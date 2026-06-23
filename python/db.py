@@ -1,15 +1,33 @@
 """SQLAlchemy engine + session factory（支援 SQLite / MySQL）。"""
+from __future__ import annotations
+import logging
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from config import get_db_url, DB_DRIVER
 
+log = logging.getLogger(__name__)
+
 _connect_args = {"check_same_thread": False} if DB_DRIVER == "sqlite" else {}
 
+_db_url = get_db_url()
+log.info("DB engine: driver=%s  url=%s", DB_DRIVER,
+         _db_url if DB_DRIVER == "sqlite" else _db_url.split("@")[-1])  # 隱藏密碼
+
 engine = create_engine(
-    get_db_url(),
+    _db_url,
     connect_args=_connect_args,
     pool_pre_ping=True,
 )
+
+# 啟動時確認連線可用
+try:
+    with engine.connect() as _conn:
+        _conn.execute(text("SELECT 1"))
+    log.info("DB connection OK")
+except Exception as _e:
+    log.error("DB connection FAILED: %s", _e)
+    raise
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -39,5 +57,6 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(sql, {"symbol": symbol, "tf": timeframe, "limit": limit}).mappings().all()
 
-    # 反轉為時間升冪（與 Go GetLatestN 一致）
-    return list(reversed([dict(r) for r in rows]))
+    result = list(reversed([dict(r) for r in rows]))
+    log.debug("fetch_candles symbol=%s tf=%s → %d rows", symbol, timeframe, len(result))
+    return result

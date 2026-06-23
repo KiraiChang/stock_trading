@@ -1,6 +1,8 @@
 package config
 
 import (
+	"strings"
+
 	"github.com/spf13/viper"
 )
 
@@ -50,6 +52,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("finmind.base_url", "https://api.finmindtrade.com/api/v4")
 	viper.SetDefault("finmind.rate_limit", 5)
 
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {

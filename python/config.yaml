@@ -4,7 +4,7 @@
 database:
   driver: "sqlite"
   # 相對於 python/ 目錄執行時的路徑
-  dsn: "../backend/trading.db"
+  dsn: "../../output/stock_trading/trading.db"
   # MySQL 範例（driver: mysql 時使用）：
   # dsn: "mysql+pymysql://root:password@127.0.0.1:3306/trading"
 

@@ -30,4 +30,12 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
-/.idea
+
+*.idea/
+*/node_modules/
+
+# Python virtual environment
+python/.venv/
+**/__pycache__/
+**/*.pyc
+**/*.pyo

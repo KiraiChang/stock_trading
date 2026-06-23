@@ -1,4 +1,6 @@
 """將回測結果寫回 DB（backtest_results + backtest_trades）。"""
+from __future__ import annotations
+import logging
 from datetime import datetime
 
 from sqlalchemy import text
@@ -6,6 +8,8 @@ from sqlalchemy import text
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from db import engine
+
+log = logging.getLogger(__name__)
 
 
 def write_result(job_id: str, result: dict) -> None:
@@ -25,10 +29,12 @@ def write_result(job_id: str, result: dict) -> None:
     """)  # SQLite ON CONFLICT 語法；MySQL 需改為 ON DUPLICATE KEY UPDATE
     with engine.begin() as conn:
         conn.execute(sql, {"job_id": job_id, **result})
+    log.info("write_result OK  job=%s", job_id)
 
 
 def write_trades(job_id: str, trades: list[dict]) -> None:
     if not trades:
+        log.info("write_trades job=%s — 0 trades, skipped", job_id)
         return
     sql = text("""
         INSERT INTO backtest_trades
@@ -41,6 +47,7 @@ def write_trades(job_id: str, trades: list[dict]) -> None:
     with engine.begin() as conn:
         for t in trades:
             conn.execute(sql, {"job_id": job_id, **t})
+    log.info("write_trades OK  job=%s  count=%d", job_id, len(trades))
 
 
 def update_job_status(job_id: str, status: str, error: str = "") -> None:
@@ -56,3 +63,4 @@ def update_job_status(job_id: str, status: str, error: str = "") -> None:
         params = {"s": status, "id": job_id}
     with engine.begin() as conn:
         conn.execute(sql, params)
+    log.info("job=%s status → %s", job_id, status)

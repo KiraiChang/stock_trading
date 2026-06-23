@@ -6,7 +6,9 @@ backtrader 封裝層。
   3. 執行回測
   4. 萃取 trades / metrics 回傳標準格式
 """
-import io
+from __future__ import annotations
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -21,6 +23,8 @@ from db import fetch_candles
 from strategy.base import TWCommission
 from strategy.breakout_v1 import BreakoutV1
 
+log = logging.getLogger(__name__)
+
 STRATEGY_MAP: dict[str, type] = {
     "breakout_v1": BreakoutV1,
 }
@@ -34,11 +38,15 @@ def run_backtest(
     end_date: str,
 ) -> dict[str, Any]:
     """執行回測，回傳 result + trades 兩個區塊。"""
+    log.info("backtest start — strategy=%s  symbols=%s  tf=%s  %s~%s",
+             strategy, symbols, timeframe, start_date, end_date)
+    t0 = time.monotonic()
+
     strategy_cls = STRATEGY_MAP.get(strategy)
     if strategy_cls is None:
         raise ValueError(f"Unknown strategy: {strategy}. Available: {list(STRATEGY_MAP)}")
 
-    cerebro = bt.Cerebro(stdstats=True)
+    cerebro = bt.Cerebro(stdstats=False)
     cerebro.broker.setcash(INITIAL_CASH)
     cerebro.broker.addcommissioninfo(TWCommission())
     cerebro.addstrategy(strategy_cls)
@@ -48,13 +56,19 @@ def run_backtest(
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
 
+    loaded = 0
     for symbol in symbols:
         rows = fetch_candles(symbol, timeframe, limit=1000)
         if not rows:
+            log.warning("symbol=%s tf=%s — no candles in DB, skipped", symbol, timeframe)
             continue
         df = _to_dataframe(rows, start_date, end_date)
         if df.empty:
+            log.warning("symbol=%s tf=%s — no data in range %s~%s, skipped",
+                        symbol, timeframe, start_date, end_date)
             continue
+        log.info("symbol=%s loaded %d candles (%s ~ %s)",
+                 symbol, len(df), df.index[0].date(), df.index[-1].date())
         data = bt.feeds.PandasData(
             dataname=df,
             datetime=None,
@@ -63,19 +77,28 @@ def run_backtest(
         )
         data._name = symbol
         cerebro.adddata(data)
+        loaded += 1
 
     if not cerebro.datas:
         raise ValueError("No data loaded for any symbol in the given date range")
 
+    log.info("running cerebro with %d symbol(s), initial_cash=%.0f ...", loaded, INITIAL_CASH)
     initial_value = cerebro.broker.getvalue()
     results = cerebro.run()
     final_value = cerebro.broker.getvalue()
+    elapsed = time.monotonic() - t0
 
     strat = results[0]
-    return {
-        "result":  _extract_result(strat, strategy, initial_value, final_value),
-        "trades":  _extract_trades(strat, symbols),
-    }
+    result = _extract_result(strat, strategy, initial_value, final_value)
+    trades = _extract_trades(strat, symbols)
+
+    log.info("backtest done in %.2fs — total_return=%.2f%%  trades=%d  win_rate=%.1f%%",
+             elapsed,
+             result["total_return"] * 100,
+             result["total_trades"],
+             result["win_rate"] * 100)
+
+    return {"result": result, "trades": trades}
 
 
 def _to_dataframe(rows: list[dict], start_date: str, end_date: str) -> pd.DataFrame:

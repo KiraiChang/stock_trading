@@ -1,5 +1,5 @@
 server:
-  port: "8080"
+  port: "8080"                # 環境變數：SERVER_PORT
 
 # ── 資料庫設定 ────────────────────────────────────────────────
 # driver: "sqlite"  開發環境，不需安裝任何資料庫，資料存在單一檔案
@@ -14,24 +14,24 @@ server:
 #      mysql -u root -p trading < migrations/003_create_signals.sql
 #      mysql -u root -p trading < migrations/004_create_watchlists.sql
 database:
-  driver: "sqlite"
-  dsn: "./trading.db"
+  driver: "sqlite"            # 環境變數：DATABASE_DRIVER
+  dsn: "../../output/stock_trading/trading.db"  # 環境變數：DATABASE_DSN
   # MySQL DSN 範例（driver 改為 mysql 時使用）：
   # dsn: "root:password@tcp(127.0.0.1:3306)/trading?parseTime=true&loc=Asia%2FTaipei"
 
 # Redis 為選填；addr 留空則停用快取（開發時不需要）
 redis:
-  addr: ""       # 留空 = 停用 Redis；生產改為 "127.0.0.1:6379"
-  password: ""
-  db: 0
+  addr: ""        # 環境變數：REDIS_ADDR（留空 = 停用 Redis；生產改為 "127.0.0.1:6379"）
+  password: ""    # 環境變數：REDIS_PASSWORD
+  db: 0           # 環境變數：REDIS_DB
 
 finmind:
-  api_key: "YOUR_FINMIND_API_KEY"
-  base_url: "https://api.finmindtrade.com/api/v4"
-  rate_limit: 5
+  api_key: "YOUR_FINMIND_API_KEY"             # 環境變數：FINMIND_API_KEY
+  base_url: "https://api.finmindtrade.com/api/v4"  # 環境變數：FINMIND_BASE_URL
+  rate_limit: 5                               # 環境變數：FINMIND_RATE_LIMIT
 
 # Python 回測服務設定
 # service_url: 留空 = 僅用 Method A（worker 輪詢 DB）
 #              填入 = Method A + Method B（同時推送 HTTP 通知）
 python:
-  service_url: ""   # e.g. "http://localhost:8001"
+  service_url: ""   # 環境變數：PYTHON_SERVICE_URL（e.g. "http://localhost:8001"）

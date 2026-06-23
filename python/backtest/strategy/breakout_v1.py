@@ -9,6 +9,7 @@ Breakout V1 策略 — 與 Go signal engine 邏輯 1:1 對齊。
 支撐阻力識別（與 Go support_resistance.go 相同）：
   Local Max/Min（window=3），差距 < 1% 合併，取最強前 3 個
 """
+from __future__ import annotations
 import backtrader as bt
 import numpy as np
 from strategy.base import BaseTWStrategy

@@ -1,6 +1,6 @@
 backtrader==1.9.78.123
 pandas>=2.0.0
-numpy>=1.26.0
+numpy>=1.23.2
 sqlalchemy>=2.0.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0

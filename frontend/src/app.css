@@ -13,8 +13,3 @@
   }
 }
 
-@layer utilities {
-  .text-rise { @apply text-rise; }
-  .text-fall { @apply text-fall; }
-  .text-flat { @apply text-flat; }
-}

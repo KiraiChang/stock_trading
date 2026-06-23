@@ -1,0 +1,37 @@
+server:
+  port: "8080"
+
+# ── 資料庫設定 ────────────────────────────────────────────────
+# driver: "sqlite"  開發環境，不需安裝任何資料庫，資料存在單一檔案
+# driver: "mysql"   生產環境，需要 MySQL 8.0+
+#
+# 切換成 MySQL 的步驟：
+#   1. 將 driver 改為 "mysql"
+#   2. 將 dsn 改為 MySQL 連線字串（見下方範例）
+#   3. 執行 backend/migrations/ 目錄下的 4 個 .sql 檔
+#      mysql -u root -p trading < migrations/001_create_candles.sql
+#      mysql -u root -p trading < migrations/002_create_indicators.sql
+#      mysql -u root -p trading < migrations/003_create_signals.sql
+#      mysql -u root -p trading < migrations/004_create_watchlists.sql
+database:
+  driver: "sqlite"
+  dsn: "./trading.db"
+  # MySQL DSN 範例（driver 改為 mysql 時使用）：
+  # dsn: "root:password@tcp(127.0.0.1:3306)/trading?parseTime=true&loc=Asia%2FTaipei"
+
+# Redis 為選填；addr 留空則停用快取（開發時不需要）
+redis:
+  addr: ""       # 留空 = 停用 Redis；生產改為 "127.0.0.1:6379"
+  password: ""
+  db: 0
+
+finmind:
+  api_key: "YOUR_FINMIND_API_KEY"
+  base_url: "https://api.finmindtrade.com/api/v4"
+  rate_limit: 5
+
+# Python 回測服務設定
+# service_url: 留空 = 僅用 Method A（worker 輪詢 DB）
+#              填入 = Method A + Method B（同時推送 HTTP 通知）
+python:
+  service_url: ""   # e.g. "http://localhost:8001"

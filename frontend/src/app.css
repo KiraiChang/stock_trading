@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply bg-surface text-gray-100 h-full;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  #app {
+    @apply h-full;
+  }
+}
+
+@layer utilities {
+  .text-rise { @apply text-rise; }
+  .text-fall { @apply text-fall; }
+  .text-flat { @apply text-flat; }
+}

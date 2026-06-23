@@ -1,0 +1,19 @@
+# Python 回測服務設定
+# 需與 backend/config.yaml 的 database 區段保持同步
+
+database:
+  driver: "sqlite"
+  # 相對於 python/ 目錄執行時的路徑
+  dsn: "../backend/trading.db"
+  # MySQL 範例（driver: mysql 時使用）：
+  # dsn: "mysql+pymysql://root:password@127.0.0.1:3306/trading"
+
+python_service:
+  port: 8001
+  worker_poll_interval: 10   # 秒，Method A 輪詢間隔
+
+backtest:
+  # 台灣股市手續費設定
+  commission_rate: 0.001425  # 買賣各 0.1425%
+  tax_rate: 0.003            # 賣出交易稅 0.3%
+  initial_cash: 1_000_000    # 回測初始資金（新台幣）

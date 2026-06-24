@@ -26,20 +26,21 @@ func NewCandleRepo(db *sqlx.DB) CandleRepo {
 
 // upsertSQL 依 driver 回傳相容的 UPSERT 語法
 func (r *candleRepo) upsertSQL() string {
-	if r.driver == "sqlite" {
+	if r.driver == "mysql" {
 		return `
 			INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
 			VALUES (:symbol, :timeframe, :open, :high, :low, :close, :volume, :amount, :ts)
-			ON CONFLICT(symbol, timeframe, ts) DO UPDATE SET
-				open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close,
-				volume=excluded.volume, amount=excluded.amount`
+			ON DUPLICATE KEY UPDATE
+				open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close),
+				volume=VALUES(volume), amount=VALUES(amount)`
 	}
+	// SQLite 和 PostgreSQL 均支援 ON CONFLICT 語法
 	return `
 		INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
 		VALUES (:symbol, :timeframe, :open, :high, :low, :close, :volume, :amount, :ts)
-		ON DUPLICATE KEY UPDATE
-			open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close),
-			volume=VALUES(volume), amount=VALUES(amount)`
+		ON CONFLICT(symbol, timeframe, ts) DO UPDATE SET
+			open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close,
+			volume=excluded.volume, amount=excluded.amount`
 }
 
 func (r *candleRepo) Insert(ctx context.Context, c *Candle) error {
@@ -62,14 +63,14 @@ func (r *candleRepo) BulkInsert(ctx context.Context, cs []Candle) error {
 
 func (r *candleRepo) GetLatestN(ctx context.Context, symbol, timeframe string, n int) ([]Candle, error) {
 	var rows []Candle
-	err := r.db.SelectContext(ctx, &rows, `
+	sql := r.db.Rebind(`
 		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
 		FROM candles
 		WHERE symbol=? AND timeframe=?
 		ORDER BY ts DESC
 		LIMIT ?
-	`, symbol, timeframe, n)
-	if err != nil {
+	`)
+	if err := r.db.SelectContext(ctx, &rows, sql, symbol, timeframe, n); err != nil {
 		return nil, err
 	}
 	// 反轉回升冪排序，供指標計算使用
@@ -81,25 +82,26 @@ func (r *candleRepo) GetLatestN(ctx context.Context, symbol, timeframe string, n
 
 func (r *candleRepo) GetRange(ctx context.Context, symbol, timeframe string, from, to time.Time) ([]Candle, error) {
 	var rows []Candle
-	err := r.db.SelectContext(ctx, &rows, `
+	sql := r.db.Rebind(`
 		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
 		FROM candles
 		WHERE symbol=? AND timeframe=? AND ts BETWEEN ? AND ?
 		ORDER BY ts ASC
-	`, symbol, timeframe, from, to)
+	`)
+	err := r.db.SelectContext(ctx, &rows, sql, symbol, timeframe, from, to)
 	return rows, err
 }
 
 func (r *candleRepo) GetLatest(ctx context.Context, symbol, timeframe string) (*Candle, error) {
 	var c Candle
-	err := r.db.GetContext(ctx, &c, `
+	sql := r.db.Rebind(`
 		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
 		FROM candles
 		WHERE symbol=? AND timeframe=?
 		ORDER BY ts DESC
 		LIMIT 1
-	`, symbol, timeframe)
-	if err != nil {
+	`)
+	if err := r.db.GetContext(ctx, &c, sql, symbol, timeframe); err != nil {
 		return nil, err
 	}
 	return &c, nil

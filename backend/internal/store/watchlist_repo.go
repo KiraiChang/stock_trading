@@ -14,11 +14,12 @@ type WatchlistRepo interface {
 }
 
 type watchlistRepo struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	driver string
 }
 
 func NewWatchlistRepo(db *sqlx.DB) WatchlistRepo {
-	return &watchlistRepo{db: db}
+	return &watchlistRepo{db: db, driver: db.DriverName()}
 }
 
 func (r *watchlistRepo) GetAll(ctx context.Context) ([]WatchlistItem, error) {
@@ -30,15 +31,21 @@ func (r *watchlistRepo) GetAll(ctx context.Context) ([]WatchlistItem, error) {
 }
 
 func (r *watchlistRepo) Add(ctx context.Context, symbol, name, sector string) error {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO watchlists (symbol, name, sector) VALUES (?, ?, ?)
-		ON DUPLICATE KEY UPDATE name=VALUES(name), sector=VALUES(sector)
-	`, symbol, name, sector)
+	var sql string
+	if r.driver == "mysql" {
+		sql = `INSERT INTO watchlists (symbol, name, sector) VALUES (?, ?, ?)
+		       ON DUPLICATE KEY UPDATE name=VALUES(name), sector=VALUES(sector)`
+	} else {
+		// SQLite 和 PostgreSQL 均支援 ON CONFLICT 語法
+		sql = `INSERT INTO watchlists (symbol, name, sector) VALUES (?, ?, ?)
+		       ON CONFLICT(symbol) DO UPDATE SET name=excluded.name, sector=excluded.sector`
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(sql), symbol, name, sector)
 	return err
 }
 
 func (r *watchlistRepo) Remove(ctx context.Context, symbol string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM watchlists WHERE symbol=?`, symbol)
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM watchlists WHERE symbol=?`), symbol)
 	return err
 }
 

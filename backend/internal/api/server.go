@@ -11,6 +11,7 @@ import (
 	"github.com/trading/backend/internal/api/middleware"
 	"github.com/trading/backend/internal/api/ws"
 	"github.com/trading/backend/internal/backtest"
+	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/internal/ui"
 )
@@ -28,6 +29,7 @@ func NewServer(
 	watchlistRepo store.WatchlistRepo,
 	backtestRepo  store.BacktestRepo,
 	btManager     *backtest.Manager,
+	fetcher       *market.Fetcher,
 	log           *zap.Logger,
 ) *Server {
 	hub := ws.NewHub(log)
@@ -50,7 +52,11 @@ func NewServer(
 		wh := handler.NewWatchlistHandler(watchlistRepo)
 		v1.GET("/watchlist", wh.GetAll)
 		v1.POST("/watchlist", wh.Add)
+		v1.POST("/watchlist/bulk", wh.BulkAdd)
 		v1.DELETE("/watchlist/:symbol", wh.Remove)
+
+		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
+		v1.POST("/market/backfill", mh.Backfill)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo)
 		v1.POST("/backtest", bh.Submit)

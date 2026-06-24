@@ -42,6 +42,32 @@ func (h *WatchlistHandler) Add(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "added"})
 }
 
+// POST /api/v1/watchlist/bulk
+// Body: { "items": [{"symbol":"2330","name":"台積電","sector":"半導體"}, ...] }
+func (h *WatchlistHandler) BulkAdd(c *gin.Context) {
+	var body struct {
+		Items []struct {
+			Symbol string `json:"symbol" binding:"required"`
+			Name   string `json:"name"   binding:"required"`
+			Sector string `json:"sector"`
+		} `json:"items" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	added, failed := 0, 0
+	for _, item := range body.Items {
+		if err := h.repo.Add(c.Request.Context(), item.Symbol, item.Name, item.Sector); err != nil {
+			failed++
+		} else {
+			added++
+		}
+	}
+	c.JSON(http.StatusCreated, gin.H{"added": added, "failed": failed, "total": len(body.Items)})
+}
+
 func (h *WatchlistHandler) Remove(c *gin.Context) {
 	symbol := c.Param("symbol")
 	if err := h.repo.Remove(c.Request.Context(), symbol); err != nil {

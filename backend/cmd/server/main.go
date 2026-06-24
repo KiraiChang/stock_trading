@@ -72,17 +72,17 @@ func main() {
 	// Backtest manager
 	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, log)
 
+	// FinMind Client + Fetcher
+	finmindClient := market.NewFinMindClient(cfg.FinMind)
+	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
+
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, btManager, log)
+	srv := api.NewServer(candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, btManager, fetcher, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {
 		srv.Hub().Broadcast(ws.Event{Type: "signal", Symbol: sym, Data: sig})
 	}
-
-	// FinMind Client + Fetcher
-	finmindClient := market.NewFinMindClient(cfg.FinMind)
-	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
 
 	// Scheduler
 	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, log)

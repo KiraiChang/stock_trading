@@ -111,9 +111,55 @@ Base URL：`http://localhost:8080/api/v1`
 { "symbol": "2330", "name": "台積電", "sector": "半導體" }
 ```
 
+### POST `/watchlist/bulk`
+
+批次新增股票（已存在的 symbol 會更新名稱與產業）。
+
+**Request Body：**
+```json
+{
+  "items": [
+    { "symbol": "2330", "name": "台積電", "sector": "半導體" },
+    { "symbol": "2454", "name": "聯發科", "sector": "半導體" },
+    { "symbol": "2317", "name": "鴻海",   "sector": "電子" }
+  ]
+}
+```
+
+**Response：**
+```json
+{ "added": 3, "failed": 0, "total": 3 }
+```
+
 ### DELETE `/watchlist/:symbol`
 
 從監控清單移除股票。
+
+---
+
+## Market API
+
+### POST `/market/backfill`
+
+觸發歷史 K 棒資料補撈（背景執行，立即回傳）。
+
+`symbols` 省略時自動使用 watchlist 全部股票；`days` 預設 120。
+
+**Request Body：**
+```json
+{ "days": 120, "symbols": ["2330", "2454"] }
+```
+
+**Response（202 Accepted）：**
+```json
+{
+  "message": "backfill 已在背景啟動",
+  "symbols": 2,
+  "days": 120
+}
+```
+
+> 進度可透過 backend log 觀察；每支股票間隔 200ms（FinMind rate limit）。
 
 ---
 

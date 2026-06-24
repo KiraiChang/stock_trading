@@ -14,7 +14,7 @@ Authorization: Bearer <token>
 
 ### POST `/auth/register`
 
-註冊新使用者。
+註冊新使用者。**新帳號預設 `status: inactive`，無法立即登入，需由已登入的使用者在管理頁面或透過 `PATCH /users/:id/status` 啟用。**
 
 **Request Body：**
 ```json
@@ -23,7 +23,7 @@ Authorization: Bearer <token>
 
 **Response（201）：**
 ```json
-{ "user_id": 1, "email": "user@example.com" }
+{ "user_id": 1, "email": "user@example.com", "status": "inactive" }
 ```
 
 ### POST `/auth/login`
@@ -40,7 +40,58 @@ Authorization: Bearer <token>
 { "token": "eyJhbGci...", "expires_in": 86400 }
 ```
 
+**錯誤回應：**
+
+| 狀態碼 | 說明 |
+|--------|------|
+| 401 | 帳號或密碼錯誤 |
+| 403 | 帳號尚未啟用（`status != active`），需管理員開通 |
+
 Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`。
+
+---
+
+## User Management API
+
+### GET `/users`
+
+列出所有使用者（不含密碼雜湊）。
+
+**Response：**
+```json
+{
+  "users": [
+    {
+      "id": 1,
+      "email": "admin@trading.com",
+      "status": "active",
+      "created_at": "2024-01-15 10:00:00"
+    },
+    {
+      "id": 2,
+      "email": "newuser@example.com",
+      "status": "inactive",
+      "created_at": "2024-01-16 09:30:00"
+    }
+  ]
+}
+```
+
+### PATCH `/users/:id/status`
+
+啟用或停用指定使用者。
+
+**Request Body：**
+```json
+{ "status": "active" }
+```
+
+`status` 只接受 `"active"` 或 `"inactive"`。
+
+**Response（200）：**
+```json
+{ "id": 2, "status": "active" }
+```
 
 ---
 

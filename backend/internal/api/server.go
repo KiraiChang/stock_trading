@@ -78,6 +78,10 @@ func NewServer(
 		protected.GET("/backtest/:job_id", bh.GetJob)
 		protected.GET("/backtest/:job_id/trades", bh.GetTrades)
 		protected.DELETE("/backtest/:job_id", bh.Cancel)
+
+		uh := handler.NewUserHandler(userRepo)
+		protected.GET("/users", uh.List)
+		protected.PATCH("/users/:id/status", uh.UpdateStatus)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

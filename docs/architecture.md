@@ -39,7 +39,8 @@ cmd/server/main.go
     ├── backtest（Manager，透過 Python 服務執行）
     └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
             ├── middleware.Auth（JWT 驗證）
-            ├── handler.Auth（register / login）
+            ├── handler.Auth（register / login，新帳號預設 inactive）
+            ├── handler.User（GET /users, PATCH /users/:id/status）
             ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest}
             └── ws.Hub
 ```
@@ -51,6 +52,7 @@ Client
     ↓ POST /api/v1/auth/login（email + password）
 Auth Handler
     ↓ bcrypt.CompareHashAndPassword
+    ↓ 檢查 user.status == "active"（否則 → 403 Forbidden）
     ↓ jwt.NewWithClaims（HS256，TTL 24h）
     ← 返回 JWT token
 Client
@@ -62,6 +64,18 @@ Handler（受保護）
 ```
 
 所有 `/api/v1/*` 路由除 `/auth/register` 和 `/auth/login` 外，皆需通過 JWT 驗證。
+
+### 使用者狀態機
+
+```
+register → inactive ──→（管理員 PATCH /users/:id/status）──→ active ──→ 可登入
+                                                                  ↓
+                                                              inactive（停用）
+```
+
+- 新帳號一律 `inactive`，防止未授權使用者自行進入系統
+- 第一個管理員需直接修改資料庫啟用（見開發指南）
+- 後續帳號可由已登入的管理員透過前端「使用者管理」頁或 API 啟用
 
 ---
 

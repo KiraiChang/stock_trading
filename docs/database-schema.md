@@ -76,6 +76,10 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 |------|------|
 | email | 唯一識別，作為登入帳號 |
 | password_hash | bcrypt hash，cost=10 |
+| status | `active`（可登入）或 `inactive`（預設，需管理員啟用） |
+| created_at | 建立時間 |
+
+> 新帳號預設 `inactive`，需要透過 `PATCH /users/:id/status` 或前端使用者管理頁面手動啟用後才能登入。
 
 ---
 

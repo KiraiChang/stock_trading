@@ -135,15 +135,33 @@ AUTH_JWT_SECRET=your-random-secret-here
 
 ### 建立第一個使用者
 
-後端啟動後，先註冊帳號：
+**新帳號預設 `inactive`，需要手動啟用才能登入。**第一個管理員帳號需透過以下流程處理：
+
+**Step 1. 註冊帳號**
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@trading.com","password":"secret123"}'
+# → {"user_id":1,"email":"admin@trading.com","status":"inactive"}
 ```
 
-登入取得 token：
+**Step 2. 直接修改資料庫啟用第一個管理員**（因為此時還無法登入）
+
+```bash
+# SQLite（開發環境）
+sqlite3 backend/trading.db "UPDATE users SET status='active' WHERE email='admin@trading.com';"
+```
+
+```sql
+-- MySQL
+UPDATE users SET status='active' WHERE email='admin@trading.com';
+
+-- PostgreSQL
+UPDATE users SET status='active' WHERE email='admin@trading.com';
+```
+
+**Step 3. 登入取得 token**
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/login \
@@ -152,11 +170,23 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 # → {"token":"eyJhbGci...","expires_in":86400}
 ```
 
-後續所有 API 請求帶入 token：
+**Step 4. 後續使用者可透過管理頁面啟用**
+
+登入後，在前端側欄點「⊙」進入使用者管理頁，或透過 API：
 
 ```bash
 export TOKEN="eyJhbGci..."
 
+# 啟用 id=2 的使用者
+curl -X PATCH http://localhost:8080/api/v1/users/2/status \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"status":"active"}'
+```
+
+後續所有 API 請求帶入 token：
+
+```bash
 curl http://localhost:8080/api/v1/watchlist \
   -H "Authorization: Bearer $TOKEN"
 ```
@@ -199,5 +229,7 @@ fetcher.BackfillHistory(ctx, symbols, 120)
 **WebSocket 無法連線**：確認後端已啟動且防火牆允許 8080 port。
 
 **API 回傳 401 Unauthorized**：Token 未帶入、已過期，或 JWT Secret 與簽發時不同。重新登入取得新 token。
+
+**login 回傳 403 Forbidden**：帳號存在但 `status = inactive`，需要管理員在使用者管理頁或透過 `PATCH /users/:id/status` 啟用。
 
 **register 回傳 409 Conflict**：該 email 已存在，直接用 login 取得 token 即可。

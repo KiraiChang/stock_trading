@@ -4,6 +4,7 @@
   import WatchlistTable from '../components/market/WatchlistTable.svelte'
   import SignalPanel from '../components/signal/SignalPanel.svelte'
   import KLineChart from '../components/chart/KLineChart.svelte'
+  import SetupWizard from '../components/setup/SetupWizard.svelte'
   import { watchlist, selectedSymbol } from '../lib/stores/market'
   import { signals } from '../lib/stores/signals'
   import { fetchWatchlist } from '../lib/api/watchlist'
@@ -11,9 +12,9 @@
   import { socket } from '../lib/ws/socket'
 
   let wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/market`
+  let showSetup = false
 
   onMount(async () => {
-    // 載入初始資料
     const [wl, sigs] = await Promise.all([
       fetchWatchlist().catch(() => []),
       fetchSignals(50).catch(() => []),
@@ -21,16 +22,37 @@
     watchlist.set(wl)
     signals.set(sigs)
 
-    // 連接 WebSocket
+    // 首次登入且監控清單為空時，顯示初始設定精靈
+    if (wl.length === 0) {
+      showSetup = true
+    }
+
     socket.connect(wsUrl)
 
-    // 訂閱所有監控股票
     const symbols = wl.map((w) => w.symbol)
     if (symbols.length > 0) {
       setTimeout(() => socket.subscribe(symbols), 500)
     }
   })
+
+  async function onSetupDone() {
+    showSetup = false
+    // 重新載入 watchlist（精靈已新增股票）
+    const wl = await fetchWatchlist().catch(() => [])
+    watchlist.set(wl)
+    const symbols = wl.map((w) => w.symbol)
+    if (symbols.length > 0) {
+      setTimeout(() => socket.subscribe(symbols), 500)
+    }
+  }
 </script>
+
+{#if showSetup}
+  <SetupWizard
+    on:done={onSetupDone}
+    on:skip={() => { showSetup = false }}
+  />
+{/if}
 
 <Layout>
   <div class="grid grid-cols-12 gap-4 h-full">

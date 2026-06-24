@@ -13,6 +13,15 @@ export async function addToWatchlist(symbol: string, name: string, sector = ''):
   })
 }
 
+export async function bulkAddToWatchlist(
+  items: { symbol: string; name: string; sector?: string }[],
+): Promise<{ added: number; failed: number }> {
+  return apiFetch('/watchlist/bulk', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  })
+}
+
 export async function removeFromWatchlist(symbol: string): Promise<void> {
   await apiFetch(`/watchlist/${symbol}`, { method: 'DELETE' })
 }

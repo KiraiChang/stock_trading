@@ -49,7 +49,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"user_id": user.ID, "email": user.Email})
+	c.JSON(http.StatusCreated, gin.H{
+		"user_id": user.ID,
+		"email":   user.Email,
+		"status":  user.Status,
+	})
 }
 
 // POST /api/v1/auth/login
@@ -71,6 +75,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
+		return
+	}
+
+	if user.Status != "active" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "account is not active, please contact an administrator"})
 		return
 	}
 

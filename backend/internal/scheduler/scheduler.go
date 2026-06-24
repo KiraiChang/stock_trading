@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
@@ -36,12 +37,12 @@ func New(
 }
 
 func (s *Scheduler) Start() {
-	// 盤前初始化
+	// 盤前初始化：補齊近 5 天日K 缺口 + 預熱日線指標
 	s.cron.AddFunc("50 8 * * 1-5", func() {
-		s.log.Info("pre-market job started")
+		s.runPreMarket()
 	})
 
-	// 盤中：每 5 分鐘拉取分K + 計算指標 + Signal 掃描
+	// 盤中：每 5 分鐘拉取分K + 計算指標 + Signal 掃描（IsMarketOpen 守衛 13:30 收盤）
 	s.cron.AddFunc("*/5 9-13 * * 1-5", func() {
 		s.runIntradayJob()
 	})
@@ -59,7 +60,32 @@ func (s *Scheduler) Stop() {
 	s.cron.Stop()
 }
 
+func (s *Scheduler) runPreMarket() {
+	s.log.Info("pre-market job started")
+	ctx := context.Background()
+	symbols, err := s.watchlist.Symbols(ctx)
+	if err != nil {
+		s.log.Error("watchlist fetch failed", zap.Error(err))
+		return
+	}
+
+	// 補齊近 5 天日K（涵蓋週末 / 假日缺口），BulkInsert 有 UNIQUE 保護不會重複
+	if err := s.fetcher.BackfillHistory(ctx, symbols, 5); err != nil {
+		s.log.Warn("pre-market backfill failed", zap.Error(err))
+	}
+
+	// 預熱日線指標，讓第一根分K掃描前就有 MA / RSI / MACD 基準值
+	for _, sym := range symbols {
+		s.signalEng.Evaluate(ctx, sym, "1d")
+	}
+	s.log.Info("pre-market job completed", zap.Int("symbols", len(symbols)))
+}
+
 func (s *Scheduler) runIntradayJob() {
+	if !timeutil.IsMarketOpen(time.Now()) {
+		return
+	}
+
 	ctx := context.Background()
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {

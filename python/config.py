@@ -10,8 +10,9 @@ with open(_cfg_path, encoding="utf-8") as f:
     _raw = yaml.safe_load(f)
 
 # ── Database ──────────────────────────────────────────────────
-DB_DRIVER: str = _raw["database"]["driver"]
-DB_DSN_RAW: str = _raw["database"]["dsn"]
+# 環境變數優先，方便 Docker 覆寫而不需掛載 config 檔
+DB_DRIVER: str = os.getenv("DATABASE_DRIVER") or _raw["database"]["driver"]
+DB_DSN_RAW: str = os.getenv("DATABASE_DSN") or _raw["database"]["dsn"]
 
 def get_db_url() -> str:
     """回傳 SQLAlchemy 格式的連線字串。"""
@@ -27,7 +28,7 @@ def get_db_url() -> str:
     raise ValueError(f"Unsupported driver: {DB_DRIVER}")
 
 # ── Python service ────────────────────────────────────────────
-SERVICE_PORT: int = _raw["python_service"]["port"]
+SERVICE_PORT: int = int(os.getenv("PYTHON_SERVICE_PORT") or _raw["python_service"]["port"])
 WORKER_POLL_INTERVAL: int = _raw["python_service"]["worker_poll_interval"]
 
 # ── Backtest ──────────────────────────────────────────────────

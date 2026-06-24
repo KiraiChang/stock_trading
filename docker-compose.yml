@@ -1,0 +1,88 @@
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading
+      POSTGRES_DB: trading
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Go Backend ────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      SERVER_PORT: "8080"
+      PYTHON_SERVICE_URL: http://python-server:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Python Worker（Method A：DB polling）─────────────────────
+  python-worker:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Python HTTP Server（Method B：FastAPI）────────────────────
+  python-server:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "http_server:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
+      PYTHON_SERVICE_PORT: "8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -64,6 +64,7 @@ func main() {
 	signalRepo    := store.NewSignalRepo(db)
 	watchlistRepo := store.NewWatchlistRepo(db)
 	backtestRepo  := store.NewBacktestRepo(db)
+	userRepo      := store.NewUserRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -77,7 +78,7 @@ func main() {
 	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, btManager, fetcher, log)
+	srv := api.NewServer(candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, btManager, fetcher, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

@@ -26,6 +26,12 @@ finmind:
   base_url: "https://api.finmindtrade.com/api/v4"  # 環境變數：FINMIND_BASE_URL
   rate_limit: 5                               # 環境變數：FINMIND_RATE_LIMIT
 
+# ── 認證設定 ──────────────────────────────────────────────────
+# 生產環境請務必更換為隨機長字串，例如：
+#   openssl rand -hex 32
+auth:
+  jwt_secret: "change-me-in-production"  # 環境變數：AUTH_JWT_SECRET
+
 # Python 回測服務設定
 # service_url: 留空 = 僅用 Method A（worker 輪詢 DB）
 #              填入 = Method A + Method B（同時推送 HTTP 通知）

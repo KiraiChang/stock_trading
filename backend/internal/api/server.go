@@ -30,6 +30,8 @@ func NewServer(
 	backtestRepo  store.BacktestRepo,
 	btManager     *backtest.Manager,
 	fetcher       *market.Fetcher,
+	userRepo      store.UserRepo,
+	jwtSecret     string,
 	log           *zap.Logger,
 ) *Server {
 	hub := ws.NewHub(log)
@@ -39,31 +41,43 @@ func NewServer(
 	r.Use(middleware.Logger(log), middleware.CORS(), gin.Recovery())
 
 	v1 := r.Group("/api/v1")
+
+	// ── 公開路由（不需 token）─────────────────────────────────
+	ah := handler.NewAuthHandler(userRepo, jwtSecret)
+	auth := v1.Group("/auth")
+	{
+		auth.POST("/register", ah.Register)
+		auth.POST("/login", ah.Login)
+	}
+
+	// ── 保護路由（需要 Bearer token）─────────────────────────
+	protected := v1.Group("")
+	protected.Use(middleware.Auth(jwtSecret))
 	{
 		ch := handler.NewCandleHandler(candleRepo)
-		v1.GET("/candles/:symbol", ch.GetCandles)
+		protected.GET("/candles/:symbol", ch.GetCandles)
 
 		ih := handler.NewIndicatorHandler(indicatorRepo)
-		v1.GET("/indicators/:symbol", ih.GetIndicators)
+		protected.GET("/indicators/:symbol", ih.GetIndicators)
 
 		sh := handler.NewSignalHandler(signalRepo)
-		v1.GET("/signals", sh.GetSignals)
+		protected.GET("/signals", sh.GetSignals)
 
 		wh := handler.NewWatchlistHandler(watchlistRepo)
-		v1.GET("/watchlist", wh.GetAll)
-		v1.POST("/watchlist", wh.Add)
-		v1.POST("/watchlist/bulk", wh.BulkAdd)
-		v1.DELETE("/watchlist/:symbol", wh.Remove)
+		protected.GET("/watchlist", wh.GetAll)
+		protected.POST("/watchlist", wh.Add)
+		protected.POST("/watchlist/bulk", wh.BulkAdd)
+		protected.DELETE("/watchlist/:symbol", wh.Remove)
 
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
-		v1.POST("/market/backfill", mh.Backfill)
+		protected.POST("/market/backfill", mh.Backfill)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo)
-		v1.POST("/backtest", bh.Submit)
-		v1.GET("/backtest", bh.ListJobs)
-		v1.GET("/backtest/:job_id", bh.GetJob)
-		v1.GET("/backtest/:job_id/trades", bh.GetTrades)
-		v1.DELETE("/backtest/:job_id", bh.Cancel)
+		protected.POST("/backtest", bh.Submit)
+		protected.GET("/backtest", bh.ListJobs)
+		protected.GET("/backtest/:job_id", bh.GetJob)
+		protected.GET("/backtest/:job_id/trades", bh.GetTrades)
+		protected.DELETE("/backtest/:job_id", bh.Cancel)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

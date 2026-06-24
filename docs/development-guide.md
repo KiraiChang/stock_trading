@@ -109,11 +109,68 @@ docker-compose up --build
 
 ---
 
+## 認證設定
+
+### JWT Secret
+
+開發環境預設值為 `change-me-in-production`，**生產環境必須更換**：
+
+```bash
+# 產生隨機 secret
+openssl rand -hex 32
+```
+
+更新 `backend/config.yaml`：
+
+```yaml
+auth:
+  jwt_secret: "your-random-secret-here"
+```
+
+或透過環境變數（Docker / CI 適用）：
+
+```bash
+AUTH_JWT_SECRET=your-random-secret-here
+```
+
+### 建立第一個使用者
+
+後端啟動後，先註冊帳號：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@trading.com","password":"secret123"}'
+```
+
+登入取得 token：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@trading.com","password":"secret123"}'
+# → {"token":"eyJhbGci...","expires_in":86400}
+```
+
+後續所有 API 請求帶入 token：
+
+```bash
+export TOKEN="eyJhbGci..."
+
+curl http://localhost:8080/api/v1/watchlist \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Token 有效期 24 小時，過期後重新登入即可。
+
+---
+
 ## 新增監控股票
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/watchlist \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"symbol":"2330","name":"台積電","sector":"半導體"}'
 ```
 
@@ -140,3 +197,7 @@ fetcher.BackfillHistory(ctx, symbols, 120)
 **Python 型別錯誤（'type' object is not subscriptable）**：Python 版本需 3.8+，`setup.sh` / `setup.ps1` 使用的 python 版本請確認。
 
 **WebSocket 無法連線**：確認後端已啟動且防火牆允許 8080 port。
+
+**API 回傳 401 Unauthorized**：Token 未帶入、已過期，或 JWT Secret 與簽發時不同。重新登入取得新 token。
+
+**register 回傳 409 Conflict**：該 email 已存在，直接用 login 取得 token 即可。

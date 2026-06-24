@@ -2,6 +2,46 @@
 
 Base URL：`http://localhost:8080/api/v1`
 
+除 `/auth/*` 外，所有端點皆需在 Header 帶入 JWT Token：
+
+```
+Authorization: Bearer <token>
+```
+
+---
+
+## Auth API（公開，不需 token）
+
+### POST `/auth/register`
+
+註冊新使用者。
+
+**Request Body：**
+```json
+{ "email": "user@example.com", "password": "secret123" }
+```
+
+**Response（201）：**
+```json
+{ "user_id": 1, "email": "user@example.com" }
+```
+
+### POST `/auth/login`
+
+登入取得 JWT token。
+
+**Request Body：**
+```json
+{ "email": "user@example.com", "password": "secret123" }
+```
+
+**Response（200）：**
+```json
+{ "token": "eyJhbGci...", "expires_in": 86400 }
+```
+
+Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`。
+
 ---
 
 ## Candle API

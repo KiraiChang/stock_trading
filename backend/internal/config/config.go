@@ -12,6 +12,11 @@ type Config struct {
 	Redis    RedisConfig
 	FinMind  FinMindConfig
 	Python   PythonConfig
+	Auth     AuthConfig
+}
+
+type AuthConfig struct {
+	JWTSecret string `mapstructure:"jwt_secret"`
 }
 
 type PythonConfig struct {
@@ -51,6 +56,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.dsn", "./trading.db")
 	viper.SetDefault("finmind.base_url", "https://api.finmindtrade.com/api/v4")
 	viper.SetDefault("finmind.rate_limit", 5)
+	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()

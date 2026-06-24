@@ -68,6 +68,17 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 
 ---
 
+## users
+
+使用者帳號，密碼以 bcrypt 雜湊儲存。
+
+| 欄位 | 說明 |
+|------|------|
+| email | 唯一識別，作為登入帳號 |
+| password_hash | bcrypt hash，cost=10 |
+
+---
+
 ## backtest_jobs
 
 回測任務佇列，Go 寫入後由 Python 消費。

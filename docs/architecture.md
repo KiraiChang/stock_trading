@@ -26,7 +26,7 @@ Frontend（Svelte，由 Go backend 直接 serve）
 
 ```
 cmd/server/main.go
-    ├── store（DB + Redis repos）
+    ├── store（DB + Redis repos，含 UserRepo）
     ├── market（FinMindClient + Fetcher）
     ├── indicator（Engine）
     │       └── store.CandleRepo
@@ -38,9 +38,30 @@ cmd/server/main.go
     │       └── signal.Engine
     ├── backtest（Manager，透過 Python 服務執行）
     └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
-            ├── handler.{Candle, Indicator, Signal, Watchlist, Backtest}
+            ├── middleware.Auth（JWT 驗證）
+            ├── handler.Auth（register / login）
+            ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest}
             └── ws.Hub
 ```
+
+## 認證架構
+
+```
+Client
+    ↓ POST /api/v1/auth/login（email + password）
+Auth Handler
+    ↓ bcrypt.CompareHashAndPassword
+    ↓ jwt.NewWithClaims（HS256，TTL 24h）
+    ← 返回 JWT token
+Client
+    ↓ Authorization: Bearer <token>（每個受保護的請求）
+middleware.Auth
+    ↓ jwt.ParseWithClaims → 驗簽 + 驗期限
+    ↓ 注入 user_id / email 至 Gin context
+Handler（受保護）
+```
+
+所有 `/api/v1/*` 路由除 `/auth/register` 和 `/auth/login` 外，皆需通過 JWT 驗證。
 
 ---
 
@@ -71,6 +92,7 @@ Go API（讀取結果回傳給前端）
 | Frontend | Vite + Svelte | 輕量、無 VDOM；build 後 embed 進 Go binary |
 | K 線圖 | lightweight-charts | < 50KB、原生 Candlestick |
 | Backtest | Python + backtrader | 策略研究與驗證 |
+| Auth | JWT（HS256）+ bcrypt | 無狀態 token，密碼安全雜湊 |
 
 ---
 

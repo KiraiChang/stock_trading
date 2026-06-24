@@ -16,6 +16,9 @@ var sqliteFS embed.FS
 //go:embed migrations/mysql/*.sql
 var mysqlFS embed.FS
 
+//go:embed migrations/postgres/*.sql
+var postgresFS embed.FS
+
 func RunMigrations(ctx context.Context, db *sqlx.DB, driver string, logger *zap.Logger) error {
 	var fs embed.FS
 	var dialect, dir string
@@ -25,6 +28,8 @@ func RunMigrations(ctx context.Context, db *sqlx.DB, driver string, logger *zap.
 		fs, dialect, dir = sqliteFS, "sqlite3", "migrations/sqlite"
 	case "mysql":
 		fs, dialect, dir = mysqlFS, "mysql", "migrations/mysql"
+	case "postgres", "postgresql":
+		fs, dialect, dir = postgresFS, "postgres", "migrations/postgres"
 	default:
 		return fmt.Errorf("unsupported driver for migrations: %s", driver)
 	}

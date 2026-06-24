@@ -22,6 +22,8 @@ def get_db_url() -> str:
         return f"sqlite:///{path}"
     if DB_DRIVER == "mysql":
         return DB_DSN_RAW  # 已是 mysql+pymysql:// 格式
+    if DB_DRIVER in ("postgres", "postgresql"):
+        return DB_DSN_RAW  # 已是 postgresql+psycopg2:// 格式
     raise ValueError(f"Unsupported driver: {DB_DRIVER}")
 
 # ── Python service ────────────────────────────────────────────

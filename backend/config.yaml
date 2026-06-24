@@ -2,22 +2,18 @@ server:
   port: "8080"                # 環境變數：SERVER_PORT
 
 # ── 資料庫設定 ────────────────────────────────────────────────
-# driver: "sqlite"  開發環境，不需安裝任何資料庫，資料存在單一檔案
-# driver: "mysql"   生產環境，需要 MySQL 8.0+
+# driver: "sqlite"    開發環境，不需安裝任何資料庫，資料存在單一檔案
+# driver: "mysql"     生產環境，需要 MySQL 8.0+
+# driver: "postgres"  生產環境，需要 PostgreSQL 14+
 #
-# 切換成 MySQL 的步驟：
-#   1. 將 driver 改為 "mysql"
-#   2. 將 dsn 改為 MySQL 連線字串（見下方範例）
-#   3. 執行 backend/migrations/ 目錄下的 4 個 .sql 檔
-#      mysql -u root -p trading < migrations/001_create_candles.sql
-#      mysql -u root -p trading < migrations/002_create_indicators.sql
-#      mysql -u root -p trading < migrations/003_create_signals.sql
-#      mysql -u root -p trading < migrations/004_create_watchlists.sql
+# Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 database:
   driver: "sqlite"            # 環境變數：DATABASE_DRIVER
   dsn: "../../output/stock_trading/trading.db"  # 環境變數：DATABASE_DSN
   # MySQL DSN 範例（driver 改為 mysql 時使用）：
   # dsn: "root:password@tcp(127.0.0.1:3306)/trading?parseTime=true&loc=Asia%2FTaipei"
+  # PostgreSQL DSN 範例（driver 改為 postgres 時使用）：
+  # dsn: "postgres://user:password@127.0.0.1:5432/trading?sslmode=disable"
 
 # Redis 為選填；addr 留空則停用快取（開發時不需要）
 redis:

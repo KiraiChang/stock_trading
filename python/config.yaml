@@ -7,6 +7,8 @@ database:
   dsn: "../../output/stock_trading/trading.db"
   # MySQL 範例（driver: mysql 時使用）：
   # dsn: "mysql+pymysql://root:password@127.0.0.1:3306/trading"
+  # PostgreSQL 範例（driver: postgres 時使用）：
+  # dsn: "postgresql+psycopg2://user:password@127.0.0.1:5432/trading"
 
 python_service:
   port: 8001

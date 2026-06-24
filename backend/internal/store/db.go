@@ -14,6 +14,8 @@ func NewDB(cfg config.DatabaseConfig) (*sqlx.DB, error) {
 	switch cfg.Driver {
 	case "mysql":
 		return NewMySQL(cfg.DSN)
+	case "postgres", "postgresql":
+		return NewPostgres(cfg.DSN)
 	case "sqlite", "":
 		return NewSQLite(cfg.DSN)
 	default:

@@ -10,6 +10,7 @@ log = logging.getLogger(__name__)
 
 _connect_args = {"check_same_thread": False} if DB_DRIVER == "sqlite" else {}
 
+
 _db_url = get_db_url()
 log.info("DB engine: driver=%s  url=%s", DB_DRIVER,
          _db_url if DB_DRIVER == "sqlite" else _db_url.split("@")[-1])  # 隱藏密碼
@@ -38,21 +39,33 @@ def get_session() -> Session:
 
 def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
     """從 DB 讀取 K 棒，回傳欄位與 Go Candle struct 對齊。"""
-    sql = text("""
-        SELECT symbol, timeframe, open, high, low, close, volume, amount,
-               CAST(strftime('%s', ts) AS INTEGER) AS timestamp
-        FROM candles
-        WHERE symbol = :symbol AND timeframe = :tf
-        ORDER BY ts DESC
-        LIMIT :limit
-    """) if DB_DRIVER == "sqlite" else text("""
-        SELECT symbol, timeframe, open, high, low, close, volume, amount,
-               UNIX_TIMESTAMP(ts) AS timestamp
-        FROM candles
-        WHERE symbol = :symbol AND timeframe = :tf
-        ORDER BY ts DESC
-        LIMIT :limit
-    """)
+    if DB_DRIVER == "sqlite":
+        sql = text("""
+            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+                   CAST(strftime('%s', ts) AS INTEGER) AS timestamp
+            FROM candles
+            WHERE symbol = :symbol AND timeframe = :tf
+            ORDER BY ts DESC
+            LIMIT :limit
+        """)
+    elif DB_DRIVER in ("postgres", "postgresql"):
+        sql = text("""
+            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+                   EXTRACT(EPOCH FROM ts)::BIGINT AS timestamp
+            FROM candles
+            WHERE symbol = :symbol AND timeframe = :tf
+            ORDER BY ts DESC
+            LIMIT :limit
+        """)
+    else:
+        sql = text("""
+            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+                   UNIX_TIMESTAMP(ts) AS timestamp
+            FROM candles
+            WHERE symbol = :symbol AND timeframe = :tf
+            ORDER BY ts DESC
+            LIMIT :limit
+        """)
 
     with engine.connect() as conn:
         rows = conn.execute(sql, {"symbol": symbol, "tf": timeframe, "limit": limit}).mappings().all()

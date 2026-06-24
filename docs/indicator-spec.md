@@ -1,6 +1,6 @@
 # 技術指標規格
 
-所有指標皆從 MySQL `candles` 表讀取最近 120 根 K 棒計算。
+所有指標皆從 `candles` 表讀取最近 120 根 K 棒計算（支援 SQLite / MySQL / PostgreSQL）。
 
 ---
 

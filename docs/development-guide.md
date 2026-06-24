@@ -2,63 +2,114 @@
 
 ## 環境需求
 
-| 工具 | 版本 |
-|------|------|
-| Go | 1.22+ |
-| Node.js | 20+ |
-| MySQL | 8.0+ |
-| Redis | 7.0+ |
+| 工具 | 版本 | 說明 |
+|------|------|------|
+| Go | 1.22+ | 後端 |
+| Node.js | 20+ | 前端 build |
+| Python | 3.8+ | 回測服務 |
+| Docker + Compose | - | 生產環境（選填） |
+
+SQLite 為開發預設，**不需要**安裝任何額外資料庫。
 
 ---
 
-## 1. 資料庫初始化
+## 快速啟動（開發，SQLite）
 
-```bash
-mysql -u root -p -e "CREATE DATABASE trading CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-
-mysql -u root -p trading < backend/migrations/001_create_candles.sql
-mysql -u root -p trading < backend/migrations/002_create_indicators.sql
-mysql -u root -p trading < backend/migrations/003_create_signals.sql
-mysql -u root -p trading < backend/migrations/004_create_watchlists.sql
-```
-
----
-
-## 2. 設定 config.yaml
-
-複製並編輯後端設定：
-
-```bash
-cp backend/config.yaml backend/config.local.yaml
-```
-
-修改 `backend/config.yaml`：
-
-```yaml
-mysql:
-  dsn: "root:YOUR_PASSWORD@tcp(127.0.0.1:3306)/trading?parseTime=true&loc=Asia%2FTaipei"
-
-finmind:
-  api_key: "YOUR_FINMIND_API_KEY"
-```
-
-FinMind API Key 請至 [finmindtrade.com](https://finmindtrade.com) 註冊取得。
-
----
-
-## 3. 啟動後端
+### 1. 啟動後端
 
 ```bash
 cd backend
-go mod tidy
 go run ./cmd/server
 ```
 
-後端預設監聽 `localhost:8080`。
+- 首次啟動自動建立 `trading.db` 並套用所有 migration
+- 監聽 `http://localhost:8080`
+
+### 2. 啟動前端（開發模式）
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+- 監聽 `http://localhost:5173`
+- API 請求自動 proxy 至 `localhost:8080`
+
+### 3. 啟動 Python 回測服務（選填）
+
+```bash
+cd python
+bash setup.sh          # 建立 venv、安裝依賴
+bash start_worker.sh   # Method A：DB polling
+bash start_server.sh   # Method B：FastAPI HTTP server（另開視窗）
+```
 
 ---
 
-## 4. 新增監控股票（範例）
+## 切換到 MySQL 或 PostgreSQL
+
+編輯 `backend/config.yaml`：
+
+```yaml
+database:
+  driver: "postgres"   # 或 "mysql"
+  dsn: "postgres://user:password@127.0.0.1:5432/trading?sslmode=disable"
+  # MySQL DSN 範例：
+  # dsn: "root:password@tcp(127.0.0.1:3306)/trading?parseTime=true&loc=Asia%2FTaipei"
+```
+
+編輯 `python/config.yaml`：
+
+```yaml
+database:
+  driver: "postgres"
+  dsn: "postgresql+psycopg2://user:password@127.0.0.1:5432/trading"
+```
+
+**Migration 不需要手動執行**，Go 啟動時 goose 會自動套用。
+
+---
+
+## 前端 Build（嵌入 Go Binary）
+
+```bash
+cd frontend
+npm run build
+# 輸出至 backend/internal/ui/dist/
+```
+
+之後重新 build Go：
+
+```bash
+cd backend
+go build -o trading-backend ./cmd/server
+./trading-backend
+# 直接從 http://localhost:8080 服務前端，不需另起前端站台
+```
+
+---
+
+## Docker Compose（生產環境）
+
+```bash
+docker-compose up --build
+```
+
+包含：PostgreSQL、Redis、Go backend、Python worker、Python HTTP server。
+
+服務對應：
+
+| 服務 | Port |
+|------|------|
+| Go backend（含前端） | 8080 |
+| Python HTTP server | 8001 |
+| PostgreSQL | 5432 |
+| Redis | 6379 |
+
+---
+
+## 新增監控股票
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/watchlist \
@@ -68,28 +119,24 @@ curl -X POST http://localhost:8080/api/v1/watchlist \
 
 ---
 
-## 5. Backfill 歷史資料
+## Backfill 歷史資料
 
-可透過直接呼叫 Fetcher 的 `BackfillHistory` 方法，或撰寫一個簡單的 CLI 工具。
+建議首次啟動後先 backfill 至少 120 天日 K（MA60 需要 60 根才能計算）：
 
----
-
-## 6. 啟動前端
-
-```bash
-cd frontend
-npm install
-npm run dev
+```go
+fetcher.BackfillHistory(ctx, symbols, 120)
 ```
-
-前端預設在 `http://localhost:5173`，API 請求透過 Vite proxy 轉發至後端。
 
 ---
 
 ## 常見問題
 
+**PostgreSQL 連線失敗**：確認 `sslmode=disable`（本地開發無 TLS）。
+
 **MySQL 連線失敗**：確認 DSN 中的時區 `loc=Asia%2FTaipei` 正確編碼。
 
-**FinMind 回傳 401**：API Key 未設定或過期，請重新取得。
+**FinMind 回傳 401**：API Key 未設定或過期，至 `backend/config.yaml` 更新。
+
+**Python 型別錯誤（'type' object is not subscriptable）**：Python 版本需 3.8+，`setup.sh` / `setup.ps1` 使用的 python 版本請確認。
 
 **WebSocket 無法連線**：確認後端已啟動且防火牆允許 8080 port。

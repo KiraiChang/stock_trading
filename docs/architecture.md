@@ -4,20 +4,20 @@
 
 ```
 FinMind API
-    ↓ HTTP (每5分鐘 / 收盤後)
-Go Market Data Service (Fetcher)
+    ↓ HTTP（每 5 分鐘 / 收盤後）
+Go Market Data Service（Fetcher）
     ↓ BulkInsert
-MySQL (candles table)
-    ↓ GetLatestN(120根)
-Indicator Engine (Go)
+SQLite / MySQL / PostgreSQL（candles table）
+    ↓ GetLatestN（120 根）
+Indicator Engine（Go）
     ↓ Upsert
-MySQL (indicator_snapshots) + Redis (hash, TTL 5min)
+DB（indicator_snapshots）+ Redis（hash, TTL 5 min）
     ↓
 Signal Engine
-    ↓ Insert + LPush
-MySQL (signals) + Redis (signal:queue)
+    ↓ Insert
+DB（signals）
     ↓ WebSocket Broadcast
-Frontend Dashboard (Svelte)
+Frontend（Svelte，由 Go backend 直接 serve）
 ```
 
 ---
@@ -26,34 +26,51 @@ Frontend Dashboard (Svelte)
 
 ```
 cmd/server/main.go
-    ├── store (MySQL + Redis repos)
-    ├── market (FinMindClient + Fetcher)
-    ├── indicator (Engine)
+    ├── store（DB + Redis repos）
+    ├── market（FinMindClient + Fetcher）
+    ├── indicator（Engine）
     │       └── store.CandleRepo
-    ├── signal (Engine)
+    ├── signal（Engine）
     │       ├── indicator.Engine
     │       └── store.{CandleRepo, SignalRepo}
-    ├── scheduler (cron jobs)
+    ├── scheduler（cron jobs）
     │       ├── market.Fetcher
     │       └── signal.Engine
-    └── api (Gin HTTP + WebSocket Hub)
-            ├── handler.{Candle, Indicator, Signal, Watchlist}
+    ├── backtest（Manager，透過 Python 服務執行）
+    └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
+            ├── handler.{Candle, Indicator, Signal, Watchlist, Backtest}
             └── ws.Hub
 ```
 
 ---
 
-## 技術選型理由
+## Python 服務
+
+Python 負責回測，獨立運行，透過共用 DB 與 Go 溝通。
+
+```
+Go（寫入 backtest_jobs）
+    ↓ DB polling（Method A）或 HTTP（Method B）
+Python Worker / HTTP Server
+    ↓ 讀取 candles，執行 backtrader 回測
+    ↓ 寫入 backtest_results + backtest_trades
+Go API（讀取結果回傳給前端）
+```
+
+---
+
+## 技術選型
 
 | 元件 | 選擇 | 理由 |
 |------|------|------|
 | Backend | Go | goroutine 適合多股票並行監控 |
 | HTTP Router | Gin | 高效能、中介軟體齊全 |
-| Database | MySQL | 結構化 OHLCV 資料、關聯查詢 |
-| Cache | Redis | 低延遲熱資料存取 |
+| Database | SQLite / MySQL / PostgreSQL | 三種環境皆支援，goose 自動 migration |
+| Cache | Redis（選填） | 低延遲熱資料；addr 留空則停用 |
 | WebSocket | gorilla/websocket | 穩定、廣泛使用 |
-| Frontend | Vite + Svelte | 輕量、響應式、無 VDOM 開銷 |
-| K線圖 | lightweight-charts | < 50KB、原生 Candlestick |
+| Frontend | Vite + Svelte | 輕量、無 VDOM；build 後 embed 進 Go binary |
+| K 線圖 | lightweight-charts | < 50KB、原生 Candlestick |
+| Backtest | Python + backtrader | 策略研究與驗證 |
 
 ---
 
@@ -65,3 +82,25 @@ Phase 1 採用**批次計算**：
 - 邏輯簡單、易於測試和驗證
 
 Phase 2 換 Shioaji 後可改為 tick-level streaming rolling sum。
+
+---
+
+## 部署模式
+
+### 開發環境
+
+```
+go run ./cmd/server      # SQLite，自動 migration
+npm run dev              # Vite dev server（含 API proxy）
+python worker.py         # Python worker（選填）
+```
+
+### 生產 / Docker
+
+```
+docker-compose up --build
+```
+
+- PostgreSQL + Redis 由 docker-compose 管理
+- Go binary 內嵌前端靜態檔案（單一執行檔）
+- Python worker 與 HTTP server 各自獨立 container

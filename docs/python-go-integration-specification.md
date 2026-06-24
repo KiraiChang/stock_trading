@@ -2,309 +2,148 @@
 
 ## System Overview
 
-本系統採用雙層架構：
-
-```text id="arch_001"
-[Python]  ← Research Layer
-   ↑  ↓
-   │  │
-[Go]      ← Production Layer
+```
+[Python]  ← Research / Backtest Layer
+   ↑  ↓  （共用同一個 DB）
+[Go]      ← Production / Real-time Layer
 ```
 
 ---
 
 # 1. Role Separation
 
-## Go (Production Layer)
+## Go（Production Layer）
 
-負責：
+- 即時行情處理（FinMind 輪詢 / 未來 Shioaji）
+- 技術指標計算（MA / RSI / MACD / VWAP / ATR / Bollinger）
+- Breakout / Breakdown 判斷
+- Signal 生成與 WebSocket 推播
+- Watchlist 掃描（~1900 檔）
+- 回測任務管理（寫入 backtest_jobs）
 
-* 即時行情處理
-* 技術指標計算（MA / RSI / MACD / VWAP）
-* Breakout / Stop Loss 判斷
-* Signal generation
-* Notification
-* Watchlist scanning（~1900 stocks）
+## Python（Research Layer）
 
-特性：
-
-* High concurrency (goroutines)
-* Low latency
-* Always-on service
-
----
-
-## Python (Research Layer)
-
-負責：
-
-* Strategy research
-* Backtesting
-* Indicator validation
-* Statistical analysis
-* Strategy prototyping
-
-特性：
-
-* Batch processing
-* Offline computation
-* Experiment-driven
+- 策略研究與回測（backtrader）
+- 指標驗證（與 Go 1:1 對齊）
+- 統計分析
+- 回測結果寫回 DB（backtest_results + backtest_trades）
 
 ---
 
 # 2. Go → Python 驅動方式
 
-Go 不直接嵌入 Python 邏輯，而是透過「任務式驅動」。
+## 方式 A：DB Polling（已實作，預設）
 
----
-
-## 方式 A：File-based Job (推薦)
-
-### Flow
-
-```text id="flow_001"
-Go 產生回測任務
+```
+Go 寫入 backtest_jobs（status='pending'）
         ↓
-寫入 JSON file / DB
+Python worker 每 10 秒掃描 pending 任務
         ↓
-Python worker poll / consume
+執行 backtrader 回測
         ↓
-執行回測
+寫入 backtest_results + backtest_trades
         ↓
-回寫結果 (MySQL / JSON)
+更新 backtest_jobs.status = 'done'
 ```
 
+啟動：`python worker.py`
+
+## 方式 B：HTTP Service（已實作，可選）
+
+```
+Go POST /backtest → Python FastAPI（port 8001）
+Python 執行回測（同步）
+Python 回傳結果 + 寫回 DB
+```
+
+啟動：`uvicorn http_server:app --port 8001`  
+Go 端需在 `config.yaml` 設定 `python.service_url: http://localhost:8001`。
+
 ---
 
-### Job Schema
+# 3. Job Schema
 
-```json id="job_001"
+寫入 `backtest_jobs` 資料表：
+
+```json
 {
-  "job_id": "bt_20260623_001",
+  "job_id": "bt_20260624_001",
   "type": "backtest",
   "strategy": "breakout_v1",
   "symbols": ["8088", "2399"],
   "timeframe": "1d",
   "start_date": "2023-01-01",
-  "end_date": "2026-06-01"
+  "end_date": "2026-06-01",
+  "status": "pending",
+  "trigger": "manual"
 }
 ```
 
 ---
 
-## 方式 B：HTTP Service (可選)
+# 4. Backtest Data Standard
 
-Python running as service:
+## 核心原則
 
-```text id="http_001"
-Go → POST /backtest → Python API
-Python → return result
-```
+> Python 與 Go 必須使用同一份 DB schema，讀取同一份 candles 資料。
 
-適合：
+## Candle Schema（正式定義）
 
-* 即時策略測試
-* 小規模分析
-
----
-
-## 方式 C：Queue-based (進階)
-
-```text id="queue_001"
-Go → Redis Queue / Kafka
-Python worker consume
-```
-
-適合：
-
-* 大規模回測
-* 批次策略掃描
-
----
-
-# 3. Python → Go 回寫方式
-
-Python 不直接影響 production system，只輸出：
-
-## Strategy Definition Contract
-
-```json id="strategy_001"
-{
-  "strategy_name": "breakout_v1",
-  "rules": {
-    "close_above_resistance": true,
-    "volume_multiplier": 2.0,
-    "ma_filter": "MA20"
-  },
-  "metrics": {
-    "win_rate": 0.62,
-    "max_drawdown": -0.08,
-    "return": 0.18
-  }
-}
-```
-
----
-
-Go 讀取後：
-
-* 轉換為 production rule
-* 編譯進 signal engine
-
----
-
-# 4. Backtest Data Standard (非常重要)
-
-## Core Principle
-
-> Python 與 Go 必須使用同一份 data schema
-
----
-
-## 4.1 Candle Schema (Canonical)
-
-```go id="candle_001"
+```go
 type Candle struct {
     Symbol    string
     Timeframe string
-
     Open      float64
     High      float64
     Low       float64
     Close     float64
-
     Volume    int64
     Amount    float64
-
-    Timestamp int64 // unix time
+    Timestamp int64  // Unix timestamp
 }
 ```
 
----
+## Python DataFrame 欄位對應
 
-## 4.2 Python DataFrame Schema
-
-Must match Go exactly:
-
-```python id="df_001"
-columns = [
-    "symbol",
-    "timeframe",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-    "amount",
-    "timestamp"
-]
+```python
+columns = ["symbol", "timeframe", "open", "high", "low",
+           "close", "volume", "amount", "timestamp"]
 ```
 
+timestamp 取法：
+- SQLite：`CAST(strftime('%s', ts) AS INTEGER)`
+- MySQL：`UNIX_TIMESTAMP(ts)`
+- PostgreSQL：`EXTRACT(EPOCH FROM ts)::BIGINT`
+
 ---
 
-## 4.3 Rule: No Extra Fields in Core Dataset
+# 5. Strategy Consistency Rule
+
+> Python 回測邏輯必須與 Go production 邏輯 1:1 對齊。
 
 禁止：
+- Python 使用不同的 MA 計算方式
+- Python 加入 Go 沒有的平滑處理
+- 不同的成交量平均窗口
 
-* technical indicator columns in raw dataset
-* mixed schema
-* ad-hoc columns
-
----
-
-# 5. Backtest Execution Standard
-
-## 5.1 Event-driven Simulation Model
-
-Python backtest must simulate Go behavior:
-
-```text id="bt_001"
-for each candle:
-    update indicators
-    check signals
-    simulate entry/exit
-```
+必須共用的參數：
+- MA window（5 / 10 / 20 / 60）
+- Volume average window（20）
+- Breakout 條件（Close > Resistance, VolRatio >= 2.0, Trend == BULLISH）
+- Support/Resistance 識別邏輯（window=3, merge threshold=1%）
 
 ---
 
-## 5.2 Signal Interface
+# 6. 資料庫設定同步
 
-```python id="signal_001"
-class Signal:
-    symbol: str
-    timestamp: int
-    action: str  # BUY / SELL
-    price: float
-```
+`backend/config.yaml` 與 `python/config.yaml` 的 `database` 區段需指向同一個 DB。  
+Docker Compose 環境下透過環境變數統一設定，不需手動同步。
 
 ---
 
-## 5.3 Portfolio Simulation
+# 7. Design Philosophy
 
-Required:
-
-* position tracking
-* entry price
-* exit price
-* PnL calculation
-* fees simulation
-
----
-
-# 6. Strategy Consistency Rule
-
-## Critical Rule
-
-> Python backtest logic MUST match Go production logic 1:1
-
----
-
-### Forbidden
-
-* Python using different MA calculation logic
-* Python smoothing that Go does not use
-* Different volume averaging methods
-
----
-
-### Required
-
-Shared logic definition:
-
-* MA window
-* Volume average window
-* breakout condition
-* support/resistance rule
-
----
-
-# 7. Indicator Consistency Layer
-
-Optional but recommended:
-
-Create shared pseudo-spec:
-
-```text id="spec_001"
-MA20 = SUM(CLOSE, 20) / 20
-VolumeAvg20 = SUM(VOLUME, 20) / 20
-Breakout = CLOSE > RESISTANCE
-```
-
-Both Go and Python must implement exactly this.
-
----
-
-# 8. Design Philosophy
-
-* Go = real-time decision engine
-* Python = truth validation engine
-* MySQL = historical truth source
-* Strategy correctness > performance
-
----
-
-# 9. Key Principle
-
-> Python discovers truth.
-> Go executes truth.
-> Data defines consistency.
+- Go = real-time decision engine
+- Python = truth validation engine
+- DB = historical truth source
+- Strategy correctness > performance

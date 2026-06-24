@@ -23,9 +23,12 @@ Base URL：`http://localhost:8080/api/v1`
   "symbol": "2330",
   "timeframe": "1d",
   "candles": [
-    { "id": 1, "symbol": "2330", "timeframe": "1d",
+    {
+      "id": 1, "symbol": "2330", "timeframe": "1d",
       "open": 975.0, "high": 980.0, "low": 970.0, "close": 978.0,
-      "volume": 25000000, "amount": 24450000000, "ts": "2024-01-15T00:00:00+08:00" }
+      "volume": 25000000, "amount": 24450000000,
+      "ts": "2024-01-15T00:00:00+08:00"
+    }
   ]
 }
 ```
@@ -82,7 +85,7 @@ Base URL：`http://localhost:8080/api/v1`
       "id": 1, "symbol": "2330",
       "signal_type": "BREAKOUT", "direction": "BUY",
       "price": 980.0, "volume": 45000000, "vol_ratio": 2.25,
-      "resistance": 975.0, "support": 0, "trend": "BULLISH",
+      "resistance": 975.0, "support": 0.0, "trend": "BULLISH",
       "note": "突破阻力 975.00，量比 2.25x",
       "ts": "2024-01-15T10:30:00+08:00"
     }
@@ -96,13 +99,79 @@ Base URL：`http://localhost:8080/api/v1`
 ## Watchlist API
 
 ### GET `/watchlist`
+
+取得監控清單。
+
 ### POST `/watchlist`
 
+新增股票至監控清單。
+
+**Request Body：**
 ```json
 { "symbol": "2330", "name": "台積電", "sector": "半導體" }
 ```
 
 ### DELETE `/watchlist/:symbol`
+
+從監控清單移除股票。
+
+---
+
+## Backtest API
+
+### POST `/backtest`
+
+提交回測任務。
+
+**Request Body：**
+```json
+{
+  "strategy": "breakout_v1",
+  "symbols": ["2330", "2454"],
+  "timeframe": "1d",
+  "start_date": "2023-01-01",
+  "end_date": "2024-12-31"
+}
+```
+
+**Response：**
+```json
+{ "job_id": "bt_20240115_abc123", "status": "pending" }
+```
+
+### GET `/backtest`
+
+列出所有回測任務。
+
+### GET `/backtest/:job_id`
+
+取得特定回測任務狀態與結果。
+
+**Response（完成後）：**
+```json
+{
+  "job_id": "bt_20240115_abc123",
+  "status": "done",
+  "result": {
+    "total_return": 0.182,
+    "annual_return": 0.091,
+    "win_rate": 0.62,
+    "max_drawdown": -0.083,
+    "sharpe_ratio": 1.42,
+    "total_trades": 24,
+    "win_trades": 15,
+    "loss_trades": 9
+  }
+}
+```
+
+### GET `/backtest/:job_id/trades`
+
+取得回測每筆交易明細。
+
+### DELETE `/backtest/:job_id`
+
+取消或刪除回測任務。
 
 ---
 

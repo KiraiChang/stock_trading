@@ -41,18 +41,17 @@ func (r *backtestRepo) CreateJob(ctx context.Context, job *BacktestJob) error {
 }
 
 func (r *backtestRepo) UpdateJobStatus(ctx context.Context, jobID, status, errMsg string) error {
-	var q string
 	switch status {
 	case "running":
-		q = `UPDATE backtest_jobs SET status=?, started_at=CURRENT_TIMESTAMP WHERE job_id=?`
+		q := r.db.Rebind(`UPDATE backtest_jobs SET status=?, started_at=CURRENT_TIMESTAMP WHERE job_id=?`)
 		_, err := r.db.ExecContext(ctx, q, status, jobID)
 		return err
 	case "done", "failed":
-		q = `UPDATE backtest_jobs SET status=?, error=?, finished_at=CURRENT_TIMESTAMP WHERE job_id=?`
+		q := r.db.Rebind(`UPDATE backtest_jobs SET status=?, error=?, finished_at=CURRENT_TIMESTAMP WHERE job_id=?`)
 		_, err := r.db.ExecContext(ctx, q, status, errMsg, jobID)
 		return err
 	default:
-		q = `UPDATE backtest_jobs SET status=? WHERE job_id=?`
+		q := r.db.Rebind(`UPDATE backtest_jobs SET status=? WHERE job_id=?`)
 		_, err := r.db.ExecContext(ctx, q, status, jobID)
 		return err
 	}
@@ -60,11 +59,11 @@ func (r *backtestRepo) UpdateJobStatus(ctx context.Context, jobID, status, errMs
 
 func (r *backtestRepo) GetJob(ctx context.Context, jobID string) (*BacktestJob, error) {
 	var job BacktestJob
-	err := r.db.GetContext(ctx, &job, `
+	err := r.db.GetContext(ctx, &job, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
 		       status, trigger, error, created_at, started_at, finished_at
 		FROM backtest_jobs WHERE job_id=?
-	`, jobID)
+	`), jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -73,20 +72,20 @@ func (r *backtestRepo) GetJob(ctx context.Context, jobID string) (*BacktestJob, 
 
 func (r *backtestRepo) ListJobs(ctx context.Context, limit int) ([]BacktestJob, error) {
 	var jobs []BacktestJob
-	err := r.db.SelectContext(ctx, &jobs, `
+	err := r.db.SelectContext(ctx, &jobs, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
 		       status, trigger, error, created_at, started_at, finished_at
 		FROM backtest_jobs
 		ORDER BY created_at DESC
 		LIMIT ?
-	`, limit)
+	`), limit)
 	return jobs, err
 }
 
 // ── Result ────────────────────────────────────────────────────
 
 func (r *backtestRepo) upsertResultSQL() string {
-	if r.driver == "sqlite" {
+	if r.driver == "mysql" {
 		return `
 			INSERT INTO backtest_results
 				(job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
@@ -94,13 +93,14 @@ func (r *backtestRepo) upsertResultSQL() string {
 			VALUES
 				(:job_id, :strategy, :total_return, :annual_return, :win_rate, :max_drawdown,
 				 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl)
-			ON CONFLICT(job_id) DO UPDATE SET
-				total_return=excluded.total_return, annual_return=excluded.annual_return,
-				win_rate=excluded.win_rate, max_drawdown=excluded.max_drawdown,
-				sharpe_ratio=excluded.sharpe_ratio, total_trades=excluded.total_trades,
-				win_trades=excluded.win_trades, loss_trades=excluded.loss_trades,
-				avg_pnl=excluded.avg_pnl`
+			ON DUPLICATE KEY UPDATE
+				total_return=VALUES(total_return), annual_return=VALUES(annual_return),
+				win_rate=VALUES(win_rate), max_drawdown=VALUES(max_drawdown),
+				sharpe_ratio=VALUES(sharpe_ratio), total_trades=VALUES(total_trades),
+				win_trades=VALUES(win_trades), loss_trades=VALUES(loss_trades),
+				avg_pnl=VALUES(avg_pnl)`
 	}
+	// sqlite 和 postgres 均支援 ON CONFLICT 語法
 	return `
 		INSERT INTO backtest_results
 			(job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
@@ -108,12 +108,12 @@ func (r *backtestRepo) upsertResultSQL() string {
 		VALUES
 			(:job_id, :strategy, :total_return, :annual_return, :win_rate, :max_drawdown,
 			 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl)
-		ON DUPLICATE KEY UPDATE
-			total_return=VALUES(total_return), annual_return=VALUES(annual_return),
-			win_rate=VALUES(win_rate), max_drawdown=VALUES(max_drawdown),
-			sharpe_ratio=VALUES(sharpe_ratio), total_trades=VALUES(total_trades),
-			win_trades=VALUES(win_trades), loss_trades=VALUES(loss_trades),
-			avg_pnl=VALUES(avg_pnl)`
+		ON CONFLICT(job_id) DO UPDATE SET
+			total_return=excluded.total_return, annual_return=excluded.annual_return,
+			win_rate=excluded.win_rate, max_drawdown=excluded.max_drawdown,
+			sharpe_ratio=excluded.sharpe_ratio, total_trades=excluded.total_trades,
+			win_trades=excluded.win_trades, loss_trades=excluded.loss_trades,
+			avg_pnl=excluded.avg_pnl`
 }
 
 func (r *backtestRepo) UpsertResult(ctx context.Context, res *BacktestResult) error {
@@ -123,11 +123,11 @@ func (r *backtestRepo) UpsertResult(ctx context.Context, res *BacktestResult) er
 
 func (r *backtestRepo) GetResult(ctx context.Context, jobID string) (*BacktestResult, error) {
 	var result BacktestResult
-	err := r.db.GetContext(ctx, &result, `
+	err := r.db.GetContext(ctx, &result, r.db.Rebind(`
 		SELECT id, job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
 		       sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, created_at
 		FROM backtest_results WHERE job_id=?
-	`, jobID)
+	`), jobID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +158,12 @@ func (r *backtestRepo) InsertTrades(ctx context.Context, trades []BacktestTrade)
 
 func (r *backtestRepo) GetTrades(ctx context.Context, jobID string) ([]BacktestTrade, error) {
 	var trades []BacktestTrade
-	err := r.db.SelectContext(ctx, &trades, `
+	err := r.db.SelectContext(ctx, &trades, r.db.Rebind(`
 		SELECT id, job_id, symbol, direction, entry_time, exit_time,
 		       entry_price, exit_price, size, pnl, pnl_pct, commission, created_at
 		FROM backtest_trades
 		WHERE job_id=?
 		ORDER BY entry_time ASC
-	`, jobID)
+	`), jobID)
 	return trades, err
 }

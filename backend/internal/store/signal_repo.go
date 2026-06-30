@@ -40,23 +40,23 @@ func (r *signalRepo) Insert(ctx context.Context, s *Signal) error {
 
 func (r *signalRepo) GetRecent(ctx context.Context, limit int) ([]Signal, error) {
 	var rows []Signal
-	err := r.db.SelectContext(ctx, &rows, `
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts
 		FROM signals
 		ORDER BY ts DESC
 		LIMIT ?
-	`, limit)
+	`), limit)
 	return rows, err
 }
 
 func (r *signalRepo) GetBySymbol(ctx context.Context, symbol string, limit int) ([]Signal, error) {
 	var rows []Signal
-	err := r.db.SelectContext(ctx, &rows, `
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts
 		FROM signals
 		WHERE symbol=?
 		ORDER BY ts DESC
 		LIMIT ?
-	`, symbol, limit)
+	`), symbol, limit)
 	return rows, err
 }

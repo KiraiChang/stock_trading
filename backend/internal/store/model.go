@@ -6,60 +6,60 @@ import (
 )
 
 type Candle struct {
-	ID        uint64    `db:"id"`
-	Symbol    string    `db:"symbol"`
-	Timeframe string    `db:"timeframe"`
-	Open      float64   `db:"open"`
-	High      float64   `db:"high"`
-	Low       float64   `db:"low"`
-	Close     float64   `db:"close"`
-	Volume    int64     `db:"volume"`
-	Amount    float64   `db:"amount"`
-	Timestamp time.Time `db:"ts"`
+	ID        uint64    `db:"id"        json:"id"`
+	Symbol    string    `db:"symbol"    json:"symbol"`
+	Timeframe string    `db:"timeframe" json:"timeframe"`
+	Open      float64   `db:"open"      json:"open"`
+	High      float64   `db:"high"      json:"high"`
+	Low       float64   `db:"low"       json:"low"`
+	Close     float64   `db:"close"     json:"close"`
+	Volume    int64     `db:"volume"    json:"volume"`
+	Amount    float64   `db:"amount"    json:"amount"`
+	Timestamp time.Time `db:"ts"        json:"ts"`
 }
 
 type IndicatorSnapshot struct {
-	ID         uint64    `db:"id"`
-	Symbol     string    `db:"symbol"`
-	Timeframe  string    `db:"timeframe"`
-	Timestamp  time.Time `db:"ts"`
-	MA5        float64   `db:"ma5"`
-	MA10       float64   `db:"ma10"`
-	MA20       float64   `db:"ma20"`
-	MA60       float64   `db:"ma60"`
-	RSI14      float64   `db:"rsi14"`
-	MACD       float64   `db:"macd"`
-	MACDSignal float64   `db:"macd_signal"`
-	MACDHist   float64   `db:"macd_hist"`
-	BBUpper    float64   `db:"bb_upper"`
-	BBMiddle   float64   `db:"bb_middle"`
-	BBLower    float64   `db:"bb_lower"`
-	ATR14      float64   `db:"atr14"`
-	VWAP       float64   `db:"vwap"`
-	VolMA20    int64     `db:"vol_ma20"`
-	VolRatio   float64   `db:"vol_ratio"`
+	ID         uint64    `db:"id"          json:"id"`
+	Symbol     string    `db:"symbol"      json:"symbol"`
+	Timeframe  string    `db:"timeframe"   json:"timeframe"`
+	Timestamp  time.Time `db:"ts"          json:"ts"`
+	MA5        float64   `db:"ma5"         json:"ma5"`
+	MA10       float64   `db:"ma10"        json:"ma10"`
+	MA20       float64   `db:"ma20"        json:"ma20"`
+	MA60       float64   `db:"ma60"        json:"ma60"`
+	RSI14      float64   `db:"rsi14"       json:"rsi14"`
+	MACD       float64   `db:"macd"        json:"macd"`
+	MACDSignal float64   `db:"macd_signal" json:"macd_signal"`
+	MACDHist   float64   `db:"macd_hist"   json:"macd_hist"`
+	BBUpper    float64   `db:"bb_upper"    json:"bb_upper"`
+	BBMiddle   float64   `db:"bb_middle"   json:"bb_middle"`
+	BBLower    float64   `db:"bb_lower"    json:"bb_lower"`
+	ATR14      float64   `db:"atr14"       json:"atr14"`
+	VWAP       float64   `db:"vwap"        json:"vwap"`
+	VolMA20    int64     `db:"vol_ma20"    json:"vol_ma20"`
+	VolRatio   float64   `db:"vol_ratio"   json:"vol_ratio"`
 }
 
 type Signal struct {
-	ID         uint64    `db:"id"`
-	Symbol     string    `db:"symbol"`
-	SignalType  string    `db:"signal_type"`
-	Direction  string    `db:"direction"`
-	Price      float64   `db:"price"`
-	Volume     int64     `db:"volume"`
-	VolRatio   float64   `db:"vol_ratio"`
-	Resistance float64   `db:"resistance"`
-	Support    float64   `db:"support"`
-	Trend      string    `db:"trend"`
-	Note       string    `db:"note"`
-	Timestamp  time.Time `db:"ts"`
+	ID         uint64    `db:"id"          json:"id"`
+	Symbol     string    `db:"symbol"      json:"symbol"`
+	SignalType string    `db:"signal_type" json:"signal_type"`
+	Direction  string    `db:"direction"   json:"direction"`
+	Price      float64   `db:"price"       json:"price"`
+	Volume     int64     `db:"volume"      json:"volume"`
+	VolRatio   float64   `db:"vol_ratio"   json:"vol_ratio"`
+	Resistance float64   `db:"resistance"  json:"resistance"`
+	Support    float64   `db:"support"     json:"support"`
+	Trend      string    `db:"trend"       json:"trend"`
+	Note       string    `db:"note"        json:"note"`
+	Timestamp  time.Time `db:"ts"          json:"ts"`
 }
 
 type WatchlistItem struct {
-	ID     uint32 `db:"id"`
-	Symbol string `db:"symbol"`
-	Name   string `db:"name"`
-	Sector string `db:"sector"`
+	ID     uint32 `db:"id"     json:"id"`
+	Symbol string `db:"symbol" json:"symbol"`
+	Name   string `db:"name"   json:"name"`
+	Sector string `db:"sector" json:"sector"`
 }
 
 // ── Backtest models ───────────────────────────────────────────

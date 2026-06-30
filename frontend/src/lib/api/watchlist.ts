@@ -22,6 +22,13 @@ export async function bulkAddToWatchlist(
   })
 }
 
+export async function updateWatchlist(symbol: string, name: string, sector = ''): Promise<void> {
+  await apiFetch(`/watchlist/${symbol}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name, sector }),
+  })
+}
+
 export async function removeFromWatchlist(symbol: string): Promise<void> {
   await apiFetch(`/watchlist/${symbol}`, { method: 'DELETE' })
 }

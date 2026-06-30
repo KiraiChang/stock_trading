@@ -9,6 +9,7 @@ import (
 type WatchlistRepo interface {
 	GetAll(ctx context.Context) ([]WatchlistItem, error)
 	Add(ctx context.Context, symbol, name, sector string) error
+	Update(ctx context.Context, symbol, name, sector string) error
 	Remove(ctx context.Context, symbol string) error
 	Symbols(ctx context.Context) ([]string, error)
 }
@@ -41,6 +42,13 @@ func (r *watchlistRepo) Add(ctx context.Context, symbol, name, sector string) er
 		       ON CONFLICT(symbol) DO UPDATE SET name=excluded.name, sector=excluded.sector`
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(sql), symbol, name, sector)
+	return err
+}
+
+func (r *watchlistRepo) Update(ctx context.Context, symbol, name, sector string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE watchlists SET name=?, sector=? WHERE symbol=?
+	`), name, sector, symbol)
 	return err
 }
 

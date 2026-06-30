@@ -58,7 +58,7 @@
   <div class="grid grid-cols-12 gap-4 h-full">
     <!-- 左側：監控清單 -->
     <div class="col-span-4 overflow-auto">
-      <WatchlistTable />
+      <WatchlistTable on:symbolAdded={(e) => socket.subscribe([e.detail])} />
     </div>
 
     <!-- 右側：訊號 + K 線圖 -->

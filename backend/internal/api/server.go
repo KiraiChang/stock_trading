@@ -67,6 +67,7 @@ func NewServer(
 		protected.GET("/watchlist", wh.GetAll)
 		protected.POST("/watchlist", wh.Add)
 		protected.POST("/watchlist/bulk", wh.BulkAdd)
+		protected.PUT("/watchlist/:symbol", wh.Update)
 		protected.DELETE("/watchlist/:symbol", wh.Remove)
 
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)

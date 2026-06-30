@@ -68,6 +68,23 @@ func (h *WatchlistHandler) BulkAdd(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"added": added, "failed": failed, "total": len(body.Items)})
 }
 
+func (h *WatchlistHandler) Update(c *gin.Context) {
+	symbol := c.Param("symbol")
+	var body struct {
+		Name   string `json:"name"   binding:"required"`
+		Sector string `json:"sector"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.repo.Update(c.Request.Context(), symbol, body.Name, body.Sector); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "updated"})
+}
+
 func (h *WatchlistHandler) Remove(c *gin.Context) {
 	symbol := c.Param("symbol")
 	if err := h.repo.Remove(c.Request.Context(), symbol); err != nil {

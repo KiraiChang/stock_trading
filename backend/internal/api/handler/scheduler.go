@@ -67,7 +67,7 @@ func (h *SchedulerHandler) GetStatus(c *gin.Context) {
 			Status:        r.Status,
 			SymbolsTotal:  r.SymbolsTotal,
 			SymbolsFailed: r.SymbolsFailed,
-			Error:         r.Error,
+			Error:         r.Error.String,
 			StartedAt:     &started,
 			Stale:         stale,
 		}

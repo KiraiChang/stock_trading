@@ -56,14 +56,14 @@ type Signal struct {
 }
 
 type JobRun struct {
-	ID            uint64       `db:"id"             json:"id"`
-	JobName       string       `db:"job_name"       json:"job_name"`
-	Status        string       `db:"status"         json:"status"` // running/success/partial/failed
-	SymbolsTotal  int          `db:"symbols_total"  json:"symbols_total"`
-	SymbolsFailed int          `db:"symbols_failed" json:"symbols_failed"`
-	Error         string       `db:"error"          json:"error,omitempty"`
-	StartedAt     time.Time    `db:"started_at"     json:"started_at"`
-	FinishedAt    sql.NullTime `db:"finished_at"    json:"finished_at,omitempty"`
+	ID            uint64         `db:"id"             json:"id"`
+	JobName       string         `db:"job_name"       json:"job_name"`
+	Status        string         `db:"status"         json:"status"` // running/success/partial/failed
+	SymbolsTotal  int            `db:"symbols_total"  json:"symbols_total"`
+	SymbolsFailed int            `db:"symbols_failed" json:"symbols_failed"`
+	Error         sql.NullString `db:"error"        json:"error,omitempty"`
+	StartedAt     time.Time      `db:"started_at"     json:"started_at"`
+	FinishedAt    sql.NullTime   `db:"finished_at"    json:"finished_at,omitempty"`
 }
 
 type WatchlistItem struct {
@@ -80,12 +80,12 @@ type BacktestJob struct {
 	JobID      string       `db:"job_id"      json:"job_id"`
 	Type       string       `db:"type"        json:"type"`
 	Strategy   string       `db:"strategy"    json:"strategy"`
-	Symbols    string       `db:"symbols"     json:"symbols"`    // JSON array string
+	Symbols    string       `db:"symbols"     json:"symbols"` // JSON array string
 	Timeframe  string       `db:"timeframe"   json:"timeframe"`
 	StartDate  string       `db:"start_date"  json:"start_date"`
 	EndDate    string       `db:"end_date"    json:"end_date"`
-	Status     string       `db:"status"      json:"status"`     // pending/running/done/failed
-	Trigger    string       `db:"trigger"     json:"trigger"`    // manual/scheduler
+	Status     string       `db:"status"      json:"status"`  // pending/running/done/failed
+	Trigger    string       `db:"trigger"     json:"trigger"` // manual/scheduler
 	Error      string       `db:"error"       json:"error,omitempty"`
 	CreatedAt  time.Time    `db:"created_at"  json:"created_at"`
 	StartedAt  sql.NullTime `db:"started_at"  json:"started_at,omitempty"`

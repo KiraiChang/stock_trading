@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -125,20 +126,40 @@ func (c *FinMindClient) doFetch(ctx context.Context, reqURL string) ([]json.RawM
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, true, fmt.Errorf("finmind read body error: http_status=%d: %w", resp.StatusCode, err)
+	}
+
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-		return nil, true, fmt.Errorf("finmind http error: status=%d", resp.StatusCode)
+		return nil, true, fmt.Errorf("finmind http error: status=%d body=%s", resp.StatusCode, truncateBody(body))
 	}
 
 	var result finmindResp
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, false, fmt.Errorf("finmind decode error: http_status=%d: %w", resp.StatusCode, err)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, false, fmt.Errorf("finmind decode error: http_status=%d body=%s: %w", resp.StatusCode, truncateBody(body), err)
 	}
-	if result.Status != 200 {
+	if resp.StatusCode != http.StatusOK || result.Status != 200 {
 		// 402 = 額度用盡, 429 = 請求過於頻繁，兩者稍等後重試通常會恢復
 		retryable := result.Status == 402 || result.Status == 429
-		return nil, retryable, fmt.Errorf("finmind error: http_status=%d api_status=%d msg=%s", resp.StatusCode, result.Status, result.Msg)
+		msg := result.Msg
+		if msg == "" {
+			// FinMind 對某些錯誤（如缺少/錯誤參數）不會回傳 {msg,status} 格式，
+			// 這種情況把原始回應內容附上，避免看到空白訊息無從排查
+			msg = truncateBody(body)
+		}
+		return nil, retryable, fmt.Errorf("finmind error: http_status=%d api_status=%d msg=%s", resp.StatusCode, result.Status, msg)
 	}
 	return result.Data, false, nil
+}
+
+func truncateBody(body []byte) string {
+	const maxLen = 300
+	s := string(body)
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }
 
 // FetchDailyCandles 拉取日K資料

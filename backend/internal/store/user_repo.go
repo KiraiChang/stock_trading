@@ -23,20 +23,37 @@ type UserRepo interface {
 }
 
 type userRepo struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	driver string
 }
 
 func NewUserRepo(db *sqlx.DB) UserRepo {
-	return &userRepo{db: db}
+	return &userRepo{db: db, driver: db.DriverName()}
 }
 
 func (r *userRepo) Create(ctx context.Context, email, passwordHash string) (*User, error) {
+	// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
+	if r.driver == "pgx" {
+		var id uint64
+		err := r.db.QueryRowContext(ctx,
+			`INSERT INTO users (email, password_hash, status) VALUES ($1, $2, 'inactive') RETURNING id`,
+			email, passwordHash,
+		).Scan(&id)
+		if err != nil {
+			return nil, err
+		}
+		return &User{ID: id, Email: email, Status: "inactive", CreatedAt: time.Now()}, nil
+	}
+
 	sql := r.db.Rebind(`INSERT INTO users (email, password_hash, status) VALUES (?, ?, 'inactive')`)
 	res, err := r.db.ExecContext(ctx, sql, email, passwordHash)
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
 	return &User{ID: uint64(id), Email: email, Status: "inactive", CreatedAt: time.Now()}, nil
 }
 

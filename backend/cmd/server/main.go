@@ -75,6 +75,9 @@ func main() {
 	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, log)
 
 	// FinMind Client + Fetcher
+	if cfg.FinMind.APIKey == "" || cfg.FinMind.APIKey == "YOUR_FINMIND_API_KEY" {
+		log.Warn("finmind api_key 未設定，FinMind 請求極可能失敗（http 422 或空白錯誤訊息）；請設定環境變數 FINMIND_API_KEY")
+	}
 	finmindClient := market.NewFinMindClient(cfg.FinMind)
 	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
 

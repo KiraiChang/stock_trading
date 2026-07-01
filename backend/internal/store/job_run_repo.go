@@ -15,14 +15,24 @@ type JobRunRepo interface {
 }
 
 type jobRunRepo struct {
-	db *sqlx.DB
+	db     *sqlx.DB
+	driver string
 }
 
 func NewJobRunRepo(db *sqlx.DB) JobRunRepo {
-	return &jobRunRepo{db: db}
+	return &jobRunRepo{db: db, driver: db.DriverName()}
 }
 
 func (r *jobRunRepo) Start(ctx context.Context, jobName string) (uint64, error) {
+	// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
+	if r.driver == "pgx" {
+		var id uint64
+		err := r.db.QueryRowContext(ctx, `
+			INSERT INTO job_runs (job_name, status) VALUES ($1, 'running') RETURNING id
+		`, jobName).Scan(&id)
+		return id, err
+	}
+
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO job_runs (job_name, status) VALUES (?, 'running')
 	`), jobName)

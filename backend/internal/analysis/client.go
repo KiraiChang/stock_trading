@@ -73,7 +73,7 @@ func (r *Result) ToStore() (*store.StockAnalysis, []store.StockAnalysisLevel, er
 		EntryStatus:          r.Entry.Status,
 		EntryDirection:       r.Entry.Direction,
 		EntryPrice:           r.Entry.Price,
-		EntryReason:          sql.NullString{String: r.Entry.Reason, Valid: r.Entry.Reason != ""},
+		EntryReason:          store.NullString{NullString: sql.NullString{String: r.Entry.Reason, Valid: r.Entry.Reason != ""}},
 		StopLossATR:          nullFloat(r.StopLoss.ATR),
 		StopLossStructural:   nullFloat(r.StopLoss.Structural),
 		StopLossComposite:    nullFloat(r.StopLoss.Composite),
@@ -93,11 +93,11 @@ func (r *Result) ToStore() (*store.StockAnalysis, []store.StockAnalysisLevel, er
 	return a, levels, nil
 }
 
-func nullFloat(p *float64) sql.NullFloat64 {
+func nullFloat(p *float64) store.NullFloat64 {
 	if p == nil {
-		return sql.NullFloat64{}
+		return store.NullFloat64{}
 	}
-	return sql.NullFloat64{Float64: *p, Valid: true}
+	return store.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *p, Valid: true}}
 }
 
 // Client 呼叫 Python HTTP service 的 /analyze 端點

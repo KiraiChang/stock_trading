@@ -2,7 +2,6 @@ package analysis
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"time"
 
@@ -108,7 +107,7 @@ func verifyTrade(a *store.StockAnalysis, candles []store.Candle) TradeVerificati
 	}
 	isLong := a.EntryDirection == "LONG"
 
-	checkStop := func(price sql.NullFloat64) TouchResult {
+	checkStop := func(price store.NullFloat64) TouchResult {
 		if !price.Valid {
 			return TouchResult{}
 		}
@@ -122,7 +121,7 @@ func verifyTrade(a *store.StockAnalysis, candles []store.Candle) TradeVerificati
 		return TouchResult{Hit: false}
 	}
 
-	checkTarget := func(price sql.NullFloat64) TouchResult {
+	checkTarget := func(price store.NullFloat64) TouchResult {
 		if !price.Valid {
 			return TouchResult{}
 		}

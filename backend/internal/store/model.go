@@ -69,39 +69,39 @@ type JobRun struct {
 // ── Stock Analysis models ─────────────────────────────────────
 
 type StockAnalysis struct {
-	ID                   uint64          `db:"id"                      json:"id"`
-	Symbol               string          `db:"symbol"                  json:"symbol"`
-	Timeframe            string          `db:"timeframe"               json:"timeframe"`
-	AnalyzedAt           time.Time       `db:"analyzed_at"             json:"analyzed_at"`
-	CurrentPrice         float64         `db:"current_price"           json:"current_price"`
-	Trend                string          `db:"trend"                   json:"trend"`
-	EntryStatus          string          `db:"entry_status"            json:"entry_status"` // ACTIVE / WATCHING
-	EntryDirection       string          `db:"entry_direction"         json:"entry_direction"`
-	EntryPrice           float64         `db:"entry_price"             json:"entry_price"`
-	EntryReason          sql.NullString  `db:"entry_reason"            json:"entry_reason,omitempty"`
-	StopLossATR          sql.NullFloat64 `db:"stop_loss_atr"           json:"stop_loss_atr,omitempty"`
-	StopLossStructural   sql.NullFloat64 `db:"stop_loss_structural"    json:"stop_loss_structural,omitempty"`
-	StopLossComposite    sql.NullFloat64 `db:"stop_loss_composite"     json:"stop_loss_composite,omitempty"`
-	TakeProfitNextLevel  sql.NullFloat64 `db:"take_profit_next_level"  json:"take_profit_next_level,omitempty"`
-	TakeProfitRiskReward sql.NullFloat64 `db:"take_profit_risk_reward" json:"take_profit_risk_reward,omitempty"`
-	TakeProfitATR        sql.NullFloat64 `db:"take_profit_atr"         json:"take_profit_atr,omitempty"`
+	ID                   uint64      `db:"id"                      json:"id"`
+	Symbol               string      `db:"symbol"                  json:"symbol"`
+	Timeframe            string      `db:"timeframe"               json:"timeframe"`
+	AnalyzedAt           time.Time   `db:"analyzed_at"             json:"analyzed_at"`
+	CurrentPrice         float64     `db:"current_price"           json:"current_price"`
+	Trend                string      `db:"trend"                   json:"trend"`
+	EntryStatus          string      `db:"entry_status"            json:"entry_status"` // ACTIVE / WATCHING
+	EntryDirection       string      `db:"entry_direction"         json:"entry_direction"`
+	EntryPrice           float64     `db:"entry_price"             json:"entry_price"`
+	EntryReason          NullString  `db:"entry_reason"            json:"entry_reason,omitempty"`
+	StopLossATR          NullFloat64 `db:"stop_loss_atr"           json:"stop_loss_atr,omitempty"`
+	StopLossStructural   NullFloat64 `db:"stop_loss_structural"    json:"stop_loss_structural,omitempty"`
+	StopLossComposite    NullFloat64 `db:"stop_loss_composite"     json:"stop_loss_composite,omitempty"`
+	TakeProfitNextLevel  NullFloat64 `db:"take_profit_next_level"  json:"take_profit_next_level,omitempty"`
+	TakeProfitRiskReward NullFloat64 `db:"take_profit_risk_reward" json:"take_profit_risk_reward,omitempty"`
+	TakeProfitATR        NullFloat64 `db:"take_profit_atr"         json:"take_profit_atr,omitempty"`
 	// TradeVerification 為 JSON 字串：每個停損/停利方法各自「有沒有被觸及、
 	// 何時、什麼價位」，見 internal/analysis/verifier.go
-	TradeVerification sql.NullString `db:"trade_verification" json:"trade_verification,omitempty"`
-	VerifiedAt        sql.NullTime   `db:"verified_at"        json:"verified_at,omitempty"`
-	CreatedAt         time.Time      `db:"created_at"         json:"created_at"`
+	TradeVerification NullString `db:"trade_verification" json:"trade_verification,omitempty"`
+	VerifiedAt        NullTime   `db:"verified_at"        json:"verified_at,omitempty"`
+	CreatedAt         time.Time  `db:"created_at"         json:"created_at"`
 }
 
 type StockAnalysisLevel struct {
-	ID          uint64          `db:"id"           json:"id"`
-	AnalysisID  uint64          `db:"analysis_id"  json:"analysis_id"`
-	Price       float64         `db:"price"        json:"price"`
-	Type        string          `db:"type"         json:"type"` // SUPPORT / RESISTANCE
-	Strength    float64         `db:"strength"     json:"strength"`
-	Method      string          `db:"method"       json:"method"`
-	Status      string          `db:"status"       json:"status"` // PENDING / HELD_SO_FAR / BROKEN
-	BrokenAt    sql.NullTime    `db:"broken_at"    json:"broken_at,omitempty"`
-	BrokenPrice sql.NullFloat64 `db:"broken_price" json:"broken_price,omitempty"`
+	ID          uint64      `db:"id"           json:"id"`
+	AnalysisID  uint64      `db:"analysis_id"  json:"analysis_id"`
+	Price       float64     `db:"price"        json:"price"`
+	Type        string      `db:"type"         json:"type"` // SUPPORT / RESISTANCE
+	Strength    float64     `db:"strength"     json:"strength"`
+	Method      string      `db:"method"       json:"method"`
+	Status      string      `db:"status"       json:"status"` // PENDING / HELD_SO_FAR / BROKEN
+	BrokenAt    NullTime    `db:"broken_at"    json:"broken_at,omitempty"`
+	BrokenPrice NullFloat64 `db:"broken_price" json:"broken_price,omitempty"`
 }
 
 type WatchlistItem struct {

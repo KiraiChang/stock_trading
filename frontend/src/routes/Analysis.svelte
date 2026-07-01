@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
   import {
     createAnalysis,
@@ -18,8 +19,10 @@
   let currentLevels: AnalysisLevel[] = []
 
   let history: StockAnalysis[] = []
-  let historyLoading = false
+  let historyLoading = true
   let verifyingId: number | null = null
+
+  onMount(loadHistory)
 
   const trendLabel: Record<string, string> = { BULLISH: '多頭', BEARISH: '空頭', SIDEWAYS: '盤整' }
   const trendClass: Record<string, string> = {
@@ -59,11 +62,12 @@
     }
   }
 
+  // symbol 留空時列出「所有股票」最近的分析紀錄，方便一進頁面就有內容可看；
+  // symbol 有值時才篩選成該股票的歷史紀錄
   async function loadHistory() {
-    if (!symbol.trim()) return
     historyLoading = true
     try {
-      history = await listAnalyses(symbol.trim(), 20)
+      history = await listAnalyses(symbol.trim() || undefined, 20)
     } catch {
       // 沉默失敗，不影響主要分析結果的呈現
     } finally {
@@ -71,11 +75,15 @@
     }
   }
 
-  async function selectHistory(id: number) {
+  async function selectHistory(h: StockAnalysis) {
     try {
-      const { analysis, levels } = await getAnalysis(id)
+      const { analysis, levels } = await getAnalysis(h.id)
       current = analysis
       currentLevels = levels
+      if (symbol.trim() !== h.symbol) {
+        symbol = h.symbol
+        await loadHistory()
+      }
     } catch {
       // ignore
     }
@@ -262,57 +270,65 @@
       </div>
     {/if}
 
-    <!-- ── 歷史分析紀錄 ──────────────────────────────────────── -->
-    {#if symbol.trim()}
-      <div class="bg-panel border border-border rounded-xl overflow-hidden">
-        <div class="px-5 py-3 border-b border-border">
-          <h2 class="text-sm font-semibold text-white">{symbol} 歷史分析紀錄</h2>
-        </div>
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="text-muted text-xs border-b border-border">
-              <th class="text-left px-5 py-2">分析時間</th>
-              <th class="text-center px-3 py-2">趨勢</th>
-              <th class="text-center px-3 py-2">進場</th>
-              <th class="text-right px-3 py-2">進場價</th>
-              <th class="text-right px-5 py-2">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#if historyLoading}
-              <tr><td colspan="5" class="px-5 py-6 text-center text-muted">載入中...</td></tr>
-            {:else if history.length === 0}
-              <tr><td colspan="5" class="px-5 py-6 text-center text-muted">尚無歷史紀錄</td></tr>
-            {:else}
-              {#each history as h (h.id)}
-                <tr
-                  class="border-b border-border/50 hover:bg-border/20 cursor-pointer transition-colors
-                         {current?.id === h.id ? 'bg-indigo-900/20' : ''}"
-                  on:click={() => selectHistory(h.id)}
-                >
-                  <td class="px-5 py-2 text-muted text-xs font-mono">{formatDateTime(h.analyzed_at)}</td>
-                  <td class="px-3 py-2 text-center text-xs {trendClass[h.trend] ?? 'text-muted'}">{trendLabel[h.trend] ?? h.trend}</td>
-                  <td class="px-3 py-2 text-center">
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {entryStatusClass[h.entry_status]}">
-                      {entryStatusLabel[h.entry_status]}
-                    </span>
-                  </td>
-                  <td class="px-3 py-2 text-right font-mono">{fmt(h.entry_price)}</td>
-                  <td class="px-5 py-2 text-right">
-                    <button
-                      class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors disabled:opacity-50"
-                      disabled={verifyingId === h.id}
-                      on:click|stopPropagation={() => reVerify(h.id)}
-                    >
-                      {verifyingId === h.id ? '...' : '重新驗證'}
-                    </button>
-                  </td>
-                </tr>
-              {/each}
-            {/if}
-          </tbody>
-        </table>
+    <!-- ── 歷史分析紀錄：一進頁面就顯示（未指定股票時顯示所有股票最近紀錄）── -->
+    <div class="bg-panel border border-border rounded-xl overflow-hidden">
+      <div class="px-5 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-white">
+          {symbol.trim() ? `${symbol} 歷史分析紀錄` : '最近分析紀錄（所有股票）'}
+        </h2>
+        {#if symbol.trim()}
+          <button
+            class="text-xs text-muted hover:text-white transition-colors"
+            on:click={() => { symbol = ''; loadHistory() }}
+          >清除篩選</button>
+        {/if}
       </div>
-    {/if}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-muted text-xs border-b border-border">
+            <th class="text-left px-5 py-2">股票</th>
+            <th class="text-left px-3 py-2">分析時間</th>
+            <th class="text-center px-3 py-2">趨勢</th>
+            <th class="text-center px-3 py-2">進場</th>
+            <th class="text-right px-3 py-2">進場價</th>
+            <th class="text-right px-5 py-2">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#if historyLoading}
+            <tr><td colspan="6" class="px-5 py-6 text-center text-muted">載入中...</td></tr>
+          {:else if history.length === 0}
+            <tr><td colspan="6" class="px-5 py-6 text-center text-muted">尚無歷史紀錄，輸入股票代號分析看看</td></tr>
+          {:else}
+            {#each history as h (h.id)}
+              <tr
+                class="border-b border-border/50 hover:bg-border/20 cursor-pointer transition-colors
+                       {current?.id === h.id ? 'bg-indigo-900/20' : ''}"
+                on:click={() => selectHistory(h)}
+              >
+                <td class="px-5 py-2 text-white font-medium">{h.symbol}</td>
+                <td class="px-3 py-2 text-muted text-xs font-mono">{formatDateTime(h.analyzed_at)}</td>
+                <td class="px-3 py-2 text-center text-xs {trendClass[h.trend] ?? 'text-muted'}">{trendLabel[h.trend] ?? h.trend}</td>
+                <td class="px-3 py-2 text-center">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {entryStatusClass[h.entry_status]}">
+                    {entryStatusLabel[h.entry_status]}
+                  </span>
+                </td>
+                <td class="px-3 py-2 text-right font-mono">{fmt(h.entry_price)}</td>
+                <td class="px-5 py-2 text-right">
+                  <button
+                    class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors disabled:opacity-50"
+                    disabled={verifyingId === h.id}
+                    on:click|stopPropagation={() => reVerify(h.id)}
+                  >
+                    {verifyingId === h.id ? '...' : '重新驗證'}
+                  </button>
+                </td>
+              </tr>
+            {/each}
+          {/if}
+        </tbody>
+      </table>
+    </div>
   </div>
 </Layout>

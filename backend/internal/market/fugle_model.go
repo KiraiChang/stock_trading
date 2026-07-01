@@ -43,10 +43,17 @@ type fugleIntradayCandleBar struct {
 
 // ── WebSocket 協定結構（依官方 websocket-api/getting-started 文件確認） ──
 
-// fugleWSEnvelope 為所有 WS 訊息共通的外層格式
+// fugleWSEnvelope 為所有 WS 訊息共通的外層格式。
+//
+// 實測發現不同 event 的欄位位置不一致：subscribed 事件的 id/channel/symbol
+// 包在 data 裡面（見 fugleSubscribedData）；但 snapshot 事件的 id/channel
+// 卻是跟 event/data 同層的欄位，data 內容則是整包歷史K棒（見 handleSnapshot）。
+// 因此這裡把 ID/Channel 也定義在外層，兩種格式都能對上。
 type fugleWSEnvelope struct {
-	Event string          `json:"event"`
-	Data  json.RawMessage `json:"data"`
+	Event   string          `json:"event"`
+	Data    json.RawMessage `json:"data"`
+	ID      string          `json:"id,omitempty"`
+	Channel string          `json:"channel,omitempty"`
 }
 
 type fugleAuthRequest struct {
@@ -96,13 +103,9 @@ func newFugleUnsubscribeRequest(channelID string) fugleUnsubscribeRequest {
 	return req
 }
 
-// fugleCandleData 為 candles channel 推送資料的猜測欄位。
-//
-// 官方文件（截至查證當下）只說明了連線/認證/訂閱/心跳協定，並未附上
-// candles/trades channel 實際推送訊息的 JSON 範例，此結構依 REST
-// intraday candles 回應格式與業界慣例推測。正式上線前務必用
-// cmd/fugle-check 實際連線觀察 raw JSON，確認欄位名稱（尤其是否有
-// isClose/lastPrice 等欄位）後再修正這裡的欄位對應。
+// fugleCandleData 為「單一根K棒」推送格式的猜測欄位，用於 subscribed/snapshot
+// 之外、目前尚未實測觀察到的 event（推測是盤中即時更新用，收盤後測試只會
+// 收到 heartbeat，需在盤中重跑 cmd/fugle-check 才能確認實際格式並修正這裡）。
 type fugleCandleData struct {
 	Channel string  `json:"channel"` // 若推送訊息用 event:"data" 包一層 channel 欄位才會有值
 	ID      string  `json:"id"`      // 訂閱時取得的 channel ID，用於在 symbol 缺欄位時回查

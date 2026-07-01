@@ -243,13 +243,62 @@ func (c *FugleStreamClient) handleMessage(raw []byte) {
 		// callbacks/channelID 已在 Unsubscribe() 呼叫時清除，這裡不需處理
 	case "error":
 		c.log.Warn("fugle ws error event", zap.ByteString("data", env.Data))
+	case "snapshot":
+		// 訂閱 candles channel 後，Fugle 會先送一個 snapshot 事件，把當天
+		// 至今的整包 1 分K 一次推送過來（結構與 REST /intraday/candles 相同，
+		// 但 id/channel 是跟 event 同層而非包在 data 裡，見 fugleWSEnvelope）
+		c.handleSnapshot(env)
 	default:
-		// 官方文件未提供 candles/trades channel 實際推送格式範例，這裡假設
-		// event 名稱可能直接是 channel 名稱（如 "candles"），或包在 "data"
-		// 事件下再由 data.channel 標示欄位；兩種都嘗試解析。實際格式請以
-		// cmd/fugle-check 觀察 raw JSON 後校正。
+		// 官方文件與實測都尚未觀察到「盤中即時更新」用的 event 名稱
+		// （收盤後測試只會收到 snapshot + heartbeat），這裡假設它可能長得
+		// 像單一根K棒（見 fugleCandleData），盤中重跑 cmd/fugle-check 後
+		// 依實際 raw JSON 校正。
 		c.handleData(env.Event, env.Data)
 	}
+}
+
+func (c *FugleStreamClient) handleSnapshot(env fugleWSEnvelope) {
+	var resp fugleIntradayCandleResponse
+	if err := json.Unmarshal(env.Data, &resp); err != nil {
+		c.log.Warn("fugle ws snapshot decode failed", zap.Error(err))
+		return
+	}
+
+	symbol := resp.Symbol
+	if symbol == "" && env.ID != "" {
+		c.mu.Lock()
+		symbol = c.idSymbol[env.ID]
+		c.mu.Unlock()
+	}
+	if symbol == "" {
+		c.log.Debug("fugle ws snapshot missing symbol", zap.String("id", env.ID))
+		return
+	}
+
+	c.mu.Lock()
+	cb := c.callbacks[symbol]
+	c.mu.Unlock()
+	if cb == nil {
+		return
+	}
+
+	for _, bar := range resp.Data {
+		ts, err := time.Parse(time.RFC3339, bar.Date)
+		if err != nil {
+			continue
+		}
+		cb(Candle{
+			Symbol:    symbol,
+			Timeframe: "1m",
+			Open:      bar.Open,
+			High:      bar.High,
+			Low:       bar.Low,
+			Close:     bar.Close,
+			Volume:    bar.Volume,
+			Timestamp: ts,
+		})
+	}
+	c.log.Info("fugle ws snapshot applied", zap.String("symbol", symbol), zap.Int("bars", len(resp.Data)))
 }
 
 func (c *FugleStreamClient) handleSubscribed(raw json.RawMessage) {

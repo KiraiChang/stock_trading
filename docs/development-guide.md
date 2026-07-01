@@ -219,6 +219,32 @@ fetcher.BackfillHistory(ctx, symbols, 120)
 
 ---
 
+## 個股分析
+
+需要先 backfill 該股票至少 35 根日K，且 Python HTTP service 需已啟動
+（`python.service_url` 已設定，見上方「啟動 Python 回測服務」）：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/analysis \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"symbol":"2330","timeframe":"1d"}'
+# → { "analysis": {...}, "levels": [...] }
+```
+
+過幾天後想確認支撐/壓力有沒有被突破、停損/停利有沒有被觸及，重新驗證
+（可重複執行，每次都用最新 candles 重新計算，不用等排程）：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/analysis/1/verify \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+也可以直接用前端「個股分析」頁面（`/analysis`），輸入代號即可，歷史紀錄
+下方有「重新驗證」按鈕。完整規格見 [stock-analysis.md](./stock-analysis.md)。
+
+---
+
 ## 執行 Python 測試
 
 `backtest/modular/` 的單元測試（支撐壓力/進場/停損/回測引擎/型別安全）：

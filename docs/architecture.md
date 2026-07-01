@@ -41,11 +41,12 @@ cmd/server/main.go
     │       ├── market.Fetcher
     │       └── signal.Engine
     ├── backtest（Manager，透過 Python 服務執行）
+    ├── analysis（Client 呼叫 Python 計算，Verifier 純 Go 比對 candles 驗證）
     └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
             ├── middleware.Auth（JWT 驗證）
             ├── handler.Auth（register / login，新帳號預設 inactive）
             ├── handler.User（GET /users, PATCH /users/:id/status）
-            ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest}
+            ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest, Analysis}
             └── ws.Hub
 ```
 
@@ -90,6 +91,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | 頁面 | Route | 說明 |
 |------|-------|------|
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號）+ K線圖 + 訊號面板 |
+| 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，並可對歷史分析手動重新驗證 |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票，呼叫 `POST /market/backfill` |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
@@ -115,6 +117,21 @@ Python Worker / HTTP Server
     ↓ 寫入 backtest_results + backtest_trades（兩條路徑輸出格式一致）
 Go API（讀取結果回傳給前端）
 ```
+
+**個股分析**（`analysis` package）跟回測共用「Python 算、Go 存」的分工，但驗證
+階段反過來——比對已存的價位跟 candles 大小，不需要重跑 Python 的策略邏輯：
+
+```
+Go POST Python /analyze（現況計算：支撐/壓力/進場/停損/停利）
+    ↓
+Go 寫入 stock_analyses + stock_analysis_levels
+    ↓（之後手動觸發，可重複執行）
+Go 讀 candles，純 Go 比對支撐/壓力是否突破、停損/停利是否觸及
+    ↓
+更新 stock_analyses.trade_verification + stock_analysis_levels.status
+```
+
+細節見 [stock-analysis.md](./stock-analysis.md)。
 
 ---
 

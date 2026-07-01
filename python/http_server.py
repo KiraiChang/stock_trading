@@ -44,6 +44,7 @@ from typing import List, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
 from backtest.db_writer import update_job_status, write_result, write_trades
+from backtest.modular.analysis import analyze_symbol
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0")
 
@@ -115,6 +116,21 @@ async def get_backtest(job_id: str):
         "job":    dict(job_row),
         "result": dict(res_row) if res_row else None,
     }
+
+
+class AnalyzeRequest(BaseModel):
+    symbol: str
+    timeframe: str = "1d"
+
+
+@app.post("/analyze")
+async def analyze(req: AnalyzeRequest):
+    """個股現況分析：支撐/壓力/進場/停損/停利（同步計算，不寫 DB，由 Go 端負責持久化與驗證）。"""
+    log.info("POST /analyze symbol=%s tf=%s", req.symbol, req.timeframe)
+    try:
+        return analyze_symbol(req.symbol, req.timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @app.get("/health")

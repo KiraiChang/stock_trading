@@ -130,3 +130,44 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | size | 交易股數 |
 | pnl / pnl_pct | 損益（絕對值 / 百分比） |
 | commission | 手續費 |
+
+---
+
+## stock_analyses
+
+個股現況分析快照，Go 呼叫 Python 計算後寫入；`trade_verification`/
+`verified_at` 由 `POST /api/v1/analysis/:id/verify` 更新（可重複執行，每次
+重新計算，非一次性狀態機）。詳見 [stock-analysis.md](./stock-analysis.md)。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / timeframe | 分析標的與週期 |
+| analyzed_at | 分析當下最後一根K棒的時間（驗證時只看嚴格晚於此時間的資料） |
+| current_price | 分析當下收盤價 |
+| trend | `BULLISH` / `BEARISH` / `SIDEWAYS` |
+| entry_status | `ACTIVE`（已觸發真正進場條件）/ `WATCHING`（觀察中的觸發價位） |
+| entry_direction | `LONG` / `SHORT` / `NONE` |
+| entry_price | 已觸發：實際進場價；觀察中：觸發價位 |
+| entry_reason | 人類可讀的判斷依據 |
+| stop_loss_atr / stop_loss_structural / stop_loss_composite | 三種停損價位 |
+| take_profit_next_level / take_profit_risk_reward / take_profit_atr | 三種停利價位 |
+| trade_verification | JSON：每個停損/停利方法各自「有沒有被觸及、何時、什麼價位」；`entry_status=WATCHING` 時為 `{"applicable": false}` |
+| verified_at | 最近一次驗證時間，`NULL` 代表尚未驗證過 |
+
+**Index：** `INDEX(symbol, created_at DESC)`，支援查某檔股票的歷史分析列表。
+
+---
+
+## stock_analysis_levels
+
+`stock_analyses` 底下的支撐/壓力位清單（一對多），驗證時逐筆更新。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → stock_analyses.id |
+| price | 價位 |
+| type | `SUPPORT` / `RESISTANCE` |
+| strength | 強度（0~1，越高代表訊號越強/越多方法認同） |
+| method | 產生此 level 的演算法：`swing` / `atr_channel` / `volume_profile_poc` / `volume_profile_vah` / `volume_profile_val` |
+| status | `PENDING`（尚未驗證）/ `HELD_SO_FAR`（目前為止沒被突破）/ `BROKEN`（已被突破） |
+| broken_at / broken_price | 第一次被突破的時間與收盤價（`status=BROKEN` 時才有值） |

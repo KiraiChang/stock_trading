@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/api"
 	"github.com/trading/backend/internal/api/ws"
 	"github.com/trading/backend/internal/backtest"
@@ -66,6 +67,7 @@ func main() {
 	backtestRepo  := store.NewBacktestRepo(db)
 	userRepo      := store.NewUserRepo(db)
 	jobRunRepo    := store.NewJobRunRepo(db)
+	analysisRepo  := store.NewAnalysisRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -73,6 +75,10 @@ func main() {
 
 	// Backtest manager
 	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, log)
+
+	// 個股分析：實際計算委由 Python（重用 backtest/modular 的模組化策略元件），
+	// Go 只負責呼叫、持久化與驗證；PYTHON_SERVICE_URL 未設定時呼叫會回錯誤訊息
+	analysisClient := analysis.NewClient(cfg.Python.ServiceURL)
 
 	// FinMind Client + Fetcher
 	if cfg.FinMind.APIKey == "" || cfg.FinMind.APIKey == "YOUR_FINMIND_API_KEY" {
@@ -97,7 +103,7 @@ func main() {
 	}
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, btManager, fetcher, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, btManager, analysisClient, fetcher, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

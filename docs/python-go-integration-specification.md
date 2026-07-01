@@ -14,12 +14,14 @@
 
 ## Go（Production Layer）
 
-- 即時行情處理（FinMind 輪詢 / 未來 Shioaji）
+- 即時行情處理（FinMind 輪詢 / 選填 Fugle 並行）
 - 技術指標計算（MA / RSI / MACD / VWAP / ATR / Bollinger）
 - Breakout / Breakdown 判斷
 - Signal 生成與 WebSocket 推播
 - Watchlist 掃描（~1900 檔）
 - 回測任務管理（寫入 backtest_jobs）
+- 個股分析結果持久化與**驗證**（`internal/analysis.Verifier`：比對 candles
+  跟已存的支撐/壓力/停損/停利，純 Go，不呼叫 Python）
 
 ## Python（Research Layer）
 
@@ -30,6 +32,8 @@
 - 指標驗證（`backtest/indicators.py`，與 Go 1:1 對齊）
 - 統計分析
 - 回測結果寫回 DB（backtest_results + backtest_trades）——兩種引擎輸出格式相同
+- 個股現況分析計算（`backtest/modular/analysis.py`：支撐/壓力/進場/停損/停利，
+  純函式、**不寫 DB**，由 Go 呼叫後負責持久化，見 3.2）
 
 ---
 
@@ -98,6 +102,37 @@ if strategy in MODULAR_STRATEGIES:      # backtest/modular/strategy.py 的 STRAT
 
 新增模組化策略只需要在 `STRATEGY_PRESETS` 註冊，`job.Strategy` 欄位填對應
 名稱即可路由，Go 端、資料庫 schema、`db_writer.py` 都不需要改動。
+
+---
+
+# 3.2 個股分析（Stock Analysis）流程
+
+跟回測不同，個股分析是**同步**呼叫（不是寫 job 表等 worker 輪詢），而且
+「計算」跟「驗證」拆在兩個語言各自負責，理由分別是：
+
+- **計算**（支撐/壓力/進場/停損/停利）需要 `backtest/modular` 的演算法，
+  所以在 Python：`POST /analyze`（`python/http_server.py`）同步回傳結果，
+  不寫 DB。
+- **驗證**（比對後續 candles，檢查支撐/壓力有沒有被突破、停損/停利有沒有
+  被觸及）只是價格數字比大小，不需要重跑策略邏輯，所以直接在 Go 做
+  （`internal/analysis.Verifier`），這樣驗證功能不會被「Python service 沒開」
+  卡住，也不用把 candles 資料再送一次去 Python。
+
+```
+Go POST Python /analyze {symbol, timeframe}
+    ↓ 同步回傳（不寫 DB）
+Go 寫入 stock_analyses + stock_analysis_levels
+    ↓（使用者之後手動觸發 POST /analysis/:id/verify，可重複執行）
+Go 讀 candles（analyzed_at 之後），純 Go 比對：
+    - 支撐位：收盤 < 支撐價 → BROKEN
+    - 壓力位：收盤 > 壓力價 → BROKEN
+    - 停損/停利（僅 entry_status=ACTIVE 才檢查）：當根最低/最高價觸及即算 Hit
+    ↓
+更新 stock_analyses.trade_verification（JSON）+ stock_analysis_levels.status
+```
+
+完整數學規格與資料表結構見 [stock-analysis.md](./stock-analysis.md)、
+[database-schema.md](./database-schema.md)。
 
 ---
 

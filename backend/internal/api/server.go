@@ -8,6 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/api/handler"
 	"github.com/trading/backend/internal/api/middleware"
 	"github.com/trading/backend/internal/api/ws"
@@ -31,7 +32,9 @@ func NewServer(
 	watchlistRepo store.WatchlistRepo,
 	backtestRepo  store.BacktestRepo,
 	jobRunRepo    store.JobRunRepo,
+	analysisRepo  store.AnalysisRepo,
 	btManager     *backtest.Manager,
+	analysisClient *analysis.Client,
 	fetcher       *market.Fetcher,
 	userRepo      store.UserRepo,
 	jwtSecret     string,
@@ -94,6 +97,12 @@ func NewServer(
 		protected.GET("/backtest/:job_id", bh.GetJob)
 		protected.GET("/backtest/:job_id/trades", bh.GetTrades)
 		protected.DELETE("/backtest/:job_id", bh.Cancel)
+
+		anh := handler.NewAnalysisHandler(analysisClient, analysis.NewVerifier(analysisRepo, candleRepo), analysisRepo)
+		protected.POST("/analysis", anh.Create)
+		protected.GET("/analysis", anh.List)
+		protected.GET("/analysis/:id", anh.Get)
+		protected.POST("/analysis/:id/verify", anh.Verify)
 
 		uh := handler.NewUserHandler(userRepo)
 		protected.GET("/users", uh.List)

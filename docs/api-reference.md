@@ -367,6 +367,85 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ---
 
+## Stock Analysis API
+
+針對單一個股，用歷史 OHLCV 算出支撐/壓力/進場/停損/停利，供人工判斷用
+（不是自動下單訊號）。實際計算由 Python 完成（重用
+[backtest-modular-strategy.md](./backtest-modular-strategy.md) 的模組化元件），
+**需要 `python.service_url` 已設定且 Python HTTP service 已啟動**，否則
+`POST /analysis` 會回傳 `502 Bad Gateway`。驗證（`POST /analysis/:id/verify`）
+不依賴 Python，純粹比對 Go 這邊的 `candles` 表，Python 沒開也能用。
+完整規格見 [stock-analysis.md](./stock-analysis.md)。
+
+### POST `/analysis`
+
+觸發一次分析並寫入 DB。
+
+**Request Body：**
+```json
+{ "symbol": "2330", "timeframe": "1d" }
+```
+
+`timeframe` 省略時預設 `1d`。
+
+**Response（201 Created）：**
+```json
+{
+  "analysis": {
+    "id": 1,
+    "symbol": "2330",
+    "timeframe": "1d",
+    "analyzed_at": "2026-07-01T00:00:00+08:00",
+    "current_price": 978.0,
+    "trend": "BULLISH",
+    "entry_status": "WATCHING",
+    "entry_direction": "LONG",
+    "entry_price": 985.0,
+    "entry_reason": "等待突破壓力 985.00（來源：swing）",
+    "stop_loss_atr": 960.2,
+    "stop_loss_structural": 965.0,
+    "stop_loss_composite": 965.0,
+    "take_profit_next_level": 1020.0,
+    "take_profit_risk_reward": 1025.0,
+    "take_profit_atr": 1030.5,
+    "trade_verification": null,
+    "verified_at": null,
+    "created_at": "2026-07-01T10:00:00+08:00"
+  },
+  "levels": [
+    { "id": 1, "analysis_id": 1, "price": 985.0, "type": "RESISTANCE", "strength": 1.0, "method": "swing", "status": "PENDING" },
+    { "id": 2, "analysis_id": 1, "price": 955.0, "type": "SUPPORT", "strength": 0.9, "method": "volume_profile_poc", "status": "PENDING" }
+  ]
+}
+```
+
+### GET `/analysis`
+
+列出歷史分析紀錄。
+
+**Query Parameters：** `symbol`（篩選特定股票）、`limit`（預設 20，最多 200）
+
+### GET `/analysis/:id`
+
+取得單筆分析詳情（含支撐/壓力清單），格式同 `POST /analysis` 的回應。
+
+### POST `/analysis/:id/verify`
+
+手動重新驗證：比對這筆分析之後的實際 K 棒，更新每個支撐/壓力位的
+`status`（是否被突破），以及（若 `entry_status=ACTIVE`）三種停損/三種停利
+各自有沒有被觸及。**可重複呼叫**，每次都用目前為止最新的資料重新計算，
+不是一次性判定。沒有自動排程，需要主動呼叫這支 API 才會更新。
+
+**Response：** 格式同 `GET /analysis/:id`，但 `trade_verification` 會有值：
+```json
+{
+  "analysis": { "...": "...", "trade_verification": "{\"applicable\":true,\"stop_loss\":{...},\"take_profit\":{...}}", "verified_at": "2026-07-05T09:00:00+08:00" },
+  "levels": [ { "...": "...", "status": "BROKEN", "broken_at": "2026-07-03T00:00:00+08:00", "broken_price": 950.0 } ]
+}
+```
+
+---
+
 ## WebSocket
 
 **連線：** `ws://localhost:8080/ws/market`

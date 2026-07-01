@@ -3,6 +3,7 @@
 
   const navItems: { label: string; icon: string; route: Route }[] = [
     { label: 'Dashboard', icon: '◈', route: 'dashboard' },
+    { label: '個股分析', icon: '◎', route: 'analysis' },
     { label: '歷史資料回補', icon: '⟳', route: 'backfill' },
     { label: '策略回測', icon: '▶', route: 'backtest' },
     { label: '排程監控', icon: '⏱', route: 'scheduler' },

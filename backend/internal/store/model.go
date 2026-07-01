@@ -55,6 +55,17 @@ type Signal struct {
 	Timestamp  time.Time `db:"ts"          json:"ts"`
 }
 
+type JobRun struct {
+	ID            uint64       `db:"id"             json:"id"`
+	JobName       string       `db:"job_name"       json:"job_name"`
+	Status        string       `db:"status"         json:"status"` // running/success/partial/failed
+	SymbolsTotal  int          `db:"symbols_total"  json:"symbols_total"`
+	SymbolsFailed int          `db:"symbols_failed" json:"symbols_failed"`
+	Error         string       `db:"error"          json:"error,omitempty"`
+	StartedAt     time.Time    `db:"started_at"     json:"started_at"`
+	FinishedAt    sql.NullTime `db:"finished_at"    json:"finished_at,omitempty"`
+}
+
 type WatchlistItem struct {
 	ID     uint32 `db:"id"     json:"id"`
 	Symbol string `db:"symbol" json:"symbol"`

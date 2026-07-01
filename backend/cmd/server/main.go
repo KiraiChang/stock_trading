@@ -65,6 +65,7 @@ func main() {
 	watchlistRepo := store.NewWatchlistRepo(db)
 	backtestRepo  := store.NewBacktestRepo(db)
 	userRepo      := store.NewUserRepo(db)
+	jobRunRepo    := store.NewJobRunRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -78,7 +79,7 @@ func main() {
 	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, btManager, fetcher, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, btManager, fetcher, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {
@@ -86,7 +87,7 @@ func main() {
 	}
 
 	// Scheduler
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, log)
+	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, log)
 	go sched.Start()
 
 	if err := srv.Run(":" + cfg.Server.Port); err != nil {

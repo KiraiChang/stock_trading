@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/api/handler"
@@ -23,11 +24,13 @@ type Server struct {
 }
 
 func NewServer(
+	db            *sqlx.DB,
 	candleRepo    store.CandleRepo,
 	indicatorRepo store.IndicatorRepo,
 	signalRepo    store.SignalRepo,
 	watchlistRepo store.WatchlistRepo,
 	backtestRepo  store.BacktestRepo,
+	jobRunRepo    store.JobRunRepo,
 	btManager     *backtest.Manager,
 	fetcher       *market.Fetcher,
 	userRepo      store.UserRepo,
@@ -39,6 +42,15 @@ func NewServer(
 
 	r := gin.New()
 	r.Use(middleware.Logger(log), middleware.CORS(), gin.Recovery())
+
+	// 給 docker / uptime 探測用，不需 token
+	r.GET("/health", func(c *gin.Context) {
+		if err := db.PingContext(c.Request.Context()); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "down", "error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
 
 	v1 := r.Group("/api/v1")
 
@@ -72,6 +84,9 @@ func NewServer(
 
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)
+
+		sch := handler.NewSchedulerHandler(jobRunRepo)
+		protected.GET("/scheduler/status", sch.GetStatus)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo)
 		protected.POST("/backtest", bh.Submit)

@@ -3,6 +3,7 @@
 
   const navItems: { label: string; icon: string; route: Route }[] = [
     { label: 'Dashboard', icon: '◈', route: 'dashboard' },
+    { label: '排程監控', icon: '⏱', route: 'scheduler' },
     { label: '使用者管理', icon: '⊙', route: 'users' },
   ]
 </script>

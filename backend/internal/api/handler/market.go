@@ -50,11 +50,8 @@ func (h *MarketHandler) Backfill(c *gin.Context) {
 	}
 
 	go func() {
-		if err := h.fetcher.BackfillHistory(context.Background(), symbols, body.Days); err != nil {
-			h.log.Warn("backfill failed", zap.Error(err))
-			return
-		}
-		h.log.Info("backfill completed", zap.Int("symbols", len(symbols)), zap.Int("days", body.Days))
+		failed := h.fetcher.BackfillHistory(context.Background(), symbols, body.Days)
+		h.log.Info("backfill completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed), zap.Int("days", body.Days))
 	}()
 
 	c.JSON(http.StatusAccepted, gin.H{

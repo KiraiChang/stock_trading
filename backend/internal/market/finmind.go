@@ -6,16 +6,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/pkg/timeutil"
 )
 
+const (
+	fetchMaxRetries  = 3
+	fetchBaseBackoff = time.Second
+)
+
 type FinMindClient struct {
 	apiKey  string
 	baseURL string
 	http    *http.Client
+	limiter *rateLimiter
 }
 
 func NewFinMindClient(cfg config.FinMindConfig) *FinMindClient {
@@ -25,6 +32,45 @@ func NewFinMindClient(cfg config.FinMindConfig) *FinMindClient {
 		http: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		limiter: newRateLimiter(cfg.RateLimit),
+	}
+}
+
+// rateLimiter 依「每分鐘請求數」節流，讓 intraday / daily close / backfill
+// 共用同一個節流器，避免對 FinMind 發出爆量請求觸發限流。
+type rateLimiter struct {
+	mu       sync.Mutex
+	interval time.Duration
+	next     time.Time
+}
+
+func newRateLimiter(perMinute int) *rateLimiter {
+	if perMinute <= 0 {
+		perMinute = 1
+	}
+	return &rateLimiter{interval: time.Minute / time.Duration(perMinute)}
+}
+
+func (l *rateLimiter) wait(ctx context.Context) error {
+	l.mu.Lock()
+	now := time.Now()
+	wait := time.Duration(0)
+	if now.Before(l.next) {
+		wait = l.next.Sub(now)
+		l.next = l.next.Add(l.interval)
+	} else {
+		l.next = now.Add(l.interval)
+	}
+	l.mu.Unlock()
+
+	if wait <= 0 {
+		return nil
+	}
+	select {
+	case <-time.After(wait):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -34,29 +80,65 @@ type finmindResp struct {
 	Data   []json.RawMessage `json:"data"`
 }
 
+// fetch 對 FinMind API 發出請求，節流後執行，並對逾時/5xx/429/402（限流、額度用盡）
+// 做有限次數的指數退避重試；其他錯誤（如參數錯誤）不重試。
 func (c *FinMindClient) fetch(ctx context.Context, params url.Values) ([]json.RawMessage, error) {
 	params.Set("token", c.apiKey)
 	reqURL := c.baseURL + "/data?" + params.Encode()
 
+	var lastErr error
+	for attempt := 0; attempt <= fetchMaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := fetchBaseBackoff * time.Duration(1<<(attempt-1))
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		if err := c.limiter.wait(ctx); err != nil {
+			return nil, err
+		}
+
+		data, retryable, err := c.doFetch(ctx, reqURL)
+		if err == nil {
+			return data, nil
+		}
+		lastErr = err
+		if !retryable {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("finmind fetch failed after %d retries: %w", fetchMaxRetries, lastErr)
+}
+
+func (c *FinMindClient) doFetch(ctx context.Context, reqURL string) ([]json.RawMessage, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
+		return nil, true, fmt.Errorf("finmind http error: status=%d", resp.StatusCode)
+	}
+
 	var result finmindResp
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		return nil, false, fmt.Errorf("finmind decode error: http_status=%d: %w", resp.StatusCode, err)
 	}
 	if result.Status != 200 {
-		return nil, fmt.Errorf("finmind error: %s", result.Msg)
+		// 402 = 額度用盡, 429 = 請求過於頻繁，兩者稍等後重試通常會恢復
+		retryable := result.Status == 402 || result.Status == 429
+		return nil, retryable, fmt.Errorf("finmind error: http_status=%d api_status=%d msg=%s", resp.StatusCode, result.Status, result.Msg)
 	}
-	return result.Data, nil
+	return result.Data, false, nil
 }
 
 // FetchDailyCandles 拉取日K資料

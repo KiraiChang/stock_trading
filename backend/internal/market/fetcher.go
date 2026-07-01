@@ -54,28 +54,28 @@ func (f *Fetcher) FetchAndStoreMinute(ctx context.Context, symbol string, date t
 	return nil
 }
 
-// BackfillHistory 補齊歷史日K，days 為往前幾天
-func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days int) error {
+// BackfillHistory 補齊歷史日K，days 為往前幾天，回傳失敗的股票數量
+func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days int) int {
 	end := timeutil.TodayTaipei()
 	start := end.AddDate(0, 0, -days)
 
+	failed := 0
 	for _, symbol := range symbols {
 		candles, err := f.client.FetchDailyCandles(ctx, symbol, start, end)
 		if err != nil {
 			f.log.Warn("backfill failed", zap.String("symbol", symbol), zap.Error(err))
+			failed++
 			continue
 		}
 		storeCandles := toStoreCandles(candles)
 		if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 			f.log.Warn("backfill insert failed", zap.String("symbol", symbol), zap.Error(err))
+			failed++
 			continue
 		}
 		f.log.Info("backfill done", zap.String("symbol", symbol), zap.Int("count", len(storeCandles)))
-
-		// 簡單的 rate limit：每次請求後等待 200ms
-		time.Sleep(200 * time.Millisecond)
 	}
-	return nil
+	return failed
 }
 
 func toStoreCandles(cs []Candle) []store.Candle {

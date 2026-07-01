@@ -117,7 +117,11 @@ def _to_dataframe(rows: list[dict], start_date: str, end_date: str) -> pd.DataFr
     df = pd.DataFrame(rows)
     df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert("Asia/Taipei")
     df = df.set_index("datetime").sort_index()
-    df = df[["open", "high", "low", "close", "volume"]]
+    # candles 的 open/high/low/close/amount 在 Postgres/MySQL 是 DECIMAL 欄位，
+    # psycopg2/pymysql 預設回傳 decimal.Decimal 而非 float（SQLite 動態型別則
+    # 天生回傳 float，本地開發用 SQLite 才沒發現這個問題）。astype(float) 統一轉型，
+    # 避免後續數值運算跟 Decimal 混用出現 TypeError。
+    df = df[["open", "high", "low", "close", "volume"]].astype(float)
     df = df.loc[start_date:end_date]
     return df
 

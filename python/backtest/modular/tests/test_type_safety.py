@@ -10,10 +10,13 @@ schema 名稱，丟出 InvalidSchemaName。
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import numpy as np
 
 from ...indicators import calc_atr, calc_macd, calc_rsi
-from ..service import _aggregate_result, _trade_to_dict
+from ..service import _aggregate_result, _to_dataframe, _trade_to_dict
+from ..support_resistance.volume_profile import VolumeProfileSR
 from ..types import BacktestReport, Direction, ExitReason, Trade
 from .conftest import bullish_trend_df
 
@@ -35,6 +38,33 @@ def test_calc_macd_returns_native_floats(bullish_df):
     assert type(macd) is float
     assert type(signal) is float, f"calc_macd 的 signal 洩漏了 {type(signal)}，應為原生 float"
     assert type(hist) is float
+
+
+def test_to_dataframe_casts_decimal_columns_to_float():
+    """
+    實際發生過的事故：candles 的 open/high/low/close 在 Postgres/MySQL 是
+    DECIMAL 欄位，psycopg2/pymysql 預設回傳 decimal.Decimal，而不是 float
+    （SQLite 動態型別天生回傳 float，本地開發用 SQLite 才沒發現）。
+    VolumeProfileSR 對這些欄位做 (highs+lows+closes)/3.0 時，Decimal 沒辦法
+    跟 float 混合運算，會直接丟 TypeError。
+    """
+    rows = [
+        {"open": Decimal("100.50"), "high": Decimal("101.00"), "low": Decimal("99.80"),
+         "close": Decimal("100.90"), "volume": 1000, "timestamp": 1700000000},
+        {"open": Decimal("100.90"), "high": Decimal("102.00"), "low": Decimal("100.00"),
+         "close": Decimal("101.50"), "volume": 1200, "timestamp": 1700086400},
+        {"open": Decimal("101.50"), "high": Decimal("103.00"), "low": Decimal("101.00"),
+         "close": Decimal("102.50"), "volume": 1300, "timestamp": 1700172800},
+    ]
+
+    df = _to_dataframe(rows, "2023-01-01", "2030-01-01")
+
+    for col in ("open", "high", "low", "close", "volume"):
+        assert df[col].dtype == float, f"{col} 應轉成 float64，實際是 {df[col].dtype}"
+
+    # 直接重現事故現場：對混有 Decimal 來源的資料做除法運算不應該再丟 TypeError
+    levels = VolumeProfileSR(lookback=3, num_bins=5).calculate(df)
+    assert levels is not None
 
 
 def _assert_all_db_safe(d: dict, path: str = "") -> None:

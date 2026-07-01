@@ -3,9 +3,9 @@
 ## 整體資料流
 
 ```
-FinMind API
-    ↓ HTTP（每 5 分鐘 / 收盤後）
-Go Market Data Service（Fetcher）
+FinMind API（歷史日K / 分K）      Fugle MarketData API（盤中即時，選填，見 fugle-integration.md）
+    ↓ HTTP（每 5 分鐘 / 收盤後）        ↓ REST（quote/candles）+ WebSocket（candles channel）
+Go Market Data Service（Fetcher）←──────┘
     ↓ BulkInsert
 SQLite / MySQL / PostgreSQL（candles table）
     ↓ GetLatestN（120 根）
@@ -20,6 +20,10 @@ DB（signals）
 Frontend（Svelte，由 Go backend 直接 serve）
 ```
 
+Fugle 目前預設關閉（`fugle.enabled: false`），已完成 REST/WebSocket client 與
+`cmd/fugle-check` 驗證工具，尚未接上 `Fetcher`/`scheduler` 的自動排程；詳見
+[fugle-integration.md](./fugle-integration.md)。
+
 ---
 
 ## 模組關係
@@ -27,7 +31,7 @@ Frontend（Svelte，由 Go backend 直接 serve）
 ```
 cmd/server/main.go
     ├── store（DB + Redis repos，含 UserRepo）
-    ├── market（FinMindClient + Fetcher）
+    ├── market（FinMindClient + Fetcher，選填 FugleQuoteClient / FugleStreamClient）
     ├── indicator（Engine）
     │       └── store.CandleRepo
     ├── signal（Engine）
@@ -79,6 +83,23 @@ register → inactive ──→（管理員 PATCH /users/:id/status）──→ 
 
 ---
 
+## 前端頁面
+
+Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
+
+| 頁面 | Route | 說明 |
+|------|-------|------|
+| Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號）+ K線圖 + 訊號面板 |
+| 歷史資料回補 | `backfill` | 勾選監控清單股票，呼叫 `POST /market/backfill` |
+| 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
+| 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
+| 使用者管理 | `users` | 啟用/停用帳號 |
+
+Dashboard 的即時欄位以 REST 主動 hydrate（`/candles`、`/indicators`、`/signals`），
+WebSocket 只在有新訊號時推播覆蓋，因為後端目前只會廣播 `signal` 事件。
+
+---
+
 ## Python 服務
 
 Python 負責回測，獨立運行，透過共用 DB 與 Go 溝通。
@@ -87,8 +108,11 @@ Python 負責回測，獨立運行，透過共用 DB 與 Go 溝通。
 Go（寫入 backtest_jobs）
     ↓ DB polling（Method A）或 HTTP（Method B）
 Python Worker / HTTP Server
-    ↓ 讀取 candles，執行 backtrader 回測
-    ↓ 寫入 backtest_results + backtest_trades
+    ↓ backtest/engine.py 依 strategy 名稱分派：
+    │   - 命中 backtest/modular/strategy.py 的 STRATEGY_PRESETS → 走純 pandas/numpy
+    │     的模組化引擎（見 backtest-modular-strategy.md）
+    │   - 否則走既有 backtrader 引擎（STRATEGY_MAP）
+    ↓ 寫入 backtest_results + backtest_trades（兩條路徑輸出格式一致）
 Go API（讀取結果回傳給前端）
 ```
 
@@ -105,7 +129,7 @@ Go API（讀取結果回傳給前端）
 | WebSocket | gorilla/websocket | 穩定、廣泛使用 |
 | Frontend | Vite + Svelte | 輕量、無 VDOM；build 後 embed 進 Go binary |
 | K 線圖 | lightweight-charts | < 50KB、原生 Candlestick |
-| Backtest | Python + backtrader | 策略研究與驗證 |
+| Backtest | Python + backtrader，另有純 pandas/numpy 模組化引擎 | 策略研究與驗證；模組化引擎可獨立替換 S/R、進場、停損元件（Strategy Pattern） |
 | Auth | JWT（HS256）+ bcrypt | 無狀態 token，密碼安全雜湊 |
 
 ---

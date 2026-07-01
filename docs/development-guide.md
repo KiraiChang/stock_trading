@@ -214,6 +214,37 @@ curl -X POST http://localhost:8080/api/v1/watchlist \
 fetcher.BackfillHistory(ctx, symbols, 120)
 ```
 
+也可以直接用前端「歷史資料回補」頁面（`/backfill`），勾選監控清單股票、
+指定天數後送出，或呼叫 `POST /api/v1/market/backfill`（見 api-reference.md）。
+
+---
+
+## 執行 Python 測試
+
+`backtest/modular/` 的單元測試（支撐壓力/進場/停損/回測引擎/型別安全）：
+
+```bash
+cd python
+.venv/Scripts/python.exe -m pip install pytest   # 或先 pip install -r requirements.txt
+.venv/Scripts/python.exe -m pytest backtest/modular/tests -v
+```
+
+---
+
+## 驗證 Fugle 即時行情（選填）
+
+`fugle.enabled` 預設 `false`，接入前建議先用獨立工具驗證延遲與實際推播格式
+（尤其盤中即時更新的訊息格式目前尚未確認，見 fugle-integration.md）：
+
+```bash
+cd backend
+$env:FUGLE_ENABLED="true"; $env:FUGLE_API_KEY="<你的 API Key>"
+go run ./cmd/fugle-check -symbol 2330 -duration 60s
+```
+
+盤中時段（09:00–13:30）執行才看得到即時推播；收盤後只會看到訂閱時的
+`snapshot`（整包當日K棒）與 30 秒一次的 `heartbeat`。
+
 ---
 
 ## 常見問題

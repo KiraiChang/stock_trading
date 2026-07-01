@@ -23,10 +23,13 @@
 
 ## Python（Research Layer）
 
-- 策略研究與回測（backtrader）
-- 指標驗證（與 Go 1:1 對齊）
+- 策略研究與回測，兩種引擎並存：
+  - `backtest/strategy/breakout_v1.py`（backtrader，與 Go signal engine 1:1 對齊）
+  - `backtest/modular/`（純 pandas/numpy，Strategy Pattern 可替換 S/R／進場／
+    停損元件，見 [backtest-modular-strategy.md](./backtest-modular-strategy.md)）
+- 指標驗證（`backtest/indicators.py`，與 Go 1:1 對齊）
 - 統計分析
-- 回測結果寫回 DB（backtest_results + backtest_trades）
+- 回測結果寫回 DB（backtest_results + backtest_trades）——兩種引擎輸出格式相同
 
 ---
 
@@ -81,6 +84,23 @@ Go 端需在 `config.yaml` 設定 `python.service_url: http://localhost:8001`。
 
 ---
 
+# 3.1 策略引擎分派
+
+`backend/internal/backtest`／`python/worker.py`／`python/http_server.py` 完全
+不知道有兩種引擎存在——分派邏輯全部封裝在 `python/backtest/engine.py` 的
+`run_backtest()`：
+
+```python
+if strategy in MODULAR_STRATEGIES:      # backtest/modular/strategy.py 的 STRATEGY_PRESETS
+    return run_modular_backtest(...)     # 純 pandas/numpy 引擎
+# 否則走 STRATEGY_MAP（backtrader）
+```
+
+新增模組化策略只需要在 `STRATEGY_PRESETS` 註冊，`job.Strategy` 欄位填對應
+名稱即可路由，Go 端、資料庫 schema、`db_writer.py` 都不需要改動。
+
+---
+
 # 4. Backtest Data Standard
 
 ## 核心原則
@@ -131,6 +151,20 @@ timestamp 取法：
 - Volume average window（20）
 - Breakout 條件（Close > Resistance, VolRatio >= 2.0, Trend == BULLISH）
 - Support/Resistance 識別邏輯（window=3, merge threshold=1%）
+
+---
+
+# 5.1 型別安全規則（寫入 DB 前必須是原生型別）
+
+`backtest_results`/`backtest_trades` 是透過 SQLAlchemy `text()` + 具名參數寫入，
+**任何要寫入的數值都必須是原生 Python `float`/`int`，不能是 `np.float64`/
+`np.int64`**。numpy>=2.0 的純量 `repr()` 格式改變後，這類型別若流進 SQL bind
+參數會讓 psycopg2 退化成把 repr 字串塞進 SQL，導致 Postgres 解析錯誤
+（實際案例見 [backtest-modular-strategy.md](./backtest-modular-strategy.md#型別安全重要教訓)）。
+
+規則：任何在累加迴圈中把原生數值跟 numpy 陣列元素相加的函式，回傳前必須
+明確 `float()`/`int()` 轉型；`db_writer.py` 呼叫端（`write_result`/
+`write_trades`）視為最後一道防線，組裝要寫入的 dict 時也要明確轉型。
 
 ---
 

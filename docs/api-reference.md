@@ -250,11 +250,16 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 }
 ```
 
-> 進度可透過 backend log 觀察；每支股票間隔 200ms（FinMind rate limit）。
+> 進度可透過 backend log 觀察；請求頻率依 `finmind.rate_limit`（每分鐘請求數，`config.yaml`）節流，非固定間隔。前端「歷史資料回補」頁面（`/backfill`）提供勾選監控清單股票的介面。
 
 ---
 
 ## Backtest API
+
+回測是**非同步 job 模式**：`POST` 送出後立即回傳 `pending` 狀態的 job，實際計算
+由 Python worker（輪詢）或 HTTP server（即時推播）在背景執行，需要輪詢
+`GET /backtest/:job_id` 直到 `status` 變成 `done`/`failed` 才會有 `result`。
+前端「策略回測」頁面（`/backtest`）已內建每 5 秒輪詢的邏輯。
 
 ### POST `/backtest`
 
@@ -271,33 +276,67 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 }
 ```
 
-**Response：**
+`strategy` 可用值：
+
+| 值 | 引擎 | 說明 |
+|----|------|------|
+| `breakout_v1` | backtrader | 與 Go signal engine 1:1 對齊的既有策略 |
+| `breakout_swing_atr_v1` | 模組化（純 pandas/numpy） | Swing High/Low 支撐壓力 + 突破進場 + ATR 停損 |
+| `breakout_volprofile_composite_v1` | 模組化 | Volume Profile 支撐壓力 + 突破進場 + 複合停損 |
+| `pullback_atrchannel_structural_v1` | 模組化 | ATR 通道支撐壓力 + 回測支撐進場 + 結構停損 |
+| `pullback_swing_composite_v1` | 模組化 | Swing High/Low 支撐壓力 + 回測支撐進場 + 複合停損 |
+
+模組化策略的完整數學定義見 [backtest-modular-strategy.md](./backtest-modular-strategy.md)。
+
+**Response（201 Created）：**
 ```json
-{ "job_id": "bt_20240115_abc123", "status": "pending" }
+{
+  "job": {
+    "job_id": "bt_20260115_103000_000",
+    "type": "backtest",
+    "strategy": "breakout_swing_atr_v1",
+    "symbols": "[\"2330\",\"2454\"]",
+    "timeframe": "1d",
+    "start_date": "2023-01-01",
+    "end_date": "2024-12-31",
+    "status": "pending",
+    "trigger": "manual",
+    "created_at": "2026-01-15T10:30:00+08:00"
+  }
+}
 ```
 
 ### GET `/backtest`
 
-列出所有回測任務。
+列出所有回測任務（依 `created_at` 由新到舊）。
+
+**Query Parameters：** `limit`（預設 20，最多 200）
+
+**Response：**
+```json
+{ "jobs": [ { "job_id": "...", "status": "done", "...": "..." } ], "total": 1 }
+```
 
 ### GET `/backtest/:job_id`
 
-取得特定回測任務狀態與結果。
+取得特定回測任務狀態與結果；`result` 在任務未完成時為 `null`。
 
 **Response（完成後）：**
 ```json
 {
-  "job_id": "bt_20240115_abc123",
-  "status": "done",
+  "job": { "job_id": "bt_20260115_103000_000", "status": "done", "...": "..." },
   "result": {
+    "job_id": "bt_20260115_103000_000",
+    "strategy": "breakout_swing_atr_v1",
     "total_return": 0.182,
     "annual_return": 0.091,
     "win_rate": 0.62,
-    "max_drawdown": -0.083,
+    "max_drawdown": 0.083,
     "sharpe_ratio": 1.42,
     "total_trades": 24,
     "win_trades": 15,
-    "loss_trades": 9
+    "loss_trades": 9,
+    "avg_pnl": 3250.5
   }
 }
 ```
@@ -306,9 +345,25 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 取得回測每筆交易明細。
 
+**Response：**
+```json
+{
+  "job_id": "bt_20260115_103000_000",
+  "trades": [
+    {
+      "symbol": "2330", "direction": "BUY",
+      "entry_time": "2023-03-01T00:00:00+08:00", "exit_time": "2023-03-10T00:00:00+08:00",
+      "entry_price": 550.0, "exit_price": 570.0,
+      "size": 1818.18, "pnl": 34500.0, "pnl_pct": 0.0345, "commission": 1560.2
+    }
+  ],
+  "total": 1
+}
+```
+
 ### DELETE `/backtest/:job_id`
 
-取消或刪除回測任務。
+取消回測任務，**只能取消 `pending` 狀態**（已開始執行的無法取消，`409 Conflict`）。
 
 ---
 
@@ -332,3 +387,9 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 { "type": "indicator", "symbol": "2330", "data": { ...Snapshot } }
 { "type": "signal",    "symbol": "2330", "data": { ...Signal } }
 ```
+
+> **目前只有 `signal` 事件會真的被推播**（`signal.Engine.BroadcastFn`，在
+> `cmd/server/main.go` 註冊）。`candle`/`indicator` 事件型別雖然定義在前端
+> `ws/socket.ts`，但後端從未送出，一般情況（沒有觸發突破/爆量）下不會有
+> 推播。前端 Dashboard 因此改用 REST（`/candles`、`/indicators`、`/signals`）
+> 在頁面載入時主動 hydrate 監控清單欄位，WebSocket 只負責之後的訊號覆蓋更新。

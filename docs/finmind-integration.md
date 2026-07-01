@@ -30,21 +30,45 @@ GET /data?dataset=TaiwanStockPrice&data_id=2330&start_date=2024-01-01&end_date=2
 
 ## 分K 資料
 
-**Dataset：** `TaiwanStockPriceMinute`
+**Dataset：** `TaiwanStockKBar`（`TaiwanStockPriceMinute` 已下架，v4 API 改用此 dataset）
 
 ```
-GET /data?dataset=TaiwanStockPriceMinute&data_id=2330&start_date=2024-01-15&end_date=2024-01-15&token=YOUR_KEY
+GET /data?dataset=TaiwanStockKBar&data_id=2330&start_date=2024-01-15&token=YOUR_KEY
 ```
 
-時間戳格式：`2024-01-15 09:01:00`
+- 單次請求只能拉一天資料（不支援 `end_date` 區間）
+- 需要 FinMind **Sponsor 級以上**的 token；帳號等級不足時回傳 400，訊息含
+  `"user level"`/`"Sponsor"`，`market.ErrInsufficientTier` 會辨識這種情況並讓
+  排程整輪跳過（重試也一定失敗，見 `scheduler.go` 的 `runIntradayJob`）
+- 回應欄位：`date`（日期）與 `minute`（`HH:MM:SS`）為分開兩個欄位，需自行組成
+  timestamp；**不提供成交金額**，intraday VWAP 目前無法用此 dataset 計算
+
+**回應欄位對應：**
+
+| FinMind 欄位 | 系統欄位 |
+|-------------|---------|
+| date + minute | ts（`YYYY-MM-DD HH:MM:SS`） |
+| open/high/low/close | 同名 |
+| volume | volume |
+| （無） | amount（固定為 0） |
 
 ---
 
 ## Rate Limit 處理
 
-- 免費方案：每分鐘約 30 requests
-- 系統預設每次請求後等待 200ms（Fetcher.BackfillHistory）
-- Scheduler 每 5 分鐘批量更新，一般不會超過限制
+- 免費方案：每分鐘約 30 requests（依帳號方案而定）
+- `market.FinMindClient` 內建 `rateLimiter`，依 `finmind.rate_limit`（`config.yaml`，
+  每分鐘請求數）節流，所有請求（日K/分K/backfill）共用同一個節流器
+- 對 429（請求過於頻繁）、402（額度用盡）、5xx 做指數退避重試（最多 3 次）；
+  400 帳號等級不足則不重試，直接回傳 `ErrInsufficientTier`
+- Scheduler 盤中每 5 分鐘批量更新，一般不會超過限制
+
+---
+
+## 與 Fugle 並行
+
+盤中即時行情可選擇並行接入 Fugle MarketData API（`fugle.enabled: true`），
+FinMind 仍負責歷史日K/backfill。細節見 [fugle-integration.md](./fugle-integration.md)。
 
 ---
 

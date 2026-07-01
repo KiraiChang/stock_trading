@@ -202,13 +202,14 @@ func (c *FinMindClient) FetchDailyCandles(ctx context.Context, symbol string, st
 }
 
 // FetchMinuteCandles 拉取分K資料
+// dataset=TaiwanStockKBar（v4 API 用此取代已下架的 TaiwanStockPriceMinute），
+// 需要 FinMind Sponsor 級以上的 token，且限制單次請求一天資料
 func (c *FinMindClient) FetchMinuteCandles(ctx context.Context, symbol string, date time.Time) ([]Candle, error) {
 	dateStr := date.Format("2006-01-02")
 	params := url.Values{
-		"dataset":    {"TaiwanStockPriceMinute"},
+		"dataset":    {"TaiwanStockKBar"},
 		"data_id":    {symbol},
 		"start_date": {dateStr},
-		"end_date":   {dateStr},
 	}
 
 	rows, err := c.fetch(ctx, params)
@@ -222,7 +223,7 @@ func (c *FinMindClient) FetchMinuteCandles(ctx context.Context, symbol string, d
 		if err := json.Unmarshal(row, &raw); err != nil {
 			continue
 		}
-		ts, err := time.ParseInLocation("2006-01-02 15:04:05", raw.Date, timeutil.TaipeiTZ)
+		ts, err := time.ParseInLocation("2006-01-02 15:04:05", raw.Date+" "+raw.Minute, timeutil.TaipeiTZ)
 		if err != nil {
 			continue
 		}
@@ -233,8 +234,9 @@ func (c *FinMindClient) FetchMinuteCandles(ctx context.Context, symbol string, d
 			High:      raw.High,
 			Low:       raw.Low,
 			Close:     raw.Close,
-			Volume:    raw.Volume,
-			Amount:    raw.Amount,
+			Volume:    int64(raw.Volume),
+			// TaiwanStockKBar 不提供成交金額，intraday VWAP 目前無法用此欄位計算
+			Amount:    0,
 			Timestamp: ts,
 		})
 	}

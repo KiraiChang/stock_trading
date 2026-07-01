@@ -15,15 +15,16 @@ type RawDailyCandle struct {
 	TurnoverRate float64 `json:"turnover_rate"`
 }
 
-// FinMind 分K 原始欄位
+// FinMind 分K 原始欄位（dataset=TaiwanStockKBar，Sponsor tier）
+// 注意：此 dataset 不提供成交金額（amount），date/minute 是分開兩個欄位
 type RawMinuteCandle struct {
 	Date   string  `json:"date"`
+	Minute string  `json:"minute"`
 	Open   float64 `json:"open"`
 	High   float64 `json:"high"`
 	Low    float64 `json:"low"`
 	Close  float64 `json:"close"`
-	Volume int64   `json:"volume"`
-	Amount float64 `json:"amount"`
+	Volume float64 `json:"volume"`
 }
 
 type FinMindResponse struct {

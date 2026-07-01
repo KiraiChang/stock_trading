@@ -6,15 +6,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
 )
 
 type SignalHandler struct {
-	repo store.SignalRepo
+	engine *signal.Engine
+	repo   store.SignalRepo
 }
 
-func NewSignalHandler(repo store.SignalRepo) *SignalHandler {
-	return &SignalHandler{repo: repo}
+func NewSignalHandler(engine *signal.Engine, repo store.SignalRepo) *SignalHandler {
+	return &SignalHandler{engine: engine, repo: repo}
 }
 
 func (h *SignalHandler) GetSignals(c *gin.Context) {
@@ -38,4 +40,24 @@ func (h *SignalHandler) GetSignals(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"signals": signals, "total": len(signals)})
+}
+
+// Evaluate 手動觸發訊號評估（POST /api/v1/signals/:symbol/evaluate），完全
+// 基於 candles（OHLCV）計算，不要求該股票在監控清單裡，也不需要即時行情。
+// 常見用途：收盤後想立刻確認某支股票當天有沒有觸發訊號，不用等排程
+// （daily_close 排程是 14:00 才對監控清單跑）。
+func (h *SignalHandler) Evaluate(c *gin.Context) {
+	symbol := c.Param("symbol")
+	timeframe := c.DefaultQuery("timeframe", "1d")
+
+	sig, err := h.engine.Evaluate(c.Request.Context(), symbol, timeframe)
+	if err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	}
+	if sig == nil {
+		c.JSON(http.StatusOK, gin.H{"signal": nil, "message": "沒有觸發訊號（不符合突破/跌破/爆量條件）"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"signal": sig})
 }

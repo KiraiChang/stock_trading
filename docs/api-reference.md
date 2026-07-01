@@ -205,6 +205,33 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ---
 
+### POST `/signals/:symbol/evaluate`
+
+手動觸發訊號評估。完全基於 `candles`（OHLCV）計算——內部會先呼叫指標計算
+（同 `/indicators/:symbol/compute`），再做支撐/壓力/趨勢判斷與
+`CheckBreakout`——不需要即時行情、不要求該股票在監控清單裡，適合**收盤後**
+立刻確認某支股票當天有沒有觸發訊號，不用等 `daily_close` 排程（14:00 才對
+監控清單跑）。
+
+**Query Parameters：** `timeframe`（預設 `1d`）
+
+**Response（200，有觸發）：**
+```json
+{ "signal": { "id": 1, "symbol": "2330", "signal_type": "BREAKOUT", "direction": "BUY", "...": "..." } }
+```
+
+**Response（200，沒有觸發）：**
+```json
+{ "signal": null, "message": "沒有觸發訊號（不符合突破/跌破/爆量條件）" }
+```
+
+**錯誤：** candles 不足 35 根時回傳 `422 Unprocessable Entity`。
+
+前端「歷史資料回補」頁面（`/backfill`）下方有「手動評估訊號」區塊，輸入任意
+股票代號即可觸發，不需要透過 API 手動呼叫。
+
+---
+
 ## Watchlist API
 
 ### GET `/watchlist`

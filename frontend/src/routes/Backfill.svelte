@@ -4,6 +4,7 @@
   import { fetchWatchlist } from '../lib/api/watchlist'
   import { triggerBackfill } from '../lib/api/market'
   import { computeIndicators, type IndicatorSnapshot } from '../lib/api/indicators'
+  import { evaluateSignal, type EvaluateResult } from '../lib/api/signals'
   import type { WatchlistItem } from '../lib/stores/market'
 
   let items: WatchlistItem[] = []
@@ -20,6 +21,13 @@
   let computing = false
   let computeError = ''
   let computeResult: IndicatorSnapshot | null = null
+
+  // ── 手動評估訊號：不限監控清單，任意股票代號都可以 ──────────
+  let evalSymbol = ''
+  let evalTimeframe = '1d'
+  let evaluating = false
+  let evalError = ''
+  let evalResult: EvaluateResult | null = null
 
   onMount(load)
 
@@ -76,6 +84,23 @@
       computeError = '計算失敗，最常見原因是 candles 不足 35 根（請先確認已 backfill 足夠天數）'
     } finally {
       computing = false
+    }
+  }
+
+  async function submitEvaluate() {
+    if (!evalSymbol.trim()) {
+      evalError = '請輸入股票代號'
+      return
+    }
+    evaluating = true
+    evalError = ''
+    evalResult = null
+    try {
+      evalResult = await evaluateSignal(evalSymbol.trim(), evalTimeframe)
+    } catch {
+      evalError = '評估失敗，最常見原因是 candles 不足 35 根（請先確認已 backfill 足夠天數）'
+    } finally {
+      evaluating = false
     }
   }
 </script>
@@ -216,6 +241,64 @@
           <p class="text-green-400 text-xs">
             {computeResult.symbol}（{computeResult.timeframe}）指標已算好並寫入，資料時間：{new Date(computeResult.ts).toLocaleString('zh-TW', { hour12: false })}
           </p>
+        {/if}
+      </div>
+    </div>
+
+    <!-- ── 手動評估訊號 ──────────────────────────────────────── -->
+    <div class="bg-panel border border-border rounded-xl mt-6">
+      <div class="px-5 py-4 border-b border-border">
+        <h2 class="text-sm font-semibold text-white">手動評估訊號</h2>
+        <p class="text-muted text-xs mt-1">
+          完全基於 candles 計算（突破/跌破/爆量），不限監控清單，不用等排程；
+          適合收盤後想立刻確認某支股票當天有沒有觸發訊號。
+        </p>
+      </div>
+
+      <div class="px-5 py-4 space-y-3">
+        {#if evalError}
+          <p class="text-rise text-sm">{evalError}</p>
+        {/if}
+
+        <div class="flex gap-3">
+          <input
+            bind:value={evalSymbol}
+            placeholder="股票代號，例如 00981A"
+            on:keydown={(e) => e.key === 'Enter' && submitEvaluate()}
+            class="flex-1 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          <select
+            bind:value={evalTimeframe}
+            class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                   focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            <option value="1d">1d</option>
+            <option value="1m">1m</option>
+          </select>
+          <button
+            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm
+                   font-medium px-5 py-2 rounded-lg transition-colors"
+            disabled={evaluating}
+            on:click={submitEvaluate}
+          >
+            {evaluating ? '評估中...' : '評估'}
+          </button>
+        </div>
+
+        {#if evalResult}
+          {#if evalResult.signal}
+            {@const sig = evalResult.signal}
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs pt-2">
+              <div><p class="text-muted mb-1">類型</p><p class="text-white font-mono">{sig.signal_type}</p></div>
+              <div><p class="text-muted mb-1">方向</p><p class="text-white font-mono">{sig.direction}</p></div>
+              <div><p class="text-muted mb-1">價格</p><p class="text-white font-mono">{sig.price.toFixed(2)}</p></div>
+              <div><p class="text-muted mb-1">量比</p><p class="text-white font-mono">{sig.vol_ratio.toFixed(2)}x</p></div>
+            </div>
+            <p class="text-rise text-xs">{sig.note}</p>
+          {:else}
+            <p class="text-muted text-xs pt-1">{evalResult.message ?? '沒有觸發訊號'}</p>
+          {/if}
         {/if}
       </div>
     </div>

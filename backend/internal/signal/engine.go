@@ -36,16 +36,18 @@ func NewEngine(
 	}
 }
 
-// Evaluate 對單一股票執行完整訊號分析
-func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) error {
+// Evaluate 對單一股票執行完整訊號分析，皆基於 candles（OHLCV）計算，不需要
+// 額外的即時行情來源。回傳觸發的 Signal；沒有觸發（不符合突破/跌破/爆量
+// 條件）時回傳 (nil, nil)，呼叫端可以用這個區分「沒訊號」跟「執行失敗」。
+func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store.Signal, error) {
 	snap, err := e.indicator.Compute(ctx, symbol, timeframe)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	candles, err := e.candles.GetLatestN(ctx, symbol, timeframe, 100)
 	if err != nil || len(candles) == 0 {
-		return err
+		return nil, err
 	}
 
 	latestCandle := candles[len(candles)-1]
@@ -54,7 +56,7 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) error {
 
 	sig := CheckBreakout(symbol, snap, latestCandle, resistances, supports, trend)
 	if sig == nil {
-		return nil
+		return nil, nil
 	}
 
 	if err := e.signals.Insert(ctx, sig); err != nil {
@@ -73,13 +75,13 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) error {
 		zap.String("direction", sig.Direction),
 		zap.Float64("price", sig.Price),
 	)
-	return nil
+	return sig, nil
 }
 
 // EvaluateAll 批量掃描所有股票
 func (e *Engine) EvaluateAll(ctx context.Context, symbols []string, timeframe string) {
 	for _, sym := range symbols {
-		if err := e.Evaluate(ctx, sym, timeframe); err != nil {
+		if _, err := e.Evaluate(ctx, sym, timeframe); err != nil {
 			e.log.Warn("evaluate failed", zap.String("symbol", sym), zap.Error(err))
 		}
 	}

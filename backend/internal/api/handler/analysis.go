@@ -119,3 +119,22 @@ func (h *AnalysisHandler) Verify(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": a, "levels": levels})
 }
+
+// DELETE /api/v1/analysis/:id
+func (h *AnalysisHandler) Delete(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "analysis not found"})
+		return
+	}
+	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}

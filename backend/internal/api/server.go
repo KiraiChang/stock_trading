@@ -103,6 +103,7 @@ func NewServer(
 		protected.GET("/analysis", anh.List)
 		protected.GET("/analysis/:id", anh.Get)
 		protected.POST("/analysis/:id/verify", anh.Verify)
+		protected.DELETE("/analysis/:id", anh.Delete)
 
 		uh := handler.NewUserHandler(userRepo)
 		protected.GET("/users", uh.List)

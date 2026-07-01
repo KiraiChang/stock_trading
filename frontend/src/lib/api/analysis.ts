@@ -75,3 +75,7 @@ export async function getAnalysis(id: number): Promise<{ analysis: StockAnalysis
 export async function verifyAnalysis(id: number): Promise<{ analysis: StockAnalysis; levels: AnalysisLevel[] }> {
   return apiFetch(`/analysis/${id}/verify`, { method: 'POST' })
 }
+
+export async function deleteAnalysis(id: number): Promise<void> {
+  await apiFetch(`/analysis/${id}`, { method: 'DELETE' })
+}

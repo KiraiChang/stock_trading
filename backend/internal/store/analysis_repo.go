@@ -16,6 +16,8 @@ type AnalysisRepo interface {
 	GetLevels(ctx context.Context, analysisID uint64) ([]StockAnalysisLevel, error)
 	UpdateVerification(ctx context.Context, analysisID uint64, tradeVerificationJSON string) error
 	UpdateLevelStatus(ctx context.Context, levelID uint64, status string, brokenAt *time.Time, brokenPrice *float64) error
+	// Delete 刪除一筆分析快照及其所有支撐/壓力位
+	Delete(ctx context.Context, id uint64) error
 }
 
 type analysisRepo struct {
@@ -147,4 +149,21 @@ func (r *analysisRepo) UpdateLevelStatus(ctx context.Context, levelID uint64, st
 		UPDATE stock_analysis_levels SET status=?, broken_at=?, broken_price=? WHERE id=?
 	`), status, brokenAt, brokenPrice, levelID)
 	return err
+}
+
+func (r *analysisRepo) Delete(ctx context.Context, id uint64) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 先刪子表（stock_analysis_levels 有 FK 指向 stock_analyses），再刪主紀錄
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM stock_analysis_levels WHERE analysis_id=?`), id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM stock_analyses WHERE id=?`), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

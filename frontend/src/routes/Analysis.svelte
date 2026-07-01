@@ -6,6 +6,7 @@
     listAnalyses,
     getAnalysis,
     verifyAnalysis,
+    deleteAnalysis,
     parseTradeVerification,
     type StockAnalysis,
     type AnalysisLevel,
@@ -21,6 +22,8 @@
   let history: StockAnalysis[] = []
   let historyLoading = true
   let verifyingId: number | null = null
+  let confirmDeleteId: number | null = null
+  let deletingId: number | null = null
 
   onMount(loadHistory)
 
@@ -102,6 +105,23 @@
       // ignore
     } finally {
       verifyingId = null
+    }
+  }
+
+  async function doDelete(id: number) {
+    deletingId = id
+    try {
+      await deleteAnalysis(id)
+      history = history.filter((h) => h.id !== id)
+      if (current?.id === id) {
+        current = null
+        currentLevels = []
+      }
+    } catch {
+      // ignore，列表維持原狀讓使用者可以重試
+    } finally {
+      deletingId = null
+      confirmDeleteId = null
     }
   }
 
@@ -301,30 +321,57 @@
             <tr><td colspan="6" class="px-5 py-6 text-center text-muted">尚無歷史紀錄，輸入股票代號分析看看</td></tr>
           {:else}
             {#each history as h (h.id)}
-              <tr
-                class="border-b border-border/50 hover:bg-border/20 cursor-pointer transition-colors
-                       {current?.id === h.id ? 'bg-indigo-900/20' : ''}"
-                on:click={() => selectHistory(h)}
-              >
-                <td class="px-5 py-2 text-white font-medium">{h.symbol}</td>
-                <td class="px-3 py-2 text-muted text-xs font-mono">{formatDateTime(h.analyzed_at)}</td>
-                <td class="px-3 py-2 text-center text-xs {trendClass[h.trend] ?? 'text-muted'}">{trendLabel[h.trend] ?? h.trend}</td>
-                <td class="px-3 py-2 text-center">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {entryStatusClass[h.entry_status]}">
-                    {entryStatusLabel[h.entry_status]}
-                  </span>
-                </td>
-                <td class="px-3 py-2 text-right font-mono">{fmt(h.entry_price)}</td>
-                <td class="px-5 py-2 text-right">
-                  <button
-                    class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors disabled:opacity-50"
-                    disabled={verifyingId === h.id}
-                    on:click|stopPropagation={() => reVerify(h.id)}
-                  >
-                    {verifyingId === h.id ? '...' : '重新驗證'}
-                  </button>
-                </td>
-              </tr>
+              {#if confirmDeleteId === h.id}
+                <tr class="border-b border-border/50 bg-red-900/20">
+                  <td class="px-5 py-2 text-xs text-gray-300" colspan="4">
+                    確定刪除 <span class="font-semibold text-white">{h.symbol}（{formatDateTime(h.analyzed_at)}）</span> 這筆分析嗎？
+                  </td>
+                  <td class="px-5 py-2 text-right" colspan="2">
+                    <div class="flex gap-2 justify-end">
+                      <button
+                        class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors"
+                        on:click={() => (confirmDeleteId = null)}
+                      >取消</button>
+                      <button
+                        class="text-xs px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded transition-colors disabled:opacity-50"
+                        disabled={deletingId === h.id}
+                        on:click={() => doDelete(h.id)}
+                      >{deletingId === h.id ? '刪除中...' : '刪除'}</button>
+                    </div>
+                  </td>
+                </tr>
+              {:else}
+                <tr
+                  class="border-b border-border/50 hover:bg-border/20 cursor-pointer transition-colors group
+                         {current?.id === h.id ? 'bg-indigo-900/20' : ''}"
+                  on:click={() => selectHistory(h)}
+                >
+                  <td class="px-5 py-2 text-white font-medium">{h.symbol}</td>
+                  <td class="px-3 py-2 text-muted text-xs font-mono">{formatDateTime(h.analyzed_at)}</td>
+                  <td class="px-3 py-2 text-center text-xs {trendClass[h.trend] ?? 'text-muted'}">{trendLabel[h.trend] ?? h.trend}</td>
+                  <td class="px-3 py-2 text-center">
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {entryStatusClass[h.entry_status]}">
+                      {entryStatusLabel[h.entry_status]}
+                    </span>
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono">{fmt(h.entry_price)}</td>
+                  <td class="px-5 py-2 text-right">
+                    <div class="flex gap-2 justify-end">
+                      <button
+                        class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors disabled:opacity-50"
+                        disabled={verifyingId === h.id}
+                        on:click|stopPropagation={() => reVerify(h.id)}
+                      >
+                        {verifyingId === h.id ? '...' : '重新驗證'}
+                      </button>
+                      <button
+                        class="text-xs px-2.5 py-1 border border-fall/40 text-fall hover:bg-fall/10 rounded transition-colors"
+                        on:click|stopPropagation={() => (confirmDeleteId = h.id)}
+                      >刪除</button>
+                    </div>
+                  </td>
+                </tr>
+              {/if}
             {/each}
           {/if}
         </tbody>

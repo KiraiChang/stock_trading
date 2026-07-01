@@ -155,6 +155,24 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ---
 
+### POST `/indicators/:symbol/compute`
+
+手動計算單一股票的最新指標快照並寫入 DB，**不要求該股票在監控清單裡**，
+只要求 `candles` 至少有 35 根（`timeframe` 對應的週期）。同步執行、直接
+回傳算出來的結果，用來補算「有 candles 但從未被排程算過指標」的股票
+（例如剛用 backfill 拉完歷史資料、但還沒加進監控清單的股票）。
+
+**Query Parameters：** `timeframe`（預設 `1d`）
+
+**Response（200）：** 格式同 `GET /indicators/:symbol`。
+
+**錯誤：** candles 不足 35 根時回傳 `422 Unprocessable Entity`。
+
+前端「歷史資料回補」頁面（`/backfill`）下方有「手動計算指標」區塊，輸入任意
+股票代號即可觸發，不需要透過 API 手動呼叫。
+
+---
+
 ## Signal API
 
 ### GET `/signals`

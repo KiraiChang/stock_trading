@@ -31,3 +31,12 @@ export async function fetchIndicators(symbol: string, timeframe = '1d'): Promise
     return null
   }
 }
+
+// 手動計算指標：不要求該股票在監控清單裡，只要求 candles 至少 35 根，
+// 不足時後端回 422，這裡讓呼叫端自己 catch 顯示錯誤（不吃掉，因為這是
+// 使用者主動觸發的動作，需要看到失敗原因）
+export async function computeIndicators(symbol: string, timeframe = '1d'): Promise<IndicatorSnapshot> {
+  return apiFetch<IndicatorSnapshot>(`/indicators/${symbol}/compute?timeframe=${timeframe}`, {
+    method: 'POST',
+  })
+}

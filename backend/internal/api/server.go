@@ -13,6 +13,7 @@ import (
 	"github.com/trading/backend/internal/api/middleware"
 	"github.com/trading/backend/internal/api/ws"
 	"github.com/trading/backend/internal/backtest"
+	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/internal/ui"
@@ -28,6 +29,7 @@ func NewServer(
 	db            *sqlx.DB,
 	candleRepo    store.CandleRepo,
 	indicatorRepo store.IndicatorRepo,
+	indEngine     *indicator.Engine,
 	signalRepo    store.SignalRepo,
 	watchlistRepo store.WatchlistRepo,
 	backtestRepo  store.BacktestRepo,
@@ -72,8 +74,9 @@ func NewServer(
 		ch := handler.NewCandleHandler(candleRepo)
 		protected.GET("/candles/:symbol", ch.GetCandles)
 
-		ih := handler.NewIndicatorHandler(indicatorRepo)
+		ih := handler.NewIndicatorHandler(indEngine, indicatorRepo)
 		protected.GET("/indicators/:symbol", ih.GetIndicators)
+		protected.POST("/indicators/:symbol/compute", ih.Compute)
 
 		sh := handler.NewSignalHandler(signalRepo)
 		protected.GET("/signals", sh.GetSignals)

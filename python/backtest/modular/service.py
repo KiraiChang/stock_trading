@@ -82,23 +82,28 @@ def _aggregate_result(strategy: str, reports: list[BacktestReport], initial_cash
     sharpe 用各symbol結果的簡單平均近似整體表現，max_drawdown 取最差者。
     若要做真正的多檔共用資金、再平衡的組合回測，需要另外設計，不在本次需求範圍內。
     """
-    total_trades = sum(r.total_trades for r in reports)
-    win_trades = sum(r.win_trades for r in reports)
-    loss_trades = sum(r.loss_trades for r in reports)
+    total_trades = int(sum(r.total_trades for r in reports))
+    win_trades = int(sum(r.win_trades for r in reports))
+    loss_trades = int(sum(r.loss_trades for r in reports))
     total_pnl = sum(t.pnl for r in reports for t in r.trades)
     n = len(reports)
 
+    # 所有數值欄位在回傳前都明確轉成原生 float/int：即使上游任何一個計算
+    # （numpy/pandas 運算、Wilder smoothing 累加等）不小心洩漏出 np.float64，
+    # 也不會流進 SQLAlchemy 的 bind 參數——這是實際發生過的問題，numpy>=2.0
+    # 的 np.float64 repr 是 "np.float64(x)"，被 psycopg2 當成純文字塞進 SQL
+    # 後會被 Postgres 誤判成 schema-qualified 識別字（"schema np does not exist"）。
     return {
         "strategy": strategy,
-        "total_return": round(sum(r.total_return for r in reports) / n, 6),
-        "annual_return": round(sum(r.annual_return for r in reports) / n, 6),
-        "win_rate": round(win_trades / total_trades, 4) if total_trades else 0.0,
-        "max_drawdown": round(max((r.max_drawdown for r in reports), default=0.0), 6),
-        "sharpe_ratio": round(sum(r.sharpe_ratio for r in reports) / n, 4),
+        "total_return": float(round(sum(r.total_return for r in reports) / n, 6)),
+        "annual_return": float(round(sum(r.annual_return for r in reports) / n, 6)),
+        "win_rate": float(round(win_trades / total_trades, 4)) if total_trades else 0.0,
+        "max_drawdown": float(round(max((r.max_drawdown for r in reports), default=0.0), 6)),
+        "sharpe_ratio": float(round(sum(r.sharpe_ratio for r in reports) / n, 4)),
         "total_trades": total_trades,
         "win_trades": win_trades,
         "loss_trades": loss_trades,
-        "avg_pnl": round(total_pnl / total_trades, 4) if total_trades else 0.0,
+        "avg_pnl": float(round(total_pnl / total_trades, 4)) if total_trades else 0.0,
     }
 
 
@@ -108,12 +113,12 @@ def _trade_to_dict(t: Trade) -> dict:
         "direction": "BUY" if t.direction == Direction.LONG else "SELL",
         "entry_time": _iso(t.entry_time),
         "exit_time": _iso(t.exit_time),
-        "entry_price": round(t.entry_price, 2),
-        "exit_price": round(t.exit_price, 2),
-        "size": t.size,
-        "pnl": t.pnl,
-        "pnl_pct": t.pnl_pct,
-        "commission": t.commission,
+        "entry_price": float(round(t.entry_price, 2)),
+        "exit_price": float(round(t.exit_price, 2)),
+        "size": float(t.size),
+        "pnl": float(t.pnl),
+        "pnl_pct": float(t.pnl_pct),
+        "commission": float(t.commission),
     }
 
 

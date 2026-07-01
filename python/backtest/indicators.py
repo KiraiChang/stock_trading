@@ -43,7 +43,10 @@ def calc_rsi(closes: Sequence[float], period: int = 14) -> float:
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss
-    return 100.0 - 100.0 / (1.0 + rs)
+    # avg_gain/avg_loss 在迴圈中曾與 numpy 陣列元素相加，型別會被提升成
+    # np.float64；顯式轉回 float 避免這個值後續被當成 SQL bind 參數時
+    # （例如 numpy>=2.0 的 repr 是 "np.float64(...)"）被誤判成識別字。
+    return float(100.0 - 100.0 / (1.0 + rs))
 
 
 # ── MACD ──────────────────────────────────────────────────────
@@ -74,6 +77,9 @@ def calc_macd(closes: Sequence[float], fast: int = 12, slow: int = 26, signal_pe
         sig_val = v * multiplier + sig_val * (1 - multiplier)
 
     last_macd = float(macd_line[-1])
+    # sig_val 在迴圈中曾與 numpy 陣列元素相加，型別會被提升成 np.float64，
+    # 顯式轉回 float（理由同 calc_rsi）
+    sig_val = float(sig_val)
     return last_macd, sig_val, last_macd - sig_val
 
 
@@ -107,7 +113,9 @@ def calc_atr(highs: Sequence[float], lows: Sequence[float],
     atr = float(np.mean(tr[1:period + 1]))
     for i in range(period + 1, n):
         atr = (atr * (period - 1) + tr[i]) / period
-    return atr
+    # atr 在迴圈中與 numpy 陣列元素 tr[i] 相加，型別會被提升成 np.float64，
+    # 顯式轉回 float（理由同 calc_rsi：避免 numpy>=2.0 的 repr 汙染 SQL bind 參數）
+    return float(atr)
 
 
 # ── VWAP ─────────────────────────────────────────────────────

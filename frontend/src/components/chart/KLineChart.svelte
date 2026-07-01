@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, afterUpdate } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { createChart, type IChartApi, type ISeriesApi, ColorType } from 'lightweight-charts'
   import { fetchCandles, type Candle } from '../../lib/api/candles'
 
@@ -62,16 +62,17 @@
     })
     ro.observe(container)
 
-    loadData(symbol)
-
     return () => {
       ro.disconnect()
     }
   })
 
-  afterUpdate(() => {
+  // 只依賴 chart / symbol，chart 就緒或 symbol 真正變更時才重新載入。
+  // 先前用 afterUpdate 會在「任何」元件更新後觸發，而 loadData 本身會
+  // 設定 loading/error 觸發更新，造成無限迴圈重複打 /candles API。
+  $: if (chart && symbol) {
     loadData(symbol)
-  })
+  }
 
   onDestroy(() => {
     chart?.remove()

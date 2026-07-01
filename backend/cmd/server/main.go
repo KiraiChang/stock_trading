@@ -81,6 +81,21 @@ func main() {
 	finmindClient := market.NewFinMindClient(cfg.FinMind)
 	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
 
+	// Fugle（富果）即時行情，與 FinMind 並行；Enabled 為 false 時完全不掛載，
+	// 行為與導入前一致。Tier 1（REST 廣度掃描）／Tier 2（WebSocket 熱點）的
+	// 排程整合（round-robin 掃描、熱點名額晉升/降級）尚未接上 scheduler，
+	// 待用 cmd/fugle-check 驗證延遲與推送格式後再補上（見計畫文件）。
+	if cfg.Fugle.Enabled {
+		if cfg.Fugle.APIKey == "" || cfg.Fugle.APIKey == "YOUR_FUGLE_API_KEY" {
+			log.Warn("fugle api_key 未設定，Fugle 即時行情請求會失敗；請設定環境變數 FUGLE_API_KEY")
+		}
+		fugleQuoteClient := market.NewFugleQuoteClient(cfg.Fugle)
+		fugleStreamClient := market.NewFugleStreamClient(cfg.Fugle, log)
+		fugleStreamClient.Start(context.Background())
+		fetcher.SetFugle(fugleQuoteClient, fugleStreamClient)
+		log.Info("fugle enabled", zap.Int("quote_rate_limit", cfg.Fugle.QuoteRateLimit), zap.Int("max_subscriptions", cfg.Fugle.MaxSubscriptions))
+	}
+
 	// API Server（含 WebSocket Hub）
 	srv := api.NewServer(db, candleRepo, indicatorRepo, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, btManager, fetcher, userRepo, cfg.Auth.JWTSecret, log)
 

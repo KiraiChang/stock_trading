@@ -11,6 +11,7 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	FinMind  FinMindConfig
+	Fugle    FugleConfig
 	Python   PythonConfig
 	Auth     AuthConfig
 }
@@ -45,6 +46,18 @@ type FinMindConfig struct {
 	RateLimit int    `mapstructure:"rate_limit"`
 }
 
+// FugleConfig 為富果 MarketData API 設定。免費公開方案額度（2026 查證）：
+// WebSocket 1 連線／同時最多訂閱 5 檔，REST 即時行情與歷史行情各 60 次/分鐘。
+type FugleConfig struct {
+	APIKey           string `mapstructure:"api_key"`
+	RESTBaseURL      string `mapstructure:"rest_base_url"`
+	WSEndpoint       string `mapstructure:"ws_endpoint"`
+	Enabled          bool   `mapstructure:"enabled"`
+	QuoteRateLimit   int    `mapstructure:"quote_rate_limit"`  // 每分鐘 REST 呼叫上限，免費方案為 60
+	MaxSubscriptions int    `mapstructure:"max_subscriptions"` // WebSocket 同時訂閱檔數上限，免費方案為 5
+	ReconnectMaxSec  int    `mapstructure:"reconnect_max_sec"` // WebSocket 重連退避上限（秒）
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -56,6 +69,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.dsn", "./trading.db")
 	viper.SetDefault("finmind.base_url", "https://api.finmindtrade.com/api/v4")
 	viper.SetDefault("finmind.rate_limit", 5)
+	viper.SetDefault("fugle.rest_base_url", "https://api.fugle.tw/marketdata/v1.0/stock")
+	viper.SetDefault("fugle.ws_endpoint", "wss://api.fugle.tw/marketdata/v1.0/stock/streaming")
+	viper.SetDefault("fugle.enabled", false)
+	viper.SetDefault("fugle.quote_rate_limit", 60)
+	viper.SetDefault("fugle.max_subscriptions", 5)
+	viper.SetDefault("fugle.reconnect_max_sec", 60)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

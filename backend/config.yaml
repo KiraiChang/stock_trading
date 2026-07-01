@@ -26,6 +26,17 @@ finmind:
   base_url: "https://api.finmindtrade.com/api/v4"  # 環境變數：FINMIND_BASE_URL
   rate_limit: 5                               # 環境變數：FINMIND_RATE_LIMIT
 
+# Fugle（富果）MarketData API，作為盤中即時行情來源，與 FinMind 並行（不取代歷史/日K）
+# 免費公開方案額度：WebSocket 1 連線／同時最多訂閱 5 檔，REST 60 次/分鐘（即時行情、歷史行情各自 60/min）
+fugle:
+  api_key: "YOUR_FUGLE_API_KEY"                                  # 環境變數：FUGLE_API_KEY
+  rest_base_url: "https://api.fugle.tw/marketdata/v1.0/stock"    # 環境變數：FUGLE_REST_BASE_URL
+  ws_endpoint: "wss://api.fugle.tw/marketdata/v1.0/stock/streaming"  # 環境變數：FUGLE_WS_ENDPOINT
+  enabled: false                              # 環境變數：FUGLE_ENABLED，驗證通過前預設關閉
+  quote_rate_limit: 60                        # 環境變數：FUGLE_QUOTE_RATE_LIMIT
+  max_subscriptions: 5                        # 環境變數：FUGLE_MAX_SUBSCRIPTIONS
+  reconnect_max_sec: 60                       # 環境變數：FUGLE_RECONNECT_MAX_SEC
+
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：
 #   openssl rand -hex 32

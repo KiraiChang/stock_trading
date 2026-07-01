@@ -241,7 +241,30 @@ curl -X POST http://localhost:8080/api/v1/analysis/1/verify \
 ```
 
 也可以直接用前端「個股分析」頁面（`/analysis`），輸入代號即可，歷史紀錄
-下方有「重新驗證」按鈕。完整規格見 [stock-analysis.md](./stock-analysis.md)。
+下方有「重新驗證」「刪除」按鈕。完整規格見 [stock-analysis.md](./stock-analysis.md)。
+
+---
+
+## 手動補算指標 / 評估訊號
+
+排程只會處理監控清單裡的股票；如果某支股票（例如剛上市、還沒加進監控清單）
+已經有 candles 但查 `/indicators/:symbol` 卻是 404，用這兩支端點手動補算，
+兩者都**不要求在監控清單裡**，只要求 candles 至少 35 根：
+
+```bash
+# 手動算一次指標快照並寫入
+curl -X POST "http://localhost:8080/api/v1/indicators/00981A/compute?timeframe=1d" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 手動跑一次訊號判斷（內部會先呼叫指標計算）
+curl -X POST "http://localhost:8080/api/v1/signals/00981A/evaluate?timeframe=1d" \
+  -H "Authorization: Bearer $TOKEN"
+# → 有觸發: {"signal": {...}}；沒觸發: {"signal": null, "message": "..."}
+```
+
+candles 不足 35 根時兩者都回 `422`，代表要先用「歷史資料回補」補更多天數。
+前端「歷史資料回補」頁面（`/backfill`）下方的「手動計算指標」「手動評估訊號」
+兩個區塊就是這兩支端點的 UI。
 
 ---
 
@@ -290,3 +313,14 @@ go run ./cmd/fugle-check -symbol 2330 -duration 60s
 **login 回傳 403 Forbidden**：帳號存在但 `status = inactive`，需要管理員在使用者管理頁或透過 `PATCH /users/:id/status` 啟用。
 
 **register 回傳 409 Conflict**：該 email 已存在，直接用 login 取得 token 即可。
+
+**`GET /indicators/:symbol` 回 404**：`indicator_snapshots` 沒有這支股票的資料，
+通常是還沒加進監控清單（排程只處理監控清單）或 candles 不足 35 根。用
+`POST /indicators/:symbol/compute` 手動補算，見上方「手動補算指標 / 評估訊號」。
+
+**前端對某個數字欄位呼叫 `.toFixed()` 出現 `TypeError: ... is not a function`**：
+後端有 struct 欄位直接用了標準庫的 `sql.NullFloat64`/`NullString`/`NullTime`，
+序列化成 JSON 後會是 `{"Float64":123.45,"Valid":true}` 這種物件而不是單純的
+數字/`null`。新增可空欄位務必用 `internal/store/null.go` 的
+`store.NullFloat64`/`NullString`/`NullTime`，見 architecture.md「Nullable
+欄位的 JSON 序列化」。

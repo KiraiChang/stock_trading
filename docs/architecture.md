@@ -91,14 +91,28 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | 頁面 | Route | 說明 |
 |------|-------|------|
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號）+ K線圖 + 訊號面板 |
-| 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，並可對歷史分析手動重新驗證 |
-| 歷史資料回補 | `backfill` | 勾選監控清單股票，呼叫 `POST /market/backfill` |
+| 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
+| 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
 | 使用者管理 | `users` | 啟用/停用帳號 |
 
 Dashboard 的即時欄位以 REST 主動 hydrate（`/candles`、`/indicators`、`/signals`），
 WebSocket 只在有新訊號時推播覆蓋，因為後端目前只會廣播 `signal` 事件。
+
+### 手動觸發端點（不限監控清單）
+
+排程只會處理監控清單裡的股票；以下端點刻意設計成**任意股票代號**都能用，
+用於補算/確認監控清單之外的股票（例如剛上市的 ETF、只是想先看看資料夠不夠）：
+
+| 端點 | 說明 | 前提 |
+|------|------|------|
+| `POST /market/backfill` | 補歷史 K 棒 | 無 |
+| `POST /indicators/:symbol/compute` | 手動算一次指標快照並寫入 | candles ≥ 35 根 |
+| `POST /signals/:symbol/evaluate` | 手動跑一次訊號判斷（內部會先呼叫指標計算） | candles ≥ 35 根 |
+
+三者都在「歷史資料回補」頁面有對應 UI，也可以直接呼叫 API（見
+api-reference.md）。
 
 ---
 
@@ -132,6 +146,17 @@ Go 讀 candles，純 Go 比對支撐/壓力是否突破、停損/停利是否觸
 ```
 
 細節見 [stock-analysis.md](./stock-analysis.md)。
+
+### Nullable 欄位的 JSON 序列化
+
+Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去
+`json.Marshal` 會變成 `{"Float64":123.45,"Valid":true}` 這種內部結構，不是
+單純的數字或 `null`，前端拿到後對它做數值運算（例如 `.toFixed()`）會直接
+拋型別錯誤——`stock_analyses` 的多個可空欄位（`stop_loss_atr` 等）就中過這個
+問題。**任何 API 會回傳的 struct，可空欄位一律用 `internal/store/null.go`
+裡的 `store.NullFloat64` / `store.NullString` / `store.NullTime`**（內嵌
+`sql.Null*` 保留 `Scan`/`Value` 給 sqlx，另外補上 `MarshalJSON`），不要直接用
+標準庫的 `sql.Null*`。
 
 ---
 

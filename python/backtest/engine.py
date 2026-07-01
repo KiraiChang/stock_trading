@@ -22,6 +22,7 @@ from config import INITIAL_CASH, COMMISSION_RATE, TAX_RATE
 from db import fetch_candles
 from strategy.base import TWCommission
 from strategy.breakout_v1 import BreakoutV1
+from .modular.service import MODULAR_STRATEGIES, run_modular_backtest
 
 log = logging.getLogger(__name__)
 
@@ -37,14 +38,25 @@ def run_backtest(
     start_date: str,
     end_date: str,
 ) -> dict[str, Any]:
-    """執行回測，回傳 result + trades 兩個區塊。"""
+    """執行回測，回傳 result + trades 兩個區塊。
+
+    strategy 若命中 backtest.modular.strategy.STRATEGY_PRESETS，改走
+    modular（純 pandas/numpy，可獨立替換 S/R、進場、停損元件）的回測引擎；
+    否則沿用既有的 backtrader 引擎（STRATEGY_MAP）。
+    """
+    if strategy in MODULAR_STRATEGIES:
+        return run_modular_backtest(
+            strategy, symbols, timeframe, start_date, end_date,
+            initial_cash=INITIAL_CASH, commission_rate=COMMISSION_RATE, tax_rate=TAX_RATE,
+        )
+
     log.info("backtest start — strategy=%s  symbols=%s  tf=%s  %s~%s",
              strategy, symbols, timeframe, start_date, end_date)
     t0 = time.monotonic()
 
     strategy_cls = STRATEGY_MAP.get(strategy)
     if strategy_cls is None:
-        raise ValueError(f"Unknown strategy: {strategy}. Available: {list(STRATEGY_MAP)}")
+        raise ValueError(f"Unknown strategy: {strategy}. Available: {list(STRATEGY_MAP)} or modular: {list(MODULAR_STRATEGIES)}")
 
     cerebro = bt.Cerebro(stdstats=False)
     cerebro.broker.setcash(INITIAL_CASH)

@@ -6,6 +6,7 @@
   import Users from './routes/Users.svelte'
   import Scheduler from './routes/Scheduler.svelte'
   import Backfill from './routes/Backfill.svelte'
+  import Backtest from './routes/Backtest.svelte'
 </script>
 
 {#if $isAuthenticated}
@@ -15,6 +16,8 @@
     <Scheduler />
   {:else if $currentRoute === 'backfill'}
     <Backfill />
+  {:else if $currentRoute === 'backtest'}
+    <Backtest />
   {:else}
     <Dashboard />
   {/if}

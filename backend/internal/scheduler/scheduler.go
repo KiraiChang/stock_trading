@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -140,8 +141,17 @@ func (s *Scheduler) runIntradayJob() {
 	today := timeutil.TodayTaipei()
 	failed := 0
 	lastErr := ""
-	for _, sym := range symbols {
+	for i, sym := range symbols {
 		if err := s.fetcher.FetchAndStoreMinute(ctx, sym, today); err != nil {
+			if errors.Is(err, market.ErrInsufficientTier) {
+				// 帳號等級不足是整個 token 的限制，對其他 symbol 重試也一定會失敗，
+				// 記一次 log 後整輪跳過，避免每 5 分鐘對 watchlist 每檔股票都打一次注定失敗的請求
+				s.log.Warn("intraday job skipped: finmind token tier insufficient", zap.Error(err))
+				if ferr := s.jobRuns.Finish(ctx, runID, "skipped", len(symbols), len(symbols)-i, err.Error()); ferr != nil {
+					s.log.Error("job_runs finish failed", zap.String("job", "intraday"), zap.Error(ferr))
+				}
+				return
+			}
 			s.log.Warn("intraday fetch failed", zap.String("symbol", sym), zap.Error(err))
 			failed++
 			lastErr = err.Error()

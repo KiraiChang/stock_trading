@@ -16,6 +16,7 @@
     success: '成功',
     partial: '部分失敗',
     failed: '失敗',
+    skipped: '已跳過',
     never_run: '尚未執行',
   }
 
@@ -24,6 +25,7 @@
     success: 'bg-green-900/40 text-green-400',
     partial: 'bg-yellow-900/40 text-yellow-400',
     failed: 'bg-red-900/40 text-red-400',
+    skipped: 'bg-gray-700/60 text-gray-400',
     never_run: 'bg-gray-700/60 text-gray-400',
   }
 
@@ -32,6 +34,7 @@
     success: 'bg-green-400',
     partial: 'bg-yellow-400',
     failed: 'bg-red-400',
+    skipped: 'bg-gray-500',
     never_run: 'bg-gray-500',
   }
 

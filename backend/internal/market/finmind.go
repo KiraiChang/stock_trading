@@ -3,10 +3,12 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,16 @@ const (
 	fetchMaxRetries  = 3
 	fetchBaseBackoff = time.Second
 )
+
+// ErrInsufficientTier 代表 FinMind token 等級不足以存取該 dataset（例如
+// TaiwanStockKBar 需要 Sponsor 級），這是帳號權限問題，重試或換 symbol 都沒用。
+var ErrInsufficientTier = errors.New("finmind: token tier insufficient for this dataset")
+
+// isTierError 判斷 FinMind 回應是否為「帳號等級不足」（訊息範例：
+// "Your level is register. Please update your user level. Detail information:..."）
+func isTierError(status int, msg string) bool {
+	return status == 400 && (strings.Contains(msg, "user level") || strings.Contains(msg, "Sponsor"))
+}
 
 type FinMindClient struct {
 	apiKey  string
@@ -140,14 +152,17 @@ func (c *FinMindClient) doFetch(ctx context.Context, reqURL string) ([]json.RawM
 		return nil, false, fmt.Errorf("finmind decode error: http_status=%d body=%s: %w", resp.StatusCode, truncateBody(body), err)
 	}
 	if resp.StatusCode != http.StatusOK || result.Status != 200 {
-		// 402 = 額度用盡, 429 = 請求過於頻繁，兩者稍等後重試通常會恢復
-		retryable := result.Status == 402 || result.Status == 429
 		msg := result.Msg
 		if msg == "" {
 			// FinMind 對某些錯誤（如缺少/錯誤參數）不會回傳 {msg,status} 格式，
 			// 這種情況把原始回應內容附上，避免看到空白訊息無從排查
 			msg = truncateBody(body)
 		}
+		if isTierError(result.Status, msg) {
+			return nil, false, fmt.Errorf("%w: %s", ErrInsufficientTier, msg)
+		}
+		// 402 = 額度用盡, 429 = 請求過於頻繁，兩者稍等後重試通常會恢復
+		retryable := result.Status == 402 || result.Status == 429
 		return nil, retryable, fmt.Errorf("finmind error: http_status=%d api_status=%d msg=%s", resp.StatusCode, result.Status, msg)
 	}
 	return result.Data, false, nil

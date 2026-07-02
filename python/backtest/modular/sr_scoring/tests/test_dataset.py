@@ -54,7 +54,7 @@ def test_build_training_rows_features_match_truncated_recomputation():
         )
         recomputed = compute_zone_features(
             truncated, zone, as_of_index=len(truncated) - 1, approach=approach,
-            lookback_bars=_CONFIG.zone_lookback_bars, forward_bars_for_return=r.forward_bars,
+            lookback_bars=_CONFIG.zone_lookback_bars, forward_bars=r.forward_bars, threshold_pct=r.threshold_pct,
         )
         assert recomputed.touch_count == r.features.touch_count
         assert recomputed.rejection_count == r.features.rejection_count

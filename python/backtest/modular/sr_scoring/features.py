@@ -1,14 +1,24 @@
 """
 每個 zone 的特徵計算：touch_count / rejection_count / breakout_count /
-avg_return_after_touch / relative_volume / volatility / trend_strength。
+average_bounce_return / average_break_return / relative_volume / volatility /
+trend_strength，以及 zone 自身的動能（zone_momentum，不是股票層級趨勢）。
 
 所有函式都以「as_of_index 當下累積至今的歷史表現」為語意 —— 這讓同一份
 compute_zone_features() 同時適用於：
   (a) 訓練資料：以某次歷史觸碰事件的 touch_index 當作 as_of_index
   (b) 即時評分：以資料最後一根K棒當作 as_of_index
 
-避免 lookahead：avg_return_after_touch 只採計 touch_index + forward_bars
-<= as_of_index 的觸碰；其餘函式本來就只掃描 [:as_of_index+1] 範圍內的資料。
+避免 lookahead：average_bounce_return/average_break_return 只採計
+touch_index + forward_bars <= as_of_index 的觸碰（見
+average_bounce_break_returns）；其餘函式本來就只掃描 [:as_of_index+1]
+範圍內的資料。
+
+2026-07 機構級重新設計：原本的 avg_return_after_touch 把「反彈」與
+「跌破」兩種方向完全不同的結果混在一起平均，導致 EV 計算失真（見
+scoring.py 開頭說明）。現在改用 labeling.py::label_touch 的判定邏輯，把
+每次觸碰分類成「守住/反彈」或「跌破/突破」，分開平均——這跟訓練資料的
+label 定義完全一致（同一套 threshold/forward_bars 邏輯），避免「訓練時
+這樣分類，評分時又用不同標準」的不一致。
 """
 from __future__ import annotations
 
@@ -16,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from ...indicators import calc_atr
+from .labeling import label_touch
 from .types import ApproachDirection, Zone, ZoneFeatures, ZoneTouch, ZoneType
 
 
@@ -133,22 +144,43 @@ def count_breakouts(
     return count
 
 
-def avg_return_after_touch(
-    df: pd.DataFrame, touches: list[ZoneTouch], forward_bars: int, as_of_index: int
-) -> float:
-    """觸碰後 forward_bars 根的報酬，正值 = 有利於 zone 成立的方向。"""
-    closes = df["close"].to_numpy()
-    returns: list[float] = []
+def average_bounce_break_returns(
+    df: pd.DataFrame,
+    touches: list[ZoneTouch],
+    forward_bars: int,
+    threshold_pct: float,
+    as_of_index: int,
+    method: str = "max_excursion",
+) -> tuple[float, float]:
+    """把每次觸碰依 label_touch 的判定分類成「守住/反彈」（hold_label=1）
+    或「跌破/突破」（break_label=1），forward_return 分開平均——不像舊版
+    avg_return_after_touch 把兩種結果混在一起，掩蓋掉「反彈時漲多少」跟
+    「跌破時虧多少」是完全不同分佈這件事。
+
+    避免 lookahead：跟舊版 avg_return_after_touch 一樣，只採計
+    touch_index + forward_bars <= as_of_index 的觸碰——label_touch 內部雖然
+    也有自己的邊界檢查，但那是以 len(df) 為界，在 walk-forward 訓練迴圈中
+    df 是完整序列、as_of_index 可能遠小於 len(df)-1，所以這裡必須先用
+    as_of_index 篩過一輪，才能呼叫 label_touch。無法判定（門檻兩邊都沒
+    觸及）的觸碰不計入任何一邊的平均。
+    """
+    bounce_returns: list[float] = []
+    break_returns: list[float] = []
     for touch in touches:
-        target = touch.touch_index + forward_bars
-        if target > as_of_index:
+        if touch.touch_index + forward_bars > as_of_index:
             continue
-        base = closes[touch.touch_index]
-        if base == 0:
+        result = label_touch(df, touch, forward_bars, threshold_pct, method)
+        if result is None:
             continue
-        raw = (closes[target] - base) / base
-        returns.append(raw if touch.role == ZoneType.SUPPORT else -raw)
-    return float(np.mean(returns)) if returns else 0.0
+        hold_label, break_label, forward_return = result
+        if hold_label:
+            bounce_returns.append(forward_return)
+        elif break_label:
+            break_returns.append(forward_return)
+
+    average_bounce_return = float(np.mean(bounce_returns)) if bounce_returns else 0.0
+    average_break_return = float(np.mean(break_returns)) if break_returns else 0.0
+    return average_bounce_return, average_break_return
 
 
 def relative_volume_at_touches(
@@ -171,7 +203,9 @@ def relative_volume_at_touches(
 
 
 def zone_volatility(df: pd.DataFrame, as_of_index: int, atr_period: int = 14) -> float:
-    """ATR / close，正規化後跨股可比。"""
+    """ATR / close，正規化後跨股可比。這是股票層級的量（跟哪個 zone 無關），
+    不應該在 API 輸出裡對每個 zone 重複顯示一次——score_symbol() 只算一次，
+    放在回傳值的 overall_volatility。"""
     highs = df["high"].to_numpy()[: as_of_index + 1]
     lows = df["low"].to_numpy()[: as_of_index + 1]
     closes = df["close"].to_numpy()[: as_of_index + 1]
@@ -181,7 +215,8 @@ def zone_volatility(df: pd.DataFrame, as_of_index: int, atr_period: int = 14) ->
 
 
 def trend_slope(df: pd.DataFrame, as_of_index: int, ma_period: int = 20, lookback: int = 20) -> float:
-    """MA(ma_period) 序列在最近 lookback 根的線性回歸斜率，正規化為 slope * lookback / price。"""
+    """MA(ma_period) 序列在最近 lookback 根的線性回歸斜率，正規化為 slope *
+    lookback / price。跟 zone_volatility 一樣是股票層級的量，見上方說明。"""
     closes = df["close"].iloc[: as_of_index + 1]
     if len(closes) < ma_period + lookback:
         return 0.0
@@ -194,6 +229,25 @@ def trend_slope(df: pd.DataFrame, as_of_index: int, ma_period: int = 20, lookbac
     return float(slope * lookback / price) if price else 0.0
 
 
+def zone_momentum(df: pd.DataFrame, touches: list[ZoneTouch], lookback: int = 5) -> float:
+    """這個 zone 過去每次被觸碰前 lookback 根的平均價格動能（趨近速度）。
+    跟 trend_slope（整檔股票共用同一個值）不同，這是由這個 zone 自己的歷史
+    觸碰所形成的值，不同 zone 會有不同結果，讓每個區間有自己的動能訊號，
+    而不是重複顯示同一個股票層級的趨勢數字。沒有觸碰或資料不足時回傳 0
+    （中性，無方向可言）。"""
+    closes = df["close"].to_numpy()
+    momenta: list[float] = []
+    for touch in touches:
+        idx = touch.touch_index
+        if idx - lookback < 0:
+            continue
+        base = closes[idx - lookback]
+        if base == 0:
+            continue
+        momenta.append((closes[idx] - base) / base)
+    return float(np.mean(momenta)) if momenta else 0.0
+
+
 def compute_zone_features(
     df: pd.DataFrame,
     zone: Zone,
@@ -202,22 +256,32 @@ def compute_zone_features(
     lookback_bars: int = 60,
     confirmation_bars: int = 2,
     rejection_window: int = 3,
-    forward_bars_for_return: int = 5,
+    forward_bars: int = 5,
+    threshold_pct: float = 0.03,
     volume_ma_period: int = 20,
     trend_ma_period: int = 20,
     trend_lookback: int = 20,
+    label_method: str = "max_excursion",
 ) -> ZoneFeatures:
     """touch_count 採計所有方向的觸碰（zone 整體活躍度）；rejection_count /
-    avg_return_after_touch / relative_volume 只採計與 approach 同方向的觸碰
-    （分別評估「作為支撐」或「作為壓力」的歷史表現）。"""
+    average_bounce_return / average_break_return / relative_volume 只採計與
+    approach 同方向的觸碰（分別評估「作為支撐」或「作為壓力」的歷史表現）。
+    forward_bars/threshold_pct 應該跟訓練資料集使用同一組值（見
+    dataset.py::DatasetConfig），否則「歷史觸碰怎麼被分類」在訓練跟評分
+    階段會不一致。"""
     all_touches = find_touches(df, zone, as_of_index, lookback_bars)
     role_touches = [t for t in all_touches if t.approach_direction == approach]
+
+    average_bounce_return, average_break_return = average_bounce_break_returns(
+        df, role_touches, forward_bars, threshold_pct, as_of_index, label_method
+    )
 
     return ZoneFeatures(
         touch_count=len(all_touches),
         rejection_count=count_rejections(df, role_touches, rejection_window, as_of_index),
         breakout_count=count_breakouts(df, zone, as_of_index, lookback_bars, confirmation_bars, approach),
-        avg_return_after_touch=avg_return_after_touch(df, role_touches, forward_bars_for_return, as_of_index),
+        average_bounce_return=average_bounce_return,
+        average_break_return=average_break_return,
         relative_volume=relative_volume_at_touches(df, role_touches, volume_ma_period),
         volatility=zone_volatility(df, as_of_index, atr_period=14),
         trend_strength=trend_slope(df, as_of_index, trend_ma_period, trend_lookback),

@@ -100,6 +100,13 @@ func nullFloat(p *float64) store.NullFloat64 {
 	return store.NullFloat64{NullFloat64: sql.NullFloat64{Float64: *p, Valid: true}}
 }
 
+func nullString(p *string) store.NullString {
+	if p == nil {
+		return store.NullString{}
+	}
+	return store.NullString{NullString: sql.NullString{String: *p, Valid: true}}
+}
+
 // Client 呼叫 Python HTTP service 的 /analyze 端點
 type Client struct {
 	baseURL string
@@ -161,41 +168,50 @@ func (c *Client) Analyze(ctx context.Context, symbol, timeframe string, limit in
 	return &result, nil
 }
 
-// ── SR Zone Scoring ──────────────────────────────────────────
-
-type ZoneFeatures struct {
-	TouchCount          int     `json:"touch_count"`
-	RejectionCount      int     `json:"rejection_count"`
-	BreakoutCount       int     `json:"breakout_count"`
-	AvgReturnAfterTouch float64 `json:"avg_return_after_touch"`
-	RelativeVolume      float64 `json:"relative_volume"`
-	Volatility          float64 `json:"volatility"`
-	TrendStrength       float64 `json:"trend_strength"`
-}
+// ── SR Zone Scoring（機構級版本，2026-07 重新設計，見 Python
+// backtest/modular/sr_scoring/scoring.py 開頭的完整說明）──────────────
 
 type ZoneScore struct {
-	PriceLow             float64       `json:"price_low"`
-	PriceHigh            float64       `json:"price_high"`
-	Method               string        `json:"method"`
-	Role                 string        `json:"role"`
-	SupportScore         float64       `json:"support_score"`
-	ResistanceScore      float64       `json:"resistance_score"`
-	Confidence           float64       `json:"confidence"`
-	BounceProbability    *float64      `json:"bounce_probability"`
-	BreakProbability     *float64      `json:"break_probability"`
-	ExpectedValue        *float64      `json:"expected_value"`
-	RiskRewardRatio      *float64      `json:"risk_reward_ratio"`
-	FeaturesAsSupport    *ZoneFeatures `json:"features_as_support"`
-	FeaturesAsResistance *ZoneFeatures `json:"features_as_resistance"`
+	PriceLow              float64  `json:"price_low"`
+	PriceHigh             float64  `json:"price_high"`
+	Method                string   `json:"method"`
+	Role                  string   `json:"role"`
+	SupportScore          float64  `json:"support_score"`
+	ResistanceScore       float64  `json:"resistance_score"`
+	NetScore              float64  `json:"net_score"`
+	NetScoreLabel         string   `json:"net_score_label"`
+	Confidence            float64  `json:"confidence"`
+	ConfidenceLevel       string   `json:"confidence_level"`
+	BounceProbability     *float64 `json:"bounce_probability"`
+	BreakProbability      *float64 `json:"break_probability"`
+	ExpectedGain          *float64 `json:"expected_gain"`
+	ExpectedLoss          *float64 `json:"expected_loss"`
+	ExpectedValue         *float64 `json:"expected_value"`
+	RiskRewardRatio       *float64 `json:"risk_reward_ratio"`
+	RewardRiskPercentile  *float64 `json:"reward_risk_percentile"`
+	RelativeVolume        *float64 `json:"relative_volume"`
+	VolumeConfirmation    *string  `json:"volume_confirmation"`
+	TouchCount            int      `json:"touch_count"`
+	RejectCount           *int     `json:"reject_count"`
+	BreakCount            *int     `json:"break_count"`
+	ZoneMomentum          float64  `json:"zone_momentum"`
+	ZoneDirection         string   `json:"zone_direction"`
+	RecentValidation      string   `json:"recent_validation"`
+	TradingScore          float64  `json:"trading_score"`
+	TradingRecommendation string   `json:"trading_recommendation"`
 }
 
-// ZoneScoreResult 對應 Python score_symbol() 的回傳格式
+// ZoneScoreResult 對應 Python score_symbol() 的回傳格式。OverallTrend/
+// OverallVolatility 是股票層級的量，只在這裡出現一次，不會在每個 Zone 裡
+// 重複（見 sr_scoring 套件說明的「十、十一」）。
 type ZoneScoreResult struct {
-	Symbol       string      `json:"symbol"`
-	Timeframe    string      `json:"timeframe"`
-	AnalyzedAt   string      `json:"analyzed_at"` // RFC3339
-	CurrentPrice float64     `json:"current_price"`
-	Zones        []ZoneScore `json:"zones"`
+	Symbol            string      `json:"symbol"`
+	Timeframe         string      `json:"timeframe"`
+	AnalyzedAt        string      `json:"analyzed_at"` // RFC3339
+	CurrentPrice      float64     `json:"current_price"`
+	OverallTrend      float64     `json:"overall_trend"`
+	OverallVolatility float64     `json:"overall_volatility"`
+	Zones             []ZoneScore `json:"zones"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
@@ -208,46 +224,53 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	}
 
 	a := &store.SRZoneAnalysis{
-		Symbol:       r.Symbol,
-		Timeframe:    r.Timeframe,
-		AnalyzedAt:   analyzedAt,
-		CurrentPrice: r.CurrentPrice,
+		Symbol:            r.Symbol,
+		Timeframe:         r.Timeframe,
+		AnalyzedAt:        analyzedAt,
+		CurrentPrice:      r.CurrentPrice,
+		OverallTrend:      r.OverallTrend,
+		OverallVolatility: r.OverallVolatility,
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))
 	for _, z := range r.Zones {
-		// Python score_zone() 永遠會同時算出 features_as_support 與
-		// features_as_resistance（兩者都不會是 null），所以不能用「哪個非
-		// nil」來挑，必須依 Role 對應到正確的觀點；AT_ZONE（現價剛好在
-		// zone 裡）沒有單一「正確答案」，選 support 觀點當預設值。
-		features := z.FeaturesAsSupport
-		if z.Role == "RESISTANCE" {
-			features = z.FeaturesAsResistance
+		rejectCount, breakCount := 0, 0
+		if z.RejectCount != nil {
+			rejectCount = *z.RejectCount
 		}
-		zone := store.SRZone{
-			PriceLow:          z.PriceLow,
-			PriceHigh:         z.PriceHigh,
-			Method:            z.Method,
-			Role:              z.Role,
-			SupportScore:      z.SupportScore,
-			ResistanceScore:   z.ResistanceScore,
-			Confidence:        z.Confidence,
-			BounceProbability: nullFloat(z.BounceProbability),
-			BreakProbability:  nullFloat(z.BreakProbability),
-			ExpectedValue:     nullFloat(z.ExpectedValue),
-			RiskRewardRatio:   nullFloat(z.RiskRewardRatio),
-			Status:            "PENDING",
+		if z.BreakCount != nil {
+			breakCount = *z.BreakCount
 		}
-		if features != nil {
-			zone.TouchCount = features.TouchCount
-			zone.RejectionCount = features.RejectionCount
-			zone.BreakoutCount = features.BreakoutCount
-			zone.AvgReturnAfterTouch = features.AvgReturnAfterTouch
-			zone.RelativeVolume = features.RelativeVolume
-			zone.Volatility = features.Volatility
-			zone.TrendStrength = features.TrendStrength
-		}
-		zones = append(zones, zone)
+		zones = append(zones, store.SRZone{
+			PriceLow:              z.PriceLow,
+			PriceHigh:             z.PriceHigh,
+			Method:                z.Method,
+			Role:                  z.Role,
+			SupportScore:          z.SupportScore,
+			ResistanceScore:       z.ResistanceScore,
+			NetScore:              z.NetScore,
+			NetScoreLabel:         z.NetScoreLabel,
+			Confidence:            z.Confidence,
+			ConfidenceLevel:       z.ConfidenceLevel,
+			BounceProbability:     nullFloat(z.BounceProbability),
+			BreakProbability:      nullFloat(z.BreakProbability),
+			ExpectedGain:          nullFloat(z.ExpectedGain),
+			ExpectedLoss:          nullFloat(z.ExpectedLoss),
+			ExpectedValue:         nullFloat(z.ExpectedValue),
+			RiskRewardRatio:       nullFloat(z.RiskRewardRatio),
+			RewardRiskPercentile:  nullFloat(z.RewardRiskPercentile),
+			RelativeVolume:        nullFloat(z.RelativeVolume),
+			VolumeConfirmation:    nullString(z.VolumeConfirmation),
+			TouchCount:            z.TouchCount,
+			RejectCount:           rejectCount,
+			BreakCount:            breakCount,
+			ZoneMomentum:          z.ZoneMomentum,
+			ZoneDirection:         z.ZoneDirection,
+			RecentValidation:      z.RecentValidation,
+			TradingScore:          z.TradingScore,
+			TradingRecommendation: z.TradingRecommendation,
+			Status:                "PENDING",
+		})
 	}
 
 	return a, zones, nil

@@ -11,6 +11,7 @@ internal/analysis/client.go 對「python service url 未設定」的處理風格
 """
 from __future__ import annotations
 
+import bisect
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,14 +33,15 @@ FEATURE_COLUMNS = [
     "touch_count",
     "rejection_count",
     "breakout_count",
-    "avg_return_after_touch",
+    "average_bounce_return",
+    "average_break_return",
     "relative_volume",
     "volatility",
     "trend_strength",
     "is_support",
 ]
 
-MODEL_VERSION = "v1"
+MODEL_VERSION = "v2"  # v1 的 feature schema 用 avg_return_after_touch，跟 v2 不相容，需重新訓練
 
 
 @dataclass
@@ -50,6 +52,9 @@ class ModelBundle:
     trained_at: str
     version: str
     metrics: dict[str, dict[str, float]] = field(default_factory=dict)
+    # 訓練資料集裡每一列 risk_reward_ratio 的排序分佈，供 reward_risk_percentile()
+    # 在推論時查表用（見 scoring.py 的 reward_risk_percentile 欄位說明）。
+    rr_reference: list[float] = field(default_factory=list)
 
 
 def _build_estimator(model_type: str, random_state: int):
@@ -95,6 +100,19 @@ def _fit_one(
     return model, metrics
 
 
+def _compute_rr_reference(dataset: pd.DataFrame) -> list[float]:
+    """訓練資料集裡每一列的 risk_reward_ratio 分佈（由 average_bounce_return/
+    average_break_return 算出），排序後供 reward_risk_percentile() 查表用。
+    只保留兩個平均報酬都非 0 的列，避免除以 0 的退化情況混進參考分佈。"""
+    bounce = dataset["average_bounce_return"].to_numpy(dtype=float)
+    brk = dataset["average_break_return"].to_numpy(dtype=float)
+    mask = (bounce != 0) & (brk != 0)
+    if not np.any(mask):
+        return []
+    rr = np.abs(bounce[mask] / brk[mask])
+    return sorted(float(v) for v in rr)
+
+
 def train_model(
     dataset: pd.DataFrame,
     model_type: str = "gradient_boosting",
@@ -114,6 +132,7 @@ def train_model(
         trained_at=datetime.now(timezone.utc).isoformat(),
         version=MODEL_VERSION,
         metrics={"hold": hold_metrics, "break": break_metrics},
+        rr_reference=_compute_rr_reference(dataset),
     )
 
 
@@ -164,7 +183,8 @@ def _feature_vector(features: ZoneFeatures, is_support: bool) -> np.ndarray:
             features.touch_count,
             features.rejection_count,
             features.breakout_count,
-            features.avg_return_after_touch,
+            features.average_bounce_return,
+            features.average_break_return,
             features.relative_volume,
             features.volatility,
             features.trend_strength,
@@ -182,3 +202,14 @@ def predict_hold_probability(bundle: ModelBundle, features: ZoneFeatures, is_sup
 def predict_break_probability(bundle: ModelBundle, features: ZoneFeatures, is_support: bool) -> float:
     X = _feature_vector(features, is_support)
     return float(bundle.break_model.predict_proba(X)[0, 1])
+
+
+def reward_risk_percentile(bundle: ModelBundle, current_rr: float) -> Optional[float]:
+    """current_rr 在訓練資料集歷史 risk_reward_ratio 分佈中的百分位（0~100，
+    見八、新增 Reward/Risk Percentile）。參考分佈為空時回傳 None（模型是用
+    太少/太乾淨的資料訓練，沒有足夠的 RR 樣本可比較）。"""
+    reference = bundle.rr_reference
+    if not reference:
+        return None
+    rank = bisect.bisect_left(reference, current_rr)
+    return float(100.0 * rank / len(reference))

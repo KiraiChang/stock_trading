@@ -104,48 +104,80 @@ type StockAnalysisLevel struct {
 	BrokenPrice NullFloat64 `db:"broken_price" json:"broken_price,omitempty"`
 }
 
-// ── SR Zone Scoring models ─────────────────────────────────────
+// ── SR Zone Scoring models（機構級版本，見 Python
+// backtest/modular/sr_scoring/scoring.py 開頭的完整說明）────────────────
 
 type SRZoneAnalysis struct {
-	ID           uint64    `db:"id"            json:"id"`
-	Symbol       string    `db:"symbol"        json:"symbol"`
-	Timeframe    string    `db:"timeframe"     json:"timeframe"`
-	AnalyzedAt   time.Time `db:"analyzed_at"   json:"analyzed_at"`
-	CurrentPrice float64   `db:"current_price" json:"current_price"`
-	ModelVersion string    `db:"model_version" json:"model_version"`
-	CreatedAt    time.Time `db:"created_at"     json:"created_at"`
+	ID           uint64    `db:"id"                 json:"id"`
+	Symbol       string    `db:"symbol"             json:"symbol"`
+	Timeframe    string    `db:"timeframe"          json:"timeframe"`
+	AnalyzedAt   time.Time `db:"analyzed_at"        json:"analyzed_at"`
+	CurrentPrice float64   `db:"current_price"      json:"current_price"`
+	// OverallTrend/OverallVolatility 是股票層級的量（同一次分析裡所有 zone
+	// 共用同一個值），存在這裡（分析快照）而不是每個 zone 各存一份，避免
+	// 重複資訊。
+	OverallTrend      float64   `db:"overall_trend"      json:"overall_trend"`
+	OverallVolatility float64   `db:"overall_volatility" json:"overall_volatility"`
+	ModelVersion      string    `db:"model_version"      json:"model_version"`
+	CreatedAt         time.Time `db:"created_at"         json:"created_at"`
 }
 
 type SRZone struct {
-	ID              uint64  `db:"id"                      json:"id"`
-	AnalysisID      uint64  `db:"analysis_id"             json:"analysis_id"`
-	PriceLow        float64 `db:"price_low"               json:"price_low"`
-	PriceHigh       float64 `db:"price_high"              json:"price_high"`
-	Method          string  `db:"method"                  json:"method"`
-	Role            string  `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
+	ID         uint64  `db:"id"                      json:"id"`
+	AnalysisID uint64  `db:"analysis_id"             json:"analysis_id"`
+	PriceLow   float64 `db:"price_low"               json:"price_low"`
+	PriceHigh  float64 `db:"price_high"              json:"price_high"`
+	Method     string  `db:"method"                  json:"method"`
+	Role       string  `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
+
 	SupportScore    float64 `db:"support_score"           json:"support_score"`
 	ResistanceScore float64 `db:"resistance_score"        json:"resistance_score"`
-	// Confidence 是觸碰次數的貝式收縮係數（0~1），touch_count 越少越低；
-	// support_score/resistance_score/expected_value 都已經用它收縮過，
-	// 不需要前端再自己算一次，這裡存下來只是讓使用者能看到「這個分數的
-	// 可信度」，避免誤把低樣本數的分數當成高確信的訊號。
-	Confidence        float64     `db:"confidence"              json:"confidence"`
+	// NetScore = SupportScore - ResistanceScore，NetScoreLabel 是分類結果
+	// （STRONG_SUPPORT/NEUTRAL/STRONG_RESISTANCE），避免只看單一分數判斷。
+	NetScore      float64 `db:"net_score"               json:"net_score"`
+	NetScoreLabel string  `db:"net_score_label"         json:"net_score_label"`
+
+	// Confidence 綜合樣本數、時間衰減（含最近驗證）、歷史結果穩定度三個
+	// 因子（0~1），ConfidenceLevel 是分級結果（LOW/MEDIUM/HIGH/VERY_HIGH）。
+	Confidence      float64 `db:"confidence"              json:"confidence"`
+	ConfidenceLevel string  `db:"confidence_level"        json:"confidence_level"`
+
 	BounceProbability NullFloat64 `db:"bounce_probability"      json:"bounce_probability,omitempty"`
 	BreakProbability  NullFloat64 `db:"break_probability"       json:"break_probability,omitempty"`
-	// ExpectedValue/RiskRewardRatio 只有 Role 為 SUPPORT/RESISTANCE 時才有值
-	// （AT_ZONE 沒有明確方向可以算），見 scoring.py::score_zone 的說明。
-	ExpectedValue       NullFloat64 `db:"expected_value"          json:"expected_value,omitempty"`
-	RiskRewardRatio     NullFloat64 `db:"risk_reward_ratio"       json:"risk_reward_ratio,omitempty"`
-	TouchCount          int         `db:"touch_count"             json:"touch_count"`
-	RejectionCount      int         `db:"rejection_count"         json:"rejection_count"`
-	BreakoutCount       int         `db:"breakout_count"          json:"breakout_count"`
-	AvgReturnAfterTouch float64     `db:"avg_return_after_touch"  json:"avg_return_after_touch"`
-	RelativeVolume      float64     `db:"relative_volume"         json:"relative_volume"`
-	Volatility          float64     `db:"volatility"              json:"volatility"`
-	TrendStrength       float64     `db:"trend_strength"          json:"trend_strength"`
-	Status              string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN
-	BrokenAt            NullTime    `db:"broken_at"               json:"broken_at,omitempty"`
-	BrokenPrice         NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
+	// ExpectedGain/ExpectedLoss 分別是這個 zone 角色解析後的
+	// average_bounce_return/average_break_return；ExpectedValue = 反彈機率
+	// × ExpectedGain + 跌破機率 × ExpectedLoss（不再用單一 average_return，
+	// 見一、修正 EV 計算方式）。RiskRewardRatio = |ExpectedGain/ExpectedLoss|。
+	// RewardRiskPercentile 是這個 RiskRewardRatio 在訓練資料集歷史分佈中的
+	// 百分位。以上皆只有 Role 為 SUPPORT/RESISTANCE 時才有值。
+	ExpectedGain         NullFloat64 `db:"expected_gain"           json:"expected_gain,omitempty"`
+	ExpectedLoss         NullFloat64 `db:"expected_loss"           json:"expected_loss,omitempty"`
+	ExpectedValue        NullFloat64 `db:"expected_value"          json:"expected_value,omitempty"`
+	RiskRewardRatio      NullFloat64 `db:"risk_reward_ratio"       json:"risk_reward_ratio,omitempty"`
+	RewardRiskPercentile NullFloat64 `db:"reward_risk_percentile"  json:"reward_risk_percentile,omitempty"`
+
+	// RelativeVolume/VolumeConfirmation 為角色解析後的值，只有 Role 為
+	// SUPPORT/RESISTANCE 時才有值。
+	RelativeVolume     NullFloat64 `db:"relative_volume"         json:"relative_volume,omitempty"`
+	VolumeConfirmation NullString  `db:"volume_confirmation"     json:"volume_confirmation,omitempty"`
+
+	TouchCount  int `db:"touch_count"             json:"touch_count"` // 聚合值，不分方向
+	RejectCount int `db:"reject_count"             json:"reject_count"`
+	BreakCount  int `db:"break_count"              json:"break_count"`
+
+	// ZoneMomentum/ZoneDirection 是這個 zone 自己的歷史觸碰動能（不是股票
+	// 層級的 trend，同一次分析裡不同 zone 會有不同值）。
+	ZoneMomentum  float64 `db:"zone_momentum"           json:"zone_momentum"`
+	ZoneDirection string  `db:"zone_direction"          json:"zone_direction"`
+
+	RecentValidation string `db:"recent_validation"       json:"recent_validation"`
+
+	TradingScore          float64 `db:"trading_score"           json:"trading_score"`
+	TradingRecommendation string  `db:"trading_recommendation"  json:"trading_recommendation"`
+
+	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（保留供未來 verifier 使用）
+	BrokenAt    NullTime    `db:"broken_at"               json:"broken_at,omitempty"`
+	BrokenPrice NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
 }
 
 type WatchlistItem struct {

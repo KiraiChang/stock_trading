@@ -65,8 +65,15 @@ func TestAnalyzeOmitsLimitFieldWhenZero(t *testing.T) {
 func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	bounce := 0.72
 	brk := 0.18
-	ev := 0.015
-	rr := 2.4
+	gain := 0.048
+	loss := -0.072
+	ev := 0.0056
+	rr := 0.667
+	percentile := 91.0
+	relVol := 1.4
+	volConf := "CONFIRMED"
+	rejectCount := 3
+	breakCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/sr-zones" {
@@ -85,24 +92,29 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ZoneScoreResult{
-			Symbol:       "2330",
-			Timeframe:    "1d",
-			AnalyzedAt:   "2026-07-01T13:30:00+08:00",
-			CurrentPrice: 600.0,
+			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+			CurrentPrice: 600.0, OverallTrend: 0.03, OverallVolatility: 0.02,
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
-					SupportScore: 0.8, ResistanceScore: 0.1, Confidence: 0.83,
+					SupportScore: 0.8, ResistanceScore: 0.1, NetScore: 0.7, NetScoreLabel: "STRONG_SUPPORT",
+					Confidence: 0.83, ConfidenceLevel: "HIGH",
 					BounceProbability: &bounce, BreakProbability: &brk,
-					ExpectedValue: &ev, RiskRewardRatio: &rr,
-					FeaturesAsSupport: &ZoneFeatures{
-						TouchCount: 4, RejectionCount: 3, BreakoutCount: 0,
-						AvgReturnAfterTouch: 0.02, RelativeVolume: 1.4, Volatility: 0.015, TrendStrength: 0.03,
-					},
+					ExpectedGain: &gain, ExpectedLoss: &loss, ExpectedValue: &ev,
+					RiskRewardRatio: &rr, RewardRiskPercentile: &percentile,
+					RelativeVolume: &relVol, VolumeConfirmation: &volConf,
+					TouchCount: 4, RejectCount: &rejectCount, BreakCount: &breakCount,
+					ZoneMomentum: -0.02, ZoneDirection: "DOWN",
+					RecentValidation: "VALIDATED_RECENTLY",
+					TradingScore:     78.5, TradingRecommendation: "BUY",
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
-					SupportScore: 0.2, ResistanceScore: 0.3, Confidence: 0.4,
+					SupportScore: 0.2, ResistanceScore: 0.3, NetScore: -0.1, NetScoreLabel: "NEUTRAL",
+					Confidence: 0.4, ConfidenceLevel: "MEDIUM",
+					TouchCount: 2, ZoneMomentum: 0.0, ZoneDirection: "FLAT",
+					RecentValidation: "PENDING_VALIDATION",
+					TradingScore:     45.0, TradingRecommendation: "NEUTRAL",
 				},
 			},
 		})
@@ -114,7 +126,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScoreZones failed: %v", err)
 	}
-	if result.Symbol != "2330" || len(result.Zones) != 2 {
+	if result.Symbol != "2330" || len(result.Zones) != 2 || result.OverallTrend != 0.03 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 
@@ -122,7 +134,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
-	if a.Symbol != "2330" || a.CurrentPrice != 600.0 {
+	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.OverallTrend != 0.03 || a.OverallVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
 	}
 	if len(zones) != 2 {
@@ -133,53 +145,43 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if first.Method != "atr" || first.Role != "SUPPORT" || first.TouchCount != 4 {
 		t.Fatalf("unexpected first zone: %+v", first)
 	}
-	if first.Confidence != 0.83 {
-		t.Fatalf("expected confidence 0.83, got %v", first.Confidence)
+	if first.NetScoreLabel != "STRONG_SUPPORT" || first.ConfidenceLevel != "HIGH" {
+		t.Fatalf("unexpected first zone labels: %+v", first)
 	}
 	if !first.BounceProbability.Valid || first.BounceProbability.Float64 != bounce {
 		t.Fatalf("expected bounce probability %.2f, got %+v", bounce, first.BounceProbability)
 	}
+	if !first.ExpectedGain.Valid || first.ExpectedGain.Float64 != gain {
+		t.Fatalf("expected expected_gain %.3f, got %+v", gain, first.ExpectedGain)
+	}
+	if !first.ExpectedLoss.Valid || first.ExpectedLoss.Float64 != loss {
+		t.Fatalf("expected expected_loss %.3f, got %+v", loss, first.ExpectedLoss)
+	}
 	if !first.ExpectedValue.Valid || first.ExpectedValue.Float64 != ev {
-		t.Fatalf("expected expected_value %.3f, got %+v", ev, first.ExpectedValue)
+		t.Fatalf("expected expected_value %.4f, got %+v", ev, first.ExpectedValue)
 	}
 	if !first.RiskRewardRatio.Valid || first.RiskRewardRatio.Float64 != rr {
-		t.Fatalf("expected risk_reward_ratio %.1f, got %+v", rr, first.RiskRewardRatio)
+		t.Fatalf("expected risk_reward_ratio %.3f, got %+v", rr, first.RiskRewardRatio)
+	}
+	if !first.RewardRiskPercentile.Valid || first.RewardRiskPercentile.Float64 != percentile {
+		t.Fatalf("expected reward_risk_percentile %.1f, got %+v", percentile, first.RewardRiskPercentile)
+	}
+	if !first.VolumeConfirmation.Valid || first.VolumeConfirmation.String != volConf {
+		t.Fatalf("expected volume_confirmation %s, got %+v", volConf, first.VolumeConfirmation)
+	}
+	if first.RejectCount != 3 || first.BreakCount != 0 {
+		t.Fatalf("unexpected reject/break count: %+v", first)
 	}
 
 	second := zones[1]
 	if second.Role != "AT_ZONE" || second.BounceProbability.Valid {
 		t.Fatalf("expected AT_ZONE zone with no bounce probability, got %+v", second)
 	}
-	if second.ExpectedValue.Valid || second.RiskRewardRatio.Valid {
-		t.Fatalf("expected AT_ZONE zone with no expected_value/risk_reward_ratio, got %+v", second)
+	if second.ExpectedValue.Valid || second.RiskRewardRatio.Valid || second.VolumeConfirmation.Valid {
+		t.Fatalf("expected AT_ZONE zone with no expected_value/risk_reward_ratio/volume_confirmation, got %+v", second)
 	}
-}
-
-func TestScoreZonesToStorePicksFeaturesMatchingRole(t *testing.T) {
-	// Python score_zone() 永遠同時回傳 features_as_support 與
-	// features_as_resistance（兩者都不會是 null），ToStore 必須依 Role
-	// 選對應的那一份，而不是「哪個非 nil」。
-	result := &ZoneScoreResult{
-		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00", CurrentPrice: 600.0,
-		Zones: []ZoneScore{
-			{
-				PriceLow: 610.0, PriceHigh: 615.0, Method: "atr", Role: "RESISTANCE",
-				SupportScore: 0.2, ResistanceScore: 0.7,
-				FeaturesAsSupport:    &ZoneFeatures{TouchCount: 1, RejectionCount: 0},
-				FeaturesAsResistance: &ZoneFeatures{TouchCount: 5, RejectionCount: 4},
-			},
-		},
-	}
-
-	_, zones, err := result.ToStore()
-	if err != nil {
-		t.Fatalf("ToStore failed: %v", err)
-	}
-	if len(zones) != 1 {
-		t.Fatalf("expected 1 zone, got %d", len(zones))
-	}
-	if zones[0].TouchCount != 5 || zones[0].RejectionCount != 4 {
-		t.Fatalf("expected RESISTANCE zone to use FeaturesAsResistance (touch=5,rejection=4), got %+v", zones[0])
+	if second.RejectCount != 0 || second.BreakCount != 0 {
+		t.Fatalf("expected AT_ZONE zone to default reject/break count to 0, got %+v", second)
 	}
 }
 

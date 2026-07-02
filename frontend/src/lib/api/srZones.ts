@@ -1,5 +1,13 @@
 import { apiFetch } from './client'
 
+export type NetScoreLabel = 'STRONG_SUPPORT' | 'NEUTRAL' | 'STRONG_RESISTANCE'
+export type ConfidenceLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH'
+export type RecentValidation = 'VALIDATED_RECENTLY' | 'PENDING_VALIDATION' | 'NOT_TESTED_RECENTLY' | 'EXPIRED'
+export type VolumeConfirmation = 'CONFIRMED' | 'WEAK' | 'NEUTRAL' | 'FAILED'
+export type ZoneDirection = 'UP' | 'DOWN' | 'FLAT'
+export type TradingRecommendation = 'STRONG_BUY' | 'BUY' | 'WATCH' | 'NEUTRAL' | 'AVOID' | 'STRONG_SELL'
+
+// 機構級版本（2026-07 重新設計，見後端 sr_scoring/scoring.py 開頭的完整說明）
 export interface SRZone {
   id: number
   analysis_id: number
@@ -7,20 +15,40 @@ export interface SRZone {
   price_high: number
   method: 'atr' | 'volume_profile'
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+
   support_score: number
   resistance_score: number
+  net_score: number
+  net_score_label: NetScoreLabel
+
   confidence: number
+  confidence_level: ConfidenceLevel
+
   bounce_probability: number | null
   break_probability: number | null
+  // expected_gain/expected_loss 是角色解析後的平均反彈/跌破報酬；
+  // expected_value = 反彈機率×expected_gain + 跌破機率×expected_loss
+  expected_gain: number | null
+  expected_loss: number | null
   expected_value: number | null
   risk_reward_ratio: number | null
+  reward_risk_percentile: number | null
+
+  relative_volume: number | null
+  volume_confirmation: VolumeConfirmation | null
+
   touch_count: number
-  rejection_count: number
-  breakout_count: number
-  avg_return_after_touch: number
-  relative_volume: number
-  volatility: number
-  trend_strength: number
+  reject_count: number
+  break_count: number
+
+  zone_momentum: number
+  zone_direction: ZoneDirection
+
+  recent_validation: RecentValidation
+
+  trading_score: number
+  trading_recommendation: TradingRecommendation
+
   status: 'PENDING' | 'HELD_SO_FAR' | 'BROKEN'
   broken_at?: string | null
   broken_price?: number | null
@@ -32,6 +60,10 @@ export interface SRZoneAnalysis {
   timeframe: string
   analyzed_at: string
   current_price: number
+  // overall_trend/overall_volatility 是股票層級的量，同一次分析裡所有
+  // zone 共用，不在每個 zone 重複顯示。
+  overall_trend: number
+  overall_volatility: number
   model_version: string
   created_at: string
 }

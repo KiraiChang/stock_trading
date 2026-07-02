@@ -3,6 +3,14 @@
 刻意不重用 backtest/modular/types.py 的 Level/SRLevels：那是「單一價位 +
 強度」語意，這裡的 Zone 是「價格區間 [price_low, price_high]」，語意不同；
 獨立定義可避免耦合既有 /analyze pipeline（Go 已依賴其輸出格式）。
+
+2026-07 機構級重新設計（見 scoring.py 開頭的完整說明）：
+  - avg_return_after_touch 拆成 average_bounce_return / average_break_return，
+    不再混合「反彈」與「跌破」兩種方向完全不同的結果。
+  - volatility / trend_strength 維持在 ZoneFeatures 內（模型訓練/預測仍要用
+    這兩個特徵），但不再是 API 對外輸出的「每個 zone 都重複顯示」欄位——
+    這兩個本質上是股票層級的量，一次算好放在 score_symbol() 回傳值的
+    overall_trend/overall_volatility，避免每個 zone 重複同一個數字。
 """
 from __future__ import annotations
 
@@ -25,6 +33,54 @@ class ZoneMethod(str, Enum):
 class ApproachDirection(str, Enum):
     FROM_ABOVE = "FROM_ABOVE"  # 價格由上往下觸碰 → 候選支撐
     FROM_BELOW = "FROM_BELOW"  # 價格由下往上觸碰 → 候選壓力
+
+
+class NetScoreLabel(str, Enum):
+    """net_score = support_score - resistance_score 的分類，避免使用者只看
+    單一 support_score 就下判斷（兩個分數只差 4 分時，光看 support_score 不
+    容易看出這其實是勢均力敵）。"""
+
+    STRONG_SUPPORT = "STRONG_SUPPORT"
+    NEUTRAL = "NEUTRAL"
+    STRONG_RESISTANCE = "STRONG_RESISTANCE"
+
+
+class ConfidenceLevel(str, Enum):
+    LOW = "LOW"  # 0~30
+    MEDIUM = "MEDIUM"  # 30~60
+    HIGH = "HIGH"  # 60~80
+    VERY_HIGH = "VERY_HIGH"  # 80~100
+
+
+class RecentValidation(str, Enum):
+    """這個 zone 最近一次被「驗證」（觸碰後有足夠未來資料判斷結果）的狀態。"""
+
+    VALIDATED_RECENTLY = "VALIDATED_RECENTLY"  # 最近一次觸碰守住，且發生在 recent_window 根之內
+    PENDING_VALIDATION = "PENDING_VALIDATION"  # 從未被觸碰過，或最近一次觸碰還沒有足夠未來資料判斷結果
+    NOT_TESTED_RECENTLY = "NOT_TESTED_RECENTLY"  # 過去守住過，但已經一段時間沒有新的觸碰
+    EXPIRED = "EXPIRED"  # 最近一次觸碰的結果是跌破/突破，這個 zone 可能已經失效
+
+
+class VolumeConfirmation(str, Enum):
+    CONFIRMED = "CONFIRMED"  # 高量且守住
+    WEAK = "WEAK"  # 量能不足，訊號不可靠
+    NEUTRAL = "NEUTRAL"  # 量能普通
+    FAILED = "FAILED"  # 高量但跌破/突破，量能確認了失敗
+
+
+class ZoneDirection(str, Enum):
+    UP = "UP"
+    DOWN = "DOWN"
+    FLAT = "FLAT"
+
+
+class TradingRecommendation(str, Enum):
+    STRONG_BUY = "STRONG_BUY"
+    BUY = "BUY"
+    WATCH = "WATCH"
+    NEUTRAL = "NEUTRAL"
+    AVOID = "AVOID"
+    STRONG_SELL = "STRONG_SELL"
 
 
 @dataclass(frozen=True)
@@ -51,10 +107,17 @@ class ZoneFeatures:
     touch_count: int
     rejection_count: int
     breakout_count: int
-    avg_return_after_touch: float  # 正值 = 有利於 zone 成立的方向
+    # average_bounce_return：觸碰後被分類為「守住/反彈」（hold_label=1）的
+    # 那些歷史觸碰，其 forward_return 的平均值（恆為正或 0，代表有利方向的
+    # 報酬幅度）。average_break_return：被分類為「跌破/突破」（break_label=1）
+    # 的那些歷史觸碰，其 forward_return 平均值（恆為負或 0）。兩者分開統計，
+    # 不像舊版 avg_return_after_touch 混合所有結果、掩蓋掉「反彈時漲多少」
+    # 跟「跌破時虧多少」是完全不同分佈這件事。
+    average_bounce_return: float
+    average_break_return: float
     relative_volume: float
-    volatility: float  # ATR / close，正規化後跨股可比
-    trend_strength: float  # MA slope，正規化為 slope * lookback / price
+    volatility: float  # ATR / close；股票層級量，見本檔開頭說明
+    trend_strength: float  # MA slope；股票層級量，見本檔開頭說明
 
 
 @dataclass(frozen=True)
@@ -88,31 +151,76 @@ class ZoneLabel:
 
 @dataclass(frozen=True)
 class ZoneScore:
-    """對外回傳的單一 zone 評分結果。
+    """對外回傳的單一 zone 評分結果（機構級重新設計，見 scoring.py 開頭）。
 
-    support_score/resistance_score 由 confidence 收縮過的機率推導而來
-    （見 scoring.py 開頭說明），不是獨立於 bounce/break_probability 之外
-    的規則式分數，兩者不會互相矛盾。
+    支撐/壓力強度：
+      support_score/resistance_score 由 confidence 收縮過的 hold 機率推導
+      （不是獨立規則式公式，不會跟機率互相矛盾）；net_score = support_score
+      - resistance_score，net_score_label 是分類結果，避免只看單一分數。
 
-    confidence：只由觸碰次數決定的貝式收縮係數（0~1），觸碰次數越少越低，
-    用來避免「尚未驗證」的 zone 被判成高分或給出誇大的期望值。
+    可信度：
+      confidence 綜合樣本數、時間衰減（含「最近驗證」）、歷史結果穩定度
+      三個因子（見 scoring.py::_confidence），confidence_level 是分級結果。
 
-    expected_value/risk_reward_ratio：只有 role 為 SUPPORT/RESISTANCE 時
-    才有值（AT_ZONE 沒有明確方向可以算）；expected_value 是「觸碰後平均報酬
-    × hold機率 - zone寬度風險 × break機率」再經 confidence 收縮，
-    risk_reward_ratio 是純粹的報酬/風險幅度比，不受 confidence 影響。
+    交易數字（只有 role 為 SUPPORT/RESISTANCE 時才有值，AT_ZONE 沒有明確
+    方向可以算）：
+      bounce_probability/break_probability：這個 zone 現在角色下的機率
+      （已正規化，見 _normalize_probabilities）。
+      expected_gain/expected_loss：分別對應 average_bounce_return/
+      average_break_return（依角色解析後的方向）。
+      expected_value = bounce_probability × expected_gain +
+                        break_probability × expected_loss（見一、修正說明），
+      不再直接用單一 average_return。
+      risk_reward_ratio = |expected_gain / expected_loss|。
+      reward_risk_percentile：這個 risk_reward_ratio 在訓練資料集歷史分佈中
+      的百分位（見 model.py::ModelBundle.rr_reference）。
+
+    量能：
+      relative_volume 為角色解析後的值；volume_confirmation 是量能是否
+      「確認」這個 zone 走勢的分類。
+
+    區間自身動能（不是股票層級趨勢，見本檔開頭 ZoneFeatures 說明）：
+      zone_momentum/zone_direction：這個 zone 過去每次被觸碰前的平均價格
+      動能，同一檔股票的不同 zone 會有不同值。
+
+    交易決策：
+      recent_validation：最近一次測試的驗證狀態。
+      trading_score/trading_recommendation：綜合以上所有訊號的加權分數與
+      建議，公式見 scoring.py::_trading_score。
     """
 
     price_low: float
     price_high: float
     method: str
     role: str
+
     support_score: float
     resistance_score: float
+    net_score: float
+    net_score_label: str
+
     confidence: float
+    confidence_level: str
+
     bounce_probability: Optional[float]
     break_probability: Optional[float]
+    expected_gain: Optional[float]
+    expected_loss: Optional[float]
     expected_value: Optional[float]
     risk_reward_ratio: Optional[float]
-    features_as_support: Optional[ZoneFeatures]
-    features_as_resistance: Optional[ZoneFeatures]
+    reward_risk_percentile: Optional[float]
+
+    relative_volume: Optional[float]
+    volume_confirmation: Optional[str]
+
+    touch_count: int
+    reject_count: Optional[int]
+    break_count: Optional[int]
+
+    zone_momentum: float
+    zone_direction: str
+
+    recent_validation: str
+
+    trading_score: float
+    trading_recommendation: str

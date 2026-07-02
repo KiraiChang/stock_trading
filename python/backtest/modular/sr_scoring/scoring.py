@@ -2,37 +2,64 @@
 對外主入口：score_symbol(symbol, timeframe) -> dict，供 FastAPI /sr-zones
 端點與 Go internal/analysis.Client.ScoreZones 呼叫。
 
-流程：抓K棒 → 用 ATR / Volume Profile 兩種方法建立 zone → 對每個 zone
-分別算「作為支撐」與「作為壓力」的歷史特徵 → 用訓練好的模型算出
-hold/break 機率 → confidence（觸碰次數的貝式收縮）→ support_score /
-resistance_score 由 confidence 收縮後的 hold 機率直接推導 → 依現價判斷
-角色 → bounce_probability / break_probability / expected_value /
-risk_reward_ratio（角色為 AT_ZONE 時皆為 None）。
+【2026-07 機構級重新設計】把這個功能從「描述市場」的資訊展示，改成能
+「指導交易」的量化決策輸出。改動的核心問題與對應設計：
 
-【score 與 probability 的關係，2026-07 重新設計】
-舊版 support_score/resistance_score 是獨立於機率模型之外的規則式加權公式，
-量的是「歷史觸碰結構」；bounce_probability/break_probability 則是兩個獨立
-訓練的二元分類器，量的是「未來走勢的預測」。兩者測的東西不同，數值上可能
-互相矛盾（規則分數很高，但模型預測反彈機率很低），也可能同時給出不合理的
-組合（bounce_probability + break_probability 加起來超過 100%，邏輯上不可能
-同時高機率反彈又高機率跌破）。
+一、EV 計算方式錯誤
+  舊版：expected_value = hold機率 × reward - break機率 × risk，其中 reward/
+  risk 是「zone 寬度」這種結構性估計，跟「反彈時實際漲多少」脫鉤，導致
+  Bounce=65%/Break=35%/Average Return=-1.6% 這種輸入卻算出反直覺的 EV。
+  新版：expected_value = bounce機率 × average_bounce_return +
+                          break機率 × average_break_return
+  兩個 average_return 分別是「歷史上真的反彈的那些觸碰」與「歷史上真的
+  跌破的那些觸碰」各自的平均報酬（見 features.py::average_bounce_break_returns），
+  不再混合使用單一 avg_return_after_touch。
 
-現在改成：
-  1. hold_model / break_model 的原始輸出先做等比例正規化，確保
-     hold + break <= 1（_normalize_probabilities）。
-  2. support_score / resistance_score 直接由（正規化後的）hold 機率經
-     confidence 貝式收縮推導（_derive_score），不再是獨立公式——score 跟
-     probability 永遠同方向，差異只在 confidence 高低造成的收縮幅度，不會
-     再互相矛盾。
-  3. confidence 只由觸碰次數決定（_confidence），觸碰次數越少，score 跟
-     expected_value 都會被往中性值收縮，避免「只驗證過 1、2 次」的 zone
-     因為那一兩次剛好都反彈，就被判成高分。
+二、Average Return 不再是單一數字
+  average_bounce_return（恆為正/0）與 average_break_return（恆為負/0）
+  分開統計，取代舊版容易混淆「反彈」「跌破」的 avg_return_after_touch。
+
+三、Risk Reward 補齊細節
+  risk_reward_ratio = |expected_gain / expected_loss|
+  （expected_gain/expected_loss 是角色解析後的 average_bounce_return/
+  average_break_return），讓使用者同時看到 Reward、Risk、R 三個數字，不是
+  只有一個抽象的 R 值。
+
+四、Support/Resistance Score 加上 Net Score
+  net_score = support_score - resistance_score，並依門檻分類成
+  STRONG_SUPPORT/NEUTRAL/STRONG_RESISTANCE，避免只看單一分數判斷。
+
+五、Confidence 改成多因子綜合
+  confidence = (sample_factor + recency_factor + stability_factor) / 3
+  sample_factor：觸碰次數的貝式收縮（樣本數）。
+  recency_factor：距離最近一次觸碰的時間衰減（越久沒測試過，這個因子越低）。
+  stability_factor：歷史結果（守住 vs 跌破）的一致性。
+  confidence_level 是 0~30/30~60/60~80/80~100 的分級結果。
+
+六、Recent Validation 取代 Pending Validation
+  依「最近一次觸碰的時間」與「有沒有守住」判斷 VALIDATED_RECENTLY /
+  PENDING_VALIDATION / NOT_TESTED_RECENTLY / EXPIRED 四種狀態。
+
+七、新增 Trading Score / Trading Recommendation
+  綜合角色分數、confidence、EV、RR、整體趨勢、量能確認、區間動能的加權
+  分數（0~100），並映射成 6 級交易建議。
+
+八、新增 Reward/Risk Percentile
+  目前 risk_reward_ratio 在訓練資料集歷史 RR 分佈中的百分位（見
+  model.py::reward_risk_percentile，參考分佈存在 ModelBundle.rr_reference）。
+
+九、新增 Volume Confirmation
+  依角色解析後的 relative_volume 與最近驗證結果分類。
+
+十、十一、Trend / Volatility 移出 Zone 層級
+  這兩個本質上是股票層級的量（同一次分析裡所有 zone 算出來都一樣），只
+  在 score_symbol() 算一次，放在回傳值的 overall_trend/overall_volatility，
+  不再對每個 zone 重複輸出同一個數字（見 十四、9. 全域指標與區間指標分離、
+  十四、7. 避免重複資訊）。新增真正逐 zone 不同的 zone_momentum/
+  zone_direction，取代原本被誤用來代表「zone 趨勢」的股票層級 trend_strength。
 
 模型未訓練時 get_model() 會拋 RuntimeError，這裡刻意不 catch —— 讓
 /sr-zones 在模型就緒前明確失敗（fail-fast），而不是靜默回傳中性機率。
-這也代表 support_score/resistance_score 現在一定需要模型才能算，不再是
-「永遠可算」的規則式分數——這是刻意的設計轉向：把這個功能從「描述市場」
-推進到「指導交易」，數字背後一定要有校準過的機率支撐。
 """
 from __future__ import annotations
 
@@ -42,19 +69,75 @@ import pandas as pd
 
 from db import fetch_candles
 
-from .features import compute_zone_features
-from .model import ModelBundle, get_model, predict_break_probability, predict_hold_probability
-from .types import ApproachDirection, Zone, ZoneFeatures, ZoneScore, ZoneType
+from .features import compute_zone_features, find_touches, trend_slope, zone_momentum, zone_volatility
+from .labeling import label_touch
+from .model import (
+    ModelBundle,
+    get_model,
+    predict_break_probability,
+    predict_hold_probability,
+    reward_risk_percentile,
+)
+from .types import (
+    ApproachDirection,
+    ConfidenceLevel,
+    NetScoreLabel,
+    RecentValidation,
+    TradingRecommendation,
+    VolumeConfirmation,
+    Zone,
+    ZoneDirection,
+    ZoneScore,
+    ZoneTouch,
+    ZoneType,
+)
 from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 
 DEFAULT_FETCH_LIMIT = 250
 
-# 貝式收縮的虛擬樣本數（pseudo-count）：confidence = touch_count / (touch_count + K)。
-# K 越大，需要越多觸碰次數 confidence 才會接近 1；K=5 代表觸碰 5 次時
-# confidence=0.5，觸碰 20 次時 confidence≈0.8。可調，非規格強制。
-CONFIDENCE_PSEUDO_COUNT = 5
+# 跟 dataset.py::DatasetConfig 的預設值保持一致，讓「訓練時怎麼分類觸碰結果」
+# 跟「即時評分時怎麼分類」用同一套標準（十四、2. 不互相矛盾）。
+DEFAULT_FORWARD_BARS = 5
+DEFAULT_THRESHOLD_PCT = 0.03
+DEFAULT_ZONE_LOOKBACK_BARS = 60
+
+# Confidence 三因子的可調參數
+CONFIDENCE_SAMPLE_PSEUDO_COUNT = 5  # 貝式收縮虛擬樣本數：touch_count=5 時 sample_factor=0.5
+CONFIDENCE_RECENCY_HALFLIFE_BARS = 40  # 每過 40 根，recency_factor 減半
+
+# Recent Validation 的時間窗口
+RECENT_VALIDATION_WINDOW_BARS = 20
+STALE_VALIDATION_WINDOW_BARS = 60
+
+# Volume Confirmation 的相對量能門檻
+VOLUME_CONFIRMATION_HIGH = 1.2
+VOLUME_CONFIRMATION_LOW = 0.8
+
+# Net Score 分類門檻
+NET_SCORE_STRONG_THRESHOLD = 0.15
+
+# Zone Direction 分類門檻（zone_momentum 的絕對值超過此值才算有明確方向）
+ZONE_DIRECTION_THRESHOLD = 0.01
+ZONE_MOMENTUM_LOOKBACK = 5
 
 NEUTRAL_PROBABILITY = 0.5
+
+TRADING_SCORE_WEIGHTS = {
+    "role_score": 0.30,
+    "confidence": 0.15,
+    "expected_value": 0.20,
+    "risk_reward": 0.15,
+    "trend": 0.10,
+    "volume": 0.05,
+    "momentum": 0.05,
+}
+
+_VOLUME_CONFIRMATION_WEIGHT = {
+    VolumeConfirmation.CONFIRMED.value: 1.0,
+    VolumeConfirmation.NEUTRAL.value: 0.5,
+    VolumeConfirmation.WEAK.value: 0.3,
+    VolumeConfirmation.FAILED.value: 0.0,
+}
 
 
 def _to_dataframe(rows: list[dict]) -> pd.DataFrame:
@@ -68,11 +151,7 @@ def _default_builders() -> list[ZoneBuilder]:
     return [ATRZoneBuilder(), VolumeProfileZoneBuilder()]
 
 
-def _confidence(touch_count: int, pseudo_count: int = CONFIDENCE_PSEUDO_COUNT) -> float:
-    """觸碰次數越少，confidence 越低（貝式收縮：touch_count=0 時 confidence=0，
-    touch_count 越多 confidence 越接近 1），避免「尚未驗證」的 zone 因為
-    樣本數太少就被判成高分或給出誇大的期望值。"""
-    return float(touch_count / (touch_count + pseudo_count))
+# ── 機率正規化 / score 推導 ──────────────────────────────────
 
 
 def _normalize_probabilities(hold_p: float, break_p: float) -> tuple[float, float]:
@@ -102,19 +181,249 @@ def _resolve_role(zone: Zone, current_price: float) -> str:
     return ZoneType.AT_ZONE.value
 
 
-def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: ModelBundle) -> ZoneScore:
-    as_of_index = len(df) - 1
+def _net_score_label(net_score: float, threshold: float = NET_SCORE_STRONG_THRESHOLD) -> str:
+    if net_score >= threshold:
+        return NetScoreLabel.STRONG_SUPPORT.value
+    if net_score <= -threshold:
+        return NetScoreLabel.STRONG_RESISTANCE.value
+    return NetScoreLabel.NEUTRAL.value
+
+
+# ── Confidence（多因子）────────────────────────────────────────
+
+
+def _sample_factor(touch_count: int, pseudo_count: int = CONFIDENCE_SAMPLE_PSEUDO_COUNT) -> float:
+    """觸碰次數越少，這個因子越低（貝式收縮）。"""
+    return float(touch_count / (touch_count + pseudo_count))
+
+
+def _recency_factor(
+    bars_since_last_touch: Optional[int], halflife: int = CONFIDENCE_RECENCY_HALFLIFE_BARS
+) -> float:
+    """距離最近一次觸碰越久，這個因子越低（time decay，每 halflife 根減半）；
+    從未被觸碰過回傳 0（沒有任何驗證資訊）。"""
+    if bars_since_last_touch is None:
+        return 0.0
+    return float(0.5 ** (bars_since_last_touch / halflife))
+
+
+def _stability_factor(hold_count: int, break_count: int) -> float:
+    """歷史結果一致性：同一種結果（守住 or 跌破）佔比越高，這個 zone 的
+    行為越穩定可預期。沒有可判定的歷史結果時回傳中性值 0.5（無資訊）。"""
+    total = hold_count + break_count
+    if total == 0:
+        return 0.5
+    return float(max(hold_count, break_count) / total)
+
+
+def _confidence(touch_count: int, bars_since_last_touch: Optional[int], hold_count: int, break_count: int) -> float:
+    """三個因子（樣本數/時間衰減/歷史穩定度）等權重平均。刻意選擇簡單、
+    可解釋的公式：任一因子偏低都會拖低整體 confidence，避免「觸碰次數夠多
+    但都是很久以前」或「次數多但結果很不穩定」被誤判成高可信度。"""
+    sample = _sample_factor(touch_count)
+    recency = _recency_factor(bars_since_last_touch)
+    stability = _stability_factor(hold_count, break_count)
+    return float((sample + recency + stability) / 3.0)
+
+
+def _confidence_level(confidence: float) -> str:
+    pct = confidence * 100
+    if pct < 30:
+        return ConfidenceLevel.LOW.value
+    if pct < 60:
+        return ConfidenceLevel.MEDIUM.value
+    if pct < 80:
+        return ConfidenceLevel.HIGH.value
+    return ConfidenceLevel.VERY_HIGH.value
+
+
+# ── 觸碰結果分類（reuse labeling.py 的判定邏輯）──────────────────
+
+
+def _classify_touches(
+    df: pd.DataFrame,
+    touches: list[ZoneTouch],
+    forward_bars: int,
+    threshold_pct: float,
+    as_of_index: int,
+    label_method: str = "max_excursion",
+) -> list[tuple[ZoneTouch, int, int, float]]:
+    """回傳 [(touch, hold_label, break_label, forward_return), ...]，只含
+    touch_index+forward_bars <= as_of_index（有足夠未來資料可判定、且不會
+    lookahead）的觸碰，依 touch_index 由舊到新排序（find_touches 本來就是
+    照這個順序掃描，這裡沿用不重新排序）。"""
+    classified: list[tuple[ZoneTouch, int, int, float]] = []
+    for touch in touches:
+        if touch.touch_index + forward_bars > as_of_index:
+            continue
+        result = label_touch(df, touch, forward_bars, threshold_pct, label_method)
+        if result is None:
+            continue
+        hold_label, break_label, forward_return = result
+        classified.append((touch, hold_label, break_label, forward_return))
+    return classified
+
+
+def _recent_validation(
+    touches: list[ZoneTouch],
+    classified: list[tuple[ZoneTouch, int, int, float]],
+    as_of_index: int,
+) -> str:
+    if not touches:
+        return RecentValidation.PENDING_VALIDATION.value  # 從未被觸碰過
+
+    last_touch = touches[-1]
+    if not classified or classified[-1][0].touch_index != last_touch.touch_index:
+        return RecentValidation.PENDING_VALIDATION.value  # 最後一次觸碰太新，還不知道結果
+
+    _, hold_label, break_label, _ = classified[-1]
+    bars_since = as_of_index - last_touch.touch_index
+
+    if break_label:
+        return RecentValidation.EXPIRED.value
+    if hold_label and bars_since <= RECENT_VALIDATION_WINDOW_BARS:
+        return RecentValidation.VALIDATED_RECENTLY.value
+    if bars_since > STALE_VALIDATION_WINDOW_BARS:
+        return RecentValidation.NOT_TESTED_RECENTLY.value
+    return RecentValidation.VALIDATED_RECENTLY.value if hold_label else RecentValidation.NOT_TESTED_RECENTLY.value
+
+
+def _volume_confirmation(relative_volume: float, recent_validation: str) -> str:
+    """判斷依據：角色解析後的 relative_volume（觸碰量相對均量）+ 最近一次
+    驗證結果。高量且守住 → CONFIRMED；高量但跌破/突破 → FAILED（量能確認了
+    失敗）；量能不足 → WEAK；其餘 → NEUTRAL。"""
+    if recent_validation == RecentValidation.EXPIRED.value and relative_volume >= VOLUME_CONFIRMATION_HIGH:
+        return VolumeConfirmation.FAILED.value
+    if recent_validation == RecentValidation.VALIDATED_RECENTLY.value and relative_volume >= VOLUME_CONFIRMATION_HIGH:
+        return VolumeConfirmation.CONFIRMED.value
+    if relative_volume < VOLUME_CONFIRMATION_LOW:
+        return VolumeConfirmation.WEAK.value
+    return VolumeConfirmation.NEUTRAL.value
+
+
+def _zone_direction(momentum: float, threshold: float = ZONE_DIRECTION_THRESHOLD) -> str:
+    if momentum > threshold:
+        return ZoneDirection.UP.value
+    if momentum < -threshold:
+        return ZoneDirection.DOWN.value
+    return ZoneDirection.FLAT.value
+
+
+# ── Trading Score / Recommendation ──────────────────────────────
+
+
+def _normalize_signed(value: float, cap: float) -> float:
+    """把可正可負的訊號（例如 EV、trend、momentum）正規化到 [0,1]，0.5 為
+    中性、+cap 以上算滿分、-cap 以下算 0 分。"""
+    return float(max(0.0, min(1.0, 0.5 + value / (2 * cap))))
+
+
+def _trading_score(
+    role: str,
+    role_score: float,
+    confidence: float,
+    expected_value: Optional[float],
+    risk_reward_ratio: Optional[float],
+    overall_trend: float,
+    volume_confirmation: str,
+    zone_momentum_value: float,
+) -> float:
+    """綜合支撐/壓力分數、可信度、期望值、風險報酬比、整體趨勢、量能確認、
+    區間動能的加權分數（0~100）。權重（TRADING_SCORE_WEIGHTS）是明確標註的
+    可調 heuristic，非規格強制值。role=AT_ZONE 時沒有明確方向可交易，只用
+    role_score 與 confidence 兩項簡化計算。"""
+    if role == ZoneType.AT_ZONE.value:
+        score01 = 0.5 * role_score + 0.5 * confidence
+        return float(max(0.0, min(1.0, score01)) * 100)
+
+    is_support = role == ZoneType.SUPPORT.value
+    ev_component = _normalize_signed(expected_value, cap=0.05) if expected_value is not None else 0.5
+    rr_component = float(max(0.0, min(1.0, (risk_reward_ratio or 0.0) / 3.0)))
+    trend_component = _normalize_signed(overall_trend if is_support else -overall_trend, cap=0.1)
+    momentum_component = _normalize_signed(
+        zone_momentum_value if is_support else -zone_momentum_value, cap=0.05
+    )
+    volume_component = _VOLUME_CONFIRMATION_WEIGHT.get(volume_confirmation, 0.5)
+
+    w = TRADING_SCORE_WEIGHTS
+    score01 = (
+        w["role_score"] * role_score
+        + w["confidence"] * confidence
+        + w["expected_value"] * ev_component
+        + w["risk_reward"] * rr_component
+        + w["trend"] * trend_component
+        + w["volume"] * volume_component
+        + w["momentum"] * momentum_component
+    )
+    return float(max(0.0, min(1.0, score01)) * 100)
+
+
+def _trading_recommendation(trading_score: float, role: str) -> str:
+    """role=SUPPORT：分數高代表『守住訊號強』= 偏多（買進）訊號。
+    role=RESISTANCE：分數高代表『壓力守住訊號強』= 偏空（避開做多/放空）
+    訊號。role=AT_ZONE：沒有明確方向，只給 WATCH/NEUTRAL。6 個類別
+    （Strong Buy/Buy/Watch/Neutral/Avoid/Strong Sell）與非對稱門檻（只有
+    Strong Sell、沒有單獨的 Sell）是需求文件原始定義，這裡照實作。"""
+    if role == ZoneType.AT_ZONE.value:
+        return TradingRecommendation.WATCH.value if trading_score >= 50 else TradingRecommendation.NEUTRAL.value
+
+    if role == ZoneType.SUPPORT.value:
+        if trading_score >= 80:
+            return TradingRecommendation.STRONG_BUY.value
+        if trading_score >= 60:
+            return TradingRecommendation.BUY.value
+        if trading_score >= 40:
+            return TradingRecommendation.WATCH.value
+        if trading_score >= 20:
+            return TradingRecommendation.NEUTRAL.value
+        return TradingRecommendation.AVOID.value
+
+    # RESISTANCE
+    if trading_score >= 80:
+        return TradingRecommendation.STRONG_SELL.value
+    if trading_score >= 60:
+        return TradingRecommendation.AVOID.value
+    if trading_score >= 40:
+        return TradingRecommendation.NEUTRAL.value
+    if trading_score >= 20:
+        return TradingRecommendation.WATCH.value
+    return TradingRecommendation.NEUTRAL.value
+
+
+# ── 主流程 ────────────────────────────────────────────────────
+
+
+def score_zone(
+    df: pd.DataFrame,
+    zone: Zone,
+    current_price: float,
+    bundle: ModelBundle,
+    overall_trend: float,
+    as_of_index: Optional[int] = None,
+    lookback_bars: int = DEFAULT_ZONE_LOOKBACK_BARS,
+    forward_bars: int = DEFAULT_FORWARD_BARS,
+    threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+) -> ZoneScore:
+    if as_of_index is None:
+        as_of_index = len(df) - 1
 
     features_as_support = compute_zone_features(
-        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_ABOVE
+        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_ABOVE,
+        lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
     )
     features_as_resistance = compute_zone_features(
-        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_BELOW
+        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_BELOW,
+        lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
     )
 
-    # touch_count 是聚合值（不分方向），兩邊 features 算出來的值相同，
-    # confidence 用哪一邊都一樣，只需要算一次。
-    confidence = _confidence(features_as_support.touch_count)
+    all_touches = find_touches(df, zone, as_of_index, lookback_bars)
+    all_classified = _classify_touches(df, all_touches, forward_bars, threshold_pct, as_of_index)
+    hold_count = sum(1 for _, hold_label, _, _ in all_classified if hold_label)
+    break_count = sum(1 for _, _, break_label, _ in all_classified if break_label)
+    bars_since_last_touch = (as_of_index - all_touches[-1].touch_index) if all_touches else None
+
+    confidence = _confidence(features_as_support.touch_count, bars_since_last_touch, hold_count, break_count)
+    confidence_level = _confidence_level(confidence)
 
     support_hold, support_break = _normalize_probabilities(
         predict_hold_probability(bundle, features_as_support, is_support=True),
@@ -127,33 +436,65 @@ def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: Model
 
     support_score = _derive_score(support_hold, confidence)
     resistance_score = _derive_score(resistance_hold, confidence)
+    net_score = support_score - resistance_score
+    net_score_label = _net_score_label(net_score)
 
     role = _resolve_role(zone, current_price)
 
+    if role == ZoneType.AT_ZONE.value:
+        role_touches = all_touches
+        role_classified = all_classified
+    else:
+        approach = ApproachDirection.FROM_ABOVE if role == ZoneType.SUPPORT.value else ApproachDirection.FROM_BELOW
+        role_touches = [t for t in all_touches if t.approach_direction == approach]
+        role_classified = _classify_touches(df, role_touches, forward_bars, threshold_pct, as_of_index)
+    recent_validation = _recent_validation(role_touches, role_classified, as_of_index)
+
+    zone_momentum_value = zone_momentum(df, all_touches, lookback=ZONE_MOMENTUM_LOOKBACK)
+    zone_direction = _zone_direction(zone_momentum_value)
+
     bounce_probability: Optional[float] = None
     break_probability: Optional[float] = None
+    expected_gain: Optional[float] = None
+    expected_loss: Optional[float] = None
     expected_value: Optional[float] = None
     risk_reward_ratio: Optional[float] = None
+    reward_risk_percentile_value: Optional[float] = None
+    relative_volume: Optional[float] = None
+    volume_confirmation: Optional[str] = None
+    reject_count: Optional[int] = None
+    break_count_field: Optional[int] = None
+    role_score = max(support_score, resistance_score)
 
     if role != ZoneType.AT_ZONE.value:
         is_support = role == ZoneType.SUPPORT.value
         role_features = features_as_support if is_support else features_as_resistance
         hold_p, break_p = (support_hold, support_break) if is_support else (resistance_hold, resistance_break)
+        role_score = support_score if is_support else resistance_score
 
         bounce_probability = hold_p
         break_probability = break_p
+        expected_gain = role_features.average_bounce_return
+        expected_loss = role_features.average_break_return
+        # 一、修正 EV：不再用單一 average_return，改成 hold機率×平均反彈報酬 +
+        # break機率×平均跌破報酬，兩個方向分開加權。
+        expected_value = hold_p * expected_gain + break_p * expected_loss
 
-        # 報酬用這個 zone 自己「觸碰後平均報酬」的歷史經驗值；風險用 zone
-        # 自身寬度相對現價的比例（價格跌破/漲破 zone 另一側邊界的估計損失），
-        # 兩者都是這個 zone 既有的資料，不用額外去抓其他價位當停利/停損參考。
-        reward_pct = abs(role_features.avg_return_after_touch)
-        risk_pct = zone.width / current_price if current_price > 0 else 0.0
-        if risk_pct > 0:
-            risk_reward_ratio = float(reward_pct / risk_pct)
-            raw_ev = hold_p * reward_pct - break_p * risk_pct
-            # EV 也用 confidence 收縮：觸碰次數太少時，即使算出來的 EV 很
-            # 誘人，也不該讓使用者看到一個「還沒被驗證過」的滿版期望值。
-            expected_value = float(confidence * raw_ev)
+        relative_volume = role_features.relative_volume
+        reject_count = role_features.rejection_count
+        break_count_field = role_features.breakout_count
+
+        if expected_loss != 0:
+            risk_reward_ratio = abs(expected_gain / expected_loss)
+            reward_risk_percentile_value = reward_risk_percentile(bundle, risk_reward_ratio)
+
+        volume_confirmation = _volume_confirmation(relative_volume, recent_validation)
+
+    trading_score_value = _trading_score(
+        role, role_score, confidence, expected_value, risk_reward_ratio, overall_trend,
+        volume_confirmation or VolumeConfirmation.NEUTRAL.value, zone_momentum_value,
+    )
+    trading_recommendation = _trading_recommendation(trading_score_value, role)
 
     return ZoneScore(
         price_low=zone.price_low,
@@ -162,13 +503,27 @@ def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: Model
         role=role,
         support_score=support_score,
         resistance_score=resistance_score,
+        net_score=net_score,
+        net_score_label=net_score_label,
         confidence=confidence,
+        confidence_level=confidence_level,
         bounce_probability=bounce_probability,
         break_probability=break_probability,
+        expected_gain=expected_gain,
+        expected_loss=expected_loss,
         expected_value=expected_value,
         risk_reward_ratio=risk_reward_ratio,
-        features_as_support=features_as_support,
-        features_as_resistance=features_as_resistance,
+        reward_risk_percentile=reward_risk_percentile_value,
+        relative_volume=relative_volume,
+        volume_confirmation=volume_confirmation,
+        touch_count=features_as_support.touch_count,
+        reject_count=reject_count,
+        break_count=break_count_field,
+        zone_momentum=zone_momentum_value,
+        zone_direction=zone_direction,
+        recent_validation=recent_validation,
+        trading_score=trading_score_value,
+        trading_recommendation=trading_recommendation,
     )
 
 
@@ -198,30 +553,26 @@ def score_symbol(
 
     current_price = float(df["close"].iloc[-1])
     analyzed_at = df.index[-1]
+    as_of_index = len(df) - 1
     bundle = get_model()
 
-    zone_scores = [score_zone(df, zone, current_price, bundle) for zone in zones]
+    # 十、十一：Trend/Volatility 是股票層級的量，只算一次，不對每個 zone 重複輸出。
+    overall_trend = trend_slope(df, as_of_index)
+    overall_volatility = zone_volatility(df, as_of_index)
+
+    zone_scores = [
+        score_zone(df, zone, current_price, bundle, overall_trend, as_of_index=as_of_index)
+        for zone in zones
+    ]
 
     return {
         "symbol": symbol,
         "timeframe": timeframe,
         "analyzed_at": analyzed_at.isoformat(),
         "current_price": current_price,
+        "overall_trend": overall_trend,
+        "overall_volatility": overall_volatility,
         "zones": [_zone_score_to_dict(z) for z in zone_scores],
-    }
-
-
-def _features_to_dict(features: Optional[ZoneFeatures]) -> Optional[dict[str, Any]]:
-    if features is None:
-        return None
-    return {
-        "touch_count": features.touch_count,
-        "rejection_count": features.rejection_count,
-        "breakout_count": features.breakout_count,
-        "avg_return_after_touch": features.avg_return_after_touch,
-        "relative_volume": features.relative_volume,
-        "volatility": features.volatility,
-        "trend_strength": features.trend_strength,
     }
 
 
@@ -233,11 +584,25 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "role": z.role,
         "support_score": z.support_score,
         "resistance_score": z.resistance_score,
+        "net_score": z.net_score,
+        "net_score_label": z.net_score_label,
         "confidence": z.confidence,
+        "confidence_level": z.confidence_level,
         "bounce_probability": z.bounce_probability,
         "break_probability": z.break_probability,
+        "expected_gain": z.expected_gain,
+        "expected_loss": z.expected_loss,
         "expected_value": z.expected_value,
         "risk_reward_ratio": z.risk_reward_ratio,
-        "features_as_support": _features_to_dict(z.features_as_support),
-        "features_as_resistance": _features_to_dict(z.features_as_resistance),
+        "reward_risk_percentile": z.reward_risk_percentile,
+        "relative_volume": z.relative_volume,
+        "volume_confirmation": z.volume_confirmation,
+        "touch_count": z.touch_count,
+        "reject_count": z.reject_count,
+        "break_count": z.break_count,
+        "zone_momentum": z.zone_momentum,
+        "zone_direction": z.zone_direction,
+        "recent_validation": z.recent_validation,
+        "trading_score": z.trading_score,
+        "trading_recommendation": z.trading_recommendation,
     }

@@ -35,23 +35,15 @@
   onMount(loadHistory)
 
   const roleLabel: Record<string, string> = {
-    SUPPORT: '支撐',
-    RESISTANCE: '壓力',
-    AT_ZONE: '現價在區間內',
+    SUPPORT: '支撐', RESISTANCE: '壓力', AT_ZONE: '現價在區間內',
   }
   const roleClass: Record<string, string> = {
     SUPPORT: 'bg-green-900/40 text-rise',
     RESISTANCE: 'bg-red-900/40 text-fall',
     AT_ZONE: 'bg-gray-700/60 text-gray-300',
   }
-  const roleTextClass: Record<string, string> = {
-    SUPPORT: 'text-rise',
-    RESISTANCE: 'text-fall',
-    AT_ZONE: 'text-muted',
-  }
   const methodLabel: Record<string, string> = {
-    atr: 'ATR 通道',
-    volume_profile: '成交量分布',
+    atr: 'ATR 通道', volume_profile: '成交量分布',
   }
   const statusLabel: Record<string, string> = {
     PENDING: '尚未驗證', HELD_SO_FAR: '目前守住', BROKEN: '已被突破',
@@ -60,6 +52,63 @@
     PENDING: 'bg-gray-700/60 text-gray-400',
     HELD_SO_FAR: 'bg-green-900/40 text-green-400',
     BROKEN: 'bg-red-900/40 text-red-400',
+  }
+
+  const netScoreLabelText: Record<string, string> = {
+    STRONG_SUPPORT: '強力支撐', NEUTRAL: '勢均力敵', STRONG_RESISTANCE: '強力壓力',
+  }
+  const netScoreLabelClass: Record<string, string> = {
+    STRONG_SUPPORT: 'bg-green-900/40 text-rise',
+    NEUTRAL: 'bg-gray-700/60 text-gray-300',
+    STRONG_RESISTANCE: 'bg-red-900/40 text-fall',
+  }
+
+  const confidenceLevelText: Record<string, string> = {
+    LOW: '低', MEDIUM: '中', HIGH: '高', VERY_HIGH: '極高',
+  }
+  const confidenceLevelClass: Record<string, string> = {
+    LOW: 'bg-gray-700/60 text-gray-400',
+    MEDIUM: 'bg-yellow-900/40 text-yellow-400',
+    HIGH: 'bg-green-900/40 text-green-400',
+    VERY_HIGH: 'bg-green-900/60 text-green-300',
+  }
+
+  const recentValidationText: Record<string, string> = {
+    VALIDATED_RECENTLY: '最近已驗證', PENDING_VALIDATION: '尚待驗證',
+    NOT_TESTED_RECENTLY: '近期未測試', EXPIRED: '可能已失效',
+  }
+  const recentValidationClass: Record<string, string> = {
+    VALIDATED_RECENTLY: 'bg-green-900/40 text-green-400',
+    PENDING_VALIDATION: 'bg-gray-700/60 text-gray-400',
+    NOT_TESTED_RECENTLY: 'bg-yellow-900/40 text-yellow-400',
+    EXPIRED: 'bg-red-900/40 text-red-400',
+  }
+
+  const volumeConfirmationText: Record<string, string> = {
+    CONFIRMED: '量能確認', WEAK: '量能不足', NEUTRAL: '量能普通', FAILED: '量能確認失敗',
+  }
+  const volumeConfirmationClass: Record<string, string> = {
+    CONFIRMED: 'bg-green-900/40 text-green-400',
+    WEAK: 'bg-yellow-900/40 text-yellow-400',
+    NEUTRAL: 'bg-gray-700/60 text-gray-400',
+    FAILED: 'bg-red-900/40 text-red-400',
+  }
+
+  const zoneDirectionText: Record<string, string> = { UP: '↑ 上升', DOWN: '↓ 下降', FLAT: '→ 持平' }
+  const zoneDirectionClass: Record<string, string> = {
+    UP: 'text-rise', DOWN: 'text-fall', FLAT: 'text-muted',
+  }
+
+  const recommendationText: Record<string, string> = {
+    STRONG_BUY: '強力買進', BUY: '買進', WATCH: '觀察', NEUTRAL: '中性', AVOID: '避開', STRONG_SELL: '強力放空',
+  }
+  const recommendationClass: Record<string, string> = {
+    STRONG_BUY: 'bg-green-900/60 text-green-300',
+    BUY: 'bg-green-900/40 text-green-400',
+    WATCH: 'bg-blue-900/40 text-blue-400',
+    NEUTRAL: 'bg-gray-700/60 text-gray-400',
+    AVOID: 'bg-yellow-900/40 text-yellow-400',
+    STRONG_SELL: 'bg-red-900/60 text-red-300',
   }
 
   async function submit() {
@@ -107,8 +156,10 @@
     }
   }
 
+  // 依 Trading Score 排序：這是綜合所有訊號後的最終決策分數，比單看
+  // support_score/resistance_score 更能反映「哪個 zone 值得優先關注」。
   function sortZones(zones: SRZone[]): SRZone[] {
-    return [...zones].sort((a, b) => Math.max(b.support_score, b.resistance_score) - Math.max(a.support_score, a.resistance_score))
+    return [...zones].sort((a, b) => b.trading_score - a.trading_score)
   }
 
   // symbol 留空時列出「所有股票」最近的分析紀錄，方便一進頁面就有內容可看；
@@ -178,31 +229,20 @@
     return v === undefined || v === null ? '—' : `${v.toFixed(2)}R`
   }
 
-  function evClass(v?: number | null): string {
+  function fmtScore100(v?: number | null): string {
+    return v === undefined || v === null ? '—' : v.toFixed(0)
+  }
+
+  function signedClass(v?: number | null): string {
     if (v === undefined || v === null) return 'text-muted'
     if (v > 0) return 'text-rise'
     if (v < 0) return 'text-fall'
     return 'text-muted'
   }
-
-  // confidence 是觸碰次數的貝式收縮係數，touch_count 太少時分數/期望值都會
-  // 被收縮到中性值——這裡用門檻標示「這個分數有多少歷史證據支撐」，避免
-  // 使用者把「尚未驗證」的 zone 誤判成高確信的訊號。
-  function confidenceLabel(c: number): string {
-    if (c >= 0.7) return '高'
-    if (c >= 0.35) return '中'
-    return '低'
-  }
-
-  function confidenceClass(c: number): string {
-    if (c >= 0.7) return 'bg-green-900/40 text-green-400'
-    if (c >= 0.35) return 'bg-yellow-900/40 text-yellow-400'
-    return 'bg-gray-700/60 text-gray-400'
-  }
 </script>
 
 <Layout>
-  <div class="max-w-4xl mx-auto space-y-4">
+  <div class="max-w-5xl mx-auto space-y-4">
     <h1 class="text-white font-semibold">支撐/壓力機率分析</h1>
 
     <!-- ── 輸入表單 ──────────────────────────────────────────── -->
@@ -305,23 +345,45 @@
           </div>
         </div>
 
+        <!-- 股票層級指標：只顯示一次，不在每個 zone 重複 -->
+        <div class="px-5 py-3 border-b border-border bg-surface/40 flex gap-6 text-xs">
+          <div>
+            <span class="text-muted">整體趨勢（Overall Trend）</span>
+            <span class="ml-2 font-mono {signedClass(current.overall_trend)}">{fmtSignedPct(current.overall_trend)}</span>
+          </div>
+          <div>
+            <span class="text-muted">整體波動率（Overall Volatility）</span>
+            <span class="ml-2 font-mono text-white">{fmtPct(current.overall_volatility)}</span>
+          </div>
+        </div>
+
         <div class="divide-y divide-border">
           {#each currentZones as z (z.id)}
             <div class="px-5 py-4">
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2">
+              <!-- 標題列：價格區間、角色、Net Score 分類、交易建議 -->
+              <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-mono text-white text-sm">{fmt(z.price_low)} ~ {fmt(z.price_high)}</span>
                   <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[z.role] ?? 'bg-gray-700/60 text-gray-400'}">
                     {roleLabel[z.role] ?? z.role}
                   </span>
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {netScoreLabelClass[z.net_score_label] ?? ''}">
+                    {netScoreLabelText[z.net_score_label] ?? z.net_score_label}
+                  </span>
                   <span class="text-muted text-xs">{methodLabel[z.method] ?? z.method}</span>
                 </div>
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
-                  {statusLabel[z.status] ?? z.status}
-                </span>
+                <div class="flex items-center gap-2">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
+                    {statusLabel[z.status] ?? z.status}
+                  </span>
+                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold {recommendationClass[z.trading_recommendation] ?? ''}">
+                    {recommendationText[z.trading_recommendation] ?? z.trading_recommendation}
+                  </span>
+                </div>
               </div>
 
-              <div class="grid grid-cols-3 gap-3 text-xs mb-3">
+              <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->
+              <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs mb-3">
                 <div>
                   <p class="text-muted mb-1">支撐強度分數</p>
                   <p class="text-rise font-mono">{fmtPct(z.support_score)}</p>
@@ -331,43 +393,66 @@
                   <p class="text-fall font-mono">{fmtPct(z.resistance_score)}</p>
                 </div>
                 <div>
+                  <p class="text-muted mb-1">Net Score</p>
+                  <p class="{signedClass(z.net_score)} font-mono">{fmtSignedPct(z.net_score)}</p>
+                </div>
+                <div>
                   <p class="text-muted mb-1 flex items-center gap-1">
                     可信度
-                    <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceClass(z.confidence)}">
-                      {confidenceLabel(z.confidence)}
+                    <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceLevelClass[z.confidence_level] ?? ''}">
+                      {confidenceLevelText[z.confidence_level] ?? z.confidence_level}
                     </span>
                   </p>
                   <p class="text-white font-mono">{fmtPct(z.confidence)}</p>
                 </div>
+                <div>
+                  <p class="text-muted mb-1">Trading Score</p>
+                  <p class="text-white font-mono">{fmtScore100(z.trading_score)} / 100</p>
+                </div>
               </div>
 
+              <!-- 交易數字列：機率、期望報酬、期望值、風險報酬比 -->
               <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
                 <div>
-                  <p class="text-muted mb-1">反彈機率</p>
-                  <p class="text-white font-mono">{fmtPct(z.bounce_probability)}</p>
+                  <p class="text-muted mb-1">反彈機率 / 跌破機率</p>
+                  <p class="text-white font-mono">{fmtPct(z.bounce_probability)} / {fmtPct(z.break_probability)}</p>
                 </div>
                 <div>
-                  <p class="text-muted mb-1">跌破機率</p>
-                  <p class="text-white font-mono">{fmtPct(z.break_probability)}</p>
+                  <p class="text-muted mb-1">Expected Gain / Loss</p>
+                  <p class="font-mono"><span class="text-rise">{fmtSignedPct(z.expected_gain)}</span> / <span class="text-fall">{fmtSignedPct(z.expected_loss)}</span></p>
                 </div>
                 <div>
-                  <p class="text-muted mb-1">期望值 (EV)</p>
-                  <p class="{evClass(z.expected_value)} font-mono">{fmtSignedPct(z.expected_value)}</p>
+                  <p class="text-muted mb-1">Expected Value</p>
+                  <p class="{signedClass(z.expected_value)} font-mono">{fmtSignedPct(z.expected_value)}</p>
                 </div>
                 <div>
-                  <p class="text-muted mb-1">風險報酬比 (R)</p>
+                  <p class="text-muted mb-1">Risk Reward{z.reward_risk_percentile !== null ? ` (${z.reward_risk_percentile.toFixed(0)}百分位)` : ''}</p>
                   <p class="text-white font-mono">{fmtRatio(z.risk_reward_ratio)}</p>
                 </div>
               </div>
 
-              <div class="grid grid-cols-3 sm:grid-cols-7 gap-3 text-xs text-muted">
+              <!-- 量能與驗證狀態列 -->
+              <div class="flex flex-wrap gap-2 mb-3">
+                {#if z.volume_confirmation}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {volumeConfirmationClass[z.volume_confirmation] ?? ''}">
+                    {volumeConfirmationText[z.volume_confirmation] ?? z.volume_confirmation}
+                  </span>
+                {/if}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {recentValidationClass[z.recent_validation] ?? ''}">
+                  {recentValidationText[z.recent_validation] ?? z.recent_validation}
+                </span>
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700/60 {zoneDirectionClass[z.zone_direction] ?? 'text-muted'}">
+                  區間動能 {zoneDirectionText[z.zone_direction] ?? z.zone_direction}
+                </span>
+              </div>
+
+              <!-- 觸碰統計列 -->
+              <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 text-xs text-muted">
                 <div><p class="mb-1">觸碰次數</p><p class="text-white">{z.touch_count}</p></div>
-                <div><p class="mb-1">拒絕次數</p><p class="text-white">{z.rejection_count}</p></div>
-                <div><p class="mb-1">突破次數</p><p class="text-white">{z.breakout_count}</p></div>
-                <div><p class="mb-1">觸碰後平均報酬</p><p class="{roleTextClass[z.role] ?? 'text-white'}">{fmtPct(z.avg_return_after_touch)}</p></div>
-                <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume.toFixed(2)}x</p></div>
-                <div><p class="mb-1">波動率</p><p class="text-white">{fmtPct(z.volatility)}</p></div>
-                <div><p class="mb-1">趨勢強度</p><p class="{z.trend_strength >= 0 ? 'text-rise' : 'text-fall'}">{fmtPct(z.trend_strength)}</p></div>
+                <div><p class="mb-1">拒絕次數</p><p class="text-white">{z.reject_count}</p></div>
+                <div><p class="mb-1">突破次數</p><p class="text-white">{z.break_count}</p></div>
+                <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
+                <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
               </div>
             </div>
           {:else}

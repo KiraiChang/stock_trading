@@ -77,7 +77,9 @@ def build_training_rows(
                 as_of_index=i,
                 approach=touch.approach_direction,
                 lookback_bars=config.zone_lookback_bars,
-                forward_bars_for_return=forward_bars,
+                forward_bars=forward_bars,
+                threshold_pct=threshold_pct,
+                label_method=config.label_method,
             )
 
             rows.append(
@@ -114,7 +116,7 @@ def build_training_dataset(
     columns = [
         "symbol", "timeframe", "touch_time", "zone_price_low", "zone_price_high",
         "method", "role", "is_support", "touch_count", "rejection_count", "breakout_count",
-        "avg_return_after_touch", "relative_volume", "volatility", "trend_strength",
+        "average_bounce_return", "average_break_return", "relative_volume", "volatility", "trend_strength",
         "forward_bars", "threshold_pct", "hold_label", "break_label", "forward_return",
     ]
     if not all_rows:
@@ -133,7 +135,8 @@ def build_training_dataset(
             "touch_count": row.features.touch_count,
             "rejection_count": row.features.rejection_count,
             "breakout_count": row.features.breakout_count,
-            "avg_return_after_touch": row.features.avg_return_after_touch,
+            "average_bounce_return": row.features.average_bounce_return,
+            "average_break_return": row.features.average_break_return,
             "relative_volume": row.features.relative_volume,
             "volatility": row.features.volatility,
             "trend_strength": row.features.trend_strength,

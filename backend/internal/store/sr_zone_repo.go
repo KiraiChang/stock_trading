@@ -33,25 +33,25 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 	}
 	defer tx.Rollback()
 
-	const cols = `symbol, timeframe, analyzed_at, current_price, model_version`
+	const cols = `symbol, timeframe, analyzed_at, current_price, overall_trend, overall_volatility, model_version`
 
 	var id uint64
 	if r.driver == "pgx" {
 		// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES ($1,$2,$3,$4,$5)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
 			RETURNING id
 		`,
-			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice, a.ModelVersion,
+			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice, a.OverallTrend, a.OverallVolatility, a.ModelVersion,
 		).Scan(&id)
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES (?,?,?,?,?)
+			VALUES (?,?,?,?,?,?,?)
 		`),
-			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice, a.ModelVersion,
+			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice, a.OverallTrend, a.OverallVolatility, a.ModelVersion,
 		)
 		if err == nil {
 			var lastID int64
@@ -71,16 +71,24 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 		if _, err := tx.NamedExecContext(ctx, `
 			INSERT INTO stock_sr_zones (
 				analysis_id, price_low, price_high, method, role,
-				support_score, resistance_score, confidence, bounce_probability, break_probability,
-				expected_value, risk_reward_ratio,
-				touch_count, rejection_count, breakout_count, avg_return_after_touch,
-				relative_volume, volatility, trend_strength, status
+				support_score, resistance_score, net_score, net_score_label,
+				confidence, confidence_level,
+				bounce_probability, break_probability,
+				expected_gain, expected_loss, expected_value, risk_reward_ratio, reward_risk_percentile,
+				relative_volume, volume_confirmation,
+				touch_count, reject_count, break_count,
+				zone_momentum, zone_direction,
+				recent_validation, trading_score, trading_recommendation, status
 			) VALUES (
 				:analysis_id, :price_low, :price_high, :method, :role,
-				:support_score, :resistance_score, :confidence, :bounce_probability, :break_probability,
-				:expected_value, :risk_reward_ratio,
-				:touch_count, :rejection_count, :breakout_count, :avg_return_after_touch,
-				:relative_volume, :volatility, :trend_strength, :status
+				:support_score, :resistance_score, :net_score, :net_score_label,
+				:confidence, :confidence_level,
+				:bounce_probability, :break_probability,
+				:expected_gain, :expected_loss, :expected_value, :risk_reward_ratio, :reward_risk_percentile,
+				:relative_volume, :volume_confirmation,
+				:touch_count, :reject_count, :break_count,
+				:zone_momentum, :zone_direction,
+				:recent_validation, :trading_score, :trading_recommendation, :status
 			)
 		`, zones[i]); err != nil {
 			return 0, err
@@ -93,7 +101,7 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 	return id, nil
 }
 
-const srZoneAnalysisColumns = `id, symbol, timeframe, analyzed_at, current_price, model_version, created_at`
+const srZoneAnalysisColumns = `id, symbol, timeframe, analyzed_at, current_price, overall_trend, overall_volatility, model_version, created_at`
 
 func (r *srZoneRepo) Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error) {
 	var a SRZoneAnalysis
@@ -127,11 +135,16 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 	var rows []SRZone
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 		SELECT id, analysis_id, price_low, price_high, method, role,
-			support_score, resistance_score, confidence, bounce_probability, break_probability,
-			expected_value, risk_reward_ratio,
-			touch_count, rejection_count, breakout_count, avg_return_after_touch,
-			relative_volume, volatility, trend_strength, status, broken_at, broken_price
-		FROM stock_sr_zones WHERE analysis_id=? ORDER BY support_score DESC, resistance_score DESC
+			support_score, resistance_score, net_score, net_score_label,
+			confidence, confidence_level,
+			bounce_probability, break_probability,
+			expected_gain, expected_loss, expected_value, risk_reward_ratio, reward_risk_percentile,
+			relative_volume, volume_confirmation,
+			touch_count, reject_count, break_count,
+			zone_momentum, zone_direction,
+			recent_validation, trading_score, trading_recommendation,
+			status, broken_at, broken_price
+		FROM stock_sr_zones WHERE analysis_id=? ORDER BY trading_score DESC
 	`), analysisID)
 	return rows, err
 }

@@ -38,11 +38,13 @@ func newTestSRZoneRepo(t *testing.T) SRZoneRepo {
 
 func testAnalysis() *SRZoneAnalysis {
 	return &SRZoneAnalysis{
-		Symbol:       "2330",
-		Timeframe:    "1d",
-		AnalyzedAt:   time.Now().UTC().Truncate(time.Second),
-		CurrentPrice: 600.0,
-		ModelVersion: "v1",
+		Symbol:            "2330",
+		Timeframe:         "1d",
+		AnalyzedAt:        time.Now().UTC().Truncate(time.Second),
+		CurrentPrice:      600.0,
+		OverallTrend:      0.03,
+		OverallVolatility: 0.02,
+		ModelVersion:      "v1",
 	}
 }
 
@@ -50,20 +52,31 @@ func testZones() []SRZone {
 	return []SRZone{
 		{
 			PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
-			SupportScore: 0.8, ResistanceScore: 0.1, Confidence: 0.83,
-			BounceProbability:   NullFloat64{sql.NullFloat64{Float64: 0.72, Valid: true}},
-			BreakProbability:    NullFloat64{sql.NullFloat64{Float64: 0.2, Valid: true}},
-			ExpectedValue:       NullFloat64{sql.NullFloat64{Float64: 0.015, Valid: true}},
-			RiskRewardRatio:     NullFloat64{sql.NullFloat64{Float64: 2.4, Valid: true}},
-			TouchCount:          4, RejectionCount: 3, BreakoutCount: 0,
-			AvgReturnAfterTouch: 0.02, RelativeVolume: 1.4, Volatility: 0.015, TrendStrength: 0.03,
+			SupportScore: 0.8, ResistanceScore: 0.1, NetScore: 0.7, NetScoreLabel: "STRONG_SUPPORT",
+			Confidence: 0.83, ConfidenceLevel: "HIGH",
+			BounceProbability:    NullFloat64{sql.NullFloat64{Float64: 0.72, Valid: true}},
+			BreakProbability:     NullFloat64{sql.NullFloat64{Float64: 0.2, Valid: true}},
+			ExpectedGain:         NullFloat64{sql.NullFloat64{Float64: 0.048, Valid: true}},
+			ExpectedLoss:         NullFloat64{sql.NullFloat64{Float64: -0.072, Valid: true}},
+			ExpectedValue:        NullFloat64{sql.NullFloat64{Float64: 0.0056, Valid: true}},
+			RiskRewardRatio:      NullFloat64{sql.NullFloat64{Float64: 0.667, Valid: true}},
+			RewardRiskPercentile: NullFloat64{sql.NullFloat64{Float64: 91.0, Valid: true}},
+			RelativeVolume:       NullFloat64{sql.NullFloat64{Float64: 1.4, Valid: true}},
+			VolumeConfirmation:   NullString{sql.NullString{String: "CONFIRMED", Valid: true}},
+			TouchCount:           4, RejectCount: 3, BreakCount: 0,
+			ZoneMomentum: -0.02, ZoneDirection: "DOWN",
+			RecentValidation: "VALIDATED_RECENTLY",
+			TradingScore:     78.5, TradingRecommendation: "BUY",
 		},
 		{
-			// AT_ZONE：confidence 仍有值，但 expected_value/risk_reward_ratio 應為 NULL
+			// AT_ZONE：confidence 仍有值，但 expected_value/risk_reward_ratio/volume_confirmation 應為 NULL
 			PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
-			SupportScore: 0.1, ResistanceScore: 0.65, Confidence: 0.4,
-			TouchCount: 2, RejectionCount: 1, BreakoutCount: 1,
-			AvgReturnAfterTouch: -0.01, RelativeVolume: 1.1, Volatility: 0.018, TrendStrength: -0.01,
+			SupportScore: 0.1, ResistanceScore: 0.65, NetScore: -0.55, NetScoreLabel: "STRONG_RESISTANCE",
+			Confidence: 0.4, ConfidenceLevel: "MEDIUM",
+			TouchCount: 2, RejectCount: 0, BreakCount: 0,
+			ZoneMomentum: 0.0, ZoneDirection: "FLAT",
+			RecentValidation: "PENDING_VALIDATION",
+			TradingScore:     45.0, TradingRecommendation: "NEUTRAL",
 		},
 	}
 }
@@ -113,20 +126,39 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 			atZone = z
 		}
 	}
-	if support.Confidence != 0.83 {
-		t.Fatalf("expected SUPPORT confidence=0.83, got %v", support.Confidence)
+	if support.Confidence != 0.83 || support.ConfidenceLevel != "HIGH" {
+		t.Fatalf("expected SUPPORT confidence=0.83/HIGH, got %v/%v", support.Confidence, support.ConfidenceLevel)
 	}
-	if !support.ExpectedValue.Valid || support.ExpectedValue.Float64 != 0.015 {
-		t.Fatalf("expected SUPPORT expected_value=0.015, got %+v", support.ExpectedValue)
+	if support.NetScoreLabel != "STRONG_SUPPORT" {
+		t.Fatalf("expected SUPPORT net_score_label=STRONG_SUPPORT, got %v", support.NetScoreLabel)
 	}
-	if !support.RiskRewardRatio.Valid || support.RiskRewardRatio.Float64 != 2.4 {
-		t.Fatalf("expected SUPPORT risk_reward_ratio=2.4, got %+v", support.RiskRewardRatio)
+	if !support.ExpectedGain.Valid || support.ExpectedGain.Float64 != 0.048 {
+		t.Fatalf("expected SUPPORT expected_gain=0.048, got %+v", support.ExpectedGain)
 	}
+	if !support.ExpectedLoss.Valid || support.ExpectedLoss.Float64 != -0.072 {
+		t.Fatalf("expected SUPPORT expected_loss=-0.072, got %+v", support.ExpectedLoss)
+	}
+	if !support.ExpectedValue.Valid || support.ExpectedValue.Float64 != 0.0056 {
+		t.Fatalf("expected SUPPORT expected_value=0.0056, got %+v", support.ExpectedValue)
+	}
+	if !support.RiskRewardRatio.Valid || support.RiskRewardRatio.Float64 != 0.667 {
+		t.Fatalf("expected SUPPORT risk_reward_ratio=0.667, got %+v", support.RiskRewardRatio)
+	}
+	if !support.VolumeConfirmation.Valid || support.VolumeConfirmation.String != "CONFIRMED" {
+		t.Fatalf("expected SUPPORT volume_confirmation=CONFIRMED, got %+v", support.VolumeConfirmation)
+	}
+	if support.TradingRecommendation != "BUY" {
+		t.Fatalf("expected SUPPORT trading_recommendation=BUY, got %v", support.TradingRecommendation)
+	}
+
 	if atZone.Confidence != 0.4 {
 		t.Fatalf("expected AT_ZONE confidence=0.4, got %v", atZone.Confidence)
 	}
-	if atZone.ExpectedValue.Valid || atZone.RiskRewardRatio.Valid {
-		t.Fatalf("expected AT_ZONE to have NULL expected_value/risk_reward_ratio, got %+v / %+v", atZone.ExpectedValue, atZone.RiskRewardRatio)
+	if atZone.ExpectedValue.Valid || atZone.RiskRewardRatio.Valid || atZone.VolumeConfirmation.Valid {
+		t.Fatalf(
+			"expected AT_ZONE to have NULL expected_value/risk_reward_ratio/volume_confirmation, got %+v / %+v / %+v",
+			atZone.ExpectedValue, atZone.RiskRewardRatio, atZone.VolumeConfirmation,
+		)
 	}
 }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ..features import (
-    avg_return_after_touch,
+    average_bounce_break_returns,
     compute_zone_features,
     count_breakouts,
     count_rejections,
@@ -11,6 +11,7 @@ from ..features import (
     relative_volume_at_touches,
     touch_starting_at,
     trend_slope,
+    zone_momentum,
     zone_volatility,
 )
 from ..types import ApproachDirection, Zone, ZoneMethod
@@ -22,6 +23,20 @@ def _tight_support_zone(support: float = 100.0) -> Zone:
         price_low=support - 0.1, price_high=support + 0.1, method=ZoneMethod.ATR,
         center_price=support, formed_at_index=0,
     )
+
+
+def _bounce_then_break_df(support: float = 100.0) -> "pd.DataFrame":
+    """兩次觸碰同一個支撐位：第一次強力反彈（守住），第二次跌破，兩次之間
+    價格都遠離 zone 邊界，確保不會被誤判成同一次觸碰的延續。用來驗證
+    average_bounce_return/average_break_return 真的有分開統計。"""
+    closes = [
+        110, 108, 104, 101, support,  # touch 1（idx4）：探底
+        105, 110, 115, 120, 125,  # 強力反彈，遠離 zone
+        120, 115, 110, 105, support,  # touch 2（idx14）：再次探底
+        95, 90, 85, 80, 75,  # 這次跌破，持續破底
+    ]
+    rows = [(c + 0.02, c + 0.05, c - 0.05, c, 1000.0) for c in closes]
+    return make_df(rows)
 
 
 def test_find_touches_counts_double_bottom():
@@ -74,22 +89,30 @@ def test_count_breakouts_ignores_moves_on_the_normal_side_of_the_zone():
     assert breakouts == 0
 
 
-def test_avg_return_after_touch_positive_for_bounce():
-    df = double_bottom_df()
+def test_average_bounce_break_returns_separates_hold_and_break():
+    df = _bounce_then_break_df()
     zone = _tight_support_zone()
     touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
-    avg_return = avg_return_after_touch(df, touches, forward_bars=3, as_of_index=len(df) - 1)
-    assert avg_return > 0
+    assert len(touches) == 2
+
+    bounce, brk = average_bounce_break_returns(
+        df, touches, forward_bars=3, threshold_pct=0.03, as_of_index=len(df) - 1
+    )
+    assert bounce > 0.1  # 第一次觸碰強力反彈
+    assert brk < -0.1  # 第二次觸碰跌破
 
 
-def test_avg_return_excludes_touches_without_enough_future_bars():
+def test_average_bounce_break_returns_excludes_touches_without_enough_future_bars():
     df = double_bottom_df()
     zone = _tight_support_zone()
     touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
     # as_of_index=14 剛好是第二次觸碰當下，該次觸碰沒有 forward_bars=3 的未來資料可用，
-    # 只有第一次觸碰（index=4）會被納入計算
-    avg_return = avg_return_after_touch(df, touches, forward_bars=3, as_of_index=14)
-    assert avg_return != 0.0
+    # 只有第一次觸碰（index=4）會被納入計算，且第一次是反彈
+    bounce, brk = average_bounce_break_returns(
+        df, touches, forward_bars=3, threshold_pct=0.03, as_of_index=14
+    )
+    assert bounce > 0
+    assert brk == 0.0
 
 
 def test_relative_volume_at_touches_uses_trailing_ma_excluding_touch_bar():
@@ -122,6 +145,19 @@ def test_trend_slope_negative_for_downtrend():
     assert slope < 0
 
 
+def test_zone_momentum_negative_when_price_falls_into_zone():
+    df = _bounce_then_break_df()
+    zone = _tight_support_zone()
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    momentum = zone_momentum(df, touches, lookback=4)
+    assert momentum < 0  # 兩次觸碰前價格都是下跌趨向這個支撐位
+
+
+def test_zone_momentum_zero_when_no_touches():
+    df = bullish_trend_df(n=40)
+    assert zone_momentum(df, []) == 0.0
+
+
 def test_touch_starting_at_none_for_continuation_bar():
     df = double_bottom_df()
     zone = _tight_support_zone()
@@ -138,7 +174,8 @@ def test_compute_zone_features_role_specific_stats():
     assert features_support.touch_count == 2
     assert features_support.rejection_count == 2
     assert features_support.breakout_count == 0
-    assert features_support.avg_return_after_touch > 0
+    assert features_support.average_bounce_return > 0
+    assert features_support.average_break_return == 0.0
 
     # 這個 zone 從未被「由下往上」觸碰過，FROM_BELOW 的 rejection 應為 0
     features_resistance = compute_zone_features(df, zone, as_of_index=len(df) - 1, approach=ApproachDirection.FROM_BELOW)

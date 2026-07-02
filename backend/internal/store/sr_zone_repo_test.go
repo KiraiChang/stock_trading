@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -71,7 +72,7 @@ func testZones() []SRZone {
 			ZoneMomentum: -0.02, ZoneDirection: "DOWN",
 			RecentValidation:      "VALIDATED_RECENTLY",
 			TradingScore:          78.5,
-			TradingScoreBreakdown: `{"expected_value":30,"risk_reward":15,"trend":10,"volume":15,"confidence":8.5}`,
+			TradingScoreBreakdown: json.RawMessage(`{"expected_value":30,"risk_reward":15,"trend":10,"volume":15,"confidence":8.5}`),
 			TradingRecommendation: "BUY",
 		},
 		{
@@ -84,7 +85,7 @@ func testZones() []SRZone {
 			ZoneMomentum: 0.0, ZoneDirection: "FLAT",
 			RecentValidation:      "PENDING_VALIDATION",
 			TradingScore:          45.0,
-			TradingScoreBreakdown: `{"expected_value":20,"risk_reward":10,"trend":7.5,"volume":7.5,"confidence":4}`,
+			TradingScoreBreakdown: json.RawMessage(`{"expected_value":20,"risk_reward":10,"trend":7.5,"volume":7.5,"confidence":4}`),
 			TradingRecommendation: "NEUTRAL",
 		},
 	}
@@ -156,7 +157,7 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	if support.Tier != "TIER_1_MAIN_STRUCTURE" || support.TierLabel != "主結構" {
 		t.Fatalf("expected SUPPORT tier=TIER_1_MAIN_STRUCTURE/主結構, got %v/%v", support.Tier, support.TierLabel)
 	}
-	if support.TradingScoreBreakdown == "" {
+	if len(support.TradingScoreBreakdown) == 0 {
 		t.Fatalf("expected non-empty trading_score_breakdown, got %+v", support)
 	}
 	if !support.ExpectedGain.Valid || support.ExpectedGain.Float64 != 0.048 {

@@ -284,7 +284,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			ZoneDirection:         z.ZoneDirection,
 			RecentValidation:      z.RecentValidation,
 			TradingScore:          z.TradingScore,
-			TradingScoreBreakdown: string(breakdownJSON),
+			TradingScoreBreakdown: json.RawMessage(breakdownJSON),
 			TradingRecommendation: z.TradingRecommendation,
 			Status:                "PENDING",
 		})

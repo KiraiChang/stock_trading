@@ -172,7 +172,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if first.NetScoreLabel != "STRONG_SUPPORT" || first.ConfidenceLevel != "HIGH" {
 		t.Fatalf("unexpected first zone labels: %+v", first)
 	}
-	if first.TradingScoreBreakdown == "" {
+	if len(first.TradingScoreBreakdown) == 0 {
 		t.Fatalf("expected non-empty trading_score_breakdown JSON, got %+v", first)
 	}
 	if !first.BounceProbability.Valid || first.BounceProbability.Float64 != bounce {

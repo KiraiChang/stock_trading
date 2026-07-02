@@ -26,8 +26,11 @@ ATR_TARGET_MULTIPLE = 3.0
 ATR_STOP_PERIOD = 14
 
 
-def analyze_symbol(symbol: str, timeframe: str = "1d") -> dict[str, Any]:
-    rows = fetch_candles(symbol, timeframe, limit=DEFAULT_FETCH_LIMIT)
+def analyze_symbol(symbol: str, timeframe: str = "1d", limit: int = DEFAULT_FETCH_LIMIT) -> dict[str, Any]:
+    """limit 為抓取的歷史K棒根數（不是天數，含意隨 timeframe 而異），
+    預設 DEFAULT_FETCH_LIMIT=250；呼叫端（FastAPI /analyze、Go handler）
+    可覆寫，讓使用者依需求拉更長或更短的歷史。"""
+    rows = fetch_candles(symbol, timeframe, limit=limit)
     if not rows:
         raise ValueError(f"no candles found for symbol={symbol} timeframe={timeframe}")
 

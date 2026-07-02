@@ -40,12 +40,14 @@ from db import engine
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, field_validator
-from typing import List, Union
+from typing import List, Optional, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
 from backtest.db_writer import update_job_status, write_result, write_trades
-from backtest.modular.analysis import analyze_symbol
+from backtest.modular.analysis import DEFAULT_FETCH_LIMIT, analyze_symbol
+from backtest.modular.sr_scoring.scoring import DEFAULT_FETCH_LIMIT as SR_SCORING_DEFAULT_FETCH_LIMIT
 from backtest.modular.sr_scoring.scoring import score_symbol
+from backtest.modular.sr_scoring.train import run_training
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0")
 
@@ -122,14 +124,15 @@ async def get_backtest(job_id: str):
 class AnalyzeRequest(BaseModel):
     symbol: str
     timeframe: str = "1d"
+    limit: int = DEFAULT_FETCH_LIMIT  # 抓取的歷史K棒根數，可由呼叫端覆寫
 
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
     """個股現況分析：支撐/壓力/進場/停損/停利（同步計算，不寫 DB，由 Go 端負責持久化與驗證）。"""
-    log.info("POST /analyze symbol=%s tf=%s", req.symbol, req.timeframe)
+    log.info("POST /analyze symbol=%s tf=%s limit=%d", req.symbol, req.timeframe, req.limit)
     try:
-        return analyze_symbol(req.symbol, req.timeframe)
+        return analyze_symbol(req.symbol, req.timeframe, req.limit)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -137,6 +140,7 @@ async def analyze(req: AnalyzeRequest):
 class ScoreZonesRequest(BaseModel):
     symbol: str
     timeframe: str = "1d"
+    limit: int = SR_SCORING_DEFAULT_FETCH_LIMIT  # 抓取的歷史K棒根數，可由呼叫端覆寫
 
 
 @app.post("/sr-zones")
@@ -144,13 +148,39 @@ async def sr_zones(req: ScoreZonesRequest):
     """支撐/壓力機率評分：對每個 zone 回傳 support_score/resistance_score
     （規則式，永遠可算）與 bounce_probability/break_probability（需要先跑過
     sr_scoring/train.py 產生模型，否則回 503）。"""
-    log.info("POST /sr-zones symbol=%s tf=%s", req.symbol, req.timeframe)
+    log.info("POST /sr-zones symbol=%s tf=%s limit=%d", req.symbol, req.timeframe, req.limit)
     try:
-        return score_symbol(req.symbol, req.timeframe)
+        return score_symbol(req.symbol, req.timeframe, req.limit)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+class TrainRequest(BaseModel):
+    symbols: Optional[List[str]] = None
+    timeframe: str = "1d"
+    limit: int = 1500
+    model_type: str = "gradient_boosting"
+
+
+@app.post("/sr-scoring/train")
+async def sr_scoring_train(req: TrainRequest):
+    """手動觸發 sr_scoring 機率模型訓練（同步執行，視資料量可能耗時數十秒到
+    數分鐘；Go 端會用背景 goroutine 呼叫，不會卡住 HTTP 回應）。"""
+    log.info(
+        "POST /sr-scoring/train symbols=%s tf=%s limit=%d model_type=%s",
+        req.symbols, req.timeframe, req.limit, req.model_type,
+    )
+    try:
+        return run_training(
+            symbols=req.symbols,
+            timeframe=req.timeframe,
+            limit=req.limit,
+            model_type=req.model_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.get("/health")

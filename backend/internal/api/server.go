@@ -116,10 +116,11 @@ func NewServer(
 		protected.POST("/analysis/:id/verify", anh.Verify)
 		protected.DELETE("/analysis/:id", anh.Delete)
 
-		szh := handler.NewSRZoneHandler(analysisClient, srZoneRepo)
+		szh := handler.NewSRZoneHandler(analysisClient, srZoneRepo, watchlistRepo, log)
 		protected.POST("/sr-zones", szh.Create)
 		protected.GET("/sr-zones", szh.List)
 		protected.GET("/sr-zones/:id", szh.Get)
+		protected.POST("/sr-zones/train", szh.Train)
 		protected.DELETE("/sr-zones/:id", szh.Delete)
 
 		uh := handler.NewUserHandler(userRepo)

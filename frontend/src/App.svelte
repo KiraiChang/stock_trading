@@ -8,6 +8,7 @@
   import Backfill from './routes/Backfill.svelte'
   import Backtest from './routes/Backtest.svelte'
   import Analysis from './routes/Analysis.svelte'
+  import SRZones from './routes/SRZones.svelte'
 </script>
 
 {#if $isAuthenticated}
@@ -21,6 +22,8 @@
     <Backtest />
   {:else if $currentRoute === 'analysis'}
     <Analysis />
+  {:else if $currentRoute === 'sr-zones'}
+    <SRZones />
   {:else}
     <Dashboard />
   {/if}

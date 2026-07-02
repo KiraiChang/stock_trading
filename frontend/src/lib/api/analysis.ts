@@ -55,10 +55,15 @@ export function parseTradeVerification(raw?: string): TradeVerification | null {
   }
 }
 
-export async function createAnalysis(symbol: string, timeframe = '1d'): Promise<{ analysis: StockAnalysis; levels: AnalysisLevel[] }> {
+// limit 為抓取的歷史K棒根數（不是天數），省略或傳 0 時由 Python 端套用預設值（250）
+export async function createAnalysis(
+  symbol: string,
+  timeframe = '1d',
+  limit?: number
+): Promise<{ analysis: StockAnalysis; levels: AnalysisLevel[] }> {
   return apiFetch('/analysis', {
     method: 'POST',
-    body: JSON.stringify({ symbol, timeframe }),
+    body: JSON.stringify({ symbol, timeframe, limit: limit || undefined }),
   })
 }
 

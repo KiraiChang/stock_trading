@@ -8,6 +8,60 @@ import (
 	"testing"
 )
 
+func TestAnalyzeSendsLimitWhenProvided(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Symbol    string `json:"symbol"`
+			Timeframe string `json:"timeframe"`
+			Limit     int    `json:"limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if body.Limit != 500 {
+			t.Fatalf("expected limit=500, got %d", body.Limit)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Result{
+			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+			CurrentPrice: 600.0, Trend: "BULLISH",
+			Entry: Entry{Status: "WATCHING", Direction: "NONE", Price: 600.0, Reason: "test"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.Analyze(context.Background(), "2330", "1d", 500); err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+}
+
+func TestAnalyzeOmitsLimitFieldWhenZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var raw map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if _, ok := raw["limit"]; ok {
+			t.Fatalf("expected \"limit\" field to be omitted when 0, got raw body %v", raw)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Result{
+			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+			CurrentPrice: 600.0, Trend: "BULLISH",
+			Entry: Entry{Status: "WATCHING", Direction: "NONE", Price: 600.0, Reason: "test"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.Analyze(context.Background(), "2330", "1d", 0); err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+}
+
 func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	bounce := 0.72
 	brk := 0.18
@@ -53,7 +107,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
-	result, err := client.ScoreZones(context.Background(), "2330", "1d")
+	result, err := client.ScoreZones(context.Background(), "2330", "1d", 0)
 	if err != nil {
 		t.Fatalf("ScoreZones failed: %v", err)
 	}
@@ -86,9 +140,103 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 }
 
+func TestScoreZonesToStorePicksFeaturesMatchingRole(t *testing.T) {
+	// Python score_zone() 永遠同時回傳 features_as_support 與
+	// features_as_resistance（兩者都不會是 null），ToStore 必須依 Role
+	// 選對應的那一份，而不是「哪個非 nil」。
+	result := &ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00", CurrentPrice: 600.0,
+		Zones: []ZoneScore{
+			{
+				PriceLow: 610.0, PriceHigh: 615.0, Method: "atr", Role: "RESISTANCE",
+				SupportScore: 0.2, ResistanceScore: 0.7,
+				FeaturesAsSupport:    &ZoneFeatures{TouchCount: 1, RejectionCount: 0},
+				FeaturesAsResistance: &ZoneFeatures{TouchCount: 5, RejectionCount: 4},
+			},
+		},
+	}
+
+	_, zones, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore failed: %v", err)
+	}
+	if len(zones) != 1 {
+		t.Fatalf("expected 1 zone, got %d", len(zones))
+	}
+	if zones[0].TouchCount != 5 || zones[0].RejectionCount != 4 {
+		t.Fatalf("expected RESISTANCE zone to use FeaturesAsResistance (touch=5,rejection=4), got %+v", zones[0])
+	}
+}
+
 func TestScoreZonesReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	client := NewClient("")
-	if _, err := client.ScoreZones(context.Background(), "2330", "1d"); err == nil {
+	if _, err := client.ScoreZones(context.Background(), "2330", "1d", 0); err == nil {
+		t.Fatal("expected error when baseURL is not configured")
+	}
+}
+
+func TestScoreZonesSendsLimitWhenProvided(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Limit int `json:"limit"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if body.Limit != 500 {
+			t.Fatalf("expected limit=500, got %d", body.Limit)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ZoneScoreResult{
+			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00", CurrentPrice: 600.0,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.ScoreZones(context.Background(), "2330", "1d", 500); err != nil {
+		t.Fatalf("ScoreZones failed: %v", err)
+	}
+}
+
+func TestTrainModelParsesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sr-scoring/train" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var body trainRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if len(body.Symbols) != 2 || body.ModelType != "gradient_boosting" {
+			t.Fatalf("unexpected request body: %+v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(TrainResult{
+			Rows: 120, Sources: 2, ModelType: "gradient_boosting",
+			Metrics:   map[string]map[string]float64{"hold": {"accuracy": 0.9}, "break": {"accuracy": 0.85}},
+			ModelPath: "models/sr_scoring_v1.joblib", TrainedAt: "2026-07-01T13:30:00+08:00", Version: "v1",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.TrainModel(context.Background(), []string{"2330", "2454"}, "1d", 1500, "gradient_boosting")
+	if err != nil {
+		t.Fatalf("TrainModel failed: %v", err)
+	}
+	if result.Rows != 120 || result.Sources != 2 || result.ModelPath != "models/sr_scoring_v1.joblib" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.Metrics["hold"]["accuracy"] != 0.9 {
+		t.Fatalf("unexpected metrics: %+v", result.Metrics)
+	}
+}
+
+func TestTrainModelReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
+	client := NewClient("")
+	if _, err := client.TrainModel(context.Background(), []string{"2330"}, "1d", 0, ""); err == nil {
 		t.Fatal("expected error when baseURL is not configured")
 	}
 }

@@ -34,6 +34,34 @@ def test_analyze_symbol_raises_when_insufficient_bars(monkeypatch):
         analysis.analyze_symbol("2330")
 
 
+def test_analyze_symbol_passes_limit_through_to_fetch_candles(monkeypatch):
+    df = bullish_trend_df(n=60)
+    captured = {}
+
+    def fake_fetch_candles(symbol, timeframe, limit):
+        captured["limit"] = limit
+        return _candle_rows(df)
+
+    monkeypatch.setattr(analysis, "fetch_candles", fake_fetch_candles)
+    analysis.analyze_symbol("2330", "1d", limit=500)
+
+    assert captured["limit"] == 500
+
+
+def test_analyze_symbol_defaults_limit_to_default_fetch_limit(monkeypatch):
+    df = bullish_trend_df(n=60)
+    captured = {}
+
+    def fake_fetch_candles(symbol, timeframe, limit):
+        captured["limit"] = limit
+        return _candle_rows(df)
+
+    monkeypatch.setattr(analysis, "fetch_candles", fake_fetch_candles)
+    analysis.analyze_symbol("2330")
+
+    assert captured["limit"] == analysis.DEFAULT_FETCH_LIMIT
+
+
 def test_analyze_symbol_returns_expected_shape(monkeypatch):
     df = bullish_trend_df(n=60)
     monkeypatch.setattr(analysis, "fetch_candles", lambda *a, **kw: _candle_rows(df))

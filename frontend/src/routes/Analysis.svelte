@@ -13,6 +13,7 @@
   } from '../lib/api/analysis'
 
   let symbol = ''
+  let fetchLimit = 250
   let submitting = false
   let submitError = ''
 
@@ -51,10 +52,14 @@
       submitError = '請輸入股票代號'
       return
     }
+    if (fetchLimit < 35) {
+      submitError = '抓取根數至少要 35 根，分析才有足夠資料可用'
+      return
+    }
     submitting = true
     submitError = ''
     try {
-      const { analysis, levels } = await createAnalysis(symbol.trim(), '1d')
+      const { analysis, levels } = await createAnalysis(symbol.trim(), '1d', fetchLimit)
       current = analysis
       currentLevels = levels
       await loadHistory()
@@ -156,6 +161,16 @@
           class="flex-1 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
                  placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
         />
+        <input
+          type="number"
+          min="35"
+          step="10"
+          bind:value={fetchLimit}
+          title="抓取的歷史K棒根數"
+          on:keydown={(e) => e.key === 'Enter' && submit()}
+          class="w-28 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 focus:outline-none focus:border-indigo-500 transition-colors"
+        />
         <button
           class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm
                  font-medium px-5 py-2 rounded-lg transition-colors"
@@ -166,7 +181,7 @@
         </button>
       </div>
       <p class="text-muted text-xs mt-2">
-        會呼叫 Python 分析服務即時計算，結果會存入資料庫供之後驗證使用。
+        會呼叫 Python 分析服務即時計算，結果會存入資料庫供之後驗證使用。抓取根數指分析用的歷史K棒數量（預設 250，至少 35 根），根數愈多支撐/壓力涵蓋的歷史愈長，但也可能納入較舊、參考價值較低的價位。
       </p>
     </div>
 

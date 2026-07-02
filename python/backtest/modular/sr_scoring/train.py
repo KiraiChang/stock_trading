@@ -1,5 +1,11 @@
 """
-sr_scoring 訓練 CLI。
+sr_scoring 訓練邏輯 + CLI。
+
+run_training() 是核心可重用函式，被兩種入口共用：
+  1. CLI：本檔案的 main()（python -m backtest.modular.sr_scoring.train ...）
+  2. FastAPI：POST /sr-scoring/train（http_server.py），供 Go 端
+     internal/api/handler/sr_zones.go 的 Train handler 觸發，讓使用者不用
+     連進伺服器下指令就能重新訓練機率模型。
 
 用法：
     cd python
@@ -17,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -24,12 +31,14 @@ from .dataset import DatasetConfig, build_training_dataset, load_ohlcv_csv
 from .model import save_model, train_model
 from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder
 
+DEFAULT_TRAIN_LIMIT = 1500
 
-def _load_db_sources(symbols: str, timeframe: str, limit: int) -> list[tuple[str, str, pd.DataFrame]]:
+
+def _load_db_sources(symbols: list[str], timeframe: str, limit: int) -> list[tuple[str, str, pd.DataFrame]]:
     from db import fetch_candles
 
     sources: list[tuple[str, str, pd.DataFrame]] = []
-    for symbol in symbols.split(","):
+    for symbol in symbols:
         symbol = symbol.strip()
         if not symbol:
             continue
@@ -55,12 +64,63 @@ def _load_csv_sources(items: list[str], timeframe: str) -> list[tuple[str, str, 
     return sources
 
 
+def run_training(
+    symbols: Optional[list[str]] = None,
+    csv_sources: Optional[list[str]] = None,
+    timeframe: str = "1d",
+    limit: int = DEFAULT_TRAIN_LIMIT,
+    model_type: str = "gradient_boosting",
+    holdout_after: Optional[str] = None,
+    output: Optional[str] = None,
+) -> dict[str, Any]:
+    """組裝訓練資料、訓練模型、存檔，回傳可直接序列化成 JSON 的結果摘要。
+    symbols/csv_sources 至少要有一個非空；資料集為空或沒有來源時拋
+    ValueError（呼叫端——CLI 或 FastAPI handler——各自決定怎麼呈現錯誤）。"""
+    sources: list[tuple[str, str, pd.DataFrame]] = []
+    if symbols:
+        sources.extend(_load_db_sources(symbols, timeframe, limit))
+    if csv_sources:
+        sources.extend(_load_csv_sources(csv_sources, timeframe))
+
+    if not sources:
+        raise ValueError("沒有任何可用的資料來源（請指定 symbols 或 csv）")
+
+    if holdout_after:
+        cutoff = pd.Timestamp(holdout_after, tz="UTC")
+        sources = [(sym, tf, df[df.index < cutoff]) for sym, tf, df in sources]
+
+    dataset = build_training_dataset(
+        sources, [ATRZoneBuilder(), VolumeProfileZoneBuilder()], DatasetConfig()
+    )
+    if dataset.empty:
+        raise ValueError("資料集為空，無法訓練（來源股票可能歷史資料太少，或都沒有偵測到 zone 觸碰事件）")
+
+    bundle = train_model(dataset, model_type=model_type)
+
+    resolved_output = output
+    if resolved_output is None:
+        import config
+
+        resolved_output = config.SR_SCORING_MODEL_PATH
+    save_model(bundle, resolved_output)
+
+    return {
+        "rows": len(dataset),
+        "sources": len(sources),
+        "model_type": model_type,
+        "metrics": bundle.metrics,
+        "model_path": resolved_output,
+        "trained_at": bundle.trained_at,
+        "version": bundle.version,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="訓練 sr_scoring bounce/break 機率模型")
     parser.add_argument("--symbols", help="逗號分隔的股票代碼，從 DB 讀取")
     parser.add_argument("--csv", action="append", default=[], help="CSV 路徑，格式 path[:symbol]，可重複給多筆")
     parser.add_argument("--timeframe", default="1d")
-    parser.add_argument("--limit", type=int, default=1500)
+    parser.add_argument("--limit", type=int, default=DEFAULT_TRAIN_LIMIT)
     parser.add_argument(
         "--model-type", default="gradient_boosting", choices=["gradient_boosting", "logistic_regression"]
     )
@@ -68,38 +128,23 @@ def main() -> None:
     parser.add_argument("--holdout-after", default=None, help="ISO 日期，訓練只使用此日期之前的資料")
     args = parser.parse_args()
 
-    sources: list[tuple[str, str, pd.DataFrame]] = []
-    if args.symbols:
-        sources.extend(_load_db_sources(args.symbols, args.timeframe, args.limit))
-    if args.csv:
-        sources.extend(_load_csv_sources(args.csv, args.timeframe))
-
-    if not sources:
-        print("[error] 沒有任何可用的資料來源（請指定 --symbols 或 --csv）", file=sys.stderr)
+    try:
+        result = run_training(
+            symbols=args.symbols.split(",") if args.symbols else None,
+            csv_sources=args.csv or None,
+            timeframe=args.timeframe,
+            limit=args.limit,
+            model_type=args.model_type,
+            holdout_after=args.holdout_after,
+            output=args.output,
+        )
+    except ValueError as exc:
+        print(f"[error] {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if args.holdout_after:
-        cutoff = pd.Timestamp(args.holdout_after, tz="UTC")
-        sources = [(sym, tf, df[df.index < cutoff]) for sym, tf, df in sources]
-
-    dataset = build_training_dataset(
-        sources, [ATRZoneBuilder(), VolumeProfileZoneBuilder()], DatasetConfig()
-    )
-    print(f"[info] 訓練資料集：{len(dataset)} 筆 touch 事件（來自 {len(sources)} 個來源）")
-    if dataset.empty:
-        print("[error] 資料集為空，無法訓練", file=sys.stderr)
-        sys.exit(1)
-
-    bundle = train_model(dataset, model_type=args.model_type)
-    print(json.dumps(bundle.metrics, indent=2, ensure_ascii=False))
-
-    output = args.output
-    if output is None:
-        import config
-
-        output = config.SR_SCORING_MODEL_PATH
-    save_model(bundle, output)
-    print(f"[info] 模型已儲存：{output}")
+    print(f"[info] 訓練資料集：{result['rows']} 筆 touch 事件（來自 {result['sources']} 個來源）")
+    print(json.dumps(result["metrics"], indent=2, ensure_ascii=False))
+    print(f"[info] 模型已儲存：{result['model_path']}")
 
 
 if __name__ == "__main__":

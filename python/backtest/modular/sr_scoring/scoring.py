@@ -108,9 +108,14 @@ def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: Model
 
 
 def score_symbol(
-    symbol: str, timeframe: str = "1d", builders: Optional[list[ZoneBuilder]] = None
+    symbol: str,
+    timeframe: str = "1d",
+    limit: int = DEFAULT_FETCH_LIMIT,
+    builders: Optional[list[ZoneBuilder]] = None,
 ) -> dict[str, Any]:
-    rows = fetch_candles(symbol, timeframe, limit=DEFAULT_FETCH_LIMIT)
+    """limit 為抓取的歷史K棒根數（不是天數），預設 DEFAULT_FETCH_LIMIT=250；
+    呼叫端（FastAPI /sr-zones、Go handler）可覆寫。"""
+    rows = fetch_candles(symbol, timeframe, limit=limit)
     if not rows:
         raise ValueError(f"no candles found for symbol={symbol} timeframe={timeframe}")
 

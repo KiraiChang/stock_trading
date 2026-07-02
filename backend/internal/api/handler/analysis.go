@@ -21,11 +21,13 @@ func NewAnalysisHandler(client *analysis.Client, verifier *analysis.Verifier, re
 }
 
 // POST /api/v1/analysis
-// Body: { "symbol": "2330", "timeframe": "1d" }
+// Body: { "symbol": "2330", "timeframe": "1d", "limit": 250 }
+// limit 省略或為 0 時使用 Python 端的預設值（DEFAULT_FETCH_LIMIT）
 func (h *AnalysisHandler) Create(c *gin.Context) {
 	var body struct {
 		Symbol    string `json:"symbol"`
 		Timeframe string `json:"timeframe"`
+		Limit     int    `json:"limit"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
@@ -34,8 +36,12 @@ func (h *AnalysisHandler) Create(c *gin.Context) {
 	if body.Timeframe == "" {
 		body.Timeframe = "1d"
 	}
+	if body.Limit < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be >= 0"})
+		return
+	}
 
-	result, err := h.client.Analyze(c.Request.Context(), body.Symbol, body.Timeframe)
+	result, err := h.client.Analyze(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return

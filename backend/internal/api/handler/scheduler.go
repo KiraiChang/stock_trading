@@ -6,15 +6,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/store"
 )
 
 type SchedulerHandler struct {
-	repo store.JobRunRepo
+	repo  store.JobRunRepo
+	sched *scheduler.Scheduler
 }
 
-func NewSchedulerHandler(repo store.JobRunRepo) *SchedulerHandler {
-	return &SchedulerHandler{repo: repo}
+func NewSchedulerHandler(repo store.JobRunRepo, sched *scheduler.Scheduler) *SchedulerHandler {
+	return &SchedulerHandler{repo: repo, sched: sched}
+}
+
+// POST /api/v1/scheduler/daily-close/run
+// 手動重跑「收盤後拉日K + 完整掃描」，用於排程時間點 FinMind 當天日K
+// 還沒發布（拉到 count=0）時的補救，跟 cron 觸發共用同一份邏輯
+// （見 scheduler.Scheduler.RunDailyClose），在背景執行、立即回應。
+func (h *SchedulerHandler) RunDailyClose(c *gin.Context) {
+	go h.sched.RunDailyClose()
+	c.JSON(http.StatusAccepted, gin.H{"message": "daily_close 已在背景重新觸發"})
 }
 
 var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close"}

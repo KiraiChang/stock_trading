@@ -54,9 +54,14 @@ func (s *Scheduler) Start() {
 		s.runIntradayJob()
 	})
 
-	// 收盤後：拉日K + 完整掃描
-	s.cron.AddFunc("0 14 * * 1-5", func() {
-		s.runDailyClose()
+	// 收盤後：拉日K + 完整掃描。收盤是 13:30，這裡刻意等到 15:00 才拉，
+	// 是因為 FinMind TaiwanStockPrice 當天日K不會在收盤當下就立刻發布——
+	// 曾經在 14:00 整拉到 count=0（請求成功但資料還沒發布，BulkInsert 對
+	// 空陣列直接視為成功，job_runs 也顯示 success，不會有任何錯誤訊號）。
+	// 15:00 給 FinMind 更多緩衝時間，仍抓空的話可用 RunDailyClose 手動重拉
+	// （見 handler.SchedulerHandler.RunDailyClose）。
+	s.cron.AddFunc("0 15 * * 1-5", func() {
+		s.RunDailyClose()
 	})
 
 	s.cron.Start()
@@ -171,7 +176,9 @@ func (s *Scheduler) runIntradayJob() {
 	s.finishRun(ctx, runID, "intraday", len(symbols), failed, lastErr)
 }
 
-func (s *Scheduler) runDailyClose() {
+// RunDailyClose 執行「收盤後拉日K + 完整掃描」的邏輯，供 cron 排程與
+// 人工手動觸發（例如排程時間點 FinMind 剛好還沒發布資料時）共用同一份實作。
+func (s *Scheduler) RunDailyClose() {
 	ctx := context.Background()
 	runID := s.startRun(ctx, "daily_close")
 

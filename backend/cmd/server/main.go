@@ -103,16 +103,17 @@ func main() {
 		log.Info("fugle enabled", zap.Int("quote_rate_limit", cfg.Fugle.QuoteRateLimit), zap.Int("max_subscriptions", cfg.Fugle.MaxSubscriptions))
 	}
 
+	// Scheduler（先建立好讓 API Server 能掛上手動觸發端點，Start() 留到最後才呼叫）
+	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, cfg.FinMind.IntradayEnabled, log)
+
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, btManager, analysisClient, fetcher, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, btManager, analysisClient, fetcher, sched, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {
 		srv.Hub().Broadcast(ws.Event{Type: "signal", Symbol: sym, Data: sig})
 	}
 
-	// Scheduler
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, cfg.FinMind.IntradayEnabled, log)
 	go sched.Start()
 
 	if err := srv.Run(":" + cfg.Server.Port); err != nil {

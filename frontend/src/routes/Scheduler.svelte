@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
-  import { fetchSchedulerStatus, type SchedulerJob } from '../lib/api/scheduler'
+  import { fetchSchedulerStatus, triggerDailyCloseRun, type SchedulerJob } from '../lib/api/scheduler'
 
   const REFRESH_MS = 15000
 
@@ -43,6 +43,10 @@
   let error = ''
   let timer: ReturnType<typeof setInterval>
 
+  let triggering = false
+  let triggerMessage = ''
+  let triggerError = ''
+
   onMount(async () => {
     await load()
     timer = setInterval(load, REFRESH_MS)
@@ -59,6 +63,21 @@
       error = '載入排程狀態失敗'
     } finally {
       loading = false
+    }
+  }
+
+  async function runDailyClose() {
+    triggering = true
+    triggerError = ''
+    triggerMessage = ''
+    try {
+      const res = await triggerDailyCloseRun()
+      triggerMessage = res.message ?? '已在背景重新觸發'
+      setTimeout(load, 1500)
+    } catch {
+      triggerError = '觸發失敗，請稍後再試'
+    } finally {
+      triggering = false
     }
   }
 
@@ -129,6 +148,27 @@
 
             {#if job.error}
               <p class="text-fall text-xs mt-3 font-mono break-all">{job.error}</p>
+            {/if}
+
+            {#if job.job_name === 'daily_close'}
+              <div class="mt-3 pt-3 border-t border-border">
+                <button
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  disabled={triggering}
+                  on:click={runDailyClose}
+                >
+                  {triggering ? '觸發中...' : '手動重拉當日資料'}
+                </button>
+                <p class="text-muted text-xs mt-2">
+                  若收盤後拉到 0 筆（FinMind 當天日K還沒發布），可用此按鈕稍後重拉，不用等隔天盤前自動回補。
+                </p>
+                {#if triggerMessage}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage}</p>
+                {/if}
+                {#if triggerError}
+                  <p class="text-fall text-xs mt-2">{triggerError}</p>
+                {/if}
+              </div>
             {/if}
           </div>
         {/each}

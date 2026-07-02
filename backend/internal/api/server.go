@@ -15,6 +15,7 @@ import (
 	"github.com/trading/backend/internal/backtest"
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
+	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/internal/ui"
@@ -41,6 +42,7 @@ func NewServer(
 	btManager     *backtest.Manager,
 	analysisClient *analysis.Client,
 	fetcher       *market.Fetcher,
+	sched         *scheduler.Scheduler,
 	userRepo      store.UserRepo,
 	jwtSecret     string,
 	log           *zap.Logger,
@@ -96,8 +98,9 @@ func NewServer(
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)
 
-		sch := handler.NewSchedulerHandler(jobRunRepo)
+		sch := handler.NewSchedulerHandler(jobRunRepo, sched)
 		protected.GET("/scheduler/status", sch.GetStatus)
+		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo)
 		protected.POST("/backtest", bh.Submit)

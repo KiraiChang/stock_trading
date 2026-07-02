@@ -17,3 +17,9 @@ export async function fetchSchedulerStatus(): Promise<SchedulerJob[]> {
   const res = await apiFetch<{ jobs: SchedulerJob[] }>('/scheduler/status')
   return res.jobs ?? []
 }
+
+// triggerDailyCloseRun 手動重新觸發「收盤後拉日K + 完整掃描」，用於排程
+// 時間點 FinMind 當天日K還沒發布（拉到 0 筆）時的補救，在背景執行、立即回應。
+export async function triggerDailyCloseRun(): Promise<{ message: string }> {
+  return apiFetch('/scheduler/daily-close/run', { method: 'POST' })
+}

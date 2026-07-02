@@ -37,6 +37,7 @@ func NewServer(
 	backtestRepo  store.BacktestRepo,
 	jobRunRepo    store.JobRunRepo,
 	analysisRepo  store.AnalysisRepo,
+	srZoneRepo    store.SRZoneRepo,
 	btManager     *backtest.Manager,
 	analysisClient *analysis.Client,
 	fetcher       *market.Fetcher,
@@ -111,6 +112,12 @@ func NewServer(
 		protected.GET("/analysis/:id", anh.Get)
 		protected.POST("/analysis/:id/verify", anh.Verify)
 		protected.DELETE("/analysis/:id", anh.Delete)
+
+		szh := handler.NewSRZoneHandler(analysisClient, srZoneRepo)
+		protected.POST("/sr-zones", szh.Create)
+		protected.GET("/sr-zones", szh.List)
+		protected.GET("/sr-zones/:id", szh.Get)
+		protected.DELETE("/sr-zones/:id", szh.Delete)
 
 		uh := handler.NewUserHandler(userRepo)
 		protected.GET("/users", uh.List)

@@ -45,6 +45,7 @@ from sqlalchemy import text
 from backtest.engine import run_backtest
 from backtest.db_writer import update_job_status, write_result, write_trades
 from backtest.modular.analysis import analyze_symbol
+from backtest.modular.sr_scoring.scoring import score_symbol
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0")
 
@@ -131,6 +132,25 @@ async def analyze(req: AnalyzeRequest):
         return analyze_symbol(req.symbol, req.timeframe)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+class ScoreZonesRequest(BaseModel):
+    symbol: str
+    timeframe: str = "1d"
+
+
+@app.post("/sr-zones")
+async def sr_zones(req: ScoreZonesRequest):
+    """支撐/壓力機率評分：對每個 zone 回傳 support_score/resistance_score
+    （規則式，永遠可算）與 bounce_probability/break_probability（需要先跑過
+    sr_scoring/train.py 產生模型，否則回 503）。"""
+    log.info("POST /sr-zones symbol=%s tf=%s", req.symbol, req.timeframe)
+    try:
+        return score_symbol(req.symbol, req.timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @app.get("/health")

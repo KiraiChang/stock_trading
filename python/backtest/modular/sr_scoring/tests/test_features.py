@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+import pytest
+
+from ..features import (
+    avg_return_after_touch,
+    compute_zone_features,
+    count_breakouts,
+    count_rejections,
+    find_touches,
+    relative_volume_at_touches,
+    touch_starting_at,
+    trend_slope,
+    zone_volatility,
+)
+from ..types import ApproachDirection, Zone, ZoneMethod
+from .conftest import bearish_trend_df, bullish_trend_df, double_bottom_df, make_df
+
+
+def _tight_support_zone(support: float = 100.0) -> Zone:
+    return Zone(
+        price_low=support - 0.1, price_high=support + 0.1, method=ZoneMethod.ATR,
+        center_price=support, formed_at_index=0,
+    )
+
+
+def test_find_touches_counts_double_bottom():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    assert len(touches) == 2
+    assert all(t.approach_direction == ApproachDirection.FROM_ABOVE for t in touches)
+
+
+def test_count_rejections_both_touches_bounce():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    assert count_rejections(df, touches, rejection_window=3, as_of_index=len(df) - 1) == 2
+
+
+def test_count_breakouts_zero_when_price_never_closes_below_support():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    breakouts = count_breakouts(
+        df, zone, as_of_index=len(df) - 1, lookback_bars=len(df), confirmation_bars=2,
+        approach=ApproachDirection.FROM_ABOVE,
+    )
+    assert breakouts == 0
+
+
+def test_count_breakouts_detects_sustained_close_below_support():
+    closes = [105.0, 103.0, 101.0, 99.0, 98.0, 97.0, 102.0, 106.0]
+    rows = [(c, c + 0.1, c - 0.1, c, 1000.0) for c in closes]
+    df = make_df(rows)
+    zone = Zone(price_low=100.0, price_high=100.5, method=ZoneMethod.ATR, center_price=100.25, formed_at_index=0)
+    breakouts = count_breakouts(
+        df, zone, as_of_index=len(df) - 1, lookback_bars=len(df), confirmation_bars=2,
+        approach=ApproachDirection.FROM_ABOVE,
+    )
+    assert breakouts == 1
+
+
+def test_count_breakouts_ignores_moves_on_the_normal_side_of_the_zone():
+    # 支撐 zone：價格待在 zone 上方是正常狀態，不該被算成突破
+    closes = [105.0, 110.0, 115.0, 120.0, 125.0]
+    rows = [(c, c + 0.1, c - 0.1, c, 1000.0) for c in closes]
+    df = make_df(rows)
+    zone = Zone(price_low=100.0, price_high=100.5, method=ZoneMethod.ATR, center_price=100.25, formed_at_index=0)
+    breakouts = count_breakouts(
+        df, zone, as_of_index=len(df) - 1, lookback_bars=len(df), confirmation_bars=2,
+        approach=ApproachDirection.FROM_ABOVE,
+    )
+    assert breakouts == 0
+
+
+def test_avg_return_after_touch_positive_for_bounce():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    avg_return = avg_return_after_touch(df, touches, forward_bars=3, as_of_index=len(df) - 1)
+    assert avg_return > 0
+
+
+def test_avg_return_excludes_touches_without_enough_future_bars():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    # as_of_index=14 剛好是第二次觸碰當下，該次觸碰沒有 forward_bars=3 的未來資料可用，
+    # 只有第一次觸碰（index=4）會被納入計算
+    avg_return = avg_return_after_touch(df, touches, forward_bars=3, as_of_index=14)
+    assert avg_return != 0.0
+
+
+def test_relative_volume_at_touches_uses_trailing_ma_excluding_touch_bar():
+    closes = [105.0] * 20 + [100.0]
+    volumes = [1000.0] * 20 + [3000.0]
+    rows = [(c, c + 0.1, c - 0.1, c, v) for c, v in zip(closes, volumes)]
+    df = make_df(rows)
+    zone = Zone(price_low=99.9, price_high=100.1, method=ZoneMethod.ATR, center_price=100.0, formed_at_index=0)
+    touches = find_touches(df, zone, as_of_index=len(df) - 1, lookback_bars=len(df))
+    assert len(touches) == 1
+    rel_vol = relative_volume_at_touches(df, touches, volume_ma_period=20)
+    assert rel_vol == pytest.approx(3.0)
+
+
+def test_zone_volatility_positive_for_volatile_series():
+    df = double_bottom_df()
+    vol = zone_volatility(df, as_of_index=len(df) - 1, atr_period=14)
+    assert vol > 0
+
+
+def test_trend_slope_positive_for_uptrend():
+    df = bullish_trend_df(n=80)
+    slope = trend_slope(df, as_of_index=len(df) - 1, ma_period=20, lookback=20)
+    assert slope > 0
+
+
+def test_trend_slope_negative_for_downtrend():
+    df = bearish_trend_df(n=80)
+    slope = trend_slope(df, as_of_index=len(df) - 1, ma_period=20, lookback=20)
+    assert slope < 0
+
+
+def test_touch_starting_at_none_for_continuation_bar():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+    assert touch_starting_at(df, zone, 4) is not None
+    # index 5 已經離開 zone，根本不算觸碰
+    assert touch_starting_at(df, zone, 5) is None
+
+
+def test_compute_zone_features_role_specific_stats():
+    df = double_bottom_df()
+    zone = _tight_support_zone()
+
+    features_support = compute_zone_features(df, zone, as_of_index=len(df) - 1, approach=ApproachDirection.FROM_ABOVE)
+    assert features_support.touch_count == 2
+    assert features_support.rejection_count == 2
+    assert features_support.breakout_count == 0
+    assert features_support.avg_return_after_touch > 0
+
+    # 這個 zone 從未被「由下往上」觸碰過，FROM_BELOW 的 rejection 應為 0
+    features_resistance = compute_zone_features(df, zone, as_of_index=len(df) - 1, approach=ApproachDirection.FROM_BELOW)
+    assert features_resistance.touch_count == 2  # touch_count 是聚合值，不分方向
+    assert features_resistance.rejection_count == 0

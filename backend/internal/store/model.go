@@ -104,6 +104,41 @@ type StockAnalysisLevel struct {
 	BrokenPrice NullFloat64 `db:"broken_price" json:"broken_price,omitempty"`
 }
 
+// ── SR Zone Scoring models ─────────────────────────────────────
+
+type SRZoneAnalysis struct {
+	ID           uint64    `db:"id"            json:"id"`
+	Symbol       string    `db:"symbol"        json:"symbol"`
+	Timeframe    string    `db:"timeframe"     json:"timeframe"`
+	AnalyzedAt   time.Time `db:"analyzed_at"   json:"analyzed_at"`
+	CurrentPrice float64   `db:"current_price" json:"current_price"`
+	ModelVersion string    `db:"model_version" json:"model_version"`
+	CreatedAt    time.Time `db:"created_at"     json:"created_at"`
+}
+
+type SRZone struct {
+	ID                  uint64      `db:"id"                      json:"id"`
+	AnalysisID          uint64      `db:"analysis_id"             json:"analysis_id"`
+	PriceLow            float64     `db:"price_low"               json:"price_low"`
+	PriceHigh           float64     `db:"price_high"              json:"price_high"`
+	Method              string      `db:"method"                  json:"method"`
+	Role                string      `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
+	SupportScore        float64     `db:"support_score"           json:"support_score"`
+	ResistanceScore     float64     `db:"resistance_score"        json:"resistance_score"`
+	BounceProbability   NullFloat64 `db:"bounce_probability"      json:"bounce_probability,omitempty"`
+	BreakProbability    NullFloat64 `db:"break_probability"       json:"break_probability,omitempty"`
+	TouchCount          int         `db:"touch_count"             json:"touch_count"`
+	RejectionCount      int         `db:"rejection_count"         json:"rejection_count"`
+	BreakoutCount       int         `db:"breakout_count"          json:"breakout_count"`
+	AvgReturnAfterTouch float64     `db:"avg_return_after_touch"  json:"avg_return_after_touch"`
+	RelativeVolume      float64     `db:"relative_volume"         json:"relative_volume"`
+	Volatility          float64     `db:"volatility"              json:"volatility"`
+	TrendStrength       float64     `db:"trend_strength"          json:"trend_strength"`
+	Status              string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN
+	BrokenAt            NullTime    `db:"broken_at"               json:"broken_at,omitempty"`
+	BrokenPrice         NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
+}
+
 type WatchlistItem struct {
 	ID     uint32 `db:"id"     json:"id"`
 	Symbol string `db:"symbol" json:"symbol"`

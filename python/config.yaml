@@ -19,3 +19,7 @@ backtest:
   commission_rate: 0.001425  # 買賣各 0.1425%
   tax_rate: 0.003            # 賣出交易稅 0.3%
   initial_cash: 1_000_000    # 回測初始資金（新台幣）
+
+sr_scoring:
+  # 相對於 python/ 目錄；由 backtest/modular/sr_scoring/train.py 產生
+  model_path: "models/sr_scoring_v1.joblib"

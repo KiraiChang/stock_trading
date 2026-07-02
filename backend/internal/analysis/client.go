@@ -150,6 +150,126 @@ func (c *Client) Analyze(ctx context.Context, symbol, timeframe string) (*Result
 	return &result, nil
 }
 
+// ── SR Zone Scoring ──────────────────────────────────────────
+
+type ZoneFeatures struct {
+	TouchCount          int     `json:"touch_count"`
+	RejectionCount      int     `json:"rejection_count"`
+	BreakoutCount       int     `json:"breakout_count"`
+	AvgReturnAfterTouch float64 `json:"avg_return_after_touch"`
+	RelativeVolume      float64 `json:"relative_volume"`
+	Volatility          float64 `json:"volatility"`
+	TrendStrength       float64 `json:"trend_strength"`
+}
+
+type ZoneScore struct {
+	PriceLow             float64       `json:"price_low"`
+	PriceHigh            float64       `json:"price_high"`
+	Method               string        `json:"method"`
+	Role                 string        `json:"role"`
+	SupportScore         float64       `json:"support_score"`
+	ResistanceScore      float64       `json:"resistance_score"`
+	BounceProbability    *float64      `json:"bounce_probability"`
+	BreakProbability     *float64      `json:"break_probability"`
+	FeaturesAsSupport    *ZoneFeatures `json:"features_as_support"`
+	FeaturesAsResistance *ZoneFeatures `json:"features_as_resistance"`
+}
+
+// ZoneScoreResult 對應 Python score_symbol() 的回傳格式
+type ZoneScoreResult struct {
+	Symbol       string      `json:"symbol"`
+	Timeframe    string      `json:"timeframe"`
+	AnalyzedAt   string      `json:"analyzed_at"` // RFC3339
+	CurrentPrice float64     `json:"current_price"`
+	Zones        []ZoneScore `json:"zones"`
+}
+
+// ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
+// ModelVersion 目前固定為空字串——Python bundle 的 version 沒有隨每次
+// /sr-zones 回應一併回傳，之後如需追蹤模型版本可擴充 Python 端輸出。
+func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, error) {
+	analyzedAt, err := time.Parse(time.RFC3339, r.AnalyzedAt)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse analyzed_at %q: %w", r.AnalyzedAt, err)
+	}
+
+	a := &store.SRZoneAnalysis{
+		Symbol:       r.Symbol,
+		Timeframe:    r.Timeframe,
+		AnalyzedAt:   analyzedAt,
+		CurrentPrice: r.CurrentPrice,
+	}
+
+	zones := make([]store.SRZone, 0, len(r.Zones))
+	for _, z := range r.Zones {
+		features := z.FeaturesAsSupport
+		if features == nil {
+			features = z.FeaturesAsResistance
+		}
+		zone := store.SRZone{
+			PriceLow:          z.PriceLow,
+			PriceHigh:         z.PriceHigh,
+			Method:            z.Method,
+			Role:              z.Role,
+			SupportScore:      z.SupportScore,
+			ResistanceScore:   z.ResistanceScore,
+			BounceProbability: nullFloat(z.BounceProbability),
+			BreakProbability:  nullFloat(z.BreakProbability),
+			Status:            "PENDING",
+		}
+		if features != nil {
+			zone.TouchCount = features.TouchCount
+			zone.RejectionCount = features.RejectionCount
+			zone.BreakoutCount = features.BreakoutCount
+			zone.AvgReturnAfterTouch = features.AvgReturnAfterTouch
+			zone.RelativeVolume = features.RelativeVolume
+			zone.Volatility = features.Volatility
+			zone.TrendStrength = features.TrendStrength
+		}
+		zones = append(zones, zone)
+	}
+
+	return a, zones, nil
+}
+
+// ScoreZones 呼叫 Python HTTP service 的 /sr-zones 端點
+func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string) (*ZoneScoreResult, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("python service url not configured（請設定 python.service_url / PYTHON_SERVICE_URL）")
+	}
+
+	body, err := json.Marshal(map[string]string{"symbol": symbol, "timeframe": timeframe})
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/sr-zones", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("python sr-zones request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("python sr-zones read body error: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("python sr-zones error: status=%d body=%s", resp.StatusCode, truncateBody(respBody))
+	}
+
+	var result ZoneScoreResult
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("python sr-zones decode error: body=%s: %w", truncateBody(respBody), err)
+	}
+	return &result, nil
+}
+
 func truncateBody(body []byte) string {
 	const maxLen = 300
 	s := string(body)

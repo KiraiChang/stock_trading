@@ -39,3 +39,6 @@ python/.venv/
 **/__pycache__/
 **/*.pyc
 **/*.pyo
+
+# Python 訓練產物
+python/models/

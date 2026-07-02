@@ -68,6 +68,7 @@ func main() {
 	userRepo      := store.NewUserRepo(db)
 	jobRunRepo    := store.NewJobRunRepo(db)
 	analysisRepo  := store.NewAnalysisRepo(db)
+	srZoneRepo    := store.NewSRZoneRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -103,7 +104,7 @@ func main() {
 	}
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, btManager, analysisClient, fetcher, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, btManager, analysisClient, fetcher, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

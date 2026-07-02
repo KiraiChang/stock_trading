@@ -35,3 +35,8 @@ WORKER_POLL_INTERVAL: int = _raw["python_service"]["worker_poll_interval"]
 COMMISSION_RATE: float = _raw["backtest"]["commission_rate"]
 TAX_RATE: float = _raw["backtest"]["tax_rate"]
 INITIAL_CASH: float = _raw["backtest"]["initial_cash"]
+
+# ── SR Scoring ────────────────────────────────────────────────
+SR_SCORING_MODEL_PATH: str = os.getenv("SR_SCORING_MODEL_PATH") or str(
+    (_ROOT / _raw["sr_scoring"]["model_path"]).resolve()
+)

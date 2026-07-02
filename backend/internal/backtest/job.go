@@ -24,10 +24,10 @@ type CreateRequest struct {
 }
 
 type Manager struct {
-	repo           store.BacktestRepo
-	pythonHTTPURL  string        // Method B：Python FastAPI 端點（空白 = 僅用 Method A）
-	httpTimeout    time.Duration
-	log            *zap.Logger
+	repo          store.BacktestRepo
+	pythonHTTPURL string // Method B：Python FastAPI 端點（空白 = 僅用 Method A）
+	httpTimeout   time.Duration
+	log           *zap.Logger
 }
 
 func NewManager(repo store.BacktestRepo, pythonHTTPURL string, log *zap.Logger) *Manager {

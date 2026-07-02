@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/store"
@@ -14,10 +15,11 @@ type AnalysisHandler struct {
 	client   *analysis.Client
 	verifier *analysis.Verifier
 	repo     store.AnalysisRepo
+	log      *zap.Logger
 }
 
-func NewAnalysisHandler(client *analysis.Client, verifier *analysis.Verifier, repo store.AnalysisRepo) *AnalysisHandler {
-	return &AnalysisHandler{client: client, verifier: verifier, repo: repo}
+func NewAnalysisHandler(client *analysis.Client, verifier *analysis.Verifier, repo store.AnalysisRepo, log *zap.Logger) *AnalysisHandler {
+	return &AnalysisHandler{client: client, verifier: verifier, repo: repo, log: log}
 }
 
 // POST /api/v1/analysis
@@ -43,30 +45,30 @@ func (h *AnalysisHandler) Create(c *gin.Context) {
 
 	result, err := h.client.Analyze(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		badGatewayError(c, h.log, err, "analysis: analyze")
 		return
 	}
 
 	a, levels, err := result.ToStore()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: convert result to store")
 		return
 	}
 
 	id, err := h.repo.Create(c.Request.Context(), a, levels)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: create")
 		return
 	}
 
 	saved, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: get saved analysis")
 		return
 	}
 	savedLevels, err := h.repo.GetLevels(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: get saved levels")
 		return
 	}
 
@@ -83,7 +85,7 @@ func (h *AnalysisHandler) List(c *gin.Context) {
 
 	rows, err := h.repo.List(c.Request.Context(), symbol, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: list")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analyses": rows, "total": len(rows)})
@@ -104,7 +106,7 @@ func (h *AnalysisHandler) Get(c *gin.Context) {
 	}
 	levels, err := h.repo.GetLevels(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: get levels")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": a, "levels": levels})
@@ -120,7 +122,7 @@ func (h *AnalysisHandler) Verify(c *gin.Context) {
 
 	a, levels, err := h.verifier.Verify(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: verify")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": a, "levels": levels})
@@ -139,7 +141,7 @@ func (h *AnalysisHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "analysis: delete")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})

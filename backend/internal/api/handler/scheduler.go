@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/store"
@@ -13,10 +14,11 @@ import (
 type SchedulerHandler struct {
 	repo  store.JobRunRepo
 	sched *scheduler.Scheduler
+	log   *zap.Logger
 }
 
-func NewSchedulerHandler(repo store.JobRunRepo, sched *scheduler.Scheduler) *SchedulerHandler {
-	return &SchedulerHandler{repo: repo, sched: sched}
+func NewSchedulerHandler(repo store.JobRunRepo, sched *scheduler.Scheduler, log *zap.Logger) *SchedulerHandler {
+	return &SchedulerHandler{repo: repo, sched: sched, log: log}
 }
 
 // POST /api/v1/scheduler/daily-close/run
@@ -52,7 +54,7 @@ type jobStatus struct {
 func (h *SchedulerHandler) GetStatus(c *gin.Context) {
 	runs, err := h.repo.GetRecent(c.Request.Context(), 50)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "scheduler: get status")
 		return
 	}
 

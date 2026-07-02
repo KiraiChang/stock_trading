@@ -27,8 +27,8 @@ type clientMsg struct {
 }
 
 type client struct {
-	conn      *websocket.Conn
-	send      chan []byte
+	conn       *websocket.Conn
+	send       chan []byte
 	subscribed map[string]bool
 }
 

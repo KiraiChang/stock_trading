@@ -28,8 +28,8 @@ type RawMinuteCandle struct {
 }
 
 type FinMindResponse struct {
-	Msg    string `json:"msg"`
-	Status int    `json:"status"`
+	Msg    string                   `json:"msg"`
+	Status int                      `json:"status"`
 	Data   []map[string]interface{} `json:"data"`
 }
 

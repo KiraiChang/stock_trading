@@ -13,10 +13,10 @@ import (
 const lookback = 120 // 拉取最近 120 根 K 棒，足夠所有指標計算
 
 type Engine struct {
-	candles   store.CandleRepo
-	indRepo   store.IndicatorRepo
-	redis     *store.RedisClient
-	log       *zap.Logger
+	candles store.CandleRepo
+	indRepo store.IndicatorRepo
+	redis   *store.RedisClient
+	log     *zap.Logger
 }
 
 func NewEngine(candles store.CandleRepo, indRepo store.IndicatorRepo, redis *store.RedisClient, log *zap.Logger) *Engine {
@@ -89,7 +89,7 @@ func (e *Engine) cacheToRedis(ctx context.Context, symbol, timeframe string, sna
 	values := map[string]interface{}{
 		"ma5": snap.MA5, "ma10": snap.MA10, "ma20": snap.MA20, "ma60": snap.MA60,
 		"rsi14": snap.RSI14,
-		"macd": snap.MACD, "macd_signal": snap.MACDSignal, "macd_hist": snap.MACDHist,
+		"macd":  snap.MACD, "macd_signal": snap.MACDSignal, "macd_hist": snap.MACDHist,
 		"bb_upper": snap.BBUpper, "bb_middle": snap.BBMiddle, "bb_lower": snap.BBLower,
 		"atr14": snap.ATR14, "vwap": snap.VWAP,
 		"vol_ma20": snap.VolMA20, "vol_ratio": snap.VolRatio,

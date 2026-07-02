@@ -5,22 +5,24 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/store"
 )
 
 type WatchlistHandler struct {
 	repo store.WatchlistRepo
+	log  *zap.Logger
 }
 
-func NewWatchlistHandler(repo store.WatchlistRepo) *WatchlistHandler {
-	return &WatchlistHandler{repo: repo}
+func NewWatchlistHandler(repo store.WatchlistRepo, log *zap.Logger) *WatchlistHandler {
+	return &WatchlistHandler{repo: repo, log: log}
 }
 
 func (h *WatchlistHandler) GetAll(c *gin.Context) {
 	items, err := h.repo.GetAll(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "watchlist: get all")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"watchlist": items})
@@ -37,7 +39,7 @@ func (h *WatchlistHandler) Add(c *gin.Context) {
 		return
 	}
 	if err := h.repo.Add(c.Request.Context(), body.Symbol, body.Name, body.Sector); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "watchlist: add")
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"message": "added"})
@@ -80,7 +82,7 @@ func (h *WatchlistHandler) Update(c *gin.Context) {
 		return
 	}
 	if err := h.repo.Update(c.Request.Context(), symbol, body.Name, body.Sector); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "watchlist: update")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "updated"})
@@ -89,7 +91,7 @@ func (h *WatchlistHandler) Update(c *gin.Context) {
 func (h *WatchlistHandler) Remove(c *gin.Context) {
 	symbol := c.Param("symbol")
 	if err := h.repo.Remove(c.Request.Context(), symbol); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "watchlist: remove")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "removed"})
@@ -113,7 +115,7 @@ func (h *WatchlistHandler) SetWatched(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "已達監聽上限（3 檔），請先取消其他股票的監聽"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "watchlist: set watched")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"symbol": symbol, "watched": body.Watched})

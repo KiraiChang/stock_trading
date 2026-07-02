@@ -46,30 +46,30 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 
 	result, err := h.client.ScoreZones(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		badGatewayError(c, h.log, err, "sr-zones: score zones")
 		return
 	}
 
 	a, zones, err := result.ToStore()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: convert result to store")
 		return
 	}
 
 	id, err := h.repo.Create(c.Request.Context(), a, zones)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: create analysis")
 		return
 	}
 
 	saved, err := h.repo.Get(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: get saved analysis")
 		return
 	}
 	savedZones, err := h.repo.GetZones(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: get saved zones")
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *SRZoneHandler) List(c *gin.Context) {
 
 	rows, err := h.repo.List(c.Request.Context(), symbol, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: list analyses")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analyses": rows, "total": len(rows)})
@@ -107,7 +107,7 @@ func (h *SRZoneHandler) Get(c *gin.Context) {
 	}
 	zones, err := h.repo.GetZones(c.Request.Context(), id)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: get zones")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": a, "zones": zones})
@@ -137,7 +137,7 @@ func (h *SRZoneHandler) Train(c *gin.Context) {
 		var err error
 		symbols, err = h.watchlist.Symbols(c.Request.Context())
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			serverError(c, h.log, err, "sr-zones: list watchlist symbols for train")
 			return
 		}
 	}
@@ -176,7 +176,7 @@ func (h *SRZoneHandler) Delete(c *gin.Context) {
 		return
 	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "sr-zones: delete analysis")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})

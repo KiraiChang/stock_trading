@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/trading/backend/internal/api/middleware"
@@ -16,13 +17,15 @@ type AuthHandler struct {
 	userRepo  store.UserRepo
 	jwtSecret []byte
 	tokenTTL  time.Duration
+	log       *zap.Logger
 }
 
-func NewAuthHandler(userRepo store.UserRepo, jwtSecret string) *AuthHandler {
+func NewAuthHandler(userRepo store.UserRepo, jwtSecret string, log *zap.Logger) *AuthHandler {
 	return &AuthHandler{
 		userRepo:  userRepo,
 		jwtSecret: []byte(jwtSecret),
 		tokenTTL:  24 * time.Hour,
+		log:       log,
 	}
 }
 
@@ -39,7 +42,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		serverError(c, h.log, err, "auth: hash password")
 		return
 	}
 
@@ -94,7 +97,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	signed, err := token.SignedString(h.jwtSecret)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sign token"})
+		serverError(c, h.log, err, "auth: sign token")
 		return
 	}
 

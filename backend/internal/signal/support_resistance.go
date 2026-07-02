@@ -13,9 +13,9 @@ type Level struct {
 }
 
 const (
-	srLookback    = 60
-	mergeThresh   = 0.01 // 1% 以內視為同一價位
-	maxLevels     = 3
+	srLookback  = 60
+	mergeThresh = 0.01 // 1% 以內視為同一價位
+	maxLevels   = 3
 )
 
 // CalcSupportResistance 識別支撐與阻力位

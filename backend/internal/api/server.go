@@ -28,24 +28,24 @@ type Server struct {
 }
 
 func NewServer(
-	db            *sqlx.DB,
-	candleRepo    store.CandleRepo,
+	db *sqlx.DB,
+	candleRepo store.CandleRepo,
 	indicatorRepo store.IndicatorRepo,
-	indEngine     *indicator.Engine,
-	sigEngine     *signal.Engine,
-	signalRepo    store.SignalRepo,
+	indEngine *indicator.Engine,
+	sigEngine *signal.Engine,
+	signalRepo store.SignalRepo,
 	watchlistRepo store.WatchlistRepo,
-	backtestRepo  store.BacktestRepo,
-	jobRunRepo    store.JobRunRepo,
-	analysisRepo  store.AnalysisRepo,
-	srZoneRepo    store.SRZoneRepo,
-	btManager     *backtest.Manager,
+	backtestRepo store.BacktestRepo,
+	jobRunRepo store.JobRunRepo,
+	analysisRepo store.AnalysisRepo,
+	srZoneRepo store.SRZoneRepo,
+	btManager *backtest.Manager,
 	analysisClient *analysis.Client,
-	fetcher       *market.Fetcher,
-	sched         *scheduler.Scheduler,
-	userRepo      store.UserRepo,
-	jwtSecret     string,
-	log           *zap.Logger,
+	fetcher *market.Fetcher,
+	sched *scheduler.Scheduler,
+	userRepo store.UserRepo,
+	jwtSecret string,
+	log *zap.Logger,
 ) *Server {
 	hub := ws.NewHub(log)
 	go hub.Run()
@@ -53,10 +53,12 @@ func NewServer(
 	r := gin.New()
 	r.Use(middleware.Logger(log), middleware.CORS(), gin.Recovery())
 
-	// 給 docker / uptime 探測用，不需 token
+	// 給 docker / uptime 探測用，不需 token。錯誤細節（DB DSN 等）只寫 log，
+	// 不回給呼叫端。
 	r.GET("/health", func(c *gin.Context) {
 		if err := db.PingContext(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "down", "error": err.Error()})
+			log.Error("health check: db ping failed", zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "down"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -65,7 +67,7 @@ func NewServer(
 	v1 := r.Group("/api/v1")
 
 	// ── 公開路由（不需 token）─────────────────────────────────
-	ah := handler.NewAuthHandler(userRepo, jwtSecret)
+	ah := handler.NewAuthHandler(userRepo, jwtSecret, log)
 	auth := v1.Group("/auth")
 	{
 		auth.POST("/register", ah.Register)
@@ -76,18 +78,18 @@ func NewServer(
 	protected := v1.Group("")
 	protected.Use(middleware.Auth(jwtSecret))
 	{
-		ch := handler.NewCandleHandler(candleRepo)
+		ch := handler.NewCandleHandler(candleRepo, log)
 		protected.GET("/candles/:symbol", ch.GetCandles)
 
 		ih := handler.NewIndicatorHandler(indEngine, indicatorRepo)
 		protected.GET("/indicators/:symbol", ih.GetIndicators)
 		protected.POST("/indicators/:symbol/compute", ih.Compute)
 
-		sh := handler.NewSignalHandler(sigEngine, signalRepo)
+		sh := handler.NewSignalHandler(sigEngine, signalRepo, log)
 		protected.GET("/signals", sh.GetSignals)
 		protected.POST("/signals/:symbol/evaluate", sh.Evaluate)
 
-		wh := handler.NewWatchlistHandler(watchlistRepo)
+		wh := handler.NewWatchlistHandler(watchlistRepo, log)
 		protected.GET("/watchlist", wh.GetAll)
 		protected.POST("/watchlist", wh.Add)
 		protected.POST("/watchlist/bulk", wh.BulkAdd)
@@ -98,18 +100,18 @@ func NewServer(
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)
 
-		sch := handler.NewSchedulerHandler(jobRunRepo, sched)
+		sch := handler.NewSchedulerHandler(jobRunRepo, sched, log)
 		protected.GET("/scheduler/status", sch.GetStatus)
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 
-		bh := handler.NewBacktestHandler(btManager, backtestRepo)
+		bh := handler.NewBacktestHandler(btManager, backtestRepo, log)
 		protected.POST("/backtest", bh.Submit)
 		protected.GET("/backtest", bh.ListJobs)
 		protected.GET("/backtest/:job_id", bh.GetJob)
 		protected.GET("/backtest/:job_id/trades", bh.GetTrades)
 		protected.DELETE("/backtest/:job_id", bh.Cancel)
 
-		anh := handler.NewAnalysisHandler(analysisClient, analysis.NewVerifier(analysisRepo, candleRepo), analysisRepo)
+		anh := handler.NewAnalysisHandler(analysisClient, analysis.NewVerifier(analysisRepo, candleRepo), analysisRepo, log)
 		protected.POST("/analysis", anh.Create)
 		protected.GET("/analysis", anh.List)
 		protected.GET("/analysis/:id", anh.Get)
@@ -123,7 +125,7 @@ func NewServer(
 		protected.POST("/sr-zones/train", szh.Train)
 		protected.DELETE("/sr-zones/:id", szh.Delete)
 
-		uh := handler.NewUserHandler(userRepo)
+		uh := handler.NewUserHandler(userRepo, log)
 		protected.GET("/users", uh.List)
 		protected.PATCH("/users/:id/status", uh.UpdateStatus)
 	}

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/backtest"
 	"github.com/trading/backend/internal/store"
@@ -13,10 +14,11 @@ import (
 type BacktestHandler struct {
 	manager *backtest.Manager
 	repo    store.BacktestRepo
+	log     *zap.Logger
 }
 
-func NewBacktestHandler(manager *backtest.Manager, repo store.BacktestRepo) *BacktestHandler {
-	return &BacktestHandler{manager: manager, repo: repo}
+func NewBacktestHandler(manager *backtest.Manager, repo store.BacktestRepo, log *zap.Logger) *BacktestHandler {
+	return &BacktestHandler{manager: manager, repo: repo, log: log}
 }
 
 // POST /api/v1/backtest
@@ -34,7 +36,7 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 
 	job, err := h.manager.Submit(c.Request.Context(), req)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "backtest: submit")
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"job": job})
@@ -50,7 +52,7 @@ func (h *BacktestHandler) ListJobs(c *gin.Context) {
 
 	jobs, err := h.repo.ListJobs(c.Request.Context(), limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "backtest: list jobs")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"jobs": jobs, "total": len(jobs)})
@@ -80,7 +82,7 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 
 	trades, err := h.repo.GetTrades(c.Request.Context(), jobID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "backtest: get trades")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job_id": jobID, "trades": trades, "total": len(trades)})
@@ -100,7 +102,7 @@ func (h *BacktestHandler) Cancel(c *gin.Context) {
 		return
 	}
 	if err := h.repo.UpdateJobStatus(c.Request.Context(), jobID, "failed", "cancelled by user"); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "backtest: cancel job")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})

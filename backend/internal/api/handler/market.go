@@ -40,7 +40,7 @@ func (h *MarketHandler) Backfill(c *gin.Context) {
 		var err error
 		symbols, err = h.watchlist.Symbols(ctx)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			serverError(c, h.log, err, "market: list watchlist symbols for backfill")
 			return
 		}
 	}

@@ -30,7 +30,7 @@ func CheckBreakout(
 		if price > r.Price && volRatio >= breakoutVolThresh && trend == Bullish {
 			return &store.Signal{
 				Symbol:     symbol,
-				SignalType:  "BREAKOUT",
+				SignalType: "BREAKOUT",
 				Direction:  "BUY",
 				Price:      price,
 				Volume:     vol,
@@ -47,16 +47,16 @@ func CheckBreakout(
 	for _, s := range supports {
 		if price < s.Price && trend == Bearish {
 			return &store.Signal{
-				Symbol:    symbol,
+				Symbol:     symbol,
 				SignalType: "BREAKDOWN",
-				Direction: "SELL",
-				Price:     price,
-				Volume:    vol,
-				VolRatio:  volRatio,
-				Support:   s.Price,
-				Trend:     string(trend),
-				Note:      fmt.Sprintf("跌破支撐 %.2f", s.Price),
-				Timestamp: ts,
+				Direction:  "SELL",
+				Price:      price,
+				Volume:     vol,
+				VolRatio:   volRatio,
+				Support:    s.Price,
+				Trend:      string(trend),
+				Note:       fmt.Sprintf("跌破支撐 %.2f", s.Price),
+				Timestamp:  ts,
 			}
 		}
 	}
@@ -64,15 +64,15 @@ func CheckBreakout(
 	// 純爆量警示（無需方向條件）
 	if volRatio >= volSpikeThresh {
 		return &store.Signal{
-			Symbol:    symbol,
+			Symbol:     symbol,
 			SignalType: "VOLUME_SPIKE",
-			Direction: "WATCH",
-			Price:     price,
-			Volume:    vol,
-			VolRatio:  volRatio,
-			Trend:     string(trend),
-			Note:      fmt.Sprintf("異常爆量 %.2fx", volRatio),
-			Timestamp: time.Now(),
+			Direction:  "WATCH",
+			Price:      price,
+			Volume:     vol,
+			VolRatio:   volRatio,
+			Trend:      string(trend),
+			Note:       fmt.Sprintf("異常爆量 %.2fx", volRatio),
+			Timestamp:  time.Now(),
 		}
 	}
 

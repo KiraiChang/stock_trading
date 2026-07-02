@@ -5,16 +5,18 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/store"
 )
 
 type UserHandler struct {
 	userRepo store.UserRepo
+	log      *zap.Logger
 }
 
-func NewUserHandler(userRepo store.UserRepo) *UserHandler {
-	return &UserHandler{userRepo: userRepo}
+func NewUserHandler(userRepo store.UserRepo, log *zap.Logger) *UserHandler {
+	return &UserHandler{userRepo: userRepo, log: log}
 }
 
 type userResponse struct {
@@ -28,7 +30,7 @@ type userResponse struct {
 func (h *UserHandler) List(c *gin.Context) {
 	users, err := h.userRepo.List(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "user: list")
 		return
 	}
 	resp := make([]userResponse, 0, len(users))
@@ -60,7 +62,7 @@ func (h *UserHandler) UpdateStatus(c *gin.Context) {
 	}
 
 	if err := h.userRepo.UpdateStatus(c.Request.Context(), id, body.Status); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "user: update status")
 		return
 	}
 

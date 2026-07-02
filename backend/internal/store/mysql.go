@@ -1,8 +1,8 @@
 package store
 
 import (
-	"github.com/jmoiron/sqlx"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 )
 
 func NewMySQL(dsn string) (*sqlx.DB, error) {

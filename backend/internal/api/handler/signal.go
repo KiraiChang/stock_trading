@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -13,10 +14,11 @@ import (
 type SignalHandler struct {
 	engine *signal.Engine
 	repo   store.SignalRepo
+	log    *zap.Logger
 }
 
-func NewSignalHandler(engine *signal.Engine, repo store.SignalRepo) *SignalHandler {
-	return &SignalHandler{engine: engine, repo: repo}
+func NewSignalHandler(engine *signal.Engine, repo store.SignalRepo, log *zap.Logger) *SignalHandler {
+	return &SignalHandler{engine: engine, repo: repo, log: log}
 }
 
 func (h *SignalHandler) GetSignals(c *gin.Context) {
@@ -35,7 +37,7 @@ func (h *SignalHandler) GetSignals(c *gin.Context) {
 		signals, err = h.repo.GetRecent(c.Request.Context(), limit)
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		serverError(c, h.log, err, "signal: get signals")
 		return
 	}
 

@@ -60,6 +60,22 @@ func (n *NullString) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// RawJSON 存的是一段已經是合法 JSON 的文字（例如 SRZone.TradingScoreBreakdown），
+// DB 欄位型別是 TEXT。刻意用 string 當底層型別，不是 []byte/json.RawMessage——
+// pgx（postgres driver）綁定 []byte 參數時會送成 bytea，寫入 TEXT 欄位會直接
+// 報型別不符的錯誤（sqlite/mysql 對這個比較寬容，不會出錯，但 postgres 會），
+// 用 string 才能讓 sqlx 在三種資料庫方言下都正常寫入/讀出這個欄位。
+// MarshalJSON 把內容原樣嵌入 API 回應（變成巢狀 JSON object），不是逃逸成
+// 一個 JSON 字串，前端才能用 z.trading_score_breakdown.expected_value 直接取值。
+type RawJSON string
+
+func (r RawJSON) MarshalJSON() ([]byte, error) {
+	if r == "" {
+		return []byte("null"), nil
+	}
+	return []byte(r), nil
+}
+
 type NullTime struct {
 	sql.NullTime
 }

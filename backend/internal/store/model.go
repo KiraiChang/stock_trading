@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"time"
 )
 
@@ -189,15 +188,11 @@ type SRZone struct {
 	RecentValidation string `db:"recent_validation"       json:"recent_validation"`
 
 	TradingScore float64 `db:"trading_score"           json:"trading_score"`
-	// TradingScoreBreakdown 存在 DB 裡是 TEXT/JSON 字串（{"expected_value":..,
-	// "risk_reward":.., "trend":.., "volume":.., "confidence":..}，五個分量
-	// 的加權貢獻值加總即為 TradingScore，見十三、Score 必須可拆解）。型別用
-	// json.RawMessage 而不是 string——RawMessage 的 MarshalJSON 會把內容
-	// 原樣嵌入回應（變成巢狀 JSON object），如果用 string 會被 json.Marshal
-	// 逃逸成一個 JSON 字串，前端就無法用 z.trading_score_breakdown.expected_value
-	// 直接取值。
-	TradingScoreBreakdown json.RawMessage `db:"trading_score_breakdown" json:"trading_score_breakdown"`
-	TradingRecommendation string          `db:"trading_recommendation"  json:"trading_recommendation"`
+	// TradingScoreBreakdown 是 RawJSON（見 null.go 說明）：{"expected_value":..,
+	// "risk_reward":.., "trend":.., "volume":.., "confidence":..}，五個分量的
+	// 加權貢獻值加總即為 TradingScore（見十三、Score 必須可拆解）。
+	TradingScoreBreakdown RawJSON `db:"trading_score_breakdown" json:"trading_score_breakdown"`
+	TradingRecommendation string  `db:"trading_recommendation"  json:"trading_recommendation"`
 
 	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（保留供未來 verifier 使用）
 	BrokenAt    NullTime    `db:"broken_at"               json:"broken_at,omitempty"`

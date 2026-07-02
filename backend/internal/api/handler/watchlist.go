@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -92,4 +93,28 @@ func (h *WatchlistHandler) Remove(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "removed"})
+}
+
+// PATCH /api/v1/watchlist/:symbol/watch
+// Body: { "watched": true }
+// 最多同時監聽 store.MaxWatchedSymbols 檔，超過會回 409。
+func (h *WatchlistHandler) SetWatched(c *gin.Context) {
+	symbol := c.Param("symbol")
+	var body struct {
+		Watched bool `json:"watched"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.repo.SetWatched(c.Request.Context(), symbol, body.Watched); err != nil {
+		if errors.Is(err, store.ErrWatchLimitExceeded) {
+			c.JSON(http.StatusConflict, gin.H{"error": "已達監聽上限（3 檔），請先取消其他股票的監聽"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"symbol": symbol, "watched": body.Watched})
 }

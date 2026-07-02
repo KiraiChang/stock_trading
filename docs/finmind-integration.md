@@ -43,6 +43,12 @@ GET /data?dataset=TaiwanStockKBar&data_id=2330&start_date=2024-01-15&token=YOUR_
 - 回應欄位：`date`（日期）與 `minute`（`HH:MM:SS`）為分開兩個欄位，需自行組成
   timestamp；**不提供成交金額**，intraday VWAP 目前無法用此 dataset 計算
 
+**帳號等級不足時建議直接關閉排程**，不要依賴上述的「跑下去才發現 400」：
+`config.yaml` 的 `finmind.intraday_enabled`（環境變數 `FINMIND_INTRADAY_ENABLED`）
+**預設 `false`**，`runIntradayJob` 一開始就會檢查這個設定並直接跳過，不會
+每 5 分鐘對 FinMind 發出注定失敗的請求、也不會在 `job_runs` 洗一筆
+`skipped` 紀錄。升級到 Sponsor 級以上的帳號後，改成 `true` 即可恢復。
+
 **回應欄位對應：**
 
 | FinMind 欄位 | 系統欄位 |

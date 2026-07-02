@@ -24,6 +24,11 @@ Fugle 目前預設關閉（`fugle.enabled: false`），已完成 REST/WebSocket 
 `cmd/fugle-check` 驗證工具，尚未接上 `Fetcher`/`scheduler` 的自動排程；詳見
 [fugle-integration.md](./fugle-integration.md)。
 
+FinMind 盤中分K排程也預設關閉（`finmind.intraday_enabled: false`）——該
+dataset（`TaiwanStockKBar`）需要 Sponsor 級以上 token，帳號等級不足時
+`runIntradayJob` 會直接跳過，不會每 5 分鐘對 FinMind 發出注定失敗的請求；
+升級帳號後改成 `true` 即可恢復，見 [finmind-integration.md](./finmind-integration.md)。
+
 ---
 
 ## 模組關係
@@ -90,7 +95,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 
 | 頁面 | Route | 說明 |
 |------|-------|------|
-| Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號）+ K線圖 + 訊號面板 |
+| Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號/★監聽切換）+ K線圖（可疊加 MA5/MA20/MA60，個別開關）+ 訊號面板 |
 | 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
@@ -99,6 +104,13 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 
 Dashboard 的即時欄位以 REST 主動 hydrate（`/candles`、`/indicators`、`/signals`），
 WebSocket 只在有新訊號時推播覆蓋，因為後端目前只會廣播 `signal` 事件。
+
+WebSocket 訂閱不是整份監控清單，而是只對監控清單裡標記 `watched=true` 的
+股票訂閱，且**同時最多 3 檔**（`store.MaxWatchedSymbols`，見
+`PATCH /watchlist/:symbol/watch`）；`ws.Hub` 也有相同上限的防禦性檢查。
+K線圖的 MA5/MA20/MA60 是前端用已載入的 candles 收盤價自行計算（rolling
+window），不是另外呼叫 API，因為 `/indicators/:symbol` 只回傳最新一筆快照，
+沒有整段歷史序列。
 
 ### 手動觸發端點（不限監控清單）
 

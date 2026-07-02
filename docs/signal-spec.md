@@ -67,3 +67,13 @@ Phase 1 無假突破過濾。Phase 2 計畫加入：
 - 需收盤確認（非盤中突破即觸發）
 - 連續 2 根 K 棒維持在阻力以上
 - RSI 不超買（< 80）
+
+---
+
+## 測試
+
+`backend/internal/signal/*_test.go` 涵蓋以上所有規則：`trend_test.go`（趨勢
+判斷各種結構組合）、`support_resistance_test.go`（群集/強度/排序截斷）、
+`breakout_test.go`（突破/跌破/爆量的每個條件與優先順序）、`engine_test.go`
+（`Engine.Evaluate` 接真實 sqlite 的整合測試）。跑法見
+[development-guide.md](./development-guide.md#執行-go-測試)。

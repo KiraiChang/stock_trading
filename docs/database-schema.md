@@ -65,6 +65,7 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | symbol | 股票代號（UNIQUE） |
 | name | 股票名稱 |
 | sector | 產業別（可空） |
+| watched | 是否透過 WebSocket 即時監聽；同時最多 3 檔為 `true`（`store.MaxWatchedSymbols`），由 `PATCH /watchlist/:symbol/watch` 設定，超過上限回 409 |
 
 ---
 

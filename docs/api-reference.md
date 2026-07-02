@@ -271,6 +271,27 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 從監控清單移除股票。
 
+### PATCH `/watchlist/:symbol/watch`
+
+設定或取消該股票的**即時監聽**（是否透過 WebSocket 推播）。監控清單本身可以
+很大，但即時監聽刻意限制**同時最多 3 檔**（`store.MaxWatchedSymbols`），跟這
+套系統「非高頻」的定位一致；前端只會對監聽中的股票送出 WebSocket 訂閱。
+
+**Request Body：**
+```json
+{ "watched": true }
+```
+
+**Response（200）：**
+```json
+{ "symbol": "2330", "watched": true }
+```
+
+**錯誤：** 已有 3 檔在監聽時，再設定第 4 檔會回傳 `409 Conflict`：
+```json
+{ "error": "已達監聽上限（3 檔），請先取消其他股票的監聽" }
+```
+
 ---
 
 ## Market API
@@ -504,6 +525,12 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 ```json
 { "action": "subscribe", "symbols": ["2330", "2454"] }
 ```
+
+同時訂閱檔數**最多 3 檔**（跟 watchlist 的 `watched` 欄位上限一致，見
+Watchlist API 的 `PATCH /watchlist/:symbol/watch`）；超過上限的 symbol 會被
+忽略並記一筆 server log，不會回錯誤給 client（目前協定沒有 ack/error 訊息
+機制）。真正的把關點是 `watched` 欄位——前端只會對監聽中的股票送出
+subscribe，這裡的檔數上限只是防禦性的第二層保護。
 
 **取消訂閱：**
 ```json

@@ -44,6 +44,10 @@ type FinMindConfig struct {
 	APIKey    string `mapstructure:"api_key"`
 	BaseURL   string `mapstructure:"base_url"`
 	RateLimit int    `mapstructure:"rate_limit"`
+	// IntradayEnabled 控制盤中分K排程（TaiwanStockKBar dataset）是否啟用；
+	// 該 dataset 需要 FinMind Sponsor 級以上 token，帳號等級不足時預設關閉，
+	// 避免排程每 5 分鐘都對 FinMind 發出注定失敗的請求、浪費 rate limit 額度。
+	IntradayEnabled bool `mapstructure:"intraday_enabled"`
 }
 
 // FugleConfig 為富果 MarketData API 設定。免費公開方案額度（2026 查證）：
@@ -69,6 +73,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("database.dsn", "./trading.db")
 	viper.SetDefault("finmind.base_url", "https://api.finmindtrade.com/api/v4")
 	viper.SetDefault("finmind.rate_limit", 5)
+	viper.SetDefault("finmind.intraday_enabled", false)
 	viper.SetDefault("fugle.rest_base_url", "https://api.fugle.tw/marketdata/v1.0/stock")
 	viper.SetDefault("fugle.ws_endpoint", "wss://api.fugle.tw/marketdata/v1.0/stock/streaming")
 	viper.SetDefault("fugle.enabled", false)

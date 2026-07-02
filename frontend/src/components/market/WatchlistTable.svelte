@@ -9,9 +9,30 @@
     addToWatchlist,
     updateWatchlist,
     removeFromWatchlist,
+    setWatched,
   } from '../../lib/api/watchlist'
 
-  const dispatch = createEventDispatcher<{ symbolAdded: string }>()
+  const dispatch = createEventDispatcher<{
+    symbolWatched: string
+    symbolUnwatched: string
+  }>()
+
+  // 即時監聽（WebSocket 訂閱）最多 3 檔，超過上限後端回 409
+  let watchError = ''
+
+  async function toggleWatch(item: WatchlistItem) {
+    const next = !item.watched
+    watchError = ''
+    try {
+      await setWatched(item.symbol, next)
+      watchlist.set(await fetchWatchlist())
+      dispatch(next ? 'symbolWatched' : 'symbolUnwatched', item.symbol)
+    } catch (e) {
+      watchError = e instanceof Error && e.message.includes('409')
+        ? '已達監聽上限（3 檔），請先取消其他股票的監聽'
+        : '設定監聽失敗，請稍後再試'
+    }
+  }
 
   const trendLabel: Record<string, string> = {
     BULLISH: '多頭',
@@ -61,7 +82,6 @@
     try {
       if (modalMode === 'add') {
         await addToWatchlist(form.symbol.trim(), form.name.trim(), form.sector.trim())
-        dispatch('symbolAdded', form.symbol.trim())
       } else {
         await updateWatchlist(form.symbol, form.name.trim(), form.sector.trim())
       }
@@ -167,6 +187,10 @@
     >+ 新增</button>
   </div>
 
+  {#if watchError}
+    <p class="px-4 py-2 text-rise text-xs border-b border-border">{watchError}</p>
+  {/if}
+
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
@@ -178,6 +202,7 @@
           <th class="text-right px-3 py-2">RSI</th>
           <th class="text-center px-3 py-2">趨勢</th>
           <th class="text-center px-3 py-2">訊號</th>
+          <th class="text-center px-3 py-2" title="即時監聽（WebSocket），最多 3 檔">監聽</th>
           <th class="px-2 py-2"></th>
         </tr>
       </thead>
@@ -188,7 +213,7 @@
           {#if confirmDeleteSymbol === item.symbol}
             <!-- 刪除確認列 -->
             <tr class="border-b border-border/50 bg-red-900/20">
-              <td class="px-4 py-2 text-xs text-gray-300" colspan="6">
+              <td class="px-4 py-2 text-xs text-gray-300" colspan="7">
                 確定刪除 <span class="font-semibold text-white">{item.symbol} {item.name}</span>？
               </td>
               <td class="px-2 py-2 text-right" colspan="2">
@@ -240,6 +265,14 @@
                   <span class="inline-block w-2 h-2 rounded-full bg-rise animate-pulse"></span>
                 {/if}
               </td>
+              <td class="px-3 py-2 text-center">
+                <button
+                  class="text-base leading-none transition-colors
+                         {item.watched ? 'text-amber-400 hover:text-amber-300' : 'text-muted hover:text-white'}"
+                  title={item.watched ? '取消即時監聽' : '設定即時監聽（最多 3 檔）'}
+                  on:click|stopPropagation={() => toggleWatch(item)}
+                >{item.watched ? '★' : '☆'}</button>
+              </td>
               <!-- 操作按鈕：hover 才顯示 -->
               <td class="px-2 py-2">
                 <div class="flex gap-1 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
@@ -259,7 +292,7 @@
           {/if}
         {:else}
           <tr>
-            <td colspan="8" class="px-4 py-8 text-center text-muted text-sm">尚無監控股票</td>
+            <td colspan="9" class="px-4 py-8 text-center text-muted text-sm">尚無監控股票</td>
           </tr>
         {/each}
       </tbody>

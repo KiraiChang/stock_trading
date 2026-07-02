@@ -7,6 +7,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+
+	"github.com/trading/backend/internal/store"
 )
 
 var upgrader = websocket.Upgrader{
@@ -136,7 +138,15 @@ func (c *client) readPump(h *Hub) {
 		h.mu.Lock()
 		switch msg.Action {
 		case "subscribe":
+			// 防禦性上限：即時監聽最多同時 store.MaxWatchedSymbols 檔，跟
+			// watchlist 的 watched 欄位上限一致（那裡是真正的把關點，這裡
+			// 只是避免任何 client 端 bug 或誤用送出超量訂閱）
 			for _, sym := range msg.Symbols {
+				if _, ok := c.subscribed[sym]; !ok && len(c.subscribed) >= store.MaxWatchedSymbols {
+					h.log.Warn("ws subscribe rejected: limit reached",
+						zap.String("symbol", sym), zap.Int("limit", store.MaxWatchedSymbols))
+					continue
+				}
 				c.subscribed[sym] = true
 			}
 		case "unsubscribe":

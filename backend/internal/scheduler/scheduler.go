@@ -15,12 +15,13 @@ import (
 )
 
 type Scheduler struct {
-	fetcher   *market.Fetcher
-	signalEng *signal.Engine
-	watchlist store.WatchlistRepo
-	jobRuns   store.JobRunRepo
-	log       *zap.Logger
-	cron      *cron.Cron
+	fetcher         *market.Fetcher
+	signalEng       *signal.Engine
+	watchlist       store.WatchlistRepo
+	jobRuns         store.JobRunRepo
+	intradayEnabled bool
+	log             *zap.Logger
+	cron            *cron.Cron
 }
 
 func New(
@@ -28,15 +29,17 @@ func New(
 	signalEng *signal.Engine,
 	watchlist store.WatchlistRepo,
 	jobRuns store.JobRunRepo,
+	intradayEnabled bool,
 	log *zap.Logger,
 ) *Scheduler {
 	return &Scheduler{
-		fetcher:   fetcher,
-		signalEng: signalEng,
-		watchlist: watchlist,
-		jobRuns:   jobRuns,
-		log:       log,
-		cron:      cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
+		fetcher:         fetcher,
+		signalEng:       signalEng,
+		watchlist:       watchlist,
+		jobRuns:         jobRuns,
+		intradayEnabled: intradayEnabled,
+		log:             log,
+		cron:            cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
 	}
 }
 
@@ -125,6 +128,13 @@ func (s *Scheduler) runPreMarket() {
 
 func (s *Scheduler) runIntradayJob() {
 	if !timeutil.IsMarketOpen(time.Now()) {
+		return
+	}
+	if !s.intradayEnabled {
+		// finmind.intraday_enabled=false（預設）：帳號等級不足以使用
+		// TaiwanStockKBar dataset，不建立 job_run 紀錄，避免每 5 分鐘
+		// 洗一筆「skipped」進資料庫；升級帳號後改設定即可恢復
+		s.log.Debug("intraday job skipped: finmind.intraday_enabled=false")
 		return
 	}
 

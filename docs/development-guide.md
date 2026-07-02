@@ -268,6 +268,24 @@ candles 不足 35 根時兩者都回 `422`，代表要先用「歷史資料回�
 
 ---
 
+## 執行 Go 測試
+
+`internal/signal/`（趨勢判斷/支撐壓力/突破訊號/Engine 整合）、
+`internal/store/`（監控清單監聽上限）目前是唯二有測試的套件：
+
+```bash
+cd backend
+go test ./internal/signal/... -v
+go test ./internal/store/... -v
+# 或直接跑全部（其他套件目前沒有測試檔，會顯示 [no test files]）
+go test ./...
+```
+
+`internal/signal` 的整合測試（`engine_test.go`）會建立暫存 sqlite 檔案並
+實際跑 migration，不需要額外設定；測試結束會自動清理暫存檔。
+
+---
+
 ## 執行 Python 測試
 
 `backtest/modular/` 的單元測試（支撐壓力/進場/停損/回測引擎/型別安全）：
@@ -317,6 +335,10 @@ go run ./cmd/fugle-check -symbol 2330 -duration 60s
 **`GET /indicators/:symbol` 回 404**：`indicator_snapshots` 沒有這支股票的資料，
 通常是還沒加進監控清單（排程只處理監控清單）或 candles 不足 35 根。用
 `POST /indicators/:symbol/compute` 手動補算，見上方「手動補算指標 / 評估訊號」。
+
+**設定監聽（`PATCH /watchlist/:symbol/watch`）回 409**：即時監聽同時最多 3 檔
+（`store.MaxWatchedSymbols`），需要先在前端監控清單頁面把其他股票的 ★ 取消
+才能再設定新的。
 
 **前端對某個數字欄位呼叫 `.toFixed()` 出現 `TypeError: ... is not a function`**：
 後端有 struct 欄位直接用了標準庫的 `sql.NullFloat64`/`NullString`/`NullTime`，

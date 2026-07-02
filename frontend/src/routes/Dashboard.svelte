@@ -33,9 +33,10 @@
 
     socket.connect(wsUrl)
 
-    const symbols = wl.map((w) => w.symbol)
-    if (symbols.length > 0) {
-      setTimeout(() => socket.subscribe(symbols), 500)
+    // 只即時監聽有勾選「監聽」的股票（最多 3 檔），不是整份監控清單
+    const watchedSymbols = wl.filter((w) => w.watched).map((w) => w.symbol)
+    if (watchedSymbols.length > 0) {
+      setTimeout(() => socket.subscribe(watchedSymbols), 500)
     }
   })
 
@@ -96,9 +97,9 @@
     const wl = await fetchWatchlist().catch(() => [])
     watchlist.set(wl)
     hydrateQuotes(wl, [])
-    const symbols = wl.map((w) => w.symbol)
-    if (symbols.length > 0) {
-      setTimeout(() => socket.subscribe(symbols), 500)
+    const watchedSymbols = wl.filter((w) => w.watched).map((w) => w.symbol)
+    if (watchedSymbols.length > 0) {
+      setTimeout(() => socket.subscribe(watchedSymbols), 500)
     }
   }
 </script>
@@ -114,7 +115,10 @@
   <div class="grid grid-cols-12 gap-4 h-full">
     <!-- 左側：監控清單 -->
     <div class="col-span-4 overflow-auto">
-      <WatchlistTable on:symbolAdded={(e) => socket.subscribe([e.detail])} />
+      <WatchlistTable
+        on:symbolWatched={(e) => socket.subscribe([e.detail])}
+        on:symbolUnwatched={(e) => socket.unsubscribe([e.detail])}
+      />
     </div>
 
     <!-- 右側：訊號 + K 線圖 -->

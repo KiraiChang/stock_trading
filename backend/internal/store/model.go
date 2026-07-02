@@ -109,6 +109,9 @@ type WatchlistItem struct {
 	Symbol string `db:"symbol" json:"symbol"`
 	Name   string `db:"name"   json:"name"`
 	Sector string `db:"sector" json:"sector"`
+	// Watched 標示是否要透過 WebSocket 即時監聽，最多同時 MaxWatchedSymbols 檔
+	// （見 watchlist_repo.go），跟監控清單本身的大小無關
+	Watched bool `db:"watched" json:"watched"`
 }
 
 // ── Backtest models ───────────────────────────────────────────

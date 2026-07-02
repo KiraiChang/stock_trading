@@ -111,7 +111,7 @@ func main() {
 	}
 
 	// Scheduler
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, log)
+	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, cfg.FinMind.IntradayEnabled, log)
 	go sched.Start()
 
 	if err := srv.Run(":" + cfg.Server.Port); err != nil {

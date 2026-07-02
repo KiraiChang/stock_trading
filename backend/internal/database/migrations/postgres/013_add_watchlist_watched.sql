@@ -1,0 +1,5 @@
+-- +goose Up
+ALTER TABLE watchlists ADD COLUMN IF NOT EXISTS watched BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- +goose Down
+ALTER TABLE watchlists DROP COLUMN IF EXISTS watched;

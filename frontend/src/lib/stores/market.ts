@@ -5,6 +5,8 @@ export interface WatchlistItem {
   symbol: string
   name: string
   sector: string
+  // 是否透過 WebSocket 即時監聽，最多同時 3 檔（見 backend MaxWatchedSymbols）
+  watched: boolean
 }
 
 export interface StockQuote {

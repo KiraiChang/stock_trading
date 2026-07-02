@@ -25,6 +25,10 @@ finmind:
   api_key: "YOUR_FINMIND_API_KEY"             # 環境變數：FINMIND_API_KEY
   base_url: "https://api.finmindtrade.com/api/v4"  # 環境變數：FINMIND_BASE_URL
   rate_limit: 5                               # 環境變數：FINMIND_RATE_LIMIT
+  # 盤中分K（TaiwanStockKBar）需要 Sponsor 級以上的 token，帳號等級不足時
+  # 預設關閉，避免排程每 5 分鐘都對 FinMind 發出注定失敗的請求；升級帳號後
+  # 改成 true 即可恢復盤中分K排程
+  intraday_enabled: false                     # 環境變數：FINMIND_INTRADAY_ENABLED
 
 # Fugle（富果）MarketData API，作為盤中即時行情來源，與 FinMind 並行（不取代歷史/日K）
 # 免費公開方案額度：WebSocket 1 連線／同時最多訂閱 5 檔，REST 60 次/分鐘（即時行情、歷史行情各自 60/min）

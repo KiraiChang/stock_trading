@@ -32,3 +32,13 @@ export async function updateWatchlist(symbol: string, name: string, sector = '')
 export async function removeFromWatchlist(symbol: string): Promise<void> {
   await apiFetch(`/watchlist/${symbol}`, { method: 'DELETE' })
 }
+
+// 設定/取消即時監聽（WebSocket 訂閱），最多同時 3 檔；超過上限時後端回 409，
+// apiFetch 的錯誤訊息會包含狀態碼（"API ... failed: 409"），呼叫端可以用
+// error.message.includes('409') 判斷是否為「已達上限」
+export async function setWatched(symbol: string, watched: boolean): Promise<void> {
+  await apiFetch(`/watchlist/${symbol}/watch`, {
+    method: 'PATCH',
+    body: JSON.stringify({ watched }),
+  })
+}

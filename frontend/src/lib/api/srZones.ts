@@ -9,8 +9,11 @@ export interface SRZone {
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
   support_score: number
   resistance_score: number
+  confidence: number
   bounce_probability: number | null
   break_probability: number | null
+  expected_value: number | null
+  risk_reward_ratio: number | null
   touch_count: number
   rejection_count: number
   breakout_count: number

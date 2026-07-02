@@ -71,12 +71,14 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 		if _, err := tx.NamedExecContext(ctx, `
 			INSERT INTO stock_sr_zones (
 				analysis_id, price_low, price_high, method, role,
-				support_score, resistance_score, bounce_probability, break_probability,
+				support_score, resistance_score, confidence, bounce_probability, break_probability,
+				expected_value, risk_reward_ratio,
 				touch_count, rejection_count, breakout_count, avg_return_after_touch,
 				relative_volume, volatility, trend_strength, status
 			) VALUES (
 				:analysis_id, :price_low, :price_high, :method, :role,
-				:support_score, :resistance_score, :bounce_probability, :break_probability,
+				:support_score, :resistance_score, :confidence, :bounce_probability, :break_probability,
+				:expected_value, :risk_reward_ratio,
 				:touch_count, :rejection_count, :breakout_count, :avg_return_after_touch,
 				:relative_volume, :volatility, :trend_strength, :status
 			)
@@ -125,7 +127,8 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 	var rows []SRZone
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 		SELECT id, analysis_id, price_low, price_high, method, role,
-			support_score, resistance_score, bounce_probability, break_probability,
+			support_score, resistance_score, confidence, bounce_probability, break_probability,
+			expected_value, risk_reward_ratio,
 			touch_count, rejection_count, breakout_count, avg_return_after_touch,
 			relative_volume, volatility, trend_strength, status, broken_at, broken_price
 		FROM stock_sr_zones WHERE analysis_id=? ORDER BY support_score DESC, resistance_score DESC

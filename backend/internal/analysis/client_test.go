@@ -65,6 +65,8 @@ func TestAnalyzeOmitsLimitFieldWhenZero(t *testing.T) {
 func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	bounce := 0.72
 	brk := 0.18
+	ev := 0.015
+	rr := 2.4
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/sr-zones" {
@@ -90,8 +92,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
-					SupportScore: 0.8, ResistanceScore: 0.1,
+					SupportScore: 0.8, ResistanceScore: 0.1, Confidence: 0.83,
 					BounceProbability: &bounce, BreakProbability: &brk,
+					ExpectedValue: &ev, RiskRewardRatio: &rr,
 					FeaturesAsSupport: &ZoneFeatures{
 						TouchCount: 4, RejectionCount: 3, BreakoutCount: 0,
 						AvgReturnAfterTouch: 0.02, RelativeVolume: 1.4, Volatility: 0.015, TrendStrength: 0.03,
@@ -99,7 +102,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
-					SupportScore: 0.2, ResistanceScore: 0.3,
+					SupportScore: 0.2, ResistanceScore: 0.3, Confidence: 0.4,
 				},
 			},
 		})
@@ -130,13 +133,25 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if first.Method != "atr" || first.Role != "SUPPORT" || first.TouchCount != 4 {
 		t.Fatalf("unexpected first zone: %+v", first)
 	}
+	if first.Confidence != 0.83 {
+		t.Fatalf("expected confidence 0.83, got %v", first.Confidence)
+	}
 	if !first.BounceProbability.Valid || first.BounceProbability.Float64 != bounce {
 		t.Fatalf("expected bounce probability %.2f, got %+v", bounce, first.BounceProbability)
+	}
+	if !first.ExpectedValue.Valid || first.ExpectedValue.Float64 != ev {
+		t.Fatalf("expected expected_value %.3f, got %+v", ev, first.ExpectedValue)
+	}
+	if !first.RiskRewardRatio.Valid || first.RiskRewardRatio.Float64 != rr {
+		t.Fatalf("expected risk_reward_ratio %.1f, got %+v", rr, first.RiskRewardRatio)
 	}
 
 	second := zones[1]
 	if second.Role != "AT_ZONE" || second.BounceProbability.Valid {
 		t.Fatalf("expected AT_ZONE zone with no bounce probability, got %+v", second)
+	}
+	if second.ExpectedValue.Valid || second.RiskRewardRatio.Valid {
+		t.Fatalf("expected AT_ZONE zone with no expected_value/risk_reward_ratio, got %+v", second)
 	}
 }
 

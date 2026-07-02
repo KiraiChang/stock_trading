@@ -117,16 +117,25 @@ type SRZoneAnalysis struct {
 }
 
 type SRZone struct {
-	ID                  uint64      `db:"id"                      json:"id"`
-	AnalysisID          uint64      `db:"analysis_id"             json:"analysis_id"`
-	PriceLow            float64     `db:"price_low"               json:"price_low"`
-	PriceHigh           float64     `db:"price_high"              json:"price_high"`
-	Method              string      `db:"method"                  json:"method"`
-	Role                string      `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
-	SupportScore        float64     `db:"support_score"           json:"support_score"`
-	ResistanceScore     float64     `db:"resistance_score"        json:"resistance_score"`
-	BounceProbability   NullFloat64 `db:"bounce_probability"      json:"bounce_probability,omitempty"`
-	BreakProbability    NullFloat64 `db:"break_probability"       json:"break_probability,omitempty"`
+	ID              uint64  `db:"id"                      json:"id"`
+	AnalysisID      uint64  `db:"analysis_id"             json:"analysis_id"`
+	PriceLow        float64 `db:"price_low"               json:"price_low"`
+	PriceHigh       float64 `db:"price_high"              json:"price_high"`
+	Method          string  `db:"method"                  json:"method"`
+	Role            string  `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
+	SupportScore    float64 `db:"support_score"           json:"support_score"`
+	ResistanceScore float64 `db:"resistance_score"        json:"resistance_score"`
+	// Confidence 是觸碰次數的貝式收縮係數（0~1），touch_count 越少越低；
+	// support_score/resistance_score/expected_value 都已經用它收縮過，
+	// 不需要前端再自己算一次，這裡存下來只是讓使用者能看到「這個分數的
+	// 可信度」，避免誤把低樣本數的分數當成高確信的訊號。
+	Confidence        float64     `db:"confidence"              json:"confidence"`
+	BounceProbability NullFloat64 `db:"bounce_probability"      json:"bounce_probability,omitempty"`
+	BreakProbability  NullFloat64 `db:"break_probability"       json:"break_probability,omitempty"`
+	// ExpectedValue/RiskRewardRatio 只有 Role 為 SUPPORT/RESISTANCE 時才有值
+	// （AT_ZONE 沒有明確方向可以算），見 scoring.py::score_zone 的說明。
+	ExpectedValue       NullFloat64 `db:"expected_value"          json:"expected_value,omitempty"`
+	RiskRewardRatio     NullFloat64 `db:"risk_reward_ratio"       json:"risk_reward_ratio,omitempty"`
 	TouchCount          int         `db:"touch_count"             json:"touch_count"`
 	RejectionCount      int         `db:"rejection_count"         json:"rejection_count"`
 	BreakoutCount       int         `db:"breakout_count"          json:"breakout_count"`

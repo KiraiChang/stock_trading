@@ -50,15 +50,18 @@ func testZones() []SRZone {
 	return []SRZone{
 		{
 			PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
-			SupportScore: 0.8, ResistanceScore: 0.1,
+			SupportScore: 0.8, ResistanceScore: 0.1, Confidence: 0.83,
 			BounceProbability:   NullFloat64{sql.NullFloat64{Float64: 0.72, Valid: true}},
 			BreakProbability:    NullFloat64{sql.NullFloat64{Float64: 0.2, Valid: true}},
+			ExpectedValue:       NullFloat64{sql.NullFloat64{Float64: 0.015, Valid: true}},
+			RiskRewardRatio:     NullFloat64{sql.NullFloat64{Float64: 2.4, Valid: true}},
 			TouchCount:          4, RejectionCount: 3, BreakoutCount: 0,
 			AvgReturnAfterTouch: 0.02, RelativeVolume: 1.4, Volatility: 0.015, TrendStrength: 0.03,
 		},
 		{
-			PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "RESISTANCE",
-			SupportScore: 0.1, ResistanceScore: 0.65,
+			// AT_ZONE：confidence 仍有值，但 expected_value/risk_reward_ratio 應為 NULL
+			PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
+			SupportScore: 0.1, ResistanceScore: 0.65, Confidence: 0.4,
 			TouchCount: 2, RejectionCount: 1, BreakoutCount: 1,
 			AvgReturnAfterTouch: -0.01, RelativeVolume: 1.1, Volatility: 0.018, TrendStrength: -0.01,
 		},
@@ -99,6 +102,31 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 		if z.Status != "PENDING" {
 			t.Fatalf("expected default status PENDING, got %s", z.Status)
 		}
+	}
+
+	var support, atZone SRZone
+	for _, z := range zones {
+		switch z.Role {
+		case "SUPPORT":
+			support = z
+		case "AT_ZONE":
+			atZone = z
+		}
+	}
+	if support.Confidence != 0.83 {
+		t.Fatalf("expected SUPPORT confidence=0.83, got %v", support.Confidence)
+	}
+	if !support.ExpectedValue.Valid || support.ExpectedValue.Float64 != 0.015 {
+		t.Fatalf("expected SUPPORT expected_value=0.015, got %+v", support.ExpectedValue)
+	}
+	if !support.RiskRewardRatio.Valid || support.RiskRewardRatio.Float64 != 2.4 {
+		t.Fatalf("expected SUPPORT risk_reward_ratio=2.4, got %+v", support.RiskRewardRatio)
+	}
+	if atZone.Confidence != 0.4 {
+		t.Fatalf("expected AT_ZONE confidence=0.4, got %v", atZone.Confidence)
+	}
+	if atZone.ExpectedValue.Valid || atZone.RiskRewardRatio.Valid {
+		t.Fatalf("expected AT_ZONE to have NULL expected_value/risk_reward_ratio, got %+v / %+v", atZone.ExpectedValue, atZone.RiskRewardRatio)
 	}
 }
 

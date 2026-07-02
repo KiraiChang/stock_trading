@@ -88,7 +88,20 @@ class ZoneLabel:
 
 @dataclass(frozen=True)
 class ZoneScore:
-    """對外回傳的單一 zone 評分結果。"""
+    """對外回傳的單一 zone 評分結果。
+
+    support_score/resistance_score 由 confidence 收縮過的機率推導而來
+    （見 scoring.py 開頭說明），不是獨立於 bounce/break_probability 之外
+    的規則式分數，兩者不會互相矛盾。
+
+    confidence：只由觸碰次數決定的貝式收縮係數（0~1），觸碰次數越少越低，
+    用來避免「尚未驗證」的 zone 被判成高分或給出誇大的期望值。
+
+    expected_value/risk_reward_ratio：只有 role 為 SUPPORT/RESISTANCE 時
+    才有值（AT_ZONE 沒有明確方向可以算）；expected_value 是「觸碰後平均報酬
+    × hold機率 - zone寬度風險 × break機率」再經 confidence 收縮，
+    risk_reward_ratio 是純粹的報酬/風險幅度比，不受 confidence 影響。
+    """
 
     price_low: float
     price_high: float
@@ -96,7 +109,10 @@ class ZoneScore:
     role: str
     support_score: float
     resistance_score: float
+    confidence: float
     bounce_probability: Optional[float]
     break_probability: Optional[float]
+    expected_value: Optional[float]
+    risk_reward_ratio: Optional[float]
     features_as_support: Optional[ZoneFeatures]
     features_as_resistance: Optional[ZoneFeatures]

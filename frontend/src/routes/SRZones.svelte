@@ -167,6 +167,38 @@
   function fmtPct(v?: number | null): string {
     return v === undefined || v === null ? '—' : `${(v * 100).toFixed(1)}%`
   }
+
+  function fmtSignedPct(v?: number | null): string {
+    if (v === undefined || v === null) return '—'
+    const pct = (v * 100).toFixed(2)
+    return v > 0 ? `+${pct}%` : `${pct}%`
+  }
+
+  function fmtRatio(v?: number | null): string {
+    return v === undefined || v === null ? '—' : `${v.toFixed(2)}R`
+  }
+
+  function evClass(v?: number | null): string {
+    if (v === undefined || v === null) return 'text-muted'
+    if (v > 0) return 'text-rise'
+    if (v < 0) return 'text-fall'
+    return 'text-muted'
+  }
+
+  // confidence 是觸碰次數的貝式收縮係數，touch_count 太少時分數/期望值都會
+  // 被收縮到中性值——這裡用門檻標示「這個分數有多少歷史證據支撐」，避免
+  // 使用者把「尚未驗證」的 zone 誤判成高確信的訊號。
+  function confidenceLabel(c: number): string {
+    if (c >= 0.7) return '高'
+    if (c >= 0.35) return '中'
+    return '低'
+  }
+
+  function confidenceClass(c: number): string {
+    if (c >= 0.7) return 'bg-green-900/40 text-green-400'
+    if (c >= 0.35) return 'bg-yellow-900/40 text-yellow-400'
+    return 'bg-gray-700/60 text-gray-400'
+  }
 </script>
 
 <Layout>
@@ -206,9 +238,9 @@
         </button>
       </div>
       <p class="text-muted text-xs mt-2">
-        用 ATR 通道與成交量分布兩種方法建立價格區間（zone），對每個區間算出規則式的支撐/壓力強度分數，
-        以及依歷史觸碰事件訓練的機率模型預測反彈/跌破機率。抓取根數指分析用的歷史K棒數量（預設 250，至少
-        35 根）。機率欄位需要下方先訓練過模型才會有值。
+        用 ATR 通道與成交量分布兩種方法建立價格區間（zone），依歷史觸碰事件訓練的機率模型算出反彈/跌破機率，
+        支撐/壓力強度分數由該機率依可信度收縮而來（觸碰次數越少越保守），兩者不會互相矛盾。抓取根數指分析用的
+        歷史K棒數量（預設 250，至少 35 根）。需要先在下方訓練過機率模型才能分析。
       </p>
     </div>
 
@@ -289,7 +321,7 @@
                 </span>
               </div>
 
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+              <div class="grid grid-cols-3 gap-3 text-xs mb-3">
                 <div>
                   <p class="text-muted mb-1">支撐強度分數</p>
                   <p class="text-rise font-mono">{fmtPct(z.support_score)}</p>
@@ -299,12 +331,32 @@
                   <p class="text-fall font-mono">{fmtPct(z.resistance_score)}</p>
                 </div>
                 <div>
+                  <p class="text-muted mb-1 flex items-center gap-1">
+                    可信度
+                    <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceClass(z.confidence)}">
+                      {confidenceLabel(z.confidence)}
+                    </span>
+                  </p>
+                  <p class="text-white font-mono">{fmtPct(z.confidence)}</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+                <div>
                   <p class="text-muted mb-1">反彈機率</p>
                   <p class="text-white font-mono">{fmtPct(z.bounce_probability)}</p>
                 </div>
                 <div>
                   <p class="text-muted mb-1">跌破機率</p>
                   <p class="text-white font-mono">{fmtPct(z.break_probability)}</p>
+                </div>
+                <div>
+                  <p class="text-muted mb-1">期望值 (EV)</p>
+                  <p class="{evClass(z.expected_value)} font-mono">{fmtSignedPct(z.expected_value)}</p>
+                </div>
+                <div>
+                  <p class="text-muted mb-1">風險報酬比 (R)</p>
+                  <p class="text-white font-mono">{fmtRatio(z.risk_reward_ratio)}</p>
                 </div>
               </div>
 

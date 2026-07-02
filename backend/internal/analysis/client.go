@@ -180,8 +180,11 @@ type ZoneScore struct {
 	Role                 string        `json:"role"`
 	SupportScore         float64       `json:"support_score"`
 	ResistanceScore      float64       `json:"resistance_score"`
+	Confidence           float64       `json:"confidence"`
 	BounceProbability    *float64      `json:"bounce_probability"`
 	BreakProbability     *float64      `json:"break_probability"`
+	ExpectedValue        *float64      `json:"expected_value"`
+	RiskRewardRatio      *float64      `json:"risk_reward_ratio"`
 	FeaturesAsSupport    *ZoneFeatures `json:"features_as_support"`
 	FeaturesAsResistance *ZoneFeatures `json:"features_as_resistance"`
 }
@@ -228,8 +231,11 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			Role:              z.Role,
 			SupportScore:      z.SupportScore,
 			ResistanceScore:   z.ResistanceScore,
+			Confidence:        z.Confidence,
 			BounceProbability: nullFloat(z.BounceProbability),
 			BreakProbability:  nullFloat(z.BreakProbability),
+			ExpectedValue:     nullFloat(z.ExpectedValue),
+			RiskRewardRatio:   nullFloat(z.RiskRewardRatio),
 			Status:            "PENDING",
 		}
 		if features != nil {

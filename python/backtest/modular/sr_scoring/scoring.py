@@ -3,13 +3,36 @@
 端點與 Go internal/analysis.Client.ScoreZones 呼叫。
 
 流程：抓K棒 → 用 ATR / Volume Profile 兩種方法建立 zone → 對每個 zone
-分別算「作為支撐」與「作為壓力」的歷史特徵 → 規則式分數
-（support_score/resistance_score，永遠可算，不需訓練模型）→ 依現價判斷
-角色 → 套用訓練好的模型算 bounce_probability/break_probability（角色為
-AT_ZONE 時為 None）。
+分別算「作為支撐」與「作為壓力」的歷史特徵 → 用訓練好的模型算出
+hold/break 機率 → confidence（觸碰次數的貝式收縮）→ support_score /
+resistance_score 由 confidence 收縮後的 hold 機率直接推導 → 依現價判斷
+角色 → bounce_probability / break_probability / expected_value /
+risk_reward_ratio（角色為 AT_ZONE 時皆為 None）。
+
+【score 與 probability 的關係，2026-07 重新設計】
+舊版 support_score/resistance_score 是獨立於機率模型之外的規則式加權公式，
+量的是「歷史觸碰結構」；bounce_probability/break_probability 則是兩個獨立
+訓練的二元分類器，量的是「未來走勢的預測」。兩者測的東西不同，數值上可能
+互相矛盾（規則分數很高，但模型預測反彈機率很低），也可能同時給出不合理的
+組合（bounce_probability + break_probability 加起來超過 100%，邏輯上不可能
+同時高機率反彈又高機率跌破）。
+
+現在改成：
+  1. hold_model / break_model 的原始輸出先做等比例正規化，確保
+     hold + break <= 1（_normalize_probabilities）。
+  2. support_score / resistance_score 直接由（正規化後的）hold 機率經
+     confidence 貝式收縮推導（_derive_score），不再是獨立公式——score 跟
+     probability 永遠同方向，差異只在 confidence 高低造成的收縮幅度，不會
+     再互相矛盾。
+  3. confidence 只由觸碰次數決定（_confidence），觸碰次數越少，score 跟
+     expected_value 都會被往中性值收縮，避免「只驗證過 1、2 次」的 zone
+     因為那一兩次剛好都反彈，就被判成高分。
 
 模型未訓練時 get_model() 會拋 RuntimeError，這裡刻意不 catch —— 讓
 /sr-zones 在模型就緒前明確失敗（fail-fast），而不是靜默回傳中性機率。
+這也代表 support_score/resistance_score 現在一定需要模型才能算，不再是
+「永遠可算」的規則式分數——這是刻意的設計轉向：把這個功能從「描述市場」
+推進到「指導交易」，數字背後一定要有校準過的機率支撐。
 """
 from __future__ import annotations
 
@@ -26,6 +49,13 @@ from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 
 DEFAULT_FETCH_LIMIT = 250
 
+# 貝式收縮的虛擬樣本數（pseudo-count）：confidence = touch_count / (touch_count + K)。
+# K 越大，需要越多觸碰次數 confidence 才會接近 1；K=5 代表觸碰 5 次時
+# confidence=0.5，觸碰 20 次時 confidence≈0.8。可調，非規格強制。
+CONFIDENCE_PSEUDO_COUNT = 5
+
+NEUTRAL_PROBABILITY = 0.5
+
 
 def _to_dataframe(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
@@ -38,29 +68,30 @@ def _default_builders() -> list[ZoneBuilder]:
     return [ATRZoneBuilder(), VolumeProfileZoneBuilder()]
 
 
-def _rule_score(
-    features: Optional[ZoneFeatures],
-    direction: str,
-    touch_count_norm_cap: int = 5,
-    relative_volume_norm_cap: float = 2.0,
-) -> float:
-    """規則式強度分數，永遠可算（不需訓練資料）。權重為明確標註的可調
-    heuristic，非規格強制：rejection 比率 0.4 + touch_count 正規化 0.25 +
-    relative_volume 正規化 0.2 + 趨勢同向加成 0.15。"""
-    if features is None or features.touch_count == 0:
-        return 0.0
+def _confidence(touch_count: int, pseudo_count: int = CONFIDENCE_PSEUDO_COUNT) -> float:
+    """觸碰次數越少，confidence 越低（貝式收縮：touch_count=0 時 confidence=0，
+    touch_count 越多 confidence 越接近 1），避免「尚未驗證」的 zone 因為
+    樣本數太少就被判成高分或給出誇大的期望值。"""
+    return float(touch_count / (touch_count + pseudo_count))
 
-    rejection_ratio = min(1.0, features.rejection_count / features.touch_count)
-    touch_norm = min(1.0, features.touch_count / touch_count_norm_cap)
-    volume_norm = min(1.0, max(0.0, features.relative_volume) / relative_volume_norm_cap)
-    trend_bonus = (
-        max(0.0, min(1.0, features.trend_strength))
-        if direction == "support"
-        else max(0.0, min(1.0, -features.trend_strength))
-    )
 
-    score = 0.40 * rejection_ratio + 0.25 * touch_norm + 0.20 * volume_norm + 0.15 * trend_bonus
-    return float(max(0.0, min(1.0, score)))
+def _normalize_probabilities(hold_p: float, break_p: float) -> tuple[float, float]:
+    """hold_model 與 break_model 是兩個獨立訓練的二元分類器，個別預測不保證
+    hold_p + break_p <= 1（理論上可能同時輸出高機率，邏輯上矛盾：不可能同時
+    高機率反彈又高機率跌破）。這裡做等比例正規化：加總超過 100% 時等比例
+    縮小，讓兩者維持「至多其中一個發生」的合理上限；1 - hold_p - break_p
+    隱含為「兩者皆未發生（盤整/不明確）」的機率。"""
+    total = hold_p + break_p
+    if total > 1.0:
+        return hold_p / total, break_p / total
+    return hold_p, break_p
+
+
+def _derive_score(hold_probability: float, confidence: float, neutral: float = NEUTRAL_PROBABILITY) -> float:
+    """score 直接由（正規化後的）hold 機率貝式收縮而來：confidence 高時
+    score 趨近模型機率本身，confidence 低時往中性值 0.5 收縮。score 不再是
+    獨立於機率之外的規則式公式，因此不會再跟 probability 互相矛盾。"""
+    return float(confidence * hold_probability + (1 - confidence) * neutral)
 
 
 def _resolve_role(zone: Zone, current_price: float) -> str:
@@ -81,17 +112,48 @@ def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: Model
         df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_BELOW
     )
 
-    support_score = _rule_score(features_as_support, "support")
-    resistance_score = _rule_score(features_as_resistance, "resistance")
+    # touch_count 是聚合值（不分方向），兩邊 features 算出來的值相同，
+    # confidence 用哪一邊都一樣，只需要算一次。
+    confidence = _confidence(features_as_support.touch_count)
+
+    support_hold, support_break = _normalize_probabilities(
+        predict_hold_probability(bundle, features_as_support, is_support=True),
+        predict_break_probability(bundle, features_as_support, is_support=True),
+    )
+    resistance_hold, resistance_break = _normalize_probabilities(
+        predict_hold_probability(bundle, features_as_resistance, is_support=False),
+        predict_break_probability(bundle, features_as_resistance, is_support=False),
+    )
+
+    support_score = _derive_score(support_hold, confidence)
+    resistance_score = _derive_score(resistance_hold, confidence)
+
     role = _resolve_role(zone, current_price)
 
     bounce_probability: Optional[float] = None
     break_probability: Optional[float] = None
+    expected_value: Optional[float] = None
+    risk_reward_ratio: Optional[float] = None
+
     if role != ZoneType.AT_ZONE.value:
         is_support = role == ZoneType.SUPPORT.value
         role_features = features_as_support if is_support else features_as_resistance
-        bounce_probability = predict_hold_probability(bundle, role_features, is_support)
-        break_probability = predict_break_probability(bundle, role_features, is_support)
+        hold_p, break_p = (support_hold, support_break) if is_support else (resistance_hold, resistance_break)
+
+        bounce_probability = hold_p
+        break_probability = break_p
+
+        # 報酬用這個 zone 自己「觸碰後平均報酬」的歷史經驗值；風險用 zone
+        # 自身寬度相對現價的比例（價格跌破/漲破 zone 另一側邊界的估計損失），
+        # 兩者都是這個 zone 既有的資料，不用額外去抓其他價位當停利/停損參考。
+        reward_pct = abs(role_features.avg_return_after_touch)
+        risk_pct = zone.width / current_price if current_price > 0 else 0.0
+        if risk_pct > 0:
+            risk_reward_ratio = float(reward_pct / risk_pct)
+            raw_ev = hold_p * reward_pct - break_p * risk_pct
+            # EV 也用 confidence 收縮：觸碰次數太少時，即使算出來的 EV 很
+            # 誘人，也不該讓使用者看到一個「還沒被驗證過」的滿版期望值。
+            expected_value = float(confidence * raw_ev)
 
     return ZoneScore(
         price_low=zone.price_low,
@@ -100,8 +162,11 @@ def score_zone(df: pd.DataFrame, zone: Zone, current_price: float, bundle: Model
         role=role,
         support_score=support_score,
         resistance_score=resistance_score,
+        confidence=confidence,
         bounce_probability=bounce_probability,
         break_probability=break_probability,
+        expected_value=expected_value,
+        risk_reward_ratio=risk_reward_ratio,
         features_as_support=features_as_support,
         features_as_resistance=features_as_resistance,
     )
@@ -168,8 +233,11 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "role": z.role,
         "support_score": z.support_score,
         "resistance_score": z.resistance_score,
+        "confidence": z.confidence,
         "bounce_probability": z.bounce_probability,
         "break_probability": z.break_probability,
+        "expected_value": z.expected_value,
+        "risk_reward_ratio": z.risk_reward_ratio,
         "features_as_support": _features_to_dict(z.features_as_support),
         "features_as_resistance": _features_to_dict(z.features_as_resistance),
     }

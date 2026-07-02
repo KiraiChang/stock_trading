@@ -5,7 +5,7 @@ import pytest
 
 from ....indicators import calc_atr
 from ..types import ZoneMethod
-from ..zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder
+from ..zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, _merge_zone_candidates
 from .conftest import bullish_trend_df, make_df
 
 
@@ -45,6 +45,79 @@ def test_atr_zone_max_zones_per_type_caps_output():
     zones = builder.build(df)
     # 最多 1 個來自 pivot-high 候選池、1 個來自 pivot-low 候選池
     assert len(zones) <= 2
+
+
+# ── 合併演算法：避免 single-linkage chaining ─────────────────────────────
+#
+# 修正前的 bug：_merge_zone_candidates 只比較新候選跟「目前已經合併到多大」
+# 的邊界夠不夠近，一串前後緊鄰的候選（例如一串相鄰的 swing pivot）會像滾
+# 雪球一樣被吃成一個涵蓋過大範圍的區間——本該是彼此獨立的關鍵價位（例如
+# 40.0／40.7／42.3 三個壓力），結果全部合併成單一個模糊區間，還可能把現價
+# 一起吃進去，讓角色被誤判成 AT_ZONE，損失方向性的機率/EV/RR 輸出。
+
+
+def test_merge_zone_candidates_caps_width_to_avoid_chaining():
+    # 一串前後緊鄰、寬度 3 的候選（間距只有 1，會兩兩重疊觸發合併）：舊版
+    # 演算法會一路吃成一個涵蓋整個範圍（6 元寬以上）的巨大區間，新版應該
+    # 在合併寬度超過上限（2 倍原始寬度=6）後停止繼續吃，拆成多段。
+    width = 3.0
+    centers = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0]
+    candidates = [(c - width / 2, c + width / 2, c, i) for i, c in enumerate(centers)]
+
+    merged = _merge_zone_candidates(candidates, merge_pct=0.0, max_merge_width_multiple=2.0)
+
+    max_allowed = 2.0 * width
+    for lo, hi, _, _ in merged:
+        assert hi - lo <= max_allowed + 1e-9
+
+    # 範圍遠超過上限，不能全部被合併成一個
+    assert len(merged) > 1
+
+    # 合併後仍要完整覆蓋所有輸入候選的範圍（沒有遺漏候選）
+    total_lo = min(c[0] for c in candidates)
+    total_hi = max(c[1] for c in candidates)
+    assert min(m[0] for m in merged) == pytest.approx(total_lo)
+    assert max(m[1] for m in merged) == pytest.approx(total_hi)
+
+
+def test_merge_zone_candidates_far_apart_groups_stay_separate():
+    # 兩群候選，同一群內間距很小會合併，但兩群之間差距很大：不該因為鏈式
+    # 合併而被合在一起（回歸「支撐/壓力被吃進同一個區間」的 bug）。
+    width = 1.0
+    near_group = [(c - width / 2, c + width / 2, c, i) for i, c in enumerate([100.0, 100.5, 101.0])]
+    far_group = [
+        (c - width / 2, c + width / 2, c, i) for i, c in enumerate([120.0, 120.5, 121.0], start=10)
+    ]
+
+    merged = _merge_zone_candidates(near_group + far_group, merge_pct=0.01, max_merge_width_multiple=2.0)
+
+    assert len(merged) == 2
+    for lo, hi, _, _ in merged:
+        assert hi < 110.0 or lo > 110.0
+
+
+def test_atr_zone_builder_does_not_produce_single_giant_zone_from_pivot_chain():
+    """對照實際案例：一串間距小的 swing pivot 不該被合併成單一涵蓋現價前後
+    9 元以上的巨大區間，否則現價會落在區間內被誤判成 AT_ZONE。"""
+    n = 80
+    x = np.arange(n)
+    closes = 40.0 + 0.05 * x + 1.2 * np.sin(x / 2.0)
+    highs = closes + 0.3
+    lows = closes - 0.3
+    opens = closes - 0.05
+    volumes = np.full(n, 1000.0)
+    df = make_df(list(zip(opens, highs, lows, closes, volumes)))
+
+    builder = ATRZoneBuilder(
+        lookback=60, atr_period=14, atr_width_multiplier=1.5, merge_pct=0.01, max_zones_per_type=10
+    )
+    zones = builder.build(df)
+    assert zones
+
+    atr = calc_atr(df["high"].to_numpy(), df["low"].to_numpy(), df["close"].to_numpy(), 14)
+    max_allowed_width = builder.max_merge_width_multiple * builder.atr_width_multiplier * atr
+    for zone in zones:
+        assert zone.width <= max_allowed_width + 1e-6
 
 
 def test_volume_profile_zone_covers_high_volume_price_range():

@@ -38,28 +38,54 @@ class ZoneBuilder(ABC):
         raise NotImplementedError
 
 
+DEFAULT_MAX_MERGE_WIDTH_MULTIPLE = 2.0
+
+
 def _merge_zone_candidates(
-    candidates: list[tuple[float, float, float, int]], merge_pct: float
+    candidates: list[tuple[float, float, float, int]],
+    merge_pct: float,
+    max_merge_width_multiple: float = DEFAULT_MAX_MERGE_WIDTH_MULTIPLE,
 ) -> list[tuple[float, float, float, int]]:
-    """合併重疊或相近（間距 < merge_pct * price）的區間候選。
+    """合併重疊或相近（間距 < merge_pct * price）的區間候選，但限制單一合併
+    結果的寬度不超過候選原始寬度的 max_merge_width_multiple 倍。
 
     candidates: [(price_low, price_high, center_price, formed_at_index), ...]
     合併後 center_price 取平均、formed_at_index 取最新（較貼近最近一次形成）。
+
+    寬度上限是為了避免「單向鏈式合併」（single-linkage chaining）：原本的
+    寫法只比較新候選跟「目前已經合併到多大」的邊界夠不夠近，只要一串候選
+    前後間距夠小（例如一串相鄰的 swing pivot，寬度都是 atr_width_multiplier
+    * ATR），就會像滾雪球一樣把整串候選吃成一個涵蓋過大範圍的區間——本該是
+    對照組裡「40.0／40.7／42.3」這種各自獨立的關鍵價位，結果全部被合併成
+    單一個涵蓋 9 元以上的模糊區間，還可能把現價一起吃進去，讓角色被誤判成
+    AT_ZONE、損失掉方向性的機率/EV/RR 輸出。加上寬度上限後，即使一串候選
+    前後緊鄰，合併也只會吃到寬度上限就停止，讓後面的候選各自獨立輸出。
+
+    寬度上限的基準（每個 cluster 的第 5 個內部欄位 seed_width）取「開啟這個
+    cluster 的第一個候選」的原始寬度，合併過程中固定不變——不能拿「目前已
+    經合併到多大」當基準，否則上限會隨著每次合併越滾越鬆，等於換一種方式
+    重現同樣的鏈式擴張問題。
     """
     if not candidates:
         return []
     ordered = sorted(candidates, key=lambda c: c[0])
-    merged = [list(ordered[0])]
+    first_lo, first_hi, first_center, first_idx = ordered[0]
+    merged = [[first_lo, first_hi, first_center, first_idx, first_hi - first_lo]]
     for lo, hi, center, idx in ordered[1:]:
         last = merged[-1]
         gap_threshold = merge_pct * max(last[2], center)
-        if lo <= last[1] + gap_threshold:
-            last[0] = min(last[0], lo)
-            last[1] = max(last[1], hi)
+        candidate_width = hi - lo
+        seed_width = last[4]
+        new_lo = min(last[0], lo)
+        new_hi = max(last[1], hi)
+        max_allowed_width = max_merge_width_multiple * max(candidate_width, seed_width)
+        if lo <= last[1] + gap_threshold and (new_hi - new_lo) <= max_allowed_width:
+            last[0] = new_lo
+            last[1] = new_hi
             last[2] = (last[2] + center) / 2.0
             last[3] = max(last[3], idx)
         else:
-            merged.append([lo, hi, center, idx])
+            merged.append([lo, hi, center, idx, candidate_width])
     return [(m[0], m[1], m[2], m[3]) for m in merged]
 
 
@@ -74,6 +100,7 @@ class ATRZoneBuilder(ZoneBuilder):
         pivot_window: int = 1,
         merge_pct: float = 0.01,
         max_zones_per_type: int = 5,
+        max_merge_width_multiple: float = DEFAULT_MAX_MERGE_WIDTH_MULTIPLE,
     ) -> None:
         self.lookback = lookback
         self.atr_period = atr_period
@@ -81,6 +108,7 @@ class ATRZoneBuilder(ZoneBuilder):
         self.pivot_window = pivot_window
         self.merge_pct = merge_pct
         self.max_zones_per_type = max_zones_per_type
+        self.max_merge_width_multiple = max_merge_width_multiple
 
     @property
     def min_bars(self) -> int:
@@ -114,8 +142,8 @@ class ATRZoneBuilder(ZoneBuilder):
             (center - width / 2.0, center + width / 2.0, center, offset + i) for i, center in low_pivots
         ]
 
-        merged_high = _merge_zone_candidates(high_candidates, self.merge_pct)
-        merged_low = _merge_zone_candidates(low_candidates, self.merge_pct)
+        merged_high = _merge_zone_candidates(high_candidates, self.merge_pct, self.max_merge_width_multiple)
+        merged_low = _merge_zone_candidates(low_candidates, self.merge_pct, self.max_merge_width_multiple)
 
         merged_high.sort(key=lambda c: abs(c[2] - current_price))
         merged_low.sort(key=lambda c: abs(c[2] - current_price))

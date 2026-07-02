@@ -2,7 +2,7 @@
 對外主入口：score_symbol(symbol, timeframe) -> dict，供 FastAPI /sr-zones
 端點與 Go internal/analysis.Client.ScoreZones 呼叫。
 
-【2026-07 機構級重新設計】把這個功能從「描述市場」的資訊展示，改成能
+【2026-07 機構級重新設計 R1】把這個功能從「描述市場」的資訊展示，改成能
 「指導交易」的量化決策輸出。改動的核心問題與對應設計：
 
 一、EV 計算方式錯誤
@@ -40,23 +40,47 @@
   依「最近一次觸碰的時間」與「有沒有守住」判斷 VALIDATED_RECENTLY /
   PENDING_VALIDATION / NOT_TESTED_RECENTLY / EXPIRED 四種狀態。
 
-七、新增 Trading Score / Trading Recommendation
-  綜合角色分數、confidence、EV、RR、整體趨勢、量能確認、區間動能的加權
-  分數（0~100），並映射成 6 級交易建議。
-
-八、新增 Reward/Risk Percentile
+七、新增 Reward/Risk Percentile
   目前 risk_reward_ratio 在訓練資料集歷史 RR 分佈中的百分位（見
   model.py::reward_risk_percentile，參考分佈存在 ModelBundle.rr_reference）。
 
-九、新增 Volume Confirmation
+八、新增 Volume Confirmation
   依角色解析後的 relative_volume 與最近驗證結果分類。
 
-十、十一、Trend / Volatility 移出 Zone 層級
+九、Trend / Volatility 移出 Zone 層級
   這兩個本質上是股票層級的量（同一次分析裡所有 zone 算出來都一樣），只
-  在 score_symbol() 算一次，放在回傳值的 overall_trend/overall_volatility，
-  不再對每個 zone 重複輸出同一個數字（見 十四、9. 全域指標與區間指標分離、
-  十四、7. 避免重複資訊）。新增真正逐 zone 不同的 zone_momentum/
-  zone_direction，取代原本被誤用來代表「zone 趨勢」的股票層級 trend_strength。
+  在 score_symbol() 算一次，放在回傳值的 global_trend/global_volatility，
+  不再對每個 zone 重複輸出同一個數字。新增真正逐 zone 不同的
+  zone_momentum/zone_direction，取代原本被誤用來代表「zone 趨勢」的股票
+  層級 trend_strength。
+
+【2026-07 機構級重新設計 R2】在 R1 基礎上進一步收斂：
+
+十、只有一個 Global Model：Global Trend/Volatility/EV/Confidence/RR
+  score_symbol() 只用同一份 get_model() 單例（本來就是——見 model.py 的
+  lazy singleton 設計），輸出裡新增 global_expected_value/global_confidence/
+  global_risk_reward_ratio，跟已經存在的 global_trend/global_volatility
+  （R1 的 overall_trend/overall_volatility 改名）放在一起，構成單一、
+  權威的「整體評估」區塊，取代「要看哪個 zone 才代表這檔股票」的曖昧。
+
+十一、Zone 必須可排序：Tier 1（主結構）/ Tier 2（交易區）/ Tier 3（短期支撐）
+  zones 依寬度（price_high - price_low）在同一次分析裡的相對排名分三層
+  （見 _assign_tiers），最寬的三分之一是 Tier 1（宏觀主結構），最窄的
+  三分之一是 Tier 3（短期戰術支撐/壓力）。回傳的 zones 陣列依 tier 由粗到
+  細排序，同一層內依 trading_score 由高到低排序，不再是無序清單。
+
+十二、EV 必須唯一收斂：Final EV = Σ(zone_EV × weight)
+  global_expected_value 用 confidence 當權重，對所有「有明確方向」（role
+  非 AT_ZONE、expected_value 非 None）的 zone 做加權平均（見
+  _compute_global_metrics）。global_risk_reward_ratio 用同一套權重比照
+  辦理。global_confidence 是所有 zone confidence 的簡單平均（不分角色，
+  反映整體結構的可信程度，不用 confidence 加權自己）。
+
+十三、Score 必須可拆解：Score = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)
+  trading_score 不再是 7 個分量的黑盒公式（R1 版本混合了 role_score 與
+  momentum），改成明確的 5 個分量、明確的權重，且每個分量的加權貢獻值都
+  存在 trading_score_breakdown 裡一起回傳，使用者可以逐項檢視分數怎麼來
+  的，而不是只看到一個總分（見十四、1. 可解釋）。
 
 模型未訓練時 get_model() 會拋 RuntimeError，這裡刻意不 catch —— 讓
 /sr-zones 在模型就緒前明確失敗（fail-fast），而不是靜默回傳中性機率。
@@ -65,6 +89,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import numpy as np
 import pandas as pd
 
 from db import fetch_candles
@@ -88,6 +113,7 @@ from .types import (
     Zone,
     ZoneDirection,
     ZoneScore,
+    ZoneTier,
     ZoneTouch,
     ZoneType,
 )
@@ -122,14 +148,13 @@ ZONE_MOMENTUM_LOOKBACK = 5
 
 NEUTRAL_PROBABILITY = 0.5
 
+# 十三、Score 必須可拆解：五個分量、明確權重，總和 = 100。
 TRADING_SCORE_WEIGHTS = {
-    "role_score": 0.30,
-    "confidence": 0.15,
-    "expected_value": 0.20,
-    "risk_reward": 0.15,
-    "trend": 0.10,
-    "volume": 0.05,
-    "momentum": 0.05,
+    "expected_value": 40.0,
+    "risk_reward": 20.0,
+    "trend": 15.0,
+    "volume": 15.0,
+    "confidence": 10.0,
 }
 
 _VOLUME_CONFIRMATION_WEIGHT = {
@@ -137,6 +162,12 @@ _VOLUME_CONFIRMATION_WEIGHT = {
     VolumeConfirmation.NEUTRAL.value: 0.5,
     VolumeConfirmation.WEAK.value: 0.3,
     VolumeConfirmation.FAILED.value: 0.0,
+}
+
+TIER_LABEL_TEXT = {
+    ZoneTier.TIER_1_MAIN_STRUCTURE.value: "主結構",
+    ZoneTier.TIER_2_TRADING_ZONE.value: "交易區",
+    ZoneTier.TIER_3_SHORT_TERM.value: "短期支撐",
 }
 
 
@@ -309,53 +340,99 @@ def _zone_direction(momentum: float, threshold: float = ZONE_DIRECTION_THRESHOLD
     return ZoneDirection.FLAT.value
 
 
-# ── Trading Score / Recommendation ──────────────────────────────
+# ── 十一、Zone Tier（可排序）──────────────────────────────────
+
+
+def _assign_tiers(widths: list[float]) -> list[str]:
+    """依寬度（zone.price_high - zone.price_low）分三個 tier：最寬的 1/3
+    是 Tier 1（主結構，涵蓋範圍最大的宏觀結構），中間 1/3 是 Tier 2
+    （交易區），最窄的 1/3 是 Tier 3（短期支撐，最貼近盤中操作的精確價位）。
+    用同一批 zone 的寬度分佈做相對分組（tercile），不用絕對門檻——不同
+    股票的價格尺度差異很大，絕對寬度沒有可比性。回傳值跟輸入 widths 同順序
+    對應（不是排序後的結果）。"""
+    n = len(widths)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda i: widths[i], reverse=True)
+    third = -(-n // 3)  # ceil(n/3)
+    tiers = [""] * n
+    for rank, idx in enumerate(order):
+        if rank < third:
+            tiers[idx] = ZoneTier.TIER_1_MAIN_STRUCTURE.value
+        elif rank < 2 * third:
+            tiers[idx] = ZoneTier.TIER_2_TRADING_ZONE.value
+        else:
+            tiers[idx] = ZoneTier.TIER_3_SHORT_TERM.value
+    return tiers
+
+
+_TIER_ORDER = {
+    ZoneTier.TIER_1_MAIN_STRUCTURE.value: 1,
+    ZoneTier.TIER_2_TRADING_ZONE.value: 2,
+    ZoneTier.TIER_3_SHORT_TERM.value: 3,
+}
+
+
+def _sort_zone_scores(zone_scores: list[ZoneScore]) -> list[ZoneScore]:
+    """zones 必須「可排序」：先依 tier 由粗到細（主結構→交易區→短期支撐），
+    同一層內再依 trading_score 由高到低，取代原本無序的清單。"""
+    return sorted(zone_scores, key=lambda z: (_TIER_ORDER.get(z.tier, 99), -z.trading_score))
+
+
+# ── 十三、Trading Score（可拆解）/ Trading Recommendation ────────
 
 
 def _normalize_signed(value: float, cap: float) -> float:
-    """把可正可負的訊號（例如 EV、trend、momentum）正規化到 [0,1]，0.5 為
-    中性、+cap 以上算滿分、-cap 以下算 0 分。"""
+    """把可正可負的訊號（例如 EV、trend）正規化到 [0,1]，0.5 為中性、+cap
+    以上算滿分、-cap 以下算 0 分。"""
     return float(max(0.0, min(1.0, 0.5 + value / (2 * cap))))
 
 
-def _trading_score(
+def _trading_score_breakdown(
     role: str,
-    role_score: float,
     confidence: float,
     expected_value: Optional[float],
     risk_reward_ratio: Optional[float],
     overall_trend: float,
-    volume_confirmation: str,
-    zone_momentum_value: float,
-) -> float:
-    """綜合支撐/壓力分數、可信度、期望值、風險報酬比、整體趨勢、量能確認、
-    區間動能的加權分數（0~100）。權重（TRADING_SCORE_WEIGHTS）是明確標註的
-    可調 heuristic，非規格強制值。role=AT_ZONE 時沒有明確方向可交易，只用
-    role_score 與 confidence 兩項簡化計算。"""
-    if role == ZoneType.AT_ZONE.value:
-        score01 = 0.5 * role_score + 0.5 * confidence
-        return float(max(0.0, min(1.0, score01)) * 100)
+    volume_confirmation: Optional[str],
+) -> dict[str, float]:
+    """Score = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)。
+    每個分量先正規化到 [0,1] 再乘上對應權重，回傳值就是「這個分量對總分的
+    實際貢獻」（加總即為 trading_score），不是抽象的 0~1 子分數——這樣使用
+    者可以直接看出「總分裡有幾分來自 EV、幾分來自量能」，不用自己再乘一次
+    權重（十四、1. 可解釋、十四、8. 明確定義計算公式）。
 
+    role=AT_ZONE 或角色相關數值缺值（EV/RR/量能確認都要求 role 已解析）時，
+    對應分量用中性值 0.5 計算，不直接給 0 分——沒有方向不代表這個 zone
+    「不好」，只是還沒有可以評分的方向性資料。Trend/Confidence 不需要角色
+    解析，任何情況都能算。"""
     is_support = role == ZoneType.SUPPORT.value
-    ev_component = _normalize_signed(expected_value, cap=0.05) if expected_value is not None else 0.5
-    rr_component = float(max(0.0, min(1.0, (risk_reward_ratio or 0.0) / 3.0)))
-    trend_component = _normalize_signed(overall_trend if is_support else -overall_trend, cap=0.1)
-    momentum_component = _normalize_signed(
-        zone_momentum_value if is_support else -zone_momentum_value, cap=0.05
-    )
-    volume_component = _VOLUME_CONFIRMATION_WEIGHT.get(volume_confirmation, 0.5)
+    is_resistance = role == ZoneType.RESISTANCE.value
+
+    ev_norm = _normalize_signed(expected_value, cap=0.05) if expected_value is not None else 0.5
+    rr_norm = float(max(0.0, min(1.0, risk_reward_ratio / 3.0))) if risk_reward_ratio is not None else 0.5
+
+    if is_support:
+        trend_norm = _normalize_signed(overall_trend, cap=0.1)
+    elif is_resistance:
+        trend_norm = _normalize_signed(-overall_trend, cap=0.1)
+    else:
+        trend_norm = _normalize_signed(overall_trend, cap=0.1)  # AT_ZONE：沒有方向可對齊，用原始值
+
+    volume_norm = _VOLUME_CONFIRMATION_WEIGHT.get(volume_confirmation, 0.5) if volume_confirmation else 0.5
 
     w = TRADING_SCORE_WEIGHTS
-    score01 = (
-        w["role_score"] * role_score
-        + w["confidence"] * confidence
-        + w["expected_value"] * ev_component
-        + w["risk_reward"] * rr_component
-        + w["trend"] * trend_component
-        + w["volume"] * volume_component
-        + w["momentum"] * momentum_component
-    )
-    return float(max(0.0, min(1.0, score01)) * 100)
+    return {
+        "expected_value": float(ev_norm * w["expected_value"]),
+        "risk_reward": float(rr_norm * w["risk_reward"]),
+        "trend": float(trend_norm * w["trend"]),
+        "volume": float(volume_norm * w["volume"]),
+        "confidence": float(confidence * w["confidence"]),
+    }
+
+
+def _trading_score(breakdown: dict[str, float]) -> float:
+    return float(sum(breakdown.values()))
 
 
 def _trading_recommendation(trading_score: float, role: str) -> str:
@@ -390,6 +467,36 @@ def _trading_recommendation(trading_score: float, role: str) -> str:
     return TradingRecommendation.NEUTRAL.value
 
 
+# ── 十、十二：Global Model（Global Trend/Volatility/EV/Confidence/RR）──
+
+
+def _compute_global_metrics(zone_scores: list[ZoneScore]) -> dict[str, Optional[float]]:
+    """十二、EV 必須唯一收斂：Final EV = Σ(zone_EV × weight)，weight 採用
+    confidence（越可信的 zone，對整體 EV 的影響力越大）。global_risk_reward_ratio
+    比照辦理。global_confidence 是所有 zone confidence 的簡單平均（不分
+    角色，不用 confidence 加權自己，避免循環）。zones 為空、或都沒有明確
+    方向（EV/RR 皆為 None）時，對應欄位回傳 None。"""
+    if not zone_scores:
+        return {"expected_value": None, "confidence": None, "risk_reward_ratio": None}
+
+    global_confidence = float(np.mean([z.confidence for z in zone_scores]))
+
+    ev_weight_sum = ev_weighted_sum = 0.0
+    rr_weight_sum = rr_weighted_sum = 0.0
+    for z in zone_scores:
+        if z.expected_value is not None:
+            ev_weighted_sum += z.expected_value * z.confidence
+            ev_weight_sum += z.confidence
+        if z.risk_reward_ratio is not None:
+            rr_weighted_sum += z.risk_reward_ratio * z.confidence
+            rr_weight_sum += z.confidence
+
+    global_ev = float(ev_weighted_sum / ev_weight_sum) if ev_weight_sum > 0 else None
+    global_rr = float(rr_weighted_sum / rr_weight_sum) if rr_weight_sum > 0 else None
+
+    return {"expected_value": global_ev, "confidence": global_confidence, "risk_reward_ratio": global_rr}
+
+
 # ── 主流程 ────────────────────────────────────────────────────
 
 
@@ -399,6 +506,7 @@ def score_zone(
     current_price: float,
     bundle: ModelBundle,
     overall_trend: float,
+    tier: str = ZoneTier.TIER_2_TRADING_ZONE.value,
     as_of_index: Optional[int] = None,
     lookback_bars: int = DEFAULT_ZONE_LOOKBACK_BARS,
     forward_bars: int = DEFAULT_FORWARD_BARS,
@@ -464,13 +572,11 @@ def score_zone(
     volume_confirmation: Optional[str] = None
     reject_count: Optional[int] = None
     break_count_field: Optional[int] = None
-    role_score = max(support_score, resistance_score)
 
     if role != ZoneType.AT_ZONE.value:
         is_support = role == ZoneType.SUPPORT.value
         role_features = features_as_support if is_support else features_as_resistance
         hold_p, break_p = (support_hold, support_break) if is_support else (resistance_hold, resistance_break)
-        role_score = support_score if is_support else resistance_score
 
         bounce_probability = hold_p
         break_probability = break_p
@@ -490,10 +596,10 @@ def score_zone(
 
         volume_confirmation = _volume_confirmation(relative_volume, recent_validation)
 
-    trading_score_value = _trading_score(
-        role, role_score, confidence, expected_value, risk_reward_ratio, overall_trend,
-        volume_confirmation or VolumeConfirmation.NEUTRAL.value, zone_momentum_value,
+    trading_score_breakdown = _trading_score_breakdown(
+        role, confidence, expected_value, risk_reward_ratio, overall_trend, volume_confirmation,
     )
+    trading_score_value = _trading_score(trading_score_breakdown)
     trading_recommendation = _trading_recommendation(trading_score_value, role)
 
     return ZoneScore(
@@ -501,6 +607,8 @@ def score_zone(
         price_high=zone.price_high,
         method=zone.method.value,
         role=role,
+        tier=tier,
+        tier_label=TIER_LABEL_TEXT.get(tier, tier),
         support_score=support_score,
         resistance_score=resistance_score,
         net_score=net_score,
@@ -523,6 +631,7 @@ def score_zone(
         zone_direction=zone_direction,
         recent_validation=recent_validation,
         trading_score=trading_score_value,
+        trading_score_breakdown=trading_score_breakdown,
         trading_recommendation=trading_recommendation,
     )
 
@@ -554,24 +663,33 @@ def score_symbol(
     current_price = float(df["close"].iloc[-1])
     analyzed_at = df.index[-1]
     as_of_index = len(df) - 1
-    bundle = get_model()
+    bundle = get_model()  # 只有一個 Global Model：整份分析共用同一個已訓練好的模型單例
 
-    # 十、十一：Trend/Volatility 是股票層級的量，只算一次，不對每個 zone 重複輸出。
-    overall_trend = trend_slope(df, as_of_index)
-    overall_volatility = zone_volatility(df, as_of_index)
+    # 九：Trend/Volatility 是股票層級的量，只算一次，不對每個 zone 重複輸出。
+    global_trend = trend_slope(df, as_of_index)
+    global_volatility = zone_volatility(df, as_of_index)
+
+    # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。
+    tiers = _assign_tiers([z.width for z in zones])
 
     zone_scores = [
-        score_zone(df, zone, current_price, bundle, overall_trend, as_of_index=as_of_index)
-        for zone in zones
+        score_zone(df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index)
+        for zone, tier in zip(zones, tiers)
     ]
+    zone_scores = _sort_zone_scores(zone_scores)
+
+    global_metrics = _compute_global_metrics(zone_scores)
 
     return {
         "symbol": symbol,
         "timeframe": timeframe,
         "analyzed_at": analyzed_at.isoformat(),
         "current_price": current_price,
-        "overall_trend": overall_trend,
-        "overall_volatility": overall_volatility,
+        "global_trend": global_trend,
+        "global_volatility": global_volatility,
+        "global_expected_value": global_metrics["expected_value"],
+        "global_confidence": global_metrics["confidence"],
+        "global_risk_reward_ratio": global_metrics["risk_reward_ratio"],
         "zones": [_zone_score_to_dict(z) for z in zone_scores],
     }
 
@@ -582,6 +700,8 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "price_high": z.price_high,
         "method": z.method,
         "role": z.role,
+        "tier": z.tier,
+        "tier_label": z.tier_label,
         "support_score": z.support_score,
         "resistance_score": z.resistance_score,
         "net_score": z.net_score,
@@ -604,5 +724,6 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "zone_direction": z.zone_direction,
         "recent_validation": z.recent_validation,
         "trading_score": z.trading_score,
+        "trading_score_breakdown": z.trading_score_breakdown,
         "trading_recommendation": z.trading_recommendation,
     }

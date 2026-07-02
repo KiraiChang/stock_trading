@@ -172,46 +172,53 @@ func (c *Client) Analyze(ctx context.Context, symbol, timeframe string, limit in
 // backtest/modular/sr_scoring/scoring.py 開頭的完整說明）──────────────
 
 type ZoneScore struct {
-	PriceLow              float64  `json:"price_low"`
-	PriceHigh             float64  `json:"price_high"`
-	Method                string   `json:"method"`
-	Role                  string   `json:"role"`
-	SupportScore          float64  `json:"support_score"`
-	ResistanceScore       float64  `json:"resistance_score"`
-	NetScore              float64  `json:"net_score"`
-	NetScoreLabel         string   `json:"net_score_label"`
-	Confidence            float64  `json:"confidence"`
-	ConfidenceLevel       string   `json:"confidence_level"`
-	BounceProbability     *float64 `json:"bounce_probability"`
-	BreakProbability      *float64 `json:"break_probability"`
-	ExpectedGain          *float64 `json:"expected_gain"`
-	ExpectedLoss          *float64 `json:"expected_loss"`
-	ExpectedValue         *float64 `json:"expected_value"`
-	RiskRewardRatio       *float64 `json:"risk_reward_ratio"`
-	RewardRiskPercentile  *float64 `json:"reward_risk_percentile"`
-	RelativeVolume        *float64 `json:"relative_volume"`
-	VolumeConfirmation    *string  `json:"volume_confirmation"`
-	TouchCount            int      `json:"touch_count"`
-	RejectCount           *int     `json:"reject_count"`
-	BreakCount            *int     `json:"break_count"`
-	ZoneMomentum          float64  `json:"zone_momentum"`
-	ZoneDirection         string   `json:"zone_direction"`
-	RecentValidation      string   `json:"recent_validation"`
-	TradingScore          float64  `json:"trading_score"`
-	TradingRecommendation string   `json:"trading_recommendation"`
+	PriceLow              float64            `json:"price_low"`
+	PriceHigh             float64            `json:"price_high"`
+	Method                string             `json:"method"`
+	Role                  string             `json:"role"`
+	Tier                  string             `json:"tier"`
+	TierLabel             string             `json:"tier_label"`
+	SupportScore          float64            `json:"support_score"`
+	ResistanceScore       float64            `json:"resistance_score"`
+	NetScore              float64            `json:"net_score"`
+	NetScoreLabel         string             `json:"net_score_label"`
+	Confidence            float64            `json:"confidence"`
+	ConfidenceLevel       string             `json:"confidence_level"`
+	BounceProbability     *float64           `json:"bounce_probability"`
+	BreakProbability      *float64           `json:"break_probability"`
+	ExpectedGain          *float64           `json:"expected_gain"`
+	ExpectedLoss          *float64           `json:"expected_loss"`
+	ExpectedValue         *float64           `json:"expected_value"`
+	RiskRewardRatio       *float64           `json:"risk_reward_ratio"`
+	RewardRiskPercentile  *float64           `json:"reward_risk_percentile"`
+	RelativeVolume        *float64           `json:"relative_volume"`
+	VolumeConfirmation    *string            `json:"volume_confirmation"`
+	TouchCount            int                `json:"touch_count"`
+	RejectCount           *int               `json:"reject_count"`
+	BreakCount            *int               `json:"break_count"`
+	ZoneMomentum          float64            `json:"zone_momentum"`
+	ZoneDirection         string             `json:"zone_direction"`
+	RecentValidation      string             `json:"recent_validation"`
+	TradingScore          float64            `json:"trading_score"`
+	TradingScoreBreakdown map[string]float64 `json:"trading_score_breakdown"`
+	TradingRecommendation string             `json:"trading_recommendation"`
 }
 
-// ZoneScoreResult 對應 Python score_symbol() 的回傳格式。OverallTrend/
-// OverallVolatility 是股票層級的量，只在這裡出現一次，不會在每個 Zone 裡
-// 重複（見 sr_scoring 套件說明的「十、十一」）。
+// ZoneScoreResult 對應 Python score_symbol() 的回傳格式。GlobalTrend/
+// GlobalVolatility/GlobalExpectedValue/GlobalConfidence/GlobalRiskRewardRatio
+// 是「只有一個 Global Model」的整體評估區塊，只在這裡出現一次，不會在每個
+// Zone 裡重複（見 sr_scoring 套件說明的「九、十、十二」）。
 type ZoneScoreResult struct {
-	Symbol            string      `json:"symbol"`
-	Timeframe         string      `json:"timeframe"`
-	AnalyzedAt        string      `json:"analyzed_at"` // RFC3339
-	CurrentPrice      float64     `json:"current_price"`
-	OverallTrend      float64     `json:"overall_trend"`
-	OverallVolatility float64     `json:"overall_volatility"`
-	Zones             []ZoneScore `json:"zones"`
+	Symbol                string      `json:"symbol"`
+	Timeframe             string      `json:"timeframe"`
+	AnalyzedAt            string      `json:"analyzed_at"` // RFC3339
+	CurrentPrice          float64     `json:"current_price"`
+	GlobalTrend           float64     `json:"global_trend"`
+	GlobalVolatility      float64     `json:"global_volatility"`
+	GlobalExpectedValue   *float64    `json:"global_expected_value"`
+	GlobalConfidence      *float64    `json:"global_confidence"`
+	GlobalRiskRewardRatio *float64    `json:"global_risk_reward_ratio"`
+	Zones                 []ZoneScore `json:"zones"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
@@ -224,12 +231,15 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	}
 
 	a := &store.SRZoneAnalysis{
-		Symbol:            r.Symbol,
-		Timeframe:         r.Timeframe,
-		AnalyzedAt:        analyzedAt,
-		CurrentPrice:      r.CurrentPrice,
-		OverallTrend:      r.OverallTrend,
-		OverallVolatility: r.OverallVolatility,
+		Symbol:                r.Symbol,
+		Timeframe:             r.Timeframe,
+		AnalyzedAt:            analyzedAt,
+		CurrentPrice:          r.CurrentPrice,
+		GlobalTrend:           r.GlobalTrend,
+		GlobalVolatility:      r.GlobalVolatility,
+		GlobalExpectedValue:   nullFloat(r.GlobalExpectedValue),
+		GlobalConfidence:      nullFloat(r.GlobalConfidence),
+		GlobalRiskRewardRatio: nullFloat(r.GlobalRiskRewardRatio),
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))
@@ -241,11 +251,17 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		if z.BreakCount != nil {
 			breakCount = *z.BreakCount
 		}
+		breakdownJSON, err := json.Marshal(z.TradingScoreBreakdown)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal trading_score_breakdown: %w", err)
+		}
 		zones = append(zones, store.SRZone{
 			PriceLow:              z.PriceLow,
 			PriceHigh:             z.PriceHigh,
 			Method:                z.Method,
 			Role:                  z.Role,
+			Tier:                  z.Tier,
+			TierLabel:             z.TierLabel,
 			SupportScore:          z.SupportScore,
 			ResistanceScore:       z.ResistanceScore,
 			NetScore:              z.NetScore,
@@ -268,6 +284,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			ZoneDirection:         z.ZoneDirection,
 			RecentValidation:      z.RecentValidation,
 			TradingScore:          z.TradingScore,
+			TradingScoreBreakdown: string(breakdownJSON),
 			TradingRecommendation: z.TradingRecommendation,
 			Status:                "PENDING",
 		})

@@ -83,6 +83,17 @@ class TradingRecommendation(str, Enum):
     STRONG_SELL = "STRONG_SELL"
 
 
+class ZoneTier(str, Enum):
+    """zone 依寬度（price_high - price_low）在同一次分析裡的相對排名分三層，
+    讓 zone 清單「可排序」成有意義的階層，而不是一堆平行、看不出主次的
+    價格區間：Tier 1 最寬，代表宏觀主結構；Tier 3 最窄，代表短期戰術支撐/
+    壓力。見 scoring.py::_assign_tiers。"""
+
+    TIER_1_MAIN_STRUCTURE = "TIER_1_MAIN_STRUCTURE"  # 主結構
+    TIER_2_TRADING_ZONE = "TIER_2_TRADING_ZONE"  # 交易區
+    TIER_3_SHORT_TERM = "TIER_3_SHORT_TERM"  # 短期支撐/壓力
+
+
 @dataclass(frozen=True)
 class Zone:
     price_low: float
@@ -185,14 +196,24 @@ class ZoneScore:
 
     交易決策：
       recent_validation：最近一次測試的驗證狀態。
-      trading_score/trading_recommendation：綜合以上所有訊號的加權分數與
-      建議，公式見 scoring.py::_trading_score。
+      trading_score = trading_score_breakdown 五個分量加總（EV 40% + RR 20%
+      + Trend 15% + Volume 15% + Confidence 10%，見 scoring.py::_trading_score_breakdown），
+      每個分量都拆開存在 trading_score_breakdown，讓分數「可拆解」，不是
+      只有一個黑盒數字。trading_recommendation 是依 trading_score 映射的
+      交易建議。
+
+    層級（可排序）：
+      tier/tier_label：依 zone 寬度在同一次分析裡的相對排名分三層（見
+      ZoneTier），zones 清單依 tier 由粗到細、同層內依 trading_score 排序。
     """
 
     price_low: float
     price_high: float
     method: str
     role: str
+
+    tier: str
+    tier_label: str
 
     support_score: float
     resistance_score: float
@@ -223,4 +244,5 @@ class ZoneScore:
     recent_validation: str
 
     trading_score: float
+    trading_score_breakdown: dict
     trading_recommendation: str

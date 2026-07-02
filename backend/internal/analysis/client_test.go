@@ -74,6 +74,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	volConf := "CONFIRMED"
 	rejectCount := 3
 	breakCount := 0
+	globalEV := 0.004
+	globalConfidence := 0.6
+	globalRR := 0.9
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/sr-zones" {
@@ -93,10 +96,12 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ZoneScoreResult{
 			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
-			CurrentPrice: 600.0, OverallTrend: 0.03, OverallVolatility: 0.02,
+			CurrentPrice: 600.0, GlobalTrend: 0.03, GlobalVolatility: 0.02,
+			GlobalExpectedValue: &globalEV, GlobalConfidence: &globalConfidence, GlobalRiskRewardRatio: &globalRR,
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
+					Tier: "TIER_1_MAIN_STRUCTURE", TierLabel: "主結構",
 					SupportScore: 0.8, ResistanceScore: 0.1, NetScore: 0.7, NetScoreLabel: "STRONG_SUPPORT",
 					Confidence: 0.83, ConfidenceLevel: "HIGH",
 					BounceProbability: &bounce, BreakProbability: &brk,
@@ -106,15 +111,22 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					TouchCount: 4, RejectCount: &rejectCount, BreakCount: &breakCount,
 					ZoneMomentum: -0.02, ZoneDirection: "DOWN",
 					RecentValidation: "VALIDATED_RECENTLY",
-					TradingScore:     78.5, TradingRecommendation: "BUY",
+					TradingScore:     78.5, TradingScoreBreakdown: map[string]float64{
+						"expected_value": 30.0, "risk_reward": 15.0, "trend": 10.0, "volume": 15.0, "confidence": 8.5,
+					},
+					TradingRecommendation: "BUY",
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
+					Tier: "TIER_3_SHORT_TERM", TierLabel: "短期支撐",
 					SupportScore: 0.2, ResistanceScore: 0.3, NetScore: -0.1, NetScoreLabel: "NEUTRAL",
 					Confidence: 0.4, ConfidenceLevel: "MEDIUM",
 					TouchCount: 2, ZoneMomentum: 0.0, ZoneDirection: "FLAT",
 					RecentValidation: "PENDING_VALIDATION",
-					TradingScore:     45.0, TradingRecommendation: "NEUTRAL",
+					TradingScore:     45.0, TradingScoreBreakdown: map[string]float64{
+						"expected_value": 20.0, "risk_reward": 10.0, "trend": 7.5, "volume": 7.5, "confidence": 4.0,
+					},
+					TradingRecommendation: "NEUTRAL",
 				},
 			},
 		})
@@ -126,7 +138,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScoreZones failed: %v", err)
 	}
-	if result.Symbol != "2330" || len(result.Zones) != 2 || result.OverallTrend != 0.03 {
+	if result.Symbol != "2330" || len(result.Zones) != 2 || result.GlobalTrend != 0.03 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 
@@ -134,8 +146,17 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
-	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.OverallTrend != 0.03 || a.OverallVolatility != 0.02 {
+	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
+	}
+	if !a.GlobalExpectedValue.Valid || a.GlobalExpectedValue.Float64 != globalEV {
+		t.Fatalf("expected global_expected_value %.3f, got %+v", globalEV, a.GlobalExpectedValue)
+	}
+	if !a.GlobalConfidence.Valid || a.GlobalConfidence.Float64 != globalConfidence {
+		t.Fatalf("expected global_confidence %.3f, got %+v", globalConfidence, a.GlobalConfidence)
+	}
+	if !a.GlobalRiskRewardRatio.Valid || a.GlobalRiskRewardRatio.Float64 != globalRR {
+		t.Fatalf("expected global_risk_reward_ratio %.3f, got %+v", globalRR, a.GlobalRiskRewardRatio)
 	}
 	if len(zones) != 2 {
 		t.Fatalf("expected 2 zones, got %d", len(zones))
@@ -145,8 +166,14 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if first.Method != "atr" || first.Role != "SUPPORT" || first.TouchCount != 4 {
 		t.Fatalf("unexpected first zone: %+v", first)
 	}
+	if first.Tier != "TIER_1_MAIN_STRUCTURE" || first.TierLabel != "主結構" {
+		t.Fatalf("unexpected first zone tier: %+v", first)
+	}
 	if first.NetScoreLabel != "STRONG_SUPPORT" || first.ConfidenceLevel != "HIGH" {
 		t.Fatalf("unexpected first zone labels: %+v", first)
+	}
+	if first.TradingScoreBreakdown == "" {
+		t.Fatalf("expected non-empty trading_score_breakdown JSON, got %+v", first)
 	}
 	if !first.BounceProbability.Valid || first.BounceProbability.Float64 != bounce {
 		t.Fatalf("expected bounce probability %.2f, got %+v", bounce, first.BounceProbability)

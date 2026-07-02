@@ -108,18 +108,26 @@ type StockAnalysisLevel struct {
 // backtest/modular/sr_scoring/scoring.py 開頭的完整說明）────────────────
 
 type SRZoneAnalysis struct {
-	ID           uint64    `db:"id"                 json:"id"`
-	Symbol       string    `db:"symbol"             json:"symbol"`
-	Timeframe    string    `db:"timeframe"          json:"timeframe"`
-	AnalyzedAt   time.Time `db:"analyzed_at"        json:"analyzed_at"`
-	CurrentPrice float64   `db:"current_price"      json:"current_price"`
-	// OverallTrend/OverallVolatility 是股票層級的量（同一次分析裡所有 zone
-	// 共用同一個值），存在這裡（分析快照）而不是每個 zone 各存一份，避免
-	// 重複資訊。
-	OverallTrend      float64   `db:"overall_trend"      json:"overall_trend"`
-	OverallVolatility float64   `db:"overall_volatility" json:"overall_volatility"`
-	ModelVersion      string    `db:"model_version"      json:"model_version"`
-	CreatedAt         time.Time `db:"created_at"         json:"created_at"`
+	ID           uint64    `db:"id"                    json:"id"`
+	Symbol       string    `db:"symbol"                json:"symbol"`
+	Timeframe    string    `db:"timeframe"             json:"timeframe"`
+	AnalyzedAt   time.Time `db:"analyzed_at"           json:"analyzed_at"`
+	CurrentPrice float64   `db:"current_price"         json:"current_price"`
+	// 只有一個 Global Model：這五個欄位是這次分析唯一、權威的整體評估
+	// 區塊，存在這裡（分析快照）而不是每個 zone 各存一份，避免重複資訊。
+	// GlobalTrend/GlobalVolatility 是股票層級的量（同一次分析裡所有 zone
+	// 共用同一個值）；GlobalExpectedValue/GlobalRiskRewardRatio 是所有
+	// zone 依 confidence 加權平均後「唯一收斂」的結果（見
+	// scoring.py::_compute_global_metrics）；GlobalConfidence 是所有 zone
+	// confidence 的簡單平均。zones 為空、或都沒有明確方向時，
+	// GlobalExpectedValue/GlobalConfidence/GlobalRiskRewardRatio 可能是 NULL。
+	GlobalTrend           float64     `db:"global_trend"            json:"global_trend"`
+	GlobalVolatility      float64     `db:"global_volatility"       json:"global_volatility"`
+	GlobalExpectedValue   NullFloat64 `db:"global_expected_value"   json:"global_expected_value,omitempty"`
+	GlobalConfidence      NullFloat64 `db:"global_confidence"       json:"global_confidence,omitempty"`
+	GlobalRiskRewardRatio NullFloat64 `db:"global_risk_reward_ratio" json:"global_risk_reward_ratio,omitempty"`
+	ModelVersion          string      `db:"model_version"           json:"model_version"`
+	CreatedAt             time.Time   `db:"created_at"              json:"created_at"`
 }
 
 type SRZone struct {
@@ -129,6 +137,13 @@ type SRZone struct {
 	PriceHigh  float64 `db:"price_high"              json:"price_high"`
 	Method     string  `db:"method"                  json:"method"`
 	Role       string  `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
+
+	// Tier/TierLabel：zone 依寬度在同一次分析裡的相對排名分三層
+	// （TIER_1_MAIN_STRUCTURE 主結構 / TIER_2_TRADING_ZONE 交易區 /
+	// TIER_3_SHORT_TERM 短期支撐），讓 zone 清單可排序（見
+	// scoring.py::_assign_tiers）。
+	Tier      string `db:"tier"                    json:"tier"`
+	TierLabel string `db:"tier_label"              json:"tier_label"`
 
 	SupportScore    float64 `db:"support_score"           json:"support_score"`
 	ResistanceScore float64 `db:"resistance_score"        json:"resistance_score"`
@@ -172,8 +187,12 @@ type SRZone struct {
 
 	RecentValidation string `db:"recent_validation"       json:"recent_validation"`
 
-	TradingScore          float64 `db:"trading_score"           json:"trading_score"`
-	TradingRecommendation string  `db:"trading_recommendation"  json:"trading_recommendation"`
+	TradingScore float64 `db:"trading_score"           json:"trading_score"`
+	// TradingScoreBreakdown 是 JSON 字串（{"expected_value":.., "risk_reward":..,
+	// "trend":.., "volume":.., "confidence":..}，五個分量的加權貢獻值加總
+	// 即為 TradingScore），讓分數「可拆解」（見十三、Score 必須可拆解）。
+	TradingScoreBreakdown string `db:"trading_score_breakdown" json:"trading_score_breakdown"`
+	TradingRecommendation string `db:"trading_recommendation"  json:"trading_recommendation"`
 
 	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（保留供未來 verifier 使用）
 	BrokenAt    NullTime    `db:"broken_at"               json:"broken_at,omitempty"`

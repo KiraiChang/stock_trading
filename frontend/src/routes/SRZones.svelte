@@ -9,6 +9,7 @@
     triggerSRScoringTrain,
     type SRZoneAnalysis,
     type SRZone,
+    type ZoneTier,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -18,6 +19,7 @@
 
   let current: SRZoneAnalysis | null = null
   let currentZones: SRZone[] = []
+  $: tierGroups = groupByTier(currentZones)
 
   let history: SRZoneAnalysis[] = []
   let historyLoading = true
@@ -111,6 +113,43 @@
     STRONG_SELL: 'bg-red-900/60 text-red-300',
   }
 
+  // Tier（可排序）：主結構（寬）→ 交易區 → 短期支撐（窄），見後端
+  // scoring.py::_assign_tiers。
+  const tierOrder: ZoneTier[] = ['TIER_1_MAIN_STRUCTURE', 'TIER_2_TRADING_ZONE', 'TIER_3_SHORT_TERM']
+  const tierDescription: Record<ZoneTier, string> = {
+    TIER_1_MAIN_STRUCTURE: '寬幅區間，反映長期／宏觀的關鍵價位',
+    TIER_2_TRADING_ZONE: '中等寬度，適合作為進出場的操作區間',
+    TIER_3_SHORT_TERM: '窄幅區間，貼近盤中操作的精確價位',
+  }
+
+  // trading_score 的五個可拆解分量，依權重大到小排列，方便閱讀「總分裡
+  // 佔最大比重的是哪一項」（見 十三、Score 必須可拆解）。
+  const scoreBreakdownFields: { key: keyof SRZone['trading_score_breakdown']; label: string; weight: number }[] = [
+    { key: 'expected_value', label: 'EV', weight: 40 },
+    { key: 'risk_reward', label: 'RR', weight: 20 },
+    { key: 'trend', label: 'Trend', weight: 15 },
+    { key: 'volume', label: 'Volume', weight: 15 },
+    { key: 'confidence', label: 'Confidence', weight: 10 },
+  ]
+
+  interface TierGroup {
+    tier: ZoneTier
+    label: string
+    zones: SRZone[]
+  }
+
+  // zones 必須「可排序」：依 tier 由粗到細分組（後端已經照這個順序排好，
+  // 這裡再依 trading_score 保險排序一次，避免前端顯示順序跟資料來源脫鉤）。
+  function groupByTier(zones: SRZone[]): TierGroup[] {
+    return tierOrder
+      .map((tier) => ({
+        tier,
+        label: zones.find((z) => z.tier === tier)?.tier_label ?? tier,
+        zones: zones.filter((z) => z.tier === tier).sort((a, b) => b.trading_score - a.trading_score),
+      }))
+      .filter((g) => g.zones.length > 0)
+  }
+
   async function submit() {
     if (!symbol.trim()) {
       submitError = '請輸入股票代號'
@@ -125,7 +164,7 @@
     try {
       const { analysis, zones } = await createSRZoneAnalysis(symbol.trim(), '1d', fetchLimit)
       current = analysis
-      currentZones = sortZones(zones)
+      currentZones = zones
       await loadHistory()
     } catch {
       submitError = '分析失敗，請確認股票代號是否有歷史資料、Python service 是否已啟動，或機率模型尚未訓練（見下方「訓練/更新機率模型」）'
@@ -156,12 +195,6 @@
     }
   }
 
-  // 依 Trading Score 排序：這是綜合所有訊號後的最終決策分數，比單看
-  // support_score/resistance_score 更能反映「哪個 zone 值得優先關注」。
-  function sortZones(zones: SRZone[]): SRZone[] {
-    return [...zones].sort((a, b) => b.trading_score - a.trading_score)
-  }
-
   // symbol 留空時列出「所有股票」最近的分析紀錄，方便一進頁面就有內容可看；
   // symbol 有值時才篩選成該股票的歷史紀錄
   async function loadHistory() {
@@ -179,7 +212,7 @@
     try {
       const { analysis, zones } = await getSRZoneAnalysis(h.id)
       current = analysis
-      currentZones = sortZones(zones)
+      currentZones = zones
       if (symbol.trim() !== h.symbol) {
         symbol = h.symbol
         await loadHistory()
@@ -345,114 +378,154 @@
           </div>
         </div>
 
-        <!-- 股票層級指標：只顯示一次，不在每個 zone 重複 -->
-        <div class="px-5 py-3 border-b border-border bg-surface/40 flex gap-6 text-xs">
+        <!-- 只有一個 Global Model：整體評估區塊，只顯示一次，不在每個 zone 重複 -->
+        <div class="px-5 py-3 border-b border-border bg-surface/40 grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
           <div>
-            <span class="text-muted">整體趨勢（Overall Trend）</span>
-            <span class="ml-2 font-mono {signedClass(current.overall_trend)}">{fmtSignedPct(current.overall_trend)}</span>
+            <p class="text-muted mb-1">Global Trend</p>
+            <p class="font-mono {signedClass(current.global_trend)}">{fmtSignedPct(current.global_trend)}</p>
           </div>
           <div>
-            <span class="text-muted">整體波動率（Overall Volatility）</span>
-            <span class="ml-2 font-mono text-white">{fmtPct(current.overall_volatility)}</span>
+            <p class="text-muted mb-1">Global Volatility</p>
+            <p class="font-mono text-white">{fmtPct(current.global_volatility)}</p>
+          </div>
+          <div>
+            <p class="text-muted mb-1">Global EV</p>
+            <p class="font-mono {signedClass(current.global_expected_value)}">{fmtSignedPct(current.global_expected_value)}</p>
+          </div>
+          <div>
+            <p class="text-muted mb-1">Global Confidence</p>
+            <p class="font-mono text-white">{fmtPct(current.global_confidence)}</p>
+          </div>
+          <div>
+            <p class="text-muted mb-1">Global RR</p>
+            <p class="font-mono text-white">{fmtRatio(current.global_risk_reward_ratio)}</p>
           </div>
         </div>
 
         <div class="divide-y divide-border">
-          {#each currentZones as z (z.id)}
-            <div class="px-5 py-4">
-              <!-- 標題列：價格區間、角色、Net Score 分類、交易建議 -->
-              <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-mono text-white text-sm">{fmt(z.price_low)} ~ {fmt(z.price_high)}</span>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[z.role] ?? 'bg-gray-700/60 text-gray-400'}">
-                    {roleLabel[z.role] ?? z.role}
-                  </span>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {netScoreLabelClass[z.net_score_label] ?? ''}">
-                    {netScoreLabelText[z.net_score_label] ?? z.net_score_label}
-                  </span>
-                  <span class="text-muted text-xs">{methodLabel[z.method] ?? z.method}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
-                    {statusLabel[z.status] ?? z.status}
-                  </span>
-                  <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold {recommendationClass[z.trading_recommendation] ?? ''}">
-                    {recommendationText[z.trading_recommendation] ?? z.trading_recommendation}
-                  </span>
-                </div>
+          {#each tierGroups as group (group.tier)}
+            <div>
+              <div class="px-5 py-2 bg-surface/60 flex items-baseline gap-2">
+                <h3 class="text-sm font-semibold text-white">Tier {tierOrder.indexOf(group.tier) + 1}（{group.label}）</h3>
+                <span class="text-muted text-xs">{tierDescription[group.tier]}</span>
               </div>
+              <div class="divide-y divide-border/60">
+                {#each group.zones as z (z.id)}
+                  <div class="px-5 py-4">
+                    <!-- 標題列：價格區間、角色、Net Score 分類、交易建議 -->
+                    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="font-mono text-white text-sm">{fmt(z.price_low)} ~ {fmt(z.price_high)}</span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[z.role] ?? 'bg-gray-700/60 text-gray-400'}">
+                          {roleLabel[z.role] ?? z.role}
+                        </span>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {netScoreLabelClass[z.net_score_label] ?? ''}">
+                          {netScoreLabelText[z.net_score_label] ?? z.net_score_label}
+                        </span>
+                        <span class="text-muted text-xs">{methodLabel[z.method] ?? z.method}</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
+                          {statusLabel[z.status] ?? z.status}
+                        </span>
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold {recommendationClass[z.trading_recommendation] ?? ''}">
+                          {recommendationText[z.trading_recommendation] ?? z.trading_recommendation}
+                        </span>
+                      </div>
+                    </div>
 
-              <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->
-              <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs mb-3">
-                <div>
-                  <p class="text-muted mb-1">支撐強度分數</p>
-                  <p class="text-rise font-mono">{fmtPct(z.support_score)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">壓力強度分數</p>
-                  <p class="text-fall font-mono">{fmtPct(z.resistance_score)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">Net Score</p>
-                  <p class="{signedClass(z.net_score)} font-mono">{fmtSignedPct(z.net_score)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1 flex items-center gap-1">
-                    可信度
-                    <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceLevelClass[z.confidence_level] ?? ''}">
-                      {confidenceLevelText[z.confidence_level] ?? z.confidence_level}
-                    </span>
-                  </p>
-                  <p class="text-white font-mono">{fmtPct(z.confidence)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">Trading Score</p>
-                  <p class="text-white font-mono">{fmtScore100(z.trading_score)} / 100</p>
-                </div>
-              </div>
+                    <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->
+                    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs mb-3">
+                      <div>
+                        <p class="text-muted mb-1">支撐強度分數</p>
+                        <p class="text-rise font-mono">{fmtPct(z.support_score)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">壓力強度分數</p>
+                        <p class="text-fall font-mono">{fmtPct(z.resistance_score)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">Net Score</p>
+                        <p class="{signedClass(z.net_score)} font-mono">{fmtSignedPct(z.net_score)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1 flex items-center gap-1">
+                          可信度
+                          <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceLevelClass[z.confidence_level] ?? ''}">
+                            {confidenceLevelText[z.confidence_level] ?? z.confidence_level}
+                          </span>
+                        </p>
+                        <p class="text-white font-mono">{fmtPct(z.confidence)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">Trading Score</p>
+                        <p class="text-white font-mono">{fmtScore100(z.trading_score)} / 100</p>
+                      </div>
+                    </div>
 
-              <!-- 交易數字列：機率、期望報酬、期望值、風險報酬比 -->
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
-                <div>
-                  <p class="text-muted mb-1">反彈機率 / 跌破機率</p>
-                  <p class="text-white font-mono">{fmtPct(z.bounce_probability)} / {fmtPct(z.break_probability)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">Expected Gain / Loss</p>
-                  <p class="font-mono"><span class="text-rise">{fmtSignedPct(z.expected_gain)}</span> / <span class="text-fall">{fmtSignedPct(z.expected_loss)}</span></p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">Expected Value</p>
-                  <p class="{signedClass(z.expected_value)} font-mono">{fmtSignedPct(z.expected_value)}</p>
-                </div>
-                <div>
-                  <p class="text-muted mb-1">Risk Reward{z.reward_risk_percentile !== null ? ` (${z.reward_risk_percentile.toFixed(0)}百分位)` : ''}</p>
-                  <p class="text-white font-mono">{fmtRatio(z.risk_reward_ratio)}</p>
-                </div>
-              </div>
+                    <!-- Trading Score 拆解：EV(40%)+RR(20%)+Trend(15%)+Volume(15%)+Confidence(10%) -->
+                    <div class="mb-3">
+                      <div class="flex h-2 rounded-full overflow-hidden bg-surface">
+                        {#each scoreBreakdownFields as f}
+                          <div
+                            class="bg-indigo-500 border-r border-panel last:border-r-0"
+                            style="width: {(z.trading_score_breakdown[f.key] / (z.trading_score || 1)) * 100}%"
+                            title="{f.label}: {z.trading_score_breakdown[f.key].toFixed(1)}"
+                          ></div>
+                        {/each}
+                      </div>
+                      <div class="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-[11px] text-muted">
+                        {#each scoreBreakdownFields as f}
+                          <span>{f.label} {z.trading_score_breakdown[f.key].toFixed(1)}<span class="opacity-60">/{f.weight}</span></span>
+                        {/each}
+                      </div>
+                    </div>
 
-              <!-- 量能與驗證狀態列 -->
-              <div class="flex flex-wrap gap-2 mb-3">
-                {#if z.volume_confirmation}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {volumeConfirmationClass[z.volume_confirmation] ?? ''}">
-                    {volumeConfirmationText[z.volume_confirmation] ?? z.volume_confirmation}
-                  </span>
-                {/if}
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {recentValidationClass[z.recent_validation] ?? ''}">
-                  {recentValidationText[z.recent_validation] ?? z.recent_validation}
-                </span>
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700/60 {zoneDirectionClass[z.zone_direction] ?? 'text-muted'}">
-                  區間動能 {zoneDirectionText[z.zone_direction] ?? z.zone_direction}
-                </span>
-              </div>
+                    <!-- 交易數字列：機率、期望報酬、期望值、風險報酬比 -->
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+                      <div>
+                        <p class="text-muted mb-1">反彈機率 / 跌破機率</p>
+                        <p class="text-white font-mono">{fmtPct(z.bounce_probability)} / {fmtPct(z.break_probability)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">Expected Gain / Loss</p>
+                        <p class="font-mono"><span class="text-rise">{fmtSignedPct(z.expected_gain)}</span> / <span class="text-fall">{fmtSignedPct(z.expected_loss)}</span></p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">Expected Value</p>
+                        <p class="{signedClass(z.expected_value)} font-mono">{fmtSignedPct(z.expected_value)}</p>
+                      </div>
+                      <div>
+                        <p class="text-muted mb-1">Risk Reward{z.reward_risk_percentile !== null ? ` (${z.reward_risk_percentile.toFixed(0)}百分位)` : ''}</p>
+                        <p class="text-white font-mono">{fmtRatio(z.risk_reward_ratio)}</p>
+                      </div>
+                    </div>
 
-              <!-- 觸碰統計列 -->
-              <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 text-xs text-muted">
-                <div><p class="mb-1">觸碰次數</p><p class="text-white">{z.touch_count}</p></div>
-                <div><p class="mb-1">拒絕次數</p><p class="text-white">{z.reject_count}</p></div>
-                <div><p class="mb-1">突破次數</p><p class="text-white">{z.break_count}</p></div>
-                <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
-                <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
+                    <!-- 量能與驗證狀態列 -->
+                    <div class="flex flex-wrap gap-2 mb-3">
+                      {#if z.volume_confirmation}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {volumeConfirmationClass[z.volume_confirmation] ?? ''}">
+                          {volumeConfirmationText[z.volume_confirmation] ?? z.volume_confirmation}
+                        </span>
+                      {/if}
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {recentValidationClass[z.recent_validation] ?? ''}">
+                        {recentValidationText[z.recent_validation] ?? z.recent_validation}
+                      </span>
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700/60 {zoneDirectionClass[z.zone_direction] ?? 'text-muted'}">
+                        區間動能 {zoneDirectionText[z.zone_direction] ?? z.zone_direction}
+                      </span>
+                    </div>
+
+                    <!-- 觸碰統計列 -->
+                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 text-xs text-muted">
+                      <div><p class="mb-1">觸碰次數</p><p class="text-white">{z.touch_count}</p></div>
+                      <div><p class="mb-1">拒絕次數</p><p class="text-white">{z.reject_count}</p></div>
+                      <div><p class="mb-1">突破次數</p><p class="text-white">{z.break_count}</p></div>
+                      <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
+                      <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
+                    </div>
+                  </div>
+                {/each}
               </div>
             </div>
           {:else}

@@ -7,14 +7,20 @@ from ..features import trend_slope
 from ..model import ModelBundle, train_model
 from ..scoring import (
     CONFIDENCE_SAMPLE_PSEUDO_COUNT,
+    TRADING_SCORE_WEIGHTS,
+    _assign_tiers,
+    _compute_global_metrics,
     _confidence,
     _derive_score,
     _net_score_label,
     _normalize_probabilities,
     _recent_validation,
     _sample_factor,
+    _sort_zone_scores,
     _stability_factor,
     _trading_recommendation,
+    _trading_score,
+    _trading_score_breakdown,
     _volume_confirmation,
     _zone_direction,
     score_symbol,
@@ -117,24 +123,41 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
 
     assert result["symbol"] == "2330"
     assert result["timeframe"] == "1d"
-    assert "overall_trend" in result
-    assert "overall_volatility" in result
+    assert "global_trend" in result
+    assert "global_volatility" in result
+    assert "global_expected_value" in result
+    assert "global_confidence" in result
+    assert "global_risk_reward_ratio" in result
     assert isinstance(result["zones"], list)
     for z in result["zones"]:
         assert 0.0 <= z["support_score"] <= 1.0
         assert 0.0 <= z["resistance_score"] <= 1.0
         assert z["role"] in ("SUPPORT", "RESISTANCE", "AT_ZONE")
+        assert z["tier"] in ("TIER_1_MAIN_STRUCTURE", "TIER_2_TRADING_ZONE", "TIER_3_SHORT_TERM")
         assert z["net_score_label"] in ("STRONG_SUPPORT", "NEUTRAL", "STRONG_RESISTANCE")
         assert z["confidence_level"] in ("LOW", "MEDIUM", "HIGH", "VERY_HIGH")
         assert z["recent_validation"] in (
             "VALIDATED_RECENTLY", "PENDING_VALIDATION", "NOT_TESTED_RECENTLY", "EXPIRED",
         )
         assert z["zone_direction"] in ("UP", "DOWN", "FLAT")
-        # overall_trend/overall_volatility 不應該在每個 zone 裡重複出現
-        assert "overall_trend" not in z
-        assert "overall_volatility" not in z
+        assert set(z["trading_score_breakdown"].keys()) == {
+            "expected_value", "risk_reward", "trend", "volume", "confidence",
+        }
+        assert z["trading_score"] == pytest.approx(sum(z["trading_score_breakdown"].values()))
+        # global_trend/global_volatility 不應該在每個 zone 裡重複出現
+        assert "global_trend" not in z
+        assert "global_volatility" not in z
         assert "trend_strength" not in z
         assert "volatility" not in z
+
+    # zones 必須可排序：tier 由粗到細，同層內 trading_score 由高到低
+    tier_order = {"TIER_1_MAIN_STRUCTURE": 1, "TIER_2_TRADING_ZONE": 2, "TIER_3_SHORT_TERM": 3}
+    ranks = [tier_order[z["tier"]] for z in result["zones"]]
+    assert ranks == sorted(ranks)
+    for i in range(len(result["zones"]) - 1):
+        a, b = result["zones"][i], result["zones"][i + 1]
+        if a["tier"] == b["tier"]:
+            assert a["trading_score"] >= b["trading_score"]
 
 
 def test_score_symbol_raises_when_no_candles(monkeypatch):
@@ -250,6 +273,97 @@ def test_trading_recommendation_at_zone_is_watch_or_neutral():
     assert _trading_recommendation(10.0, "AT_ZONE") == "NEUTRAL"
 
 
+# ── 十一、Zone Tier（可排序）──────────────────────────────────────────
+
+
+def test_assign_tiers_widest_is_tier_1_narrowest_is_tier_3():
+    # 9 個 zone，寬度由大到小：tier 應該剛好各 3 個
+    widths = [33.0, 30.0, 27.0, 9.0, 8.0, 7.0, 4.0, 3.0, 2.0]
+    tiers = _assign_tiers(widths)
+    assert tiers[0:3] == ["TIER_1_MAIN_STRUCTURE"] * 3
+    assert tiers[3:6] == ["TIER_2_TRADING_ZONE"] * 3
+    assert tiers[6:9] == ["TIER_3_SHORT_TERM"] * 3
+
+
+def test_assign_tiers_empty_input():
+    assert _assign_tiers([]) == []
+
+
+def test_assign_tiers_preserves_input_order():
+    # 回傳值要跟輸入順序一一對應，不是排序後的結果
+    widths = [2.0, 33.0, 9.0]
+    tiers = _assign_tiers(widths)
+    assert tiers[1] == "TIER_1_MAIN_STRUCTURE"  # 33.0 最寬
+    assert tiers[0] == "TIER_3_SHORT_TERM"  # 2.0 最窄
+
+
+# ── 十三、Trading Score（可拆解）─────────────────────────────────────
+
+
+def test_trading_score_breakdown_weights_sum_to_100():
+    assert sum(TRADING_SCORE_WEIGHTS.values()) == pytest.approx(100.0)
+
+
+def test_trading_score_breakdown_keys_match_weights():
+    breakdown = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.8, expected_value=0.02, risk_reward_ratio=1.5,
+        overall_trend=0.05, volume_confirmation="CONFIRMED",
+    )
+    assert set(breakdown.keys()) == set(TRADING_SCORE_WEIGHTS.keys())
+
+
+def test_trading_score_equals_sum_of_breakdown():
+    breakdown = _trading_score_breakdown(
+        role="RESISTANCE", confidence=0.5, expected_value=-0.01, risk_reward_ratio=0.8,
+        overall_trend=-0.02, volume_confirmation="WEAK",
+    )
+    assert _trading_score(breakdown) == pytest.approx(sum(breakdown.values()))
+
+
+def test_trading_score_breakdown_uses_neutral_defaults_when_role_unresolved():
+    # AT_ZONE 或缺值時，EV/RR/Volume 分量該用中性值 0.5 計算，而不是 0
+    breakdown = _trading_score_breakdown(
+        role="AT_ZONE", confidence=0.6, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None,
+    )
+    assert breakdown["expected_value"] == pytest.approx(0.5 * TRADING_SCORE_WEIGHTS["expected_value"])
+    assert breakdown["risk_reward"] == pytest.approx(0.5 * TRADING_SCORE_WEIGHTS["risk_reward"])
+    assert breakdown["volume"] == pytest.approx(0.5 * TRADING_SCORE_WEIGHTS["volume"])
+
+
+def test_trading_score_breakdown_confidence_component_is_direct():
+    breakdown = _trading_score_breakdown(
+        role="SUPPORT", confidence=1.0, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None,
+    )
+    assert breakdown["confidence"] == pytest.approx(TRADING_SCORE_WEIGHTS["confidence"])
+
+
+# ── 十二、Global EV/Confidence/RR（唯一收斂）───────────────────────────
+
+
+def test_compute_global_metrics_empty_zones_returns_none():
+    metrics = _compute_global_metrics([])
+    assert metrics == {"expected_value": None, "confidence": None, "risk_reward_ratio": None}
+
+
+def test_compute_global_metrics_confidence_weighted_average(bundle):
+    df = bullish_trend_df(n=80)
+    low = float(df["close"].min())
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    current_price = float(df["close"].iloc[-1])
+    score = score_zone(df, zone, current_price, bundle, _trend(df))
+
+    metrics = _compute_global_metrics([score])
+
+    # 只有一個 zone 時，加權平均就是那個 zone 自己的值
+    assert metrics["confidence"] == pytest.approx(score.confidence)
+    if score.expected_value is not None:
+        assert metrics["expected_value"] == pytest.approx(score.expected_value)
+    if score.risk_reward_ratio is not None:
+        assert metrics["risk_reward_ratio"] == pytest.approx(score.risk_reward_ratio)
+
+
 # ── score_zone: confidence/EV/RR/trading 整合測試 ────────────────────────
 
 
@@ -336,7 +450,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
     result = score_symbol("2330", "1d")
 
     expected_keys = {
-        "price_low", "price_high", "method", "role",
+        "price_low", "price_high", "method", "role", "tier", "tier_label",
         "support_score", "resistance_score", "net_score", "net_score_label",
         "confidence", "confidence_level",
         "bounce_probability", "break_probability",
@@ -345,7 +459,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
         "relative_volume", "volume_confirmation",
         "touch_count", "reject_count", "break_count",
         "zone_momentum", "zone_direction",
-        "recent_validation", "trading_score", "trading_recommendation",
+        "recent_validation", "trading_score", "trading_score_breakdown", "trading_recommendation",
     }
     for z in result["zones"]:
         assert expected_keys <= set(z.keys())

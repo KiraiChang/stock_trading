@@ -105,10 +105,11 @@ func main() {
 	}
 
 	// Scheduler（先建立好讓 API Server 能掛上手動觸發端點，Start() 留到最後才呼叫）
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, cfg.FinMind.IntradayEnabled, log)
+	srZoneVerifier := analysis.NewSRZoneVerifier(srZoneRepo, candleRepo)
+	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, cfg.FinMind.IntradayEnabled, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, btManager, analysisClient, fetcher, sched, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

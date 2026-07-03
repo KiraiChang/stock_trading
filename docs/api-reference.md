@@ -528,8 +528,9 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 已訓練過**（`POST /sr-zones/train` 或 CLI `python -m
 backtest.modular.sr_scoring.train`），否則 `POST /sr-zones` 會回傳
 `502 Bad Gateway`（Python service 沒開）或模型未訓練時的錯誤（fail-fast，
-不會靜默回傳中性機率）。目前**沒有驗證（verify）端點**——`status`/
-`broken_at`/`broken_price` 欄位存在但不會被更新，永遠是 `PENDING`。
+不會靜默回傳中性機率）。`status`/`broken_at`/`broken_price` 由
+`POST /sr-zones/:id/verify` 更新（見下方），或由 `daily_close` 排程每天
+自動對最近幾筆分析重新驗證一次。
 
 ### POST `/sr-zones`
 
@@ -617,6 +618,29 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
 ### GET `/sr-zones/:id`
 
 取得單筆分析詳情（含 zones 清單），格式同 `POST /sr-zones` 的回應。
+
+### POST `/sr-zones/:id/verify`
+
+手動重新驗證：比對這筆分析之後的實際 K 棒，更新每個 zone 的 `status`
+（是否被突破）。**可重複呼叫**，每次都用目前為止最新的資料重新計算，
+不是一次性判定；`daily_close` 排程也會每天自動對最近幾筆分析呼叫一次
+（見 sr-zone-scoring.md「十四」）。
+
+**Response：** 格式同 `GET /sr-zones/:id`，但 zones 的 `status`/`broken_at`/
+`broken_price` 會反映最新驗證結果：
+```json
+{
+  "analysis": { "...": "..." },
+  "zones": [
+    { "...": "...", "status": "BROKEN", "broken_at": "2026-07-05T00:00:00+08:00", "broken_price": 940.0 },
+    { "...": "...", "status": "HELD_SO_FAR", "broken_at": null, "broken_price": null }
+  ]
+}
+```
+
+`role=AT_ZONE` 的 zone 在分析當下現價落在區間內、方向未定，會維持
+`PENDING` 直到後續某根K棒收盤真正離開區間才開始判斷突破；`BROKEN` 的 zone
+不會因為後續反彈被改回 `HELD_SO_FAR`（沒有另外設計「重置」API）。
 
 ### POST `/sr-zones/train`
 

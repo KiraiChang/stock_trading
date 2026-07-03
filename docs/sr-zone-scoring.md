@@ -22,9 +22,12 @@
 - Go 持久化：`backend/internal/analysis/client.go`（`ScoreZones`/
   `TrainModel`）、`backend/internal/store/sr_zone_repo.go`、
   `backend/internal/store/sr_scoring_train_job_repo.go`（訓練任務追蹤）
+- Go 驗證：`backend/internal/analysis/sr_zone_verifier.go`（`SRZoneVerifier`，
+  見「十四」），排程整合見 `backend/internal/scheduler/scheduler.go`
 - API：`POST /api/v1/sr-zones`、`GET /api/v1/sr-zones`、
-  `GET /api/v1/sr-zones/:id`、`POST /api/v1/sr-zones/train`、
-  `GET /api/v1/sr-zones/train-jobs`、`GET /api/v1/sr-zones/train-jobs/:job_id`、
+  `GET /api/v1/sr-zones/:id`、`POST /api/v1/sr-zones/:id/verify`、
+  `POST /api/v1/sr-zones/train`、`GET /api/v1/sr-zones/train-jobs`、
+  `GET /api/v1/sr-zones/train-jobs/:job_id`、
   `DELETE /api/v1/sr-zones/:id`（見 api-reference.md）
 - 資料表：`stock_sr_zone_analyses`、`stock_sr_zones`、
   `sr_scoring_train_jobs`（見 database-schema.md）
@@ -417,12 +420,50 @@ zones 為空、或都沒有明確方向時，`global_expected_value`/`global_con
 
 ---
 
+## 十四、Zone 生命週期驗證（Verifier）
+
+`internal/analysis/sr_zone_verifier.go::SRZoneVerifier` 重新比對已存的
+zone 跟後續實際走勢，更新 `stock_sr_zones.status`/`broken_at`/
+`broken_price`。跟個股分析的 `Verifier`（`verifier.go`）同樣可重複呼叫、
+每次都用目前為止最新的 candles 重新計算，不是一次性判定；差異在於 zone
+是一段價格區間，且角色可能是 `AT_ZONE`（分析當下現價落在區間內，方向
+未定），需要額外處理：
+
+```
+role=AT_ZONE：
+    先找「收盤真正離開區間」的第一根K棒決定方向
+    （收在上方 → 之後視為 SUPPORT；收在下方 → 之後視為 RESISTANCE）
+    離開之前維持 PENDING（現價還在區間內，沒有方向可以驗證）
+
+role=SUPPORT（或 AT_ZONE 離開後解析出來的）：
+    收盤連續 confirmation_bars（預設 2，跟
+    features.py::count_breakouts 的訓練期特徵定義一致）根低於
+    price_low → BROKEN，broken_at/broken_price 取這段連續突破的第一根
+
+role=RESISTANCE：
+    收盤連續 confirmation_bars 根高於 price_high → BROKEN
+
+其餘：
+    K棒範圍曾與區間相交（觸碰過）但未被突破 → HELD_SO_FAR
+    從未被觸碰 → 維持 PENDING
+```
+
+每次都是從候選 candles 的開頭重新掃描（不是從上次驗證結果繼續），所以一旦
+某次驗證判定 `BROKEN`，之後不管價格如何反彈，重新驗證永遠會在同一根K棒
+判定 `BROKEN`——不會被後續反彈改回 `HELD_SO_FAR`（沒有另外設計「重置」
+API）。
+
+觸發方式：
+- 手動：`POST /api/v1/sr-zones/:id/verify`（見 api-reference.md）
+- 自動：`daily_close` 排程（收盤後）跑完主要的拉 K 棒/掃描流程後，接著對
+  最近 `srZoneVerifyLimit`（預設 50）筆 SR zone 分析各自重新驗證一次，
+  寫入獨立的 `sr_zone_verify` job_run 紀錄，失敗不影響 `daily_close` 本身
+  的結果。
+
+---
+
 ## 已知限制
 
-- **沒有驗證（verify）端點**：`stock_sr_zones` 有 `status`/`broken_at`/
-  `broken_price` 欄位，但目前沒有任何 API 或排程會更新它們（不像個股分析
-  有 `POST /analysis/:id/verify`）。這是預留給未來擴充的欄位，現階段每筆
-  zone 的 `status` 永遠是 `PENDING`。
 - **`atr_width_multiplier`/`max_merge_width_multiple` 需要依實際股票調參**：
   這兩個常數目前是全域預設值（1.5／2.0），對不同價位、不同波動度的股票
   可能需要不同的合理範圍，尚未针對大規模真實資料做系統性調參。

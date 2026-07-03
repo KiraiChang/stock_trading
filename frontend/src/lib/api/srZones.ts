@@ -120,6 +120,13 @@ export async function deleteSRZoneAnalysis(id: number): Promise<void> {
   await apiFetch(`/sr-zones/${id}`, { method: 'DELETE' })
 }
 
+// verifySRZoneAnalysis 手動重新驗證：比對這筆分析之後的實際 K 棒，更新每個
+// zone 的 status（PENDING/HELD_SO_FAR/BROKEN）。可重複呼叫，每次都用目前
+// 為止最新的資料重新計算（見 sr-zone-scoring.md「Zone 生命週期驗證」）。
+export async function verifySRZoneAnalysis(id: number): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
+  return apiFetch(`/sr-zones/${id}/verify`, { method: 'POST' })
+}
+
 export interface TrainOptions {
   symbols?: string[]
   timeframe?: string

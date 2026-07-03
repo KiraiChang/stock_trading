@@ -6,6 +6,7 @@
     listSRZoneAnalyses,
     getSRZoneAnalysis,
     deleteSRZoneAnalysis,
+    verifySRZoneAnalysis,
     triggerSRScoringTrain,
     getTrainJob,
     listTrainJobs,
@@ -24,6 +25,9 @@
   let current: SRZoneAnalysis | null = null
   let currentZones: SRZone[] = []
   $: tierGroups = groupByTier(currentZones)
+
+  let verifying = false
+  let verifyError = ''
 
   let history: SRZoneAnalysis[] = []
   let historyLoading = true
@@ -190,6 +194,23 @@
       submitError = '分析失敗，請確認股票代號是否有歷史資料、Python service 是否已啟動，或機率模型尚未訓練（見下方「訓練/更新機率模型」）'
     } finally {
       submitting = false
+    }
+  }
+
+  // 手動重新驗證：比對這筆分析之後的實際 K 棒，更新每個 zone 的
+  // status（PENDING/HELD_SO_FAR/BROKEN）。可重複呼叫，不是一次性判定。
+  async function runVerify() {
+    if (!current) return
+    verifying = true
+    verifyError = ''
+    try {
+      const { analysis, zones } = await verifySRZoneAnalysis(current.id)
+      current = analysis
+      currentZones = zones
+    } catch {
+      verifyError = '驗證失敗，請確認後端服務是否正常'
+    } finally {
+      verifying = false
     }
   }
 
@@ -505,10 +526,20 @@
           <div>
             <h2 class="text-white font-semibold">{current.symbol}</h2>
             <p class="text-muted text-xs mt-0.5">分析時間：{formatDateTime(current.analyzed_at)}</p>
+            {#if verifyError}
+              <p class="text-rise text-xs mt-0.5">{verifyError}</p>
+            {/if}
           </div>
           <div class="text-right">
             <p class="text-white font-mono text-lg">{fmt(current.current_price)}</p>
-            <p class="text-muted text-xs">{currentZones.length} 個區間</p>
+            <p class="text-muted text-xs mb-1.5">{currentZones.length} 個區間</p>
+            <button
+              class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded transition-colors disabled:opacity-50"
+              disabled={verifying}
+              on:click={runVerify}
+            >
+              {verifying ? '驗證中...' : '重新驗證'}
+            </button>
           </div>
         </div>
 
@@ -561,6 +592,9 @@
                       <div class="flex items-center gap-2">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
                           {statusLabel[z.status] ?? z.status}
+                          {#if z.status === 'BROKEN' && z.broken_at}
+                            （{formatDateTime(z.broken_at)} @ {fmt(z.broken_price)}）
+                          {/if}
                         </span>
                         <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold {recommendationClass[z.trading_recommendation] ?? ''}">
                           {recommendationText[z.trading_recommendation] ?? z.trading_recommendation}

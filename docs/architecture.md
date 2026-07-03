@@ -42,13 +42,14 @@ cmd/server/main.go
     ├── signal（Engine）
     │       ├── indicator.Engine
     │       └── store.{CandleRepo, SignalRepo}
-    ├── scheduler（cron jobs）
+    ├── scheduler（cron jobs，daily_close 收盤後接著跑 SR zone 驗證）
     │       ├── market.Fetcher
-    │       └── signal.Engine
+    │       ├── signal.Engine
+    │       └── analysis.SRZoneVerifier
     ├── backtest（Manager，透過 Python 服務執行）
     ├── analysis（Client 呼叫 Python 計算：/analyze 與 /sr-zones 共用同一個
-    │       Client，Verifier 純 Go 比對 candles 驗證，SR Zone Scoring 目前
-    │       沒有對應的 verifier，見 sr-zone-scoring.md「已知限制」）
+    │       Client；Verifier 與 SRZoneVerifier 都是純 Go 比對 candles 驗證，
+    │       不呼叫 Python，見 sr-zone-scoring.md「十四」）
     └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
             ├── middleware.Auth（JWT 驗證）
             ├── handler.Auth（register / login，新帳號預設 inactive）
@@ -163,13 +164,17 @@ Go 讀 candles，純 Go 比對支撐/壓力是否突破、停損/停利是否觸
 
 細節見 [stock-analysis.md](./stock-analysis.md)。
 
-**SR Zone Scoring**（同樣是「Python 算、Go 存」，但沒有驗證階段——`status`/
-`broken_at`/`broken_price` 欄位存在但目前沒有任何程式碼會更新）：
+**SR Zone Scoring**（同樣是「Python 算、Go 存」，驗證階段跟個股分析一樣是
+純 Go，見 sr-zone-scoring.md「十四」）：
 
 ```
 Go POST Python /sr-zones（zone 建立 + 特徵計算 + 機率模型預測 + 分數推導）
     ↓
 Go 寫入 stock_sr_zone_analyses + stock_sr_zones
+    ↓（手動 POST /sr-zones/:id/verify，或 daily_close 排程每天自動驗證最近幾筆）
+Go 讀 candles，純 Go 比對每個 zone 是否被突破
+    ↓
+更新 stock_sr_zones.status/broken_at/broken_price
 ```
 
 訓練是獨立的非同步流程，不在上面這條同步路徑裡：

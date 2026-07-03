@@ -222,6 +222,50 @@ func TestSRZoneRepoListFiltersBySymbol(t *testing.T) {
 	}
 }
 
+func TestSRZoneRepoUpdateZoneStatus(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	zones, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	target := zones[0]
+
+	brokenAt := time.Now().UTC().Truncate(time.Second)
+	brokenPrice := 88.5
+	if err := repo.UpdateZoneStatus(ctx, target.ID, "BROKEN", &brokenAt, &brokenPrice); err != nil {
+		t.Fatalf("UpdateZoneStatus failed: %v", err)
+	}
+
+	updated, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	var found *SRZone
+	for i := range updated {
+		if updated[i].ID == target.ID {
+			found = &updated[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected to find zone id=%d", target.ID)
+	}
+	if found.Status != "BROKEN" {
+		t.Fatalf("expected status=BROKEN, got %s", found.Status)
+	}
+	if !found.BrokenAt.Valid || !found.BrokenAt.Time.Equal(brokenAt) {
+		t.Fatalf("unexpected broken_at: %+v", found.BrokenAt)
+	}
+	if !found.BrokenPrice.Valid || found.BrokenPrice.Float64 != brokenPrice {
+		t.Fatalf("unexpected broken_price: %+v", found.BrokenPrice)
+	}
+}
+
 func TestSRZoneRepoDeleteCascadesZones(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()

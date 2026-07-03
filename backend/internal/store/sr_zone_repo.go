@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -13,6 +14,8 @@ type SRZoneRepo interface {
 	Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error)
 	List(ctx context.Context, symbol string, limit int) ([]SRZoneAnalysis, error)
 	GetZones(ctx context.Context, analysisID uint64) ([]SRZone, error)
+	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）
+	UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64) error
 	// Delete 刪除一筆 zone 評分快照及其所有 zone
 	Delete(ctx context.Context, id uint64) error
 }
@@ -156,6 +159,13 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 		ORDER BY CASE tier WHEN 'TIER_1_MAIN_STRUCTURE' THEN 1 WHEN 'TIER_2_TRADING_ZONE' THEN 2 ELSE 3 END, trading_score DESC
 	`), analysisID)
 	return rows, err
+}
+
+func (r *srZoneRepo) UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE stock_sr_zones SET status=?, broken_at=?, broken_price=? WHERE id=?
+	`), status, brokenAt, brokenPrice, zoneID)
+	return err
 }
 
 func (r *srZoneRepo) Delete(ctx context.Context, id uint64) error {

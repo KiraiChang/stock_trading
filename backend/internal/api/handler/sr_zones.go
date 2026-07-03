@@ -19,11 +19,15 @@ type SRZoneHandler struct {
 	repo      store.SRZoneRepo
 	watchlist store.WatchlistRepo
 	trainJobs store.SRScoringTrainJobRepo
+	verifier  *analysis.SRZoneVerifier
 	log       *zap.Logger
 }
 
-func NewSRZoneHandler(client *analysis.Client, repo store.SRZoneRepo, watchlist store.WatchlistRepo, trainJobs store.SRScoringTrainJobRepo, log *zap.Logger) *SRZoneHandler {
-	return &SRZoneHandler{client: client, repo: repo, watchlist: watchlist, trainJobs: trainJobs, log: log}
+func NewSRZoneHandler(
+	client *analysis.Client, repo store.SRZoneRepo, watchlist store.WatchlistRepo,
+	trainJobs store.SRScoringTrainJobRepo, verifier *analysis.SRZoneVerifier, log *zap.Logger,
+) *SRZoneHandler {
+	return &SRZoneHandler{client: client, repo: repo, watchlist: watchlist, trainJobs: trainJobs, verifier: verifier, log: log}
 }
 
 // newTrainJobID 比照 backtest.newJobID 的時間戳格式，不同前綴以便從 job_id
@@ -117,6 +121,27 @@ func (h *SRZoneHandler) Get(c *gin.Context) {
 	zones, err := h.repo.GetZones(c.Request.Context(), id)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: get zones")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"analysis": a, "zones": zones})
+}
+
+// POST /api/v1/sr-zones/:id/verify
+// 手動重新驗證：比對這筆分析之後的實際 K 棒，更新每個 zone 的 status（是否
+// 被突破）。可重複呼叫，每次都用目前為止最新的資料重新計算，不是一次性
+// 判定（見 internal/analysis/sr_zone_verifier.go）。沒有自動排程，需要主動
+// 呼叫這支 API 才會更新（但 daily_close 排程會自動對近期分析跑一次，見
+// scheduler）。
+func (h *SRZoneHandler) Verify(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	a, zones, err := h.verifier.Verify(c.Request.Context(), id)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: verify")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": a, "zones": zones})

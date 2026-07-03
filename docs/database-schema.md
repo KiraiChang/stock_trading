@@ -223,7 +223,7 @@ SR Zone Scoring 分析快照（機構級版本，見
 | trading_score | 可拆解的綜合交易分數（0~100） = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%) |
 | trading_score_breakdown | JSON：`trading_score` 五個分量各自的加權貢獻值，加總即為 `trading_score` |
 | trading_recommendation | `STRONG_BUY`/`BUY`/`WATCH`/`NEUTRAL`/`AVOID`/`STRONG_SELL` |
-| status / broken_at / broken_price | 保留供未來 verifier 使用，目前沒有任何程式碼會更新，永遠是 `PENDING` |
+| status / broken_at / broken_price | `PENDING`（尚未驗證或 `AT_ZONE` 方向未定）/ `HELD_SO_FAR`（曾被觸碰但未被突破）/ `BROKEN`（已被突破，`broken_at`/`broken_price` 是連續確認突破的第一根K棒）。由 `POST /sr-zones/:id/verify` 或 `daily_close` 排程更新，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |
 
 **Index：** `INDEX(analysis_id)`；查詢時額外依 `tier` 排序（`CASE tier WHEN
 'TIER_1_MAIN_STRUCTURE' THEN 1 ...`）後再依 `trading_score DESC`。

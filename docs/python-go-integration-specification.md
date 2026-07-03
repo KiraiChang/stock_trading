@@ -22,8 +22,8 @@
 - 回測任務管理（寫入 backtest_jobs）
 - 個股分析結果持久化與**驗證**（`internal/analysis.Verifier`：比對 candles
   跟已存的支撐/壓力/停損/停利，純 Go，不呼叫 Python）
-- SR Zone Scoring 結果持久化（`internal/store.SRZoneRepo`）——**沒有對應的
-  驗證步驟**，跟個股分析不同，見 3.3
+- SR Zone Scoring 結果持久化與**驗證**（`internal/analysis.SRZoneVerifier`：
+  比對 candles 跟已存的 zone，純 Go，不呼叫 Python，見 3.3）
 
 ## Python（Research Layer）
 
@@ -144,20 +144,26 @@ Go 讀 candles（analyzed_at 之後），純 Go 比對：
 
 # 3.3 SR Zone Scoring 流程
 
-跟個股分析同樣是**同步**呼叫、**Python 算、Go 存**的分工，但少了驗證階段：
+跟個股分析同樣是**同步**呼叫、**Python 算、Go 存**的分工，驗證階段也跟
+個股分析一樣是純 Go（不重跑 Python 的機率模型，只是價格數字比大小）：
 
 - **計算**（zone 建立、特徵工程、ML 機率模型、confidence、EV/RR、可拆解
   交易分數）在 Python：`POST /sr-zones`（`python/http_server.py`）同步回傳
   結果，不寫 DB。
-- **沒有驗證步驟**——`stock_sr_zones.status`/`broken_at`/`broken_price`
-  欄位存在（比照個股分析預留），但目前沒有任何 Go 程式碼會更新它們。這是
-  跟個股分析流程的關鍵差異，撰寫新功能前要先確認這個限制是否已經解除。
+- **驗證**（比對後續 candles，檢查每個 zone 有沒有被突破）直接在 Go 做
+  （`internal/analysis.SRZoneVerifier`，見 sr-zone-scoring.md「十四」）。
+  跟個股分析的 `Verifier` 差異：zone 是價格區間、角色可能是 `AT_ZONE`
+  （方向未定，需要先等價格離開區間才能判斷），且突破需要連續
+  `confirmation_bars`（預設 2）根收盤確認，不是單根就算數。
 
 ```
 Go POST Python /sr-zones {symbol, timeframe, limit}
     ↓ 同步回傳（不寫 DB），模型未訓練時 Python 回 503（fail-fast，不靜默回傳中性機率）
 Go 寫入 stock_sr_zone_analyses + stock_sr_zones
-    ↓（目前沒有後續驗證流程）
+    ↓（手動 POST /sr-zones/:id/verify，或 daily_close 排程每天自動驗證最近幾筆，可重複執行）
+Go 讀 candles（analyzed_at 之後），純 Go 比對每個 zone 是否被突破
+    ↓
+更新 stock_sr_zones.status/broken_at/broken_price
 ```
 
 **模型訓練**是獨立的非同步流程，不在上面這條同步路徑裡：

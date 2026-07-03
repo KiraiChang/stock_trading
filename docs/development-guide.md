@@ -276,6 +276,16 @@ curl -X POST http://localhost:8080/api/v1/sr-zones \
 機率模型」區塊就是 `POST /sr-zones/train` 的 UI，觸發後會自動每 3 秒輪詢一次
 狀態，完成/失敗都會顯示，下方也有最近幾次訓練紀錄。
 
+過幾天後想確認每個 zone 有沒有被突破，重新驗證（可重複執行，`daily_close`
+排程也會每天自動對最近幾筆分析呼叫一次，不用每次都手動觸發）：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/sr-zones/1/verify \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+前端「支撐/壓力機率分析」頁面的分析結果右上角有「重新驗證」按鈕。
+
 CLI 訓練（不透過 Go/HTTP，適合本地一次性訓練或除錯）：
 
 ```bash

@@ -245,6 +245,42 @@ curl -X POST http://localhost:8080/api/v1/analysis/1/verify \
 
 ---
 
+## SR Zone Scoring（支撐/壓力機率分析）
+
+跟個股分析是完全獨立的兩套系統（見 [sr-zone-scoring.md](./sr-zone-scoring.md)）。
+除了 Python HTTP service 已啟動，**還需要先訓練過機率模型**，否則
+`POST /sr-zones` 會失敗（fail-fast，不會靜默回傳中性機率）：
+
+```bash
+# 1. 先訓練模型（symbols 省略時自動用整個監控清單；非同步，立即回 202）
+curl -X POST http://localhost:8080/api/v1/sr-zones/train \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"symbols":["2330","2454"],"limit":1500}'
+# → {"message":"模型訓練已在背景啟動","symbols":2}
+# 訓練在背景 goroutine 執行，看後端 log 確認完成（沒有查詢進度的 API）
+
+# 2. 訓練完成後才能分析
+curl -X POST http://localhost:8080/api/v1/sr-zones \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"symbol":"2330","timeframe":"1d","limit":250}'
+# → { "analysis": {...global_*}, "zones": [...] }
+```
+
+也可以直接用前端「支撐/壓力機率分析」頁面（`/sr-zones`），下方「訓練/更新
+機率模型」區塊就是 `POST /sr-zones/train` 的 UI。
+
+CLI 訓練（不透過 Go/HTTP，適合本地一次性訓練或除錯）：
+
+```bash
+cd python
+.venv/Scripts/python.exe -m backtest.modular.sr_scoring.train \
+  --symbols 2330,2454,0050 --timeframe 1d --limit 1500
+```
+
+---
+
 ## 手動補算指標 / 評估訊號
 
 排程只會處理監控清單裡的股票；如果某支股票（例如剛上市、還沒加進監控清單）
@@ -270,13 +306,17 @@ candles 不足 35 根時兩者都回 `422`，代表要先用「歷史資料回�
 
 ## 執行 Go 測試
 
-`internal/signal/`（趨勢判斷/支撐壓力/突破訊號/Engine 整合）、
-`internal/store/`（監控清單監聽上限）目前是唯二有測試的套件：
+目前有測試的套件：`internal/signal/`（趨勢判斷/支撐壓力/突破訊號/Engine
+整合）、`internal/store/`（監控清單監聽上限、SR Zone Repo 的 Create/Get/
+List/Delete round-trip）、`internal/analysis/`（`Client.Analyze`/
+`ScoreZones`/`TrainModel` 對 Python HTTP service 的請求/回應解析，用
+`httptest.NewServer` 模擬，不需要真的啟動 Python）：
 
 ```bash
 cd backend
 go test ./internal/signal/... -v
 go test ./internal/store/... -v
+go test ./internal/analysis/... -v
 # 或直接跑全部（其他套件目前沒有測試檔，會顯示 [no test files]）
 go test ./...
 ```
@@ -288,12 +328,19 @@ go test ./...
 
 ## 執行 Python 測試
 
-`backtest/modular/` 的單元測試（支撐壓力/進場/停損/回測引擎/型別安全）：
+`backtest/modular/tests/` 是支撐壓力/進場/停損/回測引擎/型別安全的單元測試；
+`backtest/modular/sr_scoring/tests/` 是 SR Zone Scoring 的單元測試（zone
+建立/特徵工程/labeling/dataset/model/scoring），**獨立的測試套件、獨立的
+conftest**（刻意不跨套件 import，理由見 sr-zone-scoring.md 開頭），兩者都要
+跑：
 
 ```bash
 cd python
 .venv/Scripts/python.exe -m pip install pytest   # 或先 pip install -r requirements.txt
 .venv/Scripts/python.exe -m pytest backtest/modular/tests -v
+.venv/Scripts/python.exe -m pytest backtest/modular/sr_scoring/tests -v
+# 或一次跑全部（backtest/ 底下所有測試）：
+.venv/Scripts/python.exe -m pytest backtest/ -v
 ```
 
 ---
@@ -346,3 +393,21 @@ go run ./cmd/fugle-check -symbol 2330 -duration 60s
 數字/`null`。新增可空欄位務必用 `internal/store/null.go` 的
 `store.NullFloat64`/`NullString`/`NullTime`，見 architecture.md「Nullable
 欄位的 JSON 序列化」。
+
+**前端對某個物件欄位（例如 `trading_score_breakdown`）取子欄位是 `undefined`**：
+後端把一段 JSON 內容存成 Go `string`/`json.RawMessage`（`[]byte`）欄位直接
+`json.Marshal`，會逃逸成一個 JSON 字串（`"{\"foo\":1}"`）或（在 PostgreSQL/
+pgx 下）觸發 `sql: Scan error ... storing driver.Value type string into type
+*json.RawMessage`（pgx 把 TEXT 欄位讀成 `string`，`database/sql` 不會自動轉成
+`[]byte`-based 型別）。修法：用 `internal/store/null.go` 的 `store.RawJSON`
+（底層是 `string`，`MarshalJSON` 把內容原樣嵌入回應），不要用
+`json.RawMessage`/`[]byte` 存這種「DB 裡是 TEXT、API 要回傳巢狀 JSON
+object」的欄位——這個錯誤只在 PostgreSQL 才會出現，SQLite/MySQL 不會報錯，
+本機用 SQLite 開發測不出來，上 VPS（PostgreSQL）才會炸。
+
+**`POST /sr-zones` 回 `502 Bad Gateway` 或逾時**：Python HTTP service 沒開，
+或 `python.service_url`/`PYTHON_SERVICE_URL` 未設定。若 Python service 有回應
+但內容是模型相關錯誤（`RuntimeError`／`503`），代表機率模型還沒訓練過，先
+呼叫 `POST /sr-zones/train`（或 CLI `python -m
+backtest.modular.sr_scoring.train`）訓練完成後再重試，見上方「SR Zone
+Scoring」一節。

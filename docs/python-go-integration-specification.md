@@ -22,6 +22,8 @@
 - 回測任務管理（寫入 backtest_jobs）
 - 個股分析結果持久化與**驗證**（`internal/analysis.Verifier`：比對 candles
   跟已存的支撐/壓力/停損/停利，純 Go，不呼叫 Python）
+- SR Zone Scoring 結果持久化（`internal/store.SRZoneRepo`）——**沒有對應的
+  驗證步驟**，跟個股分析不同，見 3.3
 
 ## Python（Research Layer）
 
@@ -34,6 +36,10 @@
 - 回測結果寫回 DB（backtest_results + backtest_trades）——兩種引擎輸出格式相同
 - 個股現況分析計算（`backtest/modular/analysis.py`：支撐/壓力/進場/停損/停利，
   純函式、**不寫 DB**，由 Go 呼叫後負責持久化，見 3.2）
+- SR Zone Scoring 計算與模型訓練（`backtest/modular/sr_scoring/`：zone 建立、
+  特徵工程、ML 機率模型、EV/RR/交易分數推導，純函式、**不寫 DB**，由 Go
+  呼叫後負責持久化，見 3.3；[sr-zone-scoring.md](./sr-zone-scoring.md) 有完整
+  演算法規格）
 
 ---
 
@@ -136,6 +142,44 @@ Go 讀 candles（analyzed_at 之後），純 Go 比對：
 
 ---
 
+# 3.3 SR Zone Scoring 流程
+
+跟個股分析同樣是**同步**呼叫、**Python 算、Go 存**的分工，但少了驗證階段：
+
+- **計算**（zone 建立、特徵工程、ML 機率模型、confidence、EV/RR、可拆解
+  交易分數）在 Python：`POST /sr-zones`（`python/http_server.py`）同步回傳
+  結果，不寫 DB。
+- **沒有驗證步驟**——`stock_sr_zones.status`/`broken_at`/`broken_price`
+  欄位存在（比照個股分析預留），但目前沒有任何 Go 程式碼會更新它們。這是
+  跟個股分析流程的關鍵差異，撰寫新功能前要先確認這個限制是否已經解除。
+
+```
+Go POST Python /sr-zones {symbol, timeframe, limit}
+    ↓ 同步回傳（不寫 DB），模型未訓練時 Python 回 503（fail-fast，不靜默回傳中性機率）
+Go 寫入 stock_sr_zone_analyses + stock_sr_zones
+    ↓（目前沒有後續驗證流程）
+```
+
+**模型訓練**是獨立的非同步流程，不在上面這條同步路徑裡：
+
+```
+Go POST Python /sr-scoring/train {symbols, timeframe, limit, model_type}
+    （Go 端對外路由是 POST /sr-zones/train，語言邊界兩側路徑段命名不同，
+      呼叫前先確認自己站在哪一層）
+    ↓ Go 用背景 goroutine 呼叫，立即回 202 Accepted
+    ↓ Python 端同步執行訓練（gradient_boosting 或 logistic_regression）
+Python 寫入 models/sr_scoring_v2.joblib（MODEL_VERSION="v2"，跟 v1 feature
+schema 不相容，需要重新訓練，不能直接沿用舊模型檔）
+```
+
+`internal/analysis.Client` 對 `/sr-zones/train` 用獨立的長 timeout HTTP
+client（10 分鐘，一般請求是 30 秒），因為訓練耗時可能遠超一般 API 延遲。
+
+完整數學規格與資料表結構見 [sr-zone-scoring.md](./sr-zone-scoring.md)、
+[database-schema.md](./database-schema.md)。
+
+---
+
 # 4. Backtest Data Standard
 
 ## 核心原則
@@ -186,6 +230,18 @@ timestamp 取法：
 - Volume average window（20）
 - Breakout 條件（Close > Resistance, VolRatio >= 2.0, Trend == BULLISH）
 - Support/Resistance 識別邏輯（window=3, merge threshold=1%）
+
+## 5.1 廣義原則：重的數學只在 Python 寫一次
+
+上面的清單是針對 Go signal engine ↔ Python backtest 的具體對齊項目，但同樣
+的精神適用於**所有**「Python 算、Go 存」的功能（個股分析、SR Zone
+Scoring）：任何涉及技術指標、機率模型、期望值/風險報酬計算的邏輯，只在
+Python 寫一次，Go 端只負責呼叫 HTTP API、把回傳的結果映射進 DB struct、
+以及（如果有驗證流程）用單純的數值比較做 post-hoc 驗證——**不要在 Go 端
+重新實作或「簡化版重寫」任何一段機率/統計邏輯**，即使看起來只是幾行數學。
+理由：兩份邏輯只要有一個常數或捨入方式不一致，就會產生「Go 顯示的分數」跟
+「Python 訓練資料裡的分數」對不上的情況，且很難察覺（不會報錯，只是數字
+悄悄不一致）。
 
 ---
 

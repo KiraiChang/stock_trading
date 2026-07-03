@@ -46,12 +46,15 @@ cmd/server/main.go
     │       ├── market.Fetcher
     │       └── signal.Engine
     ├── backtest（Manager，透過 Python 服務執行）
-    ├── analysis（Client 呼叫 Python 計算，Verifier 純 Go 比對 candles 驗證）
+    ├── analysis（Client 呼叫 Python 計算：/analyze 與 /sr-zones 共用同一個
+    │       Client，Verifier 純 Go 比對 candles 驗證，SR Zone Scoring 目前
+    │       沒有對應的 verifier，見 sr-zone-scoring.md「已知限制」）
     └── api（Gin HTTP + WebSocket Hub + 前端靜態檔案）
             ├── middleware.Auth（JWT 驗證）
             ├── handler.Auth（register / login，新帳號預設 inactive）
             ├── handler.User（GET /users, PATCH /users/:id/status）
             ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest, Analysis}
+            ├── handler.SRZone（store.SRZoneRepo，見 sr-zone-scoring.md）
             └── ws.Hub
 ```
 
@@ -97,6 +100,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 |------|-------|------|
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號/★監聽切換）+ K線圖（可疊加 MA5/MA20/MA60，個別開關）+ 訊號面板 |
 | 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
+| 支撐/壓力機率分析 | `sr-zones` | 輸入股票代號觸發 SR Zone Scoring（`POST /sr-zones`），顯示機率模型算出的區間、機率、EV/RR、可拆解交易分數；另有「訓練/更新機率模型」區塊（`POST /sr-zones/train`）。詳見 [sr-zone-scoring.md](./sr-zone-scoring.md) |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
@@ -158,6 +162,25 @@ Go 讀 candles，純 Go 比對支撐/壓力是否突破、停損/停利是否觸
 ```
 
 細節見 [stock-analysis.md](./stock-analysis.md)。
+
+**SR Zone Scoring**（同樣是「Python 算、Go 存」，但沒有驗證階段——`status`/
+`broken_at`/`broken_price` 欄位存在但目前沒有任何程式碼會更新）：
+
+```
+Go POST Python /sr-zones（zone 建立 + 特徵計算 + 機率模型預測 + 分數推導）
+    ↓
+Go 寫入 stock_sr_zone_analyses + stock_sr_zones
+```
+
+訓練是獨立的非同步流程，不在上面這條同步路徑裡：
+
+```
+Go POST Python /sr-scoring/train（Go 端路由是 POST /sr-zones/train，立即回 202）
+    ↓ 背景 goroutine，Python 端同步執行（可能耗時數十秒到數分鐘）
+Python 訓練 hold_model + break_model，寫入 models/*.joblib
+```
+
+細節見 [sr-zone-scoring.md](./sr-zone-scoring.md)。
 
 ### Nullable 欄位的 JSON 序列化
 

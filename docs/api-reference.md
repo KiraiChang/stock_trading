@@ -517,6 +517,134 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ---
 
+## SR Zone Scoring API
+
+機構級支撐/壓力機率評分——輸出**價格區間（zone）**而非單一價位，每個 zone
+帶有機率模型算出的反彈/跌破機率、期望值、風險報酬比、可拆解的交易分數等。
+跟 Stock Analysis API 是完全獨立的兩套系統，不要混淆。完整演算法規格見
+[sr-zone-scoring.md](./sr-zone-scoring.md)。
+
+**需要 `python.service_url` 已設定、Python HTTP service 已啟動、且機率模型
+已訓練過**（`POST /sr-zones/train` 或 CLI `python -m
+backtest.modular.sr_scoring.train`），否則 `POST /sr-zones` 會回傳
+`502 Bad Gateway`（Python service 沒開）或模型未訓練時的錯誤（fail-fast，
+不會靜默回傳中性機率）。目前**沒有驗證（verify）端點**——`status`/
+`broken_at`/`broken_price` 欄位存在但不會被更新，永遠是 `PENDING`。
+
+### POST `/sr-zones`
+
+觸發一次分析並寫入 DB。
+
+**Request Body：**
+```json
+{ "symbol": "2330", "timeframe": "1d", "limit": 250 }
+```
+
+`timeframe` 省略時預設 `1d`；`limit` 為抓取的歷史K棒根數，省略或 0 時使用
+Python 端預設值（250）。
+
+**Response（201 Created）：**
+```json
+{
+  "analysis": {
+    "id": 4,
+    "symbol": "2330",
+    "timeframe": "1d",
+    "analyzed_at": "2026-07-01T00:00:00+08:00",
+    "current_price": 985.0,
+    "global_trend": 0.032,
+    "global_volatility": 0.018,
+    "global_expected_value": 0.004,
+    "global_confidence": 0.61,
+    "global_risk_reward_ratio": 0.92,
+    "model_version": "",
+    "created_at": "2026-07-01T10:00:00+08:00"
+  },
+  "zones": [
+    {
+      "id": 16,
+      "analysis_id": 4,
+      "price_low": 960.0,
+      "price_high": 970.0,
+      "method": "atr",
+      "role": "SUPPORT",
+      "tier": "TIER_1_MAIN_STRUCTURE",
+      "tier_label": "主結構",
+      "support_score": 0.68,
+      "resistance_score": 0.30,
+      "net_score": 0.38,
+      "net_score_label": "STRONG_SUPPORT",
+      "confidence": 0.72,
+      "confidence_level": "HIGH",
+      "bounce_probability": 0.66,
+      "break_probability": 0.21,
+      "expected_gain": 0.048,
+      "expected_loss": -0.021,
+      "expected_value": 0.0272,
+      "risk_reward_ratio": 2.29,
+      "reward_risk_percentile": 78.0,
+      "relative_volume": 1.4,
+      "volume_confirmation": "CONFIRMED",
+      "touch_count": 4,
+      "reject_count": 3,
+      "break_count": 0,
+      "zone_momentum": 0.021,
+      "zone_direction": "UP",
+      "recent_validation": "VALIDATED_RECENTLY",
+      "trading_score": 78.5,
+      "trading_score_breakdown": { "expected_value": 30.0, "risk_reward": 15.3, "trend": 10.6, "volume": 15.0, "confidence": 7.2 },
+      "trading_recommendation": "BUY",
+      "status": "PENDING",
+      "broken_at": null,
+      "broken_price": null
+    }
+  ]
+}
+```
+
+`role=AT_ZONE`（現價落在區間內）的 zone，`bounce_probability` 到
+`volume_confirmation` 這些「已解析方向」才有意義的欄位一律是 `null`。
+`trading_score_breakdown` 的五個分量加總即為 `trading_score`（見
+sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，同層內依
+`trading_score` 由高到低排序。
+
+### GET `/sr-zones`
+
+列出歷史分析紀錄。
+
+**Query Parameters：** `symbol`（篩選特定股票）、`limit`（預設 20，最多 200）
+
+### GET `/sr-zones/:id`
+
+取得單筆分析詳情（含 zones 清單），格式同 `POST /sr-zones` 的回應。
+
+### POST `/sr-zones/train`
+
+觸發 `hold_model`/`break_model` 重新訓練。**非同步**——立即回傳
+`202 Accepted`，實際訓練在背景 goroutine 執行（視資料量可能耗時數十秒到
+數分鐘），完成或失敗只會記錄在伺服器 log，前端沒有輪詢機制可以查詢訓練
+進度，需要重新呼叫 `POST /sr-zones` 才能確認新模型是否已生效。
+
+**Request Body：**
+```json
+{ "symbols": ["2330", "2454"], "timeframe": "1d", "limit": 1500, "model_type": "gradient_boosting" }
+```
+
+`symbols` 省略或空陣列時自動使用整個監控清單（watchlist 為空則回
+`400`）；`limit` 為每檔股票訓練用的歷史K棒根數（預設 1500）；`model_type`
+可選 `gradient_boosting`（預設）或 `logistic_regression`。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "模型訓練已在背景啟動", "symbols": 12 }
+```
+
+### DELETE `/sr-zones/:id`
+
+刪除一筆分析紀錄（連同其 zones 一併刪除）。
+
+---
+
 ## WebSocket
 
 **連線：** `ws://localhost:8080/ws/market`

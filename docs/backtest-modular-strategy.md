@@ -7,6 +7,12 @@
 `run_backtest()` 統一入口，對 Go/DB/worker 完全透明——見
 [python-go-integration-specification.md](./python-go-integration-specification.md)。
 
+> 這裡的支撐/壓力（`support_resistance/`）算出的是**單一價位**（`Level`），
+> 供回測與 [stock-analysis.md](./stock-analysis.md) 共用。機率導向、輸出
+> **價格區間**的 [sr-zone-scoring.md](./sr-zone-scoring.md) 是另一套獨立實作
+> （`sr_scoring/`），刻意不重用這裡的 `Level`/`SRLevels` 型別，只共用底層的
+> `calc_atr`/`find_swing_highs`/`find_swing_lows`。
+
 ---
 
 ## 架構

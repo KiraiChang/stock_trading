@@ -172,3 +172,59 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | method | 產生此 level 的演算法：`swing` / `atr_channel` / `volume_profile_poc` / `volume_profile_vah` / `volume_profile_val` |
 | status | `PENDING`（尚未驗證）/ `HELD_SO_FAR`（目前為止沒被突破）/ `BROKEN`（已被突破） |
 | broken_at / broken_price | 第一次被突破的時間與收盤價（`status=BROKEN` 時才有值） |
+
+---
+
+## stock_sr_zone_analyses
+
+SR Zone Scoring 分析快照（機構級版本，見
+[sr-zone-scoring.md](./sr-zone-scoring.md)），Go 呼叫 Python `POST /sr-zones`
+計算後寫入。跟 `stock_analyses` 不同的地方：這裡沒有驗證/verify 機制，
+`model_version` 目前固定寫入空字串（見 sr-zone-scoring.md「已知限制」）。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / timeframe | 分析標的與週期 |
+| analyzed_at | 分析當下最後一根K棒的時間 |
+| current_price | 分析當下收盤價 |
+| global_trend | 股票層級趨勢（`trend_slope`），同一次分析所有 zone 共用，只存一次 |
+| global_volatility | 股票層級波動率（`ATR / close`），同一次分析所有 zone 共用，只存一次 |
+| global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字（可為 `NULL`） |
+| global_confidence | 所有 zone confidence 的簡單平均（可為 `NULL`） |
+| global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR（可為 `NULL`） |
+| model_version | 目前固定為空字串（已知限制，見上） |
+
+**Index：** `INDEX(symbol, created_at DESC)`。
+
+---
+
+## stock_sr_zones
+
+`stock_sr_zone_analyses` 底下的 zone 清單（一對多）。跟 `stock_analysis_levels`
+不同：每個 zone 是一段**價格區間**（`price_low`~`price_high`），不是單一
+價位，且欄位數量遠多於 Level（含機率、EV、RR、量能確認等 ML 產出的數字）。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → stock_sr_zone_analyses.id（Go 端手動 2 步刪除，非 DB `ON DELETE CASCADE`） |
+| price_low / price_high | 區間上下緣 |
+| method | `atr` / `volume_profile` |
+| role | `SUPPORT` / `RESISTANCE` / `AT_ZONE`（依現價動態判斷，不是建立時就固定） |
+| tier / tier_label | 依區間寬度分三層：`TIER_1_MAIN_STRUCTURE`（主結構）/ `TIER_2_TRADING_ZONE`（交易區）/ `TIER_3_SHORT_TERM`（短期支撐） |
+| support_score / resistance_score | 依機率貝式收縮而來的強度分數（0~1） |
+| net_score / net_score_label | `support_score - resistance_score`；`STRONG_SUPPORT` / `NEUTRAL` / `STRONG_RESISTANCE` |
+| confidence / confidence_level | 多因子可信度（樣本數/時間衰減/歷史穩定度）；`LOW`/`MEDIUM`/`HIGH`/`VERY_HIGH` |
+| bounce_probability / break_probability | 反彈/跌破機率（`role=AT_ZONE` 時為 `NULL`） |
+| expected_gain / expected_loss / expected_value | 角色解析後的平均反彈/跌破報酬、加權期望值 |
+| risk_reward_ratio / reward_risk_percentile | `|expected_gain/expected_loss|`；此比值在訓練資料歷史分佈中的百分位 |
+| relative_volume / volume_confirmation | 角色解析後的相對量能；`CONFIRMED`/`WEAK`/`NEUTRAL`/`FAILED` |
+| touch_count / reject_count / break_count | 觸碰/拒絕/突破次數（聚合值，不分方向） |
+| zone_momentum / zone_direction | 這個 zone 自己的歷史觸碰動能（逐 zone 不同，非股票層級量）；`UP`/`DOWN`/`FLAT` |
+| recent_validation | `VALIDATED_RECENTLY` / `PENDING_VALIDATION` / `NOT_TESTED_RECENTLY` / `EXPIRED` |
+| trading_score | 可拆解的綜合交易分數（0~100） = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%) |
+| trading_score_breakdown | JSON：`trading_score` 五個分量各自的加權貢獻值，加總即為 `trading_score` |
+| trading_recommendation | `STRONG_BUY`/`BUY`/`WATCH`/`NEUTRAL`/`AVOID`/`STRONG_SELL` |
+| status / broken_at / broken_price | 保留供未來 verifier 使用，目前沒有任何程式碼會更新，永遠是 `PENDING` |
+
+**Index：** `INDEX(analysis_id)`；查詢時額外依 `tier` 排序（`CASE tier WHEN
+'TIER_1_MAIN_STRUCTURE' THEN 1 ...`）後再依 `trading_score DESC`。

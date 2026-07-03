@@ -15,6 +15,12 @@ S/R／進場／停損元件（`python/backtest/modular/`），差別在於：bac
 - 資料表：`stock_analyses`、`stock_analysis_levels`（見 database-schema.md）
 - 前端：「個股分析」頁面（`/analysis`）
 
+> **不要跟 [sr-zone-scoring.md](./sr-zone-scoring.md) 搞混**：兩者都在算
+> 「支撐/壓力」，但這裡是規則式的**單一價位**（Level）+ 固定公式的
+> 進場/停損/停利，沒有機率模型；SR Zone Scoring 是機器學習模型算出的
+> **價格區間**（Zone）+ 反彈/跌破機率/期望值/風險報酬比，是完全獨立的兩套
+> 系統、兩組資料表、兩支前端頁面。
+
 ---
 
 ## 支撐 / 壓力：三種方法合併

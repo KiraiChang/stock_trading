@@ -196,6 +196,36 @@ Go 端寫入 `stock_sr_zone_analyses.model_version`——每一筆分析都能�
 或 error），前端可用 `GET /sr-zones/train-jobs/:job_id` 輪詢進度，不需要只靠
 伺服器 log 或重新呼叫 `POST /sr-zones` 猜測新模型是否已生效。
 
+**時間序列 holdout 切分**：`train_model()` 預設 `split_method="time"`——每檔
+股票各自依 `touch_time` 排序後，取最後一段（預設 20%）當 test set，其餘當
+train set，再合併所有股票的結果。不用「對整個 pooled 資料集做一次全域時間
+排序」，因為跨股票 pooled 的資料集裡，不同股票的歷史時間範圍可能差很多
+（例如有的股票剛上市、資料比較新），全域切分容易讓 test set 集中在少數
+幾檔股票；逐股票各自切分則保證每檔股票都對 train/test 有貢獻，同時仍然
+確保「test 一定比 train 時間晚」，不會用未來資料驗證過去的模型（金融時間
+序列用隨機切分容易高估表現）。舊的隨機切分行為保留為 `split_method="random"`
+供比較，不建議當作正式評估依據。
+
+**機率校準**：`gradient_boosting`（`GradientBoostingClassifier`）的
+`predict_proba` 預設不是良好校準的機率——排序可能有鑑別力，但機率的絕對值
+不準。`calibration_method="sigmoid"`（預設，可選 `"isotonic"` 或 `"none"`）
+用 `CalibratedClassifierCV` 包一層校準。訓練集太小（< 40 筆）或任一類別樣本
+太少（< 10 筆）時自動降級為不校準，並在 `metrics.calibrated` 標記
+`0.0`——校準本身需要在訓練集內部再切一次 CV，樣本不夠時這個切分不可靠，
+寧可不校準也不要用一個看似有校準、實際上是雜訊的結果。
+
+**擴充的訓練 metrics**：`hold`/`break` 兩個模型的 metrics 現在包含
+`train_rows`/`test_rows`、`positive_rate_train`/`positive_rate_test`
+（取代舊版單一、且其實是用全資料集算的 `positive_rate`）、`brier_score`、
+`log_loss`、`calibrated`，加上原有的 `accuracy`/`precision`/`recall`/`auc`。
+
+**訓練資料診斷報告**：`dataset.py::summarize_training_dataset()` 產生
+`{rows, rows_by_symbol, role_counts, hold_positive_rate, break_positive_rate,
+feature_zero_rate, rr_reference_count}`，`run_training()` 把它放進結果的
+`dataset_summary` 欄位，原樣存進 `sr_scoring_train_jobs.dataset_summary`。
+這是判斷「這次訓練出來的模型可不可信」用的——例如樣本集中在少數幾檔股票、
+或某個特徵幾乎永遠是 0，光看 accuracy/AUC 這類整體指標看不出這件事。
+
 ---
 
 ## 五、機率正規化與分數推導

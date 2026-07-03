@@ -211,17 +211,21 @@ type SRScoringTrainJob struct {
 	Timeframe  string `db:"timeframe"   json:"timeframe"`
 	FetchLimit int    `db:"fetch_limit" json:"fetch_limit"`
 	ModelType  string `db:"model_type"  json:"model_type"`
-	// Rows/Sources/Metrics/ModelPath/ModelVersion 只有 status=done 才有值；
-	// Error 只有 status=failed 才有值。
-	Rows         NullInt64  `db:"rows"          json:"rows,omitempty"`
-	Sources      NullInt64  `db:"sources"       json:"sources,omitempty"`
-	Metrics      RawJSON    `db:"metrics"       json:"metrics,omitempty"`
-	ModelPath    NullString `db:"model_path"    json:"model_path,omitempty"`
-	ModelVersion NullString `db:"model_version" json:"model_version,omitempty"`
-	Error        NullString `db:"error"         json:"error,omitempty"`
-	StartedAt    NullTime   `db:"started_at"    json:"started_at,omitempty"`
-	FinishedAt   NullTime   `db:"finished_at"   json:"finished_at,omitempty"`
-	CreatedAt    time.Time  `db:"created_at"    json:"created_at"`
+	// Rows/Sources/Metrics/ModelPath/ModelVersion/DatasetSummary 只有
+	// status=done 才有值；Error 只有 status=failed 才有值。
+	Rows         NullInt64  `db:"rows"             json:"rows,omitempty"`
+	Sources      NullInt64  `db:"sources"          json:"sources,omitempty"`
+	Metrics      RawJSON    `db:"metrics"          json:"metrics,omitempty"`
+	ModelPath    NullString `db:"model_path"       json:"model_path,omitempty"`
+	ModelVersion NullString `db:"model_version"    json:"model_version,omitempty"`
+	// DatasetSummary 是 summarize_training_dataset() 的原樣保存（見
+	// sr-zone-scoring.md「模型驗證與校準」），供人工判斷這次訓練出來的模型
+	// 可不可信，不影響任何業務邏輯。
+	DatasetSummary RawJSON    `db:"dataset_summary"  json:"dataset_summary,omitempty"`
+	Error          NullString `db:"error"            json:"error,omitempty"`
+	StartedAt      NullTime   `db:"started_at"       json:"started_at,omitempty"`
+	FinishedAt     NullTime   `db:"finished_at"      json:"finished_at,omitempty"`
+	CreatedAt      time.Time  `db:"created_at"       json:"created_at"`
 }
 
 type WatchlistItem struct {

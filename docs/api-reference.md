@@ -661,9 +661,20 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
       "model_type": "gradient_boosting",
       "rows": 128,
       "sources": 2,
-      "metrics": { "hold": { "auc": 0.81, "accuracy": 0.76 }, "break": { "auc": 0.77, "accuracy": 0.72 } },
+      "split_method": "time",
+      "metrics": {
+        "hold": { "auc": 0.81, "accuracy": 0.76, "brier_score": 0.18, "log_loss": 0.52, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.48, "positive_rate_test": 0.5 },
+        "break": { "auc": 0.77, "accuracy": 0.72, "brier_score": 0.21, "log_loss": 0.58, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.31, "positive_rate_test": 0.35 }
+      },
       "model_path": "models/sr_scoring_v2.joblib",
       "model_version": "v2",
+      "dataset_summary": {
+        "rows": 128, "rows_by_symbol": { "2330": 90, "2454": 38 },
+        "role_counts": { "SUPPORT": 70, "RESISTANCE": 58 },
+        "hold_positive_rate": 0.49, "break_positive_rate": 0.33,
+        "feature_zero_rate": { "breakout_count": 0.62, "touch_count": 0.0 },
+        "rr_reference_count": 41
+      },
       "error": null,
       "started_at": "2026-07-03T09:00:01+08:00",
       "finished_at": "2026-07-03T09:01:47+08:00",
@@ -674,8 +685,11 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
 }
 ```
 
-`rows`/`sources`/`metrics`/`model_path`/`model_version` 只有 `status=done`
-才有值；`error` 只有 `status=failed` 才有值。
+`rows`/`sources`/`metrics`/`model_path`/`model_version`/`dataset_summary`
+只有 `status=done` 才有值；`error` 只有 `status=failed` 才有值。
+`split_method` 是 `"time"`（預設，依 `touch_time` 逐股票切分 holdout）或
+`"random"`（舊行為）；`metrics.calibrated` 是 `1.0`/`0.0`，訓練集太小時會
+自動降級為不校準（見 sr-zone-scoring.md「四」）。
 
 ### GET `/sr-zones/train-jobs/:job_id`
 

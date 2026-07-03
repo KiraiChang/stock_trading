@@ -70,6 +70,9 @@ def test_run_training_returns_summary_and_saves_model(monkeypatch, tmp_path):
     assert result["rows"] > 0
     assert result["model_path"] == output
     assert set(result["metrics"]) == {"hold", "break"}
+    assert result["split_method"] == "time"
+    assert result["dataset_summary"]["rows"] == result["rows"]
+    assert "2330" in result["dataset_summary"]["rows_by_symbol"]
 
     import os
     assert os.path.exists(output)

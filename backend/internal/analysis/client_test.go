@@ -282,9 +282,10 @@ func TestTrainModelParsesResponse(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(TrainResult{
-			Rows: 120, Sources: 2, ModelType: "gradient_boosting",
+			Rows: 120, Sources: 2, ModelType: "gradient_boosting", SplitMethod: "time",
 			Metrics:   map[string]map[string]float64{"hold": {"accuracy": 0.9}, "break": {"accuracy": 0.85}},
 			ModelPath: "models/sr_scoring_v1.joblib", TrainedAt: "2026-07-01T13:30:00+08:00", Version: "v1",
+			DatasetSummary: map[string]interface{}{"rows": 120.0, "rows_by_symbol": map[string]interface{}{"2330": 80.0, "2454": 40.0}},
 		})
 	}))
 	defer server.Close()
@@ -299,6 +300,12 @@ func TestTrainModelParsesResponse(t *testing.T) {
 	}
 	if result.Metrics["hold"]["accuracy"] != 0.9 {
 		t.Fatalf("unexpected metrics: %+v", result.Metrics)
+	}
+	if result.SplitMethod != "time" {
+		t.Fatalf("unexpected split_method: %+v", result)
+	}
+	if result.DatasetSummary["rows"] != 120.0 {
+		t.Fatalf("unexpected dataset_summary: %+v", result.DatasetSummary)
 	}
 }
 

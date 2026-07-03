@@ -368,15 +368,21 @@ type trainRequest struct {
 	ModelType string   `json:"model_type,omitempty"`
 }
 
-// TrainResult 對應 Python run_training() 的回傳格式
+// TrainResult 對應 Python run_training() 的回傳格式。SplitMethod/
+// DatasetSummary 是機率校準與時間序列切分改善的一部分（見
+// sr-zone-scoring.md「模型驗證與校準」）：DatasetSummary 形狀不固定
+// （symbol/role 分佈是 int、positive rate 是 float），故用
+// map[string]interface{} 而非強型別 struct，原樣保存供診斷用。
 type TrainResult struct {
-	Rows      int                           `json:"rows"`
-	Sources   int                           `json:"sources"`
-	ModelType string                        `json:"model_type"`
-	Metrics   map[string]map[string]float64 `json:"metrics"`
-	ModelPath string                        `json:"model_path"`
-	TrainedAt string                        `json:"trained_at"`
-	Version   string                        `json:"version"`
+	Rows           int                           `json:"rows"`
+	Sources        int                           `json:"sources"`
+	ModelType      string                        `json:"model_type"`
+	SplitMethod    string                        `json:"split_method"`
+	Metrics        map[string]map[string]float64 `json:"metrics"`
+	ModelPath      string                        `json:"model_path"`
+	TrainedAt      string                        `json:"trained_at"`
+	Version        string                        `json:"version"`
+	DatasetSummary map[string]interface{}        `json:"dataset_summary"`
 }
 
 // TrainModel 呼叫 Python /sr-scoring/train 端點，重新訓練 bounce/break

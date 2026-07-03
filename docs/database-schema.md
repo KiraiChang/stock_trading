@@ -245,8 +245,9 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | symbols | JSON 陣列字串，這次訓練用的股票代號清單 |
 | timeframe / fetch_limit / model_type | 訓練參數（K棒週期、每檔股票抓取根數、`gradient_boosting`/`logistic_regression`） |
 | rows / sources | 訓練資料筆數、來源股票數；只有 `status=done` 才有值 |
-| metrics | JSON：`{"hold": {...}, "break": {...}}`，兩個模型各自的 accuracy/precision/recall/auc；只有 `status=done` 才有值。DB 欄位 `NOT NULL DEFAULT ''`（用 `store.RawJSON` 讀寫，不能是 SQL `NULL`，空字串在 API 回應會序列化成 `null`） |
+| metrics | JSON：`{"hold": {...}, "break": {...}}`，兩個模型各自的 accuracy/precision/recall/auc/brier_score/log_loss/train_rows/test_rows/positive_rate_train/positive_rate_test/calibrated；只有 `status=done` 才有值。DB 欄位 `NOT NULL DEFAULT ''`（用 `store.RawJSON` 讀寫，不能是 SQL `NULL`，空字串在 API 回應會序列化成 `null`） |
 | model_path / model_version | 訓練完成後寫入的模型檔路徑與版本；只有 `status=done` 才有值 |
+| dataset_summary | JSON：`summarize_training_dataset()` 的診斷摘要（見 sr-zone-scoring.md「四」），只有 `status=done` 才有值。DB 欄位同樣 `NOT NULL DEFAULT ''` |
 | error | 失敗原因；只有 `status=failed` 才有值 |
 | started_at / finished_at | 開始/結束時間；`status=pending` 時兩者皆為 `NULL` |
 | created_at | 任務建立時間（等同呼叫 `POST /sr-zones/train` 的時間） |

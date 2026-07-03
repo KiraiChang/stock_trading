@@ -90,7 +90,8 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 	}
 
 	metrics := RawJSON(`{"hold":{"auc":0.81},"break":{"auc":0.77}}`)
-	if err := repo.MarkDone(ctx, "sr_train_002", 128, 3, metrics, "models/sr_scoring_v2.joblib", "v2"); err != nil {
+	datasetSummary := RawJSON(`{"rows":128,"rows_by_symbol":{"2330":90,"2454":38}}`)
+	if err := repo.MarkDone(ctx, "sr_train_002", 128, 3, metrics, "models/sr_scoring_v2.joblib", "v2", datasetSummary); err != nil {
 		t.Fatalf("MarkDone failed: %v", err)
 	}
 
@@ -112,6 +113,9 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 	}
 	if len(done.Metrics) == 0 {
 		t.Fatalf("expected non-empty metrics JSON, got %+v", done.Metrics)
+	}
+	if len(done.DatasetSummary) == 0 {
+		t.Fatalf("expected non-empty dataset_summary JSON, got %+v", done.DatasetSummary)
 	}
 }
 

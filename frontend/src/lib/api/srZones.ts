@@ -143,10 +143,26 @@ export interface SRScoringTrainJob {
   rows: number | null
   sources: number | null
   // metrics 是 {"hold": {...}, "break": {...}} 形狀（見 model.py::train_model
-  // 回傳的 metrics dict），欄位不固定，用 unknown 讓呼叫端自行處理。
+  // 回傳的 metrics dict：accuracy/precision/recall/auc/brier_score/log_loss/
+  // train_rows/test_rows/positive_rate_train/positive_rate_test/calibrated
+  // (1=有校準/0=降級為不校準)）。
   metrics: Record<string, Record<string, number>> | null
   model_path: string | null
   model_version: string | null
+  // split_method: "time"（依 touch_time 逐股票切分，預設）或 "random"（舊行為）
+  split_method: string | null
+  // dataset_summary 見 dataset.py::summarize_training_dataset()：rows_by_symbol
+  // /role_counts/hold_positive_rate/break_positive_rate/feature_zero_rate/
+  // rr_reference_count，用來判斷這次訓練出來的模型可不可信，不影響任何計算。
+  dataset_summary: {
+    rows: number
+    rows_by_symbol: Record<string, number>
+    role_counts: Record<string, number>
+    hold_positive_rate: number | null
+    break_positive_rate: number | null
+    feature_zero_rate: Record<string, number>
+    rr_reference_count: number
+  } | null
   error: string | null
   started_at: string | null
   finished_at: string | null

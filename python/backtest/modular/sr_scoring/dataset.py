@@ -10,11 +10,13 @@ zone 集合每 rebuild_every_bars 根才重建一次（效能考量：zone_build
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import pandas as pd
 
 from .features import compute_zone_features, touch_starting_at
 from .labeling import label_touch
+from .model import FEATURE_COLUMNS, compute_rr_reference
 from .types import Zone, ZoneLabel, ZoneType
 from .zone_builder import ZoneBuilder
 
@@ -149,6 +151,35 @@ def build_training_dataset(
         for row in all_rows
     ]
     return pd.DataFrame.from_records(records, columns=columns)
+
+
+def summarize_training_dataset(dataset: pd.DataFrame) -> dict[str, Any]:
+    """訓練資料診斷摘要：判斷「這次訓練出來的模型可不可信」用，不是給
+    train_model() 本身用的（不影響訓練結果，只是報告）。例如資料集中在少數
+    幾檔股票、或某個特徵幾乎永遠是 0/缺值，模型的泛化能力就值得懷疑，但
+    單看 accuracy/AUC 這類整體指標看不出這件事。"""
+    if dataset.empty:
+        return {
+            "rows": 0, "rows_by_symbol": {}, "role_counts": {},
+            "hold_positive_rate": None, "break_positive_rate": None,
+            "feature_zero_rate": {}, "rr_reference_count": 0,
+        }
+
+    rows_by_symbol = {str(k): int(v) for k, v in dataset["symbol"].value_counts().to_dict().items()}
+    role_counts = {str(k): int(v) for k, v in dataset["role"].value_counts().to_dict().items()}
+    feature_zero_rate = {
+        col: float((dataset[col] == 0).mean()) for col in FEATURE_COLUMNS if col in dataset.columns
+    }
+
+    return {
+        "rows": int(len(dataset)),
+        "rows_by_symbol": rows_by_symbol,
+        "role_counts": role_counts,
+        "hold_positive_rate": float(dataset["hold_label"].mean()),
+        "break_positive_rate": float(dataset["break_label"].mean()),
+        "feature_zero_rate": feature_zero_rate,
+        "rr_reference_count": len(compute_rr_reference(dataset)),
+    }
 
 
 def load_ohlcv_csv(path: str, symbol: str = "", timeframe: str = "1d") -> pd.DataFrame:

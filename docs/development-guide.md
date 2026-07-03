@@ -282,6 +282,12 @@ CLI 訓練（不透過 Go/HTTP，適合本地一次性訓練或除錯）：
 cd python
 .venv/Scripts/python.exe -m backtest.modular.sr_scoring.train \
   --symbols 2330,2454,0050 --timeframe 1d --limit 1500
+# 輸出除了 metrics，還會印出資料集診斷摘要（每個 symbol 的 rows 數、
+# hold/break positive rate、特徵為 0 比例等，見 sr-zone-scoring.md「四」）
+
+# --split-method（預設 time）/ --calibration-method（預設 sigmoid）可調：
+.venv/Scripts/python.exe -m backtest.modular.sr_scoring.train \
+  --symbols 2330,2454 --split-method random --calibration-method none
 ```
 
 ---

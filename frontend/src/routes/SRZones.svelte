@@ -254,6 +254,24 @@
     return v === undefined || v === null ? '—' : v.toFixed(3)
   }
 
+  // calibrated 是 1/0（見 model.py::_fit_with_optional_calibration），資料
+  // 太少時會自動降級為不校準，這裡讓使用者知道「這次的機率有沒有真的校準過」，
+  // 而不是只看到一個看似可信的 AUC 數字。
+  function calibratedLabel(job: SRScoringTrainJob | null, model: 'hold' | 'break'): string {
+    const v = job?.metrics?.[model]?.calibrated
+    if (v === undefined || v === null) return '—'
+    return v === 1 ? '已校準' : '未校準（樣本不足）'
+  }
+
+  function splitMethodLabel(job: SRScoringTrainJob | null): string {
+    if (!job?.split_method) return '—'
+    return job.split_method === 'time' ? '時間序列切分' : '隨機切分'
+  }
+
+  function symbolCount(job: SRScoringTrainJob | null): number {
+    return job?.dataset_summary ? Object.keys(job.dataset_summary.rows_by_symbol).length : 0
+  }
+
   // symbol 留空時列出「所有股票」最近的分析紀錄，方便一進頁面就有內容可看；
   // symbol 有值時才篩選成該股票的歷史紀錄
   async function loadHistory() {
@@ -428,7 +446,9 @@
           <span class="text-muted font-mono">{activeJob.job_id}</span>
           {#if activeJob.status === 'done'}
             <span class="text-white">rows={activeJob.rows} sources={activeJob.sources} model={activeJob.model_version}</span>
-            <span class="text-muted">hold AUC {metricValue(activeJob, 'hold', 'auc')} / break AUC {metricValue(activeJob, 'break', 'auc')}</span>
+            <span class="text-muted">{splitMethodLabel(activeJob)} · 來自 {symbolCount(activeJob)} 檔股票</span>
+            <span class="text-muted">hold AUC {metricValue(activeJob, 'hold', 'auc')}（{calibratedLabel(activeJob, 'hold')}） / break AUC {metricValue(activeJob, 'break', 'auc')}（{calibratedLabel(activeJob, 'break')}）</span>
+            <span class="text-muted">brier: hold {metricValue(activeJob, 'hold', 'brier_score')} / break {metricValue(activeJob, 'break', 'brier_score')}</span>
           {:else if activeJob.status === 'failed'}
             <span class="text-rise">{activeJob.error}</span>
           {/if}
@@ -444,8 +464,10 @@
               <tr class="text-muted border-b border-border/60">
                 <th class="text-left py-1">狀態</th>
                 <th class="text-left py-1">模型</th>
-                <th class="text-right py-1">rows/sources</th>
+                <th class="text-left py-1">切分方式</th>
+                <th class="text-right py-1">rows/股票數</th>
                 <th class="text-right py-1">hold/break AUC</th>
+                <th class="text-left py-1">校準</th>
                 <th class="text-left py-1">時間</th>
               </tr>
             </thead>
@@ -458,13 +480,15 @@
                     </span>
                   </td>
                   <td class="py-1 text-white">{job.model_type}{job.model_version ? ` (${job.model_version})` : ''}</td>
-                  <td class="py-1 text-right text-white">{job.rows ?? '—'} / {job.sources ?? '—'}</td>
+                  <td class="py-1 text-white">{splitMethodLabel(job)}</td>
+                  <td class="py-1 text-right text-white">{job.rows ?? '—'} / {symbolCount(job)}</td>
                   <td class="py-1 text-right text-white">{metricValue(job, 'hold', 'auc')} / {metricValue(job, 'break', 'auc')}</td>
+                  <td class="py-1 text-muted">{calibratedLabel(job, 'hold')}</td>
                   <td class="py-1 text-muted font-mono">{formatDateTime(job.created_at)}</td>
                 </tr>
                 {#if job.status === 'failed' && job.error}
                   <tr class="border-b border-border/30">
-                    <td colspan="5" class="py-1 text-rise">{job.error}</td>
+                    <td colspan="7" class="py-1 text-rise">{job.error}</td>
                   </tr>
                 {/if}
               {/each}

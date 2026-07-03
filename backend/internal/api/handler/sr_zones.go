@@ -210,7 +210,15 @@ func (h *SRZoneHandler) runTrainJob(jobID string, symbols []string, timeframe st
 		h.log.Error("sr_scoring train job: marshal metrics failed", zap.String("job_id", jobID), zap.Error(err))
 		metricsJSON = []byte("{}")
 	}
-	if err := h.trainJobs.MarkDone(ctx, jobID, result.Rows, result.Sources, store.RawJSON(metricsJSON), result.ModelPath, result.Version); err != nil {
+	datasetSummaryJSON, err := json.Marshal(result.DatasetSummary)
+	if err != nil {
+		h.log.Error("sr_scoring train job: marshal dataset summary failed", zap.String("job_id", jobID), zap.Error(err))
+		datasetSummaryJSON = []byte("{}")
+	}
+	if err := h.trainJobs.MarkDone(
+		ctx, jobID, result.Rows, result.Sources, store.RawJSON(metricsJSON), result.ModelPath, result.Version,
+		store.RawJSON(datasetSummaryJSON),
+	); err != nil {
 		h.log.Error("sr_scoring train job: mark done failed", zap.String("job_id", jobID), zap.Error(err))
 	}
 	h.log.Info("sr_scoring train completed",

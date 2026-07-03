@@ -164,6 +164,11 @@ class TrainRequest(BaseModel):
     timeframe: str = "1d"
     limit: int = 1500
     model_type: str = "gradient_boosting"
+    # split_method="time"（預設，依 touch_time 逐股票切分 holdout，避免用
+    # 未來資料驗證過去高估表現）或 "random"（舊行為，保留供比較）。
+    # calibration_method 資料太少時會自動降級為不校準，見 model.py 說明。
+    split_method: str = "time"
+    calibration_method: Optional[str] = "sigmoid"
 
 
 @app.post("/sr-scoring/train")
@@ -171,8 +176,8 @@ async def sr_scoring_train(req: TrainRequest):
     """手動觸發 sr_scoring 機率模型訓練（同步執行，視資料量可能耗時數十秒到
     數分鐘；Go 端會用背景 goroutine 呼叫，不會卡住 HTTP 回應）。"""
     log.info(
-        "POST /sr-scoring/train symbols=%s tf=%s limit=%d model_type=%s",
-        req.symbols, req.timeframe, req.limit, req.model_type,
+        "POST /sr-scoring/train symbols=%s tf=%s limit=%d model_type=%s split_method=%s",
+        req.symbols, req.timeframe, req.limit, req.model_type, req.split_method,
     )
     try:
         return run_training(
@@ -180,6 +185,8 @@ async def sr_scoring_train(req: TrainRequest):
             timeframe=req.timeframe,
             limit=req.limit,
             model_type=req.model_type,
+            split_method=req.split_method,
+            calibration_method=req.calibration_method,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

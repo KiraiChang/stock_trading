@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..dataset import DatasetConfig, build_training_dataset, build_training_rows
+from ..dataset import DatasetConfig, build_training_dataset, build_training_rows, summarize_training_dataset
 from ..features import compute_zone_features
 from ..types import ApproachDirection, Zone, ZoneType
 from ..zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder
@@ -82,3 +82,36 @@ def test_build_training_dataset_empty_still_has_columns():
 
     assert len(dataset) == 0
     assert "hold_label" in dataset.columns
+
+
+# ── 三、3：訓練資料診斷報告 ──────────────────────────────────────
+
+
+def test_summarize_training_dataset_empty():
+    df = bullish_trend_df(n=90)
+    tight_config = DatasetConfig(min_history_bars=89)
+    dataset = build_training_dataset([("A", "1d", df)], _BUILDERS, tight_config)
+
+    summary = summarize_training_dataset(dataset)
+
+    assert summary["rows"] == 0
+    assert summary["rows_by_symbol"] == {}
+    assert summary["rr_reference_count"] == 0
+
+
+def test_summarize_training_dataset_reports_per_symbol_and_role_breakdown():
+    df1 = bullish_trend_df(n=150, base=100.0)
+    df2 = bullish_trend_df(n=150, base=50.0)
+    dataset = build_training_dataset([("A", "1d", df1), ("B", "1d", df2)], _BUILDERS, _CONFIG)
+    assert not dataset.empty
+
+    summary = summarize_training_dataset(dataset)
+
+    assert summary["rows"] == len(dataset)
+    assert set(summary["rows_by_symbol"]) <= {"A", "B"}
+    assert sum(summary["rows_by_symbol"].values()) == len(dataset)
+    assert 0.0 <= summary["hold_positive_rate"] <= 1.0
+    assert 0.0 <= summary["break_positive_rate"] <= 1.0
+    # is_support 的 zero rate 反映「壓力方向」觸碰的比例，也算進特徵缺值/為 0 的診斷
+    assert "is_support" in summary["feature_zero_rate"]
+    assert "touch_count" in summary["feature_zero_rate"]

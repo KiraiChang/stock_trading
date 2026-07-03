@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 import pandas as pd
 
-from .dataset import DatasetConfig, build_training_dataset, load_ohlcv_csv
+from .dataset import DatasetConfig, build_training_dataset, load_ohlcv_csv, summarize_training_dataset
 from .model import save_model, train_model
 from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder
 
@@ -72,6 +72,8 @@ def run_training(
     model_type: str = "gradient_boosting",
     holdout_after: Optional[str] = None,
     output: Optional[str] = None,
+    split_method: str = "time",
+    calibration_method: Optional[str] = "sigmoid",
 ) -> dict[str, Any]:
     """組裝訓練資料、訓練模型、存檔，回傳可直接序列化成 JSON 的結果摘要。
     symbols/csv_sources 至少要有一個非空；資料集為空或沒有來源時拋
@@ -95,7 +97,10 @@ def run_training(
     if dataset.empty:
         raise ValueError("資料集為空，無法訓練（來源股票可能歷史資料太少，或都沒有偵測到 zone 觸碰事件）")
 
-    bundle = train_model(dataset, model_type=model_type)
+    dataset_summary = summarize_training_dataset(dataset)
+    bundle = train_model(
+        dataset, model_type=model_type, split_method=split_method, calibration_method=calibration_method
+    )
 
     resolved_output = output
     if resolved_output is None:
@@ -108,10 +113,12 @@ def run_training(
         "rows": len(dataset),
         "sources": len(sources),
         "model_type": model_type,
+        "split_method": bundle.split_method,
         "metrics": bundle.metrics,
         "model_path": resolved_output,
         "trained_at": bundle.trained_at,
         "version": bundle.version,
+        "dataset_summary": dataset_summary,
     }
 
 
@@ -126,6 +133,14 @@ def main() -> None:
     )
     parser.add_argument("--output", default=None, help="預設讀取 config.SR_SCORING_MODEL_PATH")
     parser.add_argument("--holdout-after", default=None, help="ISO 日期，訓練只使用此日期之前的資料")
+    parser.add_argument(
+        "--split-method", default="time", choices=["time", "random"],
+        help="time（預設，依 touch_time 逐股票切分，避免用未來資料驗證過去）或 random（舊行為，保留供比較）",
+    )
+    parser.add_argument(
+        "--calibration-method", default="sigmoid", choices=["sigmoid", "isotonic", "none"],
+        help="機率校準方式，資料太少時會自動降級為不校準",
+    )
     args = parser.parse_args()
 
     try:
@@ -137,14 +152,17 @@ def main() -> None:
             model_type=args.model_type,
             holdout_after=args.holdout_after,
             output=args.output,
+            split_method=args.split_method,
+            calibration_method=None if args.calibration_method == "none" else args.calibration_method,
         )
     except ValueError as exc:
         print(f"[error] {exc}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[info] 訓練資料集：{result['rows']} 筆 touch 事件（來自 {result['sources']} 個來源）")
+    print(f"[info] 訓練資料集：{result['rows']} 筆 touch 事件（來自 {result['sources']} 個來源，split_method={result['split_method']}）")
     print(json.dumps(result["metrics"], indent=2, ensure_ascii=False))
     print(f"[info] 模型已儲存：{result['model_path']}")
+    print(f"[info] 資料集摘要：{json.dumps(result['dataset_summary'], indent=2, ensure_ascii=False)}")
 
 
 if __name__ == "__main__":

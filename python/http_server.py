@@ -207,7 +207,7 @@ async def sr_scoring_model_status():
         return {
             "exists": False, "version": None, "trained_at": None,
             "model_path": config.SR_SCORING_MODEL_PATH, "split_method": None,
-            "metrics": None, "feature_names": None,
+            "metrics": None, "feature_names": None, "config_hash": None, "training_config": None,
         }
 
     return {
@@ -218,6 +218,8 @@ async def sr_scoring_model_status():
         "split_method": bundle.split_method,
         "metrics": bundle.metrics,
         "feature_names": bundle.feature_names,
+        "config_hash": bundle.config_hash,
+        "training_config": bundle.training_config,
     }
 
 

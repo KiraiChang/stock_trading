@@ -48,6 +48,7 @@ func testAnalysis() *SRZoneAnalysis {
 		GlobalConfidence:      NullFloat64{sql.NullFloat64{Float64: 0.6, Valid: true}},
 		GlobalRiskRewardRatio: NullFloat64{sql.NullFloat64{Float64: 0.9, Valid: true}},
 		ModelVersion:          "v1",
+		ModelConfigHash:       "abc123def456",
 	}
 }
 
@@ -73,6 +74,8 @@ func testZones() []SRZone {
 			TradingScore:          78.5,
 			TradingScoreBreakdown: RawJSON(`{"expected_value":30,"risk_reward":15,"trend":10,"volume":15,"confidence":8.5}`),
 			TradingRecommendation: "BUY",
+			OverlapGroup:          NullInt64{sql.NullInt64{Int64: 0, Valid: true}},
+			ConfluenceCount:       2,
 		},
 		{
 			// AT_ZONE：confidence 仍有值，但 expected_value/risk_reward_ratio/volume_confirmation 應為 NULL
@@ -86,6 +89,7 @@ func testZones() []SRZone {
 			TradingScore:          45.0,
 			TradingScoreBreakdown: RawJSON(`{"expected_value":20,"risk_reward":10,"trend":7.5,"volume":7.5,"confidence":4}`),
 			TradingRecommendation: "NEUTRAL",
+			ConfluenceCount:       1, // 沒有 OverlapGroup（獨立 zone，未跟其他方法重疊）
 		},
 	}
 }
@@ -108,6 +112,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if saved.Symbol != "2330" || saved.Timeframe != "1d" || saved.ModelVersion != "v1" {
 		t.Fatalf("unexpected saved analysis: %+v", saved)
+	}
+	if saved.ModelConfigHash != "abc123def456" {
+		t.Fatalf("expected model_config_hash to round-trip, got %q", saved.ModelConfigHash)
 	}
 	if saved.GlobalTrend != 0.03 || saved.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected saved global trend/volatility: %+v", saved)
@@ -177,9 +184,15 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	if support.TradingRecommendation != "BUY" {
 		t.Fatalf("expected SUPPORT trading_recommendation=BUY, got %v", support.TradingRecommendation)
 	}
+	if !support.OverlapGroup.Valid || support.OverlapGroup.Int64 != 0 || support.ConfluenceCount != 2 {
+		t.Fatalf("expected SUPPORT overlap_group=0/confluence_count=2, got %+v/%v", support.OverlapGroup, support.ConfluenceCount)
+	}
 
 	if atZone.Confidence != 0.4 {
 		t.Fatalf("expected AT_ZONE confidence=0.4, got %v", atZone.Confidence)
+	}
+	if atZone.OverlapGroup.Valid || atZone.ConfluenceCount != 1 {
+		t.Fatalf("expected AT_ZONE overlap_group=NULL/confluence_count=1, got %+v/%v", atZone.OverlapGroup, atZone.ConfluenceCount)
 	}
 	if atZone.ExpectedValue.Valid || atZone.RiskRewardRatio.Valid || atZone.VolumeConfirmation.Valid {
 		t.Fatalf(

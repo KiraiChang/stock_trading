@@ -12,12 +12,16 @@ from ..scoring import (
     _compute_global_metrics,
     _confidence,
     _derive_score,
+    OVERLAP_GROUP_THRESHOLD,
+    _group_overlapping_zones,
     _net_score_label,
+    _zone_overlap_ratio,
     _normalize_probabilities,
     _recent_validation,
     _sample_factor,
     _sort_zone_scores,
     _stability_factor,
+    _touch_confidence,
     _trading_recommendation,
     _trading_score,
     _trading_score_breakdown,
@@ -26,7 +30,7 @@ from ..scoring import (
     score_symbol,
     score_zone,
 )
-from ..types import Zone, ZoneMethod
+from ..types import ApproachDirection, Zone, ZoneMethod, ZoneTouch, ZoneType
 from .conftest import bullish_trend_df
 from .test_model import synthetic_dataset
 
@@ -86,6 +90,22 @@ def test_score_zone_role_reflects_current_price(bundle):
     )
 
 
+def test_score_zone_touch_count_splits_by_approach_direction(bundle):
+    """touch_count 維持兩個方向加總（zone 整體活躍度），support_touch_count/
+    resistance_touch_count 分開統計，兩者相加要等於 touch_count——確保拆分
+    後的欄位跟舊欄位語意一致，不會不小心漏掉或重複計算某個方向的觸碰。"""
+    df = bullish_trend_df(n=80)
+    low = float(df["close"].min())
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    current_price = float(df["close"].iloc[-1])
+
+    score = score_zone(df, zone, current_price, bundle, _trend(df))
+
+    assert score.support_touch_count >= 0
+    assert score.resistance_touch_count >= 0
+    assert score.touch_count == score.support_touch_count + score.resistance_touch_count
+
+
 def test_score_zone_at_zone_has_no_probability(bundle):
     df = bullish_trend_df(n=80)
     current_price = float(df["close"].iloc[-1])
@@ -131,6 +151,7 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert result["model_version"] == bundle.version
     assert result["model_trained_at"] == bundle.trained_at
     assert result["model_feature_names"] == bundle.feature_names
+    assert result["model_config_hash"] == bundle.config_hash
     assert isinstance(result["zones"], list)
     for z in result["zones"]:
         assert 0.0 <= z["support_score"] <= 1.0
@@ -147,6 +168,10 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
             "expected_value", "risk_reward", "trend", "volume", "confidence",
         }
         assert z["trading_score"] == pytest.approx(sum(z["trading_score_breakdown"].values()))
+        assert z["support_touch_count"] + z["resistance_touch_count"] == z["touch_count"]
+        assert z["confluence_count"] >= 1
+        if z["confluence_count"] == 1:
+            assert z["overlap_group"] is None
         # global_trend/global_volatility 不應該在每個 zone 裡重複出現
         assert "global_trend" not in z
         assert "global_volatility" not in z
@@ -204,6 +229,47 @@ def test_confidence_combines_three_factors():
     )
     assert well_validated > never_touched
     assert well_validated > 0.7
+
+
+def _touch(idx: int, direction: ApproachDirection) -> ZoneTouch:
+    zone = Zone(price_low=95.0, price_high=100.0, method=ZoneMethod.ATR, center_price=97.5, formed_at_index=0)
+    role = ZoneType.SUPPORT if direction == ApproachDirection.FROM_ABOVE else ZoneType.RESISTANCE
+    return ZoneTouch(zone=zone, touch_index=idx, touch_time=None, touch_price=97.5, approach_direction=direction, role=role)
+
+
+def test_touch_confidence_high_when_direction_specific_history_is_consistent():
+    touches = [_touch(i, ApproachDirection.FROM_ABOVE) for i in range(10)]
+    classified = [(t, 1, 0, 0.02) for t in touches]  # 全部守住（hold_label=1）
+
+    confidence = _touch_confidence(touches, classified, as_of_index=15)
+
+    assert confidence > 0.7
+
+
+def test_touch_confidence_differs_from_mixed_direction_calculation():
+    """role=SUPPORT 的 confidence 只該用 support 方向的觸碰計算——這是拆分
+    touch_count 語意前的行為缺陷：以前不分方向，直接把兩個方向的樣本/歷史
+    結果混在一起，導致「作為支撐」的可信度被「作為壓力」的表現拖累或拉抬。
+    這裡驗證兩種算法確實會得到不同結果，防止之後不小心又改回混合計算。"""
+    support_touches = [_touch(i, ApproachDirection.FROM_ABOVE) for i in range(10)]
+    support_classified = [(t, 1, 0, 0.02) for t in support_touches]  # 全部守住
+
+    resistance_touches = [_touch(20 + i, ApproachDirection.FROM_BELOW) for i in range(4)]
+    # 4 次裡 3 次跌破、1 次守住：跟 support 方向的表現不一致
+    resistance_classified = [
+        (resistance_touches[0], 1, 0, 0.01),
+        (resistance_touches[1], 0, 1, -0.02),
+        (resistance_touches[2], 0, 1, -0.02),
+        (resistance_touches[3], 0, 1, -0.02),
+    ]
+
+    as_of_index = 25
+    support_only = _touch_confidence(support_touches, support_classified, as_of_index)
+    mixed = _touch_confidence(
+        support_touches + resistance_touches, support_classified + resistance_classified, as_of_index
+    )
+
+    assert support_only != pytest.approx(mixed)
 
 
 def test_normalize_probabilities_rescales_when_sum_exceeds_one():
@@ -298,6 +364,113 @@ def test_assign_tiers_preserves_input_order():
     tiers = _assign_tiers(widths)
     assert tiers[1] == "TIER_1_MAIN_STRUCTURE"  # 33.0 最寬
     assert tiers[0] == "TIER_3_SHORT_TERM"  # 2.0 最窄
+
+
+# ── 十六：跨方法重疊分群（confluence）────────────────────────────────
+
+
+def _zone(low: float, high: float, method: ZoneMethod) -> Zone:
+    return Zone(price_low=low, price_high=high, method=method, center_price=(low + high) / 2, formed_at_index=0)
+
+
+def test_group_overlapping_zones_groups_cross_method_overlap():
+    zones = [
+        _zone(100.0, 110.0, ZoneMethod.ATR),           # 0：跟 1 高度重疊（跨方法）
+        _zone(101.0, 109.0, ZoneMethod.VOLUME_PROFILE),  # 1
+        _zone(200.0, 210.0, ZoneMethod.ATR),           # 2：獨立，沒有重疊
+    ]
+
+    groups, confluence = _group_overlapping_zones(zones)
+
+    assert groups[0] == groups[1]
+    assert groups[0] is not None
+    assert confluence[0] == 2 and confluence[1] == 2
+    assert groups[2] is None
+    assert confluence[2] == 1
+
+
+def test_group_overlapping_zones_ignores_same_method_overlap():
+    """同一種方法建出來的 zone 已經在各自 builder 內做過合併，
+    _group_overlapping_zones 只處理跨方法重疊，同方法重疊不分群。"""
+    zones = [
+        _zone(100.0, 110.0, ZoneMethod.ATR),
+        _zone(101.0, 109.0, ZoneMethod.ATR),
+    ]
+
+    groups, confluence = _group_overlapping_zones(zones)
+
+    assert groups == [None, None]
+    assert confluence == [1, 1]
+
+
+def test_group_overlapping_zones_below_threshold_not_grouped():
+    # overlap 只有 20%（相對於較窄 zone 寬度），低於 0.6 門檻
+    zones = [
+        _zone(100.0, 110.0, ZoneMethod.ATR),
+        _zone(108.0, 118.0, ZoneMethod.VOLUME_PROFILE),
+    ]
+
+    groups, confluence = _group_overlapping_zones(zones)
+
+    assert groups == [None, None]
+    assert confluence == [1, 1]
+
+
+def test_group_overlapping_zones_transitively_connected_zones_share_one_group():
+    # A-B overlap ratio 0.7、B-C overlap ratio 0.7，A-C 本身只有 0.4（不到
+    # 門檻），但透過 B 仍應被歸為同一群組（union-find 的傳遞性）
+    zones = [
+        _zone(100.0, 110.0, ZoneMethod.ATR),             # A
+        _zone(103.0, 113.0, ZoneMethod.VOLUME_PROFILE),  # B：跟 A、C 都重疊
+        _zone(106.0, 116.0, ZoneMethod.ATR),             # C
+    ]
+    assert _zone_overlap_ratio(zones[0], zones[2]) < OVERLAP_GROUP_THRESHOLD  # 前提：A-C 本身不到門檻
+
+    groups, confluence = _group_overlapping_zones(zones)
+
+    assert groups[0] == groups[1] == groups[2]
+    assert confluence == [3, 3, 3]
+
+
+def test_score_symbol_confluence_reflects_cross_method_overlap(monkeypatch, bundle):
+    """整合測試：直接建構兩個跨方法重疊的 zone（monkeypatch 掉 builder），
+    確認 score_symbol() 輸出的 confluence_count/overlap_group 正確反映。"""
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+    low = float(df["close"].min())
+
+    class _FixedBuilder:
+        def __init__(self, method: ZoneMethod, low_offset: float, high_offset: float):
+            self._method = method
+            self._low = low + low_offset
+            self._high = low + high_offset
+
+        @property
+        def min_bars(self) -> int:
+            return 1
+
+        def build(self, df):
+            return [Zone(price_low=self._low, price_high=self._high, method=self._method, center_price=(self._low + self._high) / 2, formed_at_index=0)]
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+
+    overlapping_builders = [
+        _FixedBuilder(ZoneMethod.ATR, 0.0, 2.0),
+        _FixedBuilder(ZoneMethod.VOLUME_PROFILE, 0.2, 1.8),
+    ]
+    result = score_symbol("2330", "1d", builders=overlapping_builders)
+    assert len(result["zones"]) == 2
+    assert result["zones"][0]["confluence_count"] == 2
+    assert result["zones"][1]["confluence_count"] == 2
+    assert result["zones"][0]["overlap_group"] == result["zones"][1]["overlap_group"]
+    assert result["zones"][0]["overlap_group"] is not None
 
 
 # ── 十三、Trading Score（可拆解）─────────────────────────────────────

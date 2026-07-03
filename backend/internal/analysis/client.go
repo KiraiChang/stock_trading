@@ -123,6 +123,13 @@ func nullString(p *string) store.NullString {
 	return store.NullString{NullString: sql.NullString{String: *p, Valid: true}}
 }
 
+func nullInt(p *int) store.NullInt64 {
+	if p == nil {
+		return store.NullInt64{}
+	}
+	return store.NullInt64{NullInt64: sql.NullInt64{Int64: int64(*p), Valid: true}}
+}
+
 // Client 呼叫 Python HTTP service 的 /analyze 端點
 type Client struct {
 	baseURL string
@@ -210,6 +217,8 @@ type ZoneScore struct {
 	RelativeVolume        *float64           `json:"relative_volume"`
 	VolumeConfirmation    *string            `json:"volume_confirmation"`
 	TouchCount            int                `json:"touch_count"`
+	SupportTouchCount     int                `json:"support_touch_count"`
+	ResistanceTouchCount  int                `json:"resistance_touch_count"`
 	RejectCount           *int               `json:"reject_count"`
 	BreakCount            *int               `json:"break_count"`
 	ZoneMomentum          float64            `json:"zone_momentum"`
@@ -218,6 +227,12 @@ type ZoneScore struct {
 	TradingScore          float64            `json:"trading_score"`
 	TradingScoreBreakdown map[string]float64 `json:"trading_score_breakdown"`
 	TradingRecommendation string             `json:"trading_recommendation"`
+	// OverlapGroup/ConfluenceCount：跨方法（ATR/volume_profile）重疊的 zone
+	// 分群（見 Python scoring.py::_group_overlapping_zones）。不合併/刪除
+	// 任何 zone，只標記供 UI 顯示「多方法共振」。ConfluenceCount 恆 >= 1；
+	// OverlapGroup 只有 ConfluenceCount > 1 時才有值。
+	OverlapGroup    *int `json:"overlap_group"`
+	ConfluenceCount int  `json:"confluence_count"`
 }
 
 // ZoneScoreResult 對應 Python score_symbol() 的回傳格式。GlobalTrend/
@@ -237,9 +252,15 @@ type ZoneScoreResult struct {
 	// ModelVersion/ModelTrainedAt/ModelFeatureNames 來自產生這次結果的
 	// ModelBundle（見 model.py::ModelBundle），供追蹤「這筆分析是哪個模型
 	// 版本算出來的」。ModelFeatureNames 目前只用於 API 診斷，不寫入 DB。
+	// ModelConfigHash 是訓練這個模型時的 DatasetConfig/zone builder 參數/
+	// model_type/calibration_method 快照的短 hash（見 model.py::
+	// compute_config_hash），比 ModelVersion 更細——同一個 ModelVersion 底下
+	// 換過幾次訓練參數都可能有不同的 ModelConfigHash，讓「這筆分析用哪組
+	// 訓練設定產生」可以事後追溯。
 	ModelVersion      string      `json:"model_version"`
 	ModelTrainedAt    string      `json:"model_trained_at"`
 	ModelFeatureNames []string    `json:"model_feature_names"`
+	ModelConfigHash   string      `json:"model_config_hash"`
 	Zones             []ZoneScore `json:"zones"`
 }
 
@@ -269,6 +290,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		GlobalConfidence:      nullFloat(r.GlobalConfidence),
 		GlobalRiskRewardRatio: nullFloat(r.GlobalRiskRewardRatio),
 		ModelVersion:          modelVersion,
+		ModelConfigHash:       r.ModelConfigHash,
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))
@@ -307,6 +329,8 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			RelativeVolume:        nullFloat(z.RelativeVolume),
 			VolumeConfirmation:    nullString(z.VolumeConfirmation),
 			TouchCount:            z.TouchCount,
+			SupportTouchCount:     z.SupportTouchCount,
+			ResistanceTouchCount:  z.ResistanceTouchCount,
 			RejectCount:           rejectCount,
 			BreakCount:            breakCount,
 			ZoneMomentum:          z.ZoneMomentum,
@@ -315,6 +339,8 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			TradingScore:          z.TradingScore,
 			TradingScoreBreakdown: store.RawJSON(breakdownJSON),
 			TradingRecommendation: z.TradingRecommendation,
+			OverlapGroup:          nullInt(z.OverlapGroup),
+			ConfluenceCount:       z.ConfluenceCount,
 			Status:                "PENDING",
 		})
 	}
@@ -448,13 +474,15 @@ func (c *Client) TrainModel(ctx context.Context, symbols []string, timeframe str
 // POST /sr-zones 之前，先知道模型準備好了沒（見 sr-zone-scoring.md「模型
 // 可追蹤性」）。Exists=false 時其餘欄位皆為 zero value。
 type ModelStatus struct {
-	Exists       bool                          `json:"exists"`
-	Version      *string                       `json:"version"`
-	TrainedAt    *string                       `json:"trained_at"`
-	ModelPath    *string                       `json:"model_path"`
-	SplitMethod  *string                       `json:"split_method"`
-	Metrics      map[string]map[string]float64 `json:"metrics"`
-	FeatureNames []string                      `json:"feature_names"`
+	Exists         bool                          `json:"exists"`
+	Version        *string                       `json:"version"`
+	TrainedAt      *string                       `json:"trained_at"`
+	ModelPath      *string                       `json:"model_path"`
+	SplitMethod    *string                       `json:"split_method"`
+	Metrics        map[string]map[string]float64 `json:"metrics"`
+	FeatureNames   []string                      `json:"feature_names"`
+	ConfigHash     *string                       `json:"config_hash"`
+	TrainingConfig map[string]interface{}        `json:"training_config"`
 }
 
 // GetModelStatus 呼叫 Python GET /sr-scoring/model-status 端點。用一般的

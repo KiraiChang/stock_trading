@@ -54,6 +54,8 @@ export interface SRZone {
   volume_confirmation: VolumeConfirmation | null
 
   touch_count: number
+  support_touch_count: number
+  resistance_touch_count: number
   reject_count: number
   break_count: number
 
@@ -67,6 +69,13 @@ export interface SRZone {
   trading_score: number
   trading_score_breakdown: TradingScoreBreakdown
   trading_recommendation: TradingRecommendation
+
+  // 跨方法（ATR/volume_profile）重疊分群：overlap_group 相同的 zone 代表
+  // 不同方法都指向同一個價位帶（「多方法共振」），不會合併或刪除任何
+  // zone。confluence_count 恆 >= 1；overlap_group 只有 confluence_count > 1
+  // 時才有值。
+  overlap_group: number | null
+  confluence_count: number
 
   status: 'PENDING' | 'HELD_SO_FAR' | 'BROKEN'
   broken_at?: string | null
@@ -91,6 +100,11 @@ export interface SRZoneAnalysis {
   global_confidence: number | null
   global_risk_reward_ratio: number | null
   model_version: string
+  // 訓練這個模型時的 DatasetConfig/zone builder 參數/model_type/
+  // calibration_method 快照的短 hash——比 model_version 更細，同一個
+  // model_version 底下換過幾次訓練參數都可能有不同的值，重訓改參數後舊
+  // 分析可以靠這個值被辨識出來。
+  model_config_hash: string
   created_at: string
 }
 
@@ -213,6 +227,11 @@ export interface ModelStatus {
   split_method: string | null
   metrics: Record<string, Record<string, number>> | null
   feature_names: string[] | null
+  // config_hash：訓練設定（DatasetConfig/zone builder 參數/model_type/
+  // calibration_method）快照的短 hash，跟分析快照存的 model_config_hash
+  // 是同一個值，重訓改參數後舊分析可以靠這個值被辨識出來。
+  config_hash: string | null
+  training_config: Record<string, unknown> | null
 }
 
 export async function getModelStatus(): Promise<ModelStatus> {

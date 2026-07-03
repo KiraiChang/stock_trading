@@ -6,6 +6,7 @@ import types
 import numpy as np
 import pytest
 
+from ..model import load_model
 from ..train import run_training
 from .conftest import make_df
 
@@ -73,9 +74,16 @@ def test_run_training_returns_summary_and_saves_model(monkeypatch, tmp_path):
     assert result["split_method"] == "time"
     assert result["dataset_summary"]["rows"] == result["rows"]
     assert "2330" in result["dataset_summary"]["rows_by_symbol"]
+    assert len(result["config_hash"]) == 12
 
     import os
     assert os.path.exists(output)
+
+    loaded = load_model(output)
+    assert loaded.config_hash == result["config_hash"]
+    assert "dataset_config" in loaded.training_config
+    assert "zone_builders" in loaded.training_config
+    assert set(loaded.training_config["zone_builders"]) == {"ATRZoneBuilder", "VolumeProfileZoneBuilder"}
 
 
 def test_run_training_passes_limit_to_fetch_candles(monkeypatch, tmp_path):

@@ -179,7 +179,8 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 
 SR Zone Scoring 分析快照（機構級版本，見
 [sr-zone-scoring.md](./sr-zone-scoring.md)），Go 呼叫 Python `POST /sr-zones`
-計算後寫入。跟 `stock_analyses` 不同的地方：這裡沒有驗證/verify 機制。
+計算後寫入。驗證機制跟 `stock_analyses` 一樣是純 Go（`SRZoneVerifier`，見
+sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一價位。
 
 | 欄位 | 說明 |
 |------|------|
@@ -192,6 +193,7 @@ SR Zone Scoring 分析快照（機構級版本，見
 | global_confidence | 所有 zone confidence 的簡單平均（可為 `NULL`） |
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR（可為 `NULL`） |
 | model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v2"`）；Python 端萬一沒回傳則寫 `"unknown"` |
+| model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
 
 **Index：** `INDEX(symbol, created_at DESC)`。
 
@@ -217,7 +219,9 @@ SR Zone Scoring 分析快照（機構級版本，見
 | expected_gain / expected_loss / expected_value | 角色解析後的平均反彈/跌破報酬、加權期望值 |
 | risk_reward_ratio / reward_risk_percentile | `|expected_gain/expected_loss|`；此比值在訓練資料歷史分佈中的百分位 |
 | relative_volume / volume_confirmation | 角色解析後的相對量能；`CONFIRMED`/`WEAK`/`NEUTRAL`/`FAILED` |
-| touch_count / reject_count / break_count | 觸碰/拒絕/突破次數（聚合值，不分方向） |
+| touch_count / reject_count / break_count | 觸碰/拒絕/突破次數（`touch_count` 是兩個方向加總；`reject_count`/`break_count` 是角色解析後方向的次數） |
+| support_touch_count / resistance_touch_count | `touch_count` 依方向拆分（兩者相加等於 `touch_count`），讓「作為支撐」跟「作為壓力」各自的歷史樣本數可以被診斷；confidence 依角色只用其中一個方向計算，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「六」 |
+| overlap_group / confluence_count | 跨方法（ATR/volume_profile）重疊分群：不同方法都指向同一價位帶的 zone 有相同的 `overlap_group`；`confluence_count` 是群組內 zone 數（恆 >= 1，單獨的 zone 沒有群組，`overlap_group` 為 `NULL`）。不合併/刪除任何 zone，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十七」 |
 | zone_momentum / zone_direction | 這個 zone 自己的歷史觸碰動能（逐 zone 不同，非股票層級量）；`UP`/`DOWN`/`FLAT` |
 | recent_validation | `VALIDATED_RECENTLY` / `PENDING_VALIDATION` / `NOT_TESTED_RECENTLY` / `EXPIRED` |
 | trading_score | 可拆解的綜合交易分數（0~100） = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%) |

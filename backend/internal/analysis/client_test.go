@@ -75,6 +75,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	volConf := "CONFIRMED"
 	rejectCount := 3
 	breakCount := 0
+	overlapGroup := 0
 	globalEV := 0.004
 	globalConfidence := 0.6
 	globalRR := 0.9
@@ -100,6 +101,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			CurrentPrice: 600.0, GlobalTrend: 0.03, GlobalVolatility: 0.02,
 			GlobalExpectedValue: &globalEV, GlobalConfidence: &globalConfidence, GlobalRiskRewardRatio: &globalRR,
 			ModelVersion: "v2", ModelTrainedAt: "2026-06-30T09:00:00+08:00", ModelFeatureNames: []string{"touch_count", "is_support"},
+			ModelConfigHash: "abc123def456",
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -110,13 +112,14 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					ExpectedGain: &gain, ExpectedLoss: &loss, ExpectedValue: &ev,
 					RiskRewardRatio: &rr, RewardRiskPercentile: &percentile,
 					RelativeVolume: &relVol, VolumeConfirmation: &volConf,
-					TouchCount: 4, RejectCount: &rejectCount, BreakCount: &breakCount,
+					TouchCount: 4, SupportTouchCount: 3, ResistanceTouchCount: 1, RejectCount: &rejectCount, BreakCount: &breakCount,
 					ZoneMomentum: -0.02, ZoneDirection: "DOWN",
 					RecentValidation: "VALIDATED_RECENTLY",
 					TradingScore:     78.5, TradingScoreBreakdown: map[string]float64{
 						"expected_value": 30.0, "risk_reward": 15.0, "trend": 10.0, "volume": 15.0, "confidence": 8.5,
 					},
 					TradingRecommendation: "BUY",
+					OverlapGroup:          &overlapGroup, ConfluenceCount: 2,
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
@@ -129,6 +132,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 						"expected_value": 20.0, "risk_reward": 10.0, "trend": 7.5, "volume": 7.5, "confidence": 4.0,
 					},
 					TradingRecommendation: "NEUTRAL",
+					ConfluenceCount:       1,
 				},
 			},
 		})
@@ -146,6 +150,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if result.ModelVersion != "v2" || result.ModelTrainedAt != "2026-06-30T09:00:00+08:00" || len(result.ModelFeatureNames) != 2 {
 		t.Fatalf("unexpected model metadata: %+v", result)
 	}
+	if result.ModelConfigHash != "abc123def456" {
+		t.Fatalf("expected model_config_hash to parse, got %q", result.ModelConfigHash)
+	}
 
 	a, zones, err := result.ToStore()
 	if err != nil {
@@ -153,6 +160,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if a.ModelVersion != "v2" {
 		t.Fatalf("expected model_version=v2, got %q", a.ModelVersion)
+	}
+	if a.ModelConfigHash != "abc123def456" {
+		t.Fatalf("expected model_config_hash to carry through ToStore, got %q", a.ModelConfigHash)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
@@ -173,6 +183,12 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	first := zones[0]
 	if first.Method != "atr" || first.Role != "SUPPORT" || first.TouchCount != 4 {
 		t.Fatalf("unexpected first zone: %+v", first)
+	}
+	if first.SupportTouchCount != 3 || first.ResistanceTouchCount != 1 {
+		t.Fatalf("unexpected direction-specific touch counts: %+v", first)
+	}
+	if !first.OverlapGroup.Valid || first.OverlapGroup.Int64 != 0 || first.ConfluenceCount != 2 {
+		t.Fatalf("unexpected overlap group/confluence count: %+v", first)
 	}
 	if first.Tier != "TIER_1_MAIN_STRUCTURE" || first.TierLabel != "主結構" {
 		t.Fatalf("unexpected first zone tier: %+v", first)

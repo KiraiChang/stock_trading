@@ -27,9 +27,11 @@ from typing import Any, Optional
 
 import pandas as pd
 
+from dataclasses import asdict
+
 from .dataset import DatasetConfig, build_training_dataset, load_ohlcv_csv, summarize_training_dataset
 from .model import save_model, train_model
-from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder
+from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 
 DEFAULT_TRAIN_LIMIT = 1500
 
@@ -64,6 +66,14 @@ def _load_csv_sources(items: list[str], timeframe: str) -> list[tuple[str, str, 
     return sources
 
 
+def _builder_config(builder: ZoneBuilder) -> dict[str, Any]:
+    """zone builder 的建構參數快照（lookback/atr_width_multiplier/... 等），
+    供 training_config 記錄「這次訓練用哪組 zone 偵測參數」。builder 的
+    __init__ 直接把每個參數存成同名 instance attribute（見 zone_builder.py），
+    所以 vars(builder) 就是完整的建構參數，不需要另外維護一份欄位清單。"""
+    return dict(vars(builder))
+
+
 def run_training(
     symbols: Optional[list[str]] = None,
     csv_sources: Optional[list[str]] = None,
@@ -91,15 +101,23 @@ def run_training(
         cutoff = pd.Timestamp(holdout_after, tz="UTC")
         sources = [(sym, tf, df[df.index < cutoff]) for sym, tf, df in sources]
 
-    dataset = build_training_dataset(
-        sources, [ATRZoneBuilder(), VolumeProfileZoneBuilder()], DatasetConfig()
-    )
+    zone_builders: list[ZoneBuilder] = [ATRZoneBuilder(), VolumeProfileZoneBuilder()]
+    dataset_config = DatasetConfig()
+    dataset = build_training_dataset(sources, zone_builders, dataset_config)
     if dataset.empty:
         raise ValueError("資料集為空，無法訓練（來源股票可能歷史資料太少，或都沒有偵測到 zone 觸碰事件）")
 
     dataset_summary = summarize_training_dataset(dataset)
+    # training_config：這次訓練實際用的 DatasetConfig + zone builder 參數快照，
+    # 存進 ModelBundle 讓「這筆分析是用哪組設定產生的」可以事後追溯（見
+    # model.py::compute_config_hash、docs/sr-zone-scoring.md「模型可追蹤性」）。
+    training_config = {
+        "dataset_config": asdict(dataset_config),
+        "zone_builders": {type(b).__name__: _builder_config(b) for b in zone_builders},
+    }
     bundle = train_model(
-        dataset, model_type=model_type, split_method=split_method, calibration_method=calibration_method
+        dataset, model_type=model_type, split_method=split_method, calibration_method=calibration_method,
+        training_config=training_config,
     )
 
     resolved_output = output
@@ -118,6 +136,7 @@ def run_training(
         "model_path": resolved_output,
         "trained_at": bundle.trained_at,
         "version": bundle.version,
+        "config_hash": bundle.config_hash,
         "dataset_summary": dataset_summary,
     }
 

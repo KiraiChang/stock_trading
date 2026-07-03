@@ -466,6 +466,9 @@
           <span class="text-white">{modelStatus.version}</span>
           <span class="text-muted">訓練於 {formatDateTime(modelStatus.trained_at)}</span>
           <span class="text-muted">hold AUC {modelStatusMetric('hold', 'auc')} / break AUC {modelStatusMetric('break', 'auc')}</span>
+          {#if modelStatus.config_hash}
+            <span class="text-muted font-mono" title="訓練設定快照的短 hash，重訓改參數後會不一樣">設定 {modelStatus.config_hash}</span>
+          {/if}
         {:else}
           <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-yellow-900/40 text-yellow-400">模型尚未訓練</span>
           <span class="text-muted">請先在下方「訓練/更新機率模型」區塊訓練，才能開始分析</span>
@@ -693,6 +696,10 @@
                 <p class="text-muted mb-1">Global RR</p>
                 <p class="font-mono text-white">{fmtRatio(current.global_risk_reward_ratio)}</p>
               </div>
+              <div>
+                <p class="text-muted mb-1">模型版本 / 設定 Hash</p>
+                <p class="font-mono text-white">{current.model_version}{current.model_config_hash ? ` / ${current.model_config_hash}` : ''}</p>
+              </div>
             </div>
           {/if}
         </div>
@@ -718,6 +725,12 @@
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
                             {statusLabel[z.status] ?? z.status}
                           </span>
+                          {#if z.confluence_count > 1}
+                            <span
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-900/40 text-indigo-300"
+                              title="不同偵測方法（ATR/成交量分布）都指向這個價位帶，多一分交叉驗證"
+                            >多方法共振 ×{z.confluence_count}</span>
+                          {/if}
                         </div>
                         <p class="text-white text-sm">{noviceRecommendationText[z.trading_recommendation] ?? z.trading_recommendation}</p>
                         <p class="text-muted text-xs mt-1">{invalidationText(z)}</p>
@@ -748,6 +761,9 @@
                           <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold {recommendationClass[z.trading_recommendation] ?? ''}">
                             {recommendationText[z.trading_recommendation] ?? z.trading_recommendation}
                           </span>
+                          {#if z.overlap_group !== null}
+                            <span class="text-muted text-xs">overlap_group #{z.overlap_group}</span>
+                          {/if}
                         </div>
 
                         <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->
@@ -834,12 +850,13 @@
 
                         <!-- 觸碰統計列 -->
                         <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 text-xs text-muted">
-                          <div><p class="mb-1">觸碰次數</p><p class="text-white">{z.touch_count}</p></div>
+                          <div><p class="mb-1">觸碰次數（支撐/壓力）</p><p class="text-white">{z.touch_count}（{z.support_touch_count}/{z.resistance_touch_count}）</p></div>
                           <div><p class="mb-1">拒絕次數</p><p class="text-white">{z.reject_count}</p></div>
                           <div><p class="mb-1">突破次數</p><p class="text-white">{z.break_count}</p></div>
                           <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
                           <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
                         </div>
+                        <p class="text-[11px] text-muted mt-1">可信度只用目前角色（{noviceRoleText[z.role] ?? z.role}）方向的觸碰樣本計算，不含另一方向</p>
                       </div>
                     {/if}
                   </div>

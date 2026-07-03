@@ -559,6 +559,7 @@ Python 端預設值（250）。
     "global_confidence": 0.61,
     "global_risk_reward_ratio": 0.92,
     "model_version": "v2",
+    "model_config_hash": "a1b2c3d4e5f6",
     "created_at": "2026-07-01T10:00:00+08:00"
   },
   "zones": [
@@ -587,6 +588,8 @@ Python 端預設值（250）。
       "relative_volume": 1.4,
       "volume_confirmation": "CONFIRMED",
       "touch_count": 4,
+      "support_touch_count": 3,
+      "resistance_touch_count": 1,
       "reject_count": 3,
       "break_count": 0,
       "zone_momentum": 0.021,
@@ -595,6 +598,8 @@ Python 端預設值（250）。
       "trading_score": 78.5,
       "trading_score_breakdown": { "expected_value": 30.0, "risk_reward": 15.3, "trend": 10.6, "volume": 15.0, "confidence": 7.2 },
       "trading_recommendation": "BUY",
+      "overlap_group": 0,
+      "confluence_count": 2,
       "status": "PENDING",
       "broken_at": null,
       "broken_price": null
@@ -607,7 +612,12 @@ Python 端預設值（250）。
 `volume_confirmation` 這些「已解析方向」才有意義的欄位一律是 `null`。
 `trading_score_breakdown` 的五個分量加總即為 `trading_score`（見
 sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，同層內依
-`trading_score` 由高到低排序。
+`trading_score` 由高到低排序（`confluence_count` 只當第三順位 tie-
+breaker，不改變主要排序規則）。`confidence` 依角色只用該方向
+（`support_touch_count`/`resistance_touch_count` 其中之一）的樣本計算，見
+sr-zone-scoring.md「六」。`overlap_group`/`confluence_count` 是跨方法重疊
+分群結果，`overlap_group` 只有 `confluence_count > 1` 時才有值，見
+sr-zone-scoring.md「十七」。
 
 ### GET `/sr-zones`
 
@@ -735,13 +745,26 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
   "model_path": "models/sr_scoring_v2.joblib",
   "split_method": "time",
   "metrics": { "hold": { "auc": 0.81, "calibrated": 1.0 }, "break": { "auc": 0.77, "calibrated": 1.0 } },
-  "feature_names": ["touch_count", "rejection_count", "..."]
+  "feature_names": ["touch_count", "rejection_count", "..."],
+  "config_hash": "a1b2c3d4e5f6",
+  "training_config": {
+    "dataset_config": { "forward_bars_support": 5, "threshold_pct_support": 0.03 },
+    "zone_builders": { "ATRZoneBuilder": { "atr_width_multiplier": 1.5 }, "VolumeProfileZoneBuilder": { "num_bins": 24 } },
+    "model_type": "gradient_boosting", "split_method": "time", "calibration_method": "sigmoid"
+  }
 }
 ```
+`config_hash`/`training_config` 見 sr-zone-scoring.md「十六」——`config_hash`
+跟分析快照的 `model_config_hash` 是同一個值，可以用來確認「現在的模型」
+跟「某筆舊分析用的模型」是不是同一組訓練設定。
 
 **Response（模型不存在）：**
 ```json
-{ "exists": false, "version": null, "trained_at": null, "model_path": null, "split_method": null, "metrics": null, "feature_names": null }
+{
+  "exists": false, "version": null, "trained_at": null, "model_path": null,
+  "split_method": null, "metrics": null, "feature_names": null,
+  "config_hash": null, "training_config": null
+}
 ```
 
 ### DELETE `/sr-zones/:id`

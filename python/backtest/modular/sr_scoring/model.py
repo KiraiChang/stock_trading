@@ -12,6 +12,8 @@ internal/analysis/client.go 對「python service url 未設定」的處理風格
 from __future__ import annotations
 
 import bisect
+import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -75,6 +77,15 @@ class ModelBundle:
     # 純量預設值會存成 class 屬性，用 joblib 讀取這個欄位加進來之前存的舊
     # 模型檔時仍能正常取得預設值，不需要為此再拉一個 MODEL_VERSION。
     split_method: str = "time"
+    # training_config：訓練這個模型時用的 DatasetConfig/zone builder 參數/
+    # model_type/calibration_method 快照（見 train.py::run_training 組裝），
+    # 讓「這筆分析是用哪組訓練設定產生的」可以事後追溯，不用去猜或翻 git
+    # log。config_hash 是這個 dict 的短 hash（sha256 前 12 碼），/sr-zones
+    # 回傳的 model_config_hash 跟分析快照存的是同一個值，重訓改參數後舊分析
+    # 可以靠這個值被辨識出來（見 docs/sr-zone-scoring.md「模型可追蹤性」）。
+    # 預設值 {}/""，讀取比這個欄位還舊的模型檔時保持向後相容。
+    training_config: dict = field(default_factory=dict)
+    config_hash: str = ""
 
 
 def _build_estimator(model_type: str, random_state: int):
@@ -194,6 +205,13 @@ def compute_rr_reference(dataset: pd.DataFrame) -> list[float]:
     return sorted(float(v) for v in rr)
 
 
+def compute_config_hash(training_config: dict) -> str:
+    """training_config 的短 hash（sha256 前 12 碼十六進位）。sort_keys=True
+    確保同一組設定不會因為 dict 建構順序不同而算出不同的 hash。"""
+    encoded = json.dumps(training_config, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:12]
+
+
 def train_model(
     dataset: pd.DataFrame,
     model_type: str = "gradient_boosting",
@@ -201,6 +219,7 @@ def train_model(
     random_state: int = 42,
     split_method: str = "time",
     calibration_method: Optional[str] = "sigmoid",
+    training_config: Optional[dict] = None,
 ) -> ModelBundle:
     if len(dataset) < 20:
         raise ValueError(f"訓練資料太少（{len(dataset)} 筆），至少需要 20 筆 touch 事件")
@@ -222,6 +241,11 @@ def train_model(
     hold_model, hold_metrics = _fit_one(train_df, test_df, "hold_label", model_type, random_state, calibration_method)
     break_model, break_metrics = _fit_one(train_df, test_df, "break_label", model_type, random_state, calibration_method)
 
+    resolved_config = dict(training_config) if training_config else {}
+    resolved_config.setdefault("model_type", model_type)
+    resolved_config.setdefault("split_method", split_method)
+    resolved_config.setdefault("calibration_method", calibration_method)
+
     return ModelBundle(
         hold_model=hold_model,
         break_model=break_model,
@@ -231,6 +255,8 @@ def train_model(
         metrics={"hold": hold_metrics, "break": break_metrics},
         rr_reference=compute_rr_reference(dataset),
         split_method=split_method,
+        training_config=resolved_config,
+        config_hash=compute_config_hash(resolved_config),
     )
 
 

@@ -127,7 +127,15 @@ type SRZoneAnalysis struct {
 	GlobalConfidence      NullFloat64 `db:"global_confidence"       json:"global_confidence,omitempty"`
 	GlobalRiskRewardRatio NullFloat64 `db:"global_risk_reward_ratio" json:"global_risk_reward_ratio,omitempty"`
 	ModelVersion          string      `db:"model_version"           json:"model_version"`
-	CreatedAt             time.Time   `db:"created_at"              json:"created_at"`
+	// ModelConfigHash 是訓練這個模型時的 DatasetConfig/zone builder 參數/
+	// model_type/calibration_method 快照的短 hash（見 Python model.py::
+	// compute_config_hash）。比 ModelVersion 更細：同一個 ModelVersion 底下
+	// 換過幾次訓練參數都可能有不同的 hash，讓「這筆分析用哪組訓練設定產生」
+	// 可以事後追溯，重訓改參數後舊分析可被這個值辨識出來。舊模型檔沒有這個
+	// 欄位時 Python 端回傳空字串，這裡直接存空字串（不像 ModelVersion 那樣
+	// 防禦性地填 "unknown"，因為空字串已經足夠表示「沒有這項資訊」）。
+	ModelConfigHash string    `db:"model_config_hash"       json:"model_config_hash"`
+	CreatedAt       time.Time `db:"created_at"              json:"created_at"`
 }
 
 type SRZone struct {
@@ -176,9 +184,15 @@ type SRZone struct {
 	RelativeVolume     NullFloat64 `db:"relative_volume"         json:"relative_volume,omitempty"`
 	VolumeConfirmation NullString  `db:"volume_confirmation"     json:"volume_confirmation,omitempty"`
 
-	TouchCount  int `db:"touch_count"             json:"touch_count"` // 聚合值，不分方向
-	RejectCount int `db:"reject_count"             json:"reject_count"`
-	BreakCount  int `db:"break_count"              json:"break_count"`
+	TouchCount int `db:"touch_count" json:"touch_count"` // 兩個方向加總（zone 整體活躍度）
+	// SupportTouchCount/ResistanceTouchCount 分開統計兩個方向各自的觸碰次數，
+	// 兩者相加等於 TouchCount。Confidence 依 Role 只用其中一個方向的樣本數/
+	// 穩定度計算（不會被另一個方向稀釋或拉抬），見 Python scoring.py::
+	// score_zone 的說明。
+	SupportTouchCount    int `db:"support_touch_count"    json:"support_touch_count"`
+	ResistanceTouchCount int `db:"resistance_touch_count" json:"resistance_touch_count"`
+	RejectCount          int `db:"reject_count"           json:"reject_count"`
+	BreakCount           int `db:"break_count"            json:"break_count"`
 
 	// ZoneMomentum/ZoneDirection 是這個 zone 自己的歷史觸碰動能（不是股票
 	// 層級的 trend，同一次分析裡不同 zone 會有不同值）。
@@ -194,7 +208,14 @@ type SRZone struct {
 	TradingScoreBreakdown RawJSON `db:"trading_score_breakdown" json:"trading_score_breakdown"`
 	TradingRecommendation string  `db:"trading_recommendation"  json:"trading_recommendation"`
 
-	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（保留供未來 verifier 使用）
+	// OverlapGroup/ConfluenceCount：跨方法（ATR/volume_profile）重疊的 zone
+	// 分群（見 Python scoring.py::_group_overlapping_zones）。不合併/刪除
+	// 任何 zone，只標記供 UI 顯示「多方法共振」。ConfluenceCount 恆 >= 1；
+	// OverlapGroup 只有 ConfluenceCount > 1 時才有值。
+	OverlapGroup    NullInt64 `db:"overlap_group"    json:"overlap_group,omitempty"`
+	ConfluenceCount int       `db:"confluence_count" json:"confluence_count"`
+
+	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（由 analysis.SRZoneVerifier 更新，見 sr-zone-scoring.md「十四」）
 	BrokenAt    NullTime    `db:"broken_at"               json:"broken_at,omitempty"`
 	BrokenPrice NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
 }

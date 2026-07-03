@@ -295,6 +295,19 @@ def _classify_touches(
     return classified
 
 
+def _touch_confidence(
+    touches: list[ZoneTouch],
+    classified: list[tuple[ZoneTouch, int, int, float]],
+    as_of_index: int,
+) -> float:
+    """依「單一方向」的觸碰計算 confidence——呼叫端要先依 approach_direction
+    篩好 touches/classified 再傳進來，這裡本身不做篩選。"""
+    hold_c = sum(1 for _, hold_label, _, _ in classified if hold_label)
+    break_c = sum(1 for _, _, break_label, _ in classified if break_label)
+    bars_since = (as_of_index - touches[-1].touch_index) if touches else None
+    return _confidence(len(touches), bars_since, hold_c, break_c)
+
+
 def _recent_validation(
     touches: list[ZoneTouch],
     classified: list[tuple[ZoneTouch, int, int, float]],
@@ -375,8 +388,81 @@ _TIER_ORDER = {
 
 def _sort_zone_scores(zone_scores: list[ZoneScore]) -> list[ZoneScore]:
     """zones 必須「可排序」：先依 tier 由粗到細（主結構→交易區→短期支撐），
-    同一層內再依 trading_score 由高到低，取代原本無序的清單。"""
-    return sorted(zone_scores, key=lambda z: (_TIER_ORDER.get(z.tier, 99), -z.trading_score))
+    同一層內再依 trading_score 由高到低，不改變這個主要排序規則；
+    confluence_count（多方法共振的 zone 數）只當第三順位的 tie-breaker，
+    trading_score 幾乎不會真的相等，實務上很少真正影響排序結果。"""
+    return sorted(
+        zone_scores, key=lambda z: (_TIER_ORDER.get(z.tier, 99), -z.trading_score, -z.confluence_count)
+    )
+
+
+# ── 跨方法重疊分群（confluence）───────────────────────────────
+
+OVERLAP_GROUP_THRESHOLD = 0.6  # overlap 相對於較窄 zone 寬度的比例達此門檻才算同一群組
+
+
+def _zone_overlap_ratio(a: Zone, b: Zone) -> float:
+    overlap = min(a.price_high, b.price_high) - max(a.price_low, b.price_low)
+    if overlap <= 0:
+        return 0.0
+    return overlap / min(a.width, b.width)
+
+
+def _group_overlapping_zones(zones: list[Zone]) -> tuple[list[Optional[int]], list[int]]:
+    """標記「不同方法（ATR / volume_profile）各自建出來、但實際上指向同一
+    價位帶」的 zone：只在乎跨方法的重疊，同一種方法建出來的 zone 已經在
+    各自的 ZoneBuilder 內做過合併（見 zone_builder.py 的 merge_pct），這裡
+    不重複處理。不合併、不刪除任何 zone——兩個 builder 各自的計算基礎不同
+    （swing pivot + ATR vs. 成交量分布），合併會丟失「這是兩種方法都認同
+    的價位」這個本身就有意義的資訊；只標記 overlap_group/confluence_count
+    供前端顯示「多方法共振」、或在排序時當 tie-breaker（見 _sort_zone_scores）。
+
+    用 union-find：兩兩比較找出跨方法且 overlap 達門檻的 pair 先 union，
+    非傳遞相連的 zone 不會被誤併（例如 A-B 重疊、B-C 重疊但 A-C 不重疊，
+    A/B/C 仍會被視為同一個群組——這是 union-find 的標準行為，跟「這個群組
+    整體覆蓋的價位範圍有多寬」是分開的問題，這裡不處理後者）。
+
+    回傳 (overlap_group, confluence_count)，皆與輸入 zones 同順序對應。
+    confluence_count 恆 >= 1（自己）；overlap_group 只有 confluence_count > 1
+    時才賦值，單獨一個 zone 沒有「群組」可言，回傳 None。"""
+    n = len(zones)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[rj] = ri
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if zones[i].method == zones[j].method:
+                continue
+            if _zone_overlap_ratio(zones[i], zones[j]) >= OVERLAP_GROUP_THRESHOLD:
+                union(i, j)
+
+    members_by_root: dict[int, list[int]] = {}
+    for i in range(n):
+        members_by_root.setdefault(find(i), []).append(i)
+
+    overlap_group: list[Optional[int]] = [None] * n
+    confluence_count: list[int] = [1] * n
+    group_id = 0
+    for members in members_by_root.values():
+        confluence = len(members)
+        for i in members:
+            confluence_count[i] = confluence
+        if confluence > 1:
+            for i in members:
+                overlap_group[i] = group_id
+            group_id += 1
+
+    return overlap_group, confluence_count
 
 
 # ── 十三、Trading Score（可拆解）/ Trading Recommendation ────────
@@ -511,6 +597,8 @@ def score_zone(
     lookback_bars: int = DEFAULT_ZONE_LOOKBACK_BARS,
     forward_bars: int = DEFAULT_FORWARD_BARS,
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
+    overlap_group: Optional[int] = None,
+    confluence_count: int = 1,
 ) -> ZoneScore:
     if as_of_index is None:
         as_of_index = len(df) - 1
@@ -525,13 +613,17 @@ def score_zone(
     )
 
     all_touches = find_touches(df, zone, as_of_index, lookback_bars)
-    all_classified = _classify_touches(df, all_touches, forward_bars, threshold_pct, as_of_index)
-    hold_count = sum(1 for _, hold_label, _, _ in all_classified if hold_label)
-    break_count = sum(1 for _, _, break_label, _ in all_classified if break_label)
-    bars_since_last_touch = (as_of_index - all_touches[-1].touch_index) if all_touches else None
+    support_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_ABOVE]
+    resistance_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_BELOW]
+    support_classified = _classify_touches(df, support_touches, forward_bars, threshold_pct, as_of_index)
+    resistance_classified = _classify_touches(df, resistance_touches, forward_bars, threshold_pct, as_of_index)
 
-    confidence = _confidence(features_as_support.touch_count, bars_since_last_touch, hold_count, break_count)
-    confidence_level = _confidence_level(confidence)
+    # confidence 依角色方向分開計算（role=SUPPORT 只用 support_touches 的樣本
+    # 數/穩定度，不會被 resistance 方向的觸碰稀釋或拉抬），見 types.py::
+    # ZoneScore 的可信度說明。support_score/resistance_score 兩者都要算（供
+    # net_score 使用），所以兩個方向的 confidence 都要先算出來。
+    confidence_as_support = _touch_confidence(support_touches, support_classified, as_of_index)
+    confidence_as_resistance = _touch_confidence(resistance_touches, resistance_classified, as_of_index)
 
     support_hold, support_break = _normalize_probabilities(
         predict_hold_probability(bundle, features_as_support, is_support=True),
@@ -542,20 +634,25 @@ def score_zone(
         predict_break_probability(bundle, features_as_resistance, is_support=False),
     )
 
-    support_score = _derive_score(support_hold, confidence)
-    resistance_score = _derive_score(resistance_hold, confidence)
+    support_score = _derive_score(support_hold, confidence_as_support)
+    resistance_score = _derive_score(resistance_hold, confidence_as_resistance)
     net_score = support_score - resistance_score
     net_score_label = _net_score_label(net_score)
 
     role = _resolve_role(zone, current_price)
 
-    if role == ZoneType.AT_ZONE.value:
-        role_touches = all_touches
-        role_classified = all_classified
+    if role == ZoneType.SUPPORT.value:
+        role_touches, role_classified, confidence = support_touches, support_classified, confidence_as_support
+    elif role == ZoneType.RESISTANCE.value:
+        role_touches, role_classified, confidence = resistance_touches, resistance_classified, confidence_as_resistance
     else:
-        approach = ApproachDirection.FROM_ABOVE if role == ZoneType.SUPPORT.value else ApproachDirection.FROM_BELOW
-        role_touches = [t for t in all_touches if t.approach_direction == approach]
-        role_classified = _classify_touches(df, role_touches, forward_bars, threshold_pct, as_of_index)
+        # AT_ZONE：方向還沒解析出來，用全部觸碰（兩個方向合計）計算 confidence，
+        # 跟 R1 設計前的行為一致。
+        role_touches = all_touches
+        role_classified = _classify_touches(df, all_touches, forward_bars, threshold_pct, as_of_index)
+        confidence = _touch_confidence(all_touches, role_classified, as_of_index)
+
+    confidence_level = _confidence_level(confidence)
     recent_validation = _recent_validation(role_touches, role_classified, as_of_index)
 
     zone_momentum_value = zone_momentum(df, all_touches, lookback=ZONE_MOMENTUM_LOOKBACK)
@@ -625,6 +722,8 @@ def score_zone(
         relative_volume=relative_volume,
         volume_confirmation=volume_confirmation,
         touch_count=features_as_support.touch_count,
+        support_touch_count=len(support_touches),
+        resistance_touch_count=len(resistance_touches),
         reject_count=reject_count,
         break_count=break_count_field,
         zone_momentum=zone_momentum_value,
@@ -633,6 +732,8 @@ def score_zone(
         trading_score=trading_score_value,
         trading_score_breakdown=trading_score_breakdown,
         trading_recommendation=trading_recommendation,
+        overlap_group=overlap_group,
+        confluence_count=confluence_count,
     )
 
 
@@ -671,10 +772,15 @@ def score_symbol(
 
     # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。
     tiers = _assign_tiers([z.width for z in zones])
+    # 十六：跨方法重疊分群（confluence），見 _group_overlapping_zones 說明。
+    overlap_groups, confluence_counts = _group_overlapping_zones(zones)
 
     zone_scores = [
-        score_zone(df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index)
-        for zone, tier in zip(zones, tiers)
+        score_zone(
+            df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index,
+            overlap_group=og, confluence_count=cc,
+        )
+        for zone, tier, og, cc in zip(zones, tiers, overlap_groups, confluence_counts)
     ]
     zone_scores = _sort_zone_scores(zone_scores)
 
@@ -693,9 +799,14 @@ def score_symbol(
         # 模型可追蹤性：ModelBundle 本身已經有這些欄位，只是先前沒有透過
         # score_symbol() 輸出，導致 Go ToStore() 只能把 model_version 寫成空
         # 字串。model_feature_names 主要供 API 診斷/測試使用，不一定要進 DB。
+        # model_config_hash 是這次評分用的模型訓練設定（DatasetConfig/zone
+        # builder 參數/model_type/calibration_method）的短 hash，讓「這筆
+        # 分析是哪組訓練設定產生的」可以事後追溯，重訓改參數後舊分析可被
+        # 這個值辨識出來（見 model.py::compute_config_hash）。
         "model_version": bundle.version,
         "model_trained_at": bundle.trained_at,
         "model_feature_names": bundle.feature_names,
+        "model_config_hash": bundle.config_hash,
         "zones": [_zone_score_to_dict(z) for z in zone_scores],
     }
 
@@ -724,6 +835,8 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "relative_volume": z.relative_volume,
         "volume_confirmation": z.volume_confirmation,
         "touch_count": z.touch_count,
+        "support_touch_count": z.support_touch_count,
+        "resistance_touch_count": z.resistance_touch_count,
         "reject_count": z.reject_count,
         "break_count": z.break_count,
         "zone_momentum": z.zone_momentum,
@@ -732,4 +845,6 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "trading_score": z.trading_score,
         "trading_score_breakdown": z.trading_score_breakdown,
         "trading_recommendation": z.trading_recommendation,
+        "overlap_group": z.overlap_group,
+        "confluence_count": z.confluence_count,
     }

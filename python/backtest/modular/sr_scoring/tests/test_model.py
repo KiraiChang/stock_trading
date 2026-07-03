@@ -8,6 +8,7 @@ from ..model import (
     FEATURE_COLUMNS,
     MIN_ROWS_FOR_CALIBRATION,
     _time_split_indices,
+    compute_config_hash,
     load_model,
     predict_break_probability,
     predict_hold_probability,
@@ -122,6 +123,29 @@ def test_save_load_round_trip(tmp_path):
     assert loaded.feature_names == bundle.feature_names
     assert loaded.metrics == bundle.metrics
     assert loaded.rr_reference == bundle.rr_reference
+    assert loaded.training_config == bundle.training_config
+    assert loaded.config_hash == bundle.config_hash
+
+
+def test_train_model_stores_training_config_and_hash():
+    bundle = train_model(
+        synthetic_dataset(), model_type="logistic_regression",
+        training_config={"dataset_config": {"forward_bars_support": 5}},
+    )
+
+    assert bundle.training_config["dataset_config"] == {"forward_bars_support": 5}
+    assert bundle.training_config["model_type"] == "logistic_regression"
+    assert bundle.training_config["split_method"] == "time"
+    assert bundle.config_hash == compute_config_hash(bundle.training_config)
+    assert len(bundle.config_hash) == 12
+
+
+def test_compute_config_hash_is_deterministic_regardless_of_key_order():
+    assert compute_config_hash({"a": 1, "b": 2}) == compute_config_hash({"b": 2, "a": 1})
+
+
+def test_compute_config_hash_differs_when_values_differ():
+    assert compute_config_hash({"a": 1}) != compute_config_hash({"a": 2})
 
 
 def test_predict_probabilities_are_in_unit_interval():

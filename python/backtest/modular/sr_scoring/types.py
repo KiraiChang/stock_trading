@@ -172,6 +172,12 @@ class ZoneScore:
     可信度：
       confidence 綜合樣本數、時間衰減（含「最近驗證」）、歷史結果穩定度
       三個因子（見 scoring.py::_confidence），confidence_level 是分級結果。
+      role=SUPPORT/RESISTANCE 時，confidence 只用該角色方向的觸碰
+      （support_touch_count/resistance_touch_count 其中之一）計算，不會被
+      另一個方向的樣本數/穩定度稀釋或拉抬；role=AT_ZONE 時用全部觸碰
+      （touch_count）計算，因為方向還沒解析出來。touch_count 恆為兩個方向
+      加總（zone 整體活躍度），support_touch_count/resistance_touch_count
+      分開統計，讓兩種角色各自的歷史樣本數可以被診斷。
 
     交易數字（只有 role 為 SUPPORT/RESISTANCE 時才有值，AT_ZONE 沒有明確
     方向可以算）：
@@ -235,6 +241,8 @@ class ZoneScore:
     volume_confirmation: Optional[str]
 
     touch_count: int
+    support_touch_count: int
+    resistance_touch_count: int
     reject_count: Optional[int]
     break_count: Optional[int]
 
@@ -246,3 +254,12 @@ class ZoneScore:
     trading_score: float
     trading_score_breakdown: dict
     trading_recommendation: str
+
+    # 跨方法重疊分群（見 scoring.py::_group_overlapping_zones）：不同方法
+    # （ATR/volume_profile）各自建出來、但實際上指向同一價位帶的 zone 會
+    # 有相同的 overlap_group id，confluence_count 是這個群組裡的 zone 數。
+    # 不合併/刪除任何 zone，只標記供前端顯示「多方法共振」或當排序 tie-
+    # breaker。confluence_count 恆 >= 1（自己）；overlap_group 只有
+    # confluence_count > 1 時才有值，單獨一個 zone 沒有「群組」可言。
+    overlap_group: Optional[int]
+    confluence_count: int

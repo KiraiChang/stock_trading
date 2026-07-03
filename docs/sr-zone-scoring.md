@@ -273,6 +273,20 @@ confidence = (sample_factor + recency_factor + stability_factor) / 3
 _level` 是分級結果：`< 30%` LOW、`30~60%` MEDIUM、`60~80%` HIGH、`>= 80%`
 VERY_HIGH。
 
+**touch_count 依方向拆分**：`touch_count`（API/DB 欄位）恆為兩個方向
+（`FROM_ABOVE`/支撐方向、`FROM_BELOW`/壓力方向）觸碰次數加總，反映 zone
+整體活躍度；`support_touch_count`/`resistance_touch_count` 分開統計，讓
+「作為支撐」跟「作為壓力」各自的歷史樣本數可以被診斷。**confidence 依
+角色只用其中一個方向的樣本數/穩定度計算**：`role=SUPPORT` 只用
+`support_touch_count` 方向的觸碰算 `sample_factor`/`recency_factor`/
+`stability_factor`，不會被壓力方向的（可能完全不同的）表現稀釋或拉抬；
+`role=RESISTANCE` 同理只用壓力方向；`role=AT_ZONE`（方向還沒解析出來）
+才用兩個方向合計計算，作為方向未定時的保守估計。這是 2026-07 加入
+`support_touch_count`/`resistance_touch_count` 時一併修正的：修正前
+`confidence` 一律用兩個方向合計的樣本/穩定度，同一個 zone 若「作為支撐」
+表現很穩定但「作為壓力」表現很差（或反之），算出來的 confidence 會被另一
+個不相關方向的表現拖累或拉抬，不是這個角色本身應有的可信度。
+
 ---
 
 ## 七、Support/Resistance Score 與 Net Score
@@ -496,6 +510,67 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 進階細節」裡，不刪除任何既有欄位或計算。`AT_ZONE` 角色會明確提示「方向還
 不明確，不是確定的買賣訊號」；`confidence_level=LOW` 會提示「樣本少或太久
 沒測試，先觀察」。
+
+---
+
+## 十六、模型設定可追溯性（training_config / model_config_hash）
+
+`model_version`（`v1`/`v2`）只到 feature schema 這種粗粒度，同一個版本底下
+換過幾次 `DatasetConfig`（`forward_bars`/`threshold_pct`/`label_method`
+等）、zone builder 參數（`atr_width_multiplier`/`merge_pct`/
+`high_volume_percentile` 等）、`model_type`、`calibration_method`，光看
+`model_version` 完全無法分辨。
+
+`ModelBundle.training_config`（`model.py`）在 `train.py::run_training()`
+組裝，內容：
+```json
+{
+  "dataset_config": { "forward_bars_support": 5, "threshold_pct_support": 0.03, "...": "..." },
+  "zone_builders": {
+    "ATRZoneBuilder": { "lookback": 60, "atr_width_multiplier": 1.5, "...": "..." },
+    "VolumeProfileZoneBuilder": { "lookback": 60, "num_bins": 24, "...": "..." }
+  },
+  "model_type": "gradient_boosting",
+  "split_method": "time",
+  "calibration_method": "sigmoid"
+}
+```
+`model.py::compute_config_hash()` 對這個 dict 算 sha256（`sort_keys=True`
+確保建構順序不影響結果），取前 12 碼十六進位存成 `ModelBundle.config_hash`。
+
+`POST /sr-zones` 回傳的 `model_config_hash` 就是產生這次評分的模型的
+`config_hash`，Go `ToStore()` 寫入 `stock_sr_zone_analyses.model_config_hash`
+——每筆分析快照都記錄了它是用哪組訓練設定產生的，重訓改參數後舊分析可以
+靠這個值被辨識出來（新分析會有不同的 hash）。`GET /sr-scoring/model-status`
+／`GET /api/v1/sr-zones/model-status` 也回傳目前模型的 `config_hash`／
+`training_config`，供訓練前後比對用。
+
+---
+
+## 十七、跨方法重疊分群（Confluence）
+
+ATR 法（swing pivot + ATR 通道）跟成交量分布法各自獨立建立 zone，計算基礎
+完全不同，即使各自 builder 內部已經合併過同方法的重疊 zone（見「一、Zone
+建立」），仍可能出現「兩種方法各自建出、但實際上指向同一個價位帶」的
+情形——這種殘餘重疊不代表資料有誤，反而是「多方法都認同」的正面訊號，
+不應該被直接刪除或靜默合併掉（會丟失這個交叉驗證資訊）。
+
+`scoring.py::_group_overlapping_zones()`（union-find）只比較**不同 method**
+的 zone pair：
+```
+overlap 比例 = overlap 寬度 / min(zone_a 寬度, zone_b 寬度)
+overlap 比例 >= 0.6（OVERLAP_GROUP_THRESHOLD）→ 同一群組
+```
+透過中介 zone 傳遞相連的 pair（A-B 重疊、B-C 重疊，A-C 本身不重疊）仍會被
+歸為同一群組——這是 union-find 的標準行為。**不合併、不刪除任何 zone**，
+只標記 `overlap_group`（群組 id，只有群組內 zone 數 > 1 才有值，單獨的
+zone 為 `null`）跟 `confluence_count`（群組內 zone 數，恆 >= 1）。
+
+排序規則不變：仍是 tier 由粗到細、同層內 `trading_score` 由高到低；
+`confluence_count` 只當第三順位的 tie-breaker（`trading_score` 幾乎不會
+真的相等，實務上很少真正影響排序結果），不會改變既有排序邏輯。前端在
+zone 卡片標題列顯示「多方法共振 ×N」徽章（`confluence_count > 1` 時），
+`overlap_group` 原始 id 在「展開進階細節」裡。
 
 ---
 

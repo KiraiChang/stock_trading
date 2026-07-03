@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +14,28 @@ import (
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/store"
 )
+
+// mapScoreZonesError 依 Python /sr-zones 回傳的實際狀態碼，回給前端對應的
+// 通用訊息——不透漏原始錯誤文字（細節只寫 log），但至少讓前端能分辨是
+// 「該補資料」「該去訓練模型」還是「Python service 沒開」，不是每種情況
+// 都顯示同一句「Python service 錯誤」。
+func mapScoreZonesError(c *gin.Context, log *zap.Logger, err error) {
+	var upstreamErr *analysis.UpstreamStatusError
+	if errors.As(err, &upstreamErr) {
+		switch upstreamErr.StatusCode {
+		case http.StatusNotFound:
+			log.Warn("sr-zones: score zones (no candles)", zap.Error(err))
+			c.JSON(http.StatusNotFound, gin.H{"error": "找不到歷史資料，請確認股票代號是否正確，或先用「歷史資料回補」補資料"})
+			return
+		case http.StatusServiceUnavailable:
+			log.Warn("sr-zones: score zones (model not trained)", zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "機率模型尚未訓練，請先在下方「訓練/更新機率模型」區塊訓練"})
+			return
+		}
+	}
+	log.Error("sr-zones: score zones", zap.Error(err))
+	c.JSON(http.StatusBadGateway, gin.H{"error": "Python 服務無法連線，請確認服務是否已啟動"})
+}
 
 type SRZoneHandler struct {
 	client    *analysis.Client
@@ -59,7 +82,7 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 
 	result, err := h.client.ScoreZones(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
 	if err != nil {
-		badGatewayError(c, h.log, err, "sr-zones: score zones")
+		mapScoreZonesError(c, h.log, err)
 		return
 	}
 
@@ -276,6 +299,19 @@ func (h *SRZoneHandler) GetTrainJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job": job})
+}
+
+// GET /api/v1/sr-zones/model-status
+// 讓前端在觸發分析前就能知道模型準備好了沒，不用先按分析失敗才知道
+// （見 sr-zone-scoring.md「模型可追蹤性」）。永遠回 200，用 body 裡的
+// exists 欄位表示模型存不存在。
+func (h *SRZoneHandler) ModelStatus(c *gin.Context) {
+	status, err := h.client.GetModelStatus(c.Request.Context())
+	if err != nil {
+		badGatewayError(c, h.log, err, "sr-zones: get model status")
+		return
+	}
+	c.JSON(http.StatusOK, status)
 }
 
 // DELETE /api/v1/sr-zones/:id

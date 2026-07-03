@@ -202,3 +202,19 @@ export async function listTrainJobs(limit = 20): Promise<SRScoringTrainJob[]> {
   const res = await apiFetch<{ jobs: SRScoringTrainJob[]; total: number }>(`/sr-zones/train-jobs?limit=${limit}`)
   return res.jobs ?? []
 }
+
+// ModelStatus 對應後端 analysis.ModelStatus。exists=false 時其餘欄位皆為
+// null——用這支端點在觸發分析前先確認模型準備好了沒，不用等分析失敗才知道。
+export interface ModelStatus {
+  exists: boolean
+  version: string | null
+  trained_at: string | null
+  model_path: string | null
+  split_method: string | null
+  metrics: Record<string, Record<string, number>> | null
+  feature_names: string[] | null
+}
+
+export async function getModelStatus(): Promise<ModelStatus> {
+  return apiFetch('/sr-zones/model-status')
+}

@@ -720,6 +720,30 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
 取得單筆訓練任務詳情，格式同上方陣列裡的單一物件（`{ "job": {...} }`）。
 找不到回 `404`。
 
+### GET `/sr-zones/model-status`
+
+查詢目前機率模型的狀態，讓前端在觸發分析前就能知道模型準備好了沒——
+**永遠回 200**，不像 `POST /sr-zones` 那樣在模型不存在時回 503，用
+`exists` 欄位表示狀態。
+
+**Response（模型存在）：**
+```json
+{
+  "exists": true,
+  "version": "v2",
+  "trained_at": "2026-07-01T13:30:00+08:00",
+  "model_path": "models/sr_scoring_v2.joblib",
+  "split_method": "time",
+  "metrics": { "hold": { "auc": 0.81, "calibrated": 1.0 }, "break": { "auc": 0.77, "calibrated": 1.0 } },
+  "feature_names": ["touch_count", "rejection_count", "..."]
+}
+```
+
+**Response（模型不存在）：**
+```json
+{ "exists": false, "version": null, "trained_at": null, "model_path": null, "split_method": null, "metrics": null, "feature_names": null }
+```
+
 ### DELETE `/sr-zones/:id`
 
 刪除一筆分析紀錄（連同其 zones 一併刪除）。

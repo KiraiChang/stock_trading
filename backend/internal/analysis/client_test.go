@@ -3,6 +3,7 @@ package analysis
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -236,6 +237,52 @@ func TestZoneScoreResultToStoreDefaultsMissingModelVersionToUnknown(t *testing.T
 	}
 }
 
+func TestScoreZonesReturnsUpstreamStatusErrorOnNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"detail": "no candles found for symbol=2330 timeframe=1d"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.ScoreZones(context.Background(), "2330", "1d", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var upstreamErr *UpstreamStatusError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("expected *UpstreamStatusError, got %T: %v", err, err)
+	}
+	if upstreamErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status=404, got %d", upstreamErr.StatusCode)
+	}
+}
+
+func TestScoreZonesReturnsUpstreamStatusErrorOnModelNotTrained(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]string{"detail": "sr_scoring 模型檔不存在"})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.ScoreZones(context.Background(), "2330", "1d", 0)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var upstreamErr *UpstreamStatusError
+	if !errors.As(err, &upstreamErr) {
+		t.Fatalf("expected *UpstreamStatusError, got %T: %v", err, err)
+	}
+	if upstreamErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected status=503, got %d", upstreamErr.StatusCode)
+	}
+}
+
 func TestScoreZonesReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	client := NewClient("")
 	if _, err := client.ScoreZones(context.Background(), "2330", "1d", 0); err == nil {
@@ -312,6 +359,65 @@ func TestTrainModelParsesResponse(t *testing.T) {
 func TestTrainModelReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	client := NewClient("")
 	if _, err := client.TrainModel(context.Background(), []string{"2330"}, "1d", 0, ""); err == nil {
+		t.Fatal("expected error when baseURL is not configured")
+	}
+}
+
+func TestGetModelStatusParsesResponseWhenModelExists(t *testing.T) {
+	version := "v2"
+	trainedAt := "2026-07-01T13:30:00+08:00"
+	modelPath := "models/sr_scoring_v2.joblib"
+	splitMethod := "time"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sr-scoring/model-status" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ModelStatus{
+			Exists: true, Version: &version, TrainedAt: &trainedAt, ModelPath: &modelPath, SplitMethod: &splitMethod,
+			Metrics:      map[string]map[string]float64{"hold": {"auc": 0.81}, "break": {"auc": 0.77}},
+			FeatureNames: []string{"touch_count", "is_support"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	status, err := client.GetModelStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetModelStatus failed: %v", err)
+	}
+	if !status.Exists || status.Version == nil || *status.Version != "v2" {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+	if len(status.FeatureNames) != 2 {
+		t.Fatalf("unexpected feature names: %+v", status.FeatureNames)
+	}
+}
+
+func TestGetModelStatusParsesResponseWhenModelMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ModelStatus{Exists: false})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	status, err := client.GetModelStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetModelStatus failed: %v", err)
+	}
+	if status.Exists || status.Version != nil {
+		t.Fatalf("expected exists=false with no version, got %+v", status)
+	}
+}
+
+func TestGetModelStatusReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
+	client := NewClient("")
+	if _, err := client.GetModelStatus(context.Background()); err == nil {
 		t.Fatal("expected error when baseURL is not configured")
 	}
 }

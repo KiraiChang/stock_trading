@@ -249,7 +249,20 @@ curl -X POST http://localhost:8080/api/v1/analysis/1/verify \
 
 跟個股分析是完全獨立的兩套系統（見 [sr-zone-scoring.md](./sr-zone-scoring.md)）。
 除了 Python HTTP service 已啟動，**還需要先訓練過機率模型**，否則
-`POST /sr-zones` 會失敗（fail-fast，不會靜默回傳中性機率）：
+`POST /sr-zones` 會失敗（fail-fast，不會靜默回傳中性機率）。分析前可以先
+查詢模型狀態，不用等分析失敗才知道（前端頁面頂部也會顯示這個狀態）：
+
+```bash
+curl http://localhost:8080/api/v1/sr-zones/model-status \
+  -H "Authorization: Bearer $TOKEN"
+# → { "exists": false, "version": null, ... }  # 尚未訓練過
+```
+
+> `python/config.yaml` 的 `sr_scoring.model_path` 預設要跟目前的
+> `MODEL_VERSION`（`model.py`）對得上——目前是 `models/sr_scoring_v2.joblib`。
+> 如果本機還留著更早期重新設計前的 `sr_scoring_v1.joblib`，且 config 指
+> 錯路徑，`/sr-zones` 會在預測時因為特徵數對不上而出現非預期的錯誤，不是
+> 預期中的 503；確認 config 指向的檔名版本正確，或乾脆重新訓練一次覆蓋掉。
 
 ```bash
 # 1. 先訓練模型（symbols 省略時自動用整個監控清單；非同步，立即回 202 + job_id）

@@ -130,6 +130,7 @@ func NewServer(
 		protected.POST("/sr-zones/train", szh.Train)
 		protected.GET("/sr-zones/train-jobs", szh.ListTrainJobs)
 		protected.GET("/sr-zones/train-jobs/:job_id", szh.GetTrainJob)
+		protected.GET("/sr-zones/model-status", szh.ModelStatus)
 		protected.DELETE("/sr-zones/:id", szh.Delete)
 
 		uh := handler.NewUserHandler(userRepo, log)

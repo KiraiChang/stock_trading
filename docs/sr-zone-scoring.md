@@ -18,9 +18,10 @@
   `zone_builder.py`、`features.py`、`labeling.py`、`dataset.py`、
   `model.py`、`scoring.py`、`train.py`）
 - Python HTTP 端點：`python/http_server.py`（`POST /sr-zones`、
-  `POST /sr-scoring/train`）
+  `POST /sr-scoring/train`、`GET /sr-scoring/model-status`）
 - Go 持久化：`backend/internal/analysis/client.go`（`ScoreZones`/
-  `TrainModel`）、`backend/internal/store/sr_zone_repo.go`、
+  `TrainModel`/`GetModelStatus`、`UpstreamStatusError`）、
+  `backend/internal/store/sr_zone_repo.go`、
   `backend/internal/store/sr_scoring_train_job_repo.go`（訓練任務追蹤）
 - Go 驗證：`backend/internal/analysis/sr_zone_verifier.go`（`SRZoneVerifier`，
   見「十四」），排程整合見 `backend/internal/scheduler/scheduler.go`
@@ -28,10 +29,12 @@
   `GET /api/v1/sr-zones/:id`、`POST /api/v1/sr-zones/:id/verify`、
   `POST /api/v1/sr-zones/train`、`GET /api/v1/sr-zones/train-jobs`、
   `GET /api/v1/sr-zones/train-jobs/:job_id`、
+  `GET /api/v1/sr-zones/model-status`、
   `DELETE /api/v1/sr-zones/:id`（見 api-reference.md）
 - 資料表：`stock_sr_zone_analyses`、`stock_sr_zones`、
   `sr_scoring_train_jobs`（見 database-schema.md）
-- 前端：「支撐/壓力機率分析」頁面（`SRZones.svelte`）
+- 前端：「支撐/壓力機率分析」頁面（`SRZones.svelte`，新手優先閱讀層級見
+  「十五」）
 
 ---
 
@@ -459,6 +462,40 @@ API）。
   最近 `srZoneVerifyLimit`（預設 50）筆 SR zone 分析各自重新驗證一次，
   寫入獨立的 `sr_zone_verify` job_run 紀錄，失敗不影響 `daily_close` 本身
   的結果。
+
+---
+
+## 十五、模型狀態查詢與錯誤訊息分級
+
+**模型狀態**：`GET /sr-scoring/model-status`（Python）／
+`GET /api/v1/sr-zones/model-status`（Go）讓前端在觸發分析前就能知道模型
+準備好了沒——不像 `/sr-zones` 那樣在模型不存在時回 503，這支端點永遠回
+200，用 `exists` 欄位表示狀態，`exists=true` 時同時回傳
+`version`/`trained_at`/`split_method`/`metrics`/`feature_names`。前端「支撐/
+壓力機率分析」頁面頂部會顯示這個狀態（模型可用/尚未訓練）。
+
+**錯誤訊息分級**：`internal/analysis.UpstreamStatusError` 保留 Python
+`/sr-zones` 回應的實際 HTTP 狀態碼，讓 Go handler（`mapScoreZonesError`）
+依狀態碼回不同的通用訊息給前端，而不是把所有非 200 回應都壓成同一句
+「Python service 錯誤」：
+
+```
+404（沒有 candles）    → 「找不到歷史資料，請確認股票代號是否正確，或先用「歷史資料回補」補資料」
+503（模型未訓練）      → 「機率模型尚未訓練，請先在下方「訓練/更新機率模型」區塊訓練」
+其他（連線失敗等）     → 502「Python 服務無法連線，請確認服務是否已啟動」
+```
+
+原始錯誤文字（可能含內部路徑、堆疊資訊）只寫伺服器 log，不會出現在前端
+回應裡——這個設計延續了先前「伺服器錯誤只寫 log、不回原始文字給前端」的
+原則（見 development-guide.md 常見問題）。
+
+**前端新手優先閱讀層級**：「支撐/壓力機率分析」頁面預設只顯示「哪個區間
+最重要、目前該觀察支撐還是壓力、什麼條件代表判斷失效、可信度高不高」這
+幾件事，用白話文字取代 EV/RR/net_score 等術語；所有原始數字（機率、EV/
+RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，收在「展開
+進階細節」裡，不刪除任何既有欄位或計算。`AT_ZONE` 角色會明確提示「方向還
+不明確，不是確定的買賣訊號」；`confidence_level=LOW` 會提示「樣本少或太久
+沒測試，先觀察」。
 
 ---
 

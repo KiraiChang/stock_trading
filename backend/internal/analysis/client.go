@@ -18,6 +18,22 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
+// UpstreamStatusError 保留 Python service 回應的實際 HTTP 狀態碼（例如
+// 404「沒有 candles」、503「模型未訓練」），讓呼叫端可以用 errors.As 判斷
+// 具體是哪種情況、回給前端對應的通用訊息——而不是把所有非 200 回應都壓成
+// 同一種「Python service 錯誤」，導致前端沒辦法分辨「該補資料」還是
+// 「該去訓練模型」。Error() 保留原始回應內容只用於伺服器 log，不會被拿去
+// 直接顯示給前端（詳細錯誤文字外洩到前端的風險見 sr_zones.go handler 的
+// 錯誤處理慣例）。
+type UpstreamStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *UpstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream status=%d body=%s", e.StatusCode, e.Body)
+}
+
 type Level struct {
 	Price    float64 `json:"price"`
 	Strength float64 `json:"strength"`
@@ -343,7 +359,7 @@ func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string, limit
 		return nil, fmt.Errorf("python sr-zones read body error: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("python sr-zones error: status=%d body=%s", resp.StatusCode, truncateBody(respBody))
+		return nil, &UpstreamStatusError{StatusCode: resp.StatusCode, Body: truncateBody(respBody)}
 	}
 
 	var result ZoneScoreResult
@@ -422,6 +438,55 @@ func (c *Client) TrainModel(ctx context.Context, symbols []string, timeframe str
 	var result TrainResult
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return nil, fmt.Errorf("python sr-scoring train decode error: body=%s: %w", truncateBody(respBody), err)
+	}
+	return &result, nil
+}
+
+// ModelStatus 對應 Python GET /sr-scoring/model-status 的回傳格式。跟
+// TrainResult 不同：這支端點永遠回 200，用 Exists 表示模型存不存在，
+// 不是像 /sr-zones 那樣在模型不存在時丟錯——目的是讓前端在呼叫
+// POST /sr-zones 之前，先知道模型準備好了沒（見 sr-zone-scoring.md「模型
+// 可追蹤性」）。Exists=false 時其餘欄位皆為 zero value。
+type ModelStatus struct {
+	Exists       bool                          `json:"exists"`
+	Version      *string                       `json:"version"`
+	TrainedAt    *string                       `json:"trained_at"`
+	ModelPath    *string                       `json:"model_path"`
+	SplitMethod  *string                       `json:"split_method"`
+	Metrics      map[string]map[string]float64 `json:"metrics"`
+	FeatureNames []string                      `json:"feature_names"`
+}
+
+// GetModelStatus 呼叫 Python GET /sr-scoring/model-status 端點。用一般的
+// c.http（30 秒 timeout），不是訓練用的長 timeout client，因為這只是查詢
+// 現況，不會觸發任何訓練動作。
+func (c *Client) GetModelStatus(ctx context.Context) (*ModelStatus, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("python service url not configured（請設定 python.service_url / PYTHON_SERVICE_URL）")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/sr-scoring/model-status", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("python model-status request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("python model-status read body error: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("python model-status error: status=%d body=%s", resp.StatusCode, truncateBody(respBody))
+	}
+
+	var result ModelStatus
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("python model-status decode error: body=%s: %w", truncateBody(respBody), err)
 	}
 	return &result, nil
 }

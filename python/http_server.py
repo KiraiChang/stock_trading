@@ -47,6 +47,7 @@ from backtest.db_writer import update_job_status, write_result, write_trades
 from backtest.modular.analysis import DEFAULT_FETCH_LIMIT, analyze_symbol
 from backtest.modular.sr_scoring.scoring import DEFAULT_FETCH_LIMIT as SR_SCORING_DEFAULT_FETCH_LIMIT
 from backtest.modular.sr_scoring.scoring import score_symbol
+from backtest.modular.sr_scoring.model import get_model
 from backtest.modular.sr_scoring.train import run_training
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0")
@@ -190,6 +191,34 @@ async def sr_scoring_train(req: TrainRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/sr-scoring/model-status")
+async def sr_scoring_model_status():
+    """查詢目前機率模型的狀態：存不存在、版本、訓練時間、路徑、metrics 摘要、
+    feature 名稱。不像 /sr-zones 那樣在模型不存在時丟 503——這支端點的用途
+    就是讓前端在呼叫 /sr-zones 之前先知道「模型準備好了沒」，所以永遠回
+    200，用 exists 欄位表示狀態。"""
+    import config
+
+    try:
+        bundle = get_model()
+    except RuntimeError:
+        return {
+            "exists": False, "version": None, "trained_at": None,
+            "model_path": config.SR_SCORING_MODEL_PATH, "split_method": None,
+            "metrics": None, "feature_names": None,
+        }
+
+    return {
+        "exists": True,
+        "version": bundle.version,
+        "trained_at": bundle.trained_at,
+        "model_path": config.SR_SCORING_MODEL_PATH,
+        "split_method": bundle.split_method,
+        "metrics": bundle.metrics,
+        "feature_names": bundle.feature_names,
+    }
 
 
 @app.get("/health")

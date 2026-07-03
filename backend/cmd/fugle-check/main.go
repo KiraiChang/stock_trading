@@ -45,6 +45,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "請先在 config.yaml 或環境變數 FUGLE_API_KEY 設定 Fugle API Key")
 		os.Exit(1)
 	}
+	if cfg.Fugle.Enabled {
+		fmt.Fprintln(os.Stderr, "警告：config.yaml 中 fugle.enabled 為 true，若正式服務（cmd/server）目前正在執行，"+
+			"此工具會與正式服務搶用同一組 API Key 唯一的 WebSocket 連線名額（免費方案僅允許 1 條連線），"+
+			"可能導致其中一方收到 \"Maximum number of connections reached\" 錯誤。建議先確認正式服務未啟動 Fugle，或停用後再執行本工具。")
+	}
 
 	ctx := context.Background()
 	quoteClient := market.NewFugleQuoteClient(cfg.Fugle)

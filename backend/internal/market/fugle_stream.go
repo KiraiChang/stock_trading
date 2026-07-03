@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,7 +88,16 @@ func (c *FugleStreamClient) runLoop(ctx context.Context) {
 		}
 
 		if err := c.connectAndServe(ctx); err != nil {
-			c.log.Warn("fugle stream disconnected", zap.Error(err))
+			if strings.Contains(err.Error(), "Maximum number of connections reached") {
+				c.log.Warn("fugle stream disconnected",
+					zap.Error(err),
+					zap.String("hint", "免費方案同一組 API Key 僅允許 1 條 WebSocket 連線；"+
+						"常見成因為 cmd/fugle-check 與本服務同時使用同一組 Key，"+
+						"或前一個 process 尚未送出正常關閉導致舊連線名額尚未釋放，稍候將由 backoff 自動重試"),
+				)
+			} else {
+				c.log.Warn("fugle stream disconnected", zap.Error(err))
+			}
 		}
 
 		select {

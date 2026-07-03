@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"os"
+	ossignal "os/signal"
+	"syscall"
 
 	"go.uber.org/zap"
 
@@ -93,13 +95,16 @@ func main() {
 	// 行為與導入前一致。Tier 1（REST 廣度掃描）／Tier 2（WebSocket 熱點）的
 	// 排程整合（round-robin 掃描、熱點名額晉升/降級）尚未接上 scheduler，
 	// 待用 cmd/fugle-check 驗證延遲與推送格式後再補上（見計畫文件）。
+	var fugleStreamClient *market.FugleStreamClient
+	fugleStreamCtx, cancelFugleStream := context.WithCancel(context.Background())
+	defer cancelFugleStream()
 	if cfg.Fugle.Enabled {
 		if cfg.Fugle.APIKey == "" || cfg.Fugle.APIKey == "YOUR_FUGLE_API_KEY" {
 			log.Warn("fugle api_key 未設定，Fugle 即時行情請求會失敗；請設定環境變數 FUGLE_API_KEY")
 		}
 		fugleQuoteClient := market.NewFugleQuoteClient(cfg.Fugle)
-		fugleStreamClient := market.NewFugleStreamClient(cfg.Fugle, log)
-		fugleStreamClient.Start(context.Background())
+		fugleStreamClient = market.NewFugleStreamClient(cfg.Fugle, log)
+		fugleStreamClient.Start(fugleStreamCtx)
 		fetcher.SetFugle(fugleQuoteClient, fugleStreamClient)
 		log.Info("fugle enabled", zap.Int("quote_rate_limit", cfg.Fugle.QuoteRateLimit), zap.Int("max_subscriptions", cfg.Fugle.MaxSubscriptions))
 	}
@@ -118,7 +123,31 @@ func main() {
 
 	go sched.Start()
 
-	if err := srv.Run(":" + cfg.Server.Port); err != nil {
-		log.Error("server error", zap.Error(err))
+	srvErrCh := make(chan error, 1)
+	go func() {
+		srvErrCh <- srv.Run(":" + cfg.Server.Port)
+	}()
+
+	sigCh := make(chan os.Signal, 1)
+	ossignal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-srvErrCh:
+		if err != nil {
+			log.Error("server error", zap.Error(err))
+		}
+	case <-sigCh:
+		log.Info("shutdown signal received")
+	}
+
+	// 收到關閉訊號時先停止 Fugle stream 的重連迴圈並送出正常的 WS close
+	// handshake，讓 Fugle 伺服器立即釋放唯一的連線名額（免費方案僅允許
+	// 1 條連線），避免下次啟動時因舊連線名額未釋放而收到
+	// "Maximum number of connections reached" 錯誤。
+	if fugleStreamClient != nil {
+		cancelFugleStream()
+		if err := fugleStreamClient.Close(); err != nil {
+			log.Warn("fugle stream close failed", zap.Error(err))
+		}
 	}
 }

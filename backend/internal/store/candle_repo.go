@@ -2,10 +2,13 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
+
+const candleBulkInsertBatchSize = 50
 
 type CandleRepo interface {
 	Insert(ctx context.Context, c *Candle) error
@@ -52,13 +55,65 @@ func (r *candleRepo) BulkInsert(ctx context.Context, cs []Candle) error {
 	if len(cs) == 0 {
 		return nil
 	}
-	sql := r.upsertSQL()
-	for _, c := range cs {
-		if _, err := r.db.NamedExecContext(ctx, sql, c); err != nil {
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for start := 0; start < len(cs); start += candleBulkInsertBatchSize {
+		end := start + candleBulkInsertBatchSize
+		if end > len(cs) {
+			end = len(cs)
+		}
+		if err := r.bulkUpsert(ctx, tx, cs[start:end]); err != nil {
 			return err
 		}
 	}
-	return nil
+
+	return tx.Commit()
+}
+
+func (r *candleRepo) bulkUpsert(ctx context.Context, tx *sqlx.Tx, cs []Candle) error {
+	args := make([]any, 0, len(cs)*9)
+	var values strings.Builder
+	for i, c := range cs {
+		if i > 0 {
+			values.WriteString(", ")
+		}
+		values.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?)")
+		args = append(args,
+			c.Symbol,
+			c.Timeframe,
+			c.Open,
+			c.High,
+			c.Low,
+			c.Close,
+			c.Volume,
+			c.Amount,
+			c.Timestamp,
+		)
+	}
+
+	query := `
+		INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
+		VALUES ` + values.String() + r.upsertSuffix()
+	_, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	return err
+}
+
+func (r *candleRepo) upsertSuffix() string {
+	if r.driver == "mysql" {
+		return `
+			ON DUPLICATE KEY UPDATE
+				open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close),
+				volume=VALUES(volume), amount=VALUES(amount)`
+	}
+	return `
+		ON CONFLICT(symbol, timeframe, ts) DO UPDATE SET
+			open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close,
+			volume=excluded.volume, amount=excluded.amount`
 }
 
 func (r *candleRepo) GetLatestN(ctx context.Context, symbol, timeframe string, n int) ([]Candle, error) {

@@ -199,6 +199,31 @@ type SRZone struct {
 	BrokenPrice NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
 }
 
+// SRScoringTrainJob 追蹤一次「重新訓練 hold/break 機率模型」的背景任務
+// （見 sr-zone-scoring.md「訓練任務可觀測化」）。訓練本身在 Go 背景 goroutine
+// 呼叫 Python 同步執行，這張表讓前端可以查詢「現在跑到哪裡、成功了沒、
+// metrics 是什麼」，不用只靠伺服器 log。
+type SRScoringTrainJob struct {
+	ID         uint64 `db:"id"          json:"id"`
+	JobID      string `db:"job_id"      json:"job_id"`
+	Status     string `db:"status"      json:"status"`  // pending / running / done / failed
+	Symbols    string `db:"symbols"     json:"symbols"` // JSON array string
+	Timeframe  string `db:"timeframe"   json:"timeframe"`
+	FetchLimit int    `db:"fetch_limit" json:"fetch_limit"`
+	ModelType  string `db:"model_type"  json:"model_type"`
+	// Rows/Sources/Metrics/ModelPath/ModelVersion 只有 status=done 才有值；
+	// Error 只有 status=failed 才有值。
+	Rows         NullInt64  `db:"rows"          json:"rows,omitempty"`
+	Sources      NullInt64  `db:"sources"       json:"sources,omitempty"`
+	Metrics      RawJSON    `db:"metrics"       json:"metrics,omitempty"`
+	ModelPath    NullString `db:"model_path"    json:"model_path,omitempty"`
+	ModelVersion NullString `db:"model_version" json:"model_version,omitempty"`
+	Error        NullString `db:"error"         json:"error,omitempty"`
+	StartedAt    NullTime   `db:"started_at"    json:"started_at,omitempty"`
+	FinishedAt   NullTime   `db:"finished_at"   json:"finished_at,omitempty"`
+	CreatedAt    time.Time  `db:"created_at"    json:"created_at"`
+}
+
 type WatchlistItem struct {
 	ID     uint32 `db:"id"     json:"id"`
 	Symbol string `db:"symbol" json:"symbol"`

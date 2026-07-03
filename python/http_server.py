@@ -147,7 +147,9 @@ class ScoreZonesRequest(BaseModel):
 async def sr_zones(req: ScoreZonesRequest):
     """支撐/壓力機率評分：對每個 zone 回傳 support_score/resistance_score
     （規則式，永遠可算）與 bounce_probability/break_probability（需要先跑過
-    sr_scoring/train.py 產生模型，否則回 503）。"""
+    sr_scoring/train.py 產生模型，否則回 503）。回應頂層另外帶
+    model_version/model_trained_at/model_feature_names，來自產生這次結果的
+    ModelBundle，供追蹤「這筆分析是哪個模型版本算出來的」。"""
     log.info("POST /sr-zones symbol=%s tf=%s limit=%d", req.symbol, req.timeframe, req.limit)
     try:
         return score_symbol(req.symbol, req.timeframe, req.limit)

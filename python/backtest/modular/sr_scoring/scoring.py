@@ -690,6 +690,12 @@ def score_symbol(
         "global_expected_value": global_metrics["expected_value"],
         "global_confidence": global_metrics["confidence"],
         "global_risk_reward_ratio": global_metrics["risk_reward_ratio"],
+        # 模型可追蹤性：ModelBundle 本身已經有這些欄位，只是先前沒有透過
+        # score_symbol() 輸出，導致 Go ToStore() 只能把 model_version 寫成空
+        # 字串。model_feature_names 主要供 API 診斷/測試使用，不一定要進 DB。
+        "model_version": bundle.version,
+        "model_trained_at": bundle.trained_at,
+        "model_feature_names": bundle.feature_names,
         "zones": [_zone_score_to_dict(z) for z in zone_scores],
     }
 

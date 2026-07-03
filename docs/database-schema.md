@@ -179,8 +179,7 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 
 SR Zone Scoring 分析快照（機構級版本，見
 [sr-zone-scoring.md](./sr-zone-scoring.md)），Go 呼叫 Python `POST /sr-zones`
-計算後寫入。跟 `stock_analyses` 不同的地方：這裡沒有驗證/verify 機制，
-`model_version` 目前固定寫入空字串（見 sr-zone-scoring.md「已知限制」）。
+計算後寫入。跟 `stock_analyses` 不同的地方：這裡沒有驗證/verify 機制。
 
 | 欄位 | 說明 |
 |------|------|
@@ -192,7 +191,7 @@ SR Zone Scoring 分析快照（機構級版本，見
 | global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字（可為 `NULL`） |
 | global_confidence | 所有 zone confidence 的簡單平均（可為 `NULL`） |
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR（可為 `NULL`） |
-| model_version | 目前固定為空字串（已知限制，見上） |
+| model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v2"`）；Python 端萬一沒回傳則寫 `"unknown"` |
 
 **Index：** `INDEX(symbol, created_at DESC)`。
 
@@ -228,3 +227,28 @@ SR Zone Scoring 分析快照（機構級版本，見
 
 **Index：** `INDEX(analysis_id)`；查詢時額外依 `tier` 排序（`CASE tier WHEN
 'TIER_1_MAIN_STRUCTURE' THEN 1 ...`）後再依 `trading_score DESC`。
+
+---
+
+## sr_scoring_train_jobs
+
+SR Zone Scoring 機率模型的訓練任務紀錄（見
+[sr-zone-scoring.md](./sr-zone-scoring.md)「訓練任務可觀測化」）。訓練本身在
+Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/train`
+可以立即回傳 `job_id`，前端輪詢 `GET /sr-zones/train-jobs/:job_id` 查詢進度，
+不用只靠伺服器 log。
+
+| 欄位 | 說明 |
+|------|------|
+| job_id | 任務識別碼（`sr_train_<時間戳>` 格式），API 查詢用這個而不是 `id` |
+| status | `pending`（已建立，尚未開始）/ `running`（訓練中）/ `done`（成功）/ `failed`（失敗） |
+| symbols | JSON 陣列字串，這次訓練用的股票代號清單 |
+| timeframe / fetch_limit / model_type | 訓練參數（K棒週期、每檔股票抓取根數、`gradient_boosting`/`logistic_regression`） |
+| rows / sources | 訓練資料筆數、來源股票數；只有 `status=done` 才有值 |
+| metrics | JSON：`{"hold": {...}, "break": {...}}`，兩個模型各自的 accuracy/precision/recall/auc；只有 `status=done` 才有值。DB 欄位 `NOT NULL DEFAULT ''`（用 `store.RawJSON` 讀寫，不能是 SQL `NULL`，空字串在 API 回應會序列化成 `null`） |
+| model_path / model_version | 訓練完成後寫入的模型檔路徑與版本；只有 `status=done` 才有值 |
+| error | 失敗原因；只有 `status=failed` 才有值 |
+| started_at / finished_at | 開始/結束時間；`status=pending` 時兩者皆為 `NULL` |
+| created_at | 任務建立時間（等同呼叫 `POST /sr-zones/train` 的時間） |
+
+**Index：** `INDEX(created_at DESC)`。

@@ -36,6 +36,30 @@ func (n *NullFloat64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type NullInt64 struct {
+	sql.NullInt64
+}
+
+func (n NullInt64) MarshalJSON() ([]byte, error) {
+	if !n.Valid {
+		return []byte("null"), nil
+	}
+	return json.Marshal(n.Int64)
+}
+
+func (n *NullInt64) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		n.Valid = false
+		n.Int64 = 0
+		return nil
+	}
+	if err := json.Unmarshal(data, &n.Int64); err != nil {
+		return err
+	}
+	n.Valid = true
+	return nil
+}
+
 type NullString struct {
 	sql.NullString
 }

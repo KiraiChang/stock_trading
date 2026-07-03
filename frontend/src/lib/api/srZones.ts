@@ -127,10 +127,38 @@ export interface TrainOptions {
   modelType?: 'gradient_boosting' | 'logistic_regression'
 }
 
+export type TrainJobStatus = 'pending' | 'running' | 'done' | 'failed'
+
+// SRScoringTrainJob 對應後端 store.SRScoringTrainJob。rows/sources/metrics/
+// model_path/model_version 只有 status=done 才有值；error 只有 status=failed
+// 才有值（見 sr-zone-scoring.md「訓練任務可觀測化」）。
+export interface SRScoringTrainJob {
+  id: number
+  job_id: string
+  status: TrainJobStatus
+  symbols: string // JSON array string
+  timeframe: string
+  fetch_limit: number
+  model_type: string
+  rows: number | null
+  sources: number | null
+  // metrics 是 {"hold": {...}, "break": {...}} 形狀（見 model.py::train_model
+  // 回傳的 metrics dict），欄位不固定，用 unknown 讓呼叫端自行處理。
+  metrics: Record<string, Record<string, number>> | null
+  model_path: string | null
+  model_version: string | null
+  error: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+}
+
 // triggerSRScoringTrain 手動觸發 bounce/break 機率模型重新訓練。symbols 省略時
-// 後端會自動使用整個 watchlist；在背景執行、立即回應（訓練視資料量可能耗時
-// 數十秒到數分鐘，不會卡住這個請求）。
-export async function triggerSRScoringTrain(opts: TrainOptions = {}): Promise<{ message: string; symbols: number }> {
+// 後端會自動使用整個 watchlist；立即回傳 job_id（status=pending），實際訓練
+// 在背景執行（可能耗時數十秒到數分鐘），用 getTrainJob(job_id) 輪詢進度。
+export async function triggerSRScoringTrain(
+  opts: TrainOptions = {}
+): Promise<{ job_id: string; status: TrainJobStatus; message: string; symbols: number }> {
   return apiFetch('/sr-zones/train', {
     method: 'POST',
     body: JSON.stringify({
@@ -140,4 +168,14 @@ export async function triggerSRScoringTrain(opts: TrainOptions = {}): Promise<{ 
       model_type: opts.modelType ?? 'gradient_boosting',
     }),
   })
+}
+
+export async function getTrainJob(jobId: string): Promise<SRScoringTrainJob> {
+  const res = await apiFetch<{ job: SRScoringTrainJob }>(`/sr-zones/train-jobs/${jobId}`)
+  return res.job
+}
+
+export async function listTrainJobs(limit = 20): Promise<SRScoringTrainJob[]> {
+  const res = await apiFetch<{ jobs: SRScoringTrainJob[]; total: number }>(`/sr-zones/train-jobs?limit=${limit}`)
+  return res.jobs ?? []
 }

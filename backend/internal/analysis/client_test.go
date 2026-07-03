@@ -98,6 +98,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
 			CurrentPrice: 600.0, GlobalTrend: 0.03, GlobalVolatility: 0.02,
 			GlobalExpectedValue: &globalEV, GlobalConfidence: &globalConfidence, GlobalRiskRewardRatio: &globalRR,
+			ModelVersion: "v2", ModelTrainedAt: "2026-06-30T09:00:00+08:00", ModelFeatureNames: []string{"touch_count", "is_support"},
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -141,10 +142,16 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if result.Symbol != "2330" || len(result.Zones) != 2 || result.GlobalTrend != 0.03 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
+	if result.ModelVersion != "v2" || result.ModelTrainedAt != "2026-06-30T09:00:00+08:00" || len(result.ModelFeatureNames) != 2 {
+		t.Fatalf("unexpected model metadata: %+v", result)
+	}
 
 	a, zones, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
+	}
+	if a.ModelVersion != "v2" {
+		t.Fatalf("expected model_version=v2, got %q", a.ModelVersion)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
@@ -209,6 +216,23 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if second.RejectCount != 0 || second.BreakCount != 0 {
 		t.Fatalf("expected AT_ZONE zone to default reject/break count to 0, got %+v", second)
+	}
+}
+
+func TestZoneScoreResultToStoreDefaultsMissingModelVersionToUnknown(t *testing.T) {
+	// 防禦性處理：Python 理論上一定會回傳 model_version，但如果哪天沒有
+	// （例如舊版 Python service 還沒部署這次的欄位），DB 裡要看到明確的
+	// "unknown" 而不是容易被誤認為「忘了填」的空字串。
+	result := ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
+	}
+	a, _, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore failed: %v", err)
+	}
+	if a.ModelVersion != "unknown" {
+		t.Fatalf("expected model_version=unknown when Python omits it, got %q", a.ModelVersion)
 	}
 }
 

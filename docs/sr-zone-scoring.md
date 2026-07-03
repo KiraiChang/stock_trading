@@ -20,11 +20,14 @@
 - Python HTTP 端點：`python/http_server.py`（`POST /sr-zones`、
   `POST /sr-scoring/train`）
 - Go 持久化：`backend/internal/analysis/client.go`（`ScoreZones`/
-  `TrainModel`）、`backend/internal/store/sr_zone_repo.go`
+  `TrainModel`）、`backend/internal/store/sr_zone_repo.go`、
+  `backend/internal/store/sr_scoring_train_job_repo.go`（訓練任務追蹤）
 - API：`POST /api/v1/sr-zones`、`GET /api/v1/sr-zones`、
   `GET /api/v1/sr-zones/:id`、`POST /api/v1/sr-zones/train`、
+  `GET /api/v1/sr-zones/train-jobs`、`GET /api/v1/sr-zones/train-jobs/:job_id`、
   `DELETE /api/v1/sr-zones/:id`（見 api-reference.md）
-- 資料表：`stock_sr_zone_analyses`、`stock_sr_zones`（見 database-schema.md）
+- 資料表：`stock_sr_zone_analyses`、`stock_sr_zones`、
+  `sr_scoring_train_jobs`（見 database-schema.md）
 - 前端：「支撐/壓力機率分析」頁面（`SRZones.svelte`）
 
 ---
@@ -180,6 +183,18 @@ backtest.modular.sr_scoring.train ...` 或 `POST /sr-zones/train`）。
 `get_model()` 是 lazy singleton——一次分析（`score_symbol`）只載入一次已訓練
 好的模型，全部 zone 共用同一份，這就是「只有一個 Global Model」的架構基礎
 （見「七」）。
+
+**模型可追蹤性**：`score_symbol()` 回傳頂層帶 `model_version`/
+`model_trained_at`/`model_feature_names`（直接來自載入的 `ModelBundle`），
+Go 端寫入 `stock_sr_zone_analyses.model_version`——每一筆分析都能回答「這是
+哪個模型版本、什麼時候訓練的算出來的」。
+
+**訓練任務可觀測化**：`POST /sr-zones/train` 不再只是觸發背景 goroutine、
+回應完就沒有下文——Go 端會先建立一筆 `sr_scoring_train_jobs` 紀錄
+（`status=pending`）並回傳 `job_id`，goroutine 依序更新
+`running → done`/`failed`（含 rows/sources/metrics/model_path/model_version
+或 error），前端可用 `GET /sr-zones/train-jobs/:job_id` 輪詢進度，不需要只靠
+伺服器 log 或重新呼叫 `POST /sr-zones` 猜測新模型是否已生效。
 
 ---
 
@@ -378,10 +393,6 @@ zones 為空、或都沒有明確方向時，`global_expected_value`/`global_con
   `broken_price` 欄位，但目前沒有任何 API 或排程會更新它們（不像個股分析
   有 `POST /analysis/:id/verify`）。這是預留給未來擴充的欄位，現階段每筆
   zone 的 `status` 永遠是 `PENDING`。
-- **`model_version` 未被寫入**：`stock_sr_zone_analyses.model_version` 欄位
-  存在，但 Go 端 `ToStore()` 目前固定寫入空字串——Python `/sr-zones` 回應
-  沒有把 `ModelBundle.version` 一併回傳，之後如需追蹤是哪個模型版本產生的
-  分析，需要擴充 Python 端輸出。
 - **`atr_width_multiplier`/`max_merge_width_multiple` 需要依實際股票調參**：
   這兩個常數目前是全域預設值（1.5／2.0），對不同價位、不同波動度的股票
   可能需要不同的合理範圍，尚未针對大規模真實資料做系統性調參。

@@ -209,25 +209,37 @@ type ZoneScore struct {
 // 是「只有一個 Global Model」的整體評估區塊，只在這裡出現一次，不會在每個
 // Zone 裡重複（見 sr_scoring 套件說明的「九、十、十二」）。
 type ZoneScoreResult struct {
-	Symbol                string      `json:"symbol"`
-	Timeframe             string      `json:"timeframe"`
-	AnalyzedAt            string      `json:"analyzed_at"` // RFC3339
-	CurrentPrice          float64     `json:"current_price"`
-	GlobalTrend           float64     `json:"global_trend"`
-	GlobalVolatility      float64     `json:"global_volatility"`
-	GlobalExpectedValue   *float64    `json:"global_expected_value"`
-	GlobalConfidence      *float64    `json:"global_confidence"`
-	GlobalRiskRewardRatio *float64    `json:"global_risk_reward_ratio"`
-	Zones                 []ZoneScore `json:"zones"`
+	Symbol                string   `json:"symbol"`
+	Timeframe             string   `json:"timeframe"`
+	AnalyzedAt            string   `json:"analyzed_at"` // RFC3339
+	CurrentPrice          float64  `json:"current_price"`
+	GlobalTrend           float64  `json:"global_trend"`
+	GlobalVolatility      float64  `json:"global_volatility"`
+	GlobalExpectedValue   *float64 `json:"global_expected_value"`
+	GlobalConfidence      *float64 `json:"global_confidence"`
+	GlobalRiskRewardRatio *float64 `json:"global_risk_reward_ratio"`
+	// ModelVersion/ModelTrainedAt/ModelFeatureNames 來自產生這次結果的
+	// ModelBundle（見 model.py::ModelBundle），供追蹤「這筆分析是哪個模型
+	// 版本算出來的」。ModelFeatureNames 目前只用於 API 診斷，不寫入 DB。
+	ModelVersion      string      `json:"model_version"`
+	ModelTrainedAt    string      `json:"model_trained_at"`
+	ModelFeatureNames []string    `json:"model_feature_names"`
+	Zones             []ZoneScore `json:"zones"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
-// ModelVersion 目前固定為空字串——Python bundle 的 version 沒有隨每次
-// /sr-zones 回應一併回傳，之後如需追蹤模型版本可擴充 Python 端輸出。
+// ModelVersion 若 Python 端沒有回傳（理論上不應該發生，防禦性處理），寫入
+// "unknown" 而不是空字串——空字串在 DB 裡看起來像「忘了填」，"unknown" 才
+// 明確代表「這筆資料就是沒有版本資訊」。
 func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, error) {
 	analyzedAt, err := time.Parse(time.RFC3339, r.AnalyzedAt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse analyzed_at %q: %w", r.AnalyzedAt, err)
+	}
+
+	modelVersion := r.ModelVersion
+	if modelVersion == "" {
+		modelVersion = "unknown"
 	}
 
 	a := &store.SRZoneAnalysis{
@@ -240,6 +252,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		GlobalExpectedValue:   nullFloat(r.GlobalExpectedValue),
 		GlobalConfidence:      nullFloat(r.GlobalConfidence),
 		GlobalRiskRewardRatio: nullFloat(r.GlobalRiskRewardRatio),
+		ModelVersion:          modelVersion,
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))

@@ -60,15 +60,16 @@ func main() {
 	}
 
 	// Repos
-	candleRepo    := store.NewCandleRepo(db)
+	candleRepo := store.NewCandleRepo(db)
 	indicatorRepo := store.NewIndicatorRepo(db)
-	signalRepo    := store.NewSignalRepo(db)
+	signalRepo := store.NewSignalRepo(db)
 	watchlistRepo := store.NewWatchlistRepo(db)
-	backtestRepo  := store.NewBacktestRepo(db)
-	userRepo      := store.NewUserRepo(db)
-	jobRunRepo    := store.NewJobRunRepo(db)
-	analysisRepo  := store.NewAnalysisRepo(db)
-	srZoneRepo    := store.NewSRZoneRepo(db)
+	backtestRepo := store.NewBacktestRepo(db)
+	userRepo := store.NewUserRepo(db)
+	jobRunRepo := store.NewJobRunRepo(db)
+	analysisRepo := store.NewAnalysisRepo(db)
+	srZoneRepo := store.NewSRZoneRepo(db)
+	srScoringTrainJobRepo := store.NewSRScoringTrainJobRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -86,7 +87,7 @@ func main() {
 		log.Warn("finmind api_key 未設定，FinMind 請求極可能失敗（http 422 或空白錯誤訊息）；請設定環境變數 FINMIND_API_KEY")
 	}
 	finmindClient := market.NewFinMindClient(cfg.FinMind)
-	fetcher       := market.NewFetcher(finmindClient, candleRepo, log)
+	fetcher := market.NewFetcher(finmindClient, candleRepo, log)
 
 	// Fugle（富果）即時行情，與 FinMind 並行；Enabled 為 false 時完全不掛載，
 	// 行為與導入前一致。Tier 1（REST 廣度掃描）／Tier 2（WebSocket 熱點）的
@@ -107,7 +108,7 @@ func main() {
 	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, cfg.FinMind.IntradayEnabled, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, btManager, analysisClient, fetcher, sched, userRepo, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, btManager, analysisClient, fetcher, sched, userRepo, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

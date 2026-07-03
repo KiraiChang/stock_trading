@@ -252,15 +252,19 @@ curl -X POST http://localhost:8080/api/v1/analysis/1/verify \
 `POST /sr-zones` 會失敗（fail-fast，不會靜默回傳中性機率）：
 
 ```bash
-# 1. 先訓練模型（symbols 省略時自動用整個監控清單；非同步，立即回 202）
+# 1. 先訓練模型（symbols 省略時自動用整個監控清單；非同步，立即回 202 + job_id）
 curl -X POST http://localhost:8080/api/v1/sr-zones/train \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"symbols":["2330","2454"],"limit":1500}'
-# → {"message":"模型訓練已在背景啟動","symbols":2}
-# 訓練在背景 goroutine 執行，看後端 log 確認完成（沒有查詢進度的 API）
+# → {"job_id":"sr_train_20260703_090000_000","status":"pending","message":"模型訓練已在背景啟動","symbols":2}
 
-# 2. 訓練完成後才能分析
+# 2. 用 job_id 輪詢進度，直到 status = done 或 failed
+curl http://localhost:8080/api/v1/sr-zones/train-jobs/sr_train_20260703_090000_000 \
+  -H "Authorization: Bearer $TOKEN"
+# → { "job": { "status": "done", "rows": 128, "sources": 2, "metrics": {...}, "model_version": "v2", ... } }
+
+# 3. 訓練完成後才能分析
 curl -X POST http://localhost:8080/api/v1/sr-zones \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
@@ -269,7 +273,8 @@ curl -X POST http://localhost:8080/api/v1/sr-zones \
 ```
 
 也可以直接用前端「支撐/壓力機率分析」頁面（`/sr-zones`），下方「訓練/更新
-機率模型」區塊就是 `POST /sr-zones/train` 的 UI。
+機率模型」區塊就是 `POST /sr-zones/train` 的 UI，觸發後會自動每 3 秒輪詢一次
+狀態，完成/失敗都會顯示，下方也有最近幾次訓練紀錄。
 
 CLI 訓練（不透過 Go/HTTP，適合本地一次性訓練或除錯）：
 

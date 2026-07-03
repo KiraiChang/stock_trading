@@ -128,6 +128,9 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert "global_expected_value" in result
     assert "global_confidence" in result
     assert "global_risk_reward_ratio" in result
+    assert result["model_version"] == bundle.version
+    assert result["model_trained_at"] == bundle.trained_at
+    assert result["model_feature_names"] == bundle.feature_names
     assert isinstance(result["zones"], list)
     for z in result["zones"]:
         assert 0.0 <= z["support_score"] <= 1.0

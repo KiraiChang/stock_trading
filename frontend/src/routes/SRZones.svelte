@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
   import {
     createSRZoneAnalysis,
@@ -7,9 +7,13 @@
     getSRZoneAnalysis,
     deleteSRZoneAnalysis,
     triggerSRScoringTrain,
+    getTrainJob,
+    listTrainJobs,
     type SRZoneAnalysis,
     type SRZone,
     type ZoneTier,
+    type SRScoringTrainJob,
+    type TrainJobStatus,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -31,10 +35,26 @@
   let trainLimit = 1500
   let trainModelType: 'gradient_boosting' | 'logistic_regression' = 'gradient_boosting'
   let training = false
-  let trainMessage = ''
   let trainError = ''
+  let activeJob: SRScoringTrainJob | null = null
+  let recentTrainJobs: SRScoringTrainJob[] = []
+  let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  onMount(loadHistory)
+  const trainStatusLabel: Record<TrainJobStatus, string> = {
+    pending: '排隊中', running: '訓練中', done: '完成', failed: '失敗',
+  }
+  const trainStatusClass: Record<TrainJobStatus, string> = {
+    pending: 'bg-gray-700/60 text-gray-400',
+    running: 'bg-blue-900/40 text-blue-400',
+    done: 'bg-green-900/40 text-green-400',
+    failed: 'bg-red-900/40 text-red-400',
+  }
+
+  onMount(() => {
+    loadHistory()
+    loadRecentTrainJobs()
+  })
+  onDestroy(stopPolling)
 
   const roleLabel: Record<string, string> = {
     SUPPORT: '支撐', RESISTANCE: '壓力', AT_ZONE: '現價在區間內',
@@ -176,7 +196,7 @@
   async function runTrain() {
     training = true
     trainError = ''
-    trainMessage = ''
+    activeJob = null
     try {
       const symbols = trainSymbols
         .split(',')
@@ -187,12 +207,51 @@
         limit: trainLimit,
         modelType: trainModelType,
       })
-      trainMessage = `${res.message}（${res.symbols} 檔股票）`
+      pollTrainJob(res.job_id)
     } catch {
       trainError = '觸發失敗，請確認 Python service 是否已啟動'
-    } finally {
       training = false
     }
+  }
+
+  // 每 3 秒查一次任務狀態，直到 done/failed 才停止——訓練可能耗時數十秒到
+  // 數分鐘，讓使用者不用一直盯著頁面，也不用只靠伺服器 log 才知道結果。
+  function pollTrainJob(jobId: string) {
+    stopPolling()
+    pollTimer = setInterval(async () => {
+      try {
+        const job = await getTrainJob(jobId)
+        activeJob = job
+        if (job.status === 'done' || job.status === 'failed') {
+          stopPolling()
+          loadRecentTrainJobs()
+        }
+      } catch {
+        trainError = '查詢訓練狀態失敗'
+        stopPolling()
+      }
+    }, 3000)
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+    }
+    training = false
+  }
+
+  async function loadRecentTrainJobs() {
+    try {
+      recentTrainJobs = await listTrainJobs(5)
+    } catch {
+      // 沉默失敗，不影響主要分析功能的呈現
+    }
+  }
+
+  function metricValue(job: SRScoringTrainJob | null, model: 'hold' | 'break', field: string): string {
+    const v = job?.metrics?.[model]?.[field]
+    return v === undefined || v === null ? '—' : v.toFixed(3)
   }
 
   // symbol 留空時列出「所有股票」最近的分析紀錄，方便一進頁面就有內容可看；
@@ -326,9 +385,6 @@
       {#if trainError}
         <p class="text-rise text-sm mb-3">{trainError}</p>
       {/if}
-      {#if trainMessage}
-        <p class="text-green-400 text-sm mb-3">{trainMessage}</p>
-      {/if}
       <div class="flex flex-wrap gap-3 items-center">
         <input
           bind:value={trainSymbols}
@@ -359,9 +415,63 @@
           disabled={training}
           on:click={runTrain}
         >
-          {training ? '觸發中...' : '開始訓練'}
+          {training ? '訓練中...' : '開始訓練'}
         </button>
       </div>
+
+      <!-- 目前這次觸發的任務狀態：每 3 秒輪詢一次，直到 done/failed -->
+      {#if activeJob}
+        <div class="mt-3 px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium {trainStatusClass[activeJob.status]}">
+            {trainStatusLabel[activeJob.status]}
+          </span>
+          <span class="text-muted font-mono">{activeJob.job_id}</span>
+          {#if activeJob.status === 'done'}
+            <span class="text-white">rows={activeJob.rows} sources={activeJob.sources} model={activeJob.model_version}</span>
+            <span class="text-muted">hold AUC {metricValue(activeJob, 'hold', 'auc')} / break AUC {metricValue(activeJob, 'break', 'auc')}</span>
+          {:else if activeJob.status === 'failed'}
+            <span class="text-rise">{activeJob.error}</span>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- 最近訓練紀錄：不用只靠伺服器 log 才知道之前訓練成功了沒 -->
+      {#if recentTrainJobs.length > 0}
+        <div class="mt-4">
+          <p class="text-muted text-xs mb-1.5">最近訓練紀錄</p>
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-muted border-b border-border/60">
+                <th class="text-left py-1">狀態</th>
+                <th class="text-left py-1">模型</th>
+                <th class="text-right py-1">rows/sources</th>
+                <th class="text-right py-1">hold/break AUC</th>
+                <th class="text-left py-1">時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each recentTrainJobs as job (job.job_id)}
+                <tr class="border-b border-border/30">
+                  <td class="py-1">
+                    <span class="inline-flex items-center px-1.5 py-0 rounded-full font-medium {trainStatusClass[job.status]}">
+                      {trainStatusLabel[job.status]}
+                    </span>
+                  </td>
+                  <td class="py-1 text-white">{job.model_type}{job.model_version ? ` (${job.model_version})` : ''}</td>
+                  <td class="py-1 text-right text-white">{job.rows ?? '—'} / {job.sources ?? '—'}</td>
+                  <td class="py-1 text-right text-white">{metricValue(job, 'hold', 'auc')} / {metricValue(job, 'break', 'auc')}</td>
+                  <td class="py-1 text-muted font-mono">{formatDateTime(job.created_at)}</td>
+                </tr>
+                {#if job.status === 'failed' && job.error}
+                  <tr class="border-b border-border/30">
+                    <td colspan="5" class="py-1 text-rise">{job.error}</td>
+                  </tr>
+                {/if}
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
     </div>
 
     <!-- ── 目前分析結果 ──────────────────────────────────────── -->

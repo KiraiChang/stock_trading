@@ -557,7 +557,7 @@ Python 端預設值（250）。
     "global_expected_value": 0.004,
     "global_confidence": 0.61,
     "global_risk_reward_ratio": 0.92,
-    "model_version": "",
+    "model_version": "v2",
     "created_at": "2026-07-01T10:00:00+08:00"
   },
   "zones": [
@@ -620,10 +620,12 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
 
 ### POST `/sr-zones/train`
 
-觸發 `hold_model`/`break_model` 重新訓練。**非同步**——立即回傳
-`202 Accepted`，實際訓練在背景 goroutine 執行（視資料量可能耗時數十秒到
-數分鐘），完成或失敗只會記錄在伺服器 log，前端沒有輪詢機制可以查詢訓練
-進度，需要重新呼叫 `POST /sr-zones` 才能確認新模型是否已生效。
+觸發 `hold_model`/`break_model` 重新訓練。**非同步**——立即建立一筆
+`sr_scoring_train_jobs` 紀錄並回傳 `job_id`（`status=pending`），實際訓練在
+背景 goroutine 執行（視資料量可能耗時數十秒到數分鐘），依序更新
+`pending → running → done`/`failed`。用 `job_id` 輪詢
+`GET /sr-zones/train-jobs/:job_id` 查詢進度，不需要只靠伺服器 log 或重新
+呼叫 `POST /sr-zones` 猜測新模型是否已生效。
 
 **Request Body：**
 ```json
@@ -636,8 +638,49 @@ sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，
 
 **Response（202 Accepted）：**
 ```json
-{ "message": "模型訓練已在背景啟動", "symbols": 12 }
+{ "job_id": "sr_train_20260703_090000_000", "status": "pending", "message": "模型訓練已在背景啟動", "symbols": 12 }
 ```
+
+### GET `/sr-zones/train-jobs`
+
+列出最近的訓練任務。
+
+**Query Parameters：** `limit`（預設 20，最多 200）
+
+**Response：**
+```json
+{
+  "jobs": [
+    {
+      "id": 3,
+      "job_id": "sr_train_20260703_090000_000",
+      "status": "done",
+      "symbols": "[\"2330\",\"2454\"]",
+      "timeframe": "1d",
+      "fetch_limit": 1500,
+      "model_type": "gradient_boosting",
+      "rows": 128,
+      "sources": 2,
+      "metrics": { "hold": { "auc": 0.81, "accuracy": 0.76 }, "break": { "auc": 0.77, "accuracy": 0.72 } },
+      "model_path": "models/sr_scoring_v2.joblib",
+      "model_version": "v2",
+      "error": null,
+      "started_at": "2026-07-03T09:00:01+08:00",
+      "finished_at": "2026-07-03T09:01:47+08:00",
+      "created_at": "2026-07-03T09:00:00+08:00"
+    }
+  ],
+  "total": 1
+}
+```
+
+`rows`/`sources`/`metrics`/`model_path`/`model_version` 只有 `status=done`
+才有值；`error` 只有 `status=failed` 才有值。
+
+### GET `/sr-zones/train-jobs/:job_id`
+
+取得單筆訓練任務詳情，格式同上方陣列裡的單一物件（`{ "job": {...} }`）。
+找不到回 `404`。
 
 ### DELETE `/sr-zones/:id`
 

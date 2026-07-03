@@ -10,7 +10,7 @@ type SRScoringTrainJobRepo interface {
 	// Create 建立一筆 pending 狀態的任務，回傳新建的 id
 	Create(ctx context.Context, job *SRScoringTrainJob) (uint64, error)
 	MarkRunning(ctx context.Context, jobID string) error
-	MarkDone(ctx context.Context, jobID string, rows, sources int, metrics RawJSON, modelPath, modelVersion string, datasetSummary RawJSON) error
+	MarkDone(ctx context.Context, jobID string, rows, sources int, metrics RawJSON, modelPath, modelVersion, splitMethod string, datasetSummary RawJSON) error
 	MarkFailed(ctx context.Context, jobID string, errMsg string) error
 	Get(ctx context.Context, jobID string) (*SRScoringTrainJob, error)
 	List(ctx context.Context, limit int) ([]SRScoringTrainJob, error)
@@ -26,7 +26,7 @@ func NewSRScoringTrainJobRepo(db *sqlx.DB) SRScoringTrainJobRepo {
 }
 
 const srScoringTrainJobColumns = `id, job_id, status, symbols, timeframe, fetch_limit, model_type,
-	rows, sources, metrics, model_path, model_version, dataset_summary, error, started_at, finished_at, created_at`
+	rows, sources, metrics, model_path, model_version, split_method, dataset_summary, error, started_at, finished_at, created_at`
 
 func (r *srScoringTrainJobRepo) Create(ctx context.Context, job *SRScoringTrainJob) (uint64, error) {
 	if job.Status == "" {
@@ -65,12 +65,12 @@ func (r *srScoringTrainJobRepo) MarkRunning(ctx context.Context, jobID string) e
 	return err
 }
 
-func (r *srScoringTrainJobRepo) MarkDone(ctx context.Context, jobID string, rows, sources int, metrics RawJSON, modelPath, modelVersion string, datasetSummary RawJSON) error {
+func (r *srScoringTrainJobRepo) MarkDone(ctx context.Context, jobID string, rows, sources int, metrics RawJSON, modelPath, modelVersion, splitMethod string, datasetSummary RawJSON) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE sr_scoring_train_jobs
-		SET status='done', rows=?, sources=?, metrics=?, model_path=?, model_version=?, dataset_summary=?, finished_at=CURRENT_TIMESTAMP
+		SET status='done', rows=?, sources=?, metrics=?, model_path=?, model_version=?, split_method=?, dataset_summary=?, finished_at=CURRENT_TIMESTAMP
 		WHERE job_id=?
-	`), rows, sources, metrics, modelPath, modelVersion, datasetSummary, jobID)
+	`), rows, sources, metrics, modelPath, modelVersion, splitMethod, datasetSummary, jobID)
 	return err
 }
 

@@ -62,7 +62,7 @@ func TestSRScoringTrainJobRepoCreateStartsAsPending(t *testing.T) {
 	if job.Symbols != `["2330","2454"]` || job.Timeframe != "1d" || job.FetchLimit != 1500 || job.ModelType != "gradient_boosting" {
 		t.Fatalf("unexpected job fields: %+v", job)
 	}
-	if job.Rows.Valid || job.Sources.Valid || job.ModelPath.Valid || job.ModelVersion.Valid || job.Error.Valid {
+	if job.Rows.Valid || job.Sources.Valid || job.ModelPath.Valid || job.ModelVersion.Valid || job.SplitMethod.Valid || job.Error.Valid {
 		t.Fatalf("expected all result fields to be NULL before job runs, got %+v", job)
 	}
 	if job.StartedAt.Valid || job.FinishedAt.Valid {
@@ -91,7 +91,7 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 
 	metrics := RawJSON(`{"hold":{"auc":0.81},"break":{"auc":0.77}}`)
 	datasetSummary := RawJSON(`{"rows":128,"rows_by_symbol":{"2330":90,"2454":38}}`)
-	if err := repo.MarkDone(ctx, "sr_train_002", 128, 3, metrics, "models/sr_scoring_v2.joblib", "v2", datasetSummary); err != nil {
+	if err := repo.MarkDone(ctx, "sr_train_002", 128, 3, metrics, "models/sr_scoring_v2.joblib", "v2", "time", datasetSummary); err != nil {
 		t.Fatalf("MarkDone failed: %v", err)
 	}
 
@@ -110,6 +110,9 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 	}
 	if !done.ModelVersion.Valid || done.ModelVersion.String != "v2" {
 		t.Fatalf("unexpected model_version: %+v", done.ModelVersion)
+	}
+	if !done.SplitMethod.Valid || done.SplitMethod.String != "time" {
+		t.Fatalf("unexpected split_method: %+v", done.SplitMethod)
 	}
 	if len(done.Metrics) == 0 {
 		t.Fatalf("expected non-empty metrics JSON, got %+v", done.Metrics)

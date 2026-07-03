@@ -265,7 +265,7 @@ func (h *SRZoneHandler) runTrainJob(jobID string, symbols []string, timeframe st
 	}
 	if err := h.trainJobs.MarkDone(
 		ctx, jobID, result.Rows, result.Sources, store.RawJSON(metricsJSON), result.ModelPath, result.Version,
-		store.RawJSON(datasetSummaryJSON),
+		result.SplitMethod, store.RawJSON(datasetSummaryJSON),
 	); err != nil {
 		h.log.Error("sr_scoring train job: mark done failed", zap.String("job_id", jobID), zap.Error(err))
 	}

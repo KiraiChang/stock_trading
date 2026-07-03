@@ -239,6 +239,7 @@ type SRScoringTrainJob struct {
 	Metrics      RawJSON    `db:"metrics"          json:"metrics,omitempty"`
 	ModelPath    NullString `db:"model_path"       json:"model_path,omitempty"`
 	ModelVersion NullString `db:"model_version"    json:"model_version,omitempty"`
+	SplitMethod  NullString `db:"split_method"     json:"split_method,omitempty"`
 	// DatasetSummary 是 summarize_training_dataset() 的原樣保存（見
 	// sr-zone-scoring.md「模型驗證與校準」），供人工判斷這次訓練出來的模型
 	// 可不可信，不影響任何業務邏輯。

@@ -251,7 +251,7 @@ func TestSRZoneRepoUpdateZoneStatus(t *testing.T) {
 
 	brokenAt := time.Now().UTC().Truncate(time.Second)
 	brokenPrice := 88.5
-	if err := repo.UpdateZoneStatus(ctx, target.ID, "BROKEN", &brokenAt, &brokenPrice); err != nil {
+	if err := repo.UpdateZoneStatus(ctx, target.ID, "BROKEN", &brokenAt, &brokenPrice, ""); err != nil {
 		t.Fatalf("UpdateZoneStatus failed: %v", err)
 	}
 
@@ -276,6 +276,47 @@ func TestSRZoneRepoUpdateZoneStatus(t *testing.T) {
 	}
 	if !found.BrokenPrice.Valid || found.BrokenPrice.Float64 != brokenPrice {
 		t.Fatalf("unexpected broken_price: %+v", found.BrokenPrice)
+	}
+	if found.ResolvedRole.Valid {
+		t.Fatalf("expected resolved_role to stay NULL when resolvedRole=\"\", got %+v", found.ResolvedRole)
+	}
+}
+
+// 【sr_zone_improve review #2】AT_ZONE 驗證後解析出的方向要能被存回並讀出，
+// 不能只更新 status/broken_at/broken_price 而遺漏 resolved_role。
+func TestSRZoneRepoUpdateZoneStatusPersistsResolvedRole(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	zones, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	target := zones[0]
+
+	if err := repo.UpdateZoneStatus(ctx, target.ID, "HELD_SO_FAR", nil, nil, "SUPPORT"); err != nil {
+		t.Fatalf("UpdateZoneStatus failed: %v", err)
+	}
+
+	updated, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	var found *SRZone
+	for i := range updated {
+		if updated[i].ID == target.ID {
+			found = &updated[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected to find zone id=%d", target.ID)
+	}
+	if !found.ResolvedRole.Valid || found.ResolvedRole.String != "SUPPORT" {
+		t.Fatalf("expected resolved_role=SUPPORT, got %+v", found.ResolvedRole)
 	}
 }
 

@@ -52,8 +52,8 @@ func (v *SRZoneVerifier) Verify(ctx context.Context, analysisID uint64) (*store.
 	}
 
 	for i := range zones {
-		status, brokenAt, brokenPrice := verifySRZone(zones[i], future, DefaultConfirmationBars)
-		if err := v.repo.UpdateZoneStatus(ctx, zones[i].ID, status, brokenAt, brokenPrice); err != nil {
+		status, brokenAt, brokenPrice, resolvedRole := verifySRZone(zones[i], future, DefaultConfirmationBars)
+		if err := v.repo.UpdateZoneStatus(ctx, zones[i].ID, status, brokenAt, brokenPrice, resolvedRole); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -69,13 +69,17 @@ func (v *SRZoneVerifier) Verify(ctx context.Context, analysisID uint64) (*store.
 	return updated, updatedZones, nil
 }
 
-// verifySRZone 判斷這個 zone 後續走勢，回傳新的 status/broken_at/broken_price：
+// verifySRZone 判斷這個 zone 後續走勢，回傳新的 status/broken_at/broken_price/
+// resolvedRole：
 //
 //   - role=AT_ZONE：分析當下現價落在區間內，方向未定，不能直接套用
 //     SUPPORT/RESISTANCE 的突破判斷。先找「收盤真正離開區間」的第一根K棒
 //     決定方向（收在上方 → 這個 zone 對它而言變成支撐；收在下方 → 變成
 //     壓力），離開之前維持 PENDING（現價還在區間內，既不是「守住」也不是
-//     「跌破」，沒有方向可以驗證）。
+//     「跌破」，沒有方向可以驗證）。解析出來的方向回傳在 resolvedRole
+//     （不覆寫原始 z.Role，保留「分析當下是 AT_ZONE」這個歷史資訊，見
+//     sr_zone_improve.md review #2）；role 本身就不是 AT_ZONE 時
+//     resolvedRole 永遠是空字串，呼叫端據此把 DB 欄位維持 NULL。
 //   - role=SUPPORT：收盤連續 confirmationBars 根低於 price_low 視為 BROKEN
 //     （比照 count_breakouts 的 streak state machine，避免單一天雜訊誤判）。
 //   - role=RESISTANCE：收盤連續 confirmationBars 根高於 price_high 視為 BROKEN。
@@ -84,8 +88,9 @@ func (v *SRZoneVerifier) Verify(ctx context.Context, analysisID uint64) (*store.
 //
 // 每次都是從候選 candles 的開頭重新掃描（不是從上次驗證結果繼續），所以
 // 一旦某次驗證判定 BROKEN，之後不管價格如何反彈，重新呼叫這個函式永遠會
-// 在同一根K棒判定 BROKEN——不會被後續反彈改回 HELD_SO_FAR。
-func verifySRZone(z store.SRZone, candles []store.Candle, confirmationBars int) (status string, brokenAt *time.Time, brokenPrice *float64) {
+// 在同一根K棒判定 BROKEN——不會被後續反彈改回 HELD_SO_FAR；resolvedRole
+// 同理，一旦解析出方向就不會因為後續資料變動而改變。
+func verifySRZone(z store.SRZone, candles []store.Candle, confirmationBars int) (status string, brokenAt *time.Time, brokenPrice *float64, resolvedRole string) {
 	role := z.Role
 	if role == "AT_ZONE" {
 		exitAt := -1
@@ -102,8 +107,9 @@ func verifySRZone(z store.SRZone, candles []store.Candle, confirmationBars int) 
 			}
 		}
 		if exitAt == -1 {
-			return "PENDING", nil, nil
+			return "PENDING", nil, nil, ""
 		}
+		resolvedRole = role
 		candles = candles[exitAt:]
 	}
 
@@ -127,12 +133,12 @@ func verifySRZone(z store.SRZone, candles []store.Candle, confirmationBars int) 
 
 		if broken && streak >= confirmationBars {
 			t, p := streakStart.Timestamp, streakStart.Close
-			return "BROKEN", &t, &p
+			return "BROKEN", &t, &p, resolvedRole
 		}
 	}
 
 	if touched {
-		return "HELD_SO_FAR", nil, nil
+		return "HELD_SO_FAR", nil, nil, resolvedRole
 	}
-	return "PENDING", nil, nil
+	return "PENDING", nil, nil, resolvedRole
 }

@@ -8,14 +8,18 @@ export type ZoneDirection = 'UP' | 'DOWN' | 'FLAT'
 export type TradingRecommendation = 'STRONG_BUY' | 'BUY' | 'WATCH' | 'NEUTRAL' | 'AVOID' | 'STRONG_SELL'
 export type ZoneTier = 'TIER_1_MAIN_STRUCTURE' | 'TIER_2_TRADING_ZONE' | 'TIER_3_SHORT_TERM'
 
-// trading_score 的可拆解分量（加權貢獻值，五個分量加總 = trading_score）：
-// Score = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)
+// trading_score 的可拆解分量（加權貢獻值，六個分量加總 = trading_score）：
+// Score = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)
+// 【2026-07 籌碼分析整合】新增 chip 分量後，其餘五個分量依原比例縮小
+// （40/20/15/15/10 → 34/17/12.75/12.75/8.5），見後端
+// sr_scoring/scoring.py::TRADING_SCORE_WEIGHTS。
 export interface TradingScoreBreakdown {
   expected_value: number
   risk_reward: number
   trend: number
   volume: number
   confidence: number
+  chip: number
 }
 
 // 機構級版本（2026-07 重新設計，見後端 sr_scoring/scoring.py 開頭的完整說明）
@@ -64,8 +68,8 @@ export interface SRZone {
 
   recent_validation: RecentValidation
 
-  // trading_score = trading_score_breakdown 五個分量加總，可拆解檢視每個
-  // 分量各佔多少分（見十三、Score 必須可拆解）。
+  // trading_score = trading_score_breakdown 六個分量加總，可拆解檢視每個
+  // 分量各佔多少分（見十三、Score 必須可拆解；chip 分量見籌碼分析整合）。
   trading_score: number
   trading_score_breakdown: TradingScoreBreakdown
   trading_recommendation: TradingRecommendation
@@ -80,6 +84,13 @@ export interface SRZone {
   status: 'PENDING' | 'HELD_SO_FAR' | 'BROKEN'
   broken_at?: string | null
   broken_price?: number | null
+
+  // 只有 role='AT_ZONE' 的 zone 在後續驗證（POST /sr-zones/:id/verify）時，
+  // 價格真正收盤離開區間後才會被解析並寫入 SUPPORT 或 RESISTANCE；
+  // role != 'AT_ZONE' 的 zone 永遠是 null（角色從分析當下就已明確）。role
+  // 本身分析後不會再變動，判斷「這個 zone 現在算支撐還是壓力」應優先看
+  // resolved_role，沒有值再退回 role。
+  resolved_role?: 'SUPPORT' | 'RESISTANCE' | null
 }
 
 export interface SRZoneAnalysis {
@@ -91,9 +102,12 @@ export interface SRZoneAnalysis {
   // 只有一個 Global Model：這次分析唯一、權威的整體評估區塊，同一次分析裡
   // 所有 zone 共用，不在每個 zone 重複顯示。global_trend/global_volatility
   // 是股票層級的量；global_expected_value/global_risk_reward_ratio 是所有
-  // zone 依 confidence 加權平均後「唯一收斂」的結果；global_confidence 是
-  // 所有 zone confidence 的簡單平均。zones 為空或都沒有明確方向時，
-  // global_expected_value/global_confidence/global_risk_reward_ratio 可能是 null。
+  // zone 依 confidence 加權平均後「唯一收斂」的結果，只在「完全沒有 zone
+  // 解析出明確方向」（全部是 AT_ZONE 或都沒有 expected_value/risk_reward_ratio）
+  // 時才是 null。global_confidence 是所有 zone confidence 的簡單平均
+  // （不論 zone 有沒有明確方向都會計入），只有 zones 陣列本身是空的時候
+  // 才會是 null——這跟 global_expected_value/global_risk_reward_ratio 的
+  // null 條件不同，不要混為一談。
   global_trend: number
   global_volatility: number
   global_expected_value: number | null

@@ -295,6 +295,14 @@ VERY_HIGH。
 （`±0.15`）分類成 `STRONG_SUPPORT` / `NEUTRAL` / `STRONG_RESISTANCE`——避免
 只看單一分數判斷，要求使用者同時比較兩邊的強度。
 
+`role`（現價位置下目前扮演的角色）跟 `net_score_label`（這個價位帶過去
+更像支撐還是壓力）是兩個不同概念，可能方向相反（例如 `role=SUPPORT` 但
+`net_score_label=STRONG_RESISTANCE`）——這不一定是演算法錯誤，但前端需要
+明確解釋兩者語意差異，並在方向相反時提示「角色與歷史強弱不一致，建議
+降低信心」，避免使用者覺得同一張卡片自相矛盾（見
+[sr_zone_improve.md](./sr_zone_improve.md) review #4，前端實作見
+`frontend/src/routes/SRZones.svelte::roleNetScoreConflicts`）。
+
 ---
 
 ## 八、Expected Value / Risk Reward / Reward-Risk Percentile
@@ -369,21 +377,26 @@ zone 依寬度（`price_high - price_low`）在**同一次分析**裡的相對�
 ## 十二、Trading Score（可拆解）與 Trading Recommendation
 
 ```
-Trading Score = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)
+Trading Score = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)
 ```
+
+【2026-07 籌碼分析整合】新增 `chip` 分量後，原本 EV(40%)/RR(20%)/Trend(15%)/
+Volume(15%)/Confidence(10%) 五個分量依原比例縮小（乘以 0.85），合計仍為
+100，見 `scoring.py::TRADING_SCORE_WEIGHTS`。
 
 每個分量先正規化到 `[0,1]`（`_normalize_signed`：0.5 為中性，±cap 為 0/1
 分），再乘上對應權重，回傳值就是「這個分量對總分的實際貢獻」，直接存在
-`trading_score_breakdown`（五個分量加總 = `trading_score`），使用者可以逐項
+`trading_score_breakdown`（六個分量加總 = `trading_score`），使用者可以逐項
 檢視分數怎麼來的，不用自己再乘一次權重：
 
 | 分量 | 權重 | 正規化方式 |
 |---|---|---|
-| `expected_value` | 40% | `expected_value` 正規化（cap=0.05）；`role=AT_ZONE` 或缺值時用中性值 0.5 |
-| `risk_reward` | 20% | `min(1, risk_reward_ratio / 3.0)`；缺值時用中性值 0.5 |
-| `trend` | 15% | `overall_trend` 正規化（cap=0.1），`role=RESISTANCE` 時取負號對齊方向 |
-| `volume` | 15% | `volume_confirmation` 查表（CONFIRMED=1.0／NEUTRAL=0.5／WEAK=0.3／FAILED=0.0）；缺值時用中性值 0.5 |
-| `confidence` | 10% | 直接用 `confidence`（本身已經是 0~1） |
+| `expected_value` | 34% | `expected_value` 正規化（cap=0.05）；`role=AT_ZONE` 或缺值時用中性值 0.5 |
+| `risk_reward` | 17% | `min(1, risk_reward_ratio / 3.0)`；缺值時用中性值 0.5 |
+| `trend` | 12.75% | `overall_trend` 正規化（cap=0.1），`role=RESISTANCE` 時取負號對齊方向 |
+| `volume` | 12.75% | `volume_confirmation` 查表（CONFIRMED=1.0／NEUTRAL=0.5／WEAK=0.3／FAILED=0.0）；缺值時用中性值 0.5 |
+| `confidence` | 8.5% | 直接用 `confidence`（本身已經是 0~1） |
+| `chip` | 15% | 籌碼分數（`chip_scores.total_score`，-100~100）正規化（cap=100），`role=RESISTANCE` 時取負號對齊方向；查無籌碼資料時用中性值 0.5，見 `fetch_latest_chip_score` |
 
 `role=AT_ZONE` 或角色相關數值缺值時，對應分量用中性值 0.5 計算，不直接給
 0 分——沒有方向不代表這個 zone「不好」，只是還沒有可以評分的方向性資料。
@@ -411,9 +424,13 @@ role=AT_ZONE：    >=50 WATCH / 其餘 NEUTRAL
 | `global_confidence` | 所有 zone confidence 的**簡單平均**（不分角色，不用 confidence 加權自己，避免循環） |
 | `global_risk_reward_ratio` | 比照 `global_expected_value`，用同一套 confidence 加權平均 `risk_reward_ratio` |
 
-zones 為空、或都沒有明確方向時，`global_expected_value`/`global_confidence`/
-`global_risk_reward_ratio` 可能是 `null`。這是為了讓「Final EV」唯一收斂：
-不再需要使用者自己判斷「要看哪個 zone 才代表這檔股票」。
+`global_expected_value`/`global_risk_reward_ratio` 只有在「完全沒有 zone
+解析出明確方向」（zones 為空，或全部是 `AT_ZONE`/沒有 `expected_value`/
+`risk_reward_ratio`）時才是 `null`。`global_confidence` 的 null 條件不同：
+只要 zones 陣列本身不是空的，就算全部都是 `AT_ZONE`，`global_confidence`
+仍然會是所有 zone confidence 的簡單平均，不會是 `null`——只有 zones 完全
+是空陣列時 `global_confidence` 才會是 `null`。這是為了讓「Final EV」唯一
+收斂：不再需要使用者自己判斷「要看哪個 zone 才代表這檔股票」。
 
 ---
 

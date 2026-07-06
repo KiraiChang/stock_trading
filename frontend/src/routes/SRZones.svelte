@@ -156,14 +156,16 @@
     TIER_3_SHORT_TERM: '窄幅區間，貼近盤中操作的精確價位',
   }
 
-  // trading_score 的五個可拆解分量，依權重大到小排列，方便閱讀「總分裡
-  // 佔最大比重的是哪一項」（見 十三、Score 必須可拆解）。
+  // trading_score 的六個可拆解分量，依權重大到小排列，方便閱讀「總分裡
+  // 佔最大比重的是哪一項」（見 十三、Score 必須可拆解）。【2026-07 籌碼
+  // 分析整合】新增 chip 分量後，其餘五個分量依原比例縮小。
   const scoreBreakdownFields: { key: keyof SRZone['trading_score_breakdown']; label: string; weight: number }[] = [
-    { key: 'expected_value', label: 'EV', weight: 40 },
-    { key: 'risk_reward', label: 'RR', weight: 20 },
-    { key: 'trend', label: 'Trend', weight: 15 },
-    { key: 'volume', label: 'Volume', weight: 15 },
-    { key: 'confidence', label: 'Confidence', weight: 10 },
+    { key: 'expected_value', label: 'EV', weight: 34 },
+    { key: 'risk_reward', label: 'RR', weight: 17 },
+    { key: 'chip', label: '籌碼', weight: 15 },
+    { key: 'trend', label: 'Trend', weight: 12.75 },
+    { key: 'volume', label: 'Volume', weight: 12.75 },
+    { key: 'confidence', label: 'Confidence', weight: 8.5 },
   ]
 
   interface TierGroup {
@@ -196,13 +198,34 @@
     expandedZones = { ...expandedZones, [id]: !expandedZones[id] }
   }
 
+  // resolved_role 是驗證後解析出的方向（只有原本 role='AT_ZONE' 的 zone 才
+  // 可能有值，見 lib/api/srZones.ts 說明）。判斷「這個 zone 現在算什麼角色」
+  // 一律要用這個 helper，不要直接讀 z.role——否則 AT_ZONE 驗證後即使已經
+  // 解析出方向，UI 仍會顯示「方向還不明確」，但 status 卻已經是
+  // HELD_SO_FAR/BROKEN，兩者會互相矛盾（見 docs/sr_zone_improve.md review #2）。
+  function effectiveRole(z: SRZone): 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE' {
+    return z.resolved_role ?? z.role
+  }
+
+  // role（現價位置下目前扮演的角色）跟 net_score_label（這個價位帶過去
+  // 更像支撐還是壓力）是兩個不同概念，方向相反不代表演算法錯，但 UI 不
+  // 解釋的話使用者會覺得同一張卡片自相矛盾（role=SUPPORT 卻顯示「強力
+  // 壓力」）。AT_ZONE 沒有明確角色可比較，NEUTRAL net_score 也不構成
+  // 「相反」，兩者都不算衝突（見 docs/sr_zone_improve.md review #4）。
+  function roleNetScoreConflicts(z: SRZone): boolean {
+    const role = effectiveRole(z)
+    if (role === 'SUPPORT' && z.net_score_label === 'STRONG_RESISTANCE') return true
+    if (role === 'RESISTANCE' && z.net_score_label === 'STRONG_SUPPORT') return true
+    return false
+  }
+
   // 主要觀察區間：優先挑已經解析出方向（SUPPORT/RESISTANCE）裡 trading_score
   // 最高的一個；如果全部都還是 AT_ZONE（現價卡在每個區間內），退而求其次
   // 挑 AT_ZONE 裡分數最高的。
   $: mainZone = pickMainZone(currentZones)
   function pickMainZone(zones: SRZone[]): SRZone | null {
     if (zones.length === 0) return null
-    const directional = zones.filter((z) => z.role !== 'AT_ZONE')
+    const directional = zones.filter((z) => effectiveRole(z) !== 'AT_ZONE')
     const pool = directional.length > 0 ? directional : zones
     return pool.reduce((best, z) => (z.trading_score > best.trading_score ? z : best), pool[0])
   }
@@ -238,11 +261,12 @@
   // 已經 BROKEN 就顯示實際結果，而不是假設性的「若跌破/突破」條件——
   // 判斷已經失效，不需要再用未來式提醒使用者。
   function invalidationText(z: SRZone): string {
+    const role = effectiveRole(z)
     if (z.status === 'BROKEN') {
-      return `已於 ${formatDateTime(z.broken_at)}（@ ${fmt(z.broken_price)}）${z.role === 'RESISTANCE' ? '突破' : '跌破'}，這個判斷已經失效`
+      return `已於 ${formatDateTime(z.broken_at)}（@ ${fmt(z.broken_price)}）${role === 'RESISTANCE' ? '突破' : '跌破'}，這個判斷已經失效`
     }
-    if (z.role === 'SUPPORT') return `若跌破 ${fmt(z.price_low)}，這個判斷就失效`
-    if (z.role === 'RESISTANCE') return `若突破 ${fmt(z.price_high)}，這個判斷就失效`
+    if (role === 'SUPPORT') return `若跌破 ${fmt(z.price_low)}，這個判斷就失效`
+    if (role === 'RESISTANCE') return `若突破 ${fmt(z.price_high)}，這個判斷就失效`
     return '現價還在區間內，方向未定，暫不適用'
   }
 
@@ -647,7 +671,7 @@
         {#if mainZone}
           <div class="px-5 py-4 border-b border-border bg-indigo-950/20">
             <p class="text-white text-sm font-medium mb-2">
-              {noviceRoleText[mainZone.role] ?? mainZone.role}，{noviceRecommendationText[mainZone.trading_recommendation] ?? mainZone.trading_recommendation}
+              {noviceRoleText[effectiveRole(mainZone)] ?? effectiveRole(mainZone)}，{noviceRecommendationText[mainZone.trading_recommendation] ?? mainZone.trading_recommendation}
             </p>
             <p class="text-muted text-xs mb-1">主要觀察區間：{fmt(mainZone.price_low)} ~ {fmt(mainZone.price_high)}（{watchRangeText(mainZone)}）</p>
             <p class="text-muted text-xs mb-2">{invalidationText(mainZone)}</p>
@@ -660,8 +684,11 @@
                 <span class="text-muted">（樣本少或太久沒測試，先觀察就好）</span>
               {/if}
             </p>
-            {#if mainZone.role === 'AT_ZONE'}
+            {#if effectiveRole(mainZone) === 'AT_ZONE'}
               <p class="text-muted text-xs mt-1">現在在區間內，方向還不明確，不是確定的買賣訊號。</p>
+            {/if}
+            {#if roleNetScoreConflicts(mainZone)}
+              <p class="text-yellow-400 text-xs mt-1">⚠ 這個價位帶過去的表現跟目前角色方向不一致，建議降低信心，展開進階細節查看歷史強弱。</p>
             {/if}
           </div>
         {/if}
@@ -719,8 +746,11 @@
                       <div>
                         <div class="flex items-center gap-2 flex-wrap mb-1">
                           <span class="font-mono text-white text-sm">{fmt(z.price_low)} ~ {fmt(z.price_high)}</span>
-                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[z.role] ?? 'bg-gray-700/60 text-gray-400'}">
-                            {noviceRoleText[z.role] ?? z.role}
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[effectiveRole(z)] ?? 'bg-gray-700/60 text-gray-400'}">
+                            {noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}
+                            {#if z.resolved_role}
+                              <span class="opacity-60 ml-0.5" title="分析當下是 AT_ZONE，後續驗證解析出方向">（已解析）</span>
+                            {/if}
                           </span>
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
                             {statusLabel[z.status] ?? z.status}
@@ -766,6 +796,14 @@
                           {/if}
                         </div>
 
+                        {#if roleNetScoreConflicts(z)}
+                          <p class="text-yellow-400 text-xs mb-3">
+                            ⚠ 角色與歷史強弱不一致：目前角色是「{noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}」，
+                            但這個價位帶過去的觸碰歷史比較像「{netScoreLabelText[z.net_score_label] ?? z.net_score_label}」，
+                            建議降低信心、多觀察一段時間再判斷。
+                          </p>
+                        {/if}
+
                         <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->
                         <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs mb-3">
                           <div>
@@ -795,7 +833,7 @@
                           </div>
                         </div>
 
-                        <!-- Trading Score 拆解：EV(40%)+RR(20%)+Trend(15%)+Volume(15%)+Confidence(10%) -->
+                        <!-- Trading Score 拆解：EV(34%)+RR(17%)+籌碼(15%)+Trend(12.75%)+Volume(12.75%)+Confidence(8.5%) -->
                         <div class="mb-3">
                           <div class="flex h-2 rounded-full overflow-hidden bg-surface">
                             {#each scoreBreakdownFields as f}

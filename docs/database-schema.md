@@ -189,9 +189,9 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | current_price | 分析當下收盤價 |
 | global_trend | 股票層級趨勢（`trend_slope`），同一次分析所有 zone 共用，只存一次 |
 | global_volatility | 股票層級波動率（`ATR / close`），同一次分析所有 zone 共用，只存一次 |
-| global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字（可為 `NULL`） |
-| global_confidence | 所有 zone confidence 的簡單平均（可為 `NULL`） |
-| global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR（可為 `NULL`） |
+| global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字；只有完全沒有 zone 解析出明確方向（zones 為空或全部 `AT_ZONE`）時才是 `NULL` |
+| global_confidence | 所有 zone confidence 的簡單平均（不論 zone 有沒有明確方向都計入）；只有 zones 陣列本身是空的時候才是 `NULL`，跟 global_expected_value 的 `NULL` 條件不同 |
+| global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR；`NULL` 條件同 global_expected_value |
 | model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v2"`）；Python 端萬一沒回傳則寫 `"unknown"` |
 | model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
 
@@ -210,7 +210,8 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | analysis_id | FK → stock_sr_zone_analyses.id（Go 端手動 2 步刪除，非 DB `ON DELETE CASCADE`） |
 | price_low / price_high | 區間上下緣 |
 | method | `atr` / `volume_profile` |
-| role | `SUPPORT` / `RESISTANCE` / `AT_ZONE`（依現價動態判斷，不是建立時就固定） |
+| role | `SUPPORT` / `RESISTANCE` / `AT_ZONE`（分析當下依現價判斷，寫入後不會再變動） |
+| resolved_role | `SUPPORT` / `RESISTANCE` / `NULL`。只有 `role=AT_ZONE` 的 zone 在後續驗證（`POST /sr-zones/:id/verify`）時，價格真正收盤離開區間後才會被解析並寫入；`role != AT_ZONE` 的 zone 永遠是 `NULL`（角色從分析當下就已明確，不需要另外解析）。前端判斷「這個 zone 現在算支撐還是壓力」應優先看 resolved_role，沒有值再退回 role，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |
 | tier / tier_label | 依區間寬度分三層：`TIER_1_MAIN_STRUCTURE`（主結構）/ `TIER_2_TRADING_ZONE`（交易區）/ `TIER_3_SHORT_TERM`（短期支撐） |
 | support_score / resistance_score | 依機率貝式收縮而來的強度分數（0~1） |
 | net_score / net_score_label | `support_score - resistance_score`；`STRONG_SUPPORT` / `NEUTRAL` / `STRONG_RESISTANCE` |
@@ -224,8 +225,8 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | overlap_group / confluence_count | 跨方法（ATR/volume_profile）重疊分群：不同方法都指向同一價位帶的 zone 有相同的 `overlap_group`；`confluence_count` 是群組內 zone 數（恆 >= 1，單獨的 zone 沒有群組，`overlap_group` 為 `NULL`）。不合併/刪除任何 zone，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十七」 |
 | zone_momentum / zone_direction | 這個 zone 自己的歷史觸碰動能（逐 zone 不同，非股票層級量）；`UP`/`DOWN`/`FLAT` |
 | recent_validation | `VALIDATED_RECENTLY` / `PENDING_VALIDATION` / `NOT_TESTED_RECENTLY` / `EXPIRED` |
-| trading_score | 可拆解的綜合交易分數（0~100） = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%) |
-| trading_score_breakdown | JSON：`trading_score` 五個分量各自的加權貢獻值，加總即為 `trading_score` |
+| trading_score | 可拆解的綜合交易分數（0~100） = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)（【2026-07 籌碼分析整合】新增 chip 分量後原五個分量權重等比例縮小） |
+| trading_score_breakdown | JSON：`trading_score` 六個分量各自的加權貢獻值，加總即為 `trading_score` |
 | trading_recommendation | `STRONG_BUY`/`BUY`/`WATCH`/`NEUTRAL`/`AVOID`/`STRONG_SELL` |
 | status / broken_at / broken_price | `PENDING`（尚未驗證或 `AT_ZONE` 方向未定）/ `HELD_SO_FAR`（曾被觸碰但未被突破）/ `BROKEN`（已被突破，`broken_at`/`broken_price` 是連續確認突破的第一根K棒）。由 `POST /sr-zones/:id/verify` 或 `daily_close` 排程更新，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |
 

@@ -14,8 +14,10 @@ type SRZoneRepo interface {
 	Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error)
 	List(ctx context.Context, symbol string, limit int) ([]SRZoneAnalysis, error)
 	GetZones(ctx context.Context, analysisID uint64) ([]SRZone, error)
-	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）
-	UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64) error
+	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）。
+	// resolvedRole 只有原本 role=AT_ZONE 的 zone 在這次驗證解析出方向時才會
+	// 非空；role 本身不是 AT_ZONE 的 zone 呼叫端應傳空字串，維持 NULL。
+	UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64, resolvedRole string) error
 	// Delete 刪除一筆 zone 評分快照及其所有 zone
 	Delete(ctx context.Context, id uint64) error
 }
@@ -157,17 +159,21 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 			zone_momentum, zone_direction,
 			recent_validation, trading_score, trading_score_breakdown, trading_recommendation,
 			overlap_group, confluence_count,
-			status, broken_at, broken_price
+			status, broken_at, broken_price, resolved_role
 		FROM stock_sr_zones WHERE analysis_id=?
 		ORDER BY CASE tier WHEN 'TIER_1_MAIN_STRUCTURE' THEN 1 WHEN 'TIER_2_TRADING_ZONE' THEN 2 ELSE 3 END, trading_score DESC
 	`), analysisID)
 	return rows, err
 }
 
-func (r *srZoneRepo) UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64) error {
+func (r *srZoneRepo) UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64, resolvedRole string) error {
+	var resolvedRoleArg any
+	if resolvedRole != "" {
+		resolvedRoleArg = resolvedRole
+	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE stock_sr_zones SET status=?, broken_at=?, broken_price=? WHERE id=?
-	`), status, brokenAt, brokenPrice, zoneID)
+		UPDATE stock_sr_zones SET status=?, broken_at=?, broken_price=?, resolved_role=? WHERE id=?
+	`), status, brokenAt, brokenPrice, resolvedRoleArg, zoneID)
 	return err
 }
 

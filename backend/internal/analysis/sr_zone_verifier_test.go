@@ -22,13 +22,16 @@ func TestVerifySRZoneSupportHeldWhenTouchedButNotBroken(t *testing.T) {
 		candleAt(day(2), 97, 107, 96, 106), // 反彈離開
 	}
 
-	status, brokenAt, brokenPrice := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, brokenPrice, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "HELD_SO_FAR" {
 		t.Fatalf("expected HELD_SO_FAR, got %s", status)
 	}
 	if brokenAt != nil || brokenPrice != nil {
 		t.Fatalf("expected no broken_at/broken_price, got %v/%v", brokenAt, brokenPrice)
+	}
+	if resolvedRole != "" {
+		t.Fatalf("expected empty resolvedRole for a zone that was never AT_ZONE, got %q", resolvedRole)
 	}
 }
 
@@ -39,7 +42,7 @@ func TestVerifySRZonePendingWhenNeverTouched(t *testing.T) {
 		candleAt(day(2), 121, 123, 119, 122),
 	}
 
-	status, brokenAt, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, _, _ := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "PENDING" {
 		t.Fatalf("expected PENDING, got %s", status)
@@ -57,7 +60,7 @@ func TestVerifySRZoneSupportBrokenAfterConsecutiveCloses(t *testing.T) {
 		candleAt(day(3), 91, 105, 91, 104), // 之後反彈，不應該影響結果
 	}
 
-	status, brokenAt, brokenPrice := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, brokenPrice, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "BROKEN" {
 		t.Fatalf("expected BROKEN, got %s", status)
@@ -68,6 +71,9 @@ func TestVerifySRZoneSupportBrokenAfterConsecutiveCloses(t *testing.T) {
 	if brokenPrice == nil || *brokenPrice != 92.0 {
 		t.Fatalf("expected broken_price=92.0 (close of day(1)), got %v", brokenPrice)
 	}
+	if resolvedRole != "" {
+		t.Fatalf("expected empty resolvedRole for a zone that was never AT_ZONE, got %q", resolvedRole)
+	}
 }
 
 func TestVerifySRZoneSupportSingleBarBreakDoesNotConfirm(t *testing.T) {
@@ -77,7 +83,7 @@ func TestVerifySRZoneSupportSingleBarBreakDoesNotConfirm(t *testing.T) {
 		candleAt(day(2), 92, 105, 92, 104),
 	}
 
-	status, _, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, _, _, _ := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "HELD_SO_FAR" {
 		t.Fatalf("expected HELD_SO_FAR (single-bar break doesn't confirm), got %s", status)
@@ -91,7 +97,7 @@ func TestVerifySRZoneResistanceBrokenAfterConsecutiveCloses(t *testing.T) {
 		candleAt(day(2), 105, 108, 104, 107),
 	}
 
-	status, brokenAt, brokenPrice := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, brokenPrice, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "BROKEN" {
 		t.Fatalf("expected BROKEN, got %s", status)
@@ -102,6 +108,9 @@ func TestVerifySRZoneResistanceBrokenAfterConsecutiveCloses(t *testing.T) {
 	if brokenPrice == nil || *brokenPrice != 105.0 {
 		t.Fatalf("unexpected broken_price: %v", brokenPrice)
 	}
+	if resolvedRole != "" {
+		t.Fatalf("expected empty resolvedRole for a zone that was never AT_ZONE, got %q", resolvedRole)
+	}
 }
 
 func TestVerifySRZoneAtZoneStaysPendingWhilePriceRemainsInside(t *testing.T) {
@@ -111,13 +120,16 @@ func TestVerifySRZoneAtZoneStaysPendingWhilePriceRemainsInside(t *testing.T) {
 		candleAt(day(2), 98, 99, 96, 97),
 	}
 
-	status, brokenAt, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, _, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "PENDING" {
 		t.Fatalf("expected PENDING while price stays inside the zone, got %s", status)
 	}
 	if brokenAt != nil {
 		t.Fatalf("expected no broken_at, got %v", brokenAt)
+	}
+	if resolvedRole != "" {
+		t.Fatalf("expected empty resolvedRole while price hasn't exited the zone yet, got %q", resolvedRole)
 	}
 }
 
@@ -129,11 +141,14 @@ func TestVerifySRZoneAtZoneResolvesRoleAfterExitingAbove(t *testing.T) {
 		candleAt(day(3), 105, 106, 96, 97), // 跌回區間但只有一天，未達 confirmationBars
 	}
 
-	status, _, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, _, _, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	// 離開區間後只被觸碰一次、沒有連續 2 根確認跌破，應該是 HELD_SO_FAR
 	if status != "HELD_SO_FAR" {
 		t.Fatalf("expected HELD_SO_FAR after resolving to SUPPORT and surviving a single-bar re-test, got %s", status)
+	}
+	if resolvedRole != "SUPPORT" {
+		t.Fatalf("expected resolvedRole=SUPPORT (price exited above the zone), got %q", resolvedRole)
 	}
 }
 
@@ -146,7 +161,7 @@ func TestVerifySRZoneAtZoneResolvesRoleAfterExitingBelowThenBreaks(t *testing.T)
 		candleAt(day(4), 101, 103, 100, 102),
 	}
 
-	status, brokenAt, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status, brokenAt, _, resolvedRole := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status != "BROKEN" {
 		t.Fatalf("expected BROKEN after resolving to RESISTANCE and then breaking out, got %s", status)
@@ -154,12 +169,15 @@ func TestVerifySRZoneAtZoneResolvesRoleAfterExitingBelowThenBreaks(t *testing.T)
 	if brokenAt == nil || !brokenAt.Equal(day(3)) {
 		t.Fatalf("unexpected broken_at: %v", brokenAt)
 	}
+	if resolvedRole != "RESISTANCE" {
+		t.Fatalf("expected resolvedRole=RESISTANCE (price exited below the zone), got %q", resolvedRole)
+	}
 }
 
 func TestVerifySRZoneNoFutureCandlesKeepsPending(t *testing.T) {
 	z := store.SRZone{Role: "SUPPORT", PriceLow: 95.0, PriceHigh: 100.0}
 
-	status, brokenAt, brokenPrice := verifySRZone(z, nil, DefaultConfirmationBars)
+	status, brokenAt, brokenPrice, _ := verifySRZone(z, nil, DefaultConfirmationBars)
 
 	if status != "PENDING" {
 		t.Fatalf("expected PENDING with no future candles, got %s", status)
@@ -178,13 +196,16 @@ func TestVerifySRZoneIsIdempotentAfterBrokenEvenWithLaterRecovery(t *testing.T) 
 		candleAt(day(4), 109, 111, 108, 110),
 	}
 
-	status1, brokenAt1, _ := verifySRZone(z, candles, DefaultConfirmationBars)
-	status2, brokenAt2, _ := verifySRZone(z, candles, DefaultConfirmationBars)
+	status1, brokenAt1, _, resolvedRole1 := verifySRZone(z, candles, DefaultConfirmationBars)
+	status2, brokenAt2, _, resolvedRole2 := verifySRZone(z, candles, DefaultConfirmationBars)
 
 	if status1 != "BROKEN" || status2 != "BROKEN" {
 		t.Fatalf("expected BROKEN on both runs, got %s / %s", status1, status2)
 	}
 	if !brokenAt1.Equal(*brokenAt2) {
 		t.Fatalf("expected identical broken_at across repeated verify calls (idempotent), got %v vs %v", brokenAt1, brokenAt2)
+	}
+	if resolvedRole1 != resolvedRole2 {
+		t.Fatalf("expected identical resolvedRole across repeated verify calls (idempotent), got %q vs %q", resolvedRole1, resolvedRole2)
 	}
 }

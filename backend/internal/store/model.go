@@ -226,6 +226,14 @@ type SRZone struct {
 	Status      string      `db:"status"                  json:"status"` // PENDING / HELD_SO_FAR / BROKEN（由 analysis.SRZoneVerifier 更新，見 sr-zone-scoring.md「十四」）
 	BrokenAt    NullTime    `db:"broken_at"               json:"broken_at,omitempty"`
 	BrokenPrice NullFloat64 `db:"broken_price"            json:"broken_price,omitempty"`
+
+	// ResolvedRole 只有 Role=AT_ZONE 的 zone 在後續驗證時，價格真正收盤離開
+	// 區間後才會被解析並寫入（SUPPORT 或 RESISTANCE）；Role != AT_ZONE 的
+	// zone 永遠是 NULL（角色從分析當下就已明確，不需要另外解析）。不覆寫
+	// 原始 Role，是為了保留「分析當下是 AT_ZONE」這個歷史資訊，同時讓
+	// status/broken_at/broken_price 有明確對應的方向可以解釋，見
+	// sr_zone_improve.md review #2。
+	ResolvedRole NullString `db:"resolved_role" json:"resolved_role,omitempty"`
 }
 
 // SRScoringTrainJob 追蹤一次「重新訓練 hold/break 機率模型」的背景任務

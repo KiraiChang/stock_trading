@@ -37,6 +37,162 @@
 - 生命週期不完整：zone 有 `status` / `broken_at` / `broken_price`，但沒有 verifier 或排程更新。
 - 營運狀態不可見：訓練是背景 goroutine，API 立即回 202，但沒有 job id、進度、最後訓練結果或前端輪詢。
 
+## 2026-07-06 Review：可讀性、正確性與矛盾結果檢查
+
+以下是針對目前程式碼狀態的靜態 review。重點不是重提既有 phase，而是標出目前已出現或容易出現的「結果矛盾」與可讀性問題，後續實作時應優先處理。
+
+### 整體可讀性
+
+- Python 端註解與文件非常完整，`features.py`、`labeling.py`、`types.py` 對 no-lookahead、角色語意、confidence、EV/RR 都有清楚說明。
+- `scoring.py` 單檔責任偏重，現在同時包含機率正規化、confidence / recent validation、tier 排序、overlap grouping、trading score / recommendation、global metrics、API response serialization。
+- 短期可接受，但後續再加規則時建議拆分，例如 `scoring_rules.py`、`ranking.py`、`serialization.py`。
+- Go 端 `analysis.Client -> ToStore -> SRZoneRepo` 映射清楚，欄位大致保持一對一。
+- 前端「新手摘要 + 進階細節」方向正確，但目前摘要會隱藏某些矛盾訊號，容易讓使用者只看到單一結論。
+
+### 正確性與矛盾結果問題
+
+#### 1. Trading Score 實作已改成 6 個分量，但前端與文件仍是 5 個分量
+
+目前 Python 實際公式已是：
+
+```text
+EV 34 + RR 17 + Trend 12.75 + Volume 12.75 + Confidence 8.5 + Chip 15
+```
+
+來源：
+
+- `python/backtest/modular/sr_scoring/scoring.py::TRADING_SCORE_WEIGHTS`
+- `python/backtest/modular/sr_scoring/scoring.py::_trading_score_breakdown`
+
+但以下位置仍寫舊公式：
+
+- `frontend/src/lib/api/srZones.ts`
+  - `TradingScoreBreakdown` 缺少 `chip`
+  - 註解仍是五個分量、舊權重
+- `frontend/src/routes/SRZones.svelte`
+  - `scoreBreakdownFields` 只顯示 EV/RR/Trend/Volume/Confidence
+  - 進階條狀圖看不到 `chip` 對總分的貢獻
+- `docs/sr-zone-scoring.md`
+  - Trading Score 章節仍寫 `EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)`
+- `docs/database-schema.md`
+  - `trading_score` / `trading_score_breakdown` 說明仍是五個分量
+
+影響：
+
+- 前端顯示的 breakdown 加總不等於實際 `trading_score`。
+- 使用者看不到 chip 分量如何影響建議。
+- 文件與實作互相矛盾，降低模型可解釋性。
+
+建議：
+
+- TypeScript `TradingScoreBreakdown` 新增 `chip: number`。
+- `scoreBreakdownFields` 改成 6 個分量與新權重。
+- 更新 `docs/sr-zone-scoring.md`、`docs/database-schema.md`。
+- 若 chip 分量暫時不想顯示，至少要在 UI 說明「其他/籌碼」分量，避免 breakdown 看起來少分。
+
+#### 2. `AT_ZONE` 驗證後 role 與 status 可能互相矛盾
+
+`backend/internal/analysis/sr_zone_verifier.go::verifySRZone` 會在驗證時把 `AT_ZONE` 依後續收盤離開區間的方向暫時解析成：
+
+- 收盤高於 `price_high` -> `SUPPORT`
+- 收盤低於 `price_low` -> `RESISTANCE`
+
+但 repo 目前只更新：
+
+- `status`
+- `broken_at`
+- `broken_price`
+
+不會更新原本儲存的 `role`。
+
+影響：
+
+- 前端仍看到 `role=AT_ZONE`，但 `status` 可能已是 `HELD_SO_FAR` 或 `BROKEN`。
+- UI 可能同時顯示「現價卡在區間內，方向還不明確」與「目前守住」或「已被突破」。
+- `SRZones.svelte::invalidationText()` 對 `BROKEN` 文案用原始 role 判斷突破/跌破；`AT_ZONE` 不是 `RESISTANCE`，所以會被顯示成「跌破」，即使 verifier 內部其實解析成壓力突破。
+
+建議：
+
+- 選一個明確方案：新增 `resolved_role` / `verified_role` 欄位，保存 verifier 解析後角色；或 verifier 更新 `role`，讓歷史 analysis 反映已驗證後角色。
+- 前端 `invalidationText()` 應使用 resolved role，而不是原始 role。
+- 若保留原始 role，UI 要把「分析當下 role」與「驗證後 role」分開顯示。
+
+#### 3. `max_excursion` label 可能同時 hold 與 break，後續處理不一致
+
+`python/backtest/modular/sr_scoring/labeling.py::label_touch` 在 `method="max_excursion"` 時，會分別檢查未來窗口內最高價與最低價是否觸及門檻。如果同一個 forward window 先大漲又大跌，或先大跌又大漲，可能同時得到：
+
+```text
+hold_label = 1
+break_label = 1
+```
+
+後續處理不一致：
+
+- `features.py::average_bounce_break_returns` 使用 `if hold_label ... elif break_label`，雙標籤會優先算進 bounce，不會算進 break。
+- `scoring.py::_touch_confidence` 中 hold / break 會各自計數，雙標籤會同時增加 hold 與 break。
+- `scoring.py::_recent_validation` 中 break 優先，雙標籤會被視為 `EXPIRED`。
+
+影響：
+
+- 同一個 zone 可能出現 EV/expected gain 偏正，但 recent_validation 顯示 `EXPIRED`。
+- confidence 會把同一事件同時計入 hold 與 break。
+- 這不是 UI 問題，而是 label 語意未唯一化。
+
+建議：
+
+- 明確定義雙觸發事件：以「先觸發哪一邊」決定唯一 label；或新增 `AMBIGUOUS`，訓練與平均報酬都排除；或保留雙模型訓練，但 EV/recent_validation/average return 要用同一套處理規則。
+- 補測試覆蓋同一 forward window 同時觸及上下門檻的情境。
+
+#### 4. Role / Net Score / Recommendation 可能在 UI 看起來互相打架
+
+目前：
+
+- `role` 由現價相對 zone 決定：現價高於 zone -> `SUPPORT`；現價低於 zone -> `RESISTANCE`；現價在 zone 內 -> `AT_ZONE`。
+- `net_score_label` 由 `support_score - resistance_score` 決定。
+
+因此可能出現：
+
+- role 是 `SUPPORT`
+- 新手摘要顯示「比較接近支撐」
+- 但進階區 `net_score_label` 顯示「強力壓力」
+
+這不一定是演算法錯，因為「目前角色」與「歷史雙向強弱」是不同概念；但 UI 沒有解釋這件事，使用者會覺得同一張卡片自相矛盾。
+
+建議：
+
+- 前端加上解釋：`role` = 現價位置下目前扮演的角色；`net_score_label` = 這個價位帶過去更像支撐還是壓力。
+- 若 `role` 與 `net_score_label` 方向相反，顯示「角色與歷史強弱不一致，建議降低信心」。
+- 也可以把 recommendation 納入 net_score 懲罰，避免顯示強買但 net score 指向壓力。
+
+#### 5. `global_confidence` 的文件說明不準確
+
+目前程式邏輯：
+
+- 只有 `zone_scores` 為空時，`global_confidence = None`。
+- 若 zones 全部都是 `AT_ZONE`，仍會回傳所有 zone confidence 的平均值。
+
+但文件與 TS 註解寫：
+
+- zones 為空或都沒有明確方向時，`global_confidence` 可能是 `null`。
+
+影響：
+
+- 這是文件/註解落後，不是 runtime bug。
+- 但會誤導前端或後續開發者，以為沒有明確方向時 global confidence 也會消失。
+
+建議：
+
+- 更新 `frontend/src/lib/api/srZones.ts` 註解。
+- 更新 `docs/sr-zone-scoring.md` 與 `docs/database-schema.md`：`global_expected_value` / `global_risk_reward_ratio` 才會在沒有明確方向時為 null；`global_confidence` 只在完全沒有 zones 時為 null。
+
+### 建議優先處理順序
+
+1. 修正 Trading Score 6 分量跨層一致性。
+2. 修正 `AT_ZONE` verifier 的 resolved role 保存與前端顯示。
+3. 明確定義 `max_excursion` 雙標籤事件。
+4. 改善 role / net_score / recommendation 的 UI 解釋與矛盾提示。
+5. 修正 `global_confidence` 文件與 TypeScript 註解。
+6. 視後續維護成本拆分 `scoring.py`。
 ## 改善原則
 
 1. 保持 Python 是唯一量化邏輯來源，Go 只做呼叫、持久化、API 與輕量驗證。
@@ -491,3 +647,4 @@ npm run build
 - 不要把 `global_trend` / `global_volatility` 放回每個 zone，現有設計刻意避免重複。
 - 新增 DB 欄位時三種 migration 都要同步：SQLite、MySQL、PostgreSQL。
 - 若新增 response 欄位但暫不入 DB，仍要更新 TypeScript type，避免前端隱性 any。
+

@@ -70,6 +70,112 @@ def test_label_touch_returns_none_when_not_enough_future_bars():
     assert result is None
 
 
+def test_max_excursion_support_hold_wins_when_favorable_move_happens_first():
+    # bar1 先漲穿門檻（+4.5%），bar2 才跌穿門檻（-5.5%）：先發生的favorable方向勝出
+    rows = [
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 104.5, 99.5, 100.0, 1000.0),
+        (100, 100.5, 94.5, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+    ]
+    df = make_df(rows)
+    touch = _touch(0, ZoneType.SUPPORT)
+
+    result = label_touch(df, touch, forward_bars=3, threshold_pct=0.03, method="max_excursion")
+
+    assert result is not None
+    hold_label, break_label, _ = result
+    assert hold_label == 1
+    assert break_label == 0
+
+
+def test_max_excursion_support_break_wins_when_unfavorable_move_happens_first():
+    # bar1 先跌穿門檻（-5.5%），bar2 才漲穿門檻（+4.5%）：先發生的unfavorable方向勝出
+    rows = [
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.5, 94.5, 100.0, 1000.0),
+        (100, 104.5, 99.5, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+    ]
+    df = make_df(rows)
+    touch = _touch(0, ZoneType.SUPPORT)
+
+    result = label_touch(df, touch, forward_bars=3, threshold_pct=0.03, method="max_excursion")
+
+    assert result is not None
+    hold_label, break_label, _ = result
+    assert hold_label == 0
+    assert break_label == 1
+
+
+def test_max_excursion_support_same_bar_tie_resolves_to_break():
+    # 同一根K棒（bar1）高低同時穿越上下門檻，無法判斷盤中先後順序 → 保守判定為 break
+    rows = [
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 105.0, 95.0, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+    ]
+    df = make_df(rows)
+    touch = _touch(0, ZoneType.SUPPORT)
+
+    result = label_touch(df, touch, forward_bars=3, threshold_pct=0.03, method="max_excursion")
+
+    assert result is not None
+    hold_label, break_label, _ = result
+    assert hold_label == 0
+    assert break_label == 1
+
+
+def test_max_excursion_resistance_same_bar_tie_resolves_to_break():
+    # role=RESISTANCE 時 break 對應「漲破」，同一根K棒同時觸及上下門檻，
+    # tie-break 規則要用 role-relative 的 break 判斷，而不是 raw 的
+    # 「down 永遠贏」（那樣對 resistance 會變成偏向 hold，方向錯誤）。
+    rows = [
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 105.0, 95.0, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+    ]
+    df = make_df(rows)
+    touch = _touch(0, ZoneType.RESISTANCE)
+
+    result = label_touch(df, touch, forward_bars=3, threshold_pct=0.03, method="max_excursion")
+
+    assert result is not None
+    hold_label, break_label, _ = result
+    assert hold_label == 0
+    assert break_label == 1
+
+
+def test_max_excursion_neither_threshold_hit_gives_no_label():
+    rows = [
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 101.0, 99.0, 100.0, 1000.0),
+        (100, 101.0, 99.0, 100.0, 1000.0),
+        (100, 101.0, 99.0, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+        (100, 100.2, 99.8, 100.0, 1000.0),
+    ]
+    df = make_df(rows)
+    touch = _touch(0, ZoneType.SUPPORT)
+
+    result = label_touch(df, touch, forward_bars=3, threshold_pct=0.03, method="max_excursion")
+
+    assert result is not None
+    hold_label, break_label, _ = result
+    assert hold_label == 0
+    assert break_label == 0
+
+
 def test_close_at_n_method_uses_simple_forward_return():
     closes = [100.0, 100.0, 100.0, 104.0]
     rows = [(c, c + 0.2, c - 0.2, c, 1000.0) for c in closes]

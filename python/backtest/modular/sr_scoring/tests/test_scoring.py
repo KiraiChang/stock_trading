@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pandas as pd
 import pytest
 
 from .. import scoring
@@ -585,10 +586,12 @@ def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bund
     low = float(df["close"].min())
 
     call_count = {"n": 0}
+    captured = {}
 
-    def _fake_fetch_chip(symbol, *a, **kw):
+    def _fake_fetch_chip(symbol, before_date=None, **kw):
         call_count["n"] += 1
         assert symbol == "2330"
+        captured["before_date"] = before_date
         return {"symbol": "2330", "total_score": 60.0}
 
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
@@ -605,6 +608,47 @@ def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bund
     # 不需要翻轉正負號
     assert z["role"] == "SUPPORT"
     assert z["trading_score_breakdown"]["chip"] == pytest.approx(0.8 * TRADING_SCORE_WEIGHTS["chip"])
+
+    # 【review 修復】必須帶 before_date，且要對齊這次分析最後一根K棒換算
+    # 成 Asia/Taipei 之後的交易日，不能省略（省略會撈到資料庫最新一筆
+    # chip_scores，可能是「未來」的籌碼資料，見 lookahead bias 說明）。
+    expected_before_date = pd.Timestamp(result["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+    assert captured["before_date"] == expected_before_date
+
+
+def test_score_symbol_chip_before_date_uses_analyzed_at_not_wall_clock_today(monkeypatch, bundle):
+    """即使系統「今天」跟資料裡最後一根K棒的日期不同（例如重算歷史資料），
+    before_date 也要用 analyzed_at（K棒日期），不能不小心用 wall-clock 的
+    今天，否則舊資料重算時一樣可能撈到「未來」的籌碼分數。"""
+    df = bullish_trend_df(n=250)
+    # 刻意用一個確定跟「今天」不同、且已知的歷史日期範圍
+    base = pd.Timestamp("2020-01-01", tz="UTC")
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"],
+            "timestamp": int((base + pd.Timedelta(days=i)).timestamp()),
+        }
+        for i, (_, row) in enumerate(df.iterrows())
+    ]
+
+    captured = {}
+
+    def _fake_fetch_chip(symbol, before_date=None, **kw):
+        captured["before_date"] = before_date
+        return None
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", _fake_fetch_chip)
+
+    result = score_symbol("2330", "1d")
+
+    expected_before_date = pd.Timestamp(result["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+    assert captured["before_date"] == expected_before_date
+    # 確認這個日期真的落在歷史資料範圍（2020年），不是 wall-clock 今天，
+    # 證明用的是 analyzed_at 而非系統當下時間。
+    assert captured["before_date"].startswith("2020")
 
 
 class _SingleZoneBuilder:

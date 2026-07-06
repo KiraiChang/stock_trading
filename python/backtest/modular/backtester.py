@@ -120,16 +120,20 @@ class BacktestEngine:
         return _build_report(strategy.name, self.initial_cash, equity, equity_curve, trades)
 
     def _passes_chip_filter(self, bar_time: object, chip_scores: dict[str, float] | None) -> bool:
-        """籌碼 filter 未啟用（chip_min_score 為 None）或這次回測沒有提供
-        chip_scores（例如任務未勾選 use_chip_filter）時一律放行。有提供時，
-        某天缺籌碼分數也放行——呼應設計文件「缺資料時 fallback 為中性，
-        不應中斷回測」的原則，不能因為某天沒同步到籌碼資料就整段回測失真。"""
-        if self.chip_min_score is None or chip_scores is None:
+        """籌碼 filter 未啟用（chip_min_score 為 None）時一律放行。啟用後，
+        缺籌碼資料（整個 chip_scores 是 None，或該日沒有分數）一律視為
+        中性分數 0 分，拿去跟門檻比較，而不是直接放行。
+
+        【review 修復】原本缺資料直接 return True，會讓 use_chip_filter=true
+        在資料庫籌碼資料不全時形同沒開（所有訊號都通過），跟「未達門檻的
+        進場訊號會被濾掉」的說明不一致，也會讓回測結果過度樂觀。改成中性
+        0 分後，門檻 > 0 時缺資料的訊號會被濾掉，門檻 <= 0 時仍會放行，
+        跟籌碼分數其他地方「缺資料 = 中性」的慣例一致（見 internal/chip
+        套件 CalcBrokerScore 等函式）。"""
+        if self.chip_min_score is None:
             return True
         date_str = pd.Timestamp(bar_time).strftime("%Y-%m-%d")
-        score = chip_scores.get(date_str)
-        if score is None:
-            return True
+        score = (chip_scores or {}).get(date_str, 0.0)
         return score >= self.chip_min_score
 
     @staticmethod

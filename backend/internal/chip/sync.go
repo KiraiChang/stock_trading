@@ -144,7 +144,21 @@ func (s *Syncer) syncBrokerForDate(ctx context.Context, symbol string, date time
 // computeAndStoreScore 從 store 讀回已落地的原始資料（不直接用剛 fetch 到的
 // 記憶體資料，確保 backfill 逐日計算時的歷史區間正確以 date 為界，不會誤
 // 用到 date 之後才落地的資料）並計算/落地 chip_score。
+//
+// 寫入前先確認 date 當天真的有資料（candle 或法人/融資融券任一），沒有
+// 就整天 skip、不寫 chip_scores——避免非交易日（週末/國定假日）或資料
+// 尚未發布時，用前一交易日的資料「借用」出一筆看似屬於當天、實則沿用
+// 舊資料的分數紀錄（GetLatest 依 trade_date DESC 取最新，會讓使用者看到
+// 週末日期的籌碼摘要，訊號加權也可能套用這種 stale score）。
 func (s *Syncer) computeAndStoreScore(ctx context.Context, symbol string, date time.Time) error {
+	hasData, err := s.hasDataForDate(ctx, symbol, date)
+	if err != nil {
+		return err
+	}
+	if !hasData {
+		return nil
+	}
+
 	lookbackStart := date.AddDate(0, 0, -lookbackDays)
 
 	institutionalHist, err := s.institutionalRepo.GetRange(ctx, symbol, lookbackStart, date)
@@ -192,6 +206,33 @@ func (s *Syncer) computeAndStoreScore(ctx context.Context, symbol string, date t
 		Reason:             store.RawJSON(reasonJSON),
 	}
 	return s.scoreRepo.Upsert(ctx, &score)
+}
+
+// hasDataForDate 檢查 date 當天是否有任一種原始資料落地（candle、法人
+// 買賣超、融資融券），藉此判斷這天是不是真的有發布資料的交易日。任一種
+//存在就視為有效，不要求三者都齊全——避免單一資料來源延遲就整天被跳過。
+func (s *Syncer) hasDataForDate(ctx context.Context, symbol string, date time.Time) (bool, error) {
+	candles, err := s.candleRepo.GetRange(ctx, symbol, "1d", date, date)
+	if err != nil {
+		return false, err
+	}
+	if len(candles) > 0 {
+		return true, nil
+	}
+
+	if _, err := s.institutionalRepo.GetByDate(ctx, symbol, date); err == nil {
+		return true, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+
+	if _, err := s.marginRepo.GetByDate(ctx, symbol, date); err == nil {
+		return true, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+
+	return false, nil
 }
 
 // loadCandleContext 取當日成交量、近20日均量與當日漲跌幅（%）。candles 依

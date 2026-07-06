@@ -18,6 +18,7 @@
   import InstitutionalTrend from '../components/chip/InstitutionalTrend.svelte'
   import MarginTrend from '../components/chip/MarginTrend.svelte'
   import BrokerRankingTable from '../components/chip/BrokerRankingTable.svelte'
+  import { todayStr, daysAgo } from '../lib/utils/date'
 
   let symbol = $selectedSymbol || ''
   let date = ''
@@ -35,16 +36,6 @@
   let syncError = ''
   let syncJob: ChipSyncJob | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
-
-  function todayStr(): string {
-    const d = new Date()
-    return d.toISOString().substring(0, 10)
-  }
-  function daysAgo(n: number): string {
-    const d = new Date()
-    d.setDate(d.getDate() - n)
-    return d.toISOString().substring(0, 10)
-  }
 
   async function loadSummary() {
     loadingSummary = true
@@ -198,7 +189,7 @@
         </button>
       </div>
       <p class="text-muted text-xs mt-2">
-        手動同步會抓取最近 30 天的三大法人、融資融券、券商分點資料並重新計算籌碼分數（分點資料若來源不支援會自動略過，不影響其他分數）。
+        手動同步會抓取最近 30 天的三大法人、融資融券資料並重新計算籌碼分數；券商分點資料僅在來源支援時才會一併同步，目前來源不支援時分點分數會維持中性，不影響其他分數。
       </p>
       {#if syncError}
         <p class="text-rise text-xs mt-2">{syncError}</p>

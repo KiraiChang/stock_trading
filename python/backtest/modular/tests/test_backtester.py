@@ -118,14 +118,38 @@ def test_backtest_engine_chip_filter_allows_entry_meeting_threshold():
     assert report.total_trades == 1, "籌碼分數達到門檻應放行進場訊號"
 
 
-def test_backtest_engine_chip_filter_missing_date_fails_open():
+def test_backtest_engine_chip_filter_missing_date_treated_as_neutral_zero():
+    """【review 修復】缺籌碼資料不再 fail-open 直接放行，而是視為中性分數
+    0 分下去跟門檻比較。門檻 > 0 時，缺資料的訊號會被濾掉（等同於 0 分
+    沒有達到門檻），避免資料庫籌碼資料不全時 filter 形同沒開。"""
     df = _breakout_then_crash_df()
     engine = BacktestEngine(chip_min_score=50.0)
 
-    # 訊號當天完全沒有籌碼分數資料，應 fallback 放行，不阻擋整段回測
     report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={})
 
-    assert report.total_trades == 1, "缺籌碼資料應 fail-open，不阻擋進場"
+    assert report.total_trades == 0, "缺籌碼資料應視為中性 0 分，未達正門檻應濾掉進場"
+
+
+def test_backtest_engine_chip_filter_missing_date_passes_when_threshold_non_positive():
+    """門檻 <= 0 時，中性 0 分仍然達標，缺資料的訊號應該放行——這樣「不設
+    門檻」（chip_min_score=0）的行為才會等同於沒有實際限制。"""
+    df = _breakout_then_crash_df()
+    engine = BacktestEngine(chip_min_score=0.0)
+
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={})
+
+    assert report.total_trades == 1, "門檻為 0 時，中性 0 分應該放行"
+
+
+def test_backtest_engine_chip_filter_none_chip_scores_treated_as_neutral_zero():
+    """chip_scores 整個是 None（呼叫端沒有提供任何籌碼資料）也要走同一套
+    中性 0 分邏輯，不能因為 dict 是 None 就繞過 filter。"""
+    df = _breakout_then_crash_df()
+    engine = BacktestEngine(chip_min_score=50.0)
+
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores=None)
+
+    assert report.total_trades == 0, "chip_scores=None 也應視為中性 0 分，未達正門檻應濾掉進場"
 
 
 def test_backtest_engine_chip_filter_disabled_ignores_chip_scores():

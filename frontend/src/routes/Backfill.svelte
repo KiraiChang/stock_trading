@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
   import { fetchWatchlist } from '../lib/api/watchlist'
   import { triggerBackfill } from '../lib/api/market'
   import { computeIndicators, type IndicatorSnapshot } from '../lib/api/indicators'
   import { evaluateSignal, type EvaluateResult } from '../lib/api/signals'
+  import { triggerChipSync, getChipSyncJob, type ChipSyncJob, type ChipSyncStatus } from '../lib/api/chips'
+  import { ApiError } from '../lib/api/client'
+  import { todayStr, daysAgo } from '../lib/utils/date'
   import type { WatchlistItem } from '../lib/stores/market'
 
   let items: WatchlistItem[] = []
@@ -29,7 +32,30 @@
   let evalError = ''
   let evalResult: EvaluateResult | null = null
 
+  // ── 籌碼資料回補：留空股票代號 = 整個監控清單，有填 = 只回補填入的股票
+  // （比照 SRZones.svelte 訓練模型的股票輸入慣例，跟上面 K 線回補的勾選
+  // 清單不同 UX，因為籌碼同步 API 一定要明確帶 symbols，這裡由前端自己
+  // 解析要送哪些代號）──────────────────────────────────────────
+  let chipSymbols = ''
+  let chipDays = 500
+  let chipSubmitting = false
+  let chipError = ''
+  let chipJob: ChipSyncJob | null = null
+  let chipPollTimer: ReturnType<typeof setInterval> | null = null
+
+  const chipSyncStatusText: Record<ChipSyncStatus, string> = {
+    pending: '排隊中', running: '同步中', done: '完成', partial: '部分成功', failed: '失敗',
+  }
+  const chipSyncStatusClass: Record<ChipSyncStatus, string> = {
+    pending: 'bg-gray-700/60 text-gray-400',
+    running: 'bg-blue-900/40 text-blue-400',
+    done: 'bg-green-900/40 text-green-400',
+    partial: 'bg-yellow-900/40 text-yellow-400',
+    failed: 'bg-red-900/40 text-red-400',
+  }
+
   onMount(load)
+  onDestroy(stopChipPolling)
 
   async function load() {
     loading = true
@@ -101,6 +127,73 @@
       evalError = '評估失敗，最常見原因是 candles 不足 35 根（請先確認已 backfill 足夠天數）'
     } finally {
       evaluating = false
+    }
+  }
+
+  // 解析使用者填入的股票代號（逗號分隔）；留空時回傳 null，呼叫端據此
+  // fallback 為整個監控清單。
+  function parseChipSymbols(): string[] | null {
+    const list = chipSymbols
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    return list.length > 0 ? list : null
+  }
+
+  async function submitChipBackfill() {
+    const symbols = parseChipSymbols() ?? items.map((i) => i.symbol)
+    if (symbols.length === 0) {
+      chipError = '沒有可回補的股票：請先至 Dashboard 新增監控股票，或自行輸入股票代號'
+      return
+    }
+    if (!Number.isFinite(chipDays) || chipDays <= 0) {
+      chipError = '回補天數需大於 0'
+      return
+    }
+
+    chipSubmitting = true
+    chipError = ''
+    chipJob = null
+    try {
+      const job = await triggerChipSync({
+        mode: 'backfill',
+        symbols,
+        from: daysAgo(chipDays),
+        to: todayStr(),
+        dataTypes: ['institutional', 'margin', 'broker', 'scores'],
+      })
+      chipJob = job
+      pollChipJob(job.job_id)
+    } catch (err) {
+      chipError = err instanceof ApiError ? err.message : '回補請求送出失敗，請稍後再試'
+      chipSubmitting = false
+    }
+  }
+
+  // 每 3 秒查一次進度，直到 done/partial/failed 才停止（比照 SRZones.svelte
+  // 訓練任務輪詢與 Chips.svelte 手動同步輪詢的做法）。
+  function pollChipJob(jobId: string) {
+    stopChipPolling()
+    chipPollTimer = setInterval(async () => {
+      try {
+        const job = await getChipSyncJob(jobId)
+        chipJob = job
+        if (job.status === 'done' || job.status === 'partial' || job.status === 'failed') {
+          stopChipPolling()
+          chipSubmitting = false
+        }
+      } catch {
+        chipError = '查詢回補狀態失敗'
+        stopChipPolling()
+        chipSubmitting = false
+      }
+    }, 3000)
+  }
+
+  function stopChipPolling() {
+    if (chipPollTimer) {
+      clearInterval(chipPollTimer)
+      chipPollTimer = null
     }
   }
 </script>
@@ -188,6 +281,71 @@
       回補會在後端背景執行（呼叫 POST /market/backfill），不會即時回報每檔股票的完成進度；
       可稍後至排程監控頁面或後端 log 確認執行結果。
     </p>
+
+    <!-- ── 籌碼資料回補 ──────────────────────────────────────── -->
+    <div class="bg-panel border border-border rounded-xl mt-6">
+      <div class="px-5 py-4 border-b border-border">
+        <h2 class="text-sm font-semibold text-white">籌碼資料回補</h2>
+        <p class="text-muted text-xs mt-1">
+          回補三大法人、融資融券、券商分點資料並重新計算籌碼分數（分點資料若來源不支援會自動略過，不影響其他分數）。
+          股票代號留空 = 整個監控清單；有填 = 只回補填入的股票。
+        </p>
+      </div>
+
+      <div class="px-5 py-4 space-y-3">
+        {#if chipError}
+          <p class="text-rise text-sm">{chipError}</p>
+        {/if}
+
+        <div class="flex gap-3 flex-wrap">
+          <input
+            bind:value={chipSymbols}
+            placeholder="股票代號，逗號分隔（留空 = 整個監控清單）"
+            class="flex-1 min-w-[220px] bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          <input
+            type="number"
+            min="1"
+            step="10"
+            bind:value={chipDays}
+            title="回補天數"
+            class="w-28 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                   focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+          <button
+            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm
+                   font-medium px-5 py-2 rounded-lg transition-colors"
+            disabled={chipSubmitting}
+            on:click={submitChipBackfill}
+          >
+            {chipSubmitting ? '回補中...' : '開始回補'}
+          </button>
+        </div>
+
+        {#if chipJob}
+          <div class="px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
+            <span class="text-muted font-mono">{chipJob.job_id}</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium {chipSyncStatusClass[chipJob.status]}">
+              {chipSyncStatusText[chipJob.status]}
+            </span>
+            <span class="text-muted">
+              {chipJob.symbols_done}/{chipJob.symbols_total} 檔，失敗 {chipJob.symbols_failed}
+            </span>
+            {#if chipJob.status === 'failed' || chipJob.status === 'partial'}
+              {#each chipJob.failures as f}
+                <span class="text-rise block w-full">{f.symbol}: {f.error}</span>
+              {/each}
+            {/if}
+          </div>
+        {/if}
+
+        <p class="text-muted text-xs">
+          回補會在後端背景執行（呼叫 POST /api/v1/chips/sync），此頁面每 3 秒輪詢一次進度；
+          離開頁面不影響後端繼續執行，之後可到「籌碼分析」頁面用 job_id 或直接查詢個股確認結果。
+        </p>
+      </div>
+    </div>
 
     <!-- ── 手動計算指標 ──────────────────────────────────────── -->
     <div class="bg-panel border border-border rounded-xl mt-6">

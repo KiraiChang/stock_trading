@@ -799,7 +799,18 @@ def score_symbol(
     # 所有 zone 共用同一個值，只是依角色翻轉正負號），只查一次。查無資料
     # （尚未同步籌碼、或該股票不在監控清單）不拋錯，讓 SR Zone 評分照常
     # 進行，chip 分量退回中性值（見 _trading_score_breakdown）。
-    chip_row = fetch_latest_chip_score(symbol)
+    #
+    # 【review 修復】一定要帶 before_date（用這次分析最後一根 K 棒的日期），
+    # 不能省略——省略會讓 fetch_latest_chip_score 直接撈資料庫裡最新的一筆
+    # chip_scores，若 K 線落後、離線重算舊資料、或資料庫已經有更晚的籌碼
+    # 分數，就會讓 trading_score 用到「未來」的籌碼資料（lookahead bias），
+    # 也會讓同一段歷史 K 線在不同時間重算得到不同結果。analyzed_at 是
+    # UTC-aware 的 pandas Timestamp（見 _to_dataframe），轉成 Asia/Taipei
+    # 再取日期字串，才會對齊 chip_scores.trade_date 實際代表的交易日
+    # （Go 端寫入時是用 Asia/Taipei 解析交易日期，見
+    # internal/market/finmind_chip.go 的 time.ParseInLocation）。
+    chip_before_date = analyzed_at.tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+    chip_row = fetch_latest_chip_score(symbol, before_date=chip_before_date)
     chip_score = float(chip_row["total_score"]) if chip_row is not None else None
 
     # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。

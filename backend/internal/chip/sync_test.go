@@ -174,6 +174,49 @@ func TestSyncDaily_InstitutionalFetchErrorPropagates(t *testing.T) {
 	}
 }
 
+func TestSyncDaily_NoDataForDateSkipsChipScoreWrite(t *testing.T) {
+	// 【review 修復】完全沒有 candle/法人/融資融券資料的日期（例如週末、
+	// 國定假日）不應該寫入 chip_scores，避免留下一筆「借用」前一交易日
+	// 資料、卻掛在非交易日 trade_date 上的紀錄。
+	date := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC) // 2026-07-04 為週六
+	source := &fakeChipDataSource{}                     // institutional/margin 皆回傳空陣列，broker unsupported
+	env := newSyncerTestEnv(t, source)
+	// 刻意不 seedCandles：模擬非交易日完全沒有任何原始資料落地
+
+	if err := env.syncer.SyncDaily(context.Background(), "2330", date); err != nil {
+		t.Fatalf("expected SyncDaily to succeed (no-op) when there's no data at all, got: %v", err)
+	}
+
+	if _, err := env.scoreRepo.GetByDate(context.Background(), "2330", date); err == nil {
+		t.Fatal("expected no chip_scores row to be written for a date with zero underlying data")
+	}
+}
+
+func TestSyncRange_WeekendWithoutDataIsSkippedButWeekdayIsScored(t *testing.T) {
+	friday := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC)
+	saturday := friday.AddDate(0, 0, 1)
+	source := &fakeChipDataSource{
+		institutional: []market.InstitutionalTrade{
+			{Symbol: "2330", Date: friday, ForeignNetBuy: 1000, TotalNetBuy: 1000},
+		},
+	}
+	env := newSyncerTestEnv(t, source)
+	seedCandles(t, env.candleRepo, "2330", friday) // 只有週五有 K 線，週六完全沒有任何資料
+
+	env.syncer.SyncRange(context.Background(), []string{"2330"}, friday, saturday, nil, func(_ string, err error) {
+		if err != nil {
+			t.Fatalf("unexpected sync error: %v", err)
+		}
+	})
+
+	if _, err := env.scoreRepo.GetByDate(context.Background(), "2330", friday); err != nil {
+		t.Fatalf("expected a chip_score row for the trading day (Friday), got error: %v", err)
+	}
+	if _, err := env.scoreRepo.GetByDate(context.Background(), "2330", saturday); err == nil {
+		t.Fatal("expected no chip_score row for the non-trading day (Saturday) with zero underlying data")
+	}
+}
+
 func TestSyncRange_DataTypesFilterSkipsUnrequestedFetches(t *testing.T) {
 	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)

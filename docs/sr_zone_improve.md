@@ -193,6 +193,93 @@ break_label = 1
 4. 改善 role / net_score / recommendation 的 UI 解釋與矛盾提示。
 5. 修正 `global_confidence` 文件與 TypeScript 註解。
 6. 視後續維護成本拆分 `scoring.py`。
+
+## 2026-07-06 Follow-up Review：目前版本仍需改進項目
+
+以下是針對目前已修改版本的 SR Zone 部分再次 review 後，仍需要補齊的項目。這一輪檢查重點是確認前一節提到的矛盾是否已收斂，以及是否還有文件、註解或 UI 顯示殘留舊語意。
+
+### 1. `docs/api-reference.md` 的 SR Zone API 範例仍是舊版五分量
+
+目前程式與主要設計文件已改成六個 `trading_score_breakdown` 分量：
+
+```text
+EV 34 + RR 17 + Trend 12.75 + Volume 12.75 + Confidence 8.5 + Chip 15
+```
+
+但 `docs/api-reference.md` 的 SR Zone response 範例仍缺少 `chip`，且文字仍寫「五個分量加總即為 `trading_score`」。
+
+影響：
+
+- API 使用者會以為 `trading_score_breakdown` 只有五個 key。
+- 文件範例與 TypeScript / Python 實作不一致。
+- 會誤導後續維護者以為 `chip` 只是內部計算，沒有出現在 API contract。
+
+建議：
+
+- 更新 SR Zone response 範例，補上 `"chip": ...`。
+- 將「五個分量」改成「六個分量」。
+- 權重說明同步改成 `EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)`。
+- 若範例數字有 `trading_score`，要讓 breakdown 加總與 `trading_score` 對齊。
+
+### 2. 前端進階說明仍用原始 `z.role`，AT_ZONE 解析後會顯示矛盾文字
+
+`frontend/src/routes/SRZones.svelte` 目前主要顯示、主觀察區間、失效條件已使用 `effectiveRole(z)`，能正確處理 `resolved_role`。但進階區底部說明仍使用 `z.role`：
+
+```svelte
+可信度只用目前角色（{noviceRoleText[z.role] ?? z.role}）方向的觸碰樣本計算，不含另一方向
+```
+
+若某個 zone 原本是 `AT_ZONE`，後續 verifier 已解析出 `resolved_role=SUPPORT` 或 `RESISTANCE`，畫面會同時出現：
+
+- badge / invalidation text：已解析成支撐或壓力
+- 進階說明：仍顯示「現價卡在區間內，方向還不明確」
+
+影響：
+
+- 這是 UI 顯示矛盾，不是演算法錯誤。
+- 使用者會不確定 confidence 到底是用解析後角色，還是原始 `AT_ZONE`。
+
+建議：
+
+- 將該行改成使用 `effectiveRole(z)`：
+
+```svelte
+可信度只用目前角色（{noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}）方向的觸碰樣本計算，不含另一方向
+```
+
+- 若需要保留歷史資訊，可另外補一句「分析當下角色：AT_ZONE；驗證後角色：SUPPORT / RESISTANCE」，不要混在同一個「目前角色」文案裡。
+
+### 3. `backend/internal/store/model.go` 的註解仍是舊規格
+
+Go store model 的 runtime 欄位已可承接目前資料，但部分註解仍停在舊語意：
+
+- `SRZoneAnalysis` 註解仍說 `GlobalExpectedValue/GlobalConfidence/GlobalRiskRewardRatio` 在 zones 為空或都沒有明確方向時可能是 `NULL`。
+- 目前實際規格是：`global_expected_value` / `global_risk_reward_ratio` 才會在沒有明確方向時為 `NULL`；`global_confidence` 只在 zones 空陣列時為 `NULL`。
+- `TradingScoreBreakdown` 註解仍寫五個分量，缺少 `chip`。
+
+影響：
+
+- 不影響 API runtime。
+- 但會讓後續改 repo / handler / DTO 的人誤解資料契約。
+- 也會和 `docs/sr-zone-scoring.md`、`docs/database-schema.md`、`frontend/src/lib/api/srZones.ts` 產生文件層級矛盾。
+
+建議：
+
+- 更新 `SRZoneAnalysis` 註解，明確區分：
+  - `GlobalExpectedValue` / `GlobalRiskRewardRatio`：沒有明確方向時可能為 `NULL`
+  - `GlobalConfidence`：只有沒有任何 zone 時才為 `NULL`
+- 更新 `TradingScoreBreakdown` 註解為六分量 JSON：
+
+```text
+{"expected_value":.., "risk_reward":.., "trend":.., "volume":.., "confidence":.., "chip":..}
+```
+
+### 驗證狀態
+
+- `frontend`：`npm run build` 通過。
+- `python`：`python .venv/Scripts/python.exe -m pytest backtest/modular/sr_scoring/tests/test_labeling.py backtest/modular/sr_scoring/tests/test_scoring.py -q` 通過，結果為 `63 passed`。
+- 檢查時工作樹沒有 source diff；本節是 review 結果補充，不代表上述問題已修正。
+
 ## 改善原則
 
 1. 保持 Python 是唯一量化邏輯來源，Go 只做呼叫、持久化、API 與輕量驗證。
@@ -647,4 +734,3 @@ npm run build
 - 不要把 `global_trend` / `global_volatility` 放回每個 zone，現有設計刻意避免重複。
 - 新增 DB 欄位時三種 migration 都要同步：SQLite、MySQL、PostgreSQL。
 - 若新增 response 欄位但暫不入 DB，仍要更新 TypeScript type，避免前端隱性 any。
-

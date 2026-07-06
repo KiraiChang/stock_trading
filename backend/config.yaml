@@ -52,3 +52,9 @@ auth:
 #              填入 = Method A + Method B（同時推送 HTTP 通知）
 python:
   service_url: ""   # 環境變數：PYTHON_SERVICE_URL（e.g. "http://localhost:8001"）
+
+# 籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）
+chip:
+  sync:
+    history_trading_days: 500   # 環境變數：CHIP_SYNC_HISTORY_TRADING_DAYS，backfill 預設回補天數
+    batch_size: 50               # 環境變數：CHIP_SYNC_BATCH_SIZE，DB 批次寫入大小

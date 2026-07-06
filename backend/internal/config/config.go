@@ -14,6 +14,7 @@ type Config struct {
 	Fugle    FugleConfig
 	Python   PythonConfig
 	Auth     AuthConfig
+	Chip     ChipConfig
 }
 
 type AuthConfig struct {
@@ -62,6 +63,18 @@ type FugleConfig struct {
 	ReconnectMaxSec  int    `mapstructure:"reconnect_max_sec"` // WebSocket 重連退避上限（秒）
 }
 
+// ChipConfig 為籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）。
+type ChipConfig struct {
+	Sync ChipSyncConfig `mapstructure:"sync"`
+}
+
+type ChipSyncConfig struct {
+	// HistoryTradingDays 為 backfill 預設回補天數（不指定 from 時反推起始日）。
+	HistoryTradingDays int `mapstructure:"history_trading_days"`
+	// BatchSize 為 DB 批次寫入大小，比照 candleBulkInsertBatchSize 的保守預設。
+	BatchSize int `mapstructure:"batch_size"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -81,6 +94,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("fugle.max_subscriptions", 5)
 	viper.SetDefault("fugle.reconnect_max_sec", 60)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
+	viper.SetDefault("chip.sync.history_trading_days", 500)
+	viper.SetDefault("chip.sync.batch_size", 50)
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()

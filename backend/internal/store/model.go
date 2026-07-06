@@ -310,3 +310,84 @@ type BacktestTrade struct {
 	Commission float64      `db:"commission"  json:"commission"`
 	CreatedAt  time.Time    `db:"created_at"  json:"created_at"`
 }
+
+// ── Chip Analysis models（見 docs/chip-analysis-design.md）───────────
+
+type InstitutionalTrade struct {
+	ID                    uint64    `db:"id"                        json:"id"`
+	Symbol                string    `db:"symbol"                    json:"symbol"`
+	TradeDate             time.Time `db:"trade_date"                json:"trade_date"`
+	ForeignNetBuy         int64     `db:"foreign_net_buy"           json:"foreign_net_buy"`
+	InvestmentTrustNetBuy int64     `db:"investment_trust_net_buy"  json:"investment_trust_net_buy"`
+	DealerNetBuy          int64     `db:"dealer_net_buy"            json:"dealer_net_buy"`
+	TotalNetBuy           int64     `db:"total_net_buy"             json:"total_net_buy"`
+	CreatedAt             time.Time `db:"created_at"                json:"created_at"`
+	UpdatedAt             time.Time `db:"updated_at"                json:"updated_at"`
+}
+
+type MarginTrade struct {
+	ID              uint64      `db:"id"                 json:"id"`
+	Symbol          string      `db:"symbol"             json:"symbol"`
+	TradeDate       time.Time   `db:"trade_date"         json:"trade_date"`
+	MarginBalance   int64       `db:"margin_balance"     json:"margin_balance"`
+	MarginChange    int64       `db:"margin_change"      json:"margin_change"`
+	ShortBalance    int64       `db:"short_balance"      json:"short_balance"`
+	ShortChange     int64       `db:"short_change"       json:"short_change"`
+	MarginUsageRate NullFloat64 `db:"margin_usage_rate"  json:"margin_usage_rate,omitempty"`
+	ShortUsageRate  NullFloat64 `db:"short_usage_rate"   json:"short_usage_rate,omitempty"`
+	CreatedAt       time.Time   `db:"created_at"         json:"created_at"`
+	UpdatedAt       time.Time   `db:"updated_at"         json:"updated_at"`
+}
+
+type BrokerTrade struct {
+	ID         uint64    `db:"id"          json:"id"`
+	Symbol     string    `db:"symbol"      json:"symbol"`
+	TradeDate  time.Time `db:"trade_date"  json:"trade_date"`
+	BrokerName string    `db:"broker_name" json:"broker_name"`
+	BranchName string    `db:"branch_name" json:"branch_name"`
+	BuyVolume  int64     `db:"buy_volume"  json:"buy_volume"`
+	SellVolume int64     `db:"sell_volume" json:"sell_volume"`
+	NetBuy     int64     `db:"net_buy"     json:"net_buy"`
+	CreatedAt  time.Time `db:"created_at"  json:"created_at"`
+}
+
+// ChipScore 是每日籌碼分析結果快照（見 internal/chip 套件的計分邏輯）。
+// Reason 用 RawJSON（純 string，非 sql.Null* 包裝）讀寫，DB 欄位 NOT NULL
+// DEFAULT '[]'，避免 RawJSON.Scan 遇到 SQL NULL 出錯。
+type ChipScore struct {
+	ID                 uint64    `db:"id"                   json:"id"`
+	Symbol             string    `db:"symbol"               json:"symbol"`
+	TradeDate          time.Time `db:"trade_date"           json:"trade_date"`
+	InstitutionalScore float64   `db:"institutional_score"  json:"institutional_score"`
+	MarginScore        float64   `db:"margin_score"         json:"margin_score"`
+	BrokerScore        float64   `db:"broker_score"         json:"broker_score"`
+	ConcentrationScore float64   `db:"concentration_score"  json:"concentration_score"`
+	TotalScore         float64   `db:"total_score"          json:"total_score"`
+	Signal             string    `db:"signal"               json:"signal"` // BULLISH/BEARISH/NEUTRAL/RISK
+	Reason             RawJSON   `db:"reason"               json:"reason,omitempty"`
+	CreatedAt          time.Time `db:"created_at"           json:"created_at"`
+	UpdatedAt          time.Time `db:"updated_at"           json:"updated_at"`
+}
+
+// ChipSyncJob 追蹤一次 manual / backfill 籌碼資料同步任務（daily 模式沿用
+// 既有 job_runs 表，job_name="chip_daily_sync"，見 scheduler.go）。Failures
+// 用 RawJSON 讀寫，DB 欄位 NOT NULL DEFAULT '[]'，理由同 ChipScore.Reason。
+type ChipSyncJob struct {
+	ID            uint64     `db:"id"             json:"id"`
+	JobID         string     `db:"job_id"         json:"job_id"`
+	Mode          string     `db:"mode"           json:"mode"` // manual / backfill
+	Symbols       string     `db:"symbols"        json:"symbols"`    // JSON array string
+	DataTypes     string     `db:"data_types"     json:"data_types"` // JSON array string
+	FromDate      string     `db:"from_date"      json:"from_date"`
+	ToDate        string     `db:"to_date"        json:"to_date"`
+	Force         bool       `db:"force"          json:"force"`
+	Status        string     `db:"status"         json:"status"` // pending/running/done/partial/failed
+	SymbolsTotal  int        `db:"symbols_total"  json:"symbols_total"`
+	SymbolsDone   int        `db:"symbols_done"   json:"symbols_done"`
+	SymbolsFailed int        `db:"symbols_failed" json:"symbols_failed"`
+	Failures      RawJSON    `db:"failures"       json:"failures,omitempty"`
+	Error         NullString `db:"error"          json:"error,omitempty"`
+	StartedAt     NullTime   `db:"started_at"     json:"started_at,omitempty"`
+	FinishedAt    NullTime   `db:"finished_at"    json:"finished_at,omitempty"`
+	CreatedAt     time.Time  `db:"created_at"     json:"created_at"`
+}

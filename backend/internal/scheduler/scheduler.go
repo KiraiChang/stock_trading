@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
+	"github.com/trading/backend/internal/chip"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -26,6 +27,7 @@ type Scheduler struct {
 	jobRuns         store.JobRunRepo
 	srZoneRepo      store.SRZoneRepo
 	srZoneVerifier  *analysis.SRZoneVerifier
+	chipSyncer      *chip.Syncer
 	intradayEnabled bool
 	log             *zap.Logger
 	cron            *cron.Cron
@@ -38,6 +40,7 @@ func New(
 	jobRuns store.JobRunRepo,
 	srZoneRepo store.SRZoneRepo,
 	srZoneVerifier *analysis.SRZoneVerifier,
+	chipSyncer *chip.Syncer,
 	intradayEnabled bool,
 	log *zap.Logger,
 ) *Scheduler {
@@ -48,6 +51,7 @@ func New(
 		jobRuns:         jobRuns,
 		srZoneRepo:      srZoneRepo,
 		srZoneVerifier:  srZoneVerifier,
+		chipSyncer:      chipSyncer,
 		intradayEnabled: intradayEnabled,
 		log:             log,
 		cron:            cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
@@ -218,6 +222,39 @@ func (s *Scheduler) RunDailyClose() {
 	// 結果——兩者依序執行但彼此獨立記錄，其中一個出問題不會讓另一個也跟著
 	// 判定失敗。
 	s.runSRZoneVerification(ctx)
+
+	// 籌碼同步同樣是獨立的 job_run 紀錄（job_name="chip_daily_sync"），排在
+	// K線/指標/SR驗證之後執行（見 docs/chip-analysis-design.md 第8節建議順序），
+	// 失敗只影響自己的紀錄。法人/融資融券資料可能比日K更晚發布，若這次抓到
+	// 空資料，可用 POST /api/v1/chips/sync {mode:"manual", force:true} 人工
+	// 補跑，比照既有 daily_close 對 FinMind 延遲發布的處理方式。
+	s.runChipDailySync(ctx)
+}
+
+// runChipDailySync 對 watchlist 全部股票執行當日籌碼同步（chip.Syncer.SyncDaily），
+// 完全比照 runSRZoneVerification 的結構：單筆失敗只記錄、不中斷其他股票的同步。
+func (s *Scheduler) runChipDailySync(ctx context.Context) {
+	runID := s.startRun(ctx, "chip_daily_sync")
+
+	symbols, err := s.watchlist.Symbols(ctx)
+	if err != nil {
+		s.log.Error("watchlist fetch failed", zap.Error(err))
+		s.finishRun(ctx, runID, "chip_daily_sync", 0, 0, err.Error())
+		return
+	}
+
+	today := timeutil.TodayTaipei()
+	failed := 0
+	lastErr := ""
+	for _, sym := range symbols {
+		if err := s.chipSyncer.SyncDaily(ctx, sym, today); err != nil {
+			s.log.Warn("chip daily sync failed", zap.String("symbol", sym), zap.Error(err))
+			failed++
+			lastErr = err.Error()
+		}
+	}
+	s.log.Info("chip daily sync job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
+	s.finishRun(ctx, runID, "chip_daily_sync", len(symbols), failed, lastErr)
 }
 
 // runSRZoneVerification 對最近 srZoneVerifyLimit 筆 SR zone 分析重新驗證

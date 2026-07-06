@@ -13,6 +13,7 @@ import (
 	"github.com/trading/backend/internal/api/middleware"
 	"github.com/trading/backend/internal/api/ws"
 	"github.com/trading/backend/internal/backtest"
+	"github.com/trading/backend/internal/chip"
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/scheduler"
@@ -46,6 +47,13 @@ func NewServer(
 	fetcher *market.Fetcher,
 	sched *scheduler.Scheduler,
 	userRepo store.UserRepo,
+	institutionalTradeRepo store.InstitutionalTradeRepo,
+	marginTradeRepo store.MarginTradeRepo,
+	brokerTradeRepo store.BrokerTradeRepo,
+	chipScoreRepo store.ChipScoreRepo,
+	chipSyncJobRepo store.ChipSyncJobRepo,
+	chipSyncer *chip.Syncer,
+	chipHistoryTradingDays int,
 	jwtSecret string,
 	log *zap.Logger,
 ) *Server {
@@ -136,6 +144,16 @@ func NewServer(
 		uh := handler.NewUserHandler(userRepo, log)
 		protected.GET("/users", uh.List)
 		protected.PATCH("/users/:id/status", uh.UpdateStatus)
+
+		cph := handler.NewChipHandler(
+			institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo,
+			candleRepo, chipSyncJobRepo, chipSyncer, chipHistoryTradingDays, log,
+		)
+		protected.GET("/chips/:symbol/summary", cph.GetSummary)
+		protected.GET("/chips/:symbol/scores", cph.GetScores)
+		protected.GET("/chips/:symbol/brokers", cph.GetBrokers)
+		protected.POST("/chips/sync", cph.Sync)
+		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

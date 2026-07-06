@@ -52,7 +52,15 @@ type Signal struct {
 	Support    float64   `db:"support"     json:"support"`
 	Trend      string    `db:"trend"       json:"trend"`
 	Note       string    `db:"note"        json:"note"`
-	Timestamp  time.Time `db:"ts"          json:"ts"`
+	// Strength（預設 1.0，代表未受籌碼調整的原始強度；籌碼加權後可能上修
+	// 或下修，例如 0.6~1.3，不是機率、不強制限制在 [0,1]）與 ChipSignal 是
+	// 【籌碼分析整合】新增欄位：Engine.Evaluate 依 chip_scores 的訊號調整
+	// 原始訊號強度時寫入，讓「這個訊號被籌碼加權過」變成可結構化查詢的
+	// 資料，不用從 Note 自由文字解析。ChipSignal 為空字串代表評估當下查無
+	// 籌碼資料，Strength 維持預設值。
+	Strength   float64    `db:"strength"    json:"strength"`
+	ChipSignal NullString `db:"chip_signal" json:"chip_signal,omitempty"`
+	Timestamp  time.Time  `db:"ts"          json:"ts"`
 }
 
 type JobRun struct {
@@ -274,9 +282,14 @@ type BacktestJob struct {
 	Status     string       `db:"status"      json:"status"`  // pending/running/done/failed
 	Trigger    string       `db:"trigger"     json:"trigger"` // manual/scheduler
 	Error      string       `db:"error"       json:"error,omitempty"`
-	CreatedAt  time.Time    `db:"created_at"  json:"created_at"`
-	StartedAt  sql.NullTime `db:"started_at"  json:"started_at,omitempty"`
-	FinishedAt sql.NullTime `db:"finished_at" json:"finished_at,omitempty"`
+	// UseChipFilter/ChipMinScore：【籌碼分析整合】是否在進場時套用
+	// chip_scores.total_score 門檻過濾（見 docs/chip-analysis-design.md 第9節），
+	// Python 端逐 bar 比對，未達門檻的訊號不會進場。
+	UseChipFilter bool         `db:"use_chip_filter" json:"use_chip_filter"`
+	ChipMinScore  float64      `db:"chip_min_score"  json:"chip_min_score"`
+	CreatedAt     time.Time    `db:"created_at"  json:"created_at"`
+	StartedAt     sql.NullTime `db:"started_at"  json:"started_at,omitempty"`
+	FinishedAt    sql.NullTime `db:"finished_at" json:"finished_at,omitempty"`
 }
 
 type BacktestResult struct {

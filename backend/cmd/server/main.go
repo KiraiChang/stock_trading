@@ -81,7 +81,7 @@ func main() {
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
-	sigEngine := signal.NewEngine(candleRepo, signalRepo, rdb, indEngine, log)
+	sigEngine := signal.NewEngine(candleRepo, signalRepo, rdb, indEngine, chipScoreRepo, log)
 
 	// Backtest manager
 	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, log)

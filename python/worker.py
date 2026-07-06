@@ -42,7 +42,8 @@ from backtest.db_writer import update_job_status, write_result, write_trades
 
 def _fetch_pending() -> list[dict]:
     sql = text("""
-        SELECT job_id, strategy, symbols, timeframe, start_date, end_date
+        SELECT job_id, strategy, symbols, timeframe, start_date, end_date,
+               use_chip_filter, chip_min_score
         FROM backtest_jobs
         WHERE status = 'pending'
         ORDER BY created_at ASC
@@ -67,6 +68,8 @@ def _process(job: dict) -> None:
             timeframe=job["timeframe"],
             start_date=job["start_date"],
             end_date=job["end_date"],
+            use_chip_filter=bool(job.get("use_chip_filter")),
+            chip_min_score=float(job.get("chip_min_score") or 0.0),
         )
         write_result(job_id, output["result"])
         write_trades(job_id, output["trades"])

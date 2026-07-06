@@ -21,6 +21,12 @@ type CreateRequest struct {
 	StartDate string   `json:"start_date"` // YYYY-MM-DD
 	EndDate   string   `json:"end_date"`
 	Trigger   string   `json:"trigger"` // "manual" / "scheduler"
+	// UseChipFilter/ChipMinScore：【籌碼分析整合】選填，套用後只對 modular
+	// 策略生效（legacy backtrader 策略會忽略並記一筆警告 log，見 Python
+	// backtest/engine.py::run_backtest）。ChipMinScore 為 chip_scores.total_score
+	// 的門檻（-100~100），未達門檻的進場訊號會被濾掉。
+	UseChipFilter bool    `json:"use_chip_filter"`
+	ChipMinScore  float64 `json:"chip_min_score"`
 }
 
 type Manager struct {
@@ -54,15 +60,17 @@ func (m *Manager) Submit(ctx context.Context, req CreateRequest) (*store.Backtes
 	}
 
 	job := &store.BacktestJob{
-		JobID:     newJobID(),
-		Type:      "backtest",
-		Strategy:  req.Strategy,
-		Symbols:   string(symbolsJSON),
-		Timeframe: req.Timeframe,
-		StartDate: req.StartDate,
-		EndDate:   req.EndDate,
-		Status:    "pending",
-		Trigger:   req.Trigger,
+		JobID:         newJobID(),
+		Type:          "backtest",
+		Strategy:      req.Strategy,
+		Symbols:       string(symbolsJSON),
+		Timeframe:     req.Timeframe,
+		StartDate:     req.StartDate,
+		EndDate:       req.EndDate,
+		Status:        "pending",
+		Trigger:       req.Trigger,
+		UseChipFilter: req.UseChipFilter,
+		ChipMinScore:  req.ChipMinScore,
 	}
 
 	if err := m.repo.CreateJob(ctx, job); err != nil {
@@ -89,12 +97,14 @@ func (m *Manager) triggerHTTP(job *store.BacktestJob) {
 	defer cancel()
 
 	body, _ := json.Marshal(map[string]interface{}{
-		"job_id":     job.JobID,
-		"strategy":   job.Strategy,
-		"symbols":    job.Symbols,
-		"timeframe":  job.Timeframe,
-		"start_date": job.StartDate,
-		"end_date":   job.EndDate,
+		"job_id":          job.JobID,
+		"strategy":        job.Strategy,
+		"symbols":         job.Symbols,
+		"timeframe":       job.Timeframe,
+		"start_date":      job.StartDate,
+		"end_date":        job.EndDate,
+		"use_chip_filter": job.UseChipFilter,
+		"chip_min_score":  job.ChipMinScore,
 	})
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,

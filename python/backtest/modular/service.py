@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from db import fetch_candles
+from db import fetch_candles, fetch_chip_scores
 
 from .backtester import BacktestEngine
 from .strategy import STRATEGY_PRESETS, build_strategy
@@ -34,8 +34,15 @@ def run_modular_backtest(
     initial_cash: float = 1_000_000.0,
     commission_rate: float = 0.001425,
     tax_rate: float = 0.003,
+    use_chip_filter: bool = False,
+    chip_min_score: float = 0.0,
 ) -> dict[str, Any]:
-    engine = BacktestEngine(initial_cash=initial_cash, commission_rate=commission_rate, tax_rate=tax_rate)
+    engine = BacktestEngine(
+        initial_cash=initial_cash,
+        commission_rate=commission_rate,
+        tax_rate=tax_rate,
+        chip_min_score=chip_min_score if use_chip_filter else None,
+    )
 
     reports: list[BacktestReport] = []
     for symbol in symbols:
@@ -51,7 +58,8 @@ def run_modular_backtest(
             )
             continue
 
-        report = engine.run(symbol, df, build_strategy(strategy))
+        chip_scores = _chip_score_map(symbol, start_date, end_date) if use_chip_filter else None
+        report = engine.run(symbol, df, build_strategy(strategy), chip_scores=chip_scores)
         reports.append(report)
         log.info(
             "modular backtest done symbol=%s trades=%d total_return=%.2f%%",
@@ -65,6 +73,18 @@ def run_modular_backtest(
         "result": _aggregate_result(strategy, reports, initial_cash),
         "trades": [_trade_to_dict(t) for r in reports for t in r.trades],
     }
+
+
+def _chip_score_map(symbol: str, start_date: str, end_date: str) -> dict[str, float]:
+    """把 fetch_chip_scores 的列表轉成 {date_str: total_score} 查找表，供
+    BacktestEngine 逐 bar 比對（見 backtester.py::_passes_chip_filter）。"""
+    rows = fetch_chip_scores(symbol, start_date, end_date)
+    result: dict[str, float] = {}
+    for r in rows:
+        d = r["trade_date"]
+        key = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+        result[key] = float(r["total_score"])
+    return result
 
 
 def _to_dataframe(rows: list[dict], start_date: str, end_date: str) -> pd.DataFrame:

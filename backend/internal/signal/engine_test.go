@@ -16,9 +16,9 @@ import (
 )
 
 // newTestEngine 建立接在暫存 sqlite 檔案上的完整 Engine（真正的 migration、
-// CandleRepo/IndicatorRepo/SignalRepo），驗證 Evaluate 整條路徑真的能跑通，
-// 不只是各自獨立的純函式。測試結束會自動清理暫存檔。
-func newTestEngine(t *testing.T) (*Engine, store.CandleRepo, store.SignalRepo) {
+// CandleRepo/IndicatorRepo/SignalRepo/ChipScoreRepo），驗證 Evaluate 整條
+// 路徑真的能跑通，不只是各自獨立的純函式。測試結束會自動清理暫存檔。
+func newTestEngine(t *testing.T) (*Engine, store.CandleRepo, store.SignalRepo, store.ChipScoreRepo) {
 	t.Helper()
 
 	tmp, err := os.CreateTemp("", "signal-engine-test-*.db")
@@ -41,11 +41,12 @@ func newTestEngine(t *testing.T) (*Engine, store.CandleRepo, store.SignalRepo) {
 	candleRepo := store.NewCandleRepo(db)
 	indicatorRepo := store.NewIndicatorRepo(db)
 	signalRepo := store.NewSignalRepo(db)
+	chipScoreRepo := store.NewChipScoreRepo(db)
 	rdb := store.NewRedis(store.DisabledRedisConfig())
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, zap.NewNop())
-	sigEngine := NewEngine(candleRepo, signalRepo, rdb, indEngine, zap.NewNop())
+	sigEngine := NewEngine(candleRepo, signalRepo, rdb, indEngine, chipScoreRepo, zap.NewNop())
 
-	return sigEngine, candleRepo, signalRepo
+	return sigEngine, candleRepo, signalRepo, chipScoreRepo
 }
 
 func seedCandles(t *testing.T, repo store.CandleRepo, candles []store.Candle) {
@@ -56,7 +57,7 @@ func seedCandles(t *testing.T, repo store.CandleRepo, candles []store.Candle) {
 }
 
 func TestEngine_Evaluate_InsufficientCandlesReturnsError(t *testing.T) {
-	eng, _, _ := newTestEngine(t)
+	eng, _, _, _ := newTestEngine(t)
 
 	sig, err := eng.Evaluate(context.Background(), "NODATA", "1d")
 	if err == nil {
@@ -68,7 +69,7 @@ func TestEngine_Evaluate_InsufficientCandlesReturnsError(t *testing.T) {
 }
 
 func TestEngine_Evaluate_FlatDataProducesNoSignal(t *testing.T) {
-	eng, candleRepo, signalRepo := newTestEngine(t)
+	eng, candleRepo, signalRepo, _ := newTestEngine(t)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	candles := make([]store.Candle, 0, 40)
@@ -99,7 +100,7 @@ func TestEngine_Evaluate_FlatDataProducesNoSignal(t *testing.T) {
 }
 
 func TestEngine_Evaluate_BreakoutGeneratesAndPersistsSignal(t *testing.T) {
-	eng, candleRepo, signalRepo := newTestEngine(t)
+	eng, candleRepo, signalRepo, _ := newTestEngine(t)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	const n = 34 // 多頭 zigzag 走勢，足夠 DetectTrend 判斷出 BULLISH（HH+HL）
@@ -163,8 +164,115 @@ func TestEngine_Evaluate_BreakoutGeneratesAndPersistsSignal(t *testing.T) {
 	}
 }
 
+func breakoutCandles(symbol string, base time.Time) []store.Candle {
+	const n = 34 // 多頭 zigzag 走勢，足夠 DetectTrend 判斷出 BULLISH（HH+HL）
+	candles := make([]store.Candle, 0, n+1)
+	var lastClose float64
+	for i := 0; i < n; i++ {
+		c := 100 + 0.6*float64(i) + 1.0*math.Sin(float64(i))
+		candles = append(candles, store.Candle{
+			Symbol: symbol, Timeframe: "1d",
+			Open: c - 0.1, High: c + 0.8, Low: c - 0.8, Close: c,
+			Volume: 1000, Timestamp: base.AddDate(0, 0, i),
+		})
+		lastClose = c
+	}
+	breakoutClose := lastClose + 20
+	candles = append(candles, store.Candle{
+		Symbol: symbol, Timeframe: "1d",
+		Open: lastClose + 0.2, High: breakoutClose + 0.5, Low: lastClose, Close: breakoutClose,
+		Volume: 5000, Timestamp: base.AddDate(0, 0, n),
+	})
+	return candles
+}
+
+func TestEngine_Evaluate_ChipBullishBoostsBreakoutStrength(t *testing.T) {
+	eng, candleRepo, signalRepo, chipScoreRepo := newTestEngine(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedCandles(t, candleRepo, breakoutCandles("BRK_BULL", base))
+
+	if err := chipScoreRepo.Upsert(context.Background(), &store.ChipScore{
+		Symbol: "BRK_BULL", TradeDate: base, Signal: "BULLISH", TotalScore: 50,
+	}); err != nil {
+		t.Fatalf("seed chip score failed: %v", err)
+	}
+
+	sig, err := eng.Evaluate(context.Background(), "BRK_BULL", "1d")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sig == nil || sig.SignalType != "BREAKOUT" {
+		t.Fatalf("expected a BREAKOUT signal, got %+v", sig)
+	}
+	if sig.Strength != baseStrength*chipStrengthBoost {
+		t.Errorf("Strength = %v, want %v (1.0 * chipStrengthBoost)", sig.Strength, chipStrengthBoost)
+	}
+	if !sig.ChipSignal.Valid || sig.ChipSignal.String != "BULLISH" {
+		t.Errorf("ChipSignal = %+v, want BULLISH", sig.ChipSignal)
+	}
+
+	rows, err := signalRepo.GetBySymbol(context.Background(), "BRK_BULL", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Strength != chipStrengthBoost {
+		t.Errorf("expected persisted signal with Strength=%v, got %+v", chipStrengthBoost, rows[0])
+	}
+}
+
+func TestEngine_Evaluate_ChipBearishReducesBreakoutStrength(t *testing.T) {
+	eng, candleRepo, _, chipScoreRepo := newTestEngine(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedCandles(t, candleRepo, breakoutCandles("BRK_BEAR", base))
+
+	if err := chipScoreRepo.Upsert(context.Background(), &store.ChipScore{
+		Symbol: "BRK_BEAR", TradeDate: base, Signal: "BEARISH", TotalScore: -50,
+	}); err != nil {
+		t.Fatalf("seed chip score failed: %v", err)
+	}
+
+	sig, err := eng.Evaluate(context.Background(), "BRK_BEAR", "1d")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sig == nil || sig.SignalType != "BREAKOUT" {
+		t.Fatalf("expected a BREAKOUT signal, got %+v", sig)
+	}
+	if sig.Strength != chipStrengthReduce {
+		t.Errorf("Strength = %v, want %v (1.0 * chipStrengthReduce)", sig.Strength, chipStrengthReduce)
+	}
+	if !sig.ChipSignal.Valid || sig.ChipSignal.String != "BEARISH" {
+		t.Errorf("ChipSignal = %+v, want BEARISH", sig.ChipSignal)
+	}
+}
+
+func TestEngine_Evaluate_NoChipDataKeepsDefaultStrength(t *testing.T) {
+	eng, candleRepo, _, _ := newTestEngine(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedCandles(t, candleRepo, breakoutCandles("BRK_NOCHIP", base))
+
+	sig, err := eng.Evaluate(context.Background(), "BRK_NOCHIP", "1d")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sig == nil {
+		t.Fatal("expected a signal")
+	}
+	if sig.Strength != 1.0 {
+		t.Errorf("Strength = %v, want 1.0 (no chip data available)", sig.Strength)
+	}
+	if sig.ChipSignal.Valid {
+		t.Errorf("ChipSignal = %+v, want invalid/empty (no chip data)", sig.ChipSignal)
+	}
+}
+
+// baseStrength 代表加權前的基準強度 1.0（CheckBreakout/CheckSupportBounce
+// 設定的預設值），只是讓斷言讀起來像「1.0 * chipStrengthBoost」而不是裸
+// 數字，方便跟 applyChipWeighting 的規則說明對照。
+const baseStrength = 1.0
+
 func TestEngine_EvaluateAll_ContinuesAfterPerSymbolFailure(t *testing.T) {
-	eng, candleRepo, signalRepo := newTestEngine(t)
+	eng, candleRepo, signalRepo, _ := newTestEngine(t)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	candles := make([]store.Candle, 0, 40)

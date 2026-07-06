@@ -60,6 +60,8 @@ class BacktestRequest(BaseModel):
     timeframe: str = "1d"
     start_date: str
     end_date: str
+    use_chip_filter: bool = False
+    chip_min_score: float = 0.0
 
     @field_validator("symbols")
     @classmethod
@@ -81,6 +83,8 @@ def _run_and_write(req: BacktestRequest) -> None:
             timeframe=req.timeframe,
             start_date=req.start_date,
             end_date=req.end_date,
+            use_chip_filter=req.use_chip_filter,
+            chip_min_score=req.chip_min_score,
         )
         write_result(job_id, output["result"])
         write_trades(job_id, output["trades"])

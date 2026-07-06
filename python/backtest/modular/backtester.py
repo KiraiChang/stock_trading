@@ -33,12 +33,23 @@ class BacktestEngine:
         initial_cash: float = 1_000_000.0,
         commission_rate: float = 0.001425,
         tax_rate: float = 0.003,
+        chip_min_score: float | None = None,
     ) -> None:
         self.initial_cash = initial_cash
         self.commission_rate = commission_rate
         self.tax_rate = tax_rate
+        # 【籌碼分析整合】None = 不套用籌碼 filter；有值時，run() 收到的
+        # chip_scores（若有提供）逐 bar 比對 total_score 是否達到這個門檻，
+        # 未達門檻的進場訊號會被濾掉（見 docs/chip-analysis-design.md 第9節）。
+        self.chip_min_score = chip_min_score
 
-    def run(self, symbol: str, df: pd.DataFrame, strategy: TradingStrategy) -> BacktestReport:
+    def run(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        strategy: TradingStrategy,
+        chip_scores: dict[str, float] | None = None,
+    ) -> BacktestReport:
         df = df.sort_index()
         n = len(df)
         warmup = strategy.min_bars
@@ -88,7 +99,11 @@ class BacktestEngine:
             else:  # 空手且沒有等待成交的訊號 → 評估是否要進場
                 levels = strategy.sr_strategy.calculate(history)
                 signal = strategy.entry_strategy.evaluate(history, levels)
-                if signal is not None and t + 1 < n:
+                if (
+                    signal is not None
+                    and t + 1 < n
+                    and self._passes_chip_filter(df.index[t], chip_scores)
+                ):
                     pending_signal = signal
 
             mtm = self._mark_to_market(equity, equity_at_entry, position, float(bar["close"]))
@@ -103,6 +118,19 @@ class BacktestEngine:
             equity_curve[-1] = (df.index[-1], equity)
 
         return _build_report(strategy.name, self.initial_cash, equity, equity_curve, trades)
+
+    def _passes_chip_filter(self, bar_time: object, chip_scores: dict[str, float] | None) -> bool:
+        """籌碼 filter 未啟用（chip_min_score 為 None）或這次回測沒有提供
+        chip_scores（例如任務未勾選 use_chip_filter）時一律放行。有提供時，
+        某天缺籌碼分數也放行——呼應設計文件「缺資料時 fallback 為中性，
+        不應中斷回測」的原則，不能因為某天沒同步到籌碼資料就整段回測失真。"""
+        if self.chip_min_score is None or chip_scores is None:
+            return True
+        date_str = pd.Timestamp(bar_time).strftime("%Y-%m-%d")
+        score = chip_scores.get(date_str)
+        if score is None:
+            return True
+        return score >= self.chip_min_score
 
     @staticmethod
     def _stop_fill_price(bar: pd.Series, position: Position) -> float:

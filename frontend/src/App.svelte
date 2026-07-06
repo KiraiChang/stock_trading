@@ -9,6 +9,7 @@
   import Backtest from './routes/Backtest.svelte'
   import Analysis from './routes/Analysis.svelte'
   import SRZones from './routes/SRZones.svelte'
+  import Chips from './routes/Chips.svelte'
 </script>
 
 {#if $isAuthenticated}
@@ -24,6 +25,8 @@
     <Analysis />
   {:else if $currentRoute === 'sr-zones'}
     <SRZones />
+  {:else if $currentRoute === 'chips'}
+    <Chips />
   {:else}
     <Dashboard />
   {/if}

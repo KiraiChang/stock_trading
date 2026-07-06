@@ -33,9 +33,9 @@ func NewBacktestRepo(db *sqlx.DB) BacktestRepo {
 func (r *backtestRepo) CreateJob(ctx context.Context, job *BacktestJob) error {
 	_, err := r.db.NamedExecContext(ctx, `
 		INSERT INTO backtest_jobs
-			(job_id, type, strategy, symbols, timeframe, start_date, end_date, status, trigger)
+			(job_id, type, strategy, symbols, timeframe, start_date, end_date, status, trigger, use_chip_filter, chip_min_score)
 		VALUES
-			(:job_id, :type, :strategy, :symbols, :timeframe, :start_date, :end_date, :status, :trigger)
+			(:job_id, :type, :strategy, :symbols, :timeframe, :start_date, :end_date, :status, :trigger, :use_chip_filter, :chip_min_score)
 	`, job)
 	return err
 }
@@ -61,7 +61,7 @@ func (r *backtestRepo) GetJob(ctx context.Context, jobID string) (*BacktestJob, 
 	var job BacktestJob
 	err := r.db.GetContext(ctx, &job, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
-		       status, trigger, error, created_at, started_at, finished_at
+		       status, trigger, error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
 		FROM backtest_jobs WHERE job_id=?
 	`), jobID)
 	if err != nil {
@@ -74,7 +74,7 @@ func (r *backtestRepo) ListJobs(ctx context.Context, limit int) ([]BacktestJob, 
 	var jobs []BacktestJob
 	err := r.db.SelectContext(ctx, &jobs, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
-		       status, trigger, error, created_at, started_at, finished_at
+		       status, trigger, error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
 		FROM backtest_jobs
 		ORDER BY created_at DESC
 		LIMIT ?

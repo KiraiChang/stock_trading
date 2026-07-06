@@ -37,18 +37,29 @@ def run_backtest(
     timeframe: str,
     start_date: str,
     end_date: str,
+    use_chip_filter: bool = False,
+    chip_min_score: float = 0.0,
 ) -> dict[str, Any]:
     """執行回測，回傳 result + trades 兩個區塊。
 
     strategy 若命中 backtest.modular.strategy.STRATEGY_PRESETS，改走
     modular（純 pandas/numpy，可獨立替換 S/R、進場、停損元件）的回測引擎；
     否則沿用既有的 backtrader 引擎（STRATEGY_MAP）。
+
+    use_chip_filter/chip_min_score 只有 modular 策略支援（見
+    docs/chip-analysis-design.md 第9節）；legacy backtrader 策略沒有這個
+    掛勾點，若請求帶了 use_chip_filter=True 只記警告並忽略，不中斷回測
+    （這是選填的加分項，不該讓整個任務失敗）。
     """
     if strategy in MODULAR_STRATEGIES:
         return run_modular_backtest(
             strategy, symbols, timeframe, start_date, end_date,
             initial_cash=INITIAL_CASH, commission_rate=COMMISSION_RATE, tax_rate=TAX_RATE,
+            use_chip_filter=use_chip_filter, chip_min_score=chip_min_score,
         )
+
+    if use_chip_filter:
+        log.warning("chip filter requested but strategy=%s is a legacy backtrader strategy — ignored", strategy)
 
     log.info("backtest start — strategy=%s  symbols=%s  tf=%s  %s~%s",
              strategy, symbols, timeframe, start_date, end_date)

@@ -1,5 +1,6 @@
 """SQLAlchemy engine + session factory（支援 SQLite / MySQL）。"""
 from __future__ import annotations
+import json
 import logging
 
 from sqlalchemy import create_engine, text
@@ -73,3 +74,54 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
     result = list(reversed([dict(r) for r in rows]))
     log.debug("fetch_candles symbol=%s tf=%s → %d rows", symbol, timeframe, len(result))
     return result
+
+
+def fetch_latest_chip_score(symbol: str, before_date: str | None = None) -> dict | None:
+    """查詢最新一筆籌碼分析分數（見 backend internal/chip 套件），供
+    sr_scoring 當作 trading_score 的第六個加權分量。before_date 指定時只取
+    該日（含）以前最新一筆；即時評分（score_symbol）不帶這個參數，直接取
+    全庫最新一筆。查無資料回傳 None，呼叫端必須 fallback 為中性值，不可
+    讓籌碼資料缺漏中斷整個 SR Zone 評分流程。"""
+    params: dict[str, object] = {"symbol": symbol}
+    where_date = ""
+    if before_date is not None:
+        where_date = "AND trade_date <= :before_date"
+        params["before_date"] = before_date
+
+    sql = text(f"""
+        SELECT symbol, trade_date, institutional_score, margin_score, broker_score,
+               concentration_score, total_score, signal, reason
+        FROM chip_scores
+        WHERE symbol = :symbol {where_date}
+        ORDER BY trade_date DESC
+        LIMIT 1
+    """)
+
+    with engine.connect() as conn:
+        row = conn.execute(sql, params).mappings().first()
+
+    if row is None:
+        return None
+
+    result = dict(row)
+    if isinstance(result.get("reason"), str):
+        try:
+            result["reason"] = json.loads(result["reason"])
+        except (TypeError, ValueError):
+            result["reason"] = []
+    return result
+
+
+def fetch_chip_scores(symbol: str, from_date: str, to_date: str) -> list[dict]:
+    """查詢一段區間的籌碼分數，供 sr_scoring（見 scoring.py 的
+    fetch_latest_chip_score）以外的用途使用——目前給 modular 回測的籌碼
+    filter（見 backtest/modular/service.py）逐 bar 比對 total_score。"""
+    sql = text("""
+        SELECT symbol, trade_date, total_score, signal
+        FROM chip_scores
+        WHERE symbol = :symbol AND trade_date BETWEEN :f AND :t
+        ORDER BY trade_date ASC
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"symbol": symbol, "f": from_date, "t": to_date}).mappings().all()
+    return [dict(r) for r in rows]

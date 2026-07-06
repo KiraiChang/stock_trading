@@ -26,9 +26,9 @@ func (r *signalRepo) Insert(ctx context.Context, s *Signal) error {
 	if r.driver == "pgx" {
 		rows, err := r.db.NamedQueryContext(ctx, `
 			INSERT INTO signals
-				(symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts)
+				(symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, strength, chip_signal, ts)
 			VALUES
-				(:symbol, :signal_type, :direction, :price, :volume, :vol_ratio, :resistance, :support, :trend, :note, :ts)
+				(:symbol, :signal_type, :direction, :price, :volume, :vol_ratio, :resistance, :support, :trend, :note, :strength, :chip_signal, :ts)
 			RETURNING id
 		`, s)
 		if err != nil {
@@ -43,9 +43,9 @@ func (r *signalRepo) Insert(ctx context.Context, s *Signal) error {
 
 	result, err := r.db.NamedExecContext(ctx, `
 		INSERT INTO signals
-			(symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts)
+			(symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, strength, chip_signal, ts)
 		VALUES
-			(:symbol, :signal_type, :direction, :price, :volume, :vol_ratio, :resistance, :support, :trend, :note, :ts)
+			(:symbol, :signal_type, :direction, :price, :volume, :vol_ratio, :resistance, :support, :trend, :note, :strength, :chip_signal, :ts)
 	`, s)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func (r *signalRepo) Insert(ctx context.Context, s *Signal) error {
 func (r *signalRepo) GetRecent(ctx context.Context, limit int) ([]Signal, error) {
 	var rows []Signal
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
-		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts
+		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, strength, chip_signal, ts
 		FROM signals
 		ORDER BY ts DESC
 		LIMIT ?
@@ -72,7 +72,7 @@ func (r *signalRepo) GetRecent(ctx context.Context, limit int) ([]Signal, error)
 func (r *signalRepo) GetBySymbol(ctx context.Context, symbol string, limit int) ([]Signal, error) {
 	var rows []Signal
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
-		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, ts
+		SELECT id, symbol, signal_type, direction, price, volume, vol_ratio, resistance, support, trend, note, strength, chip_signal, ts
 		FROM signals
 		WHERE symbol=?
 		ORDER BY ts DESC

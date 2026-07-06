@@ -138,6 +138,7 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
 
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
 
     result = score_symbol("2330", "1d")
 
@@ -165,7 +166,7 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
         )
         assert z["zone_direction"] in ("UP", "DOWN", "FLAT")
         assert set(z["trading_score_breakdown"].keys()) == {
-            "expected_value", "risk_reward", "trend", "volume", "confidence",
+            "expected_value", "risk_reward", "trend", "volume", "confidence", "chip",
         }
         assert z["trading_score"] == pytest.approx(sum(z["trading_score_breakdown"].values()))
         assert z["support_touch_count"] + z["resistance_touch_count"] == z["touch_count"]
@@ -460,6 +461,7 @@ def test_score_symbol_confluence_reflects_cross_method_overlap(monkeypatch, bund
 
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
 
     overlapping_builders = [
         _FixedBuilder(ZoneMethod.ATR, 0.0, 2.0),
@@ -513,6 +515,108 @@ def test_trading_score_breakdown_confidence_component_is_direct():
         overall_trend=0.0, volume_confirmation=None,
     )
     assert breakdown["confidence"] == pytest.approx(TRADING_SCORE_WEIGHTS["confidence"])
+
+
+# ── 【2026-07 籌碼分析整合】chip 分量 ──────────────────────────────────
+
+
+def test_trading_score_breakdown_chip_missing_data_is_neutral():
+    # 查無籌碼資料（chip_score=None，預設值）時該分量用中性值 0.5，不能是 0
+    breakdown = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None,
+    )
+    assert breakdown["chip"] == pytest.approx(0.5 * TRADING_SCORE_WEIGHTS["chip"])
+
+
+def test_trading_score_breakdown_chip_bullish_increases_support_score():
+    neutral = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=None,
+    )
+    bullish = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=80.0,
+    )
+    bearish = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=-80.0,
+    )
+    assert bullish["chip"] > neutral["chip"] > bearish["chip"]
+    # cap=100 時，chip_score=80 應正規化為 (80+100)/200=0.9
+    assert bullish["chip"] == pytest.approx(0.9 * TRADING_SCORE_WEIGHTS["chip"])
+
+
+def test_trading_score_breakdown_chip_sign_flips_for_resistance():
+    """籌碼偏多對 SUPPORT 是加分（有支撐買盤），但對 RESISTANCE 是減分
+    （買盤較強，壓力較容易被站上），跟 trend 分量的角色翻轉邏輯一致。"""
+    support = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=80.0,
+    )
+    resistance = _trading_score_breakdown(
+        role="RESISTANCE", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=80.0,
+    )
+    assert support["chip"] > TRADING_SCORE_WEIGHTS["chip"] * 0.5
+    assert resistance["chip"] < TRADING_SCORE_WEIGHTS["chip"] * 0.5
+    assert support["chip"] + resistance["chip"] == pytest.approx(TRADING_SCORE_WEIGHTS["chip"])
+
+
+def test_trading_score_breakdown_chip_at_zone_uses_unflipped_sign():
+    at_zone = _trading_score_breakdown(
+        role="AT_ZONE", confidence=0.5, expected_value=None, risk_reward_ratio=None,
+        overall_trend=0.0, volume_confirmation=None, chip_score=80.0,
+    )
+    assert at_zone["chip"] == pytest.approx(0.9 * TRADING_SCORE_WEIGHTS["chip"])
+
+
+def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bundle):
+    """整合測試：score_symbol 應該只查一次 fetch_latest_chip_score（股票層級，
+    比照 global_trend 的做法），並把結果套進每個 zone 的 trading_score_breakdown。"""
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+    low = float(df["close"].min())
+
+    call_count = {"n": 0}
+
+    def _fake_fetch_chip(symbol, *a, **kw):
+        call_count["n"] += 1
+        assert symbol == "2330"
+        return {"symbol": "2330", "total_score": 60.0}
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", _fake_fetch_chip)
+
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    result = score_symbol("2330", "1d", builders=[_SingleZoneBuilder(zone)])
+
+    assert call_count["n"] == 1  # 股票層級只查一次，不對每個 zone 重複查詢
+    assert len(result["zones"]) == 1
+    z = result["zones"][0]
+    # chip_score=60 正規化為 (60+100)/200=0.8；zone 在最低價附近，role=SUPPORT，
+    # 不需要翻轉正負號
+    assert z["role"] == "SUPPORT"
+    assert z["trading_score_breakdown"]["chip"] == pytest.approx(0.8 * TRADING_SCORE_WEIGHTS["chip"])
+
+
+class _SingleZoneBuilder:
+    def __init__(self, zone: Zone):
+        self._zone = zone
+
+    @property
+    def min_bars(self) -> int:
+        return 1
+
+    def build(self, df):
+        return [self._zone]
 
 
 # ── 十二、Global EV/Confidence/RR（唯一收斂）───────────────────────────
@@ -622,6 +726,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
 
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
 
     result = score_symbol("2330", "1d")
 

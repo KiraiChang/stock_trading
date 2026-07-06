@@ -92,7 +92,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from db import fetch_candles
+from db import fetch_candles, fetch_latest_chip_score
 
 from .features import compute_zone_features, find_touches, trend_slope, zone_momentum, zone_volatility
 from .labeling import label_touch
@@ -148,13 +148,20 @@ ZONE_MOMENTUM_LOOKBACK = 5
 
 NEUTRAL_PROBABILITY = 0.5
 
-# 十三、Score 必須可拆解：五個分量、明確權重，總和 = 100。
+# 十三、Score 必須可拆解：六個分量、明確權重，總和 = 100。
+# 【2026-07 籌碼分析整合】新增 chip 分量（權重 15），其餘五個分量依原比例
+# 縮小至 85（40/20/15/15/10 → 34/17/12.75/12.75/8.5）。chip_score 是固定
+# 加權公式的輸入，不影響 hold/break 機率模型本身，因此不需要重新訓練模型、
+# 不需要 bump ModelVersion/ModelConfigHash（見 model.py::compute_config_hash
+# 只追蹤 DatasetConfig/zone builder 參數，不含這裡的權重常數）。這組數字是
+# 初始權重，之後可依實際回測結果調整。
 TRADING_SCORE_WEIGHTS = {
-    "expected_value": 40.0,
-    "risk_reward": 20.0,
-    "trend": 15.0,
-    "volume": 15.0,
-    "confidence": 10.0,
+    "expected_value": 34.0,
+    "risk_reward": 17.0,
+    "trend": 12.75,
+    "volume": 12.75,
+    "confidence": 8.5,
+    "chip": 15.0,
 }
 
 _VOLUME_CONFIRMATION_WEIGHT = {
@@ -481,17 +488,25 @@ def _trading_score_breakdown(
     risk_reward_ratio: Optional[float],
     overall_trend: float,
     volume_confirmation: Optional[str],
+    chip_score: Optional[float] = None,
 ) -> dict[str, float]:
-    """Score = EV(40%) + RR(20%) + Trend(15%) + Volume(15%) + Confidence(10%)。
-    每個分量先正規化到 [0,1] 再乘上對應權重，回傳值就是「這個分量對總分的
-    實際貢獻」（加總即為 trading_score），不是抽象的 0~1 子分數——這樣使用
-    者可以直接看出「總分裡有幾分來自 EV、幾分來自量能」，不用自己再乘一次
-    權重（十四、1. 可解釋、十四、8. 明確定義計算公式）。
+    """Score = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%)
+    + Chip(15%)。每個分量先正規化到 [0,1] 再乘上對應權重，回傳值就是「這個
+    分量對總分的實際貢獻」（加總即為 trading_score），不是抽象的 0~1 子分數
+    ——這樣使用者可以直接看出「總分裡有幾分來自 EV、幾分來自量能」，不用
+    自己再乘一次權重（十四、1. 可解釋、十四、8. 明確定義計算公式）。
 
     role=AT_ZONE 或角色相關數值缺值（EV/RR/量能確認都要求 role 已解析）時，
     對應分量用中性值 0.5 計算，不直接給 0 分——沒有方向不代表這個 zone
     「不好」，只是還沒有可以評分的方向性資料。Trend/Confidence 不需要角色
-    解析，任何情況都能算。"""
+    解析，任何情況都能算。
+
+    【2026-07 籌碼分析整合】chip_score 是 chip_scores.total_score（-100~100，
+    見 internal/chip 套件），跟 trend 一樣需要依角色翻轉正負號：籌碼偏多
+    （chip_score 為正）代表股價有支撐、較不易跌破，對 SUPPORT 角色是加分；
+    但對 RESISTANCE 角色代表買盤較強，反而較容易「站上」壓力（壓力較不易
+    守住），要用負值計算。查無籌碼資料（chip_score=None，例如尚未同步）時
+    用中性值 0.5，不阻塞整體評分。"""
     is_support = role == ZoneType.SUPPORT.value
     is_resistance = role == ZoneType.RESISTANCE.value
 
@@ -507,6 +522,13 @@ def _trading_score_breakdown(
 
     volume_norm = _VOLUME_CONFIRMATION_WEIGHT.get(volume_confirmation, 0.5) if volume_confirmation else 0.5
 
+    if chip_score is None:
+        chip_norm = 0.5
+    elif is_resistance:
+        chip_norm = _normalize_signed(-chip_score, cap=100.0)
+    else:
+        chip_norm = _normalize_signed(chip_score, cap=100.0)  # SUPPORT 與 AT_ZONE 用原始值
+
     w = TRADING_SCORE_WEIGHTS
     return {
         "expected_value": float(ev_norm * w["expected_value"]),
@@ -514,6 +536,7 @@ def _trading_score_breakdown(
         "trend": float(trend_norm * w["trend"]),
         "volume": float(volume_norm * w["volume"]),
         "confidence": float(confidence * w["confidence"]),
+        "chip": float(chip_norm * w["chip"]),
     }
 
 
@@ -599,6 +622,7 @@ def score_zone(
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
     overlap_group: Optional[int] = None,
     confluence_count: int = 1,
+    chip_score: Optional[float] = None,
 ) -> ZoneScore:
     if as_of_index is None:
         as_of_index = len(df) - 1
@@ -695,6 +719,7 @@ def score_zone(
 
     trading_score_breakdown = _trading_score_breakdown(
         role, confidence, expected_value, risk_reward_ratio, overall_trend, volume_confirmation,
+        chip_score=chip_score,
     )
     trading_score_value = _trading_score(trading_score_breakdown)
     trading_recommendation = _trading_recommendation(trading_score_value, role)
@@ -770,6 +795,13 @@ def score_symbol(
     global_trend = trend_slope(df, as_of_index)
     global_volatility = zone_volatility(df, as_of_index)
 
+    # 【2026-07 籌碼分析整合】chip_score 同樣是股票層級的量（同一次分析裡
+    # 所有 zone 共用同一個值，只是依角色翻轉正負號），只查一次。查無資料
+    # （尚未同步籌碼、或該股票不在監控清單）不拋錯，讓 SR Zone 評分照常
+    # 進行，chip 分量退回中性值（見 _trading_score_breakdown）。
+    chip_row = fetch_latest_chip_score(symbol)
+    chip_score = float(chip_row["total_score"]) if chip_row is not None else None
+
     # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。
     tiers = _assign_tiers([z.width for z in zones])
     # 十六：跨方法重疊分群（confluence），見 _group_overlapping_zones 說明。
@@ -778,7 +810,7 @@ def score_symbol(
     zone_scores = [
         score_zone(
             df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index,
-            overlap_group=og, confluence_count=cc,
+            overlap_group=og, confluence_count=cc, chip_score=chip_score,
         )
         for zone, tier, og, cc in zip(zones, tiers, overlap_groups, confluence_counts)
     ]

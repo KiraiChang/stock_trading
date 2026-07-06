@@ -86,6 +86,58 @@ def test_backtest_engine_no_data_returns_empty_report():
     assert report.trades == []
 
 
+# ── 【2026-07 籌碼分析整合】chip_min_score filter ──────────────────────
+
+
+def _strategy_for_chip_tests() -> TradingStrategy:
+    return TradingStrategy(
+        name="test_breakout_atr_chip",
+        sr_strategy=SwingHighLowSR(lookback=60),
+        entry_strategy=BreakoutEntry(vol_multiplier=2.0, vol_period=20),
+        stop_loss_strategy=ATRStopLoss(atr_period=14, atr_multiplier=2.0),
+    )
+
+
+def test_backtest_engine_chip_filter_blocks_entry_below_threshold():
+    df = _breakout_then_crash_df()
+    signal_date = df.index[31].strftime("%Y-%m-%d")  # 訊號在 bar31 產生
+    engine = BacktestEngine(chip_min_score=50.0)
+
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={signal_date: 10.0})
+
+    assert report.total_trades == 0, "籌碼分數低於門檻應濾掉進場訊號"
+
+
+def test_backtest_engine_chip_filter_allows_entry_meeting_threshold():
+    df = _breakout_then_crash_df()
+    signal_date = df.index[31].strftime("%Y-%m-%d")
+    engine = BacktestEngine(chip_min_score=50.0)
+
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={signal_date: 60.0})
+
+    assert report.total_trades == 1, "籌碼分數達到門檻應放行進場訊號"
+
+
+def test_backtest_engine_chip_filter_missing_date_fails_open():
+    df = _breakout_then_crash_df()
+    engine = BacktestEngine(chip_min_score=50.0)
+
+    # 訊號當天完全沒有籌碼分數資料，應 fallback 放行，不阻擋整段回測
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={})
+
+    assert report.total_trades == 1, "缺籌碼資料應 fail-open，不阻擋進場"
+
+
+def test_backtest_engine_chip_filter_disabled_ignores_chip_scores():
+    df = _breakout_then_crash_df()
+    signal_date = df.index[31].strftime("%Y-%m-%d")
+    engine = BacktestEngine()  # chip_min_score 預設 None = 停用 filter
+
+    report = engine.run("TEST", df, _strategy_for_chip_tests(), chip_scores={signal_date: -100.0})
+
+    assert report.total_trades == 1, "未啟用籌碼 filter 時，即使傳入極低分數也不應影響進場"
+
+
 def test_build_strategy_unknown_name_raises():
     import pytest
 

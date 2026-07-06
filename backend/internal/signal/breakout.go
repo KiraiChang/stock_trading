@@ -37,6 +37,7 @@ func CheckBreakout(
 				VolRatio:   volRatio,
 				Resistance: r.Price,
 				Trend:      string(trend),
+				Strength:   1.0,
 				Note:       fmt.Sprintf("突破阻力 %.2f，量比 %.2fx", r.Price, volRatio),
 				Timestamp:  ts,
 			}
@@ -55,6 +56,7 @@ func CheckBreakout(
 				VolRatio:   volRatio,
 				Support:    s.Price,
 				Trend:      string(trend),
+				Strength:   1.0,
 				Note:       fmt.Sprintf("跌破支撐 %.2f", s.Price),
 				Timestamp:  ts,
 			}
@@ -71,6 +73,7 @@ func CheckBreakout(
 			Volume:     vol,
 			VolRatio:   volRatio,
 			Trend:      string(trend),
+			Strength:   1.0,
 			Note:       fmt.Sprintf("異常爆量 %.2fx", volRatio),
 			Timestamp:  time.Now(),
 		}

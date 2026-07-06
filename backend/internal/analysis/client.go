@@ -302,9 +302,16 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		if z.BreakCount != nil {
 			breakCount = *z.BreakCount
 		}
+		if err := validateTradingScoreBreakdown(z.TradingScoreBreakdown); err != nil {
+			return nil, nil, fmt.Errorf("invalid trading_score_breakdown for zone %.2f-%.2f: %w", z.PriceLow, z.PriceHigh, err)
+		}
 		breakdownJSON, err := json.Marshal(z.TradingScoreBreakdown)
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal trading_score_breakdown: %w", err)
+		}
+		confluenceCount := z.ConfluenceCount
+		if confluenceCount <= 0 {
+			confluenceCount = 1
 		}
 		zones = append(zones, store.SRZone{
 			PriceLow:              z.PriceLow,
@@ -340,12 +347,22 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			TradingScoreBreakdown: store.RawJSON(breakdownJSON),
 			TradingRecommendation: z.TradingRecommendation,
 			OverlapGroup:          nullInt(z.OverlapGroup),
-			ConfluenceCount:       z.ConfluenceCount,
+			ConfluenceCount:       confluenceCount,
 			Status:                "PENDING",
 		})
 	}
 
 	return a, zones, nil
+}
+
+func validateTradingScoreBreakdown(b map[string]float64) error {
+	required := []string{"expected_value", "risk_reward", "trend", "volume", "confidence", "chip"}
+	for _, key := range required {
+		if _, ok := b[key]; !ok {
+			return fmt.Errorf("missing %q", key)
+		}
+	}
+	return nil
 }
 
 // scoreZonesRequest 對應 Python ScoreZonesRequest；Limit 為 0 時省略欄位，

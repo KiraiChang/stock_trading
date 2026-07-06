@@ -127,8 +127,9 @@ type SRZoneAnalysis struct {
 	// 共用同一個值）；GlobalExpectedValue/GlobalRiskRewardRatio 是所有
 	// zone 依 confidence 加權平均後「唯一收斂」的結果（見
 	// scoring.py::_compute_global_metrics）；GlobalConfidence 是所有 zone
-	// confidence 的簡單平均。zones 為空、或都沒有明確方向時，
-	// GlobalExpectedValue/GlobalConfidence/GlobalRiskRewardRatio 可能是 NULL。
+	// confidence 的簡單平均。GlobalExpectedValue/GlobalRiskRewardRatio 在
+	// zones 為空或都沒有明確方向時可能是 NULL；GlobalConfidence 只有
+	// zones 為空時才是 NULL。
 	GlobalTrend           float64     `db:"global_trend"            json:"global_trend"`
 	GlobalVolatility      float64     `db:"global_volatility"       json:"global_volatility"`
 	GlobalExpectedValue   NullFloat64 `db:"global_expected_value"   json:"global_expected_value,omitempty"`
@@ -211,8 +212,8 @@ type SRZone struct {
 
 	TradingScore float64 `db:"trading_score"           json:"trading_score"`
 	// TradingScoreBreakdown 是 RawJSON（見 null.go 說明）：{"expected_value":..,
-	// "risk_reward":.., "trend":.., "volume":.., "confidence":..}，五個分量的
-	// 加權貢獻值加總即為 TradingScore（見十三、Score 必須可拆解）。
+	// "risk_reward":.., "trend":.., "volume":.., "confidence":.., "chip":..}，
+	// 六個分量的加權貢獻值加總即為 TradingScore（見十三、Score 必須可拆解）。
 	TradingScoreBreakdown RawJSON `db:"trading_score_breakdown" json:"trading_score_breakdown"`
 	TradingRecommendation string  `db:"trading_recommendation"  json:"trading_recommendation"`
 

@@ -72,7 +72,7 @@ func testZones() []SRZone {
 			ZoneMomentum: -0.02, ZoneDirection: "DOWN",
 			RecentValidation:      "VALIDATED_RECENTLY",
 			TradingScore:          78.5,
-			TradingScoreBreakdown: RawJSON(`{"expected_value":30,"risk_reward":15,"trend":10,"volume":15,"confidence":8.5}`),
+			TradingScoreBreakdown: RawJSON(`{"expected_value":26.7,"risk_reward":13.4,"trend":10,"volume":10.2,"confidence":7.2,"chip":11}`),
 			TradingRecommendation: "BUY",
 			OverlapGroup:          NullInt64{sql.NullInt64{Int64: 0, Valid: true}},
 			ConfluenceCount:       2,
@@ -87,7 +87,7 @@ func testZones() []SRZone {
 			ZoneMomentum: 0.0, ZoneDirection: "FLAT",
 			RecentValidation:      "PENDING_VALIDATION",
 			TradingScore:          45.0,
-			TradingScoreBreakdown: RawJSON(`{"expected_value":20,"risk_reward":10,"trend":7.5,"volume":7.5,"confidence":4}`),
+			TradingScoreBreakdown: RawJSON(`{"expected_value":18,"risk_reward":9,"trend":6,"volume":6,"confidence":3,"chip":3}`),
 			TradingRecommendation: "NEUTRAL",
 			ConfluenceCount:       1, // 沒有 OverlapGroup（獨立 zone，未跟其他方法重疊）
 		},
@@ -296,7 +296,16 @@ func TestSRZoneRepoUpdateZoneStatusPersistsResolvedRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetZones failed: %v", err)
 	}
-	target := zones[0]
+	var target SRZone
+	for _, z := range zones {
+		if z.Role == "AT_ZONE" {
+			target = z
+			break
+		}
+	}
+	if target.ID == 0 {
+		t.Fatal("expected test data to include an AT_ZONE zone")
+	}
 
 	if err := repo.UpdateZoneStatus(ctx, target.ID, "HELD_SO_FAR", nil, nil, "SUPPORT"); err != nil {
 		t.Fatalf("UpdateZoneStatus failed: %v", err)
@@ -317,6 +326,44 @@ func TestSRZoneRepoUpdateZoneStatusPersistsResolvedRole(t *testing.T) {
 	}
 	if !found.ResolvedRole.Valid || found.ResolvedRole.String != "SUPPORT" {
 		t.Fatalf("expected resolved_role=SUPPORT, got %+v", found.ResolvedRole)
+	}
+}
+
+func TestSRZoneRepoUpdateZoneStatusIgnoresResolvedRoleForDirectionalZone(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	zones, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	var target SRZone
+	for _, z := range zones {
+		if z.Role == "SUPPORT" {
+			target = z
+			break
+		}
+	}
+	if target.ID == 0 {
+		t.Fatal("expected test data to include a SUPPORT zone")
+	}
+
+	if err := repo.UpdateZoneStatus(ctx, target.ID, "HELD_SO_FAR", nil, nil, "SUPPORT"); err != nil {
+		t.Fatalf("UpdateZoneStatus failed: %v", err)
+	}
+
+	updated, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("GetZones failed: %v", err)
+	}
+	for _, z := range updated {
+		if z.ID == target.ID && z.ResolvedRole.Valid {
+			t.Fatalf("expected non-AT_ZONE resolved_role to remain NULL, got %+v", z.ResolvedRole)
+		}
 	}
 }
 

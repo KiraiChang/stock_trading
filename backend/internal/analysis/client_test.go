@@ -116,7 +116,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					ZoneMomentum: -0.02, ZoneDirection: "DOWN",
 					RecentValidation: "VALIDATED_RECENTLY",
 					TradingScore:     78.5, TradingScoreBreakdown: map[string]float64{
-						"expected_value": 30.0, "risk_reward": 15.0, "trend": 10.0, "volume": 15.0, "confidence": 8.5,
+						"expected_value": 26.7, "risk_reward": 13.4, "trend": 10.0, "volume": 10.2, "confidence": 7.2, "chip": 11.0,
 					},
 					TradingRecommendation: "BUY",
 					OverlapGroup:          &overlapGroup, ConfluenceCount: 2,
@@ -129,10 +129,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					TouchCount: 2, ZoneMomentum: 0.0, ZoneDirection: "FLAT",
 					RecentValidation: "PENDING_VALIDATION",
 					TradingScore:     45.0, TradingScoreBreakdown: map[string]float64{
-						"expected_value": 20.0, "risk_reward": 10.0, "trend": 7.5, "volume": 7.5, "confidence": 4.0,
+						"expected_value": 18.0, "risk_reward": 9.0, "trend": 6.0, "volume": 6.0, "confidence": 3.0, "chip": 3.0,
 					},
 					TradingRecommendation: "NEUTRAL",
-					ConfluenceCount:       1,
 				},
 			},
 		})
@@ -233,6 +232,27 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if second.RejectCount != 0 || second.BreakCount != 0 {
 		t.Fatalf("expected AT_ZONE zone to default reject/break count to 0, got %+v", second)
+	}
+	if second.ConfluenceCount != 1 {
+		t.Fatalf("expected missing confluence_count to default to 1, got %d", second.ConfluenceCount)
+	}
+}
+
+func TestZoneScoreResultToStoreRejectsIncompleteTradingScoreBreakdown(t *testing.T) {
+	result := ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
+		Zones: []ZoneScore{{
+			PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
+			TradingScoreBreakdown: map[string]float64{
+				"expected_value": 26.7, "risk_reward": 13.4, "trend": 10.0, "volume": 10.2, "confidence": 7.2,
+			},
+		}},
+	}
+
+	_, _, err := result.ToStore()
+	if err == nil {
+		t.Fatal("expected error when trading_score_breakdown misses chip")
 	}
 }
 

@@ -894,7 +894,7 @@
                           <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
                           <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
                         </div>
-                        <p class="text-[11px] text-muted mt-1">可信度只用目前角色（{noviceRoleText[z.role] ?? z.role}）方向的觸碰樣本計算，不含另一方向</p>
+                        <p class="text-[11px] text-muted mt-1">可信度只用目前角色（{noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}）方向的觸碰樣本計算，不含另一方向</p>
                       </div>
                     {/if}
                   </div>

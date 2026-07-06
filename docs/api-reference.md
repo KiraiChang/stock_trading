@@ -596,7 +596,7 @@ Python 端預設值（250）。
       "zone_direction": "UP",
       "recent_validation": "VALIDATED_RECENTLY",
       "trading_score": 78.5,
-      "trading_score_breakdown": { "expected_value": 30.0, "risk_reward": 15.3, "trend": 10.6, "volume": 15.0, "confidence": 7.2 },
+      "trading_score_breakdown": { "expected_value": 26.7, "risk_reward": 13.4, "trend": 10.0, "volume": 10.2, "confidence": 7.2, "chip": 11.0 },
       "trading_recommendation": "BUY",
       "overlap_group": 0,
       "confluence_count": 2,
@@ -610,7 +610,8 @@ Python 端預設值（250）。
 
 `role=AT_ZONE`（現價落在區間內）的 zone，`bounce_probability` 到
 `volume_confirmation` 這些「已解析方向」才有意義的欄位一律是 `null`。
-`trading_score_breakdown` 的五個分量加總即為 `trading_score`（見
+`trading_score_breakdown` 的六個分量加總即為 `trading_score`：EV(34%) + RR(17%) +
+Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)（見
 sr-zone-scoring.md「十二」）。`zones` 陣列依 Tier 由粗到細排序，同層內依
 `trading_score` 由高到低排序（`confluence_count` 只當第三順位 tie-
 breaker，不改變主要排序規則）。`confidence` 依角色只用該方向

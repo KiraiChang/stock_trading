@@ -172,7 +172,10 @@ func (r *srZoneRepo) UpdateZoneStatus(ctx context.Context, zoneID uint64, status
 		resolvedRoleArg = resolvedRole
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE stock_sr_zones SET status=?, broken_at=?, broken_price=?, resolved_role=? WHERE id=?
+		UPDATE stock_sr_zones
+		SET status=?, broken_at=?, broken_price=?,
+			resolved_role=CASE WHEN role='AT_ZONE' THEN ? ELSE NULL END
+		WHERE id=?
 	`), status, brokenAt, brokenPrice, resolvedRoleArg, zoneID)
 	return err
 }

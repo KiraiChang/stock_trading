@@ -302,6 +302,38 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 - 低信心不是看空，而是樣本少或近期未驗證，應等待確認。
 
 ---
+
+### T-017：Watching 進場點升級為機率模型
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Python / stock-analysis / 模型 |
+| 建立日期 | 2026-07-07 |
+| 來源 | 原 `docs/issue.md` I-010，2026-07-07 分流至 todo |
+
+個股分析的「Watching」（觀察中）進場點目前是規則式近似（`analysis.py`
+`_watching_entry`）：純用「趨勢方向 + 離現價最近的支撐/壓力價位」挑一個該盯的
+價位，沒有機率、期望值或風險報酬比。相對地，隔壁 SR Zone 已經是訓練過的機率
+模型，會輸出 bounce/break probability。這筆是把 Watching 也升級成機率模型的規劃
+（屬功能擴充，不是 bug）。
+
+實作範式可**直接類比 `sr_scoring/` 既有管線**（兩者是獨立系統、獨立資料表，不共用
+模型），需要新增對應元件：
+
+- **Label 定義**：進場後 N 根K棒內是否達到目標／觸及停損（可複用
+  `labeling.py::label_touch` 的「forward window + threshold」自動標籤範式，免人工標註）。
+- **特徵工程**：以現有規則式指標（趨勢、S/R 距離、爆量比、ATR、pullback 容忍帶等）
+  為基礎的特徵向量。
+- **walk-forward dataset**：類比 `dataset.py`，逐根用「至今」資料算特徵 + 未來 label。
+- **train/predict + 機率校準**：類比 `model.py`（time-split holdout、`CalibratedClassifierCV`）。
+- **模型檔管理**：類比 SR Zone 的 joblib lazy singleton。
+
+可用資料已具備：`candles` 歷史、`backtest_trades` 逐筆交易結果、SR Zone 的自動標籤
+與 walk-forward 範式；缺的是專屬 Watching 的 label 定義與特徵 pipeline，而非資料本身。
+
+---
 ## 已完成封存
 
 （目前沒有項目）

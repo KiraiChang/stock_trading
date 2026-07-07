@@ -116,6 +116,8 @@ class Zone:
 @dataclass(frozen=True)
 class ZoneFeatures:
     touch_count: int
+    # rejection_count：特徵層欄位。對外輸出時在 scoring.py 被複製成 ZoneScore.reject_count
+    # （同一個量，跨層改名，見 scoring.py 的「跨層改名點」註解與 docs/sr-zone-scoring.md）。
     rejection_count: int
     breakout_count: int
     # average_bounce_return：觸碰後被分類為「守住/反彈」（hold_label=1）的
@@ -244,6 +246,8 @@ class ZoneScore:
     touch_count: int
     support_touch_count: int
     resistance_touch_count: int
+    # reject_count：API 輸出欄位，值直接複製自特徵層 ZoneFeatures.rejection_count
+    # （同一個量，命名前綴不同，見 scoring.py 的「跨層改名點」與 docs/sr-zone-scoring.md）。
     reject_count: Optional[int]
     break_count: Optional[int]
 

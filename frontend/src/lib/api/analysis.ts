@@ -40,10 +40,17 @@ export interface TouchResult {
   hit_price?: number
 }
 
+export interface ExitResolution {
+  first_exit: 'STOP_LOSS' | 'TAKE_PROFIT' | 'NONE'
+  resolved_at?: string
+  same_bar_tie: boolean
+}
+
 export interface TradeVerification {
   applicable: boolean
   stop_loss?: Record<string, TouchResult>
   take_profit?: Record<string, TouchResult>
+  resolution?: ExitResolution
 }
 
 export function parseTradeVerification(raw?: string): TradeVerification | null {

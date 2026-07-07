@@ -861,6 +861,9 @@ def score_zone(
         expected_value = hold_p * expected_gain + break_p * expected_loss
 
         relative_volume = role_features.relative_volume
+        # 跨層改名點：特徵層叫 rejection_count（ZoneFeatures），從這裡起對外一律
+        # 叫 reject_count（ZoneScore / API / DB / Go / TS / Svelte）。兩者是同一個量，
+        # 只是所處的層不同，沒有第二個獨立數值。命名對照見 docs/sr-zone-scoring.md。
         reject_count = role_features.rejection_count
         break_count_field = role_features.breakout_count
 

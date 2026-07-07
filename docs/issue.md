@@ -15,56 +15,6 @@
 
 ---
 
-### I-008：SR Zone 機率模型缺乏獨立命名，`reject_count`/`rejection_count` 易混淆
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已知限制（不計畫修復） |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-07 |
-| 來源 | `docs/sr-zone-scoring.md` |
-| 相關檔案 | `python/backtest/modular/sr_scoring/features.py`、`scoring.py` |
-
-`reject_count`（拒絕次數，見 features.py）跟 `rejection_count`
-（zone_features 內部欄位）命名相似，容易在閱讀程式碼時混淆；另外
-`/sr-scoring/*`（Python 內部路由）跟 `/sr-zones/*`（對外 API）命名也容易
-搞混。目前判斷維護成本不高，先記錄不強制重新命名（重新命名會牽動多層
-API/DB/TS 契約）。
-
----
-
-### I-009：停損停利同時觸發時不會自動判斷先後順序
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已知限制（不計畫修復） |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-07 |
-| 來源 | `docs/stock-analysis.md` |
-| 相關檔案 | 個股分析 verifier 相關程式碼 |
-
-同一根K棒內同時觸及停損價與停利價時，系統不會自動判斷哪個先發生，需要
-人工比對 `hit_at` 決定實際結果。跟 SR Zone `labeling.py` 的 max_excursion
-雙標籤問題（已於 `sr_zone_improve.md` review #3 修復，見本文件不重複列出）
-是類似情境，但個股分析這邊目前選擇維持人工判斷，不自動化。
-
----
-
-### I-010：Watching 進場判斷是規則式近似，非機率模型
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已知限制（不計畫修復） |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-07 |
-| 來源 | `docs/stock-analysis.md` |
-
-「Watching」（觀察中）進場點的判斷目前是規則式近似（技術指標門檻），不是
-像 SR Zone 那樣用訓練過的機率模型輸出 bounce/break probability。是否要把
-這塊也升級成機率模型，目前沒有排入計畫（如果要做，應該記錄到
-[todo.md](./todo.md) 而不是這裡）。
----
-
 ### I-011：SR Zone 支撐壓力摘要看不到明確籌碼分析
 
 | 欄位 | 內容 |

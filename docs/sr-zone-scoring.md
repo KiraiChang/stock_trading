@@ -596,16 +596,46 @@ zone 卡片標題列顯示「多方法共振 ×N」徽章（`confluence_count > 
 
 ---
 
+## 命名對照（欄位與路由前綴）
+
+系統裡有幾組名稱相似、容易誤認為不同東西的命名，實際上是「同一個量／同一個
+功能」在不同層的不同叫法。整理成對照表避免閱讀時混淆（因為重新命名會橫跨
+Python/Go/DB/TS/Svelte 五層並牽動已訓練模型，投報比過低，決定不重命名，改用
+註解與本表消除混淆）。
+
+### 欄位：特徵層 vs 輸出層
+
+| 層 | 欄位名 | 定義位置 | 說明 |
+|---|---|---|---|
+| ML 特徵層 | `rejection_count` | `types.py` `ZoneFeatures` | 餵給模型訓練/推論的原始特徵 |
+| API 輸出層 | `reject_count` | `types.py` `ZoneScore` | **值直接複製自** `rejection_count` |
+| 同上（跨語言） | `reject_count` | Go `client.go`/`store` → DB 欄位 → TS `srZones.ts` → Svelte | 一路沿用輸出層名稱 |
+
+**關鍵**：`reject_count` 與 `rejection_count` 是**同一個數值**，不是兩個獨立的量，
+唯一連接點在 `scoring.py` 的 `reject_count = role_features.rejection_count`（該行有
+「跨層改名點」註解）。同理 `break_count`（輸出層）＝ `breakout_count`（特徵層）。
+
+### 路由前綴：`/sr-scoring` vs `/sr-zones`
+
+| 前綴 | 位置 | 負責 |
+|---|---|---|
+| `/sr-scoring/*` | Python FastAPI（`http_server.py`）內部 | **只有** `train`、`model-status` |
+| `/sr-zones`（Python） | Python FastAPI 內部 | 評分主端點（`score_symbol`），前綴本身就與 train 分裂 |
+| `/sr-zones/*` | Go Gin（`server.go`）對外 API | 前端看到的全部端點（評分、驗證、train、model-status…） |
+| `sr_scoring_train_jobs` | DB 表／Go `SRScoringTrainJob` | 訓練 job 實體用 `sr_scoring` 前綴 |
+
+對外一律 `/sr-zones/*`（`/sr-scoring` 對前端完全不可見，由 Go client 轉換）。
+撰寫新程式碼時要分清楚當下是哪一層，避免把 Python 內部路由跟對外 API 搞混。
+
+---
+
 ## 已知限制
 
 - **`atr_width_multiplier`/`max_merge_width_multiple` 需要依實際股票調參**：
   這兩個常數目前是全域預設值（1.5／2.0），對不同價位、不同波動度的股票
   可能需要不同的合理範圍，尚未针對大規模真實資料做系統性調參。
-- **`reject_count`/`break_count`（API/DB 輸出欄位）跟 `rejection_count`/
-  `breakout_count`（`ZoneFeatures` 訓練特徵欄位）是兩個不同層級的欄位**，
-  只是名稱相似，容易誤認為改名或型別不一致，實際上一個是 ML 特徵、一個是
-  API 輸出（`scoring.py::score_zone` 裡有做對應）。
-- **Python `POST /sr-scoring/train` 與 Go `POST /sr-zones/train`
-  是同一個功能的兩個不同路徑段**（`sr-scoring` vs `sr-zones`），依語言邊界
-  命名不同，容易混淆，撰寫新文件或程式碼時要留意分清楚是哪一層。
+- **`reject_count`/`break_count` 與 `rejection_count`/`breakout_count` 是同一個量
+  的跨層不同命名**（不是兩個獨立數值），詳見上方「命名對照」表。
+- **Python `/sr-scoring/*` 與對外 Go `/sr-zones/*` 前綴分裂**，同一功能依語言
+  邊界命名不同，詳見上方「命名對照」表。
 

@@ -240,6 +240,12 @@
             <h3 class="text-xs font-semibold text-muted mb-2">
               進場後驗證結果{current.verified_at ? `（${formatDateTime(current.verified_at)}）` : ''}
             </h3>
+            {#if verification.resolution && verification.resolution.first_exit !== 'NONE'}
+              {@const res = verification.resolution}
+              <p class="text-xs mb-2 {res.first_exit === 'STOP_LOSS' ? 'text-fall' : 'text-rise'}">
+                研判先出場：{res.first_exit === 'STOP_LOSS' ? '停損' : '停利'}{res.resolved_at ? ` @ ${formatDateTime(res.resolved_at)}` : ''}{res.same_bar_tie ? '（同根同時觸及，保守判定停損先）' : ''}
+              </p>
+            {/if}
             <div class="grid grid-cols-2 gap-4 text-xs">
               <div>
                 <p class="text-muted mb-1">停損觸及狀況</p>

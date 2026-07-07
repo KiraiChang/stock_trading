@@ -95,6 +95,20 @@ export interface SRZone {
 
 export type SRPeriodKey = 'short' | 'mid' | 'long'
 
+export type ChipDirection = 'bullish' | 'bearish' | 'neutral' | 'none'
+
+// 每張支撐/壓力摘要卡的角色化籌碼一行（見後端 _zone_summary 的 chip 欄位）。
+// direction：整檔原始方向（未翻號）。contribution：籌碼對這個角色 trading_score
+// 的直接加權貢獻（0~15，已依支撐/壓力翻號）。bounce/break_delta_pp：籌碼相對
+// 中性籌碼對本 zone 反彈/跌破機率的邊際貢獻（百分點，模型路徑）；查無籌碼
+// 資料時為 null。contribution 與 delta 分屬「直接權重」與「模型」兩條路徑。
+export interface SRZoneChip {
+  direction: ChipDirection
+  contribution: number | null
+  bounce_delta_pp: number | null
+  break_delta_pp: number | null
+}
+
 export interface SRZoneSummaryItem {
   price_low: number
   price_high: number
@@ -109,7 +123,22 @@ export interface SRZoneSummaryItem {
   recent_validation: RecentValidation
   volume_confirmation: VolumeConfirmation | null
   confluence_count: number
+  chip?: SRZoneChip
   reasons: string[]
+}
+
+// 整檔層級籌碼拆解（見後端 _build_chip_summary），供「共用籌碼面板」一次顯示。
+// missing=true 代表查無籌碼資料（與 score 接近 0 的「中性」不同），此時各分數為
+// null。分數範圍：score/institutional/margin/broker 為 -100~100，concentration 為
+// 0~100。這是分析快照當下對齊的籌碼，不是即時最新值。
+export interface SRChipSummary {
+  missing: boolean
+  score: number | null
+  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'RISK' | null
+  institutional_score: number | null
+  margin_score: number | null
+  broker_score: number | null
+  concentration_score: number | null
 }
 
 export interface SRPeriodSummary {
@@ -151,6 +180,9 @@ export interface SRZoneAnalysis {
   period_summaries: SRPeriodSummary[]
   // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
   analysis_tips: string[]
+  // 整檔層級籌碼拆解，供共用籌碼面板顯示（每張支撐/壓力卡的角色化籌碼一行在
+  // period_summaries[].support/resistance.chip）。舊分析沒有這欄時為 null。
+  chip_summary?: SRChipSummary | null
   created_at: string
 }
 

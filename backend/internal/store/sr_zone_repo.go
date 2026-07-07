@@ -38,6 +38,9 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 	if a.AnalysisTips == "" {
 		a.AnalysisTips = RawJSON("[]")
 	}
+	if a.ChipSummary == "" {
+		a.ChipSummary = RawJSON("null")
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -46,29 +49,29 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 
 	const cols = `symbol, timeframe, analyzed_at, current_price,
 		global_trend, global_volatility, global_expected_value, global_confidence, global_risk_reward_ratio,
-		model_version, model_config_hash, period_summaries, analysis_tips`
+		model_version, model_config_hash, period_summaries, analysis_tips, chip_summary`
 
 	var id uint64
 	if r.driver == "pgx" {
 		// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			RETURNING id
 		`,
 			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice,
 			a.GlobalTrend, a.GlobalVolatility, a.GlobalExpectedValue, a.GlobalConfidence, a.GlobalRiskRewardRatio,
-			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips,
+			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips, a.ChipSummary,
 		).Scan(&id)
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`),
 			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice,
 			a.GlobalTrend, a.GlobalVolatility, a.GlobalExpectedValue, a.GlobalConfidence, a.GlobalRiskRewardRatio,
-			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips,
+			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips, a.ChipSummary,
 		)
 		if err == nil {
 			var lastID int64
@@ -122,7 +125,7 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 
 const srZoneAnalysisColumns = `id, symbol, timeframe, analyzed_at, current_price,
 	global_trend, global_volatility, global_expected_value, global_confidence, global_risk_reward_ratio,
-	model_version, model_config_hash, period_summaries, analysis_tips, created_at`
+	model_version, model_config_hash, period_summaries, analysis_tips, chip_summary, created_at`
 
 func (r *srZoneRepo) Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error) {
 	var a SRZoneAnalysis

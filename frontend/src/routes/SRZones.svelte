@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
+  import SRChipPanel from '../components/chip/SRChipPanel.svelte'
   import { ApiError } from '../lib/api/client'
   import {
     createSRZoneAnalysis,
@@ -40,6 +41,7 @@
   $: tierGroups = groupByTier(currentZones)
   $: periodSummaries = current?.period_summaries ?? []
   $: analysisTips = current?.analysis_tips ?? []
+  $: chipSummary = current?.chip_summary ?? null
 
 
   let verifying = false
@@ -302,6 +304,43 @@
   function summaryNote(item: SRZoneSummaryItem | null, fallback?: string): string {
     if (!item) return fallback ?? '目前沒有符合條件的價位，先看完整明細確認。'
     return item.reasons.slice(0, 3).join('、')
+  }
+
+  const chipDirectionText: Record<string, string> = {
+    bullish: '籌碼偏多', bearish: '籌碼偏空', neutral: '籌碼中性', none: '籌碼無資料',
+  }
+
+  // 角色化：籌碼對「這個角色」是加分還是扣分，用直接加權貢獻是否高於中性
+  // （15 分的一半 = 7.5）判斷；支撐與壓力的加/扣分方向後端已翻號。
+  function chipRoleEffect(item: SRZoneSummaryItem): 'plus' | 'minus' | 'flat' {
+    const c = item.chip?.contribution
+    if (c === null || c === undefined) return 'flat'
+    if (c > 7.9) return 'plus'
+    if (c < 7.1) return 'minus'
+    return 'flat'
+  }
+
+  function chipEffectText(item: SRZoneSummaryItem): string {
+    const effect = chipRoleEffect(item)
+    const roleWord = item.side === 'support' ? '支撐' : '壓力'
+    if (effect === 'plus') return `對此${roleWord}加分`
+    if (effect === 'minus') return `對此${roleWord}扣分`
+    return '影響中性'
+  }
+
+  function chipEffectClass(item: SRZoneSummaryItem): string {
+    const effect = chipRoleEffect(item)
+    if (effect === 'plus') return 'text-rise'
+    if (effect === 'minus') return 'text-fall'
+    return 'text-muted'
+  }
+
+  // 反彈機率邊際貢獻（百分點），例如 +6.2pp / -3.0pp
+  function chipBounceDeltaText(item: SRZoneSummaryItem): string | null {
+    const d = item.chip?.bounce_delta_pp
+    if (d === null || d === undefined) return null
+    const sign = d > 0 ? '+' : ''
+    return `反彈機率 ${sign}${d.toFixed(1)}pp`
   }
 
   async function submit() {
@@ -712,6 +751,10 @@
           </div>
         {/if}
 
+        <div class="px-5 py-4 border-b border-border">
+          <SRChipPanel summary={chipSummary} />
+        </div>
+
         <div class="divide-y divide-border border-b border-border">
           {#if periodSummaries.length > 0}
             {#each periodSummaries as period (period.key)}
@@ -732,6 +775,20 @@
                         {/if}
                       </div>
                       <p class="font-mono text-sm {summaryAccent(side)}">{summaryPriceText(item)}</p>
+                      {#if item?.chip}
+                        <div class="flex items-center flex-wrap gap-x-2 gap-y-1 mt-2 text-[11px]">
+                          <span class="text-muted">{chipDirectionText[item.chip.direction] ?? '籌碼'}</span>
+                          {#if item.chip.direction !== 'none'}
+                            <span class={chipEffectClass(item)}>· {chipEffectText(item)}</span>
+                            {#if item.chip.contribution !== null}
+                              <span class="font-mono text-muted">· 貢獻 {item.chip.contribution.toFixed(1)}/15</span>
+                            {/if}
+                            {#if chipBounceDeltaText(item)}
+                              <span class="font-mono {chipEffectClass(item)}">· {chipBounceDeltaText(item)}</span>
+                            {/if}
+                          {/if}
+                        </div>
+                      {/if}
                       <p class="text-xs text-muted mt-2 leading-relaxed">{summaryNote(item, note)}</p>
                       {#if item?.confluence_count > 1}
                         <p class="text-[11px] text-indigo-300 mt-1">多方法共振 ×{item.confluence_count}</p>

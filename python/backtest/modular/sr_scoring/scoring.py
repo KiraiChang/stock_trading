@@ -100,6 +100,7 @@ from .model import (
     ModelBundle,
     chip_features_from_score_row,
     get_model,
+    neutral_chip_features,
     predict_break_probability,
     predict_hold_probability,
     reward_risk_percentile,
@@ -163,6 +164,11 @@ TRADING_SCORE_WEIGHTS = {
     "confidence": 8.5,
     "chip": 15.0,
 }
+
+# 籌碼分數（chip_scores.total_score，-100~100）判定偏多/偏空的門檻，對齊 Go
+# internal/chip 的 signalThreshold（±20 才算 BULLISH/BEARISH，見 chip/score.go）。
+# 摘要方向敘述（_chip_reason）與結構化方向（_chip_direction）共用同一個門檻。
+CHIP_SIGNAL_THRESHOLD = 20.0
 
 _VOLUME_CONFIRMATION_WEIGHT = {
     VolumeConfirmation.CONFIRMED.value: 1.0,
@@ -633,11 +639,52 @@ def _moving_average_state(current_price: float, ma5: Optional[float]) -> str:
 def _chip_reason(chip_score: Optional[float], side: str) -> str:
     if chip_score is None:
         return "尚無籌碼分數，這一項先以中性看待。"
-    if chip_score >= 20:
+    if chip_score >= CHIP_SIGNAL_THRESHOLD:
         return "籌碼偏多，對支撐較有利。" if side == "support" else "籌碼偏多，壓力可能較容易被挑戰。"
-    if chip_score <= -20:
+    if chip_score <= -CHIP_SIGNAL_THRESHOLD:
         return "籌碼偏空，支撐需要更多確認。" if side == "support" else "籌碼偏空，壓力較容易形成壓制。"
     return "籌碼分數接近中性，暫無明顯加分或扣分。"
+
+
+def _chip_direction(chip_score: Optional[float]) -> str:
+    """整檔籌碼原始方向（未依角色翻轉）：bullish/bearish/neutral/none。
+    none = 查無籌碼資料（跟 neutral「有資料但中性」不同，前端要分開顯示）。
+    角色化的加分/扣分效果由 chip 貢獻分與機率邊際貢獻（bounce/break delta）
+    表達，不在這裡翻號。"""
+    if chip_score is None:
+        return "none"
+    if chip_score >= CHIP_SIGNAL_THRESHOLD:
+        return "bullish"
+    if chip_score <= -CHIP_SIGNAL_THRESHOLD:
+        return "bearish"
+    return "neutral"
+
+
+def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
+    """整檔層級籌碼拆解，供前端「共用面板」一次顯示（不逐 zone 重複）。查無
+    資料時 missing=True、各分數 None，跟「中性（分數接近 0）」明確區分。分數
+    範圍見 internal/chip：total/法人/融資/分點為 -100~100，集中度為 0~100。
+    這是分析快照當下對齊的籌碼（見 score_symbol 的 before_date 說明），不是即時
+    最新值。"""
+    if chip_row is None:
+        return {
+            "missing": True,
+            "score": None,
+            "signal": None,
+            "institutional_score": None,
+            "margin_score": None,
+            "broker_score": None,
+            "concentration_score": None,
+        }
+    return {
+        "missing": False,
+        "score": float(chip_row["total_score"]),
+        "signal": chip_row.get("signal"),
+        "institutional_score": float(chip_row.get("institutional_score") or 0.0),
+        "margin_score": float(chip_row.get("margin_score") or 0.0),
+        "broker_score": float(chip_row.get("broker_score") or 0.0),
+        "concentration_score": float(chip_row.get("concentration_score") or 0.0),
+    }
 
 
 def _volume_reason(z: ZoneScore) -> Optional[str]:
@@ -660,9 +707,11 @@ def _validation_reason(z: ZoneScore) -> str:
     return "尚待後續K棒驗證，不宜單獨當成進出依據。"
 
 
-def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[float], chip_score: Optional[float]) -> dict[str, Any]:
+def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[float]) -> dict[str, Any]:
+    # 籌碼不再擠進 reasons 那句話，改成結構化 chip 欄位（見下），讓前端可以
+    # 用數字/徽章呈現而不只是一句文字。reasons 只留均線、驗證、量能、信心、
+    # 共振等非籌碼理由。
     reasons = [
-        _chip_reason(chip_score, side),
         _moving_average_state(current_price, ma5),
         _validation_reason(z),
     ]
@@ -690,6 +739,17 @@ def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[f
         "recent_validation": z.recent_validation,
         "volume_confirmation": z.volume_confirmation,
         "confluence_count": z.confluence_count,
+        # 結構化籌碼（角色化）：direction 是整檔原始方向（偏多/偏空/中性/無資料）；
+        # contribution 是這個角色下籌碼對 trading_score 的直接加權貢獻（0~15，已依
+        # 支撐/壓力翻號，見 _trading_score_breakdown）；bounce/break delta 是籌碼相對
+        # 中性籌碼對本 zone 反彈/跌破機率的邊際貢獻（百分點，模型路徑，見 score_zone）。
+        # 兩個數字分屬「直接權重」與「模型」兩條路徑，不是重複計分（見 todo T-014）。
+        "chip": {
+            "direction": z.chip_direction,
+            "contribution": z.trading_score_breakdown.get("chip"),
+            "bounce_delta_pp": z.chip_bounce_delta,
+            "break_delta_pp": z.chip_break_delta,
+        },
         "reasons": reasons[:5],
     }
 
@@ -709,7 +769,7 @@ def _pick_period_pair(zones: list[ZoneScore], current_price: float) -> tuple[Opt
 
 
 def _build_period_summaries(
-    zone_scores: list[ZoneScore], current_price: float, ma5: Optional[float], chip_score: Optional[float]
+    zone_scores: list[ZoneScore], current_price: float, ma5: Optional[float]
 ) -> list[dict[str, Any]]:
     summaries = []
     for key, label, tier in PERIOD_SUMMARY_CONFIG:
@@ -719,8 +779,8 @@ def _build_period_summaries(
             "key": key,
             "label": label,
             "tier": tier,
-            "support": _zone_summary(support, "support", current_price, ma5, chip_score) if support else None,
-            "resistance": _zone_summary(resistance, "resistance", current_price, ma5, chip_score) if resistance else None,
+            "support": _zone_summary(support, "support", current_price, ma5) if support else None,
+            "resistance": _zone_summary(resistance, "resistance", current_price, ma5) if resistance else None,
         }
         if support is None:
             summary["support_note"] = "暫無明確支撐"
@@ -846,6 +906,8 @@ def score_zone(
     volume_confirmation: Optional[str] = None
     reject_count: Optional[int] = None
     break_count_field: Optional[int] = None
+    chip_bounce_delta: Optional[float] = None
+    chip_break_delta: Optional[float] = None
 
     if role != ZoneType.AT_ZONE.value:
         is_support = role == ZoneType.SUPPORT.value
@@ -854,6 +916,19 @@ def score_zone(
 
         bounce_probability = hold_p
         break_probability = break_p
+
+        # 【籌碼機率邊際貢獻】反事實：把實際籌碼換成中性籌碼（neutral_chip_features），
+        # 用同一組 zone 特徵重算本角色的 hold/break 機率，差值（百分點）就是「這檔
+        # 籌碼相對中性籌碼把反彈/跌破機率推了多少」。查無籌碼資料（chip_missing）時
+        # 無從比較，留 None。這是模型路徑的貢獻，跟 trading_score 的 chip 直接加權
+        # 分量（15%）是兩條獨立路徑，前端會分開標示（見 todo T-014）。
+        if chip_features is not None and not chip_features.get("chip_missing"):
+            base_hold, base_break = _normalize_probabilities(
+                predict_hold_probability(bundle, role_features, is_support=is_support, chip_features=neutral_chip_features()),
+                predict_break_probability(bundle, role_features, is_support=is_support, chip_features=neutral_chip_features()),
+            )
+            chip_bounce_delta = (hold_p - base_hold) * 100.0
+            chip_break_delta = (break_p - base_break) * 100.0
         expected_gain = role_features.average_bounce_return
         expected_loss = role_features.average_break_return
         # 一、修正 EV：不再用單一 average_return，改成 hold機率×平均反彈報酬 +
@@ -879,6 +954,7 @@ def score_zone(
     )
     trading_score_value = _trading_score(trading_score_breakdown)
     trading_recommendation = _trading_recommendation(trading_score_value, role)
+    chip_direction = _chip_direction(chip_score)
 
     return ZoneScore(
         price_low=zone.price_low,
@@ -915,6 +991,9 @@ def score_zone(
         trading_recommendation=trading_recommendation,
         overlap_group=overlap_group,
         confluence_count=confluence_count,
+        chip_direction=chip_direction,
+        chip_bounce_delta=chip_bounce_delta,
+        chip_break_delta=chip_break_delta,
     )
 
 
@@ -986,8 +1065,9 @@ def score_symbol(
     zone_scores = _sort_zone_scores(zone_scores)
 
     global_metrics = _compute_global_metrics(zone_scores)
-    period_summaries = _build_period_summaries(zone_scores, current_price, ma5, chip_score)
+    period_summaries = _build_period_summaries(zone_scores, current_price, ma5)
     analysis_tips = _build_analysis_tips(period_summaries, current_price, ma5, chip_score)
+    chip_summary = _build_chip_summary(chip_row)
 
     return {
         "symbol": symbol,
@@ -1001,6 +1081,10 @@ def score_symbol(
         "global_risk_reward_ratio": global_metrics["risk_reward_ratio"],
         "period_summaries": period_summaries,
         "analysis_tips": analysis_tips,
+        # 整檔層級籌碼拆解（總分/訊號/四子分數/無資料旗標），供前端「共用面板」
+        # 一次顯示，不逐 zone 重複。每張支撐/壓力摘要卡的角色化籌碼一行則在
+        # period_summaries[].support/resistance.chip（見 _zone_summary）。
+        "chip_summary": chip_summary,
         # 模型可追蹤性：ModelBundle 本身已經有這些欄位，只是先前沒有透過
         # score_symbol() 輸出，導致 Go ToStore() 只能把 model_version 寫成空
         # 字串。model_feature_names 主要供 API 診斷/測試使用，不一定要進 DB。

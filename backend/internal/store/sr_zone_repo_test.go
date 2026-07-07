@@ -51,6 +51,7 @@ func testAnalysis() *SRZoneAnalysis {
 		ModelConfigHash:       "abc123def456",
 		PeriodSummaries:       RawJSON(`[{"key":"short","label":"短期"}]`),
 		AnalysisTips:          RawJSON(`["短期支撐守穩，籌碼偏多"]`),
+		ChipSummary:           RawJSON(`{"missing":false,"score":42.5,"signal":"BULLISH"}`),
 	}
 }
 
@@ -123,6 +124,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if string(saved.AnalysisTips) != `["短期支撐守穩，籌碼偏多"]` {
 		t.Fatalf("expected analysis_tips to round-trip, got %s", saved.AnalysisTips)
+	}
+	if string(saved.ChipSummary) != `{"missing":false,"score":42.5,"signal":"BULLISH"}` {
+		t.Fatalf("expected chip_summary to round-trip, got %s", saved.ChipSummary)
 	}
 	if saved.GlobalTrend != 0.03 || saved.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected saved global trend/volatility: %+v", saved)
@@ -207,6 +211,25 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 			"expected AT_ZONE to have NULL expected_value/risk_reward_ratio/volume_confirmation, got %+v / %+v / %+v",
 			atZone.ExpectedValue, atZone.RiskRewardRatio, atZone.VolumeConfirmation,
 		)
+	}
+}
+
+func TestSRZoneRepoCreateDefaultsEmptyChipSummaryToNull(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	a := testAnalysis()
+	a.ChipSummary = "" // Python 舊版沒帶 chip_summary 時 client 會給空值
+	id, err := repo.Create(ctx, a, testZones())
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	saved, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(saved.ChipSummary) != "null" {
+		t.Fatalf("expected empty chip_summary to default to JSON null, got %s", saved.ChipSummary)
 	}
 }
 

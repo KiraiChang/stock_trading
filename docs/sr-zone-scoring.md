@@ -417,6 +417,52 @@ role=AT_ZONE：    >=50 WATCH / 其餘 NEUTRAL
 
 ---
 
+## 十二之一、籌碼數字化輸出（摘要層）
+
+籌碼不只影響分數，也在摘要層以**可拆解的數字**呈現，而不是壓成一句文字。輸出
+分兩個層級，都對齊分析快照當下的籌碼（`before_date`，非即時最新值）：
+
+**整檔層級 `chip_summary`**（`_build_chip_summary`，response top-level，存於
+`stock_sr_zone_analyses.chip_summary` JSON 欄位，migration 034）：供前端「共用
+籌碼面板」一次顯示，不逐 zone 重複。
+
+| 欄位 | 範圍 | 說明 |
+|---|---|---|
+| `missing` | bool | `true`=查無籌碼資料（跟「分數接近 0 的中性」不同，前端分開顯示） |
+| `score` | -100~100 | 籌碼總分（`chip_scores.total_score`） |
+| `signal` | 類別 | `BULLISH`/`BEARISH`/`NEUTRAL`/`RISK` |
+| `institutional_score`/`margin_score`/`broker_score` | -100~100 | 法人／融資／分點子分數 |
+| `concentration_score` | 0~100 | 集中度子分數 |
+
+**每張支撐/壓力摘要卡 `period_summaries[].support/resistance.chip`**
+（`_zone_summary`，角色化；隨 `period_summaries` JSON passthrough，不佔 zones 表
+欄位）：
+
+| 欄位 | 說明 |
+|---|---|
+| `direction` | 整檔原始方向 `bullish`/`bearish`/`neutral`/`none`（未翻號；`none`=無資料） |
+| `contribution` | 籌碼對這個角色 `trading_score` 的**直接加權貢獻**（0~15，已依支撐/壓力翻號，即 `trading_score_breakdown.chip`） |
+| `bounce_delta_pp`/`break_delta_pp` | 籌碼對本 zone 反彈/跌破機率的**模型邊際貢獻**（百分點）；查無籌碼資料時為 `null` |
+
+**機率邊際貢獻（反事實）怎麼算**：在 `score_zone` 裡，對該 zone 角色用同一組
+zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中性籌碼基準
+（`neutral_chip_features()`：四子分數與總分皆 0、`chip_missing=0`），兩者正規化後
+機率相減再乘 100 就是 `*_delta_pp`。這是啟發式解釋量（模型有交互作用，delta 會
+因 zone 而異），不是嚴格的 Shapley 值；查無籌碼資料（`chip_missing`）時不計算。
+
+**兩條路徑，不是重複計分**：`contribution`（直接加權，15%）與 `*_delta_pp`
+（v3 模型特徵）是籌碼影響分數的**兩條獨立路徑**，摘要把兩者攤開正是為了讓使用
+者看得到各自的效果，而非同一個效果被算兩次。這兩條路徑是否讓籌碼被實際放大
+超過設計權重，屬待驗證項目（見 `docs/todo.md` T-014），與本輸出的數字化無關。
+
+**摘要 `reasons` 不再含籌碼句**：籌碼從 `_zone_summary` 的 `reasons[]` 拉出改成上述
+結構化 `chip` 欄位，`reasons` 只保留均線、驗證、量能、信心、共振等非籌碼理由，
+避免同一件事在文字與數字兩處重複。整檔跑馬燈 `analysis_tips` 仍保留一句白話籌碼
+提示（`_chip_reason`）。偏多/偏空門檻統一為 `CHIP_SIGNAL_THRESHOLD`（±20，對齊
+`internal/chip` 的 `signalThreshold`）。
+
+---
+
 ## 十三、Global Model（只有一個）
 
 同一次分析只有**一個**權威的整體評估區塊，不在每個 zone 重複輸出：

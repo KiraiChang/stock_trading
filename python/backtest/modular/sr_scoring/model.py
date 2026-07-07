@@ -364,6 +364,22 @@ def chip_features_from_score_row(row: Optional[dict]) -> dict[str, float]:
     }
 
 
+def neutral_chip_features() -> dict[str, float]:
+    """籌碼中性基準：有籌碼資料、但方向完全中性（四個子分數與總分皆 0、
+    chip_missing=0）。用來算「這檔實際籌碼相對中性籌碼把 hold/break 機率推了
+    多少」的反事實邊際貢獻（見 scoring.py::score_zone 的籌碼機率貢獻計算）。
+    跟 chip_features_from_score_row(None)（chip_missing=1，代表查無資料）語意
+    不同，不要混用。"""
+    return {
+        "chip_total_score": 0.0,
+        "chip_institutional_score": 0.0,
+        "chip_margin_score": 0.0,
+        "chip_broker_score": 0.0,
+        "chip_concentration_score": 0.0,
+        "chip_missing": 0.0,
+    }
+
+
 def _feature_vector(
     features: ZoneFeatures,
     is_support: bool,

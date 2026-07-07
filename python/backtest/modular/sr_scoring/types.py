@@ -268,3 +268,12 @@ class ZoneScore:
     # confluence_count > 1 時才有值，單獨一個 zone 沒有「群組」可言。
     overlap_group: Optional[int]
     confluence_count: int
+
+    # 籌碼（角色化）——只在記憶體中傳遞給 period summary 的結構化 chip 欄位，
+    # 不進 _zone_score_to_dict / zones 表（整檔籌碼另在 score_symbol 的 chip_summary
+    # 一次輸出）。chip_direction：整檔原始方向 bullish/bearish/neutral/none。
+    # chip_bounce_delta/chip_break_delta：籌碼相對中性籌碼對本 zone 反彈/跌破機率的
+    # 邊際貢獻（百分點，模型路徑，見 scoring.py::score_zone）；查無籌碼資料時為 None。
+    chip_direction: str = "none"
+    chip_bounce_delta: Optional[float] = None
+    chip_break_delta: Optional[float] = None

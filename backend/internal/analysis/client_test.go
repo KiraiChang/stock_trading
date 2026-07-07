@@ -246,6 +246,37 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 }
 
+func TestZoneScoreResultToStoreCarriesChipSummary(t *testing.T) {
+	result := ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
+		ChipSummary: json.RawMessage(`{"missing":false,"score":42.5,"signal":"BULLISH","institutional_score":60.0}`),
+	}
+	a, _, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore failed: %v", err)
+	}
+	if string(a.ChipSummary) != `{"missing":false,"score":42.5,"signal":"BULLISH","institutional_score":60.0}` {
+		t.Fatalf("expected chip_summary to carry through ToStore, got %s", a.ChipSummary)
+	}
+}
+
+func TestZoneScoreResultToStoreDefaultsMissingChipSummaryToNull(t *testing.T) {
+	// Python 舊版（尚未部署本次欄位）不會回傳 chip_summary，ToStore 要給 JSON
+	// null 而不是空字串，DB 的 chip_summary 才是合法 JSON。
+	result := ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
+	}
+	a, _, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore failed: %v", err)
+	}
+	if string(a.ChipSummary) != "null" {
+		t.Fatalf("expected missing chip_summary to default to null, got %s", a.ChipSummary)
+	}
+}
+
 func TestZoneScoreResultToStoreRejectsIncompleteTradingScoreBreakdown(t *testing.T) {
 	result := ZoneScoreResult{
 		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",

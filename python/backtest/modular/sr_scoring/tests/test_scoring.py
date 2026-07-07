@@ -806,3 +806,139 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
                 "STRONG_BUY", "BUY", "WATCH", "NEUTRAL", "AVOID", "STRONG_SELL",
             )
 
+
+
+# ── 【2026-07 籌碼數字化 A+B+C】chip_summary / 角色化摘要 / 機率邊際貢獻 ──────
+
+
+def test_chip_direction_thresholds():
+    assert scoring._chip_direction(None) == "none"
+    assert scoring._chip_direction(50.0) == "bullish"
+    assert scoring._chip_direction(-50.0) == "bearish"
+    assert scoring._chip_direction(5.0) == "neutral"
+    # 門檻對齊 CHIP_SIGNAL_THRESHOLD（±20）
+    assert scoring._chip_direction(scoring.CHIP_SIGNAL_THRESHOLD) == "bullish"
+    assert scoring._chip_direction(-scoring.CHIP_SIGNAL_THRESHOLD) == "bearish"
+
+
+def test_build_chip_summary_missing():
+    s = scoring._build_chip_summary(None)
+    assert s["missing"] is True
+    assert s["score"] is None
+    assert s["signal"] is None
+    assert s["institutional_score"] is None
+    assert s["margin_score"] is None
+    assert s["broker_score"] is None
+    assert s["concentration_score"] is None
+
+
+def test_build_chip_summary_present():
+    s = scoring._build_chip_summary({
+        "total_score": 42.5, "signal": "BULLISH",
+        "institutional_score": 60.0, "margin_score": -10.0,
+        "broker_score": 30.0, "concentration_score": 40.0,
+    })
+    assert s["missing"] is False
+    assert s["score"] == pytest.approx(42.5)
+    assert s["signal"] == "BULLISH"
+    assert s["institutional_score"] == pytest.approx(60.0)
+    assert s["margin_score"] == pytest.approx(-10.0)
+    assert s["broker_score"] == pytest.approx(30.0)
+    assert s["concentration_score"] == pytest.approx(40.0)
+
+
+def test_score_zone_chip_delta_none_when_no_chip_data(bundle):
+    df = bullish_trend_df(n=80)
+    low = float(df["close"].min())
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    current_price = float(df["close"].iloc[-1])
+
+    # 不帶籌碼 → chip_missing，機率邊際貢獻無從比較，deltas 應為 None
+    score = score_zone(df, zone, current_price, bundle, _trend(df))
+
+    assert score.chip_direction == "none"
+    assert score.chip_bounce_delta is None
+    assert score.chip_break_delta is None
+
+
+def test_score_zone_chip_delta_present_when_chip_data(bundle):
+    from ..model import chip_features_from_score_row
+
+    df = bullish_trend_df(n=80)
+    low = float(df["close"].min())
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    current_price = float(df["close"].iloc[-1])
+    chip_features = chip_features_from_score_row({
+        "total_score": 80.0, "institutional_score": 80.0, "margin_score": 40.0,
+        "broker_score": 60.0, "concentration_score": 50.0,
+    })
+
+    score = score_zone(
+        df, zone, current_price, bundle, _trend(df),
+        chip_score=80.0, chip_features=chip_features,
+    )
+
+    assert score.chip_direction == "bullish"
+    # zone 在最低價附近、現價偏高 → role=SUPPORT（有方向），delta 應為 float（非 None）
+    assert score.role == "SUPPORT"
+    assert isinstance(score.chip_bounce_delta, float)
+    assert isinstance(score.chip_break_delta, float)
+
+
+def _bullish_rows(n: int = 250):
+    df = bullish_trend_df(n=n)
+    return [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+
+
+def test_score_symbol_includes_chip_summary_and_card_chip(monkeypatch, bundle):
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: _bullish_rows())
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: {
+        "symbol": "2330", "total_score": 60.0, "signal": "BULLISH",
+        "institutional_score": 55.0, "margin_score": 20.0,
+        "broker_score": 30.0, "concentration_score": 40.0,
+    })
+
+    result = score_symbol("2330", "1d")
+
+    cs = result["chip_summary"]
+    assert cs["missing"] is False
+    assert cs["score"] == pytest.approx(60.0)
+    assert cs["signal"] == "BULLISH"
+    assert cs["institutional_score"] == pytest.approx(55.0)
+
+    # 每張摘要卡有結構化 chip；籌碼句已從 reasons 拉出（reasons 不再含「籌碼」）
+    seen_item = False
+    for period in result["period_summaries"]:
+        for side in ("support", "resistance"):
+            item = period[side]
+            if not item:
+                continue
+            seen_item = True
+            assert "chip" in item
+            assert item["chip"]["direction"] == "bullish"
+            assert all("籌碼" not in r for r in item["reasons"])
+    assert seen_item
+
+
+def test_score_symbol_chip_summary_missing_when_no_chip_data(monkeypatch, bundle):
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: _bullish_rows())
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
+
+    result = score_symbol("2330", "1d")
+
+    assert result["chip_summary"]["missing"] is True
+    assert result["chip_summary"]["score"] is None
+    for period in result["period_summaries"]:
+        for side in ("support", "resistance"):
+            item = period[side]
+            if item:
+                assert item["chip"]["direction"] == "none"
+                assert item["chip"]["bounce_delta_pp"] is None

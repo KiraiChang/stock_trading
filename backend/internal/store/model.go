@@ -147,9 +147,14 @@ type SRZoneAnalysis struct {
 	// PeriodSummaries 是 Python 端整理好的短/中/長期支撐壓力摘要 JSON；
 	// AnalysisTips 是前端輪播的白話解讀提示。兩者保存於 analysis 快照，
 	// 讓歷史分析不需要重新呼叫 Python 也能顯示同一份結論。
-	PeriodSummaries RawJSON   `db:"period_summaries"       json:"period_summaries"`
-	AnalysisTips    RawJSON   `db:"analysis_tips"          json:"analysis_tips"`
-	CreatedAt       time.Time `db:"created_at"              json:"created_at"`
+	PeriodSummaries RawJSON `db:"period_summaries"       json:"period_summaries"`
+	AnalysisTips    RawJSON `db:"analysis_tips"          json:"analysis_tips"`
+	// ChipSummary 是整檔層級的籌碼拆解 JSON（總分/訊號/四子分數/無資料旗標，
+	// 見 Python _build_chip_summary），供前端「共用籌碼面板」顯示。跟 zone 無關、
+	// 整份分析共用一份，所以存在 analysis 快照而不是每個 zone。查無籌碼資料時
+	// 為 {"missing":true,...}；舊資料沒有這欄時為 JSON null。
+	ChipSummary RawJSON   `db:"chip_summary"           json:"chip_summary"`
+	CreatedAt   time.Time `db:"created_at"              json:"created_at"`
 }
 
 type SRZone struct {

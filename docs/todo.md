@@ -220,6 +220,48 @@ K棒持有、RSI < 80 等條件，降低突破訊號的假陽性。
 
 ---
 
+### T-014：評估籌碼訊號在 trading_score 雙重計入的影響
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Python / SR Zone / 模型 |
+| 建立日期 | 2026-07-07 |
+| 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現，另見 [issue.md](./issue.md) I-011 |
+
+commit `07da5c2` 把籌碼分數（`chip_total_score`/`chip_institutional_score`/
+`chip_margin_score`/`chip_broker_score`/`chip_concentration_score`/
+`chip_missing`）加進 ML 模型的訓練特徵（`FEATURE_COLUMNS`，`MODEL_VERSION`
+bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。但
+`TRADING_SCORE_WEIGHTS` 裡原本（`6660e97`「調整分析結果增加可讀性」加入的）
+獨立 `chip` 權重（15%）並沒有拿掉或調整——現在籌碼訊號會透過兩條路徑影響
+最終 `trading_score`：
+
+1. 模型特徵 → 影響 `bounce_probability`/`break_probability` → 影響
+   `expected_value`（34%）與 `support_score`/`resistance_score`
+2. 獨立的 `chip` 加權分量（15%，直接用原始 `chip_score`）
+
+兩條路徑方向通常一致（籌碼偏多時兩邊都會加分），實際效果可能是籌碼訊號
+被放大超過原本設計的 15% 權重，且放大幅度不透明（取決於模型學到的係數，
+無法從權重常數直接看出）。
+
+**建議做法**（幾個方向，需要實際訓練/回測資料佐證才能決定）：
+
+- 方案A：拿掉獨立的 `chip` 加權分量，完全交給模型學習籌碼與機率的關係，
+  `TRADING_SCORE_WEIGHTS` 五個分量的權重比例恢復或重新分配到 100%。
+- 方案B：保留兩條路徑，但重新訓練後比較「含 chip 特徵」vs「不含 chip
+  特徵」兩版模型在相同資料集上的表現（AUC/brier/calibration），確認
+  雙重計入沒有讓模型過度依賴籌碼、犧牲其他特徵的訊號。
+- 方案C：維持現狀，但至少要把「chip 現在有兩條路徑影響分數」寫進
+  `docs/sr-zone-scoring.md`，避免文件跟行為長期不一致（先修 I-011 的
+  註解問題，可視為這個方案的最小可行版本）。
+
+在還沒做實驗確認之前，先不要假設哪個方案比較好；這筆先記錄現象，決定
+方向後再展開實作。
+
+---
+
 ## 已完成封存
 
 （目前沒有項目）

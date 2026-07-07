@@ -14,69 +14,6 @@
 
 ---
 
-### I-001：`docs/api-reference.md` 的 SR Zone API 範例仍是舊版五分量
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待修復 |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-06 |
-| 來源 | `docs/sr_zone_improve.md` Follow-up Review #1 |
-| 相關檔案 | `docs/api-reference.md` |
-
-程式與主要設計文件（`sr-zone-scoring.md`、`database-schema.md`、
-`srZones.ts`）都已經改成六分量 `EV 34 + RR 17 + Trend 12.75 + Volume 12.75
-+ Confidence 8.5 + Chip 15`，但 `docs/api-reference.md` 的 SR Zone response
-範例仍缺 `chip`，文字也還寫「五個分量加總即為 `trading_score`」。API 使用者
-會誤以為 `trading_score_breakdown` 只有五個 key。
-
-**建議修法**：補上 `"chip": ...` 範例值，文字改成六分量，並確認範例數字
-breakdown 加總等於 `trading_score`。
-
----
-
-### I-002：`SRZones.svelte` 進階說明區塊仍用原始 `z.role`
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待修復 |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-06 |
-| 來源 | `docs/sr_zone_improve.md` Follow-up Review #2 |
-| 相關檔案 | `frontend/src/routes/SRZones.svelte`（可信度說明那行） |
-
-主要顯示、主要觀察區間、失效條件都已經改用 `effectiveRole(z)`，能正確處理
-`resolved_role`。但進階區底部「可信度只用目前角色（...）方向的觸碰樣本
-計算」那行仍用 `z.role`。若某 zone 原本是 `AT_ZONE`、後續 verifier 已解析出
-方向，畫面會同時出現「已解析成支撐/壓力」跟「方向還不明確」兩種說法。
-
-**建議修法**：改用 `effectiveRole(z)`；若想保留「confidence 實際上是用分析
-當下角色計算」這個技術細節，另外補一句「分析當下角色：AT_ZONE；驗證後
-角色：SUPPORT/RESISTANCE」，不要混在同一句「目前角色」文案裡。
-
----
-
-### I-003：`backend/internal/store/model.go` 註解仍是舊規格
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待修復 |
-| 嚴重度 | 低 |
-| 發現日期 | 2026-07-06 |
-| 來源 | `docs/sr_zone_improve.md` Follow-up Review #3 |
-| 相關檔案 | `backend/internal/store/model.go` |
-
-Runtime 欄位可以正確承接目前資料，但註解落後：`SRZoneAnalysis` 註解仍說
-`GlobalExpectedValue`/`GlobalConfidence`/`GlobalRiskRewardRatio` 在 zones
-為空或都沒有明確方向時可能是 `NULL`（實際上 `global_confidence` 只有
-zones 是空陣列時才是 `NULL`，跟另外兩個欄位條件不同）；`TradingScoreBreakdown`
-註解仍寫五個分量，缺 `chip`。不影響 API runtime，但會誤導之後改
-repo/handler/DTO 的人。
-
-**建議修法**：比照 `frontend/src/lib/api/srZones.ts` 目前的註解語意同步更新。
-
----
-
 ### I-004：非交易日 chip_scores 寫入過期分數（已修復）
 
 | 欄位 | 內容 |
@@ -191,3 +128,57 @@ API/DB/TS 契約）。
 像 SR Zone 那樣用訓練過的機率模型輸出 bounce/break probability。是否要把
 這塊也升級成機率模型，目前沒有排入計畫（如果要做，應該記錄到
 [todo.md](./todo.md) 而不是這裡）。
+
+---
+
+### I-011：`scoring.py::TRADING_SCORE_WEIGHTS` 註解跟 v3 模型行為不符
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 中 |
+| 發現日期 | 2026-07-07 |
+| 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現 |
+| 相關檔案 | `python/backtest/modular/sr_scoring/scoring.py`（`TRADING_SCORE_WEIGHTS` 上方註解） |
+
+`TRADING_SCORE_WEIGHTS` 上方註解寫「chip_score 是固定加權公式的輸入，
+**不影響 hold/break 機率模型本身**，因此不需要重新訓練模型」。這句話在
+commit `07da5c2` 之前是對的，但該 commit 已經把 `chip_features`（`chip_total
+_score`/`chip_institutional_score`/`chip_margin_score`/`chip_broker_score`
+/`chip_concentration_score`/`chip_missing`）加進 `FEATURE_COLUMNS`，
+`predict_hold_probability`/`predict_break_probability` 現在都會吃 chip
+特徵、`MODEL_VERSION` 也因此 bump 到 `v3`。註解沒有跟著更新，現在會讓人以為
+籌碼只影響 `trading_score` 的固定 15% 權重，實際上籌碼還會透過模型影響
+`bounce_probability`/`break_probability`，進而影響 `expected_value`（34%）
+與 `support_score`/`resistance_score`。
+
+**建議修法**：更新註解，明確說明 chip 現在有兩條路徑影響最終分數：(1) 模型
+特徵（影響機率、進而影響 EV/support/resistance score）(2) 獨立的
+`trading_score` 加權分量（15%，直接用原始 `chip_score`）。是否要因此調整
+權重或拿掉其中一條路徑，記錄在 [todo.md](./todo.md) T-014，這裡只修正
+文字本身的錯誤描述。
+
+---
+
+### I-012：`db.py::fetch_latest_chip_score` docstring 跟 `score_symbol()` 實際行為不符
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低 |
+| 發現日期 | 2026-07-07 |
+| 來源 | 審視 commit `07da5c2` 時，順帶檢查籌碼分數查詢路徑發現 |
+| 相關檔案 | `python/db.py::fetch_latest_chip_score` |
+
+Docstring 寫「即時評分（`score_symbol`）不帶這個參數，直接取全庫最新一筆」。
+這句話描述的是 `docs/review.md` 那筆 lookahead bias 修復**之前**的行為。
+修復後（見 [issue.md](./issue.md) I-007）`score_symbol()` 一律會算出
+`chip_before_date`（依 `analyzed_at` 換算）並傳入 `before_date`，不會再直接
+取全庫最新一筆。docstring 沒有跟著更新，內容跟現在的程式碼相反，容易誤導
+之後改動這個函式或呼叫端的人，以為即時評分本來就该看全庫最新一筆而重新
+把 lookahead bug 引入。
+
+**建議修法**：把 docstring 改成「`score_symbol()` 一律會傳入
+`before_date`（依分析當下的 `analyzed_at` 換算），確保不會看到分析當下
+之後才產生的籌碼資料；只有測試或診斷用途才會省略 `before_date` 直接取
+全庫最新一筆」。

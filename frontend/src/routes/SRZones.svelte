@@ -335,12 +335,17 @@
     return 'text-muted'
   }
 
-  // 反彈機率邊際貢獻（百分點），例如 +6.2pp / -3.0pp
-  function chipBounceDeltaText(item: SRZoneSummaryItem): string | null {
-    const d = item.chip?.bounce_delta_pp
+  // 籌碼對機率的邊際貢獻（百分點），依角色顯示不同事件的機率：支撐卡看
+  // bounce_delta（hold＝反彈守住），壓力卡看 break_delta（突破壓力）。兩者是
+  // 不同事件，不能共用「反彈機率」文案，否則會把壓力區的籌碼影響誤讀成看多。
+  function chipDeltaText(item: SRZoneSummaryItem): string | null {
+    const chip = item.chip
+    if (!chip) return null
+    const d = item.side === 'support' ? chip.bounce_delta_pp : chip.break_delta_pp
     if (d === null || d === undefined) return null
     const sign = d > 0 ? '+' : ''
-    return `反彈機率 ${sign}${d.toFixed(1)}pp`
+    const label = item.side === 'support' ? '反彈機率' : '突破壓力機率'
+    return `${label} ${sign}${d.toFixed(1)}pp`
   }
 
   async function submit() {
@@ -783,8 +788,8 @@
                             {#if item.chip.contribution !== null}
                               <span class="font-mono text-muted">· 貢獻 {item.chip.contribution.toFixed(1)}/15</span>
                             {/if}
-                            {#if chipBounceDeltaText(item)}
-                              <span class="font-mono {chipEffectClass(item)}">· {chipBounceDeltaText(item)}</span>
+                            {#if chipDeltaText(item)}
+                              <span class="font-mono {chipEffectClass(item)}">· {chipDeltaText(item)}</span>
                             {/if}
                           {/if}
                         </div>

@@ -560,6 +560,15 @@ Python 端預設值（250）。
     "global_risk_reward_ratio": 0.92,
     "model_version": "v3",
     "model_config_hash": "a1b2c3d4e5f6",
+    "chip_summary": {
+      "missing": false,
+      "score": 42.5,
+      "signal": "BULLISH",
+      "institutional_score": 55.0,
+      "margin_score": 20.0,
+      "broker_score": 30.0,
+      "concentration_score": 40.0
+    },
     "created_at": "2026-07-01T10:00:00+08:00"
   },
   "zones": [
@@ -619,6 +628,33 @@ breaker，不改變主要排序規則）。`confidence` 依角色只用該方向
 sr-zone-scoring.md「六」。`overlap_group`/`confluence_count` 是跨方法重疊
 分群結果，`overlap_group` 只有 `confluence_count > 1` 時才有值，見
 sr-zone-scoring.md「十七」。
+
+`analysis` 另含 `period_summaries`（短/中/長期各一組支撐/壓力摘要）與
+`analysis_tips`（白話提示陣列），為求精簡未列在上方範例，欄位語意見
+sr-zone-scoring.md。
+
+**籌碼摘要欄位**（見 sr-zone-scoring.md「十二之一」）：`analysis.chip_summary`
+是整檔層級的籌碼拆解，`score`/`institutional_score`/`margin_score`/`broker_score`
+為 −100~100、`concentration_score` 為 0~100、`signal` 為
+`BULLISH`/`BEARISH`/`NEUTRAL`/`RISK`。查無籌碼資料時 `chip_summary.missing=true`
+且各分數為 `null`（跟「分數接近 0 的中性」不同）；更舊、尚未帶此欄位的分析
+則整個 `chip_summary` 為 `null`。
+
+每張摘要卡另在 `period_summaries[].support`／`.resistance` 底下帶一個角色化的
+`chip` 物件：
+
+```json
+"chip": {
+  "direction": "bullish",        // bullish / bearish / neutral / none（none=無資料）
+  "contribution": 11.0,          // 籌碼對這個角色 trading_score 的直接加權貢獻（0~15，已依支撐/壓力翻號）
+  "bounce_delta_pp": 6.2,        // 籌碼對本 zone 反彈（hold）機率的模型邊際貢獻（百分點）；無資料時 null
+  "break_delta_pp": -3.0         // 籌碼對本 zone 跌破/突破機率的模型邊際貢獻（百分點）；無資料時 null
+}
+```
+
+`contribution`（直接加權）與 `*_delta_pp`（v3 模型特徵）是籌碼影響分數的兩條
+獨立路徑，不是重複計分。前端摘要卡對支撐顯示 `bounce_delta_pp`（反彈守住）、
+對壓力顯示 `break_delta_pp`（突破壓力），兩者是不同事件。
 
 ### GET `/sr-zones`
 

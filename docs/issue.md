@@ -15,6 +15,4 @@
 
 ---
 
-（目前沒有待處理項目。籌碼在 SR Zone 摘要層的數字化呈現已實作，現況說明見
-`docs/sr-zone-scoring.md`「十二之一、籌碼數字化輸出（摘要層）」與
-`docs/api-reference.md` 的 `POST /sr-zones` 說明。）
+（目前沒有待處理項目）

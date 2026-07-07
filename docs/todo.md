@@ -228,7 +228,7 @@ K棒持有、RSI < 80 等條件，降低突破訊號的假陽性。
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 模型 |
 | 建立日期 | 2026-07-07 |
-| 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現，另見 [issue.md](./issue.md) I-011 |
+| 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現，另見 [sr-zone-v3-chip-model-update.md](./sr-zone-v3-chip-model-update.md)「後續驗證」 |
 
 commit `07da5c2` 把籌碼分數（`chip_total_score`/`chip_institutional_score`/
 `chip_margin_score`/`chip_broker_score`/`chip_concentration_score`/
@@ -254,8 +254,7 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
   特徵」兩版模型在相同資料集上的表現（AUC/brier/calibration），確認
   雙重計入沒有讓模型過度依賴籌碼、犧牲其他特徵的訊號。
 - 方案C：維持現狀，但至少要把「chip 現在有兩條路徑影響分數」寫進
-  `docs/sr-zone-scoring.md`，避免文件跟行為長期不一致（先修 I-011 的
-  註解問題，可視為這個方案的最小可行版本）。
+  `docs/sr-zone-scoring.md`，避免文件跟行為長期不一致（對應註解問題已先行修正，可視為這個方案的最小可行版本）。
 
 在還沒做實驗確認之前，先不要假設哪個方案比較好；這筆先記錄現象，決定
 方向後再展開實作。

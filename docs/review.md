@@ -41,6 +41,13 @@ Reviewed commits:
 
 建議：用 `analyzed_at` 或最後一根 candle 的日期作為 `before_date` 傳入 `fetch_latest_chip_score(symbol, before_date=...)`。
 
+## 修復狀態
+
+- 非交易日 `chip_scores` 寫入過期分數：已修復。`Syncer.computeAndStoreScore` 新增 `hasDataForDate`，該日完全沒有 candle、法人、融資融券資料時跳過，不寫入 `chip_scores`。
+- 回測籌碼過濾器缺資料時 fail-open：已修復。缺資料時分數視為中性值 `0.0`，不再直接放行進場訊號。
+- 前端日期計算 UTC vs Taipei 時區：已修復。日期輸出改用 `Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' })` 並抽成共用工具。
+- SR Zone 籌碼分數 lookahead bias：已修復。`score_symbol()` 會依 `analyzed_at` 換算 `before_date`，再呼叫 `fetch_latest_chip_score(symbol, before_date=...)`。
+
 ## Notes
 
 - 第二個 commit 已補上 `signal.NewEngine(..., chipScoreRepo, ...)` 的 wiring，因此整體看兩個 commit 合併後不會因 NewEngine 參數缺漏而編譯失敗。

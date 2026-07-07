@@ -52,6 +52,10 @@ v3 的 `FEATURE_COLUMNS`：
 
 缺少籌碼資料時不阻斷訓練或分析：籌碼數值欄位填 `0.0`，`chip_missing=1.0`，讓模型能學到「籌碼缺資料」這個狀態。
 
+## 後續驗證
+
+v3 後籌碼訊號同時透過兩條路徑影響最終 `trading_score`：ML 特徵會影響 `bounce_probability`/`break_probability`，獨立 `chip` 分量則直接以 15% 權重加進分數。後續需要用相同資料集比較「含 chip 特徵」與「不含 chip 特徵」模型的 AUC、brier、calibration 與回測結果，確認雙路徑沒有讓籌碼訊號被不透明地放大；在實驗完成前，不預設要移除模型特徵或獨立權重任一方。
+
 ## 模型選項
 
 目前支援：

@@ -385,7 +385,9 @@ Trading Score = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(
 
 【2026-07 籌碼分析整合】新增 `chip` 分量後，原本 EV(40%)/RR(20%)/Trend(15%)/
 Volume(15%)/Confidence(10%) 五個分量依原比例縮小（乘以 0.85），合計仍為
-100，見 `scoring.py::TRADING_SCORE_WEIGHTS`。
+100，見 `scoring.py::TRADING_SCORE_WEIGHTS`。v3 模型也把 `chip_features` 納入
+hold/break probability model，因此籌碼會透過兩條路徑影響最終分數：一是模型
+機率進而影響 EV/support/resistance score，二是下表獨立的 `chip` 加權分量。
 
 每個分量先正規化到 `[0,1]`（`_normalize_signed`：0.5 為中性，±cap 為 0/1
 分），再乘上對應權重，回傳值就是「這個分量對總分的實際貢獻」，直接存在
@@ -399,7 +401,7 @@ Volume(15%)/Confidence(10%) 五個分量依原比例縮小（乘以 0.85），�
 | `trend` | 12.75% | `overall_trend` 正規化（cap=0.1），`role=RESISTANCE` 時取負號對齊方向 |
 | `volume` | 12.75% | `volume_confirmation` 查表（CONFIRMED=1.0／NEUTRAL=0.5／WEAK=0.3／FAILED=0.0）；缺值時用中性值 0.5 |
 | `confidence` | 8.5% | 直接用 `confidence`（本身已經是 0~1） |
-| `chip` | 15% | 籌碼分數（`chip_scores.total_score`，-100~100）正規化（cap=100），`role=RESISTANCE` 時取負號對齊方向；查無籌碼資料時用中性值 0.5，見 `fetch_latest_chip_score` |
+| `chip` | 15% | 籌碼分數（`chip_scores.total_score`，-100~100）正規化（cap=100），`role=RESISTANCE` 時取負號對齊方向；`score_symbol()` 會依 `analyzed_at` 換算 `before_date` 查詢，避免歷史分析拿到未來籌碼資料；查無籌碼資料時用中性值 0.5，見 `fetch_latest_chip_score` |
 
 `role=AT_ZONE` 或角色相關數值缺值時，對應分量用中性值 0.5 計算，不直接給
 0 分——沒有方向不代表這個 zone「不好」，只是還沒有可以評分的方向性資料。

@@ -41,17 +41,17 @@ type IndicatorSnapshot struct {
 }
 
 type Signal struct {
-	ID         uint64    `db:"id"          json:"id"`
-	Symbol     string    `db:"symbol"      json:"symbol"`
-	SignalType string    `db:"signal_type" json:"signal_type"`
-	Direction  string    `db:"direction"   json:"direction"`
-	Price      float64   `db:"price"       json:"price"`
-	Volume     int64     `db:"volume"      json:"volume"`
-	VolRatio   float64   `db:"vol_ratio"   json:"vol_ratio"`
-	Resistance float64   `db:"resistance"  json:"resistance"`
-	Support    float64   `db:"support"     json:"support"`
-	Trend      string    `db:"trend"       json:"trend"`
-	Note       string    `db:"note"        json:"note"`
+	ID         uint64  `db:"id"          json:"id"`
+	Symbol     string  `db:"symbol"      json:"symbol"`
+	SignalType string  `db:"signal_type" json:"signal_type"`
+	Direction  string  `db:"direction"   json:"direction"`
+	Price      float64 `db:"price"       json:"price"`
+	Volume     int64   `db:"volume"      json:"volume"`
+	VolRatio   float64 `db:"vol_ratio"   json:"vol_ratio"`
+	Resistance float64 `db:"resistance"  json:"resistance"`
+	Support    float64 `db:"support"     json:"support"`
+	Trend      string  `db:"trend"       json:"trend"`
+	Note       string  `db:"note"        json:"note"`
 	// Strength（預設 1.0，代表未受籌碼調整的原始強度；籌碼加權後可能上修
 	// 或下修，例如 0.6~1.3，不是機率、不強制限制在 [0,1]）與 ChipSignal 是
 	// 【籌碼分析整合】新增欄位：Engine.Evaluate 依 chip_scores 的訊號調整
@@ -143,7 +143,12 @@ type SRZoneAnalysis struct {
 	// 可以事後追溯，重訓改參數後舊分析可被這個值辨識出來。舊模型檔沒有這個
 	// 欄位時 Python 端回傳空字串，這裡直接存空字串（不像 ModelVersion 那樣
 	// 防禦性地填 "unknown"，因為空字串已經足夠表示「沒有這項資訊」）。
-	ModelConfigHash string    `db:"model_config_hash"       json:"model_config_hash"`
+	ModelConfigHash string `db:"model_config_hash"       json:"model_config_hash"`
+	// PeriodSummaries 是 Python 端整理好的短/中/長期支撐壓力摘要 JSON；
+	// AnalysisTips 是前端輪播的白話解讀提示。兩者保存於 analysis 快照，
+	// 讓歷史分析不需要重新呼叫 Python 也能顯示同一份結論。
+	PeriodSummaries RawJSON   `db:"period_summaries"       json:"period_summaries"`
+	AnalysisTips    RawJSON   `db:"analysis_tips"          json:"analysis_tips"`
 	CreatedAt       time.Time `db:"created_at"              json:"created_at"`
 }
 
@@ -280,17 +285,17 @@ type WatchlistItem struct {
 // ── Backtest models ───────────────────────────────────────────
 
 type BacktestJob struct {
-	ID         uint64       `db:"id"          json:"id"`
-	JobID      string       `db:"job_id"      json:"job_id"`
-	Type       string       `db:"type"        json:"type"`
-	Strategy   string       `db:"strategy"    json:"strategy"`
-	Symbols    string       `db:"symbols"     json:"symbols"` // JSON array string
-	Timeframe  string       `db:"timeframe"   json:"timeframe"`
-	StartDate  string       `db:"start_date"  json:"start_date"`
-	EndDate    string       `db:"end_date"    json:"end_date"`
-	Status     string       `db:"status"      json:"status"`  // pending/running/done/failed
-	Trigger    string       `db:"trigger"     json:"trigger"` // manual/scheduler
-	Error      string       `db:"error"       json:"error,omitempty"`
+	ID        uint64 `db:"id"          json:"id"`
+	JobID     string `db:"job_id"      json:"job_id"`
+	Type      string `db:"type"        json:"type"`
+	Strategy  string `db:"strategy"    json:"strategy"`
+	Symbols   string `db:"symbols"     json:"symbols"` // JSON array string
+	Timeframe string `db:"timeframe"   json:"timeframe"`
+	StartDate string `db:"start_date"  json:"start_date"`
+	EndDate   string `db:"end_date"    json:"end_date"`
+	Status    string `db:"status"      json:"status"`  // pending/running/done/failed
+	Trigger   string `db:"trigger"     json:"trigger"` // manual/scheduler
+	Error     string `db:"error"       json:"error,omitempty"`
 	// UseChipFilter/ChipMinScore：【籌碼分析整合】是否在進場時套用
 	// chip_scores.total_score 門檻過濾（見 docs/chip-analysis-design.md 第9節），
 	// Python 端逐 bar 比對，未達門檻的訊號不會進場。
@@ -397,7 +402,7 @@ type ChipScore struct {
 type ChipSyncJob struct {
 	ID            uint64     `db:"id"             json:"id"`
 	JobID         string     `db:"job_id"         json:"job_id"`
-	Mode          string     `db:"mode"           json:"mode"` // manual / backfill
+	Mode          string     `db:"mode"           json:"mode"`       // manual / backfill
 	Symbols       string     `db:"symbols"        json:"symbols"`    // JSON array string
 	DataTypes     string     `db:"data_types"     json:"data_types"` // JSON array string
 	FromDate      string     `db:"from_date"      json:"from_date"`

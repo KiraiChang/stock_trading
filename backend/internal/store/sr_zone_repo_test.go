@@ -49,6 +49,8 @@ func testAnalysis() *SRZoneAnalysis {
 		GlobalRiskRewardRatio: NullFloat64{sql.NullFloat64{Float64: 0.9, Valid: true}},
 		ModelVersion:          "v1",
 		ModelConfigHash:       "abc123def456",
+		PeriodSummaries:       RawJSON(`[{"key":"short","label":"短期"}]`),
+		AnalysisTips:          RawJSON(`["短期支撐守穩，籌碼偏多"]`),
 	}
 }
 
@@ -115,6 +117,12 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if saved.ModelConfigHash != "abc123def456" {
 		t.Fatalf("expected model_config_hash to round-trip, got %q", saved.ModelConfigHash)
+	}
+	if string(saved.PeriodSummaries) != `[{"key":"short","label":"短期"}]` {
+		t.Fatalf("expected period_summaries to round-trip, got %s", saved.PeriodSummaries)
+	}
+	if string(saved.AnalysisTips) != `["短期支撐守穩，籌碼偏多"]` {
+		t.Fatalf("expected analysis_tips to round-trip, got %s", saved.AnalysisTips)
 	}
 	if saved.GlobalTrend != 0.03 || saved.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected saved global trend/volatility: %+v", saved)

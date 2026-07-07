@@ -14,6 +14,7 @@
     getModelStatus,
     type SRZoneAnalysis,
     type SRZone,
+    type SRZoneSummaryItem,
     type ZoneTier,
     type SRScoringTrainJob,
     type TrainJobStatus,
@@ -37,6 +38,9 @@
   let current: SRZoneAnalysis | null = null
   let currentZones: SRZone[] = []
   $: tierGroups = groupByTier(currentZones)
+  $: periodSummaries = current?.period_summaries ?? []
+  $: analysisTips = current?.analysis_tips ?? []
+
 
   let verifying = false
   let verifyError = ''
@@ -55,6 +59,11 @@
   let activeJob: SRScoringTrainJob | null = null
   let recentTrainJobs: SRScoringTrainJob[] = []
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let tipTimer: ReturnType<typeof setInterval> | null = null
+  let activeTipIndex = 0
+  let showDetailedZones = false
+
+  $: if (analysisTips.length > 0 && activeTipIndex >= analysisTips.length) activeTipIndex = 0
 
   const trainStatusLabel: Record<TrainJobStatus, string> = {
     pending: '排隊中', running: '訓練中', done: '完成', failed: '失敗',
@@ -70,8 +79,14 @@
     loadHistory()
     loadRecentTrainJobs()
     loadModelStatus()
+    tipTimer = setInterval(() => {
+      if (analysisTips.length > 0) activeTipIndex = (activeTipIndex + 1) % analysisTips.length
+    }, 4500)
   })
-  onDestroy(stopPolling)
+  onDestroy(() => {
+    stopPolling()
+    if (tipTimer) clearInterval(tipTimer)
+  })
 
   const roleClass: Record<string, string> = {
     SUPPORT: 'bg-green-900/40 text-rise',
@@ -129,6 +144,8 @@
     NEUTRAL: 'bg-gray-700/60 text-gray-400',
     FAILED: 'bg-red-900/40 text-red-400',
   }
+
+  const summarySides = ['support', 'resistance'] as const
 
   const zoneDirectionText: Record<string, string> = { UP: '↑ 上升', DOWN: '↓ 下降', FLAT: '→ 持平' }
   const zoneDirectionClass: Record<string, string> = {
@@ -268,6 +285,23 @@
     if (role === 'SUPPORT') return `若跌破 ${fmt(z.price_low)}，這個判斷就失效`
     if (role === 'RESISTANCE') return `若突破 ${fmt(z.price_high)}，這個判斷就失效`
     return '現價還在區間內，方向未定，暫不適用'
+  }
+
+  function summaryPriceText(item: SRZoneSummaryItem | null): string {
+    return item ? `${fmt(item.price_low)} ~ ${fmt(item.price_high)}` : '暫無合理價位'
+  }
+
+  function summaryTitle(side: 'support' | 'resistance'): string {
+    return side === 'support' ? '支撐' : '壓力'
+  }
+
+  function summaryAccent(side: 'support' | 'resistance'): string {
+    return side === 'support' ? 'text-rise' : 'text-fall'
+  }
+
+  function summaryNote(item: SRZoneSummaryItem | null, fallback?: string): string {
+    if (!item) return fallback ?? '目前沒有符合條件的價位，先看完整明細確認。'
+    return item.reasons.slice(0, 3).join('、')
   }
 
   async function submit() {
@@ -667,6 +701,57 @@
           </div>
         </div>
 
+        {#if analysisTips.length > 0}
+          <div class="px-5 py-3 border-b border-border bg-surface/50 overflow-hidden">
+            <div class="flex items-center gap-3 text-xs">
+              <span class="text-muted shrink-0">分析提示</span>
+              <p class="text-white whitespace-nowrap animate-marquee">{analysisTips[activeTipIndex]}</p>
+            </div>
+          </div>
+        {/if}
+
+        <div class="divide-y divide-border border-b border-border">
+          {#if periodSummaries.length > 0}
+            {#each periodSummaries as period (period.key)}
+              <div class="px-5 py-4">
+                <div class="flex items-center justify-between gap-3 mb-3">
+                  <h3 class="text-sm font-semibold text-white">{period.label}</h3>
+                  <span class="text-muted text-xs">每期保留一個支撐、一個壓力</span>
+                </div>
+                <div class="grid md:grid-cols-2 gap-3">
+                  {#each summarySides as side}
+                    {@const item = side === 'support' ? period.support : period.resistance}
+                    {@const note = side === 'support' ? period.support_note : period.resistance_note}
+                    <div class="border border-border/70 rounded-lg p-3 bg-surface/30">
+                      <div class="flex items-center justify-between gap-2 mb-2">
+                        <p class="text-muted text-xs">{summaryTitle(side)}</p>
+                        {#if item}
+                          <span class="text-[11px] text-muted">信心 {noviceConfidenceText[item.confidence_level] ?? item.confidence_level}</span>
+                        {/if}
+                      </div>
+                      <p class="font-mono text-sm {summaryAccent(side)}">{summaryPriceText(item)}</p>
+                      <p class="text-xs text-muted mt-2 leading-relaxed">{summaryNote(item, note)}</p>
+                      {#if item?.confluence_count > 1}
+                        <p class="text-[11px] text-indigo-300 mt-1">多方法共振 ×{item.confluence_count}</p>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          {:else}
+            <p class="text-muted text-xs px-5 py-6 text-center">尚無短中長期摘要，請重新分析以取得收斂後資料。</p>
+          {/if}
+        </div>
+
+        <button
+          class="w-full px-5 py-3 text-xs text-muted hover:text-white transition-colors text-left border-b border-border"
+          on:click={() => (showDetailedZones = !showDetailedZones)}
+        >
+          {showDetailedZones ? '▾ 收合完整明細' : '▸ 展開完整明細（原始 Global 指標、所有 zone、機率、EV/RR、籌碼拆解）'}
+        </button>
+
+        {#if showDetailedZones}
         <!-- ── 新手總結卡：不展開任何進階區塊也能看懂的重點 ──────── -->
         {#if mainZone}
           <div class="px-5 py-4 border-b border-border bg-indigo-950/20">
@@ -905,6 +990,7 @@
             <p class="text-muted text-xs px-5 py-6 text-center">這次分析沒有偵測到任何價格區間</p>
           {/each}
         </div>
+        {/if}
       </div>
     {/if}
 
@@ -982,3 +1068,16 @@
     </div>
   </div>
 </Layout>
+<style>
+  :global(.animate-marquee) {
+    display: inline-block;
+    min-width: 100%;
+    animation: sr-tip-marquee 14s linear infinite;
+  }
+
+  @keyframes sr-tip-marquee {
+    0% { transform: translateX(0); }
+    20% { transform: translateX(0); }
+    100% { transform: translateX(-35%); }
+  }
+</style>

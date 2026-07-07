@@ -154,6 +154,15 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert result["model_trained_at"] == bundle.trained_at
     assert result["model_feature_names"] == bundle.feature_names
     assert result["model_config_hash"] == bundle.config_hash
+    assert isinstance(result["period_summaries"], list)
+    assert [p["key"] for p in result["period_summaries"]] == ["short", "mid", "long"]
+    assert isinstance(result["analysis_tips"], list)
+    assert result["analysis_tips"]
+    for period in result["period_summaries"]:
+        assert period["support"] is None or period["support"]["side"] == "support"
+        assert period["resistance"] is None or period["resistance"]["side"] == "resistance"
+        if period["support"] and period["resistance"]:
+            assert period["support"]["price_high"] < period["resistance"]["price_low"]
     assert isinstance(result["zones"], list)
     for z in result["zones"]:
         assert 0.0 <= z["support_score"] <= 1.0
@@ -796,3 +805,4 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
             assert z["trading_recommendation"] in (
                 "STRONG_BUY", "BUY", "WATCH", "NEUTRAL", "AVOID", "STRONG_SELL",
             )
+

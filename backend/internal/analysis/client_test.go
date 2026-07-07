@@ -102,6 +102,8 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			GlobalExpectedValue: &globalEV, GlobalConfidence: &globalConfidence, GlobalRiskRewardRatio: &globalRR,
 			ModelVersion: "v2", ModelTrainedAt: "2026-06-30T09:00:00+08:00", ModelFeatureNames: []string{"touch_count", "is_support"},
 			ModelConfigHash: "abc123def456",
+			PeriodSummaries: json.RawMessage(`[{"key":"short","label":"短期"}]`),
+			AnalysisTips:    json.RawMessage(`["短期支撐守穩，籌碼偏多"]`),
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -162,6 +164,12 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if a.ModelConfigHash != "abc123def456" {
 		t.Fatalf("expected model_config_hash to carry through ToStore, got %q", a.ModelConfigHash)
+	}
+	if string(a.PeriodSummaries) != `[{"key":"short","label":"短期"}]` {
+		t.Fatalf("expected period_summaries to carry through ToStore, got %s", a.PeriodSummaries)
+	}
+	if string(a.AnalysisTips) != `["短期支撐守穩，籌碼偏多"]` {
+		t.Fatalf("expected analysis_tips to carry through ToStore, got %s", a.AnalysisTips)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
@@ -270,6 +278,9 @@ func TestZoneScoreResultToStoreDefaultsMissingModelVersionToUnknown(t *testing.T
 	}
 	if a.ModelVersion != "unknown" {
 		t.Fatalf("expected model_version=unknown when Python omits it, got %q", a.ModelVersion)
+	}
+	if string(a.PeriodSummaries) != "[]" || string(a.AnalysisTips) != "[]" {
+		t.Fatalf("expected missing summary JSON to default to [], got %s / %s", a.PeriodSummaries, a.AnalysisTips)
 	}
 }
 

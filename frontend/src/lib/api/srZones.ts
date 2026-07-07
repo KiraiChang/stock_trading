@@ -93,6 +93,34 @@ export interface SRZone {
   resolved_role?: 'SUPPORT' | 'RESISTANCE' | null
 }
 
+export type SRPeriodKey = 'short' | 'mid' | 'long'
+
+export interface SRZoneSummaryItem {
+  price_low: number
+  price_high: number
+  label: string
+  role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+  side: 'support' | 'resistance'
+  tier: ZoneTier
+  tier_label: string
+  confidence: number
+  confidence_level: ConfidenceLevel
+  trading_score: number
+  recent_validation: RecentValidation
+  volume_confirmation: VolumeConfirmation | null
+  confluence_count: number
+  reasons: string[]
+}
+
+export interface SRPeriodSummary {
+  key: SRPeriodKey
+  label: string
+  tier: ZoneTier
+  support: SRZoneSummaryItem | null
+  resistance: SRZoneSummaryItem | null
+  support_note?: string
+  resistance_note?: string
+}
 export interface SRZoneAnalysis {
   id: number
   symbol: string
@@ -119,6 +147,10 @@ export interface SRZoneAnalysis {
   // model_version 底下換過幾次訓練參數都可能有不同的值，重訓改參數後舊
   // 分析可以靠這個值被辨識出來。
   model_config_hash: string
+  // Python 端已收斂好的短/中/長期支撐壓力摘要；完整明細仍由 zones 提供。
+  period_summaries: SRPeriodSummary[]
+  // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
+  analysis_tips: string[]
   created_at: string
 }
 
@@ -251,3 +283,4 @@ export interface ModelStatus {
 export async function getModelStatus(): Promise<ModelStatus> {
   return apiFetch('/sr-zones/model-status')
 }
+

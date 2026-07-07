@@ -257,11 +257,13 @@ type ZoneScoreResult struct {
 	// compute_config_hash），比 ModelVersion 更細——同一個 ModelVersion 底下
 	// 換過幾次訓練參數都可能有不同的 ModelConfigHash，讓「這筆分析用哪組
 	// 訓練設定產生」可以事後追溯。
-	ModelVersion      string      `json:"model_version"`
-	ModelTrainedAt    string      `json:"model_trained_at"`
-	ModelFeatureNames []string    `json:"model_feature_names"`
-	ModelConfigHash   string      `json:"model_config_hash"`
-	Zones             []ZoneScore `json:"zones"`
+	ModelVersion      string          `json:"model_version"`
+	ModelTrainedAt    string          `json:"model_trained_at"`
+	ModelFeatureNames []string        `json:"model_feature_names"`
+	ModelConfigHash   string          `json:"model_config_hash"`
+	PeriodSummaries   json.RawMessage `json:"period_summaries"`
+	AnalysisTips      json.RawMessage `json:"analysis_tips"`
+	Zones             []ZoneScore     `json:"zones"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
@@ -291,6 +293,8 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		GlobalRiskRewardRatio: nullFloat(r.GlobalRiskRewardRatio),
 		ModelVersion:          modelVersion,
 		ModelConfigHash:       r.ModelConfigHash,
+		PeriodSummaries:       rawJSONOrDefault(r.PeriodSummaries, "[]"),
+		AnalysisTips:          rawJSONOrDefault(r.AnalysisTips, "[]"),
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))
@@ -363,6 +367,13 @@ func validateTradingScoreBreakdown(b map[string]float64) error {
 		}
 	}
 	return nil
+}
+
+func rawJSONOrDefault(raw json.RawMessage, fallback string) store.RawJSON {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return store.RawJSON(fallback)
+	}
+	return store.RawJSON(string(raw))
 }
 
 // scoreZonesRequest 對應 Python ScoreZonesRequest；Limit 為 0 時省略欄位，

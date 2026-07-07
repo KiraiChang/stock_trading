@@ -135,11 +135,12 @@ API/DB/TS 契約）。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | 已修復 |
 | 嚴重度 | 中 |
 | 發現日期 | 2026-07-07 |
 | 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現 |
 | 相關檔案 | `python/backtest/modular/sr_scoring/scoring.py`（`TRADING_SCORE_WEIGHTS` 上方註解） |
+| 修復方式 | 更新註解，移除 chip 不影響 hold/break 模型的舊描述，明確說明籌碼同時透過模型特徵與獨立 `chip` 權重影響最終分數 |
 
 `TRADING_SCORE_WEIGHTS` 上方註解寫「chip_score 是固定加權公式的輸入，
 **不影響 hold/break 機率模型本身**，因此不需要重新訓練模型」。這句話在
@@ -164,11 +165,12 @@ _score`/`chip_institutional_score`/`chip_margin_score`/`chip_broker_score`
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | 已修復 |
 | 嚴重度 | 低 |
 | 發現日期 | 2026-07-07 |
 | 來源 | 審視 commit `07da5c2` 時，順帶檢查籌碼分數查詢路徑發現 |
 | 相關檔案 | `python/db.py::fetch_latest_chip_score` |
+| 修復方式 | 更新 docstring，說明 `score_symbol()` 會依 `analyzed_at` 傳入 `before_date` 避免 lookahead bias，省略 `before_date` 僅適合測試、診斷或明確需要全庫最新資料的用途 |
 
 Docstring 寫「即時評分（`score_symbol`）不帶這個參數，直接取全庫最新一筆」。
 這句話描述的是 `docs/review.md` 那筆 lookahead bias 修復**之前**的行為。

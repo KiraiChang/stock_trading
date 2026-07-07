@@ -79,9 +79,10 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
 def fetch_latest_chip_score(symbol: str, before_date: str | None = None) -> dict | None:
     """查詢最新一筆籌碼分析分數（見 backend internal/chip 套件），供
     sr_scoring 當作 trading_score 的第六個加權分量。before_date 指定時只取
-    該日（含）以前最新一筆；即時評分（score_symbol）不帶這個參數，直接取
-    全庫最新一筆。查無資料回傳 None，呼叫端必須 fallback 為中性值，不可
-    讓籌碼資料缺漏中斷整個 SR Zone 評分流程。"""
+    該日（含）以前最新一筆；score_symbol() 會依 analyzed_at 換算並傳入
+    before_date，避免看到分析當下之後才產生的籌碼資料。省略 before_date
+    只適合測試、診斷，或明確需要全庫最新資料的用途。查無資料回傳 None，
+    呼叫端必須 fallback 為中性值，不可讓籌碼資料缺漏中斷整個 SR Zone 評分流程。"""
     params: dict[str, object] = {"symbol": symbol}
     where_date = ""
     if before_date is not None:

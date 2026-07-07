@@ -151,11 +151,10 @@ NEUTRAL_PROBABILITY = 0.5
 
 # 十三、Score 必須可拆解：六個分量、明確權重，總和 = 100。
 # 【2026-07 籌碼分析整合】新增 chip 分量（權重 15），其餘五個分量依原比例
-# 縮小至 85（40/20/15/15/10 → 34/17/12.75/12.75/8.5）。chip_score 是固定
-# 加權公式的輸入，不影響 hold/break 機率模型本身，因此不需要重新訓練模型、
-# 不需要 bump ModelVersion/ModelConfigHash（見 model.py::compute_config_hash
-# 只追蹤 DatasetConfig/zone builder 參數，不含這裡的權重常數）。這組數字是
-# 初始權重，之後可依實際回測結果調整。
+# 縮小至 85（40/20/15/15/10 → 34/17/12.75/12.75/8.5）。v3 模型已將
+# chip_features 納入 hold/break 機率模型，籌碼會透過機率與 expected_value /
+# support_score / resistance_score 影響總分；這裡的 chip 權重則是第二條路徑，
+# 直接用原始 chip_score 加權。這組數字是初始權重，之後可依實際回測結果調整。
 TRADING_SCORE_WEIGHTS = {
     "expected_value": 34.0,
     "risk_reward": 17.0,

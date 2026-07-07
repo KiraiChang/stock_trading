@@ -101,9 +101,24 @@ def run_training(
         cutoff = pd.Timestamp(holdout_after, tz="UTC")
         sources = [(sym, tf, df[df.index < cutoff]) for sym, tf, df in sources]
 
+    chip_scores_by_symbol: dict[str, list[dict]] = {}
+    if symbols:
+        try:
+            from db import fetch_chip_scores
+
+            for sym, _, df in sources:
+                if df.empty:
+                    continue
+                from_date = df.index.min().tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+                to_date = df.index.max().tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+                chip_scores_by_symbol[sym] = fetch_chip_scores(sym, from_date, to_date)
+        except Exception as exc:
+            print(f"[warn] chip_scores unavailable for training features: {exc}", file=sys.stderr)
+            chip_scores_by_symbol = {}
+
     zone_builders: list[ZoneBuilder] = [ATRZoneBuilder(), VolumeProfileZoneBuilder()]
     dataset_config = DatasetConfig()
-    dataset = build_training_dataset(sources, zone_builders, dataset_config)
+    dataset = build_training_dataset(sources, zone_builders, dataset_config, chip_scores_by_symbol=chip_scores_by_symbol)
     if dataset.empty:
         raise ValueError("資料集為空，無法訓練（來源股票可能歷史資料太少，或都沒有偵測到 zone 觸碰事件）")
 
@@ -148,7 +163,8 @@ def main() -> None:
     parser.add_argument("--timeframe", default="1d")
     parser.add_argument("--limit", type=int, default=DEFAULT_TRAIN_LIMIT)
     parser.add_argument(
-        "--model-type", default="gradient_boosting", choices=["gradient_boosting", "logistic_regression"]
+        "--model-type", default="gradient_boosting",
+        choices=["gradient_boosting", "hist_gradient_boosting", "lightgbm", "logistic_regression"]
     )
     parser.add_argument("--output", default=None, help="預設讀取 config.SR_SCORING_MODEL_PATH")
     parser.add_argument("--holdout-after", default=None, help="ISO 日期，訓練只使用此日期之前的資料")

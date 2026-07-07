@@ -558,7 +558,7 @@ Python 端預設值（250）。
     "global_expected_value": 0.004,
     "global_confidence": 0.61,
     "global_risk_reward_ratio": 0.92,
-    "model_version": "v2",
+    "model_version": "v3",
     "model_config_hash": "a1b2c3d4e5f6",
     "created_at": "2026-07-01T10:00:00+08:00"
   },
@@ -669,7 +669,7 @@ sr-zone-scoring.md「十七」。
 
 `symbols` 省略或空陣列時自動使用整個監控清單（watchlist 為空則回
 `400`）；`limit` 為每檔股票訓練用的歷史K棒根數（預設 1500）；`model_type`
-可選 `gradient_boosting`（預設）或 `logistic_regression`。
+可選 `gradient_boosting`（預設）、`hist_gradient_boosting`、`lightgbm` 或 `logistic_regression`。
 
 **Response（202 Accepted）：**
 ```json
@@ -701,8 +701,8 @@ sr-zone-scoring.md「十七」。
         "hold": { "auc": 0.81, "accuracy": 0.76, "brier_score": 0.18, "log_loss": 0.52, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.48, "positive_rate_test": 0.5 },
         "break": { "auc": 0.77, "accuracy": 0.72, "brier_score": 0.21, "log_loss": 0.58, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.31, "positive_rate_test": 0.35 }
       },
-      "model_path": "models/sr_scoring_v2.joblib",
-      "model_version": "v2",
+      "model_path": "models/sr_scoring_v3.joblib",
+      "model_version": "v3",
       "dataset_summary": {
         "rows": 128, "rows_by_symbol": { "2330": 90, "2454": 38 },
         "role_counts": { "SUPPORT": 70, "RESISTANCE": 58 },
@@ -741,9 +741,9 @@ sr-zone-scoring.md「十七」。
 ```json
 {
   "exists": true,
-  "version": "v2",
+  "version": "v3",
   "trained_at": "2026-07-01T13:30:00+08:00",
-  "model_path": "models/sr_scoring_v2.joblib",
+  "model_path": "models/sr_scoring_v3.joblib",
   "split_method": "time",
   "metrics": { "hold": { "auc": 0.81, "calibrated": 1.0 }, "break": { "auc": 0.77, "calibrated": 1.0 } },
   "feature_names": ["touch_count", "rejection_count", "..."],

@@ -23,7 +23,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier, HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -49,9 +49,15 @@ FEATURE_COLUMNS = [
     "volatility",
     "trend_strength",
     "is_support",
+    "chip_total_score",
+    "chip_institutional_score",
+    "chip_margin_score",
+    "chip_broker_score",
+    "chip_concentration_score",
+    "chip_missing",
 ]
 
-MODEL_VERSION = "v2"  # v1 的 feature schema 用 avg_return_after_touch，跟 v2 不相容，需重新訓練
+MODEL_VERSION = "v3"  # v3 加入 chip_scores 訓練特徵，跟 v2 特徵 schema 不相容，需重新訓練
 
 # 機率校準（CalibratedClassifierCV）需要足夠樣本才能穩定：訓練集太小、或
 # 任一類別樣本太少時，CalibratedClassifierCV 內部的 CV 切分會失敗或退化成
@@ -96,6 +102,24 @@ def _build_estimator(model_type: str, random_state: int):
         ])
     if model_type == "gradient_boosting":
         return GradientBoostingClassifier(random_state=random_state)
+    if model_type == "hist_gradient_boosting":
+        return HistGradientBoostingClassifier(random_state=random_state)
+    if model_type == "lightgbm":
+        try:
+            from lightgbm import LGBMClassifier
+        except ImportError as exc:
+            raise ValueError(
+                "model_type='lightgbm' 需要安裝 lightgbm；請先執行 pip install lightgbm"
+            ) from exc
+        return LGBMClassifier(
+            objective="binary",
+            random_state=random_state,
+            n_estimators=200,
+            learning_rate=0.05,
+            num_leaves=31,
+            n_jobs=-1,
+            verbosity=-1,
+        )
     raise ValueError(f"unknown model_type: {model_type}")
 
 
@@ -268,7 +292,13 @@ def save_model(bundle: ModelBundle, path: str) -> None:
 
 
 def load_model(path: str) -> ModelBundle:
-    return joblib.load(path)
+    bundle = joblib.load(path)
+    if list(getattr(bundle, "feature_names", [])) != FEATURE_COLUMNS:
+        raise RuntimeError(
+            f"sr_scoring 模型特徵 schema 不相容：model={getattr(bundle, 'feature_names', None)} "
+            f"expected={FEATURE_COLUMNS}（請重新訓練 {MODEL_VERSION} 模型）"
+        )
+    return bundle
 
 
 _MODEL_CACHE: Optional[ModelBundle] = None
@@ -301,7 +331,44 @@ def get_model(path: str | None = None) -> ModelBundle:
     return bundle
 
 
-def _feature_vector(features: ZoneFeatures, is_support: bool) -> np.ndarray:
+def _chip_feature_values(chip_features: Optional[dict[str, float]] = None) -> list[float]:
+    if chip_features is None:
+        return [0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    return [
+        float(chip_features.get("chip_total_score", 0.0)),
+        float(chip_features.get("chip_institutional_score", 0.0)),
+        float(chip_features.get("chip_margin_score", 0.0)),
+        float(chip_features.get("chip_broker_score", 0.0)),
+        float(chip_features.get("chip_concentration_score", 0.0)),
+        float(chip_features.get("chip_missing", 0.0)),
+    ]
+
+
+def chip_features_from_score_row(row: Optional[dict]) -> dict[str, float]:
+    if row is None:
+        return {
+            "chip_total_score": 0.0,
+            "chip_institutional_score": 0.0,
+            "chip_margin_score": 0.0,
+            "chip_broker_score": 0.0,
+            "chip_concentration_score": 0.0,
+            "chip_missing": 1.0,
+        }
+    return {
+        "chip_total_score": float(row.get("total_score") or 0.0),
+        "chip_institutional_score": float(row.get("institutional_score") or 0.0),
+        "chip_margin_score": float(row.get("margin_score") or 0.0),
+        "chip_broker_score": float(row.get("broker_score") or 0.0),
+        "chip_concentration_score": float(row.get("concentration_score") or 0.0),
+        "chip_missing": 0.0,
+    }
+
+
+def _feature_vector(
+    features: ZoneFeatures,
+    is_support: bool,
+    chip_features: Optional[dict[str, float]] = None,
+) -> np.ndarray:
     return np.array(
         [[
             features.touch_count,
@@ -313,18 +380,29 @@ def _feature_vector(features: ZoneFeatures, is_support: bool) -> np.ndarray:
             features.volatility,
             features.trend_strength,
             1.0 if is_support else 0.0,
+            *_chip_feature_values(chip_features),
         ]],
         dtype=float,
     )
 
 
-def predict_hold_probability(bundle: ModelBundle, features: ZoneFeatures, is_support: bool) -> float:
-    X = _feature_vector(features, is_support)
+def predict_hold_probability(
+    bundle: ModelBundle,
+    features: ZoneFeatures,
+    is_support: bool,
+    chip_features: Optional[dict[str, float]] = None,
+) -> float:
+    X = _feature_vector(features, is_support, chip_features)
     return float(bundle.hold_model.predict_proba(X)[0, 1])
 
 
-def predict_break_probability(bundle: ModelBundle, features: ZoneFeatures, is_support: bool) -> float:
-    X = _feature_vector(features, is_support)
+def predict_break_probability(
+    bundle: ModelBundle,
+    features: ZoneFeatures,
+    is_support: bool,
+    chip_features: Optional[dict[str, float]] = None,
+) -> float:
+    X = _feature_vector(features, is_support, chip_features)
     return float(bundle.break_model.predict_proba(X)[0, 1])
 
 

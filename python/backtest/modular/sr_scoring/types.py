@@ -158,6 +158,7 @@ class ZoneLabel:
     hold_label: int  # 0/1：支撐反彈 / 壓力有效
     break_label: int  # 0/1：支撐跌破 / 壓力突破（鏡射事件）
     forward_return: float  # 實際發生的方向性報酬，僅供診斷用
+    chip_features: dict  # touch_time 當下以前最新 chip_scores 數值特徵；缺資料時 chip_missing=1
 
 
 @dataclass(frozen=True)

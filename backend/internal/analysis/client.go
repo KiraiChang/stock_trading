@@ -432,10 +432,12 @@ func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string, limit
 var trainHTTPClient = &http.Client{Timeout: 10 * time.Minute}
 
 type trainRequest struct {
-	Symbols   []string `json:"symbols,omitempty"`
-	Timeframe string   `json:"timeframe,omitempty"`
-	Limit     int      `json:"limit,omitempty"`
-	ModelType string   `json:"model_type,omitempty"`
+	Symbols           []string `json:"symbols,omitempty"`
+	Timeframe         string   `json:"timeframe,omitempty"`
+	Limit             int      `json:"limit,omitempty"`
+	ModelType         string   `json:"model_type,omitempty"`
+	SplitMethod       string   `json:"split_method,omitempty"`
+	CalibrationMethod string   `json:"calibration_method,omitempty"`
 }
 
 // TrainResult 對應 Python run_training() 的回傳格式。SplitMethod/
@@ -459,12 +461,15 @@ type TrainResult struct {
 // 機率模型。symbols 為空時由 Go 端呼叫者自行決定預設值（例如整個
 // watchlist），這裡不做任何預設判斷。這是同步呼叫（等訓練完成才回應），
 // 呼叫端應在背景 goroutine 執行，避免卡住 HTTP handler。
-func (c *Client) TrainModel(ctx context.Context, symbols []string, timeframe string, limit int, modelType string) (*TrainResult, error) {
+func (c *Client) TrainModel(ctx context.Context, symbols []string, timeframe string, limit int, modelType, splitMethod, calibrationMethod string) (*TrainResult, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("python service url not configured（請設定 python.service_url / PYTHON_SERVICE_URL）")
 	}
 
-	body, err := json.Marshal(trainRequest{Symbols: symbols, Timeframe: timeframe, Limit: limit, ModelType: modelType})
+	body, err := json.Marshal(trainRequest{
+		Symbols: symbols, Timeframe: timeframe, Limit: limit, ModelType: modelType,
+		SplitMethod: splitMethod, CalibrationMethod: calibrationMethod,
+	})
 	if err != nil {
 		return nil, err
 	}

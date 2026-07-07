@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pandas as pd
+
 from ..dataset import DatasetConfig, build_training_dataset, build_training_rows, summarize_training_dataset
 from ..features import compute_zone_features
 from ..types import ApproachDirection, Zone, ZoneType
@@ -70,8 +72,50 @@ def test_build_training_dataset_concatenates_multiple_sources():
     assert not dataset.empty
     assert set(dataset["symbol"].unique()) <= {"A", "B"}
     assert "hold_label" in dataset.columns
+    assert "chip_total_score" in dataset.columns
+    assert "chip_missing" in dataset.columns
     assert "break_label" in dataset.columns
     assert "is_support" in dataset.columns
+
+
+def test_build_training_dataset_adds_chip_features_without_lookahead():
+    df = bullish_trend_df(n=150, base=100.0)
+    chip_rows = [
+        {
+            "trade_date": "2024-01-01",
+            "total_score": 10.0,
+            "institutional_score": 1.0,
+            "margin_score": 2.0,
+            "broker_score": 3.0,
+            "concentration_score": 4.0,
+        },
+        {
+            "trade_date": "2099-01-01",
+            "total_score": 99.0,
+            "institutional_score": 99.0,
+            "margin_score": 99.0,
+            "broker_score": 99.0,
+            "concentration_score": 99.0,
+        },
+    ]
+
+    dataset = build_training_dataset(
+        [("A", "1d", df)], _BUILDERS, _CONFIG, chip_scores_by_symbol={"A": chip_rows}
+    )
+
+    assert not dataset.empty
+    assert "chip_total_score" in dataset.columns
+    assert set(dataset["chip_total_score"].unique()) == {10.0}
+    assert set(dataset["chip_missing"].unique()) == {0.0}
+
+
+def test_build_training_dataset_marks_missing_chip_features():
+    df = bullish_trend_df(n=150, base=100.0)
+    dataset = build_training_dataset([("A", "1d", df)], _BUILDERS, _CONFIG)
+
+    assert not dataset.empty
+    assert set(dataset["chip_total_score"].unique()) == {0.0}
+    assert set(dataset["chip_missing"].unique()) == {1.0}
 
 
 def test_build_training_dataset_empty_still_has_columns():
@@ -82,6 +126,8 @@ def test_build_training_dataset_empty_still_has_columns():
 
     assert len(dataset) == 0
     assert "hold_label" in dataset.columns
+    assert "chip_total_score" in dataset.columns
+    assert "chip_missing" in dataset.columns
 
 
 # ── 三、3：訓練資料診斷報告 ──────────────────────────────────────

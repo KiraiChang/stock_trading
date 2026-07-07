@@ -35,6 +35,7 @@
   `sr_scoring_train_jobs`（見 database-schema.md）
 - 前端：「支撐/壓力機率分析」頁面（`SRZones.svelte`，新手優先閱讀層級見
   「十五」）
+- v3 籌碼特徵與模型升級紀錄：[sr-zone-v3-chip-model-update.md](./sr-zone-v3-chip-model-update.md)
 
 ---
 
@@ -172,18 +173,20 @@ FEATURE_COLUMNS = [
     "average_bounce_return", "average_break_return",
     "relative_volume", "volatility", "trend_strength",
     "is_support",  # 角色 one-hot；support/resistance 樣本 pooled 一起訓練，泛化性較好
+    "chip_total_score", "chip_institutional_score", "chip_margin_score",
+    "chip_broker_score", "chip_concentration_score", "chip_missing",
 ]
 ```
 
 `model.py::train_model(dataset, model_type)` 訓練**兩個獨立分類器**：
 `hold_model`（預測反彈/支撐延續）與 `break_model`（預測跌破/突破延續），
-`model_type` 可選 `gradient_boosting`（預設）或 `logistic_regression`。
+`model_type` 可選 `gradient_boosting`（預設）、`hist_gradient_boosting`、`lightgbm` 或 `logistic_regression`。
 訓練同時算出 `rr_reference`——所有 `abs(bounce/break)` 非零樣本的排序陣列，
 存進 `ModelBundle`，供即時評分時查百分位（見「八」）。
 
-`MODEL_VERSION = "v2"`：v1 的 feature schema 用單一 `avg_return_after_touch`，
-跟 v2 的雙欄位（`average_bounce_return`/`average_break_return`）不相容，
-**v1 模型檔不能直接套用在新版程式碼上，需要重新訓練**（`python -m
+`MODEL_VERSION = "v3"`：v1 的 feature schema 用單一 `avg_return_after_touch`，
+v2 缺少籌碼訓練特徵，兩者都跟 v3 不相容。
+**舊模型檔不能直接套用在新版程式碼上，需要重新訓練**（`python -m
 backtest.modular.sr_scoring.train ...` 或 `POST /sr-zones/train`）。
 
 `get_model()` 是 lazy singleton——一次分析（`score_symbol`）只載入一次已訓練
@@ -532,7 +535,7 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 
 ## 十六、模型設定可追溯性（training_config / model_config_hash）
 
-`model_version`（`v1`/`v2`）只到 feature schema 這種粗粒度，同一個版本底下
+`model_version`（`v1`/`v2`/`v3`）只到 feature schema 這種粗粒度，同一個版本底下
 換過幾次 `DatasetConfig`（`forward_bars`/`threshold_pct`/`label_method`
 等）、zone builder 參數（`atr_width_multiplier`/`merge_pct`/
 `high_volume_percentile` 等）、`model_type`、`calibration_method`，光看
@@ -603,3 +606,4 @@ zone 卡片標題列顯示「多方法共振 ×N」徽章（`confluence_count > 
 - **Python `POST /sr-scoring/train` 與 Go `POST /sr-zones/train`
   是同一個功能的兩個不同路徑段**（`sr-scoring` vs `sr-zones`），依語言邊界
   命名不同，容易混淆，撰寫新文件或程式碼時要留意分清楚是哪一層。
+

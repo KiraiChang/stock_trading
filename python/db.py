@@ -117,7 +117,8 @@ def fetch_chip_scores(symbol: str, from_date: str, to_date: str) -> list[dict]:
     fetch_latest_chip_score）以外的用途使用——目前給 modular 回測的籌碼
     filter（見 backtest/modular/service.py）逐 bar 比對 total_score。"""
     sql = text("""
-        SELECT symbol, trade_date, total_score, signal
+        SELECT symbol, trade_date, institutional_score, margin_score, broker_score,
+               concentration_score, total_score, signal
         FROM chip_scores
         WHERE symbol = :symbol AND trade_date BETWEEN :f AND :t
         ORDER BY trade_date ASC

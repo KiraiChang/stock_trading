@@ -173,8 +173,8 @@ Go POST Python /sr-scoring/train {symbols, timeframe, limit, model_type}
     （Go 端對外路由是 POST /sr-zones/train，語言邊界兩側路徑段命名不同，
       呼叫前先確認自己站在哪一層）
     ↓ Go 用背景 goroutine 呼叫，立即回 202 Accepted
-    ↓ Python 端同步執行訓練（gradient_boosting 或 logistic_regression）
-Python 寫入 models/sr_scoring_v2.joblib（MODEL_VERSION="v2"，跟 v1 feature
+    ↓ Python 端同步執行訓練（gradient_boosting、hist_gradient_boosting、lightgbm 或 logistic_regression）
+Python 寫入 models/sr_scoring_v3.joblib（MODEL_VERSION="v3"，跟 v1 feature
 schema 不相容，需要重新訓練，不能直接沿用舊模型檔）
 ```
 

@@ -179,10 +179,12 @@ func (h *SRZoneHandler) Verify(c *gin.Context) {
 // log 才知道訓練有沒有成功。
 func (h *SRZoneHandler) Train(c *gin.Context) {
 	var body struct {
-		Symbols   []string `json:"symbols"`
-		Timeframe string   `json:"timeframe"`
-		Limit     int      `json:"limit"`
-		ModelType string   `json:"model_type"`
+		Symbols           []string `json:"symbols"`
+		Timeframe         string   `json:"timeframe"`
+		Limit             int      `json:"limit"`
+		ModelType         string   `json:"model_type"`
+		SplitMethod       string   `json:"split_method"`
+		CalibrationMethod string   `json:"calibration_method"`
 	}
 	_ = c.ShouldBindJSON(&body)
 	if body.Timeframe == "" {
@@ -190,6 +192,12 @@ func (h *SRZoneHandler) Train(c *gin.Context) {
 	}
 	if body.ModelType == "" {
 		body.ModelType = "gradient_boosting"
+	}
+	if body.SplitMethod == "" {
+		body.SplitMethod = "time"
+	}
+	if body.CalibrationMethod == "" {
+		body.CalibrationMethod = "sigmoid"
 	}
 
 	symbols := body.Symbols
@@ -225,7 +233,7 @@ func (h *SRZoneHandler) Train(c *gin.Context) {
 		return
 	}
 
-	go h.runTrainJob(jobID, symbols, body.Timeframe, body.Limit, body.ModelType)
+	go h.runTrainJob(jobID, symbols, body.Timeframe, body.Limit, body.ModelType, body.SplitMethod, body.CalibrationMethod)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id":  jobID,
@@ -238,13 +246,13 @@ func (h *SRZoneHandler) Train(c *gin.Context) {
 // runTrainJob 在背景 goroutine 執行，不使用 request context（request 結束後
 // context 就會被取消，但訓練要繼續跑到完成）。狀態更新失敗只記 log——訓練
 // 本身的成敗不應該因為「記錄狀態」這個次要動作失敗而受影響。
-func (h *SRZoneHandler) runTrainJob(jobID string, symbols []string, timeframe string, limit int, modelType string) {
+func (h *SRZoneHandler) runTrainJob(jobID string, symbols []string, timeframe string, limit int, modelType, splitMethod, calibrationMethod string) {
 	ctx := context.Background()
 	if err := h.trainJobs.MarkRunning(ctx, jobID); err != nil {
 		h.log.Error("sr_scoring train job: mark running failed", zap.String("job_id", jobID), zap.Error(err))
 	}
 
-	result, err := h.client.TrainModel(ctx, symbols, timeframe, limit, modelType)
+	result, err := h.client.TrainModel(ctx, symbols, timeframe, limit, modelType, splitMethod, calibrationMethod)
 	if err != nil {
 		h.log.Error("sr_scoring train failed", zap.String("job_id", jobID), zap.Int("symbols", len(symbols)), zap.Error(err))
 		if markErr := h.trainJobs.MarkFailed(ctx, jobID, err.Error()); markErr != nil {

@@ -98,6 +98,7 @@ from .features import compute_zone_features, find_touches, trend_slope, zone_mom
 from .labeling import label_touch
 from .model import (
     ModelBundle,
+    chip_features_from_score_row,
     get_model,
     predict_break_probability,
     predict_hold_probability,
@@ -767,6 +768,7 @@ def score_zone(
     overlap_group: Optional[int] = None,
     confluence_count: int = 1,
     chip_score: Optional[float] = None,
+    chip_features: Optional[dict[str, float]] = None,
 ) -> ZoneScore:
     if as_of_index is None:
         as_of_index = len(df) - 1
@@ -793,13 +795,21 @@ def score_zone(
     confidence_as_support = _touch_confidence(support_touches, support_classified, as_of_index)
     confidence_as_resistance = _touch_confidence(resistance_touches, resistance_classified, as_of_index)
 
+    if chip_features is None:
+        chip_features = chip_features_from_score_row({
+            "total_score": chip_score,
+            "institutional_score": 0.0,
+            "margin_score": 0.0,
+            "broker_score": 0.0,
+            "concentration_score": 0.0,
+        } if chip_score is not None else None)
     support_hold, support_break = _normalize_probabilities(
-        predict_hold_probability(bundle, features_as_support, is_support=True),
-        predict_break_probability(bundle, features_as_support, is_support=True),
+        predict_hold_probability(bundle, features_as_support, is_support=True, chip_features=chip_features),
+        predict_break_probability(bundle, features_as_support, is_support=True, chip_features=chip_features),
     )
     resistance_hold, resistance_break = _normalize_probabilities(
-        predict_hold_probability(bundle, features_as_resistance, is_support=False),
-        predict_break_probability(bundle, features_as_resistance, is_support=False),
+        predict_hold_probability(bundle, features_as_resistance, is_support=False, chip_features=chip_features),
+        predict_break_probability(bundle, features_as_resistance, is_support=False, chip_features=chip_features),
     )
 
     support_score = _derive_score(support_hold, confidence_as_support)
@@ -956,6 +966,7 @@ def score_symbol(
     chip_before_date = analyzed_at.tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
     chip_row = fetch_latest_chip_score(symbol, before_date=chip_before_date)
     chip_score = float(chip_row["total_score"]) if chip_row is not None else None
+    chip_features = chip_features_from_score_row(chip_row)
     ma5 = float(df["close"].tail(5).mean()) if len(df) >= 5 else None
 
     # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。
@@ -966,7 +977,7 @@ def score_symbol(
     zone_scores = [
         score_zone(
             df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index,
-            overlap_group=og, confluence_count=cc, chip_score=chip_score,
+            overlap_group=og, confluence_count=cc, chip_score=chip_score, chip_features=chip_features,
         )
         for zone, tier, og, cc in zip(zones, tiers, overlap_groups, confluence_counts)
     ]

@@ -53,7 +53,7 @@
   // ── 訓練/更新機率模型 ──────────────────────────────────────
   let trainSymbols = ''
   let trainLimit = 1500
-  let trainModelType: 'gradient_boosting' | 'logistic_regression' = 'gradient_boosting'
+  let trainModelType: 'gradient_boosting' | 'hist_gradient_boosting' | 'lightgbm' | 'logistic_regression' = 'gradient_boosting'
   let training = false
   let trainError = ''
   let activeJob: SRScoringTrainJob | null = null
@@ -595,6 +595,8 @@
                  focus:outline-none focus:border-indigo-500 transition-colors"
         >
           <option value="gradient_boosting">Gradient Boosting</option>
+          <option value="hist_gradient_boosting">Hist Gradient Boosting</option>
+          <option value="lightgbm">LightGBM</option>
           <option value="logistic_regression">Logistic Regression</option>
         </select>
         <input

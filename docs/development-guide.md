@@ -259,7 +259,7 @@ curl http://localhost:8080/api/v1/sr-zones/model-status \
 ```
 
 > `python/config.yaml` 的 `sr_scoring.model_path` 預設要跟目前的
-> `MODEL_VERSION`（`model.py`）對得上——目前是 `models/sr_scoring_v2.joblib`。
+> `MODEL_VERSION`（`model.py`）對得上——目前是 `models/sr_scoring_v3.joblib`。
 > 如果本機還留著更早期重新設計前的 `sr_scoring_v1.joblib`，且 config 指
 > 錯路徑，`/sr-zones` 會在預測時因為特徵數對不上而出現非預期的錯誤，不是
 > 預期中的 503；確認 config 指向的檔名版本正確，或乾脆重新訓練一次覆蓋掉。
@@ -275,7 +275,7 @@ curl -X POST http://localhost:8080/api/v1/sr-zones/train \
 # 2. 用 job_id 輪詢進度，直到 status = done 或 failed
 curl http://localhost:8080/api/v1/sr-zones/train-jobs/sr_train_20260703_090000_000 \
   -H "Authorization: Bearer $TOKEN"
-# → { "job": { "status": "done", "rows": 128, "sources": 2, "metrics": {...}, "model_version": "v2", ... } }
+# → { "job": { "status": "done", "rows": 128, "sources": 2, "metrics": {...}, "model_version": "v3", ... } }
 
 # 3. 訓練完成後才能分析
 curl -X POST http://localhost:8080/api/v1/sr-zones \

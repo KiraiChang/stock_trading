@@ -191,7 +191,9 @@ export interface TrainOptions {
   symbols?: string[]
   timeframe?: string
   limit?: number
-  modelType?: 'gradient_boosting' | 'logistic_regression'
+  modelType?: 'gradient_boosting' | 'hist_gradient_boosting' | 'lightgbm' | 'logistic_regression'
+  splitMethod?: 'time' | 'random'
+  calibrationMethod?: 'sigmoid' | 'isotonic' | 'none'
 }
 
 export type TrainJobStatus = 'pending' | 'running' | 'done' | 'failed'
@@ -249,6 +251,8 @@ export async function triggerSRScoringTrain(
       timeframe: opts.timeframe ?? '1d',
       limit: opts.limit ?? 1500,
       model_type: opts.modelType ?? 'gradient_boosting',
+      split_method: opts.splitMethod ?? 'time',
+      calibration_method: opts.calibrationMethod ?? 'sigmoid',
     }),
   })
 }

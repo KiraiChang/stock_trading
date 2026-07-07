@@ -192,7 +192,7 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字；只有完全沒有 zone 解析出明確方向（zones 為空或全部 `AT_ZONE`）時才是 `NULL` |
 | global_confidence | 所有 zone confidence 的簡單平均（不論 zone 有沒有明確方向都計入）；只有 zones 陣列本身是空的時候才是 `NULL`，跟 global_expected_value 的 `NULL` 條件不同 |
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR；`NULL` 條件同 global_expected_value |
-| model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v2"`）；Python 端萬一沒回傳則寫 `"unknown"` |
+| model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v3"`）；Python 端萬一沒回傳則寫 `"unknown"` |
 | model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
 
 **Index：** `INDEX(symbol, created_at DESC)`。
@@ -248,7 +248,7 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | job_id | 任務識別碼（`sr_train_<時間戳>` 格式），API 查詢用這個而不是 `id` |
 | status | `pending`（已建立，尚未開始）/ `running`（訓練中）/ `done`（成功）/ `failed`（失敗） |
 | symbols | JSON 陣列字串，這次訓練用的股票代號清單 |
-| timeframe / fetch_limit / model_type | 訓練參數（K棒週期、每檔股票抓取根數、`gradient_boosting`/`logistic_regression`） |
+| timeframe / fetch_limit / model_type | 訓練參數（K棒週期、每檔股票抓取根數、`gradient_boosting`/`hist_gradient_boosting`/`lightgbm`/`logistic_regression`） |
 | rows / sources | 訓練資料筆數、來源股票數；只有 `status=done` 才有值 |
 | metrics | JSON：`{"hold": {...}, "break": {...}}`，兩個模型各自的 accuracy/precision/recall/auc/brier_score/log_loss/train_rows/test_rows/positive_rate_train/positive_rate_test/calibrated；只有 `status=done` 才有值。DB 欄位 `NOT NULL DEFAULT ''`（用 `store.RawJSON` 讀寫，不能是 SQL `NULL`，空字串在 API 回應會序列化成 `null`） |
 | model_path / model_version | 訓練完成後寫入的模型檔路徑與版本；只有 `status=done` 才有值 |

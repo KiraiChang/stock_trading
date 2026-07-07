@@ -38,6 +38,12 @@ def synthetic_dataset(n: int = 200, seed: int = 0, num_symbols: int = 4) -> pd.D
     volatility = rng.uniform(0.01, 0.05, n)
     trend_strength = rng.normal(0, 0.05, n)
     is_support = rng.integers(0, 2, n)
+    chip_total_score = rng.normal(0, 35, n)
+    chip_institutional_score = rng.normal(0, 30, n)
+    chip_margin_score = rng.normal(0, 20, n)
+    chip_broker_score = rng.normal(0, 20, n)
+    chip_concentration_score = rng.normal(0, 15, n)
+    chip_missing = np.zeros(n)
 
     rejection_ratio = rejection_count / np.maximum(touch_count, 1)
     hold_score = rejection_ratio + average_bounce_return * 5 + rng.normal(0, 0.3, n)
@@ -61,6 +67,12 @@ def synthetic_dataset(n: int = 200, seed: int = 0, num_symbols: int = 4) -> pd.D
         "volatility": volatility,
         "trend_strength": trend_strength,
         "is_support": is_support,
+        "chip_total_score": chip_total_score,
+        "chip_institutional_score": chip_institutional_score,
+        "chip_margin_score": chip_margin_score,
+        "chip_broker_score": chip_broker_score,
+        "chip_concentration_score": chip_concentration_score,
+        "chip_missing": chip_missing,
         "hold_label": hold_label,
         "break_label": break_label,
     })
@@ -107,7 +119,7 @@ def test_reward_risk_percentile_none_when_no_reference():
 
     empty_bundle = ModelBundle(
         hold_model=None, break_model=None, feature_names=FEATURE_COLUMNS,
-        trained_at="2026-01-01T00:00:00+00:00", version="v2", rr_reference=[],
+        trained_at="2026-01-01T00:00:00+00:00", version="v3", rr_reference=[],
     )
     assert reward_risk_percentile(empty_bundle, 1.5) is None
 
@@ -148,6 +160,11 @@ def test_compute_config_hash_differs_when_values_differ():
     assert compute_config_hash({"a": 1}) != compute_config_hash({"a": 2})
 
 
+def test_train_model_supports_hist_gradient_boosting():
+    bundle = train_model(synthetic_dataset(), model_type="hist_gradient_boosting")
+    assert bundle.training_config["model_type"] == "hist_gradient_boosting"
+
+
 def test_predict_probabilities_are_in_unit_interval():
     bundle = train_model(synthetic_dataset(), model_type="gradient_boosting")
     features = ZoneFeatures(
@@ -156,8 +173,16 @@ def test_predict_probabilities_are_in_unit_interval():
         relative_volume=1.5, volatility=0.02, trend_strength=0.01,
     )
 
-    hold_p = predict_hold_probability(bundle, features, is_support=True)
-    break_p = predict_break_probability(bundle, features, is_support=True)
+    chip_features = {
+        "chip_total_score": 30.0,
+        "chip_institutional_score": 10.0,
+        "chip_margin_score": -5.0,
+        "chip_broker_score": 2.0,
+        "chip_concentration_score": 3.0,
+        "chip_missing": 0.0,
+    }
+    hold_p = predict_hold_probability(bundle, features, is_support=True, chip_features=chip_features)
+    break_p = predict_break_probability(bundle, features, is_support=True, chip_features=chip_features)
 
     assert 0.0 <= hold_p <= 1.0
     assert 0.0 <= break_p <= 1.0

@@ -100,7 +100,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
 			CurrentPrice: 600.0, GlobalTrend: 0.03, GlobalVolatility: 0.02,
 			GlobalExpectedValue: &globalEV, GlobalConfidence: &globalConfidence, GlobalRiskRewardRatio: &globalRR,
-			ModelVersion: "v2", ModelTrainedAt: "2026-06-30T09:00:00+08:00", ModelFeatureNames: []string{"touch_count", "is_support"},
+			ModelVersion: "v3", ModelTrainedAt: "2026-06-30T09:00:00+08:00", ModelFeatureNames: []string{"touch_count", "is_support", "chip_total_score"},
 			ModelConfigHash: "abc123def456",
 			PeriodSummaries: json.RawMessage(`[{"key":"short","label":"短期"}]`),
 			AnalysisTips:    json.RawMessage(`["短期支撐守穩，籌碼偏多"]`),
@@ -148,7 +148,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if result.Symbol != "2330" || len(result.Zones) != 2 || result.GlobalTrend != 0.03 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if result.ModelVersion != "v2" || result.ModelTrainedAt != "2026-06-30T09:00:00+08:00" || len(result.ModelFeatureNames) != 2 {
+	if result.ModelVersion != "v3" || result.ModelTrainedAt != "2026-06-30T09:00:00+08:00" || len(result.ModelFeatureNames) != 3 {
 		t.Fatalf("unexpected model metadata: %+v", result)
 	}
 	if result.ModelConfigHash != "abc123def456" {
@@ -159,8 +159,8 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
-	if a.ModelVersion != "v2" {
-		t.Fatalf("expected model_version=v2, got %q", a.ModelVersion)
+	if a.ModelVersion != "v3" {
+		t.Fatalf("expected model_version=v3, got %q", a.ModelVersion)
 	}
 	if a.ModelConfigHash != "abc123def456" {
 		t.Fatalf("expected model_config_hash to carry through ToStore, got %q", a.ModelConfigHash)
@@ -370,7 +370,7 @@ func TestTrainModelParsesResponse(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body failed: %v", err)
 		}
-		if len(body.Symbols) != 2 || body.ModelType != "gradient_boosting" {
+		if len(body.Symbols) != 2 || body.ModelType != "gradient_boosting" || body.SplitMethod != "time" || body.CalibrationMethod != "sigmoid" {
 			t.Fatalf("unexpected request body: %+v", body)
 		}
 
@@ -385,7 +385,7 @@ func TestTrainModelParsesResponse(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
-	result, err := client.TrainModel(context.Background(), []string{"2330", "2454"}, "1d", 1500, "gradient_boosting")
+	result, err := client.TrainModel(context.Background(), []string{"2330", "2454"}, "1d", 1500, "gradient_boosting", "time", "sigmoid")
 	if err != nil {
 		t.Fatalf("TrainModel failed: %v", err)
 	}
@@ -405,15 +405,15 @@ func TestTrainModelParsesResponse(t *testing.T) {
 
 func TestTrainModelReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	client := NewClient("")
-	if _, err := client.TrainModel(context.Background(), []string{"2330"}, "1d", 0, ""); err == nil {
+	if _, err := client.TrainModel(context.Background(), []string{"2330"}, "1d", 0, "", "", ""); err == nil {
 		t.Fatal("expected error when baseURL is not configured")
 	}
 }
 
 func TestGetModelStatusParsesResponseWhenModelExists(t *testing.T) {
-	version := "v2"
+	version := "v3"
 	trainedAt := "2026-07-01T13:30:00+08:00"
-	modelPath := "models/sr_scoring_v2.joblib"
+	modelPath := "models/sr_scoring_v3.joblib"
 	splitMethod := "time"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -437,7 +437,7 @@ func TestGetModelStatusParsesResponseWhenModelExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetModelStatus failed: %v", err)
 	}
-	if !status.Exists || status.Version == nil || *status.Version != "v2" {
+	if !status.Exists || status.Version == nil || *status.Version != "v3" {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 	if len(status.FeatureNames) != 2 {

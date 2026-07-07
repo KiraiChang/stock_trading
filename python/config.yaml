@@ -23,7 +23,7 @@ backtest:
 sr_scoring:
   # 相對於 python/ 目錄；由 backtest/modular/sr_scoring/train.py 產生。
   # 檔名要跟 model.py::MODEL_VERSION 對得上——v1 的 feature schema（單一
-  # avg_return_after_touch）跟現在的 v2（average_bounce_return/
-  # average_break_return 分開）不相容，指到舊檔會在 /sr-zones 預測時因為
-  # 特徵數對不上而丟未預期的例外，不是預期中的 503。
-  model_path: "models/sr_scoring_v2.joblib"
+  # avg_return_after_touch）和 v2（average_bounce_return/average_break_return
+  # 但沒有 chip features）都跟現在的 v3 不相容；指到舊檔會在
+  # /sr-zones 預測時因為特徵 schema 對不上而回 503。
+  model_path: "models/sr_scoring_v3.joblib"

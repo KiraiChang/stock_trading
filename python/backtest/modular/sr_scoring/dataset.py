@@ -16,7 +16,7 @@ import pandas as pd
 
 from .features import compute_zone_features, touch_starting_at
 from .labeling import label_touch
-from .model import FEATURE_COLUMNS, compute_rr_reference
+from .model import FEATURE_COLUMNS, chip_features_from_score_row, compute_rr_reference
 from .types import Zone, ZoneLabel, ZoneType
 from .zone_builder import ZoneBuilder
 
@@ -35,12 +35,31 @@ class DatasetConfig:
     label_method: str = "max_excursion"
 
 
+def _chip_lookup_for_touch(chip_rows: list[dict] | None, touch_time: object) -> dict[str, float]:
+    if not chip_rows:
+        return chip_features_from_score_row(None)
+
+    ts = pd.Timestamp(touch_time)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    touch_date = ts.tz_convert("Asia/Taipei").date()
+    latest: dict | None = None
+    for row in chip_rows:
+        row_date = pd.Timestamp(row["trade_date"]).date()
+        if row_date <= touch_date:
+            latest = row
+        else:
+            break
+    return chip_features_from_score_row(latest)
+
+
 def build_training_rows(
     df: pd.DataFrame,
     symbol: str,
     timeframe: str,
     zone_builders: list[ZoneBuilder],
     config: DatasetConfig,
+    chip_rows: list[dict] | None = None,
 ) -> list[ZoneLabel]:
     n = len(df)
     if n <= config.min_history_bars:
@@ -84,6 +103,8 @@ def build_training_rows(
                 label_method=config.label_method,
             )
 
+            chip_features = _chip_lookup_for_touch(chip_rows, touch.touch_time)
+
             rows.append(
                 ZoneLabel(
                     symbol=symbol,
@@ -99,6 +120,7 @@ def build_training_rows(
                     hold_label=hold_label,
                     break_label=break_label,
                     forward_return=forward_return,
+                    chip_features=chip_features,
                 )
             )
 
@@ -109,17 +131,26 @@ def build_training_dataset(
     sources: list[tuple[str, str, pd.DataFrame]],
     zone_builders: list[ZoneBuilder],
     config: DatasetConfig,
+    chip_scores_by_symbol: dict[str, list[dict]] | None = None,
 ) -> pd.DataFrame:
     """彙整多個 (symbol, timeframe, df) 來源的訓練列成一份扁平 DataFrame。"""
     all_rows: list[ZoneLabel] = []
+    chip_scores_by_symbol = chip_scores_by_symbol or {}
     for symbol, timeframe, df in sources:
-        all_rows.extend(build_training_rows(df, symbol, timeframe, zone_builders, config))
+        all_rows.extend(
+            build_training_rows(
+                df, symbol, timeframe, zone_builders, config,
+                chip_rows=chip_scores_by_symbol.get(symbol),
+            )
+        )
 
     columns = [
         "symbol", "timeframe", "touch_time", "zone_price_low", "zone_price_high",
         "method", "role", "is_support", "touch_count", "rejection_count", "breakout_count",
         "average_bounce_return", "average_break_return", "relative_volume", "volatility", "trend_strength",
         "forward_bars", "threshold_pct", "hold_label", "break_label", "forward_return",
+        "chip_total_score", "chip_institutional_score", "chip_margin_score",
+        "chip_broker_score", "chip_concentration_score", "chip_missing",
     ]
     if not all_rows:
         return pd.DataFrame(columns=columns)
@@ -147,6 +178,7 @@ def build_training_dataset(
             "hold_label": row.hold_label,
             "break_label": row.break_label,
             "forward_return": row.forward_return,
+            **row.chip_features,
         }
         for row in all_rows
     ]

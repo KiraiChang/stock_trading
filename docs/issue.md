@@ -63,3 +63,20 @@ API/DB/TS 契約）。
 像 SR Zone 那樣用訓練過的機率模型輸出 bounce/break probability。是否要把
 這塊也升級成機率模型，目前沒有排入計畫（如果要做，應該記錄到
 [todo.md](./todo.md) 而不是這裡）。
+---
+
+### I-011：SR Zone 支撐壓力摘要看不到明確籌碼分析
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 中 |
+| 發現日期 | 2026-07-07 |
+| 來源 | 支撐壓力頁面檢視 |
+| 相關檔案 | `python/backtest/modular/sr_scoring/scoring.py`、`frontend/src/routes/SRZones.svelte`、`frontend/src/lib/api/srZones.ts` |
+
+目前籌碼已經進入 SR Zone 評分：v3 模型把 `chip_features` 納入 hold/break probability model，`trading_score_breakdown.chip` 也以 15% 權重直接影響總分。後端短中長摘要的 `reasons` 會放入籌碼理由，例如籌碼偏多時對支撐有利、壓力可能較容易被挑戰。
+
+但前端摘要目前只把 `reasons.slice(0, 3)` 串成一句文字，籌碼沒有獨立欄位、徽章或分數，也沒有依支撐/壓力角色分開顯示解讀。使用者在支撐壓力摘要層容易看不出籌碼已經影響模型與 trading score。
+
+**建議修法**：把籌碼從一般 reasons 中拉出來，至少在短 / 中 / 長支撐與壓力卡片中顯示「籌碼：偏多 / 中性 / 偏空 / 無資料」與一句角色化解讀；進階區可顯示 `trading_score_breakdown.chip` 對總分貢獻了多少分。

@@ -23,6 +23,8 @@ Place Go unit tests beside the package they exercise and prefer table-driven tes
 ## Agent-Specific Instructions
 When receiving a request, first restate the understood requirements and wait for confirmation. Do not browse files, inspect docs, plan, edit, test, or run services before that confirmation. After the requirement is confirmed, inspect only the necessary context and propose a plan. Wait for plan confirmation before executing changes.
 
+When documenting findings, do not create a new standalone docs file by default. Route items by type: bugs, contradictions, misleading behavior, or known limitations go into `docs/issue.md`; future improvements, feature ideas, and refactors go into `docs/todo.md`; durable design or operation notes go into the existing topic document under `docs/`. Create a new docs file only when the user explicitly asks for a new standalone document or no existing topic file fits.
+
 ## Commit & Pull Request Guidelines
 Recent commits use short, task-oriented subjects, often in Chinese, for example `更新缺漏部分` or `sr_zone強化處理完成`. Keep commit subjects concise and focused on one change. Pull requests should include a clear summary, test results, linked issue or task context when available, and screenshots or screen recordings for visible frontend changes.
 

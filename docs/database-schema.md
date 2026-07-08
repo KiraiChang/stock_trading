@@ -365,3 +365,42 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | started_at / finished_at / created_at | 任務時間戳 |
 
 **Index：** `INDEX(created_at DESC)`。
+
+---
+
+## holdings
+
+目前手中持股設定，供「持股操作」頁面維護。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol | 股票代號 |
+| shares | 持有股數 |
+| cost_price | 持有成本 |
+| note | 備註 |
+| created_at / updated_at | 建立與更新時間 |
+
+---
+
+## holding_analyses
+
+每次按下「分析」後保存的持股操作建議快照。這張表會複製當下的 `shares` /
+`cost_price`，並引用同次建立的 `stock_sr_zone_analyses.id`，讓歷史結果可回看且不受
+後續持股設定或模型重訓影響。
+
+| 欄位 | 說明 |
+|------|------|
+| holding_id | 對應持股設定 ID；刪除持股設定不會改寫既有快照內容 |
+| symbol / shares / cost_price | 分析當下的持股資料快照 |
+| analyzed_at / current_price | SR Zone 分析使用的最後一根 K 棒時間與收盤價 |
+| sr_zone_analysis_id | 同次產生的 SR Zone 快照 ID |
+| action / action_label | `HOLD` / `STOP_LOSS` / `TAKE_PROFIT` / `ADD_ON_BREAKOUT` / `REDUCE` 與中文標籤 |
+| stop_loss_price / stop_loss_amount | 停損參考價與依持有成本估算的停損金額 |
+| take_profit_price / take_profit_amount | 停利參考價與依持有成本估算的停利金額 |
+| add_on_trigger_price / add_on_amount | 突破加碼觸發價與建議加碼金額 |
+| unrealized_pnl / unrealized_pnl_pct | 分析當下未實現損益 |
+| reason | JSON：操作建議理由 |
+| detail_json | JSON：規則版本、加碼比例、選中的支撐/壓力 zone 等診斷資訊 |
+| created_at | 快照建立時間 |
+
+**Index：** `INDEX(holding_id, created_at DESC)`、`INDEX(symbol, created_at DESC)`。

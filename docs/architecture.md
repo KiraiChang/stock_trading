@@ -109,6 +109,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號/★監聽切換）+ K線圖（可疊加 MA5/MA20/MA60，個別開關）+ 訊號面板 |
 | 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
 | 支撐/壓力機率分析 | `sr-zones` | 輸入股票代號觸發 SR Zone Scoring（`POST /sr-zones`），顯示機率模型算出的區間、機率、EV/RR、可拆解交易分數；另有「訓練/更新機率模型」區塊（`POST /sr-zones/train`）。詳見 [sr-zone-scoring.md](./sr-zone-scoring.md) |
+| 持股操作 | `holdings` | 維護手中持股（代號、股數、持有成本），按下分析後用當次 SR Zone 快照產生並保存操作建議 |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 籌碼分析 | `chips` | 查詢籌碼摘要、歷史分數、券商分點排行，並可手動同步籌碼資料（`POST /chips/sync`） |
@@ -216,6 +217,21 @@ Signal Engine、Backtest、SR Zone Scoring 與前端 Chips 頁面讀取使用
 
 `POST /api/v1/chips/sync` 建立 `chip_sync_jobs` 非同步任務；日結同步則使用
 `job_runs.job_name=chip_daily_sync`，兩者的進度表不同。
+
+**持股操作分析**重用 SR Zone Scoring，但保存成獨立快照：
+
+```
+使用者維護 holdings（symbol / shares / cost_price）
+    ↓ POST /holdings/:id/analyze
+Go 呼叫 Python /sr-zones，建立一筆新的 stock_sr_zone_analyses 快照
+    ↓
+Go 依最新收盤價、持有成本、支撐/壓力 zone 產生操作建議
+    ↓
+寫入 holding_analyses（複製當下股數/成本，引用 sr_zone_analysis_id）
+```
+
+每次分析都新增一筆 `holding_analyses`，不覆蓋舊結果；後續修改持股股數或成本，也不會
+改變歷史分析快照。
 
 ### Nullable 欄位的 JSON 序列化
 

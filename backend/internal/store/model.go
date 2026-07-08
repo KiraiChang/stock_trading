@@ -424,3 +424,42 @@ type ChipSyncJob struct {
 	FinishedAt    NullTime   `db:"finished_at"    json:"finished_at,omitempty"`
 	CreatedAt     time.Time  `db:"created_at"     json:"created_at"`
 }
+
+// ── Holdings / Portfolio Analysis models ─────────────────────
+
+type Holding struct {
+	ID        uint64    `db:"id"         json:"id"`
+	Symbol    string    `db:"symbol"     json:"symbol"`
+	Shares    float64   `db:"shares"     json:"shares"`
+	CostPrice float64   `db:"cost_price" json:"cost_price"`
+	Note      string    `db:"note"       json:"note"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+// HoldingAnalysis 是每次按下「分析」後保存的操作建議快照。它會複製當下
+// shares/cost_price，並引用當次建立的 sr_zone_analysis_id，讓歷史結果不會因
+// 之後修改持股或重新訓練模型而改變。
+type HoldingAnalysis struct {
+	ID                  uint64      `db:"id"                    json:"id"`
+	HoldingID           uint64      `db:"holding_id"            json:"holding_id"`
+	Symbol              string      `db:"symbol"                json:"symbol"`
+	Shares              float64     `db:"shares"                json:"shares"`
+	CostPrice           float64     `db:"cost_price"            json:"cost_price"`
+	AnalyzedAt          time.Time   `db:"analyzed_at"           json:"analyzed_at"`
+	CurrentPrice        float64     `db:"current_price"         json:"current_price"`
+	SRZoneAnalysisID    NullInt64   `db:"sr_zone_analysis_id"   json:"sr_zone_analysis_id,omitempty"`
+	Action              string      `db:"action"                json:"action"`
+	ActionLabel         string      `db:"action_label"          json:"action_label"`
+	StopLossPrice       NullFloat64 `db:"stop_loss_price"       json:"stop_loss_price,omitempty"`
+	StopLossAmount      NullFloat64 `db:"stop_loss_amount"      json:"stop_loss_amount,omitempty"`
+	TakeProfitPrice     NullFloat64 `db:"take_profit_price"     json:"take_profit_price,omitempty"`
+	TakeProfitAmount    NullFloat64 `db:"take_profit_amount"    json:"take_profit_amount,omitempty"`
+	AddOnTriggerPrice   NullFloat64 `db:"add_on_trigger_price" json:"add_on_trigger_price,omitempty"`
+	AddOnAmount         NullFloat64 `db:"add_on_amount"        json:"add_on_amount,omitempty"`
+	UnrealizedPnL       float64     `db:"unrealized_pnl"        json:"unrealized_pnl"`
+	UnrealizedPnLPct    float64     `db:"unrealized_pnl_pct"    json:"unrealized_pnl_pct"`
+	Reason              RawJSON     `db:"reason"                json:"reason"`
+	DetailJSON          RawJSON     `db:"detail_json"           json:"detail_json"`
+	CreatedAt           time.Time   `db:"created_at"            json:"created_at"`
+}

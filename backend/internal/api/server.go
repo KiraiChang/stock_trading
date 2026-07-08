@@ -16,6 +16,7 @@ import (
 	"github.com/trading/backend/internal/chip"
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
+	"github.com/trading/backend/internal/portfolio"
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -53,6 +54,7 @@ func NewServer(
 	chipScoreRepo store.ChipScoreRepo,
 	chipSyncJobRepo store.ChipSyncJobRepo,
 	chipSyncer *chip.Syncer,
+	holdingRepo store.HoldingRepo,
 	chipHistoryTradingDays int,
 	jwtSecret string,
 	log *zap.Logger,
@@ -154,6 +156,15 @@ func NewServer(
 		protected.GET("/chips/:symbol/brokers", cph.GetBrokers)
 		protected.POST("/chips/sync", cph.Sync)
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
+
+		hh := handler.NewHoldingHandler(holdingRepo, portfolio.NewAnalyzer(analysisClient, holdingRepo, srZoneRepo), log)
+		protected.GET("/holdings", hh.List)
+		protected.POST("/holdings", hh.Create)
+		protected.PUT("/holdings/:id", hh.Update)
+		protected.DELETE("/holdings/:id", hh.Delete)
+		protected.POST("/holdings/:id/analyze", hh.Analyze)
+		protected.GET("/holdings/:id/analyses", hh.ListAnalyses)
+		protected.GET("/holding-analyses/:id", hh.GetAnalysis)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

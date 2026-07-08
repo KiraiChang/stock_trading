@@ -78,6 +78,7 @@ func main() {
 	brokerTradeRepo := store.NewBrokerTradeRepo(db)
 	chipScoreRepo := store.NewChipScoreRepo(db)
 	chipSyncJobRepo := store.NewChipSyncJobRepo(db)
+	holdingRepo := store.NewHoldingRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -124,7 +125,7 @@ func main() {
 	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.FinMind.IntradayEnabled, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, holdingRepo, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

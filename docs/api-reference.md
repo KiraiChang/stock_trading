@@ -953,6 +953,121 @@ sr-zone-scoring.md「十四」。
 
 ---
 
+## Holdings API
+
+持股操作分析以目前持股設定為輸入，每次分析都會建立一筆新的 SR Zone 快照與一筆
+`holding_analyses` 快照。歷史分析保存當下的股數、持有成本、收盤價與操作建議，不會被
+後續修改持股設定或重新訓練模型覆蓋。
+
+### GET `/holdings`
+
+列出目前持股設定。
+
+**Response：**
+```json
+{
+  "holdings": [
+    { "id": 1, "symbol": "2330", "shares": 1000, "cost_price": 600.0, "note": "", "created_at": "...", "updated_at": "..." }
+  ],
+  "total": 1
+}
+```
+
+### POST `/holdings`
+
+新增持股設定。
+
+**Request Body：**
+```json
+{ "symbol": "2330", "shares": 1000, "cost_price": 600.0, "note": "長期持有" }
+```
+
+`symbol`、`shares > 0`、`cost_price > 0` 必填。
+
+**Response（201 Created）：**
+```json
+{ "holding": { "id": 1, "symbol": "2330", "shares": 1000, "cost_price": 600.0, "...": "..." } }
+```
+
+### PUT `/holdings/:id`
+
+更新持股設定，body 同 `POST /holdings`。既有歷史分析快照不會被改寫。
+
+### DELETE `/holdings/:id`
+
+刪除目前持股設定。已保存的 `holding_analyses` 快照仍保留其當時的 symbol/shares/cost。
+
+### POST `/holdings/:id/analyze`
+
+用目前持股設定觸發一次操作分析並保存快照。內部會呼叫 Python `/sr-zones` 產生新的
+SR Zone 分析，保存後以 `sr_zone_analysis_id` 引用該次 SR 快照。
+
+**Request Body：**
+```json
+{ "timeframe": "1d", "limit": 250 }
+```
+
+`timeframe` 預設 `1d`；`limit` 為抓取 K 棒根數，省略或 0 時使用後端預設 250。
+
+**Response（201 Created）：**
+```json
+{
+  "analysis": {
+    "id": 10,
+    "holding_id": 1,
+    "symbol": "2330",
+    "shares": 1000,
+    "cost_price": 600.0,
+    "current_price": 650.0,
+    "sr_zone_analysis_id": 4,
+    "action": "HOLD",
+    "action_label": "繼續持有",
+    "stop_loss_price": 620.0,
+    "stop_loss_amount": 0,
+    "take_profit_price": 680.0,
+    "take_profit_amount": 80000,
+    "add_on_trigger_price": 690.0,
+    "add_on_amount": 162500,
+    "unrealized_pnl": 50000,
+    "unrealized_pnl_pct": 0.0833,
+    "reason": ["以 650.00 的最新收盤價與 SR Zone 快照評估。"],
+    "detail_json": { "rule_version": "holding_sr_zone_v1", "add_on_ratio": 0.25 }
+  },
+  "sr_zone_analysis": { "id": 4, "...": "..." },
+  "zones": [ { "id": 16, "...": "..." } ]
+}
+```
+
+目前規則：
+
+- 停損價：現價下方最近的支撐 zone 下緣。
+- 停利價：現價上方最近的壓力 zone 下緣。
+- 加碼觸發價：現價上方最近的壓力 zone 上緣。
+- 加碼金額：分析當下持股市值的 25%。
+- 若收盤跌破主要支撐，建議 `STOP_LOSS`；接近高分壓力區，建議 `TAKE_PROFIT`；SR 決策層為 `Avoid` 時建議 `REDUCE`；SR 決策層為 `Buy`/`BuySmall` 時以 `ADD_ON_BREAKOUT` 觀察突破加碼。
+
+### GET `/holdings/:id/analyses`
+
+列出某筆持股的歷史操作分析。
+
+**Query Parameters：** `limit`（預設 20，最多 200）
+
+**Response：**
+```json
+{ "analyses": [ { "id": 10, "action": "HOLD", "...": "..." } ], "total": 1 }
+```
+
+### GET `/holding-analyses/:id`
+
+取得單筆持股操作分析快照。
+
+**Response：**
+```json
+{ "analysis": { "id": 10, "symbol": "2330", "...": "..." } }
+```
+
+---
+
 ## WebSocket
 
 **連線：** `ws://localhost:8080/ws/market`

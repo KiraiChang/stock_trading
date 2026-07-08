@@ -233,6 +233,32 @@ Go 依最新收盤價、持有成本、支撐/壓力 zone 產生操作建議
 每次分析都新增一筆 `holding_analyses`，不覆蓋舊結果；`sr_zone_analysis_id` 可能引用既有
 SR Zone 快照。後續修改持股股數或成本，也不會改變歷史分析快照。
 
+#### 已知限制：SR 快照與持股分析非單一 transaction（刻意不處理）
+
+「建立新 SR 快照」與「建立 holding 分析」是**兩次獨立的 DB 寫入**（分屬
+`store.SRZoneRepo` 與 `store.HoldingRepo`），不是包在同一個跨 repo transaction 裡。
+一致性改由 `portfolio.Analyzer` 用**補償 + 讀回容錯**維持，而非原子交易：
+
+- `holdings.CreateAnalysis` 之前的失敗（`buildSnapshot`、`CreateAnalysis` 本身）＝
+  holding 列尚未寫入，此時把剛建立的 SR 快照 `srZoneRepo.Delete` 回收，避免孤兒。
+- `holdings.CreateAnalysis` **成功後**才發生的讀回失敗（`GetAnalysis`）＝ holding 列
+  已寫入，此時**不刪** SR 快照，改回退用記憶體中的快照回傳，避免 `holding_analyses`
+  指向被刪除的 SR（dangling reference）。
+
+殘留限制：若在「SR 建立 commit」與「holding 建立 commit」之間程序硬崩潰／連線中斷，
+會留下一筆沒有任何 `holding_analyses` 引用的 SR 快照。**刻意不升級為跨 repo
+transaction**，理由：
+
+1. **發生率極低**：僅限兩次 commit 之間毫秒級窗口的硬故障。
+2. **無資料損毀、方向安全**：殘留的是一筆合法的 `stock_sr_zone_analyses`，沒有指向缺
+   資料的外鍵；request 範圍內的暫時性錯誤已由上述補償/容錯覆蓋。
+3. **幾乎無害且會自癒**：SR 快照本就由 SR Zone 頁、排程器、持股三方共同產生、多數本
+   來就無 holding 引用，一筆「孤兒」SR 與一筆正常 SR 分析無法區分、價值相同；加上持股
+   分析已有「同 symbol/timeframe 新鮮快照優先重用」機制，該筆若仍新鮮下次會被直接重用。
+4. **成本／風險不成比例**：跨 repo transaction 需替兩個 repo 導入共用 executor 抽象並
+   改寫 `srZoneRepo.Create`（SR Zone 頁與排程器共用的寫入路徑），回歸風險外溢到持股
+   功能之外，不值得為上述殘留窗口投入。
+
 ### Nullable 欄位的 JSON 序列化
 
 Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去

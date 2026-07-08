@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -66,8 +67,11 @@ func (h *HoldingHandler) Update(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	if _, err := h.repo.Get(c.Request.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get before update")
 		return
 	}
 	req, ok := bindHoldingRequest(c)
@@ -94,8 +98,11 @@ func (h *HoldingHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	if _, err := h.repo.Get(c.Request.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get before delete")
 		return
 	}
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
@@ -111,8 +118,11 @@ func (h *HoldingHandler) Analyze(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	if _, err := h.repo.Get(c.Request.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get before analyze")
 		return
 	}
 	var body struct {
@@ -154,8 +164,11 @@ func (h *HoldingHandler) ListAnalyses(c *gin.Context) {
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	if _, err := h.repo.Get(c.Request.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get before list analyses")
 		return
 	}
 	rows, err := h.repo.ListAnalyses(c.Request.Context(), id, limit)
@@ -173,8 +186,11 @@ func (h *HoldingHandler) GetAnalysis(c *gin.Context) {
 		return
 	}
 	row, err := h.repo.GetAnalysis(c.Request.Context(), id)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding analysis not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get analysis")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"analysis": row})
@@ -186,8 +202,11 @@ func (h *HoldingHandler) DeleteAnalysis(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
 		return
 	}
-	if _, err := h.repo.GetAnalysis(c.Request.Context(), id); err != nil {
+	if _, err := h.repo.GetAnalysis(c.Request.Context(), id); errors.Is(err, sql.ErrNoRows) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "holding analysis not found"})
+		return
+	} else if err != nil {
+		serverError(c, h.log, err, "holdings: get analysis before delete")
 		return
 	}
 	if err := h.repo.DeleteAnalysis(c.Request.Context(), id); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/store"
@@ -21,23 +22,28 @@ const (
 	defaultTimeframe        = "1d"
 	defaultAddOnRatio       = 0.25
 	existingSRSnapshotLimit = 200
+	defaultSRReuseMaxAge    = 24 * time.Hour
 )
 
 type Analyzer struct {
-	client       *analysis.Client
-	holdings     store.HoldingRepo
-	srZoneRepo   store.SRZoneRepo
-	addOnRatio   float64
-	defaultLimit int
+	client        *analysis.Client
+	holdings      store.HoldingRepo
+	srZoneRepo    store.SRZoneRepo
+	addOnRatio    float64
+	defaultLimit  int
+	now           func() time.Time
+	srReuseMaxAge time.Duration
 }
 
 func NewAnalyzer(client *analysis.Client, holdings store.HoldingRepo, srZoneRepo store.SRZoneRepo) *Analyzer {
 	return &Analyzer{
-		client:       client,
-		holdings:     holdings,
-		srZoneRepo:   srZoneRepo,
-		addOnRatio:   defaultAddOnRatio,
-		defaultLimit: 250,
+		client:        client,
+		holdings:      holdings,
+		srZoneRepo:    srZoneRepo,
+		addOnRatio:    defaultAddOnRatio,
+		defaultLimit:  250,
+		now:           time.Now,
+		srReuseMaxAge: defaultSRReuseMaxAge,
 	}
 }
 
@@ -70,11 +76,11 @@ func (a *Analyzer) Analyze(ctx context.Context, holdingID uint64, opts AnalyzeOp
 		return a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
 	}
 
-	result, err := a.client.ScoreZones(ctx, holding.Symbol, opts.Timeframe, opts.Limit)
+	scoreResult, err := a.client.ScoreZones(ctx, holding.Symbol, opts.Timeframe, opts.Limit)
 	if err != nil {
 		return nil, err
 	}
-	srAnalysis, zones, err := result.ToStore()
+	srAnalysis, zones, err := scoreResult.ToStore()
 	if err != nil {
 		return nil, fmt.Errorf("convert sr zone result: %w", err)
 	}
@@ -91,7 +97,14 @@ func (a *Analyzer) Analyze(ctx context.Context, holdingID uint64, opts AnalyzeOp
 		return nil, fmt.Errorf("get saved sr zones: %w", err)
 	}
 
-	return a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
+	analysisResult, err := a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
+	if err != nil {
+		if deleteErr := a.srZoneRepo.Delete(ctx, srID); deleteErr != nil {
+			return nil, fmt.Errorf("%w; cleanup sr zone analysis %d: %v", err, srID, deleteErr)
+		}
+		return nil, err
+	}
+	return analysisResult, nil
 }
 
 func (a *Analyzer) findExistingSRSnapshot(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, []store.SRZone, bool, error) {
@@ -104,6 +117,9 @@ func (a *Analyzer) findExistingSRSnapshot(ctx context.Context, symbol, timeframe
 			continue
 		}
 		savedSR := analyses[i]
+		if !a.isFreshSRSnapshot(savedSR.AnalyzedAt) {
+			continue
+		}
 		zones, err := a.srZoneRepo.GetZones(ctx, savedSR.ID)
 		if err != nil {
 			return nil, nil, false, fmt.Errorf("get existing sr zones: %w", err)
@@ -111,6 +127,23 @@ func (a *Analyzer) findExistingSRSnapshot(ctx context.Context, symbol, timeframe
 		return &savedSR, zones, true, nil
 	}
 	return nil, nil, false, nil
+}
+
+func (a *Analyzer) isFreshSRSnapshot(analyzedAt time.Time) bool {
+	maxAge := a.srReuseMaxAge
+	if maxAge <= 0 {
+		maxAge = defaultSRReuseMaxAge
+	}
+	age := a.currentTime().Sub(analyzedAt)
+	return age >= 0 && age <= maxAge
+}
+
+// currentTime 回傳目前時間，測試可透過 a.now 注入固定時鐘。
+func (a *Analyzer) currentTime() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
 }
 
 func (a *Analyzer) createHoldingAnalysis(ctx context.Context, holding *store.Holding, savedSR *store.SRZoneAnalysis, savedZones []store.SRZone) (*AnalyzeResult, error) {
@@ -124,7 +157,13 @@ func (a *Analyzer) createHoldingAnalysis(ctx context.Context, holding *store.Hol
 	}
 	savedAnalysis, err := a.holdings.GetAnalysis(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("get saved holding analysis: %w", err)
+		// 讀回失敗不代表寫入失敗：holding_analyses 已建立（id 有效）。此時若把整筆
+		// 當成失敗回傳，呼叫端會誤以為沒寫入而去刪除 SR 快照，留下指向已刪 SR 的
+		// 孤兒分析。改回退用剛建立的快照，補上 DB 端會填的 id/created_at 後照常回傳，
+		// 確保 SR 快照被保留。
+		analysisSnapshot.ID = id
+		analysisSnapshot.CreatedAt = a.currentTime()
+		return &AnalyzeResult{Analysis: analysisSnapshot, SR: savedSR, Zones: savedZones}, nil
 	}
 
 	return &AnalyzeResult{Analysis: savedAnalysis, SR: savedSR, Zones: savedZones}, nil

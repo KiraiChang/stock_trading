@@ -23,10 +23,10 @@ const (
 )
 
 type Analyzer struct {
-	client      *analysis.Client
-	holdings    store.HoldingRepo
-	srZoneRepo  store.SRZoneRepo
-	addOnRatio  float64
+	client       *analysis.Client
+	holdings     store.HoldingRepo
+	srZoneRepo   store.SRZoneRepo
+	addOnRatio   float64
 	defaultLimit int
 }
 
@@ -47,7 +47,7 @@ type AnalyzeOptions struct {
 
 type AnalyzeResult struct {
 	Analysis *store.HoldingAnalysis `json:"analysis"`
-	SR       *store.SRZoneAnalysis   `json:"sr_zone_analysis"`
+	SR       *store.SRZoneAnalysis  `json:"sr_zone_analysis"`
 	Zones    []store.SRZone         `json:"zones"`
 }
 
@@ -170,45 +170,60 @@ func (a *Analyzer) buildSnapshot(h *store.Holding, sr *store.SRZoneAnalysis, zon
 	}
 
 	return &store.HoldingAnalysis{
-		HoldingID:           h.ID,
-		Symbol:              h.Symbol,
-		Shares:              h.Shares,
-		CostPrice:           h.CostPrice,
-		AnalyzedAt:          sr.AnalyzedAt,
-		CurrentPrice:        current,
-		SRZoneAnalysisID:    store.NewNullInt64(int64(sr.ID)),
-		Action:              action,
-		ActionLabel:         label,
-		StopLossPrice:       stopLossPrice,
-		StopLossAmount:      stopLossAmount,
-		TakeProfitPrice:     takeProfitPrice,
-		TakeProfitAmount:    takeProfitAmount,
-		AddOnTriggerPrice:   addOnTriggerPrice,
-		AddOnAmount:         addOnAmount,
-		UnrealizedPnL:       unrealized,
-		UnrealizedPnLPct:    unrealizedPct,
-		Reason:              store.RawJSON(reasonJSON),
-		DetailJSON:          store.RawJSON(detailJSON),
+		HoldingID:         h.ID,
+		Symbol:            h.Symbol,
+		Shares:            h.Shares,
+		CostPrice:         h.CostPrice,
+		AnalyzedAt:        sr.AnalyzedAt,
+		CurrentPrice:      current,
+		SRZoneAnalysisID:  store.NewNullInt64(int64(sr.ID)),
+		Action:            action,
+		ActionLabel:       label,
+		StopLossPrice:     stopLossPrice,
+		StopLossAmount:    stopLossAmount,
+		TakeProfitPrice:   takeProfitPrice,
+		TakeProfitAmount:  takeProfitAmount,
+		AddOnTriggerPrice: addOnTriggerPrice,
+		AddOnAmount:       addOnAmount,
+		UnrealizedPnL:     unrealized,
+		UnrealizedPnLPct:  unrealizedPct,
+		Reason:            store.RawJSON(reasonJSON),
+		DetailJSON:        store.RawJSON(detailJSON),
 	}, nil
 }
 
 func pickSupportZone(zones []store.SRZone, current float64) *store.SRZone {
-	candidates := make([]store.SRZone, 0)
+	belowOrAt := make([]store.SRZone, 0)
+	above := make([]store.SRZone, 0)
 	for _, z := range zones {
-		if effectiveRole(z) == "SUPPORT" && z.PriceLow <= current {
-			candidates = append(candidates, z)
+		if effectiveRole(z) != "SUPPORT" {
+			continue
+		}
+		if z.PriceLow <= current {
+			belowOrAt = append(belowOrAt, z)
+		} else {
+			above = append(above, z)
 		}
 	}
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].PriceHigh == candidates[j].PriceHigh {
-			return candidates[i].TradingScore > candidates[j].TradingScore
+	sort.Slice(belowOrAt, func(i, j int) bool {
+		if belowOrAt[i].PriceHigh == belowOrAt[j].PriceHigh {
+			return belowOrAt[i].TradingScore > belowOrAt[j].TradingScore
 		}
-		return candidates[i].PriceHigh > candidates[j].PriceHigh
+		return belowOrAt[i].PriceHigh > belowOrAt[j].PriceHigh
 	})
-	if len(candidates) == 0 {
-		return nil
+	if len(belowOrAt) > 0 {
+		return &belowOrAt[0]
 	}
-	return &candidates[0]
+	sort.Slice(above, func(i, j int) bool {
+		if above[i].PriceLow == above[j].PriceLow {
+			return above[i].TradingScore > above[j].TradingScore
+		}
+		return above[i].PriceLow < above[j].PriceLow
+	})
+	if len(above) > 0 {
+		return &above[0]
+	}
+	return nil
 }
 
 func pickResistanceZone(zones []store.SRZone, current float64) *store.SRZone {

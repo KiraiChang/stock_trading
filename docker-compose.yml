@@ -3,8 +3,8 @@ services:
   # ── Go Backend ────────────────────────────────────────────────
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_DRIVER: postgres

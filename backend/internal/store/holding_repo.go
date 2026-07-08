@@ -153,7 +153,7 @@ func (r *holdingRepo) ListAnalyses(ctx context.Context, holdingID uint64, limit 
 		SELECT `+holdingAnalysisColumns+`
 		FROM holding_analyses
 		WHERE holding_id=?
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		LIMIT ?
 	`), holdingID, limit)
 	return rows, err

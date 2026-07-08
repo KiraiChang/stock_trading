@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+backend/*.db
+backend/trading.db
+backend/internal/ui/dist
+frontend/dist
+python/

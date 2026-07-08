@@ -19,6 +19,14 @@ const (
 	fugleReadIdleTimeout    = 90 * time.Second
 	fugleAuthTimeout        = 10 * time.Second
 	fugleReconnectBaseDelay = 2 * time.Second
+	// fugleMaxConnCooldown：撞到「Maximum number of connections reached」時的專屬
+	// 冷卻時間。這個錯誤代表帳號唯一的連線名額還被前一條連線佔著——通常是前一次
+	// 1006 異常斷線（沒走正常關閉），伺服器要等自己的 timeout 才會釋放名額。這種
+	// 情況用一般 2s 退避狂重連只會讓帳號一直處於忙碌狀態、名額永遠等不到釋放，
+	// 必須改用較長的固定冷卻等伺服器端釋放（實測 17s 時名額仍未釋放，取 60s）。
+	fugleMaxConnCooldown = 60 * time.Second
+	// fugleCloseWriteWait：送出 WebSocket 正常關閉（Close 控制訊框）的寫入期限。
+	fugleCloseWriteWait = 2 * time.Second
 )
 
 // FugleStreamClient 實作 StreamingSource：Tier 2 熱點用的 WebSocket 即時推送 client。
@@ -42,6 +50,7 @@ type FugleStreamClient struct {
 	channelID map[string]string       // symbol -> channel ID（訂閱後取得，unsubscribe 用）
 	idSymbol  map[string]string       // channel ID -> symbol（推送訊息缺 symbol 欄位時回查用）
 
+	startOnce sync.Once
 	closeOnce sync.Once
 	closed    chan struct{}
 }
@@ -71,13 +80,17 @@ func NewFugleStreamClient(cfg config.FugleConfig, log *zap.Logger) *FugleStreamC
 func (c *FugleStreamClient) MaxSubscriptions() int { return c.maxSubs }
 
 // Start 建立連線並在背景執行讀取迴圈，斷線時以指數退避自動重連。
-// ctx 取消或呼叫 Close() 會停止重連迴圈。
+// ctx 取消或呼叫 Close() 會停止重連迴圈。startOnce 確保即使被重複呼叫也只會
+// 開出一條連線——在「同一組 Key 僅允許 1 條連線」的限制下，多開一條 runLoop
+// 會讓兩條連線互搶名額、永遠連不穩，是致命 bug。
 func (c *FugleStreamClient) Start(ctx context.Context) {
-	go c.runLoop(ctx)
+	c.startOnce.Do(func() {
+		go c.runLoop(ctx)
+	})
 }
 
 func (c *FugleStreamClient) runLoop(ctx context.Context) {
-	delay := fugleReconnectBaseDelay
+	backoff := fugleReconnectBaseDelay
 	for {
 		select {
 		case <-ctx.Done():
@@ -87,52 +100,85 @@ func (c *FugleStreamClient) runLoop(ctx context.Context) {
 		default:
 		}
 
-		if err := c.connectAndServe(ctx); err != nil {
-			if strings.Contains(err.Error(), "Maximum number of connections reached") {
+		authenticated, err := c.connectAndServe(ctx)
+		if err != nil {
+			if isMaxConnectionsErr(err) {
 				c.log.Warn("fugle stream disconnected",
 					zap.Error(err),
 					zap.String("hint", "免費方案同一組 API Key 僅允許 1 條 WebSocket 連線；"+
-						"常見成因為 cmd/fugle-check 與本服務同時使用同一組 Key，"+
-						"或前一個 process 尚未送出正常關閉導致舊連線名額尚未釋放，稍候將由 backoff 自動重試"),
+						"常見成因為 cmd/fugle-check 與本服務同時使用同一組 Key，或前一條連線"+
+						"（多半是 1006 異常斷線）尚未被伺服器釋放名額，將以較長冷卻等待釋放後重試"),
 				)
 			} else {
 				c.log.Warn("fugle stream disconnected", zap.Error(err))
 			}
 		}
 
+		var wait time.Duration
+		wait, backoff = nextReconnectDelay(backoff, authenticated, err, c.reconnectMaxDur)
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.closed:
 			return
-		case <-time.After(delay):
-		}
-		delay *= 2
-		if delay > c.reconnectMaxDur {
-			delay = c.reconnectMaxDur
+		case <-time.After(wait):
 		}
 	}
 }
 
-func (c *FugleStreamClient) connectAndServe(ctx context.Context) error {
+// nextReconnectDelay 依這次連線的結果決定「重連前要等多久（wait）」以及「下一輪
+// 的指數退避基準（nextBackoff）」：
+//   - 撞到 max-connections：套用固定長冷卻（fugleMaxConnCooldown），等伺服器釋放
+//     殘留名額；並把退避基準重置回 base，冷卻過後恢復即時反應。
+//   - 成功認證過才斷線：回到 base，維持斷線後的即時重連。
+//   - 其他錯誤（dial 失敗、DNS timeout、一般讀取錯誤）：指數退避，上限 maxDur。
+func nextReconnectDelay(backoff time.Duration, authenticated bool, err error, maxDur time.Duration) (wait, nextBackoff time.Duration) {
+	switch {
+	case isMaxConnectionsErr(err):
+		return fugleMaxConnCooldown, fugleReconnectBaseDelay
+	case authenticated:
+		return fugleReconnectBaseDelay, fugleReconnectBaseDelay
+	default:
+		wait = backoff
+		if wait > maxDur {
+			wait = maxDur
+		}
+		nextBackoff = backoff * 2
+		if nextBackoff > maxDur {
+			nextBackoff = maxDur
+		}
+		return wait, nextBackoff
+	}
+}
+
+func isMaxConnectionsErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Maximum number of connections reached")
+}
+
+// connectAndServe 建立一條連線並服務到斷線為止。回傳 authenticated 表示這條
+// 連線是否曾成功認證（供 runLoop 決定退避策略）。不論正常或異常結束，都會透過
+// gracefulClose 送出 WebSocket 正常關閉，讓伺服器立即釋放名額。
+func (c *FugleStreamClient) connectAndServe(ctx context.Context) (authenticated bool, err error) {
 	dialCtx, cancel := context.WithTimeout(ctx, fugleAuthTimeout)
 	defer cancel()
 	conn, _, err := websocket.DefaultDialer.DialContext(dialCtx, c.wsURL, nil)
 	if err != nil {
-		return fmt.Errorf("fugle ws dial failed: %w", err)
+		return false, fmt.Errorf("fugle ws dial failed: %w", err)
 	}
-	defer conn.Close()
+	defer c.gracefulClose(conn)
 
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
 
 	if err := c.writeJSON(newFugleAuthRequest(c.apiKey)); err != nil {
-		return fmt.Errorf("fugle ws send auth failed: %w", err)
+		return false, fmt.Errorf("fugle ws send auth failed: %w", err)
 	}
 	if err := c.waitAuthenticated(conn); err != nil {
-		return err
+		return false, err
 	}
+	authenticated = true
 	c.log.Info("fugle ws authenticated")
 
 	c.resubscribeAll()
@@ -141,7 +187,7 @@ func (c *FugleStreamClient) connectAndServe(ctx context.Context) error {
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
-			return fmt.Errorf("fugle ws read failed: %w", err)
+			return authenticated, fmt.Errorf("fugle ws read failed: %w", err)
 		}
 		conn.SetReadDeadline(time.Now().Add(fugleReadIdleTimeout))
 		if c.OnRawMessage != nil {
@@ -149,6 +195,19 @@ func (c *FugleStreamClient) connectAndServe(ctx context.Context) error {
 		}
 		c.handleMessage(raw)
 	}
+}
+
+// gracefulClose 先送出 WebSocket 正常關閉（Close 控制訊框）再關 TCP，讓 Fugle
+// 伺服器立即釋放帳號的連線名額，而不是等它自己的 timeout。best-effort：連線
+// 已經壞掉（例如 1006 異常斷線）時 WriteControl 會失敗，直接關 TCP 即可。
+// WriteControl 依 gorilla 文件可與其他讀寫方法並行呼叫，不需另外持鎖。
+func (c *FugleStreamClient) gracefulClose(conn *websocket.Conn) {
+	_ = conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(fugleCloseWriteWait),
+	)
+	_ = conn.Close()
 }
 
 func (c *FugleStreamClient) waitAuthenticated(conn *websocket.Conn) error {
@@ -384,7 +443,9 @@ func (c *FugleStreamClient) Close() error {
 	conn := c.conn
 	c.mu.Unlock()
 	if conn != nil {
-		return conn.Close()
+		// 走正常關閉，讓伺服器立即釋放名額，避免這個 process 結束後名額殘留、
+		// 導致下一次啟動又撞到 Maximum number of connections reached。
+		c.gracefulClose(conn)
 	}
 	return nil
 }

@@ -138,6 +138,33 @@ go run ./cmd/fugle-check -symbol 2330 -duration 120s
 
 ---
 
+## 連線生命週期與重連（1 條連線限制下的名額管理）
+
+免費方案「同一組 API Key 僅允許 1 條 WebSocket 連線」，`fugle_stream.go` 針對這個
+限制做了以下處理（見 `nextReconnectDelay`、`gracefulClose`）：
+
+- **正常關閉釋放名額**：斷線重連與 process 結束（`Close()`）時，都會先送出
+  WebSocket Close 控制訊框（`gracefulClose`）再關 TCP，讓伺服器**立即釋放**帳號的
+  連線名額，而不是等它自己 timeout。這避免「前一條連線名額殘留 → 下一條在 auth
+  階段被 `close 1001 Maximum number of connections reached` 踢掉」。
+- **`Maximum number of connections reached` 專屬長冷卻**：撞到這個錯誤代表名額還被
+  前一條連線佔著（多半是前一次 **1006 異常斷線**，沒走正常關閉，伺服器要等自己
+  timeout 才釋放）。此時**不套用一般 2s 指數退避**，改用固定 `fugleMaxConnCooldown`
+  （60s）冷卻等待名額釋放——每 2s 硬撞只會讓帳號一直忙碌、名額永遠等不到釋放。
+- **認證成功後重置退避**：曾成功 authenticated 過才斷線（例如健康連線 1006 掉線），
+  退避回到 base，維持斷線後的即時重連；一般 dial/DNS 失敗才走指數退避（上限
+  `reconnect_max_sec`）。
+- **`Start` 單一連線守衛**：`startOnce` 確保 `Start()` 只會開出一條 `runLoop`，避免
+  意外重複啟動造成兩條連線互搶唯一名額。
+- **DNS/dial timeout**（如 `lookup api.fugle.tw: i/o timeout`）屬環境層暫時性失敗，
+  照一般退避重試即可，與名額無關。
+
+排查提醒：若持續看到 `Maximum number of connections reached`，先確認沒有其他
+process（例如 `cmd/fugle-check`、另一個 server 實例）正用同一組 Key；若確定只有
+單一服務，通常是前一次異常斷線的名額尚未釋放，冷卻後會自動恢復。
+
+---
+
 ## 設定
 
 `backend/config.yaml` 的 `fugle:` 區塊（對應環境變數 `FUGLE_*`）：

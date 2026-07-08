@@ -165,6 +165,7 @@ func NewServer(
 		protected.POST("/holdings/:id/analyze", hh.Analyze)
 		protected.GET("/holdings/:id/analyses", hh.ListAnalyses)
 		protected.GET("/holding-analyses/:id", hh.GetAnalysis)
+		protected.DELETE("/holding-analyses/:id", hh.DeleteAnalysis)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

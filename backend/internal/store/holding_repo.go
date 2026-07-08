@@ -17,6 +17,7 @@ type HoldingRepo interface {
 	CreateAnalysis(ctx context.Context, a *HoldingAnalysis) (uint64, error)
 	GetAnalysis(ctx context.Context, id uint64) (*HoldingAnalysis, error)
 	ListAnalyses(ctx context.Context, holdingID uint64, limit int) ([]HoldingAnalysis, error)
+	DeleteAnalysis(ctx context.Context, id uint64) error
 }
 
 type holdingRepo struct {
@@ -157,6 +158,11 @@ func (r *holdingRepo) ListAnalyses(ctx context.Context, holdingID uint64, limit 
 		LIMIT ?
 	`), holdingID, limit)
 	return rows, err
+}
+
+func (r *holdingRepo) DeleteAnalysis(ctx context.Context, id uint64) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM holding_analyses WHERE id=?`), id)
+	return err
 }
 
 func nullFloat64Value(n NullFloat64) any {

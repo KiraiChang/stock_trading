@@ -180,6 +180,23 @@ func (h *HoldingHandler) GetAnalysis(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"analysis": row})
 }
 
+func (h *HoldingHandler) DeleteAnalysis(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	if _, err := h.repo.GetAnalysis(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "holding analysis not found"})
+		return
+	}
+	if err := h.repo.DeleteAnalysis(c.Request.Context(), id); err != nil {
+		serverError(c, h.log, err, "holdings: delete analysis")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
 func bindHoldingRequest(c *gin.Context) (holdingRequest, bool) {
 	var req holdingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

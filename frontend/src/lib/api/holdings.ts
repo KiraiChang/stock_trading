@@ -88,3 +88,7 @@ export async function getHoldingAnalysis(id: number): Promise<HoldingAnalysis> {
   const res = await apiFetch<{ analysis: HoldingAnalysis }>(`/holding-analyses/${id}`)
   return res.analysis
 }
+
+export async function deleteHoldingAnalysis(id: number): Promise<void> {
+  await apiFetch(`/holding-analyses/${id}`, { method: 'DELETE' })
+}

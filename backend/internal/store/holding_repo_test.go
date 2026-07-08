@@ -165,3 +165,42 @@ func TestHoldingRepoAnalysisRoundTripAndHistorySurvivesHoldingDelete(t *testing.
 		t.Fatalf("expected analysis snapshot to survive holding delete: %v", err)
 	}
 }
+
+func TestHoldingRepoDeleteAnalysis(t *testing.T) {
+	repo := newTestHoldingRepo(t)
+	ctx := context.Background()
+
+	holdingID, err := repo.Create(ctx, &Holding{Symbol: "2330", Shares: 1000, CostPrice: 600})
+	if err != nil {
+		t.Fatalf("Create holding failed: %v", err)
+	}
+	analysisID, err := repo.CreateAnalysis(ctx, &HoldingAnalysis{
+		HoldingID:        holdingID,
+		Symbol:           "2330",
+		Shares:           1000,
+		CostPrice:        600,
+		AnalyzedAt:       time.Date(2026, 7, 1, 13, 30, 0, 0, time.UTC),
+		CurrentPrice:     650,
+		Action:           "HOLD",
+		ActionLabel:      "繼續持有",
+		UnrealizedPnL:    50000,
+		UnrealizedPnLPct: 0.083333,
+	})
+	if err != nil {
+		t.Fatalf("CreateAnalysis failed: %v", err)
+	}
+
+	if err := repo.DeleteAnalysis(ctx, analysisID); err != nil {
+		t.Fatalf("DeleteAnalysis failed: %v", err)
+	}
+	if _, err := repo.GetAnalysis(ctx, analysisID); err == nil {
+		t.Fatalf("expected deleted analysis to be missing")
+	}
+	rows, err := repo.ListAnalyses(ctx, holdingID, 20)
+	if err != nil {
+		t.Fatalf("ListAnalyses failed: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected deleted analysis to be removed from list, got %+v", rows)
+	}
+}

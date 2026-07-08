@@ -5,6 +5,7 @@
   import {
     analyzeHolding,
     createHolding,
+    deleteHoldingAnalysis,
     deleteHolding,
     listHoldingAnalyses,
     listHoldings,
@@ -117,6 +118,19 @@
     selectedId = id
     analyses = await listHoldingAnalyses(id, 20).catch(() => [])
     latest = analyses[0] ?? null
+  }
+
+  async function removeAnalysis(a: HoldingAnalysis, event: MouseEvent) {
+    event.stopPropagation()
+    if (!confirm(`刪除 ${a.symbol} 於 ${dt(a.created_at)} 的分析結果？`)) return
+    error = ''
+    try {
+      await deleteHoldingAnalysis(a.id)
+      analyses = analyses.filter((item) => item.id !== a.id)
+      if (latest?.id === a.id) latest = analyses[0] ?? null
+    } catch (err) {
+      error = err instanceof ApiError ? err.message : '刪除分析結果失敗'
+    }
   }
 
   function money(v: number | null | undefined): string {
@@ -280,12 +294,13 @@
             <th class="text-center px-3 py-3">建議</th>
             <th class="text-right px-3 py-3">現價</th>
             <th class="text-right px-3 py-3">損益</th>
-            <th class="text-right px-5 py-3">SR ID</th>
+            <th class="text-right px-3 py-3">SR ID</th>
+            <th class="text-center px-5 py-3">操作</th>
           </tr>
         </thead>
         <tbody>
           {#if analyses.length === 0}
-            <tr><td colspan="6" class="px-5 py-8 text-center text-muted">尚無分析歷史</td></tr>
+            <tr><td colspan="7" class="px-5 py-8 text-center text-muted">尚無分析歷史</td></tr>
           {:else}
             {#each analyses as a (a.id)}
               <tr class="border-b border-border/50 hover:bg-border/20 cursor-pointer" on:click={() => latest = a}>
@@ -296,7 +311,10 @@
                 </td>
                 <td class="px-3 py-3 text-right text-white">{money(a.current_price)}</td>
                 <td class="px-3 py-3 text-right {a.unrealized_pnl >= 0 ? 'text-rise' : 'text-fall'}">{money(a.unrealized_pnl)}</td>
-                <td class="px-5 py-3 text-right text-muted font-mono">{a.sr_zone_analysis_id ?? '—'}</td>
+                <td class="px-3 py-3 text-right text-muted font-mono">{a.sr_zone_analysis_id ?? '—'}</td>
+                <td class="px-5 py-3 text-center">
+                  <button class="text-xs px-2 py-1.5 rounded-lg border border-fall/40 text-fall hover:bg-fall/10" on:click={(event) => removeAnalysis(a, event)}>刪除</button>
+                </td>
               </tr>
             {/each}
           {/if}

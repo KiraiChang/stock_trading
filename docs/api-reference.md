@@ -1066,6 +1066,15 @@ SR Zone 分析，保存後以 `sr_zone_analysis_id` 引用該次 SR 快照。
 { "analysis": { "id": 10, "symbol": "2330", "...": "..." } }
 ```
 
+### DELETE `/holding-analyses/:id`
+
+刪除單筆持股操作分析快照，供整理歷史列表使用。這只刪除 `holding_analyses` 紀錄，不會刪除持股設定，也不會刪除同次產生的 SR Zone 快照。
+
+**Response：**
+```json
+{ "message": "deleted" }
+```
+
 ---
 
 ## WebSocket

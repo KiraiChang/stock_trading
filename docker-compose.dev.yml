@@ -1,0 +1,115 @@
+name: stock_trading_dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading
+      POSTGRES_DB: trading
+    ports:
+      - "15432:5432"
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dev_trading_net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "16379:6379"
+    volumes:
+      - dev_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - dev_trading_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      python-server:
+        condition: service_started
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ""
+      SERVER_PORT: "8080"
+      PYTHON_SERVICE_URL: http://python-server:8001
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-change-me}
+      FINMIND_API_KEY: ${FINMIND_API_KEY:-YOUR_FINMIND_API_KEY}
+      FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
+      FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
+      FUGLE_API_KEY: ${FUGLE_API_KEY:-YOUR_FUGLE_API_KEY}
+    ports:
+      - "18080:8080"
+    networks:
+      - dev_trading_net
+
+  python-server:
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["uvicorn", "http_server:app", "--host", "0.0.0.0", "--port", "8001"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
+      PYTHON_SERVICE_PORT: "8001"
+      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v3.joblib
+    ports:
+      - "18001:8001"
+    volumes:
+      - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+    networks:
+      - dev_trading_net
+
+  python-worker:
+    profiles: ["worker"]
+    build:
+      context: ./python
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_DRIVER: postgres
+      DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
+      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v3.joblib
+    volumes:
+      - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+    networks:
+      - dev_trading_net
+
+networks:
+  dev_trading_net:
+    name: stock_trading_dev_net
+
+volumes:
+  dev_postgres_data:
+    name: stock_trading_dev_postgres_data
+  dev_redis_data:
+    name: stock_trading_dev_redis_data

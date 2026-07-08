@@ -12,7 +12,10 @@ Run commands from the relevant subdirectory unless noted.
 - `cd frontend && npm run dev`: start the Vite development server.
 - `cd frontend && npm run build`: create the production frontend bundle.
 - `cd python && .venv/Scripts/python.exe -m pytest backtest/ -v`: run Python backtest tests on Windows.
-- `docker-compose up --build`: start the composed stack, including supporting services.
+- `docker compose -f docker-compose.dev.yml up --build -d`: start the isolated Docker dev stack for validation.
+
+For Docker-based validation, project/live separation, smoke tests, and reset commands, follow
+[`docs/development-workflow.md`](docs/development-workflow.md).
 
 ## Coding Style & Naming Conventions
 Format Go code with `gofmt`; keep packages lower-case and tests named `*_test.go`. Use idiomatic Svelte component names in PascalCase, such as `WatchlistTable.svelte`, and TypeScript modules in camelCase or domain names, such as `srZones.ts`. Python code should use 4-space indentation, `snake_case` modules and functions, and focused modules under `backtest/`, `models/`, or `utils/`.
@@ -20,7 +23,12 @@ Format Go code with `gofmt`; keep packages lower-case and tests named `*_test.go
 ## Testing Guidelines
 Place Go unit tests beside the package they exercise and prefer table-driven tests for signal, store, and analysis logic. Python tests use pytest and follow `test_*.py` naming under each feature's `tests/` directory. Add or update tests when changing trading signals, persistence behavior, migrations, backtest calculations, or API contracts.
 
+When validating development results with Docker, use the isolated dev compose project documented in
+[`docs/development-workflow.md`](docs/development-workflow.md). Do not use the live/deploy compose project for test data, migrations, or destructive reset commands.
+
 ## Agent-Specific Instructions
+Use [`docs/development-workflow.md`](docs/development-workflow.md) as the shared workflow source for Docker validation and issue/todo/documentation handling.
+
 When receiving a request, first restate the understood requirements and wait for confirmation. Do not browse files, inspect docs, plan, edit, test, or run services before that confirmation. After the requirement is confirmed, inspect only the necessary context and propose a plan. Wait for plan confirmation before executing changes.
 
 When documenting findings, do not create a new standalone docs file by default. Route items by type: bugs, contradictions, misleading behavior, or known limitations go into `docs/issue.md`; future improvements, feature ideas, and refactors go into `docs/todo.md`; durable design or operation notes go into the existing topic document under `docs/`. Create a new docs file only when the user explicitly asks for a new standalone document or no existing topic file fits.

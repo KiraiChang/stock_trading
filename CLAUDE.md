@@ -3,6 +3,10 @@
 本文件提供 Claude Code（claude.ai/code）在此程式庫工作時的指引。
 始終用繁體中文說明。
 
+共用開發與 Docker 驗收流程以 `docs/development-workflow.md` 為準。驗收開發成果時要使用
+`docker-compose.dev.yml` 的 dev project，不能使用 live/deploy 的 compose project
+做測試資料、migration 驗證或清空資料。
+
 ## 協作流程
 
 收到需求後，先回饋並整理理解到的需求內容，等待使用者確認。

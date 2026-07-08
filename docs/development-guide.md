@@ -22,7 +22,7 @@ cd backend
 go run ./cmd/server
 ```
 
-- 首次啟動自動建立 `trading.db` 並套用所有 migration
+- 首次啟動會依 `backend/config.yaml` 的 `database.dsn` 建立 SQLite DB 並套用所有 migration；目前預設路徑是 `../../output/stock_trading/trading.db`
 - 監聽 `http://localhost:8080`
 
 ### 2. 啟動前端（開發模式）
@@ -93,10 +93,13 @@ go build -o trading-backend ./cmd/server
 ## Docker Compose（生產環境）
 
 ```bash
-docker-compose up --build
+docker network create proxy_net 2>/dev/null || true
+docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f docker-compose.yml up --build
 ```
 
-包含：PostgreSQL、Redis、Go backend、Python worker、Python HTTP server。
+包含：PostgreSQL、Redis、Go backend、Python worker、Python HTTP server。`docker-compose.yml`
+本身假設 `trading-net` / `proxy_net` 已存在；上方 postgres compose 檔會建立
+`trading-net`，`proxy_net` 需先存在或用上方命令建立。
 
 服務對應：
 
@@ -149,8 +152,8 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
 **Step 2. 直接修改資料庫啟用第一個管理員**（因為此時還無法登入）
 
 ```bash
-# SQLite（開發環境）
-sqlite3 backend/trading.db "UPDATE users SET status='active' WHERE email='admin@trading.com';"
+# SQLite（開發環境；路徑需對齊 backend/config.yaml 的 database.dsn）
+sqlite3 ../../output/stock_trading/trading.db "UPDATE users SET status='active' WHERE email='admin@trading.com';"
 ```
 
 ```sql
@@ -216,6 +219,24 @@ fetcher.BackfillHistory(ctx, symbols, 120)
 
 也可以直接用前端「歷史資料回補」頁面（`/backfill`），勾選監控清單股票、
 指定天數後送出，或呼叫 `POST /api/v1/market/backfill`（見 api-reference.md）。
+
+---
+
+## 籌碼資料同步
+
+籌碼分析已接入前端「籌碼分析」頁面（`/chips`）與 API：
+
+```bash
+curl -X POST http://localhost:8080/api/v1/chips/sync \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"mode":"backfill","symbols":["2330","2454"],"dataTypes":["institutional","margin","broker","scores"]}'
+# → { "job": { "job_id": "chip_...", "status": "pending", ... } }
+```
+
+`mode=manual` 且未指定日期時只同步今天；`mode=backfill` 且未指定 `from` 時，會用
+`chip.sync.history_trading_days` 往回推。收盤後 `daily_close` 排程完成日 K 與訊號後，
+也會另外建立 `job_runs.job_name=chip_daily_sync` 的日結籌碼同步紀錄。
 
 ---
 
@@ -289,8 +310,8 @@ curl -X POST http://localhost:8080/api/v1/sr-zones \
 機率模型」區塊就是 `POST /sr-zones/train` 的 UI，觸發後會自動每 3 秒輪詢一次
 狀態，完成/失敗都會顯示，下方也有最近幾次訓練紀錄。
 
-過幾天後想確認每個 zone 有沒有被突破，重新驗證（可重複執行，`daily_close`
-排程也會每天自動對最近幾筆分析呼叫一次，不用每次都手動觸發）：
+過幾天後想確認每個 zone 有沒有被突破，重新驗證（可重複執行，15:00 的
+`daily_close` 排程也會每天自動對最近幾筆分析呼叫一次，不用每次都手動觸發）：
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/sr-zones/1/verify \

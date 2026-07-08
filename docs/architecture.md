@@ -13,12 +13,16 @@ Indicator Engine（Go）
     ↓ Upsert
 DB（indicator_snapshots）+ Redis（hash, TTL 5 min）
     ↓
-Signal Engine
+Signal Engine（含 chip_scores 強度加權）
     ↓ Insert
 DB（signals）
     ↓ WebSocket Broadcast
 Frontend（Svelte，由 Go backend 直接 serve）
 ```
+
+收盤後 `daily_close` 會依序執行日 K 更新、日線訊號掃描、SR Zone 驗證與籌碼日結同步。
+籌碼同步由 `chip.Syncer` 寫入 institutional/margin/broker raw tables 與 `chip_scores`，
+失敗時只影響自己的 `job_runs` 紀錄，不會回滾 K 線或訊號結果。
 
 Fugle 目前預設關閉（`fugle.enabled: false`），已完成 REST/WebSocket client 與
 `cmd/fugle-check` 驗證工具，尚未接上 `Fetcher`/`scheduler` 的自動排程；詳見
@@ -41,8 +45,10 @@ cmd/server/main.go
     │       └── store.CandleRepo
     ├── signal（Engine）
     │       ├── indicator.Engine
-    │       └── store.{CandleRepo, SignalRepo}
-    ├── scheduler（cron jobs，daily_close 收盤後接著跑 SR zone 驗證）
+    │       └── store.{CandleRepo, SignalRepo, ChipScoreRepo}
+    ├── chip（Syncer + scoring helpers，三大法人、融資融券、券商分點、chip_scores）
+    │       └── market.FinMindClient + store chip repos
+    ├── scheduler（cron jobs，daily_close 收盤後接著跑 SR zone 驗證與 chip_daily_sync）
     │       ├── market.Fetcher
     │       ├── signal.Engine
     │       └── analysis.SRZoneVerifier
@@ -56,6 +62,7 @@ cmd/server/main.go
             ├── handler.User（GET /users, PATCH /users/:id/status）
             ├── handler.{Candle, Indicator, Signal, Watchlist, Market, Backtest, Analysis}
             ├── handler.SRZone（store.SRZoneRepo，見 sr-zone-scoring.md）
+            ├── handler.Chip（GET /chips/*, POST /chips/sync）
             └── ws.Hub
 ```
 
@@ -104,6 +111,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | 支撐/壓力機率分析 | `sr-zones` | 輸入股票代號觸發 SR Zone Scoring（`POST /sr-zones`），顯示機率模型算出的區間、機率、EV/RR、可拆解交易分數；另有「訓練/更新機率模型」區塊（`POST /sr-zones/train`）。詳見 [sr-zone-scoring.md](./sr-zone-scoring.md) |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
+| 籌碼分析 | `chips` | 查詢籌碼摘要、歷史分數、券商分點排行，並可手動同步籌碼資料（`POST /chips/sync`） |
 | 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
 | 使用者管理 | `users` | 啟用/停用帳號 |
 
@@ -149,6 +157,10 @@ Python Worker / HTTP Server
 Go API（讀取結果回傳給前端）
 ```
 
+模組化回測可選擇啟用 `use_chip_filter`，用 `chip_scores.total_score` 與
+`chip_min_score` 門檻過濾進場訊號；legacy backtrader 策略收到該選項時會記 warning
+並忽略，不中斷回測。
+
 **個股分析**（`analysis` package）跟回測共用「Python 算、Go 存」的分工，但驗證
 階段反過來——比對已存的價位跟 candles 大小，不需要重跑 Python 的策略邏輯：
 
@@ -186,6 +198,24 @@ Python 訓練 hold_model + break_model，寫入 models/*.joblib
 ```
 
 細節見 [sr-zone-scoring.md](./sr-zone-scoring.md)。
+
+**籌碼分析**由 Go 端同步、計分與查詢，Python 只在模組化回測與 SR Zone v3 模型中讀取
+已落地的 `chip_scores`：
+
+```
+manual/backfill API 或 daily_close
+    ↓
+chip.Syncer 從 FinMind 取得三大法人、融資融券、券商分點資料
+    ↓
+寫入 institutional_trades / margin_trades / broker_trades
+    ↓
+計算 chip_scores
+    ↓
+Signal Engine、Backtest、SR Zone Scoring 與前端 Chips 頁面讀取使用
+```
+
+`POST /api/v1/chips/sync` 建立 `chip_sync_jobs` 非同步任務；日結同步則使用
+`job_runs.job_name=chip_daily_sync`，兩者的進度表不同。
 
 ### Nullable 欄位的 JSON 序列化
 
@@ -240,9 +270,10 @@ python worker.py         # Python worker（選填）
 ### 生產 / Docker
 
 ```
-docker-compose up --build
+docker network create proxy_net 2>/dev/null || true
+docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f docker-compose.yml up --build
 ```
 
-- PostgreSQL + Redis 由 docker-compose 管理
+- PostgreSQL 與 Redis 分別由 `docker-compose.postgres.yml` / `docker-compose.redis.yml` 管理；主 `docker-compose.yml` 負責 backend、python-worker、python-server，並假設 `trading-net` / `proxy_net` 已存在
 - Go binary 內嵌前端靜態檔案（單一執行檔）
 - Python worker 與 HTTP server 各自獨立 container

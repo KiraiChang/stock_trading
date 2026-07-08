@@ -210,7 +210,7 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 手動觸發訊號評估。完全基於 `candles`（OHLCV）計算——內部會先呼叫指標計算
 （同 `/indicators/:symbol/compute`），再做支撐/壓力/趨勢判斷與
 `CheckBreakout`——不需要即時行情、不要求該股票在監控清單裡，適合**收盤後**
-立刻確認某支股票當天有沒有觸發訊號，不用等 `daily_close` 排程（14:00 才對
+立刻確認某支股票當天有沒有觸發訊號，不用等 `daily_close` 排程（15:00 才對
 監控清單跑）。
 
 **Query Parameters：** `timeframe`（預設 `1d`）
@@ -338,9 +338,15 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
   "symbols": ["2330", "2454"],
   "timeframe": "1d",
   "start_date": "2023-01-01",
-  "end_date": "2024-12-31"
+  "end_date": "2024-12-31",
+  "use_chip_filter": false,
+  "chip_min_score": 0
 }
 ```
+
+`use_chip_filter` / `chip_min_score` 為選填。啟用後只對模組化策略生效，Python 端會用
+`chip_scores.total_score` 逐 bar 過濾進場訊號；缺少該日籌碼資料時視為中性 `0`。
+legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不中斷回測。
 
 `strategy` 可用值：
 
@@ -365,6 +371,8 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
     "timeframe": "1d",
     "start_date": "2023-01-01",
     "end_date": "2024-12-31",
+    "use_chip_filter": false,
+    "chip_min_score": 0,
     "status": "pending",
     "trigger": "manual",
     "created_at": "2026-01-15T10:30:00+08:00"
@@ -817,6 +825,131 @@ sr-zone-scoring.md「十四」。
 ### DELETE `/sr-zones/:id`
 
 刪除一筆分析紀錄（連同其 zones 一併刪除）。
+
+---
+
+## Chip API
+
+籌碼分析 API 使用已同步到 DB 的三大法人、融資融券、券商分點與 `chip_scores`。
+資料同步由 `POST /chips/sync` 建立非同步 job；收盤後 `daily_close` 也會另外跑
+`chip_daily_sync`，其紀錄在 `job_runs`，不是 `chip_sync_jobs`。
+
+### GET `/chips/:symbol/summary`
+
+查詢單一股票籌碼摘要。`date` 省略時回傳最新一筆 `chip_scores`；若指定日期但查無
+分數，回 `404`。
+
+**Query Parameters：** `date`（選填，`YYYY-MM-DD`）
+
+**Response：**
+```json
+{
+  "symbol": "2330",
+  "date": "2026-07-03",
+  "signal": "BULLISH",
+  "totalScore": 72.5,
+  "reason": ["外資連續買超 4 日"],
+  "institutional": {
+    "foreignNetBuy": 12000,
+    "investmentTrustNetBuy": 3000,
+    "dealerNetBuy": -500,
+    "consecutiveDays": 4
+  },
+  "margin": {
+    "marginBalance": 23000,
+    "marginChange": -1200,
+    "shortBalance": 4200,
+    "shortChange": 800
+  },
+  "broker": {
+    "topNetBuy": 9000,
+    "concentration": 0.18
+  }
+}
+```
+
+`institutional` / `margin` / `broker` 會各自獨立查詢；某區塊查無資料時省略該區塊，
+不會讓整個 summary 失敗。
+
+### GET `/chips/:symbol/scores`
+
+查詢歷史籌碼分數。
+
+**Query Parameters：** `from`、`to`（必填，`YYYY-MM-DD`）
+
+**Response：**
+```json
+{ "symbol": "2330", "scores": [ { "trade_date": "2026-07-03T00:00:00+08:00", "total_score": 72.5, "...": "..." } ] }
+```
+
+### GET `/chips/:symbol/brokers`
+
+查詢券商分點買賣超排行。
+
+**Query Parameters：**
+
+| 參數 | 預設 | 說明 |
+|------|------|------|
+| date | 必填 | `YYYY-MM-DD` |
+| limit | `20` | 1～200，超出範圍會退回 20 |
+
+**Response：**
+```json
+{ "symbol": "2330", "date": "2026-07-03", "topBuy": [ { "...": "..." } ], "topSell": [ { "...": "..." } ] }
+```
+
+### POST `/chips/sync`
+
+手動同步籌碼資料，立即建立 `chip_sync_jobs` 紀錄並背景執行。
+
+**Request Body：**
+```json
+{
+  "mode": "manual",
+  "symbols": ["2330", "2317"],
+  "from": "2026-07-01",
+  "to": "2026-07-03",
+  "dataTypes": ["institutional", "margin", "broker", "scores"],
+  "force": false
+}
+```
+
+`mode` 可為 `manual` 或 `backfill`，省略時為 `manual`。`manual` 未指定日期時只同步
+今天；`backfill` 未指定 `from` 時會使用 `chip.sync.history_trading_days` 往回推。
+`force` 目前會記錄在 job，但 upsert 本身已具冪等性，尚未實作跳過既有資料的特殊邏輯。
+
+**Response（202 Accepted）：**
+```json
+{
+  "job": {
+    "job_id": "chip_20260708_120000_000",
+    "mode": "manual",
+    "status": "pending",
+    "symbols_total": 2,
+    "symbols_done": 0,
+    "symbols_failed": 0
+  }
+}
+```
+
+### GET `/chips/sync/:job_id`
+
+查詢 manual/backfill 籌碼同步任務。
+
+**Response：**
+```json
+{
+  "job": {
+    "job_id": "chip_20260708_120000_000",
+    "status": "done",
+    "symbols_done": 2,
+    "symbols_failed": 0,
+    "failures": []
+  }
+}
+```
+
+`status` 可為 `pending`、`running`、`done`、`partial`、`failed`。找不到 job 回 `404`。
 
 ---
 

@@ -15,4 +15,24 @@
 
 ---
 
-（目前沒有待處理項目）
+### I-001：Docker Compose SR Scoring 模型路徑仍指向 v2
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 中 |
+| 分類 | Docker / Python / SR Zone |
+| 建立日期 | 2026-07-08 |
+
+`python/backtest/modular/sr_scoring/model.py` 的 `MODEL_VERSION` 目前是 `v3`，且
+`python/config.yaml`、`docs/development-guide.md`、`docs/api-reference.md` 都已指向
+`models/sr_scoring_v3.joblib`。但 `docker-compose.yml` 的 `python-worker` 與
+`python-server` 仍設定：
+
+```yaml
+SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v2.joblib
+```
+
+這會讓 Docker 環境載入與目前 feature schema 不相容的舊模型路徑，可能在
+`/sr-zones` 預測時因特徵數不一致而失敗。建議後續將 compose 環境變數改為
+`/app/models/sr_scoring_v3.joblib`，並確認部署目錄已有 v3 模型或重新訓練一次。

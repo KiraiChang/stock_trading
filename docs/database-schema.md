@@ -53,6 +53,8 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | vol_ratio | 觸發時的量比 |
 | resistance / support | 觸發的阻力 / 支撐價位 |
 | trend | 當時趨勢狀態（`BULLISH`, `BEARISH`, `SIDEWAYS`） |
+| strength | 訊號強度，預設 1.0；有籌碼資料時會依 `chip_scores.signal` 上修或下修 |
+| chip_signal | 評估當下使用的籌碼訊號；空值代表查無籌碼資料 |
 
 ---
 
@@ -95,8 +97,26 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | symbols | JSON 陣列，e.g. `["2330","2454"]`（PostgreSQL 為 JSONB） |
 | timeframe | K 棒週期 |
 | start_date / end_date | 回測區間 |
-| status | `pending` → `running` → `done` / `error` |
+| status | `pending` → `running` → `done` / `failed` |
 | trigger | `manual`（API 觸發） |
+| use_chip_filter | 是否在模組化回測中用 `chip_scores.total_score` 過濾進場 |
+| chip_min_score | 籌碼 filter 門檻（-100～100）；缺資料視為 0 |
+| started_at / finished_at | 執行時間戳 |
+
+---
+
+## job_runs
+
+排程執行紀錄，由 Go scheduler 寫入。`pre_market`、`intraday`、`daily_close`、
+`sr_zone_verify`、`chip_daily_sync` 都使用這張表；manual/backfill 籌碼同步另用
+`chip_sync_jobs`。
+
+| 欄位 | 說明 |
+|------|------|
+| job_name | 排程名稱 |
+| status | `running` / `success` / `partial` / `failed` / `skipped` |
+| symbols_total / symbols_failed | 本輪處理與失敗數 |
+| error | 最後一筆錯誤或摘要訊息 |
 | started_at / finished_at | 執行時間戳 |
 
 ---
@@ -194,6 +214,10 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR；`NULL` 條件同 global_expected_value |
 | model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v3"`）；Python 端萬一沒回傳則寫 `"unknown"` |
 | model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
+| period_summaries | JSON：短/中/長期摘要卡的支撐/壓力摘要 |
+| analysis_tips | JSON：前端顯示的白話提示陣列 |
+| chip_summary | JSON：整檔層級籌碼拆解；查無資料時為 `{"missing": true, ...}`，舊資料可能為 JSON `null` |
+| decision_summary | JSON：Market Regime、唯一 Action、Primary Zone、風險提示等前端預設閱讀層 |
 
 **Index：** `INDEX(symbol, created_at DESC)`。
 
@@ -256,5 +280,88 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | error | 失敗原因；只有 `status=failed` 才有值 |
 | started_at / finished_at | 開始/結束時間；`status=pending` 時兩者皆為 `NULL` |
 | created_at | 任務建立時間（等同呼叫 `POST /sr-zones/train` 的時間） |
+
+**Index：** `INDEX(created_at DESC)`。
+
+---
+
+## institutional_trades
+
+三大法人買賣超 raw table，由 `chip.Syncer` upsert。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / trade_date | 股票代號與交易日，組成唯一鍵 |
+| foreign_net_buy | 外資買賣超股數 |
+| investment_trust_net_buy | 投信買賣超股數 |
+| dealer_net_buy | 自營商買賣超股數 |
+| total_net_buy | 三大法人合計買賣超股數 |
+| created_at / updated_at | 建立與更新時間 |
+
+---
+
+## margin_trades
+
+融資融券 raw table，由 `chip.Syncer` upsert。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / trade_date | 股票代號與交易日，組成唯一鍵 |
+| margin_balance / margin_change | 融資餘額與增減 |
+| short_balance / short_change | 融券餘額與增減 |
+| margin_usage_rate / short_usage_rate | 資券使用率，可為 `NULL` |
+| created_at / updated_at | 建立與更新時間 |
+
+---
+
+## broker_trades
+
+券商分點買賣超 raw table，由 `chip.Syncer` upsert。FinMind 目前不支援券商分點時，
+`broker_score` 會 fallback 為中性，不阻止其他籌碼分數計算。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / trade_date / broker_name / branch_name | 唯一鍵 |
+| buy_volume / sell_volume / net_buy | 分點買進、賣出與買賣超股數 |
+| created_at | 建立時間 |
+
+---
+
+## chip_scores
+
+每日籌碼分析結果快照，供 API、訊號、回測與 SR Zone v3 模型讀取。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol / trade_date | 股票代號與交易日，組成唯一鍵 |
+| institutional_score | 法人分數（-100～100） |
+| margin_score | 融資融券分數（-100～100） |
+| broker_score | 券商分點分數（-100～100） |
+| concentration_score | 集中度分數（0～100） |
+| total_score | 籌碼總分（-100～100） |
+| signal | `BULLISH` / `BEARISH` / `NEUTRAL` / `RISK` |
+| reason | JSON：產生此分數的人類可讀原因 |
+| created_at / updated_at | 建立與更新時間 |
+
+---
+
+## chip_sync_jobs
+
+手動或 backfill 籌碼同步任務紀錄。日結同步不寫這張表，而是寫
+`job_runs.job_name=chip_daily_sync`。
+
+| 欄位 | 說明 |
+|------|------|
+| job_id | 任務識別碼（`chip_<時間戳>` 格式） |
+| mode | `manual` / `backfill` |
+| symbols | JSON 陣列字串 |
+| data_types | JSON 陣列字串；空陣列代表使用同步器預設資料類型 |
+| from_date / to_date | 同步日期區間 |
+| force | API 接受並保存；目前 upsert 已冪等，尚未實作跳過既有資料的特殊行為 |
+| status | `pending` / `running` / `done` / `partial` / `failed` |
+| symbols_total / symbols_done / symbols_failed | 任務進度 |
+| failures | JSON：逐 symbol 失敗原因 |
+| error | 任務層級錯誤摘要 |
+| started_at / finished_at / created_at | 任務時間戳 |
 
 **Index：** `INDEX(created_at DESC)`。

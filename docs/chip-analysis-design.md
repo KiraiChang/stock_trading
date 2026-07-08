@@ -1,6 +1,11 @@
-# 籌碼分析設計文件
+# 籌碼分析設計與目前實作
 
-本文件提供 Claude Code 開發籌碼分析功能時使用。籌碼分析用於補強既有技術分析與回測系統，協助判斷法人、融資融券、主力與券商分點等資金行為，不執行自動交易。
+本文件記錄籌碼分析的設計與目前實作狀態。籌碼分析用於補強既有技術分析與回測系統，協助判斷法人、融資融券、主力與券商分點等資金行為，不執行自動交易。
+
+目前 Phase 1 已落地：Go backend 已有 `internal/chip`、chip repositories、
+`handler.Chip`、`chip.Syncer`、`chip_sync_jobs`、`daily_close` 後的
+`chip_daily_sync`，前端頁面為 `frontend/src/routes/Chips.svelte`。Phase 2 項目仍追蹤在
+[todo.md](./todo.md)。
 
 ## 1. 目標與範圍
 
@@ -10,9 +15,9 @@
 - 將籌碼狀態轉換成可被前端展示、訊號引擎引用、回測模組驗證的結構化資料。
 - 與既有 K 線、技術指標、支撐壓力與回測結果整合，提供多維度交易輔助。
 
-### 初期範圍
+### 目前範圍
 
-Phase 1 優先支援：
+Phase 1 已支援：
 
 - 三大法人買賣超：外資、投信、自營商。
 - 融資融券：融資餘額、融券餘額、增減、使用率。
@@ -59,7 +64,9 @@ Phase 2 再評估：
 
 ### 開發建議
 
-Phase 1 建議先實作 `FinMindChipDataSource` 或目前專案最容易接上的 provider，並保留 `TWSEChipDataSource` / `TPExChipDataSource` 的 interface 與測試資料。等資料流程、schema、API、前端畫面穩定後，再補官方 parser 與更多來源。
+目前 Phase 1 使用既有 FinMind client 實作籌碼同步。三大法人與融資融券可同步；
+券商分點在 FinMind 不支援時會回傳 unsupported，`broker_score` fallback 為中性，不阻止
+法人與融資融券分數計算。官方 TWSE / TPEx parser 與更多來源仍屬後續擴充。
 
 資料來源需抽象成 interface，避免分析邏輯綁定單一 provider。
 
@@ -73,14 +80,14 @@ type ChipDataSource interface {
 
 ## 3. 後端模組設計
 
-建議新增或擴充以下 Go backend 模組：
+目前 Go backend 已包含以下模組：
 
 ```text
 backend/internal/chip/          # 籌碼分析核心邏輯
 backend/internal/market/        # 資料來源 fetcher，可放 provider 實作
 backend/internal/store/         # 籌碼資料 repository
-backend/internal/api/handler/   # 籌碼 API handler
-backend/internal/scheduler/     # 每日籌碼資料同步 job
+backend/internal/api/handler/chip.go   # 籌碼 API handler
+backend/internal/scheduler/            # daily_close 後執行 chip_daily_sync
 ```
 
 核心職責：
@@ -239,12 +246,12 @@ total_score =
 - `NEUTRAL`: 無明顯方向。
 - `RISK`: 籌碼過熱或融資風險升高。
 
-## 6. API 設計
+## 6. API 設計與目前端點
 
 ### 查詢單一股票籌碼摘要
 
 ```http
-GET /api/chips/:symbol/summary?date=2026-07-03
+GET /api/v1/chips/:symbol/summary?date=2026-07-03
 ```
 
 回應：
@@ -282,37 +289,45 @@ GET /api/chips/:symbol/summary?date=2026-07-03
 ### 查詢歷史籌碼分數
 
 ```http
-GET /api/chips/:symbol/scores?from=2026-01-01&to=2026-07-03
+GET /api/v1/chips/:symbol/scores?from=2026-01-01&to=2026-07-03
 ```
 
 ### 查詢券商分點排行
 
 ```http
-GET /api/chips/:symbol/brokers?date=2026-07-03&limit=20
+GET /api/v1/chips/:symbol/brokers?date=2026-07-03&limit=20
 ```
 
 ### 手動同步籌碼資料
 
 ```http
-POST /api/chips/sync
+POST /api/v1/chips/sync
 ```
 
 Payload：
 
 ```json
 {
+  "mode": "manual",
   "symbols": ["2330", "2317"],
   "from": "2026-07-01",
-  "to": "2026-07-03"
+  "to": "2026-07-03",
+  "dataTypes": ["institutional", "margin", "broker", "scores"],
+  "force": false
 }
 ```
 
+這支端點會立即建立 `chip_sync_jobs` 紀錄並背景執行，回傳 `{ "job": ... }`。
+用 `GET /api/v1/chips/sync/:job_id` 查詢 manual/backfill 同步進度。`mode` 省略時為
+`manual`；`mode=backfill` 且未指定 `from` 時使用 `chip.sync.history_trading_days`
+往回推。`force` 目前只保存，upsert 本身已具冪等性。
+
 ## 7. 前端設計
 
-建議新增頁面：
+目前前端頁面與元件：
 
 ```text
-frontend/src/routes/ChipAnalysis.svelte
+frontend/src/routes/Chips.svelte
 frontend/src/lib/api/chips.ts
 frontend/src/components/chip/ChipScorePanel.svelte
 frontend/src/components/chip/InstitutionalTrend.svelte
@@ -338,7 +353,7 @@ UI 原則：
 
 ## 8. 排程與資料同步
 
-籌碼資料同步可以由既有 scheduler 統一協調，但不應與日 K、KD 或其他技術指標 job 綁成同一個不可分割流程。日 K 與 KD 通常可在收盤後較快完成，籌碼資料可能延後發布；籌碼 job 失敗時不應回滾 K 線或技術指標結果。
+籌碼資料同步已由既有 scheduler 統一協調，但不與日 K 或技術指標 job 綁成同一個不可分割流程。日 K 與技術指標通常可在收盤後較快完成，籌碼資料可能延後發布；籌碼 job 失敗時不會回滾 K 線或技術指標結果。
 
 ### 觸發模式
 
@@ -353,9 +368,9 @@ UI 原則：
 ```text
 Sync daily candles / volume
   ↓
-Calculate technical indicators, including KD if enabled
+Calculate technical indicators and evaluate signals
   ↓
-Wait or retry until chip sources are available
+Run SR zone verification
   ↓
 Sync raw chip data
   ↓
@@ -364,7 +379,9 @@ Calculate chip_scores
 Refresh signal strength / UI cache
 ```
 
-籌碼 job 的失敗狀態需獨立記錄，例如 `chip_sync_jobs` 或既有 job run table。K 線與 KD 已完成時，籌碼同步失敗只標記籌碼 job failed，後續可手動或排程重跑。
+日結籌碼 job 的失敗狀態獨立記錄在 `job_runs`（`job_name=chip_daily_sync`）。manual/backfill
+同步則記錄在 `chip_sync_jobs`。K 線與訊號已完成時，籌碼同步失敗只標記籌碼 job
+failed，後續可用 `POST /api/v1/chips/sync` 手動重跑。
 
 手動同步參數建議：
 
@@ -480,10 +497,10 @@ Python 測試：
 2. 實作籌碼資料 source interface 與一個 provider。
 3. 實作 chip score 計算邏輯與單元測試。
 4. 建立 API handler。
-5. 建立排程同步 job。
-6. 新增前端籌碼分析頁面與 API client。
-7. 將籌碼分數接入訊號引擎與回測 filter。
-8. 補齊文件與開發指南。
+5. 建立排程同步 job。（已完成，`daily_close` 後執行 `chip_daily_sync`）
+6. 新增前端籌碼分析頁面與 API client。（已完成，`Chips.svelte` / `lib/api/chips.ts`）
+7. 將籌碼分數接入訊號引擎與回測 filter。（已完成，訊號強度與模組化回測 filter）
+8. 補齊文件與開發指南。（持續維護）
 
 ## 13. 非目標
 

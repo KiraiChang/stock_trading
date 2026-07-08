@@ -385,15 +385,16 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 ## holding_analyses
 
 每次按下「分析」後保存的持股操作建議快照。這張表會複製當下的 `shares` /
-`cost_price`，並引用同次建立的 `stock_sr_zone_analyses.id`，讓歷史結果可回看且不受
-後續持股設定或模型重訓影響。
+`cost_price`，並引用使用於該次判斷的 `stock_sr_zone_analyses.id`。若同一
+symbol/timeframe 已有 SR Zone 快照，持股分析會重用最新快照；只有找不到既有快照時才新建
+SR Zone 快照。
 
 | 欄位 | 說明 |
 |------|------|
 | holding_id | 對應持股設定 ID；刪除持股設定不會改寫既有快照內容 |
 | symbol / shares / cost_price | 分析當下的持股資料快照 |
 | analyzed_at / current_price | SR Zone 分析使用的最後一根 K 棒時間與收盤價 |
-| sr_zone_analysis_id | 同次產生的 SR Zone 快照 ID |
+| sr_zone_analysis_id | 該次持股分析引用的 SR Zone 快照 ID（可能是既有快照） |
 | action / action_label | `HOLD` / `STOP_LOSS` / `TAKE_PROFIT` / `ADD_ON_BREAKOUT` / `REDUCE` 與中文標籤 |
 | stop_loss_price / stop_loss_amount | 停損參考價與依持有成本估算的停損金額 |
 | take_profit_price / take_profit_amount | 停利參考價與依持有成本估算的停利金額 |

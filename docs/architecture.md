@@ -223,15 +223,15 @@ Signal Engine、Backtest、SR Zone Scoring 與前端 Chips 頁面讀取使用
 ```
 使用者維護 holdings（symbol / shares / cost_price）
     ↓ POST /holdings/:id/analyze
-Go 呼叫 Python /sr-zones，建立一筆新的 stock_sr_zone_analyses 快照
+Go 先查同 symbol/timeframe 既有 stock_sr_zone_analyses；有則重用最新快照，沒有才呼叫 Python /sr-zones 建立
     ↓
 Go 依最新收盤價、持有成本、支撐/壓力 zone 產生操作建議
     ↓
 寫入 holding_analyses（複製當下股數/成本，引用 sr_zone_analysis_id）
 ```
 
-每次分析都新增一筆 `holding_analyses`，不覆蓋舊結果；後續修改持股股數或成本，也不會
-改變歷史分析快照。
+每次分析都新增一筆 `holding_analyses`，不覆蓋舊結果；`sr_zone_analysis_id` 可能引用既有
+SR Zone 快照。後續修改持股股數或成本，也不會改變歷史分析快照。
 
 ### Nullable 欄位的 JSON 序列化
 

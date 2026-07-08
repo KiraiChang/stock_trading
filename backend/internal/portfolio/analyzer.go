@@ -18,8 +18,9 @@ const (
 	ActionReduce        = "REDUCE"
 	ActionAddOnBreakout = "ADD_ON_BREAKOUT"
 
-	defaultTimeframe  = "1d"
-	defaultAddOnRatio = 0.25
+	defaultTimeframe        = "1d"
+	defaultAddOnRatio       = 0.25
+	existingSRSnapshotLimit = 200
 )
 
 type Analyzer struct {
@@ -63,6 +64,12 @@ func (a *Analyzer) Analyze(ctx context.Context, holdingID uint64, opts AnalyzeOp
 		opts.Limit = a.defaultLimit
 	}
 
+	if savedSR, savedZones, ok, err := a.findExistingSRSnapshot(ctx, holding.Symbol, opts.Timeframe); err != nil {
+		return nil, err
+	} else if ok {
+		return a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
+	}
+
 	result, err := a.client.ScoreZones(ctx, holding.Symbol, opts.Timeframe, opts.Limit)
 	if err != nil {
 		return nil, err
@@ -84,6 +91,29 @@ func (a *Analyzer) Analyze(ctx context.Context, holdingID uint64, opts AnalyzeOp
 		return nil, fmt.Errorf("get saved sr zones: %w", err)
 	}
 
+	return a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
+}
+
+func (a *Analyzer) findExistingSRSnapshot(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, []store.SRZone, bool, error) {
+	analyses, err := a.srZoneRepo.List(ctx, symbol, existingSRSnapshotLimit)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("list existing sr zone analyses: %w", err)
+	}
+	for i := range analyses {
+		if analyses[i].Timeframe != timeframe {
+			continue
+		}
+		savedSR := analyses[i]
+		zones, err := a.srZoneRepo.GetZones(ctx, savedSR.ID)
+		if err != nil {
+			return nil, nil, false, fmt.Errorf("get existing sr zones: %w", err)
+		}
+		return &savedSR, zones, true, nil
+	}
+	return nil, nil, false, nil
+}
+
+func (a *Analyzer) createHoldingAnalysis(ctx context.Context, holding *store.Holding, savedSR *store.SRZoneAnalysis, savedZones []store.SRZone) (*AnalyzeResult, error) {
 	analysisSnapshot, err := a.buildSnapshot(holding, savedSR, savedZones)
 	if err != nil {
 		return nil, err

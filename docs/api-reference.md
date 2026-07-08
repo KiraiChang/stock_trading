@@ -955,9 +955,10 @@ sr-zone-scoring.md「十四」。
 
 ## Holdings API
 
-持股操作分析以目前持股設定為輸入，每次分析都會建立一筆新的 SR Zone 快照與一筆
-`holding_analyses` 快照。歷史分析保存當下的股數、持有成本、收盤價與操作建議，不會被
-後續修改持股設定或重新訓練模型覆蓋。
+持股操作分析以目前持股設定為輸入，每次分析都會建立一筆新的 `holding_analyses`
+快照。若同一 symbol/timeframe 已有 SR Zone 快照，會重用最新一筆；只有找不到既有快照時，
+才會建立新的 SR Zone 快照。歷史分析保存當下的股數、持有成本、收盤價與操作建議，不會被
+後續修改持股設定覆蓋。
 
 ### GET `/holdings`
 
@@ -999,8 +1000,9 @@ sr-zone-scoring.md「十四」。
 
 ### POST `/holdings/:id/analyze`
 
-用目前持股設定觸發一次操作分析並保存快照。內部會呼叫 Python `/sr-zones` 產生新的
-SR Zone 分析，保存後以 `sr_zone_analysis_id` 引用該次 SR 快照。
+用目前持股設定觸發一次操作分析並保存快照。後端會先查同一 symbol/timeframe 的最新 SR Zone
+快照；若已存在就直接引用該快照，不再呼叫 Python `/sr-zones` 產生新的 SR Zone 分析。只有
+找不到既有快照時，才會建立新的 SR Zone 分析並以 `sr_zone_analysis_id` 引用。
 
 **Request Body：**
 ```json

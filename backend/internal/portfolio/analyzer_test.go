@@ -1,6 +1,7 @@
 package portfolio
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"testing"
@@ -127,6 +128,49 @@ func TestBuildSnapshotUsesResolvedRole(t *testing.T) {
 	assertNullFloat(t, snapshot.TakeProfitPrice, 620)
 }
 
+func TestAnalyzeReusesExistingSRZoneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	holdingRepo := &fakeHoldingRepo{
+		holding: &store.Holding{ID: 1, Symbol: "2330", Shares: 100, CostPrice: 500},
+		saved:   make(map[uint64]*store.HoldingAnalysis),
+	}
+	srRepo := &fakeSRZoneRepo{
+		analyses: []store.SRZoneAnalysis{
+			{ID: 77, Symbol: "2330", Timeframe: "5m", CurrentPrice: 590},
+			{ID: 88, Symbol: "2330", Timeframe: "1d", AnalyzedAt: time.Date(2026, 7, 1, 13, 30, 0, 0, time.UTC), CurrentPrice: 600, DecisionSummary: store.RawJSON(`{}`)},
+		},
+		zones: map[uint64][]store.SRZone{
+			88: {
+				testZone("SUPPORT", 580, 585, 78, "PENDING"),
+				testZone("RESISTANCE", 620, 630, 70, "PENDING"),
+			},
+		},
+	}
+	analyzer := &Analyzer{
+		holdings:     holdingRepo,
+		srZoneRepo:   srRepo,
+		addOnRatio:   defaultAddOnRatio,
+		defaultLimit: 250,
+	}
+
+	result, err := analyzer.Analyze(ctx, 1, AnalyzeOptions{Timeframe: "1d"})
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+	if srRepo.createCalls != 0 {
+		t.Fatalf("expected existing SR snapshot to be reused, got Create calls=%d", srRepo.createCalls)
+	}
+	if result.SR.ID != 88 || result.Analysis.SRZoneAnalysisID.Int64 != 88 {
+		t.Fatalf("expected holding analysis to reference existing SR id=88, got result=%+v analysis=%+v", result.SR, result.Analysis)
+	}
+	if len(result.Zones) != 2 {
+		t.Fatalf("expected existing zones to be returned, got %+v", result.Zones)
+	}
+	if len(holdingRepo.saved) != 1 {
+		t.Fatalf("expected one holding analysis snapshot, got %+v", holdingRepo.saved)
+	}
+}
+
 func testHolding() *store.Holding {
 	return &store.Holding{ID: 1, Symbol: "2330", Shares: 100, CostPrice: 500}
 }
@@ -179,4 +223,110 @@ func assertDetailAction(t *testing.T, raw store.RawJSON, want string) {
 
 func sqlNullString(v string) sql.NullString {
 	return sql.NullString{String: v, Valid: true}
+}
+
+type fakeHoldingRepo struct {
+	holding *store.Holding
+	saved   map[uint64]*store.HoldingAnalysis
+	nextID  uint64
+}
+
+func (r *fakeHoldingRepo) Create(ctx context.Context, h *store.Holding) (uint64, error) {
+	return 0, nil
+}
+
+func (r *fakeHoldingRepo) Update(ctx context.Context, h *store.Holding) error {
+	return nil
+}
+
+func (r *fakeHoldingRepo) Delete(ctx context.Context, id uint64) error {
+	return nil
+}
+
+func (r *fakeHoldingRepo) Get(ctx context.Context, id uint64) (*store.Holding, error) {
+	if r.holding == nil || r.holding.ID != id {
+		return nil, sql.ErrNoRows
+	}
+	h := *r.holding
+	return &h, nil
+}
+
+func (r *fakeHoldingRepo) List(ctx context.Context) ([]store.Holding, error) {
+	return nil, nil
+}
+
+func (r *fakeHoldingRepo) CreateAnalysis(ctx context.Context, a *store.HoldingAnalysis) (uint64, error) {
+	r.nextID++
+	saved := *a
+	saved.ID = r.nextID
+	r.saved[saved.ID] = &saved
+	return saved.ID, nil
+}
+
+func (r *fakeHoldingRepo) GetAnalysis(ctx context.Context, id uint64) (*store.HoldingAnalysis, error) {
+	a, ok := r.saved[id]
+	if !ok {
+		return nil, sql.ErrNoRows
+	}
+	saved := *a
+	return &saved, nil
+}
+
+func (r *fakeHoldingRepo) ListAnalyses(ctx context.Context, holdingID uint64, limit int) ([]store.HoldingAnalysis, error) {
+	return nil, nil
+}
+
+func (r *fakeHoldingRepo) DeleteAnalysis(ctx context.Context, id uint64) error {
+	delete(r.saved, id)
+	return nil
+}
+
+type fakeSRZoneRepo struct {
+	analyses    []store.SRZoneAnalysis
+	zones       map[uint64][]store.SRZone
+	createCalls int
+}
+
+func (r *fakeSRZoneRepo) Create(ctx context.Context, a *store.SRZoneAnalysis, zones []store.SRZone) (uint64, error) {
+	r.createCalls++
+	return 999, nil
+}
+
+func (r *fakeSRZoneRepo) Get(ctx context.Context, id uint64) (*store.SRZoneAnalysis, error) {
+	for i := range r.analyses {
+		if r.analyses[i].ID == id {
+			a := r.analyses[i]
+			return &a, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *fakeSRZoneRepo) List(ctx context.Context, symbol string, limit int) ([]store.SRZoneAnalysis, error) {
+	rows := make([]store.SRZoneAnalysis, 0, len(r.analyses))
+	for _, a := range r.analyses {
+		if a.Symbol == symbol {
+			rows = append(rows, a)
+		}
+	}
+	if limit > 0 && len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+func (r *fakeSRZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]store.SRZone, error) {
+	zones, ok := r.zones[analysisID]
+	if !ok {
+		return nil, sql.ErrNoRows
+	}
+	return append([]store.SRZone(nil), zones...), nil
+}
+
+func (r *fakeSRZoneRepo) UpdateZoneStatus(ctx context.Context, zoneID uint64, status string, brokenAt *time.Time, brokenPrice *float64, resolvedRole string) error {
+	return nil
+}
+
+func (r *fakeSRZoneRepo) Delete(ctx context.Context, id uint64) error {
+	return nil
 }

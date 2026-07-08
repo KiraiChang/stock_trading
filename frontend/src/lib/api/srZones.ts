@@ -150,6 +150,71 @@ export interface SRPeriodSummary {
   support_note?: string
   resistance_note?: string
 }
+
+export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
+export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
+export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY'
+
+export interface SRMarketRegime {
+  primary: SRMarketRegimePrimary
+  flags: SRMarketRegimeFlag[]
+  label: string
+  reasons: string[]
+}
+
+export interface SRDecisionContextItem {
+  key: string
+  label: string
+  value: string
+  effect?: string | null
+}
+
+export interface SRDecisionZoneSummary {
+  price_low: number
+  price_high: number
+  label: string
+  role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+  tier: ZoneTier
+  tier_label: string
+  trading_score: number
+  confidence: number
+  confidence_level: ConfidenceLevel
+  expected_value: number | null
+  risk_reward_ratio: number | null
+  distance_pct: number
+  distance_label: string
+  recent_validation: RecentValidation
+  volume_confirmation: VolumeConfirmation | null
+  confluence_count: number
+  reason: string
+}
+
+export interface SRConfidenceFactor {
+  key: string
+  value: number | null
+  label: string
+  description?: string
+  effect?: string
+}
+
+export interface SRConfidenceExplanation {
+  value: number | null
+  level: ConfidenceLevel | null
+  label: string
+  formula_factors: SRConfidenceFactor[]
+  context_factors: SRConfidenceFactor[]
+}
+
+export interface SRDecisionSummary {
+  market_regime: SRMarketRegime
+  action: SRDecisionAction
+  action_label: string
+  primary_zone: SRDecisionZoneSummary | null
+  market_context: SRDecisionContextItem[]
+  confidence_explanation: SRConfidenceExplanation
+  risk_notes: string[]
+  secondary_zones: SRDecisionZoneSummary[]
+}
 export interface SRZoneAnalysis {
   id: number
   symbol: string
@@ -183,6 +248,7 @@ export interface SRZoneAnalysis {
   // 整檔層級籌碼拆解，供共用籌碼面板顯示（每張支撐/壓力卡的角色化籌碼一行在
   // period_summaries[].support/resistance.chip）。舊分析沒有這欄時為 null。
   chip_summary?: SRChipSummary | null
+  decision_summary?: SRDecisionSummary | null
   created_at: string
 }
 

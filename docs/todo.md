@@ -355,11 +355,12 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 已完成 |
 | 優先度 | 高 |
 | 分類 | Python / SR Zone / Frontend / UX |
 | 建立日期 | 2026-07-07 |
 | 來源 | SR Zone 頁面決策閱讀優化需求 |
+| 完成日期 | 2026-07-08 |
 
 目前 SR Zone 已能輸出 `global_*`、`period_summaries`、`analysis_tips`、逐 zone 的機率、EV/RR、`trading_score_breakdown` 與籌碼拆解；但前端閱讀上仍偏向「把多個 zone 與多個理由攤給使用者自己拼結論」。後續應新增更高層的決策摘要模型，讓使用者先看到共同前提、唯一行動與主交易區，再展開看細節。
 
@@ -372,6 +373,14 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 - **提升 confidence 透明度**：預設顯示類似 `79%（高）` 的人可讀格式，並允許展開查看貢獻因子。至少應揭露目前既有 confidence 三因子：樣本數因子、近期性因子、穩定度因子；若後續把量能、共振、資料完整度或籌碼資料缺漏納入信心說明，也要清楚標註哪些是 confidence 公式本身、哪些只是輔助解釋。
 
 實作邊界：這不是要刪除既有 `trading_score`、`period_summaries`、`analysis_tips`、逐 zone 詳細數字或 score breakdown；而是新增一層更高層的「決策摘要」給前端預設閱讀。既有 EV/RR、機率、觸碰統計、模型 metadata、籌碼拆解仍應保留在進階區，供使用者驗證結論來源。
+
+設計規格已補到 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四、決策摘要層（T-019）」。本次實作已拆成：
+
+- Python：新增 `decision_summary` builder，包含 `market_regime`、唯一 `action`、`primary_zone`、`market_context`、`confidence_explanation`、`risk_notes`、`secondary_zones`。
+- Go / DB：決定 `decision_summary` 是否與 `period_summaries` 一樣以 JSON passthrough 保存，並同步 repository、handler、API response。
+- TypeScript：補 `SRDecisionSummary` 型別，明確區分公式內 confidence 因子與輔助 context 因子。
+- Svelte：頁面預設改為先顯示 Market Regime、唯一 Action、Primary Zone 與 Market Context；完整 zones 清單改為次要或展開區。
+- 測試與文件：新增 Python scoring tests、Go passthrough tests、前端欄位顯示檢查，並更新 `docs/api-reference.md` 範例。
 
 ---
 ## 已完成封存

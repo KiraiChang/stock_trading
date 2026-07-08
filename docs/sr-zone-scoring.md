@@ -485,6 +485,110 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 
 ---
 
+## 十四、決策摘要層（T-019）
+
+`decision_summary` 是更高層輸出，目標是讓前端先呈現「目前盤勢前提、唯一操作結論、主交易區、共用背景與風險」，再讓使用者展開查看既有的 zone 細節。它不取代既有 `global_*`、`period_summaries`、`analysis_tips`、`zones`、EV/RR、機率、score breakdown 或籌碼拆解，而是把這些既有資料整理成單一決策入口。
+
+`score_symbol()` top-level response 會增加：
+
+```json
+{
+  "decision_summary": {
+    "market_regime": {
+      "primary": "TREND_UP",
+      "flags": ["HIGH_VOLATILITY"],
+      "label": "多頭趨勢但波動偏高",
+      "reasons": ["整體趨勢向上", "波動高於近期常態"]
+    },
+    "action": "BuySmall",
+    "action_label": "小量試單",
+    "primary_zone": { "zone_id": 16, "role": "SUPPORT", "reason": "高信心支撐且風險報酬仍可接受" },
+    "market_context": [],
+    "confidence_explanation": {},
+    "risk_notes": [],
+    "secondary_zones": []
+  }
+}
+```
+
+### Market Regime
+
+Market Regime 是所有解讀的最高優先共同前提，先用股票層級與摘要層資料判斷「這份分析應該用什麼市場狀態閱讀」，再決定 action 與 zone 文案語氣。採「一個 primary regime + 多個 flags」：
+
+| 類別 | 用途 | 可能輸入 |
+|---|---|---|
+| `TREND_UP` | 偏多趨勢盤，支撐回測較值得關注 | `global_trend`、MA 位置、primary support、籌碼方向 |
+| `TREND_DOWN` | 偏空趨勢盤，壓力與跌破風險優先 | `global_trend`、MA 位置、primary resistance、籌碼方向 |
+| `RANGE_BOUND` | 區間盤，靠近支撐/壓力才有操作意義 | `global_trend` 接近中性、支撐壓力距離、EV/RR |
+| `LOW_CONFIDENCE` | 樣本或近期驗證不足，所有 action 需降級 | `global_confidence`、primary zone confidence |
+| `HIGH_VOLATILITY` | 波動偏高，倉位與停損要求提高 | `global_volatility`、ATR/close、zone width |
+
+`LOW_CONFIDENCE`、`HIGH_VOLATILITY` 較適合作為 flags，不一定取代趨勢方向。例如 `primary=TREND_UP` 且 `flags=[HIGH_VOLATILITY]`，前端應呈現「偏多但波動高，不適合重倉追價」。
+
+### 唯一 Action
+
+`action` 是整份分析唯一的操作結論，避免使用者自行從多張 zone 卡片拼湊結果。目前限定四種：
+
+| Action | 語意 | 典型條件 |
+|---|---|---|
+| `Buy` | 條件完整，可正常部位進場 | regime 偏多或區間下緣、primary support 高信心、EV/RR 正向、波動與風險可控 |
+| `BuySmall` | 條件偏正向但仍有明顯保留 | 偏多但波動高、confidence 未達很高、EV/RR 普通、或距離主支撐略遠 |
+| `Hold` | 不追價，等待更好的價格或確認 | 方向不差但現價不在合理風險報酬位置、primary zone 不夠近、或支撐/壓力訊號混合 |
+| `Avoid` | 不建議操作 | regime 偏空、primary zone 失效、低信心且高波動、EV/RR 明顯不佳、或價格接近強壓但缺乏突破證據 |
+
+Action 應由 Market Regime、primary zone、`trading_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
+
+### Primary Zone 與 Secondary Zones
+
+目前 `zones` 主要依 tier 與 `trading_score` 排序，適合完整清單，但不一定等於「現在最值得操作的主交易區」。`decision_summary.primary_zone` 應只挑一個目前最具決策意義的 zone，其他放入 `secondary_zones` 或前端展開明細。
+
+建議篩選與排序：
+
+1. 先排除 `role=AT_ZONE`、`recent_validation=EXPIRED`、`confidence_level=LOW`、距離現價過遠、EV/RR 缺失或不合理的 zone；若全部被排除，允許退而選擇最接近且風險可解釋的觀察區，action 通常不應高於 `Hold`。
+2. 候選 zone 依摘要專用分數排序，而不是完全沿用 `trading_score`。摘要分數可包含 `trading_score`、`confidence`、距離現價、`expected_value`、`risk_reward_ratio`、`confluence_count`、`volume_confirmation` 與籌碼方向一致性。
+3. 優先挑與 action 方向一致的 zone。`Buy`/`BuySmall` 應優先挑 support；`Avoid` 在偏空情境可挑主要 resistance 或失效支撐作為風險來源；`Hold` 可挑最近的等待區。
+4. `secondary_zones` 只保留摘要必要資訊，例如 `zone_id`、角色、價位區間、距離現價、簡短原因與是否可展開，不重複整份 market context。
+
+### Market Context 去重
+
+Market Context 放股票層級或整份分析共用的理由，zone 卡片只保留 zone 獨有理由。
+
+Market Context 建議包含：
+
+- 整體趨勢：`global_trend`、MA 位置、趨勢方向。
+- 整體波動：`global_volatility`、是否高波動、區間寬度是否偏大。
+- 整體信心：`global_confidence` 與資料完整度。
+- 籌碼摘要：`chip_summary` 的方向、分數、缺漏狀態。
+- 模型狀態：`model_version`、`model_config_hash`、訓練時間或資料不足提示。
+- 共同風險：例如高波動、低信心、價格離主交易區太遠、籌碼缺漏。
+
+Zone 卡片只保留：價位區間、距離現價、role、bounce/break 機率、EV/RR、recent validation、volume confirmation、confluence、該 zone 的 confidence 與該 zone 獨有原因。這能避免每張卡片重複描述趨勢、籌碼或模型狀態。
+
+### Confidence 透明化
+
+前端預設顯示 `79%（高）` 這類人可讀格式，展開後顯示因子貢獻。第一版應先忠實揭露目前既有公式內因子：
+
+```json
+"confidence_explanation": {
+  "value": 0.79,
+  "level": "HIGH",
+  "label": "79%（高）",
+  "formula_factors": [
+    { "key": "sample_factor", "value": 0.71, "label": "樣本數", "description": "觸碰次數越多越可靠" },
+    { "key": "recency_factor", "value": 0.84, "label": "近期性", "description": "越近期驗證過越可靠" },
+    { "key": "stability_factor", "value": 0.82, "label": "穩定度", "description": "歷史守住/跌破結果越一致越可靠" }
+  ],
+  "context_factors": [
+    { "key": "volume_confirmation", "effect": "supportive", "label": "量能確認" },
+    { "key": "confluence", "effect": "supportive", "label": "多方法共振" },
+    { "key": "chip_missing", "effect": "warning", "label": "籌碼資料缺漏" }
+  ]
+}
+```
+
+`formula_factors` 必須只放真正進入 confidence 公式的因子；`context_factors` 只是輔助解釋，不得讓使用者誤以為量能、籌碼或 confluence 已經直接改變 `confidence`。若未來要把這些因素納入 confidence 公式，必須同步更新公式、文件、API 範例與測試。
+
+---
 ## 設計原則
 
 1. **可解釋**：每個指標都要有明確公式與資料來源（本文件即是依此原則撰寫）。
@@ -505,7 +609,7 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 
 ---
 
-## 十四、Zone 生命週期驗證（Verifier）
+## 十五、Zone 生命週期驗證（Verifier）
 
 `internal/analysis/sr_zone_verifier.go::SRZoneVerifier` 重新比對已存的
 zone 跟後續實際走勢，更新 `stock_sr_zones.status`/`broken_at`/
@@ -547,7 +651,7 @@ API）。
 
 ---
 
-## 十五、模型狀態查詢與錯誤訊息分級
+## 十六、模型狀態查詢與錯誤訊息分級
 
 **模型狀態**：`GET /sr-scoring/model-status`（Python）／
 `GET /api/v1/sr-zones/model-status`（Go）讓前端在觸發分析前就能知道模型
@@ -581,7 +685,7 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 
 ---
 
-## 十六、模型設定可追溯性（training_config / model_config_hash）
+## 十七、模型設定可追溯性（training_config / model_config_hash）
 
 `model_version`（`v1`/`v2`/`v3`）只到 feature schema 這種粗粒度，同一個版本底下
 換過幾次 `DatasetConfig`（`forward_bars`/`threshold_pct`/`label_method`
@@ -615,7 +719,7 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 
 ---
 
-## 十七、跨方法重疊分群（Confluence）
+## 十八、跨方法重疊分群（Confluence）
 
 ATR 法（swing pivot + ATR 通道）跟成交量分布法各自獨立建立 zone，計算基礎
 完全不同，即使各自 builder 內部已經合併過同方法的重疊 zone（見「一、Zone

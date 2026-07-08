@@ -560,6 +560,16 @@ Python 端預設值（250）。
     "global_risk_reward_ratio": 0.92,
     "model_version": "v3",
     "model_config_hash": "a1b2c3d4e5f6",
+    "decision_summary": {
+      "action": "BuySmall",
+      "action_label": "小量試單",
+      "market_regime": { "primary": "TREND_UP", "flags": ["HIGH_VOLATILITY"], "label": "偏多趨勢但波動偏高", "reasons": ["整體趨勢 3.2%"] },
+      "primary_zone": { "label": "960.00 ~ 970.00", "role": "SUPPORT", "distance_label": "1.5%", "trading_score": 78.5 },
+      "market_context": [],
+      "confidence_explanation": { "value": 0.72, "level": "HIGH", "label": "72%（高）", "formula_factors": [], "context_factors": [] },
+      "risk_notes": ["波動偏高，倉位需保守。"],
+      "secondary_zones": []
+    },
     "chip_summary": {
       "missing": false,
       "score": 42.5,
@@ -629,9 +639,9 @@ sr-zone-scoring.md「六」。`overlap_group`/`confluence_count` 是跨方法重
 分群結果，`overlap_group` 只有 `confluence_count > 1` 時才有值，見
 sr-zone-scoring.md「十七」。
 
-`analysis` 另含 `period_summaries`（短/中/長期各一組支撐/壓力摘要）與
-`analysis_tips`（白話提示陣列），為求精簡未列在上方範例，欄位語意見
-sr-zone-scoring.md。
+`analysis` 另含 `decision_summary`（Market Regime、唯一 Action、Primary Zone、Market Context、confidence 說明與次要 zones）、`period_summaries`（短/中/長期各一組支撐/壓力摘要）與
+`analysis_tips`（白話提示陣列）。`decision_summary` 是前端預設閱讀層，既有 `zones` 詳細數字仍保留；欄位語意見
+sr-zone-scoring.md「十四」。
 
 **籌碼摘要欄位**（見 sr-zone-scoring.md「十二之一」）：`analysis.chip_summary`
 是整檔層級的籌碼拆解，`score`/`institutional_score`/`margin_score`/`broker_score`

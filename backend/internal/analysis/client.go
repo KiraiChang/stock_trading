@@ -265,8 +265,9 @@ type ZoneScoreResult struct {
 	AnalysisTips      json.RawMessage `json:"analysis_tips"`
 	// ChipSummary 是整檔層級的籌碼拆解 JSON（見 Python _build_chip_summary），
 	// 整份分析共用一份，passthrough 存進 analysis 快照供前端共用面板顯示。
-	ChipSummary json.RawMessage `json:"chip_summary"`
-	Zones       []ZoneScore     `json:"zones"`
+	ChipSummary     json.RawMessage `json:"chip_summary"`
+	DecisionSummary json.RawMessage `json:"decision_summary"`
+	Zones           []ZoneScore     `json:"zones"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
@@ -299,6 +300,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		PeriodSummaries:       rawJSONOrDefault(r.PeriodSummaries, "[]"),
 		AnalysisTips:          rawJSONOrDefault(r.AnalysisTips, "[]"),
 		ChipSummary:           rawJSONOrDefault(r.ChipSummary, "null"),
+		DecisionSummary:       rawJSONOrDefault(r.DecisionSummary, "null"),
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))

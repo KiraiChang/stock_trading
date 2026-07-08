@@ -104,6 +104,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			ModelConfigHash: "abc123def456",
 			PeriodSummaries: json.RawMessage(`[{"key":"short","label":"短期"}]`),
 			AnalysisTips:    json.RawMessage(`["短期支撐守穩，籌碼偏多"]`),
+			DecisionSummary: json.RawMessage(`{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}`),
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -170,6 +171,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if string(a.AnalysisTips) != `["短期支撐守穩，籌碼偏多"]` {
 		t.Fatalf("expected analysis_tips to carry through ToStore, got %s", a.AnalysisTips)
+	}
+	if string(a.DecisionSummary) != `{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}` {
+		t.Fatalf("expected decision_summary to carry through ToStore, got %s", a.DecisionSummary)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)

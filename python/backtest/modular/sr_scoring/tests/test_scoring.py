@@ -158,6 +158,17 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert [p["key"] for p in result["period_summaries"]] == ["short", "mid", "long"]
     assert isinstance(result["analysis_tips"], list)
     assert result["analysis_tips"]
+    ds = result["decision_summary"]
+    assert ds["market_regime"]["primary"] in ("TREND_UP", "TREND_DOWN", "RANGE_BOUND")
+    assert isinstance(ds["market_regime"]["flags"], list)
+    assert ds["action"] in ("Buy", "BuySmall", "Hold", "Avoid")
+    assert "market_context" in ds and isinstance(ds["market_context"], list)
+    assert "confidence_explanation" in ds
+    assert set(ds["confidence_explanation"].keys()) >= {"value", "level", "label", "formula_factors", "context_factors"}
+    assert isinstance(ds["secondary_zones"], list)
+    if ds["primary_zone"] is not None:
+        assert ds["primary_zone"]["role"] in ("SUPPORT", "RESISTANCE")
+        assert "distance_pct" in ds["primary_zone"]
     for period in result["period_summaries"]:
         assert period["support"] is None or period["support"]["side"] == "support"
         assert period["resistance"] is None or period["resistance"]["side"] == "resistance"

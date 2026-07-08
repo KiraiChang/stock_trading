@@ -52,6 +52,7 @@ func testAnalysis() *SRZoneAnalysis {
 		PeriodSummaries:       RawJSON(`[{"key":"short","label":"短期"}]`),
 		AnalysisTips:          RawJSON(`["短期支撐守穩，籌碼偏多"]`),
 		ChipSummary:           RawJSON(`{"missing":false,"score":42.5,"signal":"BULLISH"}`),
+		DecisionSummary:       RawJSON(`{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}`),
 	}
 }
 
@@ -127,6 +128,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if string(saved.ChipSummary) != `{"missing":false,"score":42.5,"signal":"BULLISH"}` {
 		t.Fatalf("expected chip_summary to round-trip, got %s", saved.ChipSummary)
+	}
+	if string(saved.DecisionSummary) != `{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}` {
+		t.Fatalf("expected decision_summary to round-trip, got %s", saved.DecisionSummary)
 	}
 	if saved.GlobalTrend != 0.03 || saved.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected saved global trend/volatility: %+v", saved)

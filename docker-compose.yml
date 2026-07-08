@@ -32,7 +32,7 @@ services:
     environment:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
-      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v2.joblib
+      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v3.joblib
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
     networks:
@@ -50,7 +50,7 @@ services:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       PYTHON_SERVICE_PORT: "8001"
-      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v2.joblib
+      SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v3.joblib
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
     networks:

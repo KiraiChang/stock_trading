@@ -233,7 +233,11 @@ Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
 ```
 
 成本採移動加權平均。交易事件不可修改或刪除；資料更正必須新增 `ADJUSTMENT`
-並記錄原因。分析輸出包含目前／目標／調整股數、風險金額、RR、觸發與失效條件。
+並記錄原因。`ADJUSTMENT` 是無交易價格、無現金流的 projection 校正，只覆寫校正後
+股數與 AVG，不改變由 SELL 累積的 `realized_pnl`；實際成交必須記為 BUY/SELL。
+分析輸出包含目前／目標／調整股數、風險金額、RR、觸發與失效條件。若 SR 決策為
+Buy/BuySmall、存在有效停損支撐但已無上方壓力，停利目標以可設定的固定 R 倍數推導，
+預設為 2R，避免突破後因缺少壓力 zone 而無法建立或增加部位。
 每次分析都新增一筆快照，不覆蓋舊結果。
 
 #### 已知限制：SR 快照與 Position Analysis 非單一 transaction（刻意不處理）

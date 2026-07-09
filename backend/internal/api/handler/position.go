@@ -106,8 +106,12 @@ func (h *PositionHandler) AddTransaction(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
-	if err != nil {
+	if errors.Is(err, store.ErrPositionInvalidEvent) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		serverError(c, h.log, err, "positions: add transaction")
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"position": position})
@@ -145,8 +149,12 @@ func (h *PositionHandler) Adjust(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
-	if err != nil {
+	if errors.Is(err, store.ErrPositionInvalidEvent) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		serverError(c, h.log, err, "positions: adjust")
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"position": position})

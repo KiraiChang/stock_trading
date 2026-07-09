@@ -12,7 +12,9 @@ CREATE TABLE positions (
     symbol VARCHAR(20) PRIMARY KEY, shares DECIMAL(18,4) NOT NULL,
     avg_cost DECIMAL(18,4) NOT NULL, realized_pnl DECIMAL(18,4) NOT NULL DEFAULT 0,
     version BIGINT NOT NULL, last_event_id BIGINT UNSIGNED NOT NULL,
-    updated_at DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_positions_last_event
+        FOREIGN KEY (last_event_id) REFERENCES position_transactions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE TABLE position_analyses (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY, symbol VARCHAR(20) NOT NULL,

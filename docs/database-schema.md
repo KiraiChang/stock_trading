@@ -376,7 +376,8 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 
 `position_transactions` 是不可變事件帳；支援 `OPENING_BALANCE`、`BUY`、`SELL`、
 `ADJUSTMENT`。BUY/SELL 保存股數、價格、費用與稅；ADJUSTMENT 保存更正後股數、
-AVG 成本及原因。API 不提供 update/delete。
+AVG 成本及原因。API 不提供 update/delete。ADJUSTMENT 代表無現金流的帳務校正，
+不改變 `realized_pnl`；有實際成交價與現金流的增減股必須使用 BUY/SELL。
 
 `positions` 是每個 symbol 唯一的 AVG projection：
 
@@ -386,7 +387,7 @@ AVG 成本及原因。API 不提供 update/delete。
 | shares / avg_cost | 目前股數與移動加權平均成本 |
 | realized_pnl | SELL 累積已實現損益 |
 | version | optimistic version；事件 request 必須帶目前版本 |
-| last_event_id / updated_at | projection 對應的最後事件與更新時間 |
+| last_event_id / updated_at | projection 對應的最後事件與更新時間；`last_event_id` 以 FK 指向 immutable ledger |
 
 ## position_analyses
 

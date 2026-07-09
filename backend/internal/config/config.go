@@ -23,6 +23,7 @@ type PositionAnalysisConfig struct {
 	MaxRiskAmount            float64 `mapstructure:"max_risk_amount"`
 	AddOnRatio               float64 `mapstructure:"add_on_ratio"`
 	MinRiskRewardRatio       float64 `mapstructure:"min_risk_reward_ratio"`
+	BreakoutTargetRR         float64 `mapstructure:"breakout_target_risk_reward_ratio"`
 	TakeProfitReductionRatio float64 `mapstructure:"take_profit_reduction_ratio"`
 	SRReuseMaxAgeHours       int     `mapstructure:"sr_reuse_max_age_hours"`
 }
@@ -110,6 +111,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("position_analysis.max_risk_amount", 10000)
 	viper.SetDefault("position_analysis.add_on_ratio", 0.25)
 	viper.SetDefault("position_analysis.min_risk_reward_ratio", 1.5)
+	viper.SetDefault("position_analysis.breakout_target_risk_reward_ratio", 2.0)
 	viper.SetDefault("position_analysis.take_profit_reduction_ratio", 0.5)
 	viper.SetDefault("position_analysis.sr_reuse_max_age_hours", 24)
 

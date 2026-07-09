@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -239,15 +240,25 @@ type ZoneScore struct {
 
 func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 	type plain ZoneScore
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
 	var nested struct {
 		Score    *plain          `json:"score"`
 		Features json.RawMessage `json:"features"`
 		Evidence json.RawMessage `json:"evidence"`
 	}
-	if err := json.Unmarshal(data, &nested); err != nil {
-		return err
-	}
-	if nested.Score != nil {
+	_, hasScore := fields["score"]
+	_, hasData := fields["data"]
+	_, hasLifecycle := fields["lifecycle"]
+	if hasScore || hasData || hasLifecycle {
+		if err := json.Unmarshal(data, &nested); err != nil {
+			return err
+		}
+		if nested.Score == nil {
+			return errors.New("nested zone score must contain a non-null score")
+		}
 		*z = ZoneScore(*nested.Score)
 		z.Features = nested.Features
 		z.Evidence = nested.Evidence

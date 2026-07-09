@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"testing"
@@ -77,11 +78,14 @@ func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	if p.Shares != 120 || p.AvgCost != 16 || p.Version != 4 {
 		t.Fatalf("unexpected ADJUSTMENT: %+v", p)
 	}
+	if math.Abs(p.RealizedPnL-740.5) > 1e-9 {
+		t.Fatalf("ADJUSTMENT must not invent cash flow or change realized PnL: %+v", p)
+	}
 	if _, err := repo.ApplyEvent(ctx, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventSell, OccurredAt: now,
 		Shares: NewNullFloat64(121), Price: NewNullFloat64(20),
-	}, 4); err == nil {
-		t.Fatal("expected oversell rejection")
+	}, 4); !errors.Is(err, ErrPositionInvalidEvent) {
+		t.Fatalf("expected invalid-event oversell rejection, got %v", err)
 	}
 	if _, err := repo.ApplyEvent(ctx, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventBuy, OccurredAt: now,

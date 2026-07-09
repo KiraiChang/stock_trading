@@ -371,6 +371,30 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 	}
 }
 
+func TestZoneScoreNestedDecodeRejectsNullOrMissingScore(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "null score",
+			raw:  `{"data":{"price_low":90},"features":{},"score":null,"evidence":{},"lifecycle":{}}`,
+		},
+		{
+			name: "missing score",
+			raw:  `{"data":{"price_low":90},"features":{},"evidence":{},"lifecycle":{}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var zone ZoneScore
+			if err := json.Unmarshal([]byte(tt.raw), &zone); err == nil {
+				t.Fatalf("expected invalid nested zone to fail, got %+v", zone)
+			}
+		})
+	}
+}
+
 func TestScoreZonesReturnsUpstreamStatusErrorOnNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -10,7 +10,7 @@ CREATE TABLE position_transactions (
     tax NUMERIC(18,4) NOT NULL DEFAULT 0,
     target_shares NUMERIC(18,4),
     target_avg_cost NUMERIC(18,4),
-    note TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_position_transactions_symbol_time ON position_transactions(symbol, occurred_at, id);
@@ -50,11 +50,11 @@ CREATE TABLE position_analyses (
     risk_reward_ratio NUMERIC(18,6),
     unrealized_pnl NUMERIC(18,4) NOT NULL,
     unrealized_pnl_pct NUMERIC(18,6) NOT NULL,
-    config_json TEXT NOT NULL DEFAULT '{}',
-    reason TEXT NOT NULL DEFAULT '[]',
-    evidence TEXT NOT NULL DEFAULT '{}',
-    trigger_conditions TEXT NOT NULL DEFAULT '[]',
-    invalidation_conditions TEXT NOT NULL DEFAULT '[]',
+    config_json TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    trigger_conditions TEXT NOT NULL,
+    invalidation_conditions TEXT NOT NULL,
     rule_version VARCHAR(64) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -1045,6 +1045,8 @@ Position Analysis 以股票代號為統一入口。沒有 transaction/projection
   `expected_version`、`note`。SELL 不得超賣。
 - `POST /positions/:symbol/adjustments`：新增 ADJUSTMENT；body 包含更正後
   `target_shares`、`target_avg_cost`、`expected_version` 與必填 `reason`。
+  ADJUSTMENT 只校正 projection，不代表成交、不改變 `realized_pnl`；實際交易使用
+  BUY/SELL transaction。
 - `POST /position-analyses`：body 為
   `{"symbol":"2330","timeframe":"1d","limit":250,"force_refresh":false}`。
 - `GET /position-analyses?symbol=2330&limit=20`：列出 FLAT/LONG 共用分析歷史。
@@ -1055,8 +1057,9 @@ Position Analysis 以股票代號為統一入口。沒有 transaction/projection
 預期報酬、RR、已實現／未實現損益、設定快照、Evidence、觸發與失效條件。
 
 固定預設為：單股上限 200,000、最大風險 10,000、加碼 tranche 25%、
-最低 RR 1.5、停利減碼 50%。設定由 `backend/config.yaml::position_analysis`
-覆寫。
+最低 RR 1.5、突破後無上方壓力時以 2R 推導停利目標、停利減碼 50%。設定由
+`backend/config.yaml::position_analysis` 覆寫。分析 evidence 的
+`take_profit_source` 為 `RESISTANCE_ZONE` 或 `BREAKOUT_R_MULTIPLE`，可區分停利價來源。
 
 ## Legacy Holdings API（已移除）
 

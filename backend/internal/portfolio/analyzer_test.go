@@ -1,6 +1,7 @@
 package portfolio
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -30,6 +31,45 @@ func TestBuildSnapshotFlatAndLongActions(t *testing.T) {
 	}
 	if long.PositionState != StateLong || long.Action != ActionReduce || long.TargetShares != 500 || long.AdjustmentShares != -200 {
 		t.Fatalf("unexpected LONG analysis: %+v", long)
+	}
+}
+
+func TestBuildSnapshotBreakoutUsesConfigurableRMultipleTarget(t *testing.T) {
+	config := DefaultConfig()
+	config.BreakoutTargetRR = 2
+	a := &Analyzer{config: config}
+	sr := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"action":"Buy"}`),
+	}
+	zones := []store.SRZone{
+		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
+		{ID: 2, Role: "RESISTANCE", PriceLow: 95, PriceHigh: 98, Status: "BROKEN", TradingScore: 75},
+	}
+	flat, err := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flat.Action != ActionEnter || !flat.TakeProfitPrice.Valid || flat.TakeProfitPrice.Float64 != 120 {
+		t.Fatalf("expected breakout ENTER with 2R target, got %+v", flat)
+	}
+	if !flat.RiskRewardRatio.Valid || flat.RiskRewardRatio.Float64 != 2 {
+		t.Fatalf("expected breakout RR=2, got %+v", flat.RiskRewardRatio)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal([]byte(flat.Evidence), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence["take_profit_source"] != "BREAKOUT_R_MULTIPLE" {
+		t.Fatalf("unexpected take-profit evidence: %+v", evidence)
+	}
+
+	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 500, AvgCost: 80}, sr, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if long.Action != ActionAdd || long.TargetShares <= 500 {
+		t.Fatalf("expected breakout ADD, got %+v", long)
 	}
 }
 

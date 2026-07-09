@@ -3,13 +3,14 @@ CREATE TABLE position_transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, event_type TEXT NOT NULL,
     occurred_at DATETIME NOT NULL, shares REAL, price REAL, fee REAL NOT NULL DEFAULT 0,
     tax REAL NOT NULL DEFAULT 0, target_shares REAL, target_avg_cost REAL,
-    note TEXT NOT NULL DEFAULT '', created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    note TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_position_transactions_symbol_time ON position_transactions(symbol, occurred_at, id);
 CREATE TABLE positions (
     symbol TEXT PRIMARY KEY, shares REAL NOT NULL, avg_cost REAL NOT NULL,
     realized_pnl REAL NOT NULL DEFAULT 0, version INTEGER NOT NULL,
-    last_event_id INTEGER NOT NULL, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    last_event_id INTEGER NOT NULL REFERENCES position_transactions(id),
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE position_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, position_state TEXT NOT NULL,
@@ -20,9 +21,9 @@ CREATE TABLE position_analyses (
     adjustment_amount REAL NOT NULL, entry_price REAL, stop_loss_price REAL, take_profit_price REAL,
     risk_amount REAL, expected_reward_amount REAL, risk_reward_ratio REAL,
     unrealized_pnl REAL NOT NULL, unrealized_pnl_pct REAL NOT NULL,
-    config_json TEXT NOT NULL DEFAULT '{}', reason TEXT NOT NULL DEFAULT '[]',
-    evidence TEXT NOT NULL DEFAULT '{}', trigger_conditions TEXT NOT NULL DEFAULT '[]',
-    invalidation_conditions TEXT NOT NULL DEFAULT '[]', rule_version TEXT NOT NULL,
+    config_json TEXT NOT NULL, reason TEXT NOT NULL,
+    evidence TEXT NOT NULL, trigger_conditions TEXT NOT NULL,
+    invalidation_conditions TEXT NOT NULL, rule_version TEXT NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_position_analyses_symbol ON position_analyses(symbol, created_at DESC);

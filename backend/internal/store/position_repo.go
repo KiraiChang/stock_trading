@@ -18,7 +18,10 @@ const (
 	PositionEventAdjustment     = "ADJUSTMENT"
 )
 
-var ErrPositionVersionConflict = errors.New("position version conflict")
+var (
+	ErrPositionVersionConflict = errors.New("position version conflict")
+	ErrPositionInvalidEvent    = errors.New("invalid position event")
+)
 
 type PositionRepo interface {
 	List(ctx context.Context) ([]Position, error)
@@ -131,7 +134,7 @@ func applyPositionEvent(position *Position, event *PositionTransaction) error {
 	switch event.EventType {
 	case PositionEventOpeningBalance, PositionEventBuy:
 		if !event.Shares.Valid || !event.Price.Valid || event.Shares.Float64 <= 0 || event.Price.Float64 <= 0 {
-			return fmt.Errorf("BUY requires positive shares and price")
+			return fmt.Errorf("%w: BUY requires positive shares and price", ErrPositionInvalidEvent)
 		}
 		qty := event.Shares.Float64
 		totalCost := position.Shares*position.AvgCost + qty*event.Price.Float64 + event.Fee
@@ -139,11 +142,11 @@ func applyPositionEvent(position *Position, event *PositionTransaction) error {
 		position.AvgCost = totalCost / position.Shares
 	case PositionEventSell:
 		if !event.Shares.Valid || !event.Price.Valid || event.Shares.Float64 <= 0 || event.Price.Float64 <= 0 {
-			return fmt.Errorf("SELL requires positive shares and price")
+			return fmt.Errorf("%w: SELL requires positive shares and price", ErrPositionInvalidEvent)
 		}
 		qty := event.Shares.Float64
 		if qty > position.Shares+1e-9 {
-			return fmt.Errorf("SELL shares exceed current position")
+			return fmt.Errorf("%w: SELL shares exceed current position", ErrPositionInvalidEvent)
 		}
 		position.RealizedPnL += qty*(event.Price.Float64-position.AvgCost) - event.Fee - event.Tax
 		position.Shares -= qty
@@ -156,15 +159,15 @@ func applyPositionEvent(position *Position, event *PositionTransaction) error {
 			event.TargetShares.Float64 < 0 || event.TargetAvgCost.Float64 < 0 ||
 			(event.TargetShares.Float64 > 0 && event.TargetAvgCost.Float64 <= 0) ||
 			(event.TargetShares.Float64 == 0 && event.TargetAvgCost.Float64 != 0) {
-			return fmt.Errorf("ADJUSTMENT requires a valid target shares/AVG state")
+			return fmt.Errorf("%w: ADJUSTMENT requires a valid target shares/AVG state", ErrPositionInvalidEvent)
 		}
 		if event.Note == "" {
-			return fmt.Errorf("ADJUSTMENT reason is required")
+			return fmt.Errorf("%w: ADJUSTMENT reason is required", ErrPositionInvalidEvent)
 		}
 		position.Shares = event.TargetShares.Float64
 		position.AvgCost = event.TargetAvgCost.Float64
 	default:
-		return fmt.Errorf("unsupported position event type %q", event.EventType)
+		return fmt.Errorf("%w: unsupported position event type %q", ErrPositionInvalidEvent, event.EventType)
 	}
 	return nil
 }

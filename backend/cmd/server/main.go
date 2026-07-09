@@ -132,6 +132,7 @@ func main() {
 		MaxRiskAmount:            cfg.PositionAnalysis.MaxRiskAmount,
 		AddOnRatio:               cfg.PositionAnalysis.AddOnRatio,
 		MinRiskRewardRatio:       cfg.PositionAnalysis.MinRiskRewardRatio,
+		BreakoutTargetRR:         cfg.PositionAnalysis.BreakoutTargetRR,
 		TakeProfitReductionRatio: cfg.PositionAnalysis.TakeProfitReductionRatio,
 		SRReuseMaxAge:            time.Duration(cfg.PositionAnalysis.SRReuseMaxAgeHours) * time.Hour,
 	}

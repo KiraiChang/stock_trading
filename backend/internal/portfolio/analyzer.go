@@ -37,6 +37,7 @@ type Config struct {
 	MaxRiskAmount            float64       `json:"max_risk_amount"`
 	AddOnRatio               float64       `json:"add_on_ratio"`
 	MinRiskRewardRatio       float64       `json:"min_risk_reward_ratio"`
+	BreakoutTargetRR         float64       `json:"breakout_target_risk_reward_ratio"`
 	TakeProfitReductionRatio float64       `json:"take_profit_reduction_ratio"`
 	SRReuseMaxAge            time.Duration `json:"-"`
 }
@@ -44,7 +45,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		MaxPositionValue: 200000, MaxRiskAmount: 10000, AddOnRatio: 0.25,
-		MinRiskRewardRatio: 1.5, TakeProfitReductionRatio: 0.5,
+		MinRiskRewardRatio: 1.5, BreakoutTargetRR: 2, TakeProfitReductionRatio: 0.5,
 		SRReuseMaxAge: 24 * time.Hour,
 	}
 }
@@ -72,6 +73,9 @@ func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRe
 	}
 	if config.MinRiskRewardRatio <= 0 {
 		config.MinRiskRewardRatio = d.MinRiskRewardRatio
+	}
+	if config.BreakoutTargetRR <= 0 {
+		config.BreakoutTargetRR = d.BreakoutTargetRR
 	}
 	if config.TakeProfitReductionRatio <= 0 {
 		config.TakeProfitReductionRatio = d.TakeProfitReductionRatio
@@ -195,8 +199,13 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		riskShares := math.Floor(a.config.MaxRiskAmount / (current - support.PriceLow))
 		fullTarget = math.Max(0, math.Min(capitalShares, riskShares))
 	}
+	takeProfitSource := ""
 	if resistance != nil && resistance.PriceLow > current {
 		takeProfit = store.NewNullFloat64(resistance.PriceLow)
+		takeProfitSource = "RESISTANCE_ZONE"
+	} else if stop.Valid {
+		takeProfit = store.NewNullFloat64(current + (current-stop.Float64)*a.config.BreakoutTargetRR)
+		takeProfitSource = "BREAKOUT_R_MULTIPLE"
 	}
 	if stop.Valid && takeProfit.Valid && current > stop.Float64 {
 		rr = store.NewNullFloat64((takeProfit.Float64 - current) / (current - stop.Float64))
@@ -290,6 +299,7 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		"sr_decision_action": srAction,
 		"support_zone":       zoneDetail(support),
 		"resistance_zone":    zoneDetail(resistance),
+		"take_profit_source": takeProfitSource,
 	})
 	return &store.PositionAnalysis{
 		Symbol: position.Symbol, PositionState: state, PositionVersion: position.Version,

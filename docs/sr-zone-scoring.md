@@ -485,9 +485,34 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 
 ---
 
-## 十四、決策摘要層（T-019）
+## 十四、SR Zone Decision Engine（T-019）
 
-`decision_summary` 是更高層輸出，目標是讓前端先呈現「目前盤勢前提、唯一操作結論、主交易區、共用背景與風險」，再讓使用者展開查看既有的 zone 細節。它不取代既有 `global_*`、`period_summaries`、`analysis_tips`、`zones`、EV/RR、機率、score breakdown 或籌碼拆解，而是把這些既有資料整理成單一決策入口。
+SR Zone Decision Engine 是「無持股」的決策層，輸出欄位仍是
+`decision_summary`。第一階段只回答「這份 SR Zone 分析本身目前應如何閱讀」：
+目前盤勢前提、唯一操作結論、主交易區、共用背景與風險。它不處理持有成本、
+股數、未實現損益、停損金額、停利金額或加碼金額；這些留到後續持股操作版
+Decision Engine。
+
+它不取代既有 `global_*`、`period_summaries`、`analysis_tips`、`zones`、
+EV/RR、機率、score breakdown 或籌碼拆解，而是把這些既有資料整理成單一決策
+入口，讓使用者不用自行從多張 zone 卡片拼湊結論。
+
+### Engine 邊界
+
+實作上應把目前 `scoring.py` 內 `_build_decision_summary` 相關 helper 視為
+Decision Engine 的 v1 內核，後續可抽到獨立模組
+`backtest/modular/sr_scoring/decision_engine.py`。第一版邊界如下：
+
+| 項目 | 說明 |
+|---|---|
+| 輸入 | `zone_scores`、`current_price`、`global_trend`、`global_volatility`、`global_metrics`、`chip_summary`、`ModelBundle` metadata |
+| 輸出 | top-level `decision_summary` JSON |
+| 持久化 | Go 端 passthrough 寫入 `stock_sr_zone_analyses.decision_summary` |
+| 前端 | `/sr-zones` 頁面優先顯示 decision summary panel，再展開 zones 細節 |
+| 不做 | 不做持股個人化、不下單、不輸出部位大小、不覆寫 zone 原始分數 |
+
+Decision Engine 必須 deterministic：同一份 SR Zone scoring 結果、同一份模型
+metadata 與同一份籌碼摘要，必須產生完全相同的 `decision_summary`。
 
 `score_symbol()` top-level response 會增加：
 
@@ -525,6 +550,19 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
 `LOW_CONFIDENCE`、`HIGH_VOLATILITY` 較適合作為 flags，不一定取代趨勢方向。例如 `primary=TREND_UP` 且 `flags=[HIGH_VOLATILITY]`，前端應呈現「偏多但波動高，不適合重倉追價」。
 
+v1 預設門檻：
+
+| 條件 | 門檻 |
+|---|---|
+| `TREND_UP` | `global_trend >= 0.015` |
+| `TREND_DOWN` | `global_trend <= -0.015` |
+| `RANGE_BOUND` | 介於上述兩者之間 |
+| `HIGH_VOLATILITY` | `global_volatility >= 0.035` |
+| `LOW_CONFIDENCE` | `global_confidence < 0.45` |
+
+這些門檻是 Decision Engine v1 的規則，不是模型訓練參數；調整時必須同步更新本文件、
+Python 測試與 API 範例。
+
 ### 唯一 Action
 
 `action` 是整份分析唯一的操作結論，避免使用者自行從多張 zone 卡片拼湊結果。目前限定四種：
@@ -538,6 +576,29 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
 Action 應由 Market Regime、primary zone、`trading_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
 
+v1 action pipeline：
+
+1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
+2. 若 primary zone 距離現價超過 8%：保留 action 判斷，但加上不追價風險註記。
+3. 若 primary zone `risk_reward_ratio < 1.0`：加上風險報酬不足註記。
+4. 若 primary zone `recent_validation=EXPIRED`：加上近期驗證失效註記，且不應升級到 `Buy`。
+5. 若 regime 偏空，或 primary zone 是 resistance 且沒有 bullish setup：`Avoid`。
+6. 若符合 strong setup：`Buy`。
+7. 若符合 constructive setup：`BuySmall`。
+8. 其他情況：`Hold`。
+
+v1 setup 定義：
+
+| Setup | 條件 |
+|---|---|
+| bullish setup | `market_regime.primary in (TREND_UP, RANGE_BOUND)` 且 primary zone 是 `SUPPORT` |
+| bearish setup | `market_regime.primary == TREND_DOWN` 或 primary zone 是 `RESISTANCE` |
+| strong setup | primary zone `trading_score >= 70`、`confidence >= 0.65`、`expected_value > 0`、`risk_reward_ratio >= 1.5`、距離現價 `<= 5%`、且沒有 regime flags |
+| constructive setup | bullish setup 且 primary zone `trading_score >= 55`、`confidence >= 0.45`、`expected_value >= 0` |
+
+若 `expected_value` 或 `risk_reward_ratio` 缺失，不得判定 strong setup；缺失值只允許進入
+`Hold`、`BuySmall` 的保守觀察語境，除非之後另有明確規則。
+
 ### Primary Zone 與 Secondary Zones
 
 目前 `zones` 主要依 tier 與 `trading_score` 排序，適合完整清單，但不一定等於「現在最值得操作的主交易區」。`decision_summary.primary_zone` 應只挑一個目前最具決策意義的 zone，其他放入 `secondary_zones` 或前端展開明細。
@@ -548,6 +609,32 @@ Action 應由 Market Regime、primary zone、`trading_score`、`confidence`、`e
 2. 候選 zone 依摘要專用分數排序，而不是完全沿用 `trading_score`。摘要分數可包含 `trading_score`、`confidence`、距離現價、`expected_value`、`risk_reward_ratio`、`confluence_count`、`volume_confirmation` 與籌碼方向一致性。
 3. 優先挑與 action 方向一致的 zone。`Buy`/`BuySmall` 應優先挑 support；`Avoid` 在偏空情境可挑主要 resistance 或失效支撐作為風險來源；`Hold` 可挑最近的等待區。
 4. `secondary_zones` 只保留摘要必要資訊，例如 `zone_id`、角色、價位區間、距離現價、簡短原因與是否可展開，不重複整份 market context。
+
+v1 primary zone 候選池：
+
+- 預設排除 `role=AT_ZONE`。
+- 預設排除 `recent_validation=EXPIRED`。
+- 預設排除 `confidence_level=LOW`。
+- 預設排除 `expected_value is None`。
+- 若全部被排除，退回只排除 `AT_ZONE` 的保守候選池；此時 action 通常不應高於
+  `Hold`，除非後續規則明確放寬。
+
+v1 摘要分數：
+
+```
+summary_score =
+  trading_score/100 * 0.35
+  + confidence * 0.20
+  + distance_score * 0.18
+  + ev_score * 0.12
+  + rr_score * 0.10
+  + confluence_score * 0.05
+  + role_bonus
+```
+
+其中 `role_bonus=0.08` 僅在 regime 與角色方向一致時加入：
+`TREND_UP/RANGE_BOUND + SUPPORT` 或 `TREND_DOWN + RESISTANCE`。
+`distance_score` 以 8% 為滿額衰減上限；`rr_score` 以 3.0 為滿額上限。
 
 ### Market Context 去重
 
@@ -587,6 +674,36 @@ Zone 卡片只保留：價位區間、距離現價、role、bounce/break 機率�
 ```
 
 `formula_factors` 必須只放真正進入 confidence 公式的因子；`context_factors` 只是輔助解釋，不得讓使用者誤以為量能、籌碼或 confluence 已經直接改變 `confidence`。若未來要把這些因素納入 confidence 公式，必須同步更新公式、文件、API 範例與測試。
+
+### Python / Go / Frontend 合約
+
+| 層 | 責任 |
+|---|---|
+| Python | Decision Engine 只在 Python 端計算，產生 `decision_summary`；不得依賴 Go 或前端再補決策 |
+| Go | `analysis.Client` 與 `SRZoneRepo` 只做 JSON passthrough、保存與回傳；不得重新解釋 action |
+| Frontend | 前端只負責呈現與空值保護；不得在 UI 端重新挑 primary zone 或覆寫 action |
+
+舊分析可能沒有 `decision_summary` 或值為 `null`，前端必須安全降級為只顯示 zones 與
+period summaries。新分析若 `decision_summary` 缺欄位，應視為 Python contract 失敗，
+由 Python 單元測試先攔下。
+
+### 測試與驗收
+
+Decision Engine v1 至少需要以下測試：
+
+| 測試 | 預期 |
+|---|---|
+| 多頭 + 高品質近距離支撐 | action=`Buy`，primary zone 為該支撐 |
+| 多頭 + 高波動 | action 不高於 `BuySmall`，risk_notes 含高波動 |
+| 區間盤 + 支撐條件普通 | action=`BuySmall` 或 `Hold`，不可直接 `Buy` |
+| 偏空 + resistance primary | action=`Avoid` |
+| 無合格 primary zone | action=`Hold`，primary_zone 為 null 或保守觀察區 |
+| low confidence / expired zone | 不得成為第一候選，除非所有嚴格候選都被排除 |
+| EV/RR 缺失 | 不得輸出 `Buy` |
+| chip missing | market_context 或 regime reasons 必須揭露籌碼缺漏 |
+
+Go 測試需確認 `decision_summary` 從 Python response 到 DB/API 完整 round-trip。
+Frontend 驗收需確認 `decision_summary=null` 的舊資料不會造成頁面錯誤。
 
 ---
 ## 設計原則
@@ -788,4 +905,3 @@ Python/Go/DB/TS/Svelte 五層並牽動已訓練模型，投報比過低，決定
   的跨層不同命名**（不是兩個獨立數值），詳見上方「命名對照」表。
 - **Python `/sr-scoring/*` 與對外 Go `/sr-zones/*` 前綴分裂**，同一功能依語言
   邊界命名不同，詳見上方「命名對照」表。
-

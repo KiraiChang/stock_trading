@@ -1032,7 +1032,36 @@ sr-zone-scoring.md「十七」。
 
 ---
 
-## Holdings API
+## Position Analysis API
+
+Position Analysis 以股票代號為統一入口。沒有 transaction/projection 時視為
+`FLAT`，有股數時為 `LONG`。
+
+- `GET /positions`：列出目前 LONG positions。
+- `GET /positions/:symbol`：取得 projection；空手回傳股數、AVG、version 均為 0。
+- `GET /positions/:symbol/transactions`：取得 immutable ledger。
+- `POST /positions/:symbol/transactions`：新增 BUY/SELL；body 包含
+  `event_type`、`shares`、`price`、`fee`、`tax`、`occurred_at`、
+  `expected_version`、`note`。SELL 不得超賣。
+- `POST /positions/:symbol/adjustments`：新增 ADJUSTMENT；body 包含更正後
+  `target_shares`、`target_avg_cost`、`expected_version` 與必填 `reason`。
+- `POST /position-analyses`：body 為
+  `{"symbol":"2330","timeframe":"1d","limit":250,"force_refresh":false}`。
+- `GET /position-analyses?symbol=2330&limit=20`：列出 FLAT/LONG 共用分析歷史。
+- `GET /position-analyses/:id`：取得不可變分析快照。
+
+分析輸出包含 `position_state`、Position version、目前／目標／調整股數、
+`adjustment_side`/`adjustment_amount`、Action、進場／停損／停利價、風險金額、
+預期報酬、RR、已實現／未實現損益、設定快照、Evidence、觸發與失效條件。
+
+固定預設為：單股上限 200,000、最大風險 10,000、加碼 tranche 25%、
+最低 RR 1.5、停利減碼 50%。設定由 `backend/config.yaml::position_analysis`
+覆寫。
+
+## Legacy Holdings API（已移除）
+
+以下內容只供 migration 038 前的歷史契約查閱。`/holdings*` 與
+`/holding-analyses*` routes 已移除，不應再由新客戶端呼叫。
 
 持股操作分析以目前持股設定為輸入，每次分析都會建立一筆新的 `holding_analyses`
 快照。若同一 symbol/timeframe 已有 SR Zone 快照，會重用最新一筆；只有找不到既有快照時，

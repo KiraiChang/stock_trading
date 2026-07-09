@@ -10,7 +10,7 @@
   import Analysis from './routes/Analysis.svelte'
   import SRZones from './routes/SRZones.svelte'
   import Chips from './routes/Chips.svelte'
-  import Holdings from './routes/Holdings.svelte'
+  import Positions from './routes/Positions.svelte'
 </script>
 
 {#if $isAuthenticated}
@@ -26,8 +26,8 @@
     <Analysis />
   {:else if $currentRoute === 'sr-zones'}
     <SRZones />
-  {:else if $currentRoute === 'holdings'}
-    <Holdings />
+  {:else if $currentRoute === 'positions'}
+    <Positions />
   {:else if $currentRoute === 'chips'}
     <Chips />
   {:else}

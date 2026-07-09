@@ -372,40 +372,28 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 
 ---
 
-## holdings
+## position_transactions / positions
 
-目前手中持股設定，供「持股操作」頁面維護。
+`position_transactions` 是不可變事件帳；支援 `OPENING_BALANCE`、`BUY`、`SELL`、
+`ADJUSTMENT`。BUY/SELL 保存股數、價格、費用與稅；ADJUSTMENT 保存更正後股數、
+AVG 成本及原因。API 不提供 update/delete。
 
-| 欄位 | 說明 |
-|------|------|
-| symbol | 股票代號 |
-| shares | 持有股數 |
-| cost_price | 持有成本 |
-| note | 備註 |
-| created_at / updated_at | 建立與更新時間 |
-
----
-
-## holding_analyses
-
-每次按下「分析」後保存的持股操作建議快照。這張表會複製當下的 `shares` /
-`cost_price`，並引用使用於該次判斷的 `stock_sr_zone_analyses.id`。若同一
-symbol/timeframe 已有 SR Zone 快照，持股分析會重用最新快照；只有找不到既有快照時才新建
-SR Zone 快照。
+`positions` 是每個 symbol 唯一的 AVG projection：
 
 | 欄位 | 說明 |
 |------|------|
-| holding_id | 對應持股設定 ID；刪除持股設定不會改寫既有快照內容 |
-| symbol / shares / cost_price | 分析當下的持股資料快照 |
-| analyzed_at / current_price | SR Zone 分析使用的最後一根 K 棒時間與收盤價 |
-| sr_zone_analysis_id | 該次持股分析引用的 SR Zone 快照 ID（可能是既有快照） |
-| action / action_label | `HOLD` / `STOP_LOSS` / `TAKE_PROFIT` / `ADD_ON_BREAKOUT` / `REDUCE` 與中文標籤 |
-| stop_loss_price / stop_loss_amount | 停損參考價與依持有成本估算的停損金額 |
-| take_profit_price / take_profit_amount | 停利參考價與依持有成本估算的停利金額 |
-| add_on_trigger_price / add_on_amount | 突破加碼觸發價與建議加碼金額 |
-| unrealized_pnl / unrealized_pnl_pct | 分析當下未實現損益 |
-| reason | JSON：操作建議理由 |
-| detail_json | JSON：規則版本、加碼比例、選中的支撐/壓力 zone 等診斷資訊 |
-| created_at | 快照建立時間 |
+| symbol | 股票代號主鍵 |
+| shares / avg_cost | 目前股數與移動加權平均成本 |
+| realized_pnl | SELL 累積已實現損益 |
+| version | optimistic version；事件 request 必須帶目前版本 |
+| last_event_id / updated_at | projection 對應的最後事件與更新時間 |
 
-**Index：** `INDEX(holding_id, created_at DESC)`、`INDEX(symbol, created_at DESC)`。
+## position_analyses
+
+FLAT 與 LONG 共用的不可變分析快照。包含 Position version、SR Zone reference、
+Action、目前／目標／調整股數、調整金額、進場／停損／停利價、風險金額、
+預期報酬、RR、損益、設定快照、Evidence、觸發與失效條件。
+
+Migration 038 將同 symbol 的舊 holdings 依股數加權合併為一筆
+`OPENING_BALANCE`，並把舊 `holding_analyses` 搬為
+`rule_version=holding_sr_zone_v1_legacy` 後移除舊表。

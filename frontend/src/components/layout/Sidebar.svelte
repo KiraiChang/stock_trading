@@ -5,7 +5,7 @@
     { label: 'Dashboard', icon: '◈', route: 'dashboard' },
     { label: '個股分析', icon: '◎', route: 'analysis' },
     { label: '支撐/壓力機率', icon: '◫', route: 'sr-zones' },
-    { label: '持股操作', icon: '▣', route: 'holdings' },
+    { label: 'Position Analysis', icon: '▣', route: 'positions' },
     { label: '籌碼分析', icon: '⛁', route: 'chips' },
     { label: '歷史資料回補', icon: '⟳', route: 'backfill' },
     { label: '策略回測', icon: '▶', route: 'backtest' },

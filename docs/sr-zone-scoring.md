@@ -487,11 +487,11 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 
 ## 十四、SR Zone Decision Engine（T-019）
 
-SR Zone Decision Engine 是「無持股」的決策層，輸出欄位仍是
+SR Zone Decision Engine 是 position-agnostic 的市場決策層，輸出欄位仍是
 `decision_summary`。第一階段只回答「這份 SR Zone 分析本身目前應如何閱讀」：
 目前盤勢前提、唯一操作結論、主交易區、共用背景與風險。它不處理持有成本、
-股數、未實現損益、停損金額、停利金額或加碼金額；這些留到後續持股操作版
-Decision Engine。
+股數、未實現損益、停損金額、停利金額或加碼金額；這些由 Position Analysis
+Decision Engine 處理。
 
 它不取代既有 `global_*`、`period_summaries`、`analysis_tips`、`zones`、
 EV/RR、機率、score breakdown 或籌碼拆解，而是把這些既有資料整理成單一決策

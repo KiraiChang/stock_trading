@@ -431,39 +431,63 @@ type ChipSyncJob struct {
 
 // ── Holdings / Portfolio Analysis models ─────────────────────
 
-type Holding struct {
-	ID        uint64    `db:"id"         json:"id"`
-	Symbol    string    `db:"symbol"     json:"symbol"`
-	Shares    float64   `db:"shares"     json:"shares"`
-	CostPrice float64   `db:"cost_price" json:"cost_price"`
-	Note      string    `db:"note"       json:"note"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+// Position is the materialized AVG-cost projection rebuilt transactionally
+// from immutable PositionTransaction events.
+type Position struct {
+	Symbol      string    `db:"symbol"       json:"symbol"`
+	Shares      float64   `db:"shares"       json:"shares"`
+	AvgCost     float64   `db:"avg_cost"     json:"avg_cost"`
+	RealizedPnL float64   `db:"realized_pnl" json:"realized_pnl"`
+	Version     int64     `db:"version"      json:"version"`
+	LastEventID uint64    `db:"last_event_id" json:"last_event_id"`
+	UpdatedAt   time.Time `db:"updated_at"   json:"updated_at"`
 }
 
-// HoldingAnalysis 是每次按下「分析」後保存的操作建議快照。它會複製當下
-// shares/cost_price，並引用當次建立的 sr_zone_analysis_id，讓歷史結果不會因
-// 之後修改持股或重新訓練模型而改變。
-type HoldingAnalysis struct {
-	ID                uint64      `db:"id"                    json:"id"`
-	HoldingID         uint64      `db:"holding_id"            json:"holding_id"`
-	Symbol            string      `db:"symbol"                json:"symbol"`
-	Shares            float64     `db:"shares"                json:"shares"`
-	CostPrice         float64     `db:"cost_price"            json:"cost_price"`
-	AnalyzedAt        time.Time   `db:"analyzed_at"           json:"analyzed_at"`
-	CurrentPrice      float64     `db:"current_price"         json:"current_price"`
-	SRZoneAnalysisID  NullInt64   `db:"sr_zone_analysis_id"   json:"sr_zone_analysis_id,omitempty"`
-	Action            string      `db:"action"                json:"action"`
-	ActionLabel       string      `db:"action_label"          json:"action_label"`
-	StopLossPrice     NullFloat64 `db:"stop_loss_price"       json:"stop_loss_price,omitempty"`
-	StopLossAmount    NullFloat64 `db:"stop_loss_amount"      json:"stop_loss_amount,omitempty"`
-	TakeProfitPrice   NullFloat64 `db:"take_profit_price"     json:"take_profit_price,omitempty"`
-	TakeProfitAmount  NullFloat64 `db:"take_profit_amount"    json:"take_profit_amount,omitempty"`
-	AddOnTriggerPrice NullFloat64 `db:"add_on_trigger_price" json:"add_on_trigger_price,omitempty"`
-	AddOnAmount       NullFloat64 `db:"add_on_amount"        json:"add_on_amount,omitempty"`
-	UnrealizedPnL     float64     `db:"unrealized_pnl"        json:"unrealized_pnl"`
-	UnrealizedPnLPct  float64     `db:"unrealized_pnl_pct"    json:"unrealized_pnl_pct"`
-	Reason            RawJSON     `db:"reason"                json:"reason"`
-	DetailJSON        RawJSON     `db:"detail_json"           json:"detail_json"`
-	CreatedAt         time.Time   `db:"created_at"            json:"created_at"`
+type PositionTransaction struct {
+	ID            uint64      `db:"id"              json:"id"`
+	Symbol        string      `db:"symbol"          json:"symbol"`
+	EventType     string      `db:"event_type"      json:"event_type"`
+	OccurredAt    time.Time   `db:"occurred_at"     json:"occurred_at"`
+	Shares        NullFloat64 `db:"shares"          json:"shares,omitempty"`
+	Price         NullFloat64 `db:"price"           json:"price,omitempty"`
+	Fee           float64     `db:"fee"             json:"fee"`
+	Tax           float64     `db:"tax"             json:"tax"`
+	TargetShares  NullFloat64 `db:"target_shares"   json:"target_shares,omitempty"`
+	TargetAvgCost NullFloat64 `db:"target_avg_cost" json:"target_avg_cost,omitempty"`
+	Note          string      `db:"note"            json:"note"`
+	CreatedAt     time.Time   `db:"created_at"      json:"created_at"`
+}
+
+type PositionAnalysis struct {
+	ID                     uint64      `db:"id"                     json:"id"`
+	Symbol                 string      `db:"symbol"                 json:"symbol"`
+	PositionState          string      `db:"position_state"         json:"position_state"`
+	PositionVersion        int64       `db:"position_version"       json:"position_version"`
+	Shares                 float64     `db:"shares"                 json:"shares"`
+	AvgCost                float64     `db:"avg_cost"               json:"avg_cost"`
+	RealizedPnL            float64     `db:"realized_pnl"           json:"realized_pnl"`
+	AnalyzedAt             time.Time   `db:"analyzed_at"            json:"analyzed_at"`
+	CurrentPrice           float64     `db:"current_price"          json:"current_price"`
+	SRZoneAnalysisID       NullInt64   `db:"sr_zone_analysis_id"    json:"sr_zone_analysis_id,omitempty"`
+	Action                 string      `db:"action"                 json:"action"`
+	ActionLabel            string      `db:"action_label"           json:"action_label"`
+	TargetShares           float64     `db:"target_shares"          json:"target_shares"`
+	AdjustmentShares       float64     `db:"adjustment_shares"      json:"adjustment_shares"`
+	AdjustmentSide         string      `db:"adjustment_side"        json:"adjustment_side"`
+	AdjustmentAmount       float64     `db:"adjustment_amount"      json:"adjustment_amount"`
+	EntryPrice             NullFloat64 `db:"entry_price"            json:"entry_price,omitempty"`
+	StopLossPrice          NullFloat64 `db:"stop_loss_price"        json:"stop_loss_price,omitempty"`
+	TakeProfitPrice        NullFloat64 `db:"take_profit_price"      json:"take_profit_price,omitempty"`
+	RiskAmount             NullFloat64 `db:"risk_amount"            json:"risk_amount,omitempty"`
+	ExpectedRewardAmount   NullFloat64 `db:"expected_reward_amount" json:"expected_reward_amount,omitempty"`
+	RiskRewardRatio        NullFloat64 `db:"risk_reward_ratio"      json:"risk_reward_ratio,omitempty"`
+	UnrealizedPnL          float64     `db:"unrealized_pnl"         json:"unrealized_pnl"`
+	UnrealizedPnLPct       float64     `db:"unrealized_pnl_pct"     json:"unrealized_pnl_pct"`
+	ConfigJSON             RawJSON     `db:"config_json"            json:"config"`
+	Reason                 RawJSON     `db:"reason"                 json:"reason"`
+	Evidence               RawJSON     `db:"evidence"               json:"evidence"`
+	TriggerConditions      RawJSON     `db:"trigger_conditions"     json:"trigger_conditions"`
+	InvalidationConditions RawJSON     `db:"invalidation_conditions" json:"invalidation_conditions"`
+	RuleVersion            string      `db:"rule_version"           json:"rule_version"`
+	CreatedAt              time.Time   `db:"created_at"             json:"created_at"`
 }

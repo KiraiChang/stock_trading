@@ -7,14 +7,24 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	FinMind  FinMindConfig
-	Fugle    FugleConfig
-	Python   PythonConfig
-	Auth     AuthConfig
-	Chip     ChipConfig
+	Server           ServerConfig
+	Database         DatabaseConfig
+	Redis            RedisConfig
+	FinMind          FinMindConfig
+	Fugle            FugleConfig
+	Python           PythonConfig
+	Auth             AuthConfig
+	Chip             ChipConfig
+	PositionAnalysis PositionAnalysisConfig `mapstructure:"position_analysis"`
+}
+
+type PositionAnalysisConfig struct {
+	MaxPositionValue         float64 `mapstructure:"max_position_value"`
+	MaxRiskAmount            float64 `mapstructure:"max_risk_amount"`
+	AddOnRatio               float64 `mapstructure:"add_on_ratio"`
+	MinRiskRewardRatio       float64 `mapstructure:"min_risk_reward_ratio"`
+	TakeProfitReductionRatio float64 `mapstructure:"take_profit_reduction_ratio"`
+	SRReuseMaxAgeHours       int     `mapstructure:"sr_reuse_max_age_hours"`
 }
 
 type AuthConfig struct {
@@ -96,6 +106,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)
+	viper.SetDefault("position_analysis.max_position_value", 200000)
+	viper.SetDefault("position_analysis.max_risk_amount", 10000)
+	viper.SetDefault("position_analysis.add_on_ratio", 0.25)
+	viper.SetDefault("position_analysis.min_risk_reward_ratio", 1.5)
+	viper.SetDefault("position_analysis.take_profit_reduction_ratio", 0.5)
+	viper.SetDefault("position_analysis.sr_reuse_max_age_hours", 24)
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()

@@ -2,7 +2,9 @@ package portfolio
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -13,305 +15,383 @@ import (
 )
 
 const (
-	ActionHold          = "HOLD"
-	ActionStopLoss      = "STOP_LOSS"
-	ActionTakeProfit    = "TAKE_PROFIT"
-	ActionReduce        = "REDUCE"
-	ActionAddOnBreakout = "ADD_ON_BREAKOUT"
+	StateFlat = "FLAT"
+	StateLong = "LONG"
+
+	ActionEnter      = "ENTER"
+	ActionEnterSmall = "ENTER_SMALL"
+	ActionWait       = "WAIT"
+	ActionAvoid      = "AVOID"
+	ActionHold       = "HOLD"
+	ActionAdd        = "ADD"
+	ActionReduce     = "REDUCE"
+	ActionTakeProfit = "TAKE_PROFIT"
+	ActionExitStop   = "EXIT_STOP"
 
 	defaultTimeframe        = "1d"
-	defaultAddOnRatio       = 0.25
 	existingSRSnapshotLimit = 200
-	defaultSRReuseMaxAge    = 24 * time.Hour
 )
 
-type Analyzer struct {
-	client        *analysis.Client
-	holdings      store.HoldingRepo
-	srZoneRepo    store.SRZoneRepo
-	addOnRatio    float64
-	defaultLimit  int
-	now           func() time.Time
-	srReuseMaxAge time.Duration
+type Config struct {
+	MaxPositionValue         float64       `json:"max_position_value"`
+	MaxRiskAmount            float64       `json:"max_risk_amount"`
+	AddOnRatio               float64       `json:"add_on_ratio"`
+	MinRiskRewardRatio       float64       `json:"min_risk_reward_ratio"`
+	TakeProfitReductionRatio float64       `json:"take_profit_reduction_ratio"`
+	SRReuseMaxAge            time.Duration `json:"-"`
 }
 
-func NewAnalyzer(client *analysis.Client, holdings store.HoldingRepo, srZoneRepo store.SRZoneRepo) *Analyzer {
-	return &Analyzer{
-		client:        client,
-		holdings:      holdings,
-		srZoneRepo:    srZoneRepo,
-		addOnRatio:    defaultAddOnRatio,
-		defaultLimit:  250,
-		now:           time.Now,
-		srReuseMaxAge: defaultSRReuseMaxAge,
+func DefaultConfig() Config {
+	return Config{
+		MaxPositionValue: 200000, MaxRiskAmount: 10000, AddOnRatio: 0.25,
+		MinRiskRewardRatio: 1.5, TakeProfitReductionRatio: 0.5,
+		SRReuseMaxAge: 24 * time.Hour,
 	}
 }
 
+type Analyzer struct {
+	client     *analysis.Client
+	positions  store.PositionRepo
+	srZoneRepo store.SRZoneRepo
+	config     Config
+	now        func() time.Time
+}
+
+func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRepo store.SRZoneRepo, config Config) *Analyzer {
+	// 逐欄位補預設：任何一項風險/部位參數缺漏或 <= 0 都會讓部位計算靜默失效
+	// （例如 MaxRiskAmount=0 會讓 riskShares=0、永遠 target 0），所以每項各自回退。
+	d := DefaultConfig()
+	if config.MaxPositionValue <= 0 {
+		config.MaxPositionValue = d.MaxPositionValue
+	}
+	if config.MaxRiskAmount <= 0 {
+		config.MaxRiskAmount = d.MaxRiskAmount
+	}
+	if config.AddOnRatio <= 0 {
+		config.AddOnRatio = d.AddOnRatio
+	}
+	if config.MinRiskRewardRatio <= 0 {
+		config.MinRiskRewardRatio = d.MinRiskRewardRatio
+	}
+	if config.TakeProfitReductionRatio <= 0 {
+		config.TakeProfitReductionRatio = d.TakeProfitReductionRatio
+	}
+	if config.SRReuseMaxAge <= 0 {
+		config.SRReuseMaxAge = d.SRReuseMaxAge
+	}
+	return &Analyzer{client: client, positions: positions, srZoneRepo: srZoneRepo, config: config, now: time.Now}
+}
+
 type AnalyzeOptions struct {
-	Timeframe string
-	Limit     int
+	Timeframe    string
+	Limit        int
+	ForceRefresh bool
 }
 
 type AnalyzeResult struct {
-	Analysis *store.HoldingAnalysis `json:"analysis"`
-	SR       *store.SRZoneAnalysis  `json:"sr_zone_analysis"`
-	Zones    []store.SRZone         `json:"zones"`
+	Analysis *store.PositionAnalysis `json:"analysis"`
+	SR       *store.SRZoneAnalysis   `json:"sr_zone_analysis"`
+	Zones    []store.SRZone          `json:"zones"`
 }
 
-func (a *Analyzer) Analyze(ctx context.Context, holdingID uint64, opts AnalyzeOptions) (*AnalyzeResult, error) {
-	holding, err := a.holdings.Get(ctx, holdingID)
-	if err != nil {
+func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptions) (*AnalyzeResult, error) {
+	position, err := a.positions.Get(ctx, symbol)
+	if errors.Is(err, sql.ErrNoRows) {
+		position = &store.Position{Symbol: symbol}
+	} else if err != nil {
 		return nil, err
 	}
 	if opts.Timeframe == "" {
 		opts.Timeframe = defaultTimeframe
 	}
 	if opts.Limit == 0 {
-		opts.Limit = a.defaultLimit
+		opts.Limit = 250
 	}
 
-	if savedSR, savedZones, ok, err := a.findExistingSRSnapshot(ctx, holding.Symbol, opts.Timeframe); err != nil {
-		return nil, err
-	} else if ok {
-		return a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
-	}
-
-	scoreResult, err := a.client.ScoreZones(ctx, holding.Symbol, opts.Timeframe, opts.Limit)
+	sr, zones, err := a.loadSR(ctx, symbol, opts)
 	if err != nil {
 		return nil, err
 	}
-	srAnalysis, zones, err := scoreResult.ToStore()
+	snapshot, err := a.buildSnapshot(position, sr, zones)
 	if err != nil {
-		return nil, fmt.Errorf("convert sr zone result: %w", err)
-	}
-	srID, err := a.srZoneRepo.Create(ctx, srAnalysis, zones)
-	if err != nil {
-		return nil, fmt.Errorf("create sr zone analysis: %w", err)
-	}
-	savedSR, err := a.srZoneRepo.Get(ctx, srID)
-	if err != nil {
-		return nil, fmt.Errorf("get saved sr zone analysis: %w", err)
-	}
-	savedZones, err := a.srZoneRepo.GetZones(ctx, srID)
-	if err != nil {
-		return nil, fmt.Errorf("get saved sr zones: %w", err)
-	}
-
-	analysisResult, err := a.createHoldingAnalysis(ctx, holding, savedSR, savedZones)
-	if err != nil {
-		if deleteErr := a.srZoneRepo.Delete(ctx, srID); deleteErr != nil {
-			return nil, fmt.Errorf("%w; cleanup sr zone analysis %d: %v", err, srID, deleteErr)
-		}
 		return nil, err
 	}
-	return analysisResult, nil
+	id, err := a.positions.CreateAnalysis(ctx, snapshot)
+	if err != nil {
+		return nil, fmt.Errorf("create position analysis: %w", err)
+	}
+	saved, err := a.positions.GetAnalysis(ctx, id)
+	if err != nil {
+		snapshot.ID = id
+		snapshot.CreatedAt = a.currentTime()
+		saved = snapshot
+	}
+	return &AnalyzeResult{Analysis: saved, SR: sr, Zones: zones}, nil
 }
 
-func (a *Analyzer) findExistingSRSnapshot(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, []store.SRZone, bool, error) {
-	analyses, err := a.srZoneRepo.List(ctx, symbol, existingSRSnapshotLimit)
-	if err != nil {
-		return nil, nil, false, fmt.Errorf("list existing sr zone analyses: %w", err)
-	}
-	for i := range analyses {
-		if analyses[i].Timeframe != timeframe {
-			continue
-		}
-		savedSR := analyses[i]
-		if !a.isFreshSRSnapshot(savedSR.AnalyzedAt) {
-			continue
-		}
-		zones, err := a.srZoneRepo.GetZones(ctx, savedSR.ID)
+func (a *Analyzer) loadSR(ctx context.Context, symbol string, opts AnalyzeOptions) (*store.SRZoneAnalysis, []store.SRZone, error) {
+	if !opts.ForceRefresh {
+		analyses, err := a.srZoneRepo.List(ctx, symbol, existingSRSnapshotLimit)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("get existing sr zones: %w", err)
+			return nil, nil, fmt.Errorf("list existing sr zone analyses: %w", err)
 		}
-		return &savedSR, zones, true, nil
+		for i := range analyses {
+			if analyses[i].Timeframe != opts.Timeframe {
+				continue
+			}
+			age := a.currentTime().Sub(analyses[i].AnalyzedAt)
+			if age < 0 || age > a.config.SRReuseMaxAge {
+				continue
+			}
+			zones, err := a.srZoneRepo.GetZones(ctx, analyses[i].ID)
+			return &analyses[i], zones, err
+		}
 	}
-	return nil, nil, false, nil
-}
 
-func (a *Analyzer) isFreshSRSnapshot(analyzedAt time.Time) bool {
-	maxAge := a.srReuseMaxAge
-	if maxAge <= 0 {
-		maxAge = defaultSRReuseMaxAge
-	}
-	age := a.currentTime().Sub(analyzedAt)
-	return age >= 0 && age <= maxAge
-}
-
-// currentTime 回傳目前時間，測試可透過 a.now 注入固定時鐘。
-func (a *Analyzer) currentTime() time.Time {
-	if a.now != nil {
-		return a.now()
-	}
-	return time.Now()
-}
-
-func (a *Analyzer) createHoldingAnalysis(ctx context.Context, holding *store.Holding, savedSR *store.SRZoneAnalysis, savedZones []store.SRZone) (*AnalyzeResult, error) {
-	analysisSnapshot, err := a.buildSnapshot(holding, savedSR, savedZones)
+	result, err := a.client.ScoreZones(ctx, symbol, opts.Timeframe, opts.Limit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	id, err := a.holdings.CreateAnalysis(ctx, analysisSnapshot)
+	sr, zones, err := result.ToStore()
 	if err != nil {
-		return nil, fmt.Errorf("create holding analysis: %w", err)
+		return nil, nil, err
 	}
-	savedAnalysis, err := a.holdings.GetAnalysis(ctx, id)
+	id, err := a.srZoneRepo.Create(ctx, sr, zones)
 	if err != nil {
-		// 讀回失敗不代表寫入失敗：holding_analyses 已建立（id 有效）。此時若把整筆
-		// 當成失敗回傳，呼叫端會誤以為沒寫入而去刪除 SR 快照，留下指向已刪 SR 的
-		// 孤兒分析。改回退用剛建立的快照，補上 DB 端會填的 id/created_at 後照常回傳，
-		// 確保 SR 快照被保留。
-		analysisSnapshot.ID = id
-		analysisSnapshot.CreatedAt = a.currentTime()
-		return &AnalyzeResult{Analysis: analysisSnapshot, SR: savedSR, Zones: savedZones}, nil
+		return nil, nil, err
 	}
-
-	return &AnalyzeResult{Analysis: savedAnalysis, SR: savedSR, Zones: savedZones}, nil
+	saved, err := a.srZoneRepo.Get(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	savedZones, err := a.srZoneRepo.GetZones(ctx, id)
+	return saved, savedZones, err
 }
 
-func (a *Analyzer) buildSnapshot(h *store.Holding, sr *store.SRZoneAnalysis, zones []store.SRZone) (*store.HoldingAnalysis, error) {
+func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnalysis, zones []store.SRZone) (*store.PositionAnalysis, error) {
 	current := sr.CurrentPrice
-	unrealized := (current - h.CostPrice) * h.Shares
-	unrealizedPct := 0.0
-	if h.CostPrice > 0 {
-		unrealizedPct = (current - h.CostPrice) / h.CostPrice
+	state := StateFlat
+	if position.Shares > 0 {
+		state = StateLong
+	}
+	unrealized, unrealizedPct := 0.0, 0.0
+	if state == StateLong {
+		unrealized = (current - position.AvgCost) * position.Shares
+		if position.AvgCost > 0 {
+			unrealizedPct = (current - position.AvgCost) / position.AvgCost
+		}
 	}
 
 	support := pickSupportZone(zones, current)
+	brokenSupport := pickBrokenSupport(zones, current)
 	resistance := pickResistanceZone(zones, current)
-	decisionAction := decisionAction(sr.DecisionSummary)
+	srAction := decisionAction(sr.DecisionSummary)
 
-	action, label := ActionHold, "繼續持有"
-	reasons := []string{
-		fmt.Sprintf("以 %.2f 的最新收盤價與 SR Zone 快照評估。", current),
+	var stop, takeProfit, riskAmount, rewardAmount, rr store.NullFloat64
+	fullTarget := 0.0
+	if support != nil && current > support.PriceLow {
+		stop = store.NewNullFloat64(support.PriceLow)
+		capitalShares := math.Floor(a.config.MaxPositionValue / current)
+		riskShares := math.Floor(a.config.MaxRiskAmount / (current - support.PriceLow))
+		fullTarget = math.Max(0, math.Min(capitalShares, riskShares))
+	}
+	if resistance != nil && resistance.PriceLow > current {
+		takeProfit = store.NewNullFloat64(resistance.PriceLow)
+	}
+	if stop.Valid && takeProfit.Valid && current > stop.Float64 {
+		rr = store.NewNullFloat64((takeProfit.Float64 - current) / (current - stop.Float64))
 	}
 
-	var stopLossPrice, stopLossAmount store.NullFloat64
-	if support != nil {
-		stopLossPrice = store.NewNullFloat64(support.PriceLow)
-		stopLossAmount = store.NewNullFloat64(math.Max(0, (h.CostPrice-support.PriceLow)*h.Shares))
-		reasons = append(reasons, fmt.Sprintf("主要停損參考下方支撐區 %.2f~%.2f。", support.PriceLow, support.PriceHigh))
-		if current < support.PriceLow || support.Status == "BROKEN" {
-			action, label = ActionStopLoss, "停損"
-			reasons = append(reasons, "收盤價已跌破主要支撐區，優先控管下檔風險。")
+	action, label, target := ActionWait, "等待", 0.0
+	reasons := []string{fmt.Sprintf("以 %.2f 的最新收盤價與 SR Zone v2 快照評估。", current)}
+	triggers := []string{}
+	invalidations := []string{}
+	canIncrease := stop.Valid && rr.Valid && rr.Float64 >= a.config.MinRiskRewardRatio
+	if state == StateFlat {
+		switch {
+		case srAction == "Avoid":
+			action, label = ActionAvoid, "避開"
+		case srAction == "Buy" && canIncrease:
+			action, label, target = ActionEnter, "建立部位", fullTarget
+		case srAction == "BuySmall" && canIncrease:
+			action, label, target = ActionEnterSmall, "小量建立", math.Floor(fullTarget*0.5)
+		default:
+			action, label = ActionWait, "等待"
+			if !stop.Valid {
+				reasons = append(reasons, "沒有有效支撐，無法量化停損風險。")
+			} else if !rr.Valid || rr.Float64 < a.config.MinRiskRewardRatio {
+				reasons = append(reasons, "風險報酬比未達進場門檻。")
+			}
 		}
 	} else {
-		reasons = append(reasons, "目前沒有可用的下方支撐區，停損價暫不給定。")
-	}
-
-	var takeProfitPrice, takeProfitAmount, addOnTriggerPrice, addOnAmount store.NullFloat64
-	if resistance != nil {
-		takeProfitPrice = store.NewNullFloat64(resistance.PriceLow)
-		takeProfitAmount = store.NewNullFloat64(math.Max(0, (resistance.PriceLow-h.CostPrice)*h.Shares))
-		addOnTriggerPrice = store.NewNullFloat64(resistance.PriceHigh)
-		addOnAmount = store.NewNullFloat64(current * h.Shares * a.addOnRatio)
-		reasons = append(reasons, fmt.Sprintf("主要停利參考上方壓力區 %.2f~%.2f；若收盤突破 %.2f，可再評估加碼。", resistance.PriceLow, resistance.PriceHigh, resistance.PriceHigh))
-		if action == ActionHold && near(current, resistance.PriceLow, 0.02) && resistance.TradingScore >= 60 {
-			action, label = ActionTakeProfit, "停利"
-			reasons = append(reasons, "收盤價已接近高分壓力區，優先檢查停利或減碼。")
+		broken := brokenSupport != nil
+		switch {
+		case broken:
+			action, label, target = ActionExitStop, "停損出場", 0
+		case resistance != nil && near(current, resistance.PriceLow, 0.02) && resistance.TradingScore >= 60:
+			action, label = ActionTakeProfit, "停利減碼"
+			target = math.Floor(position.Shares * (1 - a.config.TakeProfitReductionRatio))
+		case !stop.Valid:
+			action, label = ActionReduce, "降低風險"
+			target = math.Floor(position.Shares * 0.5)
+			reasons = append(reasons, "沒有有效支撐，無法量化停損風險。")
+		case srAction == "Avoid":
+			action, label = ActionReduce, "減碼"
+			target = math.Floor(position.Shares * 0.5)
+		case srAction == "Buy" && canIncrease:
+			target = fullTarget
+			if target > position.Shares {
+				target = math.Min(target, position.Shares+math.Floor(fullTarget*a.config.AddOnRatio))
+			}
+			action, label = actionForDelta(target-position.Shares, ActionHold, "繼續持有")
+		case srAction == "BuySmall" && canIncrease:
+			target = math.Floor(fullTarget * 0.5)
+			if target > position.Shares {
+				target = math.Min(target, position.Shares+math.Floor(fullTarget*a.config.AddOnRatio))
+			}
+			action, label = actionForDelta(target-position.Shares, ActionHold, "繼續持有")
+		default:
+			target = position.Shares
+			if fullTarget > 0 && target > fullTarget {
+				target = fullTarget
+				action, label = ActionReduce, "降至風險上限"
+			} else {
+				action, label = ActionHold, "繼續持有"
+			}
 		}
-	} else {
-		reasons = append(reasons, "目前沒有可用的上方壓力區，加碼與停利價暫不給定。")
 	}
+	target = math.Max(0, math.Floor(target))
+	delta := target - position.Shares
+	side := "NONE"
+	if delta > 0 {
+		side = "BUY"
+	} else if delta < 0 {
+		side = "SELL"
+	}
+	if stop.Valid {
+		riskAmount = store.NewNullFloat64(math.Max(0, (current-stop.Float64)*target))
+	}
+	if takeProfit.Valid {
+		rewardAmount = store.NewNullFloat64(math.Max(0, (takeProfit.Float64-current)*target))
+	}
+	if stop.Valid {
+		invalidations = append(invalidations, fmt.Sprintf("收盤跌破 %.2f", stop.Float64))
+	}
+	if takeProfit.Valid {
+		triggers = append(triggers, fmt.Sprintf("價格接近或突破 %.2f", takeProfit.Float64))
+	}
+	reasons = append(reasons, fmt.Sprintf("SR 決策為 %s；目前 %.0f 股，目標 %.0f 股。", srAction, position.Shares, target))
 
-	if action == ActionHold && decisionAction == "Avoid" {
-		action, label = ActionReduce, "減碼"
-		reasons = append(reasons, "SR Zone 決策層給出 Avoid，持股建議降風險。")
-	}
-	if action == ActionHold && (decisionAction == "Buy" || decisionAction == "BuySmall") && resistance != nil {
-		action, label = ActionAddOnBreakout, "突破加碼觀察"
-		reasons = append(reasons, "SR Zone 決策層偏多，但仍以突破上方壓力區後再加碼為準。")
-	}
-
-	reasonJSON, err := json.Marshal(reasons)
-	if err != nil {
-		return nil, err
-	}
-	detailJSON, err := json.Marshal(map[string]any{
-		"rule_version":       "holding_sr_zone_v1",
-		"add_on_ratio":       a.addOnRatio,
-		"sr_decision_action": decisionAction,
+	configJSON, _ := json.Marshal(a.config)
+	reasonJSON, _ := json.Marshal(reasons)
+	triggerJSON, _ := json.Marshal(triggers)
+	invalidationJSON, _ := json.Marshal(invalidations)
+	evidenceJSON, _ := json.Marshal(map[string]any{
+		"sr_decision_action": srAction,
 		"support_zone":       zoneDetail(support),
 		"resistance_zone":    zoneDetail(resistance),
 	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &store.HoldingAnalysis{
-		HoldingID:         h.ID,
-		Symbol:            h.Symbol,
-		Shares:            h.Shares,
-		CostPrice:         h.CostPrice,
-		AnalyzedAt:        sr.AnalyzedAt,
-		CurrentPrice:      current,
-		SRZoneAnalysisID:  store.NewNullInt64(int64(sr.ID)),
-		Action:            action,
-		ActionLabel:       label,
-		StopLossPrice:     stopLossPrice,
-		StopLossAmount:    stopLossAmount,
-		TakeProfitPrice:   takeProfitPrice,
-		TakeProfitAmount:  takeProfitAmount,
-		AddOnTriggerPrice: addOnTriggerPrice,
-		AddOnAmount:       addOnAmount,
-		UnrealizedPnL:     unrealized,
-		UnrealizedPnLPct:  unrealizedPct,
-		Reason:            store.RawJSON(reasonJSON),
-		DetailJSON:        store.RawJSON(detailJSON),
+	return &store.PositionAnalysis{
+		Symbol: position.Symbol, PositionState: state, PositionVersion: position.Version,
+		Shares: position.Shares, AvgCost: position.AvgCost, RealizedPnL: position.RealizedPnL,
+		AnalyzedAt: sr.AnalyzedAt, CurrentPrice: current,
+		SRZoneAnalysisID: store.NewNullInt64(int64(sr.ID)), Action: action, ActionLabel: label,
+		TargetShares: target, AdjustmentShares: delta, AdjustmentSide: side,
+		AdjustmentAmount: math.Abs(delta) * current, EntryPrice: store.NewNullFloat64(current),
+		StopLossPrice: stop, TakeProfitPrice: takeProfit, RiskAmount: riskAmount,
+		ExpectedRewardAmount: rewardAmount, RiskRewardRatio: rr,
+		UnrealizedPnL: unrealized, UnrealizedPnLPct: unrealizedPct,
+		ConfigJSON: store.RawJSON(configJSON), Reason: store.RawJSON(reasonJSON),
+		Evidence: store.RawJSON(evidenceJSON), TriggerConditions: store.RawJSON(triggerJSON),
+		InvalidationConditions: store.RawJSON(invalidationJSON), RuleVersion: "position_sr_zone_v1",
 	}, nil
 }
 
-func pickSupportZone(zones []store.SRZone, current float64) *store.SRZone {
-	belowOrAt := make([]store.SRZone, 0)
-	above := make([]store.SRZone, 0)
-	for _, z := range zones {
-		if effectiveRole(z) != "SUPPORT" {
-			continue
-		}
-		if z.PriceLow <= current {
-			belowOrAt = append(belowOrAt, z)
-		} else {
-			above = append(above, z)
-		}
+func actionForDelta(delta float64, zeroAction, zeroLabel string) (string, string) {
+	if delta > 0 {
+		return ActionAdd, "加碼"
 	}
-	sort.Slice(belowOrAt, func(i, j int) bool {
-		if belowOrAt[i].PriceHigh == belowOrAt[j].PriceHigh {
-			return belowOrAt[i].TradingScore > belowOrAt[j].TradingScore
-		}
-		return belowOrAt[i].PriceHigh > belowOrAt[j].PriceHigh
-	})
-	if len(belowOrAt) > 0 {
-		return &belowOrAt[0]
+	if delta < 0 {
+		return ActionReduce, "減碼"
 	}
-	sort.Slice(above, func(i, j int) bool {
-		if above[i].PriceLow == above[j].PriceLow {
-			return above[i].TradingScore > above[j].TradingScore
-		}
-		return above[i].PriceLow < above[j].PriceLow
-	})
-	if len(above) > 0 {
-		return &above[0]
-	}
-	return nil
+	return zeroAction, zeroLabel
 }
 
-func pickResistanceZone(zones []store.SRZone, current float64) *store.SRZone {
+func pickSupportZone(zones []store.SRZone, current float64) *store.SRZone {
 	candidates := make([]store.SRZone, 0)
 	for _, z := range zones {
-		if effectiveRole(z) == "RESISTANCE" && z.PriceHigh >= current {
-			candidates = append(candidates, z)
+		if effectiveRole(z) != "SUPPORT" || z.PriceLow > current || z.Status == "BROKEN" {
+			continue
 		}
+		candidates = append(candidates, z)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].PriceLow == candidates[j].PriceLow {
+		if candidates[i].PriceHigh == candidates[j].PriceHigh {
 			return candidates[i].TradingScore > candidates[j].TradingScore
 		}
-		return candidates[i].PriceLow < candidates[j].PriceLow
+		return candidates[i].PriceHigh > candidates[j].PriceHigh
 	})
 	if len(candidates) == 0 {
 		return nil
 	}
 	return &candidates[0]
+}
+
+func pickResistanceZone(zones []store.SRZone, current float64) *store.SRZone {
+	candidates := make([]store.SRZone, 0)
+	for _, z := range zones {
+		if effectiveRole(z) == "RESISTANCE" && z.PriceHigh >= current && z.Status != "BROKEN" {
+			candidates = append(candidates, z)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].PriceLow < candidates[j].PriceLow })
+	if len(candidates) == 0 {
+		return nil
+	}
+	return &candidates[0]
+}
+
+func pickBrokenSupport(zones []store.SRZone, current float64) *store.SRZone {
+	var belowOrAt, all []store.SRZone
+	for _, z := range zones {
+		if effectiveRole(z) != "SUPPORT" {
+			continue
+		}
+		all = append(all, z)
+		if z.PriceLow <= current {
+			belowOrAt = append(belowOrAt, z)
+		}
+	}
+	// 現價（含）以下的支撐才是多單的保護。有這種支撐時，只有它被標記為 BROKEN
+	// 才算跌破停損；上方的支撐不能拿來當停損依據，否則現價下方明明有有效支撐時，
+	// 會被上方支撐帶誤判成「跌破」而全數出場。
+	if len(belowOrAt) > 0 {
+		sort.Slice(belowOrAt, func(i, j int) bool {
+			return distanceToZone(belowOrAt[i], current) < distanceToZone(belowOrAt[j], current)
+		})
+		if belowOrAt[0].Status == "BROKEN" {
+			return &belowOrAt[0]
+		}
+		return nil
+	}
+	// 現價已跌破所有支撐帶（連最靠近的支撐都在上方）→ 結構性跌破，出場。
+	if len(all) > 0 {
+		sort.Slice(all, func(i, j int) bool {
+			return distanceToZone(all[i], current) < distanceToZone(all[j], current)
+		})
+		return &all[0]
+	}
+	return nil
+}
+
+func distanceToZone(zone store.SRZone, price float64) float64 {
+	if price < zone.PriceLow {
+		return zone.PriceLow - price
+	}
+	if price > zone.PriceHigh {
+		return price - zone.PriceHigh
+	}
+	return 0
 }
 
 func effectiveRole(z store.SRZone) string {
@@ -322,16 +402,10 @@ func effectiveRole(z store.SRZone) string {
 }
 
 func near(current, target, pct float64) bool {
-	if target <= 0 {
-		return false
-	}
-	return math.Abs(current-target)/target <= pct
+	return target > 0 && math.Abs(current-target)/target <= pct
 }
 
 func decisionAction(raw store.RawJSON) string {
-	if raw == "" || string(raw) == "null" {
-		return ""
-	}
 	var payload struct {
 		Action string `json:"action"`
 	}
@@ -344,15 +418,15 @@ func zoneDetail(z *store.SRZone) any {
 		return nil
 	}
 	return map[string]any{
-		"id":                     z.ID,
-		"price_low":              z.PriceLow,
-		"price_high":             z.PriceHigh,
-		"role":                   effectiveRole(*z),
-		"tier":                   z.Tier,
-		"confidence":             z.Confidence,
-		"confidence_level":       z.ConfidenceLevel,
-		"trading_score":          z.TradingScore,
-		"trading_recommendation": z.TradingRecommendation,
-		"status":                 z.Status,
+		"id": z.ID, "price_low": z.PriceLow, "price_high": z.PriceHigh,
+		"role": effectiveRole(*z), "tier": z.Tier, "confidence": z.Confidence,
+		"trading_score": z.TradingScore, "status": z.Status,
 	}
+}
+
+func (a *Analyzer) currentTime() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
 }

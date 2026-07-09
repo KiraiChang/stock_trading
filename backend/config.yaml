@@ -58,3 +58,11 @@ chip:
   sync:
     history_trading_days: 500   # 環境變數：CHIP_SYNC_HISTORY_TRADING_DAYS，backfill 預設回補天數
     batch_size: 50               # 環境變數：CHIP_SYNC_BATCH_SIZE，DB 批次寫入大小
+
+position_analysis:
+  max_position_value: 200000
+  max_risk_amount: 10000
+  add_on_ratio: 0.25
+  min_risk_reward_ratio: 1.5
+  take_profit_reduction_ratio: 0.5
+  sr_reuse_max_age_hours: 24

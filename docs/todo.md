@@ -333,7 +333,7 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
-### T-020：持股（holdings）加入使用者/擁有者 scoping
+### T-020：Position 資料加入使用者/擁有者 scoping
 
 | 欄位 | 內容 |
 |---|---|
@@ -343,27 +343,10 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 | 建立日期 | 2026-07-08 |
 | 來源 | 審視 commit `37b6b4f`「加入持股操作分析」時發現 |
 
-`holdings` / `holding_analyses` 資料表沒有 `user_id`，所有登入者共用同一份持股
+`positions` / `position_transactions` / `position_analyses` 沒有 `user_id`，所有登入者共用同一份
 清單與分析歷史。若系統定位為單人／管理工具可接受，但需明確；若要支援多使用者，
 需替兩張表補 owner 欄位、migration，並在 repo/handler 依當前使用者過濾（可參考
 既有 JWT / `userRepo` 機制）。屬功能擴充，非 bug。
-
----
-
-### T-021：持股 Analyze 對格式錯誤的 request body 明確回 400
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Go / API |
-| 建立日期 | 2026-07-08 |
-| 來源 | 審視 commit `37b6b4f`「加入持股操作分析」時發現 |
-
-`backend/internal/api/handler/holding.go` 的 `Analyze` 用 `_ = c.ShouldBindJSON(&body)`
-忽略解析錯誤：body 為選填時可接受，但「有帶 body 卻格式錯誤」會被靜默忽略、
-改用預設值（timeframe/limit），使用者不會知道自己的參數沒生效。可考慮在
-body 非空但解析失敗時回 400，讓錯誤明確。屬小幅健壯性優化。
 
 ---
 

@@ -54,7 +54,8 @@ func NewServer(
 	chipScoreRepo store.ChipScoreRepo,
 	chipSyncJobRepo store.ChipSyncJobRepo,
 	chipSyncer *chip.Syncer,
-	holdingRepo store.HoldingRepo,
+	positionRepo store.PositionRepo,
+	positionConfig portfolio.Config,
 	chipHistoryTradingDays int,
 	jwtSecret string,
 	log *zap.Logger,
@@ -157,15 +158,15 @@ func NewServer(
 		protected.POST("/chips/sync", cph.Sync)
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 
-		hh := handler.NewHoldingHandler(holdingRepo, portfolio.NewAnalyzer(analysisClient, holdingRepo, srZoneRepo), log)
-		protected.GET("/holdings", hh.List)
-		protected.POST("/holdings", hh.Create)
-		protected.PUT("/holdings/:id", hh.Update)
-		protected.DELETE("/holdings/:id", hh.Delete)
-		protected.POST("/holdings/:id/analyze", hh.Analyze)
-		protected.GET("/holdings/:id/analyses", hh.ListAnalyses)
-		protected.GET("/holding-analyses/:id", hh.GetAnalysis)
-		protected.DELETE("/holding-analyses/:id", hh.DeleteAnalysis)
+		ph := handler.NewPositionHandler(positionRepo, portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig), log)
+		protected.GET("/positions", ph.List)
+		protected.GET("/positions/:symbol", ph.Get)
+		protected.GET("/positions/:symbol/transactions", ph.ListTransactions)
+		protected.POST("/positions/:symbol/transactions", ph.AddTransaction)
+		protected.POST("/positions/:symbol/adjustments", ph.Adjust)
+		protected.POST("/position-analyses", ph.Analyze)
+		protected.GET("/position-analyses", ph.ListAnalyses)
+		protected.GET("/position-analyses/:id", ph.GetAnalysis)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

@@ -5,6 +5,7 @@ import (
 	"os"
 	ossignal "os/signal"
 	"syscall"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/trading/backend/internal/database"
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
+	"github.com/trading/backend/internal/portfolio"
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -78,7 +80,7 @@ func main() {
 	brokerTradeRepo := store.NewBrokerTradeRepo(db)
 	chipScoreRepo := store.NewChipScoreRepo(db)
 	chipSyncJobRepo := store.NewChipSyncJobRepo(db)
-	holdingRepo := store.NewHoldingRepo(db)
+	positionRepo := store.NewPositionRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -125,7 +127,15 @@ func main() {
 	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.FinMind.IntradayEnabled, log)
 
 	// API Server（含 WebSocket Hub）
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, holdingRepo, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
+	positionConfig := portfolio.Config{
+		MaxPositionValue:         cfg.PositionAnalysis.MaxPositionValue,
+		MaxRiskAmount:            cfg.PositionAnalysis.MaxRiskAmount,
+		AddOnRatio:               cfg.PositionAnalysis.AddOnRatio,
+		MinRiskRewardRatio:       cfg.PositionAnalysis.MinRiskRewardRatio,
+		TakeProfitReductionRatio: cfg.PositionAnalysis.TakeProfitReductionRatio,
+		SRReuseMaxAge:            time.Duration(cfg.PositionAnalysis.SRReuseMaxAgeHours) * time.Hour,
+	}
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

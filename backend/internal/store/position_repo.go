@@ -1,0 +1,307 @@
+package store
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/jmoiron/sqlx"
+)
+
+const (
+	PositionEventOpeningBalance = "OPENING_BALANCE"
+	PositionEventBuy            = "BUY"
+	PositionEventSell           = "SELL"
+	PositionEventAdjustment     = "ADJUSTMENT"
+)
+
+var ErrPositionVersionConflict = errors.New("position version conflict")
+
+type PositionRepo interface {
+	List(ctx context.Context) ([]Position, error)
+	Get(ctx context.Context, symbol string) (*Position, error)
+	ListTransactions(ctx context.Context, symbol string, limit int) ([]PositionTransaction, error)
+	ApplyEvent(ctx context.Context, event *PositionTransaction, expectedVersion int64) (*Position, error)
+	CreateAnalysis(ctx context.Context, analysis *PositionAnalysis) (uint64, error)
+	GetAnalysis(ctx context.Context, id uint64) (*PositionAnalysis, error)
+	ListAnalyses(ctx context.Context, symbol string, limit int) ([]PositionAnalysis, error)
+}
+
+type positionRepo struct {
+	db     *sqlx.DB
+	driver string
+}
+
+func NewPositionRepo(db *sqlx.DB) PositionRepo {
+	return &positionRepo{db: db, driver: db.DriverName()}
+}
+
+func (r *positionRepo) List(ctx context.Context) ([]Position, error) {
+	var rows []Position
+	err := r.db.SelectContext(ctx, &rows, `
+		SELECT symbol,shares,avg_cost,realized_pnl,version,last_event_id,updated_at
+		FROM positions WHERE shares>0 ORDER BY updated_at DESC,symbol
+	`)
+	return rows, err
+}
+
+func (r *positionRepo) Get(ctx context.Context, symbol string) (*Position, error) {
+	var row Position
+	err := r.db.GetContext(ctx, &row, r.db.Rebind(`
+		SELECT symbol,shares,avg_cost,realized_pnl,version,last_event_id,updated_at
+		FROM positions WHERE symbol=?
+	`), symbol)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
+func (r *positionRepo) ListTransactions(ctx context.Context, symbol string, limit int) ([]PositionTransaction, error) {
+	var rows []PositionTransaction
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
+		SELECT id,symbol,event_type,occurred_at,shares,price,fee,tax,
+		       target_shares,target_avg_cost,note,created_at
+		FROM position_transactions WHERE symbol=?
+		ORDER BY occurred_at DESC,id DESC LIMIT ?
+	`), symbol, limit)
+	return rows, err
+}
+
+func (r *positionRepo) ApplyEvent(ctx context.Context, event *PositionTransaction, expectedVersion int64) (*Position, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	current := Position{Symbol: event.Symbol}
+	lockClause := ""
+	if r.driver == "pgx" || r.driver == "mysql" {
+		lockClause = " FOR UPDATE"
+	}
+	err = tx.GetContext(ctx, &current, tx.Rebind(`
+		SELECT symbol,shares,avg_cost,realized_pnl,version,last_event_id,updated_at
+		FROM positions WHERE symbol=?
+	`+lockClause), event.Symbol)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	existed := !errors.Is(err, sql.ErrNoRows)
+	if !existed {
+		current = Position{Symbol: event.Symbol}
+	}
+	if current.Version != expectedVersion {
+		return nil, ErrPositionVersionConflict
+	}
+	eventID, err := r.insertEvent(ctx, tx, event)
+	if err != nil {
+		return nil, err
+	}
+	var events []PositionTransaction
+	if err := tx.SelectContext(ctx, &events, tx.Rebind(`
+		SELECT id,symbol,event_type,occurred_at,shares,price,fee,tax,
+		       target_shares,target_avg_cost,note,created_at
+		FROM position_transactions WHERE symbol=? ORDER BY occurred_at,id
+	`), event.Symbol); err != nil {
+		return nil, err
+	}
+	nextVersion := current.Version + 1
+	current = Position{Symbol: event.Symbol}
+	for i := range events {
+		if err := applyPositionEvent(&current, &events[i]); err != nil {
+			return nil, fmt.Errorf("replay position event %d: %w", events[i].ID, err)
+		}
+	}
+	current.Version = nextVersion
+	current.LastEventID = eventID
+	if err := r.upsertPosition(ctx, tx, &current, existed, expectedVersion); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return r.Get(ctx, event.Symbol)
+}
+
+func applyPositionEvent(position *Position, event *PositionTransaction) error {
+	switch event.EventType {
+	case PositionEventOpeningBalance, PositionEventBuy:
+		if !event.Shares.Valid || !event.Price.Valid || event.Shares.Float64 <= 0 || event.Price.Float64 <= 0 {
+			return fmt.Errorf("BUY requires positive shares and price")
+		}
+		qty := event.Shares.Float64
+		totalCost := position.Shares*position.AvgCost + qty*event.Price.Float64 + event.Fee
+		position.Shares += qty
+		position.AvgCost = totalCost / position.Shares
+	case PositionEventSell:
+		if !event.Shares.Valid || !event.Price.Valid || event.Shares.Float64 <= 0 || event.Price.Float64 <= 0 {
+			return fmt.Errorf("SELL requires positive shares and price")
+		}
+		qty := event.Shares.Float64
+		if qty > position.Shares+1e-9 {
+			return fmt.Errorf("SELL shares exceed current position")
+		}
+		position.RealizedPnL += qty*(event.Price.Float64-position.AvgCost) - event.Fee - event.Tax
+		position.Shares -= qty
+		if math.Abs(position.Shares) < 1e-9 {
+			position.Shares = 0
+			position.AvgCost = 0
+		}
+	case PositionEventAdjustment:
+		if !event.TargetShares.Valid || !event.TargetAvgCost.Valid ||
+			event.TargetShares.Float64 < 0 || event.TargetAvgCost.Float64 < 0 ||
+			(event.TargetShares.Float64 > 0 && event.TargetAvgCost.Float64 <= 0) ||
+			(event.TargetShares.Float64 == 0 && event.TargetAvgCost.Float64 != 0) {
+			return fmt.Errorf("ADJUSTMENT requires a valid target shares/AVG state")
+		}
+		if event.Note == "" {
+			return fmt.Errorf("ADJUSTMENT reason is required")
+		}
+		position.Shares = event.TargetShares.Float64
+		position.AvgCost = event.TargetAvgCost.Float64
+	default:
+		return fmt.Errorf("unsupported position event type %q", event.EventType)
+	}
+	return nil
+}
+
+func (r *positionRepo) insertEvent(ctx context.Context, tx *sqlx.Tx, event *PositionTransaction) (uint64, error) {
+	const columns = `symbol,event_type,occurred_at,shares,price,fee,tax,target_shares,target_avg_cost,note`
+	args := []any{
+		event.Symbol, event.EventType, event.OccurredAt, nullFloat64Value(event.Shares),
+		nullFloat64Value(event.Price), event.Fee, event.Tax,
+		nullFloat64Value(event.TargetShares), nullFloat64Value(event.TargetAvgCost), event.Note,
+	}
+	if r.driver == "pgx" {
+		var id uint64
+		err := tx.QueryRowContext(ctx, `INSERT INTO position_transactions (`+columns+`)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, args...).Scan(&id)
+		return id, err
+	}
+	res, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO position_transactions (`+columns+`)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`), args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return uint64(id), err
+}
+
+func (r *positionRepo) upsertPosition(ctx context.Context, tx *sqlx.Tx, p *Position, existed bool, expectedVersion int64) error {
+	if existed {
+		// version-guarded 更新：只有現存列的 version 仍等於這次讀到的
+		// expectedVersion 時才寫入。RowsAffected==0 代表期間被其他請求改過，
+		// 回傳版本衝突。不依賴 FOR UPDATE（sqlite 沒有、且對尚不存在的列鎖不到），
+		// 讓樂觀鎖在三種 driver 上都成立。
+		res, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE positions
+			SET shares=?, avg_cost=?, realized_pnl=?, version=?, last_event_id=?, updated_at=CURRENT_TIMESTAMP
+			WHERE symbol=? AND version=?
+		`), p.Shares, p.AvgCost, p.RealizedPnL, p.Version, p.LastEventID, p.Symbol, expectedVersion)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return ErrPositionVersionConflict
+		}
+		return nil
+	}
+	// 新部位：靠 positions.symbol 唯一鍵防止並發重複建立；若另一個請求搶先建立，
+	// 這次 INSERT 會因唯一鍵衝突失敗（回傳錯誤，不會靜默覆蓋對方的寫入）。
+	_, err := tx.ExecContext(ctx, tx.Rebind(`
+		INSERT INTO positions(symbol,shares,avg_cost,realized_pnl,version,last_event_id)
+		VALUES(?,?,?,?,?,?)
+	`), p.Symbol, p.Shares, p.AvgCost, p.RealizedPnL, p.Version, p.LastEventID)
+	return err
+}
+
+const positionAnalysisColumns = `id,symbol,position_state,position_version,shares,avg_cost,
+	realized_pnl,analyzed_at,current_price,sr_zone_analysis_id,action,action_label,
+	target_shares,adjustment_shares,adjustment_side,adjustment_amount,entry_price,
+	stop_loss_price,take_profit_price,risk_amount,expected_reward_amount,risk_reward_ratio,
+	unrealized_pnl,unrealized_pnl_pct,config_json,reason,evidence,trigger_conditions,
+	invalidation_conditions,rule_version,created_at`
+
+func (r *positionRepo) CreateAnalysis(ctx context.Context, a *PositionAnalysis) (uint64, error) {
+	const columns = `symbol,position_state,position_version,shares,avg_cost,realized_pnl,
+		analyzed_at,current_price,sr_zone_analysis_id,action,action_label,target_shares,
+		adjustment_shares,adjustment_side,adjustment_amount,entry_price,stop_loss_price,
+		take_profit_price,risk_amount,expected_reward_amount,risk_reward_ratio,unrealized_pnl,
+		unrealized_pnl_pct,config_json,reason,evidence,trigger_conditions,invalidation_conditions,rule_version`
+	args := []any{
+		a.Symbol, a.PositionState, a.PositionVersion, a.Shares, a.AvgCost, a.RealizedPnL,
+		a.AnalyzedAt, a.CurrentPrice, nullInt64Value(a.SRZoneAnalysisID), a.Action, a.ActionLabel,
+		a.TargetShares, a.AdjustmentShares, a.AdjustmentSide, a.AdjustmentAmount,
+		nullFloat64Value(a.EntryPrice), nullFloat64Value(a.StopLossPrice), nullFloat64Value(a.TakeProfitPrice),
+		nullFloat64Value(a.RiskAmount), nullFloat64Value(a.ExpectedRewardAmount), nullFloat64Value(a.RiskRewardRatio),
+		a.UnrealizedPnL, a.UnrealizedPnLPct, a.ConfigJSON, a.Reason, a.Evidence,
+		a.TriggerConditions, a.InvalidationConditions, a.RuleVersion,
+	}
+	if r.driver == "pgx" {
+		var id uint64
+		placeholders := `$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29`
+		err := r.db.QueryRowContext(ctx, `INSERT INTO position_analyses (`+columns+`) VALUES (`+placeholders+`) RETURNING id`, args...).Scan(&id)
+		return id, err
+	}
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`INSERT INTO position_analyses (`+columns+`)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`), args...)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return uint64(id), err
+}
+
+func (r *positionRepo) GetAnalysis(ctx context.Context, id uint64) (*PositionAnalysis, error) {
+	var row PositionAnalysis
+	err := r.db.GetContext(ctx, &row, r.db.Rebind(`SELECT `+positionAnalysisColumns+` FROM position_analyses WHERE id=?`), id)
+	return &row, err
+}
+
+func (r *positionRepo) ListAnalyses(ctx context.Context, symbol string, limit int) ([]PositionAnalysis, error) {
+	var rows []PositionAnalysis
+	query := `SELECT ` + positionAnalysisColumns + ` FROM position_analyses`
+	args := []any{}
+	if symbol != "" {
+		query += ` WHERE symbol=?`
+		args = append(args, symbol)
+	}
+	query += ` ORDER BY created_at DESC,id DESC LIMIT ?`
+	args = append(args, limit)
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...)
+	return rows, err
+}
+
+func nullFloat64Value(n NullFloat64) any {
+	if !n.Valid {
+		return nil
+	}
+	return n.Float64
+}
+
+func nullInt64Value(n NullInt64) any {
+	if !n.Valid {
+		return nil
+	}
+	return n.Int64
+}
+
+func NewNullFloat64(v float64) NullFloat64 {
+	return NullFloat64{NullFloat64: sql.NullFloat64{Float64: v, Valid: true}}
+}
+
+func NewNullInt64(v int64) NullInt64 {
+	return NullInt64{NullInt64: sql.NullInt64{Int64: v, Valid: true}}
+}
+
+func NewNullTime(v time.Time) NullTime {
+	return NullTime{NullTime: sql.NullTime{Time: v, Valid: true}}
+}

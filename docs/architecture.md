@@ -109,7 +109,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號/★監聽切換）+ K線圖（可疊加 MA5/MA20/MA60，個別開關）+ 訊號面板 |
 | 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
 | 支撐/壓力機率分析 | `sr-zones` | 輸入股票代號觸發 SR Zone Scoring（`POST /sr-zones`），顯示機率模型算出的區間、機率、EV/RR、可拆解交易分數；另有「訓練/更新機率模型」區塊（`POST /sr-zones/train`）。詳見 [sr-zone-scoring.md](./sr-zone-scoring.md) |
-| 持股操作 | `holdings` | 維護手中持股（代號、股數、持有成本），按下分析後用當次 SR Zone 快照產生並保存操作建議 |
+| Position Analysis | `position_transactions` / `positions` / `position_analyses` | immutable ledger、AVG projection，以及 FLAT/LONG 共用的目標股數與風險建議 |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 籌碼分析 | `chips` | 查詢籌碼摘要、歷史分數、券商分點排行，並可手動同步籌碼資料（`POST /chips/sync`） |
@@ -218,42 +218,40 @@ Signal Engine、Backtest、SR Zone Scoring 與前端 Chips 頁面讀取使用
 `POST /api/v1/chips/sync` 建立 `chip_sync_jobs` 非同步任務；日結同步則使用
 `job_runs.job_name=chip_daily_sync`，兩者的進度表不同。
 
-**持股操作分析**重用 SR Zone Scoring，但保存成獨立快照：
+**Position Analysis** 以 immutable ledger 與 AVG projection 重用 SR Zone Scoring：
 
 ```
-使用者維護 holdings（symbol / shares / cost_price）
-    ↓ POST /holdings/:id/analyze
-Go 先查同 symbol/timeframe 既有 stock_sr_zone_analyses；有則重用最新快照，沒有才呼叫 Python /sr-zones 建立
+使用者新增 BUY / SELL / ADJUSTMENT transaction
+    ↓ 同一 transaction 更新 positions AVG projection
+POST /position-analyses（只需 symbol；無 position 即 FLAT）
     ↓
-Go 依最新收盤價、持有成本、支撐/壓力 zone 產生操作建議
+Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
     ↓
-寫入 holding_analyses（複製當下股數/成本，引用 sr_zone_analysis_id）
+依 FLAT/LONG、固定風險設定、SR Decision 與 zones 計算目標股數
+    ↓
+寫入 position_analyses 不可變快照
 ```
 
-每次分析都新增一筆 `holding_analyses`，不覆蓋舊結果；`sr_zone_analysis_id` 可能引用既有
-SR Zone 快照。後續修改持股股數或成本，也不會改變歷史分析快照。
+成本採移動加權平均。交易事件不可修改或刪除；資料更正必須新增 `ADJUSTMENT`
+並記錄原因。分析輸出包含目前／目標／調整股數、風險金額、RR、觸發與失效條件。
+每次分析都新增一筆快照，不覆蓋舊結果。
 
-#### 已知限制：SR 快照與持股分析非單一 transaction（刻意不處理）
+#### 已知限制：SR 快照與 Position Analysis 非單一 transaction（刻意不處理）
 
-「建立新 SR 快照」與「建立 holding 分析」是**兩次獨立的 DB 寫入**（分屬
-`store.SRZoneRepo` 與 `store.HoldingRepo`），不是包在同一個跨 repo transaction 裡。
-一致性改由 `portfolio.Analyzer` 用**補償 + 讀回容錯**維持，而非原子交易：
+「建立新 SR 快照」與「建立 position analysis」是**兩次獨立的 DB 寫入**（分屬
+`store.SRZoneRepo` 與 `store.PositionRepo`），不是包在同一個跨 repo transaction 裡。
+Position transaction 與 projection 本身則必須在同一個 DB transaction 中完成；
+`version` 與 row lock 防止併發覆寫。
 
-- `holdings.CreateAnalysis` 之前的失敗（`buildSnapshot`、`CreateAnalysis` 本身）＝
-  holding 列尚未寫入，此時把剛建立的 SR 快照 `srZoneRepo.Delete` 回收，避免孤兒。
-- `holdings.CreateAnalysis` **成功後**才發生的讀回失敗（`GetAnalysis`）＝ holding 列
-  已寫入，此時**不刪** SR 快照，改回退用記憶體中的快照回傳，避免 `holding_analyses`
-  指向被刪除的 SR（dangling reference）。
-
-殘留限制：若在「SR 建立 commit」與「holding 建立 commit」之間程序硬崩潰／連線中斷，
-會留下一筆沒有任何 `holding_analyses` 引用的 SR 快照。**刻意不升級為跨 repo
+殘留限制：若在「SR 建立 commit」與「position analysis 建立 commit」之間程序硬崩潰／連線中斷，
+會留下一筆沒有任何 `position_analyses` 引用的 SR 快照。**刻意不升級為跨 repo
 transaction**，理由：
 
 1. **發生率極低**：僅限兩次 commit 之間毫秒級窗口的硬故障。
 2. **無資料損毀、方向安全**：殘留的是一筆合法的 `stock_sr_zone_analyses`，沒有指向缺
    資料的外鍵；request 範圍內的暫時性錯誤已由上述補償/容錯覆蓋。
-3. **幾乎無害且會自癒**：SR 快照本就由 SR Zone 頁、排程器、持股三方共同產生、多數本
-   來就無 holding 引用，一筆「孤兒」SR 與一筆正常 SR 分析無法區分、價值相同；加上持股
+3. **幾乎無害且會自癒**：SR 快照本就由 SR Zone 頁、排程器、Position 三方共同產生、多數本
+   來就無 position analysis 引用，一筆「孤兒」SR 與一筆正常 SR 分析無法區分、價值相同；加上 Position
    分析已有「同 symbol/timeframe 新鮮快照優先重用」機制，該筆若仍新鮮下次會被直接重用。
 4. **成本／風險不成比例**：跨 repo transaction 需替兩個 repo 導入共用 executor 抽象並
    改寫 `srZoneRepo.Create`（SR Zone 頁與排程器共用的寫入路徑），回歸風險外溢到持股

@@ -46,6 +46,47 @@ type SRZoneHandler struct {
 	log       *zap.Logger
 }
 
+func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H {
+	items := make([]gin.H, 0, len(zones))
+	for _, z := range zones {
+		items = append(items, gin.H{
+			"data": gin.H{
+				"id": z.ID, "analysis_id": z.AnalysisID,
+				"price_low": z.PriceLow, "price_high": z.PriceHigh,
+				"method": z.Method, "role": z.Role,
+			},
+			"features": z.Features,
+			"score":    z,
+			"evidence": z.Evidence,
+			"lifecycle": gin.H{
+				"status": z.Status, "broken_at": z.BrokenAt,
+				"broken_price": z.BrokenPrice, "resolved_role": z.ResolvedRole,
+			},
+		})
+	}
+	return gin.H{
+		"pipeline_version": a.PipelineVersion,
+		"analysis": gin.H{
+			"id": a.ID, "symbol": a.Symbol, "timeframe": a.Timeframe,
+			"analyzed_at": a.AnalyzedAt, "current_price": a.CurrentPrice,
+			"model_version": a.ModelVersion, "model_config_hash": a.ModelConfigHash,
+			"period_summaries": a.PeriodSummaries, "analysis_tips": a.AnalysisTips,
+			"chip_summary": a.ChipSummary, "created_at": a.CreatedAt,
+		},
+		"features": gin.H{
+			"global_trend": a.GlobalTrend, "global_volatility": a.GlobalVolatility,
+		},
+		"score": gin.H{
+			"global_expected_value":    a.GlobalExpectedValue,
+			"global_confidence":        a.GlobalConfidence,
+			"global_risk_reward_ratio": a.GlobalRiskRewardRatio,
+		},
+		"evidence": a.Evidence,
+		"decision": a.DecisionSummary,
+		"zones":    items,
+	}
+}
+
 func NewSRZoneHandler(
 	client *analysis.Client, repo store.SRZoneRepo, watchlist store.WatchlistRepo,
 	trainJobs store.SRScoringTrainJobRepo, verifier *analysis.SRZoneVerifier, log *zap.Logger,
@@ -109,7 +150,7 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"analysis": saved, "zones": savedZones})
+	c.JSON(http.StatusCreated, srZonePipelineResponse(saved, savedZones))
 }
 
 // GET /api/v1/sr-zones?symbol=2330&limit=20
@@ -146,7 +187,7 @@ func (h *SRZoneHandler) Get(c *gin.Context) {
 		serverError(c, h.log, err, "sr-zones: get zones")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"analysis": a, "zones": zones})
+	c.JSON(http.StatusOK, srZonePipelineResponse(a, zones))
 }
 
 // POST /api/v1/sr-zones/:id/verify
@@ -167,7 +208,7 @@ func (h *SRZoneHandler) Verify(c *gin.Context) {
 		serverError(c, h.log, err, "sr-zones: verify")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"analysis": a, "zones": zones})
+	c.JSON(http.StatusOK, srZonePipelineResponse(a, zones))
 }
 
 // POST /api/v1/sr-zones/train

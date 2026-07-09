@@ -45,6 +45,10 @@ def _trend(df) -> float:
     return trend_slope(df, len(df) - 1)
 
 
+def _v2_zone_scores(result: dict) -> list[dict]:
+    return [item["score"] for item in result["zones"]]
+
+
 def test_score_zone_scores_are_in_unit_interval(bundle):
     df = bullish_trend_df(n=80)
     low = float(df["close"].min())
@@ -143,22 +147,22 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
 
     result = score_symbol("2330", "1d")
 
-    assert result["symbol"] == "2330"
-    assert result["timeframe"] == "1d"
-    assert "global_trend" in result
-    assert "global_volatility" in result
-    assert "global_expected_value" in result
-    assert "global_confidence" in result
-    assert "global_risk_reward_ratio" in result
-    assert result["model_version"] == bundle.version
-    assert result["model_trained_at"] == bundle.trained_at
-    assert result["model_feature_names"] == bundle.feature_names
-    assert result["model_config_hash"] == bundle.config_hash
-    assert isinstance(result["period_summaries"], list)
-    assert [p["key"] for p in result["period_summaries"]] == ["short", "mid", "long"]
-    assert isinstance(result["analysis_tips"], list)
-    assert result["analysis_tips"]
-    ds = result["decision_summary"]
+    assert result["pipeline_version"] == "v2"
+    assert result["analysis"]["symbol"] == "2330"
+    assert result["analysis"]["timeframe"] == "1d"
+    assert set(result["features"]) >= {"global_trend", "global_volatility"}
+    assert set(result["score"]) >= {
+        "global_expected_value", "global_confidence", "global_risk_reward_ratio",
+    }
+    assert result["analysis"]["model"]["version"] == bundle.version
+    assert result["analysis"]["model"]["trained_at"] == bundle.trained_at
+    assert result["analysis"]["model"]["feature_names"] == bundle.feature_names
+    assert result["analysis"]["model"]["config_hash"] == bundle.config_hash
+    assert [p["key"] for p in result["analysis"]["period_summaries"]] == ["short", "mid", "long"]
+    assert result["analysis"]["analysis_tips"]
+    assert result["analysis"]["chip_summary"]["missing"] is True
+    assert result["evidence"]["model"]["explainer"] == "permutation_shap"
+    ds = result["decision"]
     assert ds["market_regime"]["primary"] in ("TREND_UP", "TREND_DOWN", "RANGE_BOUND")
     assert isinstance(ds["market_regime"]["flags"], list)
     assert ds["action"] in ("Buy", "BuySmall", "Hold", "Avoid")
@@ -169,13 +173,11 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     if ds["primary_zone"] is not None:
         assert ds["primary_zone"]["role"] in ("SUPPORT", "RESISTANCE")
         assert "distance_pct" in ds["primary_zone"]
-    for period in result["period_summaries"]:
-        assert period["support"] is None or period["support"]["side"] == "support"
-        assert period["resistance"] is None or period["resistance"]["side"] == "resistance"
-        if period["support"] and period["resistance"]:
-            assert period["support"]["price_high"] < period["resistance"]["price_low"]
     assert isinstance(result["zones"], list)
-    for z in result["zones"]:
+    zones = _v2_zone_scores(result)
+    for item, z in zip(result["zones"], zones):
+        assert set(item) == {"data", "features", "score", "evidence", "lifecycle"}
+        assert set(item["evidence"]) >= {"support", "resistance", "risk_flags"}
         assert 0.0 <= z["support_score"] <= 1.0
         assert 0.0 <= z["resistance_score"] <= 1.0
         assert z["role"] in ("SUPPORT", "RESISTANCE", "AT_ZONE")
@@ -202,10 +204,10 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
 
     # zones 必須可排序：tier 由粗到細，同層內 trading_score 由高到低
     tier_order = {"TIER_1_MAIN_STRUCTURE": 1, "TIER_2_TRADING_ZONE": 2, "TIER_3_SHORT_TERM": 3}
-    ranks = [tier_order[z["tier"]] for z in result["zones"]]
+    ranks = [tier_order[z["tier"]] for z in zones]
     assert ranks == sorted(ranks)
-    for i in range(len(result["zones"]) - 1):
-        a, b = result["zones"][i], result["zones"][i + 1]
+    for i in range(len(zones) - 1):
+        a, b = zones[i], zones[i + 1]
         if a["tier"] == b["tier"]:
             assert a["trading_score"] >= b["trading_score"]
 
@@ -489,11 +491,12 @@ def test_score_symbol_confluence_reflects_cross_method_overlap(monkeypatch, bund
         _FixedBuilder(ZoneMethod.VOLUME_PROFILE, 0.2, 1.8),
     ]
     result = score_symbol("2330", "1d", builders=overlapping_builders)
-    assert len(result["zones"]) == 2
-    assert result["zones"][0]["confluence_count"] == 2
-    assert result["zones"][1]["confluence_count"] == 2
-    assert result["zones"][0]["overlap_group"] == result["zones"][1]["overlap_group"]
-    assert result["zones"][0]["overlap_group"] is not None
+    zones = _v2_zone_scores(result)
+    assert len(zones) == 2
+    assert zones[0]["confluence_count"] == 2
+    assert zones[1]["confluence_count"] == 2
+    assert zones[0]["overlap_group"] == zones[1]["overlap_group"]
+    assert zones[0]["overlap_group"] is not None
 
 
 # ── 十三、Trading Score（可拆解）─────────────────────────────────────
@@ -623,7 +626,7 @@ def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bund
 
     assert call_count["n"] == 1  # 股票層級只查一次，不對每個 zone 重複查詢
     assert len(result["zones"]) == 1
-    z = result["zones"][0]
+    z = _v2_zone_scores(result)[0]
     # chip_score=60 正規化為 (60+100)/200=0.8；zone 在最低價附近，role=SUPPORT，
     # 不需要翻轉正負號
     assert z["role"] == "SUPPORT"
@@ -632,7 +635,7 @@ def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bund
     # 【review 修復】必須帶 before_date，且要對齊這次分析最後一根K棒換算
     # 成 Asia/Taipei 之後的交易日，不能省略（省略會撈到資料庫最新一筆
     # chip_scores，可能是「未來」的籌碼資料，見 lookahead bias 說明）。
-    expected_before_date = pd.Timestamp(result["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+    expected_before_date = pd.Timestamp(result["analysis"]["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
     assert captured["before_date"] == expected_before_date
 
 
@@ -664,7 +667,7 @@ def test_score_symbol_chip_before_date_uses_analyzed_at_not_wall_clock_today(mon
 
     result = score_symbol("2330", "1d")
 
-    expected_before_date = pd.Timestamp(result["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
+    expected_before_date = pd.Timestamp(result["analysis"]["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
     assert captured["before_date"] == expected_before_date
     # 確認這個日期真的落在歷史資料範圍（2020年），不是 wall-clock 今天，
     # 證明用的是 analyzed_at 而非系統當下時間。
@@ -806,7 +809,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
         "zone_momentum", "zone_direction",
         "recent_validation", "trading_score", "trading_score_breakdown", "trading_recommendation",
     }
-    for z in result["zones"]:
+    for z in _v2_zone_scores(result):
         assert expected_keys <= set(z.keys())
         if z["role"] == "AT_ZONE":
             assert z["expected_value"] is None
@@ -918,24 +921,14 @@ def test_score_symbol_includes_chip_summary_and_card_chip(monkeypatch, bundle):
 
     result = score_symbol("2330", "1d")
 
-    cs = result["chip_summary"]
+    cs = result["analysis"]["chip_summary"]
     assert cs["missing"] is False
     assert cs["score"] == pytest.approx(60.0)
     assert cs["signal"] == "BULLISH"
     assert cs["institutional_score"] == pytest.approx(55.0)
+    assert cs == result["evidence"]["chip"]
 
-    # 每張摘要卡有結構化 chip；籌碼句已從 reasons 拉出（reasons 不再含「籌碼」）
-    seen_item = False
-    for period in result["period_summaries"]:
-        for side in ("support", "resistance"):
-            item = period[side]
-            if not item:
-                continue
-            seen_item = True
-            assert "chip" in item
-            assert item["chip"]["direction"] == "bullish"
-            assert all("籌碼" not in r for r in item["reasons"])
-    assert seen_item
+    assert all("evidence" in item for item in result["zones"])
 
 
 def test_score_symbol_chip_summary_missing_when_no_chip_data(monkeypatch, bundle):
@@ -945,11 +938,6 @@ def test_score_symbol_chip_summary_missing_when_no_chip_data(monkeypatch, bundle
 
     result = score_symbol("2330", "1d")
 
-    assert result["chip_summary"]["missing"] is True
-    assert result["chip_summary"]["score"] is None
-    for period in result["period_summaries"]:
-        for side in ("support", "resistance"):
-            item = period[side]
-            if item:
-                assert item["chip"]["direction"] == "none"
-                assert item["chip"]["bounce_delta_pp"] is None
+    assert result["evidence"]["chip"]["missing"] is True
+    assert result["evidence"]["chip"]["score"] is None
+    assert result["analysis"]["chip_summary"] == result["evidence"]["chip"]

@@ -319,6 +319,58 @@ func TestZoneScoreResultToStoreDefaultsMissingModelVersionToUnknown(t *testing.T
 	}
 }
 
+func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
+	payload := []byte(`{
+		"pipeline_version":"v2",
+		"analysis":{"symbol":"2330","timeframe":"1d","analyzed_at":"2026-07-09T00:00:00Z","current_price":600,
+			"period_summaries":[{"key":"short","label":"短期"}],
+			"analysis_tips":["短期支撐守穩"],
+			"chip_summary":{"missing":false,"score":42.5},
+			"model":{"version":"v4","trained_at":"2026-07-08T00:00:00Z","config_hash":"cfg","feature_names":["touch_count"]}},
+		"features":{"global_trend":0.03,"global_volatility":0.02},
+		"score":{"global_expected_value":0.01,"global_confidence":0.7,"global_risk_reward_ratio":1.5},
+		"evidence":{"model":{"explainer":"permutation_shap"}},
+		"decision":{"action":"BuySmall"},
+		"zones":[{
+			"data":{"price_low":580,"price_high":585,"method":"atr","role":"SUPPORT"},
+			"features":{"support":{"touch_count":4},"resistance":{"touch_count":1}},
+			"score":{"price_low":580,"price_high":585,"method":"atr","role":"SUPPORT",
+				"tier":"TIER_1_MAIN_STRUCTURE","tier_label":"主結構",
+				"support_score":0.8,"resistance_score":0.2,"net_score":0.6,"net_score_label":"STRONG_SUPPORT",
+				"confidence":0.7,"confidence_level":"HIGH","touch_count":4,"support_touch_count":3,
+				"resistance_touch_count":1,"zone_momentum":0.01,"zone_direction":"UP",
+				"recent_validation":"VALIDATED_RECENTLY","trading_score":70,
+				"trading_score_breakdown":{"expected_value":20,"risk_reward":10,"trend":10,"volume":10,"confidence":5,"chip":15},
+				"trading_recommendation":"BUY","confluence_count":1},
+			"evidence":{"support":{"targets":{"hold":{"final_probability":0.7}}}},
+			"lifecycle":{"status":"PENDING","resolved_role":null}
+		}]
+	}`)
+
+	var result ZoneScoreResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("decode nested v2 result: %v", err)
+	}
+	analysis, zones, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore nested v2 result: %v", err)
+	}
+	if analysis.PipelineVersion != "v2" || analysis.ModelVersion != "v4" {
+		t.Fatalf("unexpected analysis metadata: %+v", analysis)
+	}
+	if string(analysis.Evidence) != `{"model":{"explainer":"permutation_shap"}}` {
+		t.Fatalf("unexpected analysis evidence: %s", analysis.Evidence)
+	}
+	if string(analysis.PeriodSummaries) != `[{"key":"short","label":"短期"}]` ||
+		string(analysis.AnalysisTips) != `["短期支撐守穩"]` ||
+		string(analysis.ChipSummary) != `{"missing":false,"score":42.5}` {
+		t.Fatalf("nested analysis summaries not persisted: %+v", analysis)
+	}
+	if len(zones) != 1 || string(zones[0].Evidence) == "null" || string(zones[0].Features) == "null" {
+		t.Fatalf("nested zone features/evidence not persisted: %+v", zones)
+	}
+}
+
 func TestScoreZonesReturnsUpstreamStatusErrorOnNotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

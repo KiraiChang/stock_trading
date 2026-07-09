@@ -121,6 +121,7 @@ from .types import (
     ZoneType,
 )
 from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
+from .pipeline_types import ZoneFeatureSet
 
 DEFAULT_FETCH_LIMIT = 250
 
@@ -829,24 +830,33 @@ def score_zone(
     confluence_count: int = 1,
     chip_score: Optional[float] = None,
     chip_features: Optional[dict[str, float]] = None,
+    feature_set: Optional[ZoneFeatureSet] = None,
 ) -> ZoneScore:
     if as_of_index is None:
         as_of_index = len(df) - 1
 
-    features_as_support = compute_zone_features(
-        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_ABOVE,
-        lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
-    )
-    features_as_resistance = compute_zone_features(
-        df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_BELOW,
-        lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
-    )
-
-    all_touches = find_touches(df, zone, as_of_index, lookback_bars)
-    support_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_ABOVE]
-    resistance_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_BELOW]
-    support_classified = _classify_touches(df, support_touches, forward_bars, threshold_pct, as_of_index)
-    resistance_classified = _classify_touches(df, resistance_touches, forward_bars, threshold_pct, as_of_index)
+    if feature_set is None:
+        features_as_support = compute_zone_features(
+            df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_ABOVE,
+            lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
+        )
+        features_as_resistance = compute_zone_features(
+            df, zone, as_of_index=as_of_index, approach=ApproachDirection.FROM_BELOW,
+            lookback_bars=lookback_bars, forward_bars=forward_bars, threshold_pct=threshold_pct,
+        )
+        all_touches = find_touches(df, zone, as_of_index, lookback_bars)
+        support_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_ABOVE]
+        resistance_touches = [t for t in all_touches if t.approach_direction == ApproachDirection.FROM_BELOW]
+        support_classified = _classify_touches(df, support_touches, forward_bars, threshold_pct, as_of_index)
+        resistance_classified = _classify_touches(df, resistance_touches, forward_bars, threshold_pct, as_of_index)
+    else:
+        features_as_support = feature_set.support.values
+        features_as_resistance = feature_set.resistance.values
+        all_touches = list(feature_set.all_touches)
+        support_touches = list(feature_set.support_touches)
+        resistance_touches = list(feature_set.resistance_touches)
+        support_classified = list(feature_set.support_labels)
+        resistance_classified = list(feature_set.resistance_labels)
 
     # confidence 依角色方向分開計算（role=SUPPORT 只用 support_touches 的樣本
     # 數/穩定度，不會被 resistance 方向的觸碰稀釋或拉抬），見 types.py::
@@ -1006,103 +1016,17 @@ def score_symbol(
 ) -> dict[str, Any]:
     """limit 為抓取的歷史K棒根數（不是天數），預設 DEFAULT_FETCH_LIMIT=250；
     呼叫端（FastAPI /sr-zones、Go handler）可覆寫。"""
-    rows = fetch_candles(symbol, timeframe, limit=limit)
-    if not rows:
-        raise ValueError(f"no candles found for symbol={symbol} timeframe={timeframe}")
+    from .pipeline import run_pipeline
 
-    df = _to_dataframe(rows)
-    builders = builders or _default_builders()
-    min_bars = max(b.min_bars for b in builders)
-    if len(df) < min_bars:
-        raise ValueError(
-            f"not enough candles for sr_scoring: symbol={symbol} got={len(df)}, need>={min_bars}"
-        )
-
-    zones: list[Zone] = []
-    for builder in builders:
-        zones.extend(builder.build(df))
-
-    current_price = float(df["close"].iloc[-1])
-    analyzed_at = df.index[-1]
-    as_of_index = len(df) - 1
-    bundle = get_model()  # 只有一個 Global Model：整份分析共用同一個已訓練好的模型單例
-
-    # 九：Trend/Volatility 是股票層級的量，只算一次，不對每個 zone 重複輸出。
-    global_trend = trend_slope(df, as_of_index)
-    global_volatility = zone_volatility(df, as_of_index)
-
-    # 【2026-07 籌碼分析整合】chip_score 同樣是股票層級的量（同一次分析裡
-    # 所有 zone 共用同一個值，只是依角色翻轉正負號），只查一次。查無資料
-    # （尚未同步籌碼、或該股票不在監控清單）不拋錯，讓 SR Zone 評分照常
-    # 進行，chip 分量退回中性值（見 _trading_score_breakdown）。
-    #
-    # 【review 修復】一定要帶 before_date（用這次分析最後一根 K 棒的日期），
-    # 不能省略——省略會讓 fetch_latest_chip_score 直接撈資料庫裡最新的一筆
-    # chip_scores，若 K 線落後、離線重算舊資料、或資料庫已經有更晚的籌碼
-    # 分數，就會讓 trading_score 用到「未來」的籌碼資料（lookahead bias），
-    # 也會讓同一段歷史 K 線在不同時間重算得到不同結果。analyzed_at 是
-    # UTC-aware 的 pandas Timestamp（見 _to_dataframe），轉成 Asia/Taipei
-    # 再取日期字串，才會對齊 chip_scores.trade_date 實際代表的交易日
-    # （Go 端寫入時是用 Asia/Taipei 解析交易日期，見
-    # internal/market/finmind_chip.go 的 time.ParseInLocation）。
-    chip_before_date = analyzed_at.tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
-    chip_row = fetch_latest_chip_score(symbol, before_date=chip_before_date)
-    chip_score = float(chip_row["total_score"]) if chip_row is not None else None
-    chip_features = chip_features_from_score_row(chip_row)
-    ma5 = float(df["close"].tail(5).mean()) if len(df) >= 5 else None
-
-    # 十一：Zone 必須可排序，先依寬度分好 tier 再逐一評分。
-    tiers = _assign_tiers([z.width for z in zones])
-    # 十六：跨方法重疊分群（confluence），見 _group_overlapping_zones 說明。
-    overlap_groups, confluence_counts = _group_overlapping_zones(zones)
-
-    zone_scores = [
-        score_zone(
-            df, zone, current_price, bundle, global_trend, tier=tier, as_of_index=as_of_index,
-            overlap_group=og, confluence_count=cc, chip_score=chip_score, chip_features=chip_features,
-        )
-        for zone, tier, og, cc in zip(zones, tiers, overlap_groups, confluence_counts)
-    ]
-    zone_scores = _sort_zone_scores(zone_scores)
-
-    global_metrics = _compute_global_metrics(zone_scores)
-    period_summaries = _build_period_summaries(zone_scores, current_price, ma5)
-    analysis_tips = _build_analysis_tips(period_summaries, current_price, ma5, chip_score)
-    chip_summary = _build_chip_summary(chip_row)
-
-    decision_summary = build_decision_summary(
-        zone_scores, current_price, global_trend, global_volatility, global_metrics, chip_summary, bundle
+    return run_pipeline(
+        symbol,
+        timeframe,
+        limit,
+        builders or _default_builders(),
+        fetch_candles_fn=fetch_candles,
+        fetch_chip_fn=fetch_latest_chip_score,
+        get_model_fn=get_model,
     )
-    return {
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "analyzed_at": analyzed_at.isoformat(),
-        "current_price": current_price,
-        "global_trend": global_trend,
-        "global_volatility": global_volatility,
-        "global_expected_value": global_metrics["expected_value"],
-        "global_confidence": global_metrics["confidence"],
-        "global_risk_reward_ratio": global_metrics["risk_reward_ratio"],
-        "period_summaries": period_summaries,
-        "analysis_tips": analysis_tips,
-        # 整檔層級籌碼拆解（總分/訊號/四子分數/無資料旗標），供前端「共用面板」
-        # 一次顯示，不逐 zone 重複。每張支撐/壓力摘要卡的角色化籌碼一行則在
-        # period_summaries[].support/resistance.chip（見 _zone_summary）。
-        "chip_summary": chip_summary,
-        "decision_summary": decision_summary,
-        # 模型可追蹤性：ModelBundle 本身已經有這些欄位，只是先前沒有透過
-        # score_symbol() 輸出，導致 Go ToStore() 只能把 model_version 寫成空
-        # 字串。model_feature_names 主要供 API 診斷/測試使用，不一定要進 DB。
-        # model_config_hash 是這次評分用的模型訓練設定（DatasetConfig/zone
-        # builder 參數/model_type/calibration_method）的短 hash，讓「這筆
-        # 分析是哪組訓練設定產生的」可以事後追溯，重訓改參數後舊分析可被
-        # 這個值辨識出來（見 model.py::compute_config_hash）。
-        "model_version": bundle.version,
-        "model_trained_at": bundle.trained_at,
-        "model_feature_names": bundle.feature_names,
-        "model_config_hash": bundle.config_hash,
-        "zones": [_zone_score_to_dict(z) for z in zone_scores],
-    }
 
 
 def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:

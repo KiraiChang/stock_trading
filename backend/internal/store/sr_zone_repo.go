@@ -44,6 +44,9 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 	if a.DecisionSummary == "" {
 		a.DecisionSummary = RawJSON("null")
 	}
+	if a.Evidence == "" {
+		a.Evidence = RawJSON("null")
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -52,29 +55,32 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 
 	const cols = `symbol, timeframe, analyzed_at, current_price,
 		global_trend, global_volatility, global_expected_value, global_confidence, global_risk_reward_ratio,
-		model_version, model_config_hash, period_summaries, analysis_tips, chip_summary, decision_summary`
+		model_version, model_config_hash, pipeline_version, evidence,
+		period_summaries, analysis_tips, chip_summary, decision_summary`
 
 	var id uint64
 	if r.driver == "pgx" {
 		// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
 		err = tx.QueryRowContext(ctx, `
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 			RETURNING id
 		`,
 			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice,
 			a.GlobalTrend, a.GlobalVolatility, a.GlobalExpectedValue, a.GlobalConfidence, a.GlobalRiskRewardRatio,
-			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips, a.ChipSummary, a.DecisionSummary,
+			a.ModelVersion, a.ModelConfigHash, a.PipelineVersion, a.Evidence,
+			a.PeriodSummaries, a.AnalysisTips, a.ChipSummary, a.DecisionSummary,
 		).Scan(&id)
 	} else {
 		var result sql.Result
 		result, err = tx.ExecContext(ctx, tx.Rebind(`
 			INSERT INTO stock_sr_zone_analyses (`+cols+`)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`),
 			a.Symbol, a.Timeframe, a.AnalyzedAt, a.CurrentPrice,
 			a.GlobalTrend, a.GlobalVolatility, a.GlobalExpectedValue, a.GlobalConfidence, a.GlobalRiskRewardRatio,
-			a.ModelVersion, a.ModelConfigHash, a.PeriodSummaries, a.AnalysisTips, a.ChipSummary, a.DecisionSummary,
+			a.ModelVersion, a.ModelConfigHash, a.PipelineVersion, a.Evidence,
+			a.PeriodSummaries, a.AnalysisTips, a.ChipSummary, a.DecisionSummary,
 		)
 		if err == nil {
 			var lastID int64
@@ -91,6 +97,12 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 		if zones[i].Status == "" {
 			zones[i].Status = "PENDING"
 		}
+		if zones[i].Features == "" {
+			zones[i].Features = RawJSON("null")
+		}
+		if zones[i].Evidence == "" {
+			zones[i].Evidence = RawJSON("null")
+		}
 		if _, err := tx.NamedExecContext(ctx, `
 			INSERT INTO stock_sr_zones (
 				analysis_id, price_low, price_high, method, role, tier, tier_label,
@@ -102,7 +114,7 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				touch_count, support_touch_count, resistance_touch_count, reject_count, break_count,
 				zone_momentum, zone_direction,
 				recent_validation, trading_score, trading_score_breakdown, trading_recommendation,
-				overlap_group, confluence_count, status
+				overlap_group, confluence_count, status, features, evidence
 			) VALUES (
 				:analysis_id, :price_low, :price_high, :method, :role, :tier, :tier_label,
 				:support_score, :resistance_score, :net_score, :net_score_label,
@@ -113,7 +125,7 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				:touch_count, :support_touch_count, :resistance_touch_count, :reject_count, :break_count,
 				:zone_momentum, :zone_direction,
 				:recent_validation, :trading_score, :trading_score_breakdown, :trading_recommendation,
-				:overlap_group, :confluence_count, :status
+				:overlap_group, :confluence_count, :status, :features, :evidence
 			)
 		`, zones[i]); err != nil {
 			return 0, err
@@ -128,7 +140,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 
 const srZoneAnalysisColumns = `id, symbol, timeframe, analyzed_at, current_price,
 	global_trend, global_volatility, global_expected_value, global_confidence, global_risk_reward_ratio,
-	model_version, model_config_hash, period_summaries, analysis_tips, chip_summary, decision_summary, created_at`
+	model_version, model_config_hash, pipeline_version, evidence,
+	period_summaries, analysis_tips, chip_summary, decision_summary, created_at`
 
 func (r *srZoneRepo) Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error) {
 	var a SRZoneAnalysis
@@ -171,7 +184,7 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 			zone_momentum, zone_direction,
 			recent_validation, trading_score, trading_score_breakdown, trading_recommendation,
 			overlap_group, confluence_count,
-			status, broken_at, broken_price, resolved_role
+		       status, broken_at, broken_price, resolved_role, features, evidence
 		FROM stock_sr_zones WHERE analysis_id=?
 		ORDER BY CASE tier WHEN 'TIER_1_MAIN_STRUCTURE' THEN 1 WHEN 'TIER_2_TRADING_ZONE' THEN 2 ELSE 3 END, trading_score DESC
 	`), analysisID)

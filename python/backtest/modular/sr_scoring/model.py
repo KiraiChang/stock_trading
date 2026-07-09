@@ -57,7 +57,8 @@ FEATURE_COLUMNS = [
     "chip_missing",
 ]
 
-MODEL_VERSION = "v3"  # v3 加入 chip_scores 訓練特徵，跟 v2 特徵 schema 不相容，需重新訓練
+MODEL_VERSION = "v4"  # v4 stores a deterministic SHAP background sample
+EXPLANATION_BACKGROUND_ROWS = 32
 
 # 機率校準（CalibratedClassifierCV）需要足夠樣本才能穩定：訓練集太小、或
 # 任一類別樣本太少時，CalibratedClassifierCV 內部的 CV 切分會失敗或退化成
@@ -92,6 +93,7 @@ class ModelBundle:
     # 預設值 {}/""，讀取比這個欄位還舊的模型檔時保持向後相容。
     training_config: dict = field(default_factory=dict)
     config_hash: str = ""
+    explanation_background: list[list[float]] = field(default_factory=list)
 
 
 def _build_estimator(model_type: str, random_state: int):
@@ -270,6 +272,11 @@ def train_model(
     resolved_config.setdefault("split_method", split_method)
     resolved_config.setdefault("calibration_method", calibration_method)
 
+    background_df = train_df.sort_values(["symbol", "touch_time"])
+    if len(background_df) > EXPLANATION_BACKGROUND_ROWS:
+        positions = np.linspace(0, len(background_df) - 1, EXPLANATION_BACKGROUND_ROWS, dtype=int)
+        background_df = background_df.iloc[positions]
+
     return ModelBundle(
         hold_model=hold_model,
         break_model=break_model,
@@ -281,6 +288,7 @@ def train_model(
         split_method=split_method,
         training_config=resolved_config,
         config_hash=compute_config_hash(resolved_config),
+        explanation_background=background_df[FEATURE_COLUMNS].to_numpy(dtype=float).tolist(),
     )
 
 
@@ -297,6 +305,10 @@ def load_model(path: str) -> ModelBundle:
         raise RuntimeError(
             f"sr_scoring 模型特徵 schema 不相容：model={getattr(bundle, 'feature_names', None)} "
             f"expected={FEATURE_COLUMNS}（請重新訓練 {MODEL_VERSION} 模型）"
+        )
+    if getattr(bundle, "version", "") != MODEL_VERSION or not getattr(bundle, "explanation_background", None):
+        raise RuntimeError(
+            f"sr_scoring model does not provide {MODEL_VERSION} SHAP background data; retrain the model"
         )
     return bundle
 
@@ -380,7 +392,7 @@ def neutral_chip_features() -> dict[str, float]:
     }
 
 
-def _feature_vector(
+def feature_vector(
     features: ZoneFeatures,
     is_support: bool,
     chip_features: Optional[dict[str, float]] = None,
@@ -408,7 +420,7 @@ def predict_hold_probability(
     is_support: bool,
     chip_features: Optional[dict[str, float]] = None,
 ) -> float:
-    X = _feature_vector(features, is_support, chip_features)
+    X = feature_vector(features, is_support, chip_features)
     return float(bundle.hold_model.predict_proba(X)[0, 1])
 
 
@@ -418,7 +430,7 @@ def predict_break_probability(
     is_support: bool,
     chip_features: Optional[dict[str, float]] = None,
 ) -> float:
-    X = _feature_vector(features, is_support, chip_features)
+    X = feature_vector(features, is_support, chip_features)
     return float(bundle.break_model.predict_proba(X)[0, 1])
 
 

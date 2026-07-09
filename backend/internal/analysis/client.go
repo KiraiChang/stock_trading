@@ -231,43 +231,92 @@ type ZoneScore struct {
 	// 分群（見 Python scoring.py::_group_overlapping_zones）。不合併/刪除
 	// 任何 zone，只標記供 UI 顯示「多方法共振」。ConfluenceCount 恆 >= 1；
 	// OverlapGroup 只有 ConfluenceCount > 1 時才有值。
-	OverlapGroup    *int `json:"overlap_group"`
-	ConfluenceCount int  `json:"confluence_count"`
+	OverlapGroup    *int            `json:"overlap_group"`
+	ConfluenceCount int             `json:"confluence_count"`
+	Features        json.RawMessage `json:"features,omitempty"`
+	Evidence        json.RawMessage `json:"evidence,omitempty"`
 }
 
-// ZoneScoreResult 對應 Python score_symbol() 的回傳格式。GlobalTrend/
-// GlobalVolatility/GlobalExpectedValue/GlobalConfidence/GlobalRiskRewardRatio
-// 是「只有一個 Global Model」的整體評估區塊，只在這裡出現一次，不會在每個
-// Zone 裡重複（見 sr_scoring 套件說明的「九、十、十二」）。
-type ZoneScoreResult struct {
-	Symbol                string   `json:"symbol"`
-	Timeframe             string   `json:"timeframe"`
-	AnalyzedAt            string   `json:"analyzed_at"` // RFC3339
-	CurrentPrice          float64  `json:"current_price"`
-	GlobalTrend           float64  `json:"global_trend"`
-	GlobalVolatility      float64  `json:"global_volatility"`
+func (z *ZoneScore) UnmarshalJSON(data []byte) error {
+	type plain ZoneScore
+	var nested struct {
+		Score    *plain          `json:"score"`
+		Features json.RawMessage `json:"features"`
+		Evidence json.RawMessage `json:"evidence"`
+	}
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return err
+	}
+	if nested.Score != nil {
+		*z = ZoneScore(*nested.Score)
+		z.Features = nested.Features
+		z.Evidence = nested.Evidence
+		return nil
+	}
+	var direct plain
+	if err := json.Unmarshal(data, &direct); err != nil {
+		return err
+	}
+	*z = ZoneScore(direct)
+	return nil
+}
+
+type zonePipelineAnalysis struct {
+	Symbol          string          `json:"symbol"`
+	Timeframe       string          `json:"timeframe"`
+	AnalyzedAt      string          `json:"analyzed_at"`
+	CurrentPrice    float64         `json:"current_price"`
+	PeriodSummaries json.RawMessage `json:"period_summaries"`
+	AnalysisTips    json.RawMessage `json:"analysis_tips"`
+	ChipSummary     json.RawMessage `json:"chip_summary"`
+	Model           struct {
+		Version      string   `json:"version"`
+		TrainedAt    string   `json:"trained_at"`
+		ConfigHash   string   `json:"config_hash"`
+		FeatureNames []string `json:"feature_names"`
+	} `json:"model"`
+}
+
+type zonePipelineFeatures struct {
+	GlobalTrend      float64 `json:"global_trend"`
+	GlobalVolatility float64 `json:"global_volatility"`
+}
+
+type zonePipelineScore struct {
 	GlobalExpectedValue   *float64 `json:"global_expected_value"`
 	GlobalConfidence      *float64 `json:"global_confidence"`
 	GlobalRiskRewardRatio *float64 `json:"global_risk_reward_ratio"`
-	// ModelVersion/ModelTrainedAt/ModelFeatureNames 來自產生這次結果的
-	// ModelBundle（見 model.py::ModelBundle），供追蹤「這筆分析是哪個模型
-	// 版本算出來的」。ModelFeatureNames 目前只用於 API 診斷，不寫入 DB。
-	// ModelConfigHash 是訓練這個模型時的 DatasetConfig/zone builder 參數/
-	// model_type/calibration_method 快照的短 hash（見 model.py::
-	// compute_config_hash），比 ModelVersion 更細——同一個 ModelVersion 底下
-	// 換過幾次訓練參數都可能有不同的 ModelConfigHash，讓「這筆分析用哪組
-	// 訓練設定產生」可以事後追溯。
-	ModelVersion      string          `json:"model_version"`
-	ModelTrainedAt    string          `json:"model_trained_at"`
-	ModelFeatureNames []string        `json:"model_feature_names"`
-	ModelConfigHash   string          `json:"model_config_hash"`
-	PeriodSummaries   json.RawMessage `json:"period_summaries"`
-	AnalysisTips      json.RawMessage `json:"analysis_tips"`
-	// ChipSummary 是整檔層級的籌碼拆解 JSON（見 Python _build_chip_summary），
-	// 整份分析共用一份，passthrough 存進 analysis 快照供前端共用面板顯示。
-	ChipSummary     json.RawMessage `json:"chip_summary"`
-	DecisionSummary json.RawMessage `json:"decision_summary"`
-	Zones           []ZoneScore     `json:"zones"`
+}
+
+// ZoneScoreResult is the breaking v2 Data -> Features -> Score -> Evidence ->
+// Decision response contract returned by Python.
+type ZoneScoreResult struct {
+	PipelineVersion string               `json:"pipeline_version"`
+	Analysis        zonePipelineAnalysis `json:"analysis"`
+	Features        zonePipelineFeatures `json:"features"`
+	Score           zonePipelineScore    `json:"score"`
+	Evidence        json.RawMessage      `json:"evidence"`
+	Decision        json.RawMessage      `json:"decision"`
+	Zones           []ZoneScore          `json:"zones"`
+
+	// Legacy construction fields remain internal test/build compatibility only.
+	Symbol                string          `json:"symbol,omitempty"`
+	Timeframe             string          `json:"timeframe,omitempty"`
+	AnalyzedAt            string          `json:"analyzed_at,omitempty"`
+	CurrentPrice          float64         `json:"current_price,omitempty"`
+	GlobalTrend           float64         `json:"global_trend,omitempty"`
+	GlobalVolatility      float64         `json:"global_volatility,omitempty"`
+	GlobalExpectedValue   *float64        `json:"global_expected_value,omitempty"`
+	GlobalConfidence      *float64        `json:"global_confidence,omitempty"`
+	GlobalRiskRewardRatio *float64        `json:"global_risk_reward_ratio,omitempty"`
+	ModelVersion          string          `json:"model_version,omitempty"`
+	ModelTrainedAt        string          `json:"model_trained_at,omitempty"`
+	ModelFeatureNames     []string        `json:"model_feature_names,omitempty"`
+	ModelConfigHash       string          `json:"model_config_hash,omitempty"`
+	PeriodSummaries       json.RawMessage `json:"period_summaries,omitempty"`
+	AnalysisTips          json.RawMessage `json:"analysis_tips,omitempty"`
+	ChipSummary           json.RawMessage `json:"chip_summary,omitempty"`
+	DecisionSummary       json.RawMessage `json:"decision_summary,omitempty"`
 }
 
 // ToStore 把 Python 回傳的 zone 評分結果轉成可以直接寫入 DB 的型別。
@@ -275,32 +324,52 @@ type ZoneScoreResult struct {
 // "unknown" 而不是空字串——空字串在 DB 裡看起來像「忘了填」，"unknown" 才
 // 明確代表「這筆資料就是沒有版本資訊」。
 func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, error) {
-	analyzedAt, err := time.Parse(time.RFC3339, r.AnalyzedAt)
+	analysis := r.Analysis
+	features := r.Features
+	score := r.Score
+	decision := r.Decision
+	periodSummaries := analysis.PeriodSummaries
+	analysisTips := analysis.AnalysisTips
+	chipSummary := analysis.ChipSummary
+	if analysis.Symbol == "" {
+		analysis.Symbol, analysis.Timeframe, analysis.AnalyzedAt = r.Symbol, r.Timeframe, r.AnalyzedAt
+		analysis.CurrentPrice = r.CurrentPrice
+		analysis.Model.Version, analysis.Model.TrainedAt = r.ModelVersion, r.ModelTrainedAt
+		analysis.Model.ConfigHash, analysis.Model.FeatureNames = r.ModelConfigHash, r.ModelFeatureNames
+		features.GlobalTrend, features.GlobalVolatility = r.GlobalTrend, r.GlobalVolatility
+		score.GlobalExpectedValue, score.GlobalConfidence = r.GlobalExpectedValue, r.GlobalConfidence
+		score.GlobalRiskRewardRatio = r.GlobalRiskRewardRatio
+		decision = r.DecisionSummary
+		periodSummaries, analysisTips, chipSummary = r.PeriodSummaries, r.AnalysisTips, r.ChipSummary
+	}
+	analyzedAt, err := time.Parse(time.RFC3339, analysis.AnalyzedAt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse analyzed_at %q: %w", r.AnalyzedAt, err)
+		return nil, nil, fmt.Errorf("parse analyzed_at %q: %w", analysis.AnalyzedAt, err)
 	}
 
-	modelVersion := r.ModelVersion
+	modelVersion := analysis.Model.Version
 	if modelVersion == "" {
 		modelVersion = "unknown"
 	}
 
 	a := &store.SRZoneAnalysis{
-		Symbol:                r.Symbol,
-		Timeframe:             r.Timeframe,
+		Symbol:                analysis.Symbol,
+		Timeframe:             analysis.Timeframe,
 		AnalyzedAt:            analyzedAt,
-		CurrentPrice:          r.CurrentPrice,
-		GlobalTrend:           r.GlobalTrend,
-		GlobalVolatility:      r.GlobalVolatility,
-		GlobalExpectedValue:   nullFloat(r.GlobalExpectedValue),
-		GlobalConfidence:      nullFloat(r.GlobalConfidence),
-		GlobalRiskRewardRatio: nullFloat(r.GlobalRiskRewardRatio),
+		CurrentPrice:          analysis.CurrentPrice,
+		GlobalTrend:           features.GlobalTrend,
+		GlobalVolatility:      features.GlobalVolatility,
+		GlobalExpectedValue:   nullFloat(score.GlobalExpectedValue),
+		GlobalConfidence:      nullFloat(score.GlobalConfidence),
+		GlobalRiskRewardRatio: nullFloat(score.GlobalRiskRewardRatio),
 		ModelVersion:          modelVersion,
-		ModelConfigHash:       r.ModelConfigHash,
-		PeriodSummaries:       rawJSONOrDefault(r.PeriodSummaries, "[]"),
-		AnalysisTips:          rawJSONOrDefault(r.AnalysisTips, "[]"),
-		ChipSummary:           rawJSONOrDefault(r.ChipSummary, "null"),
-		DecisionSummary:       rawJSONOrDefault(r.DecisionSummary, "null"),
+		ModelConfigHash:       analysis.Model.ConfigHash,
+		PipelineVersion:       r.PipelineVersion,
+		Evidence:              rawJSONOrDefault(r.Evidence, "null"),
+		PeriodSummaries:       rawJSONOrDefault(periodSummaries, "[]"),
+		AnalysisTips:          rawJSONOrDefault(analysisTips, "[]"),
+		ChipSummary:           rawJSONOrDefault(chipSummary, "null"),
+		DecisionSummary:       rawJSONOrDefault(decision, "null"),
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))
@@ -359,6 +428,8 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			OverlapGroup:          nullInt(z.OverlapGroup),
 			ConfluenceCount:       confluenceCount,
 			Status:                "PENDING",
+			Features:              rawJSONOrDefault(z.Features, "null"),
+			Evidence:              rawJSONOrDefault(z.Evidence, "null"),
 		})
 	}
 

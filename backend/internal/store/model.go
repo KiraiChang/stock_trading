@@ -143,7 +143,9 @@ type SRZoneAnalysis struct {
 	// 可以事後追溯，重訓改參數後舊分析可被這個值辨識出來。舊模型檔沒有這個
 	// 欄位時 Python 端回傳空字串，這裡直接存空字串（不像 ModelVersion 那樣
 	// 防禦性地填 "unknown"，因為空字串已經足夠表示「沒有這項資訊」）。
-	ModelConfigHash string `db:"model_config_hash"       json:"model_config_hash"`
+	ModelConfigHash string  `db:"model_config_hash"       json:"model_config_hash"`
+	PipelineVersion string  `db:"pipeline_version"        json:"pipeline_version"`
+	Evidence        RawJSON `db:"evidence"                json:"evidence"`
 	// PeriodSummaries 是 Python 端整理好的短/中/長期支撐壓力摘要 JSON；
 	// AnalysisTips 是前端輪播的白話解讀提示。兩者保存於 analysis 快照，
 	// 讓歷史分析不需要重新呼叫 Python 也能顯示同一份結論。
@@ -246,6 +248,8 @@ type SRZone struct {
 	// status/broken_at/broken_price 有明確對應的方向可以解釋，見
 	// sr_zone_improve.md review #2。
 	ResolvedRole NullString `db:"resolved_role" json:"resolved_role,omitempty"`
+	Features     RawJSON    `db:"features"      json:"features"`
+	Evidence     RawJSON    `db:"evidence"      json:"evidence"`
 }
 
 // SRScoringTrainJob 追蹤一次「重新訓練 hold/break 機率模型」的背景任務
@@ -441,25 +445,25 @@ type Holding struct {
 // shares/cost_price，並引用當次建立的 sr_zone_analysis_id，讓歷史結果不會因
 // 之後修改持股或重新訓練模型而改變。
 type HoldingAnalysis struct {
-	ID                  uint64      `db:"id"                    json:"id"`
-	HoldingID           uint64      `db:"holding_id"            json:"holding_id"`
-	Symbol              string      `db:"symbol"                json:"symbol"`
-	Shares              float64     `db:"shares"                json:"shares"`
-	CostPrice           float64     `db:"cost_price"            json:"cost_price"`
-	AnalyzedAt          time.Time   `db:"analyzed_at"           json:"analyzed_at"`
-	CurrentPrice        float64     `db:"current_price"         json:"current_price"`
-	SRZoneAnalysisID    NullInt64   `db:"sr_zone_analysis_id"   json:"sr_zone_analysis_id,omitempty"`
-	Action              string      `db:"action"                json:"action"`
-	ActionLabel         string      `db:"action_label"          json:"action_label"`
-	StopLossPrice       NullFloat64 `db:"stop_loss_price"       json:"stop_loss_price,omitempty"`
-	StopLossAmount      NullFloat64 `db:"stop_loss_amount"      json:"stop_loss_amount,omitempty"`
-	TakeProfitPrice     NullFloat64 `db:"take_profit_price"     json:"take_profit_price,omitempty"`
-	TakeProfitAmount    NullFloat64 `db:"take_profit_amount"    json:"take_profit_amount,omitempty"`
-	AddOnTriggerPrice   NullFloat64 `db:"add_on_trigger_price" json:"add_on_trigger_price,omitempty"`
-	AddOnAmount         NullFloat64 `db:"add_on_amount"        json:"add_on_amount,omitempty"`
-	UnrealizedPnL       float64     `db:"unrealized_pnl"        json:"unrealized_pnl"`
-	UnrealizedPnLPct    float64     `db:"unrealized_pnl_pct"    json:"unrealized_pnl_pct"`
-	Reason              RawJSON     `db:"reason"                json:"reason"`
-	DetailJSON          RawJSON     `db:"detail_json"           json:"detail_json"`
-	CreatedAt           time.Time   `db:"created_at"            json:"created_at"`
+	ID                uint64      `db:"id"                    json:"id"`
+	HoldingID         uint64      `db:"holding_id"            json:"holding_id"`
+	Symbol            string      `db:"symbol"                json:"symbol"`
+	Shares            float64     `db:"shares"                json:"shares"`
+	CostPrice         float64     `db:"cost_price"            json:"cost_price"`
+	AnalyzedAt        time.Time   `db:"analyzed_at"           json:"analyzed_at"`
+	CurrentPrice      float64     `db:"current_price"         json:"current_price"`
+	SRZoneAnalysisID  NullInt64   `db:"sr_zone_analysis_id"   json:"sr_zone_analysis_id,omitempty"`
+	Action            string      `db:"action"                json:"action"`
+	ActionLabel       string      `db:"action_label"          json:"action_label"`
+	StopLossPrice     NullFloat64 `db:"stop_loss_price"       json:"stop_loss_price,omitempty"`
+	StopLossAmount    NullFloat64 `db:"stop_loss_amount"      json:"stop_loss_amount,omitempty"`
+	TakeProfitPrice   NullFloat64 `db:"take_profit_price"     json:"take_profit_price,omitempty"`
+	TakeProfitAmount  NullFloat64 `db:"take_profit_amount"    json:"take_profit_amount,omitempty"`
+	AddOnTriggerPrice NullFloat64 `db:"add_on_trigger_price" json:"add_on_trigger_price,omitempty"`
+	AddOnAmount       NullFloat64 `db:"add_on_amount"        json:"add_on_amount,omitempty"`
+	UnrealizedPnL     float64     `db:"unrealized_pnl"        json:"unrealized_pnl"`
+	UnrealizedPnLPct  float64     `db:"unrealized_pnl_pct"    json:"unrealized_pnl_pct"`
+	Reason            RawJSON     `db:"reason"                json:"reason"`
+	DetailJSON        RawJSON     `db:"detail_json"           json:"detail_json"`
+	CreatedAt         time.Time   `db:"created_at"            json:"created_at"`
 }

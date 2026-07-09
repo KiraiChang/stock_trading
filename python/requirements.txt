@@ -12,3 +12,4 @@ pytest>=8.0.0         # backtest/modular 單元測試
 scikit-learn>=1.4.0   # sr_scoring bounce/break 機率模型
 lightgbm>=4.0.0         # sr_scoring 可選高效率 GBDT 模型
 joblib>=1.3.0         # sr_scoring 模型持久化
+shap>=0.46.0          # sr_scoring v4 local model evidence

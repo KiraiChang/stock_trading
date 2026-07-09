@@ -22,6 +22,53 @@ export interface TradingScoreBreakdown {
   chip: number
 }
 
+export interface SRShapContribution {
+  feature: string
+  value: number
+  contribution: number
+  direction: 'supportive' | 'opposing' | 'neutral'
+}
+
+export interface SRShapTargetEvidence {
+  baseline_probability: number
+  final_probability: number
+  additivity_error: number
+  contributions: SRShapContribution[]
+}
+
+export interface SRDirectionEvidence {
+  role: 'SUPPORT' | 'RESISTANCE'
+  targets: {
+    hold: SRShapTargetEvidence
+    break: SRShapTargetEvidence
+  }
+}
+
+export interface SRZoneEvidence {
+  price_low: number
+  price_high: number
+  support: SRDirectionEvidence
+  resistance: SRDirectionEvidence
+  risk_flags: string[]
+}
+
+export interface SRGlobalEvidence {
+  trend: number
+  volatility: number
+  metrics: {
+    expected_value: number | null
+    confidence: number | null
+    risk_reward_ratio: number | null
+  }
+  chip: SRChipSummary
+  model: {
+    version: string
+    config_hash: string
+    explainer: 'permutation_shap'
+    explained_output: 'calibrated_normalized_probability'
+  }
+}
+
 // 機構級版本（2026-07 重新設計，見後端 sr_scoring/scoring.py 開頭的完整說明）
 export interface SRZone {
   id: number
@@ -91,6 +138,11 @@ export interface SRZone {
   // 本身分析後不會再變動，判斷「這個 zone 現在算支撐還是壓力」應優先看
   // resolved_role，沒有值再退回 role。
   resolved_role?: 'SUPPORT' | 'RESISTANCE' | null
+  features?: {
+    support: Record<string, number>
+    resistance: Record<string, number>
+  } | null
+  evidence?: SRZoneEvidence | null
 }
 
 export type SRPeriodKey = 'short' | 'mid' | 'long'
@@ -241,6 +293,8 @@ export interface SRZoneAnalysis {
   // model_version 底下換過幾次訓練參數都可能有不同的值，重訓改參數後舊
   // 分析可以靠這個值被辨識出來。
   model_config_hash: string
+  pipeline_version: string
+  evidence: SRGlobalEvidence | null
   // Python 端已收斂好的短/中/長期支撐壓力摘要；完整明細仍由 zones 提供。
   period_summaries: SRPeriodSummary[]
   // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
@@ -252,16 +306,67 @@ export interface SRZoneAnalysis {
   created_at: string
 }
 
+interface SRZonePipelineItem {
+  data: Pick<SRZone, 'id' | 'analysis_id' | 'price_low' | 'price_high' | 'method' | 'role'>
+  features: SRZone['features']
+  score: SRZone
+  evidence: SRZoneEvidence | null
+  lifecycle: Pick<SRZone, 'status' | 'broken_at' | 'broken_price' | 'resolved_role'>
+}
+
+interface SRZonePipelineResponse {
+  pipeline_version: string
+  analysis: Pick<SRZoneAnalysis,
+    'id' | 'symbol' | 'timeframe' | 'analyzed_at' | 'current_price' |
+    'model_version' | 'model_config_hash' | 'period_summaries' |
+    'analysis_tips' | 'chip_summary' | 'created_at'>
+  features: Pick<SRZoneAnalysis, 'global_trend' | 'global_volatility'>
+  score: Pick<SRZoneAnalysis,
+    'global_expected_value' | 'global_confidence' | 'global_risk_reward_ratio'>
+  evidence: SRGlobalEvidence | null
+  decision: SRDecisionSummary | null
+  zones: SRZonePipelineItem[]
+}
+
+function normalizePipelineResponse(response: SRZonePipelineResponse): {
+  analysis: SRZoneAnalysis
+  zones: SRZone[]
+} {
+  return {
+    analysis: {
+      ...response.analysis,
+      ...response.features,
+      ...response.score,
+      pipeline_version: response.pipeline_version,
+      evidence: response.evidence,
+      decision_summary: response.decision,
+      period_summaries: response.analysis.period_summaries ?? [],
+      analysis_tips: response.analysis.analysis_tips ?? [],
+      // v2 evidence is preferred for new analyses; pre-migration snapshots
+      // retain their dedicated chip_summary and have evidence=null.
+      chip_summary: response.evidence?.chip ?? response.analysis.chip_summary ?? null,
+    },
+    zones: response.zones.map((item) => ({
+      ...item.score,
+      ...item.data,
+      ...item.lifecycle,
+      features: item.features,
+      evidence: item.evidence,
+    })),
+  }
+}
+
 // limit 為抓取的歷史K棒根數（不是天數），省略或傳 0 時由 Python 端套用預設值（250）
 export async function createSRZoneAnalysis(
   symbol: string,
   timeframe = '1d',
   limit?: number
 ): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
-  return apiFetch('/sr-zones', {
+  const response = await apiFetch<SRZonePipelineResponse>('/sr-zones', {
     method: 'POST',
     body: JSON.stringify({ symbol, timeframe, limit: limit || undefined }),
   })
+  return normalizePipelineResponse(response)
 }
 
 export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<SRZoneAnalysis[]> {
@@ -271,7 +376,8 @@ export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<S
 }
 
 export async function getSRZoneAnalysis(id: number): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
-  return apiFetch(`/sr-zones/${id}`)
+  const response = await apiFetch<SRZonePipelineResponse>(`/sr-zones/${id}`)
+  return normalizePipelineResponse(response)
 }
 
 export async function deleteSRZoneAnalysis(id: number): Promise<void> {
@@ -282,7 +388,8 @@ export async function deleteSRZoneAnalysis(id: number): Promise<void> {
 // zone 的 status（PENDING/HELD_SO_FAR/BROKEN）。可重複呼叫，每次都用目前
 // 為止最新的資料重新計算（見 sr-zone-scoring.md「Zone 生命週期驗證」）。
 export async function verifySRZoneAnalysis(id: number): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
-  return apiFetch(`/sr-zones/${id}/verify`, { method: 'POST' })
+  const response = await apiFetch<SRZonePipelineResponse>(`/sr-zones/${id}/verify`, { method: 'POST' })
+  return normalizePipelineResponse(response)
 }
 
 export interface TrainOptions {
@@ -385,4 +492,3 @@ export interface ModelStatus {
 export async function getModelStatus(): Promise<ModelStatus> {
   return apiFetch('/sr-zones/model-status')
 }
-

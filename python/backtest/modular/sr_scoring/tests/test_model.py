@@ -83,6 +83,9 @@ def test_train_model_produces_bundle_with_metrics():
 
     assert bundle.feature_names == FEATURE_COLUMNS
     assert set(bundle.metrics) == {"hold", "break"}
+    assert bundle.version == "v4"
+    assert 1 <= len(bundle.explanation_background) <= 32
+    assert len(bundle.explanation_background[0]) == len(FEATURE_COLUMNS)
     for metrics in bundle.metrics.values():
         assert 0.0 <= metrics["accuracy"] <= 1.0
         assert 0.0 <= metrics["precision"] <= 1.0

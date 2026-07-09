@@ -13,24 +13,6 @@
 
 ---
 
-### T-001：拆分 `python/backtest/modular/sr_scoring/scoring.py`
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone |
-| 建立日期 | 2026-07-07 |
-| 來源 | `docs/sr_zone_improve.md`「建議優先處理順序」第 6 項 |
-
-`scoring.py` 目前同時負責機率正規化、confidence/recent validation、tier 排序、
-overlap grouping、trading score/recommendation、global metrics、API response
-序列化，單檔責任偏重。文件中明確標註「視後續維護成本」才拆，不是立即要做。
-建議拆法：`scoring_rules.py`（各項分數規則）、`ranking.py`（tier/排序/分群）、
-`serialization.py`（API response 組裝）。
-
----
-
 ### T-002：SR Zone 機率模型自動化回測 pipeline
 
 | 欄位 | 內容 |
@@ -351,39 +333,6 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
-### T-019：SR Zone 決策摘要重構
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已完成 |
-| 優先度 | 高 |
-| 分類 | Python / SR Zone / Frontend / UX |
-| 建立日期 | 2026-07-07 |
-| 來源 | SR Zone 頁面決策閱讀優化需求 |
-| 完成日期 | 2026-07-08 |
-
-目前 SR Zone 已能輸出 `global_*`、`period_summaries`、`analysis_tips`、逐 zone 的機率、EV/RR、`trading_score_breakdown` 與籌碼拆解；但前端閱讀上仍偏向「把多個 zone 與多個理由攤給使用者自己拼結論」。後續應新增更高層的決策摘要模型，讓使用者先看到共同前提、唯一行動與主交易區，再展開看細節。
-
-優化方向：
-
-- **Market Regime 作為最高優先共同前提**：先判斷目前市場狀態，例如趨勢盤、區間盤、高波動、低波動、偏多但過熱、偏空但接近支撐等。所有 zone 的解讀都應受這個前提約束，避免同一份分析裡支撐卡、壓力卡、tips 各自給出分散甚至互相抵消的語氣。
-- **增加唯一 Action**：頂層輸出單一操作結論，例如 `Buy`、`BuySmall`、`Hold`、`Avoid`。這個 action 應由 Market Regime、主交易區、機率、EV/RR、confidence、籌碼與風險條件共同決定；使用者不應需要自己從多張卡片、支撐/壓力、tips 裡拼湊最後結論。
-- **突出目前真正有效的主交易區**：現有排序主要依 tier 與 `trading_score`，但頁面應再挑出一個 primary trading zone，代表「目前最值得觀察或操作的區間」。其餘 zones 保留為次要參考或展開明細，避免所有區間在視覺與語意上同等重要。
-- **Market Context 去除重複資訊**：趨勢、波動、整體籌碼、模型狀態、共同風險等股票層級理由，應集中到 `Market Context` 或等價的整體區塊；zone 卡片只保留該 zone 獨有的理由，例如距離現價、近期觸碰、量能確認、多方法共振、該區間的 break/bounce 機率。這能避免每張卡片重複描述同一組背景。
-- **提升 confidence 透明度**：預設顯示類似 `79%（高）` 的人可讀格式，並允許展開查看貢獻因子。至少應揭露目前既有 confidence 三因子：樣本數因子、近期性因子、穩定度因子；若後續把量能、共振、資料完整度或籌碼資料缺漏納入信心說明，也要清楚標註哪些是 confidence 公式本身、哪些只是輔助解釋。
-
-實作邊界：這不是要刪除既有 `trading_score`、`period_summaries`、`analysis_tips`、逐 zone 詳細數字或 score breakdown；而是新增一層更高層的「決策摘要」給前端預設閱讀。既有 EV/RR、機率、觸碰統計、模型 metadata、籌碼拆解仍應保留在進階區，供使用者驗證結論來源。
-
-設計規格已補到 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四、決策摘要層（T-019）」。本次實作已拆成：
-
-- Python：新增 `decision_summary` builder，包含 `market_regime`、唯一 `action`、`primary_zone`、`market_context`、`confidence_explanation`、`risk_notes`、`secondary_zones`。
-- Go / DB：決定 `decision_summary` 是否與 `period_summaries` 一樣以 JSON passthrough 保存，並同步 repository、handler、API response。
-- TypeScript：補 `SRDecisionSummary` 型別，明確區分公式內 confidence 因子與輔助 context 因子。
-- Svelte：頁面預設改為先顯示 Market Regime、唯一 Action、Primary Zone 與 Market Context；完整 zones 清單改為次要或展開區。
-- 測試與文件：新增 Python scoring tests、Go passthrough tests、前端欄位顯示檢查，並更新 `docs/api-reference.md` 範例。
-
----
-
 ### T-020：持股（holdings）加入使用者/擁有者 scoping
 
 | 欄位 | 內容 |
@@ -415,6 +364,61 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 忽略解析錯誤：body 為選填時可接受，但「有帶 body 卻格式錯誤」會被靜默忽略、
 改用預設值（timeframe/limit），使用者不會知道自己的參數沒生效。可考慮在
 body 非空但解析失敗時回 400，讓錯誤明確。屬小幅健壯性優化。
+
+---
+
+### T-022：SR Zone v2 evidence／v4 模型硬性相依的優雅降級與上線 gating
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Python / SR Zone / Evidence / 部署 |
+| 建立日期 | 2026-07-09 |
+| 來源 | review「SR Zone v2 pipeline evidence」變更（working tree，未提交）時發現 |
+
+v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 fallback：
+
+1. **`shap` 套件**：`evidence.py::explain_direction`（約 line 44）在 `build_evidence`
+   內對每個 zone 無條件 `import shap`，缺套件時 `raise RuntimeError` → `http_server`
+   映射成 503。`shap` 是本次才加進 `requirements.txt`，所以只要 code 先於
+   `pip install` 部署，整個 `/sr-zones` 端點全部 503。另外每個 zone 會跑兩個
+   permutation explainer（hold/break），在熱路徑上有明顯延遲成本。
+2. **v4 模型**：`model.py::load_model`（約 line 309）硬性要求 `version==v4` 且
+   `explanation_background` 非空，`config.yaml` 也改指向尚不存在的
+   `models/sr_scoring_v4.joblib`。既有 v3 部署會 503 直到重訓出 v4 模型。
+
+這些可能是刻意的 v4 遷移設計，但目前是「無 gating、無 fallback 的停機懸崖」：
+純 code deploy（未裝 shap／未訓 v4）會讓端點整個掛掉。後續優化方向：
+
+- 讓 evidence 變成可選：`shap` 或 v4 background 不可用時，`/sr-zones` 仍以規則式
+  分數正常回應、evidence 欄位標記為「未產生」，而不是整包 503。
+- 明確化部署流程（先裝 shap＋訓 v4 再切換），或以旗標 gating evidence 產生。
+- 降低 SHAP 成本（快取 background、批次化、或只對 primary/前 N 個 zone 產生 evidence）。
+
+（若最終決定維持硬性相依、不做降級，改把它記成 `docs/issue.md` 的「已知限制
+（不計畫修復）」並補上部署 runbook。）
+
+---
+
+### T-023：srZonePipelineResponse 的 zone 區塊 payload 去重
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / API / SR Zone |
+| 建立日期 | 2026-07-09 |
+| 來源 | review「SR Zone v2 pipeline evidence」變更（working tree，未提交）時發現 |
+
+`backend/internal/api/handler/sr_zones.go` 的 `srZonePipelineResponse`（約 line 52）
+把整個 `store.SRZone` 塞進 zone 的 `"score"` 鍵。由於 `SRZone.Features`/`Evidence`
+的 json tag 沒有 `omitempty`，會被序列化兩次：一次是 `item.features`/`item.evidence`
+兄弟鍵，一次在 `item.score.features`/`item.score.evidence`；`id`/`price_low`/
+`price_high`/`method`/`role` 也同時出現在 `item.data` 與 `item.score`。不是 bug，
+但 `"score"` 名不符實（其實是整筆 zone 紀錄），且 payload 帶重複的 raw-JSON blob。
+後續可讓 `"score"` 只帶真正的評分欄位（對齊 analysis 層拆成 features/score/evidence
+的做法），避免重複與誤導。
 
 ---
 ## 已完成封存

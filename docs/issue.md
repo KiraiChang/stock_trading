@@ -14,3 +14,25 @@
   則可從本清單移除。
 
 ---
+
+### I-005：ZoneScore.UnmarshalJSON 遇到 nested 且 score 為 null 時靜默解成全零 zone
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低 |
+| 分類 | Go / SR Zone |
+| 建立日期 | 2026-07-09 |
+| 來源 | review「SR Zone v2 pipeline evidence」變更（working tree，未提交）時發現 |
+
+`backend/internal/analysis/client.go` 的 `ZoneScore.UnmarshalJSON`（約 line 303）
+用 `if nested.Score != nil` 判別 nested/flat。若 zone 是 wrapper 形
+`{"data":..,"features":..,"score":null,"evidence":..,"lifecycle":..}`，JSON `null`
+會讓 `nested.Score == nil` → 落到 direct 分支，把整個 wrapper 當扁平 ZoneScore 解，
+但 wrapper 的鍵（data/score/lifecycle…）都對不上扁平 tag（price_low/method…），
+結果 zone 被解成 `price_low=0, method="", trading_score=0`、丟掉 features/evidence、
+`ConfluenceCount` 被強制成 1、`Status=PENDING`，且**不報錯**。目前 Python 一定輸出
+非 null 的 score，屬潛在/脆弱問題，但 null-vs-flat 的判別方式不穩健。
+
+修法：改用更明確的判別（例如偵測 wrapper 專屬鍵，或當 nested 且 score 為 null 時
+回傳明確錯誤）。

@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from .model import ModelBundle
 from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneType
+from .pipeline_types import AnalysisEvidence
 
 
 def _fmt_price(v: float) -> str:
@@ -263,3 +264,17 @@ def build_decision_summary(
         "risk_notes": risk_notes,
         "secondary_zones": secondary,
     }
+
+
+def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
+    """Decision's sole public input is the immutable Evidence stage output."""
+    scores = evidence.scores
+    return build_decision_summary(
+        list(scores.zones),
+        scores.features.data.current_price,
+        scores.features.global_trend,
+        scores.features.global_volatility,
+        scores.global_metrics,
+        scores.chip_summary,
+        scores.features.data.model,
+    )

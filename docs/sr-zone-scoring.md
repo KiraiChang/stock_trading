@@ -905,3 +905,32 @@ Python/Go/DB/TS/Svelte 五層並牽動已訓練模型，投報比過低，決定
   的跨層不同命名**（不是兩個獨立數值），詳見上方「命名對照」表。
 - **Python `/sr-scoring/*` 與對外 Go `/sr-zones/*` 前綴分裂**，同一功能依語言
   邊界命名不同，詳見上方「命名對照」表。
+
+## 十九、五層分析管線與模型證據
+
+SR Zone v4 將同步分析固定為以下單向資料流：
+
+```text
+Data → Features → Score → Evidence → Decision
+```
+
+- `pipeline.py` 只負責 orchestration；各 stage 透過 `pipeline_types.py` 的 immutable
+  dataclass 傳遞資料。
+- Data 固定 K 線、zone、分析時間、模型及不晚於分析日的籌碼快照。
+- Features 分開保存 support/resistance 特徵與模型向量，Score 不再自行抓資料。
+- Evidence 對 hold/break 的「校準且正規化後最終機率」執行 Permutation SHAP。
+  每個 zone 兩個角色都保存 baseline、final probability、原始特徵值、正負貢獻
+  與 `additivity_error`。浮點重建誤差容許至 `1e-5`；超過才視為證據失真並中止。
+- Decision 的公開入口只接受 `AnalysisEvidence`，不可回頭讀 DataFrame 或自行推論模型。
+
+模型版本為 `v4`，模型檔需包含固定抽樣的 SHAP background；v3 模型必須重訓。
+Python `/sr-zones` 回傳 breaking v2 nested contract：
+`analysis`、`features`、`score`、`evidence`、`decision`，以及每個 zone 各自的
+`data/features/score/evidence/lifecycle`。Go 將 analysis/zone evidence JSON
+連同 `pipeline_version` 保存，歷史快照不會回算 evidence。
+
+`analysis.period_summaries`、`analysis.analysis_tips` 與
+`analysis.chip_summary` 是持久化快照契約，不因改用五層管線而移除。
+`evidence.chip` 與專屬 `chip_summary` 來自同一份 Score stage 計算結果：
+前者供 Decision/Evidence 使用，後者維持查詢與舊快照相容。舊資料沒有 evidence
+時，前端回退讀取 `analysis.chip_summary`。

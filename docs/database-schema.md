@@ -212,7 +212,9 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | global_expected_value | 所有「有明確方向」的 zone 依 confidence 加權平均的 EV，是唯一收斂的權威數字；只有完全沒有 zone 解析出明確方向（zones 為空或全部 `AT_ZONE`）時才是 `NULL` |
 | global_confidence | 所有 zone confidence 的簡單平均（不論 zone 有沒有明確方向都計入）；只有 zones 陣列本身是空的時候才是 `NULL`，跟 global_expected_value 的 `NULL` 條件不同 |
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR；`NULL` 條件同 global_expected_value |
-| model_version | 產生這筆分析所用的模型版本（來自 `ModelBundle.version`，例如 `"v3"`）；Python 端萬一沒回傳則寫 `"unknown"` |
+| model_version | 產生這筆分析所用的模型版本（目前為 `"v4"`）；Python 端萬一沒回傳則寫 `"unknown"` |
+| pipeline_version | 分層 API/持久化契約版本，目前為 `"v2"` |
+| evidence | 分析層全局 Evidence JSON，包含 SHAP explainer metadata、global metrics 與籌碼快照 |
 | model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
 | period_summaries | JSON：短/中/長期摘要卡的支撐/壓力摘要 |
 | analysis_tips | JSON：前端顯示的白話提示陣列 |
@@ -252,6 +254,8 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | trading_score | 可拆解的綜合交易分數（0~100） = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%) + Chip(15%)（【2026-07 籌碼分析整合】新增 chip 分量後原五個分量權重等比例縮小） |
 | trading_score_breakdown | JSON：`trading_score` 六個分量各自的加權貢獻值，加總即為 `trading_score` |
 | trading_recommendation | `STRONG_BUY`/`BUY`/`WATCH`/`NEUTRAL`/`AVOID`/`STRONG_SELL` |
+| features | JSON：同一 zone 的 support/resistance typed 特徵快照 |
+| evidence | JSON：兩方向 hold/break 的 SHAP baseline、最終機率、特徵值、貢獻與風險旗標 |
 | status / broken_at / broken_price | `PENDING`（尚未驗證或 `AT_ZONE` 方向未定）/ `HELD_SO_FAR`（曾被觸碰但未被突破）/ `BROKEN`（已被突破，`broken_at`/`broken_price` 是連續確認突破的第一根K棒）。由 `POST /sr-zones/:id/verify` 或 `daily_close` 排程更新，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |
 
 **Index：** `INDEX(analysis_id)`；查詢時額外依 `tier` 排序（`CASE tier WHEN

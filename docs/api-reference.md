@@ -555,81 +555,143 @@ Python 端預設值（250）。
 **Response（201 Created）：**
 ```json
 {
+  "pipeline_version": "v2",
   "analysis": {
     "id": 4,
     "symbol": "2330",
     "timeframe": "1d",
     "analyzed_at": "2026-07-01T00:00:00+08:00",
     "current_price": 985.0,
+    "model_version": "v4",
+    "model_config_hash": "a1b2c3d4e5f6",
+    "period_summaries": [{ "key": "short", "label": "短期", "support": {}, "resistance": null }],
+    "analysis_tips": ["短期支撐守穩，接近區間時觀察量價確認。"],
+    "chip_summary": { "missing": false, "score": 42.5, "signal": "BULLISH" },
+    "created_at": "2026-07-01T10:00:00+08:00"
+  },
+  "features": {
     "global_trend": 0.032,
-    "global_volatility": 0.018,
+    "global_volatility": 0.018
+  },
+  "score": {
     "global_expected_value": 0.004,
     "global_confidence": 0.61,
-    "global_risk_reward_ratio": 0.92,
-    "model_version": "v3",
-    "model_config_hash": "a1b2c3d4e5f6",
-    "decision_summary": {
-      "action": "BuySmall",
-      "action_label": "小量試單",
-      "market_regime": { "primary": "TREND_UP", "flags": ["HIGH_VOLATILITY"], "label": "偏多趨勢但波動偏高", "reasons": ["整體趨勢 3.2%"] },
-      "primary_zone": { "label": "960.00 ~ 970.00", "role": "SUPPORT", "distance_label": "1.5%", "trading_score": 78.5 },
-      "market_context": [],
-      "confidence_explanation": { "value": 0.72, "level": "HIGH", "label": "72%（高）", "formula_factors": [], "context_factors": [] },
-      "risk_notes": ["波動偏高，倉位需保守。"],
-      "secondary_zones": []
+    "global_risk_reward_ratio": 0.92
+  },
+  "evidence": {
+    "trend": 0.032,
+    "volatility": 0.018,
+    "metrics": { "expected_value": 0.004, "confidence": 0.61, "risk_reward_ratio": 0.92 },
+    "chip": { "missing": false, "score": 42.5, "signal": "BULLISH" },
+    "model": {
+      "version": "v4",
+      "config_hash": "a1b2c3d4e5f6",
+      "explainer": "permutation_shap",
+      "explained_output": "calibrated_normalized_probability"
+    }
+  },
+  "decision": {
+    "action": "BuySmall",
+    "action_label": "小量試單",
+    "market_regime": {
+      "primary": "TREND_UP",
+      "flags": ["HIGH_VOLATILITY"],
+      "label": "偏多趨勢但波動偏高",
+      "reasons": ["整體趨勢 3.2%"]
     },
-    "chip_summary": {
-      "missing": false,
-      "score": 42.5,
-      "signal": "BULLISH",
-      "institutional_score": 55.0,
-      "margin_score": 20.0,
-      "broker_score": 30.0,
-      "concentration_score": 40.0
+    "primary_zone": {
+      "label": "960.00 ~ 970.00",
+      "role": "SUPPORT",
+      "distance_label": "1.5%",
+      "trading_score": 78.5
     },
-    "created_at": "2026-07-01T10:00:00+08:00"
+    "market_context": [],
+    "confidence_explanation": {
+      "value": 0.72,
+      "level": "HIGH",
+      "label": "72%（高）",
+      "formula_factors": [],
+      "context_factors": []
+    },
+    "risk_notes": ["波動偏高，倉位需保守。"],
+    "secondary_zones": []
   },
   "zones": [
     {
-      "id": 16,
-      "analysis_id": 4,
-      "price_low": 960.0,
-      "price_high": 970.0,
-      "method": "atr",
-      "role": "SUPPORT",
-      "tier": "TIER_1_MAIN_STRUCTURE",
-      "tier_label": "主結構",
-      "support_score": 0.68,
-      "resistance_score": 0.30,
-      "net_score": 0.38,
-      "net_score_label": "STRONG_SUPPORT",
-      "confidence": 0.72,
-      "confidence_level": "HIGH",
-      "bounce_probability": 0.66,
-      "break_probability": 0.21,
-      "expected_gain": 0.048,
-      "expected_loss": -0.021,
-      "expected_value": 0.0272,
-      "risk_reward_ratio": 2.29,
-      "reward_risk_percentile": 78.0,
-      "relative_volume": 1.4,
-      "volume_confirmation": "CONFIRMED",
-      "touch_count": 4,
-      "support_touch_count": 3,
-      "resistance_touch_count": 1,
-      "reject_count": 3,
-      "break_count": 0,
-      "zone_momentum": 0.021,
-      "zone_direction": "UP",
-      "recent_validation": "VALIDATED_RECENTLY",
-      "trading_score": 78.5,
-      "trading_score_breakdown": { "expected_value": 26.7, "risk_reward": 13.4, "trend": 10.0, "volume": 10.2, "confidence": 7.2, "chip": 11.0 },
-      "trading_recommendation": "BUY",
-      "overlap_group": 0,
-      "confluence_count": 2,
-      "status": "PENDING",
-      "broken_at": null,
-      "broken_price": null
+      "data": {
+        "id": 16,
+        "analysis_id": 4,
+        "price_low": 960.0,
+        "price_high": 970.0,
+        "method": "atr",
+        "role": "SUPPORT"
+      },
+      "features": {
+        "support": { "touch_count": 4, "rejection_count": 3, "breakout_count": 0 },
+        "resistance": { "touch_count": 4, "rejection_count": 1, "breakout_count": 1 }
+      },
+      "score": {
+        "price_low": 960.0,
+        "price_high": 970.0,
+        "method": "atr",
+        "role": "SUPPORT",
+        "tier": "TIER_1_MAIN_STRUCTURE",
+        "tier_label": "主結構",
+        "support_score": 0.68,
+        "resistance_score": 0.30,
+        "net_score": 0.38,
+        "net_score_label": "STRONG_SUPPORT",
+        "confidence": 0.72,
+        "confidence_level": "HIGH",
+        "bounce_probability": 0.66,
+        "break_probability": 0.21,
+        "expected_value": 0.0272,
+        "risk_reward_ratio": 2.29,
+        "touch_count": 4,
+        "support_touch_count": 3,
+        "resistance_touch_count": 1,
+        "recent_validation": "VALIDATED_RECENTLY",
+        "trading_score": 78.5,
+        "trading_score_breakdown": {
+          "expected_value": 26.7,
+          "risk_reward": 13.4,
+          "trend": 10.0,
+          "volume": 10.2,
+          "confidence": 7.2,
+          "chip": 11.0
+        },
+        "trading_recommendation": "BUY",
+        "overlap_group": 0,
+        "confluence_count": 2
+      },
+      "evidence": {
+        "support": {
+          "role": "SUPPORT",
+          "targets": {
+            "hold": {
+              "baseline_probability": 0.50,
+              "final_probability": 0.66,
+              "additivity_error": 0.000002,
+              "contributions": [
+                {
+                  "feature": "rejection_count",
+                  "value": 3.0,
+                  "contribution": 0.08,
+                  "direction": "supportive"
+                }
+              ]
+            }
+          }
+        },
+        "resistance": {},
+        "risk_flags": []
+      },
+      "lifecycle": {
+        "status": "PENDING",
+        "broken_at": null,
+        "broken_price": null,
+        "resolved_role": null
+      }
     }
   ]
 }
@@ -647,16 +709,18 @@ sr-zone-scoring.md「六」。`overlap_group`/`confluence_count` 是跨方法重
 分群結果，`overlap_group` 只有 `confluence_count > 1` 時才有值，見
 sr-zone-scoring.md「十七」。
 
-`analysis` 另含 `decision_summary`（Market Regime、唯一 Action、Primary Zone、Market Context、confidence 說明與次要 zones）、`period_summaries`（短/中/長期各一組支撐/壓力摘要）與
-`analysis_tips`（白話提示陣列）。`decision_summary` 是前端預設閱讀層，既有 `zones` 詳細數字仍保留；欄位語意見
-sr-zone-scoring.md「十四」。
+頂層依序對應 Data/Features/Score/Evidence/Decision。`analysis` 同時保存
+`period_summaries`、`analysis_tips` 與專屬 `chip_summary`；`decision` 是前端
+預設閱讀層。每個 zone 也分成 `data/features/score/evidence/lifecycle`，
+驗證 API 只更新 lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
 
 **籌碼摘要欄位**（見 sr-zone-scoring.md「十二之一」）：`analysis.chip_summary`
 是整檔層級的籌碼拆解，`score`/`institutional_score`/`margin_score`/`broker_score`
 為 −100~100、`concentration_score` 為 0~100、`signal` 為
 `BULLISH`/`BEARISH`/`NEUTRAL`/`RISK`。查無籌碼資料時 `chip_summary.missing=true`
 且各分數為 `null`（跟「分數接近 0 的中性」不同）；更舊、尚未帶此欄位的分析
-則整個 `chip_summary` 為 `null`。
+則整個 `chip_summary` 為 `null`。新分析的 `evidence.chip` 使用同一份計算結果；
+舊分析沒有 evidence 時，客戶端應回退讀取 `analysis.chip_summary`。
 
 每張摘要卡另在 `period_summaries[].support`／`.resistance` 底下帶一個角色化的
 `chip` 物件：
@@ -670,7 +734,7 @@ sr-zone-scoring.md「十四」。
 }
 ```
 
-`contribution`（直接加權）與 `*_delta_pp`（v3 模型特徵）是籌碼影響分數的兩條
+`contribution`（直接加權）與 `*_delta_pp`（v4 模型特徵）是籌碼影響分數的兩條
 獨立路徑，不是重複計分。前端摘要卡對支撐顯示 `bounce_delta_pp`（反彈守住）、
 對壓力顯示 `break_delta_pp`（突破壓力），兩者是不同事件。
 
@@ -691,14 +755,29 @@ sr-zone-scoring.md「十四」。
 不是一次性判定；`daily_close` 排程也會每天自動對最近幾筆分析呼叫一次
 （見 sr-zone-scoring.md「十四」）。
 
-**Response：** 格式同 `GET /sr-zones/:id`，但 zones 的 `status`/`broken_at`/
-`broken_price` 會反映最新驗證結果：
+**Response：** 格式同 `GET /sr-zones/:id`，但 `zones[].lifecycle` 會反映最新
+驗證結果：
 ```json
 {
-  "analysis": { "...": "..." },
+  "pipeline_version": "v2",
+  "analysis": { "id": 4, "symbol": "2330" },
+  "features": {},
+  "score": {},
+  "evidence": {},
+  "decision": {},
   "zones": [
-    { "...": "...", "status": "BROKEN", "broken_at": "2026-07-05T00:00:00+08:00", "broken_price": 940.0 },
-    { "...": "...", "status": "HELD_SO_FAR", "broken_at": null, "broken_price": null }
+    {
+      "data": { "id": 16, "price_low": 960.0, "price_high": 970.0 },
+      "features": {},
+      "score": {},
+      "evidence": {},
+      "lifecycle": {
+        "status": "BROKEN",
+        "broken_at": "2026-07-05T00:00:00+08:00",
+        "broken_price": 940.0,
+        "resolved_role": null
+      }
+    }
   ]
 }
 ```
@@ -755,8 +834,8 @@ sr-zone-scoring.md「十四」。
         "hold": { "auc": 0.81, "accuracy": 0.76, "brier_score": 0.18, "log_loss": 0.52, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.48, "positive_rate_test": 0.5 },
         "break": { "auc": 0.77, "accuracy": 0.72, "brier_score": 0.21, "log_loss": 0.58, "calibrated": 1.0, "train_rows": 102, "test_rows": 26, "positive_rate_train": 0.31, "positive_rate_test": 0.35 }
       },
-      "model_path": "models/sr_scoring_v3.joblib",
-      "model_version": "v3",
+      "model_path": "models/sr_scoring_v4.joblib",
+      "model_version": "v4",
       "dataset_summary": {
         "rows": 128, "rows_by_symbol": { "2330": 90, "2454": 38 },
         "role_counts": { "SUPPORT": 70, "RESISTANCE": 58 },
@@ -795,9 +874,9 @@ sr-zone-scoring.md「十四」。
 ```json
 {
   "exists": true,
-  "version": "v3",
+  "version": "v4",
   "trained_at": "2026-07-01T13:30:00+08:00",
-  "model_path": "models/sr_scoring_v3.joblib",
+  "model_path": "models/sr_scoring_v4.joblib",
   "split_method": "time",
   "metrics": { "hold": { "auc": 0.81, "calibrated": 1.0 }, "break": { "auc": 0.77, "calibrated": 1.0 } },
   "feature_names": ["touch_count", "rejection_count", "..."],

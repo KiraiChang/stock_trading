@@ -45,6 +45,7 @@
 
 
   $: decisionSummary = current?.decision_summary ?? null
+  $: globalEvidence = current?.evidence ?? null
   let verifying = false
   let verifyError = ''
 
@@ -570,6 +571,29 @@
     if (v < 0) return 'text-fall'
     return 'text-muted'
   }
+
+  const featureLabel: Record<string, string> = {
+    touch_count: '觸碰次數',
+    rejection_count: '守住次數',
+    breakout_count: '突破次數',
+    average_bounce_return: '平均反彈',
+    average_break_return: '平均跌破',
+    relative_volume: '相對量能',
+    volatility: '波動',
+    trend_strength: '趨勢',
+    is_support: '支撐角色',
+    chip_total_score: '籌碼總分',
+    chip_institutional_score: '法人',
+    chip_margin_score: '融資',
+    chip_broker_score: '券商',
+    chip_concentration_score: '集中度',
+    chip_missing: '籌碼缺漏',
+  }
+
+  function activeEvidence(z: SRZone) {
+    if (!z.evidence) return null
+    return effectiveRole(z) === 'RESISTANCE' ? z.evidence.resistance : z.evidence.support
+  }
 </script>
 
 <Layout>
@@ -776,6 +800,21 @@
         <div class="px-5 py-4 border-b border-border">
           <SRChipPanel summary={chipSummary} />
         </div>
+        {#if globalEvidence}
+          <div class="px-5 py-3 border-b border-border bg-indigo-950/20">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <p class="text-white text-sm font-medium">模型證據</p>
+                <p class="text-muted text-xs">
+                  {globalEvidence.model.explainer} · 解釋校準、正規化後的最終機率
+                </p>
+              </div>
+              <div class="text-xs text-muted font-mono">
+                pipeline {current.pipeline_version} · model {globalEvidence.model.version}/{globalEvidence.model.config_hash}
+              </div>
+            </div>
+          </div>
+        {/if}
         {#if decisionSummary}
           <div class="px-5 py-4 border-b border-border bg-surface/40 decision-summary-panel">
             <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
@@ -1054,6 +1093,31 @@
                             但這個價位帶過去的觸碰歷史比較像「{netScoreLabelText[z.net_score_label] ?? z.net_score_label}」，
                             建議降低信心、多觀察一段時間再判斷。
                           </p>
+                        {/if}
+
+                        {#if activeEvidence(z)}
+                          <div class="mb-3 border border-indigo-900/50 rounded-lg p-3 bg-indigo-950/20">
+                            <div class="flex items-center justify-between gap-2 mb-2">
+                              <p class="text-white text-xs font-medium">SHAP 局部模型解釋</p>
+                              <p class="text-muted text-[11px]">
+                                Hold {fmtPct(activeEvidence(z)?.targets.hold.baseline_probability)}
+                                → {fmtPct(activeEvidence(z)?.targets.hold.final_probability)}
+                              </p>
+                            </div>
+                            <div class="grid md:grid-cols-2 gap-x-4 gap-y-1">
+                              {#each activeEvidence(z)?.targets.hold.contributions.slice(0, 6) ?? [] as contribution}
+                                <div class="flex items-center justify-between gap-2 text-[11px]">
+                                  <span class="text-muted">{featureLabel[contribution.feature] ?? contribution.feature}</span>
+                                  <span class="{signedClass(contribution.contribution)} font-mono">
+                                    {fmtSignedPct(contribution.contribution)}
+                                  </span>
+                                </div>
+                              {/each}
+                            </div>
+                            {#if z.evidence?.risk_flags.length}
+                              <p class="text-yellow-300 text-[11px] mt-2">風險旗標：{z.evidence.risk_flags.join('、')}</p>
+                            {/if}
+                          </div>
                         {/if}
 
                         <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->

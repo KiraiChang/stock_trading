@@ -28,8 +28,7 @@ const (
 	ActionTakeProfit = "TAKE_PROFIT"
 	ActionExitStop   = "EXIT_STOP"
 
-	defaultTimeframe        = "1d"
-	existingSRSnapshotLimit = 200
+	defaultTimeframe = "1d"
 )
 
 type Config struct {
@@ -51,11 +50,14 @@ func DefaultConfig() Config {
 }
 
 type Analyzer struct {
-	client     *analysis.Client
 	positions  store.PositionRepo
-	srZoneRepo store.SRZoneRepo
+	srProvider srAnalysisProvider
 	config     Config
 	now        func() time.Time
+}
+
+type srAnalysisProvider interface {
+	Analyze(ctx context.Context, symbol string, opts analysis.SRAnalysisOptions) (*analysis.SRAnalysisResult, error)
 }
 
 func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRepo store.SRZoneRepo, config Config) *Analyzer {
@@ -83,7 +85,14 @@ func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRe
 	if config.SRReuseMaxAge <= 0 {
 		config.SRReuseMaxAge = d.SRReuseMaxAge
 	}
-	return &Analyzer{client: client, positions: positions, srZoneRepo: srZoneRepo, config: config, now: time.Now}
+	return &Analyzer{
+		positions: positions,
+		srProvider: analysis.NewSRAnalysisProvider(
+			client, srZoneRepo, config.SRReuseMaxAge,
+		),
+		config: config,
+		now:    time.Now,
+	}
 }
 
 type AnalyzeOptions struct {
@@ -112,11 +121,13 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 		opts.Limit = 250
 	}
 
-	sr, zones, err := a.loadSR(ctx, symbol, opts)
+	srResult, err := a.srProvider.Analyze(ctx, symbol, analysis.SRAnalysisOptions{
+		Timeframe: opts.Timeframe, Limit: opts.Limit, ForceRefresh: opts.ForceRefresh,
+	})
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := a.buildSnapshot(position, sr, zones)
+	snapshot, err := a.buildSnapshot(position, srResult.Analysis, srResult.Zones)
 	if err != nil {
 		return nil, err
 	}
@@ -130,46 +141,7 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 		snapshot.CreatedAt = a.currentTime()
 		saved = snapshot
 	}
-	return &AnalyzeResult{Analysis: saved, SR: sr, Zones: zones}, nil
-}
-
-func (a *Analyzer) loadSR(ctx context.Context, symbol string, opts AnalyzeOptions) (*store.SRZoneAnalysis, []store.SRZone, error) {
-	if !opts.ForceRefresh {
-		analyses, err := a.srZoneRepo.List(ctx, symbol, existingSRSnapshotLimit)
-		if err != nil {
-			return nil, nil, fmt.Errorf("list existing sr zone analyses: %w", err)
-		}
-		for i := range analyses {
-			if analyses[i].Timeframe != opts.Timeframe {
-				continue
-			}
-			age := a.currentTime().Sub(analyses[i].AnalyzedAt)
-			if age < 0 || age > a.config.SRReuseMaxAge {
-				continue
-			}
-			zones, err := a.srZoneRepo.GetZones(ctx, analyses[i].ID)
-			return &analyses[i], zones, err
-		}
-	}
-
-	result, err := a.client.ScoreZones(ctx, symbol, opts.Timeframe, opts.Limit)
-	if err != nil {
-		return nil, nil, err
-	}
-	sr, zones, err := result.ToStore()
-	if err != nil {
-		return nil, nil, err
-	}
-	id, err := a.srZoneRepo.Create(ctx, sr, zones)
-	if err != nil {
-		return nil, nil, err
-	}
-	saved, err := a.srZoneRepo.Get(ctx, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	savedZones, err := a.srZoneRepo.GetZones(ctx, id)
-	return saved, savedZones, err
+	return &AnalyzeResult{Analysis: saved, SR: srResult.Analysis, Zones: srResult.Zones}, nil
 }
 
 func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnalysis, zones []store.SRZone) (*store.PositionAnalysis, error) {

@@ -1,0 +1,108 @@
+package handler
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
+	"github.com/trading/backend/internal/analysis"
+	"github.com/trading/backend/internal/portfolio"
+	"github.com/trading/backend/internal/store"
+)
+
+type TradeAnalysisHandler struct {
+	repo     store.PositionRepo
+	analyzer positionAnalyzer
+	log      *zap.Logger
+}
+
+type positionAnalyzer interface {
+	Analyze(ctx context.Context, symbol string, opts portfolio.AnalyzeOptions) (*portfolio.AnalyzeResult, error)
+}
+
+func NewTradeAnalysisHandler(repo store.PositionRepo, analyzer *portfolio.Analyzer, log *zap.Logger) *TradeAnalysisHandler {
+	return &TradeAnalysisHandler{repo: repo, analyzer: analyzer, log: log}
+}
+
+func tradeAnalysisResponse(result *portfolio.AnalyzeResult) gin.H {
+	state := ""
+	hasPosition := false
+	symbol := ""
+	if result != nil && result.Analysis != nil {
+		symbol = result.Analysis.Symbol
+		state = result.Analysis.PositionState
+		hasPosition = result.Analysis.Shares > 0
+	}
+	var analysis *store.PositionAnalysis
+	var sr *store.SRZoneAnalysis
+	var zones []store.SRZone
+	if result != nil {
+		analysis = result.Analysis
+		sr = result.SR
+		zones = result.Zones
+	}
+	return gin.H{
+		"context": gin.H{
+			"symbol":         symbol,
+			"position_state": state,
+			"has_position":   hasPosition,
+		},
+		"analysis":         analysis,
+		"sr_zone_analysis": sr,
+		"zones":            zones,
+	}
+}
+
+func (h *TradeAnalysisHandler) Analyze(c *gin.Context) {
+	var body struct {
+		Symbol       string `json:"symbol"`
+		Timeframe    string `json:"timeframe"`
+		Limit        int    `json:"limit"`
+		ForceRefresh bool   `json:"force_refresh"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	body.Symbol = normalizePositionSymbol(body.Symbol)
+	if body.Symbol == "" || body.Limit < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "valid symbol and limit are required"})
+		return
+	}
+
+	result, err := h.analyzer.Analyze(c.Request.Context(), body.Symbol, portfolio.AnalyzeOptions{
+		Timeframe: body.Timeframe, Limit: body.Limit, ForceRefresh: body.ForceRefresh,
+	})
+	if err != nil {
+		var upstreamErr *analysis.UpstreamStatusError
+		if errors.As(err, &upstreamErr) {
+			mapScoreZonesError(c, h.log, err)
+			return
+		}
+		serverError(c, h.log, err, "trade analyses: create")
+		return
+	}
+	c.JSON(http.StatusCreated, tradeAnalysisResponse(result))
+}
+
+func (h *TradeAnalysisHandler) ListHistory(c *gin.Context) {
+	symbol := normalizePositionSymbol(c.Param("symbol"))
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	rows, err := h.repo.ListAnalyses(c.Request.Context(), symbol, limit)
+	if err != nil {
+		serverError(c, h.log, err, "trade analyses: list history")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"analyses": rows, "total": len(rows)})
+}

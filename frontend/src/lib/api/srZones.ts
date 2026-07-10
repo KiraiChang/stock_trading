@@ -360,11 +360,12 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
 export async function createSRZoneAnalysis(
   symbol: string,
   timeframe = '1d',
-  limit?: number
+  limit?: number,
+  reuseExisting = false
 ): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
   const response = await apiFetch<SRZonePipelineResponse>('/sr-zones', {
     method: 'POST',
-    body: JSON.stringify({ symbol, timeframe, limit: limit || undefined }),
+    body: JSON.stringify({ symbol, timeframe, limit: limit || undefined, reuse_existing: reuseExisting }),
   })
   return normalizePipelineResponse(response)
 }

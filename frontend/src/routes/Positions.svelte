@@ -3,10 +3,11 @@
   import Layout from '../components/layout/Layout.svelte'
   import { ApiError } from '../lib/api/client'
   import {
-    addPositionTransaction, adjustPosition, analyzePosition, getPosition,
-    listPositionAnalyses, listPositionTransactions, listPositions,
+    addPositionTransaction, adjustPosition, getPosition,
+    listPositionTransactions, listPositions,
     type Position, type PositionAnalysis, type PositionTransaction,
   } from '../lib/api/positions'
+  import { analyzeTrade, listTradeAnalyses } from '../lib/api/tradeAnalysis'
 
   let symbol = ''
   let positions: Position[] = []
@@ -33,7 +34,7 @@
     try {
       current = await getPosition(symbol)
       transactions = await listPositionTransactions(symbol)
-      analyses = await listPositionAnalyses(symbol)
+      analyses = await listTradeAnalyses(symbol)
       latest = analyses[0] ?? null
       adjustment = {
         shares: String(current.shares),
@@ -98,7 +99,7 @@
     busy = true
     error = ''
     try {
-      const response = await analyzePosition(symbol, forceRefresh)
+      const response = await analyzeTrade(symbol, forceRefresh)
       latest = response.analysis
       await select(symbol)
     } catch (err) {
@@ -128,7 +129,7 @@
 
 <Layout>
   <div class="max-w-6xl mx-auto space-y-4">
-    <h1 class="text-white font-semibold">Position Analysis</h1>
+    <h1 class="text-white font-semibold">交易分析</h1>
     {#if error}<p class="text-rise text-sm">{error}</p>{/if}
 
     <div class="bg-panel border border-border rounded-xl p-4 flex gap-3 flex-wrap">
@@ -141,7 +142,7 @@
 
     <div class="grid lg:grid-cols-3 gap-4">
       <div class="bg-panel border border-border rounded-xl p-4">
-        <h2 class="text-white text-sm font-semibold mb-3">目前 Position</h2>
+        <h2 class="text-white text-sm font-semibold mb-3">目前持股狀態</h2>
         {#if current}
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><p class="text-muted text-xs">狀態</p><p class="text-white">{current.shares > 0 ? 'LONG' : 'FLAT'}</p></div>

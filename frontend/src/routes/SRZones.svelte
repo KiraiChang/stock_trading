@@ -24,6 +24,7 @@
 
   let symbol = ''
   let fetchLimit = 250
+  let reuseExisting = false
   let submitting = false
   let submitError = ''
 
@@ -378,7 +379,7 @@
     submitting = true
     submitError = ''
     try {
-      const { analysis, zones } = await createSRZoneAnalysis(symbol.trim(), '1d', fetchLimit)
+      const { analysis, zones } = await createSRZoneAnalysis(symbol.trim(), '1d', fetchLimit, reuseExisting)
       current = analysis
       currentZones = zones
       await loadHistory()
@@ -651,10 +652,19 @@
           {submitting ? '分析中...' : '分析'}
         </button>
       </div>
+      <label class="mt-3 inline-flex items-center gap-2 text-xs text-muted">
+        <input
+          type="checkbox"
+          bind:checked={reuseExisting}
+          class="rounded border-border bg-surface text-indigo-600 focus:ring-indigo-500"
+        />
+        <span>重用 24 小時內同週期分析；未勾選時會建立新的分析快照。</span>
+      </label>
       <p class="text-muted text-xs mt-2">
         用 ATR 通道與成交量分布兩種方法建立價格區間（zone），依歷史觸碰事件訓練的機率模型算出反彈/跌破機率，
         支撐/壓力強度分數由該機率依可信度收縮而來（觸碰次數越少越保守），兩者不會互相矛盾。抓取根數指分析用的
-        歷史K棒數量（預設 250，至少 35 根）。需要先在下方訓練過機率模型才能分析。
+        歷史K棒數量（預設 250，至少 35 根）。需要先在下方訓練過機率模型才能分析；若勾選重用且找到近期快照，
+        本次不會重新呼叫模型。
       </p>
     </div>
 

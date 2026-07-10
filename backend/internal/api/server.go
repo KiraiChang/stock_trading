@@ -131,8 +131,9 @@ func NewServer(
 		protected.POST("/analysis/:id/verify", anh.Verify)
 		protected.DELETE("/analysis/:id", anh.Delete)
 
+		srAnalysisProvider := analysis.NewSRAnalysisProvider(analysisClient, srZoneRepo, positionConfig.SRReuseMaxAge)
 		szh := handler.NewSRZoneHandler(
-			analysisClient, srZoneRepo, watchlistRepo, srScoringTrainJobRepo, srZoneVerifier, log,
+			analysisClient, srZoneRepo, watchlistRepo, srScoringTrainJobRepo, srZoneVerifier, srAnalysisProvider, log,
 		)
 		protected.POST("/sr-zones", szh.Create)
 		protected.GET("/sr-zones", szh.List)
@@ -158,7 +159,8 @@ func NewServer(
 		protected.POST("/chips/sync", cph.Sync)
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 
-		ph := handler.NewPositionHandler(positionRepo, portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig), log)
+		positionAnalyzer := portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig)
+		ph := handler.NewPositionHandler(positionRepo, positionAnalyzer, log)
 		protected.GET("/positions", ph.List)
 		protected.GET("/positions/:symbol", ph.Get)
 		protected.GET("/positions/:symbol/transactions", ph.ListTransactions)
@@ -167,6 +169,10 @@ func NewServer(
 		protected.POST("/position-analyses", ph.Analyze)
 		protected.GET("/position-analyses", ph.ListAnalyses)
 		protected.GET("/position-analyses/:id", ph.GetAnalysis)
+
+		tah := handler.NewTradeAnalysisHandler(positionRepo, positionAnalyzer, log)
+		protected.POST("/trade-analysis/analyze", tah.Analyze)
+		protected.GET("/trade-analysis/:symbol/history", tah.ListHistory)
 	}
 
 	r.GET("/ws/market", func(c *gin.Context) {

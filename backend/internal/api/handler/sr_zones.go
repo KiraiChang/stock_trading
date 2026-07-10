@@ -40,6 +40,7 @@ func mapScoreZonesError(c *gin.Context, log *zap.Logger, err error) {
 type SRZoneHandler struct {
 	client    *analysis.Client
 	repo      store.SRZoneRepo
+	provider  *analysis.SRAnalysisProvider
 	watchlist store.WatchlistRepo
 	trainJobs store.SRScoringTrainJobRepo
 	verifier  *analysis.SRZoneVerifier
@@ -89,9 +90,13 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 
 func NewSRZoneHandler(
 	client *analysis.Client, repo store.SRZoneRepo, watchlist store.WatchlistRepo,
-	trainJobs store.SRScoringTrainJobRepo, verifier *analysis.SRZoneVerifier, log *zap.Logger,
+	trainJobs store.SRScoringTrainJobRepo, verifier *analysis.SRZoneVerifier,
+	provider *analysis.SRAnalysisProvider, log *zap.Logger,
 ) *SRZoneHandler {
-	return &SRZoneHandler{client: client, repo: repo, watchlist: watchlist, trainJobs: trainJobs, verifier: verifier, log: log}
+	return &SRZoneHandler{
+		client: client, repo: repo, provider: provider, watchlist: watchlist,
+		trainJobs: trainJobs, verifier: verifier, log: log,
+	}
 }
 
 // newTrainJobID 比照 backtest.newJobID 的時間戳格式，不同前綴以便從 job_id
@@ -101,13 +106,16 @@ func newTrainJobID() string {
 }
 
 // POST /api/v1/sr-zones
-// Body: { "symbol": "2330", "timeframe": "1d", "limit": 250 }
+// Body: { "symbol": "2330", "timeframe": "1d", "limit": 250, "reuse_existing": false }
 // limit 省略或為 0 時使用 Python 端的預設值（DEFAULT_FETCH_LIMIT）
+// reuse_existing 預設 false，維持舊契約：每次呼叫都觸發一次新分析並寫入 DB。
+// 只有明確傳 true 時才允許重用近期同 timeframe 的既有快照。
 func (h *SRZoneHandler) Create(c *gin.Context) {
 	var body struct {
-		Symbol    string `json:"symbol"`
-		Timeframe string `json:"timeframe"`
-		Limit     int    `json:"limit"`
+		Symbol        string `json:"symbol"`
+		Timeframe     string `json:"timeframe"`
+		Limit         int    `json:"limit"`
+		ReuseExisting bool   `json:"reuse_existing"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil || body.Symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
@@ -118,6 +126,26 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 	}
 	if body.Limit < 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be >= 0"})
+		return
+	}
+	if body.ReuseExisting {
+		if h.provider == nil {
+			serverError(c, h.log, errors.New("sr analysis provider is not configured"), "sr-zones: provider")
+			return
+		}
+		result, err := h.provider.Analyze(c.Request.Context(), body.Symbol, analysis.SRAnalysisOptions{
+			Timeframe: body.Timeframe, Limit: body.Limit, ForceRefresh: false,
+		})
+		if err != nil {
+			var upstreamErr *analysis.UpstreamStatusError
+			if errors.As(err, &upstreamErr) {
+				mapScoreZonesError(c, h.log, err)
+				return
+			}
+			serverError(c, h.log, err, "sr-zones: provider analyze")
+			return
+		}
+		c.JSON(http.StatusCreated, srZonePipelineResponse(result.Analysis, result.Zones))
 		return
 	}
 

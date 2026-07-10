@@ -546,11 +546,14 @@ backtest.modular.sr_scoring.train`），否則 `POST /sr-zones` 會回傳
 
 **Request Body：**
 ```json
-{ "symbol": "2330", "timeframe": "1d", "limit": 250 }
+{ "symbol": "2330", "timeframe": "1d", "limit": 250, "reuse_existing": false }
 ```
 
 `timeframe` 省略時預設 `1d`；`limit` 為抓取的歷史K棒根數，省略或 0 時使用
-Python 端預設值（250）。
+Python 端預設值（250）。`reuse_existing` 預設 `false`，維持舊契約：每次呼叫
+都重新分析並寫入一筆 DB 快照；只有明確傳 `true` 時，後端才會優先重用同
+timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不到可重用快照才會
+建立新分析。
 
 **Response（201 Created）：**
 ```json
@@ -1029,6 +1032,37 @@ sr-zone-scoring.md「十七」。
 ```
 
 `status` 可為 `pending`、`running`、`done`、`partial`、`failed`。找不到 job 回 `404`。
+
+---
+
+## Trade Analysis API
+
+Trade Analysis 是 SR Zone 與 Position Analysis 的統一入口。呼叫端只需要提供
+股票代號；後端會自動讀取 position projection，若資料庫沒有持股資料或股數為 0，
+就以 `FLAT` 空手情境分析；若有股數則以 `LONG` 持股情境分析。
+
+- `POST /trade-analysis/analyze`：body 為
+  `{"symbol":"2330","timeframe":"1d","limit":250,"force_refresh":false}`。
+- `GET /trade-analysis/:symbol/history?limit=20`：列出該股票 FLAT/LONG 共用分析歷史。
+
+`POST /trade-analysis/analyze` 回應：
+
+```json
+{
+  "context": {
+    "symbol": "2330",
+    "position_state": "FLAT",
+    "has_position": false
+  },
+  "analysis": {},
+  "sr_zone_analysis": {},
+  "zones": []
+}
+```
+
+`analysis` 沿用 Position Analysis 快照格式；`sr_zone_analysis` 與 `zones` 沿用
+SR Zone 快照格式。既有 `/position-analyses` endpoints 仍保留相容，但新前端入口
+應優先使用 `/trade-analysis/*`。
 
 ---
 

@@ -37,11 +37,11 @@ func tradeAnalysisResponse(result *portfolio.AnalyzeResult) gin.H {
 		state = result.Analysis.PositionState
 		hasPosition = result.Analysis.Shares > 0
 	}
-	var analysis *store.PositionAnalysis
+	var positionAnalysis *store.PositionAnalysis
 	var sr *store.SRZoneAnalysis
 	var zones []store.SRZone
 	if result != nil {
-		analysis = result.Analysis
+		positionAnalysis = result.Analysis
 		sr = result.SR
 		zones = result.Zones
 	}
@@ -51,7 +51,7 @@ func tradeAnalysisResponse(result *portfolio.AnalyzeResult) gin.H {
 			"position_state": state,
 			"has_position":   hasPosition,
 		},
-		"analysis":         analysis,
+		"analysis":         positionAnalysis,
 		"sr_zone_analysis": sr,
 		"zones":            zones,
 	}

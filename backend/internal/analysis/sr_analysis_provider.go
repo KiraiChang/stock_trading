@@ -56,9 +56,6 @@ func (p *SRAnalysisProvider) Analyze(ctx context.Context, symbol string, opts SR
 	if opts.Limit == 0 {
 		opts.Limit = defaultSRAnalysisLimit
 	}
-	if p.snapshotLimit <= 0 {
-		p.snapshotLimit = defaultSRAnalysisSnapshotLimit
-	}
 
 	if !opts.ForceRefresh {
 		existing, err := p.loadReusable(ctx, symbol, opts.Timeframe)
@@ -97,7 +94,11 @@ func (p *SRAnalysisProvider) Analyze(ctx context.Context, symbol string, opts SR
 }
 
 func (p *SRAnalysisProvider) loadReusable(ctx context.Context, symbol, timeframe string) (*SRAnalysisResult, error) {
-	analyses, err := p.repo.List(ctx, symbol, p.snapshotLimit)
+	snapshotLimit := p.snapshotLimit
+	if snapshotLimit <= 0 {
+		snapshotLimit = defaultSRAnalysisSnapshotLimit
+	}
+	analyses, err := p.repo.List(ctx, symbol, snapshotLimit)
 	if err != nil {
 		return nil, fmt.Errorf("list existing sr zone analyses: %w", err)
 	}

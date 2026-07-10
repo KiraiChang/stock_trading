@@ -395,6 +395,10 @@ FLAT 與 LONG 共用的不可變分析快照。包含 Position version、SR Zone
 Action、目前／目標／調整股數、調整金額、進場／停損／停利價、風險金額、
 預期報酬、RR、損益、設定快照、Evidence、觸發與失效條件。
 
+`sr_zone_analysis_id` 是 nullable 的 best-effort reference，沒有 DB FK 約束。刪除
+被引用的 SR Zone 快照時，`position_analyses` 不會被刪除或阻擋；歷史分析仍保留
+自身的決策快照欄位，但無法再透過該 id 回查完整 SR zones。
+
 Migration 038 將同 symbol 的舊 holdings 依股數加權合併為一筆
 `OPENING_BALANCE`，並把舊 `holding_analyses` 搬為
 `rule_version=holding_sr_zone_v1_legacy` 後移除舊表。

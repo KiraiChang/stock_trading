@@ -404,29 +404,6 @@ v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 
 的做法），避免重複與誤導。
 
 ---
-### T-024：SR Zone 與 Position Analysis 統一交易分析入口
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 進行中 |
-| 優先度 | 高 |
-| 分類 | Go / Frontend / SR Zone / Position Analysis |
-| 建立日期 | 2026-07-09 |
-| 來源 | 使用者要求：先生成計畫書，待全部功能做完再刪除 |
-| 計畫書 | [trade-analysis-merge-plan.md](./trade-analysis-merge-plan.md) |
-
-把目前分散的 SR Zone 與 Position Analysis 整合成單一「交易分析 / 股票決策」
-入口。使用者直接輸入股票代碼；系統依資料庫是否有持股資料自動決定情境，
-若沒有持股資料就當作空手分析。
-
-實作方向採「內部分層、外部統一」：SR Zone 保持 Data → Features → Score →
-Evidence 的市場結構分析層，Position Analysis 作為 Decision 層整合持股、AVG
-成本、風險報酬比與 SR Zone evidence。初期只分析單一持股，參數先固定但保留
-後續調整空間；`ADJUSTMENT` 決策保留，不直接刪除。
-
-完成全部功能並將必要內容搬入正式文件後，移除此 todo 項與暫時計畫書。
-
----
 ## 已完成封存
 
 （目前沒有項目）

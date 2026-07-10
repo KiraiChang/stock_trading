@@ -109,7 +109,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | Dashboard | `dashboard` | 監控清單（即時報價/RSI/量比/趨勢/訊號/★監聽切換）+ K線圖（可疊加 MA5/MA20/MA60，個別開關）+ 訊號面板 |
 | 個股分析 | `analysis` | 輸入股票代號觸發分析（`POST /analysis`），顯示支撐/壓力/進場/停損/停利，可對歷史分析手動重新驗證或刪除 |
 | 支撐/壓力機率分析 | `sr-zones` | 輸入股票代號觸發 SR Zone Scoring（`POST /sr-zones`），顯示機率模型算出的區間、機率、EV/RR、可拆解交易分數；另有「訓練/更新機率模型」區塊（`POST /sr-zones/train`）。詳見 [sr-zone-scoring.md](./sr-zone-scoring.md) |
-| Position Analysis | `position_transactions` / `positions` / `position_analyses` | immutable ledger、AVG projection，以及 FLAT/LONG 共用的目標股數與風險建議 |
+| Trade Analysis | `positions` / `trade-analysis` | 輸入股票代號產生 FLAT/LONG 共用交易決策；底層使用 immutable ledger、AVG projection、SR Zone snapshot 與 `position_analyses` 快照 |
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 籌碼分析 | `chips` | 查詢籌碼摘要、歷史分數、券商分點排行，並可手動同步籌碼資料（`POST /chips/sync`） |
@@ -218,12 +218,13 @@ Signal Engine、Backtest、SR Zone Scoring 與前端 Chips 頁面讀取使用
 `POST /api/v1/chips/sync` 建立 `chip_sync_jobs` 非同步任務；日結同步則使用
 `job_runs.job_name=chip_daily_sync`，兩者的進度表不同。
 
-**Position Analysis** 以 immutable ledger 與 AVG projection 重用 SR Zone Scoring：
+**Position Analysis** 是交易決策快照層，以 immutable ledger 與 AVG projection 重用
+SR Zone Scoring：
 
 ```
 使用者新增 BUY / SELL / ADJUSTMENT transaction
     ↓ 同一 transaction 更新 positions AVG projection
-POST /position-analyses（只需 symbol；無 position 即 FLAT）
+POST /trade-analysis/analyze（相容入口：POST /position-analyses）
     ↓
 Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
     ↓
@@ -240,6 +241,36 @@ Buy/BuySmall、存在有效停損支撐但已無上方壓力，停利目標以�
 預設為 2R，避免突破後因缺少壓力 zone 而無法建立或增加部位。
 每次分析都新增一筆快照，不覆蓋舊結果。
 
+**Trade Analysis** 是前端與 API 的統一入口。呼叫端只提供股票代號；後端讀取
+`positions` projection 後自動判斷決策情境：
+
+- `shares > 0`：以 `LONG` 持股情境分析，成本基準使用 AVG。
+- 找不到 projection 或 `shares = 0`：以 `FLAT` 空手情境分析，不視為錯誤。
+
+SR Zone 是市場結構層，負責 Data → Features → Score → Evidence；Position
+Analysis 是決策快照層，負責把 FLAT/LONG 情境、AVG 成本、風險設定與 SR 結果
+收斂成 Action、目標股數、停損、停利、RR、reason/evidence。`/trade-analysis/*`
+facade 回傳同一份 `position_analyses` 快照格式，讓新入口不需要先分辨「支撐
+壓力分析」或「持股分析」。
+
+SR 快照由 `SRAnalysisProvider` 統一處理重用與重算。Trade Analysis 與 Position
+Analysis 預設會優先重用同 symbol/timeframe 且仍在設定時效內的 SR 快照；呼叫端
+指定 force refresh 時才會重新產生。SR Zone 專頁的 `/sr-zones` endpoint 保留「建立
+新快照」語意，但可用 `reuse_existing=true` 明確選擇同一套 provider 重用策略。
+
+#### SR 快照刪除與歷史參照政策
+
+`position_analyses.sr_zone_analysis_id` 是 best-effort historical reference，不是
+不可刪除的強一致外鍵。Trade Analysis 歷史本身以 `position_analyses` 保存當次的
+決策、價格、部位、設定、reason/evidence、trigger/invalidation 等不可變快照；若其
+引用的 SR Zone 快照後來被刪除，歷史分析仍可讀取這些已保存欄位，但無法再回查當時
+完整的 SR zones 清單。
+
+因此 SR Zone 刪除行為維持目前策略：刪除 `stock_sr_zone_analyses` 與其
+`stock_sr_zones`，不因既有 `position_analyses` 引用而阻擋，也不補寫大型 SR snapshot
+到 `position_analyses`。需要長期可審計完整 SR zones 的情境，應保留對應 SR 快照或
+另行設計專門的歸檔欄位。
+
 #### 已知限制：SR 快照與 Position Analysis 非單一 transaction（刻意不處理）
 
 「建立新 SR 快照」與「建立 position analysis」是**兩次獨立的 DB 寫入**（分屬
@@ -253,7 +284,7 @@ transaction**，理由：
 
 1. **發生率極低**：僅限兩次 commit 之間毫秒級窗口的硬故障。
 2. **無資料損毀、方向安全**：殘留的是一筆合法的 `stock_sr_zone_analyses`，沒有指向缺
-   資料的外鍵；request 範圍內的暫時性錯誤已由上述補償/容錯覆蓋。
+   資料的外鍵；失敗的 position analysis 不會產生半套快照。
 3. **幾乎無害且會自癒**：SR 快照本就由 SR Zone 頁、排程器、Position 三方共同產生、多數本
    來就無 position analysis 引用，一筆「孤兒」SR 與一筆正常 SR 分析無法區分、價值相同；加上 Position
    分析已有「同 symbol/timeframe 新鮮快照優先重用」機制，該筆若仍新鮮下次會被直接重用。

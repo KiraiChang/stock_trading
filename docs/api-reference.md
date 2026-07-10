@@ -1037,9 +1037,9 @@ sr-zone-scoring.md「十七」。
 
 ## Trade Analysis API
 
-Trade Analysis 是 SR Zone 與 Position Analysis 的統一入口。呼叫端只需要提供
-股票代號；後端會自動讀取 position projection，若資料庫沒有持股資料或股數為 0，
-就以 `FLAT` 空手情境分析；若有股數則以 `LONG` 持股情境分析。
+Trade Analysis 是新前端與 API 的統一交易決策入口。呼叫端只需要提供股票代號；
+後端會自動讀取 `positions` projection，若資料庫沒有持股資料或股數為 0，就以
+`FLAT` 空手情境分析；若有股數則以 `LONG` 持股情境分析。
 
 - `POST /trade-analysis/analyze`：body 為
   `{"symbol":"2330","timeframe":"1d","limit":250,"force_refresh":false}`。
@@ -1061,15 +1061,20 @@ Trade Analysis 是 SR Zone 與 Position Analysis 的統一入口。呼叫端只�
 ```
 
 `analysis` 沿用 Position Analysis 快照格式；`sr_zone_analysis` 與 `zones` 沿用
-SR Zone 快照格式。既有 `/position-analyses` endpoints 仍保留相容，但新前端入口
-應優先使用 `/trade-analysis/*`。
+SR Zone 快照格式。既有 `/position-analyses` endpoints 仍保留相容與內部決策層
+存取，但新客戶端應優先使用 `/trade-analysis/*`。
+
+`analysis.sr_zone_analysis_id` 是 best-effort historical reference。若對應 SR Zone
+快照後來被刪除，trade-analysis 歷史仍會保留 `analysis` 內的決策快照欄位，但
+`sr_zone_analysis` / `zones` 可能無法再由該 id 回查完整市場結構明細。
 
 ---
 
 ## Position Analysis API
 
-Position Analysis 以股票代號為統一入口。沒有 transaction/projection 時視為
-`FLAT`，有股數時為 `LONG`。
+Position Analysis 是 Trade Analysis 背後的決策快照與部位帳務 API。沒有
+transaction/projection 時視為 `FLAT`，有股數時為 `LONG`。新交易決策入口優先使用
+`/trade-analysis/*`；以下 endpoints 保留給 position ledger、projection 與相容情境。
 
 - `GET /positions`：列出目前 LONG positions。
 - `GET /positions/:symbol`：取得 projection；空手回傳股數、AVG、version 均為 0。
@@ -1097,130 +1102,13 @@ Position Analysis 以股票代號為統一入口。沒有 transaction/projection
 
 ## Legacy Holdings API（已移除）
 
-以下內容只供 migration 038 前的歷史契約查閱。`/holdings*` 與
-`/holding-analyses*` routes 已移除，不應再由新客戶端呼叫。
+`/holdings*` 與 `/holding-analyses*` routes 已由 migration 038 移除，不應再由
+新客戶端呼叫。舊 `holdings` 會依 symbol 轉成一筆 `OPENING_BALANCE`
+transaction 與 `positions` projection；舊 `holding_analyses` 會搬到
+`position_analyses`，並以 `rule_version=holding_sr_zone_v1_legacy` 保留歷史來源。
 
-持股操作分析以目前持股設定為輸入，每次分析都會建立一筆新的 `holding_analyses`
-快照。若同一 symbol/timeframe 已有 SR Zone 快照，會重用最新一筆；只有找不到既有快照時，
-才會建立新的 SR Zone 快照。歷史分析保存當下的股數、持有成本、收盤價與操作建議，不會被
-後續修改持股設定覆蓋。
-
-### GET `/holdings`
-
-列出目前持股設定。
-
-**Response：**
-```json
-{
-  "holdings": [
-    { "id": 1, "symbol": "2330", "shares": 1000, "cost_price": 600.0, "note": "", "created_at": "...", "updated_at": "..." }
-  ],
-  "total": 1
-}
-```
-
-### POST `/holdings`
-
-新增持股設定。
-
-**Request Body：**
-```json
-{ "symbol": "2330", "shares": 1000, "cost_price": 600.0, "note": "長期持有" }
-```
-
-`symbol`、`shares > 0`、`cost_price > 0` 必填。
-
-**Response（201 Created）：**
-```json
-{ "holding": { "id": 1, "symbol": "2330", "shares": 1000, "cost_price": 600.0, "...": "..." } }
-```
-
-### PUT `/holdings/:id`
-
-更新持股設定，body 同 `POST /holdings`。既有歷史分析快照不會被改寫。
-
-### DELETE `/holdings/:id`
-
-刪除目前持股設定。已保存的 `holding_analyses` 快照仍保留其當時的 symbol/shares/cost。
-
-### POST `/holdings/:id/analyze`
-
-用目前持股設定觸發一次操作分析並保存快照。後端會先查同一 symbol/timeframe 的最新 SR Zone
-快照；若已存在就直接引用該快照，不再呼叫 Python `/sr-zones` 產生新的 SR Zone 分析。只有
-找不到既有快照時，才會建立新的 SR Zone 分析並以 `sr_zone_analysis_id` 引用。
-
-**Request Body：**
-```json
-{ "timeframe": "1d", "limit": 250 }
-```
-
-`timeframe` 預設 `1d`；`limit` 為抓取 K 棒根數，省略或 0 時使用後端預設 250。
-
-**Response（201 Created）：**
-```json
-{
-  "analysis": {
-    "id": 10,
-    "holding_id": 1,
-    "symbol": "2330",
-    "shares": 1000,
-    "cost_price": 600.0,
-    "current_price": 650.0,
-    "sr_zone_analysis_id": 4,
-    "action": "HOLD",
-    "action_label": "繼續持有",
-    "stop_loss_price": 620.0,
-    "stop_loss_amount": 0,
-    "take_profit_price": 680.0,
-    "take_profit_amount": 80000,
-    "add_on_trigger_price": 690.0,
-    "add_on_amount": 162500,
-    "unrealized_pnl": 50000,
-    "unrealized_pnl_pct": 0.0833,
-    "reason": ["以 650.00 的最新收盤價與 SR Zone 快照評估。"],
-    "detail_json": { "rule_version": "holding_sr_zone_v1", "add_on_ratio": 0.25 }
-  },
-  "sr_zone_analysis": { "id": 4, "...": "..." },
-  "zones": [ { "id": 16, "...": "..." } ]
-}
-```
-
-目前規則：
-
-- 停損價：現價下方最近的支撐 zone 下緣。
-- 停利價：現價上方最近的壓力 zone 下緣。
-- 加碼觸發價：現價上方最近的壓力 zone 上緣。
-- 加碼金額：分析當下持股市值的 25%。
-- 若收盤跌破主要支撐，建議 `STOP_LOSS`；接近高分壓力區，建議 `TAKE_PROFIT`；SR 決策層為 `Avoid` 時建議 `REDUCE`；SR 決策層為 `Buy`/`BuySmall` 時以 `ADD_ON_BREAKOUT` 觀察突破加碼。
-
-### GET `/holdings/:id/analyses`
-
-列出某筆持股的歷史操作分析。
-
-**Query Parameters：** `limit`（預設 20，最多 200）
-
-**Response：**
-```json
-{ "analyses": [ { "id": 10, "action": "HOLD", "...": "..." } ], "total": 1 }
-```
-
-### GET `/holding-analyses/:id`
-
-取得單筆持股操作分析快照。
-
-**Response：**
-```json
-{ "analysis": { "id": 10, "symbol": "2330", "...": "..." } }
-```
-
-### DELETE `/holding-analyses/:id`
-
-刪除單筆持股操作分析快照，供整理歷史列表使用。這只刪除 `holding_analyses` 紀錄，不會刪除持股設定，也不會刪除同次產生的 SR Zone 快照。
-
-**Response：**
-```json
-{ "message": "deleted" }
-```
+新流程請使用 `/positions*` 管理 immutable ledger / AVG projection，並使用
+`/trade-analysis/*` 或相容的 `/position-analyses*` 產生分析快照。
 
 ---
 

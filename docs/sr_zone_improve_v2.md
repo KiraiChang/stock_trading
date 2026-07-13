@@ -1,81 +1,21 @@
-重構目前 Trading Decision Engine，暫時不要修改 Zone Score、Zone Ranking 或 Feature Weight。
+1. 將 SUPPORT_RECLAIM 拆成：
+   - SUPPORT_RECLAIM_CANDIDATE
+   - SUPPORT_RECLAIM_CONFIRMED
 
-只完成以下四項修改：
+   單日 low 進入 zone、current price 回到 zone 上方，
+   只能標記 CANDIDATE。
 
-1. Market Regime decomposition
-   將目前單一 regime 拆成：
-- TrendRegime
-- StructureState
-- VolatilityState
+   必須 close > zone.high，且下一根 K 未重新跌破，
+   才可標記 CONFIRMED。
 
-StructureState 必須支援：
-NORMAL
-RECOVERY_CANDIDATE
-RECOVERY
-RECOVERY_INVALIDATED
-BREAKDOWN
+2. Position Action 必須附帶條件：
+   - invalidation price
+   - recovery price
+   - reason codes
 
-長期趨勢不得覆蓋短期結構破壞。
-例如 long-term bullish + recovery invalidated 應輸出：
-「長期偏多，但短線結構轉弱」。
+   UI 不可只顯示「持有」，
+   改為「條件式持有」，並顯示防守線與回穩線。
 
-2. Decision Hard Risk Gate
-   Decision pipeline 必須固定為：
-
-Regime
-→ Structure
-→ Risk Gate
-→ EV
-→ Score
-→ Action
-
-新增 RR hard gate：
-RR < 1.5 => WATCH
-RR >= 1.5 才允許 BUY_SMALL
-RR >= 2.0 才允許 BUY
-
-Score 與 EV 不得覆蓋 hard risk gate。
-
-3. Zone Interaction State
-   新增 ZoneInteraction：
-
-DistancePct
-Touched
-PenetrationPct
-ClosedInside
-ClosedAbove
-ClosedBelow
-
-Zone 判斷必須同時使用 candle high/low/close，
-不能只使用 current price 計算 distance。
-
-UI 必須能顯示：
-- 尚未測試
-- 今日已測試
-- 進入區間
-- 收回區間上方
-- 有效跌破
-
-4. Separate Market Action and Position Action
-   Decision output 拆成：
-
-MarketAction
-PositionAction
-
-MarketAction：
-WATCH
-BUY_SMALL
-BUY
-AVOID
-
-PositionAction：
-HOLD
-REDUCE_ON_BREAKDOWN
-REDUCE
-EXIT
-
-市場訊號不得直接作為既有持倉操作建議。
-
-不要修改現有 Zone Engine scoring。
-不要重新調整 feature weights。
-新增 unit tests 驗證上述 decision precedence 與 state transition。
+3. 將 Confidence 改名為 Zone Confidence／區間辨識信心，
+   不得讓使用者誤解為反彈勝率。
+   Bounce Probability 與 Breakdown Probability 必須分開顯示。

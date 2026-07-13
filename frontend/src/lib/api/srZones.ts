@@ -53,6 +53,7 @@ export interface SRZoneEvidence {
 }
 
 export interface SRZoneExplanation {
+  schema_version: 'sr_explain_v1'
   role_summary: string
   score_reason: string
   probability_reason: string
@@ -60,15 +61,10 @@ export interface SRZoneExplanation {
   positive_factors: string[]
   negative_factors: string[]
   watch_conditions: string[]
-  advanced_refs: {
-    score_breakdown_keys?: string[]
-    risk_flags?: string[]
-    shap_top_contributions?: SRShapContribution[]
-    [key: string]: unknown
-  }
 }
 
 export interface SRAnalysisExplanation {
+  schema_version: 'sr_explain_v1'
   summary: string
   action_reason: string
   market_drivers: string[]

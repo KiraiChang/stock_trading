@@ -620,6 +620,7 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
     "secondary_zones": []
   },
   "explanation": {
+    "schema_version": "sr_explain_v1",
     "summary": "2330 目前建議以「小量試單」解讀 SR Zone 結果。",
     "action_reason": "Action 為「小量試單」，主因是主交易區 960.00 ~ 970.00 目前被判定為支撐，交易分數 78.5。",
     "market_drivers": ["整體趨勢 +3.2%", "整體波動 1.8%", "整體信心 61%", "籌碼總分 42.5"],
@@ -701,18 +702,14 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
         "risk_flags": []
       },
       "explanation": {
+        "schema_version": "sr_explain_v1",
         "role_summary": "960.00 ~ 970.00 位於現價下方或回測區，暫以支撐解讀。",
         "score_reason": "Trading Score 78.5 主要由期望值貢獻 26.7 分推動；最低分量是信心 7.2 分。",
         "probability_reason": "此區間目前按支撐解讀，反彈/守住機率為 66.0%，跌破/突破機率為 21.0%；期望值為 +2.72%。",
         "confidence_reason": "信心為 72%（高），主要參考目前角色方向樣本 3 次、整體觸碰 4 次、守住 3 次、跌破/突破 0 次；近期性為「最近有守住驗證」。",
         "positive_factors": ["信心等級高", "最近有有效驗證", "多方法共振 ×2"],
         "negative_factors": ["目前沒有明顯扣分因素"],
-        "watch_conditions": ["觀察價格回測 960.00 ~ 970.00 時是否止跌", "若收盤跌破 960.00，支撐判斷失效風險升高"],
-        "advanced_refs": {
-          "score_breakdown_keys": ["expected_value", "risk_reward", "trend", "volume", "confidence", "chip"],
-          "risk_flags": [],
-          "shap_top_contributions": []
-        }
+        "watch_conditions": ["觀察價格回測 960.00 ~ 970.00 時是否止跌", "若收盤跌破 960.00，支撐判斷失效風險升高"]
       },
       "lifecycle": {
         "status": "PENDING",
@@ -754,6 +751,7 @@ lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
+| `schema_version` | string | Explanation schema 版本，目前為 `sr_explain_v1` |
 | `summary` | string | 一句整體白話結論，對齊 `decision.action` |
 | `action_reason` | string | 為什麼得到目前 action |
 | `market_drivers` | string[] | 趨勢、波動、信心、籌碼等主要因素 |
@@ -766,6 +764,7 @@ lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
+| `schema_version` | string | Explanation schema 版本，目前為 `sr_explain_v1` |
 | `role_summary` | string | 支撐、壓力或 `AT_ZONE` 方向未定的白話描述 |
 | `score_reason` | string | trading score 的最高與最低分量說明 |
 | `probability_reason` | string | 反彈/跌破機率、期望值的解釋；`AT_ZONE` 不給方向性結論 |
@@ -773,7 +772,6 @@ lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
 | `positive_factors` | string[] | 加分因素 |
 | `negative_factors` | string[] | 扣分或風險因素 |
 | `watch_conditions` | string[] | 後續要觀察的價位、量能、突破或跌破條件 |
-| `advanced_refs` | object | 給進階 UI 使用的參照，例如 score breakdown keys、risk flags、SHAP top contributions |
 
 `explanation` 是 deterministic template output，不是 LLM 文字。客戶端可以直接顯示，
 但不應把它當成新的 scoring 欄位或交易門檻。

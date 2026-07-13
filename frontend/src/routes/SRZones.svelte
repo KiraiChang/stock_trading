@@ -48,11 +48,10 @@
   $: decisionSummary = current?.decision_summary ?? null
   $: analysisExplanation = current?.explanation ?? null
   $: explanationSummary = analysisExplanation?.summary
-    ?? (decisionSummary ? `${current?.symbol ?? ''} 目前建議以「${decisionSummary.action_label || decisionSummary.action}」解讀 SR Zone 結果。` : analysisTips[0] ?? '')
+    ?? analysisTips[0]
+    ?? ''
   $: explanationActionReason = analysisExplanation?.action_reason
-    ?? (decisionSummary?.primary_zone
-      ? `主交易區 ${decisionSummary.primary_zone.label} 目前被判定為 ${decisionSummary.primary_zone.role}。`
-      : decisionSummary ? '目前沒有足夠明確的主交易區，先以等待和觀察為主。' : '')
+    ?? (decisionSummary?.primary_zone?.reason ?? '')
   $: explanationDrivers = analysisExplanation?.market_drivers ?? decisionSummary?.market_regime?.reasons ?? []
   $: explanationRisks = analysisExplanation?.risk_notes ?? decisionSummary?.risk_notes ?? []
   $: globalEvidence = current?.evidence ?? null

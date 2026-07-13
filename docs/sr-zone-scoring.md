@@ -952,6 +952,7 @@ LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判
 
 | 欄位 | 說明 |
 |---|---|
+| `schema_version` | Explanation schema 版本，目前為 `sr_explain_v1` |
 | `summary` | 一句整體結論，對齊當次 `decision.action` |
 | `action_reason` | 為什麼得到目前 action，通常引用 primary zone 或「沒有明確主交易區」 |
 | `market_drivers` | 趨勢、波動、整體信心、籌碼等主要因素 |
@@ -962,6 +963,7 @@ LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判
 
 | 欄位 | 說明 |
 |---|---|
+| `schema_version` | Explanation schema 版本，目前為 `sr_explain_v1` |
 | `role_summary` | 此 zone 是支撐、壓力或方向未定的白話說明 |
 | `score_reason` | trading score 主要由最高與最低分量解釋，不列完整 breakdown |
 | `probability_reason` | 反彈/跌破機率與期望值的白話說明 |
@@ -969,7 +971,6 @@ LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判
 | `positive_factors` | 加分因素列表 |
 | `negative_factors` | 扣分或風險因素列表 |
 | `watch_conditions` | 要觀察的價位、量能或突破/跌破條件 |
-| `advanced_refs` | 進階參照，例如 score breakdown keys、risk flags、SHAP top contributions |
 
 `AT_ZONE` 必須明確說明「現價在區間內，方向尚未解析」，不得硬判支撐或壓力；
 其 direction-only 欄位（反彈/跌破機率、EV/RR、量能確認等）仍依既有 contract

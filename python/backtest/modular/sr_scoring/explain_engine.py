@@ -12,6 +12,9 @@ from .pipeline_types import AnalysisEvidence
 from .types import ConfidenceLevel, RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 
 
+EXPLANATION_SCHEMA_VERSION = "sr_explain_v1"
+
+
 def _fmt_price(v: float) -> str:
     return f"{v:.2f}"
 
@@ -75,7 +78,7 @@ def _score_breakdown_extremes(score: ZoneScore) -> tuple[dict[str, Any] | None, 
     }
     items = [
         {"key": key, "label": labels.get(key, key), "value": float(value)}
-        for key, value in sorted(score.trading_score_breakdown.items())
+        for key, value in score.trading_score_breakdown.items()
     ]
     if not items:
         return None, None
@@ -190,26 +193,10 @@ def _role_summary(score: ZoneScore) -> str:
     return f"{label} 包含現價，方向尚未解析，不能直接視為支撐或壓力。"
 
 
-def _advanced_refs(zone_evidence: dict[str, Any], score: ZoneScore) -> dict[str, Any]:
-    active = None
-    if score.role == ZoneType.RESISTANCE.value:
-        active = zone_evidence.get("resistance")
-    elif score.role == ZoneType.SUPPORT.value:
-        active = zone_evidence.get("support")
-    top_contributions = []
-    if isinstance(active, dict):
-        hold = ((active.get("targets") or {}).get("hold") or {})
-        top_contributions = (hold.get("contributions") or [])[:3]
-    return {
-        "score_breakdown_keys": list(score.trading_score_breakdown.keys()),
-        "risk_flags": zone_evidence.get("risk_flags") or [],
-        "shap_top_contributions": top_contributions,
-    }
-
-
 def explain_zone(score: ZoneScore, zone_evidence: dict[str, Any]) -> dict[str, Any]:
     risk_flags = list(zone_evidence.get("risk_flags") or [])
     return {
+        "schema_version": EXPLANATION_SCHEMA_VERSION,
         "role_summary": _role_summary(score),
         "score_reason": _score_reason(score),
         "probability_reason": _probability_reason(score),
@@ -217,7 +204,6 @@ def explain_zone(score: ZoneScore, zone_evidence: dict[str, Any]) -> dict[str, A
         "positive_factors": _positive_factors(score),
         "negative_factors": _negative_factors(score, risk_flags),
         "watch_conditions": _watch_conditions(score),
-        "advanced_refs": _advanced_refs(zone_evidence, score),
     }
 
 
@@ -246,7 +232,12 @@ def _risk_notes(evidence: AnalysisEvidence, decision_summary: dict[str, Any]) ->
         confidence = float(evidence.scores.global_metrics["confidence"])
         if confidence < 0.45 and not any("信心" in note for note in notes):
             notes.append("整體信心偏低，應等待更多價格驗證。")
-    if any(score.recent_validation == RecentValidation.EXPIRED.value for score in evidence.scores.zones):
+    if (
+        any(score.recent_validation == RecentValidation.EXPIRED.value for score in evidence.scores.zones)
+        # 只跟「驗證失效」類提示去重；用「驗證」+「失效」兩個關鍵字一起判斷，
+        # 避免撞到高波動提示（含「區間失效」）或信心提示（含「價格驗證」）而被誤刪。
+        and not any("驗證" in note and "失效" in note for note in notes)
+    ):
         notes.append("部分區間最近驗證已失效，不宜只看歷史分數。")
     if not notes:
         notes.append("目前沒有額外系統性風險提醒，仍需以停損與倉位控管為準。")
@@ -270,6 +261,7 @@ def build_explanation(evidence: AnalysisEvidence, decision_summary: dict[str, An
     model = scores.features.data.model
     uses_shap = bool((evidence.global_evidence.get("model") or {}).get("explainer"))
     return {
+        "schema_version": EXPLANATION_SCHEMA_VERSION,
         "summary": f"{scores.features.data.symbol} 目前建議以「{action_label}」解讀 SR Zone 結果。",
         "action_reason": action_reason,
         "market_drivers": _market_drivers(evidence),

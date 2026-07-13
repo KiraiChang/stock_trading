@@ -40,3 +40,13 @@ Recent commits use short, task-oriented subjects, often in Chinese, for example 
 
 ## Security & Configuration Tips
 Do not commit secrets, tokens, local databases, or generated virtual environments. Keep service settings in `backend/config.yaml` and `python/config.yaml`, and document any required environment variable changes in `docs/development-guide.md`.
+
+## Token Budget Policy
+
+- Do not repeatedly retry the same failed tool call.
+- Stop after 2 identical tool failures.
+- Do not scan the entire repository unless explicitly required.
+- Prefer targeted file searches.
+- Before large refactors, produce a plan and wait for approval.
+- Run targeted tests before full test suites.
+- Stop and report blockers instead of repeatedly debugging infrastructure failures.

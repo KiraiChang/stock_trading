@@ -87,6 +87,34 @@ export interface SRScenario {
   global_confidence?: number | null
 }
 
+export interface SRProbabilityModelMetrics {
+  auc: number | null
+  brier_score: number | null
+  log_loss: number | null
+  calibrated: number | null
+  test_rows: number | null
+}
+
+export interface SRProbabilityContext {
+  schema_version: 'sr_probability_context_v1'
+  bounce_probability?: number | null
+  break_probability?: number | null
+  neutral_probability?: number | null
+  dominant_outcome?: 'BOUNCE' | 'BREAK' | 'NEUTRAL' | 'NO_DIRECTION' | string
+  edge_pp?: number | null
+  quality_flags?: string[]
+  model_metrics?: {
+    hold: SRProbabilityModelMetrics
+    break: SRProbabilityModelMetrics
+  }
+  health?: {
+    quality_flags: string[]
+    average_edge_pp: number | null
+    directional_zone_count: number
+    zone_count: number
+  }
+}
+
 export interface SRGlobalEvidence {
   trend: number
   volatility: number
@@ -180,6 +208,7 @@ export interface SRZone {
   evidence?: SRZoneEvidence | null
   explanation?: SRZoneExplanation | null
   scenario?: SRScenario | null
+  probability_context?: SRProbabilityContext | null
 }
 
 export type SRPeriodKey = 'short' | 'mid' | 'long'
@@ -334,6 +363,7 @@ export interface SRZoneAnalysis {
   evidence: SRGlobalEvidence | null
   explanation?: SRAnalysisExplanation | null
   scenario?: SRScenario | null
+  probability_context?: SRProbabilityContext | null
   // Python 端已收斂好的短/中/長期支撐壓力摘要；完整明細仍由 zones 提供。
   period_summaries: SRPeriodSummary[]
   // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
@@ -352,6 +382,7 @@ interface SRZonePipelineItem {
   evidence: SRZoneEvidence | null
   explanation: SRZoneExplanation | null
   scenario: SRScenario | null
+  probability_context: SRProbabilityContext | null
   lifecycle: Pick<SRZone, 'status' | 'broken_at' | 'broken_price' | 'resolved_role'>
 }
 
@@ -368,6 +399,7 @@ interface SRZonePipelineResponse {
   decision: SRDecisionSummary | null
   explanation: SRAnalysisExplanation | null
   scenario: SRScenario | null
+  probability_context: SRProbabilityContext | null
   zones: SRZonePipelineItem[]
 }
 
@@ -384,6 +416,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       evidence: response.evidence,
       explanation: response.explanation ?? null,
       scenario: response.scenario ?? null,
+      probability_context: response.probability_context ?? null,
       decision_summary: response.decision,
       period_summaries: response.analysis.period_summaries ?? [],
       analysis_tips: response.analysis.analysis_tips ?? [],
@@ -399,6 +432,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       evidence: item.evidence,
       explanation: item.explanation ?? null,
       scenario: item.scenario ?? null,
+      probability_context: item.probability_context ?? null,
     })),
   }
 }

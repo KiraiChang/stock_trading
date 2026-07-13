@@ -232,12 +232,13 @@ type ZoneScore struct {
 	// 分群（見 Python scoring.py::_group_overlapping_zones）。不合併/刪除
 	// 任何 zone，只標記供 UI 顯示「多方法共振」。ConfluenceCount 恆 >= 1；
 	// OverlapGroup 只有 ConfluenceCount > 1 時才有值。
-	OverlapGroup    *int            `json:"overlap_group"`
-	ConfluenceCount int             `json:"confluence_count"`
-	Features        json.RawMessage `json:"features,omitempty"`
-	Evidence        json.RawMessage `json:"evidence,omitempty"`
-	Explanation     json.RawMessage `json:"explanation,omitempty"`
-	Scenario        json.RawMessage `json:"scenario,omitempty"`
+	OverlapGroup       *int            `json:"overlap_group"`
+	ConfluenceCount    int             `json:"confluence_count"`
+	Features           json.RawMessage `json:"features,omitempty"`
+	Evidence           json.RawMessage `json:"evidence,omitempty"`
+	Explanation        json.RawMessage `json:"explanation,omitempty"`
+	Scenario           json.RawMessage `json:"scenario,omitempty"`
+	ProbabilityContext json.RawMessage `json:"probability_context,omitempty"`
 }
 
 func (z *ZoneScore) UnmarshalJSON(data []byte) error {
@@ -247,11 +248,12 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var nested struct {
-		Score       *plain          `json:"score"`
-		Features    json.RawMessage `json:"features"`
-		Evidence    json.RawMessage `json:"evidence"`
-		Explanation json.RawMessage `json:"explanation"`
-		Scenario    json.RawMessage `json:"scenario"`
+		Score              *plain          `json:"score"`
+		Features           json.RawMessage `json:"features"`
+		Evidence           json.RawMessage `json:"evidence"`
+		Explanation        json.RawMessage `json:"explanation"`
+		Scenario           json.RawMessage `json:"scenario"`
+		ProbabilityContext json.RawMessage `json:"probability_context"`
 	}
 	_, hasScore := fields["score"]
 	_, hasData := fields["data"]
@@ -268,6 +270,7 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		z.Evidence = nested.Evidence
 		z.Explanation = nested.Explanation
 		z.Scenario = nested.Scenario
+		z.ProbabilityContext = nested.ProbabilityContext
 		return nil
 	}
 	var direct plain
@@ -308,15 +311,16 @@ type zonePipelineScore struct {
 // ZoneScoreResult is the breaking v2 Data -> Features -> Score -> Evidence ->
 // Decision response contract returned by Python.
 type ZoneScoreResult struct {
-	PipelineVersion string               `json:"pipeline_version"`
-	Analysis        zonePipelineAnalysis `json:"analysis"`
-	Features        zonePipelineFeatures `json:"features"`
-	Score           zonePipelineScore    `json:"score"`
-	Evidence        json.RawMessage      `json:"evidence"`
-	Decision        json.RawMessage      `json:"decision"`
-	Explanation     json.RawMessage      `json:"explanation"`
-	Scenario        json.RawMessage      `json:"scenario"`
-	Zones           []ZoneScore          `json:"zones"`
+	PipelineVersion    string               `json:"pipeline_version"`
+	Analysis           zonePipelineAnalysis `json:"analysis"`
+	Features           zonePipelineFeatures `json:"features"`
+	Score              zonePipelineScore    `json:"score"`
+	Evidence           json.RawMessage      `json:"evidence"`
+	Decision           json.RawMessage      `json:"decision"`
+	Explanation        json.RawMessage      `json:"explanation"`
+	Scenario           json.RawMessage      `json:"scenario"`
+	ProbabilityContext json.RawMessage      `json:"probability_context"`
+	Zones              []ZoneScore          `json:"zones"`
 
 	// Legacy construction fields remain internal test/build compatibility only.
 	Symbol                string          `json:"symbol,omitempty"`
@@ -349,6 +353,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	decision := r.Decision
 	explanation := r.Explanation
 	scenario := r.Scenario
+	probabilityContext := r.ProbabilityContext
 	periodSummaries := analysis.PeriodSummaries
 	analysisTips := analysis.AnalysisTips
 	chipSummary := analysis.ChipSummary
@@ -389,6 +394,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		Evidence:              rawJSONOrDefault(r.Evidence, "null"),
 		Explanation:           rawJSONOrDefault(explanation, "null"),
 		Scenario:              rawJSONOrDefault(scenario, "null"),
+		ProbabilityContext:    rawJSONOrDefault(probabilityContext, "null"),
 		PeriodSummaries:       rawJSONOrDefault(periodSummaries, "[]"),
 		AnalysisTips:          rawJSONOrDefault(analysisTips, "[]"),
 		ChipSummary:           rawJSONOrDefault(chipSummary, "null"),
@@ -455,6 +461,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			Evidence:              rawJSONOrDefault(z.Evidence, "null"),
 			Explanation:           rawJSONOrDefault(z.Explanation, "null"),
 			Scenario:              rawJSONOrDefault(z.Scenario, "null"),
+			ProbabilityContext:    rawJSONOrDefault(z.ProbabilityContext, "null"),
 		})
 	}
 

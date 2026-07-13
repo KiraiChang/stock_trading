@@ -143,11 +143,12 @@ type SRZoneAnalysis struct {
 	// 可以事後追溯，重訓改參數後舊分析可被這個值辨識出來。舊模型檔沒有這個
 	// 欄位時 Python 端回傳空字串，這裡直接存空字串（不像 ModelVersion 那樣
 	// 防禦性地填 "unknown"，因為空字串已經足夠表示「沒有這項資訊」）。
-	ModelConfigHash string  `db:"model_config_hash"       json:"model_config_hash"`
-	PipelineVersion string  `db:"pipeline_version"        json:"pipeline_version"`
-	Evidence        RawJSON `db:"evidence"                json:"evidence"`
-	Explanation     RawJSON `db:"explanation"             json:"explanation"`
-	Scenario        RawJSON `db:"scenario"                json:"scenario"`
+	ModelConfigHash    string  `db:"model_config_hash"       json:"model_config_hash"`
+	PipelineVersion    string  `db:"pipeline_version"        json:"pipeline_version"`
+	Evidence           RawJSON `db:"evidence"                json:"evidence"`
+	Explanation        RawJSON `db:"explanation"             json:"explanation"`
+	Scenario           RawJSON `db:"scenario"                json:"scenario"`
+	ProbabilityContext RawJSON `db:"probability_context"     json:"probability_context"`
 	// PeriodSummaries 是 Python 端整理好的短/中/長期支撐壓力摘要 JSON；
 	// AnalysisTips 是前端輪播的白話解讀提示。兩者保存於 analysis 快照，
 	// 讓歷史分析不需要重新呼叫 Python 也能顯示同一份結論。
@@ -249,11 +250,12 @@ type SRZone struct {
 	// 原始 Role，是為了保留「分析當下是 AT_ZONE」這個歷史資訊，同時讓
 	// status/broken_at/broken_price 有明確對應的方向可以解釋，見
 	// sr_zone_improve.md review #2。
-	ResolvedRole NullString `db:"resolved_role" json:"resolved_role,omitempty"`
-	Features     RawJSON    `db:"features"      json:"features"`
-	Evidence     RawJSON    `db:"evidence"      json:"evidence"`
-	Explanation  RawJSON    `db:"explanation"   json:"explanation"`
-	Scenario     RawJSON    `db:"scenario"      json:"scenario"`
+	ResolvedRole       NullString `db:"resolved_role" json:"resolved_role,omitempty"`
+	Features           RawJSON    `db:"features"      json:"features"`
+	Evidence           RawJSON    `db:"evidence"      json:"evidence"`
+	Explanation        RawJSON    `db:"explanation"   json:"explanation"`
+	Scenario           RawJSON    `db:"scenario"      json:"scenario"`
+	ProbabilityContext RawJSON    `db:"probability_context" json:"probability_context"`
 }
 
 // SRScoringTrainJob 追蹤一次「重新訓練 hold/break 機率模型」的背景任務

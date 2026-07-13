@@ -316,6 +316,28 @@
     return '現價還在區間內，方向未定，暫不適用'
   }
 
+  const probabilityOutcomeText: Record<string, string> = {
+    BOUNCE: '反彈/守住',
+    BREAK: '跌破/突破',
+    NEUTRAL: '盤整/不明確',
+    NO_DIRECTION: '方向未定',
+  }
+
+  const probabilityFlagText: Record<string, string> = {
+    HOLD_NOT_CALIBRATED: 'hold 未校準',
+    BREAK_NOT_CALIBRATED: 'break 未校準',
+    HOLD_LOW_TEST_ROWS: 'hold 測試樣本少',
+    BREAK_LOW_TEST_ROWS: 'break 測試樣本少',
+    NO_DIRECTION: '方向未定',
+    LOW_CONFIDENCE: '信心偏低',
+    LOW_PROBABILITY_EDGE: '機率差距小',
+    MISSING_DIRECTIONAL_PROBABILITY: '缺方向機率',
+  }
+
+  function probabilityFlagLabel(flag: string): string {
+    return probabilityFlagText[flag] ?? flag
+  }
+
   function summaryPriceText(item: SRZoneSummaryItem | null): string {
     return item ? `${fmt(item.price_low)} ~ ${fmt(item.price_high)}` : '暫無合理價位'
   }
@@ -1081,6 +1103,31 @@
           </div>
         {/if}
 
+        {#if current.probability_context?.health}
+          <div class="px-5 py-4 border-b border-border bg-surface/30">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p class="text-white text-sm font-medium">機率品質</p>
+                <p class="text-muted text-xs mt-1">
+                  可用方向機率 {current.probability_context.health.directional_zone_count}/{current.probability_context.health.zone_count}
+                  {#if current.probability_context.health.average_edge_pp !== null}
+                    · 平均機率差 {current.probability_context.health.average_edge_pp.toFixed(1)}pp
+                  {/if}
+                </p>
+              </div>
+              {#if current.probability_context.health.quality_flags.length > 0}
+                <div class="flex flex-wrap gap-1 justify-end">
+                  {#each current.probability_context.health.quality_flags as flag}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-yellow-900/40 text-yellow-300">
+                      {probabilityFlagLabel(flag)}
+                    </span>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+
         <!-- 只有一個 Global Model：整體評估區塊的原始數字，收在進階裡 -->
         <div class="border-b border-border">
           <button
@@ -1357,6 +1404,45 @@
                             <p class="text-white font-mono">{fmtRatio(z.risk_reward_ratio)}</p>
                           </div>
                         </div>
+
+                        {#if z.probability_context}
+                          <div class="mb-3 border border-border/70 rounded-lg p-3 bg-surface/30 text-xs">
+                            <div class="flex items-start justify-between gap-3 flex-wrap mb-2">
+                              <div>
+                                <p class="text-white font-medium">機率解讀</p>
+                                <p class="text-muted mt-1">
+                                  主要結果：{probabilityOutcomeText[z.probability_context.dominant_outcome ?? ''] ?? z.probability_context.dominant_outcome}
+                                  {#if z.probability_context.edge_pp !== null && z.probability_context.edge_pp !== undefined}
+                                    · 差距 {z.probability_context.edge_pp.toFixed(1)}pp
+                                  {/if}
+                                </p>
+                              </div>
+                              {#if z.probability_context.quality_flags && z.probability_context.quality_flags.length > 0}
+                                <div class="flex flex-wrap gap-1 justify-end">
+                                  {#each z.probability_context.quality_flags as flag}
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-yellow-900/40 text-yellow-300">
+                                      {probabilityFlagLabel(flag)}
+                                    </span>
+                                  {/each}
+                                </div>
+                              {/if}
+                            </div>
+                            <div class="grid grid-cols-3 gap-3">
+                              <div>
+                                <p class="text-muted mb-1">反彈/守住</p>
+                                <p class="text-white font-mono">{fmtPct(z.probability_context.bounce_probability ?? null)}</p>
+                              </div>
+                              <div>
+                                <p class="text-muted mb-1">跌破/突破</p>
+                                <p class="text-white font-mono">{fmtPct(z.probability_context.break_probability ?? null)}</p>
+                              </div>
+                              <div>
+                                <p class="text-muted mb-1">盤整/不明確</p>
+                                <p class="text-white font-mono">{fmtPct(z.probability_context.neutral_probability ?? null)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        {/if}
 
                         <!-- 量能與驗證狀態列 -->
                         <div class="flex flex-wrap gap-2 mb-3">

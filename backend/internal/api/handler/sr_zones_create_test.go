@@ -92,6 +92,7 @@ func srZoneScoreResponse(symbol string, analyzedAt time.Time) string {
 		"decision_summary":{"action":"BuySmall"},
 		"explanation":{"summary":"建議小量試單"},
 		"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"},
+		"probability_context":{"schema_version":"sr_probability_context_v1","health":{"directional_zone_count":1}},
 		"zones":[{
 			"price_low":90,
 			"price_high":95,
@@ -120,7 +121,8 @@ func srZoneScoreResponse(symbol string, analyzedAt time.Time) string {
 			"trading_recommendation":"BUY",
 			"confluence_count":1,
 			"explanation":{"role_summary":"此區為支撐"},
-			"scenario":{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"}
+			"scenario":{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"},
+			"probability_context":{"schema_version":"sr_probability_context_v1","dominant_outcome":"BOUNCE"}
 		}]
 	}`, symbol, analyzedAt.Format(time.RFC3339))
 }
@@ -163,6 +165,9 @@ func TestSRZoneCreateDefaultsToNewSnapshot(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"}`) {
 		t.Fatalf("expected scenario in response: %s", rec.Body.String())
 	}
+	if !strings.Contains(rec.Body.String(), `"probability_context":{"schema_version":"sr_probability_context_v1","health":{"directional_zone_count":1}}`) {
+		t.Fatalf("expected probability_context in response: %s", rec.Body.String())
+	}
 
 	// T-023：zone 的 "score" 只帶評分欄位，不再重複帶已在 data/lifecycle/兄弟鍵
 	// 提供的欄位（features/evidence/explanation/scenario/price_low/id/role/status…）。
@@ -179,7 +184,7 @@ func TestSRZoneCreateDefaultsToNewSnapshot(t *testing.T) {
 		t.Fatalf("expected 1 zone, got %d", len(parsed.Zones))
 	}
 	score := parsed.Zones[0].Score
-	for _, k := range []string{"features", "evidence", "explanation", "scenario", "price_low", "id", "role", "status"} {
+	for _, k := range []string{"features", "evidence", "explanation", "scenario", "probability_context", "price_low", "id", "role", "status"} {
 		if _, dup := score[k]; dup {
 			t.Fatalf("zone score should not duplicate %q", k)
 		}

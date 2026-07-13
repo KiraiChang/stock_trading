@@ -49,13 +49,13 @@ type SRZoneHandler struct {
 
 // srZoneScoreExcludedKeys 是 zone 的 "score" 區塊要排除的欄位——它們已經在
 // item.data（id/price_low…）、item.lifecycle（status/broken_at…）或兄弟鍵
-// （features/evidence/explanation/scenario）各自提供，不需要在 score 裡再帶
+// （features/evidence/explanation/scenario/probability_context）各自提供，不需要在 score 裡再帶
 // 一份。其餘欄位（評分相關）維持在 score，且未來 SRZone 新增的評分欄位會自動
 // 進 score，不必同步維護一份欄位清單。
 var srZoneScoreExcludedKeys = []string{
 	"id", "analysis_id", "price_low", "price_high", "method", "role",
 	"status", "broken_at", "broken_price", "resolved_role",
-	"features", "evidence", "explanation", "scenario",
+	"features", "evidence", "explanation", "scenario", "probability_context",
 }
 
 // srZonePipelineScore 把整筆 SRZone 序列化後，移除 srZoneScoreExcludedKeys，
@@ -88,11 +88,12 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 				"price_low": z.PriceLow, "price_high": z.PriceHigh,
 				"method": z.Method, "role": z.Role,
 			},
-			"features":    z.Features,
-			"score":       srZonePipelineScore{zone: z},
-			"evidence":    z.Evidence,
-			"explanation": z.Explanation,
-			"scenario":    z.Scenario,
+			"features":            z.Features,
+			"score":               srZonePipelineScore{zone: z},
+			"evidence":            z.Evidence,
+			"explanation":         z.Explanation,
+			"scenario":            z.Scenario,
+			"probability_context": z.ProbabilityContext,
 			"lifecycle": gin.H{
 				"status": z.Status, "broken_at": z.BrokenAt,
 				"broken_price": z.BrokenPrice, "resolved_role": z.ResolvedRole,
@@ -116,11 +117,12 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 			"global_confidence":        a.GlobalConfidence,
 			"global_risk_reward_ratio": a.GlobalRiskRewardRatio,
 		},
-		"evidence":    a.Evidence,
-		"decision":    a.DecisionSummary,
-		"explanation": a.Explanation,
-		"scenario":    a.Scenario,
-		"zones":       items,
+		"evidence":            a.Evidence,
+		"decision":            a.DecisionSummary,
+		"explanation":         a.Explanation,
+		"scenario":            a.Scenario,
+		"probability_context": a.ProbabilityContext,
+		"zones":               items,
 	}
 }
 

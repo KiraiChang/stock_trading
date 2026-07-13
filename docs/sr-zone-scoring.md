@@ -257,6 +257,43 @@ confidence 高時 score 趨近模型機率本身，confidence 低時往中性值
 score 現在是機率的單調函式，不會再出現「強度分數很高但機率很低」這種自相
 矛盾的輸出。
 
+### 五之一、Probability Context 機率解讀層
+
+`probability_context` 是機率的結構化解讀與品質標記層，不重新訓練模型、不改
+`bounce_probability` / `break_probability`、不改 EV/RR、score 或 decision 門檻。
+它把既有正規化後的機率補成前端可穩定顯示的三分解：
+
+```
+neutral_probability = max(0, 1 - bounce_probability - break_probability)
+edge_pp = abs(bounce_probability - break_probability) × 100
+```
+
+**頂層 `probability_context` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `schema_version` | Probability context schema 版本，目前為 `sr_probability_context_v1` |
+| `model_metrics.hold/break` | 訓練時保存的 AUC、Brier、log loss、calibrated、test rows 摘要 |
+| `health.quality_flags` | 模型層品質提示，例如未校準或 test rows 偏少 |
+| `health.average_edge_pp` | 具方向性 zone 的平均 hold/break 機率差距 |
+| `health.directional_zone_count` / `zone_count` | 有方向機率的 zone 數與總 zone 數 |
+
+**`zones[].probability_context` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `schema_version` | Probability context schema 版本，目前為 `sr_probability_context_v1` |
+| `bounce_probability` / `break_probability` | 與 score 欄位同值，方便此 contract 自足顯示 |
+| `neutral_probability` | 盤整/不明確的隱含機率；`AT_ZONE` 為 `null` |
+| `dominant_outcome` | `BOUNCE` / `BREAK` / `NEUTRAL` / `NO_DIRECTION` |
+| `edge_pp` | bounce 與 break 的百分點差距；越小代表方向優勢越不明顯 |
+| `quality_flags` | zone 層品質提示，例如 `LOW_CONFIDENCE`、`LOW_PROBABILITY_EDGE`、`NO_DIRECTION` |
+
+舊分析可能沒有 `probability_context` 或值為 JSON `null`，前端應隱藏此區塊並
+繼續使用既有 probability / explanation 顯示。`AT_ZONE` 不給方向機率，會標記
+`NO_DIRECTION` 與 `MISSING_DIRECTIONAL_PROBABILITY`，避免把區間內震盪硬解讀成
+支撐或壓力。
+
 ---
 
 ## 六、Confidence（多因子可信度）

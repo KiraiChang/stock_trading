@@ -166,6 +166,8 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert set(result["explanation"]) >= {"schema_version", "summary", "action_reason", "market_drivers", "risk_notes", "model_context"}
     assert set(result["scenario"]) >= {"schema_version", "state", "title", "summary", "trigger_conditions", "invalidation_conditions"}
     assert result["scenario"]["schema_version"] == "sr_scenario_v1"
+    assert set(result["probability_context"]) >= {"schema_version", "model_metrics", "health"}
+    assert result["probability_context"]["schema_version"] == "sr_probability_context_v1"
     ds = result["decision"]
     assert ds["market_regime"]["primary"] in ("TREND_UP", "TREND_DOWN", "RANGE_BOUND")
     assert isinstance(ds["market_regime"]["flags"], list)
@@ -180,11 +182,13 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert isinstance(result["zones"], list)
     zones = _v2_zone_scores(result)
     for item, z in zip(result["zones"], zones):
-        assert set(item) == {"data", "features", "score", "evidence", "explanation", "scenario", "lifecycle"}
+        assert set(item) == {"data", "features", "score", "evidence", "explanation", "scenario", "probability_context", "lifecycle"}
         assert set(item["evidence"]) >= {"support", "resistance", "risk_flags"}
         assert set(item["explanation"]) >= {"schema_version", "role_summary", "score_reason", "probability_reason", "confidence_reason"}
         assert set(item["scenario"]) >= {"schema_version", "state", "title", "summary", "trigger_conditions", "invalidation_conditions"}
         assert item["scenario"]["schema_version"] == "sr_scenario_v1"
+        assert set(item["probability_context"]) >= {"schema_version", "bounce_probability", "break_probability", "neutral_probability", "dominant_outcome", "edge_pp", "quality_flags"}
+        assert item["probability_context"]["schema_version"] == "sr_probability_context_v1"
         assert "advanced_refs" not in item["explanation"]
         assert 0.0 <= z["support_score"] <= 1.0
         assert 0.0 <= z["resistance_score"] <= 1.0

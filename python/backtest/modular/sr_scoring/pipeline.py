@@ -19,6 +19,11 @@ from .pipeline_types import (
     DirectionFeatures,
     ZoneFeatureSet,
 )
+from .probability_engine import (
+    build_analysis_probability_context,
+    build_zone_probability_context,
+    model_quality_flags,
+)
 from .scenario_engine import build_analysis_scenario, build_zone_scenario
 from .types import ApproachDirection, ZoneType
 from .zone_builder import ZoneBuilder
@@ -186,6 +191,12 @@ def run_pipeline(
     decision = decide(evidence)
     explanation = build_explanation(evidence, decision.summary)
     scenario = build_analysis_scenario(evidence, decision.summary)
+    zone_probability_flags = model_quality_flags(scores)
+    zone_probability_contexts = [
+        build_zone_probability_context(score, zone_probability_flags)
+        for score in scores.zones
+    ]
+    probability_context = build_analysis_probability_context(scores, zone_probability_contexts)
     period_summaries = _build_period_summaries(
         list(scores.zones), data.current_price, features.ma5
     )
@@ -227,6 +238,7 @@ def run_pipeline(
         "decision": decision.summary,
         "explanation": explanation,
         "scenario": scenario,
+        "probability_context": probability_context,
         "zones": [
             {
                 "data": {
@@ -243,8 +255,14 @@ def run_pipeline(
                 "evidence": zone_evidence,
                 "explanation": explain_zone(score, zone_evidence),
                 "scenario": build_zone_scenario(score),
+                "probability_context": zone_probability_context,
                 "lifecycle": {"status": "PENDING", "resolved_role": None},
             }
-            for item, score, zone_evidence in zip(scores.features.zones, scores.zones, evidence.zone_evidence)
+            for item, score, zone_evidence, zone_probability_context in zip(
+                scores.features.zones,
+                scores.zones,
+                evidence.zone_evidence,
+                zone_probability_contexts,
+            )
         ],
     }

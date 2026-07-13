@@ -383,32 +383,6 @@ zone 層同樣被雙重序列化（`item.scenario` 兄弟鍵與 `item.score.scen
 
 ---
 
-### T-024：交易分析合併後的相容層收斂（handler 去重／前端 dead export）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Go / Frontend / API |
-| 建立日期 | 2026-07-10 |
-| 來源 | review commit `d1bee8a`（sr_zone 與 position 合併）時發現；原合併計畫書與舊 T-024 已於 `70ac223` 移除，但此收斂尚未完成，避免無人追蹤故重新記錄 |
-
-`d1bee8a` 導入統一「交易分析」入口後，舊 SR Zone / Position 相容層仍保留，形成兩套並存：
-
-- 後端：`handler/trade_analysis.go` 的 `TradeAnalysisHandler.Analyze` 與
-  `handler/position.go`（約 line 177）的 `PositionHandler.Analyze` 幾乎完全重複
-  （body 結構、`normalizePositionSymbol`、`limit>=0` 驗證、`analyzer.Analyze` 呼叫、
-  `UpstreamStatusError` 錯誤映射），僅回應多一層 `context`。`/position-analyses` 與
-  `/trade-analysis/*` 端點都仍註冊於 `server.go`。可抽共用 helper 或評估舊端點導向新入口。
-- 前端：Positions 頁改用 `analyzeTrade`/`listTradeAnalyses` 後，
-  `frontend/src/lib/api/positions.ts` 的 `analyzePosition` / `listPositionAnalyses`
-  已無其他使用點，屬 dead export，待確認無外部依賴後移除。
-
-收斂時一併確認 `/position-analyses` 是否還需對外相容；若決定長期保留兩套，改把「刻意保留」
-理由文件化到對應主題文件，並從本清單移除。
-
----
-
 ### T-025：Scenario Engine 收斂（dead branch／helper 重複／redundant 賦值／測試覆蓋）
 
 | 欄位 | 內容 |

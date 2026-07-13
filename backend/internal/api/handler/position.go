@@ -11,19 +11,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/trading/backend/internal/analysis"
-	"github.com/trading/backend/internal/portfolio"
 	"github.com/trading/backend/internal/store"
 )
 
 type PositionHandler struct {
-	repo     store.PositionRepo
-	analyzer *portfolio.Analyzer
-	log      *zap.Logger
+	repo store.PositionRepo
+	log  *zap.Logger
 }
 
-func NewPositionHandler(repo store.PositionRepo, analyzer *portfolio.Analyzer, log *zap.Logger) *PositionHandler {
-	return &PositionHandler{repo: repo, analyzer: analyzer, log: log}
+func NewPositionHandler(repo store.PositionRepo, log *zap.Logger) *PositionHandler {
+	return &PositionHandler{repo: repo, log: log}
 }
 
 func normalizePositionSymbol(raw string) string {
@@ -174,67 +171,3 @@ func (h *PositionHandler) ListTransactions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"transactions": rows, "total": len(rows)})
 }
 
-func (h *PositionHandler) Analyze(c *gin.Context) {
-	var body struct {
-		Symbol       string `json:"symbol"`
-		Timeframe    string `json:"timeframe"`
-		Limit        int    `json:"limit"`
-		ForceRefresh bool   `json:"force_refresh"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	body.Symbol = normalizePositionSymbol(body.Symbol)
-	if body.Symbol == "" || body.Limit < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "valid symbol and limit are required"})
-		return
-	}
-	result, err := h.analyzer.Analyze(c.Request.Context(), body.Symbol, portfolio.AnalyzeOptions{
-		Timeframe: body.Timeframe, Limit: body.Limit, ForceRefresh: body.ForceRefresh,
-	})
-	if err != nil {
-		var upstreamErr *analysis.UpstreamStatusError
-		if errors.As(err, &upstreamErr) {
-			mapScoreZonesError(c, h.log, err)
-			return
-		}
-		serverError(c, h.log, err, "position analyses: create")
-		return
-	}
-	c.JSON(http.StatusCreated, gin.H{
-		"analysis": result.Analysis, "sr_zone_analysis": result.SR, "zones": result.Zones,
-	})
-}
-
-func (h *PositionHandler) ListAnalyses(c *gin.Context) {
-	symbol := normalizePositionSymbol(c.Query("symbol"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if limit <= 0 || limit > 200 {
-		limit = 20
-	}
-	rows, err := h.repo.ListAnalyses(c.Request.Context(), symbol, limit)
-	if err != nil {
-		serverError(c, h.log, err, "position analyses: list")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"analyses": rows, "total": len(rows)})
-}
-
-func (h *PositionHandler) GetAnalysis(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
-		return
-	}
-	row, err := h.repo.GetAnalysis(c.Request.Context(), id)
-	if errors.Is(err, sql.ErrNoRows) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "position analysis not found"})
-		return
-	}
-	if err != nil {
-		serverError(c, h.log, err, "position analyses: get")
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"analysis": row})
-}

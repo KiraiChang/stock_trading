@@ -71,7 +71,7 @@ func TestPositionApplyEventErrorMapping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &positionRepoStub{applyErr: tt.err}
-			h := NewPositionHandler(repo, nil, zap.NewNop())
+			h := NewPositionHandler(repo, zap.NewNop())
 			router := gin.New()
 			router.POST("/positions/:symbol/transactions", h.AddTransaction)
 			router.POST("/positions/:symbol/adjustments", h.Adjust)

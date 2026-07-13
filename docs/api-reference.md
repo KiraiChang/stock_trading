@@ -1120,8 +1120,8 @@ Trade Analysis 是新前端與 API 的統一交易決策入口。呼叫端只需
 ```
 
 `analysis` 沿用 Position Analysis 快照格式；`sr_zone_analysis` 與 `zones` 沿用
-SR Zone 快照格式。既有 `/position-analyses` endpoints 仍保留相容與內部決策層
-存取，但新客戶端應優先使用 `/trade-analysis/*`。
+SR Zone 快照格式。分析入口統一由 `/trade-analysis/*` 提供（舊的
+`/position-analyses` 分析 endpoints 已移除）。
 
 `analysis.sr_zone_analysis_id` 是 best-effort historical reference。若對應 SR Zone
 快照後來被刪除，trade-analysis 歷史仍會保留 `analysis` 內的決策快照欄位，但
@@ -1132,8 +1132,8 @@ SR Zone 快照格式。既有 `/position-analyses` endpoints 仍保留相容與�
 ## Position Analysis API
 
 Position Analysis 是 Trade Analysis 背後的決策快照與部位帳務 API。沒有
-transaction/projection 時視為 `FLAT`，有股數時為 `LONG`。新交易決策入口優先使用
-`/trade-analysis/*`；以下 endpoints 保留給 position ledger、projection 與相容情境。
+transaction/projection 時視為 `FLAT`，有股數時為 `LONG`。交易決策入口統一為
+`/trade-analysis/*`；以下 endpoints 提供 position ledger 與 projection。
 
 - `GET /positions`：列出目前 LONG positions。
 - `GET /positions/:symbol`：取得 projection；空手回傳股數、AVG、version 均為 0。
@@ -1145,12 +1145,8 @@ transaction/projection 時視為 `FLAT`，有股數時為 `LONG`。新交易決�
   `target_shares`、`target_avg_cost`、`expected_version` 與必填 `reason`。
   ADJUSTMENT 只校正 projection，不代表成交、不改變 `realized_pnl`；實際交易使用
   BUY/SELL transaction。
-- `POST /position-analyses`：body 為
-  `{"symbol":"2330","timeframe":"1d","limit":250,"force_refresh":false}`。
-- `GET /position-analyses?symbol=2330&limit=20`：列出 FLAT/LONG 共用分析歷史。
-- `GET /position-analyses/:id`：取得不可變分析快照。
 
-分析輸出包含 `position_state`、Position version、目前／目標／調整股數、
+分析歷史改由 `GET /trade-analysis/:symbol/history` 取得；分析輸出包含 `position_state`、Position version、目前／目標／調整股數、
 `adjustment_side`/`adjustment_amount`、Action、進場／停損／停利價、風險金額、
 預期報酬、RR、已實現／未實現損益、設定快照、Evidence、觸發與失效條件。
 

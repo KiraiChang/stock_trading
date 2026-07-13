@@ -224,7 +224,7 @@ SR Zone Scoring：
 ```
 使用者新增 BUY / SELL / ADJUSTMENT transaction
     ↓ 同一 transaction 更新 positions AVG projection
-POST /trade-analysis/analyze（相容入口：POST /position-analyses）
+POST /trade-analysis/analyze
     ↓
 Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
     ↓

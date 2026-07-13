@@ -160,15 +160,12 @@ func NewServer(
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 
 		positionAnalyzer := portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig)
-		ph := handler.NewPositionHandler(positionRepo, positionAnalyzer, log)
+		ph := handler.NewPositionHandler(positionRepo, log)
 		protected.GET("/positions", ph.List)
 		protected.GET("/positions/:symbol", ph.Get)
 		protected.GET("/positions/:symbol/transactions", ph.ListTransactions)
 		protected.POST("/positions/:symbol/transactions", ph.AddTransaction)
 		protected.POST("/positions/:symbol/adjustments", ph.Adjust)
-		protected.POST("/position-analyses", ph.Analyze)
-		protected.GET("/position-analyses", ph.ListAnalyses)
-		protected.GET("/position-analyses/:id", ph.GetAnalysis)
 
 		tah := handler.NewTradeAnalysisHandler(positionRepo, positionAnalyzer, log)
 		protected.POST("/trade-analysis/analyze", tah.Analyze)

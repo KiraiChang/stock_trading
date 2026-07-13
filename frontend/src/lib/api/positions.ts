@@ -1,5 +1,4 @@
 import { apiFetch } from './client'
-import type { SRZone, SRZoneAnalysis } from './srZones'
 
 export interface Position {
   symbol: string
@@ -111,19 +110,3 @@ export async function adjustPosition(symbol: string, input: {
   return response.position
 }
 
-export async function analyzePosition(symbol: string, forceRefresh = false): Promise<{
-  analysis: PositionAnalysis
-  sr_zone_analysis: SRZoneAnalysis
-  zones: SRZone[]
-}> {
-  return apiFetch('/position-analyses', {
-    method: 'POST',
-    body: JSON.stringify({ symbol, timeframe: '1d', limit: 250, force_refresh: forceRefresh }),
-  })
-}
-
-export async function listPositionAnalyses(symbol?: string): Promise<PositionAnalysis[]> {
-  const query = symbol ? `?symbol=${encodeURIComponent(symbol)}&limit=20` : '?limit=20'
-  const response = await apiFetch<{ analyses: PositionAnalysis[] }>(`/position-analyses${query}`)
-  return response.analyses ?? []
-}

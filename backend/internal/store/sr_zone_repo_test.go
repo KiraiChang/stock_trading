@@ -351,7 +351,7 @@ func TestSRZoneRepoUpdateZoneStatus(t *testing.T) {
 	}
 }
 
-// 【sr_zone_improve review #2】AT_ZONE 驗證後解析出的方向要能被存回並讀出，
+// 【resolved_role 持久化，見 docs/sr-zone-scoring.md 十五】AT_ZONE 驗證後解析出的方向要能被存回並讀出，
 // 不能只更新 status/broken_at/broken_price 而遺漏 resolved_role。
 func TestSRZoneRepoUpdateZoneStatusPersistsResolvedRole(t *testing.T) {
 	repo := newTestSRZoneRepo(t)

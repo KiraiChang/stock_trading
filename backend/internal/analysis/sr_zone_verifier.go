@@ -78,7 +78,7 @@ func (v *SRZoneVerifier) Verify(ctx context.Context, analysisID uint64) (*store.
 //     壓力），離開之前維持 PENDING（現價還在區間內，既不是「守住」也不是
 //     「跌破」，沒有方向可以驗證）。解析出來的方向回傳在 resolvedRole
 //     （不覆寫原始 z.Role，保留「分析當下是 AT_ZONE」這個歷史資訊，見
-//     sr_zone_improve.md review #2）；role 本身就不是 AT_ZONE 時
+//     docs/sr-zone-scoring.md 十五「Zone 生命週期驗證」）；role 本身就不是 AT_ZONE 時
 //     resolvedRole 永遠是空字串，呼叫端據此把 DB 欄位維持 NULL。
 //   - role=SUPPORT：收盤連續 confirmationBars 根低於 price_low 視為 BROKEN
 //     （比照 count_breakouts 的 streak state machine，避免單一天雜訊誤判）。

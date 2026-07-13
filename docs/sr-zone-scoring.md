@@ -339,8 +339,7 @@ VERY_HIGH。
 更像支撐還是壓力）是兩個不同概念，可能方向相反（例如 `role=SUPPORT` 但
 `net_score_label=STRONG_RESISTANCE`）——這不一定是演算法錯誤，但前端需要
 明確解釋兩者語意差異，並在方向相反時提示「角色與歷史強弱不一致，建議
-降低信心」，避免使用者覺得同一張卡片自相矛盾（見
-[sr_zone_improve.md](./sr_zone_improve.md) review #4，前端實作見
+降低信心」，避免使用者覺得同一張卡片自相矛盾（前端實作見
 `frontend/src/routes/SRZones.svelte::roleNetScoreConflicts`）。
 
 ---

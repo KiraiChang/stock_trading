@@ -232,7 +232,7 @@
   // 可能有值，見 lib/api/srZones.ts 說明）。判斷「這個 zone 現在算什麼角色」
   // 一律要用這個 helper，不要直接讀 z.role——否則 AT_ZONE 驗證後即使已經
   // 解析出方向，UI 仍會顯示「方向還不明確」，但 status 卻已經是
-  // HELD_SO_FAR/BROKEN，兩者會互相矛盾（見 docs/sr_zone_improve.md review #2）。
+  // HELD_SO_FAR/BROKEN，兩者會互相矛盾（見 docs/sr-zone-scoring.md 十五）。
   function effectiveRole(z: SRZone): 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE' {
     return z.resolved_role ?? z.role
   }
@@ -241,7 +241,7 @@
   // 更像支撐還是壓力）是兩個不同概念，方向相反不代表演算法錯，但 UI 不
   // 解釋的話使用者會覺得同一張卡片自相矛盾（role=SUPPORT 卻顯示「強力
   // 壓力」）。AT_ZONE 沒有明確角色可比較，NEUTRAL net_score 也不構成
-  // 「相反」，兩者都不算衝突（見 docs/sr_zone_improve.md review #4）。
+  // 「相反」，兩者都不算衝突（見 docs/sr-zone-scoring.md 中 role 與 net_score_label 語意差異一節）。
   function roleNetScoreConflicts(z: SRZone): boolean {
     const role = effectiveRole(z)
     if (role === 'SUPPORT' && z.net_score_label === 'STRONG_RESISTANCE') return true

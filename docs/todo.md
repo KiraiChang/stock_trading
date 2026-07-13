@@ -350,6 +350,25 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
+### T-021：拆分 `scoring.py` 降低單檔責任
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Python / SR Zone / 重構 |
+| 建立日期 | 2026-07-13 |
+| 來源 | 原 `docs/sr_zone_improve.md` 2026-07-06 review，刪檔前分流至 todo |
+
+`python/backtest/modular/sr_scoring/scoring.py` 已約 1068 行，單檔同時負責機率
+正規化、confidence / recent validation、tier 排序、overlap grouping、trading
+score / recommendation、global metrics 與 API response serialization。功能正確
+但責任偏重，後續再加評分規則時建議拆分，例如 `scoring_rules.py`（評分與權重）、
+`ranking.py`（tier 排序與 overlap grouping）、`serialization.py`（response 組裝）。
+屬可維護性重構，不改變輸出語意，低優先。
+
+---
+
 ## 已完成封存
 
 （目前沒有項目）

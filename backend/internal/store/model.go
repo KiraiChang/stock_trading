@@ -249,7 +249,7 @@ type SRZone struct {
 	// zone 永遠是 NULL（角色從分析當下就已明確，不需要另外解析）。不覆寫
 	// 原始 Role，是為了保留「分析當下是 AT_ZONE」這個歷史資訊，同時讓
 	// status/broken_at/broken_price 有明確對應的方向可以解釋，見
-	// sr_zone_improve.md review #2。
+	// docs/sr-zone-scoring.md 十五（Zone 生命週期驗證）。
 	ResolvedRole       NullString `db:"resolved_role" json:"resolved_role,omitempty"`
 	Features           RawJSON    `db:"features"      json:"features"`
 	Evidence           RawJSON    `db:"evidence"      json:"evidence"`

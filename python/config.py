@@ -40,3 +40,20 @@ INITIAL_CASH: float = _raw["backtest"]["initial_cash"]
 SR_SCORING_MODEL_PATH: str = os.getenv("SR_SCORING_MODEL_PATH") or str(
     (_ROOT / _raw["sr_scoring"]["model_path"]).resolve()
 )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# evidence（SHAP 貢獻）可降級：關閉或缺 shap/background 時 /sr-zones 不再 503，
+# 詳見 evidence.build_evidence 與 docs/sr-zone-scoring.md。
+SR_SCORING_EVIDENCE_ENABLED: bool = _env_bool(
+    "SR_SCORING_EVIDENCE_ENABLED", bool(_raw["sr_scoring"].get("evidence_enabled", True))
+)
+SR_SCORING_EVIDENCE_MAX_ZONES: int = int(
+    os.getenv("SR_SCORING_EVIDENCE_MAX_ZONES") or _raw["sr_scoring"].get("evidence_max_zones", 8)
+)

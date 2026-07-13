@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from .. import evidence as evidence_mod
 from .. import scoring
 from ..features import trend_slope
 from ..model import ModelBundle, train_model
@@ -948,3 +949,32 @@ def test_score_symbol_chip_summary_missing_when_no_chip_data(monkeypatch, bundle
     assert result["evidence"]["chip"]["missing"] is True
     assert result["evidence"]["chip"]["score"] is None
     assert result["analysis"]["chip_summary"] == result["evidence"]["chip"]
+
+
+def test_score_symbol_degrades_evidence_when_shap_unavailable(monkeypatch, bundle):
+    # shap 不可用時，/sr-zones 對應的 score_symbol 應仍回完整結果（非 503/例外），
+    # evidence 標記未產生、zone 的 support/resistance 降級為 None、risk_flags 保留、
+    # explanation 的 uses_shap_evidence 為 False。
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
+    monkeypatch.setattr(evidence_mod, "_shap_available", lambda: False)
+
+    result = score_symbol("2330", "1d")
+
+    assert result["evidence"]["model"]["explainer"] is None
+    assert result["evidence"]["model"]["evidence_available"] is False
+    assert result["explanation"]["model_context"]["uses_shap_evidence"] is False
+    assert len(result["zones"]) > 0
+    for item in result["zones"]:
+        assert item["evidence"]["support"] is None
+        assert item["evidence"]["resistance"] is None
+        assert "risk_flags" in item["evidence"]

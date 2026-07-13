@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +8,8 @@ import pytest
 from ..model import (
     FEATURE_COLUMNS,
     MIN_ROWS_FOR_CALIBRATION,
+    MODEL_VERSION,
+    ModelBundle,
     _time_split_indices,
     compute_config_hash,
     load_model,
@@ -140,6 +143,41 @@ def test_save_load_round_trip(tmp_path):
     assert loaded.rr_reference == bundle.rr_reference
     assert loaded.training_config == bundle.training_config
     assert loaded.config_hash == bundle.config_hash
+
+
+def _schema_compatible_bundle(**overrides) -> ModelBundle:
+    params = dict(
+        hold_model=None,
+        break_model=None,
+        feature_names=list(FEATURE_COLUMNS),
+        trained_at="2026-07-13T00:00:00Z",
+        version=MODEL_VERSION,
+        explanation_background=[[0.0] * len(FEATURE_COLUMNS)],
+    )
+    params.update(overrides)
+    return ModelBundle(**params)
+
+
+def test_load_model_allows_schema_compatible_without_background(tmp_path):
+    # 舊 v3 模型（feature schema 相容、無 SHAP background）現在應可載入供基本
+    # 機率評分，不再 raise；evidence 由 build_evidence 降級處理。
+    bundle = _schema_compatible_bundle(version="v3", explanation_background=[])
+    path = str(tmp_path / "v3.joblib")
+    joblib.dump(bundle, path)
+
+    loaded = load_model(path)
+
+    assert loaded.version == "v3"
+    assert loaded.explanation_background == []
+
+
+def test_load_model_rejects_incompatible_feature_schema(tmp_path):
+    bundle = _schema_compatible_bundle(feature_names=["only_one_feature"])
+    path = str(tmp_path / "bad.joblib")
+    joblib.dump(bundle, path)
+
+    with pytest.raises(RuntimeError, match="schema"):
+        load_model(path)
 
 
 def test_train_model_stores_training_config_and_hash():

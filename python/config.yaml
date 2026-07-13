@@ -26,3 +26,7 @@ sr_scoring:
   # v4 除了 v3 特徵外，還保存 SHAP background sample；舊模型都不相容。
   # /sr-zones 預測時因為特徵 schema 對不上而回 503。
   model_path: "models/sr_scoring_v4.joblib"
+  # evidence（SHAP 貢獻）為可降級的展示層：shap 未安裝或模型缺 v4 background
+  # 時，/sr-zones 仍以規則式＋機率分數回應、evidence 標記未產生，而非 503。
+  evidence_enabled: true      # 設 false 可為降低延遲主動關閉 SHAP evidence
+  evidence_max_zones: 8       # 只對 trading_score 前 N 的 zone 產 SHAP evidence（0=全部）

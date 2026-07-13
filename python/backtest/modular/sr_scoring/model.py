@@ -306,10 +306,10 @@ def load_model(path: str) -> ModelBundle:
             f"sr_scoring 模型特徵 schema 不相容：model={getattr(bundle, 'feature_names', None)} "
             f"expected={FEATURE_COLUMNS}（請重新訓練 {MODEL_VERSION} 模型）"
         )
-    if getattr(bundle, "version", "") != MODEL_VERSION or not getattr(bundle, "explanation_background", None):
-        raise RuntimeError(
-            f"sr_scoring model does not provide {MODEL_VERSION} SHAP background data; retrain the model"
-        )
+    # feature schema 是唯一的硬性 gate（決定基本機率評分能不能算）。
+    # v4 的 explanation_background 只有 SHAP evidence 需要；舊 v3 模型或尚未
+    # 重訓 v4 時缺 background 不再阻擋評分，改由 evidence.build_evidence 在缺
+    # background/shap 時降級（evidence 標記未產生），避免 /sr-zones 整包 503。
     return bundle
 
 

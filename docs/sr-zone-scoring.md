@@ -923,12 +923,26 @@ Data → Features → Score → Evidence → Decision
   與 `additivity_error`。浮點重建誤差容許至 `1e-5`；超過才視為證據失真並中止。
 - Decision 的公開入口只接受 `AnalysisEvidence`，不可回頭讀 DataFrame 或自行推論模型。
 
-模型版本為 `v4`，模型檔需包含固定抽樣的 SHAP background；v3 模型必須重訓。
+**Evidence 可降級（不再是硬性 503 相依）**：SHAP 貢獻是可降級的展示層。
+`build_evidence` 在下列任一情況降級——`sr_scoring.evidence_enabled=false`、
+`shap` 套件未安裝、或模型缺 v4 `explanation_background`——此時各 zone 的
+`support`/`resistance` 設為 `null`、仍保留純規則的 `risk_flags`，
+`global_evidence.model.explainer` 設為 `null`、`evidence_available=false`，
+`/sr-zones` 仍以規則式＋機率分數正常回應（**不再整包 503**）。`load_model`
+的唯一硬性 gate 是 feature schema 相容（決定能否評分）；v4/background 缺失
+不再阻擋評分。只有找不到模型檔、schema 不相容或無 K 棒才會錯誤。
+
+**Evidence 延遲控制**：`sr_scoring.evidence_max_zones`（預設 `8`，`0`=全部）
+只對 `trading_score` 前 N 的 zone 產生 SHAP evidence，其餘 zone 降級為 `null`
+但保留 `risk_flags`；同一模型的 SHAP background 與 explainer 每次分析建一次
+重用，降低熱路徑成本。
+
 Python `/sr-zones` 回傳 breaking v2 nested contract：
-`analysis`、`features`、`score`、`evidence`、`decision`、`explanation`，
-以及每個 zone 各自的 `data/features/score/evidence/explanation/lifecycle`。
-Go 將 analysis/zone evidence 與 explanation JSON 連同 `pipeline_version`
-保存，歷史快照不會回算 evidence 或 explanation。
+`analysis`、`features`、`score`、`evidence`、`decision`、`explanation`、`scenario`，
+以及每個 zone 各自的 `data/features/score/evidence/explanation/scenario/lifecycle`。
+Go 將 analysis/zone 的 evidence、explanation、scenario JSON 連同 `pipeline_version`
+保存，歷史快照不會回算。`explanation.model_context.uses_shap_evidence` 依
+`explainer` 是否存在判斷，evidence 降級時為 `false`（前端 badge 顯示「rules only」）。
 
 ### 十九之一、Explain Engine 白話解釋層
 

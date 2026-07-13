@@ -350,40 +350,6 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
-### T-022：SR Zone v2 evidence／v4 模型硬性相依的優雅降級與上線 gating
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / Evidence / 部署 |
-| 建立日期 | 2026-07-09 |
-| 來源 | review「SR Zone v2 pipeline evidence」變更（working tree，未提交）時發現 |
-
-v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 fallback：
-
-1. **`shap` 套件**：`evidence.py::explain_direction`（約 line 44）在 `build_evidence`
-   內對每個 zone 無條件 `import shap`，缺套件時 `raise RuntimeError` → `http_server`
-   映射成 503。`shap` 是本次才加進 `requirements.txt`，所以只要 code 先於
-   `pip install` 部署，整個 `/sr-zones` 端點全部 503。另外每個 zone 會跑兩個
-   permutation explainer（hold/break），在熱路徑上有明顯延遲成本。
-2. **v4 模型**：`model.py::load_model`（約 line 309）硬性要求 `version==v4` 且
-   `explanation_background` 非空，`config.yaml` 也改指向尚不存在的
-   `models/sr_scoring_v4.joblib`。既有 v3 部署會 503 直到重訓出 v4 模型。
-
-這些可能是刻意的 v4 遷移設計，但目前是「無 gating、無 fallback 的停機懸崖」：
-純 code deploy（未裝 shap／未訓 v4）會讓端點整個掛掉。後續優化方向：
-
-- 讓 evidence 變成可選：`shap` 或 v4 background 不可用時，`/sr-zones` 仍以規則式
-  分數正常回應、evidence 欄位標記為「未產生」，而不是整包 503。
-- 明確化部署流程（先裝 shap＋訓 v4 再切換），或以旗標 gating evidence 產生。
-- 降低 SHAP 成本（快取 background、批次化、或只對 primary/前 N 個 zone 產生 evidence）。
-
-（若最終決定維持硬性相依、不做降級，改把它記成 `docs/issue.md` 的「已知限制
-（不計畫修復）」並補上部署 runbook。）
-
----
-
 ### T-023：srZonePipelineResponse 的 zone 區塊 payload 去重
 
 | 欄位 | 內容 |

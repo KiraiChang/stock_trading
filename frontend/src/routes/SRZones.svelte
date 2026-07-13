@@ -866,9 +866,13 @@
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <p class="text-white text-sm font-medium">模型證據</p>
-                <p class="text-muted text-xs">
-                  {globalEvidence.model.explainer} · 解釋校準、正規化後的最終機率
-                </p>
+                {#if globalEvidence.model.explainer}
+                  <p class="text-muted text-xs">
+                    {globalEvidence.model.explainer} · 解釋校準、正規化後的最終機率
+                  </p>
+                {:else}
+                  <p class="text-muted text-xs">規則式評分（本次未產生 SHAP evidence）</p>
+                {/if}
               </div>
               <div class="text-xs text-muted font-mono">
                 pipeline {current.pipeline_version} · model {globalEvidence.model.version}/{globalEvidence.model.config_hash}
@@ -1260,7 +1264,7 @@
                           </div>
                         {/if}
 
-                        {#if activeEvidence(z)}
+                        {#if activeEvidence(z)?.targets}
                           <div class="mb-3 border border-indigo-900/50 rounded-lg p-3 bg-indigo-950/20">
                             <div class="flex items-center justify-between gap-2 mb-2">
                               <p class="text-white text-xs font-medium">SHAP 局部模型解釋</p>
@@ -1279,10 +1283,12 @@
                                 </div>
                               {/each}
                             </div>
-                            {#if z.evidence?.risk_flags.length}
-                              <p class="text-yellow-300 text-[11px] mt-2">風險旗標：{z.evidence.risk_flags.join('、')}</p>
-                            {/if}
                           </div>
+                        {/if}
+
+                        <!-- 風險旗標為純規則產出，evidence 降級（未產生 SHAP）時仍要顯示 -->
+                        {#if z.evidence?.risk_flags?.length}
+                          <p class="text-yellow-300 text-[11px] mb-3">風險旗標：{z.evidence.risk_flags.join('、')}</p>
                         {/if}
 
                         <!-- 分數列：Support/Resistance/Net Score、Confidence、Trading Score -->

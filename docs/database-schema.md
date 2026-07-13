@@ -214,7 +214,7 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | global_risk_reward_ratio | 所有「有明確方向」的 zone 依 confidence 加權平均的 RR；`NULL` 條件同 global_expected_value |
 | model_version | 產生這筆分析所用的模型版本（目前為 `"v4"`）；Python 端萬一沒回傳則寫 `"unknown"` |
 | pipeline_version | 分層 API/持久化契約版本，目前為 `"v2"` |
-| evidence | 分析層全局 Evidence JSON，包含 SHAP explainer metadata、global metrics 與籌碼快照 |
+| evidence | 分析層全局 Evidence JSON，包含 SHAP explainer metadata、global metrics 與籌碼快照。evidence 可降級：shap 未安裝／模型缺 v4 background／`evidence_enabled=false` 時 `model.explainer=null`、`model.evidence_available=false`（見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十九」） |
 | explanation | JSON：分析層白話解釋（`schema_version`/`summary`/`action_reason`/`market_drivers`/`risk_notes`/`model_context`），由 Python explain engine 依 Score/Evidence/Decision 產生的純展示層，不影響決策；`schema_version` 目前為 `sr_explain_v1`，舊資料為 JSON `null` |
 | scenario | JSON：分析層結構化情境（`schema_version`/`state`/`title`/`summary`/`trigger_conditions`/`invalidation_conditions`/`market_regime`/`primary_zone`/`global_confidence`），由 Python scenario engine 依 decision/score/explanation 產生的純展示層，不改機率/分數/決策；`schema_version` 目前為 `sr_scenario_v1`，舊資料為 JSON `null` |
 | model_config_hash | 訓練這個模型時的 `DatasetConfig`/zone builder 參數/`model_type`/`calibration_method` 快照的短 hash（比 `model_version` 更細），見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十六」；比這個欄位還舊的分析為空字串 |
@@ -257,7 +257,7 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 | trading_score_breakdown | JSON：`trading_score` 六個分量各自的加權貢獻值，加總即為 `trading_score` |
 | trading_recommendation | `STRONG_BUY`/`BUY`/`WATCH`/`NEUTRAL`/`AVOID`/`STRONG_SELL` |
 | features | JSON：同一 zone 的 support/resistance typed 特徵快照 |
-| evidence | JSON：兩方向 hold/break 的 SHAP baseline、最終機率、特徵值、貢獻與風險旗標 |
+| evidence | JSON：兩方向 hold/break 的 SHAP baseline、最終機率、特徵值、貢獻與風險旗標。evidence 降級或此 zone 不在 `evidence_max_zones` 前 N 名時，`support`/`resistance` 為 `null`、僅保留 `risk_flags`（見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十九」） |
 | explanation | JSON：單一 zone 的白話解釋（`schema_version`/`role_summary`/`score_reason`/`probability_reason`/`confidence_reason`/`positive_factors`/`negative_factors`/`watch_conditions`），純展示層；`schema_version` 目前為 `sr_explain_v1`，舊資料為 JSON `null` |
 | scenario | JSON：單一 zone 的結構化情境（`schema_version`/`state`/`title`/`summary`/`trigger_conditions`/`invalidation_conditions`），純展示層；`state` 為機器標記（如 `SUPPORT_RETEST`/`RESISTANCE_REJECTION`/`WAIT_FOR_DIRECTION`/`RETEST_REQUIRED`）；`schema_version` 目前為 `sr_scenario_v1`，舊資料為 JSON `null` |
 | status / broken_at / broken_price | `PENDING`（尚未驗證或 `AT_ZONE` 方向未定）/ `HELD_SO_FAR`（曾被觸碰但未被突破）/ `BROKEN`（已被突破，`broken_at`/`broken_price` 是連續確認突破的第一根K棒）。由 `POST /sr-zones/:id/verify` 或 `daily_close` 排程更新，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |

@@ -261,23 +261,51 @@
   }
 
 
-  const decisionActionText: Record<string, string> = {
-    Buy: '買進', BuySmall: '小量試單', Hold: '等待', Avoid: '避開',
+  const marketActionText: Record<string, string> = {
+    BUY: '買進', BUY_SMALL: '小量試單', WATCH: '觀察', AVOID: '避開',
+    Buy: '買進', BuySmall: '小量試單', Hold: '觀察', Avoid: '避開',
   }
-  const decisionActionClass: Record<string, string> = {
+  const marketActionClass: Record<string, string> = {
+    BUY: 'bg-green-900/50 text-green-300 border-green-700/60',
+    BUY_SMALL: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
+    WATCH: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
+    AVOID: 'bg-red-900/40 text-red-300 border-red-700/60',
     Buy: 'bg-green-900/50 text-green-300 border-green-700/60',
     BuySmall: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
     Hold: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
     Avoid: 'bg-red-900/40 text-red-300 border-red-700/60',
   }
+  const positionActionText: Record<string, string> = {
+    HOLD: '持有', REDUCE_ON_BREAKDOWN: '跌破減碼', REDUCE: '減碼', EXIT: '出場',
+  }
+  const positionActionClass: Record<string, string> = {
+    HOLD: 'bg-blue-900/40 text-blue-300 border-blue-700/60',
+    REDUCE_ON_BREAKDOWN: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
+    REDUCE: 'bg-orange-900/40 text-orange-300 border-orange-700/60',
+    EXIT: 'bg-red-900/50 text-red-300 border-red-700/60',
+  }
   const regimePrimaryText: Record<string, string> = {
     TREND_UP: '偏多趨勢', TREND_DOWN: '偏空趨勢', RANGE_BOUND: '區間盤',
+  }
+  const structureStateText: Record<string, string> = {
+    NORMAL: '結構正常',
+    RECOVERY_CANDIDATE: '短線測試支撐',
+    RECOVERY: '短線收回支撐',
+    RECOVERY_INVALIDATED: '短線結構轉弱',
+    BREAKDOWN: '短線結構跌破',
   }
   const regimeFlagText: Record<string, string> = {
     HIGH_VOLATILITY: '高波動', LOW_CONFIDENCE: '低信心',
   }
   const noviceRoleText: Record<string, string> = {
     SUPPORT: '比較接近支撐', RESISTANCE: '比較接近壓力', AT_ZONE: '現價卡在區間內，方向還不明確',
+  }
+
+  function legacyMarketAction(action: string | undefined): string {
+    if (action === 'Buy') return 'BUY'
+    if (action === 'BuySmall') return 'BUY_SMALL'
+    if (action === 'Avoid') return 'AVOID'
+    return 'WATCH'
   }
 
   // 白話交易建議：保持「輔助判斷」語氣，不寫成保證獲利或自動交易指令，
@@ -909,6 +937,12 @@
                 <p class="text-muted text-xs mb-1">Market Regime</p>
                 <div class="flex items-center gap-2 flex-wrap">
                   <h3 class="text-white font-semibold">{decisionSummary.market_regime.label || regimePrimaryText[decisionSummary.market_regime.primary] || decisionSummary.market_regime.primary}</h3>
+                  {#if decisionSummary.market_regime.trend_regime}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-blue-900/40 text-blue-300">{regimePrimaryText[decisionSummary.market_regime.trend_regime] ?? decisionSummary.market_regime.trend_regime}</span>
+                  {/if}
+                  {#if decisionSummary.market_regime.structure_state}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-surface text-muted border border-border">{structureStateText[decisionSummary.market_regime.structure_state] ?? decisionSummary.market_regime.structure_state}</span>
+                  {/if}
                   {#each decisionSummary.market_regime.flags as flag}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-yellow-900/40 text-yellow-300">{regimeFlagText[flag] ?? flag}</span>
                   {/each}
@@ -917,11 +951,19 @@
                   <p class="text-muted text-xs mt-1">{decisionSummary.market_regime.reasons.join('、')}</p>
                 {/if}
               </div>
-              <div class="text-right">
-                <p class="text-muted text-xs mb-1">Action</p>
-                <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {decisionActionClass[decisionSummary.action] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
-                  {decisionSummary.action_label || decisionActionText[decisionSummary.action] || decisionSummary.action}
-                </span>
+              <div class="flex gap-2 text-right flex-wrap justify-end">
+                <div>
+                  <p class="text-muted text-xs mb-1">Market Action</p>
+                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {marketActionClass[decisionSummary.market_action ?? legacyMarketAction(decisionSummary.action)] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                    {marketActionText[decisionSummary.market_action ?? legacyMarketAction(decisionSummary.action)] ?? decisionSummary.market_action ?? decisionSummary.action}
+                  </span>
+                </div>
+                <div>
+                  <p class="text-muted text-xs mb-1">Position Action</p>
+                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {positionActionClass[decisionSummary.position_action ?? 'HOLD'] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                    {positionActionText[decisionSummary.position_action ?? 'HOLD'] ?? decisionSummary.position_action ?? 'HOLD'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -930,11 +972,12 @@
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/60">
                   <div class="flex items-center justify-between gap-3 mb-2">
                     <p class="text-muted text-xs">Primary Zone</p>
-                    <span class="text-[11px] text-muted">距離 {decisionSummary.primary_zone.distance_label}</span>
+                    <span class="text-[11px] text-muted">距離 {decisionSummary.primary_zone.zone_interaction?.distance_label ?? decisionSummary.primary_zone.distance_label}</span>
                   </div>
                   <p class="font-mono text-white text-base">{decisionSummary.primary_zone.label}</p>
                   <p class="text-xs text-muted mt-1">{noviceRoleText[decisionSummary.primary_zone.role] ?? decisionSummary.primary_zone.role} · {decisionSummary.primary_zone.reason}</p>
                   <div class="flex flex-wrap gap-2 mt-3 text-[11px]">
+                    <span class="text-white">{decisionSummary.primary_zone.zone_interaction?.state_label ?? '尚未測試'}</span>
                     <span class="text-muted">信心 {decisionSummary.confidence_explanation.label}</span>
                     <span class="text-muted">Score {fmtScore100(decisionSummary.primary_zone.trading_score)}</span>
                     <span class="text-muted">EV {fmtSignedPct(decisionSummary.primary_zone.expected_value)}</span>

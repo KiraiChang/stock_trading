@@ -1,8 +1,8 @@
-"""SR Zone Decision Engine v1.
+"""SR Zone Decision Engine v2.
 
-This module turns SR Zone scoring output into a single decision summary. It is
-intentionally portfolio-agnostic: no holding cost, shares, PnL, position sizing,
-or order execution logic belongs here.
+This module turns SR Zone scoring output into market/position decision context.
+It is intentionally portfolio-agnostic: no holding cost, shares, PnL, position
+sizing, or order execution logic belongs here.
 """
 from __future__ import annotations
 
@@ -25,8 +25,59 @@ def _distance_pct_to_zone(z: ZoneScore, current_price: float) -> float:
     return (current_price - z.price_high) / current_price
 
 
-def _decision_summary_zone(z: ZoneScore, current_price: float, reason: str) -> dict[str, Any]:
-    distance_pct = _distance_pct_to_zone(z, current_price)
+def _zone_interaction(
+    z: ZoneScore,
+    current_price: float,
+    candle_high: Optional[float] = None,
+    candle_low: Optional[float] = None,
+    candle_close: Optional[float] = None,
+) -> dict[str, Any]:
+    high = current_price if candle_high is None else candle_high
+    low = current_price if candle_low is None else candle_low
+    close = current_price if candle_close is None else candle_close
+    touched = low <= z.price_high and high >= z.price_low
+    closed_inside = z.price_low <= close <= z.price_high
+    closed_above = close > z.price_high
+    closed_below = close < z.price_low
+    penetration_pct = 0.0
+    if low < z.price_low:
+        penetration_pct = max(penetration_pct, (z.price_low - low) / z.price_low)
+    if high > z.price_high:
+        penetration_pct = max(penetration_pct, (high - z.price_high) / z.price_high)
+
+    if not touched:
+        state_label = "尚未測試"
+    elif closed_inside:
+        state_label = "進入區間"
+    elif z.role == ZoneType.SUPPORT.value and closed_below:
+        state_label = "有效跌破"
+    elif z.role == ZoneType.SUPPORT.value and closed_above:
+        state_label = "收回區間上方"
+    else:
+        state_label = "今日已測試"
+
+    distance_pct = _distance_pct_to_zone(z, close)
+    return {
+        "distance_pct": distance_pct,
+        "distance_label": f"{distance_pct * 100:.1f}%",
+        "touched": touched,
+        "penetration_pct": penetration_pct,
+        "closed_inside": closed_inside,
+        "closed_above": closed_above,
+        "closed_below": closed_below,
+        "state_label": state_label,
+    }
+
+
+def _decision_summary_zone(
+    z: ZoneScore,
+    current_price: float,
+    reason: str,
+    candle_high: Optional[float] = None,
+    candle_low: Optional[float] = None,
+    candle_close: Optional[float] = None,
+) -> dict[str, Any]:
+    interaction = _zone_interaction(z, current_price, candle_high, candle_low, candle_close)
     return {
         "price_low": z.price_low,
         "price_high": z.price_high,
@@ -39,8 +90,9 @@ def _decision_summary_zone(z: ZoneScore, current_price: float, reason: str) -> d
         "confidence_level": z.confidence_level,
         "expected_value": z.expected_value,
         "risk_reward_ratio": z.risk_reward_ratio,
-        "distance_pct": distance_pct,
-        "distance_label": f"{distance_pct * 100:.1f}%",
+        "distance_pct": interaction["distance_pct"],
+        "distance_label": interaction["distance_label"],
+        "zone_interaction": interaction,
         "recent_validation": z.recent_validation,
         "volume_confirmation": z.volume_confirmation,
         "confluence_count": z.confluence_count,
@@ -65,19 +117,21 @@ def _market_regime(
     global_volatility: float,
     global_confidence: Optional[float],
     chip_summary: dict[str, Any],
+    structure_state: str = "NORMAL",
 ) -> dict[str, Any]:
     if global_trend >= 0.015:
-        primary = "TREND_UP"
-        label = "偏多趨勢"
+        trend_regime = "TREND_UP"
+        trend_label = "偏多趨勢"
     elif global_trend <= -0.015:
-        primary = "TREND_DOWN"
-        label = "偏空趨勢"
+        trend_regime = "TREND_DOWN"
+        trend_label = "偏空趨勢"
     else:
-        primary = "RANGE_BOUND"
-        label = "區間盤"
+        trend_regime = "RANGE_BOUND"
+        trend_label = "區間盤"
 
     flags: list[str] = []
     reasons = [f"整體趨勢 {global_trend * 100:.1f}%"]
+    volatility_state = "HIGH_VOLATILITY" if global_volatility >= 0.035 else "NORMAL"
     if global_volatility >= 0.035:
         flags.append("HIGH_VOLATILITY")
         reasons.append(f"波動偏高（{global_volatility * 100:.1f}%）")
@@ -89,12 +143,32 @@ def _market_regime(
     elif chip_summary.get("score") is not None:
         reasons.append(f"籌碼總分 {float(chip_summary['score']):.1f}")
 
+    structure_label = {
+        "NORMAL": "",
+        "RECOVERY_CANDIDATE": "短線測試支撐",
+        "RECOVERY": "短線收回支撐",
+        "RECOVERY_INVALIDATED": "短線結構轉弱",
+        "BREAKDOWN": "短線結構跌破",
+    }.get(structure_state, structure_state)
+    label = trend_label
+    if structure_state in ("RECOVERY_INVALIDATED", "BREAKDOWN"):
+        label = f"長期{trend_label.replace('趨勢', '')}，但{structure_label}"
+    elif structure_label:
+        label += f"、{structure_label}"
     if "HIGH_VOLATILITY" in flags:
         label += "但波動偏高"
     if "LOW_CONFIDENCE" in flags:
         label += "且信心不足"
 
-    return {"primary": primary, "flags": flags, "label": label, "reasons": reasons[:4]}
+    return {
+        "primary": trend_regime,
+        "trend_regime": trend_regime,
+        "structure_state": structure_state,
+        "volatility_state": volatility_state,
+        "flags": flags,
+        "label": label,
+        "reasons": reasons[:4],
+    }
 
 
 def _primary_zone_score(z: ZoneScore, current_price: float, regime_primary: str) -> float:
@@ -138,7 +212,8 @@ def _decision_action(
     regime: dict[str, Any],
     primary_zone: Optional[ZoneScore],
     current_price: float,
-) -> tuple[str, str, list[str]]:
+    interaction: Optional[dict[str, Any]],
+) -> tuple[str, str, str, str, list[str]]:
     risk_notes: list[str] = []
     flags = set(regime.get("flags") or [])
     if "HIGH_VOLATILITY" in flags:
@@ -147,24 +222,40 @@ def _decision_action(
         risk_notes.append("整體信心不足，應等待更多確認。")
     if primary_zone is None:
         risk_notes.append("沒有足夠明確的主交易區。")
-        return "Hold", "等待", risk_notes
+        return "WATCH", "HOLD", "Hold", "等待", risk_notes
 
     distance_pct = _distance_pct_to_zone(primary_zone, current_price)
     if distance_pct > 0.08:
         risk_notes.append("現價離主交易區較遠，不適合追價。")
-    if primary_zone.risk_reward_ratio is not None and primary_zone.risk_reward_ratio < 1.0:
+    rr = primary_zone.risk_reward_ratio
+    if rr is None:
+        risk_notes.append("主交易區缺少風險報酬比，先觀察。")
+    elif rr < 1.5:
         risk_notes.append("主交易區風險報酬比不足。")
+    elif rr < 2.0:
+        risk_notes.append("風險報酬比未達完整買進門檻，最多小量試單。")
     if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
         risk_notes.append("主交易區近期驗證偏失效。")
 
     primary = regime.get("primary")
+    structure_state = regime.get("structure_state")
     bullish_setup = primary in ("TREND_UP", "RANGE_BOUND") and primary_zone.role == ZoneType.SUPPORT.value
     bearish_setup = primary == "TREND_DOWN" or primary_zone.role == ZoneType.RESISTANCE.value
+    structure_broken = structure_state in ("RECOVERY_INVALIDATED", "BREAKDOWN")
+    if structure_broken:
+        risk_notes.append("短線結構轉弱，市場訊號不得覆蓋跌破風險。")
+        position_action = "EXIT" if structure_state == "BREAKDOWN" else "REDUCE_ON_BREAKDOWN"
+        return "AVOID", position_action, "Avoid", "避開", risk_notes
+    if bearish_setup and not bullish_setup:
+        return "AVOID", "REDUCE", "Avoid", "避開", risk_notes
+    if rr is None or rr < 1.5:
+        return "WATCH", "HOLD", "Hold", "等待", risk_notes
+
     strong = (
         primary_zone.trading_score >= 70
         and primary_zone.confidence >= 0.65
         and (primary_zone.expected_value or 0) > 0
-        and (primary_zone.risk_reward_ratio or 0) >= 1.5
+        and rr >= 2.0
         and distance_pct <= 0.05
         and not flags
     )
@@ -175,15 +266,28 @@ def _decision_action(
         and (primary_zone.expected_value or 0) >= 0
     )
 
-    if bearish_setup and not bullish_setup:
-        return "Avoid", "避開", risk_notes
     if strong:
-        return "Buy", "買進", risk_notes
+        return "BUY", "HOLD", "Buy", "買進", risk_notes
     if constructive:
-        return "BuySmall", "小量試單", risk_notes
+        return "BUY_SMALL", "HOLD", "BuySmall", "小量試單", risk_notes
     if risk_notes:
-        return "Hold", "等待", risk_notes
-    return "Hold", "等待", ["尚未形成足夠明確的進場優勢。"]
+        return "WATCH", "HOLD", "Hold", "等待", risk_notes
+    return "WATCH", "HOLD", "Hold", "等待", ["尚未形成足夠明確的進場優勢。"]
+
+
+def _structure_state(primary_zone: Optional[ZoneScore], interaction: Optional[dict[str, Any]]) -> str:
+    if primary_zone is None or interaction is None:
+        return "NORMAL"
+    if primary_zone.role == ZoneType.SUPPORT.value:
+        if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
+            return "BREAKDOWN"
+        if interaction["closed_below"]:
+            return "RECOVERY_INVALIDATED"
+        if interaction["touched"] and interaction["closed_above"]:
+            return "RECOVERY"
+        if interaction["touched"]:
+            return "RECOVERY_CANDIDATE"
+    return "NORMAL"
 
 
 def build_decision_summary(
@@ -194,11 +298,27 @@ def build_decision_summary(
     global_metrics: dict[str, Optional[float]],
     chip_summary: dict[str, Any],
     bundle: ModelBundle,
+    candle_high: Optional[float] = None,
+    candle_low: Optional[float] = None,
+    candle_close: Optional[float] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
-    regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary)
-    primary_zone = _pick_primary_zone(zone_scores, current_price, regime["primary"])
-    action, action_label, risk_notes = _decision_action(regime, primary_zone, current_price)
+    trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary)["trend_regime"]
+    primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime)
+    primary_interaction = (
+        _zone_interaction(primary_zone, current_price, candle_high, candle_low, candle_close)
+        if primary_zone else None
+    )
+    regime = _market_regime(
+        global_trend,
+        global_volatility,
+        global_confidence,
+        chip_summary,
+        _structure_state(primary_zone, primary_interaction),
+    )
+    market_action, position_action, action, action_label, risk_notes = _decision_action(
+        regime, primary_zone, current_price, primary_interaction
+    )
 
     context = [
         {"key": "trend", "label": "整體趨勢", "value": f"{global_trend * 100:.1f}%"},
@@ -249,16 +369,21 @@ def build_decision_summary(
         ]
 
     secondary = [
-        _decision_summary_zone(z, current_price, "次要參考區")
+        _decision_summary_zone(z, current_price, "次要參考區", candle_high, candle_low, candle_close)
         for z in zone_scores
         if primary_zone is None or z is not primary_zone
     ][:5]
 
     return {
         "market_regime": regime,
+        "market_action": market_action,
+        "position_action": position_action,
         "action": action,
         "action_label": action_label,
-        "primary_zone": _decision_summary_zone(primary_zone, current_price, "目前最具決策意義的主交易區") if primary_zone else None,
+        "primary_zone": _decision_summary_zone(
+            primary_zone, current_price, "目前最具決策意義的主交易區",
+            candle_high, candle_low, candle_close,
+        ) if primary_zone else None,
         "market_context": context,
         "confidence_explanation": confidence_explanation,
         "risk_notes": risk_notes,
@@ -269,6 +394,8 @@ def build_decision_summary(
 def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
     """Decision's sole public input is the immutable Evidence stage output."""
     scores = evidence.scores
+    frame = scores.features.data.frame
+    last = frame.iloc[-1]
     return build_decision_summary(
         list(scores.zones),
         scores.features.data.current_price,
@@ -277,4 +404,7 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
         scores.global_metrics,
         scores.chip_summary,
         scores.features.data.model,
+        candle_high=float(last["high"]),
+        candle_low=float(last["low"]),
+        candle_close=float(last["close"]),
     )

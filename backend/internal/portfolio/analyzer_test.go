@@ -73,6 +73,81 @@ func TestBuildSnapshotBreakoutUsesConfigurableRMultipleTarget(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotUsesNewMarketActionOnlyForFlatPosition(t *testing.T) {
+	a := &Analyzer{config: DefaultConfig()}
+	sr := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"market_action":"BUY_SMALL","position_action":"HOLD","action":"BuySmall"}`),
+	}
+	zones := []store.SRZone{
+		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
+		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
+	}
+
+	flat, err := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flat.Action != ActionEnterSmall || flat.TargetShares != 500 {
+		t.Fatalf("expected new market_action to allow flat small entry, got %+v", flat)
+	}
+}
+
+func TestBuildSnapshotNewMarketBuyDoesNotDirectlyAddExistingPosition(t *testing.T) {
+	a := &Analyzer{config: DefaultConfig()}
+	sr := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"market_action":"BUY","position_action":"HOLD","action":"Buy"}`),
+	}
+	zones := []store.SRZone{
+		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
+		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
+	}
+
+	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, sr, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if long.Action == ActionAdd {
+		t.Fatalf("new market_action must not directly add existing position: %+v", long)
+	}
+	if long.Action != ActionHold || long.TargetShares != 300 {
+		t.Fatalf("expected existing position to hold when position_action is HOLD, got %+v", long)
+	}
+}
+
+func TestBuildSnapshotUsesNewPositionActionForExistingPositionRisk(t *testing.T) {
+	a := &Analyzer{config: DefaultConfig()}
+	zones := []store.SRZone{
+		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
+		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
+	}
+
+	reduceSR := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"market_action":"AVOID","position_action":"REDUCE_ON_BREAKDOWN","action":"Avoid"}`),
+	}
+	reduced, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, reduceSR, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reduced.Action != ActionReduce || reduced.TargetShares != 150 {
+		t.Fatalf("expected REDUCE_ON_BREAKDOWN to reduce existing position, got %+v", reduced)
+	}
+
+	exitSR := &store.SRZoneAnalysis{
+		ID: 10, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"market_action":"AVOID","position_action":"EXIT","action":"Avoid"}`),
+	}
+	exited, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, exitSR, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exited.Action != ActionExitStop || exited.TargetShares != 0 {
+		t.Fatalf("expected EXIT to close existing position, got %+v", exited)
+	}
+}
+
 func TestBuildSnapshotNoSupportWaitsOrReduces(t *testing.T) {
 	a := &Analyzer{config: DefaultConfig()}
 	sr := &store.SRZoneAnalysis{ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100, DecisionSummary: store.RawJSON(`{"action":"Buy"}`)}

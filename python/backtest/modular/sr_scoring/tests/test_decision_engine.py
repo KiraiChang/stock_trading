@@ -34,7 +34,7 @@ def _zone(
     confidence: float = 0.72,
     confidence_level: str = ConfidenceLevel.HIGH.value,
     expected_value: float | None = 0.02,
-    risk_reward_ratio: float | None = 1.8,
+    risk_reward_ratio: float | None = 2.2,
     recent_validation: str = RecentValidation.VALIDATED_RECENTLY.value,
     confluence_count: int = 2,
 ) -> ZoneScore:
@@ -90,6 +90,9 @@ def _summary(
     global_volatility: float = 0.02,
     global_confidence: float | None = 0.72,
     chip_summary: dict | None = None,
+    candle_high: float | None = None,
+    candle_low: float | None = None,
+    candle_close: float | None = None,
 ) -> dict:
     return build_decision_summary(
         zones,
@@ -99,6 +102,9 @@ def _summary(
         {"confidence": global_confidence, "expected_value": 0.01, "risk_reward_ratio": 1.5},
         chip_summary or {"missing": False, "score": 55.0, "signal": "BULLISH"},
         _bundle(),
+        candle_high=candle_high,
+        candle_low=candle_low,
+        candle_close=candle_close,
     )
 
 
@@ -106,6 +112,8 @@ def test_buy_for_bullish_high_quality_near_support():
     ds = _summary([_zone()])
 
     assert ds["action"] == "Buy"
+    assert ds["market_action"] == "BUY"
+    assert ds["position_action"] == "HOLD"
     assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value
     assert ds["primary_zone"]["label"] == "98.00 ~ 100.00"
 
@@ -114,6 +122,7 @@ def test_high_volatility_downgrades_buy_to_buy_small():
     ds = _summary([_zone()], global_volatility=0.04)
 
     assert ds["action"] == "BuySmall"
+    assert ds["market_action"] == "BUY_SMALL"
     assert any("波動偏高" in note for note in ds["risk_notes"])
 
 
@@ -123,6 +132,8 @@ def test_bearish_regime_with_resistance_primary_is_avoid():
     ds = _summary([resistance], global_trend=-0.03)
 
     assert ds["action"] == "Avoid"
+    assert ds["market_action"] == "AVOID"
+    assert ds["position_action"] == "REDUCE"
     assert ds["primary_zone"]["role"] == ZoneType.RESISTANCE.value
 
 
@@ -132,6 +143,7 @@ def test_no_clear_primary_zone_holds():
     ds = _summary([at_zone])
 
     assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
     assert ds["primary_zone"] is None
     assert any("沒有足夠明確" in note for note in ds["risk_notes"])
 
@@ -153,6 +165,51 @@ def test_missing_ev_rr_cannot_be_buy():
     ds = _summary([incomplete])
 
     assert ds["action"] != "Buy"
+    assert ds["market_action"] == "WATCH"
+
+
+def test_rr_below_hard_gate_stays_watch_even_with_high_score_and_ev():
+    zone = _zone(trading_score=95.0, confidence=0.9, expected_value=0.08, risk_reward_ratio=1.49)
+
+    ds = _summary([zone])
+
+    assert ds["market_action"] == "WATCH"
+    assert ds["action"] == "Hold"
+    assert any("風險報酬比不足" in note for note in ds["risk_notes"])
+
+
+def test_rr_between_gates_allows_only_buy_small():
+    zone = _zone(trading_score=95.0, confidence=0.9, expected_value=0.08, risk_reward_ratio=1.8)
+
+    ds = _summary([zone])
+
+    assert ds["market_action"] == "BUY_SMALL"
+    assert ds["action"] == "BuySmall"
+    assert any("完整買進門檻" in note for note in ds["risk_notes"])
+
+
+def test_recovery_invalidated_overrides_long_term_bullish_regime():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary([zone], current_price=97.5, candle_high=100.5, candle_low=97.0, candle_close=97.5)
+
+    assert ds["market_regime"]["trend_regime"] == "TREND_UP"
+    assert ds["market_regime"]["structure_state"] == "RECOVERY_INVALIDATED"
+    assert "長期偏多，但短線結構轉弱" in ds["market_regime"]["label"]
+    assert ds["market_action"] == "AVOID"
+    assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
+
+
+def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary([zone], current_price=101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+
+    interaction = ds["primary_zone"]["zone_interaction"]
+    assert interaction["touched"] is True
+    assert interaction["closed_above"] is True
+    assert interaction["closed_inside"] is False
+    assert interaction["state_label"] == "收回區間上方"
 
 
 def test_chip_missing_is_exposed_in_context():

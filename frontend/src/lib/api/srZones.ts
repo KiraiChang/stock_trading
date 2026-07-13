@@ -270,11 +270,18 @@ export interface SRPeriodSummary {
 }
 
 export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
+export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
+export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'
 export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
+export type SRStructureState = 'NORMAL' | 'RECOVERY_CANDIDATE' | 'RECOVERY' | 'RECOVERY_INVALIDATED' | 'BREAKDOWN'
+export type SRVolatilityState = 'NORMAL' | 'HIGH_VOLATILITY'
 export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY'
 
 export interface SRMarketRegime {
   primary: SRMarketRegimePrimary
+  trend_regime?: SRMarketRegimePrimary
+  structure_state?: SRStructureState
+  volatility_state?: SRVolatilityState
   flags: SRMarketRegimeFlag[]
   label: string
   reasons: string[]
@@ -285,6 +292,17 @@ export interface SRDecisionContextItem {
   label: string
   value: string
   effect?: string | null
+}
+
+export interface SRZoneInteraction {
+  distance_pct: number
+  distance_label: string
+  touched: boolean
+  penetration_pct: number
+  closed_inside: boolean
+  closed_above: boolean
+  closed_below: boolean
+  state_label: string
 }
 
 export interface SRDecisionZoneSummary {
@@ -301,6 +319,7 @@ export interface SRDecisionZoneSummary {
   risk_reward_ratio: number | null
   distance_pct: number
   distance_label: string
+  zone_interaction?: SRZoneInteraction
   recent_validation: RecentValidation
   volume_confirmation: VolumeConfirmation | null
   confluence_count: number
@@ -325,6 +344,8 @@ export interface SRConfidenceExplanation {
 
 export interface SRDecisionSummary {
   market_regime: SRMarketRegime
+  market_action?: SRMarketAction
+  position_action?: SRPositionAction
   action: SRDecisionAction
   action_label: string
   primary_zone: SRDecisionZoneSummary | null

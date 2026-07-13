@@ -161,7 +161,8 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 	support := pickSupportZone(zones, current)
 	brokenSupport := pickBrokenSupport(zones, current)
 	resistance := pickResistanceZone(zones, current)
-	srAction := decisionAction(sr.DecisionSummary)
+	srDecision := parseDecision(sr.DecisionSummary)
+	srAction := srDecision.MarketAction
 
 	var stop, takeProfit, riskAmount, rewardAmount, rr store.NullFloat64
 	fullTarget := 0.0
@@ -209,6 +210,14 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		switch {
 		case broken:
 			action, label, target = ActionExitStop, "停損出場", 0
+		case srDecision.PositionAction == "EXIT":
+			action, label, target = ActionExitStop, "出場", 0
+		case srDecision.PositionAction == "REDUCE_ON_BREAKDOWN":
+			action, label = ActionReduce, "跌破減碼"
+			target = math.Floor(position.Shares * 0.5)
+		case srDecision.PositionAction == "REDUCE":
+			action, label = ActionReduce, "減碼"
+			target = math.Floor(position.Shares * 0.5)
 		case resistance != nil && near(current, resistance.PriceLow, 0.02) && resistance.TradingScore >= 60:
 			action, label = ActionTakeProfit, "停利減碼"
 			target = math.Floor(position.Shares * (1 - a.config.TakeProfitReductionRatio))
@@ -216,16 +225,16 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 			action, label = ActionReduce, "降低風險"
 			target = math.Floor(position.Shares * 0.5)
 			reasons = append(reasons, "沒有有效支撐，無法量化停損風險。")
-		case srAction == "Avoid":
+		case srDecision.Legacy && srAction == "Avoid":
 			action, label = ActionReduce, "減碼"
 			target = math.Floor(position.Shares * 0.5)
-		case srAction == "Buy" && canIncrease:
+		case srDecision.Legacy && srAction == "Buy" && canIncrease:
 			target = fullTarget
 			if target > position.Shares {
 				target = math.Min(target, position.Shares+math.Floor(fullTarget*a.config.AddOnRatio))
 			}
 			action, label = actionForDelta(target-position.Shares, ActionHold, "繼續持有")
-		case srAction == "BuySmall" && canIncrease:
+		case srDecision.Legacy && srAction == "BuySmall" && canIncrease:
 			target = math.Floor(fullTarget * 0.5)
 			if target > position.Shares {
 				target = math.Min(target, position.Shares+math.Floor(fullTarget*a.config.AddOnRatio))
@@ -388,11 +397,48 @@ func near(current, target, pct float64) bool {
 }
 
 func decisionAction(raw store.RawJSON) string {
+	return parseDecision(raw).MarketAction
+}
+
+type srDecision struct {
+	MarketAction   string
+	PositionAction string
+	Legacy         bool
+}
+
+func parseDecision(raw store.RawJSON) srDecision {
 	var payload struct {
-		Action string `json:"action"`
+		Action         string `json:"action"`
+		MarketAction   string `json:"market_action"`
+		PositionAction string `json:"position_action"`
 	}
 	_ = json.Unmarshal([]byte(raw), &payload)
-	return payload.Action
+	if payload.MarketAction != "" {
+		return srDecision{
+			MarketAction:   normalizeMarketAction(payload.MarketAction),
+			PositionAction: payload.PositionAction,
+		}
+	}
+	return srDecision{
+		MarketAction:   normalizeMarketAction(payload.Action),
+		PositionAction: payload.PositionAction,
+		Legacy:         true,
+	}
+}
+
+func normalizeMarketAction(action string) string {
+	switch action {
+	case "BUY":
+		return "Buy"
+	case "BUY_SMALL":
+		return "BuySmall"
+	case "WATCH":
+		return "Hold"
+	case "AVOID":
+		return "Avoid"
+	default:
+		return action
+	}
 }
 
 func zoneDetail(z *store.SRZone) any {

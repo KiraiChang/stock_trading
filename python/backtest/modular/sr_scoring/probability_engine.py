@@ -60,12 +60,12 @@ def model_quality_flags(scores: AnalysisScores) -> list[str]:
     return flags
 
 
-def build_zone_probability_context(score: ZoneScore, model_quality_flags: list[str] | None = None) -> dict[str, Any]:
+def build_zone_probability_context(score: ZoneScore, model_flags: list[str] | None = None) -> dict[str, Any]:
     neutral = _neutral_probability(score.bounce_probability, score.break_probability)
     dominant = _dominant_outcome(score.bounce_probability, score.break_probability)
     edge = _edge_pp(score.bounce_probability, score.break_probability)
 
-    quality_flags = list(model_quality_flags or [])
+    quality_flags = list(model_flags or [])
     if score.role == ZoneType.AT_ZONE.value:
         quality_flags.append("NO_DIRECTION")
     if score.confidence_level == ConfidenceLevel.LOW.value:
@@ -89,9 +89,11 @@ def build_zone_probability_context(score: ZoneScore, model_quality_flags: list[s
 def build_analysis_probability_context(
     scores: AnalysisScores,
     zone_contexts: list[dict[str, Any]] | None = None,
+    model_flags: list[str] | None = None,
 ) -> dict[str, Any]:
     metrics = scores.features.data.model.metrics or {}
-    model_flags = model_quality_flags(scores)
+    if model_flags is None:
+        model_flags = model_quality_flags(scores)
     if zone_contexts is None:
         zone_contexts = [
             build_zone_probability_context(score, model_flags)

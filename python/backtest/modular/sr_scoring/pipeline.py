@@ -196,7 +196,9 @@ def run_pipeline(
         build_zone_probability_context(score, zone_probability_flags)
         for score in scores.zones
     ]
-    probability_context = build_analysis_probability_context(scores, zone_probability_contexts)
+    probability_context = build_analysis_probability_context(
+        scores, zone_probability_contexts, zone_probability_flags
+    )
     period_summaries = _build_period_summaries(
         list(scores.zones), data.current_price, features.ma5
     )

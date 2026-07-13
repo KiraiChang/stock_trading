@@ -136,3 +136,6 @@ def test_analysis_scenario_uses_decision_context():
     assert "小量試單" in scenario["title"]
     assert "98.00 ~ 100.00" in scenario["summary"]
     assert scenario["global_confidence"] == 0.6
+    # market_regime / primary_zone 已在 decision_summary，scenario 不再重複內嵌
+    assert "market_regime" not in scenario
+    assert "primary_zone" not in scenario

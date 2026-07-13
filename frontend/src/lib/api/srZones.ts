@@ -83,8 +83,7 @@ export interface SRScenario {
   summary: string
   trigger_conditions: string[]
   invalidation_conditions: string[]
-  market_regime?: SRMarketRegime | null
-  primary_zone?: SRDecisionZoneSummary | null
+  // market_regime / primary_zone 不再由 scenario 提供（改讀 decision_summary）
   global_confidence?: number | null
 }
 

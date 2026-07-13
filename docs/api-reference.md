@@ -646,10 +646,6 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
         "resistance": { "touch_count": 4, "rejection_count": 1, "breakout_count": 1 }
       },
       "score": {
-        "price_low": 960.0,
-        "price_high": 970.0,
-        "method": "atr",
-        "role": "SUPPORT",
         "tier": "TIER_1_MAIN_STRUCTURE",
         "tier_label": "主結構",
         "support_score": 0.68,
@@ -737,8 +733,11 @@ sr-zone-scoring.md「十七」。
 頂層依序對應 Data/Features/Score/Evidence/Decision。`analysis` 同時保存
 `period_summaries`、`analysis_tips` 與專屬 `chip_summary`；`decision` 是決策
 摘要，`explanation` 是 deterministic 白話解釋層。每個 zone 也分成
-`data/features/score/evidence/explanation/lifecycle`，驗證 API 只更新
-lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
+`data/features/score/evidence/explanation/scenario/lifecycle`，驗證 API 只更新
+lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/role）在
+`data`、生命週期（status/broken_at…）在 `lifecycle`、
+`features/evidence/explanation/scenario` 各自為兄弟鍵，不在 `score` 內重複。
+欄位語意見 sr-zone-scoring.md「十四、十九」。
 
 `explanation` 不取代 `evidence`：前者給前端直接呈現白話結論、加分/扣分因素與
 風險提醒；後者保留 SHAP baseline、最終機率與特徵貢獻等進階模型證據。舊分析

@@ -350,39 +350,6 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
-### T-023：srZonePipelineResponse 的 zone 區塊 payload 去重
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Go / API / SR Zone |
-| 建立日期 | 2026-07-09 |
-| 來源 | review「SR Zone v2 pipeline evidence」變更（working tree，未提交）時發現 |
-
-`backend/internal/api/handler/sr_zones.go` 的 `srZonePipelineResponse`（約 line 52）
-把整個 `store.SRZone` 塞進 zone 的 `"score"` 鍵。由於 `SRZone.Features`/`Evidence`
-的 json tag 沒有 `omitempty`，會被序列化兩次：一次是 `item.features`/`item.evidence`
-兄弟鍵，一次在 `item.score.features`/`item.score.evidence`；`id`/`price_low`/
-`price_high`/`method`/`role` 也同時出現在 `item.data` 與 `item.score`。不是 bug，
-但 `"score"` 名不符實（其實是整筆 zone 紀錄），且 payload 帶重複的 raw-JSON blob。
-後續可讓 `"score"` 只帶真正的評分欄位（對齊 analysis 層拆成 features/score/evidence
-的做法），避免重複與誤導。
-
-補充（2026-07-13 review「SR Zone explanation」變更時發現）：新增的 `explanation`
-欄位同樣沒有 `omitempty`，於是也被序列化兩次（`item.explanation` 兄弟鍵與
-`item.score.explanation`），把重複範圍再擴大一份。收斂 `"score"` 時一併處理。
-
-補充（2026-07-13 review「SR Zone scenario」變更時發現）：`scenario` 欄位重蹈覆轍，
-zone 層同樣被雙重序列化（`item.scenario` 兄弟鍵與 `item.score.scenario`）。另外分析層
-的 `scenario` JSON（`scenario_engine.build_analysis_scenario`）直接內嵌整包
-`market_regime` 與 `primary_zone`，這兩者已完整存在於同筆分析的 `decision_summary`
-（decision 欄位），等於在 DB 與 API payload 各多存/多傳一份；前端 scenario 區塊實際
-只讀 `title`/`summary`/`state`/`trigger_conditions`/`invalidation_conditions`。收斂
-`"score"` 時，一併評估 scenario 是否只保留展示必要欄位、移除與 decision 的重複。
-
----
-
 ### T-025：Scenario Engine 收斂（dead branch／helper 重複／redundant 賦值／測試覆蓋）
 
 | 欄位 | 內容 |

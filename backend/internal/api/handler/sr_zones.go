@@ -47,6 +47,38 @@ type SRZoneHandler struct {
 	log       *zap.Logger
 }
 
+// srZoneScoreExcludedKeys 是 zone 的 "score" 區塊要排除的欄位——它們已經在
+// item.data（id/price_low…）、item.lifecycle（status/broken_at…）或兄弟鍵
+// （features/evidence/explanation/scenario）各自提供，不需要在 score 裡再帶
+// 一份。其餘欄位（評分相關）維持在 score，且未來 SRZone 新增的評分欄位會自動
+// 進 score，不必同步維護一份欄位清單。
+var srZoneScoreExcludedKeys = []string{
+	"id", "analysis_id", "price_low", "price_high", "method", "role",
+	"status", "broken_at", "broken_price", "resolved_role",
+	"features", "evidence", "explanation", "scenario",
+}
+
+// srZonePipelineScore 把整筆 SRZone 序列化後，移除 srZoneScoreExcludedKeys，
+// 讓 "score" 只保留真正的評分欄位，避免同一份資料在 response 裡序列化兩次。
+type srZonePipelineScore struct {
+	zone store.SRZone
+}
+
+func (s srZonePipelineScore) MarshalJSON() ([]byte, error) {
+	raw, err := json.Marshal(s.zone)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	for _, k := range srZoneScoreExcludedKeys {
+		delete(m, k)
+	}
+	return json.Marshal(m)
+}
+
 func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H {
 	items := make([]gin.H, 0, len(zones))
 	for _, z := range zones {
@@ -57,7 +89,7 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 				"method": z.Method, "role": z.Role,
 			},
 			"features":    z.Features,
-			"score":       z,
+			"score":       srZonePipelineScore{zone: z},
 			"evidence":    z.Evidence,
 			"explanation": z.Explanation,
 			"scenario":    z.Scenario,

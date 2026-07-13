@@ -141,6 +141,9 @@ def build_analysis_scenario(evidence: AnalysisEvidence, decision_summary: dict[s
         trigger_conditions = ["等待價格接近明確支撐/壓力區，或重新分析產生主交易區"]
         invalidation_conditions = risk_notes[:3] or ["整體信心下降或波動升高時，維持觀望"]
 
+    # market_regime / primary_zone 已完整存在於同筆分析的 decision_summary，
+    # 不在 scenario 內重複內嵌（前端 scenario 區塊只讀 title/summary/state/
+    # trigger_conditions/invalidation_conditions，需要 regime/zone 明細時讀 decision）。
     return {
         "schema_version": SCENARIO_SCHEMA_VERSION,
         "state": decision_summary.get("action") or "Hold",
@@ -148,7 +151,5 @@ def build_analysis_scenario(evidence: AnalysisEvidence, decision_summary: dict[s
         "summary": summary,
         "trigger_conditions": trigger_conditions,
         "invalidation_conditions": invalidation_conditions,
-        "market_regime": regime,
-        "primary_zone": primary,
         "global_confidence": evidence.scores.global_metrics.get("confidence"),
     }

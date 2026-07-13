@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -161,6 +162,33 @@ func TestSRZoneCreateDefaultsToNewSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"}`) {
 		t.Fatalf("expected scenario in response: %s", rec.Body.String())
+	}
+
+	// T-023：zone 的 "score" 只帶評分欄位，不再重複帶已在 data/lifecycle/兄弟鍵
+	// 提供的欄位（features/evidence/explanation/scenario/price_low/id/role/status…）。
+	var parsed struct {
+		Zones []struct {
+			Data  map[string]json.RawMessage `json:"data"`
+			Score map[string]json.RawMessage `json:"score"`
+		} `json:"zones"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(parsed.Zones) != 1 {
+		t.Fatalf("expected 1 zone, got %d", len(parsed.Zones))
+	}
+	score := parsed.Zones[0].Score
+	for _, k := range []string{"features", "evidence", "explanation", "scenario", "price_low", "id", "role", "status"} {
+		if _, dup := score[k]; dup {
+			t.Fatalf("zone score should not duplicate %q", k)
+		}
+	}
+	if _, ok := score["trading_score"]; !ok {
+		t.Fatalf("zone score should keep scoring fields like trading_score: %v", score)
+	}
+	if _, ok := parsed.Zones[0].Data["price_low"]; !ok {
+		t.Fatalf("zone data should still carry price_low")
 	}
 }
 

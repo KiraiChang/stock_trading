@@ -19,3 +19,9 @@
 3. 將 Confidence 改名為 Zone Confidence／區間辨識信心，
    不得讓使用者誤解為反彈勝率。
    Bounce Probability 與 Breakdown Probability 必須分開顯示。
+
+4. 持股分析的調整
+   1.   顯示 Risk Budget → Per Share Risk → Max Shares → Excess Shares 的計算鏈。
+   2.   Stop 拆成 Defense Price 與 Structural Stop。
+   3.   RR 拆成 Market RR 與 Position RR。
+   4.   顯示執行減碼後的 realized / unrealized P&L impact。

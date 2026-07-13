@@ -435,18 +435,19 @@ v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 
 
 ---
 
-### T-025：SR Zone explain engine 收斂（未用欄位／去重／多餘排序）
+### T-025：SR Zone Explain Engine v1 後續收斂與強化
 
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone / Frontend |
+| 優先度 | 中 |
+| 分類 | Python / Go / Frontend / SR Zone / Explain Engine |
 | 建立日期 | 2026-07-13 |
 | 來源 | review「SR Zone explanation」working tree 變更時發現 |
 
-新增的 `python/backtest/modular/sr_scoring/explain_engine.py` 有幾處可收斂，皆非
-功能性 bug，屬效率／一致性清理：
+Explain Engine v1 已能把 SR Zone scoring 的 `score/features/evidence/decision`
+整理成 deterministic 白話解釋，但仍有幾個需要追蹤的收斂與強化項。這些不是
+功能性 bug，屬 contract 穩定性、payload 成本與維護一致性的改善。
 
 - **`advanced_refs` 產出但前端未使用**：`explain_zone` 對每個 zone 呼叫
   `_advanced_refs`（line 193）組 `score_breakdown_keys`/`risk_flags`/
@@ -459,6 +460,21 @@ v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 
 - **`_score_breakdown_extremes` 多餘排序**（line 78）：`items` 由
   `sorted(...items())` 建立，但隨後 `max`/`min` 以 `(value, key)` 為 key 重新選取、
   與 list 順序無關，`sorted()` 對結果無影響，可移除。
+- **Explanation schema/versioning**：目前 `explanation` 跟 `pipeline_version` 共同
+  保存，但自身沒有 `schema_version`。若未來調整欄位名稱、文字粒度或
+  `advanced_refs` 形狀，前端只能靠欄位存在與否推斷。可在 top-level/zone
+  explanation 補 `schema_version`，或明確寫入 `model_context.explain_version`。
+- **fallback 文案集中化**：Python 產生正式 explanation；Frontend 對舊資料也有
+  decision/tips fallback。若兩邊都持續擴充白話規則，文案可能漂移。可將前端
+  fallback 限縮為「缺 explanation 時顯示 decision_summary/analysis_tips」，避免在
+  TS 端重建完整解釋邏輯；或將 fallback 規則文件化並用 fixtures 驗證。
+- **payload/DB 成本評估**：`stock_sr_zone_analyses.explanation` 與
+  `stock_sr_zones.explanation` 都會保存完整文字。若 zones 很多，`advanced_refs` 又帶
+  SHAP top contributions，歷史快照會膨脹。可量測一批真實分析的 JSON 大小後決定
+  是否壓縮、裁切 advanced refs、或只保存 deterministic inputs 由前端/後端即時計算。
+- **中文文案 golden tests**：目前 unit tests 只檢查關鍵字與排序。若未來 UI 依賴
+  某些文案格式（例如價格條件、AT_ZONE 風險語句），可建立小型 fixture/golden tests，
+  讓模板改動時能明確 review 對使用者可見文字的影響。
 
 ---
 ## 已完成封存

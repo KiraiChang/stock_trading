@@ -922,9 +922,6 @@ Data → Features → Score → Evidence → Decision
   每個 zone 兩個角色都保存 baseline、final probability、原始特徵值、正負貢獻
   與 `additivity_error`。浮點重建誤差容許至 `1e-5`；超過才視為證據失真並中止。
 - Decision 的公開入口只接受 `AnalysisEvidence`，不可回頭讀 DataFrame 或自行推論模型。
-- Explain Engine 是 Evidence/Decision 之後的白話層，只用既有 `score`、
-  `features`、`evidence`、`decision` 的結構化欄位套 deterministic 模板，不接
-  LLM、不改 scoring 數學或 action 門檻。
 
 模型版本為 `v4`，模型檔需包含固定抽樣的 SHAP background；v3 模型必須重訓。
 Python `/sr-zones` 回傳 breaking v2 nested contract：
@@ -933,13 +930,58 @@ Python `/sr-zones` 回傳 breaking v2 nested contract：
 Go 將 analysis/zone evidence 與 explanation JSON 連同 `pipeline_version`
 保存，歷史快照不會回算 evidence 或 explanation。
 
-`explanation` 是前端預設顯示的白話解釋層。頂層包含：
-`summary`、`action_reason`、`market_drivers`、`risk_notes`、`model_context`。
-每個 zone 包含：`role_summary`、`score_reason`、`probability_reason`、
-`confidence_reason`、`positive_factors`、`negative_factors`、
-`watch_conditions`、`advanced_refs`。`AT_ZONE` 必須明確說明現價在區間內、
-方向尚未解析，不得硬判支撐或壓力。舊分析沒有 explanation 時，前端回退顯示
-`decision_summary`、`analysis_tips` 與既有 evidence，不顯示空白錯誤。
+### 十九之一、Explain Engine 白話解釋層
+
+Explain Engine 是 Evidence/Decision 之後的白話層，只用既有 `score`、
+`features`、`evidence`、`decision` 的結構化欄位套 deterministic 模板，不接
+LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判斷買賣，而是把
+「為什麼這個區間被視為支撐/壓力、為什麼得到 BuySmall/Hold/Avoid、哪些因素
+加分/扣分、哪些風險需要注意」整理成前端可直接顯示的穩定文字。
+
+**資料來源與分工**：
+
+- `decision`：提供 action、primary zone、market regime 與風險提示，是
+  `explanation.action_reason` 的主要來源。
+- `score`：提供 role、probability、confidence、trading score breakdown、
+  recent validation、touch/reject/break counts，是 zone 解釋的主要來源。
+- `evidence`：保留 SHAP、risk flags 與模型 metadata；Explain Engine 可引用它，
+  但不取代它。前端仍把 SHAP 放在進階細節。
+- `features`：保留支撐/壓力方向的原始特徵快照；目前主要間接透過 score 使用。
+
+**頂層 `explanation` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `summary` | 一句整體結論，對齊當次 `decision.action` |
+| `action_reason` | 為什麼得到目前 action，通常引用 primary zone 或「沒有明確主交易區」 |
+| `market_drivers` | 趨勢、波動、整體信心、籌碼等主要因素 |
+| `risk_notes` | 使用者應注意的風險；可整合 decision risk notes 與全局風險 |
+| `model_context` | 模型版本、設定 hash、是否使用 SHAP evidence |
+
+**`zones[].explanation` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `role_summary` | 此 zone 是支撐、壓力或方向未定的白話說明 |
+| `score_reason` | trading score 主要由最高與最低分量解釋，不列完整 breakdown |
+| `probability_reason` | 反彈/跌破機率與期望值的白話說明 |
+| `confidence_reason` | 樣本數、最近觸碰、守住/跌破穩定度如何影響 confidence |
+| `positive_factors` | 加分因素列表 |
+| `negative_factors` | 扣分或風險因素列表 |
+| `watch_conditions` | 要觀察的價位、量能或突破/跌破條件 |
+| `advanced_refs` | 進階參照，例如 score breakdown keys、risk flags、SHAP top contributions |
+
+`AT_ZONE` 必須明確說明「現價在區間內，方向尚未解析」，不得硬判支撐或壓力；
+其 direction-only 欄位（反彈/跌破機率、EV/RR、量能確認等）仍依既有 contract
+維持 `null` 或不給方向性結論。
+
+**相容與 fallback**：舊分析可能沒有 `explanation` 或值為 JSON `null`。前端不可
+顯示空白錯誤，應回退顯示 `decision_summary`、`analysis_tips` 與既有 evidence。
+新分析若 `explanation` 缺少必要欄位，應視為 Python contract 或 Go passthrough
+問題，而不是由前端臨時補齊完整白話解釋。
+
+**非目標**：Explain Engine v1 不納入持股、部位成本、下單 sizing、LLM 生成、
+跨 `/analysis` 舊流程解釋，且不對歷史快照回算 explanation。
 
 `analysis.period_summaries`、`analysis.analysis_tips` 與
 `analysis.chip_summary` 是持久化快照契約，不因改用五層管線而移除。

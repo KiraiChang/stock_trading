@@ -748,6 +748,36 @@ lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
 可能沒有 explanation，客戶端應回退顯示 `decision`、`analysis.analysis_tips`
 與既有 evidence。
 
+**Explanation 欄位：**
+
+頂層 `explanation`：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `summary` | string | 一句整體白話結論，對齊 `decision.action` |
+| `action_reason` | string | 為什麼得到目前 action |
+| `market_drivers` | string[] | 趨勢、波動、信心、籌碼等主要因素 |
+| `risk_notes` | string[] | 風險提醒；通常整合 decision risk notes 與全局風險 |
+| `model_context.version` | string | 產生解釋時使用的模型版本 |
+| `model_context.config_hash` | string | 模型訓練設定 hash |
+| `model_context.uses_shap_evidence` | boolean | 本次 explanation 是否可引用 SHAP evidence |
+
+每個 `zones[].explanation`：
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| `role_summary` | string | 支撐、壓力或 `AT_ZONE` 方向未定的白話描述 |
+| `score_reason` | string | trading score 的最高與最低分量說明 |
+| `probability_reason` | string | 反彈/跌破機率、期望值的解釋；`AT_ZONE` 不給方向性結論 |
+| `confidence_reason` | string | 樣本數、近期性、守住/跌破穩定度如何影響 confidence |
+| `positive_factors` | string[] | 加分因素 |
+| `negative_factors` | string[] | 扣分或風險因素 |
+| `watch_conditions` | string[] | 後續要觀察的價位、量能、突破或跌破條件 |
+| `advanced_refs` | object | 給進階 UI 使用的參照，例如 score breakdown keys、risk flags、SHAP top contributions |
+
+`explanation` 是 deterministic template output，不是 LLM 文字。客戶端可以直接顯示，
+但不應把它當成新的 scoring 欄位或交易門檻。
+
 **籌碼摘要欄位**（見 sr-zone-scoring.md「十二之一」）：`analysis.chip_summary`
 是整檔層級的籌碼拆解，`score`/`institutional_score`/`margin_score`/`broker_score`
 為 −100~100、`concentration_score` 為 0~100、`signal` 為

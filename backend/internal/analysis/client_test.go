@@ -105,6 +105,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			PeriodSummaries: json.RawMessage(`[{"key":"short","label":"短期"}]`),
 			AnalysisTips:    json.RawMessage(`["短期支撐守穩，籌碼偏多"]`),
 			DecisionSummary: json.RawMessage(`{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}`),
+			Explanation:     json.RawMessage(`{"summary":"建議小量試單","action_reason":"主交易區為支撐"}`),
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -123,6 +124,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					},
 					TradingRecommendation: "BUY",
 					OverlapGroup:          &overlapGroup, ConfluenceCount: 2,
+					Explanation: json.RawMessage(`{"role_summary":"此區為支撐","positive_factors":["信心高"]}`),
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
@@ -174,6 +176,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if string(a.DecisionSummary) != `{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}` {
 		t.Fatalf("expected decision_summary to carry through ToStore, got %s", a.DecisionSummary)
+	}
+	if string(a.Explanation) != `{"summary":"建議小量試單","action_reason":"主交易區為支撐"}` {
+		t.Fatalf("expected explanation to carry through ToStore, got %s", a.Explanation)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
@@ -234,6 +239,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if first.RejectCount != 3 || first.BreakCount != 0 {
 		t.Fatalf("unexpected reject/break count: %+v", first)
 	}
+	if string(first.Explanation) != `{"role_summary":"此區為支撐","positive_factors":["信心高"]}` {
+		t.Fatalf("expected zone explanation to carry through, got %s", first.Explanation)
+	}
 
 	second := zones[1]
 	if second.Role != "AT_ZONE" || second.BounceProbability.Valid {
@@ -247,6 +255,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if second.ConfluenceCount != 1 {
 		t.Fatalf("expected missing confluence_count to default to 1, got %d", second.ConfluenceCount)
+	}
+	if string(second.Explanation) != "null" {
+		t.Fatalf("expected missing explanation to default to null, got %s", second.Explanation)
 	}
 }
 
@@ -331,6 +342,7 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 		"score":{"global_expected_value":0.01,"global_confidence":0.7,"global_risk_reward_ratio":1.5},
 		"evidence":{"model":{"explainer":"permutation_shap"}},
 		"decision":{"action":"BuySmall"},
+		"explanation":{"summary":"建議小量試單"},
 		"zones":[{
 			"data":{"price_low":580,"price_high":585,"method":"atr","role":"SUPPORT"},
 			"features":{"support":{"touch_count":4},"resistance":{"touch_count":1}},
@@ -343,6 +355,7 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 				"trading_score_breakdown":{"expected_value":20,"risk_reward":10,"trend":10,"volume":10,"confidence":5,"chip":15},
 				"trading_recommendation":"BUY","confluence_count":1},
 			"evidence":{"support":{"targets":{"hold":{"final_probability":0.7}}}},
+			"explanation":{"role_summary":"此區為支撐"},
 			"lifecycle":{"status":"PENDING","resolved_role":null}
 		}]
 	}`)
@@ -361,13 +374,16 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 	if string(analysis.Evidence) != `{"model":{"explainer":"permutation_shap"}}` {
 		t.Fatalf("unexpected analysis evidence: %s", analysis.Evidence)
 	}
+	if string(analysis.Explanation) != `{"summary":"建議小量試單"}` {
+		t.Fatalf("unexpected analysis explanation: %s", analysis.Explanation)
+	}
 	if string(analysis.PeriodSummaries) != `[{"key":"short","label":"短期"}]` ||
 		string(analysis.AnalysisTips) != `["短期支撐守穩"]` ||
 		string(analysis.ChipSummary) != `{"missing":false,"score":42.5}` {
 		t.Fatalf("nested analysis summaries not persisted: %+v", analysis)
 	}
-	if len(zones) != 1 || string(zones[0].Evidence) == "null" || string(zones[0].Features) == "null" {
-		t.Fatalf("nested zone features/evidence not persisted: %+v", zones)
+	if len(zones) != 1 || string(zones[0].Evidence) == "null" || string(zones[0].Features) == "null" || string(zones[0].Explanation) == "null" {
+		t.Fatalf("nested zone features/evidence/explanation not persisted: %+v", zones)
 	}
 }
 

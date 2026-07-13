@@ -51,6 +51,7 @@ func testAnalysis() *SRZoneAnalysis {
 		ModelConfigHash:       "abc123def456",
 		PipelineVersion:       "v2",
 		Evidence:              RawJSON(`{"model":{"explainer":"permutation_shap"}}`),
+		Explanation:           RawJSON(`{"summary":"建議小量試單","action_reason":"主交易區為支撐"}`),
 		PeriodSummaries:       RawJSON(`[{"key":"short","label":"短期"}]`),
 		AnalysisTips:          RawJSON(`["短期支撐守穩，籌碼偏多"]`),
 		ChipSummary:           RawJSON(`{"missing":false,"score":42.5,"signal":"BULLISH"}`),
@@ -84,6 +85,7 @@ func testZones() []SRZone {
 			ConfluenceCount:       2,
 			Features:              RawJSON(`{"support":{"touch_count":4}}`),
 			Evidence:              RawJSON(`{"support":{"targets":{"hold":{"final_probability":0.72}}}}`),
+			Explanation:           RawJSON(`{"role_summary":"此區為支撐","positive_factors":["信心高"]}`),
 		},
 		{
 			// AT_ZONE：confidence 仍有值，但 expected_value/risk_reward_ratio/volume_confirmation 應為 NULL
@@ -127,6 +129,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	if saved.PipelineVersion != "v2" || string(saved.Evidence) != `{"model":{"explainer":"permutation_shap"}}` {
 		t.Fatalf("expected pipeline evidence to round-trip, got %+v", saved)
 	}
+	if string(saved.Explanation) != `{"summary":"建議小量試單","action_reason":"主交易區為支撐"}` {
+		t.Fatalf("expected explanation to round-trip, got %s", saved.Explanation)
+	}
 	if string(saved.PeriodSummaries) != `[{"key":"short","label":"短期"}]` {
 		t.Fatalf("expected period_summaries to round-trip, got %s", saved.PeriodSummaries)
 	}
@@ -161,6 +166,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if string(zones[0].Features) == "null" || string(zones[0].Evidence) == "null" {
 		t.Fatalf("expected zone features/evidence to round-trip: %+v", zones[0])
+	}
+	if string(zones[0].Explanation) == "null" {
+		t.Fatalf("expected zone explanation to round-trip: %+v", zones[0])
 	}
 	for _, z := range zones {
 		if z.AnalysisID != id {

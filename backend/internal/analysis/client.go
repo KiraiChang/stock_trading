@@ -236,6 +236,7 @@ type ZoneScore struct {
 	ConfluenceCount int             `json:"confluence_count"`
 	Features        json.RawMessage `json:"features,omitempty"`
 	Evidence        json.RawMessage `json:"evidence,omitempty"`
+	Explanation     json.RawMessage `json:"explanation,omitempty"`
 }
 
 func (z *ZoneScore) UnmarshalJSON(data []byte) error {
@@ -245,9 +246,10 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var nested struct {
-		Score    *plain          `json:"score"`
-		Features json.RawMessage `json:"features"`
-		Evidence json.RawMessage `json:"evidence"`
+		Score       *plain          `json:"score"`
+		Features    json.RawMessage `json:"features"`
+		Evidence    json.RawMessage `json:"evidence"`
+		Explanation json.RawMessage `json:"explanation"`
 	}
 	_, hasScore := fields["score"]
 	_, hasData := fields["data"]
@@ -262,6 +264,7 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		*z = ZoneScore(*nested.Score)
 		z.Features = nested.Features
 		z.Evidence = nested.Evidence
+		z.Explanation = nested.Explanation
 		return nil
 	}
 	var direct plain
@@ -308,6 +311,7 @@ type ZoneScoreResult struct {
 	Score           zonePipelineScore    `json:"score"`
 	Evidence        json.RawMessage      `json:"evidence"`
 	Decision        json.RawMessage      `json:"decision"`
+	Explanation     json.RawMessage      `json:"explanation"`
 	Zones           []ZoneScore          `json:"zones"`
 
 	// Legacy construction fields remain internal test/build compatibility only.
@@ -339,6 +343,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	features := r.Features
 	score := r.Score
 	decision := r.Decision
+	explanation := r.Explanation
 	periodSummaries := analysis.PeriodSummaries
 	analysisTips := analysis.AnalysisTips
 	chipSummary := analysis.ChipSummary
@@ -377,6 +382,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		ModelConfigHash:       analysis.Model.ConfigHash,
 		PipelineVersion:       r.PipelineVersion,
 		Evidence:              rawJSONOrDefault(r.Evidence, "null"),
+		Explanation:           rawJSONOrDefault(explanation, "null"),
 		PeriodSummaries:       rawJSONOrDefault(periodSummaries, "[]"),
 		AnalysisTips:          rawJSONOrDefault(analysisTips, "[]"),
 		ChipSummary:           rawJSONOrDefault(chipSummary, "null"),
@@ -441,6 +447,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			Status:                "PENDING",
 			Features:              rawJSONOrDefault(z.Features, "null"),
 			Evidence:              rawJSONOrDefault(z.Evidence, "null"),
+			Explanation:           rawJSONOrDefault(z.Explanation, "null"),
 		})
 	}
 

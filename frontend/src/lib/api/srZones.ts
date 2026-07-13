@@ -52,6 +52,34 @@ export interface SRZoneEvidence {
   risk_flags: string[]
 }
 
+export interface SRZoneExplanation {
+  role_summary: string
+  score_reason: string
+  probability_reason: string
+  confidence_reason: string
+  positive_factors: string[]
+  negative_factors: string[]
+  watch_conditions: string[]
+  advanced_refs: {
+    score_breakdown_keys?: string[]
+    risk_flags?: string[]
+    shap_top_contributions?: SRShapContribution[]
+    [key: string]: unknown
+  }
+}
+
+export interface SRAnalysisExplanation {
+  summary: string
+  action_reason: string
+  market_drivers: string[]
+  risk_notes: string[]
+  model_context: {
+    version: string
+    config_hash: string
+    uses_shap_evidence: boolean
+  }
+}
+
 export interface SRGlobalEvidence {
   trend: number
   volatility: number
@@ -143,6 +171,7 @@ export interface SRZone {
     resistance: Record<string, number>
   } | null
   evidence?: SRZoneEvidence | null
+  explanation?: SRZoneExplanation | null
 }
 
 export type SRPeriodKey = 'short' | 'mid' | 'long'
@@ -295,6 +324,7 @@ export interface SRZoneAnalysis {
   model_config_hash: string
   pipeline_version: string
   evidence: SRGlobalEvidence | null
+  explanation?: SRAnalysisExplanation | null
   // Python 端已收斂好的短/中/長期支撐壓力摘要；完整明細仍由 zones 提供。
   period_summaries: SRPeriodSummary[]
   // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
@@ -311,6 +341,7 @@ interface SRZonePipelineItem {
   features: SRZone['features']
   score: SRZone
   evidence: SRZoneEvidence | null
+  explanation: SRZoneExplanation | null
   lifecycle: Pick<SRZone, 'status' | 'broken_at' | 'broken_price' | 'resolved_role'>
 }
 
@@ -325,6 +356,7 @@ interface SRZonePipelineResponse {
     'global_expected_value' | 'global_confidence' | 'global_risk_reward_ratio'>
   evidence: SRGlobalEvidence | null
   decision: SRDecisionSummary | null
+  explanation: SRAnalysisExplanation | null
   zones: SRZonePipelineItem[]
 }
 
@@ -339,6 +371,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       ...response.score,
       pipeline_version: response.pipeline_version,
       evidence: response.evidence,
+      explanation: response.explanation ?? null,
       decision_summary: response.decision,
       period_summaries: response.analysis.period_summaries ?? [],
       analysis_tips: response.analysis.analysis_tips ?? [],
@@ -352,6 +385,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       ...item.lifecycle,
       features: item.features,
       evidence: item.evidence,
+      explanation: item.explanation ?? null,
     })),
   }
 }

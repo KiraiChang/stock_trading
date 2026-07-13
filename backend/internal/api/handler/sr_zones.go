@@ -56,9 +56,10 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 				"price_low": z.PriceLow, "price_high": z.PriceHigh,
 				"method": z.Method, "role": z.Role,
 			},
-			"features": z.Features,
-			"score":    z,
-			"evidence": z.Evidence,
+			"features":    z.Features,
+			"score":       z,
+			"evidence":    z.Evidence,
+			"explanation": z.Explanation,
 			"lifecycle": gin.H{
 				"status": z.Status, "broken_at": z.BrokenAt,
 				"broken_price": z.BrokenPrice, "resolved_role": z.ResolvedRole,
@@ -82,9 +83,10 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 			"global_confidence":        a.GlobalConfidence,
 			"global_risk_reward_ratio": a.GlobalRiskRewardRatio,
 		},
-		"evidence": a.Evidence,
-		"decision": a.DecisionSummary,
-		"zones":    items,
+		"evidence":    a.Evidence,
+		"decision":    a.DecisionSummary,
+		"explanation": a.Explanation,
+		"zones":       items,
 	}
 }
 

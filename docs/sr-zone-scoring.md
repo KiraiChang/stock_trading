@@ -922,12 +922,24 @@ Data → Features → Score → Evidence → Decision
   每個 zone 兩個角色都保存 baseline、final probability、原始特徵值、正負貢獻
   與 `additivity_error`。浮點重建誤差容許至 `1e-5`；超過才視為證據失真並中止。
 - Decision 的公開入口只接受 `AnalysisEvidence`，不可回頭讀 DataFrame 或自行推論模型。
+- Explain Engine 是 Evidence/Decision 之後的白話層，只用既有 `score`、
+  `features`、`evidence`、`decision` 的結構化欄位套 deterministic 模板，不接
+  LLM、不改 scoring 數學或 action 門檻。
 
 模型版本為 `v4`，模型檔需包含固定抽樣的 SHAP background；v3 模型必須重訓。
 Python `/sr-zones` 回傳 breaking v2 nested contract：
-`analysis`、`features`、`score`、`evidence`、`decision`，以及每個 zone 各自的
-`data/features/score/evidence/lifecycle`。Go 將 analysis/zone evidence JSON
-連同 `pipeline_version` 保存，歷史快照不會回算 evidence。
+`analysis`、`features`、`score`、`evidence`、`decision`、`explanation`，
+以及每個 zone 各自的 `data/features/score/evidence/explanation/lifecycle`。
+Go 將 analysis/zone evidence 與 explanation JSON 連同 `pipeline_version`
+保存，歷史快照不會回算 evidence 或 explanation。
+
+`explanation` 是前端預設顯示的白話解釋層。頂層包含：
+`summary`、`action_reason`、`market_drivers`、`risk_notes`、`model_context`。
+每個 zone 包含：`role_summary`、`score_reason`、`probability_reason`、
+`confidence_reason`、`positive_factors`、`negative_factors`、
+`watch_conditions`、`advanced_refs`。`AT_ZONE` 必須明確說明現價在區間內、
+方向尚未解析，不得硬判支撐或壓力。舊分析沒有 explanation 時，前端回退顯示
+`decision_summary`、`analysis_tips` 與既有 evidence，不顯示空白錯誤。
 
 `analysis.period_summaries`、`analysis.analysis_tips` 與
 `analysis.chip_summary` 是持久化快照契約，不因改用五層管線而移除。

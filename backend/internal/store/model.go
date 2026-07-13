@@ -146,6 +146,7 @@ type SRZoneAnalysis struct {
 	ModelConfigHash string  `db:"model_config_hash"       json:"model_config_hash"`
 	PipelineVersion string  `db:"pipeline_version"        json:"pipeline_version"`
 	Evidence        RawJSON `db:"evidence"                json:"evidence"`
+	Explanation     RawJSON `db:"explanation"             json:"explanation"`
 	// PeriodSummaries 是 Python 端整理好的短/中/長期支撐壓力摘要 JSON；
 	// AnalysisTips 是前端輪播的白話解讀提示。兩者保存於 analysis 快照，
 	// 讓歷史分析不需要重新呼叫 Python 也能顯示同一份結論。
@@ -250,6 +251,7 @@ type SRZone struct {
 	ResolvedRole NullString `db:"resolved_role" json:"resolved_role,omitempty"`
 	Features     RawJSON    `db:"features"      json:"features"`
 	Evidence     RawJSON    `db:"evidence"      json:"evidence"`
+	Explanation  RawJSON    `db:"explanation"   json:"explanation"`
 }
 
 // SRScoringTrainJob 追蹤一次「重新訓練 hold/break 機率模型」的背景任務

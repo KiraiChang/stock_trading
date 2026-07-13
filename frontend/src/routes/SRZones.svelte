@@ -46,6 +46,15 @@
 
 
   $: decisionSummary = current?.decision_summary ?? null
+  $: analysisExplanation = current?.explanation ?? null
+  $: explanationSummary = analysisExplanation?.summary
+    ?? (decisionSummary ? `${current?.symbol ?? ''} 目前建議以「${decisionSummary.action_label || decisionSummary.action}」解讀 SR Zone 結果。` : analysisTips[0] ?? '')
+  $: explanationActionReason = analysisExplanation?.action_reason
+    ?? (decisionSummary?.primary_zone
+      ? `主交易區 ${decisionSummary.primary_zone.label} 目前被判定為 ${decisionSummary.primary_zone.role}。`
+      : decisionSummary ? '目前沒有足夠明確的主交易區，先以等待和觀察為主。' : '')
+  $: explanationDrivers = analysisExplanation?.market_drivers ?? decisionSummary?.market_regime?.reasons ?? []
+  $: explanationRisks = analysisExplanation?.risk_notes ?? decisionSummary?.risk_notes ?? []
   $: globalEvidence = current?.evidence ?? null
   let verifying = false
   let verifyError = ''
@@ -810,6 +819,49 @@
         <div class="px-5 py-4 border-b border-border">
           <SRChipPanel summary={chipSummary} />
         </div>
+        {#if explanationSummary || explanationActionReason || explanationDrivers.length > 0 || explanationRisks.length > 0}
+          <div class="px-5 py-4 border-b border-border bg-surface/35">
+            <div class="flex items-start justify-between gap-4 flex-wrap mb-3">
+              <div class="min-w-0">
+                <p class="text-muted text-xs mb-1">解釋</p>
+                {#if explanationSummary}
+                  <h3 class="text-white text-sm font-semibold leading-relaxed">{explanationSummary}</h3>
+                {/if}
+                {#if explanationActionReason}
+                  <p class="text-muted text-xs mt-1 leading-relaxed">{explanationActionReason}</p>
+                {/if}
+              </div>
+              {#if analysisExplanation?.model_context}
+                <div class="text-right text-[11px] text-muted font-mono">
+                  <p>{analysisExplanation.model_context.version}{analysisExplanation.model_context.config_hash ? ` / ${analysisExplanation.model_context.config_hash}` : ''}</p>
+                  <p>{analysisExplanation.model_context.uses_shap_evidence ? 'SHAP evidence' : 'rules only'}</p>
+                </div>
+              {/if}
+            </div>
+            <div class="grid md:grid-cols-2 gap-4 text-xs">
+              {#if explanationDrivers.length > 0}
+                <div>
+                  <p class="text-white font-medium mb-2">主要因素</p>
+                  <div class="space-y-1">
+                    {#each explanationDrivers as item}
+                      <p class="text-muted leading-relaxed">{item}</p>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              {#if explanationRisks.length > 0}
+                <div>
+                  <p class="text-white font-medium mb-2">風險提醒</p>
+                  <div class="space-y-1">
+                    {#each explanationRisks as item}
+                      <p class="text-yellow-300 leading-relaxed">{item}</p>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
         {#if globalEvidence}
           <div class="px-5 py-3 border-b border-border bg-indigo-950/20">
             <div class="flex items-center justify-between gap-3 flex-wrap">
@@ -1064,6 +1116,9 @@
                           {/if}
                         </div>
                         <p class="text-white text-sm">{noviceRecommendationText[z.trading_recommendation] ?? z.trading_recommendation}</p>
+                        {#if z.explanation?.role_summary}
+                          <p class="text-muted text-xs mt-1 leading-relaxed">{z.explanation.role_summary}</p>
+                        {/if}
                         <p class="text-muted text-xs mt-1">{invalidationText(z)}</p>
                       </div>
                       <div class="text-right shrink-0">
@@ -1103,6 +1158,43 @@
                             但這個價位帶過去的觸碰歷史比較像「{netScoreLabelText[z.net_score_label] ?? z.net_score_label}」，
                             建議降低信心、多觀察一段時間再判斷。
                           </p>
+                        {/if}
+
+                        {#if z.explanation}
+                          <div class="mb-3 border border-border/70 rounded-lg p-3 bg-surface/40">
+                            <p class="text-white text-xs font-medium mb-2">白話解釋</p>
+                            <div class="space-y-1 text-xs">
+                              <p class="text-muted leading-relaxed">{z.explanation.score_reason}</p>
+                              <p class="text-muted leading-relaxed">{z.explanation.probability_reason}</p>
+                              <p class="text-muted leading-relaxed">{z.explanation.confidence_reason}</p>
+                            </div>
+                            <div class="grid md:grid-cols-3 gap-3 mt-3 text-[11px]">
+                              <div>
+                                <p class="text-rise font-medium mb-1">加分因素</p>
+                                <div class="space-y-1">
+                                  {#each z.explanation.positive_factors as item}
+                                    <p class="text-muted">{item}</p>
+                                  {/each}
+                                </div>
+                              </div>
+                              <div>
+                                <p class="text-yellow-300 font-medium mb-1">扣分/風險</p>
+                                <div class="space-y-1">
+                                  {#each z.explanation.negative_factors as item}
+                                    <p class="text-muted">{item}</p>
+                                  {/each}
+                                </div>
+                              </div>
+                              <div>
+                                <p class="text-white font-medium mb-1">觀察條件</p>
+                                <div class="space-y-1">
+                                  {#each z.explanation.watch_conditions as item}
+                                    <p class="text-muted">{item}</p>
+                                  {/each}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         {/if}
 
                         {#if activeEvidence(z)}

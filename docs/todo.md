@@ -403,6 +403,10 @@ v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 
 後續可讓 `"score"` 只帶真正的評分欄位（對齊 analysis 層拆成 features/score/evidence
 的做法），避免重複與誤導。
 
+補充（2026-07-13 review「SR Zone explanation」變更時發現）：新增的 `explanation`
+欄位同樣沒有 `omitempty`，於是也被序列化兩次（`item.explanation` 兄弟鍵與
+`item.score.explanation`），把重複範圍再擴大一份。收斂 `"score"` 時一併處理。
+
 ---
 
 ### T-024：交易分析合併後的相容層收斂（handler 去重／前端 dead export）
@@ -428,6 +432,33 @@ v2 pipeline 讓 `/sr-zones` 對兩個新東西變成硬性相依，且都沒有 
 
 收斂時一併確認 `/position-analyses` 是否還需對外相容；若決定長期保留兩套，改把「刻意保留」
 理由文件化到對應主題文件，並從本清單移除。
+
+---
+
+### T-025：SR Zone explain engine 收斂（未用欄位／去重／多餘排序）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Python / SR Zone / Frontend |
+| 建立日期 | 2026-07-13 |
+| 來源 | review「SR Zone explanation」working tree 變更時發現 |
+
+新增的 `python/backtest/modular/sr_scoring/explain_engine.py` 有幾處可收斂，皆非
+功能性 bug，屬效率／一致性清理：
+
+- **`advanced_refs` 產出但前端未使用**：`explain_zone` 對每個 zone 呼叫
+  `_advanced_refs`（line 193）組 `score_breakdown_keys`/`risk_flags`/
+  `shap_top_contributions`，寫入 `stock_sr_zones.explanation` 並隨 API 傳到前端，
+  但 `frontend/src/` 只有型別定義（`srZones.ts:63-66`）、無任何元件渲染 →
+  每檔分析都白算、白存、白傳。決定要顯示就補 UI，否則從 payload 移除。
+- **`_risk_notes` EXPIRED 分支缺去重防護**（line 249-250）：另兩則 note 都先檢查
+  `decision_summary.risk_notes` 是否已含相似字樣才 append，EXPIRED 則無條件 append，
+  可能與既有提示語意重複。補上一致的 `not any(...)` 判斷。
+- **`_score_breakdown_extremes` 多餘排序**（line 78）：`items` 由
+  `sorted(...items())` 建立，但隨後 `max`/`min` 以 `(value, key)` 為 key 重新選取、
+  與 list 順序無關，`sorted()` 對結果無影響，可移除。
 
 ---
 ## 已完成封存

@@ -7,6 +7,7 @@ from db import fetch_candles, fetch_latest_chip_score
 
 from .decision_engine import build_decision_from_evidence
 from .evidence import build_evidence
+from .explain_engine import build_explanation, explain_zone
 from .features import compute_zone_features, find_touches, trend_slope, zone_volatility
 from .model import chip_features_from_score_row, feature_vector, get_model
 from .pipeline_types import (
@@ -182,6 +183,7 @@ def run_pipeline(
     scores = calculate_scores(features)
     evidence = build_evidence(scores)
     decision = decide(evidence)
+    explanation = build_explanation(evidence, decision.summary)
     period_summaries = _build_period_summaries(
         list(scores.zones), data.current_price, features.ma5
     )
@@ -221,6 +223,7 @@ def run_pipeline(
         },
         "evidence": evidence.global_evidence,
         "decision": decision.summary,
+        "explanation": explanation,
         "zones": [
             {
                 "data": {
@@ -235,6 +238,7 @@ def run_pipeline(
                 },
                 "score": _zone_score_to_dict(score),
                 "evidence": zone_evidence,
+                "explanation": explain_zone(score, zone_evidence),
                 "lifecycle": {"status": "PENDING", "resolved_role": None},
             }
             for item, score, zone_evidence in zip(scores.features.zones, scores.zones, evidence.zone_evidence)

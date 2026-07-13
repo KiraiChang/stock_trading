@@ -619,6 +619,17 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
     "risk_notes": ["波動偏高，倉位需保守。"],
     "secondary_zones": []
   },
+  "explanation": {
+    "summary": "2330 目前建議以「小量試單」解讀 SR Zone 結果。",
+    "action_reason": "Action 為「小量試單」，主因是主交易區 960.00 ~ 970.00 目前被判定為支撐，交易分數 78.5。",
+    "market_drivers": ["整體趨勢 +3.2%", "整體波動 1.8%", "整體信心 61%", "籌碼總分 42.5"],
+    "risk_notes": ["波動偏高，倉位需保守。"],
+    "model_context": {
+      "version": "v4",
+      "config_hash": "a1b2c3d4e5f6",
+      "uses_shap_evidence": true
+    }
+  },
   "zones": [
     {
       "data": {
@@ -689,6 +700,20 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
         "resistance": {},
         "risk_flags": []
       },
+      "explanation": {
+        "role_summary": "960.00 ~ 970.00 位於現價下方或回測區，暫以支撐解讀。",
+        "score_reason": "Trading Score 78.5 主要由期望值貢獻 26.7 分推動；最低分量是信心 7.2 分。",
+        "probability_reason": "此區間目前按支撐解讀，反彈/守住機率為 66.0%，跌破/突破機率為 21.0%；期望值為 +2.72%。",
+        "confidence_reason": "信心為 72%（高），主要參考目前角色方向樣本 3 次、整體觸碰 4 次、守住 3 次、跌破/突破 0 次；近期性為「最近有守住驗證」。",
+        "positive_factors": ["信心等級高", "最近有有效驗證", "多方法共振 ×2"],
+        "negative_factors": ["目前沒有明顯扣分因素"],
+        "watch_conditions": ["觀察價格回測 960.00 ~ 970.00 時是否止跌", "若收盤跌破 960.00，支撐判斷失效風險升高"],
+        "advanced_refs": {
+          "score_breakdown_keys": ["expected_value", "risk_reward", "trend", "volume", "confidence", "chip"],
+          "risk_flags": [],
+          "shap_top_contributions": []
+        }
+      },
       "lifecycle": {
         "status": "PENDING",
         "broken_at": null,
@@ -713,9 +738,15 @@ sr-zone-scoring.md「六」。`overlap_group`/`confluence_count` 是跨方法重
 sr-zone-scoring.md「十七」。
 
 頂層依序對應 Data/Features/Score/Evidence/Decision。`analysis` 同時保存
-`period_summaries`、`analysis_tips` 與專屬 `chip_summary`；`decision` 是前端
-預設閱讀層。每個 zone 也分成 `data/features/score/evidence/lifecycle`，
-驗證 API 只更新 lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
+`period_summaries`、`analysis_tips` 與專屬 `chip_summary`；`decision` 是決策
+摘要，`explanation` 是 deterministic 白話解釋層。每個 zone 也分成
+`data/features/score/evidence/explanation/lifecycle`，驗證 API 只更新
+lifecycle。欄位語意見 sr-zone-scoring.md「十四、十九」。
+
+`explanation` 不取代 `evidence`：前者給前端直接呈現白話結論、加分/扣分因素與
+風險提醒；後者保留 SHAP baseline、最終機率與特徵貢獻等進階模型證據。舊分析
+可能沒有 explanation，客戶端應回退顯示 `decision`、`analysis.analysis_tips`
+與既有 evidence。
 
 **籌碼摘要欄位**（見 sr-zone-scoring.md「十二之一」）：`analysis.chip_summary`
 是整檔層級的籌碼拆解，`score`/`institutional_score`/`margin_score`/`broker_score`

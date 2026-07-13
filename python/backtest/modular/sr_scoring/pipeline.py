@@ -19,6 +19,7 @@ from .pipeline_types import (
     DirectionFeatures,
     ZoneFeatureSet,
 )
+from .scenario_engine import build_analysis_scenario, build_zone_scenario
 from .types import ApproachDirection, ZoneType
 from .zone_builder import ZoneBuilder
 
@@ -184,6 +185,7 @@ def run_pipeline(
     evidence = build_evidence(scores)
     decision = decide(evidence)
     explanation = build_explanation(evidence, decision.summary)
+    scenario = build_analysis_scenario(evidence, decision.summary)
     period_summaries = _build_period_summaries(
         list(scores.zones), data.current_price, features.ma5
     )
@@ -224,6 +226,7 @@ def run_pipeline(
         "evidence": evidence.global_evidence,
         "decision": decision.summary,
         "explanation": explanation,
+        "scenario": scenario,
         "zones": [
             {
                 "data": {
@@ -239,6 +242,7 @@ def run_pipeline(
                 "score": _zone_score_to_dict(score),
                 "evidence": zone_evidence,
                 "explanation": explain_zone(score, zone_evidence),
+                "scenario": build_zone_scenario(score),
                 "lifecycle": {"status": "PENDING", "resolved_role": None},
             }
             for item, score, zone_evidence in zip(scores.features.zones, scores.zones, evidence.zone_evidence)

@@ -60,6 +60,7 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 			"score":       z,
 			"evidence":    z.Evidence,
 			"explanation": z.Explanation,
+			"scenario":    z.Scenario,
 			"lifecycle": gin.H{
 				"status": z.Status, "broken_at": z.BrokenAt,
 				"broken_price": z.BrokenPrice, "resolved_role": z.ResolvedRole,
@@ -86,6 +87,7 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 		"evidence":    a.Evidence,
 		"decision":    a.DecisionSummary,
 		"explanation": a.Explanation,
+		"scenario":    a.Scenario,
 		"zones":       items,
 	}
 }

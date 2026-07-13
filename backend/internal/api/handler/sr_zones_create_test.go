@@ -90,6 +90,7 @@ func srZoneScoreResponse(symbol string, analyzedAt time.Time) string {
 		"chip_summary":null,
 		"decision_summary":{"action":"BuySmall"},
 		"explanation":{"summary":"建議小量試單"},
+		"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"},
 		"zones":[{
 			"price_low":90,
 			"price_high":95,
@@ -117,7 +118,8 @@ func srZoneScoreResponse(symbol string, analyzedAt time.Time) string {
 			"trading_score_breakdown":{"expected_value":20,"risk_reward":10,"trend":10,"volume":10,"confidence":10,"chip":10},
 			"trading_recommendation":"BUY",
 			"confluence_count":1,
-			"explanation":{"role_summary":"此區為支撐"}
+			"explanation":{"role_summary":"此區為支撐"},
+			"scenario":{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"}
 		}]
 	}`, symbol, analyzedAt.Format(time.RFC3339))
 }
@@ -156,6 +158,9 @@ func TestSRZoneCreateDefaultsToNewSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"explanation":{"summary":"建議小量試單"}`) {
 		t.Fatalf("expected explanation in response: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"}`) {
+		t.Fatalf("expected scenario in response: %s", rec.Body.String())
 	}
 }
 

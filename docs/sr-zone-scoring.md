@@ -984,6 +984,42 @@ LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判
 **非目標**：Explain Engine v1 不納入持股、部位成本、下單 sizing、LLM 生成、
 跨 `/analysis` 舊流程解釋，且不對歷史快照回算 explanation。
 
+### 十九之二、Scenario Engine 情境層
+
+Scenario Engine 是 `decision` / `score` / `explanation` 之上的結構化情境層，
+負責輸出「目前情境、觸發條件、失效條件」。它不改機率、分數、EV/RR 或
+action 門檻，也不取代 `explanation.watch_conditions`；`watch_conditions` 是 zone
+白話觀察句，`scenario` 是前端可穩定呈現的正式 contract。
+
+**頂層 `scenario` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `schema_version` | Scenario schema 版本，目前為 `sr_scenario_v1` |
+| `state` | 對齊目前 decision action，例如 `BuySmall` / `Hold` |
+| `title` | 情境標題，例如「小量試單情境」或「等待確認情境」 |
+| `summary` | 一句整體情境摘要，引用 market regime 與 primary zone |
+| `trigger_conditions` | 讓此情境成立或值得追蹤的條件 |
+| `invalidation_conditions` | 讓此情境失效或需要重評估的條件 |
+| `market_regime` | `decision.market_regime` 的原樣引用 |
+| `primary_zone` | `decision.primary_zone` 的原樣引用，可能為 `null` |
+| `global_confidence` | 這次分析的 global confidence，可能為 `null` |
+
+**`zones[].scenario` contract**：
+
+| 欄位 | 說明 |
+|---|---|
+| `schema_version` | Scenario schema 版本，目前為 `sr_scenario_v1` |
+| `state` | `SUPPORT_RETEST` / `RESISTANCE_REJECTION` / `WAIT_FOR_DIRECTION` / `RETEST_REQUIRED` / `BROKEN` |
+| `title` | Zone 情境標題，例如「支撐回測情境」 |
+| `summary` | 結合 role、bounce/break probability、EV 的短摘要 |
+| `trigger_conditions` | 此 zone 情境成立時要看到的價格或確認條件 |
+| `invalidation_conditions` | 此 zone 情境失效時要看到的價格或風險條件 |
+
+`AT_ZONE` 的 scenario 必須維持 `WAIT_FOR_DIRECTION`，只描述向上/向下離開區間後
+如何再觀察，不得產生方向性的支撐/壓力結論。舊分析可能沒有 `scenario` 或值為
+JSON `null`，前端應隱藏 scenario 區塊並繼續顯示既有 explanation/decision。
+
 `analysis.period_summaries`、`analysis.analysis_tips` 與
 `analysis.chip_summary` 是持久化快照契約，不因改用五層管線而移除。
 `evidence.chip` 與專屬 `chip_summary` 來自同一份 Score stage 計算結果：

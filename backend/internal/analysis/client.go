@@ -237,6 +237,7 @@ type ZoneScore struct {
 	Features        json.RawMessage `json:"features,omitempty"`
 	Evidence        json.RawMessage `json:"evidence,omitempty"`
 	Explanation     json.RawMessage `json:"explanation,omitempty"`
+	Scenario        json.RawMessage `json:"scenario,omitempty"`
 }
 
 func (z *ZoneScore) UnmarshalJSON(data []byte) error {
@@ -250,6 +251,7 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		Features    json.RawMessage `json:"features"`
 		Evidence    json.RawMessage `json:"evidence"`
 		Explanation json.RawMessage `json:"explanation"`
+		Scenario    json.RawMessage `json:"scenario"`
 	}
 	_, hasScore := fields["score"]
 	_, hasData := fields["data"]
@@ -265,6 +267,7 @@ func (z *ZoneScore) UnmarshalJSON(data []byte) error {
 		z.Features = nested.Features
 		z.Evidence = nested.Evidence
 		z.Explanation = nested.Explanation
+		z.Scenario = nested.Scenario
 		return nil
 	}
 	var direct plain
@@ -312,6 +315,7 @@ type ZoneScoreResult struct {
 	Evidence        json.RawMessage      `json:"evidence"`
 	Decision        json.RawMessage      `json:"decision"`
 	Explanation     json.RawMessage      `json:"explanation"`
+	Scenario        json.RawMessage      `json:"scenario"`
 	Zones           []ZoneScore          `json:"zones"`
 
 	// Legacy construction fields remain internal test/build compatibility only.
@@ -344,6 +348,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	score := r.Score
 	decision := r.Decision
 	explanation := r.Explanation
+	scenario := r.Scenario
 	periodSummaries := analysis.PeriodSummaries
 	analysisTips := analysis.AnalysisTips
 	chipSummary := analysis.ChipSummary
@@ -356,6 +361,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		score.GlobalExpectedValue, score.GlobalConfidence = r.GlobalExpectedValue, r.GlobalConfidence
 		score.GlobalRiskRewardRatio = r.GlobalRiskRewardRatio
 		decision = r.DecisionSummary
+		scenario = r.Scenario
 		periodSummaries, analysisTips, chipSummary = r.PeriodSummaries, r.AnalysisTips, r.ChipSummary
 	}
 	analyzedAt, err := time.Parse(time.RFC3339, analysis.AnalyzedAt)
@@ -383,6 +389,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		PipelineVersion:       r.PipelineVersion,
 		Evidence:              rawJSONOrDefault(r.Evidence, "null"),
 		Explanation:           rawJSONOrDefault(explanation, "null"),
+		Scenario:              rawJSONOrDefault(scenario, "null"),
 		PeriodSummaries:       rawJSONOrDefault(periodSummaries, "[]"),
 		AnalysisTips:          rawJSONOrDefault(analysisTips, "[]"),
 		ChipSummary:           rawJSONOrDefault(chipSummary, "null"),
@@ -448,6 +455,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			Features:              rawJSONOrDefault(z.Features, "null"),
 			Evidence:              rawJSONOrDefault(z.Evidence, "null"),
 			Explanation:           rawJSONOrDefault(z.Explanation, "null"),
+			Scenario:              rawJSONOrDefault(z.Scenario, "null"),
 		})
 	}
 

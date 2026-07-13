@@ -1045,6 +1045,38 @@
           </div>
         {/if}
 
+        {#if current.scenario}
+          <div class="px-5 py-4 border-b border-border bg-surface/40">
+            <div class="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p class="text-white text-sm font-medium">{current.scenario.title}</p>
+                <p class="text-muted text-xs mt-1 leading-relaxed">{current.scenario.summary}</p>
+              </div>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-indigo-900/40 text-indigo-300">
+                {current.scenario.state}
+              </span>
+            </div>
+            <div class="grid md:grid-cols-2 gap-3 mt-3 text-[11px]">
+              <div>
+                <p class="text-rise font-medium mb-1">觸發條件</p>
+                <div class="space-y-1">
+                  {#each current.scenario.trigger_conditions as item}
+                    <p class="text-muted">{item}</p>
+                  {/each}
+                </div>
+              </div>
+              <div>
+                <p class="text-yellow-300 font-medium mb-1">失效條件</p>
+                <div class="space-y-1">
+                  {#each current.scenario.invalidation_conditions as item}
+                    <p class="text-muted">{item}</p>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
+
         <!-- 只有一個 Global Model：整體評估區塊的原始數字，收在進階裡 -->
         <div class="border-b border-border">
           <button
@@ -1157,6 +1189,38 @@
                             但這個價位帶過去的觸碰歷史比較像「{netScoreLabelText[z.net_score_label] ?? z.net_score_label}」，
                             建議降低信心、多觀察一段時間再判斷。
                           </p>
+                        {/if}
+
+                        {#if z.scenario}
+                          <div class="mb-3 border border-sky-900/50 rounded-lg p-3 bg-sky-950/20">
+                            <div class="flex items-start justify-between gap-3 mb-2">
+                              <div>
+                                <p class="text-white text-xs font-medium">{z.scenario.title}</p>
+                                <p class="text-muted text-xs mt-1 leading-relaxed">{z.scenario.summary}</p>
+                              </div>
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-sky-900/50 text-sky-300">
+                                {z.scenario.state}
+                              </span>
+                            </div>
+                            <div class="grid md:grid-cols-2 gap-3 text-[11px]">
+                              <div>
+                                <p class="text-rise font-medium mb-1">觸發條件</p>
+                                <div class="space-y-1">
+                                  {#each z.scenario.trigger_conditions as item}
+                                    <p class="text-muted">{item}</p>
+                                  {/each}
+                                </div>
+                              </div>
+                              <div>
+                                <p class="text-yellow-300 font-medium mb-1">失效條件</p>
+                                <div class="space-y-1">
+                                  {#each z.scenario.invalidation_conditions as item}
+                                    <p class="text-muted">{item}</p>
+                                  {/each}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         {/if}
 
                         {#if z.explanation}

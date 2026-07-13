@@ -76,6 +76,18 @@ export interface SRAnalysisExplanation {
   }
 }
 
+export interface SRScenario {
+  schema_version: 'sr_scenario_v1'
+  state: string
+  title: string
+  summary: string
+  trigger_conditions: string[]
+  invalidation_conditions: string[]
+  market_regime?: SRMarketRegime | null
+  primary_zone?: SRDecisionZoneSummary | null
+  global_confidence?: number | null
+}
+
 export interface SRGlobalEvidence {
   trend: number
   volatility: number
@@ -168,6 +180,7 @@ export interface SRZone {
   } | null
   evidence?: SRZoneEvidence | null
   explanation?: SRZoneExplanation | null
+  scenario?: SRScenario | null
 }
 
 export type SRPeriodKey = 'short' | 'mid' | 'long'
@@ -321,6 +334,7 @@ export interface SRZoneAnalysis {
   pipeline_version: string
   evidence: SRGlobalEvidence | null
   explanation?: SRAnalysisExplanation | null
+  scenario?: SRScenario | null
   // Python 端已收斂好的短/中/長期支撐壓力摘要；完整明細仍由 zones 提供。
   period_summaries: SRPeriodSummary[]
   // 跑馬燈輪播提示，用白話補充籌碼、均線、量能與驗證狀態。
@@ -338,6 +352,7 @@ interface SRZonePipelineItem {
   score: SRZone
   evidence: SRZoneEvidence | null
   explanation: SRZoneExplanation | null
+  scenario: SRScenario | null
   lifecycle: Pick<SRZone, 'status' | 'broken_at' | 'broken_price' | 'resolved_role'>
 }
 
@@ -353,6 +368,7 @@ interface SRZonePipelineResponse {
   evidence: SRGlobalEvidence | null
   decision: SRDecisionSummary | null
   explanation: SRAnalysisExplanation | null
+  scenario: SRScenario | null
   zones: SRZonePipelineItem[]
 }
 
@@ -368,6 +384,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       pipeline_version: response.pipeline_version,
       evidence: response.evidence,
       explanation: response.explanation ?? null,
+      scenario: response.scenario ?? null,
       decision_summary: response.decision,
       period_summaries: response.analysis.period_summaries ?? [],
       analysis_tips: response.analysis.analysis_tips ?? [],
@@ -382,6 +399,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       features: item.features,
       evidence: item.evidence,
       explanation: item.explanation ?? null,
+      scenario: item.scenario ?? null,
     })),
   }
 }

@@ -361,7 +361,6 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		score.GlobalExpectedValue, score.GlobalConfidence = r.GlobalExpectedValue, r.GlobalConfidence
 		score.GlobalRiskRewardRatio = r.GlobalRiskRewardRatio
 		decision = r.DecisionSummary
-		scenario = r.Scenario
 		periodSummaries, analysisTips, chipSummary = r.PeriodSummaries, r.AnalysisTips, r.ChipSummary
 	}
 	analyzedAt, err := time.Parse(time.RFC3339, analysis.AnalyzedAt)

@@ -8,36 +8,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from .formatting import (
+    fmt_pct as _fmt_pct,
+    fmt_price as _fmt_price,
+    fmt_signed_pct as _fmt_signed_pct,
+    role_label as _role_label,
+)
 from .pipeline_types import AnalysisEvidence
 from .types import ConfidenceLevel, RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 
 
 EXPLANATION_SCHEMA_VERSION = "sr_explain_v1"
-
-
-def _fmt_price(v: float) -> str:
-    return f"{v:.2f}"
-
-
-def _fmt_pct(v: float | None, digits: int = 1) -> str:
-    if v is None:
-        return "無資料"
-    return f"{v * 100:.{digits}f}%"
-
-
-def _fmt_signed_pct(v: float | None, digits: int = 2) -> str:
-    if v is None:
-        return "無資料"
-    sign = "+" if v > 0 else ""
-    return f"{sign}{v * 100:.{digits}f}%"
-
-
-def _role_label(role: str) -> str:
-    return {
-        ZoneType.SUPPORT.value: "支撐",
-        ZoneType.RESISTANCE.value: "壓力",
-        ZoneType.AT_ZONE.value: "方向未定區",
-    }.get(role, role)
 
 
 def _action_label(action: str) -> str:

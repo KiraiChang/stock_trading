@@ -350,35 +350,6 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 
 ---
 
-### T-025：Scenario Engine 收斂（dead branch／helper 重複／redundant 賦值／測試覆蓋）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / Go / SR Zone / 測試 |
-| 建立日期 | 2026-07-13 |
-| 來源 | review「SR Zone scenario」working tree 變更時發現（非 payload 重複的部分；payload 重複另見 [T-023](#t-023srzonepipelineresponse-的-zone-區塊-payload-去重)） |
-
-`scenario_engine.py` 與其接線有幾處可收斂，皆非功能性 bug：
-
-- **BROKEN 分支/UNKNOWN 回退不可達（dead code）**：`build_zone_scenario`（line 56）的
-  `status == "BROKEN"` 分支永遠不會執行——pipeline.py 只用預設 `status="PENDING"` 呼叫，
-  且 scenario 在分析當下算一次就寫死、不會在 verify 時以更新後 status 重算；
-  `_zone_state` 的 `return "UNKNOWN"`（role 恆為三值之一）也不可達。要嘛在 verify 流程
-  重算 scenario 並傳入真實 status（讓 zone 破壞後顯示「區間已失效」），要嘛移除該分支。
-- **formatting helper 重複**：`_fmt_price`/`_fmt_pct`/`_fmt_signed_pct`/`_role_label` 是從
-  `explain_engine.py` 原樣複製（`_role_label` 的 AT_ZONE 文案還不一致：explain 為
-  「方向未定區」、scenario 為「方向未定」）。抽到 sr_scoring 內共用 formatting 模組。
-- **`client.go` redundant 賦值**：`ToStore` legacy 分支（約 line 364）的 `scenario = r.Scenario`
-  與初始化重複、為 no-op（explanation 就沒有這行），移除以免誤導。
-- **client 層測試缺 scenario 斷言**：`client_test.go` 的
-  `TestScoreZonesParsesResponseAndMapsToStore` 與 `TestZoneScoreResultNestedV2DecodeAndStore`
-  未涵蓋 scenario（explanation 有）；nested-v2 decode 對 `z.Scenario` 的搬運無直接測試。
-  補上與 explanation 對齊的斷言。
-
----
-
 ## 已完成封存
 
 （目前沒有項目）

@@ -106,6 +106,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 			AnalysisTips:    json.RawMessage(`["短期支撐守穩，籌碼偏多"]`),
 			DecisionSummary: json.RawMessage(`{"action":"BuySmall","market_regime":{"primary":"TREND_UP"}}`),
 			Explanation:     json.RawMessage(`{"summary":"建議小量試單","action_reason":"主交易區為支撐"}`),
+			Scenario:        json.RawMessage(`{"schema_version":"sr_scenario_v1","state":"BuySmall","title":"小量試單情境"}`),
 			Zones: []ZoneScore{
 				{
 					PriceLow: 580.0, PriceHigh: 585.0, Method: "atr", Role: "SUPPORT",
@@ -125,6 +126,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 					TradingRecommendation: "BUY",
 					OverlapGroup:          &overlapGroup, ConfluenceCount: 2,
 					Explanation: json.RawMessage(`{"role_summary":"此區為支撐","positive_factors":["信心高"]}`),
+					Scenario:    json.RawMessage(`{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"}`),
 				},
 				{
 					PriceLow: 610.0, PriceHigh: 615.0, Method: "volume_profile", Role: "AT_ZONE",
@@ -179,6 +181,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if string(a.Explanation) != `{"summary":"建議小量試單","action_reason":"主交易區為支撐"}` {
 		t.Fatalf("expected explanation to carry through ToStore, got %s", a.Explanation)
+	}
+	if string(a.Scenario) != `{"schema_version":"sr_scenario_v1","state":"BuySmall","title":"小量試單情境"}` {
+		t.Fatalf("expected scenario to carry through ToStore, got %s", a.Scenario)
 	}
 	if a.Symbol != "2330" || a.CurrentPrice != 600.0 || a.GlobalTrend != 0.03 || a.GlobalVolatility != 0.02 {
 		t.Fatalf("unexpected analysis: %+v", a)
@@ -242,6 +247,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	if string(first.Explanation) != `{"role_summary":"此區為支撐","positive_factors":["信心高"]}` {
 		t.Fatalf("expected zone explanation to carry through, got %s", first.Explanation)
 	}
+	if string(first.Scenario) != `{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"}` {
+		t.Fatalf("expected zone scenario to carry through, got %s", first.Scenario)
+	}
 
 	second := zones[1]
 	if second.Role != "AT_ZONE" || second.BounceProbability.Valid {
@@ -258,6 +266,9 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 	}
 	if string(second.Explanation) != "null" {
 		t.Fatalf("expected missing explanation to default to null, got %s", second.Explanation)
+	}
+	if string(second.Scenario) != "null" {
+		t.Fatalf("expected missing scenario to default to null, got %s", second.Scenario)
 	}
 }
 
@@ -343,6 +354,7 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 		"evidence":{"model":{"explainer":"permutation_shap"}},
 		"decision":{"action":"BuySmall"},
 		"explanation":{"summary":"建議小量試單"},
+		"scenario":{"schema_version":"sr_scenario_v1","state":"BuySmall"},
 		"zones":[{
 			"data":{"price_low":580,"price_high":585,"method":"atr","role":"SUPPORT"},
 			"features":{"support":{"touch_count":4},"resistance":{"touch_count":1}},
@@ -356,6 +368,7 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 				"trading_recommendation":"BUY","confluence_count":1},
 			"evidence":{"support":{"targets":{"hold":{"final_probability":0.7}}}},
 			"explanation":{"role_summary":"此區為支撐"},
+			"scenario":{"schema_version":"sr_scenario_v1","state":"SUPPORT_RETEST"},
 			"lifecycle":{"status":"PENDING","resolved_role":null}
 		}]
 	}`)
@@ -377,13 +390,16 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 	if string(analysis.Explanation) != `{"summary":"建議小量試單"}` {
 		t.Fatalf("unexpected analysis explanation: %s", analysis.Explanation)
 	}
+	if string(analysis.Scenario) != `{"schema_version":"sr_scenario_v1","state":"BuySmall"}` {
+		t.Fatalf("unexpected analysis scenario: %s", analysis.Scenario)
+	}
 	if string(analysis.PeriodSummaries) != `[{"key":"short","label":"短期"}]` ||
 		string(analysis.AnalysisTips) != `["短期支撐守穩"]` ||
 		string(analysis.ChipSummary) != `{"missing":false,"score":42.5}` {
 		t.Fatalf("nested analysis summaries not persisted: %+v", analysis)
 	}
-	if len(zones) != 1 || string(zones[0].Evidence) == "null" || string(zones[0].Features) == "null" || string(zones[0].Explanation) == "null" {
-		t.Fatalf("nested zone features/evidence/explanation not persisted: %+v", zones)
+	if len(zones) != 1 || string(zones[0].Evidence) == "null" || string(zones[0].Features) == "null" || string(zones[0].Explanation) == "null" || string(zones[0].Scenario) == "null" {
+		t.Fatalf("nested zone features/evidence/explanation/scenario not persisted: %+v", zones)
 	}
 }
 

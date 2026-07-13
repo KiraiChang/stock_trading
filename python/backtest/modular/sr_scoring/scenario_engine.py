@@ -7,6 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from .formatting import (
+    fmt_pct as _fmt_pct,
+    fmt_price as _fmt_price,
+    fmt_signed_pct as _fmt_signed_pct,
+    role_label as _role_label,
+)
 from .pipeline_types import AnalysisEvidence
 from .types import RecentValidation, ZoneScore, ZoneType
 
@@ -14,59 +20,20 @@ from .types import RecentValidation, ZoneScore, ZoneType
 SCENARIO_SCHEMA_VERSION = "sr_scenario_v1"
 
 
-def _fmt_price(v: float) -> str:
-    return f"{v:.2f}"
-
-
-def _fmt_pct(v: float | None, digits: int = 1) -> str:
-    if v is None:
-        return "無資料"
-    return f"{v * 100:.{digits}f}%"
-
-
-def _fmt_signed_pct(v: float | None, digits: int = 2) -> str:
-    if v is None:
-        return "無資料"
-    sign = "+" if v > 0 else ""
-    return f"{sign}{v * 100:.{digits}f}%"
-
-
-def _role_label(role: str) -> str:
-    return {
-        ZoneType.SUPPORT.value: "支撐",
-        ZoneType.RESISTANCE.value: "壓力",
-        ZoneType.AT_ZONE.value: "方向未定",
-    }.get(role, role)
-
-
-def _zone_state(score: ZoneScore, status: str = "PENDING") -> str:
-    if status == "BROKEN":
-        return "BROKEN"
+def _zone_state(score: ZoneScore) -> str:
     if score.role == ZoneType.AT_ZONE.value:
         return "WAIT_FOR_DIRECTION"
     if score.recent_validation == RecentValidation.EXPIRED.value:
         return "RETEST_REQUIRED"
     if score.role == ZoneType.SUPPORT.value:
         return "SUPPORT_RETEST"
-    if score.role == ZoneType.RESISTANCE.value:
-        return "RESISTANCE_REJECTION"
-    return "UNKNOWN"
+    return "RESISTANCE_REJECTION"
 
 
-def build_zone_scenario(score: ZoneScore, status: str = "PENDING") -> dict[str, Any]:
+def build_zone_scenario(score: ZoneScore) -> dict[str, Any]:
     low = _fmt_price(score.price_low)
     high = _fmt_price(score.price_high)
-    state = _zone_state(score, status)
-
-    if state == "BROKEN":
-        return {
-            "schema_version": SCENARIO_SCHEMA_VERSION,
-            "state": state,
-            "title": "區間已失效",
-            "summary": f"{low} ~ {high} 已被後續價格突破或跌破，這筆舊情境只能作為歷史參考。",
-            "trigger_conditions": ["等待重新分析產生新的支撐/壓力區間"],
-            "invalidation_conditions": ["此情境已失效，不再作為進場或風險依據"],
-        }
+    state = _zone_state(score)
 
     if score.role == ZoneType.AT_ZONE.value:
         return {

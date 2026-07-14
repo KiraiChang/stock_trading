@@ -278,7 +278,7 @@
     Avoid: 'bg-red-900/40 text-red-300 border-red-700/60',
   }
   const positionActionText: Record<string, string> = {
-    HOLD: '持有', REDUCE_ON_BREAKDOWN: '跌破減碼', REDUCE: '減碼', EXIT: '出場',
+    HOLD: '條件式持有', REDUCE_ON_BREAKDOWN: '跌破減碼', REDUCE: '減碼', EXIT: '出場',
   }
   const positionActionClass: Record<string, string> = {
     HOLD: 'bg-blue-900/40 text-blue-300 border-blue-700/60',

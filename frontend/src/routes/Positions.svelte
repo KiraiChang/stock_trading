@@ -118,6 +118,10 @@
   function dt(value: string): string {
     return new Date(value).toLocaleString('zh-TW', { hour12: false })
   }
+  function conditionLabel(latest: PositionAnalysis): string {
+    if (latest.action === 'HOLD' && latest.evidence?.position_action_condition) return '條件式持有'
+    return latest.action_label
+  }
   const actionClass: Record<string, string> = {
     ENTER: 'bg-green-900/50 text-green-300', ENTER_SMALL: 'bg-emerald-900/40 text-emerald-300',
     WAIT: 'bg-gray-700/60 text-gray-300', AVOID: 'bg-red-900/40 text-red-300',
@@ -181,7 +185,7 @@
       {#if latest}
         <div class="flex justify-between gap-3 mb-4">
           <div><p class="text-white font-mono">{latest.symbol} · {latest.position_state}</p><p class="text-muted text-xs">{dt(latest.created_at)}</p></div>
-          <span class="px-3 py-1 rounded-full text-xs {actionClass[latest.action]}">{latest.action_label}</span>
+          <span class="px-3 py-1 rounded-full text-xs {actionClass[latest.action]}">{conditionLabel(latest)}</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
           <div><p class="text-muted text-xs">目前 → 目標</p><p class="text-white">{num(latest.shares)} → {num(latest.target_shares)}</p></div>

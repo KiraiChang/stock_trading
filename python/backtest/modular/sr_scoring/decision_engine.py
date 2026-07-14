@@ -330,7 +330,7 @@ def _structure_state(
             return "BREAKDOWN"
         if interaction["closed_below"]:
             return "SUPPORT_RECLAIM_INVALIDATED"
-        if previous_interaction and previous_interaction["touched"] and previous_interaction["closed_above"] and interaction["closed_above"]:
+        if previous_interaction and previous_interaction["touched"] and previous_interaction["closed_above"] and not interaction["closed_below"]:
             return "SUPPORT_RECLAIM_CONFIRMED"
         if interaction["touched"] and interaction["closed_above"]:
             return "SUPPORT_RECLAIM_CANDIDATE"

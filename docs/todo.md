@@ -369,6 +369,72 @@ score / recommendation、global metrics 與 API response serialization。功能�
 
 ---
 
+### T-022：訊號去重／冷卻機制
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Go / 訊號引擎 |
+| 建立日期 | 2026-07-14 |
+| 來源 | review `internal/signal` |
+
+`internal/signal/engine.go:79-83`：`Evaluate` 只要 `sig != nil` 就 `signals.Insert` +
+`redis.LPush("signal:queue")` + broadcast，沒有「與上一筆相同就不重發」的判斷。1m 排程
+（`scheduler.go:189`）在持續多頭/空頭下會對同一個 breakout/breakdown 反覆插入重複訊號、
+灌爆 `signal:queue` 與 WS。後續加入狀態去重或冷卻窗（例如同 symbol+type 一段時間內只發一次，
+或條件狀態未翻轉不重發）。
+
+---
+
+### T-023：突破/跌破回報「最相關」而非「最強」的 S/R 價位
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / 訊號引擎 |
+| 建立日期 | 2026-07-14 |
+| 來源 | review `internal/signal` |
+
+`internal/signal/breakout.go:29,48` 搭配 `support_resistance.go:99-108`：levels 依 `Strength`
+降序，迴圈回傳第一個符合者，因此訊號的 `Resistance`/`Support` 記的是「最強」而非價格剛跨越、
+最相關的那條，解讀上會誤導。應改為回報最近被跨越的價位。與 `docs/issue.md` I-014 相關，可一併處理。
+
+---
+
+### T-024：VOLUME_SPIKE 訊號時間戳改用 K 棒時間
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / 訊號引擎 |
+| 建立日期 | 2026-07-14 |
+| 來源 | review `internal/signal` |
+
+`internal/signal/breakout.go:78`：純爆量分支的 `Timestamp` 用 `time.Now()`，而
+BREAKOUT/BREAKDOWN 都用 `latestCandle.Timestamp`。對即時盤影響小，但用歷史資料或回測重算時
+會把爆量標到「現在」而非該 K 棒時間，時間戳錯誤。統一改用 `ts`。
+
+---
+
+### T-025：S/R 與 swing 極值偵測改容忍平頭
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / 訊號引擎 |
+| 建立日期 | 2026-07-14 |
+| 來源 | review `internal/signal` |
+
+`internal/signal/support_resistance.go:38,42` 與 `trend.go:52,63`：以嚴格 `>`／`<` 比較左右
+鄰居，兩根等高的雙頂／雙底（`high[i] == high[i+1]`）都不算 local extreme，會漏掉重要的平台型
+壓力/支撐，在 1m 高雜訊資料上尤其明顯。改用容忍等值（例如 `>=` 搭配去重，或加入寬容窗）避免漏平頭。
+
+---
+
 ## 已完成封存
 
 （目前沒有項目）

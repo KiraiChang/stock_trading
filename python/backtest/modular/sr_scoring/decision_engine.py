@@ -100,6 +100,49 @@ def _decision_summary_zone(
     }
 
 
+def _position_action_condition(primary_zone: Optional[ZoneScore], structure_state: str) -> dict[str, Any]:
+    if primary_zone is None:
+        return {
+            "state": structure_state,
+            "invalidation_price": None,
+            "recovery_price": None,
+            "reason_codes": ["NO_PRIMARY_ZONE"],
+        }
+
+    reason_codes: list[str] = []
+    if primary_zone.role == ZoneType.SUPPORT.value:
+        reason_codes.append("PRIMARY_SUPPORT")
+        if structure_state == "SUPPORT_RECLAIM_CANDIDATE":
+            reason_codes.append("SUPPORT_RECLAIM_AWAIT_CONFIRMATION")
+        elif structure_state == "SUPPORT_RECLAIM_CONFIRMED":
+            reason_codes.append("SUPPORT_RECLAIM_CONFIRMED")
+        elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+            reason_codes.append("SUPPORT_BREAKDOWN_RISK")
+        else:
+            reason_codes.append("SUPPORT_DEFENSE")
+        return {
+            "state": structure_state,
+            "invalidation_price": primary_zone.price_low,
+            "recovery_price": primary_zone.price_high,
+            "reason_codes": reason_codes,
+        }
+
+    if primary_zone.role == ZoneType.RESISTANCE.value:
+        return {
+            "state": structure_state,
+            "invalidation_price": primary_zone.price_high,
+            "recovery_price": primary_zone.price_low,
+            "reason_codes": ["PRIMARY_RESISTANCE", "UPSIDE_BREAKOUT_REQUIRED"],
+        }
+
+    return {
+        "state": structure_state,
+        "invalidation_price": primary_zone.price_low,
+        "recovery_price": primary_zone.price_high,
+        "reason_codes": ["WAIT_FOR_DIRECTION"],
+    }
+
+
 def _confidence_label(value: Optional[float], level: Optional[str]) -> str:
     if value is None:
         return "無資料"
@@ -145,13 +188,13 @@ def _market_regime(
 
     structure_label = {
         "NORMAL": "",
-        "RECOVERY_CANDIDATE": "短線測試支撐",
-        "RECOVERY": "短線收回支撐",
-        "RECOVERY_INVALIDATED": "短線結構轉弱",
+        "SUPPORT_RECLAIM_CANDIDATE": "支撐收復候選",
+        "SUPPORT_RECLAIM_CONFIRMED": "支撐收復確認",
+        "SUPPORT_RECLAIM_INVALIDATED": "支撐收復失效",
         "BREAKDOWN": "短線結構跌破",
     }.get(structure_state, structure_state)
     label = trend_label
-    if structure_state in ("RECOVERY_INVALIDATED", "BREAKDOWN"):
+    if structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         label = f"長期{trend_label.replace('趨勢', '')}，但{structure_label}"
     elif structure_label:
         label += f"、{structure_label}"
@@ -241,7 +284,7 @@ def _decision_action(
     structure_state = regime.get("structure_state")
     bullish_setup = primary in ("TREND_UP", "RANGE_BOUND") and primary_zone.role == ZoneType.SUPPORT.value
     bearish_setup = primary == "TREND_DOWN" or primary_zone.role == ZoneType.RESISTANCE.value
-    structure_broken = structure_state in ("RECOVERY_INVALIDATED", "BREAKDOWN")
+    structure_broken = structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN")
     if structure_broken:
         risk_notes.append("短線結構轉弱，市場訊號不得覆蓋跌破風險。")
         position_action = "EXIT" if structure_state == "BREAKDOWN" else "REDUCE_ON_BREAKDOWN"
@@ -275,18 +318,24 @@ def _decision_action(
     return "WATCH", "HOLD", "Hold", "等待", ["尚未形成足夠明確的進場優勢。"]
 
 
-def _structure_state(primary_zone: Optional[ZoneScore], interaction: Optional[dict[str, Any]]) -> str:
+def _structure_state(
+    primary_zone: Optional[ZoneScore],
+    interaction: Optional[dict[str, Any]],
+    previous_interaction: Optional[dict[str, Any]] = None,
+) -> str:
     if primary_zone is None or interaction is None:
         return "NORMAL"
     if primary_zone.role == ZoneType.SUPPORT.value:
         if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
             return "BREAKDOWN"
         if interaction["closed_below"]:
-            return "RECOVERY_INVALIDATED"
+            return "SUPPORT_RECLAIM_INVALIDATED"
+        if previous_interaction and previous_interaction["touched"] and previous_interaction["closed_above"] and interaction["closed_above"]:
+            return "SUPPORT_RECLAIM_CONFIRMED"
         if interaction["touched"] and interaction["closed_above"]:
-            return "RECOVERY"
+            return "SUPPORT_RECLAIM_CANDIDATE"
         if interaction["touched"]:
-            return "RECOVERY_CANDIDATE"
+            return "SUPPORT_RECLAIM_CANDIDATE"
     return "NORMAL"
 
 
@@ -301,6 +350,9 @@ def build_decision_summary(
     candle_high: Optional[float] = None,
     candle_low: Optional[float] = None,
     candle_close: Optional[float] = None,
+    previous_candle_high: Optional[float] = None,
+    previous_candle_low: Optional[float] = None,
+    previous_candle_close: Optional[float] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
     trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary)["trend_regime"]
@@ -309,12 +361,17 @@ def build_decision_summary(
         _zone_interaction(primary_zone, current_price, candle_high, candle_low, candle_close)
         if primary_zone else None
     )
+    previous_interaction = (
+        _zone_interaction(primary_zone, current_price, previous_candle_high, previous_candle_low, previous_candle_close)
+        if primary_zone and previous_candle_close is not None else None
+    )
+    structure_state = _structure_state(primary_zone, primary_interaction, previous_interaction)
     regime = _market_regime(
         global_trend,
         global_volatility,
         global_confidence,
         chip_summary,
-        _structure_state(primary_zone, primary_interaction),
+        structure_state,
     )
     market_action, position_action, action, action_label, risk_notes = _decision_action(
         regime, primary_zone, current_price, primary_interaction
@@ -378,6 +435,7 @@ def build_decision_summary(
         "market_regime": regime,
         "market_action": market_action,
         "position_action": position_action,
+        "position_action_condition": _position_action_condition(primary_zone, structure_state),
         "action": action,
         "action_label": action_label,
         "primary_zone": _decision_summary_zone(
@@ -396,6 +454,7 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
     scores = evidence.scores
     frame = scores.features.data.frame
     last = frame.iloc[-1]
+    previous = frame.iloc[-2] if len(frame) >= 2 else None
     return build_decision_summary(
         list(scores.zones),
         scores.features.data.current_price,
@@ -407,4 +466,7 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
         candle_high=float(last["high"]),
         candle_low=float(last["low"]),
         candle_close=float(last["close"]),
+        previous_candle_high=float(previous["high"]) if previous is not None else None,
+        previous_candle_low=float(previous["low"]) if previous is not None else None,
+        previous_candle_close=float(previous["close"]) if previous is not None else None,
     )

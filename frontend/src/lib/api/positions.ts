@@ -32,6 +32,39 @@ export type PositionAction =
   | 'ENTER' | 'ENTER_SMALL' | 'WAIT' | 'AVOID'
   | 'HOLD' | 'ADD' | 'REDUCE' | 'TAKE_PROFIT' | 'EXIT_STOP'
 
+export interface PositionActionCondition {
+  state?: string
+  invalidation_price?: number | null
+  recovery_price?: number | null
+  reason_codes?: string[]
+}
+
+export interface PositionAnalysisEvidence {
+  sr_decision_action?: string
+  take_profit_source?: string
+  position_action_condition?: PositionActionCondition
+  risk_sizing?: {
+    risk_budget?: number | null
+    per_share_risk?: number | null
+    max_shares?: number | null
+    excess_shares?: number | null
+  }
+  stops?: {
+    defense_price?: number | null
+    structural_stop?: number | null
+  }
+  rr?: {
+    market_rr?: number | null
+    position_rr?: number | null
+  }
+  pnl_impact?: {
+    realized_delta?: number | null
+    unrealized_before?: number | null
+    unrealized_after?: number | null
+  }
+  [key: string]: unknown
+}
+
 export interface PositionAnalysis {
   id: number
   symbol: string
@@ -59,7 +92,7 @@ export interface PositionAnalysis {
   unrealized_pnl_pct: number
   config: Record<string, number>
   reason: string[]
-  evidence: Record<string, unknown>
+  evidence: PositionAnalysisEvidence
   trigger_conditions: string[]
   invalidation_conditions: string[]
   rule_version: string
@@ -109,4 +142,3 @@ export async function adjustPosition(symbol: string, input: {
   })
   return response.position
 }
-

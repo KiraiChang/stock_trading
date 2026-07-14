@@ -187,11 +187,43 @@
           <div><p class="text-muted text-xs">目前 → 目標</p><p class="text-white">{num(latest.shares)} → {num(latest.target_shares)}</p></div>
           <div><p class="text-muted text-xs">本次調整</p><p class="text-white">{latest.adjustment_side} {num(Math.abs(latest.adjustment_shares))}</p></div>
           <div><p class="text-muted text-xs">預估金額</p><p class="text-white">{num(latest.adjustment_amount)}</p></div>
-          <div><p class="text-muted text-xs">RR</p><p class="text-white">{num(latest.risk_reward_ratio)}</p></div>
-          <div><p class="text-muted text-xs">停損</p><p class="text-white">{num(latest.stop_loss_price)}</p></div>
+          <div><p class="text-muted text-xs">Market RR</p><p class="text-white">{num(latest.evidence?.rr?.market_rr ?? latest.risk_reward_ratio)}</p></div>
+          <div><p class="text-muted text-xs">Position RR</p><p class="text-white">{num(latest.evidence?.rr?.position_rr)}</p></div>
+          <div><p class="text-muted text-xs">Defense Price</p><p class="text-white">{num(latest.evidence?.stops?.defense_price ?? latest.stop_loss_price)}</p></div>
+          <div><p class="text-muted text-xs">Structural Stop</p><p class="text-white">{num(latest.evidence?.stops?.structural_stop ?? latest.stop_loss_price)}</p></div>
           <div><p class="text-muted text-xs">停利</p><p class="text-white">{num(latest.take_profit_price)}</p></div>
           <div><p class="text-muted text-xs">風險金額</p><p class="text-white">{num(latest.risk_amount)}</p></div>
           <div><p class="text-muted text-xs">未實現損益</p><p class={latest.unrealized_pnl >= 0 ? 'text-rise' : 'text-fall'}>{num(latest.unrealized_pnl)} ({pct(latest.unrealized_pnl_pct)})</p></div>
+        </div>
+        <div class="mt-4 grid md:grid-cols-4 gap-3 text-xs">
+          <div class="border border-border rounded p-2">
+            <p class="text-muted">Risk Budget</p>
+            <p class="text-white font-mono">{num(latest.evidence?.risk_sizing?.risk_budget)}</p>
+          </div>
+          <div class="border border-border rounded p-2">
+            <p class="text-muted">Per Share Risk</p>
+            <p class="text-white font-mono">{num(latest.evidence?.risk_sizing?.per_share_risk)}</p>
+          </div>
+          <div class="border border-border rounded p-2">
+            <p class="text-muted">Max Shares</p>
+            <p class="text-white font-mono">{num(latest.evidence?.risk_sizing?.max_shares)}</p>
+          </div>
+          <div class="border border-border rounded p-2">
+            <p class="text-muted">Excess Shares</p>
+            <p class="text-white font-mono">{num(latest.evidence?.risk_sizing?.excess_shares)}</p>
+          </div>
+        </div>
+        {#if latest.evidence?.position_action_condition}
+          <div class="mt-3 grid md:grid-cols-3 gap-3 text-xs">
+            <div><p class="text-muted">防守線</p><p class="text-fall font-mono">{num(latest.evidence.position_action_condition.invalidation_price)}</p></div>
+            <div><p class="text-muted">回穩線</p><p class="text-rise font-mono">{num(latest.evidence.position_action_condition.recovery_price)}</p></div>
+            <div><p class="text-muted">Reason Codes</p><p class="text-white font-mono break-words">{latest.evidence.position_action_condition.reason_codes?.join(' / ') || '—'}</p></div>
+          </div>
+        {/if}
+        <div class="mt-3 grid md:grid-cols-3 gap-3 text-xs">
+          <div><p class="text-muted">Realized P&L Impact</p><p class={(latest.evidence?.pnl_impact?.realized_delta ?? 0) >= 0 ? 'text-rise' : 'text-fall'}>{num(latest.evidence?.pnl_impact?.realized_delta)}</p></div>
+          <div><p class="text-muted">Unrealized Before</p><p class={(latest.evidence?.pnl_impact?.unrealized_before ?? 0) >= 0 ? 'text-rise' : 'text-fall'}>{num(latest.evidence?.pnl_impact?.unrealized_before)}</p></div>
+          <div><p class="text-muted">Unrealized After</p><p class={(latest.evidence?.pnl_impact?.unrealized_after ?? 0) >= 0 ? 'text-rise' : 'text-fall'}>{num(latest.evidence?.pnl_impact?.unrealized_after)}</p></div>
         </div>
         <div class="mt-3">{#each latest.reason as reason}<p class="text-muted text-xs">• {reason}</p>{/each}</div>
       {:else}<p class="text-muted text-sm">尚無分析；空手股票也可直接執行分析。</p>{/if}

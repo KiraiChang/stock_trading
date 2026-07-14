@@ -17,6 +17,8 @@
     type SRZone,
     type SRZoneSummaryItem,
     type ZoneTier,
+    type ConfidenceLevel,
+    type TradingRecommendation,
     type SRScoringTrainJob,
     type TrainJobStatus,
     type ModelStatus,
@@ -195,7 +197,7 @@
     { key: 'chip', label: '籌碼', weight: 15 },
     { key: 'trend', label: 'Trend', weight: 12.75 },
     { key: 'volume', label: 'Volume', weight: 12.75 },
-    { key: 'confidence', label: 'Confidence', weight: 8.5 },
+    { key: 'confidence', label: 'Zone Confidence', weight: 8.5 },
   ]
 
   interface TierGroup {
@@ -292,6 +294,9 @@
     RECOVERY_CANDIDATE: '短線測試支撐',
     RECOVERY: '短線收回支撐',
     RECOVERY_INVALIDATED: '短線結構轉弱',
+    SUPPORT_RECLAIM_CANDIDATE: '支撐收復候選',
+    SUPPORT_RECLAIM_CONFIRMED: '支撐收復確認',
+    SUPPORT_RECLAIM_INVALIDATED: '支撐收復失效',
     BREAKDOWN: '短線結構跌破',
   }
   const regimeFlagText: Record<string, string> = {
@@ -306,6 +311,10 @@
     if (action === 'BuySmall') return 'BUY_SMALL'
     if (action === 'Avoid') return 'AVOID'
     return 'WATCH'
+  }
+
+  function positionReasonCodesText(codes?: string[]): string {
+    return codes && codes.length > 0 ? codes.join(' / ') : '—'
   }
 
   // 白話交易建議：保持「輔助判斷」語氣，不寫成保證獲利或自動交易指令，
@@ -720,7 +729,7 @@
       </label>
       <p class="text-muted text-xs mt-2">
         用 ATR 通道與成交量分布兩種方法建立價格區間（zone），依歷史觸碰事件訓練的機率模型算出反彈/跌破機率，
-        支撐/壓力強度分數由該機率依可信度收縮而來（觸碰次數越少越保守），兩者不會互相矛盾。抓取根數指分析用的
+        支撐/壓力強度分數由該機率依區間辨識信心收縮而來（觸碰次數越少越保守），兩者不會互相矛盾。抓取根數指分析用的
         歷史K棒數量（預設 250，至少 35 根）。需要先在下方訓練過機率模型才能分析；若勾選重用且找到近期快照，
         本次不會重新呼叫模型。
       </p>
@@ -967,6 +976,23 @@
               </div>
             </div>
 
+            {#if decisionSummary.position_action_condition}
+              <div class="grid sm:grid-cols-3 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">防守線</p>
+                  <p class="text-fall font-mono">{fmt(decisionSummary.position_action_condition.invalidation_price)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">回穩線</p>
+                  <p class="text-rise font-mono">{fmt(decisionSummary.position_action_condition.recovery_price)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Reason Codes</p>
+                  <p class="text-white font-mono break-words">{positionReasonCodesText(decisionSummary.position_action_condition.reason_codes)}</p>
+                </div>
+              </div>
+            {/if}
+
             {#if decisionSummary.primary_zone}
               <div class="grid lg:grid-cols-[1.2fr_1fr] gap-4 mb-4">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/60">
@@ -978,7 +1004,7 @@
                   <p class="text-xs text-muted mt-1">{noviceRoleText[decisionSummary.primary_zone.role] ?? decisionSummary.primary_zone.role} · {decisionSummary.primary_zone.reason}</p>
                   <div class="flex flex-wrap gap-2 mt-3 text-[11px]">
                     <span class="text-white">{decisionSummary.primary_zone.zone_interaction?.state_label ?? '尚未測試'}</span>
-                    <span class="text-muted">信心 {decisionSummary.confidence_explanation.label}</span>
+                    <span class="text-muted">區間辨識信心 {decisionSummary.confidence_explanation.label}</span>
                     <span class="text-muted">Score {fmtScore100(decisionSummary.primary_zone.trading_score)}</span>
                     <span class="text-muted">EV {fmtSignedPct(decisionSummary.primary_zone.expected_value)}</span>
                     <span class="text-muted">RR {fmtRatio(decisionSummary.primary_zone.risk_reward_ratio)}</span>
@@ -1010,10 +1036,10 @@
             {/if}
 
             <details class="text-xs">
-              <summary class="cursor-pointer text-muted hover:text-white">信心來源與次要區間</summary>
+              <summary class="cursor-pointer text-muted hover:text-white">區間辨識信心來源與次要區間</summary>
               <div class="mt-3 grid md:grid-cols-2 gap-3">
                 <div class="space-y-2">
-                  <p class="text-white font-medium">Confidence {decisionSummary.confidence_explanation.label}</p>
+                  <p class="text-white font-medium">Zone Confidence {decisionSummary.confidence_explanation.label}</p>
                   {#each decisionSummary.confidence_explanation.formula_factors as f}
                     <p class="text-muted">{f.label}：{f.description}</p>
                   {/each}
@@ -1048,7 +1074,7 @@
                       <div class="flex items-center justify-between gap-2 mb-2">
                         <p class="text-muted text-xs">{summaryTitle(side)}</p>
                         {#if item}
-                          <span class="text-[11px] text-muted">信心 {noviceConfidenceText[item.confidence_level] ?? item.confidence_level}</span>
+                          <span class="text-[11px] text-muted">區間辨識信心 {noviceConfidenceText[item.confidence_level] ?? item.confidence_level}</span>
                         {/if}
                       </div>
                       <p class="font-mono text-sm {summaryAccent(side)}">{summaryPriceText(item)}</p>
@@ -1097,7 +1123,7 @@
             <p class="text-muted text-xs mb-1">主要觀察區間：{fmt(mainZone.price_low)} ~ {fmt(mainZone.price_high)}（{watchRangeText(mainZone)}）</p>
             <p class="text-muted text-xs mb-2">{invalidationText(mainZone)}</p>
             <p class="text-xs">
-              <span class="text-muted">整體信心：</span>
+              <span class="text-muted">區間辨識信心：</span>
               <span class="{noviceConfidenceClass[mainZone.confidence_level] ?? 'text-white'} font-medium">
                 {noviceConfidenceText[mainZone.confidence_level] ?? mainZone.confidence_level}
               </span>
@@ -1194,7 +1220,7 @@
                 <p class="font-mono {signedClass(current.global_expected_value)}">{fmtSignedPct(current.global_expected_value)}</p>
               </div>
               <div>
-                <p class="text-muted mb-1">Global Confidence</p>
+                        <p class="text-muted mb-1">Global Zone Confidence</p>
                 <p class="font-mono text-white">{fmtPct(current.global_confidence)}</p>
               </div>
               <div>
@@ -1247,7 +1273,7 @@
                         <p class="text-muted text-xs mt-1">{invalidationText(z)}</p>
                       </div>
                       <div class="text-right shrink-0">
-                        <p class="text-muted text-xs mb-1">信心</p>
+                        <p class="text-muted text-xs mb-1">區間辨識信心</p>
                         <p class="{noviceConfidenceClass[z.confidence_level] ?? 'text-white'} font-medium text-sm">
                           {noviceConfidenceText[z.confidence_level] ?? z.confidence_level}
                         </p>
@@ -1397,7 +1423,7 @@
                           </div>
                           <div>
                             <p class="text-muted mb-1 flex items-center gap-1">
-                              可信度
+                              區間辨識信心
                               <span class="inline-flex items-center px-1.5 py-0 rounded-full text-[10px] font-medium {confidenceLevelClass[z.confidence_level] ?? ''}">
                                 {confidenceLevelText[z.confidence_level] ?? z.confidence_level}
                               </span>
@@ -1431,8 +1457,12 @@
                         <!-- 交易數字列：機率、期望報酬、期望值、風險報酬比 -->
                         <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
                           <div>
-                            <p class="text-muted mb-1">反彈機率 / 跌破機率</p>
-                            <p class="text-white font-mono">{fmtPct(z.bounce_probability)} / {fmtPct(z.break_probability)}</p>
+                            <p class="text-muted mb-1">反彈/守住機率</p>
+                            <p class="text-white font-mono">{fmtPct(z.bounce_probability)}</p>
+                          </div>
+                          <div>
+                            <p class="text-muted mb-1">跌破/突破機率</p>
+                            <p class="text-white font-mono">{fmtPct(z.break_probability)}</p>
                           </div>
                           <div>
                             <p class="text-muted mb-1">Expected Gain / Loss</p>
@@ -1510,7 +1540,7 @@
                           <div><p class="mb-1">相對量能</p><p class="text-white">{z.relative_volume === null ? '—' : `${z.relative_volume.toFixed(2)}x`}</p></div>
                           <div><p class="mb-1">區間動能值</p><p class="{signedClass(z.zone_momentum)}">{fmtSignedPct(z.zone_momentum)}</p></div>
                         </div>
-                        <p class="text-[11px] text-muted mt-1">可信度只用目前角色（{noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}）方向的觸碰樣本計算，不含另一方向</p>
+                        <p class="text-[11px] text-muted mt-1">區間辨識信心只用目前角色（{noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}）方向的觸碰樣本計算，不含另一方向；不是反彈勝率</p>
                       </div>
                     {/if}
                   </div>

@@ -116,6 +116,56 @@ func TestBuildSnapshotNewMarketBuyDoesNotDirectlyAddExistingPosition(t *testing.
 	}
 }
 
+func TestBuildSnapshotConditionalHoldEvidence(t *testing.T) {
+	a := &Analyzer{config: DefaultConfig()}
+	sr := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{
+			"market_action":"WATCH",
+			"position_action":"HOLD",
+			"action":"Hold",
+			"position_action_condition":{
+				"state":"SUPPORT_RECLAIM_CANDIDATE",
+				"invalidation_price":90,
+				"recovery_price":92,
+				"reason_codes":["PRIMARY_SUPPORT","SUPPORT_RECLAIM_AWAIT_CONFIRMATION"]
+			}
+		}`),
+	}
+	zones := []store.SRZone{
+		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
+		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
+	}
+
+	result, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 95}, sr, zones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action != ActionHold || result.ActionLabel != "條件式持有" {
+		t.Fatalf("expected conditional hold, got %+v", result)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal([]byte(result.Evidence), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	condition := evidence["position_action_condition"].(map[string]any)
+	if condition["invalidation_price"].(float64) != 90 || condition["recovery_price"].(float64) != 92 {
+		t.Fatalf("unexpected condition evidence: %+v", condition)
+	}
+	riskSizing := evidence["risk_sizing"].(map[string]any)
+	if riskSizing["risk_budget"].(float64) != 10000 || riskSizing["per_share_risk"].(float64) != 10 || riskSizing["max_shares"].(float64) != 1000 {
+		t.Fatalf("unexpected risk sizing evidence: %+v", riskSizing)
+	}
+	stops := evidence["stops"].(map[string]any)
+	if stops["defense_price"].(float64) != 90 || stops["structural_stop"].(float64) != 90 {
+		t.Fatalf("unexpected stop evidence: %+v", stops)
+	}
+	rr := evidence["rr"].(map[string]any)
+	if rr["market_rr"].(float64) != 2 || rr["position_rr"].(float64) != 5 {
+		t.Fatalf("unexpected rr evidence: %+v", rr)
+	}
+}
+
 func TestBuildSnapshotUsesNewPositionActionForExistingPositionRisk(t *testing.T) {
 	a := &Analyzer{config: DefaultConfig()}
 	zones := []store.SRZone{

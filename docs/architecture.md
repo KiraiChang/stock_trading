@@ -236,7 +236,9 @@ Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
 成本採移動加權平均。交易事件不可修改或刪除；資料更正必須新增 `ADJUSTMENT`
 並記錄原因。`ADJUSTMENT` 是無交易價格、無現金流的 projection 校正，只覆寫校正後
 股數與 AVG，不改變由 SELL 累積的 `realized_pnl`；實際成交必須記為 BUY/SELL。
-分析輸出包含目前／目標／調整股數、風險金額、RR、觸發與失效條件。若 SR 決策為
+分析輸出包含目前／目標／調整股數、風險金額、RR、觸發與失效條件。`HOLD`
+若帶有 `position_action_condition`，必須解讀為條件式持有，並顯示防守線
+（`invalidation_price`）、回穩線（`recovery_price`）與 reason codes。若 SR 決策為
 Buy/BuySmall、存在有效停損支撐但已無上方壓力，停利目標以可設定的固定 R 倍數推導，
 預設為 2R，避免突破後因缺少壓力 zone 而無法建立或增加部位。
 每次分析都新增一筆快照，不覆蓋舊結果。
@@ -252,6 +254,11 @@ Analysis 是決策快照層，負責把 FLAT/LONG 情境、AVG 成本、風險�
 收斂成 Action、目標股數、停損、停利、RR、reason/evidence。`/trade-analysis/*`
 facade 回傳同一份 `position_analyses` 快照格式，讓新入口不需要先分辨「支撐
 壓力分析」或「持股分析」。
+
+Position Analysis 的細節拆解放在 `evidence` JSON：`risk_sizing` 顯示
+Risk Budget → Per Share Risk → Max Shares → Excess Shares；`stops` 拆成
+Defense Price 與 Structural Stop；`rr` 拆成 Market RR 與 Position RR；`pnl_impact`
+顯示執行減碼/出場後的 realized delta 與 unrealized before/after。
 
 SR 快照由 `SRAnalysisProvider` 統一處理重用與重算。Trade Analysis 與 Position
 Analysis 預設會優先重用同 symbol/timeframe 且仍在設定時效內的 SR 快照；呼叫端

@@ -563,6 +563,13 @@ metadata 與同一份籌碼摘要，必須產生完全相同的 `decision_summar
     },
     "action": "BuySmall",
     "action_label": "小量試單",
+    "position_action": "HOLD",
+    "position_action_condition": {
+      "state": "SUPPORT_RECLAIM_CANDIDATE",
+      "invalidation_price": 960.0,
+      "recovery_price": 970.0,
+      "reason_codes": ["PRIMARY_SUPPORT", "SUPPORT_RECLAIM_AWAIT_CONFIRMATION"]
+    },
     "primary_zone": { "zone_id": 16, "role": "SUPPORT", "reason": "高信心支撐且風險報酬仍可接受" },
     "market_context": [],
     "confidence_explanation": {},
@@ -612,6 +619,8 @@ Python 測試與 API 範例。
 
 Action 應由 Market Regime、primary zone、`trading_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
 
+`position_action=HOLD` 不代表無條件持有；若有 `position_action_condition`，前端必須顯示為「條件式持有」，並列出 `invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`。
+
 v1 action pipeline：
 
 1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
@@ -634,6 +643,19 @@ v1 setup 定義：
 
 若 `expected_value` 或 `risk_reward_ratio` 缺失，不得判定 strong setup；缺失值只允許進入
 `Hold`、`BuySmall` 的保守觀察語境，除非之後另有明確規則。
+
+### Reclaim 狀態
+
+支撐收復不得用單根 K 直接宣告確認：
+
+| State | 條件 |
+|---|---|
+| `SUPPORT_RECLAIM_CANDIDATE` | 最新 K 的 low 進入支撐 zone，且 close 收回 `zone.high` 上方；這只代表候選，不代表確認 |
+| `SUPPORT_RECLAIM_CONFIRMED` | 前一根 K 已收回 `zone.high` 上方，且最新 K 沒有重新收破 `zone.low` |
+| `SUPPORT_RECLAIM_INVALIDATED` | 最新 K 收破 `zone.low`，支撐收復失效 |
+| `BREAKDOWN` | primary zone 近期驗證已失效或結構性跌破 |
+
+這些狀態只影響 Decision/Scenario 與 Position Action 的條件呈現，不改寫 zone 的原始機率、EV/RR 或 score。
 
 ### Primary Zone 與 Secondary Zones
 
@@ -680,14 +702,16 @@ Market Context 建議包含：
 
 - 整體趨勢：`global_trend`、MA 位置、趨勢方向。
 - 整體波動：`global_volatility`、是否高波動、區間寬度是否偏大。
-- 整體信心：`global_confidence` 與資料完整度。
+- 整體區間辨識信心：`global_confidence` 與資料完整度。
 - 籌碼摘要：`chip_summary` 的方向、分數、缺漏狀態。
 - 模型狀態：`model_version`、`model_config_hash`、訓練時間或資料不足提示。
 - 共同風險：例如高波動、低信心、價格離主交易區太遠、籌碼缺漏。
 
-Zone 卡片只保留：價位區間、距離現價、role、bounce/break 機率、EV/RR、recent validation、volume confirmation、confluence、該 zone 的 confidence 與該 zone 獨有原因。這能避免每張卡片重複描述趨勢、籌碼或模型狀態。
+Zone 卡片只保留：價位區間、距離現價、role、bounce/break 機率、EV/RR、recent validation、volume confirmation、confluence、該 zone 的 Zone Confidence（區間辨識信心）與該 zone 獨有原因。這能避免每張卡片重複描述趨勢、籌碼或模型狀態。
 
-### Confidence 透明化
+### Zone Confidence 透明化
+
+`confidence` 的產品名稱是 Zone Confidence／區間辨識信心，代表這個價格區間被辨識為有效支撐/壓力的可靠度；它不是反彈勝率。反彈/守住機率與跌破/突破機率必須以 `bounce_probability`、`break_probability` 分開顯示。
 
 前端預設顯示 `79%（高）` 這類人可讀格式，展開後顯示因子貢獻。第一版應先忠實揭露目前既有公式內因子：
 

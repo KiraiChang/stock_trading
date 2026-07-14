@@ -194,10 +194,12 @@ def test_recovery_invalidated_overrides_long_term_bullish_regime():
     ds = _summary([zone], current_price=97.5, candle_high=100.5, candle_low=97.0, candle_close=97.5)
 
     assert ds["market_regime"]["trend_regime"] == "TREND_UP"
-    assert ds["market_regime"]["structure_state"] == "RECOVERY_INVALIDATED"
-    assert "長期偏多，但短線結構轉弱" in ds["market_regime"]["label"]
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_INVALIDATED"
+    assert "長期偏多，但支撐收復失效" in ds["market_regime"]["label"]
     assert ds["market_action"] == "AVOID"
     assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
+    assert ds["position_action_condition"]["invalidation_price"] == 98.0
+    assert "SUPPORT_BREAKDOWN_RISK" in ds["position_action_condition"]["reason_codes"]
 
 
 def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
@@ -210,6 +212,42 @@ def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
     assert interaction["closed_above"] is True
     assert interaction["closed_inside"] is False
     assert interaction["state_label"] == "收回區間上方"
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CANDIDATE"
+    assert ds["position_action_condition"]["recovery_price"] == 100.0
+
+
+def test_support_reclaim_confirmed_requires_following_bar_not_breaking_back_down():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=100.5,
+        candle_close=101.0,
+        # build_decision_summary callers pass these directly in production.
+    )
+
+    assert ds["market_regime"]["structure_state"] == "NORMAL"
+
+    ds = build_decision_summary(
+        [zone],
+        101.0,
+        0.03,
+        0.02,
+        {"confidence": 0.72, "expected_value": 0.01, "risk_reward_ratio": 1.5},
+        {"missing": False, "score": 55.0, "signal": "BULLISH"},
+        _bundle(),
+        candle_high=102.0,
+        candle_low=100.5,
+        candle_close=101.0,
+        previous_candle_high=101.0,
+        previous_candle_low=99.0,
+        previous_candle_close=100.5,
+    )
+
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert "SUPPORT_RECLAIM_CONFIRMED" in ds["position_action_condition"]["reason_codes"]
 
 
 def test_chip_missing_is_exposed_in_context():

@@ -273,7 +273,12 @@ export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
 export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
 export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'
 export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
-export type SRStructureState = 'NORMAL' | 'RECOVERY_CANDIDATE' | 'RECOVERY' | 'RECOVERY_INVALIDATED' | 'BREAKDOWN'
+export type SRStructureState =
+  | 'NORMAL'
+  | 'SUPPORT_RECLAIM_CANDIDATE'
+  | 'SUPPORT_RECLAIM_CONFIRMED'
+  | 'SUPPORT_RECLAIM_INVALIDATED'
+  | 'BREAKDOWN'
 export type SRVolatilityState = 'NORMAL' | 'HIGH_VOLATILITY'
 export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY'
 
@@ -326,6 +331,13 @@ export interface SRDecisionZoneSummary {
   reason: string
 }
 
+export interface SRPositionActionCondition {
+  state: SRStructureState | string
+  invalidation_price: number | null
+  recovery_price: number | null
+  reason_codes: string[]
+}
+
 export interface SRConfidenceFactor {
   key: string
   value: number | null
@@ -346,6 +358,7 @@ export interface SRDecisionSummary {
   market_regime: SRMarketRegime
   market_action?: SRMarketAction
   position_action?: SRPositionAction
+  position_action_condition?: SRPositionActionCondition
   action: SRDecisionAction
   action_label: string
   primary_zone: SRDecisionZoneSummary | null

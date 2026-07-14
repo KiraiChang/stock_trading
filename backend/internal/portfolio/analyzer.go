@@ -166,10 +166,12 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 
 	var stop, takeProfit, riskAmount, rewardAmount, rr store.NullFloat64
 	fullTarget := 0.0
+	perShareRisk := 0.0
 	if support != nil && current > support.PriceLow {
 		stop = store.NewNullFloat64(support.PriceLow)
+		perShareRisk = current - support.PriceLow
 		capitalShares := math.Floor(a.config.MaxPositionValue / current)
-		riskShares := math.Floor(a.config.MaxRiskAmount / (current - support.PriceLow))
+		riskShares := math.Floor(a.config.MaxRiskAmount / perShareRisk)
 		fullTarget = math.Max(0, math.Min(capitalShares, riskShares))
 	}
 	takeProfitSource := ""
@@ -246,7 +248,7 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 				target = fullTarget
 				action, label = ActionReduce, "降至風險上限"
 			} else {
-				action, label = ActionHold, "繼續持有"
+				action, label = ActionHold, holdLabel(srDecision.Condition)
 			}
 		}
 	}
@@ -264,8 +266,42 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 	if takeProfit.Valid {
 		rewardAmount = store.NewNullFloat64(math.Max(0, (takeProfit.Float64-current)*target))
 	}
+	marketRR := nullableFloat(rr)
+	positionRR := nullableFloat(store.NullFloat64{})
+	if state == StateLong && takeProfit.Valid && stop.Valid && position.AvgCost > stop.Float64 {
+		positionRR = (takeProfit.Float64 - position.AvgCost) / (position.AvgCost - stop.Float64)
+	}
+	conditionInvalidation := nullableFloat(store.NullFloat64{})
+	if srDecision.Condition.InvalidationPrice != nil {
+		conditionInvalidation = *srDecision.Condition.InvalidationPrice
+	}
+	defensePrice := nullableFloat(stop)
+	if srDecision.Condition.InvalidationPrice != nil {
+		defensePrice = *srDecision.Condition.InvalidationPrice
+	}
+	recoveryPrice := nullableFloat(store.NullFloat64{})
+	if srDecision.Condition.RecoveryPrice != nil {
+		recoveryPrice = *srDecision.Condition.RecoveryPrice
+	}
+	structuralStop := nullableFloat(stop)
+	excessShares := 0.0
+	if fullTarget > 0 {
+		excessShares = math.Max(0, position.Shares-fullTarget)
+	}
+	realizedDelta := 0.0
+	if delta < 0 {
+		realizedDelta = (current - position.AvgCost) * math.Abs(delta)
+	}
+	unrealizedAfter := 0.0
+	if state == StateLong {
+		heldShares := math.Min(target, position.Shares)
+		unrealizedAfter = (current - position.AvgCost) * heldShares
+	}
 	if stop.Valid {
 		invalidations = append(invalidations, fmt.Sprintf("收盤跌破 %.2f", stop.Float64))
+	}
+	if srDecision.Condition.RecoveryPrice != nil {
+		triggers = append(triggers, fmt.Sprintf("收盤站回 %.2f 並維持，條件式持有轉強", *srDecision.Condition.RecoveryPrice))
 	}
 	if takeProfit.Valid {
 		triggers = append(triggers, fmt.Sprintf("價格接近或突破 %.2f", takeProfit.Float64))
@@ -281,6 +317,31 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		"support_zone":       zoneDetail(support),
 		"resistance_zone":    zoneDetail(resistance),
 		"take_profit_source": takeProfitSource,
+		"position_action_condition": map[string]any{
+			"state":              srDecision.Condition.State,
+			"invalidation_price": conditionInvalidation,
+			"recovery_price":     recoveryPrice,
+			"reason_codes":       srDecision.Condition.ReasonCodes,
+		},
+		"risk_sizing": map[string]any{
+			"risk_budget":    a.config.MaxRiskAmount,
+			"per_share_risk": nullablePositive(perShareRisk),
+			"max_shares":     fullTarget,
+			"excess_shares":  excessShares,
+		},
+		"stops": map[string]any{
+			"defense_price":   defensePrice,
+			"structural_stop": structuralStop,
+		},
+		"rr": map[string]any{
+			"market_rr":   marketRR,
+			"position_rr": positionRR,
+		},
+		"pnl_impact": map[string]any{
+			"realized_delta":    realizedDelta,
+			"unrealized_before": unrealized,
+			"unrealized_after":  unrealizedAfter,
+		},
 	})
 	return &store.PositionAnalysis{
 		Symbol: position.Symbol, PositionState: state, PositionVersion: position.Version,
@@ -403,7 +464,15 @@ func decisionAction(raw store.RawJSON) string {
 type srDecision struct {
 	MarketAction   string
 	PositionAction string
+	Condition      positionActionCondition
 	Legacy         bool
+}
+
+type positionActionCondition struct {
+	State             string
+	InvalidationPrice *float64
+	RecoveryPrice     *float64
+	ReasonCodes       []string
 }
 
 func parseDecision(raw store.RawJSON) srDecision {
@@ -411,17 +480,31 @@ func parseDecision(raw store.RawJSON) srDecision {
 		Action         string `json:"action"`
 		MarketAction   string `json:"market_action"`
 		PositionAction string `json:"position_action"`
+		Condition      struct {
+			State             string   `json:"state"`
+			InvalidationPrice *float64 `json:"invalidation_price"`
+			RecoveryPrice     *float64 `json:"recovery_price"`
+			ReasonCodes       []string `json:"reason_codes"`
+		} `json:"position_action_condition"`
 	}
 	_ = json.Unmarshal([]byte(raw), &payload)
+	condition := positionActionCondition{
+		State:             payload.Condition.State,
+		InvalidationPrice: payload.Condition.InvalidationPrice,
+		RecoveryPrice:     payload.Condition.RecoveryPrice,
+		ReasonCodes:       payload.Condition.ReasonCodes,
+	}
 	if payload.MarketAction != "" {
 		return srDecision{
 			MarketAction:   normalizeMarketAction(payload.MarketAction),
 			PositionAction: payload.PositionAction,
+			Condition:      condition,
 		}
 	}
 	return srDecision{
 		MarketAction:   normalizeMarketAction(payload.Action),
 		PositionAction: payload.PositionAction,
+		Condition:      condition,
 		Legacy:         true,
 	}
 }
@@ -450,6 +533,27 @@ func zoneDetail(z *store.SRZone) any {
 		"role": effectiveRole(*z), "tier": z.Tier, "confidence": z.Confidence,
 		"trading_score": z.TradingScore, "status": z.Status,
 	}
+}
+
+func holdLabel(condition positionActionCondition) string {
+	if condition.InvalidationPrice != nil || condition.RecoveryPrice != nil || len(condition.ReasonCodes) > 0 {
+		return "條件式持有"
+	}
+	return "繼續持有"
+}
+
+func nullableFloat(v store.NullFloat64) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Float64
+}
+
+func nullablePositive(v float64) any {
+	if v <= 0 {
+		return nil
+	}
+	return v
 }
 
 func (a *Analyzer) currentTime() time.Time {

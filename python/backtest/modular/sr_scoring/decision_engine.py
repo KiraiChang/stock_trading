@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from .model import ModelBundle
-from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneType
+from .types import ConfidenceLevel, RecentValidation, VolumeConfirmation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
 
 
@@ -23,6 +23,144 @@ def _distance_pct_to_zone(z: ZoneScore, current_price: float) -> float:
     if current_price < z.price_low:
         return (z.price_low - current_price) / current_price
     return (current_price - z.price_high) / current_price
+
+
+# entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：
+#   1. base：純粹的「單一 zone 進場相關性」，與 scoring.py 的 entry_relevance_score
+#      同定義（優先沿用 scoring 算好的 breakdown，合成 zone 才用簡化 fallback）。
+#      這是「回報值」——decision_summary 各 zone 對外輸出的 entry_relevance_score
+#      一律用 base，確保跟 zones[] 的同名欄位一致、不會同名不同義。
+#   2. with-events：base 再疊加 market_event 修正（reclaim/reversal +8、高量跌破 -25），
+#      僅供 decision 內部 gating（_decision_action / _pick_primary_zone）使用，不對外輸出。
+#      市場事件對外已有 market_events / short_term_regime 專門呈現，不重複灌進回報分數。
+def _entry_relevance_base_breakdown(z: ZoneScore, current_price: float) -> dict[str, float]:
+    base = dict(z.entry_relevance_breakdown or {})
+    if not base:
+        distance_pct = _distance_pct_to_zone(z, current_price)
+        base = {
+            "distance": max(0.0, 1.0 - min(distance_pct / 0.08, 1.0)) * 30.0,
+            "ev_rr": (
+                (max(0.0, min(((z.expected_value or 0.0) + 0.02) / 0.07, 1.0)) * 15.0)
+                + (min((z.risk_reward_ratio or 0.0) / 2.5, 1.0) * 15.0)
+            ),
+            "validation": 0.0 if z.recent_validation == RecentValidation.EXPIRED.value else 12.0,
+            "volume": 5.0,
+            "role_readiness": 0.0 if z.role == ZoneType.AT_ZONE.value else 10.0,
+            "confidence": z.confidence * 10.0,
+        }
+    return base
+
+
+def _market_event_adjustment(z: ZoneScore, market_events: Optional[list[dict[str, Any]]]) -> float:
+    event_score = 0.0
+    for event in market_events or []:
+        ref = event.get("zone_ref") or {}
+        same_zone = ref.get("price_low") == z.price_low and ref.get("price_high") == z.price_high
+        if not same_zone:
+            continue
+        if event.get("type") in ("INTRADAY_RECLAIM", "REVERSAL_CANDIDATE"):
+            event_score = max(event_score, 8.0)
+        elif event.get("type") == "HIGH_VOLUME_BREAKDOWN":
+            event_score = min(event_score, -25.0)
+    return float(event_score)
+
+
+def _clamp_relevance(value: float) -> float:
+    return float(max(0.0, min(100.0, value)))
+
+
+def _entry_relevance_score(z: ZoneScore, current_price: float) -> float:
+    """對外回報用的 base entry relevance（不含市場事件修正）。"""
+    return _clamp_relevance(sum(_entry_relevance_base_breakdown(z, current_price).values()))
+
+
+def _entry_relevance_score_with_events(
+    z: ZoneScore, current_price: float, market_events: Optional[list[dict[str, Any]]] = None
+) -> float:
+    """decision 內部 gating 用的 event-aware relevance（base + 市場事件修正）。"""
+    return _clamp_relevance(
+        sum(_entry_relevance_base_breakdown(z, current_price).values())
+        + _market_event_adjustment(z, market_events)
+    )
+
+
+def _zone_quality_score(z: ZoneScore) -> float:
+    return float(z.zone_quality_score if z.zone_quality_score is not None else z.trading_score)
+
+
+def _event_matches_zone(event: dict[str, Any], zone: ZoneScore) -> bool:
+    ref = event.get("zone_ref") or {}
+    return ref.get("price_low") == zone.price_low and ref.get("price_high") == zone.price_high
+
+
+def _event_zone_ref(z: ZoneScore, current_price: float) -> dict[str, Any]:
+    return {
+        "price_low": z.price_low,
+        "price_high": z.price_high,
+        "label": f"{_fmt_price(z.price_low)} ~ {_fmt_price(z.price_high)}",
+        "role": z.role,
+        "tier": z.tier,
+        "tier_label": z.tier_label,
+        "distance_pct": _distance_pct_to_zone(z, current_price),
+        "entry_relevance_score": _entry_relevance_score(z, current_price),
+    }
+
+
+def _detect_market_events(
+    zone_scores: list[ZoneScore],
+    current_price: float,
+    candle_high: Optional[float],
+    candle_low: Optional[float],
+    candle_close: Optional[float],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for z in zone_scores:
+        if z.role != ZoneType.SUPPORT.value:
+            continue
+        interaction = _zone_interaction(z, current_price, candle_high, candle_low, candle_close)
+        if not interaction["touched"]:
+            continue
+        relative_volume = z.relative_volume or 0.0
+        high_volume = relative_volume >= 1.5 or z.volume_confirmation == VolumeConfirmation.FAILED.value
+        if interaction["closed_below"] and high_volume:
+            events.append({
+                "type": "HIGH_VOLUME_BREAKDOWN",
+                "direction": "BEARISH",
+                "confidence": min(1.0, max(0.45, relative_volume / 3.0)),
+                "zone_ref": _event_zone_ref(z, current_price),
+                "price_level": z.price_low,
+                "reason": "支撐區被收盤跌破，且量能放大或量能狀態確認失敗。",
+                "detected_at": "latest_candle",
+            })
+            continue
+        if interaction["closed_above"] and interaction["penetration_pct"] > 0:
+            # 收回區間上緣：歸類為 INTRADAY_RECLAIM，不再重複產生 REVERSAL_CANDIDATE，
+            # 避免同一 zone 同時掛兩筆事件（reclaim 是 reversal 的更明確版本）。
+            events.append({
+                "type": "INTRADAY_RECLAIM",
+                "direction": "BULLISH",
+                "confidence": min(1.0, 0.50 + z.confidence * 0.35),
+                "zone_ref": _event_zone_ref(z, current_price),
+                "price_level": z.price_high,
+                "reason": "盤中測試支撐後收回區間上緣。",
+                "detected_at": "latest_candle",
+            })
+        elif (
+            not interaction["closed_below"]
+            and z.confidence >= 0.45
+            and (z.expected_value or 0.0) >= 0
+            and z.recent_validation != RecentValidation.EXPIRED.value
+        ):
+            events.append({
+                "type": "REVERSAL_CANDIDATE",
+                "direction": "BULLISH",
+                "confidence": min(1.0, 0.45 + z.confidence * 0.30),
+                "zone_ref": _event_zone_ref(z, current_price),
+                "price_level": z.price_high,
+                "reason": "支撐測試未失守，且 EV 與區間信心未轉弱。",
+                "detected_at": "latest_candle",
+            })
+    return events[:6]
 
 
 def _zone_interaction(
@@ -86,6 +224,11 @@ def _decision_summary_zone(
         "tier": z.tier,
         "tier_label": z.tier_label,
         "trading_score": z.trading_score,
+        "zone_quality_score": z.zone_quality_score if z.zone_quality_score is not None else z.trading_score,
+        # 對外一律回報 base entry relevance（不含市場事件），與 zones[] 的
+        # entry_relevance_score 同定義；事件影響另由 market_events / short_term_regime 呈現。
+        "entry_relevance_score": _entry_relevance_score(z, current_price),
+        "entry_relevance_breakdown": _entry_relevance_base_breakdown(z, current_price),
         "confidence": z.confidence,
         "confidence_level": z.confidence_level,
         "expected_value": z.expected_value,
@@ -161,6 +304,7 @@ def _market_regime(
     global_confidence: Optional[float],
     chip_summary: dict[str, Any],
     structure_state: str = "NORMAL",
+    market_events: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     if global_trend >= 0.015:
         trend_regime = "TREND_UP"
@@ -193,6 +337,16 @@ def _market_regime(
         "SUPPORT_RECLAIM_INVALIDATED": "支撐收復失效",
         "BREAKDOWN": "短線結構跌破",
     }.get(structure_state, structure_state)
+    event_types = {event.get("type") for event in market_events or []}
+    if "HIGH_VOLUME_BREAKDOWN" in event_types or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+        short_term_regime = "BREAKDOWN_RISK"
+    elif "INTRADAY_RECLAIM" in event_types:
+        short_term_regime = "RECLAIM_ATTEMPT"
+    elif "REVERSAL_CANDIDATE" in event_types:
+        short_term_regime = "REVERSAL_CANDIDATE"
+    else:
+        short_term_regime = "NORMAL"
+
     label = trend_label
     if structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         label = f"長期{trend_label.replace('趨勢', '')}，但{structure_label}"
@@ -206,6 +360,8 @@ def _market_regime(
     return {
         "primary": trend_regime,
         "trend_regime": trend_regime,
+        "structural_trend": trend_regime,
+        "short_term_regime": short_term_regime,
         "structure_state": structure_state,
         "volatility_state": volatility_state,
         "flags": flags,
@@ -214,29 +370,34 @@ def _market_regime(
     }
 
 
-def _primary_zone_score(z: ZoneScore, current_price: float, regime_primary: str) -> float:
-    distance_pct = _distance_pct_to_zone(z, current_price)
-    distance_score = max(0.0, 1.0 - min(distance_pct / 0.08, 1.0))
-    ev_score = 0.5 if z.expected_value is None else max(0.0, min((z.expected_value + 0.03) / 0.08, 1.0))
+def _primary_zone_score(
+    z: ZoneScore,
+    current_price: float,
+    regime_primary: str,
+    market_events: Optional[list[dict[str, Any]]] = None,
+) -> float:
     rr_score = 0.5 if z.risk_reward_ratio is None else min(z.risk_reward_ratio / 3.0, 1.0)
     confluence_score = min(z.confluence_count / 3.0, 1.0)
-    role_bonus = 0.0
+    role_alignment = 0.0
     if regime_primary in ("TREND_UP", "RANGE_BOUND") and z.role == ZoneType.SUPPORT.value:
-        role_bonus = 0.08
+        role_alignment = 1.0
     elif regime_primary == "TREND_DOWN" and z.role == ZoneType.RESISTANCE.value:
-        role_bonus = 0.08
+        role_alignment = 1.0
     return (
-        z.trading_score / 100.0 * 0.35
-        + z.confidence * 0.20
-        + distance_score * 0.18
-        + ev_score * 0.12
-        + rr_score * 0.10
-        + confluence_score * 0.05
-        + role_bonus
+        _entry_relevance_score_with_events(z, current_price, market_events) / 100.0 * 0.65
+        + _zone_quality_score(z) / 100.0 * 0.15
+        + rr_score * 0.07
+        + confluence_score * 0.08
+        + role_alignment * 0.05
     )
 
 
-def _pick_primary_zone(zone_scores: list[ZoneScore], current_price: float, regime_primary: str) -> Optional[ZoneScore]:
+def _pick_primary_zone(
+    zone_scores: list[ZoneScore],
+    current_price: float,
+    regime_primary: str,
+    market_events: Optional[list[dict[str, Any]]] = None,
+) -> Optional[ZoneScore]:
     candidates = [
         z for z in zone_scores
         if z.role != ZoneType.AT_ZONE.value
@@ -248,7 +409,63 @@ def _pick_primary_zone(zone_scores: list[ZoneScore], current_price: float, regim
         candidates = [z for z in zone_scores if z.role != ZoneType.AT_ZONE.value]
     if not candidates:
         return None
-    return max(candidates, key=lambda z: _primary_zone_score(z, current_price, regime_primary))
+    return max(candidates, key=lambda z: _primary_zone_score(z, current_price, regime_primary, market_events))
+
+
+def _high_volume_breakdown_severity(
+    event: dict[str, Any],
+    primary_zone: ZoneScore,
+) -> str:
+    if _event_matches_zone(event, primary_zone):
+        return "critical"
+
+    ref = event.get("zone_ref") or {}
+    tier = ref.get("tier")
+    distance_pct = ref.get("distance_pct")
+    relevance = ref.get("entry_relevance_score")
+    if tier == ZoneTier.TIER_1_MAIN_STRUCTURE.value:
+        return "critical"
+    if tier != ZoneTier.TIER_3_SHORT_TERM.value and relevance is not None and distance_pct is not None:
+        if float(relevance) >= 70.0 and float(distance_pct) <= 0.05:
+            return "critical"
+        if float(relevance) >= 55.0 or float(distance_pct) <= 0.08:
+            return "moderate"
+    if tier == ZoneTier.TIER_3_SHORT_TERM.value and relevance is not None:
+        if float(relevance) >= 55.0:
+            return "moderate"
+    if tier == ZoneTier.TIER_2_TRADING_ZONE.value:
+        return "moderate"
+    return "minor"
+
+
+def _high_volume_breakdown_action(
+    market_events: Optional[list[dict[str, Any]]],
+    primary_zone: ZoneScore,
+) -> tuple[str, str, str, str, list[str]] | None:
+    severities = [
+        _high_volume_breakdown_severity(event, primary_zone)
+        for event in market_events or []
+        if event.get("type") == "HIGH_VOLUME_BREAKDOWN"
+    ]
+    if not severities:
+        return None
+    if "critical" in severities:
+        return (
+            "AVOID",
+            "EXIT",
+            "Avoid",
+            "避開",
+            ["出現主結構或主交易區高量跌破事件，先以防守優先。"],
+        )
+    if "moderate" in severities:
+        return (
+            "AVOID",
+            "REDUCE_ON_BREAKDOWN",
+            "Avoid",
+            "避開",
+            ["出現相關支撐高量跌破事件，先降低風險暴露。"],
+        )
+    return None
 
 
 def _decision_action(
@@ -256,6 +473,7 @@ def _decision_action(
     primary_zone: Optional[ZoneScore],
     current_price: float,
     interaction: Optional[dict[str, Any]],
+    market_events: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[str, str, str, str, list[str]]:
     risk_notes: list[str] = []
     flags = set(regime.get("flags") or [])
@@ -266,6 +484,13 @@ def _decision_action(
     if primary_zone is None:
         risk_notes.append("沒有足夠明確的主交易區。")
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
+
+    breakdown_action = _high_volume_breakdown_action(market_events, primary_zone)
+    if breakdown_action is not None:
+        event_risk_notes = breakdown_action[4]
+        return breakdown_action[0], breakdown_action[1], breakdown_action[2], breakdown_action[3], risk_notes + event_risk_notes
+    if any(event.get("type") == "HIGH_VOLUME_BREAKDOWN" for event in market_events or []):
+        risk_notes.append("短線支撐出現高量跌破，但尚未達主結構防守門檻。")
 
     distance_pct = _distance_pct_to_zone(primary_zone, current_price)
     if distance_pct > 0.08:
@@ -294,8 +519,9 @@ def _decision_action(
     if rr is None or rr < 1.5:
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
 
+    relevance = _entry_relevance_score_with_events(primary_zone, current_price, market_events)
     strong = (
-        primary_zone.trading_score >= 70
+        relevance >= 75
         and primary_zone.confidence >= 0.65
         and (primary_zone.expected_value or 0) > 0
         and rr >= 2.0
@@ -304,7 +530,7 @@ def _decision_action(
     )
     constructive = (
         bullish_setup
-        and primary_zone.trading_score >= 55
+        and relevance >= 55
         and primary_zone.confidence >= 0.45
         and (primary_zone.expected_value or 0) >= 0
     )
@@ -339,6 +565,69 @@ def _structure_state(
     return "NORMAL"
 
 
+def _defense_lines(
+    zone_scores: list[ZoneScore],
+    primary_zone: Optional[ZoneScore],
+    current_price: float,
+    market_events: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    def line(zone: Optional[ZoneScore], source: str) -> Optional[dict[str, Any]]:
+        if zone is None:
+            return None
+        if zone.role == ZoneType.SUPPORT.value:
+            invalidation = zone.price_low
+            recovery = zone.price_high
+        elif zone.role == ZoneType.RESISTANCE.value:
+            invalidation = zone.price_high
+            recovery = zone.price_low
+        else:
+            invalidation = zone.price_low
+            recovery = zone.price_high
+        return {
+            "price_low": zone.price_low,
+            "price_high": zone.price_high,
+            "label": f"{_fmt_price(zone.price_low)} ~ {_fmt_price(zone.price_high)}",
+            "role": zone.role,
+            "source": source,
+            "invalidation_price": invalidation,
+            "recovery_price": recovery,
+        }
+
+    tactical_zone: Optional[ZoneScore] = None
+    for event in market_events or []:
+        ref = event.get("zone_ref") or {}
+        tactical_zone = next(
+            (
+                z for z in zone_scores
+                if z.price_low == ref.get("price_low") and z.price_high == ref.get("price_high")
+            ),
+            tactical_zone,
+        )
+        if tactical_zone is not None:
+            break
+    if tactical_zone is None:
+        tactical_candidates = [
+            z for z in zone_scores
+            if z.tier == ZoneTier.TIER_3_SHORT_TERM.value and z.role != ZoneType.AT_ZONE.value
+        ]
+        tactical_zone = min(tactical_candidates, key=lambda z: _distance_pct_to_zone(z, current_price), default=None)
+
+    strategic_candidates = [
+        z for z in zone_scores
+        if z.tier == ZoneTier.TIER_1_MAIN_STRUCTURE.value and z.role != ZoneType.AT_ZONE.value
+    ]
+    strategic_zone = max(
+        strategic_candidates,
+        key=lambda z: ((z.zone_quality_score if z.zone_quality_score is not None else z.trading_score), z.confidence),
+        default=None,
+    )
+    return {
+        "tactical": line(tactical_zone, "recent_microstructure"),
+        "swing": line(primary_zone, "primary_zone"),
+        "strategic": line(strategic_zone, "main_structure"),
+    }
+
+
 def build_decision_summary(
     zone_scores: list[ZoneScore],
     current_price: float,
@@ -355,8 +644,9 @@ def build_decision_summary(
     previous_candle_close: Optional[float] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
-    trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary)["trend_regime"]
-    primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime)
+    market_events = _detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
+    trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary, market_events=market_events)["trend_regime"]
+    primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime, market_events)
     primary_interaction = (
         _zone_interaction(primary_zone, current_price, candle_high, candle_low, candle_close)
         if primary_zone else None
@@ -372,9 +662,10 @@ def build_decision_summary(
         global_confidence,
         chip_summary,
         structure_state,
+        market_events,
     )
     market_action, position_action, action, action_label, risk_notes = _decision_action(
-        regime, primary_zone, current_price, primary_interaction
+        regime, primary_zone, current_price, primary_interaction, market_events
     )
 
     context = [
@@ -430,9 +721,12 @@ def build_decision_summary(
         for z in zone_scores
         if primary_zone is None or z is not primary_zone
     ][:5]
+    defense_lines = _defense_lines(zone_scores, primary_zone, current_price, market_events)
 
     return {
         "market_regime": regime,
+        "market_events": market_events,
+        "defense_lines": defense_lines,
         "market_action": market_action,
         "position_action": position_action,
         "position_action_condition": _position_action_condition(primary_zone, structure_state),

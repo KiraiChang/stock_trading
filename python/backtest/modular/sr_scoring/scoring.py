@@ -120,7 +120,7 @@ from .types import (
     ZoneTouch,
     ZoneType,
 )
-from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
+from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 from .pipeline_types import ZoneFeatureSet
 
 DEFAULT_FETCH_LIMIT = 250
@@ -200,7 +200,7 @@ def _to_dataframe(rows: list[dict]) -> pd.DataFrame:
 
 
 def _default_builders() -> list[ZoneBuilder]:
-    return [ATRZoneBuilder(), VolumeProfileZoneBuilder()]
+    return [ATRZoneBuilder(), VolumeProfileZoneBuilder(), RecentMicrostructureZoneBuilder()]
 
 
 # ── 機率正規化 / score 推導 ──────────────────────────────────
@@ -590,6 +590,68 @@ def _trading_recommendation(trading_score: float, role: str) -> str:
     return TradingRecommendation.NEUTRAL.value
 
 
+def _distance_pct_to_zone_bounds(price_low: float, price_high: float, current_price: float) -> float:
+    if price_low <= current_price <= price_high:
+        return 0.0
+    if current_price < price_low:
+        return (price_low - current_price) / current_price
+    return (current_price - price_high) / current_price
+
+
+def _entry_relevance_breakdown(
+    *,
+    role: str,
+    current_price: float,
+    price_low: float,
+    price_high: float,
+    confidence: float,
+    expected_value: Optional[float],
+    risk_reward_ratio: Optional[float],
+    recent_validation: str,
+    volume_confirmation: Optional[str],
+) -> dict[str, float]:
+    distance_pct = _distance_pct_to_zone_bounds(price_low, price_high, current_price)
+    distance = max(0.0, 1.0 - min(distance_pct / 0.08, 1.0)) * 30.0
+    ev_rr = 0.0
+    if expected_value is not None:
+        ev_rr += max(0.0, min((expected_value + 0.02) / 0.07, 1.0)) * 15.0
+    else:
+        ev_rr += 7.5
+    if risk_reward_ratio is not None:
+        ev_rr += min(risk_reward_ratio / 2.5, 1.0) * 15.0
+    else:
+        ev_rr += 7.5
+    validation_map = {
+        RecentValidation.VALIDATED_RECENTLY.value: 20.0,
+        RecentValidation.PENDING_VALIDATION.value: 12.0,
+        RecentValidation.NOT_TESTED_RECENTLY.value: 10.0,
+        RecentValidation.EXPIRED.value: 0.0,
+    }
+    validation = validation_map.get(recent_validation, 8.0)
+    volume_map = {
+        VolumeConfirmation.CONFIRMED.value: 10.0,
+        VolumeConfirmation.NEUTRAL.value: 6.0,
+        VolumeConfirmation.WEAK.value: 3.0,
+        VolumeConfirmation.FAILED.value: 0.0,
+    }
+    volume = volume_map.get(volume_confirmation, 5.0)
+    role_readiness = 0.0 if role == ZoneType.AT_ZONE.value else 10.0
+    return {
+        "distance": float(distance),
+        "ev_rr": float(ev_rr),
+        "validation": float(validation),
+        "volume": float(volume),
+        "role_readiness": float(role_readiness),
+        "confidence": float(confidence * 10.0),
+    }
+
+
+def _entry_relevance_score(breakdown: dict[str, float]) -> float:
+    # clamp 到 [0,100]，讓 entry_relevance_score 是有界的百分制分數；也跟 decision_engine
+    # 對外回報的 base entry relevance 同界線，避免同一 zone 兩處數值對不上。
+    return float(max(0.0, min(100.0, sum(breakdown.values()))))
+
+
 # ── 十、十二：Global Model（Global Trend/Volatility/EV/Confidence/RR）──
 
 
@@ -965,6 +1027,18 @@ def score_zone(
     )
     trading_score_value = _trading_score(trading_score_breakdown)
     trading_recommendation = _trading_recommendation(trading_score_value, role)
+    entry_relevance_breakdown = _entry_relevance_breakdown(
+        role=role,
+        current_price=current_price,
+        price_low=zone.price_low,
+        price_high=zone.price_high,
+        confidence=confidence,
+        expected_value=expected_value,
+        risk_reward_ratio=risk_reward_ratio,
+        recent_validation=recent_validation,
+        volume_confirmation=volume_confirmation,
+    )
+    entry_relevance_value = _entry_relevance_score(entry_relevance_breakdown)
     chip_direction = _chip_direction(chip_score)
 
     return ZoneScore(
@@ -1005,6 +1079,9 @@ def score_zone(
         chip_direction=chip_direction,
         chip_bounce_delta=chip_bounce_delta,
         chip_break_delta=chip_break_delta,
+        zone_quality_score=trading_score_value,
+        entry_relevance_score=entry_relevance_value,
+        entry_relevance_breakdown=entry_relevance_breakdown,
     )
 
 
@@ -1063,6 +1140,9 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "trading_score": z.trading_score,
         "trading_score_breakdown": z.trading_score_breakdown,
         "trading_recommendation": z.trading_recommendation,
+        "zone_quality_score": z.zone_quality_score if z.zone_quality_score is not None else z.trading_score,
+        "entry_relevance_score": z.entry_relevance_score,
+        "entry_relevance_breakdown": z.entry_relevance_breakdown,
         "overlap_group": z.overlap_group,
         "confluence_count": z.confluence_count,
     }

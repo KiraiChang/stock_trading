@@ -336,6 +336,36 @@ cd python
 
 ---
 
+## SR Zone / 分析輸出欄位開發注意事項
+
+改 `sr_scoring`（scoring / decision_engine）或串接分析欄位到前後端時，容易踩到的
+流程性問題，先照這幾點檢查再送出：
+
+- **同名欄位跨 payload 要「同定義」**：像 `entry_relevance_score`、`zone_quality_score`
+  這種同時出現在 `zones[]`（scoring 輸出）與 `decision_summary.*`（decision 輸出）的
+  欄位，兩處必須是同一定義、同一值域。decision 層若要疊加市場事件之類的額外脈絡，
+  用**內部變數**或**另取名**，對外一律回報 base 值——不要讓同名欄位在不同 payload
+  帶不同數值，否則前端拿兩處對照會對不上。（`decision_engine` 的 `_entry_relevance_score`
+  只回 base、`_entry_relevance_score_with_events` 才含事件修正且僅供內部 gating，就是
+  這個原則的落實。）
+
+- **Python → Go → TS 三端同步**：新增分析欄位（scoring/decision 產出的 JSON key）時，
+  要同時補 `backend/internal/analysis/client.go` 的對應 struct 與
+  `frontend/src/lib/api/srZones.ts` 的介面；新欄位用 `omitempty`（Go 指標）／optional
+  （TS `?`）保持向後相容，舊資料/舊 client 不會壞。
+
+- **enum 值比對用 `Enum.value`，不要硬編字面量**：decision/scoring 內比對 `tier`、
+  `role`、`method` 等以 `str, Enum` 定義的欄位，用 `ZoneTier.TIER_x.value` 而非
+  `"TIER_x"` 字面量；否則哪天調整 enum 值，字面量比對會**靜默失配**（例如
+  `defense_lines` 的層別全變 `None`）而不報錯。
+
+- **改門檻/權重前先確認測試涵蓋**：決策動作（BUY/BuySmall/EXIT）、市場事件偵測、
+  regime 分層都有針對性測試；改 `_decision_action`、`_primary_zone_score`、
+  `_detect_market_events` 的門檻或權重後，務必跑**兩套** pytest（見「執行 Python
+  測試」）：`backtest/modular/tests` 與 `backtest/modular/sr_scoring/tests` 都要過。
+
+---
+
 ## 手動補算指標 / 評估訊號
 
 排程只會處理監控清單裡的股票；如果某支股票（例如剛上市、還沒加進監控清單）

@@ -820,6 +820,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
         "touch_count", "reject_count", "break_count",
         "zone_momentum", "zone_direction",
         "recent_validation", "trading_score", "trading_score_breakdown", "trading_recommendation",
+        "zone_quality_score", "entry_relevance_score", "entry_relevance_breakdown",
     }
     for z in _v2_zone_scores(result):
         assert expected_keys <= set(z.keys())

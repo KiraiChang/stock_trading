@@ -45,6 +45,7 @@
 score_symbol(symbol, timeframe)
     ↓ fetch_candles（重用 db.py）
     ↓ ATRZoneBuilder().build(df) + VolumeProfileZoneBuilder().build(df)
+      + RecentMicrostructureZoneBuilder().build(df)
     ↓ 依寬度分 3 個 Tier（見「六、Zone Tier」）
     ↓ 對每個 zone：
     │     compute_zone_features()（角色解析前後各算一次：support 視角 / resistance 視角）
@@ -54,7 +55,8 @@ score_symbol(symbol, timeframe)
     │     依現價判斷 role（SUPPORT / RESISTANCE / AT_ZONE）
     │     role != AT_ZONE 才算：bounce/break probability、EV、RR、reward/risk percentile、volume_confirmation
     │     recent_validation、zone_momentum/zone_direction
-    │     trading_score_breakdown → trading_score → trading_recommendation
+    │     trading_score_breakdown → trading_score / zone_quality_score
+    │     entry_relevance_breakdown → entry_relevance_score
     ↓ 依 Tier 排序，同層內依 trading_score 排序
     ↓ 用所有 zone 算出唯一的 Global Model（見「七、Global Model」）
     ↓ 回傳 {symbol, current_price, global_*, zones: [...]}
@@ -68,7 +70,7 @@ score_symbol(symbol, timeframe)
 
 ## 一、Zone 建立（Zone Builder）
 
-`zone_builder.py` 提供兩種獨立方法，各自產生候選 zone，方法不同，不跨方法
+`zone_builder.py` 提供多種獨立方法，各自產生候選 zone，方法不同，不跨方法
 合併（`method` 欄位標註來源）：
 
 ### ATRZoneBuilder
@@ -106,6 +108,17 @@ gap_threshold = merge_pct × max(現有候選中心價, 新候選中心價)
 支撐/壓力角色本來就會互換，實際角色由 `scoring.py` 依「當下價格」動態判斷
 （`_resolve_role`：現價 > zone 上緣 → SUPPORT；現價 < zone 下緣 →
 RESISTANCE；否則 AT_ZONE）。
+
+### RecentMicrostructureZoneBuilder
+
+短線戰術 zone 來源，用來補足 ATR / Volume Profile 偏結構性的區間：
+
+- `recent_pivot`：最近 swing high / swing low。
+- `breakdown_reclaim`：前收盤價被最新 K 棒盤中穿越後又收回或跌回，作為 breakdown / reclaim 參考線。
+- `vwap_reclaim`：若資料含 `vwap` 則使用最新 VWAP，否則以 5 日收盤均價作為平均成本 reclaim 參考。
+
+這些 zone 寬度較窄，預設視為短線戰術層，不取代主結構 zone；Decision Engine
+會把它們納入 `market_events`、`defense_lines.tactical` 與 primary-zone ranking。
 
 ---
 
@@ -581,7 +594,7 @@ metadata 與同一份籌碼摘要，必須產生完全相同的 `decision_summar
 
 ### Market Regime
 
-Market Regime 是所有解讀的最高優先共同前提，先用股票層級與摘要層資料判斷「這份分析應該用什麼市場狀態閱讀」，再決定 action 與 zone 文案語氣。採「一個 primary regime + 多個 flags」：
+Market Regime 是所有解讀的最高優先共同前提，先用股票層級與摘要層資料判斷「這份分析應該用什麼市場狀態閱讀」，再決定 action 與 zone 文案語氣。採「一個相容 primary regime + structural/short-term 拆分 + 多個 flags」：
 
 | 類別 | 用途 | 可能輸入 |
 |---|---|---|
@@ -593,7 +606,13 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
 `LOW_CONFIDENCE`、`HIGH_VOLATILITY` 較適合作為 flags，不一定取代趨勢方向。例如 `primary=TREND_UP` 且 `flags=[HIGH_VOLATILITY]`，前端應呈現「偏多但波動高，不適合重倉追價」。
 
-v1 預設門檻：
+目前 `market_regime` 也會輸出：
+
+- `structural_trend`：由 `global_trend` 判斷的中長線結構，值與相容欄位 `trend_regime` 一致。
+- `short_term_regime`：由最新 market events / structure state 判斷的短線狀態，例如 `BREAKDOWN_RISK`、`RECLAIM_ATTEMPT`、`REVERSAL_CANDIDATE`、`NORMAL`。
+- `primary`：保留給舊前端/舊資料讀取的相容欄位，仍表示主要趨勢 regime。
+
+Regime 預設門檻：
 
 | 條件 | 門檻 |
 |---|---|
@@ -606,6 +625,18 @@ v1 預設門檻：
 這些門檻是 Decision Engine v1 的規則，不是模型訓練參數；調整時必須同步更新本文件、
 Python 測試與 API 範例。
 
+### Market Events
+
+Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
+
+| Event | 語意 | Action 影響 |
+|---|---|---|
+| `HIGH_VOLUME_BREAKDOWN` | 支撐區被收盤跌破，且相對量放大或量能狀態為失敗 | 依破線 zone 嚴重度降風險；primary/main-structure 或高相關破線可強制 `EXIT`，短線非 primary 破線只降為 `REDUCE_ON_BREAKDOWN` 或 risk note |
+| `INTRADAY_RECLAIM` | 盤中測試支撐後收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正 |
+| `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
+
+對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`short_term_regime` 與 action/risk notes 呈現。
+
 ### 唯一 Action
 
 `action` 是整份分析唯一的操作結論，避免使用者自行從多張 zone 卡片拼湊結果。目前限定四種：
@@ -617,29 +648,30 @@ Python 測試與 API 範例。
 | `Hold` | 不追價，等待更好的價格或確認 | 方向不差但現價不在合理風險報酬位置、primary zone 不夠近、或支撐/壓力訊號混合 |
 | `Avoid` | 不建議操作 | regime 偏空、primary zone 失效、低信心且高波動、EV/RR 明顯不佳、或價格接近強壓但缺乏突破證據 |
 
-Action 應由 Market Regime、primary zone、`trading_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
+Action 應由 Market Regime、primary zone、`entry_relevance_score`、market events、`zone_quality_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。`trading_score` 保留為 legacy quality score，不得單獨直接決定 `Buy` / `BuySmall`。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
 
 `position_action=HOLD` 不代表無條件持有；若有 `position_action_condition`，前端必須顯示為「條件式持有」，並列出 `invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`。
 
-v1 action pipeline：
+目前 action pipeline：
 
 1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
 2. 若 primary zone 距離現價超過 8%：保留 action 判斷，但加上不追價風險註記。
 3. 若 primary zone `risk_reward_ratio < 1.0`：加上風險報酬不足註記。
 4. 若 primary zone `recent_validation=EXPIRED`：加上近期驗證失效註記，且不應升級到 `Buy`。
-5. 若 regime 偏空，或 primary zone 是 resistance 且沒有 bullish setup：`Avoid`。
-6. 若符合 strong setup：`Buy`。
-7. 若符合 constructive setup：`BuySmall`。
-8. 其他情況：`Hold`。
+5. 若出現 `HIGH_VOLUME_BREAKDOWN`，依破線 zone 的 tier / 是否 primary / entry relevance / 距離分級：主結構或高相關破線可 `Avoid` + `EXIT`；短線非 primary 破線降為 `Avoid` + `REDUCE_ON_BREAKDOWN` 或只加 risk note。
+6. 若 regime 偏空，或 primary zone 是 resistance 且沒有 bullish setup：`Avoid`。
+7. 若符合 strong setup：`Buy`。
+8. 若符合 constructive setup：`BuySmall`。
+9. 其他情況：`Hold`。
 
-v1 setup 定義：
+Setup 定義：
 
 | Setup | 條件 |
 |---|---|
 | bullish setup | `market_regime.primary in (TREND_UP, RANGE_BOUND)` 且 primary zone 是 `SUPPORT` |
 | bearish setup | `market_regime.primary == TREND_DOWN` 或 primary zone 是 `RESISTANCE` |
-| strong setup | primary zone `trading_score >= 70`、`confidence >= 0.65`、`expected_value > 0`、`risk_reward_ratio >= 1.5`、距離現價 `<= 5%`、且沒有 regime flags |
-| constructive setup | bullish setup 且 primary zone `trading_score >= 55`、`confidence >= 0.45`、`expected_value >= 0` |
+| strong setup | primary zone event-aware entry relevance `>= 75`、`confidence >= 0.65`、`expected_value > 0`、`risk_reward_ratio >= 2.0`、距離現價 `<= 5%`、且沒有 regime flags |
+| constructive setup | bullish setup 且 primary zone event-aware entry relevance `>= 55`、`confidence >= 0.45`、`expected_value >= 0` |
 
 若 `expected_value` 或 `risk_reward_ratio` 缺失，不得判定 strong setup；缺失值只允許進入
 `Hold`、`BuySmall` 的保守觀察語境，除非之後另有明確規則。
@@ -657,18 +689,31 @@ v1 setup 定義：
 
 這些狀態只影響 Decision/Scenario 與 Position Action 的條件呈現，不改寫 zone 的原始機率、EV/RR 或 score。
 
+### Defense Lines
+
+`decision_summary.defense_lines` 提供三層防守線：
+
+| 層級 | 來源 | 用途 |
+|---|---|---|
+| `tactical` | 最近 market event 對應 zone，或最近 `TIER_3_SHORT_TERM` microstructure zone | 短線觀察、reclaim/breakdown 風險提示 |
+| `swing` | `primary_zone` | 預設交易防守線，`position_action_condition.invalidation_price` / `recovery_price` 仍以此層為相容 alias |
+| `strategic` | `TIER_1_MAIN_STRUCTURE` 中 quality / confidence 較高的主結構 zone | 中長線結構防守與風險定位 |
+
+`position_action_condition` 保留舊欄位，前端可優先顯示 `defense_lines`，舊資料或舊前端則繼續讀
+`invalidation_price` / `recovery_price`。
+
 ### Primary Zone 與 Secondary Zones
 
 目前 `zones` 主要依 tier 與 `trading_score` 排序，適合完整清單，但不一定等於「現在最值得操作的主交易區」。`decision_summary.primary_zone` 應只挑一個目前最具決策意義的 zone，其他放入 `secondary_zones` 或前端展開明細。
 
-建議篩選與排序：
+篩選與排序：
 
 1. 先排除 `role=AT_ZONE`、`recent_validation=EXPIRED`、`confidence_level=LOW`、距離現價過遠、EV/RR 缺失或不合理的 zone；若全部被排除，允許退而選擇最接近且風險可解釋的觀察區，action 通常不應高於 `Hold`。
-2. 候選 zone 依摘要專用分數排序，而不是完全沿用 `trading_score`。摘要分數可包含 `trading_score`、`confidence`、距離現價、`expected_value`、`risk_reward_ratio`、`confluence_count`、`volume_confirmation` 與籌碼方向一致性。
+2. 候選 zone 依摘要專用分數排序，而不是完全沿用 `trading_score`。摘要分數以 event-aware entry relevance 為主，搭配 zone quality、RR、confluence 與 regime/role alignment。
 3. 優先挑與 action 方向一致的 zone。`Buy`/`BuySmall` 應優先挑 support；`Avoid` 在偏空情境可挑主要 resistance 或失效支撐作為風險來源；`Hold` 可挑最近的等待區。
 4. `secondary_zones` 只保留摘要必要資訊，例如 `zone_id`、角色、價位區間、距離現價、簡短原因與是否可展開，不重複整份 market context。
 
-v1 primary zone 候選池：
+Primary zone 候選池：
 
 - 預設排除 `role=AT_ZONE`。
 - 預設排除 `recent_validation=EXPIRED`。
@@ -677,22 +722,18 @@ v1 primary zone 候選池：
 - 若全部被排除，退回只排除 `AT_ZONE` 的保守候選池；此時 action 通常不應高於
   `Hold`，除非後續規則明確放寬。
 
-v1 摘要分數：
+目前 primary-zone ranking 分數：
 
 ```
 summary_score =
-  trading_score/100 * 0.35
-  + confidence * 0.20
-  + distance_score * 0.18
-  + ev_score * 0.12
-  + rr_score * 0.10
-  + confluence_score * 0.05
-  + role_bonus
+  event_aware_entry_relevance/100 * 0.65
+  + zone_quality_score/100 * 0.15
+  + rr_score * 0.07
+  + confluence_score * 0.08
+  + role_alignment * 0.05
 ```
 
-其中 `role_bonus=0.08` 僅在 regime 與角色方向一致時加入：
-`TREND_UP/RANGE_BOUND + SUPPORT` 或 `TREND_DOWN + RESISTANCE`。
-`distance_score` 以 8% 為滿額衰減上限；`rr_score` 以 3.0 為滿額上限。
+`event_aware_entry_relevance` 是 base `entry_relevance_score` 加上 market event 內部修正後的分數，只用於 decision gating / primary-zone ranking；對外仍回傳 base relevance。`role_alignment=1.0` 僅在 regime 與角色方向一致時成立：`TREND_UP/RANGE_BOUND + SUPPORT` 或 `TREND_DOWN + RESISTANCE`。Distance、EV、confidence 已包含在 entry relevance 裡，不再額外重複加權；`rr_score` 以 3.0 為滿額上限。
 
 ### Market Context 去重
 

@@ -433,8 +433,6 @@ BREAKOUT/BREAKDOWN 都用 `latestCandle.Timestamp`。對即時盤影響小，但
 鄰居，兩根等高的雙頂／雙底（`high[i] == high[i+1]`）都不算 local extreme，會漏掉重要的平台型
 壓力/支撐，在 1m 高雜訊資料上尤其明顯。改用容忍等值（例如 `>=` 搭配去重，或加入寬容窗）避免漏平頭。
 
----
-
 ## 已完成封存
 
 （目前沒有項目）

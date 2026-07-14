@@ -251,3 +251,75 @@ class VolumeProfileZoneBuilder(ZoneBuilder):
             )
             for lo, hi, c, idx, _ in selected
         ]
+
+
+class RecentMicrostructureZoneBuilder(ZoneBuilder):
+    """Short-lived tactical zones from recent pivots, reclaim/breakdown and VWAP/MA levels."""
+
+    def __init__(
+        self,
+        lookback: int = 20,
+        pivot_window: int = 1,
+        width_pct: float = 0.006,
+        max_zones: int = 6,
+    ) -> None:
+        self.lookback = lookback
+        self.pivot_window = pivot_window
+        self.width_pct = width_pct
+        self.max_zones = max_zones
+
+    @property
+    def min_bars(self) -> int:
+        return max(10, self.pivot_window * 2 + 3)
+
+    def _zone(self, center: float, method: ZoneMethod, idx: int) -> Zone:
+        width = max(center * self.width_pct, 0.01)
+        return Zone(
+            price_low=center - width / 2.0,
+            price_high=center + width / 2.0,
+            method=method,
+            center_price=center,
+            formed_at_index=idx,
+        )
+
+    def build(self, df: pd.DataFrame) -> list[Zone]:
+        if len(df) < self.min_bars:
+            return []
+
+        window = df.iloc[-self.lookback:] if len(df) > self.lookback else df
+        offset = len(df) - len(window)
+        current_price = float(df["close"].iloc[-1])
+        zones: list[Zone] = []
+
+        pivots: list[tuple[float, int]] = []
+        pivots.extend((float(price), offset + i) for i, price in find_swing_highs(
+            window["high"].to_numpy(), self.pivot_window, self.pivot_window
+        ))
+        pivots.extend((float(price), offset + i) for i, price in find_swing_lows(
+            window["low"].to_numpy(), self.pivot_window, self.pivot_window
+        ))
+        pivots.sort(key=lambda item: (abs(item[0] - current_price), -item[1]))
+        zones.extend(self._zone(price, ZoneMethod.RECENT_PIVOT, idx) for price, idx in pivots[: self.max_zones])
+
+        if len(df) >= 2:
+            prev_close = float(df["close"].iloc[-2])
+            last_close = float(df["close"].iloc[-1])
+            last_low = float(df["low"].iloc[-1])
+            last_high = float(df["high"].iloc[-1])
+            if last_low < prev_close < last_close or last_close < prev_close < last_high:
+                zones.append(self._zone(prev_close, ZoneMethod.BREAKDOWN_RECLAIM, len(df) - 2))
+
+        if "vwap" in df.columns and not pd.isna(df["vwap"].iloc[-1]):
+            avg_level = float(df["vwap"].iloc[-1])
+        else:
+            avg_level = float(df["close"].tail(5).mean())
+        if avg_level > 0:
+            zones.append(self._zone(avg_level, ZoneMethod.VWAP_RECLAIM, len(df) - 1))
+
+        deduped: list[Zone] = []
+        for zone in sorted(zones, key=lambda z: abs(z.center_price - current_price)):
+            if all(abs(zone.center_price - existing.center_price) / max(zone.center_price, 1.0) > self.width_pct for existing in deduped):
+                deduped.append(zone)
+            if len(deduped) >= self.max_zones:
+                break
+        return deduped

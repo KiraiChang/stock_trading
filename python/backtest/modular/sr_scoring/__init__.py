@@ -13,7 +13,7 @@ from .types import (
     ZoneTouch,
     ZoneType,
 )
-from .zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
+from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 
 __all__ = [
     "ApproachDirection",
@@ -25,6 +25,7 @@ __all__ = [
     "ZoneTouch",
     "ZoneType",
     "ATRZoneBuilder",
+    "RecentMicrostructureZoneBuilder",
     "VolumeProfileZoneBuilder",
     "ZoneBuilder",
     "compute_zone_features",

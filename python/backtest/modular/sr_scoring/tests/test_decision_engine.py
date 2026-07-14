@@ -37,14 +37,18 @@ def _zone(
     risk_reward_ratio: float | None = 2.2,
     recent_validation: str = RecentValidation.VALIDATED_RECENTLY.value,
     confluence_count: int = 2,
+    relative_volume: float = 1.2,
+    volume_confirmation: str = VolumeConfirmation.CONFIRMED.value,
+    tier: str = ZoneTier.TIER_1_MAIN_STRUCTURE.value,
+    tier_label: str = "主結構",
 ) -> ZoneScore:
     return ZoneScore(
         price_low=low,
         price_high=high,
         method="atr",
         role=role,
-        tier=ZoneTier.TIER_1_MAIN_STRUCTURE.value,
-        tier_label="主結構",
+        tier=tier,
+        tier_label=tier_label,
         support_score=0.8 if role == ZoneType.SUPPORT.value else 0.2,
         resistance_score=0.8 if role == ZoneType.RESISTANCE.value else 0.2,
         net_score=0.6 if role == ZoneType.SUPPORT.value else -0.6,
@@ -58,8 +62,8 @@ def _zone(
         expected_value=expected_value,
         risk_reward_ratio=risk_reward_ratio,
         reward_risk_percentile=80.0 if risk_reward_ratio is not None else None,
-        relative_volume=1.2 if role != ZoneType.AT_ZONE.value else None,
-        volume_confirmation=VolumeConfirmation.CONFIRMED.value if role != ZoneType.AT_ZONE.value else None,
+        relative_volume=relative_volume if role != ZoneType.AT_ZONE.value else None,
+        volume_confirmation=volume_confirmation if role != ZoneType.AT_ZONE.value else None,
         touch_count=5,
         support_touch_count=5 if role == ZoneType.SUPPORT.value else 0,
         resistance_touch_count=5 if role == ZoneType.RESISTANCE.value else 0,
@@ -116,6 +120,61 @@ def test_buy_for_bullish_high_quality_near_support():
     assert ds["position_action"] == "HOLD"
     assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value
     assert ds["primary_zone"]["label"] == "98.00 ~ 100.00"
+    assert ds["primary_zone"]["entry_relevance_score"] >= 75
+    assert ds["primary_zone"]["zone_quality_score"] == ds["primary_zone"]["trading_score"]
+
+
+def test_high_quality_far_from_zone_cannot_be_buy():
+    far = _zone(low=80.0, high=82.0, trading_score=98.0, confidence=0.9, risk_reward_ratio=3.0)
+
+    ds = _summary([far], current_price=110.0)
+
+    assert ds["action"] != "Buy"
+    assert ds["market_action"] == "BUY_SMALL"
+    assert ds["primary_zone"]["entry_relevance_score"] < 75
+    assert any("不適合追價" in note for note in ds["risk_notes"])
+
+
+def test_primary_high_volume_breakdown_event_forces_exit():
+    zone = _zone(
+        low=98.0,
+        high=100.0,
+        risk_reward_ratio=2.5,
+        relative_volume=2.2,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+    )
+
+    ds = _summary([zone], current_price=97.5, candle_high=100.5, candle_low=97.0, candle_close=97.5)
+
+    assert ds["market_events"][0]["type"] == "HIGH_VOLUME_BREAKDOWN"
+    assert ds["market_action"] == "AVOID"
+    assert ds["position_action"] == "EXIT"
+    # 對外回報的 entry_relevance 是 base 值，不把市場事件修正灌進同名分數／breakdown，
+    # 才能跟 zones[].entry_relevance_score 保持同定義（見 decision_engine 說明）。
+    assert "market_event" not in ds["primary_zone"]["entry_relevance_breakdown"]
+
+
+def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
+    main = _zone(low=80.0, high=82.0, trading_score=70.0, risk_reward_ratio=2.5)
+    short = _zone(
+        low=90.0,
+        high=91.0,
+        trading_score=95.0,
+        confidence=0.2,
+        confidence_level=ConfidenceLevel.LOW.value,
+        risk_reward_ratio=2.5,
+        relative_volume=2.2,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+        tier=ZoneTier.TIER_3_SHORT_TERM.value,
+        tier_label="短期支撐/壓力",
+    )
+
+    ds = _summary([main, short], current_price=89.0, candle_high=91.5, candle_low=88.5, candle_close=89.0)
+
+    assert any(event["type"] == "HIGH_VOLUME_BREAKDOWN" for event in ds["market_events"])
+    assert ds["primary_zone"]["price_low"] == main.price_low
+    assert ds["market_action"] == "AVOID"
+    assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
 
 
 def test_high_volatility_downgrades_buy_to_buy_small():
@@ -124,6 +183,9 @@ def test_high_volatility_downgrades_buy_to_buy_small():
     assert ds["action"] == "BuySmall"
     assert ds["market_action"] == "BUY_SMALL"
     assert any("波動偏高" in note for note in ds["risk_notes"])
+    assert ds["market_regime"]["structural_trend"] == "TREND_UP"
+    assert ds["market_regime"]["short_term_regime"] == "NORMAL"
+    assert set(ds["defense_lines"].keys()) == {"tactical", "swing", "strategic"}
 
 
 def test_bearish_regime_with_resistance_primary_is_avoid():
@@ -157,6 +219,31 @@ def test_expired_and_low_confidence_zones_are_not_first_candidate():
 
     assert ds["primary_zone"]["price_low"] == valid.price_low
     assert ds["primary_zone"]["recent_validation"] != RecentValidation.EXPIRED.value
+
+
+def test_primary_zone_ranking_prefers_near_relevant_zone_over_far_high_quality():
+    near = _zone(low=98.0, high=100.0, trading_score=62.0, confidence=0.62, risk_reward_ratio=2.0)
+    far = _zone(low=70.0, high=72.0, trading_score=99.0, confidence=0.95, risk_reward_ratio=3.0)
+
+    ds = _summary([far, near], current_price=102.0)
+
+    assert ds["primary_zone"]["price_low"] == near.price_low
+
+
+def test_primary_zone_ranking_does_not_choose_direction_mismatch_on_quality_alone():
+    aligned_support = _zone(low=98.0, high=100.0, trading_score=60.0, confidence=0.62, risk_reward_ratio=2.0)
+    mismatched_resistance = _zone(
+        role=ZoneType.RESISTANCE.value,
+        low=116.0,
+        high=118.0,
+        trading_score=99.0,
+        confidence=0.95,
+        risk_reward_ratio=3.0,
+    )
+
+    ds = _summary([mismatched_resistance, aligned_support], current_price=102.0, global_trend=0.03)
+
+    assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value
 
 
 def test_missing_ev_rr_cannot_be_buy():

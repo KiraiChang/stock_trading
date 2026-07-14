@@ -28,6 +28,9 @@ class ZoneType(str, Enum):
 class ZoneMethod(str, Enum):
     ATR = "atr"
     VOLUME_PROFILE = "volume_profile"
+    RECENT_PIVOT = "recent_pivot"
+    BREAKDOWN_RECLAIM = "breakdown_reclaim"
+    VWAP_RECLAIM = "vwap_reclaim"
 
 
 class ApproachDirection(str, Enum):
@@ -277,3 +280,6 @@ class ZoneScore:
     chip_direction: str = "none"
     chip_bounce_delta: Optional[float] = None
     chip_break_delta: Optional[float] = None
+    zone_quality_score: Optional[float] = None
+    entry_relevance_score: Optional[float] = None
+    entry_relevance_breakdown: Optional[dict] = None

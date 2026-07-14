@@ -138,7 +138,7 @@ export interface SRZone {
   analysis_id: number
   price_low: number
   price_high: number
-  method: 'atr' | 'volume_profile'
+  method: 'atr' | 'volume_profile' | 'recent_pivot' | 'breakdown_reclaim' | 'vwap_reclaim'
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
 
   // tier/tier_label：zone 依寬度在同一次分析裡的相對排名分三層，讓 zone
@@ -183,6 +183,9 @@ export interface SRZone {
   trading_score: number
   trading_score_breakdown: TradingScoreBreakdown
   trading_recommendation: TradingRecommendation
+  zone_quality_score?: number | null
+  entry_relevance_score?: number | null
+  entry_relevance_breakdown?: Record<string, number> | null
 
   // 跨方法（ATR/volume_profile）重疊分群：overlap_group 相同的 zone 代表
   // 不同方法都指向同一個價位帶（「多方法共振」），不會合併或刪除任何
@@ -273,6 +276,7 @@ export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
 export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
 export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'
 export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
+export type SRShortTermRegime = 'NORMAL' | 'BREAKDOWN_RISK' | 'RECLAIM_ATTEMPT' | 'REVERSAL_CANDIDATE' | string
 export type SRStructureState =
   | 'NORMAL'
   | 'SUPPORT_RECLAIM_CANDIDATE'
@@ -285,6 +289,8 @@ export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY'
 export interface SRMarketRegime {
   primary: SRMarketRegimePrimary
   trend_regime?: SRMarketRegimePrimary
+  structural_trend?: SRMarketRegimePrimary
+  short_term_regime?: SRShortTermRegime
   structure_state?: SRStructureState
   volatility_state?: SRVolatilityState
   flags: SRMarketRegimeFlag[]
@@ -318,6 +324,9 @@ export interface SRDecisionZoneSummary {
   tier: ZoneTier
   tier_label: string
   trading_score: number
+  zone_quality_score?: number | null
+  entry_relevance_score?: number | null
+  entry_relevance_breakdown?: Record<string, number> | null
   confidence: number
   confidence_level: ConfidenceLevel
   expected_value: number | null
@@ -329,6 +338,41 @@ export interface SRDecisionZoneSummary {
   volume_confirmation: VolumeConfirmation | null
   confluence_count: number
   reason: string
+}
+
+export interface SRMarketEvent {
+  type: 'HIGH_VOLUME_BREAKDOWN' | 'INTRADAY_RECLAIM' | 'REVERSAL_CANDIDATE' | string
+  direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | string
+  confidence: number
+  zone_ref?: {
+    price_low: number
+    price_high: number
+    label: string
+    role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+    tier?: ZoneTier
+    tier_label?: string
+    distance_pct?: number
+    entry_relevance_score?: number
+  }
+  price_level: number | null
+  reason: string
+  detected_at: string
+}
+
+export interface SRDefenseLine {
+  price_low: number
+  price_high: number
+  label: string
+  role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+  source: string
+  invalidation_price: number | null
+  recovery_price: number | null
+}
+
+export interface SRDefenseLines {
+  tactical: SRDefenseLine | null
+  swing: SRDefenseLine | null
+  strategic: SRDefenseLine | null
 }
 
 export interface SRPositionActionCondition {
@@ -356,6 +400,8 @@ export interface SRConfidenceExplanation {
 
 export interface SRDecisionSummary {
   market_regime: SRMarketRegime
+  market_events?: SRMarketEvent[]
+  defense_lines?: SRDefenseLines
   market_action?: SRMarketAction
   position_action?: SRPositionAction
   position_action_condition?: SRPositionActionCondition

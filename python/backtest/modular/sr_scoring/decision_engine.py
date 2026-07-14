@@ -8,49 +8,29 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .event_engine import (
+    detect_market_events,
+    entry_relevance_base_breakdown as _entry_relevance_base_breakdown,
+    zone_interaction as _zone_interaction,
+    _clamp_relevance,
+    _distance_pct_to_zone,
+    _fmt_price,
+)
 from .model import ModelBundle
-from .types import ConfidenceLevel, RecentValidation, VolumeConfirmation, ZoneScore, ZoneTier, ZoneType
+from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
-
-
-def _fmt_price(v: float) -> str:
-    return f"{v:.2f}"
-
-
-def _distance_pct_to_zone(z: ZoneScore, current_price: float) -> float:
-    if z.price_low <= current_price <= z.price_high:
-        return 0.0
-    if current_price < z.price_low:
-        return (z.price_low - current_price) / current_price
-    return (current_price - z.price_high) / current_price
 
 
 # entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：
 #   1. base：純粹的「單一 zone 進場相關性」，與 scoring.py 的 entry_relevance_score
-#      同定義（優先沿用 scoring 算好的 breakdown，合成 zone 才用簡化 fallback）。
+#      同定義（優先沿用 scoring 算好的 breakdown，合成 zone 才用簡化 fallback）。base
+#      breakdown 的定義集中在 event_engine.entry_relevance_base_breakdown，讓 event_engine
+#      與 decision_engine 共用同一份、不會同一 zone 在兩個模組算出不同值。
 #      這是「回報值」——decision_summary 各 zone 對外輸出的 entry_relevance_score
 #      一律用 base，確保跟 zones[] 的同名欄位一致、不會同名不同義。
 #   2. with-events：base 再疊加 market_event 修正（reclaim/reversal +8、高量跌破 -25），
 #      僅供 decision 內部 gating（_decision_action / _pick_primary_zone）使用，不對外輸出。
 #      市場事件對外已有 market_events / short_term_regime 專門呈現，不重複灌進回報分數。
-def _entry_relevance_base_breakdown(z: ZoneScore, current_price: float) -> dict[str, float]:
-    base = dict(z.entry_relevance_breakdown or {})
-    if not base:
-        distance_pct = _distance_pct_to_zone(z, current_price)
-        base = {
-            "distance": max(0.0, 1.0 - min(distance_pct / 0.08, 1.0)) * 30.0,
-            "ev_rr": (
-                (max(0.0, min(((z.expected_value or 0.0) + 0.02) / 0.07, 1.0)) * 15.0)
-                + (min((z.risk_reward_ratio or 0.0) / 2.5, 1.0) * 15.0)
-            ),
-            "validation": 0.0 if z.recent_validation == RecentValidation.EXPIRED.value else 12.0,
-            "volume": 5.0,
-            "role_readiness": 0.0 if z.role == ZoneType.AT_ZONE.value else 10.0,
-            "confidence": z.confidence * 10.0,
-        }
-    return base
-
-
 def _market_event_adjustment(z: ZoneScore, market_events: Optional[list[dict[str, Any]]]) -> float:
     event_score = 0.0
     for event in market_events or []:
@@ -63,10 +43,6 @@ def _market_event_adjustment(z: ZoneScore, market_events: Optional[list[dict[str
         elif event.get("type") == "HIGH_VOLUME_BREAKDOWN":
             event_score = min(event_score, -25.0)
     return float(event_score)
-
-
-def _clamp_relevance(value: float) -> float:
-    return float(max(0.0, min(100.0, value)))
 
 
 def _entry_relevance_score(z: ZoneScore, current_price: float) -> float:
@@ -91,120 +67,6 @@ def _zone_quality_score(z: ZoneScore) -> float:
 def _event_matches_zone(event: dict[str, Any], zone: ZoneScore) -> bool:
     ref = event.get("zone_ref") or {}
     return ref.get("price_low") == zone.price_low and ref.get("price_high") == zone.price_high
-
-
-def _event_zone_ref(z: ZoneScore, current_price: float) -> dict[str, Any]:
-    return {
-        "price_low": z.price_low,
-        "price_high": z.price_high,
-        "label": f"{_fmt_price(z.price_low)} ~ {_fmt_price(z.price_high)}",
-        "role": z.role,
-        "tier": z.tier,
-        "tier_label": z.tier_label,
-        "distance_pct": _distance_pct_to_zone(z, current_price),
-        "entry_relevance_score": _entry_relevance_score(z, current_price),
-    }
-
-
-def _detect_market_events(
-    zone_scores: list[ZoneScore],
-    current_price: float,
-    candle_high: Optional[float],
-    candle_low: Optional[float],
-    candle_close: Optional[float],
-) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    for z in zone_scores:
-        if z.role != ZoneType.SUPPORT.value:
-            continue
-        interaction = _zone_interaction(z, current_price, candle_high, candle_low, candle_close)
-        if not interaction["touched"]:
-            continue
-        relative_volume = z.relative_volume or 0.0
-        high_volume = relative_volume >= 1.5 or z.volume_confirmation == VolumeConfirmation.FAILED.value
-        if interaction["closed_below"] and high_volume:
-            events.append({
-                "type": "HIGH_VOLUME_BREAKDOWN",
-                "direction": "BEARISH",
-                "confidence": min(1.0, max(0.45, relative_volume / 3.0)),
-                "zone_ref": _event_zone_ref(z, current_price),
-                "price_level": z.price_low,
-                "reason": "支撐區被收盤跌破，且量能放大或量能狀態確認失敗。",
-                "detected_at": "latest_candle",
-            })
-            continue
-        if interaction["closed_above"] and interaction["penetration_pct"] > 0:
-            # 收回區間上緣：歸類為 INTRADAY_RECLAIM，不再重複產生 REVERSAL_CANDIDATE，
-            # 避免同一 zone 同時掛兩筆事件（reclaim 是 reversal 的更明確版本）。
-            events.append({
-                "type": "INTRADAY_RECLAIM",
-                "direction": "BULLISH",
-                "confidence": min(1.0, 0.50 + z.confidence * 0.35),
-                "zone_ref": _event_zone_ref(z, current_price),
-                "price_level": z.price_high,
-                "reason": "盤中測試支撐後收回區間上緣。",
-                "detected_at": "latest_candle",
-            })
-        elif (
-            not interaction["closed_below"]
-            and z.confidence >= 0.45
-            and (z.expected_value or 0.0) >= 0
-            and z.recent_validation != RecentValidation.EXPIRED.value
-        ):
-            events.append({
-                "type": "REVERSAL_CANDIDATE",
-                "direction": "BULLISH",
-                "confidence": min(1.0, 0.45 + z.confidence * 0.30),
-                "zone_ref": _event_zone_ref(z, current_price),
-                "price_level": z.price_high,
-                "reason": "支撐測試未失守，且 EV 與區間信心未轉弱。",
-                "detected_at": "latest_candle",
-            })
-    return events[:6]
-
-
-def _zone_interaction(
-    z: ZoneScore,
-    current_price: float,
-    candle_high: Optional[float] = None,
-    candle_low: Optional[float] = None,
-    candle_close: Optional[float] = None,
-) -> dict[str, Any]:
-    high = current_price if candle_high is None else candle_high
-    low = current_price if candle_low is None else candle_low
-    close = current_price if candle_close is None else candle_close
-    touched = low <= z.price_high and high >= z.price_low
-    closed_inside = z.price_low <= close <= z.price_high
-    closed_above = close > z.price_high
-    closed_below = close < z.price_low
-    penetration_pct = 0.0
-    if low < z.price_low:
-        penetration_pct = max(penetration_pct, (z.price_low - low) / z.price_low)
-    if high > z.price_high:
-        penetration_pct = max(penetration_pct, (high - z.price_high) / z.price_high)
-
-    if not touched:
-        state_label = "尚未測試"
-    elif closed_inside:
-        state_label = "進入區間"
-    elif z.role == ZoneType.SUPPORT.value and closed_below:
-        state_label = "有效跌破"
-    elif z.role == ZoneType.SUPPORT.value and closed_above:
-        state_label = "收回區間上方"
-    else:
-        state_label = "今日已測試"
-
-    distance_pct = _distance_pct_to_zone(z, close)
-    return {
-        "distance_pct": distance_pct,
-        "distance_label": f"{distance_pct * 100:.1f}%",
-        "touched": touched,
-        "penetration_pct": penetration_pct,
-        "closed_inside": closed_inside,
-        "closed_above": closed_above,
-        "closed_below": closed_below,
-        "state_label": state_label,
-    }
 
 
 def _decision_summary_zone(
@@ -239,6 +101,8 @@ def _decision_summary_zone(
         "recent_validation": z.recent_validation,
         "volume_confirmation": z.volume_confirmation,
         "confluence_count": z.confluence_count,
+        "confluence_family_count": z.confluence_family_count,
+        "confluence_families": list(z.confluence_families),
         "reason": reason,
     }
 
@@ -377,7 +241,7 @@ def _primary_zone_score(
     market_events: Optional[list[dict[str, Any]]] = None,
 ) -> float:
     rr_score = 0.5 if z.risk_reward_ratio is None else min(z.risk_reward_ratio / 3.0, 1.0)
-    confluence_score = min(z.confluence_count / 3.0, 1.0)
+    confluence_score = min((z.confluence_family_count or 1) / 3.0, 1.0)
     role_alignment = 0.0
     if regime_primary in ("TREND_UP", "RANGE_BOUND") and z.role == ZoneType.SUPPORT.value:
         role_alignment = 1.0
@@ -544,6 +408,41 @@ def _decision_action(
     return "WATCH", "HOLD", "Hold", "等待", ["尚未形成足夠明確的進場優勢。"]
 
 
+def _entry_action_state(
+    action: str,
+    primary_zone: Optional[ZoneScore],
+    structure_state: str,
+    current_price: float,
+    market_events: Optional[list[dict[str, Any]]] = None,
+) -> str:
+    if primary_zone is None or action in ("Avoid", "Hold"):
+        return "WAIT_CONFIRMATION"
+    if (
+        primary_zone.recent_validation == RecentValidation.PENDING_VALIDATION.value
+        or structure_state == "SUPPORT_RECLAIM_CANDIDATE"
+    ):
+        return "PROBE_ENTRY" if action == "BuySmall" else "WAIT_CONFIRMATION"
+    if action == "BuySmall":
+        return "SMALL_ENTRY"
+    if action == "Buy":
+        relevance = _entry_relevance_score_with_events(primary_zone, current_price, market_events)
+        rr = primary_zone.risk_reward_ratio or 0.0
+        if relevance >= 85.0 and rr >= 2.5:
+            return "BUY"
+        return "ACCUMULATE"
+    return "WAIT_CONFIRMATION"
+
+
+def _entry_action_label(state: str) -> str:
+    return {
+        "WAIT_CONFIRMATION": "等待確認",
+        "PROBE_ENTRY": "觀察性試探",
+        "SMALL_ENTRY": "小量進場",
+        "ACCUMULATE": "分批累積",
+        "BUY": "買進",
+    }.get(state, state)
+
+
 def _structure_state(
     primary_zone: Optional[ZoneScore],
     interaction: Optional[dict[str, Any]],
@@ -644,7 +543,7 @@ def build_decision_summary(
     previous_candle_close: Optional[float] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
-    market_events = _detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
+    market_events = detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
     trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary, market_events=market_events)["trend_regime"]
     primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime, market_events)
     primary_interaction = (
@@ -667,6 +566,7 @@ def build_decision_summary(
     market_action, position_action, action, action_label, risk_notes = _decision_action(
         regime, primary_zone, current_price, primary_interaction, market_events
     )
+    entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, market_events)
 
     context = [
         {"key": "trend", "label": "整體趨勢", "value": f"{global_trend * 100:.1f}%"},
@@ -713,7 +613,7 @@ def build_decision_summary(
         confidence_explanation["context_factors"] = [
             {"key": "touch_count", "effect": "context", "label": f"觸碰 {primary_zone.touch_count} 次"},
             {"key": "recent_validation", "effect": "context", "label": primary_zone.recent_validation},
-            {"key": "confluence", "effect": "supportive" if primary_zone.confluence_count > 1 else "neutral", "label": f"多方法共振 ×{primary_zone.confluence_count}"},
+            {"key": "confluence", "effect": "supportive" if primary_zone.confluence_family_count > 1 else "neutral", "label": f"證據族群 ×{primary_zone.confluence_family_count}"},
         ]
 
     secondary = [
@@ -732,6 +632,8 @@ def build_decision_summary(
         "position_action_condition": _position_action_condition(primary_zone, structure_state),
         "action": action,
         "action_label": action_label,
+        "entry_action_state": entry_action_state,
+        "entry_action_label": _entry_action_label(entry_action_state),
         "primary_zone": _decision_summary_zone(
             primary_zone, current_price, "目前最具決策意義的主交易區",
             candle_high, candle_low, candle_close,

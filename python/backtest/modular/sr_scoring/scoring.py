@@ -109,12 +109,14 @@ from .model import (
 from .types import (
     ApproachDirection,
     ConfidenceLevel,
+    EvidenceFamily,
     NetScoreLabel,
     RecentValidation,
     TradingRecommendation,
     VolumeConfirmation,
     Zone,
     ZoneDirection,
+    ZoneMethod,
     ZoneScore,
     ZoneTier,
     ZoneTouch,
@@ -413,7 +415,11 @@ def _sort_zone_scores(zone_scores: list[ZoneScore]) -> list[ZoneScore]:
     confluence_count（多方法共振的 zone 數）只當第三順位的 tie-breaker，
     trading_score 幾乎不會真的相等，實務上很少真正影響排序結果。"""
     return sorted(
-        zone_scores, key=lambda z: (_TIER_ORDER.get(z.tier, 99), -z.trading_score, -z.confluence_count)
+    zone_scores, key=lambda z: (
+        _TIER_ORDER.get(z.tier, 99),
+        -z.trading_score,
+        -(z.confluence_family_count or 1),
+    )
     )
 
 
@@ -429,7 +435,18 @@ def _zone_overlap_ratio(a: Zone, b: Zone) -> float:
     return overlap / min(a.width, b.width)
 
 
-def _group_overlapping_zones(zones: list[Zone]) -> tuple[list[Optional[int]], list[int]]:
+def _evidence_family(method: str | ZoneMethod) -> str:
+    value = method.value if isinstance(method, ZoneMethod) else str(method)
+    return {
+        ZoneMethod.ATR.value: EvidenceFamily.STRUCTURAL_ATR.value,
+        ZoneMethod.VOLUME_PROFILE.value: EvidenceFamily.VOLUME_PROFILE.value,
+        ZoneMethod.RECENT_PIVOT.value: EvidenceFamily.RECENT_MICROSTRUCTURE.value,
+        ZoneMethod.BREAKDOWN_RECLAIM.value: EvidenceFamily.RECENT_MICROSTRUCTURE.value,
+        ZoneMethod.VWAP_RECLAIM.value: EvidenceFamily.VWAP_OR_AVERAGE_RECLAIM.value,
+    }.get(value, value.upper())
+
+
+def _group_overlapping_zones(zones: list[Zone]) -> tuple[list[Optional[int]], list[int], list[int], list[tuple[str, ...]]]:
     """標記「不同方法（ATR / volume_profile）各自建出來、但實際上指向同一
     價位帶」的 zone：只在乎跨方法的重疊，同一種方法建出來的 zone 已經在
     各自的 ZoneBuilder 內做過合併（見 zone_builder.py 的 merge_pct），這裡
@@ -473,17 +490,22 @@ def _group_overlapping_zones(zones: list[Zone]) -> tuple[list[Optional[int]], li
 
     overlap_group: list[Optional[int]] = [None] * n
     confluence_count: list[int] = [1] * n
+    confluence_family_count: list[int] = [1] * n
+    confluence_families: list[tuple[str, ...]] = [tuple([_evidence_family(z.method)]) for z in zones]
     group_id = 0
     for members in members_by_root.values():
         confluence = len(members)
+        families = tuple(sorted({_evidence_family(zones[i].method) for i in members}))
         for i in members:
             confluence_count[i] = confluence
+            confluence_family_count[i] = len(families)
+            confluence_families[i] = families
         if confluence > 1:
             for i in members:
                 overlap_group[i] = group_id
             group_id += 1
 
-    return overlap_group, confluence_count
+    return overlap_group, confluence_count, confluence_family_count, confluence_families
 
 
 # ── 十三、Trading Score（可拆解）/ Trading Recommendation ────────
@@ -890,6 +912,8 @@ def score_zone(
     threshold_pct: float = DEFAULT_THRESHOLD_PCT,
     overlap_group: Optional[int] = None,
     confluence_count: int = 1,
+    confluence_family_count: int = 1,
+    confluence_families: tuple[str, ...] = (),
     chip_score: Optional[float] = None,
     chip_features: Optional[dict[str, float]] = None,
     feature_set: Optional[ZoneFeatureSet] = None,
@@ -1076,6 +1100,8 @@ def score_zone(
         trading_recommendation=trading_recommendation,
         overlap_group=overlap_group,
         confluence_count=confluence_count,
+        confluence_family_count=confluence_family_count,
+        confluence_families=confluence_families or (_evidence_family(zone.method),),
         chip_direction=chip_direction,
         chip_bounce_delta=chip_bounce_delta,
         chip_break_delta=chip_break_delta,
@@ -1145,4 +1171,6 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "entry_relevance_breakdown": z.entry_relevance_breakdown,
         "overlap_group": z.overlap_group,
         "confluence_count": z.confluence_count,
+        "confluence_family_count": z.confluence_family_count,
+        "confluence_families": list(z.confluence_families),
     }

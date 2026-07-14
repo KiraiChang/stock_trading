@@ -154,6 +154,15 @@ def test_primary_high_volume_breakdown_event_forces_exit():
     assert "market_event" not in ds["primary_zone"]["entry_relevance_breakdown"]
 
 
+def test_extreme_volume_outputs_context_event_without_direct_action_override():
+    zone = _zone(relative_volume=2.8, volume_confirmation=VolumeConfirmation.CONFIRMED.value)
+
+    ds = _summary([zone])
+
+    assert ds["market_events"][0]["type"] == "EXTREME_VOLUME"
+    assert ds["market_action"] == "BUY"
+
+
 def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
     main = _zone(low=80.0, high=82.0, trading_score=70.0, risk_reward_ratio=2.5)
     short = _zone(
@@ -175,6 +184,31 @@ def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
     assert ds["primary_zone"]["price_low"] == main.price_low
     assert ds["market_action"] == "AVOID"
     assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
+
+
+def test_pending_validation_buy_small_is_probe_entry_not_confirmed_small_entry():
+    zone = _zone(
+        trading_score=95.0,
+        confidence=0.9,
+        expected_value=0.08,
+        risk_reward_ratio=1.8,
+        recent_validation=RecentValidation.PENDING_VALIDATION.value,
+    )
+
+    ds = _summary([zone])
+
+    assert ds["action"] == "BuySmall"
+    assert ds["entry_action_state"] == "PROBE_ENTRY"
+    assert ds["entry_action_label"] == "觀察性試探"
+
+
+def test_confirmed_buy_small_is_small_entry():
+    zone = _zone(trading_score=95.0, confidence=0.9, expected_value=0.08, risk_reward_ratio=1.8)
+
+    ds = _summary([zone])
+
+    assert ds["action"] == "BuySmall"
+    assert ds["entry_action_state"] == "SMALL_ENTRY"
 
 
 def test_high_volatility_downgrades_buy_to_buy_small():

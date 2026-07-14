@@ -235,13 +235,15 @@ type ZoneScore struct {
 	// 分群（見 Python scoring.py::_group_overlapping_zones）。不合併/刪除
 	// 任何 zone，只標記供 UI 顯示「多方法共振」。ConfluenceCount 恆 >= 1；
 	// OverlapGroup 只有 ConfluenceCount > 1 時才有值。
-	OverlapGroup       *int            `json:"overlap_group"`
-	ConfluenceCount    int             `json:"confluence_count"`
-	Features           json.RawMessage `json:"features,omitempty"`
-	Evidence           json.RawMessage `json:"evidence,omitempty"`
-	Explanation        json.RawMessage `json:"explanation,omitempty"`
-	Scenario           json.RawMessage `json:"scenario,omitempty"`
-	ProbabilityContext json.RawMessage `json:"probability_context,omitempty"`
+	OverlapGroup          *int            `json:"overlap_group"`
+	ConfluenceCount       int             `json:"confluence_count"`
+	ConfluenceFamilyCount int             `json:"confluence_family_count,omitempty"`
+	ConfluenceFamilies    []string        `json:"confluence_families,omitempty"`
+	Features              json.RawMessage `json:"features,omitempty"`
+	Evidence              json.RawMessage `json:"evidence,omitempty"`
+	Explanation           json.RawMessage `json:"explanation,omitempty"`
+	Scenario              json.RawMessage `json:"scenario,omitempty"`
+	ProbabilityContext    json.RawMessage `json:"probability_context,omitempty"`
 }
 
 func (z *ZoneScore) UnmarshalJSON(data []byte) error {

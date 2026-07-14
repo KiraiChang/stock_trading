@@ -33,6 +33,13 @@ class ZoneMethod(str, Enum):
     VWAP_RECLAIM = "vwap_reclaim"
 
 
+class EvidenceFamily(str, Enum):
+    STRUCTURAL_ATR = "STRUCTURAL_ATR"
+    VOLUME_PROFILE = "VOLUME_PROFILE"
+    RECENT_MICROSTRUCTURE = "RECENT_MICROSTRUCTURE"
+    VWAP_OR_AVERAGE_RECLAIM = "VWAP_OR_AVERAGE_RECLAIM"
+
+
 class ApproachDirection(str, Enum):
     FROM_ABOVE = "FROM_ABOVE"  # 價格由上往下觸碰 → 候選支撐
     FROM_BELOW = "FROM_BELOW"  # 價格由下往上觸碰 → 候選壓力
@@ -271,6 +278,8 @@ class ZoneScore:
     # confluence_count > 1 時才有值，單獨一個 zone 沒有「群組」可言。
     overlap_group: Optional[int]
     confluence_count: int
+    confluence_family_count: int = 1
+    confluence_families: tuple[str, ...] = ()
 
     # 籌碼（角色化）——只在記憶體中傳遞給 period summary 的結構化 chip 欄位，
     # 不進 _zone_score_to_dict / zones 表（整檔籌碼另在 score_symbol 的 chip_summary

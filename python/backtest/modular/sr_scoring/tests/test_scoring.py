@@ -416,13 +416,16 @@ def test_group_overlapping_zones_groups_cross_method_overlap():
         _zone(200.0, 210.0, ZoneMethod.ATR),           # 2：獨立，沒有重疊
     ]
 
-    groups, confluence = _group_overlapping_zones(zones)
+    groups, confluence, family_counts, families = _group_overlapping_zones(zones)
 
     assert groups[0] == groups[1]
     assert groups[0] is not None
     assert confluence[0] == 2 and confluence[1] == 2
+    assert family_counts[0] == 2 and family_counts[1] == 2
+    assert families[0] == ("STRUCTURAL_ATR", "VOLUME_PROFILE")
     assert groups[2] is None
     assert confluence[2] == 1
+    assert family_counts[2] == 1
 
 
 def test_group_overlapping_zones_ignores_same_method_overlap():
@@ -433,10 +436,11 @@ def test_group_overlapping_zones_ignores_same_method_overlap():
         _zone(101.0, 109.0, ZoneMethod.ATR),
     ]
 
-    groups, confluence = _group_overlapping_zones(zones)
+    groups, confluence, family_counts, families = _group_overlapping_zones(zones)
 
     assert groups == [None, None]
     assert confluence == [1, 1]
+    assert family_counts == [1, 1]
 
 
 def test_group_overlapping_zones_below_threshold_not_grouped():
@@ -446,10 +450,11 @@ def test_group_overlapping_zones_below_threshold_not_grouped():
         _zone(108.0, 118.0, ZoneMethod.VOLUME_PROFILE),
     ]
 
-    groups, confluence = _group_overlapping_zones(zones)
+    groups, confluence, family_counts, families = _group_overlapping_zones(zones)
 
     assert groups == [None, None]
     assert confluence == [1, 1]
+    assert family_counts == [1, 1]
 
 
 def test_group_overlapping_zones_transitively_connected_zones_share_one_group():
@@ -462,10 +467,30 @@ def test_group_overlapping_zones_transitively_connected_zones_share_one_group():
     ]
     assert _zone_overlap_ratio(zones[0], zones[2]) < OVERLAP_GROUP_THRESHOLD  # 前提：A-C 本身不到門檻
 
-    groups, confluence = _group_overlapping_zones(zones)
+    groups, confluence, family_counts, families = _group_overlapping_zones(zones)
 
     assert groups[0] == groups[1] == groups[2]
     assert confluence == [3, 3, 3]
+    assert family_counts == [2, 2, 2]
+
+
+def test_group_overlapping_zones_deduplicates_correlated_evidence_families():
+    zones = [
+        _zone(100.0, 110.0, ZoneMethod.RECENT_PIVOT),
+        _zone(101.0, 109.0, ZoneMethod.BREAKDOWN_RECLAIM),
+        _zone(102.0, 108.0, ZoneMethod.VWAP_RECLAIM),
+        _zone(100.5, 109.5, ZoneMethod.ATR),
+    ]
+
+    groups, confluence, family_counts, families = _group_overlapping_zones(zones)
+
+    assert confluence == [4, 4, 4, 4]
+    assert family_counts == [3, 3, 3, 3]
+    assert set(families[0]) == {
+        "RECENT_MICROSTRUCTURE",
+        "VWAP_OR_AVERAGE_RECLAIM",
+        "STRUCTURAL_ATR",
+    }
 
 
 def test_score_symbol_confluence_reflects_cross_method_overlap(monkeypatch, bundle):
@@ -507,6 +532,8 @@ def test_score_symbol_confluence_reflects_cross_method_overlap(monkeypatch, bund
     assert len(zones) == 2
     assert zones[0]["confluence_count"] == 2
     assert zones[1]["confluence_count"] == 2
+    assert zones[0]["confluence_family_count"] == 2
+    assert set(zones[0]["confluence_families"]) == {"STRUCTURAL_ATR", "VOLUME_PROFILE"}
     assert zones[0]["overlap_group"] == zones[1]["overlap_group"]
     assert zones[0]["overlap_group"] is not None
 
@@ -821,6 +848,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
         "zone_momentum", "zone_direction",
         "recent_validation", "trading_score", "trading_score_breakdown", "trading_recommendation",
         "zone_quality_score", "entry_relevance_score", "entry_relevance_breakdown",
+        "confluence_family_count", "confluence_families",
     }
     for z in _v2_zone_scores(result):
         assert expected_keys <= set(z.keys())

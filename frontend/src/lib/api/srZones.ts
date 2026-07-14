@@ -193,6 +193,8 @@ export interface SRZone {
   // 時才有值。
   overlap_group: number | null
   confluence_count: number
+  confluence_family_count?: number | null
+  confluence_families?: string[] | null
 
   status: 'PENDING' | 'HELD_SO_FAR' | 'BROKEN'
   broken_at?: string | null
@@ -273,6 +275,7 @@ export interface SRPeriodSummary {
 }
 
 export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
+export type SREntryActionState = 'WAIT_CONFIRMATION' | 'PROBE_ENTRY' | 'SMALL_ENTRY' | 'ACCUMULATE' | 'BUY' | string
 export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
 export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'
 export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
@@ -337,11 +340,13 @@ export interface SRDecisionZoneSummary {
   recent_validation: RecentValidation
   volume_confirmation: VolumeConfirmation | null
   confluence_count: number
+  confluence_family_count?: number | null
+  confluence_families?: string[] | null
   reason: string
 }
 
 export interface SRMarketEvent {
-  type: 'HIGH_VOLUME_BREAKDOWN' | 'INTRADAY_RECLAIM' | 'REVERSAL_CANDIDATE' | string
+  type: 'EXTREME_VOLUME' | 'HIGH_VOLUME_BREAKDOWN' | 'INTRADAY_RECLAIM' | 'REVERSAL_CANDIDATE' | string
   direction: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | string
   confidence: number
   zone_ref?: {
@@ -353,7 +358,7 @@ export interface SRMarketEvent {
     tier_label?: string
     distance_pct?: number
     entry_relevance_score?: number
-  }
+  } | null
   price_level: number | null
   reason: string
   detected_at: string
@@ -407,6 +412,8 @@ export interface SRDecisionSummary {
   position_action_condition?: SRPositionActionCondition
   action: SRDecisionAction
   action_label: string
+  entry_action_state?: SREntryActionState
+  entry_action_label?: string
   primary_zone: SRDecisionZoneSummary | null
   market_context: SRDecisionContextItem[]
   confidence_explanation: SRConfidenceExplanation

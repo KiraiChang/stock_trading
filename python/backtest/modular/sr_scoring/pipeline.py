@@ -129,16 +129,19 @@ def calculate_scores(features: AnalysisFeatures) -> AnalysisScores:
 
     data = features.data
     tiers = _assign_tiers([zone.width for zone in data.zones])
-    groups, counts = _group_overlapping_zones(list(data.zones))
+    groups, counts, family_counts, families = _group_overlapping_zones(list(data.zones))
     chip_score = float(data.chip_row["total_score"]) if data.chip_row is not None else None
     scores = [
         score_zone(
             data.frame, item.zone, data.current_price, data.model, features.global_trend,
             tier=tier, as_of_index=len(data.frame) - 1, overlap_group=group,
-            confluence_count=count, chip_score=chip_score, chip_features=data.chip_features,
+            confluence_count=count, confluence_family_count=family_count,
+            confluence_families=family, chip_score=chip_score, chip_features=data.chip_features,
             feature_set=item,
         )
-        for item, tier, group, count in zip(features.zones, tiers, groups, counts)
+        for item, tier, group, count, family_count, family in zip(
+            features.zones, tiers, groups, counts, family_counts, families
+        )
     ]
     # Keep feature/evidence alignment after score sorting.
     indexed = list(zip(features.zones, scores))

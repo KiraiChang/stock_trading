@@ -631,6 +631,7 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 
 | Event | 語意 | Action 影響 |
 |---|---|---|
+| `EXTREME_VOLUME` | 最新量能達極端放大門檻 | context event，不單獨決定 action；需搭配 breakdown/reclaim/reversal 解讀 |
 | `HIGH_VOLUME_BREAKDOWN` | 支撐區被收盤跌破，且相對量放大或量能狀態為失敗 | 依破線 zone 嚴重度降風險；primary/main-structure 或高相關破線可強制 `EXIT`，短線非 primary 破線只降為 `REDUCE_ON_BREAKDOWN` 或 risk note |
 | `INTRADAY_RECLAIM` | 盤中測試支撐後收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正 |
 | `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
@@ -651,6 +652,18 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 Action 應由 Market Regime、primary zone、`entry_relevance_score`、market events、`zone_quality_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。`trading_score` 保留為 legacy quality score，不得單獨直接決定 `Buy` / `BuySmall`。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
 
 `position_action=HOLD` 不代表無條件持有；若有 `position_action_condition`，前端必須顯示為「條件式持有」，並列出 `invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`。
+
+`entry_action_state` 是進場階段語意，不取代 `action` / `market_action`：
+
+| State | 語意 |
+|---|---|
+| `WAIT_CONFIRMATION` | 等待確認，不進場 |
+| `PROBE_ENTRY` | 仍在待確認語境，只能視為觀察性試探 |
+| `SMALL_ENTRY` | 條件普通但已確認，可小量進場 |
+| `ACCUMULATE` | 條件完整但仍適合分批累積 |
+| `BUY` | 條件完整，可正常買進 |
+
+若 zone 是 `PENDING_VALIDATION` 或 position reason 含 `SUPPORT_RECLAIM_AWAIT_CONFIRMATION`，即使 legacy `action=BuySmall`，`entry_action_state` 也不得高於 `PROBE_ENTRY`，避免「尚待確認」與「小量試單」語意衝突。
 
 目前 action pipeline：
 
@@ -729,11 +742,11 @@ summary_score =
   event_aware_entry_relevance/100 * 0.65
   + zone_quality_score/100 * 0.15
   + rr_score * 0.07
-  + confluence_score * 0.08
+  + confluence_family_score * 0.08
   + role_alignment * 0.05
 ```
 
-`event_aware_entry_relevance` 是 base `entry_relevance_score` 加上 market event 內部修正後的分數，只用於 decision gating / primary-zone ranking；對外仍回傳 base relevance。`role_alignment=1.0` 僅在 regime 與角色方向一致時成立：`TREND_UP/RANGE_BOUND + SUPPORT` 或 `TREND_DOWN + RESISTANCE`。Distance、EV、confidence 已包含在 entry relevance 裡，不再額外重複加權；`rr_score` 以 3.0 為滿額上限。
+`event_aware_entry_relevance` 是 base `entry_relevance_score` 加上 market event 內部修正後的分數，只用於 decision gating / primary-zone ranking；對外仍回傳 base relevance。`role_alignment=1.0` 僅在 regime 與角色方向一致時成立：`TREND_UP/RANGE_BOUND + SUPPORT` 或 `TREND_DOWN + RESISTANCE`。Distance、EV、confidence 已包含在 entry relevance 裡，不再額外重複加權；`rr_score` 以 3.0 為滿額上限；`confluence_family_score` 使用去重後的獨立 evidence family count，而不是 raw zone count。
 
 ### Market Context 去重
 
@@ -954,12 +967,24 @@ overlap 比例 >= 0.6（OVERLAP_GROUP_THRESHOLD）→ 同一群組
 透過中介 zone 傳遞相連的 pair（A-B 重疊、B-C 重疊，A-C 本身不重疊）仍會被
 歸為同一群組——這是 union-find 的標準行為。**不合併、不刪除任何 zone**，
 只標記 `overlap_group`（群組 id，只有群組內 zone 數 > 1 才有值，單獨的
-zone 為 `null`）跟 `confluence_count`（群組內 zone 數，恆 >= 1）。
+zone 為 `null`）、`confluence_count`（群組內 raw zone 數，恆 >= 1）、
+`confluence_family_count` 與 `confluence_families`（去重後的獨立 evidence family）。
+
+Evidence family 用來避免 correlated evidence inflation：多個短線微結構 zone
+雖然可能都重疊在同一價位，但不應把每個 zone 都當成完全獨立證據。現行 family：
+
+| Family | 包含 method |
+|---|---|
+| `STRUCTURAL_ATR` | `atr` |
+| `VOLUME_PROFILE` | `volume_profile` |
+| `RECENT_MICROSTRUCTURE` | `recent_pivot`、`breakdown_reclaim` |
+| `VWAP_OR_AVERAGE_RECLAIM` | `vwap_reclaim` |
 
 排序規則不變：仍是 tier 由粗到細、同層內 `trading_score` 由高到低；
-`confluence_count` 只當第三順位的 tie-breaker（`trading_score` 幾乎不會
+`confluence_family_count` 只當第三順位的 tie-breaker（`trading_score` 幾乎不會
 真的相等，實務上很少真正影響排序結果），不會改變既有排序邏輯。前端在
-zone 卡片標題列顯示「多方法共振 ×N」徽章（`confluence_count > 1` 時），
+zone 卡片標題列仍可顯示 legacy「多方法共振 ×N」，但 primary-zone ranking
+與新文案應優先使用 `confluence_family_count` / `confluence_families`；
 `overlap_group` 原始 id 在「展開進階細節」裡。
 
 ---

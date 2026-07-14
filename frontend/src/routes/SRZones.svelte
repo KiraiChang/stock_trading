@@ -277,6 +277,20 @@
     Hold: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
     Avoid: 'bg-red-900/40 text-red-300 border-red-700/60',
   }
+  const entryActionText: Record<string, string> = {
+    WAIT_CONFIRMATION: '等待確認',
+    PROBE_ENTRY: '觀察性試探',
+    SMALL_ENTRY: '小量進場',
+    ACCUMULATE: '分批累積',
+    BUY: '買進',
+  }
+  const entryActionClass: Record<string, string> = {
+    WAIT_CONFIRMATION: 'bg-gray-700/60 text-gray-300 border-border',
+    PROBE_ENTRY: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
+    SMALL_ENTRY: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
+    ACCUMULATE: 'bg-green-900/40 text-green-300 border-green-700/60',
+    BUY: 'bg-green-900/50 text-green-300 border-green-700/60',
+  }
   const positionActionText: Record<string, string> = {
     HOLD: '條件式持有', REDUCE_ON_BREAKDOWN: '跌破減碼', REDUCE: '減碼', EXIT: '出場',
   }
@@ -967,6 +981,14 @@
                     {marketActionText[decisionSummary.market_action ?? legacyMarketAction(decisionSummary.action)] ?? decisionSummary.market_action ?? decisionSummary.action}
                   </span>
                 </div>
+                {#if decisionSummary.entry_action_state}
+                  <div>
+                    <p class="text-muted text-xs mb-1">Entry State</p>
+                    <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {entryActionClass[decisionSummary.entry_action_state] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                      {decisionSummary.entry_action_label ?? entryActionText[decisionSummary.entry_action_state] ?? decisionSummary.entry_action_state}
+                    </span>
+                  </div>
+                {/if}
                 <div>
                   <p class="text-muted text-xs mb-1">Position Action</p>
                   <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {positionActionClass[decisionSummary.position_action ?? 'HOLD'] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
@@ -975,6 +997,12 @@
                 </div>
               </div>
             </div>
+
+            {#if decisionSummary.entry_action_state}
+              <p class="text-muted text-xs mb-4">
+                進場時機以 <span class="font-semibold">Entry State</span> 為準；Market Action 只表示整體盤勢傾向，未確認的設定（如「觀察性試探」）不代表可直接進場。
+              </p>
+            {/if}
 
             {#if decisionSummary.position_action_condition}
               <div class="grid sm:grid-cols-3 gap-3 mb-4 text-xs">

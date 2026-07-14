@@ -40,6 +40,8 @@ fugle:
   quote_rate_limit: 60                        # 環境變數：FUGLE_QUOTE_RATE_LIMIT
   max_subscriptions: 5                        # 環境變數：FUGLE_MAX_SUBSCRIPTIONS
   reconnect_max_sec: 60                       # 環境變數：FUGLE_RECONNECT_MAX_SEC
+  max_conn_cooldown_sec: 60                   # 環境變數：FUGLE_MAX_CONN_COOLDOWN_SEC，maxconn 遞增冷卻起始值
+  ping_interval_sec: 30                       # 環境變數：FUGLE_PING_INTERVAL_SEC，主動 ping 保活間隔（負值關閉）
 
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：

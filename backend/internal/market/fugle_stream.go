@@ -20,11 +20,20 @@ const (
 	fugleAuthTimeout        = 10 * time.Second
 	fugleReconnectBaseDelay = 2 * time.Second
 	// fugleMaxConnCooldown：撞到「Maximum number of connections reached」時的專屬
-	// 冷卻時間。這個錯誤代表帳號唯一的連線名額還被前一條連線佔著——通常是前一次
+	// 冷卻「起始」值。這個錯誤代表帳號唯一的連線名額還被前一條連線佔著——通常是前一次
 	// 1006 異常斷線（沒走正常關閉），伺服器要等自己的 timeout 才會釋放名額。這種
 	// 情況用一般 2s 退避狂重連只會讓帳號一直處於忙碌狀態、名額永遠等不到釋放，
-	// 必須改用較長的固定冷卻等伺服器端釋放（實測 17s 時名額仍未釋放，取 60s）。
+	// 必須改用較長冷卻等伺服器端釋放（實測 17s 時名額仍未釋放，取 60s 起）。
+	// 連續撞 maxconn 時冷卻會逐步加倍（見 nextReconnectDelay），確保安靜窗最終
+	// 超過伺服器釋放 timeout、名額必然在窗內釋放而不再永久鎖死。可由 config 覆寫。
 	fugleMaxConnCooldown = 60 * time.Second
+	// fugleMaxConnCooldownCap：遞增冷卻的上限，避免無限拉長。
+	fugleMaxConnCooldownCap = 5 * time.Minute
+	// fuglePingInterval：認證成功後主動送 WebSocket ping 的預設間隔，用於保活、
+	// 降低被中介剪斷造成的 1006。可由 config 覆寫，設 0 關閉。
+	fuglePingInterval = 30 * time.Second
+	// fuglePingWriteWait：送出 ping 控制訊框的寫入期限。
+	fuglePingWriteWait = 5 * time.Second
 	// fugleCloseWriteWait：送出 WebSocket 正常關閉（Close 控制訊框）的寫入期限。
 	fugleCloseWriteWait = 2 * time.Second
 )
@@ -37,6 +46,8 @@ type FugleStreamClient struct {
 	wsURL           string
 	maxSubs         int
 	reconnectMaxDur time.Duration
+	maxConnCooldown time.Duration
+	pingInterval    time.Duration
 	log             *zap.Logger
 
 	// OnRawMessage 若設定，每一筆收到的原始訊息都會回呼（不影響正常訂閱處理），
@@ -64,11 +75,27 @@ func NewFugleStreamClient(cfg config.FugleConfig, log *zap.Logger) *FugleStreamC
 	if reconnectMax <= 0 {
 		reconnectMax = 60 * time.Second
 	}
+	maxConnCooldown := time.Duration(cfg.MaxConnCooldownSec) * time.Second
+	if maxConnCooldown <= 0 {
+		maxConnCooldown = fugleMaxConnCooldown
+	}
+	// PingIntervalSec 語意：未設定（0）→ 套預設並啟用保活；>0 → 用該值；<0 → 明確關閉
+	// 主動 ping（pingInterval=0，pingLoop 不啟動）。以「未設定即開」為預設，避免忘了設
+	// 就沒有保活。
+	pingInterval := fuglePingInterval
+	switch {
+	case cfg.PingIntervalSec > 0:
+		pingInterval = time.Duration(cfg.PingIntervalSec) * time.Second
+	case cfg.PingIntervalSec < 0:
+		pingInterval = 0
+	}
 	return &FugleStreamClient{
 		apiKey:          cfg.APIKey,
 		wsURL:           cfg.WSEndpoint,
 		maxSubs:         maxSubs,
 		reconnectMaxDur: reconnectMax,
+		maxConnCooldown: maxConnCooldown,
+		pingInterval:    pingInterval,
 		log:             log,
 		callbacks:       make(map[string]func(Candle)),
 		channelID:       make(map[string]string),
@@ -91,6 +118,7 @@ func (c *FugleStreamClient) Start(ctx context.Context) {
 
 func (c *FugleStreamClient) runLoop(ctx context.Context) {
 	backoff := fugleReconnectBaseDelay
+	cooldown := c.maxConnCooldown
 	for {
 		select {
 		case <-ctx.Done():
@@ -105,9 +133,10 @@ func (c *FugleStreamClient) runLoop(ctx context.Context) {
 			if isMaxConnectionsErr(err) {
 				c.log.Warn("fugle stream disconnected",
 					zap.Error(err),
+					zap.Duration("cooldown", cooldown),
 					zap.String("hint", "免費方案同一組 API Key 僅允許 1 條 WebSocket 連線；"+
 						"常見成因為 cmd/fugle-check 與本服務同時使用同一組 Key，或前一條連線"+
-						"（多半是 1006 異常斷線）尚未被伺服器釋放名額，將以較長冷卻等待釋放後重試"),
+						"（多半是 1006 異常斷線）尚未被伺服器釋放名額，將以遞增冷卻等待釋放後重試"),
 				)
 			} else {
 				c.log.Warn("fugle stream disconnected", zap.Error(err))
@@ -115,7 +144,7 @@ func (c *FugleStreamClient) runLoop(ctx context.Context) {
 		}
 
 		var wait time.Duration
-		wait, backoff = nextReconnectDelay(backoff, authenticated, err, c.reconnectMaxDur)
+		wait, backoff, cooldown = nextReconnectDelay(backoff, cooldown, authenticated, err, c.reconnectMaxDur, c.maxConnCooldown)
 
 		select {
 		case <-ctx.Done():
@@ -127,18 +156,25 @@ func (c *FugleStreamClient) runLoop(ctx context.Context) {
 	}
 }
 
-// nextReconnectDelay 依這次連線的結果決定「重連前要等多久（wait）」以及「下一輪
-// 的指數退避基準（nextBackoff）」：
-//   - 撞到 max-connections：套用固定長冷卻（fugleMaxConnCooldown），等伺服器釋放
-//     殘留名額；並把退避基準重置回 base，冷卻過後恢復即時反應。
-//   - 成功認證過才斷線：回到 base，維持斷線後的即時重連。
-//   - 其他錯誤（dial 失敗、DNS timeout、一般讀取錯誤）：指數退避，上限 maxDur。
-func nextReconnectDelay(backoff time.Duration, authenticated bool, err error, maxDur time.Duration) (wait, nextBackoff time.Duration) {
+// nextReconnectDelay 依這次連線的結果決定「重連前要等多久（wait）」以及要帶進下一輪的
+// 兩個狀態：指數退避基準（nextBackoff）與 max-connections 遞增冷卻（nextCooldown）：
+//   - 撞到 max-connections：以當前 cooldown 為 wait，等伺服器釋放殘留名額；並把
+//     nextCooldown 加倍（上限 fugleMaxConnCooldownCap），連續撞到就讓安靜窗愈拉愈長，
+//     確保最終超過伺服器釋放 timeout、名額必然在窗內釋放而非永久鎖死。backoff 重置回 base。
+//   - 成功認證過才斷線：回到 base 即時重連，並把 cooldown 重置回 baseCooldown
+//     （前一輪連續 maxconn 的遞增狀態在成功連上後清零）。
+//   - 其他錯誤（dial 失敗、DNS timeout、一般讀取錯誤）：指數退避，上限 maxDur；
+//     cooldown 同樣重置回 baseCooldown。
+func nextReconnectDelay(backoff, cooldown time.Duration, authenticated bool, err error, maxDur, baseCooldown time.Duration) (wait, nextBackoff, nextCooldown time.Duration) {
 	switch {
 	case isMaxConnectionsErr(err):
-		return fugleMaxConnCooldown, fugleReconnectBaseDelay
+		nextCooldown = cooldown * 2
+		if nextCooldown > fugleMaxConnCooldownCap {
+			nextCooldown = fugleMaxConnCooldownCap
+		}
+		return cooldown, fugleReconnectBaseDelay, nextCooldown
 	case authenticated:
-		return fugleReconnectBaseDelay, fugleReconnectBaseDelay
+		return fugleReconnectBaseDelay, fugleReconnectBaseDelay, baseCooldown
 	default:
 		wait = backoff
 		if wait > maxDur {
@@ -148,7 +184,7 @@ func nextReconnectDelay(backoff time.Duration, authenticated bool, err error, ma
 		if nextBackoff > maxDur {
 			nextBackoff = maxDur
 		}
-		return wait, nextBackoff
+		return wait, nextBackoff, baseCooldown
 	}
 }
 
@@ -183,6 +219,14 @@ func (c *FugleStreamClient) connectAndServe(ctx context.Context) (authenticated 
 
 	c.resubscribeAll()
 
+	// 主動 ping 保活：在讀取迴圈期間定期送 ping，降低被 NAT／防火牆因閒置剪斷
+	// 造成的 1006。connectAndServe 一 return（斷線或收工）就關掉 pingLoop。
+	pingDone := make(chan struct{})
+	defer close(pingDone)
+	if c.pingInterval > 0 {
+		go c.pingLoop(conn, pingDone)
+	}
+
 	conn.SetReadDeadline(time.Now().Add(fugleReadIdleTimeout))
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -194,6 +238,28 @@ func (c *FugleStreamClient) connectAndServe(ctx context.Context) (authenticated 
 			c.OnRawMessage(raw)
 		}
 		c.handleMessage(raw)
+	}
+}
+
+// pingLoop 在連線存活期間定期送出 WebSocket ping 控制訊框保活，直到 done 被關閉
+// （connectAndServe return）為止。WriteControl 依 gorilla 文件可與讀取並行呼叫，
+// 不需另外持鎖。送出失敗多半代表連線已壞，直接結束即可——讀取迴圈會一併收斂到重連。
+func (c *FugleStreamClient) pingLoop(conn *websocket.Conn, done <-chan struct{}) {
+	ticker := time.NewTicker(c.pingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := conn.WriteControl(
+				websocket.PingMessage,
+				nil,
+				time.Now().Add(fuglePingWriteWait),
+			); err != nil {
+				return
+			}
+		}
 	}
 }
 

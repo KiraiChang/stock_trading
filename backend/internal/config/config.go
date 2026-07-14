@@ -72,6 +72,14 @@ type FugleConfig struct {
 	QuoteRateLimit   int    `mapstructure:"quote_rate_limit"`  // 每分鐘 REST 呼叫上限，免費方案為 60
 	MaxSubscriptions int    `mapstructure:"max_subscriptions"` // WebSocket 同時訂閱檔數上限，免費方案為 5
 	ReconnectMaxSec  int    `mapstructure:"reconnect_max_sec"` // WebSocket 重連退避上限（秒）
+	// MaxConnCooldownSec：撞到「Maximum number of connections reached」時的遞增冷卻
+	// 起始值（秒）。名額被前一條 1006 幽靈連線佔著時，會從這個值開始、每次連續撞到
+	// 就加倍（上限見 fugleMaxConnCooldownCap），確保安靜窗夠久讓伺服器釋放名額。0 沿用預設 60。
+	MaxConnCooldownSec int `mapstructure:"max_conn_cooldown_sec"`
+	// PingIntervalSec：WebSocket 認證成功後主動送 ping 的間隔（秒），用於保活、
+	// 降低被 NAT／防火牆剪斷造成的 1006 異常斷線。未設定（0）沿用預設 30 並啟用；
+	// 負值明確關閉主動 ping。
+	PingIntervalSec int `mapstructure:"ping_interval_sec"`
 }
 
 // ChipConfig 為籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）。
@@ -104,6 +112,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("fugle.quote_rate_limit", 60)
 	viper.SetDefault("fugle.max_subscriptions", 5)
 	viper.SetDefault("fugle.reconnect_max_sec", 60)
+	viper.SetDefault("fugle.max_conn_cooldown_sec", 60)
+	viper.SetDefault("fugle.ping_interval_sec", 30)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)

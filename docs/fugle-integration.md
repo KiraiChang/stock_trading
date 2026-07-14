@@ -147,10 +147,18 @@ go run ./cmd/fugle-check -symbol 2330 -duration 120s
   WebSocket Close 控制訊框（`gracefulClose`）再關 TCP，讓伺服器**立即釋放**帳號的
   連線名額，而不是等它自己 timeout。這避免「前一條連線名額殘留 → 下一條在 auth
   階段被 `close 1001 Maximum number of connections reached` 踢掉」。
-- **`Maximum number of connections reached` 專屬長冷卻**：撞到這個錯誤代表名額還被
+- **`Maximum number of connections reached` 專屬遞增冷卻**：撞到這個錯誤代表名額還被
   前一條連線佔著（多半是前一次 **1006 異常斷線**，沒走正常關閉，伺服器要等自己
-  timeout 才釋放）。此時**不套用一般 2s 指數退避**，改用固定 `fugleMaxConnCooldown`
-  （60s）冷卻等待名額釋放——每 2s 硬撞只會讓帳號一直忙碌、名額永遠等不到釋放。
+  timeout 才釋放）。此時**不套用一般 2s 指數退避**，改用 `max_conn_cooldown_sec`
+  （預設 60s）為起始的冷卻等待名額釋放——每 2s 硬撞只會讓帳號一直忙碌、名額永遠
+  等不到釋放。**連續撞到 maxconn 時冷卻會逐步加倍**（60s→120s→240s…，上限
+  `fugleMaxConnCooldownCap`＝5 分鐘）：因為每段冷卻期間我方完全不敲門，只要安靜窗
+  最終超過伺服器釋放 timeout，名額必然在窗內被放掉、下一次即連得回，避免「固定 60s
+  仍不足 → 永久鎖死」。認證成功或一般錯誤後冷卻重置回起始值。
+- **主動 ping 保活**：認證成功後起 `pingLoop`，每 `ping_interval_sec`（預設 30s）主動送
+  一次 WebSocket ping，降低被 NAT／防火牆因閒置剪斷造成的 **1006**（此為異常斷線的
+  源頭之一）。`ping_interval_sec` 設負值可關閉。與被動的 `fugleReadIdleTimeout`（90s）
+  互補：ping 從源頭減少斷線，read deadline 負責偵測已發生的斷線。
 - **認證成功後重置退避**：曾成功 authenticated 過才斷線（例如健康連線 1006 掉線），
   退避回到 base，維持斷線後的即時重連；一般 dial/DNS 失敗才走指數退避（上限
   `reconnect_max_sec`）。
@@ -161,7 +169,9 @@ go run ./cmd/fugle-check -symbol 2330 -duration 120s
 
 排查提醒：若持續看到 `Maximum number of connections reached`，先確認沒有其他
 process（例如 `cmd/fugle-check`、另一個 server 實例）正用同一組 Key；若確定只有
-單一服務，通常是前一次異常斷線的名額尚未釋放，冷卻後會自動恢復。
+單一服務，通常是前一次異常斷線的名額尚未釋放，遞增冷卻過後會自動恢復（log 會帶
+當下 `cooldown` 值）。若長期停在冷卻上限仍連不回，代表伺服器釋放 timeout 超過
+上限，應手動實測名額實際釋放時間後調大 `max_conn_cooldown_sec` 或 `fugleMaxConnCooldownCap`。
 
 ---
 
@@ -178,6 +188,8 @@ fugle:
   quote_rate_limit: 60                 # FUGLE_QUOTE_RATE_LIMIT
   max_subscriptions: 5                 # FUGLE_MAX_SUBSCRIPTIONS
   reconnect_max_sec: 60                # FUGLE_RECONNECT_MAX_SEC
+  max_conn_cooldown_sec: 60            # FUGLE_MAX_CONN_COOLDOWN_SEC，maxconn 遞增冷卻起始值；0 沿用預設 60
+  ping_interval_sec: 30               # FUGLE_PING_INTERVAL_SEC，主動 ping 保活間隔；0 沿用預設 30，負值關閉
 ```
 
 `docker-compose.yml`/`deploy.sh` 已對應加上 `FUGLE_ENABLED`/`FUGLE_API_KEY`

@@ -1,7 +1,14 @@
 name: stock_trading_dev
 
+x-dev-resource-limits: &dev-resource-limits
+  cpus: "0.5"
+  mem_limit: 512m
+  memswap_limit: 768m
+  pids_limit: 200
+
 services:
   postgres:
+    <<: *dev-resource-limits
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -21,6 +28,7 @@ services:
       - dev_trading_net
 
   redis:
+    <<: *dev-resource-limits
     image: redis:7-alpine
     restart: unless-stopped
     ports:
@@ -36,6 +44,7 @@ services:
       - dev_trading_net
 
   backend:
+    <<: *dev-resource-limits
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -65,6 +74,7 @@ services:
       - dev_trading_net
 
   python-server:
+    <<: *dev-resource-limits
     build:
       context: ./python
       dockerfile: Dockerfile
@@ -86,6 +96,7 @@ services:
       - dev_trading_net
 
   python-worker:
+    <<: *dev-resource-limits
     profiles: ["worker"]
     build:
       context: ./python

@@ -23,12 +23,25 @@
 
 從 repo root 執行。
 
+單次驗收用的 `docker run` 預設加上資源限制，避免測試或 build 佔滿主機資源：
+
+| 參數 | 限制 |
+|------|------|
+| `--cpus="0.5"` | 最多使用半顆 CPU 的運算時間 |
+| `--memory="512m"` | 實體記憶體上限 512MB |
+| `--memory-swap="768m"` | 記憶體加 swap 總上限 768MB |
+| `--pids-limit=200` | 程序及執行緒數量上限 200 |
+
 ### 1. 用 Docker 跑建置與測試
 
 Backend：
 
 ```bash
 docker run --rm \
+  --cpus="0.5" \
+  --memory="512m" \
+  --memory-swap="768m" \
+  --pids-limit=200 \
   -v "$PWD/backend:/app" \
   -w /app \
   -e GOMODCACHE=/tmp/gomod \
@@ -41,6 +54,10 @@ Frontend：
 
 ```bash
 docker run --rm \
+  --cpus="0.5" \
+  --memory="512m" \
+  --memory-swap="768m" \
+  --pids-limit=200 \
   -v "$PWD/frontend:/app" \
   -w /app \
   node:20-alpine \
@@ -51,6 +68,10 @@ Python：
 
 ```bash
 docker run --rm \
+  --cpus="0.5" \
+  --memory="512m" \
+  --memory-swap="768m" \
+  --pids-limit=200 \
   -v "$PWD/python:/app" \
   -w /app \
   python:3.11-slim \
@@ -58,6 +79,10 @@ docker run --rm \
 ```
 
 ### 2. 啟動 dev stack 做 smoke test
+
+`docker-compose.dev.yml` 已對 dev stack 服務套用同樣的資源限制：
+每個 container 預設最多 `0.5` CPU、`512m` 實體記憶體、`768m` memory+swap、`200` 個
+process/thread。
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build -d

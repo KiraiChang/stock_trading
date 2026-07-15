@@ -20,6 +20,10 @@ type Fetcher struct {
 	// 未設定（SetFugle 未呼叫）時相關方法會回傳錯誤，呼叫端應維持走 FinMind。
 	quoteSource  QuoteSource
 	streamSource StreamingSource
+
+	// batchSource 為選填的批次盤中源（Yahoo），支援單次請求多檔；與 Fugle 並存，
+	// 未設定（SetIntradaySource 未呼叫）時 FetchAndStoreIntradayBatch 回傳錯誤。
+	batchSource BatchQuoteSource
 }
 
 func NewFetcher(client MarketDataSource, candles store.CandleRepo, log *zap.Logger) *Fetcher {
@@ -35,6 +39,51 @@ func NewFetcher(client MarketDataSource, candles store.CandleRepo, log *zap.Logg
 func (f *Fetcher) SetFugle(quote QuoteSource, stream StreamingSource) {
 	f.quoteSource = quote
 	f.streamSource = stream
+}
+
+// SetIntradaySource 掛載通用的批次盤中源（目前為 Yahoo）。與 SetFugle 並存，
+// 兩者可擇一或並用；未設定時 FetchAndStoreIntradayBatch 回傳錯誤。
+func (f *Fetcher) SetIntradaySource(src BatchQuoteSource) {
+	f.batchSource = src
+}
+
+// HasIntradaySource 回報是否已掛載批次盤中源，供 scheduler 決定盤中是否走批次路徑。
+func (f *Fetcher) HasIntradaySource() bool {
+	return f.batchSource != nil
+}
+
+// IntradayBatchSize 回傳批次盤中源建議的單次 symbol 數；未掛載時回傳 0。
+func (f *Fetcher) IntradayBatchSize() int {
+	if f.batchSource == nil {
+		return 0
+	}
+	return f.batchSource.BatchSize()
+}
+
+// FetchAndStoreIntradayBatch 用批次盤中源一次拉取多檔當日 1 分K 並寫入 candles，
+// 回傳成功寫入的 symbol 數。個別 symbol 寫入失敗只記 log、不中斷其他 symbol。
+func (f *Fetcher) FetchAndStoreIntradayBatch(ctx context.Context, symbols []string) (int, error) {
+	if f.batchSource == nil {
+		return 0, fmt.Errorf("intraday batch source not configured")
+	}
+	bySymbol, err := f.batchSource.FetchIntradayCandlesBatch(ctx, symbols)
+	if err != nil {
+		return 0, err
+	}
+
+	stored := 0
+	for sym, candles := range bySymbol {
+		if len(candles) == 0 {
+			continue
+		}
+		if err := f.candles.BulkInsert(ctx, toStoreCandles(candles)); err != nil {
+			f.log.Warn("intraday batch store failed", zap.String("symbol", sym), zap.Error(err))
+			continue
+		}
+		stored++
+	}
+	f.log.Info("fetched intraday batch candles", zap.Int("requested", len(symbols)), zap.Int("stored", stored))
+	return stored, nil
 }
 
 // FetchAndStoreFugleIntraday 為 Tier 1：用 Fugle REST 拉取當日 1 分K 並寫入 candles，

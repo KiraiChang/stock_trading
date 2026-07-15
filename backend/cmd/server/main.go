@@ -122,6 +122,15 @@ func main() {
 		log.Info("fugle enabled", zap.Int("quote_rate_limit", cfg.Fugle.QuoteRateLimit), zap.Int("max_subscriptions", cfg.Fugle.MaxSubscriptions))
 	}
 
+	// Yahoo 盤中資料源（非官方 API），作為 Tier-1 批次盤中源，掛上後 scheduler
+	// 的盤中 job 會優先走 Yahoo 批次（免 token），未掛載時退回 FinMind 分K。
+	// Enabled=false（預設）時完全不掛載，行為與導入前一致。
+	if cfg.Yahoo.Enabled {
+		yahooClient := market.NewYahooQuoteClient(cfg.Yahoo)
+		fetcher.SetIntradaySource(yahooClient)
+		log.Info("yahoo intraday enabled", zap.Int("rate_limit", cfg.Yahoo.RateLimit), zap.Int("batch_size", cfg.Yahoo.BatchSize))
+	}
+
 	// Scheduler（先建立好讓 API Server 能掛上手動觸發端點，Start() 留到最後才呼叫）
 	srZoneVerifier := analysis.NewSRZoneVerifier(srZoneRepo, candleRepo)
 	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.FinMind.IntradayEnabled, log)

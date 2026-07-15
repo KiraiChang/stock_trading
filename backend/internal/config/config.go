@@ -12,6 +12,7 @@ type Config struct {
 	Redis            RedisConfig
 	FinMind          FinMindConfig
 	Fugle            FugleConfig
+	Yahoo            YahooConfig
 	Python           PythonConfig
 	Auth             AuthConfig
 	Chip             ChipConfig
@@ -82,6 +83,15 @@ type FugleConfig struct {
 	PingIntervalSec int `mapstructure:"ping_interval_sec"`
 }
 
+// YahooConfig 為 Yahoo 股市盤中資料源設定（非官方 API，作為 Tier-1 批次盤中源，
+// 與 Fugle 並存/擇一，見 docs/yahoo-intraday-integration.md）。
+type YahooConfig struct {
+	BaseURL   string `mapstructure:"base_url"`
+	Enabled   bool   `mapstructure:"enabled"`
+	RateLimit int    `mapstructure:"rate_limit"` // 每分鐘請求上限（批次請求計為一次），保守預設 20
+	BatchSize int    `mapstructure:"batch_size"` // 單次請求最多帶入的 symbol 數，預設 40
+}
+
 // ChipConfig 為籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）。
 type ChipConfig struct {
 	Sync ChipSyncConfig `mapstructure:"sync"`
@@ -114,6 +124,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("fugle.reconnect_max_sec", 60)
 	viper.SetDefault("fugle.max_conn_cooldown_sec", 60)
 	viper.SetDefault("fugle.ping_interval_sec", 30)
+	viper.SetDefault("yahoo.base_url", "https://tw.stock.yahoo.com/_td-stock/api/resource/FinanceChartService.ApacLibraCharts")
+	viper.SetDefault("yahoo.enabled", false)
+	viper.SetDefault("yahoo.rate_limit", 20)
+	viper.SetDefault("yahoo.batch_size", 40)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)

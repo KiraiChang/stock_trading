@@ -150,11 +150,16 @@ func (s *Scheduler) runIntradayJob() {
 	if !timeutil.IsMarketOpen(time.Now()) {
 		return
 	}
+	// 有掛載批次盤中源（Yahoo）時優先走批次路徑（免 token）；未掛載才退回 FinMind 分K。
+	if s.fetcher.HasIntradaySource() {
+		s.runIntradayBatch()
+		return
+	}
 	if !s.intradayEnabled {
-		// finmind.intraday_enabled=false（預設）：帳號等級不足以使用
+		// finmind.intraday_enabled=false（預設）且無批次源：帳號等級不足以使用
 		// TaiwanStockKBar dataset，不建立 job_run 紀錄，避免每 5 分鐘
-		// 洗一筆「skipped」進資料庫；升級帳號後改設定即可恢復
-		s.log.Debug("intraday job skipped: finmind.intraday_enabled=false")
+		// 洗一筆「skipped」進資料庫；升級帳號或啟用 Yahoo 後即可恢復
+		s.log.Debug("intraday job skipped: no batch source and finmind.intraday_enabled=false")
 		return
 	}
 
@@ -186,6 +191,47 @@ func (s *Scheduler) runIntradayJob() {
 			failed++
 			lastErr = err.Error()
 		}
+		s.signalEng.Evaluate(ctx, sym, "1m")
+	}
+	s.finishRun(ctx, runID, "intraday", len(symbols), failed, lastErr)
+}
+
+// runIntradayBatch 為批次盤中源（Yahoo）版本的盤中 job：把 watchlist 依 batch_size
+// 分批、每批一次請求拉多檔 1 分K 並寫入 candles，再逐檔跑 signal 掃描。
+func (s *Scheduler) runIntradayBatch() {
+	ctx := context.Background()
+	runID := s.startRun(ctx, "intraday")
+
+	symbols, err := s.watchlist.Symbols(ctx)
+	if err != nil {
+		s.log.Error("watchlist fetch failed", zap.Error(err))
+		s.finishRun(ctx, runID, "intraday", 0, 0, err.Error())
+		return
+	}
+
+	batchSize := s.fetcher.IntradayBatchSize()
+	if batchSize <= 0 {
+		batchSize = len(symbols)
+	}
+
+	failed := 0
+	lastErr := ""
+	for start := 0; start < len(symbols); start += batchSize {
+		end := start + batchSize
+		if end > len(symbols) {
+			end = len(symbols)
+		}
+		batch := symbols[start:end]
+		if _, err := s.fetcher.FetchAndStoreIntradayBatch(ctx, batch); err != nil {
+			// 批次請求失敗（例如 Yahoo 被限流/封鎖）：記錄後續跑其他批次。
+			// 未來的 Yahoo→FinMind fallback（T-008/T-031）會在此改為回退補資料。
+			s.log.Warn("intraday batch fetch failed", zap.Int("from", start), zap.Int("size", len(batch)), zap.Error(err))
+			failed += len(batch)
+			lastErr = err.Error()
+		}
+	}
+
+	for _, sym := range symbols {
 		s.signalEng.Evaluate(ctx, sym, "1m")
 	}
 	s.finishRun(ctx, runID, "intraday", len(symbols), failed, lastErr)

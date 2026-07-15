@@ -43,6 +43,15 @@ fugle:
   max_conn_cooldown_sec: 60                   # 環境變數：FUGLE_MAX_CONN_COOLDOWN_SEC，maxconn 遞增冷卻起始值
   ping_interval_sec: 30                       # 環境變數：FUGLE_PING_INTERVAL_SEC，主動 ping 保活間隔（負值關閉）
 
+# Yahoo 股市盤中資料源（非官方 API），作為 Tier-1 批次盤中源，與 Fugle 並存/擇一。
+# 免 token、單次請求可批次多檔；enabled=true 時 scheduler 盤中 job 會優先走 Yahoo。
+# 上線前請以 cmd/yahoo-check 於盤中時段驗證覆蓋率與延遲（見 docs/yahoo-intraday-integration.md）。
+yahoo:
+  base_url: "https://tw.stock.yahoo.com/_td-stock/api/resource/FinanceChartService.ApacLibraCharts"  # 環境變數：YAHOO_BASE_URL
+  enabled: false                              # 環境變數：YAHOO_ENABLED，驗證通過前預設關閉
+  rate_limit: 20                              # 環境變數：YAHOO_RATE_LIMIT，每分鐘請求上限（批次計為一次）
+  batch_size: 40                              # 環境變數：YAHOO_BATCH_SIZE，單次請求最多帶入的 symbol 數
+
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：
 #   openssl rand -hex 32

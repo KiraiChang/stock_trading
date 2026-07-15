@@ -89,6 +89,10 @@ dataset diagnostics），沒有「模型上線後過去一段時間的訊號實�
 Tier 1（非熱門股）用 REST 輪詢掃描的機制已設計但尚未實際掛上排程器
 （`internal/scheduler`）自動執行。
 
+註：Yahoo 盤中源為另一個可作為 Tier-1 廣度掃描的選項，且支援單次批次多檔，兩者擇一或並列。
+Yahoo 的 client／設定／排程批次路徑已實作（見 `docs/yahoo-intraday-integration.md`），僅剩
+fallback（T-031）與實盤驗證（T-032）待處理。
+
 ---
 
 ### T-007：Fugle Tier 2 熱門股 WebSocket 訂閱管理
@@ -118,6 +122,9 @@ Tier 2（熱門股）動態訂閱/取消訂閱 WebSocket 頻道的管理邏輯�
 
 Fugle 連線失敗或資料異常時，尚未實作自動切換回 FinMind 補資料的邏輯，
 目前需要人工介入。
+
+註：與 T-031（Yahoo→FinMind fallback）共用「盤中源異常時回退 FinMind」的設計，
+應規劃為單一通用的盤中源 fallback 機制，而非每個源各寫一套。
 
 ---
 
@@ -459,6 +466,48 @@ BREAKOUT/BREAKDOWN 都用 `latestCandle.Timestamp`。對即時盤影響小，但
 - 候選壓力隔日壓回率或突破延續率。
 - 兩日確認後的勝率、風險報酬分布與失效率。
 - 不同量能條件、event sequence、RR gate 下的分層表現。
+
+---
+
+### T-031：runIntradayBatch 批次失敗時的 Yahoo→FinMind fallback
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 進行中 |
+| 優先度 | 中 |
+| 分類 | Go / 即時行情 / 排程 |
+| 建立日期 | 2026-07-15 |
+| 來源 | `docs/yahoo-intraday-integration.md` |
+
+Yahoo 盤中源的 client、設定、main 組裝、`scheduler.runIntradayJob → runIntradayBatch` 批次路徑
+**皆已實作**（現況見 `docs/yahoo-intraday-integration.md`）。**剩餘唯一工作**：批次請求失敗
+（Yahoo 被限流/封鎖）時回退補資料——目前 `scheduler.go` 的 `runIntradayBatch` 只記 log 續跑其他批次
+（見該處 TODO 註解），未回退 FinMind。
+
+設計取捨（本次已確認）：
+
+- 僅 `finmind.intraday_enabled=true` 時才回退逐檔 FinMind 分K；`intraday_enabled=false`（預設，無
+  Sponsor token）時**不回退**——FinMind 分K（TaiwanStockKBar）注定 422/tier 不足，回退只會徒耗額度。
+- 回退時比照現有 `ErrInsufficientTier` 邏輯：撞到 tier 不足就整輪跳過，不對每檔重打注定失敗的請求。
+- 與 T-008（Fugle→FinMind fallback）共用「盤中源異常時回退」的單一通用設計，避免各源各寫一套。
+
+---
+
+### T-032：Yahoo 盤中源實盤時段驗證
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Go / 即時行情 / 驗證 |
+| 建立日期 | 2026-07-15 |
+| 來源 | `docs/yahoo-intraday-integration.md` 風險與限制 |
+
+Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用 `cmd/yahoo-check` 實測：
+
+- minute 陣列覆蓋率：確認 `null` 僅出現在盤前/盤後，而非 ETF（如 `0050.TW`）系統性缺值——實測盤後 `0050` 陣列全為 null 但 `2330` 正常，需釐清成因。
+- 延遲：`quote.refreshedTs` vs 本地時間差。
+- 封鎖風險：連續批次請求是否觸發反爬/限流，據以定 `rate_limit`/`batch_size`。
 
 ## 已完成封存
 

@@ -433,6 +433,31 @@ BREAKOUT/BREAKDOWN 都用 `latestCandle.Timestamp`。對即時盤影響小，但
 鄰居，兩根等高的雙頂／雙底（`high[i] == high[i+1]`）都不算 local extreme，會漏掉重要的平台型
 壓力/支撐，在 1m 高雜訊資料上尤其明顯。改用容忍等值（例如 `>=` 搭配去重，或加入寬容窗）避免漏平頭。
 
+---
+
+### T-026：SR Zone Decision Engine 後續校準與資料品質擴充
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Python / SR Zone / Decision Engine |
+| 建立日期 | 2026-07-15 |
+| 來源 | I-017 修復後剩餘不可正確即時落地項目 |
+
+`docs/sr-zone-imporve.md` 的 P0/P1/P2 核心輸出欄位已落地，但下列項目需要額外資料來源或
+回測 pipeline，不能只靠目前單筆 EOD decision summary 正確完成：
+
+- `data_quality.features` 的 `STALE` / `INVALID` 狀態：目前 decision input 沒有來源 `updated_at`、
+  staleness metadata 或 schema validation error，硬判會產生假訊號。
+- 精準 K 棒 `body_ratio`：目前 `build_decision_summary()` 沒有 daily open，只能輸出
+  `body_proxy_ratio`（以前一日收盤與當日收盤近似），需把 daily open 從 evidence/frame 傳入後才能
+  改成真正 K 棒 body。
+- Daily confirmation 回測：需批次標記隔日是否守住、是否確認突破、不同量能條件下的成功率，應放在
+  SR Zone evaluation/backtest pipeline，而不是 runtime decision summary。
+- 機率與分數校準：需歷史 label、模型輸出分布與 calibration curve，應與 SR Zone model evaluation
+  一併設計。
+
 ## 已完成封存
 
 （目前沒有項目）

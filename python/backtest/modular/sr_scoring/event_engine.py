@@ -136,17 +136,20 @@ def detect_market_events(
             continue
         relative_volume = z.relative_volume or 0.0
         high_volume = relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD or z.volume_confirmation == VolumeConfirmation.FAILED.value
-        if interaction["closed_below"] and high_volume:
+        breakdown_event_added = False
+        if (interaction["closed_below"] or (candle_low is not None and candle_low < z.price_low)) and high_volume:
             events.append({
                 "type": "HIGH_VOLUME_BREAKDOWN",
                 "direction": "BEARISH",
                 "confidence": min(1.0, max(0.45, relative_volume / 3.0)),
                 "zone_ref": event_zone_ref(z, current_price),
                 "price_level": z.price_low,
-                "reason": "支撐區被收盤跌破，且量能放大或量能狀態確認失敗。",
+                "reason": "支撐區被盤中或收盤跌破，且量能放大或量能狀態確認失敗。",
                 "detected_at": "latest_candle",
             })
-            continue
+            breakdown_event_added = True
+            if interaction["closed_below"]:
+                continue
         if interaction["closed_above"] and interaction["penetration_pct"] > 0:
             events.append({
                 "type": "INTRADAY_RECLAIM",
@@ -157,6 +160,16 @@ def detect_market_events(
                 "reason": "盤中測試支撐後收回區間上緣。",
                 "detected_at": "latest_candle",
             })
+            if breakdown_event_added:
+                events.append({
+                    "type": "REVERSAL_CANDIDATE",
+                    "direction": "BULLISH",
+                    "confidence": min(1.0, 0.50 + z.confidence * 0.35),
+                    "zone_ref": event_zone_ref(z, current_price),
+                    "price_level": z.price_high,
+                    "reason": "高量跌破後收回支撐區上緣，形成反轉候選事件。",
+                    "detected_at": "latest_candle",
+                })
         elif (
             not interaction["closed_below"]
             and z.confidence >= 0.45

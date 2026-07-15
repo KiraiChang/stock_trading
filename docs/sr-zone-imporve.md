@@ -1,3 +1,46 @@
+# SR Zone 改善實作計畫書
+
+> 狀態：P0、P1、P2 核心 decision summary 欄位已實作；需額外資料來源或回測 pipeline 的校準項目改由 `docs/todo.md` T-026 追蹤。此文件保留原始案例與修正建議，作為後續校準與回測擴充依據。
+
+## 目標
+
+將目前 SR Zone 決策輸出從「單一主交易區 + Market Action」調整為「盤勢傾向、進場狀態、部位處置、決策區分層」分工明確的模型，避免把觀察訊號誤讀成下單建議，並讓 0050、00947、2330 類型案例都能用一致語意解釋。
+
+## P0：語意與風險邊界修正
+
+1. 將 UI 與 API 新增 `Market Bias`，值域為 `BULLISH_BIAS`、`NEUTRAL_BIAS`、`BEARISH_BIAS`、`REVERSAL_BIAS`，只描述盤勢傾向，不使用試單、買進、加碼等執行語意。
+2. 保留 legacy `market_action` 供相容，但 UI 主顯示改讀 `market_bias`；進場可行性只由 `entry_action_state` 表示。
+3. 拆分決策區：
+   - `nearest_decision_zone`：離現價最近且可作為短線判讀的 zone。
+   - `primary_structural_zone`：主要結構區，偏向高品質、主要趨勢結構。
+   - `best_trade_zone`：通過 RR 與進場條件後才成立的交易候選區。
+4. 新增 RR gate，輸出最低 RR、是否通過與原因碼；RR 未達門檻時不得把 zone 顯示成 `best_trade_zone`。
+5. 新增資料品質與盤後資料模式欄位，明確標示 EOD daily K 限制、缺值資料與中性判讀的差異。
+6. 將 confluence 摘要統一為「證據族群」口徑，raw method count 僅保留在明細或 legacy 欄位。
+
+## P1：日 K 決策能力補齊
+
+1. 建立 daily price action 判讀，至少輸出 close location、range expansion、reclaim/rejection、two-day follow-through、gap 與窄幅整理等狀態。
+2. 輸出事件鏈，串接 `EXTREME_VOLUME`、`HIGH_VOLUME_BREAKDOWN`、`INTRADAY_RECLAIM`、`REVERSAL_CANDIDATE`，供 explainability 與 regression test 使用。
+3. 建立 daily candidate zone 補位邏輯，當既有 zone 無法回答「今天決策價位」時，產生日內高低、收盤收復、gap、均價/成交密集等候選區。
+4. 補上 zone role/source/lifecycle，區分 structural、session、event、derived 等來源，以及 active、tested、broken、reclaimed、expired 等生命週期。
+5. 將 structural score、relevance score、tradability score 分離，避免長期重要區被誤當成立即可交易區。
+
+## P2：校準與驗證
+
+1. 建立 price path 與 invalidation/recovery/next decision price 輸出，讓 decision 能說明「若跌破/站回/接近下一區」後的狀態轉換。
+2. 建立日 K confirmation rule，將 watch / watchlist / actionable 分層，避免單日訊號直接升級成買進。
+3. 加入缺資料矩陣與資料品質分數，將 unavailable、neutral、negative 分開呈現。
+4. 擴充 backtest label 與 acceptance tests，覆蓋 0050、00947、2330 三類案例與 RR gate、event sequence、zone split 不變量。
+
+## 驗收條件
+
+1. UI 不再以 `Market Action` 顯示買賣語意，改以 `Market Bias` 表示盤勢傾向。
+2. `entry_action_state` 才能表達是否可試探、等待確認、小量、加碼或買進。
+3. RR 不足的 zone 不會出現在 `best_trade_zone`。
+4. 缺值資料會進入 `data_quality`，不會被誤寫成看多、看空或中性。
+5. 原有 `market_action`、`primary_zone`、`secondary_zones` 保持相容，既有呼叫端不因新增欄位破壞。
+
 # 0050 的修正建議
 1. P0
 

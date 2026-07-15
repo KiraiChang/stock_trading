@@ -97,6 +97,9 @@ def _summary(
     candle_high: float | None = None,
     candle_low: float | None = None,
     candle_close: float | None = None,
+    previous_candle_high: float | None = None,
+    previous_candle_low: float | None = None,
+    previous_candle_close: float | None = None,
 ) -> dict:
     return build_decision_summary(
         zones,
@@ -109,6 +112,9 @@ def _summary(
         candle_high=candle_high,
         candle_low=candle_low,
         candle_close=candle_close,
+        previous_candle_high=previous_candle_high,
+        previous_candle_low=previous_candle_low,
+        previous_candle_close=previous_candle_close,
     )
 
 
@@ -117,11 +123,23 @@ def test_buy_for_bullish_high_quality_near_support():
 
     assert ds["action"] == "Buy"
     assert ds["market_action"] == "BUY"
+    assert ds["market_bias"] == "BULLISH_BIAS"
+    assert ds["market_bias_label"] == "偏多觀察"
     assert ds["position_action"] == "HOLD"
     assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value
     assert ds["primary_zone"]["label"] == "98.00 ~ 100.00"
     assert ds["primary_zone"]["entry_relevance_score"] >= 75
     assert ds["primary_zone"]["zone_quality_score"] == ds["primary_zone"]["trading_score"]
+    assert ds["primary_zone"]["structural_score"] == ds["primary_zone"]["zone_quality_score"]
+    assert ds["primary_zone"]["decision_relevance_score"] == ds["primary_zone"]["entry_relevance_score"]
+    assert ds["primary_zone"]["tradability_score"] == ds["primary_zone"]["trading_score"]
+    assert ds["rr_gate"]["qualified"] is True
+    assert ds["best_trade_zone"]["label"] == "98.00 ~ 100.00"
+    assert ds["nearest_decision_zone"]["label"] == "98.00 ~ 100.00"
+    assert ds["primary_zone"]["source"] == "HISTORICAL_SR"
+    assert ds["primary_zone"]["decision_role"] == "PRIMARY"
+    assert ds["market_regime"]["tactical_regime"] == ds["market_regime"]["short_term_regime"]
+    assert ds["market_regime"]["recovery_state"] == ds["market_regime"]["structure_state"]
 
 
 def test_high_quality_far_from_zone_cannot_be_buy():
@@ -255,6 +273,24 @@ def test_expired_and_low_confidence_zones_are_not_first_candidate():
     assert ds["primary_zone"]["recent_validation"] != RecentValidation.EXPIRED.value
 
 
+def test_zone_lifecycle_outputs_supported_states():
+    expired = _summary([_zone(recent_validation=RecentValidation.EXPIRED.value)])
+    weak = _summary([_zone(confidence=0.2, confidence_level=ConfidenceLevel.LOW.value)])
+    confirmed = _summary(
+        [_zone()],
+        current_price=101.0,
+        candle_high=101.5,
+        candle_low=99.0,
+        candle_close=101.0,
+    )
+    pending = _summary([_zone(recent_validation=RecentValidation.PENDING_VALIDATION.value)])
+
+    assert expired["primary_zone"]["lifecycle"] == "INVALIDATED"
+    assert weak["primary_zone"]["lifecycle"] == "WEAKENING"
+    assert confirmed["primary_zone"]["lifecycle"] == "CONFIRMED"
+    assert pending["primary_zone"]["lifecycle"] == "CANDIDATE"
+
+
 def test_primary_zone_ranking_prefers_near_relevant_zone_over_far_high_quality():
     near = _zone(low=98.0, high=100.0, trading_score=62.0, confidence=0.62, risk_reward_ratio=2.0)
     far = _zone(low=70.0, high=72.0, trading_score=99.0, confidence=0.95, risk_reward_ratio=3.0)
@@ -296,6 +332,11 @@ def test_rr_below_hard_gate_stays_watch_even_with_high_score_and_ev():
 
     assert ds["market_action"] == "WATCH"
     assert ds["action"] == "Hold"
+    assert ds["rr_gate"]["qualified"] is False
+    assert ds["rr_gate"]["reason_code"] == "RR_INSUFFICIENT"
+    assert ds["best_trade_zone"] is None
+    assert ds["daily_confirmation"]["state"] == "NO_SETUP"
+    assert ds["price_path"]["path_state"] == "RR_BLOCKED"
     assert any("風險報酬比不足" in note for note in ds["risk_notes"])
 
 
@@ -321,6 +362,9 @@ def test_recovery_invalidated_overrides_long_term_bullish_regime():
     assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
     assert ds["position_action_condition"]["invalidation_price"] == 98.0
     assert "SUPPORT_BREAKDOWN_RISK" in ds["position_action_condition"]["reason_codes"]
+    assert ds["price_path"]["path_state"] == "INVALIDATION_RISK"
+    assert ds["price_path"]["invalidation_price"] == 98.0
+    assert ds["daily_confirmation"]["state"] == "INVALIDATED"
 
 
 def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
@@ -376,3 +420,131 @@ def test_chip_missing_is_exposed_in_context():
 
     assert any(item.get("key") == "chip" and item.get("effect") == "warning" for item in ds["market_context"])
     assert any("籌碼資料缺漏" in reason for reason in ds["market_regime"]["reasons"])
+    assert ds["data_mode"] == "END_OF_DAY"
+    assert ds["data_quality"]["chip_coverage"] == 0.0
+    assert "chip" in ds["data_quality"]["missing_features"]
+    assert ds["data_quality"]["features"]["chip"]["status"] == "MISSING"
+    assert ds["data_quality"]["features"]["chip"]["interpretation"] == "UNAVAILABLE"
+
+
+def test_structural_and_nearest_zones_are_split_from_best_trade_zone():
+    near = _zone(
+        low=100.5,
+        high=101.0,
+        trading_score=62.0,
+        confidence=0.58,
+        risk_reward_ratio=1.6,
+        tier=ZoneTier.TIER_2_TRADING_ZONE.value,
+        tier_label="交易區",
+    )
+    structural = _zone(low=88.0, high=90.0, trading_score=96.0, confidence=0.9, risk_reward_ratio=3.0)
+
+    ds = _summary([structural, near], current_price=102.0)
+
+    assert ds["nearest_decision_zone"]["price_low"] == near.price_low
+    assert ds["primary_structural_zone"]["price_low"] == structural.price_low
+    assert ds["best_trade_zone"] is None
+    assert ds["rr_gate"]["qualified"] is False
+    assert ds["rr_gate"]["reason_code"] == "RR_INSUFFICIENT"
+
+
+def test_event_sequence_keeps_break_reclaim_reversal_order():
+    zone = _zone(
+        low=98.0,
+        high=100.0,
+        risk_reward_ratio=2.5,
+        relative_volume=3.0,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+    )
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=97.0,
+        candle_close=101.0,
+    )
+
+    assert [item["type"] for item in ds["event_sequence"]] == [
+        "EXTREME_VOLUME",
+        "HIGH_VOLUME_BREAKDOWN",
+        "INTRADAY_RECLAIM",
+        "REVERSAL_CANDIDATE",
+    ]
+    assert [item["label"] for item in ds["event_sequence"]] == ["極端量能", "放量破位", "盤中收復", "反轉候選"]
+
+
+def test_daily_price_action_outputs_eod_bar_states():
+    ds = _summary(
+        [_zone()],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=100.0,
+        candle_close=105.0,
+        previous_candle_high=103.0,
+        previous_candle_low=98.0,
+        previous_candle_close=102.0,
+    )
+
+    action = ds["daily_price_action"]
+    assert action["available"] is True
+    assert action["close_location_state"] == "CLOSE_NEAR_HIGH"
+    assert action["range_state"] == "RANGE_EXPANSION"
+    assert action["follow_through_state"] == "UPSIDE_FOLLOW_THROUGH"
+    assert action["reclaim_rejection_state"] == "PREVIOUS_CLOSE_RECLAIM"
+    assert action["body_proxy_ratio"] == 0.5
+    assert action["body_ratio"] == action["body_proxy_ratio"]
+    assert action["lower_wick_ratio"] == 0.3333
+    assert action["upper_wick_ratio"] == 0.1667
+
+
+def test_daily_candidate_zones_are_tactical_candidates_not_best_trade_zone():
+    ds = _summary(
+        [],
+        current_price=104.0,
+        candle_high=105.0,
+        candle_low=100.0,
+        candle_close=104.0,
+        previous_candle_close=102.0,
+    )
+
+    assert ds["primary_zone"] is None
+    assert ds["best_trade_zone"] is None
+    assert [z["role"] for z in ds["daily_candidate_zones"]] == [ZoneType.SUPPORT.value, ZoneType.RESISTANCE.value]
+    assert {z["source"] for z in ds["daily_candidate_zones"]} == {"DAILY_CANDLE"}
+    assert {z["lifecycle"] for z in ds["daily_candidate_zones"]} == {"CANDIDATE"}
+    assert ds["daily_confirmation"]["state"] == "WAIT_DAILY_CONFIRM"
+    assert ds["daily_entry_state"] == "WAIT_DAILY_CONFIRM"
+    assert ds["price_path"]["path_state"] == "DAILY_CANDIDATE_ONLY"
+
+
+def test_price_path_reports_blocking_zone_and_next_decision_price():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+    resistance = _zone(role=ZoneType.RESISTANCE.value, low=106.0, high=108.0, risk_reward_ratio=2.0)
+
+    ds = _summary([support, resistance], current_price=102.0)
+
+    assert ds["price_path"]["next_decision_price"] == 100.0
+    assert ds["price_path"]["next_decision_source"] == "nearest_decision_zone"
+    assert ds["price_path"]["blocking_zone"]["label"] == "106.00 ~ 108.00"
+    assert any(item["then"] == "RECHECK_ENTRY_STATE" for item in ds["price_path"]["transitions"])
+
+
+def test_data_quality_separates_missing_neutral_and_negative_features():
+    zone = _zone(expected_value=-0.01, risk_reward_ratio=1.2)
+
+    neutral = _summary([zone], global_confidence=0.3, chip_summary={"missing": False, "score": 0.0})
+
+    assert "chip" in neutral["data_quality"]["neutral_features"]
+    assert "global_confidence" in neutral["data_quality"]["negative_features"]
+    assert "expected_value" in neutral["data_quality"]["negative_features"]
+    assert "risk_reward_ratio" in neutral["data_quality"]["negative_features"]
+    assert "daily_price" in neutral["data_quality"]["unavailable_features"]
+
+    positive = _summary([zone], chip_summary={"missing": False, "score": 50.0})
+    negative = _summary([zone], chip_summary={"missing": False, "score": -50.0})
+
+    assert "chip" in positive["data_quality"]["positive_features"]
+    assert positive["data_quality"]["features"]["chip"]["interpretation"] == "POSITIVE"
+    assert "chip" in negative["data_quality"]["negative_features"]
+    assert negative["data_quality"]["features"]["chip"]["interpretation"] == "NEGATIVE"

@@ -263,8 +263,20 @@
   }
 
 
+  const marketBiasText: Record<string, string> = {
+    BULLISH_BIAS: '偏多觀察',
+    NEUTRAL_BIAS: '中性觀察',
+    BEARISH_BIAS: '偏空觀察',
+    REVERSAL_BIAS: '反轉觀察',
+  }
+  const marketBiasClass: Record<string, string> = {
+    BULLISH_BIAS: 'bg-green-900/40 text-green-300 border-green-700/60',
+    NEUTRAL_BIAS: 'bg-gray-700/60 text-gray-300 border-border',
+    BEARISH_BIAS: 'bg-red-900/40 text-red-300 border-red-700/60',
+    REVERSAL_BIAS: 'bg-indigo-900/40 text-indigo-300 border-indigo-700/60',
+  }
   const marketActionText: Record<string, string> = {
-    BUY: '買進', BUY_SMALL: '小量試單', WATCH: '觀察', AVOID: '避開',
+    BUY: '偏多觀察', BUY_SMALL: '偏多觀察', WATCH: '中性觀察', AVOID: '偏空觀察',
     Buy: '買進', BuySmall: '小量試單', Hold: '觀察', Avoid: '避開',
   }
   const marketActionClass: Record<string, string> = {
@@ -319,12 +331,44 @@
   const noviceRoleText: Record<string, string> = {
     SUPPORT: '比較接近支撐', RESISTANCE: '比較接近壓力', AT_ZONE: '現價卡在區間內，方向還不明確',
   }
+  const dailyActionText: Record<string, string> = {
+    CLOSE_NEAR_HIGH: '收近高點',
+    CLOSE_MID_RANGE: '收在中段',
+    CLOSE_NEAR_LOW: '收近低點',
+    RANGE_EXPANSION: '波動擴大',
+    NORMAL_RANGE: '一般波動',
+    NARROW_RANGE: '窄幅整理',
+    GAP_UP_APPROX: '近似跳空上行',
+    GAP_DOWN_APPROX: '近似跳空下行',
+    NO_GAP: '無明顯跳空',
+    UPSIDE_FOLLOW_THROUGH: '向上延續',
+    DOWNSIDE_FOLLOW_THROUGH: '向下延續',
+    NO_FOLLOW_THROUGH: '未延續',
+    PREVIOUS_CLOSE_RECLAIM: '收復昨收',
+    PREVIOUS_CLOSE_REJECTION: '跌回昨收下方',
+    NONE: '無',
+    UNKNOWN: '無資料',
+  }
+  const pricePathText: Record<string, string> = {
+    INVALIDATION_RISK: '失效風險',
+    RR_BLOCKED: 'RR 阻擋',
+    BLOCKING_ZONE_AHEAD: '前方壓力',
+    DAILY_CANDIDATE_ONLY: '僅日 K 候選',
+    OPEN_PATH: '路徑開放',
+  }
 
   function legacyMarketAction(action: string | undefined): string {
     if (action === 'Buy') return 'BUY'
     if (action === 'BuySmall') return 'BUY_SMALL'
     if (action === 'Avoid') return 'AVOID'
     return 'WATCH'
+  }
+
+  function legacyMarketBias(action: string | undefined): string {
+    const legacy = legacyMarketAction(action)
+    if (legacy === 'BUY' || legacy === 'BUY_SMALL') return 'BULLISH_BIAS'
+    if (legacy === 'AVOID') return 'BEARISH_BIAS'
+    return 'NEUTRAL_BIAS'
   }
 
   function positionReasonCodesText(codes?: string[]): string {
@@ -976,9 +1020,9 @@
               </div>
               <div class="flex gap-2 text-right flex-wrap justify-end">
                 <div>
-                  <p class="text-muted text-xs mb-1">Market Action</p>
-                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {marketActionClass[decisionSummary.market_action ?? legacyMarketAction(decisionSummary.action)] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
-                    {marketActionText[decisionSummary.market_action ?? legacyMarketAction(decisionSummary.action)] ?? decisionSummary.market_action ?? decisionSummary.action}
+                  <p class="text-muted text-xs mb-1">Market Bias</p>
+                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {marketBiasClass[decisionSummary.market_bias ?? legacyMarketBias(decisionSummary.action)] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                    {decisionSummary.market_bias_label ?? marketBiasText[decisionSummary.market_bias ?? legacyMarketBias(decisionSummary.action)] ?? decisionSummary.market_bias ?? decisionSummary.action}
                   </span>
                 </div>
                 {#if decisionSummary.entry_action_state}
@@ -1000,8 +1044,82 @@
 
             {#if decisionSummary.entry_action_state}
               <p class="text-muted text-xs mb-4">
-                進場時機以 <span class="font-semibold">Entry State</span> 為準；Market Action 只表示整體盤勢傾向，未確認的設定（如「觀察性試探」）不代表可直接進場。
+                進場時機以 <span class="font-semibold">Entry State</span> 為準；Market Bias 只表示整體盤勢傾向，未確認的設定（如「觀察性試探」）不代表可直接進場。
               </p>
+            {/if}
+
+            {#if decisionSummary.data_quality}
+              <div class="border border-border/70 rounded-lg p-3 bg-panel/50 mb-4 text-xs">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                  <p class="text-muted">資料模式：<span class="text-white font-mono">{decisionSummary.data_quality.data_mode ?? decisionSummary.data_mode ?? 'END_OF_DAY'}</span></p>
+                  <p class="text-muted">完整度 <span class="text-white font-mono">{fmtPct(decisionSummary.data_quality.overall_completeness)}</span></p>
+                </div>
+                {#if decisionSummary.data_quality.notes.length > 0}
+                  <p class="text-muted mt-1">{decisionSummary.data_quality.notes.join('、')}</p>
+                {/if}
+                {#if decisionSummary.data_quality.missing_features.length > 0}
+                  <p class="text-yellow-300 mt-1">缺資料：{decisionSummary.data_quality.missing_features.join(' / ')}</p>
+                {/if}
+                {#if decisionSummary.data_quality.negative_features && decisionSummary.data_quality.negative_features.length > 0}
+                  <p class="text-red-300 mt-1">負向資料：{decisionSummary.data_quality.negative_features.join(' / ')}</p>
+                {/if}
+                {#if decisionSummary.data_quality.positive_features && decisionSummary.data_quality.positive_features.length > 0}
+                  <p class="text-rise mt-1">正向資料：{decisionSummary.data_quality.positive_features.join(' / ')}</p>
+                {/if}
+                {#if decisionSummary.data_quality.neutral_features && decisionSummary.data_quality.neutral_features.length > 0}
+                  <p class="text-muted mt-1">中性資料：{decisionSummary.data_quality.neutral_features.join(' / ')}</p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if decisionSummary.event_sequence && decisionSummary.event_sequence.length > 0}
+              <div class="border border-border/70 rounded-lg p-3 bg-panel/50 mb-4 text-xs">
+                <p class="text-muted mb-2">Event Sequence</p>
+                <div class="flex items-center gap-2 flex-wrap">
+                  {#each decisionSummary.event_sequence as event, i}
+                    {#if i > 0}<span class="text-muted">→</span>{/if}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full bg-surface text-white border border-border">{event.label}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            {#if decisionSummary.daily_price_action?.available}
+              <div class="grid md:grid-cols-4 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Close Location</p>
+                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.close_location_state] ?? decisionSummary.daily_price_action.close_location_state}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Daily Range</p>
+                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.range_state] ?? decisionSummary.daily_price_action.range_state}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Follow Through</p>
+                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.follow_through_state] ?? decisionSummary.daily_price_action.follow_through_state}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Reclaim / Rejection</p>
+                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.reclaim_rejection_state] ?? decisionSummary.daily_price_action.reclaim_rejection_state}</p>
+                </div>
+              </div>
+            {/if}
+
+            {#if decisionSummary.daily_confirmation}
+              <div class="grid md:grid-cols-3 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Daily Confirmation</p>
+                  <p class="text-white font-semibold">{decisionSummary.daily_confirmation.label}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Daily Entry State</p>
+                  <p class="text-white font-mono">{decisionSummary.daily_entry_state ?? decisionSummary.daily_confirmation.state}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Reason Codes</p>
+                  <p class="text-white font-mono break-words">{positionReasonCodesText(decisionSummary.daily_confirmation.reason_codes)}</p>
+                </div>
+              </div>
             {/if}
 
             {#if decisionSummary.position_action_condition}
@@ -1021,6 +1139,44 @@
               </div>
             {/if}
 
+            {#if decisionSummary.rr_gate}
+              <div class="grid sm:grid-cols-3 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">RR Gate</p>
+                  <p class="{decisionSummary.rr_gate.qualified ? 'text-rise' : 'text-yellow-300'} font-semibold">{decisionSummary.rr_gate.qualified ? '通過' : '未通過'}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">最低 RR</p>
+                  <p class="text-white font-mono">{fmtRatio(decisionSummary.rr_gate.minimum_rr)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Reason Code</p>
+                  <p class="text-white font-mono break-words">{decisionSummary.rr_gate.reason_code}</p>
+                </div>
+              </div>
+            {/if}
+
+            {#if decisionSummary.price_path}
+              <div class="grid md:grid-cols-4 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Price Path</p>
+                  <p class="text-white">{pricePathText[decisionSummary.price_path.path_state] ?? decisionSummary.price_path.path_state}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">失效 / 回穩</p>
+                  <p class="text-white font-mono">{fmt(decisionSummary.price_path.invalidation_price)} / {fmt(decisionSummary.price_path.recovery_price)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Next Decision</p>
+                  <p class="text-white font-mono">{fmt(decisionSummary.price_path.next_decision_price)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Blocking Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.price_path.blocking_zone?.label ?? '—'}</p>
+                </div>
+              </div>
+            {/if}
+
             {#if decisionSummary.primary_zone}
               <div class="grid lg:grid-cols-[1.2fr_1fr] gap-4 mb-4">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/60">
@@ -1036,8 +1192,8 @@
                     <span class="text-muted">Score {fmtScore100(decisionSummary.primary_zone.trading_score)}</span>
                     <span class="text-muted">EV {fmtSignedPct(decisionSummary.primary_zone.expected_value)}</span>
                     <span class="text-muted">RR {fmtRatio(decisionSummary.primary_zone.risk_reward_ratio)}</span>
-                    {#if decisionSummary.primary_zone.confluence_count > 1}
-                      <span class="text-indigo-300">多方法共振 ×{decisionSummary.primary_zone.confluence_count}</span>
+                    {#if (decisionSummary.primary_zone.confluence_family_count ?? decisionSummary.primary_zone.confluence_count) > 1}
+                      <span class="text-indigo-300">證據族群 ×{decisionSummary.primary_zone.confluence_family_count ?? decisionSummary.primary_zone.confluence_count}</span>
                     {/if}
                   </div>
                 </div>
@@ -1059,6 +1215,47 @@
                       {/each}
                     </div>
                   {/if}
+                </div>
+              </div>
+            {/if}
+
+            {#if decisionSummary.best_trade_zone || decisionSummary.nearest_decision_zone || decisionSummary.primary_structural_zone}
+              <div class="grid md:grid-cols-3 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Best Trade Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.best_trade_zone?.label ?? '尚未成立'}</p>
+                  {#if decisionSummary.best_trade_zone?.lifecycle}
+                    <p class="text-muted mt-1">{decisionSummary.best_trade_zone.source} · {decisionSummary.best_trade_zone.lifecycle}</p>
+                  {/if}
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Nearest Decision Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.nearest_decision_zone?.label ?? '—'}</p>
+                  {#if decisionSummary.nearest_decision_zone?.lifecycle}
+                    <p class="text-muted mt-1">{decisionSummary.nearest_decision_zone.source} · {decisionSummary.nearest_decision_zone.lifecycle}</p>
+                  {/if}
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Primary Structural Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.primary_structural_zone?.label ?? '—'}</p>
+                  {#if decisionSummary.primary_structural_zone?.lifecycle}
+                    <p class="text-muted mt-1">{decisionSummary.primary_structural_zone.source} · {decisionSummary.primary_structural_zone.lifecycle}</p>
+                  {/if}
+                </div>
+              </div>
+            {/if}
+
+            {#if decisionSummary.daily_candidate_zones && decisionSummary.daily_candidate_zones.length > 0}
+              <div class="border border-border/70 rounded-lg p-3 bg-panel/50 mb-4 text-xs">
+                <p class="text-muted mb-2">Daily Candidate Zones</p>
+                <div class="grid md:grid-cols-2 gap-3">
+                  {#each decisionSummary.daily_candidate_zones as z}
+                    <div>
+                      <p class="font-mono text-white">{z.label}</p>
+                      <p class="text-muted mt-1">{noviceRoleText[z.role] ?? z.role} · {z.source} · {z.lifecycle}</p>
+                      <p class="text-muted mt-1">{z.reason}</p>
+                    </div>
+                  {/each}
                 </div>
               </div>
             {/if}

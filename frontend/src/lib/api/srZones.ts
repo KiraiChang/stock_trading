@@ -276,6 +276,7 @@ export interface SRPeriodSummary {
 
 export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
 export type SREntryActionState = 'WAIT_CONFIRMATION' | 'PROBE_ENTRY' | 'SMALL_ENTRY' | 'ACCUMULATE' | 'BUY' | string
+export type SRMarketBias = 'BULLISH_BIAS' | 'NEUTRAL_BIAS' | 'BEARISH_BIAS' | 'REVERSAL_BIAS' | string
 export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
 export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'
 export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
@@ -294,7 +295,9 @@ export interface SRMarketRegime {
   trend_regime?: SRMarketRegimePrimary
   structural_trend?: SRMarketRegimePrimary
   short_term_regime?: SRShortTermRegime
+  tactical_regime?: SRShortTermRegime
   structure_state?: SRStructureState
+  recovery_state?: SRStructureState | string
   volatility_state?: SRVolatilityState
   flags: SRMarketRegimeFlag[]
   label: string
@@ -328,7 +331,10 @@ export interface SRDecisionZoneSummary {
   tier_label: string
   trading_score: number
   zone_quality_score?: number | null
+  structural_score?: number | null
   entry_relevance_score?: number | null
+  decision_relevance_score?: number | null
+  tradability_score?: number | null
   entry_relevance_breakdown?: Record<string, number> | null
   confidence: number
   confidence_level: ConfidenceLevel
@@ -342,6 +348,9 @@ export interface SRDecisionZoneSummary {
   confluence_count: number
   confluence_family_count?: number | null
   confluence_families?: string[] | null
+  source?: string
+  lifecycle?: string
+  decision_role?: string
   reason: string
 }
 
@@ -403,10 +412,114 @@ export interface SRConfidenceExplanation {
   context_factors: SRConfidenceFactor[]
 }
 
+export interface SRRRGate {
+  minimum_rr: number | null
+  actual_rr: number | null
+  qualified: boolean
+  reason_code: string
+}
+
+export interface SRDataQuality {
+  data_mode?: string
+  overall_completeness: number
+  price_data_complete: boolean
+  chip_coverage: number
+  missing_features: string[]
+  unavailable_features?: string[]
+  neutral_features?: string[]
+  negative_features?: string[]
+  positive_features?: string[]
+  features?: Record<string, {
+    status: string
+    confidence: number
+    source: string
+    interpretation: string
+    value: number | null
+  }>
+  stale_features: string[]
+  notes: string[]
+}
+
+export interface SREventSequenceItem {
+  type: string
+  label: string
+  direction?: string | null
+  confidence?: number | null
+  price_level?: number | null
+}
+
+export interface SRDailyPriceAction {
+  available: boolean
+  close_location: number | null
+  body_proxy_ratio?: number | null
+  body_ratio?: number | null
+  lower_wick_ratio?: number | null
+  upper_wick_ratio?: number | null
+  close_location_state: string
+  range_pct: number | null
+  range_state: string
+  gap_state: string
+  follow_through_state: string
+  reclaim_rejection_state: string
+  signals: string[]
+  reference_prices?: Record<string, number | null>
+}
+
+export interface SRDailyCandidateZone {
+  price_low: number
+  price_high: number
+  label: string
+  role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+  source: string
+  lifecycle: string
+  decision_role: string
+  distance_pct: number
+  distance_label: string
+  reason: string
+  event_refs: string[]
+}
+
+export interface SRPricePath {
+  path_state: string
+  invalidation_price: number | null
+  recovery_price: number | null
+  next_decision_price: number | null
+  next_decision_source: string | null
+  blocking_zone: {
+    price_low: number
+    price_high: number
+    label: string
+    role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+    source: string
+  } | null
+  transitions: Array<{
+    if: string
+    then: string
+    price: number | null
+  }>
+}
+
+export interface SRDailyConfirmation {
+  state: string
+  label: string
+  reason_codes: string[]
+  requires_next_daily_close: boolean
+  source: string
+}
+
 export interface SRDecisionSummary {
+  data_mode?: string
+  data_quality?: SRDataQuality
   market_regime: SRMarketRegime
   market_events?: SRMarketEvent[]
+  event_sequence?: SREventSequenceItem[]
+  daily_price_action?: SRDailyPriceAction
+  daily_candidate_zones?: SRDailyCandidateZone[]
+  price_path?: SRPricePath
+  daily_confirmation?: SRDailyConfirmation
   defense_lines?: SRDefenseLines
+  market_bias?: SRMarketBias
+  market_bias_label?: string
   market_action?: SRMarketAction
   position_action?: SRPositionAction
   position_action_condition?: SRPositionActionCondition
@@ -414,6 +527,12 @@ export interface SRDecisionSummary {
   action_label: string
   entry_action_state?: SREntryActionState
   entry_action_label?: string
+  daily_entry_state?: string
+  daily_entry_label?: string
+  rr_gate?: SRRRGate
+  nearest_decision_zone?: SRDecisionZoneSummary | null
+  primary_structural_zone?: SRDecisionZoneSummary | null
+  best_trade_zone?: SRDecisionZoneSummary | null
   primary_zone: SRDecisionZoneSummary | null
   market_context: SRDecisionContextItem[]
   confidence_explanation: SRConfidenceExplanation

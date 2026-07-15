@@ -65,6 +65,19 @@ def test_intraday_reclaim_excludes_reversal_candidate_for_same_zone():
     assert _types(events) == {"INTRADAY_RECLAIM"}
 
 
+def test_high_volume_intraday_break_and_reclaim_keeps_full_event_chain():
+    z = _zone(low=98.0, high=100.0, relative_volume=3.0, volume_confirmation=VolumeConfirmation.FAILED.value)
+
+    events = detect_market_events([z], current_price=101.0, candle_high=102.0, candle_low=97.0, candle_close=101.0)
+
+    assert [event["type"] for event in events] == [
+        "EXTREME_VOLUME",
+        "HIGH_VOLUME_BREAKDOWN",
+        "INTRADAY_RECLAIM",
+        "REVERSAL_CANDIDATE",
+    ]
+
+
 def test_reversal_candidate_when_support_held_inside():
     z = _zone(low=98.0, high=100.0, relative_volume=1.0)
 

@@ -610,6 +610,8 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
 - `structural_trend`：由 `global_trend` 判斷的中長線結構，值與相容欄位 `trend_regime` 一致。
 - `short_term_regime`：由最新 market events / structure state 判斷的短線狀態，例如 `BREAKDOWN_RISK`、`RECLAIM_ATTEMPT`、`REVERSAL_CANDIDATE`、`NORMAL`。
+- `tactical_regime`：短線戰術 regime，現階段與 `short_term_regime` 同值，作為 UI 與後續規則演進的明確欄位。
+- `recovery_state`：收復/失效狀態，現階段與 `structure_state` 同值，避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
 - `primary`：保留給舊前端/舊資料讀取的相容欄位，仍表示主要趨勢 regime。
 
 Regime 預設門檻：
@@ -637,6 +639,42 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 | `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
 
 對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`short_term_regime` 與 action/risk notes 呈現。
+
+### Daily Price Action / Data Quality
+
+`decision_summary.daily_price_action` 使用最新日 K OHLC 與前一日收盤建立 EOD 判讀。現階段會輸出
+`close_location`、`range_pct`、`gap_state`、`follow_through_state`、
+`reclaim_rejection_state`、`lower_wick_ratio`、`upper_wick_ratio`，以及
+`body_proxy_ratio`。因為 decision input 尚未傳入 daily open，`body_ratio` 目前是
+`body_proxy_ratio` 的相容 alias，代表「前一日收盤到當日收盤」相對當日 high/low range 的近似值；
+它不是精準 K 棒 body。精準 daily open/body ratio 追蹤於 `docs/todo.md` T-026。
+
+`decision_summary.data_quality.features` 會把缺資料、中性資料與負向資料分開，不把 missing 視為
+neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 `chip_scores.total_score`
+的 `-100~100` 值域，門檻對齊 `CHIP_SIGNAL_THRESHOLD=20`：
+
+| Chip score | interpretation |
+|---|---|
+| `< -20` | `NEGATIVE` |
+| `-20..20` | `NEUTRAL` |
+| `> 20` | `POSITIVE` |
+
+目前 feature status 可判定 `AVAILABLE` / `MISSING`；`STALE` / `INVALID` 需要資料來源提供
+`updated_at` 或 validation metadata，追蹤於 `docs/todo.md` T-026。
+
+### Decision Zone Scores / Lifecycle
+
+`decision_summary.*_zone` 會保留 legacy score 欄位，並新增語意拆分欄位：
+
+| 欄位 | 語意 | 目前來源 |
+|---|---|---|
+| `structural_score` | 區間本身品質 | `zone_quality_score` |
+| `decision_relevance_score` | 當下決策相關性，不含 market event 修正 | `entry_relevance_score` |
+| `tradability_score` | legacy 可交易綜合分 | `trading_score` |
+
+Zone lifecycle 目前由 deterministic EOD rule 產生，可能值包含 `CANDIDATE`、`CONFIRMED`、
+`VALIDATED`、`WEAKENING`、`BROKEN`、`INVALIDATED`。這是 decision summary 的解讀欄位，
+不改寫原始 `zones[]` 的驗證結果。
 
 ### 唯一 Action
 

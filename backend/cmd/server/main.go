@@ -133,7 +133,7 @@ func main() {
 
 	// Scheduler（先建立好讓 API Server 能掛上手動觸發端點，Start() 留到最後才呼叫）
 	srZoneVerifier := analysis.NewSRZoneVerifier(srZoneRepo, candleRepo)
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.FinMind.IntradayEnabled, log)
+	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.Chip.Sync.Cron, cfg.FinMind.IntradayEnabled, log)
 
 	// API Server（含 WebSocket Hub）
 	positionConfig := portfolio.Config{

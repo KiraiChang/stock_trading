@@ -102,6 +102,11 @@ type ChipSyncConfig struct {
 	HistoryTradingDays int `mapstructure:"history_trading_days"`
 	// BatchSize 為 DB 批次寫入大小，比照 candleBulkInsertBatchSize 的保守預設。
 	BatchSize int `mapstructure:"batch_size"`
+	// Cron 為籌碼每日採集的排程時間（robfig/cron 格式，台北時區）。籌碼採集與
+	// 15:00 收盤掃描解耦：FinMind 的法人資料收盤後傍晚、融資融券更要晚間才由
+	// TWSE 發布，故預設排在 21:00；需要自動重試時可設多時段（例如
+	// "0 18,20,22 * * 1-5"），upsert 天生冪等，重跑安全。
+	Cron string `mapstructure:"cron"`
 }
 
 func Load() (*Config, error) {
@@ -131,6 +136,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)
+	viper.SetDefault("chip.sync.cron", "0 21 * * 1-5")
 	viper.SetDefault("position_analysis.max_position_value", 200000)
 	viper.SetDefault("position_analysis.max_risk_amount", 10000)
 	viper.SetDefault("position_analysis.add_on_ratio", 0.25)

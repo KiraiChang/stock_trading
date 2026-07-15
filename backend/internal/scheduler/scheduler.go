@@ -28,6 +28,7 @@ type Scheduler struct {
 	srZoneRepo      store.SRZoneRepo
 	srZoneVerifier  *analysis.SRZoneVerifier
 	chipSyncer      *chip.Syncer
+	chipSyncCron    string
 	intradayEnabled bool
 	log             *zap.Logger
 	cron            *cron.Cron
@@ -41,6 +42,7 @@ func New(
 	srZoneRepo store.SRZoneRepo,
 	srZoneVerifier *analysis.SRZoneVerifier,
 	chipSyncer *chip.Syncer,
+	chipSyncCron string,
 	intradayEnabled bool,
 	log *zap.Logger,
 ) *Scheduler {
@@ -52,6 +54,7 @@ func New(
 		srZoneRepo:      srZoneRepo,
 		srZoneVerifier:  srZoneVerifier,
 		chipSyncer:      chipSyncer,
+		chipSyncCron:    chipSyncCron,
 		intradayEnabled: intradayEnabled,
 		log:             log,
 		cron:            cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
@@ -78,6 +81,16 @@ func (s *Scheduler) Start() {
 	s.cron.AddFunc("0 15 * * 1-5", func() {
 		s.RunDailyClose()
 	})
+
+	// 籌碼採集：與 15:00 收盤掃描解耦，改為傍晚獨立排程（預設 21:00，見
+	// config chip.sync.cron）。FinMind 法人資料收盤後傍晚、融資融券更要晚間
+	// 才由 TWSE 發布，若沿用 15:00 會抓到空資料、只能靠隔天 lookback 回補，
+	// 造成資料庫永遠落後一天（見 docs/chip-analysis-design.md 第8節）。
+	if _, err := s.cron.AddFunc(s.chipSyncCron, func() {
+		s.runChipDailySync(context.Background())
+	}); err != nil {
+		s.log.Error("chip sync cron register failed", zap.String("cron", s.chipSyncCron), zap.Error(err))
+	}
 
 	s.cron.Start()
 	s.log.Info("scheduler started")
@@ -269,12 +282,9 @@ func (s *Scheduler) RunDailyClose() {
 	// 判定失敗。
 	s.runSRZoneVerification(ctx)
 
-	// 籌碼同步同樣是獨立的 job_run 紀錄（job_name="chip_daily_sync"），排在
-	// K線/指標/SR驗證之後執行（見 docs/chip-analysis-design.md 第8節建議順序），
-	// 失敗只影響自己的紀錄。法人/融資融券資料可能比日K更晚發布，若這次抓到
-	// 空資料，可用 POST /api/v1/chips/sync {mode:"manual", force:true} 人工
-	// 補跑，比照既有 daily_close 對 FinMind 延遲發布的處理方式。
-	s.runChipDailySync(ctx)
+	// 註：籌碼同步（chip_daily_sync）已從此處解耦，改由傍晚獨立 cron 觸發
+	// （見 Start() 的 s.chipSyncCron）。法人/融資融券資料比日K更晚發布，
+	// 15:00 收盤這批太早，沿用會抓到空資料造成落後一天。
 }
 
 // runChipDailySync 對 watchlist 全部股票執行當日籌碼同步（chip.Syncer.SyncDaily），

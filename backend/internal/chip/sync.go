@@ -17,6 +17,18 @@ import (
 // （30 個日曆天約等於 20 個交易日，含週末假日餘裕）。
 const lookbackDays = 30
 
+// scoreRecomputeWindow 為 daily 單日同步時，chip_scores 額外向前回算的日曆天數。
+// 用途：當某個交易日的原始籌碼在當天排程時尚未發布（抓到空資料），會在隔天的
+// lookback 區間 fetch 才被補進 DB；此時需要回頭替那天重算分數，否則 chip_scores
+// 會永遠落後一天。取小值（不需涵蓋整個 lookbackDays），只為自我修復近日缺口。
+const scoreRecomputeWindow = 5
+
+// ErrChipDataNotPublished 表示目標日確認是交易日（有日K）但請求的籌碼類型
+// （法人／融資融券）尚未發布資料。用於讓排程/手動同步把「當日資料還沒進來」
+// 記成可見的失敗訊號（job_runs.failed / chip_sync_jobs failures），而非誤判為
+// 成功——空資料若靜默視為成功，會讓資料庫停在昨日卻毫無錯誤跡象。
+var ErrChipDataNotPublished = errors.New("chip data for target date not published yet")
+
 // Syncer 是 chip 套件唯一有 IO 副作用的部分：從 market.ChipDataSource 抓取
 // 原始籌碼資料、寫入 store，並呼叫 Calculate 計算 chip_score 後落地。
 type Syncer struct {
@@ -100,11 +112,36 @@ func (s *Syncer) SyncRange(ctx context.Context, symbols []string, from, to time.
 			}
 		}
 
-		for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
-			if syncBroker {
+		// 目標日資料是否已發布：確認 to 是交易日（有日K）卻抓不到請求的籌碼類型
+		// 時，記成 ErrChipDataNotPublished，讓呼叫端能看見「當日還沒進來」而不是
+		// 誤判成功。fetch 本身若已失敗，firstErr 會保留該錯誤（recordErr 取首個非 nil）。
+		if syncInstitutional || syncMargin {
+			published, err := s.targetDatePublished(ctx, symbol, to, syncInstitutional, syncMargin)
+			if err != nil {
+				recordErr(err)
+			} else if !published {
+				recordErr(ErrChipDataNotPublished)
+			}
+		}
+
+		// 分點資料是單日排行語意，僅處理請求區間 [from, to]。
+		if syncBroker {
+			for d := from; !d.After(to); d = d.AddDate(0, 0, 1) {
 				recordErr(s.syncBrokerForDate(ctx, symbol, d))
 			}
-			if syncScores {
+		}
+
+		// chip_scores：daily 單日模式（from==to）額外向前回算 scoreRecomputeWindow 天，
+		// 讓「前一交易日原本抓空、這次被 lookback 區間補上」的日子自動重算分數，
+		// 消除分數落後一天。computeAndStoreScore 具冪等性且會 skip 無資料的非交易日，
+		// 故回算窗口涵蓋到週末/尚未發布的日子也不會產生錯誤紀錄。backfill（from<to）
+		// 已逐日涵蓋整個區間，維持原樣。
+		if syncScores {
+			scoreFrom := from
+			if from.Equal(to) {
+				scoreFrom = to.AddDate(0, 0, -scoreRecomputeWindow)
+			}
+			for d := scoreFrom; !d.After(to); d = d.AddDate(0, 0, 1) {
 				recordErr(s.computeAndStoreScore(ctx, symbol, d))
 			}
 		}
@@ -230,6 +267,40 @@ func (s *Syncer) hasDataForDate(ctx context.Context, symbol string, date time.Ti
 		return true, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
+	}
+
+	return false, nil
+}
+
+// targetDatePublished 判斷「目標日的籌碼資料是否已發布」。只在 date 確認為交易日
+// （有日K）時才做判斷，避免週末/國定假日或當日K尚未同步時被誤判為「尚未發布」。
+// 交易日確認後，只要 checkInst/checkMargin 中任一被請求的類型在 date 當天已有資料
+// 就視為已發布（true）；全部請求的類型都查無資料（sql.ErrNoRows）才回傳 false，
+// 代表 FinMind 對這天的籌碼還沒發布。
+func (s *Syncer) targetDatePublished(ctx context.Context, symbol string, date time.Time, checkInst, checkMargin bool) (bool, error) {
+	candles, err := s.candleRepo.GetRange(ctx, symbol, "1d", date, date)
+	if err != nil {
+		return false, err
+	}
+	if len(candles) == 0 {
+		// 無法確認 date 是交易日（可能是週末/假日，或當日K尚未同步）→ 不判定為
+		// 「尚未發布」，避免非交易日一律被記成失敗。
+		return true, nil
+	}
+
+	if checkInst {
+		if _, err := s.institutionalRepo.GetByDate(ctx, symbol, date); err == nil {
+			return true, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+	}
+	if checkMargin {
+		if _, err := s.marginRepo.GetByDate(ctx, symbol, date); err == nil {
+			return true, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
 	}
 
 	return false, nil

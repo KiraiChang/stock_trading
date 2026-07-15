@@ -217,6 +217,68 @@ func TestSyncRange_WeekendWithoutDataIsSkippedButWeekdayIsScored(t *testing.T) {
 	}
 }
 
+func TestSyncDaily_TradingDayButChipDataUnpublishedFlagsError(t *testing.T) {
+	// 目標日確認是交易日（有日K），但 FinMind 對這天的法人/融資融券還沒發布
+	// （回空陣列）時，必須記成 ErrChipDataNotPublished，而不是靜默視為成功——
+	// 這正是「排程 15:00 抓當日籌碼太早、DB 卻毫無錯誤跡象」的根因。
+	date := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC) // 2026-07-03 為週五（交易日）
+	source := &fakeChipDataSource{}                     // institutional/margin 皆回空陣列（尚未發布）
+	env := newSyncerTestEnv(t, source)
+	seedCandles(t, env.candleRepo, "2330", date) // 有日K → 確認是交易日
+
+	err := env.syncer.SyncDaily(context.Background(), "2330", date)
+	if !errors.Is(err, ErrChipDataNotPublished) {
+		t.Fatalf("expected ErrChipDataNotPublished when a trading day has no chip data, got: %v", err)
+	}
+}
+
+func TestSyncDaily_RecomputesScoreForBackfilledPriorDay(t *testing.T) {
+	// Fix C：前一交易日在自己排程當下抓空（分數為中性 0），隔天的 daily 同步靠
+	// lookback 區間把它補進 DB 後，回算窗口要替那天重算分數，消除分數落後一天。
+	prev := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)  // 週四
+	today := time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC) // 週五
+	source := &fakeChipDataSource{}                      // 一開始沒有任何籌碼資料
+	env := newSyncerTestEnv(t, source)
+	seedCandles(t, env.candleRepo, "2330", today) // today 與前 20 日的日K（涵蓋 prev）
+
+	ctx := context.Background()
+
+	// prev 當天的排程：籌碼尚未發布 → 抓空，只寫得出中性分數。
+	_ = env.syncer.SyncDaily(ctx, "2330", prev)
+	score1, err := env.scoreRepo.GetByDate(ctx, "2330", prev)
+	if err != nil {
+		t.Fatalf("expected a (neutral) chip_score row for prev after first sync: %v", err)
+	}
+	if score1.InstitutionalScore != 0 {
+		t.Fatalf("expected neutral institutional_score=0 when prev had no chip data, got %v", score1.InstitutionalScore)
+	}
+
+	// 隔天：FinMind 已補上 prev 的法人資料（today 本身仍未發布）。
+	source.institutional = []market.InstitutionalTrade{
+		{Symbol: "2330", Date: prev, ForeignNetBuy: 8000, TotalNetBuy: 8000},
+	}
+	_ = env.syncer.SyncDaily(ctx, "2330", today) // lookback 區間會把 prev 的資料補進 DB
+
+	// prev 的原始資料應被回補。
+	rows, err := env.institutionalRepo.GetRange(ctx, "2330", prev, prev)
+	if err != nil {
+		t.Fatalf("get range failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected prev's institutional row to be backfilled, got %d rows", len(rows))
+	}
+
+	// 關鍵：prev 的分數應被回算，不再是中性 0（若沒有 Fix C 的回算窗口，
+	// 隔天的分數迴圈只會算 today，prev 永遠停在中性分數）。
+	score2, err := env.scoreRepo.GetByDate(ctx, "2330", prev)
+	if err != nil {
+		t.Fatalf("expected chip_score row for prev after backfill: %v", err)
+	}
+	if score2.InstitutionalScore <= 0 {
+		t.Fatalf("expected prev's institutional_score to be recomputed above neutral after backfill, got %v", score2.InstitutionalScore)
+	}
+}
+
 func TestSyncRange_DataTypesFilterSkipsUnrequestedFetches(t *testing.T) {
 	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)

@@ -48,7 +48,7 @@ cmd/server/main.go
     │       └── store.{CandleRepo, SignalRepo, ChipScoreRepo}
     ├── chip（Syncer + scoring helpers，三大法人、融資融券、券商分點、chip_scores）
     │       └── market.FinMindClient + store chip repos
-    ├── scheduler（cron jobs，daily_close 收盤後接著跑 SR zone 驗證與 chip_daily_sync）
+    ├── scheduler（cron jobs，daily_close 收盤後跑 SR zone 驗證；chip_daily_sync 另由傍晚獨立 cron 觸發）
     │       ├── market.Fetcher
     │       ├── signal.Engine
     │       └── analysis.SRZoneVerifier

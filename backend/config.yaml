@@ -69,6 +69,9 @@ chip:
   sync:
     history_trading_days: 500   # 環境變數：CHIP_SYNC_HISTORY_TRADING_DAYS，backfill 預設回補天數
     batch_size: 50               # 環境變數：CHIP_SYNC_BATCH_SIZE，DB 批次寫入大小
+    cron: "0 21 * * 1-5"        # 環境變數：CHIP_SYNC_CRON，日結籌碼採集排程（台北時區）。
+                                 # 與 15:00 收盤掃描解耦：FinMind 法人傍晚、融資融券晚間才發布，
+                                 # 太早抓會是空資料造成落後一天。需自動重試可設多時段如 "0 18,20,22 * * 1-5"。
 
 position_analysis:
   max_position_value: 200000

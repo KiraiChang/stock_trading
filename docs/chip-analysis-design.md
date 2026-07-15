@@ -3,7 +3,7 @@
 本文件記錄籌碼分析的設計與目前實作狀態。籌碼分析用於補強既有技術分析與回測系統，協助判斷法人、融資融券、主力與券商分點等資金行為，不執行自動交易。
 
 目前 Phase 1 已落地：Go backend 已有 `internal/chip`、chip repositories、
-`handler.Chip`、`chip.Syncer`、`chip_sync_jobs`、`daily_close` 後的
+`handler.Chip`、`chip.Syncer`、`chip_sync_jobs`、傍晚獨立排程的
 `chip_daily_sync`，前端頁面為 `frontend/src/routes/Chips.svelte`。Phase 2 項目仍追蹤在
 [todo.md](./todo.md)。
 
@@ -87,7 +87,7 @@ backend/internal/chip/          # 籌碼分析核心邏輯
 backend/internal/market/        # 資料來源 fetcher，可放 provider 實作
 backend/internal/store/         # 籌碼資料 repository
 backend/internal/api/handler/chip.go   # 籌碼 API handler
-backend/internal/scheduler/            # daily_close 後執行 chip_daily_sync
+backend/internal/scheduler/            # chip_daily_sync（傍晚獨立 cron，見 chip.sync.cron）
 ```
 
 核心職責：
@@ -359,29 +359,39 @@ UI 原則：
 
 支援三種觸發模式：
 
-- `daily`：交易日日結同步。建議在日 K、成交量與技術指標完成後執行，必要時延遲啟動或重試，等待法人、融資融券、券商分點資料可用。
+- `daily`：交易日日結同步。**與 15:00 收盤掃描（`daily_close`）解耦，改由傍晚獨立 cron 觸發**（見下方「排程時間與資料延遲」）。
 - `backfill`：歷史資料回補。不可混在日結 job 中執行，應由背景 job 依日期區間與 symbol 分批回補。
 - `manual`：手動驅動。透過 API 或 CLI 補特定股票、日期區間或資料類型，適合修正 provider 資料或重算 `chip_scores`。
 
-日結建議順序：
+### 排程時間與資料延遲（現況）
+
+FinMind 的法人資料在收盤（13:30）後傍晚才發布、融資融券更要晚間才由 TWSE 更新，比日 K 晚。若沿用 15:00 日 K 那批的時間點採集當日籌碼，多半會抓到空陣列，而空資料被視為成功、只能靠隔天 lookback 區間回補「昨天」，導致資料庫永遠落後一天。因此現況為：
+
+- **獨立傍晚排程**：日結籌碼採集（`runChipDailySync`）由 `Scheduler.Start()` 用獨立 cron 觸發，時間由設定 `chip.sync.cron` 控制，**預設 `0 21 * * 1-5`**（台北時區）。需要自動重試時可設多時段，例如 `0 18,20,22 * * 1-5`；upsert 天生冪等，重跑安全。
+- **空資料不再靜默成功**：當目標日確認是交易日（該日已有日 K）卻抓不到當日法人／融資融券時，`Syncer.SyncRange` 會回報 `ErrChipDataNotPublished`，讓 `chip_daily_sync`（`job_runs`）或 `chip_sync_jobs` 記為失敗、留下可見訊號，而非誤判成功。非交易日（該日無日 K，如週末／國定假日）不會被誤判為失敗。
+- **`chip_scores` 自我修復回算**：`daily` 單日模式除了計算目標日，另會向前回算最近數個交易日（`scoreRecomputeWindow`，預設 5 個日曆天）。當某天的原始籌碼在自己排程當下尚未發布、隔天才被 lookback 補進 DB 時，回算窗口會替那天重算分數，消除分數落後一天。`computeAndStoreScore` 具冪等性且會跳過無原始資料的非交易日。
+
+日結建議順序（K 線／指標／SR 驗證在 15:00 `daily_close`，籌碼採集在傍晚獨立排程）：
 
 ```text
+[15:00 daily_close]
 Sync daily candles / volume
   ↓
 Calculate technical indicators and evaluate signals
   ↓
 Run SR zone verification
+
+[傍晚 chip.sync.cron，預設 21:00]
+Sync raw chip data (含 lookback 區間回補)
   ↓
-Sync raw chip data
-  ↓
-Calculate chip_scores
+Calculate / 回算 chip_scores（目標日 + 近 scoreRecomputeWindow 天）
   ↓
 Refresh signal strength / UI cache
 ```
 
 日結籌碼 job 的失敗狀態獨立記錄在 `job_runs`（`job_name=chip_daily_sync`）。manual/backfill
-同步則記錄在 `chip_sync_jobs`。K 線與訊號已完成時，籌碼同步失敗只標記籌碼 job
-failed，後續可用 `POST /api/v1/chips/sync` 手動重跑。
+同步則記錄在 `chip_sync_jobs`。K 線與訊號已完成時，籌碼同步失敗（含 `ErrChipDataNotPublished`）
+只標記籌碼 job failed，後續可用 `POST /api/v1/chips/sync` 手動重跑或等下一個排程時段補上。
 
 手動同步參數建議：
 
@@ -497,7 +507,7 @@ Python 測試：
 2. 實作籌碼資料 source interface 與一個 provider。
 3. 實作 chip score 計算邏輯與單元測試。
 4. 建立 API handler。
-5. 建立排程同步 job。（已完成，`daily_close` 後執行 `chip_daily_sync`）
+5. 建立排程同步 job。（已完成，`chip_daily_sync` 由傍晚獨立 cron 觸發，見 §8「排程時間與資料延遲」）
 6. 新增前端籌碼分析頁面與 API client。（已完成，`Chips.svelte` / `lib/api/chips.ts`）
 7. 將籌碼分數接入訊號引擎與回測 filter。（已完成，訊號強度與模組化回測 filter）
 8. 補齊文件與開發指南。（持續維護）

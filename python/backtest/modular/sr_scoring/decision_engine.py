@@ -64,6 +64,17 @@ def _entry_relevance_score_with_events(
     )
 
 
+def _zone_width_penalty(z: ZoneScore, current_price: float) -> float:
+    width_pct = (z.price_high - z.price_low) / max(abs(current_price), 1e-9)
+    if width_pct <= 0.03:
+        return 0.0
+    return min((width_pct - 0.03) / 0.04, 1.0)
+
+
+def _decision_distance_score(z: ZoneScore, current_price: float) -> float:
+    return _distance_pct_to_zone(z, current_price) + _zone_width_penalty(z, current_price) * 0.08
+
+
 def _zone_quality_score(z: ZoneScore) -> float:
     return float(z.zone_quality_score if z.zone_quality_score is not None else z.trading_score)
 
@@ -84,6 +95,8 @@ def _decision_summary_zone(
     decision_role: str = "REFERENCE",
 ) -> dict[str, Any]:
     interaction = _zone_interaction(z, current_price, candle_high, candle_low, candle_close)
+    zone_width_pct = (z.price_high - z.price_low) / max(abs(current_price), 1e-9)
+    zone_width_penalty = _zone_width_penalty(z, current_price)
     structural_score = _zone_quality_score(z)
     decision_relevance_score = _entry_relevance_score(z, current_price)
     tradability_score = float(z.trading_score)
@@ -109,6 +122,8 @@ def _decision_summary_zone(
         "risk_reward_ratio": z.risk_reward_ratio,
         "distance_pct": interaction["distance_pct"],
         "distance_label": interaction["distance_label"],
+        "zone_width_pct": round(float(zone_width_pct), 4),
+        "zone_width_penalty": round(float(zone_width_penalty), 4),
         "zone_interaction": interaction,
         "recent_validation": z.recent_validation,
         "volume_confirmation": z.volume_confirmation,
@@ -233,20 +248,28 @@ def _market_regime(
         "BREAKDOWN": "短線結構跌破",
     }.get(structure_state, structure_state)
     event_types = {event.get("type") for event in market_events or []}
-    if "HIGH_VOLUME_BREAKDOWN" in event_types or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+    if structure_state == "SUPPORT_RECLAIM_CONFIRMED":
+        short_term_regime = "RECOVERY"
+    elif "HIGH_VOLUME_BREAKDOWN" in event_types or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         short_term_regime = "BREAKDOWN_RISK"
     elif "INTRADAY_RECLAIM" in event_types:
         short_term_regime = "RECLAIM_ATTEMPT"
     elif "REVERSAL_CANDIDATE" in event_types:
         short_term_regime = "REVERSAL_CANDIDATE"
+    elif trend_regime == "RANGE_BOUND" and global_trend > 0 and global_confidence is not None and global_confidence >= 0.55:
+        short_term_regime = "EARLY_TREND"
     else:
         short_term_regime = "NORMAL"
     tactical_regime = short_term_regime
-    recovery_state = structure_state
+    recovery_state = "RECOVERY" if structure_state == "SUPPORT_RECLAIM_CONFIRMED" else structure_state
 
     label = trend_label
     if structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         label = f"長期{trend_label.replace('趨勢', '')}，但{structure_label}"
+    elif structure_state == "SUPPORT_RECLAIM_CONFIRMED":
+        label += "、短線收復確認"
+    elif short_term_regime == "EARLY_TREND":
+        label += "、早期趨勢"
     elif structure_label:
         label += f"、{structure_label}"
     if "HIGH_VOLATILITY" in flags:
@@ -338,7 +361,10 @@ def _high_volume_breakdown_severity(
 def _high_volume_breakdown_action(
     market_events: Optional[list[dict[str, Any]]],
     primary_zone: ZoneScore,
+    structure_state: str = "NORMAL",
 ) -> tuple[str, str, str, str, list[str]] | None:
+    if structure_state == "SUPPORT_RECLAIM_CONFIRMED":
+        return None
     severities = [
         _high_volume_breakdown_severity(event, primary_zone)
         for event in market_events or []
@@ -382,11 +408,15 @@ def _decision_action(
         risk_notes.append("沒有足夠明確的主交易區。")
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
 
-    breakdown_action = _high_volume_breakdown_action(market_events, primary_zone)
+    structure_state = regime.get("structure_state")
+    breakdown_action = _high_volume_breakdown_action(market_events, primary_zone, str(structure_state))
     if breakdown_action is not None:
         event_risk_notes = breakdown_action[4]
         return breakdown_action[0], breakdown_action[1], breakdown_action[2], breakdown_action[3], risk_notes + event_risk_notes
-    if any(event.get("type") == "HIGH_VOLUME_BREAKDOWN" for event in market_events or []):
+    if (
+        structure_state != "SUPPORT_RECLAIM_CONFIRMED"
+        and any(event.get("type") == "HIGH_VOLUME_BREAKDOWN" for event in market_events or [])
+    ):
         risk_notes.append("短線支撐出現高量跌破，但尚未達主結構防守門檻。")
 
     distance_pct = _distance_pct_to_zone(primary_zone, current_price)
@@ -403,7 +433,6 @@ def _decision_action(
         risk_notes.append("主交易區近期驗證偏失效。")
 
     primary = regime.get("primary")
-    structure_state = regime.get("structure_state")
     bullish_setup = primary in ("TREND_UP", "RANGE_BOUND") and primary_zone.role == ZoneType.SUPPORT.value
     bearish_setup = primary == "TREND_DOWN" or primary_zone.role == ZoneType.RESISTANCE.value
     structure_broken = structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN")
@@ -468,12 +497,53 @@ def _entry_action_state(
 
 def _entry_action_label(state: str) -> str:
     return {
+        "NO_SETUP": "無設定",
         "WAIT_CONFIRMATION": "等待確認",
         "PROBE_ENTRY": "觀察性試探",
         "SMALL_ENTRY": "小量進場",
         "ACCUMULATE": "分批累積",
         "BUY": "買進",
     }.get(state, state)
+
+
+def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[str, Any]) -> dict[str, Any]:
+    daily_state = str(daily_confirmation.get("state") or "NO_SETUP")
+    order = {
+        "NO_SETUP": 0,
+        "INVALIDATED": 0,
+        "WAIT_CONFIRMATION": 1,
+        "WAIT_DAILY_CONFIRM": 1,
+        "CHASING_RISK": 1,
+        "PROBE_ENTRY": 2,
+        "PROBE_ALLOWED": 2,
+        "SMALL_ENTRY": 3,
+        "ACCUMULATE": 4,
+        "ENTRY_READY": 4,
+        "BUY": 5,
+        "BUY_READY": 5,
+    }
+    entry_rank = order.get(entry_action_state, 1)
+    daily_rank = order.get(daily_state, 1)
+    final_rank = min(entry_rank, daily_rank)
+    if final_rank >= 5:
+        state = "BUY"
+    elif final_rank == 4:
+        state = "ACCUMULATE"
+    elif final_rank == 3:
+        state = "SMALL_ENTRY"
+    elif final_rank == 2:
+        state = "PROBE_ENTRY"
+    elif final_rank == 0:
+        state = "NO_SETUP"
+    else:
+        state = "WAIT_CONFIRMATION"
+    return {
+        "state": state,
+        "label": _entry_action_label(state),
+        "entry_action_state": entry_action_state,
+        "daily_confirmation_state": daily_state,
+        "reason_codes": list(daily_confirmation.get("reason_codes") or []),
+    }
 
 
 def _market_bias(
@@ -483,6 +553,8 @@ def _market_bias(
     market_events: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[str, str]:
     event_types = {event.get("type") for event in market_events or []}
+    if regime.get("short_term_regime") in ("RECOVERY", "EARLY_TREND") and market_action != "AVOID":
+        return "BULLISH_CONTINUATION", "多頭延續"
     if "REVERSAL_CANDIDATE" in event_types or "INTRADAY_RECLAIM" in event_types:
         return "REVERSAL_BIAS", "反轉觀察"
     if market_action == "AVOID":
@@ -534,6 +606,17 @@ def _rr_gate(primary_zone: Optional[ZoneScore], entry_action_state: str) -> dict
     }
 
 
+def _rr_context(primary_zone: Optional[ZoneScore], position_zone: Optional[ZoneScore] = None) -> dict[str, Any]:
+    entry_rr = primary_zone.risk_reward_ratio if primary_zone else None
+    position_rr = position_zone.risk_reward_ratio if position_zone else None
+    return {
+        "entry_rr": float(entry_rr) if entry_rr is not None else None,
+        "entry_rr_source": "PRIMARY_ZONE" if primary_zone and entry_rr is not None else "UNAVAILABLE",
+        "position_rr": float(position_rr) if position_rr is not None else None,
+        "position_rr_source": "POSITION_ZONE" if position_zone and position_rr is not None else "UNAVAILABLE",
+    }
+
+
 def _nearest_decision_zone(zone_scores: list[ZoneScore], current_price: float) -> Optional[ZoneScore]:
     candidates = [
         z for z in zone_scores
@@ -543,7 +626,19 @@ def _nearest_decision_zone(zone_scores: list[ZoneScore], current_price: float) -
     ]
     if not candidates:
         candidates = [z for z in zone_scores if z.role != ZoneType.AT_ZONE.value]
-    return min(candidates, key=lambda z: _distance_pct_to_zone(z, current_price), default=None)
+    return min(candidates, key=lambda z: _decision_distance_score(z, current_price), default=None)
+
+
+def _nearest_zone_by_role(zone_scores: list[ZoneScore], current_price: float, role: str) -> Optional[ZoneScore]:
+    candidates = [
+        z for z in zone_scores
+        if z.role == role
+        and z.recent_validation != RecentValidation.EXPIRED.value
+        and z.confidence_level != ConfidenceLevel.LOW.value
+    ]
+    if not candidates:
+        candidates = [z for z in zone_scores if z.role == role]
+    return min(candidates, key=lambda z: _decision_distance_score(z, current_price), default=None)
 
 
 def _primary_structural_zone(zone_scores: list[ZoneScore]) -> Optional[ZoneScore]:
@@ -740,9 +835,14 @@ def _data_quality(
         features[key]["status"] == "INVALID" for key in ("daily_price", "previous_daily_price")
     ) else 0.0
     overall = price_coverage * 0.7 + chip_coverage * 0.3
+    rr_completeness = 1.0 if risk_reward_ratio is not None and expected_value is not None else 0.0
+    trade_qualification_completeness = 1.0 if primary_zone is not None and rr_completeness == 1.0 else 0.0
     return {
         "data_mode": "END_OF_DAY",
         "overall_completeness": round(overall, 4),
+        "market_data_completeness": round(overall, 4),
+        "rr_completeness": rr_completeness,
+        "trade_qualification_completeness": trade_qualification_completeness,
         "price_data_complete": price_coverage == 1.0,
         "chip_coverage": chip_coverage,
         "missing_features": missing_features,
@@ -783,6 +883,8 @@ def _daily_price_action(
             "range_state": "UNKNOWN",
             "gap_state": "UNKNOWN",
             "follow_through_state": "UNKNOWN",
+            "price_follow_through_state": "UNKNOWN",
+            "momentum_confirmation_state": "UNKNOWN",
             "reclaim_rejection_state": "UNKNOWN",
             "signals": [],
         }
@@ -844,6 +946,23 @@ def _daily_price_action(
             reclaim_rejection_state = "PREVIOUS_CLOSE_RECLAIM"
         elif candle_high > previous_candle_close > candle_close:
             reclaim_rejection_state = "PREVIOUS_CLOSE_REJECTION"
+    if follow_through_state == "UPSIDE_FOLLOW_THROUGH":
+        price_follow_through_state = "PRICE_UPSIDE_FOLLOW_THROUGH"
+    elif follow_through_state == "DOWNSIDE_FOLLOW_THROUGH":
+        price_follow_through_state = "PRICE_DOWNSIDE_FOLLOW_THROUGH"
+    elif follow_through_state == "UNKNOWN":
+        price_follow_through_state = "UNKNOWN"
+    else:
+        price_follow_through_state = "NO_PRICE_FOLLOW_THROUGH"
+
+    if range_state == "RANGE_EXPANSION" and follow_through_state in ("UPSIDE_FOLLOW_THROUGH", "DOWNSIDE_FOLLOW_THROUGH"):
+        momentum_confirmation_state = "MOMENTUM_CONFIRMED"
+    elif follow_through_state in ("UPSIDE_FOLLOW_THROUGH", "DOWNSIDE_FOLLOW_THROUGH"):
+        momentum_confirmation_state = "MOMENTUM_UNCONFIRMED"
+    elif follow_through_state == "UNKNOWN":
+        momentum_confirmation_state = "UNKNOWN"
+    else:
+        momentum_confirmation_state = "NO_MOMENTUM_CONFIRMATION"
 
     signals = [
         state for state in (
@@ -869,6 +988,8 @@ def _daily_price_action(
         "range_state": range_state,
         "gap_state": gap_state,
         "follow_through_state": follow_through_state,
+        "price_follow_through_state": price_follow_through_state,
+        "momentum_confirmation_state": momentum_confirmation_state,
         "reclaim_rejection_state": reclaim_rejection_state,
         "signals": signals,
         "reference_prices": {
@@ -895,7 +1016,7 @@ def _event_sequence(market_events: list[dict[str, Any]]) -> list[dict[str, Any]]
     labels = {
         "EXTREME_VOLUME": "極端量能",
         "HIGH_VOLUME_BREAKDOWN": "放量破位",
-        "INTRADAY_RECLAIM": "盤中收復",
+        "INTRADAY_RECLAIM": "收盤收復",
         "REVERSAL_CANDIDATE": "反轉候選",
     }
     seen: set[str] = set()
@@ -990,7 +1111,8 @@ def _price_path(
     zone_scores: list[ZoneScore],
     current_price: float,
     primary_zone: Optional[ZoneScore],
-    nearest_zone: Optional[ZoneScore],
+    nearest_support_zone: Optional[ZoneScore],
+    nearest_resistance_zone: Optional[ZoneScore],
     structural_zone: Optional[ZoneScore],
     daily_candidate_zones: list[dict[str, Any]],
     structure_state: str,
@@ -1008,14 +1130,20 @@ def _price_path(
 
     next_decision_price = None
     next_decision_source = None
-    if nearest_zone is not None:
-        if current_price < nearest_zone.price_low:
-            next_decision_price = nearest_zone.price_low
-        elif current_price > nearest_zone.price_high:
-            next_decision_price = nearest_zone.price_high
+    if nearest_support_zone is not None or nearest_resistance_zone is not None:
+        candidates: list[tuple[ZoneScore, str]] = []
+        if nearest_support_zone is not None:
+            candidates.append((nearest_support_zone, "nearest_support_zone"))
+        if nearest_resistance_zone is not None:
+            candidates.append((nearest_resistance_zone, "nearest_resistance_zone"))
+        zone, source = min(candidates, key=lambda item: _decision_distance_score(item[0], current_price))
+        if current_price < zone.price_low:
+            next_decision_price = zone.price_low
+        elif current_price > zone.price_high:
+            next_decision_price = zone.price_high
         else:
             next_decision_price = current_price
-        next_decision_source = "nearest_decision_zone"
+        next_decision_source = source
     elif daily_candidate_zones:
         candidate = min(daily_candidate_zones, key=lambda z: abs(float(z["price_low"]) - current_price))
         next_decision_price = candidate["price_low"] if current_price < candidate["price_low"] else candidate["price_high"]
@@ -1290,7 +1418,10 @@ def build_decision_summary(
     entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, market_events)
     market_bias, market_bias_label = _market_bias(regime, primary_zone, market_action, market_events)
     rr_gate = _rr_gate(primary_zone, entry_action_state)
+    rr_context = _rr_context(primary_zone)
     nearest_zone = _nearest_decision_zone(zone_scores, current_price)
+    nearest_support_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.SUPPORT.value)
+    nearest_resistance_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.RESISTANCE.value)
     structural_zone = _primary_structural_zone(zone_scores)
     daily_price_action = _daily_price_action(
         current_price,
@@ -1318,7 +1449,8 @@ def build_decision_summary(
         zone_scores,
         current_price,
         primary_zone,
-        nearest_zone,
+        nearest_support_zone,
+        nearest_resistance_zone,
         structural_zone,
         daily_candidate_zones,
         structure_state,
@@ -1334,6 +1466,7 @@ def build_decision_summary(
         daily_candidate_zones,
         current_price,
     )
+    final_entry_permission = _final_entry_permission(entry_action_state, daily_confirmation)
     best_trade_zone = primary_zone if rr_gate["qualified"] and entry_action_state in (
         "PROBE_ENTRY",
         "SMALL_ENTRY",
@@ -1420,6 +1553,7 @@ def build_decision_summary(
         "price_path": price_path,
         "daily_confirmation": daily_confirmation,
         "defense_lines": defense_lines,
+        "rr_context": rr_context,
         "market_bias": market_bias,
         "market_bias_label": market_bias_label,
         "market_action": market_action,
@@ -1429,6 +1563,7 @@ def build_decision_summary(
         "action_label": action_label,
         "entry_action_state": entry_action_state,
         "entry_action_label": _entry_action_label(entry_action_state),
+        "final_entry_permission": final_entry_permission,
         "daily_entry_state": daily_confirmation["state"],
         "daily_entry_label": daily_confirmation["label"],
         "rr_gate": rr_gate,
@@ -1437,6 +1572,16 @@ def build_decision_summary(
             candle_high, candle_low, candle_close,
             decision_role="TACTICAL",
         ) if nearest_zone else None,
+        "nearest_support_zone": _decision_summary_zone(
+            nearest_support_zone, current_price, "離現價最近的支撐決策參考區",
+            candle_high, candle_low, candle_close,
+            decision_role="TACTICAL_SUPPORT",
+        ) if nearest_support_zone else None,
+        "nearest_resistance_zone": _decision_summary_zone(
+            nearest_resistance_zone, current_price, "離現價最近的壓力決策參考區",
+            candle_high, candle_low, candle_close,
+            decision_role="TACTICAL_RESISTANCE",
+        ) if nearest_resistance_zone else None,
         "primary_structural_zone": _decision_summary_zone(
             structural_zone, current_price, "主要結構區",
             candle_high, candle_low, candle_close,

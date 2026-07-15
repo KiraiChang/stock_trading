@@ -157,7 +157,7 @@ def detect_market_events(
                 "confidence": min(1.0, 0.50 + z.confidence * 0.35),
                 "zone_ref": event_zone_ref(z, current_price),
                 "price_level": z.price_high,
-                "reason": "盤中測試支撐後收回區間上緣。",
+                "reason": "日 K 測試支撐後收盤收回區間上緣。",
                 "detected_at": "latest_candle",
             })
             if breakdown_event_added:

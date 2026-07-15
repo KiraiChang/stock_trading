@@ -342,6 +342,8 @@ export interface SRDecisionZoneSummary {
   risk_reward_ratio: number | null
   distance_pct: number
   distance_label: string
+  zone_width_pct?: number
+  zone_width_penalty?: number
   zone_interaction?: SRZoneInteraction
   recent_validation: RecentValidation
   volume_confirmation: VolumeConfirmation | null
@@ -422,6 +424,9 @@ export interface SRRRGate {
 export interface SRDataQuality {
   data_mode?: string
   overall_completeness: number
+  market_data_completeness?: number
+  rr_completeness?: number
+  trade_qualification_completeness?: number
   price_data_complete: boolean
   chip_coverage: number
   missing_features: string[]
@@ -464,6 +469,8 @@ export interface SRDailyPriceAction {
   range_state: string
   gap_state: string
   follow_through_state: string
+  price_follow_through_state?: string
+  momentum_confirmation_state?: string
   reclaim_rejection_state: string
   signals: string[]
   reference_prices?: Record<string, number | null>
@@ -511,6 +518,21 @@ export interface SRDailyConfirmation {
   source: string
 }
 
+export interface SRFinalEntryPermission {
+  state: string
+  label: string
+  entry_action_state: string
+  daily_confirmation_state: string
+  reason_codes: string[]
+}
+
+export interface SRRRContext {
+  entry_rr: number | null
+  entry_rr_source: string
+  position_rr: number | null
+  position_rr_source: string
+}
+
 export interface SRDecisionSummary {
   data_mode?: string
   data_quality?: SRDataQuality
@@ -522,6 +544,7 @@ export interface SRDecisionSummary {
   price_path?: SRPricePath
   daily_confirmation?: SRDailyConfirmation
   defense_lines?: SRDefenseLines
+  rr_context?: SRRRContext
   market_bias?: SRMarketBias
   market_bias_label?: string
   market_action?: SRMarketAction
@@ -531,10 +554,13 @@ export interface SRDecisionSummary {
   action_label: string
   entry_action_state?: SREntryActionState
   entry_action_label?: string
+  final_entry_permission?: SRFinalEntryPermission
   daily_entry_state?: string
   daily_entry_label?: string
   rr_gate?: SRRRGate
   nearest_decision_zone?: SRDecisionZoneSummary | null
+  nearest_support_zone?: SRDecisionZoneSummary | null
+  nearest_resistance_zone?: SRDecisionZoneSummary | null
   primary_structural_zone?: SRDecisionZoneSummary | null
   best_trade_zone?: SRDecisionZoneSummary | null
   primary_zone: SRDecisionZoneSummary | null

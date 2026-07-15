@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..decision_engine import build_decision_summary
+from ..decision_engine import _final_entry_permission, build_decision_summary
 from ..model import ModelBundle
 from ..types import (
     ConfidenceLevel,
@@ -251,6 +251,7 @@ def test_pending_validation_buy_small_is_probe_entry_not_confirmed_small_entry()
     assert ds["action"] == "BuySmall"
     assert ds["entry_action_state"] == "PROBE_ENTRY"
     assert ds["entry_action_label"] == "觀察性試探"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ENTRY"
 
 
 def test_confirmed_buy_small_is_small_entry():
@@ -400,6 +401,76 @@ def test_recovery_invalidated_overrides_long_term_bullish_regime():
     assert ds["daily_confirmation"]["state"] == "INVALIDATED"
 
 
+def test_recovery_confirmed_outputs_recovery_regime_and_final_permission():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=100.5,
+        candle_close=101.0,
+        previous_candle_high=101.0,
+        previous_candle_low=99.0,
+        previous_candle_close=100.5,
+    )
+
+    assert ds["market_regime"]["recovery_state"] == "RECOVERY"
+    assert ds["market_regime"]["short_term_regime"] == "RECOVERY"
+    assert ds["market_bias"] == "BULLISH_CONTINUATION"
+    assert ds["final_entry_permission"]["state"] in ("ACCUMULATE", "BUY")
+
+
+def test_early_trend_outputs_bullish_continuation_bias():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary([zone], current_price=102.0, global_trend=0.01, global_confidence=0.55)
+
+    assert ds["market_regime"]["trend_regime"] == "RANGE_BOUND"
+    assert ds["market_regime"]["short_term_regime"] == "EARLY_TREND"
+    assert ds["market_bias"] == "BULLISH_CONTINUATION"
+
+
+def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():
+    # 長期偏空但短線收復確認：short_term_regime=RECOVERY，market_action 仍可能為 AVOID。
+    # market_bias 不得因 RECOVERY 就標成多頭延續，需與 action 語意一致（偏空）。
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary(
+        [zone],
+        global_trend=-0.03,
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=100.5,
+        candle_close=101.0,
+        previous_candle_high=101.0,
+        previous_candle_low=99.0,
+        previous_candle_close=100.5,
+    )
+
+    assert ds["market_regime"]["short_term_regime"] == "RECOVERY"
+    assert ds["market_action"] == "AVOID"
+    assert ds["market_bias"] != "BULLISH_CONTINUATION"
+    assert ds["market_bias"] == "BEARISH_BIAS"
+
+
+def test_final_entry_permission_keeps_invalidated_distinct_from_waiting():
+    permission = _final_entry_permission("BUY", {"state": "INVALIDATED", "reason_codes": ["SUPPORT_CLOSED_BELOW"]})
+
+    assert permission["state"] == "NO_SETUP"
+    assert permission["label"] == "無設定"
+    assert permission["daily_confirmation_state"] == "INVALIDATED"
+    assert permission["reason_codes"] == ["SUPPORT_CLOSED_BELOW"]
+
+
+def test_final_entry_permission_does_not_upgrade_buy_without_daily_buy_ready():
+    permission = _final_entry_permission("BUY", {"state": "ENTRY_READY", "reason_codes": ["ENTRY_STATE_READY"]})
+
+    assert permission["state"] == "ACCUMULATE"
+    assert permission["entry_action_state"] == "BUY"
+    assert permission["daily_confirmation_state"] == "ENTRY_READY"
+
+
 def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
     zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
 
@@ -446,6 +517,53 @@ def test_support_reclaim_confirmed_requires_following_bar_not_breaking_back_down
 
     assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
     assert "SUPPORT_RECLAIM_CONFIRMED" in ds["position_action_condition"]["reason_codes"]
+
+
+def test_confirmed_reclaim_clears_same_zone_breakdown_exit_gate():
+    zone = _zone(
+        low=98.0,
+        high=100.0,
+        risk_reward_ratio=2.5,
+        relative_volume=2.2,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+    )
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=97.0,
+        candle_close=101.0,
+        previous_candle_high=101.0,
+        previous_candle_low=97.5,
+        previous_candle_close=100.5,
+    )
+
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert ds["market_action"] != "AVOID"
+    assert ds["position_action"] != "EXIT"
+    assert ds["position_action_condition"]["state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert "SUPPORT_RECLAIM_CONFIRMED" in ds["position_action_condition"]["reason_codes"]
+
+
+def test_reclaim_evidence_is_consistent_for_reclaimed_zone():
+    zone = _zone(low=28.06, high=28.37, risk_reward_ratio=2.5)
+
+    ds = _summary(
+        [zone],
+        current_price=28.5,
+        candle_high=28.65,
+        candle_low=27.95,
+        candle_close=28.5,
+    )
+
+    interaction = ds["primary_zone"]["zone_interaction"]
+    assert interaction["touched"] is True
+    assert interaction["closed_above"] is True
+    assert interaction["state_label"] == "收回區間上方"
+    assert ds["primary_zone"]["recent_validation"] != RecentValidation.PENDING_VALIDATION.value
+    assert ds["primary_zone"]["lifecycle"] == "CONFIRMED"
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CANDIDATE"
 
 
 def test_chip_missing_is_exposed_in_context():
@@ -504,7 +622,7 @@ def test_event_sequence_keeps_break_reclaim_reversal_order():
         "INTRADAY_RECLAIM",
         "REVERSAL_CANDIDATE",
     ]
-    assert [item["label"] for item in ds["event_sequence"]] == ["極端量能", "放量破位", "盤中收復", "反轉候選"]
+    assert [item["label"] for item in ds["event_sequence"]] == ["極端量能", "放量破位", "收盤收復", "反轉候選"]
 
 
 def test_daily_price_action_outputs_eod_bar_states():
@@ -524,6 +642,8 @@ def test_daily_price_action_outputs_eod_bar_states():
     assert action["close_location_state"] == "CLOSE_NEAR_HIGH"
     assert action["range_state"] == "RANGE_EXPANSION"
     assert action["follow_through_state"] == "UPSIDE_FOLLOW_THROUGH"
+    assert action["price_follow_through_state"] == "PRICE_UPSIDE_FOLLOW_THROUGH"
+    assert action["momentum_confirmation_state"] == "MOMENTUM_CONFIRMED"
     assert action["reclaim_rejection_state"] == "PREVIOUS_CLOSE_RECLAIM"
     assert action["body_proxy_ratio"] == 0.5
     assert action["body_ratio"] == action["body_proxy_ratio"]
@@ -579,9 +699,47 @@ def test_price_path_reports_blocking_zone_and_next_decision_price():
     ds = _summary([support, resistance], current_price=102.0)
 
     assert ds["price_path"]["next_decision_price"] == 100.0
-    assert ds["price_path"]["next_decision_source"] == "nearest_decision_zone"
+    assert ds["price_path"]["next_decision_source"] == "nearest_support_zone"
     assert ds["price_path"]["blocking_zone"]["label"] == "106.00 ~ 108.00"
     assert any(item["then"] == "RECHECK_ENTRY_STATE" for item in ds["price_path"]["transitions"])
+
+
+def test_nearest_support_and_resistance_are_split_for_price_path():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+    resistance = _zone(role=ZoneType.RESISTANCE.value, low=106.0, high=108.0, risk_reward_ratio=2.0)
+
+    ds = _summary([support, resistance], current_price=102.0)
+
+    assert ds["nearest_support_zone"]["label"] == "98.00 ~ 100.00"
+    assert ds["nearest_resistance_zone"]["label"] == "106.00 ~ 108.00"
+    assert ds["price_path"]["next_decision_source"] == "nearest_support_zone"
+    assert ds["price_path"]["next_decision_price"] == 100.0
+
+
+def test_wide_zone_penalty_prevents_broad_zone_from_winning_nearest_decision():
+    narrow = _zone(low=96.0, high=97.0, trading_score=70.0, risk_reward_ratio=2.5)
+    wide = _zone(low=95.0, high=101.0, trading_score=95.0, risk_reward_ratio=2.5)
+
+    ds = _summary([wide, narrow], current_price=102.0)
+
+    assert ds["nearest_support_zone"]["price_low"] == narrow.price_low
+    assert ds["nearest_decision_zone"]["price_low"] == narrow.price_low
+    assert ds["secondary_zones"][0]["zone_interaction"]["distance_pct"] >= 0.0
+
+
+def test_rr_context_and_completeness_layers_are_split():
+    zone = _zone(risk_reward_ratio=2.4)
+
+    ds = _summary([zone])
+
+    assert ds["rr_context"]["entry_rr"] == 2.4
+    assert ds["rr_context"]["position_rr"] is None
+    assert ds["rr_context"]["entry_rr_source"] == "PRIMARY_ZONE"
+    assert ds["rr_context"]["position_rr_source"] == "UNAVAILABLE"
+    quality = ds["data_quality"]
+    assert quality["market_data_completeness"] == quality["overall_completeness"]
+    assert quality["rr_completeness"] == 1.0
+    assert quality["trade_qualification_completeness"] == 1.0
 
 
 def test_data_quality_separates_missing_neutral_and_negative_features():

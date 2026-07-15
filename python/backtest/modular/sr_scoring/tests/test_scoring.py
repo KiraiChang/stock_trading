@@ -365,6 +365,20 @@ def test_recent_validation_pending_when_never_touched():
     assert _recent_validation([], [], as_of_index=100) == "PENDING_VALIDATION"
 
 
+def test_recent_validation_reclaimed_support_hold_is_not_pending():
+    zone = Zone(price_low=28.06, price_high=28.37, method=ZoneMethod.ATR, center_price=28.215, formed_at_index=0)
+    touch = ZoneTouch(
+        zone=zone,
+        touch_index=98,
+        touch_time=pd.Timestamp("2026-07-15"),
+        touch_price=28.10,
+        approach_direction=ApproachDirection.FROM_ABOVE,
+        role=ZoneType.SUPPORT,
+    )
+
+    assert _recent_validation([touch], [(touch, 1, 0, 0.02)], as_of_index=100) == "VALIDATED_RECENTLY"
+
+
 def test_trading_recommendation_support_strong_buy_at_high_score():
     assert _trading_recommendation(90.0, "SUPPORT") == "STRONG_BUY"
 

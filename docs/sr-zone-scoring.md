@@ -609,10 +609,18 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 目前 `market_regime` 也會輸出：
 
 - `structural_trend`：由 `global_trend` 判斷的中長線結構，值與相容欄位 `trend_regime` 一致。
-- `short_term_regime`：由最新 market events / structure state 判斷的短線狀態，例如 `BREAKDOWN_RISK`、`RECLAIM_ATTEMPT`、`REVERSAL_CANDIDATE`、`NORMAL`。
+- `short_term_regime`：由最新 market events / structure state 判斷的短線狀態，例如 `BREAKDOWN_RISK`、`RECLAIM_ATTEMPT`、`REVERSAL_CANDIDATE`、`RECOVERY`、`EARLY_TREND`、`NORMAL`。`RECOVERY` 對應 `structure_state=SUPPORT_RECLAIM_CONFIRMED`；`EARLY_TREND` 對應區間盤但 `global_trend>0` 且 `global_confidence>=0.55` 的早期趨勢。
 - `tactical_regime`：短線戰術 regime，現階段與 `short_term_regime` 同值，作為 UI 與後續規則演進的明確欄位。
-- `recovery_state`：收復/失效狀態，現階段與 `structure_state` 同值，避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
+- `recovery_state`：收復/失效狀態；`structure_state=SUPPORT_RECLAIM_CONFIRMED` 時為 `RECOVERY`，其餘與 `structure_state` 同值，避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
 - `primary`：保留給舊前端/舊資料讀取的相容欄位，仍表示主要趨勢 regime。
+
+`decision_summary.market_bias` 是對外的多空傾向標籤（`BULLISH_BIAS` / `BEARISH_BIAS` /
+`NEUTRAL_BIAS` / `REVERSAL_BIAS` / `BULLISH_CONTINUATION`）。當 `short_term_regime` 為 `RECOVERY`
+或 `EARLY_TREND` 時會輸出 `BULLISH_CONTINUATION`（多頭延續），避免延續型多頭被標成反轉觀察。
+但此升級只在 `market_action != AVOID` 時生效：若長期偏空（`primary=TREND_DOWN`）使 action 落到
+`AVOID`，即使短線是收復確認，`market_bias` 也會回歸與 action 一致的偏空標籤，確保
+`market_bias`、`market_action`、`final_entry_permission` 三者語意一致，不會出現「多頭延續 bias +
+避開 action」的矛盾輸出。
 
 Regime 預設門檻：
 
@@ -635,7 +643,7 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 |---|---|---|
 | `EXTREME_VOLUME` | 最新量能達極端放大門檻 | context event，不單獨決定 action；需搭配 breakdown/reclaim/reversal 解讀 |
 | `HIGH_VOLUME_BREAKDOWN` | 支撐區被收盤跌破，且相對量放大或量能狀態為失敗 | 依破線 zone 嚴重度降風險；primary/main-structure 或高相關破線可強制 `EXIT`，短線非 primary 破線只降為 `REDUCE_ON_BREAKDOWN` 或 risk note |
-| `INTRADAY_RECLAIM` | 盤中測試支撐後收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正 |
+| `INTRADAY_RECLAIM` | 日 K 支撐測試後收盤收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正；內部 type 保留 `INTRADAY_RECLAIM` 作相容名稱，對外 label/reason 使用 close-based 語意避免 EOD 模式誤讀為即時盤中訊號 |
 | `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
 
 對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`short_term_regime` 與 action/risk notes 呈現。
@@ -644,12 +652,17 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 
 `decision_summary.daily_price_action` 使用最新日 K OHLC 與前一日收盤建立 EOD 判讀。現階段會輸出
 `close_location`、`range_pct`、`gap_state`、`follow_through_state`、
+`price_follow_through_state`、`momentum_confirmation_state`、
 `reclaim_rejection_state`、`lower_wick_ratio`、`upper_wick_ratio`，以及
 `body_proxy_ratio`、`body_ratio`、`body_ratio_source`。`body_proxy_ratio` 固定代表「前一日收盤
 到當日收盤」相對當日 high/low range 的近似值；`body_ratio` 在 evidence/frame 傳入
 daily open 時使用 `abs(close - open) / (high - low)`，且 `body_ratio_source="DAILY_OPEN"`。
 若呼叫端未傳入 daily open，`body_ratio` 會退回 `body_proxy_ratio`，並標示
 `body_ratio_source="PREVIOUS_CLOSE_PROXY"`。
+
+`follow_through_state` 保留 legacy 相容欄位；新判讀應優先看
+`price_follow_through_state` 與 `momentum_confirmation_state`，用來區分「價格延續」與
+「動能是否確認」。
 
 `decision_summary.data_quality.features` 會把缺資料、中性資料與負向資料分開，不把 missing 視為
 neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 `chip_scores.total_score`
@@ -666,6 +679,9 @@ feature status 可判定 `AVAILABLE` / `MISSING` / `STALE` / `INVALID`。`STALE`
 `data_quality_metadata.validation_errors` 或 OHLC 基本值域檢查（例如 high < low、close 不在
 high/low 區間）。每個 feature 會保留 `updated_at` 與 `reason_codes`，前端會將
 `stale_features`、`invalid_features` 與 missing/neutral/negative 分開顯示。
+另外 `market_data_completeness`、`rr_completeness`、`trade_qualification_completeness`
+會拆開市場資料完整度、RR 資料完整度與交易資格完整度；legacy `overall_completeness`
+仍保留為市場資料完整度相容欄位。
 
 ### Decision Zone Scores / Lifecycle
 
@@ -708,13 +724,19 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 
 若 zone 是 `PENDING_VALIDATION` 或 position reason 含 `SUPPORT_RECLAIM_AWAIT_CONFIRMATION`，即使 legacy `action=BuySmall`，`entry_action_state` 也不得高於 `PROBE_ENTRY`，避免「尚待確認」與「小量試單」語意衝突。
 
+`final_entry_permission` 是 `entry_action_state` 與 `daily_confirmation.state` 的保守仲裁結果，前端若要顯示
+「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
+若 daily confirmation 為 `INVALIDATED`，final permission 會降為 `NO_SETUP`。`BUY` 只在 entry 端與
+daily 端都達最高層級時輸出；一般 `ENTRY_READY` 只會把 `BUY` 放行到 `ACCUMULATE`，避免繞過日 K
+把關。
+
 目前 action pipeline：
 
 1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
 2. 若 primary zone 距離現價超過 8%：保留 action 判斷，但加上不追價風險註記。
 3. 若 primary zone `risk_reward_ratio < 1.0`：加上風險報酬不足註記。
 4. 若 primary zone `recent_validation=EXPIRED`：加上近期驗證失效註記，且不應升級到 `Buy`。
-5. 若出現 `HIGH_VOLUME_BREAKDOWN`，依破線 zone 的 tier / 是否 primary / entry relevance / 距離分級：主結構或高相關破線可 `Avoid` + `EXIT`；短線非 primary 破線降為 `Avoid` + `REDUCE_ON_BREAKDOWN` 或只加 risk note。
+5. 若出現 `HIGH_VOLUME_BREAKDOWN`，依破線 zone 的 tier / 是否 primary / entry relevance / 距離分級：主結構或高相關破線可 `Avoid` + `EXIT`；短線非 primary 破線降為 `Watch` + `REDUCE_ON_BREAKDOWN` 或只加 risk note。若同一 primary zone 已進入 `SUPPORT_RECLAIM_CONFIRMED`，舊 breakdown 不再強制 `EXIT`。
 6. 若 regime 偏空，或 primary zone 是 resistance 且沒有 bullish setup：`Avoid`。
 7. 若符合 strong setup：`Buy`。
 8. 若符合 constructive setup：`BuySmall`。
@@ -757,6 +779,15 @@ Setup 定義：
 
 `position_action_condition` 保留舊欄位，前端可優先顯示 `defense_lines`，舊資料或舊前端則繼續讀
 `invalidation_price` / `recovery_price`。
+
+`rr_context` 將新進場 RR 與既有部位 RR 拆開：`entry_rr` 仍用於 `rr_gate` / trade candidate，
+`position_rr` 用於持股防守、減碼或續抱語境。現階段尚未接入實際 position zone 來源時，
+`position_rr=null` 且 `position_rr_source=UNAVAILABLE`，避免把 entry RR 誤讀成既有部位 RR。
+接上持股防守區後才可輸出 `position_rr_source=POSITION_ZONE`。
+
+`price_path.next_decision_source` 只描述下一個決策價位來源。拆分 nearest support / resistance 後，
+有效值為 `nearest_support_zone`、`nearest_resistance_zone` 或 `daily_candidate_zone`；
+`nearest_decision_zone` 欄位仍保留為摘要相容欄位，但不再作為 `next_decision_source`。
 
 ### Primary Zone 與 Secondary Zones
 

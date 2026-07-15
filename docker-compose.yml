@@ -18,6 +18,9 @@ services:
       FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
       FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
       FUGLE_API_KEY: ${FUGLE_API_KEY}
+      YAHOO_ENABLED: ${YAHOO_ENABLED:-false}
+      YAHOO_RATE_LIMIT: ${YAHOO_RATE_LIMIT:-20}
+      YAHOO_BATCH_SIZE: ${YAHOO_BATCH_SIZE:-40}
     networks:
       - trading-net
       - proxy_net

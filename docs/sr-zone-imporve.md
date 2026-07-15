@@ -1,6 +1,6 @@
 # SR Zone 改善實作計畫書
 
-> 狀態：P0、P1、P2 核心 decision summary 欄位已實作；需額外資料來源或回測 pipeline 的校準項目改由 `docs/todo.md` T-026 追蹤。此文件保留原始案例與修正建議，作為後續校準與回測擴充依據。
+> 狀態：P0、P1、P2 核心 decision summary 欄位已實作；需額外回測 pipeline 的後續項目改由 `docs/todo.md` T-028 與 T-014 追蹤。此文件保留原始案例與修正建議，作為後續校準與回測擴充依據。
 
 ## 目標
 

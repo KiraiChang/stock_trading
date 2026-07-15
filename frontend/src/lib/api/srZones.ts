@@ -429,12 +429,15 @@ export interface SRDataQuality {
   neutral_features?: string[]
   negative_features?: string[]
   positive_features?: string[]
+  invalid_features?: string[]
   features?: Record<string, {
     status: string
     confidence: number
     source: string
     interpretation: string
     value: number | null
+    updated_at?: string | null
+    reason_codes?: string[]
   }>
   stale_features: string[]
   notes: string[]
@@ -453,6 +456,7 @@ export interface SRDailyPriceAction {
   close_location: number | null
   body_proxy_ratio?: number | null
   body_ratio?: number | null
+  body_ratio_source?: string | null
   lower_wick_ratio?: number | null
   upper_wick_ratio?: number | null
   close_location_state: string

@@ -645,9 +645,11 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 `decision_summary.daily_price_action` 使用最新日 K OHLC 與前一日收盤建立 EOD 判讀。現階段會輸出
 `close_location`、`range_pct`、`gap_state`、`follow_through_state`、
 `reclaim_rejection_state`、`lower_wick_ratio`、`upper_wick_ratio`，以及
-`body_proxy_ratio`。因為 decision input 尚未傳入 daily open，`body_ratio` 目前是
-`body_proxy_ratio` 的相容 alias，代表「前一日收盤到當日收盤」相對當日 high/low range 的近似值；
-它不是精準 K 棒 body。精準 daily open/body ratio 追蹤於 `docs/todo.md` T-026。
+`body_proxy_ratio`、`body_ratio`、`body_ratio_source`。`body_proxy_ratio` 固定代表「前一日收盤
+到當日收盤」相對當日 high/low range 的近似值；`body_ratio` 在 evidence/frame 傳入
+daily open 時使用 `abs(close - open) / (high - low)`，且 `body_ratio_source="DAILY_OPEN"`。
+若呼叫端未傳入 daily open，`body_ratio` 會退回 `body_proxy_ratio`，並標示
+`body_ratio_source="PREVIOUS_CLOSE_PROXY"`。
 
 `decision_summary.data_quality.features` 會把缺資料、中性資料與負向資料分開，不把 missing 視為
 neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 `chip_scores.total_score`
@@ -659,8 +661,11 @@ neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 
 | `-20..20` | `NEUTRAL` |
 | `> 20` | `POSITIVE` |
 
-目前 feature status 可判定 `AVAILABLE` / `MISSING`；`STALE` / `INVALID` 需要資料來源提供
-`updated_at` 或 validation metadata，追蹤於 `docs/todo.md` T-026。
+feature status 可判定 `AVAILABLE` / `MISSING` / `STALE` / `INVALID`。`STALE` 依
+`data_quality_metadata.updated_at` 與 `analysis_as_of` 判斷，預設容忍 1 天；`INVALID` 來自
+`data_quality_metadata.validation_errors` 或 OHLC 基本值域檢查（例如 high < low、close 不在
+high/low 區間）。每個 feature 會保留 `updated_at` 與 `reason_codes`，前端會將
+`stale_features`、`invalid_features` 與 missing/neutral/negative 分開顯示。
 
 ### Decision Zone Scores / Lifecycle
 

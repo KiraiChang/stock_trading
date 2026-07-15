@@ -6,6 +6,7 @@ sizing, or order execution logic belongs here.
 """
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any, Optional
 
 from .event_engine import (
@@ -19,6 +20,9 @@ from .event_engine import (
 from .model import ModelBundle
 from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
+
+
+DEFAULT_STALE_AFTER_DAYS = 1
 
 
 # entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：
@@ -271,7 +275,6 @@ def _primary_zone_score(
     regime_primary: str,
     market_events: Optional[list[dict[str, Any]]] = None,
 ) -> float:
-    rr_score = 0.5 if z.risk_reward_ratio is None else min(z.risk_reward_ratio / 3.0, 1.0)
     confluence_score = min((z.confluence_family_count or 1) / 3.0, 1.0)
     role_alignment = 0.0
     if regime_primary in ("TREND_UP", "RANGE_BOUND") and z.role == ZoneType.SUPPORT.value:
@@ -279,9 +282,8 @@ def _primary_zone_score(
     elif regime_primary == "TREND_DOWN" and z.role == ZoneType.RESISTANCE.value:
         role_alignment = 1.0
     return (
-        _entry_relevance_score_with_events(z, current_price, market_events) / 100.0 * 0.65
+        _entry_relevance_score_with_events(z, current_price, market_events) / 100.0 * 0.72
         + _zone_quality_score(z) / 100.0 * 0.15
-        + rr_score * 0.07
         + confluence_score * 0.08
         + role_alignment * 0.05
     )
@@ -354,10 +356,10 @@ def _high_volume_breakdown_action(
         )
     if "moderate" in severities:
         return (
-            "AVOID",
+            "WATCH",
             "REDUCE_ON_BREAKDOWN",
-            "Avoid",
-            "避開",
+            "Hold",
+            "等待",
             ["出現相關支撐高量跌破事件，先降低風險暴露。"],
         )
     return None
@@ -562,6 +564,52 @@ def _primary_structural_zone(zone_scores: list[ZoneScore]) -> Optional[ZoneScore
     )
 
 
+def _to_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed.date()
+    except ValueError:
+        try:
+            return date.fromisoformat(str(value)[:10])
+        except ValueError:
+            return None
+
+
+def _metadata_dict(metadata: Optional[dict[str, Any]], key: str) -> dict[str, Any]:
+    value = (metadata or {}).get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _metadata_list(metadata: Optional[dict[str, Any]], key: str, feature_key: str) -> list[str]:
+    value = _metadata_dict(metadata, key).get(feature_key)
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item) for item in value]
+    return [str(value)]
+
+
+def _format_metadata_date(value: Any) -> Optional[str]:
+    parsed = _to_date(value)
+    if parsed is not None:
+        return parsed.isoformat()
+    return str(value) if value is not None else None
+
+
+def _is_stale(updated_at: Any, analysis_as_of: Any, stale_after_days: int) -> bool:
+    updated_date = _to_date(updated_at)
+    analysis_date = _to_date(analysis_as_of)
+    if updated_date is None or analysis_date is None:
+        return False
+    return (analysis_date - updated_date).days > stale_after_days
+
+
 def _data_quality(
     chip_summary: dict[str, Any],
     candle_high: Optional[float],
@@ -570,8 +618,23 @@ def _data_quality(
     previous_candle_close: Optional[float],
     global_confidence: Optional[float],
     primary_zone: Optional[ZoneScore],
+    metadata: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     features: dict[str, dict[str, Any]] = {}
+    metadata = metadata or {}
+    updated_at_by_feature = _metadata_dict(metadata, "updated_at")
+    analysis_as_of = metadata.get("analysis_as_of")
+    stale_after_days = int(metadata.get("stale_after_days", DEFAULT_STALE_AFTER_DAYS))
+    ohlc_errors: dict[str, list[str]] = {}
+    if candle_high is not None and candle_low is not None and candle_high < candle_low:
+        ohlc_errors.setdefault("daily_price", []).append("HIGH_BELOW_LOW")
+    if (
+        candle_high is not None
+        and candle_low is not None
+        and candle_close is not None
+        and not candle_low <= candle_close <= candle_high
+    ):
+        ohlc_errors.setdefault("daily_price", []).append("CLOSE_OUTSIDE_RANGE")
 
     def add_feature(
         key: str,
@@ -581,12 +644,28 @@ def _data_quality(
         interpretation: str = "AVAILABLE",
         value: Optional[float] = None,
     ) -> None:
+        updated_at = updated_at_by_feature.get(key)
+        reason_codes = [
+            *_metadata_list(metadata, "validation_errors", key),
+            *ohlc_errors.get(key, []),
+        ]
+        if reason_codes:
+            status = "INVALID"
+            confidence = 0.0
+            interpretation = "UNAVAILABLE"
+        elif status == "AVAILABLE" and _is_stale(updated_at, analysis_as_of, stale_after_days):
+            status = "STALE"
+            confidence = min(confidence, 0.35)
+            interpretation = "UNAVAILABLE"
+            reason_codes.append("DATA_STALE")
         features[key] = {
             "status": status,
             "confidence": confidence,
             "source": source,
             "interpretation": interpretation,
             "value": value,
+            "updated_at": _format_metadata_date(updated_at),
+            "reason_codes": reason_codes,
         }
 
     price_complete = all(v is not None for v in (candle_high, candle_low, candle_close))
@@ -650,17 +729,21 @@ def _data_quality(
     )
 
     missing_features = [key for key, item in features.items() if item["status"] == "MISSING"]
+    stale_features = [key for key, item in features.items() if item["status"] == "STALE"]
+    invalid_features = [key for key, item in features.items() if item["status"] == "INVALID"]
     neutral_features = [key for key, item in features.items() if item["interpretation"] == "NEUTRAL"]
     negative_features = [key for key, item in features.items() if item["interpretation"] == "NEGATIVE"]
     positive_features = [key for key, item in features.items() if item["interpretation"] == "POSITIVE"]
 
     chip_coverage = 0.0 if chip_summary.get("missing") else 1.0
-    price_coverage = 1.0 if price_complete else 0.0
+    price_coverage = 1.0 if price_complete and not any(
+        features[key]["status"] == "INVALID" for key in ("daily_price", "previous_daily_price")
+    ) else 0.0
     overall = price_coverage * 0.7 + chip_coverage * 0.3
     return {
         "data_mode": "END_OF_DAY",
         "overall_completeness": round(overall, 4),
-        "price_data_complete": price_complete,
+        "price_data_complete": price_coverage == 1.0,
         "chip_coverage": chip_coverage,
         "missing_features": missing_features,
         "unavailable_features": missing_features,
@@ -668,7 +751,8 @@ def _data_quality(
         "negative_features": negative_features,
         "positive_features": positive_features,
         "features": features,
-        "stale_features": [],
+        "stale_features": stale_features,
+        "invalid_features": invalid_features,
         "notes": ["盤後日 K 模式，不含盤中即時確認。"],
     }
 
@@ -676,9 +760,11 @@ def _data_quality(
 def _daily_price_action(
     current_price: float,
     global_volatility: float,
+    candle_open: Optional[float],
     candle_high: Optional[float],
     candle_low: Optional[float],
     candle_close: Optional[float],
+    previous_candle_open: Optional[float],
     previous_candle_high: Optional[float],
     previous_candle_low: Optional[float],
     previous_candle_close: Optional[float],
@@ -689,6 +775,7 @@ def _daily_price_action(
             "close_location": None,
             "body_proxy_ratio": None,
             "body_ratio": None,
+            "body_ratio_source": "UNAVAILABLE",
             "lower_wick_ratio": None,
             "upper_wick_ratio": None,
             "close_location_state": "UNKNOWN",
@@ -705,13 +792,18 @@ def _daily_price_action(
     range_pct = bar_range / max(abs(candle_close), 1e-9)
     if bar_range == 0:
         body_proxy_ratio = 0.0
+        body_ratio = 0.0
+        body_ratio_source = "DAILY_OPEN" if candle_open is not None else "PREVIOUS_CLOSE_PROXY"
         lower_wick_ratio = 0.0
         upper_wick_ratio = 0.0
     else:
         body_reference = previous_candle_close if previous_candle_close is not None else current_price
+        body_ratio_source = "DAILY_OPEN" if candle_open is not None else "PREVIOUS_CLOSE_PROXY"
+        body_open = candle_open if candle_open is not None else body_reference
         body_low = min(body_reference, candle_close)
         body_high = max(body_reference, candle_close)
         body_proxy_ratio = abs(candle_close - body_reference) / bar_range
+        body_ratio = abs(candle_close - body_open) / bar_range
         lower_wick_ratio = max(0.0, body_low - candle_low) / bar_range
         upper_wick_ratio = max(0.0, candle_high - body_high) / bar_range
     if close_location >= 0.67:
@@ -768,7 +860,8 @@ def _daily_price_action(
         "close_location": round(float(close_location), 4),
         # 沒有 daily open 時不可宣稱是精準 K 棒 body；先用 previous close/current close 近似。
         "body_proxy_ratio": round(float(body_proxy_ratio), 4),
-        "body_ratio": round(float(body_proxy_ratio), 4),
+        "body_ratio": round(float(body_ratio), 4),
+        "body_ratio_source": body_ratio_source,
         "lower_wick_ratio": round(float(lower_wick_ratio), 4),
         "upper_wick_ratio": round(float(upper_wick_ratio), 4),
         "close_location_state": close_location_state,
@@ -781,7 +874,9 @@ def _daily_price_action(
         "reference_prices": {
             "high": candle_high,
             "low": candle_low,
+            "open": candle_open,
             "close": candle_close,
+            "previous_open": previous_candle_open,
             "previous_high": previous_candle_high,
             "previous_low": previous_candle_low,
             "previous_close": previous_candle_close,
@@ -1158,12 +1253,15 @@ def build_decision_summary(
     global_metrics: dict[str, Optional[float]],
     chip_summary: dict[str, Any],
     bundle: ModelBundle,
+    candle_open: Optional[float] = None,
     candle_high: Optional[float] = None,
     candle_low: Optional[float] = None,
     candle_close: Optional[float] = None,
+    previous_candle_open: Optional[float] = None,
     previous_candle_high: Optional[float] = None,
     previous_candle_low: Optional[float] = None,
     previous_candle_close: Optional[float] = None,
+    data_quality_metadata: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
     market_events = detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
@@ -1197,9 +1295,11 @@ def build_decision_summary(
     daily_price_action = _daily_price_action(
         current_price,
         global_volatility,
+        candle_open,
         candle_high,
         candle_low,
         candle_close,
+        previous_candle_open,
         previous_candle_high,
         previous_candle_low,
         previous_candle_close,
@@ -1310,6 +1410,7 @@ def build_decision_summary(
             previous_candle_close,
             global_confidence,
             primary_zone,
+            data_quality_metadata,
         ),
         "market_regime": regime,
         "market_events": market_events,
@@ -1364,6 +1465,8 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
     frame = scores.features.data.frame
     last = frame.iloc[-1]
     previous = frame.iloc[-2] if len(frame) >= 2 else None
+    last_timestamp = frame.index[-1] if len(frame.index) else None
+    previous_timestamp = frame.index[-2] if previous is not None else None
     return build_decision_summary(
         list(scores.zones),
         scores.features.data.current_price,
@@ -1372,10 +1475,20 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
         scores.global_metrics,
         scores.chip_summary,
         scores.features.data.model,
+        candle_open=float(last["open"]),
         candle_high=float(last["high"]),
         candle_low=float(last["low"]),
         candle_close=float(last["close"]),
+        previous_candle_open=float(previous["open"]) if previous is not None else None,
         previous_candle_high=float(previous["high"]) if previous is not None else None,
         previous_candle_low=float(previous["low"]) if previous is not None else None,
         previous_candle_close=float(previous["close"]) if previous is not None else None,
+        data_quality_metadata={
+            "analysis_as_of": scores.features.data.analyzed_at,
+            "updated_at": {
+                "daily_price": last_timestamp,
+                "previous_daily_price": previous_timestamp,
+                "chip": scores.chip_summary.get("trade_date"),
+            },
+        },
     )

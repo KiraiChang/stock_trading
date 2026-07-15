@@ -228,6 +228,13 @@ bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。�
 被放大超過原本設計的 15% 權重，且放大幅度不透明（取決於模型學到的係數，
 無法從權重常數直接看出）。
 
+這筆也涵蓋 Decision Engine 後續若要調整 `structural_score`、`decision_relevance_score`、
+`tradability_score` 映射或校準時的模型/分數校準驗證，避免另開重複的校準待辦。
+目前 `_primary_zone_score` 已移除 RR 的獨立排序分量，RR 僅透過 `entry_relevance` 內的
+`ev_rr` 影響主區選擇；但 confidence 也因此主要只存在於 `entry_relevance` 內，主區選擇對
+confidence 的敏感度較低。這是去除重複計分後的校準取捨，除非回測顯示主區過度忽略信心，
+否則不應盲目把獨立 confidence 權重加回去。
+
 **建議做法**（幾個方向，需要實際訓練/回測資料佐證才能決定）：
 
 - 方案A：拿掉獨立的 `chip` 加權分量，完全交給模型學習籌碼與機率的關係，
@@ -435,28 +442,23 @@ BREAKOUT/BREAKDOWN 都用 `latestCandle.Timestamp`。對即時盤影響小，但
 
 ---
 
-### T-026：SR Zone Decision Engine 後續校準與資料品質擴充
+### T-028：SR Zone Daily Confirmation 回測與評估
 
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
 | 優先度 | 中 |
-| 分類 | Python / SR Zone / Decision Engine |
+| 分類 | Python / SR Zone / 模型驗證 |
 | 建立日期 | 2026-07-15 |
-| 來源 | I-017 修復後剩餘不可正確即時落地項目 |
+| 來源 | SR Zone Decision Engine P2 後續限制；T-002 的子任務 |
 
-`docs/sr-zone-imporve.md` 的 P0/P1/P2 核心輸出欄位已落地，但下列項目需要額外資料來源或
-回測 pipeline，不能只靠目前單筆 EOD decision summary 正確完成：
+`decision_summary.daily_confirmation` 是單筆 EOD runtime 判讀，不能代表規則已完成歷史驗證。
+後續需在 SR Zone evaluation/backtest pipeline（T-002）中加入 daily confirmation label 與成效統計：
 
-- `data_quality.features` 的 `STALE` / `INVALID` 狀態：目前 decision input 沒有來源 `updated_at`、
-  staleness metadata 或 schema validation error，硬判會產生假訊號。
-- 精準 K 棒 `body_ratio`：目前 `build_decision_summary()` 沒有 daily open，只能輸出
-  `body_proxy_ratio`（以前一日收盤與當日收盤近似），需把 daily open 從 evidence/frame 傳入後才能
-  改成真正 K 棒 body。
-- Daily confirmation 回測：需批次標記隔日是否守住、是否確認突破、不同量能條件下的成功率，應放在
-  SR Zone evaluation/backtest pipeline，而不是 runtime decision summary。
-- 機率與分數校準：需歷史 label、模型輸出分布與 calibration curve，應與 SR Zone model evaluation
-  一併設計。
+- 候選支撐隔日守住率。
+- 候選壓力隔日壓回率或突破延續率。
+- 兩日確認後的勝率、風險報酬分布與失效率。
+- 不同量能條件、event sequence、RR gate 下的分層表現。
 
 ## 已完成封存
 

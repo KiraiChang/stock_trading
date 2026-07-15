@@ -1060,6 +1060,12 @@
                 {#if decisionSummary.data_quality.missing_features.length > 0}
                   <p class="text-yellow-300 mt-1">缺資料：{decisionSummary.data_quality.missing_features.join(' / ')}</p>
                 {/if}
+                {#if decisionSummary.data_quality.stale_features && decisionSummary.data_quality.stale_features.length > 0}
+                  <p class="text-yellow-300 mt-1">資料過期：{decisionSummary.data_quality.stale_features.join(' / ')}</p>
+                {/if}
+                {#if decisionSummary.data_quality.invalid_features && decisionSummary.data_quality.invalid_features.length > 0}
+                  <p class="text-red-300 mt-1">資料無效：{decisionSummary.data_quality.invalid_features.join(' / ')}</p>
+                {/if}
                 {#if decisionSummary.data_quality.negative_features && decisionSummary.data_quality.negative_features.length > 0}
                   <p class="text-red-300 mt-1">負向資料：{decisionSummary.data_quality.negative_features.join(' / ')}</p>
                 {/if}

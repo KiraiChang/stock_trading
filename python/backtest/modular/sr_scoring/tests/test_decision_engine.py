@@ -94,12 +94,15 @@ def _summary(
     global_volatility: float = 0.02,
     global_confidence: float | None = 0.72,
     chip_summary: dict | None = None,
+    candle_open: float | None = None,
     candle_high: float | None = None,
     candle_low: float | None = None,
     candle_close: float | None = None,
+    previous_candle_open: float | None = None,
     previous_candle_high: float | None = None,
     previous_candle_low: float | None = None,
     previous_candle_close: float | None = None,
+    data_quality_metadata: dict | None = None,
 ) -> dict:
     return build_decision_summary(
         zones,
@@ -109,12 +112,15 @@ def _summary(
         {"confidence": global_confidence, "expected_value": 0.01, "risk_reward_ratio": 1.5},
         chip_summary or {"missing": False, "score": 55.0, "signal": "BULLISH"},
         _bundle(),
+        candle_open=candle_open,
         candle_high=candle_high,
         candle_low=candle_low,
         candle_close=candle_close,
+        previous_candle_open=previous_candle_open,
         previous_candle_high=previous_candle_high,
         previous_candle_low=previous_candle_low,
         previous_candle_close=previous_candle_close,
+        data_quality_metadata=data_quality_metadata,
     )
 
 
@@ -200,8 +206,35 @@ def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
 
     assert any(event["type"] == "HIGH_VOLUME_BREAKDOWN" for event in ds["market_events"])
     assert ds["primary_zone"]["price_low"] == main.price_low
-    assert ds["market_action"] == "AVOID"
+    assert ds["market_action"] == "WATCH"
+    assert ds["action"] == "Hold"
     assert ds["position_action"] == "REDUCE_ON_BREAKDOWN"
+
+
+def test_minor_high_volume_breakdown_only_adds_risk_note_without_forced_action():
+    main = _zone(low=80.0, high=82.0, trading_score=70.0, risk_reward_ratio=2.5)
+    short = _zone(
+        low=90.0,
+        high=91.0,
+        trading_score=35.0,
+        confidence=0.2,
+        confidence_level=ConfidenceLevel.LOW.value,
+        expected_value=-0.01,
+        risk_reward_ratio=0.8,
+        recent_validation=RecentValidation.EXPIRED.value,
+        relative_volume=2.2,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+        tier=ZoneTier.TIER_3_SHORT_TERM.value,
+        tier_label="短期支撐/壓力",
+    )
+
+    ds = _summary([main, short], current_price=89.0, candle_high=91.5, candle_low=88.5, candle_close=89.0)
+
+    assert any(event["type"] == "HIGH_VOLUME_BREAKDOWN" for event in ds["market_events"])
+    assert ds["primary_zone"]["price_low"] == main.price_low
+    assert ds["market_action"] != "AVOID"
+    assert ds["position_action"] != "EXIT"
+    assert any("尚未達主結構防守門檻" in note for note in ds["risk_notes"])
 
 
 def test_pending_validation_buy_small_is_probe_entry_not_confirmed_small_entry():
@@ -494,8 +527,29 @@ def test_daily_price_action_outputs_eod_bar_states():
     assert action["reclaim_rejection_state"] == "PREVIOUS_CLOSE_RECLAIM"
     assert action["body_proxy_ratio"] == 0.5
     assert action["body_ratio"] == action["body_proxy_ratio"]
+    assert action["body_ratio_source"] == "PREVIOUS_CLOSE_PROXY"
     assert action["lower_wick_ratio"] == 0.3333
     assert action["upper_wick_ratio"] == 0.1667
+
+
+def test_daily_price_action_uses_daily_open_for_body_ratio_when_available():
+    ds = _summary(
+        [_zone()],
+        current_price=105.0,
+        candle_open=101.0,
+        candle_high=106.0,
+        candle_low=100.0,
+        candle_close=105.0,
+        previous_candle_open=100.0,
+        previous_candle_close=102.0,
+    )
+
+    action = ds["daily_price_action"]
+    assert action["body_proxy_ratio"] == 0.5
+    assert action["body_ratio"] == 0.6667
+    assert action["body_ratio_source"] == "DAILY_OPEN"
+    assert action["reference_prices"]["open"] == 101.0
+    assert action["reference_prices"]["previous_open"] == 100.0
 
 
 def test_daily_candidate_zones_are_tactical_candidates_not_best_trade_zone():
@@ -548,3 +602,52 @@ def test_data_quality_separates_missing_neutral_and_negative_features():
     assert positive["data_quality"]["features"]["chip"]["interpretation"] == "POSITIVE"
     assert "chip" in negative["data_quality"]["negative_features"]
     assert negative["data_quality"]["features"]["chip"]["interpretation"] == "NEGATIVE"
+
+
+def test_data_quality_marks_stale_features_from_updated_at_metadata():
+    ds = _summary(
+        [_zone()],
+        candle_high=106.0,
+        candle_low=100.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        data_quality_metadata={
+            "analysis_as_of": "2026-07-15",
+            "stale_after_days": 1,
+            "updated_at": {
+                "daily_price": "2026-07-13",
+                "previous_daily_price": "2026-07-14",
+                "chip": "2026-07-12",
+            },
+        },
+    )
+
+    quality = ds["data_quality"]
+    assert quality["features"]["daily_price"]["status"] == "STALE"
+    assert quality["features"]["previous_daily_price"]["status"] == "AVAILABLE"
+    assert quality["features"]["chip"]["status"] == "STALE"
+    assert set(quality["stale_features"]) == {"daily_price", "chip"}
+    assert quality["features"]["daily_price"]["reason_codes"] == ["DATA_STALE"]
+
+
+def test_data_quality_marks_invalid_ohlc_and_validation_errors():
+    ds = _summary(
+        [_zone()],
+        candle_high=100.0,
+        candle_low=106.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        data_quality_metadata={
+            "validation_errors": {
+                "chip": ["SCORE_OUT_OF_RANGE"],
+            },
+        },
+    )
+
+    quality = ds["data_quality"]
+    assert quality["features"]["daily_price"]["status"] == "INVALID"
+    assert "HIGH_BELOW_LOW" in quality["features"]["daily_price"]["reason_codes"]
+    assert quality["features"]["chip"]["status"] == "INVALID"
+    assert quality["features"]["chip"]["reason_codes"] == ["SCORE_OUT_OF_RANGE"]
+    assert set(quality["invalid_features"]) == {"daily_price", "chip"}
+    assert quality["price_data_complete"] is False

@@ -1,110 +1,200 @@
-# 2026/07/15 SR Zone 改善實作計畫書
+# 2026/07/15 SR Zone 改善實作計畫書 進階版
 
-## 文件用途
+## 需要解決問題
+* **修 Zone Validation Date Window / Overlap。**先確認為什麼 7/14 完整穿越 28.06～28.37，結果仍是 UNTESTED / PENDING_VALIDATION。
+* **統一 PriceActionEvidence。**禁止 Reclaim=None 與 SUPPORT_RECLAIM_CONFIRMED 同時存在。
+* **Chip missingness。**拆 score / availability / coverage / confidence / effective_impact。
+* **增加 Regime Transition。**不要繼續塞進 Market Bias。
+* Blocking Zone 增加 source metadata。
 
-此文件整理 0050、00981A、2330 三組 SR Zone 測試後暴露的 Decision Engine 問題，作為後續實作計畫與驗收依據。重點不是重新調整 SR Detection 或 Daily Candidate Zone，而是改善「抓到正確區間後，Decision Engine 如何選區、解釋、仲裁 action」。
+## 處理方向
+### recent validation 有日期窗口問題
+結果仍顯示：
+```
+Primary Zone 28.06～28.37
+尚未測試
+PENDING_VALIDATION
+Touch 6 次
+```
+這在資料上不成立。
 
-目前已由其他文件承接的項目不在此重複展開：
+7/14：
+```
+Bar:
+27.34 ───────── 29.30
 
-- `Chip missing != neutral` 已由 `decision_summary.data_quality.features` 現況承接，會區分 missing、neutral、negative、positive、stale、invalid。
-- Daily Confirmation 的歷史驗證與成效統計由 `docs/todo.md` T-028 追蹤。
-- 分數與權重校準由 `docs/todo.md` T-014 追蹤。
+Zone:
+28.06 ─ 28.37
+```
+K 棒完整穿越 zone。
 
-目前實作狀態：
+區間 overlap：
+```
+bar.high >= zone.low
+29.30 >= 28.06  TRUE
 
-- P0 已落地：confirmed reclaim 不再被同 zone 的舊 breakdown gate 強制拉成 `EXIT`，且 reclaim evidence 使用同一份 interaction 判斷。
-- P1 已落地：新增 `final_entry_permission`、`RECOVERY` / `EARLY_TREND`、EOD 收盤收復 label、follow-through 拆層與 `BULLISH_CONTINUATION`。
-- P2 已落地：新增 zone width penalty、nearest support/resistance、`rr_context` 與 completeness 拆層。
+bar.low <= zone.high
+27.34 <= 28.37  TRUE
+```
+所以：
+```
+INTERSECTS = TRUE
+```
+而且：
+```
+bar.low < zone.low
+close > zone.high
+```
+應該分類為：
+```
+UNDERCUT_RECLAIM
+```
+不是：
+```
+UNTESTED
+```
+#### 處理方向
+做sr-zone分析時log以下內容，
+```
+   analysis_date
+   validation_start_date
+   validation_end_date
+   latest_validation_bar.date
+```
+並且reivew程式碼正確應該要是這樣的
+```
+zone_generation_end_date
+<
+validation_bar_date
+<=
+analysis_date
+```
 
-## Case Matrix
+### 只修改了 Decision Summary / Market Bias mapping，沒有修底層 PriceActionEvidence
+幫忙review資料流應該如下 
+```
+OHLCV
+  ↓
+ZoneInteractionDetector
+  ↓
+PriceActionEvidence
+  ├─ reclaim_type
+  ├─ rejection_type
+  ├─ penetration_ratio
+  ├─ close_relative_to_zone
+  └─ follow_through
+        ↓
+Decision Engine
+        ↓
+Summary
+```
+### Market Regime 仍然偏慢
+應該新增一個維度：
+```
+Market Regime:
+RANGE
 
-| Case | 現象 | 預期結果 | 疑似模組 | 優先度 | 驗收條件 |
-|---|---|---|---|---|---|
-| 0050 | `REVERSAL_CANDIDATE + NEXT_DAY_FOLLOW_THROUGH` 後仍受 `HIGH_VOLUME_BREAKDOWN` active risk gate 影響 | 轉為 `SUPPORT_RECLAIM_CONFIRMED`，解除不該延續的 breakdown 風險閘門 | Event Lifecycle / Reclaim Evidence | P0 | fixture 不再因已確認收復的舊 breakdown 直接降為 EXIT |
-| 0050 | 7/15 fixture 的 Position Action 輸出過度防守 | 輸出 `HOLD` 或條件式持有，不得輸出 `EXIT` | Position Action arbitration | P0 | `position_action` 為 `HOLD` 或可明確解釋的條件式持有，並保留防守線 |
-| 0050 | Global Entry State 與 Daily Entry State 容易產生多重語意 | 產生唯一 Final Entry Permission | Entry State arbitration | P1 | UI/API 只需讀一個 final permission 即可判斷是否可進場 |
-| 00981A | 28.06-28.37 被 7/14 K 棒完整穿越後收回，卻仍顯示尚未測試 | recent validation 應反映已測試且收回 | Zone overlap / recent_validation | P0 | 該區不再標為未測試，並能輸出收復證據 |
-| 00981A | `reclaim=None` 與 `SUPPORT_RECLAIM_CONFIRMED` 同時存在 | Reclaim evidence 單一路徑輸出，不得互相矛盾 | Reclaim Evidence pipeline | P0 | 同一份 summary 不會同時輸出空 reclaim 與 confirmed reclaim |
-| 00981A | HH + HL + Follow Through 仍判為 RANGE | 增加 `RECOVERY`、`EARLY_TREND` 等 transition state | Market Regime Transition | P1 | recovery / early trend case 不再只落入 range |
-| 00981A | Entry RR 與既有部位 RR 混在一起 | Entry RR 與 Position RR 分開 | RR / Position Context | P2 | 新進場與既有持股的 RR、停損、防守線能分別呈現 |
-| 2330 | 6% 寬 historical zone 因上緣接近現價搶走 nearest zone | Decision relevance 加入 zone width penalty | Zone ranking / Decision relevance | P2 | 過寬區間不會只因邊界接近現價成為 nearest decision zone |
-| 2330 | nearest decision zone 無法同時表達上下方下一決策點 | 拆成 nearest support / nearest resistance，再由 price path 選 next decision | Price Path / Zone selection | P2 | summary 可同時回答最近支撐、最近壓力與下一決策價 |
-| 2330 | 「盤中收復」語意不適合 EOD daily 判讀 | 改為 `CLOSE_RECLAIMED_PREVIOUS_CLOSE` 或日 K 收復結構 | Daily Price Action / Event naming | P1 | EOD 模式不再使用易誤解的盤中收復語意 |
-| 2330 | Follow Through 同時混合價格延續與動能確認 | 拆成 Price Follow Through 與 Momentum Confirmation | Daily Price Action | P1 | 可表達「價格延續、動能確認不足」 |
-| 2330 | Market Bias 應為 `BULLISH_CONTINUATION`，卻偏向 reversal watch | 增加 bullish continuation 判讀 | Market Bias | P1 | 延續型多頭不再被標成反轉觀察 |
-| 2330 | Data completeness 100% 被誤讀成交易資格完整 | 拆成 market data completeness、RR completeness、trade qualification completeness | Data Quality / Trade Qualification | P2 | 市場資料完整不等於 RR 或交易資格完整 |
+Regime Transition:
+RANGE_TO_UPTREND
 
-## P0：Event Lifecycle 與 Position Action Safety
+或者
+Regime:
+RECOVERY
+```
+結構正在往哪裡移動。的狀況
 
-1. 建立 Event Lifecycle 仲裁規則：
-   - `REVERSAL_CANDIDATE + NEXT_DAY_FOLLOW_THROUGH` 應升級為 `SUPPORT_RECLAIM_CONFIRMED`。
-   - confirmed reclaim 後，舊的 `HIGH_VOLUME_BREAKDOWN` 不得繼續作為 active risk gate。
-   - 同一 zone 同一時間不得同時輸出空 reclaim 與 confirmed reclaim。
+### Chip Aggregator 也要改
 
-2. 修正 Position Action arbitration：
-   - reclaim confirmed 或 recovery confirmed 的 case 不得直接輸出 `EXIT`。
-   - 0050 7/15 fixture 的目標輸出為 `HOLD` 或條件式持有。
-   - 若輸出條件式持有，必須保留 `invalidation_price`、`recovery_price` 與 reason codes。
+正確算法應該：
+```
+available_weight =
+0.35
 
-3. 修正 Zone overlap / recent validation：
-   - K 棒完整穿越 zone 後收回時，該 zone 不應繼續顯示為「尚未測試」。
-   - recent validation 與 reclaim evidence 必須使用同一份 interaction 判斷結果。
+chip_score =
+(-55 × 0.35) / 0.35
 
-## P1：Entry Permission、Regime 與 Bias 語意
+= -55
+```
+但：
+```
+chip_confidence = 35%
+```
+輸出：
+```
+Chip Score:
+-55
 
-1. 統一 Entry State arbitration：
-   - 將 Global Entry State 與 Daily Entry State 仲裁成唯一 Final Entry Permission。
-   - Final Entry Permission 應成為 UI/API 判斷是否可進場的主要欄位。
-   - legacy `entry_action_state` 與 `daily_entry_state` 可保留，但不得讓使用者自行拼湊結論。
+Chip Confidence:
+LOW
 
-2. 增加 Market Regime Transition：
-   - 至少支援 `RECOVERY`、`EARLY_TREND`。
-   - HH + HL + Follow Through 的 case 不應只落入 `RANGE_BOUND`。
+Coverage:
+35%
+```
+Decision Engine 再決定：
+```
+effective_chip_score =
+chip_score × confidence
 
-3. 修正 EOD daily event naming：
-   - EOD 模式避免使用「盤中收復」作為主要語意。
-   - 改用 close-based 名稱，例如 `CLOSE_RECLAIMED_PREVIOUS_CLOSE` 或日 K 收復結構。
+= -55 × 0.35
+= -19.25
+```
+在來說明部分
 
-4. 拆分 Follow Through 與 Market Bias：
-   - Price Follow Through 表達價格延續。
-   - Momentum Confirmation 表達動能是否確認。
-   - Market Bias 增加 `BULLISH_CONTINUATION`，避免延續型多頭被標成 reversal watch。
+目前：
 
-## P2：Zone Selection、RR 與 Completeness
+```
+籌碼中性 -19
+```
 
-1. Decision relevance 加入 zone width penalty：
-   - 過寬 historical zone 不應只因上緣接近現價搶走 nearest decision zone。
-   - penalty 應只影響當下決策相關性，不改寫 zone 的 structural quality。
+應該：
+```
+籌碼偏空，但資料覆蓋率低，effective impact -19
+```
 
-2. 拆分 nearest decision zone：
-   - 輸出 nearest support 與 nearest resistance。
-   - `price_path.next_decision_price` 再依距離、方向、blocking zone 選出下一決策價。
+### 還有一個新發現：你的壓力 zone 有重疊問題
+系統：
+```
+Blocking Zone:
+29.52 ~ 29.70
 
-3. 增加 position-aware RR：
-   - Entry RR 用於新進場。
-   - Position RR 用於既有持股的防守、減碼、續抱判斷。
-   - UI/API 不應把兩者混成單一 RR。
+Nearest Decision Zone:
+30.24 ~ 30.55
 
-4. 拆分 data completeness：
-   - Market data completeness：OHLC、volume、chip 等資料是否完整。
-   - RR completeness：是否具備進出場、停損、目標價所需資料。
-   - Trade qualification completeness：是否滿足交易候選條件。
+Short Resistance:
+30.61 ~ 30.79
 
-## 驗收與測試建議
+Medium Resistance:
+30.24 ~ 30.55
+```
+我想問：
+```
+29.52～29.70 是從哪個 detector 出來的？
+```
+因為 UI 的短／中／長 zone 沒有它。
 
-1. 建立三個 case fixture：
-   - 0050：7/15 reclaim / follow-through / position action。
-   - 00981A：28.06-28.37 zone 穿越後收回。
-   - 2330：寬 historical zone、bullish continuation、data completeness 拆層。
+這代表 Blocking Zone 可能來自：
+```
+all zones
+```
+而 Summary Zone 來自：
+```
+selected zones
+```
+這本身沒錯。
 
-2. 每個 fixture 至少驗證：
-   - `market_events` 與 `event_sequence` 不互相矛盾。
-   - `market_regime.structure_state` 與 reclaim evidence 一致。
-   - `market_bias`、`position_action`、Final Entry Permission 語意一致。
-   - `nearest support`、`nearest resistance`、`next_decision_price` 能回答不同問題。
-   - `data_quality` 完整度不被誤讀成交易資格完整。
+但使用者會看到：
+```
+Blocking Zone 29.52～29.70
+```
+往下找：
 
-3. 實作順序：
-   - 先做 P0，避免錯誤 EXIT 或 reclaim/breakdown 矛盾。
-   - 再做 P1，統一使用者看到的 entry/regime/bias 語意。
-   - 最後做 P2，改善 zone ranking、RR 與 completeness 的可解釋性。
+找不到這個 zone。
+
+我建議 Blocking Zone 顯示 source：
+```
+29.52 ~ 29.70
+Source: VOLUME_PROFILE
+Timeframe: SHORT
+Confidence: 58%
+```
+否則 Decision Engine 的可解釋性會斷掉。

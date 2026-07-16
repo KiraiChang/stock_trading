@@ -1,5 +1,9 @@
 # 股票支撐／壓力決策引擎完整修改計畫書
 
+> 實作順序以 [architecture/sr-zone-pipeline-upgrade-plan.md](./architecture/sr-zone-pipeline-upgrade-plan.md)
+> 為準。本文件保留完整改進構想；實作時需先完成 pipeline 邊界與 P0 語意收斂，再進入事件表、
+> JSONB 或 DB 正規化。
+
 ## 1. 修改目標
 
 目前系統的 Zone Detection、EV／RR、籌碼整合、Daily Candidate Zone、Entry Relevance 與 Defense Line 已具備可用基礎。下一階段不再優先增加 RSI、MACD、KD 等技術指標，而是集中處理以下核心問題：

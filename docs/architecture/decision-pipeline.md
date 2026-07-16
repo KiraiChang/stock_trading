@@ -59,6 +59,26 @@ Decision Pipeline 負責把 Data / Analysis / AI 的輸出收斂為交易行動�
 - 若上游資料缺漏，Decision 應降級、阻擋或標示原因，而不是自行補資料。
 - FLAT 與 LONG 情境要清楚分開：空手看進場，持股看持有、加碼、減碼、停利、停損。
 
+## SR Zone P0 契約
+
+P0 先固定 Decision Pipeline 的唯一權威輸出，避免同一份 SR Zone 分析同時出現互斥交易語意。
+
+| 類型 | 欄位 / 結構 | P0 要求 |
+|------|-------------|---------|
+| 市場偏向 | `market_bias` | 只回答市場結構偏多/偏空/中性，不等於可進場 |
+| 進場權限 | `final_entry_permission` | 未持有者能否進場的唯一輸出；不得再由 `market_action` 或 `action` 取代 |
+| 持股動作 | `position_action` | 已持有者如何處理的唯一輸出；需與 entry permission 分離 |
+| Hard gates | active event、RR、EV、blocking zone、confidence | 必須有優先序，且 reason codes 可追溯 |
+| Reason codes | `reason_codes` | 前端顯示與測試斷言應依 reason codes，而非自由文字解析 |
+
+P0 也明確停用或降級舊重複欄位：
+
+- `market_action`
+- `action`
+- `action_label`
+
+這些欄位若仍需相容舊前端或舊快照，只能作為 deprecated alias，不能作為最終決策來源。
+
 ## 近期整理方向
 
 - 將 `decision_summary` 與 analysis score breakdown 的文件界線再拉清楚。

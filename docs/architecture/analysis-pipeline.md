@@ -61,6 +61,22 @@ SR Zone 橫跨 Analysis、AI 與 Decision：
 - `bounce_probability` / `break_probability` 的模型推論與模型狀態屬於 AI Pipeline。
 - `decision_summary`、entry permission、RR context 的交易語意屬於 Decision Pipeline。
 
+### SR Zone P0 契約
+
+P0 先固定 Analysis Pipeline 可輸出的 SR Zone 欄位類型，避免再把分析 score 與交易 action
+混在同一層：
+
+| 類型 | 欄位 / 結構 | P0 要求 |
+|------|-------------|---------|
+| Zone identity | `role` / `role_label` / `tier` / `tier_label` / `display_label` | `tier_label` 只描述時間層級，`role_label` 只描述支撐/壓力，顯示文字由 `display_label` 組合 |
+| Zone score | support/resistance score、EV、RR、confidence | 僅描述該 zone 的分析分數，不輸出買賣 action |
+| Confluence | `confluence_family_count` / `confluence_families` | UI 摘要使用證據族群數，raw method count 僅供 debug |
+| Chip evidence | `chip_summary` / chip signal | 使用一致 signal 門檻與文字，不只依正負號著色 |
+| Evidence | `evidence` / `explanation` / `price_path` / `defense_lines` | 可供 Decision Pipeline 消費，但不得直接表示最終 entry/position action |
+
+Analysis Pipeline 可以保留相容舊欄位，但需在文件標示被取代的欄位，避免前端繼續把
+deprecated 欄位當主要判斷依據。
+
 ## 近期整理方向
 
 - 文件上統一使用「analysis snapshot」描述可持久化分析結果。

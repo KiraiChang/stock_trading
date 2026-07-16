@@ -553,6 +553,15 @@ pipeline 契約演進。
 - Analysis Pipeline 的 snapshot/evidence 與 Decision Pipeline 的 action/reason 分開測試。
 - 不在同一批重構中改 API 行為或 DB schema，降低回歸風險。
 
+SR Zone P0 子項（見 `docs/architecture/sr-zone-pipeline-upgrade-plan.md`）：
+
+- P0-A：先固定 SR Zone 的 Analysis / AI / Decision 欄位歸屬契約。
+- P0-B：拆分語意修正項目，包括 `tier_label` / `role_label` / `display_label`、chip signal、
+  confluence family 與舊 action 欄位去重。
+- P0-C：規劃 Decision Arbitration 單一出口，包括唯一 `final_entry_permission`、唯一
+  `position_action`、hard gate priority、entry precedence 與 reason code schema。
+- P0 明確不做 event table、JSONB migration、decision table 拆分或 model registry。
+
 ## 已完成封存
 
 （目前沒有項目）

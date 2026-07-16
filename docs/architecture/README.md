@@ -23,6 +23,12 @@ Decision Pipeline
 | AI Pipeline | [ai-pipeline.md](./ai-pipeline.md) | 模型訓練、推論、模型狀態、metrics |
 | Decision Pipeline | [decision-pipeline.md](./decision-pipeline.md) | 交易決策、position sizing、停損停利、風控輸出 |
 
+## 升級計畫
+
+| 文件 | 說明 |
+|------|------|
+| [sr-zone-pipeline-upgrade-plan.md](./sr-zone-pipeline-upgrade-plan.md) | `docs/sr-zone-improve.md` 對齊四條 pipeline 後的 P0/P1/P2 實作順序 |
+
 ## 共同規則
 
 - 上游 pipeline 只透過明確資料契約提供輸出，下游不得回頭偷抓上游內部狀態。

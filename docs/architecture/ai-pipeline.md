@@ -58,6 +58,20 @@ AI Pipeline 負責模型訓練、模型狀態、模型推論與模型評估。�
 - 不自行同步市場資料。
 - 不保存交易決策快照。
 
+## SR Zone P0 契約
+
+P0 先固定 AI Pipeline 在 SR Zone 中只提供模型與統計可信度，不輸出交易 action。
+
+| 類型 | 欄位 / 結構 | P0 要求 |
+|------|-------------|---------|
+| 模型機率 / likelihood | `bounce_probability` / `break_probability` | 只代表模型輸出；若模型健康度不足，後續應標示不可宣稱精確勝率 |
+| 模型追溯 | `model_version` / `model_config_hash` / `training_config` | 每筆分析快照需能知道使用哪個 active model 設定 |
+| 模型狀態 | model status / train job metrics | 提供模型是否存在、訓練時間、metrics、dataset summary |
+| 模型健康度 | `model_health`（後續 P2） | P0 先保留契約位置，實作延後到 AI governance 階段 |
+
+AI Pipeline 不得輸出 `BUY`、`SELL`、`HOLD`、`final_entry_permission` 或
+`position_action`。這些交易語意只屬於 Decision Pipeline。
+
 ## 後續升級方向
 
 - model registry：允許多模型並存、回滾與指定模型推論。

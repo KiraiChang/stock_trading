@@ -132,6 +132,17 @@ export interface SRGlobalEvidence {
   }
 }
 
+export interface SRValidationDebug {
+  analysis_date?: string | null
+  zone_generation_end_date?: string | null
+  validation_start_date?: string | null
+  validation_end_date?: string | null
+  latest_touch_bar_date?: string | null
+  latest_validation_bar_date?: string | null
+  latest_touch_index?: number | null
+  latest_validation_index?: number | null
+}
+
 // 機構級版本（2026-07 重新設計，見後端 sr_scoring/scoring.py 開頭的完整說明）
 export interface SRZone {
   id: number
@@ -186,6 +197,7 @@ export interface SRZone {
   zone_quality_score?: number | null
   entry_relevance_score?: number | null
   entry_relevance_breakdown?: Record<string, number> | null
+  validation_debug?: SRValidationDebug | null
 
   // 跨方法（ATR/volume_profile）重疊分群：overlap_group 相同的 zone 代表
   // 不同方法都指向同一個價位帶（「多方法共振」），不會合併或刪除任何
@@ -257,6 +269,11 @@ export interface SRZoneSummaryItem {
 export interface SRChipSummary {
   missing: boolean
   score: number | null
+  raw_score?: number | null
+  effective_score?: number | null
+  coverage?: number
+  confidence?: number
+  confidence_level?: string | null
   signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'RISK' | null
   institutional_score: number | null
   margin_score: number | null
@@ -320,6 +337,16 @@ export interface SRZoneInteraction {
   closed_above: boolean
   closed_below: boolean
   state_label: string
+  price_action_evidence?: {
+    reclaim_type: string
+    rejection_type: string
+    penetration_ratio: number
+    close_relative_to_zone: string
+    follow_through: string
+    touched: boolean
+    closed_above: boolean
+    closed_below: boolean
+  }
 }
 
 export interface SRDecisionZoneSummary {
@@ -502,6 +529,16 @@ export interface SRPricePath {
     label: string
     role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
     source: string
+    source_scope?: string | null
+    zone_id?: number | string | null
+    method?: string | null
+    timeframe?: string | null
+    tier?: string | null
+    tier_label?: string | null
+    confidence?: number | null
+    confidence_level?: string | null
+    distance_pct?: number | null
+    selected_summary_zone?: boolean
   } | null
   transitions: Array<{
     if: string

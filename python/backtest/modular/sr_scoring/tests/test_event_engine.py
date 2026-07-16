@@ -24,6 +24,19 @@ def test_zone_interaction_reports_breakdown_and_penetration():
     assert interaction["closed_below"] is True
     assert interaction["closed_above"] is False
     assert interaction["penetration_pct"] > 0
+    assert interaction["price_action_evidence"]["close_relative_to_zone"] == "BELOW_ZONE"
+    assert interaction["price_action_evidence"]["reclaim_type"] == "NONE"
+
+
+def test_zone_interaction_reports_price_action_reclaim_evidence():
+    z = _zone(low=98.0, high=100.0)
+
+    interaction = zone_interaction(z, current_price=101.0, candle_high=102.0, candle_low=97.0, candle_close=101.0)
+
+    evidence = interaction["price_action_evidence"]
+    assert evidence["reclaim_type"] == "UNDERCUT_RECLAIM"
+    assert evidence["close_relative_to_zone"] == "ABOVE_ZONE"
+    assert evidence["penetration_ratio"] > 0
 
 
 def test_extreme_volume_is_symbol_level_context_event_with_null_zone_ref():

@@ -22,16 +22,20 @@ engine = create_engine(
     pool_pre_ping=True,
 )
 
-# 啟動時確認連線可用
-try:
-    with engine.connect() as _conn:
-        _conn.execute(text("SELECT 1"))
-    log.info("DB connection OK")
-except Exception as _e:
-    log.error("DB connection FAILED: %s", _e)
-    raise
-
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+
+
+def check_connection() -> None:
+    """確認 DB 連線可用（SELECT 1），失敗即 raise。由服務啟動路徑（http_server /
+    worker / CLI）明確呼叫，不在 module import 時執行——import db 不應該有連線副作用，
+    否則純單元測試或離線工具會被連不到 DB 綁架（見 development-workflow.md「開發慣例」）。"""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        log.info("DB connection OK")
+    except Exception as e:
+        log.error("DB connection FAILED: %s", e)
+        raise
 
 
 def get_session() -> Session:

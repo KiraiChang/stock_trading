@@ -173,6 +173,12 @@ TRADING_SCORE_WEIGHTS = {
 # internal/chip 的 signalThreshold（±20 才算 BULLISH/BEARISH，見 chip/score.go）。
 # 摘要方向敘述（_chip_reason）與結構化方向（_chip_direction）共用同一個門檻。
 CHIP_SIGNAL_THRESHOLD = 20.0
+CHIP_COMPONENT_WEIGHTS = {
+    "institutional_score": 0.35,
+    "margin_score": 0.20,
+    "broker_score": 0.30,
+    "concentration_score": 0.15,
+}
 
 _VOLUME_CONFIRMATION_WEIGHT = {
     VolumeConfirmation.CONFIRMED.value: 1.0,
@@ -316,6 +322,51 @@ def _classify_touches(
         hold_label, break_label, forward_return = result
         classified.append((touch, hold_label, break_label, forward_return))
     return classified
+
+
+def _date_at_index(df: pd.DataFrame, index: Optional[int]) -> Optional[str]:
+    if index is None or index < 0 or index >= len(df.index):
+        return None
+    value = df.index[index]
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return str(value)
+
+
+def _validation_debug_metadata(
+    df: pd.DataFrame,
+    zone: Zone,
+    touches: list[ZoneTouch],
+    classified: list[tuple[ZoneTouch, int, int, float]],
+    as_of_index: int,
+    validation_start_index: int,
+) -> dict[str, Any]:
+    latest_touch = touches[-1] if touches else None
+    latest_classified = classified[-1][0] if classified else None
+    return {
+        "analysis_date": _date_at_index(df, as_of_index),
+        "zone_generation_end_date": _date_at_index(df, zone.formed_at_index),
+        "validation_start_date": _date_at_index(df, validation_start_index),
+        "validation_end_date": _date_at_index(df, as_of_index),
+        "latest_touch_bar_date": _date_at_index(df, latest_touch.touch_index if latest_touch else None),
+        "latest_validation_bar_date": _date_at_index(df, latest_classified.touch_index if latest_classified else None),
+        "latest_touch_index": latest_touch.touch_index if latest_touch else None,
+        "latest_validation_index": latest_classified.touch_index if latest_classified else None,
+    }
+
+
+def _filter_validation_touches(
+    touches: list[ZoneTouch],
+    classified: list[tuple[ZoneTouch, int, int, float]],
+    zone: Zone,
+) -> tuple[list[ZoneTouch], list[tuple[ZoneTouch, int, int, float]]]:
+    filtered_touches = [touch for touch in touches if touch.touch_index > zone.formed_at_index]
+    valid_touch_indexes = {touch.touch_index for touch in filtered_touches}
+    filtered_classified = [
+        item for item in classified
+        if item[0].touch_index in valid_touch_indexes
+    ]
+    return filtered_touches, filtered_classified
 
 
 def _touch_confidence(
@@ -756,6 +807,11 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
         return {
             "missing": True,
             "score": None,
+            "raw_score": None,
+            "effective_score": None,
+            "coverage": 0.0,
+            "confidence": 0.0,
+            "confidence_level": "NONE",
             "signal": None,
             "trade_date": None,
             "institutional_score": None,
@@ -763,15 +819,40 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
             "broker_score": None,
             "concentration_score": None,
         }
+    components = {
+        key: chip_row.get(key)
+        for key in CHIP_COMPONENT_WEIGHTS
+    }
+    available_weight = sum(
+        weight for key, weight in CHIP_COMPONENT_WEIGHTS.items()
+        if components.get(key) is not None
+    )
+    weighted_sum = sum(
+        float(components[key]) * weight
+        for key, weight in CHIP_COMPONENT_WEIGHTS.items()
+        if components.get(key) is not None
+    )
+    raw_score = weighted_sum / available_weight if available_weight > 0 else None
+    coverage = min(max(available_weight, 0.0), 1.0)
+    # effective_score 依 coverage 降權，代表缺分量後的實際影響強度（= raw_score * coverage
+    # = weighted_sum）。不直接用 DB total_score：total_score 未依覆蓋率降權，低覆蓋率時會回報
+    # 未降權的全量分數，誤導成籌碼影響比實際更強（見 sr-zone-scoring.md「Chip missingness」）。
+    effective_score = weighted_sum if raw_score is not None else None
+    confidence_level = "HIGH" if coverage >= 0.8 else "MEDIUM" if coverage >= 0.5 else "LOW" if coverage > 0 else "NONE"
     return {
         "missing": False,
-        "score": float(chip_row["total_score"]),
+        "score": raw_score,
+        "raw_score": raw_score,
+        "effective_score": effective_score,
+        "coverage": coverage,
+        "confidence": coverage,
+        "confidence_level": confidence_level,
         "signal": chip_row.get("signal"),
         "trade_date": chip_row.get("trade_date"),
-        "institutional_score": float(chip_row.get("institutional_score") or 0.0),
-        "margin_score": float(chip_row.get("margin_score") or 0.0),
-        "broker_score": float(chip_row.get("broker_score") or 0.0),
-        "concentration_score": float(chip_row.get("concentration_score") or 0.0),
+        "institutional_score": float(components["institutional_score"]) if components["institutional_score"] is not None else None,
+        "margin_score": float(components["margin_score"]) if components["margin_score"] is not None else None,
+        "broker_score": float(components["broker_score"]) if components["broker_score"] is not None else None,
+        "concentration_score": float(components["concentration_score"]) if components["concentration_score"] is not None else None,
     }
 
 
@@ -989,7 +1070,12 @@ def score_zone(
         confidence = _touch_confidence(all_touches, role_classified, as_of_index)
 
     confidence_level = _confidence_level(confidence)
-    recent_validation = _recent_validation(role_touches, role_classified, as_of_index)
+    validation_touches, validation_classified = _filter_validation_touches(role_touches, role_classified, zone)
+    recent_validation = _recent_validation(validation_touches, validation_classified, as_of_index)
+    validation_start_index = max(1, zone.formed_at_index + 1, as_of_index - lookback_bars + 1)
+    validation_debug = _validation_debug_metadata(
+        df, zone, validation_touches, validation_classified, as_of_index, validation_start_index
+    )
 
     zone_momentum_value = zone_momentum(df, all_touches, lookback=ZONE_MOMENTUM_LOOKBACK)
     zone_direction = _zone_direction(zone_momentum_value)
@@ -1110,6 +1196,7 @@ def score_zone(
         zone_quality_score=trading_score_value,
         entry_relevance_score=entry_relevance_value,
         entry_relevance_breakdown=entry_relevance_breakdown,
+        validation_debug=validation_debug,
     )
 
 
@@ -1171,6 +1258,7 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "zone_quality_score": z.zone_quality_score if z.zone_quality_score is not None else z.trading_score,
         "entry_relevance_score": z.entry_relevance_score,
         "entry_relevance_breakdown": z.entry_relevance_breakdown,
+        "validation_debug": z.validation_debug,
         "overlap_group": z.overlap_group,
         "confluence_count": z.confluence_count,
         "confluence_family_count": z.confluence_family_count,

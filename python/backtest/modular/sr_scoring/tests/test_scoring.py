@@ -379,6 +379,37 @@ def test_recent_validation_reclaimed_support_hold_is_not_pending():
     assert _recent_validation([touch], [(touch, 1, 0, 0.02)], as_of_index=100) == "VALIDATED_RECENTLY"
 
 
+def test_score_zone_validation_window_starts_after_zone_generation(bundle):
+    df = pd.DataFrame(
+        {
+            "open": [30.0, 30.0, 29.0, 29.0, 28.2, 28.6, 28.8, 29.0],
+            "high": [30.2, 29.5, 29.2, 29.1, 29.3, 29.0, 29.2, 29.4],
+            "low": [29.8, 27.9, 28.8, 28.7, 27.34, 28.5, 28.7, 28.9],
+            "close": [30.0, 28.5, 29.0, 29.0, 28.5, 28.8, 29.0, 29.1],
+            "volume": [1000, 1000, 1000, 1000, 1300, 1200, 1100, 1000],
+        },
+        index=pd.date_range("2026-07-08", periods=8, freq="D"),
+    )
+    zone = Zone(price_low=28.06, price_high=28.37, method=ZoneMethod.ATR, center_price=28.215, formed_at_index=2)
+
+    score = score_zone(
+        df,
+        zone,
+        current_price=29.1,
+        bundle=bundle,
+        overall_trend=_trend(df),
+        as_of_index=7,
+        lookback_bars=8,
+        forward_bars=2,
+        threshold_pct=0.005,
+    )
+
+    assert score.recent_validation != "PENDING_VALIDATION"
+    assert score.validation_debug["zone_generation_end_date"] == "2026-07-10"
+    assert score.validation_debug["validation_start_date"] == "2026-07-11"
+    assert score.validation_debug["latest_validation_bar_date"] == "2026-07-12"
+
+
 def test_trading_recommendation_support_strong_buy_at_high_score():
     assert _trading_recommendation(90.0, "SUPPORT") == "STRONG_BUY"
 
@@ -727,6 +758,35 @@ def test_score_symbol_chip_before_date_uses_analyzed_at_not_wall_clock_today(mon
     assert captured["before_date"].startswith("2020")
 
 
+def test_score_symbol_survives_chip_row_with_null_total_score(monkeypatch, bundle):
+    """chip row 存在但 total_score 為 NULL（partial coverage：子分數有值、綜合分數尚未算出）時，
+    calculate_scores 不得因 float(None) 拋 TypeError 中止評分；chip_score 視為缺值走中性。"""
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+    low = float(df["close"].min())
+
+    def _fake_fetch_chip(symbol, before_date=None, **kw):
+        return {"symbol": "2330", "total_score": None, "institutional_score": -55.0}
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", _fake_fetch_chip)
+
+    zone = Zone(price_low=low, price_high=low + 1.0, method=ZoneMethod.ATR, center_price=low + 0.5, formed_at_index=0)
+    result = score_symbol("2330", "1d", builders=[_SingleZoneBuilder(zone)])
+
+    assert len(result["zones"]) == 1
+    z = _v2_zone_scores(result)[0]
+    # total_score 缺值 → chip_score=None → trading_score 的 chip 分量走中性 0.5。
+    assert z["trading_score_breakdown"]["chip"] == pytest.approx(0.5 * TRADING_SCORE_WEIGHTS["chip"])
+
+
 class _SingleZoneBuilder:
     def __init__(self, zone: Zone):
         self._zone = zone
@@ -894,6 +954,9 @@ def test_build_chip_summary_missing():
     s = scoring._build_chip_summary(None)
     assert s["missing"] is True
     assert s["score"] is None
+    assert s["coverage"] == 0.0
+    assert s["confidence"] == 0.0
+    assert s["effective_score"] is None
     assert s["signal"] is None
     assert s["institutional_score"] is None
     assert s["margin_score"] is None
@@ -908,12 +971,65 @@ def test_build_chip_summary_present():
         "broker_score": 30.0, "concentration_score": 40.0,
     })
     assert s["missing"] is False
-    assert s["score"] == pytest.approx(42.5)
+    assert s["score"] == pytest.approx(34.0)
+    assert s["raw_score"] == pytest.approx(34.0)
+    # 滿覆蓋時 effective_score = raw_score * coverage = 34.0，不採用未降權的 DB total_score(42.5)。
+    assert s["effective_score"] == pytest.approx(34.0)
+    assert s["coverage"] == pytest.approx(1.0)
+    assert s["confidence_level"] == "HIGH"
     assert s["signal"] == "BULLISH"
     assert s["institutional_score"] == pytest.approx(60.0)
     assert s["margin_score"] == pytest.approx(-10.0)
     assert s["broker_score"] == pytest.approx(30.0)
     assert s["concentration_score"] == pytest.approx(40.0)
+
+
+def test_build_chip_summary_partial_coverage_separates_raw_and_effective():
+    s = scoring._build_chip_summary({
+        "total_score": -19.25, "signal": "BEARISH",
+        "institutional_score": -55.0, "margin_score": None,
+        "broker_score": None, "concentration_score": None,
+    })
+
+    assert s["missing"] is False
+    assert s["score"] == pytest.approx(-55.0)
+    assert s["coverage"] == pytest.approx(0.35)
+    assert s["confidence"] == pytest.approx(0.35)
+    assert s["confidence_level"] == "LOW"
+    assert s["effective_score"] == pytest.approx(-19.25)
+
+
+def test_build_chip_summary_effective_score_deweights_ignoring_total_score():
+    # total_score 與 raw_score * coverage 不相等時，effective_score 必須採降權值，
+    # 而非 DB total_score（鎖住 sr-zone-scoring.md「effective_score = raw_score * coverage」語意）。
+    s = scoring._build_chip_summary({
+        "total_score": -40.0, "signal": "BEARISH",
+        "institutional_score": -55.0, "margin_score": None,
+        "broker_score": None, "concentration_score": None,
+    })
+
+    assert s["raw_score"] == pytest.approx(-55.0)
+    assert s["coverage"] == pytest.approx(0.35)
+    # raw_score * coverage = -19.25，明確不等於 total_score(-40.0)。
+    assert s["effective_score"] == pytest.approx(-19.25)
+    assert s["effective_score"] != pytest.approx(-40.0)
+
+
+def test_build_chip_summary_present_but_all_subscores_none():
+    # chip row 存在但四個子分數全 None（total_score 仍存在）：raw/effective 皆 None、
+    # coverage=0、missing=False（保守，不因無可用分量而回報未降權的 total_score）。
+    s = scoring._build_chip_summary({
+        "total_score": 30.0, "signal": "BULLISH",
+        "institutional_score": None, "margin_score": None,
+        "broker_score": None, "concentration_score": None,
+    })
+
+    assert s["missing"] is False
+    assert s["raw_score"] is None
+    assert s["score"] is None
+    assert s["effective_score"] is None
+    assert s["coverage"] == pytest.approx(0.0)
+    assert s["confidence_level"] == "NONE"
 
 
 def test_score_zone_chip_delta_none_when_no_chip_data(bundle):
@@ -969,7 +1085,7 @@ def test_score_symbol_includes_chip_summary_and_card_chip(monkeypatch, bundle):
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: _bullish_rows())
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
     monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: {
-        "symbol": "2330", "total_score": 60.0, "signal": "BULLISH",
+        "symbol": "2330", "total_score": 38.25, "signal": "BULLISH",
         "institutional_score": 55.0, "margin_score": 20.0,
         "broker_score": 30.0, "concentration_score": 40.0,
     })
@@ -978,7 +1094,10 @@ def test_score_symbol_includes_chip_summary_and_card_chip(monkeypatch, bundle):
 
     cs = result["analysis"]["chip_summary"]
     assert cs["missing"] is False
-    assert cs["score"] == pytest.approx(60.0)
+    assert cs["score"] == pytest.approx(38.25)
+    assert cs["raw_score"] == pytest.approx(38.25)
+    assert cs["effective_score"] == pytest.approx(38.25)
+    assert cs["coverage"] == pytest.approx(1.0)
     assert cs["signal"] == "BULLISH"
     assert cs["institutional_score"] == pytest.approx(55.0)
     assert cs == result["evidence"]["chip"]

@@ -28,6 +28,11 @@
     return `${sign}${v.toFixed(0)}`
   }
 
+  function fmtPct(v: number | null | undefined): string {
+    if (v === null || v === undefined) return '—'
+    return `${(v * 100).toFixed(0)}%`
+  }
+
   // 分向長條：中心為 0，正值往右（紅）、負值往左（綠），滿格 = |100|。
   function barPct(v: number): number {
     return Math.min(Math.abs(v) / 100, 1) * 50
@@ -35,10 +40,10 @@
 
   $: subScores = summary && !summary.missing
     ? [
-        { label: '法人', value: summary.institutional_score ?? 0 },
-        { label: '融資', value: summary.margin_score ?? 0 },
-        { label: '分點', value: summary.broker_score ?? 0 },
-        { label: '集中度', value: summary.concentration_score ?? 0 },
+        { label: '法人', value: summary.institutional_score },
+        { label: '融資', value: summary.margin_score },
+        { label: '分點', value: summary.broker_score },
+        { label: '集中度', value: summary.concentration_score },
       ]
     : []
 </script>
@@ -59,6 +64,16 @@
       <span class="font-mono text-lg {signedClass(summary.score ?? 0)}">{fmtScore(summary.score)}</span>
       <span class="text-muted text-xs">/ 100（−100~100）</span>
     </div>
+    <div class="grid grid-cols-2 gap-2 mb-4 text-xs">
+      <div class="border border-border/70 rounded p-2">
+        <p class="text-muted mb-1">覆蓋率</p>
+        <p class="text-white font-mono">{fmtPct(summary.coverage)}</p>
+      </div>
+      <div class="border border-border/70 rounded p-2">
+        <p class="text-muted mb-1">Effective Impact</p>
+        <p class="font-mono {signedClass(summary.effective_score ?? 0)}">{fmtScore(summary.effective_score ?? null)}</p>
+      </div>
+    </div>
 
     <div class="space-y-2.5">
       {#each subScores as s}
@@ -67,13 +82,15 @@
           <div class="relative h-2 rounded-full bg-surface/60 overflow-hidden">
             <!-- 中心線 -->
             <div class="absolute top-0 bottom-0 left-1/2 w-px bg-border"></div>
-            {#if s.value >= 0}
+            {#if s.value === null || s.value === undefined}
+              <div class="absolute top-0 bottom-0 left-1/2 w-px bg-border"></div>
+            {:else if s.value >= 0}
               <div class="absolute top-0 bottom-0 left-1/2 bg-rise/70 rounded-r-full" style="width: {barPct(s.value)}%"></div>
             {:else}
               <div class="absolute top-0 bottom-0 bg-fall/70 rounded-l-full" style="right: 50%; width: {barPct(s.value)}%"></div>
             {/if}
           </div>
-          <span class="font-mono text-right {signedClass(s.value)}">{fmtScore(s.value)}</span>
+          <span class="font-mono text-right {signedClass(s.value ?? 0)}">{fmtScore(s.value)}</span>
         </div>
       {/each}
     </div>

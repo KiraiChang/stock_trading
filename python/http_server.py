@@ -36,7 +36,9 @@ log.info("loading config...")
 from config import SERVICE_PORT
 
 log.info("connecting to database...")
-from db import engine
+from db import engine, check_connection
+
+check_connection()
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, field_validator

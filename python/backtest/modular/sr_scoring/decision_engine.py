@@ -780,6 +780,8 @@ def _data_quality(
     )
     chip_missing = bool(chip_summary.get("missing"))
     chip_score = chip_summary.get("score")
+    chip_confidence = float(chip_summary.get("confidence") if chip_summary.get("confidence") is not None else (0.0 if chip_missing else 0.75))
+    chip_coverage_value = float(chip_summary.get("coverage") if chip_summary.get("coverage") is not None else (0.0 if chip_missing else 1.0))
     chip_interpretation = "UNAVAILABLE" if chip_missing else "NEUTRAL"
     if chip_score is not None:
         if float(chip_score) < -20.0:
@@ -791,7 +793,7 @@ def _data_quality(
     add_feature(
         "chip",
         "MISSING" if chip_missing else "AVAILABLE",
-        0.0 if chip_missing else 0.75,
+        chip_confidence,
         "CHIP_SUMMARY",
         chip_interpretation,
         float(chip_score) if chip_score is not None else None,
@@ -830,7 +832,7 @@ def _data_quality(
     negative_features = [key for key, item in features.items() if item["interpretation"] == "NEGATIVE"]
     positive_features = [key for key, item in features.items() if item["interpretation"] == "POSITIVE"]
 
-    chip_coverage = 0.0 if chip_summary.get("missing") else 1.0
+    chip_coverage = chip_coverage_value
     price_coverage = 1.0 if price_complete and not any(
         features[key]["status"] == "INVALID" for key in ("daily_price", "previous_daily_price")
     ) else 0.0
@@ -1118,6 +1120,49 @@ def _price_path(
     structure_state: str,
     rr_gate: dict[str, Any],
 ) -> dict[str, Any]:
+    def zone_blocking_ref(zone: ZoneScore) -> dict[str, Any]:
+        selected = any(
+            zone is selected_zone
+            for selected_zone in (primary_zone, nearest_support_zone, nearest_resistance_zone, structural_zone)
+            if selected_zone is not None
+        )
+        return {
+            "price_low": zone.price_low,
+            "price_high": zone.price_high,
+            "label": f"{_fmt_price(zone.price_low)} ~ {_fmt_price(zone.price_high)}",
+            "role": zone.role,
+            "source": "HISTORICAL_SR",
+            "source_scope": "ZONE_SCORE_POOL",
+            "zone_id": None,
+            "method": zone.method,
+            "timeframe": None,
+            "tier": zone.tier,
+            "tier_label": zone.tier_label,
+            "confidence": zone.confidence,
+            "confidence_level": zone.confidence_level,
+            "distance_pct": _distance_pct_to_zone(zone, current_price),
+            "selected_summary_zone": selected,
+        }
+
+    def daily_blocking_ref(zone: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "price_low": zone["price_low"],
+            "price_high": zone["price_high"],
+            "label": zone["label"],
+            "role": zone["role"],
+            "source": zone["source"],
+            "source_scope": "DAILY_CANDIDATE",
+            "zone_id": None,
+            "method": zone.get("method", "daily_candle"),
+            "timeframe": "1d",
+            "tier": None,
+            "tier_label": None,
+            "confidence": None,
+            "confidence_level": None,
+            "distance_pct": abs(float(zone["price_low"]) - current_price) / max(abs(current_price), 1e-9),
+            "selected_summary_zone": False,
+        }
+
     if primary_zone is not None and primary_zone.role == ZoneType.SUPPORT.value:
         invalidation_price = primary_zone.price_low
         recovery_price = primary_zone.price_high
@@ -1156,23 +1201,11 @@ def _price_path(
     blocking_zone: Optional[dict[str, Any]] = None
     if resistance_candidates:
         zone = min(resistance_candidates, key=lambda z: _distance_pct_to_zone(z, current_price))
-        blocking_zone = {
-            "price_low": zone.price_low,
-            "price_high": zone.price_high,
-            "label": f"{_fmt_price(zone.price_low)} ~ {_fmt_price(zone.price_high)}",
-            "role": zone.role,
-            "source": "HISTORICAL_SR",
-        }
+        blocking_zone = zone_blocking_ref(zone)
     elif daily_candidate_zones:
         candidate_resistance = next((z for z in daily_candidate_zones if z["role"] == ZoneType.RESISTANCE.value), None)
         if candidate_resistance:
-            blocking_zone = {
-                "price_low": candidate_resistance["price_low"],
-                "price_high": candidate_resistance["price_high"],
-                "label": candidate_resistance["label"],
-                "role": candidate_resistance["role"],
-                "source": candidate_resistance["source"],
-            }
+            blocking_zone = daily_blocking_ref(candidate_resistance)
 
     if structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         path_state = "INVALIDATION_RISK"
@@ -1297,15 +1330,22 @@ def _structure_state(
     if primary_zone is None or interaction is None:
         return "NORMAL"
     if primary_zone.role == ZoneType.SUPPORT.value:
+        evidence = interaction.get("price_action_evidence") or {}
+        previous_evidence = previous_interaction.get("price_action_evidence") if previous_interaction else {}
         if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
             return "BREAKDOWN"
-        if interaction["closed_below"]:
+        if evidence.get("closed_below", interaction["closed_below"]):
             return "SUPPORT_RECLAIM_INVALIDATED"
-        if previous_interaction and previous_interaction["touched"] and previous_interaction["closed_above"] and not interaction["closed_below"]:
+        if (
+            previous_interaction
+            and previous_evidence.get("touched", previous_interaction["touched"])
+            and previous_evidence.get("reclaim_type") == "UNDERCUT_RECLAIM"
+            and not evidence.get("closed_below", interaction["closed_below"])
+        ):
             return "SUPPORT_RECLAIM_CONFIRMED"
-        if interaction["touched"] and interaction["closed_above"]:
+        if evidence.get("reclaim_type") == "UNDERCUT_RECLAIM":
             return "SUPPORT_RECLAIM_CANDIDATE"
-        if interaction["touched"]:
+        if evidence.get("touched", interaction["touched"]):
             return "SUPPORT_RECLAIM_CANDIDATE"
     return "NORMAL"
 

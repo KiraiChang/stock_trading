@@ -540,6 +540,7 @@ def test_confirmed_reclaim_clears_same_zone_breakdown_exit_gate():
     )
 
     assert ds["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert ds["primary_zone"]["zone_interaction"]["price_action_evidence"]["reclaim_type"] == "UNDERCUT_RECLAIM"
     assert ds["market_action"] != "AVOID"
     assert ds["position_action"] != "EXIT"
     assert ds["position_action_condition"]["state"] == "SUPPORT_RECLAIM_CONFIRMED"
@@ -690,6 +691,8 @@ def test_daily_candidate_zones_are_tactical_candidates_not_best_trade_zone():
     assert ds["daily_confirmation"]["state"] == "WAIT_DAILY_CONFIRM"
     assert ds["daily_entry_state"] == "WAIT_DAILY_CONFIRM"
     assert ds["price_path"]["path_state"] == "DAILY_CANDIDATE_ONLY"
+    assert ds["price_path"]["blocking_zone"]["source_scope"] == "DAILY_CANDIDATE"
+    assert ds["price_path"]["blocking_zone"]["method"] == "daily_candle"
 
 
 def test_price_path_reports_blocking_zone_and_next_decision_price():
@@ -701,6 +704,11 @@ def test_price_path_reports_blocking_zone_and_next_decision_price():
     assert ds["price_path"]["next_decision_price"] == 100.0
     assert ds["price_path"]["next_decision_source"] == "nearest_support_zone"
     assert ds["price_path"]["blocking_zone"]["label"] == "106.00 ~ 108.00"
+    assert ds["price_path"]["blocking_zone"]["source_scope"] == "ZONE_SCORE_POOL"
+    assert ds["price_path"]["blocking_zone"]["method"] == "atr"
+    assert ds["price_path"]["blocking_zone"]["tier"] == ZoneTier.TIER_1_MAIN_STRUCTURE.value
+    assert ds["price_path"]["blocking_zone"]["confidence"] == resistance.confidence
+    assert ds["price_path"]["blocking_zone"]["selected_summary_zone"] is True
     assert any(item["then"] == "RECHECK_ENTRY_STATE" for item in ds["price_path"]["transitions"])
 
 
@@ -760,6 +768,26 @@ def test_data_quality_separates_missing_neutral_and_negative_features():
     assert positive["data_quality"]["features"]["chip"]["interpretation"] == "POSITIVE"
     assert "chip" in negative["data_quality"]["negative_features"]
     assert negative["data_quality"]["features"]["chip"]["interpretation"] == "NEGATIVE"
+
+
+def test_data_quality_uses_chip_coverage_and_confidence_from_summary():
+    ds = _summary(
+        [_zone()],
+        chip_summary={
+            "missing": False,
+            "score": -55.0,
+            "effective_score": -19.25,
+            "coverage": 0.35,
+            "confidence": 0.35,
+            "signal": "BEARISH",
+        },
+    )
+
+    chip = ds["data_quality"]["features"]["chip"]
+    assert ds["data_quality"]["chip_coverage"] == 0.35
+    assert chip["confidence"] == 0.35
+    assert chip["value"] == -55.0
+    assert chip["interpretation"] == "NEGATIVE"
 
 
 def test_data_quality_marks_stale_features_from_updated_at_metadata():

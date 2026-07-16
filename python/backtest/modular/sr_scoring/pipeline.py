@@ -130,7 +130,11 @@ def calculate_scores(features: AnalysisFeatures) -> AnalysisScores:
     data = features.data
     tiers = _assign_tiers([zone.width for zone in data.zones])
     groups, counts, family_counts, families = _group_overlapping_zones(list(data.zones))
-    chip_score = float(data.chip_row["total_score"]) if data.chip_row is not None else None
+    chip_score = (
+        float(data.chip_row["total_score"])
+        if data.chip_row is not None and data.chip_row.get("total_score") is not None
+        else None
+    )
     scores = [
         score_zone(
             data.frame, item.zone, data.current_price, data.model, features.global_trend,

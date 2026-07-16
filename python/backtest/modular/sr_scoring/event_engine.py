@@ -83,6 +83,32 @@ def zone_interaction(
         state_label = "今日已測試"
 
     distance_pct = _distance_pct_to_zone(z, close)
+    if closed_above:
+        close_relative_to_zone = "ABOVE_ZONE"
+    elif closed_below:
+        close_relative_to_zone = "BELOW_ZONE"
+    else:
+        close_relative_to_zone = "INSIDE_ZONE"
+    reclaim_type = "NONE"
+    rejection_type = "NONE"
+    if z.role == ZoneType.SUPPORT.value and touched and closed_above and penetration_pct > 0:
+        reclaim_type = "UNDERCUT_RECLAIM"
+    elif z.role == ZoneType.RESISTANCE.value and touched and closed_below and penetration_pct > 0:
+        reclaim_type = "OVERTHROW_REJECTED"
+    elif z.role == ZoneType.SUPPORT.value and touched and not closed_below:
+        rejection_type = "SUPPORT_HELD"
+    elif z.role == ZoneType.RESISTANCE.value and touched and not closed_above:
+        rejection_type = "RESISTANCE_HELD"
+    evidence = {
+        "reclaim_type": reclaim_type,
+        "rejection_type": rejection_type,
+        "penetration_ratio": penetration_pct,
+        "close_relative_to_zone": close_relative_to_zone,
+        "follow_through": "UNKNOWN",
+        "touched": touched,
+        "closed_above": closed_above,
+        "closed_below": closed_below,
+    }
     return {
         "distance_pct": distance_pct,
         "distance_label": f"{distance_pct * 100:.1f}%",
@@ -92,6 +118,7 @@ def zone_interaction(
         "closed_above": closed_above,
         "closed_below": closed_below,
         "state_label": state_label,
+        "price_action_evidence": evidence,
     }
 
 
@@ -137,7 +164,8 @@ def detect_market_events(
         relative_volume = z.relative_volume or 0.0
         high_volume = relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD or z.volume_confirmation == VolumeConfirmation.FAILED.value
         breakdown_event_added = False
-        if (interaction["closed_below"] or (candle_low is not None and candle_low < z.price_low)) and high_volume:
+        evidence = interaction["price_action_evidence"]
+        if (evidence["closed_below"] or (candle_low is not None and candle_low < z.price_low)) and high_volume:
             events.append({
                 "type": "HIGH_VOLUME_BREAKDOWN",
                 "direction": "BEARISH",
@@ -148,9 +176,9 @@ def detect_market_events(
                 "detected_at": "latest_candle",
             })
             breakdown_event_added = True
-            if interaction["closed_below"]:
+            if evidence["closed_below"]:
                 continue
-        if interaction["closed_above"] and interaction["penetration_pct"] > 0:
+        if evidence["reclaim_type"] == "UNDERCUT_RECLAIM":
             events.append({
                 "type": "INTRADAY_RECLAIM",
                 "direction": "BULLISH",

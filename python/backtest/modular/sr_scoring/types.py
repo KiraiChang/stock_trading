@@ -292,3 +292,4 @@ class ZoneScore:
     zone_quality_score: Optional[float] = None
     entry_relevance_score: Optional[float] = None
     entry_relevance_breakdown: Optional[dict] = None
+    validation_debug: Optional[dict] = None

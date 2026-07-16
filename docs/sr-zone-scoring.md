@@ -683,6 +683,20 @@ high/low 區間）。每個 feature 會保留 `updated_at` 與 `reason_codes`，
 會拆開市場資料完整度、RR 資料完整度與交易資格完整度；legacy `overall_completeness`
 仍保留為市場資料完整度相容欄位。
 
+Chip missingness 會拆成 raw score 與 effective impact：`chip_summary.score` / `raw_score`
+表示依可用分量重新正規化後的籌碼方向（present 分量的加權平均 `weighted_sum / available_weight`），
+`coverage` / `confidence` 表示可用分量權重（四子分量權重和為 1.0，`coverage` = 有值分量的權重和），
+`effective_score` 表示 `raw_score * coverage`（實作即 `weighted_sum`）後的實際影響強度。Decision Engine 的
+`data_quality.chip_coverage` 讀 `coverage`，前端文案應呈現「方向」與「覆蓋率」兩件事，
+避免把低覆蓋率下的 effective impact 誤寫成「籌碼中性」。
+
+**`effective_score` 一律依 coverage 降權，不採用 DB `total_score`**：DB `total_score` 未依覆蓋率降權，
+低覆蓋率時直接回傳會高估籌碼實際影響（`effective` 與滿覆蓋的 `score` 重複、低覆蓋時誤導），故
+`_build_chip_summary` 只用 `weighted_sum`。邊界情況：chip row 存在但四子分數全為 None（`total_score`
+仍可能有值）時，`raw_score` / `score` / `effective_score` 皆為 `None`、`coverage=0.0`、`confidence_level=NONE`，
+但 `missing=False`（保守：無可用分量時不回報未降權的 `total_score`，也與「查無 chip 資料」的 `missing=True`
+區分）。前端須把此情況視為「有籌碼資料但分量不足以評分」，不可當成中性訊號。
+
 ### Decision Zone Scores / Lifecycle
 
 `decision_summary.*_zone` 會保留 legacy score 欄位，並新增語意拆分欄位：
@@ -696,6 +710,11 @@ high/low 區間）。每個 feature 會保留 `updated_at` 與 `reason_codes`，
 Zone lifecycle 目前由 deterministic EOD rule 產生，可能值包含 `CANDIDATE`、`CONFIRMED`、
 `VALIDATED`、`WEAKENING`、`BROKEN`、`INVALIDATED`。這是 decision summary 的解讀欄位，
 不改寫原始 `zones[]` 的驗證結果。
+
+每個 decision zone 另輸出 `zone_width_pct`（區間寬度佔現價比例）與 `zone_width_penalty`
+（寬區間的距離評分懲罰）。`zone_width_penalty` 會併入 nearest decision 的距離評分（`price_path`
+的 `nearest_support_zone` / `nearest_resistance_zone` 選擇），避免過寬、模糊的區間僅因中心價較近
+就勝過較窄、較精確的關鍵價位。
 
 ### 唯一 Action
 
@@ -728,7 +747,9 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
 若 daily confirmation 為 `INVALIDATED`，final permission 會降為 `NO_SETUP`。`BUY` 只在 entry 端與
 daily 端都達最高層級時輸出；一般 `ENTRY_READY` 只會把 `BUY` 放行到 `ACCUMULATE`，避免繞過日 K
-把關。
+把關。現階段 `daily_confirmation` 最高只輸出 `ENTRY_READY`（不產生 `BUY_READY`），因此
+`final_entry_permission.state` 目前上限為 `ACCUMULATE`；`BUY` 為保留態，待 daily 端加入 `BUY_READY`
+（例如兩日確認完成）後才會端到端啟用。
 
 目前 action pipeline：
 
@@ -766,6 +787,16 @@ Setup 定義：
 | `BREAKDOWN` | primary zone 近期驗證已失效或結構性跌破 |
 
 這些狀態只影響 Decision/Scenario 與 Position Action 的條件呈現，不改寫 zone 的原始機率、EV/RR 或 score。
+原始 `recent_validation` 仍由 scoring / zone builder 的 touch classification 與 validation window
+決定；Decision Summary 只輸出 reclaim evidence，不應把 `PENDING_VALIDATION` 直接改寫成已驗證。
+`validation_debug` 會揭露 `analysis_date`、`zone_generation_end_date`、`validation_start_date`、
+`validation_end_date`、`latest_touch_bar_date` 與 `latest_validation_bar_date`。**此
+`zone.formed_at_index + 1` 過濾只作用於 validation window（`recent_validation` 與 `validation_debug`
+統計）**，確保 validation window 符合 `zone_generation_end_date < validation_bar_date <= analysis_date`；
+`_filter_validation_touches` 只過濾餵給 `recent_validation` 的觸碰。ML 特徵層的 `touch_count`、
+`breakout_count`、`rejection_count` 與 `confidence`（sample/recency/stability）仍使用完整 lookback
+窗口（`as_of_index - lookback_bars + 1 .. as_of_index`，含 zone 形成前的觸碰），這是為了讓訓練與即時
+評分的特徵定義一致，屬刻意設計，不套用 `formed_at_index + 1` 過濾。
 
 ### Defense Lines
 
@@ -788,6 +819,13 @@ Setup 定義：
 `price_path.next_decision_source` 只描述下一個決策價位來源。拆分 nearest support / resistance 後，
 有效值為 `nearest_support_zone`、`nearest_resistance_zone` 或 `daily_candidate_zone`；
 `nearest_decision_zone` 欄位仍保留為摘要相容欄位，但不再作為 `next_decision_source`。
+`price_path.blocking_zone` 可能來自完整 zone pool，而不一定存在於前端 selected summary zones。
+因此會輸出 `source_scope`、`method`、`timeframe`、`tier`、`tier_label`、`confidence`、
+`confidence_level`、`distance_pct`、`zone_id` 與 `selected_summary_zone` 等 metadata，讓使用者能追溯
+blocking zone 的來源。**目前限制**：`zone_id` 恆為 `null`（`ZoneScore` 尚無 id 欄位可對應），`timeframe`
+只有 daily candidate 路徑會填 `"1d"`、`ZONE_SCORE_POOL` 路徑恆為 `null`；`tier`/`tier_label`/`confidence`/
+`confidence_level` 在 daily candidate 路徑也為 `null`（daily 候選無 tier/confidence）。前端應把這些欄位
+視為 nullable，不可假設一定有值。
 
 ### Primary Zone 與 Secondary Zones
 
@@ -874,6 +912,13 @@ Zone 卡片只保留：價位區間、距離現價、role、bounce/break 機率�
 舊分析可能沒有 `decision_summary` 或值為 `null`，前端必須安全降級為只顯示 zones 與
 period summaries。新分析若 `decision_summary` 缺欄位，應視為 Python contract 失敗，
 由 Python 單元測試先攔下。
+
+前端現況：`SRZones.svelte` 已呈現 `final_entry_permission`（權威進場閘，優先於 legacy
+`entry_action_state` / `daily_entry_state`）、`rr_context`（`entry_rr` / `position_rr`，
+`position_rr` 為 null 時顯示「—」並標示尚未接入持股防守區）、daily price action 的
+`price_follow_through_state` / `momentum_confirmation_state`、`nearest_support_zone` /
+`nearest_resistance_zone`（取代舊單一 `nearest_decision_zone` 的顯示位置）與
+`short_term_regime`；別名欄位 `tactical_regime` / `structural_trend` 不另外呈現，避免重複。
 
 ### 測試與驗收
 
@@ -1198,7 +1243,25 @@ LLM、不改 scoring 數學、不改 action 門檻。它的目的不是重新判
 **非目標**：Explain Engine v1 不納入持股、部位成本、下單 sizing、LLM 生成、
 跨 `/analysis` 舊流程解釋，且不對歷史快照回算 explanation。
 
-### 十九之二、Scenario Engine 情境層
+### 十九之二、PriceActionEvidence 後續方向
+
+目前 Price Action 訊號分散在 `zone_interaction`、`daily_price_action`、`market_events` 與
+`position_action_condition`。後續若要重構，應收斂成單一 `PriceActionEvidence` 資料流：
+
+```text
+OHLCV
+  -> ZoneInteractionDetector
+  -> PriceActionEvidence
+  -> Decision Engine
+  -> Summary
+```
+
+`PriceActionEvidence` 承載 `reclaim_type`、`rejection_type`、`penetration_ratio`、
+`close_relative_to_zone` 與 `follow_through` 等欄位，並嵌在 `zone_interaction.price_action_evidence`
+中。舊的 `touched`、`closed_above`、`closed_below`、`penetration_pct` 欄位仍保留相容；新的 reclaim /
+breakdown / structure 判斷應優先讀 evidence，避免底層 evidence 與 summary 狀態彼此矛盾。
+
+### 十九之三、Scenario Engine 情境層
 
 Scenario Engine 是 `decision` / `score` / `explanation` 之上的結構化情境層，
 負責輸出「目前情境、觸發條件、失效條件」。它不改機率、分數、EV/RR 或

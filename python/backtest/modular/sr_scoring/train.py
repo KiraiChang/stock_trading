@@ -178,6 +178,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    from db import check_connection
+    check_connection()
+
     try:
         result = run_training(
             symbols=args.symbols.split(",") if args.symbols else None,

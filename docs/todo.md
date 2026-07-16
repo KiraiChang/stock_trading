@@ -509,6 +509,8 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 - 延遲：`quote.refreshedTs` vs 本地時間差。
 - 封鎖風險：連續批次請求是否觸發反爬/限流，據以定 `rate_limit`/`batch_size`。
 
+---
+
 ### T-033：`rr_context.position_rr` 接上實際 position zone 來源
 
 | 欄位 | 內容 |
@@ -517,7 +519,7 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 | 優先度 | 低 |
 | 分類 | Python / SR Zone / Decision Engine |
 | 建立日期 | 2026-07-15 |
-| 來源 | review `docs/sr-zone-improve.md` P2 position-aware RR 對照本次異動 |
+| 來源 | SR Zone Decision Engine `rr_context` 拆分（見 `docs/sr-zone-scoring.md`「Defense Lines」）|
 
 `decision_summary.rr_context` 已把新進場 RR（`entry_rr`）與既有部位 RR（`position_rr`）
 拆成兩欄；在尚未接入實際 position zone 前，`position_rr` 會回傳 `null` 並標示

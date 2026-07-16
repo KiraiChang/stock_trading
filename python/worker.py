@@ -33,7 +33,7 @@ log.info("loading config...")
 from config import WORKER_POLL_INTERVAL
 
 log.info("connecting to database...")
-from db import engine
+from db import engine, check_connection
 
 from sqlalchemy import text
 from backtest.engine import run_backtest
@@ -85,6 +85,7 @@ def _process(job: dict) -> None:
 
 
 def main() -> None:
+    check_connection()
     log.info("worker started — poll_interval=%ds", WORKER_POLL_INTERVAL)
     poll_count = 0
     while True:

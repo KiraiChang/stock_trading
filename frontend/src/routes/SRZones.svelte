@@ -303,6 +303,23 @@
     ACCUMULATE: 'bg-green-900/40 text-green-300 border-green-700/60',
     BUY: 'bg-green-900/50 text-green-300 border-green-700/60',
   }
+  // final_entry_permission 是 entry 與日 K 兩端的保守仲裁結果，前端顯示「是否允許進場」以此為準
+  const finalEntryText: Record<string, string> = {
+    NO_SETUP: '尚無設定',
+    WAIT_CONFIRMATION: '等待確認',
+    PROBE_ENTRY: '觀察性試探',
+    SMALL_ENTRY: '小量進場',
+    ACCUMULATE: '分批累積',
+    BUY: '買進',
+  }
+  const finalEntryClass: Record<string, string> = {
+    NO_SETUP: 'bg-gray-700/60 text-gray-300 border-border',
+    WAIT_CONFIRMATION: 'bg-gray-700/60 text-gray-300 border-border',
+    PROBE_ENTRY: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
+    SMALL_ENTRY: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
+    ACCUMULATE: 'bg-green-900/40 text-green-300 border-green-700/60',
+    BUY: 'bg-green-900/50 text-green-300 border-green-700/60',
+  }
   const positionActionText: Record<string, string> = {
     HOLD: '條件式持有', REDUCE_ON_BREAKDOWN: '跌破減碼', REDUCE: '減碼', EXIT: '出場',
   }
@@ -328,6 +345,14 @@
   const regimeFlagText: Record<string, string> = {
     HIGH_VOLATILITY: '高波動', LOW_CONFIDENCE: '低信心',
   }
+  const shortTermRegimeText: Record<string, string> = {
+    NORMAL: '短線正常',
+    BREAKDOWN_RISK: '跌破風險',
+    RECLAIM_ATTEMPT: '收復嘗試',
+    REVERSAL_CANDIDATE: '反轉候選',
+    RECOVERY: '短線收復',
+    EARLY_TREND: '初升段',
+  }
   const noviceRoleText: Record<string, string> = {
     SUPPORT: '比較接近支撐', RESISTANCE: '比較接近壓力', AT_ZONE: '現價卡在區間內，方向還不明確',
   }
@@ -346,6 +371,12 @@
     NO_FOLLOW_THROUGH: '未延續',
     PREVIOUS_CLOSE_RECLAIM: '收復昨收',
     PREVIOUS_CLOSE_REJECTION: '跌回昨收下方',
+    PRICE_UPSIDE_FOLLOW_THROUGH: '價格向上延續',
+    PRICE_DOWNSIDE_FOLLOW_THROUGH: '價格向下延續',
+    NO_PRICE_FOLLOW_THROUGH: '價格未延續',
+    MOMENTUM_CONFIRMED: '動能確認',
+    MOMENTUM_UNCONFIRMED: '動能未確認',
+    NO_MOMENTUM_CONFIRMATION: '無動能確認',
     NONE: '無',
     UNKNOWN: '無資料',
   }
@@ -1010,6 +1041,9 @@
                   {#if decisionSummary.market_regime.structure_state}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-surface text-muted border border-border">{structureStateText[decisionSummary.market_regime.structure_state] ?? decisionSummary.market_regime.structure_state}</span>
                   {/if}
+                  {#if decisionSummary.market_regime.short_term_regime && decisionSummary.market_regime.short_term_regime !== 'NORMAL'}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-purple-900/40 text-purple-300">{shortTermRegimeText[decisionSummary.market_regime.short_term_regime] ?? decisionSummary.market_regime.short_term_regime}</span>
+                  {/if}
                   {#each decisionSummary.market_regime.flags as flag}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-yellow-900/40 text-yellow-300">{regimeFlagText[flag] ?? flag}</span>
                   {/each}
@@ -1025,9 +1059,17 @@
                     {decisionSummary.market_bias_label ?? marketBiasText[decisionSummary.market_bias ?? legacyMarketBias(decisionSummary.action)] ?? decisionSummary.market_bias ?? decisionSummary.action}
                   </span>
                 </div>
+                {#if decisionSummary.final_entry_permission}
+                  <div>
+                    <p class="text-muted text-xs mb-1">Final Entry</p>
+                    <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {finalEntryClass[decisionSummary.final_entry_permission.state] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                      {decisionSummary.final_entry_permission.label ?? finalEntryText[decisionSummary.final_entry_permission.state] ?? decisionSummary.final_entry_permission.state}
+                    </span>
+                  </div>
+                {/if}
                 {#if decisionSummary.entry_action_state}
                   <div>
-                    <p class="text-muted text-xs mb-1">Entry State</p>
+                    <p class="text-muted text-xs mb-1">Entry State（明細）</p>
                     <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {entryActionClass[decisionSummary.entry_action_state] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
                       {decisionSummary.entry_action_label ?? entryActionText[decisionSummary.entry_action_state] ?? decisionSummary.entry_action_state}
                     </span>
@@ -1042,9 +1084,9 @@
               </div>
             </div>
 
-            {#if decisionSummary.entry_action_state}
+            {#if decisionSummary.final_entry_permission || decisionSummary.entry_action_state}
               <p class="text-muted text-xs mb-4">
-                進場時機以 <span class="font-semibold">Entry State</span> 為準；Market Bias 只表示整體盤勢傾向，未確認的設定（如「觀察性試探」）不代表可直接進場。
+                是否允許進場以 <span class="font-semibold">Final Entry</span> 為準（entry 與日 K 兩端的保守仲裁）；Entry State 為進場階段明細，Market Bias 只表示整體盤勢傾向，未確認的設定（如「觀察性試探」）不代表可直接進場。
               </p>
             {/if}
 
@@ -1091,7 +1133,7 @@
             {/if}
 
             {#if decisionSummary.daily_price_action?.available}
-              <div class="grid md:grid-cols-4 gap-3 mb-4 text-xs">
+              <div class="grid md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4 text-xs">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Close Location</p>
                   <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.close_location_state] ?? decisionSummary.daily_price_action.close_location_state}</p>
@@ -1102,7 +1144,11 @@
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Follow Through</p>
-                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.follow_through_state] ?? decisionSummary.daily_price_action.follow_through_state}</p>
+                  <p class="text-white">{dailyActionText[decisionSummary.daily_price_action.price_follow_through_state ?? decisionSummary.daily_price_action.follow_through_state] ?? (decisionSummary.daily_price_action.price_follow_through_state ?? decisionSummary.daily_price_action.follow_through_state)}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Momentum</p>
+                  <p class="text-white">{decisionSummary.daily_price_action.momentum_confirmation_state ? (dailyActionText[decisionSummary.daily_price_action.momentum_confirmation_state] ?? decisionSummary.daily_price_action.momentum_confirmation_state) : '—'}</p>
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Reclaim / Rejection</p>
@@ -1162,6 +1208,21 @@
               </div>
             {/if}
 
+            {#if decisionSummary.rr_context}
+              <div class="grid sm:grid-cols-2 gap-3 mb-4 text-xs">
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">進場 RR (Entry)</p>
+                  <p class="text-white font-mono">{fmtRatio(decisionSummary.rr_context.entry_rr)}</p>
+                  <p class="text-muted mt-1">{decisionSummary.rr_context.entry_rr_source}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">持股 RR (Position)</p>
+                  <p class="text-white font-mono">{fmtRatio(decisionSummary.rr_context.position_rr)}</p>
+                  <p class="text-muted mt-1">{decisionSummary.rr_context.position_rr_source === 'UNAVAILABLE' ? '尚未接入持股防守區' : decisionSummary.rr_context.position_rr_source}</p>
+                </div>
+              </div>
+            {/if}
+
             {#if decisionSummary.price_path}
               <div class="grid md:grid-cols-4 gap-3 mb-4 text-xs">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
@@ -1179,6 +1240,20 @@
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Blocking Zone</p>
                   <p class="text-white font-mono">{decisionSummary.price_path.blocking_zone?.label ?? '—'}</p>
+                  {#if decisionSummary.price_path.blocking_zone}
+                    <p class="text-muted mt-1">
+                      {decisionSummary.price_path.blocking_zone.method ?? decisionSummary.price_path.blocking_zone.source}
+                      {#if decisionSummary.price_path.blocking_zone.tier_label}
+                        · {decisionSummary.price_path.blocking_zone.tier_label}
+                      {/if}
+                      {#if decisionSummary.price_path.blocking_zone.confidence_level}
+                        · {decisionSummary.price_path.blocking_zone.confidence_level}
+                      {/if}
+                    </p>
+                    {#if decisionSummary.price_path.blocking_zone.selected_summary_zone === false}
+                      <p class="text-yellow-300 mt-1">來源：完整 zone pool</p>
+                    {/if}
+                  {/if}
                 </div>
               </div>
             {/if}
@@ -1225,8 +1300,8 @@
               </div>
             {/if}
 
-            {#if decisionSummary.best_trade_zone || decisionSummary.nearest_decision_zone || decisionSummary.primary_structural_zone}
-              <div class="grid md:grid-cols-3 gap-3 mb-4 text-xs">
+            {#if decisionSummary.best_trade_zone || decisionSummary.nearest_support_zone || decisionSummary.nearest_resistance_zone || decisionSummary.primary_structural_zone}
+              <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-xs">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Best Trade Zone</p>
                   <p class="text-white font-mono">{decisionSummary.best_trade_zone?.label ?? '尚未成立'}</p>
@@ -1235,10 +1310,17 @@
                   {/if}
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
-                  <p class="text-muted mb-1">Nearest Decision Zone</p>
-                  <p class="text-white font-mono">{decisionSummary.nearest_decision_zone?.label ?? '—'}</p>
-                  {#if decisionSummary.nearest_decision_zone?.lifecycle}
-                    <p class="text-muted mt-1">{decisionSummary.nearest_decision_zone.source} · {decisionSummary.nearest_decision_zone.lifecycle}</p>
+                  <p class="text-muted mb-1">Nearest Support Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.nearest_support_zone?.label ?? '—'}</p>
+                  {#if decisionSummary.nearest_support_zone}
+                    <p class="text-muted mt-1">距離 {decisionSummary.nearest_support_zone.distance_label}{#if decisionSummary.nearest_support_zone.lifecycle} · {decisionSummary.nearest_support_zone.lifecycle}{/if}</p>
+                  {/if}
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">Nearest Resistance Zone</p>
+                  <p class="text-white font-mono">{decisionSummary.nearest_resistance_zone?.label ?? '—'}</p>
+                  {#if decisionSummary.nearest_resistance_zone}
+                    <p class="text-muted mt-1">距離 {decisionSummary.nearest_resistance_zone.distance_label}{#if decisionSummary.nearest_resistance_zone.lifecycle} · {decisionSummary.nearest_resistance_zone.lifecycle}{/if}</p>
                   {/if}
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">

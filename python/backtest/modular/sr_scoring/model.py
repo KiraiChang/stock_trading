@@ -109,9 +109,10 @@ def _build_estimator(model_type: str, random_state: int):
     if model_type == "lightgbm":
         try:
             from lightgbm import LGBMClassifier
-        except ImportError as exc:
+        except (ImportError, OSError) as exc:
             raise ValueError(
-                "model_type='lightgbm' 需要安裝 lightgbm；請先執行 pip install lightgbm"
+                "model_type='lightgbm' 需要可用的 lightgbm（含原生庫 libgomp.so.1）；"
+                "請確認已 pip install lightgbm，且系統已安裝 libgomp1"
             ) from exc
         return LGBMClassifier(
             objective="binary",

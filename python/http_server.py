@@ -228,3 +228,14 @@ async def sr_scoring_model_status():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # log_config=None：不讓 uvicorn 套用它自己的 logging 設定。uvicorn 預設會把 uvicorn /
+    # uvicorn.error / uvicorn.access 設成 propagate=False 並掛自己的 stderr/stdout handler，
+    # 導致 startup / access / error（含 500 的 ASGI traceback）都停在 uvicorn logger、傳不到
+    # root，因此不會進 configure_logging 設定的持久化檔。設成 None 後，這些 log 交由 root 的
+    # stdout + 每日輪替檔案 handler 統一承接，全部一起持久化（見 development-workflow.md「開發慣例」）。
+    uvicorn.run(app, host="0.0.0.0", port=SERVICE_PORT, log_config=None)

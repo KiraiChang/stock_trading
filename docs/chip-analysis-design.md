@@ -7,6 +7,11 @@
 `chip_daily_sync`，前端頁面為 `frontend/src/routes/Chips.svelte`。Phase 2 項目仍追蹤在
 [todo.md](./todo.md)。
 
+在四條 pipeline 架構中，三大法人／融資融券／券商分點 raw data 同步與落地屬於
+[Data Pipeline](./architecture/data-pipeline.md)；`chip_scores` 計算與籌碼摘要屬於
+[Analysis Pipeline](./architecture/analysis-pipeline.md)。Decision Pipeline 只消費
+已落地的籌碼分析結果，不應重新同步 raw data。
+
 ## 1. 目標與範圍
 
 ### 目標

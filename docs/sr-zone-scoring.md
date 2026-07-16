@@ -1037,6 +1037,11 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 
 ## 十七、模型設定可追溯性（training_config / model_config_hash）
 
+SR Zone Scoring 橫跨四條 pipeline：zone 建立、features、score breakdown 與
+evidence 屬於 [Analysis Pipeline](./architecture/analysis-pipeline.md)；bounce/break
+機率模型與訓練任務屬於 [AI Pipeline](./architecture/ai-pipeline.md)；
+`decision_summary` 與交易語意屬於 [Decision Pipeline](./architecture/decision-pipeline.md)。
+
 目前系統只維持**一個現行機率模型**，不是 model registry。前端可選
 `model_type` / `split_method` / `calibration_method`，但每次訓練成功都會寫入
 同一個 `SR_SCORING_MODEL_PATH`，讓新的 `hold_model` / `break_model` 成為現行

@@ -528,6 +528,31 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 後續待實際 position zone 來源（例如持股成本、交易分析防守區、或 portfolio position context）
 接入 `build_decision_summary` 後，才讓 `position_rr` 真正反映持股語境。
 
+---
+
+### T-034：Pipeline 架構文件拆分後的程式邊界收斂
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | 架構 / Data Pipeline / Analysis Pipeline / AI Pipeline / Decision Pipeline |
+| 建立日期 | 2026-07-16 |
+| 來源 | `docs/architecture/` pipeline 文件拆分 |
+
+目前已先完成文件型架構拆分：`docs/architecture/` 將系統分成 Data Pipeline、
+Analysis Pipeline、AI Pipeline、Decision Pipeline。後續若要實作程式層級收斂，
+需逐步檢查 Go/Python module、handler、scheduler 與 DTO 邊界，讓程式依同樣的
+pipeline 契約演進。
+
+初步方向：
+
+- Data job、Analysis job、AI train job、Decision job 的 interface 分開。
+- Decision Pipeline 只消費明確 input DTO，不直接回頭抓上游內部 repo 狀態。
+- AI Pipeline 只輸出模型 artifact、metadata、metrics 與機率，不直接輸出交易行動。
+- Analysis Pipeline 的 snapshot/evidence 與 Decision Pipeline 的 action/reason 分開測試。
+- 不在同一批重構中改 API 行為或 DB schema，降低回歸風險。
+
 ## 已完成封存
 
 （目前沒有項目）

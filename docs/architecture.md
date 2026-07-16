@@ -1,5 +1,24 @@
 # 系統架構
 
+## Pipeline 架構
+
+系統升級後的文件邊界以四條 pipeline 描述；本檔保留整體架構總覽，細節放在
+`docs/architecture/` 子目錄。
+
+```
+Data Pipeline → Analysis Pipeline → AI Pipeline → Decision Pipeline
+```
+
+| Pipeline | 子文件 | 職責摘要 |
+|----------|--------|----------|
+| Data Pipeline | [architecture/data-pipeline.md](./architecture/data-pipeline.md) | 外部資料取得、清洗、時間對齊、持久化 |
+| Analysis Pipeline | [architecture/analysis-pipeline.md](./architecture/analysis-pipeline.md) | 指標、籌碼分數、SR Zone、分析快照與 evidence |
+| AI Pipeline | [architecture/ai-pipeline.md](./architecture/ai-pipeline.md) | 模型訓練、模型狀態、推論、metrics |
+| Decision Pipeline | [architecture/decision-pipeline.md](./architecture/decision-pipeline.md) | 交易行動、position sizing、停損停利、風控輸出 |
+
+共同規則與索引見 [architecture/README.md](./architecture/README.md)。目前這是文件型架構拆分，
+不代表程式碼已完全依四條 pipeline 重構。
+
 ## 整體資料流
 
 ```

@@ -827,6 +827,10 @@ export async function listTrainJobs(limit = 20): Promise<SRScoringTrainJob[]> {
   return res.jobs ?? []
 }
 
+export async function pruneTrainJobs(keep = 20): Promise<{ deleted: number; keep: number }> {
+  return apiFetch(`/sr-zones/train-jobs?keep=${keep}`, { method: 'DELETE' })
+}
+
 // ModelStatus 對應後端 analysis.ModelStatus。exists=false 時其餘欄位皆為
 // null——用這支端點在觸發分析前先確認模型準備好了沒，不用等分析失敗才知道。
 export interface ModelStatus {

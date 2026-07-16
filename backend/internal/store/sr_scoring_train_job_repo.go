@@ -14,6 +14,7 @@ type SRScoringTrainJobRepo interface {
 	MarkFailed(ctx context.Context, jobID string, errMsg string) error
 	Get(ctx context.Context, jobID string) (*SRScoringTrainJob, error)
 	List(ctx context.Context, limit int) ([]SRScoringTrainJob, error)
+	PruneTerminal(ctx context.Context, keep int) (int64, error)
 }
 
 type srScoringTrainJobRepo struct {
@@ -101,4 +102,39 @@ func (r *srScoringTrainJobRepo) List(ctx context.Context, limit int) ([]SRScorin
 		SELECT `+srScoringTrainJobColumns+` FROM sr_scoring_train_jobs ORDER BY created_at DESC, id DESC LIMIT ?
 	`), limit)
 	return jobs, err
+}
+
+func (r *srScoringTrainJobRepo) PruneTerminal(ctx context.Context, keep int) (int64, error) {
+	if keep < 0 {
+		keep = 0
+	}
+
+	var ids []uint64
+	if err := r.db.SelectContext(ctx, &ids, r.db.Rebind(`
+		SELECT id
+		FROM sr_scoring_train_jobs
+		WHERE status IN ('done', 'failed')
+		ORDER BY created_at DESC, id DESC
+	`)); err != nil {
+		return 0, err
+	}
+	if len(ids) <= keep {
+		return 0, nil
+	}
+
+	var deleted int64
+	for _, id := range ids[keep:] {
+		result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM sr_scoring_train_jobs WHERE id=? AND status IN ('done', 'failed')
+		`), id)
+		if err != nil {
+			return deleted, err
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return deleted, err
+		}
+		deleted += n
+	}
+	return deleted, nil
 }

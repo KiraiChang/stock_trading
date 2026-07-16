@@ -12,6 +12,7 @@
     triggerSRScoringTrain,
     getTrainJob,
     listTrainJobs,
+    pruneTrainJobs,
     getModelStatus,
     type SRZoneAnalysis,
     type SRZone,
@@ -69,8 +70,12 @@
   let trainSymbols = ''
   let trainLimit = 1500
   let trainModelType: 'gradient_boosting' | 'hist_gradient_boosting' | 'lightgbm' | 'logistic_regression' = 'gradient_boosting'
+  let trainSplitMethod: 'time' | 'random' = 'time'
+  let trainCalibrationMethod: 'sigmoid' | 'isotonic' | 'none' = 'sigmoid'
   let training = false
   let trainError = ''
+  let trainMessage = ''
+  let pruningTrainJobs = false
   let activeJob: SRScoringTrainJob | null = null
   let recentTrainJobs: SRScoringTrainJob[] = []
   let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -88,6 +93,21 @@
     running: 'bg-blue-900/40 text-blue-400',
     done: 'bg-green-900/40 text-green-400',
     failed: 'bg-red-900/40 text-red-400',
+  }
+  const modelTypeNotes: Record<typeof trainModelType, string> = {
+    gradient_boosting: '預設建議；小到中型資料穩定，能處理非線性，訓練速度中等。',
+    hist_gradient_boosting: '資料量較大時速度較好；小資料不一定比預設模型穩定。',
+    lightgbm: '大量資料時通常表現強，但 Python 環境需安裝 lightgbm，否則訓練會失敗。',
+    logistic_regression: '可解釋的基準模型；輸出保守，適合拿來檢查複雜模型是否過擬合。',
+  }
+  const splitMethodNotes: Record<typeof trainSplitMethod, string> = {
+    time: '正式評估建議；每檔股票用較新的 touch 事件當 holdout，避免未來資料混入訓練。',
+    random: '只建議做比較；金融時間序列容易高估表現，不適合作為正式模型評估。',
+  }
+  const calibrationNotes: Record<typeof trainCalibrationMethod, string> = {
+    sigmoid: '預設建議；校準機率較穩，樣本不足時後端會自動降級為未校準。',
+    isotonic: '資料足夠時較有彈性；小資料容易過擬合。',
+    none: '不做校準；適合診斷 estimator 原始輸出，不建議直接當最終機率模型。',
   }
 
   onMount(() => {
@@ -569,6 +589,7 @@
   async function runTrain() {
     training = true
     trainError = ''
+    trainMessage = ''
     activeJob = null
     try {
       const symbols = trainSymbols
@@ -579,6 +600,8 @@
         symbols: symbols.length > 0 ? symbols : undefined,
         limit: trainLimit,
         modelType: trainModelType,
+        splitMethod: trainSplitMethod,
+        calibrationMethod: trainCalibrationMethod,
       })
       pollTrainJob(res.job_id)
     } catch (err) {
@@ -620,6 +643,21 @@
       recentTrainJobs = await listTrainJobs(5)
     } catch {
       // 沉默失敗，不影響主要分析功能的呈現
+    }
+  }
+
+  async function pruneOldTrainJobs() {
+    pruningTrainJobs = true
+    trainError = ''
+    trainMessage = ''
+    try {
+      const result = await pruneTrainJobs(20)
+      trainMessage = `已清理 ${result.deleted} 筆舊訓練紀錄，保留最近 ${result.keep} 筆完成/失敗紀錄`
+      await loadRecentTrainJobs()
+    } catch (err) {
+      trainError = err instanceof ApiError ? err.message : '清理訓練紀錄失敗'
+    } finally {
+      pruningTrainJobs = false
     }
   }
 
@@ -829,9 +867,13 @@
       <h2 class="text-sm font-semibold text-white mb-1">訓練/更新機率模型</h2>
       <p class="text-muted text-xs mb-3">
         用歷史觸碰事件重新訓練 bounce_probability / break_probability 模型，在背景執行（視股票數與資料長度可能耗時數十秒到數分鐘）。
+        目前系統只維持一個現行模型；每次訓練成功都會覆蓋現行模型，下面的訓練紀錄是 job history，不是可切換的模型清單。
       </p>
       {#if trainError}
         <p class="text-rise text-sm mb-3">{trainError}</p>
+      {/if}
+      {#if trainMessage}
+        <p class="text-green-400 text-sm mb-3">{trainMessage}</p>
       {/if}
       <div class="flex flex-wrap gap-3 items-center">
         <input
@@ -850,6 +892,25 @@
           <option value="lightgbm">LightGBM</option>
           <option value="logistic_regression">Logistic Regression</option>
         </select>
+        <select
+          bind:value={trainSplitMethod}
+          title="訓練/驗證資料切分方式"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="time">時間序列切分</option>
+          <option value="random">隨機切分</option>
+        </select>
+        <select
+          bind:value={trainCalibrationMethod}
+          title="機率校準方式"
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="sigmoid">Sigmoid 校準</option>
+          <option value="isotonic">Isotonic 校準</option>
+          <option value="none">不校準</option>
+        </select>
         <input
           type="number"
           min="35"
@@ -867,6 +928,20 @@
         >
           {training ? '訓練中...' : '開始訓練'}
         </button>
+      </div>
+      <div class="mt-3 grid gap-2 md:grid-cols-3 text-xs">
+        <div class="bg-surface/50 border border-border rounded-lg p-3">
+          <p class="text-white font-medium mb-1">模型方式</p>
+          <p class="text-muted">{modelTypeNotes[trainModelType]}</p>
+        </div>
+        <div class="bg-surface/50 border border-border rounded-lg p-3">
+          <p class="text-white font-medium mb-1">切分方式</p>
+          <p class="text-muted">{splitMethodNotes[trainSplitMethod]}</p>
+        </div>
+        <div class="bg-surface/50 border border-border rounded-lg p-3">
+          <p class="text-white font-medium mb-1">機率校準</p>
+          <p class="text-muted">{calibrationNotes[trainCalibrationMethod]}</p>
+        </div>
       </div>
 
       <!-- 目前這次觸發的任務狀態：每 3 秒輪詢一次，直到 done/failed -->
@@ -890,7 +965,16 @@
       <!-- 最近訓練紀錄：不用只靠伺服器 log 才知道之前訓練成功了沒 -->
       {#if recentTrainJobs.length > 0}
         <div class="mt-4">
-          <p class="text-muted text-xs mb-1.5">最近訓練紀錄</p>
+          <div class="flex items-center justify-between gap-3 mb-1.5">
+            <p class="text-muted text-xs">最近訓練紀錄</p>
+            <button
+              class="text-xs text-muted hover:text-white px-2 py-1 border border-border rounded transition-colors disabled:opacity-50"
+              disabled={pruningTrainJobs || training}
+              on:click={pruneOldTrainJobs}
+            >
+              {pruningTrainJobs ? '清理中...' : '清理舊紀錄'}
+            </button>
+          </div>
           <table class="w-full text-xs">
             <thead>
               <tr class="text-muted border-b border-border/60">

@@ -858,12 +858,25 @@ lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/ro
 
 **Request Body：**
 ```json
-{ "symbols": ["2330", "2454"], "timeframe": "1d", "limit": 1500, "model_type": "gradient_boosting" }
+{
+  "symbols": ["2330", "2454"],
+  "timeframe": "1d",
+  "limit": 1500,
+  "model_type": "gradient_boosting",
+  "split_method": "time",
+  "calibration_method": "sigmoid"
+}
 ```
 
 `symbols` 省略或空陣列時自動使用整個監控清單（watchlist 為空則回
 `400`）；`limit` 為每檔股票訓練用的歷史K棒根數（預設 1500）；`model_type`
-可選 `gradient_boosting`（預設）、`hist_gradient_boosting`、`lightgbm` 或 `logistic_regression`。
+可選 `gradient_boosting`（預設）、`hist_gradient_boosting`、`lightgbm` 或
+`logistic_regression`。`split_method` 可選 `time`（預設，正式評估建議）或
+`random`（舊行為，僅建議比較）；`calibration_method` 可選 `sigmoid`（預設）、
+`isotonic` 或 `none`。
+
+目前系統只維持一個現行模型；訓練成功會覆蓋 `SR_SCORING_MODEL_PATH` 指向的
+active model。`sr_scoring_train_jobs` 是訓練任務紀錄，不是可切換的模型清單。
 
 **Response（202 Accepted）：**
 ```json
@@ -924,6 +937,17 @@ lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/ro
 
 取得單筆訓練任務詳情，格式同上方陣列裡的單一物件（`{ "job": {...} }`）。
 找不到回 `404`。
+
+### DELETE `/sr-zones/train-jobs`
+
+清理舊的訓練任務紀錄，只刪除 `done` / `failed`，不刪 `pending` / `running`。
+
+**Query Parameters：** `keep`（預設 20；小於 5 會提升為 5，最多 200）
+
+**Response：**
+```json
+{ "deleted": 12, "keep": 20 }
+```
 
 ### GET `/sr-zones/model-status`
 

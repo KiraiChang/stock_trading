@@ -404,6 +404,25 @@ func (h *SRZoneHandler) ListTrainJobs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"jobs": jobs, "total": len(jobs)})
 }
 
+// PruneTrainJobs 刪除舊的 terminal 訓練任務紀錄（done/failed），保留最近 keep
+// 筆。pending/running 永遠不刪，避免清掉仍在執行或尚未開始的任務狀態。
+func (h *SRZoneHandler) PruneTrainJobs(c *gin.Context) {
+	keep, _ := strconv.Atoi(c.DefaultQuery("keep", "20"))
+	if keep < 5 {
+		keep = 5
+	}
+	if keep > 200 {
+		keep = 200
+	}
+
+	deleted, err := h.trainJobs.PruneTerminal(c.Request.Context(), keep)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: prune train jobs")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"deleted": deleted, "keep": keep})
+}
+
 // GET /api/v1/sr-zones/train-jobs/:job_id
 func (h *SRZoneHandler) GetTrainJob(c *gin.Context) {
 	jobID := c.Param("job_id")

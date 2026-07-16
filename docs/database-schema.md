@@ -273,7 +273,9 @@ SR Zone Scoring 機率模型的訓練任務紀錄（見
 [sr-zone-scoring.md](./sr-zone-scoring.md)「訓練任務可觀測化」）。訓練本身在
 Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/train`
 可以立即回傳 `job_id`，前端輪詢 `GET /sr-zones/train-jobs/:job_id` 查詢進度，
-不用只靠伺服器 log。
+不用只靠伺服器 log。這張表是 job history，不是 model registry；目前系統只維持
+一個現行模型，訓練成功會覆蓋 active model path。舊的 `done` / `failed` 紀錄可由
+`DELETE /sr-zones/train-jobs?keep=20` 清理，`pending` / `running` 不會被刪除。
 
 | 欄位 | 說明 |
 |------|------|

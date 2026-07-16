@@ -181,3 +181,50 @@ func TestSRScoringTrainJobRepoListOrdersByCreatedAtDesc(t *testing.T) {
 		t.Fatalf("unexpected order: %+v", jobs)
 	}
 }
+
+func TestSRScoringTrainJobRepoPruneTerminalKeepsNewestDoneFailedOnly(t *testing.T) {
+	repo := newTestSRScoringTrainJobRepo(t)
+	ctx := context.Background()
+
+	for _, jobID := range []string{"sr_train_done_old", "sr_train_failed_old", "sr_train_done_new", "sr_train_pending", "sr_train_running"} {
+		if _, err := repo.Create(ctx, testTrainJob(jobID)); err != nil {
+			t.Fatalf("Create(%s) failed: %v", jobID, err)
+		}
+	}
+	if err := repo.MarkDone(ctx, "sr_train_done_old", 10, 1, RawJSON(`{}`), "model.joblib", "v4", "time", RawJSON(`{}`)); err != nil {
+		t.Fatalf("MarkDone old failed: %v", err)
+	}
+	if err := repo.MarkFailed(ctx, "sr_train_failed_old", "failed"); err != nil {
+		t.Fatalf("MarkFailed old failed: %v", err)
+	}
+	if err := repo.MarkDone(ctx, "sr_train_done_new", 20, 2, RawJSON(`{}`), "model.joblib", "v4", "time", RawJSON(`{}`)); err != nil {
+		t.Fatalf("MarkDone new failed: %v", err)
+	}
+	if err := repo.MarkRunning(ctx, "sr_train_running"); err != nil {
+		t.Fatalf("MarkRunning failed: %v", err)
+	}
+
+	deleted, err := repo.PruneTerminal(ctx, 1)
+	if err != nil {
+		t.Fatalf("PruneTerminal failed: %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("expected deleted=2, got %d", deleted)
+	}
+
+	if _, err := repo.Get(ctx, "sr_train_done_new"); err != nil {
+		t.Fatalf("newest terminal job should remain: %v", err)
+	}
+	if _, err := repo.Get(ctx, "sr_train_pending"); err != nil {
+		t.Fatalf("pending job should remain: %v", err)
+	}
+	if _, err := repo.Get(ctx, "sr_train_running"); err != nil {
+		t.Fatalf("running job should remain: %v", err)
+	}
+	if _, err := repo.Get(ctx, "sr_train_done_old"); err == nil {
+		t.Fatal("old done job should be pruned")
+	}
+	if _, err := repo.Get(ctx, "sr_train_failed_old"); err == nil {
+		t.Fatal("old failed job should be pruned")
+	}
+}

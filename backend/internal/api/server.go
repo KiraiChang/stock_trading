@@ -141,6 +141,7 @@ func NewServer(
 		protected.POST("/sr-zones/:id/verify", szh.Verify)
 		protected.POST("/sr-zones/train", szh.Train)
 		protected.GET("/sr-zones/train-jobs", szh.ListTrainJobs)
+		protected.DELETE("/sr-zones/train-jobs", szh.PruneTrainJobs)
 		protected.GET("/sr-zones/train-jobs/:job_id", szh.GetTrainJob)
 		protected.GET("/sr-zones/model-status", szh.ModelStatus)
 		protected.DELETE("/sr-zones/:id", szh.Delete)

@@ -1037,6 +1037,34 @@ RR、score breakdown、觸碰統計、Global Model 原始數字）都還在，�
 
 ## 十七、模型設定可追溯性（training_config / model_config_hash）
 
+目前系統只維持**一個現行機率模型**，不是 model registry。前端可選
+`model_type` / `split_method` / `calibration_method`，但每次訓練成功都會寫入
+同一個 `SR_SCORING_MODEL_PATH`，讓新的 `hold_model` / `break_model` 成為現行
+模型；`sr_scoring_train_jobs` 保存的是訓練任務紀錄與 metrics，不代表有多個
+模型可切換。若未來要支援多模型並存，需要另外設計 model registry、模型檔路徑、
+分析快照關聯與前端選模流程。
+
+訓練選項取捨：
+
+| 選項 | 建議用途 | 優點 | 代價 / 風險 |
+|------|----------|------|-------------|
+| `gradient_boosting` | 預設正式模型 | 小到中型資料穩定，能處理非線性 | 訓練速度中等，仍需用 holdout metrics 檢查 |
+| `hist_gradient_boosting` | 資料量變大時比較 | 訓練較快，適合較多 rows | 小資料不一定比預設穩 |
+| `logistic_regression` | 基準模型、診斷過擬合 | 可解釋、輸出保守 | 非線性捕捉能力弱 |
+| `lightgbm` | 大量資料實驗 | 大資料常有較好速度/表現 | Python 環境需安裝 `lightgbm`，否則訓練會失敗 |
+
+| 選項 | 建議用途 | 說明 |
+|------|----------|------|
+| `split_method=time` | 預設正式評估 | 每檔股票用較新的 touch 事件當 holdout，避免未來資料混入訓練 |
+| `split_method=random` | 舊結果比較 | 金融時間序列容易高估表現，不建議作為正式評估 |
+| `calibration_method=sigmoid` | 預設校準 | 較穩；樣本不足時後端會自動降級為未校準 |
+| `calibration_method=isotonic` | 大樣本實驗 | 彈性較高；小資料容易過擬合 |
+| `calibration_method=none` | 診斷 estimator 原始輸出 | 不做機率校準，不建議直接當最終機率模型 |
+
+`sr_scoring_train_jobs` 只保留任務狀態與診斷資料。前端可呼叫
+`DELETE /api/v1/sr-zones/train-jobs?keep=20` 清理舊紀錄；後端只刪除
+`done` / `failed`，不會刪 `pending` / `running`。
+
 `model_version`（`v1`/`v2`/`v3`）只到 feature schema 這種粗粒度，同一個版本底下
 換過幾次 `DatasetConfig`（`forward_bars`/`threshold_pct`/`label_method`
 等）、zone builder 參數（`atr_width_multiplier`/`merge_pct`/

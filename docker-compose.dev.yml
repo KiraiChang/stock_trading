@@ -68,8 +68,12 @@ services:
       FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
       FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
       FUGLE_API_KEY: ${FUGLE_API_KEY:-YOUR_FUGLE_API_KEY}
+      LOG_DIR: /app/logs/backend
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
       - "18080:8080"
+    volumes:
+      - ./logs/dev/backend:/app/logs/backend
     networks:
       - dev_trading_net
 
@@ -88,10 +92,13 @@ services:
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       PYTHON_SERVICE_PORT: "8001"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      LOG_DIR: /app/logs/python-server
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
       - "18001:8001"
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+      - ./logs/dev/python-server:/app/logs/python-server
     networks:
       - dev_trading_net
 
@@ -110,8 +117,11 @@ services:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      LOG_DIR: /app/logs/python-worker
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+      - ./logs/dev/python-worker:/app/logs/python-worker
     networks:
       - dev_trading_net
 

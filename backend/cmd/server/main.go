@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	ossignal "os/signal"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/database"
 	"github.com/trading/backend/internal/indicator"
+	applog "github.com/trading/backend/internal/logging"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/portfolio"
 	"github.com/trading/backend/internal/scheduler"
@@ -25,8 +27,20 @@ import (
 )
 
 func main() {
-	log, _ := zap.NewProduction()
-	defer log.Sync()
+	log, cleanup, err := applog.New("backend")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "persistent logger init failed: %v\n", err)
+		fallback, ferr := zap.NewProduction()
+		if ferr != nil {
+			fmt.Fprintf(os.Stderr, "fallback logger init failed: %v\n", ferr)
+			os.Exit(1)
+		}
+		log = fallback
+		cleanup = func() {
+			_ = log.Sync()
+		}
+	}
+	defer cleanup()
 
 	cfg, err := config.Load()
 	if err != nil {

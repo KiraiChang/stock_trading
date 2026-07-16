@@ -110,6 +110,19 @@ docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f doc
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 
+app runtime log 會持久化在 repo root 的 `logs/`，避免 `deploy.sh` 或 compose redeploy 重新建立
+container 後遺失：
+
+| 服務 | 持久化路徑 |
+|------|------------|
+| Go backend | `logs/backend/` |
+| Python HTTP server | `logs/python-server/` |
+| Python worker | `logs/python-worker/` |
+
+backend 每日寫入 `backend-YYYY-MM-DD.log`；Python 服務會寫入目前檔案
+`python-server.log` / `python-worker.log`，並在每日輪替後留下日期後綴檔。app log 時間格式為 UTC
+ISO 8601。保留天數可用 `LOG_RETENTION_DAYS` 調整，預設 14 天。
+
 ---
 
 ## 認證設定

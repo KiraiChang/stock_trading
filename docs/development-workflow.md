@@ -103,6 +103,19 @@ docker compose -f docker-compose.dev.yml logs --tail=200 backend
 docker compose -f docker-compose.dev.yml logs --tail=200 python-server
 ```
 
+dev stack 也會把 app runtime log 寫到 repo root 的 `logs/dev/`，避免 container 重新建立後只剩
+Docker stdout 可查：
+
+| 服務 | 持久化路徑 |
+|------|------------|
+| backend | `logs/dev/backend/` |
+| python-server | `logs/dev/python-server/` |
+| python-worker | `logs/dev/python-worker/` |
+
+backend 會寫每日檔案 `backend-YYYY-MM-DD.log`；Python 服務會寫目前檔案
+`python-server.log` / `python-worker.log`，並在每日輪替後保留日期後綴檔案。app log 時間一律使用
+UTC ISO 8601，保留天數由 `LOG_RETENTION_DAYS` 控制，預設 14 天。
+
 停止 dev stack：
 
 ```bash

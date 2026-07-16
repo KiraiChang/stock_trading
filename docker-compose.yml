@@ -21,6 +21,10 @@ services:
       YAHOO_ENABLED: ${YAHOO_ENABLED:-false}
       YAHOO_RATE_LIMIT: ${YAHOO_RATE_LIMIT:-20}
       YAHOO_BATCH_SIZE: ${YAHOO_BATCH_SIZE:-40}
+      LOG_DIR: /app/logs/backend
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
+    volumes:
+      - ./logs/backend:/app/logs/backend
     networks:
       - trading-net
       - proxy_net
@@ -36,8 +40,11 @@ services:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      LOG_DIR: /app/logs/python-worker
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+      - ./logs/python-worker:/app/logs/python-worker
     networks:
       - trading-net
 
@@ -54,8 +61,11 @@ services:
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       PYTHON_SERVICE_PORT: "8001"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      LOG_DIR: /app/logs/python-server
+      LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
+      - ./logs/python-server:/app/logs/python-server
     networks:
       - trading-net
 

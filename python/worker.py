@@ -11,23 +11,18 @@ import logging
 import sys
 import os
 
-# 在所有 app import 之前設定 logging，確保 import 期間的錯誤也能顯示
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [worker] %(levelname)-8s %(name)s — %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout,
-    force=True,
-)
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backtest"))
+
+from logging_setup import configure_logging
+
+configure_logging("python-worker")
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 log = logging.getLogger(__name__)
 
 import json
 import time
-
-sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backtest"))
 
 log.info("loading config...")
 from config import WORKER_POLL_INTERVAL

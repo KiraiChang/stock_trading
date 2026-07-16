@@ -16,21 +16,17 @@ import logging
 import sys
 import os
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [server] %(levelname)-8s %(name)s — %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout,
-    force=True,
-)
+sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backtest"))
+
+from logging_setup import configure_logging
+
+configure_logging("python-server")
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 log = logging.getLogger(__name__)
 
 import json
-
-sys.path.insert(0, os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backtest"))
 
 log.info("loading config...")
 from config import SERVICE_PORT

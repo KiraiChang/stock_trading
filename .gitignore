@@ -42,3 +42,6 @@ python/.venv/
 
 # Python 訓練產物
 python/models/
+
+# Runtime logs
+logs/

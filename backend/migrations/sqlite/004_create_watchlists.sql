@@ -1,8 +1,0 @@
-CREATE TABLE IF NOT EXISTS watchlists (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol   TEXT NOT NULL,
-    name     TEXT NOT NULL,
-    sector   TEXT,
-    added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(symbol)
-);

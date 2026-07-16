@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repository contains a stock trading system with three main runtimes. `backend/` is a Go service: entry points live in `cmd/`, application code in `internal/`, reusable packages in `pkg/`, and SQL migrations in `migrations/` plus `internal/database/migrations/`. `frontend/` is a Svelte/Vite app with routes in `src/routes/`, shared UI in `src/components/`, API clients in `src/lib/api/`, stores in `src/lib/stores/`, and WebSocket code in `src/lib/ws/`. `python/` hosts backtesting, model, worker, and HTTP service code; modular backtest tests live under `python/backtest/modular/**/tests/`. Design and operations notes are in `docs/`.
+This repository contains a stock trading system with three main runtimes. `backend/` is a Go service: entry points live in `cmd/`, application code in `internal/`, reusable packages in `pkg/`, and SQL migrations in `internal/database/migrations/`. `frontend/` is a Svelte/Vite app with routes in `src/routes/`, shared UI in `src/components/`, API clients in `src/lib/api/`, stores in `src/lib/stores/`, and WebSocket code in `src/lib/ws/`. `python/` hosts backtesting, model, worker, and HTTP service code; modular backtest tests live under `python/backtest/modular/**/tests/`. Design and operations notes are in `docs/`.
 
 ## Build, Test, and Development Commands
 Run commands from the relevant subdirectory unless noted.

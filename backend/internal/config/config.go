@@ -35,7 +35,8 @@ type AuthConfig struct {
 
 type PythonConfig struct {
 	// ServiceURL：Method B HTTP 端點；空白表示僅用 Method A（DB polling）
-	ServiceURL string `mapstructure:"service_url"`
+	ServiceURL        string `mapstructure:"service_url"`
+	SRZonesTimeoutSec int    `mapstructure:"sr_zones_timeout_sec"`
 }
 
 type DatabaseConfig struct {
@@ -134,6 +135,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("yahoo.rate_limit", 20)
 	viper.SetDefault("yahoo.batch_size", 40)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
+	viper.SetDefault("python.sr_zones_timeout_sec", 120)
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)
 	viper.SetDefault("chip.sync.cron", "0 21 * * 1-5")

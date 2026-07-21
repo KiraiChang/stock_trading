@@ -18,6 +18,47 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
+func TestMapScoreZonesErrorReturnsGatewayTimeoutForClientDeadline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := fmt.Errorf("python sr-zones request failed: %w", context.DeadlineExceeded)
+	mapScoreZonesError(c, zap.NewNop(), err)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected status=504, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SR Zone 分析逾時") {
+		t.Fatalf("expected timeout message, got body=%s", w.Body.String())
+	}
+}
+
+// fakeNetTimeoutErr 是一個 Timeout()==true 但不 wrap context.DeadlineExceeded 的
+// net.Error，用來釘住 mapScoreZonesError 的 net.Error.Timeout() belt-and-suspenders
+// 分支（不依賴特定 Go 版本把 Client.Timeout unwrap 成 DeadlineExceeded 的行為）。
+type fakeNetTimeoutErr struct{}
+
+func (fakeNetTimeoutErr) Error() string   { return "i/o timeout" }
+func (fakeNetTimeoutErr) Timeout() bool   { return true }
+func (fakeNetTimeoutErr) Temporary() bool { return false }
+
+func TestMapScoreZonesErrorReturnsGatewayTimeoutForNetTimeout(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	err := fmt.Errorf("python sr-zones request failed: %w", fakeNetTimeoutErr{})
+	mapScoreZonesError(c, zap.NewNop(), err)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Fatalf("expected status=504, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "SR Zone 分析逾時") {
+		t.Fatalf("expected timeout message, got body=%s", w.Body.String())
+	}
+}
+
 type srZoneRepoStub struct {
 	analyses         []store.SRZoneAnalysis
 	zones            map[uint64][]store.SRZone
@@ -576,7 +617,7 @@ func TestSRZoneGetDoesNotUseLegacyJSONWhenNormalizedRowsAreMissing(t *testing.T)
 }
 
 // I-018：有 normalized decision 但天生沒有 market event 時，events 應為 normalized
-//（空集合是合法的「無事件」），不得誤標成 missing。
+// （空集合是合法的「無事件」），不得誤標成 missing。
 func TestLoadSnapshotMarksEventsNormalizedWhenDecisionHasNoEventRows(t *testing.T) {
 	repo := &srZoneRepoStub{
 		analyses:  []store.SRZoneAnalysis{{ID: 7, Symbol: "2330", Timeframe: "1d"}},

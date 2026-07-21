@@ -1322,6 +1322,13 @@ Data → Features → Score → Evidence → Decision
 但保留 `risk_flags`；同一模型的 SHAP background 與 explainer 每次分析建一次
 重用，降低熱路徑成本。
 
+Go backend 呼叫 Python `/sr-zones` 使用專用同步逾時
+`python.sr_zones_timeout_sec`（預設 `120` 秒，環境變數
+`PYTHON_SR_ZONES_TIMEOUT_SEC`），不沿用 `/analyze`/`model-status` 的 30 秒 client。
+逾時會回 `504 Gateway Timeout`；若延長逾時後仍過慢，優先降低
+`sr_scoring.evidence_max_zones` 或關閉 `sr_scoring.evidence_enabled`，讓 evidence
+降級而不是停用整個 SR Zone 評分。
+
 Python `/sr-zones` 回傳 breaking v2 nested contract：
 `analysis`、`features`、`score`、`evidence`、`decision`、`explanation`、`scenario`，
 以及每個 zone 各自的 `data/features/score/evidence/explanation/scenario/lifecycle`。

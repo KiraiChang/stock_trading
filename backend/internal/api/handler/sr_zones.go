@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -33,6 +34,15 @@ func mapScoreZonesError(c *gin.Context, log *zap.Logger, err error) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "機率模型尚未訓練，請先在下方「訓練/更新機率模型」區塊訓練"})
 			return
 		}
+	}
+	// 逾時同時判斷 context.DeadlineExceeded 與 net.Error.Timeout()：
+	// Go 1.23+ 的 http.Client.Timeout 逾時會 unwrap 成前者，但 net.Error.Timeout()
+	// 作為 belt-and-suspenders，避免依賴特定 Go 版本的 unwrap 行為。
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		log.Warn("sr-zones: score zones timeout", zap.Error(err))
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "SR Zone 分析逾時，請稍後重試；若經常發生，可降低 evidence 計算數量或延長逾時設定"})
+		return
 	}
 	log.Error("sr-zones: score zones", zap.Error(err))
 	c.JSON(http.StatusBadGateway, gin.H{"error": "Python 服務無法連線，請確認服務是否已啟動"})

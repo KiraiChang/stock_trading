@@ -133,14 +133,28 @@ func nullInt(p *int) store.NullInt64 {
 
 // Client 呼叫 Python HTTP service 的 /analyze 端點
 type Client struct {
-	baseURL string
-	http    *http.Client
+	baseURL     string
+	http        *http.Client
+	srZonesHTTP *http.Client
 }
 
+const (
+	defaultHTTPTimeout        = 30 * time.Second
+	defaultSRZonesHTTPTimeout = 120 * time.Second
+)
+
 func NewClient(baseURL string) *Client {
+	return NewClientWithSRZonesTimeout(baseURL, defaultSRZonesHTTPTimeout)
+}
+
+func NewClientWithSRZonesTimeout(baseURL string, srZonesTimeout time.Duration) *Client {
+	if srZonesTimeout <= 0 {
+		srZonesTimeout = defaultSRZonesHTTPTimeout
+	}
 	return &Client{
-		baseURL: baseURL,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		baseURL:     baseURL,
+		http:        &http.Client{Timeout: defaultHTTPTimeout},
+		srZonesHTTP: &http.Client{Timeout: srZonesTimeout},
 	}
 }
 
@@ -946,7 +960,7 @@ func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string, limit
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.http.Do(req)
+	resp, err := c.srZonesHTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("python sr-zones request failed: %w", err)
 	}

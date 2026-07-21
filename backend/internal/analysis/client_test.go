@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestAnalyzeSendsLimitWhenProvided(t *testing.T) {
@@ -60,6 +61,23 @@ func TestAnalyzeOmitsLimitFieldWhenZero(t *testing.T) {
 	client := NewClient(server.URL)
 	if _, err := client.Analyze(context.Background(), "2330", "1d", 0); err != nil {
 		t.Fatalf("Analyze failed: %v", err)
+	}
+}
+
+func TestNewClientWithSRZonesTimeoutUsesDedicatedTimeout(t *testing.T) {
+	client := NewClientWithSRZonesTimeout("http://example.test", 45*time.Second)
+	if client.http.Timeout != defaultHTTPTimeout {
+		t.Fatalf("expected default http timeout=%s, got %s", defaultHTTPTimeout, client.http.Timeout)
+	}
+	if client.srZonesHTTP.Timeout != 45*time.Second {
+		t.Fatalf("expected sr-zones timeout=45s, got %s", client.srZonesHTTP.Timeout)
+	}
+}
+
+func TestNewClientWithSRZonesTimeoutFallsBackWhenInvalid(t *testing.T) {
+	client := NewClientWithSRZonesTimeout("http://example.test", 0)
+	if client.srZonesHTTP.Timeout != defaultSRZonesHTTPTimeout {
+		t.Fatalf("expected default sr-zones timeout=%s, got %s", defaultSRZonesHTTPTimeout, client.srZonesHTTP.Timeout)
 	}
 }
 

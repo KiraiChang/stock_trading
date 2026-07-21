@@ -63,6 +63,7 @@ auth:
 #              填入 = Method A + Method B（同時推送 HTTP 通知）
 python:
   service_url: ""   # 環境變數：PYTHON_SERVICE_URL（e.g. "http://localhost:8001"）
+  sr_zones_timeout_sec: 120  # 環境變數：PYTHON_SR_ZONES_TIMEOUT_SEC；SR Zone 同步分析含 evidence/SHAP，需比一般分析長
 
 # 籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）
 chip:

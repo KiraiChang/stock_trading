@@ -320,6 +320,12 @@ curl -X POST http://localhost:8080/api/v1/sr-zones \
 # → { "analysis": {...global_*}, "zones": [...] }
 ```
 
+`POST /sr-zones` 是同步分析，Go backend 對 Python `/sr-zones` 使用獨立逾時設定：
+`python.sr_zones_timeout_sec`（預設 `120`，環境變數
+`PYTHON_SR_ZONES_TIMEOUT_SEC`）。若資料量或 SHAP evidence 計算較重，可先延長
+這個值；若仍然過慢，再調整 Python 端 `sr_scoring.evidence_max_zones` 或
+`SR_SCORING_EVIDENCE_ENABLED=false` 讓 evidence 降級，評分本身仍會回應。
+
 也可以直接用前端「支撐/壓力機率分析」頁面（`/sr-zones`），下方「訓練/更新
 機率模型」區塊就是 `POST /sr-zones/train` 的 UI，觸發後會自動每 3 秒輪詢一次
 狀態，完成/失敗都會顯示，下方也有最近幾次訓練紀錄。
@@ -516,9 +522,13 @@ pgx 下）觸發 `sql: Scan error ... storing driver.Value type string into type
 object」的欄位——這個錯誤只在 PostgreSQL 才會出現，SQLite/MySQL 不會報錯，
 本機用 SQLite 開發測不出來，上 VPS（PostgreSQL）才會炸。
 
-**`POST /sr-zones` 回 `502 Bad Gateway` 或逾時**：Python HTTP service 沒開，
-或 `python.service_url`/`PYTHON_SERVICE_URL` 未設定。若 Python service 有回應
-但內容是模型相關錯誤（`RuntimeError`／`503`），代表機率模型還沒訓練過，先
-呼叫 `POST /sr-zones/train`（或 CLI `python -m
-backtest.modular.sr_scoring.train`）訓練完成後再重試，見上方「SR Zone
-Scoring」一節。
+**`POST /sr-zones` 回 `502 Bad Gateway`**：Python HTTP service 沒開，或
+`python.service_url`/`PYTHON_SERVICE_URL` 未設定。若 Python service 有回應但
+內容是模型相關錯誤（`RuntimeError`／`503`），代表機率模型還沒訓練過，先呼叫
+`POST /sr-zones/train`（或 CLI `python -m backtest.modular.sr_scoring.train`）
+訓練完成後再重試，見上方「SR Zone Scoring」一節。
+
+**`POST /sr-zones` 回 `504 Gateway Timeout`**：Go 已連到 Python，但 Python
+分析時間超過 `python.sr_zones_timeout_sec`。先視環境延長
+`PYTHON_SR_ZONES_TIMEOUT_SEC`；若仍常發生，降低 `SR_SCORING_EVIDENCE_MAX_ZONES`
+或設定 `SR_SCORING_EVIDENCE_ENABLED=false`，讓 SHAP evidence 降級。

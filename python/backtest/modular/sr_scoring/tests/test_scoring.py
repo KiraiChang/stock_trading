@@ -213,6 +213,11 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert result["analysis"]["model"]["config_hash"] == bundle.config_hash
     assert [p["key"] for p in result["analysis"]["period_summaries"]] == ["short", "mid", "long"]
     assert result["analysis"]["analysis_tips"]
+    tips_text = "\n".join(result["analysis"]["analysis_tips"])
+    for category in ("指標小辭典", "價位語意", "事件語意", "判讀提醒"):
+        assert category in tips_text
+    for product_copy in ("預設只列", "完整 zone", "硬湊數字"):
+        assert product_copy not in tips_text
     assert result["analysis"]["chip_summary"]["missing"] is True
     assert result["evidence"]["model"]["explainer"] == "permutation_shap"
     assert set(result["explanation"]) >= {"schema_version", "summary", "action_reason", "market_drivers", "risk_notes", "model_context"}

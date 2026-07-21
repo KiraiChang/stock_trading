@@ -109,14 +109,11 @@ from .model import (
 from .types import (
     ApproachDirection,
     ConfidenceLevel,
-    EvidenceFamily,
     NetScoreLabel,
     RecentValidation,
-    TradingRecommendation,
     VolumeConfirmation,
     Zone,
     ZoneDirection,
-    ZoneMethod,
     ZoneScore,
     ZoneTier,
     ZoneTouch,
@@ -124,7 +121,28 @@ from .types import (
 )
 from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 from .pipeline_types import ZoneFeatureSet
-from .labels import TIER_LABEL_TEXT, role_label as _role_label, display_label as _display_label
+from .labels import TIER_LABEL_TEXT
+from .ranking import (
+    OVERLAP_GROUP_THRESHOLD,
+    _assign_tiers,
+    _evidence_family,
+    _group_overlapping_zones,
+    _sort_zone_scores,
+    _zone_overlap_ratio,
+)
+from .scoring_rules import (
+    TRADING_SCORE_WEIGHTS,
+    TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP,
+    _entry_relevance_breakdown,
+    _entry_relevance_score,
+    _trading_recommendation,
+    _trading_score,
+    _trading_score_breakdown,
+    _trading_score_breakdown_no_direct_chip,
+)
+from .serialization import _zone_score_to_dict
+from .summaries import _build_period_summaries, _pick_period_pair
+from .tips import _build_analysis_tips
 
 DEFAULT_FETCH_LIMIT = 250
 
@@ -155,28 +173,6 @@ ZONE_MOMENTUM_LOOKBACK = 5
 
 NEUTRAL_PROBABILITY = 0.5
 
-# 十三、Score 必須可拆解：六個分量、明確權重，總和 = 100。
-# 【2026-07 籌碼分析整合】新增 chip 分量（權重 15），其餘五個分量依原比例
-# 縮小至 85（40/20/15/15/10 → 34/17/12.75/12.75/8.5）。v3 模型已將
-# chip_features 納入 hold/break 機率模型，籌碼會透過機率與 expected_value /
-# support_score / resistance_score 影響總分；這裡的 chip 權重則是第二條路徑，
-# 直接用原始 chip_score 加權。這組數字是初始權重，之後可依實際回測結果調整。
-TRADING_SCORE_WEIGHTS = {
-    "expected_value": 34.0,
-    "risk_reward": 17.0,
-    "trend": 12.75,
-    "volume": 12.75,
-    "confidence": 8.5,
-    "chip": 15.0,
-}
-TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP = {
-    "expected_value": 40.0,
-    "risk_reward": 20.0,
-    "trend": 15.0,
-    "volume": 15.0,
-    "confidence": 10.0,
-}
-
 # 籌碼分數（chip_scores.total_score，-100~100）五段訊號門檻。SR Zone 以有效
 # 影響分（effective_score）做方向判讀，避免低覆蓋率但單一分量極端時被解讀成
 # 強訊號；_chip_direction 用弱門檻判斷是否已有明確方向。
@@ -189,20 +185,6 @@ CHIP_COMPONENT_WEIGHTS = {
     "broker_score": 0.30,
     "concentration_score": 0.15,
 }
-
-_VOLUME_CONFIRMATION_WEIGHT = {
-    VolumeConfirmation.CONFIRMED.value: 1.0,
-    VolumeConfirmation.NEUTRAL.value: 0.5,
-    VolumeConfirmation.WEAK.value: 0.3,
-    VolumeConfirmation.FAILED.value: 0.0,
-}
-
-PERIOD_SUMMARY_CONFIG = [
-    ("short", "短期", ZoneTier.TIER_3_SHORT_TERM.value),
-    ("mid", "中期", ZoneTier.TIER_2_TRADING_ZONE.value),
-    ("long", "長期", ZoneTier.TIER_1_MAIN_STRUCTURE.value),
-]
-
 
 def _to_dataframe(rows: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
@@ -431,335 +413,6 @@ def _zone_direction(momentum: float, threshold: float = ZONE_DIRECTION_THRESHOLD
     return ZoneDirection.FLAT.value
 
 
-# ── 十一、Zone Tier（可排序）──────────────────────────────────
-
-
-def _assign_tiers(widths: list[float]) -> list[str]:
-    """依寬度（zone.price_high - zone.price_low）分三個 tier：最寬的 1/3
-    是 Tier 1（主結構，涵蓋範圍最大的宏觀結構），中間 1/3 是 Tier 2
-    （交易區），最窄的 1/3 是 Tier 3（短期，最貼近盤中操作的精確價位）。
-    用同一批 zone 的寬度分佈做相對分組（tercile），不用絕對門檻——不同
-    股票的價格尺度差異很大，絕對寬度沒有可比性。回傳值跟輸入 widths 同順序
-    對應（不是排序後的結果）。"""
-    n = len(widths)
-    if n == 0:
-        return []
-    order = sorted(range(n), key=lambda i: widths[i], reverse=True)
-    third = -(-n // 3)  # ceil(n/3)
-    tiers = [""] * n
-    for rank, idx in enumerate(order):
-        if rank < third:
-            tiers[idx] = ZoneTier.TIER_1_MAIN_STRUCTURE.value
-        elif rank < 2 * third:
-            tiers[idx] = ZoneTier.TIER_2_TRADING_ZONE.value
-        else:
-            tiers[idx] = ZoneTier.TIER_3_SHORT_TERM.value
-    return tiers
-
-
-_TIER_ORDER = {
-    ZoneTier.TIER_1_MAIN_STRUCTURE.value: 1,
-    ZoneTier.TIER_2_TRADING_ZONE.value: 2,
-    ZoneTier.TIER_3_SHORT_TERM.value: 3,
-}
-
-
-def _sort_zone_scores(zone_scores: list[ZoneScore]) -> list[ZoneScore]:
-    """zones 必須「可排序」：先依 tier 由粗到細（主結構→交易區→短期），
-    同一層內再依 trading_score 由高到低，不改變這個主要排序規則；
-    confluence_count（多方法共振的 zone 數）只當第三順位的 tie-breaker，
-    trading_score 幾乎不會真的相等，實務上很少真正影響排序結果。"""
-    return sorted(
-    zone_scores, key=lambda z: (
-        _TIER_ORDER.get(z.tier, 99),
-        -z.trading_score,
-        -(z.confluence_family_count or 1),
-    )
-    )
-
-
-# ── 跨方法重疊分群（confluence）───────────────────────────────
-
-OVERLAP_GROUP_THRESHOLD = 0.6  # overlap 相對於較窄 zone 寬度的比例達此門檻才算同一群組
-
-
-def _zone_overlap_ratio(a: Zone, b: Zone) -> float:
-    overlap = min(a.price_high, b.price_high) - max(a.price_low, b.price_low)
-    if overlap <= 0:
-        return 0.0
-    return overlap / min(a.width, b.width)
-
-
-def _evidence_family(method: str | ZoneMethod) -> str:
-    value = method.value if isinstance(method, ZoneMethod) else str(method)
-    return {
-        ZoneMethod.ATR.value: EvidenceFamily.STRUCTURAL_ATR.value,
-        ZoneMethod.VOLUME_PROFILE.value: EvidenceFamily.VOLUME_PROFILE.value,
-        ZoneMethod.RECENT_PIVOT.value: EvidenceFamily.RECENT_MICROSTRUCTURE.value,
-        ZoneMethod.BREAKDOWN_RECLAIM.value: EvidenceFamily.RECENT_MICROSTRUCTURE.value,
-        ZoneMethod.VWAP_RECLAIM.value: EvidenceFamily.VWAP_OR_AVERAGE_RECLAIM.value,
-    }.get(value, value.upper())
-
-
-def _group_overlapping_zones(zones: list[Zone]) -> tuple[list[Optional[int]], list[int], list[int], list[tuple[str, ...]]]:
-    """標記「不同方法（ATR / volume_profile）各自建出來、但實際上指向同一
-    價位帶」的 zone：只在乎跨方法的重疊，同一種方法建出來的 zone 已經在
-    各自的 ZoneBuilder 內做過合併（見 zone_builder.py 的 merge_pct），這裡
-    不重複處理。不合併、不刪除任何 zone——兩個 builder 各自的計算基礎不同
-    （swing pivot + ATR vs. 成交量分布），合併會丟失「這是兩種方法都認同
-    的價位」這個本身就有意義的資訊；只標記 overlap_group/confluence_count
-    供前端顯示「多方法共振」、或在排序時當 tie-breaker（見 _sort_zone_scores）。
-
-    用 union-find：兩兩比較找出跨方法且 overlap 達門檻的 pair 先 union，
-    非傳遞相連的 zone 不會被誤併（例如 A-B 重疊、B-C 重疊但 A-C 不重疊，
-    A/B/C 仍會被視為同一個群組——這是 union-find 的標準行為，跟「這個群組
-    整體覆蓋的價位範圍有多寬」是分開的問題，這裡不處理後者）。
-
-    回傳 (overlap_group, confluence_count)，皆與輸入 zones 同順序對應。
-    confluence_count 恆 >= 1（自己）；overlap_group 只有 confluence_count > 1
-    時才賦值，單獨一個 zone 沒有「群組」可言，回傳 None。"""
-    n = len(zones)
-    parent = list(range(n))
-
-    def find(i: int) -> int:
-        while parent[i] != i:
-            parent[i] = parent[parent[i]]
-            i = parent[i]
-        return i
-
-    def union(i: int, j: int) -> None:
-        ri, rj = find(i), find(j)
-        if ri != rj:
-            parent[rj] = ri
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if zones[i].method == zones[j].method:
-                continue
-            if _zone_overlap_ratio(zones[i], zones[j]) >= OVERLAP_GROUP_THRESHOLD:
-                union(i, j)
-
-    members_by_root: dict[int, list[int]] = {}
-    for i in range(n):
-        members_by_root.setdefault(find(i), []).append(i)
-
-    overlap_group: list[Optional[int]] = [None] * n
-    confluence_count: list[int] = [1] * n
-    confluence_family_count: list[int] = [1] * n
-    confluence_families: list[tuple[str, ...]] = [tuple([_evidence_family(z.method)]) for z in zones]
-    group_id = 0
-    for members in members_by_root.values():
-        confluence = len(members)
-        families = tuple(sorted({_evidence_family(zones[i].method) for i in members}))
-        for i in members:
-            confluence_count[i] = confluence
-            confluence_family_count[i] = len(families)
-            confluence_families[i] = families
-        if confluence > 1:
-            for i in members:
-                overlap_group[i] = group_id
-            group_id += 1
-
-    return overlap_group, confluence_count, confluence_family_count, confluence_families
-
-
-# ── 十三、Trading Score（可拆解）/ Trading Recommendation ────────
-
-
-def _normalize_signed(value: float, cap: float) -> float:
-    """把可正可負的訊號（例如 EV、trend）正規化到 [0,1]，0.5 為中性、+cap
-    以上算滿分、-cap 以下算 0 分。"""
-    return float(max(0.0, min(1.0, 0.5 + value / (2 * cap))))
-
-
-def _trading_score_breakdown(
-    role: str,
-    confidence: float,
-    expected_value: Optional[float],
-    risk_reward_ratio: Optional[float],
-    overall_trend: float,
-    volume_confirmation: Optional[str],
-    chip_score: Optional[float] = None,
-) -> dict[str, float]:
-    """Score = EV(34%) + RR(17%) + Trend(12.75%) + Volume(12.75%) + Confidence(8.5%)
-    + Chip(15%)。每個分量先正規化到 [0,1] 再乘上對應權重，回傳值就是「這個
-    分量對總分的實際貢獻」（加總即為 trading_score），不是抽象的 0~1 子分數
-    ——這樣使用者可以直接看出「總分裡有幾分來自 EV、幾分來自量能」，不用
-    自己再乘一次權重（十四、1. 可解釋、十四、8. 明確定義計算公式）。
-
-    role=AT_ZONE 或角色相關數值缺值（EV/RR/量能確認都要求 role 已解析）時，
-    對應分量用中性值 0.5 計算，不直接給 0 分——沒有方向不代表這個 zone
-    「不好」，只是還沒有可以評分的方向性資料。Trend/Confidence 不需要角色
-    解析，任何情況都能算。
-
-    【2026-07 籌碼分析整合】chip_score 是 chip_scores.total_score（-100~100，
-    見 internal/chip 套件），跟 trend 一樣需要依角色翻轉正負號：籌碼偏多
-    （chip_score 為正）代表股價有支撐、較不易跌破，對 SUPPORT 角色是加分；
-    但對 RESISTANCE 角色代表買盤較強，反而較容易「站上」壓力（壓力較不易
-    守住），要用負值計算。查無籌碼資料（chip_score=None，例如尚未同步）時
-    用中性值 0.5，不阻塞整體評分。"""
-    is_support = role == ZoneType.SUPPORT.value
-    is_resistance = role == ZoneType.RESISTANCE.value
-
-    ev_norm = _normalize_signed(expected_value, cap=0.05) if expected_value is not None else 0.5
-    rr_norm = float(max(0.0, min(1.0, risk_reward_ratio / 3.0))) if risk_reward_ratio is not None else 0.5
-
-    if is_support:
-        trend_norm = _normalize_signed(overall_trend, cap=0.1)
-    elif is_resistance:
-        trend_norm = _normalize_signed(-overall_trend, cap=0.1)
-    else:
-        trend_norm = _normalize_signed(overall_trend, cap=0.1)  # AT_ZONE：沒有方向可對齊，用原始值
-
-    volume_norm = _VOLUME_CONFIRMATION_WEIGHT.get(volume_confirmation, 0.5) if volume_confirmation else 0.5
-
-    if chip_score is None:
-        chip_norm = 0.5
-    elif is_resistance:
-        chip_norm = _normalize_signed(-chip_score, cap=100.0)
-    else:
-        chip_norm = _normalize_signed(chip_score, cap=100.0)  # SUPPORT 與 AT_ZONE 用原始值
-
-    w = TRADING_SCORE_WEIGHTS
-    return {
-        "expected_value": float(ev_norm * w["expected_value"]),
-        "risk_reward": float(rr_norm * w["risk_reward"]),
-        "trend": float(trend_norm * w["trend"]),
-        "volume": float(volume_norm * w["volume"]),
-        "confidence": float(confidence * w["confidence"]),
-        "chip": float(chip_norm * w["chip"]),
-    }
-
-
-def _trading_score(breakdown: dict[str, float]) -> float:
-    return float(sum(breakdown.values()))
-
-
-def _trading_score_breakdown_no_direct_chip(
-    role: str,
-    confidence: float,
-    expected_value: Optional[float],
-    risk_reward_ratio: Optional[float],
-    overall_trend: float,
-    volume_confirmation: Optional[str],
-) -> dict[str, float]:
-    """Shadow scoring policy for chip double-path evaluation.
-
-    Production scoring intentionally keeps the direct chip component. This helper
-    redistributes the non-chip weights back to the original 40/20/15/15/10
-    proportions so tests and offline analysis can compare rankings without
-    changing runtime behavior.
-    """
-    current = _trading_score_breakdown(
-        role=role,
-        confidence=confidence,
-        expected_value=expected_value,
-        risk_reward_ratio=risk_reward_ratio,
-        overall_trend=overall_trend,
-        volume_confirmation=volume_confirmation,
-        chip_score=None,
-    )
-    out: dict[str, float] = {}
-    for key, weight in TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP.items():
-        old_weight = TRADING_SCORE_WEIGHTS[key]
-        out[key] = float((current[key] / old_weight) * weight) if old_weight else 0.0
-    return out
-
-
-def _trading_recommendation(trading_score: float, role: str) -> str:
-    """role=SUPPORT：分數高代表『守住訊號強』= 偏多（買進）訊號。
-    role=RESISTANCE：分數高代表『壓力守住訊號強』= 偏空（避開做多/放空）
-    訊號。role=AT_ZONE：沒有明確方向，只給 WATCH/NEUTRAL。6 個類別
-    （Strong Buy/Buy/Watch/Neutral/Avoid/Strong Sell）與非對稱門檻（只有
-    Strong Sell、沒有單獨的 Sell）是需求文件原始定義，這裡照實作。"""
-    if role == ZoneType.AT_ZONE.value:
-        return TradingRecommendation.WATCH.value if trading_score >= 50 else TradingRecommendation.NEUTRAL.value
-
-    if role == ZoneType.SUPPORT.value:
-        if trading_score >= 80:
-            return TradingRecommendation.STRONG_BUY.value
-        if trading_score >= 60:
-            return TradingRecommendation.BUY.value
-        if trading_score >= 40:
-            return TradingRecommendation.WATCH.value
-        if trading_score >= 20:
-            return TradingRecommendation.NEUTRAL.value
-        return TradingRecommendation.AVOID.value
-
-    # RESISTANCE
-    if trading_score >= 80:
-        return TradingRecommendation.STRONG_SELL.value
-    if trading_score >= 60:
-        return TradingRecommendation.AVOID.value
-    if trading_score >= 40:
-        return TradingRecommendation.NEUTRAL.value
-    if trading_score >= 20:
-        return TradingRecommendation.WATCH.value
-    return TradingRecommendation.NEUTRAL.value
-
-
-def _distance_pct_to_zone_bounds(price_low: float, price_high: float, current_price: float) -> float:
-    if price_low <= current_price <= price_high:
-        return 0.0
-    if current_price < price_low:
-        return (price_low - current_price) / current_price
-    return (current_price - price_high) / current_price
-
-
-def _entry_relevance_breakdown(
-    *,
-    role: str,
-    current_price: float,
-    price_low: float,
-    price_high: float,
-    confidence: float,
-    expected_value: Optional[float],
-    risk_reward_ratio: Optional[float],
-    recent_validation: str,
-    volume_confirmation: Optional[str],
-) -> dict[str, float]:
-    distance_pct = _distance_pct_to_zone_bounds(price_low, price_high, current_price)
-    distance = max(0.0, 1.0 - min(distance_pct / 0.08, 1.0)) * 30.0
-    ev_rr = 0.0
-    if expected_value is not None:
-        ev_rr += max(0.0, min((expected_value + 0.02) / 0.07, 1.0)) * 15.0
-    else:
-        ev_rr += 7.5
-    if risk_reward_ratio is not None:
-        ev_rr += min(risk_reward_ratio / 2.5, 1.0) * 15.0
-    else:
-        ev_rr += 7.5
-    validation_map = {
-        RecentValidation.VALIDATED_RECENTLY.value: 20.0,
-        RecentValidation.PENDING_VALIDATION.value: 12.0,
-        RecentValidation.NOT_TESTED_RECENTLY.value: 10.0,
-        RecentValidation.EXPIRED.value: 0.0,
-    }
-    validation = validation_map.get(recent_validation, 8.0)
-    volume_map = {
-        VolumeConfirmation.CONFIRMED.value: 10.0,
-        VolumeConfirmation.NEUTRAL.value: 6.0,
-        VolumeConfirmation.WEAK.value: 3.0,
-        VolumeConfirmation.FAILED.value: 0.0,
-    }
-    volume = volume_map.get(volume_confirmation, 5.0)
-    role_readiness = 0.0 if role == ZoneType.AT_ZONE.value else 10.0
-    return {
-        "distance": float(distance),
-        "ev_rr": float(ev_rr),
-        "validation": float(validation),
-        "volume": float(volume),
-        "role_readiness": float(role_readiness),
-        "confidence": float(confidence * 10.0),
-    }
-
-
-def _entry_relevance_score(breakdown: dict[str, float]) -> float:
-    # clamp 到 [0,100]，讓 entry_relevance_score 是有界的百分制分數；也跟 decision_engine
-    # 對外回報的 base entry relevance 同界線，避免同一 zone 兩處數值對不上。
-    return float(max(0.0, min(100.0, sum(breakdown.values()))))
-
-
 # ── 十、十二：Global Model（Global Trend/Volatility/EV/Confidence/RR）──
 
 
@@ -788,38 +441,6 @@ def _compute_global_metrics(zone_scores: list[ZoneScore]) -> dict[str, Optional[
     global_rr = float(rr_weighted_sum / rr_weight_sum) if rr_weight_sum > 0 else None
 
     return {"expected_value": global_ev, "confidence": global_confidence, "risk_reward_ratio": global_rr}
-
-
-# ── 短中長期摘要與白話 tips ───────────────────────────────────
-
-
-def _fmt_price(v: float) -> str:
-    return f"{v:.2f}"
-
-
-def _moving_average_state(current_price: float, ma5: Optional[float]) -> str:
-    if ma5 is None:
-        return "5日均線資料不足，先以區間本身觀察。"
-    diff = (current_price - ma5) / ma5 if ma5 else 0.0
-    if diff > 0.01:
-        return f"收盤站上5日均線（{_fmt_price(ma5)}），短線動能偏穩。"
-    if diff < -0.01:
-        return f"收盤跌破5日均線（{_fmt_price(ma5)}），短線動能偏弱。"
-    return f"收盤接近5日均線（{_fmt_price(ma5)}），方向仍在整理。"
-
-
-def _chip_reason(chip_score: Optional[float], side: str) -> str:
-    if chip_score is None:
-        return "尚無籌碼分數，這一項先以中性看待。"
-    if chip_score >= CHIP_SIGNAL_STRONG_THRESHOLD:
-        return "籌碼偏多，對支撐較有利。" if side == "support" else "籌碼偏多，壓力可能較容易被挑戰。"
-    if chip_score >= CHIP_SIGNAL_WEAK_THRESHOLD:
-        return "籌碼略偏多，對支撐有小幅加分。" if side == "support" else "籌碼略偏多，壓力需觀察是否被挑戰。"
-    if chip_score <= -CHIP_SIGNAL_STRONG_THRESHOLD:
-        return "籌碼偏空，支撐需要更多確認。" if side == "support" else "籌碼偏空，壓力較容易形成壓制。"
-    if chip_score <= -CHIP_SIGNAL_WEAK_THRESHOLD:
-        return "籌碼略偏空，支撐需要更多確認。" if side == "support" else "籌碼略偏空，壓力仍具壓制參考。"
-    return "籌碼分數接近中性，暫無明顯加分或扣分。"
 
 
 def _chip_direction(chip_score: Optional[float]) -> str:
@@ -909,151 +530,6 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
         "broker_score": float(components["broker_score"]) if components["broker_score"] is not None else None,
         "concentration_score": float(components["concentration_score"]) if components["concentration_score"] is not None else None,
     }
-
-
-def _volume_reason(z: ZoneScore) -> Optional[str]:
-    if z.volume_confirmation == VolumeConfirmation.CONFIRMED.value:
-        return "量能有確認，這個區間的參考性較高。"
-    if z.volume_confirmation == VolumeConfirmation.WEAK.value:
-        return "量能不足，先降低這個區間的信心。"
-    if z.volume_confirmation == VolumeConfirmation.FAILED.value:
-        return "高量但驗證失敗，這個區間可能已被破壞。"
-    return None
-
-
-def _validation_reason(z: ZoneScore) -> str:
-    if z.recent_validation == RecentValidation.VALIDATED_RECENTLY.value:
-        return "最近一次測試有守住，短線仍有參考價值。"
-    if z.recent_validation == RecentValidation.EXPIRED.value:
-        return "最近一次測試偏失效，需等待重新站回或跌回確認。"
-    if z.recent_validation == RecentValidation.NOT_TESTED_RECENTLY.value:
-        return "近期沒有重新測試，參考性會隨時間下降。"
-    return "尚待後續K棒驗證，不宜單獨當成進出依據。"
-
-
-def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[float]) -> dict[str, Any]:
-    # 籌碼不再擠進 reasons 那句話，改成結構化 chip 欄位（見下），讓前端可以
-    # 用數字/徽章呈現而不只是一句文字。reasons 只留均線、驗證、量能、信心、
-    # 共振等非籌碼理由。
-    reasons = [
-        _moving_average_state(current_price, ma5),
-        _validation_reason(z),
-    ]
-    volume = _volume_reason(z)
-    if volume:
-        reasons.append(volume)
-    if z.confidence_level in (ConfidenceLevel.HIGH.value, ConfidenceLevel.VERY_HIGH.value):
-        reasons.append("信心分級偏高，可列為主要觀察區。")
-    elif z.confidence_level == ConfidenceLevel.LOW.value:
-        reasons.append("信心分級偏低，代表樣本少或近期驗證不足。")
-    family_count = z.confluence_family_count or 1
-    if family_count > 1:
-        reasons.append(f"有{family_count}個證據族群指向相近區間，屬於多方法共振。")
-
-    return {
-        "price_low": z.price_low,
-        "price_high": z.price_high,
-        "label": f"{_fmt_price(z.price_low)} ~ {_fmt_price(z.price_high)}",
-        "role": z.role,
-        "role_label": _role_label(z.role),
-        "side": side,
-        "tier": z.tier,
-        "tier_label": z.tier_label,
-        "display_label": _display_label(z.tier, z.role),
-        "confidence": z.confidence,
-        "confidence_level": z.confidence_level,
-        "trading_score": z.trading_score,
-        "recent_validation": z.recent_validation,
-        "volume_confirmation": z.volume_confirmation,
-        "confluence_count": z.confluence_count,
-        "confluence_family_count": z.confluence_family_count,
-        "confluence_families": list(z.confluence_families),
-        # 結構化籌碼（角色化）：direction 是整檔原始方向（偏多/偏空/中性/無資料）；
-        # contribution 是這個角色下籌碼對 trading_score 的直接加權貢獻（0~15，已依
-        # 支撐/壓力翻號，見 _trading_score_breakdown）；bounce/break delta 是籌碼相對
-        # 中性籌碼對本 zone 反彈/跌破機率的邊際貢獻（百分點，模型路徑，見 score_zone）。
-        # 兩個數字分屬「直接權重」與「模型」兩條路徑，評估基準見 docs/sr-zone-scoring.md。
-        "chip": {
-            "direction": z.chip_direction,
-            "contribution": z.trading_score_breakdown.get("chip"),
-            "bounce_delta_pp": z.chip_bounce_delta,
-            "break_delta_pp": z.chip_break_delta,
-        },
-        "reasons": reasons[:5],
-    }
-
-
-def _pick_period_pair(zones: list[ZoneScore], current_price: float) -> tuple[Optional[ZoneScore], Optional[ZoneScore]]:
-    supports = [z for z in zones if z.role == ZoneType.SUPPORT.value and z.price_high < current_price]
-    resistances = [z for z in zones if z.role == ZoneType.RESISTANCE.value and z.price_low > current_price]
-    supports.sort(key=lambda z: _period_summary_rank(z, current_price), reverse=True)
-    resistances.sort(key=lambda z: _period_summary_rank(z, current_price), reverse=True)
-
-    for support in supports or [None]:
-        for resistance in resistances or [None]:
-            if support is not None and resistance is not None and support.price_high >= resistance.price_low:
-                continue
-            return support, resistance
-    return None, None
-
-
-def _period_summary_rank(z: ZoneScore, current_price: float) -> tuple[float, float, float]:
-    distance_pct = _distance_pct_to_zone_bounds(z.price_low, z.price_high, current_price)
-    distance_score = 1.0 - min(distance_pct / 0.08, 1.0)
-    confluence_score = min(float(z.confluence_family_count or z.confluence_count or 1) / 3.0, 1.0)
-    relevance = (
-        (z.trading_score / 100.0) * 0.50
-        + z.confidence * 0.20
-        + distance_score * 0.20
-        + confluence_score * 0.10
-    )
-    if z.role == ZoneType.SUPPORT.value:
-        location_tiebreaker = z.price_high
-    else:
-        location_tiebreaker = -z.price_low
-    return (float(relevance), float(z.trading_score), float(location_tiebreaker))
-
-
-def _build_period_summaries(
-    zone_scores: list[ZoneScore], current_price: float, ma5: Optional[float]
-) -> list[dict[str, Any]]:
-    summaries = []
-    for key, label, tier in PERIOD_SUMMARY_CONFIG:
-        tier_zones = [z for z in zone_scores if z.tier == tier]
-        support, resistance = _pick_period_pair(tier_zones, current_price)
-        summary = {
-            "key": key,
-            "label": label,
-            "tier": tier,
-            "support": _zone_summary(support, "support", current_price, ma5) if support else None,
-            "resistance": _zone_summary(resistance, "resistance", current_price, ma5) if resistance else None,
-        }
-        if support is None:
-            summary["support_note"] = "暫無明確支撐"
-        if resistance is None:
-            summary["resistance_note"] = "暫無明確壓力"
-        summaries.append(summary)
-    return summaries
-
-
-def _build_analysis_tips(
-    period_summaries: list[dict[str, Any]], current_price: float, ma5: Optional[float], chip_score: Optional[float]
-) -> list[str]:
-    tips = [
-        "預設只列短中長期各一個支撐與壓力；完整 zone 可在明細展開。",
-        "若某期間沒有明確支撐或壓力，代表模型找不到符合現價位置的合理區間，不會硬湊數字。",
-        "支撐應在現價下方、壓力應在現價上方；若區間不符合這個關係會被摘要排除。",
-        _moving_average_state(current_price, ma5),
-        _chip_reason(chip_score, "support"),
-    ]
-    for s in period_summaries:
-        if s.get("support") and s.get("resistance"):
-            tips.append(f"{s['label']}區間已同時找到支撐與壓力，可優先觀察價格接近哪一側。")
-        elif s.get("support"):
-            tips.append(f"{s['label']}目前只有支撐較明確，上方壓力仍需等待新結構形成。")
-        elif s.get("resistance"):
-            tips.append(f"{s['label']}目前只有壓力較明確，下方支撐仍需等待新結構形成。")
-    return tips[:8]
 
 
 # ── 主流程 ────────────────────────────────────────────────────
@@ -1296,50 +772,3 @@ def score_symbol(
         fetch_chip_fn=fetch_latest_chip_score,
         get_model_fn=get_model,
     )
-
-
-def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
-    return {
-        "price_low": z.price_low,
-        "price_high": z.price_high,
-        "method": z.method,
-        "role": z.role,
-        "tier": z.tier,
-        "tier_label": z.tier_label,
-        "role_label": _role_label(z.role),
-        "display_label": _display_label(z.tier, z.role),
-        "support_score": z.support_score,
-        "resistance_score": z.resistance_score,
-        "net_score": z.net_score,
-        "net_score_label": z.net_score_label,
-        "confidence": z.confidence,
-        "confidence_level": z.confidence_level,
-        "bounce_probability": z.bounce_probability,
-        "break_probability": z.break_probability,
-        "expected_gain": z.expected_gain,
-        "expected_loss": z.expected_loss,
-        "expected_value": z.expected_value,
-        "risk_reward_ratio": z.risk_reward_ratio,
-        "reward_risk_percentile": z.reward_risk_percentile,
-        "relative_volume": z.relative_volume,
-        "volume_confirmation": z.volume_confirmation,
-        "touch_count": z.touch_count,
-        "support_touch_count": z.support_touch_count,
-        "resistance_touch_count": z.resistance_touch_count,
-        "reject_count": z.reject_count,
-        "break_count": z.break_count,
-        "zone_momentum": z.zone_momentum,
-        "zone_direction": z.zone_direction,
-        "recent_validation": z.recent_validation,
-        "trading_score": z.trading_score,
-        "trading_score_breakdown": z.trading_score_breakdown,
-        "trading_recommendation": z.trading_recommendation,
-        "zone_quality_score": z.zone_quality_score if z.zone_quality_score is not None else z.trading_score,
-        "entry_relevance_score": z.entry_relevance_score,
-        "entry_relevance_breakdown": z.entry_relevance_breakdown,
-        "validation_debug": z.validation_debug,
-        "overlap_group": z.overlap_group,
-        "confluence_count": z.confluence_count,
-        "confluence_family_count": z.confluence_family_count,
-        "confluence_families": list(z.confluence_families),
-    }

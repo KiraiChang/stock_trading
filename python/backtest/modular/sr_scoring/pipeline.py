@@ -118,12 +118,10 @@ def extract_features(data: AnalysisData) -> AnalysisFeatures:
 
 
 def calculate_scores(features: AnalysisFeatures) -> AnalysisScores:
+    from .ranking import _assign_tiers, _group_overlapping_zones, _sort_zone_scores
     from .scoring import (
-        _assign_tiers,
         _build_chip_summary,
         _compute_global_metrics,
-        _group_overlapping_zones,
-        _sort_zone_scores,
         score_zone,
     )
 
@@ -180,11 +178,9 @@ def run_pipeline(
     fetch_chip_fn=fetch_latest_chip_score,
     get_model_fn=get_model,
 ) -> dict[str, Any]:
-    from .scoring import (
-        _build_analysis_tips,
-        _build_period_summaries,
-        _zone_score_to_dict,
-    )
+    from .serialization import _zone_score_to_dict
+    from .summaries import _build_period_summaries
+    from .tips import _build_analysis_tips
 
     data = load_data(
         symbol, timeframe, limit, builders,

@@ -206,39 +206,6 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 ---
 
-### T-016：SR Zone tips 改為技術分析小知識
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / Frontend / UX |
-| 建立日期 | 2026-07-07 |
-| 來源 | 支撐壓力頁面檢視 |
-
-目前 `analysis_tips` 混有使用者有幫助的市場解讀，以及產品/實作說明，例如「預設只列短中長期各一個支撐與壓力」、「完整 zone 可在明細展開」、「模型找不到符合現價位置的合理區間」。使用者看到 tip 時，期待的是分析輔助或技術分析知識，不應看到資料結構、篩選規則或 UI 操作說明。
-
-後續應把 tip 定位成「盤勢閱讀小知識」，例如：
-
-- 支撐不是買點：接近支撐時仍要觀察量能、K 線收盤與籌碼是否配合。
-- 壓力不是放空點：壓力區若被放量站上，常代表原壓力可能轉為支撐。
-- 區間越窄越適合短線觀察，區間越寬越偏向中長期結構。
-- 多方法共振代表不同算法看到相近價位，但仍需要後續 K 棒確認。
-- 低信心不是看空，而是樣本少或近期未驗證，應等待確認。
-
-實作方向：不要隨機塞很多句 tips，改成固定分類的「分析報告閱讀指南 / 小辭典」，
-讓使用者讀 SR Zone 報告時能穩定理解術語與判讀方式：
-
-1. 指標小辭典：`RR`、`EV`、`Confidence`、`Trading Score`、`Confluence`。
-2. 價位語意：`Support`、`Resistance`、`AT_ZONE`、`Primary Zone`。
-3. 事件語意：`Break`、`Bounce`、`Reclaim`、`Invalidated`、`Pullback`。
-4. 判讀提醒：支撐不是買點、壓力不是放空點、低信心不是看空、`RR` 高不等於勝率高。
-
-後續實作時先把 `_build_analysis_tips` 從 `scoring.py` 抽離到獨立模組（例如
-`tips.py`），再以固定分類管理 tips 內容，方便擴充與測試。
-
----
-
 ### T-017：Watching 進場點升級為機率模型
 
 | 欄位 | 內容 |
@@ -285,25 +252,6 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 清單與分析歷史。若系統定位為單人／管理工具可接受，但需明確；若要支援多使用者，
 需替兩張表補 owner 欄位、migration，並在 repo/handler 依當前使用者過濾（可參考
 既有 JWT / `userRepo` 機制）。屬功能擴充，非 bug。
-
----
-
-### T-021：拆分 `scoring.py` 降低單檔責任
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone / 重構 |
-| 建立日期 | 2026-07-13 |
-| 來源 | 原 `docs/sr_zone_improve.md` 2026-07-06 review，刪檔前分流至 todo |
-
-`python/backtest/modular/sr_scoring/scoring.py` 已約 1068 行，單檔同時負責機率
-正規化、confidence / recent validation、tier 排序、overlap grouping、trading
-score / recommendation、global metrics 與 API response serialization。功能正確
-但責任偏重，後續再加評分規則時建議拆分，例如 `scoring_rules.py`（評分與權重）、
-`ranking.py`（tier 排序與 overlap grouping）、`serialization.py`（response 組裝）。
-屬可維護性重構，不改變輸出語意，低優先。
 
 ---
 

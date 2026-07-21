@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .formatting import fmt_price as _fmt_price
 from .types import RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 
 
@@ -42,10 +43,6 @@ EVENT_ORDER = {
     "INTRADAY_RECLAIM": 30,
     "REVERSAL_CANDIDATE": 40,
 }
-
-
-def _fmt_price(v: float) -> str:
-    return f"{v:.2f}"
 
 
 def _distance_pct_to_zone(z: ZoneScore, current_price: float) -> float:

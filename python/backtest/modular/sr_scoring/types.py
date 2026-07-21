@@ -97,7 +97,7 @@ class ZoneTier(str, Enum):
     """zone 依寬度（price_high - price_low）在同一次分析裡的相對排名分三層，
     讓 zone 清單「可排序」成有意義的階層，而不是一堆平行、看不出主次的
     價格區間：Tier 1 最寬，代表宏觀主結構；Tier 3 最窄，代表短期戰術支撐/
-    壓力。見 scoring.py::_assign_tiers。"""
+    壓力。見 ranking.py::_assign_tiers。"""
 
     TIER_1_MAIN_STRUCTURE = "TIER_1_MAIN_STRUCTURE"  # 主結構
     TIER_2_TRADING_ZONE = "TIER_2_TRADING_ZONE"  # 交易區
@@ -270,7 +270,7 @@ class ZoneScore:
     trading_score_breakdown: dict
     trading_recommendation: str
 
-    # 跨方法重疊分群（見 scoring.py::_group_overlapping_zones）：不同方法
+    # 跨方法重疊分群（見 ranking.py::_group_overlapping_zones）：不同方法
     # （ATR/volume_profile）各自建出來、但實際上指向同一價位帶的 zone 會
     # 有相同的 overlap_group id，confluence_count 是這個群組裡的 zone 數。
     # 不合併/刪除任何 zone，只標記供前端顯示「多方法共振」或當排序 tie-

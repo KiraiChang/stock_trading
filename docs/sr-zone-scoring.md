@@ -521,7 +521,7 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 超過設計權重，需用 shadow policy 比較，而非直接從權重常數推論。
 
 **籌碼雙路徑評估基準**：production scoring 目前保留直接 `chip` 分量；同時在
-`scoring.py` 提供 `_trading_score_breakdown_no_direct_chip` 作為離線比較用 shadow
+`scoring_rules.py` 提供 `_trading_score_breakdown_no_direct_chip` 作為離線比較用 shadow
 policy。該 policy 移除直接 `chip` 分量，並把其餘分量恢復為 EV 40% / RR 20% /
 Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重，應先比較
 現況與 shadow policy 的 top1/top3 zone 排名、摘要支撐/壓力選擇、分數差異分布，
@@ -529,8 +529,9 @@ Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重�
 
 **摘要 `reasons` 不再含籌碼句**：籌碼從 `_zone_summary` 的 `reasons[]` 拉出改成上述
 結構化 `chip` 欄位，`reasons` 只保留均線、驗證、量能、信心、共振等非籌碼理由，
-避免同一件事在文字與數字兩處重複。整檔跑馬燈 `analysis_tips` 仍保留一句白話籌碼
-提示（`_chip_reason`）。偏多/偏空門檻統一為 `CHIP_SIGNAL_THRESHOLD`（±20，對齊
+避免同一件事在文字與數字兩處重複。整檔跑馬燈 `analysis_tips` 改由 `tips.py`
+輸出固定分類的閱讀指南；籌碼只作為「判讀提醒」之一，不再混入產品操作說明。
+偏多/偏空門檻統一為 `CHIP_SIGNAL_THRESHOLD`（±10，對齊
 `internal/chip` 的 `signalThreshold`）。
 
 ---
@@ -1216,7 +1217,7 @@ ATR 法（swing pivot + ATR 通道）跟成交量分布法各自獨立建立 zon
 情形——這種殘餘重疊不代表資料有誤，反而是「多方法都認同」的正面訊號，
 不應該被直接刪除或靜默合併掉（會丟失這個交叉驗證資訊）。
 
-`scoring.py::_group_overlapping_zones()`（union-find）只比較**不同 method**
+`ranking.py::_group_overlapping_zones()`（union-find）只比較**不同 method**
 的 zone pair：
 ```
 overlap 比例 = overlap 寬度 / min(zone_a 寬度, zone_b 寬度)
@@ -1441,3 +1442,30 @@ JSON `null`，前端應隱藏 scenario 區塊並繼續顯示既有 explanation/d
 `evidence.chip` 與專屬 `chip_summary` 來自同一份 Score stage 計算結果：
 前者供 Decision/Evidence 使用，後者維持查詢與舊快照相容。舊資料沒有 evidence
 時，前端回退讀取 `analysis.chip_summary`。
+
+### 二十、Summary / Tips 模組邊界
+
+`analysis.period_summaries` 由 `summaries.py` 組裝，負責短 / 中 / 長摘要、
+摘要專用混合排序、zone summary serialization 與摘要 reasons。摘要選價採
+`trading_score` 50%、`confidence` 20%、距離現價 20%、`confluence` 10%；
+完整 `zones` 排序仍由 scoring/ranking 主流程控制。
+
+`analysis.analysis_tips` 由 `tips.py` 組裝，定位為「分析報告閱讀指南 / 小辭典」，
+不是產品操作說明。API 仍維持 `string[]` 以相容前端跑馬燈，但內容固定分成：
+
+- 指標小辭典：`RR`、`EV`、`Confidence`、`Trading Score`、`Confluence`。
+- 價位語意：`Support`、`Resistance`、`AT_ZONE`、`Primary Zone`。
+- 事件語意：`Break`、`Bounce`、`Reclaim`、`Invalidated`、`Pullback`。
+- 判讀提醒：支撐不是買點、壓力不是放空點、低信心不是看空、`RR` 高不等於勝率高。
+
+`scoring_rules.py` 負責 trading score 權重、breakdown、recommendation、entry
+relevance breakdown 與 no-direct-chip shadow policy。`utils.py` 放跨模組共用的
+數值 helper，例如 `distance_pct_to_zone_bounds`；價格格式化則沿用既有
+`formatting.py::fmt_price`。
+
+`ranking.py` 負責 tier assignment、zone sorting、overlap grouping 與 evidence family
+mapping。`serialization.py` 負責 zone score response dict，維持 API 欄位契約。
+
+`scoring.py` 現在保留核心 zone scoring、probability/confidence/recent validation、
+chip summary、global metrics 與 `score_symbol()` 入口；相容性上仍 re-export 已拆出的
+helper，避免舊測試或內部引用一次性中斷。

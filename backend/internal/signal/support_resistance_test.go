@@ -88,6 +88,18 @@ func TestCalcSupportResistance_DetectsZigzagPivots(t *testing.T) {
 	assertContainsPrice(t, supports, 102)    // 谷2
 }
 
+func TestCalcSupportResistance_DetectsFlatTopAndBottomPivots(t *testing.T) {
+	highs := []float64{90, 100, 110, 110, 100, 95, 105, 105, 96, 90}
+	lows := []float64{80, 75, 70, 70, 75, 82, 76, 76, 82, 85}
+
+	supports, resistances := CalcSupportResistance(makeTrendCandles(highs, lows))
+
+	assertContainsPrice(t, resistances, 110)
+	assertContainsPrice(t, resistances, 105)
+	assertContainsPrice(t, supports, 70)
+	assertContainsPrice(t, supports, 76)
+}
+
 func assertContainsPrice(t *testing.T, levels []Level, price float64) {
 	t.Helper()
 	for _, lv := range levels {

@@ -79,3 +79,12 @@ func TestDetectTrend_MixedStructureIsSideways(t *testing.T) {
 		t.Errorf("expected Sideways for mixed HH+LL structure, got %v", got)
 	}
 }
+
+func TestDetectTrend_DetectsFlatTopAndBottomSwingPoints(t *testing.T) {
+	highs := []float64{90, 100, 100, 95, 92, 110, 110, 100, 95, 90}
+	lows := []float64{80, 70, 70, 75, 78, 76, 76, 82, 85, 88}
+
+	if got := DetectTrend(makeTrendCandles(highs, lows)); got != Bullish {
+		t.Errorf("expected Bullish from higher flat-top high and higher flat-bottom low, got %v", got)
+	}
+}

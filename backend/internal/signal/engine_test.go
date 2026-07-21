@@ -2,7 +2,6 @@ package signal
 
 import (
 	"context"
-	"math"
 	"os"
 	"testing"
 	"time"
@@ -103,27 +102,7 @@ func TestEngine_Evaluate_BreakoutGeneratesAndPersistsSignal(t *testing.T) {
 	eng, candleRepo, signalRepo, _ := newTestEngine(t)
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	const n = 34 // 多頭 zigzag 走勢，足夠 DetectTrend 判斷出 BULLISH（HH+HL）
-	candles := make([]store.Candle, 0, n+1)
-	var lastClose float64
-	for i := 0; i < n; i++ {
-		c := 100 + 0.6*float64(i) + 1.0*math.Sin(float64(i))
-		candles = append(candles, store.Candle{
-			Symbol: "BRK", Timeframe: "1d",
-			Open: c - 0.1, High: c + 0.8, Low: c - 0.8, Close: c,
-			Volume: 1000, Timestamp: base.AddDate(0, 0, i),
-		})
-		lastClose = c
-	}
-	// 突破K棒：大漲 + 帶量，收盤遠超過前面所有壓力位（35 根，剛好滿足
-	// indicator.Compute 需要的 >=35 根門檻）
-	breakoutClose := lastClose + 20
-	candles = append(candles, store.Candle{
-		Symbol: "BRK", Timeframe: "1d",
-		Open: lastClose + 0.2, High: breakoutClose + 0.5, Low: lastClose, Close: breakoutClose,
-		Volume: 5000, Timestamp: base.AddDate(0, 0, n),
-	})
-	seedCandles(t, candleRepo, candles)
+	seedCandles(t, candleRepo, breakoutCandles("BRK", base))
 
 	var broadcastSymbol string
 	var broadcastSignal *store.Signal
@@ -165,23 +144,26 @@ func TestEngine_Evaluate_BreakoutGeneratesAndPersistsSignal(t *testing.T) {
 }
 
 func breakoutCandles(symbol string, base time.Time) []store.Candle {
-	const n = 34 // 多頭 zigzag 走勢，足夠 DetectTrend 判斷出 BULLISH（HH+HL）
-	candles := make([]store.Candle, 0, n+1)
-	var lastClose float64
-	for i := 0; i < n; i++ {
-		c := 100 + 0.6*float64(i) + 1.0*math.Sin(float64(i))
+	// 兩個 swing high 95 -> 100 與兩個 swing low 79 -> 84 形成 BULLISH。
+	// 倒數第二根收在 100 阻力下方，最後一根放量收上 100，滿足真正跨越。
+	highs := []float64{
+		81, 83, 85, 87, 89, 91, 93, 95, 93, 92, 91, 90, 88, 86, 84, 83, 85,
+		87, 89, 92, 100, 96, 94, 92, 90, 88, 90, 92, 94, 96, 98, 99, 99, 99,
+	}
+	candles := make([]store.Candle, 0, len(highs)+1)
+	for i, high := range highs {
+		low := high - 4
+		close := high - 1
 		candles = append(candles, store.Candle{
 			Symbol: symbol, Timeframe: "1d",
-			Open: c - 0.1, High: c + 0.8, Low: c - 0.8, Close: c,
+			Open: close - 0.1, High: high, Low: low, Close: close,
 			Volume: 1000, Timestamp: base.AddDate(0, 0, i),
 		})
-		lastClose = c
 	}
-	breakoutClose := lastClose + 20
 	candles = append(candles, store.Candle{
 		Symbol: symbol, Timeframe: "1d",
-		Open: lastClose + 0.2, High: breakoutClose + 0.5, Low: lastClose, Close: breakoutClose,
-		Volume: 5000, Timestamp: base.AddDate(0, 0, n),
+		Open: 99, High: 106, Low: 98, Close: 105,
+		Volume: 5000, Timestamp: base.AddDate(0, 0, len(highs)),
 	})
 	return candles
 }
@@ -263,6 +245,74 @@ func TestEngine_Evaluate_NoChipDataKeepsDefaultStrength(t *testing.T) {
 	}
 	if sig.ChipSignal.Valid {
 		t.Errorf("ChipSignal = %+v, want invalid/empty (no chip data)", sig.ChipSignal)
+	}
+}
+
+func TestEngine_Evaluate_SuppressesDuplicateSignalWithinCooldown(t *testing.T) {
+	eng, candleRepo, signalRepo, _ := newTestEngine(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedCandles(t, candleRepo, breakoutCandles("BRK_DEDUP", base))
+
+	broadcasts := 0
+	eng.BroadcastFn = func(symbol string, sig *store.Signal) {
+		broadcasts++
+	}
+
+	first, err := eng.Evaluate(context.Background(), "BRK_DEDUP", "1d")
+	if err != nil {
+		t.Fatalf("first evaluate failed: %v", err)
+	}
+	if first == nil || first.SignalType != "BREAKOUT" {
+		t.Fatalf("expected first BREAKOUT signal, got %+v", first)
+	}
+
+	second, err := eng.Evaluate(context.Background(), "BRK_DEDUP", "1d")
+	if err != nil {
+		t.Fatalf("second evaluate failed: %v", err)
+	}
+	if second != nil {
+		t.Fatalf("expected duplicate signal to be suppressed, got %+v", second)
+	}
+
+	rows, err := signalRepo.GetBySymbol(context.Background(), "BRK_DEDUP", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected only 1 persisted signal after duplicate suppression, got %d", len(rows))
+	}
+	if broadcasts != 1 {
+		t.Errorf("BroadcastFn calls = %d, want 1", broadcasts)
+	}
+}
+
+func TestEngine_ShouldSuppressDuplicate_AllowsSignalOutsideCooldown(t *testing.T) {
+	eng, _, signalRepo, _ := newTestEngine(t)
+	ts := time.Date(2026, 1, 15, 10, 0, 0, 0, time.UTC)
+	if err := signalRepo.Insert(context.Background(), &store.Signal{
+		Symbol:     "BRK_COOLDOWN",
+		SignalType: "BREAKOUT",
+		Direction:  "BUY",
+		Price:      105,
+		Resistance: 100,
+		Timestamp:  ts.Add(-signalCooldown),
+	}); err != nil {
+		t.Fatalf("seed previous signal failed: %v", err)
+	}
+
+	suppress, err := eng.shouldSuppressDuplicate(context.Background(), "BRK_COOLDOWN", &store.Signal{
+		Symbol:     "BRK_COOLDOWN",
+		SignalType: "BREAKOUT",
+		Direction:  "BUY",
+		Price:      106,
+		Resistance: 100,
+		Timestamp:  ts,
+	})
+	if err != nil {
+		t.Fatalf("duplicate check failed: %v", err)
+	}
+	if suppress {
+		t.Fatal("expected signal at cooldown boundary to be allowed")
 	}
 }
 

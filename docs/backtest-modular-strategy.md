@@ -89,7 +89,10 @@ LONG:  Close[t] > Resistance.Price
        AND Volume[t] / MA(Volume, vol_period)[t] >= vol_multiplier（預設 2.0）
        AND Trend(t) == BULLISH
 
-SHORT: Close[t] < Support.Price
+SHORT: Close[t-2] < Support.Price
+       AND Close[t-1] < Support.Price
+       AND Close[t] < Support.Price
+       AND Close[t-3] >= Support.Price
        AND Trend(t) == BEARISH
        （跌破不要求爆量：恐慌性下跌常伴隨量縮而非量增）
 ```

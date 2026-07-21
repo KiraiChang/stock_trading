@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -16,6 +18,8 @@ import (
 const (
 	chipStrengthBoost  = 1.3
 	chipStrengthReduce = 0.6
+	signalCooldown     = 15 * time.Minute
+	recentSignalLimit  = 20
 )
 
 type Engine struct {
@@ -61,12 +65,15 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store
 	if err != nil || len(candles) == 0 {
 		return nil, err
 	}
+	if len(candles) < 2 {
+		return nil, nil
+	}
 
 	latestCandle := candles[len(candles)-1]
 	supports, resistances := CalcSupportResistance(candles)
 	trend := DetectTrend(candles)
 
-	sig := CheckBreakout(symbol, snap, latestCandle, resistances, supports, trend)
+	sig := CheckBreakout(symbol, snap, candles, resistances, supports, trend)
 	if sig == nil {
 		sig = CheckSupportBounce(symbol, snap, latestCandle, supports)
 	}
@@ -75,6 +82,19 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store
 	}
 
 	e.applyChipWeighting(ctx, symbol, sig)
+
+	suppress, err := e.shouldSuppressDuplicate(ctx, symbol, sig)
+	if err != nil {
+		e.log.Warn("signal duplicate check failed", zap.String("symbol", symbol), zap.Error(err))
+	} else if suppress {
+		e.log.Debug("duplicate signal suppressed",
+			zap.String("symbol", symbol),
+			zap.String("type", sig.SignalType),
+			zap.String("direction", sig.Direction),
+			zap.Time("timestamp", sig.Timestamp),
+		)
+		return nil, nil
+	}
 
 	if err := e.signals.Insert(ctx, sig); err != nil {
 		e.log.Warn("signal insert failed", zap.String("symbol", symbol), zap.Error(err))
@@ -93,6 +113,43 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store
 		zap.Float64("price", sig.Price),
 	)
 	return sig, nil
+}
+
+func (e *Engine) shouldSuppressDuplicate(ctx context.Context, symbol string, sig *store.Signal) (bool, error) {
+	recent, err := e.signals.GetBySymbol(ctx, symbol, recentSignalLimit)
+	if err != nil {
+		return false, err
+	}
+
+	for _, prev := range recent {
+		if !sameSignalIdentity(prev, sig) {
+			continue
+		}
+		elapsed := sig.Timestamp.Sub(prev.Timestamp)
+		if elapsed >= 0 && elapsed < signalCooldown {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func sameSignalIdentity(prev store.Signal, next *store.Signal) bool {
+	if prev.Symbol != next.Symbol || prev.SignalType != next.SignalType || prev.Direction != next.Direction {
+		return false
+	}
+
+	switch next.SignalType {
+	case "BREAKOUT":
+		return samePrice(prev.Resistance, next.Resistance)
+	case "BREAKDOWN", "SUPPORT_BOUNCE":
+		return samePrice(prev.Support, next.Support)
+	default:
+		return true
+	}
+}
+
+func samePrice(a, b float64) bool {
+	return math.Abs(a-b) < 0.000001
 }
 
 // EvaluateAll 批量掃描所有股票

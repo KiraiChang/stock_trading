@@ -33,15 +33,11 @@ func CalcSupportResistance(candles []store.Candle) (supports, resistances []Leve
 
 	var resCandidates, supCandidates []float64
 
-	for i := 1; i < len(window)-1; i++ {
-		// Resistance candidate: Local High
-		if window[i].High > window[i-1].High && window[i].High > window[i+1].High {
-			resCandidates = append(resCandidates, window[i].High)
-		}
-		// Support candidate: Local Low
-		if window[i].Low < window[i-1].Low && window[i].Low < window[i+1].Low {
-			supCandidates = append(supCandidates, window[i].Low)
-		}
+	for _, p := range findLocalHighs(window) {
+		resCandidates = append(resCandidates, p.Price)
+	}
+	for _, p := range findLocalLows(window) {
+		supCandidates = append(supCandidates, p.Price)
 	}
 
 	resistances = buildLevels(resCandidates, "Resistance", window)

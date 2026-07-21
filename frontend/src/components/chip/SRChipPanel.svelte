@@ -6,12 +6,19 @@
   export let summary: SRChipSummary | null = null
 
   const signalText: Record<string, string> = {
-    BULLISH: '籌碼偏多', BEARISH: '籌碼偏空', NEUTRAL: '中性', RISK: '風險升高',
+    BULLISH: '籌碼偏多',
+    WEAK_BULLISH: '籌碼略偏多',
+    BEARISH: '籌碼偏空',
+    WEAK_BEARISH: '籌碼略偏空',
+    NEUTRAL: '中性',
+    RISK: '風險升高',
   }
   // 台股慣例：偏多用紅（text-rise），偏空用綠（text-fall）
   const signalClass: Record<string, string> = {
     BULLISH: 'bg-red-900/40 text-rise',
+    WEAK_BULLISH: 'bg-red-900/20 text-red-300',
     BEARISH: 'bg-green-900/40 text-fall',
+    WEAK_BEARISH: 'bg-green-900/20 text-green-300',
     NEUTRAL: 'bg-gray-700/60 text-gray-300',
     RISK: 'bg-yellow-900/40 text-yellow-400',
   }

@@ -163,6 +163,178 @@ type SRZoneAnalysis struct {
 	CreatedAt       time.Time `db:"created_at"              json:"created_at"`
 }
 
+type SRZoneNormalizedProjections struct {
+	Decision        *SRDecision
+	EventDetections []MarketEventDetection
+	EventStates     []MarketEventState
+	DailyCandidates []SRDailyCandidate
+	ModelGovernance *SRModelGovernance
+}
+
+type SRDecision struct {
+	ID                          uint64    `db:"id"                               json:"id"`
+	AnalysisID                  uint64    `db:"analysis_id"                      json:"analysis_id"`
+	Symbol                      string    `db:"symbol"                           json:"symbol"`
+	Timeframe                   string    `db:"timeframe"                        json:"timeframe"`
+	AnalyzedAt                  time.Time `db:"analyzed_at"                      json:"analyzed_at"`
+	MarketBias                  string    `db:"market_bias"                      json:"market_bias"`
+	EntryPermissionState        string    `db:"entry_permission_state"           json:"entry_permission_state"`
+	PositionAction              string    `db:"position_action"                  json:"position_action"`
+	PricePathState              string    `db:"price_path_state"                 json:"price_path_state"`
+	ModelHealthState            string    `db:"model_health_state"               json:"model_health_state"`
+	EventMarketState            string    `db:"event_market_state"               json:"event_market_state"`
+	ReasonCodes                 RawJSON   `db:"reason_codes"                     json:"reason_codes"`
+	MarketRegimeJSON            RawJSON   `db:"market_regime_json"               json:"market_regime_json"`
+	DataQualityJSON             RawJSON   `db:"data_quality_json"                json:"data_quality_json"`
+	EventSequenceJSON           RawJSON   `db:"event_sequence_json"              json:"event_sequence_json"`
+	DailyPriceActionJSON        RawJSON   `db:"daily_price_action_json"          json:"daily_price_action_json"`
+	PricePathJSON               RawJSON   `db:"price_path_json"                  json:"price_path_json"`
+	DailyConfirmationJSON       RawJSON   `db:"daily_confirmation_json"          json:"daily_confirmation_json"`
+	DefenseLinesJSON            RawJSON   `db:"defense_lines_json"               json:"defense_lines_json"`
+	RRContextJSON               RawJSON   `db:"rr_context_json"                  json:"rr_context_json"`
+	RRGateJSON                  RawJSON   `db:"rr_gate_json"                     json:"rr_gate_json"`
+	PositionActionConditionJSON RawJSON   `db:"position_action_condition_json"   json:"position_action_condition_json"`
+	MarketContextJSON           RawJSON   `db:"market_context_json"              json:"market_context_json"`
+	ConfidenceExplanationJSON   RawJSON   `db:"confidence_explanation_json"      json:"confidence_explanation_json"`
+	RiskNotesJSON               RawJSON   `db:"risk_notes_json"                  json:"risk_notes_json"`
+	ZoneSummariesJSON           RawJSON   `db:"zone_summaries_json"              json:"zone_summaries_json"`
+	DecisionSummary             RawJSON   `db:"decision_summary"                 json:"decision_summary"`
+	CreatedAt                   time.Time `db:"created_at"                       json:"created_at"`
+}
+
+type MarketEventDetection struct {
+	ID          uint64      `db:"id"           json:"id"`
+	AnalysisID  uint64      `db:"analysis_id"  json:"analysis_id"`
+	Symbol      string      `db:"symbol"       json:"symbol"`
+	Timeframe   string      `db:"timeframe"    json:"timeframe"`
+	AnalyzedAt  time.Time   `db:"analyzed_at"  json:"analyzed_at"`
+	EventKey    string      `db:"event_key"    json:"event_key"`
+	EventType   string      `db:"event_type"   json:"event_type"`
+	EventFamily string      `db:"event_family" json:"event_family"`
+	EventScope  string      `db:"event_scope"  json:"event_scope"`
+	ZoneKey     string      `db:"zone_key"     json:"zone_key"`
+	Direction   string      `db:"direction"    json:"direction"`
+	State       string      `db:"state"        json:"state"`
+	Active      bool        `db:"active"       json:"active"`
+	Confidence  NullFloat64 `db:"confidence"   json:"confidence,omitempty"`
+	PriceLevel  NullFloat64 `db:"price_level"  json:"price_level,omitempty"`
+	ReasonCodes RawJSON     `db:"reason_codes" json:"reason_codes"`
+	EventJSON   RawJSON     `db:"event_json"   json:"event_json"`
+	CreatedAt   time.Time   `db:"created_at"   json:"created_at"`
+}
+
+type MarketEventState struct {
+	ID              uint64      `db:"id"                json:"id"`
+	AnalysisID      uint64      `db:"analysis_id"       json:"analysis_id"`
+	Symbol          string      `db:"symbol"            json:"symbol"`
+	Timeframe       string      `db:"timeframe"         json:"timeframe"`
+	AnalyzedAt      time.Time   `db:"analyzed_at"       json:"analyzed_at"`
+	EventKey        string      `db:"event_key"         json:"event_key"`
+	EventType       string      `db:"event_type"        json:"event_type"`
+	EventFamily     string      `db:"event_family"      json:"event_family"`
+	EventScope      string      `db:"event_scope"       json:"event_scope"`
+	ZoneKey         string      `db:"zone_key"          json:"zone_key"`
+	RootEventType   string      `db:"root_event_type"   json:"root_event_type"`
+	LatestEventType string      `db:"latest_event_type" json:"latest_event_type"`
+	Direction       string      `db:"direction"         json:"direction"`
+	State           string      `db:"state"             json:"state"`
+	Active          bool        `db:"active"            json:"active"`
+	ResolvedBy      NullString  `db:"resolved_by"       json:"resolved_by,omitempty"`
+	Confidence      NullFloat64 `db:"confidence"        json:"confidence,omitempty"`
+	PriceLevel      NullFloat64 `db:"price_level"       json:"price_level,omitempty"`
+	ReasonCodes     RawJSON     `db:"reason_codes"      json:"reason_codes"`
+	StateJSON       RawJSON     `db:"state_json"        json:"state_json"`
+	CreatedAt       time.Time   `db:"created_at"        json:"created_at"`
+}
+
+type SRDailyCandidate struct {
+	ID            uint64      `db:"id"             json:"id"`
+	AnalysisID    uint64      `db:"analysis_id"    json:"analysis_id"`
+	Symbol        string      `db:"symbol"         json:"symbol"`
+	Timeframe     string      `db:"timeframe"      json:"timeframe"`
+	AnalyzedAt    time.Time   `db:"analyzed_at"    json:"analyzed_at"`
+	PriceLow      float64     `db:"price_low"      json:"price_low"`
+	PriceHigh     float64     `db:"price_high"     json:"price_high"`
+	Label         string      `db:"label"          json:"label"`
+	Role          string      `db:"role"           json:"role"`
+	Source        string      `db:"source"         json:"source"`
+	Lifecycle     string      `db:"lifecycle"      json:"lifecycle"`
+	DecisionRole  string      `db:"decision_role"  json:"decision_role"`
+	DistancePct   NullFloat64 `db:"distance_pct"   json:"distance_pct,omitempty"`
+	DistanceLabel string      `db:"distance_label" json:"distance_label"`
+	Reason        string      `db:"reason"         json:"reason"`
+	EventRefs     RawJSON     `db:"event_refs"     json:"event_refs"`
+	CandidateJSON RawJSON     `db:"candidate_json" json:"candidate_json"`
+	CreatedAt     time.Time   `db:"created_at"     json:"created_at"`
+}
+
+type SRModelGovernance struct {
+	ID                     uint64      `db:"id"                       json:"id"`
+	AnalysisID             uint64      `db:"analysis_id"              json:"analysis_id"`
+	Symbol                 string      `db:"symbol"                   json:"symbol"`
+	Timeframe              string      `db:"timeframe"                json:"timeframe"`
+	AnalyzedAt             time.Time   `db:"analyzed_at"              json:"analyzed_at"`
+	ModelVersion           string      `db:"model_version"            json:"model_version"`
+	ModelConfigHash        string      `db:"model_config_hash"        json:"model_config_hash"`
+	HealthState            string      `db:"health_state"             json:"health_state"`
+	AverageEdgePP          NullFloat64 `db:"average_edge_pp"          json:"average_edge_pp,omitempty"`
+	DirectionalZoneCount   NullInt64   `db:"directional_zone_count"   json:"directional_zone_count,omitempty"`
+	ZoneCount              NullInt64   `db:"zone_count"               json:"zone_count,omitempty"`
+	AllowEntry             NullBool    `db:"allow_entry"              json:"allow_entry,omitempty"`
+	MaxEntryState          string      `db:"max_entry_state"          json:"max_entry_state"`
+	QualityFlags           RawJSON     `db:"quality_flags"            json:"quality_flags"`
+	WarningFlags           RawJSON     `db:"warning_flags"            json:"warning_flags"`
+	BlockingFlags          RawJSON     `db:"blocking_flags"           json:"blocking_flags"`
+	ConfidenceGateJSON     RawJSON     `db:"confidence_gate_json"     json:"confidence_gate_json"`
+	CalibrationReportJSON  RawJSON     `db:"calibration_report_json"  json:"calibration_report_json"`
+	WalkForwardReportJSON  RawJSON     `db:"walk_forward_report_json" json:"walk_forward_report_json"`
+	DatasetDiagnosticsJSON RawJSON     `db:"dataset_diagnostics_json" json:"dataset_diagnostics_json"`
+	GovernanceJSON         RawJSON     `db:"governance_json"          json:"governance_json"`
+	CreatedAt              time.Time   `db:"created_at"               json:"created_at"`
+}
+
+type SRModelMetric struct {
+	ID                 uint64      `db:"id"                   json:"id"`
+	TrainJobID         uint64      `db:"train_job_id"         json:"train_job_id"`
+	JobID              string      `db:"job_id"               json:"job_id"`
+	ModelVersion       string      `db:"model_version"        json:"model_version"`
+	ModelType          string      `db:"model_type"           json:"model_type"`
+	SplitMethod        string      `db:"split_method"         json:"split_method"`
+	Timeframe          string      `db:"timeframe"            json:"timeframe"`
+	Rows               NullInt64   `db:"rows"                 json:"rows,omitempty"`
+	Sources            NullInt64   `db:"sources"              json:"sources,omitempty"`
+	HoldAUC            NullFloat64 `db:"hold_auc"             json:"hold_auc,omitempty"`
+	HoldBrierScore     NullFloat64 `db:"hold_brier_score"     json:"hold_brier_score,omitempty"`
+	HoldLogLoss        NullFloat64 `db:"hold_log_loss"        json:"hold_log_loss,omitempty"`
+	HoldCalibrated     NullBool    `db:"hold_calibrated"      json:"hold_calibrated,omitempty"`
+	HoldTestRows       NullInt64   `db:"hold_test_rows"       json:"hold_test_rows,omitempty"`
+	BreakAUC           NullFloat64 `db:"break_auc"            json:"break_auc,omitempty"`
+	BreakBrierScore    NullFloat64 `db:"break_brier_score"    json:"break_brier_score,omitempty"`
+	BreakLogLoss       NullFloat64 `db:"break_log_loss"       json:"break_log_loss,omitempty"`
+	BreakCalibrated    NullBool    `db:"break_calibrated"     json:"break_calibrated,omitempty"`
+	BreakTestRows      NullInt64   `db:"break_test_rows"      json:"break_test_rows,omitempty"`
+	MetricsJSON        RawJSON     `db:"metrics_json"         json:"metrics_json"`
+	DatasetSummaryJSON RawJSON     `db:"dataset_summary_json" json:"dataset_summary_json"`
+	CreatedAt          time.Time   `db:"created_at"           json:"created_at"`
+}
+
+type SRRegressionResult struct {
+	ID              uint64      `db:"id"                 json:"id"`
+	RunID           string      `db:"run_id"             json:"run_id"`
+	ModelConfigHash string      `db:"model_config_hash"  json:"model_config_hash"`
+	PipelineVersion string      `db:"pipeline_version"   json:"pipeline_version"`
+	DatasetFrom     NullTime    `db:"dataset_from"       json:"dataset_from,omitempty"`
+	DatasetTo       NullTime    `db:"dataset_to"         json:"dataset_to,omitempty"`
+	SplitMethod     string      `db:"split_method"       json:"split_method"`
+	HoldAUC         NullFloat64 `db:"hold_auc"           json:"hold_auc,omitempty"`
+	HoldBrierScore  NullFloat64 `db:"hold_brier_score"   json:"hold_brier_score,omitempty"`
+	BreakAUC        NullFloat64 `db:"break_auc"          json:"break_auc,omitempty"`
+	BreakBrierScore NullFloat64 `db:"break_brier_score" json:"break_brier_score,omitempty"`
+	Passed          NullBool    `db:"passed"             json:"passed,omitempty"`
+	MetricsJSON     RawJSON     `db:"metrics_json"       json:"metrics_json"`
+	CreatedAt       time.Time   `db:"created_at"         json:"created_at"`
+}
+
 type SRZone struct {
 	ID         uint64  `db:"id"                      json:"id"`
 	AnalysisID uint64  `db:"analysis_id"             json:"analysis_id"`
@@ -173,7 +345,7 @@ type SRZone struct {
 
 	// Tier/TierLabel：zone 依寬度在同一次分析裡的相對排名分三層
 	// （TIER_1_MAIN_STRUCTURE 主結構 / TIER_2_TRADING_ZONE 交易區 /
-	// TIER_3_SHORT_TERM 短期支撐），讓 zone 清單可排序（見
+	// TIER_3_SHORT_TERM 短期），讓 zone 清單可排序（見
 	// scoring.py::_assign_tiers）。
 	Tier      string `db:"tier"                    json:"tier"`
 	TierLabel string `db:"tier_label"              json:"tier_label"`

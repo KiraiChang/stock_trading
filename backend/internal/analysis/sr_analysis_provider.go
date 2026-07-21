@@ -74,11 +74,11 @@ func (p *SRAnalysisProvider) Analyze(ctx context.Context, symbol string, opts SR
 	if err != nil {
 		return nil, err
 	}
-	sr, zones, err := result.ToStore()
+	sr, zones, projections, err := result.ToStore()
 	if err != nil {
 		return nil, fmt.Errorf("convert sr zone result to store: %w", err)
 	}
-	id, err := p.repo.Create(ctx, sr, zones)
+	id, err := p.repo.Create(ctx, sr, zones, projections)
 	if err != nil {
 		return nil, fmt.Errorf("create sr zone analysis: %w", err)
 	}

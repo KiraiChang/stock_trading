@@ -911,7 +911,7 @@ def test_score_symbol_zone_dict_includes_institutional_fields(monkeypatch, bundl
     result = score_symbol("2330", "1d")
 
     expected_keys = {
-        "price_low", "price_high", "method", "role", "tier", "tier_label",
+        "price_low", "price_high", "method", "role", "tier", "tier_label", "role_label", "display_label",
         "support_score", "resistance_score", "net_score", "net_score_label",
         "confidence", "confidence_level",
         "bounce_probability", "break_probability",
@@ -945,9 +945,18 @@ def test_chip_direction_thresholds():
     assert scoring._chip_direction(50.0) == "bullish"
     assert scoring._chip_direction(-50.0) == "bearish"
     assert scoring._chip_direction(5.0) == "neutral"
-    # 門檻對齊 CHIP_SIGNAL_THRESHOLD（±20）
+    # 方向門檻使用弱訊號（±10）；強弱程度由 _chip_signal 五段化輸出。
     assert scoring._chip_direction(scoring.CHIP_SIGNAL_THRESHOLD) == "bullish"
     assert scoring._chip_direction(-scoring.CHIP_SIGNAL_THRESHOLD) == "bearish"
+
+
+def test_chip_signal_uses_five_bands():
+    assert scoring._chip_signal(None) is None
+    assert scoring._chip_signal(30.0) == "BULLISH"
+    assert scoring._chip_signal(10.0) == "WEAK_BULLISH"
+    assert scoring._chip_signal(0.0) == "NEUTRAL"
+    assert scoring._chip_signal(-10.0) == "WEAK_BEARISH"
+    assert scoring._chip_signal(-30.0) == "BEARISH"
 
 
 def test_build_chip_summary_missing():
@@ -978,6 +987,7 @@ def test_build_chip_summary_present():
     assert s["coverage"] == pytest.approx(1.0)
     assert s["confidence_level"] == "HIGH"
     assert s["signal"] == "BULLISH"
+    assert s["source_signal"] == "BULLISH"
     assert s["institutional_score"] == pytest.approx(60.0)
     assert s["margin_score"] == pytest.approx(-10.0)
     assert s["broker_score"] == pytest.approx(30.0)
@@ -997,6 +1007,8 @@ def test_build_chip_summary_partial_coverage_separates_raw_and_effective():
     assert s["confidence"] == pytest.approx(0.35)
     assert s["confidence_level"] == "LOW"
     assert s["effective_score"] == pytest.approx(-19.25)
+    assert s["signal"] == "WEAK_BEARISH"
+    assert s["source_signal"] == "BEARISH"
 
 
 def test_build_chip_summary_effective_score_deweights_ignoring_total_score():
@@ -1013,6 +1025,7 @@ def test_build_chip_summary_effective_score_deweights_ignoring_total_score():
     # raw_score * coverage = -19.25，明確不等於 total_score(-40.0)。
     assert s["effective_score"] == pytest.approx(-19.25)
     assert s["effective_score"] != pytest.approx(-40.0)
+    assert s["signal"] == "WEAK_BEARISH"
 
 
 def test_build_chip_summary_present_but_all_subscores_none():
@@ -1030,6 +1043,7 @@ def test_build_chip_summary_present_but_all_subscores_none():
     assert s["effective_score"] is None
     assert s["coverage"] == pytest.approx(0.0)
     assert s["confidence_level"] == "NONE"
+    assert s["signal"] is None
 
 
 def test_score_zone_chip_delta_none_when_no_chip_data(bundle):

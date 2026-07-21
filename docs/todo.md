@@ -530,37 +530,40 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 ---
 
-### T-034：Pipeline 架構文件拆分後的程式邊界收斂
+### T-035：SR Zone label 常數抽共用模組
 
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | 架構 / Data Pipeline / Analysis Pipeline / AI Pipeline / Decision Pipeline |
-| 建立日期 | 2026-07-16 |
-| 來源 | `docs/architecture/` pipeline 文件拆分 |
+| 優先度 | 低 |
+| 分類 | Python / SR Zone / 重構 |
+| 建立日期 | 2026-07-21 |
+| 來源 | review T-034（P0-B label 語意） |
 
-目前已先完成文件型架構拆分：`docs/architecture/` 將系統分成 Data Pipeline、
-Analysis Pipeline、AI Pipeline、Decision Pipeline。後續若要實作程式層級收斂，
-需逐步檢查 Go/Python module、handler、scheduler 與 DTO 邊界，讓程式依同樣的
-pipeline 契約演進。
+`TIER_LABEL_TEXT` / `ROLE_LABEL_TEXT` / `_role_label` / `_display_label` 在
+`python/backtest/modular/sr_scoring/scoring.py` 與 `decision_engine.py` 各定義一份。
+本輪 T-034 已出現 tier「短期」語意需兩邊各改一次的 drift 風險。可抽到共用模組
+（例如 `types.py` 或新 `labels.py`）單一來源，兩邊 import。
 
-初步方向：
+---
 
-- Data job、Analysis job、AI train job、Decision job 的 interface 分開。
-- Decision Pipeline 只消費明確 input DTO，不直接回頭抓上游內部 repo 狀態。
-- AI Pipeline 只輸出模型 artifact、metadata、metrics 與機率，不直接輸出交易行動。
-- Analysis Pipeline 的 snapshot/evidence 與 Decision Pipeline 的 action/reason 分開測試。
-- 不在同一批重構中改 API 行為或 DB schema，降低回歸風險。
+### T-036：map[string]any JSON 取值 helper 三處收斂
 
-SR Zone P0 子項（見 `docs/architecture/sr-zone-pipeline-upgrade-plan.md`）：
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / 重構 |
+| 建立日期 | 2026-07-21 |
+| 來源 | review T-034（P2-C normalized projection） |
 
-- P0-A：先固定 SR Zone 的 Analysis / AI / Decision 欄位歸屬契約。
-- P0-B：拆分語意修正項目，包括 `tier_label` / `role_label` / `display_label`、chip signal、
-  confluence family 與舊 action 欄位去重。
-- P0-C：規劃 Decision Arbitration 單一出口，包括唯一 `final_entry_permission`、唯一
-  `position_action`、hard gate priority、entry precedence 與 reason code schema。
-- P0 明確不做 event table、JSONB migration、decision table 拆分或 model registry。
+「從 `map[string]any` 依 path 取型別值」的 helper 目前在三處各自實作：
+`backend/internal/analysis/client.go`（`valueAt`/`stringAt`/`anyFloatAt`/`sliceAt`…）、
+`backend/internal/api/handler/sr_zones.go`（`rawObjectOrEmpty`/`rawAny`/`nullableFloat`…）、
+`backend/internal/store`（`metricValue`/`metricFloat`/`metricInt`/`metricBool`）。
+可評估收斂為單一 internal util（需衡量 package 邊界與 `store.RawJSON`/`sql.Null*` 依賴，非強求）。
+
+---
 
 ## 已完成封存
 

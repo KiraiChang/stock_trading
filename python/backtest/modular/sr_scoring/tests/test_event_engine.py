@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..event_engine import (
     EXTREME_VOLUME_THRESHOLD,
+    build_event_state_summary,
     detect_market_events,
     zone_interaction,
 )
@@ -89,6 +90,40 @@ def test_high_volume_intraday_break_and_reclaim_keeps_full_event_chain():
         "INTRADAY_RECLAIM",
         "REVERSAL_CANDIDATE",
     ]
+
+
+def test_0050_break_reclaim_reversal_resolves_active_bearish_event():
+    # 0050 fixture：同一個支撐區先高量跌破、再收回並形成反轉候選時，
+    # raw event chain 要完整保留，但 active bearish gate 必須被解除。
+    z = _zone(low=98.0, high=100.0, relative_volume=3.0, volume_confirmation=VolumeConfirmation.FAILED.value)
+
+    events = detect_market_events([z], current_price=101.0, candle_high=102.0, candle_low=97.0, candle_close=101.0)
+    summary = build_event_state_summary(events)
+
+    assert [event["type"] for event in events] == [
+        "EXTREME_VOLUME",
+        "HIGH_VOLUME_BREAKDOWN",
+        "INTRADAY_RECLAIM",
+        "REVERSAL_CANDIDATE",
+    ]
+    assert summary["version"] == "event-lifecycle-p1"
+    assert summary["active_bearish_events"] == []
+    assert summary["market_state"] == "RECLAIM_ATTEMPT"
+    breakdown = next(state for state in summary["states"] if state["event_family"] == "SUPPORT_BREAKDOWN")
+    assert breakdown["active"] is False
+    assert breakdown["state"] == "RESOLVED"
+    assert breakdown["resolved_by"] == "INTRADAY_RECLAIM"
+
+
+def test_unresolved_breakdown_remains_active_bearish_event():
+    z = _zone(low=98.0, high=100.0, relative_volume=2.0, volume_confirmation=VolumeConfirmation.FAILED.value)
+
+    events = detect_market_events([z], current_price=97.0, candle_high=99.0, candle_low=96.0, candle_close=97.0)
+    summary = build_event_state_summary(events)
+
+    assert [event["type"] for event in events] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert summary["market_state"] == "BREAKDOWN_RISK"
+    assert [event["type"] for event in summary["active_bearish_events"]] == ["HIGH_VOLUME_BREAKDOWN"]
 
 
 def test_reversal_candidate_when_support_held_inside():

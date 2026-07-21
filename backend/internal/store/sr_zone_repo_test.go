@@ -108,11 +108,94 @@ func testZones() []SRZone {
 	}
 }
 
+func testProjections() SRZoneNormalizedProjections {
+	return SRZoneNormalizedProjections{
+		Decision: &SRDecision{
+			MarketBias:                "BEARISH_BIAS",
+			EntryPermissionState:      "WAIT_CONFIRMATION",
+			PositionAction:            "REDUCE_ON_BREAKDOWN",
+			PricePathState:            "EVENT_RISK",
+			ModelHealthState:          "DEGRADED",
+			EventMarketState:          "BREAKDOWN_RISK",
+			ReasonCodes:               RawJSON(`["SUPPORT_CLOSED_BELOW","HIGH_VOLUME_BREAKDOWN"]`),
+			MarketRegimeJSON:          RawJSON(`{"primary":"TREND_DOWN","label":"偏空"}`),
+			PricePathJSON:             RawJSON(`{"path_state":"EVENT_RISK","next_decision_price":581}`),
+			RRContextJSON:             RawJSON(`{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}`),
+			RRGateJSON:                RawJSON(`{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"}`),
+			MarketContextJSON:         RawJSON(`[{"key":"trend","label":"趨勢","value":"偏空"}]`),
+			ConfidenceExplanationJSON: RawJSON(`{"value":0.72,"level":"HIGH","label":"高","formula_factors":[],"context_factors":[]}`),
+			RiskNotesJSON:             RawJSON(`["跌破支撐"]`),
+			ZoneSummariesJSON:         RawJSON(`{"nearest_decision_zone":{"label":"580.00 ~ 585.00"},"nearest_support_zone":null,"nearest_resistance_zone":null,"primary_structural_zone":null,"best_trade_zone":{"label":"580.00 ~ 585.00"},"primary_zone":{"label":"580.00 ~ 585.00","role":"SUPPORT"},"secondary_zones":[{"label":"600.00 ~ 605.00"}]}`),
+			DecisionSummary:           RawJSON(`{"market_bias":"BEARISH_BIAS","position_action":"REDUCE_ON_BREAKDOWN"}`),
+		},
+		EventDetections: []MarketEventDetection{{
+			EventKey:    "ZONE:BREAKDOWN:SUPPORT:580.0000:585.0000",
+			EventType:   "HIGH_VOLUME_BREAKDOWN",
+			EventFamily: "BREAKDOWN",
+			EventScope:  "ZONE",
+			ZoneKey:     "SUPPORT:580.0000:585.0000",
+			Direction:   "BEARISH",
+			State:       "ACTIVE",
+			Active:      true,
+			Confidence:  NullFloat64{sql.NullFloat64{Float64: 0.72, Valid: true}},
+			PriceLevel:  NullFloat64{sql.NullFloat64{Float64: 580, Valid: true}},
+			ReasonCodes: RawJSON(`["HIGH_VOLUME_BREAKDOWN"]`),
+			EventJSON:   RawJSON(`{"type":"HIGH_VOLUME_BREAKDOWN","active":true}`),
+		}},
+		EventStates: []MarketEventState{{
+			EventKey:        "ZONE:BREAKDOWN:SUPPORT:580.0000:585.0000",
+			EventType:       "HIGH_VOLUME_BREAKDOWN",
+			EventFamily:     "BREAKDOWN",
+			EventScope:      "ZONE",
+			ZoneKey:         "SUPPORT:580.0000:585.0000",
+			RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+			LatestEventType: "HIGH_VOLUME_BREAKDOWN",
+			Direction:       "BEARISH",
+			State:           "ACTIVE",
+			Active:          true,
+			Confidence:      NullFloat64{sql.NullFloat64{Float64: 0.72, Valid: true}},
+			PriceLevel:      NullFloat64{sql.NullFloat64{Float64: 580, Valid: true}},
+			ReasonCodes:     RawJSON(`["HIGH_VOLUME_BREAKDOWN"]`),
+			StateJSON:       RawJSON(`{"type":"HIGH_VOLUME_BREAKDOWN","state":"ACTIVE"}`),
+		}},
+		DailyCandidates: []SRDailyCandidate{{
+			PriceLow:      579.5,
+			PriceHigh:     581.0,
+			Label:         "579.50 ~ 581.00",
+			Role:          "SUPPORT",
+			Source:        "DAILY_CANDLE",
+			Lifecycle:     "CANDIDATE",
+			DecisionRole:  "TACTICAL",
+			DistancePct:   NullFloat64{sql.NullFloat64{Float64: 0.012, Valid: true}},
+			DistanceLabel: "1.2%",
+			Reason:        "日 K 低點與收盤位置形成的短線支撐候選。",
+			EventRefs:     RawJSON(`["INTRADAY_RECLAIM"]`),
+			CandidateJSON: RawJSON(`{"role":"SUPPORT","source":"DAILY_CANDLE"}`),
+		}},
+		ModelGovernance: &SRModelGovernance{
+			HealthState:            "DEGRADED",
+			AverageEdgePP:          NullFloat64{sql.NullFloat64{Float64: 12.5, Valid: true}},
+			DirectionalZoneCount:   NullInt64{sql.NullInt64{Int64: 2, Valid: true}},
+			ZoneCount:              NullInt64{sql.NullInt64{Int64: 3, Valid: true}},
+			AllowEntry:             NullBool{sql.NullBool{Bool: true, Valid: true}},
+			MaxEntryState:          "SMALL_ENTRY",
+			QualityFlags:           RawJSON(`["HOLD_NOT_CALIBRATED"]`),
+			WarningFlags:           RawJSON(`["LOW_AVERAGE_EDGE"]`),
+			BlockingFlags:          RawJSON(`[]`),
+			ConfidenceGateJSON:     RawJSON(`{"allow_entry":true,"max_entry_state":"SMALL_ENTRY"}`),
+			CalibrationReportJSON:  RawJSON(`{"schema_version":"sr_calibration_report_v1"}`),
+			WalkForwardReportJSON:  RawJSON(`{"schema_version":"sr_walk_forward_report_v1"}`),
+			DatasetDiagnosticsJSON: RawJSON(`{"schema_version":"sr_dataset_diagnostics_v1"}`),
+			GovernanceJSON:         RawJSON(`{"health_state":"DEGRADED"}`),
+		},
+	}
+}
+
 func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
-	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	id, err := repo.Create(ctx, testAnalysis(), testZones(), testProjections())
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -165,6 +248,70 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if !saved.GlobalRiskRewardRatio.Valid || saved.GlobalRiskRewardRatio.Float64 != 0.9 {
 		t.Fatalf("unexpected saved global_risk_reward_ratio: %+v", saved.GlobalRiskRewardRatio)
+	}
+
+	decision, err := repo.GetDecision(ctx, id)
+	if err != nil {
+		t.Fatalf("GetDecision failed: %v", err)
+	}
+	if decision.AnalysisID != id || decision.MarketBias != "BEARISH_BIAS" || decision.EventMarketState != "BREAKDOWN_RISK" {
+		t.Fatalf("unexpected decision projection: %+v", decision)
+	}
+	if string(decision.ReasonCodes) != `["SUPPORT_CLOSED_BELOW","HIGH_VOLUME_BREAKDOWN"]` {
+		t.Fatalf("unexpected decision reason_codes: %s", decision.ReasonCodes)
+	}
+	if string(decision.MarketRegimeJSON) != `{"primary":"TREND_DOWN","label":"偏空"}` {
+		t.Fatalf("unexpected market_regime_json: %s", decision.MarketRegimeJSON)
+	}
+	if string(decision.RRContextJSON) != `{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}` {
+		t.Fatalf("unexpected rr_context_json: %s", decision.RRContextJSON)
+	}
+	if string(decision.ZoneSummariesJSON) == "" || string(decision.ZoneSummariesJSON) == "null" {
+		t.Fatalf("expected zone_summaries_json to round-trip, got %s", decision.ZoneSummariesJSON)
+	}
+
+	detections, err := repo.GetMarketEventDetections(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMarketEventDetections failed: %v", err)
+	}
+	if len(detections) != 1 || detections[0].EventType != "HIGH_VOLUME_BREAKDOWN" || !detections[0].Active {
+		t.Fatalf("unexpected event detections: %+v", detections)
+	}
+
+	states, err := repo.GetMarketEventStates(ctx, id)
+	if err != nil {
+		t.Fatalf("GetMarketEventStates failed: %v", err)
+	}
+	if len(states) != 1 || states[0].State != "ACTIVE" || states[0].LatestEventType != "HIGH_VOLUME_BREAKDOWN" {
+		t.Fatalf("unexpected event states: %+v", states)
+	}
+
+	candidates, err := repo.GetDailyCandidates(ctx, id)
+	if err != nil {
+		t.Fatalf("GetDailyCandidates failed: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Role != "SUPPORT" || candidates[0].Source != "DAILY_CANDLE" {
+		t.Fatalf("unexpected daily candidates: %+v", candidates)
+	}
+	if !candidates[0].DistancePct.Valid || candidates[0].DistancePct.Float64 != 0.012 {
+		t.Fatalf("unexpected daily candidate distance_pct: %+v", candidates[0].DistancePct)
+	}
+	if string(candidates[0].EventRefs) != `["INTRADAY_RECLAIM"]` {
+		t.Fatalf("unexpected daily candidate event_refs: %s", candidates[0].EventRefs)
+	}
+
+	governance, err := repo.GetModelGovernance(ctx, id)
+	if err != nil {
+		t.Fatalf("GetModelGovernance failed: %v", err)
+	}
+	if governance.AnalysisID != id || governance.HealthState != "DEGRADED" || governance.ModelVersion != "v1" {
+		t.Fatalf("unexpected model governance: %+v", governance)
+	}
+	if !governance.AllowEntry.Valid || !governance.AllowEntry.Bool || governance.MaxEntryState != "SMALL_ENTRY" {
+		t.Fatalf("unexpected confidence gate projection: %+v", governance)
+	}
+	if string(governance.QualityFlags) != `["HOLD_NOT_CALIBRATED"]` {
+		t.Fatalf("unexpected model governance quality_flags: %s", governance.QualityFlags)
 	}
 
 	zones, err := repo.GetZones(ctx, id)
@@ -258,7 +405,7 @@ func TestSRZoneRepoCreateDefaultsEmptyChipSummaryToNull(t *testing.T) {
 
 	a := testAnalysis()
 	a.ChipSummary = "" // Python 舊版沒帶 chip_summary 時 client 會給空值
-	id, err := repo.Create(ctx, a, testZones())
+	id, err := repo.Create(ctx, a, testZones(), SRZoneNormalizedProjections{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -277,13 +424,13 @@ func TestSRZoneRepoListFiltersBySymbol(t *testing.T) {
 
 	a1 := testAnalysis()
 	a1.Symbol = "2330"
-	if _, err := repo.Create(ctx, a1, testZones()); err != nil {
+	if _, err := repo.Create(ctx, a1, testZones(), SRZoneNormalizedProjections{}); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
 	a2 := testAnalysis()
 	a2.Symbol = "2454"
-	if _, err := repo.Create(ctx, a2, testZones()); err != nil {
+	if _, err := repo.Create(ctx, a2, testZones(), SRZoneNormalizedProjections{}); err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
 
@@ -308,7 +455,7 @@ func TestSRZoneRepoUpdateZoneStatus(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
-	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	id, err := repo.Create(ctx, testAnalysis(), testZones(), testProjections())
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -357,7 +504,7 @@ func TestSRZoneRepoUpdateZoneStatusPersistsResolvedRole(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
-	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	id, err := repo.Create(ctx, testAnalysis(), testZones(), SRZoneNormalizedProjections{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -402,7 +549,7 @@ func TestSRZoneRepoUpdateZoneStatusIgnoresResolvedRoleForDirectionalZone(t *test
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
-	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	id, err := repo.Create(ctx, testAnalysis(), testZones(), SRZoneNormalizedProjections{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -440,7 +587,7 @@ func TestSRZoneRepoDeleteCascadesZones(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
-	id, err := repo.Create(ctx, testAnalysis(), testZones())
+	id, err := repo.Create(ctx, testAnalysis(), testZones(), SRZoneNormalizedProjections{})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
 	}
@@ -458,5 +605,15 @@ func TestSRZoneRepoDeleteCascadesZones(t *testing.T) {
 	}
 	if len(zones) != 0 {
 		t.Fatalf("expected 0 zones after cascade delete, got %d", len(zones))
+	}
+	candidates, err := repo.GetDailyCandidates(ctx, id)
+	if err != nil {
+		t.Fatalf("GetDailyCandidates after delete failed: %v", err)
+	}
+	if len(candidates) != 0 {
+		t.Fatalf("expected 0 daily candidates after delete, got %d", len(candidates))
+	}
+	if _, err := repo.GetModelGovernance(ctx, id); err == nil {
+		t.Fatalf("expected error getting deleted model governance")
 	}
 }

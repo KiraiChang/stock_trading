@@ -103,6 +103,7 @@ def _summary(
     previous_candle_low: float | None = None,
     previous_candle_close: float | None = None,
     data_quality_metadata: dict | None = None,
+    model_governance: dict | None = None,
 ) -> dict:
     return build_decision_summary(
         zones,
@@ -121,6 +122,7 @@ def _summary(
         previous_candle_low=previous_candle_low,
         previous_candle_close=previous_candle_close,
         data_quality_metadata=data_quality_metadata,
+        model_governance=model_governance,
     )
 
 
@@ -139,13 +141,65 @@ def test_buy_for_bullish_high_quality_near_support():
     assert ds["primary_zone"]["structural_score"] == ds["primary_zone"]["zone_quality_score"]
     assert ds["primary_zone"]["decision_relevance_score"] == ds["primary_zone"]["entry_relevance_score"]
     assert ds["primary_zone"]["tradability_score"] == ds["primary_zone"]["trading_score"]
+    assert ds["primary_zone"]["role_label"] == "支撐"
+    assert ds["primary_zone"]["display_label"] == "主結構支撐"
     assert ds["rr_gate"]["qualified"] is True
     assert ds["best_trade_zone"]["label"] == "98.00 ~ 100.00"
     assert ds["nearest_decision_zone"]["label"] == "98.00 ~ 100.00"
     assert ds["primary_zone"]["source"] == "HISTORICAL_SR"
+    assert ds["decision_contract"]["version"] == "sr-zone-decision-p0"
+    assert "final_entry_permission" in ds["decision_contract"]["authoritative_fields"]
+    assert "action" in ds["decision_contract"]["deprecated_fields"]
     assert ds["primary_zone"]["decision_role"] == "PRIMARY"
     assert ds["market_regime"]["tactical_regime"] == ds["market_regime"]["short_term_regime"]
     assert ds["market_regime"]["recovery_state"] == ds["market_regime"]["structure_state"]
+
+
+def test_unreliable_model_governance_blocks_entry():
+    ds = _summary(
+        [_zone()],
+        model_governance={
+            "health_state": "UNRELIABLE",
+            "blocking_flags": ["HOLD_LOW_TEST_ROWS"],
+            "warning_flags": [],
+            "confidence_gate": {
+                "state": "UNRELIABLE",
+                "allow_entry": False,
+                "max_entry_state": "WAIT_CONFIRMATION",
+                "reason_codes": ["HOLD_LOW_TEST_ROWS"],
+            },
+        },
+    )
+
+    assert ds["model_governance"]["health_state"] == "UNRELIABLE"
+    assert "MODEL_UNRELIABLE" in ds["market_regime"]["flags"]
+    assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert any("模型健康度不可用" in note for note in ds["risk_notes"])
+
+
+def test_degraded_model_governance_downgrades_strong_buy_to_small_entry():
+    ds = _summary(
+        [_zone()],
+        model_governance={
+            "health_state": "DEGRADED",
+            "blocking_flags": [],
+            "warning_flags": ["HOLD_NOT_CALIBRATED"],
+            "confidence_gate": {
+                "state": "DEGRADED",
+                "allow_entry": True,
+                "max_entry_state": "SMALL_ENTRY",
+                "reason_codes": ["HOLD_NOT_CALIBRATED"],
+            },
+        },
+    )
+
+    assert ds["model_governance"]["health_state"] == "DEGRADED"
+    assert "MODEL_DEGRADED" in ds["market_regime"]["flags"]
+    assert ds["action"] == "BuySmall"
+    assert ds["entry_action_state"] in ("PROBE_ENTRY", "SMALL_ENTRY")
+    assert any("模型健康度降級" in note for note in ds["risk_notes"])
 
 
 def test_high_quality_far_from_zone_cannot_be_buy():
@@ -171,6 +225,10 @@ def test_primary_high_volume_breakdown_event_forces_exit():
     ds = _summary([zone], current_price=97.5, candle_high=100.5, candle_low=97.0, candle_close=97.5)
 
     assert ds["market_events"][0]["type"] == "HIGH_VOLUME_BREAKDOWN"
+    assert ds["event_state_summary"]["market_state"] == "BREAKDOWN_RISK"
+    assert [event["type"] for event in ds["event_state_summary"]["active_bearish_events"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert ds["price_path"]["path_state"] == "EVENT_RISK"
+    assert ds["price_path"]["blocked_by_event"]["type"] == "HIGH_VOLUME_BREAKDOWN"
     assert ds["market_action"] == "AVOID"
     assert ds["position_action"] == "EXIT"
     # 對外回報的 entry_relevance 是 base 值，不把市場事件修正灌進同名分數／breakdown，
@@ -199,7 +257,7 @@ def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
         relative_volume=2.2,
         volume_confirmation=VolumeConfirmation.FAILED.value,
         tier=ZoneTier.TIER_3_SHORT_TERM.value,
-        tier_label="短期支撐/壓力",
+        tier_label="短期",
     )
 
     ds = _summary([main, short], current_price=89.0, candle_high=91.5, candle_low=88.5, candle_close=89.0)
@@ -225,7 +283,7 @@ def test_minor_high_volume_breakdown_only_adds_risk_note_without_forced_action()
         relative_volume=2.2,
         volume_confirmation=VolumeConfirmation.FAILED.value,
         tier=ZoneTier.TIER_3_SHORT_TERM.value,
-        tier_label="短期支撐/壓力",
+        tier_label="短期",
     )
 
     ds = _summary([main, short], current_price=89.0, candle_high=91.5, candle_low=88.5, candle_close=89.0)
@@ -624,6 +682,43 @@ def test_event_sequence_keeps_break_reclaim_reversal_order():
         "REVERSAL_CANDIDATE",
     ]
     assert [item["label"] for item in ds["event_sequence"]] == ["極端量能", "放量破位", "收盤收復", "反轉候選"]
+    assert ds["event_state_summary"]["active_bearish_events"] == []
+    assert ds["event_state_summary"]["market_state"] == "RECLAIM_ATTEMPT"
+    assert ds["market_regime"]["short_term_regime"] == "RECLAIM_ATTEMPT"
+    assert ds["market_action"] != "AVOID"
+    assert ds["position_action"] != "EXIT"
+    assert ds["price_path"]["path_state"] != "EVENT_RISK"
+    assert ds["price_path"]["blocked_by_event"] is None
+
+
+def test_resolved_breakdown_is_excluded_from_bias_and_primary_zone_gating():
+    # I-016：已被 reclaim/reversal resolve 的 breakdown 只保留在 raw chain 呈現，
+    # 不得再影響 gating——primary zone 選擇、market_bias 與 event-aware relevance
+    # 一律只吃 active 事件。
+    zone = _zone(
+        low=98.0,
+        high=100.0,
+        risk_reward_ratio=2.5,
+        relative_volume=3.0,
+        volume_confirmation=VolumeConfirmation.FAILED.value,
+    )
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=97.0,
+        candle_close=101.0,
+    )
+
+    # raw chain 仍保留完整 break→reclaim→reversal，但 active bearish gate 已清空。
+    assert "HIGH_VOLUME_BREAKDOWN" in [item["type"] for item in ds["event_sequence"]]
+    assert ds["event_state_summary"]["active_bearish_events"] == []
+    # bias 不得因已收復的歷史 breakdown 標成偏空。
+    assert ds["market_bias"] != "BEARISH_BIAS"
+    # 主交易區仍是被收復的支撐區，不因 resolved breakdown 的 relevance 懲罰被降級/剔除。
+    assert ds["primary_zone"] is not None
+    assert (ds["primary_zone"]["price_low"], ds["primary_zone"]["price_high"]) == (98.0, 100.0)
 
 
 def test_daily_price_action_outputs_eod_bar_states():

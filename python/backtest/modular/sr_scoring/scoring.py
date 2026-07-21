@@ -63,7 +63,7 @@
   （R1 的 overall_trend/overall_volatility 改名）放在一起，構成單一、
   權威的「整體評估」區塊，取代「要看哪個 zone 才代表這檔股票」的曖昧。
 
-十一、Zone 必須可排序：Tier 1（主結構）/ Tier 2（交易區）/ Tier 3（短期支撐）
+十一、Zone 必須可排序：Tier 1（主結構）/ Tier 2（交易區）/ Tier 3（短期）
   zones 依寬度（price_high - price_low）在同一次分析裡的相對排名分三層
   （見 _assign_tiers），最寬的三分之一是 Tier 1（宏觀主結構），最窄的
   三分之一是 Tier 3（短期戰術支撐/壓力）。回傳的 zones 陣列依 tier 由粗到
@@ -169,10 +169,12 @@ TRADING_SCORE_WEIGHTS = {
     "chip": 15.0,
 }
 
-# 籌碼分數（chip_scores.total_score，-100~100）判定偏多/偏空的門檻，對齊 Go
-# internal/chip 的 signalThreshold（±20 才算 BULLISH/BEARISH，見 chip/score.go）。
-# 摘要方向敘述（_chip_reason）與結構化方向（_chip_direction）共用同一個門檻。
-CHIP_SIGNAL_THRESHOLD = 20.0
+# 籌碼分數（chip_scores.total_score，-100~100）五段訊號門檻。SR Zone 以有效
+# 影響分（effective_score）做方向判讀，避免低覆蓋率但單一分量極端時被解讀成
+# 強訊號；_chip_direction 用弱門檻判斷是否已有明確方向。
+CHIP_SIGNAL_WEAK_THRESHOLD = 10.0
+CHIP_SIGNAL_STRONG_THRESHOLD = 30.0
+CHIP_SIGNAL_THRESHOLD = CHIP_SIGNAL_WEAK_THRESHOLD
 CHIP_COMPONENT_WEIGHTS = {
     "institutional_score": 0.35,
     "margin_score": 0.20,
@@ -190,7 +192,13 @@ _VOLUME_CONFIRMATION_WEIGHT = {
 TIER_LABEL_TEXT = {
     ZoneTier.TIER_1_MAIN_STRUCTURE.value: "主結構",
     ZoneTier.TIER_2_TRADING_ZONE.value: "交易區",
-    ZoneTier.TIER_3_SHORT_TERM.value: "短期支撐",
+    ZoneTier.TIER_3_SHORT_TERM.value: "短期",
+}
+
+ROLE_LABEL_TEXT = {
+    ZoneType.SUPPORT.value: "支撐",
+    ZoneType.RESISTANCE.value: "壓力",
+    ZoneType.AT_ZONE.value: "區間內",
 }
 
 PERIOD_SUMMARY_CONFIG = [
@@ -239,6 +247,14 @@ def _resolve_role(zone: Zone, current_price: float) -> str:
     if current_price < zone.price_low:
         return ZoneType.RESISTANCE.value
     return ZoneType.AT_ZONE.value
+
+
+def _role_label(role: str) -> str:
+    return ROLE_LABEL_TEXT.get(role, role)
+
+
+def _display_label(tier: str, role: str) -> str:
+    return f"{TIER_LABEL_TEXT.get(tier, tier)}{_role_label(role)}"
 
 
 def _net_score_label(net_score: float, threshold: float = NET_SCORE_STRONG_THRESHOLD) -> str:
@@ -433,7 +449,7 @@ def _zone_direction(momentum: float, threshold: float = ZONE_DIRECTION_THRESHOLD
 def _assign_tiers(widths: list[float]) -> list[str]:
     """依寬度（zone.price_high - zone.price_low）分三個 tier：最寬的 1/3
     是 Tier 1（主結構，涵蓋範圍最大的宏觀結構），中間 1/3 是 Tier 2
-    （交易區），最窄的 1/3 是 Tier 3（短期支撐，最貼近盤中操作的精確價位）。
+    （交易區），最窄的 1/3 是 Tier 3（短期，最貼近盤中操作的精確價位）。
     用同一批 zone 的寬度分佈做相對分組（tercile），不用絕對門檻——不同
     股票的價格尺度差異很大，絕對寬度沒有可比性。回傳值跟輸入 widths 同順序
     對應（不是排序後的結果）。"""
@@ -461,7 +477,7 @@ _TIER_ORDER = {
 
 
 def _sort_zone_scores(zone_scores: list[ZoneScore]) -> list[ZoneScore]:
-    """zones 必須「可排序」：先依 tier 由粗到細（主結構→交易區→短期支撐），
+    """zones 必須「可排序」：先依 tier 由粗到細（主結構→交易區→短期），
     同一層內再依 trading_score 由高到低，不改變這個主要排序規則；
     confluence_count（多方法共振的 zone 數）只當第三順位的 tie-breaker，
     trading_score 幾乎不會真的相等，實務上很少真正影響排序結果。"""
@@ -776,10 +792,14 @@ def _moving_average_state(current_price: float, ma5: Optional[float]) -> str:
 def _chip_reason(chip_score: Optional[float], side: str) -> str:
     if chip_score is None:
         return "尚無籌碼分數，這一項先以中性看待。"
-    if chip_score >= CHIP_SIGNAL_THRESHOLD:
+    if chip_score >= CHIP_SIGNAL_STRONG_THRESHOLD:
         return "籌碼偏多，對支撐較有利。" if side == "support" else "籌碼偏多，壓力可能較容易被挑戰。"
-    if chip_score <= -CHIP_SIGNAL_THRESHOLD:
+    if chip_score >= CHIP_SIGNAL_WEAK_THRESHOLD:
+        return "籌碼略偏多，對支撐有小幅加分。" if side == "support" else "籌碼略偏多，壓力需觀察是否被挑戰。"
+    if chip_score <= -CHIP_SIGNAL_STRONG_THRESHOLD:
         return "籌碼偏空，支撐需要更多確認。" if side == "support" else "籌碼偏空，壓力較容易形成壓制。"
+    if chip_score <= -CHIP_SIGNAL_WEAK_THRESHOLD:
+        return "籌碼略偏空，支撐需要更多確認。" if side == "support" else "籌碼略偏空，壓力仍具壓制參考。"
     return "籌碼分數接近中性，暫無明顯加分或扣分。"
 
 
@@ -790,11 +810,25 @@ def _chip_direction(chip_score: Optional[float]) -> str:
     表達，不在這裡翻號。"""
     if chip_score is None:
         return "none"
-    if chip_score >= CHIP_SIGNAL_THRESHOLD:
+    if chip_score >= CHIP_SIGNAL_WEAK_THRESHOLD:
         return "bullish"
-    if chip_score <= -CHIP_SIGNAL_THRESHOLD:
+    if chip_score <= -CHIP_SIGNAL_WEAK_THRESHOLD:
         return "bearish"
     return "neutral"
+
+
+def _chip_signal(score: Optional[float]) -> Optional[str]:
+    if score is None:
+        return None
+    if score >= CHIP_SIGNAL_STRONG_THRESHOLD:
+        return "BULLISH"
+    if score >= CHIP_SIGNAL_WEAK_THRESHOLD:
+        return "WEAK_BULLISH"
+    if score <= -CHIP_SIGNAL_STRONG_THRESHOLD:
+        return "BEARISH"
+    if score <= -CHIP_SIGNAL_WEAK_THRESHOLD:
+        return "WEAK_BEARISH"
+    return "NEUTRAL"
 
 
 def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
@@ -839,6 +873,7 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
     # 未降權的全量分數，誤導成籌碼影響比實際更強（見 sr-zone-scoring.md「Chip missingness」）。
     effective_score = weighted_sum if raw_score is not None else None
     confidence_level = "HIGH" if coverage >= 0.8 else "MEDIUM" if coverage >= 0.5 else "LOW" if coverage > 0 else "NONE"
+    signal_score = effective_score if effective_score is not None else raw_score
     return {
         "missing": False,
         "score": raw_score,
@@ -847,7 +882,8 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
         "coverage": coverage,
         "confidence": coverage,
         "confidence_level": confidence_level,
-        "signal": chip_row.get("signal"),
+        "signal": _chip_signal(signal_score),
+        "source_signal": chip_row.get("signal"),
         "trade_date": chip_row.get("trade_date"),
         "institutional_score": float(components["institutional_score"]) if components["institutional_score"] is not None else None,
         "margin_score": float(components["margin_score"]) if components["margin_score"] is not None else None,
@@ -891,23 +927,28 @@ def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[f
         reasons.append("信心分級偏高，可列為主要觀察區。")
     elif z.confidence_level == ConfidenceLevel.LOW.value:
         reasons.append("信心分級偏低，代表樣本少或近期驗證不足。")
-    if z.confluence_count > 1:
-        reasons.append(f"有{z.confluence_count}種方法指向相近區間，屬於多方法共振。")
+    family_count = z.confluence_family_count or 1
+    if family_count > 1:
+        reasons.append(f"有{family_count}個證據族群指向相近區間，屬於多方法共振。")
 
     return {
         "price_low": z.price_low,
         "price_high": z.price_high,
         "label": f"{_fmt_price(z.price_low)} ~ {_fmt_price(z.price_high)}",
         "role": z.role,
+        "role_label": _role_label(z.role),
         "side": side,
         "tier": z.tier,
         "tier_label": z.tier_label,
+        "display_label": _display_label(z.tier, z.role),
         "confidence": z.confidence,
         "confidence_level": z.confidence_level,
         "trading_score": z.trading_score,
         "recent_validation": z.recent_validation,
         "volume_confirmation": z.volume_confirmation,
         "confluence_count": z.confluence_count,
+        "confluence_family_count": z.confluence_family_count,
+        "confluence_families": list(z.confluence_families),
         # 結構化籌碼（角色化）：direction 是整檔原始方向（偏多/偏空/中性/無資料）；
         # contribution 是這個角色下籌碼對 trading_score 的直接加權貢獻（0~15，已依
         # 支撐/壓力翻號，見 _trading_score_breakdown）；bounce/break delta 是籌碼相對
@@ -1229,6 +1270,8 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "role": z.role,
         "tier": z.tier,
         "tier_label": z.tier_label,
+        "role_label": _role_label(z.role),
+        "display_label": _display_label(z.tier, z.role),
         "support_score": z.support_score,
         "resistance_score": z.resistance_score,
         "net_score": z.net_score,

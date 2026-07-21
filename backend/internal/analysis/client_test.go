@@ -160,7 +160,7 @@ func TestScoreZonesParsesResponseAndMapsToStore(t *testing.T) {
 		t.Fatalf("expected model_config_hash to parse, got %q", result.ModelConfigHash)
 	}
 
-	a, zones, err := result.ToStore()
+	a, zones, _, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestZoneScoreResultToStoreCarriesChipSummary(t *testing.T) {
 		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
 		ChipSummary: json.RawMessage(`{"missing":false,"score":42.5,"signal":"BULLISH","institutional_score":60.0}`),
 	}
-	a, _, err := result.ToStore()
+	a, _, _, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
@@ -294,12 +294,178 @@ func TestZoneScoreResultToStoreDefaultsMissingChipSummaryToNull(t *testing.T) {
 		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
 		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
 	}
-	a, _, err := result.ToStore()
+	a, _, _, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
 	if string(a.ChipSummary) != "null" {
 		t.Fatalf("expected missing chip_summary to default to null, got %s", a.ChipSummary)
+	}
+}
+
+func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
+	result := ZoneScoreResult{
+		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
+		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
+		ProbabilityContext: json.RawMessage(`{
+			"schema_version":"sr_probability_context_v1",
+			"health":{
+				"health_state":"DEGRADED",
+				"average_edge_pp":12.5,
+				"directional_zone_count":2,
+				"zone_count":3,
+				"quality_flags":["HOLD_NOT_CALIBRATED"],
+				"warning_flags":["LOW_AVERAGE_EDGE"],
+				"blocking_flags":[],
+				"confidence_gate":{"state":"DEGRADED","allow_entry":true,"max_entry_state":"SMALL_ENTRY","reason_codes":["LOW_AVERAGE_EDGE"]}
+			},
+			"model_reports":{
+				"calibration_report":{"schema_version":"sr_calibration_report_v1","models":{"hold":{"calibrated":false}}},
+				"walk_forward_report":{"schema_version":"sr_walk_forward_report_v1","state":"AVAILABLE"},
+				"dataset_diagnostics":{"schema_version":"sr_dataset_diagnostics_v1","state":"AVAILABLE"}
+			}
+		}`),
+		DecisionSummary: json.RawMessage(`{
+			"data_mode":"FULL",
+			"market_regime":{"primary":"TREND_DOWN","market_state":"BREAKDOWN_RISK","flags":["MODEL_DEGRADED"],"label":"偏空","reasons":["跌破支撐"]},
+			"data_quality":{"overall_completeness":0.91,"missing_features":[]},
+			"market_bias":"BEARISH_BIAS",
+			"position_action":"REDUCE_ON_BREAKDOWN",
+			"final_entry_permission":{"state":"WAIT_CONFIRMATION","reason_codes":["SUPPORT_CLOSED_BELOW"]},
+			"price_path":{"path_state":"EVENT_RISK","next_decision_price":581,"reason_codes":["EVENT_RISK"]},
+			"daily_confirmation":{"state":"WAIT_NEXT_DAILY_CLOSE","reason_codes":["DAILY_CONFIRMATION_REQUIRED"]},
+			"defense_lines":{"tactical":{"label":"579.50 ~ 581.00"},"swing":null,"strategic":null},
+			"rr_context":{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"},
+			"rr_gate":{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"},
+			"position_action_condition":{"state":"BREAKDOWN","invalidation_price":580,"recovery_price":585,"reason_codes":["SUPPORT_CLOSED_BELOW"]},
+			"market_context":[{"key":"trend","label":"趨勢","value":"偏空"}],
+			"confidence_explanation":{"value":0.72,"level":"HIGH","label":"高","formula_factors":[],"context_factors":[]},
+			"risk_notes":["跌破支撐"],
+			"event_sequence":[{"type":"HIGH_VOLUME_BREAKDOWN","label":"跌破"}],
+			"daily_price_action":{"available":true,"close_location_state":"CLOSED_BELOW"},
+			"model_governance":{"health_state":"DEGRADED","confidence_gate":{"reason_codes":["HOLD_NOT_CALIBRATED"]}},
+			"market_events":[{
+				"type":"HIGH_VOLUME_BREAKDOWN",
+				"event_family":"BREAKDOWN",
+				"event_scope":"ZONE",
+				"event_key":"ZONE:BREAKDOWN:SUPPORT:580.0000:585.0000",
+				"zone_key":"SUPPORT:580.0000:585.0000",
+				"direction":"BEARISH",
+				"state":"ACTIVE",
+				"active":true,
+				"confidence":0.72,
+				"price_level":580,
+				"reason_codes":["HIGH_VOLUME_BREAKDOWN"]
+			}],
+			"event_state_summary":{
+				"market_state":"BREAKDOWN_RISK",
+				"active_bearish_events":[{"reason_codes":["HIGH_VOLUME_BREAKDOWN"]}],
+				"states":[{
+					"type":"HIGH_VOLUME_BREAKDOWN",
+					"event_family":"BREAKDOWN",
+					"event_scope":"ZONE",
+					"event_key":"ZONE:BREAKDOWN:SUPPORT:580.0000:585.0000",
+					"zone_key":"SUPPORT:580.0000:585.0000",
+					"root_event_type":"HIGH_VOLUME_BREAKDOWN",
+					"latest_event_type":"HIGH_VOLUME_BREAKDOWN",
+					"direction":"BEARISH",
+					"state":"ACTIVE",
+					"active":true,
+					"confidence":0.72,
+					"price_level":580,
+					"reason_codes":["HIGH_VOLUME_BREAKDOWN"]
+				}]
+			},
+			"daily_candidate_zones":[{
+				"price_low":579.5,
+				"price_high":581,
+				"label":"579.50 ~ 581.00",
+				"role":"SUPPORT",
+				"source":"DAILY_CANDLE",
+				"lifecycle":"CANDIDATE",
+				"decision_role":"TACTICAL",
+				"distance_pct":0.012,
+				"distance_label":"1.2%",
+				"reason":"日 K 低點與收盤位置形成的短線支撐候選。",
+				"event_refs":["INTRADAY_RECLAIM"]
+			}],
+			"nearest_decision_zone":{"label":"580.00 ~ 585.00"},
+			"nearest_support_zone":null,
+			"nearest_resistance_zone":null,
+			"primary_structural_zone":null,
+			"best_trade_zone":{"label":"580.00 ~ 585.00"},
+			"primary_zone":{"label":"580.00 ~ 585.00","role":"SUPPORT"},
+			"secondary_zones":[{"label":"600.00 ~ 605.00"}]
+		}`),
+	}
+
+	_, _, projections, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore failed: %v", err)
+	}
+	if projections.Decision == nil {
+		t.Fatal("expected decision projection")
+	}
+	if projections.Decision.MarketBias != "BEARISH_BIAS" ||
+		projections.Decision.EntryPermissionState != "WAIT_CONFIRMATION" ||
+		projections.Decision.PositionAction != "REDUCE_ON_BREAKDOWN" ||
+		projections.Decision.PricePathState != "EVENT_RISK" ||
+		projections.Decision.ModelHealthState != "DEGRADED" ||
+		projections.Decision.EventMarketState != "BREAKDOWN_RISK" {
+		t.Fatalf("unexpected decision projection: %+v", projections.Decision)
+	}
+	if string(projections.Decision.ReasonCodes) != `["SUPPORT_CLOSED_BELOW","EVENT_RISK","HOLD_NOT_CALIBRATED","HIGH_VOLUME_BREAKDOWN"]` {
+		t.Fatalf("unexpected decision reason_codes: %s", projections.Decision.ReasonCodes)
+	}
+	if string(projections.Decision.MarketRegimeJSON) == "null" || string(projections.Decision.RRGateJSON) == "null" {
+		t.Fatalf("expected decision detail JSON to be projected: %+v", projections.Decision)
+	}
+	if string(projections.Decision.MarketContextJSON) != `[{"key":"trend","label":"趨勢","value":"偏空"}]` {
+		t.Fatalf("unexpected market_context_json: %s", projections.Decision.MarketContextJSON)
+	}
+	if string(projections.Decision.ZoneSummariesJSON) == "" || string(projections.Decision.ZoneSummariesJSON) == "null" {
+		t.Fatalf("expected zone_summaries_json, got %s", projections.Decision.ZoneSummariesJSON)
+	}
+	if len(projections.EventDetections) != 1 || projections.EventDetections[0].EventType != "HIGH_VOLUME_BREAKDOWN" {
+		t.Fatalf("unexpected event detections: %+v", projections.EventDetections)
+	}
+	if !projections.EventDetections[0].Confidence.Valid || projections.EventDetections[0].Confidence.Float64 != 0.72 {
+		t.Fatalf("unexpected event confidence: %+v", projections.EventDetections[0].Confidence)
+	}
+	if len(projections.EventStates) != 1 || projections.EventStates[0].LatestEventType != "HIGH_VOLUME_BREAKDOWN" {
+		t.Fatalf("unexpected event states: %+v", projections.EventStates)
+	}
+	if len(projections.DailyCandidates) != 1 || projections.DailyCandidates[0].Role != "SUPPORT" {
+		t.Fatalf("unexpected daily candidates: %+v", projections.DailyCandidates)
+	}
+	candidate := projections.DailyCandidates[0]
+	if candidate.PriceLow != 579.5 || candidate.PriceHigh != 581 || candidate.Source != "DAILY_CANDLE" {
+		t.Fatalf("unexpected daily candidate fields: %+v", candidate)
+	}
+	if !candidate.DistancePct.Valid || candidate.DistancePct.Float64 != 0.012 {
+		t.Fatalf("unexpected daily candidate distance_pct: %+v", candidate.DistancePct)
+	}
+	if string(candidate.EventRefs) != `["INTRADAY_RECLAIM"]` {
+		t.Fatalf("unexpected daily candidate event_refs: %s", candidate.EventRefs)
+	}
+	if projections.ModelGovernance == nil {
+		t.Fatal("expected model governance projection")
+	}
+	governance := projections.ModelGovernance
+	if governance.HealthState != "DEGRADED" || governance.MaxEntryState != "SMALL_ENTRY" {
+		t.Fatalf("unexpected model governance: %+v", governance)
+	}
+	if !governance.AverageEdgePP.Valid || governance.AverageEdgePP.Float64 != 12.5 {
+		t.Fatalf("unexpected average_edge_pp: %+v", governance.AverageEdgePP)
+	}
+	if !governance.AllowEntry.Valid || !governance.AllowEntry.Bool {
+		t.Fatalf("unexpected allow_entry: %+v", governance.AllowEntry)
+	}
+	if string(governance.QualityFlags) != `["HOLD_NOT_CALIBRATED"]` {
+		t.Fatalf("unexpected quality_flags: %s", governance.QualityFlags)
+	}
+	if string(governance.CalibrationReportJSON) == "null" || string(governance.WalkForwardReportJSON) == "null" {
+		t.Fatalf("expected model reports to be preserved: %+v", governance)
 	}
 }
 
@@ -315,7 +481,7 @@ func TestZoneScoreResultToStoreRejectsIncompleteTradingScoreBreakdown(t *testing
 		}},
 	}
 
-	_, _, err := result.ToStore()
+	_, _, _, err := result.ToStore()
 	if err == nil {
 		t.Fatal("expected error when trading_score_breakdown misses chip")
 	}
@@ -329,7 +495,7 @@ func TestZoneScoreResultToStoreDefaultsMissingModelVersionToUnknown(t *testing.T
 		Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00",
 		CurrentPrice: 600.0, GlobalTrend: 0.01, GlobalVolatility: 0.01,
 	}
-	a, _, err := result.ToStore()
+	a, _, _, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore failed: %v", err)
 	}
@@ -377,7 +543,7 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		t.Fatalf("decode nested v2 result: %v", err)
 	}
-	analysis, zones, err := result.ToStore()
+	analysis, zones, _, err := result.ToStore()
 	if err != nil {
 		t.Fatalf("ToStore nested v2 result: %v", err)
 	}

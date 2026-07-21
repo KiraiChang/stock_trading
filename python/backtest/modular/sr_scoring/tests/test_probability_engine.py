@@ -8,6 +8,7 @@ from ..pipeline_types import AnalysisData, AnalysisFeatures, AnalysisScores
 from ..probability_engine import (
     PROBABILITY_CONTEXT_SCHEMA_VERSION,
     build_analysis_probability_context,
+    build_model_governance_context,
     build_zone_probability_context,
 )
 from ..types import (
@@ -132,5 +133,53 @@ def test_analysis_probability_context_summarizes_model_quality():
     assert context["model_metrics"]["hold"]["auc"] == 0.7
     assert context["health"]["directional_zone_count"] == 1
     assert context["health"]["average_edge_pp"] == pytest.approx(34.0)
+    assert context["health"]["health_state"] == "UNRELIABLE"
+    assert context["health"]["confidence_gate"]["allow_entry"] is False
+    assert "HOLD_LOW_TEST_ROWS" in context["health"]["blocking_flags"]
     assert "HOLD_NOT_CALIBRATED" in context["health"]["quality_flags"]
     assert "HOLD_LOW_TEST_ROWS" in context["health"]["quality_flags"]
+    assert context["model_reports"]["calibration_report"]["schema_version"] == "sr_calibration_report_v1"
+    assert context["model_reports"]["walk_forward_report"]["schema_version"] == "sr_walk_forward_report_v1"
+    assert context["model_reports"]["dataset_diagnostics"]["schema_version"] == "sr_dataset_diagnostics_v1"
+
+
+def test_model_governance_reports_degraded_when_uncalibrated_but_enough_rows():
+    bundle = ModelBundle(
+        hold_model=None,
+        break_model=None,
+        feature_names=["touch_count"],
+        trained_at="2026-07-13T00:00:00Z",
+        version="probability-test",
+        config_hash="cfg123",
+        split_method="time",
+        training_config={"split_method": "time", "calibration_method": "none", "dataset_config": {"min_history_bars": 90}},
+        metrics={
+            "hold": {"auc": 0.7, "brier_score": 0.2, "log_loss": 0.5, "calibrated": 0.0, "test_rows": 50},
+            "break": {"auc": 0.6, "brier_score": 0.22, "log_loss": 0.6, "calibrated": 1.0, "test_rows": 50},
+        },
+    )
+    data = AnalysisData(
+        symbol="2330",
+        timeframe="1d",
+        frame=pd.DataFrame(),
+        analyzed_at=pd.Timestamp("2026-07-13T00:00:00Z"),
+        current_price=102.0,
+        zones=tuple(),
+        model=bundle,
+        chip_row=None,
+        chip_features={},
+    )
+    scores = AnalysisScores(
+        features=AnalysisFeatures(data=data, global_trend=0.02, global_volatility=0.02, ma5=None, zones=tuple()),
+        zones=(_zone(),),
+        global_metrics={"confidence": 0.6, "expected_value": 0.01, "risk_reward_ratio": 1.5},
+        chip_summary={"missing": True},
+    )
+
+    health = build_model_governance_context(scores)
+
+    assert health["health_state"] == "DEGRADED"
+    assert health["confidence_gate"]["allow_entry"] is True
+    assert health["confidence_gate"]["max_entry_state"] == "SMALL_ENTRY"
+    assert "HOLD_NOT_CALIBRATED" in health["warning_flags"]
+    assert health["reports"]["walk_forward_report"]["state"] == "AVAILABLE"

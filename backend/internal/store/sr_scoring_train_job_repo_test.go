@@ -89,7 +89,7 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 		t.Fatalf("expected status=running with started_at set, got %+v", running)
 	}
 
-	metrics := RawJSON(`{"hold":{"auc":0.81},"break":{"auc":0.77}}`)
+	metrics := RawJSON(`{"hold":{"auc":0.81,"brier_score":0.12,"log_loss":0.34,"calibrated":1,"test_rows":44},"break":{"auc":0.77,"brier_score":0.16,"log_loss":0.41,"calibrated":0,"test_rows":36}}`)
 	datasetSummary := RawJSON(`{"rows":128,"rows_by_symbol":{"2330":90,"2454":38}}`)
 	if err := repo.MarkDone(ctx, "sr_train_002", 128, 3, metrics, "models/sr_scoring_v2.joblib", "v2", "time", datasetSummary); err != nil {
 		t.Fatalf("MarkDone failed: %v", err)
@@ -119,6 +119,29 @@ func TestSRScoringTrainJobRepoMarkRunningThenDone(t *testing.T) {
 	}
 	if len(done.DatasetSummary) == 0 {
 		t.Fatalf("expected non-empty dataset_summary JSON, got %+v", done.DatasetSummary)
+	}
+
+	modelMetric, err := repo.GetModelMetric(ctx, "sr_train_002")
+	if err != nil {
+		t.Fatalf("GetModelMetric failed: %v", err)
+	}
+	if modelMetric.JobID != "sr_train_002" || modelMetric.ModelVersion != "v2" || modelMetric.ModelType != "gradient_boosting" {
+		t.Fatalf("unexpected model metric metadata: %+v", modelMetric)
+	}
+	if !modelMetric.HoldAUC.Valid || modelMetric.HoldAUC.Float64 != 0.81 {
+		t.Fatalf("unexpected hold_auc: %+v", modelMetric.HoldAUC)
+	}
+	if !modelMetric.HoldCalibrated.Valid || !modelMetric.HoldCalibrated.Bool {
+		t.Fatalf("unexpected hold_calibrated: %+v", modelMetric.HoldCalibrated)
+	}
+	if !modelMetric.BreakCalibrated.Valid || modelMetric.BreakCalibrated.Bool {
+		t.Fatalf("unexpected break_calibrated: %+v", modelMetric.BreakCalibrated)
+	}
+	if !modelMetric.BreakTestRows.Valid || modelMetric.BreakTestRows.Int64 != 36 {
+		t.Fatalf("unexpected break_test_rows: %+v", modelMetric.BreakTestRows)
+	}
+	if string(modelMetric.MetricsJSON) != string(metrics) || string(modelMetric.DatasetSummaryJSON) != string(datasetSummary) {
+		t.Fatalf("expected raw metrics/dataset summary to round-trip, got %+v", modelMetric)
 	}
 }
 

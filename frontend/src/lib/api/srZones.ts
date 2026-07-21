@@ -109,10 +109,21 @@ export interface SRProbabilityContext {
   }
   health?: {
     quality_flags: string[]
+    warning_flags?: string[]
+    blocking_flags?: string[]
+    health_state?: 'HEALTHY' | 'DEGRADED' | 'UNRELIABLE' | string
     average_edge_pp: number | null
     directional_zone_count: number
     zone_count: number
+    confidence_gate?: {
+      state?: string
+      allow_entry?: boolean
+      max_entry_state?: string
+      reason_codes?: string[]
+    }
+    reports?: Record<string, unknown>
   }
+  model_reports?: Record<string, unknown>
 }
 
 export interface SRGlobalEvidence {
@@ -153,9 +164,11 @@ export interface SRZone {
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
 
   // tier/tier_label：zone 依寬度在同一次分析裡的相對排名分三層，讓 zone
-  // 清單「可排序」（主結構 → 交易區 → 短期支撐）。
+  // 清單「可排序」（主結構 → 交易區 → 短期）。display_label 才包含支撐/壓力角色。
   tier: ZoneTier
   tier_label: string
+  role_label?: string
+  display_label?: string
 
   support_score: number
   resistance_score: number
@@ -252,12 +265,16 @@ export interface SRZoneSummaryItem {
   side: 'support' | 'resistance'
   tier: ZoneTier
   tier_label: string
+  role_label?: string
+  display_label?: string
   confidence: number
   confidence_level: ConfidenceLevel
   trading_score: number
   recent_validation: RecentValidation
   volume_confirmation: VolumeConfirmation | null
   confluence_count: number
+  confluence_family_count?: number | null
+  confluence_families?: string[] | null
   chip?: SRZoneChip
   reasons: string[]
 }
@@ -274,7 +291,8 @@ export interface SRChipSummary {
   coverage?: number
   confidence?: number
   confidence_level?: string | null
-  signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'RISK' | null
+  signal: 'BULLISH' | 'WEAK_BULLISH' | 'BEARISH' | 'WEAK_BEARISH' | 'NEUTRAL' | 'RISK' | null
+  source_signal?: string | null
   institutional_score: number | null
   margin_score: number | null
   broker_score: number | null
@@ -305,13 +323,14 @@ export type SRStructureState =
   | 'SUPPORT_RECLAIM_INVALIDATED'
   | 'BREAKDOWN'
 export type SRVolatilityState = 'NORMAL' | 'HIGH_VOLATILITY'
-export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY'
+export type SRMarketRegimeFlag = 'LOW_CONFIDENCE' | 'HIGH_VOLATILITY' | 'MODEL_UNRELIABLE' | 'MODEL_DEGRADED' | string
 
 export interface SRMarketRegime {
   primary: SRMarketRegimePrimary
   trend_regime?: SRMarketRegimePrimary
   structural_trend?: SRMarketRegimePrimary
   short_term_regime?: SRShortTermRegime
+  market_state?: string
   tactical_regime?: SRShortTermRegime
   structure_state?: SRStructureState
   recovery_state?: SRStructureState | string
@@ -356,6 +375,8 @@ export interface SRDecisionZoneSummary {
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
   tier: ZoneTier
   tier_label: string
+  role_label?: string
+  display_label?: string
   trading_score: number
   zone_quality_score?: number | null
   structural_score?: number | null
@@ -519,6 +540,10 @@ export interface SRDailyCandidateZone {
 
 export interface SRPricePath {
   path_state: string
+  event_state?: string
+  active_event_types?: string[]
+  blocked_by_event?: Record<string, unknown> | null
+  reason_codes?: string[]
   invalidation_price: number | null
   recovery_price: number | null
   next_decision_price: number | null
@@ -573,8 +598,31 @@ export interface SRRRContext {
 export interface SRDecisionSummary {
   data_mode?: string
   data_quality?: SRDataQuality
-  market_regime: SRMarketRegime
+  market_regime?: SRMarketRegime
+  model_governance?: {
+    health_state?: string
+    quality_flags?: string[]
+    warning_flags?: string[]
+    blocking_flags?: string[]
+    confidence_gate?: {
+      state?: string
+      allow_entry?: boolean
+      max_entry_state?: string
+      reason_codes?: string[]
+    }
+    reports?: Record<string, unknown>
+  }
   market_events?: SRMarketEvent[]
+  event_state_summary?: {
+    version?: string
+    states?: Array<Record<string, unknown>>
+    active?: Array<Record<string, unknown>>
+    resolved?: Array<Record<string, unknown>>
+    active_bearish_events?: Array<Record<string, unknown>>
+    active_bullish_events?: Array<Record<string, unknown>>
+    latest_event_type?: string | null
+    market_state?: string
+  }
   event_sequence?: SREventSequenceItem[]
   daily_price_action?: SRDailyPriceAction
   daily_candidate_zones?: SRDailyCandidateZone[]
@@ -584,11 +632,16 @@ export interface SRDecisionSummary {
   rr_context?: SRRRContext
   market_bias?: SRMarketBias
   market_bias_label?: string
+  decision_contract?: {
+    version?: string
+    authoritative_fields?: string[]
+    deprecated_fields?: string[]
+  }
   market_action?: SRMarketAction
   position_action?: SRPositionAction
   position_action_condition?: SRPositionActionCondition
-  action: SRDecisionAction
-  action_label: string
+  action?: SRDecisionAction
+  action_label?: string
   entry_action_state?: SREntryActionState
   entry_action_label?: string
   final_entry_permission?: SRFinalEntryPermission
@@ -600,12 +653,20 @@ export interface SRDecisionSummary {
   nearest_resistance_zone?: SRDecisionZoneSummary | null
   primary_structural_zone?: SRDecisionZoneSummary | null
   best_trade_zone?: SRDecisionZoneSummary | null
-  primary_zone: SRDecisionZoneSummary | null
-  market_context: SRDecisionContextItem[]
-  confidence_explanation: SRConfidenceExplanation
-  risk_notes: string[]
-  secondary_zones: SRDecisionZoneSummary[]
+  primary_zone?: SRDecisionZoneSummary | null
+  market_context?: SRDecisionContextItem[]
+  confidence_explanation?: SRConfidenceExplanation
+  risk_notes?: string[]
+  secondary_zones?: SRDecisionZoneSummary[]
 }
+
+export interface SRNormalizedStatus {
+  decision?: string
+  events?: string
+  daily_candidates?: string
+  model_governance?: string
+}
+
 export interface SRZoneAnalysis {
   id: number
   symbol: string
@@ -645,6 +706,7 @@ export interface SRZoneAnalysis {
   // period_summaries[].support/resistance.chip）。舊分析沒有這欄時為 null。
   chip_summary?: SRChipSummary | null
   decision_summary?: SRDecisionSummary | null
+  normalized_status?: SRNormalizedStatus
   created_at: string
 }
 
@@ -673,6 +735,7 @@ interface SRZonePipelineResponse {
   explanation: SRAnalysisExplanation | null
   scenario: SRScenario | null
   probability_context: SRProbabilityContext | null
+  normalized_status?: SRNormalizedStatus
   zones: SRZonePipelineItem[]
 }
 
@@ -696,6 +759,7 @@ function normalizePipelineResponse(response: SRZonePipelineResponse): {
       // v2 evidence is preferred for new analyses; pre-migration snapshots
       // retain their dedicated chip_summary and have evidence=null.
       chip_summary: response.evidence?.chip ?? response.analysis.chip_summary ?? null,
+      normalized_status: response.normalized_status,
     },
     zones: response.zones.map((item) => ({
       ...item.score,

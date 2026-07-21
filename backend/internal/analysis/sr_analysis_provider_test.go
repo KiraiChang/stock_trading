@@ -35,7 +35,7 @@ type srProviderRepoStub struct {
 	createCalls int
 }
 
-func (s *srProviderRepoStub) Create(ctx context.Context, a *store.SRZoneAnalysis, zones []store.SRZone) (uint64, error) {
+func (s *srProviderRepoStub) Create(ctx context.Context, a *store.SRZoneAnalysis, zones []store.SRZone, projections store.SRZoneNormalizedProjections) (uint64, error) {
 	if s.createErr != nil {
 		return 0, s.createErr
 	}
@@ -56,6 +56,26 @@ func (s *srProviderRepoStub) Create(ctx context.Context, a *store.SRZoneAnalysis
 	}
 	s.zones[id] = zones
 	return id, nil
+}
+
+func (s *srProviderRepoStub) GetDecision(ctx context.Context, analysisID uint64) (*store.SRDecision, error) {
+	return nil, errors.New("not found")
+}
+
+func (s *srProviderRepoStub) GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]store.MarketEventDetection, error) {
+	return nil, nil
+}
+
+func (s *srProviderRepoStub) GetMarketEventStates(ctx context.Context, analysisID uint64) ([]store.MarketEventState, error) {
+	return nil, nil
+}
+
+func (s *srProviderRepoStub) GetDailyCandidates(ctx context.Context, analysisID uint64) ([]store.SRDailyCandidate, error) {
+	return nil, nil
+}
+
+func (s *srProviderRepoStub) GetModelGovernance(ctx context.Context, analysisID uint64) (*store.SRModelGovernance, error) {
+	return nil, errors.New("not found")
 }
 
 func (s *srProviderRepoStub) Get(ctx context.Context, id uint64) (*store.SRZoneAnalysis, error) {

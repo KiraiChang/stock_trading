@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any, Optional
 
 from .event_engine import (
+    build_event_state_summary,
     detect_market_events,
     entry_relevance_base_breakdown as _entry_relevance_base_breakdown,
     zone_interaction as _zone_interaction,
@@ -20,9 +21,30 @@ from .event_engine import (
 from .model import ModelBundle
 from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
+from .probability_engine import build_model_governance_context
 
 
 DEFAULT_STALE_AFTER_DAYS = 1
+
+TIER_LABEL_TEXT = {
+    ZoneTier.TIER_1_MAIN_STRUCTURE.value: "主結構",
+    ZoneTier.TIER_2_TRADING_ZONE.value: "交易區",
+    ZoneTier.TIER_3_SHORT_TERM.value: "短期",
+}
+ROLE_LABEL_TEXT = {
+    ZoneType.SUPPORT.value: "支撐",
+    ZoneType.RESISTANCE.value: "壓力",
+    ZoneType.AT_ZONE.value: "區間內",
+}
+
+
+def _role_label(role: str) -> str:
+    return ROLE_LABEL_TEXT.get(role, role)
+
+
+def _display_label(tier: Optional[str], role: str, fallback_tier_label: Optional[str] = None) -> str:
+    tier_label = TIER_LABEL_TEXT.get(tier or "", fallback_tier_label or tier or "")
+    return f"{tier_label}{_role_label(role)}"
 
 
 # entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：
@@ -105,8 +127,10 @@ def _decision_summary_zone(
         "price_high": z.price_high,
         "label": f"{_fmt_price(z.price_low)} ~ {_fmt_price(z.price_high)}",
         "role": z.role,
+        "role_label": _role_label(z.role),
         "tier": z.tier,
         "tier_label": z.tier_label,
+        "display_label": _display_label(z.tier, z.role, z.tier_label),
         "trading_score": z.trading_score,
         "zone_quality_score": structural_score,
         "structural_score": structural_score,
@@ -215,6 +239,8 @@ def _market_regime(
     chip_summary: dict[str, Any],
     structure_state: str = "NORMAL",
     market_events: Optional[list[dict[str, Any]]] = None,
+    event_state_summary: Optional[dict[str, Any]] = None,
+    model_governance: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     if global_trend >= 0.015:
         trend_regime = "TREND_UP"
@@ -235,6 +261,13 @@ def _market_regime(
     if global_confidence is not None and global_confidence < 0.45:
         flags.append("LOW_CONFIDENCE")
         reasons.append(f"整體信心偏低（{global_confidence * 100:.0f}%）")
+    model_health_state = str((model_governance or {}).get("health_state") or "UNKNOWN")
+    if model_health_state == "UNRELIABLE":
+        flags.append("MODEL_UNRELIABLE")
+        reasons.append("模型健康度不可用，進場條件需阻擋。")
+    elif model_health_state == "DEGRADED":
+        flags.append("MODEL_DEGRADED")
+        reasons.append("模型健康度降級，進場條件需保守。")
     if chip_summary.get("missing"):
         reasons.append("籌碼資料缺漏，籌碼面以中性或缺資料解讀")
     elif chip_summary.get("score") is not None:
@@ -248,13 +281,14 @@ def _market_regime(
         "BREAKDOWN": "短線結構跌破",
     }.get(structure_state, structure_state)
     event_types = {event.get("type") for event in market_events or []}
+    market_state = str((event_state_summary or {}).get("market_state") or "NORMAL")
     if structure_state == "SUPPORT_RECLAIM_CONFIRMED":
         short_term_regime = "RECOVERY"
-    elif "HIGH_VOLUME_BREAKDOWN" in event_types or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+    elif market_state == "BREAKDOWN_RISK" or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         short_term_regime = "BREAKDOWN_RISK"
-    elif "INTRADAY_RECLAIM" in event_types:
+    elif market_state == "RECLAIM_ATTEMPT" or "INTRADAY_RECLAIM" in event_types:
         short_term_regime = "RECLAIM_ATTEMPT"
-    elif "REVERSAL_CANDIDATE" in event_types:
+    elif market_state == "REVERSAL_CANDIDATE" or "REVERSAL_CANDIDATE" in event_types:
         short_term_regime = "REVERSAL_CANDIDATE"
     elif trend_regime == "RANGE_BOUND" and global_trend > 0 and global_confidence is not None and global_confidence >= 0.55:
         short_term_regime = "EARLY_TREND"
@@ -282,10 +316,12 @@ def _market_regime(
         "trend_regime": trend_regime,
         "structural_trend": trend_regime,
         "short_term_regime": short_term_regime,
+        "market_state": market_state,
         "tactical_regime": tactical_regime,
         "structure_state": structure_state,
         "recovery_state": recovery_state,
         "volatility_state": volatility_state,
+        "model_health_state": model_health_state,
         "flags": flags,
         "label": label,
         "reasons": reasons[:4],
@@ -404,8 +440,14 @@ def _decision_action(
         risk_notes.append("波動偏高，倉位需保守。")
     if "LOW_CONFIDENCE" in flags:
         risk_notes.append("整體信心不足，應等待更多確認。")
+    if "MODEL_UNRELIABLE" in flags:
+        risk_notes.append("模型健康度不可用，暫不允許依機率模型進場。")
+    elif "MODEL_DEGRADED" in flags:
+        risk_notes.append("模型健康度降級，最多小量或觀察。")
     if primary_zone is None:
         risk_notes.append("沒有足夠明確的主交易區。")
+        return "WATCH", "HOLD", "Hold", "等待", risk_notes
+    if "MODEL_UNRELIABLE" in flags:
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
 
     structure_state = regime.get("structure_state")
@@ -1119,6 +1161,7 @@ def _price_path(
     daily_candidate_zones: list[dict[str, Any]],
     structure_state: str,
     rr_gate: dict[str, Any],
+    event_state_summary: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     def zone_blocking_ref(zone: ZoneScore) -> dict[str, Any]:
         selected = any(
@@ -1131,6 +1174,7 @@ def _price_path(
             "price_high": zone.price_high,
             "label": f"{_fmt_price(zone.price_low)} ~ {_fmt_price(zone.price_high)}",
             "role": zone.role,
+            "role_label": _role_label(zone.role),
             "source": "HISTORICAL_SR",
             "source_scope": "ZONE_SCORE_POOL",
             "zone_id": None,
@@ -1138,6 +1182,7 @@ def _price_path(
             "timeframe": None,
             "tier": zone.tier,
             "tier_label": zone.tier_label,
+            "display_label": _display_label(zone.tier, zone.role, zone.tier_label),
             "confidence": zone.confidence,
             "confidence_level": zone.confidence_level,
             "distance_pct": _distance_pct_to_zone(zone, current_price),
@@ -1150,6 +1195,7 @@ def _price_path(
             "price_high": zone["price_high"],
             "label": zone["label"],
             "role": zone["role"],
+            "role_label": _role_label(zone["role"]),
             "source": zone["source"],
             "source_scope": "DAILY_CANDIDATE",
             "zone_id": None,
@@ -1157,6 +1203,7 @@ def _price_path(
             "timeframe": "1d",
             "tier": None,
             "tier_label": None,
+            "display_label": _display_label(None, zone["role"], "日K"),
             "confidence": None,
             "confidence_level": None,
             "distance_pct": abs(float(zone["price_low"]) - current_price) / max(abs(current_price), 1e-9),
@@ -1207,7 +1254,11 @@ def _price_path(
         if candidate_resistance:
             blocking_zone = daily_blocking_ref(candidate_resistance)
 
-    if structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+    active_events = list((event_state_summary or {}).get("active") or [])
+    active_bearish_events = list((event_state_summary or {}).get("active_bearish_events") or [])
+    if active_bearish_events:
+        path_state = "EVENT_RISK"
+    elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         path_state = "INVALIDATION_RISK"
     elif primary_zone is None and daily_candidate_zones:
         path_state = "DAILY_CANDIDATE_ONLY"
@@ -1246,6 +1297,14 @@ def _price_path(
 
     return {
         "path_state": path_state,
+        "event_state": (event_state_summary or {}).get("market_state", "NORMAL"),
+        "active_event_types": [str(event.get("type") or event.get("latest_event_type")) for event in active_events],
+        "blocked_by_event": active_bearish_events[0] if active_bearish_events else None,
+        "reason_codes": (
+            ["ACTIVE_BEARISH_EVENT"]
+            if active_bearish_events else
+            [str(rr_gate.get("reason_code"))] if path_state == "RR_BLOCKED" and rr_gate.get("reason_code") else []
+        ),
         "invalidation_price": invalidation_price,
         "recovery_price": recovery_price,
         "next_decision_price": next_decision_price,
@@ -1430,11 +1489,34 @@ def build_decision_summary(
     previous_candle_low: Optional[float] = None,
     previous_candle_close: Optional[float] = None,
     data_quality_metadata: Optional[dict[str, Any]] = None,
+    model_governance: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
     market_events = detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
-    trend_regime = _market_regime(global_trend, global_volatility, global_confidence, chip_summary, market_events=market_events)["trend_regime"]
-    primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime, market_events)
+    event_state_summary = build_event_state_summary(market_events)
+    active_market_events = list(event_state_summary.get("active") or [])
+    model_governance = model_governance or {
+        "health_state": "UNKNOWN",
+        "quality_flags": [],
+        "warning_flags": [],
+        "blocking_flags": [],
+        "confidence_gate": {
+            "state": "UNKNOWN",
+            "allow_entry": True,
+            "max_entry_state": "BUY",
+            "reason_codes": [],
+        },
+    }
+    trend_regime = _market_regime(
+        global_trend,
+        global_volatility,
+        global_confidence,
+        chip_summary,
+        market_events=market_events,
+        event_state_summary=event_state_summary,
+        model_governance=model_governance,
+    )["trend_regime"]
+    primary_zone = _pick_primary_zone(zone_scores, current_price, trend_regime, active_market_events)
     primary_interaction = (
         _zone_interaction(primary_zone, current_price, candle_high, candle_low, candle_close)
         if primary_zone else None
@@ -1451,12 +1533,17 @@ def build_decision_summary(
         chip_summary,
         structure_state,
         market_events,
+        event_state_summary,
+        model_governance,
     )
+    # Decision gating（primary zone 選擇、action、entry state、bias、event-aware relevance）
+    # 一律只吃 active_market_events：已被 reclaim/reversal resolve 的 breakdown 不得再影響決策。
+    # 完整 raw chain 僅供對外呈現（market_events / event_sequence / event_state_summary）。
     market_action, position_action, action, action_label, risk_notes = _decision_action(
-        regime, primary_zone, current_price, primary_interaction, market_events
+        regime, primary_zone, current_price, primary_interaction, active_market_events
     )
-    entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, market_events)
-    market_bias, market_bias_label = _market_bias(regime, primary_zone, market_action, market_events)
+    entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, active_market_events)
+    market_bias, market_bias_label = _market_bias(regime, primary_zone, market_action, active_market_events)
     rr_gate = _rr_gate(primary_zone, entry_action_state)
     rr_context = _rr_context(primary_zone)
     nearest_zone = _nearest_decision_zone(zone_scores, current_price)
@@ -1495,6 +1582,7 @@ def build_decision_summary(
         daily_candidate_zones,
         structure_state,
         rr_gate,
+        event_state_summary,
     )
     daily_confirmation = _daily_confirmation(
         primary_zone,
@@ -1586,7 +1674,9 @@ def build_decision_summary(
             data_quality_metadata,
         ),
         "market_regime": regime,
+        "model_governance": model_governance,
         "market_events": market_events,
+        "event_state_summary": event_state_summary,
         "event_sequence": event_sequence,
         "daily_price_action": daily_price_action,
         "daily_candidate_zones": daily_candidate_zones,
@@ -1596,6 +1686,21 @@ def build_decision_summary(
         "rr_context": rr_context,
         "market_bias": market_bias,
         "market_bias_label": market_bias_label,
+        "decision_contract": {
+            "version": "sr-zone-decision-p0",
+            "authoritative_fields": [
+                "market_bias",
+                "final_entry_permission",
+                "position_action",
+                "rr_gate",
+                "price_path",
+            ],
+            "deprecated_fields": [
+                "market_action",
+                "action",
+                "action_label",
+            ],
+        },
         "market_action": market_action,
         "position_action": position_action,
         "position_action_condition": _position_action_condition(primary_zone, structure_state),
@@ -1676,4 +1781,5 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
                 "chip": scores.chip_summary.get("trade_date"),
             },
         },
+        model_governance=build_model_governance_context(scores),
     )

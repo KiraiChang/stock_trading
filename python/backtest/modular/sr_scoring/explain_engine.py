@@ -113,8 +113,9 @@ def _positive_factors(score: ZoneScore) -> list[str]:
         factors.append("最近有有效驗證")
     if score.volume_confirmation == VolumeConfirmation.CONFIRMED.value:
         factors.append("量能確認有效")
-    if score.confluence_count > 1:
-        factors.append(f"多方法共振 ×{score.confluence_count}")
+    family_count = score.confluence_family_count or 1
+    if family_count > 1:
+        factors.append(f"證據族群共振 ×{family_count}")
     if score.expected_value is not None and score.expected_value > 0:
         factors.append(f"期望值為正（{_fmt_signed_pct(score.expected_value)}）")
     if score.risk_reward_ratio is not None and score.risk_reward_ratio >= 1.5:

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -79,7 +80,77 @@ func (s srZonePipelineScore) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H {
+type srZonePipelineSnapshot struct {
+	Analysis        *store.SRZoneAnalysis
+	Zones           []store.SRZone
+	Decision        *store.SRDecision
+	EventDetections []store.MarketEventDetection
+	EventStates     []store.MarketEventState
+	DailyCandidates []store.SRDailyCandidate
+	ModelGovernance *store.SRModelGovernance
+	Status          gin.H
+}
+
+func (h *SRZoneHandler) loadSRZonePipelineSnapshot(ctx context.Context, id uint64) (*srZonePipelineSnapshot, error) {
+	a, err := h.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	zones, err := h.repo.GetZones(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	snapshot := &srZonePipelineSnapshot{
+		Analysis: a,
+		Zones:    zones,
+		Status: gin.H{
+			"decision":         "missing",
+			"events":           "missing",
+			"daily_candidates": "missing",
+			"model_governance": "missing",
+		},
+	}
+	if decision, err := h.repo.GetDecision(ctx, id); err == nil {
+		snapshot.Decision = decision
+		snapshot.Status["decision"] = "normalized"
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if events, err := h.repo.GetMarketEventDetections(ctx, id); err == nil {
+		snapshot.EventDetections = events
+	} else {
+		return nil, err
+	}
+	if states, err := h.repo.GetMarketEventStates(ctx, id); err == nil {
+		snapshot.EventStates = states
+	} else {
+		return nil, err
+	}
+	// events 與 decision 在同一個 Create transaction 寫入：只要該筆有 normalized
+	// decision，events 即視為 normalized（空集合是合法的「無事件」，不是缺正規化資料）。
+	if snapshot.Decision != nil {
+		snapshot.Status["events"] = "normalized"
+	}
+	if candidates, err := h.repo.GetDailyCandidates(ctx, id); err == nil {
+		snapshot.DailyCandidates = candidates
+		if len(candidates) > 0 {
+			snapshot.Status["daily_candidates"] = "normalized"
+		}
+	} else {
+		return nil, err
+	}
+	if governance, err := h.repo.GetModelGovernance(ctx, id); err == nil {
+		snapshot.ModelGovernance = governance
+		snapshot.Status["model_governance"] = "normalized"
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func srZonePipelineResponse(snapshot *srZonePipelineSnapshot) gin.H {
+	a := snapshot.Analysis
+	zones := snapshot.Zones
 	items := make([]gin.H, 0, len(zones))
 	for _, z := range zones {
 		items = append(items, gin.H{
@@ -118,12 +189,286 @@ func srZonePipelineResponse(a *store.SRZoneAnalysis, zones []store.SRZone) gin.H
 			"global_risk_reward_ratio": a.GlobalRiskRewardRatio,
 		},
 		"evidence":            a.Evidence,
-		"decision":            a.DecisionSummary,
+		"decision":            decisionFromSnapshot(snapshot),
 		"explanation":         a.Explanation,
 		"scenario":            a.Scenario,
-		"probability_context": a.ProbabilityContext,
+		"probability_context": probabilityContextFromSnapshot(snapshot.ModelGovernance),
+		"normalized_status":   snapshot.Status,
 		"zones":               items,
 	}
+}
+
+func decisionFromSnapshot(snapshot *srZonePipelineSnapshot) store.RawJSON {
+	if snapshot.Decision == nil {
+		return store.RawJSON("null")
+	}
+	obj := map[string]any{}
+	applyDecisionDetailJSON(obj, snapshot.Decision)
+	obj["market_bias"] = snapshot.Decision.MarketBias
+	obj["position_action"] = snapshot.Decision.PositionAction
+	obj["reason_codes"] = rawArray(snapshot.Decision.ReasonCodes)
+	setNestedObjectValue(obj, "final_entry_permission", "state", snapshot.Decision.EntryPermissionState)
+	setNestedObjectValue(obj, "price_path", "path_state", snapshot.Decision.PricePathState)
+	setNestedObjectValue(obj, "model_governance", "health_state", snapshot.Decision.ModelHealthState)
+	setNestedObjectValue(obj, "event_state_summary", "market_state", snapshot.Decision.EventMarketState)
+	if len(snapshot.EventDetections) > 0 {
+		obj["market_events"] = eventDetectionsJSON(snapshot.EventDetections)
+	} else {
+		obj["market_events"] = []any{}
+	}
+	if len(snapshot.EventStates) > 0 {
+		obj["event_state_summary"] = eventStateSummaryJSON(obj["event_state_summary"], snapshot.EventStates)
+	}
+	if len(snapshot.DailyCandidates) > 0 {
+		obj["daily_candidate_zones"] = dailyCandidatesJSON(snapshot.DailyCandidates)
+	} else {
+		obj["daily_candidate_zones"] = []any{}
+	}
+	return marshalRawObject(obj)
+}
+
+func applyDecisionDetailJSON(obj map[string]any, decision *store.SRDecision) {
+	setRawObjectIfPresent(obj, "market_regime", decision.MarketRegimeJSON)
+	setRawObjectIfPresent(obj, "data_quality", decision.DataQualityJSON)
+	setRawArrayIfPresent(obj, "event_sequence", decision.EventSequenceJSON)
+	setRawObjectIfPresent(obj, "daily_price_action", decision.DailyPriceActionJSON)
+	setRawObjectIfPresent(obj, "price_path", decision.PricePathJSON)
+	setRawObjectIfPresent(obj, "daily_confirmation", decision.DailyConfirmationJSON)
+	setRawObjectIfPresent(obj, "defense_lines", decision.DefenseLinesJSON)
+	setRawObjectIfPresent(obj, "rr_context", decision.RRContextJSON)
+	setRawObjectIfPresent(obj, "rr_gate", decision.RRGateJSON)
+	setRawObjectIfPresent(obj, "position_action_condition", decision.PositionActionConditionJSON)
+	setRawArrayIfPresent(obj, "market_context", decision.MarketContextJSON)
+	setRawObjectIfPresent(obj, "confidence_explanation", decision.ConfidenceExplanationJSON)
+	setRawArrayIfPresent(obj, "risk_notes", decision.RiskNotesJSON)
+	applyDecisionZoneSummariesJSON(obj, decision.ZoneSummariesJSON)
+}
+
+func setRawObjectIfPresent(obj map[string]any, key string, raw store.RawJSON) {
+	if isRawNull(raw) {
+		return
+	}
+	obj[key] = rawAny(raw)
+}
+
+func setRawArrayIfPresent(obj map[string]any, key string, raw store.RawJSON) {
+	if isRawNull(raw) {
+		return
+	}
+	obj[key] = rawArray(raw)
+}
+
+func applyDecisionZoneSummariesJSON(obj map[string]any, raw store.RawJSON) {
+	if isRawNull(raw) {
+		return
+	}
+	summaries := rawObjectOrEmpty(raw)
+	for _, key := range []string{
+		"nearest_decision_zone",
+		"nearest_support_zone",
+		"nearest_resistance_zone",
+		"primary_structural_zone",
+		"best_trade_zone",
+		"primary_zone",
+	} {
+		if value, ok := summaries[key]; ok && value != nil {
+			obj[key] = value
+		}
+	}
+	if value, ok := summaries["secondary_zones"]; ok {
+		raw, err := json.Marshal(value)
+		if err == nil {
+			values := rawArray(store.RawJSON(raw))
+			obj["secondary_zones"] = values
+		}
+	}
+}
+
+func probabilityContextFromSnapshot(governance *store.SRModelGovernance) store.RawJSON {
+	if governance == nil {
+		return store.RawJSON("null")
+	}
+	obj := map[string]any{"schema_version": "sr_probability_context_v1"}
+	health := map[string]any{}
+	health["health_state"] = governance.HealthState
+	health["average_edge_pp"] = nullableFloat(governance.AverageEdgePP)
+	health["directional_zone_count"] = nullableInt(governance.DirectionalZoneCount)
+	health["zone_count"] = nullableInt(governance.ZoneCount)
+	health["quality_flags"] = rawArray(governance.QualityFlags)
+	health["warning_flags"] = rawArray(governance.WarningFlags)
+	health["blocking_flags"] = rawArray(governance.BlockingFlags)
+	health["confidence_gate"] = rawAny(governance.ConfidenceGateJSON)
+	obj["health"] = health
+
+	reports := map[string]any{}
+	reports["calibration_report"] = rawAny(governance.CalibrationReportJSON)
+	reports["walk_forward_report"] = rawAny(governance.WalkForwardReportJSON)
+	reports["dataset_diagnostics"] = rawAny(governance.DatasetDiagnosticsJSON)
+	obj["model_reports"] = reports
+	return marshalRawObject(obj)
+}
+
+func eventDetectionsJSON(events []store.MarketEventDetection) []any {
+	out := make([]any, 0, len(events))
+	for _, event := range events {
+		item := rawObjectOrEmpty(event.EventJSON)
+		item["event_key"] = event.EventKey
+		item["type"] = event.EventType
+		item["event_family"] = event.EventFamily
+		item["event_scope"] = event.EventScope
+		item["zone_key"] = event.ZoneKey
+		item["direction"] = event.Direction
+		item["state"] = event.State
+		item["active"] = event.Active
+		item["confidence"] = nullableFloat(event.Confidence)
+		item["price_level"] = nullableFloat(event.PriceLevel)
+		item["reason_codes"] = rawArray(event.ReasonCodes)
+		out = append(out, item)
+	}
+	return out
+}
+
+func eventStateSummaryJSON(base any, states []store.MarketEventState) map[string]any {
+	summary := rawObjectFromAny(base)
+	items := make([]any, 0, len(states))
+	active := make([]any, 0)
+	resolved := make([]any, 0)
+	activeBearish := make([]any, 0)
+	activeBullish := make([]any, 0)
+	var latestType any
+	for _, state := range states {
+		item := rawObjectOrEmpty(state.StateJSON)
+		item["event_key"] = state.EventKey
+		item["type"] = state.EventType
+		item["event_family"] = state.EventFamily
+		item["event_scope"] = state.EventScope
+		item["zone_key"] = state.ZoneKey
+		item["root_event_type"] = state.RootEventType
+		item["latest_event_type"] = state.LatestEventType
+		item["direction"] = state.Direction
+		item["state"] = state.State
+		item["active"] = state.Active
+		item["resolved_by"] = nullableString(state.ResolvedBy)
+		item["confidence"] = nullableFloat(state.Confidence)
+		item["price_level"] = nullableFloat(state.PriceLevel)
+		item["reason_codes"] = rawArray(state.ReasonCodes)
+		items = append(items, item)
+		if state.Active {
+			active = append(active, item)
+			switch state.Direction {
+			case "BEARISH":
+				activeBearish = append(activeBearish, item)
+			case "BULLISH":
+				activeBullish = append(activeBullish, item)
+			}
+		} else {
+			resolved = append(resolved, item)
+		}
+		latestType = state.LatestEventType
+	}
+	summary["states"] = items
+	summary["active"] = active
+	summary["resolved"] = resolved
+	summary["active_bearish_events"] = activeBearish
+	summary["active_bullish_events"] = activeBullish
+	summary["latest_event_type"] = latestType
+	return summary
+}
+
+func dailyCandidatesJSON(candidates []store.SRDailyCandidate) []any {
+	out := make([]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		item := rawObjectOrEmpty(candidate.CandidateJSON)
+		item["price_low"] = candidate.PriceLow
+		item["price_high"] = candidate.PriceHigh
+		item["label"] = candidate.Label
+		item["role"] = candidate.Role
+		item["source"] = candidate.Source
+		item["lifecycle"] = candidate.Lifecycle
+		item["decision_role"] = candidate.DecisionRole
+		item["distance_pct"] = nullableFloat(candidate.DistancePct)
+		item["distance_label"] = candidate.DistanceLabel
+		item["reason"] = candidate.Reason
+		item["event_refs"] = rawArray(candidate.EventRefs)
+		out = append(out, item)
+	}
+	return out
+}
+
+func rawObjectOrEmpty(raw store.RawJSON) map[string]any {
+	if raw == "" || !json.Valid([]byte(raw)) || string(raw) == "null" {
+		return map[string]any{}
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return map[string]any{}
+	}
+	return obj
+}
+
+func isRawNull(raw store.RawJSON) bool {
+	return raw == "" || !json.Valid([]byte(raw)) || string(raw) == "null"
+}
+
+func rawObjectFromAny(value any) map[string]any {
+	if obj, ok := value.(map[string]any); ok {
+		return obj
+	}
+	return map[string]any{}
+}
+
+func rawAny(raw store.RawJSON) any {
+	if raw == "" || !json.Valid([]byte(raw)) {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return nil
+	}
+	return value
+}
+
+func rawArray(raw store.RawJSON) []any {
+	value := rawAny(raw)
+	if arr, ok := value.([]any); ok {
+		return arr
+	}
+	return []any{}
+}
+
+func setNestedObjectValue(obj map[string]any, objectKey, valueKey string, value any) {
+	nested := rawObjectFromAny(obj[objectKey])
+	nested[valueKey] = value
+	obj[objectKey] = nested
+}
+
+func marshalRawObject(obj map[string]any) store.RawJSON {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return store.RawJSON("{}")
+	}
+	return store.RawJSON(data)
+}
+
+func nullableFloat(value store.NullFloat64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Float64
+}
+
+func nullableInt(value store.NullInt64) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
+}
+
+func nullableString(value store.NullString) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
 }
 
 func NewSRZoneHandler(
@@ -183,7 +528,12 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 			serverError(c, h.log, err, "sr-zones: provider analyze")
 			return
 		}
-		c.JSON(http.StatusCreated, srZonePipelineResponse(result.Analysis, result.Zones))
+		snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), result.Analysis.ID)
+		if err != nil {
+			serverError(c, h.log, err, "sr-zones: load reusable snapshot")
+			return
+		}
+		c.JSON(http.StatusCreated, srZonePipelineResponse(snapshot))
 		return
 	}
 
@@ -193,30 +543,25 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	a, zones, err := result.ToStore()
+	a, zones, projections, err := result.ToStore()
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: convert result to store")
 		return
 	}
 
-	id, err := h.repo.Create(c.Request.Context(), a, zones)
+	id, err := h.repo.Create(c.Request.Context(), a, zones, projections)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: create analysis")
 		return
 	}
 
-	saved, err := h.repo.Get(c.Request.Context(), id)
+	snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), id)
 	if err != nil {
-		serverError(c, h.log, err, "sr-zones: get saved analysis")
-		return
-	}
-	savedZones, err := h.repo.GetZones(c.Request.Context(), id)
-	if err != nil {
-		serverError(c, h.log, err, "sr-zones: get saved zones")
+		serverError(c, h.log, err, "sr-zones: load saved snapshot")
 		return
 	}
 
-	c.JSON(http.StatusCreated, srZonePipelineResponse(saved, savedZones))
+	c.JSON(http.StatusCreated, srZonePipelineResponse(snapshot))
 }
 
 // GET /api/v1/sr-zones?symbol=2330&limit=20
@@ -248,12 +593,12 @@ func (h *SRZoneHandler) Get(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "sr zone analysis not found"})
 		return
 	}
-	zones, err := h.repo.GetZones(c.Request.Context(), id)
+	snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), a.ID)
 	if err != nil {
-		serverError(c, h.log, err, "sr-zones: get zones")
+		serverError(c, h.log, err, "sr-zones: load snapshot")
 		return
 	}
-	c.JSON(http.StatusOK, srZonePipelineResponse(a, zones))
+	c.JSON(http.StatusOK, srZonePipelineResponse(snapshot))
 }
 
 // POST /api/v1/sr-zones/:id/verify
@@ -269,12 +614,17 @@ func (h *SRZoneHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	a, zones, err := h.verifier.Verify(c.Request.Context(), id)
+	a, _, err := h.verifier.Verify(c.Request.Context(), id)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: verify")
 		return
 	}
-	c.JSON(http.StatusOK, srZonePipelineResponse(a, zones))
+	snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), a.ID)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: load verified snapshot")
+		return
+	}
+	c.JSON(http.StatusOK, srZonePipelineResponse(snapshot))
 }
 
 // POST /api/v1/sr-zones/train

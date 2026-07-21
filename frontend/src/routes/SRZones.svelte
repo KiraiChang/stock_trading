@@ -49,6 +49,10 @@
 
 
   $: decisionSummary = current?.decision_summary ?? null
+  $: hasNormalizedDecision = current?.normalized_status?.decision === 'normalized'
+  $: missingNormalizedDecision = !!current && !decisionSummary && current.normalized_status?.decision === 'missing'
+  $: missingModelGovernance = !!current && !current.probability_context && current.normalized_status?.model_governance === 'missing'
+  $: hasDecisionDetail = !!decisionSummary?.market_regime && !!decisionSummary?.confidence_explanation
   $: analysisExplanation = current?.explanation ?? null
   $: explanationSummary = analysisExplanation?.summary
     ?? analysisTips[0]
@@ -199,7 +203,7 @@
     STRONG_SELL: 'bg-red-900/60 text-red-300',
   }
 
-  // Tier（可排序）：主結構（寬）→ 交易區 → 短期支撐（窄），見後端
+  // Tier（可排序）：主結構（寬）→ 交易區 → 短期（窄），見後端
   // scoring.py::_assign_tiers。
   const tierOrder: ZoneTier[] = ['TIER_1_MAIN_STRUCTURE', 'TIER_2_TRADING_ZONE', 'TIER_3_SHORT_TERM']
   const tierDescription: Record<ZoneTier, string> = {
@@ -257,6 +261,26 @@
   // HELD_SO_FAR/BROKEN，兩者會互相矛盾（見 docs/sr-zone-scoring.md 十五）。
   function effectiveRole(z: SRZone): 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE' {
     return z.resolved_role ?? z.role
+  }
+
+  function roleLabel(role: string): string {
+    if (role === 'SUPPORT') return '支撐'
+    if (role === 'RESISTANCE') return '壓力'
+    if (role === 'AT_ZONE') return '區間內'
+    return role
+  }
+
+  function zoneDisplayLabel(z: SRZone): string {
+    return z.display_label ?? `${z.tier_label}${roleLabel(effectiveRole(z))}`
+  }
+
+  function summaryDisplayLabel(item: SRZoneSummaryItem | null, side: 'support' | 'resistance'): string {
+    if (!item) return summaryTitle(side)
+    return item.display_label ?? `${item.tier_label}${item.role_label ?? summaryTitle(side)}`
+  }
+
+  function confluenceFamilyCount(item: { confluence_count?: number; confluence_family_count?: number | null } | null | undefined): number {
+    return item?.confluence_family_count ?? item?.confluence_count ?? 1
   }
 
   // role（現價位置下目前扮演的角色）跟 net_score_label（這個價位帶過去
@@ -401,25 +425,12 @@
     UNKNOWN: '無資料',
   }
   const pricePathText: Record<string, string> = {
+    EVENT_RISK: '事件風險',
     INVALIDATION_RISK: '失效風險',
     RR_BLOCKED: 'RR 阻擋',
     BLOCKING_ZONE_AHEAD: '前方壓力',
     DAILY_CANDIDATE_ONLY: '僅日 K 候選',
     OPEN_PATH: '路徑開放',
-  }
-
-  function legacyMarketAction(action: string | undefined): string {
-    if (action === 'Buy') return 'BUY'
-    if (action === 'BuySmall') return 'BUY_SMALL'
-    if (action === 'Avoid') return 'AVOID'
-    return 'WATCH'
-  }
-
-  function legacyMarketBias(action: string | undefined): string {
-    const legacy = legacyMarketAction(action)
-    if (legacy === 'BUY' || legacy === 'BUY_SMALL') return 'BULLISH_BIAS'
-    if (legacy === 'AVOID') return 'BEARISH_BIAS'
-    return 'NEUTRAL_BIAS'
   }
 
   function positionReasonCodesText(codes?: string[]): string {
@@ -478,6 +489,8 @@
     LOW_CONFIDENCE: '信心偏低',
     LOW_PROBABILITY_EDGE: '機率差距小',
     MISSING_DIRECTIONAL_PROBABILITY: '缺方向機率',
+    LOW_AVERAGE_EDGE: '平均機率差偏低',
+    NO_DIRECTIONAL_ZONES: '無可用方向機率',
   }
 
   function probabilityFlagLabel(flag: string): string {
@@ -1112,35 +1125,35 @@
             </div>
           </div>
         {/if}
-        {#if decisionSummary}
+        {#if decisionSummary && hasDecisionDetail}
           <div class="px-5 py-4 border-b border-border bg-surface/40 decision-summary-panel">
             <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
               <div>
                 <p class="text-muted text-xs mb-1">Market Regime</p>
                 <div class="flex items-center gap-2 flex-wrap">
-                  <h3 class="text-white font-semibold">{decisionSummary.market_regime.label || regimePrimaryText[decisionSummary.market_regime.primary] || decisionSummary.market_regime.primary}</h3>
-                  {#if decisionSummary.market_regime.trend_regime}
+                  <h3 class="text-white font-semibold">{decisionSummary.market_regime?.label || regimePrimaryText[decisionSummary.market_regime?.primary ?? ''] || decisionSummary.market_regime?.primary}</h3>
+                  {#if decisionSummary.market_regime?.trend_regime}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-blue-900/40 text-blue-300">{regimePrimaryText[decisionSummary.market_regime.trend_regime] ?? decisionSummary.market_regime.trend_regime}</span>
                   {/if}
-                  {#if decisionSummary.market_regime.structure_state}
+                  {#if decisionSummary.market_regime?.structure_state}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-surface text-muted border border-border">{structureStateText[decisionSummary.market_regime.structure_state] ?? decisionSummary.market_regime.structure_state}</span>
                   {/if}
-                  {#if decisionSummary.market_regime.short_term_regime && decisionSummary.market_regime.short_term_regime !== 'NORMAL'}
+                  {#if decisionSummary.market_regime?.short_term_regime && decisionSummary.market_regime.short_term_regime !== 'NORMAL'}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-purple-900/40 text-purple-300">{shortTermRegimeText[decisionSummary.market_regime.short_term_regime] ?? decisionSummary.market_regime.short_term_regime}</span>
                   {/if}
-                  {#each decisionSummary.market_regime.flags as flag}
+                  {#each decisionSummary.market_regime?.flags ?? [] as flag}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-yellow-900/40 text-yellow-300">{regimeFlagText[flag] ?? flag}</span>
                   {/each}
                 </div>
-                {#if decisionSummary.market_regime.reasons.length > 0}
-                  <p class="text-muted text-xs mt-1">{decisionSummary.market_regime.reasons.join('、')}</p>
+                {#if (decisionSummary.market_regime?.reasons ?? []).length > 0}
+                  <p class="text-muted text-xs mt-1">{decisionSummary.market_regime?.reasons?.join('、')}</p>
                 {/if}
               </div>
               <div class="flex gap-2 text-right flex-wrap justify-end">
                 <div>
                   <p class="text-muted text-xs mb-1">Market Bias</p>
-                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {marketBiasClass[decisionSummary.market_bias ?? legacyMarketBias(decisionSummary.action)] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
-                    {decisionSummary.market_bias_label ?? marketBiasText[decisionSummary.market_bias ?? legacyMarketBias(decisionSummary.action)] ?? decisionSummary.market_bias ?? decisionSummary.action}
+                  <span class="inline-flex items-center px-3 py-1 rounded-lg border text-sm font-semibold {marketBiasClass[decisionSummary.market_bias ?? 'NEUTRAL_BIAS'] ?? 'bg-gray-700/60 text-gray-300 border-border'}">
+                    {decisionSummary.market_bias_label ?? marketBiasText[decisionSummary.market_bias ?? 'NEUTRAL_BIAS'] ?? decisionSummary.market_bias ?? 'NEUTRAL_BIAS'}
                   </span>
                 </div>
                 {#if decisionSummary.final_entry_permission}
@@ -1353,7 +1366,7 @@
                   <p class="text-xs text-muted mt-1">{noviceRoleText[decisionSummary.primary_zone.role] ?? decisionSummary.primary_zone.role} · {decisionSummary.primary_zone.reason}</p>
                   <div class="flex flex-wrap gap-2 mt-3 text-[11px]">
                     <span class="text-white">{decisionSummary.primary_zone.zone_interaction?.state_label ?? '尚未測試'}</span>
-                    <span class="text-muted">區間辨識信心 {decisionSummary.confidence_explanation.label}</span>
+                    <span class="text-muted">區間辨識信心 {decisionSummary.confidence_explanation?.label ?? '—'}</span>
                     <span class="text-muted">Score {fmtScore100(decisionSummary.primary_zone.trading_score)}</span>
                     <span class="text-muted">EV {fmtSignedPct(decisionSummary.primary_zone.expected_value)}</span>
                     <span class="text-muted">RR {fmtRatio(decisionSummary.primary_zone.risk_reward_ratio)}</span>
@@ -1366,16 +1379,16 @@
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/60">
                   <p class="text-muted text-xs mb-2">Market Context</p>
                   <div class="grid grid-cols-2 gap-2 text-xs">
-                    {#each decisionSummary.market_context as ctx}
+                    {#each decisionSummary.market_context ?? [] as ctx}
                       <div>
                         <p class="text-muted">{ctx.label}</p>
                         <p class="text-white font-mono">{ctx.value}</p>
                       </div>
                     {/each}
                   </div>
-                  {#if decisionSummary.risk_notes.length > 0}
+                  {#if (decisionSummary.risk_notes ?? []).length > 0}
                     <div class="mt-3 space-y-1">
-                      {#each decisionSummary.risk_notes as note}
+                      {#each decisionSummary.risk_notes ?? [] as note}
                         <p class="text-yellow-300 text-xs">{note}</p>
                       {/each}
                     </div>
@@ -1436,22 +1449,32 @@
               <summary class="cursor-pointer text-muted hover:text-white">區間辨識信心來源與次要區間</summary>
               <div class="mt-3 grid md:grid-cols-2 gap-3">
                 <div class="space-y-2">
-                  <p class="text-white font-medium">Zone Confidence {decisionSummary.confidence_explanation.label}</p>
-                  {#each decisionSummary.confidence_explanation.formula_factors as f}
+                  <p class="text-white font-medium">Zone Confidence {decisionSummary.confidence_explanation?.label ?? '—'}</p>
+                  {#each decisionSummary.confidence_explanation?.formula_factors ?? [] as f}
                     <p class="text-muted">{f.label}：{f.description}</p>
                   {/each}
-                  {#each decisionSummary.confidence_explanation.context_factors as f}
+                  {#each decisionSummary.confidence_explanation?.context_factors ?? [] as f}
                     <p class="text-muted">{f.label}</p>
                   {/each}
                 </div>
                 <div class="space-y-2">
                   <p class="text-white font-medium">Secondary Zones</p>
-                  {#each decisionSummary.secondary_zones.slice(0, 3) as z}
+                  {#each (decisionSummary.secondary_zones ?? []).slice(0, 3) as z}
                     <p class="text-muted"><span class="font-mono text-white">{z.label}</span> · {noviceRoleText[z.role] ?? z.role} · 距離 {z.distance_label}</p>
                   {/each}
                 </div>
               </div>
             </details>
+          </div>
+        {:else if decisionSummary && hasNormalizedDecision}
+          <div class="px-5 py-4 border-b border-border bg-surface/30">
+            <p class="text-white text-sm font-medium">Decision Snapshot</p>
+            <p class="text-muted text-xs mt-1">此分析有 normalized decision authority fields，但缺少完整 decision detail snapshot。</p>
+          </div>
+        {:else if missingNormalizedDecision}
+          <div class="px-5 py-4 border-b border-border bg-surface/30">
+            <p class="text-white text-sm font-medium">Decision Snapshot</p>
+            <p class="text-muted text-xs mt-1">此分析缺少 normalized decision snapshot；請重新分析以產生新版決策資料。</p>
           </div>
         {/if}
 
@@ -1469,7 +1492,7 @@
                     {@const note = side === 'support' ? period.support_note : period.resistance_note}
                     <div class="border border-border/70 rounded-lg p-3 bg-surface/30">
                       <div class="flex items-center justify-between gap-2 mb-2">
-                        <p class="text-muted text-xs">{summaryTitle(side)}</p>
+                        <p class="text-muted text-xs">{summaryDisplayLabel(item, side)}</p>
                         {#if item}
                           <span class="text-[11px] text-muted">區間辨識信心 {noviceConfidenceText[item.confidence_level] ?? item.confidence_level}</span>
                         {/if}
@@ -1490,8 +1513,8 @@
                         </div>
                       {/if}
                       <p class="text-xs text-muted mt-2 leading-relaxed">{summaryNote(item, note)}</p>
-                      {#if item?.confluence_count > 1}
-                        <p class="text-[11px] text-indigo-300 mt-1">多方法共振 ×{item.confluence_count}</p>
+                      {#if confluenceFamilyCount(item) > 1}
+                        <p class="text-[11px] text-indigo-300 mt-1">證據族群 ×{confluenceFamilyCount(item)}</p>
                       {/if}
                     </div>
                   {/each}
@@ -1575,6 +1598,9 @@
               <div>
                 <p class="text-white text-sm font-medium">機率品質</p>
                 <p class="text-muted text-xs mt-1">
+                  {#if current.probability_context.health.health_state}
+                    狀態 {current.probability_context.health.health_state} ·
+                  {/if}
                   可用方向機率 {current.probability_context.health.directional_zone_count}/{current.probability_context.health.zone_count}
                   {#if current.probability_context.health.average_edge_pp !== null}
                     · 平均機率差 {current.probability_context.health.average_edge_pp.toFixed(1)}pp
@@ -1647,6 +1673,9 @@
                       <div>
                         <div class="flex items-center gap-2 flex-wrap mb-1">
                           <span class="font-mono text-white text-sm">{fmt(z.price_low)} ~ {fmt(z.price_high)}</span>
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-700/50 text-gray-200">
+                            {zoneDisplayLabel(z)}
+                          </span>
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium {roleClass[effectiveRole(z)] ?? 'bg-gray-700/60 text-gray-400'}">
                             {noviceRoleText[effectiveRole(z)] ?? effectiveRole(z)}
                             {#if z.resolved_role}
@@ -1656,11 +1685,11 @@
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs {statusClass[z.status] ?? 'bg-gray-700/60 text-gray-400'}">
                             {statusLabel[z.status] ?? z.status}
                           </span>
-                          {#if z.confluence_count > 1}
+                          {#if confluenceFamilyCount(z) > 1}
                             <span
                               class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-900/40 text-indigo-300"
-                              title="不同偵測方法（ATR/成交量分布）都指向這個價位帶，多一分交叉驗證"
-                            >多方法共振 ×{z.confluence_count}</span>
+                              title="不同證據族群指向這個價位帶，多一分交叉驗證"
+                            >證據族群 ×{confluenceFamilyCount(z)}</span>
                           {/if}
                         </div>
                         <p class="text-white text-sm">{noviceRecommendationText[z.trading_recommendation] ?? z.trading_recommendation}</p>

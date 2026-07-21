@@ -40,5 +40,7 @@ Decision Pipeline
 
 ## 目前階段
 
-本次拆分是文件型架構升級，不改程式碼、不改 API、不改 DB schema。後續若要把程式碼也按
-pipeline 邊界重構，先以 [../todo.md](../todo.md) 的 T-034 追蹤。
+本次拆分是文件型架構升級，不改程式碼、不改 API、不改 DB schema。其中 SR Zone pipeline 已依此
+邊界完成程式層級收斂（Analysis / AI / Decision 欄位契約、事件生命週期、決策仲裁與 normalized
+儲存，見 [sr-zone-pipeline-upgrade-plan.md](./sr-zone-pipeline-upgrade-plan.md) 與
+[../sr-zone-scoring.md](../sr-zone-scoring.md)「十八」）。其他 pipeline 的程式邊界收斂後續再逐步推進。

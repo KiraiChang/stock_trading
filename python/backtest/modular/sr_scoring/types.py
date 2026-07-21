@@ -101,7 +101,7 @@ class ZoneTier(str, Enum):
 
     TIER_1_MAIN_STRUCTURE = "TIER_1_MAIN_STRUCTURE"  # 主結構
     TIER_2_TRADING_ZONE = "TIER_2_TRADING_ZONE"  # 交易區
-    TIER_3_SHORT_TERM = "TIER_3_SHORT_TERM"  # 短期支撐/壓力
+    TIER_3_SHORT_TERM = "TIER_3_SHORT_TERM"  # 短期；支撐/壓力由 role 決定
 
 
 @dataclass(frozen=True)

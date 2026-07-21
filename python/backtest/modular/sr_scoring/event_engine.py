@@ -9,6 +9,40 @@ from .types import RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 EXTREME_VOLUME_THRESHOLD = 2.5
 HIGH_VOLUME_BREAKDOWN_THRESHOLD = 1.5
 
+EVENT_TYPE_META = {
+    "EXTREME_VOLUME": {
+        "family": "VOLUME_CONTEXT",
+        "direction": "NEUTRAL",
+        "terminal_state": "ACTIVE",
+        "resolves": (),
+    },
+    "HIGH_VOLUME_BREAKDOWN": {
+        "family": "SUPPORT_BREAKDOWN",
+        "direction": "BEARISH",
+        "terminal_state": "ACTIVE",
+        "resolves": (),
+    },
+    "INTRADAY_RECLAIM": {
+        "family": "SUPPORT_RECLAIM",
+        "direction": "BULLISH",
+        "terminal_state": "ACTIVE",
+        "resolves": ("SUPPORT_BREAKDOWN",),
+    },
+    "REVERSAL_CANDIDATE": {
+        "family": "SUPPORT_REVERSAL",
+        "direction": "BULLISH",
+        "terminal_state": "ACTIVE",
+        "resolves": ("SUPPORT_BREAKDOWN",),
+    },
+}
+
+EVENT_ORDER = {
+    "EXTREME_VOLUME": 10,
+    "HIGH_VOLUME_BREAKDOWN": 20,
+    "INTRADAY_RECLAIM": 30,
+    "REVERSAL_CANDIDATE": 40,
+}
+
 
 def _fmt_price(v: float) -> str:
     return f"{v:.2f}"
@@ -135,6 +169,108 @@ def event_zone_ref(z: ZoneScore, current_price: float) -> dict[str, Any]:
     }
 
 
+def _zone_key(zone_ref: Optional[dict[str, Any]]) -> str:
+    if not zone_ref:
+        return "SYMBOL"
+    role = zone_ref.get("role") or "UNKNOWN"
+    return f"{role}:{float(zone_ref.get('price_low', 0.0)):.4f}:{float(zone_ref.get('price_high', 0.0)):.4f}"
+
+
+def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(event.get("type") or "UNKNOWN")
+    meta = EVENT_TYPE_META.get(event_type, {})
+    zone_ref = event.get("zone_ref")
+    event_scope = "SYMBOL" if zone_ref is None else "ZONE"
+    event_family = str(meta.get("family") or event_type)
+    normalized = dict(event)
+    normalized.setdefault("event_family", event_family)
+    normalized.setdefault("event_scope", event_scope)
+    normalized.setdefault("event_key", f"{event_scope}:{event_family}:{_zone_key(zone_ref)}")
+    normalized.setdefault("zone_key", _zone_key(zone_ref))
+    normalized.setdefault("state", str(meta.get("terminal_state") or "ACTIVE"))
+    normalized.setdefault("active", normalized["state"] == "ACTIVE")
+    normalized.setdefault("reason_codes", [event_type])
+    return normalized
+
+
+def normalize_market_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [normalize_market_event(event) for event in events]
+
+
+def build_event_state_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build an in-memory event lifecycle summary from latest detected events.
+
+    This is intentionally persistence-free for P1: it gives Decision a stable
+    active/resolved view without introducing event tables before fixtures lock
+    the transition semantics.
+    """
+    normalized = sorted(normalize_market_events(events), key=lambda e: EVENT_ORDER.get(str(e.get("type")), 999))
+    states: dict[tuple[str, str], dict[str, Any]] = {}
+    resolved: list[dict[str, Any]] = []
+
+    for event in normalized:
+        zone_key = str(event.get("zone_key") or "SYMBOL")
+        event_family = str(event.get("event_family") or event.get("type"))
+        event_type = str(event.get("type") or "UNKNOWN")
+        key = (zone_key, event_family)
+        state = {
+            "event_key": event.get("event_key"),
+            "type": event_type,
+            "zone_key": zone_key,
+            "event_family": event_family,
+            "event_scope": event.get("event_scope"),
+            "root_event_type": event_type,
+            "latest_event_type": event_type,
+            "direction": event.get("direction"),
+            "state": "ACTIVE",
+            "active": True,
+            "zone_ref": event.get("zone_ref"),
+            "price_level": event.get("price_level"),
+            "confidence": event.get("confidence"),
+            "reason_codes": list(event.get("reason_codes") or [event_type]),
+            "resolved_by": None,
+        }
+        states[key] = state
+
+        for family in EVENT_TYPE_META.get(event_type, {}).get("resolves", ()):
+            target_key = (zone_key, str(family))
+            target = states.get(target_key)
+            if not target or not target.get("active"):
+                continue
+            target["state"] = "RESOLVED"
+            target["active"] = False
+            target["latest_event_type"] = event_type
+            target["resolved_by"] = event_type
+            target["reason_codes"] = [*target.get("reason_codes", []), f"RESOLVED_BY_{event_type}"]
+            resolved.append(target)
+
+    active = [state for state in states.values() if state.get("active")]
+    active_bearish = [state for state in active if state.get("direction") == "BEARISH"]
+    active_bullish = [state for state in active if state.get("direction") == "BULLISH"]
+    latest_type = normalized[-1]["type"] if normalized else None
+    return {
+        "version": "event-lifecycle-p1",
+        "states": list(states.values()),
+        "active": active,
+        "resolved": resolved,
+        "active_bearish_events": active_bearish,
+        "active_bullish_events": active_bullish,
+        "latest_event_type": latest_type,
+        "market_state": market_state_from_event_states(active),
+    }
+
+
+def market_state_from_event_states(active_states: list[dict[str, Any]]) -> str:
+    active_types = {state.get("latest_event_type") or state.get("root_event_type") for state in active_states}
+    if "HIGH_VOLUME_BREAKDOWN" in active_types:
+        return "BREAKDOWN_RISK"
+    if "INTRADAY_RECLAIM" in active_types:
+        return "RECLAIM_ATTEMPT"
+    if "REVERSAL_CANDIDATE" in active_types:
+        return "REVERSAL_CANDIDATE"
+    return "NORMAL"
+
+
 def detect_market_events(
     zone_scores: list[ZoneScore],
     current_price: float,
@@ -213,4 +349,4 @@ def detect_market_events(
                 "reason": "支撐測試未失守，且 EV 與區間信心未轉弱。",
                 "detected_at": "latest_candle",
             })
-    return events[:8]
+    return normalize_market_events(events[:8])

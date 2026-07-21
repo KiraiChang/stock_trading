@@ -201,6 +201,8 @@ SR Zone Scoring 分析快照（機構級版本，見
 [sr-zone-scoring.md](./sr-zone-scoring.md)），Go 呼叫 Python `POST /sr-zones`
 計算後寫入。驗證機制跟 `stock_analyses` 一樣是純 Go（`SRZoneVerifier`，見
 sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一價位。
+JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存，Go 端統一使用
+`store.RawJSON` 讀寫。
 
 | 欄位 | 說明 |
 |------|------|
@@ -232,6 +234,7 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 `stock_sr_zone_analyses` 底下的 zone 清單（一對多）。跟 `stock_analysis_levels`
 不同：每個 zone 是一段**價格區間**（`price_low`~`price_high`），不是單一
 價位，且欄位數量遠多於 Level（含機率、EV、RR、量能確認等 ML 產出的數字）。
+JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 
 | 欄位 | 說明 |
 |------|------|
@@ -267,6 +270,104 @@ sr-zone-scoring.md「十四」），差異在 zone 是價格區間而非單一�
 
 ---
 
+## stock_sr_decisions
+
+每筆 SR Zone analysis 的 Decision Pipeline normalized snapshot。主欄位保存可查詢的
+authority fields；detail JSON 欄位保存前端決策面仍需要、但不適合拆成大量細表的展示/解釋資料。
+JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → `stock_sr_zone_analyses.id`，每筆 analysis 一筆 decision |
+| market_bias / entry_permission_state / position_action | Decision authority fields |
+| price_path_state / model_health_state / event_market_state | Price path、AI health 與 event state 的查詢欄位 |
+| reason_codes | JSON 陣列，彙整 final entry、price path、model governance 與 active bearish event reason codes |
+| market_regime_json / data_quality_json | Decision market regime 與資料品質 detail |
+| event_sequence_json / daily_price_action_json | 事件序列與 daily price action detail |
+| price_path_json / daily_confirmation_json | Price path 完整 detail 與日 K 確認狀態 |
+| defense_lines_json | tactical / swing / strategic 防守線 |
+| rr_context_json / rr_gate_json | Entry RR、position RR 來源與 RR gate 判斷 |
+| position_action_condition_json | 既有部位操作條件 |
+| market_context_json / confidence_explanation_json / risk_notes_json | 前端決策說明所需的 context、confidence factor 與風險提示 |
+| zone_summaries_json | `nearest_decision_zone`、`nearest_support_zone`、`nearest_resistance_zone`、`primary_structural_zone`、`best_trade_zone`、`primary_zone`、`secondary_zones` |
+| decision_summary | 原始 decision JSON snapshot，保留 debug 與舊相容用途 |
+
+**Index：** `UNIQUE(analysis_id)`、`INDEX(symbol, timeframe, analyzed_at DESC)`。
+
+---
+
+## market_event_detections
+
+每筆 SR Zone analysis 偵測到的市場事件逐筆 raw 紀錄（`detect_market_events` 的完整 event chain），
+一筆 analysis 對應 0..N 列。保留完整偵測鏈供對外呈現與稽核；Decision gating 只消費
+`market_event_states` 的 active 集合（見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十八」）。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → `stock_sr_zone_analyses.id` |
+| event_key | 事件唯一鍵（同一 zone 的事件鏈以此關聯） |
+| event_type / event_family / event_scope | 事件類型、族群與範圍（例如 `HIGH_VOLUME_BREAKDOWN`） |
+| zone_key | 事件對應的 zone 鍵 |
+| direction | 事件方向（bullish / bearish 等） |
+| state | 事件狀態 |
+| active | 是否為 active 事件（`0`/`1`，預設 `0`） |
+| confidence / price_level | 事件信心與價位；可為 `NULL` |
+| reason_codes | JSON 陣列，事件 reason codes |
+| event_json | 事件完整 detail JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
+| created_at | 建立時間 |
+
+**Index：** `INDEX(analysis_id)`、`INDEX(symbol, timeframe, analyzed_at DESC)`。
+
+---
+
+## market_event_states
+
+由 raw event chain 收斂出的每個事件狀態（`build_event_state_summary`），一筆 analysis 對應
+0..N 列。同一 zone 的 `HIGH_VOLUME_BREAKDOWN → INTRADAY_RECLAIM → REVERSAL_CANDIDATE` 會收斂為
+一列並標示 active/resolved，讓已被 reclaim/reversal 收復的 breakdown 不再作為 active bearish gate。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → `stock_sr_zone_analyses.id` |
+| event_key | 事件狀態唯一鍵 |
+| event_type / event_family / event_scope | 事件類型、族群與範圍 |
+| zone_key | 事件對應的 zone 鍵 |
+| root_event_type / latest_event_type | 事件鏈的起始與最新事件類型 |
+| direction | 事件方向 |
+| state | 事件狀態 |
+| active | 是否仍為 active（`0`/`1`，預設 `0`）；resolved 後為 `0` |
+| resolved_by | 解除該事件的事件類型；可為 `NULL` |
+| confidence / price_level | 信心與價位；可為 `NULL` |
+| reason_codes | JSON 陣列，狀態 reason codes |
+| state_json | 事件狀態完整 detail JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
+| created_at | 建立時間 |
+
+**Index：** `INDEX(analysis_id)`、`INDEX(symbol, timeframe, active, analyzed_at DESC)`。
+
+---
+
+## stock_sr_daily_candidates
+
+每筆 SR Zone analysis 的 `decision_summary.daily_candidate_zones` normalized projection——當現價
+離既有 zone 過遠、或發生盤中收復/反轉事件時，用日 K OHLC 產生的短線支撐/壓力候選區，一筆 analysis
+對應 0..N 列。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → `stock_sr_zone_analyses.id` |
+| price_low / price_high | 候選區價格區間 |
+| label / role | 顯示標籤與角色（`SUPPORT`/`RESISTANCE`） |
+| source / lifecycle / decision_role | 候選來源、生命週期與決策角色 |
+| distance_pct / distance_label | 與現價距離百分比與標籤；`distance_pct` 可為 `NULL` |
+| reason | 候選成因說明文字 |
+| event_refs | JSON 陣列，關聯事件參照 |
+| candidate_json | 候選區完整 detail JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
+| created_at | 建立時間 |
+
+**Index：** `INDEX(analysis_id)`、`INDEX(symbol, timeframe, analyzed_at DESC)`。
+
+---
+
 ## sr_scoring_train_jobs
 
 SR Zone Scoring 機率模型的訓練任務紀錄（見
@@ -292,6 +393,74 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | created_at | 任務建立時間（等同呼叫 `POST /sr-zones/train` 的時間） |
 
 **Index：** `INDEX(created_at DESC)`。
+
+---
+
+## stock_sr_model_metrics
+
+train job 完成時的 hold/break 模型品質 projection，一筆成功 train job 對應一列（`UNIQUE(job_id)`）。
+與 `sr_scoring_train_jobs.metrics` 的差別：這張是拆欄可查詢的品質快照，供 model governance 與品質
+追蹤使用，不是 job history 本身。
+
+| 欄位 | 說明 |
+|------|------|
+| train_job_id | FK → `sr_scoring_train_jobs.id` |
+| job_id | 對應 train job 的 `job_id`，唯一 |
+| model_version / model_type / split_method / timeframe | 模型版本、類型、切分方式與 K 棒週期 |
+| rows / sources | 訓練資料筆數與來源股票數；可為 `NULL` |
+| hold_auc / hold_brier_score / hold_log_loss / hold_calibrated / hold_test_rows | hold/bounce 方向品質指標；可為 `NULL` |
+| break_auc / break_brier_score / break_log_loss / break_calibrated / break_test_rows | break 方向品質指標；可為 `NULL` |
+| metrics_json / dataset_summary_json | 完整 metrics 與 dataset 摘要 JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
+| created_at | 建立時間 |
+
+**Index：** `INDEX(model_version, created_at DESC)`。
+
+---
+
+## stock_sr_model_governance
+
+每次 SR analysis 套用模型後的 AI health / confidence gate / model report projection，一筆 analysis
+對應一列（`UNIQUE(analysis_id)`）。Decision 只消費此表的 health/gate 結果，不直接讀 raw model metrics。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | FK → `stock_sr_zone_analyses.id` |
+| model_version / model_config_hash | 套用的模型版本與設定 hash |
+| health_state | 模型健康度（例如 `HEALTHY`/`DEGRADED`/`UNRELIABLE`） |
+| average_edge_pp / directional_zone_count / zone_count | 平均 edge（百分點）、有方向 zone 數與總 zone 數；可為 `NULL` |
+| allow_entry / max_entry_state | 是否允許依模型進場、最高可達的進場狀態 |
+| quality_flags / warning_flags / blocking_flags | JSON 陣列，品質、警告與阻擋旗標 |
+| confidence_gate_json | confidence gate 判斷 detail JSON |
+| calibration_report_json / walk_forward_report_json / dataset_diagnostics_json | 校準、walk-forward 與 dataset 診斷報告 JSON |
+| governance_json | model governance 完整 detail JSON |
+| created_at | 建立時間 |
+
+JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite/MySQL 以文字 JSON 儲存。
+
+**Index：** `INDEX(symbol, timeframe, analyzed_at DESC)`。
+
+---
+
+## stock_sr_regression_results
+
+SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。這張表保存跨
+`model_config_hash` / `pipeline_version` 的驗收紀錄，用來追蹤模型或 pipeline 改動後是否仍通過
+既定門檻；它不是 train job history，也不隨 `sr_scoring_train_jobs` pruning 刪除。
+`metrics_json` 在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
+
+| 欄位 | 說明 |
+|------|------|
+| run_id | 回歸驗收 run 識別碼，唯一 |
+| model_config_hash / pipeline_version | 本次驗收對應的模型設定與 pipeline 版本 |
+| dataset_from / dataset_to | 驗收資料範圍；可為 `NULL` |
+| split_method | 驗收切分方式，例如 `time` |
+| hold_auc / hold_brier_score | hold/bounce 方向主要品質指標 |
+| break_auc / break_brier_score | break 方向主要品質指標 |
+| passed | 是否通過當次門檻；可為 `NULL` 表示尚未判定 |
+| metrics_json | 完整驗收報告 JSON，保留門檻、fixture 名稱與其他指標 |
+| created_at | 建立時間 |
+
+**Index：** `INDEX(model_config_hash, created_at DESC)`、`INDEX(passed, created_at DESC)`。
 
 ---
 

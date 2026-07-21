@@ -351,7 +351,7 @@ type ZoneScoreResult struct {
 // ModelVersion 若 Python 端沒有回傳（理論上不應該發生，防禦性處理），寫入
 // "unknown" 而不是空字串——空字串在 DB 裡看起來像「忘了填」，"unknown" 才
 // 明確代表「這筆資料就是沒有版本資訊」。
-func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, error) {
+func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, store.SRZoneNormalizedProjections, error) {
 	analysis := r.Analysis
 	features := r.Features
 	score := r.Score
@@ -375,7 +375,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 	}
 	analyzedAt, err := time.Parse(time.RFC3339, analysis.AnalyzedAt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parse analyzed_at %q: %w", analysis.AnalyzedAt, err)
+		return nil, nil, store.SRZoneNormalizedProjections{}, fmt.Errorf("parse analyzed_at %q: %w", analysis.AnalyzedAt, err)
 	}
 
 	modelVersion := analysis.Model.Version
@@ -416,11 +416,11 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 			breakCount = *z.BreakCount
 		}
 		if err := validateTradingScoreBreakdown(z.TradingScoreBreakdown); err != nil {
-			return nil, nil, fmt.Errorf("invalid trading_score_breakdown for zone %.2f-%.2f: %w", z.PriceLow, z.PriceHigh, err)
+			return nil, nil, store.SRZoneNormalizedProjections{}, fmt.Errorf("invalid trading_score_breakdown for zone %.2f-%.2f: %w", z.PriceLow, z.PriceHigh, err)
 		}
 		breakdownJSON, err := json.Marshal(z.TradingScoreBreakdown)
 		if err != nil {
-			return nil, nil, fmt.Errorf("marshal trading_score_breakdown: %w", err)
+			return nil, nil, store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal trading_score_breakdown: %w", err)
 		}
 		confluenceCount := z.ConfluenceCount
 		if confluenceCount <= 0 {
@@ -470,7 +470,437 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, erro
 		})
 	}
 
-	return a, zones, nil
+	projections, err := buildSRZoneNormalizedProjections(decision, probabilityContext)
+	if err != nil {
+		return nil, nil, store.SRZoneNormalizedProjections{}, err
+	}
+	return a, zones, projections, nil
+}
+
+func buildSRZoneNormalizedProjections(decision, probabilityContext json.RawMessage) (store.SRZoneNormalizedProjections, error) {
+	projections := store.SRZoneNormalizedProjections{}
+	decisionObj, ok, err := decodeJSONObject(decision)
+	if err != nil {
+		return store.SRZoneNormalizedProjections{}, err
+	}
+	if !ok {
+		modelGovernance, err := buildModelGovernanceProjection(probabilityContext)
+		if err != nil {
+			return store.SRZoneNormalizedProjections{}, err
+		}
+		projections.ModelGovernance = modelGovernance
+		return projections, nil
+	}
+
+	reasonCodes := collectDecisionReasonCodes(decisionObj)
+	reasonCodesJSON, err := json.Marshal(reasonCodes)
+	if err != nil {
+		return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal decision reason_codes: %w", err)
+	}
+
+	projections.Decision = &store.SRDecision{
+		MarketBias:                  stringAt(decisionObj, "market_bias"),
+		EntryPermissionState:        stringAt(decisionObj, "final_entry_permission", "state"),
+		PositionAction:              stringAt(decisionObj, "position_action"),
+		PricePathState:              stringAt(decisionObj, "price_path", "path_state"),
+		ModelHealthState:            stringAt(decisionObj, "model_governance", "health_state"),
+		EventMarketState:            stringAt(decisionObj, "event_state_summary", "market_state"),
+		ReasonCodes:                 store.RawJSON(reasonCodesJSON),
+		MarketRegimeJSON:            decisionRawJSONAt(decisionObj, "null", "market_regime"),
+		DataQualityJSON:             decisionRawJSONAt(decisionObj, "null", "data_quality"),
+		EventSequenceJSON:           decisionRawJSONAt(decisionObj, "[]", "event_sequence"),
+		DailyPriceActionJSON:        decisionRawJSONAt(decisionObj, "null", "daily_price_action"),
+		PricePathJSON:               decisionRawJSONAt(decisionObj, "null", "price_path"),
+		DailyConfirmationJSON:       decisionRawJSONAt(decisionObj, "null", "daily_confirmation"),
+		DefenseLinesJSON:            decisionRawJSONAt(decisionObj, "null", "defense_lines"),
+		RRContextJSON:               decisionRawJSONAt(decisionObj, "null", "rr_context"),
+		RRGateJSON:                  decisionRawJSONAt(decisionObj, "null", "rr_gate"),
+		PositionActionConditionJSON: decisionRawJSONAt(decisionObj, "null", "position_action_condition"),
+		MarketContextJSON:           decisionRawJSONAt(decisionObj, "[]", "market_context"),
+		ConfidenceExplanationJSON:   decisionRawJSONAt(decisionObj, "null", "confidence_explanation"),
+		RiskNotesJSON:               decisionRawJSONAt(decisionObj, "[]", "risk_notes"),
+		ZoneSummariesJSON:           buildDecisionZoneSummariesJSON(decisionObj),
+		DecisionSummary:             rawJSONOrDefault(decision, "null"),
+	}
+
+	if events, ok := sliceAt(decisionObj, "market_events"); ok {
+		projections.EventDetections = make([]store.MarketEventDetection, 0, len(events))
+		for _, item := range events {
+			event, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			eventJSON, err := json.Marshal(event)
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal market event: %w", err)
+			}
+			reasonsJSON, err := json.Marshal(stringSliceAt(event, "reason_codes"))
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal market event reason_codes: %w", err)
+			}
+			projections.EventDetections = append(projections.EventDetections, store.MarketEventDetection{
+				EventKey:    stringAt(event, "event_key"),
+				EventType:   stringAt(event, "type"),
+				EventFamily: stringAt(event, "event_family"),
+				EventScope:  stringAt(event, "event_scope"),
+				ZoneKey:     stringAt(event, "zone_key"),
+				Direction:   stringAt(event, "direction"),
+				State:       stringAt(event, "state"),
+				Active:      boolAt(event, "active"),
+				Confidence:  nullFloat(anyFloatAt(event, "confidence")),
+				PriceLevel:  nullFloat(anyFloatAt(event, "price_level")),
+				ReasonCodes: store.RawJSON(reasonsJSON),
+				EventJSON:   store.RawJSON(eventJSON),
+			})
+		}
+	}
+
+	if states, ok := sliceAt(decisionObj, "event_state_summary", "states"); ok {
+		projections.EventStates = make([]store.MarketEventState, 0, len(states))
+		for _, item := range states {
+			state, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			stateJSON, err := json.Marshal(state)
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal market event state: %w", err)
+			}
+			reasonsJSON, err := json.Marshal(stringSliceAt(state, "reason_codes"))
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal event state reason_codes: %w", err)
+			}
+			projections.EventStates = append(projections.EventStates, store.MarketEventState{
+				EventKey:        stringAt(state, "event_key"),
+				EventType:       stringAt(state, "type"),
+				EventFamily:     stringAt(state, "event_family"),
+				EventScope:      stringAt(state, "event_scope"),
+				ZoneKey:         stringAt(state, "zone_key"),
+				RootEventType:   stringAt(state, "root_event_type"),
+				LatestEventType: stringAt(state, "latest_event_type"),
+				Direction:       stringAt(state, "direction"),
+				State:           stringAt(state, "state"),
+				Active:          boolAt(state, "active"),
+				ResolvedBy:      nullString(anyStringAt(state, "resolved_by")),
+				Confidence:      nullFloat(anyFloatAt(state, "confidence")),
+				PriceLevel:      nullFloat(anyFloatAt(state, "price_level")),
+				ReasonCodes:     store.RawJSON(reasonsJSON),
+				StateJSON:       store.RawJSON(stateJSON),
+			})
+		}
+	}
+
+	if candidates, ok := sliceAt(decisionObj, "daily_candidate_zones"); ok {
+		projections.DailyCandidates = make([]store.SRDailyCandidate, 0, len(candidates))
+		for _, item := range candidates {
+			candidate, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			candidateJSON, err := json.Marshal(candidate)
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal daily candidate: %w", err)
+			}
+			eventRefsJSON, err := json.Marshal(stringSliceAt(candidate, "event_refs"))
+			if err != nil {
+				return store.SRZoneNormalizedProjections{}, fmt.Errorf("marshal daily candidate event_refs: %w", err)
+			}
+			projections.DailyCandidates = append(projections.DailyCandidates, store.SRDailyCandidate{
+				PriceLow:      floatAt(candidate, "price_low"),
+				PriceHigh:     floatAt(candidate, "price_high"),
+				Label:         stringAt(candidate, "label"),
+				Role:          stringAt(candidate, "role"),
+				Source:        stringAt(candidate, "source"),
+				Lifecycle:     stringAt(candidate, "lifecycle"),
+				DecisionRole:  stringAt(candidate, "decision_role"),
+				DistancePct:   nullFloat(anyFloatAt(candidate, "distance_pct")),
+				DistanceLabel: stringAt(candidate, "distance_label"),
+				Reason:        stringAt(candidate, "reason"),
+				EventRefs:     store.RawJSON(eventRefsJSON),
+				CandidateJSON: store.RawJSON(candidateJSON),
+			})
+		}
+	}
+	modelGovernance, err := buildModelGovernanceProjection(probabilityContext)
+	if err != nil {
+		return store.SRZoneNormalizedProjections{}, err
+	}
+	projections.ModelGovernance = modelGovernance
+	return projections, nil
+}
+
+func buildModelGovernanceProjection(probabilityContext json.RawMessage) (*store.SRModelGovernance, error) {
+	probabilityObj, ok, err := decodeJSONObject(probabilityContext)
+	if err != nil || !ok {
+		return nil, err
+	}
+	health, ok := mapAt(probabilityObj, "health")
+	if !ok {
+		return nil, nil
+	}
+	healthJSON, err := json.Marshal(health)
+	if err != nil {
+		return nil, fmt.Errorf("marshal model governance health: %w", err)
+	}
+	qualityFlagsJSON, err := json.Marshal(stringSliceAt(health, "quality_flags"))
+	if err != nil {
+		return nil, fmt.Errorf("marshal model governance quality_flags: %w", err)
+	}
+	warningFlagsJSON, err := json.Marshal(stringSliceAt(health, "warning_flags"))
+	if err != nil {
+		return nil, fmt.Errorf("marshal model governance warning_flags: %w", err)
+	}
+	blockingFlagsJSON, err := json.Marshal(stringSliceAt(health, "blocking_flags"))
+	if err != nil {
+		return nil, fmt.Errorf("marshal model governance blocking_flags: %w", err)
+	}
+	confidenceGateJSON, err := marshalJSONObjectAt(health, "confidence_gate")
+	if err != nil {
+		return nil, err
+	}
+	calibrationReportJSON, err := marshalJSONObjectAt(probabilityObj, "model_reports", "calibration_report")
+	if err != nil {
+		return nil, err
+	}
+	walkForwardReportJSON, err := marshalJSONObjectAt(probabilityObj, "model_reports", "walk_forward_report")
+	if err != nil {
+		return nil, err
+	}
+	datasetDiagnosticsJSON, err := marshalJSONObjectAt(probabilityObj, "model_reports", "dataset_diagnostics")
+	if err != nil {
+		return nil, err
+	}
+	return &store.SRModelGovernance{
+		HealthState:            stringAt(health, "health_state"),
+		AverageEdgePP:          nullFloat(anyFloatAt(health, "average_edge_pp")),
+		DirectionalZoneCount:   nullIntFromFloat(anyFloatAt(health, "directional_zone_count")),
+		ZoneCount:              nullIntFromFloat(anyFloatAt(health, "zone_count")),
+		AllowEntry:             nullBool(anyBoolAt(health, "confidence_gate", "allow_entry")),
+		MaxEntryState:          stringAt(health, "confidence_gate", "max_entry_state"),
+		QualityFlags:           store.RawJSON(qualityFlagsJSON),
+		WarningFlags:           store.RawJSON(warningFlagsJSON),
+		BlockingFlags:          store.RawJSON(blockingFlagsJSON),
+		ConfidenceGateJSON:     store.RawJSON(confidenceGateJSON),
+		CalibrationReportJSON:  store.RawJSON(calibrationReportJSON),
+		WalkForwardReportJSON:  store.RawJSON(walkForwardReportJSON),
+		DatasetDiagnosticsJSON: store.RawJSON(datasetDiagnosticsJSON),
+		GovernanceJSON:         store.RawJSON(healthJSON),
+	}, nil
+}
+
+func decodeJSONObject(raw json.RawMessage) (map[string]any, bool, error) {
+	if len(raw) == 0 || !json.Valid(raw) || string(raw) == "null" {
+		return nil, false, nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, false, fmt.Errorf("decode decision projection: %w", err)
+	}
+	return obj, true, nil
+}
+
+func collectDecisionReasonCodes(obj map[string]any) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(values []string) {
+		for _, value := range values {
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			out = append(out, value)
+		}
+	}
+	add(stringSliceAt(obj, "final_entry_permission", "reason_codes"))
+	add(stringSliceAt(obj, "price_path", "reason_codes"))
+	add(stringSliceAt(obj, "model_governance", "confidence_gate", "reason_codes"))
+	if events, ok := sliceAt(obj, "event_state_summary", "active_bearish_events"); ok {
+		for _, item := range events {
+			if event, ok := item.(map[string]any); ok {
+				add(stringSliceAt(event, "reason_codes"))
+			}
+		}
+	}
+	return out
+}
+
+func valueAt(obj map[string]any, path ...string) (any, bool) {
+	var current any = obj
+	for _, key := range path {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = m[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func mapAt(obj map[string]any, path ...string) (map[string]any, bool) {
+	value, ok := valueAt(obj, path...)
+	if !ok {
+		return nil, false
+	}
+	m, ok := value.(map[string]any)
+	return m, ok
+}
+
+func marshalJSONObjectAt(obj map[string]any, path ...string) ([]byte, error) {
+	value, ok := valueAt(obj, path...)
+	if !ok || value == nil {
+		return []byte("null"), nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("marshal %q: %w", path[len(path)-1], err)
+	}
+	return data, nil
+}
+
+func decisionRawJSONAt(obj map[string]any, fallback string, path ...string) store.RawJSON {
+	value, ok := valueAt(obj, path...)
+	if !ok || value == nil {
+		return store.RawJSON(fallback)
+	}
+	data, err := json.Marshal(value)
+	if err != nil || !json.Valid(data) {
+		return store.RawJSON(fallback)
+	}
+	return store.RawJSON(data)
+}
+
+func buildDecisionZoneSummariesJSON(obj map[string]any) store.RawJSON {
+	out := map[string]any{
+		"nearest_decision_zone":   nil,
+		"nearest_support_zone":    nil,
+		"nearest_resistance_zone": nil,
+		"primary_structural_zone": nil,
+		"best_trade_zone":         nil,
+		"primary_zone":            nil,
+		"secondary_zones":         []any{},
+	}
+	for _, key := range []string{
+		"nearest_decision_zone",
+		"nearest_support_zone",
+		"nearest_resistance_zone",
+		"primary_structural_zone",
+		"best_trade_zone",
+		"primary_zone",
+		"secondary_zones",
+	} {
+		if value, ok := valueAt(obj, key); ok {
+			out[key] = value
+		}
+	}
+	data, err := json.Marshal(out)
+	if err != nil || !json.Valid(data) {
+		return store.RawJSON(`{"nearest_decision_zone":null,"nearest_support_zone":null,"nearest_resistance_zone":null,"primary_structural_zone":null,"best_trade_zone":null,"primary_zone":null,"secondary_zones":[]}`)
+	}
+	return store.RawJSON(data)
+}
+
+func stringAt(obj map[string]any, path ...string) string {
+	value := anyStringAt(obj, path...)
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func anyStringAt(obj map[string]any, path ...string) *string {
+	value, ok := valueAt(obj, path...)
+	if !ok || value == nil {
+		return nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return nil
+	}
+	return &text
+}
+
+func anyFloatAt(obj map[string]any, path ...string) *float64 {
+	value, ok := valueAt(obj, path...)
+	if !ok || value == nil {
+		return nil
+	}
+	number, ok := value.(float64)
+	if !ok {
+		return nil
+	}
+	return &number
+}
+
+func anyBoolAt(obj map[string]any, path ...string) *bool {
+	value, ok := valueAt(obj, path...)
+	if !ok || value == nil {
+		return nil
+	}
+	flag, ok := value.(bool)
+	if !ok {
+		return nil
+	}
+	return &flag
+}
+
+func floatAt(obj map[string]any, path ...string) float64 {
+	value := anyFloatAt(obj, path...)
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func boolAt(obj map[string]any, path ...string) bool {
+	value, ok := valueAt(obj, path...)
+	if !ok {
+		return false
+	}
+	flag, _ := value.(bool)
+	return flag
+}
+
+func nullBool(value *bool) store.NullBool {
+	if value == nil {
+		return store.NullBool{NullBool: sql.NullBool{}}
+	}
+	return store.NullBool{NullBool: sql.NullBool{Bool: *value, Valid: true}}
+}
+
+func nullIntFromFloat(value *float64) store.NullInt64 {
+	if value == nil {
+		return store.NullInt64{NullInt64: sql.NullInt64{}}
+	}
+	return store.NullInt64{NullInt64: sql.NullInt64{Int64: int64(*value), Valid: true}}
+}
+
+func sliceAt(obj map[string]any, path ...string) ([]any, bool) {
+	value, ok := valueAt(obj, path...)
+	if !ok {
+		return nil, false
+	}
+	items, ok := value.([]any)
+	return items, ok
+}
+
+func stringSliceAt(obj map[string]any, path ...string) []string {
+	items, ok := sliceAt(obj, path...)
+	if !ok {
+		return []string{}
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text, ok := item.(string); ok && text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func validateTradingScoreBreakdown(b map[string]float64) error {

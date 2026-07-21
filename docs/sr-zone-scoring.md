@@ -288,8 +288,19 @@ edge_pp = abs(bounce_probability - break_probability) × 100
 | `schema_version` | Probability context schema 版本，目前為 `sr_probability_context_v1` |
 | `model_metrics.hold/break` | 訓練時保存的 AUC、Brier、log loss、calibrated、test rows 摘要 |
 | `health.quality_flags` | 模型層品質提示，例如未校準或 test rows 偏少 |
+| `health.warning_flags` / `blocking_flags` | P2 model governance 的警示與阻擋原因 |
+| `health.health_state` | `HEALTHY` / `DEGRADED` / `UNRELIABLE`，供 Decision gate 消費 |
+| `health.confidence_gate` | AI Pipeline 對 entry 的上限建議，例如 `max_entry_state=SMALL_ENTRY` 或 `WAIT_CONFIRMATION` |
 | `health.average_edge_pp` | 具方向性 zone 的平均 hold/break 機率差距 |
 | `health.directional_zone_count` / `zone_count` | 有方向機率的 zone 數與總 zone 數 |
+| `model_reports.calibration_report` | 校準狀態、方法、Brier/log loss 的穩定報告 schema |
+| `model_reports.walk_forward_report` | time split / walk-forward 測試列數與正例率報告 schema |
+| `model_reports.dataset_diagnostics` | 訓練 dataset config、zone builders、split method 與測試列數摘要 |
+
+Decision Pipeline 不直接讀 raw model metrics 決定交易行動；`build_decision_from_evidence()`
+會先把 `AnalysisScores` 轉成 `model_governance`，再由 Decision 消費
+`health_state` / `confidence_gate`。`UNRELIABLE` 會阻擋依機率模型進場；
+`DEGRADED` 不直接產生 action，但會讓強買條件降級，最多保留小量或觀察語意。
 
 **`zones[].probability_context` contract**：
 
@@ -646,7 +657,32 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 | `INTRADAY_RECLAIM` | 日 K 支撐測試後收盤收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正；內部 type 保留 `INTRADAY_RECLAIM` 作相容名稱，對外 label/reason 使用 close-based 語意避免 EOD 模式誤讀為即時盤中訊號 |
 | `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
 
-對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`short_term_regime` 與 action/risk notes 呈現。
+對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`event_state_summary`、`short_term_regime` 與 action/risk notes 呈現。
+
+`market_events` 保留 latest candle 偵測到的完整事件序列；`event_state_summary` 則是
+P1 的無資料表 lifecycle 摘要，用來區分 active / resolved event：
+
+- `states`：每個 event family / zone key 的最新狀態。
+- `active`：目前仍有效的事件狀態。
+- `resolved`：已被後續事件解除的狀態。
+- `active_bearish_events`：Decision hard gate 會使用的 active bearish risk。
+- `market_state`：由 active event state 推導的短線市場狀態。
+
+同一 zone 若出現 `HIGH_VOLUME_BREAKDOWN → INTRADAY_RECLAIM → REVERSAL_CANDIDATE`，
+raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
+`event_state_summary` 會變成 `RESOLVED`，不得再作為 active bearish gate 永久強制
+`EXIT`。未被收復的 active breakdown 仍會讓 `price_path.path_state=EVENT_RISK` 並降風險。
+
+Decision gating 一律只消費 `event_state_summary.active`：primary zone 選擇
+（`_pick_primary_zone`）、market action（`_decision_action`）、entry action state、
+market bias（`_market_bias`）與 event-aware entry relevance（`_entry_relevance_score_with_events`）
+都吃 active 事件集合，已被 resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw
+event chain 保留給對外呈現（`market_events` / `event_sequence` / `event_state_summary`）。
+
+例外（刻意）：`_daily_candidate_zones` 與 `_defense_lines` 仍消費完整 raw `market_events`——
+前者用「歷史上出現過 `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`」決定是否補日 K 候選區，後者用最近
+微結構事件的 zone_ref 定位戰術防守線；兩者是「候選區產生」與「防守線呈現」，不是進場 gating，需要
+完整事件脈絡才完整，故與「gating 只吃 active」並存而不矛盾。
 
 ### Daily Price Action / Data Quality
 
@@ -1100,9 +1136,67 @@ evidence 屬於 [Analysis Pipeline](./architecture/analysis-pipeline.md)；bounc
 ／`GET /api/v1/sr-zones/model-status` 也回傳目前模型的 `config_hash`／
 `training_config`，供訓練前後比對用。
 
+## 十八、Decision / Event 正規化儲存
+
+P2-C 第一批先把 Decision Pipeline 與 Event Lifecycle 的可查詢欄位從
+`decision_summary` JSON projection 到 normalized tables：
+
+| Table | 用途 |
+|---|---|
+| `stock_sr_decisions` | 每筆 SR analysis 的決策主欄位與 detail projection：authority fields、RR gate/context、price path detail、defense lines、confidence explanation、risk notes、market context 與 zone summary 集合 |
+| `market_event_detections` | `decision_summary.market_events` 的逐事件 detection projection |
+| `market_event_states` | `decision_summary.event_state_summary.states` 的 lifecycle state projection |
+| `stock_sr_daily_candidates` | `decision_summary.daily_candidate_zones` 的日 K 戰術候選區 projection |
+| `stock_sr_model_metrics` | `sr_scoring_train_jobs.metrics` 的訓練模型品質 projection |
+| `stock_sr_model_governance` | `probability_context.health` / `model_reports` 的單次分析模型治理 projection |
+| `stock_sr_regression_results` | regression fixture、walk-forward 與 calibration 回歸驗收結果 |
+
+這批採「不考慮舊資料」策略：不回填舊 analysis，也不保證舊快照有 normalized rows。Go
+`ZoneScoreResult.ToStore()` 從 Python 回傳的 `decision` / legacy `decision_summary`
+解析 projection，`SRZoneRepo.Create()` 在同一個 transaction 寫入
+`stock_sr_zone_analyses`、`stock_sr_zones` 與 analysis-scoped normalized tables。
+
+API / 前端 response 已切成 normalized snapshot primary；legacy raw JSON 欄位保留為
+raw/debug snapshot，不再作正常 response source。`stock_sr_daily_candidates` 保存
+`price_low`/`price_high`、`role`、`source`、`lifecycle`、`decision_role`、
+`distance_pct`、`reason`、`event_refs` 與完整 `candidate_json`。
+
+P2-C-5 起，`stock_sr_decisions` 也保存尚未拆成獨立表、但前端決策面需要的 detail JSON：
+`market_regime_json`、`data_quality_json`、`event_sequence_json`、`daily_price_action_json`、
+`price_path_json`、`daily_confirmation_json`、`defense_lines_json`、`rr_context_json`、
+`rr_gate_json`、`position_action_condition_json`、`market_context_json`、
+`confidence_explanation_json`、`risk_notes_json` 與 `zone_summaries_json`。
+`zone_summaries_json` 內含 `nearest_decision_zone`、`nearest_support_zone`、
+`nearest_resistance_zone`、`primary_structural_zone`、`best_trade_zone`、`primary_zone`
+與 `secondary_zones`。
+
+AI Pipeline 的正規化分成兩層，不混用：
+
+- `stock_sr_model_metrics`：訓練任務完成時寫入，保存 hold/break 的 AUC、Brier score、
+  log loss、calibrated、test rows 與 raw `metrics_json` / `dataset_summary_json`。
+- `stock_sr_model_governance`：每次 SR analysis 建立時寫入，保存當次模型健康度
+  `health_state`、`average_edge_pp`、zone count、`confidence_gate`、flags，以及
+  calibration / walk-forward / dataset diagnostics raw report JSON。
+- `stock_sr_regression_results`：保存 regression fixture 或 walk-forward/calibration
+  驗收 run 的結果，欄位包含 `run_id`、`model_config_hash`、`pipeline_version`、dataset range、
+  split method、hold/break AUC 與 Brier score、`passed` 與 raw `metrics_json`。這張表是長期
+  回歸驗收紀錄，不隨 train job pruning 被刪除。
+
+P2-C-4 起，PostgreSQL 的 SR Zone JSON 欄位使用 JSONB，涵蓋 analysis / zone raw JSON、
+decision/event projection、daily candidate、model quality 與 regression result JSON 欄位。
+SQLite / MySQL 維持文字 JSON 型別；Go `RawJSON` 仍以 string 讀寫，確保三種資料庫方言共用同一套
+store code。
+
+API response 目前採 normalized snapshot 組裝。`decision` 由 `stock_sr_decisions` authority
+fields / detail JSON、`market_event_detections`、`market_event_states` 與
+`stock_sr_daily_candidates` 組出；`probability_context` 由 `stock_sr_model_governance`
+組出。`stock_sr_zone_analyses.decision_summary` 與 `probability_context` legacy JSON 欄位仍保留
+作 raw/debug snapshot，但不再作正常 response source。舊 analysis 若缺 normalized rows，
+response 對應區塊回 `null`，並以 `normalized_status` 標示 `missing`。
+
 ---
 
-## 十八、跨方法重疊分群（Confluence）
+## 十九、跨方法重疊分群（Confluence）
 
 ATR 法（swing pivot + ATR 通道）跟成交量分布法各自獨立建立 zone，計算基礎
 完全不同，即使各自 builder 內部已經合併過同方法的重疊 zone（見「一、Zone

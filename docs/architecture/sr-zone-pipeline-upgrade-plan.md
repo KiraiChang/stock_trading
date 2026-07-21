@@ -28,7 +28,11 @@ pipeline 邊界與語意收斂，再做事件生命週期，最後才做 AI gove
 | P1-B | P1 | Analysis | Market State Engine | 否 |
 | P1-C | P1 | Analysis / Decision | Best Trade Zone 與 Price Path schema 穩定化 | 否 |
 | P2-A | P2 | AI | Model Health、Confidence、Walk-forward | 否 |
-| P2-B | P2 | Data / Schema | JSONB、event tables、decision tables | 是 |
+| P2-B | P2 | AI | Calibration / walk-forward / dataset diagnostics JSON contract | 否 |
+| P2-C-1 | P2 | Data / Schema | Decision / Event normalized tables 第一批 | 是 |
+| P2-C-2A | P2 | Data / Schema | Daily candidate normalized table | 是 |
+| P2-C-2B | P2 | Data / Schema | Model metrics / model governance normalized tables | 是 |
+| P2-C-2C | P2 | API / Frontend | 已正規化區塊由 normalized rows 組 response | 否 |
 
 ## P0-A：SR Zone Pipeline 邊界契約
 
@@ -123,43 +127,88 @@ P1 才開始承接 `docs/sr-zone-improve.md` 的 Event Lifecycle 與 Market Stat
 
 建議先做純函數與 fixture：
 
-- event detection DTO
-- event state DTO
-- transition function
-- active / resolved / failed / expired 判斷
-- 0050 fixture
-- Active Risk Gate 不再被歷史事件永久阻擋
+- [x] event detection DTO
+- [x] event state DTO
+- [x] transition function
+- [x] active / resolved 判斷
+- [x] 0050 fixture
+- [x] Active Risk Gate 不再被歷史事件永久阻擋
 
-暫緩：
+P1 已落地為無資料表 lifecycle 摘要：`decision_summary.market_events` 保留 raw event
+chain，`decision_summary.event_state_summary` 回報 active / resolved state。Decision
+hard gate 只讀 active bearish event；已被 reclaim/reversal resolve 的 breakdown 不再強制
+`EXIT`。`price_path.path_state` 新增 `EVENT_RISK` 表示仍有 active bearish event 阻擋。
 
-- `market_event_detections`
-- `market_event_states`
-
-原因：事件狀態語意尚未由 fixture 驗證前，不應先承諾資料表。
+P1 當時先暫緩 `market_event_detections` / `market_event_states`，原因是事件狀態語意尚未由
+fixture 驗證前，不應先承諾資料表。後續已在 P2-C 正規化批次補上 event detection/state
+tables，並由 API response snapshot 使用。
 
 ## P2：AI Governance 與 DB 正規化
 
 P2 才處理模型治理與 schema 正規化：
 
-- model health gate
-- confidence factors
-- calibration report
-- walk-forward output
-- JSON text → JSONB
-- `stock_sr_decisions`
-- `stock_sr_daily_candidates`
-- `market_event_detections`
-- `market_event_states`
-- `stock_sr_model_metrics`
-- `stock_sr_regression_results`
+- [x] model health gate（先落在 `probability_context.health` / `decision_summary.model_governance`）
+- [x] confidence factors（先以 `confidence_gate` 表達 AI Pipeline 對 entry 的上限）
+- [x] calibration report（先落在 `probability_context.model_reports`）
+- [x] walk-forward output（先落在 `probability_context.model_reports`）
+- [x] `stock_sr_decisions`（第一批，不回填舊資料）
+- [x] `market_event_detections`（第一批，不回填舊資料）
+- [x] `market_event_states`（第一批，不回填舊資料）
+- [x] `stock_sr_daily_candidates`（P2-C-2A，不回填舊資料）
+- [x] `stock_sr_model_metrics`（P2-C-2B，不回填舊資料）
+- [x] `stock_sr_model_governance`（P2-C-2B，不回填舊資料）
+- [x] `stock_sr_regression_results`（P2-C-3，不回填舊資料）
+- [x] JSON text → JSONB（P2-C-4，PostgreSQL only）
+- [x] `stock_sr_decisions` detail JSON projection（P2-C-5，先保留 legacy fallback）
+- [x] API / Frontend normalized-only response（P2-C-6，舊資料以 missing/null 呈現）
 
-這些項目需要穩定的 P0/P1 契約支撐，否則會產生 migration 連鎖修改。
+P2-A/P2-B 已先以無 DB 契約落地：AI Pipeline 輸出 model governance、calibration
+report、walk-forward report 與 dataset diagnostics；Decision Pipeline 只消費
+`model_governance.health_state` / `confidence_gate`，不直接讀 raw model metrics。
+
+P2-C 第一批已採「不考慮舊資料」落地：新增 `stock_sr_decisions`、
+`market_event_detections`、`market_event_states`，Go `ToStore()` 從
+`decision_summary` 解析 normalized projection，`SRZoneRepo.Create()` 在同一個 transaction
+寫入 analysis、zones 與第一批 normalized tables。舊 JSON 欄位暫保留作為 raw/debug 與前端
+相容來源，不做舊快照 backfill。
+
+P2-C-2A 已新增 `stock_sr_daily_candidates`，Go `ToStore()` 從
+`decision_summary.daily_candidate_zones` 解析 projection，`SRZoneRepo.Create()` 在同一個
+transaction 寫入 daily candidate normalized rows。舊 JSON 欄位暫保留作為 raw/debug 與前端
+相容來源，不做舊快照 backfill。
+
+P2-C-2B 已新增兩張 AI Pipeline 正規化表：`stock_sr_model_metrics` 保存訓練任務完成時
+的 hold/break 模型品質 projection，`stock_sr_model_governance` 保存每次 analysis 套用模型後
+的 health/gate/report projection。兩者分開，避免把「模型訓練品質」與「單次分析決策可信度」
+混為同一層資料。
+
+P2-C-2C 已新增 SR Zone response snapshot 組裝層：`Create` / `Get` / `Verify`
+都先載入 normalized rows，再把 decision authority fields、market events、event state summary、
+daily candidates、model governance/model reports 組回既有前端相容 response shape。這是
+P2-C-6 normalized snapshot primary 的過渡步驟。
+
+P2-C-3 已新增 `stock_sr_regression_results` 作為 regression fixture、walk-forward
+與 calibration 回歸驗證結果的 normalized 紀錄。這張表保存跨模型設定或 pipeline 版本的驗收結果，
+和 `stock_sr_model_metrics` 的「單次 train job 品質 projection」分開，避免訓練任務清理影響
+長期 regression 驗收紀錄。
+
+P2-C-4 已新增 PostgreSQL-only JSONB migration，將 SR Zone analysis / zone raw JSON、
+decision/event projection、daily candidate、model quality 與 regression result JSON 欄位轉成
+JSONB。SQLite / MySQL 維持 TEXT / LONGTEXT 儲存 JSON 字串，Go `RawJSON` 仍使用 string 綁定以
+維持三種資料庫相容。
+
+P2-C-5 已在 `stock_sr_decisions` 補齊 decision detail JSON projection，包括 market regime、
+data quality、price path detail、daily confirmation、defense lines、RR gate/context、
+position action condition、market context、confidence explanation、risk notes 與 zone summary
+集合，為 P2-C-6 將 API / Frontend response 切成 normalized snapshot primary 鋪路。
+
+P2-C-6 已將 API / Frontend 讀取面切成 normalized snapshot primary：`decision` 不再以
+`stock_sr_zone_analyses.decision_summary` 作 base，`probability_context` 不再以
+`stock_sr_zone_analyses.probability_context` 作 base。舊 analysis 若缺 normalized rows，response
+回 `null`，並以 `normalized_status` 標示 `missing`；前端據此顯示缺 normalized snapshot 狀態。
 
 ## 不建議先做
 
-- 不先建 event tables。
-- 不先做 JSONB migration。
-- 不先拆 `stock_sr_decisions`。
 - 不先做 model registry。
 - 不先做大型 DB 正規化。
 - 不在 Decision 邊界未穩前擴充更多 AI 模型判斷。
@@ -171,4 +220,6 @@ P0 完成時，應滿足：
 - `docs/sr-zone-scoring.md` 可清楚分辨 Analysis / AI / Decision 欄位。
 - `docs/sr-zone-improve.md` 的 P0 項目已有對應 pipeline 歸屬。
 - 後續實作不會再把模型機率、分析 score、交易 action 混成同一層欄位。
-- 明確列出先不做 event table / JSONB / DB 正規化。
+- Decision / Event / Daily Candidate / Model Governance 已由 normalized tables 承接。
+- API / Frontend 不再把 legacy JSON 當正常 response source；舊 analysis 缺 normalized rows 時
+  以 `normalized_status=missing` 與 `null` 區塊呈現。

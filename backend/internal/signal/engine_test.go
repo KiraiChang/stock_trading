@@ -145,7 +145,7 @@ func TestEngine_Evaluate_BreakoutGeneratesAndPersistsSignal(t *testing.T) {
 
 func breakoutCandles(symbol string, base time.Time) []store.Candle {
 	// 兩個 swing high 95 -> 100 與兩個 swing low 79 -> 84 形成 BULLISH。
-	// 倒數第二根收在 100 阻力下方，最後一根放量收上 100，滿足真正跨越。
+	// 放量突破 K 收上 100，後續兩根也站穩 100，滿足 BREAKOUT 確認窗。
 	highs := []float64{
 		81, 83, 85, 87, 89, 91, 93, 95, 93, 92, 91, 90, 88, 86, 84, 83, 85,
 		87, 89, 92, 100, 96, 94, 92, 90, 88, 90, 92, 94, 96, 98, 99, 99, 99,
@@ -164,6 +164,16 @@ func breakoutCandles(symbol string, base time.Time) []store.Candle {
 		Symbol: symbol, Timeframe: "1d",
 		Open: 99, High: 106, Low: 98, Close: 105,
 		Volume: 5000, Timestamp: base.AddDate(0, 0, len(highs)),
+	})
+	candles = append(candles, store.Candle{
+		Symbol: symbol, Timeframe: "1d",
+		Open: 105, High: 108, Low: 103, Close: 106,
+		Volume: 1200, Timestamp: base.AddDate(0, 0, len(highs)+1),
+	})
+	candles = append(candles, store.Candle{
+		Symbol: symbol, Timeframe: "1d",
+		Open: 106, High: 109, Low: 104, Close: 107,
+		Volume: 1100, Timestamp: base.AddDate(0, 0, len(highs)+2),
 	})
 	return candles
 }

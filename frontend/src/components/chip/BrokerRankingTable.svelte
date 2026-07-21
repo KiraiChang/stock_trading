@@ -57,7 +57,11 @@
     </thead>
     <tbody>
       {#if sortedRows.length === 0}
-        <tr><td colspan="4" class="px-4 py-6 text-center text-muted">尚無資料</td></tr>
+        <tr>
+          <td colspan="4" class="px-4 py-6 text-center text-muted">
+            目前資料來源不支援或尚無券商分點資料
+          </td>
+        </tr>
       {:else}
         {#each sortedRows as r (r.broker_name + r.branch_name)}
           <tr class="border-b border-border/50">

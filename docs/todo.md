@@ -17,8 +17,8 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Python / SR Zone / 模型驗證 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
@@ -74,14 +74,17 @@ dataset diagnostics），沒有「模型上線後過去一段時間的訊號實�
 目前 Fugle WebSocket 盤中更新的訊息格式解析未在實盤交易時段實際驗證過，
 需要在開盤時段跑一次確認欄位、頻率、斷線重連行為符合預期。
 
+註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
+
 ---
 
 ### T-006：Fugle Tier 1 REST 輪詢掃描接上排程器
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Go / 即時行情 / 排程 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/fugle-integration.md` Roadmap、`docs/architecture.md` |
@@ -93,14 +96,17 @@ Tier 1（非熱門股）用 REST 輪詢掃描的機制已設計但尚未實際�
 Yahoo 的 client／設定／排程批次路徑已實作（見 `docs/yahoo-intraday-integration.md`），僅剩
 fallback（T-031）與實盤驗證（T-032）待處理。
 
+註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
+
 ---
 
 ### T-007：Fugle Tier 2 熱門股 WebSocket 訂閱管理
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Go / 即時行情 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/fugle-integration.md` Roadmap |
@@ -108,14 +114,17 @@ fallback（T-031）與實盤驗證（T-032）待處理。
 Tier 2（熱門股）動態訂閱/取消訂閱 WebSocket 頻道的管理邏輯尚未實作
 （目前只有靜態 client，見 `docs/CLAUDE.md` 提到的重複連線問題修正）。
 
+註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
+
 ---
 
 ### T-008：Fugle → FinMind 自動 fallback
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Go / 即時行情 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/fugle-integration.md` Roadmap |
@@ -125,6 +134,9 @@ Fugle 連線失敗或資料異常時，尚未實作自動切換回 FinMind 補�
 
 註：與 T-031（Yahoo→FinMind fallback）共用「盤中源異常時回退 FinMind」的設計，
 應規劃為單一通用的盤中源 fallback 機制，而非每個源各寫一套。
+
+盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
 
 ---
 
@@ -140,21 +152,6 @@ Fugle 連線失敗或資料異常時，尚未實作自動切換回 FinMind 補�
 
 目前量能計算是批次（K棒收盤後）而非 tick-level 即時累加，`CLAUDE.md`
 Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
-
----
-
-### T-010：訊號引擎假突破過濾
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Go / 訊號引擎 |
-| 建立日期 | 2026-07-07 |
-| 來源 | `docs/signal-spec.md` Phase 2 計畫 |
-
-目前 Phase 1 沒有假突破過濾機制。Phase 2 計畫加入：收盤確認、連續 2 根
-K棒持有、RSI < 80 等條件，降低突破訊號的假陽性。
 
 ---
 
@@ -205,75 +202,7 @@ K棒持有、RSI < 80 等條件，降低突破訊號的假陽性。
 - Phase 3：Portfolio tracking、Position management、Strategy templates
 - Phase 4：Semi-auto execution（optional）、Risk engine enhancement
 
-（Phase 2 的 Shioaji 整合、假突破過濾已拆成 T-009/T-010 個別追蹤。）
-
----
-
-### T-014：評估籌碼訊號在 trading_score 雙重計入的影響
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / 模型 |
-| 建立日期 | 2026-07-07 |
-| 來源 | 審視 commit `07da5c2`「調整模型以及納入籌碼分析到模型內」時發現，另見 [sr-zone-v3-chip-model-update.md](./sr-zone-v3-chip-model-update.md)「後續驗證」 |
-
-commit `07da5c2` 把籌碼分數（`chip_total_score`/`chip_institutional_score`/
-`chip_margin_score`/`chip_broker_score`/`chip_concentration_score`/
-`chip_missing`）加進 ML 模型的訓練特徵（`FEATURE_COLUMNS`，`MODEL_VERSION`
-bump 到 `v3`），讓模型自己學籌碼跟 bounce/break 機率的關係。但
-`TRADING_SCORE_WEIGHTS` 裡原本（`6660e97`「調整分析結果增加可讀性」加入的）
-獨立 `chip` 權重（15%）並沒有拿掉或調整——現在籌碼訊號會透過兩條路徑影響
-最終 `trading_score`：
-
-1. 模型特徵 → 影響 `bounce_probability`/`break_probability` → 影響
-   `expected_value`（34%）與 `support_score`/`resistance_score`
-2. 獨立的 `chip` 加權分量（15%，直接用原始 `chip_score`）
-
-兩條路徑方向通常一致（籌碼偏多時兩邊都會加分），實際效果可能是籌碼訊號
-被放大超過原本設計的 15% 權重，且放大幅度不透明（取決於模型學到的係數，
-無法從權重常數直接看出）。
-
-這筆也涵蓋 Decision Engine 後續若要調整 `structural_score`、`decision_relevance_score`、
-`tradability_score` 映射或校準時的模型/分數校準驗證，避免另開重複的校準待辦。
-目前 `_primary_zone_score` 已移除 RR 的獨立排序分量，RR 僅透過 `entry_relevance` 內的
-`ev_rr` 影響主區選擇；但 confidence 也因此主要只存在於 `entry_relevance` 內，主區選擇對
-confidence 的敏感度較低。這是去除重複計分後的校準取捨，除非回測顯示主區過度忽略信心，
-否則不應盲目把獨立 confidence 權重加回去。
-
-**建議做法**（幾個方向，需要實際訓練/回測資料佐證才能決定）：
-
-- 方案A：拿掉獨立的 `chip` 加權分量，完全交給模型學習籌碼與機率的關係，
-  `TRADING_SCORE_WEIGHTS` 五個分量的權重比例恢復或重新分配到 100%。
-- 方案B：保留兩條路徑，但重新訓練後比較「含 chip 特徵」vs「不含 chip
-  特徵」兩版模型在相同資料集上的表現（AUC/brier/calibration），確認
-  雙重計入沒有讓模型過度依賴籌碼、犧牲其他特徵的訊號。
-- 方案C：維持現狀，但至少要把「chip 現在有兩條路徑影響分數」寫進
-  `docs/sr-zone-scoring.md`，避免文件跟行為長期不一致（對應註解問題已先行修正，可視為這個方案的最小可行版本）。
-
-在還沒做實驗確認之前，先不要假設哪個方案比較好；這筆先記錄現象，決定
-方向後再展開實作。
-
----
-
-### T-015：SR Zone 短中長摘要選價規則優化
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / Frontend |
-| 建立日期 | 2026-07-07 |
-| 來源 | 支撐壓力頁面檢視 |
-
-目前短 / 中 / 長不是用時間週期切分，而是依 zone 寬度分 tier：長期是最寬 1/3、中期是中間 1/3、短期是最窄 1/3。每個 tier 內支撐候選必須在現價下方、壓力候選必須在現價上方，再依 `trading_score`、`confidence`、位置排序各挑一個。
-
-這套做法可避免摘要價位與現價位置矛盾，但 `trading_score` 會壓過「距離現價」：某個分數很高但距離較遠的 zone，可能排在較近但分數略低的 zone 前面。後續應明確決定摘要選價策略：
-
-- 分數優先：維持現況，顯示模型評分最高的區間，但 UI 要說清楚不一定最近。
-- 距離優先：先挑離現價最近的一到數個候選，再用分數與信心排序，偏短線操作。
-- 混合排序：用 `trading_score`、`confidence`、距離現價、`confluence_count` 組成摘要專用排序，避免單一分數主導。
+（Phase 2 的 Shioaji 整合已拆成 T-009 個別追蹤。）
 
 ---
 
@@ -296,6 +225,17 @@ confidence 的敏感度較低。這是去除重複計分後的校準取捨，除
 - 區間越窄越適合短線觀察，區間越寬越偏向中長期結構。
 - 多方法共振代表不同算法看到相近價位，但仍需要後續 K 棒確認。
 - 低信心不是看空，而是樣本少或近期未驗證，應等待確認。
+
+實作方向：不要隨機塞很多句 tips，改成固定分類的「分析報告閱讀指南 / 小辭典」，
+讓使用者讀 SR Zone 報告時能穩定理解術語與判讀方式：
+
+1. 指標小辭典：`RR`、`EV`、`Confidence`、`Trading Score`、`Confluence`。
+2. 價位語意：`Support`、`Resistance`、`AT_ZONE`、`Primary Zone`。
+3. 事件語意：`Break`、`Bounce`、`Reclaim`、`Invalidated`、`Pullback`。
+4. 判讀提醒：支撐不是買點、壓力不是放空點、低信心不是看空、`RR` 高不等於勝率高。
+
+後續實作時先把 `_build_analysis_tips` 從 `scoring.py` 抽離到獨立模組（例如
+`tips.py`），再以固定分類管理 tips 內容，方便擴充與測試。
 
 ---
 
@@ -328,22 +268,6 @@ confidence 的敏感度較低。這是去除重複計分後的校準取捨，除
 
 可用資料已具備：`candles` 歷史、`backtest_trades` 逐筆交易結果、SR Zone 的自動標籤
 與 walk-forward 範式；缺的是專屬 Watching 的 label 定義與特徵 pipeline，而非資料本身。
-
----
-
-### T-018：籌碼頁券商分點資料來源支援狀態文案優化
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Frontend / 籌碼分析 / UX |
-| 建立日期 | 2026-07-07 |
-| 來源 | 原 `docs/issue.md` I-013，2026-07-07 分流至 todo |
-
-券商分點目前是 FinMind unsupported stub，`broker_score` fallback 為中性，這是明確設計；但前端或操作文案若寫成「會抓取券商分點資料」，會讓使用者以為目前資料來源一定支援券商分點，實際上可能只會以中性值處理。
-
-這屬於文案與資料完整度揭露優化，不影響核心計算。後續應將籌碼同步或籌碼頁相關文案改成「若資料來源支援才同步券商分點」或「目前來源不支援時以中性處理」，並在需要時揭露各子分數是否來自實際資料或 fallback。
 
 ---
 
@@ -407,8 +331,8 @@ score / recommendation、global metrics 與 API response serialization。功能�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Go / 即時行情 / 排程 |
 | 建立日期 | 2026-07-15 |
 | 來源 | `docs/yahoo-intraday-integration.md` |
@@ -425,14 +349,17 @@ Yahoo 盤中源的 client、設定、main 組裝、`scheduler.runIntradayJob →
 - 回退時比照現有 `ErrInsufficientTier` 邏輯：撞到 tier 不足就整輪跳過，不對每檔重打注定失敗的請求。
 - 與 T-008（Fugle→FinMind fallback）共用「盤中源異常時回退」的單一通用設計，避免各源各寫一套。
 
+註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
+
 ---
 
 ### T-032：Yahoo 盤中源實盤時段驗證
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
+| 狀態 | 擱置 |
+| 優先度 | 低 |
 | 分類 | Go / 即時行情 / 驗證 |
 | 建立日期 | 2026-07-15 |
 | 來源 | `docs/yahoo-intraday-integration.md` 風險與限制 |
@@ -442,6 +369,9 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 - minute 陣列覆蓋率：確認 `null` 僅出現在盤前/盤後，而非 ETF（如 `0050.TW`）系統性缺值——實測盤後 `0050` 陣列全為 null 但 `2330` 正常，需釐清成因。
 - 延遲：`quote.refreshedTs` vs 本地時間差。
 - 封鎖風險：連續批次請求是否觸發反爬/限流，據以定 `rate_limit`/`batch_size`。
+
+註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
+的盤中資料源或明確需求時再重新評估。
 
 ---
 

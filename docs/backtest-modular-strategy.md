@@ -85,8 +85,12 @@ support/resistance（通道邊界），不是多個離散價位。
 ### BreakoutEntry（突破，雙向）
 
 ```
-LONG:  Close[t] > Resistance.Price
-       AND Volume[t] / MA(Volume, vol_period)[t] >= vol_multiplier（預設 2.0）
+LONG:  Close[t-3] <= Resistance.Price
+       AND Close[t-2] > Resistance.Price
+       AND Volume[t-2] / MA(Volume, vol_period)[t-2] >= vol_multiplier（預設 2.0）
+       AND Close[t-1] > Resistance.Price
+       AND Close[t] > Resistance.Price
+       AND RSI[t] < 80（若資料有 RSI 欄位）
        AND Trend(t) == BULLISH
 
 SHORT: Close[t-2] < Support.Price

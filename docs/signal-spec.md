@@ -39,13 +39,17 @@ SIDEWAYS: 其他
 ## Breakout 條件（全部滿足）
 
 ```
-1. PreviousClose <= Resistance.Price AND Close > Resistance.Price
-2. VolRatio >= 2.0
-3. Trend == BULLISH
+1. BreakCandle.PreviousClose <= Resistance.Price AND BreakCandle.Close > Resistance.Price
+2. BreakCandle.VolRatio >= 2.0
+3. BreakCandle 後連續 2 根 K 棒 Close > Resistance.Price（站穩壓力上方）
+4. RSI14 < 80（RSI 不足或為 0 時不阻塞）
+5. Trend == BULLISH
 ```
 
-同一根 K 棒若跨越多個阻力，回報最接近當根收盤的已跨越阻力（最高的 crossed
-resistance）；同價位以 Strength 較高者優先。
+突破當根不立即發訊，第一根確認 K 棒也不發訊；第二根確認 K 棒仍站穩時才輸出
+BREAKOUT。量能門檻使用突破當根的量比，而非確認當根。若同一個突破事件跨越
+多個阻力，回報最接近確認 K 棒收盤的已跨越阻力（最高的 crossed resistance）；
+同價位以 Strength 較高者優先。
 
 ---
 

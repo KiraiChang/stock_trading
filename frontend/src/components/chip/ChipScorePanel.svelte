@@ -108,6 +108,10 @@
           <p class="font-mono text-white">{(summary.broker.concentration * 100).toFixed(1)}%</p>
         </div>
       </div>
+    {:else}
+      <div class="text-xs text-muted mb-4 rounded border border-border/70 px-3 py-2">
+        目前資料來源未提供券商分點，主力分點分數以中性處理，不影響法人與融資融券分數。
+      </div>
     {/if}
 
     {#if summary.reason.length > 0}

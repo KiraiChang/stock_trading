@@ -10,6 +10,7 @@ from ..model import ModelBundle, train_model
 from ..scoring import (
     CONFIDENCE_SAMPLE_PSEUDO_COUNT,
     TRADING_SCORE_WEIGHTS,
+    TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP,
     _assign_tiers,
     _compute_global_metrics,
     _confidence,
@@ -19,6 +20,7 @@ from ..scoring import (
     _net_score_label,
     _zone_overlap_ratio,
     _normalize_probabilities,
+    _pick_period_pair,
     _recent_validation,
     _sample_factor,
     _sort_zone_scores,
@@ -27,12 +29,13 @@ from ..scoring import (
     _trading_recommendation,
     _trading_score,
     _trading_score_breakdown,
+    _trading_score_breakdown_no_direct_chip,
     _volume_confirmation,
     _zone_direction,
     score_symbol,
     score_zone,
 )
-from ..types import ApproachDirection, Zone, ZoneMethod, ZoneTouch, ZoneType
+from ..types import ApproachDirection, Zone, ZoneMethod, ZoneScore, ZoneTier, ZoneTouch, ZoneType
 from .conftest import bullish_trend_df
 from .test_model import synthetic_dataset
 
@@ -44,6 +47,55 @@ def bundle() -> ModelBundle:
 
 def _trend(df) -> float:
     return trend_slope(df, len(df) - 1)
+
+
+def _zone_score_for_summary(
+    *,
+    low: float,
+    high: float,
+    role: str,
+    trading_score: float,
+    confidence: float = 0.7,
+    confluence_family_count: int = 1,
+) -> ZoneScore:
+    return ZoneScore(
+        price_low=low,
+        price_high=high,
+        method=ZoneMethod.ATR.value,
+        role=role,
+        tier=ZoneTier.TIER_2_TRADING_ZONE.value,
+        tier_label="中期",
+        support_score=0.0,
+        resistance_score=0.0,
+        net_score=0.0,
+        net_score_label="NEUTRAL",
+        confidence=confidence,
+        confidence_level="MEDIUM",
+        bounce_probability=None,
+        break_probability=None,
+        expected_gain=None,
+        expected_loss=None,
+        expected_value=None,
+        risk_reward_ratio=None,
+        reward_risk_percentile=None,
+        relative_volume=None,
+        volume_confirmation=None,
+        touch_count=1,
+        support_touch_count=1 if role == ZoneType.SUPPORT.value else 0,
+        resistance_touch_count=1 if role == ZoneType.RESISTANCE.value else 0,
+        reject_count=0,
+        break_count=0,
+        zone_momentum=0.0,
+        zone_direction="NEUTRAL",
+        recent_validation="NOT_TESTED_RECENTLY",
+        trading_score=trading_score,
+        trading_score_breakdown={},
+        trading_recommendation="WATCH",
+        overlap_group=None,
+        confluence_count=confluence_family_count,
+        confluence_family_count=confluence_family_count,
+        confluence_families=(),
+    )
 
 
 def _v2_zone_scores(result: dict) -> list[dict]:
@@ -590,6 +642,11 @@ def test_trading_score_breakdown_weights_sum_to_100():
     assert sum(TRADING_SCORE_WEIGHTS.values()) == pytest.approx(100.0)
 
 
+def test_trading_score_no_direct_chip_weights_sum_to_100():
+    assert sum(TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP.values()) == pytest.approx(100.0)
+    assert "chip" not in TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP
+
+
 def test_trading_score_breakdown_keys_match_weights():
     breakdown = _trading_score_breakdown(
         role="SUPPORT", confidence=0.8, expected_value=0.02, risk_reward_ratio=1.5,
@@ -604,6 +661,25 @@ def test_trading_score_equals_sum_of_breakdown():
         overall_trend=-0.02, volume_confirmation="WEAK",
     )
     assert _trading_score(breakdown) == pytest.approx(sum(breakdown.values()))
+
+
+def test_trading_score_no_direct_chip_shadow_policy_redistributes_weights():
+    breakdown = _trading_score_breakdown_no_direct_chip(
+        role="SUPPORT", confidence=0.8, expected_value=0.02, risk_reward_ratio=1.5,
+        overall_trend=0.05, volume_confirmation="CONFIRMED",
+    )
+    assert set(breakdown.keys()) == set(TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP.keys())
+    assert "chip" not in breakdown
+
+    production_neutral = _trading_score_breakdown(
+        role="SUPPORT", confidence=0.8, expected_value=0.02, risk_reward_ratio=1.5,
+        overall_trend=0.05, volume_confirmation="CONFIRMED", chip_score=None,
+    )
+    assert breakdown["expected_value"] == pytest.approx(
+        production_neutral["expected_value"]
+        / TRADING_SCORE_WEIGHTS["expected_value"]
+        * TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP["expected_value"]
+    )
 
 
 def test_trading_score_breakdown_uses_neutral_defaults_when_role_unresolved():
@@ -623,6 +699,34 @@ def test_trading_score_breakdown_confidence_component_is_direct():
         overall_trend=0.0, volume_confirmation=None,
     )
     assert breakdown["confidence"] == pytest.approx(TRADING_SCORE_WEIGHTS["confidence"])
+
+
+def test_period_summary_prefers_nearby_support_over_far_slightly_higher_score():
+    current_price = 100.0
+    far_high_score = _zone_score_for_summary(
+        low=70.0, high=72.0, role=ZoneType.SUPPORT.value, trading_score=82.0, confidence=0.75
+    )
+    nearby = _zone_score_for_summary(
+        low=94.0, high=95.0, role=ZoneType.SUPPORT.value, trading_score=74.0, confidence=0.75
+    )
+
+    support, _ = _pick_period_pair([far_high_score, nearby], current_price)
+
+    assert support is nearby
+
+
+def test_period_summary_prefers_nearby_resistance_over_far_slightly_higher_score():
+    current_price = 100.0
+    far_high_score = _zone_score_for_summary(
+        low=128.0, high=130.0, role=ZoneType.RESISTANCE.value, trading_score=82.0, confidence=0.75
+    )
+    nearby = _zone_score_for_summary(
+        low=105.0, high=106.0, role=ZoneType.RESISTANCE.value, trading_score=74.0, confidence=0.75
+    )
+
+    _, resistance = _pick_period_pair([far_high_score, nearby], current_price)
+
+    assert resistance is nearby
 
 
 # ── 【2026-07 籌碼分析整合】chip 分量 ──────────────────────────────────

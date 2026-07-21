@@ -16,6 +16,21 @@ func makeCandle(closePrice float64, volume int64, ts time.Time) store.Candle {
 	}
 }
 
+func makeBreakoutWindow(ts time.Time, beforeBreak, breakClose, firstConfirm, secondConfirm float64, breakVolume int64) []store.Candle {
+	candles := make([]store.Candle, 0, volumeMAPeriod+4)
+	start := ts.AddDate(0, 0, -(volumeMAPeriod + 3))
+	for i := 0; i < volumeMAPeriod; i++ {
+		candles = append(candles, makeCandle(90, 1_000_000, start.AddDate(0, 0, i)))
+	}
+	candles = append(candles,
+		makeCandle(beforeBreak, 1_000_000, ts.AddDate(0, 0, -3)),
+		makeCandle(breakClose, breakVolume, ts.AddDate(0, 0, -2)),
+		makeCandle(firstConfirm, 1_200_000, ts.AddDate(0, 0, -1)),
+		makeCandle(secondConfirm, 1_100_000, ts),
+	)
+	return candles
+}
+
 func checkBreakoutWithCandles(
 	snap *store.IndicatorSnapshot,
 	candles []store.Candle,
@@ -27,12 +42,11 @@ func checkBreakoutWithCandles(
 
 func TestCheckBreakout_TriggersBuyOnBreakoutWithVolumeAndBullishTrend(t *testing.T) {
 	ts := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
-	previous := makeCandle(95, 1_000_000, ts.Add(-24*time.Hour))
-	candle := makeCandle(110, 5_000_000, ts)
-	snap := &store.IndicatorSnapshot{VolRatio: 2.5}
+	candles := makeBreakoutWindow(ts, 95, 110, 108, 109, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 1.1, RSI14: 60}
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 
 	if sig == nil {
 		t.Fatal("expected a BREAKOUT signal, got nil")
@@ -43,7 +57,7 @@ func TestCheckBreakout_TriggersBuyOnBreakoutWithVolumeAndBullishTrend(t *testing
 	if sig.Resistance != 100 {
 		t.Errorf("Resistance = %v, want 100", sig.Resistance)
 	}
-	if sig.Price != 110 || sig.Volume != 5_000_000 || sig.VolRatio != 2.5 {
+	if sig.Price != 109 || sig.Volume != 5_000_000 || sig.VolRatio != 5.0 {
 		t.Errorf("unexpected price/volume/volRatio: %+v", sig)
 	}
 	if sig.Timestamp != ts {
@@ -55,68 +69,109 @@ func TestCheckBreakout_TriggersBuyOnBreakoutWithVolumeAndBullishTrend(t *testing
 }
 
 func TestCheckBreakout_NoSignalWhenVolumeInsufficient(t *testing.T) {
-	previous := makeCandle(95, 1_000_000, time.Now().Add(-time.Hour))
-	candle := makeCandle(110, 1_200_000, time.Now())
-	snap := &store.IndicatorSnapshot{VolRatio: 1.5} // < breakoutVolThresh(2.0)
+	candles := makeBreakoutWindow(time.Now(), 95, 110, 108, 109, 1_500_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 	if sig != nil {
 		t.Errorf("expected nil (volume too low), got %+v", sig)
 	}
 }
 
 func TestCheckBreakout_NoSignalWhenTrendNotBullish(t *testing.T) {
-	previous := makeCandle(95, 1_000_000, time.Now().Add(-time.Hour))
-	candle := makeCandle(110, 5_000_000, time.Now())
-	snap := &store.IndicatorSnapshot{VolRatio: 2.5} // 夠爆量，但故意讓量比 < 3.0 避免誤觸發 VOLUME_SPIKE
+	candles := makeBreakoutWindow(time.Now(), 95, 110, 108, 109, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60} // 夠爆量，但故意讓量比 < 3.0 避免誤觸發 VOLUME_SPIKE
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Sideways)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Sideways)
 	if sig != nil {
 		t.Errorf("expected nil (trend not BULLISH), got %+v", sig)
 	}
 }
 
 func TestCheckBreakout_NoSignalWhenPriceBelowResistance(t *testing.T) {
-	previous := makeCandle(90, 1_000_000, time.Now().Add(-time.Hour))
-	candle := makeCandle(95, 5_000_000, time.Now())
-	snap := &store.IndicatorSnapshot{VolRatio: 2.5}
+	candles := makeBreakoutWindow(time.Now(), 90, 95, 94, 95, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 	if sig != nil {
 		t.Errorf("expected nil (price hasn't broken resistance), got %+v", sig)
 	}
 }
 
 func TestCheckBreakout_NoSignalWhenPriceWasAlreadyAboveResistance(t *testing.T) {
-	previous := makeCandle(105, 1_000_000, time.Now().Add(-time.Hour))
-	candle := makeCandle(110, 5_000_000, time.Now())
-	snap := &store.IndicatorSnapshot{VolRatio: 2.5}
+	candles := makeBreakoutWindow(time.Now(), 105, 110, 108, 109, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 	if sig != nil {
 		t.Errorf("expected nil (resistance was already crossed before latest candle), got %+v", sig)
 	}
 }
 
 func TestCheckBreakout_UsesNearestCrossedResistance(t *testing.T) {
-	candle := makeCandle(200, 5_000_000, time.Now())
-	previous := makeCandle(90, 1_000_000, candle.Timestamp.Add(-time.Hour))
-	snap := &store.IndicatorSnapshot{VolRatio: 2.5}
+	candles := makeBreakoutWindow(time.Now(), 90, 200, 190, 195, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
 	resistances := []Level{
 		{Price: 100, Strength: 1.0, Type: "Resistance"},
 		{Price: 150, Strength: 0.5, Type: "Resistance"},
 	}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 	if sig == nil {
 		t.Fatal("expected a signal")
 	}
 	if sig.Resistance != 150 {
 		t.Errorf("Resistance = %v, want 150 (nearest crossed resistance below close)", sig.Resistance)
+	}
+}
+
+func TestCheckBreakout_NoBreakoutSignalOnBreakCandle(t *testing.T) {
+	ts := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	candles := makeBreakoutWindow(ts, 95, 110, 108, 109, 5_000_000)[:volumeMAPeriod+2]
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
+	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
+
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
+	if sig != nil {
+		t.Errorf("expected nil on breakout candle before confirmation window, got %+v", sig)
+	}
+}
+
+func TestCheckBreakout_NoBreakoutSignalOnFirstConfirmationCandle(t *testing.T) {
+	ts := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
+	candles := makeBreakoutWindow(ts, 95, 110, 108, 109, 5_000_000)[:volumeMAPeriod+3]
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
+	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
+
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
+	if sig != nil {
+		t.Errorf("expected nil on first confirmation candle, got %+v", sig)
+	}
+}
+
+func TestCheckBreakout_NoBreakoutSignalWhenResistanceLostDuringConfirmation(t *testing.T) {
+	candles := makeBreakoutWindow(time.Now(), 95, 110, 99, 109, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 60}
+	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
+
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
+	if sig != nil {
+		t.Errorf("expected nil when resistance was lost during confirmation window, got %+v", sig)
+	}
+}
+
+func TestCheckBreakout_NoBreakoutSignalWhenRSIOverbought(t *testing.T) {
+	candles := makeBreakoutWindow(time.Now(), 95, 110, 108, 109, 5_000_000)
+	snap := &store.IndicatorSnapshot{VolRatio: 2.5, RSI14: 80}
+	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
+
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
+	if sig != nil {
+		t.Errorf("expected nil when RSI is overbought, got %+v", sig)
 	}
 }
 
@@ -273,12 +328,11 @@ func TestCheckBreakout_BreakoutTakesPriorityOverVolumeSpike(t *testing.T) {
 	// 量比同時滿足 breakout(>=2.0) 與 volume spike(>=3.0) 門檻時，
 	// 因為程式先檢查 resistances 再檢查 supports 最後才檢查純爆量，
 	// 應該回傳 BREAKOUT 而不是 VOLUME_SPIKE
-	candle := makeCandle(110, 9_000_000, time.Now())
-	previous := makeCandle(95, 1_000_000, candle.Timestamp.Add(-time.Hour))
+	candles := makeBreakoutWindow(time.Now(), 95, 110, 108, 109, 5_000_000)
 	snap := &store.IndicatorSnapshot{VolRatio: 3.5}
 	resistances := []Level{{Price: 100, Strength: 1.0, Type: "Resistance"}}
 
-	sig := checkBreakoutWithCandles(snap, []store.Candle{previous, candle}, resistances, nil, Bullish)
+	sig := checkBreakoutWithCandles(snap, candles, resistances, nil, Bullish)
 	if sig == nil {
 		t.Fatal("expected a signal")
 	}

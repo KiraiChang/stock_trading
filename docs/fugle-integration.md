@@ -2,7 +2,8 @@
 
 盤中即時行情的並行資料源，與 FinMind 分工：**FinMind 顧歷史/日K/backfill，
 Fugle 顧盤中即時**。目前只完成了 REST/WebSocket client 與驗證工具，尚未接上
-`Fetcher`/`scheduler` 的自動排程（見文末「尚未完成」）。
+`Fetcher`/`scheduler` 的自動排程。盤中源相關工作已改為擱置，近期先沿用既有
+資料流程，等後續有更合適的盤中資料源或明確需求時再重新評估。
 
 ---
 
@@ -198,7 +199,7 @@ fugle:
 
 ---
 
-## 尚未完成（Roadmap）
+## 擱置中的後續工作
 
 1. **盤中即時更新格式驗證**（見上方「尚未確認」段落），這是後續工作的前提。
 2. **Tier 1 廣度掃描**：REST round-robin 排程，取代 `scheduler.go` 的
@@ -207,3 +208,5 @@ fugle:
    決定哪 5 檔股票佔用 WebSocket 訂閱名額。
 4. **Fugle 異常時 fallback 回 FinMind**：`market.intraday_source`/
    `fallback_to_finmind` 設定尚未實作對應邏輯。
+
+以上盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程。

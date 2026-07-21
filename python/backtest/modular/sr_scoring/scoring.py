@@ -169,6 +169,13 @@ TRADING_SCORE_WEIGHTS = {
     "confidence": 8.5,
     "chip": 15.0,
 }
+TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP = {
+    "expected_value": 40.0,
+    "risk_reward": 20.0,
+    "trend": 15.0,
+    "volume": 15.0,
+    "confidence": 10.0,
+}
 
 # 籌碼分數（chip_scores.total_score，-100~100）五段訊號門檻。SR Zone 以有效
 # 影響分（effective_score）做方向判讀，避免低覆蓋率但單一分量極端時被解讀成
@@ -628,6 +635,37 @@ def _trading_score(breakdown: dict[str, float]) -> float:
     return float(sum(breakdown.values()))
 
 
+def _trading_score_breakdown_no_direct_chip(
+    role: str,
+    confidence: float,
+    expected_value: Optional[float],
+    risk_reward_ratio: Optional[float],
+    overall_trend: float,
+    volume_confirmation: Optional[str],
+) -> dict[str, float]:
+    """Shadow scoring policy for chip double-path evaluation.
+
+    Production scoring intentionally keeps the direct chip component. This helper
+    redistributes the non-chip weights back to the original 40/20/15/15/10
+    proportions so tests and offline analysis can compare rankings without
+    changing runtime behavior.
+    """
+    current = _trading_score_breakdown(
+        role=role,
+        confidence=confidence,
+        expected_value=expected_value,
+        risk_reward_ratio=risk_reward_ratio,
+        overall_trend=overall_trend,
+        volume_confirmation=volume_confirmation,
+        chip_score=None,
+    )
+    out: dict[str, float] = {}
+    for key, weight in TRADING_SCORE_WEIGHTS_NO_DIRECT_CHIP.items():
+        old_weight = TRADING_SCORE_WEIGHTS[key]
+        out[key] = float((current[key] / old_weight) * weight) if old_weight else 0.0
+    return out
+
+
 def _trading_recommendation(trading_score: float, role: str) -> str:
     """role=SUPPORT：分數高代表『守住訊號強』= 偏多（買進）訊號。
     role=RESISTANCE：分數高代表『壓力守住訊號強』= 偏空（避開做多/放空）
@@ -934,7 +972,7 @@ def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[f
         # contribution 是這個角色下籌碼對 trading_score 的直接加權貢獻（0~15，已依
         # 支撐/壓力翻號，見 _trading_score_breakdown）；bounce/break delta 是籌碼相對
         # 中性籌碼對本 zone 反彈/跌破機率的邊際貢獻（百分點，模型路徑，見 score_zone）。
-        # 兩個數字分屬「直接權重」與「模型」兩條路徑，不是重複計分（見 todo T-014）。
+        # 兩個數字分屬「直接權重」與「模型」兩條路徑，評估基準見 docs/sr-zone-scoring.md。
         "chip": {
             "direction": z.chip_direction,
             "contribution": z.trading_score_breakdown.get("chip"),
@@ -948,8 +986,8 @@ def _zone_summary(z: ZoneScore, side: str, current_price: float, ma5: Optional[f
 def _pick_period_pair(zones: list[ZoneScore], current_price: float) -> tuple[Optional[ZoneScore], Optional[ZoneScore]]:
     supports = [z for z in zones if z.role == ZoneType.SUPPORT.value and z.price_high < current_price]
     resistances = [z for z in zones if z.role == ZoneType.RESISTANCE.value and z.price_low > current_price]
-    supports.sort(key=lambda z: (z.trading_score, z.confidence, z.price_high), reverse=True)
-    resistances.sort(key=lambda z: (z.trading_score, z.confidence, -z.price_low), reverse=True)
+    supports.sort(key=lambda z: _period_summary_rank(z, current_price), reverse=True)
+    resistances.sort(key=lambda z: _period_summary_rank(z, current_price), reverse=True)
 
     for support in supports or [None]:
         for resistance in resistances or [None]:
@@ -957,6 +995,23 @@ def _pick_period_pair(zones: list[ZoneScore], current_price: float) -> tuple[Opt
                 continue
             return support, resistance
     return None, None
+
+
+def _period_summary_rank(z: ZoneScore, current_price: float) -> tuple[float, float, float]:
+    distance_pct = _distance_pct_to_zone_bounds(z.price_low, z.price_high, current_price)
+    distance_score = 1.0 - min(distance_pct / 0.08, 1.0)
+    confluence_score = min(float(z.confluence_family_count or z.confluence_count or 1) / 3.0, 1.0)
+    relevance = (
+        (z.trading_score / 100.0) * 0.50
+        + z.confidence * 0.20
+        + distance_score * 0.20
+        + confluence_score * 0.10
+    )
+    if z.role == ZoneType.SUPPORT.value:
+        location_tiebreaker = z.price_high
+    else:
+        location_tiebreaker = -z.price_low
+    return (float(relevance), float(z.trading_score), float(location_tiebreaker))
 
 
 def _build_period_summaries(
@@ -1128,7 +1183,7 @@ def score_zone(
         # 用同一組 zone 特徵重算本角色的 hold/break 機率，差值（百分點）就是「這檔
         # 籌碼相對中性籌碼把反彈/跌破機率推了多少」。查無籌碼資料（chip_missing）時
         # 無從比較，留 None。這是模型路徑的貢獻，跟 trading_score 的 chip 直接加權
-        # 分量（15%）是兩條獨立路徑，前端會分開標示（見 todo T-014）。
+        # 分量（15%）是兩條獨立路徑，前端會分開標示。
         if chip_features is not None and not chip_features.get("chip_missing"):
             base_hold, base_break = _normalize_probabilities(
                 predict_hold_probability(bundle, role_features, is_support=is_support, chip_features=neutral_chip_features()),

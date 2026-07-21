@@ -102,6 +102,12 @@
       {/each}
     </div>
 
+    {#if summary.broker_score === null || summary.broker_score === undefined}
+      <p class="text-[11px] text-muted mt-3 leading-relaxed">
+        目前資料來源未提供券商分點，分點子分數在模型與評分中以中性處理。
+      </p>
+    {/if}
+
     <p class="text-[11px] text-muted mt-3 leading-relaxed">
       籌碼透過兩條路徑影響評分：直接加權分量（總分的 15%）與 v3 機率模型特徵，兩者不是重複計分。
     </p>

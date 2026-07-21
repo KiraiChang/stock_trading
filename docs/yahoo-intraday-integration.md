@@ -7,8 +7,10 @@
 ／`yahoo_model.go`（實作 `BatchQuoteSource`）、`backend/cmd/yahoo-check`（實盤驗證工具），
 設定為 `config.YahooConfig`（`base_url`/`enabled`/`rate_limit`/`batch_size`，預設 `enabled: false`）。
 掛載後 `scheduler.runIntradayJob` 的盤中 job 會優先走 Yahoo 批次路徑（`runIntradayBatch`，免 token），
-未掛載時退回 FinMind 分K。**仍待處理**只剩兩項：批次請求失敗時的 Yahoo→FinMind fallback
-（[todo.md](./todo.md) T-031）與實盤時段覆蓋率/延遲/封鎖風險驗證（T-032）。
+未掛載時退回 FinMind 分K。**目前決策**：盤中源相關工作暫不列入近期處理，
+先沿用既有資料流程；Yahoo→FinMind fallback（[todo.md](./todo.md) T-031）與
+實盤時段覆蓋率/延遲/封鎖風險驗證（T-032）已改為擱置，等後續有更合適的盤中
+資料源或明確需求時再重新評估。
 
 ---
 
@@ -152,6 +154,6 @@ Shioaji）；它等價/替代的是 FinMind 分K 與 Fugle Tier-1 的**廣度掃
 
 冪等性由 `candles` 表 `UNIQUE(symbol, timeframe, ts)` 保證，重覆抓取只會 UPSERT 不會重複。
 
-**尚未落地的唯一一步**：批次請求失敗（Yahoo 被限流/封鎖）時的 Yahoo→FinMind fallback——目前
-`runIntradayBatch` 只記 log 續跑其他批次，回退補資料的機制待實作，且設計為與 Fugle→FinMind 共用單一
-通用回退（見 [todo.md](./todo.md) T-031、T-008）。
+**已擱置的後續工作**：批次請求失敗（Yahoo 被限流/封鎖）時的 Yahoo→FinMind fallback
+目前未實作，`runIntradayBatch` 只記 log 續跑其他批次。這筆與 Fugle→FinMind fallback
+一併擱置（見 [todo.md](./todo.md) T-031、T-008）；盤中源相關工作暫不列入近期處理。

@@ -8,43 +8,35 @@ from .conftest import bearish_trend_df, bullish_trend_df
 
 def test_breakout_entry_triggers_long_on_confirmed_breakout(bullish_df):
     df = bullish_df.copy()
-    prior_close = float(df["close"].iloc[-2])
-    avg_volume = float(df["volume"].iloc[:-1].mean())
+    avg_volume = float(df["volume"].iloc[-24:-4].mean())
 
-    # 最後一根大漲並帶量突破先前收盤價（當作壓力位）
-    df.iloc[-1, df.columns.get_loc("close")] = prior_close + 10
-    df.iloc[-1, df.columns.get_loc("high")] = prior_close + 10.5
-    df.iloc[-1, df.columns.get_loc("volume")] = avg_volume * 5
+    _set_last_closes(df, [95, 110, 108, 109])
+    df.iloc[-3, df.columns.get_loc("volume")] = avg_volume * 5
 
-    levels = SRLevels(resistances=[Level(prior_close, LevelType.RESISTANCE, 1.0, "test")])
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
     signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
 
     assert signal is not None
     assert signal.direction == Direction.LONG
-    assert signal.reference_level == prior_close
+    assert signal.reference_level == 100.0
 
 
 def test_breakout_entry_no_signal_without_volume_confirmation(bullish_df):
     df = bullish_df.copy()
-    prior_close = float(df["close"].iloc[-2])
-    df.iloc[-1, df.columns.get_loc("close")] = prior_close + 10
-    df.iloc[-1, df.columns.get_loc("high")] = prior_close + 10.5
-    # volume 維持原樣（沒有爆量）
+    _set_last_closes(df, [95, 110, 108, 109])
 
-    levels = SRLevels(resistances=[Level(prior_close, LevelType.RESISTANCE, 1.0, "test")])
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
     signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
     assert signal is None
 
 
 def test_breakout_entry_no_long_signal_when_trend_not_bullish(bearish_df):
     df = bearish_df.copy()
-    prior_close = float(df["close"].iloc[-2])
-    avg_volume = float(df["volume"].iloc[:-1].mean())
-    df.iloc[-1, df.columns.get_loc("close")] = prior_close + 10
-    df.iloc[-1, df.columns.get_loc("high")] = prior_close + 10.5
-    df.iloc[-1, df.columns.get_loc("volume")] = avg_volume * 5
+    avg_volume = float(df["volume"].iloc[-24:-4].mean())
+    _set_last_closes(df, [95, 110, 108, 109])
+    df.iloc[-3, df.columns.get_loc("volume")] = avg_volume * 5
 
-    levels = SRLevels(resistances=[Level(prior_close, LevelType.RESISTANCE, 1.0, "test")])
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
     signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
     assert signal is None
 
@@ -55,6 +47,71 @@ def _set_last_closes(df, values):
     loc = df.columns.get_loc("close")
     for i, v in enumerate(values):
         df.iloc[-n + i, loc] = v
+
+
+def test_breakout_entry_no_long_on_breakout_candle_before_window(bullish_df):
+    df = bullish_df.copy()
+    avg_volume = float(df["volume"].iloc[-22:-2].mean())
+    _set_last_closes(df, [95, 94, 92, 110])
+    df.iloc[-1, df.columns.get_loc("volume")] = avg_volume * 5
+
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
+    signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
+    assert signal is None
+
+
+def test_breakout_entry_no_long_on_first_confirmation_candle(bullish_df):
+    df = bullish_df.copy()
+    avg_volume = float(df["volume"].iloc[-23:-3].mean())
+    _set_last_closes(df, [95, 93, 110, 108])
+    df.iloc[-2, df.columns.get_loc("volume")] = avg_volume * 5
+
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
+    signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
+    assert signal is None
+
+
+def test_breakout_entry_no_long_when_resistance_lost_in_window(bullish_df):
+    df = bullish_df.copy()
+    avg_volume = float(df["volume"].iloc[-24:-4].mean())
+    _set_last_closes(df, [95, 110, 99, 109])
+    df.iloc[-3, df.columns.get_loc("volume")] = avg_volume * 5
+
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
+    signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
+    assert signal is None
+
+
+def test_breakout_entry_no_long_when_rsi_overbought(bullish_df):
+    df = bullish_df.copy()
+    avg_volume = float(df["volume"].iloc[-24:-4].mean())
+    _set_last_closes(df, [95, 110, 108, 109])
+    df.iloc[-3, df.columns.get_loc("volume")] = avg_volume * 5
+    df["rsi14"] = 60.0
+    df.iloc[-1, df.columns.get_loc("rsi14")] = 80.0
+
+    levels = SRLevels(resistances=[Level(100.0, LevelType.RESISTANCE, 1.0, "test")])
+    signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
+    assert signal is None
+
+
+def test_breakout_entry_long_uses_nearest_crossed_resistance(bullish_df):
+    df = bullish_df.copy()
+    avg_volume = float(df["volume"].iloc[-24:-4].mean())
+    _set_last_closes(df, [95, 115, 114, 113])
+    df.iloc[-3, df.columns.get_loc("volume")] = avg_volume * 5
+
+    levels = SRLevels(
+        resistances=[
+            Level(100.0, LevelType.RESISTANCE, 1.0, "test"),
+            Level(110.0, LevelType.RESISTANCE, 0.5, "test"),
+        ]
+    )
+    signal = BreakoutEntry(vol_multiplier=2.0, vol_period=20).evaluate(df, levels)
+
+    assert signal is not None
+    assert signal.direction == Direction.LONG
+    assert signal.reference_level == 110.0
 
 
 def test_breakout_entry_triggers_short_after_breakdown_confirmation(bearish_df):

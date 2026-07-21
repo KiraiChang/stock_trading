@@ -435,6 +435,11 @@ zone 依寬度（`price_high - price_low`）在**同一次分析**裡的相對�
 `trading_score` 由高到低排序（`_assign_tiers`/`_sort_zone_scores`，
 `scoring.py`）。
 
+`period_summaries` 的短／中／長摘要不直接沿用完整清單排序，而是用摘要專用
+混合分數挑選各 tier 內最適合閱讀的支撐與壓力：`trading_score` 50%、
+`confidence` 20%、距離現價 20%、多方法共振 10%。支撐候選仍必須在現價下方，
+壓力候選仍必須在現價上方；完整 `zones` 排序不受摘要排序影響。
+
 ---
 
 ## 十二、Trading Score（可拆解）與 Trading Recommendation
@@ -513,7 +518,14 @@ zone 特徵各推論兩次——一次用實際 `chip_features`、一次用中�
 **兩條路徑，不是重複計分**：`contribution`（直接加權，15%）與 `*_delta_pp`
 （v3 模型特徵）是籌碼影響分數的**兩條獨立路徑**，摘要把兩者攤開正是為了讓使用
 者看得到各自的效果，而非同一個效果被算兩次。這兩條路徑是否讓籌碼被實際放大
-超過設計權重，屬待驗證項目（見 `docs/todo.md` T-014），與本輸出的數字化無關。
+超過設計權重，需用 shadow policy 比較，而非直接從權重常數推論。
+
+**籌碼雙路徑評估基準**：production scoring 目前保留直接 `chip` 分量；同時在
+`scoring.py` 提供 `_trading_score_breakdown_no_direct_chip` 作為離線比較用 shadow
+policy。該 policy 移除直接 `chip` 分量，並把其餘分量恢復為 EV 40% / RR 20% /
+Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重，應先比較
+現況與 shadow policy 的 top1/top3 zone 排名、摘要支撐/壓力選擇、分數差異分布，
+再決定是否移除或調低直接 `chip` 權重。
 
 **摘要 `reasons` 不再含籌碼句**：籌碼從 `_zone_summary` 的 `reasons[]` 拉出改成上述
 結構化 `chip` 欄位，`reasons` 只保留均線、驗證、量能、信心、共振等非籌碼理由，

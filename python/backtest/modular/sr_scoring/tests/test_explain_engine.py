@@ -80,6 +80,7 @@ def _zone(
         trading_recommendation=TradingRecommendation.BUY.value,
         overlap_group=1,
         confluence_count=2,
+        confluence_family_count=2,
     )
 
 
@@ -306,7 +307,7 @@ def test_support_zone_explanation_golden_snapshot():
             "信心等級高",
             "最近有有效驗證",
             "量能確認有效",
-            "多方法共振 ×2",
+            "證據族群共振 ×2",
             "期望值為正（+2.00%）",
             "風險報酬比 1.80R",
         ],

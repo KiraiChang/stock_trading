@@ -530,41 +530,6 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 ---
 
-### T-035：SR Zone label 常數抽共用模組
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone / 重構 |
-| 建立日期 | 2026-07-21 |
-| 來源 | review T-034（P0-B label 語意） |
-
-`TIER_LABEL_TEXT` / `ROLE_LABEL_TEXT` / `_role_label` / `_display_label` 在
-`python/backtest/modular/sr_scoring/scoring.py` 與 `decision_engine.py` 各定義一份。
-本輪 T-034 已出現 tier「短期」語意需兩邊各改一次的 drift 風險。可抽到共用模組
-（例如 `types.py` 或新 `labels.py`）單一來源，兩邊 import。
-
----
-
-### T-036：map[string]any JSON 取值 helper 三處收斂
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Go / 重構 |
-| 建立日期 | 2026-07-21 |
-| 來源 | review T-034（P2-C normalized projection） |
-
-「從 `map[string]any` 依 path 取型別值」的 helper 目前在三處各自實作：
-`backend/internal/analysis/client.go`（`valueAt`/`stringAt`/`anyFloatAt`/`sliceAt`…）、
-`backend/internal/api/handler/sr_zones.go`（`rawObjectOrEmpty`/`rawAny`/`nullableFloat`…）、
-`backend/internal/store`（`metricValue`/`metricFloat`/`metricInt`/`metricBool`）。
-可評估收斂為單一 internal util（需衡量 package 邊界與 `store.RawJSON`/`sql.Null*` 依賴，非強求）。
-
----
-
 ## 已完成封存
 
 （目前沒有項目）

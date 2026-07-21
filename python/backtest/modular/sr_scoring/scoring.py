@@ -124,6 +124,7 @@ from .types import (
 )
 from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
 from .pipeline_types import ZoneFeatureSet
+from .labels import TIER_LABEL_TEXT, role_label as _role_label, display_label as _display_label
 
 DEFAULT_FETCH_LIMIT = 250
 
@@ -189,18 +190,6 @@ _VOLUME_CONFIRMATION_WEIGHT = {
     VolumeConfirmation.FAILED.value: 0.0,
 }
 
-TIER_LABEL_TEXT = {
-    ZoneTier.TIER_1_MAIN_STRUCTURE.value: "主結構",
-    ZoneTier.TIER_2_TRADING_ZONE.value: "交易區",
-    ZoneTier.TIER_3_SHORT_TERM.value: "短期",
-}
-
-ROLE_LABEL_TEXT = {
-    ZoneType.SUPPORT.value: "支撐",
-    ZoneType.RESISTANCE.value: "壓力",
-    ZoneType.AT_ZONE.value: "區間內",
-}
-
 PERIOD_SUMMARY_CONFIG = [
     ("short", "短期", ZoneTier.TIER_3_SHORT_TERM.value),
     ("mid", "中期", ZoneTier.TIER_2_TRADING_ZONE.value),
@@ -247,14 +236,6 @@ def _resolve_role(zone: Zone, current_price: float) -> str:
     if current_price < zone.price_low:
         return ZoneType.RESISTANCE.value
     return ZoneType.AT_ZONE.value
-
-
-def _role_label(role: str) -> str:
-    return ROLE_LABEL_TEXT.get(role, role)
-
-
-def _display_label(tier: str, role: str) -> str:
-    return f"{TIER_LABEL_TEXT.get(tier, tier)}{_role_label(role)}"
 
 
 def _net_score_label(net_score: float, threshold: float = NET_SCORE_STRONG_THRESHOLD) -> str:

@@ -22,29 +22,10 @@ from .model import ModelBundle
 from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
 from .probability_engine import build_model_governance_context
+from .labels import role_label as _role_label, display_label as _display_label
 
 
 DEFAULT_STALE_AFTER_DAYS = 1
-
-TIER_LABEL_TEXT = {
-    ZoneTier.TIER_1_MAIN_STRUCTURE.value: "主結構",
-    ZoneTier.TIER_2_TRADING_ZONE.value: "交易區",
-    ZoneTier.TIER_3_SHORT_TERM.value: "短期",
-}
-ROLE_LABEL_TEXT = {
-    ZoneType.SUPPORT.value: "支撐",
-    ZoneType.RESISTANCE.value: "壓力",
-    ZoneType.AT_ZONE.value: "區間內",
-}
-
-
-def _role_label(role: str) -> str:
-    return ROLE_LABEL_TEXT.get(role, role)
-
-
-def _display_label(tier: Optional[str], role: str, fallback_tier_label: Optional[str] = None) -> str:
-    tier_label = TIER_LABEL_TEXT.get(tier or "", fallback_tier_label or tier or "")
-    return f"{tier_label}{_role_label(role)}"
 
 
 # entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：

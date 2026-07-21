@@ -378,6 +378,18 @@ cd python
   `_detect_market_events` 的門檻或權重後，務必跑**兩套** pytest（見「執行 Python
   測試」）：`backtest/modular/tests` 與 `backtest/modular/sr_scoring/tests` 都要過。
 
+- **tier / role 顯示標籤用共用模組**：SR Zone 的 tier / role 中文標籤（`TIER_LABEL_TEXT`、
+  `ROLE_LABEL_TEXT`、`role_label`、`display_label`）集中在 `sr_scoring/labels.py`，`scoring.py`
+  與 `decision_engine.py` 都從這裡 import，不要各自再定義一份，否則調整標籤（例如 tier 文案）
+  時容易漏改一邊造成 drift。
+
+- **Go 端 map[string]any 取值 helper 刻意分散、不強求收斂**：「從 `map[string]any` 依 path
+  取型別值」的 helper 在 `internal/analysis/client.go`（回傳原生指標型別）、`internal/store`
+  （回傳 `store.Null*`）、`internal/api/handler/sr_zones.go`（`store.RawJSON` I/O）三處各自實作。
+  已評估過收斂為單一 util，結論是**不做**：三者回傳型別與所在 package 需求各異，真正重複的只有
+  幾行 map-path walk，抽成單一 util 反而要引入跨 package 依賴、並把 handler 的 RawJSON 反序列化
+  硬歸成「map 取值」。新增取值需求時就近沿用該 package 既有 helper 即可。
+
 ---
 
 ## 手動補算指標 / 評估訊號

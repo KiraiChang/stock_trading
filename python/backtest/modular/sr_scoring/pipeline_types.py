@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from .model import ModelBundle
@@ -31,7 +30,7 @@ class AnalysisData:
 class DirectionFeatures:
     role: str
     values: ZoneFeatures
-    model_vector: np.ndarray
+    model_vector: pd.DataFrame
 
 
 @dataclass(frozen=True)

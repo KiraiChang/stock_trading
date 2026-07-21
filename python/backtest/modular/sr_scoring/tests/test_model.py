@@ -12,6 +12,7 @@ from ..model import (
     ModelBundle,
     _time_split_indices,
     compute_config_hash,
+    feature_vector,
     load_model,
     predict_break_probability,
     predict_hold_probability,
@@ -227,6 +228,20 @@ def test_predict_probabilities_are_in_unit_interval():
 
     assert 0.0 <= hold_p <= 1.0
     assert 0.0 <= break_p <= 1.0
+
+
+def test_feature_vector_preserves_feature_names_for_prediction():
+    features = ZoneFeatures(
+        touch_count=4, rejection_count=3, breakout_count=0,
+        average_bounce_return=0.02, average_break_return=-0.01,
+        relative_volume=1.5, volatility=0.02, trend_strength=0.01,
+    )
+
+    frame = feature_vector(features, is_support=True, chip_features=None)
+
+    assert isinstance(frame, pd.DataFrame)
+    assert list(frame.columns) == FEATURE_COLUMNS
+    assert frame.shape == (1, len(FEATURE_COLUMNS))
 
 
 # ── 三、1：時間序列 holdout 切分（預設 split_method="time"）────────────

@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 import numpy as np
+import pandas as pd
 
 from .model import FEATURE_COLUMNS, ModelBundle
 from .pipeline_types import AnalysisEvidence, AnalysisScores, DirectionFeatures
@@ -29,7 +30,8 @@ def _additivity_error(reconstructed: float, probability: float) -> float:
 
 
 def _positive_probability(model: Any, matrix: np.ndarray) -> np.ndarray:
-    return np.asarray(model.predict_proba(matrix), dtype=float)[:, 1]
+    frame = pd.DataFrame(matrix, columns=FEATURE_COLUMNS)
+    return np.asarray(model.predict_proba(frame), dtype=float)[:, 1]
 
 
 def _normalized_probability_fn(bundle: ModelBundle, target: str) -> Callable[[np.ndarray], np.ndarray]:

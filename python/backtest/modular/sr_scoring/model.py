@@ -154,7 +154,7 @@ def _time_split_indices(dataset: pd.DataFrame, test_size: float) -> tuple[pd.Ind
 
 
 def _fit_with_optional_calibration(
-    base_model: Any, X_train: np.ndarray, y_train: np.ndarray, calibration_method: Optional[str]
+    base_model: Any, X_train: pd.DataFrame, y_train: np.ndarray, calibration_method: Optional[str]
 ) -> tuple[Any, bool]:
     """回傳 (已 fit 好的 model, 是否真的做了校準)。樣本太少或
     calibration_method 為 None/"none" 時直接 fit 原始 estimator，不校準——
@@ -178,9 +178,9 @@ def _fit_one(
     random_state: int,
     calibration_method: Optional[str],
 ) -> tuple[Any, dict[str, float]]:
-    X_train = train_df[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_train = train_df[FEATURE_COLUMNS].astype(float)
     y_train = train_df[label_col].to_numpy(dtype=int)
-    X_test = test_df[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X_test = test_df[FEATURE_COLUMNS].astype(float)
     y_test = test_df[label_col].to_numpy(dtype=int)
 
     base_model = _build_estimator(model_type, random_state)
@@ -397,22 +397,20 @@ def feature_vector(
     features: ZoneFeatures,
     is_support: bool,
     chip_features: Optional[dict[str, float]] = None,
-) -> np.ndarray:
-    return np.array(
-        [[
-            features.touch_count,
-            features.rejection_count,
-            features.breakout_count,
-            features.average_bounce_return,
-            features.average_break_return,
-            features.relative_volume,
-            features.volatility,
-            features.trend_strength,
-            1.0 if is_support else 0.0,
-            *_chip_feature_values(chip_features),
-        ]],
-        dtype=float,
-    )
+) -> pd.DataFrame:
+    values = [
+        features.touch_count,
+        features.rejection_count,
+        features.breakout_count,
+        features.average_bounce_return,
+        features.average_break_return,
+        features.relative_volume,
+        features.volatility,
+        features.trend_strength,
+        1.0 if is_support else 0.0,
+        *_chip_feature_values(chip_features),
+    ]
+    return pd.DataFrame([values], columns=FEATURE_COLUMNS, dtype=float)
 
 
 def predict_hold_probability(

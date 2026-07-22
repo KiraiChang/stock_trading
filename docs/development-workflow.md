@@ -19,64 +19,68 @@
 - 需要重置驗收資料時，只能對 dev compose 執行 `down -v`。
 - dev compose 已使用不同 host ports，可與 live 同機並存。
 
+## 測試腳本優先
+
+建置與測試一律走各 runtime 的腳本，不要臨時手打 `docker run`：
+
+1. 要跑建置或測試時，先看該 runtime 的 `scripts/` 有沒有現成腳本；**有就用腳本**。
+2. 現有腳本涵蓋不到當次需求時（新的檢查類型、新 runtime、需要固定的新參數），
+   **先提出需求與使用者確認，把行為補進腳本，再用腳本執行**，不要用一次性指令繞過。
+3. 一次性指令只用於診斷（例如進 container 看狀態），不作為驗收依據。
+
+理由：手打指令會漂移，本專案已經因此踩過三個坑——以 root 執行留下 root-owned 檔案
+（`backend/server` 曾被誤 commit、`backend/internal/ui/dist` 一度無法被覆寫）、
+記憶體上限不足導致 Go build OOM、frontend 只掛 `frontend/` 導致 build 產物寫進
+container 內憑空消失且不會報錯。腳本是這些約束的唯一真實來源。
+
 ## Docker 驗收流程
 
 從 repo root 執行。
 
-單次驗收用的 `docker run` 預設加上資源限制，避免測試或 build 佔滿主機資源：
+### 1. 用測試腳本跑建置與測試
 
-| 參數 | 限制 |
-|------|------|
-| `--cpus="0.5"` | 最多使用半顆 CPU 的運算時間 |
-| `--memory="512m"` | 實體記憶體上限 512MB |
-| `--memory-swap="768m"` | 記憶體加 swap 總上限 768MB |
-| `--pids-limit=200` | 程序及執行緒數量上限 200 |
-
-### 1. 用 Docker 跑建置與測試
-
-Backend：
+| Runtime | 腳本 | 預設行為 |
+|---------|------|----------|
+| Backend (Go) | `backend/scripts/test.sh [packages...]` | `go vet` → `go test` → `go build`（全部套件為 `./...`） |
+| Python | `python/scripts/test.sh [pytest 參數/路徑]` | 用 `python/Dockerfile` 建測試 image，跑 `pytest backtest/ tests/` |
+| Frontend (Svelte) | `frontend/scripts/test.sh [--install]` | `npm run build`（Svelte/TS 編譯檢查） |
 
 ```bash
-docker run --rm \
-  --cpus="0.5" \
-  --memory="512m" \
-  --memory-swap="768m" \
-  --pids-limit=200 \
-  -v "$PWD/backend:/app" \
-  -w /app \
-  -e GOMODCACHE=/tmp/gomod \
-  -e GOCACHE=/tmp/gocache \
-  golang:1.25-alpine \
-  go test ./...
+backend/scripts/test.sh                          # 全部 Go 套件
+backend/scripts/test.sh ./internal/market/...    # 只驗單一套件
+TEST_FLAGS="-count=1 -v" backend/scripts/test.sh ./internal/market/...
+
+python/scripts/test.sh                                   # backtest/ 與 tests/
+python/scripts/test.sh backtest/modular/sr_scoring/tests # 指定目錄
+python/scripts/test.sh -k event_engine backtest/         # 直接帶 pytest 參數
+
+frontend/scripts/test.sh            # 沿用現有 node_modules
+frontend/scripts/test.sh --install  # 先 npm ci（node_modules 不存在時會自動加上）
 ```
 
-Frontend：
+三支腳本共同保證：
 
-```bash
-docker run --rm \
-  --cpus="0.5" \
-  --memory="512m" \
-  --memory-swap="768m" \
-  --pids-limit=200 \
-  -v "$PWD/frontend:/app" \
-  -w /app \
-  node:20-alpine \
-  sh -c "npm ci && npm run build"
-```
+- `--user "$(id -u):$(id -g)"`：以本機 uid/gid 執行，container 產出的檔案不會是 root 所有。
+- Go build 產物寫到 container 內 `/tmp`、pytest 關閉 `__pycache__` 與 `.pytest_cache`，
+  不在 repo 留下編譯／測試殘渣。
+- build / module / npm 快取放在 repo 外的 `~/.cache/stock_trading/`（可用 `CACHE_DIR=` 覆寫），
+  跨次重用且不會被誤加進版控。
 
-Python：
+資源限制（預設值，可用環境變數覆寫）：
 
-```bash
-docker run --rm \
-  --cpus="0.5" \
-  --memory="512m" \
-  --memory-swap="768m" \
-  --pids-limit=200 \
-  -v "$PWD/python:/app" \
-  -w /app \
-  python:3.11-slim \
-  sh -c "pip install --no-cache-dir -r requirements.txt && pytest backtest/ -v"
-```
+| 項目 | Backend | Python | Frontend |
+|------|---------|--------|----------|
+| `MEM`（記憶體上限） | `1800m` | `1024m` | `1024m` |
+| `CPUS` | `1` | `1` | `1` |
+| `--pids-limit` | 200 | 200 | 200 |
+| image 覆寫 | `GO_IMAGE` | `PY_IMAGE` | `NODE_IMAGE` |
+
+Go 另外固定 `GOMAXPROCS=1` + `GOFLAGS=-p=1`：本機只有 2GiB RAM，平行編譯會 OOM，
+必須序列編譯；記憶體上限也因此不能沿用其他 runtime 的 512m。
+
+Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/dist`
+（Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
+跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。
 
 ### 2. 啟動 dev stack 做 smoke test
 
@@ -132,7 +136,7 @@ docker compose -f docker-compose.dev.yml down -v
 
 完成程式修改後，至少要做：
 
-- 受影響 runtime 的 Docker 測試或 build。
+- 受影響 runtime 的測試腳本（`backend|python|frontend/scripts/test.sh`）。
 - 若有 migration、API、跨服務整合、排程或 Python/Go 互動，啟動 dev stack 做 smoke test。
 - 若有前端畫面變更，跑 frontend Docker build，並在 dev stack 或本地 dev server 驗證畫面。
 - 若因環境、網路或外部 token 無法執行某項驗證，最後回報要明確寫出未執行項目與原因。

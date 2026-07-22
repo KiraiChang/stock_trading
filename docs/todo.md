@@ -323,6 +323,30 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 ---
 
+### T-033：frontend 缺自動化測試框架
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Frontend / 測試 |
+| 建立日期 | 2026-07-22 |
+| 來源 | 建立 `frontend/scripts/test.sh` 時發現 |
+
+`frontend/package.json` 只有 `dev` / `build` / `preview`，沒有 vitest、也沒有
+svelte-check，所以 `frontend/scripts/test.sh` 目前唯一能做的檢查是 `vite build`
+能否通過——只涵蓋「編得起來」，不涵蓋型別錯誤（`tsconfig.json` 有 `strict: true`
+但沒有任何步驟真的去跑型別檢查）與元件行為。
+
+建議分兩步：
+
+- 先加 `svelte-check`（含 `.svelte` 內的 TS 檢查），接進 `frontend/scripts/test.sh`
+  的預設流程，成本低、立刻補上型別缺口。
+- 再視需求評估 vitest + @testing-library/svelte，優先覆蓋 store（`src/lib/stores/`）
+  與 API 層（`src/lib/api/`）這類純邏輯。
+
+---
+
 ## 已完成封存
 
 （目前沒有項目）

@@ -1,6 +1,7 @@
 package market
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -36,6 +37,21 @@ type TWSEISINClient struct {
 	http       *http.Client
 	fetchDelay time.Duration
 	log        *zap.Logger
+}
+
+type twseISINFetchMeta struct {
+	StatusCode  int
+	ContentType string
+	BodyBytes   int
+	ParseStats  twseISINParseStats
+}
+
+type twseISINParseStats struct {
+	Rows                  int
+	CandidateRows         int
+	ParsedRows            int
+	SkippedSymbolNameRows int
+	SampleRows            []string
 }
 
 // TWSEISINClientOptions 的欄位皆為 0 值時沿用上面的 default 常數。
@@ -89,7 +105,7 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 			}
 		}
 		startedAt := time.Now()
-		symbols, err := c.fetchOne(ctx, url)
+		symbols, meta, err := c.fetchOne(ctx, url)
 		if err != nil {
 			if c.log != nil {
 				// 只記診斷用的 elapsed；錯誤本身往上拋，由 scheduler 統一記一次，
@@ -98,6 +114,14 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 					"twse isin source fetch failed",
 					zap.String("url", url),
 					zap.Duration("elapsed", time.Since(startedAt)),
+					zap.Int("status", meta.StatusCode),
+					zap.String("content_type", meta.ContentType),
+					zap.Int("body_bytes", meta.BodyBytes),
+					zap.Int("rows", meta.ParseStats.Rows),
+					zap.Int("candidate_rows", meta.ParseStats.CandidateRows),
+					zap.Int("parsed_rows", meta.ParseStats.ParsedRows),
+					zap.Int("skipped_symbol_name_rows", meta.ParseStats.SkippedSymbolNameRows),
+					zap.Strings("sample_rows", meta.ParseStats.SampleRows),
 				)
 			}
 			// all-or-nothing：任一來源失敗就整體失敗，避免部分快照觸發誤下市。
@@ -109,6 +133,11 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 				zap.String("url", url),
 				zap.Int("symbols", len(symbols)),
 				zap.Duration("elapsed", time.Since(startedAt)),
+				zap.Int("status", meta.StatusCode),
+				zap.String("content_type", meta.ContentType),
+				zap.Int("body_bytes", meta.BodyBytes),
+				zap.Int("rows", meta.ParseStats.Rows),
+				zap.Int("candidate_rows", meta.ParseStats.CandidateRows),
 			)
 		}
 		for _, s := range symbols {
@@ -125,10 +154,11 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 	return merged, nil
 }
 
-func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.StockSymbol, error) {
+func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.StockSymbol, twseISINFetchMeta, error) {
+	var meta twseISINFetchMeta
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	// 誠實表明來源身分，不偽裝成瀏覽器：TWSE ISIN 是公開清單，抓取本身正當，
 	// 站方要限流或聯絡時也才有辨識依據。Accept / Accept-Language 則是讓來源
@@ -138,18 +168,41 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 	req.Header.Set("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	defer resp.Body.Close()
+	meta.StatusCode = resp.StatusCode
+	meta.ContentType = resp.Header.Get("Content-Type")
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("twse isin: unexpected status %d", resp.StatusCode)
+		return nil, meta, fmt.Errorf("twse isin: unexpected status %d", resp.StatusCode)
 	}
 
-	reader, err := charset.NewReader(resp.Body, resp.Header.Get("Content-Type"))
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
-	return ParseTWSEISINSymbols(reader, c.log)
+	meta.BodyBytes = len(body)
+
+	reader, err := charset.NewReader(bytes.NewReader(body), meta.ContentType)
+	if err != nil {
+		return nil, meta, err
+	}
+	symbols, stats, err := parseTWSEISINSymbols(reader, c.log)
+	meta.ParseStats = stats
+	if err != nil {
+		return nil, meta, err
+	}
+	if len(symbols) == 0 {
+		return nil, meta, fmt.Errorf(
+			"twse isin parsed empty: rows=%d candidate_rows=%d skipped_symbol_name_rows=%d body_bytes=%d content_type=%q",
+			stats.Rows,
+			stats.CandidateRows,
+			stats.SkippedSymbolNameRows,
+			meta.BodyBytes,
+			meta.ContentType,
+		)
+	}
+	return symbols, meta, nil
 }
 
 type StockSymbolSource interface {
@@ -182,9 +235,15 @@ func (s *StockSymbolSyncer) Sync(ctx context.Context, seenAt time.Time) (store.S
 }
 
 func ParseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, error) {
+	out, _, err := parseTWSEISINSymbols(r, log)
+	return out, err
+}
+
+func parseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, twseISINParseStats, error) {
+	var stats twseISINParseStats
 	doc, err := html.Parse(r)
 	if err != nil {
-		return nil, err
+		return nil, stats, err
 	}
 
 	var rows [][]string
@@ -201,6 +260,7 @@ func ParseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, er
 		}
 	}
 	walk(doc)
+	stats.Rows = len(rows)
 
 	currentType := ""
 	malformedDates := 0
@@ -216,8 +276,13 @@ func ParseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, er
 		if len(cells) < 6 {
 			continue
 		}
+		stats.CandidateRows++
+		if len(stats.SampleRows) < 5 {
+			stats.SampleRows = append(stats.SampleRows, sampleTWSEISINRow(cells))
+		}
 		symbol, name, ok := parseSymbolName(cells[0])
 		if !ok {
+			stats.SkippedSymbolNameRows++
 			continue
 		}
 		listedDate, malformed := parseListedDate(cells[2])
@@ -236,12 +301,25 @@ func ParseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, er
 			ListedDate:   listedDate,
 		})
 	}
+	stats.ParsedRows = len(out)
 	// 非空但無法解析的上市日代表 TWSE 日期格式可能已變動——不讓單筆失敗中止整份解析，
 	// 但要留下警示，避免格式漂移導致 listed_date 靜默全空。
 	if malformedDates > 0 && log != nil {
 		log.Warn("twse isin: unparseable listed-date cells", zap.Int("count", malformedDates), zap.Int("parsed", len(out)))
 	}
-	return out, nil
+	return out, stats, nil
+}
+
+func sampleTWSEISINRow(cells []string) string {
+	sampleCells := cells
+	if len(sampleCells) > 4 {
+		sampleCells = sampleCells[:4]
+	}
+	s := strings.Join(sampleCells, " | ")
+	if len(s) > 240 {
+		return s[:240]
+	}
+	return s
 }
 
 func rowCells(row *html.Node) []string {

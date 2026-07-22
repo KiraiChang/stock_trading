@@ -81,6 +81,42 @@ func TestFetchStockSymbolsSendsIdentifyingHeaders(t *testing.T) {
 	}
 }
 
+func TestFetchStockSymbolsRejectsUnexpectedHTMLWithDiagnostics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><table><tr><td>temporarily unavailable</td></tr></table></body></html>`))
+	}))
+	defer srv.Close()
+
+	client := NewTWSEISINClient([]string{srv.URL}, TWSEISINClientOptions{Timeout: time.Second}, nil)
+	_, err := client.FetchStockSymbols(context.Background())
+	if err == nil {
+		t.Fatal("expected empty parse error")
+	}
+	if !strings.Contains(err.Error(), "twse isin parsed empty") {
+		t.Fatalf("expected parsed-empty diagnostic, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "rows=1") {
+		t.Fatalf("expected row count diagnostic, got %v", err)
+	}
+}
+
+func TestParseTWSEISINSymbolStats(t *testing.T) {
+	rows, stats, err := parseTWSEISINSymbols(strings.NewReader(twseISINFixture), nil)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	if stats.Rows == 0 || stats.CandidateRows != 3 || stats.ParsedRows != 3 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if len(stats.SampleRows) == 0 || !strings.Contains(stats.SampleRows[0], "1101") {
+		t.Fatalf("expected sample rows to include parsed candidates, got %+v", stats.SampleRows)
+	}
+}
+
 func TestParseTWSEISINSymbols(t *testing.T) {
 	rows, err := ParseTWSEISINSymbols(strings.NewReader(twseISINFixture), nil)
 	if err != nil {

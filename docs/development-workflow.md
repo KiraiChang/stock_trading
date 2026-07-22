@@ -101,6 +101,12 @@ process/thread。
 scripts/smoke-dev.sh
 ```
 
+腳本流程是 **先停 → 再 build → 再啟動**：build 之前會對 dev project 執行
+`compose down --remove-orphans`（**不帶 `-v`，named volume 保留**）。原因是這台 host 只有
+2GiB RAM，實測冷 cache build 的低點只剩 74 MiB available（Go compile 峰值 RSS 約 420 MiB），
+而上一輪留著的 dev stack 約占 145 MiB（postgres 26＋redis 9＋backend 9＋python-server 99），
+不先停就會在 build 階段被 OOM killer 砍掉。確定記憶體充裕時可用 `SKIP_DOWN=1` 略過這一步。
+
 可用環境變數覆寫等待時間、log 行數或 health URL：
 
 ```bash

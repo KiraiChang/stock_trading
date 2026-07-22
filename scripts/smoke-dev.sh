@@ -10,6 +10,7 @@
 #   PYTHON_URL    python-server health URL (default: http://localhost:18001/health)
 #   WAIT_SECONDS  max health-check wait in seconds (default: 90)
 #   LOG_TAIL      log lines shown on failure (default: 120)
+#   SKIP_DOWN     set to 1 to skip the pre-build stop (default: 0)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,6 +19,7 @@ BACKEND_URL="${BACKEND_URL:-http://localhost:18080/health}"
 PYTHON_URL="${PYTHON_URL:-http://localhost:18001/health}"
 WAIT_SECONDS="${WAIT_SECONDS:-90}"
 LOG_TAIL="${LOG_TAIL:-120}"
+SKIP_DOWN="${SKIP_DOWN:-0}"
 
 cd "$REPO_ROOT"
 
@@ -53,8 +55,24 @@ wait_for_health() {
   echo "    ok: $name"
 }
 
+# build 之前先把 dev stack 停掉：這台 host 只有 2GiB RAM，實測冷 cache build 的低點
+# 只剩 74 MiB available（Go compile 峰值 RSS 約 420 MiB）。上一輪留著的 dev stack
+# 約占 145 MiB（postgres 26 + redis 9 + backend 9 + python-server 99），不先停就會
+# 在 build 階段把記憶體壓成負數而被 OOM killer 砍掉（signal: killed）。
+# 注意：這裡刻意不帶 -v，named volume（dev_postgres_data / dev_redis_data）要保留；
+# 清空 dev 驗收資料是另一個明確動作，見 docs/development-workflow.md。
+if [ "$SKIP_DOWN" = "1" ]; then
+  echo "==> skip pre-build stop (SKIP_DOWN=1)"
+else
+  echo "==> stop dev stack before build (keep volumes)"
+  compose down --remove-orphans
+fi
+
+echo "==> build dev images: $COMPOSE_FILE"
+compose build
+
 echo "==> start dev stack: $COMPOSE_FILE"
-compose up --build -d
+compose up -d
 
 echo
 compose ps

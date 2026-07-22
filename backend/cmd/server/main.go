@@ -95,6 +95,7 @@ func main() {
 	chipScoreRepo := store.NewChipScoreRepo(db)
 	chipSyncJobRepo := store.NewChipSyncJobRepo(db)
 	positionRepo := store.NewPositionRepo(db)
+	stockSymbolRepo := store.NewStockSymbolRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -120,6 +121,8 @@ func main() {
 	// 籌碼分析：FinMind 目前只支援三大法人與融資融券，券商分點是 stub
 	// （market.ErrBrokerDataUnsupported），broker_score 會 fallback 為中性。
 	chipSyncer := chip.NewSyncer(finmindClient, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, candleRepo, log)
+	stockSymbolSource := market.NewTWSEISINClient(cfg.StockSymbols.SyncURLs, log)
+	stockSymbolSyncer := market.NewStockSymbolSyncer(stockSymbolSource, stockSymbolRepo, log)
 
 	// Fugle（富果）即時行情，與 FinMind 並行；Enabled 為 false 時完全不掛載，
 	// 行為與導入前一致。Tier 1（REST 廣度掃描）／Tier 2（WebSocket 熱點）的
@@ -150,7 +153,12 @@ func main() {
 
 	// Scheduler（先建立好讓 API Server 能掛上手動觸發端點，Start() 留到最後才呼叫）
 	srZoneVerifier := analysis.NewSRZoneVerifier(srZoneRepo, candleRepo)
-	sched := scheduler.New(fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier, chipSyncer, cfg.Chip.Sync.Cron, cfg.FinMind.IntradayEnabled, log)
+	sched := scheduler.New(
+		fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier,
+		chipSyncer, cfg.Chip.Sync.Cron,
+		stockSymbolSyncer, cfg.StockSymbols.Cron, cfg.StockSymbols.Enabled,
+		cfg.FinMind.IntradayEnabled, log,
+	)
 
 	// API Server（含 WebSocket Hub）
 	positionConfig := portfolio.Config{
@@ -162,7 +170,7 @@ func main() {
 		TakeProfitReductionRatio: cfg.PositionAnalysis.TakeProfitReductionRatio,
 		SRReuseMaxAge:            time.Duration(cfg.PositionAnalysis.SRReuseMaxAgeHours) * time.Hour,
 	}
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, stockSymbolRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

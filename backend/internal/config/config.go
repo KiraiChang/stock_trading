@@ -13,6 +13,7 @@ type Config struct {
 	FinMind          FinMindConfig
 	Fugle            FugleConfig
 	Yahoo            YahooConfig
+	StockSymbols     StockSymbolsConfig `mapstructure:"stock_symbols"`
 	Python           PythonConfig
 	Auth             AuthConfig
 	Chip             ChipConfig
@@ -93,6 +94,14 @@ type YahooConfig struct {
 	BatchSize int    `mapstructure:"batch_size"` // 單次請求最多帶入的 symbol 數，預設 40
 }
 
+type StockSymbolsConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// SyncURLs：TWSE ISIN 來源清單，需同時涵蓋上市（strMode=2）與上櫃（strMode=4），
+	// 否則另一半市場會被誤判為不在名單內。
+	SyncURLs []string `mapstructure:"sync_urls"`
+	Cron     string   `mapstructure:"cron"`
+}
+
 // ChipConfig 為籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）。
 type ChipConfig struct {
 	Sync ChipSyncConfig `mapstructure:"sync"`
@@ -134,6 +143,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("yahoo.enabled", false)
 	viper.SetDefault("yahoo.rate_limit", 20)
 	viper.SetDefault("yahoo.batch_size", 40)
+	viper.SetDefault("stock_symbols.enabled", true)
+	viper.SetDefault("stock_symbols.sync_urls", []string{
+		"https://isin.twse.com.tw/isin/C_public.jsp?strMode=2", // 上市
+		"https://isin.twse.com.tw/isin/C_public.jsp?strMode=4", // 上櫃
+	})
+	viper.SetDefault("stock_symbols.cron", "30 6 * * *")
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("python.sr_zones_timeout_sec", 120)
 	viper.SetDefault("chip.sync.history_trading_days", 500)

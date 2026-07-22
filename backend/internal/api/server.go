@@ -37,6 +37,7 @@ func NewServer(
 	sigEngine *signal.Engine,
 	signalRepo store.SignalRepo,
 	watchlistRepo store.WatchlistRepo,
+	stockSymbolRepo store.StockSymbolRepo,
 	backtestRepo store.BacktestRepo,
 	jobRunRepo store.JobRunRepo,
 	analysisRepo store.AnalysisRepo,
@@ -109,6 +110,9 @@ func NewServer(
 		protected.PUT("/watchlist/:symbol", wh.Update)
 		protected.DELETE("/watchlist/:symbol", wh.Remove)
 		protected.PATCH("/watchlist/:symbol/watch", wh.SetWatched)
+
+		ssh := handler.NewStockSymbolHandler(stockSymbolRepo, log)
+		protected.GET("/stock-symbols/search", ssh.Search)
 
 		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)

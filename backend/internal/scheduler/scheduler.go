@@ -21,17 +21,20 @@ import (
 const srZoneVerifyLimit = 50
 
 type Scheduler struct {
-	fetcher         *market.Fetcher
-	signalEng       *signal.Engine
-	watchlist       store.WatchlistRepo
-	jobRuns         store.JobRunRepo
-	srZoneRepo      store.SRZoneRepo
-	srZoneVerifier  *analysis.SRZoneVerifier
-	chipSyncer      *chip.Syncer
-	chipSyncCron    string
-	intradayEnabled bool
-	log             *zap.Logger
-	cron            *cron.Cron
+	fetcher          *market.Fetcher
+	signalEng        *signal.Engine
+	watchlist        store.WatchlistRepo
+	jobRuns          store.JobRunRepo
+	srZoneRepo       store.SRZoneRepo
+	srZoneVerifier   *analysis.SRZoneVerifier
+	chipSyncer       *chip.Syncer
+	chipSyncCron     string
+	stockSyncer      *market.StockSymbolSyncer
+	stockSyncCron    string
+	stockSyncEnabled bool
+	intradayEnabled  bool
+	log              *zap.Logger
+	cron             *cron.Cron
 }
 
 func New(
@@ -43,21 +46,27 @@ func New(
 	srZoneVerifier *analysis.SRZoneVerifier,
 	chipSyncer *chip.Syncer,
 	chipSyncCron string,
+	stockSyncer *market.StockSymbolSyncer,
+	stockSyncCron string,
+	stockSyncEnabled bool,
 	intradayEnabled bool,
 	log *zap.Logger,
 ) *Scheduler {
 	return &Scheduler{
-		fetcher:         fetcher,
-		signalEng:       signalEng,
-		watchlist:       watchlist,
-		jobRuns:         jobRuns,
-		srZoneRepo:      srZoneRepo,
-		srZoneVerifier:  srZoneVerifier,
-		chipSyncer:      chipSyncer,
-		chipSyncCron:    chipSyncCron,
-		intradayEnabled: intradayEnabled,
-		log:             log,
-		cron:            cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
+		fetcher:          fetcher,
+		signalEng:        signalEng,
+		watchlist:        watchlist,
+		jobRuns:          jobRuns,
+		srZoneRepo:       srZoneRepo,
+		srZoneVerifier:   srZoneVerifier,
+		chipSyncer:       chipSyncer,
+		chipSyncCron:     chipSyncCron,
+		stockSyncer:      stockSyncer,
+		stockSyncCron:    stockSyncCron,
+		stockSyncEnabled: stockSyncEnabled,
+		intradayEnabled:  intradayEnabled,
+		log:              log,
+		cron:             cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
 	}
 }
 
@@ -90,6 +99,14 @@ func (s *Scheduler) Start() {
 		s.runChipDailySync(context.Background())
 	}); err != nil {
 		s.log.Error("chip sync cron register failed", zap.String("cron", s.chipSyncCron), zap.Error(err))
+	}
+
+	if s.stockSyncEnabled && s.stockSyncer != nil {
+		if _, err := s.cron.AddFunc(s.stockSyncCron, func() {
+			s.runStockSymbolSync(context.Background())
+		}); err != nil {
+			s.log.Error("stock symbol sync cron register failed", zap.String("cron", s.stockSyncCron), zap.Error(err))
+		}
 	}
 
 	s.cron.Start()
@@ -311,6 +328,24 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 	}
 	s.log.Info("chip daily sync job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
 	s.finishRun(ctx, runID, "chip_daily_sync", len(symbols), failed, lastErr)
+}
+
+func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
+	runID := s.startRun(ctx, "stock_symbol_sync")
+	if s.stockSyncer == nil {
+		errMsg := "stock symbol syncer is not configured"
+		s.log.Warn(errMsg)
+		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, errMsg)
+		return
+	}
+
+	result, err := s.stockSyncer.Sync(ctx, time.Now().In(timeutil.TaipeiTZ))
+	if err != nil {
+		s.log.Error("stock symbol sync failed", zap.Error(err))
+		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, err.Error())
+		return
+	}
+	s.finishRun(ctx, runID, "stock_symbol_sync", result.Seen, 0, "")
 }
 
 // runSRZoneVerification 對最近 srZoneVerifyLimit 筆 SR zone 分析重新驗證

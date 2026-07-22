@@ -16,9 +16,11 @@ Data Pipeline 負責取得、清洗、時間對齊與持久化資料。它是所
 | 類別 | 現有位置 | 說明 |
 |------|----------|------|
 | 市場資料來源 | `backend/internal/market` | FinMind、Fugle、Yahoo client 與資料源抽象 |
+| 股票主檔同步 | `market.TWSEISINClient` / `market.StockSymbolSyncer` | 從 TWSE ISIN 清單同步有價證券主檔與 `is_listed` 狀態 |
 | K 棒同步 | `market.Fetcher` | 歷史日 K、盤中資料、回補流程 |
-| 排程資料工作 | `backend/internal/scheduler` | pre-market、intraday、daily-close 中的資料更新階段 |
+| 排程資料工作 | `backend/internal/scheduler` | pre-market、intraday、daily-close、stock-symbol-sync 中的資料更新階段 |
 | K 棒資料表 | `candles` | 下游指標、訊號、SR Zone、驗證使用 |
+| 股票主檔資料表 | `stock_symbols` | symbol、名稱、ISIN、分類、產業與是否仍上市 |
 | 籌碼 raw data | `institutional_trades` / `margin_trades` / `broker_trades` | 三大法人、融資融券、券商分點原始資料 |
 | 籌碼同步任務 | `chip_sync_jobs` | 手動/回補籌碼任務進度 |
 | 排程任務紀錄 | `job_runs` | daily/intraday 類任務狀態 |
@@ -31,12 +33,14 @@ Data Pipeline 負責取得、清洗、時間對齊與持久化資料。它是所
 - FinMind 歷史日 K、分 K、三大法人、融資融券、券商分點。
 - Fugle REST / WebSocket 行情。
 - Yahoo 盤中行情。
+- TWSE ISIN 上市（strMode=2）＋上櫃（strMode=4）有價證券清單。
 - 使用者維護的 watchlist。
 - 使用者新增的 BUY / SELL / ADJUSTMENT transaction。
 
 ## 輸出契約
 
 - `candles`
+- `stock_symbols`
 - `institutional_trades`
 - `margin_trades`
 - `broker_trades`

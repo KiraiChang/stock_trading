@@ -31,7 +31,7 @@ func (h *WatchlistHandler) GetAll(c *gin.Context) {
 func (h *WatchlistHandler) Add(c *gin.Context) {
 	var body struct {
 		Symbol string `json:"symbol" binding:"required"`
-		Name   string `json:"name"   binding:"required"`
+		Name   string `json:"name"`
 		Sector string `json:"sector"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -39,6 +39,10 @@ func (h *WatchlistHandler) Add(c *gin.Context) {
 		return
 	}
 	if err := h.repo.Add(c.Request.Context(), body.Symbol, body.Name, body.Sector); err != nil {
+		if errors.Is(err, store.ErrWatchlistNameRequired) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "股票代號不在主檔，請手動輸入名稱"})
+			return
+		}
 		serverError(c, h.log, err, "watchlist: add")
 		return
 	}
@@ -46,17 +50,29 @@ func (h *WatchlistHandler) Add(c *gin.Context) {
 }
 
 // POST /api/v1/watchlist/bulk
-// Body: { "items": [{"symbol":"2330","name":"台積電","sector":"半導體"}, ...] }
+// Body: { "symbols": ["2330"] } or { "items": [{"symbol":"2330","name":"台積電","sector":"半導體"}, ...] }
 func (h *WatchlistHandler) BulkAdd(c *gin.Context) {
 	var body struct {
 		Items []struct {
 			Symbol string `json:"symbol" binding:"required"`
-			Name   string `json:"name"   binding:"required"`
+			Name   string `json:"name"`
 			Sector string `json:"sector"`
-		} `json:"items" binding:"required"`
+		} `json:"items"`
+		Symbols []string `json:"symbols"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	for _, symbol := range body.Symbols {
+		body.Items = append(body.Items, struct {
+			Symbol string `json:"symbol" binding:"required"`
+			Name   string `json:"name"`
+			Sector string `json:"sector"`
+		}{Symbol: symbol})
+	}
+	if len(body.Items) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "items or symbols is required"})
 		return
 	}
 
@@ -64,6 +80,7 @@ func (h *WatchlistHandler) BulkAdd(c *gin.Context) {
 	for _, item := range body.Items {
 		if err := h.repo.Add(c.Request.Context(), item.Symbol, item.Name, item.Sector); err != nil {
 			failed++
+			h.log.Warn("watchlist bulk add item failed", zap.String("symbol", item.Symbol), zap.Error(err))
 		} else {
 			added++
 		}

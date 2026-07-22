@@ -67,8 +67,9 @@ cmd/server/main.go
     │       └── store.{CandleRepo, SignalRepo, ChipScoreRepo}
     ├── chip（Syncer + scoring helpers，三大法人、融資融券、券商分點、chip_scores）
     │       └── market.FinMindClient + store chip repos
-    ├── scheduler（cron jobs，daily_close 收盤後跑 SR zone 驗證；chip_daily_sync 另由傍晚獨立 cron 觸發）
+    ├── scheduler（cron jobs，daily_close 收盤後跑 SR zone 驗證；chip_daily_sync 另由傍晚獨立 cron 觸發；stock_symbol_sync 每日同步股票主檔）
     │       ├── market.Fetcher
+    │       ├── market.StockSymbolSyncer
     │       ├── signal.Engine
     │       └── analysis.SRZoneVerifier
     ├── backtest（Manager，透過 Python 服務執行）

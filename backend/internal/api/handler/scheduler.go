@@ -30,13 +30,14 @@ func (h *SchedulerHandler) RunDailyClose(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "daily_close 已在背景重新觸發"})
 }
 
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close"}
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "stock_symbol_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
-	"pre_market":  26 * time.Hour,
-	"intraday":    10 * time.Minute,
-	"daily_close": 26 * time.Hour,
+	"pre_market":        26 * time.Hour,
+	"intraday":          10 * time.Minute,
+	"daily_close":       26 * time.Hour,
+	"stock_symbol_sync": 26 * time.Hour,
 }
 
 type jobStatus struct {

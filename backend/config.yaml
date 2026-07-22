@@ -52,6 +52,16 @@ yahoo:
   rate_limit: 20                              # 環境變數：YAHOO_RATE_LIMIT，每分鐘請求上限（批次計為一次）
   batch_size: 40                              # 環境變數：YAHOO_BATCH_SIZE，單次請求最多帶入的 symbol 數
 
+# TWSE ISIN 股票主檔同步。每日抓上市＋上櫃有價證券清單並維護 stock_symbols.is_listed，
+# 供 watchlist 判斷原本加入的標的是否仍在交易所名單內。任一來源抓取失敗即整體略過本次
+# 同步（不做部分下市）。
+stock_symbols:
+  enabled: true                               # 環境變數：STOCK_SYMBOLS_ENABLED
+  sync_urls:                                  # 需同時涵蓋上市與上櫃，否則另一半市場會被誤判為下市
+    - "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"   # 上市
+    - "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"   # 上櫃
+  cron: "30 6 * * *"                         # 環境變數：STOCK_SYMBOLS_CRON，台北時區每日 06:30
+
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：
 #   openssl rand -hex 32

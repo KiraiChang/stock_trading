@@ -467,7 +467,35 @@ type WatchlistItem struct {
 	Sector string `db:"sector" json:"sector"`
 	// Watched 標示是否要透過 WebSocket 即時監聽，最多同時 MaxWatchedSymbols 檔
 	// （見 watchlist_repo.go），跟監控清單本身的大小無關
-	Watched bool `db:"watched" json:"watched"`
+	Watched     bool                  `db:"watched" json:"watched"`
+	StockSymbol *WatchlistStockSymbol `db:"-"       json:"stock_symbol"`
+}
+
+type WatchlistStockSymbol struct {
+	Exists       bool     `json:"exists"`
+	IsListed     bool     `json:"is_listed"`
+	ISINCode     string   `json:"isin_code"`
+	Market       string   `json:"market"`
+	SecurityType string   `json:"security_type"`
+	Industry     string   `json:"industry"`
+	LastSeenAt   NullTime `json:"last_seen_at,omitempty"`
+}
+
+type StockSymbol struct {
+	ID           uint64    `db:"id"            json:"id"`
+	Symbol       string    `db:"symbol"        json:"symbol"`
+	Name         string    `db:"name"          json:"name"`
+	ISINCode     string    `db:"isin_code"     json:"isin_code"`
+	Market       string    `db:"market"        json:"market"`
+	SecurityType string    `db:"security_type" json:"security_type"`
+	Industry     string    `db:"industry"      json:"industry"`
+	CFICode      string    `db:"cfi_code"      json:"cfi_code"`
+	Remarks      string    `db:"remarks"       json:"remarks"`
+	ListedDate   NullTime  `db:"listed_date"   json:"listed_date,omitempty"`
+	IsListed     bool      `db:"is_listed"     json:"is_listed"`
+	LastSeenAt   time.Time `db:"last_seen_at"  json:"last_seen_at"`
+	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
+	UpdatedAt    time.Time `db:"updated_at"    json:"updated_at"`
 }
 
 // ── Backtest models ───────────────────────────────────────────

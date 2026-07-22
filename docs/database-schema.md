@@ -60,7 +60,8 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 
 ## watchlists
 
-監控清單，簡單的 symbol 清單。
+監控清單，簡單的 symbol 清單。股票是否仍在交易所名單內由 `stock_symbols.is_listed`
+判斷，不直接寫在 watchlist。
 
 | 欄位 | 說明 |
 |------|------|
@@ -68,6 +69,31 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | name | 股票名稱 |
 | sector | 產業別（可空） |
 | watched | 是否透過 WebSocket 即時監聽；同時最多 3 檔為 `true`（`store.MaxWatchedSymbols`），由 `PATCH /watchlist/:symbol/watch` 設定，超過上限回 409 |
+
+---
+
+## stock_symbols
+
+股票主檔。`stock_symbol_sync` 每天從 TWSE ISIN 上市（strMode=2）＋上櫃（strMode=4）
+清單同步有價證券資料；本次清單有出現的 symbol 會 upsert 並設 `is_listed=true`，原本
+已上市但本次沒出現的 symbol 會以 `last_seen_at` 浮水印設 `is_listed=false`，用來簡化
+watchlist 維護與下架標的判斷。任一來源抓取失敗、或快照涵蓋數明顯少於現有上市數（疑似
+來源截斷）時整體略過本次同步，避免誤將大量個股標記下市。
+
+| 欄位 | 說明 |
+|------|------|
+| symbol | 股票或有價證券代號（UNIQUE） |
+| name | 名稱 |
+| isin_code | ISIN Code |
+| market | 市場別，例如 TWSE LISTED / 上市 |
+| security_type | TWSE ISIN 頁面的分類列，例如 Stocks / ETFs |
+| industry | 產業別 |
+| cfi_code | CFI Code |
+| remarks | 備註 |
+| listed_date | 上市日 |
+| is_listed | 是否仍出現在最近一次 TWSE ISIN 同步清單 |
+| last_seen_at | 最近一次在來源清單看到的時間 |
+| created_at / updated_at | 建立與更新時間 |
 
 ---
 
@@ -108,8 +134,8 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 ## job_runs
 
 排程執行紀錄，由 Go scheduler 寫入。`pre_market`、`intraday`、`daily_close`、
-`sr_zone_verify`、`chip_daily_sync` 都使用這張表；manual/backfill 籌碼同步另用
-`chip_sync_jobs`。
+`sr_zone_verify`、`chip_daily_sync`、`stock_symbol_sync` 都使用這張表；
+manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 
 | 欄位 | 說明 |
 |------|------|

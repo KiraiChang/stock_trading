@@ -234,26 +234,84 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ## Watchlist API
 
+### GET `/stock-symbols/search`
+
+搜尋股票主檔，供 watchlist 新增股票時 autocomplete 使用。預設只回最近一次
+TWSE ISIN 同步仍存在的標的。
+
+**Query：**
+
+| 參數 | 說明 |
+|------|------|
+| q | 代號或名稱關鍵字 |
+| listed | 是否只查仍上市，預設 `true` |
+| security_type | 依 TWSE ISIN 分類過濾，例如 `Stocks` / `ETFs` |
+| limit | 回傳筆數，預設 20、上限 100 |
+
+**Response：**
+```json
+{
+  "symbols": [
+    {
+      "symbol": "2330",
+      "name": "台積電",
+      "isin_code": "TW0002330008",
+      "market": "上市",
+      "security_type": "Stocks",
+      "industry": "半導體業",
+      "is_listed": true
+    }
+  ]
+}
+```
+
 ### GET `/watchlist`
 
-取得監控清單。
+取得監控清單。回傳會附帶 `stock_symbol` 主檔狀態；`exists=false` 代表該
+watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主檔但最近
+一次 TWSE ISIN 同步已未出現。
+
+**Response：**
+```json
+{
+  "watchlist": [
+    {
+      "symbol": "2330",
+      "name": "台積電",
+      "sector": "半導體業",
+      "watched": true,
+      "stock_symbol": {
+        "exists": true,
+        "is_listed": true,
+        "isin_code": "TW0002330008",
+        "market": "上市",
+        "security_type": "Stocks",
+        "industry": "半導體業"
+      }
+    }
+  ]
+}
+```
 
 ### POST `/watchlist`
 
-新增股票至監控清單。
+新增股票至監控清單。`name` / `sector` 可省略；省略時後端會從
+`stock_symbols` 補股票名稱與產業。若 symbol 不在主檔且未提供 `name`，回 400。
 
 **Request Body：**
 ```json
-{ "symbol": "2330", "name": "台積電", "sector": "半導體" }
+{ "symbol": "2330" }
 ```
 
 ### POST `/watchlist/bulk`
 
-批次新增股票（已存在的 symbol 會更新名稱與產業）。
+批次新增股票（已存在的 symbol 會更新名稱與產業）。可傳完整 `items`，也可只傳
+`symbols` 讓後端從股票主檔補資料。
 
 **Request Body：**
 ```json
 {
+  "symbols": ["2330", "2454"],
   "items": [
     { "symbol": "2330", "name": "台積電", "sector": "半導體" },
     { "symbol": "2454", "name": "聯發科", "sector": "半導體" },

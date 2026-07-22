@@ -10,7 +10,9 @@
     updateWatchlist,
     removeFromWatchlist,
     setWatched,
+    searchStockSymbols,
   } from '../../lib/api/watchlist'
+  import type { StockSymbol } from '../../lib/api/watchlist'
 
   const dispatch = createEventDispatcher<{
     symbolWatched: string
@@ -45,8 +47,26 @@
   let showModal = false
   let modalMode: 'add' | 'edit' = 'add'
   let form = { symbol: '', name: '', sector: '' }
+  let selectedStock: StockSymbol | null = null
+  let suggestions: StockSymbol[] = []
+  let searching = false
+  let searchTimer: ReturnType<typeof setTimeout> | null = null
   let submitting = false
   let formError = ''
+  let statusFilter: 'all' | 'listed' | 'delisted' | 'unknown' = 'all'
+  const statusOptions: { value: typeof statusFilter; label: string }[] = [
+    { value: 'all', label: '全部' },
+    { value: 'listed', label: '上市' },
+    { value: 'delisted', label: '已下架' },
+    { value: 'unknown', label: '未知' },
+  ]
+
+  $: filteredWatchlist = $watchlist.filter((item) => {
+    if (statusFilter === 'listed') return item.stock_symbol?.exists && item.stock_symbol.is_listed
+    if (statusFilter === 'delisted') return item.stock_symbol?.exists && !item.stock_symbol.is_listed
+    if (statusFilter === 'unknown') return !item.stock_symbol?.exists
+    return true
+  })
 
   // ── Delete 確認狀態 ─────────────────────────────────────────
   let confirmDeleteSymbol = ''
@@ -54,6 +74,8 @@
   // ── 開啟 Modal ───────────────────────────────────────────────
   function openAdd() {
     form = { symbol: '', name: '', sector: '' }
+    selectedStock = null
+    suggestions = []
     modalMode = 'add'
     formError = ''
     showModal = true
@@ -61,6 +83,8 @@
 
   function openEdit(item: WatchlistItem) {
     form = { symbol: item.symbol, name: item.name, sector: item.sector }
+    selectedStock = null
+    suggestions = []
     modalMode = 'edit'
     formError = ''
     showModal = true
@@ -72,10 +96,54 @@
     formError = ''
   }
 
+  function stockStatusLabel(item: WatchlistItem): string {
+    if (!item.stock_symbol?.exists) return '主檔未知'
+    return item.stock_symbol.is_listed ? '上市' : '已下架'
+  }
+
+  function stockStatusClass(item: WatchlistItem): string {
+    if (!item.stock_symbol?.exists) return 'text-muted border-border'
+    return item.stock_symbol.is_listed
+      ? 'text-emerald-300 border-emerald-500/30'
+      : 'text-amber-300 border-amber-500/40'
+  }
+
+  function scheduleSymbolSearch() {
+    selectedStock = null
+    form.symbol = form.symbol.trim().toUpperCase()
+    form.name = ''
+    form.sector = ''
+    if (searchTimer) clearTimeout(searchTimer)
+    const query = form.symbol.trim()
+    if (query.length < 2) {
+      suggestions = []
+      searching = false
+      return
+    }
+    searching = true
+    searchTimer = setTimeout(async () => {
+      try {
+        suggestions = await searchStockSymbols(query, { listed: true, limit: 8 })
+      } catch {
+        suggestions = []
+      } finally {
+        searching = false
+      }
+    }, 180)
+  }
+
+  function selectStock(stock: StockSymbol) {
+    selectedStock = stock
+    suggestions = []
+    form.symbol = stock.symbol
+    form.name = stock.name
+    form.sector = stock.industry
+  }
+
   // ── 送出 Add / Edit ─────────────────────────────────────────
   async function submitForm() {
     if (!form.symbol.trim()) { formError = '請輸入股票代號'; return }
-    if (!form.name.trim())   { formError = '請輸入股票名稱'; return }
+    if (modalMode === 'edit' && !form.name.trim()) { formError = '請輸入股票名稱'; return }
 
     submitting = true
     formError = ''
@@ -87,8 +155,11 @@
       }
       watchlist.set(await fetchWatchlist())
       closeModal()
-    } catch {
-      formError = modalMode === 'add' ? '新增失敗，請稍後再試' : '更新失敗，請稍後再試'
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : ''
+      formError = msg.includes('不在主檔')
+        ? '主檔找不到這個代號，請改用搜尋結果或手動輸入名稱'
+        : modalMode === 'add' ? '新增失敗，請稍後再試' : '更新失敗，請稍後再試'
     } finally {
       submitting = false
     }
@@ -125,15 +196,38 @@
       <div class="px-5 py-4 space-y-3">
         <div>
           <label for="wl-symbol" class="block text-xs text-muted mb-1">代號 <span class="text-rise">*</span></label>
-          <input
-            id="wl-symbol"
-            bind:value={form.symbol}
-            disabled={modalMode === 'edit'}
-            placeholder="例：2330"
-            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
-                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors
-                   disabled:opacity-50 disabled:cursor-not-allowed"
-          />
+          <div class="relative">
+            <input
+              id="wl-symbol"
+              bind:value={form.symbol}
+              disabled={modalMode === 'edit'}
+              placeholder="搜尋代號或名稱"
+              class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                     placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+              on:input={modalMode === 'add' ? scheduleSymbolSearch : undefined}
+            />
+            {#if modalMode === 'add' && (suggestions.length > 0 || searching)}
+              <div class="absolute z-10 mt-1 w-full bg-panel border border-border rounded-lg shadow-xl overflow-hidden">
+                {#if searching}
+                  <div class="px-3 py-2 text-xs text-muted">搜尋中...</div>
+                {:else}
+                  {#each suggestions as stock (stock.symbol)}
+                    <button
+                      class="w-full px-3 py-2 text-left hover:bg-border/40 transition-colors"
+                      on:click={() => selectStock(stock)}
+                    >
+                      <div class="flex items-center justify-between gap-3">
+                        <span class="text-sm text-white font-medium">{stock.symbol} {stock.name}</span>
+                        <span class="text-xs text-muted">{stock.security_type}</span>
+                      </div>
+                      <div class="text-xs text-muted truncate">{stock.market} · {stock.industry || '未分類'}</div>
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
         <div>
           <label for="wl-name" class="block text-xs text-muted mb-1">名稱 <span class="text-rise">*</span></label>
@@ -141,8 +235,10 @@
             id="wl-name"
             bind:value={form.name}
             placeholder="例：台積電"
+            readonly={modalMode === 'add' && selectedStock !== null}
             class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
-                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors
+                   read-only:opacity-70"
           />
         </div>
         <div>
@@ -151,8 +247,10 @@
             id="wl-sector"
             bind:value={form.sector}
             placeholder="例：半導體"
+            readonly={modalMode === 'add' && selectedStock !== null}
             class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
-                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+                   placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors
+                   read-only:opacity-70"
           />
         </div>
 
@@ -181,10 +279,20 @@
 <div class="bg-panel rounded-lg overflow-hidden border border-border">
   <div class="px-4 py-3 border-b border-border flex items-center justify-between">
     <h2 class="text-sm font-semibold text-white">監控清單</h2>
-    <button
-      class="text-xs px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
-      on:click={openAdd}
-    >+ 新增</button>
+    <div class="flex items-center gap-2">
+      <div class="flex rounded-lg border border-border overflow-hidden">
+        {#each statusOptions as option}
+          <button
+            class="text-xs px-2.5 py-1 transition-colors {statusFilter === option.value ? 'bg-indigo-600 text-white' : 'text-muted hover:text-white'}"
+            on:click={() => statusFilter = option.value}
+          >{option.label}</button>
+        {/each}
+      </div>
+      <button
+        class="text-xs px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
+        on:click={openAdd}
+      >+ 新增</button>
+    </div>
   </div>
 
   {#if watchError}
@@ -207,7 +315,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each $watchlist as item (item.symbol)}
+        {#each filteredWatchlist as item (item.symbol)}
           {@const q = $quotes.get(item.symbol)}
 
           {#if confirmDeleteSymbol === item.symbol}
@@ -238,7 +346,16 @@
             >
               <td class="px-4 py-2">
                 <div class="font-medium text-white">{item.symbol}</div>
-                <div class="text-xs text-muted truncate max-w-20">{item.name}</div>
+                <div class="text-xs text-muted truncate max-w-28">{item.name}</div>
+                <div class="mt-1 flex items-center gap-1 flex-wrap">
+                  <span class="text-[10px] px-1.5 py-0.5 rounded border {stockStatusClass(item)}">{stockStatusLabel(item)}</span>
+                  {#if item.stock_symbol?.security_type}
+                    <span class="text-[10px] text-muted">{item.stock_symbol.security_type}</span>
+                  {/if}
+                  {#if item.stock_symbol?.industry || item.sector}
+                    <span class="text-[10px] text-muted truncate max-w-24">{item.stock_symbol?.industry || item.sector}</span>
+                  {/if}
+                </div>
               </td>
               <td class="px-3 py-2 text-right font-mono">
                 {q ? formatPrice(q.close) : '-'}
@@ -292,7 +409,7 @@
           {/if}
         {:else}
           <tr>
-            <td colspan="9" class="px-4 py-8 text-center text-muted text-sm">尚無監控股票</td>
+            <td colspan="9" class="px-4 py-8 text-center text-muted text-sm">沒有符合條件的監控股票</td>
           </tr>
         {/each}
       </tbody>

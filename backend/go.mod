@@ -15,6 +15,7 @@ require (
 	github.com/spf13/viper v1.18.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.23.0
+	golang.org/x/net v0.25.0
 	modernc.org/sqlite v1.29.9
 )
 
@@ -65,7 +66,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
-	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
 	golang.org/x/text v0.29.0 // indirect

@@ -19,6 +19,10 @@ import (
 
 const defaultTWSEISINTimeout = 30 * time.Second
 
+// fetchDelayBetweenSources：連續抓取多個 TWSE ISIN 來源（上市／上櫃）之間的間隔，
+// 避免短時間內連打同一站台觸發反爬／限流。
+const fetchDelayBetweenSources = 3 * time.Second
+
 type TWSEISINClient struct {
 	urls []string
 	http *http.Client
@@ -44,7 +48,16 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 	}
 	merged := make([]store.StockSymbol, 0, 2048)
 	seen := make(map[string]struct{})
-	for _, url := range c.urls {
+	for i, url := range c.urls {
+		if i > 0 {
+			// 來源之間間隔一段時間再打下一個，降低被 TWSE 限流／封鎖的風險；
+			// context 取消或逾時時立即中止等待。
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(fetchDelayBetweenSources):
+			}
+		}
 		symbols, err := c.fetchOne(ctx, url)
 		if err != nil {
 			// all-or-nothing：任一來源失敗就整體失敗，避免部分快照觸發誤下市。

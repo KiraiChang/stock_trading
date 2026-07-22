@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
+	"golang.org/x/text/encoding/traditionalchinese"
 
 	"github.com/trading/backend/internal/store"
 )
@@ -183,7 +185,7 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 	}
 	meta.BodyBytes = len(body)
 
-	reader, err := charset.NewReader(bytes.NewReader(body), meta.ContentType)
+	reader, err := newTWSEISINBodyReader(body, meta.ContentType)
 	if err != nil {
 		return nil, meta, err
 	}
@@ -203,6 +205,27 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 		)
 	}
 	return symbols, meta, nil
+}
+
+func newTWSEISINBodyReader(body []byte, contentType string) (io.Reader, error) {
+	if isTWSEISINBig5Charset(contentType) {
+		return traditionalchinese.Big5.NewDecoder().Reader(bytes.NewReader(body)), nil
+	}
+	return charset.NewReader(bytes.NewReader(body), contentType)
+}
+
+func isTWSEISINBig5Charset(contentType string) bool {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err == nil {
+		switch strings.ToLower(strings.TrimSpace(params["charset"])) {
+		case "ms950", "cp950", "big5", "big-5", "windows-950":
+			return true
+		}
+	}
+	lower := strings.ToLower(contentType)
+	return strings.Contains(lower, "charset=ms950") ||
+		strings.Contains(lower, "charset=cp950") ||
+		strings.Contains(lower, "charset=big5")
 }
 
 type StockSymbolSource interface {

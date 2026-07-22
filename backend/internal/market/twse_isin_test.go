@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/text/encoding/traditionalchinese"
 )
 
 const twseISINFixture = `
@@ -98,6 +100,35 @@ func TestFetchStockSymbolsRejectsUnexpectedHTMLWithDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rows=1") {
 		t.Fatalf("expected row count diagnostic, got %v", err)
+	}
+}
+
+func TestFetchStockSymbolsDecodesMS950Body(t *testing.T) {
+	html := `<html><body><table>
+<tr><td>有價證券代號及名稱</td><td>國際證券辨識號碼(ISIN Code)</td><td>上市日</td><td>市場別</td><td>產業別</td><td>CFICode</td><td>備註</td></tr>
+<tr><td colspan="7">股票</td></tr>
+<tr><td>1101　台泥</td><td>TW0001101004</td><td>1962/02/09</td><td>上市</td><td>水泥工業</td><td>ESVUFR</td><td></td></tr>
+</table></body></html>`
+	encoded, err := traditionalchinese.Big5.NewEncoder().String(html)
+	if err != nil {
+		t.Fatalf("encode fixture failed: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html;charset=MS950")
+		_, _ = w.Write([]byte(encoded))
+	}))
+	defer srv.Close()
+
+	client := NewTWSEISINClient([]string{srv.URL}, TWSEISINClientOptions{Timeout: time.Second}, nil)
+	rows, err := client.FetchStockSymbols(context.Background())
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Symbol != "1101" || rows[0].Name != "台泥" || rows[0].Market != "上市" {
+		t.Fatalf("unexpected decoded row: %+v", rows[0])
 	}
 }
 

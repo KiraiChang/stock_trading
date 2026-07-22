@@ -1315,7 +1315,7 @@
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">持股 RR (Position)</p>
                   <p class="text-white font-mono">{fmtRatio(decisionSummary.rr_context.position_rr)}</p>
-                  <p class="text-muted mt-1">{decisionSummary.rr_context.position_rr_source === 'UNAVAILABLE' ? '尚未接入持股防守區' : decisionSummary.rr_context.position_rr_source}</p>
+                  <p class="text-muted mt-1">{decisionSummary.rr_context.position_rr_source === 'UNAVAILABLE' ? 'SR 層不計持股 RR，請看 Position 分析' : decisionSummary.rr_context.position_rr_source}</p>
                 </div>
               </div>
             {/if}

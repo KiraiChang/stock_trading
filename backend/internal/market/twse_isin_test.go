@@ -2,13 +2,17 @@ package market
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/traditionalchinese"
+
+	"github.com/trading/backend/internal/store"
 )
 
 const twseISINFixture = `
@@ -100,6 +104,47 @@ func TestFetchStockSymbolsRejectsUnexpectedHTMLWithDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "rows=1") {
 		t.Fatalf("expected row count diagnostic, got %v", err)
+	}
+	// 呼叫端要能用 errors.Is 區分「來源有回應但沒有半筆有價證券」與網路／狀態碼失敗。
+	if !errors.Is(err, store.ErrEmptyStockSymbolSnapshot) {
+		t.Fatalf("expected wrapped ErrEmptyStockSymbolSnapshot, got %v", err)
+	}
+}
+
+// 來源改版或回錯誤頁時 candidate_rows 會是 0，SampleRows 因此為空；診斷要靠
+// SkippedRowSamples 才看得到頁面實際長相。
+func TestParseTWSEISINSymbolsKeepsSkippedRowSamples(t *testing.T) {
+	const unexpected = `<html><body><table>
+<tr><td>temporarily unavailable</td></tr>
+<tr><td>please try again later</td><td>2026/07/22</td></tr>
+</table></body></html>`
+	rows, stats, err := parseTWSEISINSymbols(strings.NewReader(unexpected), nil)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(rows) != 0 || stats.CandidateRows != 0 {
+		t.Fatalf("expected no candidates, got rows=%d stats=%+v", len(rows), stats)
+	}
+	if len(stats.SkippedRowSamples) == 0 {
+		t.Fatal("expected skipped-row samples for diagnostics")
+	}
+	if !strings.Contains(strings.Join(stats.SkippedRowSamples, " "), "try again later") {
+		t.Fatalf("expected skipped samples to carry page content, got %+v", stats.SkippedRowSamples)
+	}
+}
+
+// 樣本截斷必須落在 rune 邊界，否則中文會被切成半個字、在 JSON log 變成亂碼。
+func TestSampleTWSEISINRowTruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("台泥水泥", 40) // 遠超過 240 bytes 的純中文
+	got := sampleTWSEISINRow([]string{long})
+	if len(got) > maxTWSEISINSampleBytes {
+		t.Fatalf("expected truncation to %d bytes, got %d", maxTWSEISINSampleBytes, len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated sample is not valid UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(long, got) {
+		t.Fatalf("truncated sample should be a prefix of the input, got %q", got)
 	}
 }
 

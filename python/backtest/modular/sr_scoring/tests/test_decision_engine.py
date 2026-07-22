@@ -522,6 +522,38 @@ def test_early_trend_outputs_bullish_continuation_bias():
     assert ds["market_bias"] == "BULLISH_CONTINUATION"
 
 
+def test_carried_active_reclaim_in_uptrend_outputs_bullish_continuation_bias():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 0,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [zone],
+        current_price=102.0,
+        candle_high=103.0,
+        candle_low=101.0,
+        candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    assert ds["market_events"] == []
+    assert ds["event_state_summary"]["market_state"] == "RECLAIM_ATTEMPT"
+    assert ds["market_regime"]["short_term_regime"] == "RECLAIM_ATTEMPT"
+    assert ds["market_bias"] == "BULLISH_CONTINUATION"
+
+
 def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():
     # 長期偏空但短線收復確認：short_term_regime=RECOVERY，market_action 仍可能為 AVOID。
     # market_bias 不得因 RECOVERY 就標成多頭延續，需與 action 語意一致（偏空）。

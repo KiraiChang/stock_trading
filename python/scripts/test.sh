@@ -24,13 +24,16 @@ IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-1024m}"
 CPUS="${CPUS:-1}"
 
-TARGETS="$*"
-[ -n "$TARGETS" ] || TARGETS="backtest/ tests/"
+# 參數原樣轉交 pytest：用 "$@" 而不是把參數併成字串，否則帶空白的參數
+# （例如 -k "a or b"）會被 word splitting 拆開，pytest 會把 "or" 當成路徑。
+if [ "$#" -eq 0 ]; then
+  set -- backtest/ tests/
+fi
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
 
-echo "==> pytest：$TARGETS image=$IMAGE mem=$MEM"
+echo "==> pytest：$* image=$IMAGE mem=$MEM"
 exec docker run --rm \
   --user "$(id -u):$(id -g)" \
   --cpus="$CPUS" \
@@ -41,4 +44,4 @@ exec docker run --rm \
   -v "$PYTHON_DIR":/app \
   -w /app \
   "$IMAGE" \
-  pytest -p no:cacheprovider $TARGETS
+  pytest -p no:cacheprovider "$@"

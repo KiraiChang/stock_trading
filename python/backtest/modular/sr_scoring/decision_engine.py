@@ -577,7 +577,7 @@ def _market_bias(
     market_events: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[str, str]:
     event_types = {event.get("type") for event in market_events or []}
-    if regime.get("short_term_regime") in ("RECOVERY", "EARLY_TREND") and market_action != "AVOID":
+    if regime.get("short_term_regime") in ("RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND") and market_action != "AVOID":
         return "BULLISH_CONTINUATION", "多頭延續"
     if "REVERSAL_CANDIDATE" in event_types or "INTRADAY_RECLAIM" in event_types:
         return "REVERSAL_BIAS", "反轉觀察"

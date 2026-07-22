@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 	"golang.org/x/net/html"
@@ -32,6 +33,14 @@ const (
 	// defaultFetchDelayBetweenSources：連續抓取多個 TWSE ISIN 來源（上市／上櫃）之間的
 	// 間隔，避免短時間內連打同一站台觸發反爬／限流。
 	defaultFetchDelayBetweenSources = 3 * time.Second
+	// maxTWSEISINBodyBytes：單一來源 body 的硬上限。實測上市清單約 7.5 MB，64 MiB 已有
+	// 極大餘裕；設上限是避免來源異常（無限串流／回錯東西）時把整份讀進記憶體撐爆
+	// container（dev/live compose 對 backend 都只給 512m）。
+	maxTWSEISINBodyBytes = 64 << 20
+	// maxTWSEISINSampleBytes：診斷樣本單列的長度上限。
+	maxTWSEISINSampleBytes = 240
+	// maxTWSEISINSampleRows：每種樣本各留幾列。
+	maxTWSEISINSampleRows = 5
 )
 
 type TWSEISINClient struct {
@@ -53,7 +62,12 @@ type twseISINParseStats struct {
 	CandidateRows         int
 	ParsedRows            int
 	SkippedSymbolNameRows int
-	SampleRows            []string
+	// SampleRows：欄位數足夠（>=6）的候選列樣本。
+	SampleRows []string
+	// SkippedRowSamples：欄位數不足而被跳過的列樣本。來源改版或回錯誤頁時
+	// CandidateRows 會是 0、SampleRows 因此為空，只有這裡看得到頁面實際長相——
+	// 這正是加這批診斷要解的情境，兩種樣本都要留。
+	SkippedRowSamples []string
 }
 
 // TWSEISINClientOptions 的欄位皆為 0 值時沿用上面的 default 常數。
@@ -124,6 +138,7 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 					zap.Int("parsed_rows", meta.ParseStats.ParsedRows),
 					zap.Int("skipped_symbol_name_rows", meta.ParseStats.SkippedSymbolNameRows),
 					zap.Strings("sample_rows", meta.ParseStats.SampleRows),
+					zap.Strings("skipped_row_samples", meta.ParseStats.SkippedRowSamples),
 				)
 			}
 			// all-or-nothing：任一來源失敗就整體失敗，避免部分快照觸發誤下市。
@@ -179,11 +194,15 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 		return nil, meta, fmt.Errorf("twse isin: unexpected status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// 多讀 1 byte 用來判斷是否真的超過上限（而不是剛好等於上限）。
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxTWSEISINBodyBytes+1))
 	if err != nil {
 		return nil, meta, err
 	}
 	meta.BodyBytes = len(body)
+	if len(body) > maxTWSEISINBodyBytes {
+		return nil, meta, fmt.Errorf("twse isin: response body exceeds %d bytes", maxTWSEISINBodyBytes)
+	}
 
 	reader, err := newTWSEISINBodyReader(body, meta.ContentType)
 	if err != nil {
@@ -195,13 +214,16 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 		return nil, meta, err
 	}
 	if len(symbols) == 0 {
+		// 包 store.ErrEmptyStockSymbolSnapshot：呼叫端要能用 errors.Is 區分
+		// 「來源回了東西但沒有半筆有價證券」與網路／狀態碼類的失敗。
 		return nil, meta, fmt.Errorf(
-			"twse isin parsed empty: rows=%d candidate_rows=%d skipped_symbol_name_rows=%d body_bytes=%d content_type=%q",
+			"twse isin parsed empty: rows=%d candidate_rows=%d skipped_symbol_name_rows=%d body_bytes=%d content_type=%q: %w",
 			stats.Rows,
 			stats.CandidateRows,
 			stats.SkippedSymbolNameRows,
 			meta.BodyBytes,
 			meta.ContentType,
+			store.ErrEmptyStockSymbolSnapshot,
 		)
 	}
 	return symbols, meta, nil
@@ -297,10 +319,13 @@ func parseTWSEISINSymbols(r io.Reader, log *zap.Logger) ([]store.StockSymbol, tw
 			continue
 		}
 		if len(cells) < 6 {
+			if len(stats.SkippedRowSamples) < maxTWSEISINSampleRows {
+				stats.SkippedRowSamples = append(stats.SkippedRowSamples, sampleTWSEISINRow(cells))
+			}
 			continue
 		}
 		stats.CandidateRows++
-		if len(stats.SampleRows) < 5 {
+		if len(stats.SampleRows) < maxTWSEISINSampleRows {
 			stats.SampleRows = append(stats.SampleRows, sampleTWSEISINRow(cells))
 		}
 		symbol, name, ok := parseSymbolName(cells[0])
@@ -339,8 +364,14 @@ func sampleTWSEISINRow(cells []string) string {
 		sampleCells = sampleCells[:4]
 	}
 	s := strings.Join(sampleCells, " | ")
-	if len(s) > 240 {
-		return s[:240]
+	if len(s) <= maxTWSEISINSampleBytes {
+		return s
+	}
+	// 依 byte 截斷會把中文（Big5 解碼後每字 3 bytes）切成半個 rune，寫進 zap 的 JSON
+	// log 會變成 � 亂碼，反而讓樣本無法辨讀；退回到最近的 rune 邊界。
+	s = s[:maxTWSEISINSampleBytes]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
 	}
 	return s
 }

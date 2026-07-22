@@ -61,6 +61,10 @@ stock_symbols:
     - "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"   # 上市
     - "https://isin.twse.com.tw/isin/C_public.jsp?strMode=4"   # 上櫃
   cron: "30 6 * * *"                         # 環境變數：STOCK_SYMBOLS_CRON，台北時區每日 06:30
+  # 以下兩項留 0 代表沿用程式預設（timeout 300 秒、來源間隔 3 秒），預設值定義在
+  # internal/market/twse_isin.go；只有要覆寫時才填非 0 的值。
+  timeout_sec: 0                             # 環境變數：STOCK_SYMBOLS_TIMEOUT_SEC，單一 TWSE ISIN 請求（含讀 body）上限
+  fetch_delay_sec: 0                         # 環境變數：STOCK_SYMBOLS_FETCH_DELAY_SEC，上市→上櫃兩次請求之間的間隔
 
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：

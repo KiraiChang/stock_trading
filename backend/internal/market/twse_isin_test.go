@@ -1,8 +1,12 @@
 package market
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const twseISINFixture = `
@@ -14,6 +18,68 @@ const twseISINFixture = `
 <tr><td colspan="7">ETFs</td></tr>
 <tr><td>00981A　ACTIVE ETF</td><td>TW00000981A1</td><td>2025/05/05</td><td>TWSE LISTED</td><td></td><td>CEOIEU</td><td>note</td></tr>
 </table></body></html>`
+
+func TestNewTWSEISINClientUsesConfiguredTimeout(t *testing.T) {
+	client := NewTWSEISINClient([]string{"http://example.test"}, TWSEISINClientOptions{Timeout: 12 * time.Second}, nil)
+	if client.http.Timeout != 12*time.Second {
+		t.Fatalf("expected configured timeout, got %s", client.http.Timeout)
+	}
+}
+
+// 0 值（config 未設 timeout_sec / fetch_delay_sec）必須 fallback 到 market 套件常數，
+// 這是「預設值只有一個來源」的保證。
+func TestNewTWSEISINClientUsesDefaultTimeout(t *testing.T) {
+	client := NewTWSEISINClient([]string{"http://example.test"}, TWSEISINClientOptions{}, nil)
+	if client.http.Timeout != defaultTWSEISINTimeout {
+		t.Fatalf("expected default timeout %s, got %s", defaultTWSEISINTimeout, client.http.Timeout)
+	}
+	if client.fetchDelay != defaultFetchDelayBetweenSources {
+		t.Fatalf("expected default fetch delay %s, got %s", defaultFetchDelayBetweenSources, client.fetchDelay)
+	}
+}
+
+func TestNewTWSEISINClientUsesConfiguredFetchDelay(t *testing.T) {
+	client := NewTWSEISINClient([]string{"http://example.test"}, TWSEISINClientOptions{FetchDelay: 7 * time.Second}, nil)
+	if client.fetchDelay != 7*time.Second {
+		t.Fatalf("expected configured fetch delay, got %s", client.fetchDelay)
+	}
+}
+
+func TestFetchStockSymbolsSendsIdentifyingHeaders(t *testing.T) {
+	var gotUserAgent string
+	var gotAccept string
+	var gotAcceptLanguage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserAgent = r.Header.Get("User-Agent")
+		gotAccept = r.Header.Get("Accept")
+		gotAcceptLanguage = r.Header.Get("Accept-Language")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(twseISINFixture))
+	}))
+	defer srv.Close()
+
+	client := NewTWSEISINClient([]string{srv.URL}, TWSEISINClientOptions{Timeout: time.Second}, nil)
+	rows, err := client.FetchStockSymbols(context.Background())
+	if err != nil {
+		t.Fatalf("fetch failed: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	// 刻意不偽裝成瀏覽器：UA 要能辨識出是本系統，方便來源站方限流或聯絡。
+	if !strings.Contains(gotUserAgent, "stock-trading/") {
+		t.Fatalf("expected self-identifying User-Agent, got %q", gotUserAgent)
+	}
+	if strings.Contains(gotUserAgent, "Mozilla") {
+		t.Fatalf("User-Agent should not masquerade as a browser, got %q", gotUserAgent)
+	}
+	if !strings.Contains(gotAccept, "text/html") {
+		t.Fatalf("expected text/html Accept header, got %q", gotAccept)
+	}
+	if !strings.Contains(gotAcceptLanguage, "zh-TW") {
+		t.Fatalf("expected zh-TW Accept-Language header, got %q", gotAcceptLanguage)
+	}
+}
 
 func TestParseTWSEISINSymbols(t *testing.T) {
 	rows, err := ParseTWSEISINSymbols(strings.NewReader(twseISINFixture), nil)

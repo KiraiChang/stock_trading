@@ -121,7 +121,14 @@ func main() {
 	// 籌碼分析：FinMind 目前只支援三大法人與融資融券，券商分點是 stub
 	// （market.ErrBrokerDataUnsupported），broker_score 會 fallback 為中性。
 	chipSyncer := chip.NewSyncer(finmindClient, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, candleRepo, log)
-	stockSymbolSource := market.NewTWSEISINClient(cfg.StockSymbols.SyncURLs, log)
+	stockSymbolSource := market.NewTWSEISINClient(
+		cfg.StockSymbols.SyncURLs,
+		market.TWSEISINClientOptions{
+			Timeout:    time.Duration(cfg.StockSymbols.TimeoutSec) * time.Second,
+			FetchDelay: time.Duration(cfg.StockSymbols.FetchDelaySec) * time.Second,
+		},
+		log,
+	)
 	stockSymbolSyncer := market.NewStockSymbolSyncer(stockSymbolSource, stockSymbolRepo, log)
 
 	// Fugle（富果）即時行情，與 FinMind 並行；Enabled 為 false 時完全不掛載，

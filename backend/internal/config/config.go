@@ -100,6 +100,12 @@ type StockSymbolsConfig struct {
 	// 否則另一半市場會被誤判為不在名單內。
 	SyncURLs []string `mapstructure:"sync_urls"`
 	Cron     string   `mapstructure:"cron"`
+	// TimeoutSec：單一 TWSE ISIN 請求（含讀 body）的上限秒數。
+	// FetchDelaySec：來源之間的等待秒數，懷疑被限流時調大。
+	// 兩者為 0 或未設定時，沿用 market 套件的 default 常數（300 秒 / 3 秒），
+	// 讓預設值只有一個來源。
+	TimeoutSec    int `mapstructure:"timeout_sec"`
+	FetchDelaySec int `mapstructure:"fetch_delay_sec"`
 }
 
 // ChipConfig 為籌碼資料同步設定（三大法人、融資融券、券商分點、chip_scores）。
@@ -149,6 +155,11 @@ func Load() (*Config, error) {
 		"https://isin.twse.com.tw/isin/C_public.jsp?strMode=4", // 上櫃
 	})
 	viper.SetDefault("stock_symbols.cron", "30 6 * * *")
+	// timeout_sec / fetch_delay_sec 不在這裡給數字：預設值由 market 套件的常數決定
+	// （見 market.defaultTWSEISINTimeout / defaultFetchDelayBetweenSources），
+	// 這裡給 0 代表「沿用程式預設」。
+	viper.SetDefault("stock_symbols.timeout_sec", 0)
+	viper.SetDefault("stock_symbols.fetch_delay_sec", 0)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("python.sr_zones_timeout_sec", 120)
 	viper.SetDefault("chip.sync.history_trading_days", 500)

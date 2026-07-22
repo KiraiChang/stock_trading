@@ -20,6 +20,12 @@ import (
 // 歷史分析越積越多，這個 job 的執行時間跟著無上限成長（見 RunDailyClose）。
 const srZoneVerifyLimit = 50
 
+// stockSymbolSyncTimeout 是整個 stock_symbol_sync job 的上限（抓取兩個來源 + 寫入快照）。
+// 單次 HTTP 請求另有 client timeout（預設 300 秒／來源），這層是最後防線：來源異常慢或
+// DB 卡住時，job 不會無限期停在 running（job_runs 的 stale 判定要 26 小時才會亮）。
+// 20 分鐘 = 2 來源 × 300 秒 + 來源間隔 + 寫入快照，仍有餘裕。
+const stockSymbolSyncTimeout = 20 * time.Minute
+
 type Scheduler struct {
 	fetcher          *market.Fetcher
 	signalEng        *signal.Engine
@@ -343,7 +349,12 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 		return
 	}
 
-	result, err := s.stockSyncer.Sync(ctx, time.Now().In(timeutil.TaipeiTZ))
+	// 只有同步本身套 timeout；startRun / finishRun 仍用原本的 ctx，
+	// 否則 sync 逾時後連「把這次 job 標記成失敗」的 DB 寫入都會一起被取消。
+	syncCtx, cancel := context.WithTimeout(ctx, stockSymbolSyncTimeout)
+	defer cancel()
+
+	result, err := s.stockSyncer.Sync(syncCtx, time.Now().In(timeutil.TaipeiTZ))
 	if err != nil {
 		s.log.Error("stock symbol sync failed", zap.Error(err))
 		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, err.Error())

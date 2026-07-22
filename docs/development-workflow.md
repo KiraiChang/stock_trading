@@ -85,6 +85,12 @@ Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/d
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
 跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。
 
+Backend image build 的記憶體約束：`backend/Dockerfile` 的 builder stage 固定
+`GOFLAGS=-p=1`、`GOMAXPROCS=1`、`GOGC=off`、`GOMEMLIMIT=250MiB`。這台 host 只有 2GiB RAM
+（實際可用約 700MB），沒有這些設定時 `redis/go-redis`、`modernc.org/libc` 的 compile 會被
+OOM killer 砍掉（`signal: killed`）；實測光是序列化還不夠，`GOMEMLIMIT=500MiB` 仍失敗，
+壓到 250MiB 才能在冷 cache 下編完（約 3 分鐘）。這些只影響編譯過程，不影響產出的執行檔。
+
 ### 2. 啟動 dev stack 做 smoke test
 
 `docker-compose.dev.yml` 已對 dev stack 服務套用同樣的資源限制：

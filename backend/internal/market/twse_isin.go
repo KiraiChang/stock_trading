@@ -17,28 +17,58 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-const defaultTWSEISINTimeout = 30 * time.Second
-
-// fetchDelayBetweenSources：連續抓取多個 TWSE ISIN 來源（上市／上櫃）之間的間隔，
-// 避免短時間內連打同一站台觸發反爬／限流。
-const fetchDelayBetweenSources = 3 * time.Second
+// defaultTWSEISINTimeout / defaultFetchDelayBetweenSources 是這兩個參數的唯一真實來源：
+// config 的 timeout_sec / fetch_delay_sec 留 0（或不設）時就會 fallback 到這裡，
+// 避免同一個數字散落在 Go 常數、viper default 與 config.yaml 三處而各自漂移。
+const (
+	// defaultTWSEISINTimeout：2026-07-22 實測單一來源（strMode=2 上市）回應 7.5 MB、
+	// 耗時約 251 秒，因此 30 秒與 90 秒都會在讀 body 時中斷（context deadline exceeded
+	// while reading body）。300 秒是量測值加上約兩成餘裕；來源明顯變慢時調
+	// stock_symbols.timeout_sec 即可，不需要改程式。
+	defaultTWSEISINTimeout = 300 * time.Second
+	// defaultFetchDelayBetweenSources：連續抓取多個 TWSE ISIN 來源（上市／上櫃）之間的
+	// 間隔，避免短時間內連打同一站台觸發反爬／限流。
+	defaultFetchDelayBetweenSources = 3 * time.Second
+)
 
 type TWSEISINClient struct {
-	urls []string
-	http *http.Client
-	log  *zap.Logger
+	urls       []string
+	http       *http.Client
+	fetchDelay time.Duration
+	log        *zap.Logger
+}
+
+// TWSEISINClientOptions 的欄位皆為 0 值時沿用上面的 default 常數。
+type TWSEISINClientOptions struct {
+	// Timeout 是單一來源 HTTP 請求（含讀取 body）的上限。
+	Timeout time.Duration
+	// FetchDelay 是來源與來源之間的等待時間。懷疑被 TWSE 限流時，這是第一個該調大的參數。
+	FetchDelay time.Duration
 }
 
 // NewTWSEISINClient 接受一或多個 TWSE ISIN 來源（例如 strMode=2 上市、strMode=4 上櫃），
 // FetchStockSymbols 會全部抓取並合併，任一來源失敗即整體失敗（避免只拿到半個市場就把
 // 另一半誤判為下市）。
-func NewTWSEISINClient(urls []string, log *zap.Logger) *TWSEISINClient {
+//
+// 刻意不做自動重試：股票主檔異動頻率低（新上市／下市），漏同步一天不影響既有標的的
+// 分析與訊號，而重試會拉長連打 TWSE 的時間、增加被限流與「半套資料」的風險。失敗時
+// 由人工按前端的手動同步按鈕（POST /api/v1/scheduler/stock-symbol-sync/run）補即可。
+func NewTWSEISINClient(urls []string, opts TWSEISINClientOptions, log *zap.Logger) *TWSEISINClient {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultTWSEISINTimeout
+	}
+	fetchDelay := opts.FetchDelay
+	if fetchDelay <= 0 {
+		fetchDelay = defaultFetchDelayBetweenSources
+	}
 	return &TWSEISINClient{
 		urls: urls,
 		http: &http.Client{
-			Timeout: defaultTWSEISINTimeout,
+			Timeout: timeout,
 		},
-		log: log,
+		fetchDelay: fetchDelay,
+		log:        log,
 	}
 }
 
@@ -55,13 +85,31 @@ func (c *TWSEISINClient) FetchStockSymbols(ctx context.Context) ([]store.StockSy
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(fetchDelayBetweenSources):
+			case <-time.After(c.fetchDelay):
 			}
 		}
+		startedAt := time.Now()
 		symbols, err := c.fetchOne(ctx, url)
 		if err != nil {
+			if c.log != nil {
+				// 只記診斷用的 elapsed；錯誤本身往上拋，由 scheduler 統一記一次，
+				// 避免同一次失敗在 log 出現兩筆重複的 error 訊息。
+				c.log.Warn(
+					"twse isin source fetch failed",
+					zap.String("url", url),
+					zap.Duration("elapsed", time.Since(startedAt)),
+				)
+			}
 			// all-or-nothing：任一來源失敗就整體失敗，避免部分快照觸發誤下市。
 			return nil, fmt.Errorf("twse isin fetch %s: %w", url, err)
+		}
+		if c.log != nil {
+			c.log.Info(
+				"twse isin source fetched",
+				zap.String("url", url),
+				zap.Int("symbols", len(symbols)),
+				zap.Duration("elapsed", time.Since(startedAt)),
+			)
 		}
 		for _, s := range symbols {
 			if _, dup := seen[s.Symbol]; dup {
@@ -82,6 +130,12 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 	if err != nil {
 		return nil, err
 	}
+	// 誠實表明來源身分，不偽裝成瀏覽器：TWSE ISIN 是公開清單，抓取本身正當，
+	// 站方要限流或聯絡時也才有辨識依據。Accept / Accept-Language 則是讓來源
+	// 回傳預期的 HTML 與中文編碼。
+	req.Header.Set("User-Agent", "stock-trading/1.0 (personal market data sync)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "zh-TW,zh;q=0.9,en;q=0.8")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err

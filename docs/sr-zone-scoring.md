@@ -673,24 +673,50 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`event_state_summary`、`short_term_regime` 與 action/risk notes 呈現。
 
 `market_events` 保留 latest candle 偵測到的完整事件序列；`event_state_summary` 則是
-P1 的無資料表 lifecycle 摘要，用來區分 active / resolved event：
+P2 的無資料表 lifecycle 摘要，用來區分 `CANDIDATE` / `CONFIRMED` / `ACTIVE` /
+`RESOLVED` / `EXPIRED` event：
 
 - `states`：每個 event family / zone key 的最新狀態。
-- `active`：目前仍有效的事件狀態。
+- `candidates`：已偵測但尚未完成確認的事件，例如盤中跌破但收盤未跌破、或反轉候選。
+- `confirmed`：已完成確認且仍有效的事件，例如收盤跌破支撐或收盤收回支撐上緣。
+- `active`：目前仍有效且可進入 decision gating 的事件狀態（`CONFIRMED` / `ACTIVE` 且 `active=true`）。
 - `resolved`：已被後續事件解除的狀態。
+- `expired`：超過有效期或來源 zone 已失效的狀態；保留歷史但不得進入 gating。
 - `active_bearish_events`：Decision hard gate 會使用的 active bearish risk。
 - `market_state`：由 active event state 推導的短線市場狀態。
 
 同一 zone 若出現 `HIGH_VOLUME_BREAKDOWN → INTRADAY_RECLAIM → REVERSAL_CANDIDATE`，
 raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
 `event_state_summary` 會變成 `RESOLVED`，不得再作為 active bearish gate 永久強制
-`EXIT`。未被收復的 active breakdown 仍會讓 `price_path.path_state=EVENT_RISK` 並降風險。
+`EXIT`。未被收復且收盤確認的 active breakdown 仍會讓
+`price_path.path_state=EVENT_RISK` 並降風險；只有盤中跌破但收盤未跌破時會保留為
+`CANDIDATE`，不進 `active_bearish_events`。
+
+`REVERSAL_CANDIDATE` 只代表候選反轉，不會直接進 active bullish gate，也不會單獨解除
+breakdown；必須由收盤收回上緣的 `INTRADAY_RECLAIM` 這類 confirmed/active event
+觸發 resolve。
 
 Decision gating 一律只消費 `event_state_summary.active`：primary zone 選擇
 （`_pick_primary_zone`）、market action（`_decision_action`）、entry action state、
 market bias（`_market_bias`）與 event-aware entry relevance（`_entry_relevance_score_with_events`）
 都吃 active 事件集合，已被 resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw
 event chain 保留給對外呈現（`market_events` / `event_sequence` / `event_state_summary`）。
+
+跨分析延續由 Go backend 在建立新分析前讀取同 `symbol/timeframe` 最近一筆 analysis 的
+active `market_event_states`，透過 Python `/sr-zones` request 的 `previous_event_states`
+傳入。Python 會先把 previous active states 放入 lifecycle map，再套用本次 latest candle
+事件：若本次沒有新事件，前次 active breakdown 會繼續進入 `active_bearish_events`；若本次
+出現 confirmed/active `INTRADAY_RECLAIM`，同 zone 的 previous breakdown 會轉為
+`RESOLVED`。
+
+**Aging → `EXPIRED`（避免事件無限期停留在 active）**：每個 event state 帶 `age_bars`
+存活計數，隨 state JSON 經 Go round-trip 累積——每被 carry 一次（一根 K 棒/分析）+1，被
+當根新偵測覆蓋時歸零。carried 且未被 resolve 的 active 事件，`age_bars` 達到自身
+`expires_after_bars`（偵測時設定，如 breakdown/reclaim=2）即轉 `EXPIRED`、`active=false`，
+退出 gating 與後續 carry；未帶 `expires_after_bars` 的事件（如 `EXTREME_VOLUME` context）
+套 `DEFAULT_EVENT_EXPIRES_AFTER_BARS`（預設 3），確保沒有任何 carried 事件永生。
+`expires_after_bars` 與 `age_bars` 由 Go `scoreZonesPreviousEventStates` 從 `state_json`
+帶回（缺 `expires_after_bars` 時送 `null` 讓 Python 套預設，而非誤傳 0 造成立即過期）。
 
 例外（刻意）：`_daily_candidate_zones` 與 `_defense_lines` 仍消費完整 raw `market_events`——
 前者用「歷史上出現過 `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`」決定是否補日 K 候選區，後者用最近
@@ -784,6 +810,7 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 
 | State | 語意 |
 |---|---|
+| `BLOCKED` | 禁止進場；硬性風險或條件失效 |
 | `WAIT_CONFIRMATION` | 等待確認，不進場 |
 | `PROBE_ENTRY` | 仍在待確認語境，只能視為觀察性試探 |
 | `SMALL_ENTRY` | 條件普通但已確認，可小量進場 |
@@ -794,9 +821,10 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 
 `final_entry_permission` 是 `entry_action_state` 與 `daily_confirmation.state` 的保守仲裁結果，前端若要顯示
 「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
-若 daily confirmation 為 `INVALIDATED`，final permission 會降為 `NO_SETUP`。`BUY` 只在 entry 端與
-daily 端都達最高層級時輸出；一般 `ENTRY_READY` 只會把 `BUY` 放行到 `ACCUMULATE`，避免繞過日 K
-把關。現階段 `daily_confirmation` 最高只輸出 `ENTRY_READY`（不產生 `BUY_READY`），因此
+`final_entry_permission.state` 不再輸出 `NO_SETUP` 或空語意；若 daily confirmation 為 `INVALIDATED`
+或 RR gate 等硬條件不通，final permission 會降為 `BLOCKED`，其他未完成 setup 則降為
+`WAIT_CONFIRMATION`。`BUY` 只在 entry 端與 daily 端都達最高層級時輸出；一般 `ENTRY_READY` 只會把
+`BUY` 放行到 `ACCUMULATE`，避免繞過日 K 把關。現階段 `daily_confirmation` 最高只輸出 `ENTRY_READY`（不產生 `BUY_READY`），因此
 `final_entry_permission.state` 目前上限為 `ACCUMULATE`；`BUY` 為保留態，待 daily 端加入 `BUY_READY`
 （例如兩日確認完成）後才會端到端啟用。
 
@@ -861,9 +889,11 @@ Setup 定義：
 `invalidation_price` / `recovery_price`。
 
 `rr_context` 將新進場 RR 與既有部位 RR 拆開：`entry_rr` 仍用於 `rr_gate` / trade candidate，
-`position_rr` 用於持股防守、減碼或續抱語境。現階段尚未接入實際 position zone 來源時，
-`position_rr=null` 且 `position_rr_source=UNAVAILABLE`，避免把 entry RR 誤讀成既有部位 RR。
-接上持股防守區後才可輸出 `position_rr_source=POSITION_ZONE`。
+`position_rr` 保留為持股語境欄位，但 SR Zone 是市場結構層，不讀使用者持倉成本；因此
+SR `decision_summary.rr_context.position_rr` 維持 `null` 且
+`position_rr_source=UNAVAILABLE`，避免把 entry RR 誤讀成既有部位 RR。實際持倉
+Position RR 由 Go Position Engine 在 `position_analyses.evidence.position_decision.position_rr`
+輸出，來源標示為 `POSITION_AVG_COST`。
 
 `price_path.next_decision_source` 只描述下一個決策價位來源。拆分 nearest support / resistance 後，
 有效值為 `nearest_support_zone`、`nearest_resistance_zone` 或 `daily_candidate_zone`；

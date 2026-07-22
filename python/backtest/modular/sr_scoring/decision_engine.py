@@ -520,7 +520,7 @@ def _entry_action_state(
 
 def _entry_action_label(state: str) -> str:
     return {
-        "NO_SETUP": "無設定",
+        "BLOCKED": "禁止進場",
         "WAIT_CONFIRMATION": "等待確認",
         "PROBE_ENTRY": "觀察性試探",
         "SMALL_ENTRY": "小量進場",
@@ -530,11 +530,12 @@ def _entry_action_label(state: str) -> str:
 
 
 def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[str, Any]) -> dict[str, Any]:
-    daily_state = str(daily_confirmation.get("state") or "NO_SETUP")
+    daily_state = str(daily_confirmation.get("state") or "WAIT_DAILY_CONFIRM")
     order = {
-        "NO_SETUP": 0,
         "INVALIDATED": 0,
+        "BLOCKED": 0,
         "WAIT_CONFIRMATION": 1,
+        "NO_SETUP": 1,
         "WAIT_DAILY_CONFIRM": 1,
         "CHASING_RISK": 1,
         "PROBE_ENTRY": 2,
@@ -557,7 +558,7 @@ def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[st
     elif final_rank == 2:
         state = "PROBE_ENTRY"
     elif final_rank == 0:
-        state = "NO_SETUP"
+        state = "BLOCKED"
     else:
         state = "WAIT_CONFIRMATION"
     return {
@@ -1308,13 +1309,13 @@ def _daily_confirmation(
     reason_codes: list[str] = []
     event_types = {event.get("type") for event in event_sequence}
     if primary_zone is None:
-        state = "WAIT_DAILY_CONFIRM" if daily_candidate_zones else "NO_SETUP"
+        state = "WAIT_DAILY_CONFIRM"
         reason_codes.append("DAILY_CANDIDATE_ONLY" if daily_candidate_zones else "NO_PRIMARY_ZONE")
     elif primary_interaction and primary_interaction.get("closed_below") and primary_zone.role == ZoneType.SUPPORT.value:
         state = "INVALIDATED"
         reason_codes.append("SUPPORT_CLOSED_BELOW")
     elif not rr_gate.get("qualified"):
-        state = "NO_SETUP"
+        state = "BLOCKED"
         reason_codes.append(str(rr_gate.get("reason_code") or "RR_NOT_QUALIFIED"))
     elif _distance_pct_to_zone(primary_zone, current_price) > 0.08:
         state = "CHASING_RISK"
@@ -1346,7 +1347,7 @@ def _daily_confirmation(
         reason_codes.append("DAILY_CONFIRMATION_REQUIRED")
 
     labels = {
-        "NO_SETUP": "無設定",
+        "BLOCKED": "禁止進場",
         "WAIT_DAILY_CONFIRM": "等待日 K 確認",
         "PROBE_ALLOWED": "允許觀察性試探",
         "ENTRY_READY": "日 K 進場條件成立",
@@ -1471,10 +1472,11 @@ def build_decision_summary(
     previous_candle_close: Optional[float] = None,
     data_quality_metadata: Optional[dict[str, Any]] = None,
     model_governance: Optional[dict[str, Any]] = None,
+    previous_event_states: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
     market_events = detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
-    event_state_summary = build_event_state_summary(market_events)
+    event_state_summary = build_event_state_summary(market_events, previous_states=previous_event_states)
     active_market_events = list(event_state_summary.get("active") or [])
     model_governance = model_governance or {
         "health_state": "UNKNOWN",
@@ -1730,7 +1732,10 @@ def build_decision_summary(
     }
 
 
-def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
+def build_decision_from_evidence(
+    evidence: AnalysisEvidence,
+    previous_event_states: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """Decision's sole public input is the immutable Evidence stage output."""
     scores = evidence.scores
     frame = scores.features.data.frame
@@ -1763,4 +1768,5 @@ def build_decision_from_evidence(evidence: AnalysisEvidence) -> dict[str, Any]:
             },
         },
         model_governance=build_model_governance_context(scores),
+        previous_event_states=previous_event_states,
     )

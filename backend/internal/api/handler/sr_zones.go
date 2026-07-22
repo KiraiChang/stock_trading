@@ -342,7 +342,10 @@ func eventStateSummaryJSON(base any, states []store.MarketEventState) map[string
 	summary := rawObjectFromAny(base)
 	items := make([]any, 0, len(states))
 	active := make([]any, 0)
+	candidates := make([]any, 0)
+	confirmed := make([]any, 0)
 	resolved := make([]any, 0)
+	expired := make([]any, 0)
 	activeBearish := make([]any, 0)
 	activeBullish := make([]any, 0)
 	var latestType any
@@ -363,6 +366,16 @@ func eventStateSummaryJSON(base any, states []store.MarketEventState) map[string
 		item["price_level"] = nullableFloat(state.PriceLevel)
 		item["reason_codes"] = rawArray(state.ReasonCodes)
 		items = append(items, item)
+		switch state.State {
+		case "CANDIDATE":
+			candidates = append(candidates, item)
+		case "CONFIRMED":
+			confirmed = append(confirmed, item)
+		case "RESOLVED":
+			resolved = append(resolved, item)
+		case "EXPIRED":
+			expired = append(expired, item)
+		}
 		if state.Active {
 			active = append(active, item)
 			switch state.Direction {
@@ -371,14 +384,15 @@ func eventStateSummaryJSON(base any, states []store.MarketEventState) map[string
 			case "BULLISH":
 				activeBullish = append(activeBullish, item)
 			}
-		} else {
-			resolved = append(resolved, item)
 		}
 		latestType = state.LatestEventType
 	}
 	summary["states"] = items
+	summary["candidates"] = candidates
+	summary["confirmed"] = confirmed
 	summary["active"] = active
 	summary["resolved"] = resolved
+	summary["expired"] = expired
 	summary["active_bearish_events"] = activeBearish
 	summary["active_bullish_events"] = activeBullish
 	summary["latest_event_type"] = latestType
@@ -547,7 +561,12 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	result, err := h.client.ScoreZones(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
+	previousEventStates, err := h.repo.GetLatestActiveMarketEventStates(c.Request.Context(), body.Symbol, body.Timeframe)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: load previous active event states")
+		return
+	}
+	result, err := h.client.ScoreZonesWithPreviousEvents(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit, previousEventStates)
 	if err != nil {
 		mapScoreZonesError(c, h.log, err)
 		return

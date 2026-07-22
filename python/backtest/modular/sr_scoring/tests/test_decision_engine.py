@@ -104,6 +104,7 @@ def _summary(
     previous_candle_close: float | None = None,
     data_quality_metadata: dict | None = None,
     model_governance: dict | None = None,
+    previous_event_states: list[dict] | None = None,
 ) -> dict:
     return build_decision_summary(
         zones,
@@ -123,6 +124,7 @@ def _summary(
         previous_candle_close=previous_candle_close,
         data_quality_metadata=data_quality_metadata,
         model_governance=model_governance,
+        previous_event_states=previous_event_states,
     )
 
 
@@ -234,6 +236,36 @@ def test_primary_high_volume_breakdown_event_forces_exit():
     # 對外回報的 entry_relevance 是 base 值，不把市場事件修正灌進同名分數／breakdown，
     # 才能跟 zones[].entry_relevance_score 保持同定義（見 decision_engine 說明）。
     assert "market_event" not in ds["primary_zone"]["entry_relevance_breakdown"]
+
+
+def test_previous_active_breakdown_carries_into_decision_gate_without_new_event():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5, relative_volume=1.0)
+    previous = [{
+        "type": "HIGH_VOLUME_BREAKDOWN",
+        "event_family": "SUPPORT_BREAKDOWN",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "HIGH_VOLUME_BREAKDOWN",
+        "latest_event_type": "HIGH_VOLUME_BREAKDOWN",
+        "direction": "BEARISH",
+        "state": "CONFIRMED",
+        "active": True,
+        "reason_codes": ["SUPPORT_CLOSED_BELOW"],
+    }]
+
+    ds = _summary(
+        [zone],
+        current_price=102.0,
+        candle_high=103.0,
+        candle_low=101.0,
+        candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    assert ds["market_events"] == []
+    assert [event["type"] for event in ds["event_state_summary"]["active_bearish_events"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert ds["price_path"]["path_state"] == "EVENT_RISK"
+    assert ds["price_path"]["blocked_by_event"]["carried_from_previous"] is True
 
 
 def test_extreme_volume_outputs_context_event_without_direct_action_override():
@@ -427,7 +459,8 @@ def test_rr_below_hard_gate_stays_watch_even_with_high_score_and_ev():
     assert ds["rr_gate"]["qualified"] is False
     assert ds["rr_gate"]["reason_code"] == "RR_INSUFFICIENT"
     assert ds["best_trade_zone"] is None
-    assert ds["daily_confirmation"]["state"] == "NO_SETUP"
+    assert ds["daily_confirmation"]["state"] == "BLOCKED"
+    assert ds["final_entry_permission"]["state"] == "BLOCKED"
     assert ds["price_path"]["path_state"] == "RR_BLOCKED"
     assert any("風險報酬比不足" in note for note in ds["risk_notes"])
 
@@ -515,10 +548,17 @@ def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids(
 def test_final_entry_permission_keeps_invalidated_distinct_from_waiting():
     permission = _final_entry_permission("BUY", {"state": "INVALIDATED", "reason_codes": ["SUPPORT_CLOSED_BELOW"]})
 
-    assert permission["state"] == "NO_SETUP"
-    assert permission["label"] == "無設定"
+    assert permission["state"] == "BLOCKED"
+    assert permission["label"] == "禁止進場"
     assert permission["daily_confirmation_state"] == "INVALIDATED"
     assert permission["reason_codes"] == ["SUPPORT_CLOSED_BELOW"]
+
+
+def test_final_entry_permission_never_outputs_no_setup():
+    for daily_state in ("NO_SETUP", "WAIT_DAILY_CONFIRM", "INVALIDATED", "BLOCKED"):
+        permission = _final_entry_permission("WAIT_CONFIRMATION", {"state": daily_state, "reason_codes": ["TEST_REASON"]})
+        assert permission["state"] != "NO_SETUP"
+        assert permission["label"] != "無設定"
 
 
 def test_final_entry_permission_does_not_upgrade_buy_without_daily_buy_ready():

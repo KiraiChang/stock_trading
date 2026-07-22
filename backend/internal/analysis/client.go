@@ -937,19 +937,55 @@ func rawJSONOrDefault(raw json.RawMessage, fallback string) store.RawJSON {
 // scoreZonesRequest 對應 Python ScoreZonesRequest；Limit 為 0 時省略欄位，
 // 讓 Python 端套用它自己的預設值（理由同 analyzeRequest）。
 type scoreZonesRequest struct {
-	Symbol    string `json:"symbol"`
-	Timeframe string `json:"timeframe"`
-	Limit     int    `json:"limit,omitempty"`
+	Symbol              string                         `json:"symbol"`
+	Timeframe           string                         `json:"timeframe"`
+	Limit               int                            `json:"limit,omitempty"`
+	PreviousEventStates []scoreZonesPreviousEventState `json:"previous_event_states,omitempty"`
+}
+
+type scoreZonesPreviousEventState struct {
+	EventKey          string            `json:"event_key"`
+	Type              string            `json:"type"`
+	EventFamily       string            `json:"event_family"`
+	EventScope        string            `json:"event_scope"`
+	ZoneKey           string            `json:"zone_key"`
+	RootEventType     string            `json:"root_event_type"`
+	LatestEventType   string            `json:"latest_event_type"`
+	Direction         string            `json:"direction"`
+	State             string            `json:"state"`
+	Active            bool              `json:"active"`
+	ConfirmationState string            `json:"confirmation_state,omitempty"`
+	ExpiresAfterBars  *int              `json:"expires_after_bars,omitempty"`
+	AgeBars           int               `json:"age_bars"`
+	ZoneRef           map[string]any    `json:"zone_ref,omitempty"`
+	ResolvedBy        store.NullString  `json:"resolved_by,omitempty"`
+	Confidence        store.NullFloat64 `json:"confidence,omitempty"`
+	PriceLevel        store.NullFloat64 `json:"price_level,omitempty"`
+	ReasonCodes       store.RawJSON     `json:"reason_codes"`
 }
 
 // ScoreZones 呼叫 Python HTTP service 的 /sr-zones 端點。limit 為抓取的
 // 歷史K棒根數，傳 0 表示使用 Python 端的預設值。
 func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string, limit int) (*ZoneScoreResult, error) {
+	return c.ScoreZonesWithPreviousEvents(ctx, symbol, timeframe, limit, nil)
+}
+
+func (c *Client) ScoreZonesWithPreviousEvents(
+	ctx context.Context,
+	symbol, timeframe string,
+	limit int,
+	previousEventStates []store.MarketEventState,
+) (*ZoneScoreResult, error) {
 	if c.baseURL == "" {
 		return nil, fmt.Errorf("python service url not configured（請設定 python.service_url / PYTHON_SERVICE_URL）")
 	}
 
-	body, err := json.Marshal(scoreZonesRequest{Symbol: symbol, Timeframe: timeframe, Limit: limit})
+	body, err := json.Marshal(scoreZonesRequest{
+		Symbol:              symbol,
+		Timeframe:           timeframe,
+		Limit:               limit,
+		PreviousEventStates: scoreZonesPreviousEventStates(previousEventStates),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -979,6 +1015,101 @@ func (c *Client) ScoreZones(ctx context.Context, symbol, timeframe string, limit
 		return nil, fmt.Errorf("python sr-zones decode error: body=%s: %w", truncateBody(respBody), err)
 	}
 	return &result, nil
+}
+
+func scoreZonesPreviousEventStates(states []store.MarketEventState) []scoreZonesPreviousEventState {
+	if len(states) == 0 {
+		return nil
+	}
+	out := make([]scoreZonesPreviousEventState, 0, len(states))
+	for _, state := range states {
+		reasons := state.ReasonCodes
+		if reasons == "" {
+			reasons = store.RawJSON("[]")
+		}
+		stateJSON := rawJSONObject(state.StateJSON)
+		out = append(out, scoreZonesPreviousEventState{
+			EventKey:          state.EventKey,
+			Type:              state.EventType,
+			EventFamily:       state.EventFamily,
+			EventScope:        state.EventScope,
+			ZoneKey:           state.ZoneKey,
+			RootEventType:     state.RootEventType,
+			LatestEventType:   state.LatestEventType,
+			Direction:         state.Direction,
+			State:             state.State,
+			Active:            state.Active,
+			ConfirmationState: stringValueAt(stateJSON, "confirmation_state"),
+			ExpiresAfterBars:  intPtrValueAt(stateJSON, "expires_after_bars"),
+			AgeBars:           intValueAt(stateJSON, "age_bars"),
+			ZoneRef:           objectValueAt(stateJSON, "zone_ref"),
+			ResolvedBy:        state.ResolvedBy,
+			Confidence:        state.Confidence,
+			PriceLevel:        state.PriceLevel,
+			ReasonCodes:       reasons,
+		})
+	}
+	return out
+}
+
+func rawJSONObject(raw store.RawJSON) map[string]any {
+	if raw == "" || raw == "null" {
+		return nil
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return nil
+	}
+	return obj
+}
+
+func objectValueAt(obj map[string]any, key string) map[string]any {
+	if obj == nil {
+		return nil
+	}
+	value, ok := obj[key].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return value
+}
+
+func stringValueAt(obj map[string]any, key string) string {
+	if obj == nil {
+		return ""
+	}
+	value, _ := obj[key].(string)
+	return value
+}
+
+// intValueAt 讀 state_json 內的整數欄位（JSON 數字會被 decode 成 float64），缺值回 0。
+func intValueAt(obj map[string]any, key string) int {
+	if obj == nil {
+		return 0
+	}
+	switch v := obj[key].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	}
+	return 0
+}
+
+// intPtrValueAt 與 intValueAt 相同，但缺值/型別不符時回 nil——用於 expires_after_bars：
+// 送 nil 讓 Python 端套自己的預設，而不是誤傳 0 造成立即過期。
+func intPtrValueAt(obj map[string]any, key string) *int {
+	if obj == nil {
+		return nil
+	}
+	switch v := obj[key].(type) {
+	case float64:
+		n := int(v)
+		return &n
+	case int:
+		return &v
+	}
+	return nil
 }
 
 // ── SR Scoring 模型訓練 ──────────────────────────────────────

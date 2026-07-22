@@ -25,12 +25,47 @@ func TestBuildSnapshotFlatAndLongActions(t *testing.T) {
 	if flat.PositionState != StateFlat || flat.Action != ActionEnterSmall || flat.TargetShares != 500 {
 		t.Fatalf("unexpected FLAT analysis: %+v", flat)
 	}
-	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 700, AvgCost: 80, Version: 3}, sr, zones)
+	var flatEvidence map[string]any
+	if err := json.Unmarshal([]byte(flat.Evidence), &flatEvidence); err != nil {
+		t.Fatal(err)
+	}
+	flatContext := flatEvidence["decision_context"].(map[string]any)
+	if flatContext["mode"] != "FLAT_ENTRY" || flatContext["has_position"].(bool) {
+		t.Fatalf("unexpected flat decision_context: %+v", flatContext)
+	}
+	flatEntry := flatEvidence["entry_decision"].(map[string]any)
+	flatPositionDecision := flatEvidence["position_decision"].(map[string]any)
+	if !flatEntry["applicable"].(bool) || flatEntry["state"] != ActionEnterSmall {
+		t.Fatalf("unexpected flat entry_decision: %+v", flatEntry)
+	}
+	if flatPositionDecision["applicable"].(bool) || flatPositionDecision["state"] != "NOT_APPLICABLE" {
+		t.Fatalf("unexpected flat position_decision: %+v", flatPositionDecision)
+	}
+	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 700, AvgCost: 95, Version: 3}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if long.PositionState != StateLong || long.Action != ActionReduce || long.TargetShares != 500 || long.AdjustmentShares != -200 {
 		t.Fatalf("unexpected LONG analysis: %+v", long)
+	}
+	var longEvidence map[string]any
+	if err := json.Unmarshal([]byte(long.Evidence), &longEvidence); err != nil {
+		t.Fatal(err)
+	}
+	longContext := longEvidence["decision_context"].(map[string]any)
+	if longContext["mode"] != "LONG_POSITION" || !longContext["has_position"].(bool) {
+		t.Fatalf("unexpected long decision_context: %+v", longContext)
+	}
+	longEntry := longEvidence["entry_decision"].(map[string]any)
+	longPositionDecision := longEvidence["position_decision"].(map[string]any)
+	if longEntry["applicable"].(bool) || longEntry["state"] != "NOT_APPLICABLE" {
+		t.Fatalf("unexpected long entry_decision: %+v", longEntry)
+	}
+	if !longPositionDecision["applicable"].(bool) || longPositionDecision["state"] != ActionReduce {
+		t.Fatalf("unexpected long position_decision: %+v", longPositionDecision)
+	}
+	if longPositionDecision["position_rr_source"] != "POSITION_AVG_COST" {
+		t.Fatalf("expected position rr source, got %+v", longPositionDecision)
 	}
 }
 
@@ -163,6 +198,30 @@ func TestBuildSnapshotConditionalHoldEvidence(t *testing.T) {
 	rr := evidence["rr"].(map[string]any)
 	if rr["market_rr"].(float64) != 2 || rr["position_rr"].(float64) != 5 {
 		t.Fatalf("unexpected rr evidence: %+v", rr)
+	}
+	positionDecision := evidence["position_decision"].(map[string]any)
+	if positionDecision["state"] != "CONDITIONAL_HOLD" || positionDecision["position_rr_source"] != "POSITION_AVG_COST" {
+		t.Fatalf("unexpected position decision: %+v", positionDecision)
+	}
+}
+
+func TestBuildSnapshotPositionDecisionMarksUnavailableRR(t *testing.T) {
+	a := &Analyzer{config: DefaultConfig()}
+	sr := &store.SRZoneAnalysis{
+		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
+		DecisionSummary: store.RawJSON(`{"market_action":"WATCH","position_action":"HOLD","action":"Hold"}`),
+	}
+	result, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 95}, sr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evidence map[string]any
+	if err := json.Unmarshal([]byte(result.Evidence), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	positionDecision := evidence["position_decision"].(map[string]any)
+	if positionDecision["position_rr"] != nil || positionDecision["position_rr_source"] != "UNAVAILABLE" {
+		t.Fatalf("expected unavailable position RR, got %+v", positionDecision)
 	}
 }
 

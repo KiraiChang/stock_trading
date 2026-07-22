@@ -399,6 +399,80 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSRZoneRepoGetLatestActiveMarketEventStatesUsesNewestSnapshot(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	older := testAnalysis()
+	older.AnalyzedAt = time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	olderProjections := testProjections()
+	olderProjections.EventStates = []MarketEventState{{
+		EventKey:        "ZONE:SUPPORT_BREAKDOWN:SUPPORT:580.0000:585.0000",
+		EventType:       "HIGH_VOLUME_BREAKDOWN",
+		EventFamily:     "SUPPORT_BREAKDOWN",
+		EventScope:      "ZONE",
+		ZoneKey:         "SUPPORT:580.0000:585.0000",
+		RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+		LatestEventType: "HIGH_VOLUME_BREAKDOWN",
+		Direction:       "BEARISH",
+		State:           "CONFIRMED",
+		Active:          true,
+		ReasonCodes:     RawJSON(`["OLDER_BREAKDOWN"]`),
+		StateJSON:       RawJSON(`{"type":"HIGH_VOLUME_BREAKDOWN","state":"CONFIRMED"}`),
+	}}
+	if _, err := repo.Create(ctx, older, testZones(), olderProjections); err != nil {
+		t.Fatalf("Create older failed: %v", err)
+	}
+
+	newer := testAnalysis()
+	newer.AnalyzedAt = time.Date(2026, 7, 21, 0, 0, 0, 0, time.UTC)
+	newerProjections := testProjections()
+	newerProjections.EventStates = []MarketEventState{
+		{
+			EventKey:        "ZONE:SUPPORT_RECLAIM:SUPPORT:580.0000:585.0000",
+			EventType:       "INTRADAY_RECLAIM",
+			EventFamily:     "SUPPORT_RECLAIM",
+			EventScope:      "ZONE",
+			ZoneKey:         "SUPPORT:580.0000:585.0000",
+			RootEventType:   "INTRADAY_RECLAIM",
+			LatestEventType: "INTRADAY_RECLAIM",
+			Direction:       "BULLISH",
+			State:           "CONFIRMED",
+			Active:          true,
+			ReasonCodes:     RawJSON(`["NEWER_RECLAIM"]`),
+			StateJSON:       RawJSON(`{"type":"INTRADAY_RECLAIM","state":"CONFIRMED"}`),
+		},
+		{
+			EventKey:        "ZONE:SUPPORT_BREAKDOWN:SUPPORT:580.0000:585.0000",
+			EventType:       "HIGH_VOLUME_BREAKDOWN",
+			EventFamily:     "SUPPORT_BREAKDOWN",
+			EventScope:      "ZONE",
+			ZoneKey:         "SUPPORT:580.0000:585.0000",
+			RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+			LatestEventType: "INTRADAY_RECLAIM",
+			Direction:       "BEARISH",
+			State:           "RESOLVED",
+			Active:          false,
+			ReasonCodes:     RawJSON(`["RESOLVED_BY_RECLAIM"]`),
+			StateJSON:       RawJSON(`{"type":"HIGH_VOLUME_BREAKDOWN","state":"RESOLVED"}`),
+		},
+	}
+	if _, err := repo.Create(ctx, newer, testZones(), newerProjections); err != nil {
+		t.Fatalf("Create newer failed: %v", err)
+	}
+
+	states, err := repo.GetLatestActiveMarketEventStates(ctx, "2330", "1d")
+	if err != nil {
+		t.Fatalf("GetLatestActiveMarketEventStates failed: %v", err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("expected only latest active states, got %+v", states)
+	}
+	if states[0].EventType != "INTRADAY_RECLAIM" || states[0].ReasonCodes != RawJSON(`["NEWER_RECLAIM"]`) {
+		t.Fatalf("unexpected latest active state: %+v", states[0])
+	}
+}
+
 func TestSRZoneRepoCreateDefaultsEmptyChipSummaryToNull(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()

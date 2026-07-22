@@ -323,25 +323,6 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 ---
 
-### T-033：`rr_context.position_rr` 接上實際 position zone 來源
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone / Decision Engine |
-| 建立日期 | 2026-07-15 |
-| 來源 | SR Zone Decision Engine `rr_context` 拆分（見 `docs/sr-zone-scoring.md`「Defense Lines」）|
-
-`decision_summary.rr_context` 已把新進場 RR（`entry_rr`）與既有部位 RR（`position_rr`）
-拆成兩欄；在尚未接入實際 position zone 前，`position_rr` 會回傳 `null` 並標示
-`position_rr_source=UNAVAILABLE`，避免把 entry RR 誤讀成既有部位 RR。
-
-後續待實際 position zone 來源（例如持股成本、交易分析防守區、或 portfolio position context）
-接入 `build_decision_summary` 後，才讓 `position_rr` 真正反映持股語境。
-
----
-
 ## 已完成封存
 
 （目前沒有項目）

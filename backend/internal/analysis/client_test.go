@@ -2,12 +2,15 @@ package analysis
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/trading/backend/internal/store"
 )
 
 func TestAnalyzeSendsLimitWhenProvided(t *testing.T) {
@@ -685,6 +688,110 @@ func TestScoreZonesSendsLimitWhenProvided(t *testing.T) {
 	client := NewClient(server.URL)
 	if _, err := client.ScoreZones(context.Background(), "2330", "1d", 500); err != nil {
 		t.Fatalf("ScoreZones failed: %v", err)
+	}
+}
+
+func TestScoreZonesWithPreviousEventsSendsLifecycleContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			PreviousEventStates []struct {
+				Type        string   `json:"type"`
+				EventFamily string   `json:"event_family"`
+				ZoneKey     string   `json:"zone_key"`
+				State       string   `json:"state"`
+				Active      bool     `json:"active"`
+				ReasonCodes []string `json:"reason_codes"`
+				ZoneRef     *struct {
+					Role      string  `json:"role"`
+					PriceLow  float64 `json:"price_low"`
+					PriceHigh float64 `json:"price_high"`
+				} `json:"zone_ref"`
+			} `json:"previous_event_states"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if len(body.PreviousEventStates) != 1 {
+			t.Fatalf("expected one previous state, got %+v", body.PreviousEventStates)
+		}
+		state := body.PreviousEventStates[0]
+		if state.Type != "HIGH_VOLUME_BREAKDOWN" || state.EventFamily != "SUPPORT_BREAKDOWN" ||
+			state.ZoneKey != "SUPPORT:580.0000:585.0000" || state.State != "CONFIRMED" || !state.Active {
+			t.Fatalf("unexpected previous state payload: %+v", state)
+		}
+		if len(state.ReasonCodes) != 1 || state.ReasonCodes[0] != "SUPPORT_CLOSED_BELOW" {
+			t.Fatalf("unexpected reason_codes: %+v", state.ReasonCodes)
+		}
+		if state.ZoneRef == nil || state.ZoneRef.Role != "SUPPORT" || state.ZoneRef.PriceLow != 580 || state.ZoneRef.PriceHigh != 585 {
+			t.Fatalf("unexpected zone_ref: %+v", state.ZoneRef)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ZoneScoreResult{
+			Symbol: "2330", Timeframe: "1d", AnalyzedAt: "2026-07-01T13:30:00+08:00", CurrentPrice: 600.0,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	previous := []store.MarketEventState{{
+		EventKey:        "ZONE:SUPPORT_BREAKDOWN:SUPPORT:580.0000:585.0000",
+		EventType:       "HIGH_VOLUME_BREAKDOWN",
+		EventFamily:     "SUPPORT_BREAKDOWN",
+		EventScope:      "ZONE",
+		ZoneKey:         "SUPPORT:580.0000:585.0000",
+		RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+		LatestEventType: "HIGH_VOLUME_BREAKDOWN",
+		Direction:       "BEARISH",
+		State:           "CONFIRMED",
+		Active:          true,
+		Confidence:      store.NullFloat64{NullFloat64: sql.NullFloat64{Float64: 0.72, Valid: true}},
+		PriceLevel:      store.NullFloat64{NullFloat64: sql.NullFloat64{Float64: 580, Valid: true}},
+		ReasonCodes:     store.RawJSON(`["SUPPORT_CLOSED_BELOW"]`),
+		StateJSON:       store.RawJSON(`{"zone_ref":{"role":"SUPPORT","price_low":580,"price_high":585}}`),
+	}}
+	if _, err := client.ScoreZonesWithPreviousEvents(context.Background(), "2330", "1d", 500, previous); err != nil {
+		t.Fatalf("ScoreZonesWithPreviousEvents failed: %v", err)
+	}
+}
+
+func TestScoreZonesPreviousEventStatesExtractsLifecycleAgeFields(t *testing.T) {
+	states := []store.MarketEventState{{
+		EventType: "HIGH_VOLUME_BREAKDOWN",
+		State:     "CONFIRMED",
+		Active:    true,
+		StateJSON: store.RawJSON(`{"confirmation_state":"CONFIRMED_CLOSE_BELOW","age_bars":1,"expires_after_bars":2}`),
+	}}
+
+	out := scoreZonesPreviousEventStates(states)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 mapped state, got %d", len(out))
+	}
+	if out[0].ConfirmationState != "CONFIRMED_CLOSE_BELOW" {
+		t.Fatalf("confirmation_state = %q", out[0].ConfirmationState)
+	}
+	if out[0].AgeBars != 1 {
+		t.Fatalf("age_bars = %d, want 1", out[0].AgeBars)
+	}
+	if out[0].ExpiresAfterBars == nil || *out[0].ExpiresAfterBars != 2 {
+		t.Fatalf("expires_after_bars = %v, want 2", out[0].ExpiresAfterBars)
+	}
+}
+
+func TestScoreZonesPreviousEventStatesOmitsExpiresWhenAbsent(t *testing.T) {
+	// 缺 expires_after_bars 時必須回 nil（送 null），否則 Python 端會把 0 當門檻立即過期。
+	states := []store.MarketEventState{{
+		EventType: "EXTREME_VOLUME",
+		State:     "ACTIVE",
+		Active:    true,
+		StateJSON: store.RawJSON(`{"confirmation_state":"CONTEXT"}`),
+	}}
+
+	out := scoreZonesPreviousEventStates(states)
+	if out[0].ExpiresAfterBars != nil {
+		t.Fatalf("expires_after_bars should be nil when absent, got %d", *out[0].ExpiresAfterBars)
+	}
+	if out[0].AgeBars != 0 {
+		t.Fatalf("age_bars = %d, want 0 when absent", out[0].AgeBars)
 	}
 }
 

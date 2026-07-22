@@ -349,7 +349,7 @@
   }
   // final_entry_permission 是 entry 與日 K 兩端的保守仲裁結果，前端顯示「是否允許進場」以此為準
   const finalEntryText: Record<string, string> = {
-    NO_SETUP: '尚無設定',
+    BLOCKED: '禁止進場',
     WAIT_CONFIRMATION: '等待確認',
     PROBE_ENTRY: '觀察性試探',
     SMALL_ENTRY: '小量進場',
@@ -357,7 +357,7 @@
     BUY: '買進',
   }
   const finalEntryClass: Record<string, string> = {
-    NO_SETUP: 'bg-gray-700/60 text-gray-300 border-border',
+    BLOCKED: 'bg-red-900/40 text-red-300 border-red-700/60',
     WAIT_CONFIRMATION: 'bg-gray-700/60 text-gray-300 border-border',
     PROBE_ENTRY: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/60',
     SMALL_ENTRY: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',

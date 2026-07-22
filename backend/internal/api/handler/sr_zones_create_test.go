@@ -60,15 +60,16 @@ func TestMapScoreZonesErrorReturnsGatewayTimeoutForNetTimeout(t *testing.T) {
 }
 
 type srZoneRepoStub struct {
-	analyses         []store.SRZoneAnalysis
-	zones            map[uint64][]store.SRZone
-	decisions        map[uint64]*store.SRDecision
-	eventDetections  map[uint64][]store.MarketEventDetection
-	eventStates      map[uint64][]store.MarketEventState
-	dailyCandidates  map[uint64][]store.SRDailyCandidate
-	modelGovernances map[uint64]*store.SRModelGovernance
-	nextID           uint64
-	createCalls      int
+	analyses           []store.SRZoneAnalysis
+	zones              map[uint64][]store.SRZone
+	decisions          map[uint64]*store.SRDecision
+	eventDetections    map[uint64][]store.MarketEventDetection
+	eventStates        map[uint64][]store.MarketEventState
+	latestActiveStates []store.MarketEventState
+	dailyCandidates    map[uint64][]store.SRDailyCandidate
+	modelGovernances   map[uint64]*store.SRModelGovernance
+	nextID             uint64
+	createCalls        int
 }
 
 func (s *srZoneRepoStub) Create(ctx context.Context, a *store.SRZoneAnalysis, zones []store.SRZone, projections store.SRZoneNormalizedProjections) (uint64, error) {
@@ -145,6 +146,10 @@ func (s *srZoneRepoStub) GetMarketEventDetections(ctx context.Context, analysisI
 
 func (s *srZoneRepoStub) GetMarketEventStates(ctx context.Context, analysisID uint64) ([]store.MarketEventState, error) {
 	return s.eventStates[analysisID], nil
+}
+
+func (s *srZoneRepoStub) GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]store.MarketEventState, error) {
+	return s.latestActiveStates, nil
 }
 
 func (s *srZoneRepoStub) GetDailyCandidates(ctx context.Context, analysisID uint64) ([]store.SRDailyCandidate, error) {

@@ -165,8 +165,11 @@ def calculate_scores(features: AnalysisFeatures) -> AnalysisScores:
     )
 
 
-def decide(evidence) -> AnalysisDecision:
-    return AnalysisDecision(evidence=evidence, summary=build_decision_from_evidence(evidence))
+def decide(evidence, previous_event_states: Optional[list[dict[str, Any]]] = None) -> AnalysisDecision:
+    return AnalysisDecision(
+        evidence=evidence,
+        summary=build_decision_from_evidence(evidence, previous_event_states=previous_event_states),
+    )
 
 
 def run_pipeline(
@@ -177,6 +180,7 @@ def run_pipeline(
     fetch_candles_fn=fetch_candles,
     fetch_chip_fn=fetch_latest_chip_score,
     get_model_fn=get_model,
+    previous_event_states: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     from .serialization import _zone_score_to_dict
     from .summaries import _build_period_summaries
@@ -191,7 +195,7 @@ def run_pipeline(
     features = extract_features(data)
     scores = calculate_scores(features)
     evidence = build_evidence(scores)
-    decision = decide(evidence)
+    decision = decide(evidence, previous_event_states=previous_event_states)
     explanation = build_explanation(evidence, decision.summary)
     scenario = build_analysis_scenario(evidence, decision.summary)
     zone_probability_flags = model_quality_flags(scores)

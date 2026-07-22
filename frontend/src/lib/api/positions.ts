@@ -42,6 +42,38 @@ export interface PositionActionCondition {
 export interface PositionAnalysisEvidence {
   sr_decision_action?: string
   take_profit_source?: string
+  decision_context?: {
+    mode?: 'FLAT_ENTRY' | 'LONG_POSITION' | string
+    has_position?: boolean
+    position_state?: PositionState | string
+    shares?: number | null
+    avg_cost?: number | null
+    current_price?: number | null
+    sr_zone_analysis_id?: number | null
+  }
+  entry_decision?: {
+    applicable?: boolean
+    state?: PositionAction | 'NOT_APPLICABLE' | string
+    label?: string
+    target_shares?: number | null
+    entry_price?: number | null
+    stop_loss_price?: number | null
+    take_profit_price?: number | null
+    market_rr?: number | null
+    reason_codes?: string[]
+  }
+  position_decision?: {
+    applicable?: boolean
+    state?: PositionAction | 'CONDITIONAL_HOLD' | 'NOT_APPLICABLE' | string
+    label?: string
+    target_shares?: number | null
+    adjustment_shares?: number | null
+    defense_price?: number | null
+    structural_stop?: number | null
+    position_rr?: number | null
+    position_rr_source?: 'POSITION_AVG_COST' | 'UNAVAILABLE' | string
+    reason_codes?: string[]
+  }
   position_action_condition?: PositionActionCondition
   risk_sizing?: {
     risk_budget?: number | null

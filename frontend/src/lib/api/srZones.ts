@@ -310,7 +310,7 @@ export interface SRPeriodSummary {
 }
 
 export type SRDecisionAction = 'Buy' | 'BuySmall' | 'Hold' | 'Avoid'
-export type SREntryActionState = 'WAIT_CONFIRMATION' | 'PROBE_ENTRY' | 'SMALL_ENTRY' | 'ACCUMULATE' | 'BUY' | string
+export type SREntryActionState = 'BLOCKED' | 'WAIT_CONFIRMATION' | 'PROBE_ENTRY' | 'SMALL_ENTRY' | 'ACCUMULATE' | 'BUY' | string
 export type SRMarketBias = 'BULLISH_BIAS' | 'NEUTRAL_BIAS' | 'BEARISH_BIAS' | 'REVERSAL_BIAS' | string
 export type SRMarketAction = 'WATCH' | 'BUY_SMALL' | 'BUY' | 'AVOID'
 export type SRPositionAction = 'HOLD' | 'REDUCE_ON_BREAKDOWN' | 'REDUCE' | 'EXIT'

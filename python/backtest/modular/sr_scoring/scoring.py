@@ -758,6 +758,7 @@ def score_symbol(
     timeframe: str = "1d",
     limit: int = DEFAULT_FETCH_LIMIT,
     builders: Optional[list[ZoneBuilder]] = None,
+    previous_event_states: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """limit 為抓取的歷史K棒根數（不是天數），預設 DEFAULT_FETCH_LIMIT=250；
     呼叫端（FastAPI /sr-zones、Go handler）可覆寫。"""
@@ -771,4 +772,5 @@ def score_symbol(
         fetch_candles_fn=fetch_candles,
         fetch_chip_fn=fetch_latest_chip_score,
         get_model_fn=get_model,
+        previous_event_states=previous_event_states,
     )

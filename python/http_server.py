@@ -37,7 +37,7 @@ from db import engine, check_connection
 check_connection()
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
@@ -144,6 +144,7 @@ class ScoreZonesRequest(BaseModel):
     symbol: str
     timeframe: str = "1d"
     limit: int = SR_SCORING_DEFAULT_FETCH_LIMIT  # 抓取的歷史K棒根數，可由呼叫端覆寫
+    previous_event_states: List[dict] = Field(default_factory=list)
 
 
 @app.post("/sr-zones")
@@ -153,9 +154,12 @@ async def sr_zones(req: ScoreZonesRequest):
     sr_scoring/train.py 產生模型，否則回 503）。回應頂層另外帶
     model_version/model_trained_at/model_feature_names，來自產生這次結果的
     ModelBundle，供追蹤「這筆分析是哪個模型版本算出來的」。"""
-    log.info("POST /sr-zones symbol=%s tf=%s limit=%d", req.symbol, req.timeframe, req.limit)
+    log.info(
+        "POST /sr-zones symbol=%s tf=%s limit=%d previous_event_states=%d",
+        req.symbol, req.timeframe, req.limit, len(req.previous_event_states),
+    )
     try:
-        return score_symbol(req.symbol, req.timeframe, req.limit)
+        return score_symbol(req.symbol, req.timeframe, req.limit, previous_event_states=req.previous_event_states)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:

@@ -278,6 +278,11 @@ Position Analysis 的細節拆解放在 `evidence` JSON：`risk_sizing` 顯示
 Risk Budget → Per Share Risk → Max Shares → Excess Shares；`stops` 拆成
 Defense Price 與 Structural Stop；`rr` 拆成 Market RR 與 Position RR；`pnl_impact`
 顯示執行減碼/出場後的 realized delta 與 unrealized before/after。
+`decision_context.mode` 明確標示本次是 `FLAT_ENTRY` 或 `LONG_POSITION`；
+`entry_decision` 是空手者的新進場決策，`position_decision` 是已持有者的續抱、
+減碼、出場或加碼決策。LONG 情境不得用 `entry_decision` 推論持有建議；FLAT
+情境不得用 `position_decision` 推論新進場建議。實際持倉 `position_rr` 只在
+Position Engine 使用 AVG 成本與防守線計算，來源標示為 `POSITION_AVG_COST`。
 
 SR 快照由 `SRAnalysisProvider` 統一處理重用與重算。Trade Analysis 與 Position
 Analysis 預設會優先重用同 symbol/timeframe 且仍在設定時效內的 SR 快照；呼叫端

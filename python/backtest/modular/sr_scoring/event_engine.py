@@ -10,29 +10,40 @@ from .types import RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 EXTREME_VOLUME_THRESHOLD = 2.5
 HIGH_VOLUME_BREAKDOWN_THRESHOLD = 1.5
 
+LIFECYCLE_CANDIDATE = "CANDIDATE"
+LIFECYCLE_CONFIRMED = "CONFIRMED"
+LIFECYCLE_ACTIVE = "ACTIVE"
+LIFECYCLE_RESOLVED = "RESOLVED"
+LIFECYCLE_EXPIRED = "EXPIRED"
+
+# carried active 事件若未被 resolve，最多存活這麼多根 K 棒（analysis）即轉 EXPIRED。
+# 事件自帶 expires_after_bars 時以事件值為準；沒帶（如 EXTREME_VOLUME context）套此
+# 預設，確保沒有任何 carried 事件會無限期停留在 active。
+DEFAULT_EVENT_EXPIRES_AFTER_BARS = 3
+
 EVENT_TYPE_META = {
     "EXTREME_VOLUME": {
         "family": "VOLUME_CONTEXT",
         "direction": "NEUTRAL",
-        "terminal_state": "ACTIVE",
+        "default_state": LIFECYCLE_ACTIVE,
         "resolves": (),
     },
     "HIGH_VOLUME_BREAKDOWN": {
         "family": "SUPPORT_BREAKDOWN",
         "direction": "BEARISH",
-        "terminal_state": "ACTIVE",
+        "default_state": LIFECYCLE_CANDIDATE,
         "resolves": (),
     },
     "INTRADAY_RECLAIM": {
         "family": "SUPPORT_RECLAIM",
         "direction": "BULLISH",
-        "terminal_state": "ACTIVE",
+        "default_state": LIFECYCLE_CONFIRMED,
         "resolves": ("SUPPORT_BREAKDOWN",),
     },
     "REVERSAL_CANDIDATE": {
         "family": "SUPPORT_REVERSAL",
         "direction": "BULLISH",
-        "terminal_state": "ACTIVE",
+        "default_state": LIFECYCLE_CANDIDATE,
         "resolves": ("SUPPORT_BREAKDOWN",),
     },
 }
@@ -179,13 +190,16 @@ def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
     zone_ref = event.get("zone_ref")
     event_scope = "SYMBOL" if zone_ref is None else "ZONE"
     event_family = str(meta.get("family") or event_type)
+    lifecycle_state = str(event.get("lifecycle_state") or meta.get("default_state") or LIFECYCLE_CANDIDATE)
     normalized = dict(event)
     normalized.setdefault("event_family", event_family)
     normalized.setdefault("event_scope", event_scope)
     normalized.setdefault("event_key", f"{event_scope}:{event_family}:{_zone_key(zone_ref)}")
     normalized.setdefault("zone_key", _zone_key(zone_ref))
-    normalized.setdefault("state", str(meta.get("terminal_state") or "ACTIVE"))
-    normalized.setdefault("active", normalized["state"] == "ACTIVE")
+    normalized.setdefault("state", lifecycle_state)
+    normalized.setdefault("lifecycle_state", normalized["state"])
+    normalized.setdefault("confirmation_state", "CONFIRMED" if normalized["state"] in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE) else "PENDING")
+    normalized.setdefault("active", normalized["state"] in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE))
     normalized.setdefault("reason_codes", [event_type])
     return normalized
 
@@ -194,22 +208,76 @@ def normalize_market_events(events: list[dict[str, Any]]) -> list[dict[str, Any]
     return [normalize_market_event(event) for event in events]
 
 
-def build_event_state_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(state.get("type") or state.get("event_type") or state.get("latest_event_type") or "UNKNOWN")
+    meta = EVENT_TYPE_META.get(event_type, {})
+    event_family = str(state.get("event_family") or meta.get("family") or event_type)
+    zone_key = str(state.get("zone_key") or _zone_key(state.get("zone_ref")))
+    state_name = str(state.get("state") or state.get("lifecycle_state") or LIFECYCLE_ACTIVE)
+    active = bool(state.get("active")) and state_name in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE)
+
+    # 每被 carry 一次代表多存活一根 K 棒（analysis）；被當根新偵測覆蓋時，會在 merge
+    # 迴圈以 age_bars=0 的新 state 取代（等於重置存活計數）。未被 resolve 的 carried
+    # active 事件老化到 expires_after_bars 門檻即轉 EXPIRED，完成 …→Resolved→Expired
+    # 生命週期，避免事件無限期停留在 active。
+    age_bars = int(state.get("age_bars") or 0) + 1
+    raw_expires = state.get("expires_after_bars")
+    expires_after = int(raw_expires) if raw_expires is not None else DEFAULT_EVENT_EXPIRES_AFTER_BARS
+    expired = active and age_bars >= expires_after
+
+    normalized = dict(state)
+    normalized.setdefault("event_key", f"{state.get('event_scope') or 'ZONE'}:{event_family}:{zone_key}")
+    normalized.setdefault("type", event_type)
+    normalized.setdefault("event_family", event_family)
+    normalized.setdefault("event_scope", state.get("event_scope") or ("SYMBOL" if zone_key == "SYMBOL" else "ZONE"))
+    normalized.setdefault("zone_key", zone_key)
+    normalized.setdefault("root_event_type", state.get("root_event_type") or event_type)
+    normalized.setdefault("latest_event_type", state.get("latest_event_type") or event_type)
+    normalized.setdefault("direction", state.get("direction") or meta.get("direction"))
+    normalized["age_bars"] = age_bars
+    normalized["expires_after_bars"] = expires_after
+    reason_codes = list(state.get("reason_codes") or [event_type])
+    if expired:
+        normalized["state"] = LIFECYCLE_EXPIRED
+        normalized["active"] = False
+        normalized["confirmation_state"] = "EXPIRED_STALE"
+        normalized["reason_codes"] = [*reason_codes, "EVENT_EXPIRED_STALE"]
+    else:
+        normalized["state"] = state_name
+        normalized["active"] = active
+        normalized.setdefault("confirmation_state", state.get("confirmation_state") or ("CONFIRMED" if active else "PENDING"))
+        normalized.setdefault("reason_codes", reason_codes)
+    normalized["carried_from_previous"] = True
+    normalized.setdefault("resolved_by", state.get("resolved_by"))
+    return normalized
+
+
+def build_event_state_summary(
+    events: list[dict[str, Any]],
+    previous_states: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
     """Build an in-memory event lifecycle summary from latest detected events.
 
-    This is intentionally persistence-free for P1: it gives Decision a stable
-    active/resolved view without introducing event tables before fixtures lock
-    the transition semantics.
+    P2 stays schema-light: Go persists normalized states per analysis and passes
+    the latest active states back as previous_states; this pure function merges
+    them with latest-candle detections and emits a deterministic lifecycle view.
     """
     normalized = sorted(normalize_market_events(events), key=lambda e: EVENT_ORDER.get(str(e.get("type")), 999))
     states: dict[tuple[str, str], dict[str, Any]] = {}
     resolved: list[dict[str, Any]] = []
+
+    for previous in previous_states or []:
+        event = _normalize_previous_event_state(previous)
+        key = (str(event.get("zone_key") or "SYMBOL"), str(event.get("event_family") or event.get("type")))
+        states[key] = event
 
     for event in normalized:
         zone_key = str(event.get("zone_key") or "SYMBOL")
         event_family = str(event.get("event_family") or event.get("type"))
         event_type = str(event.get("type") or "UNKNOWN")
         key = (zone_key, event_family)
+        state_name = str(event.get("state") or event.get("lifecycle_state") or LIFECYCLE_CANDIDATE)
+        is_active = bool(event.get("active")) and state_name in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE)
         state = {
             "event_key": event.get("event_key"),
             "type": event_type,
@@ -219,22 +287,28 @@ def build_event_state_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             "root_event_type": event_type,
             "latest_event_type": event_type,
             "direction": event.get("direction"),
-            "state": "ACTIVE",
-            "active": True,
+            "state": state_name,
+            "active": is_active,
+            "confirmation_state": event.get("confirmation_state"),
+            "expires_after_bars": event.get("expires_after_bars"),
+            "age_bars": int(event.get("age_bars") or 0),
             "zone_ref": event.get("zone_ref"),
             "price_level": event.get("price_level"),
             "confidence": event.get("confidence"),
             "reason_codes": list(event.get("reason_codes") or [event_type]),
             "resolved_by": None,
+            "price_action_evidence": event.get("price_action_evidence"),
         }
         states[key] = state
 
+        if not is_active:
+            continue
         for family in EVENT_TYPE_META.get(event_type, {}).get("resolves", ()):
             target_key = (zone_key, str(family))
             target = states.get(target_key)
-            if not target or not target.get("active"):
+            if not target or target.get("state") in (LIFECYCLE_RESOLVED, LIFECYCLE_EXPIRED):
                 continue
-            target["state"] = "RESOLVED"
+            target["state"] = LIFECYCLE_RESOLVED
             target["active"] = False
             target["latest_event_type"] = event_type
             target["resolved_by"] = event_type
@@ -242,14 +316,20 @@ def build_event_state_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             resolved.append(target)
 
     active = [state for state in states.values() if state.get("active")]
+    candidates = [state for state in states.values() if state.get("state") == LIFECYCLE_CANDIDATE]
+    confirmed = [state for state in states.values() if state.get("state") == LIFECYCLE_CONFIRMED]
+    expired = [state for state in states.values() if state.get("state") == LIFECYCLE_EXPIRED]
     active_bearish = [state for state in active if state.get("direction") == "BEARISH"]
     active_bullish = [state for state in active if state.get("direction") == "BULLISH"]
     latest_type = normalized[-1]["type"] if normalized else None
     return {
-        "version": "event-lifecycle-p1",
+        "version": "event-lifecycle-p2",
         "states": list(states.values()),
         "active": active,
+        "candidates": candidates,
+        "confirmed": confirmed,
         "resolved": resolved,
+        "expired": expired,
         "active_bearish_events": active_bearish,
         "active_bullish_events": active_bullish,
         "latest_event_type": latest_type,
@@ -281,11 +361,15 @@ def detect_market_events(
         events.append({
             "type": "EXTREME_VOLUME",
             "direction": "NEUTRAL",
+            "lifecycle_state": LIFECYCLE_ACTIVE,
+            "confirmation_state": "CONTEXT",
+            "active": True,
             "confidence": min(1.0, max_relative_volume / 4.0),
             "zone_ref": None,
             "price_level": candle_close if candle_close is not None else current_price,
             "reason": "最新量能達極端放大門檻，需搭配跌破或收復事件解讀。",
             "detected_at": "latest_candle",
+            "reason_codes": ["EXTREME_VOLUME_CONTEXT"],
         })
 
     for z in zone_scores:
@@ -299,14 +383,21 @@ def detect_market_events(
         breakdown_event_added = False
         evidence = interaction["price_action_evidence"]
         if (evidence["closed_below"] or (candle_low is not None and candle_low < z.price_low)) and high_volume:
+            confirmed_breakdown = bool(evidence["closed_below"])
             events.append({
                 "type": "HIGH_VOLUME_BREAKDOWN",
                 "direction": "BEARISH",
+                "lifecycle_state": LIFECYCLE_CONFIRMED if confirmed_breakdown else LIFECYCLE_CANDIDATE,
+                "confirmation_state": "CONFIRMED_CLOSE_BELOW" if confirmed_breakdown else "PENDING_CLOSE_CONFIRMATION",
+                "active": confirmed_breakdown,
+                "expires_after_bars": 2,
                 "confidence": min(1.0, max(0.45, relative_volume / 3.0)),
                 "zone_ref": event_zone_ref(z, current_price),
                 "price_level": z.price_low,
                 "reason": "支撐區被盤中或收盤跌破，且量能放大或量能狀態確認失敗。",
                 "detected_at": "latest_candle",
+                "reason_codes": ["SUPPORT_CLOSED_BELOW" if confirmed_breakdown else "SUPPORT_INTRABAR_BREAK"],
+                "price_action_evidence": evidence,
             })
             breakdown_event_added = True
             if evidence["closed_below"]:
@@ -315,21 +406,33 @@ def detect_market_events(
             events.append({
                 "type": "INTRADAY_RECLAIM",
                 "direction": "BULLISH",
+                "lifecycle_state": LIFECYCLE_CONFIRMED,
+                "confirmation_state": "CONFIRMED_CLOSE_ABOVE_ZONE",
+                "active": True,
+                "expires_after_bars": 2,
                 "confidence": min(1.0, 0.50 + z.confidence * 0.35),
                 "zone_ref": event_zone_ref(z, current_price),
                 "price_level": z.price_high,
                 "reason": "日 K 測試支撐後收盤收回區間上緣。",
                 "detected_at": "latest_candle",
+                "reason_codes": ["SUPPORT_RECLAIM_CONFIRMED"],
+                "price_action_evidence": evidence,
             })
             if breakdown_event_added:
                 events.append({
                     "type": "REVERSAL_CANDIDATE",
                     "direction": "BULLISH",
+                    "lifecycle_state": LIFECYCLE_CANDIDATE,
+                    "confirmation_state": "PENDING_FOLLOW_THROUGH",
+                    "active": False,
+                    "expires_after_bars": 2,
                     "confidence": min(1.0, 0.50 + z.confidence * 0.35),
                     "zone_ref": event_zone_ref(z, current_price),
                     "price_level": z.price_high,
                     "reason": "高量跌破後收回支撐區上緣，形成反轉候選事件。",
                     "detected_at": "latest_candle",
+                    "reason_codes": ["REVERSAL_CANDIDATE_AWAIT_CONFIRMATION"],
+                    "price_action_evidence": evidence,
                 })
         elif (
             not interaction["closed_below"]
@@ -340,10 +443,16 @@ def detect_market_events(
             events.append({
                 "type": "REVERSAL_CANDIDATE",
                 "direction": "BULLISH",
+                "lifecycle_state": LIFECYCLE_CANDIDATE,
+                "confirmation_state": "PENDING_FOLLOW_THROUGH",
+                "active": False,
+                "expires_after_bars": 2,
                 "confidence": min(1.0, 0.45 + z.confidence * 0.30),
                 "zone_ref": event_zone_ref(z, current_price),
                 "price_level": z.price_high,
                 "reason": "支撐測試未失守，且 EV 與區間信心未轉弱。",
                 "detected_at": "latest_candle",
+                "reason_codes": ["REVERSAL_CANDIDATE_AWAIT_CONFIRMATION"],
+                "price_action_evidence": evidence,
             })
     return normalize_market_events(events[:8])

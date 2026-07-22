@@ -217,6 +217,40 @@
             <p class="text-white font-mono">{num(latest.evidence?.risk_sizing?.excess_shares)}</p>
           </div>
         </div>
+        <div class="mt-4 grid md:grid-cols-2 gap-3 text-xs">
+          <div class="border border-border rounded p-3">
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <p class="text-muted">空手決策</p>
+              <span class="px-2 py-0.5 rounded {latest.evidence?.entry_decision?.applicable ? 'bg-green-900/40 text-green-300' : 'bg-gray-700/60 text-gray-300'}">
+                {latest.evidence?.entry_decision?.applicable ? '適用' : '不適用'}
+              </span>
+            </div>
+            <p class="text-white font-semibold">{latest.evidence?.entry_decision?.label ?? '—'}</p>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+              <div><p class="text-muted">State</p><p class="text-white font-mono">{latest.evidence?.entry_decision?.state ?? '—'}</p></div>
+              <div><p class="text-muted">Target</p><p class="text-white font-mono">{num(latest.evidence?.entry_decision?.target_shares)}</p></div>
+              <div><p class="text-muted">Entry RR</p><p class="text-white font-mono">{num(latest.evidence?.entry_decision?.market_rr)}</p></div>
+              <div><p class="text-muted">Stop</p><p class="text-white font-mono">{num(latest.evidence?.entry_decision?.stop_loss_price)}</p></div>
+            </div>
+            <p class="text-muted mt-2 break-words">{latest.evidence?.entry_decision?.reason_codes?.join(' / ') || '—'}</p>
+          </div>
+          <div class="border border-border rounded p-3">
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <p class="text-muted">持有決策</p>
+              <span class="px-2 py-0.5 rounded {latest.evidence?.position_decision?.applicable ? 'bg-blue-900/40 text-blue-300' : 'bg-gray-700/60 text-gray-300'}">
+                {latest.evidence?.position_decision?.applicable ? '適用' : '不適用'}
+              </span>
+            </div>
+            <p class="text-white font-semibold">{latest.evidence?.position_decision?.label ?? '—'}</p>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+              <div><p class="text-muted">State</p><p class="text-white font-mono">{latest.evidence?.position_decision?.state ?? '—'}</p></div>
+              <div><p class="text-muted">Target</p><p class="text-white font-mono">{num(latest.evidence?.position_decision?.target_shares)}</p></div>
+              <div><p class="text-muted">Position RR</p><p class="text-white font-mono">{num(latest.evidence?.position_decision?.position_rr)}</p></div>
+              <div><p class="text-muted">Defense</p><p class="text-white font-mono">{num(latest.evidence?.position_decision?.defense_price)}</p></div>
+            </div>
+            <p class="text-muted mt-2 break-words">{latest.evidence?.position_decision?.reason_codes?.join(' / ') || '—'}</p>
+          </div>
+        </div>
         {#if latest.evidence?.position_action_condition}
           <div class="mt-3 grid md:grid-cols-3 gap-3 text-xs">
             <div><p class="text-muted">防守線</p><p class="text-fall font-mono">{num(latest.evidence.position_action_condition.invalidation_price)}</p></div>

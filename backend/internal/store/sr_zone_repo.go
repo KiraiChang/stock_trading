@@ -17,6 +17,7 @@ type SRZoneRepo interface {
 	GetDecision(ctx context.Context, analysisID uint64) (*SRDecision, error)
 	GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]MarketEventDetection, error)
 	GetMarketEventStates(ctx context.Context, analysisID uint64) ([]MarketEventState, error)
+	GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error)
 	GetDailyCandidates(ctx context.Context, analysisID uint64) ([]SRDailyCandidate, error)
 	GetModelGovernance(ctx context.Context, analysisID uint64) (*SRModelGovernance, error)
 	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）。
@@ -464,6 +465,26 @@ func (r *srZoneRepo) GetMarketEventStates(ctx context.Context, analysisID uint64
 		FROM market_event_states WHERE analysis_id=?
 		ORDER BY id ASC
 	`), analysisID)
+	return rows, err
+}
+
+func (r *srZoneRepo) GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error) {
+	var rows []MarketEventState
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
+		SELECT id, analysis_id, symbol, timeframe, analyzed_at,
+			event_key, event_type, event_family, event_scope, zone_key,
+			root_event_type, latest_event_type, direction, state, active,
+			resolved_by, confidence, price_level, reason_codes, state_json, created_at
+		FROM market_event_states
+		WHERE symbol=? AND timeframe=? AND active=?
+			AND analysis_id = (
+				SELECT analysis_id FROM market_event_states
+				WHERE symbol=? AND timeframe=? AND active=?
+				ORDER BY analyzed_at DESC, analysis_id DESC
+				LIMIT 1
+			)
+		ORDER BY id ASC
+	`), symbol, timeframe, true, symbol, timeframe, true)
 	return rows, err
 }
 

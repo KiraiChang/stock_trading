@@ -308,6 +308,27 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 	}
 	reasons = append(reasons, fmt.Sprintf("SR 決策為 %s；目前 %.0f 股，目標 %.0f 股。", srAction, position.Shares, target))
 
+	mode := "FLAT_ENTRY"
+	if state == StateLong {
+		mode = "LONG_POSITION"
+	}
+	positionRRSource := "UNAVAILABLE"
+	if positionRR != nil {
+		positionRRSource = "POSITION_AVG_COST"
+	}
+	entryDecisionState, entryDecisionLabel := action, label
+	entryApplicable := state == StateFlat
+	if !entryApplicable {
+		entryDecisionState, entryDecisionLabel = "NOT_APPLICABLE", "不適用"
+	}
+	positionDecisionState, positionDecisionLabel := action, label
+	positionApplicable := state == StateLong
+	if !positionApplicable {
+		positionDecisionState, positionDecisionLabel = "NOT_APPLICABLE", "不適用"
+	} else if action == ActionHold && holdLabel(srDecision.Condition) == "條件式持有" {
+		positionDecisionState, positionDecisionLabel = "CONDITIONAL_HOLD", "條件式持有"
+	}
+
 	configJSON, _ := json.Marshal(a.config)
 	reasonJSON, _ := json.Marshal(reasons)
 	triggerJSON, _ := json.Marshal(triggers)
@@ -317,6 +338,38 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		"support_zone":       zoneDetail(support),
 		"resistance_zone":    zoneDetail(resistance),
 		"take_profit_source": takeProfitSource,
+		"decision_context": map[string]any{
+			"mode":                mode,
+			"has_position":        state == StateLong,
+			"position_state":      state,
+			"shares":              position.Shares,
+			"avg_cost":            position.AvgCost,
+			"current_price":       current,
+			"sr_zone_analysis_id": sr.ID,
+		},
+		"entry_decision": map[string]any{
+			"applicable":        entryApplicable,
+			"state":             entryDecisionState,
+			"label":             entryDecisionLabel,
+			"target_shares":     target,
+			"entry_price":       current,
+			"stop_loss_price":   nullableFloat(stop),
+			"take_profit_price": nullableFloat(takeProfit),
+			"market_rr":         marketRR,
+			"reason_codes":      entryReasonCodes(entryApplicable, action, srAction, stop, rr, a.config.MinRiskRewardRatio),
+		},
+		"position_decision": map[string]any{
+			"applicable":         positionApplicable,
+			"state":              positionDecisionState,
+			"label":              positionDecisionLabel,
+			"target_shares":      target,
+			"adjustment_shares":  delta,
+			"defense_price":      defensePrice,
+			"structural_stop":    structuralStop,
+			"position_rr":        positionRR,
+			"position_rr_source": positionRRSource,
+			"reason_codes":       positionReasonCodes(positionApplicable, action, srDecision.Condition, brokenSupport, stop, positionRR),
+		},
 		"position_action_condition": map[string]any{
 			"state":              srDecision.Condition.State,
 			"invalidation_price": conditionInvalidation,
@@ -367,6 +420,67 @@ func actionForDelta(delta float64, zeroAction, zeroLabel string) (string, string
 		return ActionReduce, "減碼"
 	}
 	return zeroAction, zeroLabel
+}
+
+func entryReasonCodes(applicable bool, action, srAction string, stop, rr store.NullFloat64, minRR float64) []string {
+	if !applicable {
+		return []string{"POSITION_HELD_ENTRY_NOT_APPLICABLE"}
+	}
+	switch action {
+	case ActionEnter, ActionEnterSmall:
+		return []string{"ENTRY_ALLOWED_BY_SR", "RISK_SIZING_AVAILABLE"}
+	case ActionAvoid:
+		return []string{"SR_MARKET_ACTION_AVOID"}
+	case ActionWait:
+		if !stop.Valid {
+			return []string{"NO_VALID_SUPPORT_STOP"}
+		}
+		if !rr.Valid || rr.Float64 < minRR {
+			return []string{"ENTRY_RR_INSUFFICIENT"}
+		}
+		return []string{"ENTRY_WAIT"}
+	default:
+		return []string{"SR_ACTION_" + srAction}
+	}
+}
+
+func positionReasonCodes(
+	applicable bool,
+	action string,
+	condition positionActionCondition,
+	brokenSupport *store.SRZone,
+	stop store.NullFloat64,
+	positionRR any,
+) []string {
+	if !applicable {
+		return []string{"NO_POSITION"}
+	}
+	if brokenSupport != nil {
+		return []string{"BROKEN_SUPPORT"}
+	}
+	if len(condition.ReasonCodes) > 0 {
+		return condition.ReasonCodes
+	}
+	switch action {
+	case ActionExitStop:
+		return []string{"POSITION_EXIT"}
+	case ActionReduce:
+		return []string{"POSITION_REDUCE"}
+	case ActionTakeProfit:
+		return []string{"POSITION_TAKE_PROFIT"}
+	case ActionAdd:
+		return []string{"POSITION_ADD_ALLOWED"}
+	case ActionHold:
+		if !stop.Valid {
+			return []string{"POSITION_HOLD_NO_STRUCTURAL_STOP"}
+		}
+		if positionRR == nil {
+			return []string{"POSITION_RR_UNAVAILABLE"}
+		}
+		return []string{"POSITION_HOLD"}
+	default:
+		return []string{"POSITION_" + action}
+	}
 }
 
 func pickSupportZone(zones []store.SRZone, current float64) *store.SRZone {

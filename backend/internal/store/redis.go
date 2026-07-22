@@ -3,14 +3,19 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/trading/backend/internal/config"
 )
 
+const redisReadOnlyBackoff = 5 * time.Minute
+
 type RedisClient struct {
-	rdb *redis.Client // nil 表示 Redis 停用（開發模式）
+	rdb               *redis.Client // nil 表示 Redis 停用（開發模式）
+	writeBackoffUntil atomic.Int64
 }
 
 // DisabledRedisConfig 回傳空設定，用於明確停用 Redis
@@ -46,7 +51,10 @@ func (r *RedisClient) HSet(ctx context.Context, key string, values map[string]in
 	if r.rdb == nil {
 		return nil
 	}
-	return r.rdb.HSet(ctx, key, values).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.HSet(ctx, key, values).Err())
 }
 
 func (r *RedisClient) HGetAll(ctx context.Context, key string) (map[string]string, error) {
@@ -60,7 +68,10 @@ func (r *RedisClient) Expire(ctx context.Context, key string, ttl time.Duration)
 	if r.rdb == nil {
 		return nil
 	}
-	return r.rdb.Expire(ctx, key, ttl).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.Expire(ctx, key, ttl).Err())
 }
 
 func (r *RedisClient) LPush(ctx context.Context, key string, value interface{}) error {
@@ -71,7 +82,10 @@ func (r *RedisClient) LPush(ctx context.Context, key string, value interface{}) 
 	if err != nil {
 		return err
 	}
-	return r.rdb.LPush(ctx, key, b).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.LPush(ctx, key, b).Err())
 }
 
 func (r *RedisClient) LRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
@@ -85,7 +99,10 @@ func (r *RedisClient) SAdd(ctx context.Context, key string, members ...interface
 	if r.rdb == nil {
 		return nil
 	}
-	return r.rdb.SAdd(ctx, key, members...).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.SAdd(ctx, key, members...).Err())
 }
 
 func (r *RedisClient) SMembers(ctx context.Context, key string) ([]string, error) {
@@ -99,14 +116,20 @@ func (r *RedisClient) SRem(ctx context.Context, key string, members ...interface
 	if r.rdb == nil {
 		return nil
 	}
-	return r.rdb.SRem(ctx, key, members...).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.SRem(ctx, key, members...).Err())
 }
 
 func (r *RedisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
 	if r.rdb == nil {
 		return nil
 	}
-	return r.rdb.Set(ctx, key, value, ttl).Err()
+	if r.skipWrite() {
+		return nil
+	}
+	return r.handleWriteErr(r.rdb.Set(ctx, key, value, ttl).Err())
 }
 
 func (r *RedisClient) Get(ctx context.Context, key string) (string, error) {
@@ -114,4 +137,24 @@ func (r *RedisClient) Get(ctx context.Context, key string) (string, error) {
 		return "", nil
 	}
 	return r.rdb.Get(ctx, key).Result()
+}
+
+func (r *RedisClient) skipWrite() bool {
+	until := r.writeBackoffUntil.Load()
+	return until > 0 && time.Now().Before(time.Unix(0, until))
+}
+
+func (r *RedisClient) handleWriteErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isRedisReadOnlyErr(err) {
+		r.writeBackoffUntil.Store(time.Now().Add(redisReadOnlyBackoff).UnixNano())
+		return nil
+	}
+	return err
+}
+
+func isRedisReadOnlyErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "READONLY")
 }

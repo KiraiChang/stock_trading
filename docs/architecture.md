@@ -344,7 +344,7 @@ Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去
 | Backend | Go | goroutine 適合多股票並行監控 |
 | HTTP Router | Gin | 高效能、中介軟體齊全 |
 | Database | SQLite / MySQL / PostgreSQL | 三種環境皆支援，goose 自動 migration |
-| Cache | Redis（選填） | 低延遲熱資料；addr 留空則停用 |
+| Cache | Redis（選填） | 低延遲熱資料；addr 留空則停用。若誤連到 read-only replica，Redis 寫入會短暫降級為 no-op，DB 主流程仍正常 |
 | WebSocket | gorilla/websocket | 穩定、廣泛使用 |
 | Frontend | Vite + Svelte | 輕量、無 VDOM；build 後 embed 進 Go binary |
 | K 線圖 | lightweight-charts | < 50KB、原生 Candlestick |

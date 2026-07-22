@@ -30,6 +30,13 @@ func (h *SchedulerHandler) RunDailyClose(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "daily_close 已在背景重新觸發"})
 }
 
+// POST /api/v1/scheduler/stock-symbol-sync/run
+// 手動重跑 TWSE ISIN 股票主檔同步，與每日 stock_symbol_sync cron 共用同一份邏輯。
+func (h *SchedulerHandler) RunStockSymbolSync(c *gin.Context) {
+	go h.sched.RunStockSymbolSync()
+	c.JSON(http.StatusAccepted, gin.H{"message": "stock_symbol_sync 已在背景重新觸發"})
+}
+
 var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "stock_symbol_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）

@@ -1,7 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
-  import { fetchSchedulerStatus, triggerDailyCloseRun, type SchedulerJob } from '../lib/api/scheduler'
+  import {
+    fetchSchedulerStatus,
+    triggerDailyCloseRun,
+    triggerStockSymbolSyncRun,
+    type JobName,
+    type SchedulerJob,
+  } from '../lib/api/scheduler'
 
   const REFRESH_MS = 15000
 
@@ -9,6 +15,7 @@
     pre_market: '盤前初始化',
     intraday: '盤中分K',
     daily_close: '收盤後結算',
+    stock_symbol_sync: '股票主檔同步',
   }
 
   const statusLabel: Record<string, string> = {
@@ -43,9 +50,9 @@
   let error = ''
   let timer: ReturnType<typeof setInterval>
 
-  let triggering = false
-  let triggerMessage = ''
-  let triggerError = ''
+  let triggering: Partial<Record<JobName, boolean>> = {}
+  let triggerMessage: Partial<Record<JobName, string>> = {}
+  let triggerError: Partial<Record<JobName, string>> = {}
 
   onMount(async () => {
     await load()
@@ -67,17 +74,32 @@
   }
 
   async function runDailyClose() {
-    triggering = true
-    triggerError = ''
-    triggerMessage = ''
+    triggering = { ...triggering, daily_close: true }
+    triggerError = { ...triggerError, daily_close: '' }
+    triggerMessage = { ...triggerMessage, daily_close: '' }
     try {
       const res = await triggerDailyCloseRun()
-      triggerMessage = res.message ?? '已在背景重新觸發'
+      triggerMessage = { ...triggerMessage, daily_close: res.message ?? '已在背景重新觸發' }
       setTimeout(load, 1500)
     } catch {
-      triggerError = '觸發失敗，請稍後再試'
+      triggerError = { ...triggerError, daily_close: '觸發失敗，請稍後再試' }
     } finally {
-      triggering = false
+      triggering = { ...triggering, daily_close: false }
+    }
+  }
+
+  async function runStockSymbolSync() {
+    triggering = { ...triggering, stock_symbol_sync: true }
+    triggerError = { ...triggerError, stock_symbol_sync: '' }
+    triggerMessage = { ...triggerMessage, stock_symbol_sync: '' }
+    try {
+      const res = await triggerStockSymbolSyncRun()
+      triggerMessage = { ...triggerMessage, stock_symbol_sync: res.message ?? '已在背景重新觸發' }
+      setTimeout(load, 1500)
+    } catch {
+      triggerError = { ...triggerError, stock_symbol_sync: '觸發失敗，請稍後再試' }
+    } finally {
+      triggering = { ...triggering, stock_symbol_sync: false }
     }
   }
 
@@ -154,19 +176,40 @@
               <div class="mt-3 pt-3 border-t border-border">
                 <button
                   class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
-                  disabled={triggering}
+                  disabled={triggering.daily_close}
                   on:click={runDailyClose}
                 >
-                  {triggering ? '觸發中...' : '手動重拉當日資料'}
+                  {triggering.daily_close ? '觸發中...' : '手動重拉當日資料'}
                 </button>
                 <p class="text-muted text-xs mt-2">
                   若收盤後拉到 0 筆（FinMind 當天日K還沒發布），可用此按鈕稍後重拉，不用等隔天盤前自動回補。
                 </p>
-                {#if triggerMessage}
-                  <p class="text-green-400 text-xs mt-2">{triggerMessage}</p>
+                {#if triggerMessage.daily_close}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage.daily_close}</p>
                 {/if}
-                {#if triggerError}
-                  <p class="text-fall text-xs mt-2">{triggerError}</p>
+                {#if triggerError.daily_close}
+                  <p class="text-fall text-xs mt-2">{triggerError.daily_close}</p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if job.job_name === 'stock_symbol_sync'}
+              <div class="mt-3 pt-3 border-t border-border">
+                <button
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  disabled={triggering.stock_symbol_sync}
+                  on:click={runStockSymbolSync}
+                >
+                  {triggering.stock_symbol_sync ? '觸發中...' : '手動同步股票主檔'}
+                </button>
+                <p class="text-muted text-xs mt-2">
+                  從 TWSE ISIN 重新抓上市與上櫃有價證券清單，更新 watchlist 使用的主檔與是否仍上市狀態。
+                </p>
+                {#if triggerMessage.stock_symbol_sync}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage.stock_symbol_sync}</p>
+                {/if}
+                {#if triggerError.stock_symbol_sync}
+                  <p class="text-fall text-xs mt-2">{triggerError.stock_symbol_sync}</p>
                 {/if}
               </div>
             {/if}

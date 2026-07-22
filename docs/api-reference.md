@@ -350,6 +350,17 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 { "error": "已達監聽上限（3 檔），請先取消其他股票的監聽" }
 ```
 
+### POST `/scheduler/stock-symbol-sync/run`
+
+手動觸發 TWSE ISIN 股票主檔同步，與每日 `stock_symbol_sync` 排程共用同一份邏輯。
+此端點會立即回應，實際同步在背景執行；進度與結果可透過 `GET /scheduler/status`
+查看 `stock_symbol_sync` 這個 job。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "stock_symbol_sync 已在背景重新觸發" }
+```
+
 ---
 
 ## Market API

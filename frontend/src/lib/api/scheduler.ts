@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 
-export type JobName = 'pre_market' | 'intraday' | 'daily_close'
+export type JobName = 'pre_market' | 'intraday' | 'daily_close' | 'stock_symbol_sync'
 
 export interface SchedulerJob {
   job_name: JobName
@@ -22,4 +22,8 @@ export async function fetchSchedulerStatus(): Promise<SchedulerJob[]> {
 // 時間點 FinMind 當天日K還沒發布（拉到 0 筆）時的補救，在背景執行、立即回應。
 export async function triggerDailyCloseRun(): Promise<{ message: string }> {
   return apiFetch('/scheduler/daily-close/run', { method: 'POST' })
+}
+
+export async function triggerStockSymbolSyncRun(): Promise<{ message: string }> {
+  return apiFetch('/scheduler/stock-symbol-sync/run', { method: 'POST' })
 }

@@ -103,7 +103,7 @@ func (s *Scheduler) Start() {
 
 	if s.stockSyncEnabled && s.stockSyncer != nil {
 		if _, err := s.cron.AddFunc(s.stockSyncCron, func() {
-			s.runStockSymbolSync(context.Background())
+			s.RunStockSymbolSync()
 		}); err != nil {
 			s.log.Error("stock symbol sync cron register failed", zap.String("cron", s.stockSyncCron), zap.Error(err))
 		}
@@ -328,6 +328,10 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 	}
 	s.log.Info("chip daily sync job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
 	s.finishRun(ctx, runID, "chip_daily_sync", len(symbols), failed, lastErr)
+}
+
+func (s *Scheduler) RunStockSymbolSync() {
+	s.runStockSymbolSync(context.Background())
 }
 
 func (s *Scheduler) runStockSymbolSync(ctx context.Context) {

@@ -120,6 +120,7 @@ func NewServer(
 		sch := handler.NewSchedulerHandler(jobRunRepo, sched, log)
 		protected.GET("/scheduler/status", sch.GetStatus)
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
+		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo, log)
 		protected.POST("/backtest", bh.Submit)

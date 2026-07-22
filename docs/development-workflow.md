@@ -28,6 +28,9 @@
    **先提出需求與使用者確認，把行為補進腳本，再用腳本執行**，不要用一次性指令繞過。
 3. 一次性指令只用於診斷（例如進 container 看狀態），不作為驗收依據。
 
+Dev stack smoke 也走 repo script：`scripts/smoke-dev.sh` 會啟動 isolated dev compose、
+等待 backend 與 python-server health check 通過，失敗時自動印出服務狀態與核心 log。
+
 理由：手打指令會漂移，本專案已經因此踩過三個坑——以 root 執行留下 root-owned 檔案
 （`backend/server` 曾被誤 commit、`backend/internal/ui/dist` 一度無法被覆寫）、
 記憶體上限不足導致 Go build OOM、frontend 只掛 `frontend/` 導致 build 產物寫進
@@ -89,20 +92,20 @@ Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/d
 process/thread。
 
 ```bash
-docker compose -f docker-compose.dev.yml up --build -d
+scripts/smoke-dev.sh
+```
+
+可用環境變數覆寫等待時間、log 行數或 health URL：
+
+```bash
+WAIT_SECONDS=120 LOG_TAIL=200 scripts/smoke-dev.sh
+BACKEND_URL=http://localhost:18080/health PYTHON_URL=http://localhost:18001/health scripts/smoke-dev.sh
+```
+
+需要手動查看狀態或 log 時：
+
+```bash
 docker compose -f docker-compose.dev.yml ps
-```
-
-健康檢查：
-
-```bash
-curl http://localhost:18080/health
-curl http://localhost:18001/health
-```
-
-查看 log：
-
-```bash
 docker compose -f docker-compose.dev.yml logs --tail=200 backend
 docker compose -f docker-compose.dev.yml logs --tail=200 python-server
 ```
@@ -137,7 +140,7 @@ docker compose -f docker-compose.dev.yml down -v
 完成程式修改後，至少要做：
 
 - 受影響 runtime 的測試腳本（`backend|python|frontend/scripts/test.sh`）。
-- 若有 migration、API、跨服務整合、排程或 Python/Go 互動，啟動 dev stack 做 smoke test。
+- 若有 migration、API、跨服務整合、排程或 Python/Go 互動，跑 `scripts/smoke-dev.sh` 做 dev stack smoke test。
 - 若有前端畫面變更，跑 frontend Docker build，並在 dev stack 或本地 dev server 驗證畫面。
 - 若因環境、網路或外部 token 無法執行某項驗證，最後回報要明確寫出未執行項目與原因。
 

@@ -4,15 +4,19 @@
 This repository contains a stock trading system with three main runtimes. `backend/` is a Go service: entry points live in `cmd/`, application code in `internal/`, reusable packages in `pkg/`, and SQL migrations in `internal/database/migrations/`. `frontend/` is a Svelte/Vite app with routes in `src/routes/`, shared UI in `src/components/`, API clients in `src/lib/api/`, stores in `src/lib/stores/`, and WebSocket code in `src/lib/ws/`. `python/` hosts backtesting, model, worker, and HTTP service code; modular backtest tests live under `python/backtest/modular/**/tests/`. Design and operations notes are in `docs/`.
 
 ## Build, Test, and Development Commands
-Run commands from the relevant subdirectory unless noted.
+Run commands from the repo root unless noted. Prefer repository scripts for validation; they encode the Docker, cache, resource-limit, and file-ownership rules documented in
+[`docs/development-workflow.md`](docs/development-workflow.md).
 
 - `cd backend && go run ./cmd/server`: start the Go API with local config and migrations.
-- `cd backend && go test ./...`: run all Go tests.
-- `cd frontend && npm install`: install frontend dependencies.
 - `cd frontend && npm run dev`: start the Vite development server.
-- `cd frontend && npm run build`: create the production frontend bundle.
-- `cd python && .venv/Scripts/python.exe -m pytest backtest/ -v`: run Python backtest tests on Windows.
-- `docker compose -f docker-compose.dev.yml up --build -d`: start the isolated Docker dev stack for validation.
+- `backend/scripts/test.sh`: run Go `vet`, tests, and build for all packages.
+- `backend/scripts/test.sh ./internal/market/...`: run targeted Go validation.
+- `TEST_FLAGS="-count=1 -v" backend/scripts/test.sh ./internal/market/...`: pass extra Go test flags.
+- `python/scripts/test.sh`: run Python pytest defaults through the project test image.
+- `python/scripts/test.sh backtest/modular/sr_scoring/tests`: run targeted Python tests.
+- `frontend/scripts/test.sh`: run the frontend production build check.
+- `frontend/scripts/test.sh --install`: install frontend dependencies with `npm ci` before the build check.
+- `scripts/smoke-dev.sh`: start the isolated Docker dev stack and wait for backend/python health checks.
 
 For Docker-based validation, project/live separation, smoke tests, and reset commands, follow
 [`docs/development-workflow.md`](docs/development-workflow.md).
@@ -23,11 +27,15 @@ Format Go code with `gofmt`; keep packages lower-case and tests named `*_test.go
 ## Testing Guidelines
 Place Go unit tests beside the package they exercise and prefer table-driven tests for signal, store, and analysis logic. Python tests use pytest and follow `test_*.py` naming under each feature's `tests/` directory. Add or update tests when changing trading signals, persistence behavior, migrations, backtest calculations, or API contracts.
 
-When validating development results with Docker, use the isolated dev compose project documented in
+When validating development results, use the runtime scripts first: `backend/scripts/test.sh`, `python/scripts/test.sh`, `frontend/scripts/test.sh`, and `scripts/smoke-dev.sh`. Do not hand-write one-off `docker run` commands as the validation path. If a script lacks a needed capability, propose the script change and add it after confirmation.
+
+When using Docker validation, use the isolated dev compose project documented in
 [`docs/development-workflow.md`](docs/development-workflow.md). Do not use the live/deploy compose project for test data, migrations, or destructive reset commands.
 
 ## Agent-Specific Instructions
 Use [`docs/development-workflow.md`](docs/development-workflow.md) as the shared workflow source for Docker validation and issue/todo/documentation handling.
+
+For tests and smoke checks, prioritize the repository scripts from `docs/development-workflow.md`. Use direct Docker commands only for diagnostics such as inspecting status or logs, not as the primary validation command.
 
 When receiving a request, first restate the understood requirements and wait for confirmation. Do not browse files, inspect docs, plan, edit, test, or run services before that confirmation. After the requirement is confirmed, inspect only the necessary context and propose a plan. Wait for plan confirmation before executing changes.
 

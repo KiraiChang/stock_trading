@@ -1526,12 +1526,26 @@ JSON `null`，前端應隱藏 scenario 區塊並繼續顯示既有 explanation/d
 完整 `zones` 排序仍由 scoring/ranking 主流程控制。
 
 `analysis.analysis_tips` 由 `tips.py` 組裝，定位為「分析報告閱讀指南 / 小辭典」，
-不是產品操作說明。API 仍維持 `string[]` 以相容前端跑馬燈，但內容固定分成：
+不是產品操作說明。API 仍維持 `string[]` 以相容前端跑馬燈。內容分兩部分：
+
+固定前綴（`_build_analysis_tips` 內硬編字串）：
 
 - 指標小辭典：`RR`、`EV`、`Confidence`、`Trading Score`、`Confluence`。
 - 價位語意：`Support`、`Resistance`、`AT_ZONE`、`Primary Zone`。
 - 事件語意：`Break`、`Bounce`、`Reclaim`、`Invalidated`、`Pullback`。
-- 判讀提醒：支撐不是買點、壓力不是放空點、低信心不是看空、`RR` 高不等於勝率高。
+
+enum 狀態目錄（`ANALYSIS_STATUS_TIPS`，由 `analysis_status_tips()` 展開）分成：事件語意、
+事件生命週期、區間分級、證據分級、市場狀態、趨勢分級、多空傾向、市場行為、進場權限、日 K Gate、
+價格路徑、RR 與模型。每筆為「分類｜CODE：名稱。說明」。此目錄是手工維護、與引擎
+（`decision_engine.py`、`event_engine.py`、`types.py`）分離，維護時名稱需對齊 `decision_engine.py`
+既有中文 label map（如 `HIGH_VOLUME_BREAKDOWN`＝「放量破位」、`ENTRY_READY`＝「日 K 進場條件成立」）。
+
+尾端動態提醒（`_moving_average_tip`／`_chip_tip`）：均線與籌碼的判讀提醒，並統一提示支撐不是買點、
+壓力不是放空點、低信心不是看空、`RR` 高不等於勝率高。
+
+**已知限制**：`ANALYSIS_STATUS_TIPS` 內 `BULLISH_RECOVERY`（市場狀態）、`ENTRY_ALLOWED`（進場權限）
+在引擎中無對應實作，`BUY_READY`（進場權限）僅存在於 `decision_engine.py` 的 rank 對照表、實際永不輸出；
+三者為刻意保留的前瞻／佔位條目，實務上不會出現在真實分析輸出中。
 
 `scoring_rules.py` 負責 trading score 權重、breakdown、recommendation、entry
 relevance breakdown 與 no-direct-chip shadow policy。`utils.py` 放跨模組共用的

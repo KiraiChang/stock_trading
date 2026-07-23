@@ -10,7 +10,7 @@ def test_analysis_status_tips_include_fixed_enum_catalog():
     assert "證據分級｜PENDING_VALIDATION：等待驗證。區間尚未有足夠後續資料驗證" in tips_text
     assert "多空傾向｜BULLISH_CONTINUATION：多頭延續。短線與結構同向偏多" in tips_text
     assert "趨勢分級｜TREND_DOWN：下降趨勢。中期結構偏空" in tips_text
-    assert "市場行為｜CONDITIONAL_HOLD：條件式持有。屬部位防守 gate（position_gate_state）" in tips_text
+    assert "市場行為｜CONDITIONAL_HOLD：條件式持有。屬 semantic action（semantic_pipeline.action_state）" in tips_text
     assert "進場權限｜PROBE_ALLOWED：允許觀察性試探。日 K gate 未阻擋" in tips_text
     assert "日 K Gate｜WAIT_DAILY_CONFIRM：等待日 K 確認。尚缺收盤" in tips_text
     assert "RR 與模型｜RR_QUALIFIED：RR 合格。風險報酬通過最低門檻" in tips_text

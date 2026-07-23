@@ -164,15 +164,11 @@ def _position_action_condition(
     derived_view: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     semantic_pipeline = (derived_view or {}).get("semantic_pipeline") or {}
-    position_gate_state = str(
-        semantic_pipeline.get("action_state")
-        or (derived_view or {}).get("position_gate_state")
-        or "NORMAL"
-    )
+    position_state = str(semantic_pipeline.get("action_state") or "WATCH")
     derived_reasons = list((derived_view or {}).get("position_reason_codes") or [])
     if primary_zone is None:
         return {
-            "state": position_gate_state,
+            "state": position_state,
             "structure_state": structure_state,
             "invalidation_price": None,
             "recovery_price": None,
@@ -191,7 +187,7 @@ def _position_action_condition(
         else:
             reason_codes.append("SUPPORT_DEFENSE")
         return {
-            "state": position_gate_state,
+            "state": position_state,
             "structure_state": structure_state,
             "invalidation_price": primary_zone.price_low,
             "recovery_price": primary_zone.price_high,
@@ -200,7 +196,7 @@ def _position_action_condition(
 
     if primary_zone.role == ZoneType.RESISTANCE.value:
         return {
-            "state": position_gate_state,
+            "state": position_state,
             "structure_state": structure_state,
             "invalidation_price": primary_zone.price_high,
             "recovery_price": primary_zone.price_low,
@@ -208,7 +204,7 @@ def _position_action_condition(
         }
 
     return {
-        "state": position_gate_state,
+        "state": position_state,
         "structure_state": structure_state,
         "invalidation_price": primary_zone.price_low,
         "recovery_price": primary_zone.price_high,
@@ -641,6 +637,25 @@ def _event_state_max_age(states: list[dict[str, Any]], event_type: str) -> int:
     return max(ages, default=0)
 
 
+def _position_context_reason_codes(
+    primary_zone: Optional[ZoneScore],
+    structure_state: str,
+    short_term_regime: str,
+    active_event_types: set[str],
+) -> list[str]:
+    if (
+        structure_state == "SUPPORT_RECLAIM_CONFIRMED"
+        or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
+        or "INTRADAY_RECLAIM" in active_event_types
+    ):
+        return ["POSITION_RECLAIM_DEFENSE"]
+    if primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
+        return ["POSITION_SUPPORT_DEFENSE"]
+    if primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
+        return ["POSITION_RESISTANCE_OVERHEAD"]
+    return []
+
+
 def _decision_semantic_pipeline(
     regime: dict[str, Any],
     primary_zone: Optional[ZoneScore],
@@ -866,37 +881,28 @@ def _decision_derived_view(
         path_gate_state = "RR_BLOCKED"
         reason = str(rr_gate.get("reason_code") or "RR_NOT_QUALIFIED")
         path_reason_codes = [reason]
-        if (
-            structure_state == "SUPPORT_RECLAIM_CONFIRMED"
-            or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
-            or "INTRADAY_RECLAIM" in active_event_types
-        ):
-            position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
-        elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
-            position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
-        elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
-            position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
-        else:
-            position_reason_codes = []
+        position_reason_codes = _position_context_reason_codes(
+            primary_zone,
+            structure_state,
+            short_term_regime,
+            active_event_types,
+        )
     elif "WAIT_PRICE_FOLLOW_THROUGH" in daily_reason_codes:
         path_gate_state = "WAIT_PRICE_FOLLOW_THROUGH"
         path_reason_codes = ["WAIT_PRICE_FOLLOW_THROUGH"]
-        position_reason_codes = ["POSITION_RECLAIM_DEFENSE", "WAIT_PRICE_FOLLOW_THROUGH"]
+        position_reason_codes = _unique_reason_codes([
+            *_position_context_reason_codes(primary_zone, structure_state, short_term_regime, active_event_types),
+            "WAIT_PRICE_FOLLOW_THROUGH",
+        ])
     elif blocking_zone_ahead:
         path_gate_state = "BLOCKING_ZONE_AHEAD"
         path_reason_codes = ["BLOCKING_ZONE_AHEAD"]
-        if (
-            structure_state == "SUPPORT_RECLAIM_CONFIRMED"
-            or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
-            or "INTRADAY_RECLAIM" in active_event_types
-        ):
-            position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
-        elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
-            position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
-        elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
-            position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
-        else:
-            position_reason_codes = []
+        position_reason_codes = _position_context_reason_codes(
+            primary_zone,
+            structure_state,
+            short_term_regime,
+            active_event_types,
+        )
     elif (
         structure_state == "SUPPORT_RECLAIM_CONFIRMED"
         or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
@@ -904,15 +910,30 @@ def _decision_derived_view(
     ):
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
+        position_reason_codes = _position_context_reason_codes(
+            primary_zone,
+            structure_state,
+            short_term_regime,
+            active_event_types,
+        )
     elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
+        position_reason_codes = _position_context_reason_codes(
+            primary_zone,
+            structure_state,
+            short_term_regime,
+            active_event_types,
+        )
     elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
+        position_reason_codes = _position_context_reason_codes(
+            primary_zone,
+            structure_state,
+            short_term_regime,
+            active_event_types,
+        )
     else:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []

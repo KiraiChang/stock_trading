@@ -4,6 +4,7 @@ from ..decision_engine import (
     _daily_confirmation,
     _decision_derived_view,
     _final_entry_permission,
+    _position_action_condition,
     build_decision_summary,
 )
 from ..model import ModelBundle
@@ -879,6 +880,7 @@ def test_derived_position_gate_defend_breakdown_on_active_bearish():
     dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value), active_bearish=True)
     assert dv["path_gate_state"] == "EVENT_RISK"
     assert dv["position_gate_state"] == "DEFEND_BREAKDOWN"
+    assert dv["semantic_pipeline"]["action_state"] == dv["position_gate_state"]
     assert "POSITION_DEFENSE_REQUIRED" in dv["position_reason_codes"]
 
 
@@ -886,6 +888,7 @@ def test_derived_position_gate_defend_breakdown_on_structure_breakdown():
     dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value), structure_state="BREAKDOWN")
     assert dv["path_gate_state"] == "INVALIDATION_RISK"
     assert dv["position_gate_state"] == "DEFEND_BREAKDOWN"
+    assert dv["semantic_pipeline"]["action_state"] == dv["position_gate_state"]
     assert "SUPPORT_BREAKDOWN_RISK" in dv["position_reason_codes"]
 
 
@@ -931,6 +934,17 @@ def test_semantic_pipeline_market_action_avoid_blocks_action_and_entry():
     assert semantic["entry_permission_state"] == "BLOCKED"
     assert "MARKET_ACTION_AVOID" in semantic["reason_codes"]
     assert dv["position_gate_state"] == "AVOID"
+
+
+def test_position_action_condition_ignores_deprecated_position_gate_fallback():
+    condition = _position_action_condition(
+        _zone(role=ZoneType.SUPPORT.value),
+        "NORMAL",
+        {"position_gate_state": "DEFEND_BREAKDOWN", "position_reason_codes": ["POSITION_SUPPORT_DEFENSE"]},
+    )
+
+    assert condition["state"] == "WATCH"
+    assert "POSITION_SUPPORT_DEFENSE" in condition["reason_codes"]
 
 
 def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():

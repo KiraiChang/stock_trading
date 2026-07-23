@@ -2,7 +2,7 @@
 
 `scoring.py`（zone 評分序列化）與 `decision_engine.py`（decision snapshot 序列化）
 都需要把 zone 的 tier / role 轉成中文顯示標籤。抽到這裡單一來源，避免兩邊各自
-定義一份、修改時漏改一邊造成 drift（見 T-035）。
+定義一份、修改時漏改一邊造成 drift。
 
 只依賴 `types.py`；`scoring` 依賴 `decision_engine`，兩者再依賴本模組，無循環。
 """

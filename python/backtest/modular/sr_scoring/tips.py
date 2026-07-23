@@ -237,7 +237,7 @@ ANALYSIS_STATUS_TIPS: dict[str, list[dict[str, str]]] = {
         {
             "code": "CONDITIONAL_HOLD",
             "name": "條件式持有",
-            "description": "屬部位防守 gate（position_gate_state）：可以持有但必須守住防守線或等待延續，條件失效就要重評估。",
+            "description": "屬 semantic action（semantic_pipeline.action_state）：可以持有但必須守住防守線或等待延續，條件失效就要重評估。",
         },
         {
             "code": "REDUCE_ON_BREAKDOWN",

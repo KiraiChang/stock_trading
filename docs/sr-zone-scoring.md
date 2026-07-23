@@ -656,7 +656,8 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 P0–P2 已把語意 gate 接進 derived view，價位型欄位仍由各自函式計算實際價格，避免把 price
 math 塞進 lifecycle layer。`decision_derived_view.version=decision-derived-view-p2` 是目前
 收斂後的 payload：不再輸出 production 空轉 echo 的 `final_entry_gate_state`，也不在
-`price_path` / `position_action_condition` 內輸出與 legacy state 平行的 gate 欄位。
+`price_path` / `position_action_condition` 內輸出與 legacy state 平行的 gate 欄位。此段是
+T-034 完成後的現況規格；後續維護以本文件為準，不再於 `docs/todo.md` 追蹤完成封存。
 
 P3 開始新增 `decision_derived_view.semantic_pipeline` contract，用來明確呈現單向語意推導鏈：
 
@@ -874,7 +875,8 @@ Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 `position_action_condition.state` 讀 `semantic_pipeline.action_state`；legacy
 `decision_derived_view.position_gate_state` 僅為相容 alias，也等於 `semantic_pipeline.action_state`，
 不得再作為獨立推導來源（前端型別 `SRDecisionDerivedView.position_gate_state` 已標 `@deprecated`，
-請改讀 `semantic_pipeline.action_state`）。`final_entry_permission.state` 讀
+請改讀 `semantic_pipeline.action_state`）。若無 semantic pipeline（理論上只會出現在手動呼叫或舊資料
+相容路徑），`position_action_condition.state` 保守回 `WATCH`。`final_entry_permission.state` 讀
 `semantic_pipeline.entry_permission_state`，但 daily `INVALIDATED` / `BLOCKED` /
 `CHASING_RISK` 仍保守優先。`market_bias` 讀 `semantic_pipeline.bias_state`。
 
@@ -900,6 +902,9 @@ Legacy action 應由 Market Regime、primary zone、`entry_relevance_score`、ma
 `HOLD` 表示事件已確認但仍需搭配防守線管理，`DEFEND_BREAKDOWN` 表示優先防守。前端應列出
 `invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`，不可只看 legacy
 `position_action=HOLD`。
+`decision_derived_view.position_reason_codes` 是部位防守/價位背景 context，例如
+`POSITION_SUPPORT_DEFENSE`、`POSITION_RESISTANCE_OVERHEAD`、`POSITION_RECLAIM_DEFENSE`；
+它們不是另一套 action state，也不得覆蓋 `semantic_pipeline.action_state`。
 
 `entry_action_state` 是 legacy 進場階段明細，不取代 `final_entry_permission`：
 

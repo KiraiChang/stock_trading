@@ -166,8 +166,8 @@ docker compose -f docker-compose.dev.yml down -v
 ### A. 測試驗證
 
 - [ ] 受影響 runtime 的 `scripts/test.sh` 全綠，且用 `-count=1`（或等效）跑過一次，不靠 cache 假綠。
-- [ ] 新增／修改的邏輯**每個分支**都有斷言。曾發生新的 `position_gate_state` 分支
-      （`DEFEND_BREAKDOWN` / `SUPPORT_DEFENSE` / `UPSIDE_BREAKOUT_REQUIRED`）只實作沒測到。
+- [ ] 新增／修改的邏輯**每個分支**都有斷言。曾發生新的 semantic action / position context 分支
+      （例如 `DEFEND_BREAKDOWN`、`POSITION_SUPPORT_DEFENSE`、`POSITION_RESISTANCE_OVERHEAD`）只實作沒測到。
 - [ ] 期望值來自**規格**、且測的是 **production 真的會產生的輸入**。不要手工捏造 production
       永不出現的分歧來「驗證」一個實際空轉的能力（`final_entry_gate_state` echo 的教訓）。見品質守則 §1。
 - [ ] 若動到 migration／API／跨服務／排程／Python↔Go 互動，跑過 `scripts/smoke-dev.sh`。
@@ -179,7 +179,7 @@ docker compose -f docker-compose.dev.yml down -v
 - [ ] 完成的 `issue.md` / `todo.md` 項目已移除或搬到「已完成封存」；移除前把 durable 設計寫回主題文件，
       並**修掉其他文件指向該筆的交叉引用**（避免斷鏈）。見「文件收斂規則」。
 - [ ] 狀態誠實：phased 工作在收尾前標「進行中」並保留剩餘 phase，**不要提前標「已完成」**。曾兩次把
-      只做到一半的 T-034 標成完成。
+      phased semantic pipeline 工作在只做到一半時標成完成。
 
 ### C. 前後端契約與一致性
 

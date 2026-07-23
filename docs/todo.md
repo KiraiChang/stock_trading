@@ -351,41 +351,34 @@ svelte-check，所以 `frontend/scripts/test.sh` 目前唯一能做的檢查是 
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 進行中（P0 完成） |
 | 優先度 | 高 |
 | 分類 | Python / SR Zone / 架構收斂 |
 | 建立日期 | 2026-07-22 |
-| 來源 | 使用者需求（訊號互相矛盾）＋ [issue.md I-002](./issue.md) |
+| 來源 | 使用者需求（訊號互相矛盾）＋ 2026-07-22 code review |
 
 目標狀態：**Event Lifecycle（事件的產生 → ACTIVE → 延續 → 失效 → 過期）是唯一狀態機，
-其餘所有對外標籤都是它的 derived view**，而不是各自平行計算的結論。涵蓋至少：
+其餘所有對外標籤都是它的 derived view**，而不是各自平行計算的結論。達成後一致性由結構
+保證，而不是靠個案補特例維持。設計現況見
+[sr-zone-scoring.md 的 decision_derived_view / lifecycle family 規則](../docs/sr-zone-scoring.md)。
 
-- `market_bias`（`_market_bias`）
-- `market_regime.short_term_regime` / `tactical_regime`
-- `entry_action_state`、`final_entry_permission`、持有建議
-- 價格路徑敘述（`price_path`）與 event 敘述（「連兩日收高」等）
+**P0 已完成（`decision_derived_view` 版本 `decision-derived-view-p0`）：**
 
-達成後一致性由結構保證，而不是靠個案補特例維持——目前的做法（例如把
-`RECLAIM_ATTEMPT` 加進 `BULLISH_CONTINUATION` 分支）會把矛盾從一組欄位搬到另一組，
-實例見 I-002。
+- `_decision_derived_view` 產出 bias 真值表 ＋ `daily_reason_codes` ＋ `authority_reason_codes`。
+- `market_bias`、`daily_confirmation` 改讀 derived view，不再各自從 raw `market_events` 重推。
+- event lifecycle 的 gating / aging / resolve 規則集中到 `EVENT_FAMILY_LIFECYCLE_RULES`。
+- 跨分析延續改帶完整 `market_event_states` snapshot（含 resolved / expired），Go 欄位
+  `decision_derived_view_json` 貫穿 model / insert / select / 三種 DB migration。
 
-規劃時要先確認的三件事：
+**剩餘 phase（未接線，尚待規劃）：**
 
-1. 權威來源定在 `event_engine.py` 既有的生命週期欄位（`state` / `active` / `age_bars` /
-   `expires_after_bars` / `event_family` / `root_event_type` / `market_state`）嗎？
-2. `decision_engine` 與 `event_engine` 的分工邊界：decision 端是否只准讀 lifecycle 輸出、
-   不得自行從 raw events 再推導一次狀態？
-3. `decision_summary` 是否要增加可追溯欄位（每個標籤是由哪個 event／哪個 lifecycle 狀態
-   推導出來），否則前端仍無法解釋兩個欄位為何這樣搭配。這會動到 Python↔Go↔TS 契約。
-
-實作時必須一併收掉的既有項目（詳見 [I-002 的「建議處理方向」](./issue.md)）：
-
-- **產出 `market_bias` 完整真值表**（short_term_regime × event 狀態 × `market_action` → bias），
-  用它取代目前的分支順序，順帶解決「`AVOID` ＋ 反轉／收復事件仍輸出 `REVERSAL_BIAS`」
-  這個與文件宣稱「三者語意一致」相衝突的行為。不要單獨調分支順序。
-- **同一次更新 `sr-zone-scoring.md` 的 market_bias 規格**（目前仍只列 `RECOVERY` /
-  `EARLY_TREND`，未含 `RECLAIM_ATTEMPT`），並補上依規格獨立推導期望值的契約測試，
-  完成後把 I-002 從 issue 清單移除。
+- `price_path`（第三組矛盾「連兩日收高 vs 價格未延續」的所在）與 `position_action_condition`
+  仍未改吃 derived view；`sr-zone-scoring.md` 權威鏈已把兩者列為目標終局，並標註「規劃中」，
+  待這裡完成後移除該標註。
+- `final_entry_permission` 目前只間接經 `daily_confirmation` 消費 derived view，未直接接線。
+- 前端 `SRDecisionDerivedView` 已有 TS 型別，但 `SRZones.svelte` 尚未渲染
+  `bias_reason_codes` / `daily_reason_codes` / `authority_reason_codes` 這批可追溯欄位
+  （見 development-workflow.md §3；本次先補渲染，其餘 phase 的欄位隨接線再補）。
 
 ---
 

@@ -638,13 +638,32 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 - `recovery_state`：收復/失效狀態；`structure_state=SUPPORT_RECLAIM_CONFIRMED` 時為 `RECOVERY`，其餘與 `structure_state` 同值，避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
 - `primary`：保留給舊前端/舊資料讀取的相容欄位，仍表示主要趨勢 regime。
 
+`decision_summary.decision_derived_view` 是 Event Lifecycle 與對外語意欄位之間的權威轉接層。
+推導順序固定為：`market_events`（本根 raw 偵測）→ `event_state_summary`（lifecycle）→
+`decision_derived_view`（對外語意）→ 對外標籤。除候選區產生與防守線展示外，對外結論不得
+各自直接讀 raw `market_events` 再推導一次狀態。
+
+各對外標籤的接線現況（收斂進度見 [todo.md T-034](./todo.md)）：
+
+| 對外標籤 | 是否已改吃 `decision_derived_view` |
+|---|---|
+| `market_bias` | ✅ 已接線（`bias_state`） |
+| `daily_confirmation` | ✅ 已接線（`daily_reason_codes`） |
+| `final_entry_permission` | ⚠️ 間接，僅經 `daily_confirmation` |
+| `price_path` | ⏳ 規劃中，仍自行推導 |
+| `position_action_condition` | ⏳ 規劃中，仍自行推導 |
+
+標「⏳ 規劃中」者為 T-034 尚未接線的剩餘 phase：目標終局是全部改由 derived view 推導，
+但目前程式尚未落實，接線完成後移除本標註。
+
 `decision_summary.market_bias` 是對外的多空傾向標籤（`BULLISH_BIAS` / `BEARISH_BIAS` /
-`NEUTRAL_BIAS` / `REVERSAL_BIAS` / `BULLISH_CONTINUATION`）。當 `short_term_regime` 為 `RECOVERY`
-或 `EARLY_TREND` 時會輸出 `BULLISH_CONTINUATION`（多頭延續），避免延續型多頭被標成反轉觀察。
-但此升級只在 `market_action != AVOID` 時生效：若長期偏空（`primary=TREND_DOWN`）使 action 落到
-`AVOID`，即使短線是收復確認，`market_bias` 也會回歸與 action 一致的偏空標籤，確保
-`market_bias`、`market_action`、`final_entry_permission` 三者語意一致，不會出現「多頭延續 bias +
-避開 action」的矛盾輸出。
+`NEUTRAL_BIAS` / `REVERSAL_BIAS` / `BULLISH_CONTINUATION`），由
+`decision_derived_view.bias_state` 轉出。`market_action=AVOID` 是 hard blocker，優先輸出
+`BEARISH_BIAS`；若非 `AVOID`，且 `short_term_regime` 為 `RECOVERY`、`RECLAIM_ATTEMPT` 或
+`EARLY_TREND`，輸出 `BULLISH_CONTINUATION`（多頭延續）。只有 lifecycle 仍停在 candidate 的
+`REVERSAL_CANDIDATE`，且沒有更高優先序的 action / regime 條件時，才輸出 `REVERSAL_BIAS`。
+這確保 `market_bias`、`market_action`、`final_entry_permission` 三者語意一致，不會出現
+「多頭延續 bias + 避開 action」或「active reclaim 還被標成反轉觀察」的矛盾輸出。
 
 Regime 預設門檻：
 
@@ -685,6 +704,15 @@ P2 的無資料表 lifecycle 摘要，用來區分 `CANDIDATE` / `CONFIRMED` / `
 - `active_bearish_events`：Decision hard gate 會使用的 active bearish risk。
 - `market_state`：由 active event state 推導的短線市場狀態。
 
+Lifecycle gating 與 aging 規則由 event family 統一定義，不得在 decision 欄位各自重算：
+
+| Event family | 可進入 gating 的 state | `expires_after_bars` | resolve 條件 |
+|---|---|---:|---|
+| `VOLUME_CONTEXT` | `ACTIVE` | 1 | 不 resolve 其他事件，只作當根量能 context |
+| `SUPPORT_BREAKDOWN` | `CONFIRMED` / `ACTIVE` | 2 | 同 zone 出現 confirmed/active `INTRADAY_RECLAIM` |
+| `SUPPORT_RECLAIM` | `CONFIRMED` / `ACTIVE` | 2 | 目前不 resolve bullish event；未延續則 aging 後 `EXPIRED` |
+| `SUPPORT_REVERSAL` | `ACTIVE` | 2 | candidate/confirmed 階段只作觀察，未升級前不進 gating |
+
 同一 zone 若出現 `HIGH_VOLUME_BREAKDOWN → INTRADAY_RECLAIM → REVERSAL_CANDIDATE`，
 raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
 `event_state_summary` 會變成 `RESOLVED`，不得再作為 active bearish gate 永久強制
@@ -696,25 +724,28 @@ raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
 breakdown；必須由收盤收回上緣的 `INTRADAY_RECLAIM` 這類 confirmed/active event
 觸發 resolve。
 
-Decision gating 一律只消費 `event_state_summary.active`：primary zone 選擇
-（`_pick_primary_zone`）、market action（`_decision_action`）、entry action state、
+Decision gating 一律只消費 `event_state_summary.active` 與 `decision_derived_view`：primary zone
+選擇（`_pick_primary_zone`）、market action（`_decision_action`）、entry action state、
 market bias（`_market_bias`）與 event-aware entry relevance（`_entry_relevance_score_with_events`）
-都吃 active 事件集合，已被 resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw
-event chain 保留給對外呈現（`market_events` / `event_sequence` / `event_state_summary`）。
+都吃 active lifecycle / derived state，已被 resolve 的 breakdown 不會再懲罰 relevance 或翻空
+bias。完整 raw event chain 保留給對外呈現（`market_events` / `event_sequence` /
+`event_state_summary`）。
 
 跨分析延續由 Go backend 在建立新分析前讀取同 `symbol/timeframe` 最近一筆 analysis 的
-active `market_event_states`，透過 Python `/sr-zones` request 的 `previous_event_states`
-傳入。Python 會先把 previous active states 放入 lifecycle map，再套用本次 latest candle
-事件：若本次沒有新事件，前次 active breakdown 會繼續進入 `active_bearish_events`；若本次
-出現 confirmed/active `INTRADAY_RECLAIM`，同 zone 的 previous breakdown 會轉為
-`RESOLVED`。
+完整 `market_event_states` snapshot（包含 active / resolved / expired），透過 Python
+`/sr-zones` request 的 `previous_event_states` 傳入。Python 會先把 previous lifecycle states
+放入 lifecycle map，再套用本次 latest candle 事件：若本次沒有新事件，前次 active breakdown
+會繼續進入 `active_bearish_events`；若本次出現 confirmed/active `INTRADAY_RECLAIM`，同 zone
+的 previous breakdown 會轉為 `RESOLVED`。resolved / expired state round-trip 回 Python 後
+不得重新變 active，只能維持 resolved、進一步 aging 成 expired，或被同 family fresh detection
+覆蓋為新的 age=0 state。
 
 **Aging → `EXPIRED`（避免事件無限期停留在 active）**：每個 event state 帶 `age_bars`
 存活計數，隨 state JSON 經 Go round-trip 累積——每被 carry 一次（一根 K 棒/分析）+1，被
-當根新偵測覆蓋時歸零。carried 且未被 resolve 的 active 事件，`age_bars` 達到自身
-`expires_after_bars`（偵測時設定，如 breakdown/reclaim=2）即轉 `EXPIRED`、`active=false`，
-退出 gating 與後續 carry；未帶 `expires_after_bars` 的事件（如 `EXTREME_VOLUME` context）
-套 `DEFAULT_EVENT_EXPIRES_AFTER_BARS`（預設 3），確保沒有任何 carried 事件永生。
+當根新偵測覆蓋時歸零。carried state 的 `age_bars` 達到自身 `expires_after_bars` 即轉
+`EXPIRED`、`active=false`，退出 gating；resolved state 也會 aging 成 expired，避免已解除事件
+永久停留在 lifecycle snapshot。未定義 family 規則的事件套
+`DEFAULT_EVENT_EXPIRES_AFTER_BARS`（預設 3），確保沒有任何 carried 事件永生。
 `expires_after_bars` 與 `age_bars` 由 Go `scoreZonesPreviousEventStates` 從 `state_json`
 帶回（缺 `expires_after_bars` 時送 `null` 讓 Python 套預設，而非誤傳 0 造成立即過期）。
 
@@ -737,7 +768,10 @@ daily open 時使用 `abs(close - open) / (high - low)`，且 `body_ratio_source
 
 `follow_through_state` 保留 legacy 相容欄位；新判讀應優先看
 `price_follow_through_state` 與 `momentum_confirmation_state`，用來區分「價格延續」與
-「動能是否確認」。
+「動能是否確認」。當 active reclaim 已存在但 `price_follow_through_state=NO_PRICE_FOLLOW_THROUGH`
+時，`decision_derived_view.daily_reason_codes` 會輸出 `WAIT_PRICE_FOLLOW_THROUGH`；
+若 entry 端仍只是 `PROBE_ENTRY` / `SMALL_ENTRY`，`daily_confirmation` 可維持
+`PROBE_ALLOWED`，但 reason code 必須清楚表示「RR 通過，仍等待價格延續／動能確認」。
 
 `decision_summary.data_quality.features` 會把缺資料、中性資料與負向資料分開，不把 missing 視為
 neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 `chip_scores.total_score`
@@ -1205,7 +1239,8 @@ raw/debug snapshot，不再作正常 response source。`stock_sr_daily_candidate
 `distance_pct`、`reason`、`event_refs` 與完整 `candidate_json`。
 
 P2-C-5 起，`stock_sr_decisions` 也保存尚未拆成獨立表、但前端決策面需要的 detail JSON：
-`market_regime_json`、`data_quality_json`、`event_sequence_json`、`daily_price_action_json`、
+`market_regime_json`、`data_quality_json`、`decision_derived_view_json`、`event_sequence_json`、
+`daily_price_action_json`、
 `price_path_json`、`daily_confirmation_json`、`defense_lines_json`、`rr_context_json`、
 `rr_gate_json`、`position_action_condition_json`、`market_context_json`、
 `confidence_explanation_json`、`risk_notes_json` 與 `zone_summaries_json`。

@@ -119,6 +119,7 @@ func testProjections() SRZoneNormalizedProjections {
 			EventMarketState:          "BREAKDOWN_RISK",
 			ReasonCodes:               RawJSON(`["SUPPORT_CLOSED_BELOW","HIGH_VOLUME_BREAKDOWN"]`),
 			MarketRegimeJSON:          RawJSON(`{"primary":"TREND_DOWN","label":"偏空"}`),
+			DecisionDerivedViewJSON:   RawJSON(`{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"]}`),
 			PricePathJSON:             RawJSON(`{"path_state":"EVENT_RISK","next_decision_price":581}`),
 			RRContextJSON:             RawJSON(`{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}`),
 			RRGateJSON:                RawJSON(`{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"}`),
@@ -263,6 +264,9 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	if string(decision.MarketRegimeJSON) != `{"primary":"TREND_DOWN","label":"偏空"}` {
 		t.Fatalf("unexpected market_regime_json: %s", decision.MarketRegimeJSON)
 	}
+	if string(decision.DecisionDerivedViewJSON) != `{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"]}` {
+		t.Fatalf("unexpected decision_derived_view_json: %s", decision.DecisionDerivedViewJSON)
+	}
 	if string(decision.RRContextJSON) != `{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}` {
 		t.Fatalf("unexpected rr_context_json: %s", decision.RRContextJSON)
 	}
@@ -399,7 +403,7 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSRZoneRepoGetLatestActiveMarketEventStatesUsesNewestSnapshot(t *testing.T) {
+func TestSRZoneRepoGetLatestMarketEventStatesUsesNewestSnapshot(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()
 
@@ -461,15 +465,18 @@ func TestSRZoneRepoGetLatestActiveMarketEventStatesUsesNewestSnapshot(t *testing
 		t.Fatalf("Create newer failed: %v", err)
 	}
 
-	states, err := repo.GetLatestActiveMarketEventStates(ctx, "2330", "1d")
+	states, err := repo.GetLatestMarketEventStates(ctx, "2330", "1d")
 	if err != nil {
-		t.Fatalf("GetLatestActiveMarketEventStates failed: %v", err)
+		t.Fatalf("GetLatestMarketEventStates failed: %v", err)
 	}
-	if len(states) != 1 {
-		t.Fatalf("expected only latest active states, got %+v", states)
+	if len(states) != 2 {
+		t.Fatalf("expected all latest lifecycle states, got %+v", states)
 	}
 	if states[0].EventType != "INTRADAY_RECLAIM" || states[0].ReasonCodes != RawJSON(`["NEWER_RECLAIM"]`) {
 		t.Fatalf("unexpected latest active state: %+v", states[0])
+	}
+	if states[1].EventType != "HIGH_VOLUME_BREAKDOWN" || states[1].State != "RESOLVED" || states[1].Active {
+		t.Fatalf("expected latest resolved state in lifecycle snapshot: %+v", states[1])
 	}
 }
 

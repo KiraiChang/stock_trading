@@ -595,9 +595,22 @@ export interface SRRRContext {
   position_rr_source: string
 }
 
+export interface SRDecisionDerivedView {
+  version?: string
+  bias_state?: SRMarketBias
+  bias_label?: string
+  bias_reason_codes?: string[]
+  active_event_types?: string[]
+  candidate_event_types?: string[]
+  entry_gate_state?: SREntryActionState | string
+  daily_reason_codes?: string[]
+  authority_reason_codes?: string[]
+}
+
 export interface SRDecisionSummary {
   data_mode?: string
   data_quality?: SRDataQuality
+  decision_derived_view?: SRDecisionDerivedView
   market_regime?: SRMarketRegime
   model_governance?: {
     health_state?: string

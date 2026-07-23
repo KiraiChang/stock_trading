@@ -522,6 +522,7 @@ func buildSRZoneNormalizedProjections(decision, probabilityContext json.RawMessa
 		ReasonCodes:                 store.RawJSON(reasonCodesJSON),
 		MarketRegimeJSON:            decisionRawJSONAt(decisionObj, "null", "market_regime"),
 		DataQualityJSON:             decisionRawJSONAt(decisionObj, "null", "data_quality"),
+		DecisionDerivedViewJSON:     decisionRawJSONAt(decisionObj, "null", "decision_derived_view"),
 		EventSequenceJSON:           decisionRawJSONAt(decisionObj, "[]", "event_sequence"),
 		DailyPriceActionJSON:        decisionRawJSONAt(decisionObj, "null", "daily_price_action"),
 		PricePathJSON:               decisionRawJSONAt(decisionObj, "null", "price_path"),

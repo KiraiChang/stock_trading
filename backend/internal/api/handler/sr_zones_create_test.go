@@ -60,16 +60,16 @@ func TestMapScoreZonesErrorReturnsGatewayTimeoutForNetTimeout(t *testing.T) {
 }
 
 type srZoneRepoStub struct {
-	analyses           []store.SRZoneAnalysis
-	zones              map[uint64][]store.SRZone
-	decisions          map[uint64]*store.SRDecision
-	eventDetections    map[uint64][]store.MarketEventDetection
-	eventStates        map[uint64][]store.MarketEventState
-	latestActiveStates []store.MarketEventState
-	dailyCandidates    map[uint64][]store.SRDailyCandidate
-	modelGovernances   map[uint64]*store.SRModelGovernance
-	nextID             uint64
-	createCalls        int
+	analyses          []store.SRZoneAnalysis
+	zones             map[uint64][]store.SRZone
+	decisions         map[uint64]*store.SRDecision
+	eventDetections   map[uint64][]store.MarketEventDetection
+	eventStates       map[uint64][]store.MarketEventState
+	latestEventStates []store.MarketEventState
+	dailyCandidates   map[uint64][]store.SRDailyCandidate
+	modelGovernances  map[uint64]*store.SRModelGovernance
+	nextID            uint64
+	createCalls       int
 }
 
 func (s *srZoneRepoStub) Create(ctx context.Context, a *store.SRZoneAnalysis, zones []store.SRZone, projections store.SRZoneNormalizedProjections) (uint64, error) {
@@ -148,8 +148,8 @@ func (s *srZoneRepoStub) GetMarketEventStates(ctx context.Context, analysisID ui
 	return s.eventStates[analysisID], nil
 }
 
-func (s *srZoneRepoStub) GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]store.MarketEventState, error) {
-	return s.latestActiveStates, nil
+func (s *srZoneRepoStub) GetLatestMarketEventStates(ctx context.Context, symbol, timeframe string) ([]store.MarketEventState, error) {
+	return s.latestEventStates, nil
 }
 
 func (s *srZoneRepoStub) GetDailyCandidates(ctx context.Context, analysisID uint64) ([]store.SRDailyCandidate, error) {
@@ -447,6 +447,7 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 			PositionAction: "REDUCE_ON_BREAKDOWN", PricePathState: "EVENT_RISK",
 			ModelHealthState: "DEGRADED", EventMarketState: "BREAKDOWN_RISK",
 			ReasonCodes:               store.RawJSON(`["HIGH_VOLUME_BREAKDOWN"]`),
+			DecisionDerivedViewJSON:   store.RawJSON(`{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"]}`),
 			PricePathJSON:             store.RawJSON(`{"path_state":"EVENT_RISK","next_decision_price":581}`),
 			RRGateJSON:                store.RawJSON(`{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"}`),
 			ConfidenceExplanationJSON: store.RawJSON(`{"value":0.72,"level":"HIGH","label":"高","formula_factors":[],"context_factors":[]}`),
@@ -504,6 +505,10 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 			MarketEvents []struct {
 				Type string `json:"type"`
 			} `json:"market_events"`
+			DecisionDerivedView struct {
+				Version   string `json:"version"`
+				BiasState string `json:"bias_state"`
+			} `json:"decision_derived_view"`
 			EventStateSummary struct {
 				MarketState         string           `json:"market_state"`
 				ActiveBearishEvents []map[string]any `json:"active_bearish_events"`
@@ -546,6 +551,10 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 	}
 	if len(parsed.Decision.MarketEvents) != 1 || parsed.Decision.MarketEvents[0].Type != "HIGH_VOLUME_BREAKDOWN" {
 		t.Fatalf("market_events did not use normalized rows: %+v", parsed.Decision.MarketEvents)
+	}
+	if parsed.Decision.DecisionDerivedView.Version != "decision-derived-view-p0" ||
+		parsed.Decision.DecisionDerivedView.BiasState != "BEARISH_BIAS" {
+		t.Fatalf("decision_derived_view did not use normalized rows: %+v", parsed.Decision.DecisionDerivedView)
 	}
 	if parsed.Decision.EventStateSummary.MarketState != "BREAKDOWN_RISK" || len(parsed.Decision.EventStateSummary.ActiveBearishEvents) != 1 {
 		t.Fatalf("event_state_summary did not use normalized rows: %+v", parsed.Decision.EventStateSummary)

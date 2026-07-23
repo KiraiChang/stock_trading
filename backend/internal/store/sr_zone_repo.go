@@ -17,7 +17,7 @@ type SRZoneRepo interface {
 	GetDecision(ctx context.Context, analysisID uint64) (*SRDecision, error)
 	GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]MarketEventDetection, error)
 	GetMarketEventStates(ctx context.Context, analysisID uint64) ([]MarketEventState, error)
-	GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error)
+	GetLatestMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error)
 	GetDailyCandidates(ctx context.Context, analysisID uint64) ([]SRDailyCandidate, error)
 	GetModelGovernance(ctx context.Context, analysisID uint64) (*SRModelGovernance, error)
 	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）。
@@ -173,7 +173,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				analysis_id, symbol, timeframe, analyzed_at,
 				market_bias, entry_permission_state, position_action, price_path_state,
 				model_health_state, event_market_state, reason_codes,
-				market_regime_json, data_quality_json, event_sequence_json, daily_price_action_json,
+				market_regime_json, data_quality_json, decision_derived_view_json,
+				event_sequence_json, daily_price_action_json,
 				price_path_json, daily_confirmation_json, defense_lines_json, rr_context_json,
 				rr_gate_json, position_action_condition_json, market_context_json,
 				confidence_explanation_json, risk_notes_json, zone_summaries_json, decision_summary
@@ -181,7 +182,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				:analysis_id, :symbol, :timeframe, :analyzed_at,
 				:market_bias, :entry_permission_state, :position_action, :price_path_state,
 				:model_health_state, :event_market_state, :reason_codes,
-				:market_regime_json, :data_quality_json, :event_sequence_json, :daily_price_action_json,
+				:market_regime_json, :data_quality_json, :decision_derived_view_json,
+				:event_sequence_json, :daily_price_action_json,
 				:price_path_json, :daily_confirmation_json, :defense_lines_json, :rr_context_json,
 				:rr_gate_json, :position_action_condition_json, :market_context_json,
 				:confidence_explanation_json, :risk_notes_json, :zone_summaries_json, :decision_summary
@@ -386,7 +388,8 @@ func (r *srZoneRepo) GetDecision(ctx context.Context, analysisID uint64) (*SRDec
 		SELECT id, analysis_id, symbol, timeframe, analyzed_at,
 			market_bias, entry_permission_state, position_action, price_path_state,
 			model_health_state, event_market_state, reason_codes,
-			market_regime_json, data_quality_json, event_sequence_json, daily_price_action_json,
+			market_regime_json, data_quality_json, decision_derived_view_json,
+			event_sequence_json, daily_price_action_json,
 			price_path_json, daily_confirmation_json, defense_lines_json, rr_context_json,
 			rr_gate_json, position_action_condition_json, market_context_json,
 			confidence_explanation_json, risk_notes_json, zone_summaries_json, decision_summary, created_at
@@ -404,6 +407,9 @@ func defaultSRDecisionDetailJSON(decision *SRDecision) {
 	}
 	if decision.DataQualityJSON == "" {
 		decision.DataQualityJSON = RawJSON("null")
+	}
+	if decision.DecisionDerivedViewJSON == "" {
+		decision.DecisionDerivedViewJSON = RawJSON("null")
 	}
 	if decision.EventSequenceJSON == "" {
 		decision.EventSequenceJSON = RawJSON("[]")
@@ -468,7 +474,7 @@ func (r *srZoneRepo) GetMarketEventStates(ctx context.Context, analysisID uint64
 	return rows, err
 }
 
-func (r *srZoneRepo) GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error) {
+func (r *srZoneRepo) GetLatestMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error) {
 	var rows []MarketEventState
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 		SELECT id, analysis_id, symbol, timeframe, analyzed_at,
@@ -476,15 +482,15 @@ func (r *srZoneRepo) GetLatestActiveMarketEventStates(ctx context.Context, symbo
 			root_event_type, latest_event_type, direction, state, active,
 			resolved_by, confidence, price_level, reason_codes, state_json, created_at
 		FROM market_event_states
-		WHERE symbol=? AND timeframe=? AND active=?
+		WHERE symbol=? AND timeframe=?
 			AND analysis_id = (
 				SELECT analysis_id FROM market_event_states
-				WHERE symbol=? AND timeframe=? AND active=?
+				WHERE symbol=? AND timeframe=?
 				ORDER BY analyzed_at DESC, analysis_id DESC
 				LIMIT 1
 			)
 		ORDER BY id ASC
-	`), symbol, timeframe, true, symbol, timeframe, true)
+	`), symbol, timeframe, symbol, timeframe)
 	return rows, err
 }
 

@@ -350,6 +350,7 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 			"data_mode":"FULL",
 			"market_regime":{"primary":"TREND_DOWN","market_state":"BREAKDOWN_RISK","flags":["MODEL_DEGRADED"],"label":"偏空","reasons":["跌破支撐"]},
 			"data_quality":{"overall_completeness":0.91,"missing_features":[]},
+			"decision_derived_view":{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"],"daily_reason_codes":["WAIT_PRICE_FOLLOW_THROUGH"]},
 			"market_bias":"BEARISH_BIAS",
 			"position_action":"REDUCE_ON_BREAKDOWN",
 			"final_entry_permission":{"state":"WAIT_CONFIRMATION","reason_codes":["SUPPORT_CLOSED_BELOW"]},
@@ -438,8 +439,27 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 	if string(projections.Decision.ReasonCodes) != `["SUPPORT_CLOSED_BELOW","EVENT_RISK","HOLD_NOT_CALIBRATED","HIGH_VOLUME_BREAKDOWN"]` {
 		t.Fatalf("unexpected decision reason_codes: %s", projections.Decision.ReasonCodes)
 	}
-	if string(projections.Decision.MarketRegimeJSON) == "null" || string(projections.Decision.RRGateJSON) == "null" {
+	if string(projections.Decision.MarketRegimeJSON) == "null" ||
+		string(projections.Decision.DecisionDerivedViewJSON) == "null" ||
+		string(projections.Decision.RRGateJSON) == "null" {
 		t.Fatalf("expected decision detail JSON to be projected: %+v", projections.Decision)
+	}
+	var derived struct {
+		Version          string   `json:"version"`
+		BiasState        string   `json:"bias_state"`
+		BiasReasonCodes  []string `json:"bias_reason_codes"`
+		DailyReasonCodes []string `json:"daily_reason_codes"`
+	}
+	if err := json.Unmarshal([]byte(projections.Decision.DecisionDerivedViewJSON), &derived); err != nil {
+		t.Fatalf("unmarshal decision_derived_view_json: %v", err)
+	}
+	if derived.Version != "decision-derived-view-p0" ||
+		derived.BiasState != "BEARISH_BIAS" ||
+		len(derived.BiasReasonCodes) != 1 ||
+		derived.BiasReasonCodes[0] != "MARKET_ACTION_AVOID" ||
+		len(derived.DailyReasonCodes) != 1 ||
+		derived.DailyReasonCodes[0] != "WAIT_PRICE_FOLLOW_THROUGH" {
+		t.Fatalf("unexpected decision_derived_view_json: %+v raw=%s", derived, projections.Decision.DecisionDerivedViewJSON)
 	}
 	if string(projections.Decision.MarketContextJSON) != `[{"key":"trend","label":"趨勢","value":"偏空"}]` {
 		t.Fatalf("unexpected market_context_json: %s", projections.Decision.MarketContextJSON)
@@ -700,6 +720,7 @@ func TestScoreZonesWithPreviousEventsSendsLifecycleContext(t *testing.T) {
 				ZoneKey     string   `json:"zone_key"`
 				State       string   `json:"state"`
 				Active      bool     `json:"active"`
+				ResolvedBy  *string  `json:"resolved_by"`
 				ReasonCodes []string `json:"reason_codes"`
 				ZoneRef     *struct {
 					Role      string  `json:"role"`
@@ -711,8 +732,8 @@ func TestScoreZonesWithPreviousEventsSendsLifecycleContext(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body failed: %v", err)
 		}
-		if len(body.PreviousEventStates) != 1 {
-			t.Fatalf("expected one previous state, got %+v", body.PreviousEventStates)
+		if len(body.PreviousEventStates) != 2 {
+			t.Fatalf("expected two previous states, got %+v", body.PreviousEventStates)
 		}
 		state := body.PreviousEventStates[0]
 		if state.Type != "HIGH_VOLUME_BREAKDOWN" || state.EventFamily != "SUPPORT_BREAKDOWN" ||
@@ -724,6 +745,13 @@ func TestScoreZonesWithPreviousEventsSendsLifecycleContext(t *testing.T) {
 		}
 		if state.ZoneRef == nil || state.ZoneRef.Role != "SUPPORT" || state.ZoneRef.PriceLow != 580 || state.ZoneRef.PriceHigh != 585 {
 			t.Fatalf("unexpected zone_ref: %+v", state.ZoneRef)
+		}
+		resolved := body.PreviousEventStates[1]
+		if resolved.Type != "HIGH_VOLUME_BREAKDOWN" || resolved.State != "RESOLVED" || resolved.Active {
+			t.Fatalf("unexpected resolved state payload: %+v", resolved)
+		}
+		if resolved.ResolvedBy == nil || *resolved.ResolvedBy != "INTRADAY_RECLAIM" {
+			t.Fatalf("unexpected resolved_by: %+v", resolved.ResolvedBy)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ZoneScoreResult{
@@ -748,6 +776,20 @@ func TestScoreZonesWithPreviousEventsSendsLifecycleContext(t *testing.T) {
 		PriceLevel:      store.NullFloat64{NullFloat64: sql.NullFloat64{Float64: 580, Valid: true}},
 		ReasonCodes:     store.RawJSON(`["SUPPORT_CLOSED_BELOW"]`),
 		StateJSON:       store.RawJSON(`{"zone_ref":{"role":"SUPPORT","price_low":580,"price_high":585}}`),
+	}, {
+		EventKey:        "ZONE:SUPPORT_BREAKDOWN:SUPPORT:570.0000:575.0000",
+		EventType:       "HIGH_VOLUME_BREAKDOWN",
+		EventFamily:     "SUPPORT_BREAKDOWN",
+		EventScope:      "ZONE",
+		ZoneKey:         "SUPPORT:570.0000:575.0000",
+		RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+		LatestEventType: "INTRADAY_RECLAIM",
+		Direction:       "BEARISH",
+		State:           "RESOLVED",
+		Active:          false,
+		ResolvedBy:      store.NullString{NullString: sql.NullString{String: "INTRADAY_RECLAIM", Valid: true}},
+		ReasonCodes:     store.RawJSON(`["RESOLVED_BY_INTRADAY_RECLAIM"]`),
+		StateJSON:       store.RawJSON(`{"confirmation_state":"RESOLVED_BY_INTRADAY_RECLAIM","age_bars":1,"expires_after_bars":2}`),
 	}}
 	if _, err := client.ScoreZonesWithPreviousEvents(context.Background(), "2330", "1d", 500, previous); err != nil {
 		t.Fatalf("ScoreZonesWithPreviousEvents failed: %v", err)

@@ -312,13 +312,33 @@
     NEUTRAL_BIAS: '中性觀察',
     BEARISH_BIAS: '偏空觀察',
     REVERSAL_BIAS: '反轉觀察',
+    BULLISH_CONTINUATION: '多頭延續',
   }
   const marketBiasClass: Record<string, string> = {
     BULLISH_BIAS: 'bg-green-900/40 text-green-300 border-green-700/60',
     NEUTRAL_BIAS: 'bg-gray-700/60 text-gray-300 border-border',
     BEARISH_BIAS: 'bg-red-900/40 text-red-300 border-red-700/60',
     REVERSAL_BIAS: 'bg-indigo-900/40 text-indigo-300 border-indigo-700/60',
+    BULLISH_CONTINUATION: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
   }
+  // decision_derived_view 的 reason code → 人類可讀說明；查無對照時回退顯示原始 code。
+  const derivedReasonText: Record<string, string> = {
+    MARKET_ACTION_AVOID: '盤勢避開（hard block）',
+    SHORT_TERM_RECOVERY: '短線收復確認',
+    SHORT_TERM_RECLAIM_ATTEMPT: '短線收復嘗試',
+    SHORT_TERM_EARLY_TREND: '早期趨勢',
+    REVERSAL_CANDIDATE: '反轉候選（待確認）',
+    MARKET_ACTION_BUY: '盤勢偏多',
+    MARKET_ACTION_BUY_SMALL: '盤勢偏多（小量）',
+    STRUCTURAL_BEARISH_CONTEXT: '結構偏空',
+    STRUCTURAL_BULLISH_CONTEXT: '結構偏多',
+    NEUTRAL_CONTEXT: '中性',
+    WAIT_PRICE_FOLLOW_THROUGH: '等待價格延續',
+    REVERSAL_AWAIT_NEXT_DAILY_CONFIRM: '反轉待隔日確認',
+    NO_MOMENTUM_CONFIRMATION: '動能未確認',
+    MOMENTUM_UNCONFIRMED: '動能未確認',
+  }
+  const derivedReasonLabel = (code: string): string => derivedReasonText[code] ?? code
   const marketActionText: Record<string, string> = {
     BUY: '偏多觀察', BUY_SMALL: '偏多觀察', WATCH: '中性觀察', AVOID: '偏空觀察',
     Buy: '買進', BuySmall: '小量試單', Hold: '觀察', Avoid: '避開',
@@ -1180,6 +1200,17 @@
                 </div>
               </div>
             </div>
+
+            {#if (decisionSummary.decision_derived_view?.authority_reason_codes ?? []).length > 0}
+              <div class="mb-4">
+                <p class="text-muted text-xs mb-1">判定依據（Event Lifecycle 推導）</p>
+                <div class="flex gap-1.5 flex-wrap">
+                  {#each decisionSummary.decision_derived_view?.authority_reason_codes ?? [] as code}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded border border-border/70 bg-panel/50 text-muted text-xs font-mono">{derivedReasonLabel(code)}</span>
+                  {/each}
+                </div>
+              </div>
+            {/if}
 
             {#if decisionSummary.final_entry_permission || decisionSummary.entry_action_state}
               <p class="text-muted text-xs mb-4">

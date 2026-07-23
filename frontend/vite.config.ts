@@ -6,6 +6,22 @@ export default defineConfig({
   build: {
     outDir: '../backend/internal/ui/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) {
+            return undefined
+          }
+          if (id.includes('/svelte/')) {
+            return 'vendor-svelte'
+          }
+          if (id.includes('/lightweight-charts/')) {
+            return 'vendor-charts'
+          }
+          return 'vendor'
+        },
+      },
+    },
   },
   server: {
     port: 5173,

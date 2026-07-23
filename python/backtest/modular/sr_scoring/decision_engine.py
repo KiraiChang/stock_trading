@@ -570,12 +570,104 @@ def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[st
     }
 
 
+def _event_state_types(states: list[dict[str, Any]]) -> set[str]:
+    out: set[str] = set()
+    for state in states:
+        for key in ("latest_event_type", "root_event_type", "type"):
+            value = state.get(key)
+            if value:
+                out.add(str(value))
+    return out
+
+
+def _decision_derived_view(
+    regime: dict[str, Any],
+    primary_zone: Optional[ZoneScore],
+    market_action: str,
+    entry_action_state: str,
+    event_state_summary: dict[str, Any],
+    daily_price_action: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    active_states = list(event_state_summary.get("active") or [])
+    candidate_states = list(event_state_summary.get("candidates") or [])
+    active_event_types = _event_state_types(active_states)
+    candidate_event_types = _event_state_types(candidate_states)
+    short_term_regime = str(regime.get("short_term_regime") or "NORMAL")
+    bias_reason_codes: list[str] = []
+
+    # Bias truth table: action hard blockers win first; lifecycle-based bullish
+    # continuation only applies when the market action itself is not AVOID.
+    if market_action == "AVOID":
+        bias_state = "BEARISH_BIAS"
+        bias_reason_codes.append("MARKET_ACTION_AVOID")
+    elif short_term_regime in ("RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND"):
+        bias_state = "BULLISH_CONTINUATION"
+        bias_reason_codes.append(f"SHORT_TERM_{short_term_regime}")
+    elif "REVERSAL_CANDIDATE" in candidate_event_types:
+        bias_state = "REVERSAL_BIAS"
+        bias_reason_codes.append("REVERSAL_CANDIDATE")
+    elif market_action in ("BUY", "BUY_SMALL"):
+        bias_state = "BULLISH_BIAS"
+        bias_reason_codes.append(f"MARKET_ACTION_{market_action}")
+    elif regime.get("primary") == "TREND_DOWN" or (primary_zone and primary_zone.role == ZoneType.RESISTANCE.value):
+        bias_state = "BEARISH_BIAS"
+        bias_reason_codes.append("STRUCTURAL_BEARISH_CONTEXT")
+    elif regime.get("primary") == "TREND_UP" and (primary_zone is None or primary_zone.role == ZoneType.SUPPORT.value):
+        bias_state = "BULLISH_BIAS"
+        bias_reason_codes.append("STRUCTURAL_BULLISH_CONTEXT")
+    else:
+        bias_state = "NEUTRAL_BIAS"
+        bias_reason_codes.append("NEUTRAL_CONTEXT")
+
+    daily_reason_codes: list[str] = []
+    if "REVERSAL_CANDIDATE" in candidate_event_types:
+        daily_reason_codes.append("REVERSAL_AWAIT_NEXT_DAILY_CONFIRM")
+    if (
+        (short_term_regime == "RECLAIM_ATTEMPT" or "INTRADAY_RECLAIM" in active_event_types)
+        and daily_price_action
+        and daily_price_action.get("price_follow_through_state") == "NO_PRICE_FOLLOW_THROUGH"
+    ):
+        daily_reason_codes.append("WAIT_PRICE_FOLLOW_THROUGH")
+    if (
+        entry_action_state in ("PROBE_ENTRY", "SMALL_ENTRY")
+        and daily_price_action
+        and daily_price_action.get("momentum_confirmation_state") in ("NO_MOMENTUM_CONFIRMATION", "MOMENTUM_UNCONFIRMED")
+    ):
+        daily_reason_codes.append(str(daily_price_action.get("momentum_confirmation_state")))
+
+    return {
+        "version": "decision-derived-view-p0",
+        "bias_state": bias_state,
+        "bias_label": _market_bias_label(bias_state),
+        "bias_reason_codes": bias_reason_codes,
+        "active_event_types": sorted(active_event_types),
+        "candidate_event_types": sorted(candidate_event_types),
+        "entry_gate_state": entry_action_state,
+        "daily_reason_codes": daily_reason_codes,
+        "authority_reason_codes": [*bias_reason_codes, *daily_reason_codes],
+    }
+
+
+def _market_bias_label(state: str) -> str:
+    return {
+        "BULLISH_CONTINUATION": "多頭延續",
+        "REVERSAL_BIAS": "反轉觀察",
+        "BEARISH_BIAS": "偏空觀察",
+        "BULLISH_BIAS": "偏多觀察",
+        "NEUTRAL_BIAS": "中性觀察",
+    }.get(state, state)
+
+
 def _market_bias(
     regime: dict[str, Any],
     primary_zone: Optional[ZoneScore],
     market_action: str,
     market_events: Optional[list[dict[str, Any]]] = None,
+    derived_view: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str]:
+    if derived_view:
+        state = str(derived_view.get("bias_state") or "NEUTRAL_BIAS")
+        return state, _market_bias_label(state)
     event_types = {event.get("type") for event in market_events or []}
     if regime.get("short_term_regime") in ("RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND") and market_action != "AVOID":
         return "BULLISH_CONTINUATION", "多頭延續"
@@ -1301,13 +1393,13 @@ def _daily_confirmation(
     primary_interaction: Optional[dict[str, Any]],
     daily_price_action: dict[str, Any],
     rr_gate: dict[str, Any],
-    event_sequence: list[dict[str, Any]],
+    derived_view: dict[str, Any],
     entry_action_state: str,
     daily_candidate_zones: list[dict[str, Any]],
     current_price: float,
 ) -> dict[str, Any]:
     reason_codes: list[str] = []
-    event_types = {event.get("type") for event in event_sequence}
+    derived_daily_reasons = list(derived_view.get("daily_reason_codes") or [])
     if primary_zone is None:
         state = "WAIT_DAILY_CONFIRM"
         reason_codes.append("DAILY_CANDIDATE_ONLY" if daily_candidate_zones else "NO_PRIMARY_ZONE")
@@ -1320,6 +1412,12 @@ def _daily_confirmation(
     elif _distance_pct_to_zone(primary_zone, current_price) > 0.08:
         state = "CHASING_RISK"
         reason_codes.append("PRICE_TOO_FAR_FROM_ZONE")
+    elif "WAIT_PRICE_FOLLOW_THROUGH" in derived_daily_reasons:
+        if entry_action_state in ("PROBE_ENTRY", "SMALL_ENTRY"):
+            state = "PROBE_ALLOWED"
+        else:
+            state = "WAIT_DAILY_CONFIRM"
+        reason_codes.append("WAIT_PRICE_FOLLOW_THROUGH")
     elif (
         primary_zone.role == ZoneType.SUPPORT.value
         and primary_interaction
@@ -1333,7 +1431,7 @@ def _daily_confirmation(
         else:
             state = "PROBE_ALLOWED"
             reason_codes.append("DAILY_SUPPORT_RECLAIM")
-    elif "REVERSAL_CANDIDATE" in event_types or "INTRADAY_RECLAIM" in event_types:
+    elif "REVERSAL_AWAIT_NEXT_DAILY_CONFIRM" in derived_daily_reasons:
         state = "WAIT_DAILY_CONFIRM"
         reason_codes.append("REVERSAL_AWAIT_NEXT_DAILY_CONFIRM")
     elif entry_action_state in ("ACCUMULATE", "BUY"):
@@ -1345,6 +1443,15 @@ def _daily_confirmation(
     else:
         state = "WAIT_DAILY_CONFIRM"
         reason_codes.append("DAILY_CONFIRMATION_REQUIRED")
+
+    # derived daily reasons 只在「進場軌道」的結論上補回。硬性阻擋（無主 zone、設定失效、
+    # RR 不過、追價風險）與進場條件無關，補這些 code 只會產生「禁止進場又說等待價格延續」
+    # 的矛盾標籤——正是 I-002 要消除的訊號不一致。
+    entry_track = primary_zone is not None and state not in ("INVALIDATED", "BLOCKED", "CHASING_RISK")
+    if entry_track:
+        for code in derived_daily_reasons:
+            if code not in reason_codes:
+                reason_codes.append(code)
 
     labels = {
         "BLOCKED": "禁止進場",
@@ -1526,7 +1633,6 @@ def build_decision_summary(
         regime, primary_zone, current_price, primary_interaction, active_market_events
     )
     entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, active_market_events)
-    market_bias, market_bias_label = _market_bias(regime, primary_zone, market_action, active_market_events)
     rr_gate = _rr_gate(primary_zone, entry_action_state)
     rr_context = _rr_context(primary_zone)
     nearest_zone = _nearest_decision_zone(zone_scores, current_price)
@@ -1544,6 +1650,21 @@ def build_decision_summary(
         previous_candle_high,
         previous_candle_low,
         previous_candle_close,
+    )
+    decision_derived_view = _decision_derived_view(
+        regime,
+        primary_zone,
+        market_action,
+        entry_action_state,
+        event_state_summary,
+        daily_price_action,
+    )
+    market_bias, market_bias_label = _market_bias(
+        regime,
+        primary_zone,
+        market_action,
+        active_market_events,
+        decision_derived_view,
     )
     event_sequence = _event_sequence(market_events)
     daily_candidate_zones = _daily_candidate_zones(
@@ -1572,7 +1693,7 @@ def build_decision_summary(
         primary_interaction,
         daily_price_action,
         rr_gate,
-        event_sequence,
+        decision_derived_view,
         entry_action_state,
         daily_candidate_zones,
         current_price,
@@ -1661,6 +1782,7 @@ def build_decision_summary(
         "market_events": market_events,
         "event_state_summary": event_state_summary,
         "event_sequence": event_sequence,
+        "decision_derived_view": decision_derived_view,
         "daily_price_action": daily_price_action,
         "daily_candidate_zones": daily_candidate_zones,
         "price_path": price_path,
@@ -1672,6 +1794,7 @@ def build_decision_summary(
         "decision_contract": {
             "version": "sr-zone-decision-p0",
             "authoritative_fields": [
+                "decision_derived_view",
                 "market_bias",
                 "final_entry_permission",
                 "position_action",

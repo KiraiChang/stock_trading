@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..decision_engine import _final_entry_permission, build_decision_summary
+from ..decision_engine import _daily_confirmation, _final_entry_permission, build_decision_summary
 from ..model import ModelBundle
 from ..types import (
     ConfidenceLevel,
@@ -552,6 +552,141 @@ def test_carried_active_reclaim_in_uptrend_outputs_bullish_continuation_bias():
     assert ds["event_state_summary"]["market_state"] == "RECLAIM_ATTEMPT"
     assert ds["market_regime"]["short_term_regime"] == "RECLAIM_ATTEMPT"
     assert ds["market_bias"] == "BULLISH_CONTINUATION"
+    assert ds["decision_derived_view"]["bias_state"] == "BULLISH_CONTINUATION"
+
+
+def test_carried_active_reclaim_does_not_override_avoid_bias():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 0,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [zone],
+        global_trend=-0.03,
+        current_price=102.0,
+        candle_high=103.0,
+        candle_low=101.0,
+        candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    assert ds["event_state_summary"]["market_state"] == "RECLAIM_ATTEMPT"
+    assert ds["market_action"] == "AVOID"
+    assert ds["market_bias"] == "BEARISH_BIAS"
+    assert ds["decision_derived_view"]["bias_reason_codes"] == ["MARKET_ACTION_AVOID"]
+
+
+def test_rr_qualified_probe_waits_for_price_follow_through():
+    zone = _zone(
+        low=98.89375,
+        high=101.9875,
+        risk_reward_ratio=2.58,
+        confidence=0.72,
+        trading_score=82.0,
+    )
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.8937:101.9875",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [zone],
+        current_price=103.85,
+        global_trend=0.017,
+        chip_summary={"missing": False, "score": 3.6, "signal": "NEUTRAL"},
+        candle_open=104.5,
+        candle_high=104.8,
+        candle_low=103.3,
+        candle_close=103.85,
+        previous_candle_open=100.0,
+        previous_candle_high=102.5,
+        previous_candle_low=99.85,
+        previous_candle_close=102.5,
+        model_governance={
+            "health_state": "DEGRADED",
+            "blocking_flags": [],
+            "warning_flags": ["HOLD_NOT_CALIBRATED"],
+            "confidence_gate": {
+                "state": "DEGRADED",
+                "allow_entry": True,
+                "max_entry_state": "SMALL_ENTRY",
+                "reason_codes": ["HOLD_NOT_CALIBRATED"],
+            },
+        },
+        previous_event_states=previous,
+    )
+
+    assert ds["rr_gate"]["qualified"] is True
+    assert ds["daily_price_action"]["price_follow_through_state"] == "NO_PRICE_FOLLOW_THROUGH"
+    assert ds["daily_confirmation"]["state"] == "PROBE_ALLOWED"
+    assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["daily_confirmation"]["reason_codes"]
+    assert ds["final_entry_permission"]["state"] == "PROBE_ENTRY"
+
+
+def test_hard_block_daily_confirmation_does_not_backfill_derived_reasons():
+    # 硬性阻擋（此處 RR 不過 → BLOCKED）不得回填 derived daily reasons，否則會產生
+    # 「禁止進場」卻同時掛「等待價格延續」的矛盾標籤（I-002 要消除的訊號不一致）。
+    zone = _zone(low=98.0, high=100.0)
+    derived_view = {"daily_reason_codes": ["WAIT_PRICE_FOLLOW_THROUGH", "NO_MOMENTUM_CONFIRMATION"]}
+
+    daily = _daily_confirmation(
+        primary_zone=zone,
+        primary_interaction=None,
+        daily_price_action={},
+        rr_gate={"qualified": False, "reason_code": "RR_NOT_QUALIFIED"},
+        derived_view=derived_view,
+        entry_action_state="PROBE_ENTRY",
+        daily_candidate_zones=[],
+        current_price=99.0,
+    )
+
+    assert daily["state"] == "BLOCKED"
+    assert daily["reason_codes"] == ["RR_NOT_QUALIFIED"]
+    assert "WAIT_PRICE_FOLLOW_THROUGH" not in daily["reason_codes"]
+    assert "NO_MOMENTUM_CONFIRMATION" not in daily["reason_codes"]
+
+
+def test_entry_track_daily_confirmation_still_backfills_derived_reasons():
+    # 對照組：進場軌道（此處 PROBE_ALLOWED）仍要保留 derived daily reasons，確認上一個
+    # 測試擋掉的是「硬阻擋」而非把回填整個關掉。
+    zone = _zone(low=98.0, high=100.0)
+    derived_view = {"daily_reason_codes": ["NO_MOMENTUM_CONFIRMATION"]}
+
+    daily = _daily_confirmation(
+        primary_zone=zone,
+        primary_interaction=None,
+        daily_price_action={},
+        rr_gate={"qualified": True},
+        derived_view=derived_view,
+        entry_action_state="PROBE_ENTRY",
+        daily_candidate_zones=[],
+        current_price=99.0,
+    )
+
+    assert daily["state"] == "PROBE_ALLOWED"
+    assert "NO_MOMENTUM_CONFIRMATION" in daily["reason_codes"]
 
 
 def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():

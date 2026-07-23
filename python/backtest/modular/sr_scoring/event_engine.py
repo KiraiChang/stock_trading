@@ -21,6 +21,25 @@ LIFECYCLE_EXPIRED = "EXPIRED"
 # 預設，確保沒有任何 carried 事件會無限期停留在 active。
 DEFAULT_EVENT_EXPIRES_AFTER_BARS = 3
 
+EVENT_FAMILY_LIFECYCLE_RULES = {
+    "VOLUME_CONTEXT": {
+        "gating_states": (LIFECYCLE_ACTIVE,),
+        "expires_after_bars": 1,
+    },
+    "SUPPORT_BREAKDOWN": {
+        "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
+        "expires_after_bars": 2,
+    },
+    "SUPPORT_RECLAIM": {
+        "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
+        "expires_after_bars": 2,
+    },
+    "SUPPORT_REVERSAL": {
+        "gating_states": (LIFECYCLE_ACTIVE,),
+        "expires_after_bars": 2,
+    },
+}
+
 EVENT_TYPE_META = {
     "EXTREME_VOLUME": {
         "family": "VOLUME_CONTEXT",
@@ -184,6 +203,25 @@ def _zone_key(zone_ref: Optional[dict[str, Any]]) -> str:
     return f"{role}:{float(zone_ref.get('price_low', 0.0)):.4f}:{float(zone_ref.get('price_high', 0.0)):.4f}"
 
 
+def _lifecycle_rule(event_family: str) -> dict[str, Any]:
+    return EVENT_FAMILY_LIFECYCLE_RULES.get(event_family, {
+        "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
+        "expires_after_bars": DEFAULT_EVENT_EXPIRES_AFTER_BARS,
+    })
+
+
+def _event_expires_after_bars(event_type: str, event_family: str, explicit_value: Any = None) -> int:
+    if explicit_value is not None:
+        return int(explicit_value)
+    meta = EVENT_TYPE_META.get(event_type, {})
+    family = str(meta.get("family") or event_family)
+    return int(_lifecycle_rule(family).get("expires_after_bars") or DEFAULT_EVENT_EXPIRES_AFTER_BARS)
+
+
+def _state_allows_gating(event_family: str, state_name: str) -> bool:
+    return state_name in set(_lifecycle_rule(event_family).get("gating_states") or ())
+
+
 def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
     event_type = str(event.get("type") or "UNKNOWN")
     meta = EVENT_TYPE_META.get(event_type, {})
@@ -198,8 +236,9 @@ def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("zone_key", _zone_key(zone_ref))
     normalized.setdefault("state", lifecycle_state)
     normalized.setdefault("lifecycle_state", normalized["state"])
+    normalized.setdefault("expires_after_bars", _event_expires_after_bars(event_type, event_family, event.get("expires_after_bars")))
     normalized.setdefault("confirmation_state", "CONFIRMED" if normalized["state"] in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE) else "PENDING")
-    normalized.setdefault("active", normalized["state"] in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE))
+    normalized["active"] = bool(normalized.get("active")) and _state_allows_gating(event_family, str(normalized["state"]))
     normalized.setdefault("reason_codes", [event_type])
     return normalized
 
@@ -214,7 +253,7 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
     event_family = str(state.get("event_family") or meta.get("family") or event_type)
     zone_key = str(state.get("zone_key") or _zone_key(state.get("zone_ref")))
     state_name = str(state.get("state") or state.get("lifecycle_state") or LIFECYCLE_ACTIVE)
-    active = bool(state.get("active")) and state_name in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE)
+    active = bool(state.get("active")) and _state_allows_gating(event_family, state_name)
 
     # 每被 carry 一次代表多存活一根 K 棒（analysis）；被當根新偵測覆蓋時，會在 merge
     # 迴圈以 age_bars=0 的新 state 取代（等於重置存活計數）。未被 resolve 的 carried
@@ -222,8 +261,8 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
     # 生命週期，避免事件無限期停留在 active。
     age_bars = int(state.get("age_bars") or 0) + 1
     raw_expires = state.get("expires_after_bars")
-    expires_after = int(raw_expires) if raw_expires is not None else DEFAULT_EVENT_EXPIRES_AFTER_BARS
-    expired = active and age_bars >= expires_after
+    expires_after = _event_expires_after_bars(event_type, event_family, raw_expires)
+    expired = state_name != LIFECYCLE_EXPIRED and age_bars >= expires_after
 
     normalized = dict(state)
     normalized.setdefault("event_key", f"{state.get('event_scope') or 'ZONE'}:{event_family}:{zone_key}")
@@ -245,7 +284,11 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
     else:
         normalized["state"] = state_name
         normalized["active"] = active
-        normalized.setdefault("confirmation_state", state.get("confirmation_state") or ("CONFIRMED" if active else "PENDING"))
+        normalized.setdefault(
+            "confirmation_state",
+            state.get("confirmation_state")
+            or ("RESOLVED" if state_name == LIFECYCLE_RESOLVED else ("CONFIRMED" if active else "PENDING")),
+        )
         normalized.setdefault("reason_codes", reason_codes)
     normalized["carried_from_previous"] = True
     normalized.setdefault("resolved_by", state.get("resolved_by"))
@@ -264,7 +307,6 @@ def build_event_state_summary(
     """
     normalized = sorted(normalize_market_events(events), key=lambda e: EVENT_ORDER.get(str(e.get("type")), 999))
     states: dict[tuple[str, str], dict[str, Any]] = {}
-    resolved: list[dict[str, Any]] = []
 
     for previous in previous_states or []:
         event = _normalize_previous_event_state(previous)
@@ -277,7 +319,7 @@ def build_event_state_summary(
         event_type = str(event.get("type") or "UNKNOWN")
         key = (zone_key, event_family)
         state_name = str(event.get("state") or event.get("lifecycle_state") or LIFECYCLE_CANDIDATE)
-        is_active = bool(event.get("active")) and state_name in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE)
+        is_active = bool(event.get("active")) and _state_allows_gating(event_family, state_name)
         state = {
             "event_key": event.get("event_key"),
             "type": event_type,
@@ -290,7 +332,7 @@ def build_event_state_summary(
             "state": state_name,
             "active": is_active,
             "confirmation_state": event.get("confirmation_state"),
-            "expires_after_bars": event.get("expires_after_bars"),
+            "expires_after_bars": _event_expires_after_bars(event_type, event_family, event.get("expires_after_bars")),
             "age_bars": int(event.get("age_bars") or 0),
             "zone_ref": event.get("zone_ref"),
             "price_level": event.get("price_level"),
@@ -312,12 +354,13 @@ def build_event_state_summary(
             target["active"] = False
             target["latest_event_type"] = event_type
             target["resolved_by"] = event_type
+            target["confirmation_state"] = f"RESOLVED_BY_{event_type}"
             target["reason_codes"] = [*target.get("reason_codes", []), f"RESOLVED_BY_{event_type}"]
-            resolved.append(target)
 
     active = [state for state in states.values() if state.get("active")]
     candidates = [state for state in states.values() if state.get("state") == LIFECYCLE_CANDIDATE]
     confirmed = [state for state in states.values() if state.get("state") == LIFECYCLE_CONFIRMED]
+    resolved = [state for state in states.values() if state.get("state") == LIFECYCLE_RESOLVED]
     expired = [state for state in states.values() if state.get("state") == LIFECYCLE_EXPIRED]
     active_bearish = [state for state in active if state.get("direction") == "BEARISH"]
     active_bullish = [state for state in active if state.get("direction") == "BULLISH"]

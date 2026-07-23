@@ -310,7 +310,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | market_bias / entry_permission_state / position_action | Decision authority fields |
 | price_path_state / model_health_state / event_market_state | Price path、AI health 與 event state 的查詢欄位 |
 | reason_codes | JSON 陣列，彙整 final entry、price path、model governance 與 active bearish event reason codes |
-| market_regime_json / data_quality_json | Decision market regime 與資料品質 detail |
+| market_regime_json / data_quality_json / decision_derived_view_json | Decision market regime、資料品質與 derived view 權威語意 detail |
 | event_sequence_json / daily_price_action_json | 事件序列與 daily price action detail |
 | price_path_json / daily_confirmation_json | Price path 完整 detail 與日 K 確認狀態 |
 | defense_lines_json | tactical / swing / strategic 防守線 |

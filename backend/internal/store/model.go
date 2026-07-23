@@ -186,6 +186,7 @@ type SRDecision struct {
 	ReasonCodes                 RawJSON   `db:"reason_codes"                     json:"reason_codes"`
 	MarketRegimeJSON            RawJSON   `db:"market_regime_json"               json:"market_regime_json"`
 	DataQualityJSON             RawJSON   `db:"data_quality_json"                json:"data_quality_json"`
+	DecisionDerivedViewJSON     RawJSON   `db:"decision_derived_view_json"       json:"decision_derived_view_json"`
 	EventSequenceJSON           RawJSON   `db:"event_sequence_json"              json:"event_sequence_json"`
 	DailyPriceActionJSON        RawJSON   `db:"daily_price_action_json"          json:"daily_price_action_json"`
 	PricePathJSON               RawJSON   `db:"price_path_json"                  json:"price_path_json"`

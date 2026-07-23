@@ -70,7 +70,7 @@ func (s *srProviderRepoStub) GetMarketEventStates(ctx context.Context, analysisI
 	return nil, nil
 }
 
-func (s *srProviderRepoStub) GetLatestActiveMarketEventStates(ctx context.Context, symbol, timeframe string) ([]store.MarketEventState, error) {
+func (s *srProviderRepoStub) GetLatestMarketEventStates(ctx context.Context, symbol, timeframe string) ([]store.MarketEventState, error) {
 	return nil, nil
 }
 

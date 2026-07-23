@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..event_engine import (
     EXTREME_VOLUME_THRESHOLD,
+    LIFECYCLE_ACTIVE,
     LIFECYCLE_CANDIDATE,
     LIFECYCLE_CONFIRMED,
     LIFECYCLE_EXPIRED,
@@ -339,3 +340,109 @@ def test_carried_event_without_expires_uses_default_threshold():
     assert breakdown["state"] == LIFECYCLE_EXPIRED
     assert breakdown["active"] is False
     assert breakdown["age_bars"] == 3
+
+
+def test_candidate_state_never_enters_active_gating_even_if_active_flag_is_true():
+    events = normalize_market_events([{
+        "type": "HIGH_VOLUME_BREAKDOWN",
+        "direction": "BEARISH",
+        "lifecycle_state": LIFECYCLE_CANDIDATE,
+        "active": True,
+        "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0},
+    }])
+
+    summary = build_event_state_summary(events)
+
+    breakdown = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+    assert breakdown["state"] == LIFECYCLE_CANDIDATE
+    assert breakdown["active"] is False
+    assert summary["active_bearish_events"] == []
+    assert summary["market_state"] == "NORMAL"
+
+
+def test_reversal_family_requires_active_state_before_gating():
+    events = normalize_market_events([{
+        "type": "REVERSAL_CANDIDATE",
+        "direction": "BULLISH",
+        "lifecycle_state": LIFECYCLE_CONFIRMED,
+        "active": True,
+        "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0},
+    }])
+
+    confirmed_summary = build_event_state_summary(events)
+    confirmed = next(s for s in confirmed_summary["states"] if s["event_family"] == "SUPPORT_REVERSAL")
+    assert confirmed["state"] == LIFECYCLE_CONFIRMED
+    assert confirmed["active"] is False
+    assert confirmed_summary["active_bullish_events"] == []
+
+    active_events = normalize_market_events([{
+        "type": "REVERSAL_CANDIDATE",
+        "direction": "BULLISH",
+        "lifecycle_state": LIFECYCLE_ACTIVE,
+        "active": True,
+        "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0},
+    }])
+    active_summary = build_event_state_summary(active_events)
+
+    active = next(s for s in active_summary["states"] if s["event_family"] == "SUPPORT_REVERSAL")
+    assert active["state"] == LIFECYCLE_ACTIVE
+    assert active["active"] is True
+    assert [s["type"] for s in active_summary["active_bullish_events"]] == ["REVERSAL_CANDIDATE"]
+
+
+def test_previous_resolved_state_round_trips_without_reactivation():
+    previous = [_carried_breakdown(
+        state=LIFECYCLE_RESOLVED,
+        active=False,
+        resolved_by="INTRADAY_RECLAIM",
+        latest_event_type="INTRADAY_RECLAIM",
+        age_bars=0,
+    )]
+
+    summary = build_event_state_summary([], previous_states=previous)
+
+    breakdown = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+    assert breakdown["state"] == LIFECYCLE_RESOLVED
+    assert breakdown["active"] is False
+    assert breakdown["resolved_by"] == "INTRADAY_RECLAIM"
+    assert breakdown["age_bars"] == 1
+    assert [s["type"] for s in summary["resolved"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert summary["active_bearish_events"] == []
+    assert summary["market_state"] == "NORMAL"
+
+
+def test_previous_resolved_state_expires_after_threshold():
+    previous = [_carried_breakdown(
+        state=LIFECYCLE_RESOLVED,
+        active=False,
+        resolved_by="INTRADAY_RECLAIM",
+        latest_event_type="INTRADAY_RECLAIM",
+        age_bars=1,
+    )]
+
+    summary = build_event_state_summary([], previous_states=previous)
+
+    breakdown = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+    assert breakdown["state"] == LIFECYCLE_EXPIRED
+    assert breakdown["active"] is False
+    assert "EVENT_EXPIRED_STALE" in breakdown["reason_codes"]
+    assert [s["type"] for s in summary["expired"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert summary["resolved"] == []
+
+
+def test_previous_expired_state_round_trips_without_reactivation():
+    previous = [_carried_breakdown(
+        state=LIFECYCLE_EXPIRED,
+        active=False,
+        age_bars=2,
+        reason_codes=["SUPPORT_CLOSED_BELOW", "EVENT_EXPIRED_STALE"],
+    )]
+
+    summary = build_event_state_summary([], previous_states=previous)
+
+    breakdown = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+    assert breakdown["state"] == LIFECYCLE_EXPIRED
+    assert breakdown["active"] is False
+    assert breakdown["age_bars"] == 3
+    assert [s["type"] for s in summary["expired"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert summary["active_bearish_events"] == []

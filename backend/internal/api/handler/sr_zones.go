@@ -240,6 +240,7 @@ func decisionFromSnapshot(snapshot *srZonePipelineSnapshot) store.RawJSON {
 func applyDecisionDetailJSON(obj map[string]any, decision *store.SRDecision) {
 	setRawObjectIfPresent(obj, "market_regime", decision.MarketRegimeJSON)
 	setRawObjectIfPresent(obj, "data_quality", decision.DataQualityJSON)
+	setRawObjectIfPresent(obj, "decision_derived_view", decision.DecisionDerivedViewJSON)
 	setRawArrayIfPresent(obj, "event_sequence", decision.EventSequenceJSON)
 	setRawObjectIfPresent(obj, "daily_price_action", decision.DailyPriceActionJSON)
 	setRawObjectIfPresent(obj, "price_path", decision.PricePathJSON)
@@ -561,9 +562,9 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	previousEventStates, err := h.repo.GetLatestActiveMarketEventStates(c.Request.Context(), body.Symbol, body.Timeframe)
+	previousEventStates, err := h.repo.GetLatestMarketEventStates(c.Request.Context(), body.Symbol, body.Timeframe)
 	if err != nil {
-		serverError(c, h.log, err, "sr-zones: load previous active event states")
+		serverError(c, h.log, err, "sr-zones: load previous event states")
 		return
 	}
 	result, err := h.client.ScoreZonesWithPreviousEvents(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit, previousEventStates)

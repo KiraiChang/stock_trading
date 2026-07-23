@@ -647,23 +647,40 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
 | 對外標籤 | 接線現況 |
 |---|---|
-| `market_bias` | ✅ 已接線（`bias_state`） |
+| `market_bias` | ✅ 已接線（P3-B 後由 `semantic_pipeline.bias_state` 推導，hard blocker 優先） |
 | `daily_confirmation` | ✅ 已接線（`daily_reason_codes`） |
-| `final_entry_permission` | ✅ 已合併 `final_entry_reason_codes`；state 由 `entry_action_state` 與 `daily_confirmation.state` 保守仲裁 |
+| `final_entry_permission` | ✅ P3-C 後 state 由 `semantic_pipeline.entry_permission_state` 推導；daily invalidated / blocked / chasing risk 仍保守優先 |
 | `price_path` | ✅ `path_state` 由 `path_gate_state` 推導；價位仍由 price path 函式計算 |
-| `position_action_condition` | ✅ `state` 由 `position_gate_state` 推導；防守價仍由 primary zone 計算，`structure_state` 僅供 debug |
+| `position_action_condition` | ✅ P3-C 後 `state` 由 `semantic_pipeline.action_state` 推導；防守價仍由 primary zone 計算，`structure_state` 僅供 debug |
 
 P0–P2 已把語意 gate 接進 derived view，價位型欄位仍由各自函式計算實際價格，避免把 price
 math 塞進 lifecycle layer。`decision_derived_view.version=decision-derived-view-p2` 是目前
 收斂後的 payload：不再輸出 production 空轉 echo 的 `final_entry_gate_state`，也不在
 `price_path` / `position_action_condition` 內輸出與 legacy state 平行的 gate 欄位。
 
+P3 開始新增 `decision_derived_view.semantic_pipeline` contract，用來明確呈現單向語意推導鏈：
+
+```text
+Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
+```
+
+`semantic_pipeline.version=decision-semantic-pipeline-p3`，標準欄位包含：
+`event_signal`、`lifecycle_phase`、`market_state`、`bias_state`、`action_state`、
+`entry_permission_state`、`reason_codes` 與 `source_order`。P3-A 先用 fixture 鎖住
+Close Reclaim 的 `TESTING` / `CONFIRMED` / `CONTINUATION` 語意；P3-B 已讓
+`market_bias` 改由 `semantic_pipeline.bias_state` 推導，`market_action=AVOID` 等 hard
+blocker 會在 semantic pipeline 內統一覆蓋為 `BEARISH_BIAS` / `AVOID` / `BLOCKED`。
+P3-C 已讓 `position_action_condition.state` 與
+`final_entry_permission.state` 分別改由 `semantic_pipeline.action_state` /
+`semantic_pipeline.entry_permission_state` 推導；daily invalidated / blocked / chasing risk
+這類 hard gate 仍保守優先。
+
 `decision_summary.market_bias` 是對外的多空傾向標籤（`BULLISH_BIAS` / `BEARISH_BIAS` /
 `NEUTRAL_BIAS` / `REVERSAL_BIAS` / `BULLISH_CONTINUATION`），由
-`decision_derived_view.bias_state` 轉出。`market_action=AVOID` 是 hard blocker，優先輸出
-`BEARISH_BIAS`；若非 `AVOID`，且 `short_term_regime` 為 `RECOVERY`、`RECLAIM_ATTEMPT` 或
-`EARLY_TREND`，輸出 `BULLISH_CONTINUATION`（多頭延續）。只有 lifecycle 仍停在 candidate 的
-`REVERSAL_CANDIDATE`，且沒有更高優先序的 action / regime 條件時，才輸出 `REVERSAL_BIAS`。
+`decision_derived_view.semantic_pipeline.bias_state` 轉出。`market_action=AVOID` 是 semantic
+hard blocker，會同步輸出 `BEARISH_BIAS`、`action_state=AVOID` 與
+`entry_permission_state=BLOCKED`；若非 `AVOID`，`TESTING` / `CONFIRMED` 的收復修復語境輸出
+`BULLISH_BIAS`，只有 `CONTINUATION` 才輸出 `BULLISH_CONTINUATION`（多頭延續）。
 這確保 `market_bias`、`market_action`、`final_entry_permission` 三者語意一致，不會出現
 「多頭延續 bias + 避開 action」或「active reclaim 還被標成反轉觀察」的矛盾輸出。
 
@@ -726,12 +743,12 @@ raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
 breakdown；必須由收盤收回上緣的 `INTRADAY_RECLAIM` 這類 confirmed/active event
 觸發 resolve。
 
-Decision gating 一律只消費 `event_state_summary.active` 與 `decision_derived_view`：primary zone
-選擇（`_pick_primary_zone`）、market action（`_decision_action`）、entry action state、
-market bias（`_market_bias`）與 event-aware entry relevance（`_entry_relevance_score_with_events`）
-都吃 active lifecycle / derived state，已被 resolve 的 breakdown 不會再懲罰 relevance 或翻空
-bias。完整 raw event chain 保留給對外呈現（`market_events` / `event_sequence` /
-`event_state_summary`）。
+Decision gating 一律只消費 `event_state_summary.active` 與 `decision_derived_view`。P3 後，
+`market_bias`、`position_action_condition.state` 與 `final_entry_permission.state` 的權威來源是
+`decision_derived_view.semantic_pipeline`；primary zone 選擇、legacy market action / entry action state
+與 event-aware entry relevance 仍吃 active lifecycle / derived state 作為相容與明細來源。已被
+resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw event chain 保留給對外呈現
+（`market_events` / `event_sequence` / `event_state_summary`）。
 
 跨分析延續由 Go backend 在建立新分析前讀取同 `symbol/timeframe` 最近一筆 analysis 的
 完整 `market_event_states` snapshot（包含 active / resolved / expired），透過 Python
@@ -772,8 +789,8 @@ daily open 時使用 `abs(close - open) / (high - low)`，且 `body_ratio_source
 `price_follow_through_state` 與 `momentum_confirmation_state`，用來區分「價格延續」與
 「動能是否確認」。當 active reclaim 已存在但 `price_follow_through_state=NO_PRICE_FOLLOW_THROUGH`
 時，`decision_derived_view.daily_reason_codes` 會輸出 `WAIT_PRICE_FOLLOW_THROUGH`；
-若 entry 端仍只是 `PROBE_ENTRY` / `SMALL_ENTRY`，`daily_confirmation` 可維持
-`PROBE_ALLOWED`，但 reason code 必須清楚表示「RR 通過，仍等待價格延續／動能確認」。
+`daily_confirmation` 與 `final_entry_permission` 可維持 `PROBE_ALLOWED`，但 reason code
+必須清楚表示「RR 通過，仍等待價格延續／動能確認」。
 
 `decision_summary.data_quality.features` 會把缺資料、中性資料與負向資料分開，不把 missing 視為
 neutral，也不把 neutral 視為 bearish。籌碼 `chip_summary.score` 使用 `chip_scores.total_score`
@@ -827,9 +844,45 @@ Zone lifecycle 目前由 deterministic EOD rule 產生，可能值包含 `CANDID
 的 `nearest_support_zone` / `nearest_resistance_zone` 選擇），避免過寬、模糊的區間僅因中心價較近
 就勝過較窄、較精確的關鍵價位。
 
-### 唯一 Action
+### Semantic Pipeline 與 Legacy Action
 
-`action` 是整份分析唯一的操作結論，避免使用者自行從多張 zone 卡片拼湊結果。目前限定四種：
+P3 後，對外交易語意的權威鏈路是：
+
+```text
+Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
+```
+
+對應欄位為 `decision_derived_view.semantic_pipeline`：
+
+| 欄位 | 語意 | 典型值 |
+|---|---|---|
+| `event_signal` | 最新事件語意 | `CLOSE_RECLAIM`、`SUPPORT_TEST`、`CLOSE_BREAKDOWN` |
+| `lifecycle_phase` | 事件成熟度 | `TESTING`、`CONFIRMED`、`CONTINUATION`、`BREAKDOWN` |
+| `market_state` | 市場狀態 | `BULLISH_RECOVERY`、`BULLISH_CONTINUATION`、`REVERSAL_CANDIDATE`、`BREAKDOWN_RISK` |
+| `bias_state` | 對外多空傾向來源 | `BULLISH_BIAS`、`BULLISH_CONTINUATION`、`REVERSAL_BIAS`、`BEARISH_BIAS` |
+| `action_state` | 持有者語意來源 | `CONDITIONAL_HOLD`、`HOLD`、`DEFEND_BREAKDOWN`、`AVOID`、`WATCH` |
+| `entry_permission_state` | 未持有者進場權限來源 | `PROBE_ALLOWED`、`ENTRY_ALLOWED`、`WAIT_CONFIRMATION`、`BLOCKED` |
+
+標準 Close Reclaim 閱讀路徑：
+
+| 情境 | Semantic path |
+|---|---|
+| 收盤收復當日 | `Close Reclaim -> TESTING -> BULLISH_RECOVERY -> CONDITIONAL_HOLD -> PROBE_ALLOWED` |
+| 隔日仍守住 | `Close Reclaim -> CONFIRMED -> BULLISH_RECOVERY -> HOLD -> PROBE_ALLOWED` |
+| 明確突破延續 | `Close Reclaim -> CONTINUATION -> BULLISH_CONTINUATION -> HOLD -> ENTRY_ALLOWED` |
+
+`position_action_condition.state` 讀 `semantic_pipeline.action_state`；legacy
+`decision_derived_view.position_gate_state` 僅為相容 alias，也等於 `semantic_pipeline.action_state`，
+不得再作為獨立推導來源（前端型別 `SRDecisionDerivedView.position_gate_state` 已標 `@deprecated`，
+請改讀 `semantic_pipeline.action_state`）。`final_entry_permission.state` 讀
+`semantic_pipeline.entry_permission_state`，但 daily `INVALIDATED` / `BLOCKED` /
+`CHASING_RISK` 仍保守優先。`market_bias` 讀 `semantic_pipeline.bias_state`。
+
+`entry_permission_state` 的前方壓力判定使用 entry 層 `blocking_zone_ahead`，其計算刻意排除
+daily candidate zones（只看真實 scored zones），避免較弱的日 K 候選區擋住進場；path 層
+`path_gate_state=BLOCKING_ZONE_AHEAD` 則仍含 daily candidate zones。兩者是不同層級、可各自成立。
+
+Legacy `action` 是整份分析的相容操作結論，避免舊前端自行從多張 zone 卡片拼湊結果。目前限定四種：
 
 | Action | 語意 | 典型條件 |
 |---|---|---|
@@ -838,11 +891,17 @@ Zone lifecycle 目前由 deterministic EOD rule 產生，可能值包含 `CANDID
 | `Hold` | 不追價，等待更好的價格或確認 | 方向不差但現價不在合理風險報酬位置、primary zone 不夠近、或支撐/壓力訊號混合 |
 | `Avoid` | 不建議操作 | regime 偏空、primary zone 失效、低信心且高波動、EV/RR 明顯不佳、或價格接近強壓但缺乏突破證據 |
 
-Action 應由 Market Regime、primary zone、`entry_relevance_score`、market events、`zone_quality_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。`trading_score` 保留為 legacy quality score，不得單獨直接決定 `Buy` / `BuySmall`。若任一核心資料缺失，預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
+Legacy action 應由 Market Regime、primary zone、`entry_relevance_score`、market events、
+`zone_quality_score`、`confidence`、`expected_value`、`risk_reward_ratio`、`chip_summary` 與風險條件共同決定。
+`trading_score` 保留為 legacy quality score，不得單獨直接決定 `Buy` / `BuySmall`。若任一核心資料缺失，
+預設應保守降級，例如 `Buy` 降為 `BuySmall`，`BuySmall` 降為 `Hold`。
 
-`position_action=HOLD` 不代表無條件持有；若有 `position_action_condition`，前端必須顯示為「條件式持有」，並列出 `invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`。
+`position_action_condition.state` 是持有者語意來源：`CONDITIONAL_HOLD` 表示條件式持有，
+`HOLD` 表示事件已確認但仍需搭配防守線管理，`DEFEND_BREAKDOWN` 表示優先防守。前端應列出
+`invalidation_price`（防守線）、`recovery_price`（回穩線）與 `reason_codes`，不可只看 legacy
+`position_action=HOLD`。
 
-`entry_action_state` 是進場階段語意，不取代 `action` / `market_action`：
+`entry_action_state` 是 legacy 進場階段明細，不取代 `final_entry_permission`：
 
 | State | 語意 |
 |---|---|
@@ -853,19 +912,23 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 | `ACCUMULATE` | 條件完整但仍適合分批累積 |
 | `BUY` | 條件完整，可正常買進 |
 
-若 zone 是 `PENDING_VALIDATION` 或 position reason 含 `SUPPORT_RECLAIM_AWAIT_CONFIRMATION`，即使 legacy `action=BuySmall`，`entry_action_state` 也不得高於 `PROBE_ENTRY`，避免「尚待確認」與「小量試單」語意衝突。
+若 zone 是 `PENDING_VALIDATION` 或 position reason 含 `SUPPORT_RECLAIM_AWAIT_CONFIRMATION`，
+即使 legacy `action=BuySmall`，`entry_action_state` 也不得高於 `PROBE_ENTRY`。P3 後，
+`final_entry_permission.state` 可由 semantic pipeline 輸出 `PROBE_ALLOWED`，代表未持有者僅允許觀察性試探，
+不是正式進場。
 
-`final_entry_permission` 是 `entry_action_state` 與 `daily_confirmation.state` 的保守仲裁結果，
+`final_entry_permission` 是 `semantic_pipeline.entry_permission_state` 的對外進場權限輸出，
 並合併 `decision_derived_view.final_entry_reason_codes` 作為可追溯理由；前端若要顯示
 「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
 `final_entry_permission.state` 不再輸出 `NO_SETUP` 或空語意；若 daily confirmation 為 `INVALIDATED`
-或 RR gate 等硬條件不通，final permission 會降為 `BLOCKED`，其他未完成 setup 則降為
-`WAIT_CONFIRMATION`。`BUY` 只在 entry 端與 daily 端都達最高層級時輸出；一般 `ENTRY_READY` 只會把
-`BUY` 放行到 `ACCUMULATE`，避免繞過日 K 把關。現階段 `daily_confirmation` 最高只輸出 `ENTRY_READY`（不產生 `BUY_READY`），因此
-`final_entry_permission.state` 目前上限為 `ACCUMULATE`；`BUY` 為保留態，待 daily 端加入 `BUY_READY`
-（例如兩日確認完成）後才會端到端啟用。
+或 `BLOCKED`，final permission 會降為 `BLOCKED`；若 daily confirmation 為 `CHASING_RISK`，
+final permission 會降為 `WAIT_CONFIRMATION`。`ENTRY_ALLOWED` 只在 semantic pipeline 判定
+`CONTINUATION`、RR 合格且前方沒有既有 SR 壓力區擋道時輸出；若前方有既有 SR 壓力區，
+未持有者進場權限降為 `WAIT_CONFIRMATION` 並附上 `BLOCKING_ZONE_AHEAD`。`TESTING` /
+`CONFIRMED` 的收復修復語境通常只輸出 `PROBE_ALLOWED`，避免把持有者的 `HOLD` 誤解成
+未持有者可正式進場。
 
-目前 action pipeline：
+Legacy action pipeline：
 
 1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
 2. 若 primary zone 距離現價超過 8%：保留 action 判斷，但加上不追價風險註記。

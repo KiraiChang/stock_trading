@@ -251,7 +251,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存，G
 | period_summaries | JSON：短/中/長期摘要卡的支撐/壓力摘要 |
 | analysis_tips | JSON：前端顯示的白話提示陣列 |
 | chip_summary | JSON：整檔層級籌碼拆解；查無資料時為 `{"missing": true, ...}`，舊資料可能為 JSON `null` |
-| decision_summary | JSON：Market Regime、唯一 Action、Primary Zone、風險提示等前端預設閱讀層 |
+| decision_summary | JSON：Semantic Pipeline、Market Regime、Primary Zone、風險提示等前端預設閱讀層 |
 
 **Index：** `INDEX(symbol, created_at DESC)`。
 
@@ -307,7 +307,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | 欄位 | 說明 |
 |------|------|
 | analysis_id | FK → `stock_sr_zone_analyses.id`，每筆 analysis 一筆 decision |
-| market_bias / entry_permission_state / position_action | Decision authority fields |
+| market_bias / entry_permission_state / position_action | Decision authority fields；P3 後分別對應 `semantic_pipeline.bias_state`、`entry_permission_state` 與 `action_state` 的對外摘要 |
 | price_path_state / model_health_state / event_market_state | Price path、AI health 與 event state 的查詢欄位 |
 | reason_codes | JSON 陣列，彙整 final entry、price path、model governance 與 active bearish event reason codes |
 | market_regime_json / data_quality_json / decision_derived_view_json | Decision market regime、資料品質與 derived view 權威語意 detail |
@@ -315,7 +315,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | price_path_json / daily_confirmation_json | Price path 完整 detail 與日 K 確認狀態 |
 | defense_lines_json | tactical / swing / strategic 防守線 |
 | rr_context_json / rr_gate_json | Entry RR、position RR 來源與 RR gate 判斷 |
-| position_action_condition_json | 既有部位操作條件 |
+| position_action_condition_json | 部位操作條件；`state` 由 `semantic_pipeline.action_state` 推導，防守價仍由 primary zone 計算 |
 | market_context_json / confidence_explanation_json / risk_notes_json | 前端決策說明所需的 context、confidence factor 與風險提示 |
 | zone_summaries_json | `nearest_decision_zone`、`nearest_support_zone`、`nearest_resistance_zone`、`primary_structural_zone`、`best_trade_zone`、`primary_zone`、`secondary_zones` |
 | decision_summary | 原始 decision JSON snapshot，保留 debug 與舊相容用途 |

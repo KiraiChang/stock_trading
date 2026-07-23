@@ -671,6 +671,35 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
       "label": "偏多趨勢但波動偏高",
       "reasons": ["整體趨勢 3.2%"]
     },
+    "decision_derived_view": {
+      "version": "decision-derived-view-p2",
+      "semantic_pipeline": {
+        "version": "decision-semantic-pipeline-p3",
+        "event_signal": "CLOSE_RECLAIM",
+        "lifecycle_phase": "CONFIRMED",
+        "market_state": "BULLISH_RECOVERY",
+        "bias_state": "BULLISH_BIAS",
+        "action_state": "HOLD",
+        "entry_permission_state": "PROBE_ALLOWED",
+        "reason_codes": ["CLOSE_RECLAIM"],
+        "source_order": ["Event", "Lifecycle", "Market State", "Bias", "Action", "Entry"]
+      }
+    },
+    "market_bias": "BULLISH_BIAS",
+    "final_entry_permission": {
+      "state": "PROBE_ALLOWED",
+      "label": "允許觀察性試探",
+      "entry_action_state": "PROBE_ENTRY",
+      "daily_confirmation_state": "PROBE_ALLOWED",
+      "reason_codes": ["CLOSE_RECLAIM", "WAIT_PRICE_FOLLOW_THROUGH"]
+    },
+    "position_action_condition": {
+      "state": "HOLD",
+      "structure_state": "SUPPORT_RECLAIM_CONFIRMED",
+      "invalidation_price": 960.0,
+      "recovery_price": 970.0,
+      "reason_codes": ["PRIMARY_SUPPORT", "SUPPORT_RECLAIM_CONFIRMED"]
+    },
     "primary_zone": {
       "label": "960.00 ~ 970.00",
       "role": "SUPPORT",
@@ -801,7 +830,13 @@ sr-zone-scoring.md「十七」。
 
 頂層依序對應 Data/Features/Score/Evidence/Decision。`analysis` 同時保存
 `period_summaries`、`analysis_tips` 與專屬 `chip_summary`；`decision` 是決策
-摘要，`explanation` 是 deterministic 白話解釋層。每個 zone 也分成
+摘要，其中 `decision_derived_view.semantic_pipeline` 是
+`Event -> Lifecycle -> Market State -> Bias -> Action -> Entry` 的權威語意鏈。
+`market_bias`、`final_entry_permission.state` 與 `position_action_condition.state`
+應優先依此鏈路解讀；legacy `action` / `entry_action_state` 保留作相容明細。
+`decision_derived_view.position_gate_state` 仍可能存在於舊相容 payload，但只是
+`semantic_pipeline.action_state` 的 deprecated alias。
+`explanation` 是 deterministic 白話解釋層。每個 zone 也分成
 `data/features/score/evidence/explanation/scenario/lifecycle`，驗證 API 只更新
 lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/role）在
 `data`、生命週期（status/broken_at…）在 `lifecycle`、

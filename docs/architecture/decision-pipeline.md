@@ -71,6 +71,11 @@ P0 先固定 Decision Pipeline 的唯一權威輸出，避免同一份 SR Zone �
 | Hard gates | active event、RR、EV、blocking zone、confidence | 必須有優先序，且 reason codes 可追溯 |
 | Reason codes | `reason_codes` | 前端顯示與測試斷言應依 reason codes，而非自由文字解析 |
 
+SR Zone P3 後，對外語意由 `decision_derived_view.semantic_pipeline` 串成
+`Event -> Lifecycle -> Market State -> Bias -> Action -> Entry`。`market_bias`、
+`position_action_condition.state` 與 `final_entry_permission.state` 皆由此鏈路推導；
+legacy `market_action` / `action` / `entry_action_state` 僅保留為相容與明細，不得作為最終決策來源。
+
 P0 也明確停用或降級舊重複欄位：
 
 - `market_action`

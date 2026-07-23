@@ -163,7 +163,12 @@ def _position_action_condition(
     structure_state: str,
     derived_view: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    position_gate_state = str((derived_view or {}).get("position_gate_state") or "NORMAL")
+    semantic_pipeline = (derived_view or {}).get("semantic_pipeline") or {}
+    position_gate_state = str(
+        semantic_pipeline.get("action_state")
+        or (derived_view or {}).get("position_gate_state")
+        or "NORMAL"
+    )
     derived_reasons = list((derived_view or {}).get("position_reason_codes") or [])
     if primary_zone is None:
         return {
@@ -533,9 +538,11 @@ def _entry_action_label(state: str) -> str:
         "BLOCKED": "禁止進場",
         "WAIT_CONFIRMATION": "等待確認",
         "PROBE_ENTRY": "觀察性試探",
+        "PROBE_ALLOWED": "允許觀察性試探",
         "SMALL_ENTRY": "小量進場",
         "ACCUMULATE": "分批累積",
         "BUY": "買進",
+        "ENTRY_ALLOWED": "允許進場",
     }.get(state, state)
 
 
@@ -553,6 +560,8 @@ def _final_entry_permission(
     derived_view: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     daily_state = str(daily_confirmation.get("state") or "WAIT_DAILY_CONFIRM")
+    semantic_pipeline = (derived_view or {}).get("semantic_pipeline") or {}
+    semantic_entry_state = str(semantic_pipeline.get("entry_permission_state") or "")
     order = {
         "INVALIDATED": 0,
         "BLOCKED": 0,
@@ -568,27 +577,35 @@ def _final_entry_permission(
         "BUY": 5,
         "BUY_READY": 5,
     }
-    entry_rank = order.get(entry_action_state, 1)
-    daily_rank = order.get(daily_state, 1)
-    final_rank = min(entry_rank, daily_rank)
-    if final_rank >= 5:
-        state = "BUY"
-    elif final_rank == 4:
-        state = "ACCUMULATE"
-    elif final_rank == 3:
-        state = "SMALL_ENTRY"
-    elif final_rank == 2:
-        state = "PROBE_ENTRY"
-    elif final_rank == 0:
+    if daily_state in ("INVALIDATED", "BLOCKED") or semantic_entry_state == "BLOCKED":
         state = "BLOCKED"
-    else:
+    elif daily_state == "CHASING_RISK":
         state = "WAIT_CONFIRMATION"
+    elif semantic_entry_state:
+        state = semantic_entry_state
+    else:
+        entry_rank = order.get(entry_action_state, 1)
+        daily_rank = order.get(daily_state, 1)
+        final_rank = min(entry_rank, daily_rank)
+        if final_rank >= 5:
+            state = "BUY"
+        elif final_rank == 4:
+            state = "ACCUMULATE"
+        elif final_rank == 3:
+            state = "SMALL_ENTRY"
+        elif final_rank == 2:
+            state = "PROBE_ENTRY"
+        elif final_rank == 0:
+            state = "BLOCKED"
+        else:
+            state = "WAIT_CONFIRMATION"
     reason_codes = list(daily_confirmation.get("reason_codes") or [])
     # 硬阻擋時不回填「等待延續 / 動能確認」這類 derived reason，避免
     # final entry 同時輸出 blocked 與 probe/wait 文案。
     if state != "BLOCKED":
         reason_codes = _unique_reason_codes([
             *reason_codes,
+            *list(semantic_pipeline.get("reason_codes") or []),
             *list((derived_view or {}).get("final_entry_reason_codes") or []),
         ])
 
@@ -611,6 +628,166 @@ def _event_state_types(states: list[dict[str, Any]]) -> set[str]:
     return out
 
 
+def _event_state_max_age(states: list[dict[str, Any]], event_type: str) -> int:
+    ages = [
+        int(state.get("age_bars") or 0)
+        for state in states
+        if event_type in {
+            str(state.get("latest_event_type") or ""),
+            str(state.get("root_event_type") or ""),
+            str(state.get("type") or ""),
+        }
+    ]
+    return max(ages, default=0)
+
+
+def _decision_semantic_pipeline(
+    regime: dict[str, Any],
+    primary_zone: Optional[ZoneScore],
+    market_action: str,
+    event_state_summary: dict[str, Any],
+    daily_price_action: Optional[dict[str, Any]],
+    rr_gate: Optional[dict[str, Any]],
+    structure_state: str,
+    blocking_zone_ahead: bool,
+    current_price: float,
+) -> dict[str, Any]:
+    active_states = list(event_state_summary.get("active") or [])
+    candidate_states = list(event_state_summary.get("candidates") or [])
+    active_bearish_states = list(event_state_summary.get("active_bearish_events") or [])
+    active_types = _event_state_types(active_states)
+    candidate_types = _event_state_types(candidate_states)
+    reason_codes: list[str] = []
+
+    if "HIGH_VOLUME_BREAKDOWN" in _event_state_types(active_bearish_states):
+        event_signal = "CLOSE_BREAKDOWN"
+        reason_codes.append("ACTIVE_BEARISH_EVENT")
+    elif "INTRADAY_RECLAIM" in active_types or structure_state in (
+        "SUPPORT_RECLAIM_CANDIDATE",
+        "SUPPORT_RECLAIM_CONFIRMED",
+    ):
+        event_signal = "CLOSE_RECLAIM"
+        reason_codes.append("CLOSE_RECLAIM")
+    elif "REVERSAL_CANDIDATE" in candidate_types:
+        event_signal = "SUPPORT_TEST"
+        reason_codes.append("REVERSAL_CANDIDATE")
+    elif (
+        primary_zone is not None
+        and primary_zone.role == ZoneType.SUPPORT.value
+        and primary_zone.recent_validation == RecentValidation.PENDING_VALIDATION.value
+    ):
+        event_signal = "SUPPORT_TEST"
+        reason_codes.append("PENDING_ZONE_VALIDATION")
+    elif "EXTREME_VOLUME" in active_types:
+        event_signal = "VOLUME_CONTEXT"
+        reason_codes.append("EXTREME_VOLUME_CONTEXT")
+    else:
+        event_signal = "NO_EVENT"
+
+    price_follow_through = str((daily_price_action or {}).get("price_follow_through_state") or "UNKNOWN")
+    momentum_state = str((daily_price_action or {}).get("momentum_confirmation_state") or "UNKNOWN")
+    rr_qualified = bool((rr_gate or {}).get("qualified"))
+    reclaim_age = _event_state_max_age(active_states, "INTRADAY_RECLAIM")
+    clear_zone_breakout = (
+        primary_zone is not None
+        and primary_zone.role == ZoneType.SUPPORT.value
+        and current_price >= primary_zone.price_high * 1.03
+    )
+
+    if active_bearish_states or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+        lifecycle_phase = "INVALIDATED" if structure_state == "SUPPORT_RECLAIM_INVALIDATED" else "BREAKDOWN"
+    elif event_signal == "CLOSE_RECLAIM" and (
+        price_follow_through == "PRICE_UPSIDE_FOLLOW_THROUGH"
+        and momentum_state == "MOMENTUM_CONFIRMED"
+        and rr_qualified
+        and clear_zone_breakout
+    ):
+        lifecycle_phase = "CONTINUATION"
+        reason_codes.append("PRICE_UPSIDE_FOLLOW_THROUGH")
+    elif event_signal == "CLOSE_RECLAIM" and (
+        structure_state == "SUPPORT_RECLAIM_CONFIRMED" or reclaim_age >= 1
+    ):
+        lifecycle_phase = "CONFIRMED"
+    elif event_signal in ("CLOSE_RECLAIM", "SUPPORT_TEST"):
+        lifecycle_phase = "TESTING"
+    elif primary_zone is None:
+        lifecycle_phase = "NO_PRIMARY_ZONE"
+    else:
+        lifecycle_phase = "NORMAL"
+
+    if lifecycle_phase in ("BREAKDOWN", "INVALIDATED"):
+        market_state = "BREAKDOWN_RISK"
+    elif lifecycle_phase == "CONTINUATION":
+        market_state = "BULLISH_CONTINUATION"
+    elif lifecycle_phase == "TESTING" and event_signal == "SUPPORT_TEST":
+        market_state = "REVERSAL_CANDIDATE"
+    elif lifecycle_phase in ("TESTING", "CONFIRMED"):
+        market_state = "BULLISH_RECOVERY"
+    else:
+        market_state = str(regime.get("short_term_regime") or event_state_summary.get("market_state") or "NORMAL")
+
+    if market_state == "BREAKDOWN_RISK":
+        bias_state = "BEARISH_BIAS"
+    elif market_state == "BULLISH_CONTINUATION":
+        bias_state = "BULLISH_CONTINUATION"
+    elif market_state == "REVERSAL_CANDIDATE":
+        bias_state = "REVERSAL_BIAS"
+    elif market_state in ("BULLISH_RECOVERY", "RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND"):
+        bias_state = "BULLISH_BIAS"
+    elif regime.get("primary") == "TREND_DOWN" or (primary_zone and primary_zone.role == ZoneType.RESISTANCE.value):
+        bias_state = "BEARISH_BIAS"
+    elif regime.get("primary") == "TREND_UP" and (primary_zone is None or primary_zone.role == ZoneType.SUPPORT.value):
+        bias_state = "BULLISH_BIAS"
+    else:
+        bias_state = "NEUTRAL_BIAS"
+
+    if market_action == "AVOID":
+        bias_state = "BEARISH_BIAS"
+        action_state = "AVOID"
+        entry_permission_state = "BLOCKED"
+        reason_codes.append("MARKET_ACTION_AVOID")
+    else:
+        if market_state == "BREAKDOWN_RISK":
+            action_state = "DEFEND_BREAKDOWN"
+        elif lifecycle_phase == "TESTING":
+            action_state = "CONDITIONAL_HOLD"
+        elif lifecycle_phase in ("CONFIRMED", "CONTINUATION"):
+            action_state = "HOLD"
+        elif bias_state == "BEARISH_BIAS":
+            action_state = "AVOID"
+        else:
+            action_state = "WATCH"
+
+        if market_state == "BREAKDOWN_RISK":
+            entry_permission_state = "BLOCKED"
+        elif not rr_qualified:
+            entry_permission_state = "BLOCKED"
+            reason_codes.append(str((rr_gate or {}).get("reason_code") or "RR_NOT_QUALIFIED"))
+        elif blocking_zone_ahead:
+            entry_permission_state = "WAIT_CONFIRMATION"
+            reason_codes.append("BLOCKING_ZONE_AHEAD")
+        elif action_state == "CONDITIONAL_HOLD":
+            entry_permission_state = "PROBE_ALLOWED"
+        elif action_state == "HOLD" and lifecycle_phase == "CONTINUATION":
+            entry_permission_state = "ENTRY_ALLOWED"
+        elif action_state == "HOLD" and market_state == "BULLISH_RECOVERY":
+            entry_permission_state = "PROBE_ALLOWED"
+        else:
+            entry_permission_state = "WAIT_CONFIRMATION"
+
+    return {
+        "version": "decision-semantic-pipeline-p3",
+        "event_signal": event_signal,
+        "lifecycle_phase": lifecycle_phase,
+        "market_state": market_state,
+        "bias_state": bias_state,
+        "action_state": action_state,
+        "entry_permission_state": entry_permission_state,
+        "reason_codes": _unique_reason_codes(reason_codes),
+        "source_order": ["Event", "Lifecycle", "Market State", "Bias", "Action", "Entry"],
+    }
+
+
 def _decision_derived_view(
     regime: dict[str, Any],
     primary_zone: Optional[ZoneScore],
@@ -622,6 +799,7 @@ def _decision_derived_view(
     structure_state: str = "NORMAL",
     daily_candidate_zones: Optional[list[dict[str, Any]]] = None,
     blocking_zone_ahead: bool = False,
+    entry_blocking_zone_ahead: Optional[bool] = None,
 ) -> dict[str, Any]:
     active_states = list(event_state_summary.get("active") or [])
     candidate_states = list(event_state_summary.get("candidates") or [])
@@ -630,30 +808,25 @@ def _decision_derived_view(
     candidate_event_types = _event_state_types(candidate_states)
     short_term_regime = str(regime.get("short_term_regime") or "NORMAL")
     bias_reason_codes: list[str] = []
+    semantic_pipeline = _decision_semantic_pipeline(
+        regime,
+        primary_zone,
+        market_action,
+        event_state_summary,
+        daily_price_action,
+        rr_gate,
+        structure_state,
+        blocking_zone_ahead if entry_blocking_zone_ahead is None else entry_blocking_zone_ahead,
+        (daily_price_action or {}).get("reference_prices", {}).get("current_price") or 0.0,
+    )
 
-    # Bias truth table: action hard blockers win first; lifecycle-based bullish
-    # continuation only applies when the market action itself is not AVOID.
     if market_action == "AVOID":
         bias_state = "BEARISH_BIAS"
         bias_reason_codes.append("MARKET_ACTION_AVOID")
-    elif short_term_regime in ("RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND"):
-        bias_state = "BULLISH_CONTINUATION"
-        bias_reason_codes.append(f"SHORT_TERM_{short_term_regime}")
-    elif "REVERSAL_CANDIDATE" in candidate_event_types:
-        bias_state = "REVERSAL_BIAS"
-        bias_reason_codes.append("REVERSAL_CANDIDATE")
-    elif market_action in ("BUY", "BUY_SMALL"):
-        bias_state = "BULLISH_BIAS"
-        bias_reason_codes.append(f"MARKET_ACTION_{market_action}")
-    elif regime.get("primary") == "TREND_DOWN" or (primary_zone and primary_zone.role == ZoneType.RESISTANCE.value):
-        bias_state = "BEARISH_BIAS"
-        bias_reason_codes.append("STRUCTURAL_BEARISH_CONTEXT")
-    elif regime.get("primary") == "TREND_UP" and (primary_zone is None or primary_zone.role == ZoneType.SUPPORT.value):
-        bias_state = "BULLISH_BIAS"
-        bias_reason_codes.append("STRUCTURAL_BULLISH_CONTEXT")
     else:
-        bias_state = "NEUTRAL_BIAS"
-        bias_reason_codes.append("NEUTRAL_CONTEXT")
+        bias_state = str(semantic_pipeline.get("bias_state") or "NEUTRAL_BIAS")
+        semantic_market_state = str(semantic_pipeline.get("market_state") or "UNKNOWN")
+        bias_reason_codes.append(f"SEMANTIC_{semantic_market_state}")
 
     daily_reason_codes: list[str] = []
     if "REVERSAL_CANDIDATE" in candidate_event_types:
@@ -680,17 +853,14 @@ def _decision_derived_view(
     if active_bearish_states:
         path_gate_state = "EVENT_RISK"
         path_reason_codes = ["ACTIVE_BEARISH_EVENT"]
-        position_gate_state = "DEFEND_BREAKDOWN"
         position_reason_codes = ["ACTIVE_BEARISH_EVENT", "POSITION_DEFENSE_REQUIRED"]
     elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         path_gate_state = "INVALIDATION_RISK"
         path_reason_codes = ["SUPPORT_BREAKDOWN_RISK"]
-        position_gate_state = "DEFEND_BREAKDOWN"
         position_reason_codes = ["POSITION_DEFENSE_REQUIRED", "SUPPORT_BREAKDOWN_RISK"]
     elif primary_zone is None and daily_candidate_zones:
         path_gate_state = "DAILY_CANDIDATE_ONLY"
         path_reason_codes = ["DAILY_CANDIDATE_ONLY"]
-        position_gate_state = "NORMAL"
         position_reason_codes = []
     elif rr_gate is not None and not rr_gate.get("qualified"):
         path_gate_state = "RR_BLOCKED"
@@ -701,21 +871,16 @@ def _decision_derived_view(
             or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
             or "INTRADAY_RECLAIM" in active_event_types
         ):
-            position_gate_state = "CONDITIONAL_HOLD"
             position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
         elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
-            position_gate_state = "SUPPORT_DEFENSE"
             position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
         elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
-            position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
             position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
         else:
-            position_gate_state = "NORMAL"
             position_reason_codes = []
     elif "WAIT_PRICE_FOLLOW_THROUGH" in daily_reason_codes:
         path_gate_state = "WAIT_PRICE_FOLLOW_THROUGH"
         path_reason_codes = ["WAIT_PRICE_FOLLOW_THROUGH"]
-        position_gate_state = "CONDITIONAL_HOLD"
         position_reason_codes = ["POSITION_RECLAIM_DEFENSE", "WAIT_PRICE_FOLLOW_THROUGH"]
     elif blocking_zone_ahead:
         path_gate_state = "BLOCKING_ZONE_AHEAD"
@@ -725,16 +890,12 @@ def _decision_derived_view(
             or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
             or "INTRADAY_RECLAIM" in active_event_types
         ):
-            position_gate_state = "CONDITIONAL_HOLD"
             position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
         elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
-            position_gate_state = "SUPPORT_DEFENSE"
             position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
         elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
-            position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
             position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
         else:
-            position_gate_state = "NORMAL"
             position_reason_codes = []
     elif (
         structure_state == "SUPPORT_RECLAIM_CONFIRMED"
@@ -743,23 +904,21 @@ def _decision_derived_view(
     ):
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_gate_state = "CONDITIONAL_HOLD"
         position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
     elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_gate_state = "SUPPORT_DEFENSE"
         position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
     elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
         position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
     else:
         path_gate_state = "OPEN_PATH"
         path_reason_codes = []
-        position_gate_state = "NORMAL"
         position_reason_codes = []
+
+    position_gate_state = str(semantic_pipeline.get("action_state") or "WATCH")
 
     return {
         "version": "decision-derived-view-p2",
@@ -774,6 +933,7 @@ def _decision_derived_view(
         "position_gate_state": position_gate_state,
         "position_reason_codes": position_reason_codes,
         "daily_reason_codes": daily_reason_codes,
+        "semantic_pipeline": semantic_pipeline,
         "authority_reason_codes": _unique_reason_codes([
             *bias_reason_codes,
             *daily_reason_codes,
@@ -801,16 +961,17 @@ def _market_bias(
     market_events: Optional[list[dict[str, Any]]] = None,
     derived_view: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str]:
+    if market_action == "AVOID":
+        return "BEARISH_BIAS", "偏空觀察"
     if derived_view:
-        state = str(derived_view.get("bias_state") or "NEUTRAL_BIAS")
+        semantic = derived_view.get("semantic_pipeline") or {}
+        state = str(semantic.get("bias_state") or derived_view.get("bias_state") or "NEUTRAL_BIAS")
         return state, _market_bias_label(state)
     event_types = {event.get("type") for event in market_events or []}
     if regime.get("short_term_regime") in ("RECOVERY", "RECLAIM_ATTEMPT", "EARLY_TREND") and market_action != "AVOID":
-        return "BULLISH_CONTINUATION", "多頭延續"
+        return "BULLISH_BIAS", "偏多觀察"
     if "REVERSAL_CANDIDATE" in event_types or "INTRADAY_RECLAIM" in event_types:
         return "REVERSAL_BIAS", "反轉觀察"
-    if market_action == "AVOID":
-        return "BEARISH_BIAS", "偏空觀察"
     if market_action in ("BUY", "BUY_SMALL"):
         return "BULLISH_BIAS", "偏多觀察"
     if regime.get("primary") == "TREND_DOWN" or (primary_zone and primary_zone.role == ZoneType.RESISTANCE.value):
@@ -1842,6 +2003,8 @@ def build_decision_summary(
         market_events,
         nearest_zone,
     )
+    blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price)
+    entry_blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, [], current_price)
     decision_derived_view = _decision_derived_view(
         regime,
         primary_zone,
@@ -1852,7 +2015,8 @@ def build_decision_summary(
         rr_gate,
         structure_state,
         daily_candidate_zones,
-        _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price),
+        blocking_zone_ahead,
+        entry_blocking_zone_ahead,
     )
     market_bias, market_bias_label = _market_bias(
         regime,

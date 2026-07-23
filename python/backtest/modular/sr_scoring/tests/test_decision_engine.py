@@ -346,7 +346,9 @@ def test_pending_validation_buy_small_is_probe_entry_not_confirmed_small_entry()
     assert ds["action"] == "BuySmall"
     assert ds["entry_action_state"] == "PROBE_ENTRY"
     assert ds["entry_action_label"] == "觀察性試探"
-    assert ds["final_entry_permission"]["state"] == "PROBE_ENTRY"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+    assert ds["final_entry_permission"]["label"] == "允許觀察性試探"
+    assert ds["decision_derived_view"]["semantic_pipeline"]["event_signal"] == "SUPPORT_TEST"
 
 
 def test_confirmed_buy_small_is_small_entry():
@@ -513,21 +515,22 @@ def test_recovery_confirmed_outputs_recovery_regime_and_final_permission():
 
     assert ds["market_regime"]["recovery_state"] == "RECOVERY"
     assert ds["market_regime"]["short_term_regime"] == "RECOVERY"
-    assert ds["market_bias"] == "BULLISH_CONTINUATION"
-    assert ds["final_entry_permission"]["state"] in ("ACCUMULATE", "BUY")
+    assert ds["market_bias"] == "BULLISH_BIAS"
+    assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
 
 
-def test_early_trend_outputs_bullish_continuation_bias():
+def test_early_trend_outputs_bullish_bias_without_continuation():
     zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
 
     ds = _summary([zone], current_price=102.0, global_trend=0.01, global_confidence=0.55)
 
     assert ds["market_regime"]["trend_regime"] == "RANGE_BOUND"
     assert ds["market_regime"]["short_term_regime"] == "EARLY_TREND"
-    assert ds["market_bias"] == "BULLISH_CONTINUATION"
+    assert ds["market_bias"] == "BULLISH_BIAS"
 
 
-def test_carried_active_reclaim_in_uptrend_outputs_bullish_continuation_bias():
+def test_carried_active_reclaim_in_uptrend_outputs_bullish_bias_before_continuation():
     zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
     previous = [{
         "type": "INTRADAY_RECLAIM",
@@ -556,8 +559,9 @@ def test_carried_active_reclaim_in_uptrend_outputs_bullish_continuation_bias():
     assert ds["market_events"] == []
     assert ds["event_state_summary"]["market_state"] == "RECLAIM_ATTEMPT"
     assert ds["market_regime"]["short_term_regime"] == "RECLAIM_ATTEMPT"
-    assert ds["market_bias"] == "BULLISH_CONTINUATION"
-    assert ds["decision_derived_view"]["bias_state"] == "BULLISH_CONTINUATION"
+    assert ds["market_bias"] == "BULLISH_BIAS"
+    assert ds["decision_derived_view"]["bias_state"] == "BULLISH_BIAS"
+    assert ds["decision_derived_view"]["semantic_pipeline"]["lifecycle_phase"] == "CONFIRMED"
 
 
 def test_carried_active_reclaim_does_not_override_avoid_bias():
@@ -648,16 +652,151 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
     assert ds["decision_derived_view"]["version"] == "decision-derived-view-p2"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["decision_derived_view"]["final_entry_reason_codes"]
     assert ds["decision_derived_view"]["path_gate_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
-    assert ds["decision_derived_view"]["position_gate_state"] == "CONDITIONAL_HOLD"
+    assert ds["decision_derived_view"]["position_gate_state"] == "HOLD"
     assert ds["daily_confirmation"]["state"] == "PROBE_ALLOWED"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["daily_confirmation"]["reason_codes"]
-    assert ds["final_entry_permission"]["state"] == "PROBE_ENTRY"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["final_entry_permission"]["reason_codes"]
     assert ds["price_path"]["path_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
     assert ds["price_path"]["reason_codes"] == ["WAIT_PRICE_FOLLOW_THROUGH"]
-    assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["position_action_condition"]["state"] == "HOLD"
     assert ds["position_action_condition"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
     assert "POSITION_RECLAIM_DEFENSE" in ds["position_action_condition"]["reason_codes"]
+
+
+def test_semantic_pipeline_close_reclaim_testing_probe_allowed():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary(
+        [zone],
+        current_price=101.0,
+        candle_high=102.0,
+        candle_low=97.8,
+        candle_close=101.0,
+    )
+
+    semantic = ds["decision_derived_view"]["semantic_pipeline"]
+    assert semantic["source_order"] == ["Event", "Lifecycle", "Market State", "Bias", "Action", "Entry"]
+    assert semantic["event_signal"] == "CLOSE_RECLAIM"
+    assert semantic["lifecycle_phase"] == "TESTING"
+    assert semantic["market_state"] == "BULLISH_RECOVERY"
+    assert semantic["action_state"] == "CONDITIONAL_HOLD"
+    assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
+    assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+
+
+def test_semantic_pipeline_carried_close_reclaim_confirmed_probe_allowed():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 0,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [zone],
+        current_price=102.0,
+        candle_high=103.0,
+        candle_low=101.0,
+        candle_close=102.0,
+        previous_candle_close=101.0,
+        previous_event_states=previous,
+    )
+
+    semantic = ds["decision_derived_view"]["semantic_pipeline"]
+    assert semantic["event_signal"] == "CLOSE_RECLAIM"
+    assert semantic["lifecycle_phase"] == "CONFIRMED"
+    assert semantic["market_state"] == "BULLISH_RECOVERY"
+    assert semantic["action_state"] == "HOLD"
+    assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
+    assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+
+
+def test_semantic_pipeline_breakout_continuation_entry_allowed():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [zone],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=102.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    semantic = ds["decision_derived_view"]["semantic_pipeline"]
+    assert semantic["event_signal"] == "CLOSE_RECLAIM"
+    assert semantic["lifecycle_phase"] == "CONTINUATION"
+    assert semantic["market_state"] == "BULLISH_CONTINUATION"
+    assert semantic["action_state"] == "HOLD"
+    assert semantic["entry_permission_state"] == "ENTRY_ALLOWED"
+    assert ds["market_bias"] == "BULLISH_CONTINUATION"
+    assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
+
+
+def test_semantic_pipeline_blocking_zone_ahead_waits_confirmation():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0)
+    resistance = _zone(role=ZoneType.RESISTANCE.value, low=106.0, high=108.0, risk_reward_ratio=1.2)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [support, resistance],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=102.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    semantic = ds["decision_derived_view"]["semantic_pipeline"]
+    assert semantic["lifecycle_phase"] == "CONTINUATION"
+    assert semantic["action_state"] == "HOLD"
+    assert semantic["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert "BLOCKING_ZONE_AHEAD" in semantic["reason_codes"]
+    assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert "BLOCKING_ZONE_AHEAD" in ds["final_entry_permission"]["reason_codes"]
 
 
 def test_hard_block_daily_confirmation_does_not_backfill_derived_reasons():
@@ -753,15 +892,17 @@ def test_derived_position_gate_defend_breakdown_on_structure_breakdown():
 def test_derived_position_gate_support_defense_on_clean_support():
     dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value))
     assert dv["path_gate_state"] == "OPEN_PATH"
-    assert dv["position_gate_state"] == "SUPPORT_DEFENSE"
+    assert dv["position_gate_state"] == "WATCH"
     assert dv["position_reason_codes"] == ["POSITION_SUPPORT_DEFENSE"]
+    assert dv["semantic_pipeline"]["action_state"] == dv["position_gate_state"]
 
 
 def test_derived_position_gate_upside_breakout_required_on_resistance():
     dv = _derived(primary_zone=_zone(role=ZoneType.RESISTANCE.value))
     assert dv["path_gate_state"] == "OPEN_PATH"
-    assert dv["position_gate_state"] == "UPSIDE_BREAKOUT_REQUIRED"
+    assert dv["position_gate_state"] == "AVOID"
     assert dv["position_reason_codes"] == ["POSITION_RESISTANCE_OVERHEAD"]
+    assert dv["semantic_pipeline"]["action_state"] == dv["position_gate_state"]
 
 
 def test_derived_position_gate_rr_blocked_support_defense():
@@ -771,7 +912,25 @@ def test_derived_position_gate_rr_blocked_support_defense():
     )
     assert dv["path_gate_state"] == "RR_BLOCKED"
     assert dv["path_reason_codes"] == ["RR_NOT_QUALIFIED"]
-    assert dv["position_gate_state"] == "SUPPORT_DEFENSE"
+    assert dv["position_gate_state"] == "WATCH"
+    assert dv["semantic_pipeline"]["entry_permission_state"] == "BLOCKED"
+
+
+def test_semantic_pipeline_market_action_avoid_blocks_action_and_entry():
+    dv = _derived(
+        primary_zone=_zone(role=ZoneType.SUPPORT.value),
+        market_action="AVOID",
+        short_term_regime="RECOVERY",
+        structure_state="SUPPORT_RECLAIM_CONFIRMED",
+    )
+
+    semantic = dv["semantic_pipeline"]
+    assert semantic["market_state"] == "BULLISH_RECOVERY"
+    assert semantic["bias_state"] == "BEARISH_BIAS"
+    assert semantic["action_state"] == "AVOID"
+    assert semantic["entry_permission_state"] == "BLOCKED"
+    assert "MARKET_ACTION_AVOID" in semantic["reason_codes"]
+    assert dv["position_gate_state"] == "AVOID"
 
 
 def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():
@@ -795,6 +954,8 @@ def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids(
     assert ds["market_action"] == "AVOID"
     assert ds["market_bias"] != "BULLISH_CONTINUATION"
     assert ds["market_bias"] == "BEARISH_BIAS"
+    assert ds["decision_derived_view"]["semantic_pipeline"]["action_state"] == "AVOID"
+    assert ds["position_action_condition"]["state"] == "AVOID"
 
 
 def test_final_entry_permission_keeps_invalidated_distinct_from_waiting():
@@ -908,7 +1069,7 @@ def test_confirmed_reclaim_clears_same_zone_breakdown_exit_gate():
     assert ds["primary_zone"]["zone_interaction"]["price_action_evidence"]["reclaim_type"] == "UNDERCUT_RECLAIM"
     assert ds["market_action"] != "AVOID"
     assert ds["position_action"] != "EXIT"
-    assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["position_action_condition"]["state"] == "HOLD"
     assert ds["position_action_condition"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
     assert "SUPPORT_RECLAIM_CONFIRMED" in ds["position_action_condition"]["reason_codes"]
 

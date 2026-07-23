@@ -596,8 +596,21 @@ export interface SRRRContext {
   position_rr_source: string
 }
 
+export interface SRSemanticPipeline {
+  version?: string
+  event_signal?: string
+  lifecycle_phase?: string
+  market_state?: string
+  bias_state?: SRMarketBias
+  action_state?: string
+  entry_permission_state?: string
+  reason_codes?: string[]
+  source_order?: string[]
+}
+
 export interface SRDecisionDerivedView {
   version?: string
+  semantic_pipeline?: SRSemanticPipeline
   bias_state?: SRMarketBias
   bias_label?: string
   bias_reason_codes?: string[]
@@ -606,6 +619,7 @@ export interface SRDecisionDerivedView {
   final_entry_reason_codes?: string[]
   path_gate_state?: string
   path_reason_codes?: string[]
+  /** @deprecated use semantic_pipeline.action_state */
   position_gate_state?: string
   position_reason_codes?: string[]
   daily_reason_codes?: string[]

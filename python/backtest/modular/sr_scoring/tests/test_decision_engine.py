@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from ..decision_engine import _daily_confirmation, _final_entry_permission, build_decision_summary
+from ..decision_engine import (
+    _daily_confirmation,
+    _decision_derived_view,
+    _final_entry_permission,
+    build_decision_summary,
+)
 from ..model import ModelBundle
 from ..types import (
     ConfidenceLevel,
@@ -640,9 +645,19 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
 
     assert ds["rr_gate"]["qualified"] is True
     assert ds["daily_price_action"]["price_follow_through_state"] == "NO_PRICE_FOLLOW_THROUGH"
+    assert ds["decision_derived_view"]["version"] == "decision-derived-view-p2"
+    assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["decision_derived_view"]["final_entry_reason_codes"]
+    assert ds["decision_derived_view"]["path_gate_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
+    assert ds["decision_derived_view"]["position_gate_state"] == "CONDITIONAL_HOLD"
     assert ds["daily_confirmation"]["state"] == "PROBE_ALLOWED"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["daily_confirmation"]["reason_codes"]
     assert ds["final_entry_permission"]["state"] == "PROBE_ENTRY"
+    assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["final_entry_permission"]["reason_codes"]
+    assert ds["price_path"]["path_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
+    assert ds["price_path"]["reason_codes"] == ["WAIT_PRICE_FOLLOW_THROUGH"]
+    assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["position_action_condition"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert "POSITION_RECLAIM_DEFENSE" in ds["position_action_condition"]["reason_codes"]
 
 
 def test_hard_block_daily_confirmation_does_not_backfill_derived_reasons():
@@ -689,6 +704,76 @@ def test_entry_track_daily_confirmation_still_backfills_derived_reasons():
     assert "NO_MOMENTUM_CONFIRMATION" in daily["reason_codes"]
 
 
+def _derived(
+    *,
+    primary_zone=None,
+    market_action="WATCH",
+    entry_action_state="WAIT_CONFIRMATION",
+    short_term_regime="NORMAL",
+    primary="RANGE_BOUND",
+    active_bearish=False,
+    structure_state="NORMAL",
+    rr_gate=None,
+    daily_candidate_zones=None,
+    blocking_zone_ahead=False,
+) -> dict:
+    event_state_summary = {
+        "active": [],
+        "candidates": [],
+        "active_bearish_events": [{"type": "HIGH_VOLUME_BREAKDOWN"}] if active_bearish else [],
+    }
+    return _decision_derived_view(
+        {"short_term_regime": short_term_regime, "primary": primary},
+        primary_zone,
+        market_action,
+        entry_action_state,
+        event_state_summary,
+        None,
+        rr_gate if rr_gate is not None else {"qualified": True},
+        structure_state,
+        daily_candidate_zones or [],
+        blocking_zone_ahead,
+    )
+
+
+def test_derived_position_gate_defend_breakdown_on_active_bearish():
+    dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value), active_bearish=True)
+    assert dv["path_gate_state"] == "EVENT_RISK"
+    assert dv["position_gate_state"] == "DEFEND_BREAKDOWN"
+    assert "POSITION_DEFENSE_REQUIRED" in dv["position_reason_codes"]
+
+
+def test_derived_position_gate_defend_breakdown_on_structure_breakdown():
+    dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value), structure_state="BREAKDOWN")
+    assert dv["path_gate_state"] == "INVALIDATION_RISK"
+    assert dv["position_gate_state"] == "DEFEND_BREAKDOWN"
+    assert "SUPPORT_BREAKDOWN_RISK" in dv["position_reason_codes"]
+
+
+def test_derived_position_gate_support_defense_on_clean_support():
+    dv = _derived(primary_zone=_zone(role=ZoneType.SUPPORT.value))
+    assert dv["path_gate_state"] == "OPEN_PATH"
+    assert dv["position_gate_state"] == "SUPPORT_DEFENSE"
+    assert dv["position_reason_codes"] == ["POSITION_SUPPORT_DEFENSE"]
+
+
+def test_derived_position_gate_upside_breakout_required_on_resistance():
+    dv = _derived(primary_zone=_zone(role=ZoneType.RESISTANCE.value))
+    assert dv["path_gate_state"] == "OPEN_PATH"
+    assert dv["position_gate_state"] == "UPSIDE_BREAKOUT_REQUIRED"
+    assert dv["position_reason_codes"] == ["POSITION_RESISTANCE_OVERHEAD"]
+
+
+def test_derived_position_gate_rr_blocked_support_defense():
+    dv = _derived(
+        primary_zone=_zone(role=ZoneType.SUPPORT.value),
+        rr_gate={"qualified": False, "reason_code": "RR_NOT_QUALIFIED"},
+    )
+    assert dv["path_gate_state"] == "RR_BLOCKED"
+    assert dv["path_reason_codes"] == ["RR_NOT_QUALIFIED"]
+    assert dv["position_gate_state"] == "SUPPORT_DEFENSE"
+
+
 def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids():
     # 長期偏空但短線收復確認：short_term_regime=RECOVERY，market_action 仍可能為 AVOID。
     # market_bias 不得因 RECOVERY 就標成多頭延續，需與 action 語意一致（偏空）。
@@ -726,6 +811,21 @@ def test_final_entry_permission_never_outputs_no_setup():
         permission = _final_entry_permission("WAIT_CONFIRMATION", {"state": daily_state, "reason_codes": ["TEST_REASON"]})
         assert permission["state"] != "NO_SETUP"
         assert permission["label"] != "無設定"
+
+
+def test_final_entry_permission_merges_derived_final_reasons_without_state_indirection():
+    permission = _final_entry_permission(
+        "BUY",
+        {"state": "ENTRY_READY", "reason_codes": ["ENTRY_STATE_READY"]},
+        {
+            "final_entry_reason_codes": ["ENTRY_GATE_WAIT_CONFIRMATION"],
+        },
+    )
+
+    assert permission["state"] == "ACCUMULATE"
+    assert permission["entry_action_state"] == "BUY"
+    assert permission["daily_confirmation_state"] == "ENTRY_READY"
+    assert permission["reason_codes"] == ["ENTRY_STATE_READY", "ENTRY_GATE_WAIT_CONFIRMATION"]
 
 
 def test_final_entry_permission_does_not_upgrade_buy_without_daily_buy_ready():
@@ -808,7 +908,8 @@ def test_confirmed_reclaim_clears_same_zone_breakdown_exit_gate():
     assert ds["primary_zone"]["zone_interaction"]["price_action_evidence"]["reclaim_type"] == "UNDERCUT_RECLAIM"
     assert ds["market_action"] != "AVOID"
     assert ds["position_action"] != "EXIT"
-    assert ds["position_action_condition"]["state"] == "SUPPORT_RECLAIM_CONFIRMED"
+    assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["position_action_condition"]["structure_state"] == "SUPPORT_RECLAIM_CONFIRMED"
     assert "SUPPORT_RECLAIM_CONFIRMED" in ds["position_action_condition"]["reason_codes"]
 
 

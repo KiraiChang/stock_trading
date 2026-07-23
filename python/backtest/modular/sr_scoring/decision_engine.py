@@ -158,13 +158,20 @@ def _zone_lifecycle(z: ZoneScore, interaction: Optional[dict[str, Any]] = None) 
     return "VALIDATED"
 
 
-def _position_action_condition(primary_zone: Optional[ZoneScore], structure_state: str) -> dict[str, Any]:
+def _position_action_condition(
+    primary_zone: Optional[ZoneScore],
+    structure_state: str,
+    derived_view: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    position_gate_state = str((derived_view or {}).get("position_gate_state") or "NORMAL")
+    derived_reasons = list((derived_view or {}).get("position_reason_codes") or [])
     if primary_zone is None:
         return {
-            "state": structure_state,
+            "state": position_gate_state,
+            "structure_state": structure_state,
             "invalidation_price": None,
             "recovery_price": None,
-            "reason_codes": ["NO_PRIMARY_ZONE"],
+            "reason_codes": _unique_reason_codes(["NO_PRIMARY_ZONE", *derived_reasons]),
         }
 
     reason_codes: list[str] = []
@@ -179,25 +186,28 @@ def _position_action_condition(primary_zone: Optional[ZoneScore], structure_stat
         else:
             reason_codes.append("SUPPORT_DEFENSE")
         return {
-            "state": structure_state,
+            "state": position_gate_state,
+            "structure_state": structure_state,
             "invalidation_price": primary_zone.price_low,
             "recovery_price": primary_zone.price_high,
-            "reason_codes": reason_codes,
+            "reason_codes": _unique_reason_codes([*reason_codes, *derived_reasons]),
         }
 
     if primary_zone.role == ZoneType.RESISTANCE.value:
         return {
-            "state": structure_state,
+            "state": position_gate_state,
+            "structure_state": structure_state,
             "invalidation_price": primary_zone.price_high,
             "recovery_price": primary_zone.price_low,
-            "reason_codes": ["PRIMARY_RESISTANCE", "UPSIDE_BREAKOUT_REQUIRED"],
+            "reason_codes": _unique_reason_codes(["PRIMARY_RESISTANCE", "UPSIDE_BREAKOUT_REQUIRED", *derived_reasons]),
         }
 
     return {
-        "state": structure_state,
+        "state": position_gate_state,
+        "structure_state": structure_state,
         "invalidation_price": primary_zone.price_low,
         "recovery_price": primary_zone.price_high,
-        "reason_codes": ["WAIT_FOR_DIRECTION"],
+        "reason_codes": _unique_reason_codes(["WAIT_FOR_DIRECTION", *derived_reasons]),
     }
 
 
@@ -529,7 +539,19 @@ def _entry_action_label(state: str) -> str:
     }.get(state, state)
 
 
-def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[str, Any]) -> dict[str, Any]:
+def _unique_reason_codes(codes: list[str]) -> list[str]:
+    out: list[str] = []
+    for code in codes:
+        if code and code not in out:
+            out.append(code)
+    return out
+
+
+def _final_entry_permission(
+    entry_action_state: str,
+    daily_confirmation: dict[str, Any],
+    derived_view: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
     daily_state = str(daily_confirmation.get("state") or "WAIT_DAILY_CONFIRM")
     order = {
         "INVALIDATED": 0,
@@ -561,12 +583,21 @@ def _final_entry_permission(entry_action_state: str, daily_confirmation: dict[st
         state = "BLOCKED"
     else:
         state = "WAIT_CONFIRMATION"
+    reason_codes = list(daily_confirmation.get("reason_codes") or [])
+    # 硬阻擋時不回填「等待延續 / 動能確認」這類 derived reason，避免
+    # final entry 同時輸出 blocked 與 probe/wait 文案。
+    if state != "BLOCKED":
+        reason_codes = _unique_reason_codes([
+            *reason_codes,
+            *list((derived_view or {}).get("final_entry_reason_codes") or []),
+        ])
+
     return {
         "state": state,
         "label": _entry_action_label(state),
         "entry_action_state": entry_action_state,
         "daily_confirmation_state": daily_state,
-        "reason_codes": list(daily_confirmation.get("reason_codes") or []),
+        "reason_codes": reason_codes,
     }
 
 
@@ -587,9 +618,14 @@ def _decision_derived_view(
     entry_action_state: str,
     event_state_summary: dict[str, Any],
     daily_price_action: Optional[dict[str, Any]] = None,
+    rr_gate: Optional[dict[str, Any]] = None,
+    structure_state: str = "NORMAL",
+    daily_candidate_zones: Optional[list[dict[str, Any]]] = None,
+    blocking_zone_ahead: bool = False,
 ) -> dict[str, Any]:
     active_states = list(event_state_summary.get("active") or [])
     candidate_states = list(event_state_summary.get("candidates") or [])
+    active_bearish_states = list(event_state_summary.get("active_bearish_events") or [])
     active_event_types = _event_state_types(active_states)
     candidate_event_types = _event_state_types(candidate_states)
     short_term_regime = str(regime.get("short_term_regime") or "NORMAL")
@@ -635,16 +671,116 @@ def _decision_derived_view(
     ):
         daily_reason_codes.append(str(daily_price_action.get("momentum_confirmation_state")))
 
+    final_entry_reason_codes = _unique_reason_codes([
+        *daily_reason_codes,
+        *(["MARKET_ACTION_AVOID"] if market_action == "AVOID" else []),
+        *(["ENTRY_GATE_BLOCKED"] if entry_action_state == "BLOCKED" else []),
+        *(["ENTRY_GATE_WAIT_CONFIRMATION"] if entry_action_state in ("WAIT_CONFIRMATION", "NO_SETUP") else []),
+    ])
+    if active_bearish_states:
+        path_gate_state = "EVENT_RISK"
+        path_reason_codes = ["ACTIVE_BEARISH_EVENT"]
+        position_gate_state = "DEFEND_BREAKDOWN"
+        position_reason_codes = ["ACTIVE_BEARISH_EVENT", "POSITION_DEFENSE_REQUIRED"]
+    elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
+        path_gate_state = "INVALIDATION_RISK"
+        path_reason_codes = ["SUPPORT_BREAKDOWN_RISK"]
+        position_gate_state = "DEFEND_BREAKDOWN"
+        position_reason_codes = ["POSITION_DEFENSE_REQUIRED", "SUPPORT_BREAKDOWN_RISK"]
+    elif primary_zone is None and daily_candidate_zones:
+        path_gate_state = "DAILY_CANDIDATE_ONLY"
+        path_reason_codes = ["DAILY_CANDIDATE_ONLY"]
+        position_gate_state = "NORMAL"
+        position_reason_codes = []
+    elif rr_gate is not None and not rr_gate.get("qualified"):
+        path_gate_state = "RR_BLOCKED"
+        reason = str(rr_gate.get("reason_code") or "RR_NOT_QUALIFIED")
+        path_reason_codes = [reason]
+        if (
+            structure_state == "SUPPORT_RECLAIM_CONFIRMED"
+            or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
+            or "INTRADAY_RECLAIM" in active_event_types
+        ):
+            position_gate_state = "CONDITIONAL_HOLD"
+            position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
+        elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
+            position_gate_state = "SUPPORT_DEFENSE"
+            position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
+        elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
+            position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
+            position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
+        else:
+            position_gate_state = "NORMAL"
+            position_reason_codes = []
+    elif "WAIT_PRICE_FOLLOW_THROUGH" in daily_reason_codes:
+        path_gate_state = "WAIT_PRICE_FOLLOW_THROUGH"
+        path_reason_codes = ["WAIT_PRICE_FOLLOW_THROUGH"]
+        position_gate_state = "CONDITIONAL_HOLD"
+        position_reason_codes = ["POSITION_RECLAIM_DEFENSE", "WAIT_PRICE_FOLLOW_THROUGH"]
+    elif blocking_zone_ahead:
+        path_gate_state = "BLOCKING_ZONE_AHEAD"
+        path_reason_codes = ["BLOCKING_ZONE_AHEAD"]
+        if (
+            structure_state == "SUPPORT_RECLAIM_CONFIRMED"
+            or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
+            or "INTRADAY_RECLAIM" in active_event_types
+        ):
+            position_gate_state = "CONDITIONAL_HOLD"
+            position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
+        elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
+            position_gate_state = "SUPPORT_DEFENSE"
+            position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
+        elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
+            position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
+            position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
+        else:
+            position_gate_state = "NORMAL"
+            position_reason_codes = []
+    elif (
+        structure_state == "SUPPORT_RECLAIM_CONFIRMED"
+        or short_term_regime in ("RECLAIM_ATTEMPT", "RECOVERY")
+        or "INTRADAY_RECLAIM" in active_event_types
+    ):
+        path_gate_state = "OPEN_PATH"
+        path_reason_codes = []
+        position_gate_state = "CONDITIONAL_HOLD"
+        position_reason_codes = ["POSITION_RECLAIM_DEFENSE"]
+    elif primary_zone and primary_zone.role == ZoneType.SUPPORT.value:
+        path_gate_state = "OPEN_PATH"
+        path_reason_codes = []
+        position_gate_state = "SUPPORT_DEFENSE"
+        position_reason_codes = ["POSITION_SUPPORT_DEFENSE"]
+    elif primary_zone and primary_zone.role == ZoneType.RESISTANCE.value:
+        path_gate_state = "OPEN_PATH"
+        path_reason_codes = []
+        position_gate_state = "UPSIDE_BREAKOUT_REQUIRED"
+        position_reason_codes = ["POSITION_RESISTANCE_OVERHEAD"]
+    else:
+        path_gate_state = "OPEN_PATH"
+        path_reason_codes = []
+        position_gate_state = "NORMAL"
+        position_reason_codes = []
+
     return {
-        "version": "decision-derived-view-p0",
+        "version": "decision-derived-view-p2",
         "bias_state": bias_state,
         "bias_label": _market_bias_label(bias_state),
         "bias_reason_codes": bias_reason_codes,
         "active_event_types": sorted(active_event_types),
         "candidate_event_types": sorted(candidate_event_types),
-        "entry_gate_state": entry_action_state,
+        "final_entry_reason_codes": final_entry_reason_codes,
+        "path_gate_state": path_gate_state,
+        "path_reason_codes": path_reason_codes,
+        "position_gate_state": position_gate_state,
+        "position_reason_codes": position_reason_codes,
         "daily_reason_codes": daily_reason_codes,
-        "authority_reason_codes": [*bias_reason_codes, *daily_reason_codes],
+        "authority_reason_codes": _unique_reason_codes([
+            *bias_reason_codes,
+            *daily_reason_codes,
+            *final_entry_reason_codes,
+            *path_reason_codes,
+            *position_reason_codes,
+        ]),
     }
 
 
@@ -1225,6 +1361,50 @@ def _daily_candidate_zones(
     return candidates
 
 
+def _select_blocking_resistance(
+    zone_scores: list[ZoneScore],
+    daily_candidate_zones: list[dict[str, Any]],
+    current_price: float,
+) -> Optional[tuple[str, Any]]:
+    """挑出目前擋在前方的壓力 zone（歷史 SR 優先，否則日 K 候選壓力）。
+
+    回傳 `("zone", ZoneScore)` / `("daily", dict)` / `None`，讓 `_has_blocking_zone_ahead`
+    與 `_price_path` 共用同一份選擇邏輯，避免兩處各自實作而漂移（兩者的 `price_low`
+    門檻必須一致，才能保證 `path_state=BLOCKING_ZONE_AHEAD` 與 `blocking_zone` 輸出不分歧）。
+    """
+    resistance_candidates = [
+        z for z in zone_scores
+        if z.role == ZoneType.RESISTANCE.value and z.price_high >= current_price
+    ]
+    if resistance_candidates:
+        return ("zone", min(resistance_candidates, key=lambda z: _distance_pct_to_zone(z, current_price)))
+    candidate_resistance = next(
+        (z for z in daily_candidate_zones if z["role"] == ZoneType.RESISTANCE.value),
+        None,
+    )
+    if candidate_resistance is not None:
+        return ("daily", candidate_resistance)
+    return None
+
+
+def _blocking_zone_price_low(blocker: Optional[tuple[str, Any]]) -> Optional[float]:
+    if blocker is None:
+        return None
+    kind, obj = blocker
+    return float(obj.price_low) if kind == "zone" else float(obj["price_low"])
+
+
+def _has_blocking_zone_ahead(
+    zone_scores: list[ZoneScore],
+    daily_candidate_zones: list[dict[str, Any]],
+    current_price: float,
+) -> bool:
+    price_low = _blocking_zone_price_low(
+        _select_blocking_resistance(zone_scores, daily_candidate_zones, current_price)
+    )
+    return price_low is not None and current_price < price_low
+
+
 def _price_path(
     zone_scores: list[ZoneScore],
     current_price: float,
@@ -1236,6 +1416,7 @@ def _price_path(
     structure_state: str,
     rr_gate: dict[str, Any],
     event_state_summary: Optional[dict[str, Any]] = None,
+    derived_view: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     def zone_blocking_ref(zone: ZoneScore) -> dict[str, Any]:
         selected = any(
@@ -1315,22 +1496,21 @@ def _price_path(
         next_decision_price = candidate["price_low"] if current_price < candidate["price_low"] else candidate["price_high"]
         next_decision_source = "daily_candidate_zone"
 
-    resistance_candidates = [
-        z for z in zone_scores
-        if z.role == ZoneType.RESISTANCE.value and z.price_high >= current_price
-    ]
+    # 與 _has_blocking_zone_ahead 共用同一份壓力 zone 選擇，兩處只在「輸出 ref」與
+    # 「回傳 bool」上不同，選出的 zone 與 price_low 門檻保證一致。
+    blocker = _select_blocking_resistance(zone_scores, daily_candidate_zones, current_price)
     blocking_zone: Optional[dict[str, Any]] = None
-    if resistance_candidates:
-        zone = min(resistance_candidates, key=lambda z: _distance_pct_to_zone(z, current_price))
-        blocking_zone = zone_blocking_ref(zone)
-    elif daily_candidate_zones:
-        candidate_resistance = next((z for z in daily_candidate_zones if z["role"] == ZoneType.RESISTANCE.value), None)
-        if candidate_resistance:
-            blocking_zone = daily_blocking_ref(candidate_resistance)
+    if blocker is not None:
+        kind, obj = blocker
+        blocking_zone = zone_blocking_ref(obj) if kind == "zone" else daily_blocking_ref(obj)
 
     active_events = list((event_state_summary or {}).get("active") or [])
     active_bearish_events = list((event_state_summary or {}).get("active_bearish_events") or [])
-    if active_bearish_events:
+    derived_path_state = str((derived_view or {}).get("path_gate_state") or "OPEN_PATH")
+    derived_path_reasons = list((derived_view or {}).get("path_reason_codes") or [])
+    if derived_view is not None:
+        path_state = derived_path_state
+    elif active_bearish_events:
         path_state = "EVENT_RISK"
     elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
         path_state = "INVALIDATION_RISK"
@@ -1377,6 +1557,7 @@ def _price_path(
         "reason_codes": (
             ["ACTIVE_BEARISH_EVENT"]
             if active_bearish_events else
+            derived_path_reasons if derived_view is not None and derived_path_reasons else
             [str(rr_gate.get("reason_code"))] if path_state == "RR_BLOCKED" and rr_gate.get("reason_code") else []
         ),
         "invalidation_price": invalidation_price,
@@ -1651,21 +1832,6 @@ def build_decision_summary(
         previous_candle_low,
         previous_candle_close,
     )
-    decision_derived_view = _decision_derived_view(
-        regime,
-        primary_zone,
-        market_action,
-        entry_action_state,
-        event_state_summary,
-        daily_price_action,
-    )
-    market_bias, market_bias_label = _market_bias(
-        regime,
-        primary_zone,
-        market_action,
-        active_market_events,
-        decision_derived_view,
-    )
     event_sequence = _event_sequence(market_events)
     daily_candidate_zones = _daily_candidate_zones(
         current_price,
@@ -1675,6 +1841,25 @@ def build_decision_summary(
         daily_price_action,
         market_events,
         nearest_zone,
+    )
+    decision_derived_view = _decision_derived_view(
+        regime,
+        primary_zone,
+        market_action,
+        entry_action_state,
+        event_state_summary,
+        daily_price_action,
+        rr_gate,
+        structure_state,
+        daily_candidate_zones,
+        _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price),
+    )
+    market_bias, market_bias_label = _market_bias(
+        regime,
+        primary_zone,
+        market_action,
+        active_market_events,
+        decision_derived_view,
     )
     price_path = _price_path(
         zone_scores,
@@ -1687,6 +1872,7 @@ def build_decision_summary(
         structure_state,
         rr_gate,
         event_state_summary,
+        decision_derived_view,
     )
     daily_confirmation = _daily_confirmation(
         primary_zone,
@@ -1698,7 +1884,7 @@ def build_decision_summary(
         daily_candidate_zones,
         current_price,
     )
-    final_entry_permission = _final_entry_permission(entry_action_state, daily_confirmation)
+    final_entry_permission = _final_entry_permission(entry_action_state, daily_confirmation, decision_derived_view)
     best_trade_zone = primary_zone if rr_gate["qualified"] and entry_action_state in (
         "PROBE_ENTRY",
         "SMALL_ENTRY",
@@ -1809,7 +1995,7 @@ def build_decision_summary(
         },
         "market_action": market_action,
         "position_action": position_action,
-        "position_action_condition": _position_action_condition(primary_zone, structure_state),
+        "position_action_condition": _position_action_condition(primary_zone, structure_state, decision_derived_view),
         "action": action,
         "action_label": action_label,
         "entry_action_state": entry_action_state,

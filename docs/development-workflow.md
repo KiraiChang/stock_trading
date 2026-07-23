@@ -156,6 +156,56 @@ docker compose -f docker-compose.dev.yml down -v
 - 若有前端畫面變更，跑 frontend Docker build，並在 dev stack 或本地 dev server 驗證畫面。
 - 若因環境、網路或外部 token 無法執行某項驗證，最後回報要明確寫出未執行項目與原因。
 
+宣告完成或移除 issue/todo 項目前，逐項走過下方「結案確認清單（Definition of Done）」。
+
+## 結案確認清單（Definition of Done）
+
+「開發完成標準」是最低要求，這份清單是**宣告任務完成前（或把 issue/todo 項目移除前）逐項確認的
+操作版**。每一條都對應本專案實際踩過的結案缺陷，別跳過。整份走完再說「完成」。
+
+### A. 測試驗證
+
+- [ ] 受影響 runtime 的 `scripts/test.sh` 全綠，且用 `-count=1`（或等效）跑過一次，不靠 cache 假綠。
+- [ ] 新增／修改的邏輯**每個分支**都有斷言。曾發生新的 `position_gate_state` 分支
+      （`DEFEND_BREAKDOWN` / `SUPPORT_DEFENSE` / `UPSIDE_BREAKOUT_REQUIRED`）只實作沒測到。
+- [ ] 期望值來自**規格**、且測的是 **production 真的會產生的輸入**。不要手工捏造 production
+      永不出現的分歧來「驗證」一個實際空轉的能力（`final_entry_gate_state` echo 的教訓）。見品質守則 §1。
+- [ ] 若動到 migration／API／跨服務／排程／Python↔Go 互動，跑過 `scripts/smoke-dev.sh`。
+
+### B. 文件收斂與狀態誠實
+
+- [ ] 主題文件（`sr-zone-scoring.md` 等）與實作一致，**不得把「目標終局」寫成已完成**；只做一半就
+      如實標「⚠️／規劃中」。曾把 annotation 層寫成「已達成單一真相源」。
+- [ ] 完成的 `issue.md` / `todo.md` 項目已移除或搬到「已完成封存」；移除前把 durable 設計寫回主題文件，
+      並**修掉其他文件指向該筆的交叉引用**（避免斷鏈）。見「文件收斂規則」。
+- [ ] 狀態誠實：phased 工作在收尾前標「進行中」並保留剩餘 phase，**不要提前標「已完成」**。曾兩次把
+      只做到一半的 T-034 標成完成。
+
+### C. 前後端契約與一致性
+
+- [ ] 新增分析欄位時 Python → Go(`internal/analysis/client.go`) → TS(`lib/api/*.ts`) 三端同步，
+      新欄位用 `omitempty`／optional 保向後相容。見「SR Zone / 分析輸出欄位開發注意事項」。
+- [ ] 新的 `decision_summary`／derived 欄位**已在前端接線或顯式延後**，不能只加型別不渲染。見品質守則 §3。
+- [ ] 共用的 label／對照表抽到**單一模組**（例如 `derivedReasonLabel` 放 `srZones.ts`），不要兩個頁面各自
+      維護一份而漂移。
+
+### D. 不留 dead / echo / 雙真相源
+
+- [ ] 沒有只是鏡像另一欄位的 echo 欄位（如 `final_entry_gate_state` = `entry_action_state`）。
+- [ ] 沒有 legacy state 與 derived gate 並存的雙真相源；legacy 欄位要嘛由 gate 推導、要嘛退役並在文件
+      標明哪個是權威、消費端不應讀 legacy。
+- [ ] 重複邏輯已收斂到單一 helper（如 blocking-zone 偵測），避免兩份 copy 漂移。
+
+### E. 產物與版控
+
+- [ ] 前端有變更 → **重新 build dist 並 `git add backend/internal/ui/dist`**。`git commit -am` 不會帶
+      未追蹤的新 chunk，漏了會讓 `index.html` 指向不存在的檔案、Go embed 前端 404。
+- [ ] `git status` 只剩本次預期的改動：無 root-owned 檔案、無誤入的執行檔／`__pycache__`／快取殘渣。
+
+### F. 回報
+
+- [ ] 回報明確寫出「跑了什麼、結果、沒跑什麼與原因」；測試失敗或步驟略過要如實說，不要含糊帶過。
+
 ## 開發慣例（品質守則）
 
 這些是從實際 code review 累積的品質守則，補在「開發完成標準」之外，針對容易長期潛藏、

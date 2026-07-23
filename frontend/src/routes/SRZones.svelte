@@ -14,6 +14,7 @@
     listTrainJobs,
     pruneTrainJobs,
     getModelStatus,
+    derivedReasonLabel,
     type SRZoneAnalysis,
     type SRZone,
     type SRZoneSummaryItem,
@@ -322,23 +323,6 @@
     BULLISH_CONTINUATION: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60',
   }
   // decision_derived_view 的 reason code → 人類可讀說明；查無對照時回退顯示原始 code。
-  const derivedReasonText: Record<string, string> = {
-    MARKET_ACTION_AVOID: '盤勢避開（hard block）',
-    SHORT_TERM_RECOVERY: '短線收復確認',
-    SHORT_TERM_RECLAIM_ATTEMPT: '短線收復嘗試',
-    SHORT_TERM_EARLY_TREND: '早期趨勢',
-    REVERSAL_CANDIDATE: '反轉候選（待確認）',
-    MARKET_ACTION_BUY: '盤勢偏多',
-    MARKET_ACTION_BUY_SMALL: '盤勢偏多（小量）',
-    STRUCTURAL_BEARISH_CONTEXT: '結構偏空',
-    STRUCTURAL_BULLISH_CONTEXT: '結構偏多',
-    NEUTRAL_CONTEXT: '中性',
-    WAIT_PRICE_FOLLOW_THROUGH: '等待價格延續',
-    REVERSAL_AWAIT_NEXT_DAILY_CONFIRM: '反轉待隔日確認',
-    NO_MOMENTUM_CONFIRMATION: '動能未確認',
-    MOMENTUM_UNCONFIRMED: '動能未確認',
-  }
-  const derivedReasonLabel = (code: string): string => derivedReasonText[code] ?? code
   const marketActionText: Record<string, string> = {
     BUY: '偏多觀察', BUY_SMALL: '偏多觀察', WATCH: '中性觀察', AVOID: '偏空觀察',
     Buy: '買進', BuySmall: '小量試單', Hold: '觀察', Avoid: '避開',
@@ -448,13 +432,14 @@
     EVENT_RISK: '事件風險',
     INVALIDATION_RISK: '失效風險',
     RR_BLOCKED: 'RR 阻擋',
+    WAIT_PRICE_FOLLOW_THROUGH: '等待價格延續',
     BLOCKING_ZONE_AHEAD: '前方壓力',
     DAILY_CANDIDATE_ONLY: '僅日 K 候選',
     OPEN_PATH: '路徑開放',
   }
 
   function positionReasonCodesText(codes?: string[]): string {
-    return codes && codes.length > 0 ? codes.join(' / ') : '—'
+    return codes && codes.length > 0 ? codes.map(derivedReasonLabel).join(' / ') : '—'
   }
 
   // 白話交易建議：保持「輔助判斷」語氣，不寫成保證獲利或自動交易指令，

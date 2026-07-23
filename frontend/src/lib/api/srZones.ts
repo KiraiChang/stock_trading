@@ -441,6 +441,7 @@ export interface SRDefenseLines {
 
 export interface SRPositionActionCondition {
   state: SRStructureState | string
+  structure_state?: SRStructureState | string
   invalidation_price: number | null
   recovery_price: number | null
   reason_codes: string[]
@@ -602,10 +603,46 @@ export interface SRDecisionDerivedView {
   bias_reason_codes?: string[]
   active_event_types?: string[]
   candidate_event_types?: string[]
-  entry_gate_state?: SREntryActionState | string
+  final_entry_reason_codes?: string[]
+  path_gate_state?: string
+  path_reason_codes?: string[]
+  position_gate_state?: string
+  position_reason_codes?: string[]
   daily_reason_codes?: string[]
   authority_reason_codes?: string[]
 }
+
+// decision_derived_view 的 reason code → 中文說明；查無對照時回退顯示原始 code。
+// SRZones 與 Positions 共用此表，避免兩處各自維護而漂移。
+export const derivedReasonText: Record<string, string> = {
+  MARKET_ACTION_AVOID: '盤勢避開（hard block）',
+  SHORT_TERM_RECOVERY: '短線收復確認',
+  SHORT_TERM_RECLAIM_ATTEMPT: '短線收復嘗試',
+  SHORT_TERM_EARLY_TREND: '早期趨勢',
+  REVERSAL_CANDIDATE: '反轉候選（待確認）',
+  MARKET_ACTION_BUY: '盤勢偏多',
+  MARKET_ACTION_BUY_SMALL: '盤勢偏多（小量）',
+  STRUCTURAL_BEARISH_CONTEXT: '結構偏空',
+  STRUCTURAL_BULLISH_CONTEXT: '結構偏多',
+  NEUTRAL_CONTEXT: '中性',
+  WAIT_PRICE_FOLLOW_THROUGH: '等待價格延續',
+  REVERSAL_AWAIT_NEXT_DAILY_CONFIRM: '反轉待隔日確認',
+  NO_MOMENTUM_CONFIRMATION: '動能未確認',
+  MOMENTUM_UNCONFIRMED: '動能未確認',
+  ENTRY_GATE_BLOCKED: '進場閘門阻擋',
+  ENTRY_GATE_WAIT_CONFIRMATION: '進場閘門等待確認',
+  ACTIVE_BEARISH_EVENT: '有效偏空事件',
+  SUPPORT_BREAKDOWN_RISK: '支撐跌破風險',
+  BLOCKING_ZONE_AHEAD: '前方壓力擋道',
+  DAILY_CANDIDATE_ONLY: '僅日 K 候選',
+  RR_NOT_QUALIFIED: 'RR 未達門檻',
+  POSITION_DEFENSE_REQUIRED: '持倉需防守',
+  POSITION_RECLAIM_DEFENSE: '收復後條件式防守',
+  POSITION_SUPPORT_DEFENSE: '支撐防守',
+  POSITION_RESISTANCE_OVERHEAD: '上方壓力需突破',
+}
+
+export const derivedReasonLabel = (code: string): string => derivedReasonText[code] ?? code
 
 export interface SRDecisionSummary {
   data_mode?: string

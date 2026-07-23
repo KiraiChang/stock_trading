@@ -8,6 +8,7 @@
     type Position, type PositionAnalysis, type PositionTransaction,
   } from '../lib/api/positions'
   import { analyzeTrade, listTradeAnalyses } from '../lib/api/tradeAnalysis'
+  import { derivedReasonLabel } from '../lib/api/srZones'
 
   let symbol = ''
   let positions: Position[] = []
@@ -255,7 +256,7 @@
           <div class="mt-3 grid md:grid-cols-3 gap-3 text-xs">
             <div><p class="text-muted">防守線</p><p class="text-fall font-mono">{num(latest.evidence.position_action_condition.invalidation_price)}</p></div>
             <div><p class="text-muted">回穩線</p><p class="text-rise font-mono">{num(latest.evidence.position_action_condition.recovery_price)}</p></div>
-            <div><p class="text-muted">Reason Codes</p><p class="text-white font-mono break-words">{latest.evidence.position_action_condition.reason_codes?.join(' / ') || '—'}</p></div>
+            <div><p class="text-muted">Reason Codes</p><p class="text-white font-mono break-words">{latest.evidence.position_action_condition.reason_codes?.map(derivedReasonLabel).join(' / ') || '—'}</p></div>
           </div>
         {/if}
         <div class="mt-3 grid md:grid-cols-3 gap-3 text-xs">

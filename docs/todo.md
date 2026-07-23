@@ -347,41 +347,11 @@ svelte-check，所以 `frontend/scripts/test.sh` 目前唯一能做的檢查是 
 
 ---
 
-### T-034：對外標籤統一由 Event Lifecycle 推導
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 進行中（P0 完成） |
-| 優先度 | 高 |
-| 分類 | Python / SR Zone / 架構收斂 |
-| 建立日期 | 2026-07-22 |
-| 來源 | 使用者需求（訊號互相矛盾）＋ 2026-07-22 code review |
-
-目標狀態：**Event Lifecycle（事件的產生 → ACTIVE → 延續 → 失效 → 過期）是唯一狀態機，
-其餘所有對外標籤都是它的 derived view**，而不是各自平行計算的結論。達成後一致性由結構
-保證，而不是靠個案補特例維持。設計現況見
-[sr-zone-scoring.md 的 decision_derived_view / lifecycle family 規則](../docs/sr-zone-scoring.md)。
-
-**P0 已完成（`decision_derived_view` 版本 `decision-derived-view-p0`）：**
-
-- `_decision_derived_view` 產出 bias 真值表 ＋ `daily_reason_codes` ＋ `authority_reason_codes`。
-- `market_bias`、`daily_confirmation` 改讀 derived view，不再各自從 raw `market_events` 重推。
-- event lifecycle 的 gating / aging / resolve 規則集中到 `EVENT_FAMILY_LIFECYCLE_RULES`。
-- 跨分析延續改帶完整 `market_event_states` snapshot（含 resolved / expired），Go 欄位
-  `decision_derived_view_json` 貫穿 model / insert / select / 三種 DB migration。
-
-**剩餘 phase（未接線，尚待規劃）：**
-
-- `price_path`（第三組矛盾「連兩日收高 vs 價格未延續」的所在）與 `position_action_condition`
-  仍未改吃 derived view；`sr-zone-scoring.md` 權威鏈已把兩者列為目標終局，並標註「規劃中」，
-  待這裡完成後移除該標註。
-- `final_entry_permission` 目前只間接經 `daily_confirmation` 消費 derived view，未直接接線。
-- 前端 `SRDecisionDerivedView` 已有 TS 型別，但 `SRZones.svelte` 尚未渲染
-  `bias_reason_codes` / `daily_reason_codes` / `authority_reason_codes` 這批可追溯欄位
-  （見 development-workflow.md §3；本次先補渲染，其餘 phase 的欄位隨接線再補）。
-
----
-
 ## 已完成封存
 
-（目前沒有項目）
+- **T-034：對外標籤統一由 Event Lifecycle 推導**（2026-07-23 結案）。P0–P2 已把
+  `market_bias` / `daily_confirmation` / `final_entry_permission` / `price_path` /
+  `position_action_condition` 全部改由 `decision_derived_view` 推導（version
+  `decision-derived-view-p2`），移除 echo 與同物異名欄位，達成單一真相源。現況規格見
+  [sr-zone-scoring.md](./sr-zone-scoring.md) 的「decision_derived_view 接線現況」與
+  「lifecycle family 規則」，不再於本清單追蹤。

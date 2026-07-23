@@ -643,18 +643,20 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 `decision_derived_view`（對外語意）→ 對外標籤。除候選區產生與防守線展示外，對外結論不得
 各自直接讀 raw `market_events` 再推導一次狀態。
 
-各對外標籤的接線現況（收斂進度見 [todo.md T-034](./todo.md)）：
+各對外標籤的接線現況（全部已由 derived view 推導；此為現況規格，非待辦）：
 
-| 對外標籤 | 是否已改吃 `decision_derived_view` |
+| 對外標籤 | 接線現況 |
 |---|---|
 | `market_bias` | ✅ 已接線（`bias_state`） |
 | `daily_confirmation` | ✅ 已接線（`daily_reason_codes`） |
-| `final_entry_permission` | ⚠️ 間接，僅經 `daily_confirmation` |
-| `price_path` | ⏳ 規劃中，仍自行推導 |
-| `position_action_condition` | ⏳ 規劃中，仍自行推導 |
+| `final_entry_permission` | ✅ 已合併 `final_entry_reason_codes`；state 由 `entry_action_state` 與 `daily_confirmation.state` 保守仲裁 |
+| `price_path` | ✅ `path_state` 由 `path_gate_state` 推導；價位仍由 price path 函式計算 |
+| `position_action_condition` | ✅ `state` 由 `position_gate_state` 推導；防守價仍由 primary zone 計算，`structure_state` 僅供 debug |
 
-標「⏳ 規劃中」者為 T-034 尚未接線的剩餘 phase：目標終局是全部改由 derived view 推導，
-但目前程式尚未落實，接線完成後移除本標註。
+P0–P2 已把語意 gate 接進 derived view，價位型欄位仍由各自函式計算實際價格，避免把 price
+math 塞進 lifecycle layer。`decision_derived_view.version=decision-derived-view-p2` 是目前
+收斂後的 payload：不再輸出 production 空轉 echo 的 `final_entry_gate_state`，也不在
+`price_path` / `position_action_condition` 內輸出與 legacy state 平行的 gate 欄位。
 
 `decision_summary.market_bias` 是對外的多空傾向標籤（`BULLISH_BIAS` / `BEARISH_BIAS` /
 `NEUTRAL_BIAS` / `REVERSAL_BIAS` / `BULLISH_CONTINUATION`），由
@@ -853,7 +855,8 @@ Action 應由 Market Regime、primary zone、`entry_relevance_score`、market ev
 
 若 zone 是 `PENDING_VALIDATION` 或 position reason 含 `SUPPORT_RECLAIM_AWAIT_CONFIRMATION`，即使 legacy `action=BuySmall`，`entry_action_state` 也不得高於 `PROBE_ENTRY`，避免「尚待確認」與「小量試單」語意衝突。
 
-`final_entry_permission` 是 `entry_action_state` 與 `daily_confirmation.state` 的保守仲裁結果，前端若要顯示
+`final_entry_permission` 是 `entry_action_state` 與 `daily_confirmation.state` 的保守仲裁結果，
+並合併 `decision_derived_view.final_entry_reason_codes` 作為可追溯理由；前端若要顯示
 「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
 `final_entry_permission.state` 不再輸出 `NO_SETUP` 或空語意；若 daily confirmation 為 `INVALIDATED`
 或 RR gate 等硬條件不通，final permission 會降為 `BLOCKED`，其他未完成 setup 則降為

@@ -53,8 +53,9 @@
   let searchTimer: ReturnType<typeof setTimeout> | null = null
   let submitting = false
   let formError = ''
-  let statusFilter: 'all' | 'listed' | 'delisted' | 'unknown' = 'all'
-  const statusOptions: { value: typeof statusFilter; label: string }[] = [
+  type StatusFilter = 'all' | 'listed' | 'delisted' | 'unknown'
+  let statusFilter: StatusFilter = 'all'
+  const statusOptions: { value: StatusFilter; label: string }[] = [
     { value: 'all', label: '全部' },
     { value: 'listed', label: '上市' },
     { value: 'delisted', label: '已下架' },

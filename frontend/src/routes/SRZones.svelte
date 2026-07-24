@@ -74,9 +74,12 @@
   // ── 訓練/更新機率模型 ──────────────────────────────────────
   let trainSymbols = ''
   let trainLimit = 1500
-  let trainModelType: 'gradient_boosting' | 'hist_gradient_boosting' | 'lightgbm' | 'logistic_regression' = 'gradient_boosting'
-  let trainSplitMethod: 'time' | 'random' = 'time'
-  let trainCalibrationMethod: 'sigmoid' | 'isotonic' | 'none' = 'sigmoid'
+  type TrainModelType = 'gradient_boosting' | 'hist_gradient_boosting' | 'lightgbm' | 'logistic_regression'
+  type TrainSplitMethod = 'time' | 'random'
+  type TrainCalibrationMethod = 'sigmoid' | 'isotonic' | 'none'
+  let trainModelType: TrainModelType = 'gradient_boosting'
+  let trainSplitMethod: TrainSplitMethod = 'time'
+  let trainCalibrationMethod: TrainCalibrationMethod = 'sigmoid'
   let training = false
   let trainError = ''
   let trainMessage = ''
@@ -99,17 +102,17 @@
     done: 'bg-green-900/40 text-green-400',
     failed: 'bg-red-900/40 text-red-400',
   }
-  const modelTypeNotes: Record<typeof trainModelType, string> = {
+  const modelTypeNotes: Record<TrainModelType, string> = {
     gradient_boosting: '預設建議；小到中型資料穩定，能處理非線性，訓練速度中等。',
     hist_gradient_boosting: '資料量較大時速度較好；小資料不一定比預設模型穩定。',
     lightgbm: '大量資料時通常表現強，但 Python 環境需安裝 lightgbm，否則訓練會失敗。',
     logistic_regression: '可解釋的基準模型；輸出保守，適合拿來檢查複雜模型是否過擬合。',
   }
-  const splitMethodNotes: Record<typeof trainSplitMethod, string> = {
+  const splitMethodNotes: Record<TrainSplitMethod, string> = {
     time: '正式評估建議；每檔股票用較新的 touch 事件當 holdout，避免未來資料混入訓練。',
     random: '只建議做比較；金融時間序列容易高估表現，不適合作為正式模型評估。',
   }
-  const calibrationNotes: Record<typeof trainCalibrationMethod, string> = {
+  const calibrationNotes: Record<TrainCalibrationMethod, string> = {
     sigmoid: '預設建議；校準機率較穩，樣本不足時後端會自動降級為未校準。',
     isotonic: '資料足夠時較有彈性；小資料容易過擬合。',
     none: '不做校準；適合診斷 estimator 原始輸出，不建議直接當最終機率模型。',
@@ -751,7 +754,7 @@
     }
   }
 
-  function formatDateTime(ts?: string): string {
+  function formatDateTime(ts?: string | null): string {
     if (!ts) return '—'
     return new Date(ts).toLocaleString('zh-TW', { hour12: false })
   }

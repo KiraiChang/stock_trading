@@ -103,7 +103,7 @@ class MarketSocket {
         ma5: d.ma5 ?? existing.ma5 ?? 0,
         ma20: d.ma20 ?? existing.ma20 ?? 0,
         rsi14: d.rsi14 ?? existing.rsi14 ?? 0,
-        trend: (d.trend as StockQuote['trend']) ?? existing.trend ?? '',
+        trend: (d.trend as unknown as StockQuote['trend']) ?? existing.trend ?? '',
         hasSignal: existing.hasSignal ?? false,
       })
       return new Map(map)
@@ -111,7 +111,7 @@ class MarketSocket {
   }
 
   private handleSignal(evt: WsEvent): void {
-    const sig = evt.data as Signal
+    const sig = evt.data as unknown as Signal
     signals.update((list) => [sig, ...list].slice(0, 100))
     // 標記 quote 有訊號
     quotes.update((map) => {

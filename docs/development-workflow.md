@@ -46,7 +46,7 @@ container 內憑空消失且不會報錯。腳本是這些約束的唯一真實�
 |---------|------|----------|
 | Backend (Go) | `backend/scripts/test.sh [packages...]` | `go vet` → `go test` → `go build`（全部套件為 `./...`） |
 | Python | `python/scripts/test.sh [pytest 參數/路徑]` | 用 `python/Dockerfile` 建測試 image，跑 `pytest backtest/ tests/` |
-| Frontend (Svelte) | `frontend/scripts/test.sh [--install]` | `npm run build`（Svelte/TS 編譯檢查） |
+| Frontend (Svelte) | `frontend/scripts/test.sh [--install]` | `svelte-check`（型別）→ `vitest run`（單元）→ `vite build`，任一失敗即中止 |
 
 ```bash
 backend/scripts/test.sh                          # 全部 Go 套件
@@ -84,6 +84,23 @@ Go 另外固定 `GOMAXPROCS=1` + `GOFLAGS=-p=1`：本機只有 2GiB RAM，平行
 Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/dist`
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
 跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。
+
+Frontend 測試框架（三層，T-033 導入）：
+
+- **型別**：`svelte-check`（含 `.svelte` 內 TS），對應 `npm run check`。`tsconfig.json` 的
+  `strict: true` 從此被真正執行；`src/vite-env.d.ts` 補上 `vite/client` 型別讓 `import.meta.env`
+  可用。
+- **單元 / 元件**：`vitest` + `@testing-library/svelte`（v4，對應 Svelte 4）+ `jsdom`，對應
+  `npm run test:unit`。測試檔為 `src/**/*.test.ts`；純邏輯（`lib/utils`、`lib/stores`、`lib/api`）
+  與元件渲染（`.svelte`）皆可測。目前為框架＋種子測試，覆蓋逐步補齊。
+- **設定分離**：測試用獨立的 `vitest.config.ts`（不帶 `vite.config.ts` 的 build `outDir` /
+  `emptyOutDir` / manualChunks，避免跑測試誤動 dist 產物）；`resolve.conditions=['browser']` 讓
+  Svelte 元件能在 jsdom 掛載；`vitest-setup.ts` 載入 jest-dom matcher 並手動 `afterEach(cleanup)`。
+- **記憶體**：2GiB host 下 vitest 以 `pool: 'forks'` + `singleFork` 限制併發（比照 Go
+  `GOMAXPROCS=1`、Python `-p=1`）；`MEM` 預設 1024m，vitest+jsdom 較吃資源時可經環境變數上調。
+- **版本相容**：Svelte 4 需 `svelte-check@^3`（v4 需 Svelte 5）與 `@testing-library/svelte@^4`
+  （v5 的 `svelteTesting` vite plugin 需 Svelte 5，本專案不適用，故手動設定 browser condition
+  與 cleanup）。
 
 Backend image build 的記憶體約束：`backend/Dockerfile` 的 builder stage 固定
 `GOFLAGS=-p=1`、`GOMAXPROCS=1`、`GOGC=off`、`GOMEMLIMIT=250MiB`。這台 host 只有 2GiB RAM

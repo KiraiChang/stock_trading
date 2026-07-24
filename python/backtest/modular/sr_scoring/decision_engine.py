@@ -26,6 +26,23 @@ from .labels import role_label as _role_label, display_label as _display_label
 
 
 DEFAULT_STALE_AFTER_DAYS = 1
+MARKET_PRICE_ENTRY_BASES = {"RECLAIM_CLOSE", "CONTINUATION_MARKET_PRICE"}
+
+
+def _risk_note(code: str, text: str) -> dict[str, str]:
+    return {"code": code, "text": text}
+
+
+def _risk_note_text(note: Any) -> str:
+    if isinstance(note, dict):
+        return str(note.get("text") or "")
+    return str(note)
+
+
+def _risk_note_code(note: Any) -> str:
+    if isinstance(note, dict):
+        return str(note.get("code") or "")
+    return ""
 
 
 # entry_relevance_score 有兩個層次，兩者都 clamp 到 [0,100]：
@@ -435,7 +452,7 @@ def _decision_action(
     if "MODEL_UNRELIABLE" in flags:
         risk_notes.append("模型健康度不可用，暫不允許依機率模型進場。")
     elif "MODEL_DEGRADED" in flags:
-        risk_notes.append("模型健康度降級，最多小量或觀察。")
+        risk_notes.append(_risk_note("MODEL_DEGRADED_ENTRY_TONE", "模型健康度降級，最多小量或觀察。"))
     if primary_zone is None:
         risk_notes.append("沒有足夠明確的主交易區。")
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
@@ -462,7 +479,7 @@ def _decision_action(
     elif rr < 1.5:
         risk_notes.append("主交易區風險報酬比不足。")
     elif rr < 2.0:
-        risk_notes.append("風險報酬比未達完整買進門檻，最多小量試單。")
+        risk_notes.append(_risk_note("RR_BELOW_FULL_ENTRY", "風險報酬比未達完整買進門檻，最多小量試單。"))
     if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
         risk_notes.append("主交易區近期驗證偏失效。")
 
@@ -504,6 +521,85 @@ def _decision_action(
     return "WATCH", "HOLD", "Hold", "等待", ["尚未形成足夠明確的進場優勢。"]
 
 
+def _final_action_from_entry(
+    final_entry_permission: dict[str, Any],
+    market_action: str,
+    position_action: str,
+    action: str,
+    action_label: str,
+) -> tuple[str, str, str, str]:
+    state = str(final_entry_permission.get("state") or "WAIT_CONFIRMATION")
+    if state == "BLOCKED":
+        if market_action == "AVOID" or action == "Avoid":
+            return "AVOID", position_action, "Avoid", "避開"
+        return "WATCH", position_action, "Hold", "等待"
+    if state == "WAIT_CONFIRMATION":
+        return "WATCH", position_action, "Hold", "等待"
+    if state == "PROBE_ALLOWED":
+        if action == "Buy":
+            return "BUY_SMALL", position_action, "BuySmall", "小量試單"
+        return market_action, position_action, action, action_label
+    return market_action, position_action, action, action_label
+
+
+def _final_entry_risk_notes(
+    risk_notes: list[Any],
+    final_entry_permission: dict[str, Any],
+    entry_executability: Optional[dict[str, Any]] = None,
+    entry_blocking_zone: Optional[dict[str, Any]] = None,
+    rr_context: Optional[dict[str, Any]] = None,
+) -> list[str]:
+    state = str(final_entry_permission.get("state") or "WAIT_CONFIRMATION")
+    reason_codes = set(str(code) for code in final_entry_permission.get("reason_codes") or [])
+    notes = list(risk_notes)
+    if state in ("BLOCKED", "WAIT_CONFIRMATION"):
+        cleaned_notes: list[Any] = []
+        for note in notes:
+            code = _risk_note_code(note)
+            if code == "MODEL_DEGRADED_ENTRY_TONE":
+                cleaned_notes.append("模型健康度降級，Final Entry 需保守觀察。")
+            elif code == "RR_BELOW_FULL_ENTRY":
+                cleaned_notes.append("風險報酬比未達完整買進門檻，Final Entry 需保守觀察。")
+            else:
+                cleaned_notes.append(note)
+        notes = cleaned_notes
+    price_basis = str((entry_executability or {}).get("price_basis") or "")
+    stop_distance_pct = (rr_context or {}).get("stop_distance_pct")
+    stop_note = ""
+    if price_basis in MARKET_PRICE_ENTRY_BASES and stop_distance_pct is not None:
+        stop_note = f"市價進場距停損約 {float(stop_distance_pct) * 100:.1f}%，需確認部位風險可承受。"
+    if state == "WAIT_CONFIRMATION":
+        if entry_executability and not entry_executability.get("executable_now"):
+            reason = str(entry_executability.get("reason_code") or "ENTRY_NOT_EXECUTABLE")
+            if reason == "ENTRY_ZONE_OVERSHOT":
+                notes.append("Final Entry 尚未放行：現價已高於可執行進場區，不追價。")
+            elif reason == "ENTRY_ZONE_UNDERSHOT":
+                notes.append("Final Entry 尚未放行：現價已低於可執行進場區，需等待重新站回。")
+            else:
+                notes.append("Final Entry 尚未放行：目前進場價位不可執行。")
+        elif entry_blocking_zone and entry_blocking_zone.get("blocked"):
+            notes.append("Final Entry 尚未放行：前方壓力過近，先等待突破或回測。")
+        elif "EXECUTION_RR_UNAVAILABLE" in reason_codes:
+            notes.append(f"Final Entry 尚未放行：市價進場尚無可量化目標價，需等待前方壓力或回測區明確。{stop_note}".strip())
+        elif "EXECUTION_RR_INSUFFICIENT" in reason_codes:
+            notes.append(f"Final Entry 尚未放行：以市價、停損與前方目標重算後 RR 不足。{stop_note}".strip())
+        elif "MODEL_ENTRY_BLOCKED" in reason_codes or "MODEL_ENTRY_CAPPED" in reason_codes:
+            notes.append("Final Entry 已依模型健康度降級，先以觀察為主。")
+        else:
+            notes.append("Final Entry 尚未放行，對外操作維持觀察等待。")
+    elif state == "BLOCKED":
+        notes.append("Final Entry 禁止進場，需等待阻擋條件解除後重新評估。")
+    elif state == "PROBE_ALLOWED":
+        notes.append("Final Entry 僅允許觀察性試探，不代表完整部位進場。")
+    elif state == "ENTRY_ALLOWED" and price_basis in MARKET_PRICE_ENTRY_BASES:
+        target_known = bool((rr_context or {}).get("target_known"))
+        if target_known:
+            notes.append(f"Final Entry 已放行市價型進場，需以 entry_price、stop_price 與 target_price 控制風險。{stop_note}".strip())
+        else:
+            notes.append(f"Final Entry 已放行市價型進場；目前上方無明確壓力目標，target 尚未量化。{stop_note}".strip())
+    return _unique_reason_codes([_risk_note_text(note) for note in notes])
+
+
 def _entry_action_state(
     action: str,
     primary_zone: Optional[ZoneScore],
@@ -542,6 +638,131 @@ def _entry_action_label(state: str) -> str:
     }.get(state, state)
 
 
+def _normalize_final_entry_state(state: str) -> str:
+    if state in ("INVALIDATED", "BLOCKED"):
+        return "BLOCKED"
+    if state in ("PROBE_ENTRY", "PROBE_ALLOWED", "SMALL_ENTRY"):
+        return "PROBE_ALLOWED"
+    if state in ("ENTRY_ALLOWED", "BUY", "BUY_READY", "ENTRY_READY", "ACCUMULATE"):
+        return "ENTRY_ALLOWED"
+    return "WAIT_CONFIRMATION"
+
+
+def _entry_state_rank(state: str) -> int:
+    return {
+        "INVALIDATED": 0,
+        "BLOCKED": 0,
+        "WAIT_CONFIRMATION": 1,
+        "NO_SETUP": 1,
+        "WAIT_DAILY_CONFIRM": 1,
+        "CHASING_RISK": 1,
+        "PROBE_ENTRY": 2,
+        "PROBE_ALLOWED": 2,
+        "SMALL_ENTRY": 3,
+        "ACCUMULATE": 4,
+        "ENTRY_READY": 4,
+        "ENTRY_ALLOWED": 5,
+        "BUY": 5,
+        "BUY_READY": 5,
+    }.get(state, 1)
+
+
+def _entry_cap_state(state: str, max_state: str) -> str:
+    normalized_state = _normalize_final_entry_state(state)
+    cap_rank = _entry_state_rank(max_state)
+    if _entry_state_rank(normalized_state) <= cap_rank:
+        return normalized_state
+    if cap_rank <= 1:
+        return "WAIT_CONFIRMATION"
+    if cap_rank <= 4:
+        return "PROBE_ALLOWED"
+    return normalized_state
+
+
+def _entry_zone_tolerance(primary_zone: Optional[ZoneScore], current_price: float) -> Optional[float]:
+    if primary_zone is None:
+        return None
+    width = max(primary_zone.price_high - primary_zone.price_low, 0.0)
+    return max(abs(current_price) * 0.002, width * 0.1)
+
+
+def _is_market_price_entry(entry_executability: Optional[dict[str, Any]]) -> bool:
+    return str((entry_executability or {}).get("price_basis") or "") in MARKET_PRICE_ENTRY_BASES
+
+
+def _entry_executability(
+    primary_zone: Optional[ZoneScore],
+    current_price: float,
+    derived_view: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    if primary_zone is None:
+        return {
+            "entry_price": None,
+            "entry_zone_lower": None,
+            "entry_zone_upper": None,
+            "tolerance": None,
+            "executable_now": False,
+            "reason_code": "NO_ENTRY_ZONE",
+            "price_basis": "UNAVAILABLE",
+        }
+    if primary_zone.role != ZoneType.SUPPORT.value:
+        return {
+            "entry_price": None,
+            "entry_zone_lower": primary_zone.price_low,
+            "entry_zone_upper": primary_zone.price_high,
+            "tolerance": _entry_zone_tolerance(primary_zone, current_price),
+            "executable_now": False,
+            "reason_code": "ENTRY_ZONE_NOT_SUPPORT",
+            "price_basis": "UNSUPPORTED_ENTRY_ZONE",
+        }
+    tolerance = float(_entry_zone_tolerance(primary_zone, current_price) or 0.0)
+    lower = float(primary_zone.price_low)
+    upper = float(primary_zone.price_high)
+    semantic_pipeline = (derived_view or {}).get("semantic_pipeline") or {}
+    lifecycle_phase = str(semantic_pipeline.get("lifecycle_phase") or "NORMAL")
+    event_signal = str(semantic_pipeline.get("event_signal") or "NO_EVENT")
+    entry_permission_state = str(semantic_pipeline.get("entry_permission_state") or "WAIT_CONFIRMATION")
+
+    if current_price < lower - tolerance:
+        return {
+            "entry_price": upper,
+            "entry_zone_lower": lower,
+            "entry_zone_upper": upper,
+            "tolerance": tolerance,
+            "executable_now": False,
+            "reason_code": "ENTRY_ZONE_UNDERSHOT",
+            "price_basis": "PRIMARY_SUPPORT_UPPER",
+        }
+
+    reclaim_or_continuation = (
+        event_signal == "CLOSE_RECLAIM"
+        and lifecycle_phase in ("TESTING", "CONFIRMED", "CONTINUATION")
+        and entry_permission_state in ("PROBE_ALLOWED", "ENTRY_ALLOWED")
+    )
+    if reclaim_or_continuation:
+        price_basis = "CONTINUATION_MARKET_PRICE" if lifecycle_phase == "CONTINUATION" else "RECLAIM_CLOSE"
+        return {
+            "entry_price": float(current_price),
+            "entry_zone_lower": lower,
+            "entry_zone_upper": upper,
+            "tolerance": tolerance,
+            "executable_now": True,
+            "reason_code": "EXECUTABLE_NOW",
+            "price_basis": price_basis,
+        }
+
+    executable_now = current_price <= upper + tolerance
+    return {
+        "entry_price": upper,
+        "entry_zone_lower": lower,
+        "entry_zone_upper": upper,
+        "tolerance": tolerance,
+        "executable_now": executable_now,
+        "reason_code": "EXECUTABLE_NOW" if executable_now else "ENTRY_ZONE_OVERSHOT",
+        "price_basis": "PRIMARY_SUPPORT_UPPER",
+    }
+
+
 def _unique_reason_codes(codes: list[str]) -> list[str]:
     out: list[str] = []
     for code in codes:
@@ -554,25 +775,14 @@ def _final_entry_permission(
     entry_action_state: str,
     daily_confirmation: dict[str, Any],
     derived_view: Optional[dict[str, Any]] = None,
+    entry_executability: Optional[dict[str, Any]] = None,
+    entry_blocking_zone: Optional[dict[str, Any]] = None,
+    model_governance: Optional[dict[str, Any]] = None,
+    execution_rr_gate: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     daily_state = str(daily_confirmation.get("state") or "WAIT_DAILY_CONFIRM")
     semantic_pipeline = (derived_view or {}).get("semantic_pipeline") or {}
     semantic_entry_state = str(semantic_pipeline.get("entry_permission_state") or "")
-    order = {
-        "INVALIDATED": 0,
-        "BLOCKED": 0,
-        "WAIT_CONFIRMATION": 1,
-        "NO_SETUP": 1,
-        "WAIT_DAILY_CONFIRM": 1,
-        "CHASING_RISK": 1,
-        "PROBE_ENTRY": 2,
-        "PROBE_ALLOWED": 2,
-        "SMALL_ENTRY": 3,
-        "ACCUMULATE": 4,
-        "ENTRY_READY": 4,
-        "BUY": 5,
-        "BUY_READY": 5,
-    }
     if daily_state in ("INVALIDATED", "BLOCKED") or semantic_entry_state == "BLOCKED":
         state = "BLOCKED"
     elif daily_state == "CHASING_RISK":
@@ -580,21 +790,20 @@ def _final_entry_permission(
     elif semantic_entry_state:
         state = semantic_entry_state
     else:
-        entry_rank = order.get(entry_action_state, 1)
-        daily_rank = order.get(daily_state, 1)
+        entry_rank = _entry_state_rank(entry_action_state)
+        daily_rank = _entry_state_rank(daily_state)
         final_rank = min(entry_rank, daily_rank)
         if final_rank >= 5:
-            state = "BUY"
+            state = "ENTRY_ALLOWED"
         elif final_rank == 4:
-            state = "ACCUMULATE"
-        elif final_rank == 3:
-            state = "SMALL_ENTRY"
-        elif final_rank == 2:
-            state = "PROBE_ENTRY"
+            state = "ENTRY_ALLOWED"
+        elif final_rank in (2, 3):
+            state = "PROBE_ALLOWED"
         elif final_rank == 0:
             state = "BLOCKED"
         else:
             state = "WAIT_CONFIRMATION"
+    state = _normalize_final_entry_state(state)
     reason_codes = list(daily_confirmation.get("reason_codes") or [])
     # 硬阻擋時不回填「等待延續 / 動能確認」這類 derived reason，避免
     # final entry 同時輸出 blocked 與 probe/wait 文案。
@@ -604,6 +813,41 @@ def _final_entry_permission(
             *list(semantic_pipeline.get("reason_codes") or []),
             *list((derived_view or {}).get("final_entry_reason_codes") or []),
         ])
+    if state != "BLOCKED" and entry_executability and not entry_executability.get("executable_now"):
+        state = "WAIT_CONFIRMATION"
+        reason_codes = _unique_reason_codes([
+            *reason_codes,
+            str(entry_executability.get("reason_code") or "ENTRY_NOT_EXECUTABLE"),
+        ])
+    if state != "BLOCKED" and entry_blocking_zone and entry_blocking_zone.get("blocked"):
+        state = "WAIT_CONFIRMATION"
+        reason_codes = _unique_reason_codes([
+            *reason_codes,
+            str(entry_blocking_zone.get("reason_code") or "NEAR_RESISTANCE_BLOCKING_ENTRY"),
+        ])
+    if state != "BLOCKED" and execution_rr_gate and not execution_rr_gate.get("qualified"):
+        state = "WAIT_CONFIRMATION"
+        reason_codes = _unique_reason_codes([
+            *reason_codes,
+            str(execution_rr_gate.get("reason_code") or "EXECUTION_RR_UNAVAILABLE"),
+        ])
+    confidence_gate = (model_governance or {}).get("confidence_gate") or {}
+    if state != "BLOCKED" and confidence_gate.get("allow_entry") is False:
+        state = "WAIT_CONFIRMATION"
+        reason_codes = _unique_reason_codes([
+            *reason_codes,
+            *list(confidence_gate.get("reason_codes") or []),
+            "MODEL_ENTRY_BLOCKED",
+        ])
+    elif state != "BLOCKED" and confidence_gate.get("max_entry_state"):
+        capped_state = _entry_cap_state(state, str(confidence_gate.get("max_entry_state")))
+        if capped_state != state:
+            state = capped_state
+            reason_codes = _unique_reason_codes([
+                *reason_codes,
+                *list(confidence_gate.get("reason_codes") or []),
+                "MODEL_ENTRY_CAPPED",
+            ])
 
     return {
         "state": state,
@@ -1040,14 +1284,130 @@ def _rr_gate(primary_zone: Optional[ZoneScore], entry_action_state: str) -> dict
     }
 
 
-def _rr_context(primary_zone: Optional[ZoneScore], position_zone: Optional[ZoneScore] = None) -> dict[str, Any]:
+def _rr_context(
+    primary_zone: Optional[ZoneScore],
+    position_zone: Optional[ZoneScore] = None,
+    entry_executability: Optional[dict[str, Any]] = None,
+    defense_lines: Optional[dict[str, Any]] = None,
+    target_zone: Optional[ZoneScore] = None,
+) -> dict[str, Any]:
     entry_rr = primary_zone.risk_reward_ratio if primary_zone else None
     position_rr = position_zone.risk_reward_ratio if position_zone else None
+    entry_price = (entry_executability or {}).get("entry_price")
+    entry_zone_lower = (entry_executability or {}).get("entry_zone_lower")
+    entry_zone_upper = (entry_executability or {}).get("entry_zone_upper")
+    price_basis = (entry_executability or {}).get("price_basis") or "UNAVAILABLE"
+    market_price_entry = _is_market_price_entry(entry_executability)
+    tactical_line = (defense_lines or {}).get("tactical") or {}
+    swing_line = (defense_lines or {}).get("swing") or {}
+    strategic_line = (defense_lines or {}).get("strategic") or {}
+    stop_price = None
+    stop_basis = "UNAVAILABLE"
+    if primary_zone is not None:
+        if tactical_line.get("role") == ZoneType.SUPPORT.value and tactical_line.get("invalidation_price") is not None:
+            stop_price = float(tactical_line["invalidation_price"])
+            stop_basis = "TACTICAL_STOP"
+        elif swing_line.get("role") == ZoneType.SUPPORT.value and swing_line.get("invalidation_price") is not None:
+            stop_price = float(swing_line["invalidation_price"])
+            stop_basis = "PRIMARY_ZONE_STOP"
+    target_price = None
+    target_basis = "UNAVAILABLE"
+    risk_price = None
+    reward_price = None
+    execution_rr = None
+    execution_rr_source = "UNAVAILABLE"
+    if entry_price is not None and stop_price is not None:
+        risk = max(float(entry_price) - float(stop_price), 0.0)
+        if risk > 0:
+            risk_price = risk
+            if market_price_entry:
+                if (
+                    target_zone is not None
+                    and target_zone.role == ZoneType.RESISTANCE.value
+                    and float(target_zone.price_low) > float(entry_price)
+                ):
+                    target_price = float(target_zone.price_low)
+                    target_basis = "NEAREST_RESISTANCE_TARGET"
+                    reward_price = target_price - float(entry_price)
+                    execution_rr = reward_price / risk
+                    execution_rr_source = "ENTRY_STOP_TARGET"
+                else:
+                    target_basis = "MARKET_ENTRY_TARGET_UNAVAILABLE"
+            elif entry_rr is not None:
+                execution_rr = float(entry_rr)
+                execution_rr_source = "PRIMARY_ZONE"
+                target_price = float(entry_price) + risk * float(entry_rr)
+                target_basis = "PRIMARY_ZONE_RR"
+                reward_price = target_price - float(entry_price)
+    structural_stop_price = (
+        float(strategic_line["invalidation_price"])
+        if strategic_line.get("role") == ZoneType.SUPPORT.value and strategic_line.get("invalidation_price") is not None
+        else None
+    )
+    stop_distance_pct = (
+        risk_price / max(abs(float(entry_price)), 1e-9)
+        if risk_price is not None and entry_price is not None
+        else None
+    )
     return {
         "entry_rr": float(entry_rr) if entry_rr is not None else None,
-        "entry_rr_source": "PRIMARY_ZONE" if primary_zone and entry_rr is not None else "UNAVAILABLE",
+        "entry_rr_source": (
+            "PRIMARY_ZONE_STATISTIC" if market_price_entry and primary_zone and entry_rr is not None
+            else "PRIMARY_ZONE" if primary_zone and entry_rr is not None
+            else "UNAVAILABLE"
+        ),
+        "execution_rr": float(execution_rr) if execution_rr is not None else None,
+        "execution_rr_source": execution_rr_source,
         "position_rr": float(position_rr) if position_rr is not None else None,
         "position_rr_source": "POSITION_ZONE" if position_zone and position_rr is not None else "UNAVAILABLE",
+        "entry_price": float(entry_price) if entry_price is not None else None,
+        "entry_zone_lower": float(entry_zone_lower) if entry_zone_lower is not None else None,
+        "entry_zone_upper": float(entry_zone_upper) if entry_zone_upper is not None else None,
+        "stop_price": stop_price,
+        "target_price": target_price,
+        "price_basis": price_basis,
+        "stop_basis": stop_basis,
+        "target_basis": target_basis,
+        "structural_stop_price": structural_stop_price,
+        "risk_price": risk_price,
+        "reward_price": reward_price,
+        "stop_distance_pct": stop_distance_pct,
+        "target_known": target_price is not None,
+        "executable_now": bool((entry_executability or {}).get("executable_now")),
+        "entry_executability_reason_code": (entry_executability or {}).get("reason_code"),
+        "rr_formula_available": entry_price is not None and stop_price is not None and target_price is not None,
+    }
+
+
+def _execution_rr_gate(
+    primary_zone: Optional[ZoneScore],
+    entry_action_state: str,
+    rr_context: dict[str, Any],
+    base_rr_gate: dict[str, Any],
+) -> dict[str, Any]:
+    if str(rr_context.get("price_basis") or "") not in MARKET_PRICE_ENTRY_BASES:
+        return base_rr_gate
+    minimum = _minimum_rr(primary_zone, entry_action_state)
+    execution_rr = rr_context.get("execution_rr")
+    if execution_rr is None:
+        return {
+            "minimum_rr": minimum,
+            "actual_rr": None,
+            "qualified": True,
+            "reason_code": "EXECUTION_RR_UNAVAILABLE",
+            "gate_basis": "MARKET_ENTRY_TARGET_UNAVAILABLE",
+            "zone_actual_rr": base_rr_gate.get("actual_rr"),
+            "target_known": False,
+        }
+    qualified = float(execution_rr) >= minimum
+    return {
+        "minimum_rr": minimum,
+        "actual_rr": float(execution_rr),
+        "qualified": qualified,
+        "reason_code": "RR_QUALIFIED" if qualified else "EXECUTION_RR_INSUFFICIENT",
+        "gate_basis": "ENTRY_STOP_TARGET",
+        "zone_actual_rr": base_rr_gate.get("actual_rr"),
+        "target_known": True,
     }
 
 
@@ -1073,6 +1433,27 @@ def _nearest_zone_by_role(zone_scores: list[ZoneScore], current_price: float, ro
     if not candidates:
         candidates = [z for z in zone_scores if z.role == role]
     return min(candidates, key=lambda z: _decision_distance_score(z, current_price), default=None)
+
+
+def _nearest_resistance_above_entry(zone_scores: list[ZoneScore], entry_price: Optional[float]) -> Optional[ZoneScore]:
+    if entry_price is None:
+        return None
+    strict_candidates = [
+        z for z in zone_scores
+        if z.role == ZoneType.RESISTANCE.value
+        and z.recent_validation != RecentValidation.EXPIRED.value
+        and z.confidence_level != ConfidenceLevel.LOW.value
+        and float(z.price_low) > float(entry_price)
+    ]
+    if strict_candidates:
+        return min(strict_candidates, key=lambda z: float(z.price_low) - float(entry_price))
+    fallback_candidates = [
+        z for z in zone_scores
+        if z.role == ZoneType.RESISTANCE.value
+        and z.recent_validation != RecentValidation.EXPIRED.value
+        and float(z.price_low) > float(entry_price)
+    ]
+    return min(fallback_candidates, key=lambda z: float(z.price_low) - float(entry_price), default=None)
 
 
 def _primary_structural_zone(zone_scores: list[ZoneScore]) -> Optional[ZoneScore]:
@@ -1485,14 +1866,24 @@ def _daily_candidate_zone(
         distance_pct = (price_low - current_price) / current_price
     elif current_price > price_high:
         distance_pct = (current_price - price_high) / current_price
+    zero_width = abs(price_high - price_low) <= max(abs(price_low), 1.0) * 1e-9
+    zone_kind = "DAILY_ZONE"
+    trigger_price = None
+    label = f"{_fmt_price(price_low)} ~ {_fmt_price(price_high)}"
+    if zero_width:
+        zone_kind = "BREAKOUT_TRIGGER" if role == ZoneType.RESISTANCE.value else "BREAKDOWN_TRIGGER"
+        trigger_price = price_low
+        label = f"{zone_kind} {_fmt_price(price_low)}"
     return {
         "price_low": price_low,
         "price_high": price_high,
-        "label": f"{_fmt_price(price_low)} ~ {_fmt_price(price_high)}",
+        "label": label,
         "role": role,
         "source": "DAILY_CANDLE",
         "lifecycle": "CANDIDATE",
         "decision_role": "TACTICAL",
+        "zone_kind": zone_kind,
+        "trigger_price": trigger_price,
         "distance_pct": distance_pct,
         "distance_label": f"{distance_pct * 100:.1f}%",
         "reason": reason,
@@ -1585,6 +1976,57 @@ def _has_blocking_zone_ahead(
         _select_blocking_resistance(zone_scores, daily_candidate_zones, current_price)
     )
     return price_low is not None and current_price < price_low
+
+
+def _entry_blocking_zone_detail(zone_scores: list[ZoneScore], current_price: float) -> dict[str, Any]:
+    resistance_candidates = [
+        z for z in zone_scores
+        if z.role == ZoneType.RESISTANCE.value
+        and z.recent_validation != RecentValidation.EXPIRED.value
+        and z.price_high >= current_price
+    ]
+    if not resistance_candidates:
+        return {
+            "blocked": False,
+            "reason_code": None,
+            "distance_to_nearest_resistance": None,
+            "threshold": None,
+            "distance_price": None,
+            "threshold_price": None,
+            "distance_pct": None,
+            "threshold_pct": None,
+            "threshold_basis": "ZONE_WIDTH_OR_0_5_PERCENT_PROXY",
+            "blocking_zone": None,
+        }
+    zone = min(resistance_candidates, key=lambda z: _distance_pct_to_zone(z, current_price))
+    distance_abs = max(float(zone.price_low) - current_price, 0.0)
+    width = max(float(zone.price_high) - float(zone.price_low), 0.0)
+    threshold_abs = max(width * 0.5, abs(current_price) * 0.005)
+    distance_pct = distance_abs / max(abs(current_price), 1e-9)
+    threshold_pct = threshold_abs / max(abs(current_price), 1e-9)
+    blocked = distance_abs <= threshold_abs
+    return {
+        "blocked": blocked,
+        "reason_code": "NEAR_RESISTANCE_BLOCKING_ENTRY" if blocked else None,
+        "distance_to_nearest_resistance": distance_pct,
+        "threshold": threshold_pct,
+        "distance_price": distance_abs,
+        "threshold_price": threshold_abs,
+        "distance_pct": distance_pct,
+        "threshold_pct": threshold_pct,
+        "threshold_basis": "ZONE_WIDTH_OR_0_5_PERCENT_PROXY",
+        "blocking_zone": {
+            "price_low": zone.price_low,
+            "price_high": zone.price_high,
+            "label": f"{_fmt_price(zone.price_low)} ~ {_fmt_price(zone.price_high)}",
+            "role": zone.role,
+            "tier": zone.tier,
+            "tier_label": zone.tier_label,
+            "source_scope": "ZONE_SCORE_POOL",
+            "method": zone.method,
+            "confidence": zone.confidence,
+        },
+    }
 
 
 def _price_path(
@@ -1997,7 +2439,6 @@ def build_decision_summary(
     )
     entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, active_market_events)
     rr_gate = _rr_gate(primary_zone, entry_action_state)
-    rr_context = _rr_context(primary_zone)
     nearest_zone = _nearest_decision_zone(zone_scores, current_price)
     nearest_support_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.SUPPORT.value)
     nearest_resistance_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.RESISTANCE.value)
@@ -2024,8 +2465,10 @@ def build_decision_summary(
         market_events,
         nearest_zone,
     )
+    defense_lines = _defense_lines(zone_scores, primary_zone, current_price, market_events)
+    entry_blocking_zone = _entry_blocking_zone_detail(zone_scores, current_price)
     blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price)
-    entry_blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, [], current_price)
+    entry_blocking_zone_ahead = bool(entry_blocking_zone.get("blocked"))
     decision_derived_view = _decision_derived_view(
         regime,
         primary_zone,
@@ -2039,6 +2482,7 @@ def build_decision_summary(
         blocking_zone_ahead,
         entry_blocking_zone_ahead,
     )
+    entry_executability = _entry_executability(primary_zone, current_price, decision_derived_view)
     market_bias, market_bias_label = _market_bias(
         regime,
         primary_zone,
@@ -2069,13 +2513,49 @@ def build_decision_summary(
         daily_candidate_zones,
         current_price,
     )
-    final_entry_permission = _final_entry_permission(entry_action_state, daily_confirmation, decision_derived_view)
-    best_trade_zone = primary_zone if rr_gate["qualified"] and entry_action_state in (
-        "PROBE_ENTRY",
-        "SMALL_ENTRY",
-        "ACCUMULATE",
-        "BUY",
-    ) else None
+    rr_context = _rr_context(
+        primary_zone,
+        entry_executability=entry_executability,
+        defense_lines=defense_lines,
+        target_zone=_nearest_resistance_above_entry(
+            zone_scores,
+            entry_executability.get("entry_price") if entry_executability else None,
+        ),
+    )
+    rr_gate = _execution_rr_gate(primary_zone, entry_action_state, rr_context, rr_gate)
+    final_entry_permission = _final_entry_permission(
+        entry_action_state,
+        daily_confirmation,
+        decision_derived_view,
+        entry_executability,
+        entry_blocking_zone,
+        model_governance,
+        rr_gate,
+    )
+    market_action, position_action, action, action_label = _final_action_from_entry(
+        final_entry_permission,
+        market_action,
+        position_action,
+        action,
+        action_label,
+    )
+    risk_notes = _final_entry_risk_notes(
+        risk_notes,
+        final_entry_permission,
+        entry_executability,
+        entry_blocking_zone,
+        rr_context,
+    )
+    final_entry_state = str(final_entry_permission.get("state") or "WAIT_CONFIRMATION")
+    best_trade_zone = (
+        primary_zone
+        if rr_gate["qualified"]
+        and final_entry_state in ("PROBE_ALLOWED", "ENTRY_ALLOWED")
+        and entry_executability.get("executable_now")
+        and not entry_blocking_zone.get("blocked")
+        and not _is_market_price_entry(entry_executability)
+        else None
+    )
 
     context = [
         {"key": "trend", "label": "整體趨勢", "value": f"{global_trend * 100:.1f}%"},
@@ -2134,8 +2614,6 @@ def build_decision_summary(
         for z in zone_scores
         if primary_zone is None or z is not primary_zone
     ][:5]
-    defense_lines = _defense_lines(zone_scores, primary_zone, current_price, market_events)
-
     return {
         "data_mode": "END_OF_DAY",
         "data_quality": _data_quality(
@@ -2158,6 +2636,8 @@ def build_decision_summary(
         "daily_candidate_zones": daily_candidate_zones,
         "price_path": price_path,
         "daily_confirmation": daily_confirmation,
+        "entry_executability": entry_executability,
+        "entry_blocking_zone": entry_blocking_zone,
         "defense_lines": defense_lines,
         "rr_context": rr_context,
         "market_bias": market_bias,

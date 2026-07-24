@@ -192,6 +192,8 @@ type SRDecision struct {
 	PricePathJSON               RawJSON   `db:"price_path_json"                  json:"price_path_json"`
 	DailyConfirmationJSON       RawJSON   `db:"daily_confirmation_json"          json:"daily_confirmation_json"`
 	DefenseLinesJSON            RawJSON   `db:"defense_lines_json"               json:"defense_lines_json"`
+	EntryExecutabilityJSON      RawJSON   `db:"entry_executability_json"         json:"entry_executability_json"`
+	EntryBlockingZoneJSON       RawJSON   `db:"entry_blocking_zone_json"         json:"entry_blocking_zone_json"`
 	RRContextJSON               RawJSON   `db:"rr_context_json"                  json:"rr_context_json"`
 	RRGateJSON                  RawJSON   `db:"rr_gate_json"                     json:"rr_gate_json"`
 	PositionActionConditionJSON RawJSON   `db:"position_action_condition_json"   json:"position_action_condition_json"`

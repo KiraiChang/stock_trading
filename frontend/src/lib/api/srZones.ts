@@ -468,6 +468,9 @@ export interface SRRRGate {
   actual_rr: number | null
   qualified: boolean
   reason_code: string
+  gate_basis?: string
+  zone_actual_rr?: number | null
+  target_known?: boolean
 }
 
 export interface SRDataQuality {
@@ -533,6 +536,8 @@ export interface SRDailyCandidateZone {
   source: string
   lifecycle: string
   decision_role: string
+  zone_kind?: 'DAILY_ZONE' | 'BREAKOUT_TRIGGER' | 'BREAKDOWN_TRIGGER' | string
+  trigger_price?: number | null
   distance_pct: number
   distance_label: string
   reason: string
@@ -582,7 +587,7 @@ export interface SRDailyConfirmation {
 }
 
 export interface SRFinalEntryPermission {
-  state: string
+  state: 'BLOCKED' | 'WAIT_CONFIRMATION' | 'PROBE_ALLOWED' | 'ENTRY_ALLOWED' | string
   label: string
   entry_action_state: string
   daily_confirmation_state: string
@@ -592,8 +597,60 @@ export interface SRFinalEntryPermission {
 export interface SRRRContext {
   entry_rr: number | null
   entry_rr_source: string
+  execution_rr?: number | null
+  execution_rr_source?: string
   position_rr: number | null
   position_rr_source: string
+  entry_price?: number | null
+  entry_zone_lower?: number | null
+  entry_zone_upper?: number | null
+  stop_price?: number | null
+  target_price?: number | null
+  price_basis?: string
+  stop_basis?: string
+  target_basis?: string
+  structural_stop_price?: number | null
+  risk_price?: number | null
+  reward_price?: number | null
+  stop_distance_pct?: number | null
+  executable_now?: boolean
+  entry_executability_reason_code?: string | null
+  rr_formula_available?: boolean
+}
+
+export interface SREntryExecutability {
+  entry_price: number | null
+  entry_zone_lower: number | null
+  entry_zone_upper: number | null
+  tolerance: number | null
+  executable_now: boolean
+  reason_code: string | null
+  price_basis: string
+}
+
+export interface SREntryBlockingZone {
+  blocked: boolean
+  reason_code?: string | null
+  distance_price?: number | null
+  threshold_price?: number | null
+  distance_pct?: number | null
+  threshold_pct?: number | null
+  /** @deprecated use distance_pct. */
+  distance_to_nearest_resistance?: number | null
+  /** @deprecated use threshold_pct. */
+  threshold?: number | null
+  threshold_basis?: string
+  blocking_zone?: {
+    price_low: number
+    price_high: number
+    label: string
+    role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
+    tier?: string | null
+    tier_label?: string | null
+    source_scope?: string | null
+    method?: string | null
+    confidence?: number | null
+  } | null
 }
 
 export interface SRSemanticPipeline {
@@ -692,6 +749,8 @@ export interface SRDecisionSummary {
   daily_candidate_zones?: SRDailyCandidateZone[]
   price_path?: SRPricePath
   daily_confirmation?: SRDailyConfirmation
+  entry_executability?: SREntryExecutability
+  entry_blocking_zone?: SREntryBlockingZone
   defense_lines?: SRDefenseLines
   rr_context?: SRRRContext
   market_bias?: SRMarketBias

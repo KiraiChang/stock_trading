@@ -175,7 +175,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				model_health_state, event_market_state, reason_codes,
 				market_regime_json, data_quality_json, decision_derived_view_json,
 				event_sequence_json, daily_price_action_json,
-				price_path_json, daily_confirmation_json, defense_lines_json, rr_context_json,
+				price_path_json, daily_confirmation_json, defense_lines_json,
+				entry_executability_json, entry_blocking_zone_json, rr_context_json,
 				rr_gate_json, position_action_condition_json, market_context_json,
 				confidence_explanation_json, risk_notes_json, zone_summaries_json, decision_summary
 			) VALUES (
@@ -184,7 +185,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				:model_health_state, :event_market_state, :reason_codes,
 				:market_regime_json, :data_quality_json, :decision_derived_view_json,
 				:event_sequence_json, :daily_price_action_json,
-				:price_path_json, :daily_confirmation_json, :defense_lines_json, :rr_context_json,
+				:price_path_json, :daily_confirmation_json, :defense_lines_json,
+				:entry_executability_json, :entry_blocking_zone_json, :rr_context_json,
 				:rr_gate_json, :position_action_condition_json, :market_context_json,
 				:confidence_explanation_json, :risk_notes_json, :zone_summaries_json, :decision_summary
 			)
@@ -390,7 +392,8 @@ func (r *srZoneRepo) GetDecision(ctx context.Context, analysisID uint64) (*SRDec
 			model_health_state, event_market_state, reason_codes,
 			market_regime_json, data_quality_json, decision_derived_view_json,
 			event_sequence_json, daily_price_action_json,
-			price_path_json, daily_confirmation_json, defense_lines_json, rr_context_json,
+			price_path_json, daily_confirmation_json, defense_lines_json,
+			entry_executability_json, entry_blocking_zone_json, rr_context_json,
 			rr_gate_json, position_action_condition_json, market_context_json,
 			confidence_explanation_json, risk_notes_json, zone_summaries_json, decision_summary, created_at
 		FROM stock_sr_decisions WHERE analysis_id=?
@@ -425,6 +428,12 @@ func defaultSRDecisionDetailJSON(decision *SRDecision) {
 	}
 	if decision.DefenseLinesJSON == "" {
 		decision.DefenseLinesJSON = RawJSON("null")
+	}
+	if decision.EntryExecutabilityJSON == "" {
+		decision.EntryExecutabilityJSON = RawJSON("null")
+	}
+	if decision.EntryBlockingZoneJSON == "" {
+		decision.EntryBlockingZoneJSON = RawJSON("null")
 	}
 	if decision.RRContextJSON == "" {
 		decision.RRContextJSON = RawJSON("null")

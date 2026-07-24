@@ -528,6 +528,8 @@ func buildSRZoneNormalizedProjections(decision, probabilityContext json.RawMessa
 		PricePathJSON:               decisionRawJSONAt(decisionObj, "null", "price_path"),
 		DailyConfirmationJSON:       decisionRawJSONAt(decisionObj, "null", "daily_confirmation"),
 		DefenseLinesJSON:            decisionRawJSONAt(decisionObj, "null", "defense_lines"),
+		EntryExecutabilityJSON:      decisionRawJSONAt(decisionObj, "null", "entry_executability"),
+		EntryBlockingZoneJSON:       decisionRawJSONAt(decisionObj, "null", "entry_blocking_zone"),
 		RRContextJSON:               decisionRawJSONAt(decisionObj, "null", "rr_context"),
 		RRGateJSON:                  decisionRawJSONAt(decisionObj, "null", "rr_gate"),
 		PositionActionConditionJSON: decisionRawJSONAt(decisionObj, "null", "position_action_condition"),

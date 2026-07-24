@@ -246,6 +246,8 @@ func applyDecisionDetailJSON(obj map[string]any, decision *store.SRDecision) {
 	setRawObjectIfPresent(obj, "price_path", decision.PricePathJSON)
 	setRawObjectIfPresent(obj, "daily_confirmation", decision.DailyConfirmationJSON)
 	setRawObjectIfPresent(obj, "defense_lines", decision.DefenseLinesJSON)
+	setRawObjectIfPresent(obj, "entry_executability", decision.EntryExecutabilityJSON)
+	setRawObjectIfPresent(obj, "entry_blocking_zone", decision.EntryBlockingZoneJSON)
 	setRawObjectIfPresent(obj, "rr_context", decision.RRContextJSON)
 	setRawObjectIfPresent(obj, "rr_gate", decision.RRGateJSON)
 	setRawObjectIfPresent(obj, "position_action_condition", decision.PositionActionConditionJSON)

@@ -3,8 +3,10 @@ from __future__ import annotations
 from ..decision_engine import (
     _daily_confirmation,
     _decision_derived_view,
+    _final_entry_risk_notes,
     _final_entry_permission,
     _position_action_condition,
+    _risk_note,
     build_decision_summary,
 )
 from ..model import ModelBundle
@@ -95,7 +97,7 @@ def _zone(
 
 def _summary(
     zones: list[ZoneScore],
-    current_price: float = 102.0,
+    current_price: float = 100.1,
     global_trend: float = 0.03,
     global_volatility: float = 0.02,
     global_confidence: float | None = 0.72,
@@ -137,8 +139,10 @@ def _summary(
 def test_buy_for_bullish_high_quality_near_support():
     ds = _summary([_zone()])
 
-    assert ds["action"] == "Buy"
-    assert ds["market_action"] == "BUY"
+    assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
+    assert ds["entry_action_state"] == "ACCUMULATE"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
     assert ds["market_bias"] == "BULLISH_BIAS"
     assert ds["market_bias_label"] == "偏多觀察"
     assert ds["position_action"] == "HOLD"
@@ -152,7 +156,7 @@ def test_buy_for_bullish_high_quality_near_support():
     assert ds["primary_zone"]["role_label"] == "支撐"
     assert ds["primary_zone"]["display_label"] == "主結構支撐"
     assert ds["rr_gate"]["qualified"] is True
-    assert ds["best_trade_zone"]["label"] == "98.00 ~ 100.00"
+    assert ds["best_trade_zone"] is None
     assert ds["nearest_decision_zone"]["label"] == "98.00 ~ 100.00"
     assert ds["primary_zone"]["source"] == "HISTORICAL_SR"
     assert ds["decision_contract"]["version"] == "sr-zone-decision-p0"
@@ -205,7 +209,8 @@ def test_degraded_model_governance_downgrades_strong_buy_to_small_entry():
 
     assert ds["model_governance"]["health_state"] == "DEGRADED"
     assert "MODEL_DEGRADED" in ds["market_regime"]["flags"]
-    assert ds["action"] == "BuySmall"
+    assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
     assert ds["entry_action_state"] in ("PROBE_ENTRY", "SMALL_ENTRY")
     assert any("模型健康度降級" in note for note in ds["risk_notes"])
 
@@ -216,9 +221,37 @@ def test_high_quality_far_from_zone_cannot_be_buy():
     ds = _summary([far], current_price=110.0)
 
     assert ds["action"] != "Buy"
-    assert ds["market_action"] == "BUY_SMALL"
+    assert ds["market_action"] == "WATCH"
+    assert ds["entry_executability"]["executable_now"] is False
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
     assert ds["primary_zone"]["entry_relevance_score"] < 75
     assert any("不適合追價" in note for note in ds["risk_notes"])
+
+
+def test_entry_zone_overshot_blocks_best_trade_zone_and_downgrades_action():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.82, trading_score=92.0)
+
+    ds = _summary([zone], current_price=102.0)
+
+    assert ds["entry_action_state"] in ("ACCUMULATE", "BUY")
+    assert ds["entry_executability"]["executable_now"] is False
+    assert ds["entry_executability"]["reason_code"] == "ENTRY_ZONE_OVERSHOT"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert "ENTRY_ZONE_OVERSHOT" in ds["final_entry_permission"]["reason_codes"]
+    assert ds["market_action"] == "WATCH"
+    assert ds["action"] == "Hold"
+    assert ds["best_trade_zone"] is None
+
+
+def test_entry_zone_undershot_blocks_best_trade_zone_and_downgrades_action():
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.82, trading_score=92.0)
+
+    ds = _summary([zone], current_price=97.0)
+
+    assert ds["entry_executability"]["executable_now"] is False
+    assert ds["entry_executability"]["reason_code"] == "ENTRY_ZONE_UNDERSHOT"
+    assert ds["final_entry_permission"]["state"] in ("BLOCKED", "WAIT_CONFIRMATION")
+    assert ds["best_trade_zone"] is None
 
 
 def test_primary_high_volume_breakdown_event_forces_exit():
@@ -280,7 +313,8 @@ def test_extreme_volume_outputs_context_event_without_direct_action_override():
     ds = _summary([zone])
 
     assert ds["market_events"][0]["type"] == "EXTREME_VOLUME"
-    assert ds["market_action"] == "BUY"
+    assert ds["entry_action_state"] == "ACCUMULATE"
+    assert ds["market_action"] == "WATCH"
 
 
 def test_short_term_non_primary_high_volume_breakdown_reduces_without_exit():
@@ -357,15 +391,17 @@ def test_confirmed_buy_small_is_small_entry():
 
     ds = _summary([zone])
 
-    assert ds["action"] == "BuySmall"
+    assert ds["action"] == "Hold"
     assert ds["entry_action_state"] == "SMALL_ENTRY"
+    assert ds["final_entry_permission"]["state"] == "BLOCKED"
 
 
 def test_high_volatility_downgrades_buy_to_buy_small():
     ds = _summary([_zone()], global_volatility=0.04)
 
-    assert ds["action"] == "BuySmall"
-    assert ds["market_action"] == "BUY_SMALL"
+    assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
+    assert ds["entry_action_state"] == "SMALL_ENTRY"
     assert any("波動偏高" in note for note in ds["risk_notes"])
     assert ds["market_regime"]["structural_trend"] == "TREND_UP"
     assert ds["market_regime"]["short_term_regime"] == "NORMAL"
@@ -478,9 +514,20 @@ def test_rr_between_gates_allows_only_buy_small():
 
     ds = _summary([zone])
 
-    assert ds["market_action"] == "BUY_SMALL"
-    assert ds["action"] == "BuySmall"
-    assert any("完整買進門檻" in note for note in ds["risk_notes"])
+    assert ds["market_action"] == "WATCH"
+    assert ds["action"] == "Hold"
+    assert ds["entry_action_state"] == "SMALL_ENTRY"
+    assert any("完整買進門檻" in note and "Final Entry 需保守觀察" in note for note in ds["risk_notes"])
+    assert not any("最多小量試單" in note for note in ds["risk_notes"])
+
+
+def test_final_entry_risk_note_rewrite_is_code_driven_not_text_driven():
+    notes = _final_entry_risk_notes(
+        [_risk_note("RR_BELOW_FULL_ENTRY", "RR 文案改掉也不得影響改寫。")],
+        {"state": "WAIT_CONFIRMATION", "reason_codes": []},
+    )
+
+    assert notes[0] == "風險報酬比未達完整買進門檻，Final Entry 需保守觀察。"
 
 
 def test_recovery_invalidated_overrides_long_term_bullish_regime():
@@ -518,7 +565,11 @@ def test_recovery_confirmed_outputs_recovery_regime_and_final_permission():
     assert ds["market_regime"]["short_term_regime"] == "RECOVERY"
     assert ds["market_bias"] == "BULLISH_BIAS"
     assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_executability"]["price_basis"] == "RECLAIM_CLOSE"
     assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+    assert "EXECUTION_RR_UNAVAILABLE" not in ds["final_entry_permission"]["reason_codes"]
+    assert "ENTRY_ZONE_OVERSHOT" not in ds["final_entry_permission"]["reason_codes"]
 
 
 def test_early_trend_outputs_bullish_bias_without_continuation():
@@ -649,6 +700,8 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
     )
 
     assert ds["rr_gate"]["qualified"] is True
+    assert ds["rr_gate"]["reason_code"] == "EXECUTION_RR_UNAVAILABLE"
+    assert ds["rr_gate"]["target_known"] is False
     assert ds["daily_price_action"]["price_follow_through_state"] == "NO_PRICE_FOLLOW_THROUGH"
     assert ds["decision_derived_view"]["version"] == "decision-derived-view-p2"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["decision_derived_view"]["final_entry_reason_codes"]
@@ -656,8 +709,12 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
     assert ds["decision_derived_view"]["position_gate_state"] == "HOLD"
     assert ds["daily_confirmation"]["state"] == "PROBE_ALLOWED"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["daily_confirmation"]["reason_codes"]
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_executability"]["price_basis"] == "RECLAIM_CLOSE"
     assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["final_entry_permission"]["reason_codes"]
+    assert "EXECUTION_RR_UNAVAILABLE" not in ds["final_entry_permission"]["reason_codes"]
+    assert "ENTRY_ZONE_OVERSHOT" not in ds["final_entry_permission"]["reason_codes"]
     assert ds["price_path"]["path_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
     assert ds["price_path"]["reason_codes"] == ["WAIT_PRICE_FOLLOW_THROUGH"]
     assert ds["position_action_condition"]["state"] == "HOLD"
@@ -684,7 +741,11 @@ def test_semantic_pipeline_close_reclaim_testing_probe_allowed():
     assert semantic["action_state"] == "CONDITIONAL_HOLD"
     assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
     assert ds["position_action_condition"]["state"] == "CONDITIONAL_HOLD"
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_executability"]["price_basis"] == "RECLAIM_CLOSE"
     assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+    assert "EXECUTION_RR_UNAVAILABLE" not in ds["final_entry_permission"]["reason_codes"]
+    assert "ENTRY_ZONE_OVERSHOT" not in ds["final_entry_permission"]["reason_codes"]
 
 
 def test_semantic_pipeline_carried_close_reclaim_confirmed_probe_allowed():
@@ -721,7 +782,11 @@ def test_semantic_pipeline_carried_close_reclaim_confirmed_probe_allowed():
     assert semantic["action_state"] == "HOLD"
     assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
     assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_executability"]["price_basis"] == "RECLAIM_CLOSE"
     assert ds["final_entry_permission"]["state"] == "PROBE_ALLOWED"
+    assert "EXECUTION_RR_UNAVAILABLE" not in ds["final_entry_permission"]["reason_codes"]
+    assert "ENTRY_ZONE_OVERSHOT" not in ds["final_entry_permission"]["reason_codes"]
 
 
 def test_semantic_pipeline_breakout_continuation_entry_allowed():
@@ -759,6 +824,134 @@ def test_semantic_pipeline_breakout_continuation_entry_allowed():
     assert semantic["entry_permission_state"] == "ENTRY_ALLOWED"
     assert ds["market_bias"] == "BULLISH_CONTINUATION"
     assert ds["position_action_condition"]["state"] == "HOLD"
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_executability"]["price_basis"] == "CONTINUATION_MARKET_PRICE"
+    assert ds["rr_context"]["target_price"] is None
+    assert ds["rr_context"]["target_basis"] == "MARKET_ENTRY_TARGET_UNAVAILABLE"
+    assert ds["rr_context"]["execution_rr"] is None
+    assert ds["rr_gate"]["qualified"] is True
+    assert ds["rr_gate"]["reason_code"] == "EXECUTION_RR_UNAVAILABLE"
+    assert ds["rr_gate"]["gate_basis"] == "MARKET_ENTRY_TARGET_UNAVAILABLE"
+    assert ds["rr_gate"]["target_known"] is False
+    assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
+    assert "EXECUTION_RR_UNAVAILABLE" not in ds["final_entry_permission"]["reason_codes"]
+    assert "ENTRY_ZONE_OVERSHOT" not in ds["final_entry_permission"]["reason_codes"]
+    assert ds["best_trade_zone"] is None
+    assert any("target 尚未量化" in note and "停損" in note for note in ds["risk_notes"])
+
+
+def test_market_price_continuation_uses_resistance_target_without_historical_best_trade_zone():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0)
+    resistance = _zone(role=ZoneType.RESISTANCE.value, low=125.0, high=127.0, risk_reward_ratio=1.2)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [support, resistance],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=102.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    semantic = ds["decision_derived_view"]["semantic_pipeline"]
+    assert semantic["entry_permission_state"] == "ENTRY_ALLOWED"
+    assert ds["entry_executability"]["price_basis"] == "CONTINUATION_MARKET_PRICE"
+    assert ds["rr_context"]["target_price"] == 125.0
+    assert ds["rr_context"]["target_basis"] == "NEAREST_RESISTANCE_TARGET"
+    assert ds["rr_context"]["execution_rr"] == (125.0 - 105.0) / (105.0 - 98.0)
+    assert ds["rr_gate"]["qualified"] is True
+    assert ds["rr_gate"]["gate_basis"] == "ENTRY_STOP_TARGET"
+    assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
+    assert ds["best_trade_zone"] is None
+    assert any("市價型進場" in note and "停損" in note for note in ds["risk_notes"])
+
+
+def test_market_price_target_uses_nearest_resistance_above_entry_not_below_entry():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0)
+    below_entry = _zone(role=ZoneType.RESISTANCE.value, low=103.0, high=104.0, risk_reward_ratio=1.2)
+    above_entry = _zone(role=ZoneType.RESISTANCE.value, low=118.0, high=120.0, risk_reward_ratio=1.2)
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [support, below_entry, above_entry],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=102.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    assert ds["entry_executability"]["price_basis"] == "CONTINUATION_MARKET_PRICE"
+    assert ds["rr_context"]["target_price"] == 118.0
+    assert ds["rr_context"]["target_basis"] == "NEAREST_RESISTANCE_TARGET"
+
+
+def test_market_price_target_ignores_expired_resistance_above_entry():
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0)
+    expired = _zone(
+        role=ZoneType.RESISTANCE.value,
+        low=118.0,
+        high=120.0,
+        risk_reward_ratio=1.2,
+        recent_validation=RecentValidation.EXPIRED.value,
+    )
+    previous = [{
+        "type": "INTRADAY_RECLAIM",
+        "event_family": "SUPPORT_RECLAIM",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "INTRADAY_RECLAIM",
+        "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH",
+        "state": "ACTIVE",
+        "active": True,
+        "age_bars": 1,
+        "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+
+    ds = _summary(
+        [support, expired],
+        current_price=105.0,
+        candle_high=106.0,
+        candle_low=102.0,
+        candle_close=105.0,
+        previous_candle_close=102.0,
+        previous_event_states=previous,
+    )
+
+    assert ds["rr_context"]["target_price"] is None
+    assert ds["rr_context"]["target_basis"] == "MARKET_ENTRY_TARGET_UNAVAILABLE"
+    assert ds["rr_gate"]["target_known"] is False
     assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
 
 
@@ -798,6 +991,35 @@ def test_semantic_pipeline_blocking_zone_ahead_waits_confirmation():
     assert ds["position_action_condition"]["state"] == "HOLD"
     assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
     assert "BLOCKING_ZONE_AHEAD" in ds["final_entry_permission"]["reason_codes"]
+
+
+def test_near_resistance_blocks_probe_entry_and_best_trade_zone():
+    support = _zone(
+        low=98.0,
+        high=100.0,
+        risk_reward_ratio=2.5,
+        confidence=0.82,
+        trading_score=90.0,
+        recent_validation=RecentValidation.PENDING_VALIDATION.value,
+    )
+    resistance = _zone(
+        role=ZoneType.RESISTANCE.value,
+        low=100.35,
+        high=101.0,
+        risk_reward_ratio=1.2,
+        confidence=0.7,
+    )
+
+    ds = _summary([support, resistance], current_price=100.1)
+
+    assert ds["decision_derived_view"]["semantic_pipeline"]["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert "BLOCKING_ZONE_AHEAD" in ds["decision_derived_view"]["semantic_pipeline"]["reason_codes"]
+    assert ds["entry_executability"]["executable_now"] is True
+    assert ds["entry_blocking_zone"]["blocked"] is True
+    assert ds["entry_blocking_zone"]["reason_code"] == "NEAR_RESISTANCE_BLOCKING_ENTRY"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert "NEAR_RESISTANCE_BLOCKING_ENTRY" in ds["final_entry_permission"]["reason_codes"]
+    assert ds["best_trade_zone"] is None
 
 
 def test_hard_block_daily_confirmation_does_not_backfill_derived_reasons():
@@ -988,7 +1210,7 @@ def test_final_entry_permission_never_outputs_no_setup():
         assert permission["label"] != "無設定"
 
 
-def test_final_entry_permission_merges_derived_final_reasons_without_state_indirection():
+def test_final_entry_permission_merges_derived_final_reasons_and_normalizes_state():
     permission = _final_entry_permission(
         "BUY",
         {"state": "ENTRY_READY", "reason_codes": ["ENTRY_STATE_READY"]},
@@ -997,16 +1219,16 @@ def test_final_entry_permission_merges_derived_final_reasons_without_state_indir
         },
     )
 
-    assert permission["state"] == "ACCUMULATE"
+    assert permission["state"] == "ENTRY_ALLOWED"
     assert permission["entry_action_state"] == "BUY"
     assert permission["daily_confirmation_state"] == "ENTRY_READY"
     assert permission["reason_codes"] == ["ENTRY_STATE_READY", "ENTRY_GATE_WAIT_CONFIRMATION"]
 
 
-def test_final_entry_permission_does_not_upgrade_buy_without_daily_buy_ready():
+def test_final_entry_permission_normalizes_buy_ready_to_entry_allowed():
     permission = _final_entry_permission("BUY", {"state": "ENTRY_READY", "reason_codes": ["ENTRY_STATE_READY"]})
 
-    assert permission["state"] == "ACCUMULATE"
+    assert permission["state"] == "ENTRY_ALLOWED"
     assert permission["entry_action_state"] == "BUY"
     assert permission["daily_confirmation_state"] == "ENTRY_READY"
 
@@ -1273,6 +1495,26 @@ def test_daily_candidate_zones_are_tactical_candidates_not_best_trade_zone():
     assert ds["price_path"]["blocking_zone"]["method"] == "daily_candle"
 
 
+def test_zero_width_daily_candidate_zones_output_triggers():
+    ds = _summary(
+        [],
+        current_price=2405.0,
+        candle_high=2405.0,
+        candle_low=2405.0,
+        candle_close=2405.0,
+        previous_candle_close=2400.0,
+    )
+
+    support, resistance = ds["daily_candidate_zones"]
+    assert support["zone_kind"] == "BREAKDOWN_TRIGGER"
+    assert support["trigger_price"] == 2405.0
+    assert support["label"] == "BREAKDOWN_TRIGGER 2405.00"
+    assert resistance["zone_kind"] == "BREAKOUT_TRIGGER"
+    assert resistance["trigger_price"] == 2405.0
+    assert resistance["label"] == "BREAKOUT_TRIGGER 2405.00"
+    assert ds["best_trade_zone"] is None
+
+
 def test_price_path_reports_blocking_zone_and_next_decision_price():
     support = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
     resistance = _zone(role=ZoneType.RESISTANCE.value, low=106.0, high=108.0, risk_reward_ratio=2.0)
@@ -1322,10 +1564,43 @@ def test_rr_context_and_completeness_layers_are_split():
     assert ds["rr_context"]["position_rr"] is None
     assert ds["rr_context"]["entry_rr_source"] == "PRIMARY_ZONE"
     assert ds["rr_context"]["position_rr_source"] == "UNAVAILABLE"
+    assert ds["rr_context"]["entry_price"] == 100.0
+    assert ds["rr_context"]["entry_zone_lower"] == 98.0
+    assert ds["rr_context"]["entry_zone_upper"] == 100.0
+    assert ds["rr_context"]["stop_price"] == 98.0
+    assert ds["rr_context"]["target_price"] == 104.8
+    assert ds["rr_context"]["price_basis"] == "PRIMARY_SUPPORT_UPPER"
+    assert ds["rr_context"]["stop_basis"] == "PRIMARY_ZONE_STOP"
+    assert ds["rr_context"]["target_basis"] == "PRIMARY_ZONE_RR"
+    assert ds["rr_context"]["executable_now"] is True
+    assert ds["rr_context"]["rr_formula_available"] is True
     quality = ds["data_quality"]
     assert quality["market_data_completeness"] == quality["overall_completeness"]
     assert quality["rr_completeness"] == 1.0
     assert quality["trade_qualification_completeness"] == 1.0
+
+
+def test_tactical_stop_is_separate_from_structural_stop_in_rr_context():
+    primary = _zone(low=98.0, high=100.0, risk_reward_ratio=2.4, trading_score=92.0, confidence=0.82)
+    tactical = _zone(
+        low=99.0,
+        high=99.5,
+        trading_score=40.0,
+        confidence=0.2,
+        confidence_level=ConfidenceLevel.LOW.value,
+        risk_reward_ratio=1.0,
+        tier=ZoneTier.TIER_3_SHORT_TERM.value,
+        tier_label="短期",
+    )
+
+    ds = _summary([primary, tactical], current_price=100.1)
+
+    assert ds["primary_zone"]["price_low"] == 98.0
+    assert ds["defense_lines"]["tactical"]["invalidation_price"] == 99.0
+    assert ds["defense_lines"]["strategic"]["invalidation_price"] == 98.0
+    assert ds["rr_context"]["stop_price"] == 99.0
+    assert ds["rr_context"]["stop_basis"] == "TACTICAL_STOP"
+    assert ds["rr_context"]["structural_stop_price"] == 98.0
 
 
 def test_data_quality_separates_missing_neutral_and_negative_features():

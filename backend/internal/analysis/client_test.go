@@ -357,6 +357,8 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 			"price_path":{"path_state":"EVENT_RISK","next_decision_price":581,"reason_codes":["EVENT_RISK"]},
 			"daily_confirmation":{"state":"WAIT_NEXT_DAILY_CLOSE","reason_codes":["DAILY_CONFIRMATION_REQUIRED"]},
 			"defense_lines":{"tactical":{"label":"579.50 ~ 581.00"},"swing":null,"strategic":null},
+			"entry_executability":{"entry_price":581,"executable_now":true,"reason_code":"EXECUTABLE_NOW","price_basis":"PRIMARY_SUPPORT_UPPER"},
+			"entry_blocking_zone":{"blocked":false,"distance_price":12,"threshold_price":3,"distance_pct":0.02,"threshold_pct":0.005},
 			"rr_context":{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"},
 			"rr_gate":{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"},
 			"position_action_condition":{"state":"BREAKDOWN","invalidation_price":580,"recovery_price":585,"reason_codes":["SUPPORT_CLOSED_BELOW"]},
@@ -441,6 +443,8 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 	}
 	if string(projections.Decision.MarketRegimeJSON) == "null" ||
 		string(projections.Decision.DecisionDerivedViewJSON) == "null" ||
+		string(projections.Decision.EntryExecutabilityJSON) == "null" ||
+		string(projections.Decision.EntryBlockingZoneJSON) == "null" ||
 		string(projections.Decision.RRGateJSON) == "null" {
 		t.Fatalf("expected decision detail JSON to be projected: %+v", projections.Decision)
 	}

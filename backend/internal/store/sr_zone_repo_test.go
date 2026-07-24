@@ -121,6 +121,8 @@ func testProjections() SRZoneNormalizedProjections {
 			MarketRegimeJSON:          RawJSON(`{"primary":"TREND_DOWN","label":"偏空"}`),
 			DecisionDerivedViewJSON:   RawJSON(`{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"]}`),
 			PricePathJSON:             RawJSON(`{"path_state":"EVENT_RISK","next_decision_price":581}`),
+			EntryExecutabilityJSON:    RawJSON(`{"entry_price":581,"executable_now":true,"reason_code":"EXECUTABLE_NOW"}`),
+			EntryBlockingZoneJSON:     RawJSON(`{"blocked":false,"distance_price":12,"threshold_price":3}`),
 			RRContextJSON:             RawJSON(`{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}`),
 			RRGateJSON:                RawJSON(`{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"}`),
 			MarketContextJSON:         RawJSON(`[{"key":"trend","label":"趨勢","value":"偏空"}]`),
@@ -269,6 +271,12 @@ func TestSRZoneRepoCreateGetRoundTrip(t *testing.T) {
 	}
 	if string(decision.RRContextJSON) != `{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"}` {
 		t.Fatalf("unexpected rr_context_json: %s", decision.RRContextJSON)
+	}
+	if string(decision.EntryExecutabilityJSON) != `{"entry_price":581,"executable_now":true,"reason_code":"EXECUTABLE_NOW"}` {
+		t.Fatalf("unexpected entry_executability_json: %s", decision.EntryExecutabilityJSON)
+	}
+	if string(decision.EntryBlockingZoneJSON) != `{"blocked":false,"distance_price":12,"threshold_price":3}` {
+		t.Fatalf("unexpected entry_blocking_zone_json: %s", decision.EntryBlockingZoneJSON)
 	}
 	if string(decision.ZoneSummariesJSON) == "" || string(decision.ZoneSummariesJSON) == "null" {
 		t.Fatalf("expected zone_summaries_json to round-trip, got %s", decision.ZoneSummariesJSON)

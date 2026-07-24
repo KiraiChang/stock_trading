@@ -449,6 +449,8 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 			ReasonCodes:               store.RawJSON(`["HIGH_VOLUME_BREAKDOWN"]`),
 			DecisionDerivedViewJSON:   store.RawJSON(`{"version":"decision-derived-view-p0","bias_state":"BEARISH_BIAS","bias_reason_codes":["MARKET_ACTION_AVOID"]}`),
 			PricePathJSON:             store.RawJSON(`{"path_state":"EVENT_RISK","next_decision_price":581}`),
+			EntryExecutabilityJSON:    store.RawJSON(`{"entry_price":581,"executable_now":true,"reason_code":"EXECUTABLE_NOW"}`),
+			EntryBlockingZoneJSON:     store.RawJSON(`{"blocked":false,"distance_price":12,"threshold_price":3}`),
 			RRGateJSON:                store.RawJSON(`{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"}`),
 			ConfidenceExplanationJSON: store.RawJSON(`{"value":0.72,"level":"HIGH","label":"高","formula_factors":[],"context_factors":[]}`),
 			ZoneSummariesJSON:         store.RawJSON(`{"nearest_decision_zone":null,"nearest_support_zone":null,"nearest_resistance_zone":null,"primary_structural_zone":null,"best_trade_zone":{"label":"580.00 ~ 585.00"},"primary_zone":{"label":"580.00 ~ 585.00","role":"SUPPORT"},"secondary_zones":[]}`),
@@ -519,6 +521,12 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 			PricePath struct {
 				NextDecisionPrice float64 `json:"next_decision_price"`
 			} `json:"price_path"`
+			EntryExecutability struct {
+				ReasonCode string `json:"reason_code"`
+			} `json:"entry_executability"`
+			EntryBlockingZone struct {
+				DistancePrice float64 `json:"distance_price"`
+			} `json:"entry_blocking_zone"`
 			RRGate struct {
 				ReasonCode string `json:"reason_code"`
 			} `json:"rr_gate"`
@@ -563,6 +571,8 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 		t.Fatalf("daily_candidate_zones did not use normalized rows: %+v", parsed.Decision.DailyCandidateZones)
 	}
 	if parsed.Decision.PricePath.NextDecisionPrice != 581 ||
+		parsed.Decision.EntryExecutability.ReasonCode != "EXECUTABLE_NOW" ||
+		parsed.Decision.EntryBlockingZone.DistancePrice != 12 ||
 		parsed.Decision.RRGate.ReasonCode != "RR_OK" ||
 		parsed.Decision.PrimaryZone.Label != "580.00 ~ 585.00" ||
 		parsed.Decision.ConfidenceExplanation.Label != "高" {

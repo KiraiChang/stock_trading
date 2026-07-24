@@ -774,6 +774,12 @@ resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw even
 微結構事件的 zone_ref 定位戰術防守線；兩者是「候選區產生」與「防守線呈現」，不是進場 gating，需要
 完整事件脈絡才完整，故與「gating 只吃 active」並存而不矛盾。
 
+Daily candidate zone 若 `price_low == price_high`，不再以 `2405.00 ~ 2405.00` 這類零寬區間呈現，
+而改成 trigger 語意：resistance 端輸出 `zone_kind=BREAKOUT_TRIGGER`、support 端輸出
+`zone_kind=BREAKDOWN_TRIGGER`，並填 `trigger_price` 與 `BREAKOUT_TRIGGER 2405.00` /
+`BREAKDOWN_TRIGGER 2405.00` label。`price_low` / `price_high` 保留作舊 payload 相容；trigger
+不可直接成為 `best_trade_zone`。
+
 ### Daily Price Action / Data Quality
 
 `decision_summary.daily_price_action` 使用最新日 K OHLC 與前一日收盤建立 EOD 判讀。現階段會輸出
@@ -933,6 +939,60 @@ final permission 會降為 `WAIT_CONFIRMATION`。`ENTRY_ALLOWED` 只在 semantic
 `CONFIRMED` 的收復修復語境通常只輸出 `PROBE_ALLOWED`，避免把持有者的 `HOLD` 誤解成
 未持有者可正式進場。
 
+Final Entry Arbitration P0/P1 後，對外進場仲裁順序固定為：
+
+```text
+Final Entry
+> Executability
+> Blocking Zone
+> Model Health
+> Daily Entry State
+> Historical Zone RR
+```
+
+`final_entry_permission.state` 對外只輸出四種權限：`BLOCKED`、`WAIT_CONFIRMATION`、
+`PROBE_ALLOWED`、`ENTRY_ALLOWED`。Legacy `entry_action_state` 的 `BUY` / `ACCUMULATE` /
+`SMALL_ENTRY` / `PROBE_ENTRY` 只作為內部輸入階段，進入 final entry 後會正規化成上述四種權限。
+
+`entry_executability` 會明確輸出 `entry_price`、`entry_zone_lower`、`entry_zone_upper`、
+`tolerance`、`executable_now`、`reason_code` 與 `price_basis`。`tolerance` 目前為
+`max(current_price * 0.002, zone_width * 0.1)`。回測支撐語境使用
+`price_basis=PRIMARY_SUPPORT_UPPER`，現價高於 support entry zone upper + tolerance 時
+`executable_now=false`，`final_entry_permission.state` 降為 `WAIT_CONFIRMATION` 並附上
+`ENTRY_ZONE_OVERSHOT`，`best_trade_zone` 不可輸出。收復／修復／延續語境不再用 primary support
+upper 判斷追價，而是改用 `price_basis=RECLAIM_CLOSE` 或 `CONTINUATION_MARKET_PRICE`；
+這類語境的 chasing risk 由 daily confirmation 的 `CHASING_RISK` 處理。若現價低於 support
+entry zone lower - tolerance，`executable_now=false` 並輸出 `ENTRY_ZONE_UNDERSHOT`。
+
+`entry_executability.reason_code` 目前包含：`NO_ENTRY_ZONE`、`ENTRY_ZONE_NOT_SUPPORT`、
+`EXECUTABLE_NOW`、`ENTRY_ZONE_OVERSHOT`、`ENTRY_ZONE_UNDERSHOT`。Final entry 另可能因模型健康度
+輸出 `MODEL_ENTRY_BLOCKED`、`MODEL_ENTRY_CAPPED`。
+
+`entry_blocking_zone` 是進場層前方壓力 gate，只看尚未失效的 scored resistance zone，不使用
+daily candidate zone。若最近 scored resistance 距離小於 proxy 門檻（目前
+`max(zone_width * 0.5, current_price * 0.005)`，`threshold_basis=ZONE_WIDTH_OR_0_5_PERCENT_PROXY`），
+`blocked=true`，`final_entry_permission.state` 降為 `WAIT_CONFIRMATION` 並附上
+`NEAR_RESISTANCE_BLOCKING_ENTRY`。輸出欄位同時包含價格單位與比例單位：
+`distance_price` / `threshold_price` 是價格差，`distance_pct` / `threshold_pct` 是除以現價後的比例。
+舊欄位 `distance_to_nearest_resistance` 與 `threshold` 暫時保留為比例值相容 alias，前端新顯示應改讀
+`distance_pct` / `threshold_pct` 或價格欄位。`price_path.blocking_zone` 仍是路徑提示，可包含 daily
+candidate；semantic entry gate 的 `BLOCKING_ZONE_AHEAD` 使用 entry 層近壓力判斷，path 層則仍可用
+完整路徑提示描述前方壓力。
+
+`action` / `market_action` 是 final entry 對齊後的相容輸出，不得高於
+`final_entry_permission`。若 final entry 為 `WAIT_CONFIRMATION`，即使 legacy
+`entry_action_state` 是 `SMALL_ENTRY` / `ACCUMULATE`，對外也輸出 `market_action=WATCH` 與
+`action=Hold`；`best_trade_zone` 只在 final entry 為 `PROBE_ALLOWED` / `ENTRY_ALLOWED`、
+`executable_now=true`、entry blocking 未阻擋、RR 合格，且 entry 不是
+`RECLAIM_CLOSE` / `CONTINUATION_MARKET_PRICE` 這類市價型語境時輸出。市價型語境不得把
+historical support zone 當成 `best_trade_zone`，避免 `best_trade_zone` 與 `entry_price` 互相矛盾；
+前端應改讀 `entry_executability` 與 `rr_context`。`risk_notes` 需在 final entry 降級後改寫舊的
+進場語氣註記並保留原因，避免 legacy action 與對外操作語氣不一致。改寫由 **reason code 驅動**，
+不以中文文案子字串比對：`_decision_action` 對會被改寫的註記帶結構化 code（`MODEL_DEGRADED_ENTRY_TONE`、
+`RR_BELOW_FULL_ENTRY`），final entry 為 `WAIT_CONFIRMATION` / `BLOCKED` 時依 code 換成保留原因的
+保守句（例如「風險報酬比未達完整買進門檻，Final Entry 需保守觀察。」），最後才統一轉回純字串輸出；
+因此改文案不影響改寫邏輯，對外 `risk_notes` 仍是 `string[]`。
+
 Legacy action pipeline：
 
 1. 若沒有 primary zone：`Hold`，並加入「沒有足夠明確主交易區」風險註記。
@@ -999,6 +1059,30 @@ SR `decision_summary.rr_context.position_rr` 維持 `null` 且
 `position_rr_source=UNAVAILABLE`，避免把 entry RR 誤讀成既有部位 RR。實際持倉
 Position RR 由 Go Position Engine 在 `position_analyses.evidence.position_decision.position_rr`
 輸出，來源標示為 `POSITION_AVG_COST`。
+
+P0/P1 後，`rr_context` 也輸出 entry RR 的顯示基礎：`entry_price`、`entry_zone_lower`、
+`entry_zone_upper`、`stop_price`、`target_price`、`price_basis`、`stop_basis`、`target_basis`、
+`structural_stop_price`、`risk_price`、`reward_price`、`stop_distance_pct`、`execution_rr`、
+`execution_rr_source`、`executable_now`、`entry_executability_reason_code` 與
+`rr_formula_available`。試單 RR 的 stop 優先使用 `defense_lines.tactical` 的 support invalidation
+price（`stop_basis=TACTICAL_STOP`）；若沒有 tactical support，且 primary / swing line 是 support，
+才 fallback 到 primary zone stop。Resistance primary 不得輸出 long entry 的反向停損。
+`structural_stop_price` 僅作結構防守參考，不作為試單 stop。若 `price_basis` 是 `RECLAIM_CLOSE`
+或 `CONTINUATION_MARKET_PRICE`，`entry_rr` 僅是 historical zone statistic；實際 final RR gate 改讀
+`execution_rr`。市價型 entry 的 target 取 **entry price 之上最近的有效 resistance** 的 `price_low`
+（`target_basis=NEAREST_RESISTANCE_TARGET`）：先以「`price_low > entry_price` ＋ 排除 `EXPIRED` ＋
+排除 LOW confidence」嚴格挑最近者，落空再退到「排除 `EXPIRED`、允許 LOW confidence」，但**不回退到
+含 `EXPIRED`**（與 `entry_blocking_zone` 的 EXPIRED 過濾一致）。不採「取最近 resistance 再事後過濾
+方向」，以免被 entry 之下、已被跨越但仍標為 resistance 的區擋掉、錯過上方真正壓力。若沒有可量化 target，
+`target_price=null`、
+`target_basis=MARKET_ENTRY_TARGET_UNAVAILABLE`、`rr_formula_available=false`、`target_known=false`；
+這代表 target unknown，不代表 RR 不合格，因此不會單獨把 final entry 降為 `WAIT_CONFIRMATION`。
+只有 target 已知且 `execution_rr < minimum_rr`（`EXECUTION_RR_INSUFFICIENT`）才會降級。
+
+`rr_gate` 是 final/execution gate 的對外結果。市價型 entry 會輸出 `gate_basis`、
+`zone_actual_rr` 與 `target_known`：`zone_actual_rr` 保留 historical zone statistic 供對照，
+`actual_rr` 則是可量化時的 execution RR；若 `target_known=false`，`actual_rr=null` 但
+`qualified=true`，由 `risk_notes` 提醒 target 尚未量化。
 
 `price_path.next_decision_source` 只描述下一個決策價位來源。拆分 nearest support / resistance 後，
 有效值為 `nearest_support_zone`、`nearest_resistance_zone` 或 `daily_candidate_zone`；

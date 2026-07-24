@@ -15,16 +15,16 @@ export interface TradeAnalysisResult {
   zones: SRZone[]
 }
 
-export async function analyzeTrade(symbol: string, forceRefresh = false): Promise<TradeAnalysisResult> {
+export async function analyzeTrade(symbol: string, portfolioID: number, forceRefresh = false): Promise<TradeAnalysisResult> {
   return apiFetch('/trade-analysis/analyze', {
     method: 'POST',
-    body: JSON.stringify({ symbol, timeframe: '1d', limit: 250, force_refresh: forceRefresh }),
+    body: JSON.stringify({ symbol, portfolio_id: portfolioID, timeframe: '1d', limit: 250, force_refresh: forceRefresh }),
   })
 }
 
-export async function listTradeAnalyses(symbol: string): Promise<PositionAnalysis[]> {
+export async function listTradeAnalyses(symbol: string, portfolioID: number): Promise<PositionAnalysis[]> {
   const response = await apiFetch<{ analyses: PositionAnalysis[] }>(
-    `/trade-analysis/${encodeURIComponent(symbol)}/history?limit=20`
+    `/trade-analysis/${encodeURIComponent(symbol)}/history?limit=20&portfolio_id=${encodeURIComponent(String(portfolioID))}`
   )
   return response.analyses ?? []
 }

@@ -640,9 +640,40 @@ type ChipSyncJob struct {
 
 // ── Holdings / Portfolio Analysis models ─────────────────────
 
+const DefaultPortfolioID uint64 = 1
+
+type Portfolio struct {
+	ID              uint64    `db:"id"                 json:"id"`
+	TenantID        uint64    `db:"tenant_id"          json:"tenant_id"`
+	Name            string    `db:"name"               json:"name"`
+	OwnerType       string    `db:"owner_type"         json:"owner_type"`
+	OwnerID         NullInt64 `db:"owner_id"           json:"owner_id,omitempty"`
+	CreatedByUserID NullInt64 `db:"created_by_user_id" json:"created_by_user_id,omitempty"`
+	IsDefault       bool      `db:"is_default"         json:"is_default"`
+	CanWrite        bool      `db:"can_write"          json:"can_write"`
+	CreatedAt       time.Time `db:"created_at"         json:"created_at"`
+	UpdatedAt       time.Time `db:"updated_at"         json:"updated_at"`
+}
+
+type Group struct {
+	ID        uint64    `db:"id"         json:"id"`
+	TenantID  uint64    `db:"tenant_id"  json:"tenant_id"`
+	Name      string    `db:"name"       json:"name"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+}
+
+type GroupMember struct {
+	GroupID   uint64    `db:"group_id"   json:"group_id"`
+	UserID    uint64    `db:"user_id"    json:"user_id"`
+	Role      string    `db:"role"       json:"role"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 // Position is the materialized AVG-cost projection rebuilt transactionally
 // from immutable PositionTransaction events.
 type Position struct {
+	PortfolioID uint64    `db:"portfolio_id" json:"portfolio_id"`
 	Symbol      string    `db:"symbol"       json:"symbol"`
 	Shares      float64   `db:"shares"       json:"shares"`
 	AvgCost     float64   `db:"avg_cost"     json:"avg_cost"`
@@ -654,6 +685,7 @@ type Position struct {
 
 type PositionTransaction struct {
 	ID            uint64      `db:"id"              json:"id"`
+	PortfolioID   uint64      `db:"portfolio_id"    json:"portfolio_id"`
 	Symbol        string      `db:"symbol"          json:"symbol"`
 	EventType     string      `db:"event_type"      json:"event_type"`
 	OccurredAt    time.Time   `db:"occurred_at"     json:"occurred_at"`
@@ -669,6 +701,7 @@ type PositionTransaction struct {
 
 type PositionAnalysis struct {
 	ID                     uint64      `db:"id"                     json:"id"`
+	PortfolioID            uint64      `db:"portfolio_id"           json:"portfolio_id"`
 	Symbol                 string      `db:"symbol"                 json:"symbol"`
 	PositionState          string      `db:"position_state"         json:"position_state"`
 	PositionVersion        int64       `db:"position_version"       json:"position_version"`

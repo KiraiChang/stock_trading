@@ -1262,18 +1262,34 @@ Position Analysis 是 Trade Analysis 背後的決策快照與部位帳務 API。
 transaction/projection 時視為 `FLAT`，有股數時為 `LONG`。交易決策入口統一為
 `/trade-analysis/*`；以下 endpoints 提供 position ledger 與 projection。
 
-- `GET /positions`：列出目前 LONG positions。
-- `GET /positions/:symbol`：取得 projection；空手回傳股數、AVG、version 均為 0。
-- `GET /positions/:symbol/transactions`：取得 immutable ledger。
+- `GET /groups`：列出目前使用者加入的 groups。
+- `POST /groups`：建立 group；建立者自動成為 `OWNER`。
+- `POST /groups/:id/members`：由 group `OWNER` / `ADMIN` 新增或更新成員 role（body：`user_id`、`role`）。
+  角色保護：actor 不得修改自己的 role；只有 `OWNER` 能授予 `OWNER`、或異動一個現任 `OWNER`（`ADMIN`
+  不得碰 `OWNER`）；不得把最後一名 `OWNER` 降級。新增成員時會一併確保該 user 具 group tenant 的
+  membership，避免 `CanAccess` 的 tenant join 把成員靜默鎖死。
+- `GET /portfolios`：列出目前使用者可用的 portfolios（legacy shared、個人、已加入 group 的 portfolio）；
+  response item 包含 `can_write`，前端用來停用唯讀 portfolio 的寫入操作。
+- `POST /portfolios`：建立 portfolio；body 包含 `name`，若帶 `group_id` 則建立 group-owned portfolio，
+  且呼叫者必須是該 group 的 `OWNER` / `ADMIN`。
+- `GET /positions?portfolio_id=...`：列出目前 LONG positions；未帶 `portfolio_id` 時使用 legacy default portfolio。
+- `GET /positions/:symbol?portfolio_id=...`：取得 projection；空手回傳股數、AVG、version 均為 0。
+- `GET /positions/:symbol/transactions?portfolio_id=...`：取得 immutable ledger。
 - `POST /positions/:symbol/transactions`：新增 BUY/SELL；body 包含
-  `event_type`、`shares`、`price`、`fee`、`tax`、`occurred_at`、
+  `portfolio_id`、`event_type`、`shares`、`price`、`fee`、`tax`、`occurred_at`、
   `expected_version`、`note`。SELL 不得超賣。
 - `POST /positions/:symbol/adjustments`：新增 ADJUSTMENT；body 包含更正後
-  `target_shares`、`target_avg_cost`、`expected_version` 與必填 `reason`。
+  `portfolio_id`、`target_shares`、`target_avg_cost`、`expected_version` 與必填 `reason`。
   ADJUSTMENT 只校正 projection，不代表成交、不改變 `realized_pnl`；實際交易使用
   BUY/SELL transaction。
 
-分析歷史改由 `GET /trade-analysis/:symbol/history` 取得；分析輸出包含 `position_state`、Position version、目前／目標／調整股數、
+所有 position / trade-analysis endpoints 都會檢查目前 JWT 使用者是否可存取該 `portfolio_id`。
+讀取 endpoints 需要 read access；BUY/SELL/ADJUSTMENT 與 `POST /trade-analysis/analyze`
+需要 write access，因為 analyze 會新增 `position_analyses` 快照。
+
+`POST /trade-analysis/analyze` body 可帶 `portfolio_id`；Position Engine 會使用該 portfolio 的
+持倉成本、股數與 version 產生 FLAT/LONG 決策。分析歷史改由
+`GET /trade-analysis/:symbol/history?portfolio_id=...` 取得；分析輸出包含 `position_state`、Position version、目前／目標／調整股數、
 `adjustment_side`/`adjustment_amount`、Action、進場／停損／停利價、風險金額、
 預期報酬、RR、已實現／未實現損益、設定快照、Evidence、觸發與失效條件。
 

@@ -155,6 +155,16 @@ func NewServer(
 		protected.GET("/users", uh.List)
 		protected.PATCH("/users/:id/status", uh.UpdateStatus)
 
+		portfolioRepoForScope := store.NewPortfolioRepo(db)
+		pfh := handler.NewPortfolioHandler(portfolioRepoForScope, log)
+		protected.GET("/portfolios", pfh.List)
+		protected.POST("/portfolios", pfh.Create)
+
+		gh := handler.NewGroupHandler(store.NewGroupRepo(db), log)
+		protected.GET("/groups", gh.List)
+		protected.POST("/groups", gh.Create)
+		protected.POST("/groups/:id/members", gh.AddMember)
+
 		cph := handler.NewChipHandler(
 			institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo,
 			candleRepo, chipSyncJobRepo, chipSyncer, chipHistoryTradingDays, log,
@@ -166,14 +176,14 @@ func NewServer(
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 
 		positionAnalyzer := portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig)
-		ph := handler.NewPositionHandler(positionRepo, log)
+		ph := handler.NewPositionHandler(positionRepo, portfolioRepoForScope, log)
 		protected.GET("/positions", ph.List)
 		protected.GET("/positions/:symbol", ph.Get)
 		protected.GET("/positions/:symbol/transactions", ph.ListTransactions)
 		protected.POST("/positions/:symbol/transactions", ph.AddTransaction)
 		protected.POST("/positions/:symbol/adjustments", ph.Adjust)
 
-		tah := handler.NewTradeAnalysisHandler(positionRepo, positionAnalyzer, log)
+		tah := handler.NewTradeAnalysisHandler(positionRepo, portfolioRepoForScope, positionAnalyzer, log)
 		protected.POST("/trade-analysis/analyze", tah.Analyze)
 		protected.GET("/trade-analysis/:symbol/history", tah.ListHistory)
 	}

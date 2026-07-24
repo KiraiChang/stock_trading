@@ -1,6 +1,7 @@
 import { apiFetch } from './client'
 
 export interface Position {
+  portfolio_id: number
   symbol: string
   shares: number
   avg_cost: number
@@ -14,6 +15,7 @@ export type PositionEventType = 'OPENING_BALANCE' | 'BUY' | 'SELL' | 'ADJUSTMENT
 
 export interface PositionTransaction {
   id: number
+  portfolio_id: number
   symbol: string
   event_type: PositionEventType
   occurred_at: string
@@ -99,6 +101,7 @@ export interface PositionAnalysisEvidence {
 
 export interface PositionAnalysis {
   id: number
+  portfolio_id: number
   symbol: string
   position_state: PositionState
   position_version: number
@@ -131,22 +134,31 @@ export interface PositionAnalysis {
   created_at: string
 }
 
-export async function listPositions(): Promise<Position[]> {
-  const response = await apiFetch<{ positions: Position[] }>('/positions')
+function portfolioQuery(portfolioID: number): string {
+  return `portfolio_id=${encodeURIComponent(String(portfolioID))}`
+}
+
+export async function listPositions(portfolioID: number): Promise<Position[]> {
+  const response = await apiFetch<{ positions: Position[] }>(`/positions?${portfolioQuery(portfolioID)}`)
   return response.positions ?? []
 }
 
-export async function getPosition(symbol: string): Promise<Position> {
-  const response = await apiFetch<{ position: Position }>(`/positions/${encodeURIComponent(symbol)}`)
+export async function getPosition(symbol: string, portfolioID: number): Promise<Position> {
+  const response = await apiFetch<{ position: Position }>(
+    `/positions/${encodeURIComponent(symbol)}?${portfolioQuery(portfolioID)}`
+  )
   return response.position
 }
 
-export async function listPositionTransactions(symbol: string): Promise<PositionTransaction[]> {
-  const response = await apiFetch<{ transactions: PositionTransaction[] }>(`/positions/${encodeURIComponent(symbol)}/transactions`)
+export async function listPositionTransactions(symbol: string, portfolioID: number): Promise<PositionTransaction[]> {
+  const response = await apiFetch<{ transactions: PositionTransaction[] }>(
+    `/positions/${encodeURIComponent(symbol)}/transactions?${portfolioQuery(portfolioID)}`
+  )
   return response.transactions ?? []
 }
 
 export async function addPositionTransaction(symbol: string, input: {
+  portfolio_id: number
   event_type: 'BUY' | 'SELL'
   shares: number
   price: number
@@ -163,6 +175,7 @@ export async function addPositionTransaction(symbol: string, input: {
 }
 
 export async function adjustPosition(symbol: string, input: {
+  portfolio_id: number
   target_shares: number
   target_avg_cost: number
   expected_version: number

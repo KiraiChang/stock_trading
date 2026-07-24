@@ -99,6 +99,7 @@ type AnalyzeOptions struct {
 	Timeframe    string
 	Limit        int
 	ForceRefresh bool
+	PortfolioID  uint64
 }
 
 type AnalyzeResult struct {
@@ -108,9 +109,13 @@ type AnalyzeResult struct {
 }
 
 func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptions) (*AnalyzeResult, error) {
-	position, err := a.positions.Get(ctx, symbol)
+	portfolioID := opts.PortfolioID
+	if portfolioID == 0 {
+		portfolioID = store.DefaultPortfolioID
+	}
+	position, err := a.positions.Get(ctx, portfolioID, symbol)
 	if errors.Is(err, sql.ErrNoRows) {
-		position = &store.Position{Symbol: symbol}
+		position = &store.Position{PortfolioID: portfolioID, Symbol: symbol}
 	} else if err != nil {
 		return nil, err
 	}
@@ -131,11 +136,12 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 	if err != nil {
 		return nil, err
 	}
+	snapshot.PortfolioID = portfolioID
 	id, err := a.positions.CreateAnalysis(ctx, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("create position analysis: %w", err)
 	}
-	saved, err := a.positions.GetAnalysis(ctx, id)
+	saved, err := a.positions.GetAnalysis(ctx, portfolioID, id)
 	if err != nil {
 		snapshot.ID = id
 		snapshot.CreatedAt = a.currentTime()
@@ -145,6 +151,9 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 }
 
 func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnalysis, zones []store.SRZone) (*store.PositionAnalysis, error) {
+	if position.PortfolioID == 0 {
+		position.PortfolioID = store.DefaultPortfolioID
+	}
 	current := sr.CurrentPrice
 	state := StateFlat
 	if position.Shares > 0 {
@@ -397,7 +406,7 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 		},
 	})
 	return &store.PositionAnalysis{
-		Symbol: position.Symbol, PositionState: state, PositionVersion: position.Version,
+		PortfolioID: position.PortfolioID, Symbol: position.Symbol, PositionState: state, PositionVersion: position.Version,
 		Shares: position.Shares, AvgCost: position.AvgCost, RealizedPnL: position.RealizedPnL,
 		AnalyzedAt: sr.AnalyzedAt, CurrentPrice: current,
 		SRZoneAnalysisID: store.NewNullInt64(int64(sr.ID)), Action: action, ActionLabel: label,

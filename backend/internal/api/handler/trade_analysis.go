@@ -15,17 +15,18 @@ import (
 )
 
 type TradeAnalysisHandler struct {
-	repo     store.PositionRepo
-	analyzer positionAnalyzer
-	log      *zap.Logger
+	repo       store.PositionRepo
+	portfolios store.PortfolioRepo
+	analyzer   positionAnalyzer
+	log        *zap.Logger
 }
 
 type positionAnalyzer interface {
 	Analyze(ctx context.Context, symbol string, opts portfolio.AnalyzeOptions) (*portfolio.AnalyzeResult, error)
 }
 
-func NewTradeAnalysisHandler(repo store.PositionRepo, analyzer *portfolio.Analyzer, log *zap.Logger) *TradeAnalysisHandler {
-	return &TradeAnalysisHandler{repo: repo, analyzer: analyzer, log: log}
+func NewTradeAnalysisHandler(repo store.PositionRepo, portfolios store.PortfolioRepo, analyzer *portfolio.Analyzer, log *zap.Logger) *TradeAnalysisHandler {
+	return &TradeAnalysisHandler{repo: repo, portfolios: portfolios, analyzer: analyzer, log: log}
 }
 
 func tradeAnalysisResponse(result *portfolio.AnalyzeResult) gin.H {
@@ -60,6 +61,7 @@ func tradeAnalysisResponse(result *portfolio.AnalyzeResult) gin.H {
 func (h *TradeAnalysisHandler) Analyze(c *gin.Context) {
 	var body struct {
 		Symbol       string `json:"symbol"`
+		PortfolioID  uint64 `json:"portfolio_id"`
 		Timeframe    string `json:"timeframe"`
 		Limit        int    `json:"limit"`
 		ForceRefresh bool   `json:"force_refresh"`
@@ -73,9 +75,17 @@ func (h *TradeAnalysisHandler) Analyze(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "valid symbol and limit are required"})
 		return
 	}
+	portfolioID := body.PortfolioID
+	portfolioID, ok := portfolioIDFromRequest(c, portfolioID)
+	if !ok {
+		return
+	}
+	if !requirePortfolioAccess(c, h.portfolios, portfolioID, true) {
+		return
+	}
 
 	result, err := h.analyzer.Analyze(c.Request.Context(), body.Symbol, portfolio.AnalyzeOptions{
-		Timeframe: body.Timeframe, Limit: body.Limit, ForceRefresh: body.ForceRefresh,
+		Timeframe: body.Timeframe, Limit: body.Limit, ForceRefresh: body.ForceRefresh, PortfolioID: portfolioID,
 	})
 	if err != nil {
 		var upstreamErr *analysis.UpstreamStatusError
@@ -90,6 +100,13 @@ func (h *TradeAnalysisHandler) Analyze(c *gin.Context) {
 }
 
 func (h *TradeAnalysisHandler) ListHistory(c *gin.Context) {
+	portfolioID, ok := portfolioIDFromQuery(c)
+	if !ok {
+		return
+	}
+	if !requirePortfolioAccess(c, h.portfolios, portfolioID, false) {
+		return
+	}
 	symbol := normalizePositionSymbol(c.Param("symbol"))
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
@@ -99,10 +116,10 @@ func (h *TradeAnalysisHandler) ListHistory(c *gin.Context) {
 	if limit <= 0 || limit > 200 {
 		limit = 20
 	}
-	rows, err := h.repo.ListAnalyses(c.Request.Context(), symbol, limit)
+	rows, err := h.repo.ListAnalyses(c.Request.Context(), portfolioID, symbol, limit)
 	if err != nil {
 		serverError(c, h.log, err, "trade analyses: list history")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"analyses": rows, "total": len(rows)})
+	c.JSON(http.StatusOK, gin.H{"portfolio_id": portfolioID, "analyses": rows, "total": len(rows)})
 }

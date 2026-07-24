@@ -17,8 +17,16 @@
 
 目前無待處理項目。
 
-已結案並歸檔：I-019 ~ I-032（SR Zone Final Entry 仲裁鏈的 context-aware entry executability、
-market-price RR / target / best_trade_zone 語意、entry blocking gate、final entry state 正規化、
-risk_notes reason-code 驅動改寫、market-price target 選取等一整組問題）已於 2026-07-24 review 通過
-並修正完成，現況規格歸檔於 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 Final Entry Arbitration
-與 rr_context / rr_gate 段落。下一筆新問題從 `I-033` 起編。
+已結案並歸檔：
+
+- **I-019 ~ I-032**（SR Zone Final Entry 仲裁鏈的 context-aware entry executability、market-price
+  RR / target / best_trade_zone 語意、entry blocking gate、final entry state 正規化、risk_notes
+  reason-code 驅動改寫、market-price target 選取等一整組問題）已於 2026-07-24 review 通過並修正完成，
+  現況規格歸檔於 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 Final Entry Arbitration 與
+  rr_context / rr_gate 段落。
+- **I-033 ~ I-035**（T-020 Position owner scope 的 review 發現：group `AddMember` 角色保護、
+  group membership 與 tenant membership 一致性、前端 `canWritePortfolio` 預設）已於 2026-07-24
+  review 通過並修正完成，現況歸檔於 [`database-schema.md`](./database-schema.md)、
+  [`architecture.md`](./architecture.md) 與 [`api-reference.md`](./api-reference.md)。
+
+下一筆新問題從 `I-036` 起編。

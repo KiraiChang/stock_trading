@@ -35,25 +35,25 @@ type tradePositionRepoStub struct {
 	err      error
 }
 
-func (s *tradePositionRepoStub) List(context.Context) ([]store.Position, error) {
+func (s *tradePositionRepoStub) List(context.Context, uint64) ([]store.Position, error) {
 	return nil, nil
 }
-func (s *tradePositionRepoStub) Get(context.Context, string) (*store.Position, error) {
+func (s *tradePositionRepoStub) Get(context.Context, uint64, string) (*store.Position, error) {
 	return nil, nil
 }
-func (s *tradePositionRepoStub) ListTransactions(context.Context, string, int) ([]store.PositionTransaction, error) {
+func (s *tradePositionRepoStub) ListTransactions(context.Context, uint64, string, int) ([]store.PositionTransaction, error) {
 	return nil, nil
 }
-func (s *tradePositionRepoStub) ApplyEvent(context.Context, *store.PositionTransaction, int64) (*store.Position, error) {
+func (s *tradePositionRepoStub) ApplyEvent(context.Context, uint64, *store.PositionTransaction, int64) (*store.Position, error) {
 	return nil, nil
 }
 func (s *tradePositionRepoStub) CreateAnalysis(context.Context, *store.PositionAnalysis) (uint64, error) {
 	return 0, nil
 }
-func (s *tradePositionRepoStub) GetAnalysis(context.Context, uint64) (*store.PositionAnalysis, error) {
+func (s *tradePositionRepoStub) GetAnalysis(context.Context, uint64, uint64) (*store.PositionAnalysis, error) {
 	return nil, nil
 }
-func (s *tradePositionRepoStub) ListAnalyses(context.Context, string, int) ([]store.PositionAnalysis, error) {
+func (s *tradePositionRepoStub) ListAnalyses(context.Context, uint64, string, int) ([]store.PositionAnalysis, error) {
 	return s.analyses, s.err
 }
 
@@ -95,7 +95,7 @@ func TestTradeAnalysisAnalyzeContext(t *testing.T) {
 			router := gin.New()
 			router.POST("/trade-analysis/analyze", h.Analyze)
 
-			req := httptest.NewRequest(http.MethodPost, "/trade-analysis/analyze", bytes.NewBufferString(`{"symbol":" 2330 ","limit":250}`))
+			req := httptest.NewRequest(http.MethodPost, "/trade-analysis/analyze", bytes.NewBufferString(`{"symbol":" 2330 ","limit":250,"portfolio_id":2}`))
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
@@ -107,7 +107,7 @@ func TestTradeAnalysisAnalyzeContext(t *testing.T) {
 			if !strings.Contains(body, tt.wantHasPosition) || !strings.Contains(body, tt.wantState) {
 				t.Fatalf("unexpected context body: %s", body)
 			}
-			if analyzer.symbol != "2330" || analyzer.opts.Limit != 250 {
+			if analyzer.symbol != "2330" || analyzer.opts.Limit != 250 || analyzer.opts.PortfolioID != 2 {
 				t.Fatalf("analyzer input = symbol %q opts %+v", analyzer.symbol, analyzer.opts)
 			}
 		})

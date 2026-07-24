@@ -19,25 +19,25 @@ type positionRepoStub struct {
 	applyErr error
 }
 
-func (s *positionRepoStub) List(context.Context) ([]store.Position, error) {
+func (s *positionRepoStub) List(context.Context, uint64) ([]store.Position, error) {
 	return nil, nil
 }
-func (s *positionRepoStub) Get(context.Context, string) (*store.Position, error) {
+func (s *positionRepoStub) Get(context.Context, uint64, string) (*store.Position, error) {
 	return nil, nil
 }
-func (s *positionRepoStub) ListTransactions(context.Context, string, int) ([]store.PositionTransaction, error) {
+func (s *positionRepoStub) ListTransactions(context.Context, uint64, string, int) ([]store.PositionTransaction, error) {
 	return nil, nil
 }
-func (s *positionRepoStub) ApplyEvent(context.Context, *store.PositionTransaction, int64) (*store.Position, error) {
+func (s *positionRepoStub) ApplyEvent(context.Context, uint64, *store.PositionTransaction, int64) (*store.Position, error) {
 	return nil, s.applyErr
 }
 func (s *positionRepoStub) CreateAnalysis(context.Context, *store.PositionAnalysis) (uint64, error) {
 	return 0, nil
 }
-func (s *positionRepoStub) GetAnalysis(context.Context, uint64) (*store.PositionAnalysis, error) {
+func (s *positionRepoStub) GetAnalysis(context.Context, uint64, uint64) (*store.PositionAnalysis, error) {
 	return nil, nil
 }
-func (s *positionRepoStub) ListAnalyses(context.Context, string, int) ([]store.PositionAnalysis, error) {
+func (s *positionRepoStub) ListAnalyses(context.Context, uint64, string, int) ([]store.PositionAnalysis, error) {
 	return nil, nil
 }
 
@@ -71,7 +71,7 @@ func TestPositionApplyEventErrorMapping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &positionRepoStub{applyErr: tt.err}
-			h := NewPositionHandler(repo, zap.NewNop())
+			h := NewPositionHandler(repo, nil, zap.NewNop())
 			router := gin.New()
 			router.POST("/positions/:symbol/transactions", h.AddTransaction)
 			router.POST("/positions/:symbol/adjustments", h.Adjust)

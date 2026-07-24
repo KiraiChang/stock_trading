@@ -582,11 +582,28 @@ SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。�
 AVG 成本及原因。API 不提供 update/delete。ADJUSTMENT 代表無現金流的帳務校正，
 不改變 `realized_pnl`；有實際成交價與現金流的增減股必須使用 BUY/SELL。
 
-`positions` 是每個 symbol 唯一的 AVG projection：
+`tenants` / `tenant_members` / `portfolio_groups` / `group_members` / `portfolios`
+是 Position owner scope（migration 051 / 052 導入）。
+`portfolio` 是真正持有 position 的帳本；`tenant` 是資料隔離邊界。Migration 051
+會建立 `Default Tenant` 與 `Legacy Shared Portfolio`，並把既有全域持倉搬到
+`portfolio_id=1`，維持舊 API 未傳 `portfolio_id` 時的相容行為。Migration 052
+新增 `portfolio_groups` 與 `group_members`；API 對外仍稱 groups，DB 表名避開
+MySQL `GROUPS` 關鍵字風險。
+
+`portfolios.owner_type` 支援 `TENANT` / `USER` / `GROUP`。`GROUP` portfolio 的
+`owner_id` 指向 `portfolio_groups.id`；group `VIEWER` 可讀不可寫，`OWNER` / `ADMIN`
+可寫入部位與分析快照。
+
+`tenant_members.role` 目前不參與授權判斷（`CanAccess` 只看 tenant membership 是否
+存在），所有 tenant membership 一律預設 `MEMBER`（migration 051 搬入的既有 users 與
+新註冊 user 皆為 `MEMBER`）；實際讀寫權限由 portfolio owner scope 與 `group_members.role`
+決定。加入 group 成員時會一併確保其具 group tenant 的 membership。
+
+`positions` 是每個 `portfolio_id + symbol` 唯一的 AVG projection：
 
 | 欄位 | 說明 |
 |------|------|
-| symbol | 股票代號主鍵 |
+| portfolio_id / symbol | 帳本 scope 與股票代號；`UNIQUE(portfolio_id, symbol)`，不可再把 symbol 視為全域唯一 |
 | shares / avg_cost | 目前股數與移動加權平均成本 |
 | realized_pnl | SELL 累積已實現損益 |
 | version | optimistic version；事件 request 必須帶目前版本 |
@@ -594,7 +611,8 @@ AVG 成本及原因。API 不提供 update/delete。ADJUSTMENT 代表無現金�
 
 ## position_analyses
 
-FLAT 與 LONG 共用的不可變分析快照。包含 Position version、SR Zone reference、
+FLAT 與 LONG 共用的不可變分析快照。owner scope 導入後快照同樣保存 `portfolio_id`，表示
+該次分析使用哪個 portfolio 的股數、AVG 成本與 version。包含 Position version、SR Zone reference、
 Action、目前／目標／調整股數、調整金額、進場／停損／停利價、風險金額、
 預期報酬、RR、損益、設定快照、Evidence、觸發與失效條件。
 

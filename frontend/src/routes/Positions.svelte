@@ -7,10 +7,15 @@
     listPositionTransactions, listPositions,
     type Position, type PositionAnalysis, type PositionTransaction,
   } from '../lib/api/positions'
+  import { createPortfolio, listPortfolios, type Portfolio } from '../lib/api/portfolios'
   import { analyzeTrade, listTradeAnalyses } from '../lib/api/tradeAnalysis'
   import { derivedReasonLabel } from '../lib/api/srZones'
+  import { selectedPortfolioID } from '../lib/stores/portfolio'
 
   let symbol = ''
+  let portfolios: Portfolio[] = []
+  let creatingPortfolio = false
+  let newPortfolioName = ''
   let positions: Position[] = []
   let current: Position | null = null
   let transactions: PositionTransaction[] = []
@@ -22,10 +27,65 @@
   let trade = { shares: '', price: '', fee: '0', tax: '0', note: '' }
   let adjustment = { shares: '', avgCost: '', reason: '' }
 
-  onMount(loadPositions)
+  $: selectedPortfolio = portfolios.find((p) => p.id === $selectedPortfolioID) ?? null
+  // portfolio 尚未 resolve（清單未載入、或選到無權存取的 id）時保守停用寫入，
+  // 交由 server 的 requirePortfolioAccess 作最終真相源。
+  $: canWritePortfolio = selectedPortfolio?.can_write ?? false
+
+  onMount(async () => {
+    await loadPortfolioOptions()
+    await loadPositions()
+  })
+
+  async function loadPortfolioOptions() {
+    try {
+      portfolios = await listPortfolios()
+      if (portfolios.length > 0 && !portfolios.some((p) => p.id === $selectedPortfolioID)) {
+        selectedPortfolioID.set(portfolios[0].id)
+      }
+    } catch (err) {
+      error = err instanceof ApiError ? err.message : '載入 Portfolio 失敗'
+    }
+  }
 
   async function loadPositions() {
-    positions = await listPositions().catch(() => [])
+    positions = await listPositions($selectedPortfolioID).catch(() => [])
+  }
+
+  async function changePortfolio(raw: string) {
+    const nextID = Number(raw)
+    if (!nextID || nextID === $selectedPortfolioID) return
+    selectedPortfolioID.set(nextID)
+    current = null
+    transactions = []
+    analyses = []
+    latest = null
+    await loadPositions()
+    if (symbol.trim()) await select(symbol)
+  }
+
+  function changePortfolioFromEvent(event: Event) {
+    const target = event.currentTarget as HTMLSelectElement
+    void changePortfolio(target.value)
+  }
+
+  async function savePortfolio() {
+    const name = newPortfolioName.trim()
+    if (!name) return
+    creatingPortfolio = true
+    error = ''
+    try {
+      const created = await createPortfolio({ name })
+      newPortfolioName = ''
+      await loadPortfolioOptions()
+      selectedPortfolioID.set(created.id)
+      await loadPositions()
+      if (symbol.trim()) await select(symbol)
+    } catch (err) {
+      error = err instanceof ApiError ? err.message : '建立 Portfolio 失敗'
+    } finally {
+      creatingPortfolio = false
+    }
   }
 
   async function select(raw: string) {
@@ -33,9 +93,9 @@
     if (!symbol) return
     error = ''
     try {
-      current = await getPosition(symbol)
-      transactions = await listPositionTransactions(symbol)
-      analyses = await listTradeAnalyses(symbol)
+      current = await getPosition(symbol, $selectedPortfolioID)
+      transactions = await listPositionTransactions(symbol, $selectedPortfolioID)
+      analyses = await listTradeAnalyses(symbol, $selectedPortfolioID)
       latest = analyses[0] ?? null
       adjustment = {
         shares: String(current.shares),
@@ -48,12 +108,17 @@
   }
 
   async function saveTrade() {
+    if (!canWritePortfolio) {
+      error = '目前 Portfolio 沒有寫入權限'
+      return
+    }
     if (!current) await select(symbol)
     if (!current) return
     busy = true
     error = ''
     try {
       current = await addPositionTransaction(symbol, {
+        portfolio_id: $selectedPortfolioID,
         event_type: eventType,
         shares: Number(trade.shares),
         price: Number(trade.price),
@@ -73,6 +138,10 @@
   }
 
   async function saveAdjustment() {
+    if (!canWritePortfolio) {
+      error = '目前 Portfolio 沒有寫入權限'
+      return
+    }
     if (!current || !adjustment.reason.trim()) {
       error = 'ADJUSTMENT 必須填寫更正原因'
       return
@@ -80,6 +149,7 @@
     busy = true
     try {
       current = await adjustPosition(symbol, {
+        portfolio_id: $selectedPortfolioID,
         target_shares: Number(adjustment.shares),
         target_avg_cost: Number(adjustment.avgCost),
         expected_version: current.version,
@@ -95,12 +165,16 @@
   }
 
   async function runAnalysis(forceRefresh = false) {
+    if (!canWritePortfolio) {
+      error = '目前 Portfolio 沒有寫入權限'
+      return
+    }
     symbol = symbol.trim().toUpperCase()
     if (!symbol) return
     busy = true
     error = ''
     try {
-      const response = await analyzeTrade(symbol, forceRefresh)
+      const response = await analyzeTrade(symbol, $selectedPortfolioID, forceRefresh)
       latest = response.analysis
       await select(symbol)
     } catch (err) {
@@ -137,12 +211,30 @@
     <h1 class="text-white font-semibold">交易分析</h1>
     {#if error}<p class="text-rise text-sm">{error}</p>{/if}
 
+    <div class="bg-panel border border-border rounded-xl p-4 space-y-3">
+      <div class="flex gap-3 flex-wrap">
+        <select value={$selectedPortfolioID} on:change={changePortfolioFromEvent}
+          class="min-w-[220px] bg-surface border border-border rounded-lg px-3 py-2 text-white">
+          {#each portfolios as portfolio}
+            <option value={portfolio.id}>{portfolio.name} · {portfolio.owner_type}{portfolio.can_write ? '' : ' · READ'}</option>
+          {/each}
+        </select>
+        <input bind:value={newPortfolioName} placeholder="新增個人 Portfolio"
+          class="flex-1 min-w-[180px] bg-surface border border-border rounded-lg px-3 py-2 text-white" />
+        <button class="px-4 py-2 border border-border rounded-lg text-muted disabled:opacity-50"
+          disabled={creatingPortfolio || !newPortfolioName.trim()} on:click={savePortfolio}>建立</button>
+      </div>
+      {#if selectedPortfolio && !selectedPortfolio.can_write}
+        <p class="text-yellow-300 text-xs">目前 Portfolio 為唯讀，已停用交易、更正與分析寫入。</p>
+      {/if}
+    </div>
+
     <div class="bg-panel border border-border rounded-xl p-4 flex gap-3 flex-wrap">
       <input bind:value={symbol} placeholder="股票代號，例如 2330" on:keydown={(e) => e.key === 'Enter' && select(symbol)}
         class="flex-1 min-w-[180px] bg-surface border border-border rounded-lg px-3 py-2 text-white" />
       <button class="px-4 py-2 bg-indigo-600 rounded-lg text-white" on:click={() => select(symbol)}>載入</button>
-      <button class="px-4 py-2 bg-green-700 rounded-lg text-white disabled:opacity-50" disabled={busy} on:click={() => runAnalysis(false)}>分析</button>
-      <button class="px-4 py-2 border border-border rounded-lg text-muted disabled:opacity-50" disabled={busy} on:click={() => runAnalysis(true)}>強制刷新 SR</button>
+      <button class="px-4 py-2 bg-green-700 rounded-lg text-white disabled:opacity-50" disabled={busy || !canWritePortfolio} on:click={() => runAnalysis(false)}>分析</button>
+      <button class="px-4 py-2 border border-border rounded-lg text-muted disabled:opacity-50" disabled={busy || !canWritePortfolio} on:click={() => runAnalysis(true)}>強制刷新 SR</button>
     </div>
 
     <div class="grid lg:grid-cols-3 gap-4">
@@ -151,6 +243,7 @@
         {#if current}
           <div class="grid grid-cols-2 gap-3 text-sm">
             <div><p class="text-muted text-xs">狀態</p><p class="text-white">{current.shares > 0 ? 'LONG' : 'FLAT'}</p></div>
+            <div><p class="text-muted text-xs">Portfolio</p><p class="text-white">{current.portfolio_id}</p></div>
             <div><p class="text-muted text-xs">版本</p><p class="text-white">{current.version}</p></div>
             <div><p class="text-muted text-xs">股數</p><p class="text-white">{num(current.shares)}</p></div>
             <div><p class="text-muted text-xs">AVG 成本</p><p class="text-white">{num(current.avg_cost)}</p></div>
@@ -169,7 +262,7 @@
           <input bind:value={trade.tax} type="number" placeholder="交易稅" class="bg-surface border border-border rounded px-2 py-2 text-white" />
           <input bind:value={trade.note} placeholder="備註" class="bg-surface border border-border rounded px-2 py-2 text-white" />
         </div>
-        <button class="w-full bg-indigo-600 text-white rounded py-2 disabled:opacity-50" disabled={busy || !current} on:click={saveTrade}>寫入不可變交易</button>
+        <button class="w-full bg-indigo-600 text-white rounded py-2 disabled:opacity-50" disabled={busy || !current || !canWritePortfolio} on:click={saveTrade}>寫入不可變交易</button>
       </div>
 
       <div class="bg-panel border border-border rounded-xl p-4 space-y-2">
@@ -177,7 +270,7 @@
         <input bind:value={adjustment.shares} type="number" placeholder="更正後股數" class="w-full bg-surface border border-border rounded px-2 py-2 text-white" />
         <input bind:value={adjustment.avgCost} type="number" placeholder="更正後 AVG" class="w-full bg-surface border border-border rounded px-2 py-2 text-white" />
         <input bind:value={adjustment.reason} placeholder="必填：更正原因" class="w-full bg-surface border border-border rounded px-2 py-2 text-white" />
-        <button class="w-full border border-yellow-700 text-yellow-300 rounded py-2 disabled:opacity-50" disabled={busy || !current} on:click={saveAdjustment}>新增更正事件</button>
+        <button class="w-full border border-yellow-700 text-yellow-300 rounded py-2 disabled:opacity-50" disabled={busy || !current || !canWritePortfolio} on:click={saveAdjustment}>新增更正事件</button>
       </div>
     </div>
 
@@ -185,7 +278,7 @@
       <h2 class="text-white text-sm font-semibold mb-3">最新分析</h2>
       {#if latest}
         <div class="flex justify-between gap-3 mb-4">
-          <div><p class="text-white font-mono">{latest.symbol} · {latest.position_state}</p><p class="text-muted text-xs">{dt(latest.created_at)}</p></div>
+          <div><p class="text-white font-mono">{latest.symbol} · {latest.position_state}</p><p class="text-muted text-xs">Portfolio {latest.portfolio_id} · {dt(latest.created_at)}</p></div>
           <span class="px-3 py-1 rounded-full text-xs {actionClass[latest.action]}">{conditionLabel(latest)}</span>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">

@@ -28,9 +28,10 @@
   let adjustment = { shares: '', avgCost: '', reason: '' }
 
   $: selectedPortfolio = portfolios.find((p) => p.id === $selectedPortfolioID) ?? null
+  $: hasSelectedPortfolio = $selectedPortfolioID > 0 && selectedPortfolio !== null
   // portfolio 尚未 resolve（清單未載入、或選到無權存取的 id）時保守停用寫入，
   // 交由 server 的 requirePortfolioAccess 作最終真相源。
-  $: canWritePortfolio = selectedPortfolio?.can_write ?? false
+  $: canWritePortfolio = hasSelectedPortfolio && (selectedPortfolio?.can_write ?? false)
 
   onMount(async () => {
     await loadPortfolioOptions()
@@ -42,6 +43,8 @@
       portfolios = await listPortfolios()
       if (portfolios.length > 0 && !portfolios.some((p) => p.id === $selectedPortfolioID)) {
         selectedPortfolioID.set(portfolios[0].id)
+      } else if (portfolios.length === 0) {
+        selectedPortfolioID.set(0)
       }
     } catch (err) {
       error = err instanceof ApiError ? err.message : '載入 Portfolio 失敗'
@@ -49,7 +52,12 @@
   }
 
   async function loadPositions() {
-    positions = await listPositions($selectedPortfolioID).catch(() => [])
+    const portfolioID = $selectedPortfolioID
+    if (portfolioID <= 0) {
+      positions = []
+      return
+    }
+    positions = await listPositions(portfolioID).catch(() => [])
   }
 
   async function changePortfolio(raw: string) {
@@ -91,11 +99,16 @@
   async function select(raw: string) {
     symbol = raw.trim().toUpperCase()
     if (!symbol) return
+    const portfolioID = $selectedPortfolioID
+    if (portfolioID <= 0) {
+      error = '請先建立或選擇 Portfolio'
+      return
+    }
     error = ''
     try {
-      current = await getPosition(symbol, $selectedPortfolioID)
-      transactions = await listPositionTransactions(symbol, $selectedPortfolioID)
-      analyses = await listTradeAnalyses(symbol, $selectedPortfolioID)
+      current = await getPosition(symbol, portfolioID)
+      transactions = await listPositionTransactions(symbol, portfolioID)
+      analyses = await listTradeAnalyses(symbol, portfolioID)
       latest = analyses[0] ?? null
       adjustment = {
         shares: String(current.shares),
@@ -108,6 +121,11 @@
   }
 
   async function saveTrade() {
+    const portfolioID = $selectedPortfolioID
+    if (portfolioID <= 0) {
+      error = '請先建立或選擇 Portfolio'
+      return
+    }
     if (!canWritePortfolio) {
       error = '目前 Portfolio 沒有寫入權限'
       return
@@ -118,7 +136,7 @@
     error = ''
     try {
       current = await addPositionTransaction(symbol, {
-        portfolio_id: $selectedPortfolioID,
+        portfolio_id: portfolioID,
         event_type: eventType,
         shares: Number(trade.shares),
         price: Number(trade.price),
@@ -138,6 +156,11 @@
   }
 
   async function saveAdjustment() {
+    const portfolioID = $selectedPortfolioID
+    if (portfolioID <= 0) {
+      error = '請先建立或選擇 Portfolio'
+      return
+    }
     if (!canWritePortfolio) {
       error = '目前 Portfolio 沒有寫入權限'
       return
@@ -149,7 +172,7 @@
     busy = true
     try {
       current = await adjustPosition(symbol, {
-        portfolio_id: $selectedPortfolioID,
+        portfolio_id: portfolioID,
         target_shares: Number(adjustment.shares),
         target_avg_cost: Number(adjustment.avgCost),
         expected_version: current.version,
@@ -165,6 +188,11 @@
   }
 
   async function runAnalysis(forceRefresh = false) {
+    const portfolioID = $selectedPortfolioID
+    if (portfolioID <= 0) {
+      error = '請先建立或選擇 Portfolio'
+      return
+    }
     if (!canWritePortfolio) {
       error = '目前 Portfolio 沒有寫入權限'
       return
@@ -174,7 +202,7 @@
     busy = true
     error = ''
     try {
-      const response = await analyzeTrade(symbol, $selectedPortfolioID, forceRefresh)
+      const response = await analyzeTrade(symbol, portfolioID, forceRefresh)
       latest = response.analysis
       await select(symbol)
     } catch (err) {
@@ -215,6 +243,9 @@
       <div class="flex gap-3 flex-wrap">
         <select value={$selectedPortfolioID} on:change={changePortfolioFromEvent}
           class="min-w-[220px] bg-surface border border-border rounded-lg px-3 py-2 text-white">
+          {#if portfolios.length === 0}
+            <option value="0">尚無 Portfolio</option>
+          {/if}
           {#each portfolios as portfolio}
             <option value={portfolio.id}>{portfolio.name} · {portfolio.owner_type}{portfolio.can_write ? '' : ' · READ'}</option>
           {/each}
@@ -224,7 +255,9 @@
         <button class="px-4 py-2 border border-border rounded-lg text-muted disabled:opacity-50"
           disabled={creatingPortfolio || !newPortfolioName.trim()} on:click={savePortfolio}>建立</button>
       </div>
-      {#if selectedPortfolio && !selectedPortfolio.can_write}
+      {#if portfolios.length === 0}
+        <p class="text-yellow-300 text-xs">請先建立 Portfolio，才能載入持倉、寫入交易或執行分析。</p>
+      {:else if selectedPortfolio && !selectedPortfolio.can_write}
         <p class="text-yellow-300 text-xs">目前 Portfolio 為唯讀，已停用交易、更正與分析寫入。</p>
       {/if}
     </div>
@@ -232,7 +265,7 @@
     <div class="bg-panel border border-border rounded-xl p-4 flex gap-3 flex-wrap">
       <input bind:value={symbol} placeholder="股票代號，例如 2330" on:keydown={(e) => e.key === 'Enter' && select(symbol)}
         class="flex-1 min-w-[180px] bg-surface border border-border rounded-lg px-3 py-2 text-white" />
-      <button class="px-4 py-2 bg-indigo-600 rounded-lg text-white" on:click={() => select(symbol)}>載入</button>
+      <button class="px-4 py-2 bg-indigo-600 rounded-lg text-white disabled:opacity-50" disabled={!hasSelectedPortfolio} on:click={() => select(symbol)}>載入</button>
       <button class="px-4 py-2 bg-green-700 rounded-lg text-white disabled:opacity-50" disabled={busy || !canWritePortfolio} on:click={() => runAnalysis(false)}>分析</button>
       <button class="px-4 py-2 border border-border rounded-lg text-muted disabled:opacity-50" disabled={busy || !canWritePortfolio} on:click={() => runAnalysis(true)}>強制刷新 SR</button>
     </div>

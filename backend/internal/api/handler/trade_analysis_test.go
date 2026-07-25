@@ -122,7 +122,7 @@ func TestTradeAnalysisListHistory(t *testing.T) {
 	router.GET("/trade-analysis/:symbol/history", h.ListHistory)
 
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/trade-analysis/2330/history", nil))
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/trade-analysis/2330/history?portfolio_id=2", nil))
 
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"total":1`) {
 		t.Fatalf("unexpected history response: %d %s", rec.Code, rec.Body.String())
@@ -139,7 +139,7 @@ func TestTradeAnalysisInternalErrorsDoNotLeak(t *testing.T) {
 	router := gin.New()
 	router.POST("/trade-analysis/analyze", h.Analyze)
 
-	req := httptest.NewRequest(http.MethodPost, "/trade-analysis/analyze", bytes.NewBufferString(`{"symbol":"2330"}`))
+	req := httptest.NewRequest(http.MethodPost, "/trade-analysis/analyze", bytes.NewBufferString(`{"symbol":"2330","portfolio_id":2}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -149,5 +149,27 @@ func TestTradeAnalysisInternalErrorsDoNotLeak(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "secret") {
 		t.Fatalf("internal detail leaked: %s", rec.Body.String())
+	}
+}
+
+func TestTradeAnalysisRequiresPortfolioID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &TradeAnalysisHandler{repo: &tradePositionRepoStub{}, analyzer: &tradeAnalyzerStub{}, log: zap.NewNop()}
+	router := gin.New()
+	router.POST("/trade-analysis/analyze", h.Analyze)
+	router.GET("/trade-analysis/:symbol/history", h.ListHistory)
+
+	req := httptest.NewRequest(http.MethodPost, "/trade-analysis/analyze", bytes.NewBufferString(`{"symbol":"2330"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "portfolio_id is required") {
+		t.Fatalf("unexpected analyze response: %d %s", rec.Code, rec.Body.String())
+	}
+
+	historyRec := httptest.NewRecorder()
+	router.ServeHTTP(historyRec, httptest.NewRequest(http.MethodGet, "/trade-analysis/2330/history", nil))
+	if historyRec.Code != http.StatusBadRequest || !strings.Contains(historyRec.Body.String(), "portfolio_id is required") {
+		t.Fatalf("unexpected history response: %d %s", historyRec.Code, historyRec.Body.String())
 	}
 }

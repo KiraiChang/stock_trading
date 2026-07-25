@@ -51,6 +51,9 @@ func (r *groupRepo) Create(ctx context.Context, userID uint64, name string) (*Gr
 		name = "New Group"
 	}
 	tenantID, err := firstTenantForUser(ctx, r.db, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrGroupAccessDenied
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -134,14 +137,21 @@ func (r *groupRepo) AddMember(ctx context.Context, actorUserID uint64, groupID u
 			return ErrGroupAccessDenied
 		}
 	}
-	// group membership 必須同時保證 group tenant 的 membership，否則
-	// portfolio_repo.CanAccess 對 GROUP portfolio 的 tenant join 會把該成員靜默鎖死。
+	// 目標 user 必須「已是」group tenant 的成員才能加入 group。不自動補 tenant membership，
+	// 避免 group admin 靜默把任意 user_id 拉進 tenant 而取得 TENANT portfolio 寫入權（提權副作用）。
+	// 現行單一 default tenant 下每個註冊 user 都已是 default tenant 成員、group 也都在該 tenant，
+	// 故此檢查不影響一般流程；只有跨租戶（把別 tenant 的 user 加進本 group）才會被明確拒絕，
+	// 取代原本 CanAccess 對非 tenant 成員的 silent lockout。
 	tenantID, err := groupTenantTx(ctx, tx, groupID)
 	if err != nil {
 		return err
 	}
-	if err := ensureTenantMemberTx(ctx, tx, r.driver, tenantID, userID); err != nil {
+	isMember, err := isTenantMemberTx(ctx, tx, tenantID, userID)
+	if err != nil {
 		return err
+	}
+	if !isMember {
+		return ErrGroupAccessDenied
 	}
 	if err := upsertGroupMemberTx(ctx, tx, r.driver, groupID, userID, role); err != nil {
 		return err
@@ -156,25 +166,13 @@ func groupTenantTx(ctx context.Context, tx *sqlx.Tx, groupID uint64) (uint64, er
 	return tenantID, err
 }
 
-// ensureTenantMemberTx 若 user 尚非該 tenant 成員，補上 MEMBER；已是成員則不動其角色。
-func ensureTenantMemberTx(ctx context.Context, tx *sqlx.Tx, driver string, tenantID uint64, userID uint64) error {
-	if driver == "pgx" {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO tenant_members(tenant_id,user_id,role) VALUES($1,$2,'MEMBER')
-			ON CONFLICT(tenant_id,user_id) DO NOTHING
-		`, tenantID, userID)
-		return err
-	}
-	if driver == "mysql" {
-		_, err := tx.ExecContext(ctx, `
-			INSERT IGNORE INTO tenant_members(tenant_id,user_id,role) VALUES(?,?,'MEMBER')
-		`, tenantID, userID)
-		return err
-	}
-	_, err := tx.ExecContext(ctx, tx.Rebind(`
-		INSERT OR IGNORE INTO tenant_members(tenant_id,user_id,role) VALUES(?,?,'MEMBER')
+// isTenantMemberTx 回傳 user 是否已是該 tenant 的成員。
+func isTenantMemberTx(ctx context.Context, tx *sqlx.Tx, tenantID uint64, userID uint64) (bool, error) {
+	var count int
+	err := tx.GetContext(ctx, &count, tx.Rebind(`
+		SELECT COUNT(1) FROM tenant_members WHERE tenant_id=? AND user_id=?
 	`), tenantID, userID)
-	return err
+	return count > 0, err
 }
 
 // groupRoleTx 回傳 user 在 group 內的角色；非成員回傳空字串。
@@ -242,13 +240,12 @@ func normalizeGroupRole(role string) string {
 	}
 }
 
+// firstTenantForUser 回傳 user 最先加入的 tenant id（store 內共用）。查無 membership 時回傳
+// 原始 sql.ErrNoRows，由各呼叫端映射成自己的 access-denied error（group / portfolio）。
 func firstTenantForUser(ctx context.Context, db *sqlx.DB, userID uint64) (uint64, error) {
 	var id uint64
 	err := db.GetContext(ctx, &id, db.Rebind(`
 		SELECT tenant_id FROM tenant_members WHERE user_id=? ORDER BY tenant_id LIMIT 1
 	`), userID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, ErrGroupAccessDenied
-	}
 	return id, err
 }

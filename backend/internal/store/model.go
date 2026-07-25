@@ -640,8 +640,6 @@ type ChipSyncJob struct {
 
 // ── Holdings / Portfolio Analysis models ─────────────────────
 
-const DefaultPortfolioID uint64 = 1
-
 type Portfolio struct {
 	ID              uint64    `db:"id"                 json:"id"`
 	TenantID        uint64    `db:"tenant_id"          json:"tenant_id"`

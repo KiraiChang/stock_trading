@@ -253,8 +253,9 @@ Go 查同 symbol/timeframe 的 24 小時內 SR 快照；可 force_refresh
 寫入 position_analyses 不可變快照
 ```
 
-Position owner scope 導入後，Position Analysis 以 `portfolio_id + symbol` 作為持倉 scope；未提供
-`portfolio_id` 時走 legacy default portfolio，保留舊 API 相容。成本採移動加權平均。
+Position owner scope 導入後，Position Analysis 以 `portfolio_id + symbol` 作為持倉 scope；
+所有 position / trade-analysis API 都必須明確提供 `portfolio_id`，避免不同使用者或群組共用
+隱含預設帳本。成本採移動加權平均。
 交易事件不可修改或刪除；資料更正必須新增 `ADJUSTMENT`
 並記錄原因。`ADJUSTMENT` 是無交易價格、無現金流的 projection 校正，只覆寫校正後
 股數與 AVG，不改變由 SELL 累積的 `realized_pnl`；實際成交必須記為 BUY/SELL。
@@ -267,16 +268,17 @@ Buy/BuySmall、存在有效停損支撐但已無上方壓力，停利目標以�
 
 Portfolio 權限由 `PortfolioRepo.CanAccess` 集中判斷：
 
-- `TENANT` portfolio：tenant member 可讀寫，用於 legacy shared portfolio 相容。
+- `TENANT` portfolio：保留為未來 tenant-level 帳本能力；目前不再建立 shared default portfolio。
 - `USER` portfolio：只有 owner user 可讀寫。
 - `GROUP` portfolio：group member 可讀；`OWNER` / `ADMIN` 可寫，`MEMBER` / `VIEWER` 不可寫。
 
 Group 角色管理（`GroupRepo.AddMember`）有對應保護：actor 不得改自己的 role；只有 `OWNER` 能授予或
-異動 `OWNER`（`ADMIN` 不得碰 `OWNER`）；不得降級最後一名 `OWNER`；加入成員時一併補上 group tenant 的
-membership。`tenant_members.role` 目前不參與授權（`CanAccess` 只看 tenant membership 是否存在），故所有
-tenant membership 一律預設 `MEMBER`；實際讀寫權限由 portfolio owner scope 與 group role 決定。
+異動 `OWNER`（`ADMIN` 不得碰 `OWNER`）；不得降級最後一名 `OWNER`；被加入者必須**已是** group tenant 的
+成員，否則拒絕（不自動補 tenant membership，避免 group admin 把任意 user 拉進 tenant 取得 TENANT
+portfolio 寫入權）。`tenant_members.role` 目前不參與授權（`CanAccess` 只看 tenant membership 是否存在），
+故所有 tenant membership 一律預設 `MEMBER`；實際讀寫權限由 portfolio owner scope 與 group role 決定。
 
-**Trade Analysis** 是前端與 API 的統一入口。呼叫端提供股票代號與可選的
+**Trade Analysis** 是前端與 API 的統一入口。呼叫端提供股票代號與必要的
 `portfolio_id`；後端讀取該 portfolio 的 `positions` projection 後自動判斷決策情境：
 
 - `shares > 0`：以 `LONG` 持股情境分析，成本基準使用 AVG。

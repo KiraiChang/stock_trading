@@ -28,5 +28,12 @@
   group membership 與 tenant membership 一致性、前端 `canWritePortfolio` 預設）已於 2026-07-24
   review 通過並修正完成，現況歸檔於 [`database-schema.md`](./database-schema.md)、
   [`architecture.md`](./architecture.md) 與 [`api-reference.md`](./api-reference.md)。
+- **I-036 ~ I-039**（T-020 migration 053 追加異動的 review 發現：053 刻意捨棄 legacy 全域持倉且不可逆、
+  MySQL `INSERT ... SELECT ... NOT EXISTS(同表)` error 1093、group `AddMember` 自動授予 tenant
+  membership 的提權副作用重評、default portfolio 唯一約束與重複 helper / 多餘賦值清理）已於
+  2026-07-25 review 通過並修正完成，現況（053 資料捨棄、MySQL 1093 / functional-index 注意、default
+  portfolio 唯一約束、AddMember 需既有 tenant membership）歸檔於
+  [`database-schema.md`](./database-schema.md)、[`architecture.md`](./architecture.md) 與
+  [`api-reference.md`](./api-reference.md)。
 
-下一筆新問題從 `I-036` 起編。
+下一筆新問題從 `I-040` 起編。

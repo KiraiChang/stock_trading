@@ -21,6 +21,7 @@ const (
 var (
 	ErrPositionVersionConflict = errors.New("position version conflict")
 	ErrPositionInvalidEvent    = errors.New("invalid position event")
+	ErrPortfolioRequired       = errors.New("portfolio id is required")
 )
 
 type PositionRepo interface {
@@ -42,15 +43,17 @@ func NewPositionRepo(db *sqlx.DB) PositionRepo {
 	return &positionRepo{db: db, driver: db.DriverName()}
 }
 
-func normalizePortfolioID(portfolioID uint64) uint64 {
+func requirePortfolioID(portfolioID uint64) error {
 	if portfolioID == 0 {
-		return DefaultPortfolioID
+		return ErrPortfolioRequired
 	}
-	return portfolioID
+	return nil
 }
 
 func (r *positionRepo) List(ctx context.Context, portfolioID uint64) ([]Position, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	var rows []Position
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 			SELECT portfolio_id,symbol,shares,avg_cost,realized_pnl,version,last_event_id,updated_at
@@ -60,7 +63,9 @@ func (r *positionRepo) List(ctx context.Context, portfolioID uint64) ([]Position
 }
 
 func (r *positionRepo) Get(ctx context.Context, portfolioID uint64, symbol string) (*Position, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	var row Position
 	err := r.db.GetContext(ctx, &row, r.db.Rebind(`
 			SELECT portfolio_id,symbol,shares,avg_cost,realized_pnl,version,last_event_id,updated_at
@@ -73,7 +78,9 @@ func (r *positionRepo) Get(ctx context.Context, portfolioID uint64, symbol strin
 }
 
 func (r *positionRepo) ListTransactions(ctx context.Context, portfolioID uint64, symbol string, limit int) ([]PositionTransaction, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	var rows []PositionTransaction
 	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
 			SELECT id,portfolio_id,symbol,event_type,occurred_at,shares,price,fee,tax,
@@ -85,7 +92,9 @@ func (r *positionRepo) ListTransactions(ctx context.Context, portfolioID uint64,
 }
 
 func (r *positionRepo) ApplyEvent(ctx context.Context, portfolioID uint64, event *PositionTransaction, expectedVersion int64) (*Position, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	event.PortfolioID = portfolioID
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -246,7 +255,9 @@ const positionAnalysisColumns = `id,portfolio_id,symbol,position_state,position_
 	invalidation_conditions,rule_version,created_at`
 
 func (r *positionRepo) CreateAnalysis(ctx context.Context, a *PositionAnalysis) (uint64, error) {
-	a.PortfolioID = normalizePortfolioID(a.PortfolioID)
+	if err := requirePortfolioID(a.PortfolioID); err != nil {
+		return 0, err
+	}
 	const columns = `portfolio_id,symbol,position_state,position_version,shares,avg_cost,realized_pnl,
 			analyzed_at,current_price,sr_zone_analysis_id,action,action_label,target_shares,
 			adjustment_shares,adjustment_side,adjustment_amount,entry_price,stop_loss_price,
@@ -277,14 +288,18 @@ func (r *positionRepo) CreateAnalysis(ctx context.Context, a *PositionAnalysis) 
 }
 
 func (r *positionRepo) GetAnalysis(ctx context.Context, portfolioID uint64, id uint64) (*PositionAnalysis, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	var row PositionAnalysis
 	err := r.db.GetContext(ctx, &row, r.db.Rebind(`SELECT `+positionAnalysisColumns+` FROM position_analyses WHERE portfolio_id=? AND id=?`), portfolioID, id)
 	return &row, err
 }
 
 func (r *positionRepo) ListAnalyses(ctx context.Context, portfolioID uint64, symbol string, limit int) ([]PositionAnalysis, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if err := requirePortfolioID(portfolioID); err != nil {
+		return nil, err
+	}
 	var rows []PositionAnalysis
 	query := `SELECT ` + positionAnalysisColumns + ` FROM position_analyses WHERE portfolio_id=?`
 	args := []any{portfolioID}

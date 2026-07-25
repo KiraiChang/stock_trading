@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPortfolioRepoListsLegacyAndCreatesUserPortfolio(t *testing.T) {
+func TestPortfolioRepoCreatesDefaultAndAdditionalUserPortfolios(t *testing.T) {
 	posRepo := newTestPositionRepo(t)
 	db := posRepo.(*positionRepo).db
 	ctx := context.Background()
@@ -19,8 +19,11 @@ func TestPortfolioRepoListsLegacyAndCreatesUserPortfolio(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].ID != DefaultPortfolioID || rows[0].OwnerType != PortfolioOwnerTenant {
-		t.Fatalf("expected legacy default portfolio, got %+v", rows)
+	if len(rows) != 1 || rows[0].OwnerType != PortfolioOwnerUser || !rows[0].IsDefault {
+		t.Fatalf("expected personal default portfolio, got %+v", rows)
+	}
+	if !rows[0].OwnerID.Valid || uint64(rows[0].OwnerID.Int64) != user.ID {
+		t.Fatalf("default portfolio should belong to user %d, got %+v", user.ID, rows[0])
 	}
 
 	created, err := repo.CreateForUser(ctx, user.ID, "Swing Trades")
@@ -35,7 +38,7 @@ func TestPortfolioRepoListsLegacyAndCreatesUserPortfolio(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(rows) != 2 {
-		t.Fatalf("expected legacy + user portfolio, got %+v", rows)
+		t.Fatalf("expected default + user portfolio, got %+v", rows)
 	}
 }
 

@@ -585,19 +585,26 @@ AVG 成本及原因。API 不提供 update/delete。ADJUSTMENT 代表無現金�
 `tenants` / `tenant_members` / `portfolio_groups` / `group_members` / `portfolios`
 是 Position owner scope（migration 051 / 052 導入）。
 `portfolio` 是真正持有 position 的帳本；`tenant` 是資料隔離邊界。Migration 051
-會建立 `Default Tenant` 與 `Legacy Shared Portfolio`，並把既有全域持倉搬到
-`portfolio_id=1`，維持舊 API 未傳 `portfolio_id` 時的相容行為。Migration 052
-新增 `portfolio_groups` 與 `group_members`；API 對外仍稱 groups，DB 表名避開
-MySQL `GROUPS` 關鍵字風險。
+建立初始 tenant / portfolio scope，並把既有全域持倉暫存到 `portfolio_id=1` 的 Legacy
+Shared Portfolio；migration 053 改為每個 user 一個 `is_default` 的 Personal Portfolio，
+移除 legacy shared default portfolio 與 position 相關表的 `portfolio_id DEFAULT 1`（API 必須
+明確指定 `portfolio_id`）。**注意：053 刻意捨棄 `portfolio_id=1` 的舊全域持倉、不搬遷、不可逆**
+——舊全域資料無使用者歸屬，三方言分別以 `DELETE` 或 rebuild only-copy（`portfolio_id<>1`）實作，
+`-- +goose Down` 只還原空的 Legacy portfolio row，無法還原被刪的持倉列。Migration 052 新增
+`portfolio_groups` 與 `group_members`；API 對外仍稱 groups，DB 表名避開 MySQL `GROUPS` 關鍵字風險。
 
 `portfolios.owner_type` 支援 `TENANT` / `USER` / `GROUP`。`GROUP` portfolio 的
 `owner_id` 指向 `portfolio_groups.id`；group `VIEWER` 可讀不可寫，`OWNER` / `ADMIN`
-可寫入部位與分析快照。
+可寫入部位與分析快照。每個 `(owner_type, owner_id)` 至多一個 `is_default` portfolio，由
+migration 054 的唯一約束保證：PG / SQLite 用 partial unique index（`WHERE is_default`），
+MySQL 無 partial index 改用 functional key part `(IF(is_default, owner_id, NULL))`（unique 視多個
+NULL 互異，需 MySQL 8.0.13+）。另注意 MySQL 不允許在 `INSERT INTO portfolios ... SELECT` 的子查詢
+直接引用 `portfolios`（error 1093），涉及此表的 `NOT EXISTS` 子查詢需包一層 derived table 強制物化。
 
 `tenant_members.role` 目前不參與授權判斷（`CanAccess` 只看 tenant membership 是否
 存在），所有 tenant membership 一律預設 `MEMBER`（migration 051 搬入的既有 users 與
 新註冊 user 皆為 `MEMBER`）；實際讀寫權限由 portfolio owner scope 與 `group_members.role`
-決定。加入 group 成員時會一併確保其具 group tenant 的 membership。
+決定。加入 group 成員要求其已是 group tenant 的成員，否則拒絕（不自動補 tenant membership）。
 
 `positions` 是每個 `portfolio_id + symbol` 唯一的 AVG projection：
 

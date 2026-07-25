@@ -45,6 +45,9 @@ func (r *userRepo) Create(ctx context.Context, email, passwordHash string) (*Use
 		if err := r.addDefaultTenantMembership(ctx, id); err != nil {
 			return nil, err
 		}
+		if err := r.ensureDefaultUserPortfolio(ctx, id); err != nil {
+			return nil, err
+		}
 		return &User{ID: id, Email: email, Status: "inactive", CreatedAt: time.Now()}, nil
 	}
 
@@ -59,6 +62,9 @@ func (r *userRepo) Create(ctx context.Context, email, passwordHash string) (*Use
 	}
 	userID := uint64(id)
 	if err := r.addDefaultTenantMembership(ctx, userID); err != nil {
+		return nil, err
+	}
+	if err := r.ensureDefaultUserPortfolio(ctx, userID); err != nil {
 		return nil, err
 	}
 	return &User{ID: userID, Email: email, Status: "inactive", CreatedAt: time.Now()}, nil
@@ -106,5 +112,51 @@ func (r *userRepo) addDefaultTenantMembership(ctx context.Context, userID uint64
 		INSERT OR IGNORE INTO tenant_members(tenant_id,user_id,role)
 		SELECT id,?,'MEMBER' FROM tenants WHERE is_default=1 ORDER BY id LIMIT 1
 	`), userID)
+	return err
+}
+
+func (r *userRepo) ensureDefaultUserPortfolio(ctx context.Context, userID uint64) error {
+	if r.driver == "pgx" {
+		_, err := r.db.ExecContext(ctx, `
+			INSERT INTO portfolios(tenant_id,name,owner_type,owner_id,created_by_user_id,is_default)
+			SELECT tenant_id,'Personal Portfolio','USER',$1,$1,TRUE
+			FROM tenant_members
+			WHERE user_id=$1
+			  AND NOT EXISTS (
+			    SELECT 1 FROM portfolios WHERE owner_type='USER' AND owner_id=$1 AND is_default=TRUE
+			  )
+			ORDER BY tenant_id
+			LIMIT 1
+		`, userID)
+		return err
+	}
+	if r.driver == "mysql" {
+		// NOT EXISTS 子查詢包一層 derived table 強制物化，否則 MySQL 會因
+		// 在 INSERT 目標表 portfolios 的子查詢引用自身而回 error 1093。
+		_, err := r.db.ExecContext(ctx, `
+			INSERT INTO portfolios(tenant_id,name,owner_type,owner_id,created_by_user_id,is_default)
+			SELECT tenant_id,'Personal Portfolio','USER',?,?,TRUE
+			FROM tenant_members
+			WHERE user_id=?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM (SELECT owner_type,owner_id,is_default FROM portfolios) p
+			    WHERE p.owner_type='USER' AND p.owner_id=? AND p.is_default=TRUE
+			  )
+			ORDER BY tenant_id
+			LIMIT 1
+		`, userID, userID, userID, userID)
+		return err
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO portfolios(tenant_id,name,owner_type,owner_id,created_by_user_id,is_default)
+		SELECT tenant_id,'Personal Portfolio','USER',?,?,1
+		FROM tenant_members
+		WHERE user_id=?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM portfolios WHERE owner_type='USER' AND owner_id=? AND is_default=1
+		  )
+		ORDER BY tenant_id
+		LIMIT 1
+	`), userID, userID, userID, userID)
 	return err
 }

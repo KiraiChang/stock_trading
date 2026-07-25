@@ -138,7 +138,9 @@ func (r *portfolioRepo) CreateForGroup(ctx context.Context, userID uint64, group
 }
 
 func (r *portfolioRepo) CanAccess(ctx context.Context, userID uint64, portfolioID uint64, write bool) (bool, error) {
-	portfolioID = normalizePortfolioID(portfolioID)
+	if portfolioID == 0 {
+		return false, nil
+	}
 	var count int
 	roleFilter := ""
 	if write {
@@ -160,10 +162,7 @@ func (r *portfolioRepo) CanAccess(ctx context.Context, userID uint64, portfolioI
 }
 
 func (r *portfolioRepo) defaultTenantForUser(ctx context.Context, userID uint64) (uint64, error) {
-	var id uint64
-	err := r.db.GetContext(ctx, &id, r.db.Rebind(`
-		SELECT tenant_id FROM tenant_members WHERE user_id=? ORDER BY tenant_id LIMIT 1
-	`), userID)
+	id, err := firstTenantForUser(ctx, r.db, userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrPortfolioAccessDenied
 	}

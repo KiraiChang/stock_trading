@@ -18,7 +18,7 @@ func TestBuildSnapshotFlatAndLongActions(t *testing.T) {
 		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
 		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
 	}
-	flat, err := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, zones)
+	flat, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330"}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestBuildSnapshotFlatAndLongActions(t *testing.T) {
 	if flatPositionDecision["applicable"].(bool) || flatPositionDecision["state"] != "NOT_APPLICABLE" {
 		t.Fatalf("unexpected flat position_decision: %+v", flatPositionDecision)
 	}
-	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 700, AvgCost: 95, Version: 3}, sr, zones)
+	long, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 700, AvgCost: 95, Version: 3}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestBuildSnapshotBreakoutUsesConfigurableRMultipleTarget(t *testing.T) {
 		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
 		{ID: 2, Role: "RESISTANCE", PriceLow: 95, PriceHigh: 98, Status: "BROKEN", TradingScore: 75},
 	}
-	flat, err := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, zones)
+	flat, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330"}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestBuildSnapshotBreakoutUsesConfigurableRMultipleTarget(t *testing.T) {
 		t.Fatalf("unexpected take-profit evidence: %+v", evidence)
 	}
 
-	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 500, AvgCost: 80}, sr, zones)
+	long, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 500, AvgCost: 80}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestBuildSnapshotUsesNewMarketActionOnlyForFlatPosition(t *testing.T) {
 		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
 	}
 
-	flat, err := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, zones)
+	flat, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330"}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestBuildSnapshotNewMarketBuyDoesNotDirectlyAddExistingPosition(t *testing.
 		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
 	}
 
-	long, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, sr, zones)
+	long, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 300, AvgCost: 80}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestBuildSnapshotConditionalHoldEvidence(t *testing.T) {
 		{ID: 2, Role: "RESISTANCE", PriceLow: 120, PriceHigh: 122, Status: "PENDING", TradingScore: 70},
 	}
 
-	result, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 95}, sr, zones)
+	result, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 300, AvgCost: 95}, sr, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestBuildSnapshotPositionDecisionMarksUnavailableRR(t *testing.T) {
 		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
 		DecisionSummary: store.RawJSON(`{"market_action":"WATCH","position_action":"HOLD","action":"Hold"}`),
 	}
-	result, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 95}, sr, nil)
+	result, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 300, AvgCost: 95}, sr, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestBuildSnapshotUsesNewPositionActionForExistingPositionRisk(t *testing.T)
 		ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
 		DecisionSummary: store.RawJSON(`{"market_action":"AVOID","position_action":"REDUCE_ON_BREAKDOWN","action":"Avoid"}`),
 	}
-	reduced, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, reduceSR, zones)
+	reduced, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 300, AvgCost: 80}, reduceSR, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestBuildSnapshotUsesNewPositionActionForExistingPositionRisk(t *testing.T)
 		ID: 10, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100,
 		DecisionSummary: store.RawJSON(`{"market_action":"AVOID","position_action":"EXIT","action":"Avoid"}`),
 	}
-	exited, err := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 300, AvgCost: 80}, exitSR, zones)
+	exited, err := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 300, AvgCost: 80}, exitSR, zones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,11 +260,11 @@ func TestBuildSnapshotUsesNewPositionActionForExistingPositionRisk(t *testing.T)
 func TestBuildSnapshotNoSupportWaitsOrReduces(t *testing.T) {
 	a := &Analyzer{config: DefaultConfig()}
 	sr := &store.SRZoneAnalysis{ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100, DecisionSummary: store.RawJSON(`{"action":"Buy"}`)}
-	flat, _ := a.buildSnapshot(&store.Position{Symbol: "2330"}, sr, nil)
+	flat, _ := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330"}, sr, nil)
 	if flat.Action != ActionWait {
 		t.Fatalf("expected WAIT, got %+v", flat)
 	}
-	long, _ := a.buildSnapshot(&store.Position{Symbol: "2330", Shares: 100, AvgCost: 90}, sr, nil)
+	long, _ := a.buildSnapshot(&store.Position{PortfolioID: 1, Symbol: "2330", Shares: 100, AvgCost: 90}, sr, nil)
 	if long.Action != ActionReduce || long.TargetShares != 50 {
 		t.Fatalf("expected risk reduction, got %+v", long)
 	}
@@ -273,7 +273,7 @@ func TestBuildSnapshotNoSupportWaitsOrReduces(t *testing.T) {
 func TestBuildSnapshotSupportAboveCurrentDoesNotForceExit(t *testing.T) {
 	a := &Analyzer{config: DefaultConfig()}
 	sr := &store.SRZoneAnalysis{ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100, DecisionSummary: store.RawJSON(`{"action":"Hold"}`)}
-	position := &store.Position{Symbol: "2330", Shares: 100, AvgCost: 90}
+	position := &store.Position{PortfolioID: 1, Symbol: "2330", Shares: 100, AvgCost: 90}
 	// 最靠近的支撐帶在現價上方（100.5~102），但現價下方有有效支撐（90~92）。
 	// 上方支撐不能被當成跌破停損而全數出場。
 	zones := []store.SRZone{
@@ -289,7 +289,7 @@ func TestBuildSnapshotSupportAboveCurrentDoesNotForceExit(t *testing.T) {
 func TestBuildSnapshotOnlyNearestBrokenSupportTriggersExit(t *testing.T) {
 	a := &Analyzer{config: DefaultConfig()}
 	sr := &store.SRZoneAnalysis{ID: 9, Symbol: "2330", AnalyzedAt: time.Now(), CurrentPrice: 100, DecisionSummary: store.RawJSON(`{"action":"Hold"}`)}
-	position := &store.Position{Symbol: "2330", Shares: 100, AvgCost: 90}
+	position := &store.Position{PortfolioID: 1, Symbol: "2330", Shares: 100, AvgCost: 90}
 	zones := []store.SRZone{
 		{ID: 1, Role: "SUPPORT", PriceLow: 90, PriceHigh: 92, Status: "PENDING", TradingScore: 80},
 		{ID: 2, Role: "SUPPORT", PriceLow: 60, PriceHigh: 62, Status: "BROKEN", TradingScore: 70},

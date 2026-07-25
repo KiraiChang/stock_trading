@@ -16,6 +16,9 @@ export interface TradeAnalysisResult {
 }
 
 export async function analyzeTrade(symbol: string, portfolioID: number, forceRefresh = false): Promise<TradeAnalysisResult> {
+  if (!Number.isInteger(portfolioID) || portfolioID <= 0) {
+    throw new Error('portfolio_id is required')
+  }
   return apiFetch('/trade-analysis/analyze', {
     method: 'POST',
     body: JSON.stringify({ symbol, portfolio_id: portfolioID, timeframe: '1d', limit: 250, force_refresh: forceRefresh }),
@@ -23,6 +26,9 @@ export async function analyzeTrade(symbol: string, portfolioID: number, forceRef
 }
 
 export async function listTradeAnalyses(symbol: string, portfolioID: number): Promise<PositionAnalysis[]> {
+  if (!Number.isInteger(portfolioID) || portfolioID <= 0) {
+    throw new Error('portfolio_id is required')
+  }
   const response = await apiFetch<{ analyses: PositionAnalysis[] }>(
     `/trade-analysis/${encodeURIComponent(symbol)}/history?limit=20&portfolio_id=${encodeURIComponent(String(portfolioID))}`
   )

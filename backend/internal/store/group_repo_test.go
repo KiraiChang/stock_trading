@@ -107,3 +107,43 @@ func TestGroupRepoAddMemberRoleProtection(t *testing.T) {
 		t.Fatalf("owner demote co-owner while another owner remains: %v", err)
 	}
 }
+
+func TestGroupRepoAddMemberRequiresTenantMembership(t *testing.T) {
+	posRepo := newTestPositionRepo(t)
+	db := posRepo.(*positionRepo).db
+	ctx := context.Background()
+	users := NewUserRepo(db)
+	owner, err := users.Create(ctx, "owner-tenant@example.com", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := users.Create(ctx, "outsider-tenant@example.com", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := NewGroupRepo(db)
+	group, err := repo.Create(ctx, owner.ID, "Tenant Desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 模擬「非該 group tenant 成員」：把 outsider 從 group tenant 移出。
+	if _, err := db.ExecContext(ctx, db.Rebind(
+		`DELETE FROM tenant_members WHERE tenant_id=? AND user_id=?`), group.TenantID, outsider.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 非 tenant 成員不得被加入 group（改法不再自動補 membership，改為明確拒絕）。
+	if err := repo.AddMember(ctx, owner.ID, group.ID, outsider.ID, GroupRoleMember); !errors.Is(err, ErrGroupAccessDenied) {
+		t.Fatalf("expected non-tenant-member add rejected, got %v", err)
+	}
+	// 確認沒有靜默補上 tenant membership（消除提權副作用）。
+	var count int
+	if err := db.GetContext(ctx, &count, db.Rebind(
+		`SELECT COUNT(1) FROM tenant_members WHERE tenant_id=? AND user_id=?`), group.TenantID, outsider.ID); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no auto-added tenant membership, got %d", count)
+	}
+}

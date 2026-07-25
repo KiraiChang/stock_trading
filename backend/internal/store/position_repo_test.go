@@ -33,12 +33,25 @@ func newTestPositionRepo(t *testing.T) PositionRepo {
 	return NewPositionRepo(db)
 }
 
+func createTestPortfolio(t *testing.T, repo PositionRepo, id uint64) uint64 {
+	t.Helper()
+	sqlRepo := repo.(*positionRepo)
+	if _, err := sqlRepo.db.Exec(`
+		INSERT INTO portfolios(id, tenant_id, name, owner_type, owner_id, is_default)
+		VALUES(?, 1, ?, 'TENANT', 1, 0)
+	`, id, "Test Portfolio"); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	repo := newTestPositionRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
+	portfolioID := createTestPortfolio(t, repo, 1)
 
-	p, err := repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	p, err := repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventBuy, OccurredAt: now,
 		Shares: NewNullFloat64(100), Price: NewNullFloat64(10), Fee: 10,
 	}, 0)
@@ -48,7 +61,7 @@ func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	if p.Shares != 100 || math.Abs(p.AvgCost-10.1) > 1e-9 || p.Version != 1 {
 		t.Fatalf("unexpected first BUY: %+v", p)
 	}
-	p, err = repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	p, err = repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventBuy, OccurredAt: now.Add(time.Minute),
 		Shares: NewNullFloat64(100), Price: NewNullFloat64(20),
 	}, 1)
@@ -58,7 +71,7 @@ func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	if math.Abs(p.AvgCost-15.05) > 1e-9 {
 		t.Fatalf("unexpected AVG: %+v", p)
 	}
-	p, err = repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	p, err = repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventSell, OccurredAt: now.Add(2 * time.Minute),
 		Shares: NewNullFloat64(50), Price: NewNullFloat64(30), Fee: 5, Tax: 2,
 	}, 2)
@@ -68,7 +81,7 @@ func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	if p.Shares != 150 || math.Abs(p.RealizedPnL-740.5) > 1e-9 || math.Abs(p.AvgCost-15.05) > 1e-9 {
 		t.Fatalf("unexpected SELL: %+v", p)
 	}
-	p, err = repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	p, err = repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventAdjustment, OccurredAt: now.Add(3 * time.Minute),
 		TargetShares: NewNullFloat64(120), TargetAvgCost: NewNullFloat64(16), Note: "broker reconciliation",
 	}, 3)
@@ -81,13 +94,13 @@ func TestPositionRepoAVGEventsAndAdjustment(t *testing.T) {
 	if math.Abs(p.RealizedPnL-740.5) > 1e-9 {
 		t.Fatalf("ADJUSTMENT must not invent cash flow or change realized PnL: %+v", p)
 	}
-	if _, err := repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	if _, err := repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventSell, OccurredAt: now,
 		Shares: NewNullFloat64(121), Price: NewNullFloat64(20),
 	}, 4); !errors.Is(err, ErrPositionInvalidEvent) {
 		t.Fatalf("expected invalid-event oversell rejection, got %v", err)
 	}
-	if _, err := repo.ApplyEvent(ctx, DefaultPortfolioID, &PositionTransaction{
+	if _, err := repo.ApplyEvent(ctx, portfolioID, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventBuy, OccurredAt: now,
 		Shares: NewNullFloat64(1), Price: NewNullFloat64(20),
 	}, 2); err != ErrPositionVersionConflict {
@@ -99,13 +112,8 @@ func TestPositionRepoScopesSameSymbolByPortfolio(t *testing.T) {
 	repo := newTestPositionRepo(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	sqlRepo := repo.(*positionRepo)
-	if _, err := sqlRepo.db.ExecContext(ctx, `
-		INSERT INTO portfolios(id, tenant_id, name, owner_type, owner_id, is_default)
-		VALUES(2, 1, 'Second Portfolio', 'TENANT', 1, 0)
-	`); err != nil {
-		t.Fatal(err)
-	}
+	createTestPortfolio(t, repo, 1)
+	createTestPortfolio(t, repo, 2)
 
 	first, err := repo.ApplyEvent(ctx, 1, &PositionTransaction{
 		Symbol: "2330", EventType: PositionEventBuy, OccurredAt: now,
@@ -144,8 +152,9 @@ func TestPositionRepoScopesSameSymbolByPortfolio(t *testing.T) {
 func TestPositionRepoAnalysisRoundTrip(t *testing.T) {
 	repo := newTestPositionRepo(t)
 	ctx := context.Background()
+	portfolioID := createTestPortfolio(t, repo, 1)
 	a := &PositionAnalysis{
-		Symbol: "2330", PositionState: "FLAT", AnalyzedAt: time.Now().UTC(),
+		PortfolioID: portfolioID, Symbol: "2330", PositionState: "FLAT", AnalyzedAt: time.Now().UTC(),
 		CurrentPrice: 100, Action: "ENTER_SMALL", ActionLabel: "小量建立",
 		TargetShares: 500, AdjustmentShares: 500, AdjustmentSide: "BUY",
 		AdjustmentAmount: 50000, ConfigJSON: RawJSON(`{"max_position_value":200000}`),
@@ -157,7 +166,7 @@ func TestPositionRepoAnalysisRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved, err := repo.GetAnalysis(ctx, DefaultPortfolioID, id)
+	saved, err := repo.GetAnalysis(ctx, portfolioID, id)
 	if err != nil {
 		t.Fatal(err)
 	}

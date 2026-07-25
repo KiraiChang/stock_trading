@@ -31,7 +31,8 @@ func normalizePositionSymbol(raw string) string {
 func portfolioIDFromQuery(c *gin.Context) (uint64, bool) {
 	raw := strings.TrimSpace(c.Query("portfolio_id"))
 	if raw == "" {
-		return store.DefaultPortfolioID, true
+		c.JSON(http.StatusBadRequest, gin.H{"error": "portfolio_id is required"})
+		return 0, false
 	}
 	id, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil || id == 0 {

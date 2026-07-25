@@ -111,7 +111,7 @@ type AnalyzeResult struct {
 func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptions) (*AnalyzeResult, error) {
 	portfolioID := opts.PortfolioID
 	if portfolioID == 0 {
-		portfolioID = store.DefaultPortfolioID
+		return nil, store.ErrPortfolioRequired
 	}
 	position, err := a.positions.Get(ctx, portfolioID, symbol)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -136,7 +136,6 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 	if err != nil {
 		return nil, err
 	}
-	snapshot.PortfolioID = portfolioID
 	id, err := a.positions.CreateAnalysis(ctx, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("create position analysis: %w", err)
@@ -152,7 +151,7 @@ func (a *Analyzer) Analyze(ctx context.Context, symbol string, opts AnalyzeOptio
 
 func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnalysis, zones []store.SRZone) (*store.PositionAnalysis, error) {
 	if position.PortfolioID == 0 {
-		position.PortfolioID = store.DefaultPortfolioID
+		return nil, store.ErrPortfolioRequired
 	}
 	current := sr.CurrentPrice
 	state := StateFlat

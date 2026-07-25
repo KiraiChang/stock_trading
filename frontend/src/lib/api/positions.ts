@@ -135,6 +135,9 @@ export interface PositionAnalysis {
 }
 
 function portfolioQuery(portfolioID: number): string {
+  if (!Number.isInteger(portfolioID) || portfolioID <= 0) {
+    throw new Error('portfolio_id is required')
+  }
   return `portfolio_id=${encodeURIComponent(String(portfolioID))}`
 }
 

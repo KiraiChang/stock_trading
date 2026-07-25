@@ -54,7 +54,7 @@ func TestPositionApplyEventErrorMapping(t *testing.T) {
 		{
 			name:       "transaction validation error",
 			path:       "/positions/2330/transactions",
-			body:       `{"event_type":"SELL","shares":10,"price":100}`,
+			body:       `{"portfolio_id":2,"event_type":"SELL","shares":10,"price":100}`,
 			err:        errors.Join(store.ErrPositionInvalidEvent, errors.New("SELL shares exceed current position")),
 			wantStatus: http.StatusBadRequest,
 			wantBody:   "SELL shares exceed current position",
@@ -62,7 +62,7 @@ func TestPositionApplyEventErrorMapping(t *testing.T) {
 		{
 			name:       "adjustment infrastructure error",
 			path:       "/positions/2330/adjustments",
-			body:       `{"target_shares":10,"target_avg_cost":100,"reason":"reconcile"}`,
+			body:       `{"portfolio_id":2,"target_shares":10,"target_avg_cost":100,"reason":"reconcile"}`,
 			err:        errors.New("driver: bad connection secret"),
 			wantStatus: http.StatusInternalServerError,
 			wantBody:   "internal server error",
@@ -88,5 +88,27 @@ func TestPositionApplyEventErrorMapping(t *testing.T) {
 				t.Fatalf("infrastructure details leaked to client: %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestPositionRequiresPortfolioID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewPositionHandler(&positionRepoStub{}, nil, zap.NewNop())
+	router := gin.New()
+	router.GET("/positions", h.List)
+	router.POST("/positions/:symbol/transactions", h.AddTransaction)
+
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/positions", nil))
+	if listRec.Code != http.StatusBadRequest || !strings.Contains(listRec.Body.String(), "portfolio_id is required") {
+		t.Fatalf("unexpected list response: %d %s", listRec.Code, listRec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/positions/2330/transactions", bytes.NewBufferString(`{"event_type":"BUY","shares":10,"price":100}`))
+	req.Header.Set("Content-Type", "application/json")
+	writeRec := httptest.NewRecorder()
+	router.ServeHTTP(writeRec, req)
+	if writeRec.Code != http.StatusBadRequest || !strings.Contains(writeRec.Body.String(), "portfolio_id is required") {
+		t.Fatalf("unexpected write response: %d %s", writeRec.Code, writeRec.Body.String())
 	}
 }

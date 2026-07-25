@@ -85,7 +85,7 @@ Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/d
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
 跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。
 
-Frontend 測試框架（三層，T-033 導入）：
+Frontend 測試框架（三層）：
 
 - **型別**：`svelte-check`（含 `.svelte` 內 TS），對應 `npm run check`。`tsconfig.json` 的
   `strict: true` 從此被真正執行；`src/vite-env.d.ts` 補上 `vite/client` 型別讓 `import.meta.env`

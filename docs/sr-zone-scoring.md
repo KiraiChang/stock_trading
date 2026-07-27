@@ -1501,6 +1501,25 @@ Python/Go/DB/TS/Svelte 五層並牽動已訓練模型，投報比過低，決定
 
 ---
 
+## Evaluation Pipeline 與 Builder Config 規劃
+
+T-002 / T-003 的後續實作方向固定為：
+
+1. **先建立 SR Zone 專用 evaluation pipeline**：不要直接把一般
+   `backtest/modular` 交易策略回測拿來當模型驗證。SR Zone evaluation 第一版應專注在
+   probability、zone outcome、event lifecycle、daily confirmation 與 final entry state
+   的 walk-forward 表現，避免把資金配置、position sizing 或 portfolio policy 的問題混進模型品質。
+2. **evaluation 結果先寫 `stock_sr_regression_results.metrics_json`**：這張表已用來保存
+   regression fixture、walk-forward 與 calibration 驗收紀錄。T-002 第一版不新增拆欄 schema；
+   等 report 內的指標穩定後，再決定哪些欄位值得正規化。
+3. **ATR zone 調參先抽 config，不先改預設值**：`train.py`、`scoring.py` 與 evaluation runner
+   應共用同一個 `ZoneBuilderConfig` / builder factory。`atr_width_multiplier=1.5`、
+   `max_merge_width_multiple=2.0` 先保留為 baseline，後續用 evaluation 比較不同 bucket config。
+4. **T-003 的正式調參依賴 T-002**：低波動 / 一般波動 / 高波動 bucket 可以作為第一階段，
+   但不應在缺乏 walk-forward evaluation 前直接導入 symbol-level override，避免過擬合。
+
+---
+
 ## 已知限制
 
 - **`atr_width_multiplier`/`max_merge_width_multiple` 需要依實際股票調參**：

@@ -17,16 +17,50 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 擱置 |
-| 優先度 | 低 |
+| 狀態 | 規劃中 |
+| 優先度 | 中 |
 | 分類 | Python / SR Zone / 模型驗證 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 
 目前只有 `train.py` 手動訓練 + train job metrics（time-split holdout、校準、
 dataset diagnostics），沒有「模型上線後過去一段時間的訊號實際表現如何」的
-自動化回測驗證。可以考慮串接既有 `backtest/modular` 引擎，定期用 SR Zone
-訊號跑一次回測並記錄下來，跟訓練時的 metrics 對照。
+自動化驗證。這項應先做成 SR Zone 專用 evaluation pipeline，不直接套用一般
+`backtest/modular` 的交易策略回測；原因是 SR Zone 需要同時驗證 probability、
+zone outcome、event lifecycle、daily confirmation 與 final entry state 的語意表現。
+
+實作計畫：
+
+- **P0：Python evaluation runner**
+  - 新增 `backtest.modular.sr_scoring.evaluation`。
+  - 輸入 symbols、timeframe、limit / date range、model path、builder config。
+  - 對每檔股票做 walk-forward evaluation：每個時間點只能用當下以前的 OHLCV
+    建 zone、算 probability / score / decision，再用未來 N 根 K 棒產生 label。
+  - 第一版輸出 JSON report，不先接 UI 或排程。
+- **P0：核心驗證指標**
+  - 模型層：hold / break AUC、Brier score、log loss、calibration bins。
+  - Zone 層：support hold rate、resistance rejection rate、breakout continuation rate。
+  - Decision 層：`WAIT_CONFIRMATION`、`PROBE_ENTRY`、`ENTRY_ALLOWED` 的後續勝率、
+    失效率、平均報酬與 RR 分布。
+  - Daily confirmation：納入 T-028 的隔日 / 兩日確認成效統計。
+- **P1：結果落 DB**
+  - 優先寫入既有 `stock_sr_regression_results.metrics_json`。
+  - `run_id` 使用 `sr_eval_yyyymmddhhmmss`，並記錄 `model_config_hash`、
+    `pipeline_version`、dataset range 與 split method。
+  - 暫不新增拆欄 schema；等 report 指標穩定後再評估是否正規化。
+- **P1：CLI / API**
+  - 先提供 CLI：`python -m backtest.modular.sr_scoring.evaluation ...`。
+  - Go API 可後續新增 `/sr-zones/evaluate` 與 regression result list endpoint。
+- **P2：排程與模型治理**
+  - report 穩定後再加 daily / weekly schedule。
+  - 若 evaluation 未通過門檻，標記模型 degraded / unreliable，不自動放大進場權限。
+
+驗證與風險：
+
+- 必須避免 lookahead bias；builder、feature、decision 都只能吃當下以前資料。
+- 第一版不要做交易資金模擬，先驗證訊號分類與後續 outcome，避免把 sizing /
+  portfolio policy 的問題混進模型品質判斷。
+- T-003 的 ATR 參數調整應依賴本項 evaluation 結果，不應單獨憑主觀調常數。
 
 ---
 
@@ -34,14 +68,39 @@ dataset diagnostics），沒有「模型上線後過去一段時間的訊號實�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 低 |
+| 狀態 | 規劃中 |
+| 優先度 | 中 |
 | 分類 | Python / SR Zone / Zone Builder |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
+
+實作計畫：
+
+- **P0：抽出 builder config factory**
+  - 新增 `ZoneBuilderConfig` / `build_zone_builders(config)` 類型的集中入口。
+  - `train.py`、`scoring.py` 與 T-002 evaluation runner 都改用同一個 factory。
+  - 第一版保留目前預設：`atr_width_multiplier=1.5`、
+    `max_merge_width_multiple=2.0`，只先移除硬編碼分散。
+- **P1：個股波動 profile / bucket**
+  - 以歷史 OHLCV 計算 `ATR / close`、平均日內 range、價格級距、touch density。
+  - 先分低波動 / 一般波動 / 高波動 bucket，不直接做 symbol-level override。
+  - 每個 bucket 有一組候選 builder config。
+- **P1：參數 sweep**
+  - 候選範圍先保守，例如 `atr_width_multiplier=1.0/1.25/1.5/1.75/2.0`、
+    `max_merge_width_multiple=1.5/2.0/2.5`。
+  - 用 T-002 evaluation 比較 touch 樣本量、hold/break calibration、
+    `AT_ZONE` 比例、entry decision outcome 與 RR 分布。
+- **P2：導入 bucket-based config**
+  - 低波動股票使用較窄 zone，高波動股票可放寬 zone，但仍限制 merge 避免過度糊成大區間。
+  - 等 evaluation 樣本足夠後，才評估 symbol-level override。
+
+相依性：
+
+- P0 可先做，因為它只是抽參數入口。
+- P1/P2 必須依賴 T-002 evaluation pipeline；沒有 evaluation 前不應直接調整正式預設值。
 
 ---
 
@@ -303,4 +362,3 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
 的盤中資料源或明確需求時再重新評估。
-

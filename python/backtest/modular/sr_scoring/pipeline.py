@@ -5,6 +5,12 @@ from typing import Any, Optional
 
 from db import fetch_candles, fetch_latest_chip_score
 
+try:
+    from db import fetch_latest_sr_regression_governance
+except ImportError:  # pragma: no cover - older CLI/test db shims may not expose this helper.
+    def fetch_latest_sr_regression_governance(model_config_hash: str) -> dict | None:
+        return None
+
 from .decision_engine import build_decision_from_evidence
 from .evidence import build_evidence
 from .explain_engine import build_explanation, explain_zone
@@ -26,14 +32,44 @@ from .probability_engine import (
 )
 from .scenario_engine import build_analysis_scenario, build_zone_scenario
 from .types import ApproachDirection, ZoneType
-from .zone_builder import ZoneBuilder
+from .zone_builder import ZoneBuilder, ZoneBuilderConfig, build_zone_builders, zone_builder_config_snapshot
+
+
+def _resolve_runtime_builders(frame, builders: list[ZoneBuilder] | None) -> tuple[list[ZoneBuilder], dict[str, Any]]:
+    if builders:
+        return builders, {
+            "enabled": False,
+            "reason_code": "EXPLICIT_BUILDERS",
+        }
+
+    try:
+        from .scoring import _adaptive_zone_builder_enabled, _adaptive_zone_builder_profile
+        from .zone_builder import resolve_zone_builder_config_for_profile
+
+        if _adaptive_zone_builder_enabled():
+            atr_pct, average_range_pct = _adaptive_zone_builder_profile(frame)
+            config, metadata = resolve_zone_builder_config_for_profile(atr_pct, average_range_pct)
+            return build_zone_builders(config, include_recent_microstructure=True), metadata
+    except Exception as exc:
+        return build_zone_builders(include_recent_microstructure=True), {
+            "enabled": False,
+            "reason_code": "ADAPTIVE_ZONE_BUILDERS_ERROR",
+            "error": str(exc),
+            "config": zone_builder_config_snapshot(ZoneBuilderConfig()),
+        }
+
+    return build_zone_builders(include_recent_microstructure=True), {
+        "enabled": False,
+        "reason_code": "ADAPTIVE_ZONE_BUILDERS_DISABLED",
+        "config": zone_builder_config_snapshot(ZoneBuilderConfig()),
+    }
 
 
 def load_data(
     symbol: str,
     timeframe: str,
     limit: int,
-    builders: list[ZoneBuilder],
+    builders: list[ZoneBuilder] | None,
     fetch_candles_fn=fetch_candles,
     fetch_chip_fn=fetch_latest_chip_score,
     get_model_fn=get_model,
@@ -45,6 +81,7 @@ def load_data(
     if not rows:
         raise ValueError(f"no candles found for symbol={symbol} timeframe={timeframe}")
     frame = _to_dataframe(rows)
+    builders, builder_runtime_config = _resolve_runtime_builders(frame, builders)
     min_bars = max(builder.min_bars for builder in builders)
     if len(frame) < min_bars:
         raise ValueError(f"not enough candles for sr_scoring: symbol={symbol} got={len(frame)}, need>={min_bars}")
@@ -59,6 +96,7 @@ def load_data(
         analyzed_at=analyzed_at,
         current_price=float(frame["close"].iloc[-1]),
         zones=zones,
+        zone_builder_runtime_config=builder_runtime_config,
         model=get_model_fn(),
         chip_row=chip_row,
         chip_features=chip_features_from_score_row(chip_row),
@@ -165,18 +203,137 @@ def calculate_scores(features: AnalysisFeatures) -> AnalysisScores:
     )
 
 
-def decide(evidence, previous_event_states: Optional[list[dict[str, Any]]] = None) -> AnalysisDecision:
+def decide(
+    evidence,
+    previous_event_states: Optional[list[dict[str, Any]]] = None,
+    model_governance: Optional[dict[str, Any]] = None,
+) -> AnalysisDecision:
     return AnalysisDecision(
         evidence=evidence,
-        summary=build_decision_from_evidence(evidence, previous_event_states=previous_event_states),
+        summary=build_decision_from_evidence(
+            evidence,
+            previous_event_states=previous_event_states,
+            model_governance=model_governance,
+        ),
     )
+
+
+def _entry_rank(state: str) -> int:
+    return {
+        "WAIT_CONFIRMATION": 1,
+        "WAIT_DAILY_CONFIRM": 1,
+        "PROBE_ALLOWED": 2,
+        "PROBE_ENTRY": 2,
+        "SMALL_ENTRY": 3,
+        "ENTRY_ALLOWED": 5,
+        "BUY": 5,
+    }.get(str(state or ""), 5)
+
+
+def _str_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values if value]
+
+
+def _unique(items: list[str]) -> list[str]:
+    out: list[str] = []
+    for item in items:
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+_HEALTH_SEVERITY = {"UNRELIABLE": 3, "DEGRADED": 2, "HEALTHY": 1}
+
+
+def _health_severity(state: str) -> int:
+    # 未知狀態回 0（低於 HEALTHY），刻意不誤擋——與 I-040 的「缺資料不誤擋」一致。
+    # 但單靠這個會讓格式壞掉時完全沒有訊號，所以 _merge_regression_governance_gate 會另外
+    # 記一筆 REGRESSION_GOVERNANCE_STATE_UNKNOWN warning
+    # （見 docs/sr-zone-scoring.md「Production 端的 regression governance gate」）。
+    return _HEALTH_SEVERITY.get(str(state or ""), 0)
+
+
+def _is_known_health_state(state: str) -> bool:
+    return str(state or "") in _HEALTH_SEVERITY
+
+
+def _merge_regression_governance_gate(
+    base: dict[str, Any],
+    regression: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not regression:
+        return base
+    merged = dict(base)
+    base_gate = dict((base.get("confidence_gate") or {}))
+    regression_gate = dict((regression.get("confidence_gate") or {}))
+    base_state = str(base.get("health_state") or "UNKNOWN")
+    regression_state = str(regression.get("health_state") or regression_gate.get("state") or "UNKNOWN")
+    final_state = base_state
+    if _health_severity(regression_state) > _health_severity(base_state):
+        final_state = regression_state
+
+    quality_flags = _unique([*_str_list(base.get("quality_flags"))])
+    warning_flags = _unique([*_str_list(base.get("warning_flags"))])
+    blocking_flags = _unique([*_str_list(base.get("blocking_flags"))])
+    reason_codes = _unique([
+        *_str_list(base_gate.get("reason_codes")),
+        *_str_list(regression_gate.get("reason_codes")),
+    ])
+
+    if regression_state == "UNRELIABLE":
+        blocking_flags = _unique([*blocking_flags, "REGRESSION_GOVERNANCE_UNRELIABLE"])
+        reason_codes = _unique([*reason_codes, "REGRESSION_GOVERNANCE_UNRELIABLE"])
+    elif regression_state == "DEGRADED":
+        warning_flags = _unique([*warning_flags, "REGRESSION_GOVERNANCE_DEGRADED"])
+        reason_codes = _unique([*reason_codes, "REGRESSION_GOVERNANCE_DEGRADED"])
+    elif not _is_known_health_state(regression_state):
+        # 認不得的 health_state 不會升嚴重度（不誤擋），但一定要留下訊號，否則欄位改名或
+        # 上游格式變動會讓整個 gate 靜默失效而沒人發現。
+        warning_flags = _unique([*warning_flags, "REGRESSION_GOVERNANCE_STATE_UNKNOWN"])
+        reason_codes = _unique([*reason_codes, "REGRESSION_GOVERNANCE_STATE_UNKNOWN"])
+
+    allow_entry = bool(base_gate.get("allow_entry", True))
+    if regression_gate.get("allow_entry") is False or final_state == "UNRELIABLE":
+        allow_entry = False
+        final_state = "UNRELIABLE"
+    base_max = str(base_gate.get("max_entry_state") or "BUY")
+    regression_max = str(regression_gate.get("max_entry_state") or "BUY")
+    max_entry_state = base_max if _entry_rank(base_max) <= _entry_rank(regression_max) else regression_max
+    if not allow_entry:
+        max_entry_state = "WAIT_CONFIRMATION"
+    elif final_state == "DEGRADED" and _entry_rank(max_entry_state) > _entry_rank("SMALL_ENTRY"):
+        max_entry_state = "SMALL_ENTRY"
+
+    merged.update({
+        "health_state": final_state,
+        "quality_flags": quality_flags,
+        "warning_flags": warning_flags,
+        "blocking_flags": blocking_flags,
+        "confidence_gate": {
+            "state": final_state,
+            "allow_entry": allow_entry,
+            "max_entry_state": max_entry_state,
+            "reason_codes": reason_codes,
+        },
+        "regression_governance": regression,
+    })
+    return merged
+
+
+def _latest_regression_governance(model_config_hash: str) -> dict[str, Any] | None:
+    try:
+        return fetch_latest_sr_regression_governance(model_config_hash)
+    except Exception:
+        return None
 
 
 def run_pipeline(
     symbol: str,
     timeframe: str,
     limit: int,
-    builders: list[ZoneBuilder],
+    builders: list[ZoneBuilder] | None,
     fetch_candles_fn=fetch_candles,
     fetch_chip_fn=fetch_latest_chip_score,
     get_model_fn=get_model,
@@ -195,9 +352,6 @@ def run_pipeline(
     features = extract_features(data)
     scores = calculate_scores(features)
     evidence = build_evidence(scores)
-    decision = decide(evidence, previous_event_states=previous_event_states)
-    explanation = build_explanation(evidence, decision.summary)
-    scenario = build_analysis_scenario(evidence, decision.summary)
     zone_probability_flags = model_quality_flags(scores)
     zone_probability_contexts = [
         build_zone_probability_context(score, zone_probability_flags)
@@ -206,6 +360,17 @@ def run_pipeline(
     probability_context = build_analysis_probability_context(
         scores, zone_probability_contexts, zone_probability_flags
     )
+    probability_context["health"] = _merge_regression_governance_gate(
+        probability_context.get("health") or {},
+        _latest_regression_governance(data.model.config_hash),
+    )
+    decision = decide(
+        evidence,
+        previous_event_states=previous_event_states,
+        model_governance=probability_context["health"],
+    )
+    explanation = build_explanation(evidence, decision.summary)
+    scenario = build_analysis_scenario(evidence, decision.summary)
     period_summaries = _build_period_summaries(
         list(scores.zones), data.current_price, features.ma5
     )
@@ -227,6 +392,7 @@ def run_pipeline(
             "period_summaries": period_summaries,
             "analysis_tips": analysis_tips,
             "chip_summary": scores.chip_summary,
+            "zone_builder_runtime_config": data.zone_builder_runtime_config,
             "model": {
                 "version": data.model.version,
                 "trained_at": data.model.trained_at,

@@ -1,6 +1,6 @@
 import { apiFetch } from './client'
 
-export type JobName = 'pre_market' | 'intraday' | 'daily_close' | 'stock_symbol_sync'
+export type JobName = 'pre_market' | 'intraday' | 'daily_close' | 'chip_daily_sync' | 'stock_symbol_sync' | 'sr_evaluation'
 
 export interface SchedulerJob {
   job_name: JobName
@@ -26,4 +26,8 @@ export async function triggerDailyCloseRun(): Promise<{ message: string }> {
 
 export async function triggerStockSymbolSyncRun(): Promise<{ message: string }> {
   return apiFetch('/scheduler/stock-symbol-sync/run', { method: 'POST' })
+}
+
+export async function triggerSREvaluationRun(): Promise<{ message: string }> {
+  return apiFetch('/scheduler/sr-evaluation/run', { method: 'POST' })
 }

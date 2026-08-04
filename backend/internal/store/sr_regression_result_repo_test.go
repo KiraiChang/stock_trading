@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -54,7 +55,14 @@ func TestSRRegressionResultRepoCreateAndGet(t *testing.T) {
 		BreakAUC:        NullFloat64{NullFloat64: sql.NullFloat64{Float64: 0.76, Valid: true}},
 		BreakBrierScore: NullFloat64{NullFloat64: sql.NullFloat64{Float64: 0.16, Valid: true}},
 		Passed:          NullBool{NullBool: sql.NullBool{Bool: true, Valid: true}},
-		MetricsJSON:     RawJSON(`{"thresholds":{"hold_auc":0.75},"fixture":"sr_v3"}`),
+		MetricsJSON: RawJSON(`{
+			"schema_version":"sr_zone_decision_replay_p0",
+			"rows":42,
+			"sources":2,
+			"governance_evaluation":{"health_state":"DEGRADED","strict_passed":false},
+			"thresholds":{"hold_auc":0.75},
+			"fixture":"sr_v3"
+		}`),
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)
@@ -79,8 +87,27 @@ func TestSRRegressionResultRepoCreateAndGet(t *testing.T) {
 	if !got.Passed.Valid || !got.Passed.Bool {
 		t.Fatalf("unexpected passed flag: %+v", got.Passed)
 	}
-	if string(got.MetricsJSON) != `{"thresholds":{"hold_auc":0.75},"fixture":"sr_v3"}` {
-		t.Fatalf("expected metrics_json round-trip, got %s", got.MetricsJSON)
+	if got.SchemaVersion != "sr_zone_decision_replay_p0" {
+		t.Fatalf("unexpected schema_version: %s", got.SchemaVersion)
+	}
+	if !got.Rows.Valid || got.Rows.Int64 != 42 {
+		t.Fatalf("unexpected rows: %+v", got.Rows)
+	}
+	if !got.Sources.Valid || got.Sources.Int64 != 2 {
+		t.Fatalf("unexpected sources: %+v", got.Sources)
+	}
+	if got.GovernanceHealthState != "DEGRADED" {
+		t.Fatalf("unexpected governance health state: %s", got.GovernanceHealthState)
+	}
+	if !got.GovernanceStrictPassed.Valid || got.GovernanceStrictPassed.Bool {
+		t.Fatalf("unexpected governance strict passed: %+v", got.GovernanceStrictPassed)
+	}
+	var metrics map[string]any
+	if err := json.Unmarshal([]byte(got.MetricsJSON), &metrics); err != nil {
+		t.Fatalf("metrics_json should remain valid JSON: %v", err)
+	}
+	if metrics["fixture"] != "sr_v3" {
+		t.Fatalf("expected metrics_json round-trip, got %+v", metrics)
 	}
 }
 
@@ -120,5 +147,35 @@ func TestSRRegressionResultRepoListOrdersNewestFirst(t *testing.T) {
 	}
 	if rows[0].RunID != "sr_regression_005" || rows[1].RunID != "sr_regression_004" {
 		t.Fatalf("expected newest first by id tie-breaker, got %+v", rows)
+	}
+}
+
+func TestSRRegressionResultRepoListBySchemaVersion(t *testing.T) {
+	repo := newTestSRRegressionResultRepo(t)
+	ctx := context.Background()
+
+	fixtures := []struct {
+		runID       string
+		metricsJSON RawJSON
+	}{
+		{runID: "sr_eval_001", metricsJSON: RawJSON(`{"schema_version":"sr_zone_evaluation_p0"}`)},
+		{runID: "sr_replay_001", metricsJSON: RawJSON(`{"schema_version":"sr_zone_decision_replay_p0","ok":true}`)},
+		{runID: "sr_replay_002", metricsJSON: RawJSON(`{"schema_version":"sr_zone_decision_replay_p0","ok":false}`)},
+	}
+	for _, fixture := range fixtures {
+		if _, err := repo.Create(ctx, &SRRegressionResult{RunID: fixture.runID, MetricsJSON: fixture.metricsJSON}); err != nil {
+			t.Fatalf("Create %s failed: %v", fixture.runID, err)
+		}
+	}
+
+	rows, err := repo.ListBySchemaVersion(ctx, "sr_zone_decision_replay_p0", 10)
+	if err != nil {
+		t.Fatalf("ListBySchemaVersion failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 replay rows, got %d", len(rows))
+	}
+	if rows[0].RunID != "sr_replay_002" || rows[1].RunID != "sr_replay_001" {
+		t.Fatalf("expected replay rows newest first, got %+v", rows)
 	}
 }

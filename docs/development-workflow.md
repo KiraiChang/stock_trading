@@ -59,6 +59,9 @@ python/scripts/test.sh -k event_engine backtest/         # 直接帶 pytest 參�
 
 frontend/scripts/test.sh            # 沿用現有 node_modules
 frontend/scripts/test.sh --install  # 先 npm ci（node_modules 不存在時會自動加上）
+
+# 開發迭代：只跑指定測試檔（略過 svelte-check 與 build）。驗收仍要跑不帶此變數的完整三步。
+VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 ```
 
 三支腳本共同保證：
@@ -79,7 +82,12 @@ frontend/scripts/test.sh --install  # 先 npm ci（node_modules 不存在時會�
 | image 覆寫 | `GO_IMAGE` | `PY_IMAGE` | `NODE_IMAGE` |
 
 Go 另外固定 `GOMAXPROCS=1` + `GOFLAGS=-p=1`：本機只有 2GiB RAM，平行編譯會 OOM，
-必須序列編譯；記憶體上限也因此不能沿用其他 runtime 的 512m。
+必須序列編譯；記憶體上限也因此不能沿用其他 runtime 的 512m。再加上 `GOGC=off` +
+`GOMEMLIMIT`（腳本的 `GO_MEMLIMIT`，預設 `250MiB`，可經環境變數上調）：序列化只限制
+**併發數**，不限制單一 go 子行程的 heap，container 的 `--memory` 也擋不住 host 層級的
+OOM killer。沒有這兩項時，`modernc.org/sqlite/lib`（C 轉譯的巨大 generated package）的
+vet／compile 會出現 `vet: signal: killed`，`set -e` 讓整條 vet → test → build 直接中止。
+這些只影響編譯過程，不影響測試結果與產出的執行檔。
 
 Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/dist`
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。

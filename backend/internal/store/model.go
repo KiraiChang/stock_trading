@@ -322,20 +322,50 @@ type SRModelMetric struct {
 }
 
 type SRRegressionResult struct {
-	ID              uint64      `db:"id"                 json:"id"`
-	RunID           string      `db:"run_id"             json:"run_id"`
-	ModelConfigHash string      `db:"model_config_hash"  json:"model_config_hash"`
-	PipelineVersion string      `db:"pipeline_version"   json:"pipeline_version"`
-	DatasetFrom     NullTime    `db:"dataset_from"       json:"dataset_from,omitempty"`
-	DatasetTo       NullTime    `db:"dataset_to"         json:"dataset_to,omitempty"`
-	SplitMethod     string      `db:"split_method"       json:"split_method"`
-	HoldAUC         NullFloat64 `db:"hold_auc"           json:"hold_auc,omitempty"`
-	HoldBrierScore  NullFloat64 `db:"hold_brier_score"   json:"hold_brier_score,omitempty"`
-	BreakAUC        NullFloat64 `db:"break_auc"          json:"break_auc,omitempty"`
-	BreakBrierScore NullFloat64 `db:"break_brier_score" json:"break_brier_score,omitempty"`
-	Passed          NullBool    `db:"passed"             json:"passed,omitempty"`
-	MetricsJSON     RawJSON     `db:"metrics_json"       json:"metrics_json"`
-	CreatedAt       time.Time   `db:"created_at"         json:"created_at"`
+	ID                     uint64      `db:"id"                         json:"id"`
+	RunID                  string      `db:"run_id"                     json:"run_id"`
+	ModelConfigHash        string      `db:"model_config_hash"          json:"model_config_hash"`
+	PipelineVersion        string      `db:"pipeline_version"           json:"pipeline_version"`
+	DatasetFrom            NullTime    `db:"dataset_from"               json:"dataset_from,omitempty"`
+	DatasetTo              NullTime    `db:"dataset_to"                 json:"dataset_to,omitempty"`
+	SplitMethod            string      `db:"split_method"               json:"split_method"`
+	HoldAUC                NullFloat64 `db:"hold_auc"                   json:"hold_auc,omitempty"`
+	HoldBrierScore         NullFloat64 `db:"hold_brier_score"           json:"hold_brier_score,omitempty"`
+	BreakAUC               NullFloat64 `db:"break_auc"                  json:"break_auc,omitempty"`
+	BreakBrierScore        NullFloat64 `db:"break_brier_score"          json:"break_brier_score,omitempty"`
+	Passed                 NullBool    `db:"passed"                     json:"passed,omitempty"`
+	SchemaVersion          string      `db:"schema_version"             json:"schema_version"`
+	Rows                   NullInt64   `db:"result_rows"                json:"rows,omitempty"`
+	Sources                NullInt64   `db:"source_count"               json:"sources,omitempty"`
+	GovernanceHealthState  string      `db:"governance_health_state"    json:"governance_health_state"`
+	GovernanceStrictPassed NullBool    `db:"governance_strict_passed"   json:"governance_strict_passed,omitempty"`
+	MetricsJSON            RawJSON     `db:"metrics_json"               json:"metrics_json"`
+	CreatedAt              time.Time   `db:"created_at"                 json:"created_at"`
+}
+
+// SREvaluationJob 追蹤一次 SR Zone evaluation / decision replay 背景任務。
+// 實際計算仍由 Python /sr-scoring/evaluate 同步執行；Go 在背景 goroutine
+// 呼叫後把 report 存回這張表，前端可輪詢進度，不必讓 HTTP request 一直等待。
+type SREvaluationJob struct {
+	ID              uint64     `db:"id"               json:"id"`
+	JobID           string     `db:"job_id"           json:"job_id"`
+	Status          string     `db:"status"           json:"status"` // pending / running / done / failed
+	Symbols         string     `db:"symbols"          json:"symbols"`
+	Timeframe       string     `db:"timeframe"        json:"timeframe"`
+	FetchLimit      int        `db:"fetch_limit"      json:"fetch_limit"`
+	Mode            string     `db:"mode"             json:"mode"`
+	WriteDB         bool       `db:"write_db"         json:"write_db"`
+	ReplayMaxRows   int        `db:"replay_max_rows"  json:"replay_max_rows"`
+	RunID           NullString `db:"run_id"           json:"run_id,omitempty"`
+	SchemaVersion   NullString `db:"schema_version"   json:"schema_version,omitempty"`
+	PipelineVersion NullString `db:"pipeline_version" json:"pipeline_version,omitempty"`
+	Rows            NullInt64  `db:"result_rows"      json:"rows,omitempty"`
+	Sources         NullInt64  `db:"source_count"     json:"sources,omitempty"`
+	Report          RawJSON    `db:"report"           json:"report,omitempty"`
+	Error           NullString `db:"error"            json:"error,omitempty"`
+	StartedAt       NullTime   `db:"started_at"       json:"started_at,omitempty"`
+	FinishedAt      NullTime   `db:"finished_at"      json:"finished_at,omitempty"`
+	CreatedAt       time.Time  `db:"created_at"       json:"created_at"`
 }
 
 type SRZone struct {

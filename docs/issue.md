@@ -15,25 +15,49 @@
 
 ---
 
-目前無待處理項目。
+### I-040：production regression governance gate 在該模型首次 decision-replay 寫入前為 no-op（by-design）
 
-已結案並歸檔：
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（刻意，by-design） |
+| 嚴重度 | 低 |
+| 分類 | Python / SR Zone / 模型治理 |
+| 發現日期 | 2026-07-27 |
+| 來源 | T-002 P2 review |
 
-- **I-019 ~ I-032**（SR Zone Final Entry 仲裁鏈的 context-aware entry executability、market-price
-  RR / target / best_trade_zone 語意、entry blocking gate、final entry state 正規化、risk_notes
-  reason-code 驅動改寫、market-price target 選取等一整組問題）已於 2026-07-24 review 通過並修正完成，
-  現況規格歸檔於 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 Final Entry Arbitration 與
-  rr_context / rr_gate 段落。
-- **I-033 ~ I-035**（T-020 Position owner scope 的 review 發現：group `AddMember` 角色保護、
-  group membership 與 tenant membership 一致性、前端 `canWritePortfolio` 預設）已於 2026-07-24
-  review 通過並修正完成，現況歸檔於 [`database-schema.md`](./database-schema.md)、
-  [`architecture.md`](./architecture.md) 與 [`api-reference.md`](./api-reference.md)。
-- **I-036 ~ I-039**（T-020 migration 053 追加異動的 review 發現：053 刻意捨棄 legacy 全域持倉且不可逆、
-  MySQL `INSERT ... SELECT ... NOT EXISTS(同表)` error 1093、group `AddMember` 自動授予 tenant
-  membership 的提權副作用重評、default portfolio 唯一約束與重複 helper / 多餘賦值清理）已於
-  2026-07-25 review 通過並修正完成，現況（053 資料捨棄、MySQL 1093 / functional-index 注意、default
-  portfolio 唯一約束、AddMember 需既有 tenant membership）歸檔於
-  [`database-schema.md`](./database-schema.md)、[`architecture.md`](./architecture.md) 與
-  [`api-reference.md`](./api-reference.md)。
+`pipeline._merge_regression_governance_gate` 只有在 `fetch_latest_sr_regression_governance(model_config_hash)`
+查得同模型、`schema_version=sr_zone_decision_replay_p0` 的最新 replay 結果時才會作用。若該
+`model_config_hash` 尚未跑過任何 `--write-db` 的 decision replay（新訓練模型、或 scheduler 關閉且從未手動
+執行），fetch 回 None → gate 為 no-op，分析維持原本模型治理。這是刻意的安全預設（gate 只趨保守、
+不因缺資料而誤擋），但意味著**這層 P2 安全網要等該模型至少跑過一次 evaluation 並寫入 DB 後才生效**。
+上線流程若倚賴此 gate，需確保新模型部署後有排入一次 decision replay。屬營運相依，非 bug。
 
-下一筆新問題從 `I-040` 起編。
+---
+
+### I-049：`_chip_row_for_as_of` 遇到缺 `trade_date` 的 context row 會拋 KeyError
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已修復（待 review） |
+| 嚴重度 | 中 |
+| 分類 | Python / SR Zone / 模型驗證 |
+| 發現日期 | 2026-08-04 |
+| 來源 | T-002 A 區 review 修復後的自我 review |
+
+`evaluation._chip_row_for_as_of` 原本直接 `row["trade_date"]`，只要 chip context 裡有一列
+缺這個欄位就 `KeyError`，**整個 decision replay job 直接失敗**。姊妹函式
+`_snapshot_for_as_of` 本來就有 `if raw_time is None: continue` 的防護，兩者不一致。
+
+可達性：`POST /sr-zones/evaluate` 允許呼叫端自帶 `chip_scores_by_symbol`（見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Replay context 的股票比對規則」），
+外部給的資料不保證每列都有 `trade_date`。這是既有問題，不是同批 review 的修復引入的，
+在補「context row 缺時間欄位」的邊界測試時才浮現。
+
+**修復方式（2026-08-04，已實作）**：改用 `row.get("trade_date")`，`None` 或
+`pd.Timestamp` 解析失敗都只 `continue` 跳過該列，與 `_snapshot_for_as_of` 行為一致。
+新增測試：context 混入一列沒有 `trade_date` 的資料時，replay 仍完成且 as-of 命中有時間戳
+的那一列。
+
+---
+
+下一筆新問題從 `I-050` 起編。

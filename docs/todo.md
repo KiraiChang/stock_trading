@@ -22,6 +22,9 @@
 | 分類 | Python / SR Zone / 模型驗證 |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
+| P0 狀態 | 已實作（calibration bins 已於 2026-08-04 補齊） |
+| P1 狀態 | 部分已實作（decision replay、DB 落地、API 與 UI 手動入口已完成） |
+| P2 狀態 | 部分已實作（機制完整且預設關閉；正式啟用另有前置條件，見下方 review） |
 
 目前只有 `train.py` 手動訓練 + train job metrics（time-split holdout、校準、
 dataset diagnostics），沒有「模型上線後過去一段時間的訊號實際表現如何」的
@@ -31,29 +34,35 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
 
 實作計畫：
 
-- **P0：Python evaluation runner**
+- **P0：Python evaluation runner**（已實作，待 review）
   - 新增 `backtest.modular.sr_scoring.evaluation`。
   - 輸入 symbols、timeframe、limit / date range、model path、builder config。
   - 對每檔股票做 walk-forward evaluation：每個時間點只能用當下以前的 OHLCV
     建 zone、算 probability / score / decision，再用未來 N 根 K 棒產生 label。
   - 第一版輸出 JSON report，不先接 UI 或排程。
-- **P0：核心驗證指標**
-  - 模型層：hold / break AUC、Brier score、log loss、calibration bins。
+- **P0：核心驗證指標**（已實作，待 review）
+  - 模型層：hold / break AUC、Brier score、log loss、calibration bins（2026-08-04 補齊，
+    schema `sr_evaluation_calibration_v1`）。
   - Zone 層：support hold rate、resistance rejection rate、breakout continuation rate。
   - Decision 層：`WAIT_CONFIRMATION`、`PROBE_ENTRY`、`ENTRY_ALLOWED` 的後續勝率、
     失效率、平均報酬與 RR 分布。
   - Daily confirmation：納入 T-028 的隔日 / 兩日確認成效統計。
-- **P1：結果落 DB**
+- **P1：結果落 DB**（已實作起步，待 review）
   - 優先寫入既有 `stock_sr_regression_results.metrics_json`。
   - `run_id` 使用 `sr_eval_yyyymmddhhmmss`，並記錄 `model_config_hash`、
     `pipeline_version`、dataset range 與 split method。
   - 暫不新增拆欄 schema；等 report 指標穩定後再評估是否正規化。
-- **P1：CLI / API**
+- **P1：CLI / API**（CLI、evaluate trigger API 與 regression result list API 已實作起步）
   - 先提供 CLI：`python -m backtest.modular.sr_scoring.evaluation ...`。
-  - Go API 可後續新增 `/sr-zones/evaluate` 與 regression result list endpoint。
-- **P2：排程與模型治理**
-  - report 穩定後再加 daily / weekly schedule。
-  - 若 evaluation 未通過門檻，標記模型 degraded / unreliable，不自動放大進場權限。
+  - Go API 已新增 `GET /sr-zones/regression-results` 讀取
+    `stock_sr_regression_results`，支援 `limit` 與 `schema_version` 篩選。
+  - Go API 已新增 `POST /sr-zones/evaluate`，轉呼叫 Python
+    `POST /sr-scoring/evaluate`，可手動觸發 evaluation 或 decision replay；`write_db=true`
+    時由 Python 寫入 `stock_sr_regression_results`。
+- **P2：排程與模型治理**（部分已實作，待 review）
+  - 已先提供可設定的 daily / weekly cron 入口，預設關閉；待 report schema review 後再決定正式啟用策略。
+  - production analysis 已接入同模型最新 regression governance gate；若 evaluation
+    未通過門檻，會標記模型 degraded / unreliable，並保守限制 entry gate。
 
 驗證與風險：
 
@@ -61,6 +70,189 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
 - 第一版不要做交易資金模擬，先驗證訊號分類與後續 outcome，避免把 sizing /
   portfolio policy 的問題混進模型品質判斷。
 - T-003 的 ATR 參數調整應依賴本項 evaluation 結果，不應單獨憑主觀調常數。
+
+P0 已實作範圍：
+
+- `evaluation.py` 提供 CLI / JSON report 與 `run_evaluation()`。
+- 目前 report 已包含 dataset summary、zone outcome、model availability、hold/break
+  AUC / Brier score / log loss 與 calibration bins（模型存在時）。
+- DB 落地已支援寫入 `stock_sr_regression_results`；decision replay 分層統計已起步，
+  Go evaluate background job API、result list API、前端手動入口與 scheduler 排程入口已實作。
+
+P1 已實作範圍：
+
+- CLI / `run_evaluation()` report 已包含 `run_id`、`pipeline_version`、`split_method`、
+  `model_config_hash`。
+- CLI 支援 `--write-db`、`--run-id`、`--pipeline-version`、`--passed`。
+- `write_evaluation_result()` 將完整 report 存入 `metrics_json`，並投影 hold/break
+  AUC / Brier score 到既有欄位。
+- `write_evaluation_result()` 也可寫入 `sr_zone_decision_replay_p0` report；此類 report
+  會完整存入 `metrics_json`，hold/break scalar 欄位維持 null。CLI
+  `--decision-replay --write-db` 已允許；`--sweep --write-db` 仍禁止。
+- Decision / daily confirmation / final entry 成效統計不能從 dataset label 假推；目前已
+  改走 historical decision replay，逐日用「當下以前」OHLCV 重建 zone score 與
+  decision summary，再把 decision fields 對齊未來 N 根 outcome。
+- model path 可載入時，decision replay report 已輸出 `model_metadata`、
+  `model_version`、`model_config_hash`、`model_trained_at`，並產生每個 symbol 的
+  `replay_plan`（candidate bars、start/end as-of、min history、forward bars）。
+- decision replay 已能產生 historical outcome rows：每列包含 `symbol`、`timeframe`、
+  `as_of`、`current_price`、`forward_bars`、`forward_return`，並以
+  `--replay-max-rows` 限制輸出量。
+- replay rows 已補上後續 `build_decision_summary()` 需要的 candle context：
+  `candle_open`、`candle_high`、`candle_low`、`candle_close`、
+  `previous_candle_close`。同時新增 `zone_score_available`、`zone_score_error`、
+  `decision_error`、`zone_score_fields_available` 與
+  `outcome_summary.rows_with_zone_score / rows_with_decision_fields`，讓後續接
+  historical ZoneScore 時可以清楚辨識目前可用層級。
+- model path 可載入時，decision replay rows 已會用歷史 as-of slice 建立 zone、
+  透過既有 `score_zone()` 產生 historical ZoneScore 摘要，並填入
+  `zone_score_available`、`zone_count`、`primary_zone`、`zone_score_error`。
+  report 的 `zone_score_fields_available` 與
+  `outcome_summary.zone_score_error_counts` 會反映 ZoneScore replay 是否可用。
+- replay rows 已補上 `build_decision_summary()` 所需的 global/chip context 起步：
+  `global_trend`、`global_volatility`、`global_metrics` 與 `chip_summary`。
+  `run_decision_replay(chip_scores_by_symbol=...)` 可依 as-of 日期取
+  `trade_date <= as_of` 的最新 chip row，並重用 production `_build_chip_summary()` 格式；
+  找不到資料時才以 `chip_summary.missing=true` 表示缺資料。
+  `outcome_summary.rows_with_global_context / rows_with_chip_context`、
+  `rows_with_non_missing_chip`、`chip_missing_rows` 用於追蹤前置 context 是否齊備。
+- model、historical ZoneScore 與 global context 可用時，decision replay 已開始呼叫
+  `build_decision_summary()`，並填入 `market_bias`、`daily_confirmation_state`、
+  `final_entry_state`、`rr_context`、`decision_error`。report 會輸出
+  `decision_replay_available`、`decision_fields_available`、
+  `outcome_summary.rows_with_decision_fields`、`decision_error_counts`、
+  `final_entry_state_counts`、`daily_confirmation_state_counts`。
+- decision replay outcome summary 已新增 `by_final_entry_state`、
+  `by_daily_confirmation_state`、`by_market_bias` 分層，每組輸出 rows、
+  `average_forward_return`、`positive_forward_return_rate`、
+  `negative_forward_return_rate`。
+- decision replay row 已新增 `daily_confirmation_outcome`、`next_close_return`、
+  `two_bar_close_return`，以 primary zone 角色做隔日 / 兩日確認結果標記：
+  支撐 `SUPPORT_HELD` / `SUPPORT_BROKEN`、壓力
+  `RESISTANCE_REJECTED` / `RESISTANCE_BROKEN`、兩日
+  `SUPPORT_CONFIRMED` / `SUPPORT_FAILED` /
+  `RESISTANCE_BREAKOUT_CONTINUATION` 等。
+- decision replay outcome summary 已新增 `daily_confirmation_summary`，彙總支撐隔日守住率、
+  支撐兩日確認率、壓力隔日壓回率、壓力突破率、壓力兩日突破延續率、隔日 /
+  兩日平均報酬與依 `daily_confirmation_state`、`primary_role` 分層的 outcome counts。
+- `daily_confirmation_summary` 已新增量能 / 事件 / RR gate 分層，包含
+  `by_volume_context`、`by_event_sequence`、`by_market_event_types`、
+  `by_event_market_state`、`by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket`，
+  每組都輸出 counts、returns 與 failure distribution。
+- `daily_confirmation_summary.failure_distribution` 已新增第一版失敗分布：
+  `SUPPORT_CONFIRMATION_FAILED`、`SUPPORT_CONFIRMATION_OK`、
+  `RESISTANCE_BREAKOUT_CONTINUED`、`RESISTANCE_REJECTION_OK`、
+  `RESISTANCE_REJECTION_FAILED`、`RESISTANCE_UNRESOLVED` 等。
+- decision replay outcome summary 已新增保守 `rr_summary`，只抽取穩定欄位
+  `entry_rr`、`position_rr`、`entry_rr_source`、`position_rr_source`，輸出 count /
+  average / median / source counts。RR bucket 與完整 distribution 尚未納入，避免過早
+  固定 `rr_context` 統計 schema。
+- decision replay 已依 symbol carry-forward previous event states，下一列會把上一列
+  `event_state_summary.states` 傳入 `build_decision_summary(previous_event_states=...)`。
+  report 會輸出 `event_lifecycle_replay_available`、
+  `outcome_summary.rows_with_event_lifecycle` 與每列的 `event_state_count`、
+  `active_event_count`、`resolved_event_count`、`expired_event_count`。
+- `run_decision_replay(model_governance_by_symbol=...)` 可依 as-of 日期取
+  `as_of` / `trade_date` / `created_at <= replay as_of` 的最新 governance snapshot，
+  並傳入 `build_decision_summary(model_governance=...)`。row 會輸出
+  `model_governance_available`、`model_governance_source_time`、
+  `model_governance`；summary 會輸出 `rows_with_model_governance` 與
+  `model_governance_missing_rows`。
+- decision replay report 已新增 `governance_evaluation`
+  (`sr_decision_replay_governance_evaluation_v1`)，依 replay rows、decision field
+  coverage、error rate、model governance coverage、event lifecycle coverage 與
+  `PROBE_ALLOWED` / `ENTRY_ALLOWED` 後續 outcome，輸出 `HEALTHY` / `DEGRADED` /
+  `UNRELIABLE`、`passed`、`strict_passed`、`confidence_gate.allow_entry`、
+  `max_entry_state` 與 reason codes。
+- `write_evaluation_result()` 在呼叫端未指定 `passed` 時，會自動使用
+  `governance_evaluation.passed` 投影到 `stock_sr_regression_results.passed`；
+  手動指定 `passed=true/false` 時仍以呼叫端為準。
+- migration `056_add_sr_regression_result_summary_columns` 已新增
+  `schema_version`、`result_rows`、`source_count`、`governance_health_state`、
+  `governance_strict_passed`，讓 regression result list 不必每次解析完整
+  `metrics_json` 才能篩選/顯示 replay 治理狀態。
+- Go repo 與 Python `write_evaluation_result()` 都會從 report 自動投影上述 summary
+  欄位；API JSON 仍維持 `rows` / `sources` 命名，DB 欄位使用
+  `result_rows` / `source_count` 以避開 SQL 保留字風險。
+- CLI `--decision-replay` 已支援 `--chip-json` 與 `--model-governance-json`，
+  JSON 可為 `{ "2330": [rows] }` 或 `[rows]`。傳單一 list 時會轉成 `__default__` key，
+  語意是「這份 context 套用到所有 symbol」；per-symbol object 則嚴格比對，不會跨股票挪用
+  （現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Replay context 的股票比對規則」）。
+- Go `POST /sr-zones/evaluate` 在 decision replay 模式下已會自動從 DB 補 historical
+  chip context 與 model governance context；手動 request 若已提供
+  `chip_scores_by_symbol` / `model_governance_by_symbol` 則保留呼叫端內容不覆蓋。
+- Python CLI `--decision-replay --symbols` 在未提供 JSON context 時，已會自動從 DB 載入
+  `chip_scores` 與 `stock_sr_model_governance` 歷史 context；`--chip-json` /
+  `--model-governance-json` 仍可覆蓋來源。
+- migration `055_create_sr_evaluation_jobs` 已新增 `sr_evaluation_jobs`，用來追蹤
+  evaluation / decision replay 的 pending/running/done/failed 狀態與完成 report。
+- `POST /sr-zones/evaluate` 已改為建立背景 job；前端可用
+  `GET /sr-zones/evaluation-jobs/:job_id` 輪詢狀態，完成後從 job.report 顯示摘要。
+- 前端 SR Zone 頁面已新增手動 evaluation / decision replay 控制、active job 狀態、
+  最近 evaluation jobs 與最近 regression results 表格。
+- backend 已新增 `sr_evaluation` config、scheduler cron 註冊與
+  `POST /scheduler/sr-evaluation/run` 手動觸發；自動排程預設關閉，開啟後 symbols 空陣列
+  會使用 watchlist，並共用 Go API 的 historical chip / model governance DB context 注入。
+- 前端排程監控頁已新增 `sr_evaluation` job 狀態與手動執行按鈕。
+- production analysis 已會讀取同一 `model_config_hash` 最新
+  `sr_zone_decision_replay_p0` regression governance gate，並合併進
+  `probability_context.health` / `decision.model_governance`。若最近 replay 為
+  `UNRELIABLE`，正式 entry gate 會保守阻擋；若為 `DEGRADED`，最多限制到小量 /
+  觀察。查無同模型 replay 或 DB 尚未有 summary 欄位時，分析維持原本模型治理邏輯。
+
+#### T-002 P1 / P2 實作狀況 review（2026-08-04）
+
+逐項對照計畫文字與實際程式碼（不只看自述）的結果：
+
+**P1 — 與自述相符，DB 落地鏈路完整**。`write_evaluation_result()` 確實寫入 `run_id` /
+`model_config_hash` / `pipeline_version` / `split_method` 與 056 的五個 summary 欄位；CLI 四個
+旗標齊全；decision replay report 的 hold/break scalar 維持 null；Go list API 的
+`schema_version` 篩選同時比對欄位與 `metrics_json->>'schema_version'`；背景 job 與前端輪詢都在。
+
+**P0 遺留缺口：calibration bins 從未實作**。P0「核心驗證指標」明列「hold / break AUC、Brier
+score、log loss、**calibration bins**」，但 `evaluation.py` 內沒有任何 calibration 相關程式碼，
+`model_metrics` 只有 `rows` / `positive_rows` / `auc` / `brier_score` / `log_loss`。原本表頭把
+P0 標成「已實作」與 P0 條列的「部分已實作」互相矛盾，已更正表頭。RR 分布只有保守版
+（count / average / median / source counts），這點原本就有記錄。
+
+**P2 — 機制完整可運作，但正式啟用有一個未寫下的前置條件**。治理鏈路端到端追過是通的
+（Python 寫 `governance_health_state` → `fetch_latest_sr_regression_governance` 以
+`governance_health_state <> ''` 篩選 → `_merge_regression_governance_gate` 合併；非 replay 的
+evaluation report 不產生 governance verdict，因此不會被誤選中）。
+
+但 **預設 `replay_max_rows: 200` 搭配 watchlist（50～200 檔）時，股票覆蓋率必然遠低於
+`MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都會產出 `DEGRADED`**，production 進場上限被壓到
+`SMALL_ENTRY`。所以 P2 要正式啟用，得先決定 `replay_max_rows` 與 `sr_evaluation.symbols` 的
+搭配（例如縮小 symbols 到重點觀察名單，或把 `replay_max_rows` 調到
+`檔數 × 足夠樣本`），不只是「等 report schema review」。
+
+**P1/P2 剩餘工作**：
+
+1. ~~補 calibration bins 到 `model_metrics`~~ **已完成（2026-08-04）**，見 T-003 的
+   「實作計畫：sweep 接 decision replay + calibration bins」步驟 2。
+2. 決定 P2 正式啟用的 `replay_max_rows` / `symbols` 搭配並寫進設定說明。
+3. RR 分布由保守版擴充為 bucket / distribution（原計畫的 Decision 層指標）。
+
+#### T-002 / T-003 / T-028 review 結論（2026-07-27 初審、2026-08-04 複審）
+
+兩輪 review 都確認**方向正確、關鍵風險處理妥當**：無 lookahead bias、production governance
+gate 只趨保守且安全降級、T-003 預設未變（`adaptive_zone_builders_enabled: false`）、排程預設
+關閉（`sr_evaluation.enabled: false`）。這些性質的現況說明已歸檔到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)（as-of 邊界、取樣規則、context 比對規則、
+governance gate、evaluation 排程），並由 `tests/test_pipeline.py` 與 `scheduler_test.go` 鎖住。
+
+2026-08-04 複審另外找出 9 筆問題（含一筆會讓 replay 只驗到第一檔股票的高嚴重度取樣缺陷、
+一筆 MySQL 保留字），皆已修復並歸檔；review 通過後已從 `issue.md` 收斂，僅留 I-040
+（刻意保留的已知限制）與 I-049（複審當下新發現、待 review）。
+
+F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 review，條目已收斂。剩餘：
+
+- **F3（低，optional，未處理）**：`evaluation.py` 單檔已超過 1900 行（replay / daily-confirmation /
+  sweep / governance report 全擠一起），後續可拆模組（replay / outcomes / sweep / reporting）
+  以利維護。屬大型重構，需另出計畫書。
+
+狀態不動（T-002/T-003 P1/P2 仍「部分已實作」、T-028「已實作起步」）；剩餘 P1/P2 續作與 F3
+完成後再整體收斂歸檔。
 
 ---
 
@@ -73,27 +265,30 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
 | 分類 | Python / SR Zone / Zone Builder |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
+| P0 狀態 | 已實作（待 review） |
+| P1 狀態 | 已實作（待 review；計畫列的五個比較面向全數覆蓋） |
+| P2 狀態 | 部分已實作（flag + runtime metadata 已有、預設關閉；決策依據已具備，待實跑 sweep 取樣） |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
 
 實作計畫：
 
-- **P0：抽出 builder config factory**
+- **P0：抽出 builder config factory**（已實作，待 review）
   - 新增 `ZoneBuilderConfig` / `build_zone_builders(config)` 類型的集中入口。
   - `train.py`、`scoring.py` 與 T-002 evaluation runner 都改用同一個 factory。
   - 第一版保留目前預設：`atr_width_multiplier=1.5`、
     `max_merge_width_multiple=2.0`，只先移除硬編碼分散。
-- **P1：個股波動 profile / bucket**
+- **P1：個股波動 profile / bucket**（已實作起步，待 review）
   - 以歷史 OHLCV 計算 `ATR / close`、平均日內 range、價格級距、touch density。
   - 先分低波動 / 一般波動 / 高波動 bucket，不直接做 symbol-level override。
   - 每個 bucket 有一組候選 builder config。
-- **P1：參數 sweep**
+- **P1：參數 sweep**（已實作，待 review）
   - 候選範圍先保守，例如 `atr_width_multiplier=1.0/1.25/1.5/1.75/2.0`、
     `max_merge_width_multiple=1.5/2.0/2.5`。
   - 用 T-002 evaluation 比較 touch 樣本量、hold/break calibration、
     `AT_ZONE` 比例、entry decision outcome 與 RR 分布。
-- **P2：導入 bucket-based config**
+- **P2：導入 bucket-based config**（部分已實作，待 review）
   - 低波動股票使用較窄 zone，高波動股票可放寬 zone，但仍限制 merge 避免過度糊成大區間。
   - 等 evaluation 樣本足夠後，才評估 symbol-level override。
 
@@ -101,6 +296,223 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
 
 - P0 可先做，因為它只是抽參數入口。
 - P1/P2 必須依賴 T-002 evaluation pipeline；沒有 evaluation 前不應直接調整正式預設值。
+
+P0 已實作範圍：
+
+- `zone_builder.py` 新增 `ZoneBuilderConfig` 與三個 builder 子 config。
+- `build_zone_builders()` 集中建立 train/scoring/evaluation 使用的 builders。
+- `train.py`、`scoring.py` 已改用 factory；正式預設值未調整。
+- 尚未實作 symbol-level override 或正式預設導入。
+
+P1 已實作範圍：
+
+- `evaluation.py` CLI 已支援單次 evaluation 的 ATR builder 參數：
+  `--atr-width-multiplier`、`--max-merge-width-multiple`、`--atr-lookback`、`--atr-period`。
+- `run_builder_sweep()` / CLI `--sweep` 已支援保守 grid sweep：
+  `--atr-width-grid`、`--max-merge-width-grid`，輸出每組候選的 zone outcome、
+  model metrics、builder config 與 `best_by` 摘要。
+- `run_evaluation()` 已輸出 `volatility_profiles`，包含 `atr_pct`、
+  `average_range_pct`、`touch_density_per_100_bars` 與
+  `LOW_VOLATILITY` / `NORMAL_VOLATILITY` / `HIGH_VOLATILITY` bucket。
+- `zone_outcomes` 已新增 `by_volatility_bucket` 分層，sweep candidate 也會帶出同樣
+  bucket outcome，供後續比較不同 ATR 參數在不同波動股票上的表現。
+- `run_builder_sweep()` 已輸出 `recommended_configs_by_bucket`，依各 volatility bucket
+  的 hold rate 與 average forward return 做保守排序；樣本不足時標記
+  `insufficient_sample=true`，不硬給正式建議。
+- sweep 目前只輸出 JSON，不寫入 `stock_sr_regression_results`；該資料表仍保留給單一
+  evaluation/regression run。
+- 這些參數只影響當次 evaluation，不改 train/scoring 正式預設。
+- bucket recommendation 目前仍是 evaluation 參考輸出，不會改寫正式
+  `build_zone_builders()` 預設；production scoring 只在明確開啟
+  `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 時套用 bucket config。
+
+P2 已實作範圍：
+
+- `zone_builder.py` 新增 `volatility_bucket_from_profile()` 與
+  `resolve_zone_builder_config_for_profile()`，把 LOW/NORMAL/HIGH volatility bucket
+  對應到候選 ATR width / merge width config。
+- `scoring.py` 新增個股 runtime profile helper，使用近 60 根 K 棒的 `ATR / close`
+  與平均日內 range 作為 bucket 依據。
+- `pipeline.py` 在未明確傳入 builders 時，會依
+  `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 決定使用固定預設或 bucket config；
+  目前 `python/config.yaml` 預設 `adaptive_zone_builders_enabled: false`，所以正式
+  scoring 行為不會自動改變。
+- analysis payload 新增 `zone_builder_runtime_config`，可檢查本次是否啟用 adaptive、
+  使用哪個 bucket、實際套用的 builder config 與原因碼。
+- 尚未完成：依 T-002 regression/sweep 結果決定是否預設啟用、調整 bucket 門檻、
+  或加入 symbol-level override。
+
+> 2026-07-27 review：P0（抽 config、預設未變）與 P2 adaptive flag（預設關閉、production scoring 不變）
+> 方向確認無誤，見 T-002 的「review 結論」段落。
+
+#### T-003 P1 / P2 實作狀況 review（2026-08-04）
+
+**P1 的工具都在，但比較面向只覆蓋計畫的 2/5 —— 這是 T-003 目前最大的落差。**
+
+已驗證完成：CLI 的 `--atr-width-multiplier` / `--max-merge-width-multiple` / `--atr-lookback` /
+`--atr-period`；`--sweep` 與兩個 grid，且 `--sweep` 與 `--write-db`、`--decision-replay` 互斥；
+`volatility_profiles`（`atr_pct` / `average_range_pct` / `touch_density_per_100_bars` + 三個
+bucket）；`zone_outcomes.by_volatility_bucket`；`recommended_configs_by_bucket` 與
+`insufficient_sample`。
+
+問題在於 **`run_builder_sweep()` 呼叫的是 `run_evaluation`，不是 `run_decision_replay`**，
+所以每個 candidate 的 report 裡根本沒有 decision / RR 欄位。對照 P1 計畫列的五個比較面向：
+
+| 計畫要比較的 | 實況 |
+|---|---|
+| touch 樣本量 | ✅ `dataset_summary` |
+| hold/break calibration | ⚠️ 只有 AUC / Brier，缺 calibration bins（見 T-002 P0 遺留缺口） |
+| `AT_ZONE` 比例 | ❌ 測不到：evaluation dataset 的 `role` 只會是 SUPPORT / RESISTANCE（`features.py` 由 approach direction 二選一決定），`AT_ZONE` 是 runtime 概念，不會進資料集 |
+| entry decision outcome | ❌ sweep 不跑 decision replay |
+| RR 分布 | ❌ 同上 |
+
+（另外確認過一個疑慮：`zone_outcomes.resistance_rejection_rate` 用 `is_support == 0` 取樣，
+但因為 dataset 裡不存在 `AT_ZONE` 列，並沒有被非壓力角色污染。）
+
+**P2 的機制齊全，但決策依據還不存在**。`volatility_bucket_from_profile` /
+`resolve_zone_builder_config_for_profile` / `scoring.py` runtime profile / `pipeline.py` flag
+gate / `zone_builder_runtime_config` 都已驗證，預設關閉也確認過。但 P2 的出口條件是「等
+evaluation 樣本足夠後才評估是否導入」，而 sweep 現在比不出 entry outcome 與 RR 分布——
+**要不要開 adaptive builder 的判斷依據產不出來**。這是一條斷掉的相依鏈：P2 卡在 P1，
+而 P1 的缺口先前沒有被記錄。
+
+**P1/P2 剩餘工作（有先後順序）**：
+
+1. ~~讓 sweep 能產出 decision 層指標~~ **已完成（2026-08-04）**：
+   `run_builder_sweep(decision_replay=True)` 會對每組候選跑一次帶該候選 builder config 的
+   decision replay，candidate 摘要新增 `decision_outcomes`，`best_by` 新增
+   `entry_average_forward_return`。
+2. ~~補 calibration bins~~ **已完成（2026-08-04）**。
+3. ~~`AT_ZONE` 比例無法量測~~ **已完成（2026-08-04）**。先前的結論只對 evaluation dataset
+   成立（該處 `role` 由 approach direction 二選一決定，永遠不是 `AT_ZONE`），但 **replay
+   路徑的 `primary_zone.role` 是量得到的**——`score_zone()` 會產生 `AT_ZONE`。已新增
+   `outcome_summary.at_zone_rate` / `primary_zone_role_counts`，並帶進 sweep 的
+   `decision_outcomes`。至此 P1 計畫列的五個比較面向全數覆蓋。
+4. **仍待辦**：實際跑一次 sweep 取樣，依結果決定 bucket 門檻、是否預設啟用 adaptive
+   builder，以及是否需要 symbol-level override。這是 P2 收斂的最後一步。
+
+#### 實作計畫：sweep 接 decision replay + calibration bins（2026-08-04，已實作待 review）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已實作（待 review） |
+| 範圍 | Python evaluation pipeline（T-003 P1 剩餘工作 1、2；同時補齊 T-002 P0 遺留的 calibration bins） |
+| 影響 runtime | 只有 Python；不動 Go、frontend、production scoring |
+
+**實作結果（2026-08-04）**：三個步驟都完成，python 全套 371 passed。現況規格已歸檔到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Decision Replay 的 zone builder 參數」、
+「Calibration bins」與「參數 sweep 的 decision 層比較」三節。計畫要求的實測也做了：
+2 檔股票 × 400 根 K、4 組候選、`replay_max_rows=50` 耗時 73 秒、peak RSS 177MB——**記憶體
+不是瓶頸，時間才是**，預設 5×3 grid 外推約 4～5 分鐘，因此
+`SWEEP_DEFAULT_REPLAY_MAX_ROWS = 50` 維持計畫初值。
+
+**先講一個會改變範圍的前提**
+
+原本以為「sweep 接 decision replay」只是把 `run_builder_sweep()` 的呼叫對象換掉，實際查證後
+不是：
+
+- `run_decision_replay()` **沒有 `builder_config` 參數**。
+- `_decision_replay_rows()` 呼叫 `_historical_zone_score_summary(df, idx, bundle, dataset_config)`
+  時**沒有傳 builder config**，所以 replay 重建 zone 一律用 `build_zone_builders(None)` 的
+  baseline 參數。
+
+也就是說，直接讓 sweep 對每個 candidate 跑 decision replay，**15 組候選會得到完全相同的
+decision 指標**，完全沒有比較價值。因此本計畫的第一步是把 builder config 打通到 replay 路徑。
+順帶一提，這也是目前一個沉默的行為陷阱：CLI 的 `--atr-width-multiplier` 等四個參數在
+`--decision-replay` 模式下**現在完全沒有作用**。
+
+**目標**
+
+1. 讓 decision replay 可依指定的 `ZoneBuilderConfig` 重建 zone（獨立價值：修掉上述陷阱）。
+2. `model_metrics` 補上 calibration bins（T-002 P0 明列但從未實作）。
+3. `run_builder_sweep()` 可選擇性跑 decision replay，讓 sweep 產出 entry outcome 與 RR 分層，
+   補齊 T-003 P1 計畫列的比較面向。
+
+**不做的範圍**
+
+- 不改 production scoring 預設，不動 `adaptive_zone_builders_enabled`。
+- sweep 仍只輸出 JSON，不寫入 `stock_sr_regression_results`。
+- 不做 symbol-level override、不調整 bucket 門檻（那是 P2 拿到資料後才決定）。
+- 不動 Go 與 frontend：report 只增欄位，由 raw JSON 與 `SREvaluationReport` 的索引簽章吸收。
+
+**實作步驟（有先後順序）**
+
+**步驟 1：把 builder config 打通到 decision replay**
+
+- `run_decision_replay()` 新增 `builder_config: ZoneBuilderConfig | None = None`。
+- `_decision_replay_rows()` 新增同名參數，傳給 `_historical_zone_score_summary()`
+  （該函式**已經有**這個參數，只是從來沒被傳過）。
+- 預設 `None` → 行為與現在完全相同，既有呼叫端不受影響。
+- replay report 新增 `builder_config`（用既有的 `zone_builder_config_snapshot()`），讓 replay
+  結果可追溯用了哪組參數。
+- CLI `--decision-replay` 改為套用既有的四個 ATR 參數，使其與 evaluation 模式語意一致。
+
+**步驟 2：calibration bins**
+
+- 在 `_binary_metrics()` 內新增 `calibration` 區塊（單一入口，hold/break 自動都有）。
+- 新增 `_calibration_bins(y, y_proba, bin_count)`：等寬切 `[0, 1]`，每個 bin 輸出
+  `lower` / `upper` / `rows` / `mean_predicted` / `observed_rate` / `gap`
+  （`observed_rate - mean_predicted`）。
+- **空 bin 保留**（`rows=0`、其餘為 null）：sweep 要跨 candidate 對齊比較，schema 必須穩定。
+- 聚合輸出 `expected_calibration_error`（以樣本數加權的 `|gap|` 平均）與
+  `max_calibration_error`。
+- 新增常數 `CALIBRATION_BIN_COUNT = 10`、`MIN_CALIBRATION_ROWS = 50`；總樣本低於門檻時標記
+  `insufficient_sample=true`，bins 照樣輸出但不應拿來做參數決策。
+- schema 標記 `sr_evaluation_calibration_v1`。與 `probability_engine._calibration_report`
+  是不同東西（那支描述「訓練時是否有校準」，這裡是實測 reliability），不共用格式。
+
+**步驟 3：sweep 選擇性跑 decision replay**
+
+- `run_builder_sweep()` 新增 `decision_replay: bool = False` 與 `replay_max_rows`，
+  **預設關閉**，既有行為不變。
+- 開啟時每個 candidate 除了現有的 `run_evaluation()`，再跑一次
+  `run_decision_replay(builder_config=<該 candidate 的 config>)`。
+- **chip / governance context 只在 sweep 開頭載入一次**，再傳給每個 candidate，避免 15 組候選
+  各查一次 DB。
+- `_sweep_result_summary()` 新增 `decision_outcomes`：`by_final_entry_state`、`rr_summary`、
+  `replay_coverage`、`decision_fields_available`。
+- `best_by` 新增 decision 層排名；只納入 `rows_with_forward_return >=
+  MIN_ENTRY_OUTCOME_ROWS` 的 candidate，避免用 3、5 列的樣本挑參數。
+- 未提供 `model_path` 時：decision replay 產不出 decision 欄位，因此**只記 warning 並略過
+  replay**，不讓整個 sweep 失敗。
+- CLI 新增 `--sweep-decision-replay`，沿用既有 `--replay-max-rows`。
+
+**資料 contract 變化**
+
+只有新增，沒有改名或移除：replay report 增 `builder_config`、`model_metrics.{hold,break}`
+增 `calibration`、sweep candidate 增 `decision_outcomes`、`best_by` 增鍵。DB schema 不變
+（sweep 不寫 DB；evaluation 的 `metrics_json` 是整包 JSON）。
+
+**主要風險**
+
+- **執行時間與記憶體（最大風險）**：decision replay 每一列都要重建 zone 並跑完整
+  decision engine。5 × 3 grid 配 `replay_max_rows=200` 等於 3000 次重建，在這台 2GiB host 上
+  很可能是分鐘級甚至更久。緩解：預設關閉、sweep 專用的較小 replay 預算（初值提議 50，
+  **實作時先實測再定案**）、文件標明建議搭配較小的 symbol 集合。
+- **既有測試會紅（預期內）**：`test_run_builder_sweep_returns_parameter_candidates` 目前斷言
+  `set(report["best_by"]) == {4 個 zone 層鍵}`，加了 decision 層鍵會失敗，需一併更新。
+- **步驟 1 會讓既有 CLI 行為改變**：`--decision-replay` 搭配 ATR 參數從「靜默無效」變成
+  「真的生效」。這是修正而非退步，但先前若有人跑過這種組合，新舊結果不可直接比較。
+- **回滾**：全部是新增參數與新欄位，預設值維持現行行為，`git checkout` 即可還原。
+
+**測試策略**
+
+- 步驟 1：同一份資料用差異夠大的兩組 `atr_width_multiplier` 跑 replay，`zone_count` /
+  `primary_zone` 必須不同——**這條是整個計畫的關鍵測試**，直接鎖住「配置真的有生效」，
+  否則 sweep 的比較毫無意義。另驗 replay report 帶出 `builder_config` snapshot。
+- 步驟 2：完美校準的合成資料 → ECE 接近 0；刻意偏移的資料 → ECE 明顯大於 0；空 bin 仍在
+  且欄位為 null；樣本低於門檻 → `insufficient_sample=true`。
+- 步驟 3：`decision_replay=True` 時每個 candidate 都有 `decision_outcomes`，且候選之間不完全
+  相同（呼應步驟 1 的關鍵測試）；未給 `model_path` 時有 warning 且 sweep 仍完成；更新既有
+  `best_by` 斷言。
+
+**驗證**：`python/scripts/test.sh backtest/modular/sr_scoring/tests`，並實跑一次小型
+sweep（2 檔股票 × 2×2 grid）量測耗時與記憶體，據以決定 sweep 的預設 replay 預算。Go 與
+frontend 無契約變更，不需重跑。
+
+**完成後歸檔**：replay 的 builder config 語意、calibration bins schema 與門檻、sweep 的
+decision 層比較與取樣預算，補到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 evaluation 相關段落。
 
 ---
 
@@ -124,7 +536,7 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 進行中 |
 | 優先度 | 中 |
 | 分類 | Go / 即時行情 |
 | 建立日期 | 2026-07-07 |
@@ -310,10 +722,25 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 `decision_summary.daily_confirmation` 是單筆 EOD runtime 判讀，不能代表規則已完成歷史驗證。
 後續需在 SR Zone evaluation/backtest pipeline（T-002）中加入 daily confirmation label 與成效統計：
 
-- 候選支撐隔日守住率。
-- 候選壓力隔日壓回率或突破延續率。
-- 兩日確認後的勝率、風險報酬分布與失效率。
-- 不同量能條件、event sequence、RR gate 下的分層表現。
+- 候選支撐隔日守住率。（已實作起步，待 review）
+- 候選壓力隔日壓回率或突破延續率。（已實作起步，待 review）
+- 兩日確認後的勝率、風險報酬分布與失效率。（已實作起步：兩日方向 / 報酬統計；完整 RR distribution 待補）
+- 不同量能條件、event sequence、RR gate 下的分層表現。（已實作起步，待 review）
+
+已實作範圍：
+
+- `run_decision_replay()` 的每列 replay row 新增 `daily_confirmation_outcome`、
+  `next_close_return`、`two_bar_close_return`。
+- `outcome_summary.daily_confirmation_summary` 會輸出支撐 / 壓力隔日 zone 結果與兩日結果，
+  並提供 `by_state`、`by_primary_role` 分層。
+- `outcome_summary.daily_confirmation_summary` 已補上量能條件、event sequence、market event、
+  market state、RR gate、RR reason code、RR bucket 分層。
+- `outcome_summary.daily_confirmation_summary.failure_distribution` 已提供第一版失敗分布。
+- 尚未完成：更完整的 RR distribution（例如 percentiles / drawdown-like failure window）、
+  以及依量能強弱數值、event sequence 順序細節與 RR gate 原始基礎值做更細分層。
+
+> 2026-07-27 review：daily confirmation outcome 標記與分層統計以未來 idx+1 / idx+2 label 計算、
+> 無 lookahead，方向確認無誤，見 T-002 的「review 結論」段落。
 
 ---
 

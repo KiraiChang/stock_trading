@@ -1518,6 +1518,157 @@ T-002 / T-003 的後續實作方向固定為：
 4. **T-003 的正式調參依賴 T-002**：低波動 / 一般波動 / 高波動 bucket 可以作為第一階段，
    但不應在缺乏 walk-forward evaluation 前直接導入 symbol-level override，避免過擬合。
 
+### Decision Replay 的 as-of 邊界（無 lookahead）
+
+replay 的每一列都只能看到 as-of 當下為止的資訊，這是整條驗證管線的第一風險，已兩次
+review 逐項確認：
+
+- zone 用 `df.iloc[: as_of_index + 1]` 重建（`_historical_zone_score_summary`），
+  `current_price` 取 as-of 的 close。
+- 籌碼與模型治理 context 只取 `<= as_of` 的最新一列
+  （`_chip_row_for_as_of` / `_snapshot_for_as_of`）。
+- 未來資料**只**用於 label：`forward_return` / `next_close_return` / `two_bar_close_return`。
+- 每檔的 as-of 區間上界固定留 `forward_bars` 根（`_candidate_bar_range`），確保 label 算得出來。
+
+### Decision Replay 的取樣規則（`replay_max_rows`）
+
+`replay_max_rows` 是**所有股票加總**的預算，不是每檔的配額。分配規則在
+`evaluation._allocate_replay_quota`：
+
+- 預算跨股票**均分**；配額超過該檔可用 as-of 根數（`candidate_bars`）的部分會被收回，
+  重新分給還有餘裕的股票，重複到收斂。短天期個股不會白白佔用預算。
+- 常數 `MIN_ROWS_PER_SYMBOL = 5`：預算不足以讓每檔都拿到下限時，只覆蓋前
+  `replay_max_rows // MIN_ROWS_PER_SYMBOL` 檔（依來源順序，決定性），其餘列入
+  `replay_coverage.symbols_skipped`。用意是避免「200 檔各分到 1 列」這種算不出統計量的樣本。
+- 每檔取的是**最新**的 N 根（`range(last_idx - quota + 1, last_idx + 1)`），不是最舊的：
+  模型健康度 gate 用來限制當下進場，要用近期盤勢驗證。維持**連續**區間而非等間距抽樣，
+  是因為 event lifecycle 的 `previous_event_states` 需要連續的前一根狀態。
+
+report 的 `symbols` / `sources` / `replay_plan` 描述的是「要求驗證的範圍」，新增的
+`replay_coverage`（`symbols_requested` / `symbols_covered` / `symbols_skipped` /
+`coverage_ratio` / `quota_by_symbol` / `window_mode`）描述的是「實際驗證到的範圍」。預算不足
+時兩者會不一致，有 skipped 時 `warnings` 也會多一筆。
+
+覆蓋率低於 `MIN_REPLAY_SYMBOL_COVERAGE = 0.9` 時，`_decision_replay_governance_evaluation`
+會加上 **warning** flag `REPLAY_SYMBOL_COVERAGE_PARTIAL` → `health_state=DEGRADED` →
+production 進場上限降到 `SMALL_ENTRY`。刻意用 warning 而非 blocking：覆蓋不完整代表信心度
+下降，但不該讓 watchlist 裡一檔上市不久的個股害全體停單。
+
+> 注意：以 scheduler 預設 `replay_max_rows: 200` 搭配 50～200 檔的 watchlist，覆蓋率必然
+> 低於門檻而落在 DEGRADED。這是誠實的訊號（200 列本來就驗證不了 200 檔），要完整覆蓋就得
+> 調高 `replay_max_rows` 或縮小 `sr_evaluation.symbols`。
+
+`pipeline_version` 因此從 `sr_zone_decision_replay_p0` 升為 `..._p1`，讓新舊取樣方式的
+report 可區分。**`schema_version` 維持 `sr_zone_decision_replay_p0` 不變**——
+`fetch_latest_sr_regression_governance` 是用 schema_version 過濾的，改了會讓 production gate
+查不到資料而靜默失效。
+
+### Replay context 的股票比對規則
+
+decision replay 的籌碼與模型治理 context 是 `{symbol: [rows...]}`，由
+`evaluation._rows_for_symbol` 依序比對：
+
+1. **精確 symbol key**。
+2. **`__default__`**：CLI 傳入單一 list（而非 per-symbol object）時
+   `_load_symbol_rows_json` 會產生這個 key，語意是「這份資料套用到所有股票」，多股票也有效。
+3. **單一來源時**才容忍 key 命名不一致（例如 `2330` vs `2330.TW`）。
+
+第 3 點刻意限制在 `len(sources) == 1`：Go 端 `analysis/sr_evaluation_context.go` 只把
+**查得到資料**的股票寫進 map，所以「多檔 replay、只有一檔有籌碼資料」時 dict 會剛好只剩
+一組 key；若不限制，其他股票就會靜默套用別檔的籌碼分數與治理快照，污染 replay 特徵。
+
+查無 context 的股票維持 `chip_summary.missing=True` / `model_governance_available=False`，
+覆蓋率由 `outcome_summary` 的 `rows_with_non_missing_chip` / `rows_with_model_governance`
+呈現，不會靜默補值。
+
+context 在進 replay 迴圈前會由 `_sorted_context` **統一排成時間升冪**（只排一次）。
+`_chip_row_for_as_of` / `_snapshot_for_as_of` 是掃到第一筆超過 as_of 就 `break`，依賴升冪
+輸入；排程路徑的 Go repo 雖然都是 `ORDER BY ... ASC`，但 `POST /sr-zones/evaluate` 允許
+呼叫端自帶這兩份 context，因此不能假設順序。取不到或解析不了時間的 row 會被排到最前面
+（等同視為最舊），不會拋例外。
+
+### Decision Replay 的 zone builder 參數
+
+`run_decision_replay(builder_config=...)` 會把 `ZoneBuilderConfig` 一路傳到
+`_decision_replay_rows` → `_historical_zone_score_summary`，replay 才會用指定的 ATR 參數重建
+zone。未指定時走 baseline 預設，行為與過去相同。
+
+這條路徑先前是斷的（`_historical_zone_score_summary` 早就有這個參數，但沒有呼叫端傳），
+造成兩個後果：CLI 的 `--atr-width-multiplier` 等四個參數在 `--decision-replay` 模式下**靜默
+無效**；而且參數 sweep 若對每組候選跑 replay，會得到一模一樣的 decision 指標。現在 replay
+report 會帶出 `builder_config` snapshot，可追溯該次用了哪組參數。
+
+### Calibration bins（`model_metrics.{hold,break}.calibration`）
+
+`sr_evaluation_calibration_v1`：把預測機率等寬切 `CALIBRATION_BIN_COUNT = 10` 個 bin，
+逐 bin 輸出 `lower` / `upper` / `rows` / `mean_predicted` / `observed_rate` /
+`gap`（`observed_rate - mean_predicted`），並彙總 `expected_calibration_error`
+（樣本加權 `|gap|` 平均）與 `max_calibration_error`。
+
+- **空 bin 會保留**（`rows=0`、其餘 null）：sweep 要跨 candidate 對齊比較，schema 必須穩定。
+- 最後一個 bin 含右端點，`proba=1.0` 不會被邊界條件漏掉。
+- 總樣本低於 `MIN_CALIBRATION_ROWS = 50` 時標記 `insufficient_sample=true`——bin 內的
+  `observed_rate` 抖動過大，ECE 不應拿來挑參數。
+
+與 `probability_engine._calibration_report` 是不同東西：那支描述「訓練時有沒有做校準」，
+這裡是拿 holdout 資料實際量出來的 reliability。
+
+### 參數 sweep 的 decision 層比較
+
+`run_builder_sweep(decision_replay=True, model_path=...)` 會讓每組候選在 `run_evaluation()`
+之外再跑一次 `run_decision_replay()`（帶該候選的 builder config），candidate 摘要新增
+`decision_outcomes`：`by_final_entry_state`、`rr_summary`、`replay_coverage`、
+`decision_fields_available`。`best_by` 同步新增 `entry_average_forward_return`。
+
+- **預設關閉**。未提供 `model_path` 時只記 warning 並略過 replay，zone 層比較照常完成。
+- chip / governance context 在 sweep 開頭載入一次後傳給所有候選，不會每組各查一次 DB。
+- 排名只計入 `ENTRY_ALLOWED` / `PROBE_ALLOWED`（`WAIT_CONFIRMATION` 的後續報酬不代表進場
+  品質），且樣本數需 `>= MIN_ENTRY_OUTCOME_ROWS`，避免用個位數樣本挑參數。
+- **成本**：實測 2 檔股票 × 400 根 K、4 組候選、`replay_max_rows=50` 約 73 秒，peak RSS
+  177MB——記憶體不是瓶頸，時間才是。預設 5×3 grid（15 組）外推約 4～5 分鐘。因此
+  `SWEEP_DEFAULT_REPLAY_MAX_ROWS = 50`（單次 replay 是 200），建議搭配較小的 symbol 集合。
+- **`AT_ZONE` 比例**：`decision_outcomes.at_zone_rate` 與 `primary_zone_role_counts` 來自
+  replay 每列的 `primary_zone.role`，分母只計有 primary zone 的列。比例偏高代表現價一直落在
+  區間內、方向解析不出來，通常是 zone 畫得太寬——正是 ATR 寬度調校要看的訊號。
+  這個指標**只有 replay 路徑量得到**：evaluation dataset 的 `role` 由 approach direction
+  二選一決定（見 `features.py`），永遠不會是 `AT_ZONE`。
+- **decision 層不一定能分出勝負**：若取樣區間內沒有任何列走到進場狀態（實測合成資料時
+  所有列都落在 `BLOCKED`），各候選的 `by_final_entry_state` 會完全相同，
+  `best_by.entry_average_forward_return` 也會是 `None`。這代表**資料本身沒有進場訊號**，
+  不是參數沒生效——此時要靠 zone 層指標比較，或擴大取樣區間 / 換一段行情再跑。
+  「builder config 有沒有真的生效」不要靠 decision 指標判斷，該由 replay 的
+  `builder_config` snapshot 與 `zone_count` 差異來確認。
+
+### Production 端的 regression governance gate
+
+`pipeline._merge_regression_governance_gate` 把「同 `model_config_hash` 的最新 decision replay
+結論」合併進 production 的 `probability_context.health`。合併規則**只趨保守，絕不放寬**：
+
+- `health_state` 取兩者較嚴重者（`UNRELIABLE` > `DEGRADED` > `HEALTHY`）。
+- `allow_entry` 只會被設成 `False`，不會從 `False` 變回 `True`。
+- `max_entry_state` 取 `_entry_rank` 較小（較保守）者；`allow_entry=False` 時直接壓成
+  `WAIT_CONFIRMATION`，`DEGRADED` 時上限壓到 `SMALL_ENTRY`。
+- 查無 regression 結果時原樣回傳 base（見 I-040 的 no-op 說明）。
+
+**未知的 `health_state`**（欄位改名、上游格式變動、拼字錯誤）不會升嚴重度——維持
+「不因資料壞掉而誤擋」的原則——但會加上 `REGRESSION_GOVERNANCE_STATE_UNKNOWN` 到
+`warning_flags` 與 `reason_codes`，讓問題在 report 與 decision reason 看得見，而不是靜默
+失效。相關的 gate 安全性質由 `tests/test_pipeline.py` 鎖住。
+
+### Evaluation 排程現況（`sr_evaluation` job）
+
+`backend/internal/scheduler/scheduler.go` 的 `Start()` 對 sr_evaluation 有兩個刻意的行為，
+兩者都由 `backend/internal/scheduler/scheduler_test.go` 鎖住：
+
+- **預設關閉**：只有 `sr_evaluation.enabled: true` 時才 `cron.AddFunc` 註冊排程。預設 `false`，
+  避免開發環境一啟動就對 Python service 打大量 decision replay。關閉時仍可用
+  `POST /scheduler/sr-evaluation/run` 或 SR Zone 頁面手動觸發。
+- **cron 字串非法只記 log**：`AddFunc` 回錯時只 `log.Error`，不 panic 也不中止 `Start()`，
+  其餘排程照常註冊。代價是設定打錯時 sr_evaluation 會靜默不執行，只能從啟動 log 發現。
+
+手動入口 `Scheduler.RunSREvaluation()` 與 cron 走同一條 `runSREvaluation`，因此兩種觸發方式
+都會建立 `sr_evaluation_jobs` 紀錄並寫入 `job_runs`；狀態推導與 job 生命週期沒有分岔。
+
 ---
 
 ## 已知限制

@@ -5,12 +5,15 @@
 # 用法：
 #   frontend/scripts/test.sh             # check → test:unit → build（沿用現有 node_modules）
 #   frontend/scripts/test.sh --install   # 先 npm ci 再跑上述三步
+#   VITEST_ARGS="src/routes/Scheduler.test.ts" frontend/scripts/test.sh   # 開發迭代：只跑指定測試
 #
 # 可覆寫的環境變數：
 #   MEM         container 記憶體上限（預設 1024m；vitest+jsdom 較吃資源，必要時上調）
 #   CPUS        CPU 上限（預設 1）
 #   NODE_IMAGE  使用的 node image（預設 node:20-alpine）
 #   CACHE_DIR   npm 快取根目錄（預設 ~/.cache/stock_trading）
+#   VITEST_ARGS 傳給 vitest 的額外參數（預設空）。設了就只跑 vitest（略過 check 與 build），
+#               供開發迭代單一測試檔用；驗收仍要跑不帶此變數的完整三步。
 #
 # 設計重點：
 #   - 掛載 repo root 而非 frontend/：vite.config.ts 的 outDir 是
@@ -27,6 +30,7 @@ CACHE_DIR="${CACHE_DIR:-$HOME/.cache/stock_trading}"
 NODE_IMAGE="${NODE_IMAGE:-node:20-alpine}"
 MEM="${MEM:-1024m}"
 CPUS="${CPUS:-1}"
+VITEST_ARGS="${VITEST_ARGS:-}"
 
 INSTALL=0
 [ "${1:-}" = "--install" ] && INSTALL=1
@@ -37,12 +41,19 @@ mkdir -p "$CACHE_DIR/npm"
 CMD="set -e"
 [ "$INSTALL" = "1" ] && CMD="$CMD
 npm ci"
-CMD="$CMD
+if [ -n "$VITEST_ARGS" ]; then
+  # 開發迭代模式：只跑 vitest，省掉 svelte-check 與 vite build 的等待。
+  CMD="$CMD
+npx vitest run $VITEST_ARGS"
+  echo "==> frontend vitest only：args=$VITEST_ARGS install=$INSTALL image=$NODE_IMAGE mem=$MEM"
+else
+  CMD="$CMD
 npm run check
 npm run test:unit
 npm run build"
+  echo "==> frontend check+test+build：install=$INSTALL image=$NODE_IMAGE mem=$MEM"
+fi
 
-echo "==> frontend check+test+build：install=$INSTALL image=$NODE_IMAGE mem=$MEM"
 exec docker run --rm \
   --user "$(id -u):$(id -g)" \
   --cpus="$CPUS" \

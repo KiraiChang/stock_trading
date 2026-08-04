@@ -17,6 +17,7 @@ type Config struct {
 	Python           PythonConfig
 	Auth             AuthConfig
 	Chip             ChipConfig
+	SREvaluation     SREvaluationConfig     `mapstructure:"sr_evaluation"`
 	PositionAnalysis PositionAnalysisConfig `mapstructure:"position_analysis"`
 }
 
@@ -125,6 +126,20 @@ type ChipSyncConfig struct {
 	Cron string `mapstructure:"cron"`
 }
 
+type SREvaluationConfig struct {
+	// Enabled 預設關閉，避免開發環境啟動後自動跑大量 Python decision replay。
+	Enabled bool `mapstructure:"enabled"`
+	// Cron 為 SR evaluation / decision replay 排程時間（台北時區）。
+	Cron string `mapstructure:"cron"`
+	// Symbols 空陣列代表使用 watchlist；非空時只跑指定股票。
+	Symbols        []string `mapstructure:"symbols"`
+	Timeframe      string   `mapstructure:"timeframe"`
+	Limit          int      `mapstructure:"limit"`
+	DecisionReplay bool     `mapstructure:"decision_replay"`
+	ReplayMaxRows  int      `mapstructure:"replay_max_rows"`
+	WriteDB        bool     `mapstructure:"write_db"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -165,6 +180,14 @@ func Load() (*Config, error) {
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)
 	viper.SetDefault("chip.sync.cron", "0 21 * * 1-5")
+	viper.SetDefault("sr_evaluation.enabled", false)
+	viper.SetDefault("sr_evaluation.cron", "30 22 * * 1-5")
+	viper.SetDefault("sr_evaluation.symbols", []string{})
+	viper.SetDefault("sr_evaluation.timeframe", "1d")
+	viper.SetDefault("sr_evaluation.limit", 1500)
+	viper.SetDefault("sr_evaluation.decision_replay", true)
+	viper.SetDefault("sr_evaluation.replay_max_rows", 200)
+	viper.SetDefault("sr_evaluation.write_db", true)
 	viper.SetDefault("position_analysis.max_position_value", 200000)
 	viper.SetDefault("position_analysis.max_risk_amount", 10000)
 	viper.SetDefault("position_analysis.add_on_ratio", 0.25)

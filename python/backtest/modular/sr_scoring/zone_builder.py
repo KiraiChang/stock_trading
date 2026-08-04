@@ -14,6 +14,7 @@ Zone（價格區間）建立：至少支援 ATR-based 與 Volume Profile 兩種�
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -39,6 +40,17 @@ class ZoneBuilder(ABC):
 
 
 DEFAULT_MAX_MERGE_WIDTH_MULTIPLE = 2.0
+LOW_VOLATILITY_THRESHOLD = 0.015
+HIGH_VOLATILITY_THRESHOLD = 0.035
+
+
+VOLATILITY_BUCKET_ATR_CONFIGS: dict[str, dict[str, float]] = {
+    # These are conservative candidates, not a tuned production default. They
+    # mirror the evaluation sweep grid so review can promote/adjust them later.
+    "LOW_VOLATILITY": {"atr_width_multiplier": 1.25, "max_merge_width_multiple": 1.75},
+    "NORMAL_VOLATILITY": {"atr_width_multiplier": 1.5, "max_merge_width_multiple": 2.0},
+    "HIGH_VOLATILITY": {"atr_width_multiplier": 1.75, "max_merge_width_multiple": 2.25},
+}
 
 
 def _merge_zone_candidates(
@@ -323,3 +335,120 @@ class RecentMicrostructureZoneBuilder(ZoneBuilder):
             if len(deduped) >= self.max_zones:
                 break
         return deduped
+
+
+@dataclass(frozen=True)
+class ATRZoneBuilderConfig:
+    lookback: int = 60
+    atr_period: int = 14
+    atr_width_multiplier: float = 1.5
+    pivot_window: int = 1
+    merge_pct: float = 0.01
+    max_zones_per_type: int = 5
+    max_merge_width_multiple: float = DEFAULT_MAX_MERGE_WIDTH_MULTIPLE
+
+
+@dataclass(frozen=True)
+class VolumeProfileZoneBuilderConfig:
+    lookback: int = 60
+    num_bins: int = 24
+    high_volume_percentile: float = 0.7
+    max_gap_bins: int = 1
+    max_zones_per_type: int = 5
+
+
+@dataclass(frozen=True)
+class RecentMicrostructureZoneBuilderConfig:
+    lookback: int = 20
+    pivot_window: int = 1
+    width_pct: float = 0.006
+    max_zones: int = 6
+
+
+@dataclass(frozen=True)
+class ZoneBuilderConfig:
+    atr: ATRZoneBuilderConfig = ATRZoneBuilderConfig()
+    volume_profile: VolumeProfileZoneBuilderConfig = VolumeProfileZoneBuilderConfig()
+    recent_microstructure: RecentMicrostructureZoneBuilderConfig = RecentMicrostructureZoneBuilderConfig()
+
+
+def volatility_bucket_from_profile(atr_pct: float | None, average_range_pct: float | None) -> str:
+    values = [value for value in (atr_pct, average_range_pct) if value is not None]
+    if not values:
+        return "UNKNOWN_VOLATILITY"
+    basis = max(values)
+    if basis < LOW_VOLATILITY_THRESHOLD:
+        return "LOW_VOLATILITY"
+    if basis > HIGH_VOLATILITY_THRESHOLD:
+        return "HIGH_VOLATILITY"
+    return "NORMAL_VOLATILITY"
+
+
+def resolve_zone_builder_config_for_profile(
+    atr_pct: float | None,
+    average_range_pct: float | None,
+    base_config: ZoneBuilderConfig | None = None,
+) -> tuple[ZoneBuilderConfig, dict]:
+    """Resolve a candidate builder config from a volatility profile.
+
+    This resolver is intentionally separate from build_zone_builders(): callers
+    must opt in, because the bucket thresholds/configs still need real replay
+    review before becoming unconditional production defaults.
+    """
+    base = base_config or ZoneBuilderConfig()
+    bucket = volatility_bucket_from_profile(atr_pct, average_range_pct)
+    overrides = VOLATILITY_BUCKET_ATR_CONFIGS.get(bucket)
+    if not overrides:
+        return base, {
+            "enabled": False,
+            "bucket": bucket,
+            "reason_code": "UNKNOWN_VOLATILITY_BUCKET",
+            "atr_pct": atr_pct,
+            "average_range_pct": average_range_pct,
+            "config": zone_builder_config_snapshot(base),
+        }
+    resolved = replace(
+        base,
+        atr=replace(
+            base.atr,
+            atr_width_multiplier=float(overrides["atr_width_multiplier"]),
+            max_merge_width_multiple=float(overrides["max_merge_width_multiple"]),
+        ),
+    )
+    return resolved, {
+        "enabled": True,
+        "bucket": bucket,
+        "reason_code": "VOLATILITY_BUCKET_CONFIG",
+        "atr_pct": atr_pct,
+        "average_range_pct": average_range_pct,
+        "config": zone_builder_config_snapshot(resolved),
+    }
+
+
+def build_zone_builders(
+    config: ZoneBuilderConfig | None = None,
+    include_recent_microstructure: bool = True,
+) -> list[ZoneBuilder]:
+    """Build the SR Zone builders from one shared config source.
+
+    Training intentionally excludes recent microstructure by default at the call
+    site, while runtime scoring includes it. The factory keeps both paths on the
+    same baseline ATR / volume-profile parameters.
+    """
+    config = config or ZoneBuilderConfig()
+    builders: list[ZoneBuilder] = [
+        ATRZoneBuilder(**asdict(config.atr)),
+        VolumeProfileZoneBuilder(**asdict(config.volume_profile)),
+    ]
+    if include_recent_microstructure:
+        builders.append(RecentMicrostructureZoneBuilder(**asdict(config.recent_microstructure)))
+    return builders
+
+
+def zone_builder_config_snapshot(config: ZoneBuilderConfig | None = None) -> dict[str, dict]:
+    config = config or ZoneBuilderConfig()
+    return {
+        "ATRZoneBuilder": asdict(config.atr),
+        "VolumeProfileZoneBuilder": asdict(config.volume_profile),
+        "RecentMicrostructureZoneBuilder": asdict(config.recent_microstructure),
+    }

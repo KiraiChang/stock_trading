@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from .. import evidence as evidence_mod
+from .. import pipeline as pipeline_mod
 from .. import scoring
 from ..features import trend_slope
 from ..model import ModelBundle, train_model
@@ -211,6 +212,8 @@ def test_score_symbol_returns_well_formed_zones(monkeypatch, bundle):
     assert result["analysis"]["model"]["trained_at"] == bundle.trained_at
     assert result["analysis"]["model"]["feature_names"] == bundle.feature_names
     assert result["analysis"]["model"]["config_hash"] == bundle.config_hash
+    assert result["analysis"]["zone_builder_runtime_config"]["enabled"] is False
+    assert result["analysis"]["zone_builder_runtime_config"]["reason_code"] == "ADAPTIVE_ZONE_BUILDERS_DISABLED"
     assert [p["key"] for p in result["analysis"]["period_summaries"]] == ["short", "mid", "long"]
     assert result["analysis"]["analysis_tips"]
     tips_text = "\n".join(result["analysis"]["analysis_tips"])
@@ -830,6 +833,77 @@ def test_score_symbol_passes_chip_score_from_db_into_breakdown(monkeypatch, bund
     # chip_scores，可能是「未來」的籌碼資料，見 lookahead bias 說明）。
     expected_before_date = pd.Timestamp(result["analysis"]["analyzed_at"]).tz_convert("Asia/Taipei").strftime("%Y-%m-%d")
     assert captured["before_date"] == expected_before_date
+
+
+def test_score_symbol_applies_latest_regression_governance_gate(monkeypatch, bundle):
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline_mod, "fetch_latest_sr_regression_governance", lambda model_config_hash: {
+        "source": "LATEST_REGRESSION_RESULT",
+        "run_id": "sr_replay_gate_001",
+        "model_config_hash": model_config_hash,
+        "health_state": "UNRELIABLE",
+        "passed": False,
+        "strict_passed": False,
+        "confidence_gate": {
+            "state": "UNRELIABLE",
+            "allow_entry": False,
+            "max_entry_state": "WAIT_CONFIRMATION",
+            "reason_codes": ["ENTRY_OUTCOME_NEGATIVE"],
+        },
+    })
+
+    result = score_symbol("2330", "1d")
+
+    health = result["probability_context"]["health"]
+    assert health["health_state"] == "UNRELIABLE"
+    assert health["confidence_gate"]["allow_entry"] is False
+    assert health["confidence_gate"]["max_entry_state"] == "WAIT_CONFIRMATION"
+    assert health["regression_governance"]["run_id"] == "sr_replay_gate_001"
+    assert "REGRESSION_GOVERNANCE_UNRELIABLE" in health["blocking_flags"]
+
+    decision = result["decision"]
+    assert decision["model_governance"]["health_state"] == "UNRELIABLE"
+    assert decision["model_governance"]["confidence_gate"]["allow_entry"] is False
+    assert decision["model_governance"]["regression_governance"]["run_id"] == "sr_replay_gate_001"
+    assert decision["final_entry_permission"]["state"] != "ENTRY_ALLOWED"
+
+
+def test_score_symbol_uses_adaptive_zone_builder_config_when_enabled(monkeypatch, bundle):
+    df = bullish_trend_df(n=250)
+    rows = [
+        {
+            "open": row["open"], "high": row["high"], "low": row["low"],
+            "close": row["close"], "volume": row["volume"], "timestamp": int(ts.timestamp()),
+        }
+        for ts, row in df.iterrows()
+    ]
+
+    monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: rows)
+    monkeypatch.setattr(scoring, "get_model", lambda: bundle)
+    monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
+    monkeypatch.setattr(scoring, "_adaptive_zone_builder_enabled", lambda: True)
+    monkeypatch.setattr(scoring, "_adaptive_zone_builder_profile", lambda frame: (0.04, 0.02))
+
+    result = score_symbol("2330", "1d")
+
+    runtime_config = result["analysis"]["zone_builder_runtime_config"]
+    atr_config = runtime_config["config"]["ATRZoneBuilder"]
+    assert runtime_config["enabled"] is True
+    assert runtime_config["bucket"] == "HIGH_VOLATILITY"
+    assert runtime_config["reason_code"] == "VOLATILITY_BUCKET_CONFIG"
+    assert atr_config["atr_width_multiplier"] == pytest.approx(1.75)
+    assert atr_config["max_merge_width_multiple"] == pytest.approx(2.25)
 
 
 def test_score_symbol_chip_before_date_uses_analyzed_at_not_wall_clock_today(monkeypatch, bundle):

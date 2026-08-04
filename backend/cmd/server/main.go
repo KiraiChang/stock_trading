@@ -96,6 +96,8 @@ func main() {
 	chipSyncJobRepo := store.NewChipSyncJobRepo(db)
 	positionRepo := store.NewPositionRepo(db)
 	stockSymbolRepo := store.NewStockSymbolRepo(db)
+	srEvaluationJobRepo := store.NewSREvaluationJobRepo(db)
+	srModelGovernanceRepo := store.NewSRModelGovernanceRepo(db)
 
 	// Engines
 	indEngine := indicator.NewEngine(candleRepo, indicatorRepo, rdb, log)
@@ -164,6 +166,7 @@ func main() {
 		fetcher, sigEngine, watchlistRepo, jobRunRepo, srZoneRepo, srZoneVerifier,
 		chipSyncer, cfg.Chip.Sync.Cron,
 		stockSymbolSyncer, cfg.StockSymbols.Cron, cfg.StockSymbols.Enabled,
+		analysisClient, srEvaluationJobRepo, chipScoreRepo, srModelGovernanceRepo, cfg.SREvaluation,
 		cfg.FinMind.IntradayEnabled, log,
 	)
 

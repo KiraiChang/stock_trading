@@ -1,4 +1,5 @@
 from .dataset import DatasetConfig, build_training_dataset, build_training_rows, load_ohlcv_csv
+from .evaluation import run_builder_sweep, run_decision_replay, run_evaluation, write_evaluation_result
 from .features import compute_zone_features, find_touches
 from .labeling import label_touch
 from .model import ModelBundle, get_model, predict_break_probability, predict_hold_probability, train_model
@@ -13,7 +14,20 @@ from .types import (
     ZoneTouch,
     ZoneType,
 )
-from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
+from .zone_builder import (
+    ATRZoneBuilder,
+    ATRZoneBuilderConfig,
+    RecentMicrostructureZoneBuilder,
+    RecentMicrostructureZoneBuilderConfig,
+    VolumeProfileZoneBuilder,
+    VolumeProfileZoneBuilderConfig,
+    ZoneBuilder,
+    ZoneBuilderConfig,
+    build_zone_builders,
+    resolve_zone_builder_config_for_profile,
+    volatility_bucket_from_profile,
+    zone_builder_config_snapshot,
+)
 
 __all__ = [
     "ApproachDirection",
@@ -25,9 +39,17 @@ __all__ = [
     "ZoneTouch",
     "ZoneType",
     "ATRZoneBuilder",
+    "ATRZoneBuilderConfig",
     "RecentMicrostructureZoneBuilder",
+    "RecentMicrostructureZoneBuilderConfig",
     "VolumeProfileZoneBuilder",
+    "VolumeProfileZoneBuilderConfig",
     "ZoneBuilder",
+    "ZoneBuilderConfig",
+    "build_zone_builders",
+    "resolve_zone_builder_config_for_profile",
+    "volatility_bucket_from_profile",
+    "zone_builder_config_snapshot",
     "compute_zone_features",
     "find_touches",
     "label_touch",
@@ -35,6 +57,10 @@ __all__ = [
     "build_training_dataset",
     "build_training_rows",
     "load_ohlcv_csv",
+    "run_builder_sweep",
+    "run_decision_replay",
+    "run_evaluation",
+    "write_evaluation_result",
     "ModelBundle",
     "get_model",
     "predict_break_probability",

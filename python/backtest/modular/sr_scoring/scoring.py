@@ -94,6 +94,7 @@ import pandas as pd
 
 from db import fetch_candles, fetch_latest_chip_score
 
+from ...indicators import calc_atr
 from .decision_engine import build_decision_summary
 from .features import compute_zone_features, find_touches, trend_slope, zone_momentum, zone_volatility
 from .labeling import label_touch
@@ -119,7 +120,7 @@ from .types import (
     ZoneTouch,
     ZoneType,
 )
-from .zone_builder import ATRZoneBuilder, RecentMicrostructureZoneBuilder, VolumeProfileZoneBuilder, ZoneBuilder
+from .zone_builder import ZoneBuilder, build_zone_builders
 from .pipeline_types import ZoneFeatureSet
 from .labels import TIER_LABEL_TEXT
 from .ranking import (
@@ -194,7 +195,39 @@ def _to_dataframe(rows: list[dict]) -> pd.DataFrame:
 
 
 def _default_builders() -> list[ZoneBuilder]:
-    return [ATRZoneBuilder(), VolumeProfileZoneBuilder(), RecentMicrostructureZoneBuilder()]
+    return build_zone_builders(include_recent_microstructure=True)
+
+
+def _adaptive_zone_builder_enabled() -> bool:
+    try:
+        import config
+
+        return bool(getattr(config, "SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED", False))
+    except Exception:
+        return False
+
+
+def _adaptive_zone_builder_profile(df: pd.DataFrame) -> tuple[float | None, float | None]:
+    if df.empty:
+        return None, None
+    recent = df.tail(60)
+    atr_pct = None
+    if len(recent) >= 2:
+        atr = calc_atr(
+            recent["high"].to_numpy(),
+            recent["low"].to_numpy(),
+            recent["close"].to_numpy(),
+            14,
+        )
+        last_close = float(recent["close"].iloc[-1])
+        if last_close > 0 and atr > 0:
+            atr_pct = float(atr / last_close)
+    average_range_pct = None
+    if not recent.empty:
+        ranges = ((recent["high"] - recent["low"]) / recent["close"]).replace([np.inf, -np.inf], np.nan).dropna()
+        if not ranges.empty:
+            average_range_pct = float(ranges.mean())
+    return atr_pct, average_range_pct
 
 
 # ── 機率正規化 / score 推導 ──────────────────────────────────
@@ -768,7 +801,7 @@ def score_symbol(
         symbol,
         timeframe,
         limit,
-        builders or _default_builders(),
+        builders,
         fetch_candles_fn=fetch_candles,
         fetch_chip_fn=fetch_latest_chip_score,
         get_model_fn=get_model,

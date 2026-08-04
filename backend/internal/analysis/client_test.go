@@ -890,6 +890,51 @@ func TestTrainModelReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	}
 }
 
+func TestRunSREvaluationParsesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sr-scoring/evaluate" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var body SREvaluationRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		if len(body.Symbols) != 1 || body.Symbols[0] != "2330" || !body.DecisionReplay || !body.WriteDB {
+			t.Fatalf("unexpected request body: %+v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"schema_version": "sr_zone_decision_replay_p0",
+			"run_id":         "sr_replay_api_001",
+			"rows":           12,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.RunSREvaluation(context.Background(), SREvaluationRequest{
+		Symbols:        []string{"2330"},
+		Timeframe:      "1d",
+		Limit:          1500,
+		DecisionReplay: true,
+		WriteDB:        true,
+	})
+	if err != nil {
+		t.Fatalf("RunSREvaluation failed: %v", err)
+	}
+	if result["schema_version"] != "sr_zone_decision_replay_p0" || result["run_id"] != "sr_replay_api_001" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestRunSREvaluationReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
+	client := NewClient("")
+	if _, err := client.RunSREvaluation(context.Background(), SREvaluationRequest{Symbols: []string{"2330"}}); err == nil {
+		t.Fatal("expected error when baseURL is not configured")
+	}
+}
+
 func TestGetModelStatusParsesResponseWhenModelExists(t *testing.T) {
 	version := "v3"
 	trainedAt := "2026-07-01T13:30:00+08:00"

@@ -1,7 +1,7 @@
 """Typed contracts between the five SR Zone analysis stages."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
@@ -24,6 +24,7 @@ class AnalysisData:
     model: ModelBundle
     chip_row: dict[str, Any] | None
     chip_features: dict[str, float]
+    zone_builder_runtime_config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

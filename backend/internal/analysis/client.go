@@ -1149,6 +1149,29 @@ type TrainResult struct {
 	DatasetSummary map[string]interface{}        `json:"dataset_summary"`
 }
 
+type SREvaluationRequest struct {
+	Symbols                 []string                    `json:"symbols"`
+	Timeframe               string                      `json:"timeframe,omitempty"`
+	Limit                   int                         `json:"limit,omitempty"`
+	ModelPath               string                      `json:"model_path,omitempty"`
+	WriteDB                 bool                        `json:"write_db,omitempty"`
+	DecisionReplay          bool                        `json:"decision_replay,omitempty"`
+	ReplayMaxRows           int                         `json:"replay_max_rows,omitempty"`
+	RunID                   string                      `json:"run_id,omitempty"`
+	PipelineVersion         string                      `json:"pipeline_version,omitempty"`
+	Passed                  *bool                       `json:"passed,omitempty"`
+	MinHistoryBars          int                         `json:"min_history_bars,omitempty"`
+	RebuildEveryBars        int                         `json:"rebuild_every_bars,omitempty"`
+	ForwardBars             int                         `json:"forward_bars,omitempty"`
+	ThresholdPct            float64                     `json:"threshold_pct,omitempty"`
+	ATRWidthMultiplier      float64                     `json:"atr_width_multiplier,omitempty"`
+	MaxMergeWidthMultiple   float64                     `json:"max_merge_width_multiple,omitempty"`
+	ATRLookback             int                         `json:"atr_lookback,omitempty"`
+	ATRPeriod               int                         `json:"atr_period,omitempty"`
+	ChipScoresBySymbol      map[string][]map[string]any `json:"chip_scores_by_symbol,omitempty"`
+	ModelGovernanceBySymbol map[string][]map[string]any `json:"model_governance_by_symbol,omitempty"`
+}
+
 // TrainModel 呼叫 Python /sr-scoring/train 端點，重新訓練 bounce/break
 // 機率模型。symbols 為空時由 Go 端呼叫者自行決定預設值（例如整個
 // watchlist），這裡不做任何預設判斷。這是同步呼叫（等訓練完成才回應），
@@ -1191,6 +1214,43 @@ func (c *Client) TrainModel(ctx context.Context, symbols []string, timeframe str
 		return nil, fmt.Errorf("python sr-scoring train decode error: body=%s: %w", truncateBody(respBody), err)
 	}
 	return &result, nil
+}
+
+func (c *Client) RunSREvaluation(ctx context.Context, request SREvaluationRequest) (map[string]any, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("python service url not configured（請設定 python.service_url / PYTHON_SERVICE_URL）")
+	}
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/sr-scoring/evaluate", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := trainHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("python sr-scoring evaluate request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("python sr-scoring evaluate read body error: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, &UpstreamStatusError{StatusCode: resp.StatusCode, Body: truncateBody(respBody)}
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("python sr-scoring evaluate decode error: body=%s: %w", truncateBody(respBody), err)
+	}
+	return result, nil
 }
 
 // ModelStatus 對應 Python GET /sr-scoring/model-status 的回傳格式。跟

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import logging
+from datetime import date, datetime
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -131,3 +132,124 @@ def fetch_chip_scores(symbol: str, from_date: str, to_date: str) -> list[dict]:
     with engine.connect() as conn:
         rows = conn.execute(sql, {"symbol": symbol, "f": from_date, "t": to_date}).mappings().all()
     return [dict(r) for r in rows]
+
+
+def fetch_sr_model_governance(symbol: str, timeframe: str, from_ts: str, to_ts: str) -> list[dict]:
+    """查詢 SR model governance 歷史快照，供 decision replay 依 as-of 時間重建
+    當時模型健康度 gate。回傳欄位對齊 Go API 注入到 Python 的
+    model_governance_by_symbol row 形狀。"""
+    sql = text("""
+        SELECT analyzed_at, created_at, symbol, timeframe, model_version, model_config_hash,
+               health_state, average_edge_pp, directional_zone_count, zone_count,
+               allow_entry, max_entry_state, quality_flags, warning_flags, blocking_flags,
+               confidence_gate_json, calibration_report_json, walk_forward_report_json,
+               dataset_diagnostics_json, governance_json
+        FROM stock_sr_model_governance
+        WHERE symbol = :symbol AND timeframe = :tf AND analyzed_at BETWEEN :f AND :t
+        ORDER BY analyzed_at ASC, id ASC
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"symbol": symbol, "tf": timeframe, "f": from_ts, "t": to_ts}).mappings().all()
+
+    result: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        result.append({
+            "as_of": _iso_value(item.get("analyzed_at")),
+            "created_at": _iso_value(item.get("created_at")),
+            "symbol": item.get("symbol"),
+            "timeframe": item.get("timeframe"),
+            "model_version": item.get("model_version"),
+            "model_config_hash": item.get("model_config_hash"),
+            "health_state": item.get("health_state"),
+            "average_edge_pp": item.get("average_edge_pp"),
+            "directional_zone_count": item.get("directional_zone_count"),
+            "zone_count": item.get("zone_count"),
+            "allow_entry": item.get("allow_entry"),
+            "max_entry_state": item.get("max_entry_state"),
+            "quality_flags": _json_value(item.get("quality_flags"), []),
+            "warning_flags": _json_value(item.get("warning_flags"), []),
+            "blocking_flags": _json_value(item.get("blocking_flags"), []),
+            "confidence_gate": _json_value(item.get("confidence_gate_json"), {}),
+            "calibration_report": _json_value(item.get("calibration_report_json"), {}),
+            "walk_forward_report": _json_value(item.get("walk_forward_report_json"), {}),
+            "dataset_diagnostics": _json_value(item.get("dataset_diagnostics_json"), {}),
+            "governance": _json_value(item.get("governance_json"), {}),
+        })
+    return result
+
+
+def fetch_latest_sr_regression_governance(
+    model_config_hash: str,
+    schema_version: str = "sr_zone_decision_replay_p0",
+) -> dict | None:
+    """查詢同一 model_config_hash 最新 decision replay governance gate。
+
+    這是 production analysis 的外層模型治理 gate：若最近 replay 判定目前模型
+    UNRELIABLE / DEGRADED，正式決策會透過 confidence_gate 保守化。查無資料
+    回傳 None，呼叫端應維持原本模型治理邏輯。
+    """
+    if not model_config_hash:
+        return None
+    sql = text("""
+        SELECT run_id, model_config_hash, pipeline_version, schema_version, passed,
+               governance_health_state, governance_strict_passed, metrics_json, created_at
+        FROM stock_sr_regression_results
+        WHERE schema_version = :schema_version
+          AND model_config_hash = :model_config_hash
+          AND governance_health_state <> ''
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """)
+    with engine.connect() as conn:
+        row = conn.execute(sql, {
+            "schema_version": schema_version,
+            "model_config_hash": model_config_hash,
+        }).mappings().first()
+    if row is None:
+        return None
+
+    item = dict(row)
+    metrics = _json_value(item.get("metrics_json"), {})
+    governance = metrics.get("governance_evaluation") if isinstance(metrics, dict) else None
+    confidence_gate = {}
+    if isinstance(governance, dict):
+        confidence_gate = governance.get("confidence_gate") or {}
+    if not isinstance(confidence_gate, dict):
+        confidence_gate = {}
+    health_state = item.get("governance_health_state") or (
+        governance.get("health_state") if isinstance(governance, dict) else None
+    )
+    strict_passed = item.get("governance_strict_passed")
+    return {
+        "source": "LATEST_REGRESSION_RESULT",
+        "schema_version": schema_version,
+        "run_id": item.get("run_id"),
+        "model_config_hash": item.get("model_config_hash"),
+        "pipeline_version": item.get("pipeline_version"),
+        "created_at": _iso_value(item.get("created_at")),
+        "health_state": health_state,
+        "passed": item.get("passed"),
+        "strict_passed": strict_passed,
+        "confidence_gate": confidence_gate,
+        "governance_evaluation": governance if isinstance(governance, dict) else None,
+    }
+
+
+def _iso_value(value: object) -> object:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
+def _json_value(value: object, fallback: object) -> object:
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return fallback
+    return fallback

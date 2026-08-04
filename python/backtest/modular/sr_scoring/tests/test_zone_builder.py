@@ -5,7 +5,18 @@ import pytest
 
 from ....indicators import calc_atr
 from ..types import ZoneMethod
-from ..zone_builder import ATRZoneBuilder, VolumeProfileZoneBuilder, _merge_zone_candidates
+from ..zone_builder import (
+    ATRZoneBuilder,
+    ATRZoneBuilderConfig,
+    RecentMicrostructureZoneBuilder,
+    VolumeProfileZoneBuilder,
+    ZoneBuilderConfig,
+    _merge_zone_candidates,
+    build_zone_builders,
+    resolve_zone_builder_config_for_profile,
+    volatility_bucket_from_profile,
+    zone_builder_config_snapshot,
+)
 from .conftest import bullish_trend_df, make_df
 
 
@@ -31,6 +42,44 @@ def test_atr_zone_width_matches_atr_multiplier():
     for zone in zones:
         assert zone.method == ZoneMethod.ATR
         assert zone.width == pytest.approx(expected_width, rel=1e-6)
+
+
+def test_build_zone_builders_uses_shared_config_and_runtime_microstructure_toggle():
+    config = ZoneBuilderConfig(atr=ATRZoneBuilderConfig(atr_width_multiplier=1.25, max_merge_width_multiple=1.5))
+
+    training_builders = build_zone_builders(config, include_recent_microstructure=False)
+    runtime_builders = build_zone_builders(config, include_recent_microstructure=True)
+
+    assert [type(builder).__name__ for builder in training_builders] == [
+        "ATRZoneBuilder", "VolumeProfileZoneBuilder",
+    ]
+    assert isinstance(runtime_builders[-1], RecentMicrostructureZoneBuilder)
+    assert training_builders[0].atr_width_multiplier == pytest.approx(1.25)
+    assert training_builders[0].max_merge_width_multiple == pytest.approx(1.5)
+    assert zone_builder_config_snapshot(config)["ATRZoneBuilder"]["atr_width_multiplier"] == pytest.approx(1.25)
+
+
+def test_resolve_zone_builder_config_for_profile_uses_volatility_bucket_configs():
+    assert volatility_bucket_from_profile(0.01, 0.012) == "LOW_VOLATILITY"
+    assert volatility_bucket_from_profile(0.02, 0.018) == "NORMAL_VOLATILITY"
+    assert volatility_bucket_from_profile(0.04, 0.02) == "HIGH_VOLATILITY"
+    assert volatility_bucket_from_profile(None, None) == "UNKNOWN_VOLATILITY"
+
+    low_config, low_meta = resolve_zone_builder_config_for_profile(0.01, 0.012)
+    high_config, high_meta = resolve_zone_builder_config_for_profile(0.04, 0.02)
+    unknown_config, unknown_meta = resolve_zone_builder_config_for_profile(None, None)
+
+    assert low_meta["enabled"] is True
+    assert low_meta["bucket"] == "LOW_VOLATILITY"
+    assert low_config.atr.atr_width_multiplier == pytest.approx(1.25)
+    assert low_config.atr.max_merge_width_multiple == pytest.approx(1.75)
+    assert high_meta["enabled"] is True
+    assert high_meta["bucket"] == "HIGH_VOLATILITY"
+    assert high_config.atr.atr_width_multiplier == pytest.approx(1.75)
+    assert high_config.atr.max_merge_width_multiple == pytest.approx(2.25)
+    assert unknown_meta["enabled"] is False
+    assert unknown_meta["reason_code"] == "UNKNOWN_VOLATILITY_BUCKET"
+    assert unknown_config.atr.atr_width_multiplier == pytest.approx(1.5)
 
 
 def test_atr_zone_builder_respects_min_bars():

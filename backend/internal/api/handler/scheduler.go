@@ -37,14 +37,23 @@ func (h *SchedulerHandler) RunStockSymbolSync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "stock_symbol_sync 已在背景重新觸發"})
 }
 
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "stock_symbol_sync"}
+// POST /api/v1/scheduler/sr-evaluation/run
+// 手動重跑 SR Zone evaluation / decision replay，與 sr_evaluation cron 共用同一份邏輯。
+func (h *SchedulerHandler) RunSREvaluation(c *gin.Context) {
+	go h.sched.RunSREvaluation()
+	c.JSON(http.StatusAccepted, gin.H{"message": "sr_evaluation 已在背景重新觸發"})
+}
+
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
 	"pre_market":        26 * time.Hour,
 	"intraday":          10 * time.Minute,
 	"daily_close":       26 * time.Hour,
+	"chip_daily_sync":   72 * time.Hour,
 	"stock_symbol_sync": 26 * time.Hour,
+	"sr_evaluation":     72 * time.Hour,
 }
 
 type jobStatus struct {

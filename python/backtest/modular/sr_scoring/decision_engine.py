@@ -2709,6 +2709,7 @@ def build_decision_summary(
 def build_decision_from_evidence(
     evidence: AnalysisEvidence,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
+    model_governance: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Decision's sole public input is the immutable Evidence stage output."""
     scores = evidence.scores
@@ -2741,6 +2742,6 @@ def build_decision_from_evidence(
                 "chip": scores.chip_summary.get("trade_date"),
             },
         },
-        model_governance=build_model_governance_context(scores),
+        model_governance=model_governance or build_model_governance_context(scores),
         previous_event_states=previous_event_states,
     )

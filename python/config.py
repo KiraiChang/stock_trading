@@ -57,3 +57,7 @@ SR_SCORING_EVIDENCE_ENABLED: bool = _env_bool(
 SR_SCORING_EVIDENCE_MAX_ZONES: int = int(
     os.getenv("SR_SCORING_EVIDENCE_MAX_ZONES") or _raw["sr_scoring"].get("evidence_max_zones", 8)
 )
+SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED: bool = _env_bool(
+    "SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED",
+    bool(_raw["sr_scoring"].get("adaptive_zone_builders_enabled", False)),
+)

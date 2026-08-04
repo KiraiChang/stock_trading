@@ -2,7 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/chip"
+	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -38,6 +41,11 @@ type Scheduler struct {
 	stockSyncer      *market.StockSymbolSyncer
 	stockSyncCron    string
 	stockSyncEnabled bool
+	analysisClient   *analysis.Client
+	srEvaluationJobs store.SREvaluationJobRepo
+	chipScores       store.ChipScoreRepo
+	modelGovernance  store.SRModelGovernanceRepo
+	srEvaluation     config.SREvaluationConfig
 	intradayEnabled  bool
 	log              *zap.Logger
 	cron             *cron.Cron
@@ -55,6 +63,11 @@ func New(
 	stockSyncer *market.StockSymbolSyncer,
 	stockSyncCron string,
 	stockSyncEnabled bool,
+	analysisClient *analysis.Client,
+	srEvaluationJobs store.SREvaluationJobRepo,
+	chipScores store.ChipScoreRepo,
+	modelGovernance store.SRModelGovernanceRepo,
+	srEvaluation config.SREvaluationConfig,
 	intradayEnabled bool,
 	log *zap.Logger,
 ) *Scheduler {
@@ -70,6 +83,11 @@ func New(
 		stockSyncer:      stockSyncer,
 		stockSyncCron:    stockSyncCron,
 		stockSyncEnabled: stockSyncEnabled,
+		analysisClient:   analysisClient,
+		srEvaluationJobs: srEvaluationJobs,
+		chipScores:       chipScores,
+		modelGovernance:  modelGovernance,
+		srEvaluation:     srEvaluation,
 		intradayEnabled:  intradayEnabled,
 		log:              log,
 		cron:             cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
@@ -112,6 +130,14 @@ func (s *Scheduler) Start() {
 			s.RunStockSymbolSync()
 		}); err != nil {
 			s.log.Error("stock symbol sync cron register failed", zap.String("cron", s.stockSyncCron), zap.Error(err))
+		}
+	}
+
+	if s.srEvaluation.Enabled {
+		if _, err := s.cron.AddFunc(s.srEvaluation.Cron, func() {
+			s.RunSREvaluation()
+		}); err != nil {
+			s.log.Error("sr evaluation cron register failed", zap.String("cron", s.srEvaluation.Cron), zap.Error(err))
 		}
 	}
 
@@ -388,3 +414,143 @@ func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 	s.log.Info("sr zone verification job completed", zap.Int("analyses", len(analyses)), zap.Int("failed", failed))
 	s.finishRun(ctx, runID, "sr_zone_verify", len(analyses), failed, lastErr)
 }
+
+func (s *Scheduler) RunSREvaluation() {
+	s.runSREvaluation(context.Background())
+}
+
+func (s *Scheduler) runSREvaluation(ctx context.Context) {
+	runID := s.startRun(ctx, "sr_evaluation")
+
+	symbols, err := s.srEvaluationSymbols(ctx)
+	if err != nil {
+		s.log.Error("sr evaluation symbols failed", zap.Error(err))
+		s.finishRun(ctx, runID, "sr_evaluation", 1, 1, err.Error())
+		return
+	}
+	if len(symbols) == 0 {
+		errMsg := "sr evaluation symbols is empty"
+		s.log.Warn(errMsg)
+		s.finishRun(ctx, runID, "sr_evaluation", 1, 1, errMsg)
+		return
+	}
+	if s.analysisClient == nil {
+		errMsg := "sr evaluation analysis client is not configured"
+		s.log.Warn(errMsg)
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), errMsg)
+		return
+	}
+	if s.srEvaluationJobs == nil {
+		errMsg := "sr evaluation job repo is not configured"
+		s.log.Warn(errMsg)
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), errMsg)
+		return
+	}
+
+	request := s.srEvaluationRequest(symbols)
+	analysis.PopulateSREvaluationReplayContext(ctx, &request, s.chipScores, s.modelGovernance, s.log)
+
+	symbolsJSON, err := json.Marshal(symbols)
+	if err != nil {
+		s.log.Error("sr evaluation symbols marshal failed", zap.Error(err))
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		return
+	}
+
+	jobID := analysis.NewEvaluationJobID()
+	mode := "evaluation"
+	if request.DecisionReplay {
+		mode = "decision_replay"
+	}
+	if _, err := s.srEvaluationJobs.Create(ctx, &store.SREvaluationJob{
+		JobID:         jobID,
+		Status:        "pending",
+		Symbols:       string(symbolsJSON),
+		Timeframe:     request.Timeframe,
+		FetchLimit:    request.Limit,
+		Mode:          mode,
+		WriteDB:       request.WriteDB,
+		ReplayMaxRows: request.ReplayMaxRows,
+	}); err != nil {
+		s.log.Error("sr evaluation job create failed", zap.String("job_id", jobID), zap.Error(err))
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		return
+	}
+	if err := s.srEvaluationJobs.MarkRunning(ctx, jobID); err != nil {
+		s.log.Error("sr evaluation job mark running failed", zap.String("job_id", jobID), zap.Error(err))
+	}
+
+	report, err := s.analysisClient.RunSREvaluation(ctx, request)
+	if err != nil {
+		s.log.Error("sr evaluation failed", zap.String("job_id", jobID), zap.Error(err))
+		if markErr := s.srEvaluationJobs.MarkFailed(ctx, jobID, err.Error()); markErr != nil {
+			s.log.Error("sr evaluation job mark failed failed", zap.String("job_id", jobID), zap.Error(markErr))
+		}
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		return
+	}
+
+	reportJSON, err := json.Marshal(report)
+	if err != nil {
+		s.log.Error("sr evaluation report marshal failed", zap.String("job_id", jobID), zap.Error(err))
+		reportJSON = []byte("null")
+	}
+	if err := s.srEvaluationJobs.MarkDone(
+		ctx,
+		jobID,
+		store.RawJSON(reportJSON),
+		analysis.StringFromReport(report, "run_id"),
+		analysis.StringFromReport(report, "schema_version"),
+		analysis.StringFromReport(report, "pipeline_version"),
+		analysis.IntFromReport(report, "rows"),
+		analysis.IntFromReport(report, "sources"),
+	); err != nil {
+		s.log.Error("sr evaluation job mark done failed", zap.String("job_id", jobID), zap.Error(err))
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		return
+	}
+
+	s.log.Info("sr evaluation job completed", zap.String("job_id", jobID), zap.Int("symbols", len(symbols)))
+	s.finishRun(ctx, runID, "sr_evaluation", len(symbols), 0, "")
+}
+
+func (s *Scheduler) srEvaluationSymbols(ctx context.Context) ([]string, error) {
+	if len(s.srEvaluation.Symbols) > 0 {
+		symbols := make([]string, 0, len(s.srEvaluation.Symbols))
+		for _, symbol := range s.srEvaluation.Symbols {
+			symbol = strings.TrimSpace(symbol)
+			if symbol != "" {
+				symbols = append(symbols, symbol)
+			}
+		}
+		return symbols, nil
+	}
+	return s.watchlist.Symbols(ctx)
+}
+
+func (s *Scheduler) srEvaluationRequest(symbols []string) analysis.SREvaluationRequest {
+	timeframe := strings.TrimSpace(s.srEvaluation.Timeframe)
+	if timeframe == "" {
+		timeframe = "1d"
+	}
+	limit := s.srEvaluation.Limit
+	if limit <= 0 {
+		limit = 1500
+	}
+	replayMaxRows := s.srEvaluation.ReplayMaxRows
+	if s.srEvaluation.DecisionReplay && replayMaxRows <= 0 {
+		replayMaxRows = 200
+	}
+	if !s.srEvaluation.DecisionReplay {
+		replayMaxRows = 0
+	}
+	return analysis.SREvaluationRequest{
+		Symbols:        symbols,
+		Timeframe:      timeframe,
+		Limit:          limit,
+		WriteDB:        s.srEvaluation.WriteDB,
+		DecisionReplay: s.srEvaluation.DecisionReplay,
+		ReplayMaxRows:  replayMaxRows,
+	}
+}
+

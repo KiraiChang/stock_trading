@@ -4,6 +4,7 @@
   import {
     fetchSchedulerStatus,
     triggerDailyCloseRun,
+    triggerSREvaluationRun,
     triggerStockSymbolSyncRun,
     type JobName,
     type SchedulerJob,
@@ -15,7 +16,9 @@
     pre_market: '盤前初始化',
     intraday: '盤中分K',
     daily_close: '收盤後結算',
+    chip_daily_sync: '籌碼日結同步',
     stock_symbol_sync: '股票主檔同步',
+    sr_evaluation: 'SR Zone 驗證',
   }
 
   const statusLabel: Record<string, string> = {
@@ -100,6 +103,21 @@
       triggerError = { ...triggerError, stock_symbol_sync: '觸發失敗，請稍後再試' }
     } finally {
       triggering = { ...triggering, stock_symbol_sync: false }
+    }
+  }
+
+  async function runSREvaluation() {
+    triggering = { ...triggering, sr_evaluation: true }
+    triggerError = { ...triggerError, sr_evaluation: '' }
+    triggerMessage = { ...triggerMessage, sr_evaluation: '' }
+    try {
+      const res = await triggerSREvaluationRun()
+      triggerMessage = { ...triggerMessage, sr_evaluation: res.message ?? '已在背景重新觸發' }
+      setTimeout(load, 1500)
+    } catch {
+      triggerError = { ...triggerError, sr_evaluation: '觸發失敗，請稍後再試' }
+    } finally {
+      triggering = { ...triggering, sr_evaluation: false }
     }
   }
 
@@ -210,6 +228,27 @@
                 {/if}
                 {#if triggerError.stock_symbol_sync}
                   <p class="text-fall text-xs mt-2">{triggerError.stock_symbol_sync}</p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if job.job_name === 'sr_evaluation'}
+              <div class="mt-3 pt-3 border-t border-border">
+                <button
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  disabled={triggering.sr_evaluation}
+                  on:click={runSREvaluation}
+                >
+                  {triggering.sr_evaluation ? '觸發中...' : '手動執行 SR 驗證'}
+                </button>
+                <p class="text-muted text-xs mt-2">
+                  依 backend 的 sr_evaluation 設定執行 evaluation 或 decision replay，結果會寫入 evaluation jobs 與 regression results。
+                </p>
+                {#if triggerMessage.sr_evaluation}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage.sr_evaluation}</p>
+                {/if}
+                {#if triggerError.sr_evaluation}
+                  <p class="text-fall text-xs mt-2">{triggerError.sr_evaluation}</p>
                 {/if}
               </div>
             {/if}

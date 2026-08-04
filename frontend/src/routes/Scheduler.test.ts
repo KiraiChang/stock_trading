@@ -1,0 +1,86 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import Scheduler from './Scheduler.svelte'
+import {
+  fetchSchedulerStatus,
+  triggerSREvaluationRun,
+  type SchedulerJob,
+} from '../lib/api/scheduler'
+
+// 元件層測試：API 契約已由 scheduler.test.ts 保護，這裡只驗「手動觸發 SR 驗證」
+// 的元件狀態機（是否呼叫 API、進行中禁用、成功／失敗訊息）。
+vi.mock('../lib/api/scheduler', () => ({
+  fetchSchedulerStatus: vi.fn(),
+  triggerDailyCloseRun: vi.fn(),
+  triggerStockSymbolSyncRun: vi.fn(),
+  triggerSREvaluationRun: vi.fn(),
+}))
+
+const srEvaluationJob: SchedulerJob = {
+  job_name: 'sr_evaluation',
+  status: 'success',
+  symbols_total: 2,
+  symbols_failed: 0,
+  stale: false,
+  started_at: '2026-08-04T02:00:00Z',
+  finished_at: '2026-08-04T02:03:00Z',
+}
+
+beforeEach(() => {
+  vi.mocked(fetchSchedulerStatus).mockReset()
+  vi.mocked(triggerSREvaluationRun).mockReset()
+  vi.mocked(fetchSchedulerStatus).mockResolvedValue([srEvaluationJob])
+})
+
+// onMount 的第一次載入完成前畫面停在「載入中...」，用 findBy 等到列表渲染出來。
+async function renderSchedulerPage() {
+  render(Scheduler)
+  return screen.findByRole('button', { name: '手動執行 SR 驗證' })
+}
+
+describe('Scheduler 頁面的 sr_evaluation 區塊', () => {
+  it('渲染 SR Zone 驗證排程列與手動執行按鈕', async () => {
+    await renderSchedulerPage()
+
+    expect(screen.getByText('SR Zone 驗證')).toBeInTheDocument()
+    expect(screen.getByText('成功')).toBeInTheDocument()
+  })
+
+  it('點擊手動執行會呼叫 triggerSREvaluationRun 並顯示後端訊息', async () => {
+    vi.mocked(triggerSREvaluationRun).mockResolvedValue({ message: '已在背景觸發 SR evaluation' })
+    const button = await renderSchedulerPage()
+
+    await fireEvent.click(button)
+
+    expect(triggerSREvaluationRun).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText('已在背景觸發 SR evaluation')).toBeInTheDocument()
+  })
+
+  it('觸發進行中時按鈕禁用並顯示觸發中文案', async () => {
+    let resolveTrigger: (value: { message: string }) => void = () => {}
+    vi.mocked(triggerSREvaluationRun).mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrigger = resolve
+      })
+    )
+    const button = await renderSchedulerPage()
+
+    await fireEvent.click(button)
+
+    const pending = await screen.findByRole('button', { name: '觸發中...' })
+    expect(pending).toBeDisabled()
+
+    resolveTrigger({ message: 'ok' })
+    await waitFor(() => expect(screen.getByRole('button', { name: '手動執行 SR 驗證' })).toBeEnabled())
+  })
+
+  it('觸發失敗時顯示錯誤訊息且不留在觸發中狀態', async () => {
+    vi.mocked(triggerSREvaluationRun).mockRejectedValue(new Error('boom'))
+    const button = await renderSchedulerPage()
+
+    await fireEvent.click(button)
+
+    expect(await screen.findByText('觸發失敗，請稍後再試')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '手動執行 SR 驗證' })).toBeEnabled()
+  })
+})

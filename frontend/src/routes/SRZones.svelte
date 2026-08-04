@@ -14,6 +14,10 @@
     listTrainJobs,
     pruneTrainJobs,
     getModelStatus,
+    runSREvaluation,
+    getSREvaluationJob,
+    listSREvaluationJobs,
+    listSRRegressionResults,
     derivedReasonLabel,
     type SRZoneAnalysis,
     type SRZone,
@@ -24,6 +28,10 @@
     type SRScoringTrainJob,
     type TrainJobStatus,
     type ModelStatus,
+    type SREvaluationReport,
+    type SREvaluationJob,
+    type SREvaluationJobStatus,
+    type SRRegressionResult,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -86,7 +94,22 @@
   let pruningTrainJobs = false
   let activeJob: SRScoringTrainJob | null = null
   let recentTrainJobs: SRScoringTrainJob[] = []
+  type EvaluationMode = 'decision_replay' | 'evaluation'
+  let evaluationSymbols = ''
+  let evaluationLimit = 1500
+  let evaluationReplayMaxRows = 100
+  let evaluationMode: EvaluationMode = 'decision_replay'
+  let evaluationWriteDB = true
+  let evaluating = false
+  let evaluationError = ''
+  let evaluationMessage = ''
+  let evaluationReport: SREvaluationReport | null = null
+  let activeEvaluationJob: SREvaluationJob | null = null
+  let recentEvaluationJobs: SREvaluationJob[] = []
+  let regressionResults: SRRegressionResult[] = []
+  let regressionSchemaVersion = 'sr_zone_decision_replay_p0'
   let pollTimer: ReturnType<typeof setInterval> | null = null
+  let evaluationPollTimer: ReturnType<typeof setInterval> | null = null
   let tipTimer: ReturnType<typeof setInterval> | null = null
   let activeTipIndex = 0
   let showDetailedZones = false
@@ -97,6 +120,15 @@
     pending: '排隊中', running: '訓練中', done: '完成', failed: '失敗',
   }
   const trainStatusClass: Record<TrainJobStatus, string> = {
+    pending: 'bg-gray-700/60 text-gray-400',
+    running: 'bg-blue-900/40 text-blue-400',
+    done: 'bg-green-900/40 text-green-400',
+    failed: 'bg-red-900/40 text-red-400',
+  }
+  const evaluationStatusLabel: Record<SREvaluationJobStatus, string> = {
+    pending: '排隊中', running: '執行中', done: '完成', failed: '失敗',
+  }
+  const evaluationStatusClass: Record<SREvaluationJobStatus, string> = {
     pending: 'bg-gray-700/60 text-gray-400',
     running: 'bg-blue-900/40 text-blue-400',
     done: 'bg-green-900/40 text-green-400',
@@ -121,6 +153,8 @@
   onMount(() => {
     loadHistory()
     loadRecentTrainJobs()
+    loadRecentEvaluationJobs()
+    loadRegressionResults()
     loadModelStatus()
     tipTimer = setInterval(() => {
       if (analysisTips.length > 0) activeTipIndex = (activeTipIndex + 1) % analysisTips.length
@@ -128,6 +162,7 @@
   })
   onDestroy(() => {
     stopPolling()
+    stopEvaluationPolling()
     if (tipTimer) clearInterval(tipTimer)
   })
 
@@ -682,6 +717,150 @@
     }
   }
 
+  function parseSymbolList(input: string): string[] {
+    return input
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  }
+
+  async function runEvaluation() {
+    const symbols = parseSymbolList(evaluationSymbols || symbol)
+    if (symbols.length === 0) {
+      evaluationError = '請輸入 evaluation 股票代號'
+      return
+    }
+    if (evaluationLimit < 80) {
+      evaluationError = 'evaluation 抓取根數至少要 80 根'
+      return
+    }
+    if (evaluationMode === 'decision_replay' && evaluationReplayMaxRows <= 0) {
+      evaluationError = 'replay rows 必須大於 0'
+      return
+    }
+
+    evaluating = true
+    evaluationError = ''
+    evaluationMessage = ''
+    evaluationReport = null
+    activeEvaluationJob = null
+    try {
+      const res = await runSREvaluation({
+        symbols,
+        timeframe: '1d',
+        limit: evaluationLimit,
+        decisionReplay: evaluationMode === 'decision_replay',
+        replayMaxRows: evaluationReplayMaxRows,
+        writeDb: evaluationWriteDB,
+      })
+      evaluationMessage = res.message
+      activeEvaluationJob = {
+        id: 0,
+        job_id: res.job_id,
+        status: res.status,
+        symbols: JSON.stringify(symbols),
+        timeframe: '1d',
+        fetch_limit: evaluationLimit,
+        mode: evaluationMode,
+        write_db: evaluationWriteDB,
+        replay_max_rows: evaluationMode === 'decision_replay' ? evaluationReplayMaxRows : 0,
+        run_id: null,
+        schema_version: null,
+        pipeline_version: null,
+        rows: null,
+        sources: null,
+        report: null,
+        error: null,
+        started_at: null,
+        finished_at: null,
+        created_at: new Date().toISOString(),
+      }
+      pollEvaluationJob(res.job_id)
+    } catch (err) {
+      evaluationError = err instanceof ApiError ? err.message : 'evaluation 失敗，請確認 Python service 是否已啟動'
+      evaluating = false
+    }
+  }
+
+  function pollEvaluationJob(jobId: string) {
+    clearEvaluationPollTimer()
+    evaluationPollTimer = setInterval(async () => {
+      try {
+        const job = await getSREvaluationJob(jobId)
+        activeEvaluationJob = job
+        if (job.status === 'done' || job.status === 'failed') {
+          stopEvaluationPolling()
+          loadRecentEvaluationJobs()
+          if (job.status === 'done') {
+            evaluationReport = job.report
+            evaluationMessage = job.run_id ? `已完成 ${job.run_id}` : '已完成 evaluation'
+            if (job.write_db) {
+              regressionSchemaVersion = job.schema_version ?? regressionSchemaVersion
+              loadRegressionResults()
+            }
+          } else {
+            evaluationError = job.error ?? 'evaluation job failed'
+          }
+        }
+      } catch {
+        evaluationError = '查詢 evaluation 狀態失敗'
+        stopEvaluationPolling()
+      }
+    }, 3000)
+  }
+
+  function clearEvaluationPollTimer() {
+    if (evaluationPollTimer) {
+      clearInterval(evaluationPollTimer)
+      evaluationPollTimer = null
+    }
+  }
+
+  function stopEvaluationPolling() {
+    clearEvaluationPollTimer()
+    evaluating = false
+  }
+
+  async function loadRecentEvaluationJobs() {
+    try {
+      recentEvaluationJobs = await listSREvaluationJobs(5)
+    } catch {
+      // 沉默失敗，不影響分析與訓練功能
+    } finally {
+    }
+  }
+
+  async function loadRegressionResults() {
+    try {
+      regressionResults = await listSRRegressionResults(regressionSchemaVersion || undefined, 8)
+    } catch {
+      // 沉默失敗，不影響分析與訓練功能
+    }
+  }
+
+  function evaluationSchemaLabel(schema?: string | null): string {
+    if (schema === 'sr_zone_decision_replay_p0') return 'Decision Replay'
+    if (schema === 'sr_zone_evaluation_p0') return 'Evaluation'
+    if (schema === 'decision_replay') return 'Decision Replay'
+    if (schema === 'evaluation') return 'Evaluation'
+    return schema || '—'
+  }
+
+  function regressionRows(result: SRRegressionResult): number | null {
+    const value = result.metrics_json?.rows
+    return typeof value === 'number' ? value : null
+  }
+
+  function regressionSymbols(result: SRRegressionResult): string {
+    const symbols = result.metrics_json?.symbols
+    return Array.isArray(symbols) && symbols.length > 0 ? symbols.join(', ') : '—'
+  }
+
+  function regressionWarnings(result: SRRegressionResult): string {
+    const warnings = result.metrics_json?.warnings
+    return Array.isArray(warnings) && warnings.length > 0 ? warnings.join('；') : '—'
+  }
+
   function metricValue(job: SRScoringTrainJob | null, model: 'hold' | 'break', field: string): string {
     const v = job?.metrics?.[model]?.[field]
     return v === undefined || v === null ? '—' : v.toFixed(3)
@@ -1033,6 +1212,198 @@
           </table>
         </div>
       {/if}
+    </div>
+
+    <!-- ── 模型驗證 / Decision Replay ────────────────────────── -->
+    <div class="bg-panel border border-border rounded-xl px-5 py-4">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-white mb-1">模型驗證 / Decision Replay</h2>
+        </div>
+        <button
+          class="text-xs text-muted hover:text-white px-2 py-1 border border-border rounded transition-colors"
+          on:click={loadRegressionResults}
+        >
+          重新整理
+        </button>
+      </div>
+
+      {#if evaluationError}
+        <p class="text-rise text-sm mb-3">{evaluationError}</p>
+      {/if}
+      {#if evaluationMessage}
+        <p class="text-green-400 text-sm mb-3">{evaluationMessage}</p>
+      {/if}
+
+      <div class="flex flex-wrap gap-3 items-center">
+        <select
+          bind:value={evaluationMode}
+          class="bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 focus:outline-none focus:border-indigo-500 transition-colors"
+        >
+          <option value="decision_replay">Decision Replay</option>
+          <option value="evaluation">Zone Evaluation</option>
+        </select>
+        <input
+          bind:value={evaluationSymbols}
+          placeholder="股票代號，逗號分隔（留空 = 上方股票代號）"
+          class="flex-1 min-w-[220px] bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+        />
+        <input
+          type="number"
+          min="80"
+          step="100"
+          bind:value={evaluationLimit}
+          title="evaluation 用的歷史K棒根數（每檔股票）"
+          class="w-32 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                 focus:outline-none focus:border-indigo-500 transition-colors"
+        />
+        {#if evaluationMode === 'decision_replay'}
+          <input
+            type="number"
+            min="1"
+            step="25"
+            bind:value={evaluationReplayMaxRows}
+            title="Decision Replay 輸出 rows 上限"
+            class="w-32 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                   focus:outline-none focus:border-indigo-500 transition-colors"
+          />
+        {/if}
+        <label class="inline-flex items-center gap-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            bind:checked={evaluationWriteDB}
+            class="rounded border-border bg-surface text-indigo-600 focus:ring-indigo-500"
+          />
+          <span>寫入結果</span>
+        </label>
+        <button
+          class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm
+                 font-medium px-5 py-2 rounded-lg transition-colors"
+          disabled={evaluating}
+          on:click={runEvaluation}
+        >
+          {evaluating ? '執行中...' : '開始驗證'}
+        </button>
+      </div>
+
+      {#if activeEvaluationJob}
+        <div class="mt-3 px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium {evaluationStatusClass[activeEvaluationJob.status]}">
+            {evaluationStatusLabel[activeEvaluationJob.status]}
+          </span>
+          <span class="text-muted font-mono">{activeEvaluationJob.job_id}</span>
+          <span class="text-white">{evaluationSchemaLabel(activeEvaluationJob.schema_version ?? activeEvaluationJob.mode)}</span>
+          <span class="text-muted">rows={activeEvaluationJob.rows ?? '—'} sources={activeEvaluationJob.sources ?? '—'}</span>
+          {#if activeEvaluationJob.run_id}
+            <span class="text-muted font-mono">{activeEvaluationJob.run_id}</span>
+          {/if}
+          {#if activeEvaluationJob.status === 'failed' && activeEvaluationJob.error}
+            <span class="text-rise">{activeEvaluationJob.error}</span>
+          {/if}
+        </div>
+      {/if}
+
+      {#if evaluationReport}
+        <div class="mt-3 px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium bg-blue-900/40 text-blue-400">
+            {evaluationSchemaLabel(evaluationReport.schema_version)}
+          </span>
+          <span class="text-muted font-mono">{evaluationReport.run_id}</span>
+          <span class="text-white">rows={evaluationReport.rows ?? '—'} sources={evaluationReport.sources ?? '—'}</span>
+          {#if evaluationReport.decision_replay_available !== undefined}
+            <span class="text-muted">decision={evaluationReport.decision_replay_available ? 'available' : 'unavailable'}</span>
+          {/if}
+          {#if evaluationReport.event_lifecycle_replay_available !== undefined}
+            <span class="text-muted">lifecycle={evaluationReport.event_lifecycle_replay_available ? 'available' : 'unavailable'}</span>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="mt-4">
+        {#if recentEvaluationJobs.length > 0}
+          <div class="mb-4">
+            <p class="text-muted text-xs mb-1.5">最近 evaluation jobs</p>
+            <table class="w-full text-xs">
+              <thead>
+                <tr class="text-muted border-b border-border/60">
+                  <th class="text-left py-1">狀態</th>
+                  <th class="text-left py-1">類型</th>
+                  <th class="text-left py-1">run id</th>
+                  <th class="text-right py-1">rows</th>
+                  <th class="text-left py-1">時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each recentEvaluationJobs as job (job.job_id)}
+                  <tr class="border-b border-border/30">
+                    <td class="py-1">
+                      <span class="inline-flex items-center px-1.5 py-0 rounded-full font-medium {evaluationStatusClass[job.status]}">
+                        {evaluationStatusLabel[job.status]}
+                      </span>
+                    </td>
+                    <td class="py-1 text-white">{evaluationSchemaLabel(job.schema_version ?? job.mode)}</td>
+                    <td class="py-1 text-muted font-mono">{job.run_id ?? job.job_id}</td>
+                    <td class="py-1 text-right text-white">{job.rows ?? '—'}</td>
+                    <td class="py-1 text-muted font-mono">{formatDateTime(job.created_at)}</td>
+                  </tr>
+                  {#if job.status === 'failed' && job.error}
+                    <tr class="border-b border-border/30">
+                      <td colspan="5" class="py-1 text-rise">{job.error}</td>
+                    </tr>
+                  {/if}
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-1.5">
+          <p class="text-muted text-xs">最近 regression results</p>
+          <select
+            bind:value={regressionSchemaVersion}
+            on:change={loadRegressionResults}
+            class="bg-surface border border-border rounded px-2 py-1 text-xs text-white
+                   focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            <option value="sr_zone_decision_replay_p0">Decision Replay</option>
+            <option value="sr_zone_evaluation_p0">Zone Evaluation</option>
+            <option value="">全部</option>
+          </select>
+        </div>
+        {#if regressionResults.length > 0}
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-muted border-b border-border/60">
+                <th class="text-left py-1">類型</th>
+                <th class="text-left py-1">run id</th>
+                <th class="text-left py-1">股票</th>
+                <th class="text-right py-1">rows</th>
+                <th class="text-right py-1">hold/break AUC</th>
+                <th class="text-left py-1">治理</th>
+                <th class="text-left py-1">警告</th>
+                <th class="text-left py-1">時間</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each regressionResults as result (result.id)}
+                <tr class="border-b border-border/30">
+                  <td class="py-1 text-white">{evaluationSchemaLabel(result.schema_version || result.metrics_json?.schema_version)}</td>
+                  <td class="py-1 text-muted font-mono">{result.run_id}</td>
+                  <td class="py-1 text-white">{regressionSymbols(result)}</td>
+                  <td class="py-1 text-right text-white">{result.rows ?? regressionRows(result) ?? '—'}</td>
+                  <td class="py-1 text-right text-white">{fmt(result.hold_auc)} / {fmt(result.break_auc)}</td>
+                  <td class="py-1 text-white">{result.governance_health_state || '—'}</td>
+                  <td class="py-1 text-muted max-w-[260px] truncate" title={regressionWarnings(result)}>{regressionWarnings(result)}</td>
+                  <td class="py-1 text-muted font-mono">{formatDateTime(result.created_at)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {:else}
+          <p class="text-muted text-xs py-2">尚無 regression result。</p>
+        {/if}
+      </div>
     </div>
 
     <!-- ── 目前分析結果 ──────────────────────────────────────── -->

@@ -30,3 +30,4 @@ sr_scoring:
   # 時，/sr-zones 仍以規則式＋機率分數回應、evidence 標記未產生，而非 503。
   evidence_enabled: true      # 設 false 可為降低延遲主動關閉 SHAP evidence
   evidence_max_zones: 8       # 只對 trading_score 前 N 的 zone 產 SHAP evidence（0=全部）
+  adaptive_zone_builders_enabled: false  # T-003 P2 opt-in；待 evaluation review 後才考慮預設啟用

@@ -1038,3 +1038,116 @@ export interface ModelStatus {
 export async function getModelStatus(): Promise<ModelStatus> {
   return apiFetch('/sr-zones/model-status')
 }
+
+export interface SREvaluationOptions {
+  symbols: string[]
+  timeframe?: string
+  limit?: number
+  writeDb?: boolean
+  decisionReplay?: boolean
+  replayMaxRows?: number
+}
+
+export interface SREvaluationReport {
+  schema_version?: string
+  run_id?: string
+  pipeline_version?: string
+  rows?: number
+  sources?: number
+  symbols?: string[]
+  timeframe?: string
+  model_available?: boolean
+  decision_replay_available?: boolean
+  event_lifecycle_replay_available?: boolean
+  zone_score_fields_available?: boolean
+  decision_fields_available?: boolean
+  outcome_summary?: Record<string, unknown>
+  zone_outcomes?: Record<string, unknown>
+  model_metrics?: Record<string, Record<string, number | null> | null>
+  warnings?: string[]
+  [key: string]: unknown
+}
+
+export interface SRRegressionResult {
+  id: number
+  run_id: string
+  model_config_hash: string
+  pipeline_version: string
+  dataset_from: string | null
+  dataset_to: string | null
+  split_method: string
+  hold_auc: number | null
+  hold_brier_score: number | null
+  break_auc: number | null
+  break_brier_score: number | null
+  passed: boolean | null
+  schema_version: string
+  rows: number | null
+  sources: number | null
+  governance_health_state: string
+  governance_strict_passed: boolean | null
+  metrics_json: SREvaluationReport
+  created_at: string
+}
+
+export type SREvaluationJobStatus = 'pending' | 'running' | 'done' | 'failed'
+
+export interface SREvaluationJob {
+  id: number
+  job_id: string
+  status: SREvaluationJobStatus
+  symbols: string
+  timeframe: string
+  fetch_limit: number
+  mode: 'evaluation' | 'decision_replay' | string
+  write_db: boolean
+  replay_max_rows: number
+  run_id: string | null
+  schema_version: string | null
+  pipeline_version: string | null
+  rows: number | null
+  sources: number | null
+  report: SREvaluationReport | null
+  error: string | null
+  started_at: string | null
+  finished_at: string | null
+  created_at: string
+}
+
+export async function runSREvaluation(
+  opts: SREvaluationOptions
+): Promise<{ job_id: string; status: SREvaluationJobStatus; message: string; symbols: number }> {
+  return apiFetch('/sr-zones/evaluate', {
+    method: 'POST',
+    body: JSON.stringify({
+      symbols: opts.symbols,
+      timeframe: opts.timeframe ?? '1d',
+      limit: opts.limit ?? 1500,
+      write_db: opts.writeDb ?? false,
+      decision_replay: opts.decisionReplay ?? false,
+      replay_max_rows: opts.replayMaxRows ?? 200,
+    }),
+  })
+}
+
+export async function getSREvaluationJob(jobId: string): Promise<SREvaluationJob> {
+  const res = await apiFetch<{ job: SREvaluationJob }>(`/sr-zones/evaluation-jobs/${jobId}`)
+  return res.job
+}
+
+export async function listSREvaluationJobs(limit = 5): Promise<SREvaluationJob[]> {
+  const res = await apiFetch<{ jobs: SREvaluationJob[]; total: number }>(`/sr-zones/evaluation-jobs?limit=${limit}`)
+  return res.jobs ?? []
+}
+
+export async function listSRRegressionResults(
+  schemaVersion?: string,
+  limit = 10
+): Promise<SRRegressionResult[]> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (schemaVersion) params.set('schema_version', schemaVersion)
+  const res = await apiFetch<{ results: SRRegressionResult[]; total: number }>(
+    `/sr-zones/regression-results?${params.toString()}`
+  )
+  return res.results ?? []
+}

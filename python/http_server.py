@@ -38,15 +38,25 @@ check_connection()
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
 from backtest.db_writer import update_job_status, write_result, write_trades
 from backtest.modular.analysis import DEFAULT_FETCH_LIMIT, analyze_symbol
 from backtest.modular.sr_scoring.scoring import DEFAULT_FETCH_LIMIT as SR_SCORING_DEFAULT_FETCH_LIMIT
 from backtest.modular.sr_scoring.scoring import score_symbol
+from backtest.modular.sr_scoring.dataset import DatasetConfig
+from backtest.modular.sr_scoring.evaluation import (
+    DEFAULT_EVALUATION_LIMIT,
+    DEFAULT_PIPELINE_VERSION,
+    DEFAULT_REPLAY_MAX_ROWS,
+    run_decision_replay,
+    run_evaluation,
+    write_evaluation_result,
+)
 from backtest.modular.sr_scoring.model import get_model
 from backtest.modular.sr_scoring.train import run_training
+from backtest.modular.sr_scoring.zone_builder import ATRZoneBuilderConfig, ZoneBuilderConfig
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0")
 
@@ -197,6 +207,111 @@ async def sr_scoring_train(req: TrainRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+class SREvaluationRequest(BaseModel):
+    symbols: List[str]
+    timeframe: str = "1d"
+    limit: int = DEFAULT_EVALUATION_LIMIT
+    model_path: Optional[str] = None
+    write_db: bool = False
+    decision_replay: bool = False
+    replay_max_rows: int = DEFAULT_REPLAY_MAX_ROWS
+    run_id: Optional[str] = None
+    pipeline_version: Optional[str] = None
+    passed: Optional[bool] = None
+    min_history_bars: int = 80
+    rebuild_every_bars: int = 5
+    forward_bars: int = 5
+    threshold_pct: float = 0.03
+    atr_width_multiplier: float = 1.5
+    max_merge_width_multiple: float = 2.0
+    atr_lookback: int = 60
+    atr_period: int = 14
+    chip_scores_by_symbol: Optional[dict[str, list[dict[str, Any]]]] = None
+    model_governance_by_symbol: Optional[dict[str, list[dict[str, Any]]]] = None
+
+
+@app.post("/sr-scoring/evaluate")
+async def sr_scoring_evaluate(req: SREvaluationRequest):
+    """手動觸發 SR Zone evaluation / decision replay。
+
+    這支 API 是 CLI evaluation 的 HTTP 包裝：Go 端可用它手動產生 regression
+    report，並在 write_db=true 時由 Python 寫入 stock_sr_regression_results。
+    第一版只接受 DB symbols，不開放遠端指定 CSV 路徑。
+    """
+    import config
+
+    symbols = [symbol.strip() for symbol in req.symbols if symbol.strip()]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="symbols is required")
+    if req.limit <= 0:
+        raise HTTPException(status_code=400, detail="limit must be > 0")
+    # replay_max_rows 只有 decision_replay 模式才有意義；非 replay 模式送 0 是 Go 端的正常
+    # 語意，不該回 400。
+    if req.decision_replay and req.replay_max_rows <= 0:
+        raise HTTPException(status_code=400, detail="replay_max_rows must be > 0 when decision_replay is enabled")
+
+    log.info(
+        "POST /sr-scoring/evaluate symbols=%s tf=%s limit=%d decision_replay=%s write_db=%s",
+        symbols, req.timeframe, req.limit, req.decision_replay, req.write_db,
+    )
+
+    dataset_config = DatasetConfig(
+        min_history_bars=req.min_history_bars,
+        rebuild_every_bars=req.rebuild_every_bars,
+        forward_bars_support=req.forward_bars,
+        forward_bars_resistance=req.forward_bars,
+        threshold_pct_support=req.threshold_pct,
+        threshold_pct_resistance=req.threshold_pct,
+    )
+    model_path = req.model_path or config.SR_SCORING_MODEL_PATH
+    pipeline_version = req.pipeline_version or (
+        # 與 evaluation.run_decision_replay 的預設一致；schema_version 仍是 p0（gate 用它過濾）。
+        "sr_zone_decision_replay_p1" if req.decision_replay else DEFAULT_PIPELINE_VERSION
+    )
+
+    try:
+        if req.decision_replay:
+            report = run_decision_replay(
+                symbols=symbols,
+                timeframe=req.timeframe,
+                limit=req.limit,
+                model_path=model_path,
+                dataset_config=dataset_config,
+                replay_max_rows=req.replay_max_rows,
+                chip_scores_by_symbol=req.chip_scores_by_symbol,
+                model_governance_by_symbol=req.model_governance_by_symbol,
+                run_id=req.run_id,
+                pipeline_version=pipeline_version,
+            )
+        else:
+            builder_config = ZoneBuilderConfig(
+                atr=ATRZoneBuilderConfig(
+                    lookback=req.atr_lookback,
+                    atr_period=req.atr_period,
+                    atr_width_multiplier=req.atr_width_multiplier,
+                    max_merge_width_multiple=req.max_merge_width_multiple,
+                )
+            )
+            report = run_evaluation(
+                symbols=symbols,
+                timeframe=req.timeframe,
+                limit=req.limit,
+                model_path=model_path,
+                dataset_config=dataset_config,
+                builder_config=builder_config,
+                run_id=req.run_id,
+                pipeline_version=pipeline_version,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    if req.write_db:
+        write_evaluation_result(report, passed=req.passed)
+    return report
 
 
 @app.get("/sr-scoring/model-status")

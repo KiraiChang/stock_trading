@@ -121,6 +121,7 @@ func NewServer(
 		protected.GET("/scheduler/status", sch.GetStatus)
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
+		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo, log)
 		protected.POST("/backtest", bh.Submit)
@@ -140,8 +141,20 @@ func NewServer(
 		szh := handler.NewSRZoneHandler(
 			analysisClient, srZoneRepo, watchlistRepo, srScoringTrainJobRepo, srZoneVerifier, srAnalysisProvider, log,
 		)
+		srRegressionResultHandler := handler.NewSRRegressionResultHandler(
+			analysisClient,
+			store.NewSRRegressionResultRepo(db),
+			store.NewSREvaluationJobRepo(db),
+			chipScoreRepo,
+			store.NewSRModelGovernanceRepo(db),
+			log,
+		)
 		protected.POST("/sr-zones", szh.Create)
 		protected.GET("/sr-zones", szh.List)
+		protected.POST("/sr-zones/evaluate", srRegressionResultHandler.Evaluate)
+		protected.GET("/sr-zones/evaluation-jobs", srRegressionResultHandler.ListEvaluationJobs)
+		protected.GET("/sr-zones/evaluation-jobs/:job_id", srRegressionResultHandler.GetEvaluationJob)
+		protected.GET("/sr-zones/regression-results", srRegressionResultHandler.List)
 		protected.GET("/sr-zones/:id", szh.Get)
 		protected.POST("/sr-zones/:id/verify", szh.Verify)
 		protected.POST("/sr-zones/train", szh.Train)

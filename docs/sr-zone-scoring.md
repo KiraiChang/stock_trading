@@ -1662,6 +1662,35 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
   只是它們的摘要——判讀時看前兩者。
 - Zone Evaluation 模式的 report 沒有 `governance_evaluation`，治理區塊不會出現。
 
+**面板區塊與 schema 的對應**：兩種 report 的欄位幾乎互斥，面板一律以「欄位在不在」決定顯示
+（`{#if report.xxx}`），不用模式旗標判斷——模式判斷會在 schema 演進時失準，by-presence 天然容錯。
+
+| 區塊 | 依據欄位 | Zone Evaluation<br>`sr_zone_evaluation_p0` | Decision Replay<br>`sr_zone_decision_replay_p0` |
+|---|---|---|---|
+| 模型層（AUC / Brier / log loss / calibration bins） | `model_metrics` | ✅ | ❌ |
+| Zone 層（守住率 / 壓回率 / 突破率 + 角色·方法·波動分層） | `zone_outcomes` | ✅ | ❌ |
+| Decision 層（`at_zone_rate`、RR 摘要、進場狀態分層） | `outcome_summary` | ❌ | ✅ |
+| 隔日／兩日確認成效 | `outcome_summary.daily_confirmation_summary` | ❌ | ✅ |
+| 模型治理 / 覆蓋率 | `governance_evaluation`、`replay_coverage` | ❌ | ✅ |
+| 警告 | `warnings` | ✅ | ✅ |
+
+2026-08-05 之前面板只渲染治理區塊，而那是 replay 專屬欄位，所以**Zone Evaluation 模式跑完
+畫面上只剩 run_id 與 rows/sources**，要看 AUC 就得勾「寫入結果」去查 regression results
+表格——與「先 dry run 再決定寫不寫」的設計初衷互相矛盾。四個指標區塊補上後才真正解掉。
+
+**判讀時的兩個陷阱**：
+
+- **`—` 不等於 0**：模型載不到時 `model_metrics.hold` / `break` 是 `null`（不是缺鍵），
+  `calibration` 在無樣本時是 `null`，空 bin 的 `mean_predicted` / `observed_rate` / `gap`
+  也都是 null。UI 一律顯示 `—`；把 null 當 0 讀會把「沒資料」誤判成「完美校準」。
+- **ECE 樣本不足**：`calibration.insufficient_sample=true`（樣本 < `MIN_CALIBRATION_ROWS = 50`）
+  時 bin 內 `observed_rate` 抖動極大，面板會標紅「樣本不足，ECE 抖動大，不可用於調參」。
+  看到這行就不要拿該次 ECE 做參數決策。
+
+面板配色沿用 [`development-workflow.md`](./development-workflow.md) 的三類規則：warnings 與
+「樣本不足」屬錯誤／警示文字用 `text-rise`（紅），報酬率屬行情語意走既有
+`fmtSignedPct()` / `signedClass()`。這些顏色由 `SRZones.test.ts` 的 class 斷言鎖住。
+
 參數 sweep 沒有 API 與 UI，只能用 CLI（見上節）。
 
 ### Production 端的 regression governance gate

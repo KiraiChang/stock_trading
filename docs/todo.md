@@ -710,3 +710,123 @@ import 期（或提供可注入的 DB stub），屬小型重構。
 
 **相依**：B 的第三點需先改 Go；A 與 B 前兩點是純前端。實作前需依規模決定是否另出計畫書
 （跨 Go + 前端即屬跨模組異動）。
+
+#### 實作計畫：T-037 A —— report 面板補上三層核心指標（2026-08-05，已實作待 review）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已實作（待 review） |
+| 範圍 | frontend only（SR Zone 頁 evaluation 面板）；本次只做 A，B / C 不動 |
+| 影響 runtime | 只有 frontend；不動 Go、Python、API contract 與 DB |
+
+**實作結果（2026-08-05）**：四個區塊與 warnings 全部完成，`svelte-check` 0 errors、
+14 files / 42 tests（新增 5 筆）、build 綠。現況說明已歸檔到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「前端手動 evaluation 入口的判讀」（含區塊與
+schema 的對應表、`—` 不等於 0、ECE 樣本不足兩個判讀陷阱）。
+
+實作中修掉一個計畫沒預見的問題：**Svelte 模板不能寫明確泛型參數**。
+`sortedEntries<SRZoneOutcomeGroup>(...)` 會被模板當成 `<` / `>` 比較運算子，編譯過得去但
+runtime 拋 `ReferenceError: SRZoneOutcomeGroup is not defined`，且只在有分層資料的 report
+才觸發——靠型別檢查與 build 都抓不到，是新增的元件測試先攔下來的。改用型別推導即可。
+
+**先講一個會決定整個設計的前提：兩種 report 的欄位幾乎是互斥的**
+
+查證 `evaluation.py` 的兩處 report 組裝後確認：
+
+| 欄位 | Zone Evaluation<br>`sr_zone_evaluation_p0` | Decision Replay<br>`sr_zone_decision_replay_p0` |
+|---|---|---|
+| `model_metrics`（AUC / Brier / log loss / calibration） | ✅ | ❌ |
+| `zone_outcomes`（hold rate / rejection rate / …） | ✅ | ❌ |
+| `dataset_summary` | ✅ | ❌ |
+| `outcome_summary`（decision 分層 / RR / daily confirmation） | ❌ | ✅ |
+| `governance_evaluation` / `replay_coverage` / `replay_rows` | ❌ | ✅ |
+| `volatility_profiles` / `builder_config` / `warnings` | ✅ | ✅ |
+
+這正好解釋了「Zone Evaluation 跑完畫面一片空白」：現有面板只渲染治理區塊，而那是 replay
+專屬欄位。所以**所有區塊一律 by-presence 渲染（`{#if report.xxx}`），不要用模式旗標硬寫**
+——用模式判斷會在 schema 演進時再度失準，而 by-presence 天然容錯。
+
+**目標**
+
+1. Zone Evaluation 模式跑完就看得到模型層與 Zone 層指標，不必勾「寫入結果」去查表格。
+2. Decision Replay 模式補上 decision 分層、RR 摘要與 daily confirmation 成效。
+3. 兩種模式都顯示 `warnings`。
+
+**不做的範圍**
+
+- 不做 B（ATR 參數輸入、`volatility_profiles` 明細、`zone_builder_runtime_config`）與 C（端點可測性）。
+- 不顯示 `replay_rows` 原始列、不加「完整 report JSON」區塊。
+- 不改後端與 Python：這些欄位早就在 report 裡，純粹是前端沒渲染。
+
+**受影響檔案**
+
+| 檔案 | 動作 |
+|---|---|
+| `frontend/src/lib/api/srZones.ts` | 新增具名 optional 型別掛進 `SREvaluationReport`（比照既有 `SRDecisionReplayGovernance` 的做法，不靠 index signature） |
+| `frontend/src/routes/SRZones.svelte` | evaluation report 區下新增四個 `<details>` 分區 + warnings 列 |
+| `frontend/src/routes/SRZones.test.ts` | 新增兩種 schema 的渲染測試與邊界測試 |
+
+**型別**（欄位名以 `evaluation.py` 實際輸出為準）
+
+- `SRBinaryMetrics`：`rows` / `positive_rows` / `auc` / `brier_score` / `log_loss` / `calibration`
+- `SRCalibration`：`bin_count` / `rows` / `binned_rows` / `bins[]` / `expected_calibration_error` /
+  `max_calibration_error` / `insufficient_sample`；bin 為 `lower` / `upper` / `rows` /
+  `mean_predicted` / `observed_rate` / `gap`
+- `SRModelMetrics`：`model_available` / `model_version` / `model_trained_at` /
+  `model_config_hash` / `hold` / `break`（**`hold` 與 `break` 在無模型時是 `null`**）
+- `SRZoneOutcomes`：`rows` / `support_hold_rate` / `resistance_rejection_rate` /
+  `break_positive_rate` / `average_forward_return` / `by_method` / `by_role` / `by_volatility_bucket`
+- `SRDecisionOutcomeGroup`：`rows` / `rows_with_forward_return` / `average_forward_return` /
+  `positive_forward_return_rate` / `negative_forward_return_rate`
+- `SRRRSummary`：`rows_with_entry_rr` / `average_entry_rr` / `median_entry_rr` /
+  `rows_with_position_rr` / `average_position_rr` / `median_position_rr` /
+  `entry_rr_source_counts` / `position_rr_source_counts`
+- `SRDailyConfirmationSummary`：`rows` / 五個 rate（`support_next_hold_rate`、
+  `support_two_bar_confirm_rate`、`resistance_next_rejection_rate`、
+  `resistance_next_breakout_rate`、`resistance_two_bar_breakout_continuation_rate`）/
+  `average_next_close_return` / `average_two_bar_close_return` / `failure_distribution` / `by_state`
+- `SROutcomeSummary`：`at_zone_rate` / `primary_zone_role_counts` / `rr_summary` /
+  `daily_confirmation_summary` / `by_final_entry_state` / `by_daily_confirmation_state` /
+  `by_market_bias`（其餘 `rows_with_*` 計數本次不渲染，靠既有索引簽章吸收）
+
+**UI（四個分區，各用 `<details>`，沿用檔案既有樣式）**
+
+| 分區 | 摘要列（預設可見） | 展開內容 |
+|---|---|---|
+| 模型層 | hold / break 的 AUC、Brier、log loss、ECE | calibration 10 個 bin 的表格（區間、rows、mean_predicted、observed_rate、gap） |
+| Zone 層 | support hold rate、resistance rejection rate、break positive rate、平均 forward return | `by_role` / `by_method` / `by_volatility_bucket` 三張小表 |
+| Decision 層 | `at_zone_rate`、平均 entry RR / position RR | `by_final_entry_state` / `by_market_bias` / `by_daily_confirmation_state` 表格（rows、平均報酬、正負報酬率） |
+| Daily confirmation | 五個 rate + 隔日／兩日平均報酬 | `failure_distribution` 與 `by_state` |
+
+`warnings` 不折疊，直接列在分區之上。
+
+**顏色**（依 [`development-workflow.md`](./development-workflow.md) 的三類規則，避免重蹈 `fall` 是綠色的坑）
+
+- `warnings` 屬錯誤訊息文字 → `text-rise`（紅）。
+- 報酬率屬行情語意 → 沿用既有 `fmtSignedPct()` 與 `signedClass()`。
+- **不得**用 `text-fall` 標示任何「不好的」指標，那是綠色。
+
+**主要風險**
+
+- **null 與空值**：無模型時 `model_metrics.hold` / `break` 是 `null`（不是缺鍵），`calibration`
+  在 `rows=0` 時也是 `null`，空 bin 的 `mean_predicted` / `observed_rate` / `gap` 全是 null。
+  必須顯示 `—` 而非 `0`——把 null 印成 0 會讓「沒資料」看起來像「完美校準」。
+- **ECE 誤用**：`insufficient_sample=true`（樣本 < 50）時 bin 內 observed_rate 抖動極大，UI 必須
+  明確標示「樣本不足，不可用於調參」，否則使用者會拿雜訊做參數決策。這是主題文件明講的陷阱。
+- **面板長度**：四區全展開會很長，故預設全部收合、摘要只放關鍵數字。
+- **回滾**：純前端、無契約變更，`git checkout` 即可還原。既有測試不會紅（純新增）。
+
+**測試（`SRZones.test.ts`）**
+
+- Zone Evaluation report（有 `model_metrics` / `zone_outcomes`、無 `governance_evaluation`）→
+  模型層與 Zone 層區塊出現、治理區塊不出現。**這條直接鎖住本次要解的痛點。**
+- Decision Replay report → decision 層與 daily confirmation 區塊出現、模型層區塊不出現。
+- `model_available: false`（`hold` / `break` 為 `null`）→ 不拋錯，數值顯示 `—`。
+- `calibration.insufficient_sample: true` → 顯示樣本不足標示。
+- `warnings` 非空 → 內容顯示且帶 `text-rise` **class 斷言**（只斷言文字抓不到配色錯誤）。
+
+**驗證**：`frontend/scripts/test.sh`（svelte-check → vitest → build 三步全綠）。後端與 Python
+無改動，不需重跑。
+
+**完成後歸檔**：各區塊對應哪個 schema、為何 by-presence 渲染、ECE 樣本不足的判讀方式，補到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「前端手動 evaluation 入口的判讀」。

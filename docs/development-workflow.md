@@ -99,6 +99,36 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 自己的 cgroup 上限」（可回收、錯誤訊息讀得到、工作階段活著）換成「host 砍掉呼叫端」
 （整個工作階段連同未回報的結果一起消失）。
 
+### container 上限的**總和**也要顧——本機同時只留一組 stack
+
+同一個失效模式不只來自測試腳本的 `--memory`，也來自**常駐 compose stack 的 `mem_limit`
+總和**。每個 stack 都設 `0.5` CPU / `512m` / `768m`，看似安全，但那是**每個 container 各自的
+上限**，不是總量保證：10 個 container 加起來就是 ~5 GB 的授權額度，而 host 只有 2 GiB。
+
+2026-08-05 16:22 實際發生過（見 [issue.md](./issue.md) I-053）：live project `stock_trading`
+被拉起來後，全機共 10 個 container ＋ claude ~400 MB ＋ codex ~137 MB ＋ dockerd ~314 MB，
+**沒有任何 container 撞到自己的 512m 上限**（全部 `OOMKilled=false`），是 host 先耗盡，
+於是 claude 被砍，接著 `docker-proxy` × 8 與 `dockerd` 也被砍，所有 container 一起停掉。
+
+規則：
+
+- **本機同時只允許一組 stack 常駐**。開工前先 `docker ps --format '{{.Names}}'` 看一眼，
+  多餘的先 `compose down`（不帶 `-v`）。
+- **不要在本機把 live/deploy project 拉起來**——驗收一律用 `docker-compose.dev.yml` 的
+  dev project（CLAUDE.md 規定）。
+- 開跑前 `free -m` 的 `available` 低於 ~800 MB 就先清場再說，不要硬上。
+
+### 事後判讀 OOM：這台的 `dmesg -T` 時間不可信
+
+調查被 kill 的原因時，`dmesg -T` 的**絕對時間會錯**（此沙箱 kernel 單調時鐘與 wallclock 有
+數十小時偏移，2026-08-05 實測 ~44.8 小時，會把當天的事件標成兩天前）。正確做法：
+
+- 只用 `dmesg` 的**相對間隔**，再拿 `docker inspect -f '{{.State.StartedAt}} {{.State.FinishedAt}}'`
+  （docker 用自己的 wallclock，可信）對齊到真實時間。
+- 決定性驗證：`dmesg` 最後一行的 veth 名稱若等於 `ip -o link` 目前唯一存在的 veth，
+  該行就是最近一次 container 啟動的時點。
+- kernel ring buffer 只留約 60 行 / 1.7 小時，查不到不等於沒發生。
+
 護欄開關（環境變數）：
 
 | 變數 | 預設 | 作用 |
@@ -163,6 +193,9 @@ Frontend 測試框架（三層）：
   用量壓下來的主要槓桿。2026-08-05 實測三步峰值（`memory.max_usage_in_bytes`，含可回收的
   page cache）：svelte-check 376MB、vitest 359MB、vite build 370MB；`MEM` 預設 440m，被護欄
   下修到 365m 時三步仍全過（緊縮時 kernel 直接回收 page cache，不會 OOM）。
+  **下限**：`svelte-check` 的 node heap 低於約 200MB 會直接 `JavaScript heap out of memory`
+  （實測 198m 失敗、231m 通過）。host 吃緊到 `MEM` 被下修至 300m 以下時就會踩到，這時不是
+  改 code，是等記憶體回來或調 `MEM_RESERVE_MB`。失敗發生在 container 內，呼叫端不受影響。
   **不要因為想給測試更多空間而調高 `MEM`**，理由見上面的「`MEM` 是上限，不是預留」。
 - **版本相容**：Svelte 4 需 `svelte-check@^3`（v4 需 Svelte 5）與 `@testing-library/svelte@^4`
   （v5 的 `svelteTesting` vite plugin 需 Svelte 5，本專案不適用，故手動設定 browser condition

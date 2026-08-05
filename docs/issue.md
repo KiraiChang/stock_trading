@@ -34,4 +34,58 @@
 
 ---
 
-下一筆新問題從 `I-053` 起編。
+### I-053：2 GiB host 下 live stack 與本機開發工具（claude / codex）不可併存，會被 host OOM killer 砍掉呼叫端
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（環境限制，不改 runtime） |
+| 嚴重度 | 中 |
+| 分類 | 開發環境 / Docker / 記憶體 |
+| 發現日期 | 2026-08-05 |
+| 來源 | 2026-08-05 16:22 claude 被 OOM kill 事故調查 |
+
+**現象**：Claude Code 這端完全閒置（沒跑測試、沒 build）時，claude 行程仍被 host OOM killer
+砍掉，並連帶引發 `docker-proxy` × 8 與 `dockerd` 被砍、所有 container 被停的 cascade。
+
+**時序（2026-08-05，CST）**：
+
+| 時間 | 事件 |
+|---|---|
+| 15:56:03 | live project `stock_trading`（backend / python-server / python-worker）被啟動 |
+| 16:22:02 | host OOM killer 砍掉 claude（anon-rss 402 MB、total-vm 5.9 GB） |
+| 16:22:31–16:23:57 | 連續砍掉 8 個 `docker-proxy` |
+| 16:23:57 | 砍掉 `dockerd`（anon-rss 314 MB） |
+| 16:23:58 | systemd 重啟 dockerd，接手後把殘留 container 全停（`python-worker` 逾時被 SIGKILL → `exit=137`） |
+| 16:24:13 | 只有 gitea（restart policy）回來 |
+
+**根因**：host cgroup 上限只有 2 GiB，事發當下同時有 **10 個 container**（15:56 才起的 live
+stack 3 個 ＋ 既有 7 個：dev postgres、postgres、redis、caddy、fin-api、akatengu、gitea），
+外加 host 上的 claude ~400 MB、codex ~137 MB、dockerd ~314 MB、containerd 與 10 個 shim。
+每個 container 都設了 `mem_limit: 512m`，但**加總約 5 GB 遠超過 host 的 2 GiB**——per-container
+上限只保證單一 container 不超標，不保證總和。所以沒有任何 container 撞到自己的 cgroup 上限
+（全部 `OOMKilled=false`），是 host 先耗盡，再由 host 層級 OOM killer 挑 badness 最高的行程，
+也就是持有最大 heap 的 claude。詳見 `development-workflow.md` 的
+「`MEM` 是上限，不是預留」與「container 上限的**總和**也要顧」。
+
+**規避方式**：本機同時只允許一組 stack 常駐。要跑 live project 前先確認沒有其他 stack 佔著
+記憶體；驗收一律用 `docker-compose.dev.yml` 的 dev project（CLAUDE.md 規定），不要在本機把
+live/deploy project 拉起來。
+
+**調查此類事故時的陷阱**：這台沙箱的 `dmesg -T` **絕對時間不可信**（kernel 單調時鐘與
+wallclock 有數十小時偏移，本次為 ~44.8 小時，會把當天事件標成兩天前）。判讀方式：
+
+- 用 `dmesg` 的**相對間隔**搭配 `docker inspect` 的 `StartedAt` / `FinishedAt`（docker 用自己的
+  wallclock，可信）交叉定位。
+- 決定性驗證：`dmesg` 最後一行的 veth 名稱是否等於 `ip -o link` 目前唯一存在的 veth，
+  是的話該行就是「最近一次 container 啟動」。
+- kernel ring buffer 只留約 60 行 / 1.7 小時，更早的事故不會留下紀錄，別把「查不到」當成
+  「沒發生」。
+
+**附帶發現（待套用）**：`/opt/stacks/scripts/gitea/compose.yml` 是唯一沒有 `cpus` /
+`mem_limit` / `memswap_limit` 設定的 stack（實測佔 154 MB），其他 stack 都是
+`0.5` CPU / `512m` / `768m`。已決定補齊，但該路徑屬 `kirai`（uid 1000），需由該帳號或
+sudo 手動套用後重啟 gitea。
+
+---
+
+下一筆新問題從 `I-054` 起編。

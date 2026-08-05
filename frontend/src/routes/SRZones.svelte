@@ -34,6 +34,9 @@
     type SRDecisionReplayGovernance,
     type SRReplayCoverage,
     type SRRegressionResult,
+    type SRModelMetrics,
+    type SRBinaryMetrics,
+    type SRCalibrationBin,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -148,6 +151,34 @@
     const ratio = coverage.coverage_ratio
     const pct = ratio === null || ratio === undefined ? '—' : `${Math.round(ratio * 100)}%`
     return `${covered}/${requested}（${pct}）`
+  }
+
+  // evaluation report 的指標格式化。這些欄位大量出現 null（無模型、樣本為 0、空 bin），
+  // 一律顯示 '—'——把 null 印成 0 會讓「沒資料」看起來像「完美校準 / 零失敗」。
+  function fmtMetric(v?: number | null): string {
+    return v === undefined || v === null ? '—' : v.toFixed(3)
+  }
+
+  // Record<string, T> 的穩定排序，讓分層表格每次渲染順序一致。
+  function sortedEntries<T>(group?: Record<string, T>): [string, T][] {
+    return Object.entries(group ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  }
+
+  function calibrationBinLabel(bin: SRCalibrationBin): string {
+    const lower = bin.lower === undefined || bin.lower === null ? '—' : bin.lower.toFixed(1)
+    const upper = bin.upper === undefined || bin.upper === null ? '—' : bin.upper.toFixed(1)
+    return `${lower}~${upper}`
+  }
+
+  // hold / break 兩個模型走同一組渲染邏輯。無模型時兩者都是 null（不是缺鍵），
+  // 仍列出來讓使用者看到「這次沒有模型可評估」，而不是整區消失。
+  function binaryMetricRows(
+    metrics: SRModelMetrics
+  ): { label: string; value: SRBinaryMetrics | null | undefined }[] {
+    return [
+      { label: 'hold', value: metrics.hold },
+      { label: 'break', value: metrics.break },
+    ]
   }
 
   const evaluationStatusClass: Record<SREvaluationJobStatus, string> = {
@@ -1382,6 +1413,215 @@
               {/if}
             {/if}
           </div>
+        {/if}
+
+        <!--
+          以下四區一律以「欄位在不在」決定顯示，不用模式旗標判斷：兩種 schema 的欄位幾乎互斥
+          （`sr_zone_evaluation_p0` 有 model_metrics / zone_outcomes，`sr_zone_decision_replay_p0`
+          有 outcome_summary / governance_evaluation），by-presence 才不會在 schema 演進時失準。
+        -->
+        {#if (evaluationReport.warnings ?? []).length > 0}
+          <div class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <span class="text-muted">警告</span>
+            {#each evaluationReport.warnings ?? [] as warning}
+              <p class="text-rise mt-0.5">{warning}</p>
+            {/each}
+          </div>
+        {/if}
+
+        {#if evaluationReport.model_metrics}
+          {@const modelMetrics = evaluationReport.model_metrics}
+          <details class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <summary class="cursor-pointer text-muted hover:text-white">
+              模型層指標
+              {#if modelMetrics.model_available === false}
+                <span class="text-rise">（模型不可用，本次無機率指標）</span>
+              {:else}
+                <span class="text-white">
+                  hold AUC {fmtMetric(modelMetrics.hold?.auc)} · break AUC {fmtMetric(modelMetrics.break?.auc)}
+                </span>
+              {/if}
+            </summary>
+            <div class="mt-2 space-y-3">
+              {#each binaryMetricRows(modelMetrics) as row}
+                <div>
+                  <p class="text-white font-medium">{row.label}</p>
+                  <p class="text-muted mt-0.5">
+                    rows={row.value?.rows ?? '—'} · 正樣本={row.value?.positive_rows ?? '—'} ·
+                    AUC={fmtMetric(row.value?.auc)} · Brier={fmtMetric(row.value?.brier_score)} ·
+                    log loss={fmtMetric(row.value?.log_loss)}
+                  </p>
+                  {#if row.value?.calibration}
+                    {@const calibration = row.value.calibration}
+                    <p class="text-muted mt-0.5">
+                      ECE={fmtMetric(calibration.expected_calibration_error)} ·
+                      MCE={fmtMetric(calibration.max_calibration_error)} ·
+                      有效樣本={calibration.binned_rows ?? '—'}/{calibration.rows ?? '—'}
+                    </p>
+                    {#if calibration.insufficient_sample}
+                      <p class="text-rise mt-0.5">樣本不足，ECE 抖動大，不可用於調參</p>
+                    {/if}
+                    <table class="w-full mt-1">
+                      <thead>
+                        <tr class="text-muted border-b border-border/60">
+                          <th class="text-left py-1">機率區間</th>
+                          <th class="text-right py-1">rows</th>
+                          <th class="text-right py-1">預測均值</th>
+                          <th class="text-right py-1">實際命中率</th>
+                          <th class="text-right py-1">gap</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {#each calibration.bins ?? [] as bin}
+                          <tr class="border-b border-border/30">
+                            <td class="py-1 font-mono text-muted">{calibrationBinLabel(bin)}</td>
+                            <td class="py-1 text-right text-white">{bin.rows ?? '—'}</td>
+                            <td class="py-1 text-right text-muted">{fmtMetric(bin.mean_predicted)}</td>
+                            <td class="py-1 text-right text-muted">{fmtMetric(bin.observed_rate)}</td>
+                            <td class="py-1 text-right text-muted">{fmtMetric(bin.gap)}</td>
+                          </tr>
+                        {/each}
+                      </tbody>
+                    </table>
+                  {:else}
+                    <p class="text-muted mt-0.5">無校準資料</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </details>
+        {/if}
+
+        {#if evaluationReport.zone_outcomes}
+          {@const zoneOutcomes = evaluationReport.zone_outcomes}
+          <details class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <summary class="cursor-pointer text-muted hover:text-white">
+              Zone 層指標
+              <span class="text-white">
+                支撐守住 {fmtPct(zoneOutcomes.support_hold_rate)} · 壓力壓回 {fmtPct(zoneOutcomes.resistance_rejection_rate)}
+              </span>
+            </summary>
+            <p class="text-muted mt-2">
+              rows={zoneOutcomes.rows ?? '—'} · 突破率={fmtPct(zoneOutcomes.break_positive_rate)} ·
+              平均報酬=<span class={signedClass(zoneOutcomes.average_forward_return)}>
+                {fmtSignedPct(zoneOutcomes.average_forward_return)}
+              </span>
+            </p>
+            {#each [{ title: '依角色', group: zoneOutcomes.by_role }, { title: '依方法', group: zoneOutcomes.by_method }, { title: '依波動 bucket', group: zoneOutcomes.by_volatility_bucket }] as section}
+              {#if sortedEntries(section.group).length > 0}
+                <p class="text-muted mt-2 mb-1">{section.title}</p>
+                <table class="w-full">
+                  <thead>
+                    <tr class="text-muted border-b border-border/60">
+                      <th class="text-left py-1">名稱</th>
+                      <th class="text-right py-1">rows</th>
+                      <th class="text-right py-1">支撐守住</th>
+                      <th class="text-right py-1">壓力壓回</th>
+                      <th class="text-right py-1">突破率</th>
+                      <th class="text-right py-1">平均報酬</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each sortedEntries(section.group) as [name, item]}
+                      <tr class="border-b border-border/30">
+                        <td class="py-1 text-white">{name}</td>
+                        <td class="py-1 text-right text-muted">{item.rows ?? '—'}</td>
+                        <td class="py-1 text-right text-muted">{fmtPct(item.support_hold_rate)}</td>
+                        <td class="py-1 text-right text-muted">{fmtPct(item.resistance_rejection_rate)}</td>
+                        <td class="py-1 text-right text-muted">{fmtPct(item.break_positive_rate)}</td>
+                        <td class="py-1 text-right {signedClass(item.average_forward_return)}">
+                          {fmtSignedPct(item.average_forward_return)}
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
+            {/each}
+          </details>
+        {/if}
+
+        {#if evaluationReport.outcome_summary}
+          {@const outcomeSummary = evaluationReport.outcome_summary}
+          {@const rrSummary = outcomeSummary.rr_summary ?? {}}
+          <details class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <summary class="cursor-pointer text-muted hover:text-white">
+              Decision 層指標
+              <span class="text-white">
+                AT_ZONE {fmtPct(outcomeSummary.at_zone_rate)} · 平均 entry RR {fmtRatio(rrSummary.average_entry_rr)}
+              </span>
+            </summary>
+            <p class="text-muted mt-2">
+              entry RR 中位數={fmtRatio(rrSummary.median_entry_rr)}（{rrSummary.rows_with_entry_rr ?? 0} 列）·
+              position RR 平均={fmtRatio(rrSummary.average_position_rr)}（{rrSummary.rows_with_position_rr ?? 0} 列）
+            </p>
+            {#each [{ title: '依最終進場狀態', group: outcomeSummary.by_final_entry_state }, { title: '依市場偏向', group: outcomeSummary.by_market_bias }, { title: '依隔日確認狀態', group: outcomeSummary.by_daily_confirmation_state }] as section}
+              {#if sortedEntries(section.group).length > 0}
+                <p class="text-muted mt-2 mb-1">{section.title}</p>
+                <table class="w-full">
+                  <thead>
+                    <tr class="text-muted border-b border-border/60">
+                      <th class="text-left py-1">狀態</th>
+                      <th class="text-right py-1">rows</th>
+                      <th class="text-right py-1">有報酬列</th>
+                      <th class="text-right py-1">平均報酬</th>
+                      <th class="text-right py-1">正報酬率</th>
+                      <th class="text-right py-1">負報酬率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each sortedEntries(section.group) as [name, item]}
+                      <tr class="border-b border-border/30">
+                        <td class="py-1 text-white">{name}</td>
+                        <td class="py-1 text-right text-muted">{item.rows ?? '—'}</td>
+                        <td class="py-1 text-right text-muted">{item.rows_with_forward_return ?? '—'}</td>
+                        <td class="py-1 text-right {signedClass(item.average_forward_return)}">
+                          {fmtSignedPct(item.average_forward_return)}
+                        </td>
+                        <td class="py-1 text-right text-muted">{fmtPct(item.positive_forward_return_rate)}</td>
+                        <td class="py-1 text-right text-muted">{fmtPct(item.negative_forward_return_rate)}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              {/if}
+            {/each}
+          </details>
+        {/if}
+
+        {#if evaluationReport.outcome_summary?.daily_confirmation_summary}
+          {@const dailyConfirmation = evaluationReport.outcome_summary.daily_confirmation_summary}
+          <details class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <summary class="cursor-pointer text-muted hover:text-white">
+              隔日／兩日確認成效
+              <span class="text-white">
+                支撐隔日守住 {fmtPct(dailyConfirmation.support_next_hold_rate)} ·
+                壓力隔日壓回 {fmtPct(dailyConfirmation.resistance_next_rejection_rate)}
+              </span>
+            </summary>
+            <p class="text-muted mt-2">
+              rows={dailyConfirmation.rows ?? '—'} ·
+              支撐兩日確認={fmtPct(dailyConfirmation.support_two_bar_confirm_rate)} ·
+              壓力隔日突破={fmtPct(dailyConfirmation.resistance_next_breakout_rate)} ·
+              壓力兩日突破延續={fmtPct(dailyConfirmation.resistance_two_bar_breakout_continuation_rate)}
+            </p>
+            <p class="text-muted mt-0.5">
+              隔日平均報酬=<span class={signedClass(dailyConfirmation.average_next_close_return)}>
+                {fmtSignedPct(dailyConfirmation.average_next_close_return)}
+              </span> ·
+              兩日平均報酬=<span class={signedClass(dailyConfirmation.average_two_bar_close_return)}>
+                {fmtSignedPct(dailyConfirmation.average_two_bar_close_return)}
+              </span>
+            </p>
+            {#if sortedEntries(dailyConfirmation.failure_distribution).length > 0}
+              <p class="text-muted mt-2 mb-1">失敗分布</p>
+              <div class="flex flex-wrap gap-x-3 gap-y-1">
+                {#each sortedEntries(dailyConfirmation.failure_distribution) as [name, count]}
+                  <span class="text-muted"><span class="text-white font-mono">{name}</span> {count}</span>
+                {/each}
+              </div>
+            {/if}
+          </details>
         {/if}
       {/if}
 

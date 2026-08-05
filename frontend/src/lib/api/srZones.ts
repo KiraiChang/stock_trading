@@ -1078,6 +1078,113 @@ export interface SRReplayCoverage {
   window_mode?: string
 }
 
+// 實測校準（`sr_evaluation_calibration_v1`）。與 train job 的 calibration_method 是不同東西：
+// 那支描述「訓練時有沒有做校準」，這裡是拿 holdout 實際量出來的 reliability。
+// 空 bin 會保留（rows=0、其餘欄位為 null），schema 才能跨 candidate 對齊比較。
+export interface SRCalibrationBin {
+  lower?: number | null
+  upper?: number | null
+  rows?: number
+  mean_predicted?: number | null
+  observed_rate?: number | null
+  gap?: number | null
+}
+
+export interface SRCalibration {
+  schema_version?: string
+  bin_count?: number
+  rows?: number
+  binned_rows?: number
+  bins?: SRCalibrationBin[]
+  expected_calibration_error?: number | null
+  max_calibration_error?: number | null
+  // 樣本 < MIN_CALIBRATION_ROWS(50) 時 bin 內 observed_rate 抖動極大，ECE 不可拿來調參。
+  insufficient_sample?: boolean
+}
+
+export interface SRBinaryMetrics {
+  rows?: number
+  positive_rows?: number
+  auc?: number | null
+  brier_score?: number | null
+  log_loss?: number | null
+  calibration?: SRCalibration | null
+}
+
+// 注意：模型載不到時 Python 回的是 {model_available: false, hold: null, break: null}
+// ——hold / break 是 null 而不是缺鍵，取值前必須判空。
+export interface SRModelMetrics {
+  model_available?: boolean
+  model_version?: string
+  model_trained_at?: string
+  model_config_hash?: string
+  hold?: SRBinaryMetrics | null
+  break?: SRBinaryMetrics | null
+}
+
+export interface SRZoneOutcomeGroup {
+  rows?: number
+  support_hold_rate?: number | null
+  resistance_rejection_rate?: number | null
+  break_positive_rate?: number | null
+  average_forward_return?: number | null
+}
+
+export interface SRZoneOutcomes extends SRZoneOutcomeGroup {
+  by_method?: Record<string, SRZoneOutcomeGroup>
+  by_role?: Record<string, SRZoneOutcomeGroup>
+  by_volatility_bucket?: Record<string, SRZoneOutcomeGroup>
+}
+
+export interface SRDecisionOutcomeGroup {
+  rows?: number
+  rows_with_forward_return?: number
+  average_forward_return?: number | null
+  positive_forward_return_rate?: number | null
+  negative_forward_return_rate?: number | null
+}
+
+// 保守版 RR 統計：只抽 rr_context 的穩定欄位，bucket / 完整 distribution 尚未納入。
+export interface SRRRSummary {
+  rows_with_entry_rr?: number
+  average_entry_rr?: number | null
+  median_entry_rr?: number | null
+  rows_with_position_rr?: number
+  average_position_rr?: number | null
+  median_position_rr?: number | null
+  entry_rr_source_counts?: Record<string, number>
+  position_rr_source_counts?: Record<string, number>
+}
+
+export interface SRDailyConfirmationSummary {
+  rows?: number
+  support_next_hold_rate?: number | null
+  support_two_bar_confirm_rate?: number | null
+  resistance_next_rejection_rate?: number | null
+  resistance_next_breakout_rate?: number | null
+  resistance_two_bar_breakout_continuation_rate?: number | null
+  average_next_close_return?: number | null
+  average_two_bar_close_return?: number | null
+  failure_distribution?: Record<string, number>
+  by_state?: Record<string, SRDecisionOutcomeGroup>
+  by_primary_role?: Record<string, SRDecisionOutcomeGroup>
+}
+
+export interface SROutcomeSummary {
+  at_zone_rate?: number | null
+  rows_with_primary_zone?: number
+  primary_zone_role_counts?: Record<string, number>
+  rr_summary?: SRRRSummary
+  daily_confirmation_summary?: SRDailyConfirmationSummary
+  by_final_entry_state?: Record<string, SRDecisionOutcomeGroup>
+  by_daily_confirmation_state?: Record<string, SRDecisionOutcomeGroup>
+  by_market_bias?: Record<string, SRDecisionOutcomeGroup>
+  [key: string]: unknown
+}
+
+// 兩種 schema 的欄位幾乎互斥：`sr_zone_evaluation_p0` 有 model_metrics / zone_outcomes，
+// `sr_zone_decision_replay_p0` 有 outcome_summary / governance_evaluation / replay_coverage，
+// 只有 warnings 等少數欄位共用。所以 UI 一律以「欄位在不在」決定顯示，不用模式旗標判斷。
 export interface SREvaluationReport {
   schema_version?: string
   run_id?: string
@@ -1091,9 +1198,9 @@ export interface SREvaluationReport {
   event_lifecycle_replay_available?: boolean
   zone_score_fields_available?: boolean
   decision_fields_available?: boolean
-  outcome_summary?: Record<string, unknown>
-  zone_outcomes?: Record<string, unknown>
-  model_metrics?: Record<string, Record<string, number | null> | null>
+  outcome_summary?: SROutcomeSummary
+  zone_outcomes?: SRZoneOutcomes
+  model_metrics?: SRModelMetrics
   governance_evaluation?: SRDecisionReplayGovernance
   replay_coverage?: SRReplayCoverage
   warnings?: string[]

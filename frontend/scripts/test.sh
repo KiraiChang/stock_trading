@@ -69,6 +69,9 @@ DOCKER_ARGS=(
   --memory="$MEM"
   --memory-swap="$MEMSWAP"
   --pids-limit=200
+  # node 撞到 heap 上限時是 SIGABRT，預設會把 1.3GB 的 core dump 丟進 repo（掛載的 workdir）。
+  # 記憶體吃緊時 svelte-check 本來就可能 OOM，不該每次都附贈一顆巨大的垃圾檔。
+  --ulimit core=0
   -e HOME=/tmp
   -e npm_config_cache=/npmcache
   -e NODE_OPTIONS="--max-old-space-size=$NODE_HEAP_MB"

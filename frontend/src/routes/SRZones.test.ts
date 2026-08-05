@@ -334,3 +334,172 @@ describe('SRZones 治理判定的顏色語意', () => {
     expect(screen.getByText('max_entry_state=WAIT_CONFIRMATION')).toBeInTheDocument()
   })
 })
+
+// 兩種 report schema 的欄位幾乎互斥（evaluation 有 model_metrics / zone_outcomes，
+// decision replay 有 outcome_summary / governance_evaluation），面板一律 by-presence 渲染。
+// 這組測試鎖的就是「哪個 report 出現哪些區塊」。
+describe('SRZones evaluation report 的核心指標區塊', () => {
+  async function runWithReport(report: SREvaluationJob['report'], jobId = 'sr_eval_job_010') {
+    vi.useFakeTimers()
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: jobId,
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    vi.mocked(getSREvaluationJob).mockResolvedValue(doneJob({ report }))
+
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.click(button)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    await tick()
+  }
+
+  it('Zone Evaluation report 顯示模型層與 Zone 層，不顯示治理與 Decision 層', async () => {
+    await runWithReport({
+      run_id: 'sr_eval_010',
+      rows: 240,
+      model_metrics: {
+        model_available: true,
+        hold: {
+          rows: 240,
+          positive_rows: 150,
+          auc: 0.812,
+          brier_score: 0.14,
+          log_loss: 0.44,
+          calibration: {
+            rows: 240,
+            binned_rows: 240,
+            expected_calibration_error: 0.031,
+            max_calibration_error: 0.09,
+            insufficient_sample: false,
+            bins: [
+              { lower: 0.0, upper: 0.1, rows: 20, mean_predicted: 0.05, observed_rate: 0.1, gap: 0.05 },
+              { lower: 0.9, upper: 1.0, rows: 0, mean_predicted: null, observed_rate: null, gap: null },
+            ],
+          },
+        },
+        break: { rows: 240, positive_rows: 60, auc: 0.735, brier_score: 0.18, log_loss: 0.52, calibration: null },
+      },
+      zone_outcomes: {
+        rows: 240,
+        support_hold_rate: 0.62,
+        resistance_rejection_rate: 0.55,
+        break_positive_rate: 0.21,
+        average_forward_return: 0.012,
+        by_role: { SUPPORT: { rows: 130, support_hold_rate: 0.62, average_forward_return: 0.015 } },
+      },
+    })
+
+    expect(screen.getByText(/模型層指標/)).toBeInTheDocument()
+    expect(screen.getByText(/hold AUC 0\.812/)).toBeInTheDocument()
+    expect(screen.getByText(/Zone 層指標/)).toBeInTheDocument()
+    expect(screen.getByText(/支撐守住 62\.0%/)).toBeInTheDocument()
+    // Zone Evaluation 的 report 沒有這兩塊——先前面板只渲染治理區塊，才會整頁空白。
+    expect(screen.queryByText('模型治理')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Decision 層指標/)).not.toBeInTheDocument()
+  })
+
+  it('Decision Replay report 顯示 Decision 層與確認成效，不顯示模型層', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_replay_010',
+        rows: 40,
+        outcome_summary: {
+          at_zone_rate: 0.12,
+          rr_summary: {
+            rows_with_entry_rr: 18,
+            average_entry_rr: 1.85,
+            median_entry_rr: 1.7,
+            rows_with_position_rr: 12,
+            average_position_rr: 2.1,
+          },
+          by_final_entry_state: {
+            ENTRY_ALLOWED: {
+              rows: 8,
+              rows_with_forward_return: 8,
+              average_forward_return: 0.023,
+              positive_forward_return_rate: 0.75,
+              negative_forward_return_rate: 0.25,
+            },
+          },
+          daily_confirmation_summary: {
+            rows: 40,
+            support_next_hold_rate: 0.68,
+            resistance_next_rejection_rate: 0.45,
+            support_two_bar_confirm_rate: 0.52,
+            average_next_close_return: 0.004,
+            failure_distribution: { SUPPORT_CONFIRMATION_FAILED: 6 },
+          },
+        },
+      },
+      'sr_eval_job_011'
+    )
+
+    expect(screen.getByText(/Decision 層指標/)).toBeInTheDocument()
+    expect(screen.getByText(/AT_ZONE 12\.0%/)).toBeInTheDocument()
+    expect(screen.getByText(/平均 entry RR 1\.85R/)).toBeInTheDocument()
+    expect(screen.getByText(/隔日／兩日確認成效/)).toBeInTheDocument()
+    expect(screen.getByText(/支撐隔日守住 68\.0%/)).toBeInTheDocument()
+    expect(screen.queryByText(/模型層指標/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Zone 層指標/)).not.toBeInTheDocument()
+  })
+
+  it('模型不可用時 hold/break 是 null，仍要渲染且數值顯示破折號', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_011',
+        model_metrics: { model_available: false, hold: null, break: null },
+      },
+      'sr_eval_job_012'
+    )
+
+    expect(screen.getByText(/模型不可用，本次無機率指標/)).toBeInTheDocument()
+    // null 不能被印成 0——那會讓「沒資料」看起來像「完美校準」。
+    expect(screen.getAllByText(/AUC=—/).length).toBe(2)
+    expect(screen.getAllByText('無校準資料').length).toBe(2)
+  })
+
+  it('calibration 樣本不足時要標示不可用於調參', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_012',
+        model_metrics: {
+          model_available: true,
+          hold: {
+            rows: 20,
+            auc: 0.6,
+            calibration: {
+              rows: 20,
+              binned_rows: 20,
+              expected_calibration_error: 0.21,
+              insufficient_sample: true,
+              bins: [],
+            },
+          },
+          break: null,
+        },
+      },
+      'sr_eval_job_013'
+    )
+
+    const notice = screen.getByText('樣本不足，ECE 抖動大，不可用於調參')
+    // 這是警示，必須是紅色；tailwind 的 fall 是綠色，不能拿來標壞消息。
+    expect(notice).toHaveClass('text-rise')
+  })
+
+  it('report 的 warnings 要顯示且用紅色', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_013',
+        warnings: ['model unavailable: no such file'],
+      },
+      'sr_eval_job_014'
+    )
+
+    const warning = screen.getByText('model unavailable: no such file')
+    expect(warning).toHaveClass('text-rise')
+  })
+})

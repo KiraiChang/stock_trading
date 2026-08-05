@@ -271,6 +271,19 @@ async def sr_scoring_evaluate(req: SREvaluationRequest):
         "sr_zone_decision_replay_p1" if req.decision_replay else DEFAULT_PIPELINE_VERSION
     )
 
+    # builder config 在分支外組好給兩條路徑共用。先前只有 evaluation 分支組，decision replay
+    # 分支漏傳，四個 ATR 參數在 replay 模式被靜默忽略（與 CLI 曾有的陷阱相同）。放在分支外
+    # 就不可能再有哪一支忘了帶。四個欄位的預設值與 ATRZoneBuilderConfig 相同，所以呼叫端
+    # 沒指定時等同於不傳。
+    builder_config = ZoneBuilderConfig(
+        atr=ATRZoneBuilderConfig(
+            lookback=req.atr_lookback,
+            atr_period=req.atr_period,
+            atr_width_multiplier=req.atr_width_multiplier,
+            max_merge_width_multiple=req.max_merge_width_multiple,
+        )
+    )
+
     try:
         if req.decision_replay:
             report = run_decision_replay(
@@ -279,6 +292,7 @@ async def sr_scoring_evaluate(req: SREvaluationRequest):
                 limit=req.limit,
                 model_path=model_path,
                 dataset_config=dataset_config,
+                builder_config=builder_config,
                 replay_max_rows=req.replay_max_rows,
                 chip_scores_by_symbol=req.chip_scores_by_symbol,
                 model_governance_by_symbol=req.model_governance_by_symbol,
@@ -286,14 +300,6 @@ async def sr_scoring_evaluate(req: SREvaluationRequest):
                 pipeline_version=pipeline_version,
             )
         else:
-            builder_config = ZoneBuilderConfig(
-                atr=ATRZoneBuilderConfig(
-                    lookback=req.atr_lookback,
-                    atr_period=req.atr_period,
-                    atr_width_multiplier=req.atr_width_multiplier,
-                    max_merge_width_multiple=req.max_merge_width_multiple,
-                )
-            )
             report = run_evaluation(
                 symbols=symbols,
                 timeframe=req.timeframe,

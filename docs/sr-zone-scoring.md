@@ -1598,6 +1598,13 @@ zone。未指定時走 baseline 預設，行為與過去相同。
 無效**；而且參數 sweep 若對每組候選跑 replay，會得到一模一樣的 decision 指標。現在 replay
 report 會帶出 `builder_config` snapshot，可追溯該次用了哪組參數。
 
+**CLI 與 HTTP 兩條路徑現在都會套用**。`POST /sr-scoring/evaluate`（以及轉呼叫它的 Go
+`POST /sr-zones/evaluate`）的 `atr_width_multiplier` / `max_merge_width_multiple` /
+`atr_lookback` / `atr_period` 對 evaluation 與 decision replay 都生效——2026-08-05 前只有
+evaluation 分支組 `builder_config`，replay 分支漏傳，是同一個陷阱的 HTTP 版。現在 config 在
+分支外組好共用。這四個欄位的預設值與 `ATRZoneBuilderConfig` 相同（1.5 / 2.0 / 60 / 14），
+呼叫端沒指定時等同於不傳，排程與前端的既有行為不變。
+
 ### Calibration bins（`model_metrics.{hold,break}.calibration`）
 
 `sr_evaluation_calibration_v1`：把預測機率等寬切 `CALIBRATION_BIN_COUNT = 10` 個 bin，

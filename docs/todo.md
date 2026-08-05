@@ -650,3 +650,63 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 註：盤中源相關工作暫不列入近期處理；目前先沿用既有資料流程，等後續有更合適
 的盤中資料源或明確需求時再重新評估。
+
+---
+
+### T-037：T-002 / T-003 的 evaluation 產出接上前端畫面
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Frontend / Go / SR Zone / 可觀測性 |
+| 建立日期 | 2026-08-05 |
+| 來源 | T-002 / T-003 前端畫面補齊狀況檢查（2026-08-05） |
+
+2026-08-05 對照程式碼檢查的結果：**T-002 的操作入口齊全，但 P0 計畫列的三層核心指標在 UI 上
+一個都沒顯示；T-003 則是前端完全沒有任何呈現**（`grep` 整個 `frontend/src` 對
+`volatility_profile` / `zone_builder_runtime_config` / `atr_width_multiplier` 零命中）。
+
+**最實際的後果**：Zone Evaluation 模式跑完等於白跑。該模式的 report 依設計沒有
+`governance_evaluation`（治理區塊不出現），而 `model_metrics` / `zone_outcomes` 又沒渲染，
+畫面上只剩 `run_id` 與 `rows` / `sources`。要看 AUC 就只能勾「寫入結果」去查 regression
+results 表格——正是 2026-08-04 那批修正想解掉的兩難，當時只解了 decision replay 那一半。
+
+**A：report 面板補上核心指標**（前端為主，無 API 變更；欄位早就在 report 裡）
+
+| 層級 | report 欄位 | 現況 |
+|---|---|---|
+| 模型層 | `model_metrics.{hold,break}`：AUC / Brier / log loss / calibration bins + ECE | 未顯示 |
+| Zone 層 | `zone_outcomes`：hold rate / rejection rate / breakout continuation | 未顯示 |
+| Decision 層 | `outcome_summary.by_final_entry_state` / `by_market_bias` / `rr_summary` / `at_zone_rate` | 未顯示 |
+| Daily confirmation | `outcome_summary.daily_confirmation_summary`（T-028） | 未顯示 |
+| 警告 | `warnings` | 只有 regression results 表格有，live report 面板沒有 |
+
+面板一次塞太多會難讀，需先決定分區與預設收合策略；calibration bins 這種 10 列的資料要考慮
+是否只顯示 ECE / max error 摘要，細節走 raw JSON。
+
+**B：T-003 的 builder 參數與 runtime config**
+
+- evaluation 表單補上四個 ATR 參數輸入（`atr_width_multiplier` / `max_merge_width_multiple` /
+  `atr_lookback` / `atr_period`）。**Go API 與 Python 都已支援**，evaluation 與 decision replay
+  兩種模式都會生效（見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Decision Replay 的
+  zone builder 參數」），純粹是前端沒開欄位。
+- 顯示 `volatility_profiles` 與 `zone_outcomes.by_volatility_bucket`。
+- 顯示分析用的 `zone_builder_runtime_config`（adaptive 是否啟用、用了哪個 bucket、原因碼）。
+  **這條要先補 Go**：`analysis/client.go` 目前沒有對應欄位，Python payload 的這塊在 Go 端就被
+  丟掉了，前端拿不到。屬 T-003 P2 的可觀測性缺口。
+
+**C：`http_server` 端點的可測性**
+
+`/sr-scoring/evaluate` 目前沒有任何測試，且 `http_server.py` 在 import 時就呼叫
+`check_connection()`，測試環境沒有 DB 會直接失敗，無法用 FastAPI TestClient 補。
+2026-08-05 就實際發生過一次「參數收下卻沒生效」的 wiring bug（replay 分支漏傳
+`builder_config`），這類問題目前只能靠結構避免、無法靠測試鎖住。需要的是把連線檢查移出
+import 期（或提供可注入的 DB stub），屬小型重構。
+
+**不在本項範圍**：參數 sweep 沒有 API 與 UI（Go 無路由、Python 無端點），只能走 CLI——這是
+已記載的現況（見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「參數 sweep 的 decision 層
+比較」），要不要做成背景 job 另案評估，不在這裡順手加。
+
+**相依**：B 的第三點需先改 Go；A 與 B 前兩點是純前端。實作前需依規模決定是否另出計畫書
+（跨 Go + 前端即屬跨模組異動）。

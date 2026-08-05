@@ -507,6 +507,47 @@ func TestSRZoneRepoCreateDefaultsEmptyChipSummaryToNull(t *testing.T) {
 	}
 }
 
+// 這個欄位有兩處欄位清單要維護（INSERT 的 cols 與 SELECT 的 srZoneAnalysisColumns），
+// 只改一處會變成「寫得進去、讀不出來」，所以要有 round-trip 測試鎖住。
+func TestSRZoneRepoRoundTripsZoneBuilderRuntimeConfig(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	a := testAnalysis()
+	a.ZoneBuilderRuntimeConfig = RawJSON(`{"enabled":true,"bucket":"HIGH_VOLATILITY","reason_code":"VOLATILITY_BUCKET_CONFIG"}`)
+	id, err := repo.Create(ctx, a, testZones(), SRZoneNormalizedProjections{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	saved, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(saved.ZoneBuilderRuntimeConfig) != string(a.ZoneBuilderRuntimeConfig) {
+		t.Fatalf("zone_builder_runtime_config not round-tripped: got %s", saved.ZoneBuilderRuntimeConfig)
+	}
+}
+
+// 空字串會被 DB 的 NOT NULL JSON 欄位拒絕，也代表不了「無紀錄」，要落成 JSON null。
+func TestSRZoneRepoCreateDefaultsEmptyZoneBuilderRuntimeConfigToNull(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	a := testAnalysis()
+	a.ZoneBuilderRuntimeConfig = ""
+	id, err := repo.Create(ctx, a, testZones(), SRZoneNormalizedProjections{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	saved, err := repo.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if string(saved.ZoneBuilderRuntimeConfig) != "null" {
+		t.Fatalf("expected empty zone_builder_runtime_config to default to JSON null, got %s", saved.ZoneBuilderRuntimeConfig)
+	}
+}
+
 func TestSRZoneRepoListFiltersBySymbol(t *testing.T) {
 	repo := newTestSRZoneRepo(t)
 	ctx := context.Background()

@@ -189,6 +189,7 @@ func srZonePipelineResponse(snapshot *srZonePipelineSnapshot) gin.H {
 			"model_version": a.ModelVersion, "model_config_hash": a.ModelConfigHash,
 			"period_summaries": a.PeriodSummaries, "analysis_tips": a.AnalysisTips,
 			"chip_summary": a.ChipSummary, "created_at": a.CreatedAt,
+			"zone_builder_runtime_config": a.ZoneBuilderRuntimeConfig,
 		},
 		"features": gin.H{
 			"global_trend": a.GlobalTrend, "global_volatility": a.GlobalVolatility,

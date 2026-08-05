@@ -120,6 +120,33 @@ RESISTANCE；否則 AT_ZONE）。
 這些 zone 寬度較窄，預設視為短線戰術層，不取代主結構 zone；Decision Engine
 會把它們納入 `market_events`、`defense_lines.tactical` 與 primary-zone ranking。
 
+### Adaptive builder 選用與 `zone_builder_runtime_config`
+
+`pipeline._resolve_runtime_builders` 決定這次分析要用哪組 builder 設定，並把決策過程原樣
+記錄在 `analysis.zone_builder_runtime_config`。**這是純紀錄，不參與任何仲裁或狀態推導**，
+但少了它就無從回答「這次分析為什麼用這組 zone 寬度」。
+
+| `reason_code` | 意義 | `enabled` |
+|---|---|---|
+| `VOLATILITY_BUCKET_CONFIG` | adaptive 生效，依波動 bucket 套用 `VOLATILITY_BUCKET_ATR_CONFIGS` 的覆寫 | `true` |
+| `EXPLICIT_BUILDERS` | 呼叫端自帶 builder，不做 adaptive 解析 | `false` |
+| `ADAPTIVE_ZONE_BUILDERS_DISABLED` | adaptive 開關關閉，用 baseline 預設 | `false` |
+| `UNKNOWN_VOLATILITY_BUCKET` | 分不出 bucket（資料不足），退回 base config | `false` |
+| `ADAPTIVE_ZONE_BUILDERS_ERROR` | 解析過程拋例外，已回退預設 builder，另帶 `error` 字串 | `false` |
+
+`config` 是三個 builder 的參數快照（`ATRZoneBuilder` / `VolumeProfileZoneBuilder` /
+`RecentMicrostructureZoneBuilder`），形狀依 builder 而異。
+
+**落地與相容性**（2026-08-05，T-037 B）：這個欄位先前在 Go 端沒有承接欄位，Python 送了也會
+在 `ToStore()` 被丟掉，前端拿不到。現在 `stock_sr_zone_analyses` 有同名欄位（migration 057，
+mysql / postgres / sqlite 三份），由 API 的 `analysis` 區塊回傳，SR Zone 頁的分析卡下方以
+摺疊區顯示。
+
+- **舊分析（057 之前）的值是 JSON `null`**，代表「沒有這項紀錄」——**不等於 adaptive 未啟用**
+  （那是 `enabled:false` 且有 `reason_code`）。前端據此整區隱藏，不可顯示成「未啟用」。
+- 欄位是 `NOT NULL`：`store.RawJSON` 是純 string、沒有實作 `sql.Scanner`，SQL NULL 會讓
+  scan 直接失敗，所以三份 migration 都把舊列 backfill 成 JSON `null` 而非留 SQL NULL。
+
 ---
 
 ## 二、特徵工程（Features）
@@ -1605,6 +1632,24 @@ evaluation 分支組 `builder_config`，replay 分支漏傳，是同一個陷阱
 分支外組好共用。這四個欄位的預設值與 `ATRZoneBuilderConfig` 相同（1.5 / 2.0 / 60 / 14），
 呼叫端沒指定時等同於不傳，排程與前端的既有行為不變。
 
+**前端入口**（2026-08-05 補）：SR Zone 頁「模型驗證 / Decision Replay」面板的
+「zone builder 參數（留白 = 沿用後端預設）」摺疊區有這四個欄位。語意是**留白＝整個鍵不送**，
+由後端沿用預設值——不是送 0，也不是送 null：
+
+- **只有正數會送出**。留白、`NaN`、`0` 與負數一律不送該鍵。
+- **0 為什麼也要擋**：Go 的 `SREvaluationRequest` 對這四個欄位用 `omitempty`，
+  `json.Marshal` 在轉發給 Python 前就會把 0 丟掉。前端若照送 0，使用者會看到「參數收下了」
+  但完全沒有效果——正是 T-037 C 要解掉的那種靜默 wiring 失效。這四個參數本來也沒有 0 的
+  合理語意（zone 寬度 0、ATR 期數 0）。**要支援 0 得先拿掉 Go 那邊的 `omitempty`**，
+  不是在前端硬送。
+- 前端 state 用 `number | null` 而非 `number`：`<input type="number">` 清空時
+  `bind:value` 給的是 `null`，用 0 當預設會分不出「沒填」與「填了 0」。
+- 實際生效值由 report 的 `builder_config` 回聲，要確認參數有沒有吃到就看那裡；四個參數
+  **不會**存進 evaluation job 記錄。
+
+這條路徑的規則由 `frontend/src/lib/api/srZones.test.ts` 鎖住（留白不送鍵、非正數與 NaN
+要丟掉、正數要照送）。
+
 ### Calibration bins（`model_metrics.{hold,break}.calibration`）
 
 `sr_evaluation_calibration_v1`：把預測機率等寬切 `CALIBRATION_BIN_COUNT = 10` 個 bin，
@@ -1672,6 +1717,7 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 | Decision 層（`at_zone_rate`、RR 摘要、進場狀態分層） | `outcome_summary` | ❌ | ✅ |
 | 隔日／兩日確認成效 | `outcome_summary.daily_confirmation_summary` | ❌ | ✅ |
 | 模型治理 / 覆蓋率 | `governance_evaluation`、`replay_coverage` | ❌ | ✅ |
+| 波動側寫 | `volatility_profiles` | ✅ | ✅ |
 | 警告 | `warnings` | ✅ | ✅ |
 
 2026-08-05 之前面板只渲染治理區塊，而那是 replay 專屬欄位，所以**Zone Evaluation 模式跑完
@@ -1686,6 +1732,14 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 - **ECE 樣本不足**：`calibration.insufficient_sample=true`（樣本 < `MIN_CALIBRATION_ROWS = 50`）
   時 bin 內 `observed_rate` 抖動極大，面板會標紅「樣本不足，ECE 抖動大，不可用於調參」。
   看到這行就不要拿該次 ECE 做參數決策。
+
+**波動側寫（`volatility_profiles`）**（2026-08-05 補）：逐檔列出 `bucket`、`atr_pct`、
+`average_range_pct`、觸價次數與每百根觸價密度，並顯示分組門檻（低波動 ≤ 1.5%、高波動 ≥ 3.5%，
+即 `LOW_VOLATILITY_THRESHOLD` / `HIGH_VOLATILITY_THRESHOLD`）。這一區是 Zone 層
+「依波動 bucket」分層的**母體**：那裡是各 bucket 的成效，這裡是哪幾檔落在該 bucket、樣本
+夠不夠。兩者要一起看，否則會拿只有一兩檔的 bucket 去下調參結論。`atr_pct` 與
+`average_range_pct` 是比例（0.042 = 4.2%），`touch_density_per_100_bars` 已經是每百根的
+次數、不是比率。
 
 面板配色沿用 [`development-workflow.md`](./development-workflow.md) 的三類規則：warnings 與
 「樣本不足」屬錯誤／警示文字用 `text-rise`（紅），報酬率屬行情語意走既有

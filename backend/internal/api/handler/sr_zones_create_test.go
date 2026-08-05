@@ -590,6 +590,48 @@ func TestSRZoneGetUsesNormalizedRowsForDecisionAndModelGovernance(t *testing.T) 
 	}
 }
 
+// zone_builder_runtime_config 從 Python 到前端要經過 client struct → store → repo →
+// 這裡的回應組裝，任何一段漏掉都會靜默丟資料（T-037 B 就是這樣被丟了一整條）。
+// 這個測試鎖住最後一段：欄位有沒有真的出現在 analysis 區塊。
+func TestSRZoneGetExposesZoneBuilderRuntimeConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC().Truncate(time.Second)
+	repo := &srZoneRepoStub{
+		analyses: []store.SRZoneAnalysis{{
+			ID: 42, Symbol: "2330", Timeframe: "1d", AnalyzedAt: now,
+			CurrentPrice: 100, PipelineVersion: "v2", ModelVersion: "v-test",
+			ZoneBuilderRuntimeConfig: store.RawJSON(`{"enabled":true,"bucket":"HIGH_VOLATILITY","reason_code":"VOLATILITY_BUCKET_CONFIG"}`),
+		}},
+		zones: map[uint64][]store.SRZone{42: {}},
+	}
+	handler := NewSRZoneHandler(nil, repo, nil, nil, nil, nil, zap.NewNop())
+	router := gin.New()
+	router.GET("/sr-zones/:id", handler.Get)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sr-zones/42", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var parsed struct {
+		Analysis struct {
+			ZoneBuilderRuntimeConfig struct {
+				Enabled    bool   `json:"enabled"`
+				Bucket     string `json:"bucket"`
+				ReasonCode string `json:"reason_code"`
+			} `json:"zone_builder_runtime_config"`
+		} `json:"analysis"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("decode response: %v body=%s", err, rec.Body.String())
+	}
+	got := parsed.Analysis.ZoneBuilderRuntimeConfig
+	if !got.Enabled || got.Bucket != "HIGH_VOLATILITY" || got.ReasonCode != "VOLATILITY_BUCKET_CONFIG" {
+		t.Fatalf("zone_builder_runtime_config not exposed in analysis block: body=%s", rec.Body.String())
+	}
+}
+
 func TestSRZoneGetDoesNotUseLegacyJSONWhenNormalizedRowsAreMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	now := time.Now().UTC().Truncate(time.Second)

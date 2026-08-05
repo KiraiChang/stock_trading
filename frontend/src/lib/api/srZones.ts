@@ -829,6 +829,9 @@ export interface SRZoneAnalysis {
   // period_summaries[].support/resistance.chip）。舊分析沒有這欄時為 null。
   chip_summary?: SRChipSummary | null
   decision_summary?: SRDecisionSummary | null
+  // 這次分析實際採用的 zone builder 設定。057 migration 之前的舊分析為 null，
+  // 代表「沒有這項紀錄」——不等於 adaptive 未啟用（那是 enabled:false）。
+  zone_builder_runtime_config?: SRZoneBuilderRuntimeConfig | null
   normalized_status?: SRNormalizedStatus
   created_at: string
 }
@@ -849,7 +852,7 @@ interface SRZonePipelineResponse {
   analysis: Pick<SRZoneAnalysis,
     'id' | 'symbol' | 'timeframe' | 'analyzed_at' | 'current_price' |
     'model_version' | 'model_config_hash' | 'period_summaries' |
-    'analysis_tips' | 'chip_summary' | 'created_at'>
+    'analysis_tips' | 'chip_summary' | 'zone_builder_runtime_config' | 'created_at'>
   features: Pick<SRZoneAnalysis, 'global_trend' | 'global_volatility'>
   score: Pick<SRZoneAnalysis,
     'global_expected_value' | 'global_confidence' | 'global_risk_reward_ratio'>
@@ -1046,6 +1049,14 @@ export interface SREvaluationOptions {
   writeDb?: boolean
   decisionReplay?: boolean
   replayMaxRows?: number
+  // zone builder 的四個 ATR 參數。evaluation 與 decision replay 兩種模式都會生效
+  // （見 sr-zone-scoring.md「Decision Replay 的 zone builder 參數」）。
+  // 只有正數會被送出；undefined / <= 0 一律不送該鍵，由 Python 預設值接手
+  // （原因見 optionalBuilderParams：Go 的 omitempty 讓 0 根本傳不到 Python）。
+  atrWidthMultiplier?: number
+  maxMergeWidthMultiple?: number
+  atrLookback?: number
+  atrPeriod?: number
 }
 
 // decision replay 的治理判定（Python `_decision_replay_governance_evaluation`）。
@@ -1170,6 +1181,40 @@ export interface SRDailyConfirmationSummary {
   by_primary_role?: Record<string, SRDecisionOutcomeGroup>
 }
 
+// 這次分析用了哪組 zone builder 設定（Python `_resolve_runtime_builders`）。
+// reason_code 有五種：VOLATILITY_BUCKET_CONFIG（adaptive 生效）、EXPLICIT_BUILDERS
+// （呼叫端自帶 builder）、ADAPTIVE_ZONE_BUILDERS_DISABLED（開關關閉）、
+// UNKNOWN_VOLATILITY_BUCKET（分不出 bucket）、ADAPTIVE_ZONE_BUILDERS_ERROR（例外，含 error）。
+// config 是三個 builder 的參數快照，形狀依 builder 而異，故以 unknown 承接。
+export interface SRZoneBuilderRuntimeConfig {
+  enabled?: boolean
+  bucket?: string
+  reason_code?: string
+  atr_pct?: number | null
+  average_range_pct?: number | null
+  error?: string
+  config?: Record<string, Record<string, unknown>>
+}
+
+// 每檔標的的波動側寫（Python `_volatility_profiles`）。`bucket` 就是 zone_outcomes
+// `by_volatility_bucket` 的分組鍵，兩者要一起看：這裡是母體（各檔落在哪個 bucket、
+// 有幾次觸價），那裡是該 bucket 的成效。atr_pct / average_range_pct 在資料不足時是 null。
+export interface SRVolatilityProfile {
+  symbol?: string
+  timeframe?: string
+  bucket?: string
+  atr_pct?: number | null
+  average_range_pct?: number | null
+  touch_count?: number
+  candle_count?: number
+  touch_density_per_100_bars?: number | null
+  lookback_bars?: number
+  thresholds?: {
+    low_volatility_max?: number
+    high_volatility_min?: number
+  }
+}
+
 export interface SROutcomeSummary {
   at_zone_rate?: number | null
   rows_with_primary_zone?: number
@@ -1203,6 +1248,7 @@ export interface SREvaluationReport {
   model_metrics?: SRModelMetrics
   governance_evaluation?: SRDecisionReplayGovernance
   replay_coverage?: SRReplayCoverage
+  volatility_profiles?: Record<string, SRVolatilityProfile>
   warnings?: string[]
   [key: string]: unknown
 }
@@ -1265,8 +1311,32 @@ export async function runSREvaluation(
       write_db: opts.writeDb ?? false,
       decision_replay: opts.decisionReplay ?? false,
       replay_max_rows: opts.replayMaxRows ?? 200,
+      ...optionalBuilderParams(opts),
     }),
   })
+}
+
+// 四個 builder 參數只在使用者填了「正數」時才放進 body，其餘（留白 / NaN / <= 0）
+// 整個鍵不送，由後端沿用預設值。
+//
+// 為什麼連 0 都要擋：Go 的 `SREvaluationRequest` 對這四個欄位用 `omitempty`，
+// 0 在轉發給 Python 前就會被丟掉。若前端照送 0，使用者會看到「參數收下了」卻毫無效果——
+// 正是 T-037 C 想解掉的那種靜默 wiring 失效。這四個參數本來也沒有 0 的合理語意
+// （zone 寬度 0、ATR 期數 0）。要支援 0 就得先拿掉 Go 那邊的 omitempty，不是前端硬送。
+function optionalBuilderParams(opts: SREvaluationOptions): Record<string, number> {
+  const pairs: [string, number | undefined][] = [
+    ['atr_width_multiplier', opts.atrWidthMultiplier],
+    ['max_merge_width_multiple', opts.maxMergeWidthMultiple],
+    ['atr_lookback', opts.atrLookback],
+    ['atr_period', opts.atrPeriod],
+  ]
+  const body: Record<string, number> = {}
+  for (const [key, value] of pairs) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      body[key] = value
+    }
+  }
+  return body
 }
 
 export async function getSREvaluationJob(jobId: string): Promise<SREvaluationJob> {

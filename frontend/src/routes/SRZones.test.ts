@@ -502,4 +502,87 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     const warning = screen.getByText('model unavailable: no such file')
     expect(warning).toHaveClass('text-rise')
   })
+
+  it('report 有 volatility_profiles 時顯示波動側寫，缺鍵時整區不出現', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_014',
+        volatility_profiles: {
+          '2330': {
+            symbol: '2330',
+            timeframe: '1d',
+            bucket: 'HIGH_VOLATILITY',
+            atr_pct: 0.042,
+            average_range_pct: 0.038,
+            touch_count: 26,
+            candle_count: 1200,
+            touch_density_per_100_bars: 2.17,
+            lookback_bars: 240,
+            thresholds: { low_volatility_max: 0.015, high_volatility_min: 0.035 },
+          },
+        },
+      },
+      'sr_eval_job_015'
+    )
+
+    expect(screen.getByText(/波動側寫/)).toBeInTheDocument()
+    expect(screen.getByText('HIGH_VOLATILITY')).toBeInTheDocument()
+    expect(screen.getByText('4.2%')).toBeInTheDocument()
+    // 門檻要一起顯示，否則使用者無從判斷 bucket 是怎麼分出來的。
+    expect(screen.getByText(/低波動 ≤ 1\.5%/)).toBeInTheDocument()
+  })
+
+  it('report 沒有 volatility_profiles 時不顯示波動側寫', async () => {
+    await runWithReport({ run_id: 'sr_eval_015', rows: 10 }, 'sr_eval_job_016')
+
+    expect(screen.queryByText(/波動側寫/)).not.toBeInTheDocument()
+  })
+})
+
+// 四個 ATR 參數是 T-003 的調參入口：Go 與 Python 早就支援，先前只是前端沒開欄位。
+// 留白必須送 undefined（API 層再轉成「整個鍵不送」），不可送 0——0 是合法設定值。
+describe('SRZones evaluation 的 zone builder 參數輸入', () => {
+  const ATR_WIDTH_TITLE = 'atr_width_multiplier：zone 寬度 = ATR × 此倍數'
+  const ATR_PERIOD_TITLE = 'atr_period：ATR 本身的計算期數'
+
+  it('四個參數留白時送出 undefined，不干擾後端預設', async () => {
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_020',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+
+    await fireEvent.click(button)
+
+    expect(runSREvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        atrWidthMultiplier: undefined,
+        maxMergeWidthMultiple: undefined,
+        atrLookback: undefined,
+        atrPeriod: undefined,
+      })
+    )
+  })
+
+  it('填入的參數以數字送出', async () => {
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_021',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.input(screen.getByTitle(ATR_WIDTH_TITLE), { target: { value: '1.2' } })
+    await fireEvent.input(screen.getByTitle(ATR_PERIOD_TITLE), { target: { value: '14' } })
+
+    await fireEvent.click(button)
+
+    expect(runSREvaluation).toHaveBeenCalledWith(
+      expect.objectContaining({ atrWidthMultiplier: 1.2, atrPeriod: 14 })
+    )
+  })
 })

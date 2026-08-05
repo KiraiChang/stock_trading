@@ -657,7 +657,7 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 進行中（A、B 已實作待 review；C 未開始） |
 | 優先度 | 中 |
 | 分類 | Frontend / Go / SR Zone / 可觀測性 |
 | 建立日期 | 2026-08-05 |
@@ -830,3 +830,151 @@ runtime 拋 `ReferenceError: SRZoneOutcomeGroup is not defined`，且只在有�
 
 **完成後歸檔**：各區塊對應哪個 schema、為何 by-presence 渲染、ECE 樣本不足的判讀方式，補到
 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「前端手動 evaluation 入口的判讀」。
+
+#### 實作計畫：T-037 B —— builder 參數輸入與 runtime config 可觀測性（2026-08-05，待確認）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已實作（待 review） |
+| 範圍 | B①②（純前端）＋ B③（Python→Go→DB→API→前端全鏈路）；C 不在本次 |
+| 影響 runtime | 前端、Go backend、DB schema；Python 不改 |
+
+**實作結果（2026-08-05）**：兩階段都完成。
+
+- 階段 1（B①②）：`frontend/scripts/test.sh` 三步全綠（svelte-check 0 errors、
+  14 files / 49 tests、build 通過）。
+- 階段 2（B③）：`backend/scripts/test.sh ./internal/store/... ./internal/analysis/...
+  ./internal/api/handler/...` 全綠；前端再跑一次為 14 files / **51 tests**、build 通過。
+- 現況說明已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md)：新增
+  「Adaptive builder 選用與 `zone_builder_runtime_config`」（reason_code 五種值、
+  舊資料 JSON null ≠ adaptive 未啟用、為何用 NOT NULL），並在
+  「Decision Replay 的 zone builder 參數」補前端入口的「留白＝不送鍵」語意、
+  「前端手動 evaluation 入口的判讀」補波動側寫區塊與單位陷阱。
+
+**實作中修掉一個計畫沒預見的問題**：Svelte 模板**不能寫 TS 型別註記**。原本想用
+`{#each [...] as field}` 把四個參數輸入收成一個迴圈，裡面的
+`set: (v: number | null) => ...` 讓 svelte-check 直接 `Unexpected token`，且錯誤會外溢成
+「SRZones.svelte has no default export」把 App.svelte 與測試一起弄紅。改成四個明確的
+`<label>` + `bind:value` 即可——這與 A 那次的「模板不能寫明確泛型參數」是同一類坑。
+
+**自我 review 後修掉的兩處（2026-08-05）**：
+
+1. **前端接受 `0` 但 Go 會靜默丟掉**：`optionalBuilderParams` 原本刻意保留 0（理由是
+   「0 是合法設定值」），但 `SREvaluationRequest` 這四個欄位是 `omitempty`，
+   `json.Marshal` 轉發給 Python 前就把 0 丟掉了——使用者填 0 會得到「參數收下卻無效果」的
+   靜默失效，正是 T-037 C 要解的那類 bug。已改成**只送正數**，`min` 由 `0` 收緊到 `0.1`，
+   測試改為 `drops non-positive and NaN`（同時斷言正數要照送），並修正
+   `sr-zone-scoring.md` 中「0 是合法的參數值」的錯誤敘述。要支援 0 得先拿掉 Go 的
+   `omitempty`，不是前端硬送。
+2. **`client.go` 不合 gofmt**：新欄位插在 `ChipSummary` 與 `Model` 之間，中間的註解會中斷
+   gofmt 的對齊區塊，讓 `Model` 的舊 padding 變成不合格式。本機沒有 go toolchain、
+   `go vet` 也不檢查格式，現有流程擋不下來。已把新欄位移到 struct 最後。
+
+**尚未處理（提交前要注意）**：`backend/internal/ui/dist/` 的建置產物每次 build 都會換檔名——
+`index.html` 已 track 且指向新檔名，但新的 `assets/index-*.js` / `.css` 是 untracked。
+用 `git commit -am` 會只提交 index.html 而漏掉資產，Go embed 的 dist 就缺檔。
+**提交時要 `git add backend/internal/ui/dist/` 整個目錄。**
+
+**驗證涵蓋範圍**：
+
+| 項目 | 驗證方式 | 結果 |
+|---|---|---|
+| sqlite migration | `internal/store` 測試實跑 goose migration 後做 round-trip | ✅ |
+| postgres migration | `scripts/smoke-dev.sh` 起 dev stack，backend 啟動時由 goose 實際套用 | ✅ `goose_db_version` = 57，欄位為 `jsonb NOT NULL DEFAULT 'null'::jsonb` |
+| mysql migration | **未實跑**——本機沒有 MySQL 實例，dev compose 用的是 postgres | ⚠ 僅比照 037 既有寫法（ADD NULL → backfill → MODIFY NOT NULL） |
+| dev stack 端到端 | `scripts/smoke-dev.sh`（先停 → build → 起 → health check） | ✅ backend / python-server 皆 healthy，`dev stack smoke passed` |
+| API 回應含新欄位 | `TestSRZoneGetExposesZoneBuilderRuntimeConfig` | ✅ |
+
+`smoke-dev.sh` 是在 live project 的 9 個 container 仍常駐、`MemAvailable` 約 930MB 的情況下
+跑的，Go 編譯階段 available 一度掉到 275MB 但沒有觸發 OOM killer；後續 handler 測試被
+mem-guard 由 700m 自動下修到 540m 仍通過。這次沒重演 I-053，但邊際很窄。
+
+**先回報一項與 T-037 原描述的落差**
+
+原文把 B③ 寫成「這條要先補 Go：`analysis/client.go` 目前沒有對應欄位」，實際查證後**範圍比
+這句話大**：SR 分析的 API 回應是**繞經 DB 再讀回來**的（`sr_zones.go:578` `ToStore()` →
+`repo.Create()` → `loadSRZonePipelineSnapshot()` → `srZonePipelineResponse()`；即使是走
+`provider.Analyze` 的分支，第 558 行一樣是從 DB 讀 snapshot）。所以只在 `client.go` 補欄位，
+資料仍會在 `ToStore()` 這關被丟掉，前端拿不到。**要讓前端看得到就必須落地成 DB 欄位**，
+連帶三個 DB engine 的 migration。這已是資料庫 contract 變更，故單獨出此計畫書。
+
+反過來也有好消息，B① 與 B② 都比原描述更輕：
+
+| 子項 | 原描述 | 實際查證 |
+|---|---|---|
+| B① 四個 ATR 參數輸入 | 「Go API 與 Python 都已支援，純粹前端沒開欄位」 | ✅ 正確。`sr_regression_results.go:63` 直接 bind 進 `analysis.SREvaluationRequest`，該 struct 的四個欄位（`client.go:1167-1170`）json tag 齊全 → **純前端** |
+| B② `volatility_profiles` 顯示 | 未言明 | **純前端**。`RunSREvaluation` 回傳 `map[string]any`（原樣穿透），report 欄位早就到得了前端。且 `zone_outcomes.by_volatility_bucket` 已由 A 做掉（`SRZones.svelte:1510`），本項只剩 `volatility_profiles` 本體 |
+| B③ `zone_builder_runtime_config` | 「先補 Go client.go」 | **全鏈路**：Go struct ＋ **DB migration ×3** ＋ store model ＋ repo 兩處欄位清單 ＋ handler 回應 ＋ 前端 |
+
+**目標**
+
+1. evaluation 表單可以直接調四個 ATR builder 參數，不必改 code 或走 CLI。
+2. evaluation report 看得到 `volatility_profiles`（各 symbol 落在哪個波動 bucket、touch count），
+   讓 A 已做好的 `by_volatility_bucket` 分層數字有母體可對照。
+3. SR 分析畫面看得到 `zone_builder_runtime_config`：adaptive 是否啟用、用了哪個 bucket 的
+   config、以及 `reason_code`（`EXPLICIT_BUILDERS` / `ADAPTIVE_ZONE_BUILDERS_DISABLED` /
+   `ADAPTIVE_ZONE_BUILDERS_ERROR`）——目前這段在 Go 端被靜默丟棄，是 T-003 P2 的可觀測性缺口。
+
+**不做的範圍**
+
+- 不做 C（`http_server.py` import 期 `check_connection()` 重構與 `/sr-scoring/evaluate` 測試）。
+- 不做參數 sweep 的 API／UI（已記載為現況限制，只能走 CLI）。
+- 不把四個 ATR 參數存進 evaluation job 記錄（不加 job 表欄位）：實際生效值已由 report 的
+  `builder_config` 回聲，夠用且不需要再一次 migration。
+- 不改 Python：`pipeline.py:99/395` 早就把 runtime config 放進 `analysis` payload 了。
+
+**分兩階段實作（可分別驗收）**
+
+**階段 1：B①＋B②（純前端，無 contract 變更）**
+
+| 檔案 | 動作 |
+|---|---|
+| `frontend/src/lib/api/srZones.ts` | `SREvaluationOptions` 加四個 optional 參數；`runSREvaluation` body 帶上 `atr_width_multiplier` / `max_merge_width_multiple` / `atr_lookback` / `atr_period`（**未填就不送**，讓 Go 的 `omitempty` 與 Python 預設值接手）；新增 `SRVolatilityProfile` 型別掛進 `SREvaluationReport`（比照 A 的具名 optional 型別做法） |
+| `frontend/src/routes/SRZones.svelte` | 表單新增四個 optional 數字輸入（放在既有 `evaluationLimit`／`evaluationReplayMaxRows` 附近，約 1310-1330 行區塊），預設空白＝沿用後端預設；report 區新增 `volatility_profiles` 分區（`<details>`，by-presence 渲染） |
+| `frontend/src/routes/SRZones.test.ts` | 「四個參數留白時 body 不含該鍵」「填了才送出且型別為數字」「`volatility_profiles` 有資料時渲染、缺鍵時不渲染」 |
+
+**階段 2：B③（全鏈路）**
+
+| 檔案 | 動作 |
+|---|---|
+| `backend/internal/database/migrations/{mysql,postgres,sqlite}/057_add_sr_zone_builder_runtime_config.sql` | `stock_sr_zone_analyses` 加 `zone_builder_runtime_config` JSON/TEXT 欄位，`ADD COLUMN IF NOT EXISTS` + `-- +goose Up/Down`，比照 056 的寫法；三個 engine 的型別依既有 RawJSON 欄位（如 `period_summaries`）在該 engine 的宣告方式對齊 |
+| `backend/internal/analysis/client.go` | `zonePipelineAnalysis`（303 行）加 `ZoneBuilderRuntimeConfig json.RawMessage \`json:"zone_builder_runtime_config"\``；`ToStore()` 帶進 store 型別 |
+| `backend/internal/store/model.go` | `SRZoneAnalysis` 加 `ZoneBuilderRuntimeConfig RawJSON`（比照 `PeriodSummaries` 的 db/json tag 寫法） |
+| `backend/internal/store/sr_zone_repo.go` | **兩處欄位清單都要改**（第 74 行、第 337 行），以及對應的 INSERT 參數 |
+| `backend/internal/api/handler/sr_zones.go` | `srZonePipelineResponse` 的 `analysis` 區塊（186-192 行）加上該鍵 |
+| `frontend/src/lib/api/srZones.ts` / `SRZones.svelte` | 型別 ＋ 分析頁顯示（adaptive 啟用與否、`reason_code`、bucket、`config` 快照） |
+
+**資料 contract 變化**
+
+- 新增 DB 欄位（nullable，無預設值語意）；**舊資料為 NULL**，前端必須 by-presence 渲染，
+  NULL 時整個分區不出現——不可顯示成「adaptive 未啟用」，那是把「沒有紀錄」誤讀成「有紀錄且為關閉」。
+- API 回應新增一個 optional 鍵，屬**相容新增**，既有前端不受影響。
+- 仲裁順序不變：這個欄位純粹是**紀錄**（Python 端已經決定好了才回傳），不參與任何決策或狀態推導。
+
+**主要風險與回滾**
+
+- **三個 engine 的 migration 漏改**：目前 mysql 55 / postgres 56 / sqlite 55 個檔，數量本就不一致，
+  容易只補一個。→ 三個都補，並在 dev project（postgres）實跑 migration 驗證。
+- **repo 欄位清單有兩處**：只改一處會出現「寫得進去、讀不出來」或 scan 欄位數不符的 runtime error。
+  → 兩處都改，並靠既有 repo 測試覆蓋。
+- **NULL 判讀**：如上，舊分析沒有這個值，UI 必須顯示為「無紀錄」而非「未啟用」。
+- **回滾**：migration 有 `-- +goose Down`；Go／前端變更皆為相容新增，`git revert` 即可。
+  已寫入的欄位留著不影響舊版程式（多餘欄位不會被 scan）。
+
+**測試與驗證策略**
+
+- 階段 1：`frontend/scripts/test.sh`（svelte-check → vitest → build 三步全綠）。
+- 階段 2：
+  - `backend/scripts/test.sh ./internal/store/... ./internal/analysis/... ./internal/api/handler/...`
+  - migration 在 **dev project**（`docker-compose.dev.yml`）實跑，確認 up / down 都過（CLAUDE.md：
+    不得用 live/deploy compose project 做 migration 驗證）。
+  - `scripts/smoke-dev.sh` 跑一次分析，確認新欄位在 API 回應中出現且值正確。
+  - 前端測試補「NULL/缺鍵時不渲染」與「有值時顯示 reason_code」。
+- 記憶體：依 `development-workflow.md`，開跑前先確認沒有其他 stack 常駐（見 issue.md I-053）。
+
+**完成後歸檔**
+
+- `zone_builder_runtime_config` 的欄位語意、`reason_code` 三種值的意義、NULL 代表舊資料，補到
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 zone builder 章節。
+- 四個 ATR 參數在 UI 的位置與「留白＝沿用預設」的行為，補到同文件的「Decision Replay 的
+  zone builder 參數」。

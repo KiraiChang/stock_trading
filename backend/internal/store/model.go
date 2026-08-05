@@ -158,9 +158,16 @@ type SRZoneAnalysis struct {
 	// 見 Python _build_chip_summary），供前端「共用籌碼面板」顯示。跟 zone 無關、
 	// 整份分析共用一份，所以存在 analysis 快照而不是每個 zone。查無籌碼資料時
 	// 為 {"missing":true,...}；舊資料沒有這欄時為 JSON null。
-	ChipSummary     RawJSON   `db:"chip_summary"           json:"chip_summary"`
-	DecisionSummary RawJSON   `db:"decision_summary"       json:"decision_summary"`
-	CreatedAt       time.Time `db:"created_at"              json:"created_at"`
+	ChipSummary     RawJSON `db:"chip_summary"           json:"chip_summary"`
+	DecisionSummary RawJSON `db:"decision_summary"       json:"decision_summary"`
+	// ZoneBuilderRuntimeConfig 是這次分析實際採用的 zone builder 設定快照
+	// （Python `_resolve_runtime_builders`）：adaptive 是否啟用、落在哪個波動
+	// bucket、以及 reason_code（EXPLICIT_BUILDERS / ADAPTIVE_ZONE_BUILDERS_DISABLED /
+	// ADAPTIVE_ZONE_BUILDERS_ERROR）。純紀錄用，不參與任何決策或狀態推導。
+	// 057 migration 之前的舊資料為 JSON null，代表「沒有這項紀錄」——
+	// 不等於「adaptive 未啟用」，前端要據此隱藏區塊而不是顯示成關閉。
+	ZoneBuilderRuntimeConfig RawJSON   `db:"zone_builder_runtime_config" json:"zone_builder_runtime_config"`
+	CreatedAt                time.Time `db:"created_at"                  json:"created_at"`
 }
 
 type SRZoneNormalizedProjections struct {

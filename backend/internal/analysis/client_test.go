@@ -614,6 +614,58 @@ func TestZoneScoreResultNestedV2DecodeAndStore(t *testing.T) {
 	}
 }
 
+// zone_builder_runtime_config 之前在 Go 端沒有欄位承接，Python 送了也會被丟掉，
+// 導致「這次分析為什麼用這組 zone 寬度」無從追溯（T-037 B）。
+func TestZoneScoreResultToStoreCarriesZoneBuilderRuntimeConfig(t *testing.T) {
+	payload := []byte(`{
+		"pipeline_version":"v2",
+		"analysis":{"symbol":"2330","timeframe":"1d","analyzed_at":"2026-07-09T00:00:00Z","current_price":600,
+			"zone_builder_runtime_config":{"enabled":true,"bucket":"HIGH_VOLATILITY","reason_code":"VOLATILITY_BUCKET_CONFIG"},
+			"model":{"version":"v4","config_hash":"cfg"}},
+		"features":{"global_trend":0.03,"global_volatility":0.02},
+		"score":{"global_expected_value":0.01,"global_confidence":0.7,"global_risk_reward_ratio":1.5},
+		"zones":[]
+	}`)
+
+	var result ZoneScoreResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	analysis, _, _, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore: %v", err)
+	}
+	const want = `{"enabled":true,"bucket":"HIGH_VOLATILITY","reason_code":"VOLATILITY_BUCKET_CONFIG"}`
+	if string(analysis.ZoneBuilderRuntimeConfig) != want {
+		t.Fatalf("expected zone_builder_runtime_config to carry through ToStore, got %s", analysis.ZoneBuilderRuntimeConfig)
+	}
+}
+
+// 沒有這個欄位時要落成 JSON null（代表「無紀錄」），不能是空字串——
+// 空字串寫進 NOT NULL 的 JSON 欄位會被 DB 拒絕。
+func TestZoneScoreResultToStoreDefaultsMissingZoneBuilderRuntimeConfigToNull(t *testing.T) {
+	payload := []byte(`{
+		"pipeline_version":"v2",
+		"analysis":{"symbol":"2330","timeframe":"1d","analyzed_at":"2026-07-09T00:00:00Z","current_price":600,
+			"model":{"version":"v4","config_hash":"cfg"}},
+		"features":{"global_trend":0.03,"global_volatility":0.02},
+		"score":{"global_expected_value":0.01,"global_confidence":0.7,"global_risk_reward_ratio":1.5},
+		"zones":[]
+	}`)
+
+	var result ZoneScoreResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	analysis, _, _, err := result.ToStore()
+	if err != nil {
+		t.Fatalf("ToStore: %v", err)
+	}
+	if string(analysis.ZoneBuilderRuntimeConfig) != "null" {
+		t.Fatalf("expected zone_builder_runtime_config to default to null, got %q", analysis.ZoneBuilderRuntimeConfig)
+	}
+}
+
 func TestZoneScoreNestedDecodeRejectsNullOrMissingScore(t *testing.T) {
 	tests := []struct {
 		name string

@@ -107,6 +107,13 @@
   // 預設不寫入：寫進 stock_sr_regression_results 會成為該 model_config_hash 的 production
   // entry gate 依據（第一筆寫入就讓原本 no-op 的 gate 生效），不該是點兩下就發生的副作用。
   let evaluationWriteDB = false
+  // zone builder 的四個 ATR 參數：留白（空字串／null）= 沿用後端預設，不送該鍵。
+  // 型別用 number | null 而非 number，是因為 <input type="number"> 清空時 bind 出來是 null，
+  // 用 0 當預設會把「沒填」誤送成「明確設成 0」。
+  let evaluationATRWidthMultiplier: number | null = null
+  let evaluationMaxMergeWidthMultiple: number | null = null
+  let evaluationATRLookback: number | null = null
+  let evaluationATRPeriod: number | null = null
   let evaluating = false
   let evaluationError = ''
   let evaluationMessage = ''
@@ -805,6 +812,10 @@
         decisionReplay: evaluationMode === 'decision_replay',
         replayMaxRows: evaluationReplayMaxRows,
         writeDb: evaluationWriteDB,
+        atrWidthMultiplier: evaluationATRWidthMultiplier ?? undefined,
+        maxMergeWidthMultiple: evaluationMaxMergeWidthMultiple ?? undefined,
+        atrLookback: evaluationATRLookback ?? undefined,
+        atrPeriod: evaluationATRPeriod ?? undefined,
       })
       evaluationMessage = res.message
       activeEvaluationJob = {
@@ -1341,6 +1352,70 @@
         </button>
       </div>
 
+      <details class="mt-2">
+        <summary class="text-xs text-muted cursor-pointer hover:text-white transition-colors">
+          zone builder 參數（留白 = 沿用後端預設）
+        </summary>
+        <div class="flex flex-wrap gap-3 mt-2">
+          <label class="text-xs text-muted flex flex-col gap-1">
+            <span>ATR 寬度倍數</span>
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              bind:value={evaluationATRWidthMultiplier}
+              placeholder="預設"
+              title="atr_width_multiplier：zone 寬度 = ATR × 此倍數"
+              class="w-36 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                     placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </label>
+          <label class="text-xs text-muted flex flex-col gap-1">
+            <span>合併寬度上限倍數</span>
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              bind:value={evaluationMaxMergeWidthMultiple}
+              placeholder="預設"
+              title="max_merge_width_multiple：相鄰 zone 合併後寬度上限"
+              class="w-36 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                     placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </label>
+          <label class="text-xs text-muted flex flex-col gap-1">
+            <span>ATR 回看根數</span>
+            <input
+              type="number"
+              min="1"
+              step="10"
+              bind:value={evaluationATRLookback}
+              placeholder="預設"
+              title="atr_lookback：計算波動側寫的回看根數"
+              class="w-36 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                     placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </label>
+          <label class="text-xs text-muted flex flex-col gap-1">
+            <span>ATR 期數</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              bind:value={evaluationATRPeriod}
+              placeholder="預設"
+              title="atr_period：ATR 本身的計算期數"
+              class="w-36 bg-surface border border-border rounded-lg px-3 py-2 text-sm text-white
+                     placeholder:text-muted focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </label>
+        </div>
+        <p class="text-xs text-muted mt-2">
+          四個參數在 Zone Evaluation 與 Decision Replay 兩種模式都會生效。實際生效值會回聲在
+          報告的 <code>builder_config</code>；留白或非正數的欄位不會送出，由後端沿用預設。
+        </p>
+      </details>
+
       {#if evaluationWriteDB}
         <p class="text-yellow-400 text-xs mt-2">
           ⚠ 結果會寫入 stock_sr_regression_results，並成為此模型（model_config_hash）
@@ -1538,6 +1613,48 @@
                 </table>
               {/if}
             {/each}
+          </details>
+        {/if}
+
+        {#if sortedEntries(evaluationReport.volatility_profiles).length > 0}
+          {@const profiles = sortedEntries(evaluationReport.volatility_profiles)}
+          {@const thresholds = profiles[0][1].thresholds ?? {}}
+          <details class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+            <summary class="cursor-pointer text-muted hover:text-white">
+              波動側寫
+              <span class="text-white">{profiles.length} 檔</span>
+            </summary>
+            <p class="text-muted mt-2">
+              bucket 就是上方「依波動 bucket」的分組鍵：這裡是母體（各檔落在哪一組、取樣幾根），
+              上面是該組的成效。門檻 低波動 ≤ {fmtPct(thresholds.low_volatility_max)}、
+              高波動 ≥ {fmtPct(thresholds.high_volatility_min)}。
+            </p>
+            <table class="w-full mt-2">
+              <thead>
+                <tr class="text-muted border-b border-border/60">
+                  <th class="text-left py-1">代號</th>
+                  <th class="text-left py-1">bucket</th>
+                  <th class="text-right py-1">ATR%</th>
+                  <th class="text-right py-1">平均振幅</th>
+                  <th class="text-right py-1">觸價次數</th>
+                  <th class="text-right py-1">每百根觸價</th>
+                  <th class="text-right py-1">取樣根數</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each profiles as [symbol, profile]}
+                  <tr class="border-b border-border/30">
+                    <td class="py-1 text-white">{profile.symbol ?? symbol}</td>
+                    <td class="py-1 text-muted">{profile.bucket ?? '—'}</td>
+                    <td class="py-1 text-right text-muted">{fmtPct(profile.atr_pct)}</td>
+                    <td class="py-1 text-right text-muted">{fmtPct(profile.average_range_pct)}</td>
+                    <td class="py-1 text-right text-muted">{profile.touch_count ?? '—'}</td>
+                    <td class="py-1 text-right text-muted">{fmt(profile.touch_density_per_100_bars)}</td>
+                    <td class="py-1 text-right text-muted">{profile.lookback_bars ?? '—'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
           </details>
         {/if}
 
@@ -2349,6 +2466,32 @@
                 <p class="font-mono text-white">{current.model_version}{current.model_config_hash ? ` / ${current.model_config_hash}` : ''}</p>
               </div>
             </div>
+          {/if}
+
+          <!-- zone builder 設定：舊分析（057 migration 之前）沒有這項紀錄，整區不顯示。
+               不可在缺紀錄時顯示成「未啟用」——那會把「沒記錄」誤讀成「adaptive 關閉」。 -->
+          {#if current.zone_builder_runtime_config}
+            {@const builderConfig = current.zone_builder_runtime_config}
+            <details class="mt-3 px-3 py-2 bg-surface/60 rounded-lg text-xs">
+              <summary class="cursor-pointer text-muted hover:text-white">
+                zone builder 設定
+                <span class="text-white">
+                  {builderConfig.enabled ? `adaptive 生效${builderConfig.bucket ? `（${builderConfig.bucket}）` : ''}` : 'adaptive 未生效'}
+                </span>
+              </summary>
+              <p class="text-muted mt-2">
+                reason_code=<span class="font-mono text-white">{builderConfig.reason_code ?? '—'}</span>
+                {#if builderConfig.atr_pct !== undefined || builderConfig.average_range_pct !== undefined}
+                  · ATR%={fmtPct(builderConfig.atr_pct)} · 平均振幅={fmtPct(builderConfig.average_range_pct)}
+                {/if}
+              </p>
+              {#if builderConfig.error}
+                <p class="text-rise mt-1">adaptive 解析失敗，已回退預設 builder：{builderConfig.error}</p>
+              {/if}
+              {#if builderConfig.config}
+                <pre class="mt-2 p-2 bg-surface rounded overflow-x-auto text-muted">{JSON.stringify(builderConfig.config, null, 2)}</pre>
+              {/if}
+            </details>
           {/if}
         </div>
 

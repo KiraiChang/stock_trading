@@ -314,6 +314,10 @@ type zonePipelineAnalysis struct {
 		ConfigHash   string   `json:"config_hash"`
 		FeatureNames []string `json:"feature_names"`
 	} `json:"model"`
+	// ZoneBuilderRuntimeConfig 是 Python `_resolve_runtime_builders` 的決策紀錄
+	// （adaptive 是否啟用、用了哪個波動 bucket 的設定、reason_code）。純觀測用，
+	// 不參與仲裁；沒有這個欄位會讓「這次分析為什麼用這組 zone 寬度」無從追溯。
+	ZoneBuilderRuntimeConfig json.RawMessage `json:"zone_builder_runtime_config"`
 }
 
 type zonePipelineFeatures struct {
@@ -418,6 +422,8 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, stor
 		AnalysisTips:          rawJSONOrDefault(analysisTips, "[]"),
 		ChipSummary:           rawJSONOrDefault(chipSummary, "null"),
 		DecisionSummary:       rawJSONOrDefault(decision, "null"),
+		// legacy 建構路徑（analysis.Symbol == ""）沒有這個欄位，落回 JSON null＝無紀錄。
+		ZoneBuilderRuntimeConfig: rawJSONOrDefault(analysis.ZoneBuilderRuntimeConfig, "null"),
 	}
 
 	zones := make([]store.SRZone, 0, len(r.Zones))

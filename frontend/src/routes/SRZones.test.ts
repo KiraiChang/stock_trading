@@ -144,7 +144,8 @@ describe('SRZones 頁面 evaluation 送出與輪詢', () => {
       limit: 1500,
       decisionReplay: true,
       replayMaxRows: 100,
-      writeDb: true,
+      // 預設不寫入：寫 DB 會啟動該模型的 production entry gate，不該是點兩下的副作用。
+      writeDb: false,
     })
     expect(await screen.findByText('已在背景開始 evaluation')).toBeInTheDocument()
   })
@@ -205,5 +206,131 @@ describe('SRZones 頁面 evaluation 送出與輪詢', () => {
 
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
     expect(getSREvaluationJob).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('SRZones 頁面 evaluation 的寫入開關與治理判定', () => {
+  it('勾選寫入結果後才送 writeDb=true，並顯示會啟動 gate 的警語', async () => {
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_003',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    const button = await renderSRZones()
+    expect(screen.queryByText(/會寫入 stock_sr_regression_results/)).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByLabelText('寫入結果'))
+
+    expect(await screen.findByText(/會寫入 stock_sr_regression_results/)).toBeInTheDocument()
+
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.click(button)
+
+    expect(runSREvaluation).toHaveBeenCalledWith(expect.objectContaining({ writeDb: true }))
+  })
+
+  it('job 完成後顯示治理判定與覆蓋率，不必寫 DB 就看得到', async () => {
+    vi.useFakeTimers()
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_004',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 2,
+    })
+    vi.mocked(getSREvaluationJob).mockResolvedValue(
+      doneJob({
+        write_db: false,
+        report: {
+          run_id: 'sr_replay_001',
+          governance_evaluation: {
+            health_state: 'DEGRADED',
+            blocking_flags: [],
+            warning_flags: ['REPLAY_SYMBOL_COVERAGE_PARTIAL'],
+            confidence_gate: { allow_entry: true, max_entry_state: 'SMALL_ENTRY' },
+          },
+          replay_coverage: {
+            symbols_requested: 4,
+            symbols_covered: 2,
+            symbols_skipped: ['00947', '00981A'],
+            coverage_ratio: 0.5,
+          },
+        },
+      })
+    )
+
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.click(button)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    await tick()
+
+    expect(screen.getByText('模型治理')).toBeInTheDocument()
+    expect(screen.getByText('DEGRADED')).toBeInTheDocument()
+    expect(screen.getByText('allow_entry=true')).toBeInTheDocument()
+    expect(screen.getByText('max_entry_state=SMALL_ENTRY')).toBeInTheDocument()
+    expect(screen.getByText('REPLAY_SYMBOL_COVERAGE_PARTIAL')).toBeInTheDocument()
+    expect(screen.getByText(/覆蓋 2\/4/)).toBeInTheDocument()
+    expect(screen.getByText(/略過 00947, 00981A/)).toBeInTheDocument()
+  })
+
+  it('Zone Evaluation 模式（report 沒有治理判定）不顯示治理區塊', async () => {
+    vi.useFakeTimers()
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_005',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    vi.mocked(getSREvaluationJob).mockResolvedValue(
+      doneJob({ report: { run_id: 'sr_eval_001', rows: 12 } })
+    )
+
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.click(button)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    await tick()
+
+    expect(screen.queryByText('模型治理')).not.toBeInTheDocument()
+  })
+})
+
+describe('SRZones 治理判定的顏色語意', () => {
+  it('allow_entry=false 要用紅色（text-rise）標示被擋單', async () => {
+    vi.useFakeTimers()
+    vi.mocked(runSREvaluation).mockResolvedValue({
+      job_id: 'sr_eval_job_006',
+      status: 'pending',
+      message: '已在背景開始 evaluation',
+      symbols: 1,
+    })
+    vi.mocked(getSREvaluationJob).mockResolvedValue(
+      doneJob({
+        report: {
+          run_id: 'sr_replay_002',
+          governance_evaluation: {
+            health_state: 'UNRELIABLE',
+            blocking_flags: ['REPLAY_SAMPLE_TOO_SMALL'],
+            warning_flags: [],
+            confidence_gate: { allow_entry: false, max_entry_state: 'WAIT_CONFIRMATION' },
+          },
+        },
+      })
+    )
+
+    const button = await renderSRZones()
+    await fireEvent.input(screen.getByPlaceholderText(SYMBOLS_PLACEHOLDER), { target: { value: '2330' } })
+    await fireEvent.click(button)
+    await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS)
+    await tick()
+
+    // tailwind.config.js：rise=#e74c3c(紅)、fall=#2ecc71(綠)。被擋單是壞消息，必須是紅色。
+    const blocked = screen.getByText('allow_entry=false')
+    expect(blocked).toHaveClass('text-rise')
+    expect(screen.getByText('max_entry_state=WAIT_CONFIRMATION')).toBeInTheDocument()
   })
 })

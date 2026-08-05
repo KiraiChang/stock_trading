@@ -12,6 +12,8 @@
 
   const REFRESH_MS = 15000
 
+  // 顏色語意：text-rise=#e74c3c(紅) / text-fall=#2ecc71(綠)，是台股「漲紅跌綠」的行情色。
+  // 作業層的錯誤與失敗數屬於警示，一律用 text-rise（紅），不要照行情語意用 text-fall。
   const jobLabel: Record<string, string> = {
     pre_market: '盤前初始化',
     intraday: '盤中分K',
@@ -182,12 +184,12 @@
               </div>
               <div>
                 <p class="text-muted mb-1">失敗數</p>
-                <p class={job.symbols_failed > 0 ? 'text-fall' : 'text-white'}>{job.symbols_failed}</p>
+                <p class={job.symbols_failed > 0 ? 'text-rise' : 'text-white'}>{job.symbols_failed}</p>
               </div>
             </div>
 
             {#if job.error}
-              <p class="text-fall text-xs mt-3 font-mono break-all">{job.error}</p>
+              <p class="text-rise text-xs mt-3 font-mono break-all">{job.error}</p>
             {/if}
 
             {#if job.job_name === 'daily_close'}
@@ -206,7 +208,7 @@
                   <p class="text-green-400 text-xs mt-2">{triggerMessage.daily_close}</p>
                 {/if}
                 {#if triggerError.daily_close}
-                  <p class="text-fall text-xs mt-2">{triggerError.daily_close}</p>
+                  <p class="text-rise text-xs mt-2">{triggerError.daily_close}</p>
                 {/if}
               </div>
             {/if}
@@ -227,7 +229,7 @@
                   <p class="text-green-400 text-xs mt-2">{triggerMessage.stock_symbol_sync}</p>
                 {/if}
                 {#if triggerError.stock_symbol_sync}
-                  <p class="text-fall text-xs mt-2">{triggerError.stock_symbol_sync}</p>
+                  <p class="text-rise text-xs mt-2">{triggerError.stock_symbol_sync}</p>
                 {/if}
               </div>
             {/if}
@@ -248,7 +250,7 @@
                   <p class="text-green-400 text-xs mt-2">{triggerMessage.sr_evaluation}</p>
                 {/if}
                 {#if triggerError.sr_evaluation}
-                  <p class="text-fall text-xs mt-2">{triggerError.sr_evaluation}</p>
+                  <p class="text-rise text-xs mt-2">{triggerError.sr_evaluation}</p>
                 {/if}
               </div>
             {/if}

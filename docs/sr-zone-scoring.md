@@ -1639,6 +1639,24 @@ report 會帶出 `builder_config` snapshot，可追溯該次用了哪組參數�
   「builder config 有沒有真的生效」不要靠 decision 指標判斷，該由 replay 的
   `builder_config` snapshot 與 `zone_count` 差異來確認。
 
+### 前端手動 evaluation 入口的判讀
+
+SR Zone 頁的「模型驗證 / Decision Replay」面板：
+
+- **「寫入結果」預設不勾**。勾選代表把結果寫進 `stock_sr_regression_results`，而該表的最新一筆
+  就是這個 `model_config_hash` 的 production entry gate 依據——**第一次寫入會讓原本 no-op 的
+  gate 開始生效**（見上節與 issue I-040）。勾選時 UI 會顯示這段因果的警語。
+- **治理判定不需要寫 DB 就看得到**：job 完成後，report 摘要下方會顯示
+  `governance_evaluation` 的 `health_state`（HEALTHY 綠 / DEGRADED 黃 / UNRELIABLE 紅）、
+  `confidence_gate.allow_entry`、`max_entry_state` 與 blocking/warning flags，以及
+  `replay_coverage` 的覆蓋率與被略過的股票。因此標準流程是**先不勾寫入跑一次、確認判定合理，
+  再決定要不要寫入**。
+- `allow_entry` 與 `max_entry_state` 才是真正會限制 production 進場的值，`health_state`
+  只是它們的摘要——判讀時看前兩者。
+- Zone Evaluation 模式的 report 沒有 `governance_evaluation`，治理區塊不會出現。
+
+參數 sweep 沒有 API 與 UI，只能用 CLI（見上節）。
+
 ### Production 端的 regression governance gate
 
 `pipeline._merge_regression_governance_gate` 把「同 `model_config_hash` 的最新 decision replay

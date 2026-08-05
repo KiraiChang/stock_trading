@@ -386,7 +386,7 @@
                         {verifyingId === h.id ? '...' : '重新驗證'}
                       </button>
                       <button
-                        class="text-xs px-2.5 py-1 border border-fall/40 text-fall hover:bg-fall/10 rounded transition-colors"
+                        class="text-xs px-2.5 py-1 border border-red-600/40 text-red-400 hover:bg-red-900/20 rounded transition-colors"
                         on:click|stopPropagation={() => (confirmDeleteId = h.id)}
                       >刪除</button>
                     </div>

@@ -84,3 +84,31 @@ describe('Scheduler 頁面的 sr_evaluation 區塊', () => {
     expect(screen.getByRole('button', { name: '手動執行 SR 驗證' })).toBeEnabled()
   })
 })
+
+describe('Scheduler 頁面的錯誤色語意', () => {
+  // tailwind.config.js：rise=#e74c3c(紅)、fall=#2ecc71(綠)，是台股「漲紅跌綠」的行情色。
+  // 作業層的錯誤與失敗數是警示，必須紅色；先前誤用 text-fall 會把失敗顯示成綠色。
+  it('job 錯誤與失敗數用紅色（text-rise）', async () => {
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([
+      {
+        ...srEvaluationJob,
+        status: 'failed',
+        symbols_failed: 3,
+        error: 'python upstream unavailable',
+      },
+    ])
+    await renderSchedulerPage()
+
+    expect(screen.getByText('python upstream unavailable')).toHaveClass('text-rise')
+    expect(screen.getByText('3')).toHaveClass('text-rise')
+  })
+
+  it('手動觸發失敗訊息用紅色（text-rise）', async () => {
+    vi.mocked(triggerSREvaluationRun).mockRejectedValue(new Error('boom'))
+    const button = await renderSchedulerPage()
+
+    await fireEvent.click(button)
+
+    expect(await screen.findByText('觸發失敗，請稍後再試')).toHaveClass('text-rise')
+  })
+})

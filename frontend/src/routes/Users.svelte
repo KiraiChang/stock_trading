@@ -95,7 +95,7 @@
                   <button
                     class="text-xs px-3 py-1 rounded-lg border transition-colors disabled:opacity-40
                       {user.status === 'active'
-                        ? 'border-fall/40 text-fall hover:bg-fall/10'
+                        ? 'border-red-600/40 text-red-400 hover:bg-red-900/20'
                         : 'border-green-600/40 text-green-400 hover:bg-green-900/20'}"
                     disabled={updating === user.id}
                     on:click={() => toggleStatus(user)}

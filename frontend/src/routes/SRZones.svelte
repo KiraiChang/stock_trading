@@ -31,6 +31,8 @@
     type SREvaluationReport,
     type SREvaluationJob,
     type SREvaluationJobStatus,
+    type SRDecisionReplayGovernance,
+    type SRReplayCoverage,
     type SRRegressionResult,
   } from '../lib/api/srZones'
 
@@ -99,7 +101,9 @@
   let evaluationLimit = 1500
   let evaluationReplayMaxRows = 100
   let evaluationMode: EvaluationMode = 'decision_replay'
-  let evaluationWriteDB = true
+  // 預設不寫入：寫進 stock_sr_regression_results 會成為該 model_config_hash 的 production
+  // entry gate 依據（第一筆寫入就讓原本 no-op 的 gate 生效），不該是點兩下就發生的副作用。
+  let evaluationWriteDB = false
   let evaluating = false
   let evaluationError = ''
   let evaluationMessage = ''
@@ -128,6 +132,24 @@
   const evaluationStatusLabel: Record<SREvaluationJobStatus, string> = {
     pending: '排隊中', running: '執行中', done: '完成', failed: '失敗',
   }
+  const governanceStateClass: Record<string, string> = {
+    HEALTHY: 'bg-green-900/40 text-green-400',
+    DEGRADED: 'bg-yellow-900/40 text-yellow-400',
+    UNRELIABLE: 'bg-red-900/40 text-red-400',
+  }
+
+  function governanceFlags(governance: SRDecisionReplayGovernance): string {
+    return [...(governance.blocking_flags ?? []), ...(governance.warning_flags ?? [])].join(', ')
+  }
+
+  function coverageLabel(coverage: SRReplayCoverage): string {
+    const covered = coverage.symbols_covered ?? 0
+    const requested = coverage.symbols_requested ?? 0
+    const ratio = coverage.coverage_ratio
+    const pct = ratio === null || ratio === undefined ? '—' : `${Math.round(ratio * 100)}%`
+    return `${covered}/${requested}（${pct}）`
+  }
+
   const evaluationStatusClass: Record<SREvaluationJobStatus, string> = {
     pending: 'bg-gray-700/60 text-gray-400',
     running: 'bg-blue-900/40 text-blue-400',
@@ -1288,6 +1310,14 @@
         </button>
       </div>
 
+      {#if evaluationWriteDB}
+        <p class="text-yellow-400 text-xs mt-2">
+          ⚠ 結果會寫入 stock_sr_regression_results，並成為此模型（model_config_hash）
+          production entry gate 的判定依據。第一次寫入會讓原本未生效的 gate 開始作用；
+          若判定為 UNRELIABLE，正式分析會保守阻擋進場。只想看報告請取消勾選。
+        </p>
+      {/if}
+
       {#if activeEvaluationJob}
         <div class="mt-3 px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
           <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium {evaluationStatusClass[activeEvaluationJob.status]}">
@@ -1319,6 +1349,40 @@
             <span class="text-muted">lifecycle={evaluationReport.event_lifecycle_replay_available ? 'available' : 'unavailable'}</span>
           {/if}
         </div>
+
+        <!-- 治理判定：write_db=false 的試跑也看得到，不必為了看結論而寫 DB 啟動 gate。 -->
+        {#if evaluationReport.governance_evaluation}
+          {@const governance = evaluationReport.governance_evaluation}
+          {@const gate = governance.confidence_gate ?? {}}
+          {@const flags = governanceFlags(governance)}
+          <div class="mt-2 px-3 py-2 bg-surface/60 rounded-lg text-xs flex flex-wrap items-center gap-2">
+            <span class="text-muted">模型治理</span>
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full font-medium
+              {governanceStateClass[governance.health_state ?? ''] ?? 'bg-gray-700/60 text-gray-400'}">
+              {governance.health_state ?? 'UNKNOWN'}
+            </span>
+            <span class={gate.allow_entry === false ? 'text-rise' : 'text-white'}>
+              allow_entry={gate.allow_entry === undefined ? '—' : String(gate.allow_entry)}
+            </span>
+            <span class="text-white">max_entry_state={gate.max_entry_state ?? '—'}</span>
+            {#if flags}
+              <span class="text-muted max-w-[320px] truncate" title={flags}>{flags}</span>
+            {/if}
+            {#if evaluationReport.replay_coverage}
+              <span class="text-muted">
+                覆蓋 {coverageLabel(evaluationReport.replay_coverage)}
+              </span>
+              {#if (evaluationReport.replay_coverage.symbols_skipped ?? []).length > 0}
+                <span
+                  class="text-yellow-400 max-w-[240px] truncate"
+                  title={(evaluationReport.replay_coverage.symbols_skipped ?? []).join(', ')}
+                >
+                  略過 {(evaluationReport.replay_coverage.symbols_skipped ?? []).join(', ')}
+                </span>
+              {/if}
+            {/if}
+          </div>
+        {/if}
       {/if}
 
       <div class="mt-4">

@@ -316,7 +316,7 @@
                 <td class="px-5 py-2 text-right">
                   {#if job.status === 'pending'}
                     <button
-                      class="text-xs px-2.5 py-1 border border-fall/40 text-fall hover:bg-fall/10 rounded transition-colors"
+                      class="text-xs px-2.5 py-1 border border-red-600/40 text-red-400 hover:bg-red-900/20 rounded transition-colors"
                       on:click|stopPropagation={() => cancel(job.job_id)}
                     >取消</button>
                   {/if}

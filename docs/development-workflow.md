@@ -76,10 +76,40 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 
 | 項目 | Backend | Python | Frontend |
 |------|---------|--------|----------|
-| `MEM`（記憶體上限） | `1800m` | `1024m` | `1024m` |
+| `MEM`（記憶體上限） | `700m` | `700m` | `440m`（每步一個 container） |
+| `MEMSWAP` | 同 `MEM` | 同 `MEM` | 同 `MEM` |
 | `CPUS` | `1` | `1` | `1` |
 | `--pids-limit` | 200 | 200 | 200 |
 | image 覆寫 | `GO_IMAGE` | `PY_IMAGE` | `NODE_IMAGE` |
+
+### `MEM` 是上限，不是預留——不可高於 host 可用量
+
+三支腳本都在 `docker run` 前呼叫 `scripts/lib/mem-guard.sh` 的 `mem_guard_clamp`，把 `MEM`
+壓進 host 當下真的供得起的範圍：上限 = `/proc/meminfo` 的 **`MemAvailable`**（不是 `MemTotal`）
+減 `MEM_RESERVE_MB`（預設 150）。超過就印警告並自動下修。
+
+**為什麼要有這道護欄**：`--memory` 是 cgroup 的上限，不是向 host 預留記憶體。設得比
+`MemAvailable` 高時，container 根本撞不到自己的限制，會先耗盡 host 實體記憶體 + swap，
+於是由 **host 層級的 OOM killer** 出手，砍掉 badness 分數最高的行程——在這台機器上就是
+**呼叫測試的工作階段本身**（claude CLI，RSS 隨對話成長到 400~500MB）。2026-08-03 與
+2026-08-05 各發生一次；2026-08-05 那次的 container 還活過呼叫端並自己跑完（測試全綠，log
+留在 scratchpad），死的是呼叫測試的人——**被 kill 後先去撈 log，不要反射性重跑**。
+
+所以遇到記憶體不足時，**要降的是實際用量，不是把 `MEM` 調大**。調大只是把「container 撞
+自己的 cgroup 上限」（可回收、錯誤訊息讀得到、工作階段活著）換成「host 砍掉呼叫端」
+（整個工作階段連同未回報的結果一起消失）。
+
+護欄開關（環境變數）：
+
+| 變數 | 預設 | 作用 |
+|------|------|------|
+| `MEM_RESERVE_MB` | `150` | 保留給呼叫端**執行期間再成長**的量。`MemAvailable` 已扣掉各行程當下的 RSS，不需在此重複涵蓋；設太大會讓上限低到無法執行 |
+| `MEM_MIN_MB` | `256` | 下修後低於此值直接中止，並提示先關掉常駐 container |
+| `MEM_STRICT` | `0` | 設 `1` 時不下修，直接中止（想明確發現設定錯誤時用） |
+| `MEM_FORCE` | `0` | 設 `1` 時完全略過護欄 |
+
+`MEMSWAP`（`--memory-swap`）預設等於 `MEM`，即**關掉 container 的 swap**。這台 host 的 512MB
+swap 常態 100% 用滿，放任 container 換頁只會拖垮整台機器，不如讓它乾脆撞 cgroup 上限。
 
 Go 另外固定 `GOMAXPROCS=1` + `GOFLAGS=-p=1`：本機只有 2GiB RAM，平行編譯會 OOM，
 必須序列編譯；記憶體上限也因此不能沿用其他 runtime 的 512m。再加上 `GOGC=off` +
@@ -93,6 +123,26 @@ Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/d
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
 跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。
 
+Frontend 顏色語意（`tailwind.config.js`）：`rise: #e74c3c`（**紅**）、`fall: #2ecc71`（**綠**），
+名稱來自台股「漲紅跌綠」。**關鍵陷阱：`fall` 是綠色**，不要因為「fall 聽起來像壞事」就拿去標
+錯誤或危險操作，那會把警示顯示成安全色。用法分三類：
+
+| 情境 | 用什麼 | 例子 |
+|------|--------|------|
+| 行情語意 | `text-rise` / `text-fall` | 漲跌、損益、買賣超、停損價、最大回撤 |
+| 錯誤／失敗訊息文字 | `text-rise`（紅） | job error、觸發失敗、載入失敗 |
+| UI 狀態徽章與動作按鈕 | tailwind 色票 `text-red-400` / `text-green-400` 等 | 刪除／取消／停用按鈕、status chip |
+
+第二類沿用 `text-rise` 是既有慣例（`SRZones.svelte`、`Scheduler.svelte` 的載入錯誤本來就這樣）；
+第三類用色票是因為按鈕本來就與行情無關，且同組按鈕的另一分支已經是
+`border-green-600/40 text-green-400`，用色票才對稱。
+
+這個坑實際發生過兩次（2026-08-05 修正）：`Scheduler.svelte` 整檔把 job 錯誤與失敗數標成綠色
+（同檔的載入錯誤卻是紅色，自相矛盾）；`Users.svelte` / `Backtest.svelte` / `Analysis.svelte`
+的停用／取消／刪除按鈕也是綠色，其中 `Users.svelte` 的切換按鈕**兩個狀態都是綠色**，使用者
+完全分不出哪邊是危險操作。已在 `Scheduler.test.ts` / `SRZones.test.ts` / `Users.test.ts` /
+`Backtest.test.ts` / `Analysis.test.ts` 加上 class 斷言鎖住——**只斷言文字內容的測試抓不到這種錯**。
+
 Frontend 測試框架（三層）：
 
 - **型別**：`svelte-check`（含 `.svelte` 內 TS），對應 `npm run check`。`tsconfig.json` 的
@@ -105,7 +155,15 @@ Frontend 測試框架（三層）：
   `emptyOutDir` / manualChunks，避免跑測試誤動 dist 產物）；`resolve.conditions=['browser']` 讓
   Svelte 元件能在 jsdom 掛載；`vitest-setup.ts` 載入 jest-dom matcher 並手動 `afterEach(cleanup)`。
 - **記憶體**：2GiB host 下 vitest 以 `pool: 'forks'` + `singleFork` 限制併發（比照 Go
-  `GOMAXPROCS=1`、Python `-p=1`）；`MEM` 預設 1024m，vitest+jsdom 較吃資源時可經環境變數上調。
+  `GOMAXPROCS=1`、Python `-p=1`）。腳本另外把三步**拆成三個獨立 container** 依序執行
+  （`npm run check` → `npm run test:unit` → `npm run build`）：每步跑完就退出、記憶體立刻
+  歸還 host，峰值變成三者的 **max 而非 sum**，哪一步爆掉也一眼可辨。再加
+  `NODE_OPTIONS=--max-old-space-size`（腳本的 `NODE_HEAP_MB`，預設 320）——node 的預設
+  old-space 由可用記憶體推導，不明確指定就會一路漲到接近 cgroup 上限才認真 GC，這是把實際
+  用量壓下來的主要槓桿。2026-08-05 實測三步峰值（`memory.max_usage_in_bytes`，含可回收的
+  page cache）：svelte-check 376MB、vitest 359MB、vite build 370MB；`MEM` 預設 440m，被護欄
+  下修到 365m 時三步仍全過（緊縮時 kernel 直接回收 page cache，不會 OOM）。
+  **不要因為想給測試更多空間而調高 `MEM`**，理由見上面的「`MEM` 是上限，不是預留」。
 - **版本相容**：Svelte 4 需 `svelte-check@^3`（v4 需 Svelte 5）與 `@testing-library/svelte@^4`
   （v5 的 `svelteTesting` vite plugin 需 Svelte 5，本專案不適用，故手動設定 browser condition
   與 cleanup）。

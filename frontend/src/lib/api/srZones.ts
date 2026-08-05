@@ -1048,6 +1048,36 @@ export interface SREvaluationOptions {
   replayMaxRows?: number
 }
 
+// decision replay 的治理判定（Python `_decision_replay_governance_evaluation`）。
+// confidence_gate 的 allow_entry / max_entry_state 才是真正會限制 production 進場的值，
+// health_state 只是它們的摘要。
+export interface SRDecisionReplayGovernance {
+  schema_version?: string
+  scope?: string
+  health_state?: string
+  passed?: boolean
+  strict_passed?: boolean
+  blocking_flags?: string[]
+  warning_flags?: string[]
+  confidence_gate?: {
+    state?: string
+    allow_entry?: boolean
+    max_entry_state?: string
+    reason_codes?: string[]
+  }
+  coverage?: Record<string, number | null>
+}
+
+// replay 實際涵蓋到的股票範圍。report 的 symbols/sources 描述的是「要求驗證的範圍」，
+// 這裡才是「實際驗證到的範圍」，預算不足時兩者會不一致。
+export interface SRReplayCoverage {
+  symbols_requested?: number
+  symbols_covered?: number
+  symbols_skipped?: string[]
+  coverage_ratio?: number | null
+  window_mode?: string
+}
+
 export interface SREvaluationReport {
   schema_version?: string
   run_id?: string
@@ -1064,6 +1094,8 @@ export interface SREvaluationReport {
   outcome_summary?: Record<string, unknown>
   zone_outcomes?: Record<string, unknown>
   model_metrics?: Record<string, Record<string, number | null> | null>
+  governance_evaluation?: SRDecisionReplayGovernance
+  replay_coverage?: SRReplayCoverage
   warnings?: string[]
   [key: string]: unknown
 }

@@ -88,4 +88,38 @@ sudo 手動套用後重啟 gitea。
 
 ---
 
-下一筆新問題從 `I-054` 起編。
+### I-054：mysql migration 從未在真實 MySQL 上跑過，只靠比照既有寫法
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（受環境限制，暫不修復） |
+| 嚴重度 | 中 |
+| 分類 | Go / DB / migration |
+| 發現日期 | 2026-08-06 |
+| 來源 | T-037 B review |
+
+`backend/internal/database/migrations/` 維護 mysql / postgres / sqlite 三份 migration，
+但**只有 postgres 與 sqlite 真的被執行過**：
+
+- sqlite：`internal/store` 測試每次都實跑 goose migration 後做 round-trip。
+- postgres：dev / live compose 都用 postgres，backend 啟動時由 goose 實際套用。
+- **mysql：沒有任何自動或手動路徑會執行它。** 本機沒有 MySQL 實例，dev compose 用 postgres，
+  拉一個 MySQL container 需要的記憶體在這台 2 GiB host 上會踩到 I-053。
+
+所以每一份 mysql migration 都只是「比照該檔案既有寫法撰寫」，語法錯誤、型別不相容或
+backfill 漏做都不會被任何流程擋下來，要等真的有人用 MySQL 部署才會爆。
+
+最近一例是 `057_add_sr_zone_builder_runtime_config.sql`：mysql 版走
+`ADD COLUMN ... NULL` → `UPDATE ... SET 'null'` → `MODIFY ... NOT NULL` 三步（比照 033），
+postgres / sqlite 則各自一步用 `NOT NULL DEFAULT`。三者最終狀態有個小差異——
+**mysql 版沒有 DEFAULT**，所以省略該欄位的 INSERT 在 mysql 會失敗、在另外兩個 engine 會成功。
+目前唯一的寫入路徑（`sr_zone_repo.Create`）永遠帶齊欄位且有 `== ""` 的 normalization guard，
+所以不構成實際問題，但這正是「mysql 分支沒被執行過」會累積出來的那種不對稱。
+
+**要解掉需要**：CI 或本機起一個 MySQL 實例把三份 migration 都跑一遍（up + down），
+或明確宣告不再支援 MySQL 並刪掉那份 migration 目錄。兩者都不是順手能做的，故先記為已知限制。
+`backend/config.yaml` 目前仍把 mysql 列為生產可選 driver。
+
+---
+
+下一筆新問題從 `I-055` 起編。

@@ -31,11 +31,10 @@ import json
 log.info("loading config...")
 from config import SERVICE_PORT
 
-log.info("connecting to database...")
+log.info("loading database module...")
 from db import engine, check_connection
 
-check_connection()
-
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, List, Optional, Union
@@ -58,7 +57,26 @@ from backtest.modular.sr_scoring.model import get_model
 from backtest.modular.sr_scoring.train import run_training
 from backtest.modular.sr_scoring.zone_builder import ATRZoneBuilderConfig, ZoneBuilderConfig
 
-app = FastAPI(title="Trading Backtest Service", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """DB 連線檢查放在啟動事件，不放在 module import 期。
+
+    兩條啟動路徑都會經過 lifespan，fail-fast 行為與先前一致（startup 期 raise 時 uvicorn 會記
+    `Application startup failed. Exiting.` 並以非 0 退出，container 照樣重啟）：
+      - `python http_server.py`（dev / live compose 用）→ 檔尾的 uvicorn.run(app)
+      - `uvicorn http_server:app`（start_server.sh 用）
+
+    放在 import 期則等於「import 這個模組 == 必須連得到 DB」，會綁架所有離線工具與
+    FastAPI TestClient——`/sr-scoring/evaluate` 長期沒有測試就是被這一行擋住的。
+    見 docs/development-workflow.md §4「模組 import 不得有連線等副作用」。
+    """
+    log.info("connecting to database...")
+    check_connection()
+    yield
+
+
+app = FastAPI(title="Trading Backtest Service", version="1.0.0", lifespan=lifespan)
 
 
 class BacktestRequest(BaseModel):

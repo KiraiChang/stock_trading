@@ -376,6 +376,28 @@ docker compose -f docker-compose.dev.yml down -v
   - 需要啟動時 fail-fast 的服務／CLI，在進入點呼叫 `db.check_connection()`，不要靠 import 副作用。
   - 新寫的模組比照辦理：建立 engine／client 可以在 module level，但實際連線要延後到使用或明確的
     啟動檢查，別放在 import 時執行。
+- **FastAPI 服務的「進入點」＝ lifespan，不是 module 頂層**（2026-08-06，T-037 C）：
+  `http_server.py` 原本在 module 頂層直接呼叫 `check_connection()`，等於「import 這個模組 ==
+  必須連得到 DB」，讓 `/sr-scoring/evaluate` 完全無法用 FastAPI TestClient 測（該端點因此長期
+  0 測試）。現改成 `@asynccontextmanager` 的 `lifespan`，掛進 `FastAPI(lifespan=...)`：
+
+  ```python
+  @asynccontextmanager
+  async def lifespan(app: FastAPI):
+      check_connection()
+      yield
+
+  app = FastAPI(..., lifespan=lifespan)
+  ```
+
+  兩條啟動路徑（compose 的 `python http_server.py` → 檔尾 `uvicorn.run(app)`、`start_server.sh`
+  的 `uvicorn http_server:app`）都會經過 lifespan，**fail-fast 行為不變**：已實測連不到 DB 時
+  uvicorn 記 `Application startup failed. Exiting.` 並以 **exit 3** 退出，container 照樣依
+  `restart: unless-stopped` 重啟。
+- **測試側的對應寫法**：starlette 的 `TestClient` **只有被當成 context manager 使用時才會跑
+  lifespan**。所以端點測試一律用 `TestClient(app)`（不加 `with`）＝ 完全不需要 DB；只有要驗證
+  啟動行為的測試才寫 `with TestClient(app):`。這點寫在 `python/tests/conftest.py` 的 `client`
+  fixture 註解裡——若有人順手改成 `with`，整批端點測試會突然需要 DB。
 
 ## 文件收斂規則
 

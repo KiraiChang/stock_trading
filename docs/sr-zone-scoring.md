@@ -1639,7 +1639,8 @@ evaluation 分支組 `builder_config`，replay 分支漏傳，是同一個陷阱
 - **只有正數會送出**。留白、`NaN`、`0` 與負數一律不送該鍵。
 - **0 為什麼也要擋**：Go 的 `SREvaluationRequest` 對這四個欄位用 `omitempty`，
   `json.Marshal` 在轉發給 Python 前就會把 0 丟掉。前端若照送 0，使用者會看到「參數收下了」
-  但完全沒有效果——正是 T-037 C 要解掉的那種靜默 wiring 失效。這四個參數本來也沒有 0 的
+  但完全沒有效果——這種「參數收下卻沒生效」的靜默 wiring 失效現已由
+  `python/tests/test_http_server_sr_evaluate_wiring.py` 鎖住。這四個參數本來也沒有 0 的
   合理語意（zone 寬度 0、ATR 期數 0）。**要支援 0 得先拿掉 Go 那邊的 `omitempty`**，
   不是在前端硬送。
 - 前端 state 用 `number | null` 而非 `number`：`<input type="number">` 清空時

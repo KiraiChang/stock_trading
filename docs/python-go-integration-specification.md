@@ -186,6 +186,36 @@ client（10 分鐘，一般請求是 30 秒），因為訓練耗時可能遠超�
 
 ---
 
+# 3.4 `/sr-scoring/evaluate` 的參數轉發規則
+
+`POST /sr-scoring/evaluate`（`python/http_server.py`）是 CLI evaluation 的 HTTP 包裝，Go 端用它
+手動產生 regression report（`write_db=true` 時由 Python 寫入 `stock_sr_regression_results`）。
+回應**原樣穿透**：Go 的 `RunSREvaluation` 收成 `map[string]any`，不改名、不包裝。
+
+request 欄位到下游的對應**不是一對一**，這幾條是實際踩過或容易踩的：
+
+| request 欄位 | 轉成什麼 | 備註 |
+|---|---|---|
+| `atr_width_multiplier`／`max_merge_width_multiple`／`atr_lookback`／`atr_period` | `ZoneBuilderConfig(atr=ATRZoneBuilderConfig(...))` | `atr_lookback` 對應的是 `ATRZoneBuilderConfig.lookback`（名稱不同）。**`builder_config` 組在 `if req.decision_replay` 分支之外**，兩條路徑共用 |
+| `forward_bars` | `forward_bars_support` **與** `forward_bars_resistance` | 一對多展開 |
+| `threshold_pct` | `threshold_pct_support` **與** `threshold_pct_resistance` | 一對多展開 |
+| `min_history_bars`／`rebuild_every_bars` | `DatasetConfig` 同名欄位 | 直傳 |
+| `model_path` 留空 | `config.SR_SCORING_MODEL_PATH` | |
+| `pipeline_version` 留空 | replay → `sr_zone_decision_replay_p1`；evaluation → `DEFAULT_PIPELINE_VERSION` | 預設值**依模式而異**，是刻意的（要能區分新舊 report）。`schema_version` 仍維持 p0，改了會讓 production gate 查不到資料，見 issue.md I-040 |
+| `chip_scores_by_symbol`／`model_governance_by_symbol`／`replay_max_rows` | 只進 `run_decision_replay` | replay 專屬 |
+
+驗證與狀態碼：`symbols` 會先 strip 並濾掉空字串，濾完為空 → 400；`limit <= 0` → 400；
+**`replay_max_rows <= 0` 只有 `decision_replay=true` 時才是錯誤**——非 replay 模式該欄位沒有意義，
+Go 端送 0 是正常語意，不該回 400。下游 `ValueError` → 400、`RuntimeError` → 503（對齊
+`/sr-zones` 的模型未就緒語意）；跑失敗時不會寫 DB。
+
+**為什麼這一節值得寫下來**：2026-08-05 發生過 decision replay 分支漏傳 `builder_config` 的
+wiring bug——四個 ATR 參數收下了、回應也是 200，但完全沒生效。這類「參數收下卻沒生效」的靜默
+失效不會讓任何既有測試變紅。上表每一條現在都有測試鎖住，見
+`python/tests/test_http_server_sr_evaluate_wiring.py` 與 `..._validation.py`。
+
+---
+
 # 4. Backtest Data Standard
 
 ## 核心原則

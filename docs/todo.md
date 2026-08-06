@@ -574,7 +574,7 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | Python 端已實作（待 review）；前端接入已完成但**驗收未跑完**，見下方「前端接入」 |
+| 狀態 | Python 端與前端接入皆已實作（待 review）；仍有 Python 端的 RR distribution 未做 |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 模型驗證 / Frontend |
 | 建立日期 | 2026-07-15 |
@@ -621,13 +621,12 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 - ✅ `VITEST_ARGS="src/routes/SRZones.test.ts"` → **23 passed**（含新增 4 筆）。
 - ✅ 變異驗證：把樣本門檻由 20 改成 1，「樣本不足」那條如預期變紅，確認門檻邏輯不是擺設。
-- ❌ **`frontend/scripts/test.sh` 完整三步（svelte-check → vitest → build）跑不起來**：
-  svelte-check 在 mem-guard 把 heap 壓到 202MB 後 `Reached heap limit`。當時 host
-  `MemAvailable` 只剩 465MB、swap 幾乎用滿，live stack 的 python-server 單獨佔 287MB
-  ——即 [`issue.md`](./issue.md) I-053 的情況。沒有自行調高 `MEM`（那只會讓 host OOM killer
-  改砍呼叫端），也沒有自行停掉 live stack（屬對外可見動作）。
-- **所以目前狀態是「vitest 綠、型別檢查與 build 未驗證」。要空出約 300MB 補跑完整三步之後，
-  這筆才能收斂移除。**
+- ✅ **`frontend/scripts/test.sh` 完整三步全綠**：svelte-check 0 errors 0 warnings、
+  vitest **55 passed**、vite build 通過。
+  一開始這步因 host 記憶體不足而 OOM（svelte-check 的 heap 被 mem-guard 壓到 202MB），
+  後來實測出 svelte-check 的下限約 225MB heap 並在 available 回到 513MB 時跑完。
+  過程中量到的數字與腳本改善見 [`development-workflow.md`](./development-workflow.md)
+  的「frontend 三步的記憶體實測」。
 
 **self-review 後修掉的三處（2026-08-06）**：
 

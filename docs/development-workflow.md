@@ -118,6 +118,31 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
   dev project（CLAUDE.md 規定）。
 - 開跑前 `free -m` 的 `available` 低於 ~800 MB 就先清場再說，不要硬上。
 
+### frontend 三步的記憶體實測（2026-08-06）
+
+`frontend/scripts/test.sh` 的三步裡 **svelte-check 是瓶頸，而且它的用量幾乎壓不下去**。
+2026-08-06 逐項量測的結果：
+
+| 嘗試 | 結果 |
+|---|---|
+| `--max-old-space-size` 180 / 200 / 215 | 全部 OOM |
+| `--max-old-space-size` 230 | 通過 → **下限抓 225MB heap** |
+| `tsconfig.json` 加 `skipLibCheck: true` | tsc program 由 130.5MB 降到 100.8MB（−23%）、check 時間 9.60s→2.15s（快 4.5×）。**但 svelte-check 的下限幾乎沒降**——svelte 的 language service 才是大宗，不是那 881 個 `.d.ts` |
+| `--diagnostic-sources js,svelte`（去掉 css） | heap 200MB 仍 OOM，無效 |
+| `--max-semi-space-size=2` | 有沒有它都一樣，無效 |
+
+換算成前置條件：**heap 225 → `MEM` ≥ 330m → host `MemAvailable` ≥ 約 480MB**
+（heap = MEM − 100，MEM 再被 mem-guard 減去 150MB 的 reserve）。這台平常在 450~510MB
+之間浮動，**正好卡在門檻上**，所以同一份程式碼可能這次過、下次 OOM——不是 flaky，是記憶體。
+
+腳本已在 svelte-check 前加一道警告：clamp 後的 heap 低於 `SVELTE_CHECK_MIN_HEAP_MB`（225）
+時明講「很可能 OOM，要解的是釋放 host 記憶體」。**只警告不中止**，因為下限是區間值、
+邊界上仍可能過。只想跑單元測試時用 `VITEST_ARGS=...` 略過這一步。
+
+`skipLibCheck` 雖然不解 OOM，仍值得留著：省 30MB 的 margin 與 4.5 倍的 check 速度。
+代價是不再檢查函式庫 `.d.ts` 內部的型別錯誤（例如兩個套件的 global 型別互相衝突）；
+自己的程式碼對照函式庫型別的檢查完全不受影響，這也是 Vite / Svelte 官方 template 的預設。
+
 ### 事後判讀 OOM：這台的 `dmesg -T` 時間不可信
 
 調查被 kill 的原因時，`dmesg -T` 的**絕對時間會錯**（此沙箱 kernel 單調時鐘與 wallclock 有

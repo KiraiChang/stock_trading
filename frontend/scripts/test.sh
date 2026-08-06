@@ -41,6 +41,11 @@ MEM="${MEM:-440m}"
 NODE_HEAP_MB="${NODE_HEAP_MB:-320}"
 CPUS="${CPUS:-1}"
 VITEST_ARGS="${VITEST_ARGS:-}"
+# 2026-08-06 實測：heap 180/200/215 都 OOM、230 通過，故下限抓 225。
+# 這個數字幾乎壓不下去——tsconfig 的 skipLibCheck 只省到 tsc program 那一段，
+# svelte 的 language service 才是大宗；`--diagnostic-sources js,svelte`（去掉 css）
+# 與 `--max-semi-space-size=2` 實測都沒有幫助。
+SVELTE_CHECK_MIN_HEAP_MB="${SVELTE_CHECK_MIN_HEAP_MB:-225}"
 
 # shellcheck source=../../scripts/lib/mem-guard.sh
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
@@ -96,6 +101,17 @@ if [ -n "$VITEST_ARGS" ]; then
   # 開發迭代模式：只跑 vitest，省掉 svelte-check 與 vite build 的等待。
   run_step "vitest（args=$VITEST_ARGS）" "npx vitest run $VITEST_ARGS"
 else
+  # svelte-check 是三步中最吃記憶體的一步，而且它的用量幾乎不隨旋鈕改變（2026-08-06 實測，
+  # 數字與量法見 docs/development-workflow.md 的「frontend 三步的記憶體實測」）。heap 給不夠時
+  # 它會先燒約 30 秒才吐一大段 V8 stack trace，光看訊息不容易意識到「這是 host 記憶體不夠」，
+  # 所以先講清楚。這裡只警告不中止——實測下限是區間值，邊界上仍可能過。
+  if [ "$NODE_HEAP_MB" -lt "$SVELTE_CHECK_MIN_HEAP_MB" ]; then
+    echo >&2 "==> [warn] svelte-check 實測需要約 ${SVELTE_CHECK_MIN_HEAP_MB}MB heap，目前只有 ${NODE_HEAP_MB}MB，很可能 OOM。"
+    echo >&2 "    heap 由 MEM 推導（MEM-100），MEM 由 mem-guard 依 host available 下修，"
+    echo >&2 "    所以要解的是**釋放 host 記憶體**（需 available ≥ 約 $((SVELTE_CHECK_MIN_HEAP_MB + 100 + 150))MB），"
+    echo >&2 "    不是調高 MEM——調高只會讓 host OOM killer 改砍呼叫端（見 issue.md I-053）。"
+    echo >&2 "    只想跑單元測試可用 VITEST_ARGS=... 略過這一步。"
+  fi
   run_step "svelte-check" "npm run check"
   run_step "vitest" "npm run test:unit"
   run_step "vite build" "npm run build"

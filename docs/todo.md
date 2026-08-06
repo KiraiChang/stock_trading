@@ -973,3 +973,169 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 跑完的結論（各 bucket 的樣本量、候選之間有無實質差異、是否足以支撐 T-003 P2 的決策）補到
 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「參數 sweep 的 decision 層比較」；
 若結論是「資料量不足以下建議」，那本身就是要記下來的現況，避免下次有人再跑一次同樣的東西。
+
+---
+
+### T-040：擴充評估標的池（第一階段：精選 100～200 檔）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 計畫書待確認 |
+| 優先度 | 高（同時解掉 T-002 / T-003 / T-028 共同的取樣限制） |
+| 分類 | Go / 資料同步 / 排程 / DB |
+| 建立日期 | 2026-08-06 |
+| 來源 | T-039 sweep 實跑結論：卡住的是標的池，不是參數 |
+
+**背景**：2026-08-06 實跑 sweep 後確認，SR Zone 的參數調校卡在標的池只有 **11 檔**
+（9 檔落在 HIGH bucket、NORMAL 只有 `0050`／`2330`、LOW **完全空白**），候選之間的差異落在
+雜訊內。要往前走需要更多橫跨波動區間的標的。完整結論見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「2026-08-06 首次實跑 sweep 的結論」。
+
+#### 目標
+
+1. 把評估用的標的池從 11 檔擴到 **100～200 檔**，且**橫跨三個波動 bucket**。
+2. 這些標的每日盤後自動更新日 K，讓歷史持續累積。
+3. **完全不改變現有 watchlist 的行為與成本。**
+
+#### 不做的範圍
+
+- **不做全市場 2,298 檔**。那是 CLAUDE.md Roadmap Phase 2 的方向，需要先改造 evaluation
+  pipeline 的記憶體與時間（實測外推：2,298 檔單次 evaluation 約 4 小時、記憶體遠超這台
+  2GiB host），屬另一個量級的工程，另案處理。
+- **不讓新標的進入盤中掃描、籌碼同步、SR 分析、signal 掃描**（理由見下節）。
+- **不動 bucket 門檻**。門檻要怎麼改，要等本項的 Step 1 量出實際分佈才有依據。
+- 不改 evaluation pipeline 的批次設計——100～200 檔預期仍撐得住，但要實測確認。
+
+#### 關鍵設計決定：新標的不能放進 `watchlists`
+
+`watchlists` 目前驅動**六個**流程，把 200 檔塞進去會讓每一個都乘上 ~18 倍：
+
+| 流程 | 觸發 | 每檔成本 | 200 檔的後果 |
+|---|---|---|---|
+| `runIntradayJob` | 盤中**每 5 分鐘** | 1 request | **完全不可行**：5 req/min 下光一輪就要 40 分鐘 |
+| `runChipDailySync` | 每日 21:00 | 2 requests（法人＋融資券） | 400 requests → 80 分鐘 |
+| `RunDailyClose` | 每日 15:00 | 1 request ＋ signal 評估 | 200 requests → 40 分鐘 |
+| `runPreMarket` | 每日 08:50 | `BackfillHistory(5天)` | 200 requests → 40 分鐘 |
+| `runSRZoneVerification` | 每日盤後 | SR zone 驗證 | 計算量 ×18 |
+| SR evaluation 排程 | `symbols: []` ＝ watchlist | replay 母體 | 覆蓋率語意改變 |
+
+所以要新增一個**與 watchlist 分離的「評估標的池」**：只維護日 K，不進盤中、不抓籌碼、
+不做 SR 分析。watchlist 維持 11 檔不動。
+
+#### 實作分兩階段
+
+**Phase 1：選股用的一次性抓取（幾乎不需要改程式）**
+
+查證後確認 `POST /api/v1/market/backfill`（`handler/market.go:27`）**已經支援**
+`{"days": N, "symbols": [...]}`、在背景執行、並共用 `FinMindClient` 的 rate limiter。
+所以 Step 1／Step 3 的抓取用現有端點就能跑。要補的是可觀測性與速度：
+
+| 項目 | 現況 | 本次要做 |
+|---|---|---|
+| 進度追蹤 | `go func()` fire-and-forget，只寫 log，**沒有 job 紀錄** | 比照 `chip_sync_jobs` 加 `market_backfill_jobs`：pending/running/done/failed、總數/完成數/失敗清單 |
+| 可續跑 | 用 `context.Background()`，backend 重啟即中斷且無紀錄 | job 紀錄讓中斷後知道跑到哪，可用剩餘 symbols 重送 |
+| 速度 | `rate_limit: 5`/分（＝300/h） | **不調整**。FinMind 註冊帳號的官方上限是 **600 requests/小時**（＝10/min），現行 5/min 已用掉一半、另一半留給重試與突發。大批量回補靠**拉長時間**而不是拉高速率；650 檔約 2.2 小時、150 檔約 30 分鐘，都是可接受的一次性成本 |
+| 候選清單來源 | 無 | 新增 `GET /api/v1/market/symbols?type=股票,ETF&…`，從 `stock_symbols` 產生候選清單，免得手工湊 650 個代號 |
+
+**Phase 2：常態維護——一個「純日 K」清單（選完標的後才需要）**
+
+新增的 `evaluation_universe` 是**只處理日 K 的清單**，這是它與 `watchlists` 的唯一分野，
+也是整個設計的重點。**明確界定它做什麼、不做什麼**，避免日後被順手接上其他流程：
+
+| | `watchlists`（11 檔，不動） | `evaluation_universe`（新，100～200 檔） |
+|---|---|---|
+| 每日日 K | ✅ | ✅ **只有這一項** |
+| 盤中分 K（每 5 分鐘） | ✅ | ❌ |
+| 籌碼同步（法人／融資券） | ✅ | ❌ |
+| signal 掃描 | ✅ | ❌ |
+| SR zone 分析與驗證 | ✅ | ❌ |
+| 前端 watchlist 畫面 | ✅ | ❌（研究用，不進使用者的關注清單） |
+
+用途只有一個：**讓 evaluation / sweep 有夠寬的取樣母體**。任何要把它接上盤中或籌碼流程的
+提案，都要先回頭看本筆「關鍵設計決定」那張成本表。
+
+| 檔案 | 動作 |
+|---|---|
+| `migrations/{mysql,postgres,sqlite}/058_create_evaluation_universe.sql` | 新表：`symbol`、`bucket_hint`、`selected_at`、`source`、`active`、`note` |
+| `store/evaluation_universe_repo.go` ＋ `model.go` | repo 與 model |
+| `scheduler/scheduler.go` | 新 job `evaluation_universe_sync`：每日盤後（晚於 `daily_close` 的 15:00，建議 16:00）**只對池內標的跑 `FetchAndStoreDaily`**；不呼叫 `signalEng.Evaluate`、不進 SR 驗證、不進籌碼同步 |
+| `config.yaml` | 新增 `evaluation_universe` 區段：`enabled`（預設 false）、`cron`、`batch_size` |
+| `api/handler` ＋ `router.go` | 池的 CRUD 與手動觸發 |
+
+**每日成本**：150 檔 × 1 request ÷ 5 req/min = **約 30 分鐘**，排在 16:00 之後的離峰時段，
+與盤中排程不重疊，也遠低於 FinMind 的 600/h 上限。
+
+#### 選股方法（三步，Step 2 的結果可能改變 T-003 的設計）
+
+**Step 1：量分佈，不挑股票**
+
+- 樣本：全部 354 檔 ETF ＋ 各產業分層抽樣約 300 檔股票 ≈ **650 檔**，每檔只抓最近約
+  **130 天**（`VOLATILITY_PROFILE_LOOKBACK = 60` 個交易日 ＋ 假日 buffer）。
+- 產出：全市場的 ATR%/close 分佈。
+- 成本：650 requests，`rate_limit=5` 下約 **2.2 小時**（一次性，不需要調速率）。
+
+**Step 2：依分佈決定策略**
+
+現有 11 檔中最低波動的是 `0050` 的 **ATR% 3.25%**，而 HIGH 門檻是 3.5%、LOW 門檻是 1.5%
+（約 `0050` 的一半）。**台灣最廣泛分散的股票型 ETF 都幾乎算不上「非高波動」**，
+這強烈暗示門檻相對台股實際分佈定得太低。
+
+- 若分佈顯示確實有一群 ≤1.5% 的**股票型**標的 → 照原計畫選它們填 LOW。
+- 若幾乎沒有（預期是這個結果）→ **結論是門檻要重定**，改用實際分佈的分位數（例如 P33/P67）
+  切三個 bucket。硬塞幾檔債券 ETF 進 LOW 只會讓該組全是與股票行為完全不同的商品，
+  拿來調 zone builder 參數**反而有害**。
+
+**Step 3：選 100～200 檔深抓 5 年**
+
+三個 bucket 各 40～60 檔，選取規則：
+
+- **產業分散**：半導體業有 201 檔，隨機抽會被它主導；每個 bucket 內限制單一產業佔比。
+- **流動性下限**：2,298 檔裡有大量低成交量標的，OHLCV 本身就是雜訊、zone touch 沒有意義。
+  用平均成交金額設門檻。
+- **上市滿 5 年**：需要足夠的 walk-forward 深度，新股先排除。
+- **保留現有 11 檔**：維持與 2026-08-06 那批結果的可比性。
+- 成本：150 requests × 5 年，`rate_limit=5` 下約 **30 分鐘**。
+
+#### 資料 contract 變化
+
+- 新表 `evaluation_universe`，與既有表無外鍵相依；**不改 `watchlists`、`candles`、
+  `stock_symbols` 的結構**。
+- `candles` 只是多了更多 symbol 的資料列，schema 不變。
+- API 為相容新增；既有端點行為不變。
+- **仲裁順序不變**：這個池不參與任何交易決策或狀態推導，純粹是研究用的標的清單。
+
+#### 主要風險與回滾
+
+- **不動 `rate_limit`**：FinMind 註冊帳號上限 600 requests/小時，現行 5/min（300/h）已用一半。
+  所有請求共用同一個節流器，調高會影響 live 既有排程（盤中每 5 分鐘的分 K 拉取也走同一條），
+  收益（省幾小時的一次性作業）遠小於風險。**本次明確不調。**
+- **DB 成長**：150 檔 × 5 年 ≈ 18 萬列（現有 29,208 列的 6 倍）。磁碟不是問題，但
+  `candles` 的既有索引效能要留意。
+- **evaluation 記憶體（最主要的未知數）**：150 檔的 evaluation **未經實測**。
+  先前「以 270MB 線性外推到 1.5～2GB」的估算**是錯的**——那 270MB 幾乎都是 pandas / sklearn /
+  lightgbm / shap 的 import 開銷，資料本身只有數 MB。重新估算後 150 檔約落在 **350～450MB**，
+  在這台 host 上是「邊緣但可能可行」。完整分析與改造方向見 [`issue.md`](./issue.md) **I-056**。
+  **仍要實測，不要假設**：Phase 2 完成後的第一次 evaluation 建議先用 30～50 檔量一次實際峰值，
+  再決定要不要降 `--limit` 或先做 I-056 的串流化。
+- **回滾**：Phase 1 只新增 job 表與唯讀查詢端點，`git revert` 即可；已抓下來的 candles
+  留著無害（多的 symbol 不會被任何既有流程掃到）。Phase 2 的 migration 有 `-- +goose Down`。
+
+#### 測試與驗證策略
+
+- `backend/scripts/test.sh ./internal/market/... ./internal/store/... ./internal/api/handler/... ./internal/scheduler/...`
+- migration 在 **dev project** 實跑（CLAUDE.md：不得用 live/deploy compose 驗證 migration）。
+- **實際抓取由使用者在 live 環境執行**，之後由本人透過 live DB 驗證：
+  1. `candles` 的 symbol 數與列數是否符合預期
+  2. 各 symbol 的日期涵蓋範圍是否完整（有無缺漏交易日）
+  3. 用實際資料算出 ATR% 分佈，交付 Step 2 的判斷
+- **記憶體**：Phase 2 的第一次 evaluation 要實測，不要假設線性外推成立。
+
+#### 完成後歸檔
+
+- 評估標的池與 watchlist 的分工、為何不合併，補到
+  [`architecture.md`](./architecture.md) 或 [`database-schema.md`](./database-schema.md)。
+- ATR% 實際分佈與 bucket 門檻的最終決定，補到
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 zone builder 章節。
+- FinMind 官方 rate limit（600 requests/小時）已於 2026-08-06 更正到
+  [`finmind-integration.md`](./finmind-integration.md) 的「Rate Limit 處理」——
+  該處原本寫「每分鐘約 30 requests」（＝1800/h），與官方值差 3 倍。

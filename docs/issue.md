@@ -211,4 +211,55 @@ postgres / sqlite 則各自一步用 `NOT NULL DEFAULT`。三者最終狀態有�
 
 ---
 
-下一筆新問題從 `I-056` 起編。
+### I-056：SR evaluation 的規模上限——`sources` 與 `dataset` 必須同時常駐記憶體
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（擴標的池前的必經改造，見 todo.md T-040） |
+| 嚴重度 | 中 |
+| 分類 | Python / SR Zone / 效能 |
+| 發現日期 | 2026-08-06 |
+| 來源 | T-039 sweep 實跑 ＋ 擴標的池的可行性評估 |
+
+`run_evaluation()`（`evaluation.py:335`）的結構決定了它的規模上限：
+
+```python
+sources = _load_db_sources(symbols, timeframe, limit)   # 所有標的的 DataFrame 一次全載
+dataset = build_training_dataset(sources, builders, ...)  # 全部 touch 併成一張表
+...
+model_metrics = _model_metrics(dataset, bundle)
+volatility_profiles = _volatility_profiles(sources, dataset)   # ← 同時要 sources 和 dataset
+```
+
+**`sources` 無法在建完 `dataset` 後釋放**，因為 `_volatility_profiles` 還要用它。所以峰值
+記憶體 = 全部原始 K 線 ＋ 全部 touch dataset ＋ 模型 ＋ 中間物，四者同時存在。
+
+**實測基準（2026-08-06）**：11 檔 × `limit=1500` → 5,928 touches，container **270MB 跑得完**，
+單次約 70 秒；6 組 sweep 約 7 分鐘。
+
+**但不要拿 270MB 做線性外推**——那 270MB 幾乎都是 Python ＋ pandas / numpy / sklearn /
+lightgbm / shap 的 import 開銷，資料本身只有數 MB（原始 frame 約 1MB、dataset 約 1MB）。
+真正隨標的數成長的是原始 frames、touch dataset，以及建 zone／算特徵時的中間物：
+
+| 標的數 | 原始 frames | touch dataset | 粗估峰值 | 單次耗時 |
+|---|---|---|---|---|
+| 11（現況） | ~1MB | ~1MB | **270MB（實測）** | **70 秒（實測）** |
+| 150 | ~14MB | ~13MB | 約 350～450MB（**未實測**） | 約 16 分鐘 |
+| 2,298（全市場） | ~220MB | ~200MB | 約 0.8～1.2GB（**未實測**） | 約 4 小時 |
+
+**時間是硬性的線性成長**（walk-forward 逐檔跑），sweep 還要再乘候選數——全市場的 6 組 sweep
+約 24 小時。這台 host 的 `MemAvailable` 常態只有 450～510MB、mem-guard 再保留 150MB，
+**150 檔已經在邊緣，全市場給不起**。
+
+**可行的改造方向（尚未實作，記下來避免重新推導）**：
+
+1. **串流化**：逐檔建完 dataset 後立刻釋放該檔的原始 frame。前提是把
+   `_volatility_profiles` 改成逐檔算好 profile 再丟掉 frame，而不是最後才一次算。
+   這是最有效的一刀——原始 frames 是全市場情境下最大的一塊。
+2. **指標可以串流，但不能分批平均**：AUC 是非線性的排序統計量，**把各批的 AUC 平均是錯的**。
+   正確做法是只累積「預測機率 ＋ label」兩個一維陣列（全市場約 124 萬列 × 2 × 8B ≈ **20MB**），
+   最後一次算 AUC / Brier / log loss。這條路可行且便宜。
+3. 降 `--limit`（每檔取較少 K 棒）或對標的抽樣——最省事，但直接犧牲樣本量，
+   而樣本量正是擴標的池要解決的問題，只適合當臨時手段。
+
+**現況結論**：擴到 100～200 檔可以先不改造（但要實測，不要假設），**全市場路線必須先做第 1、2 項**。

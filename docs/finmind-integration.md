@@ -62,7 +62,10 @@ GET /data?dataset=TaiwanStockKBar&data_id=2330&start_date=2024-01-15&token=YOUR_
 
 ## Rate Limit 處理
 
-- 免費方案：每分鐘約 30 requests（依帳號方案而定）
+- **註冊帳號：600 requests／小時**（官方文件值，2026-08-06 更正）。換算約 10 req/min。
+  先前這裡寫的是「每分鐘約 30 requests」＝ 1800/h，與官方值差 3 倍，是錯的。
+  `config.yaml` 的 `finmind.rate_limit: 5`（＝300/h）刻意保守，留一半餘裕給重試與突發，
+  **短期不調整**；大批量回補靠拉長時間而不是拉高速率。
 - `market.FinMindClient` 內建 `rateLimiter`，依 `finmind.rate_limit`（`config.yaml`，
   每分鐘請求數）節流，所有請求（日K/分K/backfill）共用同一個節流器
 - 對 429（請求過於頻繁）、402（額度用盡）、5xx 做指數退避重試（最多 3 次）；

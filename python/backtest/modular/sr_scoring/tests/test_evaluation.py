@@ -304,6 +304,35 @@ def test_run_evaluation_returns_zone_outcome_report(tmp_path):
     assert report["volatility_profiles"]["2330"]["touch_count"] == report["rows"]
     assert report["zone_outcomes"]["by_volatility_bucket"]
     assert sum(bucket["rows"] for bucket in report["zone_outcomes"]["by_volatility_bucket"].values()) == report["rows"]
+
+    # 分層必須輸出與頂層同名的比率欄位，而且要有實際數值。
+    # I-055：分層原本只回 hold_rate / break_rate，前端讀的是這三個 key，於是永遠顯示 `—`；
+    # 當時的測試只斷言 by_volatility_bucket 非空與 rows 加總，剛好完全避開了出錯的欄位。
+    # 所以這裡斷言「值不是 None 且落在 [0,1]」，不是只斷言 key 存在。
+    zone_outcomes = report["zone_outcomes"]
+    for grouping in ("by_role", "by_method", "by_volatility_bucket"):
+        assert zone_outcomes[grouping], grouping
+        for name, group in zone_outcomes[grouping].items():
+            assert group["break_positive_rate"] is not None, (grouping, name)
+            assert 0.0 <= group["break_positive_rate"] <= 1.0, (grouping, name)
+            assert group["hold_rate"] is not None, (grouping, name)
+            # 依角色拆開的兩個比率：by_role 只會有一種角色，另一個必然是 None；
+            # 其餘分層兩者都該有值。至少要有一個不是 None，否則就是又對不上欄位了。
+            role_rates = (group["support_hold_rate"], group["resistance_rejection_rate"])
+            assert any(rate is not None for rate in role_rates), (grouping, name)
+            assert "break_rate" not in group, (grouping, name)
+
+    # by_role 的分層比率要跟頂層對得起來：SUPPORT 組的 support_hold_rate 就是頂層的值。
+    by_role = zone_outcomes["by_role"]
+    if "SUPPORT" in by_role:
+        assert by_role["SUPPORT"]["support_hold_rate"] == pytest.approx(zone_outcomes["support_hold_rate"])
+        assert by_role["SUPPORT"]["resistance_rejection_rate"] is None
+    if "RESISTANCE" in by_role:
+        assert by_role["RESISTANCE"]["resistance_rejection_rate"] == pytest.approx(
+            zone_outcomes["resistance_rejection_rate"]
+        )
+        assert by_role["RESISTANCE"]["support_hold_rate"] is None
+
     assert "ATRZoneBuilder" in report["builder_config"]
     assert report["model_metrics"]["model_available"] is False
 

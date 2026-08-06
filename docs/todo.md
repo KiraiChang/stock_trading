@@ -220,15 +220,27 @@ P0 標成「已實作」與 P0 條列的「部分已實作」互相矛盾，已�
 `governance_health_state <> ''` 篩選 → `_merge_regression_governance_gate` 合併；非 replay 的
 evaluation report 不產生 governance verdict，因此不會被誤選中）。
 
-但 **預設 `replay_max_rows: 200` 搭配 watchlist（50～200 檔）時，股票覆蓋率必然遠低於
-`MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都會產出 `DEGRADED`**，production 進場上限被壓到
-`SMALL_ENTRY`。所以 P2 要正式啟用，得先決定 `replay_max_rows` 與 `sr_evaluation.symbols` 的
-搭配（例如縮小 symbols 到重點觀察名單，或把 `replay_max_rows` 調到
-`檔數 × 足夠樣本`），不只是「等 report schema review」。
+當時的判斷是「預設 `replay_max_rows: 200` 搭配 watchlist（50～200 檔）時，股票覆蓋率必然遠低於
+`MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都會產出 `DEGRADED`」。
+
+**2026-08-06 更正：這個前提是錯的。** 那個「50～200 檔」是 CLAUDE.md 的 Scanner Scope
+**Phase 1 規劃值**，不是現況。查 live DB 的實際數字：
+
+| 項目 | 當時假設 | 實際 |
+|---|---|---|
+| `watchlists` 表 | 50～200 檔 | **11 檔** |
+| 有 1d candles 的標的 | — | **11 檔**（與 watchlist 完全相同） |
+| `replay_max_rows: 200` 攤到每檔 | ~1～4 列 | **~18 列** |
+
+11 檔要達到 0.9 覆蓋率只需 10 檔產得出 rows，`MIN_GOVERNANCE_REPLAY_ROWS = 30` 也遠低於 200。
+所以**現行預設很可能本來就夠用**，「必然 DEGRADED」的結論不成立。這一項因此從「需要重新設計
+搭配」降級為「實跑一次 decision replay，看 `replay_coverage` 的實際數字再確認」——成本低很多。
 
 **P1/P2 剩餘工作**：
 
-1. 決定 P2 正式啟用的 `replay_max_rows` / `symbols` 搭配並寫進設定說明。
+1. 實跑一次 decision replay，用 `replay_coverage` 的實際數字確認現行 `replay_max_rows: 200`
+   ＋ `symbols: []`（＝11 檔 watchlist）是否已足夠，並把結論寫進設定說明。
+   （原本寫的是「需要重新設計搭配」，見上方 2026-08-06 的更正。）
 2. RR 分布由保守版擴充為 bucket / distribution（原計畫的 Decision 層指標）。
 
 （P0 遺留的 calibration bins 已於 2026-08-04 補齊、2026-08-05 review 通過，現況規格見
@@ -270,7 +282,7 @@ F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 r
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 | P0 狀態 | 已實作（2026-08-05 review 通過） |
 | P1 狀態 | 已實作（2026-08-05 review 通過；計畫列的五個比較面向全數覆蓋） |
-| P2 狀態 | 部分已實作（flag + runtime metadata 已有、預設關閉；決策依據已具備，待實跑 sweep 取樣） |
+| P2 狀態 | **擱置**（機制完整、預設關閉；sweep 已實跑，結論是**標的池不足以支撐決策**，見下方） |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
@@ -370,10 +382,34 @@ calibration bins 從未實作；`AT_ZONE` 比例被判為量不到。**三個缺
 gate / `zone_builder_runtime_config` 都已驗證，預設關閉也確認過。P2 的出口條件是「等
 evaluation 樣本足夠後才評估是否導入」——工具現在齊了，但**還沒實際跑過一次 sweep 取樣**。
 
-**P1/P2 剩餘工作**：
+#### P2 的結論（2026-08-06 實跑 sweep 後）
 
-- **仍待辦**：實際跑一次 sweep 取樣，依結果決定 bucket 門檻、是否預設啟用 adaptive
-  builder，以及是否需要 symbol-level override。這是 P2 收斂的最後一步。
+sweep 已於 2026-08-06 實際跑過（11 檔 watchlist、`--limit 1500`、grid 3×2 共 6 組，
+完整數據與判讀見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
+「2026-08-06 首次實跑 sweep 的結論」）。**結論與原本的預期相反：卡住 P2 的不是「還沒跑 sweep」，
+是標的池太窄。**
+
+| 發現 | 數字 |
+|---|---|
+| bucket 分佈 | HIGH **9 檔**／NORMAL 2 檔／LOW **0 檔** |
+| zone 層候選差異 | 支撐守住全距 1.76pp、壓力壓回 0.73pp、突破 1.08pp；**四個指標選出四個不同贏家** |
+| HIGH bucket 的建議 score 全距 | **0.0056**（前三名相差 0.0004）→ 在雜訊中排序 |
+| NORMAL bucket | 全距 0.0244、偏好方向與 HIGH 相反，但**只有 2 檔**，無法歸因 |
+
+**因此三件原本要靠 sweep 決定的事，現在的答案都是「資料不足以決定」**：
+
+1. **bucket 門檻**：不調。LOW bucket 沒有任何標的，調門檻沒有資料可驗證。
+2. **是否預設啟用 adaptive builder**：**維持關閉**。9/11 落在 HIGH 表示分組對現有標的池
+   幾乎不分辨；HIGH 的候選差異又在雜訊內，啟用與否的預期差異接近零。
+3. **symbol-level override**：更不用談，樣本比 bucket-level 還少。
+
+**P2 要往前走，需要的是擴標的池**（更多 NORMAL / LOW 波動的標的），不是更密的參數網格或
+更多次 sweep。在 11 檔、9 檔擠在 HIGH 的情況下，再跑幾次都會得到同樣的雜訊。
+因此 P2 狀態改為**擱置**——機制完整、預設關閉是安全的現況，等標的池擴大後再重跑一次 sweep 即可。
+
+**不做的事（明確記下來，避免日後誤動）**：不因這次結果調整 `build_zone_builders()` 的預設值。
+score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket` 的
+`insufficient_sample=false` 只保證樣本數夠，不保證候選之間有可分辨的差異。
 
 ---
 
@@ -770,10 +806,11 @@ python-server。T-003 P2 若決定預設啟用，這個開關的可觀測性與�
 **C：排程參數不能從前端調**
 
 `Scheduler.svelte` 只有觸發按鈕，零個輸入欄位。`sr_evaluation` 的 `enabled` / `cron` / `symbols` /
-`replay_max_rows` 只能改 `backend/config.yaml` 或環境變數再重啟 backend。而 **T-002 P2 的剩餘工作
-正是「決定 `replay_max_rows` 與 `symbols` 的搭配」**——預設 `replay_max_rows: 200` 搭配
-`symbols: []`（＝watchlist 50～200 檔）必然踩到 `MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都
-產出 `DEGRADED`。調參要重啟，試錯成本高。
+`replay_max_rows` 只能改 `backend/config.yaml` 或環境變數再重啟 backend，調參要重啟、試錯成本高。
+
+不過**這一項的急迫性在 2026-08-06 下降了**：原本的理由是 T-002 P2 需要反覆試 `replay_max_rows`
+與 `symbols` 的搭配，但查證後 watchlist 實際只有 11 檔（不是記載的 50～200 檔），現行預設很可能
+本來就夠用，不需要反覆調參（見 T-002 該段的更正）。
 
 注意這不只是 SR Zone 的問題：排程頁對所有 job 都只能觸發、不能調參。要做的話應該先決定
 「排程設定要不要落 DB」這個更大的方向，不要只為 `sr_evaluation` 開特例。
@@ -787,7 +824,152 @@ python-server。T-003 P2 若決定預設啟用，這個開關的可觀測性與�
 
 **相依與建議順序**
 
-1. 先用 CLI 跑一次 sweep（不需要本項任何工作），同時解掉 T-003 P2 的取樣與 T-002 P2 的
-   `replay_max_rows` 決策依據。
-2. 依跑完的實際體感決定 A 要不要做。
-3. B / C / D 都等 T-003 P2 定案後再評估——若決定 adaptive 維持關閉，B / D 就沒有急迫性。
+1. ~~先用 CLI 跑一次 sweep~~ **已於 2026-08-06 執行完畢**，執行方案與結果見下節。
+2. **A（sweep 的 API + UI）：判定現在不做。** 實跑的體感是「6 組約 7 分鐘、跑兩次就得到結論」，
+   而結論是**在標的池擴大之前不需要再跑**。為一個短期內不會再用的操作蓋背景 job ＋ UI 不划算。
+   等標的池擴大、真的要反覆比較參數時再回來評估。
+3. **B / D：判定現在不做。** 兩者都是為了「adaptive builder 要調整／要切換」而存在，
+   而 T-003 P2 的結論是**維持關閉且短期內不會改**（見該筆的「P2 的結論」）。
+4. **C（排程參數不能從前端調）：維持記錄，優先度低。** 它原本的急迫性來自 T-002 P2 需要反覆
+   試參數，但那個前提也已更正（watchlist 實際 11 檔，現行預設很可能夠用）。
+
+**本筆的現況**：四個缺口全部確認為「真實存在但現在都不急」。**本筆不刪除**——缺口本身沒有消失，
+只是觸發它們的需求還沒到。等標的池擴大後，A / B / D 會一起重新變得有意義。
+
+#### 執行方案：sweep 取樣（2026-08-06，待確認）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **已執行完畢（2026-08-06）**：Pass 0 ✅、Pass 1 ✅、Pass 2 依結論略過 |
+| 性質 | **只跑不寫**：不改任何程式碼、不改任何預設值、不寫任何資料表 |
+| 產出 | JSON report，供 T-003 P2 決定 bucket 門檻與是否預設啟用 adaptive builder |
+| 結論 | **資料不足以支撐決策**——卡住的是標的池（11 檔、9 檔擠在 HIGH、LOW 空白），不是參數。見 T-003 的「P2 的結論」 |
+
+**資料現況（2026-08-06 查 live DB，決定了整個設計）**
+
+| 項目 | 實際 |
+|---|---|
+| watchlist / 有 1d candles 的標的 | **11 檔**（完全重疊） |
+| 各檔根數 | `2454`／`2330`／`0050` 各 ~4,865（2006 起）；`2399`／`5490`／`3630`／`6243`／`2478` 各 ~2,400（2016 起）；`00830` 1,768；`00947` 523；`00981A` 293 |
+| `chip_scores` | 9,989 列 / 11 檔 → decision replay 的 chip context 齊全 |
+| `stock_sr_model_governance` | **只有 9 列 / 2 檔** → governance context 很薄，replay 的 governance 分層會大量 missing |
+| 模型 | `/opt/stacks/scripts/stock_trading/python/models/sr_scoring_v4.joblib`，version `v4`、15 特徵、2026-08-06 訓練，與 `MODEL_VERSION = "v4"` 相容（已實際載入確認） |
+
+**執行環境**
+
+- **一次性 container**，`--network trading-net` 連 live postgres，掛本 repo 的 `python/` 與
+  live 的模型檔（world-readable，已確認可讀）。
+- **不用 live 的 `python-server` container 跑**：那是 production 容器、`mem_limit` 512m，
+  sweep 會跟線上服務搶記憶體。
+- **不用 dev project**：dev postgres 的 `candles` 是**空的**（已確認），跑不出任何東西。
+  CLAUDE.md 要求用 dev project 的規則是針對「驗收開發成果／migration／測試資料」，
+  這裡是唯讀的研究性查詢；而且 `--sweep` 在 CLI 層就禁止 `--write-db`
+  （`evaluation.py:2167`），**結構上不可能寫到 live DB**。
+
+**Pass 0：先診斷，不要直接 sweep**
+
+`MIN_BUCKET_RECOMMENDATION_ROWS = 20`。11 檔很可能有 bucket 只落到 1～2 檔，touch 數不足 20，
+那麼 sweep 的 `recommended_configs_by_bucket` 會全部標 `insufficient_sample`、給不出建議——
+**跑 6～15 組等於白跑**。所以先花 1 次的成本確認母體：
+
+- 單次 `run_evaluation`（**不加** `--sweep`），11 檔、`--limit 1500`、帶 `--model-path`。
+- 只看兩件事：`volatility_profiles`（11 檔各落在哪個 bucket）與
+  `zone_outcomes.by_volatility_bucket`（各 bucket 幾筆）。
+- **決策點**：若有 bucket < 20 筆 → 現有資料量產不出 bucket 建議，該做的是**擴 watchlist**
+  而不是跑 sweep，本方案就此打住。
+- 順便量這一次的實際記憶體峰值，作為 pass 1 網格大小的依據。
+
+**Pass 0 結果（2026-08-06 已執行）**
+
+11 檔全數納入、**5,928 筆 touch**、資料區間 2020-05-31 → 2026-08-05、無 warnings。
+模型 v4 可用：**hold AUC 0.842 / break AUC 0.833**。container 記憶體 350m 一次過關
+（第二次重跑用 270m 也過）。
+
+*bucket 分佈——這是主要發現*：
+
+| bucket | 檔數 | rows |
+|---|---|---|
+| `HIGH_VOLATILITY` | **9 檔** | 4,676 |
+| `NORMAL_VOLATILITY` | 2 檔（`0050`、`2330`） | 1,252 |
+| `LOW_VOLATILITY` | **0 檔** | **完全沒有** |
+
+門檻是 `LOW ≤ 1.5%` / `HIGH ≥ 3.5%`，而實際 ATR% 從 `2330`／`0050` 的 3.2% 一路到 `6243` 的
+**11.6%**。所以 **9/11 落在 HIGH**，`0050`／`2330` 離 HIGH 門檻只差 0.3 個百分點，
+**LOW bucket 永遠不會被觸發、也永遠無法用資料驗證**。
+
+*兩個 bucket 的通過條件都滿足*：`MIN_BUCKET_RECOMMENDATION_ROWS = 20`，HIGH 4,676 / NORMAL 1,252
+都遠超過，所以 sweep 產得出這兩組的建議——但**永遠產不出 LOW 的建議**。
+
+*Pass 0 順帶抓到一個 bug*：`zone_outcomes` 三種分層的比率欄位在前端永遠顯示 `—`
+（欄位名不一致），見 [`issue.md`](./issue.md) I-055，已於同日修復。**修好後才有下表**，
+而這正是 Pass 1 要比較的維度——若沒先跑 Pass 0，Pass 1 會在只剩 `average_forward_return`
+一個維度可比的情況下跑完，結論不可靠。
+
+修復後的 bucket 分層數字：
+
+| bucket | rows | 支撐守住 | 壓力壓回 | 突破 |
+|---|---|---|---|---|
+| HIGH | 4,676 | 45.3% | 34.1% | 43.8% |
+| NORMAL | 1,252 | 33.7% | 22.6% | 27.2% |
+
+兩組差距不小，對 T-003 P2 是**正面訊號**——波動分組確實對應到不同的 zone 行為。
+但**不能就此歸因於波動**：NORMAL 只有 `0050` 與 `2330` 兩檔，差異可能只是「這兩檔本來就跟
+其他 9 檔不同」（都是權值股／ETF）。兩檔不足以歸因，寫結論時必須講清楚。
+
+**Pass 1：zone 層 sweep（粗網格，6 組）**
+
+- `--sweep --atr-width-grid 1.0,1.5,2.0 --max-merge-width-grid 1.5,2.5` → 3×2 = **6 組**，
+  而不是預設的 5×3 = 15 組。先看**有沒有訊號**；若 6 組之間的差異落在雜訊內，加密網格也沒意義。
+- **不開** `--sweep-decision-replay`（每組要多跑一次 replay，成本高）。
+
+**Pass 1 結果（2026-08-06 已執行）**
+
+6 組跑完約 **7 分鐘**、container 記憶體 **280m** 足夠、無 warnings。
+
+| w | merge | rows | 支撐守住 | 壓力壓回 | 突破 | 平均報酬 |
+|---|---|---|---|---|---|---|
+| 1.0 | 1.5 | 9,493 | 41.01% | 32.17% | 39.54% | +0.041% |
+| 1.0 | 2.5 | 6,144 | **42.36%** | 31.77% | **40.62%** | +0.010% |
+| 1.5 | 1.5 | 8,069 | 40.60% | 32.08% | 40.18% | +0.014% |
+| 1.5 | 2.5 | 4,907 | 41.58% | **32.50%** | 40.43% | +0.015% |
+| 2.0 | 1.5 | 6,929 | 42.12% | 31.94% | 39.79% | **+0.059%** |
+| 2.0 | 2.5 | 4,055 | 41.91% | 32.04% | 40.32% | +0.040% |
+
+**四個指標選出四個不同的贏家**，沒有候選在多維度領先——雜訊的典型特徵。
+完整判讀（含 bucket 建議的 score 全距、rows 差 2.3 倍不能當同一實驗、NORMAL 只有兩檔無法歸因）
+已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「2026-08-06 首次實跑 sweep 的結論」，
+對 T-003 P2 的處置見該筆的「P2 的結論」。
+
+**依計畫書自訂的準則（差異落在雜訊內就停）：不加密網格、Pass 2 不執行。**
+
+**Pass 2：decision 層（選擇性）——2026-08-06 判定不執行**
+
+原設計是：只在 pass 1 顯示候選之間有實質差異時才做（對勝出的 2～3 組加
+`--sweep-decision-replay --model-path`）。Pass 1 的差異落在雜訊內，前提不成立，故略過。
+若日後標的池擴大後重跑，這一層仍要注意 governance context 當時只有 9 列 / 2 檔，
+分層會大量 missing，**不要把 missing 當成「治理不通過」**。
+
+**與 T-002 P2 的關係：是兩件事，不要混在一起**
+
+T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠」，那**不靠 sweep**，
+靠一次普通的 `--decision-replay` 看 `replay_coverage`。而且前提已更正（watchlist 是 11 檔
+不是 50～200 檔），現行預設很可能本來就夠——那是一次獨立的、更便宜的驗證。
+
+**主要風險**
+
+- **記憶體（最主要）**：host `MemAvailable` 約 500MB，evaluation 會載 pandas + sklearn +
+  lightgbm（+shap）。順序執行時 peak 是單組的 peak 而非累加，但要在 pass 0 實測確認每組之間
+  真的有釋放。`--memory` 比照 mem-guard 原則設定（不高於 available − 150MB），
+  **不因為想跑快就調高**（見 issue.md I-053）。
+- **live DB 讀取負載**：11 檔 × 1500 根 ≈ 16,500 列／次，每個 candidate 各讀一次。量極小，
+  但 pass 1 是 6 次。純 SELECT。
+- **輸出位置**：`--output` 要寫到 repo 外（掛一個 `/tmp` 或 scratchpad），不要落進 repo 被
+  git 追蹤——sweep report 是一次性取樣結果，不是需要版控的產物。
+- **判讀陷阱**：`00947`（523 根）與 `00981A`（293 根）歷史很短，`--limit 1500` 對它們是全取，
+  樣本本來就少；看 per-symbol 數字時要記得這兩檔的權重不該與 2330／2454 等同。
+
+**完成後歸檔**
+
+跑完的結論（各 bucket 的樣本量、候選之間有無實質差異、是否足以支撐 T-003 P2 的決策）補到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「參數 sweep 的 decision 層比較」；
+若結論是「資料量不足以下建議」，那本身就是要記下來的現況，避免下次有人再跑一次同樣的東西。

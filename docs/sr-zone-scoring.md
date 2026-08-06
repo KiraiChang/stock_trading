@@ -1692,6 +1692,54 @@ evaluation 分支組 `builder_config`，replay 分支漏傳，是同一個陷阱
   「builder config 有沒有真的生效」不要靠 decision 指標判斷，該由 replay 的
   `builder_config` snapshot 與 `zone_count` 差異來確認。
 
+### 2026-08-06 首次實跑 sweep 的結論：卡住的是標的池，不是參數
+
+這是第一次拿真實資料跑 sweep（11 檔 watchlist、`--limit 1500`、5,928～9,493 筆 touch、
+grid 3×2）。結論與原本的預期相反，**值得記下來避免重跑一次同樣的東西**。
+
+**一、bucket 分佈本身就是最大的限制**
+
+| bucket | 檔數 | touch rows |
+|---|---|---|
+| `HIGH_VOLATILITY` | **9 檔** | 4,676 |
+| `NORMAL_VOLATILITY` | 2 檔（`0050`、`2330`） | 1,252 |
+| `LOW_VOLATILITY` | **0 檔** | **0** |
+
+門檻是 `LOW ≤ 1.5%` / `HIGH ≥ 3.5%`（ATR/close），實際 ATR% 從 `2330`／`0050` 的 3.2%
+到 `6243` 的 11.6%。所以 **LOW bucket 的 config 永遠不會被觸發、也永遠無法用資料驗證**，
+而 `0050`／`2330` 離 HIGH 門檻只差 0.3 個百分點。
+
+**二、zone 層候選之間的差異落在雜訊內**
+
+6 組候選的頂層指標全距：支撐守住 1.76pp、壓力壓回 0.73pp、突破 1.08pp。
+**四個指標選出四個不同的贏家**，沒有任何候選在多維度上領先——這是雜訊的典型特徵。
+粗估 n≈6,000、p≈0.42 的標準誤約 0.63pp，而各候選的樣本高度重疊（同一段價格序列的不同切法），
+有效樣本遠小於名目值，實際不確定度更大。
+
+`recommended_configs_by_bucket` 雖然 `insufficient_sample=false`（兩個 bucket 都遠超過
+`MIN_BUCKET_RECOMMENDATION_ROWS = 20`），但 **HIGH bucket 六組的 score 全距只有 0.0056、
+前三名相差 0.0004**——這個「建議」實質上是在雜訊中排序，**不足以作為調參依據**。
+`insufficient_sample=false` 只保證樣本數夠，不保證候選之間有可分辨的差異，判讀時要自己看全距。
+
+**三、判讀 rows 的陷阱**
+
+各候選的 `rows` 從 4,055 到 9,493 差 2.3 倍——不同 builder 參數產生的 zone 數不同，
+touch 母體**根本不是同一群**，不能當成同一個實驗的重複測量。
+反過來說，「窄 zone 產生 2 倍以上的觸價，但守住率幾乎一樣」本身就是資訊：
+這幾組參數對 zone 品質的影響很小。
+
+**四、唯一像訊號的東西，卻無法歸因**
+
+NORMAL bucket 的 score 全距 0.0244（HIGH 的 4 倍），而且**偏好方向與 HIGH 相反**
+（HIGH 偏好窄 zone＋少合併，NORMAL 偏好寬 zone＋多合併）。這看起來像真訊號，
+但 NORMAL 只有 `0050` 與 `2330` **兩檔**，無法把「波動較低」與「這兩檔剛好是權值股／ETF」
+分開，而且該組排名第一的候選只有 849 rows。
+
+**所以要驗證 bucket-based config，缺的是更多 NORMAL / LOW 波動的標的，不是更密的參數網格。**
+在標的池只有 11 檔、9 檔擠在 HIGH 的情況下，再跑幾次 sweep 都會得到同樣的雜訊。
+
+decision 層（Pass 2）依此結論**未執行**：它的前提是 zone 層先顯示候選之間有實質差異。
+
 ### 前端手動 evaluation 入口的判讀
 
 SR Zone 頁的「模型驗證 / Decision Replay」面板：
@@ -1741,6 +1789,22 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 夠不夠。兩者要一起看，否則會拿只有一兩檔的 bucket 去下調參結論。`atr_pct` 與
 `average_range_pct` 是比例（0.042 = 4.2%），`touch_density_per_100_bars` 已經是每百根的
 次數、不是比率。
+
+**Zone 層分層的欄位語意**（2026-08-06 補）：`zone_outcomes` 的三種分層
+（`by_role` / `by_method` / `by_volatility_bucket`）**與頂層使用同名、同算法的比率欄位**——
+`support_hold_rate`（只取組內 `is_support==1`）、`resistance_rejection_rate`（只取 `is_support==0`）、
+`break_positive_rate`（整組）。這是刻意的：分層若另立一套 key，前端就無法用同一組欄位渲染
+分層與頂層，也無法直接對照「這一組比整體好還是差」。
+
+分層另外多一個 `hold_rate`，**不要跟 `support_hold_rate` 搞混**：
+
+- `hold_rate` 是整組（支撐與壓力混在一起）的 `hold_label` 平均，即「不分方向的 zone 守住率」。
+  `_bucket_candidate_score` 以 0.7 的權重用它排序 sweep 的 bucket 建議。
+- `support_hold_rate` / `resistance_rejection_rate` 是同一份 `hold_label` 依角色拆開看。
+  在 `by_role` 分層裡兩者**必有一個是 `null`**（該組只有一種角色），這是正常的，不是缺資料。
+
+這組欄位在 2026-08-06 之前是錯的（分層只回 `hold_rate`/`break_rate`，前端讀三個不存在的 key，
+比率欄位永遠顯示 `—`），詳見 [`issue.md`](./issue.md) I-055。
 
 **隔日／兩日確認的九個分層**（2026-08-06 補）：`daily_confirmation_summary` 除了摘要的五個 rate
 與兩日正負報酬率之外，還有九個分層。面板依語意分三群，各自一個預設收合的 `<details>`：

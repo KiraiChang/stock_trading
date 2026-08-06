@@ -1133,8 +1133,14 @@ export interface SRModelMetrics {
   break?: SRBinaryMetrics | null
 }
 
+// 頂層 zone_outcomes 與三種分層（by_method / by_role / by_volatility_bucket）共用這個形狀，
+// 因為 Python 的 `_zone_outcome_group` 與 `_zone_outcomes` 刻意用同名同算法的欄位。
+// `hold_rate` 只有分層才有：它是整組不分角色的 zone 守住率，與拆開角色的
+// support_hold_rate / resistance_rejection_rate 是不同指標，不要互相取代。
+// 在 by_role 分層裡，support_hold_rate 與 resistance_rejection_rate 必有一個是 null。
 export interface SRZoneOutcomeGroup {
   rows?: number
+  hold_rate?: number | null
   support_hold_rate?: number | null
   resistance_rejection_rate?: number | null
   break_positive_rate?: number | null

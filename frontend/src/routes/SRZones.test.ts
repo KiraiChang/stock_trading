@@ -389,7 +389,27 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
         resistance_rejection_rate: 0.55,
         break_positive_rate: 0.21,
         average_forward_return: 0.012,
-        by_role: { SUPPORT: { rows: 130, support_hold_rate: 0.62, average_forward_return: 0.015 } },
+        // 分層 fixture 的形狀要跟 Python `_zone_outcome_group` 實際輸出一致：六個 key、
+        // by_role 只有一種角色所以另一個比率是 null。I-055 就是這裡憑印象手寫、用了
+        // Python 從不產生的 key，於是前後端測試各自對著虛構的形狀互相印證。
+        by_role: {
+          SUPPORT: {
+            rows: 130,
+            hold_rate: 0.62,
+            support_hold_rate: 0.62,
+            resistance_rejection_rate: null,
+            break_positive_rate: 0.19,
+            average_forward_return: 0.015,
+          },
+          RESISTANCE: {
+            rows: 110,
+            hold_rate: 0.55,
+            support_hold_rate: null,
+            resistance_rejection_rate: 0.55,
+            break_positive_rate: 0.23,
+            average_forward_return: -0.004,
+          },
+        },
       },
     })
 
@@ -397,6 +417,19 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.getByText(/hold AUC 0\.812/)).toBeInTheDocument()
     expect(screen.getByText(/Zone 層指標/)).toBeInTheDocument()
     expect(screen.getByText(/支撐守住 62\.0%/)).toBeInTheDocument()
+
+    // 分層表要真的印出數字。只斷言「Zone 層指標」這個標題存在，是 I-055 能活這麼久的原因：
+    // 三個比率欄位全是 `—` 也照樣通過。
+    const supportRow = screen.getByText('SUPPORT').closest('tr')
+    const supportCells = Array.from(supportRow?.querySelectorAll('td') ?? []).map((td) =>
+      td.textContent?.trim()
+    )
+    expect(supportCells).toContain('130')
+    expect(supportCells).toContain('62.0%') // support_hold_rate
+    expect(supportCells).toContain('19.0%') // break_positive_rate
+    // 只有一種角色的那一欄是 null → 破折號，不能印成 0.0%。
+    expect(supportCells).toContain('—')
+    expect(supportCells).not.toContain('0.0%')
     // Zone Evaluation 的 report 沒有這兩塊——先前面板只渲染治理區塊，才會整頁空白。
     expect(screen.queryByText('模型治理')).not.toBeInTheDocument()
     expect(screen.queryByText(/Decision 層指標/)).not.toBeInTheDocument()

@@ -122,4 +122,93 @@ postgres / sqlite 則各自一步用 `NOT NULL DEFAULT`。三者最終狀態有�
 
 ---
 
-下一筆新問題從 `I-055` 起編。
+### I-055：`zone_outcomes` 分層的三個比率欄位在前端永遠顯示 `—`（欄位名不一致）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已修復（待 review） |
+| 嚴重度 | 中 |
+| 分類 | Python / Frontend / SR Zone |
+| 發現日期 | 2026-08-06 |
+| 修復日期 | 2026-08-06 |
+| 來源 | T-039 sweep 取樣 Pass 0 的實跑結果 |
+
+**症狀**：SR Zone evaluation report 的「Zone 層指標」分區裡，`by_role` / `by_method` /
+`by_volatility_bucket` 三張分層表的**「支撐守住」「壓力壓回」「突破率」三欄永遠是 `—`**，
+只有 `rows` 與「平均報酬」有值。頂層的同名三個比率是正常的。
+
+**根因**：欄位名不一致。`_zone_outcome_group`（`evaluation.py:198`）回傳的是
+
+```python
+{"rows", "hold_rate", "break_rate", "average_forward_return"}
+```
+
+但 TS 型別 `SRZoneOutcomeGroup`（`srZones.ts:1136`）宣告、且 `SRZones.svelte` 實際渲染的是
+`support_hold_rate` / `resistance_rejection_rate` / `break_positive_rate`——**三個 key 在 Python
+輸出裡根本不存在**，取值得到 `undefined`，`fmtPct()` 照設計印成 `—`。
+
+2026-08-06 實跑驗證（11 檔、5,928 筆 touch）：頂層 `support_hold_rate=0.426`、
+`resistance_rejection_rate=0.318`、`break_positive_rate=0.403` 都有值，
+但 `by_role` / `by_volatility_bucket` 每一組的這三個欄位全是 `None`。
+
+**為什麼沒被任何測試擋下來**：
+
+- 前端測試（`SRZones.test.ts:392`）的 fixture 是**手寫**的
+  `by_role: { SUPPORT: { rows: 130, support_hold_rate: 0.62, ... } }`——
+  用了一個 Python 從來不會產生的 key，所以測試「通過」的是一份不存在的資料形狀。
+- Python 測試（`test_evaluation.py:305-306`）只斷言 `by_volatility_bucket` 非空、rows 加總正確，
+  **沒有斷言任何比率欄位**。
+
+兩邊各自為政、都沒有對照另一邊的實際輸出，於是「型別、渲染、測試」三者一致地錯。
+這與 [`development-workflow.md`](./development-workflow.md) §3 記的
+「沒被消費的型別還會默默寫錯」是同一類，但更難發現——**這個欄位有被消費、有被測試，
+只是消費與測試的都是虛構的形狀**，而 `—` 看起來就像「這組沒資料」。
+
+**連帶影響**：T-039 的 sweep 取樣 Pass 1 要比較的正是各候選在各 bucket 的守住率／突破率差異，
+在修好之前那些欄位是 `None`，只剩 `average_forward_return` 一個維度可比。**Pass 1 應等本項修完再跑。**
+
+**修復計畫（待確認）**
+
+1. **`evaluation.py`**：`_zone_outcome_group` 補齊與頂層同名、同算法的三個比率——
+   `support_hold_rate` 只取組內 `is_support==1`、`resistance_rejection_rate` 只取 `is_support==0`、
+   `break_positive_rate` 取整組。
+2. **保留 `hold_rate`**：它有真正的消費者（`_bucket_candidate_score:580` 以 0.7 權重用它排序
+   bucket 建議），而且「不分支撐／壓力的 zone 守住率」本身是有意義的獨立指標。
+   加註解寫明它與 `support_hold_rate` 的差別，避免下次有人誤刪。
+   **本次不動 `_bucket_candidate_score` 的評分邏輯**——同時改欄位與改評分會讓 sweep 結果無從對照。
+3. **移除 `break_rate`**：與新增的 `break_positive_rate` 同義，且 grep 全庫**沒有任何消費者**。
+4. **`srZones.ts`**：`SRZoneOutcomeGroup` 補上 `hold_rate`，讓型別反映實際輸出。
+5. **測試**：Python 斷言分層比率的**實際數值**（不只是 key 存在）；前端 fixture 改成 Python 真的
+   會產生的形狀，並斷言畫面上出現**具體百分比字串**——只斷言「表格有出現」正是這次失效的原因。
+
+**驗證**：`python/scripts/test.sh` ＋ `frontend/scripts/test.sh` 全綠，然後**重跑一次 Pass 0**
+確認分層比率確實有值（這是唯一能證明修好的方式——單元測試用的是合成資料）。
+
+**修復結果（2026-08-06）**
+
+五項全數完成。`python/scripts/test.sh backtest/modular/sr_scoring/tests/test_evaluation.py`
+→ 43 passed；`VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh` → 23 passed。
+
+**決定性驗證是重跑 Pass 0**（真實資料，11 檔 / 5,928 筆 touch），三種分層的比率全部有值：
+
+| 分層 | rows | 支撐守住 | 壓力壓回 | 突破 |
+|---|---|---|---|---|
+| （頂層） | 5,928 | 42.6% | 31.8% | 40.3% |
+| `by_role` / SUPPORT | 2,728 | 42.6% | — | 34.3% |
+| `by_role` / RESISTANCE | 3,200 | — | 31.8% | 45.5% |
+| `by_method` / atr | 4,305 | 42.7% | 31.7% | 40.0% |
+| `by_method` / volume_profile | 1,623 | 42.4% | 32.0% | 41.1% |
+| `by_volatility_bucket` / HIGH | 4,676 | 45.3% | 34.1% | 43.8% |
+| `by_volatility_bucket` / NORMAL | 1,252 | 33.7% | 22.6% | 27.2% |
+
+`by_role` 的值與頂層完全吻合（SUPPORT 組的支撐守住 = 頂層 42.6%），互為交叉驗證；
+只有一種角色的那一欄正確顯示 `None` 而非 0。`break_rate` 已從所有分層消失。
+
+現況說明已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Zone 層分層的欄位語意」
+（含 `hold_rate` 與 `support_hold_rate` 的差別、`by_role` 必有一欄為 null 是正常的），
+測試面的教訓補到 [`development-workflow.md`](./development-workflow.md) §3
+（fixture 要從真實輸出取樣、斷言要到值、跨語言契約最終要靠實跑驗證）。
+
+---
+
+下一筆新問題從 `I-056` 起編。

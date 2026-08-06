@@ -196,10 +196,32 @@ def _model_metrics(dataset: pd.DataFrame, bundle: ModelBundle | None) -> dict[st
 
 
 def _zone_outcome_group(group: pd.DataFrame) -> dict[str, Any]:
+    """分層（by_method / by_role / by_volatility_bucket）的 zone outcome 指標。
+
+    三個比率的名稱與算法與 `_zone_outcomes` 的頂層**完全一致**，這是刻意的：分層自己另立一套
+    key，前端就無法用同一組欄位渲染分層與頂層，也無法直接對照「這一組比整體好還是差」。
+    I-055 就是這樣來的——分層回傳 `hold_rate`/`break_rate`，前端讀 `support_hold_rate` 等三個
+    不存在的 key，三張分層表的比率欄位因此永遠顯示 `—`，而且前後端測試各自用虛構的形狀
+    互相印證，誰也沒發現。**改這裡時要同步確認 `frontend/src/lib/api/srZones.ts` 的
+    `SRZoneOutcomeGroup`。**
+
+    `hold_rate` 與 `support_hold_rate` 不是同一件事，不要合併或刪掉其中之一：
+
+    - `hold_rate`：整組（支撐與壓力混在一起）的 `hold_label` 平均，即「zone 守住率」，不分方向。
+      `_bucket_candidate_score` 以 0.7 的權重用它排序 bucket 建議。
+    - `support_hold_rate` / `resistance_rejection_rate`：同一份 `hold_label` 依角色拆開看。
+      在 `by_role` 分層裡兩者必有一個是 None（該組只有一種角色），這是正常的。
+    """
+    supports = group[group["is_support"] == 1]
+    resistances = group[group["is_support"] == 0]
     return {
         "rows": int(len(group)),
         "hold_rate": _clean_metric(float(group["hold_label"].mean())),
-        "break_rate": _clean_metric(float(group["break_label"].mean())),
+        "support_hold_rate": _clean_metric(float(supports["hold_label"].mean())) if not supports.empty else None,
+        "resistance_rejection_rate": (
+            _clean_metric(float(resistances["hold_label"].mean())) if not resistances.empty else None
+        ),
+        "break_positive_rate": _clean_metric(float(group["break_label"].mean())),
         "average_forward_return": _clean_metric(float(group["forward_return"].mean())),
     }
 

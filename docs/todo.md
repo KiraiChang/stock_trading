@@ -574,9 +574,9 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | Python 端已實作（待 review）；**前端只接了不到一半**，見下方「前端接入缺口」 |
 | 優先度 | 中 |
-| 分類 | Python / SR Zone / 模型驗證 |
+| 分類 | Python / SR Zone / 模型驗證 / Frontend |
 | 建立日期 | 2026-07-15 |
 | 來源 | SR Zone Decision Engine P2 後續限制；T-002 的子任務 |
 
@@ -602,6 +602,39 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 > 2026-07-27 review：daily confirmation outcome 標記與分層統計以未來 idx+1 / idx+2 label 計算、
 > 無 lookahead，方向確認無誤，見 T-002 的「review 結論」段落。
+
+#### 前端接入缺口（2026-08-06 盤點）
+
+Python 端的產出對照程式碼查證後與自述相符，且有測試鎖住（`test_evaluation.py:192` 專測
+confirmation rates、`:719-722` 斷言 `by_state` 與 `by_volume_context` 有值）。
+**但前端只渲染了其中不到一半。**
+
+| 欄位 | 前端狀態 |
+|---|---|
+| 5 個 rate、隔日／兩日平均報酬、`failure_distribution` | ✅ 已渲染（`SRZones.svelte:1709-1740`） |
+| `by_state`、`by_primary_role` | ⚠ **TS 型別已宣告（`srZones.ts`），但 Svelte 裡 0 處使用** |
+| `by_volume_context`、`by_event_sequence`、`by_market_event_types`、`by_event_market_state`、`by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket` | ❌ 型別沒宣告、也沒渲染 |
+| `positive_two_bar_return_rate`、`negative_two_bar_return_rate` | ❌ 沒渲染 |
+
+**為什麼這件事重要**：T-028 最有價值的產出就是那 9 個分層——「量能不足時的隔日守住率」
+「RR gate 被擋時的兩日確認率」這類問題只能靠分層回答，總表的 5 個 rate 答不了。
+目前要看只能去 regression results 表格挖 `metrics_json` 或直接讀 API 回應，
+也就是 T-037 想解掉的那個問題在 daily confirmation 這一層還沒解掉。
+
+**`by_state` / `by_primary_role` 是「型別寫了、沒有任何地方消費」**——正是
+[`development-workflow.md`](./development-workflow.md) §3 那條慣例要防的失效模式，
+而它就在這裡發生了。成因是 T-037 A 的計畫書明寫 Daily confirmation 分區的展開內容是
+「`failure_distribution` 與 `by_state`」，實作只做了前者，型別卻已經先加進去。
+依 §3 的要求，本筆即為該欄位「顯式延後」的去處。
+
+**注意不要誤以為已經有了**：`by_daily_confirmation_state`（Decision 層分層）確實有渲染，
+但那是對 replay rows 依 confirmation state 分組算 forward return，跟
+`daily_confirmation_summary.by_state`（對 confirmation outcomes 分組算隔日／兩日結果）
+不是同一份資料，不能互相取代。
+
+**待辦**：把 9 個分層與兩個 rate 接上前端（純前端、無 contract 變更，資料早就在 report 裡），
+比照 T-037 A 的 `<details>` 分區做法。分層有 9 組，一次全攤開會太長，需先決定預設收合策略與
+是否只顯示樣本數足夠的組。
 
 ---
 
@@ -677,3 +710,74 @@ FastAPI TestClient，但當時只補了 `/sr-scoring/evaluate`。仍無測試的
 - `/health`
 
 分檔慣例比照 `tests/test_http_server_sr_evaluate_*.py`：一個測試範圍一支檔，不堆進同一個檔案。
+
+---
+
+### T-039：SR Zone 調參與決策入口沒有前端，卡住 T-002 / T-003 的收尾
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | Frontend / Go / Python / SR Zone |
+| 建立日期 | 2026-08-06 |
+| 來源 | T-002 / T-003 完成度盤點（2026-08-06） |
+
+2026-08-06 對照程式碼盤點 T-002 / T-003 的結果：**觀察與驗證的入口已經很完整**（跑 evaluation、
+看三層指標、看波動側寫、看這次用了哪組 builder、看模型治理狀態），**但調參與決策的入口幾乎都
+不在前端**。這正好解釋了為什麼兩項都停在「機制齊全、就差實際跑一次取樣然後定案」——那一步
+目前只能用 CLI 做。
+
+**已有前端入口**（不需再做）：手動 evaluation / decision replay 表單（模式、symbols、limit、
+`replay_max_rows`、四個 ATR 參數、寫入 DB）、evaluation job 輪詢與最近 jobs、regression results
+表格、report 三層指標 / daily confirmation 摘要 / warnings / `volatility_profiles` /
+`zone_builder_runtime_config`、`sr_evaluation` 排程狀態與手動執行、production 分析的模型治理區塊。
+
+（daily confirmation 只接了**摘要**，9 個分層都還沒渲染——那是**顯示**缺口，記在 T-028 的
+「前端接入缺口」，不在本筆範圍。本筆只談**調參與決策**入口。）
+
+**四個缺口**（依擋路程度排序）：
+
+**A：參數 sweep 沒有 API 與 UI（最擋路）**
+
+Python 有 `run_builder_sweep()` 與 CLI `--sweep`，但沒有 HTTP 端點、沒有 Go 路由、沒有 UI
+（現況已記在 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「參數 sweep 的 decision 層比較」）。
+**T-003 P2 的最後一步就是實跑 sweep 取樣**，唯一路徑是進 container 敲 CLI。sweep 會對每組候選
+各跑一次 evaluation（開 decision replay 時再加一次 replay），耗時遠超一般 API 延遲，要做就得比照
+`/sr-zones/evaluate` 走背景 job（`sr_evaluation_jobs` 或另開表），不能同步回應。
+
+決定要不要做之前，建議**先用 CLI 跑一次**——跑完才知道多久會想再跑第二次。只跑一兩次就定案的話，
+API + UI 不划算。
+
+**B：adaptive builder 開關只在 Python 設定**
+
+`SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 只存在於 `python/config.yaml` 與環境變數；
+`backend/internal` 與 `frontend/src` 完全沒有這個概念（已 grep 確認）。要開關得改設定並重啟
+python-server。T-003 P2 若決定預設啟用，這個開關的可觀測性與可切換性值得一併考慮——目前前端
+只看得到「這次分析有沒有生效」（`zone_builder_runtime_config.reason_code`），看不到「系統設定是
+開還是關」。
+
+**C：排程參數不能從前端調**
+
+`Scheduler.svelte` 只有觸發按鈕，零個輸入欄位。`sr_evaluation` 的 `enabled` / `cron` / `symbols` /
+`replay_max_rows` 只能改 `backend/config.yaml` 或環境變數再重啟 backend。而 **T-002 P2 的剩餘工作
+正是「決定 `replay_max_rows` 與 `symbols` 的搭配」**——預設 `replay_max_rows: 200` 搭配
+`symbols: []`（＝watchlist 50～200 檔）必然踩到 `MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都
+產出 `DEGRADED`。調參要重啟，試錯成本高。
+
+注意這不只是 SR Zone 的問題：排程頁對所有 job 都只能觸發、不能調參。要做的話應該先決定
+「排程設定要不要落 DB」這個更大的方向，不要只為 `sr_evaluation` 開特例。
+
+**D：volatility bucket 門檻是 module 常數**
+
+`LOW_VOLATILITY_THRESHOLD = 0.015` / `HIGH_VOLATILITY_THRESHOLD = 0.035`
+（`python/backtest/modular/sr_scoring/zone_builder.py:43-44`）連 config 都不是。T-003 P2 說要
+「依 sweep 結果調整 bucket 門檻」，目前只能改 code。優先度最低——門檻改動頻率本來就低，
+且改了會影響 production scoring，走 code review 反而比較安全。
+
+**相依與建議順序**
+
+1. 先用 CLI 跑一次 sweep（不需要本項任何工作），同時解掉 T-003 P2 的取樣與 T-002 P2 的
+   `replay_max_rows` 決策依據。
+2. 依跑完的實際體感決定 A 要不要做。
+3. B / C / D 都等 T-003 P2 定案後再評估——若決定 adaptive 維持關閉，B / D 就沒有急迫性。

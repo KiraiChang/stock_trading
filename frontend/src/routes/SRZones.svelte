@@ -37,6 +37,8 @@
     type SRModelMetrics,
     type SRBinaryMetrics,
     type SRCalibrationBin,
+    type SRDailyConfirmationSummary,
+    type SRDailyConfirmationGroup,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -169,6 +171,68 @@
   // Record<string, T> 的穩定排序，讓分層表格每次渲染順序一致。
   function sortedEntries<T>(group?: Record<string, T>): [string, T][] {
     return Object.entries(group ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  }
+
+  // 分層一細，單組可能只剩一兩列，此時 positive/negative_two_bar_return_rate 只會是
+  // 0% 或 100%，是純雜訊。低於這個列數就在該列標「樣本不足」——**標示而不是隱藏**，
+  // 靜默過濾會讓人分不出「這組本來就沒資料」與「這組被藏起來了」。
+  // 20 借用 Python 的 `MIN_BUCKET_RECOMMENDATION_ROWS`（sweep 判定 bucket 樣本夠不夠下建議
+  // 用的同一個門檻），不在前端自創一個沒有來歷的數字。
+  const MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20
+
+  // 九個分層依語意分三群：一次攤開九張表太長，而且三群回答的是不同層次的問題，
+  // 混在一起看反而失焦。空的分層在這裡就濾掉（by-presence），模板只管畫。
+  function dailyConfirmationGroupSections(summary: SRDailyConfirmationSummary) {
+    return [
+      {
+        title: '結果面分層',
+        hint: '這批 outcome 本身怎麼分布',
+        tables: [
+          { title: '依確認狀態', group: summary.by_state },
+          { title: '依 zone 角色', group: summary.by_primary_role },
+        ],
+      },
+      {
+        title: '條件面分層',
+        hint: '當時的量能與事件條件下表現差多少',
+        tables: [
+          { title: '依量能條件', group: summary.by_volume_context },
+          { title: '依事件序列', group: summary.by_event_sequence },
+          { title: '依市場事件類型', group: summary.by_market_event_types },
+          { title: '依事件市場狀態', group: summary.by_event_market_state },
+        ],
+      },
+      {
+        title: 'RR 面分層',
+        hint: 'RR gate 的判斷後來對不對',
+        tables: [
+          { title: '依 RR gate', group: summary.by_rr_gate },
+          { title: '依 RR gate 原因碼', group: summary.by_rr_gate_reason_code },
+          { title: '依 RR bucket', group: summary.by_rr_bucket },
+        ],
+      },
+    ]
+      .map((section) => ({
+        ...section,
+        tables: section.tables.filter((table) => sortedEntries(table.group).length > 0),
+      }))
+      .filter((section) => section.tables.length > 0)
+  }
+
+  // 三個 Record 欄位（隔日結果 / 兩日結果 / 失敗分布）攤平成 chip 列放在該列下方；
+  // 塞進表格欄位會讓表寬失控。前綴標明來源，否則 SUPPORT_HELD 這類值分不出是哪一類。
+  function dailyConfirmationCountChips(group: SRDailyConfirmationGroup): [string, number][] {
+    return [
+      ...sortedEntries(group.next_zone_result_counts).map(
+        ([name, count]) => [`隔日/${name}`, count] as [string, number],
+      ),
+      ...sortedEntries(group.two_bar_result_counts).map(
+        ([name, count]) => [`兩日/${name}`, count] as [string, number],
+      ),
+      ...sortedEntries(group.failure_distribution).map(
+        ([name, count]) => [`失敗/${name}`, count] as [string, number],
+      ),
+    ]
   }
 
   function calibrationBinLabel(bin: SRCalibrationBin): string {
@@ -1728,7 +1792,9 @@
               </span> ·
               兩日平均報酬=<span class={signedClass(dailyConfirmation.average_two_bar_close_return)}>
                 {fmtSignedPct(dailyConfirmation.average_two_bar_close_return)}
-              </span>
+              </span> ·
+              兩日正報酬率={fmtPct(dailyConfirmation.positive_two_bar_return_rate)} ·
+              兩日負報酬率={fmtPct(dailyConfirmation.negative_two_bar_return_rate)}
             </p>
             {#if sortedEntries(dailyConfirmation.failure_distribution).length > 0}
               <p class="text-muted mt-2 mb-1">失敗分布</p>
@@ -1738,6 +1804,65 @@
                 {/each}
               </div>
             {/if}
+            {#each dailyConfirmationGroupSections(dailyConfirmation) as section}
+              <details class="mt-2 px-3 py-2 bg-surface/40 rounded-lg">
+                <summary class="cursor-pointer text-muted hover:text-white">
+                  {section.title}
+                  <span class="text-white">{section.tables.length} 組</span>
+                </summary>
+                <p class="text-muted mt-1">{section.hint}</p>
+                {#each section.tables as table}
+                  <p class="text-muted mt-2 mb-1">{table.title}</p>
+                  <table class="w-full">
+                    <thead>
+                      <tr class="text-muted border-b border-border/60">
+                        <th class="text-left py-1">名稱</th>
+                        <th class="text-right py-1">rows</th>
+                        <th class="text-right py-1">隔日平均報酬</th>
+                        <th class="text-right py-1">兩日平均報酬</th>
+                        <th class="text-right py-1">兩日正報酬率</th>
+                        <th class="text-right py-1">兩日負報酬率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each sortedEntries(table.group) as [name, item]}
+                        {@const chips = dailyConfirmationCountChips(item)}
+                        <tr class={chips.length > 0 ? '' : 'border-b border-border/30'}>
+                          <td class="py-1 text-white">
+                            {name}
+                            {#if (item.rows ?? 0) < MIN_DAILY_CONFIRMATION_GROUP_ROWS}
+                              <span class="text-rise">樣本不足</span>
+                            {/if}
+                          </td>
+                          <td class="py-1 text-right text-muted">{item.rows ?? '—'}</td>
+                          <td class="py-1 text-right {signedClass(item.average_next_close_return)}">
+                            {fmtSignedPct(item.average_next_close_return)}
+                          </td>
+                          <td class="py-1 text-right {signedClass(item.average_two_bar_close_return)}">
+                            {fmtSignedPct(item.average_two_bar_close_return)}
+                          </td>
+                          <td class="py-1 text-right text-muted">{fmtPct(item.positive_two_bar_return_rate)}</td>
+                          <td class="py-1 text-right text-muted">{fmtPct(item.negative_two_bar_return_rate)}</td>
+                        </tr>
+                        {#if chips.length > 0}
+                          <tr class="border-b border-border/30">
+                            <td colspan="6" class="pb-1">
+                              <div class="flex flex-wrap gap-x-3 gap-y-1">
+                                {#each chips as [label, count]}
+                                  <span class="text-muted">
+                                    <span class="text-white font-mono">{label}</span> {count}
+                                  </span>
+                                {/each}
+                              </div>
+                            </td>
+                          </tr>
+                        {/if}
+                      {/each}
+                    </tbody>
+                  </table>
+                {/each}
+              </details>
+            {/each}
           </details>
         {/if}
       {/if}

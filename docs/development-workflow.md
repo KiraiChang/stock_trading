@@ -362,6 +362,17 @@ docker compose -f docker-compose.dev.yml down -v
 - **具體做法**：
   - plan/PR 明確標記每個新欄位的前端處置：「本次接線」或「顯式延後到 T-xxx」。
   - 顯示新拆分欄位時，同步移除或標註被取代的舊單一欄位，避免殘留誤導。
+- **沒被消費的型別還會默默寫錯**（2026-08-06，T-028 前端接入）：
+  `SRDailyConfirmationSummary.by_state` / `by_primary_role` 一度被宣告成
+  `SRDecisionOutcomeGroup`，但 Python `_daily_confirmation_groups` 實際回傳的形狀與它
+  **除了 `rows` 之外零重疊**。因為從沒有任何地方消費這兩個欄位，`svelte-check` 與 build 都
+  不會比對它跟真實資料——型別看起來「有寫」，其實是錯的。這比單純漏渲染更難發現：漏渲染至少
+  肉眼看得出畫面少東西，型別錯了則要等到有人真的去用才會炸。
+  **所以「型別已宣告」不能當成進度**，只有被渲染且有測試斷言過的欄位才算接線完成。
+
+  同理，新增分層／統計欄位時不要在前端自行推導比率。該批分層只提供原始 counts，Python 的
+  `_outcome_rate` 帶 `primary_role` 過濾語意，前端相除得到的數字會跟後端定義悄悄分岔，
+  且不會有任何測試發現。要比率就在 Python 算好送過來。
 
 ### 4. 模組 import 不得有連線等副作用，測試要能獨立啟動
 

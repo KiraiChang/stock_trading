@@ -1742,6 +1742,33 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 `average_range_pct` 是比例（0.042 = 4.2%），`touch_density_per_100_bars` 已經是每百根的
 次數、不是比率。
 
+**隔日／兩日確認的九個分層**（2026-08-06 補）：`daily_confirmation_summary` 除了摘要的五個 rate
+與兩日正負報酬率之外，還有九個分層。面板依語意分三群，各自一個預設收合的 `<details>`：
+
+| 群 | 分層欄位 | 回答什麼 |
+|---|---|---|
+| 結果面 | `by_state`、`by_primary_role` | 這批 outcome 本身怎麼分布 |
+| 條件面 | `by_volume_context`、`by_event_sequence`、`by_market_event_types`、`by_event_market_state` | 當時的量能與事件條件下表現差多少 |
+| RR 面 | `by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket` | RR gate 的判斷後來對不對 |
+
+「量能不足時的隔日守住表現如何」這類問題只能靠分層回答，摘要的五個 rate 答不了。九張表一次
+攤開太長，所以分三群並預設全收合；空的分層整塊不出現（by-presence，與其他區塊一致）。
+
+判讀這一區有兩件事要知道：
+
+- **分層裡只有原始 counts，沒有 hold rate 這種現成比率——這是刻意的。** 每組給的是
+  `next_zone_result_counts` / `two_bar_result_counts`（例如 `SUPPORT_HELD: 12`）與平均報酬、
+  正負報酬率。摘要那五個 rate 是 Python `_outcome_rate` 算的，帶 `primary_role` 過濾語意；
+  前端若自行把 counts 相除得出「分層版 hold rate」，必然會跟 Python 的定義悄悄分岔，而且不會有
+  任何測試發現。所以 UI 只照 counts 顯示，要比率請看摘要或改 Python。三個 Record 欄位
+  （隔日結果 / 兩日結果 / 失敗分布）以 `隔日/` `兩日/` `失敗/` 前綴攤成 chip 列放在該組下方，
+  前綴是必要的——`SUPPORT_HELD` 這種值在三個 Record 裡都可能出現。
+- **`rows` 少於 20 的組會標紅「樣本不足」，但不會被隱藏。** 分層一細，單組可能只剩一兩列，
+  此時正負報酬率只會是 0% 或 100%，是純雜訊。**標示而非過濾**：靜默隱藏會讓人分不出
+  「這組本來就沒資料」與「這組被藏起來了」。門檻 20 是借用 Python 的
+  `MIN_BUCKET_RECOMMENDATION_ROWS`（sweep 判定 bucket 樣本夠不夠下建議用的同一個數字），
+  刻意不在前端自創一個沒有來歷的門檻。
+
 面板配色沿用 [`development-workflow.md`](./development-workflow.md) 的三類規則：warnings 與
 「樣本不足」屬錯誤／警示文字用 `text-rise`（紅），報酬率屬行情語意走既有
 `fmtSignedPct()` / `signedClass()`。這些顏色由 `SRZones.test.ts` 的 class 斷言鎖住。

@@ -537,10 +537,137 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
 
     expect(screen.queryByText(/波動側寫/)).not.toBeInTheDocument()
   })
+
+  // daily confirmation 的九個分層才是 T-028 的價值所在：「量能不足時的隔日守住表現」
+  // 這類問題總表的五個 rate 答不了。以下鎖住分層有被渲染、且分群是依語意切的。
+  it('daily confirmation 的九個分層依語意分三群顯示', async () => {
+    const group = (rows: number) => ({
+      rows,
+      next_zone_result_counts: { SUPPORT_HELD: rows },
+      two_bar_result_counts: { SUPPORT_CONFIRMED: rows },
+      average_next_close_return: 0.004,
+      average_two_bar_close_return: 0.006,
+      positive_two_bar_return_rate: 0.6,
+      negative_two_bar_return_rate: 0.4,
+      failure_distribution: { SUPPORT_CONFIRMATION_OK: rows },
+    })
+
+    await runWithReport(
+      {
+        run_id: 'sr_eval_016',
+        outcome_summary: {
+          daily_confirmation_summary: {
+            rows: 120,
+            support_next_hold_rate: 0.68,
+            by_state: { CONFIRMED: group(40) },
+            by_primary_role: { SUPPORT: group(40) },
+            by_volume_context: { VOLUME_CONFIRMED: group(40) },
+            by_event_sequence: { TOUCH_THEN_HOLD: group(40) },
+            by_market_event_types: { BREAKOUT: group(40) },
+            by_event_market_state: { TRENDING: group(40) },
+            by_rr_gate: { RR_OK: group(40) },
+            by_rr_gate_reason_code: { RR_ABOVE_MIN: group(40) },
+            by_rr_bucket: { 'RR_1.5_2.0': group(40) },
+          },
+        },
+      },
+      'sr_eval_job_017'
+    )
+
+    expect(screen.getByText(/結果面分層/)).toBeInTheDocument()
+    expect(screen.getByText(/條件面分層/)).toBeInTheDocument()
+    expect(screen.getByText(/RR 面分層/)).toBeInTheDocument()
+    expect(screen.getByText('VOLUME_CONFIRMED')).toBeInTheDocument()
+    expect(screen.getByText('RR_ABOVE_MIN')).toBeInTheDocument()
+    // 三個 Record 欄位攤成 chip，前綴要標明來源，否則分不出是隔日還是兩日的結果。
+    expect(screen.getAllByText('隔日/SUPPORT_HELD').length).toBe(9)
+    expect(screen.getAllByText('兩日/SUPPORT_CONFIRMED').length).toBe(9)
+  })
+
+  it('只有部分分層有資料時，其餘的群整塊不出現', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_017',
+        outcome_summary: {
+          daily_confirmation_summary: {
+            rows: 30,
+            by_volume_context: { VOLUME_CONFIRMED: { rows: 30, average_two_bar_close_return: 0.01 } },
+          },
+        },
+      },
+      'sr_eval_job_018'
+    )
+
+    expect(screen.getByText(/條件面分層/)).toBeInTheDocument()
+    expect(screen.queryByText(/結果面分層/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/RR 面分層/)).not.toBeInTheDocument()
+  })
+
+  it('分層樣本數低於門檻才標示樣本不足，足夠的不標', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_018',
+        outcome_summary: {
+          daily_confirmation_summary: {
+            rows: 45,
+            by_rr_gate: {
+              RR_BLOCKED: { rows: 3, positive_two_bar_return_rate: 1 },
+              RR_OK: { rows: 42, positive_two_bar_return_rate: 0.55 },
+            },
+          },
+        },
+      },
+      'sr_eval_job_019'
+    )
+
+    // 兩個方向一起斷言：只標樣本少的那組。只測單邊的話，「永遠顯示」也會綠。
+    const notices = screen.getAllByText('樣本不足')
+    expect(notices.length).toBe(1)
+    // 警示一律紅色；tailwind 的 fall 是綠色，不能拿來標壞消息。
+    expect(notices[0]).toHaveClass('text-rise')
+  })
+
+  it('分層報酬為 null 時顯示破折號而非 0', async () => {
+    await runWithReport(
+      {
+        run_id: 'sr_eval_019',
+        outcome_summary: {
+          daily_confirmation_summary: {
+            rows: 25,
+            positive_two_bar_return_rate: 0.5,
+            negative_two_bar_return_rate: 0.5,
+            by_state: {
+              UNRESOLVED: {
+                rows: 25,
+                average_next_close_return: null,
+                average_two_bar_close_return: null,
+                positive_two_bar_return_rate: null,
+                negative_two_bar_return_rate: null,
+              },
+            },
+          },
+        },
+      },
+      'sr_eval_job_020'
+    )
+
+    // 摘要行新增的兩個 rate 也要露出來。
+    expect(screen.getByText(/兩日正報酬率=50\.0%/)).toBeInTheDocument()
+
+    // 只斷言全頁的破折號數量會過鬆（`—` 到處都是），要鎖到這一列上。
+    const row = screen.getByText('UNRESOLVED').closest('tr')
+    const cells = Array.from(row?.querySelectorAll('td') ?? []).map((td) => td.textContent?.trim())
+    // 名稱、rows(25)，其餘四欄全 null → 四個破折號。
+    expect(cells.filter((text) => text === '—').length).toBe(4)
+    // null 印成 0% 會讓「沒資料」看起來像「一半機率」，這是這條測試真正要擋的事。
+    expect(cells).not.toContain('0.0%')
+  })
 })
 
 // 四個 ATR 參數是 T-003 的調參入口：Go 與 Python 早就支援，先前只是前端沒開欄位。
-// 留白必須送 undefined（API 層再轉成「整個鍵不送」），不可送 0——0 是合法設定值。
+// 留白必須送 undefined，API 層再轉成「整個鍵不送」。0 與負數同樣不送——Go 的
+// `omitempty` 會在轉發給 Python 前把 0 丟掉，前端硬送只會得到「參數收下卻無效果」的
+// 靜默失效（見 srZones.ts 的 optionalBuilderParams）。
 describe('SRZones evaluation 的 zone builder 參數輸入', () => {
   const ATR_WIDTH_TITLE = 'atr_width_multiplier：zone 寬度 = ATR × 此倍數'
   const ATR_PERIOD_TITLE = 'atr_period：ATR 本身的計算期數'

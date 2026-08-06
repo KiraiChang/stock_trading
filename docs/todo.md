@@ -574,7 +574,7 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | Python 端已實作（待 review）；**前端只接了不到一半**，見下方「前端接入缺口」 |
+| 狀態 | Python 端已實作（待 review）；前端接入已完成但**驗收未跑完**，見下方「前端接入」 |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 模型驗證 / Frontend |
 | 建立日期 | 2026-07-15 |
@@ -603,38 +603,49 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 > 2026-07-27 review：daily confirmation outcome 標記與分層統計以未來 idx+1 / idx+2 label 計算、
 > 無 lookahead，方向確認無誤，見 T-002 的「review 結論」段落。
 
-#### 前端接入缺口（2026-08-06 盤點）
+#### 前端接入（2026-08-06 實作，待 review）
 
-Python 端的產出對照程式碼查證後與自述相符，且有測試鎖住（`test_evaluation.py:192` 專測
-confirmation rates、`:719-722` 斷言 `by_state` 與 `by_volume_context` 有值）。
-**但前端只渲染了其中不到一半。**
+原記錄的缺口是：Python 端九個分層都算好了，前端只渲染摘要，且 `by_state` / `by_primary_role`
+的 TS 型別**宣告錯誤**（被套成 `SRDecisionOutcomeGroup`，與實際回傳除了 `rows` 之外零重疊，
+因為從沒被消費過所以型別檢查抓不到）。已於 2026-08-06 接線完成。
 
-| 欄位 | 前端狀態 |
+**實作範圍**（純前端，無 contract 變更）：
+
+| 檔案 | 動作 |
 |---|---|
-| 5 個 rate、隔日／兩日平均報酬、`failure_distribution` | ✅ 已渲染（`SRZones.svelte:1709-1740`） |
-| `by_state`、`by_primary_role` | ⚠ **TS 型別已宣告（`srZones.ts`），但 Svelte 裡 0 處使用** |
-| `by_volume_context`、`by_event_sequence`、`by_market_event_types`、`by_event_market_state`、`by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket` | ❌ 型別沒宣告、也沒渲染 |
-| `positive_two_bar_return_rate`、`negative_two_bar_return_rate` | ❌ 沒渲染 |
+| `frontend/src/lib/api/srZones.ts` | 新增 `SRDailyConfirmationGroup`（依 `_daily_confirmation_groups` 實際輸出）；修正 `by_state` / `by_primary_role` 型別，補上其餘 7 個分層與 `positive/negative_two_bar_return_rate`。`SRDecisionOutcomeGroup` 不動——另外三個欄位在用它且形狀正確 |
+| `frontend/src/routes/SRZones.svelte` | 九個分層依語意分三群（結果面／條件面／RR 面），各一個預設收合的巢狀 `<details>`；`MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20` 樣本不足標示；三個 Record 欄位以 `隔日/`｜`兩日/`｜`失敗/` 前綴攤成 chip 列；摘要行補兩個 rate |
+| `frontend/src/routes/SRZones.test.ts` | 新增 4 筆測試；順手修掉一句與實作矛盾的舊註解（原寫「0 是合法設定值」，但 B 已改成 0 也不送） |
 
-**為什麼這件事重要**：T-028 最有價值的產出就是那 9 個分層——「量能不足時的隔日守住率」
-「RR gate 被擋時的兩日確認率」這類問題只能靠分層回答，總表的 5 個 rate 答不了。
-目前要看只能去 regression results 表格挖 `metrics_json` 或直接讀 API 回應，
-也就是 T-037 想解掉的那個問題在 daily confirmation 這一層還沒解掉。
+**驗證狀況（未完成，不能據此收斂）**：
 
-**`by_state` / `by_primary_role` 是「型別寫了、沒有任何地方消費」**——正是
-[`development-workflow.md`](./development-workflow.md) §3 那條慣例要防的失效模式，
-而它就在這裡發生了。成因是 T-037 A 的計畫書明寫 Daily confirmation 分區的展開內容是
-「`failure_distribution` 與 `by_state`」，實作只做了前者，型別卻已經先加進去。
-依 §3 的要求，本筆即為該欄位「顯式延後」的去處。
+- ✅ `VITEST_ARGS="src/routes/SRZones.test.ts"` → **23 passed**（含新增 4 筆）。
+- ✅ 變異驗證：把樣本門檻由 20 改成 1，「樣本不足」那條如預期變紅，確認門檻邏輯不是擺設。
+- ❌ **`frontend/scripts/test.sh` 完整三步（svelte-check → vitest → build）跑不起來**：
+  svelte-check 在 mem-guard 把 heap 壓到 202MB 後 `Reached heap limit`。當時 host
+  `MemAvailable` 只剩 465MB、swap 幾乎用滿，live stack 的 python-server 單獨佔 287MB
+  ——即 [`issue.md`](./issue.md) I-053 的情況。沒有自行調高 `MEM`（那只會讓 host OOM killer
+  改砍呼叫端），也沒有自行停掉 live stack（屬對外可見動作）。
+- **所以目前狀態是「vitest 綠、型別檢查與 build 未驗證」。要空出約 300MB 補跑完整三步之後，
+  這筆才能收斂移除。**
 
-**注意不要誤以為已經有了**：`by_daily_confirmation_state`（Decision 層分層）確實有渲染，
-但那是對 replay rows 依 confirmation state 分組算 forward return，跟
-`daily_confirmation_summary.by_state`（對 confirmation outcomes 分組算隔日／兩日結果）
-不是同一份資料，不能互相取代。
+**self-review 後修掉的三處（2026-08-06）**：
 
-**待辦**：把 9 個分層與兩個 rate 接上前端（純前端、無 contract 變更，資料早就在 report 裡），
-比照 T-037 A 的 `<details>` 分區做法。分層有 9 組，一次全攤開會太長，需先決定預設收合策略與
-是否只顯示樣本數足夠的組。
+1. `dailyConfirmationCountChips(item)` 在同一列被呼叫兩次（`{#if}` 判斷一次、`{#each}` 再一次）
+   → 改用 `{@const chips = ...}`。
+2. 沒有 chip 時補一列空 `<tr>` 只為了保住底線 → 改成沒有 chip 時把底線 class 掛回主列，
+   不再插入空列。
+3. null 那條測試用 `getAllByText('—').length >= 4`，但 `—` 全頁都是，等於沒測到
+   → 改成用 `closest('tr')` 鎖定該列的 `<td>`，斷言恰好 4 個破折號**且該列不含 `0.0%`**。
+
+現況說明已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「前端手動 evaluation 入口的
+判讀」（三群的分法、**為什麼只顯示 counts 不自行推導比率**、樣本不足門檻 20 的來源），
+型別宣告錯誤那件事補進 [`development-workflow.md`](./development-workflow.md) §3
+（「沒被消費的型別還會默默寫錯」）。
+
+**T-028 仍未結案的部分**（Python 端，本次不做）：更完整的 RR distribution（percentiles、
+drawdown-like failure window）、以及依量能強弱數值、event sequence 順序細節與 RR gate 原始
+基礎值做更細分層。
 
 ---
 

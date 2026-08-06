@@ -1167,6 +1167,26 @@ export interface SRRRSummary {
   position_rr_source_counts?: Record<string, number>
 }
 
+// daily confirmation 的分層單位（Python `_daily_confirmation_groups`）。
+//
+// **不要拿 SRDecisionOutcomeGroup 來套**：這兩者除了 `rows` 之外完全沒有共同欄位。
+// 2026-08-06 之前 by_state / by_primary_role 就是被錯誤宣告成 SRDecisionOutcomeGroup，
+// 因為從沒有任何地方消費它，svelte-check 與 build 都抓不到（見 development-workflow.md §3）。
+//
+// 這裡只有原始 counts，沒有 hold rate 之類的現成比率——那是刻意的。Python 的
+// `_outcome_rate` 帶 primary_role 過濾語意，在前端自行相除必然會悄悄跟 Python 分岔，
+// 所以 UI 一律照 counts 顯示，不重算比率。
+export interface SRDailyConfirmationGroup {
+  rows?: number
+  next_zone_result_counts?: Record<string, number>
+  two_bar_result_counts?: Record<string, number>
+  average_next_close_return?: number | null
+  average_two_bar_close_return?: number | null
+  positive_two_bar_return_rate?: number | null
+  negative_two_bar_return_rate?: number | null
+  failure_distribution?: Record<string, number>
+}
+
 export interface SRDailyConfirmationSummary {
   rows?: number
   support_next_hold_rate?: number | null
@@ -1176,9 +1196,20 @@ export interface SRDailyConfirmationSummary {
   resistance_two_bar_breakout_continuation_rate?: number | null
   average_next_close_return?: number | null
   average_two_bar_close_return?: number | null
+  positive_two_bar_return_rate?: number | null
+  negative_two_bar_return_rate?: number | null
   failure_distribution?: Record<string, number>
-  by_state?: Record<string, SRDecisionOutcomeGroup>
-  by_primary_role?: Record<string, SRDecisionOutcomeGroup>
+  // 九個分層，UI 依語意分三群顯示：結果面（state / primary_role）、
+  // 條件面（volume / event 系列）、RR 面（rr_gate 系列）。
+  by_state?: Record<string, SRDailyConfirmationGroup>
+  by_primary_role?: Record<string, SRDailyConfirmationGroup>
+  by_volume_context?: Record<string, SRDailyConfirmationGroup>
+  by_event_sequence?: Record<string, SRDailyConfirmationGroup>
+  by_market_event_types?: Record<string, SRDailyConfirmationGroup>
+  by_event_market_state?: Record<string, SRDailyConfirmationGroup>
+  by_rr_gate?: Record<string, SRDailyConfirmationGroup>
+  by_rr_gate_reason_code?: Record<string, SRDailyConfirmationGroup>
+  by_rr_bucket?: Record<string, SRDailyConfirmationGroup>
 }
 
 // 這次分析用了哪組 zone builder 設定（Python `_resolve_runtime_builders`）。

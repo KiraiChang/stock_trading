@@ -1191,3 +1191,34 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 - FinMind 官方 rate limit（600 requests/小時）已於 2026-08-06 更正到
   [`finmind-integration.md`](./finmind-integration.md) 的「Rate Limit 處理」——
   該處原本寫「每分鐘約 30 requests」（＝1800/h），與官方值差 3 倍。
+
+---
+
+### T-041：SR Zone 決策顯示補齊 Lifecycle、Event Timeline 與 Strategy Layer
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中 |
+| 分類 | SR Zone / Decision UI / Position Action |
+| 建立日期 | 2026-08-07 |
+| 來源 | 使用者需求：決策畫面需要更完整地呈現 lifecycle、事件鏈與策略層 |
+
+目前 SR Zone 決策顯示仍偏向單一摘要，還沒有把 lifecycle、完整事件鏈與不同策略層的
+position action 正式整理成可讀的前端狀態。後續應補齊下列三個面向：
+
+- **Lifecycle 正式顯示**：在決策畫面明確呈現 `Started` / `Testing` / `Confirmed` /
+  `Failed`，並定義這些狀態與既有 event lifecycle / daily confirmation / final entry state
+  的對應關係。
+- **Event Timeline**：改為呈現完整事件鏈，而不是只顯示兩個 Event。Timeline 應能看出事件
+  何時開始、測試、確認、失敗、過期或被後續事件取代，並保留事件順序與狀態轉換脈絡。
+- **Strategy Layer**：加入 `Trading`、`Swing`、`Investment` 三種策略層，讓同一組 SR Zone
+  / event / confirmation 訊號能對應到不同的 `Position Action`，避免短線、波段與投資邏輯
+  混在同一個建議裡。
+
+#### 後續規劃重點
+
+- 先盤點後端 decision summary / event state / replay report 目前已輸出的欄位，確認哪些可直接
+  支援前端顯示，哪些需要補 contract。
+- 若新增或改動 API contract，要同步更新 `docs/api-reference.md` 與 SR Zone 相關主題文件。
+- `Position Action` 的策略差異應先文件化仲裁規則，再實作 UI，避免前端自行推導交易語意。

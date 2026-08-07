@@ -1,11 +1,26 @@
 package handler
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+// jobLookupError 統一處理「查一筆 job」的錯誤：查無資料回 404，其餘（DB 連線中斷、
+// 語法錯誤等）回 500。
+//
+// 先前兩支 job 查詢端點都是「只要 repo 回 error 就一律 404」，DB 掛掉時前端看到的是
+// 「任務不存在」而不是伺服器錯誤——使用者會以為任務被清掉了，實際上是資料庫連不上。
+func jobLookupError(c *gin.Context, log *zap.Logger, err error, context string) {
+	if errors.Is(err, sql.ErrNoRows) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	serverError(c, log, err, context)
+}
 
 // serverError 記錄伺服器內部錯誤（DB、內部邏輯等）到 log，並回傳給前端一個
 // 不含內部細節的通用訊息——err.Error() 可能包含 DB 連線字串、SQL 片段、

@@ -311,7 +311,10 @@ type SRModelMetric struct {
 	ModelType          string      `db:"model_type"           json:"model_type"`
 	SplitMethod        string      `db:"split_method"         json:"split_method"`
 	Timeframe          string      `db:"timeframe"            json:"timeframe"`
-	Rows               NullInt64   `db:"rows"                 json:"rows,omitempty"`
+	// db 欄位名 row_count ≠ json 欄位名 rows：rows 是 MySQL 保留字，
+	// 裸寫在查詢語句裡在 MySQL 上會語法錯誤（migration 059 改名，見 issue.md I-054）。
+	// json tag 維持 rows，所以 API 與前端不受影響。
+	Rows               NullInt64   `db:"row_count"            json:"rows,omitempty"`
 	Sources            NullInt64   `db:"sources"              json:"sources,omitempty"`
 	HoldAUC            NullFloat64 `db:"hold_auc"             json:"hold_auc,omitempty"`
 	HoldBrierScore     NullFloat64 `db:"hold_brier_score"     json:"hold_brier_score,omitempty"`
@@ -484,7 +487,8 @@ type SRScoringTrainJob struct {
 	ModelType  string `db:"model_type"  json:"model_type"`
 	// Rows/Sources/Metrics/ModelPath/ModelVersion/DatasetSummary 只有
 	// status=done 才有值；Error 只有 status=failed 才有值。
-	Rows         NullInt64  `db:"rows"             json:"rows,omitempty"`
+	// db 欄位名 row_count ≠ json 欄位名 rows，理由同 SRModelMetric.Rows。
+	Rows         NullInt64  `db:"row_count"        json:"rows,omitempty"`
 	Sources      NullInt64  `db:"sources"          json:"sources,omitempty"`
 	Metrics      RawJSON    `db:"metrics"          json:"metrics,omitempty"`
 	ModelPath    NullString `db:"model_path"       json:"model_path,omitempty"`
@@ -550,7 +554,8 @@ type BacktestJob struct {
 	StartDate string `db:"start_date"  json:"start_date"`
 	EndDate   string `db:"end_date"    json:"end_date"`
 	Status    string `db:"status"      json:"status"`  // pending/running/done/failed
-	Trigger   string `db:"trigger"     json:"trigger"` // manual/scheduler
+	// db 欄位名 trigger_source ≠ json 欄位名 trigger，理由同 SRModelMetric.Rows。
+	Trigger   string `db:"trigger_source" json:"trigger"` // manual/scheduler
 	Error     string `db:"error"       json:"error,omitempty"`
 	// UseChipFilter/ChipMinScore：【籌碼分析整合】是否在進場時套用
 	// chip_scores.total_score 門檻過濾（見 docs/chip-analysis-design.md 第9節），
@@ -646,7 +651,8 @@ type ChipScore struct {
 	BrokerScore        float64   `db:"broker_score"         json:"broker_score"`
 	ConcentrationScore float64   `db:"concentration_score"  json:"concentration_score"`
 	TotalScore         float64   `db:"total_score"          json:"total_score"`
-	Signal             string    `db:"signal"               json:"signal"` // BULLISH/BEARISH/NEUTRAL/RISK
+	// db 欄位名 signal_type ≠ json 欄位名 signal，理由同 SRModelMetric.Rows。
+	Signal             string    `db:"signal_type"          json:"signal"` // BULLISH/BEARISH/NEUTRAL/RISK
 	Reason             RawJSON   `db:"reason"               json:"reason,omitempty"`
 	CreatedAt          time.Time `db:"created_at"           json:"created_at"`
 	UpdatedAt          time.Time `db:"updated_at"           json:"updated_at"`
@@ -663,7 +669,27 @@ type ChipSyncJob struct {
 	DataTypes     string     `db:"data_types"     json:"data_types"` // JSON array string
 	FromDate      string     `db:"from_date"      json:"from_date"`
 	ToDate        string     `db:"to_date"        json:"to_date"`
-	Force         bool       `db:"force"          json:"force"`
+	// db 欄位名 force_sync ≠ json 欄位名 force，理由同 SRModelMetric.Rows。
+	Force         bool       `db:"force_sync"     json:"force"`
+	Status        string     `db:"status"         json:"status"` // pending/running/done/partial/failed
+	SymbolsTotal  int        `db:"symbols_total"  json:"symbols_total"`
+	SymbolsDone   int        `db:"symbols_done"   json:"symbols_done"`
+	SymbolsFailed int        `db:"symbols_failed" json:"symbols_failed"`
+	Failures      RawJSON    `db:"failures"       json:"failures,omitempty"`
+	Error         NullString `db:"error"          json:"error,omitempty"`
+	StartedAt     NullTime   `db:"started_at"     json:"started_at,omitempty"`
+	FinishedAt    NullTime   `db:"finished_at"    json:"finished_at,omitempty"`
+	CreatedAt     time.Time  `db:"created_at"     json:"created_at"`
+}
+
+// MarketBackfillJob 追蹤 POST /market/backfill 的執行進度。
+// 形狀刻意比照 ChipSyncJob（同一個前端頁面上兩塊 UI 要一致），差別只在回補範圍：
+// 籌碼用 from_date/to_date，股價用 Days（往前回補幾天，對齊 Fetcher.BackfillHistory）。
+type MarketBackfillJob struct {
+	ID            uint64     `db:"id"             json:"id"`
+	JobID         string     `db:"job_id"         json:"job_id"`
+	Symbols       string     `db:"symbols"        json:"symbols"` // JSON array string
+	Days          int        `db:"days"           json:"days"`
 	Status        string     `db:"status"         json:"status"` // pending/running/done/partial/failed
 	SymbolsTotal  int        `db:"symbols_total"  json:"symbols_total"`
 	SymbolsDone   int        `db:"symbols_done"   json:"symbols_done"`

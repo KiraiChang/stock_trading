@@ -835,7 +835,7 @@ def test_run_decision_replay_uses_latest_historical_chip_row(tmp_path, monkeypat
     chip_rows = [
         {
             "trade_date": "1970-01-01",
-            "signal": "BULLISH",
+            "signal_type": "BULLISH",
             "institutional_score": 30.0,
             "margin_score": 10.0,
             "broker_score": 20.0,
@@ -843,7 +843,7 @@ def test_run_decision_replay_uses_latest_historical_chip_row(tmp_path, monkeypat
         },
         {
             "trade_date": "2099-01-01",
-            "signal": "BEARISH",
+            "signal_type": "BEARISH",
             "institutional_score": -50.0,
             "margin_score": -20.0,
             "broker_score": -30.0,
@@ -927,7 +927,7 @@ def test_run_decision_replay_loads_db_context_for_symbol_replay(tmp_path, monkey
     fake_db.fetch_candles = lambda symbol, timeframe, limit: _candle_rows(df)
     fake_db.fetch_chip_scores = lambda symbol, from_date, to_date: [{
         "trade_date": "1970-01-01",
-        "signal": "BULLISH",
+        "signal_type": "BULLISH",
         "institutional_score": 30.0,
         "margin_score": 10.0,
         "broker_score": 20.0,
@@ -1137,7 +1137,7 @@ def test_decision_replay_does_not_borrow_chip_context_from_another_symbol(tmp_pa
                 "trade_date": "1970-01-01",
                 "total_score": 3.5,
                 "institutional_score": 1.5,
-                "signal": "BULLISH",
+                "signal_type": "BULLISH",
             }],
         },
     )
@@ -1164,9 +1164,9 @@ def test_decision_replay_sorts_descending_context_before_as_of_lookup(tmp_path):
     _write_csv(path, bullish_trend_df(n=170))
 
     descending = [
-        {"trade_date": "1970-01-05", "total_score": 4.0, "signal": "BULLISH"},
-        {"trade_date": "1970-01-03", "total_score": 2.0, "signal": "NEUTRAL"},
-        {"trade_date": "1970-01-01", "total_score": 1.0, "signal": "BEARISH"},
+        {"trade_date": "1970-01-05", "total_score": 4.0, "signal_type": "BULLISH"},
+        {"trade_date": "1970-01-03", "total_score": 2.0, "signal_type": "NEUTRAL"},
+        {"trade_date": "1970-01-01", "total_score": 1.0, "signal_type": "BEARISH"},
     ]
 
     report = run_decision_replay(
@@ -1211,8 +1211,8 @@ def test_context_rows_without_timestamp_do_not_break_sorting(tmp_path):
         dataset_config=_dataset_config(),
         replay_max_rows=5,
         chip_scores_by_symbol={"2330": [
-            {"total_score": 9.9, "signal": "BULLISH"},  # 沒有 trade_date
-            {"trade_date": "1970-01-02", "total_score": 2.0, "signal": "NEUTRAL"},
+            {"total_score": 9.9, "signal_type": "BULLISH"},  # 沒有 trade_date
+            {"trade_date": "1970-01-02", "total_score": 2.0, "signal_type": "NEUTRAL"},
         ]},
     )
 

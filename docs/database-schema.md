@@ -126,7 +126,7 @@ watchlist 維護與下架標的判斷。任一來源抓取失敗、或快照涵�
 | timeframe | K 棒週期 |
 | start_date / end_date | 回測區間 |
 | status | `pending` → `running` → `done` / `failed` |
-| trigger | `manual`（API 觸發） |
+| trigger_source | `manual`（API 觸發）。**DB 欄位名是 `trigger_source`，JSON／API 欄位名仍是 `trigger`**——`trigger` 是 MySQL 保留字，migration 059 改名（見 issue.md I-054） |
 | use_chip_filter | 是否在模組化回測中用 `chip_scores.total_score` 過濾進場 |
 | chip_min_score | 籌碼 filter 門檻（-100～100）；缺資料視為 0 |
 | started_at / finished_at | 執行時間戳 |
@@ -412,7 +412,7 @@ Go 背景 goroutine 呼叫 Python 同步執行，這張表讓 `POST /sr-zones/tr
 | status | `pending`（已建立，尚未開始）/ `running`（訓練中）/ `done`（成功）/ `failed`（失敗） |
 | symbols | JSON 陣列字串，這次訓練用的股票代號清單 |
 | timeframe / fetch_limit / model_type | 訓練參數（K棒週期、每檔股票抓取根數、`gradient_boosting`/`hist_gradient_boosting`/`lightgbm`/`logistic_regression`） |
-| rows / sources | 訓練資料筆數、來源股票數；只有 `status=done` 才有值 |
+| row_count / sources | 訓練資料筆數、來源股票數；只有 `status=done` 才有值。**DB 欄位名是 `row_count`，JSON 欄位名仍是 `rows`**（`rows` 是 MySQL 保留字，migration 059 改名） |
 | metrics | JSON：`{"hold": {...}, "break": {...}}`，兩個模型各自的 accuracy/precision/recall/auc/brier_score/log_loss/train_rows/test_rows/positive_rate_train/positive_rate_test/calibrated；只有 `status=done` 才有值。DB 欄位 `NOT NULL DEFAULT ''`（用 `store.RawJSON` 讀寫，不能是 SQL `NULL`，空字串在 API 回應會序列化成 `null`） |
 | model_path / model_version | 訓練完成後寫入的模型檔路徑與版本；只有 `status=done` 才有值 |
 | dataset_summary | JSON：`summarize_training_dataset()` 的診斷摘要（見 sr-zone-scoring.md「四」），只有 `status=done` 才有值。DB 欄位同樣 `NOT NULL DEFAULT ''` |
@@ -435,7 +435,7 @@ train job 完成時的 hold/break 模型品質 projection，一筆成功 train j
 | train_job_id | FK → `sr_scoring_train_jobs.id` |
 | job_id | 對應 train job 的 `job_id`，唯一 |
 | model_version / model_type / split_method / timeframe | 模型版本、類型、切分方式與 K 棒週期 |
-| rows / sources | 訓練資料筆數與來源股票數；可為 `NULL` |
+| row_count / sources | 訓練資料筆數與來源股票數；可為 `NULL`。**DB 欄位名是 `row_count`，JSON 欄位名仍是 `rows`**（理由同上） |
 | hold_auc / hold_brier_score / hold_log_loss / hold_calibrated / hold_test_rows | hold/bounce 方向品質指標；可為 `NULL` |
 | break_auc / break_brier_score / break_log_loss / break_calibrated / break_test_rows | break 方向品質指標；可為 `NULL` |
 | metrics_json / dataset_summary_json | 完整 metrics 與 dataset 摘要 JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
@@ -546,7 +546,7 @@ SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。�
 | broker_score | 券商分點分數（-100～100） |
 | concentration_score | 集中度分數（0～100） |
 | total_score | 籌碼總分（-100～100） |
-| signal | `BULLISH` / `BEARISH` / `NEUTRAL` / `RISK` |
+| signal_type | `BULLISH` / `BEARISH` / `NEUTRAL` / `RISK`。**DB 欄位名是 `signal_type`，JSON 欄位名仍是 `signal`**（`signal` 是 MySQL 保留字，migration 059 改名） |
 | reason | JSON：產生此分數的人類可讀原因 |
 | created_at / updated_at | 建立與更新時間 |
 
@@ -559,12 +559,12 @@ SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。�
 
 | 欄位 | 說明 |
 |------|------|
-| job_id | 任務識別碼（`chip_<時間戳>` 格式） |
+| job_id | 任務識別碼（`chip_<時間戳到毫秒>_<4 位隨機碼>`；隨機碼是為了避免同毫秒的兩個請求撞上 UNIQUE） |
 | mode | `manual` / `backfill` |
 | symbols | JSON 陣列字串 |
 | data_types | JSON 陣列字串；空陣列代表使用同步器預設資料類型 |
 | from_date / to_date | 同步日期區間 |
-| force | API 接受並保存；目前 upsert 已冪等，尚未實作跳過既有資料的特殊行為 |
+| force_sync | API 接受並保存；目前 upsert 已冪等，尚未實作跳過既有資料的特殊行為。**DB 欄位名是 `force_sync`，JSON 欄位名仍是 `force`**（`force` 是 MySQL 保留字，migration 059 改名） |
 | status | `pending` / `running` / `done` / `partial` / `failed` |
 | symbols_total / symbols_done / symbols_failed | 任務進度 |
 | failures | JSON：逐 symbol 失敗原因 |
@@ -572,6 +572,57 @@ SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。�
 | started_at / finished_at / created_at | 任務時間戳 |
 
 **Index：** `INDEX(created_at DESC)`。
+
+---
+
+## market_backfill_jobs
+
+股價（日K）手動回補任務紀錄，對應 `POST /api/v1/market/backfill`。結構刻意比照
+`chip_sync_jobs`——同一個「歷史資料回補」頁面上兩塊 UI 走同一套輪詢流程；差別只在
+回補範圍的表達方式：籌碼用 `from_date`/`to_date`，股價用 `days`（往前幾天）。
+
+排程的每日盤前回補（`runPreMarket`）**不寫這張表**，它走的是既有的
+`job_runs` 紀錄。這張表只記錄使用者手動觸發的回補。
+
+| 欄位 | 說明 |
+|------|------|
+| job_id | 任務識別碼（`bf_<時間戳到毫秒>_<4 位隨機碼>` 格式） |
+| symbols | JSON 陣列字串，要回補的股票代號。**API 層必填**，不會自動代入 watchlist |
+| days | 往前回補幾天 |
+| status | `pending` / `running` / `done` / `partial`（部分失敗） / `failed`（全部失敗，或背景執行 panic） |
+| symbols_total / symbols_done / symbols_failed | 任務進度；每回補完一檔就更新一次，所以進度是逐檔推進的 |
+| failures | JSON 物件陣列 `[{"symbol":…,"error":…}]`；`NOT NULL DEFAULT '[]'`，用 `store.RawJSON` 讀寫，不能是 SQL `NULL` |
+| error | 任務層級錯誤摘要（`all symbols failed` / `some symbols failed` / `internal error`） |
+| started_at / finished_at / created_at | 任務時間戳。`started_at` 在第一次進度更新時以 `COALESCE` 寫入 |
+
+**Index：** `INDEX(created_at DESC)`、`job_id` UNIQUE。
+
+**不做 job 續跑**：backend 重啟時進行中的任務不會被接手，會永遠停在 `running`。
+前端的輪詢靠「進度停滯」偵測而非固定逾時來收斂（見
+[`api-reference.md`](./api-reference.md) 的 market 章節）。
+
+---
+
+## 欄位命名規範：避開 MySQL 保留字
+
+新增 migration 時，**欄位名不可使用 MySQL 保留字**（`trigger`、`signal`、`force`、
+`rows`、`interval`、`range`、`rank`、`groups`、`system`、`condition`… 完整清單見
+MySQL 官方文件）。
+
+理由是這個專案同時維護 mysql / postgres / sqlite 三份 migration，但 **repo 的查詢語句
+三個 engine 共用同一份字串**。保留字在 DDL 可以用反引號迴避，但反引號是 MySQL 專屬
+語法，放進共用的查詢字串會讓 postgres / sqlite 直接語法錯誤——等於沒有可行的迴避方式。
+
+已經踩過一次：`trigger`／`signal`／`force`／`rows` 四個欄位在 2026-08-07 由 migration 059
+改名為 `trigger_source`／`signal_type`／`force_sync`／`row_count`。postgres 與 sqlite 都
+容許這些字裸寫，所以問題潛伏了 57 個 migration 才在第一次真的跑 MySQL 時爆出來。
+
+**改名時 JSON／API 欄位名維持原樣**（Go struct 的 `db` tag 與 `json` tag 刻意不同），
+對外契約不受影響。`SELECT *` 直接當 API 回應的地方要記得手動轉回來（見
+`python/http_server.py` 的 `_backtest_job_payload`）。
+
+改到 `migrations/mysql/` 之後要跑 `scripts/test-mysql-migrations.sh` 實際驗證，
+見 [`development-workflow.md`](./development-workflow.md)。
 
 ---
 

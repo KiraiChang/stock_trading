@@ -30,7 +30,7 @@ func NewSRScoringTrainJobRepo(db *sqlx.DB) SRScoringTrainJobRepo {
 }
 
 const srScoringTrainJobColumns = `id, job_id, status, symbols, timeframe, fetch_limit, model_type,
-	rows, sources, metrics, model_path, model_version, split_method, dataset_summary, error, started_at, finished_at, created_at`
+	row_count, sources, metrics, model_path, model_version, split_method, dataset_summary, error, started_at, finished_at, created_at`
 
 func (r *srScoringTrainJobRepo) Create(ctx context.Context, job *SRScoringTrainJob) (uint64, error) {
 	if job.Status == "" {
@@ -78,7 +78,7 @@ func (r *srScoringTrainJobRepo) MarkDone(ctx context.Context, jobID string, rows
 
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE sr_scoring_train_jobs
-		SET status='done', rows=?, sources=?, metrics=?, model_path=?, model_version=?, split_method=?, dataset_summary=?, finished_at=CURRENT_TIMESTAMP
+		SET status='done', row_count=?, sources=?, metrics=?, model_path=?, model_version=?, split_method=?, dataset_summary=?, finished_at=CURRENT_TIMESTAMP
 		WHERE job_id=?
 	`), rows, sources, metrics, modelPath, modelVersion, splitMethod, datasetSummary, jobID); err != nil {
 		return err
@@ -89,11 +89,11 @@ func (r *srScoringTrainJobRepo) MarkDone(ctx context.Context, jobID string, rows
 		JobID     string `db:"job_id"`
 		ModelType string `db:"model_type"`
 		Timeframe string `db:"timeframe"`
-		Rows      int64  `db:"rows"`
+		Rows      int64  `db:"row_count"`
 		Sources   int64  `db:"sources"`
 	}
 	if err := tx.GetContext(ctx, &job, tx.Rebind(`
-		SELECT id, job_id, model_type, timeframe, rows, sources
+		SELECT id, job_id, model_type, timeframe, row_count, sources
 		FROM sr_scoring_train_jobs WHERE job_id=?
 	`), jobID); err != nil {
 		return err
@@ -107,12 +107,12 @@ func (r *srScoringTrainJobRepo) MarkDone(ctx context.Context, jobID string, rows
 	if _, err := tx.NamedExecContext(ctx, `
 		INSERT INTO stock_sr_model_metrics (
 			train_job_id, job_id, model_version, model_type, split_method, timeframe,
-			rows, sources, hold_auc, hold_brier_score, hold_log_loss, hold_calibrated, hold_test_rows,
+			row_count, sources, hold_auc, hold_brier_score, hold_log_loss, hold_calibrated, hold_test_rows,
 			break_auc, break_brier_score, break_log_loss, break_calibrated, break_test_rows,
 			metrics_json, dataset_summary_json
 		) VALUES (
 			:train_job_id, :job_id, :model_version, :model_type, :split_method, :timeframe,
-			:rows, :sources, :hold_auc, :hold_brier_score, :hold_log_loss, :hold_calibrated, :hold_test_rows,
+			:row_count, :sources, :hold_auc, :hold_brier_score, :hold_log_loss, :hold_calibrated, :hold_test_rows,
 			:break_auc, :break_brier_score, :break_log_loss, :break_calibrated, :break_test_rows,
 			:metrics_json, :dataset_summary_json
 		)
@@ -145,7 +145,7 @@ func (r *srScoringTrainJobRepo) GetModelMetric(ctx context.Context, jobID string
 	var row SRModelMetric
 	err := r.db.GetContext(ctx, &row, r.db.Rebind(`
 		SELECT id, train_job_id, job_id, model_version, model_type, split_method, timeframe,
-			rows, sources, hold_auc, hold_brier_score, hold_log_loss, hold_calibrated, hold_test_rows,
+			row_count, sources, hold_auc, hold_brier_score, hold_log_loss, hold_calibrated, hold_test_rows,
 			break_auc, break_brier_score, break_log_loss, break_calibrated, break_test_rows,
 			metrics_json, dataset_summary_json, created_at
 		FROM stock_sr_model_metrics WHERE job_id=?

@@ -94,6 +94,7 @@ func main() {
 	brokerTradeRepo := store.NewBrokerTradeRepo(db)
 	chipScoreRepo := store.NewChipScoreRepo(db)
 	chipSyncJobRepo := store.NewChipSyncJobRepo(db)
+	marketBackfillJobRepo := store.NewMarketBackfillJobRepo(db)
 	positionRepo := store.NewPositionRepo(db)
 	stockSymbolRepo := store.NewStockSymbolRepo(db)
 	srEvaluationJobRepo := store.NewSREvaluationJobRepo(db)
@@ -180,7 +181,7 @@ func main() {
 		TakeProfitReductionRatio: cfg.PositionAnalysis.TakeProfitReductionRatio,
 		SRReuseMaxAge:            time.Duration(cfg.PositionAnalysis.SRReuseMaxAgeHours) * time.Hour,
 	}
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, stockSymbolRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, stockSymbolRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, marketBackfillJobRepo, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {

@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS stock_sr_model_metrics (
     model_type VARCHAR(40) NOT NULL DEFAULT '',
     split_method VARCHAR(20) NOT NULL DEFAULT '',
     timeframe VARCHAR(10) NOT NULL DEFAULT '',
-    rows BIGINT,
+    -- rows 是 MySQL 保留字，需反引號（理由同 005 的 trigger）。
+    `rows` BIGINT,
     sources BIGINT,
     hold_auc DOUBLE,
     hold_brier_score DOUBLE,

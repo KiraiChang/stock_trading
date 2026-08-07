@@ -164,10 +164,19 @@ func (f *Fetcher) FetchAndStoreMinute(ctx context.Context, symbol string, date t
 	return nil
 }
 
-// BackfillHistory 補齊歷史日K，days 為往前幾天，回傳失敗的股票數量
-func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days int) int {
+// BackfillHistory 補齊歷史日K，days 為往前幾天，回傳失敗的股票數量。
+// onSymbol 可為 nil；不為 nil 時**每一檔都會呼叫一次**（成功時 err 為 nil），
+// 供呼叫端即時更新進度。比照 chip.Syncer.SyncRange 的回呼形狀——沒有這個回呼就
+// 只能等整批跑完才知道結果，20 檔在 rate limit 下要 4 分鐘。
+func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days int, onSymbol func(symbol string, err error)) int {
 	end := timeutil.TodayTaipei()
 	start := end.AddDate(0, 0, -days)
+
+	report := func(symbol string, err error) {
+		if onSymbol != nil {
+			onSymbol(symbol, err)
+		}
+	}
 
 	failed := 0
 	for _, symbol := range symbols {
@@ -175,15 +184,18 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 		if err != nil {
 			f.log.Warn("backfill failed", zap.String("symbol", symbol), zap.Error(err))
 			failed++
+			report(symbol, err)
 			continue
 		}
 		storeCandles := toStoreCandles(candles)
 		if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 			f.log.Warn("backfill insert failed", zap.String("symbol", symbol), zap.Error(err))
 			failed++
+			report(symbol, err)
 			continue
 		}
 		f.log.Info("backfill done", zap.String("symbol", symbol), zap.Int("count", len(storeCandles)))
+		report(symbol, nil)
 	}
 	return failed
 }

@@ -367,9 +367,12 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 ### POST `/market/backfill`
 
-觸發歷史 K 棒資料補撈（背景執行，立即回傳）。
+觸發歷史 K 棒資料補撈，立即建立 `market_backfill_jobs` 紀錄並背景執行，回傳 job 供輪詢
+（形狀與 `POST /chips/sync` 一致）。
 
-`symbols` 省略時自動使用 watchlist 全部股票；`days` 預設 120。
+**`symbols` 為必填**——空陣列或缺鍵一律回 `400 symbols is required`。API 層不認識 watchlist：
+要回補哪些股票由呼叫端明講，因此這支端點也可用於 watchlist 以外的標的。前端「歷史資料回補」
+頁面留空時代入整個監控清單，那是**前端的語法糖，不是 API 行為**。`days` 預設 120。
 
 **Request Body：**
 ```json
@@ -379,13 +382,64 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 **Response（202 Accepted）：**
 ```json
 {
-  "message": "backfill 已在背景啟動",
-  "symbols": 2,
-  "days": 120
+  "job": {
+    "job_id": "bf_20260807_120000_000",
+    "symbols": "[\"2330\",\"2454\"]",
+    "days": 120,
+    "status": "pending",
+    "symbols_total": 2,
+    "symbols_done": 0,
+    "symbols_failed": 0,
+    "failures": []
+  }
 }
 ```
 
-> 進度可透過 backend log 觀察；請求頻率依 `finmind.rate_limit`（每分鐘請求數，`config.yaml`）節流，非固定間隔。前端「歷史資料回補」頁面（`/backfill`）提供勾選監控清單股票的介面。
+`symbols` 在 job 上是 JSON 陣列**字串**（DB 直存），`failures` 則是物件陣列。
+`job_id` 格式為 `bf_<UTC 時間戳到毫秒>_<4 位隨機碼>`；隨機碼是必要的，只有時間戳時
+同一毫秒進來的兩個請求會產生相同 id 而撞上 UNIQUE constraint。
+（`POST /chips/sync` 的 `chip_` 前綴同此格式。）
+
+### GET `/market/backfill/:job_id`
+
+查詢股價回補任務進度。每檔回補完成（成功或失敗）就更新一次，所以進度是逐檔推進的。
+
+**Response：**
+```json
+{
+  "job": {
+    "job_id": "bf_20260807_120000_000",
+    "status": "partial",
+    "symbols_total": 2,
+    "symbols_done": 2,
+    "symbols_failed": 1,
+    "failures": [{ "symbol": "2454", "error": "finmind 429" }],
+    "error": "some symbols failed"
+  }
+}
+```
+
+`status` 可為 `pending`、`running`、`done`、`partial`（部分失敗）、`failed`。
+`failed` 涵蓋兩種情況：所有 symbol 都失敗（`error` 為 `all symbols failed`），
+或背景執行時發生 panic 被攔下（`error` 為 `internal error`）——後者的用意是讓輪詢
+能收斂到終態，而不是讓任務永遠停在 `running`。
+
+**錯誤語意**：找不到 job 回 `404`；查詢過程發生其他錯誤（DB 連線中斷等）回 `500`。
+這兩者刻意分開——先前所有 repo 錯誤都被當成 `404`，DB 掛掉時呼叫端看到的是
+「任務不存在」，會誤以為任務被清掉了。`GET /chips/sync/:job_id` 同此語意。
+
+> 請求頻率依 `finmind.rate_limit`（每分鐘請求數，`config.yaml`）節流，非固定間隔；
+> 20 檔約 4 分鐘、650 檔約 2.2 小時。前端「歷史資料回補」頁面（`/backfill`）提供代號
+> 輸入框（逗號或空白分隔）與每 3 秒輪詢的進度顯示。
+>
+> **前端不設固定逾時**：長任務本來就會跑數小時，固定上限會把正常任務誤判成卡住。
+> 改用停滯偵測——連續 5 分鐘 `symbols_done` 沒有推進才停止追蹤並解鎖送出按鈕，
+> 且訊息明講「後端可能仍在執行」而不謊稱失敗（backend 重啟不會接手既有任務，
+> 那種情況下 job 會永遠停在 `running`）。籌碼同步的輪詢同此設計。
+
+> **相容性提醒（2026-08-07 變更）**：本端點原本回 `{message, symbols, days}` 且 `symbols`
+> 省略時自動代入 watchlist。現已改為回 `{job}` 且 `symbols` 必填，兩者皆為 breaking change，
+> 手動 curl 這支端點的腳本要一併調整。`GET /market/backfill/:job_id` 屬相容新增。
 
 ---
 
@@ -1217,7 +1271,13 @@ active model。`sr_scoring_train_jobs` 是訓練任務紀錄，不是可切換�
 }
 ```
 
-`status` 可為 `pending`、`running`、`done`、`partial`、`failed`。找不到 job 回 `404`。
+`status` 可為 `pending`、`running`、`done`、`partial`、`failed`（`failed` 也涵蓋背景執行
+panic 被攔下的情況，`error` 為 `internal error`）。
+
+找不到 job 回 `404`；查詢過程發生其他錯誤（DB 連線中斷等）回 `500`——語意與
+`GET /market/backfill/:job_id` 一致，該處有詳細說明。前端輪詢的停滯偵測也相同。
+
+`job_id` 格式為 `chip_<UTC 時間戳到毫秒>_<4 位隨機碼>`。
 
 ---
 

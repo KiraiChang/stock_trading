@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS chip_scores (
     broker_score         DECIMAL(10,4)  NOT NULL DEFAULT 0,
     concentration_score  DECIMAL(10,4)  NOT NULL DEFAULT 0,
     total_score          DECIMAL(10,4)  NOT NULL DEFAULT 0,
-    signal               VARCHAR(20)    NOT NULL DEFAULT 'NEUTRAL',
+    -- signal 是 MySQL 保留字，需反引號（理由同 005 的 trigger）。
+    `signal`             VARCHAR(20)    NOT NULL DEFAULT 'NEUTRAL',
     reason               TEXT           NOT NULL DEFAULT ('[]'),
     created_at           DATETIME(0)    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at           DATETIME(0)    NOT NULL DEFAULT CURRENT_TIMESTAMP,

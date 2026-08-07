@@ -1030,12 +1030,13 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 `{"days": N, "symbols": [...]}`、在背景執行、並共用 `FinMindClient` 的 rate limiter。
 所以 Step 1／Step 3 的抓取用現有端點就能跑。要補的是可觀測性與速度：
 
-| 項目 | 現況 | 本次要做 |
-|---|---|---|
-| 進度追蹤 | `go func()` fire-and-forget，只寫 log，**沒有 job 紀錄** | 比照 `chip_sync_jobs` 加 `market_backfill_jobs`：pending/running/done/failed、總數/完成數/失敗清單 |
-| 可續跑 | 用 `context.Background()`，backend 重啟即中斷且無紀錄 | job 紀錄讓中斷後知道跑到哪，可用剩餘 symbols 重送 |
-| 速度 | `rate_limit: 5`/分（＝300/h） | **不調整**。FinMind 註冊帳號的官方上限是 **600 requests/小時**（＝10/min），現行 5/min 已用掉一半、另一半留給重試與突發。大批量回補靠**拉長時間**而不是拉高速率；650 檔約 2.2 小時、150 檔約 30 分鐘，都是可接受的一次性成本 |
-| 候選清單來源 | 無 | 新增 `GET /api/v1/market/symbols?type=股票,ETF&…`，從 `stock_symbols` 產生候選清單，免得手工湊 650 個代號 |
+| 項目 | 狀態 |
+|---|---|
+| 進度追蹤（`market_backfill_jobs` job 紀錄 ＋ 前端輪詢） | **已完成**（Phase 1a，2026-08-07；現況見 [`database-schema.md`](./database-schema.md) 的 `market_backfill_jobs` 與 [`api-reference.md`](./api-reference.md) 的 market 章節） |
+| 手動輸入代號（不再侷限 watchlist） | **已完成**（同上；`symbols` 已改必填） |
+| 可續跑 | **未做**。job 紀錄讓中斷後知道跑到哪，但 backend 重啟不會接手既有任務，仍需人工用剩餘 symbols 重送 |
+| 速度 | **不調整**。FinMind 註冊帳號的官方上限是 **600 requests/小時**（＝10/min），現行 5/min 已用掉一半、另一半留給重試與突發。大批量回補靠**拉長時間**而不是拉高速率；650 檔約 2.2 小時、150 檔約 30 分鐘，都是可接受的一次性成本 |
+| 候選清單來源 | **未做**。要新增 `GET /api/v1/market/symbols?type=股票,ETF&…`，從 `stock_symbols` 產生候選清單，免得手工湊 650 個代號 |
 
 **Phase 2：常態維護——一個「純日 K」清單（選完標的後才需要）**
 

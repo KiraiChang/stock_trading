@@ -88,38 +88,36 @@ sudo 手動套用後重啟 gitea。
 
 ---
 
-### I-054：mysql migration 從未在真實 MySQL 上跑過，只靠比照既有寫法
+### I-054：mysql 的執行期支援仍未被驗證（DDL 已驗，CRUD 未驗）
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已知限制（受環境限制，暫不修復） |
-| 嚴重度 | 中 |
+| 狀態 | 已知限制（部分已解，剩餘部分暫不修） |
+| 嚴重度 | 低（目前無人以 MySQL 部署） |
 | 分類 | Go / DB / migration |
-| 發現日期 | 2026-08-06 |
+| 發現日期 | 2026-08-06（2026-08-07 縮小範圍） |
 | 來源 | T-037 B review |
 
-`backend/internal/database/migrations/` 維護 mysql / postgres / sqlite 三份 migration，
-但**只有 postgres 與 sqlite 真的被執行過**：
+**已解決的部分**（2026-08-07）：mysql migration 現在有可重複執行的驗證路徑
+（`scripts/test-mysql-migrations.sh`），首次執行抓到並修好 5 個保留字語法錯誤，
+57 個 migration 已全數 up 成功。用法與設計見
+[`development-workflow.md`](./development-workflow.md)；欄位命名規範見
+[`database-schema.md`](./database-schema.md) 的「欄位命名規範：避開 MySQL 保留字」。
 
-- sqlite：`internal/store` 測試每次都實跑 goose migration 後做 round-trip。
-- postgres：dev / live compose 都用 postgres，backend 啟動時由 goose 實際套用。
-- **mysql：沒有任何自動或手動路徑會執行它。** 本機沒有 MySQL 實例，dev compose 用 postgres，
-  拉一個 MySQL container 需要的記憶體在這台 2 GiB host 上會踩到 I-053。
+**仍未解的兩項**：
 
-所以每一份 mysql migration 都只是「比照該檔案既有寫法撰寫」，語法錯誤、型別不相容或
-backfill 漏做都不會被任何流程擋下來，要等真的有人用 MySQL 部署才會爆。
+1. **驗證只涵蓋 DDL，不涵蓋 repo 層的 CRUD round-trip。** 「表建得起來」不等於
+   「INSERT/SELECT 跑得動」——目前只能說不再有*已知的*保留字阻礙，但沒有任何自動化
+   流程證明 Go repo 的查詢在 MySQL 上真的能執行。要補的話是讓 `internal/store` 的
+   repo 測試能對著真實 MySQL 跑一輪，而不是只跑 sqlite。
+2. **`057_add_sr_zone_builder_runtime_config.sql` 的 DEFAULT 不對稱**：mysql 版走
+   `ADD COLUMN ... NULL` → `UPDATE` → `MODIFY ... NOT NULL` 三步（比照 033），
+   postgres / sqlite 各自一步用 `NOT NULL DEFAULT`，導致 **mysql 版沒有 DEFAULT**——
+   省略該欄位的 INSERT 在 mysql 會失敗、另外兩個 engine 會成功。目前唯一的寫入路徑
+   （`sr_zone_repo.Create`）永遠帶齊欄位且有 normalization guard，所以不構成實際問題。
 
-最近一例是 `057_add_sr_zone_builder_runtime_config.sql`：mysql 版走
-`ADD COLUMN ... NULL` → `UPDATE ... SET 'null'` → `MODIFY ... NOT NULL` 三步（比照 033），
-postgres / sqlite 則各自一步用 `NOT NULL DEFAULT`。三者最終狀態有個小差異——
-**mysql 版沒有 DEFAULT**，所以省略該欄位的 INSERT 在 mysql 會失敗、在另外兩個 engine 會成功。
-目前唯一的寫入路徑（`sr_zone_repo.Create`）永遠帶齊欄位且有 `== ""` 的 normalization guard，
-所以不構成實際問題，但這正是「mysql 分支沒被執行過」會累積出來的那種不對稱。
-
-**要解掉需要**：CI 或本機起一個 MySQL 實例把三份 migration 都跑一遍（up + down），
-或明確宣告不再支援 MySQL 並刪掉那份 migration 目錄。兩者都不是順手能做的，故先記為已知限制。
-`backend/config.yaml` 目前仍把 mysql 列為生產可選 driver。
-
+`backend/config.yaml` 目前仍把 mysql 列為生產可選 driver——要嘛補上第 1 項的驗證，
+要嘛明確宣告不支援並移除該選項。
 ---
 
 ### I-055：`zone_outcomes` 分層的三個比率欄位在前端永遠顯示 `—`（欄位名不一致）
@@ -263,3 +261,47 @@ lightgbm / shap 的 import 開銷，資料本身只有數 MB（原始 frame 約 
    而樣本量正是擴標的池要解決的問題，只適合當臨時手段。
 
 **現況結論**：擴到 100～200 檔可以先不改造（但要實測，不要假設），**全市場路線必須先做第 1、2 項**。
+
+---
+
+### I-057：migration 的回滾鏈在 017 斷掉，無法從最新版一路 down 到 0
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復（已知、暫不修） |
+| 嚴重度 | 中 |
+| 分類 | DB / migration |
+| 發現日期 | 2026-08-07 |
+| 來源 | `scripts/test-mysql-migrations.sh` 第一次實跑 down（2026-08-07 建立該驗證環境時） |
+
+`017_redesign_sr_zones_institutional.sql` 的 Up 是「砍掉 `stock_sr_zones` /
+`stock_sr_zone_analyses` 再用新結構重建」，但它的 Down 只有：
+
+```sql
+DROP TABLE IF EXISTS stock_sr_zones;
+DROP TABLE IF EXISTS stock_sr_zone_analyses;
+```
+
+**沒有還原 017 之前的舊結構**。`018_sr_zones_global_model_and_tiers.sql` 的 Down 完全相同
+（同樣兩行 DROP），所以這是**同一套模式重複出現**，不是單一檔案的疏漏。
+
+後果：只要回滾越過 017，下一個 016 的
+`ALTER TABLE stock_sr_zones DROP COLUMN confidence` 就會因為表不存在而失敗：
+
+```
+ERROR 016_add_sr_zone_confidence_ev_rr.sql: Table 'trading.stock_sr_zones' doesn't exist
+```
+
+**三個 engine 都一樣**——postgres 與 sqlite 的 017 是同樣的「DROP 再重建」寫法，
+不是 mysql 專屬問題。之所以到現在才發現，是因為**在 `scripts/test-mysql-migrations.sh`
+（2026-08-07）之前沒有任何流程跑過 down**。
+
+影響：`docs/todo.md` 各筆計畫「回滾：migration 有 `-- +goose Down`」的說法，
+對**單一 migration 的回滾**成立，對**跨越 017 的多步回滾**不成立。
+
+暫不修的理由：修它等於為 017 寫出真正的逆操作（重建 017 之前的 `stock_sr_zones`
+結構），要同時改三個 engine，而實務上不會有人把生產資料庫回滾到 2026 年初的
+schema——真要那樣做也是還原備份而不是跑 down。
+
+`backend/internal/database/migrate_mysql_test.go` 因此只回滾到 017 為止，
+涵蓋 018 之後（實務上真的可能被回滾的那一段）的 Down 區塊。

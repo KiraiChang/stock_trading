@@ -96,7 +96,7 @@ def fetch_latest_chip_score(symbol: str, before_date: str | None = None) -> dict
 
     sql = text(f"""
         SELECT symbol, trade_date, institutional_score, margin_score, broker_score,
-               concentration_score, total_score, signal, reason
+               concentration_score, total_score, signal_type, reason
         FROM chip_scores
         WHERE symbol = :symbol {where_date}
         ORDER BY trade_date DESC
@@ -124,7 +124,7 @@ def fetch_chip_scores(symbol: str, from_date: str, to_date: str) -> list[dict]:
     filter（見 backtest/modular/service.py）逐 bar 比對 total_score。"""
     sql = text("""
         SELECT symbol, trade_date, institutional_score, margin_score, broker_score,
-               concentration_score, total_score, signal
+               concentration_score, total_score, signal_type
         FROM chip_scores
         WHERE symbol = :symbol AND trade_date BETWEEN :f AND :t
         ORDER BY trade_date ASC

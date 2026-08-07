@@ -24,7 +24,7 @@ func NewChipSyncJobRepo(db *sqlx.DB) ChipSyncJobRepo {
 	return &chipSyncJobRepo{db: db, driver: db.DriverName()}
 }
 
-const chipSyncJobColumns = `id, job_id, mode, symbols, data_types, from_date, to_date, force, status,
+const chipSyncJobColumns = `id, job_id, mode, symbols, data_types, from_date, to_date, force_sync, status,
 	symbols_total, symbols_done, symbols_failed, failures, error, started_at, finished_at, created_at`
 
 func (r *chipSyncJobRepo) Create(ctx context.Context, job *ChipSyncJob) error {
@@ -38,14 +38,14 @@ func (r *chipSyncJobRepo) Create(ctx context.Context, job *ChipSyncJob) error {
 	if r.driver == "pgx" {
 		// pgx（postgres）不支援 LastInsertId，需改用 RETURNING id
 		return r.db.QueryRowContext(ctx, `
-			INSERT INTO chip_sync_jobs (job_id, mode, symbols, data_types, from_date, to_date, force, status, symbols_total)
+			INSERT INTO chip_sync_jobs (job_id, mode, symbols, data_types, from_date, to_date, force_sync, status, symbols_total)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			RETURNING id
 		`, job.JobID, job.Mode, job.Symbols, job.DataTypes, job.FromDate, job.ToDate, job.Force, job.Status, job.SymbolsTotal).Scan(&job.ID)
 	}
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO chip_sync_jobs (job_id, mode, symbols, data_types, from_date, to_date, force, status, symbols_total)
+		INSERT INTO chip_sync_jobs (job_id, mode, symbols, data_types, from_date, to_date, force_sync, status, symbols_total)
 		VALUES (?,?,?,?,?,?,?,?,?)
 	`), job.JobID, job.Mode, job.Symbols, job.DataTypes, job.FromDate, job.ToDate, job.Force, job.Status, job.SymbolsTotal)
 	if err != nil {

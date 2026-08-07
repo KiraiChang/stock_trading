@@ -193,7 +193,7 @@ func (s *Scheduler) runPreMarket() {
 	}
 
 	// 補齊近 5 天日K（涵蓋週末 / 假日缺口），BulkInsert 有 UNIQUE 保護不會重複
-	failed := s.fetcher.BackfillHistory(ctx, symbols, 5)
+	failed := s.fetcher.BackfillHistory(ctx, symbols, 5, nil)
 
 	// 預熱日線指標，讓第一根分K掃描前就有 MA / RSI / MACD 基準值
 	for _, sym := range symbols {

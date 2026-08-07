@@ -1,0 +1,62 @@
+# MySQL migration 驗證用的獨立 compose project。
+#
+# 用途只有一個：讓 backend/internal/database/migrations/mysql/ 那份 migration 能真的被跑起來
+# （見 docs/issue.md I-054——那 57 個檔案在此之前從未在真實 MySQL 上執行過）。
+# 不是 dev stack 的一部分，backend 的 dev / live 仍然使用 postgres。
+#
+# 不要手動 `docker compose -f docker-compose.mysql.yml up`：請用
+# `scripts/test-mysql-migrations.sh`，它會照顧編譯與 MySQL 的記憶體錯開、
+# 等 healthcheck、跑驗證並收乾淨。
+#
+# 設計重點：
+#   - name：獨立 project，避免與 live（stock_trading）/ dev（stock_trading_dev）混在一起。
+#     CLAUDE.md 要求驗證不得用 live/deploy compose project。
+#   - 啟動參數把 MySQL 調瘦：預設值在這台 2GiB host 上會直接吃掉 400MB 以上。
+#     performance_schema 是最大宗，關掉之後 buffer pool 才是主要用量。
+#   - 資料放 named volume 而非 tmpfs：tmpfs 是拿 RAM 換磁碟，在這台機器上方向相反。
+#     每次驗證都要從空 DB 開始，所以腳本跑完會 `down -v`。
+name: stock_trading_mysql
+
+services:
+  mysql:
+    image: mysql:8.4
+    cpus: "0.5"
+    mem_limit: 512m
+    memswap_limit: 512m
+    pids_limit: 200
+    command:
+      - --performance-schema=OFF
+      - --innodb-buffer-pool-size=64M
+      - --innodb-redo-log-capacity=32M
+      - --innodb-log-buffer-size=8M
+      - --max-connections=20
+      # X Protocol（33060）驗證用不到，關掉省一個 listener 與其記憶體。
+      - --mysqlx=OFF
+    environment:
+      MYSQL_ROOT_PASSWORD: trading
+      MYSQL_DATABASE: trading
+      MYSQL_USER: trading
+      MYSQL_PASSWORD: trading
+    # 只綁 loopback：驗證本身走 compose 網路的 service name，根本不需要對外 port，
+    # 這裡留著純粹是為了需要時能從本機手動連進去看 schema。
+    # docker 的 port publish 會繞過 host 防火牆規則，綁 0.0.0.0 等於把一個
+    # 密碼是 trading/trading 的 MySQL 掛到網路上。
+    ports:
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-utrading", "-ptrading"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    networks:
+      - mysql_net
+
+networks:
+  mysql_net:
+    name: stock_trading_mysql_net
+
+volumes:
+  mysql_data:
+    name: stock_trading_mysql_data

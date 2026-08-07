@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -273,7 +272,7 @@ func (h *ChipHandler) Sync(c *gin.Context) {
 	dataTypesJSON, _ := json.Marshal(req.DataTypes)
 
 	job := &store.ChipSyncJob{
-		JobID:        newChipSyncJobID(),
+		JobID:        newJobID("chip"),
 		Mode:         req.Mode,
 		Symbols:      string(symbolsJSON),
 		DataTypes:    string(dataTypesJSON),
@@ -295,6 +294,19 @@ func (h *ChipHandler) Sync(c *gin.Context) {
 
 func (h *ChipHandler) runSync(jobID string, symbols []string, from, to time.Time, dataTypes []string) {
 	ctx := context.Background()
+	// 理由同 MarketHandler.runBackfill：gin 的 recovery middleware 管不到 handler
+	// 自己起的 goroutine，這裡 panic 會帶掉整個 backend process。
+	defer func() {
+		if r := recover(); r != nil {
+			h.log.Error("chip sync: panic recovered",
+				zap.String("job_id", jobID), zap.Any("panic", r), zap.Stack("stack"))
+			if err := h.syncJobRepo.Finish(ctx, jobID, "failed", "internal error"); err != nil {
+				h.log.Warn("chip sync: finish after panic failed",
+					zap.String("job_id", jobID), zap.Error(err))
+			}
+		}
+	}()
+
 	done, failed := 0, 0
 	failures := make([]map[string]string, 0)
 
@@ -327,12 +339,8 @@ func (h *ChipHandler) GetSyncJob(c *gin.Context) {
 	jobID := c.Param("job_id")
 	job, err := h.syncJobRepo.GetByJobID(c.Request.Context(), jobID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		jobLookupError(c, h.log, err, "chip: get sync job")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"job": job})
-}
-
-func newChipSyncJobID() string {
-	return fmt.Sprintf("chip_%s", time.Now().UTC().Format("20060102_150405_000"))
 }

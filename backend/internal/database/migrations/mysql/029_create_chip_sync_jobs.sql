@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS chip_sync_jobs (
     data_types     TEXT         NOT NULL,
     from_date      DATE         NOT NULL,
     to_date        DATE         NOT NULL,
-    force          TINYINT(1)   NOT NULL DEFAULT 0,
+    -- force 是 MySQL 保留字，需反引號（理由同 005 的 trigger）。
+    `force`        TINYINT(1)   NOT NULL DEFAULT 0,
     status         VARCHAR(15)  NOT NULL DEFAULT 'pending',
     symbols_total  INT          NOT NULL DEFAULT 0,
     symbols_done   INT          NOT NULL DEFAULT 0,

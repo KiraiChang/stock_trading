@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS backtest_jobs (
     start_date  DATE         NOT NULL,
     end_date    DATE         NOT NULL,
     status      VARCHAR(10)  NOT NULL DEFAULT 'pending',
-    trigger     VARCHAR(10)  NOT NULL DEFAULT 'manual',
+    -- trigger 是 MySQL 保留字，DDL 必須用反引號括起來（postgres / sqlite 都容許裸寫，
+    -- 所以這個錯誤一路到 2026-08-07 第一次真的在 MySQL 上跑 migration 才浮現）。
+    `trigger`   VARCHAR(10)  NOT NULL DEFAULT 'manual',
     error       TEXT,
     created_at  DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at  DATETIME(0),

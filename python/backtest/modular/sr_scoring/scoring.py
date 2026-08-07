@@ -556,7 +556,9 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
         "confidence": coverage,
         "confidence_level": confidence_level,
         "signal": _chip_signal(signal_score),
-        "source_signal": chip_row.get("signal"),
+        # DB 欄位名是 signal_type（signal 是 MySQL 保留字，migration 059 改名）；
+        # 這裡輸出的 key 維持 source_signal，對外形狀不變。
+        "source_signal": chip_row.get("signal_type"),
         "trade_date": chip_row.get("trade_date"),
         "institutional_score": float(components["institutional_score"]) if components["institutional_score"] is not None else None,
         "margin_score": float(components["margin_score"]) if components["margin_score"] is not None else None,

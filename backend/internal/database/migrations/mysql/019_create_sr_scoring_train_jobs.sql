@@ -8,7 +8,8 @@ CREATE TABLE sr_scoring_train_jobs (
     timeframe     VARCHAR(5)    NOT NULL,
     fetch_limit   INT           NOT NULL,
     model_type    VARCHAR(30)   NOT NULL,
-    rows          INT,
+    -- rows 是 MySQL 保留字，需反引號（理由同 005 的 trigger）。
+    `rows`        INT,
     sources       INT,
     -- metrics 用 store.RawJSON（純 string，非 sql.Null* 包裝）讀寫，NOT NULL
     -- DEFAULT 讓它在任務完成前永遠是空字串而不是 SQL NULL（RawJSON 掃 NULL

@@ -27,26 +27,26 @@ func NewChipScoreRepo(db *sqlx.DB) ChipScoreRepo {
 	return &chipScoreRepo{db: db, driver: db.DriverName()}
 }
 
-const chipScoreColumns = `id, symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal, reason, created_at, updated_at`
+const chipScoreColumns = `id, symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal_type, reason, created_at, updated_at`
 
 func (r *chipScoreRepo) upsertSQL() string {
 	if r.driver == "mysql" {
 		return `
-			INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal, reason)
-			VALUES (:symbol, :trade_date, :institutional_score, :margin_score, :broker_score, :concentration_score, :total_score, :signal, :reason)
+			INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal_type, reason)
+			VALUES (:symbol, :trade_date, :institutional_score, :margin_score, :broker_score, :concentration_score, :total_score, :signal_type, :reason)
 			ON DUPLICATE KEY UPDATE
 				institutional_score=VALUES(institutional_score), margin_score=VALUES(margin_score),
 				broker_score=VALUES(broker_score), concentration_score=VALUES(concentration_score),
-				total_score=VALUES(total_score), signal=VALUES(signal), reason=VALUES(reason),
+				total_score=VALUES(total_score), signal_type=VALUES(signal_type), reason=VALUES(reason),
 				updated_at=CURRENT_TIMESTAMP`
 	}
 	return `
-		INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal, reason)
-		VALUES (:symbol, :trade_date, :institutional_score, :margin_score, :broker_score, :concentration_score, :total_score, :signal, :reason)
+		INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal_type, reason)
+		VALUES (:symbol, :trade_date, :institutional_score, :margin_score, :broker_score, :concentration_score, :total_score, :signal_type, :reason)
 		ON CONFLICT(symbol, trade_date) DO UPDATE SET
 			institutional_score=excluded.institutional_score, margin_score=excluded.margin_score,
 			broker_score=excluded.broker_score, concentration_score=excluded.concentration_score,
-			total_score=excluded.total_score, signal=excluded.signal, reason=excluded.reason,
+			total_score=excluded.total_score, signal_type=excluded.signal_type, reason=excluded.reason,
 			updated_at=CURRENT_TIMESTAMP`
 }
 
@@ -94,7 +94,7 @@ func (r *chipScoreRepo) bulkUpsert(ctx context.Context, tx *sqlx.Tx, ss []ChipSc
 	}
 
 	query := `
-		INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal, reason)
+		INSERT INTO chip_scores (symbol, trade_date, institutional_score, margin_score, broker_score, concentration_score, total_score, signal_type, reason)
 		VALUES ` + values.String() + r.upsertSuffix()
 	_, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	return err
@@ -106,14 +106,14 @@ func (r *chipScoreRepo) upsertSuffix() string {
 			ON DUPLICATE KEY UPDATE
 				institutional_score=VALUES(institutional_score), margin_score=VALUES(margin_score),
 				broker_score=VALUES(broker_score), concentration_score=VALUES(concentration_score),
-				total_score=VALUES(total_score), signal=VALUES(signal), reason=VALUES(reason),
+				total_score=VALUES(total_score), signal_type=VALUES(signal_type), reason=VALUES(reason),
 				updated_at=CURRENT_TIMESTAMP`
 	}
 	return `
 		ON CONFLICT(symbol, trade_date) DO UPDATE SET
 			institutional_score=excluded.institutional_score, margin_score=excluded.margin_score,
 			broker_score=excluded.broker_score, concentration_score=excluded.concentration_score,
-			total_score=excluded.total_score, signal=excluded.signal, reason=excluded.reason,
+			total_score=excluded.total_score, signal_type=excluded.signal_type, reason=excluded.reason,
 			updated_at=CURRENT_TIMESTAMP`
 }
 

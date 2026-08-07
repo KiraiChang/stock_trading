@@ -12,6 +12,10 @@
   let loading = false
   let error = ''
   let addResult = { added: 0, failed: 0 }
+  // step 1 剛加入的代號，step 2 回補時直接沿用。
+  // triggerBackfill 的 symbols 是必填（API 層不認識 watchlist，見 todo.md T-040），
+  // 這裡不能只送 days 讓後端自己去撈清單。
+  let addedSymbols: string[] = []
 
   // 解析輸入：每行 "2330 台積電 半導體" 或 "2330"
   function parseStocks(raw: string) {
@@ -39,6 +43,7 @@
     loading = true
     try {
       addResult = await bulkAddToWatchlist(items)
+      addedSymbols = items.map((i) => i.symbol)
       step = 2
     } catch {
       error = '新增失敗，請確認格式或稍後再試'
@@ -51,7 +56,7 @@
     loading = true
     error = ''
     try {
-      await triggerBackfill({ days: backfillDays })
+      await triggerBackfill({ days: backfillDays, symbols: addedSymbols })
       step = 3
     } catch {
       error = 'Backfill 啟動失敗，可稍後在 Dashboard 手動觸發'

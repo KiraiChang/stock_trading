@@ -55,6 +55,7 @@ func NewServer(
 	chipScoreRepo store.ChipScoreRepo,
 	chipSyncJobRepo store.ChipSyncJobRepo,
 	chipSyncer *chip.Syncer,
+	marketBackfillJobRepo store.MarketBackfillJobRepo,
 	positionRepo store.PositionRepo,
 	positionConfig portfolio.Config,
 	chipHistoryTradingDays int,
@@ -114,8 +115,9 @@ func NewServer(
 		ssh := handler.NewStockSymbolHandler(stockSymbolRepo, log)
 		protected.GET("/stock-symbols/search", ssh.Search)
 
-		mh := handler.NewMarketHandler(fetcher, watchlistRepo, log)
+		mh := handler.NewMarketHandler(fetcher, marketBackfillJobRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)
+		protected.GET("/market/backfill/:job_id", mh.GetBackfillJob)
 
 		sch := handler.NewSchedulerHandler(jobRunRepo, sched, log)
 		protected.GET("/scheduler/status", sch.GetStatus)

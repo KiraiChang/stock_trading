@@ -133,6 +133,20 @@ async def submit_backtest(req: BacktestRequest, background_tasks: BackgroundTask
     return {"job_id": req.job_id, "status": "running"}
 
 
+def _backtest_job_payload(job_row) -> dict:
+    """把 backtest_jobs 的 DB 列轉成對外的 job 形狀。
+
+    `SELECT *` 會讓任何 schema 變動直接漏到 API 回應，所以 DB 欄位名與對外欄位名
+    不同的地方要在這裡明確轉回來。目前只有一個：`trigger` 是 MySQL 保留字，
+    DB 欄位已改名為 `trigger_source`（migration 059，見 issue.md I-054），
+    但對外的欄位名維持 `trigger`——Go 端 `store.BacktestJob` 的 json tag 也是這樣。
+    """
+    job = dict(job_row)
+    if "trigger_source" in job:
+        job["trigger"] = job.pop("trigger_source")
+    return job
+
+
 @app.get("/backtest/{job_id}")
 async def get_backtest(job_id: str):
     """查詢回測狀態與結果。"""
@@ -147,7 +161,7 @@ async def get_backtest(job_id: str):
         res_row = conn.execute(res_sql, {"id": job_id}).mappings().first()
 
     return {
-        "job":    dict(job_row),
+        "job":    _backtest_job_payload(job_row),
         "result": dict(res_row) if res_row else None,
     }
 

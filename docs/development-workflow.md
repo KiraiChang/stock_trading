@@ -31,6 +31,31 @@
 Dev stack smoke 也走 repo script：`scripts/smoke-dev.sh` 會啟動 isolated dev compose、
 等待 backend 與 python-server health check 通過，失敗時自動印出服務狀態與核心 log。
 
+### MySQL migration 驗證：`scripts/test-mysql-migrations.sh`
+
+改到 `backend/internal/database/migrations/mysql/` 就要跑這支。dev / live 都用 postgres，
+mysql 那份 migration 沒有其他執行路徑（背景見 [`issue.md`](./issue.md) I-054——
+2026-08-07 首次實跑就抓到 5 個保留字語法錯誤）。
+
+```bash
+scripts/test-mysql-migrations.sh              # 起 MySQL → goose up → 驗 schema → down → 收掉
+KEEP_UP=1 scripts/test-mysql-migrations.sh    # 跑完保留 MySQL（可從 127.0.0.1:13306 連進去看）
+```
+
+驗證邏輯在 `backend/internal/database/migrate_mysql_test.go`，用的是與 `cmd/server/main.go`
+相同的 `database.RunMigrations` 進入點（migration 是 `//go:embed` 打包的，
+從磁碟讀檔的 goose CLI 驗的是另一份東西）。該測試以 `MYSQL_MIGRATION_DSN` gate 住，
+沒設就 skip，所以 `backend/scripts/test.sh ./...` 不受影響。
+
+**兩階段設計與記憶體實測（2026-08-07）**：腳本刻意先在 MySQL 還沒起來時把測試編成執行檔，
+編譯器退場後才起 MySQL，再用輕量 container 跑編好的 binary——峰值因此是
+max(編譯, MySQL) 而不是 sum。調瘦後（`performance-schema=OFF`、buffer pool 64M）
+MySQL 實測佔 **182MiB**（預設值會是 400MB 以上），過程中 host available 低點約 689MB。
+腳本開頭會檢查 available ≥ 600MB，不足直接中止而不是硬跑。
+
+`down` 只回滾到版本 17，不是 0——原因見 [`issue.md`](./issue.md) **I-057**（017／018 的
+Down 直接 DROP 而不還原舊結構，是三個 engine 共有的結構性問題）。
+
 理由：手打指令會漂移，本專案已經因此踩過三個坑——以 root 執行留下 root-owned 檔案
 （`backend/server` 曾被誤 commit、`backend/internal/ui/dist` 一度無法被覆寫）、
 記憶體上限不足導致 Go build OOM、frontend 只掛 `frontend/` 導致 build 產物寫進
@@ -294,6 +319,7 @@ docker compose -f docker-compose.dev.yml down -v
 
 - 受影響 runtime 的測試腳本（`backend|python|frontend/scripts/test.sh`）。
 - 若有 migration、API、跨服務整合、排程或 Python/Go 互動，跑 `scripts/smoke-dev.sh` 做 dev stack smoke test。
+- 若改到 `migrations/mysql/`，另外跑 `scripts/test-mysql-migrations.sh`。
 - 若有前端畫面變更，跑 frontend Docker build，並在 dev stack 或本地 dev server 驗證畫面。
 - 若因環境、網路或外部 token 無法執行某項驗證，最後回報要明確寫出未執行項目與原因。
 
@@ -312,6 +338,8 @@ docker compose -f docker-compose.dev.yml down -v
 - [ ] 期望值來自**規格**、且測的是 **production 真的會產生的輸入**。不要手工捏造 production
       永不出現的分歧來「驗證」一個實際空轉的能力（`final_entry_gate_state` echo 的教訓）。見品質守則 §1。
 - [ ] 若動到 migration／API／跨服務／排程／Python↔Go 互動，跑過 `scripts/smoke-dev.sh`。
+- [ ] 若動到 `migrations/mysql/`，另外跑過 `scripts/test-mysql-migrations.sh`（dev/live 是
+      postgres，mysql 那份沒有其他執行路徑）。
 
 ### B. 文件收斂與狀態誠實
 

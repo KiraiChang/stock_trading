@@ -1158,7 +1158,7 @@ def test_build_chip_summary_missing():
 
 def test_build_chip_summary_present():
     s = scoring._build_chip_summary({
-        "total_score": 42.5, "signal": "BULLISH",
+        "total_score": 42.5, "signal_type": "BULLISH",
         "institutional_score": 60.0, "margin_score": -10.0,
         "broker_score": 30.0, "concentration_score": 40.0,
     })
@@ -1179,7 +1179,7 @@ def test_build_chip_summary_present():
 
 def test_build_chip_summary_partial_coverage_separates_raw_and_effective():
     s = scoring._build_chip_summary({
-        "total_score": -19.25, "signal": "BEARISH",
+        "total_score": -19.25, "signal_type": "BEARISH",
         "institutional_score": -55.0, "margin_score": None,
         "broker_score": None, "concentration_score": None,
     })
@@ -1198,7 +1198,7 @@ def test_build_chip_summary_effective_score_deweights_ignoring_total_score():
     # total_score 與 raw_score * coverage 不相等時，effective_score 必須採降權值，
     # 而非 DB total_score（鎖住 sr-zone-scoring.md「effective_score = raw_score * coverage」語意）。
     s = scoring._build_chip_summary({
-        "total_score": -40.0, "signal": "BEARISH",
+        "total_score": -40.0, "signal_type": "BEARISH",
         "institutional_score": -55.0, "margin_score": None,
         "broker_score": None, "concentration_score": None,
     })
@@ -1215,7 +1215,7 @@ def test_build_chip_summary_present_but_all_subscores_none():
     # chip row 存在但四個子分數全 None（total_score 仍存在）：raw/effective 皆 None、
     # coverage=0、missing=False（保守，不因無可用分量而回報未降權的 total_score）。
     s = scoring._build_chip_summary({
-        "total_score": 30.0, "signal": "BULLISH",
+        "total_score": 30.0, "signal_type": "BULLISH",
         "institutional_score": None, "margin_score": None,
         "broker_score": None, "concentration_score": None,
     })
@@ -1282,7 +1282,7 @@ def test_score_symbol_includes_chip_summary_and_card_chip(monkeypatch, bundle):
     monkeypatch.setattr(scoring, "fetch_candles", lambda *a, **kw: _bullish_rows())
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
     monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: {
-        "symbol": "2330", "total_score": 38.25, "signal": "BULLISH",
+        "symbol": "2330", "total_score": 38.25, "signal_type": "BULLISH",
         "institutional_score": 55.0, "margin_score": 20.0,
         "broker_score": 30.0, "concentration_score": 40.0,
     })

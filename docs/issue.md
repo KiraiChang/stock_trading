@@ -173,3 +173,67 @@ lightgbm / shap 的 import 開銷，資料本身只有數 MB（原始 frame 約 
    而樣本量正是擴標的池要解決的問題，只適合當臨時手段。
 
 **現況結論**：擴到 100～200 檔可以先不改造（但要實測，不要假設），**全市場路線必須先做第 1、2 項**。
+
+---
+
+### I-059：decision replay 對真實 DB 跑時，chip 的 `trade_date` 讓 JSON 序列化整個失敗
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **已修復／待 review**（2026-08-07，已對真實 DB 驗證） |
+| 嚴重度 | 高（decision replay 對有籌碼資料的標的**必定失敗**，含排程／API 的 `--write-db` 路徑） |
+| 分類 | Python / SR Zone / 跨語言契約 |
+| 發現日期 | 2026-08-07 |
+| 來源 | T-028 用 live DB 的 29 檔實跑 decision replay |
+
+**症狀**：`--decision-replay` 對 live DB 跑完整個 walk-forward（11 檔約 30 分鐘）後，
+**在最後一步序列化時才失敗**：
+
+```
+TypeError: Object of type date is not JSON serializable
+  evaluation.py:2272  encoded = json.dumps(report, indent=2, ensure_ascii=False)
+```
+
+**根因**：`scoring.py:562` 的 `_build_chip_summary` 把 chip row 的 `trade_date`
+**原樣**塞進輸出：
+
+```python
+"trade_date": chip_row.get("trade_date"),
+```
+
+live `chip_scores.trade_date` 的欄位型別是 `date`，psycopg2 讀出來就是
+`datetime.date` 物件。同一份 chip_summary 會被嵌進 decision replay 的每一列
+（`daily_confirmation_context`），於是整份 report 無法序列化。
+
+**為什麼測試沒擋下來**：測試 fixture 的 `trade_date` 一律是**字串**
+（`{"trade_date": "1970-01-01", ...}`），而真實 DB 給的是 `date` 物件。
+**這與 2026-08-06 的 `zone_outcomes` 欄位名事件是同一類問題**（教訓見
+[`development-workflow.md`](./development-workflow.md) 的「測試 fixture 必須是後端真的會
+產生的形狀，斷言必須到值」）——fixture 用了後端真實路徑不會產生的東西，所以三層測試全綠，
+但只要接上真的資料就爆。**那次是 key 名不一致，這次是型別不一致**——同一條規則的兩種踩法，
+代表「fixture 從真實輸出取樣」這條要求還沒有被落實到位。
+
+**影響範圍不只 CLI**：`write_evaluation_result`（`evaluation.py:426`）也是同一個
+`json.dumps(report)`，所以**排程或 API 觸發、帶 `--write-db` 的 decision replay
+會以同樣方式失敗**。只有在該標的完全沒有籌碼資料時才不會踩到
+（`chip_row is None` → `_missing_chip_summary` 的 `trade_date` 是 `None`）。
+live 有 31 檔、34,260 筆籌碼分數，所以實務上一定會踩到。
+
+**代價**：失敗發生在最後一步，前面數十分鐘的運算全部白跑。
+
+**修復（2026-08-07）**：新增 `scoring._iso_date()`，在 `_build_chip_summary` 把
+`trade_date` 正規化成 ISO 字串。**刻意不用 `json.dumps(default=str)` 這種全域逃生口**
+——那會讓下一個型別洩漏同樣無聲無息地混進 API 回應。`_iso_date` 以 `isoformat` 是否可呼叫
+來判斷，所以 postgres 的 `date`、sqlite 的字串都吃得下。
+
+測試 `test_build_chip_summary_trade_date_is_json_serializable`：fixture 直接用
+`datetime.date(2026, 8, 6)`（psycopg2 真正會給的型別），斷言輸出是 `"2026-08-06"`、
+**整份 summary 可 `json.dumps`**，另外覆蓋字串輸入原樣保留與查無資料時維持 `None`。
+
+**驗證**：`python/scripts/test.sh` 的 scoring 測試 76 passed；並對 **live DB 實跑**
+decision replay（2 檔 / limit 400）確認 `trade_date` 輸出為 ISO 字串且整份 report
+序列化成功。
+
+**這次學到的操作經驗**：這條路徑跑一次要數十分鐘且失敗在最後一步，所以**改完先用
+小 `--limit` ＋ 少量標的做一次快速預檢**（2 檔 / limit 400 約 2 分鐘），確認真實 DB 的
+型別都過得了序列化，再投入完整規模的跑。

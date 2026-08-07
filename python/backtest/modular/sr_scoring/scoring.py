@@ -504,6 +504,22 @@ def _chip_signal(score: Optional[float]) -> Optional[str]:
     return "NEUTRAL"
 
 
+def _iso_date(value: Any) -> Optional[str]:
+    """把 DB 的日期欄位正規化成 ISO 字串，讓輸出可以 json.dumps。
+
+    DB（postgres DATE / sqlite TEXT / mysql DATE）讀出來的型別不一致：psycopg2 給
+    `datetime.date`、sqlite 給字串。輸出契約統一成字串——前端的型別宣告也是字串。
+    刻意不用 `json.dumps(default=str)` 之類的全域逃生口，那會讓下一個型別洩漏
+    同樣無聲無息地混進 API 回應。
+    """
+    if value is None:
+        return None
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
+
+
 def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
     """整檔層級籌碼拆解，供前端「共用面板」一次顯示（不逐 zone 重複）。查無
     資料時 missing=True、各分數 None，跟「中性（分數接近 0）」明確區分。分數
@@ -559,7 +575,11 @@ def _build_chip_summary(chip_row: Optional[dict]) -> dict[str, Any]:
         # DB 欄位名是 signal_type（signal 是 MySQL 保留字，migration 059 改名）；
         # 這裡輸出的 key 維持 source_signal，對外形狀不變。
         "source_signal": chip_row.get("signal_type"),
-        "trade_date": chip_row.get("trade_date"),
+        # 一律正規化成 ISO 字串：DB 的 chip_scores.trade_date 是 DATE 欄位，
+        # psycopg2 讀出來是 datetime.date 物件，原樣輸出會讓整份 report 無法
+        # json.dumps（decision replay 每一列都嵌著這份 summary，跑完數十分鐘才在
+        # 最後一步爆掉）。測試 fixture 給的是字串，所以這個型別差異一直沒被擋下來。
+        "trade_date": _iso_date(chip_row.get("trade_date")),
         "institutional_score": float(components["institutional_score"]) if components["institutional_score"] is not None else None,
         "margin_score": float(components["margin_score"]) if components["margin_score"] is not None else None,
         "broker_score": float(components["broker_score"]) if components["broker_score"] is not None else None,

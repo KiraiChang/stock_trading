@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from datetime import date
+
 import pandas as pd
 import pytest
 
@@ -1175,6 +1178,37 @@ def test_build_chip_summary_present():
     assert s["margin_score"] == pytest.approx(-10.0)
     assert s["broker_score"] == pytest.approx(30.0)
     assert s["concentration_score"] == pytest.approx(40.0)
+
+
+def test_build_chip_summary_trade_date_is_json_serializable():
+    """DB 給的是 datetime.date，輸出必須是 ISO 字串。
+
+    這條鎖住 2026-08-07 的事故：decision replay 把 chip_summary 嵌進每一列，
+    trade_date 原樣是 date 物件時，整份 report 在 json.dumps 才失敗——而那是
+    跑完數十分鐘 walk-forward 之後的最後一步。先前所有 fixture 都用字串，
+    剛好避開了真實 DB 的型別。
+    """
+    s = scoring._build_chip_summary({
+        "total_score": 42.5, "signal_type": "BULLISH",
+        # psycopg2 讀 postgres 的 DATE 欄位就是給這個型別
+        "trade_date": date(2026, 8, 6),
+        "institutional_score": 60.0, "margin_score": -10.0,
+        "broker_score": 30.0, "concentration_score": 40.0,
+    })
+
+    assert s["trade_date"] == "2026-08-06"
+    # 不只驗這個欄位——整份 summary 都要能序列化，否則下一個型別洩漏又會等到實跑才發現。
+    json.dumps(s)
+
+    # sqlite 那條路徑給的是字串，要原樣保留而不是再包一層。
+    assert scoring._build_chip_summary({
+        "total_score": 1.0, "signal_type": "NEUTRAL", "trade_date": "2026-08-06",
+        "institutional_score": 1.0, "margin_score": None,
+        "broker_score": None, "concentration_score": None,
+    })["trade_date"] == "2026-08-06"
+
+    # 查無籌碼資料時維持 None（不能變成 "None" 字串）。
+    assert scoring._build_chip_summary(None)["trade_date"] is None
 
 
 def test_build_chip_summary_partial_coverage_separates_raw_and_effective():

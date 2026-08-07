@@ -53,6 +53,32 @@ max(編譯, MySQL) 而不是 sum。調瘦後（`performance-schema=OFF`、buffer
 MySQL 實測佔 **182MiB**（預設值會是 400MB 以上），過程中 host available 低點約 689MB。
 腳本開頭會檢查 available ≥ 600MB，不足直接中止而不是硬跑。
 
+### 用真實資料跑 evaluation：`scripts/run-evaluation.sh`
+
+SR Zone 的 evaluation / decision replay / sweep 要拿**真實的數千根日 K** 才有意義，
+單元測試的合成資料取代不了。這支腳本封裝了那條路徑：
+
+```bash
+scripts/run-evaluation.sh --symbols 2330,2454              # evaluation
+MODE=replay scripts/run-evaluation.sh --symbols 2330,2454  # decision replay（daily confirmation 在這裡）
+MODE=sweep  scripts/run-evaluation.sh --symbols 2330,2454  # ATR builder 參數 sweep
+OUTPUT=/tmp/r.json MODE=replay scripts/run-evaluation.sh --symbols …  # 結果落檔
+```
+
+**預設唯讀、不寫 DB**。資料來源是 live（dev project 沒有這些歷史資料），要寫入必須明確
+`WRITE_DB=1` 並會看到警告——CLAUDE.md 規定驗收不得動 live 資料，所以把「不寫」設成預設。
+DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版控，live 改密碼也不用改腳本）。
+
+**先做小規模預檢再投入完整規模**（2026-08-07 的教訓，見 [`issue.md`](./issue.md) I-059）：
+這條路徑會跑很久，而序列化失敗發生在**最後一步**——曾經整輪跑完才因為一個 `date` 物件
+炸掉，前面的運算全部白費。改動後先用 `--symbols 2檔 --limit 400 --replay-max-rows 20`
+跑一次（約兩分鐘），確認真實 DB 的型別都過得了 `json.dumps`，再跑完整規模。
+
+**資源特性**（2026-08-07 實測，11 檔 × `replay_max_rows=5000`）：記憶體約 **157MiB**，
+受限的是 CPU 與 `replay_max_rows` 而非記憶體。**執行時間請實際量測，不要用本機的等待感推估**
+——這個沙箱的 `sleep` 不等比推進 wallclock，且腳本用 `--rm`，容器結束後拿不到
+`FinishedAt`。要量時間得自行在呼叫端記錄起訖。
+
 ### migration 的 Down 區塊也要能跑
 
 **寫破壞性 migration（`DROP TABLE` 再 `CREATE`）時，Down 必須把前一版結構重建回來**，

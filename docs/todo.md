@@ -610,7 +610,7 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | Python 端與前端接入皆已實作（待 review）；仍有 Python 端的 RR distribution 未做 |
+| 狀態 | Python 端與前端接入皆已實作（待 review）；**分層樣本量已用真實資料驗證足夠（2026-08-07）**；仍有 Python 端的 RR distribution 未做 |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 模型驗證 / Frontend |
 | 建立日期 | 2026-07-15 |
@@ -681,6 +681,56 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 **T-028 仍未結案的部分**（Python 端，本次不做）：更完整的 RR distribution（percentiles、
 drawdown-like failure window）、以及依量能強弱數值、event sequence 順序細節與 RR gate 原始
 基礎值做更細分層。
+
+#### 用真實資料量測分層樣本量（2026-08-07）
+
+**目的**：先前的分層統計都是用合成資料或極小樣本驗證的，不知道接上真實資料後九個分層
+是否有足夠樣本支撐結論。這次用 live DB 的真實日 K 實跑 decision replay 來回答。
+
+**執行方式**：`scripts/run-evaluation.sh`（本次新增）以 `MODE=replay` 唯讀讀取 live DB、
+**不寫任何一張表**；11 檔 × `--replay-max-rows 5000`。腳本設計見
+[`development-workflow.md`](./development-workflow.md)。
+
+**結果**：4,998 筆 outcome rows，九個分層的樣本數如下。
+
+| 分層 | 組數 | 最大組 | 最小組 |
+|---|---|---|---|
+| `by_state` | 5 | BLOCKED 3,909 | **ENTRY_READY 13** |
+| `by_primary_role` | 3 | SUPPORT 2,396 | AT_ZONE 1,037 |
+| `by_volume_context` | 7 | EXTREME_VOLUME 1,990 | HIGH_VOLUME_BREAKDOWN 87 |
+| `by_event_sequence` | 7 | INTRADAY_RECLAIM 1,491 | 87 |
+| `by_market_event_types` | 7 | INTRADAY_RECLAIM 1,491 | 87 |
+| `by_event_market_state` | 2 | RECLAIM_ATTEMPT 3,773 | NORMAL 1,225 |
+| `by_rr_gate` | 2 | RR_BLOCKED 4,084 | RR_QUALIFIED 914 |
+| `by_rr_gate_reason_code` | 5 | RR_UNAVAILABLE 3,109 | EXECUTION_RR_UNAVAILABLE 78 |
+| `by_rr_bucket` | 6 | RR_UNAVAILABLE 3,109 | RR_1_5_TO_2_0 175 |
+
+**結論：主要分層的樣本量足夠，不需要擴大標的數。**
+
+- 除 `ENTRY_READY`(13) 與 `EXECUTION_RR_UNAVAILABLE`(78) 外，各組都有數百到數千筆。
+- **`ENTRY_READY` 稀少不是標的數的問題**：`BLOCKED` 佔了 78%（3,909/4,998），
+  這是決策引擎本身的分布特性。加標的只會等比放大各組，弱項仍然是弱項；
+  要補強得靠拉高 `replay_max_rows`（總樣本預算），而不是加標的。
+  `replay_max_rows` 的分配規則見
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Decision Replay 的取樣規則」。
+- 順帶驗證了前端的 `MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20` 門檻**在真實資料上真的會觸發**
+  （`ENTRY_READY` 13 < 20 會標示樣本不足），不是擺設。
+
+**過程中發現並修掉一個高嚴重度 bug**：decision replay 對有籌碼資料的標的必定在最後一步
+序列化失敗（`trade_date` 是 `date` 物件），連帶影響排程／API 的 `--write-db` 路徑。
+見 [`issue.md`](./issue.md) **I-059**。**這代表在此之前，decision replay 從未成功對
+真實籌碼資料跑完過**——T-028 的分層統計先前只在合成資料上驗證過。
+
+**量到的執行特性**：
+
+- 記憶體全程約 **157MiB**，遠低於 I-056 對 evaluation 的 270MB 描述——
+  這條路徑受限的是 CPU 與 `replay_max_rows`，不是記憶體。
+- 執行時間**未取得可信數字**（容器帶 `--rm`，結束後拿不到 `FinishedAt`；
+  且本機沙箱的 `sleep` 不等比推進 wallclock，不能用等待次數推估）。
+  下次要量時間的話，腳本要先拿掉 `--rm` 或自行記錄起訖時間。
+
+**續作建議**：擴大標的不會改善分層品質，優先做 RR distribution（本項唯一未做的部分），
+可直接用這份 4,998 筆的真實 report 驗證新指標。
 
 ---
 

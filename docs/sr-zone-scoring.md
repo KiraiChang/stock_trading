@@ -1585,6 +1585,13 @@ production 進場上限降到 `SMALL_ENTRY`。刻意用 warning 而非 blocking�
 > 低於門檻而落在 DEGRADED。這是誠實的訊號（200 列本來就驗證不了 200 檔），要完整覆蓋就得
 > 調高 `replay_max_rows` 或縮小 `sr_evaluation.symbols`。
 
+**做分層統計時，`replay_max_rows` 才是決定樣本量的旋鈕，不是標的數**（2026-08-07 實測）：
+11 檔 × `replay_max_rows=5000` 得到 4,998 筆 outcome rows，九個分層裡除兩組外都有數百到
+數千筆。但 `by_state` 的分布極度偏斜——`BLOCKED` 一組就佔 78%，`ENTRY_READY` 只有 13 筆。
+**那是決策引擎本身的分布特性，不是取樣不足**：加標的只會等比放大各組，稀有狀態仍然稀有，
+要補強只能拉高總預算。預設 200 拿來做九個分層等於每組個位數，無法產生統計量。
+完整量測結果見 [`todo.md`](./todo.md) T-028。
+
 `pipeline_version` 因此從 `sr_zone_decision_replay_p0` 升為 `..._p1`，讓新舊取樣方式的
 report 可區分。**`schema_version` 維持 `sr_zone_decision_replay_p0` 不變**——
 `fetch_latest_sr_regression_governance` 是用 schema_version 過濾的，改了會讓 production gate

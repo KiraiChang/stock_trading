@@ -901,7 +901,8 @@ python-server。T-003 P2 若決定預設啟用，這個開關的可觀測性與�
 都遠超過，所以 sweep 產得出這兩組的建議——但**永遠產不出 LOW 的建議**。
 
 *Pass 0 順帶抓到一個 bug*：`zone_outcomes` 三種分層的比率欄位在前端永遠顯示 `—`
-（欄位名不一致），見 [`issue.md`](./issue.md) I-055，已於同日修復。**修好後才有下表**，
+（欄位名不一致），已於同日修復；現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
+「Zone 層分層的欄位語意」。**修好後才有下表**，
 而這正是 Pass 1 要比較的維度——若沒先跑 Pass 0，Pass 1 會在只剩 `average_forward_return`
 一個維度可比的情況下跑完，結論不可靠。
 

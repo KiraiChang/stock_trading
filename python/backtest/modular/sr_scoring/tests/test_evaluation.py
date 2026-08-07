@@ -306,7 +306,7 @@ def test_run_evaluation_returns_zone_outcome_report(tmp_path):
     assert sum(bucket["rows"] for bucket in report["zone_outcomes"]["by_volatility_bucket"].values()) == report["rows"]
 
     # 分層必須輸出與頂層同名的比率欄位，而且要有實際數值。
-    # I-055：分層原本只回 hold_rate / break_rate，前端讀的是這三個 key，於是永遠顯示 `—`；
+    # 分層原本只回 hold_rate / break_rate，前端讀的是這三個 key，於是永遠顯示 `—`；
     # 當時的測試只斷言 by_volatility_bucket 非空與 rows 加總，剛好完全避開了出錯的欄位。
     # 所以這裡斷言「值不是 None 且落在 [0,1]」，不是只斷言 key 存在。
     zone_outcomes = report["zone_outcomes"]

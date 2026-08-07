@@ -200,7 +200,7 @@ def _zone_outcome_group(group: pd.DataFrame) -> dict[str, Any]:
 
     三個比率的名稱與算法與 `_zone_outcomes` 的頂層**完全一致**，這是刻意的：分層自己另立一套
     key，前端就無法用同一組欄位渲染分層與頂層，也無法直接對照「這一組比整體好還是差」。
-    I-055 就是這樣來的——分層回傳 `hold_rate`/`break_rate`，前端讀 `support_hold_rate` 等三個
+    2026-08-06 修掉的那個 bug 就是這樣來的——分層回傳 `hold_rate`/`break_rate`，前端讀 `support_hold_rate` 等三個
     不存在的 key，三張分層表的比率欄位因此永遠顯示 `—`，而且前後端測試各自用虛構的形狀
     互相印證，誰也沒發現。**改這裡時要同步確認 `frontend/src/lib/api/srZones.ts` 的
     `SRZoneOutcomeGroup`。**

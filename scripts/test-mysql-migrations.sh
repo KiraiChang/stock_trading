@@ -148,7 +148,7 @@ if [ -z "$NETWORK_NAME" ]; then
 fi
 
 # ── 階段 C：執行已編好的測試執行檔 ──────────────────────────────────
-echo "==> [3/4] 跑 migration 驗證（up → 驗 schema → down 到 17）"
+echo "==> [3/4] 跑 migration 驗證（up → 驗 schema → 分段 down 到 0）"
 docker run --rm \
   --network "$NETWORK_NAME" \
   --cpus="$CPUS" \

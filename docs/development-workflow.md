@@ -53,8 +53,35 @@ max(編譯, MySQL) 而不是 sum。調瘦後（`performance-schema=OFF`、buffer
 MySQL 實測佔 **182MiB**（預設值會是 400MB 以上），過程中 host available 低點約 689MB。
 腳本開頭會檢查 available ≥ 600MB，不足直接中止而不是硬跑。
 
-`down` 只回滾到版本 17，不是 0——原因見 [`issue.md`](./issue.md) **I-057**（017／018 的
-Down 直接 DROP 而不還原舊結構，是三個 engine 共有的結構性問題）。
+### migration 的 Down 區塊也要能跑
+
+**寫破壞性 migration（`DROP TABLE` 再 `CREATE`）時，Down 必須把前一版結構重建回來**，
+不能只有 `DROP TABLE IF EXISTS`。否則往回滾越過它之後，更早那筆的 `ALTER TABLE` 會
+找不到表，整條回滾鏈中斷——017／018 就這樣壞了一段時間，直到 2026-08-07 才補上真正的逆操作。
+資料本來就救不回來（Up 已經刪了），Down 只需還原結構。
+
+回滾鏈由兩支測試把關：
+
+- `backend/internal/database/migrate_sqlite_test.go`：**每次 `backend/scripts/test.sh`
+  都會跑**（sqlite 用暫存檔，不需要 container）。這是常態的回歸保護。
+- `backend/internal/database/migrate_mysql_test.go`：需要 `scripts/test-mysql-migrations.sh`。
+
+**兩支都採分段回滾，不是直接 down 到 0——這一點是刻意的。** 一路滾到底「沒報錯」
+驗不到破壞性 migration 的 Down 重建得**對不對**：以 017／018 為例，017 的 Down 一執行
+就把 018 重建的表砍掉了，所以 018 的 Down 內容只要不出錯就會過，寫錯也沒人知道。
+正確做法是**越過每一筆之後立刻檢查表的形狀**：
+
+```
+down to 17  → 斷言 stock_sr_zones 有 017 版獨有的欄位（net_score / confidence_level …）
+down to 16  → 斷言退回 015+016 的形狀（confidence 在、net_score 不在）
+down to 0   → 斷言除 goose_db_version 外一張表都不剩
+```
+
+日後再寫破壞性 migration 時，測試要比照補上對應的中途斷言，否則那段 Down SQL
+等於沒有被驗證過。
+
+postgres 的 Down 鏈**尚未自動化驗證**（需要一個可丟棄的 postgres 實例；在 dev project
+上跑 down 到 0 會清掉 dev 資料，屬另一個明確動作）。
 
 理由：手打指令會漂移，本專案已經因此踩過三個坑——以 root 執行留下 root-owned 檔案
 （`backend/server` 曾被誤 commit、`backend/internal/ui/dist` 一度無法被覆寫）、
@@ -426,7 +453,7 @@ docker compose -f docker-compose.dev.yml down -v
   同理，新增分層／統計欄位時不要在前端自行推導比率。該批分層只提供原始 counts，Python 的
   `_outcome_rate` 帶 `primary_role` 過濾語意，前端相除得到的數字會跟後端定義悄悄分岔，
   且不會有任何測試發現。要比率就在 Python 算好送過來。
-- **測試 fixture 必須是後端真的會產生的形狀，斷言必須到值**（2026-08-06，issue.md I-055）：
+- **測試 fixture 必須是後端真的會產生的形狀，斷言必須到值**（2026-08-06 實例）：
   `zone_outcomes` 的分層比率在前端永遠顯示 `—` 長達數週，因為 Python 回的是
   `hold_rate`/`break_rate`、前端讀的是 `support_hold_rate` 等三個不存在的 key。
   三層測試全綠是因為——**前端測試的 fixture 是憑印象手寫的**，用了後端從不產生的 key，
@@ -440,7 +467,7 @@ docker compose -f docker-compose.dev.yml down -v
      全是 `—` 時照樣通過；鎖到該列的 `<td>` 斷言「出現 62.0%」才擋得住。
      同理，null 的欄位要斷言它顯示 `—` **且不出現 `0.0%`**。
   3. 跨語言的欄位契約，**最終要靠一次真實資料的實跑驗證**——單元測試兩邊都用合成資料時，
-     兩邊可以一致地錯。I-055 就是靠 T-039 的 Pass 0 實跑才浮出來。
+     兩邊可以一致地錯。這個 bug 就是靠 T-039 的 Pass 0 實跑才浮出來。
 
 ### 4. 模組 import 不得有連線等副作用，測試要能獨立啟動
 

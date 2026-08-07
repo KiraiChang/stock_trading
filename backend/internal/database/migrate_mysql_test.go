@@ -116,43 +116,49 @@ func TestMySQLMigrationsUpAndDown(t *testing.T) {
 
 	assertMarketBackfillJobsSchema(t, db)
 
-	// 回滾驗證：往回滾到 017 為止，不是滾到 0。
+	// 回滾驗證：一路 down 到 0，驗證每一筆 migration 的 Down 都真的可逆。
 	//
-	// 017（sr_zones 機構級重新設計）的 Down 只是 DROP TABLE，沒有還原 017 之前的
-	// stock_sr_zones，所以只要越過 017 再往回滾，016 的
-	// `ALTER TABLE stock_sr_zones DROP COLUMN confidence` 就會因為表不存在而失敗。
-	// 這是**三個 engine 共有的結構性問題**（postgres / sqlite 的 017 寫法相同），
-	// 不是 mysql 專屬，修它等於重寫一串歷史 migration 的逆操作——已記進
-	// docs/issue.md，不在本測試的範圍內。
-	//
-	// 滾到 017 仍然有價值：它涵蓋 018 之後所有「還在演進中」的 migration 的 Down 區塊，
-	// 也就是實務上真的可能被回滾的那一段。
-	const downToVersion = 17
-
+	// 這條路徑曾經在 016 中斷——017／018 是破壞性重建（DROP 再 CREATE），但它們的 Down
+	// 只有 DROP、沒有還原前一版結構，所以越過它們之後 016 的
+	// `ALTER TABLE stock_sr_zones DROP COLUMN confidence` 會找不到表。
+	// 兩筆的 Down 已補上結構重建，這裡才改回滾到底。
 	goose.SetBaseFS(mysqlFS)
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatalf("goose set dialect: %v", err)
 	}
-	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, downToVersion); err != nil {
-		t.Fatalf("mysql migration down 到 %d 失敗: %v", downToVersion, err)
+
+	// 分段回滾並在中途檢查結構，理由同 migrate_sqlite_test.go：「一路 down 到 0 沒報錯」
+	// 驗不到 017／018 的 Down 重建得對不對（017 的 Down 一執行就把 018 重建的表砍掉）。
+	// mysql 的 Down 是獨立的方言檔案，要有自己的覆蓋。
+	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 17); err != nil {
+		t.Fatalf("mysql migration down 到 17 失敗: %v", err)
+	}
+	assertMySQLColumns(t, db, "stock_sr_zones",
+		"net_score", "net_score_label", "confidence_level", "reject_count", "break_count",
+		"zone_momentum", "trading_score", "trading_recommendation")
+	assertMySQLColumns(t, db, "stock_sr_zone_analyses", "overall_trend", "overall_volatility")
+
+	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 16); err != nil {
+		t.Fatalf("mysql migration down 到 16 失敗: %v", err)
+	}
+	assertMySQLColumns(t, db, "stock_sr_zones",
+		"rejection_count", "breakout_count", "avg_return_after_touch", "trend_strength",
+		"confidence", "expected_value", "risk_reward_ratio")
+
+	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 0); err != nil {
+		t.Fatalf("mysql migration down 到 0 失敗: %v", err)
 	}
 
 	if v, err := goose.GetDBVersion(db.DB); err != nil {
 		t.Fatalf("讀不到 goose 版本: %v", err)
-	} else if v != downToVersion {
-		t.Fatalf("down 之後版本 = %d, want %d", v, downToVersion)
+	} else if v != 0 {
+		t.Fatalf("down 之後版本 = %d, want 0", v)
 	}
 
-	// 018 之後建立的表該不見了。
-	if tableExists(t, db, "market_backfill_jobs") {
-		t.Error("market_backfill_jobs 在 down 之後仍存在，058 的 Down 沒生效")
-	}
-	// 反向哨兵：candles（001 建立，之後沒有任何 migration 動過它）必須還在，
-	// 證明只滾到 017 而不是把整個 DB 清掉。
-	// 刻意不用 stock_sr_zones 當哨兵——018 的 Down 和 017 一樣是直接 DROP 不還原
-	// （見 issue.md I-057），滾到 017 時它本來就會消失。
-	if !tableExists(t, db, "candles") {
-		t.Error("candles 不見了，代表滾過頭（應停在 017）")
+	// goose_db_version 是 goose 自己的版本表，它不會刪掉自己；除此之外應該一張表都不剩。
+	if n := countTablesExcludingGoose(t, db); n != 0 {
+		t.Fatalf("down 到 0 之後還剩 %d 張表，代表有 migration 的 Down 沒清乾淨: %v",
+			n, tableNames(t, db))
 	}
 }
 
@@ -199,14 +205,53 @@ func countTables(t *testing.T, db *sqlx.DB) int {
 	return n
 }
 
-func tableExists(t *testing.T, db *sqlx.DB, name string) bool {
+// assertMySQLColumns 檢查回滾到某個版本之後，表的欄位確實是那一版的形狀。
+func assertMySQLColumns(t *testing.T, db *sqlx.DB, table string, want ...string) {
+	t.Helper()
+	var names []string
+	if err := db.Select(&names, `
+		SELECT COLUMN_NAME FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+	`, table); err != nil {
+		t.Fatalf("讀 %s 的欄位失敗: %v", table, err)
+	}
+	if len(names) == 0 {
+		t.Fatalf("表 %s 不存在——Down 沒有把前一版結構重建回來", table)
+	}
+	have := make(map[string]bool, len(names))
+	for _, n := range names {
+		have[n] = true
+	}
+	for _, c := range want {
+		if !have[c] {
+			t.Errorf("%s 缺少欄位 %q——Down 還原的結構不是預期的版本", table, c)
+		}
+	}
+}
+
+// down 之後 goose_db_version 本身會留著（goose 不會刪自己的版本表），要排除掉。
+func countTablesExcludingGoose(t *testing.T, db *sqlx.DB) int {
 	t.Helper()
 	var n int
 	if err := db.Get(&n, `
 		SELECT COUNT(*) FROM information_schema.TABLES
-		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-	`, name); err != nil {
-		t.Fatalf("查表是否存在失敗: %v", err)
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME <> 'goose_db_version'
+	`); err != nil {
+		t.Fatalf("數表失敗: %v", err)
 	}
-	return n > 0
+	return n
+}
+
+// 失敗時列出殘留的表名，比只給一個數字好查。
+func tableNames(t *testing.T, db *sqlx.DB) []string {
+	t.Helper()
+	var names []string
+	if err := db.Select(&names, `
+		SELECT TABLE_NAME FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME <> 'goose_db_version'
+		ORDER BY TABLE_NAME
+	`); err != nil {
+		t.Fatalf("列表失敗: %v", err)
+	}
+	return names
 }

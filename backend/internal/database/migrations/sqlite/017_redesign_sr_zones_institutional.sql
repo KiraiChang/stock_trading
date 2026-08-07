@@ -69,5 +69,48 @@ CREATE TABLE stock_sr_zones (
 CREATE INDEX idx_stock_sr_zones_analysis_id ON stock_sr_zones(analysis_id);
 
 -- +goose Down
+-- 重建「014 + 015 + 016」的最終結構，理由見 postgres 版同名 migration 的 Down 註解
+-- 與 development-workflow.md 的「migration 的 Down 區塊也要能跑」。
+-- **資料回不來**，只還原結構。
 DROP TABLE IF EXISTS stock_sr_zones;
 DROP TABLE IF EXISTS stock_sr_zone_analyses;
+
+CREATE TABLE stock_sr_zone_analyses (
+    id             INTEGER  PRIMARY KEY AUTOINCREMENT,
+    symbol         TEXT     NOT NULL,
+    timeframe      TEXT     NOT NULL,
+    analyzed_at    DATETIME NOT NULL,
+    current_price  REAL     NOT NULL,
+    model_version  TEXT     NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_stock_sr_zone_analyses_symbol ON stock_sr_zone_analyses(symbol, created_at DESC);
+
+CREATE TABLE stock_sr_zones (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id             INTEGER NOT NULL,
+    price_low               REAL    NOT NULL,
+    price_high              REAL    NOT NULL,
+    method                  TEXT    NOT NULL,
+    role                    TEXT    NOT NULL,
+    support_score           REAL    NOT NULL,
+    resistance_score        REAL    NOT NULL,
+    bounce_probability      REAL,
+    break_probability       REAL,
+    touch_count             INTEGER NOT NULL,
+    rejection_count         INTEGER NOT NULL,
+    breakout_count          INTEGER NOT NULL,
+    avg_return_after_touch  REAL    NOT NULL,
+    relative_volume         REAL    NOT NULL,
+    volatility              REAL    NOT NULL,
+    trend_strength          REAL    NOT NULL,
+    status                  TEXT    NOT NULL DEFAULT 'PENDING',
+    broken_at               DATETIME,
+    broken_price            REAL,
+    -- 016 加的三欄
+    confidence              REAL    NOT NULL DEFAULT 0,
+    expected_value          REAL,
+    risk_reward_ratio       REAL,
+    FOREIGN KEY(analysis_id) REFERENCES stock_sr_zone_analyses(id)
+);
+CREATE INDEX idx_stock_sr_zones_analysis_id ON stock_sr_zones(analysis_id);

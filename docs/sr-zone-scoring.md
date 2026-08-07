@@ -1804,7 +1804,8 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
   在 `by_role` 分層裡兩者**必有一個是 `null`**（該組只有一種角色），這是正常的，不是缺資料。
 
 這組欄位在 2026-08-06 之前是錯的（分層只回 `hold_rate`/`break_rate`，前端讀三個不存在的 key，
-比率欄位永遠顯示 `—`），詳見 [`issue.md`](./issue.md) I-055。
+比率欄位永遠顯示 `—`）。當時前後端測試各自對著虛構的形狀互相印證都沒發現，教訓與具體要求
+見 [`development-workflow.md`](./development-workflow.md) 的「測試 fixture 必須是後端真的會產生的形狀」。
 
 **隔日／兩日確認的九個分層**（2026-08-06 補）：`daily_confirmation_summary` 除了摘要的五個 rate
 與兩日正負報酬率之外，還有九個分層。面板依語意分三群，各自一個預設收合的 `<details>`：

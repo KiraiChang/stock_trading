@@ -390,7 +390,7 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
         break_positive_rate: 0.21,
         average_forward_return: 0.012,
         // 分層 fixture 的形狀要跟 Python `_zone_outcome_group` 實際輸出一致：六個 key、
-        // by_role 只有一種角色所以另一個比率是 null。I-055 就是這裡憑印象手寫、用了
+        // by_role 只有一種角色所以另一個比率是 null。這裡曾經憑印象手寫、用了
         // Python 從不產生的 key，於是前後端測試各自對著虛構的形狀互相印證。
         by_role: {
           SUPPORT: {
@@ -418,7 +418,7 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.getByText(/Zone 層指標/)).toBeInTheDocument()
     expect(screen.getByText(/支撐守住 62\.0%/)).toBeInTheDocument()
 
-    // 分層表要真的印出數字。只斷言「Zone 層指標」這個標題存在，是 I-055 能活這麼久的原因：
+    // 分層表要真的印出數字。只斷言「Zone 層指標」這個標題存在，正是那個 bug 能活這麼久的原因：
     // 三個比率欄位全是 `—` 也照樣通過。
     const supportRow = screen.getByText('SUPPORT').closest('tr')
     const supportCells = Array.from(supportRow?.querySelectorAll('td') ?? []).map((td) =>

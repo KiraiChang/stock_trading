@@ -1590,7 +1590,8 @@ production 進場上限降到 `SMALL_ENTRY`。刻意用 warning 而非 blocking�
 數千筆。但 `by_state` 的分布極度偏斜——`BLOCKED` 一組就佔 78%，`ENTRY_READY` 只有 13 筆。
 **那是決策引擎本身的分布特性，不是取樣不足**：加標的只會等比放大各組，稀有狀態仍然稀有，
 要補強只能拉高總預算。預設 200 拿來做九個分層等於每組個位數，無法產生統計量。
-完整量測結果見 [`todo.md`](./todo.md) T-028。
+（2026-08-07 實測：11 檔 × `replay_max_rows=5000` → 4,998 列，九個分層裡除兩組外
+都有數百到數千筆；`by_state` 的 `BLOCKED` 一組就佔 78%，`ENTRY_READY` 僅 13 筆。）
 
 `pipeline_version` 因此從 `sr_zone_decision_replay_p0` 升為 `..._p1`，讓新舊取樣方式的
 report 可區分。**`schema_version` 維持 `sr_zone_decision_replay_p0` 不變**——
@@ -1872,8 +1873,8 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
   > 同時出現 `volume_context=EXTREME_VOLUME` 與 `volume_strength=VOL_LT_0_8`——
   > **這不是 bug，是兩個不同主體**。比較兩者時要記得；replay row 只帶 primary zone，
   > 拿不到全體 zone 的最大值，要對齊得先擴充 row projection。
-- **`by_rr_formula_state` 是用來拆開 `RR_UNAVAILABLE` 的。** 真實資料上
-  `by_rr_gate_reason_code` 的 `RR_UNAVAILABLE` 是最大的一組（4,998 筆裡佔 62%），
+- **`by_rr_formula_state` 是全域維度，但在 `RR_UNAVAILABLE` 子集內是乾淨的分割。**
+  真實資料上 `by_rr_gate_reason_code` 的 `RR_UNAVAILABLE` 是最大的一組（4,998 筆裡佔 62%），
   但看不出 RR 為何算不出來。加上這個分層後才分得開三種處置完全不同的情況：
   **`REWARD_MISSING`**（有停損、沒有目標價，zone 上方沒有可用壓力區——實測是最大宗）、
   **`RISK_NOT_POSITIVE`**（entry 與 stop 都有，但 `entry - stop <= 0`，停損價在進場價之上或同價）、
@@ -1885,6 +1886,20 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
   > 初版就開了那個空桶，真實資料跑出 0 筆卻可能被誤讀成「風險側從不缺」，
   > 而真正的 `entry - stop <= 0` 案例被靜靜併進「兩邊都缺」。
   > 這條不變式由 `test_rr_formula_state_has_no_unreachable_bucket` 對真實生產者鎖住。
+
+  **實測分布**（2026-08-10，4 檔 × `limit=600` × `replay_max_rows=400`，400 列）：
+  `REWARD_MISSING` 138（34.5%）／`ENTRY_OR_STOP_MISSING` 123（30.8%）／
+  `RR_FORMULA_COMPLETE` 81（20.3%）／`RISK_NOT_POSITIVE` 58（14.5%），
+  最小桶 58 筆遠高於樣本不足門檻 20。其中 `RISK_NOT_POSITIVE` 那 58 筆在初版分桶下
+  會被併進「兩邊都缺」，**等於 14.5% 的列被貼上錯誤標籤**——這是重新設計的實據。
+
+  **這個維度不是 `RR_UNAVAILABLE` 的子分類，桶內也含其他 reason code 的列**
+  （2026-08-10 交叉表更正）。在 `RR_UNAVAILABLE`(235) 內它確實乾淨分割成
+  127／70／38；但另有 33 列是 `RR_QUALIFIED` 卻 `ENTRY_OR_STOP_MISSING`、
+  14 列是 `RR_QUALIFIED` 卻 `RISK_NOT_POSITIVE`——**gate 說 RR 合格，卻算不出可執行的
+  風險距離**。原因是 `_rr_gate()` 用 zone 層預先算好的 `primary_zone.risk_reward_ratio`，
+  而 `rr_context` 是另外由 entry/stop/target 推導的，兩者來源不同。這種矛盾只有交叉看
+  才會浮現，是這個維度真正的價值所在。
   只看 `by_stop_distance_bucket` 會把停損距離當成唯一的原始基礎值，完全看不到 reward 側的缺口。
 - **`by_primary_market_event` 不是時間順序，別照字面理解**（2026-08-07 更正，見
   本節）。這個欄位原名 `by_first_market_event`，文件也曾寫成

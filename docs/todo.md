@@ -606,262 +606,32 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 ---
 
-### T-028：SR Zone Daily Confirmation 回測與評估
+### T-028：SR Zone Daily Confirmation 的 drawdown-like failure window
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作／待 review**：Python 端、前端接入、RR distribution ＋ 更細分層皆完成（2026-08-07），分層樣本量已用真實資料驗證足夠；唯一未做的是 drawdown-like failure window |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / 模型驗證 / Frontend |
+| 狀態 | 待規劃（T-028 其餘部分已於 2026-08-10 完成並收斂） |
+| 優先度 | 低 |
+| 分類 | Python / SR Zone / 模型驗證 |
 | 建立日期 | 2026-07-15 |
 | 來源 | SR Zone Decision Engine P2 後續限制；T-002 的子任務 |
 
-`decision_summary.daily_confirmation` 是單筆 EOD runtime 判讀，不能代表規則已完成歷史驗證。
-後續需在 SR Zone evaluation/backtest pipeline（T-002）中加入 daily confirmation label 與成效統計：
+T-028 的主體（daily confirmation 的 label 與成效統計、十五個分層、RR distribution、
+前端接入）**已全部完成並用真實資料驗證**，現況說明見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「隔日／兩日確認的分層」、
+「再細的六個分層與分桶邊界的由來」與「RR 分布」。
 
-- 候選支撐隔日守住率。（已實作起步，方向已 review；續作項目見下方剩餘工作）
-- 候選壓力隔日壓回率或突破延續率。（已實作起步，方向已 review；續作項目見下方剩餘工作）
-- 兩日確認後的勝率、風險報酬分布與失效率。（已實作起步：兩日方向 / 報酬統計；完整 RR distribution 待補）
-- 不同量能條件、event sequence、RR gate 下的分層表現。（已實作起步，方向已 review；續作項目見下方剩餘工作）
+**唯一未做的是 drawdown-like failure window**：目前只知道兩日確認後的**終點報酬**
+（`two_bar_close_return` 與其分布），不知道**過程**——確認之後價格曾經逆行多少、
+以及多久才失效。這兩個問題對停損設定的實務價值高於終點報酬。
 
-已實作範圍：
+**為什麼一直沒做**：需要逐根回放窗口內的價格路徑（最大不利偏移、失效發生在第幾根），
+成本比現有的終點統計高一個量級。decision replay 已經是 CPU 受限的路徑
+（見 sr-zone-scoring.md 的「Decision Replay 的取樣規則」），再加一層逐根計算前
+要先確認值不值得。
 
-- `run_decision_replay()` 的每列 replay row 新增 `daily_confirmation_outcome`、
-  `next_close_return`、`two_bar_close_return`。
-- `outcome_summary.daily_confirmation_summary` 會輸出支撐 / 壓力隔日 zone 結果與兩日結果，
-  並提供 `by_state`、`by_primary_role` 分層。
-- `outcome_summary.daily_confirmation_summary` 已補上量能條件、event sequence、market event、
-  market state、RR gate、RR reason code、RR bucket 分層。
-- `outcome_summary.daily_confirmation_summary.failure_distribution` 已提供第一版失敗分布。
-- 尚未完成：更完整的 RR distribution（例如 percentiles / drawdown-like failure window）、
-  以及依量能強弱數值、event sequence 順序細節與 RR gate 原始基礎值做更細分層。
-
-> 2026-07-27 review：daily confirmation outcome 標記與分層統計以未來 idx+1 / idx+2 label 計算、
-> 無 lookahead，方向確認無誤，見 T-002 的「review 結論」段落。
-
-#### 前端接入（2026-08-06 實作，待 review）
-
-原記錄的缺口是：Python 端九個分層都算好了，前端只渲染摘要，且 `by_state` / `by_primary_role`
-的 TS 型別**宣告錯誤**（被套成 `SRDecisionOutcomeGroup`，與實際回傳除了 `rows` 之外零重疊，
-因為從沒被消費過所以型別檢查抓不到）。已於 2026-08-06 接線完成。
-
-**實作範圍**（純前端，無 contract 變更）：
-
-| 檔案 | 動作 |
-|---|---|
-| `frontend/src/lib/api/srZones.ts` | 新增 `SRDailyConfirmationGroup`（依 `_daily_confirmation_groups` 實際輸出）；修正 `by_state` / `by_primary_role` 型別，補上其餘 7 個分層與 `positive/negative_two_bar_return_rate`。`SRDecisionOutcomeGroup` 不動——另外三個欄位在用它且形狀正確 |
-| `frontend/src/routes/SRZones.svelte` | 九個分層依語意分三群（結果面／條件面／RR 面），各一個預設收合的巢狀 `<details>`；`MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20` 樣本不足標示；三個 Record 欄位以 `隔日/`｜`兩日/`｜`失敗/` 前綴攤成 chip 列；摘要行補兩個 rate |
-| `frontend/src/routes/SRZones.test.ts` | 新增 4 筆測試；順手修掉一句與實作矛盾的舊註解（原寫「0 是合法設定值」，但 B 已改成 0 也不送） |
-
-**驗證狀況（未完成，不能據此收斂）**：
-
-- ✅ `VITEST_ARGS="src/routes/SRZones.test.ts"` → **23 passed**（含新增 4 筆）。
-- ✅ 變異驗證：把樣本門檻由 20 改成 1，「樣本不足」那條如預期變紅，確認門檻邏輯不是擺設。
-- ✅ **`frontend/scripts/test.sh` 完整三步全綠**：svelte-check 0 errors 0 warnings、
-  vitest **55 passed**、vite build 通過。
-  一開始這步因 host 記憶體不足而 OOM（svelte-check 的 heap 被 mem-guard 壓到 202MB），
-  後來實測出 svelte-check 的下限約 225MB heap 並在 available 回到 513MB 時跑完。
-  過程中量到的數字與腳本改善見 [`development-workflow.md`](./development-workflow.md)
-  的「frontend 三步的記憶體實測」。
-
-**self-review 後修掉的三處（2026-08-06）**：
-
-1. `dailyConfirmationCountChips(item)` 在同一列被呼叫兩次（`{#if}` 判斷一次、`{#each}` 再一次）
-   → 改用 `{@const chips = ...}`。
-2. 沒有 chip 時補一列空 `<tr>` 只為了保住底線 → 改成沒有 chip 時把底線 class 掛回主列，
-   不再插入空列。
-3. null 那條測試用 `getAllByText('—').length >= 4`，但 `—` 全頁都是，等於沒測到
-   → 改成用 `closest('tr')` 鎖定該列的 `<td>`，斷言恰好 4 個破折號**且該列不含 `0.0%`**。
-
-現況說明已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「前端手動 evaluation 入口的
-判讀」（三群的分法、**為什麼只顯示 counts 不自行推導比率**、樣本不足門檻 20 的來源），
-型別宣告錯誤那件事補進 [`development-workflow.md`](./development-workflow.md) §3
-（「沒被消費的型別還會默默寫錯」）。
-
-**T-028 仍未結案的部分**（Python 端，本次不做）：更完整的 RR distribution（percentiles、
-drawdown-like failure window）、以及依量能強弱數值、event sequence 順序細節與 RR gate 原始
-基礎值做更細分層。
-
-#### 用真實資料量測分層樣本量（2026-08-07）
-
-**目的**：先前的分層統計都是用合成資料或極小樣本驗證的，不知道接上真實資料後九個分層
-是否有足夠樣本支撐結論。這次用 live DB 的真實日 K 實跑 decision replay 來回答。
-
-**執行方式**：`scripts/run-evaluation.sh`（本次新增）以 `MODE=replay` 唯讀讀取 live DB、
-**不寫任何一張表**；11 檔 × `--replay-max-rows 5000`。腳本設計見
-[`development-workflow.md`](./development-workflow.md)。
-
-**結果**：4,998 筆 outcome rows，九個分層的樣本數如下。
-
-| 分層 | 組數 | 最大組 | 最小組 |
-|---|---|---|---|
-| `by_state` | 5 | BLOCKED 3,909 | **ENTRY_READY 13** |
-| `by_primary_role` | 3 | SUPPORT 2,396 | AT_ZONE 1,037 |
-| `by_volume_context` | 7 | EXTREME_VOLUME 1,990 | HIGH_VOLUME_BREAKDOWN 87 |
-| `by_event_sequence` | 7 | INTRADAY_RECLAIM 1,491 | 87 |
-| `by_market_event_types` | 7 | INTRADAY_RECLAIM 1,491 | 87 |
-| `by_event_market_state` | 2 | RECLAIM_ATTEMPT 3,773 | NORMAL 1,225 |
-| `by_rr_gate` | 2 | RR_BLOCKED 4,084 | RR_QUALIFIED 914 |
-| `by_rr_gate_reason_code` | 5 | RR_UNAVAILABLE 3,109 | EXECUTION_RR_UNAVAILABLE 78 |
-| `by_rr_bucket` | 6 | RR_UNAVAILABLE 3,109 | RR_1_5_TO_2_0 175 |
-
-**結論：主要分層的樣本量足夠，不需要擴大標的數。**
-
-- 除 `ENTRY_READY`(13) 與 `EXECUTION_RR_UNAVAILABLE`(78) 外，各組都有數百到數千筆。
-- **`ENTRY_READY` 稀少不是標的數的問題**：`BLOCKED` 佔了 78%（3,909/4,998），
-  這是決策引擎本身的分布特性。加標的只會等比放大各組，弱項仍然是弱項；
-  要補強得靠拉高 `replay_max_rows`（總樣本預算），而不是加標的。
-  `replay_max_rows` 的分配規則見
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Decision Replay 的取樣規則」。
-- 順帶驗證了前端的 `MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20` 門檻**在真實資料上真的會觸發**
-  （`ENTRY_READY` 13 < 20 會標示樣本不足），不是擺設。
-
-**過程中發現並修掉一個高嚴重度 bug**：decision replay 對有籌碼資料的標的必定在最後一步
-序列化失敗（`trade_date` 是 `date` 物件），連帶影響排程／API 的 `--write-db` 路徑。
-教訓已歸檔到 [`development-workflow.md`](./development-workflow.md) §3（「fixture 的型別也要跟真實來源一致」）。
-**這代表在此之前，decision replay 從未成功對
-真實籌碼資料跑完過**——T-028 的分層統計先前只在合成資料上驗證過。
-
-**量到的執行特性**：
-
-- 記憶體全程約 **157MiB**，遠低於 I-056 對 evaluation 的 270MB 描述——
-  這條路徑受限的是 CPU 與 `replay_max_rows`，不是記憶體。
-- 執行時間**未取得可信數字**（容器帶 `--rm`，結束後拿不到 `FinishedAt`；
-  且本機沙箱的 `sleep` 不等比推進 wallclock，不能用等待次數推估）。
-  下次要量時間的話，腳本要先拿掉 `--rm` 或自行記錄起訖時間。
-
-**續作建議**：擴大標的不會改善分層品質，優先做 RR distribution（本項唯一未做的部分），
-可直接用這份 4,998 筆的真實 report 驗證新指標。
-
-#### 實作計畫：RR distribution ＋ 更細分層（2026-08-07，**已實作／待 review**）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（2026-08-07 完成，已用真實資料交叉驗證） |
-| 範圍 | Python evaluation ＋ 前端顯示；**資料 contract 變更**（replay row 與 outcome_summary 皆新增欄位） |
-| 影響 runtime | python、frontend |
-
-**動機（用真實資料證明的）**：現有 `rr_summary` 只有平均與中位數，而 2026-08-07 的實跑顯示
-`average_entry_rr = 6.45`、`median_entry_rr = 2.34`——**平均是中位數的 2.75 倍**，代表分布
-嚴重右偏（少數極大 RR 把平均拉高）。只看平均會系統性高估這套規則的風險報酬，這正是
-T-028 要求「完整 RR distribution」的原因。
-
-**要做的三件事**
-
-1. **RR 分布**：`rr_summary` 補 percentiles（p10/p25/p50/p75/p90）、標準差、min/max。
-2. **補上 `execution_rr`**：`rr_context` 早就有 `execution_rr` / `execution_rr_source`，
-   但現有 `rr_summary` **完全沒有涵蓋它**——只算了 entry 與 position。而
-   `by_rr_gate_reason_code` 裡有 `EXECUTION_RR_INSUFFICIENT`(175) 與
-   `EXECUTION_RR_UNAVAILABLE`(78)，代表 execution RR 確實參與 gate 判斷，卻沒有統計。
-3. **更細分層**（`daily_confirmation_summary` 新增 `by_*` 群）：
-   - **量能強弱數值**：現在只有分類後的 `volume_confirmation`。**需要先把
-     `relative_volume` 數值加進 replay row 的 `primary_zone` projection**
-     （`evaluation.py:766` 目前沒帶這個欄位），再依數值分桶。
-   - **RR gate 原始基礎值**：依 `stop_distance_pct`、`risk_price`/`reward_price` 是否齊備、
-     `entry_executability_reason_code` 分層——這些都已在 `rr_context` 裡，不需改 row。
-   - **event sequence 順序細節**：現有 `event_sequence` 是排序後串接的字串
-     （`EXTREME_VOLUME+HIGH_VOLUME_BREAKDOWN+INTRADAY_RECLAIM+...`），**看不出先後**。
-     改為額外輸出「首個事件」與「事件數」兩個分層，避免高基數字串把樣本切碎。
-     > **本項前提有誤，已於 2026-08-07 更正**（現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-     > 的「再細的六個分層」）：
-     > 「首個事件」做不出來——`event_sequence` 是**固定優先序**排的，不是時間序，
-     > 而且同一列的事件全來自同一根 K 棒，**單根 K 棒內沒有先後可言**。
-     > 欄位已改名 `by_primary_market_event`，語意是「依優先序取的代表事件」，
-     > 實質上是 `by_market_event_types` 的低基數粗化，價值在於減少樣本切碎而非提供順序資訊。
-
-**不做的範圍**
-
-- 不動 `schema_version`（`sr_zone_decision_replay_p0`）——`fetch_latest_sr_regression_governance`
-  以它過濾，改了會讓 production gate 靜默失效（見 sr-zone-scoring.md 的取樣規則章節）。
-- 不改任何既有欄位的**算法或語意**，只新增。既有 key 全部保留，前端現有渲染不受影響。
-- 不做 drawdown-like failure window（要逐根回放窗口內價格路徑，成本高一個量級，另立項目）。
-- 不動 `_bucket_candidate_score` 的評分邏輯。
-
-**資料 contract 變化**
-
-| 位置 | 變化 | 相容性 |
-|---|---|---|
-| `replay_rows[].primary_zone` | 新增 `relative_volume` | 純新增。**原本寫「前端 `SRZoneScoreFields` 型別要跟上」是錯的——該型別不存在**（2026-08-07 更正）。前端不消費 `replay_rows`，刻意不加無消費者的型別，改以 Python 側的 key 集合斷言鎖住形狀，見 [`issue.md`](./issue.md) I-062 |
-| `outcome_summary.rr_summary` | 新增 percentiles / 標準差 / min-max / execution RR 一組 | 純新增，既有 6 個 key 不動 |
-| `daily_confirmation_summary` | 新增數個 `by_*` 分層 | 純新增，既有 9 個分層不動 |
-
-**受影響檔案**
-
-| 檔案 | 動作 |
-|---|---|
-| `evaluation.py:766` | `primary_zone` projection 補 `relative_volume` |
-| `evaluation.py:817`（`_daily_confirmation_context`） | 新增分層 key（量能桶、RR 基礎值桶、首事件、事件數） |
-| `evaluation.py:1430`（`_daily_confirmation_summary`） | 掛上新的 `by_*` 群 |
-| `evaluation.py:1763`（`_rr_summary`） | percentiles、標準差、min/max、execution RR |
-| `frontend/src/lib/api/srZones.ts` | `SRRRSummary` 擴充；`primary_zone` 型別補欄位；新分層型別 |
-| `frontend/src/routes/SRZones.svelte:1727` | RR 區塊顯示分布；新分層併入既有三群巢狀 `<details>` |
-| `python/.../tests/test_evaluation.py` | 分布數值與新分層的斷言 |
-| `frontend/src/routes/SRZones.test.ts` | 新區塊渲染斷言（fixture 用真實 report 取樣的形狀） |
-
-**主要風險與相容策略**
-
-- **report 體積**：目前 11 檔 / 5000 列已是 **20MB**。新增分層會再放大 `outcome_summary`
-  （分層是彙總、不隨列數線性成長，但高基數欄位會爆組數）。因此**量能與 RR 基礎值一律先分桶
-  再分層**，不直接用連續值當 key；event sequence 也只取首事件而非完整排列。
-- **樣本被切碎**：新分層若組數過多，每組樣本會低於前端的 `MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20`
-  而全部標成「樣本不足」，等於白做。桶的邊界要用這份真實 report 的實際分布來定，
-  **不能憑感覺切**。
-- **回滾**：純新增欄位，`git revert` 即可；DB 無 migration。
-
-**測試與驗證策略**
-
-- `python/scripts/test.sh`：percentiles 用已知序列驗證數值正確（不是只驗 key 存在）；
-  空集合、單一元素、全 None 的邊界要各有案例。
-- **fixture 型別要與真實 DB 一致**（`datetime.date` 那次的教訓，見 development-workflow.md §3）。
-- `frontend/scripts/test.sh` 完整三步；fixture 從真實 report 取樣而非手寫。
-- **決定性驗證是重跑真實資料**：用 `scripts/run-evaluation.sh` 對 live 唯讀重跑 11 檔，
-  確認 percentiles 與既有 median 一致（p50 應等於現有的 `median_entry_rr`）、
-  新分層每組樣本數足夠。單元測試用合成資料，證明不了這件事。
-
-**完成後歸檔**
-
-- 分布欄位語意與分桶邊界的來源 → [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-  的 daily confirmation 章節。**已完成**（「再細的六個分層與分桶邊界的由來」與「RR 分布」）。
-- 前端新區塊的判讀方式 → 同上的「前端手動 evaluation 入口的判讀」。**已完成**。
-
-**實作結果（2026-08-07）**
-
-| 驗證 | 結果 |
-|---|---|
-| `python/scripts/test.sh`（test_evaluation.py） | **49 passed** |
-| `frontend/scripts/test.sh` 完整三步 | svelte-check 0 errors／vitest 15 檔 **67 passed**／build 成功 |
-| 真實資料交叉驗證（`scripts/run-evaluation.sh`，唯讀 live） | **exit 0**，見下 |
-
-**決定性驗證是對真實資料重跑**（單元測試用合成資料，證明不了與既有欄位一致）：
-
-- 三個 RR 的 `distribution.median` 與既有的 `median_*_rr` **完全相等**
-  （entry 1.988＝1.988、execution 1.2016441005802707＝同值、position 皆 `None`）。
-  這條防的是「同一個面板出現兩個互相矛盾的數字」。
-- `entry_rr_distribution` 的分位數單調遞增，且 `average`(3.45) > `median`(1.99)——
-  右偏在小樣本上同樣成立。
-- 六個新分層都有輸出，200 列樣本下最小組 1 筆、最大 110 筆（列數受
-  `--replay-max-rows 200` 限制，非分層本身的問題；4,998 列的試算最小組是 87）。
-- `by_rr_formula_state`（後補的第六維）在真實資料上的實測分布：
-  `REWARD_MISSING` 78 / `RISK_REWARD_MISSING` 71 / `RR_FORMULA_COMPLETE` 51，
-  成功把 `RR_UNAVAILABLE`（125 筆）拆開，證實「RR 算不出來」主要是**缺目標價**。
-  > 註：該次實測用的是初版分桶。2026-08-10 因 review 發現 `RISK_MISSING` 為不可能出現的
-  > 空桶而重新設計（現況見 sr-zone-scoring.md 的「再細的六個分層」），當時歸在 `RISK_REWARD_MISSING` 的 71 筆，
-  > 在新分桶下會分流到 `RISK_NOT_POSITIVE` 與 `ENTRY_OR_STOP_MISSING`，**尚未重新實測**。
-- `replay_rows[].primary_zone.relative_volume` 確認有值（1.3154…），
-  代表 projection 的新增欄位真的流到 row。
-
-**實作時證實的既有缺口**：`execution_rr` 一直存在於 `rr_context`、也參與 rr_gate 判斷，
-但 `rr_summary` **從未統計它**。已補上 `rows_with_execution_rr` /
-`average_execution_rr` / `median_execution_rr` / `execution_rr_source_counts` 與分布。
-
-**改到既有測試的一處**：`test_evaluation.py` 用 `assert set(rr_summary) == {...}` 鎖死 key
-集合，新增欄位後會紅。**補上新 key 而不是弱化成子集比對**——那個精確斷言正是用來擋
-「前端與後端形狀悄悄分岔」的護欄，弱化掉等於把它拆了。
-
-**仍未做**：drawdown-like failure window（需逐根回放窗口內價格路徑，成本高一個量級，
-計畫已明列為不做範圍）。
-
----
+**要做的話**：可先在小樣本上量一次成本，再決定是全量計算還是只對
+`daily_confirmation_state` 為特定值的列計算。
 
 ### T-031：runIntradayBatch 批次失敗時的 Yahoo→FinMind fallback
 
@@ -958,8 +728,9 @@ FastAPI TestClient，但當時只補了 `/sr-scoring/evaluate`。仍無測試的
 表格、report 三層指標 / daily confirmation 摘要 / warnings / `volatility_profiles` /
 `zone_builder_runtime_config`、`sr_evaluation` 排程狀態與手動執行、production 分析的模型治理區塊。
 
-（daily confirmation 只接了**摘要**，9 個分層都還沒渲染——那是**顯示**缺口，記在 T-028 的
-「前端接入缺口」，不在本筆範圍。本筆只談**調參與決策**入口。）
+（daily confirmation 的分層渲染屬**顯示**缺口，已於 2026-08-06～08-07 完成，
+現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「隔日／兩日確認的分層」，
+不在本筆範圍。本筆只談**調參與決策**入口。）
 
 **四個缺口**（依擋路程度排序）：
 
@@ -1351,54 +1122,3 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
   支援前端顯示，哪些需要補 contract。
 - 若新增或改動 API contract，要同步更新 `docs/api-reference.md` 與 SR Zone 相關主題文件。
 - `Position Action` 的策略差異應先文件化仲裁規則，再實作 UI，避免前端自行推導交易語意。
-
----
-
-### T-043：T-028 review 證實缺失的殘留修補
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待處理（三項殘留，主體已於 2026-08-10 修畢） |
-| 優先度 | 中（第 1 項）／低（第 2、3 項） |
-| 分類 | 開發流程 / Python / SR Zone |
-| 建立日期 | 2026-08-10 |
-| 來源 | T-028 RR distribution 的 code review（`/code-review high`） |
-
-該次 review 提出 5 項、**經查證全部屬實**，其中兩項是實質缺陷。主體修正已完成
-（見下表），但有三項留下殘留工作，記在這裡避免被當成已結案。
-
-**已修畢的部分**
-
-| review 發現 | 修法 |
-|---|---|
-| `dist/index.html` 指向未追蹤的 bundle（`//go:embed all:dist` 會做出全白的 SPA） | 已 `git add`；build 後重新對齊 |
-| `_rr_formula_state` 的 `RISK_MISSING` 是不可能出現的空桶 | 改依上游成因分桶（`RR_FORMULA_COMPLETE`／`REWARD_MISSING`／`RISK_NOT_POSITIVE`／`ENTRY_OR_STOP_MISSING`），並補測試鎖住「reward 蘊含 risk」的上游不變式 |
-| 序數桶被 `localeCompare` 排成亂序 | 前端加 `BUCKET_ORDER`，並補排序斷言 |
-| 文件計數過時（五 vs 六） | 已更正 |
-| `volume_strength`（primary zone）與 `volume_context`（全體 zone 最大值）主體不同 | 已在程式註解與 `sr-zone-scoring.md` 寫明兩者可不一致 |
-
-**殘留 1：dist 的規則存在但沒有機械化檢查（優先做這項）**
-
-`development-workflow.md` 的提交前檢查清單**早就有**「前端有變更 → 重新 build dist 並
-`git add backend/internal/ui/dist`」這一條，**但這次還是漏了**。這說明問題不在缺少規則，
-而在於**沒有任何東西會在漏掉時失敗**——再加一行文字不會改善。
-
-建議做法：在 `frontend/scripts/test.sh` 的 `vite build` 之後加一道檢查——把
-`backend/internal/ui/dist/index.html` 引用到的每個 asset 拿去比對 `git ls-files`，
-有未追蹤的就印出明確警告（或非零退出）。這道檢查天生放在產生 dist 的地方最合理，
-也符合「測試腳本優先」。**注意**：Go 的 `//go:embed` 讀的是磁碟而非 git，
-所以寫成 Go 測試抓不到這個情況，必須是 git-aware 的檢查。
-
-**殘留 2：`by_rr_formula_state` 的新分桶尚未用真實資料實測**
-
-2026-08-07 的實測（`REWARD_MISSING` 78／`RISK_REWARD_MISSING` 71／`RR_FORMULA_COMPLETE` 51）
-用的是**初版分桶**。2026-08-10 重新設計後，原本歸在 `RISK_REWARD_MISSING` 的 71 筆會分流到
-`RISK_NOT_POSITIVE` 與 `ENTRY_OR_STOP_MISSING`，**尚未重新量測**，所以不知道新的兩個桶
-各自的樣本量是否都高於前端門檻 20。跑一次 `scripts/run-evaluation.sh`（唯讀 live）即可確認。
-
-**殘留 3：量能兩欄的主體不一致目前只做到「文件化」**
-
-要讓 `volume_strength` 與 `volume_context` 真正對齊，得把「全體 zone 的最大
-`relative_volume`」也帶進 replay row 的 projection，再依同一個值分桶。這是 contract 變更，
-且目前兩欄並存也有資訊價值（primary zone 的量能 vs 全場最強 zone 的量能），
-所以**先不做**，僅記錄限制。若日後分析時發現兩欄常被混淆，再回頭處理。

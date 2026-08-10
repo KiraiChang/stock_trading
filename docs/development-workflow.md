@@ -422,6 +422,12 @@ docker compose -f docker-compose.dev.yml down -v
 
 - [ ] 前端有變更 → **重新 build dist 並 `git add backend/internal/ui/dist`**。`git commit -am` 不會帶
       未追蹤的新 chunk，漏了會讓 `index.html` 指向不存在的檔案、Go embed 前端 404。
+      **這一條現在有機械化保護**：`frontend/scripts/test.sh` 的 build 之後會跑
+      `scripts/check-dist-assets.sh --fix`，自動把 index.html 引用到的 asset stage 起來
+      （`DIST_AUTOSTAGE=0` 可改成只檢查不修）。要單獨驗證時直接跑
+      `scripts/check-dist-assets.sh`（未納入版控就非零退出）。
+      **這件事無法用 Go 測試把關**——`//go:embed` 讀磁碟不讀 git，本機檔案在就會過。
+      這條規則在 2026-08-10 之前就寫在這裡，仍被漏掉一次，所以才補上自動化。
 - [ ] `git status` 只剩本次預期的改動：無 root-owned 檔案、無誤入的執行檔／`__pycache__`／快取殘渣。
 
 ### F. 回報

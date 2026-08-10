@@ -15,6 +15,8 @@
 #   CACHE_DIR    npm 快取根目錄（預設 ~/.cache/stock_trading）
 #   VITEST_ARGS  傳給 vitest 的額外參數（預設空）。設了就只跑 vitest（略過 check 與 build），
 #                供開發迭代單一測試檔用；驗收仍要跑不帶此變數的完整三步。
+#   DIST_AUTOSTAGE=1  build 後把 dist 的未追蹤檔案自動 git add（預設 0＝只檢查，
+#                     有未納入版控的檔案就失敗）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
 #
 # 設計重點：
@@ -115,5 +117,21 @@ else
   run_step "svelte-check" "npm run check"
   run_step "vitest" "npm run test:unit"
   run_step "vite build" "npm run build"
+
+  # build 一定會產生新的 content hash 檔名，於是每次前端有變更都會出現
+  # 「index.html 改了、但新 bundle 還是 untracked」的狀態。dist 依設計要進版控
+  # （backend/internal/ui/ui.go 的 //go:embed all:dist），漏 add 會做出 index.html
+  # 指向不存在檔案的 commit——SPA 整頁空白，而且所有測試都會過。
+  #
+  # **預設只檢查、不自動 add**：自動 add 會讓這道檢查永遠不失敗（等於沒有檢查），
+  # 也會在使用者不知情下動到 git index。這一步失敗代表「工作區還不能 commit」，
+  # 不是測試壞了——照訊息跑一次 git add 即可，每次前端變更只會遇到一次。
+  # 明確要自動 add 時用 DIST_AUTOSTAGE=1。細節見 scripts/check-dist-assets.sh。
+  if [ "${DIST_AUTOSTAGE:-0}" = "1" ]; then
+    "$REPO_ROOT/scripts/check-dist-assets.sh" --fix
+  else
+    "$REPO_ROOT/scripts/check-dist-assets.sh"
+  fi
+
   echo "==> frontend check + test + build 全部通過"
 fi

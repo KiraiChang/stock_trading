@@ -1,26 +1,68 @@
+# Postgres migration 驗證用的獨立 compose project。
+#
+# 用途只有一個：讓 backend/internal/database/migrations/postgres/ 那份 migration 的
+# **Up 與 Down** 都能在真的 postgres 上被跑起來。
+#
+# 為什麼需要它（dev stack 明明就有 postgres）：
+#   - dev 的 backend 啟動時只會跑 **Up**，Down 那一半從來沒有執行路徑——
+#     017／018 的回滾鏈斷掉就是這樣一直沒被發現的（見 docs/development-workflow.md）。
+#   - 要驗 Down 就得 down 到 0，那會清光 dev 的資料，是另一個明確動作，不該混在驗收流程裡。
+#   - 這台 host 只有 2 GiB，dev stack（多個 container）與 live 併存會踩到 I-053。
+#     單獨一個 postgres 便宜得多。
+#
+# 不要手動 `docker compose -f docker-compose.postgres.yml up`：請用
+# `scripts/test-postgres-migrations.sh`，它會照顧編譯與 postgres 的記憶體錯開、
+# 等 healthcheck、跑驗證並收乾淨。
+#
+# 設計重點（與 docker-compose.mysql.yml 一致的理由不再重複）：
+#   - name：獨立 project，避免與 live（stock_trading）/ dev（stock_trading_dev）混在一起。
+#   - 調瘦：postgres 預設就比 MySQL 省，但仍把 shared_buffers 等壓小，
+#     並關掉 stats collector 之外用不到的背景工作。驗證用的 DB 不需要效能。
+#   - 資料放 named volume 而非 tmpfs：tmpfs 是拿 RAM 換磁碟，在這台機器上方向相反。
+#   - port 綁 127.0.0.1：docker 的 port publish 會繞過 host 防火牆規則，
+#     綁 0.0.0.0 等於把一個密碼是 trading/trading 的 DB 掛到網路上。
+#     驗證本身走 compose 網路的 service name，這個 port 只是需要時手動連進去看 schema 用。
+name: stock_trading_pgtest
+
 services:
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
+    cpus: "0.5"
+    mem_limit: 384m
+    memswap_limit: 384m
+    pids_limit: 200
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - max_connections=20
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
     environment:
+      POSTGRES_DB: trading
       POSTGRES_USER: trading
       POSTGRES_PASSWORD: trading
-      POSTGRES_DB: trading
     ports:
-      - "5432:5432"
+      - "127.0.0.1:15433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgtest_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 30
     networks:
-      - trading-net
+      - pgtest_net
 
 networks:
-  trading-net:
-    name: trading-net
+  pgtest_net:
+    name: stock_trading_pgtest_net
 
 volumes:
-  postgres_data:
+  pgtest_data:
+    name: stock_trading_pgtest_data

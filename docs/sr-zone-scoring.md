@@ -1932,6 +1932,85 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 
 參數 sweep 沒有 API 與 UI，只能用 CLI（見上節）。
 
+**確認之後的「過程」：drawdown-like failure window**（2026-08-10 補）：
+`daily_confirmation_summary.excursion` 與每個分層底下的同名區塊，回答終點報酬答不了的
+問題——**確認之後價格曾經逆行多少、多久才失效**。停損是被路徑掃到的，不是被終點掃到的。
+
+窗口沿用 `forward_bars`（預設 5）。`_candidate_bar_range` 本來就為它預留了尾端，
+`idx + forward_bars` 必定在界內，所以不必另立一個要解釋、要調、要測的旋鈕。
+
+| 欄位（在 `daily_confirmation_outcome` 下） | 語意 |
+|---|---|
+| `max_adverse_excursion_pct` | 窗口內最大不利偏移，**負值或 0**（0 = 從未逆行） |
+| `max_favorable_excursion_pct` | 同窗口最大有利偏移，**正值或 0** |
+| `bars_to_failure` | 第幾根首次失效；未失效為 `None` |
+| `failure_state` | `FAILED` / `SURVIVED_WINDOW` / `BOUNDARY_UNAVAILABLE` / `DIRECTION_UNDEFINED` |
+| `mae_to_stop_ratio` | `abs(MAE) / stop_distance_pct`；**> 1.0 代表窗口內曾掃到停損** |
+| `excursion_window_bars` | 實際採用的根數（資料尾端不足時會小於 `forward_bars`） |
+
+**偏移是「相對部位方向」的，不是原始漲跌幅。** `RESISTANCE` 視為偏空，所以價格上漲才算
+不利，符號與原始報酬相反——這樣兩種 role 的數字才放得進同一個分布看。
+
+**MAE 的分母是 `current_price`（確認日收盤），不是 `rr_context.entry_price`**。三個理由：
+
+1. `entry_price` 在相當比例的列上是 `None`（就是 `by_rr_formula_state` 的
+   `ENTRY_OR_STOP_MISSING`）。拿它當分母，MAE 會恰好在**最需要看停損的那些列上消失**。
+2. 與 `two_bar_close_return`、`forward_return` **同分母**，「過程 vs 終點」才相減得起來。
+3. `current_price` 永不為 `None`，不需要額外的 reason code。
+
+停損那層意義改由 `mae_to_stop_ratio` 承接，把不可用性隔離在單一欄位，不污染主指標。
+
+**`AT_ZONE` 一律不計**（`failure_state = DIRECTION_UNDEFINED`，各偏移為 `None`）。它的既有
+label（`AT_ZONE_TWO_BAR_RESOLVED_UP/DOWN`）本身就沒有方向偏誤，硬指定一邊會做出沒有人
+能解釋的數字。因此 `excursion.rows` 通常小於外層 `rows`，這是預期而非漏算。
+
+「失效」的判準**沿用既有的** `_daily_confirmation_failure_bucket`（SUPPORT 跌破 `price_low`、
+RESISTANCE 突破 `price_high`），不另立一套——否則同一份輸出裡會有兩個互相矛盾的「失效」。
+zone 邊界為 `NaN` 時視同不存在（`BOUNDARY_UNAVAILABLE`）：拿 `NaN` 去比較會全部得到 `False`，
+會把「算不出來」靜靜報成「窗口內沒失效」。
+
+**成本量測推翻了原本的顧慮**（2026-08-10，`tests/test_excursion_cost.py`，
+`PY_ENV="SR_EXCURSION_BENCH=1"` 開啟）：這件事一直沒做，理由寫的是「需要逐根回放，
+成本比終點統計高一個量級」。實測**方向是反的**——既有的 per-row zone 重建是新增窗口計算的
+**10.9 倍**（2991µs vs 275µs），而這還是保守下限，分母只算了 zone 重建、沒含 decision
+pipeline。5,000 列總共多花約 1.4 秒。所以不需要分層計算，直接全量。
+
+> 原本的顧慮之所以站不住腳：`_daily_confirmation_outcome` **本來就在做窗口切片**
+> （`df["low"].iloc[idx+1:idx+3].min()`），把窗口從 2 根拉到 5 根只是同一個 numpy slice
+> 換長度，量級上不可能與「從歷史重建 zone」相比。
+
+**2026-08-10 首次實跑**（11 檔 × `replay_max_rows=5000` → 4,994 列 daily confirmation，
+其中 3,862 列有方向；差額是 `AT_ZONE`）：
+
+| 指標 | p10 | p25 | 中位數 | p75 | p90 |
+|---|---|---|---|---|---|
+| `max_adverse_excursion_pct` | −9.6% | −5.4% | **−2.8%** | −1.1% | 0.0% |
+| `max_favorable_excursion_pct` | 0.0% | +1.0% | **+2.8%** | +5.6% | +9.9% |
+| `mae_to_stop_ratio` | 0.00 | 0.27 | **0.91** | 4.04 | 9.17 |
+
+三個值得記的結論：
+
+1. **`stop_sweep_rate = 48%`**（`mae_to_stop_ratio` 中位數 0.91）。近半數的列，窗口內的
+   逆行幅度**超過了自己設定的停損距離**——終點報酬完全看不到這件事。這是本節存在的理由。
+2. **失效很罕見但拖得久**：`failure_state` 只有 116 列 `FAILED`、3,746 列 `SURVIVED_WINDOW`，
+   而失效的平均落在第 **3.4** 根（分布 1→8、2→20、3→35、4→23、5→30）。**失效不是隔天發生的**，
+   隔日確認的窗口看不完整。
+3. **MAE 中位數與 MFE 中位數幾乎對稱**（−2.8% vs +2.8%），但 MAE 的左尾更長
+   （p10 −9.6% vs p90 +9.9% 看似對稱，`stddev` 卻是 0.061 vs 0.071）。
+
+分層來看（`by_state`），`stop_sweep_rate` 隨 gate 的寬鬆程度單調變化：`BLOCKED` 51.2%
+（2,920 列）、`PROBE_ALLOWED` 38.2%（248 列）、`CHASING_RISK` 26.7%（217 列）。
+`ENTRY_READY` 是 0%，但**只有 11 列，低於樣本不足門檻 20，不能當結論**——它值得的是
+一次針對性的取樣，而不是拿來宣稱 gate 有效。
+
+**平均數在這裡特別不能看**：`mae_to_stop_ratio` 的 `average = 7.31`、`stddev = 148`、
+`max = 6261`——停損距離極小的列會把平均炸掉。判讀一律以中位數與分位數為準。
+
+**這份資料本身被兩個資料品質問題污染**（都是這次靠 MAE 才發現的，見
+[`issue.md`](./issue.md) I-064 / I-065）：4 根全零 K 棒讓 `max_favorable_excursion_pct`
+出現剛好 `1.0000` 的值；0050 未還原的 1:4 分割讓 MAE 出現 −75.5%。分位數受影響有限，
+但 `min = -1.0` / `max = 1.0` 這兩個端點值是假的。
+
 ### Production 端的 regression governance gate
 
 `pipeline._merge_regression_governance_gate` 把「同 `model_config_hash` 的最新 decision replay

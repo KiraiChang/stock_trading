@@ -76,7 +76,7 @@ func (f *Fetcher) FetchAndStoreIntradayBatch(ctx context.Context, symbols []stri
 		if len(candles) == 0 {
 			continue
 		}
-		if err := f.candles.BulkInsert(ctx, toStoreCandles(candles)); err != nil {
+		if err := f.candles.BulkInsert(ctx, f.toStoreCandles(candles)); err != nil {
 			f.log.Warn("intraday batch store failed", zap.String("symbol", sym), zap.Error(err))
 			continue
 		}
@@ -97,7 +97,7 @@ func (f *Fetcher) FetchAndStoreFugleIntraday(ctx context.Context, symbol string)
 		return err
 	}
 
-	storeCandles := toStoreCandles(candles)
+	storeCandles := f.toStoreCandles(candles)
 	if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (f *Fetcher) SubscribeRealtime(ctx context.Context, symbol string) error {
 		return fmt.Errorf("fugle stream source not configured")
 	}
 	return f.streamSource.Subscribe(ctx, symbol, func(c Candle) {
-		if err := f.candles.BulkInsert(context.Background(), toStoreCandles([]Candle{c})); err != nil {
+		if err := f.candles.BulkInsert(context.Background(), f.toStoreCandles([]Candle{c})); err != nil {
 			f.log.Warn("fugle realtime candle store failed", zap.String("symbol", symbol), zap.Error(err))
 		}
 	})
@@ -140,7 +140,7 @@ func (f *Fetcher) FetchAndStoreDaily(ctx context.Context, symbol string, date ti
 		return err
 	}
 
-	storeCandles := toStoreCandles(candles)
+	storeCandles := f.toStoreCandles(candles)
 	if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func (f *Fetcher) FetchAndStoreMinute(ctx context.Context, symbol string, date t
 		return err
 	}
 
-	storeCandles := toStoreCandles(candles)
+	storeCandles := f.toStoreCandles(candles)
 	if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 		return err
 	}
@@ -187,7 +187,7 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 			report(symbol, err)
 			continue
 		}
-		storeCandles := toStoreCandles(candles)
+		storeCandles := f.toStoreCandles(candles)
 		if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
 			f.log.Warn("backfill insert failed", zap.String("symbol", symbol), zap.Error(err))
 			failed++
@@ -200,10 +200,35 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 	return failed
 }
 
-func toStoreCandles(cs []Candle) []store.Candle {
-	result := make([]store.Candle, len(cs))
-	for i, c := range cs {
-		result[i] = store.Candle{
+// toStoreCandles 轉成 store 層的 Candle，並擋掉價格非正的 K 棒。
+//
+// 為什麼要擋（2026-08-10，見 docs/issue.md I-064）：live DB 出現過 4 根 OHLCV 全為 0 的
+// 日 K（2454 2016-05-13、3630 2024-12-18、2317 2025-07-30、1101 2025-08-13）。那幾天
+// 其他二十多檔都正常交易且有量，所以不是整輪抓取失敗，而是單檔單日的異常；個股停牌
+// （上游以 0 表示無成交）與上游 glitch 都有可能，但兩種情況的正解相同：
+// **無成交的日子應該是「沒有那筆資料」，不是一根價格為 0 的 K 棒**。
+//
+// 留一根零價 K 棒的代價遠大於少一天：MA / RSI / ATR、zone 建構、breakout 偵測全都會被
+// 那一根污染，而且不會有任何東西報錯——I-064 是靠 T-028 的 MAE 剛好等於 −100% 才浮出來的。
+//
+// 只驗價格不驗 volume：成交量為 0 在盤中分K 是正常的（該分鐘沒有成交），
+// 價格為 0 則在任何情況下都不成立。
+func (f *Fetcher) toStoreCandles(cs []Candle) []store.Candle {
+	result := make([]store.Candle, 0, len(cs))
+	for _, c := range cs {
+		if c.Open <= 0 || c.High <= 0 || c.Low <= 0 || c.Close <= 0 {
+			f.log.Warn("skip candle with non-positive price",
+				zap.String("symbol", c.Symbol),
+				zap.String("timeframe", c.Timeframe),
+				zap.Time("ts", c.Timestamp),
+				zap.Float64("open", c.Open),
+				zap.Float64("high", c.High),
+				zap.Float64("low", c.Low),
+				zap.Float64("close", c.Close),
+			)
+			continue
+		}
+		result = append(result, store.Candle{
 			Symbol:    c.Symbol,
 			Timeframe: c.Timeframe,
 			Open:      c.Open,
@@ -213,7 +238,7 @@ func toStoreCandles(cs []Candle) []store.Candle {
 			Volume:    c.Volume,
 			Amount:    c.Amount,
 			Timestamp: c.Timestamp,
-		}
+		})
 	}
 	return result
 }

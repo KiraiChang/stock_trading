@@ -5,6 +5,7 @@
 #   python/scripts/test.sh                                  # backtest/ 與 tests/
 #   python/scripts/test.sh backtest/modular/sr_scoring/tests # 只跑指定目錄
 #   python/scripts/test.sh -k event_engine backtest/         # 也可直接帶 pytest 參數
+#   PY_ENV="SR_EXCURSION_BENCH=1" python/scripts/test.sh -s backtest/…/test_excursion_cost.py
 #
 # 可覆寫的環境變數：
 #   MEM        container 記憶體上限（預設 700m；會再經 mem-guard 依 host 實況下修）
@@ -12,6 +13,9 @@
 #   CPUS       CPU 上限（預設 1）
 #   PY_IMAGE   測試用 image tag（預設 stock-trading-python-test:latest）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
+#   PY_ENV     以空白分隔的 NAME=VALUE，原樣傳進 container。給「預設 skip、明確要求
+#              才跑」的測試用（例如成本量測 SR_EXCURSION_BENCH=1）——這類測試不該
+#              進常態回合，但也不該退化成一次性 docker 指令繞過腳本。
 #
 # 設計重點：
 #   - 直接用 python/Dockerfile 建測試 image：裡面已裝好 requirements.txt（含 pytest）
@@ -41,6 +45,12 @@ if [ "$#" -eq 0 ]; then
   set -- backtest/ tests/
 fi
 
+# 逐個展開成 -e 參數；用陣列而非字串，值含空白時才不會被 word splitting 拆開。
+ENV_ARGS=()
+for pair in ${PY_ENV:-}; do
+  ENV_ARGS+=(-e "$pair")
+done
+
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
 
@@ -53,6 +63,7 @@ exec docker run --rm \
   --pids-limit=200 \
   -e HOME=/tmp \
   -e PYTHONDONTWRITEBYTECODE=1 \
+  "${ENV_ARGS[@]+"${ENV_ARGS[@]}"}" \
   -v "$PYTHON_DIR":/app \
   -w /app \
   "$IMAGE" \

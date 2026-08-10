@@ -21,7 +21,13 @@ func (s *stubDailySource) FetchDailyCandles(_ context.Context, symbol string, _,
 	if err, ok := s.errBySymbol[symbol]; ok {
 		return nil, err
 	}
-	return []Candle{{Symbol: symbol, Timeframe: "1d", Close: 100, Timestamp: time.Now()}}, nil
+	// 四個價格都要給：toStoreCandles 會擋掉價格非正的 K 棒（I-064），
+	// 只設 Close 的 stub 會被整根丟掉，讓測試因為錯誤的理由而通過。
+	return []Candle{{
+		Symbol: symbol, Timeframe: "1d",
+		Open: 99, High: 101, Low: 98, Close: 100,
+		Timestamp: time.Now(),
+	}}, nil
 }
 
 func (s *stubDailySource) FetchMinuteCandles(context.Context, string, time.Time) ([]Candle, error) {
@@ -105,5 +111,56 @@ func TestBackfillHistoryNilCallback(t *testing.T) {
 
 	if failed := f.BackfillHistory(context.Background(), []string{"2330", "2454"}, 5, nil); failed != 1 {
 		t.Fatalf("failed = %d, want 1", failed)
+	}
+}
+
+
+func TestToStoreCandlesDropsNonPositivePrices(t *testing.T) {
+	// live DB 曾出現 4 根 OHLCV 全為 0 的日 K（issue.md I-064）。無成交的日子應該是
+	// 「沒有那筆資料」，不是一根價格為 0 的 K 棒——留著會污染 MA / ATR / zone 建構，
+	// 而且不會有任何東西報錯。
+	f := NewFetcher(&stubDailySource{}, &stubCandleRepo{}, zap.NewNop())
+	now := time.Now()
+
+	cases := []struct {
+		name   string
+		candle Candle
+		want   bool
+	}{
+		{"全零", Candle{Symbol: "3630", Timeframe: "1d", Timestamp: now}, false},
+		{"只有 open 為 0", Candle{Symbol: "a", Open: 0, High: 10, Low: 9, Close: 10, Timestamp: now}, false},
+		{"只有 high 為 0", Candle{Symbol: "a", Open: 10, High: 0, Low: 9, Close: 10, Timestamp: now}, false},
+		{"只有 low 為 0", Candle{Symbol: "a", Open: 10, High: 11, Low: 0, Close: 10, Timestamp: now}, false},
+		{"只有 close 為 0", Candle{Symbol: "a", Open: 10, High: 11, Low: 9, Close: 0, Timestamp: now}, false},
+		{"負價", Candle{Symbol: "a", Open: -1, High: 11, Low: 9, Close: 10, Timestamp: now}, false},
+		{"正常", Candle{Symbol: "a", Open: 10, High: 11, Low: 9, Close: 10, Timestamp: now}, true},
+		// volume 為 0 是正常的（該分鐘沒成交），不該被擋。
+		{"零成交量但價格正常", Candle{Symbol: "a", Open: 10, High: 11, Low: 9, Close: 10, Volume: 0, Timestamp: now}, true},
+	}
+
+	for _, tc := range cases {
+		got := f.toStoreCandles([]Candle{tc.candle})
+		if kept := len(got) == 1; kept != tc.want {
+			t.Errorf("%s: 保留 = %v, want %v", tc.name, kept, tc.want)
+		}
+	}
+}
+
+func TestToStoreCandlesKeepsGoodCandlesInBatch(t *testing.T) {
+	// 一根壞的不該讓整批消失——只丟那一根，其餘照常寫入。
+	f := NewFetcher(&stubDailySource{}, &stubCandleRepo{}, zap.NewNop())
+	now := time.Now()
+
+	got := f.toStoreCandles([]Candle{
+		{Symbol: "2330", Open: 10, High: 11, Low: 9, Close: 10, Timestamp: now},
+		{Symbol: "2330", Timestamp: now.Add(time.Hour)},
+		{Symbol: "2330", Open: 12, High: 13, Low: 11, Close: 12, Timestamp: now.Add(2 * time.Hour)},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("保留 %d 根, want 2", len(got))
+	}
+	if got[0].Close != 10 || got[1].Close != 12 {
+		t.Fatalf("保留的順序或內容不對: %+v", got)
 	}
 }

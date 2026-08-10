@@ -5,6 +5,7 @@ import sys
 import types
 
 import numpy as np
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine, text
 
@@ -13,6 +14,7 @@ from ..model import ModelBundle
 from .. import evaluation as evaluation_module
 from ..evaluation import (
     _daily_confirmation_summary,
+    _excursion_window,
     _decision_replay_governance_evaluation,
     _load_symbol_rows_json,
     _rows_for_symbol,
@@ -272,6 +274,175 @@ def test_daily_confirmation_summary_reports_zone_confirmation_rates():
     assert summary["by_rr_gate"]["RR_QUALIFIED"]["rows"] == 2
     assert summary["by_rr_gate_reason_code"]["RR_INSUFFICIENT"]["rows"] == 1
     assert summary["by_rr_bucket"]["RR_GTE_3"]["rows"] == 1
+
+
+def _excursion_df(lows: list[float], highs: list[float]) -> pd.DataFrame:
+    """idx=0 是確認日，之後是窗口內的每一根。確認日本身的 high/low 不該被納入計算。"""
+    n = len(lows)
+    return pd.DataFrame(
+        {
+            "open": [100.0] * n,
+            "high": highs,
+            "low": lows,
+            "close": [100.0] * n,
+            "volume": [1000] * n,
+        },
+        index=pd.date_range("2026-01-01", periods=n, freq="D"),
+    )
+
+
+def test_excursion_window_support_measures_path_not_endpoint():
+    # 確認日收 100；窗口內先跌到 94（逆行 6%）再拉到 108，終點卻回到 100——
+    # 這正是終點報酬看不見、但停損會被掃到的情況。
+    df = _excursion_df(
+        lows=[999.0, 98.0, 94.0, 99.0],
+        highs=[999.0, 101.0, 100.0, 108.0],
+    )
+    zone = {"role": "SUPPORT", "price_low": 95.0, "price_high": 105.0}
+
+    result = _excursion_window(df, 0, 100.0, zone, 3, {"stop_distance_pct": 0.04})
+
+    assert result["excursion_window_bars"] == 3
+    assert result["max_adverse_excursion_pct"] == pytest.approx(-0.06)
+    assert result["max_favorable_excursion_pct"] == pytest.approx(0.08)
+    # 94 < price_low 95，發生在窗口第 2 根。
+    assert result["failure_state"] == "FAILED"
+    assert result["bars_to_failure"] == 2
+    # 逆行 6% 對停損距離 4% → 1.5 倍，> 1 代表窗口內曾掃到停損。
+    assert result["mae_to_stop_ratio"] == pytest.approx(1.5)
+
+
+def test_excursion_window_resistance_flips_sign_for_short_bias():
+    # RESISTANCE 視為偏空：價格上漲才算不利，符號與原始報酬相反。
+    df = _excursion_df(
+        lows=[999.0, 97.0, 96.0],
+        highs=[999.0, 103.0, 105.0],
+    )
+    zone = {"role": "RESISTANCE", "price_low": 95.0, "price_high": 104.0}
+
+    result = _excursion_window(df, 0, 100.0, zone, 2, None)
+
+    assert result["max_adverse_excursion_pct"] == pytest.approx(-0.05)
+    assert result["max_favorable_excursion_pct"] == pytest.approx(0.04)
+    assert result["failure_state"] == "FAILED"
+    assert result["bars_to_failure"] == 2
+    assert result["mae_to_stop_ratio"] is None
+
+
+def test_excursion_window_clamps_when_price_never_moves_against_position():
+    # 全程走高的 SUPPORT：MAE 是 0（從未逆行），不是正數。
+    df = _excursion_df(lows=[999.0, 101.0, 103.0], highs=[999.0, 104.0, 106.0])
+    zone = {"role": "SUPPORT", "price_low": 95.0}
+
+    result = _excursion_window(df, 0, 100.0, zone, 2, {"stop_distance_pct": 0.05})
+
+    assert result["max_adverse_excursion_pct"] == 0.0
+    assert result["max_favorable_excursion_pct"] == pytest.approx(0.06)
+    assert result["failure_state"] == "SURVIVED_WINDOW"
+    assert result["bars_to_failure"] is None
+    assert result["mae_to_stop_ratio"] == 0.0
+
+
+def test_excursion_window_at_zone_has_no_defined_direction():
+    # AT_ZONE 的既有 label 本身沒有方向偏誤，硬指定一邊會做出無法解釋的數字。
+    df = _excursion_df(lows=[999.0, 94.0, 96.0], highs=[999.0, 106.0, 104.0])
+    zone = {"role": "AT_ZONE", "price_low": 95.0, "price_high": 105.0}
+
+    result = _excursion_window(df, 0, 100.0, zone, 2, {"stop_distance_pct": 0.05})
+
+    assert result["max_adverse_excursion_pct"] is None
+    assert result["max_favorable_excursion_pct"] is None
+    assert result["failure_state"] == "DIRECTION_UNDEFINED"
+    assert result["mae_to_stop_ratio"] is None
+
+
+def test_excursion_window_without_boundary_still_reports_excursion():
+    # 缺 price_low 只讓「失效」算不出來，不該連帶讓 MAE 消失。
+    df = _excursion_df(lows=[999.0, 94.0], highs=[999.0, 101.0])
+    zone = {"role": "SUPPORT", "price_low": None}
+
+    result = _excursion_window(df, 0, 100.0, zone, 1, None)
+
+    assert result["max_adverse_excursion_pct"] == pytest.approx(-0.06)
+    assert result["failure_state"] == "BOUNDARY_UNAVAILABLE"
+    assert result["bars_to_failure"] is None
+
+
+def test_excursion_window_treats_nan_boundary_as_unavailable():
+    # NaN 邊界拿去比較會全部得到 False，不能讓「算不出來」被報成「窗口內沒失效」。
+    df = _excursion_df(lows=[999.0, 94.0], highs=[999.0, 101.0])
+    zone = {"role": "SUPPORT", "price_low": float("nan")}
+
+    result = _excursion_window(df, 0, 100.0, zone, 1, None)
+
+    assert result["failure_state"] == "BOUNDARY_UNAVAILABLE"
+    assert result["max_adverse_excursion_pct"] == pytest.approx(-0.06)
+
+
+def test_excursion_window_stops_at_end_of_dataframe():
+    # 窗口要 5 根但只剩 2 根：以實際根數為準，不能讀出界。
+    df = _excursion_df(lows=[999.0, 98.0, 97.0], highs=[999.0, 101.0, 102.0])
+    zone = {"role": "SUPPORT", "price_low": 90.0}
+
+    result = _excursion_window(df, 0, 100.0, zone, 5, None)
+
+    assert result["excursion_window_bars"] == 2
+    assert result["max_adverse_excursion_pct"] == pytest.approx(-0.03)
+
+
+def test_daily_confirmation_summary_reports_excursion_section():
+    rows = [
+        {
+            "daily_confirmation_outcome": {
+                "available": True,
+                "state": "PROBE_ALLOWED",
+                "primary_role": "SUPPORT",
+                "max_adverse_excursion_pct": -0.06,
+                "max_favorable_excursion_pct": 0.08,
+                "bars_to_failure": 2,
+                "failure_state": "FAILED",
+                "mae_to_stop_ratio": 1.5,
+            }
+        },
+        {
+            "daily_confirmation_outcome": {
+                "available": True,
+                "state": "PROBE_ALLOWED",
+                "primary_role": "SUPPORT",
+                "max_adverse_excursion_pct": -0.02,
+                "max_favorable_excursion_pct": 0.03,
+                "bars_to_failure": None,
+                "failure_state": "SURVIVED_WINDOW",
+                "mae_to_stop_ratio": 0.5,
+            }
+        },
+        {
+            # AT_ZONE：不計入 excursion 的分母，這是預期而非漏算。
+            "daily_confirmation_outcome": {
+                "available": True,
+                "state": "WAIT_CONFIRMATION",
+                "primary_role": "AT_ZONE",
+                "max_adverse_excursion_pct": None,
+                "max_favorable_excursion_pct": None,
+                "bars_to_failure": None,
+                "failure_state": "DIRECTION_UNDEFINED",
+                "mae_to_stop_ratio": None,
+            }
+        },
+    ]
+
+    excursion = _daily_confirmation_summary(rows)["excursion"]
+
+    assert excursion["rows"] == 2
+    assert excursion["average_max_adverse_excursion_pct"] == pytest.approx(-0.04)
+    assert excursion["max_adverse_excursion_distribution"]["count"] == 2
+    assert excursion["max_adverse_excursion_distribution"]["min"] == pytest.approx(-0.06)
+    assert excursion["stop_sweep_rate"] == pytest.approx(0.5)
+    assert excursion["failure_state_counts"] == {"FAILED": 1, "SURVIVED_WINDOW": 1}
+    assert excursion["bars_to_failure_counts"] == {"2": 1}
+    assert excursion["average_bars_to_failure"] == pytest.approx(2.0)
+    # 分層也要帶上同一段，否則只有全體看得到過程。
+    assert _daily_confirmation_summary(rows)["by_state"]["PROBE_ALLOWED"]["excursion"]["rows"] == 2
 
 
 def test_run_evaluation_returns_zone_outcome_report(tmp_path):

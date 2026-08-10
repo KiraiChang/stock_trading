@@ -132,3 +132,80 @@ func assertNoColumns(t *testing.T, db *sqlx.DB, table string, unwanted ...string
 		}
 	}
 }
+
+// 060 的 CHECK 約束驗證（見 docs/issue.md I-064）。
+//
+// 為什麼要測「資料有沒有活過重建」：sqlite 沒有 ALTER TABLE ADD CONSTRAINT，060 只能
+// 整張表重建。重建寫錯（漏 INSERT ... SELECT、欄位順序錯位）不會讓 migration 失敗，
+// 只會安靜地把 candles 清空——正是 development-workflow.md 要求「越過每一筆之後立刻
+// 檢查表的形狀」的那類錯誤。
+func TestSQLiteCandlePositivePriceConstraint(t *testing.T) {
+	tmp, err := os.CreateTemp("", "sqlite-candle-check-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+	t.Cleanup(func() { os.Remove(tmp.Name()) })
+
+	db, err := sqlx.Connect("sqlite", tmp.Name())
+	if err != nil {
+		t.Fatalf("連不上 sqlite: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	db.SetMaxOpenConns(1)
+
+	ctx := context.Background()
+	goose.SetBaseFS(sqliteFS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("goose set dialect: %v", err)
+	}
+
+	// 先停在 059（約束還沒加），塞一列正常資料，用來驗證 060 的重建有沒有搬走資料。
+	if err := goose.UpToContext(ctx, db.DB, "migrations/sqlite", 59); err != nil {
+		t.Fatalf("up 到 59 失敗: %v", err)
+	}
+	insert := `INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
+	           VALUES (?, '1d', ?, ?, ?, ?, 1000, 0, '2026-01-01 00:00:00')`
+	if _, err := db.Exec(insert, "2330", 99.0, 101.0, 98.0, 100.0); err != nil {
+		t.Fatalf("059 版寫入正常 K 棒失敗: %v", err)
+	}
+
+	if err := goose.UpToContext(ctx, db.DB, "migrations/sqlite", 60); err != nil {
+		t.Fatalf("up 到 60 失敗: %v", err)
+	}
+
+	var count int
+	if err := db.Get(&count, `SELECT COUNT(*) FROM candles WHERE symbol = '2330'`); err != nil {
+		t.Fatalf("讀 candles 失敗: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("060 重建後既有資料剩 %d 列, want 1——重建沒有把資料搬過去", count)
+	}
+
+	// 約束生效：全零 K 棒（就是 I-064 那 4 列的形狀）必須被擋下。
+	if _, err := db.Exec(insert, "3630", 0.0, 0.0, 0.0, 0.0); err == nil {
+		t.Fatal("全零 K 棒竟然寫得進去——CHECK 約束沒生效")
+	}
+	// 單一欄位為 0 也要擋。
+	if _, err := db.Exec(insert, "3631", 10.0, 11.0, 0.0, 10.0); err == nil {
+		t.Fatal("low=0 的 K 棒竟然寫得進去——CHECK 約束沒涵蓋所有價格欄位")
+	}
+	// 正常的仍然寫得進去，別擋過頭。
+	if _, err := db.Exec(insert, "2454", 50.0, 52.0, 49.0, 51.0); err != nil {
+		t.Fatalf("正常 K 棒被擋掉了: %v", err)
+	}
+
+	// Down 是真逆操作：約束消失、資料仍在。
+	if err := goose.DownToContext(ctx, db.DB, "migrations/sqlite", 59); err != nil {
+		t.Fatalf("down 到 59 失敗: %v", err)
+	}
+	if err := db.Get(&count, `SELECT COUNT(*) FROM candles`); err != nil {
+		t.Fatalf("down 後讀 candles 失敗: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("down 後資料剩 %d 列, want 2——Down 的重建沒有把資料搬回去", count)
+	}
+	if _, err := db.Exec(insert, "3630", 0.0, 0.0, 0.0, 0.0); err != nil {
+		t.Fatalf("down 之後約束應該已移除，但寫入仍被擋: %v", err)
+	}
+}

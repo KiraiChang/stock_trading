@@ -53,6 +53,28 @@ max(編譯, MySQL) 而不是 sum。調瘦後（`performance-schema=OFF`、buffer
 MySQL 實測佔 **182MiB**（預設值會是 400MB 以上），過程中 host available 低點約 689MB。
 腳本開頭會檢查 available ≥ 600MB，不足直接中止而不是硬跑。
 
+### Postgres migration 驗證：`scripts/test-postgres-migrations.sh`
+
+改到 `backend/internal/database/migrations/postgres/` 就要跑這支。
+
+```bash
+scripts/test-postgres-migrations.sh              # 起 postgres → up → 驗 schema → 分段 down → 收掉
+KEEP_UP=1 scripts/test-postgres-migrations.sh    # 跑完保留（可從 127.0.0.1:15433 連進去看）
+```
+
+**dev stack 明明就有 postgres，為什麼還要一個**：dev 的 backend 啟動時**只跑 Up**，
+Down 那一半沒有任何執行路徑——017／018 的回滾鏈斷掉就是這樣一直沒被發現的。
+要驗 Down 得 down 到 0，那會清光 dev 的資料，是另一個明確動作，不該混進驗收流程。
+所以需要一個**可丟棄**的實例。設計與 mysql 版相同（兩階段錯開記憶體、走 embed 的 migration
+而非磁碟、專用 compose project、跑完 `down -v`），驗證邏輯在
+`backend/internal/database/migrate_postgres_test.go`，以 `POSTGRES_MIGRATION_DSN` gate 住。
+
+除了回滾鏈，它還鎖住一個**只有實跑才驗得到**的性質：migration 060 的
+`ck_candles_positive_price` 在 postgres 上是 `NOT VALID`，因為加上去的當下 live 仍有
+I-064 那幾列髒資料。`TestPostgresMigrationsToleratePreexistingBadRows` 直接重現那個處境
+——先寫一列髒資料再套 060，套得上去才算過。哪天有人「順手」把 `NOT VALID` 拿掉，
+會在這裡失敗，而不是部署到 live 才炸。
+
 ### 用真實資料跑 evaluation：`scripts/run-evaluation.sh`
 
 SR Zone 的 evaluation / decision replay / sweep 要拿**真實的數千根日 K** 才有意義，
@@ -86,13 +108,14 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 找不到表，整條回滾鏈中斷——017／018 就這樣壞了一段時間，直到 2026-08-07 才補上真正的逆操作。
 資料本來就救不回來（Up 已經刪了），Down 只需還原結構。
 
-回滾鏈由兩支測試把關：
+回滾鏈由三支測試把關（三種 engine 各一份 migration，各自的 Down 都要驗）：
 
 - `backend/internal/database/migrate_sqlite_test.go`：**每次 `backend/scripts/test.sh`
   都會跑**（sqlite 用暫存檔，不需要 container）。這是常態的回歸保護。
 - `backend/internal/database/migrate_mysql_test.go`：需要 `scripts/test-mysql-migrations.sh`。
+- `backend/internal/database/migrate_postgres_test.go`：需要 `scripts/test-postgres-migrations.sh`。
 
-**兩支都採分段回滾，不是直接 down 到 0——這一點是刻意的。** 一路滾到底「沒報錯」
+**三支都採分段回滾，不是直接 down 到 0——這一點是刻意的。** 一路滾到底「沒報錯」
 驗不到破壞性 migration 的 Down 重建得**對不對**：以 017／018 為例，017 的 Down 一執行
 就把 018 重建的表砍掉了，所以 018 的 Down 內容只要不出錯就會過，寫錯也沒人知道。
 正確做法是**越過每一筆之後立刻檢查表的形狀**：
@@ -105,9 +128,6 @@ down to 0   → 斷言除 goose_db_version 外一張表都不剩
 
 日後再寫破壞性 migration 時，測試要比照補上對應的中途斷言，否則那段 Down SQL
 等於沒有被驗證過。
-
-postgres 的 Down 鏈**尚未自動化驗證**（需要一個可丟棄的 postgres 實例；在 dev project
-上跑 down 到 0 會清掉 dev 資料，屬另一個明確動作）。
 
 理由：手打指令會漂移，本專案已經因此踩過三個坑——以 root 執行留下 root-owned 檔案
 （`backend/server` 曾被誤 commit、`backend/internal/ui/dist` 一度無法被覆寫）、
@@ -134,6 +154,10 @@ TEST_FLAGS="-count=1 -v" backend/scripts/test.sh ./internal/market/...
 python/scripts/test.sh                                   # backtest/ 與 tests/
 python/scripts/test.sh backtest/modular/sr_scoring/tests # 指定目錄
 python/scripts/test.sh -k event_engine backtest/         # 直接帶 pytest 參數
+
+# 預設 skip、明確要求才跑的測試（例如成本量測）：用 PY_ENV 把 gate 變數送進 container。
+PY_ENV="SR_EXCURSION_BENCH=1" python/scripts/test.sh -s \
+  backtest/modular/sr_scoring/tests/test_excursion_cost.py
 
 frontend/scripts/test.sh            # 沿用現有 node_modules
 frontend/scripts/test.sh --install  # 先 npm ci（node_modules 不存在時會自動加上）

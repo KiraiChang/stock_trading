@@ -986,12 +986,109 @@ def _close_return(df: pd.DataFrame, idx: int, bars: int, current_price: float) -
     return _clean_metric((float(df["close"].iloc[target_idx]) / current_price) - 1.0)
 
 
+def _excursion_window(
+    df: pd.DataFrame,
+    idx: int,
+    current_price: float,
+    primary_zone: dict[str, Any] | None,
+    window_bars: int,
+    rr_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """確認之後那段窗口的「過程」：最大不利／有利偏移，以及多久才失效。
+
+    既有的 next_/two_bar_ 指標只看**終點**，看不出中間曾經逆行多少——而停損是被路徑
+    掃到的，不是被終點掃到的。
+
+    偏移是**相對部位方向**的，不是原始漲跌幅：`max_adverse_excursion_pct` 一律為負值
+    或 0（0 代表窗口內從未逆行），`max_favorable_excursion_pct` 一律為正值或 0。
+    RESISTANCE 視為偏空，所以價格「上漲」才算不利，符號因此與原始報酬相反——
+    這樣兩種 role 的數字才放得進同一個分布看。
+
+    分母用 `current_price`（確認日收盤）而不是 `rr_context.entry_price`：entry_price
+    在相當比例的列上是 None（見 by_rr_formula_state 的 ENTRY_OR_STOP_MISSING），拿它當
+    分母會讓 MAE 恰好在最需要看停損的那些列上消失；而 current_price 與
+    two_bar_close_return 同分母，「過程 vs 終點」才相減得起來。停損那層意義改由
+    mae_to_stop_ratio 承接，把不可用性隔離在單一欄位。
+    """
+    unavailable = {
+        "excursion_window_bars": 0,
+        "max_adverse_excursion_pct": None,
+        "max_favorable_excursion_pct": None,
+        "bars_to_failure": None,
+        "failure_state": "DIRECTION_UNDEFINED",
+        "mae_to_stop_ratio": None,
+    }
+    role = str((primary_zone or {}).get("role") or "")
+    # AT_ZONE 刻意不算：它的既有 label（AT_ZONE_TWO_BAR_RESOLVED_UP/DOWN）本身就沒有
+    # 方向偏誤，硬指定一邊會做出沒有人能解釋的數字。
+    if role not in ("SUPPORT", "RESISTANCE") or current_price <= 0:
+        return unavailable
+
+    end = min(idx + 1 + window_bars, len(df))
+    if end <= idx + 1:
+        return unavailable
+    bars = end - (idx + 1)
+    lows = df["low"].iloc[idx + 1 : end]
+    highs = df["high"].iloc[idx + 1 : end]
+    down_pct = (float(lows.min()) / current_price) - 1.0
+    up_pct = (float(highs.max()) / current_price) - 1.0
+
+    # NaN 要和 None 一樣視為「沒有邊界」：拿 NaN 去比較會全部得到 False，
+    # 那會把「算不出來」靜靜地報成「窗口內沒失效」。
+    def _boundary(key: str) -> Optional[float]:
+        value = (primary_zone or {}).get(key)
+        if value is None or pd.isna(value):
+            return None
+        return float(value)
+
+    if role == "SUPPORT":
+        adverse, favorable = down_pct, up_pct
+        boundary = _boundary("price_low")
+        breached = lows < boundary if boundary is not None else None
+    else:
+        # 偏空：漲為不利、跌為有利，兩者都取反號。
+        adverse, favorable = -up_pct, -down_pct
+        boundary = _boundary("price_high")
+        breached = highs > boundary if boundary is not None else None
+
+    # 沒逆行就是 0，不是正數——MAE 的定義是「對部位最不利的那一刻」，
+    # 而「從未逆行」的不利程度是零。
+    adverse = min(adverse, 0.0)
+    favorable = max(favorable, 0.0)
+
+    if breached is None:
+        failure_state = "BOUNDARY_UNAVAILABLE"
+        bars_to_failure = None
+    elif bool(breached.any()):
+        failure_state = "FAILED"
+        bars_to_failure = int(breached.values.argmax()) + 1
+    else:
+        failure_state = "SURVIVED_WINDOW"
+        bars_to_failure = None
+
+    stop_distance_pct = (rr_context or {}).get("stop_distance_pct")
+    mae_to_stop_ratio = None
+    if stop_distance_pct is not None and float(stop_distance_pct) > 0:
+        mae_to_stop_ratio = _clean_metric(abs(adverse) / float(stop_distance_pct))
+
+    return {
+        "excursion_window_bars": bars,
+        "max_adverse_excursion_pct": _clean_metric(adverse),
+        "max_favorable_excursion_pct": _clean_metric(favorable),
+        "bars_to_failure": bars_to_failure,
+        "failure_state": failure_state,
+        "mae_to_stop_ratio": mae_to_stop_ratio,
+    }
+
+
 def _daily_confirmation_outcome(
     df: pd.DataFrame,
     idx: int,
     current_price: float,
     primary_zone: dict[str, Any] | None,
     daily_confirmation_state: str | None,
+    window_bars: int = 0,
+    rr_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     next_return = _close_return(df, idx, 1, current_price)
     two_bar_return = _close_return(df, idx, 2, current_price)
@@ -1065,7 +1162,7 @@ def _daily_confirmation_outcome(
             else:
                 two_bar_result = "AT_ZONE_TWO_BAR_STILL_INSIDE"
 
-    return {
+    outcome = {
         "available": True,
         "state": daily_confirmation_state,
         "primary_role": role or None,
@@ -1074,6 +1171,10 @@ def _daily_confirmation_outcome(
         "next_close_return": next_return,
         "two_bar_close_return": two_bar_return,
     }
+    # 只掛在 available 的分支：summary 本來就只吃 available 的列，
+    # 不可用的那幾個 early return 保持原樣，contract 不必跟著變寬。
+    outcome.update(_excursion_window(df, idx, current_price, primary_zone, window_bars, rr_context))
+    return outcome
 
 
 def _chip_row_for_as_of(chip_rows: list[dict] | None, as_of: object) -> dict | None:
@@ -1427,6 +1528,10 @@ def _decision_replay_rows(
                 current_price,
                 primary_zone,
                 daily_confirmation_state,
+                # 窗口沿用 forward_bars：_candidate_bar_range 已經為它預留尾端，
+                # idx + forward_bars 必定在界內，不必另立一個要解釋、要調、要測的旋鈕。
+                forward_bars,
+                rr_context,
             )
             daily_confirmation_context = _daily_confirmation_context(primary_zone, decision_field_context)
             rows.append({
@@ -1603,6 +1708,8 @@ def _daily_confirmation_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "positive_two_bar_return_rate": _metric_positive_rate(outcomes, "two_bar_close_return"),
         "negative_two_bar_return_rate": _metric_negative_rate(outcomes, "two_bar_close_return"),
         "failure_distribution": _daily_confirmation_failure_distribution(outcomes),
+        # 過程（drawdown-like failure window）——終點報酬看不出停損有沒有被路徑掃到。
+        "excursion": _excursion_summary(outcomes),
         "by_state": _daily_confirmation_groups(outcomes, "state"),
         "by_primary_role": _daily_confirmation_groups(outcomes, "primary_role"),
         "by_volume_context": _daily_confirmation_groups(outcomes, "volume_context"),
@@ -1679,8 +1786,37 @@ def _daily_confirmation_groups(outcomes: list[dict[str, Any]], field: str) -> di
             "positive_two_bar_return_rate": _metric_positive_rate(group, "two_bar_close_return"),
             "negative_two_bar_return_rate": _metric_negative_rate(group, "two_bar_close_return"),
             "failure_distribution": _daily_confirmation_failure_distribution(group),
+            "excursion": _excursion_summary(group),
         }
         for key, group in sorted(groups.items())
+    }
+
+
+def _excursion_summary(outcomes: list[dict[str, Any]]) -> dict[str, Any]:
+    """窗口內「過程」的摘要——與終點指標並列，用來回答「確認之後曾經逆行多少」。
+
+    只統計 role 為 SUPPORT/RESISTANCE 的列（AT_ZONE 的方向未定義，見 _excursion_window），
+    所以 `rows` 通常小於外層的 rows，這是預期而非漏算。
+    """
+    scoped = [o for o in outcomes if o.get("max_adverse_excursion_pct") is not None]
+    ratios = _metric_values(scoped, "mae_to_stop_ratio")
+    return {
+        "rows": len(scoped),
+        "average_max_adverse_excursion_pct": _metric_average(scoped, "max_adverse_excursion_pct"),
+        "average_max_favorable_excursion_pct": _metric_average(scoped, "max_favorable_excursion_pct"),
+        "max_adverse_excursion_distribution": _metric_distribution(
+            _metric_values(scoped, "max_adverse_excursion_pct")
+        ),
+        "max_favorable_excursion_distribution": _metric_distribution(
+            _metric_values(scoped, "max_favorable_excursion_pct")
+        ),
+        "mae_to_stop_ratio_distribution": _metric_distribution(ratios),
+        # 窗口內 MAE 曾經超過停損距離的比例——這是本節唯一直接對應「停損會不會被掃到」
+        # 的數字。分母只算 stop_distance_pct 可用的列。
+        "stop_sweep_rate": _clean_metric(float(np.mean(np.array(ratios) > 1.0))) if ratios else None,
+        "failure_state_counts": _value_counts(scoped, "failure_state"),
+        "bars_to_failure_counts": _value_counts(scoped, "bars_to_failure"),
+        "average_bars_to_failure": _metric_average(scoped, "bars_to_failure"),
     }
 
 

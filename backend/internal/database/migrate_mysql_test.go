@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
@@ -115,6 +116,7 @@ func TestMySQLMigrationsUpAndDown(t *testing.T) {
 	}
 
 	assertMarketBackfillJobsSchema(t, db)
+	assertCandlePositivePriceCheck(t, db)
 
 	// 回滾驗證：一路 down 到 0，驗證每一筆 migration 的 Down 都真的可逆。
 	//
@@ -254,4 +256,33 @@ func tableNames(t *testing.T, db *sqlx.DB) []string {
 		t.Fatalf("列表失敗: %v", err)
 	}
 	return names
+}
+
+// assertCandlePositivePriceCheck 驗 060 的 CHECK 真的被強制執行（見 docs/issue.md I-064）。
+//
+// migration 跑得過**不代表約束有效**：MySQL 8.0.16 之前的版本會把 CHECK 解析掉但不強制，
+// 而 `ALTER TABLE ... ADD CONSTRAINT` 在任何版本都不會報錯。只有實際寫一列違規資料
+// 進去才知道它有沒有在做事。
+func assertCandlePositivePriceCheck(t *testing.T, db *sqlx.DB) {
+	t.Helper()
+	const insert = `INSERT INTO candles (symbol, timeframe, ` + "`open`" + `, high, low, ` + "`close`" + `, volume, amount, ts)
+	                VALUES (?, '1d', ?, ?, ?, ?, 1000, 0, '2026-01-01 00:00:00')`
+
+	// 全零 K 棒就是 I-064 那 4 列的形狀，必須被擋。
+	if _, err := db.Exec(insert, "3630", 0.0, 0.0, 0.0, 0.0); err == nil {
+		t.Error("全零 K 棒竟然寫得進去——CHECK 約束沒生效")
+	}
+	// 只有單一欄位為 0 也要擋，確認約束涵蓋四個價格欄位而不是只看其中一個。
+	for i, c := range [][4]float64{{0, 11, 9, 10}, {10, 0, 9, 10}, {10, 11, 0, 10}, {10, 11, 9, 0}} {
+		if _, err := db.Exec(insert, fmt.Sprintf("t%d", i), c[0], c[1], c[2], c[3]); err == nil {
+			t.Errorf("價格 %v 竟然寫得進去——CHECK 沒涵蓋所有價格欄位", c)
+		}
+	}
+	// 正常的要寫得進去，別擋過頭。
+	if _, err := db.Exec(insert, "2330", 99.0, 101.0, 98.0, 100.0); err != nil {
+		t.Errorf("正常 K 棒被擋掉了: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM candles WHERE symbol = '2330'`); err != nil {
+		t.Errorf("清理測試資料失敗: %v", err)
+	}
 }

@@ -23,6 +23,21 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 - `UNIQUE(symbol, timeframe, ts)`：防止 FinMind 重複寫入
 - `INDEX(symbol, timeframe, ts DESC)`：支援 `ORDER BY ts DESC LIMIT N`
 
+**Constraint：**
+- `ck_candles_positive_price`（migration 060）：`open/high/low/close` 全部必須 `> 0`。
+  背景見 [`issue.md`](./issue.md) I-064——live 曾出現 4 根 OHLCV 全為 0 的日 K，
+  **無成交的日子應該是「沒有那筆資料」，不是一根價格為 0 的 K 棒**。
+  留著它會污染 MA / ATR / zone 建構且不會有任何東西報錯。
+  **不約束 `volume`**：成交量為 0 在盤中分K 是正常的。
+  寫入端另有一層（`market/fetcher.go` 的 `toStoreCandles`），兩層各補對方的不足——
+  Go guard 擋不住手動 SQL，DB 約束不會告訴你哪一檔哪一天被丟掉。
+- postgres 版是 **`NOT VALID`**：加上約束時 live 仍有那 4 列髒資料，完整約束會讓
+  migration 失敗。`NOT VALID` 只約束之後的寫入。清完資料後要補跑
+  `ALTER TABLE candles VALIDATE CONSTRAINT ck_candles_positive_price;`。
+
+> **`ts` 存 UTC**。Taipei 00:00 = 前一日 16:00+00，所以查詢一定要
+> `(ts at time zone 'Asia/Taipei')::date` 再比對日期，直接 `ts::date` 會整整差一天。
+
 ---
 
 ## indicator_snapshots

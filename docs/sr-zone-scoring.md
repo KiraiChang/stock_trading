@@ -1814,16 +1814,18 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 比率欄位永遠顯示 `—`）。當時前後端測試各自對著虛構的形狀互相印證都沒發現，教訓與具體要求
 見 [`development-workflow.md`](./development-workflow.md) 的「測試 fixture 必須是後端真的會產生的形狀」。
 
-**隔日／兩日確認的九個分層**（2026-08-06 補）：`daily_confirmation_summary` 除了摘要的五個 rate
-與兩日正負報酬率之外，還有九個分層。面板依語意分三群，各自一個預設收合的 `<details>`：
+**隔日／兩日確認的分層**（2026-08-06 建立九個，2026-08-07 增為十五個）：
+`daily_confirmation_summary` 除了摘要的五個 rate 與兩日正負報酬率之外，還有十五個分層。
+面板依語意分三群，各自一個預設收合的 `<details>`（**粗體為 2026-08-07 新增**，
+桶定義與由來見下方「再細的六個分層」）：
 
 | 群 | 分層欄位 | 回答什麼 |
 |---|---|---|
 | 結果面 | `by_state`、`by_primary_role` | 這批 outcome 本身怎麼分布 |
-| 條件面 | `by_volume_context`、`by_event_sequence`、`by_market_event_types`、`by_event_market_state` | 當時的量能與事件條件下表現差多少 |
-| RR 面 | `by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket` | RR gate 的判斷後來對不對 |
+| 條件面 | `by_volume_context`、**`by_volume_strength`**、`by_event_sequence`、**`by_primary_market_event`**、**`by_market_event_count`**、`by_market_event_types`、`by_event_market_state` | 當時的量能與事件條件下表現差多少 |
+| RR 面 | `by_rr_gate`、`by_rr_gate_reason_code`、`by_rr_bucket`、**`by_stop_distance_bucket`**、**`by_entry_executability`**、**`by_rr_formula_state`** | RR gate 的判斷後來對不對、被擋住的原因是什麼 |
 
-「量能不足時的隔日守住表現如何」這類問題只能靠分層回答，摘要的五個 rate 答不了。九張表一次
+「量能不足時的隔日守住表現如何」這類問題只能靠分層回答，摘要的五個 rate 答不了。十幾張表一次
 攤開太長，所以分三群並預設全收合；空的分層整塊不出現（by-presence，與其他區塊一致）。
 
 判讀這一區有兩件事要知道：
@@ -1844,6 +1846,74 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 面板配色沿用 [`development-workflow.md`](./development-workflow.md) 的三類規則：warnings 與
 「樣本不足」屬錯誤／警示文字用 `text-rise`（紅），報酬率屬行情語意走既有
 `fmtSignedPct()` / `signedClass()`。這些顏色由 `SRZones.test.ts` 的 class 斷言鎖住。
+
+**再細的六個分層與分桶邊界的由來**（2026-08-07 補）：上表九個分層之外另有六個，
+併入原本的三群顯示（條件面 +3、RR 面 +3）：
+
+| 分層欄位 | 桶 | 邊界從哪來 |
+|---|---|---|
+| `by_volume_strength` | `VOL_LT_0_8` / `VOL_0_8_TO_1_2` / `VOL_1_2_TO_2_5` / `VOL_GTE_2_5` | **沿用既有常數**：`scoring.VOLUME_CONFIRMATION_LOW/HIGH`（判定 WEAK/NEUTRAL/CONFIRMED）與 `event_engine.EXTREME_VOLUME_THRESHOLD`（判定爆量事件） |
+| `by_stop_distance_bucket` | `<1%` / `1–3%` / `3–6%` / `6–10%` / `≥10%` | 取自 2026-08-07 的 4,998 筆真實 report 分位數（p50≈1.8%、p75≈6.6%、p90≈9.2%） |
+| `by_entry_executability` | `rr_context.entry_executability_reason_code` 原值 | 不分桶（基數本來就低） |
+| `by_rr_formula_state` | `RR_FORMULA_COMPLETE` / `REWARD_MISSING` / `RISK_NOT_POSITIVE` / `ENTRY_OR_STOP_MISSING` | 依**上游成因**，不是依欄位有無（見下方警告） |
+| `by_primary_market_event` | 事件的**固定優先序**代表值 | 不分桶（見下方警告） |
+| `by_market_event_count` | `0` / `1` / `2` / `3+` | 事件數 |
+
+四個設計決定：
+
+- **量能分桶不自訂邊界。** 分層若另訂一套門檻，同一筆資料在「分類」（`volume_context`）與
+  「分層」（`volume_strength`）會講出不一致的故事——例如分類說 CONFIRMED、分層卻落在偏弱的桶。
+
+  > **但門檻相同不代表主體相同——這兩欄仍然可能不一致**（2026-08-10 更正，先前這裡宣稱
+  > 沿用常數就能避免不一致，是錯的）：`volume_strength` 吃的是 **primary zone 的**
+  > `relative_volume`；而 `volume_context` 在偵測到 `EXTREME_VOLUME` 事件時會被覆寫成該值，
+  > 那個事件是 `event_engine.detect_market_events()` 用**全體 zone 的最大**
+  > `relative_volume` 判定的。所以「primary zone 量能很弱、但別的 zone 爆量」時，同一列會
+  > 同時出現 `volume_context=EXTREME_VOLUME` 與 `volume_strength=VOL_LT_0_8`——
+  > **這不是 bug，是兩個不同主體**。比較兩者時要記得；replay row 只帶 primary zone，
+  > 拿不到全體 zone 的最大值，要對齊得先擴充 row projection。
+- **`by_rr_formula_state` 是用來拆開 `RR_UNAVAILABLE` 的。** 真實資料上
+  `by_rr_gate_reason_code` 的 `RR_UNAVAILABLE` 是最大的一組（4,998 筆裡佔 62%），
+  但看不出 RR 為何算不出來。加上這個分層後才分得開三種處置完全不同的情況：
+  **`REWARD_MISSING`**（有停損、沒有目標價，zone 上方沒有可用壓力區——實測是最大宗）、
+  **`RISK_NOT_POSITIVE`**（entry 與 stop 都有，但 `entry - stop <= 0`，停損價在進場價之上或同價）、
+  **`ENTRY_OR_STOP_MISSING`**（連 entry 或 stop 都沒有，通常是根本沒有 primary zone）。
+
+  > **不要改回「risk / reward 各自有無」的四象限**（2026-08-10 更正）：
+  > `decision_engine._rr_context()` 的 `reward_price` 只在 `if risk > 0:` 內賦值，
+  > 所以 **reward 有值必然蘊含 risk 有值**，「只有 reward」那一格永遠是空的。
+  > 初版就開了那個空桶，真實資料跑出 0 筆卻可能被誤讀成「風險側從不缺」，
+  > 而真正的 `entry - stop <= 0` 案例被靜靜併進「兩邊都缺」。
+  > 這條不變式由 `test_rr_formula_state_has_no_unreachable_bucket` 對真實生產者鎖住。
+  只看 `by_stop_distance_bucket` 會把停損距離當成唯一的原始基礎值，完全看不到 reward 側的缺口。
+- **`by_primary_market_event` 不是時間順序，別照字面理解**（2026-08-07 更正，見
+  本節）。這個欄位原名 `by_first_market_event`，文件也曾寫成
+  「保留事件的先後」「先發生什麼」——**那是錯的**：
+  - `decision_engine._event_sequence()` 是用**固定優先序**排序的
+    （`EXTREME_VOLUME` 10 → `HIGH_VOLUME_BREAKDOWN` 20 → `INTRADAY_RECLAIM` 30 →
+    `REVERSAL_CANDIDATE` 40），不是偵測時間。
+  - 同一列的 `market_events` 全部來自**同一根 K 棒**，`normalize_market_event()` 也沒有任何
+    時間欄位——**單根 K 棒內「誰先發生」根本沒有定義**。
+  - 因此本欄位是**事件類型集合的確定性函數**，也就是 `by_market_event_types` 的低基數粗化，
+    資訊量不會超過它。留著的唯一價值是組數少、樣本不會被切碎（實測 4 組 vs 7 組）。
+  - 要問「哪個事件先發生」得靠 event state 的 `age_bars`（跨 K 棒的存活根數），
+    那是另一個維度，目前沒有帶進 decision replay 的 row。
+- **邊界先用真實分布試算過再定。** 上述分桶在 4,998 筆上的最小組是 87 筆，全部高於前端的
+  樣本不足門檻 20——分層切太細會讓每組都標成「樣本不足」，等於白做。
+
+**RR 分布**（2026-08-07 補）：`rr_summary` 除了既有的平均與中位數，另有
+`entry_rr_distribution` / `execution_rr_distribution` / `position_rr_distribution`，
+各含 `count` / `average` / `stddev` / `min` / `p10` / `p25` / `median` / `p75` / `p90` / `max`。
+
+**為什麼一定要看分位數**：2026-08-07 的真實 report 上 `average_entry_rr = 6.45`、
+`median_entry_rr = 2.34`、`max = 1032`——**平均是中位數的 2.75 倍**。只報平均會系統性
+高估這套規則的風險報酬。UI 因此把 p10/中位數/p90 一起攤開，並以中位數為主要判讀依據。
+
+`execution_rr` 同時補進統計。它一直存在於 `rr_context` 也參與 rr_gate 判斷
+（`by_rr_gate_reason_code` 有 `EXECUTION_RR_INSUFFICIENT` / `EXECUTION_RR_UNAVAILABLE`），
+但先前完全沒有被彙總。`position_rr` 在目前的資料上多半全空，`count=0` 的分布在 UI 整列不顯示
+（畫一排破折號只是噪音）。分布的 `median` 與既有的 `median_*` 必須相等，這條由測試鎖住，
+避免同一個面板出現兩個互相矛盾的數字。
 
 參數 sweep 沒有 API 與 UI，只能用 CLI（見上節）。
 

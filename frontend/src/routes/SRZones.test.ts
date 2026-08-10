@@ -480,6 +480,55 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.queryByText(/Zone 層指標/)).not.toBeInTheDocument()
   })
 
+  it('RR 分布把 p10/中位數/p90 攤開，沒有樣本的 RR 不列出來', async () => {
+    // fixture 取自 2026-08-07 的真實 report 形狀：entry RR 平均遠高於中位數（右偏），
+    // position RR 則是 count=0（真實資料上 position_rr 全數 UNAVAILABLE）。
+    await runWithReport(
+      {
+        run_id: 'sr_replay_012',
+        rows: 40,
+        outcome_summary: {
+          at_zone_rate: 0.12,
+          rr_summary: {
+            rows_with_entry_rr: 1889,
+            average_entry_rr: 6.45,
+            median_entry_rr: 2.34,
+            rows_with_execution_rr: 931,
+            median_execution_rr: 1.05,
+            rows_with_position_rr: 0,
+            entry_rr_distribution: {
+              count: 1889, average: 6.45, stddev: 30.1, min: 0,
+              p10: 0, p25: 0.98, median: 2.34, p75: 4.78, p90: 11.2, max: 1032,
+            },
+            execution_rr_distribution: {
+              count: 931, average: 3.2, stddev: 8.4, min: 0,
+              p10: 0, p25: 0.13, median: 1.05, p75: 2.47, p90: 5.08, max: 95.76,
+            },
+            position_rr_distribution: {
+              count: 0, average: null, stddev: null, min: null,
+              p10: null, p25: null, median: null, p75: null, p90: null, max: null,
+            },
+          },
+        },
+      },
+      'sr_eval_job_013'
+    )
+
+    expect(screen.getByText(/RR 分布/)).toBeInTheDocument()
+
+    // 有樣本的兩列要印出具體分位數，不能只驗標題存在
+    const entryRow = screen.getByText('entry RR').closest('tr')
+    const entryCells = Array.from(entryRow?.querySelectorAll('td') ?? []).map((td) => td.textContent?.trim())
+    expect(entryCells).toContain('1889')
+    expect(entryCells).toContain('2.34R') // 中位數
+    expect(entryCells).toContain('11.20R') // p90
+    expect(entryCells).toContain('1032.00R') // 極端值要看得到，這正是平均被拉高的原因
+
+    expect(screen.getByText('execution RR')).toBeInTheDocument()
+    // count=0 的 position RR 整列不出現——畫一排破折號只是噪音
+    expect(screen.queryByText('position RR')).not.toBeInTheDocument()
+  })
+
   it('模型不可用時 hold/break 是 null，仍要渲染且數值顯示破折號', async () => {
     await runWithReport(
       {
@@ -571,9 +620,9 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.queryByText(/波動側寫/)).not.toBeInTheDocument()
   })
 
-  // daily confirmation 的九個分層才是 T-028 的價值所在：「量能不足時的隔日守住表現」
+  // daily confirmation 的分層才是 T-028 的價值所在：「量能不足時的隔日守住表現」
   // 這類問題總表的五個 rate 答不了。以下鎖住分層有被渲染、且分群是依語意切的。
-  it('daily confirmation 的九個分層依語意分三群顯示', async () => {
+  it('daily confirmation 的十五個分層依語意分三群顯示', async () => {
     const group = (rows: number) => ({
       rows,
       next_zone_result_counts: { SUPPORT_HELD: rows },
@@ -601,6 +650,15 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
             by_rr_gate: { RR_OK: group(40) },
             by_rr_gate_reason_code: { RR_ABOVE_MIN: group(40) },
             by_rr_bucket: { 'RR_1.5_2.0': group(40) },
+            // 2026-08-07 新增的六個細分層。欄位名與 Python
+            // `_daily_confirmation_summary()` 的輸出一致，桶名取自真實 report。
+            // 故意用「強桶在前、弱桶在後」的插入順序，驗證渲染會依序數重排
+            by_volume_strength: { VOL_GTE_2_5: group(40), VOL_LT_0_8: group(30) },
+            by_primary_market_event: { EXTREME_VOLUME: group(40) },
+            by_market_event_count: { EVENTS_2: group(40) },
+            by_stop_distance_bucket: { SD_1_TO_3PCT: group(40) },
+            by_entry_executability: { EXECUTABLE_NOW: group(40) },
+            by_rr_formula_state: { REWARD_MISSING: group(40) },
           },
         },
       },
@@ -612,9 +670,39 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.getByText(/RR 面分層/)).toBeInTheDocument()
     expect(screen.getByText('VOLUME_CONFIRMED')).toBeInTheDocument()
     expect(screen.getByText('RR_ABOVE_MIN')).toBeInTheDocument()
-    // 三個 Record 欄位攤成 chip，前綴要標明來源，否則分不出是隔日還是兩日的結果。
-    expect(screen.getAllByText('隔日/SUPPORT_HELD').length).toBe(9)
-    expect(screen.getAllByText('兩日/SUPPORT_CONFIRMED').length).toBe(9)
+
+    // 逐個分層標題斷言，**不用「總共幾個 chip」這種總數**：每加一個分層就要改數字，
+    // 而改錯數字比漏測更難察覺（見 docs/development-workflow.md §3）。這裡漏接任何一個分層都會失敗。
+    for (const title of [
+      '依確認狀態', '依 zone 角色',
+      '依量能條件', '依量能強弱', '依事件序列', '依主要事件', '依事件數',
+      '依市場事件類型', '依事件市場狀態',
+      '依 RR gate', '依 RR gate 原因碼', '依 RR bucket',
+      '依停損距離', '依進場可執行性', '依 RR 公式齊備性',
+    ]) {
+      expect(screen.getByText(title)).toBeInTheDocument()
+    }
+    // 新分層的桶名要真的出現在畫面上，不是只有標題
+    for (const bucket of [
+      'VOL_GTE_2_5', 'EXTREME_VOLUME', 'EVENTS_2',
+      'SD_1_TO_3PCT', 'EXECUTABLE_NOW', 'REWARD_MISSING',
+    ]) {
+      expect(screen.getByText(bucket)).toBeInTheDocument()
+    }
+
+    // 序數桶要依強弱排序，**不是字典序**：localeCompare 會把 VOL_LT_0_8 排到
+    // VOL_GTE_2_5 後面，讀者由上往下掃會把最弱的看成最強之後而誤判單調趨勢。
+    // 標題的下一個兄弟節點才是對應的表；用 parentElement.querySelector('table')
+    // 會抓到容器裡的第一張表（也就是上一個分層的），測到錯的東西。
+    const volumeTable = screen.getByText('依量能強弱').nextElementSibling as HTMLElement
+    expect(volumeTable?.tagName).toBe('TABLE')
+    const volumeRows = Array.from(volumeTable.querySelectorAll('tbody tr'))
+      .map((tr) => tr.querySelector('td')?.textContent?.trim())
+      // chip 列（隔日/兩日/失敗）與桶列同在 tbody，只取桶名那幾列
+      .filter((text): text is string => !!text && text.startsWith('VOL_'))
+    expect(volumeRows).toEqual(['VOL_LT_0_8', 'VOL_GTE_2_5'])
+    // chip 前綴仍要標明來源，否則分不出是隔日還是兩日的結果
+    expect(screen.getAllByText('隔日/SUPPORT_HELD').length).toBeGreaterThan(0)
   })
 
   it('只有部分分層有資料時，其餘的群整塊不出現', async () => {

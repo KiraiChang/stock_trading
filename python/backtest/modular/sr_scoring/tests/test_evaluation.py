@@ -666,6 +666,18 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
     assert report["outcome_summary"]["by_final_entry_state"] == {}
     assert report["outcome_summary"]["by_daily_confirmation_state"] == {}
     assert report["outcome_summary"]["by_market_bias"] == {}
+    empty_distribution = {
+        "count": 0,
+        "average": None,
+        "stddev": None,
+        "min": None,
+        "p10": None,
+        "p25": None,
+        "median": None,
+        "p75": None,
+        "p90": None,
+        "max": None,
+    }
     assert report["outcome_summary"]["rr_summary"] == {
         "rows_with_entry_rr": 0,
         "average_entry_rr": None,
@@ -675,6 +687,14 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
         "median_position_rr": None,
         "entry_rr_source_counts": {},
         "position_rr_source_counts": {},
+        "rows_with_execution_rr": 0,
+        "average_execution_rr": None,
+        "median_execution_rr": None,
+        "execution_rr_source_counts": {},
+        # 沒有樣本時分布是 count=0 ＋ 其餘 None，不是一堆 0
+        "entry_rr_distribution": empty_distribution,
+        "execution_rr_distribution": empty_distribution,
+        "position_rr_distribution": empty_distribution,
     }
     assert report["replay_plan"][0]["symbol"] == "2330"
     assert report["replay_plan"][0]["candidate_bars"] > 0
@@ -764,6 +784,8 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     assert first_group["positive_forward_return_rate"] is not None
     assert first_group["negative_forward_return_rate"] is not None
     rr_summary = report["outcome_summary"]["rr_summary"]
+    # 刻意用精確的 key 集合而不是子集比對：欄位增減要被這裡擋一次，
+    # 前端才不會在不知情的狀況下與後端形狀分岔。
     assert set(rr_summary) == {
         "rows_with_entry_rr",
         "average_entry_rr",
@@ -773,12 +795,44 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
         "median_position_rr",
         "entry_rr_source_counts",
         "position_rr_source_counts",
+        # 2026-08-07 新增（T-028 RR distribution）
+        "rows_with_execution_rr",
+        "average_execution_rr",
+        "median_execution_rr",
+        "execution_rr_source_counts",
+        "entry_rr_distribution",
+        "execution_rr_distribution",
+        "position_rr_distribution",
     }
     assert isinstance(rr_summary["entry_rr_source_counts"], dict)
     assert isinstance(rr_summary["position_rr_source_counts"], dict)
+    assert isinstance(rr_summary["execution_rr_source_counts"], dict)
+    # 分布與既有的 median_* 必須一致，否則前端會顯示兩個互相矛盾的數字
+    assert rr_summary["entry_rr_distribution"]["count"] == rr_summary["rows_with_entry_rr"]
     scored_row = next(row for row in report["replay_rows"] if row["zone_score_available"])
     assert scored_row["zone_count"] > 0
     assert scored_row["zone_score_error"] is None
+    # replay row 的 primary_zone 是對外 projection，欄位增減要在這裡被擋一次。
+    #
+    # **這是 Python 與前端型別之間唯一的連結點。** TypeScript 偵測不到 Python 的變動
+    # （這個不對稱正是 key 名寫錯與型別不符這兩類事故能潛伏數週的原因，見
+    #   docs/development-workflow.md §3），
+    # 所以由這一側主動失敗並提醒。改這裡的同時要確認
+    # `frontend/src/lib/api/srZones.ts` 有沒有對應型別需要一起改
+    # ——目前**刻意沒有**replay row 的 TS 型別（見 issue.md I-062）：前端不消費
+    # replay_rows，加一個沒有消費者的宣告只會重蹈「型別沒被消費所以默默寫錯」的覆轍。
+    # 這份清單就是日後真的要加型別時的權威來源，不要憑記憶手寫。
+    assert set(scored_row["primary_zone"]) == {
+        "role",
+        "tier",
+        "price_low",
+        "price_high",
+        "confidence",
+        "trading_score",
+        "risk_reward_ratio",
+        "volume_confirmation",
+        "relative_volume",
+    }
     assert scored_row["primary_zone"]["role"] in {"SUPPORT", "RESISTANCE", "AT_ZONE"}
     assert scored_row["primary_zone"]["price_low"] < scored_row["primary_zone"]["price_high"]
     assert scored_row["primary_zone"]["confidence"] is not None
@@ -1550,3 +1604,257 @@ def test_sweep_decision_outcomes_expose_at_zone_rate(tmp_path, monkeypatch):
         assert "primary_zone_role_counts" in decision
         if decision["at_zone_rate"] is not None:
             assert 0.0 <= decision["at_zone_rate"] <= 1.0
+
+
+# ── RR distribution 與更細分層（2026-08-07 補，T-028）─────────────────
+
+
+def test_metric_distribution_values_are_correct():
+    """percentiles 要驗實際數值，不是只驗 key 存在。
+
+    用一組已知序列：1..10 的中位數是 5.5、p25=3.25、p75=7.75（numpy 線性插值）。
+    只斷言「key 存在」的測試擋不住把 p25 和 p75 寫反這種錯。
+    """
+    dist = evaluation_module._metric_distribution([float(i) for i in range(1, 11)])
+
+    assert dist["count"] == 10
+    assert dist["min"] == pytest.approx(1.0)
+    assert dist["max"] == pytest.approx(10.0)
+    assert dist["median"] == pytest.approx(5.5)
+    assert dist["average"] == pytest.approx(5.5)
+    assert dist["p25"] == pytest.approx(3.25)
+    assert dist["p75"] == pytest.approx(7.75)
+    assert dist["p10"] == pytest.approx(1.9)
+    assert dist["p90"] == pytest.approx(9.1)
+    # 分位數必須單調遞增，寫反或取錯會在這裡被抓到
+    order = [dist["min"], dist["p10"], dist["p25"], dist["median"], dist["p75"], dist["p90"], dist["max"]]
+    assert order == sorted(order)
+
+
+def test_metric_distribution_edge_cases():
+    # 空集合：count=0，其餘為 None 而不是 0——「沒有樣本」與「樣本值是 0」是兩件事。
+    empty = evaluation_module._metric_distribution([])
+    assert empty["count"] == 0
+    assert all(empty[key] is None for key in ("average", "stddev", "min", "median", "max", "p10", "p90"))
+
+    # 單一元素：所有分位數都等於該值，標準差為 0（不是 None）。
+    single = evaluation_module._metric_distribution([3.5])
+    assert single["count"] == 1
+    assert single["stddev"] == pytest.approx(0.0)
+    for key in ("average", "min", "p10", "p25", "median", "p75", "p90", "max"):
+        assert single[key] == pytest.approx(3.5), key
+
+
+def test_rr_summary_covers_execution_rr_and_distributions():
+    """execution_rr 先前完全沒有被統計，但它參與 rr_gate 判斷。"""
+    rows = [
+        {"rr_context": {"entry_rr": 1.0, "execution_rr": 0.5, "entry_rr_source": "PRIMARY_ZONE",
+                        "execution_rr_source": "PRIMARY_ZONE"}},
+        {"rr_context": {"entry_rr": 3.0, "execution_rr": 2.5, "entry_rr_source": "PRIMARY_ZONE",
+                        "execution_rr_source": "PRIMARY_ZONE"}},
+        {"rr_context": {"entry_rr": None, "execution_rr": None, "entry_rr_source": "UNAVAILABLE",
+                        "execution_rr_source": "UNAVAILABLE"}},
+    ]
+
+    summary = evaluation_module._rr_summary(rows)
+
+    # 既有欄位不能因為新增而改變語意
+    assert summary["rows_with_entry_rr"] == 2
+    assert summary["median_entry_rr"] == pytest.approx(2.0)
+    assert summary["entry_rr_source_counts"] == {"PRIMARY_ZONE": 2, "UNAVAILABLE": 1}
+
+    # 新增的 execution RR
+    assert summary["rows_with_execution_rr"] == 2
+    assert summary["median_execution_rr"] == pytest.approx(1.5)
+    assert summary["execution_rr_source_counts"] == {"PRIMARY_ZONE": 2, "UNAVAILABLE": 1}
+
+    # 分布的 median 必須與既有的 median_* 一致，否則兩個數字會在前端互相矛盾
+    assert summary["entry_rr_distribution"]["median"] == pytest.approx(summary["median_entry_rr"])
+    assert summary["execution_rr_distribution"]["median"] == pytest.approx(summary["median_execution_rr"])
+    assert summary["entry_rr_distribution"]["count"] == summary["rows_with_entry_rr"]
+    # 全部無值時是空分布，不是 0
+    assert summary["position_rr_distribution"]["count"] == 0
+    assert summary["position_rr_distribution"]["median"] is None
+
+
+def test_volume_strength_bucket_reuses_existing_thresholds():
+    """邊界必須跟 scoring/_volume_confirmation 與 event_engine 的門檻一致。
+
+    分層若自訂邊界，同一筆資料在「分類」與「分層」會講出不一致的故事。
+    """
+    assert evaluation_module._volume_strength_bucket(None) == "VOLUME_UNAVAILABLE"
+    assert evaluation_module._volume_strength_bucket(0.79) == "VOL_LT_0_8"
+    # 邊界值屬於上一桶（>= 才進）
+    assert evaluation_module._volume_strength_bucket(0.8) == "VOL_0_8_TO_1_2"
+    assert evaluation_module._volume_strength_bucket(1.19) == "VOL_0_8_TO_1_2"
+    assert evaluation_module._volume_strength_bucket(1.2) == "VOL_1_2_TO_2_5"
+    assert evaluation_module._volume_strength_bucket(2.49) == "VOL_1_2_TO_2_5"
+    assert evaluation_module._volume_strength_bucket(2.5) == "VOL_GTE_2_5"
+
+
+def test_stop_distance_and_event_buckets():
+    assert evaluation_module._stop_distance_bucket(None) == "STOP_DISTANCE_UNAVAILABLE"
+    # 傳入的是比例（0.006 = 0.6%），不是百分比數值——搞混會讓所有列擠進同一桶
+    assert evaluation_module._stop_distance_bucket(0.006) == "SD_LT_1PCT"
+    assert evaluation_module._stop_distance_bucket(0.01) == "SD_1_TO_3PCT"
+    assert evaluation_module._stop_distance_bucket(0.05) == "SD_3_TO_6PCT"
+    assert evaluation_module._stop_distance_bucket(0.09) == "SD_6_TO_10PCT"
+    assert evaluation_module._stop_distance_bucket(0.10) == "SD_GTE_10PCT"
+
+    # 代表事件取的是傳入 list 的第一個——注意這個 helper 本身不排序，
+    # 排序是 decision_engine._event_sequence() 做的（固定優先序，非時間序）。
+    assert evaluation_module._priority_event_type([]) == "NO_EVENT"
+    assert evaluation_module._priority_event_type(
+        [{"type": "INTRADAY_RECLAIM"}, {"type": "EXTREME_VOLUME"}]
+    ) == "INTRADAY_RECLAIM"
+    # 沒有 type 的項目要跳過而不是當成事件
+    assert evaluation_module._priority_event_type([{"other": 1}, {"type": "EXTREME_VOLUME"}]) == "EXTREME_VOLUME"
+
+    assert evaluation_module._event_count_bucket([]) == "EVENTS_0"
+    assert evaluation_module._event_count_bucket([{"type": "A"}]) == "EVENTS_1"
+    assert evaluation_module._event_count_bucket([{"type": "A"}, {"type": "B"}]) == "EVENTS_2"
+    assert evaluation_module._event_count_bucket(
+        [{"type": "A"}, {"type": "B"}, {"type": "C"}, {"type": "D"}]
+    ) == "EVENTS_3_PLUS"
+
+
+def test_daily_confirmation_summary_includes_new_groups():
+    """新分層要真的掛上 summary，而不是只算出來沒輸出。"""
+    rows = [
+        {
+            "daily_confirmation_outcome": {
+                "available": True, "state": "BLOCKED", "primary_role": "SUPPORT",
+                "next_zone_result": "SUPPORT_HELD", "two_bar_result": "SUPPORT_CONFIRMED",
+                "next_close_return": 0.01, "two_bar_close_return": 0.02,
+            },
+            "daily_confirmation_context": {
+                "volume_strength": "VOL_GTE_2_5",
+                "stop_distance_bucket": "SD_1_TO_3PCT",
+                "entry_executability": "EXECUTABLE_NOW",
+                "primary_market_event": "EXTREME_VOLUME",
+                "market_event_count": "EVENTS_2",
+            },
+        }
+    ]
+
+    summary = evaluation_module._daily_confirmation_summary(rows)
+
+    for group, key in (
+        ("by_volume_strength", "VOL_GTE_2_5"),
+        ("by_stop_distance_bucket", "SD_1_TO_3PCT"),
+        ("by_entry_executability", "EXECUTABLE_NOW"),
+        ("by_primary_market_event", "EXTREME_VOLUME"),
+        ("by_market_event_count", "EVENTS_2"),
+    ):
+        assert group in summary, group
+        assert key in summary[group], (group, key)
+        assert summary[group][key]["rows"] == 1
+
+
+def test_primary_market_event_is_priority_order_not_time_order():
+    """鎖住 `primary_market_event` 的真實語意：固定優先序，不是時間序。
+
+    先前這個欄位叫 `first_market_event`，程式註解與文件都寫「先發生什麼」——那是錯的
+    （現況見 docs/sr-zone-scoring.md 的「再細的六個分層」）。
+    `decision_engine._event_sequence()` 用固定優先序排序
+    （EXTREME_VOLUME 10 → HIGH_VOLUME_BREAKDOWN 20 → INTRADAY_RECLAIM 30 →
+    REVERSAL_CANDIDATE 40），而且同一列的事件全來自同一根 K 棒，根本沒有時間先後。
+
+    這支測試刻意走**真實路徑**（decision engine 的排序 → context），而不是只餵手寫 list
+    給 helper——原本的測試就是因為只測 helper，完全沒碰到排序語意才漏掉。
+    """
+    from ..decision_engine import _event_sequence
+
+    # 故意用「優先序低的排在前面」的輸入：若語意真的是時間序，結果會是 INTRADAY_RECLAIM。
+    market_events = [
+        {"type": "INTRADAY_RECLAIM"},
+        {"type": "EXTREME_VOLUME"},
+    ]
+    sequence = _event_sequence(market_events)
+    assert [event["type"] for event in sequence] == ["EXTREME_VOLUME", "INTRADAY_RECLAIM"]
+
+    context = evaluation_module._daily_confirmation_context(
+        {"volume_confirmation": "NEUTRAL", "relative_volume": 1.0},
+        {"event_sequence": sequence, "market_events": market_events, "rr_context": {}, "rr_gate": {}},
+    )
+    # 優先序最高的 EXTREME_VOLUME 勝出，即使它在輸入 list 裡排在後面
+    assert context["primary_market_event"] == "EXTREME_VOLUME"
+
+    # 而且它是事件類型集合的確定性函數——換順序輸入結果不變，
+    # 這正是「它是 market_event_types 的粗化、不是新維度」的證明。
+    reversed_sequence = _event_sequence(list(reversed(market_events)))
+    reversed_context = evaluation_module._daily_confirmation_context(
+        {"volume_confirmation": "NEUTRAL", "relative_volume": 1.0},
+        {"event_sequence": reversed_sequence, "market_events": market_events, "rr_context": {}, "rr_gate": {}},
+    )
+    assert reversed_context["primary_market_event"] == context["primary_market_event"]
+
+
+def test_rr_formula_state_buckets_are_all_reachable():
+    """四個桶都要對應真實可能發生的上游狀態。
+
+    只有 stop_distance 與 entry_executability 兩個分層時，RR_UNAVAILABLE
+    （真實資料上佔 62%）完全拆不開，看不出是缺目標價還是缺停損。
+    """
+    state = evaluation_module._rr_formula_state
+    assert state({"risk_price": 5.0, "reward_price": 12.0}) == "RR_FORMULA_COMPLETE"
+    assert state({"risk_price": 5.0, "reward_price": None}) == "REWARD_MISSING"
+    # entry 與 stop 都有、但 risk 不是正數（停損在進場之上）——先前這種列被靜靜併進
+    # 「兩邊都缺」，與文件寫的「通常是沒有 primary zone」不符。
+    assert state({"entry_price": 100.0, "stop_price": 105.0}) == "RISK_NOT_POSITIVE"
+    assert state({"entry_price": 100.0, "stop_price": 100.0}) == "RISK_NOT_POSITIVE"
+    # 連 entry / stop 都沒有
+    assert state({"entry_price": 100.0}) == "ENTRY_OR_STOP_MISSING"
+    assert state({}) == "ENTRY_OR_STOP_MISSING"
+
+
+def test_rr_formula_state_has_no_unreachable_bucket():
+    """鎖住「reward 有值必然蘊含 risk 有值」這個上游不變式。
+
+    `decision_engine._rr_context()` 的 `reward_price` 只在 `if risk > 0:` 內賦值，
+    所以「只有 reward、沒有 risk」不可能發生。先前的實作為此開了一個
+    `RISK_MISSING` 桶，真實資料跑出 0 筆卻被當成「風險側從不缺」的結論依據。
+    這支測試直接對**真實生產者**驗這個不變式——只測 helper 對手寫 dict 的行為抓不到。
+    """
+    import inspect
+
+    from .. import decision_engine
+
+    source = inspect.getsource(decision_engine._rr_context)
+    risk_assign = source.index("risk_price = risk")
+    # reward_price 的每一次賦值都必須出現在 risk_price = risk 之後（同一個 if risk > 0 區塊內）
+    reward_assigns = [
+        idx for idx in range(len(source))
+        if source.startswith("reward_price = ", idx) and not source[:idx].rstrip().endswith("None")
+    ]
+    assert reward_assigns, "找不到 reward_price 的賦值，_rr_context 結構已變，請重新確認分桶語意"
+    assert all(idx > risk_assign for idx in reward_assigns), (
+        "reward_price 出現在 risk_price 之前——上游不變式已改變，"
+        "_rr_formula_state 的分桶要重新設計（可能需要重新加回 RISK_MISSING）"
+    )
+
+
+def test_daily_confirmation_context_emits_rr_formula_state():
+    """要走 context 這條真實路徑，不是只測 helper。"""
+    context = evaluation_module._daily_confirmation_context(
+        {"volume_confirmation": "NEUTRAL", "relative_volume": 1.0},
+        {
+            "event_sequence": [],
+            "market_events": [],
+            "rr_context": {"risk_price": 5.0, "reward_price": None, "stop_distance_pct": 0.02},
+            "rr_gate": {},
+        },
+    )
+    assert context["rr_formula_state"] == "REWARD_MISSING"
+
+    summary = evaluation_module._daily_confirmation_summary([
+        {
+            "daily_confirmation_outcome": {
+                "available": True, "state": "BLOCKED", "primary_role": "SUPPORT",
+                "next_zone_result": "SUPPORT_HELD", "two_bar_result": "SUPPORT_CONFIRMED",
+                "next_close_return": 0.01, "two_bar_close_return": 0.02,
+            },
+            "daily_confirmation_context": context,
+        }
+    ])
+    assert summary["by_rr_formula_state"]["REWARD_MISSING"]["rows"] == 1

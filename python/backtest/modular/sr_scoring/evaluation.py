@@ -24,7 +24,14 @@ from .decision_engine import build_decision_summary
 from .features import trend_slope, zone_volatility
 from .model import FEATURE_COLUMNS, ModelBundle, load_model
 from .ranking import _assign_tiers, _sort_zone_scores
-from .scoring import _build_chip_summary, _compute_global_metrics, score_zone
+from .event_engine import EXTREME_VOLUME_THRESHOLD
+from .scoring import (
+    VOLUME_CONFIRMATION_HIGH,
+    VOLUME_CONFIRMATION_LOW,
+    _build_chip_summary,
+    _compute_global_metrics,
+    score_zone,
+)
 from .zone_builder import (
     ATRZoneBuilderConfig,
     HIGH_VOLATILITY_THRESHOLD,
@@ -772,6 +779,9 @@ def _historical_zone_score_summary(
             "trading_score": primary.trading_score,
             "risk_reward_ratio": primary.risk_reward_ratio,
             "volume_confirmation": primary.volume_confirmation,
+            # 帶出數值而不只是分類後的 volume_confirmation：分層要能依量能強弱切桶，
+            # 光有 CONFIRMED/NEUTRAL/WEAK 三檔看不出「多強」。
+            "relative_volume": primary.relative_volume,
         },
     }
 
@@ -814,6 +824,117 @@ def _rr_bucket(value: Any) -> str:
     return "RR_GTE_3"
 
 
+def _volume_strength_bucket(value: Any) -> str:
+    """量能強弱分桶。
+
+    邊界**沿用既有常數**而不是另外訂一套：`VOLUME_CONFIRMATION_LOW/HIGH` 是
+    `scoring._volume_confirmation` 判定 WEAK/NEUTRAL/CONFIRMED 的門檻，
+    `EXTREME_VOLUME_THRESHOLD` 是 event_engine 判定爆量事件的門檻。
+
+    **但門檻相同不代表主體相同——這一點必須知道，否則會誤判**（2026-08-10 補）：
+    本函式吃的是 **primary zone 的** `relative_volume`，而同一列的 `volume_context`
+    在偵測到 `EXTREME_VOLUME` 事件時會被覆寫成該值，那個事件是
+    `event_engine.detect_market_events()` 用**全體 zone 的最大** `relative_volume`
+    判定的。所以「primary zone 量能很弱、但別的 zone 爆量」時，同一列會同時出現
+    `volume_context=EXTREME_VOLUME` 與 `volume_strength=VOL_LT_0_8`——**這不是 bug，
+    是兩個不同主體**。要比較兩者時記得這件事；replay row 只帶 primary zone，
+    拿不到全體 zone 的最大值。
+    """
+    if value is None:
+        return "VOLUME_UNAVAILABLE"
+    rv = float(value)
+    if rv < VOLUME_CONFIRMATION_LOW:
+        return "VOL_LT_0_8"
+    if rv < VOLUME_CONFIRMATION_HIGH:
+        return "VOL_0_8_TO_1_2"
+    if rv < EXTREME_VOLUME_THRESHOLD:
+        return "VOL_1_2_TO_2_5"
+    return "VOL_GTE_2_5"
+
+
+def _stop_distance_bucket(value: Any) -> str:
+    """停損距離分桶（百分比）。
+
+    邊界取自 2026-08-07 的 4,998 筆真實 report 分布（p50≈1.8%、p75≈6.6%、p90≈9.2%），
+    切出來每組 193～1,222 筆，都高於前端的樣本不足門檻 20。
+    """
+    if value is None:
+        return "STOP_DISTANCE_UNAVAILABLE"
+    pct = float(value) * 100.0
+    if pct < 1.0:
+        return "SD_LT_1PCT"
+    if pct < 3.0:
+        return "SD_1_TO_3PCT"
+    if pct < 6.0:
+        return "SD_3_TO_6PCT"
+    if pct < 10.0:
+        return "SD_6_TO_10PCT"
+    return "SD_GTE_10PCT"
+
+
+def _rr_formula_state(rr_context: dict[str, Any]) -> str:
+    """RR 公式為什麼算不出來——依**上游的實際成因**分桶，不是依欄位有無。
+
+    **為什麼需要單獨看這個**：真實資料上 `by_rr_gate_reason_code` 的 `RR_UNAVAILABLE`
+    佔 62%（3,109/4,998）——最大的一組，卻無法再往下拆。
+
+    分桶（四個都可能出現，實測分布見 sr-zone-scoring.md）：
+
+    - `RR_FORMULA_COMPLETE`：risk 與 reward 都算得出來。
+    - `REWARD_MISSING`：有 risk、沒有 reward——zone 上方沒有可用的壓力區當目標
+      （`target_basis` 為 `UNAVAILABLE` 或 `MARKET_ENTRY_TARGET_UNAVAILABLE`）。
+    - `RISK_NOT_POSITIVE`：**entry 與 stop 都有，但 `entry - stop <= 0`**，
+      風險距離不是正數（停損價在進場價之上或同價，例如價格已跌破 zone 而 stop 仍在上方）。
+    - `ENTRY_OR_STOP_MISSING`：連 entry 或 stop 都沒有，通常是根本沒有 primary zone。
+
+    **不要用「risk_price / reward_price 各自有沒有值」的四象限來分**（2026-08-10 更正）：
+    `decision_engine._rr_context()` 的 `reward_price` 只在 `if risk > 0:` 區塊內賦值
+    （見該檔 `risk_price = risk` 之後），所以 **reward 有值必然蘊含 risk 有值**——
+    「只有 reward、沒有 risk」這個象限**永遠不可能出現**。先前的版本就有這個空桶，
+    真實資料跑出 0 筆卻被當成「風險側從不缺」的證據，而真正的
+    `entry - stop <= 0` 案例被靜靜併進「兩邊都缺」，與文件寫的「通常是沒有 primary zone」不符。
+    """
+    if rr_context.get("risk_price") is not None:
+        return "RR_FORMULA_COMPLETE" if rr_context.get("reward_price") is not None else "REWARD_MISSING"
+    # risk_price 是 None 有兩種成因，處置完全不同，不能混為一談。
+    if rr_context.get("entry_price") is not None and rr_context.get("stop_price") is not None:
+        return "RISK_NOT_POSITIVE"
+    return "ENTRY_OR_STOP_MISSING"
+
+
+def _priority_event_type(event_sequence: list[dict[str, Any]]) -> str:
+    """依**固定優先序**取出代表事件。
+
+    **這不是「時間上最早發生的事件」**，別照字面理解成先後順序：
+    `decision_engine._event_sequence()` 是用固定優先序排的（`EXTREME_VOLUME` 10 →
+    `HIGH_VOLUME_BREAKDOWN` 20 → `INTRADAY_RECLAIM` 30 → `REVERSAL_CANDIDATE` 40），
+    不是偵測時間。而且同一列的 market_events 全部來自**同一根 K 棒**，
+    `normalize_market_event()` 也沒有任何時間欄位——**單根 K 棒內「誰先發生」根本沒有定義**。
+
+    因此本欄位實際上是 `market_event_types` 的**低基數粗化**（同一個事件類型集合必然得到
+    同一個代表事件），資訊量不會超過它。留著的價值只有一個：組數少，樣本不會被切碎
+    （真實資料上 4 組 vs 7 組）。要問「哪個事件先發生」得靠 event state 的 `age_bars`，
+    那是跨 K 棒的存活時間，與本欄位無關。
+    """
+    for event in event_sequence:
+        event_type = event.get("type")
+        if event_type:
+            return str(event_type)
+    return "NO_EVENT"
+
+
+def _event_count_bucket(event_sequence: list[dict[str, Any]]) -> str:
+    """同時發生的事件數。事件越多代表當下訊號越密集，與確認成效的關係值得單獨看。"""
+    count = sum(1 for event in event_sequence if event.get("type"))
+    if count == 0:
+        return "EVENTS_0"
+    if count == 1:
+        return "EVENTS_1"
+    if count == 2:
+        return "EVENTS_2"
+    return "EVENTS_3_PLUS"
+
+
 def _daily_confirmation_context(
     primary_zone: dict[str, Any] | None,
     fields: dict[str, Any],
@@ -841,6 +962,20 @@ def _daily_confirmation_context(
         "rr_bucket": _rr_bucket(actual_rr),
         "daily_price_follow_through": str((fields.get("daily_price_action") or {}).get("price_follow_through_state") or "UNKNOWN"),
         "daily_momentum_confirmation": str((fields.get("daily_price_action") or {}).get("momentum_confirmation_state") or "UNKNOWN"),
+        # ── 以下為更細的分層維度 ───────────────────────────────────
+        # volume_context 只有分類（CONFIRMED/NEUTRAL/WEAK…），看不出「多強」。
+        "volume_strength": _volume_strength_bucket((primary_zone or {}).get("relative_volume")),
+        # RR gate 的原始基礎值：停損距離與「現在能不能執行」是 gate 判斷的兩個前提，
+        # 分層看它們才知道 RR_BLOCKED 是因為距離太寬還是根本進不了場。
+        "stop_distance_bucket": _stop_distance_bucket(rr_context.get("stop_distance_pct")),
+        "entry_executability": str(rr_context.get("entry_executability_reason_code") or "ENTRY_EXECUTABILITY_UNKNOWN"),
+        # risk / reward 的齊備性——沒有這個維度就看不出 RR_UNAVAILABLE（真實資料上佔 62%）
+        # 到底是缺目標價還是缺停損。
+        "rr_formula_state": _rr_formula_state(rr_context),
+        # event_sequence 是排序後串接的字串，看不出先後也切得太碎（4,998 筆散在 7 組）。
+        # 拆成「第一個事件」與「事件數」兩個低基數維度。
+        "primary_market_event": _priority_event_type(event_sequence),
+        "market_event_count": _event_count_bucket(event_sequence),
     }
 
 
@@ -1477,6 +1612,14 @@ def _daily_confirmation_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "by_rr_gate": _daily_confirmation_groups(outcomes, "rr_gate"),
         "by_rr_gate_reason_code": _daily_confirmation_groups(outcomes, "rr_gate_reason_code"),
         "by_rr_bucket": _daily_confirmation_groups(outcomes, "rr_bucket"),
+        # 更細的分層（2026-08-07 補）：量能強弱數值、RR gate 的原始基礎值、事件順序。
+        # 分桶邊界沿用既有常數或取自真實分布，見各 _*_bucket 函式的說明。
+        "by_volume_strength": _daily_confirmation_groups(outcomes, "volume_strength"),
+        "by_stop_distance_bucket": _daily_confirmation_groups(outcomes, "stop_distance_bucket"),
+        "by_entry_executability": _daily_confirmation_groups(outcomes, "entry_executability"),
+        "by_rr_formula_state": _daily_confirmation_groups(outcomes, "rr_formula_state"),
+        "by_primary_market_event": _daily_confirmation_groups(outcomes, "primary_market_event"),
+        "by_market_event_count": _daily_confirmation_groups(outcomes, "market_event_count"),
     }
 
 
@@ -1760,28 +1903,77 @@ def _decision_outcome_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _metric_distribution(values: list[float]) -> dict[str, Any]:
+    """數值序列的分布摘要。
+
+    **為什麼需要這個**：平均數單獨看會誤導。2026-08-07 的真實 report 裡
+    `average_entry_rr = 6.45` 但 `median_entry_rr = 2.34`（最大值 1032），
+    平均是中位數的 2.75 倍——只報平均會系統性高估這套規則的風險報酬。
+    percentiles 才看得出分布的形狀與尾巴。
+
+    空序列回傳 count=0 且其餘為 None（不是 0）：沒有樣本與「樣本值為 0」是兩件事。
+    """
+    if not values:
+        return {
+            "count": 0,
+            "average": None,
+            "stddev": None,
+            "min": None,
+            "p10": None,
+            "p25": None,
+            "median": None,
+            "p75": None,
+            "p90": None,
+            "max": None,
+        }
+    array = np.asarray(values, dtype=float)
+    return {
+        "count": int(array.size),
+        "average": _clean_metric(float(np.mean(array))),
+        # 單一元素時 np.std 回 0.0（ddof=0），語意正確：只有一個點就沒有離散度。
+        "stddev": _clean_metric(float(np.std(array))),
+        "min": _clean_metric(float(np.min(array))),
+        "p10": _clean_metric(float(np.percentile(array, 10))),
+        "p25": _clean_metric(float(np.percentile(array, 25))),
+        "median": _clean_metric(float(np.median(array))),
+        "p75": _clean_metric(float(np.percentile(array, 75))),
+        "p90": _clean_metric(float(np.percentile(array, 90))),
+        "max": _clean_metric(float(np.max(array))),
+    }
+
+
+def _rr_values(rows: list[dict[str, Any]], field: str) -> list[float]:
+    return [
+        float((row.get("rr_context") or {}).get(field))
+        for row in rows
+        if (row.get("rr_context") or {}).get(field) is not None
+    ]
+
+
 def _rr_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    entry_rr_values = [
-        float((row.get("rr_context") or {}).get("entry_rr"))
-        for row in rows
-        if (row.get("rr_context") or {}).get("entry_rr") is not None
-    ]
-    position_rr_values = [
-        float((row.get("rr_context") or {}).get("position_rr"))
-        for row in rows
-        if (row.get("rr_context") or {}).get("position_rr") is not None
-    ]
+    entry_rr_values = _rr_values(rows, "entry_rr")
+    position_rr_values = _rr_values(rows, "position_rr")
+    # execution_rr 一直存在於 rr_context、也參與 rr_gate 的判斷
+    # （by_rr_gate_reason_code 有 EXECUTION_RR_INSUFFICIENT / EXECUTION_RR_UNAVAILABLE），
+    # 但先前完全沒有被統計。2026-08-07 的真實 report 有 931 筆有值。
+    execution_rr_values = _rr_values(rows, "execution_rr")
+
     entry_rr_sources: dict[str, int] = {}
     position_rr_sources: dict[str, int] = {}
+    execution_rr_sources: dict[str, int] = {}
     for row in rows:
         rr_context = row.get("rr_context") or {}
-        if rr_context.get("entry_rr_source"):
-            source = str(rr_context["entry_rr_source"])
-            entry_rr_sources[source] = entry_rr_sources.get(source, 0) + 1
-        if rr_context.get("position_rr_source"):
-            source = str(rr_context["position_rr_source"])
-            position_rr_sources[source] = position_rr_sources.get(source, 0) + 1
+        for field, bucket in (
+            ("entry_rr_source", entry_rr_sources),
+            ("position_rr_source", position_rr_sources),
+            ("execution_rr_source", execution_rr_sources),
+        ):
+            if rr_context.get(field):
+                source = str(rr_context[field])
+                bucket[source] = bucket.get(source, 0) + 1
+
     return {
+        # ── 既有欄位，形狀不動（前端已在消費）──────────────────
         "rows_with_entry_rr": len(entry_rr_values),
         "average_entry_rr": _clean_metric(float(np.mean(entry_rr_values))) if entry_rr_values else None,
         "median_entry_rr": _clean_metric(float(np.median(entry_rr_values))) if entry_rr_values else None,
@@ -1790,6 +1982,14 @@ def _rr_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "median_position_rr": _clean_metric(float(np.median(position_rr_values))) if position_rr_values else None,
         "entry_rr_source_counts": dict(sorted(entry_rr_sources.items())),
         "position_rr_source_counts": dict(sorted(position_rr_sources.items())),
+        # ── 2026-08-07 新增：execution RR 與三者的完整分布 ──────
+        "rows_with_execution_rr": len(execution_rr_values),
+        "average_execution_rr": _clean_metric(float(np.mean(execution_rr_values))) if execution_rr_values else None,
+        "median_execution_rr": _clean_metric(float(np.median(execution_rr_values))) if execution_rr_values else None,
+        "execution_rr_source_counts": dict(sorted(execution_rr_sources.items())),
+        "entry_rr_distribution": _metric_distribution(entry_rr_values),
+        "execution_rr_distribution": _metric_distribution(execution_rr_values),
+        "position_rr_distribution": _metric_distribution(position_rr_values),
     }
 
 

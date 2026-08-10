@@ -39,6 +39,8 @@
     type SRCalibrationBin,
     type SRDailyConfirmationSummary,
     type SRDailyConfirmationGroup,
+    type SRRRSummary,
+    type SRMetricDistribution,
   } from '../lib/api/srZones'
 
   let symbol = ''
@@ -168,9 +170,25 @@
     return v === undefined || v === null ? '—' : v.toFixed(3)
   }
 
+  // 序數型分桶的顯示順序。**不能靠字典序**：localeCompare 會把 `VOL_LT_0_8` 排到
+  // `VOL_GTE_2_5` 後面、`SD_LT_1PCT` 排到 `SD_GTE_10PCT` 後面，讀者由上往下掃時
+  // 會把「最弱」看成「最強之後」而誤判趨勢——而這些維度存在的目的正是看單調變化。
+  // 不在表內的 key 一律排在最後並沿用字典序（例如 *_UNAVAILABLE）。
+  const BUCKET_ORDER: Record<string, number> = {
+    VOL_LT_0_8: 1, VOL_0_8_TO_1_2: 2, VOL_1_2_TO_2_5: 3, VOL_GTE_2_5: 4,
+    SD_LT_1PCT: 1, SD_1_TO_3PCT: 2, SD_3_TO_6PCT: 3, SD_6_TO_10PCT: 4, SD_GTE_10PCT: 5,
+    RR_LT_1: 1, RR_1_0_TO_1_5: 2, RR_1_5_TO_2_0: 3, RR_2_0_TO_3_0: 4, RR_GTE_3: 5,
+    EVENTS_0: 1, EVENTS_1: 2, EVENTS_2: 3, EVENTS_3_PLUS: 4,
+  }
+
   // Record<string, T> 的穩定排序，讓分層表格每次渲染順序一致。
+  // 序數桶依 BUCKET_ORDER，其餘沿用字典序。
   function sortedEntries<T>(group?: Record<string, T>): [string, T][] {
-    return Object.entries(group ?? {}).sort(([a], [b]) => a.localeCompare(b))
+    return Object.entries(group ?? {}).sort(([a], [b]) => {
+      const oa = BUCKET_ORDER[a] ?? Number.MAX_SAFE_INTEGER
+      const ob = BUCKET_ORDER[b] ?? Number.MAX_SAFE_INTEGER
+      return oa === ob ? a.localeCompare(b) : oa - ob
+    })
   }
 
   // 分層一細，單組可能只剩一兩列，此時 positive/negative_two_bar_return_rate 只會是
@@ -180,7 +198,17 @@
   // 用的同一個門檻），不在前端自創一個沒有來歷的數字。
   const MIN_DAILY_CONFIRMATION_GROUP_ROWS = 20
 
-  // 九個分層依語意分三群：一次攤開九張表太長，而且三群回答的是不同層次的問題，
+  // RR 分布表的列。沒有樣本的（count=0）直接不列——position RR 在多數 report 裡
+  // 是全空的，畫一整列破折號只是噪音。
+  function rrDistributionRows(summary: SRRRSummary) {
+    return [
+      { title: 'entry RR', dist: summary.entry_rr_distribution },
+      { title: 'execution RR', dist: summary.execution_rr_distribution },
+      { title: 'position RR', dist: summary.position_rr_distribution },
+    ].filter((row): row is { title: string; dist: SRMetricDistribution } => (row.dist?.count ?? 0) > 0)
+  }
+
+  // 分層依語意分三群：一次攤開十幾張表太長，而且三群回答的是不同層次的問題，
   // 混在一起看反而失焦。空的分層在這裡就濾掉（by-presence），模板只管畫。
   function dailyConfirmationGroupSections(summary: SRDailyConfirmationSummary) {
     return [
@@ -197,7 +225,13 @@
         hint: '當時的量能與事件條件下表現差多少',
         tables: [
           { title: '依量能條件', group: summary.by_volume_context },
+          // 量能強弱是數值分桶（邊界沿用 Python 判定 WEAK/NEUTRAL/CONFIRMED 與爆量事件的
+          // 同一組門檻），比上面的分類多一層「多強」的資訊。
+          { title: '依量能強弱', group: summary.by_volume_strength },
           { title: '依事件序列', group: summary.by_event_sequence },
+          // 事件序列的字串是排序後串接的，看不出先後；這兩個補上順序與密集度。
+          { title: '依主要事件', group: summary.by_primary_market_event },
+          { title: '依事件數', group: summary.by_market_event_count },
           { title: '依市場事件類型', group: summary.by_market_event_types },
           { title: '依事件市場狀態', group: summary.by_event_market_state },
         ],
@@ -209,6 +243,10 @@
           { title: '依 RR gate', group: summary.by_rr_gate },
           { title: '依 RR gate 原因碼', group: summary.by_rr_gate_reason_code },
           { title: '依 RR bucket', group: summary.by_rr_bucket },
+          // gate 的原始基礎值：看得出 RR_BLOCKED 是因為停損距離太寬，還是根本進不了場。
+          { title: '依停損距離', group: summary.by_stop_distance_bucket },
+          { title: '依進場可執行性', group: summary.by_entry_executability },
+          { title: '依 RR 公式齊備性', group: summary.by_rr_formula_state },
         ],
       },
     ]
@@ -1734,8 +1772,45 @@
             </summary>
             <p class="text-muted mt-2">
               entry RR 中位數={fmtRatio(rrSummary.median_entry_rr)}（{rrSummary.rows_with_entry_rr ?? 0} 列）·
+              execution RR 中位數={fmtRatio(rrSummary.median_execution_rr)}（{rrSummary.rows_with_execution_rr ?? 0} 列）·
               position RR 平均={fmtRatio(rrSummary.average_position_rr)}（{rrSummary.rows_with_position_rr ?? 0} 列）
             </p>
+
+            <!-- RR 分布：只看平均會誤導（真實資料上 entry RR 平均 6.45、中位數 2.34、
+                 最大值 1032），所以把中位數與 p10/p90 一起攤開看尾巴。 -->
+            {#if rrDistributionRows(rrSummary).length > 0}
+              <p class="text-muted mt-2 mb-1">RR 分布（平均易被極端值拉高，以中位數與分位數為準）</p>
+              <table class="w-full">
+                <thead>
+                  <tr class="text-muted border-b border-border/60">
+                    <th class="text-left py-1">RR</th>
+                    <th class="text-right py-1">列數</th>
+                    <th class="text-right py-1">p10</th>
+                    <th class="text-right py-1">p25</th>
+                    <th class="text-right py-1">中位數</th>
+                    <th class="text-right py-1">p75</th>
+                    <th class="text-right py-1">p90</th>
+                    <th class="text-right py-1">平均</th>
+                    <th class="text-right py-1">最大</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each rrDistributionRows(rrSummary) as row}
+                    <tr class="border-b border-border/30">
+                      <td class="py-1 text-white">{row.title}</td>
+                      <td class="py-1 text-right text-muted">{row.dist.count ?? 0}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.p10)}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.p25)}</td>
+                      <td class="py-1 text-right text-white">{fmtRatio(row.dist.median)}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.p75)}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.p90)}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.average)}</td>
+                      <td class="py-1 text-right text-muted">{fmtRatio(row.dist.max)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
             {#each [{ title: '依最終進場狀態', group: outcomeSummary.by_final_entry_state }, { title: '依市場偏向', group: outcomeSummary.by_market_bias }, { title: '依隔日確認狀態', group: outcomeSummary.by_daily_confirmation_state }] as section}
               {#if sortedEntries(section.group).length > 0}
                 <p class="text-muted mt-2 mb-1">{section.title}</p>

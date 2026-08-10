@@ -1162,6 +1162,24 @@ export interface SRDecisionOutcomeGroup {
 }
 
 // 保守版 RR 統計：只抽 rr_context 的穩定欄位，bucket / 完整 distribution 尚未納入。
+// 數值分布摘要（Python `_metric_distribution`）。
+//
+// 只看平均會誤導：2026-08-07 的真實 report 裡 entry RR 平均 6.45、中位數 2.34、
+// 最大值 1032——平均是中位數的 2.75 倍。UI 要同時顯示中位數與 p10/p90 才看得出尾巴。
+// count=0 時其餘欄位是 null 而不是 0（沒有樣本 ≠ 樣本值為 0）。
+export interface SRMetricDistribution {
+  count?: number
+  average?: number | null
+  stddev?: number | null
+  min?: number | null
+  p10?: number | null
+  p25?: number | null
+  median?: number | null
+  p75?: number | null
+  p90?: number | null
+  max?: number | null
+}
+
 export interface SRRRSummary {
   rows_with_entry_rr?: number
   average_entry_rr?: number | null
@@ -1171,6 +1189,14 @@ export interface SRRRSummary {
   median_position_rr?: number | null
   entry_rr_source_counts?: Record<string, number>
   position_rr_source_counts?: Record<string, number>
+  // 2026-08-07 新增：execution RR（先前完全沒有統計，但它參與 rr_gate 判斷）
+  rows_with_execution_rr?: number
+  average_execution_rr?: number | null
+  median_execution_rr?: number | null
+  execution_rr_source_counts?: Record<string, number>
+  entry_rr_distribution?: SRMetricDistribution
+  execution_rr_distribution?: SRMetricDistribution
+  position_rr_distribution?: SRMetricDistribution
 }
 
 // daily confirmation 的分層單位（Python `_daily_confirmation_groups`）。
@@ -1205,7 +1231,7 @@ export interface SRDailyConfirmationSummary {
   positive_two_bar_return_rate?: number | null
   negative_two_bar_return_rate?: number | null
   failure_distribution?: Record<string, number>
-  // 九個分層，UI 依語意分三群顯示：結果面（state / primary_role）、
+  // 十五個分層，UI 依語意分三群顯示：結果面（state / primary_role）、
   // 條件面（volume / event 系列）、RR 面（rr_gate 系列）。
   by_state?: Record<string, SRDailyConfirmationGroup>
   by_primary_role?: Record<string, SRDailyConfirmationGroup>
@@ -1216,6 +1242,18 @@ export interface SRDailyConfirmationSummary {
   by_rr_gate?: Record<string, SRDailyConfirmationGroup>
   by_rr_gate_reason_code?: Record<string, SRDailyConfirmationGroup>
   by_rr_bucket?: Record<string, SRDailyConfirmationGroup>
+  // 2026-08-07 新增的細分層。量能與停損距離是「數值分桶」（邊界沿用 Python 既有常數
+  // 與真實分布，見 evaluation._volume_strength_bucket / _stop_distance_bucket）；
+  // primary_market_event 是依固定優先序取的代表事件，**不是時間上最早發生的**——
+  // 同一列的事件全來自同一根 K 棒，沒有時間順序可言。它是 market_event_types 的低基數粗化。
+  by_volume_strength?: Record<string, SRDailyConfirmationGroup>
+  by_stop_distance_bucket?: Record<string, SRDailyConfirmationGroup>
+  by_entry_executability?: Record<string, SRDailyConfirmationGroup>
+  // risk / reward 齊備性：RR_UNAVAILABLE 是最大的一組，靠這個維度才拆得開
+  // 「缺目標價」與「缺停損」兩種完全不同的原因。
+  by_rr_formula_state?: Record<string, SRDailyConfirmationGroup>
+  by_primary_market_event?: Record<string, SRDailyConfirmationGroup>
+  by_market_event_count?: Record<string, SRDailyConfirmationGroup>
 }
 
 // 這次分析用了哪組 zone builder 設定（Python `_resolve_runtime_builders`）。

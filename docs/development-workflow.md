@@ -71,9 +71,27 @@ Down 那一半沒有任何執行路徑——017／018 的回滾鏈斷掉就是�
 
 除了回滾鏈，它還鎖住一個**只有實跑才驗得到**的性質：migration 060 的
 `ck_candles_positive_price` 在 postgres 上是 `NOT VALID`，因為加上去的當下 live 仍有
-I-064 那幾列髒資料。`TestPostgresMigrationsToleratePreexistingBadRows` 直接重現那個處境
+當時尚未清除的髒資料（見 `database-schema.md` 的 candles 章節）。
+`TestPostgresMigrationsToleratePreexistingBadRows` 直接重現那個處境
 ——先寫一列髒資料再套 060，套得上去才算過。哪天有人「順手」把 `NOT VALID` 拿掉，
 會在這裡失敗，而不是部署到 live 才炸。
+
+### 要動 live 資料時的做法
+
+CLAUDE.md 禁止拿 live 做測試資料、migration 驗證與清空資料。少數情況下仍需要修正 live 的
+實際資料（例如 2026-08-10 清掉 4 根全零 K 棒），那時：
+
+- **先取得單獨授權**，不要順手夾在其他工作裡做掉。
+- **先留底**：把要動的列 dump 成可還原的 SQL。
+- **用明確的主鍵，不要用條件式**。`WHERE id IN (…)` 而不是 `WHERE low <= 0`——
+  條件寫錯的代價是刪掉真實資料，而主鍵清單在執行前就能逐筆核對。
+- **包在交易裡並在 COMMIT 前斷言結果**（例如「違規列剩餘 0」），不成立就整筆回滾。
+- **事後核對範圍**：不只看目標消失，也要確認**沒有誤刪**——比對相關標的的總列數變化量、
+  以及被刪那天的前後日資料仍在。
+
+> `docker exec` 執行 heredoc 時**一定要加 `-i`**。少了它 stdin 不會進到 container，
+> psql 讀到 EOF 直接以 **exit 0** 結束——指令看起來成功，實際上一行都沒執行。
+> 2026-08-10 就這樣「刪除成功」了一次，是事後查資料才發現根本沒刪。
 
 ### 用真實資料跑 evaluation：`scripts/run-evaluation.sh`
 
@@ -498,7 +516,7 @@ docker compose -f docker-compose.dev.yml down -v
 - **具體做法**：
   - plan/PR 明確標記每個新欄位的前端處置：「本次接線」或「顯式延後到 T-xxx」。
   - 顯示新拆分欄位時，同步移除或標註被取代的舊單一欄位，避免殘留誤導。
-- **沒被消費的型別還會默默寫錯**（2026-08-06，T-028 前端接入）：
+- **沒被消費的型別還會默默寫錯**（2026-08-06，daily confirmation 前端接入）：
   `SRDailyConfirmationSummary.by_state` / `by_primary_role` 一度被宣告成
   `SRDecisionOutcomeGroup`，但 Python `_daily_confirmation_groups` 實際回傳的形狀與它
   **除了 `rows` 之外零重疊**。因為從沒有任何地方消費這兩個欄位，`svelte-check` 與 build 都

@@ -258,7 +258,7 @@ func tableNames(t *testing.T, db *sqlx.DB) []string {
 	return names
 }
 
-// assertCandlePositivePriceCheck 驗 060 的 CHECK 真的被強制執行（見 docs/issue.md I-064）。
+// assertCandlePositivePriceCheck 驗 060 的 CHECK 真的被強制執行（見 docs/database-schema.md）。
 //
 // migration 跑得過**不代表約束有效**：MySQL 8.0.16 之前的版本會把 CHECK 解析掉但不強制，
 // 而 `ALTER TABLE ... ADD CONSTRAINT` 在任何版本都不會報錯。只有實際寫一列違規資料
@@ -268,7 +268,7 @@ func assertCandlePositivePriceCheck(t *testing.T, db *sqlx.DB) {
 	const insert = `INSERT INTO candles (symbol, timeframe, ` + "`open`" + `, high, low, ` + "`close`" + `, volume, amount, ts)
 	                VALUES (?, '1d', ?, ?, ?, ?, 1000, 0, '2026-01-01 00:00:00')`
 
-	// 全零 K 棒就是 I-064 那 4 列的形狀，必須被擋。
+	// 全零 K 棒是 live 上真的出現過的形狀，必須被擋。
 	if _, err := db.Exec(insert, "3630", 0.0, 0.0, 0.0, 0.0); err == nil {
 		t.Error("全零 K 棒竟然寫得進去——CHECK 約束沒生效")
 	}

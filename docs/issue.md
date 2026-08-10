@@ -182,7 +182,7 @@ lightgbm / shap 的 import 開銷，資料本身只有數 MB（原始 frame 約 
 | 嚴重度 | 低 |
 | 分類 | Frontend / SR Zone / API Contract |
 | 發現日期 | 2026-08-07 |
-| 來源 | T-028 RR distribution ＋ 更細分層實作 review |
+| 來源 | SR Zone RR distribution ＋ 更細分層實作 review（2026-08-07） |
 
 `SREvaluationReport` 只有 `[key: string]: unknown`，TypeScript 沒有任何型別描述
 `replay_rows[].primary_zone`（含 `relative_volume`）。**這是刻意的**：前端目前不渲染
@@ -198,111 +198,6 @@ event timeline 時會缺型別基礎），不是待辦也不是已修的 bug。�
 
 ---
 
-### I-064：live `candles` 有 4 根全零 K 棒（OHLCV 皆為 0）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已實作／待 review（防護已加、live 資料已清；**`VALIDATE CONSTRAINT` 待 060 部署後執行**） |
-| 嚴重度 | 中 |
-| 分類 | 資料品質 / Go 抓取 |
-| 發現日期 | 2026-08-10 |
-| 來源 | T-028 的 drawdown-like failure window 實跑（見 `sr-zone-scoring.md`） |
-
-live DB 的 `candles`（`timeframe='1d'`）有 4 列 open/high/low/close/volume **全部為 0**：
-
-| symbol | 交易日（Taipei） | `ts`（UTC） |
-|---|---|---|
-| 2454 | 2016-05-13 | 2016-05-12 16:00+00 |
-| 3630 | 2024-12-18 | 2024-12-17 16:00+00 |
-| 2317 | 2025-07-30 | 2025-07-29 16:00+00 |
-| 1101 | 2025-08-13 | 2025-08-12 16:00+00 |
-
-```sql
-select symbol, (ts at time zone 'Asia/Taipei')::date, open, high, low, close, volume
-from candles where timeframe='1d' and low <= 0;
-```
-
-> `ts` 存 UTC（Taipei 00:00 = 前一日 16:00+00），查詢一定要 `at time zone 'Asia/Taipei'`
-> 再取 date，否則列出來的日期會整整差一天。
-
-**怎麼被發現的**：終點報酬看不到它——一根零價 K 棒夾在中間，前後收盤照常，
-`two_bar_close_return` 只是略微失真。是 `max_favorable_excursion_pct` **剛好等於 1.0000**
-（窗口內最低價為 0 ⇒ 相對確認日收盤下跌 100%）才把它逼出來。**看路徑才看得到的錯誤，
-看終點看不到。**
-
-**已查證的部分**：`market/fetcher.go:203` 的 `toStoreCandles` 對價格**沒有任何驗證**，
-上游給什麼就寫什麼；`finmind.go:181` 的 `FetchDailyCandles` 同樣直接透傳 `raw.Open/High/Low/Close`。
-所以只要上游回一天零值，它就會進 DB。
-
-**成因無法從現有資料判定**：那 4 天其他 27～28 檔都正常交易且有量，所以**不是整輪抓取失敗**，
-而是單檔單日異常。個股停牌（上游以 0 表示無成交）與上游 glitch 兩種可能都說得通，
-現有資料分不出來——但**兩種情況的修法相同**：無成交的日子應該是「沒有那筆資料」，
-不是「一根價格為 0 的 K 棒」。
-
-**現況影響**：所有跨到這 4 天的技術指標、zone 建構與 replay 結果都被污染。
-
-#### 已完成（2026-08-10）
-
-**兩層防護**，因為單靠任何一層都不夠——Go guard 擋不住手動 SQL 與未來新增的匯入工具，
-DB 約束則不會告訴你「哪一檔哪一天被丟掉了」：
-
-1. **寫入端**：`market/fetcher.go` 的 `toStoreCandles` 改成 method，擋掉
-   `open/high/low/close` 任一 `<= 0` 的 K 棒並記 Warn log（帶 symbol / ts / 四個價格）。
-   一根壞的只丟那一根，不影響同批其他 K 棒。
-   **只驗價格不驗 volume**：成交量為 0 在盤中分K 是正常的，價格為 0 不是。
-2. **DB 約束**：migration 060 對三種 engine 加 `ck_candles_positive_price`。
-
-**postgres 用 `NOT VALID` 是刻意的**：live 那 4 列還在（清資料未授權），完整約束會讓
-migration 直接失敗。`NOT VALID` 只約束之後的寫入、不回頭驗既有列，所以髒資料還在時也套得上。
-清完之後要再跑一次升級成完整驗證：
-
-```sql
-ALTER TABLE candles VALIDATE CONSTRAINT ck_candles_positive_price;
-```
-
-sqlite 沒有 `ALTER TABLE ADD CONSTRAINT`，060 是整張表重建；Up / Down 都保留資料
-（與 017／018 那種破壞性重建不同）。
-
-**測試**：`fetcher_test.go` 涵蓋四個欄位各自為 0、負價、零成交量不該被擋、
-一根壞的不影響同批其他根；`migrate_sqlite_test.go` 驗約束生效、**資料活過重建**、
-Down 之後約束消失且資料仍在；`migrate_mysql_test.go` 實際寫違規列驗約束真的被強制執行
-（migration 跑得過不代表約束有效）。
-
-順手修掉一個 stub 保真度問題：`stubDailySource` 原本只設 `Close`，Open/High/Low 都是 0，
-加了 guard 之後那些 K 棒會被整根丟掉——測試仍然會過，但**是因為錯誤的理由**。已補齊四個價格。
-
-#### live 資料清理（2026-08-10，已完成）
-
-那 4 列已從 live 刪除，以明確的 id 逐筆刪（`WHERE id IN (15326, 239015, 1130675, 1159370)`），
-不用 `WHERE low<=0` 這類條件式——條件寫錯的代價是刪掉真實資料。整段包在交易裡，
-並在 COMMIT 前斷言「非正價格剩餘 0 列」，不成立就整筆回滾。
-
-刪除後核對：非正價格 0 列；四檔各恰好少 1 列（2454 4867→4866、3630 2413→2412、
-2317 1594→1593、1101 1594→1593）；2317 的 2025-07-30 消失而 07-29 與 07-31 仍在。
-被刪的 4 列內容（全為 0）已留底，需要時可還原。
-
-#### 未做：`VALIDATE CONSTRAINT`
-
-**live 目前在 goose 版本 59，migration 060 還沒部署**，所以 `ck_candles_positive_price`
-在 live 上還不存在，`VALIDATE CONSTRAINT` 無從執行。060 會在下次部署、backend 啟動時
-自動套用（`cmd/server/main.go` 的 `RunMigrations`）。部署後執行：
-
-```sql
-ALTER TABLE candles VALIDATE CONSTRAINT ck_candles_positive_price;
-```
-
-**為什麼不趁 live 已清乾淨就把 060 改成一般（會驗證既有列）的約束**：寫入端的 guard
-**也還沒部署**。從現在到部署之間，排程仍可能寫進新的零價 K 棒；那時一個會驗證的約束
-會讓 migration 失敗、連帶擋住整個部署。維持 `NOT VALID` 則不管資料當下乾不乾淨都套得上，
-把「驗證既有列」留成部署後的獨立動作——那時寫入端的 guard 也已生效，不會再有新的髒資料進來。
-（postgres 的 060 原本沒有實跑證據，2026-08-10 已補上
-`scripts/test-postgres-migrations.sh` 與 `migrate_postgres_test.go` 驗過——
-其中 `TestPostgresMigrationsToleratePreexistingBadRows` 直接重現 live 的處境：
-先寫一列髒資料再套 060，套得上去、新寫入被擋、`VALIDATE CONSTRAINT` 在髒資料還在時失敗、
-清乾淨後才成功。）
-
----
-
 ### I-065：`candles` 存的是**未還原**股價，除權除息／分割會產生假跳空
 
 | 欄位 | 內容 |
@@ -311,7 +206,7 @@ ALTER TABLE candles VALIDATE CONSTRAINT ck_candles_positive_price;
 | 嚴重度 | 高 |
 | 分類 | 資料品質 / 回測正確性 |
 | 發現日期 | 2026-08-10 |
-| 來源 | 同 I-064 |
+| 來源 | SR Zone drawdown-like failure window 實跑（2026-08-10） |
 
 0050 在 2025-06 分割（1:4），而 `candles` 存的是未還原價，於是序列上出現一根假的 −75%：
 
@@ -323,19 +218,19 @@ ALTER TABLE candles VALIDATE CONSTRAINT ck_candles_positive_price;
 期間 2025-06-11～06-17 **0050 完全沒有 K 棒，而同期其他 28 檔都有**——這是分割換發期間
 停止交易，不是資料缺漏。查到這段空白時不用再追一次。
 
-**影響範圍遠大於 T-028**：所有以 `candles` 為輸入的東西都受影響——MA / RSI / MACD / ATR、
-zone 建構、breakout / volume spike 偵測、decision replay、模型訓練特徵。凡是窗口跨過
-公司行動日的樣本，看到的都是一個從未發生的暴跌或暴漲。
+**影響範圍遠大於發現它的那筆工作**：所有以 `candles` 為輸入的東西都受影響——
+MA / RSI / MACD / ATR、zone 建構、breakout / volume spike 偵測、decision replay、
+模型訓練特徵。凡是窗口跨過公司行動日的樣本，看到的都是一個從未發生的暴跌或暴漲。
 
 **為什麼一直沒被發現**：日常使用看的是**近期**資料，而公司行動稀疏；只有回測與 replay
-會系統性掃過歷史，才會踩到。本次是 MAE 的 `min = -1.0` 與 0050 的 −75.5% 兩個離群值
+會系統性掃過歷史，才會踩到。這次是 MAE 的 `min = -1.0` 與 0050 的 −75.5% 兩個離群值
 把它翻出來的。
 
 **修復方向（未定案，需另立計畫）**：
 
 1. 抓取端改存還原股價，或另存還原係數欄位。
    > **待查證**：目前用的是 `dataset=TaiwanStockPrice`（`finmind.go:183`），確定是未還原。
-   > FinMind 是否提供還原版 dataset、以及**是否需要更高的 token tier**，我沒有查證過。
+   > FinMind 是否提供還原版 dataset、以及**是否需要更高的 token tier**，尚未查證。
    > repo 已有 `ErrInsufficientTier`（`finmind.go:26`）顯示 tier 限制在這裡是真實約束，
    > 所以這條路可不可行必須先確認，不能當成已知選項。
 2. 或在讀取端套用還原係數——但這樣每個消費者都要記得套，容易漏。

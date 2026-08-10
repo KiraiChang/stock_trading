@@ -1,4 +1,4 @@
-"""drawdown-like failure window 的成本量測（T-028）。
+"""drawdown-like failure window 的成本量測。
 
 **為什麼是一支 env gate 的測試而不是一次性指令**：`development-workflow.md` 的
 「測試腳本優先」要求新的檢查類型補進腳本再用腳本執行。這支掛在
@@ -70,7 +70,7 @@ def test_excursion_cost_relative_to_existing_per_row_cost(capsys):
 
     with capsys.disabled():
         print(
-            f"\n[T-028 成本量測] zone 重建 {zone_seconds * 1e6:.1f}us"
+            f"\n[成本量測] zone 重建 {zone_seconds * 1e6:.1f}us"
             f" / 窗口計算 {excursion_seconds * 1e6:.1f}us"
             f" → 既有成本是新增的 {ratio:.1f} 倍"
         )

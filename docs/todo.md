@@ -46,7 +46,8 @@ zone outcome、event lifecycle、daily confirmation 與 final entry state 的語
   - Zone 層：support hold rate、resistance rejection rate、breakout continuation rate。
   - Decision 層：`WAIT_CONFIRMATION`、`PROBE_ENTRY`、`ENTRY_ALLOWED` 的後續勝率、
     失效率、平均報酬與 RR 分布。
-  - Daily confirmation：納入 T-028 的隔日 / 兩日確認成效統計。
+  - Daily confirmation：納入隔日 / 兩日確認成效統計（已完成，現況見
+    [`sr-zone-scoring.md`](./sr-zone-scoring.md)）。
 - **P1：結果落 DB**（已實作起步，方向已 review；續作項目見下方剩餘工作）
   - 優先寫入既有 `stock_sr_regression_results.metrics_json`。
   - `run_id` 使用 `sr_eval_yyyymmddhhmmss`，並記錄 `model_config_hash`、
@@ -246,7 +247,7 @@ evaluation report 不產生 governance verdict，因此不會被誤選中）。
 （P0 遺留的 calibration bins 已於 2026-08-04 補齊、2026-08-05 review 通過，現況規格見
 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「Calibration bins」。）
 
-#### T-002 / T-003 / T-028 review 結論（2026-07-27 初審、2026-08-04 複審）
+#### T-002 / T-003 ＋ daily confirmation review 結論（2026-07-27 初審、2026-08-04 複審）
 
 兩輪 review 都確認**方向正確、關鍵風險處理妥當**：無 lookahead bias、production governance
 gate 只趨保守且安全降級、T-003 預設未變（`adaptive_zone_builders_enabled: false`）、排程預設
@@ -266,7 +267,8 @@ F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 r
   sweep / governance report 全擠一起），後續可拆模組（replay / outcomes / sweep / reporting）
   以利維護。屬大型重構，需另出計畫書。
 
-狀態不動（T-002/T-003 P1/P2 仍「部分已實作」、T-028「已實作起步」）；剩餘 P1/P2 續作與 F3
+狀態不動（T-002/T-003 P1/P2 仍「部分已實作」、daily confirmation 當時「已實作起步」，
+後續已全部完成並收斂）；剩餘 P1/P2 續作與 F3
 完成後再整體收斂歸檔。
 
 ---
@@ -606,183 +608,6 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 ---
 
-### T-028：SR Zone Daily Confirmation 的 drawdown-like failure window
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已實作／待 review（2026-08-10；T-028 其餘部分已完成並收斂） |
-| 優先度 | 低 |
-| 分類 | Python / SR Zone / 模型驗證 |
-| 建立日期 | 2026-07-15 |
-| 來源 | SR Zone Decision Engine P2 後續限制；T-002 的子任務 |
-
-T-028 的主體（daily confirmation 的 label 與成效統計、十五個分層、RR distribution、
-前端接入）**已全部完成並用真實資料驗證**，現況說明見
-[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「隔日／兩日確認的分層」、
-「再細的六個分層與分桶邊界的由來」與「RR 分布」。
-
-**唯一未做的是 drawdown-like failure window**：目前只知道兩日確認後的**終點報酬**
-（`two_bar_close_return` 與其分布），不知道**過程**——確認之後價格曾經逆行多少、
-以及多久才失效。這兩個問題對停損設定的實務價值高於終點報酬。
-
-**為什麼一直沒做**：需要逐根回放窗口內的價格路徑（最大不利偏移、失效發生在第幾根），
-成本比現有的終點統計高一個量級。decision replay 已經是 CPU 受限的路徑
-（見 sr-zone-scoring.md 的「Decision Replay 的取樣規則」），再加一層逐根計算前
-要先確認值不值得。
-
-**要做的話**：可先在小樣本上量一次成本，再決定是全量計算還是只對
-`daily_confirmation_state` 為特定值的列計算。
-
----
-
-#### 計畫書（2026-08-10，待確認）
-
-##### 修改目標
-
-用**一輪成本量測**決定 drawdown-like failure window 要不要全量計算，並在量測過程中把
-prototype 實作出來。本輪交付的是**量測結論＋成本數據**，不是完成的功能。
-
-##### 先要推翻或證實的前提
-
-上面「成本高一個量級」這句話**在瀏覽程式碼後看起來是錯的**，本輪第一件事是驗證它：
-
-- `_daily_confirmation_outcome`（`evaluation.py:1029`）**現在就在做窗口切片**——
-  `df["low"].iloc[idx + 1 : idx + 3].min()`、`df["high"].iloc[…].max()`。所謂「逐根回放」
-  在 2 根的尺度上**已經在跑了**。
-- 每列的成本主體是 `_historical_zone_score_summary`（從 idx 之前的歷史重建 zone）與
-  `build_decision_summary`（`evaluation.py:1372`、`1384`）。把窗口從 2 根拉到 5 根，
-  多出來的是同一個 numpy slice 換長度，量級上不該可比。
-
-若量測證實前提為錯，「全量或分層」這個問題就自動消失（直接全量），本筆可一次做完。
-
-##### 不做的範圍
-
-- 不改 zone 建構、decision pipeline、RR gate 或任何**決策邏輯**——只在既有 outcome 上多算統計。
-- 不動 `two_bar_close_return` / `next_close_return` / 現有十五個分層的語意與數值。
-- 不接前端（等量測與欄位定案後另議）。
-- 不寫 DB（沿用 `scripts/run-evaluation.sh` 的唯讀預設）。
-
-##### 受影響檔案與資料流
-
-| 檔案 | 變更 |
-|---|---|
-| `python/backtest/modular/sr_scoring/evaluation.py` | `_daily_confirmation_outcome` 增欄位；`_daily_confirmation_summary` / `_daily_confirmation_groups` 增統計；replay row 投影增鍵 |
-| `python/backtest/modular/sr_scoring/tests/test_evaluation.py` | 新欄位的斷言；沿用既有的 exact key-set 斷言風格 |
-| `docs/sr-zone-scoring.md` | 量測結論與欄位語意歸檔 |
-
-資料流不變：`_decision_replay_rows` → `_daily_confirmation_outcome` → `_daily_confirmation_summary`。
-
-##### 欄位與 contract
-
-窗口長度**沿用 `forward_bars`**（預設 5，`dataset.py:28`）。理由：`_candidate_bar_range`
-已經為它預留了尾端（`evaluation.py:1198`），`idx + forward_bars` 必定在界內，**邊界處理成本為零**；
-另立一個窗口參數等於多一個要解釋、要調、要測的旋鈕。
-
-新增欄位（都掛在 `daily_confirmation_outcome` 底下，與既有終點指標同層）：
-
-| 欄位 | 型別 | 語意 |
-|---|---|---|
-| `max_adverse_excursion_pct` | `float \| None` | 窗口內相對確認日收盤的**最大不利偏移**（負值或 0） |
-| `max_favorable_excursion_pct` | `float \| None` | 同窗口的最大有利偏移（正值或 0） |
-| `bars_to_failure` | `int \| None` | 第幾根**首次**失效；未失效為 `None` |
-| `excursion_window_bars` | `int` | 實際採用的窗口根數（等於 `forward_bars`） |
-
-**MAE 的計價基準用 `current_price`（確認日收盤），不用 `rr_context.entry_price`**——這是你要我判斷的部分，理由：
-
-1. `entry_price` **在很大一部分列上是 `None`**。2026-08-07 的交叉表已經量到
-   `ENTRY_OR_STOP_MISSING` 佔相當比例（見 `sr-zone-scoring.md` 的「RR 分布」）。
-   拿它當分母，MAE 會**恰好在最需要看停損的那些列上不可用**。
-2. `current_price` 與 `two_bar_close_return`、`forward_return` **同一個分母**。本筆的整個
-   命題是「過程 vs 終點」，兩者可直接相減才有意義；換基準就比不了。
-3. `current_price` 是 `float(df["close"].iloc[idx])`，**永不為 None**，不需要 reason code。
-
-停損實務價值改由**第二個、明確標示不可用的**欄位承接，而不是污染主指標：
-
-| 欄位 | 型別 | 語意 |
-|---|---|---|
-| `mae_to_stop_ratio` | `float \| None` | `abs(MAE) / stop_distance_pct`；`stop_distance_pct` 為 `None` 時為 `None` |
-
-> `> 1.0` 即代表「窗口內曾經掃到停損」。這正是 todo 說的「對停損設定的實務價值」，
-> 而它的不可用性被隔離在單一欄位裡，不會讓 MAE 本身消失。
-
-**「不利」的方向依 `primary_role` 定義**（這是本筆真正的設計工作，不是實作細節）：
-
-| role | 不利方向 | MAE 取自 |
-|---|---|---|
-| `SUPPORT` | 下跌（做多偏誤） | 窗口內 `low` 的最小值 |
-| `RESISTANCE` | 上漲（假設為壓力拒絕／偏空） | 窗口內 `high` 的最大值 |
-| `AT_ZONE` | **無方向，不計** | `None`（`reason_code` 記為 `AT_ZONE_DIRECTION_UNDEFINED`） |
-
-`AT_ZONE` 刻意留空而非硬取一邊：它的既有 label（`AT_ZONE_TWO_BAR_RESOLVED_UP/DOWN`）本身
-就沒有方向偏誤，強行定義一個方向會做出一個沒有人能解釋的數字。
-
-`bars_to_failure` 的「失效」沿用**既有的** `_daily_confirmation_failure_bucket` 方向定義
-（SUPPORT 跌破 `price_low`、RESISTANCE 突破 `price_high`），不另立一套判準——
-否則同一份輸出裡會有兩個互相矛盾的「失效」。
-
-##### 風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| 新欄位讓既有 exact key-set 斷言失敗 | **這是刻意的**：照 2026-08-07 的做法補齊 key，不放寬成 subset |
-| 前提若成立（成本真的高），做白工 | prototype 本身就是量測工具，結論無論哪個方向都要歸檔 |
-| `AT_ZONE` 的 `None` 被誤讀成「沒有回檔」 | 配 `reason_code`，並在 `sr-zone-scoring.md` 寫明 |
-
-回滾：純新增欄位，不改既有欄位語意；移除新欄位即回到現狀。
-
-##### 測試與驗證策略
-
-1. `python/scripts/test.sh backtest/modular/sr_scoring/tests` —— 單元層，合成資料驗
-   方向定義、`AT_ZONE` 留空、`bars_to_failure` 的首次命中、窗口邊界。
-2. **成本量測**：以 env gate 的 benchmark test 跑在同一支腳本下（不新增一次性指令，
-   依 `development-workflow.md`「測試腳本優先」），用 `time.perf_counter()` 在**容器內**
-   量 (a) 既有 per-row zone/decision 成本 vs (b) 新增窗口計算成本，回報比值。
-   > 不在呼叫端量 wallclock：這個沙箱的 `sleep` 不等比推進時間，
-   > 見 `development-workflow.md` 的「資源特性」。
-3. 真實資料複驗：`MODE=replay scripts/run-evaluation.sh`，**先小樣本預檢**
-   （`--symbols 2檔 --limit 400 --replay-max-rows 20`）確認新欄位過得了 `json.dumps`，
-   再跑 11 檔 × `replay_max_rows=5000` 的既有規模，與上一輪的數字對照確認終點指標未變。
-
-##### 完成後歸檔位置
-
-`docs/sr-zone-scoring.md` 的「隔日／兩日確認的分層」新增一節，寫明窗口定義、MAE 基準的
-取捨理由、`AT_ZONE` 為何留空，以及成本量測的實際數字。
-
----
-
-#### 實作結果（2026-08-10）
-
-**已完成並全部驗證**，現況說明見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
-「確認之後的『過程』：drawdown-like failure window」。
-
-**前提被推翻——這是本輪最重要的結論**：「成本比終點統計高一個量級」方向是**反的**。
-實測既有的 per-row zone 重建是新增窗口計算的 **10.9 倍**（2991µs vs 275µs，且分母
-還沒含 decision pipeline），5,000 列總共多花約 1.4 秒。因此**不做分層計算，直接全量**——
-計畫裡「全量或分層」那個決策點自動消失。
-
-**與計畫的兩處偏離**：
-
-1. 計畫寫的是 `excursion_reason_code`（值 `AT_ZONE_DIRECTION_UNDEFINED`）。實作改成
-   單一的 `failure_state` 列舉（`FAILED` / `SURVIVED_WINDOW` / `BOUNDARY_UNAVAILABLE` /
-   `DIRECTION_UNDEFINED`）。理由：兩個欄位會產生無法表達的組合——缺 zone 邊界時
-   MAE **算得出來**但失效**算不出來**，用一個 reason code 蓋兩件事會失真。
-2. 多加了 `python/scripts/test.sh` 的 `PY_ENV` 傳遞。計畫已載明「env gate 的 benchmark
-   跑在同一支腳本下」，但該腳本原本沒有任何 env 傳遞管道，不補就只能退化成一次性
-   docker 指令，違反「測試腳本優先」。
-
-**順手抓到兩個資料品質 bug**（已記到 [`issue.md`](./issue.md) I-064 / I-065）：4 根全零
-K 棒、以及 `candles` 存未還原股價導致 0050 分割產生假的 −75% 跳空。兩者**終點報酬都看不到**，
-是 MAE 的端點值（剛好 1.0000、−0.755）把它們逼出來的。I-065 的影響範圍遠大於本筆
-（所有以 candles 為輸入的指標與回測）。
-
-**驗證**：
-
-- `python/scripts/test.sh` 全數 **426 passed, 1 skipped**（skip 的是預設關閉的成本量測）。
-- 新增 8 個測試涵蓋方向定義、`AT_ZONE` 留空、`NaN` 邊界、首次命中、窗口邊界、摘要分層。
-- **既有數字證明未變**：把 `evaluation.py` 還原成 baseline 跑同一份真實小樣本，
-  兩份 JSON 剝除新欄位後**逐欄位比對零差異**。純加法改動不能只靠「我沒改到」自證。
-- 真實資料實跑 11 檔 × `replay_max_rows=5000`（4,994 列），數字已歸檔。
-
 ### T-031：runIntradayBatch 批次失敗時的 Yahoo→FinMind fallback
 
 | 欄位 | 內容 |
@@ -1082,7 +907,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 計畫書待確認 |
-| 優先度 | 高（同時解掉 T-002 / T-003 / T-028 共同的取樣限制） |
+| 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
 | 來源 | T-039 sweep 實跑結論：卡住的是標的池，不是參數 |

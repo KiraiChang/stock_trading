@@ -21,7 +21,7 @@ func (s *stubDailySource) FetchDailyCandles(_ context.Context, symbol string, _,
 	if err, ok := s.errBySymbol[symbol]; ok {
 		return nil, err
 	}
-	// 四個價格都要給：toStoreCandles 會擋掉價格非正的 K 棒（I-064），
+	// 四個價格都要給：toStoreCandles 會擋掉價格非正的 K 棒，
 	// 只設 Close 的 stub 會被整根丟掉，讓測試因為錯誤的理由而通過。
 	return []Candle{{
 		Symbol: symbol, Timeframe: "1d",
@@ -116,7 +116,7 @@ func TestBackfillHistoryNilCallback(t *testing.T) {
 
 
 func TestToStoreCandlesDropsNonPositivePrices(t *testing.T) {
-	// live DB 曾出現 4 根 OHLCV 全為 0 的日 K（issue.md I-064）。無成交的日子應該是
+	// live DB 曾出現 4 根 OHLCV 全為 0 的日 K。無成交的日子應該是
 	// 「沒有那筆資料」，不是一根價格為 0 的 K 棒——留著會污染 MA / ATR / zone 建構，
 	// 而且不會有任何東西報錯。
 	f := NewFetcher(&stubDailySource{}, &stubCandleRepo{}, zap.NewNop())

@@ -966,7 +966,7 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
         "median_position_rr",
         "entry_rr_source_counts",
         "position_rr_source_counts",
-        # 2026-08-07 新增（T-028 RR distribution）
+        # 2026-08-07 新增（RR distribution）
         "rows_with_execution_rr",
         "average_execution_rr",
         "median_execution_rr",
@@ -1777,7 +1777,7 @@ def test_sweep_decision_outcomes_expose_at_zone_rate(tmp_path, monkeypatch):
             assert 0.0 <= decision["at_zone_rate"] <= 1.0
 
 
-# ── RR distribution 與更細分層（2026-08-07 補，T-028）─────────────────
+# ── RR distribution 與更細分層（2026-08-07 補）─────────────────────────
 
 
 def test_metric_distribution_values_are_correct():

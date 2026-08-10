@@ -133,7 +133,7 @@ func assertNoColumns(t *testing.T, db *sqlx.DB, table string, unwanted ...string
 	}
 }
 
-// 060 的 CHECK 約束驗證（見 docs/issue.md I-064）。
+// 060 的 CHECK 約束驗證（見 docs/database-schema.md 的 candles 章節）。
 //
 // 為什麼要測「資料有沒有活過重建」：sqlite 沒有 ALTER TABLE ADD CONSTRAINT，060 只能
 // 整張表重建。重建寫錯（漏 INSERT ... SELECT、欄位順序錯位）不會讓 migration 失敗，
@@ -182,7 +182,7 @@ func TestSQLiteCandlePositivePriceConstraint(t *testing.T) {
 		t.Fatalf("060 重建後既有資料剩 %d 列, want 1——重建沒有把資料搬過去", count)
 	}
 
-	// 約束生效：全零 K 棒（就是 I-064 那 4 列的形狀）必須被擋下。
+	// 約束生效：全零 K 棒（live 上真的出現過的形狀）必須被擋下。
 	if _, err := db.Exec(insert, "3630", 0.0, 0.0, 0.0, 0.0); err == nil {
 		t.Fatal("全零 K 棒竟然寫得進去——CHECK 約束沒生效")
 	}

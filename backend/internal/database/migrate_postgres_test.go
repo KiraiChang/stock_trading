@@ -230,7 +230,7 @@ func assertPostgresCandlePriceCheck(t *testing.T, db *sqlx.DB) {
 }
 
 // TestPostgresMigrationsToleratePreexistingBadRows 重現 live 當下的處境：
-// candles 已經有髒資料（I-064 的 4 根全零 K 棒）而**還沒被清掉**，060 仍然必須套得上去。
+// candles 已經有髒資料（4 根全零 K 棒）而**還沒被清掉**，060 仍然必須套得上去。
 //
 // 這正是 postgres 版用 `NOT VALID` 的唯一理由。如果哪天有人「順手」把 NOT VALID 拿掉，
 // 這支測試會失敗，而不是等到部署到 live 才炸。

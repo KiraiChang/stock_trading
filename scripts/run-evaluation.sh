@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 對真實 DB 執行 SR Zone evaluation / decision replay，**預設唯讀、不寫任何一張表**。
 #
-# 用途：T-028 的 daily confirmation 驗證、T-039 的 sweep 取樣、T-040 選股的分佈量測——
+# 用途：daily confirmation 驗證、T-039 的 sweep 取樣、T-040 選股的分佈量測——
 # 這些都要拿真實資料跑，不是單元測試能取代的（單元測試用的是合成資料）。
 #
 # 用法：

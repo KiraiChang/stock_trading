@@ -1,4 +1,4 @@
--- 擋掉價格非正的 K 棒（見 docs/issue.md I-064）。
+-- 擋掉價格非正的 K 棒（見 docs/database-schema.md 的 candles 章節）。
 -- SQLite 沒有 ALTER TABLE ADD CONSTRAINT，只能重建表；Up / Down 都是完整的表重建，
 -- 且都保留資料（與 017／018 那種破壞性 migration 不同，這裡沒有資料損失）。
 

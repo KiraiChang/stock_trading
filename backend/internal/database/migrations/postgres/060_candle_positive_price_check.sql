@@ -1,4 +1,4 @@
--- 擋掉價格非正的 K 棒（見 docs/issue.md I-064）。
+-- 擋掉價格非正的 K 棒（見 docs/database-schema.md 的 candles 章節）。
 -- 寫入端已在 market/fetcher.go 的 toStoreCandles 擋一層；這裡是第二層，
 -- 讓其他寫入路徑（手動 SQL、未來新增的匯入工具）也不可能繞過。
 

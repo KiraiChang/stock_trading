@@ -122,6 +122,7 @@ scheduler 記一次（`stock symbol sync failed`），不重複記錄。
 |---|---|---|---|
 | 分割／反分割／面額變更 | FinMind `TaiwanStockSplitPrice` | **一次批次請求抓全市場**，每次整段重抓 2015 年起 | 全市場 11 年僅 33 筆 |
 | 除權息 | Yahoo `dividendsByYear` | **逐檔**，標的來源是 `candles` 內所有相異 symbol | 每檔約 12～34 筆 |
+| 減資 | FinMind `TaiwanStockCapitalReductionReferencePrice` | **逐檔**（整批需 Sponsor tier），與除權息在同一個迴圈 | 全市場稀少 |
 
 **分割為什麼整段重抓而不做增量**：一次請求就抓得完，而「增量」需要維護游標、
 漏一次就永久缺一筆。事件表是 upsert、重算是冪等的，整段重抓沒有副作用。
@@ -129,7 +130,11 @@ scheduler 記一次（`stock symbol sync failed`），不重複記錄。
 **除權息的標的來源刻意不是 watchlist**：評估標的池（見 todo.md T-040）的標的不在
 watchlist 裡，只跑 watchlist 會讓它們「分割有還原、除權息沒有」，而且不會報錯。
 
-### 規模限制：除權息是逐檔查詢
+**除權息與減資合併在同一個迴圈**（`Adjuster.SyncPerSymbolEvents`）：重算要 UPDATE 該檔的
+整段歷史，分開跑會做兩次。兩者打的是不同 host（Yahoo／FinMind），各有各的節流器，
+合併不會互相排擠。
+
+### 規模限制：除權息與減資都是逐檔查詢
 
 Yahoo 的 symbol 在 URL path 裡，**沒有批次端點**。受 `yahoo.rate_limit`
 （每分鐘 20，與盤中報價**共用同一個節流器**——同一個 host，各自節流會讓實際速率加倍）節制：

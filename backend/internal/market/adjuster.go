@@ -19,17 +19,22 @@ import (
 // Phase 1 只處理分割。除權息（Phase 2）造成的是緩慢累積偏移，而且不調整成交量，
 // 屆時會需要第二個係數。
 type Adjuster struct {
-	client    SplitSource
-	dividends DividendSource
-	actions   store.CorporateActionRepo
+	client     SplitSource
+	dividends  DividendSource
+	reductions CapitalReductionSource
+	actions    store.CorporateActionRepo
 	candles   store.CandleRepo
 	log       *zap.Logger
 }
 
-// SetDividendSource 掛載除權息來源（Phase 2）。未設定時 SyncDividends 是 no-op，
-// 行為與只有 Phase 1 時相同。
+// SetDividendSource 掛載除權息來源。未設定時該類事件不抓，行為與導入前相同。
 func (a *Adjuster) SetDividendSource(d DividendSource) {
 	a.dividends = d
+}
+
+// SetCapitalReductionSource 掛載減資來源。未設定時該類事件不抓。
+func (a *Adjuster) SetCapitalReductionSource(r CapitalReductionSource) {
+	a.reductions = r
 }
 
 // SplitSource 是分割事件的來源（目前是 FinMind 的 TaiwanStockSplitPrice）。
@@ -41,6 +46,12 @@ type SplitSource interface {
 // **逐檔查詢**——與分割不同，除權息沒有一次抓全市場的端點。
 type DividendSource interface {
 	FetchDividends(ctx context.Context, symbol string) ([]store.CorporateAction, error)
+}
+
+// CapitalReductionSource 是減資事件的來源（FinMind
+// TaiwanStockCapitalReductionReferencePrice）。同樣**只能逐檔**。
+type CapitalReductionSource interface {
+	FetchCapitalReductions(ctx context.Context, symbol string) ([]store.CorporateAction, error)
 }
 
 func NewAdjuster(client SplitSource, actions store.CorporateActionRepo, candles store.CandleRepo, log *zap.Logger) *Adjuster {
@@ -203,39 +214,61 @@ func (a *Adjuster) SymbolsWithCandles(ctx context.Context) ([]string, error) {
 	return a.candles.Symbols(ctx)
 }
 
-// SyncDividends 逐檔抓除權息並重算。symbols 為空時不做事。
+// SyncPerSymbolEvents 逐檔抓「沒有批次端點」的事件——除權息與減資——並重算。
 //
-// **刻意逐檔獨立處理**：Yahoo 是非官方 API，單一標的解析失敗（格式變動、被限流）
-// 不該讓整輪停下來。失敗的檔維持前次係數（重算是冪等的），下一輪會自動補上。
-func (a *Adjuster) SyncDividends(ctx context.Context, symbols []string) (int, error) {
-	if a.dividends == nil || len(symbols) == 0 {
+// **兩者合併在同一個迴圈**是為了每檔只重算一次：重算要 UPDATE 該檔的整段歷史，
+// 分開跑會做兩次。兩個來源打的是不同的 host（Yahoo／FinMind），各有各的節流器，
+// 所以合併不會互相排擠。
+//
+// **刻意逐檔獨立處理**：任一來源對單一標的失敗（格式變動、被限流）不該讓整輪停下來。
+// 失敗的檔維持前次係數（重算是冪等的），下一輪會自動補上。
+func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (int, error) {
+	if len(symbols) == 0 || (a.dividends == nil && a.reductions == nil) {
 		return 0, nil
 	}
-	total := 0
-	failed := 0
+	total, failed := 0, 0
 	for _, symbol := range symbols {
-		actions, err := a.dividends.FetchDividends(ctx, symbol)
-		if err != nil {
+		var actions []store.CorporateAction
+		symbolFailed := false
+
+		if a.dividends != nil {
+			got, err := a.dividends.FetchDividends(ctx, symbol)
+			if err != nil {
+				symbolFailed = true
+				a.log.Warn("fetch dividends failed", zap.String("symbol", symbol), zap.Error(err))
+			} else {
+				actions = append(actions, got...)
+			}
+		}
+		if a.reductions != nil {
+			got, err := a.reductions.FetchCapitalReductions(ctx, symbol)
+			if err != nil {
+				symbolFailed = true
+				a.log.Warn("fetch capital reductions failed", zap.String("symbol", symbol), zap.Error(err))
+			} else {
+				actions = append(actions, got...)
+			}
+		}
+		if symbolFailed {
 			failed++
-			a.log.Warn("fetch dividends failed", zap.String("symbol", symbol), zap.Error(err))
-			continue
 		}
 		if len(actions) == 0 {
 			continue
 		}
 		if err := a.actions.Upsert(ctx, actions); err != nil {
 			failed++
-			a.log.Warn("upsert dividends failed", zap.String("symbol", symbol), zap.Error(err))
+			a.log.Warn("upsert per-symbol events failed", zap.String("symbol", symbol), zap.Error(err))
 			continue
 		}
 		total += len(actions)
 		if err := a.RecomputeSymbol(ctx, symbol); err != nil {
-			a.log.Error("recompute after dividends failed",
+			a.log.Error("recompute after per-symbol events failed",
 				zap.String("symbol", symbol), zap.Error(err))
 		}
 	}
 	if failed > 0 {
-		a.log.Warn("dividend sync 有標的失敗", zap.Int("failed", failed), zap.Int("total", len(symbols)))
+		a.log.Warn("逐檔事件同步有標的失敗",
+			zap.Int("failed", failed), zap.Int("total", len(symbols)))
 	}
 	return total, nil
 }

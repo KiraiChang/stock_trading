@@ -83,7 +83,23 @@ const (
 	CorporateActionDividendCash  = "DIVIDEND_CASH"
 	CorporateActionDividendStock = "DIVIDEND_STOCK"
 	CorporateActionDividendBoth  = "DIVIDEND_BOTH"
+
+	// 減資（見 docs/issue.md I-069）。與反分割在數學上是同一件事：股數變少、價格變高，
+	// 所以係數 > 1，且 volume_factor 等於價格係數。
+	CorporateActionCapitalReduction = "CAPITAL_REDUCTION"
 )
+
+// AllCorporateActionTypes 匯出給測試用：DB 的 action_type 欄位必須容得下每一個值
+// （`CAPITAL_REDUCTION` 是 17 字元，原本的 VARCHAR(16) 裝不下，見 migration 064）。
+func AllCorporateActionTypes() []string {
+	return []string{
+		CorporateActionSplit, CorporateActionDividend, CorporateActionUnknown,
+		CorporateActionDividendCash, CorporateActionDividendStock, CorporateActionDividendBoth,
+		CorporateActionCapitalReduction,
+		// 來源原文（FinMind 的 TaiwanStockSplitPrice 直接照存）
+		"分割", "反分割", "面額變更",
+	}
+}
 
 // CorporateAction 是一次公司行動。Factor = AfterPrice / BeforePrice，
 // 由抓取端算好存起來，避免每個消費者各算一次。

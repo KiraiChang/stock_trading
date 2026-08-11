@@ -204,7 +204,7 @@ event timeline 時會缺型別基礎），不是待辦也不是已修的 bug。�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已知限制（T-042 明列為不做的範圍） |
+| 狀態 | 減資已實作／待部署驗證；合併與下市重編仍不涵蓋（2026-08-11） |
 | 嚴重度 | 中 |
 | 分類 | 資料品質 / 回測正確性 |
 | 發現日期 | 2026-08-11 |
@@ -239,6 +239,79 @@ from adj where prev > 0 and abs(p/prev-1) > 0.25 order by abs(p/prev-1) desc;
 
 **影響**：跨越這些日期的窗口，指標與回測結果不可靠。目前有資料的標的中影響 3 檔。
 
-**修復方向（未查證）**：需要一個涵蓋減資的資料源。FinMind 的 `TaiwanStockSplitPrice`
-只有分割／反分割／面額變更（實測 33 筆的 type 分佈），Yahoo 的 `dividendsByYear`
-只有除權息。**兩者都沒有減資**，所以要先找到來源才談得上實作。
+#### 資料源已查證（2026-08-11）：FinMind 逐檔查詢可用
+
+`TaiwanStockCapitalReductionReferencePrice`，**與除權息同一個模式——整批需 Sponsor tier，
+但逐檔（帶 `data_id`）在現有 `register` tier 就能用**。
+
+```
+GET /api/v4/data?dataset=TaiwanStockCapitalReductionReferencePrice&data_id=2603&…
+{"date":"2022-09-19","stock_id":"2603",
+ "ClosingPriceonTheLastTradingDay":80.8,"PostReductionReferencePrice":187.0,
+ "OpeningReferencePrice":187.0,"LimitUp":205.5,"LimitDown":168.5,
+ "ExrightReferencePrice":-1.0,"ReasonforCapitalReduction":"…"}
+```
+
+係數 = `PostReductionReferencePrice / ClosingPriceonTheLastTradingDay`。
+減資讓股數變少、價格變高，所以**係數 > 1**（與反分割同向），成交量係數相同（股數確實改變）。
+
+三個已知案例全部命中，且 `ClosingPriceonTheLastTradingDay` 與我們 DB 裡的前一根收盤價
+**完全相同**——這是資料源正確性的獨立佐證：
+
+| 標的 | 日期 | 停前收盤（來源／我方） | 減資後參考價 | 係數 |
+|---|---|---|---|---|
+| 6243 | 2021-11-04 | 22.75 / **22.75** | 46.95 | 2.0637 |
+| 2603 | 2022-09-19 | 80.80 / **80.80** | 187.00 | 2.3144 |
+| 2478 | 2019-10-07 | 35.80 / **35.80** | 44.40 | 1.2402 |
+
+另發現一筆先前未列出的：2478 於 2016-10-21（17.65 → 20.99，+18.9%），
+因低於當初 25% 的篩選門檻而沒出現在上表。
+
+#### 已排除的來源
+
+| 來源 | 結論 |
+|---|---|
+| FinMind `TaiwanStockCapitalReductionReferencePrice` **整批** | ❌ 需 Sponsor tier |
+| FinMind 其他 dataset | ❌ 完整目錄（104 個，台股 61 個）裡減資只有這一個，**合併則完全沒有** |
+| TWSE `exchangeReport/TWTAUU` | ⚠️ 欄位齊全且免費，但**只服務當年度**——跨年區間會被靜默截斷成當年，純過去的區間回一個與實際原因不符的錯誤（「查詢結束日期小於查詢開始日期」）。可用於**日後新增**，不能回補歷史 |
+| Yahoo `dividendsByYear` | ❌ 只有除權息 |
+
+#### 已實作（2026-08-11）
+
+`FinMindClient.FetchCapitalReductions` 逐檔查詢，寫進既有的 `corporate_actions`
+（`action_type = CAPITAL_REDUCTION`），由既有重算流程處理。
+**沒有新增表、欄位或係數概念**——減資與反分割在數學上是同一件事。
+
+除權息與減資合併在 `Adjuster.SyncPerSymbolEvents` 的同一個迴圈，**每檔只重算一次**
+（重算要 UPDATE 整段歷史，分開跑會做兩次）。兩者打不同 host，各有節流器，不互相排擠。
+
+現況說明見 [`database-schema.md`](./database-schema.md) 的 `corporate_actions`
+與 [`architecture/data-pipeline.md`](./architecture/data-pipeline.md) 的「公司行動同步」。
+
+**權威來源比門檻式偵測多找到 2 筆**：上表那 3 筆是用「還原後單日變動 > 25%」篩出來的，
+而 FinMind 逐檔查詢顯示目前標的中共有 **5 筆**——多出 2478 的 2016-10-21（+18.9%）
+與 2317 的 2018-10-26。**篩選門檻會漏掉真實事件**，不能拿它當事件清單，只能拿來當異常偵測。
+
+**減資日與除權息日目前無重疊**（實測 4 檔全部無重疊）。這點值得留意但**不是零風險**：
+兩者若同日發生，會產生兩筆 `corporate_actions`（`action_type` 不同，UNIQUE 擋不住）
+而被各套一次。資料源的 `ExrightReferencePrice` 欄位（目前恆為 `-1.0`）暗示來源本身
+有能力表達合併事件，屆時要確認是否重複計算。
+
+**待部署後驗證**：`scripts/verify-adjustment.sh` 的檢查 3／6 會涵蓋；
+另可用 I-069 上面那段 SQL 確認殘留消失。
+
+#### 規模警訊：FinMind 的節流器與每日抓價共用
+
+減資是逐檔查詢，走的是 `finmind.rate_limit`（預設 **5/分**）——**與每日的 K 棒抓取同一個節流器**：
+
+| 標的數 | 光是減資查詢就要 |
+|---|---|
+| 29（目前） | 5.8 分鐘 |
+| 200（T-040 第一階段） | 40 分鐘 |
+| 1,900（全市場） | **6.3 小時** |
+
+除權息走 Yahoo 的節流器（20/分）不受影響，但**減資會直接排擠每日抓價的額度**。
+因此增量更新對減資比對除權息更迫切——後者最多是自己慢，前者會拖累行情資料。
+
+**合併與下市重編仍不涵蓋**——FinMind 的完整 dataset 目錄（104 個，台股 61 個）裡沒有這類資料，
+TWSE 的 `TWTAUU` 只服務當年度。維持為已知限制。

@@ -334,3 +334,69 @@ func (c *FinMindClient) FetchSplitPrices(ctx context.Context, start, end time.Ti
 	}
 	return actions, nil
 }
+
+// RawCapitalReduction 是 dataset=TaiwanStockCapitalReductionReferencePrice 的原始欄位。
+//
+// **逐檔查詢在 register tier 就能用，整批（不帶 data_id）才需要 Sponsor**——
+// 與 TaiwanStockDividendResult 同一個模式。2026-08-11 實測確認。
+type RawCapitalReduction struct {
+	Date        string  `json:"date"`
+	StockID     string  `json:"stock_id"`
+	BeforePrice float64 `json:"ClosingPriceonTheLastTradingDay"`
+	AfterPrice  float64 `json:"PostReductionReferencePrice"`
+	Reason      string  `json:"ReasonforCapitalReduction"`
+}
+
+// FetchCapitalReductions 取單一標的的減資事件（見 docs/issue.md I-069）。
+//
+// **減資與反分割在數學上是同一件事**：股數變少、價格變高，所以係數 > 1，
+// 而且成交量係數等於價格係數（股數確實改變）。因此不需要新的係數概念。
+//
+// 資料源正確性的佐證：三個已知案例的 `ClosingPriceonTheLastTradingDay`
+// 與我們 candles 裡的前一根收盤價完全相同（6243 22.75、2603 80.80、2478 35.80）。
+//
+// **只能逐檔**（整批需 Sponsor tier），所以與除權息一樣受 rate limit 節制，
+// 擴到全市場前需要增量更新。
+func (c *FinMindClient) FetchCapitalReductions(ctx context.Context, symbol string) ([]store.CorporateAction, error) {
+	params := url.Values{
+		"dataset":    {"TaiwanStockCapitalReductionReferencePrice"},
+		"data_id":    {symbol},
+		"start_date": {"2000-01-01"},
+		"end_date":   {timeutil.TodayTaipei().Format("2006-01-02")},
+	}
+
+	rows, err := c.fetch(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	actions := make([]store.CorporateAction, 0, len(rows))
+	for _, row := range rows {
+		var raw RawCapitalReduction
+		if err := json.Unmarshal(row, &raw); err != nil {
+			continue
+		}
+		// 價格為 0 或負數算不出係數，也會讓還原價變成 0。跳過而不是寫進事件表——
+		// 一筆壞事件會污染該檔的整段歷史。
+		if raw.BeforePrice <= 0 || raw.AfterPrice <= 0 {
+			continue
+		}
+		ts, err := time.ParseInLocation("2006-01-02", raw.Date, timeutil.TaipeiTZ)
+		if err != nil {
+			continue
+		}
+		factor := raw.AfterPrice / raw.BeforePrice
+		actions = append(actions, store.CorporateAction{
+			Symbol:      symbol,
+			EventDate:   ts,
+			ActionType:  store.CorporateActionCapitalReduction,
+			BeforePrice: raw.BeforePrice,
+			AfterPrice:  raw.AfterPrice,
+			Factor:      factor,
+			// 減資改變股數，成交量係數與價格係數相同。
+			VolumeFactor: factor,
+			Source:       "TaiwanStockCapitalReductionReferencePrice",
+		})
+	}
+	return actions, nil
+}

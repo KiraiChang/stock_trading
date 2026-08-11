@@ -129,6 +129,8 @@ func main() {
 	// （見 docs/architecture/data-pipeline.md 的「公司行動同步」）。
 	// 除權息來源（T-042 Phase 2）。逐檔查詢，沿用 Yahoo 的 rate limit 設定。
 	adjuster.SetDividendSource(market.NewYahooDividendClient(cfg.Yahoo.RateLimit, log))
+	// 減資（見 docs/issue.md I-069）：FinMind 逐檔查詢，register tier 可用。
+	adjuster.SetCapitalReductionSource(finmindClient)
 	fetcher.SetAdjuster(adjuster)
 
 	// 籌碼分析：FinMind 目前只支援三大法人與融資融券，券商分點是 stub

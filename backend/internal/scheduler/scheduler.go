@@ -599,7 +599,7 @@ func (s *Scheduler) RunCorporateActionSync() {
 		return
 	}
 
-	// 除權息（Phase 2）：**逐檔查詢**（沒有批次端點，與分割不同）。
+	// 除權息與減資：**逐檔查詢**（沒有批次端點，與分割不同）。
 	//
 	// 標的來源是 **candles 內所有相異 symbol**，不是 watchlist：評估標的池（T-040）的
 	// 標的不在 watchlist 裡，只跑 watchlist 會讓它們「分割有還原、除權息沒有」，
@@ -607,9 +607,9 @@ func (s *Scheduler) RunCorporateActionSync() {
 	symbols, err := s.adjuster.SymbolsWithCandles(ctx)
 	if err != nil {
 		s.log.Error("列出有 K 棒的標的失敗", zap.Error(err))
-	} else if d, derr := s.adjuster.SyncDividends(ctx, symbols); derr != nil {
+	} else if d, derr := s.adjuster.SyncPerSymbolEvents(ctx, symbols); derr != nil {
 		// 個別標的失敗已在 Adjuster 內記錄並跳過；這裡只處理整體性錯誤。
-		s.log.Error("dividend sync failed", zap.Error(derr))
+		s.log.Error("逐檔事件同步失敗", zap.Error(derr))
 	} else {
 		n += d
 	}

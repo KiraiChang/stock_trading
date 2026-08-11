@@ -3,6 +3,7 @@ package database_test
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -173,6 +174,39 @@ func TestPostgresMigrationsJobNameFitsLongestJob(t *testing.T) {
 			`INSERT INTO job_runs (job_name, status, started_at) VALUES ($1, 'running', NOW())`,
 			name); err != nil {
 			t.Errorf("job_name %q（%d 字元）寫不進 job_runs: %v", name, len(name), err)
+		}
+	}
+}
+
+// TestPostgresMigrationsActionTypeFitsAllConstants 鎖住與 job_name 完全相同的錯誤：
+// `CAPITAL_REDUCTION` 是 17 字元，而 `action_type` 原本是 VARCHAR(16)。
+//
+// 這個坑在同一天內踩了兩次（job_runs.job_name 是第一次），所以這裡同樣用
+// **程式碼裡真正的常數清單**去寫入，而不是寫死字串——日後新增更長的值會直接失敗。
+func TestPostgresMigrationsActionTypeFitsAllConstants(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_MIGRATION_DSN")
+	if dsn == "" {
+		t.Skip("未設 POSTGRES_MIGRATION_DSN，跳過")
+	}
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		t.Fatalf("連不上 postgres: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	ctx := context.Background()
+
+	if err := database.RunMigrations(ctx, db, "postgres", zap.NewNop()); err != nil {
+		t.Fatalf("migration 失敗: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM corporate_actions`) })
+
+	for i, at := range store.AllCorporateActionTypes() {
+		if _, err := db.Exec(`
+			INSERT INTO corporate_actions
+				(symbol, event_date, action_type, before_price, after_price, factor, volume_factor, source)
+			VALUES ($1, '2020-01-01', $2, 100, 50, 0.5, 0.5, 'test')`,
+			"T"+strconv.Itoa(i), at); err != nil {
+			t.Errorf("action_type %q（%d 字元）寫不進 corporate_actions: %v", at, len(at), err)
 		}
 	}
 }

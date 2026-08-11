@@ -83,7 +83,7 @@ amount 不調整                      ← 成交金額是錢，不隨股數重�
 |------|------|------|
 | symbol | VARCHAR(10) | 股票代號 |
 | event_date | DATE | **新價的第一個交易日**。套用範圍是 `ts < event_date`，**當日不套** |
-| action_type | VARCHAR(16) | 分割／反分割／面額變更（來源原文）、`DIVIDEND_CASH` / `DIVIDEND_STOCK` / `DIVIDEND_BOTH`、`UNKNOWN` |
+| action_type | VARCHAR(16) | 分割／反分割／面額變更（來源原文）、`DIVIDEND_CASH` / `DIVIDEND_STOCK` / `DIVIDEND_BOTH`、`CAPITAL_REDUCTION`、`UNKNOWN` |
 | before_price / after_price | DECIMAL(10,2) | 事件前後的參考價 |
 | factor | DECIMAL(18,10) | 價格係數 = `after_price / before_price` |
 | volume_factor | DECIMAL(18,10) | 股數係數。**純現金股利為 1** |
@@ -102,9 +102,13 @@ amount 不調整                      ← 成交金額是錢，不隨股數重�
 |---|---|---|
 | 分割／反分割／面額變更 | FinMind `TaiwanStockSplitPrice` | **一次批次請求抓全市場**（2015～2026 共 33 筆） |
 | 除權息 | Yahoo `dividendsByYear` | **逐檔查詢**，沒有批次端點 |
+| 減資 | FinMind `TaiwanStockCapitalReductionReferencePrice` | **逐檔查詢**（整批需 Sponsor tier） |
 
-> **不涵蓋減資／合併／下市重編**。這類事件同樣會重訂價格，但兩個來源都沒有——
-> 實測 live 上有 3 筆殘留（見 [`issue.md`](./issue.md) I-069）。
+> **減資與反分割在數學上是同一件事**：股數變少、價格變高，所以係數 **> 1**，
+> 且 `volume_factor` 等於價格係數。成交量的調整方向是**縮小**，與分割相反。
+>
+> **仍不涵蓋合併與下市重編**——FinMind 的完整 dataset 目錄（104 個）裡沒有這類資料，
+> 見 [`issue.md`](./issue.md) I-069。
 
 ---
 

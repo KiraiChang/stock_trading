@@ -1,4 +1,4 @@
--- 公司行動（分割／除權息）與 K 棒的還原係數。背景見 docs/issue.md I-065。
+-- 公司行動（分割／除權息）與 K 棒的還原係數。背景見 docs/database-schema.md 的「股價還原」。
 --
 -- 設計：candles 的原始價**不改動**，另存累積還原係數，讀取端相乘。
 -- adj_factor 是 corporate_actions 的純函數（見 market/adjuster.go），重算永遠整段覆寫，

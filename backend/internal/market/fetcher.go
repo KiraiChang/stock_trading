@@ -25,7 +25,8 @@ type Fetcher struct {
 	// 未設定（SetIntradaySource 未呼叫）時 FetchAndStoreIntradayBatch 回傳錯誤。
 	batchSource BatchQuoteSource
 
-	// adjuster 為選填：設定後，回補完成會立即重算還原係數（見 docs/issue.md I-066）。
+	// adjuster 為選填：設定後，回補完成會立即重算還原係數
+	// （見 docs/architecture/data-pipeline.md 的「公司行動同步」）。
 	// 未設定時行為與導入前相同（係數由每日排程重算）。
 	adjuster *Adjuster
 }
@@ -211,7 +212,7 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 		report(symbol, nil)
 	}
 
-	// 回補完成後立即重算還原係數（見 docs/issue.md I-066）。
+	// 回補完成後立即重算還原係數（見 docs/architecture/data-pipeline.md 的「公司行動同步」）。
 	//
 	// 重算失敗不改變 failed 計數，也不影響已回報的每檔結果——K 棒**已經寫進去了**，
 	// 把它算成「回補失敗」會誤導呼叫端去重抓。改成記 Error，並靠隔天的排程與

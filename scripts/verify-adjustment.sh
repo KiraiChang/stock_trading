@@ -129,61 +129,81 @@ fi
 
 # ── 4. 黃金案例：0050 的 1:4 分割 ─────────────────────────────────────
 #
-# 這組數字是 2026-08-10 從 live 實際查到的，寫死在這裡當回歸基準：
-#   2025-06-10 收 188.65（分割前最後一個交易日）→ 還原後應為 47.16
-#   2025-06-18 收 47.57（新價第一個交易日）      → 不調整，係數為 1
+# **驗的是分割「自身的貢獻」，不是累積係數。** 分割之後 0050 還有數次除息，
+# 所以分割前那根的 adj_factor 是 0.25 × 後續每次除息的係數（實測 0.2433），
+# 不會等於 0.25。寫死 0.25 的版本在 Phase 2 上線後就開始誤報（2026-08-11 踩到）。
+#
+# 取比值就能隔離出分割本身：分割日之後的所有事件對「分割前一日」與「分割當日」
+# 兩根的影響完全相同，相除之後只剩分割自己。
+#
+#   adj_factor(2025-06-10) / adj_factor(2025-06-18) = 47.16 / 188.65 = 0.24999
 echo "[4/6] 黃金案例：0050 2025-06 的 1:4 分割"
 if [ "$(psql_q "SELECT COUNT(*) FROM candles WHERE symbol='0050' AND timeframe='1d'")" -eq 0 ]; then
   note "略過：這個 DB 沒有 0050 的資料"
 else
-  before="$(psql_q "
-    SELECT ROUND(adj_factor, 4) || '|' || ROUND(close * adj_factor, 2)
-    FROM candles WHERE symbol='0050' AND timeframe='1d'
-      AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-10'")"
-  after="$(psql_q "
-    SELECT ROUND(adj_factor, 4)
-    FROM candles WHERE symbol='0050' AND timeframe='1d'
-      AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-18'")"
-  want_factor="0.2500"
-  got_factor="${before%%|*}"
-  got_price="${before##*|}"
-  if [ "$got_factor" = "$want_factor" ]; then
-    ok "2025-06-10 係數 = $got_factor（還原價 $got_price，原始 188.65）"
+  ratio="$(psql_q "
+    SELECT ROUND(
+      (SELECT adj_factor FROM candles WHERE symbol='0050' AND timeframe='1d'
+         AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-10')
+      /
+      NULLIF((SELECT adj_factor FROM candles WHERE symbol='0050' AND timeframe='1d'
+         AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-18'), 0)
+    , 4)")"
+  if [ "$ratio" = "0.2500" ]; then
+    ok "分割前後的係數比 = $ratio（47.16 / 188.65），分割貢獻正確"
   else
-    bad "2025-06-10 係數 = ${got_factor:-<無資料>}, want $want_factor"
+    bad "分割前後的係數比 = ${ratio:-<無資料>}, want 0.2500"
+    note "比值隔離了分割自身，與之後的除息無關；不符代表 as-of 邊界或係數算錯。"
   fi
-  if [ "$after" = "1.0000" ]; then
-    ok "2025-06-18（事件當日）係數 = 1，未被重複調整"
+
+  # 還原後的價格連續性：分割前一日與分割當日的還原價不該出現斷崖。
+  gap="$(psql_q "
+    SELECT ROUND(ABS(
+      (SELECT close * adj_factor FROM candles WHERE symbol='0050' AND timeframe='1d'
+         AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-10')
+      /
+      NULLIF((SELECT close * adj_factor FROM candles WHERE symbol='0050' AND timeframe='1d'
+         AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '2025-06-18'), 0) - 1
+    ) * 100, 2)")"
+  if [ -n "$gap" ] && [ "$(printf '%.0f' "$gap")" -le 10 ]; then
+    ok "還原後跨分割的價格落差 = ${gap}%（未還原時是 −75%）"
   else
-    bad "2025-06-18 係數 = ${after:-<無資料>}, want 1.0000——as-of 邊界差了一天"
+    bad "還原後跨分割仍有 ${gap:-?}% 的落差——還原沒有生效"
   fi
 fi
 
-# ── 5. 恆等式：只對「純股數事件」成立 ────────────────────────────────
+# ── 5. 現金股利不得影響成交量 ────────────────────────────────────────
 #
-# adj_price * adj_volume == price * volume。價乘量除若寫反，這條立刻不成立。
+# 這條直接檢查**事件表本身的語意**，不是重算結果：純現金股利的 volume_factor 必須是 1。
+# 檢查 6 是拿 volume_factor 重算後比對，若抓取端一開始就把值寫錯，兩邊會一致地錯下去——
+# 這條才抓得到那種情況。
 #
-# **但它只在 adj_factor = vol_factor 時成立**（分割、反分割、面額變更這類純股數事件）。
-# 用容差而不是精確相等挑選這些列：純配股事件的兩個係數數學上相同，但一個算的是
-# (prev-0)/ratio/prev、另一個算 1/ratio，浮點可能差 1 ULP——精確相等會讓那些列
-# 被靜靜排除在檢查之外，看起來「通過」其實是沒驗。
-# 現金股利讓價格下修而股數不變（vol_factor = 1），乘積本來就該變小——那不是 bug，
-# 是錢真的離開了公司。不縮限這個條件的話，Phase 2（除權息）一上線這條檢查就會全面誤報。
-echo "[5/6] 恆等式 adj_close × adj_volume == close × volume（限純股數事件）"
-share_rows="$(psql_q "SELECT COUNT(*) FROM candles WHERE adj_factor <> 1 AND ABS(adj_factor - vol_factor) <= 1e-9")"
-if [ "$share_rows" -eq 0 ]; then
-  note "略過：目前沒有任何 K 棒受純股數事件影響"
+# （原本這裡是恆等式 adj_close × adj_volume == close × volume。Phase 2 之後，
+#  只要標的有配息，adj_factor 就不再等於 vol_factor，那條檢查會全面空轉，
+#  失去意義。改成語意檢查後才真的有涵蓋。）
+echo "[5/6] 現金股利的 volume_factor 必須為 1"
+bad_cash="$(psql_q "
+  SELECT COUNT(*) FROM corporate_actions
+  WHERE action_type = 'DIVIDEND_CASH' AND volume_factor <> 1")"
+if [ "$bad_cash" = "0" ]; then
+  cash_total="$(psql_q "SELECT COUNT(*) FROM corporate_actions WHERE action_type = 'DIVIDEND_CASH'")"
+  ok "$cash_total 筆純現金股利的 volume_factor 都是 1（股數未改變）"
 else
-  broken="$(psql_q "
-    SELECT COUNT(*) FROM candles
-    WHERE adj_factor <> 1 AND ABS(adj_factor - vol_factor) <= 1e-9 AND volume > 0
-      AND ABS((close * adj_factor) * (volume / vol_factor) - close * volume)
-          > GREATEST(ABS(close * volume) * 1e-9, 1e-6)")"
-  if [ "$broken" = "0" ]; then
-    ok "$share_rows 根受純股數事件影響的 K 棒全部滿足恆等式"
-  else
-    bad "有 $broken 根不滿足恆等式——價乘量除的方向可能寫反了"
-  fi
+  bad "有 $bad_cash 筆純現金股利的 volume_factor 不是 1——現金股利被算進成交量調整"
+  psql_q "SELECT symbol || ' ' || event_date || ' volume_factor=' || volume_factor
+          FROM corporate_actions
+          WHERE action_type = 'DIVIDEND_CASH' AND volume_factor <> 1
+          ORDER BY event_date LIMIT 5" | while read -r line; do note "$line"; done
+fi
+
+# 改變股數的事件則相反：volume_factor 不該是 1。
+bad_share="$(psql_q "
+  SELECT COUNT(*) FROM corporate_actions
+  WHERE action_type NOT LIKE 'DIVIDEND%' AND volume_factor = 1 AND factor <> 1")"
+if [ "$bad_share" = "0" ]; then
+  ok "改變股數的事件都有非 1 的 volume_factor"
+else
+  bad "有 $bad_share 筆分割類事件的 volume_factor 是 1——成交量沒有被還原"
 fi
 
 # ── 6. vol_factor 是否等於獨立重算的期望值 ───────────────────────────

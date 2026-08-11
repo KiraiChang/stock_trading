@@ -116,7 +116,8 @@ func parseYahooDecimal(s string) (float64, bool) {
 //	volume = 1 / (1 + stock/10)      ← 現金股利不改變股數，所以純現金時為 1
 //
 // 已知限制：來源把同年的現金與股票股利合併成一筆（URL 的 action=combineCashAndStock），
-// 兩者除權息日不同天時係數會算錯。實測 146 筆中 1 筆受影響，已接受，見 issue.md I-068。
+// 兩者除權息日不同天時係數會算錯。實測 146 筆中 1 筆受影響（2891 於 2016-10-12，差 4.1%），
+// 已接受這個限制——其餘純現金案例與 FinMind 精確到浮點極限。
 func (c *YahooDividendClient) FetchDividends(ctx context.Context, symbol string) ([]store.CorporateAction, error) {
 	if err := c.limiter.wait(ctx); err != nil {
 		return nil, err

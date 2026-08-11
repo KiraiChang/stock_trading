@@ -17,7 +17,7 @@ type Candle struct {
 	Amount    float64   `db:"amount"    json:"amount"`
 	Timestamp time.Time `db:"ts"        json:"ts"`
 
-	// AdjFactor 是這根 K 棒的累積還原係數（見 docs/issue.md I-065、todo.md T-042）。
+	// AdjFactor 是這根 K 棒的累積還原係數（見 docs/database-schema.md 的「股價還原」）。
 	// open/high/low/close 一律是**原始成交價**，要還原價請用 AdjustedClose() 等方法。
 	// 沒跑過重算的資料為 1，語意就是「未調整」，不存在中間狀態。
 	AdjFactor float64 `db:"adj_factor" json:"adj_factor"`

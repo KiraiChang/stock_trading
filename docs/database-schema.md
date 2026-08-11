@@ -18,6 +18,8 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 | volume | BIGINT | 成交量 |
 | amount | DECIMAL(18,2) | 成交金額 |
 | ts | TIMESTAMPTZ / DATETIME(0) | K 棒時間 |
+| adj_factor | DECIMAL(18,10) | **價格**的累積還原係數（migration 061），預設 1 |
+| vol_factor | DECIMAL(18,10) | **成交量**的累積還原係數（migration 062），預設 1 |
 
 **Index：**
 - `UNIQUE(symbol, timeframe, ts)`：防止 FinMind 重複寫入
@@ -40,6 +42,69 @@ Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
 
 > **`ts` 存 UTC**。Taipei 00:00 = 前一日 16:00+00，所以查詢一定要
 > `(ts at time zone 'Asia/Taipei')::date` 再比對日期，直接 `ts::date` 會整整差一天。
+
+### 股價還原（`adj_factor` / `vol_factor`）
+
+**`open/high/low/close/volume` 永遠是原始成交價量**，還原用係數相乘而不是改寫原始值：
+
+```
+還原價 = close * adj_factor
+還原量 = volume / vol_factor      ← 注意是除
+amount 不調整                      ← 成交金額是錢，不隨股數重新定義
+```
+
+**為什麼價乘量除**：分割讓股數變多，所以歷史價要縮小、歷史量要放大，方向相反。
+
+**為什麼價與量用不同係數**：現金股利讓價格下修，但**股數沒有改變**，
+所以成交量不可以跟著調整（`vol_factor = 1`）。只有分割與配股會改變股數。
+因此 `還原價 × 還原量 == close × volume` **只在兩個係數相等時成立**——
+現金股利發生時錢真的離開公司，乘積本來就該變小。
+
+**為什麼不直接改寫原始價**：每次有新的公司行動就要回頭改寫該檔的全部歷史列，
+而所有從舊價算出來的衍生資料（`indicator_snapshots`、`stock_analyses`、
+`stock_sr_zone_analyses`）不會跟著更新，也不會報錯。
+
+**係數是 `corporate_actions` 的純函數**，重算永遠整段覆寫、不讀舊值，所以**冪等**：
+跑一次跟跑十次結果相同。實作在 `market/adjuster.go`，
+驗證用 `scripts/verify-adjustment.sh`（唯讀，用 SQL 獨立重算一次再比對）。
+
+> **既有衍生資料的基準不一致**：`indicator_snapshots`、`stock_analyses`、
+> `stock_sr_zone_analyses` 裡在還原上線**之前**產生的列，是用原始價算的。
+> 刻意不回頭重算——後兩者是「當時做了什麼判斷」的紀錄，不是快取；
+> `indicator_snapshots` 會在下次計算時自然被覆蓋。做跨期比較時要記得這件事。
+
+---
+
+## corporate_actions
+
+公司行動（分割／除權息），`candles` 還原係數的唯一來源。
+
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| symbol | VARCHAR(10) | 股票代號 |
+| event_date | DATE | **新價的第一個交易日**。套用範圍是 `ts < event_date`，**當日不套** |
+| action_type | VARCHAR(16) | 分割／反分割／面額變更（來源原文）、`DIVIDEND_CASH` / `DIVIDEND_STOCK` / `DIVIDEND_BOTH`、`UNKNOWN` |
+| before_price / after_price | DECIMAL(10,2) | 事件前後的參考價 |
+| factor | DECIMAL(18,10) | 價格係數 = `after_price / before_price` |
+| volume_factor | DECIMAL(18,10) | 股數係數。**純現金股利為 1** |
+| source | VARCHAR(32) | `TaiwanStockSplitPrice` 或 `YahooDividendsByYear` |
+
+**Constraint：**
+- `UNIQUE(symbol, event_date, action_type)`：冪等性的第一道保證。重複抓取若產生第二筆，
+  同一次事件會被乘兩次。
+- `ck_corporate_actions_prices`：`before_price`、`after_price`、`factor` 皆 `> 0`。
+- `ck_corporate_actions_volume_factor`：`volume_factor > 0`
+  （驗證腳本用 `LN(volume_factor)` 連乘，0 會變 `-inf`）。
+
+**資料來源**（見 [`architecture/data-pipeline.md`](./architecture/data-pipeline.md)）：
+
+| 類型 | 來源 | 取得方式 |
+|---|---|---|
+| 分割／反分割／面額變更 | FinMind `TaiwanStockSplitPrice` | **一次批次請求抓全市場**（2015～2026 共 33 筆） |
+| 除權息 | Yahoo `dividendsByYear` | **逐檔查詢**，沒有批次端點 |
+
+> **不涵蓋減資／合併／下市重編**。這類事件同樣會重訂價格，但兩個來源都沒有——
+> 實測 live 上有 3 筆殘留（見 [`issue.md`](./issue.md) I-069）。
 
 ---
 

@@ -107,3 +107,48 @@ scheduler 記一次（`stock symbol sync failed`），不重複記錄。
 - 將文件中的「資料同步」與「分析計算」描述分開。
 - 將 K 棒回補、籌碼回補、盤中資料同步標記為 Data Pipeline job。
 - 後續若做程式重構，可先抽出 data job interface，避免 scheduler 直接混入分析與決策邏輯。
+
+---
+
+## 公司行動同步（`corporate_action_sync`）
+
+維護 `corporate_actions` 與 `candles` 的還原係數。**平日 06:30** 執行，
+或 `POST /api/v1/scheduler/corporate-action-sync/run` 手動觸發
+（前端「排程狀態」頁有按鈕）。**重算是冪等的**，重複觸發不會累積誤差。
+
+兩個來源的取得成本差很多，處理方式因此不同：
+
+| 類型 | 來源 | 方式 | 規模 |
+|---|---|---|---|
+| 分割／反分割／面額變更 | FinMind `TaiwanStockSplitPrice` | **一次批次請求抓全市場**，每次整段重抓 2015 年起 | 全市場 11 年僅 33 筆 |
+| 除權息 | Yahoo `dividendsByYear` | **逐檔**，標的來源是 `candles` 內所有相異 symbol | 每檔約 12～34 筆 |
+
+**分割為什麼整段重抓而不做增量**：一次請求就抓得完，而「增量」需要維護游標、
+漏一次就永久缺一筆。事件表是 upsert、重算是冪等的，整段重抓沒有副作用。
+
+**除權息的標的來源刻意不是 watchlist**：評估標的池（見 todo.md T-040）的標的不在
+watchlist 裡，只跑 watchlist 會讓它們「分割有還原、除權息沒有」，而且不會報錯。
+
+### 規模限制：除權息是逐檔查詢
+
+Yahoo 的 symbol 在 URL path 裡，**沒有批次端點**。受 `yahoo.rate_limit`
+（每分鐘 20，與盤中報價**共用同一個節流器**——同一個 host，各自節流會讓實際速率加倍）節制：
+
+- 目前約 28 檔：約 1.5 分鐘。
+- 擴到 1,900 檔（T-040 的終局）：**數小時**。
+
+因此**增量更新是擴標的池的前置條件**，不是日後優化。目前是每次全抓。
+
+### 回補之後會立即重算
+
+回補可能插入**比公司行動更早**的 K 棒，而 `BulkInsert` 寫入的係數是預設值 1。
+`fetcher.BackfillHistory` 因此在成功寫入後呼叫 `Adjuster.RecomputeAffected`，
+只重算**有事件**的標的（全市場 33 筆事件只涵蓋 31 檔，無腦全算會變成大量無謂的全表 UPDATE）。
+
+重算失敗**不計入回補的 failed 數**：K 棒已經寫進去了，算成「回補失敗」會誤導呼叫端去重抓。
+改記 Error log，靠隔天排程與 `scripts/verify-adjustment.sh` 補救。
+
+### 每日抓取不需要重算
+
+每日抓取寫入的是最新一根 K 棒，位置在所有公司行動之後，係數本來就是 1。
+只有回補會插入比事件更早的 K 棒。

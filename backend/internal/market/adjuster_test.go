@@ -236,7 +236,7 @@ func TestAdjustedFallsBackToOne(t *testing.T) {
 	}
 }
 
-// TestBackfillRecomputesAdjFactor 驗 I-066：回補插入比事件更早的 K 棒之後，
+// TestBackfillRecomputesAdjFactor 驗：回補插入比事件更早的 K 棒之後，
 // 係數要**立即**重算，而不是等隔天排程。
 //
 // 這是最容易漏的一條路徑：K 棒寫進去了、回補回報成功、沒有任何錯誤，
@@ -285,7 +285,7 @@ func TestBackfillRecomputesAdjFactor(t *testing.T) {
 
 	got := factorsBySymbol(t, candles, "0050")["2025-06-10"]
 	if got != 0.25 {
-		t.Errorf("回補後 2025-06-10 的係數 = %v, want 0.25——回補沒有觸發重算（I-066）", got)
+		t.Errorf("回補後 2025-06-10 的係數 = %v, want 0.25——回補沒有觸發重算", got)
 	}
 }
 

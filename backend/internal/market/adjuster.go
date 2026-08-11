@@ -11,7 +11,7 @@ import (
 	"github.com/trading/backend/pkg/timeutil"
 )
 
-// Adjuster 維護 candles 的還原係數（見 docs/issue.md I-065、docs/todo.md T-042）。
+// Adjuster 維護 candles 的還原係數（見 docs/database-schema.md 的「股價還原」）。
 //
 // **設計的一句話**：`adj_factor` 是 `corporate_actions` 的純函數，重算永遠整段覆寫。
 // 因此重複執行不會改變結果——這是使用者明確要求的性質，也是這個檔案所有寫法的理由。
@@ -78,7 +78,7 @@ func (a *Adjuster) SyncSplits(ctx context.Context, start, end time.Time) (int, e
 
 // RecomputeAffected 只重算「有公司行動」的那些 symbol。
 //
-// 給回補用（見 docs/issue.md I-066）：回補可能插入比事件更早的 K 棒，而 BulkInsert 寫入的
+// 給回補用（見 docs/architecture/data-pipeline.md 的「公司行動同步」）：回補可能插入比事件更早的 K 棒，而 BulkInsert 寫入的
 // adj_factor 是欄位預設值 1，那些列會靜靜地帶著未還原的價格直到隔天排程才修正。
 //
 // **刻意先過濾出有事件的檔**，而不是無腦對每個回補過的 symbol 呼叫 RecomputeSymbol：

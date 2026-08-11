@@ -125,7 +125,8 @@ func main() {
 	// candles 的原始價不動，另存累積係數由讀取端相乘。
 	adjuster := market.NewAdjuster(
 		finmindClient, store.NewCorporateActionRepo(db), candleRepo, log)
-	// 回補會插入比公司行動更早的 K 棒，寫入時係數是預設值 1，必須立即重算（I-066）。
+	// 回補會插入比公司行動更早的 K 棒，寫入時係數是預設值 1，必須立即重算
+	// （見 docs/architecture/data-pipeline.md 的「公司行動同步」）。
 	// 除權息來源（T-042 Phase 2）。逐檔查詢，沿用 Yahoo 的 rate limit 設定。
 	adjuster.SetDividendSource(market.NewYahooDividendClient(cfg.Yahoo.RateLimit, log))
 	fetcher.SetAdjuster(adjuster)

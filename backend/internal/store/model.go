@@ -89,6 +89,23 @@ const (
 	CorporateActionCapitalReduction = "CAPITAL_REDUCTION"
 )
 
+// 公司行動的資料來源。**定義在這裡而不是散在各 client**，是為了讓測試能拿到
+// 與正式路徑完全相同的字串——這些名稱由外部服務決定，長度不受我們控制。
+const (
+	CorporateActionSourceSplit            = "TaiwanStockSplitPrice"
+	CorporateActionSourceDividend         = "YahooDividendsByYear"
+	CorporateActionSourceCapitalReduction = "TaiwanStockCapitalReductionReferencePrice"
+)
+
+// AllCorporateActionSources 匯出給測試用，理由同 AllCorporateActionTypes。
+func AllCorporateActionSources() []string {
+	return []string{
+		CorporateActionSourceSplit,
+		CorporateActionSourceDividend,
+		CorporateActionSourceCapitalReduction,
+	}
+}
+
 // AllCorporateActionTypes 匯出給測試用：DB 的 action_type 欄位必須容得下每一個值
 // （`CAPITAL_REDUCTION` 是 17 字元，原本的 VARCHAR(16) 裝不下，見 migration 064）。
 func AllCorporateActionTypes() []string {

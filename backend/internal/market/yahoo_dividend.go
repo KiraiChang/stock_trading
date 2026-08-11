@@ -212,7 +212,7 @@ func (c *YahooDividendClient) FetchDividends(ctx context.Context, symbol string)
 			Factor:      reference / prev,
 			// 只有配股改變股數；純現金為 1，成交量不調整。
 			VolumeFactor: 1 / shareRatio,
-			Source:       "YahooDividendsByYear",
+			Source:       store.CorporateActionSourceDividend,
 		})
 	}
 	return actions, nil

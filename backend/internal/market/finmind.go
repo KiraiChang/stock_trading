@@ -329,7 +329,7 @@ func (c *FinMindClient) FetchSplitPrices(ctx context.Context, start, end time.Ti
 			// 漏設這欄會寫入 0，被 ck_corporate_actions_volume_factor 擋下——
 			// 2026-08-11 正式環境就是這樣失敗的（Phase 1 時還沒有這個欄位）。
 			VolumeFactor: raw.AfterPrice / raw.BeforePrice,
-			Source:       "TaiwanStockSplitPrice",
+			Source:       store.CorporateActionSourceSplit,
 		})
 	}
 	return actions, nil
@@ -395,7 +395,7 @@ func (c *FinMindClient) FetchCapitalReductions(ctx context.Context, symbol strin
 			Factor:      factor,
 			// 減資改變股數，成交量係數與價格係數相同。
 			VolumeFactor: factor,
-			Source:       "TaiwanStockCapitalReductionReferencePrice",
+			Source:       store.CorporateActionSourceCapitalReduction,
 		})
 	}
 	return actions, nil

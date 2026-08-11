@@ -119,6 +119,34 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 ——這個沙箱的 `sleep` 不等比推進 wallclock，且腳本用 `--rm`，容器結束後拿不到
 `FinishedAt`。要量時間得自行在呼叫端記錄起訖。
 
+### 字串欄位的寬度：不要訂「剛好夠用」
+
+2026-08-11 同一天內因為這件事失敗了**三次**，全部是同一個型態（SQLSTATE 22001）：
+
+| migration | 欄位 | 原寬度 | 裝不下的值 |
+|---|---|---|---|
+| 063 | `job_runs.job_name` | 20 | `corporate_action_sync`（21） |
+| 064 | `corporate_actions.action_type` | 16 | `CAPITAL_REDUCTION`（17） |
+| 065 | `corporate_actions.source` | 32 | `TaiwanStockCapitalReductionReferencePrice`（**41**） |
+
+**兩個教訓：**
+
+**一、寬度要給得寬鬆，特別是值由外部決定時。** dataset 名稱、job 名稱這類字串，
+訂一個「剛好夠用」的長度只是在等下一次失敗。`source` 最後取 255。
+
+**二、逐欄測試抓不到下一個欄位。** 064 當時加了回歸測試，但它只把 `action_type`
+換成各種常數，**其餘欄位（包含 `source`）寫死成安全的短字串**——所以 065 這次它照樣放行。
+
+正確做法是**用真實的寫入路徑，讓所有欄位同時吃到正式值**：
+
+- 常數集中在 store 層並匯出（`AllCorporateActionTypes()` / `AllCorporateActionSources()` /
+  `handler.KnownSchedulerJobs()`），測試與正式程式共用同一份定義。
+- 測試走 **repo 的 Upsert**（不是手拼 INSERT），並**遍歷所有組合**。
+  見 `TestPostgresMigrationsRealValuesFitAllColumns`。
+
+**這類失敗特別容易被忽略**：`startRun` 與 `SyncPerSymbolEvents` 的寫入失敗都只記 log
+不中斷流程，所以 job 照跑、只是資料沒進去——除非有人去翻 log，否則不會發現。
+
 ### migration 的 Down 區塊也要能跑
 
 **寫破壞性 migration（`DROP TABLE` 再 `CREATE`）時，Down 必須把前一版結構重建回來**，

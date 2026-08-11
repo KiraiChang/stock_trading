@@ -1,6 +1,7 @@
 package market
 
 import (
+	"sync"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -31,6 +32,26 @@ type YahooQuoteClient struct {
 	batchSize int
 }
 
+// yahooSharedLimiter 讓**所有** Yahoo 用戶端共用同一個節流器。
+//
+// 為什麼要共用（2026-08-11 review）：盤中報價與除權息是同一個 host。各自持有節流器時，
+// 兩者合計的請求速率是設定值的兩倍，而 Yahoo 是非官方 API——被限流或封鎖時
+// 兩條路徑會一起失效。設定裡的 rate_limit 語意是「對 Yahoo 的總速率」，不是「每個用戶端」。
+var (
+	yahooLimiterOnce sync.Once
+	yahooLimiter     *rateLimiter
+)
+
+// sharedYahooLimiter 以第一次呼叫時的速率建立單例。後續呼叫傳入不同速率不會生效——
+// 這是刻意的：兩個用戶端讀的是同一個 cfg.Yahoo.RateLimit，出現不同值代表設定被誤用。
+func sharedYahooLimiter(perMinute int) *rateLimiter {
+	if perMinute <= 0 {
+		perMinute = yahooDefaultRateLimit
+	}
+	yahooLimiterOnce.Do(func() { yahooLimiter = newRateLimiter(perMinute) })
+	return yahooLimiter
+}
+
 func NewYahooQuoteClient(cfg config.YahooConfig) *YahooQuoteClient {
 	rl := cfg.RateLimit
 	if rl <= 0 {
@@ -45,7 +66,7 @@ func NewYahooQuoteClient(cfg config.YahooConfig) *YahooQuoteClient {
 		http: &http.Client{
 			Timeout: 20 * time.Second,
 		},
-		limiter:   newRateLimiter(rl),
+		limiter:   sharedYahooLimiter(rl),
 		rateLimit: rl,
 		batchSize: bs,
 	}

@@ -29,6 +29,10 @@ const srZoneVerifyLimit = 50
 // 20 分鐘 = 2 來源 × 300 秒 + 來源間隔 + 寫入快照，仍有餘裕。
 const stockSymbolSyncTimeout = 20 * time.Minute
 
+// corporateActionSyncTimeout：一次批次請求 ＋ 逐檔重算。事件檔數少（全市場數十檔），
+// 但每檔要 UPDATE 整段歷史，所以留寬一點。
+const corporateActionSyncTimeout = 10 * time.Minute
+
 type Scheduler struct {
 	fetcher          *market.Fetcher
 	signalEng        *signal.Engine
@@ -47,7 +51,10 @@ type Scheduler struct {
 	modelGovernance  store.SRModelGovernanceRepo
 	srEvaluation     config.SREvaluationConfig
 	intradayEnabled  bool
-	log              *zap.Logger
+	// adjuster 為選填（見 docs/todo.md T-042）：未注入時不註冊還原係數同步排程，
+	// 行為與導入前完全相同。
+	adjuster *market.Adjuster
+	log      *zap.Logger
 	cron             *cron.Cron
 }
 
@@ -130,6 +137,16 @@ func (s *Scheduler) Start() {
 			s.RunStockSymbolSync()
 		}); err != nil {
 			s.log.Error("stock symbol sync cron register failed", zap.String("cron", s.stockSyncCron), zap.Error(err))
+		}
+	}
+
+	// 公司行動同步：分割罕見（全市場 11 年只有 33 筆），但漏掉一次就會讓該檔的整段歷史
+	// 出現假跳空，所以每天跑一次。重算是冪等的，重複執行不會累積誤差。
+	if s.adjuster != nil {
+		if _, err := s.cron.AddFunc("30 6 * * 1-5", func() {
+			s.RunCorporateActionSync()
+		}); err != nil {
+			s.log.Error("corporate action sync cron register failed", zap.Error(err))
 		}
 	}
 
@@ -554,3 +571,49 @@ func (s *Scheduler) srEvaluationRequest(symbols []string) analysis.SREvaluationR
 	}
 }
 
+// SetAdjuster 注入還原係數同步器。未呼叫時排程不註冊該 job。
+func (s *Scheduler) SetAdjuster(a *market.Adjuster) {
+	s.adjuster = a
+}
+
+// RunCorporateActionSync 抓取公司行動並重算還原係數。
+//
+// 抓取區間刻意從 2015 年起整段重抓，而不是只抓增量：全市場只有數十筆分割，
+// 一次請求就抓得完，而「增量」需要維護游標、漏一次就永久缺一筆。
+// 事件表是 upsert、重算是冪等的，所以整段重抓沒有副作用。
+func (s *Scheduler) RunCorporateActionSync() {
+	if s.adjuster == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), corporateActionSyncTimeout)
+	defer cancel()
+
+	runID := s.startRun(ctx, "corporate_action_sync")
+	start := time.Date(2015, 1, 1, 0, 0, 0, 0, timeutil.TaipeiTZ)
+	end := timeutil.TodayTaipei()
+
+	n, err := s.adjuster.SyncSplits(ctx, start, end)
+	if err != nil {
+		s.log.Error("corporate action sync failed", zap.Error(err))
+		s.finishRun(ctx, runID, "corporate_action_sync", 0, 1, err.Error())
+		return
+	}
+
+	// 除權息（Phase 2）：**逐檔查詢**（沒有批次端點，與分割不同）。
+	//
+	// 標的來源是 **candles 內所有相異 symbol**，不是 watchlist：評估標的池（T-040）的
+	// 標的不在 watchlist 裡，只跑 watchlist 會讓它們「分割有還原、除權息沒有」，
+	// 而且不會有任何東西報錯（2026-08-11 review）。
+	symbols, err := s.adjuster.SymbolsWithCandles(ctx)
+	if err != nil {
+		s.log.Error("列出有 K 棒的標的失敗", zap.Error(err))
+	} else if d, derr := s.adjuster.SyncDividends(ctx, symbols); derr != nil {
+		// 個別標的失敗已在 Adjuster 內記錄並跳過；這裡只處理整體性錯誤。
+		s.log.Error("dividend sync failed", zap.Error(derr))
+	} else {
+		n += d
+	}
+
+	s.log.Info("corporate action sync done", zap.Int("events", n))
+	s.finishRun(ctx, runID, "corporate_action_sync", n, 0, "")
+}

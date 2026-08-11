@@ -16,6 +16,89 @@ type Candle struct {
 	Volume    int64     `db:"volume"    json:"volume"`
 	Amount    float64   `db:"amount"    json:"amount"`
 	Timestamp time.Time `db:"ts"        json:"ts"`
+
+	// AdjFactor 是這根 K 棒的累積還原係數（見 docs/issue.md I-065、todo.md T-042）。
+	// open/high/low/close 一律是**原始成交價**，要還原價請用 AdjustedClose() 等方法。
+	// 沒跑過重算的資料為 1，語意就是「未調整」，不存在中間狀態。
+	AdjFactor float64 `db:"adj_factor" json:"adj_factor"`
+
+	// VolFactor 是**成交量**的累積係數，與 AdjFactor 分開（T-042 Phase 2）。
+	// 現金股利讓價格下修但股數沒變，成交量不能跟著調整；分割與配股才會改變股數。
+	VolFactor float64 `db:"vol_factor" json:"vol_factor"`
+}
+
+// AdjustedOpen/High/Low/Close 回傳還原價：價乘以 AdjFactor。
+// AdjustedVolume 用的是 **VolFactor**，不是 AdjFactor。
+//
+// 為什麼價乘、量除：分割讓股數變多，所以歷史價要縮小、歷史量要放大，方向相反。
+//
+// **為什麼價與量用不同的係數**（T-042 Phase 2）：現金股利讓價格下修，但股數沒有改變，
+// 所以成交量不可以跟著調整。只有分割與配股會改變股數。因此
+//
+//	AdjustedClose() * AdjustedVolume() == Close * Volume
+//
+// **只在 AdjFactor == VolFactor 時成立**（純股數事件）。現金股利發生時錢真的離開公司，
+// 乘積本來就該變小——這不是 bug。
+//
+// 係數為 0（欄位沒被 SELECT 出來）時一律當作 1，避免把價格算成 0——
+// 「漏 select」不該表現成「這檔股票不值錢」。
+func factorOrOne(v float64) float64 {
+	if v <= 0 {
+		return 1
+	}
+	return v
+}
+
+func (c Candle) adjFactorOrOne() float64 { return factorOrOne(c.AdjFactor) }
+
+// volFactorOrOne：VolFactor 未被 select 或尚未寫入（Phase 1 的舊資料）時，
+// 退回 AdjFactor——Phase 1 只有分割，那時價量本來就共用一個係數。
+func (c Candle) volFactorOrOne() float64 {
+	if c.VolFactor > 0 {
+		return c.VolFactor
+	}
+	return c.adjFactorOrOne()
+}
+
+func (c Candle) AdjustedOpen() float64   { return c.Open * c.adjFactorOrOne() }
+func (c Candle) AdjustedHigh() float64   { return c.High * c.adjFactorOrOne() }
+func (c Candle) AdjustedLow() float64    { return c.Low * c.adjFactorOrOne() }
+func (c Candle) AdjustedClose() float64  { return c.Close * c.adjFactorOrOne() }
+func (c Candle) AdjustedVolume() float64 { return float64(c.Volume) / c.volFactorOrOne() }
+
+// 公司行動的類型。
+//
+// SPLIT/DIVIDEND 是我們自己的分類；`TaiwanStockSplitPrice` 回傳的 type 是中文原文
+// （分割／反分割／面額變更），直接照存，因為它們是**不同的事件**，只是恰好都用
+// after/before 當調整係數。硬塞成同一個標籤之後就分不出來了。
+const (
+	CorporateActionSplit    = "SPLIT"
+	CorporateActionDividend = "DIVIDEND"
+	// CorporateActionUnknown 給來源沒有標 type 的事件（實測有一筆 00631L）。
+	// 前後價有效就照算係數——沒有標籤不代表事件沒發生。
+	CorporateActionUnknown = "UNKNOWN"
+
+	// 除權息（T-042 Phase 2）。分成三種是因為**對股數的影響不同**：
+	// 純現金不改變股數（volume_factor = 1），配股會改變。
+	CorporateActionDividendCash  = "DIVIDEND_CASH"
+	CorporateActionDividendStock = "DIVIDEND_STOCK"
+	CorporateActionDividendBoth  = "DIVIDEND_BOTH"
+)
+
+// CorporateAction 是一次公司行動。Factor = AfterPrice / BeforePrice，
+// 由抓取端算好存起來，避免每個消費者各算一次。
+type CorporateAction struct {
+	ID          uint64    `db:"id"           json:"id"`
+	Symbol      string    `db:"symbol"       json:"symbol"`
+	EventDate   time.Time `db:"event_date"   json:"event_date"`
+	ActionType  string    `db:"action_type"  json:"action_type"`
+	BeforePrice float64   `db:"before_price" json:"before_price"`
+	AfterPrice  float64   `db:"after_price"  json:"after_price"`
+	Factor      float64   `db:"factor"       json:"factor"`
+	// VolumeFactor 是這次事件對**股數**的影響：分割／配股會改變股數（等於價格係數或
+	// 1/(1+配股率)），純現金股利不改變股數（為 1）。
+	VolumeFactor float64 `db:"volume_factor" json:"volume_factor"`
+	Source       string  `db:"source"        json:"source"`
 }
 
 type IndicatorSnapshot struct {

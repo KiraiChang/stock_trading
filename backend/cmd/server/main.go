@@ -121,6 +121,15 @@ func main() {
 	finmindClient := market.NewFinMindClient(cfg.FinMind)
 	fetcher := market.NewFetcher(finmindClient, candleRepo, log)
 
+	// 還原係數（見 docs/todo.md T-042）：分割會讓歷史序列出現假跳空，
+	// candles 的原始價不動，另存累積係數由讀取端相乘。
+	adjuster := market.NewAdjuster(
+		finmindClient, store.NewCorporateActionRepo(db), candleRepo, log)
+	// 回補會插入比公司行動更早的 K 棒，寫入時係數是預設值 1，必須立即重算（I-066）。
+	// 除權息來源（T-042 Phase 2）。逐檔查詢，沿用 Yahoo 的 rate limit 設定。
+	adjuster.SetDividendSource(market.NewYahooDividendClient(cfg.Yahoo.RateLimit, log))
+	fetcher.SetAdjuster(adjuster)
+
 	// 籌碼分析：FinMind 目前只支援三大法人與融資融券，券商分點是 stub
 	// （market.ErrBrokerDataUnsupported），broker_score 會 fallback 為中性。
 	chipSyncer := chip.NewSyncer(finmindClient, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, candleRepo, log)
@@ -187,6 +196,8 @@ func main() {
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {
 		srv.Hub().Broadcast(ws.Event{Type: "signal", Symbol: sym, Data: sig})
 	}
+
+	sched.SetAdjuster(adjuster)
 
 	go sched.Start()
 

@@ -24,6 +24,16 @@ type Fetcher struct {
 	// batchSource 為選填的批次盤中源（Yahoo），支援單次請求多檔；與 Fugle 並存，
 	// 未設定（SetIntradaySource 未呼叫）時 FetchAndStoreIntradayBatch 回傳錯誤。
 	batchSource BatchQuoteSource
+
+	// adjuster 為選填：設定後，回補完成會立即重算還原係數（見 docs/issue.md I-066）。
+	// 未設定時行為與導入前相同（係數由每日排程重算）。
+	adjuster *Adjuster
+}
+
+// SetAdjuster 掛載還原係數重算器。**只有回補需要**：每日抓取寫入的是最新一根 K 棒，
+// 位置在所有公司行動之後，係數本來就是 1；只有回補會插入比事件更早的 K 棒。
+func (f *Fetcher) SetAdjuster(a *Adjuster) {
+	f.adjuster = a
 }
 
 func NewFetcher(client MarketDataSource, candles store.CandleRepo, log *zap.Logger) *Fetcher {
@@ -179,6 +189,8 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 	}
 
 	failed := 0
+	// 成功寫入的標的，回補結束後要重算還原係數。
+	backfilled := make([]string, 0, len(symbols))
 	for _, symbol := range symbols {
 		candles, err := f.client.FetchDailyCandles(ctx, symbol, start, end)
 		if err != nil {
@@ -195,7 +207,20 @@ func (f *Fetcher) BackfillHistory(ctx context.Context, symbols []string, days in
 			continue
 		}
 		f.log.Info("backfill done", zap.String("symbol", symbol), zap.Int("count", len(storeCandles)))
+		backfilled = append(backfilled, symbol)
 		report(symbol, nil)
+	}
+
+	// 回補完成後立即重算還原係數（見 docs/issue.md I-066）。
+	//
+	// 重算失敗不改變 failed 計數，也不影響已回報的每檔結果——K 棒**已經寫進去了**，
+	// 把它算成「回補失敗」會誤導呼叫端去重抓。改成記 Error，並靠隔天的排程與
+	// scripts/verify-adjustment.sh 補救。
+	if f.adjuster != nil && len(backfilled) > 0 {
+		if err := f.adjuster.RecomputeAffected(ctx, backfilled); err != nil {
+			f.log.Error("backfill 後重算還原係數失敗，這些標的的歷史價可能仍未還原",
+				zap.Strings("symbols", backfilled), zap.Error(err))
+		}
 	}
 	return failed
 }

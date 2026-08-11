@@ -43,11 +43,29 @@ def get_session() -> Session:
     return SessionLocal()
 
 
-def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
-    """從 DB 讀取 K 棒，回傳欄位與 Go Candle struct 對齊。"""
+def fetch_candles(
+    symbol: str, timeframe: str, limit: int = 200, adjusted: bool = True
+) -> list[dict]:
+    """從 DB 讀取 K 棒，回傳欄位與 Go Candle struct 對齊。
+
+    **預設回傳還原價**（`adjusted=True`）。DB 存的是原始成交價，跨越分割的序列會出現
+    假跳空——0050 在 2025-06-18 的 1:4 分割讓價格從 188.65 掉到 47.57，任何跨過那天的
+    MA / ATR / zone 建構都會看到一個從未發生的 −75%（見 docs/issue.md I-065）。
+
+    這裡是 **Python 端唯一的 candles 進入點**，所以還原一次做在這裡；若讓每個消費者
+    自己乘係數，漏掉的那個不會有任何東西報錯。要原始成交價（例如顯示「當時實際成交在
+    哪裡」）時明確傳 `adjusted=False`。
+
+    價乘係數、量除係數——方向相反，因為分割讓股數變多：歷史價要縮小、歷史量要放大。
+    `amount`（成交金額）不動，錢不隨股數重新定義。
+
+    **價與量用不同的係數**：`adj_factor` 給價、`vol_factor` 給量。現金股利讓價格下修
+    但**股數沒有改變**，所以成交量不可以跟著調整；只有分割與配股會改變股數。
+    因此 `adj_close * adj_volume == close * volume` **只在兩個係數相等時成立**。
+    """
     if DB_DRIVER == "sqlite":
         sql = text("""
-            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+            SELECT symbol, timeframe, open, high, low, close, volume, amount, adj_factor, vol_factor,
                    CAST(strftime('%s', ts) AS INTEGER) AS timestamp
             FROM candles
             WHERE symbol = :symbol AND timeframe = :tf
@@ -56,7 +74,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
         """)
     elif DB_DRIVER in ("postgres", "postgresql"):
         sql = text("""
-            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+            SELECT symbol, timeframe, open, high, low, close, volume, amount, adj_factor, vol_factor,
                    EXTRACT(EPOCH FROM ts)::BIGINT AS timestamp
             FROM candles
             WHERE symbol = :symbol AND timeframe = :tf
@@ -65,7 +83,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
         """)
     else:
         sql = text("""
-            SELECT symbol, timeframe, open, high, low, close, volume, amount,
+            SELECT symbol, timeframe, open, high, low, close, volume, amount, adj_factor, vol_factor,
                    UNIX_TIMESTAMP(ts) AS timestamp
             FROM candles
             WHERE symbol = :symbol AND timeframe = :tf
@@ -77,7 +95,25 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 200) -> list[dict]:
         rows = conn.execute(sql, {"symbol": symbol, "tf": timeframe, "limit": limit}).mappings().all()
 
     result = list(reversed([dict(r) for r in rows]))
-    log.debug("fetch_candles symbol=%s tf=%s → %d rows", symbol, timeframe, len(result))
+    if adjusted:
+        for row in result:
+            # 係數為 None/0（欄位還沒被重算過，或舊資料）時當作 1。
+            # 「沒有係數」的正解是「不調整」，不是「價格歸零」。
+            factor = float(row.get("adj_factor") or 1.0)
+            if factor <= 0:
+                factor = 1.0
+            # vol_factor 缺值（Phase 1 的舊資料）時退回 adj_factor：
+            # 那時只有分割，價量本來就共用一個係數。
+            vol_factor = float(row.get("vol_factor") or 0.0)
+            if vol_factor <= 0:
+                vol_factor = factor
+            for field in ("open", "high", "low", "close"):
+                if row.get(field) is not None:
+                    row[field] = float(row[field]) * factor
+            if row.get("volume") is not None:
+                row["volume"] = float(row["volume"]) / vol_factor
+    log.debug("fetch_candles symbol=%s tf=%s adjusted=%s → %d rows",
+              symbol, timeframe, adjusted, len(result))
     return result
 
 

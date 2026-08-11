@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/trading/backend/internal/config"
+	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
 )
 
@@ -256,4 +257,76 @@ func (c *FinMindClient) FetchMinuteCandles(ctx context.Context, symbol string, d
 		})
 	}
 	return candles, nil
+}
+
+// RawSplitPrice 是 dataset=TaiwanStockSplitPrice 的原始欄位。
+// 這個 dataset 在 register tier 就能用，**而且可以不帶 data_id 整批抓**
+// （對照：TaiwanStockPriceAdj 與 TaiwanStockDividendResult 的整批查詢都需要 Sponsor）。
+type RawSplitPrice struct {
+	Date        string  `json:"date"`
+	StockID     string  `json:"stock_id"`
+	Type        string  `json:"type"`
+	BeforePrice float64 `json:"before_price"`
+	AfterPrice  float64 `json:"after_price"`
+}
+
+// FetchSplitPrices 拉取區間內全市場的價格重訂事件（見 docs/todo.md T-042）。
+//
+// 全市場 2015～2026 只有 33 筆，所以這裡刻意不帶 data_id：一次請求抓完整段歷史，
+// 比逐檔抓省掉數百次請求與對應的 rate limit 等待。
+//
+// **這個 dataset 不是只有「分割」**（2026-08-11 實測 33 筆的分佈）：
+//
+//	面額變更 22、反分割 6、分割 4、type 為空字串 1
+//
+// 四種都是同一件事——把價格重新表述，所以 after/before 一律是正確的調整係數：
+// 面額變更 312→31.2（0.1）、反分割 3.28→22.96（7.0）、分割 188.65→47.16（0.25）。
+// **係數可以大於 1**（反分割時股數變少、價格變高），對應的成交量調整
+// `volume / factor` 也因此是縮小，方向仍然正確。
+//
+// ActionType 直接記 FinMind 給的 type 而不是一律寫 SPLIT——否則反分割與面額變更會被
+// 標成分割，之後要分辨就得回頭重抓。type 為空時（實測有一筆 00631L）記為 UNKNOWN，
+// 係數照算，因為前後價都是有效的。
+func (c *FinMindClient) FetchSplitPrices(ctx context.Context, start, end time.Time) ([]store.CorporateAction, error) {
+	params := url.Values{
+		"dataset":    {"TaiwanStockSplitPrice"},
+		"start_date": {start.Format("2006-01-02")},
+		"end_date":   {end.Format("2006-01-02")},
+	}
+
+	rows, err := c.fetch(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	actions := make([]store.CorporateAction, 0, len(rows))
+	for _, row := range rows {
+		var raw RawSplitPrice
+		if err := json.Unmarshal(row, &raw); err != nil {
+			continue
+		}
+		// 價格為 0 或負數時算不出係數，而且會讓還原價變成 0。跳過並記錄，
+		// 不要寫進事件表——一筆壞事件會污染該檔的整段歷史。
+		if raw.BeforePrice <= 0 || raw.AfterPrice <= 0 {
+			continue
+		}
+		ts, err := time.ParseInLocation("2006-01-02", raw.Date, timeutil.TaipeiTZ)
+		if err != nil {
+			continue
+		}
+		actionType := strings.TrimSpace(raw.Type)
+		if actionType == "" {
+			actionType = store.CorporateActionUnknown
+		}
+		actions = append(actions, store.CorporateAction{
+			Symbol:      raw.StockID,
+			EventDate:   ts,
+			ActionType:  actionType,
+			BeforePrice: raw.BeforePrice,
+			AfterPrice:  raw.AfterPrice,
+			Factor:      raw.AfterPrice / raw.BeforePrice,
+			Source:      "TaiwanStockSplitPrice",
+		})
+	}
+	return actions, nil
 }

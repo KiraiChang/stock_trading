@@ -16,6 +16,15 @@ type CandleRepo interface {
 	GetLatestN(ctx context.Context, symbol, timeframe string, n int) ([]Candle, error)
 	GetRange(ctx context.Context, symbol, timeframe string, from, to time.Time) ([]Candle, error)
 	GetLatest(ctx context.Context, symbol, timeframe string) (*Candle, error)
+
+	// 還原係數的維護（見 docs/todo.md T-042）。實作在 corporate_action_repo.go，
+	// 與事件表的操作放在一起比較好讀。
+	ApplyAdjFactors(ctx context.Context, symbol string, ranges []AdjFactorRange) error
+	CountUnadjustedBefore(ctx context.Context, symbol string, before time.Time) (int, error)
+	// Symbols 回傳 candles 內所有相異 symbol。還原係數要涵蓋**所有有價格歷史的標的**，
+	// 不能只看 watchlist——評估標的池（T-040）的標的不在 watchlist 裡，
+	// 漏掉會讓它們「分割有還原、除權息沒有」。
+	Symbols(ctx context.Context) ([]string, error)
 }
 
 type candleRepo struct {
@@ -119,7 +128,7 @@ func (r *candleRepo) upsertSuffix() string {
 func (r *candleRepo) GetLatestN(ctx context.Context, symbol, timeframe string, n int) ([]Candle, error) {
 	var rows []Candle
 	sql := r.db.Rebind(`
-		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
+		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts, adj_factor, vol_factor
 		FROM candles
 		WHERE symbol=? AND timeframe=?
 		ORDER BY ts DESC
@@ -138,7 +147,7 @@ func (r *candleRepo) GetLatestN(ctx context.Context, symbol, timeframe string, n
 func (r *candleRepo) GetRange(ctx context.Context, symbol, timeframe string, from, to time.Time) ([]Candle, error) {
 	var rows []Candle
 	sql := r.db.Rebind(`
-		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
+		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts, adj_factor, vol_factor
 		FROM candles
 		WHERE symbol=? AND timeframe=? AND ts BETWEEN ? AND ?
 		ORDER BY ts ASC
@@ -150,7 +159,7 @@ func (r *candleRepo) GetRange(ctx context.Context, symbol, timeframe string, fro
 func (r *candleRepo) GetLatest(ctx context.Context, symbol, timeframe string) (*Candle, error) {
 	var c Candle
 	sql := r.db.Rebind(`
-		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts
+		SELECT id, symbol, timeframe, open, high, low, close, volume, amount, ts, adj_factor, vol_factor
 		FROM candles
 		WHERE symbol=? AND timeframe=?
 		ORDER BY ts DESC

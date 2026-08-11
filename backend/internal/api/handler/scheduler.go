@@ -44,7 +44,18 @@ func (h *SchedulerHandler) RunSREvaluation(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "sr_evaluation 已在背景重新觸發"})
 }
 
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation"}
+// POST /api/v1/scheduler/corporate-action-sync/run
+// 手動重跑公司行動同步（分割 ＋ 除權息）與還原係數重算，與每日 cron 共用同一份邏輯。
+//
+// **部署後的驗證需要它**：cron 是平日 06:30，若部署發生在那之後，
+// 沒有這個入口就得等到隔天才驗得了還原是否正確（見 scripts/verify-adjustment.sh）。
+// 重算是冪等的，重複觸發不會累積誤差。
+func (h *SchedulerHandler) RunCorporateActionSync(c *gin.Context) {
+	go h.sched.RunCorporateActionSync()
+	c.JSON(http.StatusAccepted, gin.H{"message": "corporate_action_sync 已在背景重新觸發"})
+}
+
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
@@ -54,6 +65,8 @@ var jobStaleThreshold = map[string]time.Duration{
 	"chip_daily_sync":   72 * time.Hour,
 	"stock_symbol_sync": 26 * time.Hour,
 	"sr_evaluation":     72 * time.Hour,
+	// 平日 06:30 跑一次；跨週末最長間隔是週五到週一，加上緩衝取 80 小時。
+	"corporate_action_sync": 80 * time.Hour,
 }
 
 type jobStatus struct {

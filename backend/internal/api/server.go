@@ -124,6 +124,7 @@ func NewServer(
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
 		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)
+		protected.POST("/scheduler/corporate-action-sync/run", sch.RunCorporateActionSync)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo, log)
 		protected.POST("/backtest", bh.Submit)

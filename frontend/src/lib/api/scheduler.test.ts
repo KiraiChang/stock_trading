@@ -4,6 +4,7 @@ import {
   fetchSchedulerStatus,
   triggerDailyCloseRun,
   triggerSREvaluationRun,
+  triggerCorporateActionSyncRun,
   triggerStockSymbolSyncRun,
 } from './scheduler'
 
@@ -33,9 +34,11 @@ describe('scheduler api', () => {
     await triggerDailyCloseRun()
     await triggerStockSymbolSyncRun()
     await triggerSREvaluationRun()
+    await triggerCorporateActionSyncRun()
 
     expect(apiFetch).toHaveBeenNthCalledWith(1, '/scheduler/daily-close/run', { method: 'POST' })
     expect(apiFetch).toHaveBeenNthCalledWith(2, '/scheduler/stock-symbol-sync/run', { method: 'POST' })
     expect(apiFetch).toHaveBeenNthCalledWith(3, '/scheduler/sr-evaluation/run', { method: 'POST' })
+    expect(apiFetch).toHaveBeenNthCalledWith(4, '/scheduler/corporate-action-sync/run', { method: 'POST' })
   })
 })

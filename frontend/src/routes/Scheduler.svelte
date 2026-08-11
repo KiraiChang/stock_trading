@@ -5,6 +5,7 @@
     fetchSchedulerStatus,
     triggerDailyCloseRun,
     triggerSREvaluationRun,
+    triggerCorporateActionSyncRun,
     triggerStockSymbolSyncRun,
     type JobName,
     type SchedulerJob,
@@ -21,6 +22,7 @@
     chip_daily_sync: '籌碼日結同步',
     stock_symbol_sync: '股票主檔同步',
     sr_evaluation: 'SR Zone 驗證',
+    corporate_action_sync: '公司行動與股價還原',
   }
 
   const statusLabel: Record<string, string> = {
@@ -120,6 +122,21 @@
       triggerError = { ...triggerError, sr_evaluation: '觸發失敗，請稍後再試' }
     } finally {
       triggering = { ...triggering, sr_evaluation: false }
+    }
+  }
+
+  async function runCorporateActionSync() {
+    triggering = { ...triggering, corporate_action_sync: true }
+    triggerError = { ...triggerError, corporate_action_sync: '' }
+    triggerMessage = { ...triggerMessage, corporate_action_sync: '' }
+    try {
+      const res = await triggerCorporateActionSyncRun()
+      triggerMessage = { ...triggerMessage, corporate_action_sync: res.message ?? '已在背景重新觸發' }
+      setTimeout(load, 1500)
+    } catch {
+      triggerError = { ...triggerError, corporate_action_sync: '觸發失敗，請稍後再試' }
+    } finally {
+      triggering = { ...triggering, corporate_action_sync: false }
     }
   }
 
@@ -251,6 +268,28 @@
                 {/if}
                 {#if triggerError.sr_evaluation}
                   <p class="text-rise text-xs mt-2">{triggerError.sr_evaluation}</p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if job.job_name === 'corporate_action_sync'}
+              <div class="mt-3 pt-3 border-t border-border">
+                <button
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  disabled={triggering.corporate_action_sync}
+                  on:click={runCorporateActionSync}
+                >
+                  {triggering.corporate_action_sync ? '觸發中...' : '手動執行還原同步'}
+                </button>
+                <p class="text-muted text-xs mt-2">
+                  抓取分割與除權息事件並重算股價還原係數。排程為平日 06:30；
+                  剛部署完想立即驗證時用這個入口。重算是冪等的，重複觸發不會累積誤差。
+                </p>
+                {#if triggerMessage.corporate_action_sync}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage.corporate_action_sync}</p>
+                {/if}
+                {#if triggerError.corporate_action_sync}
+                  <p class="text-rise text-xs mt-2">{triggerError.corporate_action_sync}</p>
                 {/if}
               </div>
             {/if}

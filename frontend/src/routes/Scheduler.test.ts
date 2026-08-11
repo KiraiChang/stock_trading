@@ -4,6 +4,7 @@ import Scheduler from './Scheduler.svelte'
 import {
   fetchSchedulerStatus,
   triggerSREvaluationRun,
+  triggerCorporateActionSyncRun,
   type SchedulerJob,
 } from '../lib/api/scheduler'
 
@@ -14,6 +15,7 @@ vi.mock('../lib/api/scheduler', () => ({
   triggerDailyCloseRun: vi.fn(),
   triggerStockSymbolSyncRun: vi.fn(),
   triggerSREvaluationRun: vi.fn(),
+  triggerCorporateActionSyncRun: vi.fn(),
 }))
 
 const srEvaluationJob: SchedulerJob = {
@@ -110,5 +112,50 @@ describe('Scheduler 頁面的錯誤色語意', () => {
     await fireEvent.click(button)
 
     expect(await screen.findByText('觸發失敗，請稍後再試')).toHaveClass('text-rise')
+  })
+})
+
+describe('Scheduler 頁面的 corporate_action_sync 區塊', () => {
+  const job: SchedulerJob = {
+    job_name: 'corporate_action_sync',
+    status: 'never_run',
+    symbols_total: 0,
+    symbols_failed: 0,
+    stale: true,
+  }
+
+  beforeEach(() => {
+    vi.mocked(triggerCorporateActionSyncRun).mockReset()
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([job])
+  })
+
+  // 這個入口存在的理由：排程是平日 06:30，部署若晚於那個時間，
+  // 沒有手動觸發就得等到隔天才驗得了還原是否正確。
+  it('渲染排程列與手動執行按鈕', async () => {
+    render(Scheduler)
+    expect(await screen.findByRole('button', { name: '手動執行還原同步' })).toBeTruthy()
+    expect(screen.getByText('公司行動與股價還原')).toBeTruthy()
+  })
+
+  it('點擊手動執行會呼叫 API 並顯示後端訊息', async () => {
+    vi.mocked(triggerCorporateActionSyncRun).mockResolvedValue({ message: '已在背景重新觸發' })
+    render(Scheduler)
+    const btn = await screen.findByRole('button', { name: '手動執行還原同步' })
+
+    await fireEvent.click(btn)
+
+    await waitFor(() => expect(triggerCorporateActionSyncRun).toHaveBeenCalledTimes(1))
+    expect(await screen.findByText('已在背景重新觸發')).toBeTruthy()
+  })
+
+  it('觸發失敗時顯示錯誤訊息且不留在觸發中狀態', async () => {
+    vi.mocked(triggerCorporateActionSyncRun).mockRejectedValue(new Error('boom'))
+    render(Scheduler)
+    const btn = await screen.findByRole('button', { name: '手動執行還原同步' })
+
+    await fireEvent.click(btn)
+
+    expect(await screen.findByText('觸發失敗，請稍後再試')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '手動執行還原同步' })).toBeTruthy()
   })
 })

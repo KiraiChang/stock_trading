@@ -99,7 +99,7 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 ### GET `/candles/:symbol`
 
-取得 K 棒資料。
+取得 K 棒資料。**回傳的是還原價**（見下方說明）。
 
 **Query Parameters：**
 
@@ -115,14 +115,36 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
   "timeframe": "1d",
   "candles": [
     {
-      "id": 1, "symbol": "2330", "timeframe": "1d",
+      "symbol": "2330", "timeframe": "1d",
       "open": 975.0, "high": 980.0, "low": 970.0, "close": 978.0,
       "volume": 25000000, "amount": 24450000000,
-      "ts": "2024-01-15T00:00:00+08:00"
+      "ts": "2024-01-15T00:00:00+08:00",
+      "adj_factor": 1, "vol_factor": 1
     }
   ]
 }
 ```
+
+#### 回傳的是還原價，不是原始成交價
+
+`open/high/low/close` 已套用累積還原係數，`volume` 已套用成交量係數。DB 存的是**原始價**，
+調整在 handler 完成——**呼叫端不需要、也不應該自己乘係數**（前端是第三個語言，
+同一段邏輯散到三處時，算錯的那一處不會有任何東西告訴你）。
+
+不還原的話，跨越公司行動的 K 線圖會出現一根從未發生的暴跌：0050 在 2025-06-18 的 1:4 分割
+會讓價格從 188.65 掉到 47.57。
+
+| 欄位 | 說明 |
+|------|------|
+| `adj_factor` | 價格的累積還原係數。`1` 代表該區間之後沒有公司行動 |
+| `vol_factor` | **成交量**的係數。與 `adj_factor` 不同：現金股利讓價格下修但股數沒變，所以量不調整；只有分割與配股會讓兩者不相等 |
+| `amount` | **不調整**。成交金額是錢，不隨股數重新定義 |
+
+因此 `close × volume`（還原後）**只在 `adj_factor == vol_factor` 時**等於原始的乘積。
+現金股利發生時錢真的離開公司，乘積本來就該變小。
+
+需要「當時實際成交在哪裡」的原始價時，這支端點目前沒有開關——現況沒有這種呼叫端，
+等真的有需求再加（背景見 [`todo.md`](./todo.md) T-042）。
 
 ---
 
@@ -359,6 +381,28 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 **Response（202 Accepted）：**
 ```json
 { "message": "stock_symbol_sync 已在背景重新觸發" }
+```
+
+### POST `/scheduler/corporate-action-sync/run`
+
+手動觸發公司行動同步（分割 ＋ 除權息）與股價還原係數重算，與每日 `corporate_action_sync`
+排程（平日 06:30）共用同一份邏輯。立即回應，實際執行在背景；結果查
+`GET /scheduler/status` 的 `corporate_action_sync`。
+
+**為什麼需要這個入口**：排程一天只跑一次，部署若晚於 06:30，沒有它就得等到隔天才驗得了
+還原是否正確（驗證方式見 `scripts/verify-adjustment.sh`）。**重算是冪等的**，
+重複觸發不會累積誤差——`adj_factor` 是事件表的純函數，每次都整段覆寫。
+
+執行內容：
+
+1. 一次批次請求抓全市場的分割／反分割／面額變更（FinMind `TaiwanStockSplitPrice`）。
+2. 逐檔抓除權息（Yahoo `dividendsByYear`），標的來源是 **`candles` 內所有相異 symbol**，
+   不是 watchlist。
+3. 重算受影響標的的 `adj_factor`（價）與 `vol_factor`（量）。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "corporate_action_sync 已在背景重新觸發" }
 ```
 
 ---

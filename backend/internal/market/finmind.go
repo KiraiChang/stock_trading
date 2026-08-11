@@ -325,7 +325,11 @@ func (c *FinMindClient) FetchSplitPrices(ctx context.Context, start, end time.Ti
 			BeforePrice: raw.BeforePrice,
 			AfterPrice:  raw.AfterPrice,
 			Factor:      raw.AfterPrice / raw.BeforePrice,
-			Source:      "TaiwanStockSplitPrice",
+			// 分割／反分割／面額變更**都會改變股數**，所以成交量係數等於價格係數。
+			// 漏設這欄會寫入 0，被 ck_corporate_actions_volume_factor 擋下——
+			// 2026-08-11 正式環境就是這樣失敗的（Phase 1 時還沒有這個欄位）。
+			VolumeFactor: raw.AfterPrice / raw.BeforePrice,
+			Source:       "TaiwanStockSplitPrice",
 		})
 	}
 	return actions, nil

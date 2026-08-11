@@ -159,7 +159,7 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 
 | 欄位 | 說明 |
 |------|------|
-| job_name | 排程名稱 |
+| job_name | 排程名稱（`VARCHAR(64)`，migration 063 由 20 放寬——`corporate_action_sync` 是 21 字元，原本的上限裝不下且**失敗時只記 log 不中斷排程**，症狀是「job 有跑但狀態頁看不到」） |
 | status | `running` / `success` / `partial` / `failed` / `skipped` |
 | symbols_total / symbols_failed | 本輪處理與失敗數 |
 | error | 最後一筆錯誤或摘要訊息 |

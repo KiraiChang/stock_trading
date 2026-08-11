@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/trading/backend/internal/api/handler"
 	"github.com/trading/backend/internal/database"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
@@ -138,5 +139,40 @@ func TestPostgresMigrationsAdjusterAppliesFactors(t *testing.T) {
 	}
 	if got := rows[0].AdjustedVolume(); got < 125_900_000 || got > 126_000_000 {
 		t.Errorf("2025-06-10 還原量 = %v, want ≈1.259 億（31,483,080 × 4）", got)
+	}
+}
+
+// TestPostgresMigrationsJobNameFitsLongestJob 鎖住 2026-08-11 正式環境的失敗：
+// `job_runs.job_name` 原本是 VARCHAR(20)，而 `corporate_action_sync` 是 21 字元，
+// 寫入直接 22001（value too long）。
+//
+// **症狀特別容易被忽略**：startRun 失敗只記 log 不中斷排程，所以 job 照跑，
+// 只是狀態頁永遠看不到它——除非有人去翻 log，否則不會發現。
+//
+// 這裡用**程式碼裡真正註冊的 job 名稱清單**去驗，而不是寫死字串：
+// 日後再加更長的 job 名稱時，這支會直接失敗。
+func TestPostgresMigrationsJobNameFitsLongestJob(t *testing.T) {
+	dsn := os.Getenv("POSTGRES_MIGRATION_DSN")
+	if dsn == "" {
+		t.Skip("未設 POSTGRES_MIGRATION_DSN，跳過")
+	}
+	db, err := sqlx.Connect("pgx", dsn)
+	if err != nil {
+		t.Fatalf("連不上 postgres: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	ctx := context.Background()
+
+	if err := database.RunMigrations(ctx, db, "postgres", zap.NewNop()); err != nil {
+		t.Fatalf("migration 失敗: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(`DELETE FROM job_runs`) })
+
+	for _, name := range handler.KnownSchedulerJobs() {
+		if _, err := db.Exec(
+			`INSERT INTO job_runs (job_name, status, started_at) VALUES ($1, 'running', NOW())`,
+			name); err != nil {
+			t.Errorf("job_name %q（%d 字元）寫不進 job_runs: %v", name, len(name), err)
+		}
 	}
 }

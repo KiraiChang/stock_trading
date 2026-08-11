@@ -55,6 +55,10 @@ func (h *SchedulerHandler) RunCorporateActionSync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "corporate_action_sync 已在背景重新觸發"})
 }
 
+// KnownSchedulerJobs 匯出給測試用：DB 的 job_name 欄位必須容得下每一個名稱
+// （2026-08-11 正式環境因 VARCHAR(20) 裝不下 corporate_action_sync 而失敗）。
+func KnownSchedulerJobs() []string { return append([]string(nil), knownSchedulerJobs...) }
+
 var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）

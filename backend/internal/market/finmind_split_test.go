@@ -88,6 +88,16 @@ func TestFetchSplitPricesParsesRealPayload(t *testing.T) {
 		if a.BeforePrice <= 0 || a.AfterPrice <= 0 {
 			t.Errorf("%s 的前後價不該是非正數: %+v", tc.symbol, a)
 		}
+		// 分割會改變股數，成交量係數必須等於價格係數。
+		// **漏設會寫入 0**，被 DB 的 ck_corporate_actions_volume_factor 擋下——
+		// 2026-08-11 正式環境就是這樣失敗的，而當時這支測試只驗了 Factor。
+		if a.VolumeFactor != a.Factor {
+			t.Errorf("%s 的 VolumeFactor = %v, want %v（等於價格係數）",
+				tc.symbol, a.VolumeFactor, a.Factor)
+		}
+		if a.VolumeFactor <= 0 {
+			t.Errorf("%s 的 VolumeFactor 是非正數，會違反 DB 的 CHECK 約束", tc.symbol)
+		}
 		if a.Source == "" {
 			t.Errorf("%s 沒有記來源", tc.symbol)
 		}

@@ -23,6 +23,7 @@
 #   MODEL_PATH   模型檔在 container 內的路徑（預設 /app/models/sr_scoring_v4.joblib）
 #   MEM / CPUS / PY_IMAGE / MEM_RESERVE_MB …  同 python/scripts/test.sh
 #   WRITE_DB=1   **才會**加上 --write-db（預設不加，見下方安全預設）
+#   MEASURE_PEAK=1  量測 container 的記憶體峰值與 host available 低點（見下方）
 #
 # 設計重點：
 #   - **預設唯讀**：不帶 --write-db。CLAUDE.md 規定驗收不得動 live 資料，而這支腳本的
@@ -34,6 +35,21 @@
 #   - 沿用 python/scripts/test.sh 的 image 與資源約束（mem-guard、--user、不留 __pycache__）。
 #   - 記憶體：evaluation 的 sources 與 dataset 必須同時常駐（見 issue.md I-056），
 #     用量隨標的數成長且**不可線性外推**。跑大批標的前先看 free -m。
+#   - **MEASURE_PEAK=1 的量測方式**：擴標的池（todo.md T-040 Step 0）要拿峰值當決策依據，
+#     而預設路徑 `docker run --rm` 跑完容器就消失，量不到。
+#
+#     峰值由**容器自己在指令結束後、退出前**寫進 /peak/peak，而不是從外面輪詢。
+#     這一點是實測踩出來的：第一版用 `docker exec` 每 2 秒輪詢，量到 N=30 的峰值
+#     比 N=20 還低（232MB < 276MB），但 N=30 的 dataset 是 N=20 的超集、rows 更多。
+#     原因是 `_volatility_profiles`（正是 issue.md I-056 說「sources 與 dataset 必須同時
+#     常駐」的那一段）跑在整段流程的**最後**，峰值落在最後一次輪詢之後、容器結束之前，
+#     而容器一結束 cgroup 就被移除，從外面再也讀不到——**系統性低估，且偏差不固定**。
+#
+#     讀的是 kernel 維護的 cgroup 單調最大值（v1 `memory.max_usage_in_bytes` /
+#     v2 `memory.peak`），所以只要在退出前讀一次就是真正的峰值。host available 低點
+#     仍由外面輪詢，那個本來就是取樣值。
+#     **注意 cgroup v1 的峰值含 page cache**，會略高於實際 anon 用量——用於「塞不塞得進去」
+#     的判斷是保守的正確方向，因為 cgroup 上限本來就把 cache 算進去。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -93,7 +109,6 @@ if [ ! -d "$MODELS_DIR" ]; then
 fi
 
 DOCKER_ARGS=(
-  --rm
   --user "$(id -u):$(id -g)"
   --network "$NETWORK"
   --cpus="$CPUS"
@@ -124,4 +139,59 @@ docker build -t "$IMAGE" "$PYTHON_DIR"
 
 echo "==> evaluation：mode=$MODE network=$NETWORK mem=$MEM write_db=${WRITE_DB:-0}"
 echo "    args: $*"
-exec docker run "${DOCKER_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}"
+
+if [ "${MEASURE_PEAK:-0}" != "1" ]; then
+  exec docker run --rm "${DOCKER_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}"
+fi
+
+# ── MEASURE_PEAK=1：具名 detached 容器，峰值由容器自己回報 ──────────────
+# 不能用 --rm：容器一結束就被移除，logs 會跟著消失。改為手動 rm。
+CONTAINER="sr-eval-peak-$$"
+PEAK_DIR="$(mktemp -d)"
+HOST_LOW_MB=""
+
+cleanup_peak() {
+  docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+  rm -rf "$PEAK_DIR"
+}
+trap cleanup_peak EXIT
+
+# 包一層 sh：跑完原本的指令後、退出前把 cgroup 峰值寫出來，並保留原指令的 exit code。
+# 兩種 cgroup 版本都試（v1 在 4.19 kernel 上是 memory.max_usage_in_bytes）。
+PEAK_WRAPPER='"$@"; rc=$?;
+{ cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes 2>/dev/null \
+  || cat /sys/fs/cgroup/memory.peak 2>/dev/null; } > /peak/peak || true
+exit $rc'
+
+docker run -d --name "$CONTAINER" "${DOCKER_ARGS[@]}" -v "$PEAK_DIR":/peak \
+  "$IMAGE" sh -c "$PEAK_WRAPPER" _ "${CMD_ARGS[@]}" >/dev/null
+
+# host available 低點仍由外面取樣——那本來就不是單調值，只能取樣。
+while docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; do
+  if avail="$(mem_guard_available_mb)"; then
+    if [ -z "$HOST_LOW_MB" ] || [ "$avail" -lt "$HOST_LOW_MB" ]; then
+      HOST_LOW_MB="$avail"
+    fi
+  fi
+  sleep 2
+done
+
+status="$(docker wait "$CONTAINER" 2>/dev/null || echo 1)"
+docker logs "$CONTAINER" 2>&1 || true
+
+PEAK_BYTES="$(tr -dc '0-9' < "$PEAK_DIR/peak" 2>/dev/null || true)"
+if [ -z "$PEAK_BYTES" ]; then
+  echo "==> [warn] 讀不到容器回報的峰值（/peak/peak 是空的）——這次的峰值數字不可信。" >&2
+  PEAK_BYTES=0
+fi
+PEAK_MB=$((PEAK_BYTES / 1024 / 1024))
+cat <<EOF
+
+==> 記憶體量測（MEASURE_PEAK=1）
+    container 峰值   : ${PEAK_MB} MB（cgroup 上限 $MEM）
+    host available 低點: ${HOST_LOW_MB:-unknown} MB
+    判準（todo.md T-040 Step 0）：峰值 ＋ 150MB 保留 < host available
+    註：cgroup v1 的峰值含 page cache，會略高於實際 anon 用量。
+EOF
+
+exit "$status"

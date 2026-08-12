@@ -906,7 +906,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 計畫書待確認 |
+| 狀態 | 計畫書待確認（2026-08-12 更新執行順序與過時內容，仍待確認後才實作） |
 | 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
@@ -962,7 +962,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 手動輸入代號（不再侷限 watchlist） | **已完成**（同上；`symbols` 已改必填） |
 | 可續跑 | **未做**。job 紀錄讓中斷後知道跑到哪，但 backend 重啟不會接手既有任務，仍需人工用剩餘 symbols 重送 |
 | 速度 | **不調整**。FinMind 註冊帳號的官方上限是 **600 requests/小時**（＝10/min），現行 5/min 已用掉一半、另一半留給重試與突發。大批量回補靠**拉長時間**而不是拉高速率；650 檔約 2.2 小時、150 檔約 30 分鐘，都是可接受的一次性成本 |
-| 候選清單來源 | **未做**。要新增 `GET /api/v1/market/symbols?type=股票,ETF&…`，從 `stock_symbols` 產生候選清單，免得手工湊 650 個代號 |
+| 候選清單來源 | **未做**，但比原本估的小。`stock_symbols`（migration 048）已有 `security_type`、`industry`、`listed_date`、`is_listed`，Step 3 的三條選取規則除了流動性以外都查得到。要補的是一個**批次取用**的路徑——**不要撐大既有的 `Search`**（`stock_symbol_repo.go:197`，`limit > 100` 會被打回 20，那個上限是 autocomplete 的刻意設計），改為新增 `ListCandidates(ctx, opts)` 與對應端點 |
 
 **Phase 2：常態維護——一個「純日 K」清單（選完標的後才需要）**
 
@@ -983,7 +983,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 檔案 | 動作 |
 |---|---|
-| `migrations/{mysql,postgres,sqlite}/058_create_evaluation_universe.sql` | 新表：`symbol`、`bucket_hint`、`selected_at`、`source`、`active`、`note` |
+| `migrations/{mysql,postgres,sqlite}/066_create_evaluation_universe.sql` | 新表：`symbol`、`bucket_hint`、`selected_at`、`source`、`active`、`note`。**編號是 066 不是原本寫的 058**——058 已被 `market_backfill_jobs` 用掉，mysql／postgres 目前在 065 |
 | `store/evaluation_universe_repo.go` ＋ `model.go` | repo 與 model |
 | `scheduler/scheduler.go` | 新 job `evaluation_universe_sync`：每日盤後（晚於 `daily_close` 的 15:00，建議 16:00）**只對池內標的跑 `FetchAndStoreDaily`**；不呼叫 `signalEng.Evaluate`、不進 SR 驗證、不進籌碼同步 |
 | `config.yaml` | 新增 `evaluation_universe` 區段：`enabled`（預設 false）、`cron`、`batch_size` |
@@ -991,6 +991,54 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 **每日成本**：150 檔 × 1 request ÷ 5 req/min = **約 30 分鐘**，排在 16:00 之後的離峰時段，
 與盤中排程不重疊，也遠低於 FinMind 的 600/h 上限。
+
+#### 執行順序（2026-08-12 定案）
+
+原計畫把記憶體實測排在 Phase 2 之後。**改成最先做**——理由見下方風險段：150 檔的
+evaluation 從未實測，若跑不動，前面所有抓取與建表都是白工。順序因此是：
+
+| # | 步驟 | 產出／決策點 | 成本 |
+|---|---|---|---|
+| **0** | **記憶體實測**（新增，最先做） | 30～50 檔跑一次 evaluation 量實際峰值，決定 100～200 檔可不可行、要不要先做 [`issue.md`](./issue.md) I-056 的串流化 | 現有 11 檔 ＋ 補 16～20 檔（選法見下），**16～20 requests ≈ 4 分鐘** ＋ 一次 evaluation |
+| 1 | `ListCandidates` repo 方法與端點 | 能從 `stock_symbols` 產生 650 檔候選清單 | 純 backend，無外部依賴 |
+| 2 | Step 1 抓取（見下） | 全市場 ATR% 分佈 | 650 requests ≈ 2.2 小時 |
+| 3 | Step 2 判讀 → bucket 門檻定案 | **可能改變 T-003 的設計** | 分析，無抓取 |
+| 4 | Step 3 選 100～200 檔並深抓 | 最終標的池 | 150 requests ≈ 30 分鐘 |
+| 5 | Phase 2：`evaluation_universe` 表與排程 | 常態維護 | 見上方檔案表 |
+
+**Step 1 與 Step 3 不合併（2026-08-12 決定）**：`FetchDailyCandles`（`market/finmind.go:182`）
+**帶日期區間與單日同價**，都是 1 request/檔，所以 650 檔直接抓 5 年與抓 130 天是**同樣 650
+requests**——合併可省下 Step 3 那趟 30 分鐘。**但不採用**：代價是 `candles` 從約 18 萬列變
+約 78 萬列（現有 29,208 列的 27 倍），多出的 60 萬列有九成以上屬於不會入選的標的，
+30 分鐘的重抓成本遠低於長期背在 `candles` 上的索引負擔。**Step 1 只抓 130 天，Step 3 才深抓。**
+
+#### Step 0 的標的怎麼挑
+
+原則是**三個 bucket 各挑幾檔**（2026-08-12 決定），但有一個必須先處理的循環相依：
+**bucket 標籤要等 Step 1／Step 2 算出 ATR% 才會有，Step 0 當下不存在**。而且 LOW bucket
+現在是**空的**——那正是本項要解決的問題本身（現有 11 檔的 ATR% 是 `2330`／`0050` 的 3.2%
+到 `6243` 的 11.6%，門檻是 `LOW ≤ 1.5%`／`HIGH ≥ 3.5%`，見 `zone_builder.py:43-44`）。
+
+所以 Step 0 改用**預期波動的代理指標**分層，不需要先有資料：
+
+| 層 | 代理 | 補幾檔 |
+|---|---|---|
+| 預期低波動 | 電信、公用事業、大型金控、債券型 ETF | 8～10 |
+| 預期中波動 | 權值股、市值型與高股息 ETF、傳產龍頭 | 8～10 |
+| 預期高波動 | **不補**——現有 11 檔已有 9 檔落在 HIGH，再補只會加重既有的偏斜 | 0 |
+
+**這樣挑不會影響 Step 0 的效力**：Step 0 量的是**記憶體峰值**，不是調參。峰值由「檔數 ×
+`--limit` 列數 ＋ touch dataset 大小」決定，而 touch 數會隨波動變化（2026-08-06 的 sweep
+實測不同 builder 參數的 rows 差 2.3 倍），所以**涵蓋波動範圍才量得到有代表性的峰值**。
+代理猜錯某一檔的實際 bucket 不影響這個目的——那是 Step 2 要回答的問題。
+
+計畫書「不做的範圍」寫的「硬塞債券 ETF 進 LOW 反而有害」**不適用於 Step 0**：那句話針對的是
+拿它們調 zone builder 參數。Step 0 不調參，只量記憶體。但這些代理標的**不自動進入最終標的池**，
+要不要留由 Step 2／Step 3 依實際 ATR% 決定。
+
+**T-043 不是本項的前置條件**（2026-08-12 修正）。Yahoo 批次端點取不到歷史日 K，且
+evaluation 硬性需要成交量與成交金額，兩者 Yahoo 都給不了或不可用。詳見 T-043 的
+「與 T-040 的關係」。
 
 #### 選股方法（三步，Step 2 的結果可能改變 T-003 的設計）
 
@@ -1038,12 +1086,15 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
   收益（省幾小時的一次性作業）遠小於風險。**本次明確不調。**
 - **DB 成長**：150 檔 × 5 年 ≈ 18 萬列（現有 29,208 列的 6 倍）。磁碟不是問題，但
   `candles` 的既有索引效能要留意。
-- **evaluation 記憶體（最主要的未知數）**：150 檔的 evaluation **未經實測**。
-  先前「以 270MB 線性外推到 1.5～2GB」的估算**是錯的**——那 270MB 幾乎都是 pandas / sklearn /
-  lightgbm / shap 的 import 開銷，資料本身只有數 MB。重新估算後 150 檔約落在 **350～450MB**，
-  在這台 host 上是「邊緣但可能可行」。完整分析與改造方向見 [`issue.md`](./issue.md) **I-056**。
-  **仍要實測，不要假設**：Phase 2 完成後的第一次 evaluation 建議先用 30～50 檔量一次實際峰值，
-  再決定要不要降 `--limit` 或先做 I-056 的串流化。
+- **evaluation 記憶體（最主要的未知數，也是本項唯一可能整個做白工的風險）**：150 檔的
+  evaluation **未經實測**。先前「以 270MB 線性外推到 1.5～2GB」的估算**是錯的**——那 270MB
+  幾乎都是 pandas / sklearn / lightgbm / shap 的 import 開銷，資料本身只有數 MB。重新估算後
+  150 檔約落在 **350～450MB**，而這台 host 的 `MemAvailable` 常態只有 450～510MB、mem-guard
+  還要再保留 150MB——**是「邊緣」而不是「大概沒問題」**。完整分析與改造方向見
+  [`issue.md`](./issue.md) **I-056**。
+  因此**實測提前為 Step 0**（見上方執行順序），不再排到 Phase 2 之後：抓 2.2 小時、建表、
+  接排程之後才發現跑不動，前面全部是白工。量完若超標，先做 I-056 的第 1、2 項
+  （逐檔釋放原始 frame、只累積預測機率＋label 最後算 AUC）再往下走。
 - **回滾**：Phase 1 只新增 job 表與唯讀查詢端點，`git revert` 即可；已抓下來的 candles
   留著無害（多的 symbol 不會被任何既有流程掃到）。Phase 2 的 migration 有 `-- +goose Down`。
 
@@ -1055,7 +1106,12 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
   1. `candles` 的 symbol 數與列數是否符合預期
   2. 各 symbol 的日期涵蓋範圍是否完整（有無缺漏交易日）
   3. 用實際資料算出 ATR% 分佈，交付 Step 2 的判斷
-- **記憶體**：Phase 2 的第一次 evaluation 要實測，不要假設線性外推成立。
+- **記憶體**：Step 0 就要實測（30～50 檔），不要假設線性外推成立，也不要等到 Phase 2 之後。
+  量測方式比照既有腳本慣例（`scripts/` 內的 mem-guard 與 container 記憶體上限），
+  記錄峰值與當下 host available，判準是「峰值 ＋ 150MB 保留 < host available」。
+- **migration 編號**：新表是 `066`（058 已被 `market_backfill_jobs` 佔用）。三種 engine
+  各一份，其中 mysql 版要另跑 `scripts/test-mysql-migrations.sh`
+  （dev/live 是 postgres，mysql 那份沒有其他執行路徑）。
 
 #### 完成後歸檔
 
@@ -1134,10 +1190,10 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
-| 優先度 | 中（T-040 擴標的池的前置條件之一） |
+| 優先度 | 低（**不是** T-040 的前置條件，見下方「與 T-040 的關係」） |
 | 分類 | Go / 資料抓取 |
 | 建立日期 | 2026-08-11 |
-| 來源 | 2026-08-11 對 `FinanceChartService.ApacLibraCharts` 的可行性評估 |
+| 來源 | 2026-08-11 對 `FinanceChartService.ApacLibraCharts` 的可行性評估；2026-08-12 與 T-040 的合併評估修正定位 |
 
 完整評估與實測數字見
 [`yahoo-intraday-integration.md`](./yahoo-intraday-integration.md) 的
@@ -1148,8 +1204,38 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 - **批次**：至少 50 檔／請求，耗時與檔數幾乎無關。1,900 檔約 2 分鐘，
   FinMind 逐檔要 95 分鐘。
 
-**這筆的價值在擴標的池**：T-040 要把標的池擴到 100～200 檔、最終全市場，
-逐檔抓日 K 是主要瓶頸。價格改走 Yahoo 批次可以把日 K 補齊從小時級降到分鐘級。
+#### 與 T-040 的關係：幫不上，不要綁在一起做
+
+本筆原本寫「價值在擴標的池、逐檔抓日 K 是主要瓶頸」。**那個前提是錯的**
+（2026-08-12 對照程式碼查證後修正）：
+
+1. **這個端點取不到歷史日 K**。它是當日分 K 專用，唯一用法是盤後把**今天**的分 K
+   聚合成一根日 K。而 T-040 的兩筆抓取成本全是歷史回補——Step 1 是 650 檔 × 130 天、
+   Step 3 是 150 檔 × 5 年，Yahoo 一天都補不了。
+2. **日常維護那 30 分鐘也省不下來**。`FetchDailyCandles`（`market/finmind.go:182`）
+   一次請求就回傳 O/H/L/C/**Volume/Amount**，且**帶日期區間與單日同價**。只要還需要成交量，
+   那一個 FinMind 請求就跑不掉；從 Yahoo 另外抓價格不會減少任何 FinMind 請求。
+3. **evaluation pipeline 硬性需要成交量**。`evaluation.py:92` 直接取
+   `["open","high","low","close","volume"]`；`relative_volume` 是模型特徵，
+   `volume_confirmation` 與 `EXTREME_VOLUME_THRESHOLD` 都是**門檻型**判斷，
+   0.3%～7.8% 且與標的相關的偏差足以讓它們失真。T-040 Step 3 的流動性下限還要用
+   平均成交金額，而 Yahoo 連 `Amount` 都沒有。
+
+**更上層的結論**：卡住標的池規模上限的是**成交量**，不是價格。全市場 ＋ 完整量能
+在 FinMind 現行額度（600 requests/小時）下無解，那是比 T-040 更上層的策略問題，
+不是本筆能解的。
+
+#### 那本筆的價值在哪
+
+不在吞吐量，在**時效性**與**未來的價格層級掃描**：
+
+1. **當日價格的前哨與交叉檢核**。`scheduler.go:116` 記錄了 FinMind 當日日 K 不會在收盤當下
+   發布，曾在 14:00 拉到 `count=0` 且**靜默成功**（空陣列 BulkInsert 視為成功、`job_runs`
+   顯示 success，沒有任何錯誤訊號）。Yahoo 盤後聚合可以在 13:30 收盤後立刻拿到當日價格，
+   用來提前偵測「FinMind 這批是空的」並交叉檢核價格——這是 FinMind 給不了的。
+2. **未來全市場的價格層級掃描**（CLAUDE.md Roadmap Phase 2 的 1,900 檔）。日常維護在
+   FinMind 5/min 下要 6.3 小時／天不可行，Yahoo 約 2 分鐘。但**僅在可接受無量能確認的
+   用途上成立**——突破偵測的三個條件裡有一項就是 `Volume > AvgVolume(20)`。
 
 **要處理的問題**：
 

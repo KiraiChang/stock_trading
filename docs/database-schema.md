@@ -83,11 +83,11 @@ amount 不調整                      ← 成交金額是錢，不隨股數重�
 |------|------|------|
 | symbol | VARCHAR(10) | 股票代號 |
 | event_date | DATE | **新價的第一個交易日**。套用範圍是 `ts < event_date`，**當日不套** |
-| action_type | VARCHAR(16) | 分割／反分割／面額變更（來源原文）、`DIVIDEND_CASH` / `DIVIDEND_STOCK` / `DIVIDEND_BOTH`、`CAPITAL_REDUCTION`、`UNKNOWN` |
+| action_type | VARCHAR(32) | 分割／反分割／面額變更（來源原文）、`DIVIDEND_CASH` / `DIVIDEND_STOCK` / `DIVIDEND_BOTH`、`CAPITAL_REDUCTION`、`UNKNOWN`。migration 064 由 16 放寬——`CAPITAL_REDUCTION` 是 17 字元 |
 | before_price / after_price | DECIMAL(10,2) | 事件前後的參考價 |
 | factor | DECIMAL(18,10) | 價格係數 = `after_price / before_price` |
 | volume_factor | DECIMAL(18,10) | 股數係數。**純現金股利為 1** |
-| source | VARCHAR(32) | `TaiwanStockSplitPrice` 或 `YahooDividendsByYear` |
+| source | VARCHAR(255) | `TaiwanStockSplitPrice`、`YahooDividendsByYear`、`TaiwanStockCapitalReductionReferencePrice`。migration 065 由 32 放寬——最長的是 41 字元，且外部 dataset 名稱不受我們控制，所以取 255 而非「剛好夠用」 |
 
 **Constraint：**
 - `UNIQUE(symbol, event_date, action_type)`：冪等性的第一道保證。重複抓取若產生第二筆，

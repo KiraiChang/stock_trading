@@ -42,10 +42,28 @@ scripts/test-mysql-migrations.sh              # 起 MySQL → goose up → 驗 s
 KEEP_UP=1 scripts/test-mysql-migrations.sh    # 跑完保留 MySQL（可從 127.0.0.1:13306 連進去看）
 ```
 
-驗證邏輯在 `backend/internal/database/migrate_mysql_test.go`，用的是與 `cmd/server/main.go`
+驗證邏輯在 `backend/internal/database/migrate_mysql_test.go` 與
+`backend/internal/database/adjuster_mysql_test.go`，用的是與 `cmd/server/main.go`
 相同的 `database.RunMigrations` 進入點（migration 是 `//go:embed` 打包的，
-從磁碟讀檔的 goose CLI 驗的是另一份東西）。該測試以 `MYSQL_MIGRATION_DSN` gate 住，
-沒設就 skip，所以 `backend/scripts/test.sh ./...` 不受影響。
+從磁碟讀檔的 goose CLI 驗的是另一份東西）。這些測試以 `MYSQL_MIGRATION_DSN` gate 住，
+沒設就 skip，所以 `backend/scripts/test.sh ./...` 不受影響。目前有三支：
+
+| 測試 | 驗什麼 |
+|---|---|
+| `TestMySQLMigrationsUpAndDown` | 完整 up → 驗 schema → 分段 down 到 0（回滾鏈） |
+| `TestMySQLMigrationsPreserveCashDividendVolumeFactor` | `062` 的回填在 down→up 重跑時不會動到現金股利的 `volume_factor` |
+| `TestMySQLMigrationsRealValuesFitAllColumns` | 欄位寬度裝得下程式碼裡真正的常數（`063`／`064`／`065` 的回歸） |
+
+**新增測試時名稱必須以 `TestMySQLMigrations` 開頭**，否則不符合腳本的
+`-test.run 'TestMySQLMigrations'` 過濾條件——測試會被靜靜跳過而輸出看起來完全正常
+（postgres 側 2026-08-11 踩過一次）。驗收時要逐支確認 `--- PASS`，不能只看 exit code。
+
+測試共用同一個 MySQL 實例並依序執行，所以每一支都要自己把狀態收回去：
+`TestMySQLMigrationsUpAndDown` 要求進來時是空 DB，後面的測試各自 `up` 上去、
+結束前 `down` 回 0 或清掉寫入的資料。
+
+**歷史**：`061`～`065` 曾經連續五次改動都沒跑這支，2026-08-12 才補跑（結果全數通過，
+migration 無需修正）。這正是把它寫進下方檢查清單的原因。
 
 **兩階段設計與記憶體實測（2026-08-07）**：腳本刻意先在 MySQL 還沒起來時把測試編成執行檔，
 編譯器退場後才起 MySQL，再用輕量 container 跑編好的 binary——峰值因此是
@@ -142,7 +160,10 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 - 常數集中在 store 層並匯出（`AllCorporateActionTypes()` / `AllCorporateActionSources()` /
   `handler.KnownSchedulerJobs()`），測試與正式程式共用同一份定義。
 - 測試走 **repo 的 Upsert**（不是手拼 INSERT），並**遍歷所有組合**。
-  見 `TestPostgresMigrationsRealValuesFitAllColumns`。
+  見 `TestPostgresMigrationsRealValuesFitAllColumns` 與
+  `TestMySQLMigrationsRealValuesFitAllColumns`——**欄寬限制在兩個 engine 上都存在，
+  兩份都要有**（mysql 那份 2026-08-12 才補上）。sqlite 不需要：該引擎是 TEXT，沒有長度上限，
+  所以 `063`～`065` 也刻意沒有 sqlite 版本的 migration。
 
 **這類失敗特別容易被忽略**：`startRun` 與 `SyncPerSymbolEvents` 的寫入失敗都只記 log
 不中斷流程，所以 job 照跑、只是資料沒進去——除非有人去翻 log，否則不會發現。

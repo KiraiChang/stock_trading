@@ -164,6 +164,83 @@ func TestMySQLMigrationsUpAndDown(t *testing.T) {
 	}
 }
 
+// TestMySQLMigrationsPreserveCashDividendVolumeFactor 鎖住 062 回填條件的正確性，
+// 對應 migrate_postgres_test.go 的 TestPostgresMigrationsPreserveCashDividendVolumeFactor。
+//
+// 062 有一段回填「Phase 1 的分割事件 volume_factor = factor」。條件若只寫
+// `volume_factor = 1 AND factor <> 1`，會把現金股利也一起改掉——**1 正是現金股利的正確值**，
+// 等於把現金股利算進成交量調整。所以條件必須排除 DIVIDEND%。
+//
+// 平常跑不到，因為 migration 只套用一次；但 **down → up 會重現**：欄位被 drop 之後
+// 全部回到預設 1，再 up 時每一筆 factor <> 1 的事件都符合條件。
+// TestMySQLMigrationsUpAndDown 是「up 一次、down 到 0」，驗不到這條路徑。
+func TestMySQLMigrationsPreserveCashDividendVolumeFactor(t *testing.T) {
+	db := mysqlTestDB(t)
+	ctx := context.Background()
+
+	// 前一支測試結束在版本 0，只剩 goose_db_version。
+	if n := countTablesExcludingGoose(t, db); n != 0 {
+		t.Fatalf("DB 不是空的（有 %d 張表）: %v", n, tableNames(t, db))
+	}
+
+	goose.SetBaseFS(mysqlFS)
+	if err := goose.SetDialect("mysql"); err != nil {
+		t.Fatalf("goose set dialect: %v", err)
+	}
+	if err := goose.UpToContext(ctx, db.DB, mysqlMigrationDir, 62); err != nil {
+		t.Fatalf("up 到 62 失敗: %v", err)
+	}
+
+	// 一筆現金股利（volume_factor 正確值為 1）與一筆分割（volume_factor = factor）。
+	if _, err := db.Exec(`
+		INSERT INTO corporate_actions
+			(symbol, event_date, action_type, before_price, after_price, factor, volume_factor, source)
+		VALUES ('2317','2026-07-02','DIVIDEND_CASH',248,242.2,0.976613,1,'test'),
+		       ('0050','2025-06-18','分割',188.65,47.16,0.249987,0.249987,'test')`); err != nil {
+		t.Fatalf("寫入測試事件失敗: %v", err)
+	}
+
+	// down → up：欄位被 drop 再重建，回填邏輯會重跑。
+	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 61); err != nil {
+		t.Fatalf("down 到 61 失敗: %v", err)
+	}
+	if err := goose.UpToContext(ctx, db.DB, mysqlMigrationDir, 62); err != nil {
+		t.Fatalf("重新 up 到 62 失敗: %v", err)
+	}
+
+	var cashVF, splitVF float64
+	if err := db.Get(&cashVF,
+		`SELECT volume_factor FROM corporate_actions WHERE symbol='2317'`); err != nil {
+		t.Fatalf("讀現金股利失敗: %v", err)
+	}
+	if err := db.Get(&splitVF,
+		`SELECT volume_factor FROM corporate_actions WHERE symbol='0050'`); err != nil {
+		t.Fatalf("讀分割失敗: %v", err)
+	}
+
+	if cashVF != 1 {
+		t.Errorf("現金股利的 volume_factor = %v, want 1——回填把除權息也改掉了，"+
+			"等於把現金股利算進成交量調整", cashVF)
+	}
+	if diff := splitVF - 0.249987; diff > 1e-9 || diff < -1e-9 {
+		t.Errorf("分割的 volume_factor = %v, want 0.249987——回填沒有涵蓋純股數事件", splitVF)
+	}
+
+	// volume_factor 的 CHECK 要真的生效（檢查 6 用 LN(volume_factor)，0 會變 -inf）。
+	// MySQL 的 CHECK 在 8.0.16 之前只解析不強制，只有實際寫一列違規資料進去才知道有沒有在做事。
+	if _, err := db.Exec(`
+		INSERT INTO corporate_actions
+			(symbol, event_date, action_type, before_price, after_price, factor, volume_factor, source)
+		VALUES ('9999','2026-01-01','分割',100,50,0.5,0,'test')`); err == nil {
+		t.Error("volume_factor = 0 竟然寫得進去——CHECK 沒生效")
+	}
+
+	// 收乾淨，讓之後的測試從空 DB 開始。
+	if err := goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 0); err != nil {
+		t.Fatalf("收尾 down 到 0 失敗: %v", err)
+	}
+}
+
 // assertMarketBackfillJobsSchema 抽驗最近新增、且寫法只有真的跑過才知道對不對的欄位。
 // failures 用的是 TEXT 的括號預設值 DEFAULT ('[]')——MySQL 8.0.13+ 才支援，
 // 這正是「比照既有寫法」擋不掉、只有實跑才驗得到的那類問題。

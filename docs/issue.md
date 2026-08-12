@@ -95,22 +95,30 @@ sudo 手動套用後重啟 gitea。
 | 狀態 | 已知限制（部分已解，剩餘部分暫不修） |
 | 嚴重度 | 低（目前無人以 MySQL 部署） |
 | 分類 | Go / DB / migration |
-| 發現日期 | 2026-08-06（2026-08-07 縮小範圍） |
+| 發現日期 | 2026-08-06（2026-08-07、2026-08-12 兩次縮小範圍） |
 | 來源 | T-037 B review |
 
-**已解決的部分**（2026-08-07）：mysql migration 現在有可重複執行的驗證路徑
-（`scripts/test-mysql-migrations.sh`），首次執行抓到並修好 5 個保留字語法錯誤，
-57 個 migration 已全數 up 成功。用法與設計見
-[`development-workflow.md`](./development-workflow.md)；欄位命名規範見
-[`database-schema.md`](./database-schema.md) 的「欄位命名規範：避開 MySQL 保留字」。
+**DDL 部分已解**：mysql migration 有可重複執行的驗證路徑
+（`scripts/test-mysql-migrations.sh`，2026-08-12 起共三支測試），全部 migration 都能
+up 到最新並 down 回 0。用法、測試清單與命名限制見
+[`development-workflow.md`](./development-workflow.md)；欄位命名規範與現況欄寬見
+[`database-schema.md`](./database-schema.md)。
 
-**仍未解的兩項**：
+**仍未解的三項**：
 
-1. **驗證只涵蓋 DDL，不涵蓋 repo 層的 CRUD round-trip。** 「表建得起來」不等於
-   「INSERT/SELECT 跑得動」——目前只能說不再有*已知的*保留字阻礙，但沒有任何自動化
-   流程證明 Go repo 的查詢在 MySQL 上真的能執行。要補的話是讓 `internal/store` 的
-   repo 測試能對著真實 MySQL 跑一輪，而不是只跑 sqlite。
-2. **`057_add_sr_zone_builder_runtime_config.sql` 的 DEFAULT 不對稱**：mysql 版走
+1. **驗證仍不涵蓋 repo 層的 CRUD round-trip。** 「表建得起來」不等於「INSERT/SELECT 跑得動」。
+   `CorporateActionRepo.Upsert` 的 mysql 分支（`ON DUPLICATE KEY UPDATE`）已有真實 MySQL 的
+   執行證明，但那是**唯一**被涵蓋的 repo 寫入路徑，其餘 `internal/store` 的查詢仍只跑 sqlite。
+   要補的話是讓 repo 測試整批對著真實 MySQL 跑一輪。
+2. **`time.Time` 寫進 DATE／DATETIME 的時區處理，mysql 與 postgres 不一致**（2026-08-12 發現）：
+   `go-sql-driver` 寫入前會 `v.In(cfg.Loc)`（`connection.go:262`），驗證用 DSN 沒帶 `loc` 即 UTC，
+   所以**台北午夜會被存成前一天**；`pgx` 取的是值本身時區的日曆日
+   （`pgtype/date.go:164`），存進去就是那天。受影響最明顯的是
+   `corporate_actions.event_date`——語意是「新價的第一個交易日」，adjuster 用 `ts < event_date`
+   決定套用範圍，差一天等於係數套錯一根 K 棒。這正是第 1 項所預言的那類問題。
+   目前不修：mysql 沒有任何部署，且正確的修法（DSN 帶 `loc`／改成傳日期字串）要連同
+   第 1 項的整批驗證一起做，才不會只修掉看得見的那一個欄位。
+3. **`057_add_sr_zone_builder_runtime_config.sql` 的 DEFAULT 不對稱**：mysql 版走
    `ADD COLUMN ... NULL` → `UPDATE` → `MODIFY ... NOT NULL` 三步（比照 033），
    postgres / sqlite 各自一步用 `NOT NULL DEFAULT`，導致 **mysql 版沒有 DEFAULT**——
    省略該欄位的 INSERT 在 mysql 會失敗、另外兩個 engine 會成功。目前唯一的寫入路徑

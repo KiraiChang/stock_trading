@@ -453,10 +453,31 @@ def test_zone_lifecycle_outputs_supported_states():
     )
     pending = _summary([_zone(recent_validation=RecentValidation.PENDING_VALIDATION.value)])
 
-    assert expired["primary_zone"]["lifecycle"] == "INVALIDATED"
-    assert weak["primary_zone"]["lifecycle"] == "WEAKENING"
-    assert confirmed["primary_zone"]["lifecycle"] == "CONFIRMED"
-    assert pending["primary_zone"]["lifecycle"] == "CANDIDATE"
+    assert expired["primary_zone"]["zone_health_state"] == "INVALIDATED"
+    assert weak["primary_zone"]["zone_health_state"] == "WEAKENING"
+    assert confirmed["primary_zone"]["zone_health_state"] == "CONFIRMED"
+    assert pending["primary_zone"]["zone_health_state"] == "CANDIDATE"
+
+
+def test_zone_health_state_and_deprecated_lifecycle_alias_stay_in_sync():
+    """新鍵與 deprecated alias 必須同時存在且同值。
+
+    T-044 刻意採增量更名：`SRZones.svelte` 有 5 處在讀舊的 `lifecycle`，
+    破壞性改名會把「引擎抽離」與「前端 contract 遷移」綁成同一批。
+    但兩個鍵一旦漂移，前端會依讀到哪一個而得到不同結果——所以要鎖住。
+    """
+    for ds in (
+        _summary([_zone(recent_validation=RecentValidation.EXPIRED.value)]),
+        _summary([_zone(confidence=0.2, confidence_level=ConfidenceLevel.LOW.value)]),
+        _summary([_zone(recent_validation=RecentValidation.PENDING_VALIDATION.value)]),
+    ):
+        zone = ds["primary_zone"]
+        assert "zone_health_state" in zone, "新鍵不見了"
+        assert "lifecycle" in zone, "deprecated alias 被移除會讓前端 5 處消費點壞掉"
+        assert zone["zone_health_state"] == zone["lifecycle"], (
+            f"兩個鍵漂移了：zone_health_state={zone['zone_health_state']!r} "
+            f"lifecycle={zone['lifecycle']!r}"
+        )
 
 
 def test_primary_zone_ranking_prefers_near_relevant_zone_over_far_high_quality():

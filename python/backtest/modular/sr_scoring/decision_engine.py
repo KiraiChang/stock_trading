@@ -18,6 +18,10 @@ from .event_engine import (
     _distance_pct_to_zone,
     _fmt_price,
 )
+from .lifecycle_engine import (
+    event_state_types as _event_state_types,
+    resolve_lifecycle,
+)
 from .model import ModelBundle
 from .types import ConfidenceLevel, RecentValidation, ZoneScore, ZoneTier, ZoneType
 from .pipeline_types import AnalysisEvidence
@@ -153,13 +157,28 @@ def _decision_summary_zone(
         "confluence_family_count": z.confluence_family_count,
         "confluence_families": list(z.confluence_families),
         "source": source,
-        "lifecycle": _zone_lifecycle(z, interaction),
+        # zone_health_state 是 zone 本身的健康度，與 semantic_pipeline.lifecycle_phase
+        # （整體事件演進）是**不同的軸**。兩個都叫 lifecycle 是這一塊長年難讀的主因，
+        # 所以新增語意清楚的鍵。舊的 "lifecycle" 保留不動——前端 SRZones.svelte 有 5 處
+        # 在消費它，破壞性改名會把「引擎抽離」與「API/前端 contract 遷移」綁成同一批，
+        # 兩者的風險性質完全不同。顯示名稱的收斂留給 T-041。
+        "zone_health_state": _zone_health_state(z, interaction),
+        "lifecycle": _zone_health_state(z, interaction),  # deprecated：改用 zone_health_state
         "decision_role": decision_role,
         "reason": reason,
     }
 
 
-def _zone_lifecycle(z: ZoneScore, interaction: Optional[dict[str, Any]] = None) -> str:
+def _zone_health_state(z: ZoneScore, interaction: Optional[dict[str, Any]] = None) -> str:
+    """zone **本身**的健康度：候選 → 驗證過 → 確認 / 轉弱 / 跌破 / 失效。
+
+    與 lifecycle_engine 的 `lifecycle_phase`（整體事件演進）是不同的軸，
+    也與 scenario_engine._zone_state（場景判定：SUPPORT_RETEST / RETEST_REQUIRED…）不同——
+    **三者都在描述 zone，但問的是三個不同的問題**，這正是原本命名混亂的來源。
+    值域也不同——這裡的 CONFIRMED 指「zone 被收復確認」，那裡的 CONFIRMED 指
+    「收復事件已確認」。原名 `_zone_lifecycle` 與另外三套 lifecycle 同名不同義，
+    是這一塊難讀的主因，因此更名（見 todo.md T-044）。
+    """
     if z.recent_validation == RecentValidation.EXPIRED.value:
         return "INVALIDATED"
     if interaction and interaction.get("closed_below") and z.role == ZoneType.SUPPORT.value:
@@ -858,29 +877,6 @@ def _final_entry_permission(
     }
 
 
-def _event_state_types(states: list[dict[str, Any]]) -> set[str]:
-    out: set[str] = set()
-    for state in states:
-        for key in ("latest_event_type", "root_event_type", "type"):
-            value = state.get(key)
-            if value:
-                out.add(str(value))
-    return out
-
-
-def _event_state_max_age(states: list[dict[str, Any]], event_type: str) -> int:
-    ages = [
-        int(state.get("age_bars") or 0)
-        for state in states
-        if event_type in {
-            str(state.get("latest_event_type") or ""),
-            str(state.get("root_event_type") or ""),
-            str(state.get("type") or ""),
-        }
-    ]
-    return max(ages, default=0)
-
-
 def _position_context_reason_codes(
     primary_zone: Optional[ZoneScore],
     structure_state: str,
@@ -911,68 +907,21 @@ def _decision_semantic_pipeline(
     blocking_zone_ahead: bool,
     current_price: float,
 ) -> dict[str, Any]:
-    active_states = list(event_state_summary.get("active") or [])
-    candidate_states = list(event_state_summary.get("candidates") or [])
-    active_bearish_states = list(event_state_summary.get("active_bearish_events") or [])
-    active_types = _event_state_types(active_states)
-    candidate_types = _event_state_types(candidate_states)
-    reason_codes: list[str] = []
-
-    if "HIGH_VOLUME_BREAKDOWN" in _event_state_types(active_bearish_states):
-        event_signal = "CLOSE_BREAKDOWN"
-        reason_codes.append("ACTIVE_BEARISH_EVENT")
-    elif "INTRADAY_RECLAIM" in active_types or structure_state in (
-        "SUPPORT_RECLAIM_CANDIDATE",
-        "SUPPORT_RECLAIM_CONFIRMED",
-    ):
-        event_signal = "CLOSE_RECLAIM"
-        reason_codes.append("CLOSE_RECLAIM")
-    elif "REVERSAL_CANDIDATE" in candidate_types:
-        event_signal = "SUPPORT_TEST"
-        reason_codes.append("REVERSAL_CANDIDATE")
-    elif (
-        primary_zone is not None
-        and primary_zone.role == ZoneType.SUPPORT.value
-        and primary_zone.recent_validation == RecentValidation.PENDING_VALIDATION.value
-    ):
-        event_signal = "SUPPORT_TEST"
-        reason_codes.append("PENDING_ZONE_VALIDATION")
-    elif "EXTREME_VOLUME" in active_types:
-        event_signal = "VOLUME_CONTEXT"
-        reason_codes.append("EXTREME_VOLUME_CONTEXT")
-    else:
-        event_signal = "NO_EVENT"
-
-    price_follow_through = str((daily_price_action or {}).get("price_follow_through_state") or "UNKNOWN")
-    momentum_state = str((daily_price_action or {}).get("momentum_confirmation_state") or "UNKNOWN")
-    rr_qualified = bool((rr_gate or {}).get("qualified"))
-    reclaim_age = _event_state_max_age(active_states, "INTRADAY_RECLAIM")
-    clear_zone_breakout = (
-        primary_zone is not None
-        and primary_zone.role == ZoneType.SUPPORT.value
-        and current_price >= primary_zone.price_high * 1.03
+    # 生命週期由獨立的 Lifecycle Engine 判定（見 lifecycle_engine.py 與 todo.md T-044）。
+    # **它不吃 rr_gate**：RR 是進場與策略條件，不是事件事實。原本 CONTINUATION 的條件
+    # 含 rr_qualified，等於讓策略條件改寫事件事實；移除後保守度改由下方的 entry gate 負責。
+    lifecycle = resolve_lifecycle(
+        event_state_summary=event_state_summary,
+        primary_zone=primary_zone,
+        structure_state=structure_state,
+        daily_price_action=daily_price_action,
+        current_price=current_price,
     )
+    event_signal = lifecycle["event_signal"]
+    lifecycle_phase = lifecycle["lifecycle_phase"]
+    reason_codes: list[str] = list(lifecycle["reason_codes"])
 
-    if active_bearish_states or structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
-        lifecycle_phase = "INVALIDATED" if structure_state == "SUPPORT_RECLAIM_INVALIDATED" else "BREAKDOWN"
-    elif event_signal == "CLOSE_RECLAIM" and (
-        price_follow_through == "PRICE_UPSIDE_FOLLOW_THROUGH"
-        and momentum_state == "MOMENTUM_CONFIRMED"
-        and rr_qualified
-        and clear_zone_breakout
-    ):
-        lifecycle_phase = "CONTINUATION"
-        reason_codes.append("PRICE_UPSIDE_FOLLOW_THROUGH")
-    elif event_signal == "CLOSE_RECLAIM" and (
-        structure_state == "SUPPORT_RECLAIM_CONFIRMED" or reclaim_age >= 1
-    ):
-        lifecycle_phase = "CONFIRMED"
-    elif event_signal in ("CLOSE_RECLAIM", "SUPPORT_TEST"):
-        lifecycle_phase = "TESTING"
-    elif primary_zone is None:
-        lifecycle_phase = "NO_PRIMARY_ZONE"
-    else:
-        lifecycle_phase = "NORMAL"
+    rr_qualified = bool((rr_gate or {}).get("qualified"))
 
     if lifecycle_phase in ("BREAKDOWN", "INVALIDATED"):
         market_state = "BREAKDOWN_RISK"
@@ -1035,7 +984,7 @@ def _decision_semantic_pipeline(
             entry_permission_state = "WAIT_CONFIRMATION"
 
     return {
-        "version": "decision-semantic-pipeline-p3",
+        "version": "decision-semantic-pipeline-p4",
         "event_signal": event_signal,
         "lifecycle_phase": lifecycle_phase,
         "market_state": market_state,

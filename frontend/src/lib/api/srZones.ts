@@ -399,6 +399,13 @@ export interface SRDecisionZoneSummary {
   confluence_family_count?: number | null
   confluence_families?: string[] | null
   source?: string
+  /**
+   * zone **本身**的健康度（`CANDIDATE` / `VALIDATED` / `CONFIRMED` / `WEAKENING` /
+   * `BROKEN` / `INVALIDATED`）。與 `semantic_pipeline.lifecycle_phase`（整體事件演進）
+   * 是不同的軸——後者的 CONFIRMED 指「收復事件已確認」，這裡指「zone 被收復確認」。
+   */
+  zone_health_state?: string
+  /** @deprecated 改用 `zone_health_state`；後端仍同時輸出兩者且值相同。 */
   lifecycle?: string
   decision_role?: string
   reason: string

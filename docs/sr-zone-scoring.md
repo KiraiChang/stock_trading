@@ -692,7 +692,9 @@ P3 開始新增 `decision_derived_view.semantic_pipeline` contract，用來明�
 Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 ```
 
-`semantic_pipeline.version=decision-semantic-pipeline-p3`，標準欄位包含：
+`semantic_pipeline.version` **目前為 `decision-semantic-pipeline-p4`**
+（P3 起新增這個 contract，T-044 於 2026-08-13 因 lifecycle 語意改變升為 p4，
+見下方「分層原則：lifecycle 不看 RR」）。標準欄位包含：
 `event_signal`、`lifecycle_phase`、`market_state`、`bias_state`、`action_state`、
 `entry_permission_state`、`reason_codes` 與 `source_order`。P3-A 先用 fixture 鎖住
 Close Reclaim 的 `TESTING` / `CONFIRMED` / `CONTINUATION` 語意；P3-B 已讓
@@ -896,6 +898,52 @@ Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 | `bias_state` | 對外多空傾向來源 | `BULLISH_BIAS`、`BULLISH_CONTINUATION`、`REVERSAL_BIAS`、`BEARISH_BIAS` |
 | `action_state` | 持有者語意來源 | `CONDITIONAL_HOLD`、`HOLD`、`DEFEND_BREAKDOWN`、`AVOID`、`WATCH` |
 | `entry_permission_state` | 未持有者進場權限來源 | `PROBE_ALLOWED`、`ENTRY_ALLOWED`、`WAIT_CONFIRMATION`、`BLOCKED` |
+
+#### 分層原則：lifecycle 不看 RR（2026-08-13 起）
+
+`lifecycle_phase` 由獨立的 **Lifecycle Engine**（`lifecycle_engine.py`）判定，
+它的職責只有一件事——**依 Event 的演進決定目前處於哪一個階段**。
+
+**它的函式簽章裡沒有 `rr_gate`，這是刻意的，請不要加回去。**
+風險報酬比是進場與策略條件，不是事件事實。原本 `CONTINUATION` 的判定含
+`rr_gate.qualified`，導致同一段價格行為在 RR 不合格時被判成 `CONFIRMED`、
+合格時才是 `CONTINUATION`——**策略條件改寫了事件事實**，於是「現在處於什麼階段」
+無法被獨立回答。要維持保守度應該由 Decision Engine 用 RR Gate 去擋。
+
+`CONTINUATION` 現在只要求三個**價格證據**同時成立：價格跟進、動能確認、
+明確突破 zone 上緣（×1.03）。
+
+**注意這裡有四套同名不同義的「lifecycle」**，判讀時要先確認在講哪一個：
+
+| 名稱 | 位置 | 語意 |
+|---|---|---|
+| `LIFECYCLE_*` | `event_engine.py` | **單一事件**的生老病死（`CANDIDATE`/`ACTIVE`/`RESOLVED`/`EXPIRED`） |
+| `lifecycle_phase` | `lifecycle_engine.py` | **整體事件演進**（本表格這個） |
+| `zone_health_state` | `decision_engine.py` | **zone 本身**的健康度（舊鍵 `lifecycle` 已 deprecated） |
+| `_zone_state` | `scenario_engine.py` | **場景判定**（`SUPPORT_RETEST`/`RETEST_REQUIRED`…） |
+
+#### 已知並接受的行為改變（待 replay 評估）
+
+RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持有建議**：
+
+| 情境 | 舊 | 新 |
+|---|---|---|
+| 收復已確認（structure `SUPPORT_RECLAIM_CONFIRMED` 或撐過一根 K 棒）＋ 三項價格證據 ＋ RR 不合格 | `CONFIRMED` → `HOLD` | `CONTINUATION` → `HOLD`（不變） |
+| **收復尚未確認**（`SUPPORT_RECLAIM_CANDIDATE`、`age_bars=0`）＋ 三項價格證據 ＋ RR 不合格 | `TESTING` → `CONDITIONAL_HOLD` | **`CONTINUATION` → `HOLD`** |
+
+第二列的 `action_state` 會被 `_position_action_condition` 原樣採用，
+所以 `position_action_condition.state` 由「條件性續抱」變成「續抱」。
+**進場那條線沒有放寬**——`entry_permission_state` 的 `elif not rr_qualified: BLOCKED`
+排在 `ENTRY_ALLOWED` 之前，RR 不合格時進場一律仍是 `BLOCKED`。
+
+**目前刻意接受這個放寬**（2026-08-13 決定），理由是沒有乾淨的還原方式：
+舊行為的保守度來自「RR 失敗時掉回確認層級判斷」這個**順序副作用**，而抽離後那個區分
+已被收斂掉；硬加 RR gate 會讓第一列原本就該是 `HOLD` 的樣本變成 `CONDITIONAL_HOLD`，
+成為另一個方向的回歸。**待 decision replay 累積足夠資料後再評估**——
+而那依賴「有排程定期產生 SR 分析」，見 [`todo.md`](./todo.md) T-045 的前置條件。
+
+`semantic_pipeline.version` 已由 `decision-semantic-pipeline-p3` 升為 `p4`，
+所以 `stock_sr_decisions` 裡的資料可以從版本字串分辨是改前還是改後產生的。
 
 標準 Close Reclaim 閱讀路徑：
 
@@ -1417,7 +1465,7 @@ P2-C 第一批先把 Decision Pipeline 與 Event Lifecycle 的可查詢欄位從
 
 API / 前端 response 已切成 normalized snapshot primary；legacy raw JSON 欄位保留為
 raw/debug snapshot，不再作正常 response source。`stock_sr_daily_candidates` 保存
-`price_low`/`price_high`、`role`、`source`、`lifecycle`、`decision_role`、
+`price_low`/`price_high`、`role`、`source`、`lifecycle`（deprecated，等同 `zone_health_state`）、`decision_role`、
 `distance_pct`、`reason`、`event_refs` 與完整 `candidate_json`。
 
 P2-C-5 起，`stock_sr_decisions` 也保存尚未拆成獨立表、但前端決策面需要的 detail JSON：

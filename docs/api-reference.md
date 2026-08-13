@@ -922,7 +922,7 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
     "decision_derived_view": {
       "version": "decision-derived-view-p2",
       "semantic_pipeline": {
-        "version": "decision-semantic-pipeline-p3",
+        "version": "decision-semantic-pipeline-p4",
         "event_signal": "CLOSE_RECLAIM",
         "lifecycle_phase": "CONFIRMED",
         "market_state": "BULLISH_RECOVERY",
@@ -1084,6 +1084,20 @@ sr-zone-scoring.md「十七」。
 應優先依此鏈路解讀；legacy `action` / `entry_action_state` 保留作相容明細。
 `decision_derived_view.position_gate_state` 仍可能存在於舊相容 payload，但只是
 `semantic_pipeline.action_state` 的 deprecated alias。
+
+> **`lifecycle` 這個字在本專案有五種不同意思，讀 response 時務必先確認是哪一種：**
+>
+> | 出現位置 | 意思 |
+> |---|---|
+> | zone 的 `lifecycle` 物件（`status`/`broken_at`/`broken_price`/`resolved_role`） | zone 的**驗證狀態**，本文件下方描述的就是這個 |
+> | `semantic_pipeline.lifecycle_phase` | **整體事件演進**（`TESTING`/`CONFIRMED`/`CONTINUATION`…） |
+> | decision summary zone 的 `zone_health_state` | **zone 本身的健康度**；同物件的 `lifecycle` 字串鍵是它的 deprecated alias |
+> | 事件狀態的 `state` | **單一事件**的生老病死（`CANDIDATE`/`ACTIVE`/`RESOLVED`/`EXPIRED`） |
+> | `/sr-zones/event-timeline` 的 chain | 跨分析的**事件鏈**，見上方 Event Timeline 章節 |
+>
+> **`semantic_pipeline.lifecycle_phase` 不再受 RR 影響**（`p4` 起）。分層原則與
+> 已知的行為改變見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
+> 「分層原則：lifecycle 不看 RR」。
 `explanation` 是 deterministic 白話解釋層。每個 zone 也分成
 `data/features/score/evidence/explanation/scenario/lifecycle`，驗證 API 只更新
 lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/role）在

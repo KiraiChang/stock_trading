@@ -1530,7 +1530,8 @@ Python 目前只透過 `previous_event_states`（`analysis/client.go:952`）拿�
    避免日後誤以為它已經看得到事件演進的完整歷程。
 2. `decision_engine.py` 改為呼叫它，移除內嵌的 lifecycle 推導與 RR 耦合。
 3. `_zone_lifecycle` **改為增量式更名，不做破壞性改名**：新增語意清楚的鍵
-   （`zone_state`），舊的 `"lifecycle"` 鍵保留並標記 deprecated。
+   （`zone_health_state`），舊的 `"lifecycle"` 鍵保留並標記 deprecated。
+   **不用 `zone_state`**：`scenario_engine.py` 已有一個同名但語意不同的函式（場景判定）。
    原因是 `SRZones.svelte` 有 5 處消費它（`best_trade_zone` / `nearest_support_zone` /
    `nearest_resistance_zone` / `primary_structural_zone`），破壞性改名會把「引擎抽離」
    與「API／前端 contract 遷移」綁成同一批，兩件事的風險性質完全不同。
@@ -1567,7 +1568,10 @@ API 與 replay 報告，改名的漣漪遠大於收益。判定順序即優先�
 #### 預期的行為改變（使用者已同意重構可伴隨行為改變，此處逐項列出）
 
 **唯一的來源改變是 `CONTINUATION` 不再要求 `rr_qualified`**，但它的**影響面不只 lifecycle 欄位**
-——這點初版計畫低估了。`lifecycle_phase` 是下游一連串推導的輸入
+——這點初版計畫低估了**兩次**：第一次漏了下游推導鏈，第二次（2026-08-13 review）
+漏了「原本落到 `TESTING` 的樣本也會變成 `CONTINUATION`」這一整條路徑。
+完整的行為改變清單與已接受的結論已歸檔到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「已知並接受的行為改變」。`lifecycle_phase` 是下游一連串推導的輸入
 （`decision_engine.py:977-1035`），所以「RR 不合格但價格延續成立」的樣本會沿著整條鏈改變：
 
 ```
@@ -1631,6 +1635,41 @@ strategy mode（T-041，尚未存在）─────────────�
 - 若 zone `"lifecycle"` 鍵更名 → [`api-reference.md`](./api-reference.md) 與
   [`database-schema.md`](./database-schema.md)。
 - 「lifecycle 不看 RR」這條分層原則 → `sr-zone-scoring.md`，避免日後又被加回去。
+
+#### P0 實作結果（2026-08-13）
+
+| 項目 | 內容 |
+|---|---|
+| `lifecycle_engine.py`（新） | `resolve_lifecycle()` 純函數，**簽章裡沒有 `rr_gate`**。`event_state_types` / `event_state_max_age` 兩個純事件 helper 一併移入 |
+| `decision_engine.py` | 改為呼叫，移除內嵌的 `event_signal` ＋ `lifecycle_phase` 推導與 RR 耦合 |
+| `_zone_lifecycle` → `_zone_health_state` | **增量新增** `zone_health_state` 鍵，舊的 `lifecycle` 保留並標 deprecated |
+| 測試 | `test_lifecycle_engine.py` 12 個 test function（其中一支 parametrized 成 5 個 case，pytest 實收 16 個 lifecycle cases），涵蓋七個狀態、優先序、延續三條件的每一項缺失 |
+
+**差點自己製造出第五套同名詞彙**：原本要把 `_zone_lifecycle` 改名為 `_zone_state`，
+但 `scenario_engine.py` **已經有一個 `_zone_state`**，回傳的是場景判定
+（`WAIT_FOR_DIRECTION` / `RETEST_REQUIRED` / `SUPPORT_RETEST` / `RESISTANCE_REJECTION`），
+概念與值域都不同。同一個 package 內兩個同名不同義的函式，正是本筆開頭診斷的那個問題。
+改用 `_zone_health_state`，並在 docstring 同時標明它與 `lifecycle_phase`、
+`scenario_engine._zone_state` 三者的區別——**三者都在描述 zone，但問的是三個不同的問題**。
+
+#### 驗證現況與**尚未關閉的缺口**
+
+抽離後 428 支既有測試全數通過。**但這不是「沒有行為改變」的證據**——
+它是「沒有任何既有測試涵蓋 RR 解耦那條路徑」的證據。兩者結論完全不同，不能混為一談。
+
+行為改變確實存在且可由結構證明：舊條件要求 `rr_qualified`，不滿足時會落到下一個分支
+（`CONFIRMED` 或 `TESTING`）；移除後同樣輸入得到 `CONTINUATION`。
+兩支測試分工：`test_continuation_only_needs_price_evidence` 鎖住「延續只看三項價格證據」，
+`test_widened_path_previously_testing_now_continuation` 鎖住**真正變寬的那條路徑**
+（收復未確認 ＋ `age_bars=0`，舊碼落 `TESTING`、新碼是 `CONTINUATION`）。
+注意前者**無法**防守「RR 被加回來」——`resolve_lifecycle` 簽章裡沒有 `rr_gate`，
+真要加回來會是新增參數，那支測試照樣綠燈。
+
+**計畫要求的完整驗證尚未執行**：decision replay 對真實資料比對
+`final_entry_state` / `lifecycle_phase` / `market_bias` 的分佈變化。
+現實限制是 live 只有 **4 檔標的 / 20 次分析**（見 T-045 前置條件），
+replay 的統計意義有限。因此目前這個行為改變**只有單元測試層級的證據**，
+決定接受與否前應知道這一點。
 
 #### 與 T-041 的關係
 

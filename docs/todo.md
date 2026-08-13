@@ -1466,3 +1466,439 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 **與既有工作的關係**：這個端點就是 `yahoo.base_url`（盤中源，`enabled: false`）。
 盤中源的實盤驗證是 T-032、批次失敗的 fallback 是 T-031，兩者都擱置中；
 本筆若要動，會先碰到同一組風險（非官方 API、封鎖風險）。
+
+---
+
+### T-044：抽出獨立的 Lifecycle Engine
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 計畫書待確認 |
+| 優先度 | 中 |
+| 分類 | Python / SR Zone / 決策邏輯 |
+| 建立日期 | 2026-08-13 |
+| 來源 | 使用者需求：lifecycle 判定應與建議產出分離 |
+
+**目標**：新增一個獨立的 Lifecycle Engine，職責只有一件事——**依 Event 的演進決定當前
+處於哪一個生命週期狀態**。Decision Engine 改為消費這個狀態，再疊上 RR Gate、策略模式等
+條件才輸出最終建議。同一個 lifecycle 狀態因此可以在不同策略立場下得到不同建議，
+而狀態判定本身只有一套。
+
+#### 現況盤點（2026-08-13 對照程式碼）
+
+**一、lifecycle 不是不存在，而是存在四套不同的詞彙**
+
+| 來源 | 位置 | 狀態集合 | 語意 |
+|---|---|---|---|
+| **單一事件** | `event_engine.py:13-17` | `CANDIDATE` / `CONFIRMED` / `ACTIVE` / `RESOLVED` / `EXPIRED` | **一個事件自己的生老病死**——timeline 的基本單位 |
+| pipeline 層 | `decision_engine.py:957-975`（`_decision_semantic_pipeline` 內） | `NORMAL` / `TESTING` / `CONFIRMED` / `CONTINUATION` / `BREAKDOWN` / `INVALIDATED` / `NO_PRIMARY_ZONE` | **整體事件演進**——本次要抽出的就是這個 |
+| zone 層 | `decision_engine.py:162`（`_zone_lifecycle`） | `CANDIDATE` / `VALIDATED` / `CONFIRMED` / `WEAKENING` / `BROKEN` / `INVALIDATED` | **zone 本身的健康度**，與事件演進是不同軸 |
+| 規劃中 | [T-041](#t-041sr-zone-決策顯示補齊-lifecycleevent-timeline-與-strategy-layer) | `Started` / `Testing` / `Confirmed` / `Failed` | 前端顯示用，尚未實作 |
+
+**四套裡有三套共用 `CANDIDATE` / `CONFIRMED` 這兩個字但意思都不同**，這是這一塊難讀的主因。
+`_zone_lifecycle` 的輸出還以 `"lifecycle"` 為鍵放進 decision summary
+（`decision_engine.py:156`），與 pipeline 的 `lifecycle_phase` 在同一份報告裡並存。
+
+**分層的正確說法**：單一事件的狀態機（第 1 列）是**輸入**，pipeline lifecycle（第 2 列）是
+**輸出**。本筆要抽出的是後者，前者維持不動——但兩者都叫 lifecycle 會讓人以為是同一件事。
+
+**二、目前的 lifecycle 判定會讀 RR Gate——正是要拆掉的耦合**
+
+`_decision_semantic_pipeline` 的 `CONTINUATION` 分支條件包含 `rr_qualified`
+（`rr_gate.qualified`）。**風險報酬比是策略條件，不是事件事實**：同一段價格行為，
+在 RR 不合格時被判成 `CONFIRMED`、合格時才變 `CONTINUATION`。這讓「現在處於什麼階段」
+無法獨立回答，也是本次抽離最實質的一項。
+
+**三、Trading / Investment 策略模式目前不存在**
+
+全 repo 沒有任何 strategy mode 的實作（`swing` 只出現在防守線的價位計算，是不同概念）。
+T-041 規劃了 `Trading` / `Swing` / `Investment` 三層但仍是待規劃。
+
+#### 修改目標（2026-08-13 review 後定案為 P0）
+
+**採 P0：snapshot-compatible engine。** 輸入維持現有的
+`event_state_summary` / `daily_price_action` / `structure_state`，**不等 chain contract**。
+
+理由：T-045 P1 是 Go 端唯讀 API，產出的 chain **不會流進 Python 分析流程**——
+Python 目前只透過 `previous_event_states`（`analysis/client.go:952`）拿到最新快照。
+要讓 Lifecycle Engine 吃 chain 必須另補 Go→Python request contract、analysis client mapping
+與 replay 管線，那是獨立工程（見 T-045 的 `runtime_chain`）。**等 T-045 對本筆沒有幫助**，
+兩筆因此各自獨立、可並行。
+
+1. 新增 `lifecycle_engine.py`：**純函數**，輸出 lifecycle 狀態 ＋ reason codes。
+   不 import RR、不 import 策略模式。**文件要明說它現階段是 snapshot-based 而非 chain-based**，
+   避免日後誤以為它已經看得到事件演進的完整歷程。
+2. `decision_engine.py` 改為呼叫它，移除內嵌的 lifecycle 推導與 RR 耦合。
+3. `_zone_lifecycle` **改為增量式更名，不做破壞性改名**：新增語意清楚的鍵
+   （`zone_state`），舊的 `"lifecycle"` 鍵保留並標記 deprecated。
+   原因是 `SRZones.svelte` 有 5 處消費它（`best_trade_zone` / `nearest_support_zone` /
+   `nearest_resistance_zone` / `primary_structural_zone`），破壞性改名會把「引擎抽離」
+   與「API／前端 contract 遷移」綁成同一批，兩件事的風險性質完全不同。
+   顯示名稱的收斂留給 T-041。
+
+#### 不做的範圍
+
+- **不實作 Trading / Investment 策略模式**。那是 T-041 的 Strategy Layer，範圍與風險都是
+  另一個量級。本次只**留出接縫**：Decision Engine 取得 lifecycle 之後的那一段，改寫成
+  可以依模式分岔的形狀，但只實作現有的單一模式。
+- **不新增第四套狀態詞彙**。T-041 的 `Started/Testing/Confirmed/Failed` 應改為直接渲染
+  本引擎的狀態集合，而不是再定義一組並維護對應表。
+- 不改 zone builder、probability、scoring 的任何邏輯。
+- 不改前端（T-041 另案）。
+
+#### 狀態機提案
+
+沿用 pipeline 現有的七個狀態，**不重新命名**——它們已經寫進 DB（`sr_zone_decision_events`）、
+API 與 replay 報告，改名的漣漪遠大於收益。判定順序即優先序：
+
+| # | 狀態 | 進入條件（抽出後） |
+|---|---|---|
+| 1 | `INVALIDATED` | `structure_state == SUPPORT_RECLAIM_INVALIDATED` |
+| 2 | `BREAKDOWN` | 有 active bearish event，或 `structure_state == BREAKDOWN` |
+| 3 | `CONTINUATION` | `CLOSE_RECLAIM` ＋ 價格延續 ＋ 動能確認 ＋ 明確突破 zone（**移除 `rr_qualified`**） |
+| 4 | `CONFIRMED` | `CLOSE_RECLAIM` ＋（`SUPPORT_RECLAIM_CONFIRMED` 或 reclaim 已滿一日） |
+| 5 | `TESTING` | `event_signal ∈ {CLOSE_RECLAIM, SUPPORT_TEST}` |
+| 6 | `NO_PRIMARY_ZONE` | 沒有 primary zone |
+| 7 | `NORMAL` | 其餘 |
+
+`event_signal` 的推導（`decision_engine.py:919-943`）一併移入本引擎——它本來就是純粹的
+事件分類，留在 decision engine 沒有理由。
+
+#### 預期的行為改變（使用者已同意重構可伴隨行為改變，此處逐項列出）
+
+**唯一的來源改變是 `CONTINUATION` 不再要求 `rr_qualified`**，但它的**影響面不只 lifecycle 欄位**
+——這點初版計畫低估了。`lifecycle_phase` 是下游一連串推導的輸入
+（`decision_engine.py:977-1035`），所以「RR 不合格但價格延續成立」的樣本會沿著整條鏈改變：
+
+```
+lifecycle_phase  CONFIRMED          → CONTINUATION
+market_state     BULLISH_RECOVERY   → BULLISH_CONTINUATION
+bias_state       BULLISH_BIAS       → BULLISH_CONTINUATION
+        ↓
+market_bias / position_action_condition / final_entry_permission / 前端顯示
+```
+
+因此**驗證不能只比對 `lifecycle_phase`**，必須涵蓋：
+`decision_derived_view.semantic_pipeline`、`market_bias`、`position_action_condition`、
+`final_entry_permission`，以及 replay 的 `final_entry_state` / `lifecycle_phase` /
+`market_bias` 分佈。
+
+`_zone_lifecycle` 改為**增量新增鍵**（見上方修改目標），因此不構成破壞性 contract 變更。
+
+其餘狀態的判定條件完全不變。
+
+#### 受影響檔案與資料流
+
+```
+event_engine.detect_market_events ─┐
+zone/structure state ──────────────┼→ [新] lifecycle_engine.resolve(...) → lifecycle + reason_codes
+daily_price_action ────────────────┘                                              │
+                                                                                  ▼
+rr_gate ──────────────────────────────────────────────→ decision_engine（建議產出）
+strategy mode（T-041，尚未存在）───────────────────────↗
+```
+
+| 檔案 | 動作 |
+|---|---|
+| `python/backtest/modular/sr_scoring/lifecycle_engine.py` | 新增：純函數 ＋ 狀態常數 |
+| `python/backtest/modular/sr_scoring/decision_engine.py` | 移除內嵌推導，改呼叫；`_zone_lifecycle` 更名 |
+| `python/backtest/modular/sr_scoring/tests/` | 新增 lifecycle 狀態機的單元測試 |
+| `docs/api-reference.md`、`docs/sr-zone-scoring.md` | contract 與現況說明 |
+
+#### 主要風險與回滾
+
+- **最大風險是「重構」變成「悄悄改變決策」**。`decision_engine.py` 有 2,747 行，
+  lifecycle 的下游消費點分散（`market_state`、`bias_state`、`action_state`、entry gate）。
+  對策：先寫**行為對照測試**——抽離前後對同一組輸入產出的完整 decision summary 必須逐欄一致，
+  只有上表列出的那一項可以不同。
+- RR 解耦後若下游沒有補上對應的 gate，會讓進場建議變寬鬆。上線前要用 decision replay
+  比對 `final_entry_state` 的分佈，確認沒有整體放寬。
+- 回滾：純 Python 變更，`git revert` 即可；沒有 migration、沒有資料寫入格式變更
+  （除非 zone `"lifecycle"` 鍵更名，那一項要與前端同批進退）。
+
+#### 測試與驗證策略
+
+- `python/scripts/test.sh`：lifecycle 狀態機的表格驅動測試，涵蓋七個狀態與優先序邊界
+  （例如 bearish event 與 CLOSE_RECLAIM 同時成立時必須是 `BREAKDOWN`）。
+- **行為對照**：抽離前先錄一組 decision summary 快照，抽離後逐欄比對。
+- `scripts/run-evaluation.sh MODE=replay`：對真實資料跑 decision replay，比對
+  `final_entry_state` 與 `lifecycle_phase` 的分佈變化，量化 RR 解耦的實際影響。
+- 記憶體：replay 走既有腳本，注意這台 host 的限制（見 I-056 與 T-040 Step 0 實測）。
+
+#### 完成後歸檔
+
+- 狀態機定義、優先序與各狀態語意 → [`sr-zone-scoring.md`](./sr-zone-scoring.md)。
+- 若 zone `"lifecycle"` 鍵更名 → [`api-reference.md`](./api-reference.md) 與
+  [`database-schema.md`](./database-schema.md)。
+- 「lifecycle 不看 RR」這條分層原則 → `sr-zone-scoring.md`，避免日後又被加回去。
+
+#### 與 T-041 的關係
+
+T-041 的三個面向裡，**Lifecycle 正式顯示**與**Strategy Layer** 都依賴本筆先把狀態定義收斂。
+建議順序：T-044（本筆，後端分層）→ T-041 的 Lifecycle 顯示 → T-041 的 Strategy Layer。
+T-041 原訂的 `Started/Testing/Confirmed/Failed` 應改為直接使用本引擎的狀態集合。
+
+#### Review 決策紀錄（2026-08-13，已採納並整合進上文）
+
+**方向正確，但 T-044 / T-045 的接縫要先收斂再開工。** 現有程式碼確認
+`_decision_semantic_pipeline` 的 `CONTINUATION` 分支確實讀 `rr_gate.qualified`
+（`decision_engine.py:958-963`），所以「lifecycle 不應看 RR」這個拆分方向是對的：
+RR 是進場與策略條件，不是事件演進事實。
+
+需要修正的是輸入契約：T-045 規劃 Lifecycle Engine 應吃 `chain[]`，但本筆的修改目標目前寫成
+直接從事件狀態與價格結構抽出 `lifecycle_engine.resolve(...)`。現有 runtime 只把**最新 snapshot**
+透過 `previous_event_states` 傳回 Python，並沒有完整 chain。因此開工前要明確二選一：
+
+1. **T-044 P0：snapshot-compatible engine**。先抽出目前 `_decision_semantic_pipeline`
+   裡的 lifecycle 判定，輸入仍是 `event_state_summary` / `daily_price_action` / `structure_state`，
+   行為維持等價，只移除 RR 耦合。這條路可以先做，但文件要承認它還不是 chain-based engine。
+2. **T-045 先補 runtime chain contract**。先讓 Go / Python 在分析流程裡能傳遞 `chain[]`，
+   再讓 T-044 的 Lifecycle Engine 直接吃 chain。這條路設計較完整，但範圍明顯跨 Go API、
+   Python request contract、replay 與測試。
+
+RR 解耦的影響也不能只記成 `lifecycle_phase` 的變化。現有下游會接著用 `lifecycle_phase`
+推導 `market_state`、`bias_state`、`action_state`、`entry_permission_state`
+（`decision_engine.py:977-1035`）；因此 RR 不合格但價格延續成立的樣本，可能從
+`CONFIRMED / BULLISH_RECOVERY` 變成 `CONTINUATION / BULLISH_CONTINUATION`，再影響
+`market_bias`、`position_action_condition` 與前端顯示。驗證策略要擴成完整比對：
+
+- `decision_derived_view.semantic_pipeline`
+- `market_bias`
+- `position_action_condition`
+- `final_entry_permission`
+- replay 的 `final_entry_state` / `lifecycle_phase` / `market_bias` 分佈
+
+`_zone_lifecycle` 更名是正確方向，但不建議列為 T-044 必要同批。`"lifecycle"` 目前已在
+decision zone summary、frontend 型別與 `SRZones.svelte` 顯示中被消費；若同批破壞性改名，
+會把 lifecycle engine 抽離與 API/front-end contract migration 綁在一起。較穩的做法是：
+先保留舊 `"lifecycle"`，新增語意清楚的新鍵（例如 `zone_state` 或 `zone_health_state`），
+文件標記舊鍵 deprecated，等 T-041 前端整理時再收斂顯示名稱。
+
+---
+
+### T-045：Event Timeline——把事件狀態改成完整事件鏈
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | P1 實作中（2026-08-13 確認採第 2 案）；P2 待確認 |
+| 優先度 | 中 |
+| 分類 | Python / Go / SR Zone / 決策資料 |
+| 建立日期 | 2026-08-13 |
+| 來源 | 使用者需求；T-041 的 Event Timeline 面向獨立成案 |
+
+**目標**：把「目前有哪些事件」改成「事件如何一路演進到現在」——完整事件鏈，
+看得出何時開始、測試、確認、失敗、過期或被後續事件取代，並保留順序與轉換脈絡。
+
+> **與 [T-044](#t-044抽出獨立的-lifecycle-engine) 必須一起設計**：Lifecycle Engine 的職責是
+> 「依 **Event 的演進** 決定狀態」，而演進的載體就是 timeline。先做 timeline，
+> Lifecycle Engine 才有正確的輸入形狀；否則它只能繼續讀「當前狀態的快照」，
+> 那不是演進，是切片。**建議 T-045 先於或與 T-044 同批進行。**
+
+#### 為什麼現在「只有兩個 event」
+
+不是顯示層的問題，是**資料模型結構上就沒有鏈**：
+
+1. `build_event_state_summary`（`event_engine.py:298`）以 `(zone_key, event_family)` 為鍵，
+   **新事件直接整筆覆寫** `states[key] = state`。同一家族的前一個事件連同它的
+   `root_event_type` 一起被蓋掉——`root_event_type` 在覆寫時被設成新事件的 type，
+   **根本不是 root**。
+2. 摘要只輸出**當前**分桶（`active` / `candidates` / `confirmed` / `resolved` / `expired`），
+   沒有任何時間序列或轉換紀錄。前端看到的「兩個 event」通常就是
+   `active` 一個 ＋ `candidates` 一個。
+3. 唯一的鏈狀痕跡是 `resolved_by` 與 `latest_event_type`——只夠表達「被誰終結」，
+   不足以還原順序。
+
+#### 關鍵發現：鏈其實已經在 DB 裡
+
+`market_event_states`（migration 042）**每一次分析都寫入一份完整狀態快照**，
+欄位含 `analyzed_at`、`event_key`、`root_event_type`、`latest_event_type`、`state`、
+`active`、`resolved_by`、`state_json`，並有 `(symbol, timeframe, active, analyzed_at DESC)` 索引。
+另有 `market_event_detections` 記錄每次分析偵測到的原始事件。
+
+**所以 timeline 不需要新資料表**：把同一 `(symbol, timeframe, zone_key, event_family)` 的
+快照序列依 `analyzed_at` 排序，**相鄰兩份快照的差異就是一次轉換**。這個作法還有一個
+新增資料表拿不到的好處——**對既有資料回溯有效**，不必等新資料累積。
+
+#### 設計
+
+**Timeline 的單位是「事件鏈」（chain），不是「事件」**
+
+一條 chain ＝ 同一個 `(zone_key, event_family)` 從首次出現到終結（`RESOLVED` / `EXPIRED`）
+的完整歷程。同一個 zone 可以有多條 chain（不同家族），同一家族在終結後再次觸發則是**新的一條**。
+
+```text
+chain: (zone=S-142.5, family=SUPPORT_RECLAIM)
+  ├─ 2026-08-03  CANDIDATE   INTRADAY_RECLAIM      reason=[CLOSE_RECLAIM]
+  ├─ 2026-08-04  CONFIRMED   INTRADAY_RECLAIM      reason=[RECLAIM_AGE_1]
+  ├─ 2026-08-06  ACTIVE      INTRADAY_RECLAIM      age=2
+  └─ 2026-08-07  RESOLVED    HIGH_VOLUME_BREAKDOWN resolved_by=HIGH_VOLUME_BREAKDOWN
+```
+
+**轉換的判定**：相鄰快照中 `state`、`active`、`latest_event_type`、`resolved_by` 任一改變
+即產生一筆 transition；完全相同則不產生（避免每日分析都塞一筆「沒事發生」）。
+
+**分兩階段，避免一次動太多**
+
+| 階段 | 內容 | 風險 |
+|---|---|---|
+| **P1：唯讀重建** | 新增 `GET /sr-zones/event-timeline?symbol=&timeframe=`，由 Go 讀 `market_event_states` 的快照序列摺疊成 chain。**不改任何寫入路徑、不改 Python** | 低。純新增查詢，錯了不影響決策 |
+| **P2：修正 root 與寫入端** | 修 `build_event_state_summary` 的覆寫問題（保留 `root_event_type`、`first_seen_at`），讓當前狀態自己也帶得動鏈資訊 | 中。動到事件狀態機，會影響 decision |
+
+**端點路徑用 query 而不是 path param**（2026-08-13 review 修正）：`server.go:163` 已有
+`GET /sr-zones/:id`，同一層再放 `:symbol` 會與它衝突（gin 不允許同位置兩個不同名的 wildcard）。
+而 `evaluate`、`train-jobs`、`model-status` 等靜態同層路由都與 `:id` 並存無礙，
+所以 `event-timeline` 走靜態路徑 ＋ query 參數才是與既有慣例一致的作法，
+日後要加 `from` / `to` / `limit` 也自然。
+
+**P1 需要新的 repo 查詢，不能重用既有的**：`SRZoneRepo` 目前只有
+`GetMarketEventStates(analysisID)`（單次分析）與 `GetLatestMarketEventStates(symbol, timeframe)`
+（只取最新一批），兩者都給不出歷史序列。要新增依 `symbol, timeframe` 取一段歷史 states 的
+method，並以 `analyzed_at, analysis_id, zone_key, event_family` **穩定排序**——
+摺疊邏輯依賴順序決定性，排序不穩會讓同一份資料產生不同的 chain。
+
+**索引**：migration 042 現有的 `(symbol, timeframe, active, analyzed_at DESC)` 是為
+「最新 active 快照」設計的，`active` 卡在中間，不適合 timeline 依
+`(symbol, timeframe, zone_key, event_family, analyzed_at)` 摺疊。三種 engine 都要補。
+**但不必在 P1 就加**——live 目前整張表只有 76 列，索引的寫入成本此刻大於收益；
+應等 SR 分析的執行頻率提高、資料量起來後再補，並在計畫裡記下這個判斷依據。
+
+P1 先做的理由：**它能立刻回答「鏈長什麼樣子」**，而那正是設計 P2 與 T-044 輸入形狀所需要的
+實證。先改寫入端等於在還沒看過真實鏈的情況下決定資料形狀。
+
+#### 與 T-044 的接縫
+
+```
+market_event_states 快照序列
+        ↓（P1 摺疊）
+   Event Timeline（chain[]）
+        ↓
+[T-044] Lifecycle Engine ── lifecycle + reason_codes
+        ↓
+   Decision Engine（＋RR Gate、策略模式）
+```
+
+**但 P1 的 chain 不會自動成為 T-044 的輸入**（2026-08-13 review 修正）。P1 只在 Go 端新增
+唯讀 API，Python 分析流程完全沒動；Lifecycle Engine 若要吃 chain，必須把 chain contract
+一路送進 Python scoring / replay runtime。因此 chain 要分成兩種，**不要混為一談**：
+
+| | `display_chain[]` | `runtime_chain[]` |
+|---|---|---|
+| 產生者 | Go 由 DB 快照重建（P1） | Go→Python request contract（未規劃） |
+| 消費者 | T-041 前端 timeline、人工檢查 | Lifecycle Engine 的權威輸入 |
+| 需要動到 | 新增唯讀查詢 | analysis client mapping、replay previous-state 管線、對照測試 |
+| 本次範圍 | ✅ P1 | ❌ 另案 |
+
+所以 **T-044 現階段是 snapshot-based**，等 `runtime_chain` 到位後才換輸入形狀。
+換成 chain 之後才可能實作現在做不到的規則，例如「同一個 zone 第三次測試」與「第一次測試」
+判成不同狀態——現在的模型看不出次數。**那些新規則不在 T-044 也不在 T-045 的範圍內。**
+
+#### 既有 `event_sequence` 的去留
+
+`decision_engine._event_sequence()`（`decision_engine.py:1826`）目前輸出的「Event Sequence」
+只是把**當根偵測到的** `market_events` 依固定優先序排序去重，欄位是 `type` / `label` /
+`direction`，沒有 `analyzed_at`、沒有 state transition、沒有 chain 邊界。
+**它不是事件鏈，也不該被當成事件鏈**。
+
+Timeline 上線後兩者會同時存在且名字近似，容易誤用。建議：P1 完成後在
+`api-reference.md` 明確區分兩者語意（「當次事件摘要」vs「跨分析事件鏈」），
+待 T-041 前端改用 timeline 顯示後，再評估 `event_sequence` 是否退場——
+**本次不刪**，因為它仍是 decision summary 的既有欄位。
+
+#### 不做的範圍
+
+- **不新增資料表**（除非 P1 實證顯示快照序列真的不足以還原鏈）。
+- **不改前端**——那是 T-041 的 Event Timeline 面向，本筆只提供 API。
+- 不改事件偵測邏輯（`detect_market_events`）與事件家族定義。
+- P1 不碰 Python；P2 才動。
+
+#### 前置條件：目前沒有任何排程會產生 SR zone 分析
+
+**timeline 的解析度等於分析頻率，不是 K 棒頻率。** 而分析頻率目前是——沒有頻率。
+
+2026-08-13 對照程式碼與 live 資料確認：
+
+| 事實 | 依據 |
+|---|---|
+| 9 個排程 job 沒有任何一個建立 SR zone 分析 | `scheduler.go` 的 `startRun` 呼叫點：`pre_market`／`intraday`／`daily_close`／`chip_daily_sync`／`stock_symbol_sync`／`sr_zone_verify`／`sr_evaluation`／`corporate_action_sync` |
+| `sr_zone_verify` **不建立分析**，只重驗既有分析的 zone 有沒有被突破 | `scheduler.go:409-412` 的說明 |
+| 唯一的建立路徑是手動／API | `POST /sr-zones` → `handler/sr_zones.go:524` |
+| live 實際只有 **20 次分析 / 4 檔標的**（2026-07-13～08-12） | `stock_sr_zone_analyses`：0050 十四次、2330 四次、`00981A` 與 `00947` 各一次 |
+| 連帶 `market_event_states` 只有 **76 列 / 13 次分析 / 2 檔標的** | 同上，事件狀態只在有分析時才寫入 |
+
+**所以 P1 做出來，多數標的的 timeline 會是空的，0050 也只有十幾個點。**
+這不影響 P1 的正確性，但**決定它的當下價值**：沒有穩定的分析節奏，事件鏈就沒有內容可看。
+
+要讓 timeline 真的有東西，需要一個**定期對 watchlist 產生 SR zone 分析的排程**——
+那是本筆之外的獨立工作，且成本不低：每檔分析都會呼叫 Python scoring，
+而這台 host 的記憶體限制已在 [`issue.md`](./issue.md) I-056 與 T-040 Step 0 實測中量化過。
+
+**已決定（2026-08-13）：採第 2 案——P1 照做，接受初期資料稀疏。**
+理由是 P1 是純新增的唯讀查詢、風險最低，而摺疊邏輯本身需要真實資料驗證形狀，
+0050 現有的十幾個分析點已足以驗證鏈能否還原。補分析排程牽涉每檔都要跑 Python scoring，
+在這台 2GiB host 上需要單獨評估（見 I-056），不綁進 timeline 的範圍。
+
+當初評估的三個選項（保留供日後回顧）：
+
+1. **先補分析排程再做 P1** — timeline 一上線就有內容，但要先付排程與記憶體的成本。
+2. **P1 照做，接受初期資料稀疏** — 端點與摺疊邏輯先就緒，資料隨分析累積自然變厚。
+   前提是輸出必須誠實標示 snapshot gap（見下方風險），否則空白會被誤讀成「沒有事件」。
+3. **兩者同批** — 範圍最大，但避免做出一個沒有資料可展示的功能。
+
+#### 主要風險
+
+- **鏈會有洞**，P1 的輸出必須誠實標示「這是分析快照序列，不是逐日事件史」，
+  否則會被誤讀成那段期間沒有事件發生（成因見上方前置條件）。
+- 分析被取代時 `sr_zone_repo.go:558` 會 `DELETE FROM market_event_states WHERE analysis_id=?`，
+  重跑同一天的分析會覆蓋當天快照。鏈因此是「每次分析的最後一版」，不含當日中間狀態。
+- P2 修 `root_event_type` 會改變 `market_event_states` 的寫入內容，**既有列不會回填**，
+  所以鏈在修正前後的語意不同。要在文件標明分界日期。
+
+#### 測試與驗證策略
+
+- P1：摺疊邏輯的表格驅動測試（同狀態不產生 transition、resolved_by 產生、
+  跨 analysis 缺漏時的行為），以及對 live 唯讀資料實跑一次確認 0050 的鏈可還原。
+- P2：`build_event_state_summary` 的既有測試要擴充「同家族第二次事件不得抹掉 root」。
+- 與 T-044 同批時，decision summary 的逐欄對照測試同樣適用。
+
+#### 完成後歸檔
+
+- 事件鏈的定義、chain 的邊界（何時算新的一條）→ [`sr-zone-scoring.md`](./sr-zone-scoring.md)。
+- 新端點 → [`api-reference.md`](./api-reference.md)。
+- 「timeline 解析度 ＝ 分析頻率」這個限制 → [`issue.md`](./issue.md) 或 `sr-zone-scoring.md`，
+  它會長期影響判讀。
+
+#### Review 決策紀錄（2026-08-13，已採納並整合進上文）
+
+**方向正確：不要再把 `event_sequence` 當 Event Timeline。** 目前
+`decision_engine._event_sequence()` 只是把當根偵測到的 `market_events` 依固定優先序排序並去重，
+輸出 `type` / `label` / `direction` 等欄位，沒有 `analyzed_at`、state transition 或 chain
+邊界；前端現在顯示的 Event Sequence 因此只是當次事件摘要，不是完整事件鏈。
+
+P1「不新增資料表、由既有 `market_event_states` 快照序列重建」可行，但要補三個設計細節：
+
+1. **端點路徑要改。** 目前 router 已有 `GET /sr-zones/:id`，`GET /sr-zones/:symbol/event-timeline`
+   容易和同層 wildcard 路由衝突或讓 symbol/id 語意混雜。建議改為
+   `GET /sr-zones/event-timeline?symbol=2330&timeframe=1d`；若未來要支援區間或筆數限制，
+   也自然能加 `from` / `to` / `limit`。
+2. **需要新的 repo 查詢 contract。** 現有 `SRZoneRepo` 只有
+   `GetMarketEventStates(analysisID)` 與 `GetLatestMarketEventStates(symbol,timeframe)`；
+   P1 需要的是依 `symbol,timeframe` 取一段歷史 states，並按
+   `analyzed_at, analysis_id, zone_key, event_family` 穩定排序。這應明確列為新增 method，
+   不能假設現有 latest snapshot 查詢能重用。
+3. **需要補索引規劃。** migration 042 目前的索引偏向
+   `(symbol, timeframe, active, analyzed_at DESC)`，適合最新 active snapshot，不適合 timeline
+   依 `(symbol,timeframe,zone_key,event_family,analyzed_at)` 摺疊。P1 若要在資料量增加後仍可用，
+   應補一個歷史 timeline 查詢用索引；三種 engine（postgres/sqlite/mysql）都要同步。
+
+P1 產出的 `chain[]` 要先定位為**展示與實證資料**，不是自動等於 T-044 的 runtime input。
+原因是 P1 按目前規劃只在 Go 端新增唯讀 API，不改 Python 分析流程；但 T-044 的
+Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python scoring/replay runtime。
+因此 T-045 與 T-044 的接縫建議拆成兩層：
+
+- `display_chain[]`：Go 由 DB 快照重建，供 T-041 前端 timeline 顯示與人工檢查。
+- `runtime_chain[]`：若 Lifecycle Engine 要以 chain 為權威輸入，另案或同批補 Go→Python
+  request contract、analysis client mapping、replay previous-state 管線與對照測試。
+
+測試除原本 P1/P2 項目外，還要補路由與查詢層測試：endpoint 不被 `/sr-zones/:id` 吃掉、
+同狀態快照不產生 transition、`resolved_by` / `latest_event_type` 改變會產生 transition、
+跨 analysis 缺口會在輸出標示 snapshot gap，而不是假裝逐日連續。

@@ -446,3 +446,69 @@ def test_previous_expired_state_round_trips_without_reactivation():
     assert breakdown["age_bars"] == 3
     assert [s["type"] for s in summary["expired"]] == ["HIGH_VOLUME_BREAKDOWN"]
     assert summary["active_bearish_events"] == []
+
+
+def test_fresh_detection_preserves_root_event_type():
+    """root_event_type 必須留住鏈的**起點**，不能被當根新偵測蓋成新事件的 type。
+
+    這是 todo.md T-045 P2 修的 bug：merge 迴圈 `states[key] = state` 是整筆覆寫，
+    先前把 root 設成新偵測的 type，欄位名叫 root 卻永遠等於 latest，
+    事件鏈的起點因此無法還原。
+
+    **這個情境目前在正式資料裡不會發生，是刻意構造的**：EVENT_TYPE_META 現在的四種
+    事件類型各自對應一個獨立 family（一個 family 只有一種 type），所以同一個
+    (zone_key, event_family) 的 root 與新偵測的 type 永遠相同，覆寫不會遺失資訊。
+    `INTRABAR_BREAKDOWN` 是本測試虛構的型別名，repo 裡並不存在
+    （真實的「intrabar 跌破」是 HIGH_VOLUME_BREAKDOWN 的 CANDIDATE 狀態）。
+
+    保留這支測試的理由是**擋住未來**：哪一天 SUPPORT_BREAKDOWN 家族多出第二種 type，
+    覆寫就會開始默默吃掉鏈的起點，而那時不會有任何東西報錯。
+    """
+    previous = [_carried_breakdown(
+        root_event_type="INTRABAR_BREAKDOWN",
+        latest_event_type="INTRABAR_BREAKDOWN",
+        type="INTRABAR_BREAKDOWN",
+    )]
+    events = normalize_market_events([{
+        "type": "HIGH_VOLUME_BREAKDOWN",
+        "direction": "BEARISH",
+        "lifecycle_state": LIFECYCLE_CONFIRMED,
+        "active": True,
+        "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0},
+    }])
+
+    summary = build_event_state_summary(events, previous_states=previous)
+
+    state = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+    assert state["root_event_type"] == "INTRABAR_BREAKDOWN", "鏈的起點被新偵測蓋掉了"
+    assert state["latest_event_type"] == "HIGH_VOLUME_BREAKDOWN", "latest 應反映最新事件"
+
+
+def test_detection_after_terminal_state_starts_new_root():
+    """已終結（EXPIRED／RESOLVED）之後再出現同家族事件，是**新的一條鏈**，root 應為新事件。
+
+    規則與 Go 端摺疊 timeline 的 chain 邊界刻意對稱
+    （internal/analysis/event_timeline.go 的 isClosedEventState）。
+    """
+    for terminal in (LIFECYCLE_EXPIRED, LIFECYCLE_RESOLVED):
+        previous = [_carried_breakdown(
+            root_event_type="INTRABAR_BREAKDOWN",
+            latest_event_type="INTRABAR_BREAKDOWN",
+            type="INTRABAR_BREAKDOWN",
+            state=terminal,
+            active=False,
+        )]
+        events = normalize_market_events([{
+            "type": "HIGH_VOLUME_BREAKDOWN",
+            "direction": "BEARISH",
+            "lifecycle_state": LIFECYCLE_CONFIRMED,
+            "active": True,
+            "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0},
+        }])
+
+        summary = build_event_state_summary(events, previous_states=previous)
+
+        state = next(s for s in summary["states"] if s["event_family"] == "SUPPORT_BREAKDOWN")
+        assert state["root_event_type"] == "HIGH_VOLUME_BREAKDOWN", (
+            f"前一狀態為 {terminal} 時應開新鏈，root 該是新事件而不是沿用舊的"
+        )

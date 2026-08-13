@@ -747,3 +747,95 @@ func TestSRZoneRepoDeleteCascadesZones(t *testing.T) {
 		t.Fatalf("expected error getting deleted model governance")
 	}
 }
+
+// TestListMarketEventStateHistoryReturnsFullSnapshots：跨分析取歷史序列。
+//
+// **最容易寫錯的是參數綁定**：查詢的 filter 出現兩次（外層 WHERE 與內層挑 analysis_id 的
+// 子查詢），參數也必須帶兩份，順序錯了會查出完全不同的結果卻不報錯。
+func TestListMarketEventStateHistoryReturnsFullSnapshots(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	state := func(zoneKey, stateName string) MarketEventState {
+		return MarketEventState{
+			EventKey: "ZONE:SUPPORT_RECLAIM:" + zoneKey, EventType: "INTRADAY_RECLAIM",
+			EventFamily: "SUPPORT_RECLAIM", EventScope: "ZONE", ZoneKey: zoneKey,
+			RootEventType: "INTRADAY_RECLAIM", LatestEventType: "INTRADAY_RECLAIM",
+			Direction: "BULLISH", State: stateName, Active: stateName == "CONFIRMED",
+			ReasonCodes: RawJSON(`["CLOSE_RECLAIM"]`), StateJSON: RawJSON(`{}`),
+		}
+	}
+
+	for i, spec := range []struct {
+		day   int
+		first string
+	}{{20, "CANDIDATE"}, {21, "CONFIRMED"}, {22, "RESOLVED"}} {
+		a := testAnalysis()
+		a.AnalyzedAt = time.Date(2026, 7, spec.day, 0, 0, 0, 0, time.UTC)
+		p := testProjections()
+		// 每份快照兩列，用來驗證不會在快照中間被截斷
+		p.EventStates = []MarketEventState{state("SUPPORT:580:585", spec.first), state("SUPPORT:600:605", "CANDIDATE")}
+		if _, err := repo.Create(ctx, a, testZones(), p); err != nil {
+			t.Fatalf("Create #%d failed: %v", i, err)
+		}
+	}
+
+	rows, err := repo.ListMarketEventStateHistory(ctx, MarketEventStateHistoryOptions{
+		Symbol: "2330", Timeframe: "1d",
+	})
+	if err != nil {
+		t.Fatalf("ListMarketEventStateHistory failed: %v", err)
+	}
+	if len(rows) != 6 {
+		t.Fatalf("列數 = %d, want 6（3 次分析 × 每份 2 列）", len(rows))
+	}
+	// 必須依 analyzed_at 遞增——摺疊邏輯依賴順序
+	for i := 1; i < len(rows); i++ {
+		if rows[i].AnalyzedAt.Before(rows[i-1].AnalyzedAt) {
+			t.Fatalf("第 %d 列的 analyzed_at 早於前一列，排序不對", i)
+		}
+	}
+	if rows[0].State != "CANDIDATE" || rows[len(rows)-1].AnalyzedAt.Day() != 22 {
+		t.Errorf("序列頭尾不符：first=%q lastDay=%d", rows[0].State, rows[len(rows)-1].AnalyzedAt.Day())
+	}
+}
+
+// MaxAnalyses 以**分析次數**為單位而不是列數：對列數截斷會切出半份快照，
+// 摺疊時把被切掉的事件誤判成消失，產生不存在的 transition。
+func TestListMarketEventStateHistoryLimitsByAnalysisNotRows(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	for day := 20; day <= 22; day++ {
+		a := testAnalysis()
+		a.AnalyzedAt = time.Date(2026, 7, day, 0, 0, 0, 0, time.UTC)
+		p := testProjections()
+		p.EventStates = []MarketEventState{
+			{EventKey: "A", EventType: "INTRADAY_RECLAIM", EventFamily: "SUPPORT_RECLAIM", EventScope: "ZONE",
+				ZoneKey: "Z1", RootEventType: "INTRADAY_RECLAIM", LatestEventType: "INTRADAY_RECLAIM",
+				Direction: "BULLISH", State: "CANDIDATE", ReasonCodes: RawJSON(`[]`), StateJSON: RawJSON(`{}`)},
+			{EventKey: "B", EventType: "INTRADAY_RECLAIM", EventFamily: "SUPPORT_RECLAIM", EventScope: "ZONE",
+				ZoneKey: "Z2", RootEventType: "INTRADAY_RECLAIM", LatestEventType: "INTRADAY_RECLAIM",
+				Direction: "BULLISH", State: "CANDIDATE", ReasonCodes: RawJSON(`[]`), StateJSON: RawJSON(`{}`)},
+		}
+		if _, err := repo.Create(ctx, a, testZones(), p); err != nil {
+			t.Fatalf("Create failed: %v", err)
+		}
+	}
+
+	rows, err := repo.ListMarketEventStateHistory(ctx, MarketEventStateHistoryOptions{
+		Symbol: "2330", Timeframe: "1d", MaxAnalyses: 2,
+	})
+	if err != nil {
+		t.Fatalf("ListMarketEventStateHistory failed: %v", err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("列數 = %d, want 4（2 次分析 × 每份 2 列，完整不截斷）", len(rows))
+	}
+	// 取的是最近兩次，所以最早那天不該出現
+	for _, r := range rows {
+		if r.AnalyzedAt.Day() == 20 {
+			t.Error("MaxAnalyses=2 卻回傳了第三新的分析")
+		}
+	}
+}

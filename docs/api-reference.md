@@ -367,6 +367,76 @@ TWSE ISIN 同步仍存在的標的。
   會整批砍掉高代號的產業，正是 `per_industry` 要消除的偏斜，所以拿到 `true` 時
   應該調高 `limit` 或收緊條件，而不是直接使用這份清單。
 
+### GET `/sr-zones/event-timeline`
+
+取得事件鏈（Event Timeline），供決策畫面呈現「事件如何一路演進到現在」。
+背景與設計見 [`todo.md`](./todo.md) T-045。
+
+**與 decision summary 的 `event_sequence` 不同，兩者不要混用：**
+
+| | `event_sequence`（decision summary 內） | 本端點的 `chains` |
+|---|---|---|
+| 範圍 | **當次分析**偵測到的事件，依優先序排序去重 | **跨分析**的完整演進 |
+| 有無時間 | 無 | 每一步都有 `analyzed_at` |
+| 有無狀態轉換 | 無 | 有，並標明改變了哪些欄位 |
+
+**為什麼是 query 而不是 `/sr-zones/:symbol/...`**：同層已有 `GET /sr-zones/:id`，
+gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務啟動時 panic。
+
+**Query：**
+
+| 參數 | 說明 |
+|------|------|
+| symbol | **必填** |
+| timeframe | 預設 `1d` |
+| max_analyses | 回溯幾次分析（不是幾列），預設 60、上限 500 |
+
+**Response：**
+```json
+{
+  "symbol": "0050", "timeframe": "1d",
+  "chains": [{
+    "zone_key": "SUPPORT:103.4487:104.0713",
+    "event_family": "SUPPORT_RECLAIM",
+    "direction": "BULLISH",
+    "root_event_type": "INTRADAY_RECLAIM",
+    "first_seen_at": "2026-08-10T00:00:00Z",
+    "last_seen_at": "2026-08-12T00:00:00Z",
+    "closed": false,
+    "final_state": "CONFIRMED",
+    "transitions": [
+      {"analyzed_at": "2026-08-10T00:00:00Z", "analysis_id": 41,
+       "state": "CONFIRMED", "active": true,
+       "event_type": "INTRADAY_RECLAIM", "latest_event_type": "INTRADAY_RECLAIM",
+       "reason_codes": ["CLOSE_RECLAIM"]}
+    ]
+  }],
+  "snapshots": [
+    {"analysis_id": 40, "analyzed_at": "2026-08-09T00:00:00Z", "gap_days": 0},
+    {"analysis_id": 41, "analyzed_at": "2026-08-10T00:00:00Z", "gap_days": 1}
+  ]
+}
+```
+
+**判讀時必須注意的三件事：**
+
+1. **`snapshots[].gap_days` 不能忽略。** timeline 的解析度**等於 SR 分析的執行頻率**，
+   而目前沒有任何排程會產生分析（唯一路徑是 `POST /sr-zones`）。
+   鏈上的空白**不代表那段期間沒有事件**，只代表那段期間沒有分析。
+
+   `snapshots` 取自 **`stock_sr_zone_analyses`（所有分析）**，不是事件狀態列——
+   **一次沒有偵測到任何事件的分析不會留下任何 state 列**，只看事件列會把它報成「沒有觀測」。
+   實測 0050 有 14 次分析、只有 11 次產生事件列；若用事件列推導，觀測起點會從 07-13
+   誤植為 07-20，而且 07-15→07-20 那個五天的缺口會整個消失。
+2. **同狀態不產生 transition。** 只有 `state` / `active` / `latest_event_type` /
+   `resolved_by` 改變才記一步，並在 `changed[]` 標明改了什麼。
+   `confidence`、`price_level` 這類每次分析都會浮動的數值刻意不納入比對。
+3. **一條 chain ＝ 同一個 `(zone_key, event_family)` 從出現到終結**（`RESOLVED`／`EXPIRED`）。
+   終結後**只有再出現非終結狀態**才算新的一條；終結狀態被後續快照重複回報是墓碑，
+   只會推進 `last_seen_at`，不會產生新鏈。
+
+這份資料定位為 **display chain**——供顯示與人工檢查，**不是** Lifecycle Engine 的 runtime 輸入。
+
 ### GET `/watchlist`
 
 取得監控清單。回傳會附帶 `stock_symbol` 主檔狀態；`exists=false` 代表該

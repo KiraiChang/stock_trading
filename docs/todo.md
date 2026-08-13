@@ -1680,7 +1680,7 @@ decision zone summary、frontend 型別與 `SRZones.svelte` 顯示中被消費�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | P1 實作中（2026-08-13 確認採第 2 案）；P2 待確認 |
+| 狀態 | P1/P2 已實作，review 已收斂（2026-08-13）；前端顯示與 runtime chain 另案 |
 | 優先度 | 中 |
 | 分類 | Python / Go / SR Zone / 決策資料 |
 | 建立日期 | 2026-08-13 |
@@ -1742,7 +1742,7 @@ chain: (zone=S-142.5, family=SUPPORT_RECLAIM)
 | 階段 | 內容 | 風險 |
 |---|---|---|
 | **P1：唯讀重建** | 新增 `GET /sr-zones/event-timeline?symbol=&timeframe=`，由 Go 讀 `market_event_states` 的快照序列摺疊成 chain。**不改任何寫入路徑、不改 Python** | 低。純新增查詢，錯了不影響決策 |
-| **P2：修正 root 與寫入端** | 修 `build_event_state_summary` 的覆寫問題（保留 `root_event_type`、`first_seen_at`），讓當前狀態自己也帶得動鏈資訊 | 中。動到事件狀態機，會影響 decision |
+| **P2：修正 root 與寫入端** ✅ **已實作 2026-08-13** | 修 `build_event_state_summary` 的覆寫問題（`root_event_type` 延續）。`first_seen_at` **不做**，理由見下 | 實測**低於預估**：目前無行為改變，見下 |
 
 **端點路徑用 query 而不是 path param**（2026-08-13 review 修正）：`server.go:163` 已有
 `GET /sr-zones/:id`，同一層再放 `:symbol` 會與它衝突（gin 不允許同位置兩個不同名的 wildcard）。
@@ -1764,6 +1764,94 @@ method，並以 `analyzed_at, analysis_id, zone_key, event_family` **穩定排�
 
 P1 先做的理由：**它能立刻回答「鏈長什麼樣子」**，而那正是設計 P2 與 T-044 輸入形狀所需要的
 實證。先改寫入端等於在還沒看過真實鏈的情況下決定資料形狀。
+
+#### P1 review 修正（2026-08-13）
+
+實作後的 review 找到四個問題與一個交付完整性缺口，都已修正並補上回歸測試：
+
+**一、MySQL 拒絕 `IN (… LIMIT ?)`**（`sr_zone_repo.go`）。MySQL 至今仍不支援
+`IN/ALL/ANY/SOME` 子查詢裡直接用 `LIMIT`（ERROR 1235），該端點在 mysql 部署上會全數 500。
+修法是多包一層 derived table。**這是三種 engine 都要記住的通用陷阱**——
+同一個檔案的 `GetLatestMarketEventStates` 用的是純量形式 `= (SELECT … LIMIT 1)`，
+那個 MySQL 允許，所以它不需要這層；正確範例就在旁邊卻選了會失敗的寫法。
+
+**二、墓碑分支吞掉終結後的真實變化**（`event_timeline.go`）。原本只判斷「是不是終結狀態」，
+所以 `RESOLVED → EXPIRED` 的老化（`_normalize_previous_event_state` 在 `age_bars` 達門檻時
+會翻）會被整個吞掉，鏈的 `final_state` 永遠停在 `RESOLVED`，與 DB 最新狀態矛盾。
+改為**只有與前一步完全相同才算墓碑**，有變化就接在同一條鏈上。
+
+**三、`snapshots` 漏掉沒有事件的分析**（影響最大）。快照原本由事件狀態列推導，
+但**一次沒偵測到任何事件的分析不會留下任何 state 列**。實測 0050 有 14 次分析、
+只有 11 次產生事件列——漏了 21%，而 `snapshots` 正是文件宣稱「誠實揭露觀測缺口」的唯一依據。
+
+修正後 live 實測的差異不只是多三個點：
+
+```
+修正前： 07-20(+0) 07-21(+1) 07-22(+1) 07-23(+1) 08-03(+11) …
+修正後： 07-13(+0) 07-14(+1) 07-15(+1) 07-20(+5) 07-21(+1) … 08-03(+11) …
+```
+
+觀測起點從 07-20 修正為 07-13，並多出一個 `07-20(+5)` 的缺口——**漏掉的分析不只讓計數變少，
+還會讓相鄰的 gap 被錯誤地合併或消失**。新增 `SRZoneRepo.ListAnalysisSnapshots` 從
+`stock_sr_zone_analyses` 取所有分析，handler 一併查詢帶入。
+
+**四、有分析但沒有任何事件時，`snapshots` 被 early return 整個丟掉**（`event_timeline.go`）。
+P1 修正三之後，handler 會把所有分析傳進 `BuildEventTimeline`，但函式一開始若 `rows == 0`
+就直接回傳，導致「這段期間有分析、只是沒有事件」被輸出成完全沒有觀測。修法是讓
+`snapshots` 先根據 `analyses` 建出來，再回傳空 `chains`。回歸測試
+`TestBuildEventTimelineKeepsAnalysisSnapshotsWhenNoEvents` 鎖住這個形狀。
+
+**交付完整性缺口**：P1/P2 新增的 `event_timeline.go`、單元測試、live 驗證測試與
+`scripts/verify-event-timeline.sh` 一度還是 untracked；本機測試會讀工作目錄，所以不會抓到
+「只提交 tracked diff 後 clone/CI 找不到 `analysis.BuildEventTimeline`」這種錯。四個檔案已納入
+version control（`A` 狀態）。若未來常發生類似問題，應補一個類似 `scripts/check-dist-assets.sh`
+的交付檢查。
+
+**一個過程上的觀察**：這批的單元測試從頭到尾**沒有自己抓到任何一個真 bug**——
+墓碑重複問題是 live 實跑抓到的，其餘邊界與交付缺口是 review 抓到的。測試驗證的是
+「我以為的行為」，而錯的正是那個「我以為」。這也是為什麼計畫裡的 live 實跑驗收項目不能省。
+
+**收斂驗證（2026-08-13）**：`backend/scripts/test.sh ./internal/analysis ./internal/store ./internal/api/handler`
+通過，`bash -n scripts/verify-event-timeline.sh` 通過，
+`python/scripts/test.sh backtest/modular/sr_scoring/tests/test_event_engine.py` 通過（27 passed）。
+原先記在 `docs/issue.md` 的 `I-070` / `I-071` 已確認修復並移除，保留結論改歸檔於本節。
+
+#### P2 實作結果（2026-08-13）
+
+**修了什麼**：merge 迴圈的 `states[key] = state` 是整筆覆寫，把 `root_event_type` 設成
+新偵測的 type——欄位名叫 root 卻永遠等於 latest，鏈的起點無法還原。
+改為**前一狀態未終結時延續 root**，已 `RESOLVED`／`EXPIRED` 才視為新鏈。
+這個邊界規則與 Go 端摺疊 timeline 的 `isClosedEventState` **刻意對稱**，
+兩邊的註解互相指向對方，避免日後規則漂移。
+
+**風險實測低於計畫預估——目前沒有任何行為改變。**
+`EVENT_TYPE_META` 的四種事件類型各自對應一個獨立 family
+（`EXTREME_VOLUME`→`VOLUME_CONTEXT`、`HIGH_VOLUME_BREAKDOWN`→`SUPPORT_BREAKDOWN`、
+`INTRADAY_RECLAIM`→`SUPPORT_RECLAIM`、`REVERSAL_CANDIDATE`→`SUPPORT_REVERSAL`），
+**一個 family 只有一種 type**，所以同一個 `(zone_key, event_family)` 的 root 與新偵測的
+type 永遠相同，覆寫從來沒有真的遺失過資訊。
+
+這一點很重要，因為 `root_event_type` **確實被 decision 消費**
+（`decision_engine.py:864` 的 `_event_state_types` 與 `:877` 的 `_event_state_max_age`
+都把它併進事件類型集合，而該集合直接決定 `event_signal` → `lifecycle_phase`）。
+若 root 真的會與 latest 不同，這次修改就會改變決策；正因為兩者恆等，**本次修改是純粹的
+正確性補強**，不需要 decision 對照測試。
+
+**所以 P2 的價值是擋住未來**：哪一天某個 family 多出第二種 type，覆寫就會開始默默吃掉鏈的
+起點並連帶影響 `event_signal`，而那時不會有任何東西報錯。兩支新測試鎖住這個規則
+（其中用到的 `INTRABAR_BREAKDOWN` 是**虛構型別**，repo 裡不存在，僅用來構造該情境）。
+
+**`first_seen_at` 刻意不做**（縮減計畫範圍）：
+
+- Python 端的事件狀態**沒有任何時間欄位**，以 K 棒為單位運作（`age_bars`），拿不到 `analyzed_at`。
+- 要持久化就得在 `market_event_states` 加欄位＝一支 migration ＋ 三種 engine 同步。
+- 而 **P1 的 Go timeline 已從快照序列推導出 `first_seen_at`**，這個欄位目前**沒有消費者**，
+  加了只會多一份可能與推導值不一致的資料。
+- 真正需要它的是 `runtime_chain`（讓 Python 的 Lifecycle Engine 知道鏈跑多久），已列為另案。
+
+**驗證**：`python/scripts/test.sh` 428 passed / 1 skipped，既有的事件狀態機測試
+（含 `test_fresh_detection_resets_carried_event_age`）全數未受影響。
+`age_bars` 的重置行為**沒有動**——`_normalize_previous_event_state` 的註解明說那是刻意設計。
 
 #### 與 T-044 的接縫
 

@@ -167,6 +167,9 @@ func NewServer(
 		protected.DELETE("/sr-zones/train-jobs", szh.PruneTrainJobs)
 		protected.GET("/sr-zones/train-jobs/:job_id", szh.GetTrainJob)
 		protected.GET("/sr-zones/model-status", szh.ModelStatus)
+		// 靜態路徑 ＋ query：同層的 /sr-zones/:id 已佔用 wildcard 位置，
+		// 再放 /sr-zones/:symbol/... 會與它衝突（見 handler.EventTimeline 的說明）。
+		protected.GET("/sr-zones/event-timeline", szh.EventTimeline)
 		protected.DELETE("/sr-zones/:id", szh.Delete)
 
 		uh := handler.NewUserHandler(userRepo, log)

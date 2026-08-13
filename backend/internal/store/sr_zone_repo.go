@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -18,6 +20,14 @@ type SRZoneRepo interface {
 	GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]MarketEventDetection, error)
 	GetMarketEventStates(ctx context.Context, analysisID uint64) ([]MarketEventState, error)
 	GetLatestMarketEventStates(ctx context.Context, symbol, timeframe string) ([]MarketEventState, error)
+	// ListMarketEventStateHistory 取一段歷史的事件狀態快照，供 Event Timeline 摺疊成事件鏈
+	// （todo.md T-045 P1）。**不能用上面兩支代替**：GetMarketEventStates 只看單次分析、
+	// GetLatestMarketEventStates 只取最新一批，兩者都給不出跨分析的序列。
+	ListMarketEventStateHistory(ctx context.Context, opts MarketEventStateHistoryOptions) ([]MarketEventState, error)
+	// ListAnalysisSnapshots 取一段期間**所有**分析的時間點（不論有沒有產生事件）。
+	// Event Timeline 的 gap 揭露必須依賴它——只看 market_event_states 會漏掉
+	// 「跑了分析但沒有任何事件」的那幾次，把它們誤報成沒有觀測。
+	ListAnalysisSnapshots(ctx context.Context, opts MarketEventStateHistoryOptions) ([]AnalysisSnapshot, error)
 	GetDailyCandidates(ctx context.Context, analysisID uint64) ([]SRDailyCandidate, error)
 	GetModelGovernance(ctx context.Context, analysisID uint64) (*SRModelGovernance, error)
 	// UpdateZoneStatus 供 SRZoneVerifier 使用（見 internal/analysis/sr_zone_verifier.go）。
@@ -504,6 +514,128 @@ func (r *srZoneRepo) GetLatestMarketEventStates(ctx context.Context, symbol, tim
 		ORDER BY id ASC
 	`), symbol, timeframe, symbol, timeframe)
 	return rows, err
+}
+
+// AnalysisSnapshot 只帶 timeline 需要的兩個欄位，避免為了畫 gap 就拉整份分析。
+type AnalysisSnapshot struct {
+	ID         uint64    `db:"id"          json:"analysis_id"`
+	AnalyzedAt time.Time `db:"analyzed_at" json:"analyzed_at"`
+}
+
+// MarketEventStateHistoryOptions 的 From／To 為零值代表不限。
+type MarketEventStateHistoryOptions struct {
+	Symbol    string
+	Timeframe string
+	From      time.Time
+	To        time.Time
+	// MaxAnalyses 限制回溯幾次分析（不是幾列）。0 代表用預設值。
+	// 以分析次數而非列數為單位，是因為截斷在列的中間會切出半份快照，
+	// 摺疊時會產生不存在的 transition。
+	MaxAnalyses int
+}
+
+const (
+	defaultTimelineMaxAnalyses = 60
+	maxTimelineMaxAnalyses     = 500
+)
+
+func (r *srZoneRepo) ListMarketEventStateHistory(ctx context.Context, opts MarketEventStateHistoryOptions) ([]MarketEventState, error) {
+	limit := opts.MaxAnalyses
+	if limit <= 0 {
+		limit = defaultTimelineMaxAnalyses
+	}
+	if limit > maxTimelineMaxAnalyses {
+		limit = maxTimelineMaxAnalyses
+	}
+
+	where := []string{"symbol=?", "timeframe=?"}
+	args := []any{opts.Symbol, opts.Timeframe}
+	if !opts.From.IsZero() {
+		where = append(where, "analyzed_at >= ?")
+		args = append(args, opts.From)
+	}
+	if !opts.To.IsZero() {
+		where = append(where, "analyzed_at <= ?")
+		args = append(args, opts.To)
+	}
+	filter := strings.Join(where, " AND ")
+
+	// 先挑出要回溯的那幾次分析，再撈它們的全部狀態列。
+	// **不能直接對狀態列 LIMIT**：那會在快照中間截斷，摺疊時把「被切掉的事件」
+	// 誤判成消失，產生不存在的 transition。
+	args = append(args, limit)
+	query := `
+		SELECT id, analysis_id, symbol, timeframe, analyzed_at,
+			event_key, event_type, event_family, event_scope, zone_key,
+			root_event_type, latest_event_type, direction, state, active,
+			resolved_by, confidence, price_level, reason_codes, state_json, created_at
+		FROM market_event_states
+		WHERE ` + filter + `
+			AND analysis_id IN (
+				-- 多包一層 derived table 是**必要的**，不是多餘：MySQL 至今仍拒絕
+				-- IN/ALL/ANY/SOME 子查詢裡直接用 LIMIT
+				-- （ERROR 1235: This version of MySQL doesn't yet support
+				-- 'LIMIT & IN/ALL/ANY/SOME subquery'），包成 derived table 才會過。
+				-- 同檔的 GetLatestMarketEventStates 用的是純量形式 = (SELECT … LIMIT 1)，
+				-- 那個 MySQL 允許，所以它不需要這層。
+				SELECT * FROM (
+					SELECT analysis_id FROM market_event_states
+					WHERE ` + filter + `
+					GROUP BY analysis_id
+					ORDER BY MAX(analyzed_at) DESC, analysis_id DESC
+					LIMIT ?
+				) AS recent_analyses
+			)
+		ORDER BY analyzed_at ASC, analysis_id ASC, zone_key ASC, event_family ASC, id ASC`
+
+	// filter 出現兩次，參數也要帶兩份；LIMIT 的參數排在最後。
+	full := make([]any, 0, len(args)*2)
+	full = append(full, args[:len(args)-1]...)
+	full = append(full, args[:len(args)-1]...)
+	full = append(full, args[len(args)-1])
+
+	var rows []MarketEventState
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), full...); err != nil {
+		return nil, fmt.Errorf("list market event state history: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *srZoneRepo) ListAnalysisSnapshots(ctx context.Context, opts MarketEventStateHistoryOptions) ([]AnalysisSnapshot, error) {
+	limit := opts.MaxAnalyses
+	if limit <= 0 {
+		limit = defaultTimelineMaxAnalyses
+	}
+	if limit > maxTimelineMaxAnalyses {
+		limit = maxTimelineMaxAnalyses
+	}
+
+	where := []string{"symbol=?", "timeframe=?"}
+	args := []any{opts.Symbol, opts.Timeframe}
+	if !opts.From.IsZero() {
+		where = append(where, "analyzed_at >= ?")
+		args = append(args, opts.From)
+	}
+	if !opts.To.IsZero() {
+		where = append(where, "analyzed_at <= ?")
+		args = append(args, opts.To)
+	}
+	args = append(args, limit)
+
+	// 先取最近 N 筆再依時間遞增排回來——直接 ORDER BY ASC + LIMIT 會拿到最舊的 N 筆。
+	var rows []AnalysisSnapshot
+	query := `
+		SELECT id, analyzed_at FROM (
+			SELECT id, analyzed_at FROM stock_sr_zone_analyses
+			WHERE ` + strings.Join(where, " AND ") + `
+			ORDER BY analyzed_at DESC, id DESC
+			LIMIT ?
+		) AS recent
+		ORDER BY analyzed_at ASC, id ASC`
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("list analysis snapshots: %w", err)
+	}
+	return rows, nil
 }
 
 func (r *srZoneRepo) GetDailyCandidates(ctx context.Context, analysisID uint64) ([]SRDailyCandidate, error) {

@@ -23,9 +23,10 @@ func (s *srProviderScorerStub) ScoreZones(ctx context.Context, symbol, timeframe
 }
 
 type srProviderRepoStub struct {
-	analyses []store.SRZoneAnalysis
-	zones    map[uint64][]store.SRZone
-	nextID   uint64
+	eventStateHistory []store.MarketEventState
+	analyses          []store.SRZoneAnalysis
+	zones             map[uint64][]store.SRZone
+	nextID            uint64
 
 	listErr     error
 	getZonesErr error
@@ -231,4 +232,12 @@ func TestSRAnalysisProviderWrapsRepoErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "list existing sr zone analyses") {
 		t.Fatalf("expected contextual list error, got %v", err)
 	}
+}
+
+func (s *srProviderRepoStub) ListMarketEventStateHistory(ctx context.Context, opts store.MarketEventStateHistoryOptions) ([]store.MarketEventState, error) {
+	return s.eventStateHistory, nil
+}
+
+func (s *srProviderRepoStub) ListAnalysisSnapshots(ctx context.Context, opts store.MarketEventStateHistoryOptions) ([]store.AnalysisSnapshot, error) {
+	return nil, nil
 }

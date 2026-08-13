@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -848,4 +849,55 @@ func (h *SRZoneHandler) Delete(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+}
+
+// EventTimeline 回傳事件鏈（GET /api/v1/sr-zones/event-timeline?symbol=&timeframe=）。
+//
+// **為什麼是 query 而不是 path param**：同一層已有 `GET /sr-zones/:id`（server.go），
+// 再放一個 `/sr-zones/:symbol/...` 會與它衝突——gin 不允許同一位置有兩個不同名的 wildcard。
+// 而 `evaluate`、`train-jobs`、`model-status` 等靜態同層路由與 `:id` 並存無礙，
+// 所以靜態路徑 ＋ query 才是與既有慣例一致的作法。
+//
+// 回傳的是 **display_chain**：由 DB 的分析快照序列重建，供前端 timeline 顯示與人工檢查，
+// 不是 Lifecycle Engine 的 runtime 輸入（見 docs/todo.md T-045）。
+//
+// Query：
+//
+//	symbol       必填
+//	timeframe    預設 1d
+//	max_analyses 回溯幾次分析，預設 60、上限 500
+func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
+	symbol := strings.TrimSpace(c.Query("symbol"))
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "symbol is required"})
+		return
+	}
+	timeframe := strings.TrimSpace(c.DefaultQuery("timeframe", "1d"))
+
+	opts := store.MarketEventStateHistoryOptions{Symbol: symbol, Timeframe: timeframe}
+	if raw := strings.TrimSpace(c.Query("max_analyses")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "max_analyses must be a positive integer"})
+			return
+		}
+		opts.MaxAnalyses = n
+	}
+
+	rows, err := h.repo.ListMarketEventStateHistory(c.Request.Context(), opts)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: event timeline")
+		return
+	}
+	// 另外查「所有分析」：沒有事件的分析不會在 market_event_states 留下任何列，
+	// 只靠 rows 推導 snapshots 會把它們報成「沒有觀測」（實測 0050 有 14 次分析、
+	// 只有 11 次留下事件列）。gap 揭露的正確性依賴這一查。
+	analyses, err := h.repo.ListAnalysisSnapshots(c.Request.Context(), opts)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: event timeline analyses")
+		return
+	}
+
+	timeline := analysis.BuildEventTimeline(symbol, timeframe, rows, analyses)
+	c.JSON(http.StatusOK, timeline)
 }

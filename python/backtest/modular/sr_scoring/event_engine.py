@@ -320,13 +320,29 @@ def build_event_state_summary(
         key = (zone_key, event_family)
         state_name = str(event.get("state") or event.get("lifecycle_state") or LIFECYCLE_CANDIDATE)
         is_active = bool(event.get("active")) and _state_allows_gating(event_family, state_name)
+
+        # **root_event_type 要延續，不能被新偵測蓋掉**（todo.md T-045 P2）。
+        # 這一行 `states[key] = state` 是整筆覆寫，先前把 root 設成新事件的 type，
+        # 等於欄位名叫 root 卻永遠等於 latest——事件鏈的起點因此無法還原。
+        #
+        # 延續的條件與 Go 端摺疊 timeline 的規則刻意對稱（internal/analysis/event_timeline.go）：
+        # **前一個狀態尚未終結才算同一條鏈**；已 RESOLVED／EXPIRED 之後再出現同家族事件，
+        # 那是新的一條鏈，root 應該是新事件本身。
+        previous_state = states.get(key)
+        root_event_type = event_type
+        if previous_state is not None and str(previous_state.get("state")) not in (
+            LIFECYCLE_RESOLVED,
+            LIFECYCLE_EXPIRED,
+        ):
+            root_event_type = str(previous_state.get("root_event_type") or event_type)
+
         state = {
             "event_key": event.get("event_key"),
             "type": event_type,
             "zone_key": zone_key,
             "event_family": event_family,
             "event_scope": event.get("event_scope"),
-            "root_event_type": event_type,
+            "root_event_type": root_event_type,
             "latest_event_type": event_type,
             "direction": event.get("direction"),
             "state": state_name,

@@ -60,6 +60,8 @@ func TestMapScoreZonesErrorReturnsGatewayTimeoutForNetTimeout(t *testing.T) {
 }
 
 type srZoneRepoStub struct {
+	eventStateHistory []store.MarketEventState
+	analysisSnapshots []store.AnalysisSnapshot
 	analyses          []store.SRZoneAnalysis
 	zones             map[uint64][]store.SRZone
 	decisions         map[uint64]*store.SRDecision
@@ -701,4 +703,80 @@ func TestLoadSnapshotMarksEventsNormalizedWhenDecisionHasNoEventRows(t *testing.
 	if snapshot.Status["events"] != "normalized" {
 		t.Fatalf("expected events=normalized when decision present without event rows, got %v", snapshot.Status["events"])
 	}
+}
+
+func (s *srZoneRepoStub) ListMarketEventStateHistory(ctx context.Context, opts store.MarketEventStateHistoryOptions) ([]store.MarketEventState, error) {
+	return s.eventStateHistory, nil
+}
+
+// TestEventTimelineRouteNotSwallowedByIDRoute：`/sr-zones/event-timeline` 與同層的
+// `/sr-zones/:id` 並存時，必須路由到 timeline handler 而不是被當成 id=event-timeline。
+// gin 對「靜態段 vs wildcard」的優先序是靜態優先，但這件事值得鎖住——
+// 一旦有人把路徑改成 `/sr-zones/:symbol/event-timeline`，gin 會在啟動時 panic。
+func TestEventTimelineRouteNotSwallowedByIDRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &srZoneRepoStub{}
+	h := NewSRZoneHandler(nil, repo, nil, nil, nil, nil, zap.NewNop())
+
+	router := gin.New()
+	// 刻意照 server.go 的順序註冊，重現真實的路由樹
+	router.GET("/sr-zones/:id", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"routed_to": "get_by_id", "id": c.Param("id")})
+	})
+	router.GET("/sr-zones/event-timeline", h.EventTimeline)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sr-zones/event-timeline?symbol=2330", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應不是合法 JSON: %v", err)
+	}
+	if body["routed_to"] == "get_by_id" {
+		t.Fatal("請求被 /sr-zones/:id 吃掉了")
+	}
+	if body["symbol"] != "2330" {
+		t.Errorf("symbol = %v, want 2330", body["symbol"])
+	}
+}
+
+func TestEventTimelineRequiresSymbol(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewSRZoneHandler(nil, &srZoneRepoStub{}, nil, nil, nil, nil, zap.NewNop())
+	router := gin.New()
+	router.GET("/sr-zones/event-timeline", h.EventTimeline)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sr-zones/event-timeline", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("缺 symbol 的狀態碼 = %d, want 400", rec.Code)
+	}
+}
+
+// 空結果的兩個陣列都要是 []，前端會直接 .map()。
+func TestEventTimelineEmptyShapes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewSRZoneHandler(nil, &srZoneRepoStub{}, nil, nil, nil, nil, zap.NewNop())
+	router := gin.New()
+	router.GET("/sr-zones/event-timeline", h.EventTimeline)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/sr-zones/event-timeline?symbol=2330", nil))
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應不是合法 JSON: %v", err)
+	}
+	for _, key := range []string{"chains", "snapshots"} {
+		if string(body[key]) == "null" {
+			t.Errorf("%q 是 null，應該是 []", key)
+		}
+	}
+}
+
+func (s *srZoneRepoStub) ListAnalysisSnapshots(ctx context.Context, opts store.MarketEventStateHistoryOptions) ([]store.AnalysisSnapshot, error) {
+	return s.analysisSnapshots, nil
 }

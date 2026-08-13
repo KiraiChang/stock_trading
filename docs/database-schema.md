@@ -175,7 +175,7 @@ watchlist 維護與下架標的判斷。任一來源抓取失敗、或快照涵�
 | name | 名稱 |
 | isin_code | ISIN Code |
 | market | 市場別，例如 TWSE LISTED / 上市 |
-| security_type | TWSE ISIN 頁面的分類列，例如 Stocks / ETFs |
+| security_type | TWSE ISIN 頁面的分類列。**值是中文**：`股票`（1,945）、`ETF`（354）、`上市認購(售)權證`（31,090）、`上櫃認購(售)權證`（9,568）等 |
 | industry | 產業別 |
 | cfi_code | CFI Code |
 | remarks | 備註 |

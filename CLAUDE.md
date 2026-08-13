@@ -99,7 +99,14 @@ Language:
 
 ### Primary Storage
 
-* MySQL（已導入）
+* **PostgreSQL**——dev 與 live 實際使用的資料庫，system of record
+
+支援但非部署目標的 engine（三份 migration 都要同步維護）：
+
+* **SQLite**：單元測試用，`backend/scripts/test.sh` 每次都跑
+* **MySQL**：保留完整 migration，但**從未在任何環境部署過**。只能靠
+  `scripts/test-mysql-migrations.sh` 驗證，且驗證只涵蓋 DDL 不涵蓋 repo 層 CRUD，
+  詳見 `docs/issue.md` I-054。要用它之前先讀那一筆
 
 用途：
 
@@ -124,7 +131,14 @@ Language:
 
 ## Frontend
 
-* React / Next.js
+* Svelte 4 + TypeScript
+* Vite 5（dev server / build）
+* Tailwind CSS 3
+* Vitest 2 + @testing-library/svelte（單元測試）
+
+原始碼在 `frontend/src`：`routes/` 是頁面、`components/` 是元件、`lib/api/` 是 API 層、
+`lib/stores/` 是狀態。路由是 `lib/stores/router.ts` 的一個 store，由 `App.svelte`
+以條件渲染切換，**沒有使用 router 套件**。
 
 用途：
 
@@ -147,9 +161,12 @@ Language:
 
 ---
 
-# Market Data Model (MySQL)
+# Market Data Model
 
 ## Table: candles
+
+Go 側的模型是 engine 無關的；欄位型別差異由三份 migration 各自處理
+（`backend/internal/database/migrations/{postgres,sqlite,mysql}/`）。
 
 ```go id="mysql_model_001"
 type Candle struct {
@@ -174,7 +191,7 @@ type Candle struct {
 
 ## Design Notes
 
-* MySQL 已作為主要歷史資料庫
+* PostgreSQL 已作為主要歷史資料庫
 * 所有技術指標皆基於 candles 計算
 * 不再依賴外部即時計算資料
 * Redis 僅作為熱資料 cache
@@ -188,7 +205,7 @@ Market Data Source
         ↓
 Go Market Data Service
         ↓
-MySQL (candles storage)
+PostgreSQL (candles storage)
         ↓
 Indicator Engine (Go)
         ↓
@@ -209,14 +226,14 @@ Notification / Dashboard
 
 * 接收 FinMind / Shioaji data
 * 轉換成 OHLCV candle
-* 寫入 MySQL
+* 寫入 PostgreSQL
 * 更新 Redis 最新 K 線
 
 ---
 
 ## 2. Indicator Engine
 
-所有指標皆基於 MySQL candles：
+所有指標皆基於 candles 計算：
 
 ### Trend
 
@@ -248,7 +265,7 @@ Notification / Dashboard
 資料來源：
 
 ```text id="ma_source_001"
-Close (from MySQL candles)
+Close (from candles)
 ```
 
 ---
@@ -267,7 +284,7 @@ MA = (PreviousSum - OldClose + NewClose) / N
 
 資料來源：
 
-* MySQL OHLCV
+* PostgreSQL OHLCV
 * Volume distribution
 * VWAP approximation
 
@@ -428,7 +445,7 @@ It only evaluates:
 
 ## Phase 1 (Current)
 
-* MySQL-based market data storage
+* PostgreSQL-based market data storage
 * Indicator engine
 * Basic breakout detection
 
@@ -459,7 +476,7 @@ It only evaluates:
 
 # Key Design Shift
 
-✔ MySQL is now the system of record
+✔ PostgreSQL is the system of record（sqlite 供測試、mysql 保留 migration 但未部署）
 ✔ Redis is only for hot cache
 ✔ Indicators computed from stored candles
 ✔ System is batch + streaming hybrid

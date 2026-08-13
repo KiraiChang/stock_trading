@@ -267,7 +267,7 @@ TWSE ISIN 同步仍存在的標的。
 |------|------|
 | q | 代號或名稱關鍵字 |
 | listed | 是否只查仍上市，預設 `true` |
-| security_type | 依 TWSE ISIN 分類過濾，例如 `Stocks` / `ETFs` |
+| security_type | 依 TWSE ISIN 分類過濾。**值是中文**，例如 `股票` / `ETF`（實測值見 `stock_symbols.security_type`） |
 | limit | 回傳筆數，預設 20、上限 100 |
 
 **Response：**
@@ -279,13 +279,58 @@ TWSE ISIN 同步仍存在的標的。
       "name": "台積電",
       "isin_code": "TW0002330008",
       "market": "上市",
-      "security_type": "Stocks",
+      "security_type": "股票",
       "industry": "半導體業",
       "is_listed": true
     }
   ]
 }
 ```
+
+### GET `/stock-symbols/candidates`
+
+批次產生**研究用**的候選標的清單，供擴評估標的池使用（見 [`todo.md`](./todo.md) T-040
+的 Step 1／Step 3）。回傳的 `symbols` 可直接餵給 `POST /market/backfill`。
+
+**與 `/search` 的分野**：`/search` 是 watchlist 的 autocomplete，筆數上限刻意壓在 100；
+本端點是研究用的批次取用，上限 5,000。兩者用途不同，不要互相取代。
+
+**Query：**
+
+| 參數 | 說明 |
+|------|------|
+| security_type | 逗號分隔。**留空預設 `股票,ETF`**，見下方警告 |
+| industry | 逗號分隔，空 = 不限 |
+| listed_years | 只留上市滿 N 年的標的。**`listed_date` 為 NULL 者一律排除**——證不出上市夠久就不該進研究母體。`0` 或留空 = 不限 |
+| per_industry | 每個產業最多幾檔。半導體業有 201 檔，不設限時抽樣會被它主導。**在該產業的代號區間內等距取樣**（不是取代號最小的前 N 檔），且是**決定性的**——同條件每次拿到同一批 |
+| limit | 總筆數上限，預設 3000、上限 5000 |
+| include_delisted | 預設 `false`，研究母體不含已下市標的 |
+
+> **`security_type` 為什麼有預設值**：`stock_symbols` 存的是完整的 TWSE ISIN 主檔。
+> 實測 43,061 筆上市資料裡有 **40,658 筆是認購（售）權證**（佔 94%），而且代號排序在股票之前。
+> 沒有預設值的話，一個不帶參數的請求會回傳「ETF ＋ 權證」而一檔股票都沒有——
+> 這份 `symbols` 又被設計成可直接餵給 `POST /market/backfill`（無筆數上限、5 req/min），
+> 等於把數小時的 FinMind 配額花在沒有 K 線的商品上。要權證請明確指定。
+
+> **`per_industry` 對「沒有產業分類」的列不生效**：`industry` 是 `NOT NULL DEFAULT ''`，
+> 而 ETF 與權證的產業欄位都是空字串。空字串代表「未分類」而不是一個產業，
+> 若一併套用上限，`security_type=股票,ETF&per_industry=9` 會讓 354 檔 ETF 只剩 9 檔。
+
+**Response：**
+```json
+{
+  "count": 2,
+  "symbols": ["2330", "2603"],
+  "by_industry": {"半導體業": 1, "航運業": 1},
+  "rows": [{"symbol": "2330", "name": "台積電", "industry": "半導體業", "...": "同 /search 的欄位"}],
+  "truncated": false
+}
+```
+
+- `by_industry`：給人工核對產業分佈用——Step 1 要確認抽樣沒有被單一產業壓垮。
+- `truncated`：`true` 代表還有更多符合條件的標的被 `limit` 砍掉。**截斷依代號順序**，
+  會整批砍掉高代號的產業，正是 `per_industry` 要消除的偏斜，所以拿到 `true` 時
+  應該調高 `limit` 或收緊條件，而不是直接使用這份清單。
 
 ### GET `/watchlist`
 
@@ -307,7 +352,7 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
         "is_listed": true,
         "isin_code": "TW0002330008",
         "market": "上市",
-        "security_type": "Stocks",
+        "security_type": "股票",
         "industry": "半導體業"
       }
     }

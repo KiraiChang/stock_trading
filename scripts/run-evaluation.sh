@@ -149,8 +149,12 @@ fi
 CONTAINER="sr-eval-peak-$$"
 PEAK_DIR="$(mktemp -d)"
 HOST_LOW_MB=""
+LOGS_PID=""
 
 cleanup_peak() {
+  if [ -n "$LOGS_PID" ]; then
+    kill "$LOGS_PID" >/dev/null 2>&1 || true
+  fi
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   rm -rf "$PEAK_DIR"
 }
@@ -166,6 +170,14 @@ exit $rc'
 docker run -d --name "$CONTAINER" "${DOCKER_ARGS[@]}" -v "$PEAK_DIR":/peak \
   "$IMAGE" sh -c "$PEAK_WRAPPER" _ "${CMD_ARGS[@]}" >/dev/null
 
+# **邊跑邊串流輸出**，不要等 docker wait 之後才 docker logs。
+# 兩個理由：一是這支跑 150 檔約 14 分鐘、全市場數小時，中途完全沒有輸出的話，
+# 卡住與正常執行看起來一模一樣；二是 cleanup_peak 會 `docker rm -f`，
+# 中斷（Ctrl-C）或被 host OOM killer 砍掉時，還沒印出來的 log 會跟著容器一起消失——
+# 預設的 `exec docker run` 路徑本來就是即時串流的，不該因為量記憶體而退步。
+docker logs -f "$CONTAINER" 2>&1 &
+LOGS_PID=$!
+
 # host available 低點仍由外面取樣——那本來就不是單調值，只能取樣。
 while docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; do
   if avail="$(mem_guard_available_mb)"; then
@@ -177,7 +189,11 @@ while docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q 
 done
 
 status="$(docker wait "$CONTAINER" 2>/dev/null || echo 1)"
-docker logs "$CONTAINER" 2>&1 || true
+# 容器結束後 `docker logs -f` 會自行退出；等它把最後幾行沖出來再印摘要。
+if [ -n "$LOGS_PID" ]; then
+  wait "$LOGS_PID" 2>/dev/null || true
+  LOGS_PID=""
+fi
 
 PEAK_BYTES="$(tr -dc '0-9' < "$PEAK_DIR/peak" 2>/dev/null || true)"
 if [ -z "$PEAK_BYTES" ]; then

@@ -118,6 +118,38 @@ func (h *StockSymbolHandler) Candidates(c *gin.Context) {
 // 研究母體預設只看股票與 ETF；權證等其他 ISIN 類別要明確指定才會出現。
 var defaultCandidateSecurityTypes = []string{"股票", "ETF"}
 
+// Facets 回傳可用的篩選選項與母體筆數（GET /api/v1/stock-symbols/facets）。
+//
+// **為什麼需要**：`security_type` 與 `industry` 的值是 TWSE ISIN 的原始中文分類，
+// 前端沒有這支就只能讓使用者手打「半導體業」——而打錯的後果是 HTTP 200 + 0 筆，
+// 與「條件真的沒匹配」無法區分。
+//
+// Query：
+//
+//	security_type=股票   只縮放 industries 的範圍；**不影響回傳的 security_types 清單**
+//	                     （選單要一直是完整的，否則選了之後換不回來）
+//	include_delisted=true 預設 false
+func (h *StockSymbolHandler) Facets(c *gin.Context) {
+	opts := store.StockSymbolFacetOptions{
+		SecurityTypes: splitCSVParam(c.Query("security_type")),
+	}
+	if raw := strings.TrimSpace(c.Query("include_delisted")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "include_delisted must be true or false"})
+			return
+		}
+		opts.IncludeDelisted = parsed
+	}
+
+	facets, err := h.repo.Facets(c.Request.Context(), opts)
+	if err != nil {
+		serverError(c, h.log, err, "stock symbols: facets")
+		return
+	}
+	c.JSON(http.StatusOK, facets)
+}
+
 func splitCSVParam(raw string) []string {
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))

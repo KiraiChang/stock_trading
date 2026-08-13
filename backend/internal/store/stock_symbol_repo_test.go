@@ -416,3 +416,104 @@ func TestListCandidatesFiltersAndDelisted(t *testing.T) {
 		t.Errorf("IncludeDelisted=true 仍看不到 9999：%v", got)
 	}
 }
+
+// TestFacetsCountsArePopulationNotSample：Count 必須是母體筆數。
+// 挑 per_industry 時要看母體才知道 9 是多是少（半導體業 201 檔 vs 玻璃陶瓷 5 檔），
+// 而 /candidates 的 by_industry 是取樣後的數字，母體數只有這支拿得到。
+func TestFacetsCountsArePopulationNotSample(t *testing.T) {
+	repo, ctx := candidateTestRepo(t)
+
+	facets, err := repo.Facets(ctx, StockSymbolFacetOptions{})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+
+	byValue := map[string]int{}
+	for _, f := range facets.Industries {
+		byValue[f.Value] = f.Count
+	}
+	// fixture 的半導體有 4 檔，全部都要算進去（不受任何取樣上限影響）
+	if byValue["Semiconductor"] != 4 {
+		t.Errorf("Semiconductor 母體 = %d, want 4：Count 應該是母體而不是取樣數", byValue["Semiconductor"])
+	}
+	// industry = '' 是「未分類」（真實資料裡 ETF 與權證都在這裡），不該出現在產業選單
+	if _, ok := byValue[""]; ok {
+		t.Error("產業選單出現空字串——那是未分類，不是一個產業")
+	}
+}
+
+// TestFacetsSecurityTypesAlwaysComplete：security_type 參數只縮放 industries，
+// 不該讓 security_types 清單本身變短——否則使用者選了某個類型之後就換不回來。
+func TestFacetsSecurityTypesAlwaysComplete(t *testing.T) {
+	repo, ctx := candidateTestRepo(t)
+
+	all, err := repo.Facets(ctx, StockSymbolFacetOptions{})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+	scoped, err := repo.Facets(ctx, StockSymbolFacetOptions{SecurityTypes: []string{"ETF"}})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+
+	if len(scoped.SecurityTypes) != len(all.SecurityTypes) {
+		t.Errorf("帶 security_type=ETF 之後選單從 %d 種變成 %d 種——選單應該一直是完整的",
+			len(all.SecurityTypes), len(scoped.SecurityTypes))
+	}
+	// ETF 的 industry 全是空字串，縮放後產業清單應該是空的（而不是 null，見下一支測試）
+	if len(scoped.Industries) != 0 {
+		t.Errorf("ETF 的產業清單 = %v, want 空——ETF 沒有產業分類", scoped.Industries)
+	}
+}
+
+// TestFacetsEmptyIsNotNull：空清單要序列化成 []，前端會對它做 .map()。
+func TestFacetsEmptyIsNotNull(t *testing.T) {
+	repo, ctx := candidateTestRepo(t)
+
+	facets, err := repo.Facets(ctx, StockSymbolFacetOptions{SecurityTypes: []string{"不存在的類型"}})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+	if facets.Industries == nil {
+		t.Error("Industries 是 nil，序列化會變成 null——前端 .map() 會爆掉")
+	}
+}
+
+// TestFacetsExcludesDelistedByDefault：研究母體不含已下市標的，選項清單也該一致。
+func TestFacetsExcludesDelistedByDefault(t *testing.T) {
+	repo, ctx := candidateTestRepo(t)
+
+	fixture := candidateFixtureRows()
+	remaining := make([]StockSymbol, 0, len(fixture)-1)
+	for _, row := range fixture {
+		if row.Symbol != "9999" {
+			remaining = append(remaining, row)
+		}
+	}
+	if _, err := repo.UpsertSnapshot(ctx, remaining, time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("snapshot failed: %v", err)
+	}
+
+	def, err := repo.Facets(ctx, StockSymbolFacetOptions{})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+	withDelisted, err := repo.Facets(ctx, StockSymbolFacetOptions{IncludeDelisted: true})
+	if err != nil {
+		t.Fatalf("Facets failed: %v", err)
+	}
+
+	count := func(fs []StockSymbolFacet, v string) int {
+		for _, f := range fs {
+			if f.Value == v {
+				return f.Count
+			}
+		}
+		return 0
+	}
+	// 9999 是 Shipping，下市後預設不該再被算進去
+	if count(def.Industries, "Shipping") >= count(withDelisted.Industries, "Shipping") {
+		t.Errorf("預設含了已下市標的：預設 %d、含下市 %d",
+			count(def.Industries, "Shipping"), count(withDelisted.Industries, "Shipping"))
+	}
+}

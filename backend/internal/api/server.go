@@ -115,6 +115,7 @@ func NewServer(
 		ssh := handler.NewStockSymbolHandler(stockSymbolRepo, log)
 		protected.GET("/stock-symbols/search", ssh.Search)
 		protected.GET("/stock-symbols/candidates", ssh.Candidates)
+		protected.GET("/stock-symbols/facets", ssh.Facets)
 
 		mh := handler.NewMarketHandler(fetcher, marketBackfillJobRepo, log)
 		protected.POST("/market/backfill", mh.Backfill)

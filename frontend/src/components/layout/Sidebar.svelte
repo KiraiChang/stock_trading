@@ -8,6 +8,7 @@
     { label: '交易分析', icon: '▣', route: 'positions' },
     { label: '籌碼分析', icon: '⛁', route: 'chips' },
     { label: '歷史資料回補', icon: '⟳', route: 'backfill' },
+    { label: '評估標的池', icon: '⊞', route: 'evaluation-universe' },
     { label: '策略回測', icon: '▶', route: 'backtest' },
     { label: '排程監控', icon: '⏱', route: 'scheduler' },
     { label: '使用者管理', icon: '⊙', route: 'users' },

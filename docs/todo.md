@@ -1122,7 +1122,43 @@ evaluation 硬性需要成交量與成交金額，兩者 Yahoo 都給不了或�
 - **保留現有 11 檔**：維持與 2026-08-06 那批結果的可比性。
 - 成本：150 requests × 5 年，`rate_limit=5` 下約 **30 分鐘**。
 
-#### 前端頁面設計（2026-08-12，設計稿待確認，**尚未實作**）
+#### 前端頁面（設計 2026-08-12，**已實作 2026-08-13**）
+
+**實作結果**：新頁面 `routes/EvaluationUniverse.svelte`（route `evaluation-universe`、
+側邊欄「評估標的池」），三段流程如設計稿。連同前置重構共 5 個檔案：
+
+| 檔案 | 內容 |
+|---|---|
+| `lib/utils/jobPolling.ts` ＋ `.test.ts` | **先抽再用**的共用輪詢（含停滯保護），9 支測試。`Backfill.svelte` 原有兩份幾乎相同的實作，這頁會是第三份。抽出後才發現原本兩份共有的競態：慢回應會在收尾後把畫面蓋回舊狀態，一次修好三處 |
+| `lib/api/stockSymbols.ts` | `fetchSymbolCandidates`；`StockSymbol` 型別自 `watchlist.ts` re-export |
+| `routes/EvaluationUniverse.svelte` ＋ `.test.ts` | 頁面本體，17 支測試 |
+| `routes/Backfill.svelte` | 兩處輪詢改用共用工具，行為不變（既有 11 支測試全過） |
+| `router.ts` / `App.svelte` / `Sidebar.svelte` | 路由與導覽 |
+
+**篩選選項改由 API 提供（2026-08-13 追加）**：初版把產業做成文字輸入 ＋ `datalist`，
+因為當時**沒有任何端點回傳產業清單**——選項只能取自上一次查詢的 `by_industry`，
+所以第一次查詢前選單是空的，使用者還是得先知道「半導體業」這五個字才打得出來。
+已補上 `GET /stock-symbols/facets`（`StockSymbolRepo.Facets`，現況見
+[`api-reference.md`](./api-reference.md)），證券類型與產業改為由 API 驅動的複選標籤，
+各自標示**母體**筆數。三個設計決定：
+
+- **`count` 是母體不是取樣數**：挑 `per_industry` 時要看母體才知道 9 是多是少
+  （半導體業 201 檔 vs 玻璃陶瓷 5 檔）；`/candidates` 的 `by_industry` 是取樣**後**的數字。
+- **`security_type` 參數只縮放 `industries`，不影響 `security_types` 清單本身**，
+  否則使用者選了某個類型之後就換不回來。
+- **產業清單排除 `industry = ''`**：那是「未分類」而不是一個產業（ETF 與權證全在那裡）。
+
+**權證的處理**：選單**完整列出所有 ISIN 分類並標示筆數**，但預設只勾股票與 ETF。
+看到「上市認購(售)權證 31,090」這個數字使用者自己就知道不該勾——
+**用資訊而不是隱藏來防止誤選**，同時保留日後要研究特別股、創新板的彈性。
+
+**驗收**：`frontend/scripts/test.sh` 全綠（svelte-check → 88 支 vitest → vite build）。
+注意 build 產物 `backend/internal/ui/dist` **依設計要進版控**（`ui.go` 的 `//go:embed all:dist`），
+新的 hash 檔名要 `scripts/check-dist-assets.sh --fix` 一併 stage，
+**且舊 bundle 的刪除要在同一次 commit**，否則會做出 index.html 指向不存在檔案的前端，
+而所有測試仍然會過。
+
+以下為當初的設計稿，保留供 review 對照：
 
 **定位**：把 Step 1／Step 3 的「產生候選清單 → 觸發回補 → 追進度」從敲 API 變成畫面操作。
 **不是**要做一個新的分析頁——判讀留給既有頁面。

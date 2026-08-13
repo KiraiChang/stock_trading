@@ -11,6 +11,7 @@
   import SRZones from './routes/SRZones.svelte'
   import Chips from './routes/Chips.svelte'
   import Positions from './routes/Positions.svelte'
+import EvaluationUniverse from './routes/EvaluationUniverse.svelte'
 </script>
 
 {#if $isAuthenticated}
@@ -30,6 +31,8 @@
     <Positions />
   {:else if $currentRoute === 'chips'}
     <Chips />
+  {:else if $currentRoute === 'evaluation-universe'}
+    <EvaluationUniverse />
   {:else}
     <Dashboard />
   {/if}

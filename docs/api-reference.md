@@ -287,6 +287,41 @@ TWSE ISIN 同步仍存在的標的。
 }
 ```
 
+### GET `/stock-symbols/facets`
+
+回傳可用的篩選選項與**母體**筆數，供前端產生選單。沒有這支的話，使用者只能手打
+`半導體業` 這類 TWSE ISIN 的原始中文分類——**打錯的後果是 HTTP 200 ＋ 0 筆**，
+與「條件真的沒匹配」在畫面上無法區分。
+
+**Query：**
+
+| 參數 | 說明 |
+|------|------|
+| security_type | 逗號分隔。**只縮放 `industries` 的範圍，不影響回傳的 `security_types` 清單**——選單本身要一直完整，否則使用者選了某個類型之後就換不回來 |
+| include_delisted | 預設 `false`，與 `/candidates` 一致 |
+
+**Response：**
+```json
+{
+  "security_types": [
+    {"value": "上市認購(售)權證", "count": 31090},
+    {"value": "股票", "count": 1945},
+    {"value": "ETF", "count": 354}
+  ],
+  "industries": [
+    {"value": "電子零組件業", "count": 209},
+    {"value": "半導體業", "count": 201}
+  ]
+}
+```
+
+- `count` 是**母體**筆數，不是取樣後的數量。挑 `/candidates` 的 `per_industry` 時要看母體
+  才知道 9 是多是少（半導體業 201 檔 vs 玻璃陶瓷 5 檔）；`/candidates` 的 `by_industry`
+  給的是取樣**後**的數字，兩者不要混用。
+- `industries` **排除 `industry = ''`**：那是「未分類」而不是一個產業，ETF 與權證全落在那裡。
+  所以 `?security_type=ETF` 會回傳空的 `industries`。
+- 兩個陣列都保證是 `[]` 而非 `null`。
+
 ### GET `/stock-symbols/candidates`
 
 批次產生**研究用**的候選標的清單，供擴評估標的池使用（見 [`todo.md`](./todo.md) T-040

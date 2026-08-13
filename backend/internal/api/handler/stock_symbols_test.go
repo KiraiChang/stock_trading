@@ -18,8 +18,10 @@ import (
 // stockSymbolRepoStub 只記錄收到的 options——這幾支測試驗的是 handler 怎麼把 query
 // 翻譯成 repo 條件，repo 本身的查詢邏輯由 internal/store 的測試對真實 sqlite 驗。
 type stockSymbolRepoStub struct {
-	gotOpts store.StockSymbolCandidateOptions
-	result  store.StockSymbolCandidateResult
+	gotOpts      store.StockSymbolCandidateOptions
+	result       store.StockSymbolCandidateResult
+	gotFacetOpts store.StockSymbolFacetOptions
+	facets       store.StockSymbolFacets
 }
 
 func (s *stockSymbolRepoStub) UpsertSnapshot(context.Context, []store.StockSymbol, time.Time) (store.StockSymbolSyncResult, error) {
@@ -37,6 +39,10 @@ func (s *stockSymbolRepoStub) Search(context.Context, store.StockSymbolSearchOpt
 func (s *stockSymbolRepoStub) ListCandidates(_ context.Context, opts store.StockSymbolCandidateOptions) (store.StockSymbolCandidateResult, error) {
 	s.gotOpts = opts
 	return s.result, nil
+}
+func (s *stockSymbolRepoStub) Facets(_ context.Context, opts store.StockSymbolFacetOptions) (store.StockSymbolFacets, error) {
+	s.gotFacetOpts = opts
+	return s.facets, nil
 }
 
 func candidatesRequest(t *testing.T, repo store.StockSymbolRepo, query string) *httptest.ResponseRecorder {
@@ -159,5 +165,83 @@ func TestCandidatesPassesTruncated(t *testing.T) {
 	}
 	if body.ByIndustry["半導體業"] != 1 {
 		t.Errorf("by_industry 不符：%+v", body.ByIndustry)
+	}
+}
+
+func facetsRequest(t *testing.T, repo store.StockSymbolRepo, query string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	h := NewStockSymbolHandler(repo, zap.NewNop())
+	router := gin.New()
+	router.GET("/stock-symbols/facets", h.Facets)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/stock-symbols/facets"+query, nil))
+	return rec
+}
+
+// TestFacetsPassesSecurityTypeScope：security_type 要傳到 repo 去縮放產業清單。
+func TestFacetsPassesSecurityTypeScope(t *testing.T) {
+	repo := &stockSymbolRepoStub{}
+	if rec := facetsRequest(t, repo, "?security_type=股票,ETF"); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := repo.gotFacetOpts.SecurityTypes; len(got) != 2 || got[0] != "股票" || got[1] != "ETF" {
+		t.Errorf("SecurityTypes = %v, want [股票 ETF]", got)
+	}
+}
+
+// TestFacetsEmptyShapes：空清單要序列化成 []，前端會直接 .map()。
+func TestFacetsEmptyShapes(t *testing.T) {
+	repo := &stockSymbolRepoStub{facets: store.StockSymbolFacets{
+		SecurityTypes: []store.StockSymbolFacet{},
+		Industries:    []store.StockSymbolFacet{},
+	}}
+	rec := facetsRequest(t, repo, "")
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應不是合法 JSON: %v", err)
+	}
+	for _, key := range []string{"security_types", "industries"} {
+		if string(body[key]) == "null" {
+			t.Errorf("%q 是 null，應該是 []——前端 .map() 會爆掉", key)
+		}
+	}
+}
+
+// TestFacetsResponseShape：欄位名要與前端型別一致（value / count）。
+func TestFacetsResponseShape(t *testing.T) {
+	repo := &stockSymbolRepoStub{facets: store.StockSymbolFacets{
+		SecurityTypes: []store.StockSymbolFacet{{Value: "股票", Count: 1945}},
+		Industries:    []store.StockSymbolFacet{{Value: "半導體業", Count: 201}},
+	}}
+	rec := facetsRequest(t, repo, "")
+
+	var body struct {
+		SecurityTypes []struct {
+			Value string `json:"value"`
+			Count int    `json:"count"`
+		} `json:"security_types"`
+		Industries []struct {
+			Value string `json:"value"`
+			Count int    `json:"count"`
+		} `json:"industries"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應不是合法 JSON: %v", err)
+	}
+	if len(body.SecurityTypes) != 1 || body.SecurityTypes[0].Value != "股票" || body.SecurityTypes[0].Count != 1945 {
+		t.Errorf("security_types 形狀不符：%+v", body.SecurityTypes)
+	}
+	if len(body.Industries) != 1 || body.Industries[0].Value != "半導體業" || body.Industries[0].Count != 201 {
+		t.Errorf("industries 形狀不符：%+v", body.Industries)
+	}
+}
+
+func TestFacetsRejectsBadIncludeDelisted(t *testing.T) {
+	repo := &stockSymbolRepoStub{}
+	if rec := facetsRequest(t, repo, "?include_delisted=maybe"); rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }

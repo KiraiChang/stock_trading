@@ -30,6 +30,9 @@ type StockSymbolRepo interface {
 	// 與 Search **刻意分開**：Search 是 autocomplete，它把 limit 夾在 100 以內是刻意設計，
 	// 撐大它會讓兩種用途互相牽制。
 	ListCandidates(ctx context.Context, opts StockSymbolCandidateOptions) (StockSymbolCandidateResult, error)
+	// Facets 回傳可用的篩選選項與各自的母體筆數，供前端產生下拉選單。
+	// 沒有這支的話，使用者得先知道「半導體業」這五個字才打得出來。
+	Facets(ctx context.Context, opts StockSymbolFacetOptions) (StockSymbolFacets, error)
 }
 
 type StockSymbolSyncResult struct {
@@ -63,6 +66,25 @@ type StockSymbolCandidateOptions struct {
 	// ETF 與權證都落在這裡。
 	PerIndustryLimit int
 	Limit            int
+}
+
+type StockSymbolFacetOptions struct {
+	// SecurityTypes 只縮放 Industries 的範圍，不影響回傳的 SecurityTypes 清單——
+	// 選單本身要一直是完整的，否則使用者選了某個類型之後就換不回來。
+	SecurityTypes   []string
+	IncludeDelisted bool
+}
+
+// StockSymbolFacet 的 Count 是**母體**筆數，不是取樣後的數量。
+// 挑 per_industry 時要看母體才知道 9 是多是少（半導體業 201 檔 vs 玻璃陶瓷 5 檔）。
+type StockSymbolFacet struct {
+	Value string `db:"facet_value" json:"value"`
+	Count int    `db:"facet_count" json:"count"`
+}
+
+type StockSymbolFacets struct {
+	SecurityTypes []StockSymbolFacet `json:"security_types"`
+	Industries    []StockSymbolFacet `json:"industries"`
 }
 
 // StockSymbolCandidateResult 帶著 Truncated，因為呼叫端光看筆數分不出
@@ -235,6 +257,61 @@ func (r *stockSymbolRepo) List(ctx context.Context, onlyListed bool) ([]StockSym
 
 const stockSymbolColumns = `id, symbol, name, isin_code, market, security_type, industry, cfi_code, remarks,
 	       listed_date, is_listed, last_seen_at, created_at, updated_at`
+
+func (r *stockSymbolRepo) Facets(ctx context.Context, opts StockSymbolFacetOptions) (StockSymbolFacets, error) {
+	out := StockSymbolFacets{SecurityTypes: []StockSymbolFacet{}, Industries: []StockSymbolFacet{}}
+
+	// 欄位別名用 facet_value / facet_count：`value` 與 `count` 在部分 engine 有保留字風險，
+	// 而這個專案已經因為保留字踩過五次（見 migration 059 與 database-schema.md 的命名規範）。
+	base := []string{"1=1"}
+	baseArgs := []any{}
+	if !opts.IncludeDelisted {
+		base = append(base, "is_listed = ?")
+		baseArgs = append(baseArgs, true)
+	}
+	baseFilter := strings.Join(base, " AND ")
+
+	// 排除空的 security_type，與下方 industries 的 `industry <> ''` 對稱。
+	// 空值是可達的：twse_isin.go 的解析器以 `currentType := ""` 起始，只有遇到分類標題列
+	// 才會覆寫，所以 TWSE 版面一變動就可能產生沒有分類的列。那種列在選單上會是
+	// 一個沒有文字、點了也沒作用的按鈕（空值會被 splitCSVParam 濾掉而落回預設）。
+	query := `SELECT security_type AS facet_value, COUNT(*) AS facet_count
+	          FROM stock_symbols WHERE ` + baseFilter + ` AND security_type <> ''
+	          GROUP BY security_type
+	          ORDER BY facet_count DESC, facet_value ASC`
+	if err := r.db.SelectContext(ctx, &out.SecurityTypes, r.db.Rebind(query), baseArgs...); err != nil {
+		return StockSymbolFacets{}, fmt.Errorf("stock symbol security_type facets: %w", err)
+	}
+
+	// industry = '' 是「未分類」（ETF 與權證全落在這裡），不該出現在產業選單。
+	where := append(append([]string{}, base...), "industry <> ''")
+	args := append([]any{}, baseArgs...)
+	if len(opts.SecurityTypes) > 0 {
+		where = append(where, "security_type IN (?)")
+		args = append(args, opts.SecurityTypes)
+	}
+	query = `SELECT industry AS facet_value, COUNT(*) AS facet_count
+	         FROM stock_symbols WHERE ` + strings.Join(where, " AND ") + `
+	         GROUP BY industry
+	         ORDER BY facet_count DESC, facet_value ASC`
+	query, args, err := sqlx.In(query, args...)
+	if err != nil {
+		return StockSymbolFacets{}, fmt.Errorf("expand stock symbol facet query: %w", err)
+	}
+	if err := r.db.SelectContext(ctx, &out.Industries, r.db.Rebind(query), args...); err != nil {
+		return StockSymbolFacets{}, fmt.Errorf("stock symbol industry facets: %w", err)
+	}
+
+	// SelectContext 查無資料時留下 nil slice，JSON 會變成 null 而不是 []——
+	// 前端對它做 .map() 會直接爆掉（與 ListCandidates 同一個理由）。
+	if out.SecurityTypes == nil {
+		out.SecurityTypes = []StockSymbolFacet{}
+	}
+	if out.Industries == nil {
+		out.Industries = []StockSymbolFacet{}
+	}
+	return out, nil
+}
 
 func (r *stockSymbolRepo) ListCandidates(ctx context.Context, opts StockSymbolCandidateOptions) (StockSymbolCandidateResult, error) {
 	limit := opts.Limit

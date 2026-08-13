@@ -13,6 +13,7 @@
   import { triggerChipSync, getChipSyncJob, type ChipSyncJob, type ChipSyncStatus } from '../lib/api/chips'
   import { ApiError } from '../lib/api/client'
   import { todayStr, daysAgo } from '../lib/utils/date'
+  import { pollUntilTerminal, stalledMessage } from '../lib/utils/jobPolling'
   import type { WatchlistItem } from '../lib/stores/market'
 
   // items（監控清單）留著給兩塊回補 UI 當「留空 ＝ 整個監控清單」的 fallback。
@@ -24,7 +25,7 @@
   let submitting = false
   let error = ''
   let backfillJob: MarketBackfillJob | null = null
-  let backfillPollTimer: ReturnType<typeof setInterval> | null = null
+  let backfillPollTimer: (() => void) | null = null
 
   // ── 手動計算指標：不限監控清單，任意股票代號都可以 ──────────
   let computeSymbol = ''
@@ -48,15 +49,9 @@
   let chipSubmitting = false
   let chipError = ''
   let chipJob: ChipSyncJob | null = null
-  let chipPollTimer: ReturnType<typeof setInterval> | null = null
+  let chipPollTimer: (() => void) | null = null
 
-  // 停滯判定：輪詢間隔 3 秒，連續 100 次（＝5 分鐘）進度沒推進就停止追蹤。
-  // 門檻要明顯大於單檔的最壞情況——FinMind rate_limit 5/min 表示每檔約 12 秒，
-  // 加上重試與慢回應，5 分鐘沒有任何一檔完成幾乎只可能是後端沒在跑了。
-  const POLL_INTERVAL_MS = 3000
-  const STALL_MINUTES = 5
-  const STALL_TICKS = (STALL_MINUTES * 60 * 1000) / POLL_INTERVAL_MS
-
+  // 輪詢與停滯判定已抽到 lib/utils/jobPolling.ts（三個頁面共用，見該檔說明）。
   // 股價回補與籌碼回補的 job 狀態是同一組值，共用一份對應表。
   const chipSyncStatusText: Record<ChipSyncStatus, string> = {
     pending: '排隊中', running: '同步中', done: '完成', partial: '部分成功', failed: '失敗',
@@ -119,46 +114,24 @@
     }
   }
 
-  // 每 3 秒查一次進度，直到 done/partial/failed 才停止（與下方籌碼回補同一套流程）。
-  //
-  // 停滯保護：任務若因後端重啟而永遠卡在 pending/running，輪詢會一直拿到非終態，
-  // 按鈕就鎖死到使用者重新整理為止。**刻意不用固定逾時**——650 檔在 rate limit 下
-  // 本來就要跑兩個多小時，固定上限會把正常的長任務誤判成卡住。改成看「進度有沒有推進」：
-  // 連續 STALL_TICKS 次 symbols_done 都沒變才停止追蹤並解鎖。
-  // 停止追蹤**不代表任務失敗**，後端可能還在跑，訊息要講清楚。
   function pollJob(jobId: string) {
     stopPolling()
-    let stalled = 0
-    let lastDone = -1
-    backfillPollTimer = setInterval(async () => {
-      try {
-        const latest = await getBackfillJob(jobId)
-        backfillJob = latest
-        if (latest.status === 'done' || latest.status === 'partial' || latest.status === 'failed') {
-          stopPolling()
-          submitting = false
-          return
-        }
-        stalled = latest.symbols_done === lastDone ? stalled + 1 : 0
-        lastDone = latest.symbols_done
-        if (stalled >= STALL_TICKS) {
-          stopPolling()
-          submitting = false
-          error = `進度已 ${STALL_MINUTES} 分鐘沒有推進，停止追蹤。後端可能仍在執行（或已重啟），可看後端 log 或稍後重新查詢 ${jobId}。`
-        }
-      } catch {
-        error = '查詢回補狀態失敗'
-        stopPolling()
+    backfillPollTimer = pollUntilTerminal<MarketBackfillJob>({
+      fetch: () => getBackfillJob(jobId),
+      isTerminal: (j) => j.status === 'done' || j.status === 'partial' || j.status === 'failed',
+      progressOf: (j) => j.symbols_done,
+      onUpdate: (j) => { backfillJob = j },
+      onSettled: (reason) => {
         submitting = false
-      }
-    }, POLL_INTERVAL_MS)
+        if (reason === 'stalled') error = stalledMessage(jobId)
+        if (reason === 'error') error = '查詢回補狀態失敗'
+      },
+    })
   }
 
   function stopPolling() {
-    if (backfillPollTimer) {
-      clearInterval(backfillPollTimer)
-      backfillPollTimer = null
-    }
+    backfillPollTimer?.()
+    backfillPollTimer = null
   }
 
   async function submitCompute() {
@@ -235,42 +208,24 @@
     }
   }
 
-  // 每 3 秒查一次進度，直到 done/partial/failed 才停止（比照 SRZones.svelte
-  // 訓練任務輪詢與 Chips.svelte 手動同步輪詢的做法）。
   function pollChipJob(jobId: string) {
     stopChipPolling()
-    let stalled = 0
-    let lastDone = -1
-    chipPollTimer = setInterval(async () => {
-      try {
-        const job = await getChipSyncJob(jobId)
-        chipJob = job
-        if (job.status === 'done' || job.status === 'partial' || job.status === 'failed') {
-          stopChipPolling()
-          chipSubmitting = false
-          return
-        }
-        // 停滯保護，理由與做法同 pollJob。
-        stalled = job.symbols_done === lastDone ? stalled + 1 : 0
-        lastDone = job.symbols_done
-        if (stalled >= STALL_TICKS) {
-          stopChipPolling()
-          chipSubmitting = false
-          chipError = `進度已 ${STALL_MINUTES} 分鐘沒有推進，停止追蹤。後端可能仍在執行（或已重啟），可看後端 log 或稍後重新查詢 ${jobId}。`
-        }
-      } catch {
-        chipError = '查詢回補狀態失敗'
-        stopChipPolling()
+    chipPollTimer = pollUntilTerminal<ChipSyncJob>({
+      fetch: () => getChipSyncJob(jobId),
+      isTerminal: (j) => j.status === 'done' || j.status === 'partial' || j.status === 'failed',
+      progressOf: (j) => j.symbols_done,
+      onUpdate: (j) => { chipJob = j },
+      onSettled: (reason) => {
         chipSubmitting = false
-      }
-    }, POLL_INTERVAL_MS)
+        if (reason === 'stalled') chipError = stalledMessage(jobId)
+        if (reason === 'error') chipError = '查詢回補狀態失敗'
+      },
+    })
   }
 
   function stopChipPolling() {
-    if (chipPollTimer) {
-      clearInterval(chipPollTimer)
-      chipPollTimer = null
-    }
+    chipPollTimer?.()
+    chipPollTimer = null
   }
 </script>
 

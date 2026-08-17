@@ -1,0 +1,107 @@
+{
+  "missing": [],
+  "pipeline_version": "sr_zone_evaluation_p1",
+  "profiles": {
+    "0050": {
+      "atr_pct": 0.025967925920955502,
+      "average_range_pct": 0.01969495819390689,
+      "bucket": "NORMAL_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "00830": {
+      "atr_pct": 0.02997087849862484,
+      "average_range_pct": 0.015752986733002593,
+      "bucket": "NORMAL_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "2330": {
+      "atr_pct": 0.026488095238095265,
+      "average_range_pct": 0.019644870233361124,
+      "bucket": "NORMAL_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "2399": {
+      "atr_pct": 0.05524316109422492,
+      "average_range_pct": 0.06257962614744433,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "2454": {
+      "atr_pct": 0.059876543209876544,
+      "average_range_pct": 0.05432790802820208,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "2478": {
+      "atr_pct": 0.08382857142857142,
+      "average_range_pct": 0.08871864651920615,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "3630": {
+      "atr_pct": 0.04462531574515858,
+      "average_range_pct": 0.051167089608273715,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "5490": {
+      "atr_pct": 0.06374684705342812,
+      "average_range_pct": 0.04127374961957884,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    },
+    "6243": {
+      "atr_pct": 0.08596436386370741,
+      "average_range_pct": 0.06336964655274048,
+      "bucket": "HIGH_VOLATILITY",
+      "candle_count": 1500,
+      "lookback_bars": 60
+    }
+  },
+  "schema_version": "sr_volatility_baseline_p0",
+  "snapshot": {
+    "adj_factor_note": "2026-08-11/12 股價還原（含減資）已上線並重算；本基準建立於重算之後",
+    "candle_counts": {
+      "0050": 4867,
+      "00830": 1775,
+      "2330": 4872,
+      "2399": 2418,
+      "2454": 4871,
+      "2478": 2404,
+      "3630": 2417,
+      "5490": 2418,
+      "6243": 2413
+    },
+    "evaluation": {
+      "limit": 1500,
+      "peak_mb": 382,
+      "rows": 72083,
+      "sources": 131
+    },
+    "generated_at": "2026-08-17",
+    "last_trading_day": "2026-08-17",
+    "universe_size": 131,
+    "universe_source": "T-040 Step 3 selection report（report-v6，131 檔定案）"
+  },
+  "source_schema_version": "sr_zone_evaluation_p0",
+  "symbols": [
+    "0050",
+    "00830",
+    "2330",
+    "2399",
+    "2454",
+    "2478",
+    "3630",
+    "5490",
+    "6243"
+  ],
+  "timeframe": "1d"
+}

@@ -436,6 +436,19 @@ T-040 Step 3 對 857 檔全市場資料實測，pipeline 的絕對門檻與台�
 score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket` 的
 `insufficient_sample=false` 只保證樣本數夠，不保證候選之間有可分辨的差異。
 
+##### 判讀前提：HIGH bucket 的結論天生帶半導體業偏斜
+
+T-040 選池定案時已裁決**接受 HIGH bucket 填不滿**（bucket 名額 30、含 watchlist 共 33，
+低於 `per_bucket_min=35`），因為那是母體事實而非演算法問題：HIGH 的 90 個候選裡
+**81 檔是半導體業（90%）**，其餘 14 個產業各只有 1～4 檔，產業上限 11 之下理論上限只有 36。
+台股「高波動且流動性足」幾乎等於半導體。
+
+**所以跨 bucket 比較時，HIGH 那一組的差異有多少來自「高波動」、有多少來自「半導體業」
+是分不開的。** 不要把 HIGH 的勝出候選直接當成「高波動股票適用的參數」。
+完整理由與被否決的兩個替代方案見
+[`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
+「三個設計決定」的第二點。
+
 ##### 併入項目：bucket 邊界必須凍結進 universe artifact（2026-08-17，來自 T-040 階段 4 驗證）
 
 **分位數邊界是相對於當下母體的，母體一動邊界就漂——bucket 不是標的的固有屬性。**
@@ -961,12 +974,35 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 計畫書待確認（2026-08-12 更新執行順序與過時內容，仍待確認後才實作） |
+| 狀態 | **進行中**（2026-08-17：Step 0～3 已完成，Step 4 資料補齊中，Step 5 待啟動） |
 | 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
 | 來源 | T-039 sweep 實跑結論：卡住的是標的池，不是參數 |
 | Step 3 計畫 | 詳細流動性過濾與最終 universe 選取規格見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md) |
+| 相依 | **T-003 的「bucket 邊界必須凍結」是本項的前置**，見下方「相依：T-003 邊界凍結」 |
+
+**各 Step 狀態（2026-08-17）**：
+
+| Step | 內容 | 狀態 |
+|---|---|---|
+| 0 | 記憶體實測 | ✅ 完成 2026-08-12（150 檔可行、200 檔不可行） |
+| 1 | `ListCandidates` repo ＋ 端點 ＋ 前端頁面 | ✅ 完成 2026-08-12／13 |
+| 2 | Step 1 全市場短期回補與判讀 | ✅ 完成 2026-08-13（857 檔 / 454,152 列） |
+| 3 | selection report、選出最終清單 | ✅ 完成 2026-08-17（**131 檔**，計畫書階段 1～3 通過） |
+| 4 | deep backfill ＋ 階段 4～6 驗證 | 🔄 **進行中**——尾端對齊回補待執行，階段 5／6 未跑 |
+| 5 | Phase 2：`evaluation_universe` 表與每日排程 | 📋 **計畫書已寫，待確認**（階段 4／5／6 已通過）|
+
+#### 相依：T-003 邊界凍結
+
+`selection_bucket` 是**對全體流動性合格股票取分位數**得到的，母體一動邊界就漂。
+實測重跑 selection report 時，有 3 檔（3530、3661、8102）`atr_pct` 一個 bit 都沒變卻跳桶，
+且選池 131 檔中有 18 檔距最近邊界不到 2%。
+
+**後果是本項刻意經營的 bucket 配比會隨每日資料自己劣化**，且跨期比較會分不清
+「策略改了」還是「bucket 定義改了」。處置（把 `quantile_edges` 凍結進 universe artifact）
+記在 T-003 的「門檻重定 → bucket 邊界必須凍結」，**必須在 Step 5 建表前決定**——
+`evaluation_universe.bucket_hint` 存的就是這個值。
 
 **背景**：2026-08-06 實跑 sweep 後確認，SR Zone 的參數調校卡在標的池只有 **11 檔**
 （9 檔落在 HIGH bucket、NORMAL 只有 `0050`／`2330`、LOW **完全空白**），候選之間的差異落在
@@ -1060,7 +1096,7 @@ evaluation 從未實測，若跑不動，前面所有抓取與建表都是白工
 | 2 | Step 1 抓取（見下） | 全市場 ATR% 分佈 | 650 requests ≈ 2.2 小時 |
 | 3 | Step 2 判讀 → bucket 門檻定案 | **可能改變 T-003 的設計** | 分析，無抓取 |
 | 4 | Step 3 選 120～150 檔並深抓 | 最終標的池 | 150 requests ≈ 30 分鐘 |
-| 5 | Phase 2：`evaluation_universe` 表與排程 | 常態維護 | 見上方檔案表 |
+| 5 | Phase 2：`evaluation_universe` 表與排程 | 常態維護。詳細計畫見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「Step 5 執行計畫書」 | 見上方檔案表 |
 
 **Step 1 與 Step 3 不合併（2026-08-12 決定）**：`FetchDailyCandles`（`market/finmind.go:182`）
 **帶日期區間與單日同價**，都是 1 request/檔，所以 650 檔直接抓 5 年與抓 130 天是**同樣 650

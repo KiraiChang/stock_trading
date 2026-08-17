@@ -206,17 +206,25 @@ watchlist 的唯一理由。強塞進 universe 只會多一個無桶標的，並
 
 最終 report 應包含三份清單：
 
-| 清單 | 用途 |
-|---|---|
-| `selected_symbols` | 要 deep backfill 的最終清單 |
-| `review_symbols` | 邊界案例，需人工確認 |
-| `excluded_symbols` | 被排除者與原因 |
+| 清單 | 用途 | 實作 |
+|---|---|---|
+| `selected_symbols` | 要 deep backfill 的最終清單 | ✅ 有 |
+| `review_symbols` | 邊界案例，需人工確認 | **刻意不產生**，見下 |
+| `excluded_symbols` | 被排除者與原因 | 以每列的 `selection_status` / `exclusion_reason` 取代 |
 
 **`review_symbols` 必須有收斂條件，否則會變成永久待辦。** 規則：
 
 - review 項目**必須在 deep backfill 前清空**——每一筆要嘛升為 `selected`、要嘛降為 `excluded`。
 - 判定依據與判定者記在 report 或 `todo.md`，不要只留在對話。
 - **未決者一律歸 `excluded`**：寧可少幾檔，也不要讓沒被判斷過的標的混進調參母體。
+
+**實作結果：`review` 這個狀態刻意永不產生**（2026-08-17）。`evaluate_exclusion()` 只回
+`selected` / `excluded`——上面那條「未決者一律歸 `excluded`」直接寫進了判定函式，
+所以沒有任何路徑會產出 `review`。完成條件的「`review_symbols` 已清空」因此自動成立。
+
+報告也不另外輸出 `review_symbols` / `excluded_symbols` 兩份清單：
+前者恆為空，後者的資訊已經在每一列的 `selection_status` 與 `exclusion_reason` 上，
+再複製一份只會多一個可能不同步的地方。**`selected_symbols` 是唯一的清單輸出。**
 
 ## 執行流程
 
@@ -233,16 +241,32 @@ watchlist 的唯一理由。強塞進 universe 只會多一個無桶標的，並
 
 Phase 2 的目的不是選股，而是維護已確認的標的池。
 
-建議資料表仍沿用 T-040 原規格：
+### 為什麼 Phase 2 不是「有空再做」：選池目前完全沒有日更
 
-| 欄位 | 說明 |
+**日更同步只跑 watchlist。** 2026-08-17 實測，**全庫只有 9 檔有當日資料，全部是 watchlist 成員**；
+選池另外 122 檔停在 08-12～08-14，自從被回補後就沒有任何流程再碰它們。
+
+| 最後交易日 | 檔數 |
 |---|---|
-| `symbol` | 代號 |
-| `bucket_hint` | selection report 決定的 bucket |
-| `selected_at` | 入池時間 |
-| `source` | 入池來源，例如 `T-040_STEP3` |
-| `active` | 是否仍在每日日 K 維護 |
-| `note` | 流動性門檻、ETF supplemental 等備註 |
+| 2026-08-17（當日） | 9（全為 watchlist） |
+| 2026-08-14 | 78 |
+| 2026-08-13 | 39 |
+| 2026-08-12 | 5 |
+
+後果是**每次跑 evaluation 前都得先手動回補一次來對齊尾端**——evaluation 取的是「最後 N 根」，
+各檔尾端差 1～3 個交易日會讓評估視窗錯開，也讓同一份報告隔幾天重跑得到不同結果
+（無法歸因是策略變了還是資料窗變了）。今天補完，明天又會漂掉。
+
+**這條營運負擔會一直存在，直到 Phase 2 的排程上線。** 所以 Phase 2 不只是「維護」，
+它是讓階段 5／6 的結果可重現的前提。在它之前，「跑 evaluation」的標準流程是
+**先對整個選池做一次對齊回補，再跑**。
+
+回補成本與天數無關：`Fetcher.BackfillHistory` 對每檔只發**一個** `FetchDailyCandles`
+請求（`market/finmind.go:182` 把日期區間塞進同一個請求），所以 `days=10` 與 `days=2400`
+都是 1 request/檔。131 檔 ÷ 5 req/min ≈ **26 分鐘**。既然成本相同，
+對齊回補直接用 `days=2400`：一次同時補齊尾端、深度與歷史缺漏。
+回補成功後會自動重算還原係數，而係數是 `corporate_actions` 的純函數、整段覆寫，
+所以重抓已有 5 年的標的**沒有副作用**。
 
 排程仍應只做一件事：每日盤後對 active universe 跑日 K 更新。
 
@@ -253,6 +277,144 @@ Phase 2 的目的不是選股，而是維護已確認的標的池。
 - signal 掃描
 - production SR zone 分析與驗證
 - watchlist UI
+
+---
+
+## Step 5 執行計畫書（2026-08-17，**待確認**）
+
+依 CLAUDE.md，本項屬跨模組（DB / repo / API / 排程 / 前端）異動，實作前需確認本計畫書。
+
+### 目標
+
+把「131 檔選池」從一份 scratchpad JSON 變成**系統維護的狀態**，讓：
+
+1. 選池成員與其入池依據（bucket、邊界、來源）可查、可審、可停用。
+2. 每日盤後自動更新 active 成員的日 K，**消除「跑 evaluation 前要先手動對齊」這條營運負擔**。
+3. 階段 5／6 的結果可重現——今天已實證同一份報告隔幾天重跑會因尾端漂移而不同。
+
+### 不做的範圍
+
+- **不自動重選池。** 今天實證選池不是不動點（回補後重跑 131 → 126、26 檔換桶），
+  universe 是**人工確認的決策**，Phase 2 只負責維護已確認的清單。
+  重選由人跑 selection report 後明確匯入。
+- **不接入盤中分 K、籌碼同步、signal 掃描、production SR 分析、watchlist UI。**
+  這是 T-040「新標的不能放進 `watchlists`」的核心約束。
+- **不動 `rate_limit`**（5 req/min）。理由見 T-040 風險段。
+- 不改 `watchlists`、`candles`、`stock_symbols` 的結構。
+- **不預設啟用排程。** 比照 `sr_evaluation`，`enabled: false` 起步。
+- 不做 bucket 邊界的**消費**邏輯（下游要不要用凍結邊界分桶）——那是 T-003 的決定，
+  本項只負責**記錄**當時用的邊界。
+
+### 受影響檔案與資料流
+
+```text
+selection report (JSON)
+   │  人工確認後匯入
+   ▼
+POST /api/v1/evaluation-universe        ← 新增
+   ▼
+evaluation_universe（migration 066 × 3 engines）  ← 新表
+   ▼
+每日 16:00 evaluation_universe_sync    ← 新 cron job
+   │  Fetcher.BackfillHistory(active symbols, days=10)
+   ▼
+candles（只多幾個 symbol 的列，schema 不變）
+   ▼
+scripts/run-evaluation.sh --symbols <active>  → 階段 5／6
+```
+
+| 檔案 | 變更 |
+|---|---|
+| `internal/database/migrations/{postgres,sqlite,mysql}/066_evaluation_universe.sql` | 新表，三份 |
+| `internal/store/evaluation_universe_repo.go` ＋ `_test.go` | `List` / `Upsert` / `SetActive` |
+| `internal/store/model.go` | `EvaluationUniverseEntry` |
+| `internal/scheduler/scheduler.go` | 註冊 `evaluation_universe_sync` cron |
+| `internal/api/handler/evaluation_universe.go` ＋ `router.go` | 三個端點 |
+| `internal/api/handler/scheduler.go` | `knownSchedulerJobs` ＋ staleness 門檻 ＋ 手動觸發 |
+| `backend/config.yaml` | `evaluation_universe` 區塊 |
+| `frontend/src/routes/EvaluationUniverse.svelte` ＋ `lib/api/` | 「已入池」區塊 |
+| `docs/api-reference.md`、`docs/database-schema.md` | contract 與 schema |
+
+### 資料 contract
+
+`evaluation_universe`：
+
+| 欄位 | 類型 | 說明 |
+|---|---|---|
+| `symbol` | VARCHAR(10) UNIQUE | 代號 |
+| `bucket_hint` | VARCHAR(32) | 入池時的 `selection_bucket` |
+| `bucket_edge_low` / `bucket_edge_high` | DECIMAL(18,10) | **入池時實際使用的分位數邊界** |
+| `universe_version` | VARCHAR(32) | 例如 `v2`；重新取分位數就升版 |
+| `universe_role` | VARCHAR(16) | `primary` / `supplemental`（見「watchlist 的分級保留」） |
+| `selected_at` | TIMESTAMPTZ | 入池時間 |
+| `source` | VARCHAR(64) | 例如 `T-040_STEP3` |
+| `active` | BOOLEAN NOT NULL DEFAULT true | 是否仍納入每日維護 |
+| `note` | TEXT | 流動性門檻、`insufficient_depth` 等備註 |
+
+**為什麼把邊界存進每一列**（而不是只存 `bucket_hint`）：`bucket_hint` 單獨存在無法回答
+「這個 bucket 是用哪組邊界判的」。今天實證有 3 檔 `atr_pct` 完全未變卻換桶，
+只因母體變了邊界移動。131 列的反正規化成本可以忽略，換來的是**每一列自我描述**。
+不論 T-003 最後決定要不要用凍結邊界分桶，「記下當時用了什麼」都是必要的。
+
+**仲裁順序不變**：這張表不參與任何交易決策或狀態推導，是純研究用清單。
+
+### 排程時段：16:00
+
+現有排程與成本：
+
+| 時間 | job | FinMind requests |
+|---|---|---|
+| 06:30 | `corporate_action_sync`、`stock_symbol_sync` | 少量 |
+| 08:50 | `pre_market` | 11 |
+| 09:00–13:30 每 5 分 | `intraday` | 11/次 |
+| 15:00 | `daily_close` | 11 |
+| **16:00** | **`evaluation_universe_sync`（新）** | **131 → 約 26 分鐘** |
+| 21:00 | `chip_daily_sync` | 22 |
+| 22:30 | `sr_evaluation` | 0（Python，吃 CPU/記憶體） |
+
+**選 16:00 的理由**：晚於 `daily_close`（15:00 已確認 FinMind 當日日 K 已發布——14:00 曾抓到
+`count=0`），且與 21:00 的籌碼採集有近 5 小時緩衝，26 分鐘的執行窗絕不會重疊。
+`cron: "0 16 * * 1-5"`，可由 `EVALUATION_UNIVERSE_CRON` 覆寫。
+
+`days=10`（而非 5）：容忍連假與國定假日，成本與 `days=5` 相同（1 request/檔）。
+
+### 主要風險與回滾
+
+| 風險 | 處理 |
+|---|---|
+| **每日 FinMind 用量增加 131 requests** | 預設 `enabled: false`；16:00 時段沒有其他 job，131 req/26 分遠低於 600/h 上限 |
+| 部分標的抓取失敗 | 沿用 `BackfillHistory` 的 `onSymbol` 回呼累計 `symbols_failed` 寫進 `job_runs`，**不中止整批** |
+| mysql 版 repo CRUD 從未驗證 | 這正是 `issue.md` I-054 第 1 項。本項新增 repo 只保證 DDL 過 `scripts/test-mysql-migrations.sh`；**CRUD 仍只跑 sqlite**，要在 I-054 記下新增了一個未驗證的 repo |
+| 26 分鐘的 job 與手動回補重疊 | job 開始前檢查同名 `job_runs` 是否 running，重複觸發直接跳過 |
+| `bucket_hint` 與下游重算的 bucket 不一致 | 存 `bucket_edge_low/high` ＋ `universe_version`，讓不一致**看得出來**而不是靜默 |
+| 回滾 | migration 有 `-- +goose Down`；排程 `enabled: false` 即停；已抓的 candles 留著無害（不被任何既有流程掃到） |
+
+### 測試與驗證策略
+
+1. `backend/scripts/test.sh ./internal/store/... ./internal/api/handler/... ./internal/scheduler/...`
+2. migration 在 **dev project** 實跑（CLAUDE.md：不得用 live/deploy compose 驗證 migration）
+3. `scripts/test-mysql-migrations.sh`——動到 `migrations/mysql/` 就要跑，
+   新測試名稱必須以 `TestMySQLMigrations` 開頭
+4. `scripts/test-postgres-migrations.sh`
+5. 前端 `frontend/scripts/test.sh`
+6. **live 驗證（唯讀）**：手動觸發一次 sync 後查 `job_runs` 的 `symbols_total=131`／
+   `symbols_failed`，並確認 131 檔的最後交易日一致
+7. **端到端**：隔一個交易日後不做任何手動回補，直接跑
+   `scripts/verify-regression-baseline.sh`——**blocking 項應全數通過**。
+   這是本項唯一真正的驗收標準：它證明「尾端自動保持對齊」
+
+### 前置條件
+
+- **T-003 的「bucket 邊界凍結」要先有決定**。本表只記錄邊界，但 `universe_version`
+  的語意（何時該升版）取決於那個決定。
+- 匯入的 131 檔清單以 `report-v6` 為準（已通過階段 4／5／6）。
+
+### 完成後歸檔
+
+- 表結構與欄位語意 → `docs/database-schema.md`
+- 三個端點 → `docs/api-reference.md`
+- 排程時段與每日成本 → `docs/development-workflow.md` 的排程段落
+- 「評估標的池與 watchlist 的分工、為何不合併」→ `docs/architecture.md`
 
 ## 測試與驗證策略
 
@@ -396,16 +558,96 @@ mem-guard 直接擋下、連 10 檔都跑不起來（見 `development-workflow.m
 同時比對三項與 Step 0 外推值的落差：實際峰值 vs 420MB、耗時 vs 14 分鐘、
 report 的 `volatility_profiles` bucket 分佈 vs selection report 的預期。
 
+#### 階段 5 實測結果（2026-08-17，131 檔）
+
+| 項目 | Step 0 外推 | 實測 | 判定 |
+|---|---|---|---|
+| container 峰值 | ~401MB（270 基線 ＋ 1.0MB×131） | **382 MB** | ✅ 外推略為保守 |
+| host available 低點 | — | 225 MB（起始 647MB） | ✅ 未觸及 150MB 保留 |
+| 耗時 | ~12 分鐘（5.5 秒/檔） | **約 12 分鐘** | ✅ 相符 |
+| dataset | — | **72,083 rows / 131 sources** | — |
+
+**Step 0 留下的「尚未驗證」已解掉**：那裡寫「外推假設 zone building 的中間物隨標的數
+線性成長，這一段沒有直接量到」。131 檔實測 382MB 低於外推的 401MB，
+**「固定基線 ＋ 線性邊際」的模型成立且偏保守**，可以繼續用來估更大規模。
+
+執行條件：mem-guard 把 `MEM` 由 700m 下修為 497m（available 647MB − 150MB 保留），
+過程中未觸及上限。**gitea 當時未常駐**——它在的話 available 只有 398MB，連 10 檔都跑不起來。
+
 ### 階段 6：回歸基準（唯讀）
-
-watchlist 的資料沒變，它們的 `volatility_profiles` **應與 2026-08-06 那次完全相同**。
-不同即代表 pipeline 在這段期間被改動而未被發現。
-
-這是「保留 watchlist」的正確用法——比對的是**個別標的的統計**，不是 sweep 的結論。
 
 **基準是 9 檔不是 11 檔**：00947、00981A 深度撐不起 walk-forward（見階段 4），
 以 `select_universe` 輸出的 `regression_baseline_symbols` 為準，不要手寫 watchlist 清單。
 實測該欄位為 `0050, 00830, 2330, 2399, 2454, 2478, 3630, 5490, 6243`。
+
+#### 原定義是錯的：「與 2026-08-06 完全相同」不可能成立（2026-08-17 修正）
+
+本節原本寫「watchlist 的資料沒變，`volatility_profiles` 應與 2026-08-06 那次完全相同」。
+實際執行時發現**兩個前提都不成立**：
+
+**一、那個基準從未落地。** `stock_sr_regression_results` 是空表，git 裡也沒有任何 committed
+的 evaluation 產出。2026-08-06 那次是 sweep，而 sweep **刻意不寫**
+`stock_sr_regression_results`（見 `todo.md` T-003 P1 已實作範圍）。能比對的只剩
+`sr-zone-scoring.md` 留下的彙總數字，沒有逐檔數值。
+
+**二、「資料沒變」是錯的。** `atr_pct` 取**近 60 根**，時間前進窗口就滾動；更關鍵的是
+**2026-08-11／12 的股價還原工作改寫了 `adj_factor`**，還原價變了 ATR 必然變：
+
+| 標的 | 2026-08-06（文件記載） | 2026-08-17（實測） |
+|---|---|---|
+| 2330 / 0050 | ≈ 3.2% | 2.65% / 2.60% |
+| 6243 | 11.6% | 8.60% |
+| 絕對門檻分佈 | HIGH 9 / NORMAL 2 / LOW 0 | HIGH 6 / NORMAL 3 / LOW 0 |
+
+**在資料會前進的系統上，「數值完全相同」是不可檢驗的命題。** 把它當通過條件只會讓階段 6
+永遠失敗，然後被當成雜訊忽略——那比沒有這道檢查更糟。
+
+#### 修正後的定義：排序穩定性 ＋ 落地基準
+
+**檢查一：blocking 項——序數性質（抗資料移動，這是真正的回歸檢查）**
+
+| 性質 | 2026-08-17 實測 |
+|---|---|
+| 所有基準標的都有 profile | ✅ 9/9 |
+| 波動最高者不變 | ✅ `6243`（2026-08-06 亦然） |
+| 波動最低兩檔不變 | ✅ `0050`、`2330`（2026-08-06 亦然） |
+| `atr_pct` 排名 Spearman ≥ 0.9 | ✅ |
+
+序數性質對「新增幾天資料」不敏感，但對「pipeline 算錯」很敏感——
+改壞 ATR 公式、還原係數套錯方向、bucket 判定寫反，都會打亂排序。
+
+**檢查二：觀察項——bucket 跨越（記錄但不阻擋）**
+
+「有沒有標的跨越 LOW/NORMAL/HIGH 邊界」**刻意不是失敗條件**。
+絕對門檻（1.5% / 3.5%）與台股分佈差一個量級（見 `todo.md` T-003「門檻重定」），
+標的常態貼在 3.5% 附近，普通的資料漂移就會跨過去。**實證：2026-08-06 到 08-17 的 11 天內
+HIGH 由 9 檔變 6 檔，期間 pipeline 沒有任何改動。**
+
+設成 blocking 會讓階段 6 常態失敗、然後被當成雜訊忽略——**那比沒有這道檢查更糟**。
+所以它輸出在 `warnings` 裡供人判讀，不影響 exit code。
+（門檻重定之後這一項才有機會變成 blocking。）
+
+**檢查三：基準必須落地成版本控管的檔案**
+
+原定義失敗的根因是**基準從來沒被存下來**。所以階段 6 的產出是一個檔案：
+
+```bash
+# 產出 evaluation report（約 12 分鐘 / 131 檔）
+OUTPUT=/tmp/eval.json scripts/run-evaluation.sh --symbols <選池> --limit 1500
+# 比對
+scripts/verify-regression-baseline.sh /tmp/eval.json
+```
+
+基準檔在 `python/baselines/sr_volatility_baseline.json`，邏輯在 `python/baseline_check.py`
+（純函數，`tests/test_baseline_check.py` 9 支測試）。
+
+**為什麼放進 git 而不是寫 DB**：基準的價值在於「改變時要被看見並被 review」，
+那正是 git diff 的語意；寫進 `stock_sr_regression_results` 需要 `--write-db`
+（計畫書全程避免動 live），而且 DB 裡的一列不會出現在 code review 上。
+
+**快照是必填欄位**。基準檔記下最後交易日、每檔列數、`adj_factor` 重算狀態；
+`REBUILD=1` 沒給 `SNAPSHOT` 會直接中止。**少了它，下次比對無法判斷差異來自 pipeline
+還是來自資料**——那就是這次踩到的坑。
 
 ### T-003 後續
 
@@ -421,15 +663,19 @@ watchlist 的資料沒變，它們的 `volatility_profiles` **應與 2026-08-06 
 `scripts/build-selection-report.sh`（唯讀）→ `python/selection_report.py`。
 核心是純函數，測試不需要 DB；已知答案測試用 live 實測的真實標的形狀當 fixture。
 
-### 選池結果：130 檔
+### 選池結果：131 檔
 
-| bucket（分位數） | 候選 | 選入 | 其中 ETF | 產業數 |
-|---|---|---|---|---|
-| `LOW_VOLATILITY` | 128 | 45 | 2 | 20 |
-| `NORMAL_VOLATILITY` | 85 | 45 | 2 | 21 |
-| `HIGH_VOLATILITY` | 90 | **29**（未達 35） | 0 | 14 |
+| bucket（分位數） | 候選 | bucket 名額選入 | 其中 ETF | ＋watchlist | bucket 合計 | 產業數 |
+|---|---|---|---|---|---|---|
+| `LOW_VOLATILITY` | 128 | 45 | 2 | 3 | 48 | 20 |
+| `NORMAL_VOLATILITY` | 85 | 45 | 2 | 5 | 50 | 21 |
+| `HIGH_VOLATILITY` | 90 | **30**（未達 35） | 0 | 3 | 33 | 14 |
 
-流動性門檻 2,000 萬、產業上限 11 檔/bucket、上市滿 5 年、watchlist 11 檔無條件保留。
+流動性門檻 2,000 萬、產業上限 11 檔/bucket、上市滿 5 年、watchlist 11 檔分級保留
+（分級規則見「watchlist 的分級保留」）。watchlist 不佔 bucket 名額，所以
+`per_bucket.picked` 只算 bucket 名額那一欄。
+
+**`HIGH_VOLATILITY` 的 `underfilled: true` 是預期的穩定狀態，不是待辦。** 理由見下方決定二。
 
 ### 三個設計決定（2026-08-17）
 
@@ -443,12 +689,28 @@ watchlist 的資料沒變，它們的 `volatility_profiles` **應與 2026-08-06 
 讓 T-003 有可執行的依據而不是印象。與其扭曲選池去遷就過時的門檻，
 不如把門檻重定正式納入 T-003（見 `todo.md` T-003「門檻重定」）。
 
-**二、接受 HIGH bucket 只有 29 檔，不放寬產業上限。**
+**二、接受 HIGH bucket 填不滿（bucket 名額 30、含 watchlist 共 33），不放寬產業上限。**
 
-這不是演算法的問題，是**母體的事實**：HIGH bucket 的 90 個候選裡 **82 檔是半導體業**（91%）。
-產業上限把它壓到 11 檔後，其餘 13 個產業總共只湊得出 18 檔。
-**「產業分散的高波動 bucket」在台股資料上不成立**——放寬上限只會讓 HIGH 變成半導體專場，
-那對調參沒有幫助。這一點應直接寫進 T-003 的判讀前提。
+這不是演算法的問題，是**母體的事實**：HIGH bucket 的 90 個候選裡 **81 檔是半導體業**（90%），
+其餘 14 個產業各只有 1～4 檔。產業上限 11 一設，**理論上限就只有
+`Σ min(該產業檔數, 11) = 36`**——`per_bucket_min = 35` 在這個母體上幾乎不可能達成，
+而且達成了也只是把半導體佔比推更高。
+
+**「產業分散的高波動 bucket」在台股資料上不成立。** 台股「高波動且流動性足」幾乎等於半導體。
+
+**為什麼接受而不是調參數**：T-003 要比的是「同一組 builder config 在不同波動 bucket 上的表現」，
+HIGH 有 33 檔已**遠超統計需求**——2026-08-06 那次 sweep 的 HIGH 只有 9 檔就是當時的瓶頸。
+為湊到 35 而把產業上限放寬到 18，半導體佔比會從 37% 升到 42%，
+等於讓 HIGH 變成「半導體專用參數」，對調參是負面的。
+
+考慮過並否決的兩個替代方案：
+
+* **只對 HIGH 放寬產業上限**（0.25 → 0.4）：能到約 43 檔，但代價如上。
+* **降 `per_bucket_min` 到 30**：只是改判準讓旗標變綠，不改變任何實質內容；
+  保留 `underfilled: true` 反而讓「這個 bucket 受母體結構限制」在每份報告上都看得見。
+
+這一點應直接寫進 T-003 的判讀前提：**HIGH bucket 的結論天生帶半導體業偏斜**，
+跨 bucket 比較時要把這件事算進去。
 
 **三、ETF 給獨立配額（每 bucket 2 檔），不佔產業名額。**
 

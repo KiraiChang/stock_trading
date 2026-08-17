@@ -990,7 +990,7 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     #   docs/development-workflow.md §3），
     # 所以由這一側主動失敗並提醒。改這裡的同時要確認
     # `frontend/src/lib/api/srZones.ts` 有沒有對應型別需要一起改
-    # ——目前**刻意沒有**replay row 的 TS 型別（見 issue.md I-062）：前端不消費
+    # ——目前**刻意沒有**replay row 的 TS 型別（見 docs/development-workflow.md §3「什麼時候才該新增跨語言的型別宣告」）：前端不消費
     # replay_rows，加一個沒有消費者的宣告只會重蹈「型別沒被消費所以默默寫錯」的覆轍。
     # 這份清單就是日後真的要加型別時的權威來源，不要憑記憶手寫。
     assert set(scored_row["primary_zone"]) == {

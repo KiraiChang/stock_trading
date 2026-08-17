@@ -274,7 +274,7 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 總和**。每個 stack 都設 `0.5` CPU / `512m` / `768m`，看似安全，但那是**每個 container 各自的
 上限**，不是總量保證：10 個 container 加起來就是 ~5 GB 的授權額度，而 host 只有 2 GiB。
 
-2026-08-05 16:22 實際發生過（見 [issue.md](./issue.md) I-053）：live project `stock_trading`
+2026-08-05 16:22 實際發生過：live project `stock_trading`
 被拉起來後，全機共 10 個 container ＋ claude ~400 MB ＋ codex ~137 MB ＋ dockerd ~314 MB，
 **沒有任何 container 撞到自己的 512m 上限**（全部 `OOMKilled=false`），是 host 先耗盡，
 於是 claude 被砍，接著 `docker-proxy` × 8 與 `dockerd` 也被砍，所有 container 一起停掉。

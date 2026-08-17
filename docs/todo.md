@@ -284,7 +284,7 @@ F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 r
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 | P0 狀態 | 已實作（2026-08-05 review 通過） |
 | P1 狀態 | 已實作（2026-08-05 review 通過；計畫列的五個比較面向全數覆蓋） |
-| P2 狀態 | **擱置**（機制完整、預設關閉；sweep 已實跑，結論是**標的池不足以支撐決策**，見下方） |
+| P2 狀態 | **擱置**（機制完整、預設關閉；sweep 已實跑，結論是**標的池不足以支撐決策**，見下方）。**2026-08-17 新增前置輸入：bucket 絕對門檻需重定**，見下方「門檻重定」 |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
@@ -409,9 +409,64 @@ sweep 已於 2026-08-06 實際跑過（11 檔 watchlist、`--limit 1500`、grid 
 更多次 sweep。在 11 檔、9 檔擠在 HIGH 的情況下，再跑幾次都會得到同樣的雜訊。
 因此 P2 狀態改為**擱置**——機制完整、預設關閉是安全的現況，等標的池擴大後再重跑一次 sweep 即可。
 
+#### 門檻重定：P2 的新前置輸入（2026-08-17，來自 T-040 Step 3）
+
+**「等標的池擴大後再重跑 sweep」這句話不夠——擴大之後才發現真正的阻礙是門檻本身。**
+
+T-040 Step 3 對 857 檔全市場資料實測，pipeline 的絕對門檻與台股實際分佈**差了一個量級**：
+
+| | LOW | NORMAL | HIGH |
+|---|---|---|---|
+| `zone_builder.py` 現行絕對門檻 | `< 1.5%` | 1.5–3.5% | `> 3.5%` |
+| **流動性合格股票（319 檔）的實際分位數** | **`< 4.25%`**（P33） | 4.25–6.04% | **`> 6.04%`**（P67） |
+
+後果是**選池怎麼挑都沒用**：Step 3 用分位數選出三個 bucket 各 45/45/29 檔的 universe，
+但同一批標的用 pipeline 的絕對門檻分類是 **103 / 26 / 1**——LOW bucket 只剩一檔。
+`VOLATILITY_BUCKET_ATR_CONFIGS` 是照絕對門檻分派 config 的，所以 LOW 那組 config
+仍然只會被一檔標的觸發，**與 2026-08-06 sweep 時 LOW 為 0 檔的處境沒有實質差別**。
+
+**所以 P2 的順序要改**：先重定 `LOW_VOLATILITY_THRESHOLD` / `HIGH_VOLATILITY_THRESHOLD`，
+再跑 sweep。門檻的候選值已由 selection report 的 `threshold_gap` 欄位輸出
+（`scripts/build-selection-report.sh`），不需要重新推導。
+
+**重定門檻是破壞性變更**，會改變既有 `stock_sr_zone_analyses` 的 bucket 語意，
+規劃時要一併決定：既有資料是否重算、`volatility_profiles` 的歷史值如何標示新舊。
+
 **不做的事（明確記下來，避免日後誤動）**：不因這次結果調整 `build_zone_builders()` 的預設值。
 score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket` 的
 `insufficient_sample=false` 只保證樣本數夠，不保證候選之間有可分辨的差異。
+
+##### 併入項目：bucket 邊界必須凍結進 universe artifact（2026-08-17，來自 T-040 階段 4 驗證）
+
+**分位數邊界是相對於當下母體的，母體一動邊界就漂——bucket 不是標的的固有屬性。**
+
+deep backfill 完成後重跑 selection report，與回補前的 `universe-v2.json` 比對，實測到：
+
+| 觀察 | 數字 |
+|---|---|
+| 全體 857 檔 bucket 變動 | 9 檔 |
+| 其中在 130 檔選池內 | 6 檔 |
+| **其中這次完全沒重抓、`atr_pct` 一個 bit 都沒變** | **3 檔**（3530、3661、8102） |
+
+邊界移動量：LOW/NORMAL `0.0424759 → 0.0417790`（-1.64%）、NORMAL/HIGH `0.0604097 → 0.0605084`（+0.16%）。
+3530（`atr_pct` 固定 0.042139）、3661（0.060433）、8102（0.041858）三檔的值完全未變卻跳桶，
+**直接證明變動來自邊界而非標的本身**。
+
+風險放大在於邊界附近很擠：**選池 130 檔中有 18 檔（14%）距離最近邊界不到 2%**，
+其中 2376、6405 的相對距離是 0.00%——就壓在線上。後果有兩層：
+
+1. 選池刻意經營的 LOW 45 / NORMAL 45 / HIGH 29 配比會隨每日資料進來自己劣化，壓線的十幾檔來回跳。
+2. 跨期比較失真：下次 evaluation 結果與這次不同時，**分不清是策略改了還是 bucket 定義改了**。
+
+**做法**：selection report 已輸出 `quantile_edges`，選池定案時把該值凍結進 universe artifact，
+下游 evaluation 依凍結邊界分桶而不是每次重算。重新取分位數改成明確的版本升級動作
+（universe v2 → v3），不是每天偷偷發生的副作用。
+
+這與上面「重定絕對門檻」是同一件事的兩面，**必須一起規劃**：絕對門檻決定 bucket 的語意，
+凍結機制決定該語意在時間軸上是否穩定。只做前者，重定完的門檻一樣會被下一批資料推著跑。
+
+> 附帶結論：階段 4 原本寫的驗證判準「5 年資料到位後 bucket 不該變」**是錯的**，已依此實測修正，
+> 見 `docs/evaluation-universe-selection-plan.md` 的階段 4。
 
 ---
 
@@ -886,7 +941,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 - **記憶體（最主要）**：host `MemAvailable` 約 500MB，evaluation 會載 pandas + sklearn +
   lightgbm（+shap）。順序執行時 peak 是單組的 peak 而非累加，但要在 pass 0 實測確認每組之間
   真的有釋放。`--memory` 比照 mem-guard 原則設定（不高於 available − 150MB），
-  **不因為想跑快就調高**（見 issue.md I-053）。
+  **不因為想跑快就調高**（見 `development-workflow.md`「`MEM` 是上限，不是預留」）。
 - **live DB 讀取負載**：11 檔 × 1500 根 ≈ 16,500 列／次，每個 candidate 各讀一次。量極小，
   但 pass 1 是 6 次。純 SELECT。
 - **輸出位置**：`--output` 要寫到 repo 外（掛一個 `/tmp` 或 scratchpad），不要落進 repo 被
@@ -902,7 +957,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 ---
 
-### T-040：擴充評估標的池（第一階段：精選 100～200 檔）
+### T-040：擴充評估標的池（第一階段：精選 120～150 檔）
 
 | 欄位 | 內容 |
 |---|---|
@@ -911,6 +966,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
 | 來源 | T-039 sweep 實跑結論：卡住的是標的池，不是參數 |
+| Step 3 計畫 | 詳細流動性過濾與最終 universe 選取規格見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md) |
 
 **背景**：2026-08-06 實跑 sweep 後確認，SR Zone 的參數調校卡在標的池只有 **11 檔**
 （9 檔落在 HIGH bucket、NORMAL 只有 `0050`／`2330`、LOW **完全空白**），候選之間的差異落在
@@ -919,7 +975,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 #### 目標
 
-1. 把評估用的標的池從 11 檔擴到 **100～200 檔**，且**橫跨三個波動 bucket**。
+1. 把評估用的標的池從 11 檔擴到 **120～150 檔**，且**橫跨三個波動 bucket**。
 2. 這些標的每日盤後自動更新日 K，讓歷史持續累積。
 3. **完全不改變現有 watchlist 的行為與成本。**
 
@@ -930,7 +986,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
   2GiB host），屬另一個量級的工程，另案處理。
 - **不讓新標的進入盤中掃描、籌碼同步、SR 分析、signal 掃描**（理由見下節）。
 - **不動 bucket 門檻**。門檻要怎麼改，要等本項的 Step 1 量出實際分佈才有依據。
-- 不改 evaluation pipeline 的批次設計——100～200 檔預期仍撐得住，但要實測確認。
+- 不改 evaluation pipeline 的批次設計——120～150 檔預期仍撐得住，但要實測確認。
 
 #### 關鍵設計決定：新標的不能放進 `watchlists`
 
@@ -969,7 +1025,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 新增的 `evaluation_universe` 是**只處理日 K 的清單**，這是它與 `watchlists` 的唯一分野，
 也是整個設計的重點。**明確界定它做什麼、不做什麼**，避免日後被順手接上其他流程：
 
-| | `watchlists`（11 檔，不動） | `evaluation_universe`（新，100～200 檔） |
+| | `watchlists`（11 檔，不動） | `evaluation_universe`（新，120～150 檔） |
 |---|---|---|
 | 每日日 K | ✅ | ✅ **只有這一項** |
 | 盤中分 K（每 5 分鐘） | ✅ | ❌ |
@@ -1003,7 +1059,7 @@ evaluation 從未實測，若跑不動，前面所有抓取與建表都是白工
 | 1 | `ListCandidates` repo 方法與端點 **✅ 已完成 2026-08-12** | `GET /stock-symbols/candidates`，見上方 Phase 1 表與 [`api-reference.md`](./api-reference.md) | 純 backend，無外部依賴 |
 | 2 | Step 1 抓取（見下） | 全市場 ATR% 分佈 | 650 requests ≈ 2.2 小時 |
 | 3 | Step 2 判讀 → bucket 門檻定案 | **可能改變 T-003 的設計** | 分析，無抓取 |
-| 4 | Step 3 選 100～200 檔並深抓 | 最終標的池 | 150 requests ≈ 30 分鐘 |
+| 4 | Step 3 選 120～150 檔並深抓 | 最終標的池 | 150 requests ≈ 30 分鐘 |
 | 5 | Phase 2：`evaluation_universe` 表與排程 | 常態維護 | 見上方檔案表 |
 
 **Step 1 與 Step 3 不合併（2026-08-12 決定）**：`FetchDailyCandles`（`market/finmind.go:182`）
@@ -1040,7 +1096,7 @@ N=30（317MB）高於 N=40（310MB）的 7MB 是量測噪音（cgroup v1 峰值�
 
 **因此目標上限由 200 檔下修為 150 檔**，且**執行前必須確認 host available ≥ 570MB**。
 實測期間 gitea（209MB）常駐時 available 只有 398MB，mem-guard 直接擋下、
-連 10 檔都跑不起來——這是 I-053「本機同時只允許一組 stack 常駐」的另一個面向。
+連 10 檔都跑不起來——這是 `development-workflow.md`「本機同時只留一組 stack」的另一個面向。
 
 時間約 **5.5 秒/檔**，150 檔單次約 14 分鐘（與 I-056 估的 16 分鐘相符）；
 sweep 要乘候選數，6 組候選約 1.4 小時。
@@ -1153,7 +1209,17 @@ evaluation 硬性需要成交量與成交金額，兩者 Yahoo 都給不了或�
 `6236`、`00625K`。是成交本身稀薄（停牌或極低流動性），不是抓取失敗——
 正好是流動性下限要濾掉的類型。
 
-**Step 3：選 100～200 檔深抓 5 年**
+**Step 3：選 120～150 檔深抓 5 年** ✅ **選池完成 2026-08-17（130 檔）**
+
+> 完整結果、三個設計決定與演算法說明見
+> [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
+> 的「Step 3 實測結果」。**最重要的發現**：pipeline 的 bucket 絕對門檻與台股實際分佈
+> 差一個量級（1.5%/3.5% vs 實測分位數 4.25%/6.04%），**不重定門檻，選池怎麼挑都沒用**
+> ——已列為 T-003 的前置輸入。deep backfill 尚未執行。
+
+詳細計畫見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)。
+Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 selection report，
+用流動性門檻矩陣與 bucket 策略決定最終標的池，再 deep backfill 5 年。
 
 三個 bucket 各 40～60 檔，選取規則：
 
@@ -1895,7 +1961,12 @@ version control（`A` 狀態）。若未來常發生類似問題，應補一個�
 **收斂驗證（2026-08-13）**：`backend/scripts/test.sh ./internal/analysis ./internal/store ./internal/api/handler`
 通過，`bash -n scripts/verify-event-timeline.sh` 通過，
 `python/scripts/test.sh backtest/modular/sr_scoring/tests/test_event_engine.py` 通過（27 passed）。
-原先記在 `docs/issue.md` 的 `I-070` / `I-071` 已確認修復並移除，保留結論改歸檔於本節。
+原先記在 `docs/issue.md` 的兩筆 T-045 相關 issue（當時編號 `I-070` / `I-071`）已確認修復並移除，
+保留結論改歸檔於本節。**`I-070` 這個編號後來被回收再發過一次**（給了 T-040 selection report
+的 `keep_symbols` 靜默丟棄，該筆也已收斂，規格歸檔在
+[`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
+「watchlist 的分級保留」）。兩者都與本節無關；編號不重複發放是原則，這裡是既成事實，
+靠這段註記避免日後把三件事混在一起。
 
 #### P2 實作結果（2026-08-13）
 
@@ -2071,3 +2142,27 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 測試除原本 P1/P2 項目外，還要補路由與查詢層測試：endpoint 不被 `/sr-zones/:id` 吃掉、
 同狀態快照不產生 transition、`resolved_by` / `latest_event_type` 改變會產生 transition、
 跨 analysis 缺口會在輸出標示 snapshot gap，而不是假裝逐日連續。
+
+---
+
+### T-046：gitea stack 補上 `cpus` / `mem_limit` / `memswap_limit`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃（卡在權限） |
+| 優先度 | 低 |
+| 分類 | 開發環境 / Docker / 記憶體 |
+| 建立日期 | 2026-08-17（原記於 issue.md I-053 的「附帶發現」，該筆收斂時移入） |
+| 來源 | 2026-08-05 host OOM kill 事故調查 |
+
+`/opt/stacks/scripts/gitea/compose.yml` 是唯一沒有 `cpus` / `mem_limit` / `memswap_limit`
+設定的 stack（實測佔 **154 MB**），其他 stack 都是 `0.5` CPU / `512m` / `768m`。
+
+**為什麼要補**：host 只有 2 GiB，沒有上限的 container 不受 `mem_limit` 總和的約束，
+會直接侵蝕 `MemAvailable`。實測 gitea 常駐時 available 只有 398MB，mem-guard 直接擋下
+SR evaluation，連 10 檔都跑不起來。背景見
+[`development-workflow.md`](./development-workflow.md) 的
+「container 上限的**總和**也要顧」。
+
+**卡在權限**：該路徑屬 `kirai`（uid 1000），需由該帳號或 sudo 手動套用後重啟 gitea。
+目前的替代做法是跑 evaluation 前先手動停掉 gitea。

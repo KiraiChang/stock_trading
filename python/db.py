@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import date, datetime
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from config import get_db_url, DB_DRIVER
 
@@ -115,6 +115,95 @@ def fetch_candles(
     log.debug("fetch_candles symbol=%s tf=%s adjusted=%s → %d rows",
               symbol, timeframe, adjusted, len(result))
     return result
+
+
+def fetch_market_trading_days(timeframe: str = "1d", limit: int = 60) -> list[str]:
+    """最近 N 個**市場交易日**（全庫 distinct 日期），由新到舊。
+
+    **為什麼需要它**：candles 只有「有成交的日子」才會有列——沒成交的日子根本沒有那一列。
+    所以「某檔近 60 根裡有幾天有成交」恆等於 60，量不出流動性。
+    真正的分母是市場交易日：拿它去比對某檔在同一區間內有幾根 K 線，才看得出
+    「這檔有多少天根本沒人交易」（見 docs/evaluation-universe-selection-plan.md 的已知缺陷）。
+    """
+    if DB_DRIVER == "sqlite":
+        sql = text("""
+            SELECT DISTINCT date(ts) AS d FROM candles WHERE timeframe = :tf
+            ORDER BY d DESC LIMIT :limit
+        """)
+    elif DB_DRIVER in ("postgres", "postgresql"):
+        # ts 存 UTC，必須轉台北時區再取日期，否則整整差一天（見 docs/database-schema.md）。
+        sql = text("""
+            SELECT DISTINCT (ts AT TIME ZONE 'Asia/Taipei')::date AS d
+            FROM candles WHERE timeframe = :tf
+            ORDER BY d DESC LIMIT :limit
+        """)
+    else:
+        sql = text("""
+            SELECT DISTINCT DATE(ts) AS d FROM candles WHERE timeframe = :tf
+            ORDER BY d DESC LIMIT :limit
+        """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"tf": timeframe, "limit": limit}).mappings().all()
+    return [str(r["d"]) for r in rows]
+
+
+def fetch_watchlist_symbols() -> list[str]:
+    """watchlist 的代號（唯讀），由小到大。
+
+    **成員資格就是「`watchlists` 裡有這一列」**，不要用 `watched` 過濾——那個布林是
+    「要不要即時監聽」的開關（有併發上限，見 `watchlist_repo.SetWatched`），
+    實測 11 檔裡只有 2 檔為 true。拿它當成員條件會漏掉 9 檔。
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT symbol FROM watchlists ORDER BY symbol")).mappings().all()
+    return [str(r["symbol"]) for r in rows]
+
+
+def fetch_candle_depths(timeframe: str = "1d") -> dict[str, int]:
+    """每檔的**總 K 棒數**（全歷史），symbol → count。
+
+    **不要拿 `fetch_candles()` 回傳的長度當深度**：那個函式帶 `limit`，
+    selection report 只抓近 60 根算波動 profile，所以它的 `len()` 上限就是 60，
+    量的是「抓了幾根」不是「有幾根」。要判斷標的撐不撐得起 walk-forward 的
+    `--limit 1500`，只能用這裡的全表聚合。
+
+    單一 GROUP BY，實測 857 檔約 0.5 秒。
+    """
+    sql = text("SELECT symbol, COUNT(*) AS n FROM candles WHERE timeframe = :tf GROUP BY symbol")
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"tf": timeframe}).mappings().all()
+    return {str(r["symbol"]): int(r["n"]) for r in rows}
+
+
+def fetch_symbol_universe(symbols: list[str] | None = None) -> list[dict]:
+    """stock_symbols 主檔（唯讀）。symbols 為 None 時回傳全部仍上市者。"""
+    base = """
+        SELECT symbol, name, security_type, industry, listed_date, is_listed
+        FROM stock_symbols
+    """
+    params: dict = {}
+    if symbols:
+        # SQLAlchemy 的 expanding bindparam 讓 IN 清單在三種 engine 上都能用。
+        sql = text(base + " WHERE symbol IN :symbols").bindparams(
+            bindparam("symbols", expanding=True)
+        )
+        params["symbols"] = list(symbols)
+    else:
+        sql = text(base + " WHERE is_listed = :listed")
+        params["listed"] = True
+    with engine.connect() as conn:
+        rows = conn.execute(sql, params).mappings().all()
+    return [
+        {
+            "symbol": str(r["symbol"]),
+            "name": str(r["name"] or ""),
+            "security_type": str(r["security_type"] or ""),
+            "industry": str(r["industry"] or ""),
+            "listed_date": _iso_value(r["listed_date"]),
+            "is_listed": bool(r["is_listed"]),
+        }
+        for r in rows
+    ]
 
 
 def fetch_latest_chip_score(symbol: str, before_date: str | None = None) -> dict | None:

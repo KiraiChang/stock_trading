@@ -1187,7 +1187,7 @@ def _chip_row_for_as_of(chip_rows: list[dict] | None, as_of: object) -> dict | N
     latest: dict | None = None
     for row in chip_rows:
         # 缺 trade_date 或格式壞掉的 row 只跳過，不能讓整個 replay 拋例外——這份 context
-        # 可能來自 /sr-zones/evaluate 的呼叫端（見 docs/issue.md I-049）。姊妹函式
+        # 可能來自 /sr-zones/evaluate 的呼叫端（該端點不保證 row 帶齊欄位）。姊妹函式
         # _snapshot_for_as_of 本來就是這個行為，這裡補齊一致性。
         raw_date = row.get("trade_date")
         if raw_date is None:

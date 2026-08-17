@@ -12,6 +12,25 @@
 - 新增項目時往下加一筆，編號遞增（`I-0xx`）。修復後若仍需短期追蹤，先把「狀態」改成
   `已修復` 並補上「修復方式」；若修復紀錄已移到對應主題文件或 review 文件，
   則可從本清單移除。
+- **編號只增不重用。** 已移除的條目編號不得再發給新問題——程式碼註解與其他文件會留著舊 ID，
+  重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
+  移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
+  見 `todo.md` T-045 那段的註記。
+- **下一個新編號從 `I-073` 起算。** 本檔目前最大是 I-069，但 **I-070～I-072 都發放過**
+  （T-045 那批，在同一個工作階段內建立又移除，git 歷史裡看不到）。
+  **不要用「檔案裡最大值 + 1」決定編號**——被移除的條目正是看不見的那些。
+- **移除條目前要先反轉依賴。** 主題文件與程式碼註解常寫「見 issue.md I-0xx」，
+  這種寫法讓 issue.md 變成權威來源，一刪就斷鏈。移除前先把說明**內嵌**到對應主題文件，
+  再把所有引用改指向該文件。收斂後用下面這條檢查沒有殘留：
+
+  ```bash
+  comm -13 <(grep -o '^### I-0[0-9][0-9]' docs/issue.md | sed 's/### //' | sort -u) \
+           <(grep -rho "I-0[0-9][0-9]" --include="*.md" --include="*.go" --include="*.py" \
+              --include="*.sh" . | grep -v node_modules | sort -u)
+  ```
+
+  列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
+  不能有任何「見 I-0xx」形式的活指標。
 
 ---
 
@@ -31,60 +50,6 @@
 執行），fetch 回 None → gate 為 no-op，分析維持原本模型治理。這是刻意的安全預設（gate 只趨保守、
 不因缺資料而誤擋），但意味著**這層 P2 安全網要等該模型至少跑過一次 evaluation 並寫入 DB 後才生效**。
 上線流程若倚賴此 gate，需確保新模型部署後有排入一次 decision replay。屬營運相依，非 bug。
-
----
-
-### I-053：2 GiB host 下 live stack 與本機開發工具（claude / codex）不可併存，會被 host OOM killer 砍掉呼叫端
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已知限制（環境限制，不改 runtime） |
-| 嚴重度 | 中 |
-| 分類 | 開發環境 / Docker / 記憶體 |
-| 發現日期 | 2026-08-05 |
-| 來源 | 2026-08-05 16:22 claude 被 OOM kill 事故調查 |
-
-**現象**：Claude Code 這端完全閒置（沒跑測試、沒 build）時，claude 行程仍被 host OOM killer
-砍掉，並連帶引發 `docker-proxy` × 8 與 `dockerd` 被砍、所有 container 被停的 cascade。
-
-**時序（2026-08-05，CST）**：
-
-| 時間 | 事件 |
-|---|---|
-| 15:56:03 | live project `stock_trading`（backend / python-server / python-worker）被啟動 |
-| 16:22:02 | host OOM killer 砍掉 claude（anon-rss 402 MB、total-vm 5.9 GB） |
-| 16:22:31–16:23:57 | 連續砍掉 8 個 `docker-proxy` |
-| 16:23:57 | 砍掉 `dockerd`（anon-rss 314 MB） |
-| 16:23:58 | systemd 重啟 dockerd，接手後把殘留 container 全停（`python-worker` 逾時被 SIGKILL → `exit=137`） |
-| 16:24:13 | 只有 gitea（restart policy）回來 |
-
-**根因**：host cgroup 上限只有 2 GiB，事發當下同時有 **10 個 container**（15:56 才起的 live
-stack 3 個 ＋ 既有 7 個：dev postgres、postgres、redis、caddy、fin-api、akatengu、gitea），
-外加 host 上的 claude ~400 MB、codex ~137 MB、dockerd ~314 MB、containerd 與 10 個 shim。
-每個 container 都設了 `mem_limit: 512m`，但**加總約 5 GB 遠超過 host 的 2 GiB**——per-container
-上限只保證單一 container 不超標，不保證總和。所以沒有任何 container 撞到自己的 cgroup 上限
-（全部 `OOMKilled=false`），是 host 先耗盡，再由 host 層級 OOM killer 挑 badness 最高的行程，
-也就是持有最大 heap 的 claude。詳見 `development-workflow.md` 的
-「`MEM` 是上限，不是預留」與「container 上限的**總和**也要顧」。
-
-**規避方式**：本機同時只允許一組 stack 常駐。要跑 live project 前先確認沒有其他 stack 佔著
-記憶體；驗收一律用 `docker-compose.dev.yml` 的 dev project（CLAUDE.md 規定），不要在本機把
-live/deploy project 拉起來。
-
-**調查此類事故時的陷阱**：這台沙箱的 `dmesg -T` **絕對時間不可信**（kernel 單調時鐘與
-wallclock 有數十小時偏移，本次為 ~44.8 小時，會把當天事件標成兩天前）。判讀方式：
-
-- 用 `dmesg` 的**相對間隔**搭配 `docker inspect` 的 `StartedAt` / `FinishedAt`（docker 用自己的
-  wallclock，可信）交叉定位。
-- 決定性驗證：`dmesg` 最後一行的 veth 名稱是否等於 `ip -o link` 目前唯一存在的 veth，
-  是的話該行就是「最近一次 container 啟動」。
-- kernel ring buffer 只留約 60 行 / 1.7 小時，更早的事故不會留下紀錄，別把「查不到」當成
-  「沒發生」。
-
-**附帶發現（待套用）**：`/opt/stacks/scripts/gitea/compose.yml` 是唯一沒有 `cpus` /
-`mem_limit` / `memswap_limit` 設定的 stack（實測佔 154 MB），其他 stack 都是
-`0.5` CPU / `512m` / `768m`。已決定補齊，但該路徑屬 `kirai`（uid 1000），需由該帳號或
-sudo 手動套用後重啟 gitea。
 
 ---
 
@@ -200,32 +165,8 @@ lightgbm / shap 的 import 開銷，資料本身只有數 MB（原始 frame 約 
 **現況結論**（2026-08-12 依實測更新）：擴到 **150 檔可以先不改造**，推估峰值約 420MB；
 但**上限是 150 檔不是 200 檔**——200 檔推估 470MB，加上 150MB 保留需要 620MB available，
 在這台 host 上實質不可行。而且 150 檔也**要求執行當下不常駐 gitea 那一級的服務**
-（實測 gitea 常駐時 available 只有 398MB，mem-guard 直接擋下、連 10 檔都跑不起來，
-見 I-053）。**全市場路線仍必須先做第 1、2 項。**
-
-### I-062：decision replay row 沒有前端型別（刻意）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已知限制（刻意，待有消費者時再處理） |
-| 嚴重度 | 低 |
-| 分類 | Frontend / SR Zone / API Contract |
-| 發現日期 | 2026-08-07 |
-| 來源 | SR Zone RR distribution ＋ 更細分層實作 review（2026-08-07） |
-
-`SREvaluationReport` 只有 `[key: string]: unknown`，TypeScript 沒有任何型別描述
-`replay_rows[].primary_zone`（含 `relative_volume`）。**這是刻意的**：前端目前不渲染
-`replay_rows`，加一個沒有消費者的宣告只會成為下一個默默寫錯的型別。
-
-判準與「沒有消費者時該怎麼辦」已升級為通則，見
-[`development-workflow.md`](./development-workflow.md) §3 的
-「什麼時候才該新增跨語言的型別宣告」。權威形狀由 `test_evaluation.py` 對
-`primary_zone` 的 key 集合斷言鎖住。
-
-**本筆保留的原因**：它是一個仍然成立的**現況限制**（要做 replay row drilldown、匯出或
-event timeline 時會缺型別基礎），不是待辦也不是已修的 bug。等真的有消費者時一併處理即可。
-
----
+（實測 gitea 常駐時 available 只有 398MB，mem-guard 直接擋下、連 10 檔都跑不起來；
+背景見 `development-workflow.md`「container 上限的總和也要顧」，補上限的待辦是 todo.md T-046）。**全市場路線仍必須先做第 1、2 項。**
 
 ---
 
@@ -269,3 +210,6 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
    **判別方法：看同一天其他標的動了沒。**
 2. **門檻本身會漏掉真實事件**。當初用 25% 只找到 3 筆減資，權威來源實際有 **7 筆**
    （多出 2412、2478 的 2016 那筆、2609、2317）。門檻只能當異常偵測，不能當事件清單。
+
+---
+

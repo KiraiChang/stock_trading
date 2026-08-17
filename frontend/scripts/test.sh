@@ -111,7 +111,7 @@ else
     echo >&2 "==> [warn] svelte-check 實測需要約 ${SVELTE_CHECK_MIN_HEAP_MB}MB heap，目前只有 ${NODE_HEAP_MB}MB，很可能 OOM。"
     echo >&2 "    heap 由 MEM 推導（MEM-100），MEM 由 mem-guard 依 host available 下修，"
     echo >&2 "    所以要解的是**釋放 host 記憶體**（需 available ≥ 約 $((SVELTE_CHECK_MIN_HEAP_MB + 100 + 150))MB），"
-    echo >&2 "    不是調高 MEM——調高只會讓 host OOM killer 改砍呼叫端（見 issue.md I-053）。"
+    echo >&2 "    不是調高 MEM——調高只會讓 host OOM killer 改砍呼叫端（見 docs/development-workflow.md）。"
     echo >&2 "    只想跑單元測試可用 VITEST_ARGS=... 略過這一步。"
   fi
   run_step "svelte-check" "npm run check"

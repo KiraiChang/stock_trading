@@ -19,7 +19,7 @@
 #
 # 設計重點：
 #   - **兩階段錯開記憶體**：這台 host 只有 2GiB，Go 編譯（峰值數百 MB）與 MySQL（約 200~300MB）
-#     同時存在會踩到 docs/issue.md I-053。所以先在 MySQL 還沒起來時把測試編成執行檔，
+#     同時存在會踩到 host 記憶體上限（見 docs/development-workflow.md「container 上限的總和也要顧」）。所以先在 MySQL 還沒起來時把測試編成執行檔，
 #     編譯器退場後才起 MySQL，再用輕量 container 執行已編好的 binary。
 #     峰值因此是 max(編譯, MySQL＋binary) 而不是 sum。
 #   - 驗證邏輯在 Go 測試裡（backend/internal/database/migrate_mysql_test.go），不在這支 shell。

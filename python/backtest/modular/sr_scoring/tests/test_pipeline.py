@@ -73,7 +73,10 @@ def test_merge_never_relaxes_a_stricter_base():
 
 
 def test_merge_flags_unknown_health_state():
-    """認不得的 health_state 不升嚴重度（不誤擋），但必須留下訊號（見 I-048）。"""
+    """認不得的 health_state 不升嚴重度（不誤擋），但必須留下訊號。
+
+    規格見 docs/sr-zone-scoring.md「未知的 `health_state`」。
+    """
     merged = _merge_regression_governance_gate(
         _base_gate(),
         _regression("SOMETHING_ELSE"),

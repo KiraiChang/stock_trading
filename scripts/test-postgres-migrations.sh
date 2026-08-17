@@ -25,7 +25,7 @@
 #
 # 設計重點（與 test-mysql-migrations.sh 相同的取捨，理由見該檔）：
 #   - **兩階段錯開記憶體**：先在 postgres 還沒起來時把測試編成執行檔，編譯器退場後才起
-#     postgres，再用輕量 container 跑編好的 binary。峰值是 max 而不是 sum（見 I-053）。
+#     postgres，再用輕量 container 跑編好的 binary。峰值是 max 而不是 sum（見 docs/development-workflow.md「container 上限的總和也要顧」）。
 #   - 驗證邏輯在 Go 測試裡（backend/internal/database/migrate_postgres_test.go）。
 #     migration 是 //go:embed 打包的，goose CLI 從磁碟讀到的是另一份檔案，驗了不算數。
 #   - 測試 container 附掛到 compose 網路、用 service name 連線，不依賴 host port。

@@ -86,12 +86,14 @@ def test_bucket_crossing_warns_but_does_not_block():
     實證是 2026-08-06 到 08-17 的 11 天內 HIGH 由 9 檔變 6 檔，pipeline 沒有任何改動。
     設成 blocking 會讓這道檢查常態失敗然後被當成雜訊忽略。
     """
-    crossed = dict(LIVE); crossed["0050"] = 0.010  # NORMAL -> LOW
+    # 挑 3630（0.0446，新門檻下屬 LOW）推到 0.050 → NORMAL。
+    # 刻意選中段的標的：排名與極值都不變，才能單獨驗「跨越不阻擋」而不誤觸其他 blocking 項。
+    crossed = dict(LIVE); crossed["3630"] = 0.050
     r = compare(_baseline(), _report(crossed))
     chk = [c for c in r["checks"] if "bucket 跨越" in c["name"]][0]
     assert chk["blocking"] is False
     assert not chk["passed"]
-    assert chk["detail"]["moved"]["0050"] == ["NORMAL_VOLATILITY", "LOW_VOLATILITY"]
+    assert chk["detail"]["moved"]["3630"] == ["LOW_VOLATILITY", "NORMAL_VOLATILITY"]
     assert r["passed"], "bucket 跨越不該讓整體失敗"
     assert r["warnings"] == ["bucket 跨越（觀察項，不阻擋）"]
 
@@ -131,3 +133,24 @@ def test_profiles_by_symbol_accepts_both_shapes():
     assert profiles_by_symbol(as_dict) == profiles_by_symbol(as_list)
     assert profiles_by_symbol({}) == {} and profiles_by_symbol([]) == {}
     assert profiles_by_symbol(None) == {}
+
+
+def test_baseline_records_thresholds_and_derives_bucket_from_them():
+    """bucket 是門檻的函數，所以基準必須記下當時在位的門檻。
+
+    2026-08-17 門檻由 1.5%/3.5% 重定為凍結的分位數。少了 `thresholds`，
+    下次比對看到 bucket 變了會分不清是資料漂移還是門檻被改。
+    也不能照抄 report 的 bucket——那份 report 可能是重定之前跑的。
+    """
+    from baseline_check import (HIGH_VOLATILITY_THRESHOLD, LOW_VOLATILITY_THRESHOLD,
+                                build_baseline)
+
+    # report 帶一個**過期**的 bucket 值，build_baseline 應以現行門檻重算而非照抄
+    rep = {"volatility_profiles": {"2330": {"symbol": "2330", "atr_pct": 0.0265,
+                                           "average_range_pct": 0.0196,
+                                           "bucket": "STALE_FROM_OLD_RUN"}}}
+    b = build_baseline(rep, ["2330"], {})
+    assert b["thresholds"]["low_volatility_max"] == LOW_VOLATILITY_THRESHOLD
+    assert b["thresholds"]["high_volatility_min"] == HIGH_VOLATILITY_THRESHOLD
+    assert b["profiles"]["2330"]["bucket"] == "LOW_VOLATILITY", "0.0265 在新門檻下是 LOW"
+    assert b["profiles"]["2330"]["bucket"] != "STALE_FROM_OLD_RUN"

@@ -73,9 +73,16 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 **仍未解的三項**：
 
 1. **驗證仍不涵蓋 repo 層的 CRUD round-trip。** 「表建得起來」不等於「INSERT/SELECT 跑得動」。
-   `CorporateActionRepo.Upsert` 的 mysql 分支（`ON DUPLICATE KEY UPDATE`）已有真實 MySQL 的
-   執行證明，但那是**唯一**被涵蓋的 repo 寫入路徑，其餘 `internal/store` 的查詢仍只跑 sqlite。
-   要補的話是讓 repo 測試整批對著真實 MySQL 跑一輪。
+   目前對真實 MySQL 有執行證明的**只有兩個 repo 寫入路徑**，都是靠
+   `TestMySQLMigrationsRealValuesFitAllColumns` 順帶涵蓋的：
+
+   * `CorporateActionRepo.Upsert`（`ON DUPLICATE KEY UPDATE`）
+   * `EvaluationUniverseRepo.Upsert`（2026-08-17 T-040 Step 5 新增，同樣是
+     `ON DUPLICATE KEY UPDATE` 分支）
+
+   其餘 `internal/store` 的查詢與寫入仍只跑 sqlite。**每新增一個有 mysql 分支的 repo，
+   這一項的缺口就多一個**——`EvaluationUniverseRepo` 的 `ListActive` / `SetActive`
+   在真實 MySQL 上從未執行過。要補的話是讓 repo 測試整批對著真實 MySQL 跑一輪。
 2. **`time.Time` 寫進 DATE／DATETIME 的時區處理，mysql 與 postgres 不一致**（2026-08-12 發現）：
    `go-sql-driver` 寫入前會 `v.In(cfg.Loc)`（`connection.go:262`），驗證用 DSN 沒帶 `loc` 即 UTC，
    所以**台北午夜會被存成前一天**；`pgx` 取的是值本身時區的日曆日
@@ -213,4 +220,34 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
    （多出 2412、2478 的 2016 那筆、2609、2317）。門檻只能當異常偵測，不能當事件清單。
 
 ---
+
+### I-073：預設關閉的排程在 `/scheduler/status` 會顯示成 `never_run` ＋ `stale=true`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（既有判定方式，暫不改） |
+| 嚴重度 | 低（誤導但不影響 runtime） |
+| 分類 | Go / API / 排程 |
+| 發現日期 | 2026-08-17 |
+| 來源 | T-040 Step 5 實作時核對 `GetStatus` 的行為 |
+
+`SchedulerHandler.GetStatus` 對 `knownSchedulerJobs` 裡沒有任何 `job_runs` 紀錄的 job
+一律回 `{"status": "never_run", "stale": true}`（`scheduler.go:119-121`），
+**不區分「排程有開但沒跑起來」與「刻意沒開」**。
+
+目前有兩個預設關閉的 job 落在這個情況：
+
+* `sr_evaluation`（`sr_evaluation.enabled` 預設 false）
+* `evaluation_universe_sync`（`evaluation_universe.enabled` 預設 false，T-040 Step 5 新增）
+
+**後果**：排程狀態頁常態顯示兩個 stale 項目，而它們其實運作正常（就是沒開）。
+這會訓練使用者忽略 stale 旗標——真的有 job 卡住時反而看不出來。
+
+**為什麼暫不修**：正確的修法是讓 handler 知道各 job 的 enabled 狀態，
+需要把 `config.SREvaluationConfig` 與 `config.EvaluationUniverseConfig` 傳進
+`SchedulerHandler`（目前只拿到 `JobRunRepo` 與 `Scheduler`）。那是可做的小重構，
+但與 T-040 Step 5 的目標無關，不在該批一起改。
+
+**替代做法**：判讀排程頁時，先確認該 job 是否在 config 裡啟用；
+`never_run` 對預設關閉的 job 是預期狀態。
 

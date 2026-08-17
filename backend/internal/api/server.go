@@ -56,6 +56,7 @@ func NewServer(
 	chipSyncJobRepo store.ChipSyncJobRepo,
 	chipSyncer *chip.Syncer,
 	marketBackfillJobRepo store.MarketBackfillJobRepo,
+	evaluationUniverseRepo store.EvaluationUniverseRepo,
 	positionRepo store.PositionRepo,
 	positionConfig portfolio.Config,
 	chipHistoryTradingDays int,
@@ -127,6 +128,12 @@ func NewServer(
 		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
 		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)
 		protected.POST("/scheduler/corporate-action-sync/run", sch.RunCorporateActionSync)
+		protected.POST("/scheduler/evaluation-universe-sync/run", sch.RunEvaluationUniverseSync)
+
+		eu := handler.NewEvaluationUniverseHandler(evaluationUniverseRepo, log)
+		protected.GET("/evaluation-universe", eu.List)
+		protected.POST("/evaluation-universe", eu.Upsert)
+		protected.PATCH("/evaluation-universe/:symbol", eu.SetActive)
 
 		bh := handler.NewBacktestHandler(btManager, backtestRepo, log)
 		protected.POST("/backtest", bh.Submit)

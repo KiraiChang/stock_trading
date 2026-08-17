@@ -5,35 +5,35 @@
     "0050": {
       "atr_pct": 0.025967925920955502,
       "average_range_pct": 0.01969495819390689,
-      "bucket": "NORMAL_VOLATILITY",
+      "bucket": "LOW_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
     "00830": {
       "atr_pct": 0.02997087849862484,
       "average_range_pct": 0.015752986733002593,
-      "bucket": "NORMAL_VOLATILITY",
+      "bucket": "LOW_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
     "2330": {
       "atr_pct": 0.026488095238095265,
       "average_range_pct": 0.019644870233361124,
-      "bucket": "NORMAL_VOLATILITY",
+      "bucket": "LOW_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
     "2399": {
       "atr_pct": 0.05524316109422492,
       "average_range_pct": 0.06257962614744433,
-      "bucket": "HIGH_VOLATILITY",
+      "bucket": "NORMAL_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
     "2454": {
       "atr_pct": 0.059876543209876544,
       "average_range_pct": 0.05432790802820208,
-      "bucket": "HIGH_VOLATILITY",
+      "bucket": "NORMAL_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
@@ -47,7 +47,7 @@
     "3630": {
       "atr_pct": 0.04462531574515858,
       "average_range_pct": 0.051167089608273715,
-      "bucket": "HIGH_VOLATILITY",
+      "bucket": "NORMAL_VOLATILITY",
       "candle_count": 1500,
       "lookback_bars": 60
     },
@@ -88,6 +88,7 @@
     },
     "generated_at": "2026-08-17",
     "last_trading_day": "2026-08-17",
+    "threshold_note": "2026-08-17 門檻由 1.5%/3.5% 重定為凍結的全市場分位數；本基準建立於重定之後",
     "universe_size": 131,
     "universe_source": "T-040 Step 3 selection report（report-v6，131 檔定案）"
   },
@@ -103,5 +104,9 @@
     "5490",
     "6243"
   ],
+  "thresholds": {
+    "high_volatility_min": 0.06278197721225691,
+    "low_volatility_max": 0.046089927430152715
+  },
   "timeframe": "1d"
 }

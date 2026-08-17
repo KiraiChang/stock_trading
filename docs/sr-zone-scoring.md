@@ -147,6 +147,42 @@ mysql / postgres / sqlite 三份），由 API 的 `analysis` 區塊回傳，SR Z
 - 欄位是 `NOT NULL`：`store.RawJSON` 是純 string、沒有實作 `sql.Scanner`，SQL NULL 會讓
   scan 直接失敗，所以三份 migration 都把舊列 backfill 成 JSON `null` 而非留 SQL NULL。
 
+### Volatility bucket 門檻＝凍結的全市場分位數（2026-08-17 重定）
+
+`LOW_VOLATILITY_THRESHOLD` / `HIGH_VOLATILITY_THRESHOLD`（`zone_builder.py`）**不是手選的整數**，
+是一次全市場量測的凍結結果：
+
+| | 舊值（2026-08-17 之前） | 現值 |
+|---|---|---|
+| LOW | `< 1.5%` | **`< 4.6089927430152715%`** |
+| HIGH | `> 3.5%` | **`> 6.278197721225691%`** |
+
+量測條件記在同檔的 `VOLATILITY_THRESHOLD_PROVENANCE`：319 檔流動性合格股票
+（`security_type=股票`、日均成交 ≥ 2,000 萬）的 P33 / P67，工具是
+`scripts/build-selection-report.sh`。
+
+**為什麼要重定**：舊值與台股實際分佈差一個量級。用它分類 T-040 選出的 131 檔會得到
+**103 / 26 / 1**——LOW 只剩一檔，`VOLATILITY_BUCKET_ATR_CONFIGS` 的 LOW 那組 config
+永遠不會被觸發、也永遠無法用資料驗證，T-003 的 sweep 因此卡住。重定後是 **53 / 46 / 32**。
+
+**判定基準是 `max(atr_pct, average_range_pct)`，門檻必須用同一個基準量。**
+這是重定時踩出來的：selection report 一開始只取 `atr_pct` 的分位數，但 319 檔裡有
+**156 檔（49%）的 `average_range_pct` 比 `atr_pct` 大**，兩種基準會讓 131 檔中的 20 檔
+分到不同 bucket。**門檻、切點、判定基準三者同源**是硬性要求，否則重定門檻也修不好
+「選池說 LOW、runtime 說 NORMAL」這類對不上的問題。
+
+**值刻意不四捨五入。** 選池的 `bucket_hint` 就是用這組數字判的，取整會讓貼在邊界的
+十幾檔與它不一致（實測 131 檔中有 18 檔距最近邊界不到 2%）。
+
+**要重新取分位數就改這兩個常數並升 `universe_version`**——那是一次明確的版本動作。
+不這樣做的後果已實證：分位數是相對於當下母體的，2026-08-17 有 3 檔（3530、3661、8102）
+`atr_pct` 一個 bit 都沒變卻換桶，只因母體變了邊界移動。凍結機制與選池的關係見
+[`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)。
+
+**既有資料不重算。** `stock_sr_zone_analyses` 裡 2026-08-17 之前的列，其 bucket 語意是舊門檻。
+這沿用 [`database-schema.md`](./database-schema.md)「股價還原」段已立的原則——
+分析紀錄是「當時做了什麼判斷」，不是快取。做跨期比較時要記得這條分界。
+
 ---
 
 ## 二、特徵工程（Features）

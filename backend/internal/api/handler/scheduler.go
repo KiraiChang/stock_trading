@@ -55,11 +55,22 @@ func (h *SchedulerHandler) RunCorporateActionSync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "corporate_action_sync 已在背景重新觸發"})
 }
 
+// POST /api/v1/scheduler/evaluation-universe-sync/run
+// 手動重跑評估標的池的日 K 維護，與 evaluation_universe_sync cron 共用同一份邏輯。
+//
+// **這個入口是必要的**：cron 預設關閉（一次約 26 分鐘、131 個 FinMind 請求），
+// 而跑 evaluation 之前需要先把池的尾端對齊——在排程開啟之前，這是唯一的對齊方式。
+// 重複觸發由 scheduler 內的旗標擋掉，不會有兩批請求互搶節流器。
+func (h *SchedulerHandler) RunEvaluationUniverseSync(c *gin.Context) {
+	go h.sched.RunEvaluationUniverseSync()
+	c.JSON(http.StatusAccepted, gin.H{"message": "evaluation_universe_sync 已在背景重新觸發"})
+}
+
 // KnownSchedulerJobs 匯出給測試用：DB 的 job_name 欄位必須容得下每一個名稱
 // （2026-08-11 正式環境因 VARCHAR(20) 裝不下 corporate_action_sync 而失敗）。
 func KnownSchedulerJobs() []string { return append([]string(nil), knownSchedulerJobs...) }
 
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync"}
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
@@ -71,6 +82,11 @@ var jobStaleThreshold = map[string]time.Duration{
 	"sr_evaluation":     72 * time.Hour,
 	// 平日 06:30 跑一次；跨週末最長間隔是週五到週一，加上緩衝取 80 小時。
 	"corporate_action_sync": 80 * time.Hour,
+	// 平日 16:00 跑一次，同樣跨週末，取 80 小時。
+	// **注意**：本 job 預設關閉，未啟用時 GetStatus 會回 never_run 且 stale=true
+	// （與同樣預設關閉的 sr_evaluation 相同）。那是既有的判定方式，不是本 job 的缺陷，
+	// 但會讓「刻意沒開」看起來像「排程卡住」——記在 docs/issue.md I-073。
+	"evaluation_universe_sync": 80 * time.Hour,
 }
 
 type jobStatus struct {

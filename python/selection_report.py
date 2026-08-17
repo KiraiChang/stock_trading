@@ -29,7 +29,11 @@ from typing import Any, Iterable, Optional
 # 這兩個是私有函式，但重寫的代價是「報告說 LOW、pipeline 說 NORMAL」這種
 # 沒有任何東西會報錯的分歧，比耦合一個私有函式嚴重得多。
 from backtest.modular.sr_scoring.evaluation import _atr_pct, VOLATILITY_PROFILE_LOOKBACK
-from backtest.modular.sr_scoring.zone_builder import volatility_bucket_from_profile
+from backtest.modular.sr_scoring.zone_builder import (
+    HIGH_VOLATILITY_THRESHOLD,
+    LOW_VOLATILITY_THRESHOLD,
+    volatility_bucket_from_profile,
+)
 
 BUCKET_STALE = "STALE"
 
@@ -186,6 +190,18 @@ def evaluate_exclusion(
     return "selected", None
 
 
+def bucket_basis(m: dict[str, Any]) -> Optional[float]:
+    """分桶用的波動基準，**必須與 pipeline 的 volatility_bucket_from_profile 相同**。
+
+    那個函式取 `max(atr_pct, average_range_pct)`。報告一開始只取 `atr_pct`，
+    造成選池的 `selection_bucket` 與 runtime 的 bucket 在 131 檔裡差了 20 檔——
+    319 檔流動性合格股票中有 156 檔的 `average_range_pct` 比 `atr_pct` 大。
+    **門檻、切點與判定基準三者必須同源**，否則重定門檻也修不好對不上的問題。
+    """
+    values = [v for v in (m.get("atr_pct"), m.get("average_range_pct")) if v is not None]
+    return max(values) if values else None
+
+
 def quantile_bucket_edges(values: list[float]) -> Optional[tuple[float, float]]:
     """由**流動性合格的股票**算 P33 / P67 切點。
 
@@ -206,13 +222,14 @@ def quantile_bucket_edges(values: list[float]) -> Optional[tuple[float, float]]:
     return _q(1 / 3), _q(2 / 3)
 
 
-def assign_quantile_bucket(atr: Optional[float], edges: Optional[tuple[float, float]]) -> str:
-    if atr is None or edges is None:
+def assign_quantile_bucket(basis: Optional[float], edges: Optional[tuple[float, float]]) -> str:
+    """`basis` 是 `bucket_basis()` 的輸出，不是單獨的 atr_pct。"""
+    if basis is None or edges is None:
         return BUCKET_STALE
     low_edge, high_edge = edges
-    if atr < low_edge:
+    if basis < low_edge:
         return "LOW_VOLATILITY"
-    if atr > high_edge:
+    if basis > high_edge:
         return "HIGH_VOLATILITY"
     return "NORMAL_VOLATILITY"
 
@@ -236,7 +253,8 @@ def build_threshold_matrix(
         ]
         stocks = [m for m in qualified if m["security_type"] == "股票"]
         etfs = [m for m in qualified if m["security_type"] == "ETF"]
-        edges = quantile_bucket_edges([m["atr_pct"] for m in stocks if m["atr_pct"] is not None])
+        bases = [b for b in (bucket_basis(m) for m in stocks) if b is not None]
+        edges = quantile_bucket_edges(bases)
 
         def _count(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
             acc: dict[str, int] = {}
@@ -254,7 +272,7 @@ def build_threshold_matrix(
             "current_bucket_etfs": _count(etfs, "current_bucket"),
             "quantile_edges": list(edges) if edges else None,
             "quantile_bucket_stocks": _count(
-                [{"b": assign_quantile_bucket(m["atr_pct"], edges)} for m in stocks], "b"
+                [{"b": assign_quantile_bucket(bucket_basis(m), edges)} for m in stocks], "b"
             ),
             "industry_by_bucket": _industry_by_bucket(stocks),
         })
@@ -288,10 +306,11 @@ def build_report(
         r for r in rows if r["selection_status"] == "selected" and r["security_type"] == "股票"
     ]
     edges = quantile_bucket_edges(
-        [r["atr_pct"] for r in selected_stocks if r["atr_pct"] is not None]
+        [b for b in (bucket_basis(r) for r in selected_stocks) if b is not None]
     )
     for r in rows:
-        r["selection_bucket"] = assign_quantile_bucket(r["atr_pct"], edges)
+        r["bucket_basis"] = bucket_basis(r)
+        r["selection_bucket"] = assign_quantile_bucket(r["bucket_basis"], edges)
 
     reasons: dict[str, int] = {}
     for r in rows:
@@ -302,12 +321,26 @@ def build_report(
     # pipeline 用的是絕對門檻 1.5% / 3.5%，而流動性合格股票的實際分位數切點差了一個量級——
     # 用分位數選出的「平均分佈」在 pipeline 眼中仍會擠在 HIGH。
     # 兩組數字並列，讓「門檻是否該重定」有依據而不是印象。
+    # **import 真正的常數，不要複製數值。** 這裡原本把 0.015 / 0.035 硬編在報告裡，
+    # 2026-08-17 重定門檻後就變成「報告宣稱 pipeline 用舊值」的假訊息——
+    # 而「常數的手抄鏡像會過期」正是重定門檻要消滅的那類問題。
     threshold_gap = {
-        "pipeline_absolute": {"low_max": 0.015, "high_min": 0.035},
+        "pipeline_absolute": {
+            "low_max": LOW_VOLATILITY_THRESHOLD,
+            "high_min": HIGH_VOLATILITY_THRESHOLD,
+        },
         "liquid_stock_quantile": {"p33": edges[0], "p67": edges[1]} if edges else None,
+        # 重定後兩者應該相等（新常數就是凍結的分位數）。**不相等代表母體已經漂離凍結點**，
+        # 那是「要不要升 universe_version」的訊號，不是錯誤。
+        "aligned": (
+            edges is not None
+            and edges[0] == LOW_VOLATILITY_THRESHOLD
+            and edges[1] == HIGH_VOLATILITY_THRESHOLD
+        ),
         "note": (
-            "pipeline 的絕對門檻若不重定，selection_bucket 的平均分佈不會反映到 "
-            "volatility_profiles——見 docs/todo.md T-003 與 T-040 Step 3。"
+            "pipeline 門檻已於 2026-08-17 重定為凍結的分位數（見 docs/sr-zone-scoring.md）。"
+            "aligned=false 代表當下母體算出的切點已偏離凍結值，需評估是否升 universe_version；"
+            "不是錯誤。"
         ),
     }
 

@@ -896,7 +896,8 @@ def test_score_symbol_uses_adaptive_zone_builder_config_when_enabled(monkeypatch
     monkeypatch.setattr(scoring, "get_model", lambda: bundle)
     monkeypatch.setattr(scoring, "fetch_latest_chip_score", lambda *a, **kw: None)
     monkeypatch.setattr(scoring, "_adaptive_zone_builder_enabled", lambda: True)
-    monkeypatch.setattr(scoring, "_adaptive_zone_builder_profile", lambda frame: (0.04, 0.02))
+    # 0.08 對照 2026-08-17 重定後的 HIGH 門檻（> 6.28%）；舊門檻是 3.5%
+    monkeypatch.setattr(scoring, "_adaptive_zone_builder_profile", lambda frame: (0.08, 0.07))
 
     result = score_symbol("2330", "1d")
 

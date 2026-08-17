@@ -24,7 +24,8 @@ T-040 已完成的前置能力：
 - Step 0 記憶體實測完成：150 檔可行，200 檔過於邊緣；執行 150 檔 evaluation 前應確認 host available >= 570MB。
 - Step 1 候選清單 API / 前端完成：`GET /stock-symbols/candidates`、`GET /stock-symbols/facets` 與 `EvaluationUniverse.svelte` 可產生候選並觸發回補。
 - Step 2 全市場短期資料已回補並判讀：857 檔 / 454,152 列，840 檔具備 >=60 根可計算波動 profile。
-- 現行 LOW / NORMAL / HIGH 門檻下，股票 LOW 確實存在，但與低流動性高度重疊。
+- ~~現行 LOW / NORMAL / HIGH 門檻下…~~ → **門檻已於 2026-08-17 重定**（凍結分位數），
+  現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Volatility bucket 門檻」。重定後選池 131 檔為 LOW 53 / NORMAL 46 / HIGH 32。
 
 重要限制：
 
@@ -34,7 +35,8 @@ T-040 已完成的前置能力：
 
 ## 不做事項
 
-- 不直接調整 T-003 的 `build_zone_builders()` 預設值。
+- 不直接調整 T-003 的 `build_zone_builders()` 預設值。（2026-08-17 註：重定的是 bucket **門檻**
+  常數，`build_zone_builders()` 的 `atr_width_multiplier` 等預設值仍未動——兩者不同。）
 - 不預設啟用 adaptive builder。
 - 不把新標的塞進 `watchlists`。
 - 不用債券 ETF 補足股票 LOW bucket 來決定股票用的 builder config。
@@ -139,6 +141,12 @@ Step 3 不應先假設一定沿用目前絕對門檻。決策順序如下：
 4. 若 LOW 不足或集中在少數低流動性 / 特定產業標的，改用流動性合格股票內的 ATR% 分位數切 bucket，例如 P33 / P67。
 5. ETF 不與股票混在同一個分位數母體；需要時可在 report 中提供 ETF 自己的 bucket 分佈。
 
+**判定基準必須與 pipeline 同源（2026-08-17 修正）**：`volatility_bucket_from_profile` 取
+`max(atr_pct, average_range_pct)`，所以切點也要用同一個基準量。報告初版只取 `atr_pct`，
+而 319 檔流動性合格股票裡有 **156 檔（49%）的 `average_range_pct` 更大**——兩種基準會讓
+131 檔中的 20 檔分到不同 bucket。已新增 `selection_report.bucket_basis()` 統一，
+並輸出每列的 `bucket_basis` 供核對。**門檻、切點、判定基準三者同源是硬性要求。**
+
 建議第一版採用：
 
 - 股票主池使用「流動性合格後的分位數 bucket」作為 `selection_bucket`。
@@ -154,8 +162,8 @@ Step 3 不應先假設一定沿用目前絕對門檻。決策順序如下：
 1. 保留現有 11 檔，作為**歷史連續性與回歸檢查基準**。
    **注意不是「sweep 結果可比」**：2026-08-06 那次 sweep 的母體就是這 11 檔，
    而新 universe 是 120～150 檔、bucket 組成完全不同，兩次 sweep 的 score **不可直接對比**。
-   能比的是**同樣 11 檔的個別 zone 統計與 `volatility_profiles`**（資料沒變就該完全相同），
-   那是回歸檢查，不是效果比較。
+   能比的是**同樣 9 檔的個別 zone 統計與 `volatility_profiles`**，那是回歸檢查不是效果比較。
+   **但「資料沒變就該完全相同」是錯的**，比對方式見階段 6（改為序數性質）。
 
    **保留是分級的，不是無條件**——規格見下方「watchlist 的分級保留」。
 2. 股票為主，依 `selection_bucket` 盡量平均分配。
@@ -280,9 +288,27 @@ Phase 2 的目的不是選股，而是維護已確認的標的池。
 
 ---
 
-## Step 5 執行計畫書（2026-08-17，**待確認**）
+## Step 5 執行計畫書（2026-08-17，**已實作，待 review**）
 
-依 CLAUDE.md，本項屬跨模組（DB / repo / API / 排程 / 前端）異動，實作前需確認本計畫書。
+依 CLAUDE.md，本項屬跨模組（DB / repo / API / 排程 / 前端）異動，計畫書於 2026-08-17 確認後實作。
+
+### 實作結果（2026-08-17）
+
+| 元件 | 狀態 |
+|---|---|
+| migration `066` × postgres / sqlite / mysql | ✅ 兩支驗證腳本各跑過，含 up → 分段 down-to-0 |
+| `EvaluationUniverseRepo` ＋ `EvaluationUniverseEntry` | ✅ 7 支 sqlite 測試 |
+| `evaluation_universe_sync` 排程 | ✅ 預設關閉、16:00、`days=10`、每 25 檔記進度、`atomic.Bool` 防重入 |
+| 三個 CRUD 端點 ＋ 手動觸發 | ✅ 9 支 handler 測試 |
+| `config.yaml`、`main.go` 接線 | ✅ setter 在 `go sched.Start()` **之前**（之後注入會靜默失效） |
+| 前端「③ 已入池」區塊 | ✅ `svelte-check` 0 errors、vitest 96 passed |
+
+**尚未做的**：把定案的 131 檔實際匯入 live（那是寫入動作，需授權並由使用者執行），
+以及「隔一個交易日後不做手動回補、直接跑 `verify-regression-baseline.sh`」這個端到端驗收。
+
+**實作中發現並記錄的問題**：`sr_evaluation` 與 `evaluation_universe_sync` 都預設關閉，
+於是 `/scheduler/status` 會常態把它們顯示成 `never_run` ＋ `stale=true`
+（見 [`issue.md`](./issue.md) I-073）。那會訓練使用者忽略 stale 旗標。
 
 ### 目標
 
@@ -385,7 +411,7 @@ scripts/run-evaluation.sh --symbols <active>  → 階段 5／6
 | **每日 FinMind 用量增加 131 requests** | 預設 `enabled: false`；16:00 時段沒有其他 job，131 req/26 分遠低於 600/h 上限 |
 | 部分標的抓取失敗 | 沿用 `BackfillHistory` 的 `onSymbol` 回呼累計 `symbols_failed` 寫進 `job_runs`，**不中止整批** |
 | mysql 版 repo CRUD 從未驗證 | 這正是 `issue.md` I-054 第 1 項。本項新增 repo 只保證 DDL 過 `scripts/test-mysql-migrations.sh`；**CRUD 仍只跑 sqlite**，要在 I-054 記下新增了一個未驗證的 repo |
-| 26 分鐘的 job 與手動回補重疊 | job 開始前檢查同名 `job_runs` 是否 running，重複觸發直接跳過 |
+| 26 分鐘的 job 與手動回補重疊 | scheduler 內的行程旗標（`atomic.Bool`）擋重複觸發。**實作時偏離原計畫**：原本寫「查同名 `job_runs` 是否 running」，但 `JobRunRepo` 沒有該查詢方法，而 DB 層檢查只在多實例部署才有意義——目前是單一 backend 實例。功能等價、成本低得多 |
 | `bucket_hint` 與下游重算的 bucket 不一致 | 存 `bucket_edge_low/high` ＋ `universe_version`，讓不一致**看得出來**而不是靜默 |
 | 回滾 | migration 有 `-- +goose Down`；排程 `enabled: false` 即停；已抓的 candles 留著無害（不被任何既有流程掃到） |
 
@@ -405,8 +431,11 @@ scripts/run-evaluation.sh --symbols <active>  → 階段 5／6
 
 ### 前置條件
 
-- **T-003 的「bucket 邊界凍結」要先有決定**。本表只記錄邊界，但 `universe_version`
-  的語意（何時該升版）取決於那個決定。
+- ~~T-003 的「bucket 邊界凍結」要先有決定~~ → **已完成（2026-08-17）**：
+  門檻常數**就是**凍結的邊界，重新取分位數＝改 `zone_builder.py` 的兩個常數並升
+  `universe_version`。所以 `bucket_edge_low/high` 應填入
+  `LOW_VOLATILITY_THRESHOLD` / `HIGH_VOLATILITY_THRESHOLD` 當下的值，
+  `universe_version` 起始為 `v2`（對照 `VOLATILITY_THRESHOLD_PROVENANCE`）。
 - 匯入的 131 檔清單以 `report-v6` 為準（已通過階段 4／5／6）。
 
 ### 完成後歸檔

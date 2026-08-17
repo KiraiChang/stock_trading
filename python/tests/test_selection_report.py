@@ -11,6 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from backtest.modular.sr_scoring.zone_builder import (
+    HIGH_VOLATILITY_THRESHOLD,
+    LOW_VOLATILITY_THRESHOLD,
+)
 from selection_report import (
     BUCKET_STALE,
     MIN_CANDLES_FOR_PROFILE,
@@ -18,6 +22,7 @@ from selection_report import (
     build_report,
     build_threshold_matrix,
     classify_liquidity,
+    bucket_basis,
     compute_symbol_metrics,
     evaluate_exclusion,
     quantile_bucket_edges,
@@ -181,12 +186,14 @@ def test_quantile_bucket_uses_only_liquid_stocks_population():
     ]
     report = build_report(metrics, snapshot={}, min_amount=2e7)
 
-    stock_atrs = sorted(
-        m["atr_pct"] for m in metrics
+    # 期望值必須用**與 pipeline 相同的基準**（max(atr, range)），不是單獨的 atr_pct——
+    # 兩者在半數標的上不同，見 bucket_basis 的說明。
+    stock_bases = sorted(
+        bucket_basis(m) for m in metrics
         if m["security_type"] == "股票" and m["avg_amount_60"] >= 2e7
     )
-    assert report["quantile_edges"] == list(quantile_bucket_edges(stock_atrs)), (
-        "切點的母體混進了 ETF 或低流動性股票"
+    assert report["quantile_edges"] == list(quantile_bucket_edges(stock_bases)), (
+        "切點的母體混進了 ETF 或低流動性股票，或基準與 pipeline 不同源"
     )
 
 
@@ -505,5 +512,28 @@ def test_report_exposes_threshold_gap_for_t003():
     ]
     report = build_report(metrics, snapshot={}, min_amount=2e7)
     gap = report["threshold_gap"]
-    assert gap["pipeline_absolute"] == {"low_max": 0.015, "high_min": 0.035}
+    # **不要斷言字面數值**：原本這裡寫 {"low_max": 0.015, "high_min": 0.035}，
+    # 於是 2026-08-17 重定門檻時它「通過」了，卻沒發現報告開始宣稱 pipeline 用舊值。
+    # 斷言的對象要是「與 zone_builder 同源」這個性質，不是某一組數字。
+    assert gap["pipeline_absolute"]["low_max"] == LOW_VOLATILITY_THRESHOLD
+    assert gap["pipeline_absolute"]["high_min"] == HIGH_VOLATILITY_THRESHOLD
     assert gap["liquid_stock_quantile"]["p33"] < gap["liquid_stock_quantile"]["p67"]
+
+
+def test_threshold_gap_reports_live_pipeline_constants_not_copies():
+    """`threshold_gap` 必須反映 zone_builder 的**當下**常數，不能是手抄的數值。
+
+    原本硬編 0.015 / 0.035，2026-08-17 重定門檻後報告就開始宣稱 pipeline 用舊值——
+    而「常數的手抄鏡像會過期」正是重定門檻要消滅的那類問題。
+    """
+    days = MARKET_DAYS[:MIN_CANDLES_FOR_PROFILE]
+    metrics = [
+        compute_symbol_metrics(_meta(f"S{i}"), _candles(days, rng=1.0 + i, amount=1e8), MARKET_DAYS)
+        for i in range(4)
+    ]
+    gap = build_report(metrics, snapshot={}, min_amount=2e7)["threshold_gap"]
+
+    assert gap["pipeline_absolute"]["low_max"] == LOW_VOLATILITY_THRESHOLD
+    assert gap["pipeline_absolute"]["high_min"] == HIGH_VOLATILITY_THRESHOLD
+    # 合成資料的切點不會等於凍結值，所以 aligned 應為 False——它是訊號不是錯誤
+    assert gap["aligned"] is False

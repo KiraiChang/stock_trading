@@ -690,6 +690,40 @@ SR Zone regression fixture、walk-forward 與 calibration 回歸驗收結果。�
 
 ---
 
+## evaluation_universe
+
+評估標的池（migration 066，T-040 Step 5）。**與 `watchlists` 分離**：`watchlists` 驅動盤中
+掃描、籌碼同步、日結掃描、signal 與 production SR 分析五＋一個流程，把 131 檔塞進去會讓
+每一個都乘上約 12 倍。本表只驅動一件事——每日盤後更新這批標的的日 K，讓歷史持續累積供
+T-002 / T-003 研究使用。**不參與任何交易決策或狀態推導。**
+
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| symbol | VARCHAR(10) UNIQUE | 股票代號 |
+| bucket_hint | VARCHAR(32) | 入池時的 `selection_bucket` |
+| bucket_edge_low / bucket_edge_high | DECIMAL(18,10) | **入池時實際使用的分位數邊界**，等於當下的 `LOW/HIGH_VOLATILITY_THRESHOLD` |
+| universe_version | VARCHAR(32) | 例如 `v2`；重新取分位數就升版 |
+| universe_role | VARCHAR(16) | `primary` 參與股票 builder 決策／`supplemental` 僅交叉觀察。**沒有 CHECK 約束**，合法值由 `store.AllUniverseRoles()` 與欄寬回歸測試把住 |
+| selected_at | TIMESTAMPTZ | 入池時間，由伺服器決定（不接受呼叫端指定） |
+| source | VARCHAR(64) | 入池來源，例如 `T-040_STEP3` |
+| active | BOOLEAN | 是否仍納入每日維護 |
+| note | TEXT（mysql 為 VARCHAR(1024)） | 流動性門檻、`insufficient_depth` 等備註 |
+
+**為什麼邊界存在每一列**（刻意的反正規化）：`bucket_hint` 單獨存在無法回答「這個 bucket
+是用哪組邊界判的」。分位數是相對於當下母體的——實測 2026-08-17 有 3 檔（3530、3661、8102）
+`atr_pct` 一個 bit 都沒變卻換桶，只因母體變了邊界移動。131 列的重複成本可忽略，
+換來的是每一列自我描述。門檻的凍結機制見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Volatility bucket 門檻」。
+
+**`active=false` 不刪除列**：入池與退池的歷史本身是研究紀錄。重新匯入 selection report
+（upsert）**不會動 `active`**——停用是獨立的人工決定。
+
+**mysql 的 `note` 用 `VARCHAR(1024)` 而非 `TEXT`**：MySQL 的 TEXT 不能有 `DEFAULT`，
+用 TEXT 會重演 `057` 那種「省略該欄位的 INSERT 在 mysql 失敗、另兩個 engine 成功」的
+不對稱（見 [`issue.md`](./issue.md) I-054 第 3 項）。
+
+---
+
 ## 欄位命名規範：避開 MySQL 保留字
 
 新增 migration 時，**欄位名不可使用 MySQL 保留字**（`trigger`、`signal`、`force`、

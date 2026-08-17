@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -54,8 +55,17 @@ type Scheduler struct {
 	// adjuster 為選填（見 docs/todo.md T-042）：未注入時不註冊還原係數同步排程，
 	// 行為與導入前完全相同。
 	adjuster *market.Adjuster
-	log      *zap.Logger
-	cron             *cron.Cron
+	// evaluationUniverse 為選填（見 docs/todo.md T-040 Step 5）：未注入或未啟用時
+	// 不註冊該排程，行為與導入前完全相同。比照 adjuster 的處理。
+	evaluationUniverse    store.EvaluationUniverseRepo
+	evaluationUniverseCfg config.EvaluationUniverseConfig
+	// universeSyncRunning 擋重複觸發。這個 job 要跑約 26 分鐘，cron 與人工觸發撞在一起
+	// 會讓兩批請求共用同一個節流器互相拖慢，且 job_runs 出現兩筆難以判讀的紀錄。
+	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
+	// 卻只在多實例部署才有意義。
+	universeSyncRunning atomic.Bool
+	log                 *zap.Logger
+	cron                *cron.Cron
 }
 
 func New(
@@ -147,6 +157,17 @@ func (s *Scheduler) Start() {
 			s.RunCorporateActionSync()
 		}); err != nil {
 			s.log.Error("corporate action sync cron register failed", zap.Error(err))
+		}
+	}
+
+	// 評估標的池的每日日 K 維護。**只做這一件事**——不進盤中、不抓籌碼、不做 SR 分析，
+	// 那是 T-040「新標的不能放進 watchlists」的核心約束。
+	if s.evaluationUniverse != nil && s.evaluationUniverseCfg.Enabled {
+		if _, err := s.cron.AddFunc(s.evaluationUniverseCfg.Cron, func() {
+			s.runEvaluationUniverseSync(context.Background())
+		}); err != nil {
+			s.log.Error("evaluation universe cron register failed",
+				zap.String("cron", s.evaluationUniverseCfg.Cron), zap.Error(err))
 		}
 	}
 
@@ -574,6 +595,94 @@ func (s *Scheduler) srEvaluationRequest(symbols []string) analysis.SREvaluationR
 // SetAdjuster 注入還原係數同步器。未呼叫時排程不註冊該 job。
 func (s *Scheduler) SetAdjuster(a *market.Adjuster) {
 	s.adjuster = a
+}
+
+// SetEvaluationUniverse 注入評估標的池與其排程設定。未呼叫或 cfg.Enabled=false 時
+// 不註冊該 job，行為與導入前完全相同（比照 SetAdjuster）。
+func (s *Scheduler) SetEvaluationUniverse(repo store.EvaluationUniverseRepo, cfg config.EvaluationUniverseConfig) {
+	s.evaluationUniverse = repo
+	s.evaluationUniverseCfg = cfg
+}
+
+// RunEvaluationUniverseSync 供 API 手動觸發。
+func (s *Scheduler) RunEvaluationUniverseSync() {
+	s.runEvaluationUniverseSync(context.Background())
+}
+
+// runEvaluationUniverseSync 更新評估標的池的日 K。
+//
+// **這是 T-040 Step 5 的唯一目的**：池裡的標的沒有任何流程會碰它們，尾端會逐日落後
+// （實測 2026-08-17：全庫只有 9 檔 watchlist 有當日資料，池內另外 122 檔停在三天前）。
+// evaluation 取「最後 N 根」，尾端不齊會讓評估視窗錯開、同一份報告隔幾天重跑結果不同。
+//
+// 單檔失敗只累計不中斷——131 檔裡一檔抓不到不該讓其餘 130 檔也不更新。
+func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
+	if s.evaluationUniverse == nil {
+		return
+	}
+	// 這個 job 約 26 分鐘，cron 與人工觸發撞在一起會共用同一個節流器互相拖慢。
+	if !s.universeSyncRunning.CompareAndSwap(false, true) {
+		s.log.Warn("evaluation universe sync already running, skipped")
+		return
+	}
+	defer s.universeSyncRunning.Store(false)
+
+	runID := s.startRun(ctx, "evaluation_universe_sync")
+
+	entries, err := s.evaluationUniverse.ListActive(ctx)
+	if err != nil {
+		s.log.Error("evaluation universe list failed", zap.Error(err))
+		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 1, err.Error())
+		return
+	}
+	if len(entries) == 0 {
+		// 空池不是錯誤：表建好但還沒匯入清單時就是這個狀態。
+		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 0, "")
+		return
+	}
+
+	symbols := make([]string, 0, len(entries))
+	for i := range entries {
+		symbols = append(symbols, entries[i].Symbol)
+	}
+
+	days := s.evaluationUniverseCfg.Days
+	if days <= 0 {
+		days = 10
+	}
+	// **一定要帶 onSymbol**：131 檔在 5 req/min 下約 26 分鐘，沒有中間訊號的話
+	// 「卡在第 3 檔」與「跑到第 130 檔」在 log 上完全一樣，無法判斷該不該中斷。
+	// 每 25 檔記一次進度，避免 131 行雜訊；失敗的逐檔記，那才是要追的東西。
+	done := 0
+	var firstErr string
+	onSymbol := func(symbol string, err error) {
+		done++
+		if err != nil {
+			if firstErr == "" {
+				firstErr = symbol + ": " + err.Error()
+			}
+			s.log.Warn("evaluation universe symbol failed",
+				zap.String("symbol", symbol), zap.Int("at", done), zap.Error(err))
+			return
+		}
+		if done%25 == 0 || done == len(symbols) {
+			s.log.Info("evaluation universe sync progress",
+				zap.Int("done", done), zap.Int("total", len(symbols)))
+		}
+	}
+
+	failed := s.fetcher.BackfillHistory(ctx, symbols, days, onSymbol)
+	lastErr := ""
+	if failed > 0 {
+		// 帶上第一個實際錯誤而不是一句「詳見 log」——job_runs 是排程頁唯一看得到的地方。
+		lastErr = firstErr
+		if lastErr == "" {
+			lastErr = "部分標的回補失敗，詳見 log"
+		}
+	}
+	s.log.Info("evaluation universe sync done",
+		zap.Int("symbols", len(symbols)), zap.Int("failed", failed), zap.Int("days", days))
+	s.finishRun(ctx, runID, "evaluation_universe_sync", len(symbols), failed, lastErr)
 }
 
 // RunCorporateActionSync 抓取公司行動並重算還原係數。

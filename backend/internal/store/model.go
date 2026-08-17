@@ -420,13 +420,13 @@ type SRModelGovernance struct {
 }
 
 type SRModelMetric struct {
-	ID                 uint64      `db:"id"                   json:"id"`
-	TrainJobID         uint64      `db:"train_job_id"         json:"train_job_id"`
-	JobID              string      `db:"job_id"               json:"job_id"`
-	ModelVersion       string      `db:"model_version"        json:"model_version"`
-	ModelType          string      `db:"model_type"           json:"model_type"`
-	SplitMethod        string      `db:"split_method"         json:"split_method"`
-	Timeframe          string      `db:"timeframe"            json:"timeframe"`
+	ID           uint64 `db:"id"                   json:"id"`
+	TrainJobID   uint64 `db:"train_job_id"         json:"train_job_id"`
+	JobID        string `db:"job_id"               json:"job_id"`
+	ModelVersion string `db:"model_version"        json:"model_version"`
+	ModelType    string `db:"model_type"           json:"model_type"`
+	SplitMethod  string `db:"split_method"         json:"split_method"`
+	Timeframe    string `db:"timeframe"            json:"timeframe"`
 	// db 欄位名 row_count ≠ json 欄位名 rows：rows 是 MySQL 保留字，
 	// 裸寫在查詢語句裡在 MySQL 上會語法錯誤（migration 059 改名，見 issue.md I-054）。
 	// json tag 維持 rows，所以 API 與前端不受影響。
@@ -669,10 +669,10 @@ type BacktestJob struct {
 	Timeframe string `db:"timeframe"   json:"timeframe"`
 	StartDate string `db:"start_date"  json:"start_date"`
 	EndDate   string `db:"end_date"    json:"end_date"`
-	Status    string `db:"status"      json:"status"`  // pending/running/done/failed
+	Status    string `db:"status"      json:"status"` // pending/running/done/failed
 	// db 欄位名 trigger_source ≠ json 欄位名 trigger，理由同 SRModelMetric.Rows。
-	Trigger   string `db:"trigger_source" json:"trigger"` // manual/scheduler
-	Error     string `db:"error"       json:"error,omitempty"`
+	Trigger string `db:"trigger_source" json:"trigger"` // manual/scheduler
+	Error   string `db:"error"       json:"error,omitempty"`
 	// UseChipFilter/ChipMinScore：【籌碼分析整合】是否在進場時套用
 	// chip_scores.total_score 門檻過濾（見 docs/chip-analysis-design.md 第9節），
 	// Python 端逐 bar 比對，未達門檻的訊號不會進場。
@@ -768,23 +768,23 @@ type ChipScore struct {
 	ConcentrationScore float64   `db:"concentration_score"  json:"concentration_score"`
 	TotalScore         float64   `db:"total_score"          json:"total_score"`
 	// db 欄位名 signal_type ≠ json 欄位名 signal，理由同 SRModelMetric.Rows。
-	Signal             string    `db:"signal_type"          json:"signal"` // BULLISH/BEARISH/NEUTRAL/RISK
-	Reason             RawJSON   `db:"reason"               json:"reason,omitempty"`
-	CreatedAt          time.Time `db:"created_at"           json:"created_at"`
-	UpdatedAt          time.Time `db:"updated_at"           json:"updated_at"`
+	Signal    string    `db:"signal_type"          json:"signal"` // BULLISH/BEARISH/NEUTRAL/RISK
+	Reason    RawJSON   `db:"reason"               json:"reason,omitempty"`
+	CreatedAt time.Time `db:"created_at"           json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at"           json:"updated_at"`
 }
 
 // ChipSyncJob 追蹤一次 manual / backfill 籌碼資料同步任務（daily 模式沿用
 // 既有 job_runs 表，job_name="chip_daily_sync"，見 scheduler.go）。Failures
 // 用 RawJSON 讀寫，DB 欄位 NOT NULL DEFAULT '[]'，理由同 ChipScore.Reason。
 type ChipSyncJob struct {
-	ID            uint64     `db:"id"             json:"id"`
-	JobID         string     `db:"job_id"         json:"job_id"`
-	Mode          string     `db:"mode"           json:"mode"`       // manual / backfill
-	Symbols       string     `db:"symbols"        json:"symbols"`    // JSON array string
-	DataTypes     string     `db:"data_types"     json:"data_types"` // JSON array string
-	FromDate      string     `db:"from_date"      json:"from_date"`
-	ToDate        string     `db:"to_date"        json:"to_date"`
+	ID        uint64 `db:"id"             json:"id"`
+	JobID     string `db:"job_id"         json:"job_id"`
+	Mode      string `db:"mode"           json:"mode"`       // manual / backfill
+	Symbols   string `db:"symbols"        json:"symbols"`    // JSON array string
+	DataTypes string `db:"data_types"     json:"data_types"` // JSON array string
+	FromDate  string `db:"from_date"      json:"from_date"`
+	ToDate    string `db:"to_date"        json:"to_date"`
 	// db 欄位名 force_sync ≠ json 欄位名 force，理由同 SRModelMetric.Rows。
 	Force         bool       `db:"force_sync"     json:"force"`
 	Status        string     `db:"status"         json:"status"` // pending/running/done/partial/failed
@@ -910,3 +910,35 @@ type PositionAnalysis struct {
 	RuleVersion            string      `db:"rule_version"           json:"rule_version"`
 	CreatedAt              time.Time   `db:"created_at"             json:"created_at"`
 }
+
+// EvaluationUniverseEntry 是評估標的池的一筆成員（T-040 Step 5）。
+//
+// **與 watchlists 分離**：watchlists 驅動盤中掃描、籌碼同步、日結掃描、signal 與
+// production SR 分析；本表只驅動一件事——每日盤後更新日 K。不參與任何交易決策或狀態推導。
+// 規格見 docs/evaluation-universe-selection-plan.md 的「Step 5 執行計畫書」。
+type EvaluationUniverseEntry struct {
+	ID         uint64 `db:"id"           json:"id"`
+	Symbol     string `db:"symbol"       json:"symbol"`
+	BucketHint string `db:"bucket_hint"  json:"bucket_hint"`
+	// BucketEdgeLow / BucketEdgeHigh 是入池時**實際使用的分位數邊界**，刻意存在每一列。
+	// BucketHint 單獨存在無法回答「這個 bucket 是用哪組邊界判的」——實測 2026-08-17 有
+	// 3 檔 atr_pct 完全未變卻換桶，只因母體變了邊界移動。應填入 zone_builder.py 的
+	// LOW/HIGH_VOLATILITY_THRESHOLD 當下的值。
+	BucketEdgeLow   float64 `db:"bucket_edge_low"  json:"bucket_edge_low"`
+	BucketEdgeHigh  float64 `db:"bucket_edge_high" json:"bucket_edge_high"`
+	UniverseVersion string  `db:"universe_version" json:"universe_version"`
+	// UniverseRole：primary 參與股票 builder 決策，supplemental 只作交叉觀察。
+	UniverseRole string    `db:"universe_role" json:"universe_role"`
+	SelectedAt   time.Time `db:"selected_at"   json:"selected_at"`
+	Source       string    `db:"source"        json:"source"`
+	// Active=false 代表保留紀錄但不再納入每日維護。刻意不刪除：入退池歷史本身是研究紀錄。
+	Active bool   `db:"active" json:"active"`
+	Note   string `db:"note"   json:"note"`
+}
+
+// AllUniverseRoles 是 UniverseRole 的合法值。
+//
+// 由 TestPostgresMigrationsRealValuesFitAllColumns 與
+// TestMySQLMigrationsRealValuesFitAllColumns 取用：universe_role 是 VARCHAR(16) 且沒有
+// CHECK 約束，少了那兩支測試，日後新增一個較長的值不會有任何東西擋下。
+func AllUniverseRoles() []string { return []string{"primary", "supplemental"} }

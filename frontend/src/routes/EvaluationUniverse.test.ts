@@ -8,6 +8,13 @@ import {
   type SymbolFacets,
 } from '../lib/api/stockSymbols'
 import { triggerBackfill, getBackfillJob, type MarketBackfillJob } from '../lib/api/market'
+import {
+  fetchEvaluationUniverse,
+  setEvaluationUniverseActive,
+  triggerEvaluationUniverseSync,
+  upsertEvaluationUniverse,
+  type EvaluationUniverseList,
+} from '../lib/api/evaluationUniverse'
 
 // 元件層測試：驗這頁的狀態機與送出的參數，API 形狀由後端 handler 測試把關。
 vi.mock('../lib/api/stockSymbols', () => ({
@@ -15,6 +22,13 @@ vi.mock('../lib/api/stockSymbols', () => ({
   fetchSymbolFacets: vi.fn(),
 }))
 vi.mock('../lib/api/market', () => ({ triggerBackfill: vi.fn(), getBackfillJob: vi.fn() }))
+// ③ 已入池區塊在 onMount 就會查一次；不 mock 的話每支測試都會打真 fetch。
+vi.mock('../lib/api/evaluationUniverse', () => ({
+  fetchEvaluationUniverse: vi.fn(),
+  setEvaluationUniverseActive: vi.fn(),
+  triggerEvaluationUniverseSync: vi.fn(),
+  upsertEvaluationUniverse: vi.fn(),
+}))
 
 function candidates(overrides: Partial<SymbolCandidatesResult> = {}): SymbolCandidatesResult {
   return {
@@ -69,7 +83,37 @@ beforeEach(() => {
   vi.mocked(getBackfillJob).mockReset()
   vi.mocked(fetchSymbolCandidates).mockResolvedValue(candidates())
   vi.mocked(triggerBackfill).mockResolvedValue(job())
+  vi.mocked(fetchEvaluationUniverse).mockReset()
+  vi.mocked(fetchEvaluationUniverse).mockResolvedValue(emptyPool())
+  vi.mocked(upsertEvaluationUniverse).mockReset()
+  vi.mocked(upsertEvaluationUniverse).mockResolvedValue({ upserted: 2 })
+  vi.mocked(setEvaluationUniverseActive).mockReset()
+  vi.mocked(setEvaluationUniverseActive).mockResolvedValue({ symbol: '2330', active: false })
+  vi.mocked(triggerEvaluationUniverseSync).mockReset()
+  vi.mocked(triggerEvaluationUniverseSync).mockResolvedValue({ message: 'evaluation_universe_sync 已在背景重新觸發' })
 })
+
+function pool(overrides: Partial<EvaluationUniverseList> = {}): EvaluationUniverseList {
+  return {
+    items: [
+      {
+        id: 1, symbol: '2330', bucket_hint: 'LOW_VOLATILITY',
+        bucket_edge_low: 0.046, bucket_edge_high: 0.063,
+        universe_version: 'v2', universe_role: 'primary',
+        selected_at: '2026-08-17T00:00:00+08:00', source: 'T-040_STEP3',
+        active: true, note: '',
+      },
+    ],
+    total: 1,
+    active_count: 1,
+    active_buckets: { LOW_VOLATILITY: 1 },
+    ...overrides,
+  }
+}
+
+function emptyPool(): EvaluationUniverseList {
+  return { items: [], total: 0, active_count: 0, active_buckets: {} }
+}
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -261,5 +305,105 @@ describe('證券類型全部取消勾選', () => {
 
     expect(await screen.findByText(/全部不選不等於/)).toBeInTheDocument()
     expect(fetchSymbolCandidates).not.toHaveBeenCalled()
+  })
+})
+
+// ── ③ 已入池：匯入 selection report ─────────────────────────────
+const IMPORT_LOW = 0.046089927430152715
+const IMPORT_HIGH = 0.06278197721225691
+
+function reportJson(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    quantile_edges: [IMPORT_LOW, IMPORT_HIGH],
+    threshold_gap: { aligned: true, pipeline_absolute: { low_max: IMPORT_LOW, high_min: IMPORT_HIGH } },
+    symbols: [
+      { symbol: '0050', selection_bucket: 'LOW_VOLATILITY', universe_role: 'primary' },
+      { symbol: '2454', selection_bucket: 'HIGH_VOLATILITY', universe_role: 'primary' },
+    ],
+    universe: { selected_symbols: ['0050', '2454'] },
+    ...overrides,
+  })
+}
+
+async function pasteReport(raw: string) {
+  const ta = screen.getByPlaceholderText('或直接貼上報告 JSON')
+  await fireEvent.input(ta, { target: { value: raw } })
+}
+
+describe('匯入 selection report', () => {
+  it('貼上報告後顯示筆數與 bucket 分佈，確認後送出逐檔資料', async () => {
+    render(EvaluationUniverse)
+    await pasteReport(reportJson())
+
+    await screen.findByText(/將匯入/)
+    await fireEvent.click(screen.getByRole('button', { name: '確認匯入 2 檔' }))
+
+    await waitFor(() => expect(upsertEvaluationUniverse).toHaveBeenCalledTimes(1))
+    const items = vi.mocked(upsertEvaluationUniverse).mock.calls[0][0]
+    expect(items.map((i) => i.symbol)).toEqual(['0050', '2454'])
+    // 邊界照抄，不重算也不取整
+    expect(items[0].bucket_edge_low).toBe(IMPORT_LOW)
+    expect(items[0].bucket_hint).toBe('LOW_VOLATILITY')
+    expect(items[1].bucket_hint).toBe('HIGH_VOLATILITY')
+    // 匯入成功後要重新載入池，而不是就地拼湊本地狀態
+    await waitFor(() => expect(fetchEvaluationUniverse).toHaveBeenCalledTimes(2))
+  })
+
+  it('aligned=false 時顯示警告但仍可匯入', async () => {
+    render(EvaluationUniverse)
+    await pasteReport(reportJson({ threshold_gap: { aligned: false } }))
+
+    await screen.findByText(/bucket_hint 會與 runtime 算出的 bucket 不一致/)
+    // 警告不是阻擋：使用者可能就是要記錄一個已知會漂的版本
+    expect(screen.getByRole('button', { name: '確認匯入 2 檔' })).toBeTruthy()
+  })
+
+  it('不是 selection report 時顯示錯誤且不送出', async () => {
+    render(EvaluationUniverse)
+    await pasteReport('{"foo":1}')
+
+    await screen.findByText(/selected_symbols/)
+    expect(screen.queryByRole('button', { name: /確認匯入/ })).toBeNull()
+    expect(upsertEvaluationUniverse).not.toHaveBeenCalled()
+  })
+})
+
+describe('③ 已入池：維護狀態與手動對齊', () => {
+  it('切換維護狀態後重新載入整份，而不是就地改本地狀態', async () => {
+    vi.mocked(fetchEvaluationUniverse).mockResolvedValue(pool())
+    render(EvaluationUniverse)
+
+    const toggle = await screen.findByRole('button', { name: '維護中' })
+    await fireEvent.click(toggle)
+
+    await waitFor(() => expect(setEvaluationUniverseActive).toHaveBeenCalledWith('2330', false))
+    // active_count 與 bucket 分佈都由後端算，本地各算一次就會有兩套邏輯
+    await waitFor(() => expect(fetchEvaluationUniverse).toHaveBeenCalledTimes(2))
+  })
+
+  it('手動對齊的耗時由實際檔數推算，不寫死', async () => {
+    vi.mocked(fetchEvaluationUniverse).mockResolvedValue(pool({ active_count: 131 }))
+    render(EvaluationUniverse)
+    await screen.findByRole('button', { name: '維護中' })
+
+    await fireEvent.click(screen.getByRole('button', { name: '手動對齊日 K' }))
+
+    // 131 檔 ÷ 5 req/min = 27 分鐘（向上取整）。寫死 26 在池變大變小時都會誤導。
+    await screen.findByText(/約 27 分鐘（131 檔）/)
+  })
+
+  it('池是空的時候不顯示假的耗時', async () => {
+    vi.mocked(fetchEvaluationUniverse).mockResolvedValue(
+      { items: [], total: 0, active_count: 0, active_buckets: {} },
+    )
+    render(EvaluationUniverse)
+    await fireEvent.click(await screen.findByRole('button', { name: '手動對齊日 K' }))
+
+    // **要對訊息元素本身斷言**，不能用全文件查「約 N 分鐘」——
+    // ② 回補區有自己的耗時格式化，輸入為空時就渲染「約 0 分鐘」，
+    // 全域查詢會撞到它（第一版就是這樣誤判成程式有問題）。
+    const msg = await screen.findByText(/evaluation_universe_sync 已在背景重新觸發/)
+    expect(msg.textContent).toContain('進度見排程狀態')
+    expect(msg.textContent).not.toContain('約')
   })
 })

@@ -17,6 +17,14 @@ import json
 import sys
 from typing import Any, Iterable, Optional
 
+# 直接重用 pipeline 的分類，**不自己重寫一份門檻比較**——重寫的代價是「基準說 LOW、
+# pipeline 說 NORMAL」這種沒有東西會報錯的分歧。
+from backtest.modular.sr_scoring.zone_builder import (
+    HIGH_VOLATILITY_THRESHOLD,
+    LOW_VOLATILITY_THRESHOLD,
+    volatility_bucket_from_profile,
+)
+
 # Spearman 相關的下限。1.0 太嚴（相鄰兩檔本來就可能因幾天資料互換），
 # 0.9 在 9 檔的規模下容許約一組相鄰互換，但擋得住整體重排。
 DEFAULT_MIN_SPEARMAN = 0.9
@@ -85,6 +93,12 @@ def build_baseline(
         "source_schema_version": report.get("schema_version"),
         "pipeline_version": report.get("pipeline_version"),
         "timeframe": report.get("timeframe"),
+        # 記下產生本基準時**在位的門檻**。bucket 是門檻的函數，少了這兩個值，
+        # 下次比對看到 bucket 變了無法分辨是資料漂移還是門檻被重定（2026-08-17 重定過一次）。
+        "thresholds": {
+            "low_volatility_max": LOW_VOLATILITY_THRESHOLD,
+            "high_volatility_min": HIGH_VOLATILITY_THRESHOLD,
+        },
         "snapshot": snapshot,
         "symbols": wanted,
         "missing": [s for s in wanted if s not in by_sym],
@@ -92,7 +106,11 @@ def build_baseline(
             s: {
                 "atr_pct": by_sym[s].get("atr_pct"),
                 "average_range_pct": by_sym[s].get("average_range_pct"),
-                "bucket": by_sym[s].get("bucket"),
+                # 用**當下在位的門檻**重算，而不是照抄 report 的值：report 可能是門檻
+                # 重定之前跑的，照抄會讓基準內部自我矛盾（thresholds 與 bucket 不同源）。
+                "bucket": volatility_bucket_from_profile(
+                    by_sym[s].get("atr_pct"), by_sym[s].get("average_range_pct")
+                ),
                 "candle_count": by_sym[s].get("candle_count"),
                 "lookback_bars": by_sym[s].get("lookback_bars"),
             }
@@ -147,13 +165,31 @@ def compare(
         "detail": {"spearman": rho, "min": min_spearman, "n": len(set(b_atr) & set(c_atr))},
     })
 
+    # 門檻漂移：基準記的門檻與現行不同時，bucket 的比對就不是同一把尺。
+    # 這是觀察項——門檻重定是刻意的動作（2026-08-17 做過一次），但**基準必須跟著重建**，
+    # 否則 thresholds 與 profiles 不同源。
+    base_th = (baseline.get("thresholds") or {})
+    live_th = {"low_volatility_max": LOW_VOLATILITY_THRESHOLD,
+               "high_volatility_min": HIGH_VOLATILITY_THRESHOLD}
+    checks.append({
+        "name": "基準的門檻與現行一致（觀察項）",
+        "blocking": False,
+        "passed": base_th == live_th,
+        "detail": {"baseline": base_th or None, "current": live_th},
+    })
+
     # bucket 跨越是**觀察項而非失敗條件**。
     # 絕對門檻（1.5% / 3.5%）與台股分佈差一個量級（見 todo.md T-003「門檻重定」），
     # 標的常態貼在 3.5% 附近，普通的資料漂移就會跨過去。實證：2026-08-06 到 08-17 的 11 天內
     # HIGH 由 9 檔變 6 檔，期間 pipeline 沒有任何改動。
     # 把它設成 blocking 會讓階段 6 常態失敗，然後被當成雜訊忽略——那比沒有檢查更糟。
-    moved = {s: [base[s].get("bucket"), cur[s].get("bucket")]
-             for s in sorted(base) if s in cur and base[s].get("bucket") != cur[s].get("bucket")}
+    # 兩邊都用**現行門檻**重算，比對才是同一把尺——照讀各自存的 bucket 會把
+    # 「門檻被重定」誤報成「標的跨越邊界」。門檻本身的差異由上面那項負責。
+    def _bucket(p: dict[str, Any]) -> str:
+        return volatility_bucket_from_profile(p.get("atr_pct"), p.get("average_range_pct"))
+
+    moved = {s: [_bucket(base[s]), _bucket(cur[s])]
+             for s in sorted(base) if s in cur and _bucket(base[s]) != _bucket(cur[s])}
     checks.append({
         "name": "bucket 跨越（觀察項，不阻擋）",
         "blocking": False,

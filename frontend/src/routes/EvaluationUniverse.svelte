@@ -14,6 +14,18 @@
     type MarketBackfillJob,
     type MarketBackfillStatus,
   } from '../lib/api/market'
+  import {
+    fetchEvaluationUniverse,
+    setEvaluationUniverseActive,
+    triggerEvaluationUniverseSync,
+    upsertEvaluationUniverse,
+    type EvaluationUniverseList,
+  } from '../lib/api/evaluationUniverse'
+  import {
+    parseSelectionReport,
+    SelectionReportError,
+    type ParsedSelectionReport,
+  } from '../lib/utils/selectionReport'
   import { ApiError } from '../lib/api/client'
   import { pollUntilTerminal, stalledMessage, DEFAULT_STALL_MINUTES } from '../lib/utils/jobPolling'
 
@@ -62,7 +74,128 @@
     failed: 'bg-red-900/40 text-red-400',
   }
 
+  // ── ③ 已入池（T-040 Step 5）─────────────────────────────────
+  // 這一區顯示的是**系統維護中的選池**，與上面兩區（產生候選、一次性回補）不同：
+  // 上面是研究過程，這裡是已確認的決策。
+  let pool: EvaluationUniverseList | null = null
+  let poolError = ''
+  let poolLoading = false
+  let syncMessage = ''
+  let togglingSymbol = ''
+
+  async function loadPool() {
+    poolLoading = true
+    poolError = ''
+    try {
+      pool = await fetchEvaluationUniverse()
+    } catch (err) {
+      poolError = err instanceof ApiError ? err.message : '載入評估標的池失敗'
+    } finally {
+      poolLoading = false
+    }
+  }
+
+  async function toggleActive(symbol: string, next: boolean) {
+    togglingSymbol = symbol
+    poolError = ''
+    try {
+      await setEvaluationUniverseActive(symbol, next)
+      // 重新拉整份而不是就地改本地狀態：active_count 與 bucket 分佈都由後端算，
+      // 本地各算一次就會有兩套邏輯，遲早不一致。
+      await loadPool()
+    } catch (err) {
+      poolError = err instanceof ApiError ? err.message : '切換維護狀態失敗'
+    } finally {
+      togglingSymbol = ''
+    }
+  }
+
+  // ── 匯入 selection report ───────────────────────────────────
+  // **吃整份報告，不讓使用者手打**：bucket_hint 逐檔不同，bucket_edge_* 是 17 位有效數字的
+  // 凍結分位數——手打必然出錯，而錯了沒有東西擋得下來（DB 的 CHECK 只驗 high > low > 0）。
+  let importVersion = 'v2'
+  let importSource = 'T-040_STEP3'
+  let importRaw = ''
+  let parsed: ParsedSelectionReport | null = null
+  let importError = ''
+  let importing = false
+  let importMessage = ''
+
+  function parseNow(raw: string) {
+    importRaw = raw
+    parsed = null
+    importError = ''
+    importMessage = ''
+    if (!raw.trim()) return
+    try {
+      parsed = parseSelectionReport(raw, {
+        universeVersion: importVersion.trim(),
+        source: importSource.trim(),
+      })
+    } catch (err) {
+      importError = err instanceof SelectionReportError ? err.message : '解析失敗'
+    }
+  }
+
+  async function onReportFile(event: Event) {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      // 在瀏覽器端讀完再解析：報告有 857 檔、數 MB，不需要也不該送給後端解析。
+      parseNow(await file.text())
+    } catch (err) {
+      // 沒有這個 catch 時讀檔失敗（權限、檔案已被刪、磁碟錯誤）畫面毫無反應，
+      // 只在 console 留 unhandled rejection——使用者會以為自己沒選到檔案。
+      parsed = null
+      importError = `讀取檔案失敗：${err instanceof Error ? err.message : String(err)}`
+    } finally {
+      // 重置後同一個檔案才選得第二次（改完報告重選同名檔時需要）。
+      input.value = ''
+    }
+  }
+
+  async function confirmImport() {
+    if (!parsed || parsed.items.length === 0) return
+    importing = true
+    importError = ''
+    try {
+      const res = await upsertEvaluationUniverse(parsed.items)
+      importMessage = `已匯入 ${res.upserted} 檔`
+      parsed = null
+      importRaw = ''
+      await loadPool()
+    } catch (err) {
+      importError = err instanceof ApiError ? err.message : '匯入失敗'
+    } finally {
+      importing = false
+    }
+  }
+
+  // FinMind 節流是 5 req/min，回補是 1 request/檔（日期區間塞在同一個請求裡）。
+  const FINMIND_REQ_PER_MIN = 5
+
+  /** 由實際 active 檔數推估耗時。寫死「26 分鐘」在池變大或變小時都會誤導。 */
+  function syncEtaText(activeCount: number | null): string {
+    if (activeCount === null || activeCount <= 0) return '進度見排程狀態'
+    return `約 ${Math.ceil(activeCount / FINMIND_REQ_PER_MIN)} 分鐘（${activeCount} 檔），進度見排程狀態`
+  }
+
+  async function runSync() {
+    syncMessage = ''
+    poolError = ''
+    try {
+      const res = await triggerEvaluationUniverseSync()
+      // **不做輪詢**：這個 job 沒有 job id，進度看排程狀態頁。
+      // 假裝有進度條會比沒有更糟。
+      syncMessage = `${res.message}（${syncEtaText(pool?.active_count ?? null)}）`
+    } catch (err) {
+      poolError = err instanceof ApiError ? err.message : '觸發維護失敗'
+    }
+  }
+
   onMount(async () => {
+    void loadPool()
     try {
       // **帶著已選類型抓**：不帶的話產業清單會混入只存在於創新板（30 檔）與
       // 特別股（26 檔）的產業，使用者在「股票+ETF」之下點了它必然 0 筆，
@@ -504,10 +637,180 @@
       </div>
     </div>
 
-    <!-- ── ③ 下一步 ────────────────────────────────────────── -->
+    <!-- ── ③ 已入池（系統維護中）────────────────────────────── -->
+    <div class="bg-panel border border-border rounded-xl">
+      <div class="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold text-white">③ 已入池（系統每日維護日 K）</h2>
+        <div class="flex items-center gap-3">
+          <button
+            class="text-xs text-muted hover:text-white transition-colors"
+            disabled={poolLoading}
+            on:click={loadPool}
+          >{poolLoading ? '載入中…' : '重新載入'}</button>
+          <button
+            class="text-xs px-3 py-1 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 text-white transition-colors"
+            on:click={runSync}
+          >手動對齊日 K</button>
+        </div>
+      </div>
+      <div class="px-5 py-4 space-y-3">
+        <p class="text-muted text-xs">
+          這裡是**已確認的選池**，與上面兩區的研究過程不同。排程
+          <code class="text-white">evaluation_universe_sync</code>
+          每個交易日 16:00 更新這批標的的日 K；<strong class="text-white">預設關閉</strong>，
+          未啟用時要用右上角手動對齊。跑 evaluation 前尾端沒對齊，各檔的評估視窗會錯開。
+        </p>
+
+        <!-- 匯入 selection report -->
+        <details class="border border-border/60 rounded-lg">
+          <summary class="px-3 py-2 text-xs text-muted hover:text-white cursor-pointer">
+            匯入 selection report（設定選池成員）
+          </summary>
+          <div class="px-3 py-3 space-y-3 border-t border-border/60">
+            <p class="text-muted text-xs">
+              吃 <code class="text-white">scripts/build-selection-report.sh</code> 產出的 JSON。
+              <strong class="text-white">逐檔的 bucket 與凍結邊界都從報告取</strong>——
+              邊界是 17 位有效數字，手打必然出錯而且沒有東西擋得下來。
+            </p>
+            <div class="flex flex-wrap items-end gap-3">
+              <label class="text-xs text-muted">
+                universe_version
+                <input
+                  class="ml-2 w-20 bg-surface border border-border rounded px-2 py-1 text-white"
+                  bind:value={importVersion}
+                  on:change={() => parseNow(importRaw)}
+                />
+              </label>
+              <label class="text-xs text-muted">
+                source
+                <input
+                  class="ml-2 w-36 bg-surface border border-border rounded px-2 py-1 text-white"
+                  bind:value={importSource}
+                  on:change={() => parseNow(importRaw)}
+                />
+              </label>
+              <input
+                type="file"
+                accept=".json,application/json"
+                class="text-xs text-muted"
+                on:change={onReportFile}
+              />
+            </div>
+            <textarea
+              class="w-full h-24 bg-surface border border-border rounded px-2 py-1 text-xs text-white font-mono"
+              placeholder="或直接貼上報告 JSON"
+              value={importRaw}
+              on:input={(e) => parseNow(e.currentTarget.value)}
+            ></textarea>
+
+            {#if importError}
+              <p class="text-xs text-red-400">{importError}</p>
+            {/if}
+            {#if importMessage}
+              <p class="text-xs text-green-400">{importMessage}</p>
+            {/if}
+
+            {#if parsed}
+              <div class="space-y-2">
+                <div class="flex flex-wrap gap-3 text-xs">
+                  <span class="text-muted">將匯入 <strong class="text-white">{parsed.items.length}</strong> 檔</span>
+                  {#each Object.entries(parsed.bucketCounts) as [bucket, n]}
+                    <span class="text-muted">{bucket} <strong class="text-white">{n}</strong></span>
+                  {/each}
+                </div>
+                <div class="flex flex-wrap gap-3 text-xs">
+                  {#each Object.entries(parsed.roleCounts) as [role, n]}
+                    <span class="text-muted">{role} <strong class="text-white">{n}</strong></span>
+                  {/each}
+                </div>
+                <p class="text-xs text-muted font-mono break-all">
+                  報告切點: {parsed.edges[0]} / {parsed.edges[1]}
+                </p>
+                {#if parsed.aligned === true}
+                  <p class="text-xs text-green-400">切點與 pipeline 門檻一致（aligned=true）</p>
+                {:else if parsed.pipelineThresholds}
+                  <!-- 差 0.005% 與差一個量級的處置完全不同，所以要並列實際數字 -->
+                  <p class="text-xs text-yellow-400 font-mono break-all">
+                    pipeline 門檻: {parsed.pipelineThresholds.low} / {parsed.pipelineThresholds.high}
+                  </p>
+                {/if}
+                {#each parsed.warnings as w}
+                  <p class="text-xs text-yellow-400">⚠ {w}</p>
+                {/each}
+                <button
+                  class="text-xs px-3 py-1 rounded-lg bg-indigo-600/80 hover:bg-indigo-600 disabled:opacity-50 text-white transition-colors"
+                  disabled={importing}
+                  on:click={confirmImport}
+                >{importing ? '匯入中…' : `確認匯入 ${parsed.items.length} 檔`}</button>
+              </div>
+            {/if}
+          </div>
+        </details>
+
+        {#if poolError}
+          <p class="text-xs text-red-400">{poolError}</p>
+        {/if}
+        {#if syncMessage}
+          <p class="text-xs text-green-400">{syncMessage}</p>
+        {/if}
+
+        {#if pool}
+          {#if pool.total === 0}
+            <p class="text-xs text-muted">
+              池是空的。用 selection report 產出清單後，透過
+              <code class="text-white">POST /api/v1/evaluation-universe</code> 匯入。
+            </p>
+          {:else}
+            <div class="flex flex-wrap gap-4 text-xs">
+              <span class="text-muted">共 <strong class="text-white">{pool.total}</strong> 檔</span>
+              <span class="text-muted">維護中 <strong class="text-white">{pool.active_count}</strong> 檔</span>
+              {#each Object.entries(pool.active_buckets) as [bucket, n]}
+                <span class="text-muted">{bucket} <strong class="text-white">{n}</strong></span>
+              {/each}
+            </div>
+            <div class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="text-muted border-b border-border/60">
+                    <th class="text-left py-1">代號</th>
+                    <th class="text-left py-1">bucket</th>
+                    <th class="text-left py-1">角色</th>
+                    <th class="text-left py-1">版本</th>
+                    <th class="text-left py-1">入池</th>
+                    <th class="text-right py-1">維護</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each pool.items as row (row.symbol)}
+                    <tr class="border-b border-border/30" class:opacity-50={!row.active}>
+                      <td class="py-1 text-white">{row.symbol}</td>
+                      <td class="py-1 text-muted">{row.bucket_hint}</td>
+                      <td class="py-1 text-muted">{row.universe_role}</td>
+                      <td class="py-1 text-muted">{row.universe_version}</td>
+                      <td class="py-1 text-muted">{row.selected_at.slice(0, 10)}</td>
+                      <td class="py-1 text-right">
+                        <button
+                          class="text-xs hover:underline"
+                          class:text-green-400={row.active}
+                          class:text-gray-500={!row.active}
+                          disabled={togglingSymbol === row.symbol}
+                          on:click={() => toggleActive(row.symbol, !row.active)}
+                        >{togglingSymbol === row.symbol ? '…' : row.active ? '維護中' : '已停用'}</button>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        {/if}
+      </div>
+    </div>
+
+    <!-- ── ④ 下一步 ────────────────────────────────────────── -->
     <div class="bg-panel border border-border rounded-xl">
       <div class="px-5 py-4 border-b border-border">
-        <h2 class="text-sm font-semibold text-white">③ 下一步：看波動分佈</h2>
+        <h2 class="text-sm font-semibold text-white">④ 下一步：看波動分佈</h2>
       </div>
       <div class="px-5 py-4 space-y-3">
         <p class="text-muted text-xs">

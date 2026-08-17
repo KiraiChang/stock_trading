@@ -100,6 +100,17 @@ sr_evaluation:
   replay_max_rows: 200           # 環境變數：SR_EVALUATION_REPLAY_MAX_ROWS
   write_db: true                 # 環境變數：SR_EVALUATION_WRITE_DB，寫入 stock_sr_regression_results
 
+# 評估標的池的每日日 K 維護（T-040 Step 5）。**預設關閉**：一次會對整個池（實測 131 檔）
+# 各發一個 FinMind 請求，5 req/min 下約 26 分鐘。這個池只維護日 K，不進盤中掃描、
+# 籌碼同步、signal 或 production SR 分析——那是「新標的不能放進 watchlists」的核心約束。
+evaluation_universe:
+  enabled: false                 # 環境變數：EVALUATION_UNIVERSE_ENABLED
+  cron: "0 16 * * 1-5"           # 環境變數：EVALUATION_UNIVERSE_CRON，台北時區。
+                                 # 選 16:00：晚於 daily_close（15:00 已確認 FinMind 當日日K已發布，
+                                 # 14:00 曾抓到 count=0），且與 21:00 籌碼採集有近 5 小時緩衝。
+  days: 10                       # 環境變數：EVALUATION_UNIVERSE_DAYS，往前幾個日曆天。
+                                 # 10 而非 5 是為了容忍連假；成本與天數無關（1 request/檔）。
+
 position_analysis:
   max_position_value: 200000
   max_risk_amount: 10000

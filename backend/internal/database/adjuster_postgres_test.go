@@ -173,6 +173,7 @@ func TestPostgresMigrationsRealValuesFitAllColumns(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM corporate_actions`)
 		_, _ = db.Exec(`DELETE FROM job_runs`)
+		_, _ = db.Exec(`DELETE FROM evaluation_universe`)
 	})
 
 	// corporate_actions：走真實的 repo，每一組 (type, source) 都試。
@@ -199,6 +200,29 @@ func TestPostgresMigrationsRealValuesFitAllColumns(t *testing.T) {
 			`INSERT INTO job_runs (job_name, status, started_at) VALUES ($1, 'running', NOW())`,
 			name); err != nil {
 			t.Errorf("job_name %q（%d 字元）寫不進 job_runs: %v", name, len(name), err)
+		}
+	}
+
+	// evaluation_universe：走真實的 repo，把程式碼裡合法的 role 值都試一遍。
+	// bucket_hint / source / universe_version 也一起帶上真正會用的字串——
+	// universe_role 是 VARCHAR(16)、bucket_hint 是 VARCHAR(32)，都沒有 CHECK 約束，
+	// 少了這一段，日後新增一個較長的值不會有任何東西擋下——通則見
+	// docs/development-workflow.md §3「什麼時候才該新增跨語言的型別宣告」。
+	uniRepo := store.NewEvaluationUniverseRepo(db)
+	for j, role := range store.AllUniverseRoles() {
+		entry := store.EvaluationUniverseEntry{
+			Symbol:          "U" + strconv.Itoa(j),
+			BucketHint:      "NORMAL_VOLATILITY",
+			BucketEdgeLow:   0.046089927430152715,
+			BucketEdgeHigh:  0.06278197721225691,
+			UniverseVersion: "v2",
+			UniverseRole:    role,
+			SelectedAt:      time.Now(),
+			Source:          "T-040_STEP3",
+		}
+		if err := uniRepo.Upsert(ctx, []store.EvaluationUniverseEntry{entry}); err != nil {
+			t.Errorf("universe_role=%q(%d 字元) 寫不進 evaluation_universe: %v",
+				role, len(role), err)
 		}
 	}
 }

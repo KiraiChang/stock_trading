@@ -40,8 +40,34 @@ class ZoneBuilder(ABC):
 
 
 DEFAULT_MAX_MERGE_WIDTH_MULTIPLE = 2.0
-LOW_VOLATILITY_THRESHOLD = 0.015
-HIGH_VOLATILITY_THRESHOLD = 0.035
+
+# Volatility bucket 門檻＝**凍結的全市場分位數量測**，不是手選的整數（2026-08-17 重定）。
+#
+# 舊值 0.015 / 0.035 與台股實際分佈差一個量級：用它分類 T-040 選出的 131 檔會得到
+# 103 / 26 / 1——LOW 只剩一檔，`VOLATILITY_BUCKET_ATR_CONFIGS` 的 LOW 那組永遠不會被
+# 觸發，也永遠無法用資料驗證。T-003 的 sweep 因此卡住（見 docs/todo.md T-003「門檻重定」）。
+#
+# 新值是 319 檔流動性合格股票（日均成交 ≥ 2,000 萬）的 P33 / P67，
+# **基準與 volatility_bucket_from_profile() 相同，即 max(atr_pct, average_range_pct)**。
+# 這一點是實作時踩出來的：報告一開始只取 `atr_pct` 的分位數，但半數標的
+# （319 檔中 156 檔）的 average_range_pct 更大，兩種基準會讓 131 檔裡的 20 檔分到不同 bucket。
+# 門檻與基準必須同源，否則選池與 runtime 永遠對不上。
+#
+# **值刻意不四捨五入**：它是一次量測的凍結結果，選池的 bucket_hint 就是用這組數字判的
+# （見 docs/evaluation-universe-selection-plan.md「Step 5 執行計畫書」的 bucket_edge_* 欄位）。
+# 取整會讓貼在邊界的十幾檔與 bucket_hint 不一致。
+# **要重新取分位數就改這裡並升 universe_version**，那是一次明確的版本動作，不是每日漂移。
+LOW_VOLATILITY_THRESHOLD = 0.046089927430152715
+HIGH_VOLATILITY_THRESHOLD = 0.06278197721225691
+# 產生這組數字的量測條件，寫下來才能重現。
+VOLATILITY_THRESHOLD_PROVENANCE = {
+    "measured_at": "2026-08-17",
+    "universe_version": "v2",
+    "population": "319 檔流動性合格股票（security_type=股票、avg_amount_60 >= 20,000,000）",
+    "basis": "max(atr_pct, average_range_pct)，近 60 根",
+    "quantiles": [1 / 3, 2 / 3],
+    "tool": "scripts/build-selection-report.sh",
+}
 
 
 VOLATILITY_BUCKET_ATR_CONFIGS: dict[str, dict[str, float]] = {

@@ -98,6 +98,7 @@ func main() {
 	positionRepo := store.NewPositionRepo(db)
 	stockSymbolRepo := store.NewStockSymbolRepo(db)
 	srEvaluationJobRepo := store.NewSREvaluationJobRepo(db)
+	evaluationUniverseRepo := store.NewEvaluationUniverseRepo(db)
 	srModelGovernanceRepo := store.NewSRModelGovernanceRepo(db)
 
 	// Engines
@@ -193,7 +194,7 @@ func main() {
 		TakeProfitReductionRatio: cfg.PositionAnalysis.TakeProfitReductionRatio,
 		SRReuseMaxAge:            time.Duration(cfg.PositionAnalysis.SRReuseMaxAgeHours) * time.Hour,
 	}
-	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, stockSymbolRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, marketBackfillJobRepo, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
+	srv := api.NewServer(db, candleRepo, indicatorRepo, indEngine, sigEngine, signalRepo, watchlistRepo, stockSymbolRepo, backtestRepo, jobRunRepo, analysisRepo, srZoneRepo, srScoringTrainJobRepo, srZoneVerifier, btManager, analysisClient, fetcher, sched, userRepo, institutionalTradeRepo, marginTradeRepo, brokerTradeRepo, chipScoreRepo, chipSyncJobRepo, chipSyncer, marketBackfillJobRepo, evaluationUniverseRepo, positionRepo, positionConfig, cfg.Chip.Sync.HistoryTradingDays, cfg.Auth.JWTSecret, log)
 
 	// 注入 WebSocket broadcast
 	sigEngine.BroadcastFn = func(sym string, sig *store.Signal) {
@@ -201,6 +202,9 @@ func main() {
 	}
 
 	sched.SetAdjuster(adjuster)
+	// **必須在 sched.Start() 之前**：Start() 當下才決定要不要註冊 cron，
+	// 之後再注入不會有任何效果也不會報錯（靜默失效）。
+	sched.SetEvaluationUniverse(evaluationUniverseRepo, cfg.EvaluationUniverse)
 
 	go sched.Start()
 

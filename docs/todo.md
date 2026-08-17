@@ -277,14 +277,14 @@ F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 r
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中 |
+| 狀態 | 進行中（P0/P1 已實作；門檻重定 2026-08-17 完成；P2 sweep 待跑） |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / Zone Builder |
 | 建立日期 | 2026-07-07 |
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 | P0 狀態 | 已實作（2026-08-05 review 通過） |
 | P1 狀態 | 已實作（2026-08-05 review 通過；計畫列的五個比較面向全數覆蓋） |
-| P2 狀態 | **擱置**（機制完整、預設關閉；sweep 已實跑，結論是**標的池不足以支撐決策**，見下方）。**2026-08-17 新增前置輸入：bucket 絕對門檻需重定**，見下方「門檻重定」 |
+| P2 狀態 | **可續作**（機制完整、預設關閉）。原本擱置的兩個阻礙都已解除：標的池已擴到 131 檔（T-040 Step 3）、bucket 門檻已於 2026-08-17 重定（見下方「門檻重定」）。下一步是跑 coarse sweep |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
@@ -409,28 +409,42 @@ sweep 已於 2026-08-06 實際跑過（11 檔 watchlist、`--limit 1500`、grid 
 更多次 sweep。在 11 檔、9 檔擠在 HIGH 的情況下，再跑幾次都會得到同樣的雜訊。
 因此 P2 狀態改為**擱置**——機制完整、預設關閉是安全的現況，等標的池擴大後再重跑一次 sweep 即可。
 
-#### 門檻重定：P2 的新前置輸入（2026-08-17，來自 T-040 Step 3）
+#### 門檻重定：**已實作（2026-08-17）**，P2 的前置已解除
 
 **「等標的池擴大後再重跑 sweep」這句話不夠——擴大之後才發現真正的阻礙是門檻本身。**
-
-T-040 Step 3 對 857 檔全市場資料實測，pipeline 的絕對門檻與台股實際分佈**差了一個量級**：
+2026-08-17 已依裁決重定並實作完成，現況規格歸檔在
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Volatility bucket 門檻＝凍結的全市場分位數」。
 
 | | LOW | NORMAL | HIGH |
 |---|---|---|---|
-| `zone_builder.py` 現行絕對門檻 | `< 1.5%` | 1.5–3.5% | `> 3.5%` |
-| **流動性合格股票（319 檔）的實際分位數** | **`< 4.25%`**（P33） | 4.25–6.04% | **`> 6.04%`**（P67） |
+| 舊絕對門檻 | `< 1.5%` | 1.5–3.5% | `> 3.5%` |
+| **重定後（凍結分位數）** | **`< 4.6089927%`** | 4.609–6.278% | **`> 6.2781977%`** |
+| 選池 131 檔的分佈 | 1 → **53** | 26 → **46** | 103 → **32** |
 
-後果是**選池怎麼挑都沒用**：Step 3 用分位數選出三個 bucket 各 45/45/29 檔的 universe，
-但同一批標的用 pipeline 的絕對門檻分類是 **103 / 26 / 1**——LOW bucket 只剩一檔。
-`VOLATILITY_BUCKET_ATR_CONFIGS` 是照絕對門檻分派 config 的，所以 LOW 那組 config
-仍然只會被一檔標的觸發，**與 2026-08-06 sweep 時 LOW 為 0 檔的處境沒有實質差別**。
+原本的問題是**選池怎麼挑都沒用**：用分位數選出三桶均衡的 universe，但同一批標的用
+pipeline 的絕對門檻分類是 103 / 26 / 1，LOW 只剩一檔，`VOLATILITY_BUCKET_ATR_CONFIGS`
+的 LOW 那組永遠不會被觸發——**與 2026-08-06 sweep 時 LOW 為 0 檔沒有實質差別**。
 
-**所以 P2 的順序要改**：先重定 `LOW_VOLATILITY_THRESHOLD` / `HIGH_VOLATILITY_THRESHOLD`，
-再跑 sweep。門檻的候選值已由 selection report 的 `threshold_gap` 欄位輸出
-（`scripts/build-selection-report.sh`），不需要重新推導。
+**實作時發現的關鍵不一致（原計畫沒預見）**：`volatility_bucket_from_profile` 的判定基準是
+`max(atr_pct, average_range_pct)`，但 selection report 的分位數只用 `atr_pct`。
+319 檔裡 **156 檔（49%）的 `average_range_pct` 比 `atr_pct` 大**，兩種基準會讓 131 檔中的
+20 檔分到不同 bucket。**只換常數不換基準，重定完仍然對不上。**
+已讓 report 新增 `bucket_basis()` 與 pipeline 同源，並用同基準重算切點。
 
-**重定門檻是破壞性變更**，會改變既有 `stock_sr_zone_analyses` 的 bucket 語意，
-規劃時要一併決定：既有資料是否重算、`volatility_profiles` 的歷史值如何標示新舊。
+**驗收**：定案 131 檔的 `selection_bucket`（分位數重算）與 `current_bucket`（絕對門檻）
+**131/131 完全一致**。python 測試 499 passed。
+
+**既有資料不重算**（本次裁決）：`stock_sr_zone_analyses` 在 2026-08-17 之前的列，其 bucket
+語意是舊門檻。沿用 `database-schema.md`「股價還原」已立的原則——分析紀錄是「當時做了什麼判斷」，
+不是快取。分界日與注意事項已寫進 `sr-zone-scoring.md`。
+
+**邊界凍結一併完成**：新常數**就是**凍結的邊界，重新取分位數＝改這兩個常數並升
+`universe_version`，是一次明確的版本動作而非每日漂移。`VOLATILITY_THRESHOLD_PROVENANCE`
+記下量測條件（母體、基準、分位數、工具）供重現。
+
+**P2 的下一步**：門檻已不再是阻礙，可以跑 coarse sweep 了。三桶分別有 53 / 46 / 32 檔，
+都遠超 `MIN_BUCKET_RECOMMENDATION_ROWS`。判讀時要帶上下方「HIGH bucket 天生帶半導體業偏斜」
+這個前提。
 
 **不做的事（明確記下來，避免日後誤動）**：不因這次結果調整 `build_zone_builders()` 的預設值。
 score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket` 的
@@ -974,7 +988,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **進行中**（2026-08-17：Step 0～3 已完成，Step 4 資料補齊中，Step 5 待啟動） |
+| 狀態 | **已實作，待 review**（2026-08-17：Step 0～5 全部完成；剩匯入 live 與端到端驗收） |
 | 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
@@ -990,8 +1004,8 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 1 | `ListCandidates` repo ＋ 端點 ＋ 前端頁面 | ✅ 完成 2026-08-12／13 |
 | 2 | Step 1 全市場短期回補與判讀 | ✅ 完成 2026-08-13（857 檔 / 454,152 列） |
 | 3 | selection report、選出最終清單 | ✅ 完成 2026-08-17（**131 檔**，計畫書階段 1～3 通過） |
-| 4 | deep backfill ＋ 階段 4～6 驗證 | 🔄 **進行中**——尾端對齊回補待執行，階段 5／6 未跑 |
-| 5 | Phase 2：`evaluation_universe` 表與每日排程 | 📋 **計畫書已寫，待確認**（階段 4／5／6 已通過）|
+| 4 | deep backfill ＋ 階段 4～6 驗證 | ✅ 完成 2026-08-17（131/131 對齊、覆蓋率 99.1%+、峰值 382MB、回歸基準已落地） |
+| 5 | Phase 2：`evaluation_universe` 表與每日排程 | ✅ **已實作，待 review**（2026-08-17）。尚未匯入 131 檔到 live、尚未做端到端驗收 |
 
 #### 相依：T-003 邊界凍結
 

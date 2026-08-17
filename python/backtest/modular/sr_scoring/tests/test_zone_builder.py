@@ -60,13 +60,19 @@ def test_build_zone_builders_uses_shared_config_and_runtime_microstructure_toggl
 
 
 def test_resolve_zone_builder_config_for_profile_uses_volatility_bucket_configs():
-    assert volatility_bucket_from_profile(0.01, 0.012) == "LOW_VOLATILITY"
-    assert volatility_bucket_from_profile(0.02, 0.018) == "NORMAL_VOLATILITY"
-    assert volatility_bucket_from_profile(0.04, 0.02) == "HIGH_VOLATILITY"
+    # 取值對照 2026-08-17 重定後的門檻（LOW < 4.61%、HIGH > 6.28%），
+    # 而不是舊的 1.5% / 3.5%。門檻是凍結的全市場分位數，見 zone_builder 的
+    # VOLATILITY_THRESHOLD_PROVENANCE。
+    assert volatility_bucket_from_profile(0.030, 0.028) == "LOW_VOLATILITY"
+    assert volatility_bucket_from_profile(0.055, 0.050) == "NORMAL_VOLATILITY"
+    assert volatility_bucket_from_profile(0.080, 0.070) == "HIGH_VOLATILITY"
     assert volatility_bucket_from_profile(None, None) == "UNKNOWN_VOLATILITY"
 
-    low_config, low_meta = resolve_zone_builder_config_for_profile(0.01, 0.012)
-    high_config, high_meta = resolve_zone_builder_config_for_profile(0.04, 0.02)
+    # 基準是 max(atr_pct, average_range_pct)——第二個參數較大時由它決定 bucket
+    assert volatility_bucket_from_profile(0.030, 0.070) == "HIGH_VOLATILITY"
+
+    low_config, low_meta = resolve_zone_builder_config_for_profile(0.030, 0.028)
+    high_config, high_meta = resolve_zone_builder_config_for_profile(0.080, 0.070)
     unknown_config, unknown_meta = resolve_zone_builder_config_for_profile(None, None)
 
     assert low_meta["enabled"] is True

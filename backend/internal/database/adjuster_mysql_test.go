@@ -55,6 +55,7 @@ func TestMySQLMigrationsRealValuesFitAllColumns(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = db.Exec(`DELETE FROM corporate_actions`)
 		_, _ = db.Exec(`DELETE FROM job_runs`)
+		_, _ = db.Exec(`DELETE FROM evaluation_universe`)
 	})
 
 	// 刻意用 UTC 而不是 TaipeiTZ：go-sql-driver 寫入前會把 time.Time 轉成連線的 loc
@@ -88,6 +89,26 @@ func TestMySQLMigrationsRealValuesFitAllColumns(t *testing.T) {
 			`INSERT INTO job_runs (job_name, status, started_at) VALUES (?, 'running', NOW())`,
 			name); err != nil {
 			t.Errorf("job_name %q（%d 字元）寫不進 job_runs: %v", name, len(name), err)
+		}
+	}
+
+	// evaluation_universe：與 postgres 版對稱。這是**目前唯一**會對真實 MySQL 執行
+	// 本 repo 寫入路徑的地方（issue.md I-054 第 1 項：其餘 CRUD 仍只跑 sqlite）。
+	uniRepo := store.NewEvaluationUniverseRepo(db)
+	for j, role := range store.AllUniverseRoles() {
+		entry := store.EvaluationUniverseEntry{
+			Symbol:          "U" + strconv.Itoa(j),
+			BucketHint:      "NORMAL_VOLATILITY",
+			BucketEdgeLow:   0.046089927430152715,
+			BucketEdgeHigh:  0.06278197721225691,
+			UniverseVersion: "v2",
+			UniverseRole:    role,
+			SelectedAt:      time.Now(),
+			Source:          "T-040_STEP3",
+		}
+		if err := uniRepo.Upsert(ctx, []store.EvaluationUniverseEntry{entry}); err != nil {
+			t.Errorf("universe_role=%q(%d 字元) 寫不進 evaluation_universe: %v",
+				role, len(role), err)
 		}
 	}
 }

@@ -557,6 +557,109 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 ---
 
+### POST `/scheduler/evaluation-universe-sync/run`
+
+手動觸發評估標的池的日 K 維護，與 `evaluation_universe_sync` 排程（平日 16:00）共用邏輯。
+立即回應，實際執行在背景；結果查 `GET /scheduler/status` 的 `evaluation_universe_sync`。
+
+**為什麼需要這個入口**：該排程**預設關閉**（一次約 131 個 FinMind 請求、26 分鐘），
+而跑 evaluation 之前必須先把池的尾端對齊——在排程開啟前這是唯一的對齊方式。
+不對齊的後果：各檔最後交易日相差 1～3 天，evaluation 取「最後 N 根」會讓評估視窗錯開，
+同一份報告隔幾天重跑得到不同結果，且分不清是策略變了還是資料窗變了。
+
+**重複觸發會被擋掉**（scheduler 內的行程旗標），不會有兩批請求互搶 5 req/min 的節流器。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "evaluation_universe_sync 已在背景重新觸發" }
+```
+
+---
+
+## Evaluation Universe API
+
+評估標的池（T-040 Step 5）。**這個池不是 watchlist**：它只驅動每日盤後的日 K 維護，
+不進盤中掃描、籌碼同步、signal 或 production SR 分析——那是「新標的不能放進 `watchlists`」
+的核心約束（把 131 檔塞進 watchlist 會讓六個流程各乘上約 12 倍）。
+選取規格見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)。
+
+### GET `/evaluation-universe`
+
+| 參數 | 說明 |
+|---|---|
+| `active` | `true` 時只回仍納入每日維護的成員。**預設回全部**（含停用者）——入退池歷史本身是研究紀錄 |
+
+**Response：**
+```json
+{
+  "items": [
+    {
+      "id": 1, "symbol": "2330", "bucket_hint": "LOW_VOLATILITY",
+      "bucket_edge_low": 0.046089927430152715,
+      "bucket_edge_high": 0.06278197721225691,
+      "universe_version": "v2", "universe_role": "primary",
+      "selected_at": "2026-08-17T00:00:00+08:00",
+      "source": "T-040_STEP3", "active": true, "note": ""
+    }
+  ],
+  "total": 131,
+  "active_count": 131,
+  "active_buckets": { "LOW_VOLATILITY": 53, "NORMAL_VOLATILITY": 46, "HIGH_VOLATILITY": 32 }
+}
+```
+
+`bucket_edge_low` / `bucket_edge_high` 是**入池時實際使用的分位數邊界**，每一列都存。
+`bucket_hint` 單獨存在無法回答「這個 bucket 是用哪組邊界判的」——實測 2026-08-17 有 3 檔
+`atr_pct` 完全未變卻換桶，只因母體變了、邊界移動。
+
+`active_buckets` **只統計 active 成員**：停用的標的不再進 evaluation，算進去會高估樣本量。
+三個 bucket 是否都還有足夠樣本，直接決定 T-003 的 sweep 有沒有意義。
+
+### POST `/evaluation-universe`
+
+匯入（或更新）選池成員，以 `symbol` 為鍵 upsert。
+
+**Request：**
+```json
+{
+  "items": [
+    {
+      "symbol": "2330", "bucket_hint": "LOW_VOLATILITY",
+      "bucket_edge_low": 0.046089927430152715,
+      "bucket_edge_high": 0.06278197721225691,
+      "universe_version": "v2", "universe_role": "primary",
+      "source": "T-040_STEP3", "note": ""
+    }
+  ]
+}
+```
+
+必填：`symbol`、`bucket_hint`、`bucket_edge_low`、`bucket_edge_high`、`universe_version`、
+`source`。`universe_role` 省略時為 `primary`。
+
+**刻意不接受 `active`**：入退池是獨立的人工決定，不該被一次重新匯入靜默覆寫。要改用 `PATCH`。
+**`selected_at` 由伺服器決定**：讓呼叫端指定會讓「何時入池」變成可偽造的欄位，
+而它是研究紀錄的一部分。
+
+400 的情形：`items` 為空、缺必填欄位、`bucket_edge_high <= bucket_edge_low`、
+以及**同一次請求內有重複的 symbol**（它們會在同一個 transaction 內互相覆蓋，
+留下哪一筆取決於順序，那是靜默的資料遺失）。
+
+**Response：** `{ "upserted": 131 }`
+
+### PATCH `/evaluation-universe/:symbol`
+
+切換該標的是否納入每日日 K 維護。目前只支援 `active`。
+
+**Request：** `{ "active": false }`
+
+`active` 為**必填**（後端用指標型別）：缺欄位與 `false` 必須分得開，
+否則漏帶欄位會被當成「停用」。標的不在池內時回 **404**。
+
+**Response：** `{ "symbol": "2330", "active": false }`
+
+---
+
 ## Market API
 
 ### POST `/market/backfill`

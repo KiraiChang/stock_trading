@@ -7,18 +7,19 @@ import (
 )
 
 type Config struct {
-	Server           ServerConfig
-	Database         DatabaseConfig
-	Redis            RedisConfig
-	FinMind          FinMindConfig
-	Fugle            FugleConfig
-	Yahoo            YahooConfig
-	StockSymbols     StockSymbolsConfig `mapstructure:"stock_symbols"`
-	Python           PythonConfig
-	Auth             AuthConfig
-	Chip             ChipConfig
-	SREvaluation     SREvaluationConfig     `mapstructure:"sr_evaluation"`
-	PositionAnalysis PositionAnalysisConfig `mapstructure:"position_analysis"`
+	Server             ServerConfig
+	Database           DatabaseConfig
+	Redis              RedisConfig
+	FinMind            FinMindConfig
+	Fugle              FugleConfig
+	Yahoo              YahooConfig
+	StockSymbols       StockSymbolsConfig `mapstructure:"stock_symbols"`
+	Python             PythonConfig
+	Auth               AuthConfig
+	Chip               ChipConfig
+	SREvaluation       SREvaluationConfig       `mapstructure:"sr_evaluation"`
+	EvaluationUniverse EvaluationUniverseConfig `mapstructure:"evaluation_universe"`
+	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 }
 
 type PositionAnalysisConfig struct {
@@ -140,6 +141,21 @@ type SREvaluationConfig struct {
 	WriteDB        bool     `mapstructure:"write_db"`
 }
 
+// EvaluationUniverseConfig 是評估標的池的每日日 K 維護排程（T-040 Step 5）。
+//
+// **預設關閉**：這個 job 一次會對整個池（實測 131 檔）各發一個 FinMind 請求，
+// 在 5 req/min 的節流下約 26 分鐘。不該讓它預設開著，比照 sr_evaluation 的處理。
+type EvaluationUniverseConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Cron 為每日維護時間（台北時區）。預設 16:00：晚於 daily_close（15:00，已確認
+	// FinMind 當日日 K 已發布——14:00 曾抓到 count=0），且與 21:00 的籌碼採集有近 5 小時
+	// 緩衝，26 分鐘的執行窗不會重疊。
+	Cron string `mapstructure:"cron"`
+	// Days 為每次回補往前幾個**日曆天**。10 而非 5 是為了容忍連假與國定假日；
+	// 成本與天數無關（FetchDailyCandles 把日期區間塞在同一個請求裡，1 request/檔）。
+	Days int `mapstructure:"days"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -188,6 +204,10 @@ func Load() (*Config, error) {
 	viper.SetDefault("sr_evaluation.decision_replay", true)
 	viper.SetDefault("sr_evaluation.replay_max_rows", 200)
 	viper.SetDefault("sr_evaluation.write_db", true)
+
+	viper.SetDefault("evaluation_universe.enabled", false)
+	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
+	viper.SetDefault("evaluation_universe.days", 10)
 	viper.SetDefault("position_analysis.max_position_value", 200000)
 	viper.SetDefault("position_analysis.max_risk_amount", 10000)
 	viper.SetDefault("position_analysis.add_on_ratio", 0.25)

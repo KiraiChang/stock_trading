@@ -537,3 +537,70 @@ def test_threshold_gap_reports_live_pipeline_constants_not_copies():
     assert gap["pipeline_absolute"]["high_min"] == HIGH_VOLATILITY_THRESHOLD
     # 合成資料的切點不會等於凍結值，所以 aligned 應為 False——它是訊號不是錯誤
     assert gap["aligned"] is False
+
+
+# ── 匯入 payload ──────────────────────────────────────────────
+def _full_report():
+    return {
+        "schema_version": "selection-report-p2",
+        "snapshot": {"last_trading_day": "2026-08-17"},
+        "quantile_edges": [0.0461, 0.0628],
+        "threshold_gap": {"aligned": True, "pipeline_absolute": {"low_max": 0.0461, "high_min": 0.0628}},
+        "symbols": [
+            {"symbol": "2330", "selection_bucket": "LOW_VOLATILITY", "universe_role": "primary",
+             "atr_pct": 0.026, "avg_amount_60": 1e10},
+            {"symbol": "6243", "selection_bucket": "HIGH_VOLATILITY", "universe_role": "primary"},
+            {"symbol": "9999", "selection_bucket": "LOW_VOLATILITY", "universe_role": "primary"},
+        ],
+        "universe": {
+            "selected_symbols": ["2330", "6243"],
+            "supplemental_symbols": {"6243": "low_liquidity", "9999": "etf_suffix"},
+            "insufficient_depth_detail": {"6243": {"total_candle_count": 299, "kind": "listing_age"}},
+        },
+    }
+
+
+def test_import_payload_keeps_only_what_the_importer_reads():
+    """完整報告 672KB / 857 檔，匯入只需要選池那幾檔的三個欄位。"""
+    from selection_report import build_import_payload
+
+    imp = build_import_payload(_full_report())
+
+    assert [r["symbol"] for r in imp["symbols"]] == ["2330", "6243"]
+    # 逐檔只留 importer 會讀的欄位，不夾帶 atr_pct 等判讀用資料
+    assert set(imp["symbols"][0]) == {"symbol", "selection_bucket", "universe_role"}
+    # universe 的三個欄位也要依成員過濾：9999 不在池內，它的 supplemental 標記不該跟著來
+    assert imp["universe"]["supplemental_symbols"] == {"6243": "low_liquidity"}
+    assert set(imp["universe"]["insufficient_depth_detail"]) == {"6243"}
+    # 邊界與 threshold_gap 原樣帶過去——那是 bucket_hint 的判定依據
+    assert imp["quantile_edges"] == [0.0461, 0.0628]
+    assert imp["threshold_gap"]["aligned"] is True
+    assert imp["missing_symbols"] == []
+
+
+def test_import_payload_pins_membership_but_takes_current_buckets():
+    """釘住 membership、bucket 取本次重算值。
+
+    選池是人工決策且已深補完，但重跑時資料與分桶基準都可能已變
+    （實測 131 → 126）。兩者必須能分開指定。
+    """
+    from selection_report import build_import_payload
+
+    # 釘住 9999（本次報告沒把它選進池），排除 6243
+    imp = build_import_payload(_full_report(), ["2330", "9999"])
+
+    assert imp["universe"]["selected_symbols"] == ["2330", "9999"]
+    assert [r["symbol"] for r in imp["symbols"]] == ["2330", "9999"]
+    # bucket 取的是本次報告算出來的值，不是釘住時的舊值
+    assert imp["symbols"][1]["selection_bucket"] == "LOW_VOLATILITY"
+
+
+def test_import_payload_reports_pinned_symbols_missing_from_report():
+    """釘住的成員在本次報告裡找不到時要顯式列出，不能靜默少幾檔。"""
+    from selection_report import build_import_payload
+
+    imp = build_import_payload(_full_report(), ["2330", "NOPE"])
+
+    assert imp["missing_symbols"] == ["NOPE"]
+    # 找不到的不會出現在 selected_symbols，否則前端 parser 會因缺 bucket 整份拒絕
+    assert imp["universe"]["selected_symbols"] == ["2330"]

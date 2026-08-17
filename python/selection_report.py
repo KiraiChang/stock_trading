@@ -633,6 +633,60 @@ def _keep_symbols_drift(keep: Iterable[str], watchlist: Iterable[str]) -> dict[s
     }
 
 
+def build_import_payload(
+    report: dict[str, Any], symbols: Optional[Iterable[str]] = None
+) -> dict[str, Any]:
+    """把完整報告裁成前端匯入用的最小 payload。
+
+    **為什麼需要它**：完整報告 672KB、含 857 檔，但匯入只需要選池那些標的的
+    `selection_bucket` / `universe_role`，加上 `quantile_edges` 與 `threshold_gap`。
+    貼一份 672KB 的 JSON 進 textarea 可行但笨重，而用檔案選取又要求瀏覽器跑在同一台機器。
+
+    `symbols` 用來**釘住 membership**：選池是人工決策且已深補完，
+    重跑報告時資料與分桶基準都可能已變（實測 131 → 126）。釘住成員、但
+    `bucket_hint` 取這次重算的值，才會既保留決策又反映當下正確的分類。
+    未指定時用本次報告自己的 `universe.selected_symbols`。
+    """
+    universe = report.get("universe") or {}
+    wanted = list(symbols) if symbols is not None else list(universe.get("selected_symbols") or [])
+    wanted_set = set(wanted)
+
+    rows = [r for r in (report.get("symbols") or []) if r.get("symbol") in wanted_set]
+    found = {r["symbol"] for r in rows}
+    missing = sorted(wanted_set - found)
+
+    return {
+        "schema_version": "selection-report-import-p1",
+        "generated_from": report.get("schema_version"),
+        "snapshot": report.get("snapshot"),
+        "quantile_edges": report.get("quantile_edges"),
+        "threshold_gap": report.get("threshold_gap"),
+        # 前端 parser 只讀這三個 universe 欄位（supplemental 的權威來源與深度細節）
+        "universe": {
+            "selected_symbols": sorted(wanted_set & found),
+            "supplemental_symbols": {
+                k: v for k, v in (universe.get("supplemental_symbols") or {}).items()
+                if k in wanted_set
+            },
+            "insufficient_depth_detail": {
+                k: v for k, v in (universe.get("insufficient_depth_detail") or {}).items()
+                if k in wanted_set
+            },
+        },
+        "symbols": [
+            {
+                "symbol": r["symbol"],
+                "selection_bucket": r.get("selection_bucket"),
+                "universe_role": r.get("universe_role"),
+            }
+            for r in sorted(rows, key=lambda r: r["symbol"])
+        ],
+        # **釘住的成員在本次報告裡找不到就要顯式列出**，不能靜默少幾檔——
+        # 前端 parser 會因缺 selection_bucket 而整份拒絕，這裡先讓人知道是哪幾檔。
+        "missing_symbols": missing,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluation universe selection report（唯讀）")
     parser.add_argument("--timeframe", default="1d")
@@ -644,6 +698,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--keep-symbols", default="",
                         help="無條件保留的代號（逗號分隔），通常是 watchlist")
     parser.add_argument("--today", default=None, help="YYYY-MM-DD，用於算上市年數；預設今天")
+    parser.add_argument("--import-payload",
+                        help="另外輸出前端匯入用的最小 payload 到這個路徑（約 20KB）")
+    parser.add_argument("--pin-symbols", default="",
+                        help="釘住 membership 的代號（逗號分隔）。選池是人工決策且已深補，"
+                             "重跑時資料與分桶基準可能已變；釘住成員但 bucket 取本次重算值")
     args = parser.parse_args(argv)
 
     from db import (fetch_candle_depths, fetch_candles, fetch_market_trading_days,
@@ -702,6 +761,18 @@ def main(argv: list[str] | None = None) -> int:
             f"預設值是刻意凍結的，若要納入新 watchlist 需明確傳 KEEP_SYMBOLS。",
             file=sys.stderr,
         )
+
+    if args.import_payload:
+        pinned = [x.strip() for x in args.pin_symbols.split(",") if x.strip()] or None
+        imp = build_import_payload(report, pinned)
+        with open(args.import_payload, "w", encoding="utf-8") as fh:
+            json.dump(imp, fh, ensure_ascii=False, indent=2, default=str)
+            fh.write("\n")
+        print(f"==> 匯入 payload 已寫入 {args.import_payload}"
+              f"（{len(imp['symbols'])} 檔）", file=sys.stderr)
+        if imp["missing_symbols"]:
+            print(f"WARNING: 釘住的 {len(imp['missing_symbols'])} 檔在本次報告裡找不到："
+                  f"{imp['missing_symbols']}", file=sys.stderr)
 
     payload = json.dumps(report, ensure_ascii=False, indent=2, default=str)
     if args.output:

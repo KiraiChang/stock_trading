@@ -11,6 +11,11 @@
 #
 # 可覆寫的環境變數：
 #   OUTPUT          輸出 JSON 路徑（container 內掛成 /out）；未指定則印到 stdout
+#   IMPORT_PAYLOAD  另外輸出**前端匯入用的最小 payload**（約 20KB，完整報告是 672KB）。
+#                   路徑必須與 OUTPUT 同一個目錄（兩者共用同一個 /out 掛載點）。
+#   PIN_SYMBOLS     釘住 membership 的代號（逗號分隔）。選池是人工決策且已深補完，
+#                   重跑時資料與分桶基準都可能已變（實測 131 → 126）；
+#                   釘住成員、但 bucket_hint 取本次重算值，才會既保留決策又反映當下分類。
 #   MIN_AMOUNT      日均成交金額下限（預設 20000000，即 2000 萬）
 #   MIN_TRADED_DAYS 近 60 個市場交易日內至少幾天有成交（預設 45）
 #   SECURITY_TYPE   逗號分隔，預設 `股票,ETF`
@@ -46,6 +51,8 @@ MIN_TRADED_DAYS="${MIN_TRADED_DAYS:-45}"
 SECURITY_TYPE="${SECURITY_TYPE:-股票,ETF}"
 # 定案 universe（universe-v2）用的 watchlist；預設寫死在這裡才能讓重跑可重現。
 KEEP_SYMBOLS="${KEEP_SYMBOLS:-0050,00830,00947,00981A,2330,2399,2454,2478,3630,5490,6243}"
+IMPORT_PAYLOAD="${IMPORT_PAYLOAD:-}"
+PIN_SYMBOLS="${PIN_SYMBOLS:-}"
 
 cd "$REPO_ROOT"
 # shellcheck source=lib/mem-guard.sh
@@ -94,6 +101,20 @@ if [ -n "$OUTPUT" ]; then
   OUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd)"
   DOCKER_ARGS+=(-v "$OUT_DIR":/out)
   CMD_ARGS+=(--output "/out/$(basename "$OUTPUT")")
+fi
+
+if [ -n "$IMPORT_PAYLOAD" ]; then
+  IMP_DIR="$(cd "$(dirname "$IMPORT_PAYLOAD")" && pwd)"
+  if [ -z "${OUT_DIR:-}" ]; then
+    DOCKER_ARGS+=(-v "$IMP_DIR":/out)
+  elif [ "$IMP_DIR" != "$OUT_DIR" ]; then
+    # 兩個路徑共用同一個 /out 掛載點，不同目錄會讓其中一個寫到錯的地方。
+    echo "ERROR: IMPORT_PAYLOAD 必須與 OUTPUT 在同一個目錄。" >&2
+    echo "       OUTPUT=$OUT_DIR / IMPORT_PAYLOAD=$IMP_DIR" >&2
+    exit 1
+  fi
+  CMD_ARGS+=(--import-payload "/out/$(basename "$IMPORT_PAYLOAD")")
+  [ -n "$PIN_SYMBOLS" ] && CMD_ARGS+=(--pin-symbols "$PIN_SYMBOLS")
 fi
 
 echo "==> 建置 image：$IMAGE"

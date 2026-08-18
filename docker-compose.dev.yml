@@ -68,6 +68,13 @@ services:
       FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
       FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
       FUGLE_API_KEY: ${FUGLE_API_KEY:-YOUR_FUGLE_API_KEY}
+      # 評估標的池的每日日 K 維護（T-040 Step 5）。**預設關閉**：一次會對整個池
+      # （實測 131 檔）各發一個 FinMind 請求，5 req/min 下約 27 分鐘。
+      # 16:00 晚於 daily_close（15:00，已確認當日日 K 已發布），且與 21:00 籌碼採集
+      # 有近 5 小時緩衝。這個池只維護日 K，不進盤中掃描、籌碼同步、signal 或 SR 分析。
+      EVALUATION_UNIVERSE_ENABLED: ${EVALUATION_UNIVERSE_ENABLED:-false}
+      EVALUATION_UNIVERSE_CRON: ${EVALUATION_UNIVERSE_CRON:-0 16 * * 1-5}
+      EVALUATION_UNIVERSE_DAYS: ${EVALUATION_UNIVERSE_DAYS:-10}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
@@ -41,6 +42,23 @@ func main() {
 		}
 	}
 	defer cleanup()
+
+	// gin 預設是 debug 模式。切成 release **不是為了效能**——gin v1.10 的
+	// IsDebugging() 分支沒有一個在 per-request 熱路徑上，唯一會每次請求多花成本的
+	// HTMLDebug renderer 只在 LoadHTMLGlob/LoadHTMLFiles 才會用到，而前端是
+	// //go:embed 的靜態 dist，用不到樣板。實測 backend container 也只佔 3MB。
+	//
+	// 真正的理由有兩個：
+	//  1. debug 模式啟動時印 76 行 [GIN-debug]，把完整路由表與 handler 符號名寫進 log。
+	//  2. **panic 時 recovery 會多印整包 request header**（recovery.go），而 gin 只把
+	//     Authorization 遮成 `*`，Cookie 與自訂 header 照樣原樣落地。
+	//
+	// **GIN_MODE 有設就尊重它**：本機要看路由表時 `GIN_MODE=debug` 仍然有效。
+	// 只有沒設時才預設 release——寫在這裡而不是 compose，是因為有三份 compose ＋
+	// deploy.sh，環境變數漏一份就會靜默退回 debug 而不會有人發現。
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	cfg, err := config.Load()
 	if err != nil {

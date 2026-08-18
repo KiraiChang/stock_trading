@@ -457,6 +457,21 @@ WAIT_SECONDS=120 LOG_TAIL=200 scripts/smoke-dev.sh
 BACKEND_URL=http://localhost:18080/health PYTHON_URL=http://localhost:18001/health scripts/smoke-dev.sh
 ```
 
+**gin 預設跑 release**（`cmd/server/main.go`，只在 `GIN_MODE` 沒設時套用）。要看啟動時的
+路由表就暫時開 debug——兩份 compose 都有 `GIN_MODE: ${GIN_MODE:-}` 的 passthrough：
+
+```bash
+GIN_MODE=debug scripts/smoke-dev.sh
+docker logs stock_trading_dev-backend-1 2>&1 | grep GIN-debug   # release 下是 0 行
+```
+
+debug 模式會多印 76 行 `[GIN-debug]`（完整路由表 ＋ handler 符號名），而且 **panic 時
+`recovery` 會把整包 request header 寫進 log**（gin 只把 `Authorization` 遮成 `*`，
+Cookie 與自訂 header 照樣落地），所以只在需要時暫時開。**切 release 不是效能考量**：
+gin v1.10 的 `IsDebugging()` 分支沒有一個在 per-request 熱路徑上，唯一會逐次付出成本的
+`HTMLDebug` renderer 只在 `LoadHTMLGlob`/`LoadHTMLFiles` 才用得到，而前端是 `//go:embed`
+的靜態 dist。
+
 需要手動查看狀態或 log 時：
 
 ```bash

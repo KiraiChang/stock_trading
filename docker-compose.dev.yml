@@ -80,6 +80,11 @@ services:
       # 打錯字會退回預設值繼續跑並記 Error log。**不要設得比 80 小時稀疏**——
       # /scheduler/status 的 stale 門檻寫死 80 小時（見 docs/api-reference.md）。
       CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
+      # 留白（預設）時 main.go 會把 gin 設成 release。要看啟動時的路由表就設 debug：
+      #   GIN_MODE=debug scripts/smoke-dev.sh
+      # debug 模式會多印 76 行 [GIN-debug]，且 panic 時 recovery 會連整包 request header
+      # 一起寫進 log（gin 只遮 Authorization），所以只在需要時暫時開。
+      GIN_MODE: ${GIN_MODE:-}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:

@@ -35,6 +35,11 @@ services:
       # **不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
       # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
       CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
+      # 留白（預設）時 main.go 會把 gin 設成 release。**正式環境不要設 debug**：
+      # 它會把完整路由表寫進 log，且 panic 時 recovery 會連整包 request header 一起印
+      # （gin 只遮 Authorization，Cookie 與自訂 header 照樣落地）。
+      # 這裡留這個鍵只是讓排查問題時不必改 compose，deploy.sh 刻意不 export 它。
+      GIN_MODE: ${GIN_MODE:-}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:

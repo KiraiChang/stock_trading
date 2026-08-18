@@ -53,9 +53,11 @@ func main() {
 	//  2. **panic 時 recovery 會多印整包 request header**（recovery.go），而 gin 只把
 	//     Authorization 遮成 `*`，Cookie 與自訂 header 照樣原樣落地。
 	//
-	// **GIN_MODE 有設就尊重它**：本機要看路由表時 `GIN_MODE=debug` 仍然有效。
-	// 只有沒設時才預設 release——寫在這裡而不是 compose，是因為有三份 compose ＋
-	// deploy.sh，環境變數漏一份就會靜默退回 debug 而不會有人發現。
+	// **GIN_MODE 有設就尊重它**，只有沒設時才預設 release。預設寫在這裡而不是 compose，
+	// 是因為有三份 compose ＋ deploy.sh，環境變數漏一份就會靜默退回 debug 而不會有人發現。
+	//
+	// 逃生口在容器裡也按得到：兩份 compose 都有 `GIN_MODE: ${GIN_MODE:-}` 的 passthrough，
+	// 所以 `GIN_MODE=debug scripts/smoke-dev.sh` 就看得到啟動時的路由表。
 	if os.Getenv("GIN_MODE") == "" {
 		gin.SetMode(gin.ReleaseMode)
 	}

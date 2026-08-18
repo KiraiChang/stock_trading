@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -577,4 +578,88 @@ func TestSREvaluationSymbolsPrefersConfigAndFallsBackToWatchlist(t *testing.T) {
 	if !reflect.DeepEqual(symbols, []string{"1101", "2603"}) {
 		t.Fatalf("expected watchlist fallback symbols, got %+v", symbols)
 	}
+}
+
+// ── IsJobRegistered：區分「沒開」與「該開卻沒開」──
+// 規格見 docs/api-reference.md「`status` 的三種『沒有執行紀錄』情形」。
+func TestIsJobRegisteredReflectsActualRegistration(t *testing.T) {
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: false})
+	s.Start()
+	defer s.Stop()
+
+	// 無條件註冊的四支，任何設定下都該是 true。
+	// sr_zone_verify 沒有自己的 cron，跟著 daily_close 在 RunDailyClose 尾端跑。
+	for _, name := range []string{"pre_market", "intraday", "daily_close", "sr_zone_verify"} {
+		if !s.IsJobRegistered(name) {
+			t.Errorf("%s 應該永遠註冊", name)
+		}
+	}
+	// 預設關閉的兩支：沒開就是沒註冊，API 層據此顯示 disabled 而不是 stale
+	if s.IsJobRegistered("sr_evaluation") {
+		t.Error("sr_evaluation 未啟用時不該註冊")
+	}
+	if s.IsJobRegistered("evaluation_universe_sync") {
+		t.Error("evaluation_universe_sync 未注入 repo 時不該註冊")
+	}
+	// 沒注入 adjuster / stockSyncer 時同樣不註冊
+	if s.IsJobRegistered("corporate_action_sync") {
+		t.Error("adjuster 未注入時不該註冊 corporate_action_sync")
+	}
+	if s.IsJobRegistered("stock_symbol_sync") {
+		t.Error("stockSyncEnabled=false 時不該註冊")
+	}
+	// 沒見過的名稱回 false，不 panic
+	if s.IsJobRegistered("nope") {
+		t.Error("未知 job 應回 false")
+	}
+}
+
+func TestIsJobRegisteredTrueWhenEnabled(t *testing.T) {
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: true, Cron: "30 22 * * 1-5"})
+	s.SetEvaluationUniverse(nil, config.EvaluationUniverseConfig{})
+	s.Start()
+	defer s.Stop()
+
+	if !s.IsJobRegistered("sr_evaluation") {
+		t.Error("啟用後應註冊 sr_evaluation")
+	}
+	// repo 為 nil 時即使 Enabled 也不註冊——註冊條件是「repo != nil && Enabled」
+	if s.IsJobRegistered("evaluation_universe_sync") {
+		t.Error("repo 為 nil 時不該註冊")
+	}
+}
+
+func TestIsJobRegisteredFalseWhenCronStringInvalid(t *testing.T) {
+	// cron 打錯時 AddFunc 只記 log 不中止，job 靜默不執行。
+	// 這種情況與「刻意關閉」在行為上相同，但 IsJobRegistered 同樣回 false——
+	// 呼叫端要分辨成因得看啟動 log。
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: true, Cron: "not a cron"})
+	s.Start()
+	defer s.Stop()
+
+	if s.IsJobRegistered("sr_evaluation") {
+		t.Error("cron 字串非法時不該算註冊成功")
+	}
+}
+
+func TestIsJobRegisteredIsSafeForConcurrentAccess(t *testing.T) {
+	// main.go 是 `go sched.Start()` 與 HTTP server 並行啟動的：Start() 寫
+	// registeredJobs 的同時 /scheduler/status 可能正在讀。Go 的 map 不支援並發讀寫，
+	// 撞上是 `fatal error: concurrent map read and map write`——不可 recover。
+	// 這支在 -race 下會抓到未上鎖的實作；沒有 -race 時仍可能觸發 runtime 的並發偵測。
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: true, Cron: "30 22 * * 1-5"})
+	defer s.Stop()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); s.Start() }()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			for _, name := range []string{"pre_market", "sr_evaluation", "evaluation_universe_sync"} {
+				_ = s.IsJobRegistered(name)
+			}
+		}
+	}()
+	wg.Wait()
 }

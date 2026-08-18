@@ -70,22 +70,25 @@ func (h *SchedulerHandler) RunEvaluationUniverseSync(c *gin.Context) {
 // （2026-08-11 正式環境因 VARCHAR(20) 裝不下 corporate_action_sync 而失敗）。
 func KnownSchedulerJobs() []string { return append([]string(nil), knownSchedulerJobs...) }
 
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync"}
+// **`sr_zone_verify` 沒有自己的 cron**：它在 `RunDailyClose` 尾端無條件執行，
+// 但寫的是獨立的 job_runs 紀錄（失敗不影響 daily_close 的判定）。
+// 不列進來的話它的失敗只能靠直接查 DB 才看得到。
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
-	"pre_market":        26 * time.Hour,
-	"intraday":          10 * time.Minute,
-	"daily_close":       26 * time.Hour,
+	"pre_market":  26 * time.Hour,
+	"intraday":    10 * time.Minute,
+	"daily_close": 26 * time.Hour,
+	// 跟著 daily_close 跑，所以門檻相同。
+	"sr_zone_verify":    26 * time.Hour,
 	"chip_daily_sync":   72 * time.Hour,
 	"stock_symbol_sync": 26 * time.Hour,
 	"sr_evaluation":     72 * time.Hour,
 	// 平日 06:30 跑一次；跨週末最長間隔是週五到週一，加上緩衝取 80 小時。
 	"corporate_action_sync": 80 * time.Hour,
 	// 平日 16:00 跑一次，同樣跨週末，取 80 小時。
-	// **注意**：本 job 預設關閉，未啟用時 GetStatus 會回 never_run 且 stale=true
-	// （與同樣預設關閉的 sr_evaluation 相同）。那是既有的判定方式，不是本 job 的缺陷，
-	// 但會讓「刻意沒開」看起來像「排程卡住」——記在 docs/issue.md I-073。
+	// 本 job 與 sr_evaluation 預設關閉，未註冊時 GetStatus 回 disabled 而不套用這個門檻。
 	"evaluation_universe_sync": 80 * time.Hour,
 }
 
@@ -100,7 +103,9 @@ type jobStatus struct {
 	Stale         bool       `json:"stale"`
 }
 
-// GetStatus 回傳每個排程 job 最新一筆執行紀錄；未曾執行過的 job 標記為 never_run。
+// GetStatus 回傳每個排程 job 最新一筆執行紀錄。沒有紀錄的 job 分成兩種：
+// 排程有註冊的標 never_run（該跑卻沒跑），沒註冊的標 disabled（刻意沒開）。
+// 完整規格見 docs/api-reference.md 的 GET /scheduler/status。
 func (h *SchedulerHandler) GetStatus(c *gin.Context) {
 	runs, err := h.repo.GetRecent(c.Request.Context(), 50)
 	if err != nil {
@@ -117,13 +122,32 @@ func (h *SchedulerHandler) GetStatus(c *gin.Context) {
 
 	result := make([]jobStatus, 0, len(knownSchedulerJobs))
 	for _, name := range knownSchedulerJobs {
+		// 排程沒註冊就不是「卡住」，是「沒開」。兩者都沒有 job_runs 紀錄，
+		// 但把刻意關閉的 job 標成 stale 會訓練使用者忽略這個旗標——
+		// 真的有 job 卡住時反而看不出來（見 docs/issue.md 的收斂紀錄）。
+		// 註冊與否由 scheduler 自己回報，不在這裡重算 config 條件。
+		// 不對 h.sched 做 nil 檢查：本檔其餘 handler 全都直接 deref（`h.sched.RunDailyClose()`），
+		// 只在這裡防禦並不一致，而 server.go 永遠傳非 nil。
+		registered := h.sched.IsJobRegistered(name)
+
 		r, ok := latest[name]
 		if !ok {
-			result = append(result, jobStatus{JobName: name, Status: "never_run", Stale: true})
+			status := "never_run"
+			if !registered {
+				status = "disabled"
+			}
+			result = append(result, jobStatus{
+				JobName: name,
+				Status:  status,
+				// 未註冊的 job 永遠不會有紀錄，標 stale 沒有意義
+				Stale: registered,
+			})
 			continue
 		}
 
-		stale := r.Status != "running" && time.Since(r.StartedAt) > jobStaleThreshold[name]
+		// 有歷史紀錄但排程已被關閉時同樣不算 stale——那是「跑過、後來關了」，
+		// 不是「該跑卻沒跑」。
+		stale := registered && r.Status != "running" && time.Since(r.StartedAt) > jobStaleThreshold[name]
 		started := r.StartedAt
 		js := jobStatus{
 			JobName:       r.JobName,

@@ -201,7 +201,8 @@ request 欄位到下游的對應**不是一對一**，這幾條是實際踩過�
 | `threshold_pct` | `threshold_pct_support` **與** `threshold_pct_resistance` | 一對多展開 |
 | `min_history_bars`／`rebuild_every_bars` | `DatasetConfig` 同名欄位 | 直傳 |
 | `model_path` 留空 | `config.SR_SCORING_MODEL_PATH` | |
-| `pipeline_version` 留空 | replay → `sr_zone_decision_replay_p1`；evaluation → `DEFAULT_PIPELINE_VERSION` | 預設值**依模式而異**，是刻意的（要能區分新舊 report）。`schema_version` 仍維持 p0，改了會讓 production gate 查不到資料，見 issue.md I-040 |
+| `pipeline_version` 留空 | replay → `sr_zone_decision_replay_p1`；evaluation → `DEFAULT_PIPELINE_VERSION` | 預設值**依模式而異**，是刻意的（要能區分新舊 report）。`schema_version` 仍維持 p0，改了會讓 production gate 查不到資料而靜默失效，見 `sr-zone-scoring.md`
+「gate 在該模型首次 decision-replay 寫入前是 no-op」 |
 | `chip_scores_by_symbol`／`model_governance_by_symbol`／`replay_max_rows` | 只進 `run_decision_replay` | replay 專屬 |
 
 驗證與狀態碼：`symbols` 會先 strip 並濾掉空字串，濾完為空 → 400；`limit <= 0` → 400；

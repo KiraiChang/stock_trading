@@ -2266,7 +2266,8 @@ def run_decision_replay(
     # pipeline_version 升到 p1 標記「跨股票均分預算 + 每檔取最新窗口」的取樣方式變更，
     # 讓新舊 report 可區分。schema_version 刻意維持 p0——
     # fetch_latest_sr_regression_governance 是用 schema_version 過濾的，改了會讓 production
-    # gate 查不到資料而靜默失效（見 docs/issue.md I-040）。
+    # gate 查不到資料而靜默失效（見 docs/sr-zone-scoring.md
+    # 「gate 在該模型首次 decision-replay 寫入前是 no-op」）。
     pipeline_version: str = "sr_zone_decision_replay_p1",
 ) -> dict[str, Any]:
     """Prepare the historical decision replay report envelope.

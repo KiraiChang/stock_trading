@@ -19,10 +19,14 @@
     pre_market: '盤前初始化',
     intraday: '盤中分K',
     daily_close: '收盤後結算',
+    // 沒有自己的 cron，跟著 daily_close 在 RunDailyClose 尾端跑，但寫獨立的 job_runs。
+    // 與 sr_evaluation（模型驗證）不同：這支只驗既有 zone 是否仍然成立。
+    sr_zone_verify: 'SR Zone 收盤驗證',
     chip_daily_sync: '籌碼日結同步',
     stock_symbol_sync: '股票主檔同步',
     sr_evaluation: 'SR Zone 驗證',
     corporate_action_sync: '公司行動與股價還原',
+    evaluation_universe_sync: '評估標的池同步',
   }
 
   const statusLabel: Record<string, string> = {
@@ -32,6 +36,9 @@
     failed: '失敗',
     skipped: '已跳過',
     never_run: '尚未執行',
+    // 排程未註冊（config 關閉、或相依未注入）。與 never_run 分開：
+    // 前者是「刻意沒開」，後者是「該跑卻沒跑過」。
+    disabled: '未啟用',
   }
 
   const statusClass: Record<string, string> = {
@@ -41,6 +48,7 @@
     failed: 'bg-red-900/40 text-red-400',
     skipped: 'bg-gray-700/60 text-gray-400',
     never_run: 'bg-gray-700/60 text-gray-400',
+    disabled: 'bg-gray-800/60 text-gray-500',
   }
 
   const dotClass: Record<string, string> = {
@@ -50,6 +58,7 @@
     failed: 'bg-red-400',
     skipped: 'bg-gray-500',
     never_run: 'bg-gray-500',
+    disabled: 'bg-gray-600',
   }
 
   let jobs: SchedulerJob[] = []

@@ -31,6 +31,35 @@
 Dev stack smoke 也走 repo script：`scripts/smoke-dev.sh` 會啟動 isolated dev compose、
 等待 backend 與 python-server health check 通過，失敗時自動印出服務狀態與核心 log。
 
+### Race detector：`RACE=1 backend/scripts/test.sh <單一套件>`
+
+```bash
+RACE=1 backend/scripts/test.sh ./internal/scheduler/...            # 整包
+RACE=1 TEST_FLAGS="-run TestFoo -count=1 -v" backend/scripts/test.sh ./internal/scheduler/...
+```
+
+**預設關閉**，因為 `-race` 需要 cgo，而預設的 alpine image 沒有 C toolchain
+（會直接報 `-race requires cgo`）。開啟時腳本改用 debian 版 `golang:1.25`、放寬
+`GO_MEMLIMIT`，並且**只跑 `go test`**（略過 vet／build——cgo 編譯很慢又吃記憶體，
+全跑沒有額外資訊）。
+
+**只對單一套件跑，永遠不要對 `./...` 開。** 這台 2GiB host 跑 race 是踩在極限上：
+瓶頸是 `modernc.org/sqlite/lib`（`internal/store/sqlite.go` 的 blank import 把它拖進
+幾乎每個套件的相依樹），race 版的它單一 compile 峰值約 **510MB**，`MEM` 被下修到 582m
+就會 `compile: signal: killed`，**要 700m 才跑得完**。所以開跑前 `MemAvailable`
+要有 **850MB 以上**（700m ＋ mem-guard 的 150MB 保留），實務上得先停掉 dev stack 的
+python 兩支。完整實測數字與「為什麼 `GO_MEMLIMIT` 不能設 600MiB」記在
+`backend/scripts/test.sh` 檔頭。
+
+**什麼時候該用**：改到跨 goroutine 共用的狀態時。一般測試抓不到這類 bug——
+2026-08-18 曾把 `Scheduler.registeredJobs` 的 map 並發讀寫（`Start()` 寫、
+`/scheduler/status` 讀）做到全綠才被 race detector 抓出來，而那種 bug 的實際症狀是
+`fatal error: concurrent map read and map write`，**不可 recover，整個 backend 行程會死**。
+
+用法上要先確認 detector 對這個案例真的有效：**先在未修復的版本跑一次、確認報出
+`WARNING: DATA RACE`**，再套修復重跑。少了這一步，「跑完是綠的」也可能只代表測試沒壓到
+那條路徑。
+
 ### MySQL migration 驗證：`scripts/test-mysql-migrations.sh`
 
 改到 `backend/internal/database/migrations/mysql/` 就要跑這支。dev / live 都用 postgres，
@@ -286,6 +315,10 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 - **不要在本機把 live/deploy project 拉起來**——驗收一律用 `docker-compose.dev.yml` 的
   dev project（CLAUDE.md 規定）。
 - 開跑前 `free -m` 的 `available` 低於 ~800 MB 就先清場再說，不要硬上。
+- **每個 stack 的 compose 都要有 `cpus` / `mem_limit` / `memswap_limit`。** 沒有上限的
+  container 不受總和約束，會直接侵蝕 `MemAvailable`。gitea 曾是唯一沒設的一個
+  （實測佔 154 MB），常駐時 available 只剩 398MB，mem-guard 直接擋下 SR evaluation、
+  連 10 檔都跑不起來。2026-08-18 確認已補上 `0.5` CPU / `512m` / `768m`，與其他 stack 一致。
 
 ### frontend 三步的記憶體實測（2026-08-06）
 

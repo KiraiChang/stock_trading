@@ -307,8 +307,17 @@ Phase 2 的目的不是選股，而是維護已確認的標的池。
 以及「隔一個交易日後不做手動回補、直接跑 `verify-regression-baseline.sh`」這個端到端驗收。
 
 **實作中發現並記錄的問題**：`sr_evaluation` 與 `evaluation_universe_sync` 都預設關閉，
-於是 `/scheduler/status` 會常態把它們顯示成 `never_run` ＋ `stale=true`
-（見 [`issue.md`](./issue.md) I-073）。那會訓練使用者忽略 stale 旗標。
+於是 `/scheduler/status` 會常態把它們顯示成 `never_run` ＋ `stale=true`。
+**此問題已於 2026-08-18 修掉**：未註冊的排程改回 `status=disabled` 且不標 stale，
+規格見 [`api-reference.md`](./api-reference.md)「`status` 的三種『沒有執行紀錄』情形」。
+同批順帶把 `sr_zone_verify`（跟著 `daily_close` 跑但寫獨立 `job_runs`）納入
+`knownSchedulerJobs`，否則它的失敗只能靠直接查 DB 才看得到。
+
+該修復引入的 `Scheduler.registeredJobs` map 是**跨 goroutine 共用**的（`Start()` 寫、
+`/scheduler/status` 讀，而 `main.go` 是 `go sched.Start()` 與 HTTP server 並行啟動），
+第一版沒上鎖且 428 支測試全綠。**這是靠 race detector 才抓出來的**——先在未上鎖的版本
+跑出 `WARNING: DATA RACE` 確認 detector 有效，再套 `sync.RWMutex` 重跑轉綠。
+用法見 [`development-workflow.md`](./development-workflow.md)「Race detector」。
 
 ### 目標
 

@@ -522,6 +522,30 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 { "error": "已達監聽上限（3 檔），請先取消其他股票的監聽" }
 ```
 
+### GET `/scheduler/status`
+
+回傳每個 `knownSchedulerJobs` 的最新一筆執行紀錄。**即使從未執行過也會回一列。**
+
+#### `status` 的三種「沒有執行紀錄」情形
+
+| `status` | `stale` | 意義 |
+|---|---|---|
+| `disabled` | `false` | **排程沒有被註冊**——config 關閉（`sr_evaluation`、`evaluation_universe`）或相依未注入（`adjuster`、`stockSyncer`）。刻意沒開，不是異常 |
+| `never_run` | `true` | 已註冊但從未跑過——**該跑卻沒跑**，要查 |
+| 實際狀態（`success` / `partial` / `failed` / `running`） | 依 `jobStaleThreshold` | 跑過；`stale` **只在仍註冊時才計算** |
+
+**為什麼要分開**（2026-08-18 修正）：早期版本一律回 `never_run` ＋ `stale=true`，
+於是兩個預設關閉的排程（`sr_evaluation`、`evaluation_universe_sync`）常態顯示成 stale。
+**那會訓練使用者忽略這個旗標——真的有 job 卡住時反而看不出來。**
+
+註冊與否由 scheduler 自己回報（`Scheduler.IsJobRegistered`），API 層**不重算 config 條件**，
+避免同一個判斷散在兩處而不一致。
+
+**cron 字串打錯導致註冊失敗時也回 `disabled`**——`AddFunc` 出錯只記 log 不中止，
+行為上與「沒開」相同（都不會跑），成因要看啟動 log 的 `cron register failed`。
+
+「跑過、後來被關閉」的 job 保留實際狀態，但 `stale` 為 `false`——舊紀錄不代表排程卡住。
+
 ### POST `/scheduler/stock-symbol-sync/run`
 
 手動觸發 TWSE ISIN 股票主檔同步，與每日 `stock_symbol_sync` 排程共用同一份邏輯。

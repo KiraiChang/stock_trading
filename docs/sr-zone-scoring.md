@@ -1629,6 +1629,58 @@ T-002 / T-003 的後續實作方向固定為：
 4. **T-003 的正式調參依賴 T-002**：低波動 / 一般波動 / 高波動 bucket 可以作為第一階段，
    但不應在缺乏 walk-forward evaluation 前直接導入 symbol-level override，避免過擬合。
 
+### 規模上限：`sources` 與 `dataset` 必須同時常駐記憶體
+
+`run_evaluation()` 的結構決定了它的規模上限：
+
+```python
+sources = _load_db_sources(symbols, timeframe, limit)     # 所有標的的 DataFrame 一次全載
+dataset = build_training_dataset(sources, builders, ...)  # 全部 touch 併成一張表
+...
+volatility_profiles = _volatility_profiles(sources, dataset)   # ← 同時要 sources 和 dataset
+```
+
+**`sources` 無法在建完 `dataset` 後釋放**，因為 `_volatility_profiles` 還要用它。
+峰值 = 全部原始 K 線 ＋ 全部 touch dataset ＋ 模型 ＋ 中間物，四者同時存在。
+
+#### 實測數據
+
+| 標的數 | touch rows | 峰值 | 單次耗時 |
+|---|---|---|---|
+| 10 | 6,032 | 281 MB | — |
+| 20 | 11,859 | 281 MB | 131 秒 |
+| 30 | 17,447 | 317 MB | 191 秒 |
+| 40 | 22,401 | 310 MB | 241 秒 |
+| **131** | **72,083** | **382 MB** | **約 12 分鐘** |
+
+**峰值由固定的 import 開銷主導**（pandas / numpy / sklearn / lightgbm / shap），
+資料本身只有數 MB。標的數 10→40（4 倍）、rows 3.7 倍，峰值只增加約 30MB——
+**邊際成本約 1.0 MB/檔**。
+
+**所以正確的外推方式是「固定基線 ＋ 線性邊際」**，只外推量到的那 ~30MB 資料相依部分。
+把 270MB 乘以標的倍數會高估一個量級。131 檔實測 382MB 低於外推的 401MB，
+**模型成立且偏保守**。
+
+量測噪音約 ±7MB（N=30 的 317MB 高於 N=40 的 310MB，但兩者是超集關係）——
+cgroup v1 的峰值含 page cache。
+
+#### 量測方式
+
+`MEASURE_PEAK=1 scripts/run-evaluation.sh`。峰值由**容器在退出前自報** cgroup 單調最大值，
+**不能從外面輪詢**——`_volatility_profiles`（就是「sources 與 dataset 同時常駐」那一段）
+跑在流程最後，輪詢會系統性低估且偏差不固定。
+
+#### 現況上限
+
+**時間是硬性的線性成長**（walk-forward 逐檔跑），sweep 還要再乘候選數。
+這台 host 的 `MemAvailable` 常態只有 450～510MB、mem-guard 再保留 150MB：
+
+* **150 檔可行**（推估 ~420MB，需 570MB available），且**要求執行當下不常駐額外服務**
+* **200 檔不可行**（推估 470MB，需 620MB available）
+* **全市場（2,298 檔）給不起**——推估 0.8～1.2GB、單次約 4 小時、6 組 sweep 約 24 小時
+
+擴標的池的改造方向見 [`todo.md`](./todo.md) T-047。
+
 ### Decision Replay 的 as-of 邊界（無 lookahead）
 
 replay 的每一列都只能看到 as-of 當下為止的資訊，這是整條驗證管線的第一風險，已兩次
@@ -1838,7 +1890,7 @@ SR Zone 頁的「模型驗證 / Decision Replay」面板：
 
 - **「寫入結果」預設不勾**。勾選代表把結果寫進 `stock_sr_regression_results`，而該表的最新一筆
   就是這個 `model_config_hash` 的 production entry gate 依據——**第一次寫入會讓原本 no-op 的
-  gate 開始生效**（見上節與 issue I-040）。勾選時 UI 會顯示這段因果的警語。
+  gate 開始生效**（見「gate 在該模型首次 decision-replay 寫入前是 no-op」）。勾選時 UI 會顯示這段因果的警語。
 - **治理判定不需要寫 DB 就看得到**：job 完成後，report 摘要下方會顯示
   `governance_evaluation` 的 `health_state`（HEALTHY 綠 / DEGRADED 黃 / UNRELIABLE 紅）、
   `confidence_gate.allow_entry`、`max_entry_state` 與 blocking/warning flags，以及
@@ -2153,7 +2205,25 @@ p25 以上完全不變。RR gate 吃這個值，所以低 RR 那一端會有更�
 - `allow_entry` 只會被設成 `False`，不會從 `False` 變回 `True`。
 - `max_entry_state` 取 `_entry_rank` 較小（較保守）者；`allow_entry=False` 時直接壓成
   `WAIT_CONFIRMATION`，`DEGRADED` 時上限壓到 `SMALL_ENTRY`。
-- 查無 regression 結果時原樣回傳 base（見 I-040 的 no-op 說明）。
+- 查無 regression 結果時原樣回傳 base——**這一層安全網在該模型首次寫入前是 no-op**，見下。
+
+#### gate 在該模型首次 decision-replay 寫入前是 no-op（by-design）
+
+`_merge_regression_governance_gate` 只有在
+`fetch_latest_sr_regression_governance(model_config_hash)` 查得**同模型**、
+`schema_version=sr_zone_decision_replay_p0` 的最新 replay 結果時才會作用。
+
+若該 `model_config_hash` 尚未跑過任何 `--write-db` 的 decision replay
+（新訓練的模型、或 scheduler 關閉且從未手動執行），fetch 回 `None` → gate 為 no-op，
+分析維持原本的模型治理。
+
+**這是刻意的安全預設**（gate 只趨保守、不因缺資料而誤擋），
+但意味著**這層安全網要等該模型至少跑過一次 evaluation 並寫入 DB 後才生效**。
+
+* 上線流程若倚賴此 gate，**新模型部署後要排入一次 decision replay**。屬營運相依，不是 bug。
+* `schema_version` 因此**不可隨意變動**：`fetch_latest_sr_regression_governance` 用它過濾，
+  改了會讓 gate 查不到資料而靜默失效（這也是 `pipeline_version` 升到 `p1` 時
+  `schema_version` 仍維持 `p0` 的原因）。
 
 **未知的 `health_state`**（欄位改名、上游格式變動、拼字錯誤）不會升嚴重度——維持
 「不因資料壞掉而誤擋」的原則——但會加上 `REGRESSION_GOVERNANCE_STATE_UNKNOWN` 到

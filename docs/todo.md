@@ -256,7 +256,8 @@ gate 只趨保守且安全降級、T-003 預設未變（`adaptive_zone_builders_
 governance gate、evaluation 排程），並由 `tests/test_pipeline.py` 與 `scheduler_test.go` 鎖住。
 
 2026-08-04 複審另外找出 9 筆問題（含一筆會讓 replay 只驗到第一檔股票的高嚴重度取樣缺陷、
-一筆 MySQL 保留字），皆已修復並歸檔；review 通過後已從 `issue.md` 收斂，僅留 I-040
+一筆 MySQL 保留字），皆已修復並歸檔；review 通過後已從 `issue.md` 收斂（I-040 亦於 2026-08-18 內嵌至
+`sr-zone-scoring.md` 後移除），僅留
 （刻意保留的已知限制）。2026-08-05 review 通過後，I-049（context row 缺 `trade_date` 會拋
 `KeyError`）也已收斂——現況行為記在 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
 「Replay context 的股票比對規則」。
@@ -1105,7 +1106,7 @@ evaluation 從未實測，若跑不動，前面所有抓取與建表都是白工
 
 | # | 步驟 | 產出／決策點 | 成本 |
 |---|---|---|---|
-| **0** | **記憶體實測**（新增，最先做）**✅ 已完成 2026-08-12** | 見下方「Step 0 實測結果」。結論：150 檔可行、200 檔不可行，**不需要先做 I-056 的串流化** | 實際只補 11 檔 |
+| **0** | **記憶體實測**（新增，最先做）**✅ 已完成 2026-08-12** | 見下方「Step 0 實測結果」。結論：150 檔可行、200 檔不可行，**不需要先做串流化改造**（見 T-047） | 實際只補 11 檔 |
 | 1 | `ListCandidates` repo 方法與端點 **✅ 已完成 2026-08-12** | `GET /stock-symbols/candidates`，見上方 Phase 1 表與 [`api-reference.md`](./api-reference.md) | 純 backend，無外部依賴 |
 | 2 | Step 1 抓取（見下） | 全市場 ATR% 分佈 | 650 requests ≈ 2.2 小時 |
 | 3 | Step 2 判讀 → bucket 門檻定案 | **可能改變 T-003 的設計** | 分析，無抓取 |
@@ -1132,8 +1133,8 @@ requests**——合併可省下 Step 3 那趟 30 分鐘。**但不採用**：代
 | 40 | 22,401 | 310 MB | 241s |
 
 **峰值由固定的 import 開銷主導**：標的數 4 倍、rows 3.7 倍，峰值只增加約 30MB。
-[`issue.md`](./issue.md) I-056 判斷「270MB 幾乎都是 pandas/sklearn/lightgbm/shap 的
-import 開銷」**已由實測證實**。邊際成本約 **1.0 MB/檔**。
+先前判斷「270MB 幾乎都是 pandas/sklearn/lightgbm/shap 的
+import 開銷」**已由實測證實**（現況數據見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」）。邊際成本約 **1.0 MB/檔**。
 N=30（317MB）高於 N=40（310MB）的 7MB 是量測噪音（cgroup v1 峰值含 page cache），
 不是真實反轉——兩者是超集關係。
 
@@ -1148,7 +1149,7 @@ N=30（317MB）高於 N=40（310MB）的 7MB 是量測噪音（cgroup v1 峰值�
 實測期間 gitea（209MB）常駐時 available 只有 398MB，mem-guard 直接擋下、
 連 10 檔都跑不起來——這是 `development-workflow.md`「本機同時只留一組 stack」的另一個面向。
 
-時間約 **5.5 秒/檔**，150 檔單次約 14 分鐘（與 I-056 估的 16 分鐘相符）；
+時間約 **5.5 秒/檔**，150 檔單次約 14 分鐘（與先前估的 16 分鐘相符）；
 sweep 要乘候選數，6 組候選約 1.4 小時。
 
 **尚未驗證**：外推假設 zone building 的中間物隨標的數線性成長，這一段沒有直接量到。
@@ -1465,9 +1466,9 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
   幾乎都是 pandas / sklearn / lightgbm / shap 的 import 開銷，資料本身只有數 MB。重新估算後
   150 檔約落在 **350～450MB**，而這台 host 的 `MemAvailable` 常態只有 450～510MB、mem-guard
   還要再保留 150MB——**是「邊緣」而不是「大概沒問題」**。完整分析與改造方向見
-  [`issue.md`](./issue.md) **I-056**。
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」。
   因此**實測提前為 Step 0**（見上方執行順序），不再排到 Phase 2 之後：抓 2.2 小時、建表、
-  接排程之後才發現跑不動，前面全部是白工。量完若超標，先做 I-056 的第 1、2 項
+  接排程之後才發現跑不動，前面全部是白工。量完若超標，先做 T-047 的第 1、2 項
   （逐檔釋放原始 frame、只累積預測機率＋label 最後算 AUC）再往下走。
 - **回滾**：Phase 1 只新增 job 表與唯讀查詢端點，`git revert` 即可；已抓下來的 candles
   留著無害（多的 symbol 不會被任何既有流程掃到）。Phase 2 的 migration 有 `-- +goose Down`。
@@ -1504,7 +1505,7 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 待規劃（**前置已解除**：T-044 已於 2026-08-18 收斂，Lifecycle 狀態定義已定案） |
 | 優先度 | 中 |
 | 分類 | SR Zone / Decision UI / Position Action |
 | 建立日期 | 2026-08-07 |
@@ -1558,7 +1559,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 | ~~模型用未還原資料訓練~~ | **已驗證，不需重訓**（2026-08-11）。A/B 實測邊際分布沒有位移（`confidence` 與 `trading_score` 的中位數幾乎相同），個別決策改變 1.9%～5.4% 屬於還原修正錯誤輸入。結論與方法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「模型與還原股價的相容性」 |
 | `corporate_action_sync` 的 cron 寫死 | 其他排程（chip／stock symbol／sr evaluation）都走 config，只有這支是 `"30 6 * * 1-5"` 硬編碼。目前沒有調整需求 |
 | Python 的 volume 變 float | `fetch_candles` 還原後的成交量是除法結果。既有測試全過，但沒有針對「下游是否假設整數」的明確檢查 |
-| ~~減資未涵蓋~~ | **已實作並在 live 驗證通過**（2026-08-11）：7 筆減資事件，三筆假跳空（+126.8% / +109.2% / +36.3%）全部消失。合併與下市重編仍無來源，見 [`issue.md`](./issue.md) I-069 |
+| ~~減資未涵蓋~~ | **已實作並在 live 驗證通過**（2026-08-11）：7 筆減資事件，三筆假跳空（+126.8% / +109.2% / +36.3%）全部消失。合併與下市重編仍無來源，見 [`database-schema.md`](./database-schema.md)「未涵蓋的公司行動」 |
 
 ### T-043：盤後用 Yahoo 批次補日 K（價格），成交量仍走 FinMind
 
@@ -1632,7 +1633,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 計畫書待確認 |
+| 狀態 | **P0 已實作，已收斂**（2026-08-13 實作、2026-08-18 review 確認）。驗證缺口記為 `issue.md` I-074 |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 決策邏輯 |
 | 建立日期 | 2026-08-13 |
@@ -1786,7 +1787,7 @@ strategy mode（T-041，尚未存在）─────────────�
 - **行為對照**：抽離前先錄一組 decision summary 快照，抽離後逐欄比對。
 - `scripts/run-evaluation.sh MODE=replay`：對真實資料跑 decision replay，比對
   `final_entry_state` 與 `lifecycle_phase` 的分佈變化，量化 RR 解耦的實際影響。
-- 記憶體：replay 走既有腳本，注意這台 host 的限制（見 I-056 與 T-040 Step 0 實測）。
+- 記憶體：replay 走既有腳本，注意這台 host 的限制（見 `sr-zone-scoring.md`「規模上限」）。
 
 #### 完成後歸檔
 
@@ -1826,9 +1827,14 @@ strategy mode（T-041，尚未存在）─────────────�
 
 **計畫要求的完整驗證尚未執行**：decision replay 對真實資料比對
 `final_entry_state` / `lifecycle_phase` / `market_bias` 的分佈變化。
-現實限制是 live 只有 **4 檔標的 / 20 次分析**（見 T-045 前置條件），
-replay 的統計意義有限。因此目前這個行為改變**只有單元測試層級的證據**，
-決定接受與否前應知道這一點。
+現實限制是 live 只有 **4 檔標的 / 20 次分析**（2026-08-18 重新確認，一筆都沒增加），
+replay 的統計意義有限。因此目前這個行為改變**只有單元測試層級的證據**。
+
+**2026-08-18 決定：接受現狀並收斂本筆。** 缺口不會消失，但它的本質是
+「production 分析資料太少」——那是獨立的問題，不該讓 T-044 無限期掛著。
+缺口已轉記為 [`issue.md`](./issue.md) **I-074**（含關閉條件）；
+現況規格早已歸檔在 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+「分層原則：lifecycle 不看 RR」與「已知並接受的行為改變」。
 
 #### 與 T-041 的關係
 
@@ -2121,12 +2127,12 @@ Timeline 上線後兩者會同時存在且名字近似，容易誤用。建議�
 
 要讓 timeline 真的有東西，需要一個**定期對 watchlist 產生 SR zone 分析的排程**——
 那是本筆之外的獨立工作，且成本不低：每檔分析都會呼叫 Python scoring，
-而這台 host 的記憶體限制已在 [`issue.md`](./issue.md) I-056 與 T-040 Step 0 實測中量化過。
+而這台 host 的記憶體限制已在 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」量化過。
 
 **已決定（2026-08-13）：採第 2 案——P1 照做，接受初期資料稀疏。**
 理由是 P1 是純新增的唯讀查詢、風險最低，而摺疊邏輯本身需要真實資料驗證形狀，
 0050 現有的十幾個分析點已足以驗證鏈能否還原。補分析排程牽涉每檔都要跑 Python scoring，
-在這台 2GiB host 上需要單獨評估（見 I-056），不綁進 timeline 的範圍。
+在這台 2GiB host 上需要單獨評估（見 `sr-zone-scoring.md`「規模上限」），不綁進 timeline 的範圍。
 
 當初評估的三個選項（保留供日後回顧）：
 
@@ -2196,24 +2202,32 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 
 ---
 
-### T-046：gitea stack 補上 `cpus` / `mem_limit` / `memswap_limit`
+### T-047：SR evaluation 串流化，解除全市場的記憶體上限
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃（卡在權限） |
-| 優先度 | 低 |
-| 分類 | 開發環境 / Docker / 記憶體 |
-| 建立日期 | 2026-08-17（原記於 issue.md I-053 的「附帶發現」，該筆收斂時移入） |
-| 來源 | 2026-08-05 host OOM kill 事故調查 |
+| 狀態 | 待規劃（**全市場路線的前置條件**） |
+| 優先度 | 低（150 檔以內不需要） |
+| 分類 | Python / SR Zone / 效能 |
+| 建立日期 | 2026-08-18（原 `issue.md` I-056 的「可行的改造方向」，該筆收斂時移入） |
+| 來源 | T-039 sweep 實跑 ＋ T-040 Step 0 記憶體實測 |
 
-`/opt/stacks/scripts/gitea/compose.yml` 是唯一沒有 `cpus` / `mem_limit` / `memswap_limit`
-設定的 stack（實測佔 **154 MB**），其他 stack 都是 `0.5` CPU / `512m` / `768m`。
+現況上限與實測數據見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+「規模上限：`sources` 與 `dataset` 必須同時常駐記憶體」。
+**150 檔以內不需要做這一項**——2026-08-17 實測 131 檔峰值 382MB，跑得完。
 
-**為什麼要補**：host 只有 2 GiB，沒有上限的 container 不受 `mem_limit` 總和的約束，
-會直接侵蝕 `MemAvailable`。實測 gitea 常駐時 available 只有 398MB，mem-guard 直接擋下
-SR evaluation，連 10 檔都跑不起來。背景見
-[`development-workflow.md`](./development-workflow.md) 的
-「container 上限的**總和**也要顧」。
+要往 CLAUDE.md Roadmap 的全市場（2,298 檔）方向走才需要：
 
-**卡在權限**：該路徑屬 `kirai`（uid 1000），需由該帳號或 sudo 手動套用後重啟 gitea。
-目前的替代做法是跑 evaluation 前先手動停掉 gitea。
+1. **串流化**：逐檔建完 dataset 後立刻釋放該檔的原始 frame。前提是把
+   `_volatility_profiles` 改成**逐檔算好 profile 再丟掉 frame**，而不是最後才一次算。
+   這是最有效的一刀——原始 frames 是全市場情境下最大的一塊（約 220MB）。
+2. **指標可以串流，但不能分批平均**：AUC 是非線性的排序統計量，
+   **把各批的 AUC 平均是錯的**。正確做法是只累積「預測機率 ＋ label」兩個一維陣列
+   （全市場約 124 萬列 × 2 × 8B ≈ **20MB**），最後一次算 AUC / Brier / log loss。
+   這條路可行且便宜。
+3. 降 `--limit`（每檔取較少 K 棒）或對標的抽樣——最省事，但**直接犧牲樣本量**，
+   而樣本量正是擴標的池要解決的問題，只適合當臨時手段。
+
+**另一個獨立的前置條件**：T-042 的「逐檔事件的增量更新」。減資走 FinMind（5/分）
+且與每日抓價共用節流器，1,900 檔光減資就要 6.3 小時並排擠行情抓取。
+記憶體解決了，抓取節流仍會擋住。

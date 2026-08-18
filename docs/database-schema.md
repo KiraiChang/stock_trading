@@ -107,8 +107,43 @@ amount 不調整                      ← 成交金額是錢，不隨股數重�
 > **減資與反分割在數學上是同一件事**：股數變少、價格變高，所以係數 **> 1**，
 > 且 `volume_factor` 等於價格係數。成交量的調整方向是**縮小**，與分割相反。
 >
-> **仍不涵蓋合併與下市重編**——FinMind 的完整 dataset 目錄（104 個）裡沒有這類資料，
-> 見 [`issue.md`](./issue.md) I-069。
+> **仍不涵蓋合併與下市重編**——見下方「未涵蓋的公司行動」。
+
+### 未涵蓋的公司行動：合併與下市重編
+
+股價還原目前涵蓋**分割、反分割、面額變更、除權息、減資**，
+但**不涵蓋合併與下市重編**，而且**沒有資料源**：
+
+* FinMind 的完整 dataset 目錄（104 個，台股 61 個）裡沒有這類資料。
+* TWSE 的 `exchangeReport/TWTAUU` 欄位齊全但**只服務當年度**——跨年區間會被靜默截斷成當年；
+  純過去的區間回一個與實際原因不符的錯誤（「查詢結束日期小於查詢開始日期」）。
+
+**目前標的中沒有觀察到實例**：2026-08-11 減資上線後，全庫已無未解釋的假跳空。
+
+#### 偵測方法與它的兩個例外
+
+原理是「台股單日漲跌幅上限 ±10%，還原後仍超過就代表有未處理的公司行動」：
+
+```sql
+with adj as (
+  select symbol, ts, close*adj_factor as p,
+         lag(close*adj_factor) over (partition by symbol order by ts) as prev,
+         lag(ts) over (partition by symbol order by ts) as prev_ts
+  from candles where timeframe='1d')
+select symbol, (prev_ts at time zone 'Asia/Taipei')::date, (ts at time zone 'Asia/Taipei')::date,
+       round((p/prev-1)*100,1) as pct, (ts::date - prev_ts::date) as gap_days
+from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
+```
+
+**兩個例外不先排除就會追到不存在的問題**：
+
+1. **國外成分證券 ETF 不受 ±10% 限制。** 實測 `00830` 在 2025-04-07 為 −20.6%、
+   04-10 為 +19.1%，但**同日 28 檔全部同向**（04-07 平均 −10.0%、04-10 平均 +9.7%），
+   是 2025 年 4 月關稅衝擊的市場性事件，不是資料問題。
+   **判別方法：看同一天其他標的動了沒。**
+2. **門檻本身會漏掉真實事件。** 當初用 25% 只找到 3 筆減資，權威來源實際有 **7 筆**
+   （多出 2412、2478 的 2016 那筆、2609、2317）。
+   **門檻只能當異常偵測，不能當事件清單。**
 
 ---
 

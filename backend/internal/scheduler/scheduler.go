@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -64,8 +65,19 @@ type Scheduler struct {
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
 	// 卻只在多實例部署才有意義。
 	universeSyncRunning atomic.Bool
-	log                 *zap.Logger
-	cron                *cron.Cron
+	// registeredJobs 記錄 Start() 實際註冊了哪些 cron job。
+	// **為什麼要記而不是讓呼叫端自己判斷**：註冊條件散在 Start() 各處
+	// （config 開關、adjuster 是否注入、repo 是否注入），複製一份到 API 層
+	// 遲早會與這裡不一致。由 scheduler 自己回報才有單一事實來源。
+	//
+	// **必須上鎖**：main.go 是 `go sched.Start()` 與 HTTP server 並行啟動的，
+	// Start() 寫這個 map 的同時 /scheduler/status 可能正在讀。Go 的 map 不支援
+	// 並發讀寫，撞上會是 `fatal error: concurrent map read and map write`——
+	// 不可 recover，整個行程死掉。
+	registeredJobsMu sync.RWMutex
+	registeredJobs   map[string]bool
+	log              *zap.Logger
+	cron             *cron.Cron
 }
 
 func New(
@@ -108,6 +120,7 @@ func New(
 		intradayEnabled:  intradayEnabled,
 		log:              log,
 		cron:             cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
+		registeredJobs:   map[string]bool{},
 	}
 }
 
@@ -116,11 +129,13 @@ func (s *Scheduler) Start() {
 	s.cron.AddFunc("50 8 * * 1-5", func() {
 		s.runPreMarket()
 	})
+	s.markRegistered("pre_market")
 
 	// 盤中：每 5 分鐘拉取分K + 計算指標 + Signal 掃描（IsMarketOpen 守衛 13:30 收盤）
 	s.cron.AddFunc("*/5 9-13 * * 1-5", func() {
 		s.runIntradayJob()
 	})
+	s.markRegistered("intraday")
 
 	// 收盤後：拉日K + 完整掃描。收盤是 13:30，這裡刻意等到 15:00 才拉，
 	// 是因為 FinMind TaiwanStockPrice 當天日K不會在收盤當下就立刻發布——
@@ -131,6 +146,10 @@ func (s *Scheduler) Start() {
 	s.cron.AddFunc("0 15 * * 1-5", func() {
 		s.RunDailyClose()
 	})
+	s.markRegistered("daily_close")
+	// sr_zone_verify 沒有自己的 cron——它在 RunDailyClose 尾端無條件執行，
+	// 所以「有沒有排程會觸發它」等同於 daily_close。
+	s.markRegistered("sr_zone_verify")
 
 	// 籌碼採集：與 15:00 收盤掃描解耦，改為傍晚獨立排程（預設 21:00，見
 	// config chip.sync.cron）。FinMind 法人資料收盤後傍晚、融資融券更要晚間
@@ -140,6 +159,8 @@ func (s *Scheduler) Start() {
 		s.runChipDailySync(context.Background())
 	}); err != nil {
 		s.log.Error("chip sync cron register failed", zap.String("cron", s.chipSyncCron), zap.Error(err))
+	} else {
+		s.markRegistered("chip_daily_sync")
 	}
 
 	if s.stockSyncEnabled && s.stockSyncer != nil {
@@ -147,6 +168,8 @@ func (s *Scheduler) Start() {
 			s.RunStockSymbolSync()
 		}); err != nil {
 			s.log.Error("stock symbol sync cron register failed", zap.String("cron", s.stockSyncCron), zap.Error(err))
+		} else {
+			s.markRegistered("stock_symbol_sync")
 		}
 	}
 
@@ -157,6 +180,8 @@ func (s *Scheduler) Start() {
 			s.RunCorporateActionSync()
 		}); err != nil {
 			s.log.Error("corporate action sync cron register failed", zap.Error(err))
+		} else {
+			s.markRegistered("corporate_action_sync")
 		}
 	}
 
@@ -168,6 +193,8 @@ func (s *Scheduler) Start() {
 		}); err != nil {
 			s.log.Error("evaluation universe cron register failed",
 				zap.String("cron", s.evaluationUniverseCfg.Cron), zap.Error(err))
+		} else {
+			s.markRegistered("evaluation_universe_sync")
 		}
 	}
 
@@ -176,6 +203,8 @@ func (s *Scheduler) Start() {
 			s.RunSREvaluation()
 		}); err != nil {
 			s.log.Error("sr evaluation cron register failed", zap.String("cron", s.srEvaluation.Cron), zap.Error(err))
+		} else {
+			s.markRegistered("sr_evaluation")
 		}
 	}
 
@@ -590,6 +619,24 @@ func (s *Scheduler) srEvaluationRequest(symbols []string) analysis.SREvaluationR
 		DecisionReplay: s.srEvaluation.DecisionReplay,
 		ReplayMaxRows:  replayMaxRows,
 	}
+}
+
+// IsJobRegistered 回報 Start() 是否真的註冊了這個 cron job。
+//
+// **註冊失敗也算沒註冊**：cron 字串打錯時 AddFunc 只記 log 不中止，
+// 那種情況與「刻意關閉」在行為上相同（都不會跑），但成因完全不同——
+// 呼叫端要能分辨「沒開」與「該開卻沒開」，前者看這個回傳、後者看啟動 log。
+func (s *Scheduler) IsJobRegistered(name string) bool {
+	s.registeredJobsMu.RLock()
+	defer s.registeredJobsMu.RUnlock()
+	return s.registeredJobs[name]
+}
+
+// markRegistered 由 Start() 呼叫，是唯一的寫入點。
+func (s *Scheduler) markRegistered(name string) {
+	s.registeredJobsMu.Lock()
+	defer s.registeredJobsMu.Unlock()
+	s.registeredJobs[name] = true
 }
 
 // SetAdjuster 注入還原係數同步器。未呼叫時排程不註冊該 job。

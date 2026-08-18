@@ -33,15 +33,15 @@
 #     todo.md T-040 也明訂「實際抓取由使用者在 live 環境執行，之後透過 live DB 驗證」。
 #   - **模型檔在 live 主機上**，repo 的 python/models/ 是空的，所以要掛 MODELS_DIR（唯讀）。
 #   - 沿用 python/scripts/test.sh 的 image 與資源約束（mem-guard、--user、不留 __pycache__）。
-#   - 記憶體：evaluation 的 sources 與 dataset 必須同時常駐（見 issue.md I-056），
-#     用量隨標的數成長且**不可線性外推**。跑大批標的前先看 free -m。
+#   - 記憶體：evaluation 的 sources 與 dataset 必須同時常駐（見 docs/sr-zone-scoring.md
+#     「規模上限」）。用量隨標的數成長且**不可線性外推**。跑大批標的前先看 free -m。
 #   - **MEASURE_PEAK=1 的量測方式**：擴標的池（todo.md T-040 Step 0）要拿峰值當決策依據，
 #     而預設路徑 `docker run --rm` 跑完容器就消失，量不到。
 #
 #     峰值由**容器自己在指令結束後、退出前**寫進 /peak/peak，而不是從外面輪詢。
 #     這一點是實測踩出來的：第一版用 `docker exec` 每 2 秒輪詢，量到 N=30 的峰值
 #     比 N=20 還低（232MB < 276MB），但 N=30 的 dataset 是 N=20 的超集、rows 更多。
-#     原因是 `_volatility_profiles`（正是 issue.md I-056 說「sources 與 dataset 必須同時
+#     原因是 `_volatility_profiles`（正是「sources 與 dataset 必須同時
 #     常駐」的那一段）跑在整段流程的**最後**，峰值落在最後一次輪詢之後、容器結束之前，
 #     而容器一結束 cgroup 就被移除，從外面再也讀不到——**系統性低估，且偏差不固定**。
 #

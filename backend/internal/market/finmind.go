@@ -347,7 +347,7 @@ type RawCapitalReduction struct {
 	Reason      string  `json:"ReasonforCapitalReduction"`
 }
 
-// FetchCapitalReductions 取單一標的的減資事件（見 docs/issue.md I-069）。
+// FetchCapitalReductions 取單一標的的減資事件（見 docs/database-schema.md「股價還原」）。
 //
 // **減資與反分割在數學上是同一件事**：股數變少、價格變高，所以係數 > 1，
 // 而且成交量係數等於價格係數（股數確實改變）。因此不需要新的係數概念。

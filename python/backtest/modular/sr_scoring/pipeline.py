@@ -248,7 +248,8 @@ _HEALTH_SEVERITY = {"UNRELIABLE": 3, "DEGRADED": 2, "HEALTHY": 1}
 
 
 def _health_severity(state: str) -> int:
-    # 未知狀態回 0（低於 HEALTHY），刻意不誤擋——與 I-040 的「缺資料不誤擋」一致。
+    # 未知狀態回 0（低於 HEALTHY），刻意不誤擋——與 gate 的「缺資料不誤擋」原則一致
+    # （見 docs/sr-zone-scoring.md「gate 在該模型首次 decision-replay 寫入前是 no-op」）。
     # 但單靠這個會讓格式壞掉時完全沒有訊號，所以 _merge_regression_governance_gate 會另外
     # 記一筆 REGRESSION_GOVERNANCE_STATE_UNKNOWN warning
     # （見 docs/sr-zone-scoring.md「Production 端的 regression governance gate」）。

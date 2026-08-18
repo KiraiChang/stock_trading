@@ -4,10 +4,13 @@ export type JobName =
   | 'pre_market'
   | 'intraday'
   | 'daily_close'
+  // 沒有自己的 cron（跟著 daily_close 跑），但有獨立的 job_runs 紀錄
+  | 'sr_zone_verify'
   | 'chip_daily_sync'
   | 'stock_symbol_sync'
   | 'sr_evaluation'
   | 'corporate_action_sync'
+  | 'evaluation_universe_sync'
 
 export interface SchedulerJob {
   job_name: JobName

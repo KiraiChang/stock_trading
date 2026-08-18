@@ -115,6 +115,30 @@ describe('Scheduler 頁面的錯誤色語意', () => {
   })
 })
 
+// 後端把「排程沒被註冊」與「該跑卻沒跑」分成 disabled / never_run 兩種狀態
+// （規格見 docs/api-reference.md 的 GET /scheduler/status）。前端若照舊只認 never_run，
+// disabled 會直接把原始字串印出來，等於白做。
+describe('Scheduler 頁面的 disabled 狀態', () => {
+  it('未啟用的排程顯示「未啟用」而不是「尚未執行」，且不標 stale', async () => {
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([
+      {
+        job_name: 'evaluation_universe_sync',
+        status: 'disabled',
+        symbols_total: 0,
+        symbols_failed: 0,
+        stale: false,
+      },
+      srEvaluationJob,
+    ])
+    await renderSchedulerPage()
+
+    expect(screen.getByText('評估標的池同步')).toBeInTheDocument()
+    expect(screen.getByText('未啟用')).toBeInTheDocument()
+    expect(screen.queryByText('尚未執行')).not.toBeInTheDocument()
+    expect(screen.queryByText('⚠ 已延遲未執行')).not.toBeInTheDocument()
+  })
+})
+
 describe('Scheduler 頁面的 corporate_action_sync 區塊', () => {
   const job: SchedulerJob = {
     job_name: 'corporate_action_sync',

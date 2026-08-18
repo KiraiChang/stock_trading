@@ -84,7 +84,7 @@ const (
 	CorporateActionDividendStock = "DIVIDEND_STOCK"
 	CorporateActionDividendBoth  = "DIVIDEND_BOTH"
 
-	// 減資（見 docs/issue.md I-069）。與反分割在數學上是同一件事：股數變少、價格變高，
+	// 減資（見 docs/database-schema.md「股價還原」）。與反分割在數學上是同一件事：股數變少、價格變高，
 	// 所以係數 > 1，且 volume_factor 等於價格係數。
 	CorporateActionCapitalReduction = "CAPITAL_REDUCTION"
 )

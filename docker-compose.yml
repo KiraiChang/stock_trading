@@ -28,6 +28,13 @@ services:
       EVALUATION_UNIVERSE_ENABLED: ${EVALUATION_UNIVERSE_ENABLED:-false}
       EVALUATION_UNIVERSE_CRON: ${EVALUATION_UNIVERSE_CRON:-0 16 * * 1-5}
       EVALUATION_UNIVERSE_DAYS: ${EVALUATION_UNIVERSE_DAYS:-10}
+      # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
+      # 漏跑一次就會讓該檔整段歷史出現假跳空，而重算是冪等的，所以沒有關掉它的情境。
+      # 06:30 早於 08:50 的 pre_market，讓開盤前的分析已吃到最新係數。
+      # 打錯字會退回預設值繼續跑並記 Error log（靜默停掉等於還原係數無聲過期）。
+      # **不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
+      # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
+      CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:

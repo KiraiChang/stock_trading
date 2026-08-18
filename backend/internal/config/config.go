@@ -19,6 +19,7 @@ type Config struct {
 	Chip               ChipConfig
 	SREvaluation       SREvaluationConfig       `mapstructure:"sr_evaluation"`
 	EvaluationUniverse EvaluationUniverseConfig `mapstructure:"evaluation_universe"`
+	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 }
 
@@ -156,6 +157,19 @@ type EvaluationUniverseConfig struct {
 	Days int `mapstructure:"days"`
 }
 
+// CorporateActionConfig 是公司行動（分割／除權息／減資）同步排程的設定。
+//
+// **沒有 Enabled 開關**：是否註冊由「有沒有注入 adjuster」決定（`SetAdjuster`），
+// 與 stock symbol／sr evaluation 那種 config 開關不同。多一個 enabled 會出現
+// 「adjuster 有注入但 enabled=false」這種要另外解釋的組合，而目前沒有關掉它的需求——
+// 漏跑一次就會讓該檔整段歷史出現假跳空。
+type CorporateActionConfig struct {
+	// Cron 為同步時間（robfig/cron 格式，台北時區）。預設 06:30 平日：
+	// 早於 08:50 的 pre_market，讓當天開盤前的分析已經吃到最新係數。
+	// 重算是冪等的，需要多跑幾次時可設多時段（例如 "30 6,12 * * 1-5"）。
+	Cron string `mapstructure:"cron"`
+}
+
 func Load() (*Config, error) {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
@@ -205,6 +219,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("sr_evaluation.replay_max_rows", 200)
 	viper.SetDefault("sr_evaluation.write_db", true)
 
+	// 與搬進 config 之前的硬編碼值相同，行為不變（T-042）。
+	viper.SetDefault("corporate_action.cron", "30 6 * * 1-5")
 	viper.SetDefault("evaluation_universe.enabled", false)
 	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
 	viper.SetDefault("evaluation_universe.days", 10)

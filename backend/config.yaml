@@ -111,6 +111,19 @@ evaluation_universe:
   days: 10                       # 環境變數：EVALUATION_UNIVERSE_DAYS，往前幾個日曆天。
                                  # 10 而非 5 是為了容忍連假；成本與天數無關（1 request/檔）。
 
+# 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
+# 是否啟用由程式有沒有注入 adjuster 決定。漏跑一次會讓該檔整段歷史出現假跳空，
+# 而重算是冪等的，所以沒有關掉它的情境。
+corporate_action:
+  cron: "30 6 * * 1-5"           # 環境變數：CORPORATE_ACTION_CRON，台北時區。
+                                 # 06:30 早於 08:50 的 pre_market，讓開盤前的分析已吃到最新係數。
+                                 # 需要多跑幾次時可設多時段（例如 "30 6,12 * * 1-5"）。
+                                 # 打錯字時會退回預設值繼續跑並記 Error log——這支沒有 enabled
+                                 # 開關，靜默停掉等於還原係數無聲過期。
+                                 # **不要設得比 80 小時稀疏**（例如每週一）：/scheduler/status
+                                 # 的 stale 門檻寫死 80 小時，會永遠顯示逾期。見 api-reference.md
+                                 # 「`stale` 門檻寫死在程式裡，不隨 cron 調整」。
+
 position_analysis:
   max_position_value: 200000
   max_risk_amount: 10000

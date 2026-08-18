@@ -546,6 +546,23 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 「跑過、後來被關閉」的 job 保留實際狀態，但 `stale` 為 `false`——舊紀錄不代表排程卡住。
 
+#### `stale` 門檻寫死在程式裡，不隨 cron 調整
+
+`jobStaleThreshold` 是每個 job 各自的常數（`handler/scheduler.go`），**不會依 config 的 cron 重算**。
+四支 cron 走 config 的排程都受影響：
+
+| job | 門檻 | 隱含假設 |
+|---|---|---|
+| `chip_daily_sync` | 72 小時 | 每日 |
+| `sr_evaluation` | 72 小時 | 每日 |
+| `corporate_action_sync` | 80 小時 | 平日每日（跨週末最長週五→週一） |
+| `evaluation_universe_sync` | 80 小時 | 平日每日 |
+
+**把 cron 設得比門檻稀疏會讓該 job 永遠顯示 stale**（例如改成每週一跑，間隔 168 小時 > 80），
+即使它完全照設定執行。這正是本頁上面警告的那種「訓練使用者忽略 stale 旗標」。
+目前的做法是**不要把這幾支設成稀疏排程**；真的需要時，正解是讓門檻從 cron 推導
+（例如取下兩次觸發間隔再加緩衝），那是還沒做的改造。
+
 ### POST `/scheduler/stock-symbol-sync/run`
 
 手動觸發 TWSE ISIN 股票主檔同步，與每日 `stock_symbol_sync` 排程共用同一份邏輯。
@@ -560,10 +577,10 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 ### POST `/scheduler/corporate-action-sync/run`
 
 手動觸發公司行動同步（分割 ＋ 除權息）與股價還原係數重算，與每日 `corporate_action_sync`
-排程（平日 06:30）共用同一份邏輯。立即回應，實際執行在背景；結果查
-`GET /scheduler/status` 的 `corporate_action_sync`。
+排程（`corporate_action.cron`，**預設**平日 06:30）共用同一份邏輯。立即回應，
+實際執行在背景；結果查 `GET /scheduler/status` 的 `corporate_action_sync`。
 
-**為什麼需要這個入口**：排程一天只跑一次，部署若晚於 06:30，沒有它就得等到隔天才驗得了
+**為什麼需要這個入口**：排程一天只跑一次，部署若晚於排程時間，沒有它就得等到隔天才驗得了
 還原是否正確（驗證方式見 `scripts/verify-adjustment.sh`）。**重算是冪等的**，
 重複觸發不會累積誤差——`adj_factor` 是事件表的純函數，每次都整段覆寫。
 

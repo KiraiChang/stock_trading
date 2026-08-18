@@ -21,6 +21,11 @@ import (
 	"github.com/trading/backend/pkg/timeutil"
 )
 
+// defaultCorporateActionCron 是公司行動同步的預設排程（平日 06:30，台北時區）。
+// 與 config 的 SetDefault 同值；兩邊都留是為了讓不經過 config.Load() 的呼叫端
+// 也有可用的預設（見 corporateActionCron）。
+const defaultCorporateActionCron = "30 6 * * 1-5"
+
 // srZoneVerifyLimit 每次收盤驗證最多處理幾筆最近的 SR zone 分析，避免隨著
 // 歷史分析越積越多，這個 job 的執行時間跟著無上限成長（見 RunDailyClose）。
 const srZoneVerifyLimit = 50
@@ -56,6 +61,9 @@ type Scheduler struct {
 	// adjuster 為選填（見 docs/todo.md T-042）：未注入時不註冊還原係數同步排程，
 	// 行為與導入前完全相同。
 	adjuster *market.Adjuster
+	// corporateActionCfg 只有 cron。cron 為空時退回 defaultCorporateActionCron——
+	// config 沒設不該讓這支排程消失（漏跑會讓該檔整段歷史出現假跳空）。
+	corporateActionCfg config.CorporateActionConfig
 	// evaluationUniverse 為選填（見 docs/todo.md T-040 Step 5）：未注入或未啟用時
 	// 不註冊該排程，行為與導入前完全相同。比照 adjuster 的處理。
 	evaluationUniverse    store.EvaluationUniverseRepo
@@ -176,10 +184,12 @@ func (s *Scheduler) Start() {
 	// 公司行動同步：分割罕見（全市場 11 年只有 33 筆），但漏掉一次就會讓該檔的整段歷史
 	// 出現假跳空，所以每天跑一次。重算是冪等的，重複執行不會累積誤差。
 	if s.adjuster != nil {
-		if _, err := s.cron.AddFunc("30 6 * * 1-5", func() {
+		cronSpec := s.corporateActionCron()
+		if _, err := s.cron.AddFunc(cronSpec, func() {
 			s.RunCorporateActionSync()
 		}); err != nil {
-			s.log.Error("corporate action sync cron register failed", zap.Error(err))
+			s.log.Error("corporate action sync cron register failed",
+				zap.String("cron", cronSpec), zap.Error(err))
 		} else {
 			s.markRegistered("corporate_action_sync")
 		}
@@ -639,9 +649,39 @@ func (s *Scheduler) markRegistered(name string) {
 	s.registeredJobs[name] = true
 }
 
-// SetAdjuster 注入還原係數同步器。未呼叫時排程不註冊該 job。
-func (s *Scheduler) SetAdjuster(a *market.Adjuster) {
+// SetAdjuster 注入還原係數同步器與其排程設定。未呼叫時排程不註冊該 job。
+// 比照 SetEvaluationUniverse：依賴與設定一起注入，避免兩者分開設定時漏掉其一。
+func (s *Scheduler) SetAdjuster(a *market.Adjuster, cfg config.CorporateActionConfig) {
 	s.adjuster = a
+	s.corporateActionCfg = cfg
+}
+
+// corporateActionCron 取設定值，**空白或無法解析時都退回預設**。
+//
+// **為什麼不讓壞字串直接傳給 AddFunc**：那會註冊失敗（只記 log 不中止），
+// 於是「config 打錯一個字」的後果是這支排程靜默消失，而它漏跑一次就會讓該檔的整段
+// 歷史出現假跳空。viper 那層已經有 SetDefault，這裡是第二道防線——
+// 測試或其他呼叫端不經過 config.Load() 時同樣要拿得到可用的預設。
+//
+// **為什麼這支特別要擋，其他排程不用**：其他三支 cron 走 config 的排程
+// （chip / stock symbol / sr evaluation）都有各自的 enabled 開關或選填依賴，
+// 註冊失敗時 /scheduler/status 顯示 disabled 是說得通的（見 docs/api-reference.md
+// 「`status` 的三種『沒有執行紀錄』情形」）。**本 job 沒有開關**——它顯示成 disabled
+// 等於一個不存在的狀態，操作者不會知道還原係數已經停止重算。所以寧可用預設時間繼續跑，
+// 也不要靜默停掉；打錯的那個值會以 Error log 留下來。
+func (s *Scheduler) corporateActionCron() string {
+	spec := strings.TrimSpace(s.corporateActionCfg.Cron)
+	if spec == "" {
+		return defaultCorporateActionCron
+	}
+	if _, err := cron.ParseStandard(spec); err != nil {
+		s.log.Error("corporate action cron 無法解析，改用預設值",
+			zap.String("cron", spec),
+			zap.String("fallback", defaultCorporateActionCron),
+			zap.Error(err))
+		return defaultCorporateActionCron
+	}
+	return spec
 }
 
 // SetEvaluationUniverse 注入評估標的池與其排程設定。未呼叫或 cfg.Enabled=false 時

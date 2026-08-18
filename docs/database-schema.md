@@ -64,6 +64,14 @@ amount 不調整                      ← 成交金額是錢，不隨股數重�
 而所有從舊價算出來的衍生資料（`indicator_snapshots`、`stock_analyses`、
 `stock_sr_zone_analyses`）不會跟著更新，也不會報錯。
 
+**還原後的 volume 是 float，這是刻意的**：`volume / vol_factor` 是除法，Python 端
+（`db.fetch_candles`，還原的唯一進入點）不會把它截回整數——截整數會無聲丟掉還原的精度，
+而且連 `vol_factor = 1` 的常見情形也會被牽動。**下游全部以 float 取用**
+（`.astype(float)` / `to_numpy(dtype=float)`），且原始 volume 不跨 Python→Go 邊界
+（Go 收的是 `relative_volume` 這類 float 欄位），所以沒有「`1234.0` 打進 int64 欄位」
+的解析風險。行為由 `python/tests/test_db_fetch_candles.py` 鎖住——
+把它改成回整數是**行為改變**，不是修 bug。要原始整數量時傳 `adjusted=False`。
+
 **係數是 `corporate_actions` 的純函數**，重算永遠整段覆寫、不讀舊值，所以**冪等**：
 跑一次跟跑十次結果相同。實作在 `market/adjuster.go`，
 驗證用 `scripts/verify-adjustment.sh`（唯讀，用 SQL 獨立重算一次再比對）。

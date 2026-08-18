@@ -112,9 +112,17 @@ scheduler 記一次（`stock symbol sync failed`），不重複記錄。
 
 ## 公司行動同步（`corporate_action_sync`）
 
-維護 `corporate_actions` 與 `candles` 的還原係數。**平日 06:30** 執行，
+維護 `corporate_actions` 與 `candles` 的還原係數。**預設平日 06:30** 執行
+（`corporate_action.cron`，環境變數 `CORPORATE_ACTION_CRON`，台北時區；
+06:30 早於 08:50 的 `pre_market`，讓當天開盤前的分析已吃到最新係數），
 或 `POST /api/v1/scheduler/corporate-action-sync/run` 手動觸發
-（前端「排程狀態」頁有按鈕）。**重算是冪等的**，重複觸發不會累積誤差。
+（前端「排程狀態」頁有按鈕）。**重算是冪等的**，重複觸發不會累積誤差，
+所以需要多跑幾次時直接設多時段即可（例如 `"30 6,12 * * 1-5"`）。
+
+**這支排程沒有 `enabled` 開關**，與 `stock_symbols` / `sr_evaluation` /
+`evaluation_universe` 不同：是否啟用取決於程式有沒有注入 adjuster
+（`Scheduler.SetAdjuster`）。漏跑一次就會讓該檔整段歷史出現假跳空，而重算是冪等的，
+所以沒有「刻意關掉」的情境。config 的 `cron` 留白時會退回程式內的預設值而不是靜默不註冊。
 
 兩個來源的取得成本差很多，處理方式因此不同：
 

@@ -743,7 +743,7 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | **已實作，待 review**（2026-08-18：七個端點全部補完，新增 28 支測試） |
 | 優先度 | 低 |
 | 分類 | Python / 測試 |
 | 建立日期 | 2026-08-06 |
@@ -763,6 +763,26 @@ FastAPI TestClient，但當時只補了 `/sr-scoring/evaluate`。仍無測試的
 - `/health`
 
 分檔慣例比照 `tests/test_http_server_sr_evaluate_*.py`：一個測試範圍一支檔，不堆進同一個檔案。
+
+#### 實作結果（2026-08-18）
+
+七個端點各一支檔，共 **28 支測試**，全部走 conftest 既有的 `client` fixture
+（不用 `with`，所以不跑 lifespan、不連 DB）：
+
+| 檔案 | 支數 | 鎖住的重點 |
+|---|---|---|
+| `test_http_server_analyze.py` | 4 | 三參數轉發、`ValueError` → 404、缺 symbol → 422 |
+| `test_http_server_sr_zones.py` | 4 | 404 **與** 503 兩條分支、`previous_event_states` 省略時是**空 list 而非 None** |
+| `test_http_server_train.py` | 4 | 六參數轉發（都取非預設值）、`calibration_method: null` 不被當成沒給、`ValueError` → **400** |
+| `test_http_server_model_status.py` | 3 | 模型不存在回 **200 + `exists:false`**（測試明寫 `!= 503`）、其餘欄位為 None、`config_hash` 有帶出 |
+| `test_http_server_backtest_submit.py` | 6 | 202、`symbols` 收 JSON string 與 list、回應只有 `{job_id, status}` |
+| `test_http_server_backtest_get.py` | 5 | 查無 → 404 且不再查 results、`trigger_source` → `trigger` 改名、result 未寫入時為 null |
+| `test_http_server_health.py` | 2 | `{"status":"ok"}`、**把 engine 換成一碰就爆也仍是 200**（liveness 不該依賴 DB） |
+
+**沒能驗到的一項要說清楚**：TestClient 會在回應產生後、`client.post()` 回來前執行
+background task，所以 `/backtest` 的「不阻塞」**無法用時序證明**。測試鎖的是
+「工作有排進背景、回應不含執行結果」；真正的不阻塞來自 `BackgroundTasks.add_task`
+而不是 `await`，那是結構上的事實。這一點寫在該檔的 docstring 裡。
 
 ---
 
@@ -1536,7 +1556,7 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待處理（主體已完成並驗證，2026-08-11） |
+| 狀態 | 待處理（主體已完成並驗證，2026-08-11；**兩項小的已於 2026-08-18 實作，待 review**，只剩「逐檔事件的增量更新」） |
 | 優先度 | 中 |
 | 分類 | Go / Python / 資料正確性 |
 | 建立日期 | 2026-08-11 |
@@ -1551,14 +1571,14 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
 live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.86%**；
 2603 在 2023-06-30 的 **−39.7%** 大額配息跳空也被除權息還原修掉。
 
-以下是**刻意留待後續**的項目：
+以下是**刻意留待後續**的項目（2026-08-18：兩項小的已實作／已盤查，只剩第一項）：
 
 | 項目 | 說明 |
 |---|---|
 | **逐檔事件的增量更新** | 除權息與減資都是逐檔、目前每次全抓。除權息走 Yahoo（20/分）；**減資走 FinMind（5/分），與每日抓價共用節流器**——1,900 檔光減資就要 6.3 小時且會排擠行情抓取。這是 T-040 擴標的池的**前置條件**，不是日後優化 |
 | ~~模型用未還原資料訓練~~ | **已驗證，不需重訓**（2026-08-11）。A/B 實測邊際分布沒有位移（`confidence` 與 `trading_score` 的中位數幾乎相同），個別決策改變 1.9%～5.4% 屬於還原修正錯誤輸入。結論與方法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「模型與還原股價的相容性」 |
-| `corporate_action_sync` 的 cron 寫死 | 其他排程（chip／stock symbol／sr evaluation）都走 config，只有這支是 `"30 6 * * 1-5"` 硬編碼。目前沒有調整需求 |
-| Python 的 volume 變 float | `fetch_candles` 還原後的成交量是除法結果。既有測試全過，但沒有針對「下游是否假設整數」的明確檢查 |
+| ~~`corporate_action_sync` 的 cron 寫死~~ | **已實作，待 review**（2026-08-18）：改走 `corporate_action.cron`（環境變數 `CORPORATE_ACTION_CRON`），預設值等於原本的硬編碼 `"30 6 * * 1-5"`，**行為不變**。現況說明見 [`architecture/data-pipeline.md`](./architecture/data-pipeline.md)「公司行動同步」 |
+| ~~Python 的 volume 變 float~~ | **已盤查，結論是不改行為，待 review**（2026-08-18）：下游全部以 float 取用、原始 volume 不跨 Python→Go 邊界，**沒有假設整數的消費者**。補 9 支測試鎖住現況，說明見 [`database-schema.md`](./database-schema.md)「股價還原」 |
 | ~~減資未涵蓋~~ | **已實作並在 live 驗證通過**（2026-08-11）：7 筆減資事件，三筆假跳空（+126.8% / +109.2% / +36.3%）全部消失。合併與下市重編仍無來源，見 [`database-schema.md`](./database-schema.md)「未涵蓋的公司行動」 |
 
 ### T-043：盤後用 Yahoo 批次補日 K（價格），成交量仍走 FinMind

@@ -19,6 +19,14 @@ export EVALUATION_UNIVERSE_ENABLED="false"  # 匯入選池成員後改為 "true"
 export EVALUATION_UNIVERSE_CRON="0 16 * * 1-5"  # 台北時區
 export EVALUATION_UNIVERSE_DAYS="10"       # 往前幾個日曆天；10 是為了容忍連假，成本與天數無關
 
+# 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：漏跑一次會讓該檔
+# 整段歷史出現假跳空，重算又是冪等的，所以沒有關掉它的情境；只有時間可調。
+# 06:30 早於 08:50 的 pre_market，讓當天開盤前的分析已吃到最新係數。
+# 需要多跑幾次時直接設多時段（例如 "30 6,12 * * 1-5"）。打錯字會退回預設值繼續跑並記
+# Error log。**不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
+# 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
+export CORPORATE_ACTION_CRON="30 6 * * 1-5"  # 台北時區
+
 docker compose \
   -f "$PROJECT_DIR/docker-compose.yml" \
   --project-directory "$PROJECT_DIR" \

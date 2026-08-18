@@ -16,6 +16,7 @@ import (
 
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/config"
+	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 )
 
@@ -662,4 +663,89 @@ func TestIsJobRegisteredIsSafeForConcurrentAccess(t *testing.T) {
 		}
 	}()
 	wg.Wait()
+}
+
+// ── corporate_action_sync 的 cron 走 config（T-042）──
+// 搬進 config 之前這支排程的 cron 是唯一硬編碼的，其他三支都走 config。
+
+// schedulerWithAdjuster 注入一個不會被呼叫到的 adjuster——Start() 只檢查 nil，
+// 不會 deref 裡面的依賴，所以空的就夠。
+func schedulerWithAdjuster(t *testing.T, cfg config.CorporateActionConfig) *Scheduler {
+	t.Helper()
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: false})
+	s.SetAdjuster(market.NewAdjuster(nil, nil, nil, zap.NewNop()), cfg)
+	return s
+}
+
+func TestCorporateActionCronFallsBackToDefaultWhenUnset(t *testing.T) {
+	// config 漏設時不能讓這支排程消失——空字串傳給 AddFunc 會註冊失敗（只記 log），
+	// 而漏跑一次就會讓該檔整段歷史出現假跳空。
+	for _, cron := range []string{"", "   "} {
+		s := schedulerWithAdjuster(t, config.CorporateActionConfig{Cron: cron})
+		if got := s.corporateActionCron(); got != defaultCorporateActionCron {
+			t.Errorf("cron=%q 應退回預設 %q，實際 %q", cron, defaultCorporateActionCron, got)
+		}
+		s.Start()
+		if !s.IsJobRegistered("corporate_action_sync") {
+			t.Errorf("cron=%q 時仍應註冊", cron)
+		}
+		s.Stop()
+	}
+}
+
+func TestCorporateActionCronUsesConfiguredValue(t *testing.T) {
+	s := schedulerWithAdjuster(t, config.CorporateActionConfig{Cron: "30 6,12 * * 1-5"})
+	defer s.Stop()
+
+	if got := s.corporateActionCron(); got != "30 6,12 * * 1-5" {
+		t.Fatalf("應採用 config 的值，實際 %q", got)
+	}
+	s.Start()
+	if !s.IsJobRegistered("corporate_action_sync") {
+		t.Error("合法 cron 應註冊成功")
+	}
+}
+
+// 非法 cron **不能**讓這支排程消失。
+//
+// 其他三支 cron 走 config 的排程註冊失敗時顯示成 disabled 是說得通的（它們都有
+// enabled 開關）；本 job 沒有開關，disabled 對它是個不存在的狀態，操作者不會知道
+// 還原係數已經停止重算。所以打錯字時用預設時間繼續跑，並留一筆 Error log。
+func TestCorporateActionInvalidCronFallsBackToDefault(t *testing.T) {
+	for _, spec := range []string{"not a cron", "6:30", "* * *"} {
+		s := schedulerWithAdjuster(t, config.CorporateActionConfig{Cron: spec})
+
+		if got := s.corporateActionCron(); got != defaultCorporateActionCron {
+			t.Errorf("cron=%q 應退回預設 %q，實際 %q", spec, defaultCorporateActionCron, got)
+		}
+
+		s.Start()
+		if !s.IsJobRegistered("corporate_action_sync") {
+			t.Errorf("cron=%q 打錯字不該讓這支排程消失", spec)
+		}
+		s.Stop()
+	}
+}
+
+// 反面：合法但**不同於預設**的值必須原樣採用，否則上面那條退回邏輯會演變成
+// 「不管設什麼都跑預設」——那等於 config 沒有接上。
+func TestCorporateActionValidCronIsNotOverriddenByFallback(t *testing.T) {
+	s := schedulerWithAdjuster(t, config.CorporateActionConfig{Cron: "15 7 * * 1"})
+	defer s.Stop()
+
+	if got := s.corporateActionCron(); got != "15 7 * * 1" {
+		t.Fatalf("合法值不該被退回預設，實際 %q", got)
+	}
+}
+
+func TestCorporateActionNotRegisteredWithoutAdjuster(t *testing.T) {
+	// 沒注入 adjuster 時不管 cron 設什麼都不註冊（既有行為，一併鎖住）。
+	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: false})
+	defer s.Stop()
+
+	s.Start()
+
+	if s.IsJobRegistered("corporate_action_sync") {
+		t.Error("未注入 adjuster 時不該註冊")
+	}
 }

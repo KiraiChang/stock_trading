@@ -201,7 +201,7 @@ func main() {
 		srv.Hub().Broadcast(ws.Event{Type: "signal", Symbol: sym, Data: sig})
 	}
 
-	sched.SetAdjuster(adjuster)
+	sched.SetAdjuster(adjuster, cfg.CorporateAction)
 	// **必須在 sched.Start() 之前**：Start() 當下才決定要不要註冊 cron，
 	// 之後再注入不會有任何效果也不會報錯（靜默失效）。
 	sched.SetEvaluationUniverse(evaluationUniverseRepo, cfg.EvaluationUniverse)

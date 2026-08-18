@@ -303,8 +303,58 @@ Phase 2 的目的不是選股，而是維護已確認的標的池。
 | `config.yaml`、`main.go` 接線 | ✅ setter 在 `go sched.Start()` **之前**（之後注入會靜默失效） |
 | 前端「③ 已入池」區塊 | ✅ `svelte-check` 0 errors、vitest 96 passed |
 
-**尚未做的**：把定案的 131 檔實際匯入 live（那是寫入動作，需授權並由使用者執行），
-以及「隔一個交易日後不做手動回補、直接跑 `verify-regression-baseline.sh`」這個端到端驗收。
+### live 現況與端到端驗收（2026-08-18 唯讀盤點）
+
+**池已匯入並自主運作**，分兩批寫入：
+
+| 匯入時間（台北） | 筆數 |
+|---|---|
+| 2026-08-17 18:26 | 126 |
+| 2026-08-18 09:59 | 9 |
+
+合計 **135 檔，全部 `active`**，bucket 分佈 **LOW 53 / NORMAL 49 / HIGH 33**。
+
+**與上方定案的 131 檔（48 / 50 / 33）不一致，落差原因沒有任何紀錄。** 第一批的 126
+恰好等於本檔「重跑實測 131 → 126」那個數字，看起來像是第一批用了重跑後的報告、隔日早上
+再補 9 檔——**但這是從數字推測，沒有證據**。日後要重現這個池，依據是
+`evaluation_universe` 表本身，不是本檔的 131。
+
+**端到端驗收的前半段已通過**（2026-08-18，無任何手動回補）：
+
+```
+daily_close               15:00  success  11 檔
+sr_zone_verify            15:02  success  20 筆
+evaluation_universe_sync  15:06  success  135 檔 / 0 失敗
+```
+
+池內 135 檔的日 K **全部到 2026-08-18**，證明「隔一個交易日後池會自己補上」這條成立。
+
+**後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未執行。**
+基準檔 `python/baselines/sr_volatility_baseline.json` 追蹤 9 檔的 profile 序數，
+其 snapshot 記的是 `sources: 131`；重跑時 `sources` 會變成 135，比對本身仍是那 9 檔的
+Spearman ≥ 0.9。成本約 12 分鐘、峰值約 382MB。
+
+### 重跑選池前必須先回補池外標的
+
+**這是池上線後才出現的限制，而它的失敗方式是「靜默通過」。**
+
+`selection_report.py` 的 `DEFAULT_STALE_TOLERANCE_DAYS = 3`：最後一根日 K 不在最近
+**3 個市場交易日**內就標 `STALE`、`atr_pct` 給 None、直接排除，且
+`KEEP_FATAL_EXCLUSIONS` 讓 `KEEP_SYMBOLS` 也救不回來。
+
+而每日維護**只涵蓋池內成員**，所以池外標的會逐日變舊。2026-08-18 的實況：
+
+| 交易日 | 有日 K 的檔數 |
+|---|---|
+| 08-18 / 08-17 / 08-14 | **135**（只有池內成員） |
+| 08-13 以前 | 841 |
+
+市場交易日是從全庫 distinct 日期算的，於是「最近 3 個交易日」整個被池內成員定義，
+**池外 706 檔全部落在容忍窗之外**。此時重跑選池，候選母體只剩池內那 135 檔，
+結論必然是「池沒變」——那是循環論證，不是驗證，而且報告不會有任何異常訊號。
+
+**所以要重跑選池，必須先把池外標的回補到最近 3 個交易日內**（約 706 檔 × 1 request，
+FinMind 5 req/min 下約 2.4 小時），否則結果無效。
 
 **實作中發現並記錄的問題**：`sr_evaluation` 與 `evaluation_universe_sync` 都預設關閉，
 於是 `/scheduler/status` 會常態把它們顯示成 `never_run` ＋ `stale=true`。

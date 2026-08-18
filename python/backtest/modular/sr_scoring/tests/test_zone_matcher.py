@@ -1,0 +1,400 @@
+"""ZoneMatcher（T-048 階段 A）。
+
+**fixture 用的是 live 撈下來的真實 zone 形狀**，不是編出來的數字——判準是靠實測
+543 組相鄰配對定下來的（`docs/todo.md` T-048「門檻掃描實測」），用假數字測等於
+測另一個世界的參數。價格取自 2026-08-18 匯出的 `stock_sr_zones`（0050，311 列）。
+"""
+from __future__ import annotations
+
+import itertools
+
+import pytest
+
+from backtest.modular.sr_scoring.zone_matcher import (
+    RELATION_CONTINUE,
+    RELATION_MERGE,
+    RELATION_RESHAPE,
+    RELATION_SPLIT,
+    ROLE_FLIPPED,
+    ROLE_RESOLVED,
+    ROLE_UNRESOLVED,
+    CandidateZone,
+    PreviousZone,
+    is_same_zone,
+    match_zones,
+)
+
+
+@pytest.fixture
+def uid_factory():
+    """可預測的身分產生器。真實實作用 uuid4，測試不該面對隨機值。"""
+    counter = itertools.count(1)
+    return lambda: f"Z{next(counter):03d}"
+
+
+def prev(uid, low, high, role, method="atr", incarnation_role=None):
+    return PreviousZone(uid, low, high, method, role, incarnation_role)
+
+
+def cur(low, high, role, method="atr"):
+    return CandidateZone(low, high, method, role)
+
+
+# ─────────────────────────────────────────────────────────────
+# 身分延續：真實漂移
+# ─────────────────────────────────────────────────────────────
+
+
+def test_real_drift_2026_08_04_to_08_05_continues(uid_factory):
+    """0050 atr 在 08-04 → 08-05 的四個 zone 都只是邊界微幅重算，身分必須延續。
+
+    這些正是現行 `_zone_key()` 會判成「四個全新 zone」的案例——它把身分綁在
+    小數點後 4 位的價格上。
+    """
+    previous = [
+        prev("Z-A", 89.32, 97.18, "SUPPORT"),
+        prev("Z-B", 95.12, 104.73, "AT_ZONE"),
+        prev("Z-C", 100.32, 108.63, "AT_ZONE"),
+        prev("Z-D", 100.37, 110.03, "AT_ZONE"),
+    ]
+    current = [
+        cur(89.28, 97.22, "SUPPORT"),
+        cur(95.08, 104.77, "AT_ZONE"),
+        cur(100.28, 108.67, "AT_ZONE"),
+        cur(101.08, 110.37, "AT_ZONE"),
+    ]
+
+    result = match_zones(previous, current, uid_factory)
+
+    assert result.zone_uids == ["Z-A", "Z-B", "Z-C", "Z-D"]
+    # 身分延續不寫血緣邊——那會是 parent == child 的自環，讓祖先回溯查詢無法終止。
+    assert result.relations == []
+    assert result.unmatched_previous == []
+    assert result.terminated_previous == []
+
+
+def test_zone_that_moved_too_far_is_a_new_identity(uid_factory):
+    """同一次分析裡的 [105.37,114.78] → [107.08,114.82]：中心位移 0.102，超過門檻。
+
+    這是**保守失敗**：多產生一個身分、鏈變短。相對於「把兩個真實 zone 併成一個、
+    事件張冠李戴」的危險失敗，這個方向是刻意選的。
+    """
+    result = match_zones(
+        [prev("Z-OLD", 105.37, 114.78, "RESISTANCE")],
+        [cur(107.08, 114.82, "RESISTANCE")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z001"]
+    assert result.relations == []
+    assert result.unmatched_previous == ["Z-OLD"]
+
+
+# ─────────────────────────────────────────────────────────────
+# 角色翻轉：身分必須跨越它
+# ─────────────────────────────────────────────────────────────
+
+
+def test_role_flip_with_identical_bounds_keeps_identity(uid_factory):
+    """0050 recent_pivot [104.73,105.37]：07-16 SUPPORT → 07-21 RESISTANCE。
+
+    **邊界一動也沒動**，只有角色翻轉。現行 `_zone_key()` 含 role，所以這在今天
+    必然是兩個不同的 key、鏈直接斷——這條測試就是那個 bug 的回歸測試。
+    """
+    result = match_zones(
+        [prev("Z-PIVOT", 104.73, 105.37, "SUPPORT", method="recent_pivot")],
+        [cur(104.73, 105.37, "RESISTANCE", method="recent_pivot")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z-PIVOT"]
+    assert [(t.kind, t.from_role, t.to_role) for t in result.role_transitions] == [
+        (ROLE_FLIPPED, "SUPPORT", "RESISTANCE")
+    ]
+
+
+def test_flip_through_at_zone_is_detected(uid_factory):
+    """`RESISTANCE → AT_ZONE → SUPPORT`：兩個有向角色**並不相鄰**。
+
+    live 有這個實例（0050 recent_pivot）。只比對相鄰兩次的 role 會漏掉它，
+    所以判定規則是「新解析出的方向 ≠ 當前這一世的 role」。
+    """
+    # 第二步：方向變得無法解析。incarnation_role 仍是 RESISTANCE。
+    step2 = match_zones(
+        [prev("Z-P", 104.73, 105.37, "RESISTANCE", method="recent_pivot",
+              incarnation_role="RESISTANCE")],
+        [cur(104.73, 105.37, "AT_ZONE", method="recent_pivot")],
+        uid_factory,
+    )
+    assert step2.zone_uids == ["Z-P"]
+    assert [t.kind for t in step2.role_transitions] == [ROLE_UNRESOLVED]
+
+    # 第三步：解析出 SUPPORT。相鄰的 role 是 AT_ZONE→SUPPORT，看起來像單純解析，
+    # 但對照這一世的角色（RESISTANCE）就是翻轉。
+    step3 = match_zones(
+        [prev("Z-P", 104.73, 105.37, "AT_ZONE", method="recent_pivot",
+              incarnation_role="RESISTANCE")],
+        [cur(104.73, 105.37, "SUPPORT", method="recent_pivot")],
+        uid_factory,
+    )
+    assert [(t.kind, t.from_role, t.to_role) for t in step3.role_transitions] == [
+        (ROLE_FLIPPED, "RESISTANCE", "SUPPORT")
+    ]
+
+
+def test_at_zone_returning_to_same_role_is_resolved_not_flipped(uid_factory):
+    """`RESISTANCE → AT_ZONE → RESISTANCE` 是解析回原角色，不是翻轉。
+
+    live 的 3 筆 `X→AT_ZONE→Y` 裡有 2 筆是這種。把它算成翻轉會讓真正的翻轉
+    被雜訊淹沒。
+    """
+    result = match_zones(
+        [prev("Z-P", 104.73, 105.37, "AT_ZONE", incarnation_role="RESISTANCE")],
+        [cur(104.73, 105.37, "RESISTANCE")],
+        uid_factory,
+    )
+
+    assert [(t.kind, t.from_role, t.to_role) for t in result.role_transitions] == [
+        (ROLE_RESOLVED, "AT_ZONE", "RESISTANCE")
+    ]
+
+
+def test_long_at_zone_chain_produces_no_role_transition(uid_factory):
+    """live 有一條連續 16 次分析都是 AT_ZONE 的鏈。
+
+    一直沒解析出方向不是「轉換」，不該每天記一筆——那會把 transition 表灌成流水帳。
+    """
+    result = match_zones(
+        [prev("Z-P", 95.12, 104.73, "AT_ZONE")],
+        [cur(95.08, 104.77, "AT_ZONE")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z-P"]
+    assert result.role_transitions == []
+
+
+def test_first_resolution_is_resolved_not_flipped(uid_factory):
+    """身分第一次解析出方向：沒有「前一世的角色」可比，是 RESOLVED 不是 FLIPPED。"""
+    result = match_zones(
+        [prev("Z-P", 95.12, 104.73, "AT_ZONE")],
+        [cur(95.08, 104.77, "SUPPORT")],
+        uid_factory,
+    )
+
+    assert [(t.kind, t.to_role) for t in result.role_transitions] == [
+        (ROLE_RESOLVED, "SUPPORT")
+    ]
+
+
+# ─────────────────────────────────────────────────────────────
+# 血緣：分裂 / 合併 / 重整
+# ─────────────────────────────────────────────────────────────
+
+
+def test_real_duplication_falls_below_threshold_and_becomes_new_identity(uid_factory):
+    """0050 atr 08-05 的重複現場：[95.12,104.73] 之後同時存在
+    [95.08,104.77] 與 [95.73,105.37]。
+
+    第二個的中心位移是 0.0649，**剛好超過 0.06 門檻**，所以判成新生而不是分裂。
+    這條把「門檻就在這個案例附近」這件事釘住——日後有人放寬門檻時，
+    這條會變紅並強迫他面對 N→M 的代價（實測 0.10 時 N→M 從 3 筆暴增到 10 筆）。
+    """
+    result = match_zones(
+        [prev("Z-B", 95.12, 104.73, "AT_ZONE")],
+        [cur(95.08, 104.77, "AT_ZONE"), cur(95.73, 105.37, "AT_ZONE")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z-B", "Z001"]
+    assert result.relations == []          # 一個延續、一個新生，都不是血緣邊
+
+
+def test_split_gives_all_children_new_identities(uid_factory):
+    """1→N：parent 終止，**沒有任何 child 繼承 parent 的身分**。
+
+    讓某個 child 繼承必然是任意選擇，而且會讓血緣圖說謊。血緣由 relations 表達。
+    """
+    result = match_zones(
+        [prev("Z-P", 100.00, 110.00, "SUPPORT")],
+        [cur(100.10, 109.90, "SUPPORT"), cur(100.20, 110.10, "SUPPORT")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z001", "Z002"]
+    assert {(r.parent_zone_uid, r.child_zone_uid, r.relation) for r in result.relations} == {
+        ("Z-P", "Z001", RELATION_SPLIT),
+        ("Z-P", "Z002", RELATION_SPLIT),
+    }
+    assert result.role_transitions == []   # 新身分沒有「轉換」，只有誕生
+    # parent 有 child，所以不是 unmatched；但身分本身結束了，階段 B 要寫成終態。
+    assert result.terminated_previous == ["Z-P"]
+    assert result.unmatched_previous == []
+
+
+def test_merge_records_both_parents(uid_factory):
+    result = match_zones(
+        [prev("Z-P1", 100.00, 110.00, "SUPPORT"), prev("Z-P2", 100.10, 109.90, "SUPPORT")],
+        [cur(100.05, 109.95, "SUPPORT")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z001"]
+    assert {(r.parent_zone_uid, r.relation) for r in result.relations} == {
+        ("Z-P1", RELATION_MERGE),
+        ("Z-P2", RELATION_MERGE),
+    }
+
+
+def test_chained_component_does_not_fabricate_unmatched_edges(uid_factory):
+    """**元件連通 ≠ 全交叉。**
+
+    P0–C0、P1–C0、P1–C1 相連但 P0 與 C1 並不匹配（中心差 1.5 = 寬度的 15%，
+    是判準明確否決的）。對整個元件做笛卡爾積會憑空生出 P0→C1 這條父子關係——
+    那與本模組「不猜血緣」的立場直接矛盾，而且邊數會隨元件大小平方成長。
+    """
+    previous = [
+        prev("Z-P0", 100.0, 110.0, "SUPPORT"),
+        prev("Z-P1", 101.0, 111.0, "SUPPORT"),
+    ]
+    current = [cur(100.5, 110.5, "SUPPORT"), cur(101.5, 111.5, "SUPPORT")]
+
+    result = match_zones(previous, current, uid_factory)
+
+    edges = {(r.parent_zone_uid, r.child_zone_uid) for r in result.relations}
+    assert ("Z-P0", "Z002") not in edges, "P0 與 C1 不匹配，不該有這條邊"
+    assert edges == {("Z-P0", "Z001"), ("Z-P1", "Z001"), ("Z-P1", "Z002")}
+
+
+def test_incarnation_role_is_returned_so_callers_need_no_bookkeeping(uid_factory):
+    """`incarnation_role` 的前進規則必須由本模組給，不能讓每個呼叫端自己重寫。
+
+    漏掉「翻轉後要前進」的後果是**靜默的**：`RESISTANCE → SUPPORT → RESISTANCE`
+    只會報出第一次翻轉，第二次因為 `cur.role == incarnation_role` 而被判成沒有轉換——
+    那正是這個模組要消滅的斷鏈，卻發生在模組外面、沒有測試抓得到。
+    """
+    first = match_zones(
+        [prev("Z-P", 104.73, 105.37, "RESISTANCE", incarnation_role="RESISTANCE")],
+        [cur(104.73, 105.37, "SUPPORT")],
+        uid_factory,
+    )
+    assert [t.kind for t in first.role_transitions] == [ROLE_FLIPPED]
+    assert first.incarnation_roles == ["SUPPORT"]      # 已前進
+
+    # 把上一輪算好的值原樣帶回來，第二次翻轉就抓得到
+    second = match_zones(
+        [prev("Z-P", 104.73, 105.37, "SUPPORT",
+              incarnation_role=first.incarnation_roles[0])],
+        [cur(104.73, 105.37, "RESISTANCE")],
+        uid_factory,
+    )
+    assert [(t.kind, t.from_role, t.to_role) for t in second.role_transitions] == [
+        (ROLE_FLIPPED, "SUPPORT", "RESISTANCE")
+    ]
+
+
+def test_incarnation_role_carries_through_at_zone(uid_factory):
+    """AT_ZONE 期間沿用這一世原本的角色，不能歸零——歸零會讓下一次解析變成
+    「第一次解析」而不是翻轉。"""
+    result = match_zones(
+        [prev("Z-P", 104.73, 105.37, "RESISTANCE", incarnation_role="RESISTANCE")],
+        [cur(104.73, 105.37, "AT_ZONE")],
+        uid_factory,
+    )
+
+    assert result.incarnation_roles == ["RESISTANCE"]
+
+
+def test_new_identity_starts_a_fresh_incarnation(uid_factory):
+    """新身分沒有前一世，AT_ZONE 起手時 incarnation_role 應為 None。"""
+    result = match_zones([], [cur(100.0, 110.0, "AT_ZONE"), cur(200.0, 210.0, "SUPPORT")],
+                         uid_factory)
+
+    assert result.incarnation_roles == [None, "SUPPORT"]
+
+
+def test_unknown_previous_role_does_not_emit_a_transition(uid_factory):
+    """`role` 從 DB 讀回來是自由字串。未知值進 AT_ZONE 不該被說成
+    「有向 → AT_ZONE」——那個語意是假的。"""
+    result = match_zones(
+        [prev("Z-P", 100.0, 110.0, "UNKNOWN")],
+        [cur(100.0, 110.0, "AT_ZONE")],
+        uid_factory,
+    )
+
+    assert result.role_transitions == []
+
+
+def test_reshape_records_every_edge_and_guesses_nothing(uid_factory):
+    """N→M：2 個 parent 與 2 個 child 全部互相匹配。
+
+    這裡沒有任何一條邊是「真的」，所以四條邊全部記為 RESHAPE。
+    誠實記錄一次無法解析的重整，好過編一組看起來合理的父子關係。
+    """
+    result = match_zones(
+        [prev("Z-P1", 100.00, 110.00, "SUPPORT"), prev("Z-P2", 100.10, 110.10, "SUPPORT")],
+        [cur(100.05, 110.05, "SUPPORT"), cur(100.15, 110.15, "SUPPORT")],
+        uid_factory,
+    )
+
+    assert result.zone_uids == ["Z001", "Z002"]
+    assert len(result.relations) == 4
+    assert {r.relation for r in result.relations} == {RELATION_RESHAPE}
+
+
+# ─────────────────────────────────────────────────────────────
+# 判準本身
+# ─────────────────────────────────────────────────────────────
+
+
+def test_method_never_crosses():
+    """ATR zone 與 volume profile zone 是不同方法算出來的東西，
+    價格碰巧重疊不代表是同一個結構。"""
+    assert not is_same_zone(
+        prev("Z", 100.0, 110.0, "SUPPORT", method="atr"),
+        cur(100.0, 110.0, "SUPPORT", method="volume_profile"),
+    )
+
+
+def test_role_is_not_part_of_identity():
+    assert is_same_zone(
+        prev("Z", 104.73, 105.37, "SUPPORT"),
+        cur(104.73, 105.37, "RESISTANCE"),
+    )
+
+
+def test_wide_zone_is_not_penalised_for_being_wide():
+    """判準刻意是尺度無關的。純 IoU 會讓寬 zone 漂一點點就掉出門檻——
+    live 有 IoU 0.878 但中心位移只有 0.065 的案例。"""
+    narrow = is_same_zone(prev("Z", 100.00, 101.00, "SUPPORT"), cur(100.03, 101.03, "SUPPORT"))
+    wide = is_same_zone(prev("Z", 100.00, 110.00, "SUPPORT"), cur(100.30, 110.30, "SUPPORT"))
+    assert narrow == wide is True
+
+
+def test_width_change_beyond_threshold_breaks_match():
+    """中心沒動但寬度暴增：那是重新算出來的另一個結構，不是同一個 zone 漂移。"""
+    assert not is_same_zone(
+        prev("Z", 100.0, 110.0, "SUPPORT"),
+        cur(97.0, 113.0, "SUPPORT"),
+    )
+
+
+def test_degenerate_zero_width_zone_does_not_divide_by_zero():
+    assert is_same_zone(prev("Z", 100.0, 100.0, "SUPPORT"), cur(100.0, 100.0, "SUPPORT"))
+    assert not is_same_zone(prev("Z", 100.0, 100.0, "SUPPORT"), cur(100.1, 100.1, "SUPPORT"))
+
+
+def test_empty_previous_makes_everything_a_birth(uid_factory):
+    result = match_zones([], [cur(100.0, 110.0, "SUPPORT")], uid_factory)
+
+    assert result.zone_uids == ["Z001"]
+    assert result.relations == []
+    assert result.unmatched_previous == []
+
+
+def test_empty_current_reports_all_previous_as_unmatched(uid_factory):
+    result = match_zones([prev("Z-P", 100.0, 110.0, "SUPPORT")], [], uid_factory)
+
+    assert result.zone_uids == []
+    assert result.relations == []
+    assert result.unmatched_previous == ["Z-P"]

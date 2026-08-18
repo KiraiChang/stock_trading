@@ -1009,7 +1009,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作，待 review**（2026-08-17：Step 0～5 全部完成；剩匯入 live 與端到端驗收） |
+| 狀態 | **已實作，待 review**（Step 0～5 全部完成；**池已匯入 live 並自主運作**，2026-08-18 盤點見下；只剩 `verify-regression-baseline.sh` 那半段驗收） |
 | 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
@@ -1026,7 +1026,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 2 | Step 1 全市場短期回補與判讀 | ✅ 完成 2026-08-13（857 檔 / 454,152 列） |
 | 3 | selection report、選出最終清單 | ✅ 完成 2026-08-17（**131 檔**，計畫書階段 1～3 通過） |
 | 4 | deep backfill ＋ 階段 4～6 驗證 | ✅ 完成 2026-08-17（131/131 對齊、覆蓋率 99.1%+、峰值 382MB、回歸基準已落地） |
-| 5 | Phase 2：`evaluation_universe` 表與每日排程 | ✅ **已實作，待 review**（2026-08-17）。尚未匯入 131 檔到 live、尚未做端到端驗收 |
+| 5 | Phase 2：`evaluation_universe` 表與每日排程 | ✅ **已實作，待 review**（2026-08-17）。**2026-08-18 唯讀盤點：池已匯入（135 檔，非文件的 131）、排程已啟用、當日 15:06 同步 135 檔／0 失敗、池內日 K 全部到 08-18 且無手動回補**——端到端驗收的前半段成立。後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未跑。詳見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「live 現況與端到端驗收」 |
 
 #### 相依：T-003 邊界凍結
 
@@ -2251,3 +2251,510 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 **另一個獨立的前置條件**：T-042 的「逐檔事件的增量更新」。減資走 FinMind（5/分）
 且與每日抓價共用節流器，1,900 檔光減資就要 6.3 小時並排擠行情抓取。
 記憶體解決了，抓取節流仍會擋住。
+
+---
+
+### T-048：SR Zone 狀態持久化——Zone 身分、Event Lifecycle 與轉換紀錄
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 計畫書待確認 |
+| 優先度 | 高（T-049 與 T-041 的共同前置） |
+| 分類 | Python / Go / DB / SR Zone / 決策資料 |
+| 建立日期 | 2026-08-18 |
+| 來源 | 使用者需求：把「每次重判」改成「可追蹤的演進」 |
+| 關聯 | 接手 T-044（Lifecycle Engine P0 已實作）與 T-045（事件鏈 P1/P2 已實作）；T-049 是它的下游 |
+
+#### 問題：現在的事件鏈會分裂，而且沒有東西會報錯
+
+事件鏈**已經有持久化**（T-045 做的 `market_event_states` / `market_event_detections`），
+但它的身分是 `_zone_key()`（`event_engine.py:199`）：
+
+```python
+return f"{role}:{price_low:.4f}:{price_high:.4f}"
+```
+
+**身分綁在浮點邊界上，而 zone 邊界每次分析都由 ATR 重算。** 2026-08-18 對 live
+`market_event_states` 的唯讀盤點抓到兩個實證：
+
+**一、同一個支撐分裂成兩條鏈。** 0050：
+
+| 日期 | zone_key | event |
+|---|---|---|
+| 07-23 ～ 08-04 | `SUPPORT:102.4916:103.1084` | INTRADAY_RECLAIM |
+| **08-05 起** | `SUPPORT:102.4916:103.1084` | INTRADAY_RECLAIM |
+| **08-05 起** | `SUPPORT:102.5414:103.1585` | INTRADAY_RECLAIM |
+
+08-05 之後兩個 key **每天並存**，各自帶一條 reclaim 鏈。價格區間重疊 99%，
+實際上是同一個支撐。下游看到的是兩個獨立 zone、兩次獨立事件——**這會重複計數**，
+而且沒有任何檢查會發現。
+
+**二、`role` 在 key 裡，所以 `ROLE_FLIPPED` 在現行模型中無法表達。** 支撐翻壓力必然
+產生一個全新身分、舊鏈直接斷掉。這不是 bug，是資料模型的結構限制。
+
+#### 目標
+
+1. Zone 有**跨交易日穩定的身分**，邊界漂移與角色翻轉都不改變身分。
+2. Event 與 Zone 的生命週期是**存下來的事實**，不是每次分析重新推導的結果。
+3. 狀態轉換**留痕**：看得出何時、因為什麼從哪個狀態到哪個狀態。
+
+#### 不做的範圍
+
+* **不改任何下游決策邏輯**。Market State / Bias / Final Entry 這批全部留在 T-049。
+  本筆做完，決策行為必須與現在**逐欄相同**——這是它的驗收條件之一。
+* 不做前端顯示（T-041）。
+* 不擴充事件種類到 4 個以外。
+* 不重算歷史：既有 `market_event_states` 的 86 列不回填 zone 身分（理由見「相容策略」）。
+
+#### 執行順序（2026-08-18 定案：**3 → 4 → 1 → 2**）
+
+需求原本給的順序是「1 事件表 → 2 Lifecycle Engine → 3 Zone ID → 4 zone 表」。**但 Zone
+身分是事件表的外鍵前提**：先建 `event_instances` 就只能沿用會漂移的 `zone_key`，等階段 3
+做出穩定 ID 後，階段 1 的資料要整批 migration ＋ 回填，而回填正是「無法可靠判斷兩個
+舊 key 是不是同一個 zone」的那件事——**那個回填不可能做對，因為它要解的正是本筆要建的能力**。
+
+先把身分釘死，後面兩張表一開始就長在正確的鍵上：
+
+| 新序 | 原編號 | 內容 |
+|---|---|---|
+| **A** | 3 | Zone ID + ZoneMatcher（純 Python，不碰 DB） |
+| **B** | 4 | `zone_instances` + `zone_transitions` |
+| **C** | 1 | `event_instances` + `event_transitions`（外鍵指向 `zone_instances`） |
+| **D** | 2 | Lifecycle Engine 支援 4 個事件 |
+
+**A 是唯一沒有現成東西可接手的部分，也是其餘三階段的地基**——它做錯，後面三個階段
+會長在錯誤的鍵上，而那時已經有資料了。所以 A 的參數必須用 live 資料決定，
+不能在程式裡先寫死一組猜測值（見下）。
+
+---
+
+#### 階段 A：Zone ID + ZoneMatcher
+
+**這是整筆的核心，也是唯一沒有現成東西可接手的部分。**
+
+`ZoneScore`（`types.py:229`）目前只有 `price_low` / `price_high` / `method` / `role`，
+沒有 id。ZoneMatcher 要回答的是：**這次分析算出來的 zone，是不是上次那一個？**
+
+比對維度（草案，實作前要用 live 資料調參）：
+
+| 維度 | 用途 |
+|---|---|
+| 價格區間重疊率（IoU） | 主判準；上面 0050 那兩個 key 的 IoU > 0.9 |
+| `method` | ATR zone 與 volume profile zone 不互相匹配 |
+| **不比 `role`** | 角色翻轉要能保持同一身分，這正是 `ROLE_FLIPPED` 的前提 |
+| 時間距離 | 超過 N 個交易日沒出現就不再匹配，避免跨越太久誤配 |
+
+##### 門檻掃描實測（2026-08-18，live `stock_sr_zones` 311 列 / 18 個 symbol×method 組合）
+
+相鄰兩次分析之間 IoU > 0 的配對共 **543** 筆。IoU 分佈是**雙峰**的——209 筆 < 0.3（明顯不同）、
+90 筆 ≥ 0.99（幾乎完全相同），中間稀疏。這是好消息：多數匹配是清楚的。
+
+**發現一：純 IoU 會被 zone 寬度污染。** 寬 zone 漂一點點 IoU 就掉很多。改用兩個尺度無關的量
+（中心位移 ÷ 平均寬度、寬度變化率）後，分群更乾淨：
+
+| 中心位移/寬度 | 筆數 | IoU 中位數 |
+|---|---|---|
+| < 0.05 | 159 | 0.992 |
+| 0.05 ～ 0.10 | 34 | 0.849 |
+| 0.10 ～ 0.20 | 30 | 0.725 |
+| 0.20 ～ 0.40 | 55 | 0.494 |
+| ≥ 0.40 | 265 | 0.206 |
+
+**`IoU ≥ 0.90` 是位移判準的嚴格子集**：交集 145 = IoU 的全部，沒有任何一組是
+IoU 收而位移判準不收。**在定案的 0.06 門檻下，位移判準另外多收 16 組**——
+形狀上就是同一個 zone 的日常漂移，例如
+`[109.59,113.65] → [109.80,113.45]`（IoU 0.899，但中心位移只有 0.001）。
+
+> **`+16` 是 0.06 的數字，`+38` 是 0.10 的。** 這兩個曾被混用過一次，引用前先看門檻。
+> 同理，常被拿來當例子的 `[95.12,104.73] → [95.73,105.37]` 位移是 **0.0649，超過 0.06**，
+> 它**不在**這 16 組裡——那組配對在定案判準下是判成新身分的
+> （見 `test_real_duplication_falls_below_threshold_and_becomes_new_identity`）。
+
+**發現二：判準的鬆緊直接換成一對多的數量。**
+
+| 判準 | 配對 | 前日 zone 匹配數 | 一對多 | 多對一 |
+|---|---|---|---|---|
+| `IoU ≥ 0.95` | 128 | 128 | 0 | 0 |
+| **`IoU ≥ 0.90`** | 145 | 144 | **1** | 1 |
+| **位移 < 0.06 且 寬變 < 0.25** | 161 | 154 | **7** | 6 |
+| 位移 < 0.08 且 寬變 < 0.25 | 172 | 160 | 12 | 12 |
+| 位移 < 0.10 且 寬變 < 0.25 | 183 | 163 | 20 | 19 |
+
+**一對多不是雜訊，是真實的 zone 分裂／合併**——放寬判準只是讓它現形。所以問題不是
+「怎麼把一對多壓到 0」，而是「matcher 要不要從第一天就支援它」。
+
+**發現三：`role` 必須排除在身分之外，證據比預期強。** IoU ≥ 0.8 的角色翻轉共 18 筆，
+其中 volume_profile 有多筆 **IoU = 1.000** 的翻轉：
+
+```
+0050 volume_profile 2026-08-04→08-05  AT_ZONE → SUPPORT     IoU=1.000
+0050 volume_profile 2026-08-05→08-06  AT_ZONE → RESISTANCE  IoU=1.000
+0050 volume_profile 2026-08-07→08-10  RESISTANCE → AT_ZONE  IoU=1.000
+```
+
+**價格區間一模一樣、邊界完全沒動，只因為 role 重新解析，`zone_key` 就整個不同、鏈直接斷。**
+而 `AT_ZONE ↔ SUPPORT/RESISTANCE` 在價格穿越 zone 時就會切換，是常態不是例外。
+
+##### 一對多用血緣關聯表達，不是用門檻壓低（2026-08-18 定案）
+
+**設計決定：zone 的分裂／合併是要被記錄的事實，不是要被消除的雜訊。**
+
+```
+Z100 (ACTIVE)
+  │
+  ├── SPLIT ──► Z101
+  └── SPLIT ──► Z102
+```
+
+```sql
+zone_relations:
+  parent_zone_uid  varchar  REFERENCES zone_instances
+  child_zone_uid   varchar  REFERENCES zone_instances
+  relation         varchar  -- CONTINUE / SPLIT / MERGE / RESHAPE
+  analysis_id      bigint   -- 觀察到這個關聯的那次分析
+  occurred_at      timestamptz
+  PRIMARY KEY (parent_zone_uid, child_zone_uid, analysis_id)
+```
+
+**這取代了原本規劃的 `matched_from` 陣列欄位。** 差別不只是形式：關聯表讓「Z101 是從
+Z100 分裂出來的」變成可查詢、可回溯的邊，而陣列欄位只是把答案塞進一個格子裡。
+要回答「這個 zone 的祖先是誰」只需沿著 parent 走。
+
+**relation 字彙由實測決定**——把每次相鄰分析的匹配當二部圖取連通元件：
+
+| 判準 | 1→1 CONTINUE | 1→N SPLIT | N→1 MERGE | **N→M RESHAPE** | 1→0 消失 | 0→1 新生 |
+|---|---|---|---|---|---|---|
+| `IoU ≥ 0.90` | 141 | 1 | 1 | **0** | 108 | 103 |
+| **位移 < 0.06 且 寬變 < 0.25** | **144** | 2 | 1 | **3** | 98 | 92 |
+| 位移 < 0.10 且 寬變 < 0.25 | 136 | 3 | 2 | **10** | 89 | 83 |
+
+**判準定為「中心位移 < 0.06 且 寬度變化 < 0.25」**，理由是這張表的形狀：
+
+* 它讓 `CONTINUE` 達到最大（144）。**再放寬反而變少**（0.10 時掉到 136）——
+  乾淨的一對一被吸進 N→M 的糾纏裡。**所以這不是「越鬆越好」的參數，0.06 是拐點。**
+* `SPLIT`／`MERGE` 有了關聯表就是可表達的事實，不再是選判準時要迴避的成本。
+* 真正要控制的是 **N→M**：它無法用 parent-child 誠實表達（2 個 parent 對 2 個 child
+  全部交叉連接時，沒有任何一條邊是真的）。0.06 只有 3 筆，0.10 暴增到 10 筆。
+
+**N→M 的處理**：不猜血緣。所有 parent 一律終止、所有 child 一律新生，
+關聯記為 `RESHAPE` 並把整個元件的所有 parent×child 邊都寫進去。
+**寧可誠實記錄「這裡發生了一次無法解析的重整」，也不要編一組看起來合理的父子關係。**
+
+**parent 在 SPLIT／MERGE／RESHAPE 後一律終止**（`zone_instances.state` 進終態），
+child 取得全新 `zone_uid`。不讓某個 child「繼承」parent 的身分——那個選擇必然是任意的，
+而且會讓血緣圖說謊。
+
+> **留給階段 C 的問題**：parent 身上的 event 要不要跟著傳給 child？
+> 關聯表讓這件事可以被**明確決定**（沿 parent 走），而不是像現在這樣隱性地斷掉。
+> 這個決定等 `zone_relations` 有真實資料再做。
+
+**其餘未定的決策**：
+
+1. **ID 形式**。建議 opaque 的 `zone_uid`（UUID），**不要**把價格或 role 編進去——
+   那正是現在這個問題的成因。
+2. **狀態機的可逆性**（見階段 B）。
+
+輸出：`zone_matcher.match_zones(previous, current, uid_factory)`。
+純函數、不碰 DB，所以測試不需要 DB（比照 `selection_report.py` 的做法）。
+
+##### 實作結果（2026-08-18，**已實作，待 review**）
+
+`python/backtest/modular/sr_scoring/zone_matcher.py` ＋ 23 支測試
+（`tests/test_zone_matcher.py`，全部用 live 撈下來的真實 zone 形狀當 fixture）。
+
+**對 live 的 311 列真實 zone 重放**（數字為 review 修正後）：
+
+| | 值 | 對照 |
+|---|---|---|
+| 身分延續 | 144 | = 統計掃描的 `CONTINUE` 元件數 |
+| 血緣邊（`SPLIT` 4 ＋ `MERGE` 2 ＋ `RESHAPE` 11） | 17 | 144 ＋ 17 = **161 = 實際匹配配對數** ✅ |
+| 身分消失（`unmatched_previous`） | 98 | = 掃描的 1→0 |
+| 身分終止（`terminated_previous`） | 10 | 2 SPLIT ＋ 2 MERGE ＋ 6 RESHAPE 的 parent |
+| `ROLE_RESOLVED` / `ROLE_UNRESOLVED` / `ROLE_FLIPPED` | 6 / 8 / **3** | 翻轉 3 = 2 直接 ＋ 1 跨 `AT_ZONE` ✅ |
+
+**311 列 zone 收斂成 167 個身分。**
+
+`ROLE_FLIPPED` 是 **3** 而不是稍早記的 2：`incarnation_role` 的前進與延續規則收進模組後，
+跨 `AT_ZONE` 的那一筆才被正確歸類（先前的臨時重放腳本在 `AT_ZONE` 期間沒有沿用
+這一世的角色，把它誤判成 `ROLE_RESOLVED`）。這個數字現在與獨立的鏈分析一致。
+
+實作與 review 後確立的四個設計細節：
+
+* **只有身分延續（1→1）保留 `zone_uid`**；SPLIT / MERGE / RESHAPE 的所有 child 都取得新
+  `zone_uid`，parent 列入 `terminated_previous` 等階段 B 寫成終態。
+  **延續不寫血緣邊**——那會是 `parent == child` 的自環，讓沿 parent 遞迴回溯祖先的查詢
+  無法終止（Postgres 的 `WITH RECURSIVE` 沒有 cycle 偵測會直接失敗）。
+* **只寫實際匹配上的邊，不做笛卡爾積。** 元件連通不代表全交叉——鏈狀元件
+  （P0–C0、P1–C0、P1–C1）很常見，補成 4 條邊會憑空生出 `is_same_zone` 明確否決過的
+  P0–C1。實測 live 資料裡就有一條這樣的假邊（修正前 162 邊 vs 實際 161 組配對）。
+* **翻轉判定比對的是「當前這一世的 role」而非「上次觀測到的 role」**，
+  所以 `RESISTANCE → AT_ZONE → SUPPORT` 這種穿過 `AT_ZONE` 的翻轉抓得到。
+* **`incarnation_role` 的前進規則由模組回傳，不讓呼叫端自己維護**
+  （`MatchResult.incarnation_roles`）。漏掉「翻轉後要前進」的後果是靜默的：
+  `RESISTANCE → SUPPORT → RESISTANCE` 只會報出第一次翻轉——而那正是本筆要消滅的斷鏈，
+  卻會發生在模組外面、沒有測試抓得到。
+
+**「時間距離」這個判準維度刻意留到階段 B。** 上面列的四個維度裡只實作了三個
+（價格位移、寬度變化、`method`）——時間距離需要 `PreviousZone` 帶時間戳，
+而時間戳要有可信的來源就得先有持久化。
+
+> **這是階段 B 的呼叫端必須顧的風險**：`unmatched_previous` 的身分若被無限期留著等下次，
+> ATR 某天碰巧重算出相近的區間時，會把一個消失數月的 zone 復活——正是這個維度要防的誤配。
+> 階段 B 接上持久化時要一併補齊。
+
+**`ZoneScore.zone_uid` 這次沒有接上，這是刻意的範圍界定**：matcher 需要「上一次的
+zone 清單」當輸入，而目前 Python 端唯一的跨次狀態通道是 Go 傳進來的
+`previous_event_states`——沒有 `previous_zones`。要餵得動它就得先有持久化與 contract
+變更，那是階段 B／C 的工作。**階段 A 交付的是引擎本身，不是接線。**
+
+#### 階段 B：`zone_instances` + `zone_transitions`
+
+**分三層：身分 / 一世（role incarnation）/ 轉換。**（2026-08-18 定案）
+
+`INVALIDATED` 是**該 role incarnation 的終態，不是 Zone Identity 的終態**。
+同一個價位失效後又重新有效，是同一個身分的**下一世**，不是新的身分——
+這樣「這個價位長期是不是關鍵」與「這一世活了多久」兩個問題都答得出來，
+而我原本提的「失效即換新 uid」只保得住後者。
+
+```sql
+-- zone_instances：身分。長壽，跨越失效與角色翻轉
+zone_uid              varchar   PRIMARY KEY
+symbol                varchar
+timeframe             varchar
+method                varchar
+state                 varchar   -- ACTIVE（身分還在）/ SPLIT / MERGED / RESHAPED（身分終態）
+price_low             numeric   -- 最近一次觀測值，非身分
+price_high            numeric
+first_seen_at         timestamptz
+last_seen_at          timestamptz
+ended_at              timestamptz NULL   -- 只有身分終態才有
+
+-- zone_role_incarnations：一世。角色翻轉或失效後重生都會開新的一世
+incarnation_uid       varchar   PRIMARY KEY
+zone_uid              varchar   REFERENCES zone_instances
+seq                   int       -- 這是該身分的第幾世
+role                  varchar   -- SUPPORT / RESISTANCE（**不含 AT_ZONE**，見下）
+state                 varchar   -- ACTIVE / TESTING / INVALIDATED（一世的終態）
+started_at            timestamptz
+ended_at              timestamptz NULL
+end_reason            varchar   NULL   -- INVALIDATED / ROLE_FLIPPED / IDENTITY_ENDED
+
+-- zone_transitions：狀態與角色轉換的 append-only 紀錄
+id                bigserial PRIMARY KEY
+zone_uid          varchar   REFERENCES zone_instances
+analysis_id       bigint    -- 觸發這次轉換的分析
+transition_kind   varchar   -- STATE_CHANGE / ROLE_RESOLVED / ROLE_UNRESOLVED / ROLE_FLIPPED
+from_state        varchar   NULL   -- NULL = 首次建立
+to_state          varchar   NULL   -- 純 role 轉換時為 NULL
+from_role         varchar   NULL
+to_role           varchar   NULL
+reason_codes      jsonb
+occurred_at       timestamptz
+```
+
+**注意 `zone_instances` 沒有 `matched_from` 欄位**——血緣走 `zone_relations`（見階段 A）。
+`state` 的終態除了 `INVALIDATED` / `ROLE_FLIPPED`，還要涵蓋分裂／合併／重整造成的終止
+（`SPLIT` / `MERGED` / `RESHAPED`），否則 parent 終止時沒有狀態可寫。
+
+兩層狀態機，**合法轉換分開定義**：
+
+**一世（`zone_role_incarnations.state`）**
+
+* `ACTIVE ↔ TESTING`：可來回（測試失敗回到 ACTIVE 是常態）。
+* `INVALIDATED`：**該世的終態**。同一 `zone_uid` 之後可以開下一世（`seq + 1`），
+  身分不變。
+* 一世結束的三個原因寫在 `end_reason`：`INVALIDATED`（被跌破/突破）、
+  `ROLE_FLIPPED`（角色翻轉，緊接著開新的一世）、`IDENTITY_ENDED`（身分本身終止）。
+
+**身分（`zone_instances.state`）**
+
+* `ACTIVE`：身分還在，不管目前這一世是不是 `INVALIDATED`。
+* `SPLIT` / `MERGED` / `RESHAPED`：**身分終態**，由 `zone_relations` 補上血緣。
+  身分終止時，未結束的那一世以 `end_reason='IDENTITY_ENDED'` 收掉。
+
+**`ROLE_FLIPPED` 不是狀態，是 transition**：它結束當前這一世、開啟下一世，
+持久化的結果是 `zone_role_incarnations` 多一列而不是某個欄位被改成 `ROLE_FLIPPED`。
+
+##### role 變化要分成三種 transition，不能混為一談
+
+`zone_transitions` 的 `transition_kind` 要能分辨 role 變化的三種語意。這不是分類癖——
+實測（定案判準下 161 個匹配配對）顯示三者的量級差兩個數量級：
+
+| `transition_kind` | 語意 | 實測筆數 |
+|---|---|---|
+| （role 不變） | SUPPORT 59 / AT_ZONE 43 / RESISTANCE 42 | 144 |
+| `ROLE_UNRESOLVED` | 有向 → `AT_ZONE`：價格進入 zone，方向暫時無法解析 | 8 |
+| `ROLE_RESOLVED` | `AT_ZONE` → 有向：方向被解析出來 | 7 |
+| **`ROLE_FLIPPED`** | **`SUPPORT` ↔ `RESISTANCE`：真正的角色翻轉** | **2** |
+
+**`AT_ZONE` 的進出不是翻轉**，它是「方向還沒解析」的狀態進出。把三者混在一起會讓
+真正的翻轉被雜訊淹沒——混合口徑下是 17 筆，分開後真翻轉只有 2 筆。
+
+實測到的兩筆真翻轉都是教科書形狀，**價格區間完全沒動**：
+
+```
+0050 recent_pivot 07-16→07-21  [104.73,105.37] → [104.73,105.37]  SUPPORT → RESISTANCE
+0050 recent_pivot 08-04→08-05  [102.54,103.16] → [102.54,103.16]  RESISTANCE → SUPPORT
+```
+
+這同時再次證明**身分不能含 role**：這兩個 zone 的邊界一模一樣，現行 `zone_key`
+卻會把它們當成兩個不同的 zone。
+
+> 給 T-049 的提示：下游（Bias / Final Entry）該關心的是 `ROLE_FLIPPED`，
+> 而 `AT_ZONE` 的來回churn 多半只是價格在 zone 內外進出。兩者若不分開，
+> 下游就得自己重新推導——那正是本筆要消滅的模式。
+
+##### `AT_ZONE` 不結束一世，而且翻轉偵測必須跨越它
+
+沿匹配鏈追 role 序列（156 條鏈、56 條長度 > 1、最長 16 次分析），
+`X → AT_ZONE → Y` 的完整三段只有 **3 筆**：
+
+| 模式 | 筆數 | 實例 |
+|---|---|---|
+| 回到原角色 | 2 | `RESISTANCE → AT_ZONE → RESISTANCE` |
+| **換角色** | **1** | `RESISTANCE → AT_ZONE → SUPPORT`（recent_pivot） |
+
+兩個結論：
+
+**一、`AT_ZONE` 不能結束一世。** 它是「方向暫時無法解析」，不是一個角色。
+若讓它結束一世，上表那 2 筆連續的壓力會被切成兩世；而且資料裡有一條**連續 16 次分析
+都是 `AT_ZONE`** 的鏈，那會產生一個 `role='AT_ZONE'` 的一世，語意上沒有意義。
+所以 `zone_role_incarnations.role` 只收 `SUPPORT` / `RESISTANCE`，
+`AT_ZONE` 期間沿用上一個已解析的角色，只在 `zone_transitions` 留下
+`ROLE_UNRESOLVED` / `ROLE_RESOLVED` 兩筆記錄。
+
+**二、翻轉偵測必須跨越 `AT_ZONE`。** 上面那筆 `RESISTANCE → AT_ZONE → SUPPORT`
+是一次真實翻轉，但**兩個有向角色並不相鄰**——只比對相鄰兩次分析會漏掉它。
+判定規則是「**新解析出的方向 ≠ 當前一世的 role**」，而不是「相鄰兩次的 role 不同」。
+先前記的「真翻轉 2 筆」是用相鄰口徑算的，加上這一筆實際是 **3 筆**。
+
+> **樣本量警告**：這三筆是 live 全部的資料（4 檔 / 20 次分析）。
+> 上面兩個結論的**邏輯**不依賴筆數（不該讓暫時的模糊切斷一個連續的生命），
+> 但「AT_ZONE 多半會回到原角色」這個**經驗傾向**只有 2:1，不足以當作規則的依據。
+> 補分析排程（見 T-049 前置）到位後應重新驗證。
+
+#### 階段 C：`event_instances` + `event_transitions`
+
+既有的 `market_event_states`（86 列）與 `market_event_detections`（26 列）**不刪**，
+新表並存，理由見「相容策略」。
+
+```sql
+event_instances:
+  event_uid, zone_uid (FK), symbol, timeframe,
+  event_family, root_event_type, latest_event_type,
+  state, active, direction, resolved_by, first_seen_at, last_seen_at
+
+event_transitions:
+  id, event_uid (FK), analysis_id, from_state, to_state,
+  trigger_event_type, reason_codes, occurred_at
+```
+
+與 `market_event_states` 的差別只有一個但很關鍵：**`zone_uid` 取代 `zone_key`**。
+其餘欄位刻意對齊，讓兩者可以並行寫入、逐欄比對。
+
+#### 階段 D：Lifecycle Engine 支援 4 個事件
+
+要支援 `SUPPORT_BREAKDOWN` / `SUPPORT_RECLAIM` / `SUPPORT_RETEST` / `RESISTANCE_BREAKOUT`。
+**盤點後發現這四個的現況差很多，不是同一種工作：**
+
+| 事件 | 現況 |
+|---|---|
+| `SUPPORT_BREAKDOWN` | ✅ 已是 event family（`HIGH_VOLUME_BREAKDOWN`） |
+| `SUPPORT_RECLAIM` | ✅ 已是 event family（`INTRADAY_RECLAIM`） |
+| `SUPPORT_RETEST` | ❌ **不存在**。只在 `scenario_engine._zone_state` 當**場景字串**，不是事件 |
+| `RESISTANCE_BREAKOUT` | ❌ **不存在**。只在 `evaluation.py` 當 replay 的兩根 K 結果標籤 |
+
+所以後兩個**是新增偵測邏輯**，不是把既有東西存下來。它們要各自定義：觸發條件、
+`EVENT_TYPE_META`（family / direction / default_state / resolves）、
+`EVENT_FAMILY_LIFECYCLE_RULES`（gating_states / expires_after_bars）、以及 `EVENT_ORDER`。
+
+**`RESISTANCE_BREAKOUT` 另外有一個結構性問題**：現行 `EVENT_FAMILY_LIFECYCLE_RULES`
+全部是 `SUPPORT_*` 與 `VOLUME_CONTEXT`，沒有任何壓力側的 family。加它進來會是第一個
+壓力側事件，`resolves` 的語意（壓力突破是否 resolve 支撐事件）要先想清楚。
+
+#### 受影響的檔案與資料流
+
+```
+zone_builder.py ──► ZoneMatcher（新）──► ZoneScore.zone_uid
+                                            │
+scoring.py / pipeline.py ───────────────────┤
+                                            ▼
+event_engine.py（zone_key → zone_uid）  lifecycle_engine.py（＋2 個新事件）
+                                            │
+                                            ▼
+              Go: analysis/client.go contract ＋ store repo ＋ migration 067
+```
+
+* Python：`zone_builder.py`、`types.py`、`event_engine.py`、`lifecycle_engine.py`、
+  `scoring.py`、`pipeline.py`、`serialization.py`、新增 `zone_matcher.py`
+* Go：`internal/analysis/client.go`（contract）、`internal/store/`（新 repo）、
+  `internal/database/migrations/{postgres,sqlite,mysql}/067_*`（**三份都要**）
+* 前端：本筆不動
+
+#### 風險與回滾／相容策略
+
+| 風險 | 對策 |
+|---|---|
+| ZoneMatcher 誤配把兩個真實 zone 併成一個 | 門檻先用 live 資料掃描決定；`zone_transitions` 留痕讓誤配看得出來 |
+| 新舊兩套事件狀態不一致 | **並行寫入一段時間**，新表不餵給任何決策；用 SQL 逐日比對兩邊的 active 集合 |
+| mysql migration 從未部署（I-054） | 三份 migration 都寫，但只有 postgres/sqlite 有執行證明，照 I-054 的既有處置 |
+| 回滾 | 三個階段都是**純新增**（新表、新欄位、新模組），既有路徑不改。`git revert` ＋ `-- +goose Down` 即可；已寫入的新表留著無害，因為沒有任何決策讀它 |
+
+**相容策略的核心：本筆全程「只寫不讀」。** 新表寫入、舊路徑照跑、決策完全不變。
+這讓階段 A～D 可以逐個交付而不需要一次性切換，也讓 T-049 有真實資料可以比對。
+
+#### 測試與驗證策略
+
+* ZoneMatcher：純函數，用 live 抓下來的真實 zone 形狀當 fixture（比照
+  `selection_report.py` 的已知答案測試）。**必測 0050 那組 IoU > 0.9 的分裂案例**。
+* 狀態機：合法/非法轉換各一組；`ROLE_FLIPPED` 後身分不變。
+* 事件：4 個事件各自的觸發與過期；`RESISTANCE_BREAKOUT` 的 `resolves` 語意。
+* **並行比對**：新舊兩套同時寫入後，用 SQL 比對每日的 active 事件集合，
+  差異只能來自「分裂被正確合併」，不能有其他來源。
+* 決策不變的證明：`stock_sr_zone_analyses` 的既有欄位在本筆前後必須逐欄相同。
+
+#### 完成後歸檔
+
+現況規格寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)（Zone 身分與 ZoneMatcher、
+狀態機、四個事件的定義），schema 寫進 [`database-schema.md`](./database-schema.md)，
+contract 變更寫進 [`api-reference.md`](./api-reference.md)。
+
+---
+
+### T-049：Market State 與所有下游改讀同一套 state
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃（**前置未完成**） |
+| 優先度 | 中 |
+| 分類 | Python / SR Zone / 決策邏輯 |
+| 建立日期 | 2026-08-18 |
+| 來源 | 同 T-048，階段 5～6 |
+
+**範圍**：Market State 改讀 Lifecycle 而不再自己重判 Event；接著 Bias /
+Daily Confirmation / Reclaim / Event Sequence / Final Entry 全部改讀同一套 state。
+
+**依使用者確認，本筆先只列方向與驗證門檻，細節等 T-048 落地、看過真實資料形狀再寫。**
+
+#### 兩個前置條件，缺一不可
+
+1. **T-048 完成**，且新舊兩套狀態已並行比對過一段時間。
+2. **補分析排程**——「定期對 watchlist 產生 SR zone 分析」。
+   這是 `issue.md` **I-074** 的關閉條件，也是本筆唯一可行的驗證來源：
+   目前 `stock_sr_zone_analyses` 只有 **4 檔 / 20 次分析**（2026-08-18 再次確認未增加），
+   而本筆會同時改動 Bias、進場、事件序列——**比 T-044 那次影響面大一個量級**，
+   不能再用「428 支測試全綠」當證據交付。
+
+   這個排程目前**沒有任何 todo 在追**，只散見於 T-045 的討論段落。它本身有成本
+   （每檔都要跑一次 Python scoring，記憶體限制見 `sr-zone-scoring.md`「規模上限」），
+   要獨立評估。
+
+#### 驗證門檻（現在就定，避免事後放寬）
+
+`MODE=replay scripts/run-evaluation.sh` 對真實資料比對 `final_entry_state` /
+`lifecycle_phase` / `market_bias` 的分佈變化，且**母體要足以做分佈比較**。
+在達到這個門檻之前，本筆不應開始實作階段 6。
+
+**這一條是從 T-044 的教訓來的**：那次的行為改變至今只有單元測試層級的證據
+（`issue.md` I-074），因為驗證母體始終沒有補上。同樣的缺口不應該在影響面更大的
+這一筆再發生一次。

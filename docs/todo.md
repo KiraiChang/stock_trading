@@ -1489,8 +1489,9 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
 
 #### 完成後歸檔
 
-- 評估標的池與 watchlist 的分工、為何不合併，補到
-  [`architecture.md`](./architecture.md) 或 [`database-schema.md`](./database-schema.md)。
+- ✅ **已歸檔（2026-08-18）**：評估標的池與 watchlist 的分工、為何不合併 →
+  [`architecture.md`](./architecture.md)「兩個標的清單」。含六個流程的成本表、
+  現況職能對照、哪些研究該用哪一份，以及「池不加籌碼」的理由。
 - ATR% 實際分佈與 bucket 門檻的最終決定，補到
   [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的 zone builder 章節。
 - FinMind 官方 rate limit（600 requests/小時）已於 2026-08-06 更正到

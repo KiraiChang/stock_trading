@@ -160,6 +160,86 @@ window），不是另外呼叫 API，因為 `/indicators/:symbol` 只回傳最�
 三者都在「歷史資料回補」頁面有對應 UI，也可以直接呼叫 API（見
 api-reference.md）。
 
+## 兩個標的清單：`watchlists` 與 `evaluation_universe`
+
+系統有**兩份彼此獨立的標的清單**，職能完全不同。搞混會導致嚴重的成本誤判，
+所以先講為什麼不合併。
+
+### 為什麼不能合併
+
+`watchlists` 驅動**六個**流程，每加一檔就同時乘上六份成本：
+
+| 流程 | 觸發頻率 | 每檔成本 |
+|---|---|---|
+| `runIntradayJob` | 盤中**每 5 分鐘** | 1 request |
+| `runPreMarket` | 每日 08:50 | `BackfillHistory(5 天)` |
+| `RunDailyClose` | 每日 15:00 | 1 request ＋ signal 評估 |
+| `runChipDailySync` | 每日 21:00 | **2 requests**（法人＋融資券） |
+| `runSRZoneVerification` | 每日盤後 | SR zone 驗證計算 |
+| SR evaluation 排程 | `symbols: []` 時 | replay 母體 |
+
+盤中那一列是決定性的：FinMind 節流是 5 req/min，把 135 檔放進 watchlist
+會讓**光是一輪盤中掃描就要 27 分鐘**，而它應該每 5 分鐘跑完一次。
+這不是「比較慢」，是**根本不可行**。
+
+所以研究用的標的池必須與 watchlist 分離。
+
+### 現況職能
+
+| | `watchlists`（11 檔） | `evaluation_universe`（135 檔） |
+|---|---|---|
+| 盤中分 K | ✅ 每 5 分鐘 | ❌ |
+| 盤前補缺口 08:50 | ✅ | ❌ |
+| 收盤日 K ＋ signal 15:00 | ✅ | ❌ |
+| **日 K 維護 16:00** | ❌ | ✅ **唯一職能** |
+| 籌碼同步 21:00 | ✅ | ❌ |
+| SR zone 驗證 / production 分析 | ✅ | ❌ |
+| 排程版 SR evaluation 的母體 | ✅ | ❌ |
+
+**`evaluation_universe` 目前只做一件事：讓 135 檔的日 K 保持新鮮。**
+它不做任何分析，也**不參與任何交易決策或狀態推導**。
+
+在它上線前，每次跑 evaluation 都得先手動回補一次對齊尾端——實測 2026-08-17
+全庫只有 9 檔（皆為 watchlist 成員）有當日資料，池內其餘標的停在三天前。
+尾端不齊會讓 evaluation 的「最後 N 根」視窗錯開，同一份報告隔幾天重跑得到不同結果，
+且分不清是策略變了還是資料窗變了。池把這件事自動化了。
+
+### 研究流程目前是半自動的
+
+`scripts/run-evaluation.sh` 的標的來自 **CLI 參數** `--symbols`，不是從
+`evaluation_universe` 讀的；排程版的 `sr_evaluation` job 用的是
+`watchlist.Symbols()`。所以「從池撈清單 → 傳給 evaluation」這一步是人工的。
+
+**池是資料保鮮機制，不是研究流程的入口。**
+
+### 哪些研究該用哪一份
+
+這條界線由一個事實決定：**SR scoring 的模型特徵完全不使用籌碼**
+（`features.py` 沒有任何 chip 相關欄位）。籌碼只在 decision engine 以解讀層進入，
+產生 `chip_interpretation` 與 reasons 文字，不影響 zone 建立與模型預測。
+
+| 研究類型 | 用哪份清單 | 理由 |
+|---|---|---|
+| Zone 建立與合併參數（T-003 sweep） | **池** | 這一層不碰籌碼，池的 135 檔正是要解決樣本不足 |
+| 觸價統計、hold/break calibration、模型 AUC | **池** | 同上 |
+| `volatility_profiles` 與 bucket 分層 | **池** | 同上 |
+| **decision replay 的 RR / entry-state 分佈** | **watchlist** | 池沒有籌碼，replay 會得到全體 `chip_missing=true` 的偏斜分佈，**與 production 不可比** |
+
+最後一列是容易踩到的：池的規格寫著支撐「evaluation、sweep 與 decision replay」，
+但只有前兩者在池上是有效的。這也解釋了 T-003 的順序——先在池上跑 zone 層 sweep，
+差異明確後才選少數候選回到 watchlist 跑 decision replay。
+
+### 池要不要加籌碼
+
+**目前不加。** 代價是 135 檔 × 2 requests = 270 requests ÷ 5 req/min
+= **每日 54 分鐘**，比日 K 維護（27 分鐘）多一倍；收益只有 decision engine 的一個解讀層，
+不改變 zone 品質也不改變模型輸出。要做 decision replay 的分佈研究時，
+在 watchlist 上做即可。
+
+選池的產生與維護規格見
+[`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)，
+表結構見 [`database-schema.md`](./database-schema.md) 的 `evaluation_universe`。
+
 ---
 
 ## Python 服務

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import itertools
+from datetime import date
 
 import pytest
 
@@ -20,6 +21,7 @@ from backtest.modular.sr_scoring.zone_matcher import (
     ROLE_UNRESOLVED,
     CandidateZone,
     PreviousZone,
+    TradingCalendar,
     is_same_zone,
     match_zones,
 )
@@ -32,8 +34,10 @@ def uid_factory():
     return lambda: f"Z{next(counter):03d}"
 
 
-def prev(uid, low, high, role, method="atr", incarnation_role=None):
-    return PreviousZone(uid, low, high, method, role, incarnation_role)
+def prev(uid, low, high, role, method="atr", incarnation_role=None, last_seen_at=None,
+         observed_absences=0):
+    return PreviousZone(uid, low, high, method, role, incarnation_role, last_seen_at,
+                        observed_absences)
 
 
 def cur(low, high, role, method="atr"):
@@ -384,6 +388,102 @@ def test_degenerate_zero_width_zone_does_not_divide_by_zero():
     assert not is_same_zone(prev("Z", 100.0, 100.0, "SUPPORT"), cur(100.1, 100.1, "SUPPORT"))
 
 
+# 台股 2026-08 的真實交易日（週末不交易）。matcher 不自己判斷假日——
+# 專案既有做法是從 candles 的 distinct 日期推得，這裡沿用同一個事實來源。
+AUG = TradingCalendar(tuple(
+    date(2026, 8, d) for d in
+    (3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 31)
+))
+
+
+def test_trading_calendar_skips_weekends():
+    """週五 → 週一是 1 個交易日，不是 3 天。用日曆天算會讓每個週末都虛胖 2 天。"""
+    assert AUG.sessions_between(date(2026, 8, 14), date(2026, 8, 17)) == 1
+    assert (date(2026, 8, 17) - date(2026, 8, 14)).days == 3
+
+
+def test_trading_calendar_ignores_non_trading_endpoints():
+    """分析可能落在盤後或假日，端點本身不必是交易日。"""
+    assert AUG.sessions_between(date(2026, 8, 15), date(2026, 8, 18)) == 2  # 17、18
+    assert AUG.sessions_between(date(2026, 8, 18), date(2026, 8, 18)) == 0
+
+
+def test_absence_beyond_trading_day_limit_loses_eligibility(uid_factory):
+    """缺席太久的身分**根本不進候選集合**，不是「進去但配不上」。
+
+    這是持久化之後才出現的風險：previous 從「上一次分析的 zone」變成
+    「所有還活著的身分」，沒有閘門的話一個消失數月的 zone 會被 ATR 碰巧算出的
+    相近區間接回來。
+    """
+    old = prev("Z-OLD", 104.73, 105.37, "SUPPORT", last_seen_at=date(2026, 8, 3))
+
+    result = match_zones([old], [cur(104.73, 105.37, "SUPPORT")], uid_factory,
+                         as_of=date(2026, 8, 31), calendar=AUG,
+                         max_absence_trading_days=5)
+
+    assert result.zone_uids == ["Z001"], "失格的身分不該延續"
+    assert result.expired_previous == ["Z-OLD"]
+    # 失格與「這次沒配到」語意不同，不可混在 unmatched_previous
+    assert result.unmatched_previous == []
+
+
+def test_absence_within_trading_day_limit_still_continues(uid_factory):
+    old = prev("Z-OLD", 104.73, 105.37, "SUPPORT", last_seen_at=date(2026, 8, 14))
+
+    result = match_zones([old], [cur(104.73, 105.37, "SUPPORT")], uid_factory,
+                         as_of=date(2026, 8, 18), calendar=AUG,
+                         max_absence_trading_days=5)
+
+    assert result.zone_uids == ["Z-OLD"]
+    assert result.expired_previous == []
+
+
+def test_third_observed_absence_loses_eligibility(uid_factory):
+    """`MAX_OBSERVED_ABSENCES = 3` 是「小於才有資格」：缺席 2 次還在，第 3 次收攤。
+
+    這一軸與交易日無關——它量的是「我們看了幾次都沒看到」，
+    而交易日量的是 wall-clock 陳舊度。單靠時間軸分不出「zone 消失了」與
+    「我們根本沒看」（實測 2330 全期只有 4 次分析、橫跨 5 週）。
+    """
+    still_ok = prev("Z-A", 104.73, 105.37, "SUPPORT", observed_absences=2)
+    expired = prev("Z-B", 200.00, 201.00, "SUPPORT", observed_absences=3)
+
+    result = match_zones([still_ok, expired],
+                         [cur(104.73, 105.37, "SUPPORT"), cur(200.00, 201.00, "SUPPORT")],
+                         uid_factory)
+
+    assert result.zone_uids[0] == "Z-A"
+    assert result.zone_uids[1] == "Z001", "缺席 3 次的身分不該被接回來"
+    assert result.expired_previous == ["Z-B"]
+
+
+def test_observed_absences_are_advanced_by_the_module(uid_factory):
+    """配到歸零、沒配到 +1——**由模組算**，不讓呼叫端自己加減。
+
+    比照 incarnation_roles 的教訓：這種 bookkeeping 算錯是靜默的，
+    而且錯誤發生在模組外面、沒有測試抓得到。
+    """
+    matched = prev("Z-HIT", 104.73, 105.37, "SUPPORT", observed_absences=1)
+    missed = prev("Z-MISS", 300.00, 301.00, "SUPPORT", observed_absences=1)
+
+    result = match_zones([matched, missed], [cur(104.73, 105.37, "SUPPORT")], uid_factory)
+
+    assert result.next_observed_absences == {"Z-HIT": 0, "Z-MISS": 2}
+
+
+def test_eligibility_gate_is_skipped_without_persistence(uid_factory):
+    """還沒接上持久化的呼叫端沒有 calendar／last_seen_at，行為要與階段 A 相同。"""
+    result = match_zones(
+        [prev("Z-OLD", 104.73, 105.37, "SUPPORT")],
+        [cur(104.73, 105.37, "SUPPORT")],
+        uid_factory,
+        as_of=date(2026, 8, 18),   # 有 as_of 但沒有 calendar
+    )
+
+    assert result.zone_uids == ["Z-OLD"]
+    assert result.expired_previous == []
+
+
 def test_empty_previous_makes_everything_a_birth(uid_factory):
     result = match_zones([], [cur(100.0, 110.0, "SUPPORT")], uid_factory)
 
@@ -398,3 +498,60 @@ def test_empty_current_reports_all_previous_as_unmatched(uid_factory):
     assert result.zone_uids == []
     assert result.relations == []
     assert result.unmatched_previous == ["Z-P"]
+
+
+# ── review 修正的回歸測試 ──
+
+
+def test_calendar_rejects_descending_input():
+    """`db.fetch_market_trading_days` 是 `ORDER BY d DESC` 的**字串**清單。
+
+    照文件直接接上去、只轉型別卻忘了 reverse 的話，`sessions_between` 會回 0 或負數，
+    時間軸閘門**被靜默關掉**——正是這一批要修的問題。所以建構時就要擋。
+    """
+    with pytest.raises(ValueError):
+        TradingCalendar((date(2026, 8, 18), date(2026, 8, 17)))
+
+
+def test_calendar_rejects_strings():
+    with pytest.raises(TypeError):
+        TradingCalendar(("2026-08-17", "2026-08-18"))
+
+
+def test_calendar_from_iterable_accepts_the_real_source_shape():
+    """`fetch_market_trading_days()` 的輸出（降冪字串）可以直接丟進來。"""
+    cal = TradingCalendar.from_iterable(["2026-08-18", "2026-08-17", "2026-08-14"])
+
+    assert cal.days == (date(2026, 8, 14), date(2026, 8, 17), date(2026, 8, 18))
+    assert cal.sessions_between(date(2026, 8, 14), date(2026, 8, 18)) == 2
+
+
+def test_expired_identities_also_advance_their_absence_count(uid_factory):
+    """失格的身分也要 +1，這是與 repo 端的握手。
+
+    `ListLive` 用 `observed_absences <= 上限` 才撈得到剛達上限的身分（否則收攤流程
+    是不可達的死碼）。但少了這裡的 +1，它每次分析都會再被撈出來、再失格一次，
+    `EXPIRED_BY_ABSENCE` 會被重複寫入。
+    """
+    expired = prev("Z-EXP", 104.73, 105.37, "SUPPORT", observed_absences=3)
+
+    result = match_zones([expired], [], uid_factory)
+
+    assert result.expired_previous == ["Z-EXP"]
+    assert result.next_observed_absences == {"Z-EXP": 4}
+
+
+def test_terminated_parents_are_not_given_an_absence_count(uid_factory):
+    """SPLIT / MERGE / RESHAPE 的 parent 身分已經結束、child 另取新 uid。
+
+    照欄位說明「只負責存回去」而遍歷整個 dict 去 upsert 的呼叫端，
+    會把剛判定終止的身分又寫回一筆 observed_absences=0 的活躍狀態。
+    """
+    result = match_zones(
+        [prev("Z-P", 100.00, 110.00, "SUPPORT")],
+        [cur(100.10, 109.90, "SUPPORT"), cur(100.20, 110.10, "SUPPORT")],
+        uid_factory,
+    )
+
+    assert result.terminated_previous == ["Z-P"]
+    assert "Z-P" not in result.next_observed_absences

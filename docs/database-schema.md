@@ -767,6 +767,86 @@ T-002 / T-003 研究使用。**不參與任何交易決策或狀態推導。**
 
 ---
 
+## zone_instances / zone_role_incarnations / zone_transitions / zone_relations
+
+Zone 的跨交易日身分與生命週期（T-048 階段 B，migration 067）。**目前只寫不讀**——
+沒有任何決策路徑查詢它們，既有的 `market_event_states` / `market_event_detections`
+繼續並行寫入。
+
+**要解的問題**：舊的 zone 身分是 `event_engine._zone_key()`，也就是
+`role:price_low:price_high`——綁在浮點邊界與角色上。2026-08-18 對 live 的盤點抓到兩個後果：
+
+* **同一個支撐分裂成兩條事件鏈**：0050 從 2026-08-05 起，`SUPPORT:102.4916:103.1084`
+  與 `SUPPORT:102.5414:103.1585` 每天並存，價格區間重疊 99%，各自帶一條 reclaim 鏈。
+  下游重複計數且沒有任何東西會報錯。
+* **角色翻轉必然斷鏈**：實測有 `IoU = 1.000` 的翻轉——邊界一動也沒動，
+  只因為 role 從 RESISTANCE 變 SUPPORT，key 就完全不同。
+
+### 三層結構
+
+| 表 | 語意 | 終態 |
+|---|---|---|
+| `zone_instances` | **身分**。跨越失效與角色翻轉 | `SPLIT` / `MERGED` / `RESHAPED` |
+| `zone_role_incarnations` | **一世**。同一價位失效後又有效＝下一世（`seq + 1`） | `INVALIDATED` / `EXPIRED` |
+| `zone_transitions` | 狀態與角色轉換的 append-only 流水 | — |
+| `zone_relations` | 分裂／合併的血緣邊 | — |
+
+**`INVALIDATED` 是「這一世」的終態，不是身分的終態。** 這樣「這個價位長期是不是關鍵」
+與「這一世活了多久」兩個問題都答得出來。
+
+### 資格閘門：`observed_absences` 與交易日
+
+`zone_instances.observed_absences` 是「連續幾次觀測到它不存在」。它與 `last_seen_at`
+是**兩個獨立的軸**，一起決定某個身分還有沒有資格進入 matcher 的候選集合：
+
+| 軸 | 欄位 | 量什麼 | 在哪裡擋 |
+|---|---|---|---|
+| 次數 | `observed_absences` | 「我們看了幾次都沒看到」 | `ListLive` 的 SQL（`< 3`） |
+| 時間 | `last_seen_at` | wall-clock 陳舊度 | matcher（**用交易日算**） |
+
+**為什麼時間軸不在 SQL 擋**：SQL 裡沒有交易日的概念，硬算會退回日曆天，
+而週五→週一會被算成 3 天。`ListLive` 只用 `last_seen_at` 做寬鬆的下界過濾，
+精確距離由 matcher 用注入的交易日曆算。
+
+**為什麼兩個軸都要**：單一時間軸分不出「zone 消失了」與「我們根本沒看」——
+實測 2330 全期只有 4 次分析、橫跨 5 週，任何兩次之間都隔很久。
+
+**`EXPIRED` 與 `INVALIDATED` 的差別是誰造成的**：`INVALIDATED` 是市場事件
+（被跌破／突破），`EXPIRED` 是長期缺席、我們不再認得它。收攤時同時寫
+`expired_at` 與一筆 `end_reason='EXPIRED_BY_ABSENCE'` 的 transition。
+`expired_at` 與 `ended_at` 分開存是刻意的：`ended_at` 回答「這一世何時結束」，
+`expired_at` 回答「何時被判定為不再認得」，後者是資格閘門的稽核依據。
+
+### 幾個容易寫錯的地方
+
+* **`zone_uid` 是 opaque UUID**，不可把價格或 role 編進去——那正是舊 `_zone_key()`
+  的問題成因。`price_low` / `price_high` 只是最近一次觀測值，**不是身分**。
+* **`zone_role_incarnations.role` 只收 `SUPPORT` / `RESISTANCE`。** `AT_ZONE` 是
+  「方向暫時無法解析」不是角色；live 有一條連續 16 次分析都是 `AT_ZONE` 的鏈，
+  讓它開一世會產生沒有語意的紀錄。`AT_ZONE` 期間沿用這一世原本的角色。
+* **`zone_relations` 沒有 `CONTINUE`。** 身分延續由 `zone_uid` 不變表達；寫成
+  `parent = child` 的自環會讓沿 parent 遞迴回溯祖先的查詢無法終止
+  （`WITH RECURSIVE` 沒有 cycle 偵測會直接失敗）。schema 有 CHECK 擋住。
+* **`RESHAPE`（N→M）不猜血緣**：所有 parent 終止、所有 child 新生，
+  只記錄實際匹配上的邊。誠實記錄一次無法解析的重整，好過編一組看起來合理的父子關係。
+* **`zone_transitions.is_illegal`**：不合法的轉換照樣寫入，只標記不擋。
+  判讀時記得過濾——這是刻意的取捨，目的是先看清楚現實會發生什麼。
+* **`reason_codes` 是 `TEXT DEFAULT '[]'` 而不是 JSON 型別**：mysql 的 JSON 欄位
+  給不起 DEFAULT，會造成三個 engine 不對稱（見下方「欄位命名規範」與 I-054 第 3 項）。
+
+`transition_kind` 分四種，**role 的三種變化必須分開**——混為一談會讓真正的翻轉被雜訊
+淹沒。實測 161 個匹配配對裡，`AT_ZONE` 的進出有 15 筆、真正的 `SUPPORT ↔ RESISTANCE`
+翻轉只有 3 筆：
+
+| `transition_kind` | 語意 |
+|---|---|
+| `STATE_CHANGE` | 一世或身分的狀態變化 |
+| `ROLE_RESOLVED` | `AT_ZONE` → 有向：方向被解析出來 |
+| `ROLE_UNRESOLVED` | 有向 → `AT_ZONE`：價格進入 zone，方向暫時無法解析 |
+| `ROLE_FLIPPED` | `SUPPORT` ↔ `RESISTANCE`：真正的翻轉，結束當前這一世並開下一世 |
+
+---
+
 ## 欄位命名規範：避開 MySQL 保留字
 
 新增 migration 時，**欄位名不可使用 MySQL 保留字**（`trigger`、`signal`、`force`、

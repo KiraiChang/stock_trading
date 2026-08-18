@@ -31,27 +31,58 @@
 0.06 是拐點而不是「越鬆越好」：放寬到 0.10 會多收到 38 組，但乾淨的一對一反而
 從 144 掉到 136——它們被吸進無法解析血緣的 N→M 糾纏裡（N→M 從 3 組暴增到 10 組）。
 
-## 尚未實作的判準維度
+## 資格閘門與幾何比對是兩件事
 
-計畫書列的四個維度裡，**時間距離（超過 N 個交易日沒出現就不再匹配）刻意留到階段 B**：
-它需要 `PreviousZone` 帶時間戳，而時間戳只有在有持久化之後才有意義的來源。
+持久化之後，`previous` 不再是「上一次分析的 zone」而是**所有還活著的身分**，
+所以需要一道閘門擋住「消失很久之後被 ATR 碰巧重算出相近區間而復活」。
 
-**這是呼叫端現在必須自己顧的風險**：`unmatched_previous` 的身分若被無限期留著等下次，
-ATR 某天碰巧重算出相近的區間時，會把一個消失數月的 zone 復活。階段 B 接上持久化時
-要一併補上這個維度。
+**閘門只決定「這個身分還有沒有資格進入 matcher」，不參與幾何比對。**
+`is_same_zone()` 是純幾何的，混進時間條件會讓「形狀像不像」與「還算不算數」
+變成同一個判斷，兩者的失敗方式完全不同。
+
+閘門有**兩個獨立的軸**，缺一不可：
+
+| 軸 | 量什麼 | 與分析頻率的關係 |
+|---|---|---|
+| `MAX_ABSENCE_TRADING_DAYS` | wall-clock 陳舊度 | 無關 |
+| `MAX_OBSERVED_ABSENCES` | 「我們看了幾次都沒看到」 | 相關 |
+
+**為什麼兩個都要**：先前只有時間軸時，實測「缺席後又找回」的間隔一路拉到 22 天，
+但那反映的是**分析頻率**而不是 zone 真的消失——2330 全期只有 4 次分析、橫跨 5 週。
+單一時間軸分不出「zone 消失了」與「我們根本沒看」，加上觀測次數才分得出來。
+
+**距離用交易日算，不是日曆天**：週末與假日不交易，週五→週一是 1 個交易日而不是 3 天。
+交易日曆由呼叫端注入（`TradingCalendar`），沿用專案既有的做法——交易日從 candles 的
+distinct 日期推得（見 `db.fetch_market_trading_days`），不引入外部假日表。
+
+`as_of` 或 `last_seen_at` 缺一時不套用時間軸，讓還沒接上持久化的呼叫端行為不變；
+`observed_absences` 預設 0，所以次數軸對它們也不會誤擋。
 
 完整數據與推導見 `docs/todo.md` T-048 階段 A。
 """
 from __future__ import annotations
 
+import bisect
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Callable, Optional, Sequence
 
-# ── 匹配判準（實測定案，改動前先看 docs/todo.md T-048 的門檻掃描表）──
+# ── 幾何判準（實測定案，改動前先看 docs/todo.md T-048 的門檻掃描表）──
 MAX_CENTER_SHIFT_RATIO = 0.06
 MAX_WIDTH_CHANGE_RATIO = 0.25
+
+# ── 資格閘門。兩個軸都要通過才進得了候選集合 ──
+# 缺席超過這麼多**交易日**就失格。20 個交易日約一個月，與先前的 30 日曆天同一個意圖，
+# 但改用交易日之後不會被連假拉長。**這個值不是實測出來的**，理由見模組 docstring。
+MAX_ABSENCE_TRADING_DAYS = 20
+# 連續幾次「觀測到它不存在」就失格。**小於這個值才有資格**，所以 3 代表缺席第 3 次收攤。
+MAX_OBSERVED_ABSENCES = 3
+
+# 一世因為長期缺席而收攤時，寫進 zone_transitions 的原因碼。
+# 與 INVALIDATED（被跌破/突破）不同：那是市場事件，這是「我們不再認得它」。
+EXPIRED_BY_ABSENCE = "EXPIRED_BY_ABSENCE"
 
 # ── 血緣關聯 ──
 RELATION_CONTINUE = "CONTINUE"   # 1→1，身分延續（**不寫進 relations**，見 MatchResult）
@@ -67,6 +98,59 @@ ROLE_FLIPPED = "ROLE_FLIPPED"          # SUPPORT ↔ RESISTANCE，真正的翻�
 ROLE_AT_ZONE = "AT_ZONE"
 
 DIRECTIONAL_ROLES = frozenset({"SUPPORT", "RESISTANCE"})
+
+
+@dataclass(frozen=True)
+class TradingCalendar:
+    """已知的交易日，升冪。
+
+    **不自己判斷週末與假日**：台股的休市日不是「週末 ＋ 固定國定假日」那麼簡單
+    （颱風假、補行交易日都會變動）。專案既有的做法是從 candles 的 distinct 日期推得
+    真實交易日（`db.fetch_market_trading_days`），這裡沿用同一個事實來源。
+    """
+
+    days: tuple[date, ...]
+
+    def __post_init__(self) -> None:
+        """**必須升冪且是 date**——`sessions_between` 用 bisect 取序數差。
+
+        這道檢查不是潔癖：本 class 指名的事實來源 `db.fetch_market_trading_days`
+        回傳的是 **`ORDER BY d DESC` 的字串清單**。照著文件直接接上去有兩種壞法，
+        而且都不會有人發現：
+          * 丟字串進來 → bisect 比較 str 與 date 會 raise（這種還算好，至少會炸）
+          * 轉成 date 但忘了 reverse → `hi - lo` 恆為 0 或負數，
+            時間軸閘門**被靜默關掉**，正好是這一批要修的「消失數月的 zone 被接回來」。
+        用 `from_iterable()` 建構就不必自己顧這件事。
+        """
+        for d in self.days:
+            if not isinstance(d, date):
+                raise TypeError(f"TradingCalendar.days 只收 date，收到 {type(d).__name__}")
+        if list(self.days) != sorted(self.days):
+            raise ValueError("TradingCalendar.days 必須升冪；fetch_market_trading_days 是降冪的")
+
+    @classmethod
+    def from_iterable(cls, days) -> "TradingCalendar":
+        """從任意順序的 `date` 或 `YYYY-MM-DD` 字串建構，去重並升冪排序。
+
+        `db.fetch_market_trading_days()` 的輸出可以直接丟進來。
+        """
+        parsed = {
+            d if isinstance(d, date) else date.fromisoformat(str(d))
+            for d in days
+        }
+        return cls(tuple(sorted(parsed)))
+
+    def sessions_between(self, start: date, end: date) -> int:
+        """`start` 之後到 `end`（含）之間有幾個交易日。
+
+        兩個日期本身不必是交易日——分析可能落在盤後任何時間點。
+        用二分搜尋取序數差，所以與曆法無關。
+        """
+        if end <= start:
+            return 0
+        lo = bisect.bisect_right(self.days, start)
+        hi = bisect.bisect_right(self.days, end)
+        return hi - lo
 
 
 @dataclass(frozen=True)
@@ -87,6 +171,12 @@ class PreviousZone:
     method: str
     role: str
     incarnation_role: Optional[str] = None
+    # 這個身分最後一次被觀測到的日期。`None` 代表呼叫端沒有持久化來源，
+    # 此時不套用時間軸的閘門（行為與階段 A 相同）。
+    last_seen_at: Optional[date] = None
+    # 已經連續幾次「觀測到它不存在」。由 MatchResult.next_observed_absences 維護，
+    # 呼叫端只負責存回去、不要自己加減——那種 bookkeeping 錯了是靜默的。
+    observed_absences: int = 0
 
 
 @dataclass(frozen=True)
@@ -139,6 +229,12 @@ class MatchResult:
     # 因為分裂／合併／重整而終止的舊身分。它們**有** child，但身分本身結束了，
     # 所以不會出現在 unmatched_previous；階段 B 要把這些寫成身分終態。
     terminated_previous: list[str] = field(default_factory=list)
+    # 沒通過資格閘門、根本沒進候選集合的身分。**與 unmatched_previous 語意不同**：
+    # unmatched 是「這次沒配到，下次還有機會」，expired 是「不再認得它了」。
+    # 呼叫端要把這些的一世收成 EXPIRED、記 expired_at、寫一筆 EXPIRED_BY_ABSENCE。
+    expired_previous: list[str] = field(default_factory=list)
+    # 下一輪該存回 PreviousZone.observed_absences 的值。配到歸零、沒配到 +1。
+    next_observed_absences: dict[str, int] = field(default_factory=dict)
 
     def relations_by_child(self) -> dict[str, list[ZoneRelation]]:
         out: dict[str, list[ZoneRelation]] = defaultdict(list)
@@ -155,8 +251,37 @@ def _width(zone) -> float:
     return zone.price_high - zone.price_low
 
 
+def is_eligible(
+    prev: PreviousZone,
+    as_of: Optional[date] = None,
+    calendar: Optional[TradingCalendar] = None,
+    max_absence_trading_days: int = MAX_ABSENCE_TRADING_DAYS,
+    max_observed_absences: int = MAX_OBSERVED_ABSENCES,
+) -> bool:
+    """這個既有身分**還有沒有資格進入 matcher 的候選集合**。
+
+    **這裡不做任何形狀比對**——資格與相似度是兩件事，混在一起會讓
+    「形狀像不像」與「還算不算數」變成同一個判斷。
+
+    兩個軸任一超標就失格：
+
+    * 缺席交易日數 > `max_absence_trading_days`
+    * 連續觀測缺席次數 >= `max_observed_absences`（**小於才有資格**）
+
+    缺 `as_of`／`last_seen_at`／`calendar` 任一項時不套用時間軸——
+    還沒接上持久化的呼叫端行為與階段 A 相同。
+    """
+    if prev.observed_absences >= max_observed_absences:
+        return False
+
+    if as_of is None or prev.last_seen_at is None or calendar is None:
+        return True
+
+    return calendar.sessions_between(prev.last_seen_at, as_of) <= max_absence_trading_days
+
+
 def is_same_zone(prev, cur) -> bool:
-    """兩個 zone 是不是同一個。
+    """兩個 zone 的**形狀**是不是同一個。純幾何，不看時間也不看資格。
 
     **不比 role**：角色翻轉要能保持同一身分，那正是這個模組要解的問題之一。
     **比 method**：ATR zone 與 volume profile zone 是不同方法算出來的東西，
@@ -283,8 +408,15 @@ def match_zones(
     previous: Sequence[PreviousZone],
     current: Sequence[CandidateZone],
     uid_factory: Callable[[], str] = lambda: str(uuid.uuid4()),
+    as_of: Optional[date] = None,
+    calendar: Optional[TradingCalendar] = None,
+    max_absence_trading_days: int = MAX_ABSENCE_TRADING_DAYS,
+    max_observed_absences: int = MAX_OBSERVED_ABSENCES,
 ) -> MatchResult:
     """把這次算出來的 zone 對應到既有身分，回傳身分指派與血緣關聯。
+
+    流程是**先過資格閘門、再做幾何比對**：失格的身分根本不進候選集合，
+    列在 `expired_previous` 由呼叫端收攤（見 MatchResult）。
 
     **只有 `CONTINUE` 會延續身分。** SPLIT / MERGE / RESHAPE 的所有 child 都取得
     新的 `zone_uid`，parent 一律終止（列在 `terminated_previous`）——不讓某個 child
@@ -296,15 +428,24 @@ def match_zones(
         zone_uids=[""] * len(current),
         incarnation_roles=[None] * len(current),
     )
+
+    # ── 資格閘門。這一步之後 previous 就只剩「還算數」的身分 ──
+    eligible: list[PreviousZone] = []
+    for prev in previous:
+        if is_eligible(prev, as_of, calendar, max_absence_trading_days, max_observed_absences):
+            eligible.append(prev)
+        else:
+            result.expired_previous.append(prev.zone_uid)
+
     accounted_prev: set[int] = set()
 
-    for p_set, c_set, edges in _connected_components(previous, current):
+    for p_set, c_set, edges in _connected_components(eligible, current):
         relation = _classify(len(p_set), len(c_set))
 
         if relation == RELATION_CONTINUE:
             (i,) = tuple(p_set)
             (j,) = tuple(c_set)
-            prev, cur = previous[i], current[j]
+            prev, cur = eligible[i], current[j]
             accounted_prev.add(i)
             result.zone_uids[j] = prev.zone_uid
             # 身分延續**不寫 relations**：那會是一條 parent == child 的自環邊。
@@ -329,16 +470,40 @@ def match_zones(
             continue
 
         accounted_prev |= p_set
-        result.terminated_previous.extend(previous[i].zone_uid for i in sorted(p_set))
+        result.terminated_previous.extend(eligible[i].zone_uid for i in sorted(p_set))
 
         # **只寫實際匹配上的邊**。元件連通不代表全交叉——鏈狀元件用笛卡爾積補邊，
         # 會產生 is_same_zone 明確否決過的父子關係，那正是「不猜血緣」要避免的事。
         for i, j in sorted(edges):
             result.relations.append(
-                ZoneRelation(previous[i].zone_uid, result.zone_uids[j], relation)
+                ZoneRelation(eligible[i].zone_uid, result.zone_uids[j], relation)
             )
 
     result.unmatched_previous = [
-        previous[i].zone_uid for i in range(len(previous)) if i not in accounted_prev
+        eligible[i].zone_uid for i in range(len(eligible)) if i not in accounted_prev
     ]
+
+    # 下一輪的缺席次數。**由本模組算**——讓呼叫端自己加減的話，算錯是靜默的
+    # （比照 incarnation_roles 的教訓）。三種來源，缺一不可：
+    #
+    #   * 延續的身分 → 歸零
+    #   * 這次沒配到但仍有資格 → +1
+    #   * **失格的身分 → 也要 +1**。少了這一條，`ListLive` 的 `observed_absences <= 上限`
+    #     會讓它每次分析都再被撈出來、再失格一次，於是 EXPIRED_BY_ABSENCE 會被重複寫入。
+    #     +1 之後它就越過上限，從此不再進候選集合——這是與 repo 端的握手。
+    #
+    # **終止的 parent（SPLIT / MERGE / RESHAPE）刻意不列入**：它們的身分已經結束、
+    # child 另取新 uid，呼叫端若照欄位說明遍歷整個 dict 去 upsert，會把剛判定終止的
+    # 身分又寫回一筆 observed_absences=0 的活躍狀態。
+    terminated = set(result.terminated_previous)
+    matched_uids = {eligible[i].zone_uid for i in accounted_prev}
+    for prev in eligible:
+        if prev.zone_uid in terminated:
+            continue
+        result.next_observed_absences[prev.zone_uid] = (
+            0 if prev.zone_uid in matched_uids else prev.observed_absences + 1
+        )
+    for prev in previous:
+        if prev.zone_uid in result.expired_previous:
+            result.next_observed_absences[prev.zone_uid] = prev.observed_absences + 1
     return result

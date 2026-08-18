@@ -2575,6 +2575,69 @@ occurred_at       timestamptz
 **`ROLE_FLIPPED` 不是狀態，是 transition**：它結束當前這一世、開啟下一世，
 持久化的結果是 `zone_role_incarnations` 多一列而不是某個欄位被改成 `ROLE_FLIPPED`。
 
+**不合法的轉換寬鬆記錄、只標記不擋**（2026-08-18 定案）：`zone_transitions.is_illegal`。
+階段 B 沒有任何決策依賴這些資料，這時候應該先搞清楚現實世界真的會發生什麼，
+而不是拿還沒驗證過的規則把證據擋掉。判讀時記得過濾這個旗標。
+
+#### 實作結果（2026-08-18，**已實作，待 review**）
+
+| 產出 | 內容 |
+|---|---|
+| `migrations/{postgres,sqlite,mysql}/067_zone_identity.sql` | 四張表，**三個 engine 都實跑驗證過** |
+| `internal/store/zone_identity_repo.go` | `ZoneIdentityRepo`：`ListLive` ＋ 單一交易的 `Apply` |
+| `internal/store/zone_identity_repo_test.go` | 15 支 sqlite 測試 |
+| `zone_matcher.py` | 補上資格閘門（`MAX_ABSENCE_TRADING_DAYS` ＋ `MAX_OBSERVED_ABSENCES` ＋ `TradingCalendar`），測試 23 → 35 支 |
+
+**驗證**：`scripts/test-postgres-migrations.sh`（up → 分段 down 到 0）、
+`scripts/test-mysql-migrations.sh`、`migrate_sqlite_test.go` 全數通過。
+
+三個實作決定：
+
+* **`reason_codes` 用 `TEXT DEFAULT '[]'` 而不是 `JSONB`／`JSON`**：mysql 的 JSON 欄位
+  給不起 DEFAULT，三個 engine 會不對稱——那正是 `issue.md` I-054 第 3 項踩過的坑
+  （057 的 mysql 版沒有 DEFAULT，省略欄位的 INSERT 只在 mysql 失敗）。比照 migration 028。
+* **`is_illegal` 的索引用複合索引而不是 postgres 的部分索引**：少一個 engine 差異
+  就少一個只在 mysql 上出現的驚喜。
+* **`Apply` 是單一交易**：只寫了 instances 卻沒寫 relations 的話，血緣圖會出現無父的孤兒，
+  而那與「這個 zone 是新生的」在資料上**無法區分**。測試 `...ApplyIsAtomic` 鎖住這件事。
+
+#### 資格閘門：兩個軸，與幾何比對分離
+
+**閘門只決定「這個身分還有沒有資格進入 matcher」，不參與形狀比對。**
+`is_same_zone()` 因此回歸純幾何——混進時間條件會讓「形狀像不像」與「還算不算數」
+變成同一個判斷，而兩者的失敗方式完全不同。
+
+| 軸 | 常數 | 量什麼 | 與分析頻率 |
+|---|---|---|---|
+| 時間 | `MAX_ABSENCE_TRADING_DAYS = 20` | wall-clock 陳舊度 | 無關 |
+| 次數 | `MAX_OBSERVED_ABSENCES = 3` | 「我們看了幾次都沒看到」 | 相關 |
+
+**為什麼兩個都要**：先前只有時間軸時，實測「缺席後又找回」的間隔一路拉到 22 天，
+但那反映的是**分析頻率**而不是 zone 真的消失——2330 全期只有 4 次分析、橫跨 5 週。
+**單一時間軸分不出「zone 消失了」與「我們根本沒看」**，加上次數軸才分得出來。
+這也解掉了先前「N 無法由資料決定」的困境。
+
+`MAX_OBSERVED_ABSENCES` 是**小於才有資格**：缺席 1、2 次還能被接回來，第 3 次收攤。
+
+**距離用交易日算，不是日曆天**：週五→週一是 1 個交易日而不是 3 天。交易日曆由呼叫端
+注入（`TradingCalendar`），沿用專案既有的事實來源——交易日從 candles 的 distinct 日期
+推得（`db.fetch_market_trading_days`），**不引入外部假日表**：台股的休市不是
+「週末 ＋ 固定國定假日」那麼簡單（颱風假、補行交易日都會變動）。
+
+**失格的處理**（`MatchResult.expired_previous`，與 `unmatched_previous` 語意不同——
+後者是「這次沒配到，下次還有機會」）：
+
+* 一世的 `state` → `EXPIRED`、記 `expired_at`
+* 寫一筆 `EXPIRED_BY_ABSENCE` 的 transition
+* 移出候選集合
+
+**`EXPIRED` 與 `INVALIDATED` 的差別是誰造成的**：後者是市場事件（被跌破／突破），
+前者是「我們不再認得它」。兩者都是**一世**的終態，身分本身不終止。
+
+**次數軸在 SQL 擋、時間軸在 matcher 擋**：`ListLive` 的 `observed_absences < ?` 不需要
+交易日曆；精確的交易日距離必須在 matcher 算，因為 **SQL 裡沒有交易日的概念**，
+硬要在那裡算會退回日曆天。
+
 ##### role 變化要分成三種 transition，不能混為一談
 
 `zone_transitions` 的 `transition_kind` 要能分辨 role 變化的三種語意。這不是分類癖——

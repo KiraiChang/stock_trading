@@ -210,10 +210,15 @@ func (c *Client) Analyze(ctx context.Context, symbol, timeframe string, limit in
 // backtest/modular/sr_scoring/scoring.py 開頭的完整說明）──────────────
 
 type ZoneScore struct {
-	PriceLow                float64            `json:"price_low"`
-	PriceHigh               float64            `json:"price_high"`
-	Method                  string             `json:"method"`
-	Role                    string             `json:"role"`
+	PriceLow  float64 `json:"price_low"`
+	PriceHigh float64 `json:"price_high"`
+	Method    string  `json:"method"`
+	Role      string  `json:"role"`
+	// ZoneKey 由 Python 產生（event_engine.zone_identity_key），與事件身上的
+	// zone_key 是**同一個函數的輸出**。Go 靠它把事件掛回 zone 的穩定身分。
+	// 不在 Go 這邊用 %.4f 重建：那會是 _zone_key() 的平行實作，兩份格式化一旦分歧，
+	// 關聯會靜默失敗——事件掛不到 zone，看起來像「這次沒有 zone 事件」。
+	ZoneKey                 string             `json:"zone_key"`
 	Tier                    string             `json:"tier"`
 	TierLabel               string             `json:"tier_label"`
 	SupportScore            float64            `json:"support_score"`
@@ -451,6 +456,7 @@ func (r *ZoneScoreResult) ToStore() (*store.SRZoneAnalysis, []store.SRZone, stor
 			PriceHigh:             z.PriceHigh,
 			Method:                z.Method,
 			Role:                  z.Role,
+			ZoneKey:               z.ZoneKey,
 			Tier:                  z.Tier,
 			TierLabel:             z.TierLabel,
 			SupportScore:          z.SupportScore,

@@ -2460,8 +2460,10 @@ helper，避免舊測試或內部引用一次性中斷。
 
 ## 二十、Zone 身分與 ZoneMatcher
 
-跨交易日追蹤「同一個 zone」的機制。**已實作的是身分層（階段 A／B）；事件層
-（`event_instances`）尚未實作**，事件鏈目前仍走 `market_event_states`。
+跨交易日追蹤「同一個 zone」的機制。身分層（階段 A／B）與事件層（階段 C，
+`event_instances` / `event_transitions` / `zone_key_aliases`）都已實作，
+**兩層目前都只寫不讀**：決策路徑仍然走 `market_event_states`，
+既有欄位逐欄相同是驗收條件。
 
 ### 為什麼需要身分
 
@@ -2558,6 +2560,51 @@ P0–C1。
 4. **`/zone-identity/match` 對格式錯誤的 `as_of` / `trading_days` 回 500 而不是 422。**
    呼叫端只有 Go backend、值都由程式產生，實際上碰不到；之後若開放人工呼叫要補。
 
+### 事件層：鏈的身分與三段關聯決策
+
+`event_instances` 一列是**一條事件鏈**（一個 zone × 一個 family × 一個 `seq`），
+`event_transitions` 記它的狀態轉換。schema 與欄位語意見
+[`database-schema.md`](./database-schema.md)「event_instances / event_transitions /
+zone_key_aliases」。這裡只講判讀時最容易搞錯的那件事：**事件帶的 `zone_key` 對不上
+本次分析的 zone，是常態而不是例外**（2026-08-19 實測 41 筆 ZONE scope 事件有 26 筆對不上），
+成因有二——role 編在 key 裡（`SUPPORT` 變 `AT_ZONE` 就換了 key），以及邊界由 ATR 重算會漂走。
+身分都還 ACTIVE，只是 key 到不了它。
+
+所以關聯是三段的，**優先序不可調換**：
+
+1. **既有鏈優先**：`(last_zone_key, event_family)` 命中活鏈 → 直接沿用
+   `instance.zone_uid`，連 key 都不必解析。上面那兩個成因在這一段就被吃掉了。
+2. **carried 護欄**：沒有活鏈 ＋ `carried_from_previous = true` → **不建立新 occurrence**。
+   carried 代表「重報」不代表「發生」；少了這條，每一條走完生命週期的鏈都會在此後
+   每次分析重生一條新鏈。
+3. **key 解析**：本次分析的 `zone_key → zone_uid` map，miss 再退到 `zone_key_aliases`
+   （每個身分保留最近 8 個用過的 key）。這一段只服務**新**關聯。
+
+`carried_from_previous` 由 Python 兩條路徑都寫進 `state_json`——新偵測在
+`build_event_state_summary` 寫 `false`，carry forward 在 `_normalize_previous_event_state`
+無條件寫 `true`。Go 只讀不推導，**缺鍵是異常**而不是「不是 carried」。
+
+**zone 身分因 `SPLIT` / `MERGE` / `RESHAPE` 終止時，parent 身上的事件不傳給 child**，
+而是以 `end_reason = 'ZONE_IDENTITY_ENDED'` 收攤：那條鏈的前提已經消失，接到 child
+等於宣稱鏈延續了，而 `RESHAPE` 的定義正是「血緣無法解析」。血緣留在 `zone_relations`，
+之後沿 parent 回溯補得回來；反過來先接了就拆不回來。
+
+#### 可觀測性：一筆結構化 log 拆出關聯決策
+
+每次分析輸出一筆 `event identity: zone association*`，欄位包含三段各自的命中數
+（`matched_by_chain` / `matched_by_current` / `matched_by_alias`）與各類異常。
+級別是刻意分的：`unmatched_zone_keys` / `chain_conflicts` / `chain_key_ambiguous` /
+`alias_ambiguous` / `carried_parse_failed` 任一非零升 **Warn**；終態不變式被違反升
+**Error**；其餘走 Debug。
+
+**`carried_noop` 不升級別**：終態被 carry forward 是常態，每一條走完的鏈此後每次分析
+都會貢獻一筆，讓它升 Warn 等於保證 warn 永遠不會歸零、真正的異常被淹掉。
+它仍然出現在欄位裡，判讀方式是逐筆去對 `event_instances`——對應的鏈**應該都已終結**。
+
+這是「鏈靜默凍結」唯一抓得到的東西：那個缺陷的症狀是資料表面上完全正常
+（鏈停在 `CONFIRMED` 不再更新），只有把「事件是怎麼找到身分的」逐段數出來才看得見。
+升級成可查詢的 metric 是 todo T-050。
+
 ### 實測特性
 
 **對 live 311 列真實 zone 重放**（階段 A，2026-08-18）：收斂成 **167 個身分**，
@@ -2596,5 +2643,19 @@ P0–C1。
 而 `AT_ZONE` 的來回 churn 多半只是價格在 zone 內外進出。兩者若不分開，下游就得自己
 重新推導——那正是這套機制要消滅的模式。
 
+**事件層的 as-of 階梯**（階段 C，2026-08-19，0050 同一組七階）：七階全部 201，
+`unmatched_zone_keys` / `invariant_violations` **每一階都是空的**，
+`carried_parse_failed` 為 0；事件鏈收斂到 **10 條**（8 條掛 zone、2 條 SYMBOL scope），
+而三段關聯決策改進之前同樣的資料會產生 14 條且持續增長——差額正是被 carried 護欄
+擋下來的終態重生。`carried_noop` 收斂到 5 筆，逐筆對過都是已終結的鏈。
+
+兩塊**還沒有真實資料覆蓋**，判讀時要知道：
+
+* `matched_by_alias` 七階全部是 0——既有鏈優先那一段就把兩個成因都接住了，
+  alias 是它的備援，目前只有單元測試覆蓋。
+* 這輪 45 個 zone 身分**全部 ACTIVE**，`ZONE_IDENTITY_ENDED` 那條收攤路徑
+  一次都沒被執行過，證據只有 synthetic 的 integration test。要補實測覆蓋得挑一組
+  會實際產生 `SPLIT` / `RESHAPE` 的 symbol 重跑階梯。
+
 要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
-「在 dev stack 上做『as-of 階梯』驗收」。
+「在 dev stack 上做『as-of 階梯』驗收」與其中的「as-of 階梯驗收的六條門檻」。

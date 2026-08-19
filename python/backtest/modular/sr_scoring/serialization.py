@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .event_engine import zone_identity_key as _zone_identity_key
 from .labels import display_label as _display_label, role_label as _role_label
 from .types import ZoneScore
 
@@ -13,6 +14,10 @@ def _zone_score_to_dict(z: ZoneScore) -> dict[str, Any]:
         "price_high": z.price_high,
         "method": z.method,
         "role": z.role,
+        # zone_key 讓 Go 端能把事件掛回這個 zone 的穩定身分（T-048 階段 C）。
+        # 與 market_event_*.zone_key 同一個函數產生，不是重算的——理由見
+        # event_engine.zone_identity_key。
+        "zone_key": _zone_identity_key(z),
         "tier": z.tier,
         "tier_label": z.tier_label,
         "role_label": _role_label(z.role),

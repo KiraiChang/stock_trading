@@ -10,6 +10,7 @@ from ..event_engine import (
     build_event_state_summary,
     detect_market_events,
     normalize_market_events,
+    zone_identity_key,
     zone_interaction,
 )
 from ..types import RecentValidation, VolumeConfirmation, ZoneType
@@ -512,3 +513,52 @@ def test_detection_after_terminal_state_starts_new_root():
         assert state["root_event_type"] == "HIGH_VOLUME_BREAKDOWN", (
             f"前一狀態為 {terminal} 時應開新鏈，root 該是新事件而不是沿用舊的"
         )
+
+
+# ── zone 與事件的關聯鍵（T-048 階段 C）──
+
+def test_zone_identity_key_matches_the_key_events_carry():
+    """序列化輸出的 zone_key 必須與事件身上的 zone_key **逐字元相同**。
+
+    Go 端靠這個鍵把事件掛回 zone 的穩定身分。兩邊只要有一邊改了格式化方式，
+    關聯就會靜默失敗——事件掛不到 zone，看起來像「這次沒有 zone 事件」。
+    """
+    from ..serialization import _zone_score_to_dict
+
+    z = _zone(low=98.0, high=100.0)
+    events = normalize_market_events([
+        {"type": "SUPPORT_BREAKDOWN", "zone_ref": {
+            "role": z.role, "price_low": z.price_low, "price_high": z.price_high,
+        }},
+    ])
+
+    assert _zone_score_to_dict(z)["zone_key"] == events[0]["zone_key"]
+    assert zone_identity_key(z) == events[0]["zone_key"]
+
+
+def test_zone_identity_key_ignores_fields_that_are_not_identity():
+    # 鍵只由 role 與邊界構成。帶進分數這類每次分析都會變的欄位，會讓同一個 zone
+    # 每次拿到不同的鍵——那正是 zone_key 當身分時的原始毛病。
+    a = _zone(low=98.0, high=100.0, confidence=0.72, trading_score=78.0)
+    b = _zone(low=98.0, high=100.0, confidence=0.31, trading_score=12.0)
+
+    assert zone_identity_key(a) == zone_identity_key(b)
+
+
+def test_every_state_carries_the_carried_flag():
+    """`carried_from_previous` 在**每一筆** state 上都要有值。
+
+    Go 端用它決定「找不到活鏈時要不要開新 occurrence」（T-048 階段 C 的 F2 護欄），
+    並把讀不到的筆數計成 carried_parse_failed。只在 carry forward 那條寫 True 的話，
+    每一筆新偵測都會被算成解析失敗，那個計數就沒有訊號了。
+    """
+    first = build_event_state_summary([
+        {"type": "SUPPORT_BREAKDOWN", "zone_ref": {"role": "SUPPORT", "price_low": 98.0, "price_high": 100.0}},
+    ])
+    for state in first["states"]:
+        assert state["carried_from_previous"] is False, "這一輪偵測到的事件不是重報"
+
+    # 下一輪沒有任何新偵測，前一輪的狀態被抄過來。
+    second = build_event_state_summary([], previous_states=first["states"])
+    for state in second["states"]:
+        assert state["carried_from_previous"] is True, "沒有新偵測時抄過來的狀態是重報"

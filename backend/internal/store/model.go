@@ -502,6 +502,12 @@ type SRZone struct {
 	Method     string  `db:"method"                  json:"method"`
 	Role       string  `db:"role"                    json:"role"` // SUPPORT / RESISTANCE / AT_ZONE
 
+	// ZoneKey 是 Python 產生的「這次分析內」的 zone↔事件關聯鍵（T-048 階段 C）。
+	// **不入庫**（`db:"-"`）：它不是身分，只是把同一次分析的 zone 與事件對起來的
+	// 臨時鍵；跨交易日的身分是 zone_instances.zone_uid。存進 stock_sr_zones 會讓
+	// 兩個不同語意的東西看起來像同一種鍵。
+	ZoneKey string `db:"-" json:"zone_key,omitempty"`
+
 	// Tier/TierLabel：zone 依寬度在同一次分析裡的相對排名分三層
 	// （TIER_1_MAIN_STRUCTURE 主結構 / TIER_2_TRADING_ZONE 交易區 /
 	// TIER_3_SHORT_TERM 短期），讓 zone 清單可排序（見

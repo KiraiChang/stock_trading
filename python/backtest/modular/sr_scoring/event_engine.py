@@ -203,6 +203,23 @@ def _zone_key(zone_ref: Optional[dict[str, Any]]) -> str:
     return f"{role}:{float(zone_ref.get('price_low', 0.0)):.4f}:{float(zone_ref.get('price_high', 0.0)):.4f}"
 
 
+def zone_identity_key(z: ZoneScore) -> str:
+    """zone 與它身上事件之間的關聯鍵。**這是該鍵唯一的產生點。**
+
+    Go 端要把事件掛到 `zone_instances.zone_uid` 上，需要一個能把「這次分析的 zone」
+    與「這次分析偵測到的事件」對起來的鍵。讓 Go 自己用 `%.4f` 重建一份，等於做出
+    `_zone_key()` 的平行實作——兩份浮點格式化哪天分歧，關聯會**靜默**失敗：事件掛不到
+    zone，資料看起來就像「這次沒有 zone 事件」，沒有任何東西會報錯。
+
+    所以 zone 的序列化直接輸出這個鍵（見 serialization.py），Go 只做字串比對。
+    """
+    return _zone_key({
+        "role": z.role,
+        "price_low": z.price_low,
+        "price_high": z.price_high,
+    })
+
+
 def _lifecycle_rule(event_family: str) -> dict[str, Any]:
     return EVENT_FAMILY_LIFECYCLE_RULES.get(event_family, {
         "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
@@ -356,6 +373,12 @@ def build_event_state_summary(
             "reason_codes": list(event.get("reason_codes") or [event_type]),
             "resolved_by": None,
             "price_action_evidence": event.get("price_action_evidence"),
+            # **兩條路徑都要寫這個旗標**：carry forward 那條在
+            # _normalize_previous_event_state 無條件寫 True，這條是「這次真的偵測到」
+            # 所以是 False。缺鍵不是「不是 carried」而是**異常**——Go 端據此計數
+            # （sr_zones.go 的 carried_parse_failed），只寫 True 的話每一筆新事件
+            # 都會被算成解析失敗，警訊就永遠不會歸零、也就沒有訊號可言。
+            "carried_from_previous": False,
         }
         states[key] = state
 

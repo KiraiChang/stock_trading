@@ -865,6 +865,77 @@ Zone 的跨交易日身分與生命週期（T-048 階段 B，migration 067）。
 
 ---
 
+## event_instances / event_transitions / zone_key_aliases
+
+事件鏈的跨交易日身分與生命週期，以及 zone 身分的 key 別名歷史
+（T-048 階段 C，migration 068）。**目前只寫不讀**——與 067 那批一樣，
+沒有任何決策路徑查詢它們，`market_event_states` / `market_event_detections`
+繼續並行寫入，逐欄相同是驗收條件。
+
+**要解的問題**：事件鏈原本的身分是 `market_event_states.zone_key`
+（`role:price_low:price_high`），與 067 解掉的 zone 身分問題同源；而且事件鏈
+**沒有被存下來**——`internal/analysis/event_timeline.go` 是回讀歷史快照、在讀取時
+摺疊出 timeline，那份摺疊規則與 Python 的 `build_event_state_summary` 是兩份必須保持
+對稱的實作，分歧時沒有任何東西會報錯。068 把生命週期變成存下來的事實。
+
+### 三張表
+
+| 表 | 語意 | 終態 |
+|---|---|---|
+| `event_instances` | **一條事件鏈**（一個 zone × 一個 family × 一個 `seq`） | `RESOLVED` / `EXPIRED` / `ZONE_IDENTITY_ENDED` |
+| `event_transitions` | 鏈的狀態轉換 append-only 流水 | — |
+| `zone_key_aliases` | zone 身分歷來用過的 `zone_key` | — |
+
+### 幾個容易踩到的設計點
+
+* **`zone_uid` 可為 NULL，但唯一鍵用 `zone_scope_key`**：`event_scope='SYMBOL'` 的事件
+  （爆量這類）不屬於任何 zone。三個 engine 的 UNIQUE 都不擋多個 NULL，直接把
+  可空的 `zone_uid` 放進唯一鍵等於不設限制，所以另存一個 NOT NULL 的投影鍵：
+  ZONE scope 時等於 `zone_uid`，SYMBOL scope 時是字串 `'SYMBOL'`。
+* **`seq` 表達同一個 (zone, family) 的先後鏈**：前一條 `RESOLVED` / `EXPIRED` 之後
+  再出現同家族事件，那是新的一條鏈而不是舊鏈復活。規則與 Python 的
+  `build_event_state_summary` 對稱，寫法比照 `zone_role_incarnations`。
+* **`root_event_type` 不可被新偵測蓋掉**（T-045 踩過）：欄位名叫 root 卻永遠等於
+  latest 的話，鏈的起點無法還原。
+* **`active` 不等於 `state`**：還要通過該 family 的 `gating_states` 才算數。
+* **`last_zone_key` 是鏈延續的第一把鑰匙**，見下一節。**每次觀測都要更新**，
+  停在誕生那天的值會讓這把鑰匙永遠 miss。
+* **`event_transitions.from_state IS NULL` 恰好等於「鏈誕生」**。這條不變式沿用 067
+  的定案（zone 那邊曾因誕生不寫 transition ＋ 失格也留白，導致 `from_state IS NULL`
+  什麼都問不出來），事件表不再踩第二次：所有非誕生的轉換都必須明寫 `from_state`。
+* **`zone_key_aliases` 每個 `zone_uid` 只留最新 8 筆**，prune 在寫入的同一個交易內做。
+  邊界每次由 ATR 重算，不設上限這張表會隨分析次數單調成長。
+
+### 事件關聯到 zone 身分的三段決策
+
+事件身上帶的 `zone_key` 是「上次那個 zone 長什麼樣」，本次分析的 `zone_key` 由這次的
+ATR 邊界與 role 算出來——**兩者對不上是常態而非例外**（2026-08-19 實測 41 筆 ZONE scope
+事件有 26 筆對不上）。所以關聯是三段的，優先序不可調換：
+
+| 段 | 判準 | 為什麼在這個位置 |
+|---|---|---|
+| ① 既有鏈 | `(last_zone_key, event_family)` 命中活鏈 → 直接沿用 `instance.zone_uid` | 連 key 都不必解析。這是「鏈靜默凍結」的根治 |
+| ② carried 護欄 | 沒有活鏈 ＋ `carried_from_previous=true` → **不建立新 occurrence** | carried 代表「重報」不代表「發生」。少了這條，每次分析都會讓終態的鏈重生一條新鏈 |
+| ③ key 解析 | 本次分析的 `zone_key → zone_uid` map，miss 再退到 `zone_key_aliases` | 只服務**新**關聯 |
+
+`carried_from_previous` 由 Python 在 `build_event_state_summary`（新偵測寫 `false`）與
+`_normalize_previous_event_state`（carry forward 無條件寫 `true`）兩條路徑都寫進
+`state_json`；Go 只讀不推導。**缺鍵是異常**，不是「不是 carried」。
+
+**zone 身分因 `SPLIT` / `MERGE` / `RESHAPE` 終止時，parent 身上的事件不傳給 child**，
+而是以 `end_reason='ZONE_IDENTITY_ENDED'` 收攤。那條鏈的前提（那個 zone 存在）已經消失，
+接到 child 等於宣稱鏈延續了，而 `RESHAPE` 的定義正是「血緣無法解析」。血緣留在
+`zone_relations`，之後要沿 parent 回溯補得回來；反過來先接了再拆拆不回來。
+
+### 終態的不變式
+
+`ended_at` 有值 ⇔ `state ∈ {RESOLVED, EXPIRED}` 且 `active = false`。三個欄位是**一起**
+寫的（Go 側只有一個終態寫入點），曾經發生過只設 `ended_at` / `end_reason`、
+`state` 與 `active` 沿用舊值的矛盾快照。查核 SQL 見
+[`development-workflow.md`](./development-workflow.md)「as-of 階梯驗收的六條門檻」。
+
+---
+
 ## 欄位命名規範：避開 MySQL 保留字
 
 新增 migration 時，**欄位名不可使用 MySQL 保留字**（`trigger`、`signal`、`force`、

@@ -58,6 +58,20 @@ type ZoneIdentityRepo interface {
 	// （sqlite 的 DATE() 回字串、postgres 的 ::date 回 time.Time），而下游是
 	// Python 端點的 JSON 欄位、本來就要字串。在 SQL 就轉成文字，三邊行為才一致。
 	ListTradingDays(ctx context.Context, timeframe string, limit int) ([]string, error)
+	// ListKeyAliases 回傳這檔**還活著的身分歷來用過的 zone_key**，由新到舊
+	// （T-048 階段 C 修法，F1 key 漂移）。
+	//
+	// 事件身上帶的 zone_key 是「上次那個 zone 長什麼樣」，而本次分析的 key 由這次的
+	// ATR 邊界與 role 算出來——對不上是常態。實測 41 筆 ZONE scope 事件有 26 筆
+	// 關聯失敗，兩個成因（role 進 AT_ZONE、邊界漂走）都是「身分還在，只是 key 到不了」。
+	//
+	// **只回 state='ACTIVE' 且 ended_at IS NULL 的身分**：把事件掛到收攤過的身分上
+	// 比關聯失敗更糟——關聯失敗會進 warn 計數，掛錯身分不會有任何東西報錯。
+	//
+	// 同一個 zone_key 對到多個活身分時**兩筆都回**，由呼叫端決定取捨並計數；
+	// 在 SQL 裡靜靜挑一個會讓「有多少衝突」永遠問不出來。排序保證同一個 key 的
+	// 最新者在前。
+	ListKeyAliases(ctx context.Context, symbol, timeframe string) ([]ZoneKeyAliasRef, error)
 }
 
 // ZoneInstance 是身分本身。`PriceLow`/`PriceHigh` 是最近一次觀測值，**不是身分**。
@@ -140,12 +154,44 @@ type LiveZone struct {
 	IncarnationMaxSeq sql.NullInt64 `db:"incarnation_max_seq"`
 }
 
+// ZoneKeyAlias 是「這個身分曾經以這個 zone_key 被觀測到」的一筆歷史
+// （T-048 階段 C 修法）。
+//
+// **刻意不做成 zone_instances 上的單一欄位**：那只記得住最後一次，而缺席容忍是
+// 3 次、角色翻轉前後還要再回溯一段。更重要的是單一欄位會與這張表成為兩份事實，
+// 分歧時沒有任何東西會報錯——那正是 T-048 一路在解的那類問題。
+type ZoneKeyAlias struct {
+	ZoneUID string `db:"zone_uid"`
+	// ZoneKey 是 role:price_low:price_high，由 Python 的 zone_identity_key 產生，
+	// 與 market_event_states.zone_key 同一個函數。Go 端只做字串比對，不重建它。
+	ZoneKey     string    `db:"zone_key"`
+	FirstSeenAt time.Time `db:"first_seen_at"`
+	LastSeenAt  time.Time `db:"last_seen_at"`
+}
+
+// ZoneKeyAliasRef 是 ListKeyAliases 的回傳：一筆 zone_key → zone_uid 的對應。
+type ZoneKeyAliasRef struct {
+	ZoneKey    string    `db:"zone_key"`
+	ZoneUID    string    `db:"zone_uid"`
+	LastSeenAt time.Time `db:"last_seen_at"`
+}
+
+// ZoneKeyAliasLimit 是每個 zone_uid 保留的 alias 筆數上限。
+//
+// **一定要有上限**：zone 邊界每次分析都由 ATR 重算，不設限這張表會隨分析次數單調成長。
+// 取 8 的理由是它要涵蓋得住回溯需求——缺席容忍 3 次（zone_matcher.MAX_OBSERVED_ABSENCES）
+// 加上角色翻轉前後各一段，8 已經比實際需要寬。
+const ZoneKeyAliasLimit = 8
+
 // ZoneIdentityWrite 是一次分析要落地的全部異動。
 type ZoneIdentityWrite struct {
 	Instances    []ZoneInstance
 	Incarnations []ZoneRoleIncarnation
 	Transitions  []ZoneTransition
 	Relations    []ZoneRelation
+	// KeyAliases 是這次觀測到的 zone_key。與四張表在**同一個交易**內寫入：
+	// alias 沒寫進去而身分寫了，下一次分析就少一把回溯的鑰匙，而那個缺失是靜默的。
+	KeyAliases []ZoneKeyAlias
 }
 
 var (
@@ -351,6 +397,66 @@ func (r *zoneIdentityRepo) relationInsertSQL() string {
 	return `INSERT INTO zone_relations ` + cols + ` ON CONFLICT DO NOTHING`
 }
 
+// **只回活著的身分**，理由見介面註解。排序讓同一個 zone_key 的最新者在最前面，
+// 呼叫端才能用「先到先得」的規則挑，而不是讓 SQL 的回傳順序決定。
+const listZoneKeyAliasesSQL = `
+	SELECT a.zone_key, a.zone_uid, a.last_seen_at
+	FROM zone_key_aliases a
+	JOIN zone_instances z ON z.zone_uid = a.zone_uid
+	WHERE z.symbol = ? AND z.timeframe = ? AND z.state = 'ACTIVE' AND z.ended_at IS NULL
+	ORDER BY a.zone_key, a.last_seen_at DESC, a.zone_uid`
+
+func (r *zoneIdentityRepo) ListKeyAliases(
+	ctx context.Context, symbol, timeframe string,
+) ([]ZoneKeyAliasRef, error) {
+	var out []ZoneKeyAliasRef
+	query := r.db.Rebind(listZoneKeyAliasesSQL)
+	if err := r.db.SelectContext(ctx, &out, query, symbol, timeframe); err != nil {
+		return nil, fmt.Errorf("zone identity: list key aliases: %w", err)
+	}
+	return out, nil
+}
+
+// alias 是「觀測到的事實」，重複觀測只推進 last_seen_at。
+//
+// **first_seen_at 不更新**：它回答「這個 key 從什麼時候開始代表這個身分」，
+// 被覆寫就答不出來了。與 zone_instances.first_seen_at 同一個道理。
+func (r *zoneIdentityRepo) keyAliasUpsertSQL() string {
+	const cols = `(zone_uid, zone_key, first_seen_at, last_seen_at)
+		VALUES (:zone_uid, :zone_key, :first_seen_at, :last_seen_at)`
+	switch r.driver {
+	case "mysql":
+		return `INSERT INTO zone_key_aliases ` + cols + `
+			ON DUPLICATE KEY UPDATE
+				last_seen_at=GREATEST(last_seen_at, VALUES(last_seen_at))`
+	case "sqlite", "sqlite3":
+		return `INSERT INTO zone_key_aliases ` + cols + `
+			ON CONFLICT(zone_uid, zone_key) DO UPDATE SET
+				last_seen_at=MAX(zone_key_aliases.last_seen_at, excluded.last_seen_at)`
+	}
+	return `INSERT INTO zone_key_aliases ` + cols + `
+		ON CONFLICT(zone_uid, zone_key) DO UPDATE SET
+			last_seen_at=GREATEST(zone_key_aliases.last_seen_at, excluded.last_seen_at)`
+}
+
+// prune 只針對**本次寫過的 zone_uid**，不全表掃——沒動到的身分它的 alias 數本來就沒變。
+//
+// 子查詢多包一層 `t` 是 mysql 的要求（不能在同一句裡對目標表做 IN 子查詢）；
+// postgres 與 sqlite 也吃得下這個寫法，所以三個 engine 共用一句。
+// ORDER BY 補上 zone_key 是為了 last_seen_at 打平時仍然決定性——不然同一批資料
+// 在不同 engine 上會 prune 掉不同的列。
+const pruneZoneKeyAliasesSQL = `
+	DELETE FROM zone_key_aliases
+	WHERE zone_uid = ?
+	  AND zone_key NOT IN (
+	      SELECT t.zone_key FROM (
+	          SELECT zone_key FROM zone_key_aliases
+	          WHERE zone_uid = ?
+	          ORDER BY last_seen_at DESC, zone_key
+	          LIMIT ?
+	      ) t
+	  )`
+
 func (r *zoneIdentityRepo) Apply(ctx context.Context, w ZoneIdentityWrite) error {
 	// 先擋自環：schema 有 CHECK，但那會在交易中途才炸，錯誤訊息也看不出是誰寫的。
 	for _, rel := range w.Relations {
@@ -368,6 +474,12 @@ func (r *zoneIdentityRepo) Apply(ctx context.Context, w ZoneIdentityWrite) error
 		}
 		seen[inst.ZoneUID] = struct{}{}
 	}
+
+	// alias 的主鍵是 (zone_uid, zone_key)，同一批重複時 postgres 一樣會炸
+	// （ON CONFLICT DO UPDATE cannot affect row a second time），理由同上。
+	// 這裡直接去重而不是報錯：兩個 method 算出完全一樣的區間並非不可能，
+	// 那是合法輸入，不該讓整批寫入失敗。
+	aliases := dedupeZoneKeyAliases(w.KeyAliases)
 
 	// RawJSON 是純 string，沒有 driver.Valuer——零值會把 '' 寫進 NOT NULL DEFAULT '[]'
 	// 的欄位（DEFAULT 不會生效，因為欄位有被明確列在 INSERT 裡）。本批只寫不讀，
@@ -408,9 +520,63 @@ func (r *zoneIdentityRepo) Apply(ctx context.Context, w ZoneIdentityWrite) error
 			return fmt.Errorf("zone identity: insert relations: %w", err)
 		}
 	}
+	// alias 排在身分之後：外鍵指向 zone_instances，新生的身分要先存在。
+	if len(aliases) > 0 {
+		if _, err := tx.NamedExecContext(ctx, r.keyAliasUpsertSQL(), aliases); err != nil {
+			return fmt.Errorf("zone identity: upsert key aliases: %w", err)
+		}
+		prune := tx.Rebind(pruneZoneKeyAliasesSQL)
+		for _, uid := range distinctAliasZoneUIDs(aliases) {
+			if _, err := tx.ExecContext(ctx, prune, uid, uid, ZoneKeyAliasLimit); err != nil {
+				return fmt.Errorf("zone identity: prune key aliases: %w", err)
+			}
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("zone identity: commit: %w", err)
 	}
 	return nil
+}
+
+// dedupeZoneKeyAliases 讓同一批裡的 (zone_uid, zone_key) 只留一筆，取 last_seen_at
+// 較新的那個；first_seen_at 反過來取較舊的，因為它記的是起點。
+func dedupeZoneKeyAliases(in []ZoneKeyAlias) []ZoneKeyAlias {
+	if len(in) == 0 {
+		return nil
+	}
+	idx := make(map[string]int, len(in))
+	out := make([]ZoneKeyAlias, 0, len(in))
+	for _, a := range in {
+		if a.ZoneUID == "" || a.ZoneKey == "" {
+			continue
+		}
+		k := a.ZoneUID + "|" + a.ZoneKey
+		if i, dup := idx[k]; dup {
+			if a.LastSeenAt.After(out[i].LastSeenAt) {
+				out[i].LastSeenAt = a.LastSeenAt
+			}
+			if a.FirstSeenAt.Before(out[i].FirstSeenAt) {
+				out[i].FirstSeenAt = a.FirstSeenAt
+			}
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, a)
+	}
+	return out
+}
+
+// distinctAliasZoneUIDs 保持輸入順序，讓 prune 的執行順序在三個 engine 上一致。
+func distinctAliasZoneUIDs(in []ZoneKeyAlias) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, a := range in {
+		if _, dup := seen[a.ZoneUID]; dup {
+			continue
+		}
+		seen[a.ZoneUID] = struct{}{}
+		out = append(out, a.ZoneUID)
+	}
+	return out
 }

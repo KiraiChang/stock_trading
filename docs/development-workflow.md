@@ -246,6 +246,84 @@ API 照樣回 201，所以每階跑完要看一次：
 docker logs stock_trading_dev-backend-1 2>&1 | grep -i "zone identity"
 ```
 
+#### as-of 階梯驗收的六條門檻
+
+每一階跑完看 backend log 的 `event identity: zone association` 那筆結構化 log
+（它把整次分析的關聯決策拆成欄位），七階跑完再對 DB 跑一次不變式 SQL。
+2026-08-19 的 T-048 階段 C 復驗就是照這六條判「過或不過」：
+
+| 門檻 | 來源 | 合格值 |
+|---|---|---|
+| 事件關聯不到 zone 身分 | log `unmatched_zone_keys` | **每一階都是空的**。非空代表還有沒找出來的成因，不能當已知限制帶過 |
+| 終態快照矛盾 | log `invariant_violations` | **恆空**（非空是 `Error` 級別） |
+| `carried_from_previous` 讀不到 | log `carried_parse_failed` | **0**。非 0 代表 Python 沒把旗標寫進 `state_json` |
+| 終態重生 | `event_instances` 筆數不隨分析次數單調成長 | 同一條鏈不該每次分析多一筆 |
+| `from_state` 留白 | SQL（見下） | 誕生以外 0 筆 |
+| ZONE scope 事件掛空 zone | SQL（見下） | 0 筆 |
+
+```sql
+-- 終態快照矛盾（ended_at 有值但 state / active 沒跟上）
+select count(*) from event_instances
+ where ended_at is not null and (state not in ('RESOLVED','EXPIRED') or active);
+-- transition 說終態、快照卻沒終態
+select count(*) from event_instances e
+ where exists (select 1 from event_transitions t
+                where t.event_uid = e.event_uid and t.to_state in ('RESOLVED','EXPIRED'))
+   and e.ended_at is null;
+-- from_state 留白（誕生除外）
+select count(*) from event_transitions t
+ where from_state is null
+   and t.id <> (select min(id) from event_transitions x where x.event_uid = t.event_uid);
+-- ZONE scope 事件掛空 zone / 指向不存在的身分 / alias 超過每 zone 8 筆上限
+select count(*) from event_instances where last_zone_key <> 'SYMBOL' and zone_uid is null;
+select count(*) from event_instances e where zone_uid is not null
+   and not exists (select 1 from zone_instances z where z.zone_uid = e.zone_uid);
+select count(*) from (select zone_uid from zone_key_aliases
+                       group by zone_uid having count(*) > 8) s;
+```
+
+**`carried_noop` 不是門檻。** 它記的是「carried 事件找不到活鏈，依定案不開新
+occurrence」，而 Python 會把**終態**的事件狀態每次分析都重報一次——所以每一條走完
+生命週期的鏈，此後每一階都會貢獻一筆，計數只會單調累積（0050 七階累積到 5 筆）。
+判讀方式是逐筆去 `event_instances` 對：**對應的鏈應該都已經 `ended_at IS NOT NULL`**；
+若有一筆的鏈還活著，那才是問題（護欄擋掉了不該擋的東西）。
+
+#### 重跑階梯前要先把 DB 退乾淨
+
+migration 已經套用過的版本，goose **不會**因為檔案內容改了就重跑。階段 C 復驗時
+`zone_key_aliases` 是後來才加進 068 的，dev DB 停在舊版 068，於是 alias 修法整段驗不到。
+退版要連 goose 紀錄一起處理，且**全部放在同一個交易**裡——中途出錯整批回滾，
+不會留下一半的 schema：
+
+```sql
+BEGIN;
+DROP TABLE IF EXISTS zone_key_aliases;      -- 068 建的表，順序照外鍵反向
+DROP TABLE IF EXISTS event_transitions;
+DROP TABLE IF EXISTS event_instances;
+DELETE FROM goose_db_version WHERE version_id = 68;
+COMMIT;
+```
+
+清資料時 `TRUNCATE` 的**所有互相參照的表要寫在同一句**，否則 postgres 直接報
+`cannot truncate a table referenced in a foreign key constraint`。`stock_sr_zone_analyses`
+的參照方比想像的多（`stock_sr_decisions`、`stock_sr_daily_candidates`、
+`stock_sr_model_governance`…），先查一次再寫：
+
+```sql
+select conrelid::regclass || ' -> ' || confrelid::regclass from pg_constraint
+ where contype = 'f' and confrelid::regclass::text = 'stock_sr_zone_analyses';
+```
+
+**`docker exec` 要帶 `-i`**，否則 heredoc 進不了 container，psql 讀到空的 stdin
+直接結束——**沒有任何錯誤訊息**，看起來就像指令跑完了但資料一點都沒變。
+
+#### 一天不要重複打同一階
+
+事件的老化計數 `age_bars` 的單位是**分析次數**不是 K 棒數，所以同一階重打一次，
+active 的事件就多老一根。復驗時重跑第七階，兩條 `CONFIRMED` 的 `SUPPORT_RECLAIM`
+在 candles 一根都沒變的情況下同時轉 `EXPIRED`。判讀階梯結果時要把這件事算進去，
+細節見 [`issue.md`](./issue.md) I-077。
+
 ### 字串欄位的寬度：不要訂「剛好夠用」
 
 2026-08-11 同一天內因為這件事失敗了**三次**，全部是同一個型態（SQLSTATE 22001）：

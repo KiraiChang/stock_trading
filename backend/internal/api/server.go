@@ -156,6 +156,9 @@ func NewServer(
 		// Zone 身分追蹤（T-048 階段 B）。**只寫不讀**：目前沒有任何決策讀這四張表，
 		// 寫入失敗只記 log 不影響分析（見 persistZoneIdentity）。
 		szh.SetZoneIdentity(store.NewZoneIdentityRepo(db))
+		// 事件身分追蹤（T-048 階段 C）。同樣**只寫不讀**，並且依賴上面那行先成功：
+		// 沒有 zone_uid 就沒有可以掛的身分（見 persistEventIdentity）。
+		szh.SetEventIdentity(store.NewEventIdentityRepo(db))
 		srRegressionResultHandler := handler.NewSRRegressionResultHandler(
 			analysisClient,
 			store.NewSRRegressionResultRepo(db),

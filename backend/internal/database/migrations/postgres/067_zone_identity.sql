@@ -41,6 +41,11 @@ CREATE TABLE IF NOT EXISTS zone_instances (
     -- 單靠時間分不出「zone 消失了」與「我們根本沒看」（實測 2330 全期只有 4 次分析、
     -- 橫跨 5 週）。達到 MAX_OBSERVED_ABSENCES 就移出候選集合。
     observed_absences INTEGER NOT NULL DEFAULT 0,
+    -- **上次觀測到的 role**，與「當前這一世的角色」是兩回事：AT_ZONE 期間這裡是
+    -- AT_ZONE，而一世的角色仍是上一個已解析的方向。matcher 兩者都要——少了它就分不出
+    -- 「這次才進 AT_ZONE」與「已經在 AT_ZONE 好幾次了」，前者該記 ROLE_UNRESOLVED，
+    -- 後者不該；同樣地，從 AT_ZONE 回到原方向的 ROLE_RESOLVED 也認不出來。
+    last_role     VARCHAR(16)   NOT NULL DEFAULT 'AT_ZONE',
     ended_at      TIMESTAMPTZ NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

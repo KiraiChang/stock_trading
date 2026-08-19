@@ -2634,7 +2634,53 @@ occurred_at       timestamptz
 **`EXPIRED` 與 `INVALIDATED` 的差別是誰造成的**：後者是市場事件（被跌破／突破），
 前者是「我們不再認得它」。兩者都是**一世**的終態，身分本身不終止。
 
-**次數軸在 SQL 擋、時間軸在 matcher 擋**：`ListLive` 的 `observed_absences < ?` 不需要
+#### 接線（2026-08-18，**已實作，待 review**）
+
+`/zone-identity/match`（Python，獨立端點）＋ `MatchZoneIdentities`（Go client）＋
+`persistZoneIdentity` / `buildZoneIdentityWrite`（handler）＋ `server.go` 注入。
+
+**刻意不併進 `/sr-zones`**：階段 B 只寫不讀，沒有任何決策依賴它的輸出；併進去就得動
+`scoring.py` / `pipeline.py` 那條有決策責任的核心路徑，為一個還沒有讀者的功能去動它，
+風險與收益不成比例。代價是每次分析多一趟 HTTP（每檔每天一次）。
+
+**寫入失敗只記 log，不影響分析本身。** 等階段 C／T-049 真的有讀者再收緊。
+
+##### 兩個已知限制
+
+**一、只接在 `reuse_existing=false` 那條分析路徑。** `SRAnalysisProvider.Analyze`
+也會 `repo.Create`（被 `portfolio/analyzer` 與 `/sr-zones` 的 reuse 分支使用），
+那些跑法會產生 zone 但**不算一次觀測**，所以 `observed_absences` 統計的是分析的
+一個子集。刻意如此——重用既有分析的目的就是不重算，把它算成觀測會讓
+「我們看了幾次都沒看到」失真。T-049 若需要完整母體要重新評估。
+
+**二、`/zone-identity/match` 對格式錯誤的 `as_of` / `trading_days` 回 500 而不是 422。**
+`date.fromisoformat` 與 `TradingCalendar.from_iterable` 丟的是 `ValueError`，端點沒有映射。
+呼叫端只有 Go backend、值都由程式產生，實際上碰不到；之後若開放人工呼叫要補。
+
+**三、同一 symbol 的併發分析會產生身分 churn 或交易失敗。** 兩個同時的
+`POST /sr-zones`（前端按鈕連點兩下就夠）都會讀 `ListLive` 再寫。zone 若翻轉，
+兩邊都算出 `seq = MaxSeq + 1`，第二個 `Apply` 撞 `uq_zone_incarnation_seq` 而整筆
+rollback——而且是**靜默的**，因為錯誤只記 log。zone 若是新的，兩邊會為同一個幾何
+各鑄一個 uid，下次分析看到 2→1 判成 MERGE、終止兩個再鑄第三個，正是這個功能要
+消滅的 churn。目前接受：階段 B 只寫不讀，且 SR 分析本來就不是高併發路徑。
+要修的話是對 (symbol, timeframe) 加行程內鎖或 DB advisory lock。
+
+**端到端實跑（2026-08-18）**：dev stack 灌 0050 的 400 根日 K ＋ live 模型，
+打兩次 `POST /sr-zones`：
+
+```
+第一次  zone_instances 15 / zone_role_incarnations 10 / transitions 0 / relations 0
+第二次  zone_instances 15 / zone_role_incarnations 10   ← 不是 30，身分延續了
+```
+
+15 個身分裡有 10 個開了一世（其餘 5 個是 `AT_ZONE`，依設計不開）；
+`first_seen_at` 未被覆寫、`last_seen_at` 有前進。**舊的 `_zone_key()` 在同樣情境下
+會產生 15 個全新的 key**，這就是本筆要解決的問題。
+
+`ROLE_FLIPPED` / `SPLIT` / `EXPIRED_BY_ABSENCE` 這次沒驗到——兩次分析用同一份資料，
+zone 形狀與角色都沒變。要驗它們得讓資料前進後再分析。
+
+**次數軸在 SQL 擋、時間軸在 matcher 擋**：`ListLive` 的 `observed_absences <= ?` 不需要
 交易日曆；精確的交易日距離必須在 matcher 算，因為 **SQL 裡沒有交易日的概念**，
 硬要在那裡算會退回日曆天。
 

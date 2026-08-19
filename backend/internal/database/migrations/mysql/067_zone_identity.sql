@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS zone_instances (
     last_seen_at  DATETIME(0)   NOT NULL,
     -- 資格閘門的第二個軸，見 postgres 版註解
     observed_absences INT     NOT NULL DEFAULT 0,
+    -- 上次觀測到的 role，與一世的角色是兩回事（見 postgres 版註解）
+    last_role     VARCHAR(16)   NOT NULL DEFAULT 'AT_ZONE',
     ended_at      DATETIME(0)   NULL,
     created_at    DATETIME(0)   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at    DATETIME(0)   NOT NULL DEFAULT CURRENT_TIMESTAMP,

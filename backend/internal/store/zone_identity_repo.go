@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/trading/backend/pkg/timeutil"
 )
 
 // ZoneIdentityRepo 管理 zone 的跨交易日身分、一世與轉換（T-048 階段 B）。
@@ -21,23 +24,40 @@ type ZoneIdentityRepo interface {
 	// ListLive 撈這檔還有資格進 matcher 的身分，附帶當前這一世的角色——正好是
 	// ZoneMatcher 需要的 `previous`。
 	//
-	// **這裡做的是粗篩，不是資格判定。** 兩個都刻意比 matcher 寬：
+	// **只用次數軸過濾，刻意沒有時間下界。**
 	//
-	//   * 次數軸用 `<= maxObservedAbsences` 而**不是** `<`。用 `<` 的話，剛好累到上限的
-	//     身分再也撈不出來 → 進不了 matcher → 不會出現在 expired_previous →
-	//     **沒有任何東西會把它收成 EXPIRED**，收攤流程整條變成不可達的死碼。
-	//     放它進來一次，matcher 判失格、呼叫端收攤並把次數 +1，下次就越過上限了。
-	//   * 時間軸只用 notSeenSince 做寬鬆下界。精確的交易日距離必須由 matcher 用注入的
-	//     交易日曆算——**SQL 裡沒有交易日的概念**，硬算會退回日曆天，週五→週一變 3 天。
-	//     `notSeenSince` 傳得比 20 個交易日還緊的話，SQL 會比 matcher 嚴，
-	//     同樣會讓身分被靜默丟掉而不收攤。
-	ListLive(ctx context.Context, symbol, timeframe string, notSeenSince time.Time,
+	// 次數軸用 `<= maxObservedAbsences` 而**不是** `<`：用 `<` 的話，剛好累到上限的
+	// 身分再也撈不出來 → 進不了 matcher → 不會出現在 expired_previous →
+	// **沒有任何東西會把它收成 EXPIRED**，收攤流程整條變成不可達的死碼。
+	// 放它進來一次，matcher 判失格、呼叫端收攤並把次數推過上限，下次就不會再進來。
+	//
+	// **時間軸完全交給 matcher**，這裡不加 last_seen_at 下界。加了的話同一個洞會從
+	// 另一個軸出現：超過下界的身分被 SQL 擋在 matcher 之前，於是永遠不會被判失格、
+	// 永遠不會收攤，就這樣以 state='ACTIVE' 與未結束的一世留在表裡。
+	// 那不是理論問題——按需分析的標的隔超過三個月才再分析一次是常態。
+	//
+	// 不加下界也不會讓結果集變大：收攤時次數會被推過上限，所以死掉的身分下一次就被
+	// 次數軸擋掉。單一 symbol 的活躍身分實測是十幾個。
+	ListLive(ctx context.Context, symbol, timeframe string,
 		maxObservedAbsences int) ([]LiveZone, error)
 	// Apply 把一次分析的結果整批寫入，**單一交易**。
 	//
 	// 四張表必須一起成功：只寫了 instances 卻沒寫 relations，血緣圖就會出現無父的孤兒，
 	// 而那與「這個 zone 是新生的」在資料上無法區分。
 	Apply(ctx context.Context, w ZoneIdentityWrite) error
+	// ListTradingDays 回傳最近 limit 個**市場交易日**（全庫 distinct 日期），由新到舊。
+	//
+	// matcher 的時間軸用交易日算距離，而**台股的休市日不是「週末 ＋ 固定國定假日」
+	// 那麼簡單**（颱風假、補行交易日都會變動），所以不自己造日曆，
+	// 從 candles 有資料的日子反推——與 Python 端 db.fetch_market_trading_days 同一個事實來源。
+	//
+	// **放在這個 repo 而不是 CandleRepo**：CandleRepo 有十處使用與多個測試替身，
+	// 為單一消費者加方法要動一整圈。等到有第二個消費者再搬。
+	//
+	// 回傳 `YYYY-MM-DD` 字串而不是 time.Time：三個 engine 的日期型別掃描行為不一致
+	// （sqlite 的 DATE() 回字串、postgres 的 ::date 回 time.Time），而下游是
+	// Python 端點的 JSON 欄位、本來就要字串。在 SQL 就轉成文字，三邊行為才一致。
+	ListTradingDays(ctx context.Context, timeframe string, limit int) ([]string, error)
 }
 
 // ZoneInstance 是身分本身。`PriceLow`/`PriceHigh` 是最近一次觀測值，**不是身分**。
@@ -53,7 +73,12 @@ type ZoneInstance struct {
 	LastSeenAt  time.Time    `db:"last_seen_at"`
 	// ObservedAbsences 是資格閘門的次數軸：連續幾次「觀測到它不存在」。
 	// 由 matcher 的 next_observed_absences 維護，這裡只負責存回去。
-	ObservedAbsences int          `db:"observed_absences"`
+	ObservedAbsences int `db:"observed_absences"`
+	// LastRole 是**上次觀測到的 role**，與「當前這一世的角色」是兩回事：
+	// AT_ZONE 期間 LastRole 是 AT_ZONE，而一世的角色仍是上一個已解析的方向。
+	// matcher 兩者都要——少了 LastRole 就分不出「這次才進 AT_ZONE」與
+	// 「已經在 AT_ZONE 好幾次了」，前者該記 ROLE_UNRESOLVED，後者不該。
+	LastRole string `db:"last_role"`
 	EndedAt          sql.NullTime `db:"ended_at"`
 }
 
@@ -107,6 +132,12 @@ type LiveZone struct {
 	ZoneInstance
 	IncarnationUID  sql.NullString `db:"incarnation_uid"`
 	IncarnationRole sql.NullString `db:"incarnation_role"`
+	IncarnationSeq  sql.NullInt64  `db:"incarnation_seq"`
+	// IncarnationMaxSeq 是這個身分歷來的最大 seq（含已結束的）。
+	// **不能用 IncarnationSeq 代替**：一世被 INVALIDATED 之後沒有未結束的一世，
+	// 下一世要接在最大值之後，只看未結束的那筆會拿到 NULL 而重複用 seq=1，
+	// 撞上 UNIQUE(zone_uid, seq)。
+	IncarnationMaxSeq sql.NullInt64 `db:"incarnation_max_seq"`
 }
 
 // ZoneIdentityWrite 是一次分析要落地的全部異動。
@@ -129,10 +160,23 @@ var (
 type zoneIdentityRepo struct {
 	db     *sqlx.DB
 	driver string
+
+	// 交易日快取。key 是 timeframe，連同「算出來的那一天」一起存——
+	// 跨日就失效重算。全市場共用的資料，不必每次分析都掃一次 candles。
+	calendarMu    sync.Mutex
+	calendarCache map[string]cachedCalendar
+}
+
+type cachedCalendar struct {
+	day  string // YYYY-MM-DD（台北），跨日即失效
+	days []string
 }
 
 func NewZoneIdentityRepo(db *sqlx.DB) ZoneIdentityRepo {
-	return &zoneIdentityRepo{db: db, driver: db.DriverName()}
+	return &zoneIdentityRepo{
+		db: db, driver: db.DriverName(),
+		calendarCache: map[string]cachedCalendar{},
+	}
 }
 
 // 只撈身分還在（state='ACTIVE'）且最近仍出現過的。
@@ -146,37 +190,95 @@ func NewZoneIdentityRepo(db *sqlx.DB) ZoneIdentityRepo {
 const listLiveZonesSQL = `
 	SELECT z.zone_uid, z.symbol, z.timeframe, z.method, z.state,
 	       z.price_low, z.price_high, z.first_seen_at, z.last_seen_at,
-	       z.observed_absences, z.ended_at,
+	       z.observed_absences, z.last_role, z.ended_at,
 	       i.incarnation_uid AS incarnation_uid,
-	       i.role            AS incarnation_role
+	       i.role            AS incarnation_role,
+	       i.seq             AS incarnation_seq,
+	       (SELECT MAX(i3.seq) FROM zone_role_incarnations i3
+	         WHERE i3.zone_uid = z.zone_uid) AS incarnation_max_seq
 	FROM zone_instances z
 	LEFT JOIN zone_role_incarnations i
 	       ON i.zone_uid = z.zone_uid AND i.ended_at IS NULL
 	      AND i.seq = (SELECT MAX(i2.seq) FROM zone_role_incarnations i2
 	                    WHERE i2.zone_uid = z.zone_uid AND i2.ended_at IS NULL)
 	WHERE z.symbol = ? AND z.timeframe = ? AND z.state = 'ACTIVE'
-	  AND z.last_seen_at >= ?
 	  AND z.observed_absences <= ?
 	ORDER BY z.price_low`
 
 func (r *zoneIdentityRepo) ListLive(
-	ctx context.Context, symbol, timeframe string, notSeenSince time.Time,
-	maxObservedAbsences int,
+	ctx context.Context, symbol, timeframe string, maxObservedAbsences int,
 ) ([]LiveZone, error) {
 	var out []LiveZone
 	query := r.db.Rebind(listLiveZonesSQL)
 	if err := r.db.SelectContext(ctx, &out, query,
-		symbol, timeframe, notSeenSince, maxObservedAbsences); err != nil {
+		symbol, timeframe, maxObservedAbsences); err != nil {
 		return nil, fmt.Errorf("zone identity: list live: %w", err)
 	}
 	return out, nil
 }
 
+// **時區一定要轉**：ts 存 UTC，而日 K 是以台北午夜寫入的（market/finmind.go 用
+// TaipeiTZ 解析），也就是 UTC 前一日 16:00。直接取 DATE(ts) 會讓 2026-08-18 的盤
+// 被報成 2026-08-17——`database-schema.md` 開頭就警告過這個「整整差一天」。
+// postgres 的 to_char 還會依 session 的 TimeZone GUC 變動，同一句在不同伺服器設定下
+// 結果不同，而 Python 端是釘死的，兩份「同一個事實來源」會分岔。
+//
+// 定義與 db.fetch_market_trading_days 逐字對齊：sqlite 的 ts 本來就是本地時間字串
+// 所以直接取日期，postgres 明確轉 Asia/Taipei。
+func (r *zoneIdentityRepo) tradingDaysSQL() string {
+	switch r.driver {
+	case "postgres", "pgx":
+		return `SELECT DISTINCT to_char((ts AT TIME ZONE 'Asia/Taipei')::date, 'YYYY-MM-DD') AS d
+		        FROM candles WHERE timeframe = ? AND ts >= ?
+		        ORDER BY d DESC LIMIT ?`
+	case "mysql":
+		return `SELECT DISTINCT DATE_FORMAT(CONVERT_TZ(ts, '+00:00', '+08:00'), '%Y-%m-%d') AS d
+		        FROM candles WHERE timeframe = ? AND ts >= ?
+		        ORDER BY d DESC LIMIT ?`
+	}
+	return `SELECT DISTINCT DATE(ts) AS d FROM candles WHERE timeframe = ? AND ts >= ?
+	        ORDER BY d DESC LIMIT ?`
+}
+
+// ListTradingDays 會**在行程內快取到當日結束**。
+//
+// `since` 幫不上效能：candles 唯一可用的索引是 (symbol, timeframe, ts DESC) 與
+// UNIQUE(symbol, timeframe, ts)，兩者前導欄都是 symbol，所以 `timeframe = ?` 與
+// `ts >= ?` 都無法 seek——DB 仍得掃過整張表再做 DISTINCT，`since` 只縮小了聚合的輸入。
+// 而這條查詢跑在**每一次 POST /sr-zones** 裡。
+//
+// 市場交易日是全市場共用、一天最多變一次的東西，所以快取是最便宜的正解；
+// 真要靠索引解決得加 (timeframe, ts)，那是對一張大表的 migration，不值得為這件事做。
+func (r *zoneIdentityRepo) ListTradingDays(
+	ctx context.Context, timeframe string, limit int,
+) ([]string, error) {
+	today := time.Now().In(timeutil.TaipeiTZ).Format("2006-01-02")
+	r.calendarMu.Lock()
+	if c, ok := r.calendarCache[timeframe]; ok && c.day == today && len(c.days) >= limit {
+		defer r.calendarMu.Unlock()
+		return append([]string(nil), c.days...), nil
+	}
+	r.calendarMu.Unlock()
+
+	// 取 limit 個交易日最多需要回看多久：抓 3 倍日曆天當寬鬆上界（含週末與連假）。
+	since := time.Now().UTC().AddDate(0, 0, -limit*3)
+	var days []string
+	query := r.db.Rebind(r.tradingDaysSQL())
+	if err := r.db.SelectContext(ctx, &days, query, timeframe, since, limit); err != nil {
+		return nil, fmt.Errorf("zone identity: list trading days: %w", err)
+	}
+
+	r.calendarMu.Lock()
+	r.calendarCache[timeframe] = cachedCalendar{day: today, days: days}
+	r.calendarMu.Unlock()
+	return days, nil
+}
+
 func (r *zoneIdentityRepo) instanceUpsertSQL() string {
 	const cols = `(zone_uid, symbol, timeframe, method, state, price_low, price_high,
-		first_seen_at, last_seen_at, observed_absences, ended_at)
+		first_seen_at, last_seen_at, observed_absences, last_role, ended_at)
 		VALUES (:zone_uid, :symbol, :timeframe, :method, :state, :price_low, :price_high,
-		:first_seen_at, :last_seen_at, :observed_absences, :ended_at)`
+		:first_seen_at, :last_seen_at, :observed_absences, :last_role, :ended_at)`
 	// 三個欄位刻意**不是**單純覆寫，因為它們的錯誤都是靜默的：
 	//
 	//   * first_seen_at 完全不更新——身分第一次出現的時間是事實，重寫會讓身分壽命失真。
@@ -193,7 +295,7 @@ func (r *zoneIdentityRepo) instanceUpsertSQL() string {
 			ON DUPLICATE KEY UPDATE
 				state=VALUES(state), price_low=VALUES(price_low), price_high=VALUES(price_high),
 				last_seen_at=GREATEST(last_seen_at, VALUES(last_seen_at)),
-				observed_absences=VALUES(observed_absences),
+				observed_absences=VALUES(observed_absences), last_role=VALUES(last_role),
 				ended_at=COALESCE(ended_at, VALUES(ended_at)),
 				updated_at=CURRENT_TIMESTAMP`
 	case "sqlite", "sqlite3":
@@ -201,7 +303,7 @@ func (r *zoneIdentityRepo) instanceUpsertSQL() string {
 			ON CONFLICT(zone_uid) DO UPDATE SET
 				state=excluded.state, price_low=excluded.price_low, price_high=excluded.price_high,
 				last_seen_at=MAX(zone_instances.last_seen_at, excluded.last_seen_at),
-				observed_absences=excluded.observed_absences,
+				observed_absences=excluded.observed_absences, last_role=excluded.last_role, last_role=excluded.last_role,
 				ended_at=COALESCE(zone_instances.ended_at, excluded.ended_at),
 				updated_at=CURRENT_TIMESTAMP`
 	}
@@ -209,7 +311,7 @@ func (r *zoneIdentityRepo) instanceUpsertSQL() string {
 		ON CONFLICT(zone_uid) DO UPDATE SET
 			state=excluded.state, price_low=excluded.price_low, price_high=excluded.price_high,
 			last_seen_at=GREATEST(zone_instances.last_seen_at, excluded.last_seen_at),
-			observed_absences=excluded.observed_absences,
+			observed_absences=excluded.observed_absences, last_role=excluded.last_role,
 			ended_at=COALESCE(zone_instances.ended_at, excluded.ended_at),
 			updated_at=CURRENT_TIMESTAMP`
 }

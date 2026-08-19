@@ -12,10 +12,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/pkg/timeutil"
 )
 
 // mapScoreZonesError 依 Python /sr-zones 回傳的實際狀態碼，回給前端對應的
@@ -56,7 +58,16 @@ type SRZoneHandler struct {
 	watchlist store.WatchlistRepo
 	trainJobs store.SRScoringTrainJobRepo
 	verifier  *analysis.SRZoneVerifier
-	log       *zap.Logger
+	// zoneIdentity 為**選填**（T-048 階段 B）：未注入時整條身分追蹤不執行，
+	// 行為與導入前完全相同。比照 scheduler 對 adjuster 的處理。
+	zoneIdentity store.ZoneIdentityRepo
+	log          *zap.Logger
+}
+
+// SetZoneIdentity 注入 zone 身分追蹤（T-048 階段 B）。**只寫不讀**：
+// 寫入失敗不影響分析本身，見 persistZoneIdentity。
+func (h *SRZoneHandler) SetZoneIdentity(repo store.ZoneIdentityRepo) {
+	h.zoneIdentity = repo
 }
 
 // srZoneScoreExcludedKeys 是 zone 的 "score" 區塊要排除的欄位——它們已經在
@@ -589,6 +600,8 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.persistZoneIdentity(c.Request.Context(), body.Symbol, body.Timeframe, id, zones)
+
 	snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), id)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: load saved snapshot")
@@ -900,4 +913,365 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 
 	timeline := analysis.BuildEventTimeline(symbol, timeframe, rows, analyses)
 	c.JSON(http.StatusOK, timeline)
+}
+
+// persistZoneIdentity 把這次分析的 zone 對應到跨交易日的身分並落地（T-048 階段 B）。
+//
+// **失敗只記 log，不影響分析本身。** 這四張表目前沒有任何讀者——沒有決策依賴它們，
+// 卻讓一次身分匹配的失敗把整個 SR 分析變成 500，風險與收益完全不成比例。
+// 等階段 C／T-049 真的有東西讀它，再把錯誤處理收緊。
+//
+// **只接在這一條路徑上（reuse_existing=false）。** SRAnalysisProvider.Analyze
+// 也會 repo.Create，被 portfolio/analyzer 與本 handler 的 reuse 分支使用——
+// 那些跑法會產生 zone 但不算一次「觀測」，所以 observed_absences 統計的是
+// **分析的一個子集**。這是刻意的取捨：那條路徑的目的是重用既有分析，把它也算成
+// 觀測會讓「我們看了幾次」失真。等 T-049 需要完整母體時要重新評估，
+// 已記在 docs/todo.md T-048 階段 B 的實作結果。
+func (h *SRZoneHandler) persistZoneIdentity(
+	ctx context.Context, symbol, timeframe string, analysisID uint64, zones []store.SRZone,
+) {
+	if h.zoneIdentity == nil || len(zones) == 0 {
+		return
+	}
+	if timeframe == "" {
+		timeframe = "1d"
+	}
+	// **用台北日期**：trading_days 是 (ts AT TIME ZONE 'Asia/Taipei')::date，
+	// 市場也是台北時區。用 UTC 的話，台北 00:00～08:00 執行的分析會回報成前一個日曆日，
+	// sessions_between 就少算一個交易日——兩份「同一個日期空間」其實不同。
+	now := time.Now().In(timeutil.TaipeiTZ)
+
+	// notSeenSince 刻意放得比 matcher 的交易日上限寬：SQL 裡沒有交易日的概念，
+	// 在這裡用日曆天硬算會比 matcher 嚴，把身分靜默丟掉而不收攤。
+	// 精確判定由 matcher 用交易日曆做。
+	live, err := h.zoneIdentity.ListLive(ctx, symbol, timeframe, zoneIdentityMaxAbsences)
+	if err != nil {
+		h.log.Warn("zone identity: list live failed", zap.Error(err))
+		return
+	}
+	tradingDays, err := h.zoneIdentity.ListTradingDays(ctx, timeframe, zoneIdentityCalendarDays)
+	if err != nil {
+		h.log.Warn("zone identity: list trading days failed", zap.Error(err))
+		return
+	}
+
+	current := make([]analysis.ZoneIdentityZone, 0, len(zones))
+	for _, z := range zones {
+		current = append(current, analysis.ZoneIdentityZone{
+			PriceLow: z.PriceLow, PriceHigh: z.PriceHigh,
+			Method: z.Method, Role: z.Role,
+		})
+	}
+
+	matched, err := h.client.MatchZoneIdentities(ctx, now.Format("2006-01-02"),
+		tradingDays, analysis.ZoneIdentityZonesFromLive(live), current)
+	if err != nil {
+		h.log.Warn("zone identity: match failed", zap.Error(err))
+		return
+	}
+
+	write := buildZoneIdentityWrite(symbol, timeframe, analysisID, now, zones, live, matched,
+		func() string { return uuid.NewString() })
+	if err := h.zoneIdentity.Apply(ctx, write); err != nil {
+		h.log.Warn("zone identity: apply failed", zap.Error(err))
+	}
+}
+
+const (
+	// 與 zone_matcher.MAX_OBSERVED_ABSENCES 同值。用 `<=` 撈，讓剛達上限的身分
+	// 還能進來一次完成收攤（見 ZoneIdentityRepo.ListLive 的說明）。
+	zoneIdentityMaxAbsences = 3
+	// 交易日曆取多久。要涵蓋得住 lookback，否則 matcher 算距離時會低估。
+	zoneIdentityCalendarDays = 120
+)
+
+// buildZoneIdentityWrite 把 matcher 的結果組成一次交易要寫的四張表內容。
+//
+// 拆成獨立函數是為了讓它可以在沒有 HTTP 與 DB 的情況下測——這段的錯誤
+// （身分與 zone 錯位、缺席次數沒存回去、終止的身分沒收攤）在資料裡看起來都很正常。
+//
+// 四種身分各有各的寫法，**漏掉任何一種都會讓身分無法穩定**：
+//
+//	這次看到的     → ACTIVE、缺席歸零、必要時開新的一世
+//	分裂／合併的   → 終態 ＋ ended_at。漏掉的話它會永遠停在 ACTIVE 並重新進入
+//	                 candidate set，每次分析都再分裂一次，child 每次拿到全新 uid
+//	失格的         → 一世收成 EXPIRED，缺席次數推過上限
+//	沒看到但仍有效 → 只加缺席次數，**不動 last_seen_at**
+func buildZoneIdentityWrite(
+	symbol, timeframe string, analysisID uint64, now time.Time,
+	zones []store.SRZone, live []store.LiveZone, m *analysis.ZoneIdentityMatchResult,
+	uidFactory func() string,
+) store.ZoneIdentityWrite {
+	byUID := make(map[string]store.LiveZone, len(live))
+	for _, z := range live {
+		byUID[z.ZoneUID] = z
+	}
+	analysisRef := sql.NullInt64{Int64: int64(analysisID), Valid: true}
+
+	w := store.ZoneIdentityWrite{}
+	written := make(map[string]struct{}, len(zones)+len(live))
+	openedIncarnation := make(map[string]string, len(zones))
+
+	// 翻轉由 matcher 判定，這裡不重推——它比對的是「當前這一世的角色」，
+	// 而那個規則跨 AT_ZONE 才成立（見 zone_matcher 的 _role_transition）。
+	flipped := make(map[string]string, len(m.RoleTransitions))
+	for _, t := range m.RoleTransitions {
+		if t.Kind == "ROLE_FLIPPED" {
+			flipped[t.ZoneUID] = t.ToRole
+		}
+	}
+
+	// ── 一、這次觀測到的 zone ──
+	for i, z := range zones {
+		uid := m.ZoneUIDs[i]
+		if _, dup := written[uid]; dup {
+			continue
+		}
+		written[uid] = struct{}{}
+
+		prev, existing := byUID[uid]
+		first := now
+		if existing {
+			first = prev.FirstSeenAt
+		}
+		w.Instances = append(w.Instances, store.ZoneInstance{
+			ZoneUID: uid, Symbol: symbol, Timeframe: timeframe, Method: z.Method,
+			State: "ACTIVE", PriceLow: z.PriceLow, PriceHigh: z.PriceHigh,
+			FirstSeenAt: first, LastSeenAt: now, ObservedAbsences: 0,
+			// 這次觀測到的 role。與一世的角色不同——AT_ZONE 也要如實記下來，
+			// 否則下次分不出「這次才進 AT_ZONE」與「已經在裡面好幾次了」。
+			LastRole: z.Role,
+		})
+
+		if inc := incarnationForObservedZone(uid, z.Role, now, prev, existing,
+			flipped, uidFactory); len(inc) > 0 {
+			w.Incarnations = append(w.Incarnations, inc...)
+			// 翻轉開出來的新一世要能被 role transition 指到（見下方 RoleTransitions 迴圈）。
+			openedIncarnation[uid] = inc[len(inc)-1].IncarnationUID
+		}
+	}
+
+	// ── 二、因分裂／合併／重整而終止的身分 ──
+	// **這一段先前整個漏掉**，後果是 parent 永遠停在 ACTIVE：下次分析它照樣被
+	// ListLive 撈出來、幾何上仍配得到自己的 child，於是變成 N→M 重整，
+	// child 又拿到全新 uid——身分永遠不會穩定，正是這個功能要消滅的 churn。
+	terminalState := terminalStateByParent(m.Relations)
+	for _, uid := range m.TerminatedPrevious {
+		if _, dup := written[uid]; dup {
+			continue
+		}
+		prev, ok := byUID[uid]
+		if !ok {
+			continue
+		}
+		written[uid] = struct{}{}
+		state := terminalState[uid]
+		if state == "" {
+			state = "RESHAPED"
+		}
+		w.Instances = append(w.Instances, instanceFrom(prev, symbol, timeframe, state, now,
+			prev.ObservedAbsences))
+		if prev.IncarnationUID.Valid {
+			w.Incarnations = append(w.Incarnations, closeIncarnation(prev, now,
+				"IDENTITY_ENDED", false))
+		}
+		w.Transitions = append(w.Transitions, store.ZoneTransition{
+			ZoneUID: uid, IncarnationUID: prev.IncarnationUID, AnalysisID: analysisRef,
+			TransitionKind: "STATE_CHANGE",
+			FromState:      sql.NullString{String: "ACTIVE", Valid: true},
+			ToState:        sql.NullString{String: state, Valid: true},
+			ReasonCodes:    store.RawJSON(`["IDENTITY_ENDED"]`),
+			OccurredAt:     now,
+		})
+	}
+
+	// ── 三、失格的身分 ──
+	for _, uid := range m.ExpiredPrevious {
+		if _, dup := written[uid]; dup {
+			continue
+		}
+		prev, ok := byUID[uid]
+		if !ok {
+			continue
+		}
+		written[uid] = struct{}{}
+
+		// **一定要推過上限**，否則時間軸造成的失格會每次分析重複收攤：
+		// 那條路徑觸發時 observed_absences 可能還很小（例如 1），+1 之後仍在
+		// ListLive 的範圍內，下次又被撈出來、又失格一次，留下重複的
+		// EXPIRED_BY_ABSENCE 紀錄。次數軸自然會越界，時間軸不會。
+		absences := zoneIdentityMaxAbsences + 1
+		if next, ok := m.NextObservedAbsences[uid]; ok && next > absences {
+			absences = next
+		}
+		// **用 prev.LastSeenAt 而不是 now**：upsert 對 last_seen_at 取大，
+		// 傳 now 等於宣告「這個剛被判定不再認得的身分今天有被看到」，
+		// 而 idx_zone_instances_live 正是 (symbol, timeframe, state, last_seen_at)——
+		// 階段 C 沿著它查會撈到一堆看起來很新鮮的鬼魂。
+		w.Instances = append(w.Instances, instanceFrom(prev, symbol, timeframe, "ACTIVE",
+			prev.LastSeenAt, absences))
+
+		if prev.IncarnationUID.Valid {
+			w.Incarnations = append(w.Incarnations, closeIncarnation(prev, now,
+				"EXPIRED_BY_ABSENCE", true))
+		}
+		w.Transitions = append(w.Transitions, store.ZoneTransition{
+			ZoneUID: uid,
+			// 帶上 incarnation_uid：少了它，事後問「這筆 EXPIRED 收掉的是哪一世」
+			// 只能靠時間戳去猜。
+			IncarnationUID: prev.IncarnationUID,
+			AnalysisID:     analysisRef,
+			TransitionKind: "STATE_CHANGE",
+			ToState:        sql.NullString{String: "EXPIRED", Valid: true},
+			ReasonCodes:    store.RawJSON(`["EXPIRED_BY_ABSENCE"]`),
+			OccurredAt:     now,
+		})
+	}
+
+	// ── 四、沒看到但仍有資格：只加缺席次數 ──
+	for _, z := range live {
+		next, ok := m.NextObservedAbsences[z.ZoneUID]
+		if !ok || next == 0 {
+			continue
+		}
+		if _, dup := written[z.ZoneUID]; dup {
+			continue
+		}
+		written[z.ZoneUID] = struct{}{}
+		// **不動 last_seen_at**：填成本次時間等於宣告「它剛被看到」，
+		// 時間軸閘門從此永遠不會觸發。
+		w.Instances = append(w.Instances, instanceFrom(z, symbol, timeframe, "ACTIVE",
+			z.LastSeenAt, next))
+	}
+
+	for _, rel := range m.Relations {
+		w.Relations = append(w.Relations, store.ZoneRelation{
+			ParentZoneUID: rel.ParentZoneUID, ChildZoneUID: rel.ChildZoneUID,
+			Relation: rel.Relation, AnalysisID: analysisRef, OccurredAt: now,
+		})
+	}
+
+	for _, t := range m.RoleTransitions {
+		// 翻轉是**唯一會關掉一世又開一世**的事件，所以最需要這條連結。
+		// 新開的優先（翻轉後這筆屬於新的一世），否則沿用既有未結束的那筆。
+		inc := sqlNullString(openedIncarnation[t.ZoneUID])
+		if !inc.Valid {
+			if prev, ok := byUID[t.ZoneUID]; ok {
+				inc = prev.IncarnationUID
+			}
+		}
+		w.Transitions = append(w.Transitions, store.ZoneTransition{
+			ZoneUID: t.ZoneUID, IncarnationUID: inc, AnalysisID: analysisRef,
+			TransitionKind: t.Kind,
+			FromRole:       sqlNullString(t.FromRole),
+			ToRole:         sqlNullString(t.ToRole),
+			OccurredAt:     now,
+		})
+	}
+
+	return w
+}
+
+// incarnationForObservedZone 維護「一世」。
+//
+// **先前完全沒有人建立一世**，於是 zone_role_incarnations 永遠是空的、
+// ListLive 的 incarnation_role 永遠是 NULL，matcher 因此把每個有向 zone 都當成
+// 「第一次解析出方向」——ROLE_UNRESOLVED 永遠不會發生，而 ROLE_FLIPPED
+// （這整個功能的動機）**永遠偵測不到**。
+//
+// 回傳可能是 0、1（新開）或 2（翻轉：關舊的＋開新的）筆。
+func incarnationForObservedZone(
+	uid, role string, now time.Time, prev store.LiveZone, existing bool,
+	flipped map[string]string, uidFactory func() string,
+) []store.ZoneRoleIncarnation {
+	// AT_ZONE 不開一世：它是「方向暫時無法解析」，不是角色。
+	if role != "SUPPORT" && role != "RESISTANCE" {
+		return nil
+	}
+
+	openSameRole := existing && prev.IncarnationUID.Valid &&
+		prev.IncarnationRole.String == role
+	_, isFlip := flipped[uid]
+	if openSameRole && !isFlip {
+		return nil // 這一世繼續，沒有要寫的
+	}
+
+	out := make([]store.ZoneRoleIncarnation, 0, 2)
+	if existing && prev.IncarnationUID.Valid {
+		out = append(out, closeIncarnation(prev, now, "ROLE_FLIPPED", false))
+	}
+	seq := int(prev.IncarnationMaxSeq.Int64) + 1
+	if seq < 1 {
+		seq = 1
+	}
+	out = append(out, store.ZoneRoleIncarnation{
+		IncarnationUID: uidFactory(), ZoneUID: uid, Seq: seq, Role: role,
+		State: "ACTIVE", StartedAt: now,
+	})
+	return out
+}
+
+func closeIncarnation(
+	prev store.LiveZone, now time.Time, reason string, expired bool,
+) store.ZoneRoleIncarnation {
+	inc := store.ZoneRoleIncarnation{
+		IncarnationUID: prev.IncarnationUID.String,
+		ZoneUID:        prev.ZoneUID,
+		Seq:            int(prev.IncarnationSeq.Int64),
+		Role:           prev.IncarnationRole.String,
+		State:          "INVALIDATED",
+		StartedAt:      prev.FirstSeenAt,
+		EndedAt:        sql.NullTime{Time: now, Valid: true},
+		EndReason:      sql.NullString{String: reason, Valid: true},
+	}
+	if expired {
+		inc.State = "EXPIRED"
+		// expired_at 與 ended_at 分開：後者答「這一世何時結束」，
+		// 前者答「何時被判定為不再認得」，是資格閘門的稽核依據。
+		inc.ExpiredAt = sql.NullTime{Time: now, Valid: true}
+	}
+	return inc
+}
+
+func instanceFrom(
+	prev store.LiveZone, symbol, timeframe, state string, lastSeen time.Time, absences int,
+) store.ZoneInstance {
+	inst := store.ZoneInstance{
+		ZoneUID: prev.ZoneUID, Symbol: symbol, Timeframe: timeframe, Method: prev.Method,
+		State: state, PriceLow: prev.PriceLow, PriceHigh: prev.PriceHigh,
+		FirstSeenAt: prev.FirstSeenAt, LastSeenAt: lastSeen, ObservedAbsences: absences,
+		// 沒觀測到就沿用舊值——這次沒看到它，不代表它變成別的角色。
+		LastRole: prev.LastRole,
+	}
+	if state != "ACTIVE" {
+		inst.EndedAt = sql.NullTime{Time: lastSeen, Valid: true}
+	}
+	return inst
+}
+
+// terminalStateByParent 依血緣型別決定 parent 的終態。
+// 一個 parent 在同一次分析裡只會屬於一個元件，所以不會有衝突。
+func terminalStateByParent(relations []analysis.ZoneIdentityRelation) map[string]string {
+	out := make(map[string]string, len(relations))
+	for _, rel := range relations {
+		switch rel.Relation {
+		case "SPLIT":
+			out[rel.ParentZoneUID] = "SPLIT"
+		case "MERGE":
+			out[rel.ParentZoneUID] = "MERGED"
+		case "RESHAPE":
+			out[rel.ParentZoneUID] = "RESHAPED"
+		}
+	}
+	return out
+}
+
+// 空字串代表「這個轉換沒有這一側的角色」，要存 NULL 而不是 ''——
+// 之後查 from_role IS NULL 才問得出「哪些是第一次解析出方向」。
+// 本檔已有一個語意不同的 nullableString（處理 store.NullString），故另取名。
+func sqlNullString(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: s, Valid: true}
 }

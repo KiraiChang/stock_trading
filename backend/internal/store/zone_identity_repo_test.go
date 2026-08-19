@@ -93,7 +93,7 @@ func TestZoneIdentityApplyWritesAllFourTables(t *testing.T) {
 		t.Fatalf("apply failed: %v", err)
 	}
 
-	live, err := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, err := repo.ListLive(ctx, "0050", "1d", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestZoneIdentityListLiveJoinsOpenIncarnationRole(t *testing.T) {
 		t.Fatalf("apply failed: %v", err)
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 1 {
 		t.Fatalf("want 1 row, got %d", len(live))
 	}
@@ -134,10 +134,10 @@ func TestZoneIdentityListLiveJoinsOpenIncarnationRole(t *testing.T) {
 	}
 }
 
-func TestZoneIdentityListLiveExcludesLongAbsentIdentities(t *testing.T) {
+func TestZoneIdentityListLiveKeepsLongAbsentIdentitiesSoTheyCanBeCollected(t *testing.T) {
 	repo, ctx := newZoneIdentityRepoForTest(t)
 
-	old := zoneSeenAt.Add(-90 * 24 * time.Hour)
+	old := zoneSeenAt.Add(-180 * 24 * time.Hour)
 	if err := repo.Apply(ctx, ZoneIdentityWrite{
 		Instances: []ZoneInstance{
 			zoneInstance("Z-OLD", 104.73, 105.37, old),
@@ -147,11 +147,13 @@ func TestZoneIdentityListLiveExcludesLongAbsentIdentities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 這道過濾就是 matcher 時間距離判準的 DB 側：沒有它，一個消失三個月的 zone
-	// 會在 ATR 碰巧算出相近區間時被接回來。
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-30*24*time.Hour), 3)
-	if len(live) != 1 || live[0].ZoneUID != "Z-NEW" {
-		t.Fatalf("只該回最近出現過的 Z-NEW，得到 %+v", live)
+	// **刻意沒有時間下界。** 加了的話，超過下界的身分會被 SQL 擋在 matcher 之前，
+	// 於是永遠不會被判失格、永遠不會收攤，就這樣以 ACTIVE 留在表裡——
+	// 與次數軸用 `<` 會造成的死碼是同一個洞，只是換一個軸。
+	// 時間軸的判定屬於 matcher（它才有交易日曆）。
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
+	if len(live) != 2 {
+		t.Fatalf("消失很久的身分仍要撈得出來才收得掉，得到 %+v", live)
 	}
 }
 
@@ -165,7 +167,7 @@ func TestZoneIdentityListLiveExcludesEndedIdentities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 0 {
 		t.Fatalf("身分已終止不該回傳，得到 %+v", live)
 	}
@@ -212,7 +214,7 @@ func TestZoneIdentityApplyUpdatesLastSeenButKeepsFirstSeen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", first.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 1 {
 		t.Fatalf("want 1 row, got %d", len(live))
 	}
@@ -262,7 +264,7 @@ func TestZoneIdentityApplyIsAtomic(t *testing.T) {
 		t.Fatal("外鍵不存在時應該失敗")
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 0 {
 		t.Fatalf("交易失敗後不該留下任何身分，得到 %+v", live)
 	}
@@ -283,7 +285,7 @@ func TestZoneIdentityListLiveExcludesZonesPastTheAbsenceLimit(t *testing.T) {
 
 	// 次數軸的粗篩在 SQL（不需要交易日曆）；剛好等於上限的那一筆仍要放進來一次，
 	// 見 TestZoneIdentityListLiveIncludesZoneAtAbsenceLimitSoItCanExpire。
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 1 || live[0].ZoneUID != "Z-OK" {
 		t.Fatalf("已越過上限的身分不該再進候選集合，得到 %+v", live)
 	}
@@ -310,7 +312,7 @@ func TestZoneIdentityListLiveIncludesZoneAtAbsenceLimitSoItCanExpire(t *testing.
 	// **剛好累到上限的必須還撈得出來一次**，否則它進不了 matcher、不會出現在
 	// expired_previous，就沒有任何東西會把它收成 EXPIRED——整條收攤流程變成死碼。
 	// 收攤時次數 +1，之後才真正消失。
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 1 || live[0].ZoneUID != "Z-LIMIT" {
 		t.Fatalf("上限那筆要進得來、超過的要擋掉，得到 %+v", live)
 	}
@@ -332,7 +334,7 @@ func TestZoneIdentityListLivePicksLatestOpenIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-24*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if len(live) != 1 {
 		t.Fatalf("同一身分不該被放大成多列，得到 %d 列", len(live))
 	}
@@ -359,7 +361,7 @@ func TestZoneIdentityUpsertKeepsLastSeenMonotonic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live, _ := repo.ListLive(ctx, "0050", "1d", zoneSeenAt.Add(-240*time.Hour), 3)
+	live, _ := repo.ListLive(ctx, "0050", "1d", 3)
 	if !live[0].LastSeenAt.Equal(zoneSeenAt) {
 		t.Errorf("last_seen_at 不該倒退，want %v got %v", zoneSeenAt, live[0].LastSeenAt)
 	}
@@ -435,5 +437,38 @@ func TestZoneIdentityNormalisesEmptyReasonCodes(t *testing.T) {
 	}
 	if raw != "[]" {
 		t.Errorf("空的 reason_codes 應正規化為 []，得到 %q", raw)
+	}
+}
+
+func TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst(t *testing.T) {
+	repo, ctx := newZoneIdentityRepoForTest(t)
+	db := repo.(*zoneIdentityRepo).db
+
+	// 同一天兩筆（不同 symbol）只算一個交易日；週末沒有 K 棒所以自然不在清單裡。
+	for _, row := range []struct {
+		symbol string
+		ts     string
+	}{
+		{"0050", "2026-08-14"}, {"2330", "2026-08-14"},
+		{"0050", "2026-08-17"}, {"0050", "2026-08-18"},
+	} {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
+			 VALUES (?, '1d', 1, 1, 1, 1, 1, 1, ?)`, row.symbol, row.ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	days, err := repo.ListTradingDays(ctx, "1d", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 3 {
+		t.Fatalf("同一天多檔只算一個交易日，want 3 got %d：%v", len(days), days)
+	}
+	// 由新到舊——與 Python 端 fetch_market_trading_days 同一個順序約定。
+	// matcher 端的 TradingCalendar.from_iterable 會負責排成升冪。
+	if days[0] != "2026-08-18" {
+		t.Errorf("應由新到舊，得到 %v", days)
 	}
 }

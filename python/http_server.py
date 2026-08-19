@@ -35,6 +35,7 @@ log.info("loading database module...")
 from db import engine, check_connection
 
 from contextlib import asynccontextmanager
+from datetime import date
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, List, Optional, Union
@@ -56,6 +57,7 @@ from backtest.modular.sr_scoring.evaluation import (
 from backtest.modular.sr_scoring.model import get_model
 from backtest.modular.sr_scoring.train import run_training
 from backtest.modular.sr_scoring.zone_builder import ATRZoneBuilderConfig, ZoneBuilderConfig
+from backtest.modular.sr_scoring import zone_matcher
 
 
 @asynccontextmanager
@@ -350,6 +352,89 @@ async def sr_scoring_evaluate(req: SREvaluationRequest):
     if req.write_db:
         write_evaluation_result(report, passed=req.passed)
     return report
+
+
+class ZoneIdentityZone(BaseModel):
+    """matcher 需要的最小 zone 形狀。`price_low`/`price_high` 不是身分，只是形狀。"""
+
+    price_low: float
+    price_high: float
+    method: str
+    role: str
+    # 以下只有 previous 側會帶
+    zone_uid: Optional[str] = None
+    incarnation_role: Optional[str] = None
+    last_seen_at: Optional[str] = None      # YYYY-MM-DD
+    observed_absences: int = 0
+
+
+class ZoneIdentityMatchRequest(BaseModel):
+    as_of: Optional[str] = None             # YYYY-MM-DD，缺就不套時間軸閘門
+    # 市場交易日。**可以是降冪**——from_iterable 會排序去重，
+    # 直接把 db.fetch_market_trading_days() 的輸出丟進來即可。
+    trading_days: List[str] = Field(default_factory=list)
+    previous: List[ZoneIdentityZone] = Field(default_factory=list)
+    current: List[ZoneIdentityZone] = Field(default_factory=list)
+
+
+@app.post("/zone-identity/match")
+async def zone_identity_match(req: ZoneIdentityMatchRequest):
+    """Zone 跨交易日的身分匹配（T-048 階段 B 接線）。
+
+    **刻意是獨立端點而不是塞進 /sr-zones**：階段 B 是「只寫不讀」，沒有任何決策依賴
+    它的輸出。把它掛進 /sr-zones 就得動 scoring.py / pipeline.py——那是有決策責任的
+    核心路徑，為一個還沒有讀者的功能去動它，風險與收益不成比例。
+
+    這支是 `zone_matcher.match_zones` 的純函數包裝：不碰 DB、不改任何既有回應。
+    """
+    log.info("POST /zone-identity/match previous=%d current=%d",
+             len(req.previous), len(req.current))
+
+    calendar = (
+        zone_matcher.TradingCalendar.from_iterable(req.trading_days)
+        if req.trading_days else None
+    )
+    as_of = date.fromisoformat(req.as_of) if req.as_of else None
+
+    previous = [
+        zone_matcher.PreviousZone(
+            zone_uid=z.zone_uid or "",
+            price_low=z.price_low,
+            price_high=z.price_high,
+            method=z.method,
+            role=z.role,
+            incarnation_role=z.incarnation_role,
+            last_seen_at=date.fromisoformat(z.last_seen_at) if z.last_seen_at else None,
+            observed_absences=z.observed_absences,
+        )
+        for z in req.previous
+    ]
+    current = [
+        zone_matcher.CandidateZone(z.price_low, z.price_high, z.method, z.role)
+        for z in req.current
+    ]
+
+    result = zone_matcher.match_zones(previous, current, as_of=as_of, calendar=calendar)
+
+    return {
+        "zone_uids": result.zone_uids,
+        "incarnation_roles": result.incarnation_roles,
+        "relations": [
+            {"parent_zone_uid": r.parent_zone_uid,
+             "child_zone_uid": r.child_zone_uid,
+             "relation": r.relation}
+            for r in result.relations
+        ],
+        "role_transitions": [
+            {"zone_uid": t.zone_uid, "kind": t.kind,
+             "from_role": t.from_role, "to_role": t.to_role}
+            for t in result.role_transitions
+        ],
+        "unmatched_previous": result.unmatched_previous,
+        "terminated_previous": result.terminated_previous,
+        "expired_previous": result.expired_previous,
+        "next_observed_absences": result.next_observed_absences,
+    }
 
 
 @app.get("/sr-scoring/model-status")

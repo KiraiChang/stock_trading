@@ -2584,6 +2584,15 @@ zone_key_aliases」。這裡只講判讀時最容易搞錯的那件事：**事�
 `build_event_state_summary` 寫 `false`，carry forward 在 `_normalize_previous_event_state`
 無條件寫 `true`。Go 只讀不推導，**缺鍵是異常**而不是「不是 carried」。
 
+**第三段用的 `zone_key` 由單一 authority 產生。** 本次分析那份 `zone_key → zone_uid`
+map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` 輸出的欄位；Go 只做
+字串比對，**不自己用 `fmt.Sprintf("%s:%.4f:%.4f", …)` 重建**。兩份浮點格式化只要哪天
+分歧，關聯就會**靜默**失敗——事件掛不到 zone，外觀與「這次沒有 zone 事件」一模一樣。
+
+事件層也沿用身分層四個已知限制中的兩條：`event_instances` 同樣**只在
+`reuse_existing=false` 那條路徑寫入**（統計的是分析的子集），同一 symbol 的併發分析
+同樣會撞唯一索引而整筆 rollback、且只記 log。
+
 **zone 身分因 `SPLIT` / `MERGE` / `RESHAPE` 終止時，parent 身上的事件不傳給 child**，
 而是以 `end_reason = 'ZONE_IDENTITY_ENDED'` 收攤：那條鏈的前提已經消失，接到 child
 等於宣稱鏈延續了，而 `RESHAPE` 的定義正是「血緣無法解析」。血緣留在 `zone_relations`，

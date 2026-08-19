@@ -3015,7 +3015,7 @@ migration：三個 engine 都實跑——`scripts/test-postgres-migrations.sh`�
 `matched_by_alias` **0**——即使在 57 條血緣邊的高 churn 資料上，alias 也沒有輪到它
 決定關聯，它仍然只有單元測試覆蓋。
 
-##### F5：alias 索引與 matcher 對「還活著」用了兩套定義（**已實作／待 review**；端到端實測待補）
+##### F5：alias 索引與 matcher 對「還活著」用了兩套定義（**已實作並端到端復驗／待 review**）
 
 上面那輪出現 **85 筆 `alias_ambiguous`**（37 筆 warn 全部由它觸發）——
 同一個 `zone_key` 對到多個仍算「活著」的身分。逐筆查下去，成因不是 key 撞號：
@@ -3090,9 +3090,25 @@ b9cb296b  8150   recent_pivot  RESISTANCE  118.144500  118.855500  ACTIVE  4
 新增 `TestZoneKeyAliasListExcludesZonesOverAbsenceLimit` 同時釘住「超過上限要排除」與
 「剛好等於上限要留著」（用 `<` 會讓收攤流程變成不可達的死碼）。`backend/scripts/test.sh` 全綠。
 
-**端到端實測待補**：上面的「16 → 0」是對本輪最終 DB 直接套過濾條件的**試算**，
-不是重跑階梯量出來的。要確認 `alias_ambiguous` 真的歸零，得重建 image 後再跑一次
-四檔 21 階（約 50 分鐘）。這一輪沒跑。
+**端到端實測（2026-08-19，image 重建後重跑）**：dev DB 退乾淨（`candles`、身分／事件／alias
+與 `stock_sr_zone_analyses` 及其六個參照方一起 TRUNCATE，保留 `stg_candles`）後，
+同一組四檔 × 21 個交易日重跑，**84 次分析全部 201**。
+
+* **`alias_ambiguous` 77 → 0**：這一輪 backend log **一筆 warn 都沒有**
+  （84 行全是 `level=info` 的 request log；唯一的 warn 是啟動時的 FinMind api_key 提醒，
+  在階梯開始之前）。上一輪是 36 筆 warn、全部由 `alias_ambiguous` 觸發。
+  試算的「16 → 0」到此有了端到端證據。
+* **行為零回歸**：zone 身分 329、血緣邊 57（2330 19／6182 29／8150 9／3105 0）、
+  事件鏈 59、transitions 116、alias 685、`ZONE_IDENTITY_ENDED` 4 次——與修法前逐項相同；
+  終態分布也相同（ACTIVE 293／RESHAPED 20／MERGED 12／SPLIT 4）。
+  六條門檻＋D4 專屬檢查（`ZONE_IDENTITY_ENDED` 的 parent 仍是 ACTIVE）全部 0。
+
+**判讀陷阱：直接對 DB 數撞號會是 16，不是 0。** F5 改的是**查詢路徑**
+（`listZoneKeyAliasesSQL` 的候選條件），不是刪 alias 資料——`zone_key_aliases`
+裡那些殭屍身分的列還在，所以不帶 `observed_absences <= 3` 去 group 一樣會數到 16 個
+撞號 key（涉及 31 個身分：25 個 `observed_absences=4`，其餘 4／1／1 個是 0／1／3）。
+帶上與 `ListLive` 相同的次數上限再數才是 0。要驗這條修法，看的是
+`alias_ambiguous` 的 warn 有沒有消失，不是 DB 的原始撞號數。
 
 **復驗方式的限制**：`logging.NewWithConfig` 把 level 寫死 `zap.InfoLevel`
 （`backend/internal/logging/logger.go`），所以 Debug 版的 `event identity: zone association`

@@ -2674,8 +2674,13 @@ parent 都是 `RESHAPED`），寫出來的 `state` / `active` / `end_reason` 三
 
 現在兩道過濾各管一段：`ListKeyAliases` 的 SQL 用**與 `ListLive` 相同的**
 `observed_absences <= zoneIdentityMaxAbsences` 擋掉已經沉下去的，呼叫端再用
-`expired_previous` 擋掉這一輪剛失格、次數還沒推過上限的。對前述資料試算，
-撞號的 key 由 16 降到 0；端到端重跑的實測待補（`todo.md` T-048 F5）。
+`expired_previous` 擋掉這一輪剛失格、次數還沒推過上限的。同一組四檔 21 階在退乾淨的
+dev DB 上重跑後，**`alias_ambiguous` 由 77 降到 0**（整輪 84 次分析一筆 warn 都沒有），
+而身分數／血緣邊／事件鏈／alias 筆數與 `ZONE_IDENTITY_ENDED` 次數逐項不變。
+
+判讀時注意：修法改的是**查詢路徑**不是資料，`zone_key_aliases` 裡失格身分的列仍在，
+所以不帶次數上限直接對 DB group 一樣會數到 16 個撞號 `zone_key`。
+要看這條有沒有生效，看 `alias_ambiguous` 的 warn 是否消失。
 
 **逐段命中數只有 warn 時看得到。** `logging` 把 level 寫死 `zap.InfoLevel`，
 而完整欄位的 `event identity: zone association` 是 Debug 級別，只有觸發 warn 的那次分析

@@ -2455,3 +2455,146 @@ mapping。`serialization.py` 負責 zone score response dict，維持 API 欄位
 `scoring.py` 現在保留核心 zone scoring、probability/confidence/recent validation、
 chip summary、global metrics 與 `score_symbol()` 入口；相容性上仍 re-export 已拆出的
 helper，避免舊測試或內部引用一次性中斷。
+
+---
+
+## 二十、Zone 身分與 ZoneMatcher
+
+跨交易日追蹤「同一個 zone」的機制。**已實作的是身分層（階段 A／B）；事件層
+（`event_instances`）尚未實作**，事件鏈目前仍走 `market_event_states`。
+
+### 為什麼需要身分
+
+事件鏈原本的身分是 `event_engine.py` 的 `_zone_key()`：
+
+```python
+return f"{role}:{price_low:.4f}:{price_high:.4f}"
+```
+
+**身分綁在浮點邊界上，而 zone 邊界每次分析都由 ATR 重算。** 兩個後果都在 live 資料裡
+證實過：同一個支撐會因為邊界微幅漂移而分裂成兩條並存的鏈（下游重複計數，且沒有任何
+檢查會發現）；`role` 在 key 裡，所以支撐翻壓力必然產生全新身分、舊鏈直接斷掉。
+
+### 三層模型：身分 / 一世 / 轉換
+
+| 層 | 表 | 語意 |
+|---|---|---|
+| 身分 | `zone_instances` | 長壽。跨越失效與角色翻轉都不改變 |
+| 一世（role incarnation） | `zone_role_incarnations` | 角色翻轉或失效後重生會開新的一世（`seq + 1`） |
+| 轉換 | `zone_transitions` | append-only 流水 |
+
+`INVALIDATED` 是**該一世的終態，不是身分的終態**。同一個價位失效後又重新有效，是同一個
+身分的下一世——這樣「這個價位長期是不是關鍵」與「這一世活了多久」兩個問題才都答得出來。
+
+`ROLE_FLIPPED` **不是狀態而是 transition**：它結束當前這一世、開啟下一世，持久化的結果是
+`zone_role_incarnations` 多一列，而不是某個欄位被改成 `ROLE_FLIPPED`。
+
+欄位定義、狀態機的合法轉換、`from_state` 的不變式與 `EXPIRED` / `INVALIDATED` 的差別，
+見 [`database-schema.md`](./database-schema.md)。
+
+### ZoneMatcher（`zone_matcher.py`）
+
+**`is_same_zone()` 是純幾何**：比中心位移比率、寬度變化比率與 `method`，
+**不比 role**（角色翻轉要能保持同一身分），也不看時間與資格——把時間條件混進來會讓
+「形狀像不像」與「還算不算數」變成同一個判斷，而兩者的失敗方式完全不同。
+
+**血緣型別是連通元件的性質，不是單一邊的性質。** 同一條邊在 1→1 裡是延續、在 2→2 裡是
+`RESHAPE`。只有 1→1 的延續保留 `zone_uid`；`SPLIT` / `MERGE` / `RESHAPE` 的所有 child
+都取得新 uid，parent 寫成身分終態。**延續不寫血緣邊**——那會是 `parent == child` 的自環，
+讓沿 parent 遞迴回溯祖先的查詢無法終止。**只寫實際匹配上的邊，不做笛卡爾積**：
+鏈狀元件（P0–C0、P1–C0、P1–C1）很常見，補成 4 條邊會憑空生出 `is_same_zone` 明確否決過的
+P0–C1。
+
+**翻轉判定比對的是「當前這一世的 role」而非「上次觀測到的 role」**，所以
+`RESISTANCE → AT_ZONE → SUPPORT` 這種穿過 `AT_ZONE` 的翻轉抓得到。`AT_ZONE` 是
+「方向暫時無法解析」不是角色，它不結束一世，只在 `zone_transitions` 留
+`ROLE_UNRESOLVED` / `ROLE_RESOLVED`。
+
+**門檻的來源**（live 311 列 zone、相鄰分析間 IoU > 0 的 543 筆配對掃描而來，不是猜的）：
+純 IoU 會被 zone 寬度污染——寬 zone 漂一點點 IoU 就掉很多，所以改用兩個**尺度無關**的量。
+定案是**中心位移 < 0.06、寬度變化 < 0.25**。`IoU ≥ 0.90` 是這個判準的嚴格子集，
+而位移判準另外多收 16 組形狀上就是日常漂移的配對（例如
+`[109.59,113.65] → [109.80,113.45]`，IoU 0.899 但中心位移只有 0.001）。
+
+> 引用數字前先看門檻：`+16` 是 0.06 的、`+38` 是 0.10 的，這兩個被混用過一次。
+
+**判準的鬆緊直接換成一對多的數量**（0.06 下是 7 組一對多、6 組多對一；放寬到 0.10 會變成
+20／19）。一對多不是雜訊而是真實的分裂／合併，放寬只是讓它現形——所以問題不是
+「怎麼把一對多壓到 0」，而是「matcher 要不要從第一天就支援它」，答案是要，用血緣表達。
+
+**`role` 必須排除在身分之外，證據比預期強**：IoU ≥ 0.8 的角色翻轉有 18 筆，其中
+`volume_profile` 有多筆 **IoU = 1.000** 的翻轉——價格區間一模一樣、邊界完全沒動，
+只因為 role 重新解析，舊 `zone_key` 就整個不同、鏈直接斷。而
+`AT_ZONE ↔ SUPPORT/RESISTANCE` 在價格穿越 zone 時就會切換，是常態不是例外。
+
+**資格閘門有兩個軸**，只決定「這個身分還有沒有資格進入 matcher」：
+`MAX_ABSENCE_TRADING_DAYS = 20`（交易日陳舊度，在 matcher 擋）與
+`MAX_OBSERVED_ABSENCES = 3`（看了幾次都沒看到，在 `ListLive` 的 SQL 擋）。
+**兩個都要**——單一時間軸分不出「zone 消失了」與「我們根本沒看」。距離用交易日而非
+日曆天，交易日曆由呼叫端注入，沿用 candles 的 distinct 日期，不引入外部假日表。
+
+### 接線
+
+`/zone-identity/match`（Python 獨立端點）＋ `MatchZoneIdentities`（Go client）＋
+`persistZoneIdentity`（handler）。
+
+**刻意不併進 `/sr-zones` 的核心路徑**：身分層目前**只寫不讀**，沒有任何決策依賴它的輸出；
+併進去就得動 `scoring.py` / `pipeline.py` 那條有決策責任的路徑，為一個還沒有讀者的功能
+去動它，風險與收益不成比例。代價是每次分析多一趟 HTTP。**寫入失敗只記 log，不影響分析
+本身**——所以排查時要主動 grep log，API 回 201 不代表身分寫進去了。
+
+#### 四個已知限制
+
+1. **只接在 `reuse_existing=false` 那條路徑。** `SRAnalysisProvider.Analyze` 也會
+   `repo.Create`（`portfolio/analyzer` 與 `/sr-zones` 的 reuse 分支），那些跑法會產生 zone
+   但**不算一次觀測**，所以 `observed_absences` 統計的是分析的一個子集。刻意如此：重用既有
+   分析的目的就是不重算，把它算成觀測會讓「我們看了幾次」失真。
+2. **`as_of` 取的是 wall clock，不是資料日期**，所以 `observed_absences` 量的是分析次數
+   而非時間。詳見 `database-schema.md`。
+3. **同一 symbol 的併發分析會產生身分 churn 或靜默的交易失敗。** 兩個同時的
+   `POST /sr-zones`（前端連點兩下就夠）都會讀 `ListLive` 再寫；zone 若翻轉，兩邊都算出
+   `seq = MaxSeq + 1`，第二個 `Apply` 撞唯一索引而整筆 rollback，而錯誤只記 log。
+   要修的話是對 `(symbol, timeframe)` 加行程內鎖或 DB advisory lock。
+4. **`/zone-identity/match` 對格式錯誤的 `as_of` / `trading_days` 回 500 而不是 422。**
+   呼叫端只有 Go backend、值都由程式產生，實際上碰不到；之後若開放人工呼叫要補。
+
+### 實測特性
+
+**對 live 311 列真實 zone 重放**（階段 A，2026-08-18）：收斂成 **167 個身分**，
+其中身分延續 144、血緣邊 17（SPLIT 4 ／ MERGE 2 ／ RESHAPE 11），
+`ROLE_RESOLVED` / `ROLE_UNRESOLVED` / `ROLE_FLIPPED` 為 6 / 8 / **3**——
+真翻轉只有 3 筆，而混合口徑（把 `AT_ZONE` 的進出也算進去）會報成 17 筆。
+**`AT_ZONE` 的進出不是翻轉**，混在一起會讓真正的翻轉被雜訊淹沒。
+
+**as-of 階梯實跑**（階段 B 端到端，2026-08-19，0050 七階）：
+
+*身分機制確實優於舊 key，但不到「穩定」。* 104 次 zone 觀測下——
+
+| 身分機制 | 身分數 | 觀測數／身分 |
+|---|---|---|
+| 舊 `_zone_key()` | 86 | 1.21 |
+| zone identity | 59 | 1.76 |
+
+*穩定度隨 method 差很多*，這是判讀時最需要記得的一件事：
+
+| method | 活過 >1 次分析 |
+|---|---|
+| `atr` | 83% |
+| `recent_pivot` | 79% |
+| `volume_profile` | 27% |
+| `vwap_reclaim` | **0%** |
+
+結構性的方法身分延續得好，`volume_profile` 與 `vwap_reclaim` 幾乎每次都是新的。
+**這兩個 method 的 zone 不適合拿來談「這個 zone 活了多久」**——不是 matcher 的缺陷，
+是這些 method 每次算出來的東西本來就在動。
+
+*2→2 的 `RESHAPE` 代價要知道*：兩個互相重疊的 ATR zone 只要一起漂 0.02 就會四條邊全部
+成立、元件變成 2→2，兩個身分一起終止並重鑄。這是「血緣型別是元件的性質」的直接後果，
+不是 bug；實測沒有形成 churn 迴圈（後續各階沒有再對同一組 zone 重複 RESHAPE）。
+
+**給下游（T-049 / Bias / Final Entry）的判讀提示**：該關心的是 `ROLE_FLIPPED`，
+而 `AT_ZONE` 的來回 churn 多半只是價格在 zone 內外進出。兩者若不分開，下游就得自己
+重新推導——那正是這套機制要消滅的模式。
+
+要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
+「在 dev stack 上做『as-of 階梯』驗收」。

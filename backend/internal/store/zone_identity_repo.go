@@ -18,7 +18,7 @@ import (
 // **本批只寫不讀**：沒有任何決策路徑會查這些表。既有的 market_event_states /
 // market_event_detections 繼續並行寫入，等階段 C 有東西可比對之後再切換。
 //
-// 分三層的理由見 migration 067 的註解與 docs/todo.md T-048：身分跨越失效與角色翻轉，
+// 分三層的理由見 migration 067 的註解與 docs/sr-zone-scoring.md：身分跨越失效與角色翻轉，
 // `INVALIDATED` 只是「這一世」的終態。
 type ZoneIdentityRepo interface {
 	// ListLive 撈這檔還有資格進 matcher 的身分，附帶當前這一世的角色——正好是

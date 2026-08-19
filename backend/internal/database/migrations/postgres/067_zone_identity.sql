@@ -1,4 +1,5 @@
--- Zone 身分、一世與轉換（T-048 階段 B）。規格見 docs/todo.md T-048。
+-- Zone 身分、一世與轉換（T-048 階段 B）。
+-- 現況規格見 docs/sr-zone-scoring.md「Zone 身分與 ZoneMatcher」與 docs/database-schema.md。
 --
 -- 要解的問題：現行 zone 身分是 event_engine._zone_key()，也就是
 -- `role:price_low:price_high`——身分綁在浮點邊界與角色上。2026-08-18 對 live 的盤點
@@ -95,7 +96,11 @@ CREATE TABLE IF NOT EXISTS zone_transitions (
     -- **role 的三種變化必須分開**，混為一談會讓真正的翻轉被雜訊淹沒：實測 161 個匹配
     -- 配對裡，AT_ZONE 的進出有 15 筆、真正的 SUPPORT↔RESISTANCE 翻轉只有 3 筆。
     transition_kind VARCHAR(24) NOT NULL,
-    from_state      VARCHAR(16) NULL,   -- 純 role 轉換時為 NULL
+    -- NULL 有兩種來源，靠 transition_kind 分辨：
+    --   STATE_CHANGE 且 from_state IS NULL  → 身分誕生（to_state = ACTIVE）
+    --   純 role 轉換（ROLE_*）               → from_state / to_state 都是 NULL
+    -- 失格與終態一律從 ACTIVE 出發，不會留白。
+    from_state      VARCHAR(16) NULL,
     to_state        VARCHAR(16) NULL,
     from_role       VARCHAR(16) NULL,
     to_role         VARCHAR(16) NULL,

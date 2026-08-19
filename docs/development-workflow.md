@@ -166,6 +166,86 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 ——這個沙箱的 `sleep` 不等比推進 wallclock，且腳本用 `--rm`，容器結束後拿不到
 `FinishedAt`。要量時間得自行在呼叫端記錄起訖。
 
+### 在 dev stack 上做「as-of 階梯」驗收
+
+要驗的東西**跨越多個交易日**（zone 身分延續、角色翻轉、缺席收攤、事件鏈）時，
+單次分析驗不出來，而 dev project 沒有歷史資料。作法是把 live 的日 K 唯讀複製到
+dev 的 staging 表，再**依交易日逐階釋出**到 `candles`，每釋出一階打一次分析。
+2026-08-19 的 T-048 階段 B 驗收就是這樣做的。
+
+**一、從 live 唯讀取資料**（live 憑證從 container 的 `POSTGRES_USER` 讀，不寫進 repo）：
+
+```bash
+docker exec postgres-postgres-1 psql -U trading_username -d trading \
+  -c "\copy (select symbol,timeframe,open,high,low,close,volume,amount,ts,adj_factor,vol_factor \
+       from candles where symbol='0050' and timeframe='1d' and ts >= '2024-06-01' order by ts) \
+      to stdout with csv" > /tmp/0050_1d.csv
+```
+
+**二、進 dev 的 staging 表**（不要直接進 `candles`，否則沒得分階段）：
+
+```bash
+docker exec stock_trading_dev-postgres-1 psql -U trading -d trading \
+  -c "drop table if exists stg_candles; create table stg_candles (like candles including defaults);"
+docker exec -i stock_trading_dev-postgres-1 psql -U trading -d trading \
+  -c "\copy stg_candles(symbol,timeframe,open,high,low,close,volume,amount,ts,adj_factor,vol_factor) from stdin with csv" \
+  < /tmp/0050_1d.csv
+```
+
+**三、每一階：釋出 → 分析 → 快照**：
+
+```sql
+insert into candles (symbol,timeframe,open,high,low,close,volume,amount,ts,adj_factor,vol_factor)
+select symbol,timeframe,open,high,low,close,volume,amount,ts,adj_factor,vol_factor from stg_candles
+where (ts at time zone 'Asia/Taipei')::date <= date '2026-07-21'
+on conflict (symbol,timeframe,ts) do nothing;
+```
+
+```bash
+curl -sS -X POST http://localhost:18080/api/v1/sr-zones \
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"symbol":"0050","timeframe":"1d","limit":400,"reuse_existing":false}'
+```
+
+#### 四個會讓這件事做錯的細節
+
+**交易日是台北日期，不是 `ts::date`。** `candles.ts` 存的是 `16:00Z`＝台北隔日
+`00:00`，所以 `2026-08-17 16:00:00+00` 這根的交易日是 **08-18**。切階梯一律用
+`(ts at time zone 'Asia/Taipei')::date`，用 `ts::date` 會整批差一天。
+
+**`SR_SCORING_MODELS_DIR` 沒帶就分析不了。** repo 的 `python/models/` 是**空的**，
+compose 預設會把它掛進去，於是 `POST /sr-zones` 回 **503「機率模型尚未訓練」**——
+看起來像模型壞了，其實是掛錯目錄。啟動 dev stack 時要指到有 joblib 的目錄：
+
+```bash
+SR_SCORING_MODELS_DIR=/opt/stacks/scripts/stock_trading/python/models \
+  docker compose -f docker-compose.dev.yml up -d
+```
+
+**dev 帳號註冊完是 `inactive`，沒有 first-user bootstrap。** `POST /auth/register`
+之後要直接改 DB 才登得進去：
+
+```bash
+docker exec stock_trading_dev-postgres-1 psql -U trading -d trading \
+  -c "update users set status='active' where email='dev@example.com';"
+```
+
+**不要為了這件事重建 image。** `scripts/smoke-dev.sh` 會先 `down` 再 build，
+Go compile 峰值 RSS 約 420 MiB，而這台 host 只有 2 GiB。先確認跑著的 image 已經是
+現行程式碼再決定——backend 比對 image 建置時間與 commit 時間，python-server 直接比 md5：
+
+```bash
+docker image inspect stock_trading_dev-backend -f '{{.Created}}'
+docker exec stock_trading_dev-python-server-1 md5sum /app/http_server.py; md5sum python/http_server.py
+```
+
+**寫入失敗是靜默的就要主動查 log。** zone identity 那條路徑寫入失敗只記 warn、
+API 照樣回 201，所以每階跑完要看一次：
+
+```bash
+docker logs stock_trading_dev-backend-1 2>&1 | grep -i "zone identity"
+```
+
 ### 字串欄位的寬度：不要訂「剛好夠用」
 
 2026-08-11 同一天內因為這件事失敗了**三次**，全部是同一個型態（SQLSTATE 22001）：

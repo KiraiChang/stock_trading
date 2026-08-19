@@ -137,6 +137,11 @@ func TestBuildZoneIdentityWriteExpiresIncarnationAndRecordsReason(t *testing.T) 
 	for _, tr := range w.Transitions {
 		if tr.ZoneUID == "Z-EXP" && tr.ToState.String == "EXPIRED" {
 			found = true
+			// 失格一定是從 ACTIVE 出發。留白會讓它與誕生那筆都是 NULL，
+			// `from_state IS NULL` 就分不出「剛出現」與「不再認得」。
+			if tr.FromState.String != "ACTIVE" {
+				t.Errorf("失格的 from_state 要是 ACTIVE，got %+v", tr.FromState)
+			}
 		}
 	}
 	if !found {
@@ -391,5 +396,146 @@ func TestBuildZoneIdentityWriteExpiredKeepsOriginalLastSeen(t *testing.T) {
 	if !w.Instances[0].LastSeenAt.Equal(seen) {
 		t.Errorf("失格不該把 last_seen_at 推到今天，want %v got %v",
 			seen, w.Instances[0].LastSeenAt)
+	}
+}
+
+// ── 身分誕生的 transition ──
+//
+// 誕生一度完全不寫 transition，於是 zone_transitions 不是完整的事件流：
+// 下游問「這個身分何時出現」得改查 zone_instances.first_seen_at，
+// 而「from_state IS NULL = 首次建立」這個約定在資料裡永遠撈不到東西。
+// 不變式的現況定義見 docs/database-schema.md。
+
+func creationTransitions(w store.ZoneIdentityWrite) []store.ZoneTransition {
+	out := []store.ZoneTransition{}
+	for _, tr := range w.Transitions {
+		if tr.TransitionKind == "STATE_CHANGE" && !tr.FromState.Valid {
+			out = append(out, tr)
+		}
+	}
+	return out
+}
+
+func TestBuildZoneIdentityWriteRecordsCreationTransition(t *testing.T) {
+	zones := []store.SRZone{srZone(104.73, 105.37, "SUPPORT")}
+	m := &analysis.ZoneIdentityMatchResult{ZoneUIDs: []string{"Z-NEW"}}
+
+	w := buildZoneIdentityWrite("0050", "1d", 42, identityNow, zones, nil, m, testUID())
+
+	created := creationTransitions(w)
+	if len(created) != 1 {
+		t.Fatalf("新身分要留一筆誕生 transition，got %d（%+v）", len(created), w.Transitions)
+	}
+	tr := created[0]
+	if tr.ZoneUID != "Z-NEW" || tr.ToState.String != "ACTIVE" {
+		t.Errorf("誕生要指向 ACTIVE，got %+v", tr)
+	}
+	if string(tr.ReasonCodes) != `["IDENTITY_CREATED"]` {
+		t.Errorf("reason_codes 不對：%s", tr.ReasonCodes)
+	}
+	// 帶上一世：少了它，事後問「誕生時開的是哪一世」只能靠時間戳猜。
+	if !tr.IncarnationUID.Valid {
+		t.Error("有向 zone 誕生時開了一世，transition 要指得到它")
+	}
+	if !tr.AnalysisID.Valid {
+		t.Error("要記是哪次分析造成的")
+	}
+}
+
+func TestBuildZoneIdentityWriteDoesNotRecordCreationForExistingIdentity(t *testing.T) {
+	// 這是最容易寫錯的方向：把「這次有觀測到」當成「誕生」，
+	// 於是每次分析都替同一個身分再寫一筆誕生，事件流就沒有意義了。
+	live := []store.LiveZone{liveZone("Z-P", 104.73, 105.37, identityNow.AddDate(0, 0, -5), 0)}
+	zones := []store.SRZone{srZone(104.73, 105.37, "SUPPORT")}
+	m := &analysis.ZoneIdentityMatchResult{ZoneUIDs: []string{"Z-P"}}
+
+	w := buildZoneIdentityWrite("0050", "1d", 42, identityNow, zones, live, m, testUID())
+
+	if got := creationTransitions(w); len(got) != 0 {
+		t.Errorf("既有身分不該再誕生一次，got %+v", got)
+	}
+}
+
+func TestBuildZoneIdentityWriteRecordsCreationForAtZoneWithoutIncarnation(t *testing.T) {
+	// AT_ZONE 不開一世，但它仍然是一個新身分——誕生 transition 要照寫，
+	// incarnation_uid 是 NULL 而不是漏帶。
+	zones := []store.SRZone{srZone(104.73, 105.37, "AT_ZONE")}
+	m := &analysis.ZoneIdentityMatchResult{ZoneUIDs: []string{"Z-AZ"}}
+
+	w := buildZoneIdentityWrite("0050", "1d", 42, identityNow, zones, nil, m, testUID())
+
+	created := creationTransitions(w)
+	if len(created) != 1 {
+		t.Fatalf("AT_ZONE 也要記誕生，got %d", len(created))
+	}
+	if created[0].IncarnationUID.Valid {
+		t.Errorf("AT_ZONE 沒有一世可指，incarnation_uid 應為 NULL，got %+v", created[0].IncarnationUID)
+	}
+}
+
+func TestBuildZoneIdentityWriteRecordsCreationForSplitChildren(t *testing.T) {
+	// 血緣那幾段不另外補誕生——child 是走「這次觀測到的 zone」那條路徑拿新 uid 的。
+	// 這支測試鎖住那個假設：改動迴圈結構而讓 child 漏掉誕生，這裡會紅。
+	live := []store.LiveZone{liveZone("Z-P", 100.0, 110.0, identityNow, 0)}
+	zones := []store.SRZone{srZone(100.1, 109.9, "SUPPORT"), srZone(100.2, 110.1, "SUPPORT")}
+	m := &analysis.ZoneIdentityMatchResult{
+		ZoneUIDs:           []string{"Z-C1", "Z-C2"},
+		TerminatedPrevious: []string{"Z-P"},
+		Relations: []analysis.ZoneIdentityRelation{
+			{ParentZoneUID: "Z-P", ChildZoneUID: "Z-C1", Relation: "SPLIT"},
+			{ParentZoneUID: "Z-P", ChildZoneUID: "Z-C2", Relation: "SPLIT"},
+		},
+	}
+
+	w := buildZoneIdentityWrite("0050", "1d", 42, identityNow, zones, live, m, testUID())
+
+	got := map[string]bool{}
+	for _, tr := range creationTransitions(w) {
+		got[tr.ZoneUID] = true
+	}
+	if !got["Z-C1"] || !got["Z-C2"] {
+		t.Errorf("分裂出來的 child 也是新身分，兩個都要有誕生 transition，got %v", got)
+	}
+	// parent 是終止不是誕生，它那筆從 ACTIVE 出發。
+	if got["Z-P"] {
+		t.Error("終止的 parent 不該有誕生 transition")
+	}
+}
+
+func TestBuildZoneIdentityWriteCreationIsTheOnlyNullFromState(t *testing.T) {
+	// **這支是整組測試的核心**：`from_state IS NULL` 必須恰好等於「誕生」。
+	// 一次跑出誕生／失格／終止三種 STATE_CHANGE，確認只有誕生留白。
+	live := []store.LiveZone{
+		liveZone("Z-P", 100.0, 110.0, identityNow, 0),
+		liveZone("Z-EXP", 90.0, 91.0, identityNow.AddDate(0, 0, -60), 3),
+	}
+	live[1].IncarnationUID = sql.NullString{String: "I-1", Valid: true}
+	live[1].IncarnationRole = sql.NullString{String: "SUPPORT", Valid: true}
+	zones := []store.SRZone{srZone(100.1, 109.9, "SUPPORT"), srZone(100.2, 110.1, "SUPPORT")}
+	m := &analysis.ZoneIdentityMatchResult{
+		ZoneUIDs:             []string{"Z-C1", "Z-C2"},
+		TerminatedPrevious:   []string{"Z-P"},
+		ExpiredPrevious:      []string{"Z-EXP"},
+		NextObservedAbsences: map[string]int{"Z-EXP": 4},
+		Relations: []analysis.ZoneIdentityRelation{
+			{ParentZoneUID: "Z-P", ChildZoneUID: "Z-C1", Relation: "SPLIT"},
+			{ParentZoneUID: "Z-P", ChildZoneUID: "Z-C2", Relation: "SPLIT"},
+		},
+	}
+
+	w := buildZoneIdentityWrite("0050", "1d", 42, identityNow, zones, live, m, testUID())
+
+	kinds := 0
+	for _, tr := range w.Transitions {
+		if tr.TransitionKind != "STATE_CHANGE" {
+			continue
+		}
+		kinds++
+		if tr.FromState.Valid != (tr.ToState.String != "ACTIVE") {
+			t.Errorf("from_state 留白必須恰好對應誕生（to_state=ACTIVE），got %+v", tr)
+		}
+	}
+	if kinds < 4 {
+		t.Fatalf("這個情境要同時涵蓋誕生／終止／失格，只拿到 %d 筆 STATE_CHANGE", kinds)
 	}
 }

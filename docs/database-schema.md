@@ -811,6 +811,18 @@ Zone 的跨交易日身分與生命週期（T-048 階段 B，migration 067）。
 **為什麼兩個軸都要**：單一時間軸分不出「zone 消失了」與「我們根本沒看」——
 實測 2330 全期只有 4 次分析、橫跨 5 週，任何兩次之間都隔很久。
 
+**`as_of` 取的是 wall clock，不是資料日期。** `persistZoneIdentity`
+（`backend/internal/api/handler/sr_zones.go`）用 `time.Now().In(timeutil.TaipeiTZ)`
+當基準日，所以：
+
+* `observed_absences` 量的是**分析次數**，不是時間。回補歷史、或同一天內對同一檔重跑
+  多次分析，缺席次數都會以與市場無關的速度累加。
+* 同一天內跑完的整串分析，`as_of` 全部相同，**交易日缺席距離恆為 0**——時間軸
+  在單日內不可能自然觸發。2026-08-19 的階梯驗收只能用 fixture（直接改 `last_seen_at`）
+  證明那條路徑會動。
+
+判讀這兩個欄位前要先知道這件事，特別是拿它們回答「這個 zone 沉寂多久了」的時候。
+
 **`EXPIRED` 與 `INVALIDATED` 的差別是誰造成的**：`INVALIDATED` 是市場事件
 （被跌破／突破），`EXPIRED` 是長期缺席、我們不再認得它。收攤時同時寫
 `expired_at` 與一筆 `end_reason='EXPIRED_BY_ABSENCE'` 的 transition。
@@ -829,6 +841,12 @@ Zone 的跨交易日身分與生命週期（T-048 階段 B，migration 067）。
   （`WITH RECURSIVE` 沒有 cycle 偵測會直接失敗）。schema 有 CHECK 擋住。
 * **`RESHAPE`（N→M）不猜血緣**：所有 parent 終止、所有 child 新生，
   只記錄實際匹配上的邊。誠實記錄一次無法解析的重整，好過編一組看起來合理的父子關係。
+* **`from_state IS NULL` 的 `STATE_CHANGE` 恰好等於「身分誕生」**（`to_state='ACTIVE'`、
+  `reason_codes=["IDENTITY_CREATED"]`）。失格與終態都從 `ACTIVE` 出發，不留白；
+  純 role 轉換（`ROLE_*`）則是 `from_state` / `to_state` 都 NULL，靠 `transition_kind` 分辨。
+  誕生的 `incarnation_uid` 在 `AT_ZONE` 誕生時是 NULL——那是因為 `AT_ZONE` 不開一世，
+  不是漏帶。**誕生時間問這張表就好，不必再去查 `zone_instances.first_seen_at`**；
+  這條不變式 2026-08-19 才補齊，在那之前誕生完全不寫 transition。
 * **`zone_transitions.is_illegal`**：不合法的轉換照樣寫入，只標記不擋。
   判讀時記得過濾——這是刻意的取捨，目的是先看清楚現實會發生什麼。
 * **`reason_codes` 是 `TEXT DEFAULT '[]'` 而不是 JSON 型別**：mysql 的 JSON 欄位

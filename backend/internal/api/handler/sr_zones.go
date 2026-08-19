@@ -926,7 +926,7 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 // 那些跑法會產生 zone 但不算一次「觀測」，所以 observed_absences 統計的是
 // **分析的一個子集**。這是刻意的取捨：那條路徑的目的是重用既有分析，把它也算成
 // 觀測會讓「我們看了幾次」失真。等 T-049 需要完整母體時要重新評估，
-// 已記在 docs/todo.md T-048 階段 B 的實作結果。
+// 已記在 docs/sr-zone-scoring.md「Zone 身分與 ZoneMatcher」的已知限制。
 func (h *SRZoneHandler) persistZoneIdentity(
 	ctx context.Context, symbol, timeframe string, analysisID uint64, zones []store.SRZone,
 ) {
@@ -1049,6 +1049,25 @@ func buildZoneIdentityWrite(
 			// 翻轉開出來的新一世要能被 role transition 指到（見下方 RoleTransitions 迴圈）。
 			openedIncarnation[uid] = inc[len(inc)-1].IncarnationUID
 		}
+
+		// ── 誕生也是一次轉換 ──
+		// 少了這一筆，zone_transitions 就不是完整的事件流：下游要問「這個身分何時出現」
+		// 得改查 zone_instances.first_seen_at，於是同一個問題要跨兩張表用兩種語意回答。
+		// **誕生是唯一 from_state 為 NULL 的 STATE_CHANGE**——失格與終態都從 ACTIVE 出發。
+		// SPLIT / MERGE / RESHAPE 的 child 也是走這條路徑拿新 uid，所以這裡一併涵蓋，
+		// 不需要在血緣那幾段各補一次。不變式見 docs/database-schema.md。
+		if !existing {
+			w.Transitions = append(w.Transitions, store.ZoneTransition{
+				ZoneUID: uid,
+				// AT_ZONE 誕生時不開一世，這裡就是 NULL——不是漏帶。
+				IncarnationUID: sqlNullString(openedIncarnation[uid]),
+				AnalysisID:     analysisRef,
+				TransitionKind: "STATE_CHANGE",
+				ToState:        sql.NullString{String: "ACTIVE", Valid: true},
+				ReasonCodes:    store.RawJSON(`["IDENTITY_CREATED"]`),
+				OccurredAt:     now,
+			})
+		}
 	}
 
 	// ── 二、因分裂／合併／重整而終止的身分 ──
@@ -1122,9 +1141,12 @@ func buildZoneIdentityWrite(
 			IncarnationUID: prev.IncarnationUID,
 			AnalysisID:     analysisRef,
 			TransitionKind: "STATE_CHANGE",
-			ToState:        sql.NullString{String: "EXPIRED", Valid: true},
-			ReasonCodes:    store.RawJSON(`["EXPIRED_BY_ABSENCE"]`),
-			OccurredAt:     now,
+			// **明寫 ACTIVE**：失格前這個身分一定是 ACTIVE（ListLive 只撈 ACTIVE）。
+			// 留白會讓它與誕生那筆一樣都是 NULL，`from_state IS NULL` 就分不出兩者。
+			FromState:   sql.NullString{String: "ACTIVE", Valid: true},
+			ToState:     sql.NullString{String: "EXPIRED", Valid: true},
+			ReasonCodes: store.RawJSON(`["EXPIRED_BY_ABSENCE"]`),
+			OccurredAt:  now,
 		})
 	}
 

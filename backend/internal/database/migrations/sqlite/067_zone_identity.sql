@@ -1,5 +1,5 @@
 -- Zone 身分、一世與轉換（T-048 階段 B）。完整設計理由見 postgres 版的註解與
--- docs/todo.md T-048。
+-- docs/sr-zone-scoring.md「Zone 身分與 ZoneMatcher」。
 --
 -- sqlite 差異：TEXT 沒有長度上限、沒有 JSONB（用 TEXT 存 JSON 字串）、
 -- 沒有部分索引以外的差別。BIGSERIAL → INTEGER PRIMARY KEY AUTOINCREMENT。

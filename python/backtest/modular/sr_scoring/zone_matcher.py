@@ -69,7 +69,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Callable, Optional, Sequence
 
-# ── 幾何判準（實測定案，改動前先看 docs/todo.md T-048 的門檻掃描表）──
+# ── 幾何判準（實測定案，改動前先看 docs/sr-zone-scoring.md 的「門檻的來源」）──
 MAX_CENTER_SHIFT_RATIO = 0.06
 MAX_WIDTH_CHANGE_RATIO = 0.25
 

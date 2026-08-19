@@ -1,5 +1,5 @@
 -- Zone 身分、一世與轉換（T-048 階段 B）。完整設計理由見 postgres 版的註解與
--- docs/todo.md T-048。
+-- docs/sr-zone-scoring.md「Zone 身分與 ZoneMatcher」。
 --
 -- mysql 從未在任何環境部署，唯一的驗證路徑是 scripts/test-mysql-migrations.sh（見 issue.md I-054）。
 --

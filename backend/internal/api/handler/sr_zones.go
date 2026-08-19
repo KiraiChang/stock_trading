@@ -992,7 +992,10 @@ func (h *SRZoneHandler) persistZoneIdentity(
 	//
 	// 失敗只降級不中止：沒有 alias 就退回本次 map 單段查找，也就是修法前的行為。
 	// 為了一份輔助索引把整條身分追蹤停掉，代價與收益不成比例。
-	aliasRefs, err := h.zoneIdentity.ListKeyAliases(ctx, symbol, timeframe)
+	// 次數軸傳與 ListLive 同一個常數：alias 索引與 matcher 的候選集合必須由同一個
+	// 地方定義，否則「還活著」會有兩套判準（T-048 F5）。
+	aliasRefs, err := h.zoneIdentity.ListKeyAliases(ctx, symbol, timeframe,
+		zoneIdentityMaxAbsences)
 	if err != nil {
 		h.log.Warn("zone identity: list key aliases failed", zap.Error(err))
 	}
@@ -1020,7 +1023,7 @@ func (h *SRZoneHandler) persistZoneIdentity(
 		// 讓階段 C 照跑會寫出指向不存在身分的事件鏈（sqlite 不擋外鍵時尤其安靜）。
 		return nil
 	}
-	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(aliasRefs)
+	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(aliasRefs, matched.ExpiredPrevious)
 	return &zoneIdentityOutcome{
 		UIDByZoneKey:      zoneUIDByZoneKey(zones, matched.ZoneUIDs),
 		AliasUIDByZoneKey: aliasByKey,
@@ -1500,15 +1503,38 @@ func resolveEventZoneUID(zoneKey string, o *zoneIdentityOutcome) (string, eventZ
 	return "", eventZoneMatchNone
 }
 
-// aliasUIDByZoneKey 把 ListKeyAliases 的列摺成 zone_key → zone_uid。
+// aliasUIDByZoneKey 把 ListKeyAliases 的列摺成 `zone_key → zone_uid`，並回報撞號的 key。
 //
 // SQL 已經按 (zone_key, last_seen_at DESC) 排好，所以**第一個就是最新的那個身分**。
 // 同一個 key 對到多個活身分時取最新並計數——在 SQL 裡靜靜挑一個會讓「有多少衝突」
 // 永遠問不出來。
-func aliasUIDByZoneKey(refs []store.ZoneKeyAliasRef) (map[string]string, []string) {
+//
+// `expired` 是 matcher 這一輪判定**失格**的身分（`ZoneIdentityMatchResult.ExpiredPrevious`），
+// 一律排除。這是**兩道過濾中的第二道，只負責「本輪」**：
+//
+//	ListKeyAliases  observed_absences <= zoneIdentityMaxAbsences（與 ListLive 同一個閘門）
+//	這裡            再扣掉 matcher 這一輪剛判失格、但次數還沒推過上限的那些
+//
+// 為什麼兩道都要：階段 B 的定案是**失格只收掉「這一世」，身分本身仍是 ACTIVE**，
+// 所以 alias 的 SQL 若只看 `state='ACTIVE' AND ended_at IS NULL`，matcher 早就放棄的
+// 身分照樣是候選；而只靠這裡的 `expired` 又補不起來——失格身分下一輪就被次數軸擋在
+// matcher 之前，一生只會出現在 `expired_previous` 一次。2026-08-19 每日階梯實測：
+// 只做這一道時仍有 77 筆 `alias_ambiguous`、16 個 key 撞號（todo.md T-048 F5）。
+//
+// **`TerminatedPrevious` 刻意不排除**：那些身分是這一輪因 SPLIT / MERGE / RESHAPE
+// 終止的，它們身上的事件要走 D4 收攤（`EndedZoneUIDs` → `zone_ended_skipped`）。
+// 把它們從 alias 拿掉，那些事件會變成「關聯不到身分」，等於把一個有解釋的收攤
+// 偽裝成 F1 那種必須歸零的失敗訊號。
+func aliasUIDByZoneKey(
+	refs []store.ZoneKeyAliasRef, expired []string,
+) (map[string]string, []string) {
+	skip := uidSet(expired)
 	out := make(map[string]string, len(refs))
 	var ambiguous []string
 	for _, r := range refs {
+		if _, gone := skip[r.ZoneUID]; gone {
+			continue
+		}
 		if _, dup := out[r.ZoneKey]; dup {
 			ambiguous = append(ambiguous, r.ZoneKey)
 			continue

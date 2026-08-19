@@ -627,3 +627,33 @@ func TestEventIdentityStatsCarriedNoopAloneIsNotAWarning(t *testing.T) {
 		}
 	}
 }
+
+func TestAliasIndexDropsIdentitiesTheMatcherGaveUpOn(t *testing.T) {
+	// F5 的回歸測試（2026-08-19 每日階梯實測）。alias 索引原本只看
+	// `state='ACTIVE' AND ended_at IS NULL`，而失格只收掉「這一世」、身分本身仍是
+	// ACTIVE——於是 matcher 早就放棄的身分照樣是 alias 候選。實測 8150 有兩個
+	// role／method／邊界逐位元相同的身分同時活著，缺席次數都已經超過上限。
+	refs := []store.ZoneKeyAliasRef{
+		// 先到的是殭屍：matcher 這一輪把它列進 expired_previous。
+		{ZoneKey: zoneKeyA, ZoneUID: "Z-zombie"},
+		{ZoneKey: zoneKeyA, ZoneUID: "Z-live"},
+		{ZoneKey: zoneKeyADrifted, ZoneUID: "Z-other"},
+	}
+
+	byKey, ambiguous := aliasUIDByZoneKey(refs, []string{"Z-zombie"})
+
+	if byKey[zoneKeyA] != "Z-live" {
+		t.Errorf("失格的身分不該佔住 key，got %q", byKey[zoneKeyA])
+	}
+	if byKey[zoneKeyADrifted] != "Z-other" {
+		t.Errorf("沒失格的身分要留著，got %q", byKey[zoneKeyADrifted])
+	}
+	if len(ambiguous) != 0 {
+		t.Errorf("排掉殭屍之後就不該再算撞號，got %+v", ambiguous)
+	}
+
+	// 對照組：兩個都沒失格時，撞號仍然要被報出來——它那時是真的有兩個活身分同形。
+	if _, amb := aliasUIDByZoneKey(refs, nil); len(amb) != 1 {
+		t.Errorf("兩個活身分共用一個 key 仍是撞號，got %+v", amb)
+	}
+}

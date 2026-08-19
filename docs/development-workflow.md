@@ -317,6 +317,31 @@ select conrelid::regclass || ' -> ' || confrelid::regclass from pg_constraint
 **`docker exec` 要帶 `-i`**，否則 heredoc 進不了 container，psql 讀到空的 stdin
 直接結束——**沒有任何錯誤訊息**，看起來就像指令跑完了但資料一點都沒變。
 
+#### 要驗血緣（SPLIT / MERGE / RESHAPE）就得用每日階距
+
+階距決定驗得到什麼。0050 的**週距**七階跑出 45 個 zone 身分、**血緣邊 0 條**——
+隔一週 zone 早就漂到不重疊，直接走「缺席→失格」，2→2 的元件根本組不起來，
+於是所有依賴 zone 終止的路徑（事件鏈的 `ZONE_IDENTITY_ENDED` 收攤）一次都驗不到。
+
+換成**每日**階距（2026-07-21～08-18，21 個交易日）並挑會 churn 的標的
+（近 60 根日均振幅 7%＋、量能 20M＋），四檔跑出 57 條血緣邊。挑標的的 SQL：
+
+```sql
+with pool as (select symbol from candles where timeframe='1d' and ts>='2024-06-01'
+               group by symbol having count(*)>=500),
+     recent as (select c.symbol, c.high, c.low, c.close, c.volume,
+                       row_number() over (partition by c.symbol order by c.ts desc) rn
+                  from candles c join pool p on p.symbol=c.symbol where c.timeframe='1d')
+select symbol, round(avg((high-low)/nullif(close,0))*100, 2) range_pct
+  from recent where rn<=60 group by symbol having avg(volume) > 3000000
+ order by range_pct desc limit 15;
+```
+
+**不是每檔都會 churn**：同一組跑法裡 `3105` 的 71 個身分全部 ACTIVE、0 條血緣邊。
+所以要驗血緣路徑就一次多跑幾檔，不要押單一標的。另外 zone 終止**不等於**
+事件收攤路徑被執行到——那個 zone 身上還要有活著的事件鏈，四檔 57 條血緣邊最後只換到
+4 次 `ZONE_IDENTITY_ENDED`。
+
 #### 一天不要重複打同一階
 
 事件的老化計數 `age_bars` 的單位是**分析次數**不是 K 棒數，所以同一階重打一次，

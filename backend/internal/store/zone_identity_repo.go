@@ -68,10 +68,19 @@ type ZoneIdentityRepo interface {
 	// **只回 state='ACTIVE' 且 ended_at IS NULL 的身分**：把事件掛到收攤過的身分上
 	// 比關聯失敗更糟——關聯失敗會進 warn 計數，掛錯身分不會有任何東西報錯。
 	//
+	// **次數軸與 ListLive 用同一個閘門**（`maxObservedAbsences`，呼叫端傳同一個常數）。
+	// 少了它，這裡的「還活著」會比 matcher 寬：階段 B 的定案是失格只收掉「這一世」、
+	// 身分本身仍是 `ACTIVE`，於是 matcher 早就放棄的身分照樣留在 alias 索引裡。
+	// 只靠呼叫端排除本輪 `expired_previous` 補不起來——失格身分下一輪就被這裡的次數軸
+	// 擋在 matcher 之前，所以它一生只會出現在 `expired_previous` **一次**，
+	// 之後就永遠沉在索引裡（2026-08-19 每日階梯實測：77 筆 `alias_ambiguous`、
+	// 16 個 key 撞號，加上這道過濾後歸零。todo.md T-048 F5）。
+	//
 	// 同一個 zone_key 對到多個活身分時**兩筆都回**，由呼叫端決定取捨並計數；
 	// 在 SQL 裡靜靜挑一個會讓「有多少衝突」永遠問不出來。排序保證同一個 key 的
 	// 最新者在前。
-	ListKeyAliases(ctx context.Context, symbol, timeframe string) ([]ZoneKeyAliasRef, error)
+	ListKeyAliases(ctx context.Context, symbol, timeframe string,
+		maxObservedAbsences int) ([]ZoneKeyAliasRef, error)
 }
 
 // ZoneInstance 是身分本身。`PriceLow`/`PriceHigh` 是最近一次觀測值，**不是身分**。
@@ -404,14 +413,16 @@ const listZoneKeyAliasesSQL = `
 	FROM zone_key_aliases a
 	JOIN zone_instances z ON z.zone_uid = a.zone_uid
 	WHERE z.symbol = ? AND z.timeframe = ? AND z.state = 'ACTIVE' AND z.ended_at IS NULL
+	  AND z.observed_absences <= ?
 	ORDER BY a.zone_key, a.last_seen_at DESC, a.zone_uid`
 
 func (r *zoneIdentityRepo) ListKeyAliases(
-	ctx context.Context, symbol, timeframe string,
+	ctx context.Context, symbol, timeframe string, maxObservedAbsences int,
 ) ([]ZoneKeyAliasRef, error) {
 	var out []ZoneKeyAliasRef
 	query := r.db.Rebind(listZoneKeyAliasesSQL)
-	if err := r.db.SelectContext(ctx, &out, query, symbol, timeframe); err != nil {
+	if err := r.db.SelectContext(ctx, &out, query,
+		symbol, timeframe, maxObservedAbsences); err != nil {
 		return nil, fmt.Errorf("zone identity: list key aliases: %w", err)
 	}
 	return out, nil

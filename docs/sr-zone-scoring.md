@@ -2649,13 +2649,37 @@ zone_key_aliases」。這裡只講判讀時最容易搞錯的那件事：**事�
 而三段關聯決策改進之前同樣的資料會產生 14 條且持續增長——差額正是被 carried 護欄
 擋下來的終態重生。`carried_noop` 收斂到 5 筆，逐筆對過都是已終結的鏈。
 
-兩塊**還沒有真實資料覆蓋**，判讀時要知道：
+**血緣終止的實測覆蓋**（2026-08-19，`2330` / `3105` / `6182` / `8150` 的每日階梯，
+21 個交易日 × 4 檔 ＝ 84 次分析全部 201）：0050 的七階跑不出任何血緣邊，原因是**階距**
+而不是選錯 symbol——週距下 zone 早漂到不重疊，直接走「缺席→失格」，2→2 的元件組不起來。
+改成每日階梯後拿到 57 條血緣邊（`6182` 29、`2330` 19、`8150` 9、`3105` 0），
+**`ZONE_IDENTITY_ENDED` 收攤路徑執行了 4 次**（6182 的四條 `SUPPORT_RECLAIM`，
+parent 都是 `RESHAPED`），寫出來的 `state` / `active` / `end_reason` 三個欄位一致。
 
-* `matched_by_alias` 七階全部是 0——既有鏈優先那一段就把兩個成因都接住了，
-  alias 是它的備援，目前只有單元測試覆蓋。
-* 這輪 45 個 zone 身分**全部 ACTIVE**，`ZONE_IDENTITY_ENDED` 那條收攤路徑
-  一次都沒被執行過，證據只有 synthetic 的 integration test。要補實測覆蓋得挑一組
-  會實際產生 `SPLIT` / `RESHAPE` 的 symbol 重跑階梯。
+判讀時要知道的一塊：**`matched_by_alias` 在兩輪階梯都是 0**。既有鏈優先那一段就把
+兩個成因都接住了，即使在 57 條血緣邊的高 churn 資料上也沒有輪到 alias 決定關聯，
+它目前只有單元測試覆蓋。
+
+這組數字在 F5 修法（alias 索引排除本輪 `expired_previous`）之後**逐項重現**——
+同一組四檔 21 階重跑一次，身分數、血緣邊、事件鏈、transitions、alias 筆數與
+`ZONE_IDENTITY_ENDED` 次數全部相同，六條門檻也仍然全過。
+
+**alias 索引的「還活著」與 matcher 用同一個定義。** 這件事踩過一次坑：
+`listZoneKeyAliasesSQL` 原本只看 `state='ACTIVE' AND ended_at IS NULL`，而
+「失格只收掉這一世、身分本身仍是 ACTIVE」是階段 B 的定案，於是 `observed_absences`
+已經超過上限的身分照樣留在索引裡——84 次分析累出 77 筆 `alias_ambiguous`、
+16 個 `zone_key` 對到多個 ACTIVE 身分。**只排除本輪 `expired_previous` 補不起來**：
+`ListLive` 的次數軸讓失格身分下一輪就不再進 matcher，所以一個身分一生只會被列進
+`expired_previous` 一次，之後就永遠沉在索引裡。
+
+現在兩道過濾各管一段：`ListKeyAliases` 的 SQL 用**與 `ListLive` 相同的**
+`observed_absences <= zoneIdentityMaxAbsences` 擋掉已經沉下去的，呼叫端再用
+`expired_previous` 擋掉這一輪剛失格、次數還沒推過上限的。對前述資料試算，
+撞號的 key 由 16 降到 0；端到端重跑的實測待補（`todo.md` T-048 F5）。
+
+**逐段命中數只有 warn 時看得到。** `logging` 把 level 寫死 `zap.InfoLevel`，
+而完整欄位的 `event identity: zone association` 是 Debug 級別，只有觸發 warn 的那次分析
+才會印出整組欄位。所以上面的命中數是 warn 樣本內的統計；全量觀測要等 T-050 的 metric。
 
 要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
 「在 dev stack 上做『as-of 階梯』驗收」與其中的「as-of 階梯驗收的六條門檻」。

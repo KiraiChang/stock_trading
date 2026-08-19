@@ -85,7 +85,7 @@ func runStage(
 		t.Fatalf("%s: list live: %v", st.name, err)
 	}
 	// **在 Apply 之前讀**，與 persistZoneIdentity 相同：讀到的是先前各階留下的 key。
-	aliasRefs, err := zoneRepo.ListKeyAliases(ctx, "0050", "1d")
+	aliasRefs, err := zoneRepo.ListKeyAliases(ctx, "0050", "1d", zoneIdentityMaxAbsences)
 	if err != nil {
 		t.Fatalf("%s: list aliases: %v", st.name, err)
 	}
@@ -95,7 +95,7 @@ func runStage(
 		t.Fatalf("%s: zone apply: %v", st.name, err)
 	}
 
-	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(aliasRefs)
+	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(aliasRefs, st.match.ExpiredPrevious)
 	outcome := &zoneIdentityOutcome{
 		UIDByZoneKey:      zoneUIDByZoneKey(st.zones, st.match.ZoneUIDs),
 		AliasUIDByZoneKey: aliasByKey,

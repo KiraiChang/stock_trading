@@ -2978,13 +2978,127 @@ migration：三個 engine 都實跑——`scripts/test-postgres-migrations.sh`�
 * **alias history 一次都沒被走到**：七階的 `matched_by_alias` 全部是 0。既有鏈優先
   （`matched_by_chain`）已經把 F1 的兩個成因都接住了，alias 是它的備援。
   目前只有單元測試（`TestBuildEventIdentityWriteFallsBackToAliasWhen*`）覆蓋。
+  **四檔 21 日的每日階梯重跑後仍然是 0**，見下方 P2。
 * **F3 原樣還在**：這輪 45 個 zone 身分仍然全部 ACTIVE，`zone_ended_skipped` 全空，
-  D4 收攤路徑（F4 修的那條）在真實資料上**一次都沒被執行**。它的證據仍只有
-  `TestZoneAndEventIdentityAcrossSplitMergeReshape` 這條 synthetic integration test。
-  要補實測覆蓋就得執行計畫書的 P2：挑一組會實際產生 `SPLIT` / `RESHAPE` 的 symbol 重跑階梯。
+  D4 收攤路徑（F4 修的那條）在真實資料上**一次都沒被執行**。
+  **已由下方 P2 的每日階梯補上**（6182 執行了 4 次）。
 
 順帶發現一筆與本 todo 無關的問題：同一個交易日重複分析會讓事件提早老化到 `EXPIRED`
 （`age_bars` 的計數單位是分析次數不是 K 棒），記為 [`issue.md`](./issue.md) I-077。
+
+##### P2 真實資料覆蓋：每日階梯 × 四檔（2026-08-19，**F3 缺口已補上**）
+
+0050 那組七階跑不出血緣邊的原因不是 symbol 選錯，是**階距**：週距下 zone 早就漂到不重疊，
+直接走「缺席→失格」，2→2 的元件根本組不起來。改成**每日**階梯（2026-07-21～08-18 共
+21 個交易日）並換成會 churn 的標的：`2330`、`3105`、`6182`、`8150`
+（後三者近 60 根日均振幅 7.4～7.8%、量能 24M～60M）。**84 次分析全部 201。**
+
+| symbol | 身分數 | SPLIT | MERGE | RESHAPE | 血緣邊 |
+|---|---|---|---|---|---|
+| 2330 | 82 | 2 | 4 | 6 | 19 |
+| 6182 | 108 | 2 | 6 | 10 | 29 |
+| 8150 | 68 | 0 | 2 | 4 | 9 |
+| 3105 | 71 | 0 | 0 | 0 | 0 |
+
+（中間三欄是 `zone_instances.state` 的終態分布，最右是 `zone_relations` 的邊數。）
+
+**D4 收攤路徑在真實資料上執行了 4 次**：6182 的四條 `SUPPORT_RECLAIM` 鏈，parent 都是
+`RESHAPED` 的身分，寫出來的快照是 `state=EXPIRED`／`active=false`／
+`end_reason='ZONE_IDENTITY_ENDED'`——**三個欄位一致**，正是 F4 修的那條路徑。
+修法前這條路只設 `ended_at` / `end_reason`，會留下 `state` 仍是 `ACTIVE` 的矛盾快照。
+
+六條門檻在這組資料上全數通過（84 次分析、329 個身分、57 條血緣邊、59 條事件鏈）：
+`unmatched_zone_keys` 0、`invariant_violations` 0、`carried_parse_failed` 0、
+`from_state` 留白 0、ZONE scope 事件掛空 zone 0、alias 外鍵與每 zone 8 筆上限 0 違反；
+另加一條 D4 專屬檢查「`ZONE_IDENTITY_ENDED` 的 parent 仍是 ACTIVE」也是 0。
+三段關聯決策的命中分布：`matched_by_chain` 49、`matched_by_current` 18、
+`matched_by_alias` **0**——即使在 57 條血緣邊的高 churn 資料上，alias 也沒有輪到它
+決定關聯，它仍然只有單元測試覆蓋。
+
+##### F5：alias 索引與 matcher 對「還活著」用了兩套定義（**已實作／待 review**；端到端實測待補）
+
+上面那輪出現 **85 筆 `alias_ambiguous`**（37 筆 warn 全部由它觸發）——
+同一個 `zone_key` 對到多個仍算「活著」的身分。逐筆查下去，成因不是 key 撞號：
+
+```
+uid       symbol method        last_role   price_low   price_high  state   observed_absences
+b9cb296b  8150   recent_pivot  RESISTANCE  118.144500  118.855500  ACTIVE  4
+7c64eabe  8150   recent_pivot  RESISTANCE  118.144500  118.855500  ACTIVE  4
+```
+
+兩個身分的 role／method／邊界**逐位元相同**，而且都還是 `ACTIVE`。真正的成因是
+**兩個模組對「還活著」的判準不同**：
+
+* matcher 的資格閘門是 `observed_absences <= 3` ＋ `last_seen_at` 在 20 個交易日內
+  （`zone_matcher.py` 的 `MAX_OBSERVED_ABSENCES` / `MAX_ABSENCE_TRADING_DAYS`）。
+  失格的身分列進 `expired_previous`，**不再進候選集合**。
+* alias 索引的查詢是 `z.state = 'ACTIVE' AND z.ended_at IS NULL`
+  （`listZoneKeyAliasesSQL`）。而階段 B 的定案是**失格只收掉「這一世」，
+  身分本身仍是 `ACTIVE`**——於是 matcher 早就放棄的身分，在 alias 索引裡照樣是候選。
+
+量化：20 個撞號的 key、涉及 32 個身分，其中 **25 個（78%）的 `observed_absences` 已經
+超過 3**。也就是說 `alias_ambiguous` 主要是在數殭屍身分。
+
+**這輪沒有寫出錯誤資料**——`matched_by_alias` 是 0，alias 一次都沒有真的決定過關聯。
+但它是潛伏的：只要既有鏈那一段 miss 一次，事件就可能掛到一個 matcher 早已放棄的身分上。
+而且它讓 warn 又變成常態噪音（37/37），與 `carried_noop` 當初的毛病同一類。
+
+**修法方向**（尚未實作，兩個選項）：
+
+1. **用 matcher 的裁決當唯一權威**：`persistZoneIdentity` 手上已經有
+   `ZoneIdentityMatchResult.expired_previous`，把這批從本次 alias 索引排除。
+   門檻的定義維持 Python 一份，不必在 Go 複製 `MAX_OBSERVED_ABSENCES`。
+2. **在 SQL 加 `z.observed_absences <= N`**：改動最小，但把 Python 的常數複製到 Go，
+   兩邊分歧時沒有東西會報錯——正是 T-048 一路在消滅的那種模式。**不建議**。
+
+順帶一提，`observed_absences` 對失格身分仍會持續累加（實測到 4），因為它們每輪都
+不在候選集合裡。目前無害，但那個計數是無上界的。
+
+###### 選項 1 已實作並復驗：只擋得住「失格發生的那一輪」（2026-08-19）
+
+`aliasUIDByZoneKey(refs, matched.ExpiredPrevious)` 已實作，image 重建後把同一組階梯
+（同樣四檔 × 21 個交易日，2026-07-21～08-18）在退乾淨的 dev DB 上重跑一次，
+**84 次分析全部 201**。
+
+**行為零回歸**：zone 身分 329、血緣邊 57、事件鏈 59、transitions 116、alias 685、
+`ZONE_IDENTITY_ENDED` 4 次——與修法前逐項相同；六條門檻＋D4 專屬檢查全部 0，
+`unmatched_zone_keys`／`chain_conflicts`／`chain_key_ambiguous`／`carried_parse_failed`／
+`invariant_violations` 全程 0，`matched_by_alias` 仍是 0。
+
+**但主目標幾乎沒動**：`alias_ambiguous` **85 → 77**、由它觸發的 warn **37 → 36**。
+最終 DB 裡仍有 **16 個 `zone_key` 對到多個 `state='ACTIVE'` 的身分**（修法前 20 個），
+涉及 32 個身分，其中 **25 個的 `observed_absences` 是 4**——與修法前同一批殭屍。
+
+成因是 `expired_previous` 是**單輪快照**：`ListLive` 的次數軸
+（`observed_absences <= zoneIdentityMaxAbsences`）讓失格身分**下一輪就不再進 matcher**
+（`zone_identity_repo.go` 的介面註解本來就寫明這個設計——放它進來一次、收攤把次數推過
+上限、下次就擋在 SQL）。所以一個身分一生只會出現在 `expired_previous` **一次**；
+那一輪之後它永遠沉在 alias 索引裡，選項 1 再也碰不到。8 筆的減幅正好就是
+「剛好在這一輪失格」的那些。
+
+**選項 2 當初的反對理由不成立**：`zoneIdentityMaxAbsences = 3` **早就存在於 Go**
+（`sr_zones.go:1062`，註解寫著「與 zone_matcher.MAX_OBSERVED_ABSENCES 同值」），
+而且它就是餵給 `ListLive` 的那個參數。常數已經複製過去了，alias 索引改用**同一個**值
+不新增分歧來源，反而讓 alias 索引與 matcher 的候選集合由同一個地方定義。
+對本輪資料試算：alias 索引加上 `z.observed_absences <= 3` 後，撞號的 key **16 → 0**。
+
+**已實作（2026-08-19）**：`listZoneKeyAliasesSQL` 加上 `AND z.observed_absences <= ?`，
+`ListKeyAliases` 多收一個 `maxObservedAbsences`，呼叫端傳的就是餵給 `ListLive` 的
+`zoneIdentityMaxAbsences`——alias 索引與 matcher 的候選集合自此由**同一個地方**定義。
+選項 1 的 `expired_previous` 排除保留，兩道過濾各管一段：SQL 擋「已經沉下去的」，
+`expired_previous` 擋「這一輪剛失格、次數還沒推過上限的」。
+新增 `TestZoneKeyAliasListExcludesZonesOverAbsenceLimit` 同時釘住「超過上限要排除」與
+「剛好等於上限要留著」（用 `<` 會讓收攤流程變成不可達的死碼）。`backend/scripts/test.sh` 全綠。
+
+**端到端實測待補**：上面的「16 → 0」是對本輪最終 DB 直接套過濾條件的**試算**，
+不是重跑階梯量出來的。要確認 `alias_ambiguous` 真的歸零，得重建 image 後再跑一次
+四檔 21 階（約 50 分鐘）。這一輪沒跑。
+
+**復驗方式的限制**：`logging.NewWithConfig` 把 level 寫死 `zap.InfoLevel`
+（`backend/internal/logging/logger.go`），所以 Debug 版的 `event identity: zone association`
+**任何環境都不會輸出**——每階的逐段命中數只有在該次分析觸發 warn 時才看得到。
+上面的 `matched_by_chain` / `matched_by_alias` 數字都是「warn 樣本內」的值，不是全 84 次的總和。
+要全量觀測得等 T-050 的 metric。
 
 
 ##### 受影響的檔案與資料流

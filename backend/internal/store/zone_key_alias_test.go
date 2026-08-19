@@ -10,6 +10,10 @@ import (
 // zone 長什麼樣」，本次分析的 key 由這次的 ATR 邊界與 role 算出來，兩者對不上是常態。
 // 這組測試盯的是**寫入端**——上限、first_seen_at 不被覆寫、只回活著的身分。
 
+// aliasMaxAbsences 對應呼叫端的 zoneIdentityMaxAbsences（= zone_matcher 的
+// MAX_OBSERVED_ABSENCES）。alias 索引與 ListLive 共用同一個次數軸。
+const aliasMaxAbsences = 3
+
 func aliasOf(zoneUID, key string, seen time.Time) ZoneKeyAlias {
 	return ZoneKeyAlias{
 		ZoneUID: zoneUID, ZoneKey: key,
@@ -34,7 +38,7 @@ func TestZoneKeyAliasUpsertKeepsFirstSeenAndAdvancesLastSeen(t *testing.T) {
 		t.Fatalf("second apply: %v", err)
 	}
 
-	refs, err := repo.ListKeyAliases(ctx, "0050", "1d")
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +71,7 @@ func TestZoneKeyAliasPrunesToLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refs, err := repo.ListKeyAliases(ctx, "0050", "1d")
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +105,7 @@ func TestZoneKeyAliasListSkipsTerminatedIdentities(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refs, err := repo.ListKeyAliases(ctx, "0050", "1d")
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +134,7 @@ func TestZoneKeyAliasListPutsNewestFirstForSameKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	refs, err := repo.ListKeyAliases(ctx, "0050", "1d")
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,11 +163,62 @@ func TestZoneKeyAliasApplyDedupesWithinOneBatch(t *testing.T) {
 		t.Fatalf("重複的 alias 不該讓整批失敗：%v", err)
 	}
 
-	refs, err := repo.ListKeyAliases(ctx, "0050", "1d")
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(refs) != 1 || !refs[0].LastSeenAt.Equal(zoneSeenAt.Add(time.Hour)) {
 		t.Fatalf("去重要取較新的 last_seen_at，got %+v", refs)
+	}
+}
+
+func TestZoneKeyAliasListExcludesZonesOverAbsenceLimit(t *testing.T) {
+	// **次數軸要與 ListLive 一致**：階段 B 的定案是失格只收掉「這一世」，身分本身仍是
+	// ACTIVE，所以只看 state 的話，matcher 早就放棄的身分會照樣留在 alias 索引裡。
+	// 2026-08-19 的每日階梯實測就是這樣累出 77 筆 alias_ambiguous（todo.md T-048 F5）。
+	repo, ctx := newZoneIdentityRepoForTest(t)
+
+	const shared = "SUPPORT:104.7300:105.3700"
+	zombie := zoneInstance("Z-ZOMBIE", 104.73, 105.37, zoneSeenAt)
+	zombie.ObservedAbsences = aliasMaxAbsences + 1
+	live := zoneInstance("Z-LIVE", 104.73, 105.37, zoneSeenAt)
+	live.ObservedAbsences = 0
+
+	if err := repo.Apply(ctx, ZoneIdentityWrite{
+		Instances: []ZoneInstance{zombie, live},
+		KeyAliases: []ZoneKeyAlias{
+			aliasOf("Z-ZOMBIE", shared, zoneSeenAt.Add(24*time.Hour)),
+			aliasOf("Z-LIVE", shared, zoneSeenAt),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	refs, err := repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("超過次數上限的身分不該進 alias 索引（撞號就是這樣來的），got %+v", refs)
+	}
+	if refs[0].ZoneUID != "Z-LIVE" {
+		t.Errorf("留下的要是還在資格窗內的身分，got %+v", refs)
+	}
+	// 剛好等於上限的身分還要留著：它下一輪才進 matcher 完成收攤，
+	// 用 `<` 會讓收攤流程整條變成不可達的死碼（見 ListLive 的說明）。
+	atLimit := zoneInstance("Z-AT-LIMIT", 200.0, 201.0, zoneSeenAt)
+	atLimit.ObservedAbsences = aliasMaxAbsences
+	if err := repo.Apply(ctx, ZoneIdentityWrite{
+		Instances:  []ZoneInstance{atLimit},
+		KeyAliases: []ZoneKeyAlias{aliasOf("Z-AT-LIMIT", "SUPPORT:200.0000:201.0000", zoneSeenAt)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	refs, err = repo.ListKeyAliases(ctx, "0050", "1d", aliasMaxAbsences)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 2 {
+		t.Fatalf("剛好等於上限的身分要留著（<= 而非 <），got %+v", refs)
 	}
 }

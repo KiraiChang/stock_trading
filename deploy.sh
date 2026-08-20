@@ -19,6 +19,21 @@ export EVALUATION_UNIVERSE_ENABLED="false"  # 匯入選池成員後改為 "true"
 export EVALUATION_UNIVERSE_CRON="0 16 * * 1-5"  # 台北時區
 export EVALUATION_UNIVERSE_DAYS="10"       # 往前幾個日曆天；10 是為了容忍連假，成本與天數無關
 
+# 定期對 watchlist 產生 SR zone 分析（T-052）：每交易日兩輪，17:00 與 22:00。
+# 這是 production 驗證母體的唯一來源——沒有它，stock_sr_zone_analyses 只會累積人工點擊的
+# 零星幾筆，decision replay 的分佈比較（issue.md I-074、todo.md T-049）永遠做不了。
+#
+# **開之前先確認 I-077 的修法已經上線**（事件老化改為依「K 棒推進」而不是「分析次數」）。
+# 否則排程與人工同日各跑一次會讓老化一天前進 2，污染的正是要累積的那份母體。
+#
+# 兩輪的差別只在籌碼：17:00 拿到的是前一日籌碼（FinMind 法人／融資券晚間才發布），
+# 22:00 那輪晚於 21:00 的籌碼採集，才有當日的。
+export SR_ANALYSIS_ENABLED="false"           # 確認 I-077 已上線後改為 "true"
+export SR_ANALYSIS_CRON="0 17 * * 1-5"       # 台北時區，不含當日籌碼那輪
+export SR_ANALYSIS_CHIP_CRON="0 22 * * 1-5"  # 台北時區，含當日籌碼那輪
+export SR_ANALYSIS_TIMEFRAME="1d"
+export SR_ANALYSIS_LIMIT="400"               # 抓取的歷史 K 棒根數
+
 # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：漏跑一次會讓該檔
 # 整段歷史出現假跳空，重算又是冪等的，所以沒有關掉它的情境；只有時間可調。
 # 06:30 早於 08:50 的 pre_market，讓當天開盤前的分析已吃到最新係數。

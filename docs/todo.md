@@ -2801,6 +2801,11 @@ Go api/handler/scheduler.go  ＋ 手動觸發入口（比照 RunDailyClose）
 程式已完成，**但排程預設關閉，等同尚未上線**——實際開始累積母體是把
 `sr_analysis.enabled` 設成 true 的那一刻。
 
+**上線步驟**（2026-08-20 補齊）：改 `deploy.sh` 的 `SR_ANALYSIS_ENABLED="true"` 再重新部署。
+環境變數已同時拉進 `docker-compose.yml`（正式）、`docker-compose.dev.yml` 與 `deploy.sh`
+三處——**compose 的 `environment:` 是白名單，沒列的變數不會進 container**，第一版只加了
+dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法必須先在 live 生效。**
+
 | 驗證 | 結果 |
 |---|---|
 | Go 全量 `test.sh` | 全綠（+6 支排程測試） |

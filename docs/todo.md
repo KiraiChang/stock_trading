@@ -2274,7 +2274,8 @@ Daily Confirmation / Reclaim / Event Sequence / Final Entry 全部改讀同一�
 T-048 已完成並收斂，身分層／事件鏈的現況規格見
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」與「事件層：鏈的
 身分與三段關聯決策」，schema 見 [`database-schema.md`](./database-schema.md)。
-它明確延後、指名由本筆承接的有四項：
+它明確延後、指名由本筆承接的有四項；另有一個 T-048 驗收踩出的 issue
+（I-077）也必須在本筆一起看，因為它會直接改 Market State：
 
 1. **`ZoneScore.zone_uid` 仍未接上**（Python 端在分析當下拿不到身分）。要餵得動 matcher
    就得給它「上一次的 zone 清單」，而 Python 目前唯一的跨次狀態通道是 Go 傳進來的
@@ -2292,6 +2293,10 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
    evaluation 的分層可比性，不影響 `stock_sr_decisions`。非阻斷，但做分佈比較前要先處理，
    否則新舊兩批的分層對不起來。
 4. **新舊兩套並行比對還沒做**（見下方前置①）。
+5. **I-077：同一個交易日重複分析會讓事件提早老化到 `EXPIRED`。**
+   目前 `age_bars` 是「被 carry 的分析次數」而不是「K 棒推進次數」；
+   T-049 一旦讓 Market State 與下游全部改讀同一套 state，就不能再把這個問題留在旁邊。
+   規劃時要一起決定是否把老化改成依最新 K 棒 timestamp 推進，而不是依分析次數推進。
 
 #### 兩個前置條件，缺一不可
 
@@ -2304,9 +2309,14 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
    這件事要等前置②給出母體才做得起來——21 個交易日湊不出「一段時間」。
 2. **補分析排程**——「定期對 watchlist 產生 SR zone 分析」。
    這是 `issue.md` **I-074** 的關閉條件，也是本筆唯一可行的驗證來源：
-   目前 `stock_sr_zone_analyses` 只有 **4 檔 / 20 次分析**（2026-08-18 再次確認未增加），
+   目前 production live DB 的 `stock_sr_zone_analyses` 只有 **4 檔 / 20 次分析**
+   （2026-08-18 再次確認未增加），
    而本筆會同時改動 Bias、進場、事件序列——**比 T-044 那次影響面大一個量級**，
    不能再用「428 支測試全綠」當證據交付。
+
+   注意這個 **4 檔 / 20 次** 是 production live DB 的自然母體；T-048 收斂時使用的
+   **4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，用來證明回歸與身分層寫入，
+   不能替代本筆需要的 production 分佈比較母體。
 
    這個排程已於 2026-08-20 獨立成
    [T-052](#t-052定期對-watchlist-產生-sr-zone-分析分析排程)（在那之前沒有任何 todo 在追，
@@ -2433,7 +2443,8 @@ T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來�
 
 #### 問題
 
-`stock_sr_zone_analyses` 的母體長期停在極小規模（2026-08-18 盤點：4 檔 / 20 次分析），
+`stock_sr_zone_analyses` 的 production live DB 母體長期停在極小規模
+（2026-08-18 盤點：4 檔 / 20 次分析），
 所有需要「分佈比較」的驗證因此都做不了。目前卡在這一點的至少有三筆：
 
 * **I-074**：T-044 的 RR 解耦只有單元測試層級的證據，`MODE=replay` 的 decision replay
@@ -2444,6 +2455,10 @@ T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來�
 
 as-of 階梯可以造出深度（同一檔多個時間點），但造不出廣度，也造不出「真實使用節奏下
 身分會不會失格」這種只有時間會給的答案。
+
+T-048 收斂時的 **4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，不是 production
+自然母體；它能證明「改動前後逐欄相同」與「身分層數字重現」，但不能關閉 I-074 / T-049
+要求的 production 分佈比較。
 
 #### 要決定的事（規劃時定案）
 
@@ -2459,6 +2474,9 @@ as-of 階梯可以造出深度（同一檔多個時間點），但造不出廣�
 
 #### 驗收門檻
 
-* 排程連續運行一段時間後，`stock_sr_zone_analyses` 的母體足以跑
+* 排程連續運行一段時間後，production `stock_sr_zone_analyses` 的母體足以跑
   `MODE=replay scripts/run-evaluation.sh` 做分佈比較（I-074 的關閉條件）。
-* `zone_instances` 出現 `EXPIRED`、`MatchedByAlias` 非零（I-078 的關閉條件）。
+* `zone_instances` 出現 `EXPIRED`，且 EXPIRED 收攤行為與單元測試一致（I-078 的第一個關閉條件）。
+* `MatchedByAlias` 不能假設一定會因排程自然變成非零：T-048 實測中第一段既有鏈命中會吃掉
+  多數情況。排程上線後需設定觀察期限；若仍為 0，改用 targeted integration/live fixture
+  或 T-050 metric 證明 alias 備援路徑，而不是把 T-052 卡死在不可控的自然觸發上。

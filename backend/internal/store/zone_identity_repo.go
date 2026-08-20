@@ -74,7 +74,7 @@ type ZoneIdentityRepo interface {
 	// 只靠呼叫端排除本輪 `expired_previous` 補不起來——失格身分下一輪就被這裡的次數軸
 	// 擋在 matcher 之前，所以它一生只會出現在 `expired_previous` **一次**，
 	// 之後就永遠沉在索引裡（2026-08-19 每日階梯實測：77 筆 `alias_ambiguous`、
-	// 16 個 key 撞號，加上這道過濾後歸零。todo.md T-048 F5）。
+	// 16 個 key 撞號，加上這道過濾後歸零。見 docs/sr-zone-scoring.md「實測特性」）。
 	//
 	// 同一個 zone_key 對到多個活身分時**兩筆都回**，由呼叫端決定取捨並計數；
 	// 在 SQL 裡靜靜挑一個會讓「有多少衝突」永遠問不出來。排序保證同一個 key 的

@@ -2254,644 +2254,6 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 
 ---
 
-### T-048：SR Zone 狀態持久化——Zone 身分、Event Lifecycle 與轉換紀錄
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（階段 A／B／C 已 review 通過，2026-08-19；階段 D 於 2026-08-20 實作並通過四檔 21 階復驗——決策逐欄相同、六條門檻＋D4 全 0、新事件鏈確實落地，驗收數字見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「實測特性」） |
-| 優先度 | 高（T-049 與 T-041 的共同前置） |
-| 分類 | Python / Go / DB / SR Zone / 決策資料 |
-| 建立日期 | 2026-08-18 |
-| 來源 | 使用者需求：把「每次重判」改成「可追蹤的演進」 |
-| 關聯 | 接手 T-044（Lifecycle Engine P0 已實作）與 T-045（事件鏈 P1/P2 已實作）；T-049 是它的下游 |
-
-#### 問題：現在的事件鏈會分裂，而且沒有東西會報錯
-
-事件鏈**已經有持久化**（T-045 做的 `market_event_states` / `market_event_detections`），
-但它的身分是 `_zone_key()`（`event_engine.py:199`）：
-
-```python
-return f"{role}:{price_low:.4f}:{price_high:.4f}"
-```
-
-**身分綁在浮點邊界上，而 zone 邊界每次分析都由 ATR 重算。** 2026-08-18 對 live
-`market_event_states` 的唯讀盤點抓到兩個實證：
-
-**一、同一個支撐分裂成兩條鏈。** 0050：
-
-| 日期 | zone_key | event |
-|---|---|---|
-| 07-23 ～ 08-04 | `SUPPORT:102.4916:103.1084` | INTRADAY_RECLAIM |
-| **08-05 起** | `SUPPORT:102.4916:103.1084` | INTRADAY_RECLAIM |
-| **08-05 起** | `SUPPORT:102.5414:103.1585` | INTRADAY_RECLAIM |
-
-08-05 之後兩個 key **每天並存**，各自帶一條 reclaim 鏈。價格區間重疊 99%，
-實際上是同一個支撐。下游看到的是兩個獨立 zone、兩次獨立事件——**這會重複計數**，
-而且沒有任何檢查會發現。
-
-**二、`role` 在 key 裡，所以 `ROLE_FLIPPED` 在現行模型中無法表達。** 支撐翻壓力必然
-產生一個全新身分、舊鏈直接斷掉。這不是 bug，是資料模型的結構限制。
-
-#### 目標
-
-1. Zone 有**跨交易日穩定的身分**，邊界漂移與角色翻轉都不改變身分。
-2. Event 與 Zone 的生命週期是**存下來的事實**，不是每次分析重新推導的結果。
-3. 狀態轉換**留痕**：看得出何時、因為什麼從哪個狀態到哪個狀態。
-
-#### 不做的範圍
-
-* **不改任何下游決策邏輯**。Market State / Bias / Final Entry 這批全部留在 T-049。
-  本筆做完，決策行為必須與現在**逐欄相同**——這是它的驗收條件之一。
-* 不做前端顯示（T-041）。
-* 不擴充事件種類到 4 個以外。
-* 不重算歷史：既有 `market_event_states` 的 86 列不回填 zone 身分（理由見「相容策略」）。
-
-#### 執行順序（2026-08-18 定案：**3 → 4 → 1 → 2**）
-
-需求原本給的順序是「1 事件表 → 2 Lifecycle Engine → 3 Zone ID → 4 zone 表」。**但 Zone
-身分是事件表的外鍵前提**：先建 `event_instances` 就只能沿用會漂移的 `zone_key`，等階段 3
-做出穩定 ID 後，階段 1 的資料要整批 migration ＋ 回填，而回填正是「無法可靠判斷兩個
-舊 key 是不是同一個 zone」的那件事——**那個回填不可能做對，因為它要解的正是本筆要建的能力**。
-
-先把身分釘死，後面兩張表一開始就長在正確的鍵上：
-
-| 新序 | 原編號 | 內容 |
-|---|---|---|
-| **A** | 3 | Zone ID + ZoneMatcher（純 Python，不碰 DB） |
-| **B** | 4 | `zone_instances` + `zone_transitions` |
-| **C** | 1 | `event_instances` + `event_transitions`（外鍵指向 `zone_instances`） |
-| **D** | 2 | Lifecycle Engine 支援 4 個事件 |
-
-**A 是唯一沒有現成東西可接手的部分，也是其餘三階段的地基**——它做錯，後面三個階段
-會長在錯誤的鍵上，而那時已經有資料了。所以 A 的參數必須用 live 資料決定，
-不能在程式裡先寫死一組猜測值（見下）。
-
----
-
-#### 階段 A：Zone ID + ZoneMatcher —— **已完成（2026-08-19 review 通過）**
-
-#### 階段 B：`zone_instances` + `zone_transitions` —— **已完成（2026-08-19 review 通過）**
-
-身分層（`zone_matcher.py` ＋ 四張表 ＋ `/zone-identity/match` 接線）已實作、已驗收。
-**現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」**
-（三層模型、matcher 判準與門檻來源、資格閘門、接線、四個已知限制、實測特性），
-schema 與 `from_state` 不變式見 [`database-schema.md`](./database-schema.md)，
-重跑驗收的步驟見 [`development-workflow.md`](./development-workflow.md)
-「在 dev stack 上做『as-of 階梯』驗收」。
-
-身分層只寫不讀，沒有任何決策依賴 `zone_instances`；階段 C 是它的第一個讀者，
-其餘待接項目移到階段 C 條目下。
-
-#### 階段 C：`event_instances` + `event_transitions` —— **已完成（2026-08-19 review 通過）**
-
-事件層（三張表 ＋ `EventIdentityRepo` ＋ handler 的三段關聯決策）已實作、已驗收：
-0050 七階與四檔 21 階兩輪 as-of 階梯，六條門檻＋D4 專屬檢查全部歸零，
-`alias_ambiguous` 在 F5 修法後由 77 降到 0。
-**現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層：鏈的身分與三段關聯決策」**
-（三段優先序與不可調換的理由、carried 護欄、`ZONE_IDENTITY_ENDED` 收攤、關聯鍵的單一
-authority、可觀測性與 warn 級別取捨、兩輪階梯的實測特性），schema 與終態不變式見
-[`database-schema.md`](./database-schema.md)「event_instances / event_transitions /
-zone_key_aliases」，重跑驗收的步驟與六條門檻見
-[`development-workflow.md`](./development-workflow.md)。
-
-階段 D 要接的三件事：
-
-* **事件層同樣只寫不讀。** 決策路徑讀的仍是 `market_event_states` /
-  `market_event_detections`，`event_instances` 沒有任何讀者。
-* **`matched_by_alias` 兩輪階梯都是 0。** alias 備援只有單元測試覆蓋，新增事件型別
-  若讓 zone key 的漂移型態改變，這一段會是第一個被實際走到的地方。
-* **`ZoneScore.zone_uid` 仍未接上。** matcher 需要「上一次的 zone 清單」當輸入，而
-  Python 端目前唯一的跨次狀態通道是 Go 傳進來的 `previous_event_states`，
-  沒有 `previous_zones`——要餵得動它就得改 contract。階段 C 未做（不動
-  `scoring.py` / `pipeline.py`）。**處置：2026-08-20 定案延後**，理由與去向見下方
-  階段 E 的「明確延後（不是達成）」——它現在沒有讀者，真要做時應與 `_zone_key()`
-  換 uid 一起在 T-049 決定。階段 E 改為把身分落到 `stock_sr_zones.zone_uid`，
-  補上 DB 的 join 路徑。
-
-#### 階段 D：Lifecycle Engine 支援 4 個事件 —— **已實作／待 review（2026-08-20）**
-
-要支援 `SUPPORT_BREAKDOWN` / `SUPPORT_RECLAIM` / `SUPPORT_RETEST` / `RESISTANCE_BREAKOUT`。
-**盤點後這四個的現況差很多，不是同一種工作：**
-
-| 事件 | 現況 |
-|---|---|
-| `SUPPORT_BREAKDOWN` | ✅ 已是 event family（`HIGH_VOLUME_BREAKDOWN`） |
-| `SUPPORT_RECLAIM` | ✅ 已是 event family（`INTRADAY_RECLAIM`） |
-| `SUPPORT_RETEST` | ❌ **不存在**。只在 `scenario_engine._zone_state` 當**場景字串**——由 `role` 直接推出來的展示標籤，與「有沒有真的回測」無關 |
-| `RESISTANCE_BREAKOUT` | ❌ **不存在**。只在 `evaluation.py` 當 replay 的兩根 K 結果標籤 |
-
-盤點還多找到兩件計畫必須處理的事：
-
-* **壓力側目前完全不產生事件。** `detect_market_events` 的主迴圈第一行就是
-  `if z.role != ZoneType.SUPPORT.value: continue`（`event_engine.py:458`）。
-  `RESISTANCE_BREAKOUT` 不是「多加一個 if」，是**第一次讓壓力 zone 進入事件迴圈**。
-* **事件直接改決策。** `market_state_from_event_states` 的輸出經
-  `event_state_summary.market_state` 走進 `decision_engine.py:312` 與 `:927`，
-  決定 `short_term_regime` / `market_bias` / `action_state` / `entry_permission`。
-  所以新增事件型別**預設就會改變交易訊號**，與階段 A～C 的「純新增」性質不同。
-
-##### 修改目標
-
-讓四個事件都在 event 層存在並被持久化，且**新增的兩個全程只寫不讀**
-（2026-08-19 使用者定案）：寫進 `market_event_states` / `market_event_detections` /
-`event_instances`，但不參與 `market_state`、不參與 `lifecycle_phase` / `event_signal`、
-不參與 `decision_engine` 的任何分支。**驗收條件是決策逐欄相同**——與階段 B／C 同一條。
-
-這條界線的理由：接進決策等於改變 Bias 與進場訊號，而 T-049 已經定下該類改動的門檻
-（`MODE=replay scripts/run-evaluation.sh` 對真實資料做分佈比較，母體要夠），
-那個母體要等 `issue.md` I-074 的補分析排程，現在不存在。先把事實層做出來並累積資料，
-接進決策由 T-049 一次做完。
-
-##### 不做的範圍
-
-* **不改任何決策行為。** `market_state` / `lifecycle_phase` / `event_signal` /
-  `market_bias` / `action_state` / `entry_permission` 全部逐欄不變。
-* **不改既有四個事件型別的觸發條件**（`EXTREME_VOLUME` / `HIGH_VOLUME_BREAKDOWN` /
-  `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`），連門檻常數都不動。
-* **不動前端。**
-* **不接 `ZoneScore.zone_uid`**（階段 C 遺留的開放項目，需要 `previous_zones` contract，
-  與本階段無關）。
-* 不做 T-050 的 metric。
-
-##### 實作偏離紀錄（2026-08-20，已回報並經使用者確認）
-
-**D1 的「名字型／方向型」二分不完整，實際上還有第三類：位置型讀者。** 這類讀者既不比對
-型別名、也不看 `direction`，而是**取事件清單裡的第幾個**——新事件一旦進 raw
-`market_events` 就會插隊改變答案。盤點到兩處，兩處都在 `decision_engine.py`：
-
-| 位置 | 讀法 | 影響的既有欄位 |
-|---|---|---|
-| `_event_sequence` | 排序後投影整串事件 | `stock_sr_decisions.event_sequence_json` |
-| `_defense_lines` | 取**第一個** `zone_ref` 對得上的事件當戰術防守線 | `defense_lines_json`、以及吃 tactical stop 的 `rr_context_json` |
-
-因此「`decision_engine.py` 不改」這條放寬為：**只加 `is_decision_visible` 過濾，不改任何
-判斷邏輯、門檻或分支**。其餘 raw `market_events` 讀者（`_market_event_adjustment`、
-`_high_volume_breakdown_action`、`_daily_candidate_zones`、`:312` 與 `:1185` 的
-`event_types`）都是名字型，確認安全、不動。
-
-`_defense_lines` 是**驗收跑出來才抓到的**，不是設計時想到的：第一輪四檔 21 階復驗
-84 筆決策中有 **7 筆**的 `defense_lines.tactical`（連帶 `rr_context.stop_basis` 7 筆、
-`stop_price` 2 筆）與基準不同，`market_bias` / `entry_permission_state` /
-`position_action` / `event_market_state` / `reason_codes` 則全部逐欄相同。回歸測試見
-`test_decision_engine.py::test_defense_lines_tactical_skips_decision_invisible_events`
-（拿掉過濾即失敗）。
-
-另一項定案：`decision_visible` 這個鍵也會出現在**對外 payload 的既有事件項目**上
-（`market_events[]` 與 `event_state_summary` 各桶），視為**純新增鍵**、不算決策差異——
-它是跨 Python／Go 的單一 authority 旗標，Go 端就是從 `state_json` 讀它。
-
-非阻斷、留給 T-049：`evaluation.py` 的 `market_event_types` 分層鍵會多出新型別，
-影響 replay／evaluation 的分層可比性，不影響 `stock_sr_decisions`。
-
-##### Review findings（2026-08-20，**已修正／待複審**）
-
-* **D2 文件一致性**：✅ 已修正。本 TODO 的 D2 修法段落現在寫「`decision_visible` 優先、
-  同一可見性內維持插入序」，與實作及 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-  「事件的決策可見性」一致。實作是
-  `sorted(enumerate(events), key=(0 if visible else 1, index))` 取前
-  `MAX_EVENTS_PER_ANALYSIS`，再依原 index 還原成插入序輸出——**全部可見時與
-  `events[:8]` 逐項相同**，`EVENT_ORDER` 只管 `build_event_state_summary` 的合併順序與
-  `latest_event_type`，不參與截斷。全檔已無「再依 `EVENT_ORDER`」的舊敘述
-  （只剩本條目引用舊字樣）。
-* **`decision_engine.py` 範圍描述一致性**：✅ 已修正。「受影響的檔案與資料流」的圖與清單
-  都改成「只加 `is_decision_visible` 過濾，不改判斷邏輯、門檻或分支」，
-  `decision_engine.py` 也已從「`lifecycle_engine.py` / `scenario_engine.py` /
-  `scoring.py` / `pipeline.py` 都不改」那串移出來單列。放寬的理由與實測證據見上方
-  「實作偏離紀錄」。過濾點共四個（Python 桶構建、Go `eventStateSummaryJSON`、
-  `_event_sequence`、`_defense_lines`），現況規格在 `sr-zone-scoring.md`。
-
-##### 五個設計決定
-
-**D1：隔離要顯式，不能靠「決策端不認識新名字」。**
-
-決策端對事件的消費有兩類，只有一類是安全的：
-
-| 類型 | 位置 | 對新事件的行為 |
-|---|---|---|
-| **名字型** | `market_state_from_event_states`、`resolve_event_signal`、`decision_engine` 的 `event_types` | 逐一比對 `HIGH_VOLUME_BREAKDOWN` / `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`，新名字自然落到 `NORMAL` |
-| **方向型** | `active_bearish_events` / `active_bullish_events` 兩個桶 | **只看 `direction`**。`resolve_event_signal` 對 `active_bearish_states` 取 truthiness 就回 `CLOSE_BREAKDOWN`，`resolve_lifecycle` 直接判 `lifecycle_phase=BREAKDOWN` |
-
-所以只要新事件是 active 且帶方向，**不必被任何人認識就會改決策**。而且這組桶有**兩份
-實作**：Python 在 `build_event_state_summary`，Go 在 `sr_zones.go:404-410`
-（`eventStateSummaryJSON` 依 `state.Direction` 重建），carry-forward 的回程走的是 Go 那份。
-
-**修法**：在 `EVENT_TYPE_META` 加一個 `decision_visible`（新事件為 `False`，既有四個
-為 `True`），Python 的桶構建與 Go 的 `eventStateSummaryJSON` **各自**跳過
-`decision_visible=False` 的狀態。旗標要能從 `state_json` 讀到，Go 才不必複製型別清單。
-
-**備案（不建議）**：把新事件的 `direction` 設成 `NEUTRAL`、`gating_states` 設空，靠它們
-永遠進不了 active 與方向桶。這是靠副作用達成隔離——下一個人加第三個事件時不會知道
-要維持這組副作用，而且沒有任何東西會報錯。
-
-**D2：`events[:8]` 的截斷是插入序，不是優先序。**
-
-`detect_market_events` 結尾是 `normalize_market_events(events[:8])`，而 `events` 的順序
-是「`EXTREME_VOLUME` ＋ zone 迴圈的插入序」，**排序（`EVENT_ORDER`）發生在截斷之後**
-（`build_event_state_summary` 才排）。目前迴圈只跑支撐 zone，開放壓力 zone 之後同一個
-上限要塞更多事件，**可能把後面 zone 的支撐事件擠掉**——那是決策可見的改變，而且完全靜默。
-
-**修法**：截斷前先依「`decision_visible` 優先、同一可見性內維持插入序」處理，保證新事件
-只會擠掉新事件。上限值本身不動（改上限也是決策可見的改變）。
-
-**D3：兩個新事件的 `resolves` 都是空的。**
-
-`resolves` 會把既有 family 的狀態改成 `RESOLVED`／`active=False`，那是決策可見的改變。
-「壓力突破是否 resolve 支撐側事件」的語意本身是個真問題（現行
-`EVENT_FAMILY_LIFECYCLE_RULES` 全部是 `SUPPORT_*` 與 `VOLUME_CONTEXT`，沒有壓力側先例），
-但它只有在事件接進決策之後才有意義，**留給 T-049**。
-
-**D4：`SUPPORT_RETEST` 與既有 `REVERSAL_CANDIDATE` 重疊，要先分工再實作。**
-
-現行 `REVERSAL_CANDIDATE` 的 else 分支條件是「未收破 ＋ `confidence >= 0.45` ＋
-`EV >= 0` ＋ 近期驗證未失效」，已經涵蓋「測試到支撐且守住」。若把 `SUPPORT_RETEST`
-定義成 `rejection_type == "SUPPORT_HELD"`，它就是前者的**超集**。
-
-分工定義：`SUPPORT_RETEST` 是**事實**（碰到 zone 且未收破，不帶品質門檻），
-`REVERSAL_CANDIDATE` 是**帶品質門檻的方向性候選**。兩者是不同 family，同一根 K 同時
-成立是正常的，不互相 resolve。
-
-**命名要避開撞名**：`scenario_engine._zone_state` 已經有字串 `SUPPORT_RETEST`，語意是
-「這是支撐 zone」而不是「發生了回測」。事件型別若用同名，grep 與判讀都會混淆。
-**建議事件型別叫 `SUPPORT_RETEST_HELD`、family 叫 `SUPPORT_RETEST`**；family 名對齊
-需求用語，型別名保留「守住」這個事實。
-
-**D5：`RESISTANCE_BREAKOUT` 鏡像 `HIGH_VOLUME_BREAKDOWN`，但守衛要改成 role 分派。**
-
-觸發條件（鏡像既有跌破事件，常數沿用不新增）：壓力 zone、`touched`、
-收盤站上 `price_high`（`CONFIRMED`）或僅盤中 `high > price_high`（`CANDIDATE`），
-且 `relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD` 或
-`volume_confirmation == FAILED`。`zone_interaction` 對壓力 zone 已經算好
-`closed_above` / `penetration_pct` / `rejection_type="RESISTANCE_HELD"` /
-`reclaim_type="OVERTHROW_REJECTED"`，不必新增幾何判斷。
-
-**但 `if z.role != SUPPORT: continue` 不能直接移除**：迴圈內其餘分支
-（跌破、`UNDERCUT_RECLAIM`、`REVERSAL_CANDIDATE`）全部假設 support。移除守衛會讓壓力
-zone 掉進那些分支，那是決策可見的改變。**改成依 role 分派到兩段互斥的邏輯**，
-支撐側那段一行不動。`AT_ZONE` 維持現行行為（兩段都不進）。
-
-##### 受影響的檔案與資料流
-
-```
-event_engine.py
-  ├─ EVENT_TYPE_META        ＋2 型別、＋decision_visible 旗標
-  ├─ EVENT_FAMILY_LIFECYCLE_RULES ＋2 family
-  ├─ EVENT_ORDER            ＋2（排在既有之後）
-  ├─ detect_market_events   role 分派 ＋ 壓力側偵測 ＋ 截斷前排序（D2）
-  └─ build_event_state_summary  桶構建跳過 decision_visible=False（D1）
-                                      │
-                                      ▼
-  decision_engine.py（呼叫端，:2339）——只加 is_decision_visible 過濾，並證明輸出逐欄相同
-                                      │
-                                      ▼
-  Go: sr_zones.go eventStateSummaryJSON  桶構建跳過 decision_visible=False（D1）
-      ├─ market_event_states / market_event_detections（既有表，多出新型別的列）
-      └─ event_instances / event_transitions（新 family 的鏈，自動走既有路徑）
-```
-
-* Python：`event_engine.py`（主要）、`decision_engine.py`（只加 `is_decision_visible`
-  過濾）、對應測試。**`lifecycle_engine.py` / `scenario_engine.py` / `scoring.py` /
-  `pipeline.py` 都不改。**
-* Go：`internal/api/handler/sr_zones.go` 的 `eventStateSummaryJSON`（跳過不可見事件）；
-  `internal/store/` 與 `internal/analysis/` **不改**——`event_instances` 的
-  `event_family` / `*_event_type` / `direction` 都是 `VARCHAR(80)`／`VARCHAR(20)`
-  自由字串，新 family 走既有寫入路徑。
-* **Migration：不需要。** 三份 068／042 都沒有對 `event_family` / `event_type` 的
-  CHECK constraint（已確認）。這是階段 D 與 A／B／C 最大的不同。
-* 前端：不動。
-
-##### 資料 contract 變化
-
-| 變更 | 型態 | 相容性 |
-|---|---|---|
-| `state_json` ＋ `decision_visible` | 純新增布林鍵 | 缺鍵視為 `True`（既有列都是決策可見的），與 `carried_from_previous` 的處理方式**刻意不同**——那個缺鍵是異常，這個缺鍵有合理預設 |
-| `market_event_states` 多出兩種 `type` / `event_family` 的**列** | 純新增列 | 既有列逐欄不變 |
-| `event_instances` 多出兩個 family 的鏈 | 新列 | 沒有讀者 |
-| `/sr-zones` 的 `event_state_summary.states` | 多出 `decision_visible=false` 的項目 | `active` / `candidates` / 方向桶**不變** |
-| `/sr-zones` 的 event timeline（`sr_zones.go:924`） | 會出現新事件的鏈 | 前端目前沒有讀這個端點，但這是對外可見的變化，要寫進歸檔 |
-
-##### 主要風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| **以為是純新增、其實改了決策**（經方向桶或 `[:8]` 截斷靜默發生） | D1／D2 是針對這條的；驗收條件是 `stock_sr_decisions` 與 `market_event_*` 既有欄位逐欄相同 |
-| Python 與 Go 兩份桶構建對 `decision_visible` 的處理分歧 | 兩邊各補單元測試釘住；旗標值由 Python 單一產生、Go 只讀不推導（比照 `carried_from_previous` 的定案） |
-| 壓力 zone 首次進事件迴圈，掉進支撐側分支 | D5 的 role 分派；支撐側那段程式碼一行不動，用既有測試證明 |
-| 新事件讓 zone key 的漂移型態改變，第一次真的走到 alias 備援 | 不是缺陷。階梯復驗時觀察 `matched_by_alias` 是否首次非零，記進歸檔 |
-| 事件數增加撞上 `[:8]` | D2 的排序保證只擠掉新事件；階梯復驗比對既有事件數 |
-| 回滾 | 純新增（新型別、新旗標、新分支），既有路徑不改。`git revert` 即可；**沒有 migration 要退**，已寫入的新事件列留著無害（沒有讀者） |
-
-##### 測試與驗證策略
-
-* **單元（Python）**：兩個新事件各自的觸發與不觸發；`SUPPORT_RETEST_HELD` 與
-  `REVERSAL_CANDIDATE` 同一根 K 同時成立時互不干擾；壓力 zone 不會產生支撐側事件；
-  新事件不進 `active` / `active_bearish_events` / `active_bullish_events`；
-  `market_state` 在有新事件時仍是 `NORMAL`；截斷排序（構造超過 8 個事件，
-  驗證被擠掉的一定是 `decision_visible=False` 的）。
-* **單元（Go）**：`eventStateSummaryJSON` 對 `decision_visible=false` 的狀態
-  只放進 `states`、不放進其餘六個桶；缺鍵時視為可見。
-* **回歸**：`python/scripts/test.sh`、`backend/scripts/test.sh` 全綠。
-* **端到端（as-of 階梯）**：四檔 21 階同一組（`2330`／`3105`／`6182`／`8150`，
-  2026-07-21～08-18），腳本與基準都是現成的。門檻：
-  1. **決策逐欄相同**——`stock_sr_decisions` 與 `market_event_states` 的既有欄位
-     與階段 C 那輪比對無差異（新增的列除外）。這是本階段唯一真正的驗收條件。
-  2. **zone 身分數不變**（329）、血緣邊不變（57）——新事件不該影響身分層。
-  3. **事件鏈數增加**且新 family 的鏈確實寫進 `event_instances`（否則等於沒做）。
-  4. 六條門檻＋D4 專屬檢查仍然全部 0。
-* **不做 replay 分佈比較**：那是 T-049 的門檻，本階段因為決策逐欄不變而不需要
-  （反過來說，若比對出任何決策差異，就是本階段的界線被打破，不是可以放寬的門檻）。
-
-##### 完成後歸檔（**已完成，2026-08-20**）
-
-* 四個事件的定義、觸發條件、三類讀者與四個過濾點、截斷順序、role 分派 →
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Market Events」的新增列、family lifecycle
-  規則兩列，以及新增的「事件的決策可見性（`decision_visible`）」。
-* `state_json` 的 `decision_visible` 鍵與「缺鍵當 true」（與 `carried_from_previous`
-  刻意相反）→ [`database-schema.md`](./database-schema.md)「market_event_states」欄位表
-  與「event_instances / event_transitions / zone_key_aliases」。
-* event timeline 與 `/sr-zones` payload 會出現只寫不讀的事件鏈 →
-  [`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」。
-* 階梯復驗的新基準數字（事件鏈 128、transitions 250、`ZONE_IDENTITY_ENDED` 8、
-  新型別列數、以及第一輪 7 筆 `defense_lines` 差異的成因）→
-  `sr-zone-scoring.md` 的「實測特性」。
-
-#### 階段 E：把 zone 身分落到分析快照 —— **已實作／待 review（2026-08-20）**
-
-階段 C 留下、階段 D 明確排除的最後一條開放項目。現況是：**身分算得出來、也存得起來，
-但沒有任何地方把「這次分析的 zone」與「它的身分」連起來**。
-
-| 現況 | 位置 |
-|---|---|
-| Go 先呼叫 `/sr-zones` 拿 zones、寫進 DB，**之後**才呼叫 `/zone-identity/match` | `sr_zones.go:611-617`（`repo.Create` → `persistZoneIdentity`） |
-| 「這次分析的第 N 個 zone 是哪個身分」只活在 Go 記憶體的 `UIDByZoneKey` | `stock_sr_zones` **沒有 `zone_uid` 欄位** |
-| 因此 T-041 的 timeline 與 T-049 的下游都沒有 join 路徑可走 | — |
-
-盤點時確認的兩件事決定了本階段的作法：
-
-* **對外回應的 zones 是從 DB 讀回來的**（`loadSRZonePipelineSnapshot(id)`，`sr_zones.go:622`），
-  不是直接回傳 Python 的輸出。**只要 DB 有 `zone_uid`，對外 payload 就看得到身分，
-  Python 完全不必知道它的存在。**
-  > **這句的後半被實作推翻（2026-08-20 復驗）。** 前半（來源是 DB snapshot、Python 不必知道）
-  > 成立；但 `srZonePipelineResponse` 不是把 `SRZone` marshal 出去，而是**手工白名單**，
-  > DB 有值不等於回應帶得出來。正確的對外路徑是 `zones[].data.zone_uid`，且 handler
-  > 必須明確加鍵。詳見下方「實作結果與驗收」。
-* **`buildZoneIdentityWrite` 沒有用到 zones 的 DB id**（只用 `ZoneKey` / `Method` /
-  `PriceLow` / `PriceHigh` / `Role`），`analysisID` 只有「寫入」那一步需要。
-  **所以比對可以前移到 `repo.Create` 之前**，讓 zones 一次寫入就帶著 uid。
-
-##### 修改目標
-
-1. `stock_sr_zones.zone_uid` 落地——補上「分析快照 ↔ 身分」缺的 join 路徑。
-2. 對外 payload 的 `zones[].data.zone_uid` 看得到身分（**來源是 DB snapshot；
-   但 `srZonePipelineResponse` 是手工白名單，需明確加鍵，不會只靠 struct tag 自動帶出**）。
-3. **全程只寫不讀**：驗收條件與 B／C／D 同一條——決策逐欄相同。
-
-##### 明確延後（不是達成）
-
-**`ZoneScore.zone_uid`（Python 端在分析當下拿到身分）本階段不做**，2026-08-20 定案。
-
-理由是**它現在沒有讀者**：Python 端唯一的候選消費者是把 `event_engine._zone_key()`
-換成 uid，而那件事會改變 `market_event_states.event_key` / `zone_key` 與 carry-forward
-的比對面，也與 Go 端三段關聯決策重疊——是獨立的一階，且真要做時應該與 T-049
-一起決定。為了一個沒有讀者的欄位去改 `/sr-zones` 的 request contract 與
-`pipeline.py`（決策核心路徑），風險與收益不成比例；同一個判斷 `/zone-identity/match`
-的 docstring 在階段 B 已經下過一次。
-
-因此上方階段 C 的開放項目「`ZoneScore.zone_uid` 仍未接上」**不算被本階段解決**，
-改列為 T-049 的前置，處置見本節。
-
-##### 不做的範圍
-
-* **Python 一行不改。** `pipeline.py` / `http_server.py` / `scoring.py` /
-  `serialization.py` / `types.py` / `zone_matcher.py` 全部不動。
-* **不改 matcher 的判準、門檻常數或資格閘門**，也不改 `/sr-zones` 的 request contract。
-* **不改 `event_engine._zone_key()`。**
-* **不刪 `/zone-identity/match`**：它仍是唯一的比對入口，維持現用。
-* **不回填歷史**：既有 `stock_sr_zones` 列的 `zone_uid` 留 `NULL`（回填要解的正是
-  「兩個舊 key 是不是同一個 zone」，那是本筆要建的能力，回填不可能做對）。
-* 不動前端（T-041）、不接下游決策（T-049）、不做 T-050 的 metric。
-
-##### 三個設計決定
-
-**E1：比對前移到 `repo.Create` 之前，不新增任何 contract。**
-
-新順序（括號內是現行位置）：
-
-```
-ScoreZonesWithPreviousEvents（:599）
-   → result.ToStore()（:605）
-   → ListLive / ListTradingDays / ListKeyAliases  ← 由 persistZoneIdentity 內前移
-   → MatchZoneIdentities                          ← 由 persistZoneIdentity 內前移
-   → 把 matched.ZoneUIDs[i] 填進 zones[i].ZoneUID  ← 新增
-   → repo.Create(a, zones, projections)（:611）    ← zones 一次寫入就帶 uid
-   → buildZoneIdentityWrite + Apply（:1024-1030）  ← 保留，改吃已經算好的 matched
-   → persistEventIdentity（:618）                  ← 不變
-```
-
-考慮過但否決的方案（完整比較留在對話紀錄，這裡記結論）：
-
-| 方案 | 否決理由 |
-|---|---|
-| Python 內建比對（request ＋ `previous_zones`） | 目標 1 現在沒有讀者，卻要動決策核心路徑並讓 matcher 例外有機會炸掉整筆分析。留給 T-049 |
-| Python 與 Go 各跑一次 matcher | `uid_factory` 是隨機 UUID，同一組輸入會給出**不同的 uid**，兩張表對不起來且不會報錯 |
-| 用 Go 重寫一份 matcher | 作廢階段 A 的單元測試與 live fixture，並永久維持兩份會漂移的實作 |
-| Python 自己連 DB 查 `zone_instances` | `max_observed_absences` 與交易日曆會出現第二份資格判準（F5 才剛統一成一個定義） |
-| 先寫 zones 再 `UPDATE ... SET zone_uid` | 多一次寫入與一個「短暫不一致」的中間狀態，換不到任何東西——比對本來就可以前移 |
-
-**E2：失敗語意必須維持「身分掛掉不影響分析」。**
-
-現行 `persistZoneIdentity` 的每一步失敗都是 `h.log.Warn` ＋ `return nil`，分析照常回 201。
-前移之後比對發生在**分析還沒落地**的時點，所以這條要特別釘住：
-`ListLive` / `ListTradingDays` / `MatchZoneIdentities` 任何一步失敗，
-**zones 的 `zone_uid` 留空、照樣 `repo.Create`、事件層照現行邏輯跳過**
-（`zoneOutcome = nil`），分析本身必須成立。這是本階段唯一與 A 方案同源的風險，
-面積小很多，但要有測試。
-
-**E3：`zone_uid` 可空、無外鍵。**
-
-`zone_instances` 的寫入（`Apply`）仍在 `repo.Create` **之後**，兩者不同交易。加外鍵會讓
-「zones 已寫入、`Apply` 失敗」這個既有降級路徑直接違反約束，把一個可容忍的降級變成
-整筆分析失敗。所以是 `VARCHAR(64) NULL` ＋ index，不加 FK。
-
-**`NULL` 有三種語意**，文件要寫明：① 該次分析早於本階段；② 當次身分比對或寫入降級了；
-③ 由 `analysis/sr_analysis_provider.go` 這條不做身分追蹤的路徑建立（signal／排程／
-`reuse_existing=true`）。三者都不代表「這個 zone 沒有身分」。
-
-##### Review findings（2026-08-20，**已修正／待複審**）
-
-兩條都是「TODO 仍留著舊 contract／語意描述」，會讓依 TODO 接資料的 T-041 / T-049 讀錯。
-
-* **對外 payload path 一致性**：實作與 [`api-reference.md`](./api-reference.md) 都是
-  `zones[].data.zone_uid`，本 TODO 若仍寫 `zones[].zone_uid` 就是舊設計。後續 T-041 /
-  T-049 會依 TODO 接資料，路徑要修成 `data.zone_uid`。
-  **已修正**：修改目標 2、受影響檔案與資料流、contract 表、完成後歸檔四處改為
-  `zones[].data.zone_uid`，並加註「`srZonePipelineResponse` 是手工白名單，需明確加鍵」。
-  掃過全文，剩下的裸 `zones[].zone_uid` 只有本條 finding 自己引述舊寫法的那一句。
-* **`NULL` 語意一致性**：正式 schema 已寫成三種語意：舊分析、當次身分比對／寫入降級、
-  以及 `sr_analysis_provider.go` / `reuse_existing=true` 這條不做身分追蹤的路徑。TODO
-  若仍寫兩種語意，會漏掉 provider/reuse 產生 `NULL` 的情境。
-  **已修正**：E3 與完成後歸檔改為三種語意，風險表對應改為「E3 的三種語意」。
-
-**同一類的另外兩處，本輪一併修掉**（原本不在 finding 清單裡，但都是會誤導下游的舊描述）：
-
-* 「盤點時確認的兩件事」第一點斷言「只要 DB 有 `zone_uid`，對外 payload 就看得到身分」——
-  這正是害目標 2 第一輪漏掉的前提。原句保留供 review，下方加了一段標明被實作推翻。
-* 測試與驗證策略門檻 3 原寫「這是目標 1、2 ⋯⋯唯一硬證據」。DB 非空只證明得了目標 1，
-  已改成目標 1，並補上門檻 5（目標 2 要看回應本身）。
-
-三份主題文件（`api-reference.md` / `sr-zone-scoring.md` / `database-schema.md`）掃過，
-沒有殘留的舊路徑或兩種語意寫法。
-
-##### 受影響的檔案與資料流
-
-```
-Go: api/handler/sr_zones.go
-  ├─ 呼叫順序前移（E1）＋ zones[i].ZoneUID 指派
-  └─ persistZoneIdentity 拆成「取資料＋比對」與「寫入」兩段
-Go: store/model.go        SRZone ＋ ZoneUID（**入庫**，與 ZoneKey 的 `db:"-"` 相反）
-Go: store/ 的 zones 寫入 SQL ＋ 讀取 SQL（snapshot 要帶回 zone_uid）
-migrations/{postgres,sqlite,mysql}/0XX_sr_zone_uid.sql   **三份都要**
-```
-
-* Python：**不改**。
-* 前端：不動（`zones[].data.zone_uid` 是純新增鍵，前端沒讀就沒有影響）。
-
-##### 資料 contract 變化
-
-| 變更 | 型態 | 相容性 |
-|---|---|---|
-| `stock_sr_zones` ＋ `zone_uid VARCHAR(64) NULL` | 純新增可空欄位 | 既有列 `NULL`，不回填 |
-| `/sr-zones` 回應 `zones[].data.zone_uid` | 純新增鍵 | 既有欄位逐欄不變；來源是 DB snapshot，handler 白名單需明確帶出 |
-| `/sr-zones` request | **不變** | 本階段不動 contract |
-| `/zone-identity/match` | **不變**，維持現用 | — |
-
-##### 主要風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| 前移後比對進到「分析尚未落地」的時點，失敗會拖垮整筆分析 | E2 的 fail-open ＋ 專屬 Go 測試（比對失敗時 zones 仍寫入、`zone_uid` 為空、分析成立） |
-| 順序前移改變了 `ListLive` 的讀取時點，previous 清單可能不同 | 現行也是在同一次請求內、`Apply` 之前讀（`sr_zones.go:997` 的註解就是在講這件事），前移不跨越任何寫入點。驗收門檻②要求身分層數字**逐項重現**，對不上就是輸入變了 |
-| zones 的寫入／讀取 SQL 多一欄，三個 engine 要同步 | 三份 migration ＋ `scripts/test-postgres-migrations.sh`；mysql 依 I-054 的既有處置 |
-| 下游把 `NULL` 誤讀成「沒有身分」 | E3 的三種語意寫進 `database-schema.md` |
-| 回滾 | 純新增欄位 ＋ Go 內部順序調整，Python 沒有動。`git revert` ＋ `-- +goose Down` 掉欄位即可 |
-
-##### 測試與驗證策略
-
-* **單元（Go）**：比對前移後 zones 帶 uid 寫入、snapshot 讀得回來；
-  `ListLive` / `MatchZoneIdentities` 失敗時 zones 仍寫入且 `zone_uid` 為空、
-  `zoneOutcome` 為 `nil`、分析成立；`buildZoneIdentityWrite` 既有測試全綠（行為不變）。
-* **回歸**：`backend/scripts/test.sh` 全綠；`python/scripts/test.sh` 也要跑一次證明沒被波及。
-* **Migration**：`scripts/test-postgres-migrations.sh`；sqlite 由 `backend/scripts/test.sh` 覆蓋。
-* **端到端（as-of 階梯）**：同一組四檔 21 階（`2330`／`3105`／`6182`／`8150`），門檻：
-  1. **決策逐欄相同**（`zone_uid` 是新增欄位，比對時排除）。
-  2. **身分層數字逐項重現**：zone 身分 329、血緣邊 57、事件鏈 128、transitions 250、
-     alias 685、`ZONE_IDENTITY_ENDED` 8；六條門檻＋D4 仍全部 0。
-  3. `stock_sr_zones.zone_uid` **非空比例 100%**（`AT_ZONE` 也要有），且每一列都
-     join 得到 `zone_instances`——這是**目標 1**有沒有真的達成的唯一硬證據。
-     （原文寫「目標 1、2」，2026-08-20 修正：DB 非空證明不了對外回應帶不帶得出來。）
-  4. 每次分析的 zones 筆數 ＝ 該次 `zone_uids` 長度（順序沒有錯位）。
-  5. **目標 2 的硬證據是回應本身**：`POST /sr-zones` 回應裡每個 zone 都帶得出
-     `data.zone_uid`。DB 對了但白名單漏鍵時，前四條門檻會全部通過而目標 2 沒達成。
-
-##### 完成後歸檔
-
-* 呼叫順序（比對前移）與「身分寫入降級時 `zone_uid` 留 `NULL`」→
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」的「接線」段。
-* `stock_sr_zones.zone_uid`：可空、無 FK 的理由、不回填、`NULL` 的語意 →
-  [`database-schema.md`](./database-schema.md)。實作時發現是**三種**不是兩種：
-  多了「由 `sr_analysis_provider.go` 這條不做身分追蹤的路徑建立」。
-* 回應多 `zones[].data.zone_uid` → [`api-reference.md`](./api-reference.md)。
-* `ZoneScore.zone_uid` 延後的決定與理由 → 留在本筆，並列進 T-049 的前置清單。
-
-歸檔**已完成（2026-08-20）**：`database-schema.md` 的 `stock_sr_zones` 加了 `zone_uid`
-欄位與三種 `NULL` 語意、`sr-zone-scoring.md`「接線」段換成前移後的呼叫順序與降級語意、
-`api-reference.md` 加了 `zones[].data.zone_uid`。
-
-##### 實作結果與驗收（2026-08-20）
-
-**與計畫書的一處偏離：目標 2 不是免費的。** 計畫書寫「對外回應是從 DB 讀回來的，只要 DB 有
-`zone_uid`，對外 payload 就看得到」——**這個前提是錯的**。`srZonePipelineResponse` 不是把
-`SRZone` 整個 marshal 出去，而是手工白名單（`id` / `analysis_id` / `price_low` /
-`price_high` / `method` / `role` 六個鍵），所以 struct 上的 `json:"zone_uid,omitempty"`
-在這條路徑上根本沒被用到。第一輪階梯跑完 DB 全對，但實際回應 13 個 zone **一個都沒有
-`zone_uid`**。補法是白名單加一鍵 ＋ 一條 handler 測試釘住（漏欄位的外觀與「降級成 `NULL`」
-一模一樣，從回應上看不出差別）。修完重建、重跑整輪階梯復驗。
-
-驗收結果（對照上方五條門檻，全部通過；階梯 84/84 皆 201，backend log 沒有任何
-`zone identity ... failed`）：
-
-| 門檻 | 結果 |
-|---|---|
-| ① 決策逐欄相同 | PASS（84 筆，27 欄逐欄比對） |
-| ② 既有事件型別狀態逐欄相同 | PASS |
-| ③ 身分層數字逐項重現 | 84 / 329 / 57 / 128 / 250 / 685 / 8 全部命中；六條門檻＋D4 全 0 |
-| ④ `zone_uid` 非空比例 | 1282/1282，join 不到 `zone_instances` 0 筆，`AT_ZONE` 缺身分 0 筆 |
-| ⑤ 沒有錯位 | 同分析內重複 uid 0 筆；身分數 ≠ zone 數 0 筆 |
-| ⑥ 對外 payload（目標 2） | 最後一筆回應 13/13 個 zone 都帶得出 `data.zone_uid` |
-
-回歸：`backend/scripts/test.sh` 全綠、`python/scripts/test.sh` 595 passed / 1 skipped
-（Python 未改，只為證明沒被波及）、`scripts/test-postgres-migrations.sh` 全綠（含 069
-up/down），sqlite 由 backend 測試覆蓋、mysql 依 I-054 既有處置只驗 DDL。
-
-**驗收時踩到一個已記錄的坑**：用 `scripts/smoke-dev.sh` 起 dev stack 不會帶
-`SR_SCORING_MODELS_DIR`，於是掛到空的 `python/models/`，整輪階梯回 503「機率模型尚未
-訓練」。`development-workflow.md` 已經寫了這件事，起 stack 時要自己帶。
-
----
-
-#### 受影響的檔案與資料流
-
-```
-zone_builder.py ──► ZoneMatcher（新）──► ZoneScore.zone_uid
-                                            │
-scoring.py / pipeline.py ───────────────────┤
-                                            ▼
-event_engine.py（zone_key → zone_uid）  lifecycle_engine.py（＋2 個新事件）
-                                            │
-                                            ▼
-              Go: analysis/client.go contract ＋ store repo ＋ migration 067
-```
-
-* Python：`zone_builder.py`、`types.py`、`event_engine.py`、`lifecycle_engine.py`、
-  `scoring.py`、`pipeline.py`、`serialization.py`、新增 `zone_matcher.py`
-* Go：`internal/analysis/client.go`（contract）、`internal/store/`（新 repo）、
-  `internal/database/migrations/{postgres,sqlite,mysql}/067_*`（**三份都要**）
-* 前端：本筆不動
-
-#### 風險與回滾／相容策略
-
-| 風險 | 對策 |
-|---|---|
-| ZoneMatcher 誤配把兩個真實 zone 併成一個 | 門檻先用 live 資料掃描決定；`zone_transitions` 留痕讓誤配看得出來 |
-| 新舊兩套事件狀態不一致 | **並行寫入一段時間**，新表不餵給任何決策；用 SQL 逐日比對兩邊的 active 集合 |
-| mysql migration 從未部署（I-054） | 三份 migration 都寫，但只有 postgres/sqlite 有執行證明，照 I-054 的既有處置 |
-| 回滾 | 三個階段都是**純新增**（新表、新欄位、新模組），既有路徑不改。`git revert` ＋ `-- +goose Down` 即可；已寫入的新表留著無害，因為沒有任何決策讀它 |
-
-**相容策略的核心：本筆全程「只寫不讀」。** 新表寫入、舊路徑照跑、決策完全不變。
-這讓階段 A～D 可以逐個交付而不需要一次性切換，也讓 T-049 有真實資料可以比對。
-
-#### 測試與驗證策略
-
-* ZoneMatcher：純函數，用 live 抓下來的真實 zone 形狀當 fixture（比照
-  `selection_report.py` 的已知答案測試）。**必測 0050 那組 IoU > 0.9 的分裂案例**。
-* 狀態機：合法/非法轉換各一組；`ROLE_FLIPPED` 後身分不變。
-* 事件：4 個事件各自的觸發與過期；`RESISTANCE_BREAKOUT` 的 `resolves` 語意。
-* **並行比對**：新舊兩套同時寫入後，用 SQL 比對每日的 active 事件集合，
-  差異只能來自「分裂被正確合併」，不能有其他來源。
-* 決策不變的證明：`stock_sr_zone_analyses` 的既有欄位在本筆前後必須逐欄相同。
-
-#### 完成後歸檔
-
-現況規格寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)（Zone 身分與 ZoneMatcher、
-狀態機、四個事件的定義），schema 寫進 [`database-schema.md`](./database-schema.md)，
-contract 變更寫進 [`api-reference.md`](./api-reference.md)。
-
-**階段 A／B／C 的部分已歸檔**（2026-08-19）：`sr-zone-scoring.md`「Zone 身分與
-ZoneMatcher」與其中的「事件層：鏈的身分與三段關聯決策」、`database-schema.md` 的
-067／068 兩組表與 `from_state`／終態不變式、`development-workflow.md` 的 as-of 階梯
-驗收步驟與六條門檻。階段 D 完成後補上四個事件的定義。
-
----
-
 ### T-049：Market State 與所有下游改讀同一套 state
 
 | 欄位 | 內容 |
@@ -2900,25 +2262,56 @@ ZoneMatcher」與其中的「事件層：鏈的身分與三段關聯決策」、
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 決策邏輯 |
 | 建立日期 | 2026-08-18 |
-| 來源 | 同 T-048，階段 5～6 |
+| 來源 | 同 T-048（SR Zone 狀態持久化，已於 2026-08-20 完成並收斂），階段 5～6 |
 
 **範圍**：Market State 改讀 Lifecycle 而不再自己重判 Event；接著 Bias /
 Daily Confirmation / Reclaim / Event Sequence / Final Entry 全部改讀同一套 state。
 
-**依使用者確認，本筆先只列方向與驗證門檻，細節等 T-048 落地、看過真實資料形狀再寫。**
+**依使用者確認，本筆先只列方向與驗證門檻，細節等看過真實資料形狀再寫。**
+
+#### 從 T-048 交接過來的四件事（2026-08-20 收斂時移入）
+
+T-048 已完成並收斂，身分層／事件鏈的現況規格見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」與「事件層：鏈的
+身分與三段關聯決策」，schema 見 [`database-schema.md`](./database-schema.md)。
+它明確延後、指名由本筆承接的有四項：
+
+1. **`ZoneScore.zone_uid` 仍未接上**（Python 端在分析當下拿不到身分）。要餵得動 matcher
+   就得給它「上一次的 zone 清單」，而 Python 目前唯一的跨次狀態通道是 Go 傳進來的
+   `previous_event_states`，沒有 `previous_zones`——**要改 `/sr-zones` 的 request contract**。
+   T-048 階段 E 定案延後的理由是「它現在沒有讀者」：唯一的候選消費者是把
+   `event_engine._zone_key()` 換成 uid，而那會改變 `market_event_states.event_key` /
+   `zone_key` 與 carry-forward 的比對面，與本筆的三段關聯決策重疊，是獨立的一階。
+   **本筆若要動 `_zone_key()`，這兩件事必須一起決定。**
+2. **兩個新事件（`SUPPORT_RETEST_HELD` / `RESISTANCE_BREAKOUT`）的 `resolves` 是空的。**
+   `resolves` 會把既有 family 改成 `RESOLVED`／`active=False`，那是決策可見的改變。
+   「壓力突破是否 resolve 支撐側事件」本身是個真問題（現行
+   `EVENT_FAMILY_LIFECYCLE_RULES` 全是 `SUPPORT_*` 與 `VOLUME_CONTEXT`，沒有壓力側先例），
+   但只有在事件真的接進決策之後才有意義。
+3. **`evaluation.py` 的 `market_event_types` 分層鍵會多出新型別**，影響 replay／
+   evaluation 的分層可比性，不影響 `stock_sr_decisions`。非阻斷，但做分佈比較前要先處理，
+   否則新舊兩批的分層對不起來。
+4. **新舊兩套並行比對還沒做**（見下方前置①）。
 
 #### 兩個前置條件，缺一不可
 
-1. **T-048 完成**，且新舊兩套狀態已並行比對過一段時間。
+1. **新舊兩套狀態並行比對過一段時間。** T-048 本身已完成，但它的驗收做的是**回歸比對**
+   （改動前後決策逐欄相同、身分層數字逐項重現），**不是**計畫書要求的並行比對
+   （逐日比對新舊兩套的 active 事件集合，差異只能來自「分裂被正確合併」）。
+   起點資料是 [`issue.md`](./issue.md) I-080 的落差表：同一份 84 次分析裡，
+   `event_instances` 的鏈數與 timeline 端點的 `(zone_key, family)` 組合數**雙向都對不上**
+   （多出來的是 key 漂移拆開的鏈，少的是身分終止後的重生鏈）。
+   這件事要等前置②給出母體才做得起來——21 個交易日湊不出「一段時間」。
 2. **補分析排程**——「定期對 watchlist 產生 SR zone 分析」。
    這是 `issue.md` **I-074** 的關閉條件，也是本筆唯一可行的驗證來源：
    目前 `stock_sr_zone_analyses` 只有 **4 檔 / 20 次分析**（2026-08-18 再次確認未增加），
    而本筆會同時改動 Bias、進場、事件序列——**比 T-044 那次影響面大一個量級**，
    不能再用「428 支測試全綠」當證據交付。
 
-   這個排程目前**沒有任何 todo 在追**，只散見於 T-045 的討論段落。它本身有成本
-   （每檔都要跑一次 Python scoring，記憶體限制見 `sr-zone-scoring.md`「規模上限」），
-   要獨立評估。
+   這個排程已於 2026-08-20 獨立成
+   [T-052](#t-052定期對-watchlist-產生-sr-zone-分析分析排程)（在那之前沒有任何 todo 在追，
+   只散見於 T-045 與本筆的討論段落）。它本身有成本（每檔都要跑一次 Python scoring，
+   記憶體限制見 `sr-zone-scoring.md`「規模上限」），要獨立評估。
 
 #### 驗證門檻（現在就定，避免事後放寬）
 
@@ -2937,7 +2330,7 @@ Daily Confirmation / Reclaim / Event Sequence / Final Entry 全部改讀同一�
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
-| 優先度 | 中（T-048 階段 C 的後續，不擋 T-048 其餘階段） |
+| 優先度 | 中（T-048 階段 C 的後續；T-048 已於 2026-08-20 完成並收斂，本筆不擋任何人） |
 | 分類 | Go / 可觀測性 |
 | 建立日期 | 2026-08-19 |
 | 來源 | T-048 階段 C「P1 frozen chain 可觀測性」的取捨：以結構化 log 交付，metric 另立一筆（現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「可觀測性：一筆結構化 log 拆出關聯決策」） |
@@ -2972,10 +2365,100 @@ log 能回答「這一次分析發生了什麼」，但答不出**趨勢**問題
 
 #### 前置
 
-**已滿足**：T-048 階段 C 已完成並 review 通過（2026-08-19），`eventIdentityStats`
+**已滿足**：T-048 全案已完成、review 通過並收斂（2026-08-20），`eventIdentityStats`
 的欄位定義已穩定，metric 的 label 可以照它定。
 
 #### 不做的範圍
 
 * 不做告警規則本身（那要先有抓取端）。
 * 不改任何決策邏輯。
+
+---
+
+### T-051：Event Timeline 改讀身分層，讓修好的分裂真的看得到
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 高（T-048 的價值兌現點，也是 T-041 的前置） |
+| 分類 | Go / SR Zone / 事件鏈 / 對外 API |
+| 建立日期 | 2026-08-20 |
+| 來源 | T-048 全案 review：身分層四張表目前**沒有任何讀者** |
+| 關聯 | 修的是 [`issue.md`](./issue.md) I-080；下游是 T-041 的 Event Timeline 面向 |
+
+#### 問題
+
+T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來了，但
+`GET /sr-zones/event-timeline` 仍以 `(zone_key, event_family)` 摺疊
+`market_event_states`——**T-048 要修的分裂，在唯一會顯示鏈的端點上原封不動**。
+實測落差與成因見 I-080。
+
+更根本的一點：`zone_instances` / `event_instances` / `zone_relations` /
+`event_transitions` 四張表在 Go 端只有兩處 `SELECT`（`zone_identity_repo.go` 的
+`ListLive`、`event_identity_repo.go` 找活鏈），**兩處都是 matcher 自己餵自己**。
+對外唯一看得到的身分資料是階段 E 加的 `zones[].data.zone_uid`。身分層目前仍是
+「只寫不讀」，本筆是它的第一個真正讀者。
+
+#### 要決定的事（規劃時定案）
+
+* **換來源還是併行**：直接讓端點改讀 `event_instances` / `event_transitions`
+  （鏈與轉換都是存下來的事實），或維持現行摺疊、只多帶 `zone_uid` 讓前端自己合併。
+  前者是 T-048 的原意，後者風險小但把合併責任推給每個消費者。
+* **回應 contract**：`display_chain` 目前以 `zone_key` 為鍵。改用 `zone_uid` 後
+  `zone_key` 要保留（人工比對還需要）還是降級成 alias 清單。
+* **重生鏈怎麼呈現**：`seq > 1` 的鏈（實測 10 條）與因 `ZONE_IDENTITY_ENDED` 收攤的鏈
+  （實測 8 條）在 timeline 上是同一條的延續還是兩條，語意要先定，
+  否則前端會自己猜。
+* **舊資料**：`stock_sr_zones.zone_uid` 不回填（見 `database-schema.md`），
+  早於 migration 069 的分析在新 timeline 上會缺身分，要決定是隱藏還是標示。
+
+#### 驗收門檻
+
+* 同一組四檔 21 階 as-of 階梯，端點回傳的鏈數與 `event_instances` 的鏈數**逐檔相同**。
+* 至少一個「漂移過 `zone_key` 的身分」在新端點上是**一條**鏈（現行會是多條）。
+* 決策路徑逐欄不變——本筆只動讀取端。
+
+---
+
+### T-052：定期對 watchlist 產生 SR zone 分析（分析排程）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 高（同時是 T-049 的硬前置與三筆驗證缺口的唯一解） |
+| 分類 | Go / 排程 / SR Zone / 驗證母體 |
+| 建立日期 | 2026-08-20 |
+| 來源 | T-048 全案 review。T-049 已列它為前置，但**先前沒有任何 todo 在追**，只散見於 T-045 與 T-049 的討論段落 |
+| 關聯 | [`issue.md`](./issue.md) I-074（T-044 的 replay 驗證無法執行）、I-078（身分層兩條路徑從未被執行）；T-049 的前置條件② |
+
+#### 問題
+
+`stock_sr_zone_analyses` 的母體長期停在極小規模（2026-08-18 盤點：4 檔 / 20 次分析），
+所有需要「分佈比較」的驗證因此都做不了。目前卡在這一點的至少有三筆：
+
+* **I-074**：T-044 的 RR 解耦只有單元測試層級的證據，`MODE=replay` 的 decision replay
+  跑不起來。
+* **I-078**：T-048 身分層的 `EXPIRED` 收攤與 alias 備援兩條路徑，在 84 次分析的母體裡
+  一次都沒被觸發——身分還來不及缺席到失格。
+* **T-049**：本身就把「母體要足以做分佈比較」寫成不可放寬的前置門檻。
+
+as-of 階梯可以造出深度（同一檔多個時間點），但造不出廣度，也造不出「真實使用節奏下
+身分會不會失格」這種只有時間會給的答案。
+
+#### 要決定的事（規劃時定案）
+
+* **成本**：每檔都要跑一次 Python scoring，記憶體上限見
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」。這台 host 只有 2GiB，
+  排程的併發度與批次大小要一起定。
+* **範圍**：watchlist、`evaluation_universe`（T-040 已上線 135 檔）還是兩者的交集。
+* **頻率與時點**：日 K 收盤後一次即可，但要與 `daily_close` / 選池同步的既有排程排開。
+* **`reuse_existing` 走哪條**：必須是 `false`，否則不進身分追蹤路徑
+  （`sr_analysis_provider.go` 那條不寫 `zone_uid`）。這點會直接決定它能不能當
+  I-078 的關閉條件。
+* **失敗處理**：單檔失敗不能拖垮整批；要不要留 job 紀錄供查。
+
+#### 驗收門檻
+
+* 排程連續運行一段時間後，`stock_sr_zone_analyses` 的母體足以跑
+  `MODE=replay scripts/run-evaluation.sh` 做分佈比較（I-074 的關閉條件）。
+* `zone_instances` 出現 `EXPIRED`、`MatchedByAlias` 非零（I-078 的關閉條件）。

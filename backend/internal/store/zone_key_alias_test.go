@@ -175,7 +175,8 @@ func TestZoneKeyAliasApplyDedupesWithinOneBatch(t *testing.T) {
 func TestZoneKeyAliasListExcludesZonesOverAbsenceLimit(t *testing.T) {
 	// **次數軸要與 ListLive 一致**：階段 B 的定案是失格只收掉「這一世」，身分本身仍是
 	// ACTIVE，所以只看 state 的話，matcher 早就放棄的身分會照樣留在 alias 索引裡。
-	// 2026-08-19 的每日階梯實測就是這樣累出 77 筆 alias_ambiguous（todo.md T-048 F5）。
+	// 2026-08-19 的每日階梯實測就是這樣累出 77 筆 alias_ambiguous
+	// （見 docs/sr-zone-scoring.md「實測特性」）。
 	repo, ctx := newZoneIdentityRepoForTest(t)
 
 	const shared = "SUPPORT:104.7300:105.3700"

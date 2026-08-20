@@ -58,7 +58,7 @@ distinct 日期推得（見 `db.fetch_market_trading_days`），不引入外部�
 `as_of` 或 `last_seen_at` 缺一時不套用時間軸，讓還沒接上持久化的呼叫端行為不變；
 `observed_absences` 預設 0，所以次數軸對它們也不會誤擋。
 
-完整數據與推導見 `docs/todo.md` T-048 階段 A。
+完整數據與推導見 `docs/sr-zone-scoring.md`「ZoneMatcher」的「門檻的來源」。
 """
 from __future__ import annotations
 

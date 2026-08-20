@@ -1,7 +1,7 @@
 """ZoneMatcher（T-048 階段 A）。
 
 **fixture 用的是 live 撈下來的真實 zone 形狀**，不是編出來的數字——判準是靠實測
-543 組相鄰配對定下來的（`docs/todo.md` T-048「門檻掃描實測」），用假數字測等於
+543 組相鄰配對定下來的（`docs/sr-zone-scoring.md`「門檻的來源」），用假數字測等於
 測另一個世界的參數。價格取自 2026-08-18 匯出的 `stock_sr_zones`（0050，311 列）。
 """
 from __future__ import annotations

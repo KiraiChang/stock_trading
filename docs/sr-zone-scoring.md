@@ -2637,6 +2637,22 @@ ScoreZonesWithPreviousEvents → result.ToStore()
 讀者：唯一的候選消費者是把 `event_engine._zone_key()` 換成 uid，而那會改變
 `market_event_states` 的比對面，是獨立的一階。
 
+#### 比對只能有一份實作
+
+`/zone-identity/match` 是**唯一**的比對入口。這不是分層潔癖，是兩個會靜默壞掉的約束：
+
+* **`uid_factory` 產生的是隨機 UUID。** 同一組輸入在兩個地方各跑一次 matcher 會得到
+  **不同的 uid**，於是兩邊寫出來的身分永遠對不起來——而且不會報錯，只是血緣圖從某天起
+  開始說謊。所以「Python 與 Go 各跑一次」與「用 Go 重寫一份 matcher」都不可行；
+  後者還會作廢 live fixture 的單元測試，並永久維持兩份會漂移的實作。
+* **資格判準只能有一份。** 若讓 Python 自己連 DB 查 `zone_instances`，
+  `max_observed_absences` 與交易日曆就會出現第二份定義——那正是 F5 剛統一掉的東西
+  （見「實測特性」的 `alias_ambiguous` 77→0）。資格由 `ListLive` 的 SQL 與 matcher
+  各守一個軸，交易日曆由呼叫端注入，不要再開第三個來源。
+
+同理，「先寫 zones 再 `UPDATE ... SET zone_uid`」也被否決：比對本來就可以前移，
+多一次寫入只換來一個「短暫不一致」的中間狀態。
+
 #### 四個已知限制
 
 1. **只接在 `reuse_existing=false` 那條路徑。** `SRAnalysisProvider.Analyze` 也會

@@ -1622,7 +1622,8 @@ func resolveEventZoneUID(zoneKey string, o *zoneIdentityOutcome) (string, eventZ
 // 所以 alias 的 SQL 若只看 `state='ACTIVE' AND ended_at IS NULL`，matcher 早就放棄的
 // 身分照樣是候選；而只靠這裡的 `expired` 又補不起來——失格身分下一輪就被次數軸擋在
 // matcher 之前，一生只會出現在 `expired_previous` 一次。2026-08-19 每日階梯實測：
-// 只做這一道時仍有 77 筆 `alias_ambiguous`、16 個 key 撞號（todo.md T-048 F5）。
+// 只做這一道時仍有 77 筆 `alias_ambiguous`、16 個 key 撞號
+// （見 docs/sr-zone-scoring.md「實測特性」）。
 //
 // **`TerminatedPrevious` 刻意不排除**：那些身分是這一輪因 SPLIT / MERGE / RESHAPE
 // 終止的，它們身上的事件要走 D4 收攤（`EndedZoneUIDs` → `zone_ended_skipped`）。

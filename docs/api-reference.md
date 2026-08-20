@@ -1139,7 +1139,8 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
         "price_low": 960.0,
         "price_high": 970.0,
         "method": "atr",
-        "role": "SUPPORT"
+        "role": "SUPPORT",
+        "zone_uid": "0f1c9a2e-8b5d-4c31-9a77-2f6e1d4b8c05"
       },
       "features": {
         "support": { "touch_count": 4, "rejection_count": 3, "breakout_count": 0 },
@@ -1254,10 +1255,16 @@ sr-zone-scoring.md「十七」。
 > 「分層原則：lifecycle 不看 RR」。
 `explanation` 是 deterministic 白話解釋層。每個 zone 也分成
 `data/features/score/evidence/explanation/scenario/lifecycle`，驗證 API 只更新
-lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/role）在
+lifecycle。`score` 只帶評分欄位；zone 的識別（id/price_low/method/role/zone_uid）在
 `data`、生命週期（status/broken_at…）在 `lifecycle`、
 `features/evidence/explanation/scenario` 各自為兄弟鍵，不在 `score` 內重複。
 欄位語意見 sr-zone-scoring.md「十四、十九」。
+
+**`data.zone_uid` 是這個 zone 的跨交易日身分**（同一個 uid 出現在不同分析＝系統認為是
+同一個 zone），對應 `zone_instances.zone_uid`。**可能是 `null`，但 `null` 不代表
+「這個 zone 沒有身分」**——三種成因（舊分析、當次身分寫入降級、`reuse_existing=true`
+那條不做身分追蹤的路徑）見 [`database-schema.md`](./database-schema.md) 的
+`stock_sr_zones.zone_uid`。客戶端要當作可選欄位處理，不要用它的有無去判斷 zone 是否有效。
 
 `explanation` 不取代 `evidence`：前者給前端直接呈現白話結論、加分/扣分因素與
 風險提醒；後者保留 SHAP baseline、最終機率與特徵貢獻等進階模型證據。舊分析

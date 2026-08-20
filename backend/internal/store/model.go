@@ -508,6 +508,14 @@ type SRZone struct {
 	// 兩個不同語意的東西看起來像同一種鍵。
 	ZoneKey string `db:"-" json:"zone_key,omitempty"`
 
+	// ZoneUID 是跨交易日的 zone 身分（T-048 階段 E）。**入庫**，與上面 ZoneKey 的
+	// `db:"-"` 相反——它就是身分本身，把分析快照與 zone_instances 連起來的那一欄。
+	//
+	// 可空。NULL 有三種語意，都不代表「這個 zone 沒有身分」：該次分析早於 069
+	// migration、當次身分比對／寫入降級了、或由 analysis/sr_analysis_provider.go
+	// 這條不做身分追蹤的路徑建立。
+	ZoneUID NullString `db:"zone_uid" json:"zone_uid,omitempty"`
+
 	// Tier/TierLabel：zone 依寬度在同一次分析裡的相對排名分三層
 	// （TIER_1_MAIN_STRUCTURE 主結構 / TIER_2_TRADING_ZONE 交易區 /
 	// TIER_3_SHORT_TERM 短期），讓 zone 清單可排序（見

@@ -188,6 +188,10 @@ func srZonePipelineResponse(snapshot *srZonePipelineSnapshot) gin.H {
 				"id": z.ID, "analysis_id": z.AnalysisID,
 				"price_low": z.PriceLow, "price_high": z.PriceHigh,
 				"method": z.Method, "role": z.Role,
+				// zone_uid：跨交易日的 zone 身分（T-048 階段 E）。這個 map 是**白名單**，
+				// 不是 SRZone 整個 marshal，所以 struct 上的 json tag 不會自己把它帶出來。
+				// 沒值時是 JSON null——三種語意見 069 migration 的註解。
+				"zone_uid": z.ZoneUID,
 			},
 			"features":            z.Features,
 			"score":               srZonePipelineScore{zone: z},
@@ -608,13 +612,19 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// **比對在寫入之前**（T-048 階段 E）：zones 一次寫入就帶著 zone_uid，
+	// 分析快照與 zone_instances 才有 join 路徑。失敗一律降級（zoneMatch == nil →
+	// zone_uid 留空、事件層跳過），分析本身照常成立。
+	zoneMatch := h.matchZoneIdentity(c.Request.Context(), body.Symbol, body.Timeframe, zones)
+	applyZoneUIDs(zones, zoneMatch)
+
 	id, err := h.repo.Create(c.Request.Context(), a, zones, projections)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: create analysis")
 		return
 	}
 
-	zoneOutcome := h.persistZoneIdentity(c.Request.Context(), body.Symbol, body.Timeframe, id, zones)
+	zoneOutcome := h.persistZoneIdentity(c.Request.Context(), body.Symbol, id, zones, zoneMatch)
 	h.persistEventIdentity(c.Request.Context(), body.Symbol, body.Timeframe, id,
 		projections.EventStates, zoneOutcome)
 
@@ -966,9 +976,33 @@ type zoneIdentityOutcome struct {
 	EndedZoneUIDs map[string]struct{}
 }
 
-func (h *SRZoneHandler) persistZoneIdentity(
-	ctx context.Context, symbol, timeframe string, analysisID uint64, zones []store.SRZone,
-) *zoneIdentityOutcome {
+// zoneIdentityMatch 是「比對完、但還沒寫入」的中間結果（T-048 階段 E）。
+//
+// 階段 E 之前，取資料／比對／寫入是同一個函數，而它整段跑在 repo.Create **之後**——
+// zones 因此不可能帶著 zone_uid 入庫，「這次分析的第 N 個 zone 是哪個身分」只活在
+// 回傳的 UIDByZoneKey 裡。現在把前兩段前移到 repo.Create 之前，zones 一次寫入就帶著
+// 身分；寫入那段仍在 analysisID 拿到之後跑（zone_role_incarnations 需要它）。
+//
+// 前移是安全的：buildZoneIdentityWrite 只用 zones 的 ZoneKey / Method / PriceLow /
+// PriceHigh / Role，**沒有用到 DB id**。
+//
+// **nil 代表這次沒有身分可用**（沒接 repo、沒有 zone，或取資料／比對失敗）。呼叫端一律
+// 當降級處理：zone_uid 留空、事件層跳過、**分析本身照常成立**——這條語意在階段 E 之前
+// 就是這樣（每一步失敗都是 warn ＋ return nil），前移之後更要守住，因為比對現在發生在
+// 分析還沒落地的時點。
+type zoneIdentityMatch struct {
+	// timeframe 是正規化過的值，寫入段直接沿用，避免兩段各自正規化而分歧。
+	timeframe string
+	now       time.Time
+	live      []store.LiveZone
+	aliasRefs []store.ZoneKeyAliasRef
+	matched   *analysis.ZoneIdentityMatchResult
+}
+
+// matchZoneIdentity 取身分比對需要的資料並呼叫 matcher。**在 repo.Create 之前跑。**
+func (h *SRZoneHandler) matchZoneIdentity(
+	ctx context.Context, symbol, timeframe string, zones []store.SRZone,
+) *zoneIdentityMatch {
 	if h.zoneIdentity == nil || len(zones) == 0 {
 		return nil
 	}
@@ -1020,21 +1054,62 @@ func (h *SRZoneHandler) persistZoneIdentity(
 		h.log.Warn("zone identity: match failed", zap.Error(err))
 		return nil
 	}
+	return &zoneIdentityMatch{
+		timeframe: timeframe,
+		now:       now,
+		live:      live,
+		aliasRefs: aliasRefs,
+		matched:   matched,
+	}
+}
 
-	write := buildZoneIdentityWrite(symbol, timeframe, analysisID, now, zones, live, matched,
+// applyZoneUIDs 把比對結果填進 zones，讓 repo.Create 一次寫入就帶著身分（T-048 階段 E）。
+//
+// matcher 的輸出與 zones 是**索引對齊**的（current 就是照 zones 的順序組的）。
+// 長度對不上時寧可留空也不猜——錯位的身分比沒有身分更難發現。
+func applyZoneUIDs(zones []store.SRZone, m *zoneIdentityMatch) {
+	if m == nil || m.matched == nil {
+		return
+	}
+	for i := range zones {
+		if i >= len(m.matched.ZoneUIDs) {
+			return
+		}
+		uid := m.matched.ZoneUIDs[i]
+		if uid == "" {
+			continue
+		}
+		zones[i].ZoneUID = store.NullString{NullString: sql.NullString{String: uid, Valid: true}}
+	}
+}
+
+// persistZoneIdentity 把比對結果寫進四張身分表。**在 repo.Create 之後跑**，
+// 因為 zone_role_incarnations 要 analysisID。
+func (h *SRZoneHandler) persistZoneIdentity(
+	ctx context.Context, symbol string, analysisID uint64, zones []store.SRZone,
+	m *zoneIdentityMatch,
+) *zoneIdentityOutcome {
+	if m == nil || m.matched == nil {
+		return nil
+	}
+	write := buildZoneIdentityWrite(symbol, m.timeframe, analysisID, m.now, zones, m.live, m.matched,
 		func() string { return uuid.NewString() })
 	if err := h.zoneIdentity.Apply(ctx, write); err != nil {
 		h.log.Warn("zone identity: apply failed", zap.Error(err))
 		// **這裡要 return nil**：身分沒寫進去，事件就沒有可以指的 zone_uid。
 		// 讓階段 C 照跑會寫出指向不存在身分的事件鏈（sqlite 不擋外鍵時尤其安靜）。
+		//
+		// 注意 zones 的 zone_uid 這時**已經寫進 stock_sr_zones 了**（階段 E 的前移）。
+		// 那是刻意的取捨：欄位可空、無外鍵，留著一個指不到 zone_instances 的 uid，
+		// 比為了它把整筆分析退掉好。判讀時見 069 migration 註解的三種 NULL 語意。
 		return nil
 	}
-	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(aliasRefs, matched.ExpiredPrevious)
+	aliasByKey, aliasAmbiguous := aliasUIDByZoneKey(m.aliasRefs, m.matched.ExpiredPrevious)
 	return &zoneIdentityOutcome{
-		UIDByZoneKey:      zoneUIDByZoneKey(zones, matched.ZoneUIDs),
+		UIDByZoneKey:      zoneUIDByZoneKey(zones, m.matched.ZoneUIDs),
 		AliasUIDByZoneKey: aliasByKey,
 		AliasAmbiguous:    aliasAmbiguous,
-		EndedZoneUIDs:     uidSet(matched.TerminatedPrevious),
+		EndedZoneUIDs:     uidSet(m.matched.TerminatedPrevious),
 	}
 }
 

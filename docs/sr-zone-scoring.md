@@ -2596,19 +2596,54 @@ P0–C1。
 ### 接線
 
 `/zone-identity/match`（Python 獨立端點）＋ `MatchZoneIdentities`（Go client）＋
-`persistZoneIdentity`（handler）。
+handler 的兩段：`matchZoneIdentity`（取資料＋比對）與 `persistZoneIdentity`（寫入）。
 
 **刻意不併進 `/sr-zones` 的核心路徑**：身分層目前**只寫不讀**，沒有任何決策依賴它的輸出；
 併進去就得動 `scoring.py` / `pipeline.py` 那條有決策責任的路徑，為一個還沒有讀者的功能
 去動它，風險與收益不成比例。代價是每次分析多一趟 HTTP。**寫入失敗只記 log，不影響分析
 本身**——所以排查時要主動 grep log，API 回 201 不代表身分寫進去了。
 
+**比對排在 `repo.Create` 之前，寫入排在之後**（現行順序）：
+
+```text
+ScoreZonesWithPreviousEvents → result.ToStore()
+  → matchZoneIdentity（ListLive / ListTradingDays / ListKeyAliases → MatchZoneIdentities）
+  → applyZoneUIDs：把 matched.ZoneUIDs[i] 填進 zones[i].ZoneUID
+  → repo.Create：zones 一次寫入就帶著 zone_uid
+  → persistZoneIdentity：寫四張身分表（zone_role_incarnations 需要 analysisID）
+  → persistEventIdentity
+```
+
+拆成兩段是為了讓 `stock_sr_zones.zone_uid` 有值——沒有它，分析快照與 `zone_instances`
+在 DB 裡接不起來。前移是安全的：`buildZoneIdentityWrite` 只用 zones 的 `ZoneKey` /
+`Method` / `PriceLow` / `PriceHigh` / `Role`，**沒有用到 DB id**。
+
+`applyZoneUIDs` 依**索引對齊**指派（matcher 的 `current` 就是照 zones 的順序組的），
+**長度對不上時剩下的留空而不猜**——錯位的身分在資料裡看起來完全正常，任何查詢都不報錯，
+只是血緣圖開始說謊。
+
+**降級語意**（前移之後更要守住，因為比對現在發生在分析還沒落地的時點）：
+`matchZoneIdentity` 任何一步失敗就回 `nil`，於是 `zone_uid` 留空、`repo.Create` 照常、
+事件層跳過（`zoneOutcome = nil`），**分析本身照常成立回 201**。反過來，若比對成功但
+`Apply` 失敗，`stock_sr_zones.zone_uid` 這時**已經寫進去了**，會留下一個指不到
+`zone_instances` 的 uid——欄位可空、無外鍵就是為了容忍這個，判讀時見
+[`database-schema.md`](./database-schema.md) 的三種 `NULL` 語意。
+
+身分也會跟著回應出去：`zones[].data.zone_uid`。注意那個 map 是**手工白名單**不是把
+`SRZone` 整個 marshal，所以 struct 上的 json tag 擋不住漏欄位——漏掉的外觀與「降級成
+`NULL`」一模一樣，從回應上看不出差別，因此由 handler 測試釘住。
+
+**Python 端的 `ZoneScore.zone_uid` 仍未接上**（分析當下 Python 拿不到身分）。它現在沒有
+讀者：唯一的候選消費者是把 `event_engine._zone_key()` 換成 uid，而那會改變
+`market_event_states` 的比對面，是獨立的一階。
+
 #### 四個已知限制
 
 1. **只接在 `reuse_existing=false` 那條路徑。** `SRAnalysisProvider.Analyze` 也會
    `repo.Create`（`portfolio/analyzer` 與 `/sr-zones` 的 reuse 分支），那些跑法會產生 zone
    但**不算一次觀測**，所以 `observed_absences` 統計的是分析的一個子集。刻意如此：重用既有
-   分析的目的就是不重算，把它算成觀測會讓「我們看了幾次」失真。
+   分析的目的就是不重算，把它算成觀測會讓「我們看了幾次」失真。那條路徑寫出來的
+   `stock_sr_zones` 列因此也沒有 `zone_uid`（三種 `NULL` 語意的第三種）。
 2. **`as_of` 取的是 wall clock，不是資料日期**，所以 `observed_absences` 量的是分析次數
    而非時間。詳見 `database-schema.md`。
 3. **同一 symbol 的併發分析會產生身分 churn 或靜默的交易失敗。** 兩個同時的

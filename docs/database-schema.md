@@ -397,6 +397,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | 欄位 | 說明 |
 |------|------|
 | analysis_id | FK → stock_sr_zone_analyses.id（Go 端手動 2 步刪除，非 DB `ON DELETE CASCADE`） |
+| zone_uid | 這個 zone 的跨交易日身分 → `zone_instances.zone_uid`。**可空、刻意不加外鍵**，語意見下方 |
 | price_low / price_high | 區間上下緣 |
 | method | `atr` / `volume_profile` |
 | role | `SUPPORT` / `RESISTANCE` / `AT_ZONE`（分析當下依現價判斷，寫入後不會再變動） |
@@ -423,8 +424,23 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | scenario | JSON：單一 zone 的結構化情境（`schema_version`/`state`/`title`/`summary`/`trigger_conditions`/`invalidation_conditions`），純展示層；`state` 為機器標記（如 `SUPPORT_RETEST`/`RESISTANCE_REJECTION`/`WAIT_FOR_DIRECTION`/`RETEST_REQUIRED`）；`schema_version` 目前為 `sr_scenario_v1`，舊資料為 JSON `null` |
 | status / broken_at / broken_price | `PENDING`（尚未驗證或 `AT_ZONE` 方向未定）/ `HELD_SO_FAR`（曾被觸碰但未被突破）/ `BROKEN`（已被突破，`broken_at`/`broken_price` 是連續確認突破的第一根K棒）。由 `POST /sr-zones/:id/verify` 或 `daily_close` 排程更新，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「十四」 |
 
-**Index：** `INDEX(analysis_id)`；查詢時額外依 `tier` 排序（`CASE tier WHEN
+**Index：** `INDEX(analysis_id)`、`INDEX(zone_uid)`；查詢時額外依 `tier` 排序（`CASE tier WHEN
 'TIER_1_MAIN_STRUCTURE' THEN 1 ...`）後再依 `trading_score DESC`。
+
+**`zone_uid`：分析快照 ↔ zone 身分的 join 路徑**（migration 069）。在此之前，「這次分析的
+第 N 個 zone 是哪個身分」只活在 Go handler 的記憶體裡，DB 兩邊接不起來，下游只能靠價格
+邊界回推。現在 zones 寫入 `stock_sr_zones` 時就帶著身分——身分比對排在 `repo.Create`
+**之前**，見 [sr-zone-scoring.md](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher → 接線」。
+
+* **可空且沒有外鍵，是刻意的。** `zone_instances` 的寫入（`Apply`）在 `stock_sr_zones`
+  之後、且是另一個交易。加外鍵會讓「zones 已寫入、身分寫入失敗」這個既有的可容忍降級
+  （handler 只記 warn、API 照樣回 201）直接違反約束，把降級升級成整筆分析失敗。
+* **`NULL` 有三種語意，都不代表「這個 zone 沒有身分」**：① 該次分析早於 migration 069；
+  ② 當次身分比對或寫入降級了（要查 log，API 回 201 看不出來）；③ 由
+  `analysis/sr_analysis_provider.go` 這條不做身分追蹤的路徑建立（signal／排程／
+  `reuse_existing=true`，與 `/sr-zones` 的新分析是兩條路）。
+* **既有列不回填。** 回填要解的正是「兩個舊 `zone_key` 是不是同一個 zone」，而那正是
+  身分層本身要建的能力——沒有它的當下，回填不可能做對。
 
 ---
 

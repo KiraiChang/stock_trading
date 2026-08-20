@@ -151,7 +151,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				touch_count, support_touch_count, resistance_touch_count, reject_count, break_count,
 				zone_momentum, zone_direction,
 				recent_validation, trading_score, trading_score_breakdown, trading_recommendation,
-				overlap_group, confluence_count, status, features, evidence, explanation, scenario, probability_context
+				overlap_group, confluence_count, status, features, evidence, explanation, scenario, probability_context,
+				zone_uid
 			) VALUES (
 				:analysis_id, :price_low, :price_high, :method, :role, :tier, :tier_label,
 				:support_score, :resistance_score, :net_score, :net_score_label,
@@ -162,7 +163,8 @@ func (r *srZoneRepo) Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZo
 				:touch_count, :support_touch_count, :resistance_touch_count, :reject_count, :break_count,
 				:zone_momentum, :zone_direction,
 				:recent_validation, :trading_score, :trading_score_breakdown, :trading_recommendation,
-				:overlap_group, :confluence_count, :status, :features, :evidence, :explanation, :scenario, :probability_context
+				:overlap_group, :confluence_count, :status, :features, :evidence, :explanation, :scenario, :probability_context,
+				:zone_uid
 			)
 		`, zones[i]); err != nil {
 			return 0, err
@@ -390,7 +392,8 @@ func (r *srZoneRepo) GetZones(ctx context.Context, analysisID uint64) ([]SRZone,
 			zone_momentum, zone_direction,
 			recent_validation, trading_score, trading_score_breakdown, trading_recommendation,
 			overlap_group, confluence_count,
-		       status, broken_at, broken_price, resolved_role, features, evidence, explanation, scenario, probability_context
+		       status, broken_at, broken_price, resolved_role, features, evidence, explanation, scenario, probability_context,
+		       zone_uid
 		FROM stock_sr_zones WHERE analysis_id=?
 		ORDER BY CASE tier WHEN 'TIER_1_MAIN_STRUCTURE' THEN 1 WHEN 'TIER_2_TRADING_ZONE' THEN 2 ELSE 3 END, trading_score DESC
 	`), analysisID)

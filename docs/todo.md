@@ -2363,9 +2363,12 @@ zone_key_aliases」，重跑驗收的步驟與六條門檻見
 * **`ZoneScore.zone_uid` 仍未接上。** matcher 需要「上一次的 zone 清單」當輸入，而
   Python 端目前唯一的跨次狀態通道是 Go 傳進來的 `previous_event_states`，
   沒有 `previous_zones`——要餵得動它就得改 contract。階段 C 未做（不動
-  `scoring.py` / `pipeline.py`），仍是開放項目。
+  `scoring.py` / `pipeline.py`）。**處置：2026-08-20 定案延後**，理由與去向見下方
+  階段 E 的「明確延後（不是達成）」——它現在沒有讀者，真要做時應與 `_zone_key()`
+  換 uid 一起在 T-049 決定。階段 E 改為把身分落到 `stock_sr_zones.zone_uid`，
+  補上 DB 的 join 路徑。
 
-#### 階段 D：Lifecycle Engine 支援 4 個事件（**計畫書待確認**，2026-08-19）
+#### 階段 D：Lifecycle Engine 支援 4 個事件 —— **已實作／待 review（2026-08-20）**
 
 要支援 `SUPPORT_BREAKDOWN` / `SUPPORT_RECLAIM` / `SUPPORT_RETEST` / `RESISTANCE_BREAKOUT`。
 **盤點後這四個的現況差很多，不是同一種工作：**
@@ -2610,6 +2613,230 @@ event_engine.py
 * 階梯復驗的新基準數字（事件鏈 128、transitions 250、`ZONE_IDENTITY_ENDED` 8、
   新型別列數、以及第一輪 7 筆 `defense_lines` 差異的成因）→
   `sr-zone-scoring.md` 的「實測特性」。
+
+#### 階段 E：把 zone 身分落到分析快照 —— **已實作／待 review（2026-08-20）**
+
+階段 C 留下、階段 D 明確排除的最後一條開放項目。現況是：**身分算得出來、也存得起來，
+但沒有任何地方把「這次分析的 zone」與「它的身分」連起來**。
+
+| 現況 | 位置 |
+|---|---|
+| Go 先呼叫 `/sr-zones` 拿 zones、寫進 DB，**之後**才呼叫 `/zone-identity/match` | `sr_zones.go:611-617`（`repo.Create` → `persistZoneIdentity`） |
+| 「這次分析的第 N 個 zone 是哪個身分」只活在 Go 記憶體的 `UIDByZoneKey` | `stock_sr_zones` **沒有 `zone_uid` 欄位** |
+| 因此 T-041 的 timeline 與 T-049 的下游都沒有 join 路徑可走 | — |
+
+盤點時確認的兩件事決定了本階段的作法：
+
+* **對外回應的 zones 是從 DB 讀回來的**（`loadSRZonePipelineSnapshot(id)`，`sr_zones.go:622`），
+  不是直接回傳 Python 的輸出。**只要 DB 有 `zone_uid`，對外 payload 就看得到身分，
+  Python 完全不必知道它的存在。**
+  > **這句的後半被實作推翻（2026-08-20 復驗）。** 前半（來源是 DB snapshot、Python 不必知道）
+  > 成立；但 `srZonePipelineResponse` 不是把 `SRZone` marshal 出去，而是**手工白名單**，
+  > DB 有值不等於回應帶得出來。正確的對外路徑是 `zones[].data.zone_uid`，且 handler
+  > 必須明確加鍵。詳見下方「實作結果與驗收」。
+* **`buildZoneIdentityWrite` 沒有用到 zones 的 DB id**（只用 `ZoneKey` / `Method` /
+  `PriceLow` / `PriceHigh` / `Role`），`analysisID` 只有「寫入」那一步需要。
+  **所以比對可以前移到 `repo.Create` 之前**，讓 zones 一次寫入就帶著 uid。
+
+##### 修改目標
+
+1. `stock_sr_zones.zone_uid` 落地——補上「分析快照 ↔ 身分」缺的 join 路徑。
+2. 對外 payload 的 `zones[].data.zone_uid` 看得到身分（**來源是 DB snapshot；
+   但 `srZonePipelineResponse` 是手工白名單，需明確加鍵，不會只靠 struct tag 自動帶出**）。
+3. **全程只寫不讀**：驗收條件與 B／C／D 同一條——決策逐欄相同。
+
+##### 明確延後（不是達成）
+
+**`ZoneScore.zone_uid`（Python 端在分析當下拿到身分）本階段不做**，2026-08-20 定案。
+
+理由是**它現在沒有讀者**：Python 端唯一的候選消費者是把 `event_engine._zone_key()`
+換成 uid，而那件事會改變 `market_event_states.event_key` / `zone_key` 與 carry-forward
+的比對面，也與 Go 端三段關聯決策重疊——是獨立的一階，且真要做時應該與 T-049
+一起決定。為了一個沒有讀者的欄位去改 `/sr-zones` 的 request contract 與
+`pipeline.py`（決策核心路徑），風險與收益不成比例；同一個判斷 `/zone-identity/match`
+的 docstring 在階段 B 已經下過一次。
+
+因此上方階段 C 的開放項目「`ZoneScore.zone_uid` 仍未接上」**不算被本階段解決**，
+改列為 T-049 的前置，處置見本節。
+
+##### 不做的範圍
+
+* **Python 一行不改。** `pipeline.py` / `http_server.py` / `scoring.py` /
+  `serialization.py` / `types.py` / `zone_matcher.py` 全部不動。
+* **不改 matcher 的判準、門檻常數或資格閘門**，也不改 `/sr-zones` 的 request contract。
+* **不改 `event_engine._zone_key()`。**
+* **不刪 `/zone-identity/match`**：它仍是唯一的比對入口，維持現用。
+* **不回填歷史**：既有 `stock_sr_zones` 列的 `zone_uid` 留 `NULL`（回填要解的正是
+  「兩個舊 key 是不是同一個 zone」，那是本筆要建的能力，回填不可能做對）。
+* 不動前端（T-041）、不接下游決策（T-049）、不做 T-050 的 metric。
+
+##### 三個設計決定
+
+**E1：比對前移到 `repo.Create` 之前，不新增任何 contract。**
+
+新順序（括號內是現行位置）：
+
+```
+ScoreZonesWithPreviousEvents（:599）
+   → result.ToStore()（:605）
+   → ListLive / ListTradingDays / ListKeyAliases  ← 由 persistZoneIdentity 內前移
+   → MatchZoneIdentities                          ← 由 persistZoneIdentity 內前移
+   → 把 matched.ZoneUIDs[i] 填進 zones[i].ZoneUID  ← 新增
+   → repo.Create(a, zones, projections)（:611）    ← zones 一次寫入就帶 uid
+   → buildZoneIdentityWrite + Apply（:1024-1030）  ← 保留，改吃已經算好的 matched
+   → persistEventIdentity（:618）                  ← 不變
+```
+
+考慮過但否決的方案（完整比較留在對話紀錄，這裡記結論）：
+
+| 方案 | 否決理由 |
+|---|---|
+| Python 內建比對（request ＋ `previous_zones`） | 目標 1 現在沒有讀者，卻要動決策核心路徑並讓 matcher 例外有機會炸掉整筆分析。留給 T-049 |
+| Python 與 Go 各跑一次 matcher | `uid_factory` 是隨機 UUID，同一組輸入會給出**不同的 uid**，兩張表對不起來且不會報錯 |
+| 用 Go 重寫一份 matcher | 作廢階段 A 的單元測試與 live fixture，並永久維持兩份會漂移的實作 |
+| Python 自己連 DB 查 `zone_instances` | `max_observed_absences` 與交易日曆會出現第二份資格判準（F5 才剛統一成一個定義） |
+| 先寫 zones 再 `UPDATE ... SET zone_uid` | 多一次寫入與一個「短暫不一致」的中間狀態，換不到任何東西——比對本來就可以前移 |
+
+**E2：失敗語意必須維持「身分掛掉不影響分析」。**
+
+現行 `persistZoneIdentity` 的每一步失敗都是 `h.log.Warn` ＋ `return nil`，分析照常回 201。
+前移之後比對發生在**分析還沒落地**的時點，所以這條要特別釘住：
+`ListLive` / `ListTradingDays` / `MatchZoneIdentities` 任何一步失敗，
+**zones 的 `zone_uid` 留空、照樣 `repo.Create`、事件層照現行邏輯跳過**
+（`zoneOutcome = nil`），分析本身必須成立。這是本階段唯一與 A 方案同源的風險，
+面積小很多，但要有測試。
+
+**E3：`zone_uid` 可空、無外鍵。**
+
+`zone_instances` 的寫入（`Apply`）仍在 `repo.Create` **之後**，兩者不同交易。加外鍵會讓
+「zones 已寫入、`Apply` 失敗」這個既有降級路徑直接違反約束，把一個可容忍的降級變成
+整筆分析失敗。所以是 `VARCHAR(64) NULL` ＋ index，不加 FK。
+
+**`NULL` 有三種語意**，文件要寫明：① 該次分析早於本階段；② 當次身分比對或寫入降級了；
+③ 由 `analysis/sr_analysis_provider.go` 這條不做身分追蹤的路徑建立（signal／排程／
+`reuse_existing=true`）。三者都不代表「這個 zone 沒有身分」。
+
+##### Review findings（2026-08-20，**已修正／待複審**）
+
+兩條都是「TODO 仍留著舊 contract／語意描述」，會讓依 TODO 接資料的 T-041 / T-049 讀錯。
+
+* **對外 payload path 一致性**：實作與 [`api-reference.md`](./api-reference.md) 都是
+  `zones[].data.zone_uid`，本 TODO 若仍寫 `zones[].zone_uid` 就是舊設計。後續 T-041 /
+  T-049 會依 TODO 接資料，路徑要修成 `data.zone_uid`。
+  **已修正**：修改目標 2、受影響檔案與資料流、contract 表、完成後歸檔四處改為
+  `zones[].data.zone_uid`，並加註「`srZonePipelineResponse` 是手工白名單，需明確加鍵」。
+  掃過全文，剩下的裸 `zones[].zone_uid` 只有本條 finding 自己引述舊寫法的那一句。
+* **`NULL` 語意一致性**：正式 schema 已寫成三種語意：舊分析、當次身分比對／寫入降級、
+  以及 `sr_analysis_provider.go` / `reuse_existing=true` 這條不做身分追蹤的路徑。TODO
+  若仍寫兩種語意，會漏掉 provider/reuse 產生 `NULL` 的情境。
+  **已修正**：E3 與完成後歸檔改為三種語意，風險表對應改為「E3 的三種語意」。
+
+**同一類的另外兩處，本輪一併修掉**（原本不在 finding 清單裡，但都是會誤導下游的舊描述）：
+
+* 「盤點時確認的兩件事」第一點斷言「只要 DB 有 `zone_uid`，對外 payload 就看得到身分」——
+  這正是害目標 2 第一輪漏掉的前提。原句保留供 review，下方加了一段標明被實作推翻。
+* 測試與驗證策略門檻 3 原寫「這是目標 1、2 ⋯⋯唯一硬證據」。DB 非空只證明得了目標 1，
+  已改成目標 1，並補上門檻 5（目標 2 要看回應本身）。
+
+三份主題文件（`api-reference.md` / `sr-zone-scoring.md` / `database-schema.md`）掃過，
+沒有殘留的舊路徑或兩種語意寫法。
+
+##### 受影響的檔案與資料流
+
+```
+Go: api/handler/sr_zones.go
+  ├─ 呼叫順序前移（E1）＋ zones[i].ZoneUID 指派
+  └─ persistZoneIdentity 拆成「取資料＋比對」與「寫入」兩段
+Go: store/model.go        SRZone ＋ ZoneUID（**入庫**，與 ZoneKey 的 `db:"-"` 相反）
+Go: store/ 的 zones 寫入 SQL ＋ 讀取 SQL（snapshot 要帶回 zone_uid）
+migrations/{postgres,sqlite,mysql}/0XX_sr_zone_uid.sql   **三份都要**
+```
+
+* Python：**不改**。
+* 前端：不動（`zones[].data.zone_uid` 是純新增鍵，前端沒讀就沒有影響）。
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| `stock_sr_zones` ＋ `zone_uid VARCHAR(64) NULL` | 純新增可空欄位 | 既有列 `NULL`，不回填 |
+| `/sr-zones` 回應 `zones[].data.zone_uid` | 純新增鍵 | 既有欄位逐欄不變；來源是 DB snapshot，handler 白名單需明確帶出 |
+| `/sr-zones` request | **不變** | 本階段不動 contract |
+| `/zone-identity/match` | **不變**，維持現用 | — |
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 前移後比對進到「分析尚未落地」的時點，失敗會拖垮整筆分析 | E2 的 fail-open ＋ 專屬 Go 測試（比對失敗時 zones 仍寫入、`zone_uid` 為空、分析成立） |
+| 順序前移改變了 `ListLive` 的讀取時點，previous 清單可能不同 | 現行也是在同一次請求內、`Apply` 之前讀（`sr_zones.go:997` 的註解就是在講這件事），前移不跨越任何寫入點。驗收門檻②要求身分層數字**逐項重現**，對不上就是輸入變了 |
+| zones 的寫入／讀取 SQL 多一欄，三個 engine 要同步 | 三份 migration ＋ `scripts/test-postgres-migrations.sh`；mysql 依 I-054 的既有處置 |
+| 下游把 `NULL` 誤讀成「沒有身分」 | E3 的三種語意寫進 `database-schema.md` |
+| 回滾 | 純新增欄位 ＋ Go 內部順序調整，Python 沒有動。`git revert` ＋ `-- +goose Down` 掉欄位即可 |
+
+##### 測試與驗證策略
+
+* **單元（Go）**：比對前移後 zones 帶 uid 寫入、snapshot 讀得回來；
+  `ListLive` / `MatchZoneIdentities` 失敗時 zones 仍寫入且 `zone_uid` 為空、
+  `zoneOutcome` 為 `nil`、分析成立；`buildZoneIdentityWrite` 既有測試全綠（行為不變）。
+* **回歸**：`backend/scripts/test.sh` 全綠；`python/scripts/test.sh` 也要跑一次證明沒被波及。
+* **Migration**：`scripts/test-postgres-migrations.sh`；sqlite 由 `backend/scripts/test.sh` 覆蓋。
+* **端到端（as-of 階梯）**：同一組四檔 21 階（`2330`／`3105`／`6182`／`8150`），門檻：
+  1. **決策逐欄相同**（`zone_uid` 是新增欄位，比對時排除）。
+  2. **身分層數字逐項重現**：zone 身分 329、血緣邊 57、事件鏈 128、transitions 250、
+     alias 685、`ZONE_IDENTITY_ENDED` 8；六條門檻＋D4 仍全部 0。
+  3. `stock_sr_zones.zone_uid` **非空比例 100%**（`AT_ZONE` 也要有），且每一列都
+     join 得到 `zone_instances`——這是**目標 1**有沒有真的達成的唯一硬證據。
+     （原文寫「目標 1、2」，2026-08-20 修正：DB 非空證明不了對外回應帶不帶得出來。）
+  4. 每次分析的 zones 筆數 ＝ 該次 `zone_uids` 長度（順序沒有錯位）。
+  5. **目標 2 的硬證據是回應本身**：`POST /sr-zones` 回應裡每個 zone 都帶得出
+     `data.zone_uid`。DB 對了但白名單漏鍵時，前四條門檻會全部通過而目標 2 沒達成。
+
+##### 完成後歸檔
+
+* 呼叫順序（比對前移）與「身分寫入降級時 `zone_uid` 留 `NULL`」→
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」的「接線」段。
+* `stock_sr_zones.zone_uid`：可空、無 FK 的理由、不回填、`NULL` 的語意 →
+  [`database-schema.md`](./database-schema.md)。實作時發現是**三種**不是兩種：
+  多了「由 `sr_analysis_provider.go` 這條不做身分追蹤的路徑建立」。
+* 回應多 `zones[].data.zone_uid` → [`api-reference.md`](./api-reference.md)。
+* `ZoneScore.zone_uid` 延後的決定與理由 → 留在本筆，並列進 T-049 的前置清單。
+
+歸檔**已完成（2026-08-20）**：`database-schema.md` 的 `stock_sr_zones` 加了 `zone_uid`
+欄位與三種 `NULL` 語意、`sr-zone-scoring.md`「接線」段換成前移後的呼叫順序與降級語意、
+`api-reference.md` 加了 `zones[].data.zone_uid`。
+
+##### 實作結果與驗收（2026-08-20）
+
+**與計畫書的一處偏離：目標 2 不是免費的。** 計畫書寫「對外回應是從 DB 讀回來的，只要 DB 有
+`zone_uid`，對外 payload 就看得到」——**這個前提是錯的**。`srZonePipelineResponse` 不是把
+`SRZone` 整個 marshal 出去，而是手工白名單（`id` / `analysis_id` / `price_low` /
+`price_high` / `method` / `role` 六個鍵），所以 struct 上的 `json:"zone_uid,omitempty"`
+在這條路徑上根本沒被用到。第一輪階梯跑完 DB 全對，但實際回應 13 個 zone **一個都沒有
+`zone_uid`**。補法是白名單加一鍵 ＋ 一條 handler 測試釘住（漏欄位的外觀與「降級成 `NULL`」
+一模一樣，從回應上看不出差別）。修完重建、重跑整輪階梯復驗。
+
+驗收結果（對照上方五條門檻，全部通過；階梯 84/84 皆 201，backend log 沒有任何
+`zone identity ... failed`）：
+
+| 門檻 | 結果 |
+|---|---|
+| ① 決策逐欄相同 | PASS（84 筆，27 欄逐欄比對） |
+| ② 既有事件型別狀態逐欄相同 | PASS |
+| ③ 身分層數字逐項重現 | 84 / 329 / 57 / 128 / 250 / 685 / 8 全部命中；六條門檻＋D4 全 0 |
+| ④ `zone_uid` 非空比例 | 1282/1282，join 不到 `zone_instances` 0 筆，`AT_ZONE` 缺身分 0 筆 |
+| ⑤ 沒有錯位 | 同分析內重複 uid 0 筆；身分數 ≠ zone 數 0 筆 |
+| ⑥ 對外 payload（目標 2） | 最後一筆回應 13/13 個 zone 都帶得出 `data.zone_uid` |
+
+回歸：`backend/scripts/test.sh` 全綠、`python/scripts/test.sh` 595 passed / 1 skipped
+（Python 未改，只為證明沒被波及）、`scripts/test-postgres-migrations.sh` 全綠（含 069
+up/down），sqlite 由 backend 測試覆蓋、mysql 依 I-054 既有處置只驗 DDL。
+
+**驗收時踩到一個已記錄的坑**：用 `scripts/smoke-dev.sh` 起 dev stack 不會帶
+`SR_SCORING_MODELS_DIR`，於是掛到空的 `python/models/`，整輪階梯回 503「機率模型尚未
+訓練」。`development-workflow.md` 已經寫了這件事，起 stack 時要自己帶。
+
+---
 
 #### 受影響的檔案與資料流
 

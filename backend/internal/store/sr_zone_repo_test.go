@@ -839,3 +839,44 @@ func TestListMarketEventStateHistoryLimitsByAnalysisNotRows(t *testing.T) {
 		}
 	}
 }
+
+// T-048 階段 E：zone 身分要能跟著 zones 一次寫入並原樣讀回。
+//
+// 這條測的是 INSERT／SELECT 的欄位有沒有同步——named 參數少一個不會編譯失敗，
+// 只會靜靜地把 zone_uid 寫成 NULL，而那個結果與「這次分析沒有身分」長得一模一樣。
+func TestSRZoneRepoRoundTripsZoneUID(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	ctx := context.Background()
+
+	zones := testZones()
+	zones[0].ZoneUID = NullString{sql.NullString{String: "Z-abc", Valid: true}}
+	// zones[1] 刻意不給：可空欄位要能與「有值」並存在同一次寫入裡。
+
+	id, err := repo.Create(ctx, testAnalysis(), zones, SRZoneNormalizedProjections{})
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	saved, err := repo.GetZones(ctx, id)
+	if err != nil {
+		t.Fatalf("get zones failed: %v", err)
+	}
+	if len(saved) != len(zones) {
+		t.Fatalf("want %d zones, got %d", len(zones), len(saved))
+	}
+
+	var withUID, withoutUID int
+	for _, z := range saved {
+		if z.ZoneUID.Valid {
+			withUID++
+			if z.ZoneUID.String != "Z-abc" {
+				t.Errorf("zone_uid = %q, want Z-abc", z.ZoneUID.String)
+			}
+			continue
+		}
+		withoutUID++
+	}
+	if withUID != 1 || withoutUID != len(zones)-1 {
+		t.Errorf("want 1 帶身分 / %d 不帶，got %d / %d", len(zones)-1, withUID, withoutUID)
+	}
+}

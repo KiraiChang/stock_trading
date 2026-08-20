@@ -14,6 +14,7 @@ import (
 	"github.com/trading/backend/internal/api/ws"
 	"github.com/trading/backend/internal/backtest"
 	"github.com/trading/backend/internal/chip"
+	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/portfolio"
@@ -58,6 +59,7 @@ func NewServer(
 	marketBackfillJobRepo store.MarketBackfillJobRepo,
 	evaluationUniverseRepo store.EvaluationUniverseRepo,
 	positionRepo store.PositionRepo,
+	srAnalysisCfg config.SRAnalysisConfig,
 	positionConfig portfolio.Config,
 	chipHistoryTradingDays int,
 	jwtSecret string,
@@ -129,6 +131,7 @@ func NewServer(
 		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)
 		protected.POST("/scheduler/corporate-action-sync/run", sch.RunCorporateActionSync)
 		protected.POST("/scheduler/evaluation-universe-sync/run", sch.RunEvaluationUniverseSync)
+		protected.POST("/scheduler/sr-analysis/run", sch.RunSRAnalysis)
 
 		eu := handler.NewEvaluationUniverseHandler(evaluationUniverseRepo, log)
 		protected.GET("/evaluation-universe", eu.List)
@@ -159,6 +162,10 @@ func NewServer(
 		// 事件身分追蹤（T-048 階段 C）。同樣**只寫不讀**，並且依賴上面那行先成功：
 		// 沒有 zone_uid 就沒有可以掛的身分（見 persistEventIdentity）。
 		szh.SetEventIdentity(store.NewEventIdentityRepo(db))
+		// SR 分析排程（T-052）：排程與 POST /sr-zones 共用 szh.RunAnalysis，
+		// 身分追蹤因此只有一份實作。**必須在 sched.Start() 之前**——Start() 當下才
+		// 決定要不要註冊 cron，main.go 的呼叫順序已保證這件事。
+		sched.SetSRAnalysis(szh, candleRepo, srAnalysisCfg)
 		srRegressionResultHandler := handler.NewSRRegressionResultHandler(
 			analysisClient,
 			store.NewSRRegressionResultRepo(db),

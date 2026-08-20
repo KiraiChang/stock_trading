@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,12 @@ type SRZoneRepo interface {
 	Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZone, projections SRZoneNormalizedProjections) (uint64, error)
 	Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error)
 	List(ctx context.Context, symbol string, limit int) ([]SRZoneAnalysis, error)
+	// GetLatestByTimeframe 取某檔某 timeframe 的最新一筆分析。
+	//
+	// **不能用 List(symbol, 1) 代替**：List 只按 symbol 過濾，使用者今天手動跑過一次 5m
+	// 分析，就會讓 1d 的排程誤判「今天已經分析過」而整批跳過（見 todo.md T-052）。
+	// 沒有任何分析時回 (nil, nil)——那不是錯誤，是「這檔還沒被分析過」。
+	GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*SRZoneAnalysis, error)
 	GetZones(ctx context.Context, analysisID uint64) ([]SRZone, error)
 	GetDecision(ctx context.Context, analysisID uint64) (*SRDecision, error)
 	GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]MarketEventDetection, error)
@@ -356,6 +363,22 @@ func (r *srZoneRepo) Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error
 	err := r.db.GetContext(ctx, &a, r.db.Rebind(`
 		SELECT `+srZoneAnalysisColumns+` FROM stock_sr_zone_analyses WHERE id=?
 	`), id)
+	if err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (r *srZoneRepo) GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*SRZoneAnalysis, error) {
+	var a SRZoneAnalysis
+	err := r.db.GetContext(ctx, &a, r.db.Rebind(`
+		SELECT `+srZoneAnalysisColumns+`
+		FROM stock_sr_zone_analyses WHERE symbol=? AND timeframe=?
+		ORDER BY created_at DESC LIMIT 1
+	`), symbol, timeframe)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}

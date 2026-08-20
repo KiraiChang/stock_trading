@@ -174,6 +174,11 @@ func (s *srZoneRepoStub) Get(ctx context.Context, id uint64) (*store.SRZoneAnaly
 	return nil, fmt.Errorf("not found")
 }
 
+// 排程用的 timeframe-aware 查詢（todo.md T-052）。這些 stub 沒有用到它。
+func (s *srZoneRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, error) {
+	return nil, nil
+}
+
 func (s *srZoneRepoStub) List(ctx context.Context, symbol string, limit int) ([]store.SRZoneAnalysis, error) {
 	rows := make([]store.SRZoneAnalysis, 0, len(s.analyses))
 	for _, a := range s.analyses {

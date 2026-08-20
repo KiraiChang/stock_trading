@@ -88,6 +88,21 @@ chip:
                                  # 與 15:00 收盤掃描解耦：FinMind 法人傍晚、融資融券晚間才發布，
                                  # 太早抓會是空資料造成落後一天。需自動重試可設多時段如 "0 18,20,22 * * 1-5"。
 
+# 定期對 watchlist 產生 SR zone 分析（todo.md T-052）。這是 production 驗證母體的來源：
+# 沒有它，stock_sr_zone_analyses 只會累積人工點擊的零星幾筆，I-074 / T-049 的分佈比較
+# 永遠做不了。走的是與使用者手動分析**同一條**帶身分追蹤的路徑（會寫 zone_uid）。
+#
+# 兩個 cron 是刻意的：SR 分析吃籌碼（trading_score 的 Chip 佔 15%），而籌碼要晚間才發布。
+#   cron      17:00 → 當日 K 棒 ＋ 前一日籌碼（收盤後盡快有一份）
+#   chip_cron 22:00 → 當日 K 棒 ＋ 當日籌碼（晚於 chip sync 21:00、早於 sr_evaluation 22:30）
+# 兩輪都會跳過「最新 K 棒不是今天」的標的；chip_cron 那輪額外跳過「籌碼不是今天」的標的。
+sr_analysis:
+  enabled: false                 # 環境變數：SR_ANALYSIS_ENABLED
+  cron: "0 17 * * 1-5"           # 環境變數：SR_ANALYSIS_CRON，台北時區
+  chip_cron: "0 22 * * 1-5"      # 環境變數：SR_ANALYSIS_CHIP_CRON，台北時區
+  timeframe: "1d"                # 環境變數：SR_ANALYSIS_TIMEFRAME
+  limit: 400                     # 環境變數：SR_ANALYSIS_LIMIT，抓取的歷史 K 棒根數
+
 # SR Zone evaluation / decision replay 自動驗證。預設關閉，避免開發環境啟動後自動跑大量
 # Python replay；開啟後若 symbols 留空，會使用 watchlist 全部股票。
 sr_evaluation:

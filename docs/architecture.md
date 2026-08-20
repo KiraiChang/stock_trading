@@ -193,8 +193,15 @@ api-reference.md）。
 | 收盤日 K ＋ signal 15:00 | ✅ | ❌ |
 | **日 K 維護 16:00** | ❌ | ✅ **唯一職能** |
 | 籌碼同步 21:00 | ✅ | ❌ |
-| SR zone 驗證 / production 分析 | ✅ | ❌ |
+| SR zone 驗證 | ✅ 每日盤後 | ❌ |
+| **SR zone production 分析** | ✅ **平日 17:00 ＋ 22:00**（T-052） | ❌ |
 | 排程版 SR evaluation 的母體 | ✅ | ❌ |
+
+**production 分析排程（2026-08-20 起）**：`watchlists` 每檔每交易日跑**兩輪**帶身分追蹤的
+SR zone 分析——17:00 那輪拿到的是前一日籌碼，22:00 那輪（晚於 21:00 的籌碼採集）才有當日的。
+它是 `stock_sr_zone_analyses` 的 production 母體來源，也是 decision replay 分佈驗證的前提。
+預設關閉，細節見 [`api-reference.md`](./api-reference.md) 的
+`POST /scheduler/sr-analysis/run`。
 
 **`evaluation_universe` 目前只做一件事：讓 135 檔的日 K 保持新鮮。**
 它不做任何分析，也**不參與任何交易決策或狀態推導**。

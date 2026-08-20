@@ -75,6 +75,15 @@ services:
       EVALUATION_UNIVERSE_ENABLED: ${EVALUATION_UNIVERSE_ENABLED:-false}
       EVALUATION_UNIVERSE_CRON: ${EVALUATION_UNIVERSE_CRON:-0 16 * * 1-5}
       EVALUATION_UNIVERSE_DAYS: ${EVALUATION_UNIVERSE_DAYS:-10}
+      # 定期對 watchlist 產生 SR zone 分析（T-052）。**預設關閉**：它是 production
+      # 驗證母體的唯一來源（I-074 / T-049），開了就會每天累積分析。
+      # 兩個 cron 是刻意的：17:00 那輪拿不到當日籌碼（FinMind 晚間才發布），
+      # 22:00 那輪晚於 chip sync（21:00）、早於 sr_evaluation（22:30）。
+      SR_ANALYSIS_ENABLED: ${SR_ANALYSIS_ENABLED:-false}
+      SR_ANALYSIS_CRON: ${SR_ANALYSIS_CRON:-0 17 * * 1-5}
+      SR_ANALYSIS_CHIP_CRON: ${SR_ANALYSIS_CHIP_CRON:-0 22 * * 1-5}
+      SR_ANALYSIS_TIMEFRAME: ${SR_ANALYSIS_TIMEFRAME:-1d}
+      SR_ANALYSIS_LIMIT: ${SR_ANALYSIS_LIMIT:-400}
       # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
       # 漏跑一次就會讓該檔整段歷史出現假跳空，而重算是冪等的，所以沒有關掉它的情境。
       # 打錯字會退回預設值繼續跑並記 Error log。**不要設得比 80 小時稀疏**——

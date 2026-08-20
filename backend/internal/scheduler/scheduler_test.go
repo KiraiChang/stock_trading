@@ -18,6 +18,7 @@ import (
 	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/pkg/timeutil"
 )
 
 type schedulerWatchlistStub struct {
@@ -747,5 +748,232 @@ func TestCorporateActionNotRegisteredWithoutAdjuster(t *testing.T) {
 
 	if s.IsJobRegistered("corporate_action_sync") {
 		t.Error("未注入 adjuster 時不該註冊")
+	}
+}
+
+// ── SR 分析排程（todo.md T-052）──
+
+// 只實作用到的那一兩支，其餘由內嵌介面補齊：真的被呼叫到會 nil panic，
+// 那正是「這支測試碰到了不該碰的東西」的訊號，比回假資料好。
+type schedulerSRZoneRepoStub struct {
+	store.SRZoneRepo
+	analyses []store.SRZoneAnalysis
+}
+
+// **stub 也要照 timeframe 過濾**：不濾的話，P2 那條隔離性的測試會假綠。
+func (s *schedulerSRZoneRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, error) {
+	for i := range s.analyses {
+		if s.analyses[i].Timeframe == "" || s.analyses[i].Timeframe == timeframe {
+			return &s.analyses[i], nil
+		}
+	}
+	return nil, nil
+}
+
+type schedulerChipLatestStub struct {
+	store.ChipScoreRepo
+	latest *store.ChipScore
+}
+
+func (s *schedulerChipLatestStub) GetLatest(ctx context.Context, symbol string) (*store.ChipScore, error) {
+	return s.latest, nil
+}
+
+type schedulerCandleRepoStub struct {
+	store.CandleRepo
+	latest *store.Candle
+}
+
+func (s *schedulerCandleRepoStub) GetLatest(ctx context.Context, symbol, timeframe string) (*store.Candle, error) {
+	return s.latest, nil
+}
+
+type schedulerSRAnalysisRunnerStub struct {
+	calls   []string
+	failFor map[string]bool
+}
+
+func (r *schedulerSRAnalysisRunnerStub) RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error) {
+	r.calls = append(r.calls, symbol)
+	if r.failFor[symbol] {
+		return 0, errors.New("boom")
+	}
+	return uint64(len(r.calls)), nil
+}
+
+func newSRAnalysisTestScheduler(
+	symbols []string, jobRuns *schedulerJobRunRepoStub,
+	candles *schedulerCandleRepoStub, analyses []store.SRZoneAnalysis,
+	runner *schedulerSRAnalysisRunnerStub, chip *schedulerChipLatestStub,
+) *Scheduler {
+	s := New(nil, nil, &schedulerWatchlistStub{symbols: symbols}, jobRuns,
+		&schedulerSRZoneRepoStub{analyses: analyses},
+		nil, nil, "0 21 * * *", nil, "", false, nil, nil, chip, nil,
+		config.SREvaluationConfig{}, false, zap.NewNop())
+	s.SetSRAnalysis(runner, candles, config.SRAnalysisConfig{
+		Enabled: true, Cron: "0 17 * * 1-5", ChipCron: "0 22 * * 1-5", Timeframe: "1d", Limit: 400,
+	})
+	return s
+}
+
+func todayCandle() *schedulerCandleRepoStub {
+	return &schedulerCandleRepoStub{latest: &store.Candle{Timestamp: timeutil.TodayTaipei()}}
+}
+
+// 兩輪都要註冊，而且兩輪都不能因為對方存在而消失。
+func TestStartRegistersBothSRAnalysisCronsOnlyWhenEnabled(t *testing.T) {
+	base := startedCronEntries(t, newStartTestScheduler(config.SREvaluationConfig{}))
+
+	s := newSRAnalysisTestScheduler(nil, &schedulerJobRunRepoStub{}, todayCandle(), nil,
+		&schedulerSRAnalysisRunnerStub{}, nil)
+	if got := startedCronEntries(t, s); got != base+2 {
+		t.Fatalf("cron entries = %d, want base+2 (%d)", got, base+2)
+	}
+}
+
+// runner 沒注入時整組不註冊——比照 adjuster / evaluationUniverse 的「未注入即等同導入前」。
+func TestStartSkipsSRAnalysisWhenRunnerMissing(t *testing.T) {
+	base := startedCronEntries(t, newStartTestScheduler(config.SREvaluationConfig{}))
+
+	s := newStartTestScheduler(config.SREvaluationConfig{})
+	s.SetSRAnalysis(nil, todayCandle(), config.SRAnalysisConfig{Enabled: true, Cron: "0 17 * * 1-5"})
+	if got := startedCronEntries(t, s); got != base {
+		t.Fatalf("cron entries = %d, want %d（runner 未注入時不該註冊）", got, base)
+	}
+}
+
+// 今天的 K 棒還沒到就不要跑——假日、停牌、daily_close 尚未完成都落在這裡。
+// **跳過不是失敗**：job_runs 的 total 要把跳過的扣掉，否則每個假日都會看到一筆 failed。
+func TestSRAnalysisSkipsWhenLatestCandleIsNotToday(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	stale := &schedulerCandleRepoStub{latest: &store.Candle{
+		Timestamp: timeutil.TodayTaipei().AddDate(0, 0, -1),
+	}}
+	s := newSRAnalysisTestScheduler([]string{"2330"}, jobRuns, stale, nil, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 0 {
+		t.Fatalf("K 棒不是今天時不該分析，got %v", runner.calls)
+	}
+	if len(jobRuns.finished) != 1 || jobRuns.finished[0].symbolsTotal != 0 || jobRuns.finished[0].symbolsFailed != 0 {
+		t.Fatalf("job_runs = %+v，want total=0 failed=0（跳過不算失敗）", jobRuns.finished)
+	}
+}
+
+// **守衛是 per 時段，不是 per 日。** 17:00 已經分析過今天的 K 棒（用的是昨日籌碼），
+// 22:00 那輪在**當日籌碼已入庫**的前提下仍然必須跑——這正是兩段式的意義；
+// 用「今天分析過就跳過」會把它整輪擋掉。
+func TestSRAnalysisChipSlotRunsWhenTodayChipArrived(t *testing.T) {
+	yesterday := timeutil.TodayTaipei().AddDate(0, 0, -1).Format("2006-01-02")
+	analyses := []store.SRZoneAnalysis{{
+		AnalyzedAt:  timeutil.TodayTaipei(),
+		ChipSummary: store.RawJSON(`{"trade_date":"` + yesterday + `"}`),
+	}}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	chip := &schedulerChipLatestStub{latest: &store.ChipScore{TradeDate: timeutil.TodayTaipei()}}
+	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
+		todayCandle(), analyses, runner, chip)
+
+	// 17:00 那輪：今天這根 K 棒已經算過了 → 跳過
+	s.runSRAnalysis(context.Background(), false)
+	if len(runner.calls) != 0 {
+		t.Fatalf("17:00 那輪應跳過（今日 K 棒已分析），got %v", runner.calls)
+	}
+
+	// 22:00 那輪：當日籌碼已入庫、最新分析用的還是昨日籌碼 → 照跑
+	s.runSRAnalysis(context.Background(), true)
+	if len(runner.calls) != 1 {
+		t.Fatalf("22:00 那輪應照跑（當日籌碼已入庫），got %v", runner.calls)
+	}
+}
+
+// **當日籌碼還沒入庫就不能跑。** 21:00 的 chip sync 失敗或還沒寫完時，這一輪跑出來的
+// 東西會與 17:00 那輪一模一樣——白算一次，還多推一次 observed_absences，
+// 污染的正是 T-049 要用的 production 母體。
+func TestSRAnalysisChipSlotSkipsWhenTodayChipNotLoaded(t *testing.T) {
+	yesterday := timeutil.TodayTaipei().AddDate(0, 0, -1)
+	analyses := []store.SRZoneAnalysis{{
+		AnalyzedAt:  timeutil.TodayTaipei(),
+		ChipSummary: store.RawJSON(`{"trade_date":"` + yesterday.Format("2006-01-02") + `"}`),
+	}}
+
+	for _, tc := range []struct {
+		name string
+		chip *schedulerChipLatestStub
+	}{
+		{"籌碼還停在昨天", &schedulerChipLatestStub{latest: &store.ChipScore{TradeDate: yesterday}}},
+		{"這檔完全沒有籌碼資料", &schedulerChipLatestStub{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &schedulerSRAnalysisRunnerStub{}
+			s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
+				todayCandle(), analyses, runner, tc.chip)
+
+			s.runSRAnalysis(context.Background(), true)
+
+			if len(runner.calls) != 0 {
+				t.Fatalf("當日籌碼未入庫時不該跑，got %v", runner.calls)
+			}
+		})
+	}
+}
+
+// 籌碼是今天的、但最新那筆分析已經用過它了 → 再算一次結果相同。
+func TestSRAnalysisChipSlotSkipsWhenTodayChipAlreadyUsed(t *testing.T) {
+	today := timeutil.TodayTaipei()
+	analyses := []store.SRZoneAnalysis{{
+		AnalyzedAt:  today,
+		ChipSummary: store.RawJSON(`{"trade_date":"` + today.Format("2006-01-02") + `"}`),
+	}}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	chip := &schedulerChipLatestStub{latest: &store.ChipScore{TradeDate: today}}
+	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
+		todayCandle(), analyses, runner, chip)
+
+	s.runSRAnalysis(context.Background(), true)
+
+	if len(runner.calls) != 0 {
+		t.Fatalf("今日籌碼已用過時應跳過，got %v", runner.calls)
+	}
+}
+
+// 單檔失敗不能拖垮整批：其餘標的照跑，job_runs 記正確的 total / failed。
+func TestSRAnalysisContinuesAfterSymbolFailure(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
+	runner := &schedulerSRAnalysisRunnerStub{failFor: map[string]bool{"3105": true}}
+	s := newSRAnalysisTestScheduler([]string{"2330", "3105", "6182"}, jobRuns,
+		todayCandle(), nil, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 3 {
+		t.Fatalf("失敗的那檔不該中斷其餘，got %v", runner.calls)
+	}
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("want 1 finish, got %+v", jobRuns.finished)
+	}
+	f := jobRuns.finished[0]
+	if f.symbolsTotal != 3 || f.symbolsFailed != 1 || f.status != "partial" {
+		t.Fatalf("job_runs = %+v，want total=3 failed=1 status=partial", f)
+	}
+}
+
+// **timeframe 要隔離。** 使用者今天手動跑過一次 5m 分析，不能讓 1d 的排程誤判
+// 「今天已經分析過」而整批跳過——那會讓 sr_analysis.timeframe 這個設定失去意義。
+func TestSRAnalysisIgnoresAnalysesFromOtherTimeframe(t *testing.T) {
+	analyses := []store.SRZoneAnalysis{{
+		Timeframe:  "5m",
+		AnalyzedAt: timeutil.TodayTaipei(),
+	}}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
+		todayCandle(), analyses, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 1 {
+		t.Fatalf("5m 的分析不該擋掉 1d 的排程，got %v", runner.calls)
 	}
 }

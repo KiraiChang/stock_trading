@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -595,38 +596,18 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 		return
 	}
 
-	previousEventStates, err := h.repo.GetLatestMarketEventStates(c.Request.Context(), body.Symbol, body.Timeframe)
+	id, err := h.RunAnalysis(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit)
 	if err != nil {
-		serverError(c, h.log, err, "sr-zones: load previous event states")
+		// **只有 scoring 那一段能走 mapScoreZonesError。** 它的 fallback 是 502
+		// 「Python 服務無法連線」，把 repo.Create 的失敗餵進去會變成完全誤導的訊息。
+		var scoreErr *srScoreError
+		if errors.As(err, &scoreErr) {
+			mapScoreZonesError(c, h.log, err)
+			return
+		}
+		serverError(c, h.log, err, "sr-zones: run analysis")
 		return
 	}
-	result, err := h.client.ScoreZonesWithPreviousEvents(c.Request.Context(), body.Symbol, body.Timeframe, body.Limit, previousEventStates)
-	if err != nil {
-		mapScoreZonesError(c, h.log, err)
-		return
-	}
-
-	a, zones, projections, err := result.ToStore()
-	if err != nil {
-		serverError(c, h.log, err, "sr-zones: convert result to store")
-		return
-	}
-
-	// **比對在寫入之前**（T-048 階段 E）：zones 一次寫入就帶著 zone_uid，
-	// 分析快照與 zone_instances 才有 join 路徑。失敗一律降級（zoneMatch == nil →
-	// zone_uid 留空、事件層跳過），分析本身照常成立。
-	zoneMatch := h.matchZoneIdentity(c.Request.Context(), body.Symbol, body.Timeframe, zones)
-	applyZoneUIDs(zones, zoneMatch)
-
-	id, err := h.repo.Create(c.Request.Context(), a, zones, projections)
-	if err != nil {
-		serverError(c, h.log, err, "sr-zones: create analysis")
-		return
-	}
-
-	zoneOutcome := h.persistZoneIdentity(c.Request.Context(), body.Symbol, id, zones, zoneMatch)
-	h.persistEventIdentity(c.Request.Context(), body.Symbol, body.Timeframe, id,
-		projections.EventStates, zoneOutcome)
 
 	snapshot, err := h.loadSRZonePipelineSnapshot(c.Request.Context(), id)
 	if err != nil {
@@ -635,6 +616,56 @@ func (h *SRZoneHandler) Create(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, srZonePipelineResponse(snapshot))
+}
+
+// srScoreError 標記「錯在呼叫 Python scoring 那一段」。
+//
+// 抽出 RunAnalysis 之後這個標記是**必要的**：HTTP 層用它決定要不要套
+// mapScoreZonesError（404 沒資料 / 503 模型未訓練 / 504 逾時 / 502 連不上），
+// 而那組對照的 fallback 是「Python 服務無法連線」——把 repo.Create 或身分寫入的
+// 失敗餵進去，使用者會看到一個與真正原因無關的訊息。
+type srScoreError struct{ err error }
+
+func (e *srScoreError) Error() string { return e.err.Error() }
+func (e *srScoreError) Unwrap() error { return e.err }
+
+// RunAnalysis 跑一次完整的 SR zone 分析並落地，回傳 analysis id。
+//
+// **這是帶身分追蹤的那條路徑，而且全系統只有這一份。** `POST /sr-zones` 與排程
+// （docs/todo.md T-052）都呼叫它。不要為了排程另外複製一份：
+// `analysis.SRAnalysisProvider`（`reuse_existing=true` 那條）**不寫 zone_uid、不追身分**，
+// 兩者不可互換——用錯的那條，分析會產生但身分層完全沒有紀錄，而且不會報錯。
+//
+// 錯誤一律包上階段名；scoring 那段另外包 srScoreError 供 HTTP 層做狀態碼對照。
+func (h *SRZoneHandler) RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error) {
+	previousEventStates, err := h.repo.GetLatestMarketEventStates(ctx, symbol, timeframe)
+	if err != nil {
+		return 0, fmt.Errorf("load previous event states: %w", err)
+	}
+	result, err := h.client.ScoreZonesWithPreviousEvents(ctx, symbol, timeframe, limit, previousEventStates)
+	if err != nil {
+		return 0, &srScoreError{err}
+	}
+
+	a, zones, projections, err := result.ToStore()
+	if err != nil {
+		return 0, fmt.Errorf("convert result to store: %w", err)
+	}
+
+	// **比對在寫入之前**（T-048 階段 E）：zones 一次寫入就帶著 zone_uid，
+	// 分析快照與 zone_instances 才有 join 路徑。失敗一律降級（zoneMatch == nil →
+	// zone_uid 留空、事件層跳過），分析本身照常成立。
+	zoneMatch := h.matchZoneIdentity(ctx, symbol, timeframe, zones)
+	applyZoneUIDs(zones, zoneMatch)
+
+	id, err := h.repo.Create(ctx, a, zones, projections)
+	if err != nil {
+		return 0, fmt.Errorf("create analysis: %w", err)
+	}
+
+	zoneOutcome := h.persistZoneIdentity(ctx, symbol, id, zones, zoneMatch)
+	h.persistEventIdentity(ctx, symbol, timeframe, id, projections.EventStates, zoneOutcome)
+	return id, nil
 }
 
 // GET /api/v1/sr-zones?symbol=2330&limit=20

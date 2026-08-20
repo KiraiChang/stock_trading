@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -73,6 +74,20 @@ type Scheduler struct {
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
 	// 卻只在多實例部署才有意義。
 	universeSyncRunning atomic.Bool
+	// srAnalysisRunner 為選填（todo.md T-052）：未注入或未啟用時不註冊排程，
+	// 行為與導入前完全相同（比照 adjuster / evaluationUniverse）。
+	//
+	// **介面由這裡定義、由 main 注入 handler**：身分追蹤只存在於
+	// `api/handler.SRZoneHandler`，而 `api/handler` 已經 import 本套件
+	// （SchedulerHandler），反向 import 會是 cycle。介面由消費端宣告是 Go 的慣例，
+	// 也讓「身分追蹤只有一份實作」這條不變式不必靠紀律維持。
+	srAnalysisRunner SRAnalysisRunner
+	srAnalysisCfg    config.SRAnalysisConfig
+	// srAnalysisCandles 用來檢查「今天的 K 棒到了沒」。
+	srAnalysisCandles store.CandleRepo
+	// 兩個時段各一個併發旗標：17:00 那輪還在跑時 22:00 不該被它擋掉。
+	srAnalysisRunning     atomic.Bool
+	srAnalysisChipRunning atomic.Bool
 	// registeredJobs 記錄 Start() 實際註冊了哪些 cron job。
 	// **為什麼要記而不是讓呼叫端自己判斷**：註冊條件散在 Start() 各處
 	// （config 開關、adjuster 是否注入、repo 是否注入），複製一份到 API 層
@@ -86,6 +101,15 @@ type Scheduler struct {
 	registeredJobs   map[string]bool
 	log              *zap.Logger
 	cron             *cron.Cron
+}
+
+// SRAnalysisRunner 是「跑一次帶身分追蹤的 SR zone 分析」。實作是
+// `api/handler.SRZoneHandler.RunAnalysis`——`POST /sr-zones` 走的也是它。
+//
+// **不要在這裡另外實作一份。** `analysis.SRAnalysisProvider`（reuse_existing=true 那條）
+// 不寫 zone_uid、不追身分，用它產生的分析在身分層完全沒有紀錄，而且不會報錯。
+type SRAnalysisRunner interface {
+	RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error)
 }
 
 func New(
@@ -205,6 +229,26 @@ func (s *Scheduler) Start() {
 				zap.String("cron", s.evaluationUniverseCfg.Cron), zap.Error(err))
 		} else {
 			s.markRegistered("evaluation_universe_sync")
+		}
+	}
+
+	// SR 分析排程（T-052）：兩輪都跑同一份 runner，差別只在「要不要求當日籌碼」。
+	if s.srAnalysisRunner != nil && s.srAnalysisCfg.Enabled {
+		if _, err := s.cron.AddFunc(s.srAnalysisCfg.Cron, func() {
+			s.runSRAnalysis(context.Background(), false)
+		}); err != nil {
+			s.log.Error("sr analysis cron register failed",
+				zap.String("cron", s.srAnalysisCfg.Cron), zap.Error(err))
+		} else {
+			s.markRegistered("sr_analysis")
+		}
+		if _, err := s.cron.AddFunc(s.srAnalysisCfg.ChipCron, func() {
+			s.runSRAnalysis(context.Background(), true)
+		}); err != nil {
+			s.log.Error("sr analysis chip cron register failed",
+				zap.String("cron", s.srAnalysisCfg.ChipCron), zap.Error(err))
+		} else {
+			s.markRegistered("sr_analysis_chip")
 		}
 	}
 
@@ -812,4 +856,195 @@ func (s *Scheduler) RunCorporateActionSync() {
 
 	s.log.Info("corporate action sync done", zap.Int("events", n))
 	s.finishRun(ctx, runID, "corporate_action_sync", n, 0, "")
+}
+
+// SetSRAnalysis 注入 SR 分析 runner 與其排程設定（todo.md T-052）。
+// 未呼叫或 cfg.Enabled=false 時不註冊，行為與導入前完全相同（比照 SetEvaluationUniverse）。
+func (s *Scheduler) SetSRAnalysis(runner SRAnalysisRunner, candles store.CandleRepo, cfg config.SRAnalysisConfig) {
+	s.srAnalysisRunner = runner
+	s.srAnalysisCandles = candles
+	s.srAnalysisCfg = cfg
+}
+
+// RunSRAnalysis 供 API 手動觸發。withChip 決定是否要求「當日籌碼已入庫」。
+func (s *Scheduler) RunSRAnalysis(withChip bool) {
+	s.runSRAnalysis(context.Background(), withChip)
+}
+
+// runSRAnalysis 對 watchlist 逐檔跑一次帶身分追蹤的 SR zone 分析（todo.md T-052）。
+//
+// **為什麼是 watchlist 而不是 evaluation_universe**：後者的唯一職能是日 K 維護，
+// 「不做任何分析，也不參與任何交易決策或狀態推導」——那是 T-040 的核心約束，
+// 見 docs/architecture.md「兩個標的清單」。
+//
+// **為什麼一天跑兩輪**：SR 分析吃籌碼（trading_score 的 Chip 佔 15%），而籌碼要晚間才
+// 發布。17:00 那輪拿到的是前一日籌碼，22:00 那輪才有當日的。兩輪站在同一根 K 棒上，
+// 只有籌碼不同。
+//
+// **序列執行**：這台 host 只有 2GiB。逐檔的峰值等同使用者手動點一次分析；
+// 真的撐不住時要降頻而不是加併發。
+func (s *Scheduler) runSRAnalysis(ctx context.Context, withChip bool) {
+	if s.srAnalysisRunner == nil {
+		return
+	}
+	jobName, guard := "sr_analysis", &s.srAnalysisRunning
+	if withChip {
+		jobName, guard = "sr_analysis_chip", &s.srAnalysisChipRunning
+	}
+	// 併發守衛只擋同一輪自己；兩輪之間互不影響。
+	if !guard.CompareAndSwap(false, true) {
+		s.log.Warn("sr analysis already running, skipped", zap.String("job", jobName))
+		return
+	}
+	defer guard.Store(false)
+
+	runID := s.startRun(ctx, jobName)
+
+	symbols, err := s.watchlist.Symbols(ctx)
+	if err != nil {
+		s.log.Error("sr analysis watchlist failed", zap.String("job", jobName), zap.Error(err))
+		s.finishRun(ctx, runID, jobName, 0, 1, err.Error())
+		return
+	}
+	if len(symbols) == 0 {
+		s.finishRun(ctx, runID, jobName, 0, 0, "")
+		return
+	}
+
+	timeframe := s.srAnalysisCfg.Timeframe
+	if timeframe == "" {
+		timeframe = "1d"
+	}
+	today := timeutil.TodayTaipei()
+
+	var failed, skipped int
+	var firstErr string
+	for _, symbol := range symbols {
+		reason, ok := s.srAnalysisSkipReason(ctx, symbol, timeframe, today, withChip)
+		if !ok {
+			skipped++
+			s.log.Info("sr analysis skipped",
+				zap.String("job", jobName), zap.String("symbol", symbol), zap.String("reason", reason))
+			continue
+		}
+		if _, err := s.srAnalysisRunner.RunAnalysis(ctx, symbol, timeframe, s.srAnalysisCfg.Limit); err != nil {
+			failed++
+			if firstErr == "" {
+				firstErr = symbol + ": " + err.Error()
+			}
+			// **單檔失敗不中斷整批**：一檔沒有 K 棒或 Python 逾時，不該讓其餘標的整天沒分析。
+			s.log.Warn("sr analysis symbol failed",
+				zap.String("job", jobName), zap.String("symbol", symbol), zap.Error(err))
+		}
+	}
+	total := len(symbols) - skipped
+	s.log.Info("sr analysis done",
+		zap.String("job", jobName), zap.Int("total", len(symbols)),
+		zap.Int("analyzed", total-failed), zap.Int("skipped", skipped), zap.Int("failed", failed))
+	s.finishRun(ctx, runID, jobName, total, failed, firstErr)
+}
+
+// srAnalysisSkipReason 回傳 (跳過原因, 是否該跑)。
+//
+// 這裡的判斷全部**從資料推導**，不靠行程內狀態——重啟後行為要一致，而且兩輪的規則
+// 刻意不同（否則 17:00 跑完就會把 22:00 整輪擋掉）。四個跳過條件：
+//
+//   - 兩輪共同：最新 K 棒的交易日必須是今天。一次處理掉假日、停牌、daily_close 尚未完成。
+//   - 僅 17:00：今天這根 K 棒已經分析過就不必再算。
+//   - 僅 22:00：**當日籌碼尚未入庫就跳過**（查 chip_scores 本身，不是查最新分析用了什麼）。
+//     21:00 的採集失敗或還沒寫完時跑這一輪，結果會與 17:00 那輪一模一樣——白算一次，
+//     還多推一次 observed_absences。
+//   - 僅 22:00：當日籌碼已入庫、但最新那筆分析已經用過它了，同樣不必再算。
+//
+// **所有查詢都帶 timeframe。** 少了它，使用者手動跑過的 5m 分析會擋掉 1d 的排程。
+func (s *Scheduler) srAnalysisSkipReason(
+	ctx context.Context, symbol, timeframe string, today time.Time, withChip bool,
+) (string, bool) {
+	// 共同前置：今天的 K 棒必須已經入庫。假日、停牌、daily_close 尚未完成都會落在這裡。
+	if s.srAnalysisCandles != nil {
+		candle, err := s.srAnalysisCandles.GetLatest(ctx, symbol, timeframe)
+		switch {
+		case err != nil:
+			s.log.Warn("sr analysis candle lookup failed", zap.String("symbol", symbol), zap.Error(err))
+			return "查不到 K 棒", false
+		case candle == nil:
+			return "沒有任何 K 棒", false
+		case !taipeiDate(candle.Timestamp).Equal(today):
+			return "最新 K 棒不是今天", false
+		}
+	}
+
+	// **必須帶 timeframe**：List(symbol, 1) 只按 symbol 取最新一筆，使用者今天手動跑過一次
+	// 5m 分析就會讓 1d 的排程誤判「今天已經分析過」而整批跳過。
+	latest, err := s.srZoneRepo.GetLatestByTimeframe(ctx, symbol, timeframe)
+	if err != nil {
+		// 查不到就照跑：漏跑一次分析比因為一個唯讀查詢失敗而整檔停擺糟。
+		s.log.Warn("sr analysis latest lookup failed", zap.String("symbol", symbol), zap.Error(err))
+		return "", true
+	}
+
+	if !withChip {
+		// 17:00 那輪：今天這根 K 棒已經分析過就不必再算。
+		if latest != nil && taipeiDate(latest.AnalyzedAt).Equal(today) {
+			return "已分析過今日 K 棒", false
+		}
+		return "", true
+	}
+
+	// 22:00 那輪的前提是「當日籌碼已經入庫」。**光看最新分析用的是不是今日籌碼不夠**：
+	// 21:00 的 chip sync 失敗或還沒寫完時，那個條件同樣成立（最新分析用的是昨日籌碼），
+	// 於是這一輪會拿著昨日籌碼再產生一筆內容相同的分析——白算一次，還多推一次
+	// observed_absences，污染的正是 T-049 要用的 production 母體。所以先查籌碼本身。
+	if s.chipScores != nil {
+		chip, err := s.chipScores.GetLatest(ctx, symbol)
+		switch {
+		// **沒有籌碼資料不是錯誤**，是這檔還沒被採集過（新標的、或籌碼來源沒有它）。
+		// ChipScoreRepo.GetLatest 對此回 sql.ErrNoRows，不特別處理的話每個這種標的
+		// 每天都會產生一筆 Warn，把真正的查詢失敗淹掉。
+		case errors.Is(err, sql.ErrNoRows) || (err == nil && chip == nil):
+			return "沒有任何籌碼資料", false
+		case err != nil:
+			s.log.Warn("sr analysis chip lookup failed", zap.String("symbol", symbol), zap.Error(err))
+			return "籌碼查詢失敗", false
+		case !taipeiDate(chip.TradeDate).Equal(today):
+			return "當日籌碼尚未入庫", false
+		}
+	}
+	// 籌碼是今天的，但最新那筆分析已經用過它了 → 再算一次結果相同。
+	if latest != nil && taipeiDate(latest.AnalyzedAt).Equal(today) &&
+		chipTradeDateIs(latest.ChipSummary, today) {
+		return "已用今日籌碼分析過", false
+	}
+	return "", true
+}
+
+// taipeiDate 取 t 在台北時區的日曆日（時分秒歸零）。
+//
+// **不能用 t 的 UTC 日期**：日 K 的 candles.ts 存的是 16:00Z＝台北隔日 00:00，
+// 所以 `2026-08-17T16:00:00Z` 那根的交易日是 **08-18**。用 UTC 判斷會整批差一天。
+func taipeiDate(t time.Time) time.Time {
+	local := t.In(timeutil.TaipeiTZ)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, timeutil.TaipeiTZ)
+}
+
+// chipTradeDateIs 判斷這筆分析用的籌碼是不是 day 當天的。
+//
+// chip_summary 是 Python 產生的 JSON，`trade_date` 缺席或為 null 是**正常**的
+// （該檔當日沒有籌碼資料時就會這樣），一律當成「不是今天」——保守側會讓 22:00 那輪
+// 照跑，而不是誤判成已經算過。
+func chipTradeDateIs(chipSummary store.RawJSON, day time.Time) bool {
+	if len(chipSummary) == 0 {
+		return false
+	}
+	var payload struct {
+		TradeDate string `json:"trade_date"`
+	}
+	if err := json.Unmarshal([]byte(chipSummary), &payload); err != nil || payload.TradeDate == "" {
+		return false
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", payload.TradeDate, timeutil.TaipeiTZ)
+	if err != nil {
+		return false
+	}
+	return parsed.Equal(day)
 }

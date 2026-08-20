@@ -2434,7 +2434,7 @@ T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | **已實作／待 review**（2026-08-20；上線＝把 `sr_analysis.enabled` 設成 true） |
 | 優先度 | 高（同時是 T-049 的硬前置與三筆驗證缺口的唯一解） |
 | 分類 | Go / 排程 / SR Zone / 驗證母體 |
 | 建立日期 | 2026-08-20 |
@@ -2460,29 +2460,249 @@ T-048 收斂時的 **4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，
 自然母體；它能證明「改動前後逐欄相同」與「身分層數字重現」，但不能關閉 I-074 / T-049
 要求的 production 分佈比較。
 
-#### 要決定的事（規劃時定案）
+#### 計畫書（**已實作／待 review**，2026-08-20）
 
-* **同日守衛：只為省資源，不是正確性依賴（2026-08-20 定案）。**
-  老化單位的正確性由 [`issue.md`](./issue.md) I-077 的修法負責——`age_bars` 改成只在
-  最新 K 棒推進時 +1，計畫書見該筆「修法定案」。**I-077 必須先上線，本筆才能開排程**，
-  否則排程與人工同日各跑一次會讓老化一天前進 2，污染的正是後面所有驗證要用的母體。
-  I-077 修完之後，本筆仍可加「當日已分析過就跳過」的守衛，但那時它只是省一次 Python
-  scoring 的成本，**不再是正確性的一部分**——要不要加、以及跳過的標的算不算一次觀測
-  （會影響 `observed_absences`），規劃時一起決定。
-* **成本**：每檔都要跑一次 Python scoring，記憶體上限見
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」。這台 host 只有 2GiB，
-  排程的併發度與批次大小要一起定。
-* **範圍**：watchlist、`evaluation_universe`（T-040 已上線 135 檔）還是兩者的交集。
-* **頻率與時點**：日 K 收盤後一次即可，但要與 `daily_close` / 選池同步的既有排程排開。
-* **`reuse_existing` 走哪條**：必須是 `false`，否則不進身分追蹤路徑
-  （`sr_analysis_provider.go` 那條不寫 `zone_uid`）。這點會直接決定它能不能當
-  I-078 的關閉條件。
-* **失敗處理**：單檔失敗不能拖垮整批；要不要留 job 紀錄供查。
+##### 修改目標與不做的範圍
+
+* **目標**：每個交易日收盤後，對 **watchlist** 的每一檔跑一次帶身分追蹤的 SR zone 分析，
+  讓 `stock_sr_zone_analyses` 開始自然累積 production 母體。
+* **不做**：不改任何分析／決策／身分層邏輯——本筆只是**多一個呼叫端**。
+* **不做**：不動 `evaluation_universe`（理由見下方範圍定案）、不改 watchlist 內容、
+  不動前端、不新增 API 端點（除了既有 scheduler status 會多一個 job 名稱）。
+* **不做**：不做補歷史（不回頭幫過去的日子補分析）——母體靠往前累積，不靠回填。
+
+##### 六個定案
+
+**S1：範圍是 watchlist，不是 `evaluation_universe`。**
+
+[`architecture.md`](./architecture.md)「兩個標的清單」的分工表已經把這件事定死了：
+`evaluation_universe`（135 檔）**唯一職能是日 K 維護**，「不做任何分析，也不參與任何交易
+決策或狀態推導」，那是 T-040 的核心約束；`watchlists`（11 檔）才是做 SR zone 驗證與
+production 分析的那一份。本筆補的正是那張表裡「production 分析」這一格**目前其實不存在的
+排程**——現有的 `runSRZoneVerification` 只驗證既有 zone，不產生新分析。
+
+母體規模：11 檔 × 每交易日 1 次 ≈ **每月 220 次分析**，對照現況 20 次（累積數月）。
+
+**S2：排程必須走 handler 那條帶身分追蹤的路徑，且只能有一份實作。**
+
+身分追蹤（`matchZoneIdentity` → `applyZoneUIDs` → `repo.Create` → `persistZoneIdentity`
+→ `persistEventIdentity`）目前**只存在於 `SRZoneHandler.Create`**。
+`analysis.SRAnalysisProvider` 那條（`reuse_existing=true`）**不寫 `zone_uid`、不追身分**，
+所以不能用——用了就當不成 I-078 的關閉條件。
+
+**不能讓 scheduler 直接 import handler**：`api/handler` 已經 import `scheduler`
+（`SchedulerHandler`），反向會是 import cycle。
+
+作法：**scheduler 自己宣告一個窄介面，由 `main.go` 注入 handler**（Go 的慣例：介面由消費端
+定義）。handler 把 `Create` 的核心抽成一個可重用的方法，`Create` 與排程**呼叫同一份**：
+
+```go
+// scheduler 端
+type SRAnalysisRunner interface {
+    RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error)
+}
+// handler 端：Create 與排程都呼叫它，確保永遠只有一份身分追蹤邏輯
+func (h *SRZoneHandler) RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error)
+```
+
+考慮過但否決：
+
+| 方案 | 否決理由 |
+|---|---|
+| 把整包身分邏輯搬到 `internal/analysis` | 正解但是大重構（`sr_zones.go` 的身分相關函式與測試整批搬家），風險與本筆的目標不成比例。**列為之後的獨立重構**，不夾帶在這裡 |
+| 排程內部打自己的 HTTP `/sr-zones` | 該路由是 protected，排程要自製 JWT；而且為了呼叫自己繞一趟網路 |
+| 在 scheduler 複製一份身分追蹤 | 兩份會漂移，而漂移時**沒有任何東西會報錯**——那正是 T-048 一路在解的那類問題 |
+
+**S3：獨立 cron，而且是兩段——17:00 不含當日籌碼、22:00 含當日籌碼。**
+
+先講為什麼獨立而不掛在 `RunDailyClose` 尾端（`sr_zone_verify` 是掛尾端的先例）：
+
+* daily_close 失敗（FinMind 抓空是實際發生過的事）不該連帶讓分析整天不跑。
+* 獨立 cron 才有獨立的 `job_runs` 與獨立的手動觸發入口，出事時看得出是誰失敗。
+
+**為什麼要兩段**：SR 分析吃籌碼（`trading_score` 的 Chip 佔 15%，`chip_summary` 也進決策），
+而 FinMind 的法人／融資券要傍晚到晚間才發布——`chip.sync.cron` 因此是 `0 21 * * 1-5`。
+17:00 跑到的必然是**前一日的籌碼**。所以：
+
+| 時段 | 內容 | 為什麼是這個時間 |
+|---|---|---|
+| **17:00** | 當日 K 棒 ＋ **前一日籌碼** | 收盤後盡快有一份可看的分析。已晚於 `daily_close`（15:00）與 `evaluation_universe_sync`（16:00） |
+| **22:00** | 當日 K 棒 ＋ **當日籌碼** | 籌碼排程 21:00 **開始**，排 21:00 會與它對跑。既有先例 `sr_evaluation` 排 22:30 並註明「預設晚於 chip sync」，本筆插在中間 |
+
+兩段各自有**前置檢查，不符就 skip 該檔而不是失敗**：
+
+* 兩段共同：該檔最新 candle 的交易日必須是今天（一次處理掉假日、停牌、daily_close 未完成）。
+* 22:00 專屬：該檔籌碼的 `trade_date` 必須是今天。**籌碼沒進來就跳過**——那一輪算出來的東西
+  會與 17:00 那份一模一樣，白跑一次還多推一次 `observed_absences`（見 S4）。
+
+**S4：一天兩次會讓 `observed_absences` 前進兩次，這是刻意接受的。**
+
+`next_observed_absences` 的規則是「配到歸零、沒配到 +1」，而它是 **per 分析**不是 per 日
+（`zone_matcher.py`；已知限制「`as_of` 取的是 wall clock，不是資料日期」的同一個根源）。
+一天兩次之後，`MAX_OBSERVED_ABSENCES = 3` 的實質意義從「約 3 個交易日」變成
+**「約 1.5 個交易日」**——zone 身分會比現在早一倍失格。時間軸
+（`MAX_ABSENCE_TRADING_DAYS = 20`，用交易日）不受影響。
+
+**定案是接受並記錄，不動常數**，理由有二：
+
+1. 次數軸的語意本來就是「我們看了幾次都沒看到」，不是「過了幾天」——兩個軸並存正是為了
+   分辨這兩件事。看得更頻繁、更早判失格，符合它的原意。
+2. 它會讓 [`issue.md`](./issue.md) **I-078 的 `EXPIRED` 收攤更快被觸發**，而那正是本筆要
+   幫忙關閉的缺口之一。
+
+若之後想維持「約 3 個交易日」的等價語意，選項是把 `MAX_OBSERVED_ABSENCES` 調成 6——
+但那是 matcher 常數、屬身分層可見改變，**要另案並附實測**，不在本筆範圍。
+
+**S5：守衛是「每時段一次」，不是「每日一次」。**
+
+S3 改成兩段之後，「當日已分析過就跳過」會直接把 22:00 那輪整個擋掉，所以守衛的粒度是
+**(交易日, 時段)**：同一個時段今天已經跑過才跳過，17:00 與 22:00 互不影響。
+
+I-077 修完後（**必須先上線**，見下方前置），同時段重跑不再影響老化，所以這個守衛只是省一次
+Python scoring ＋ 少推一次 `observed_absences`（S4）。
+
+**跳過就是完全不跑 matcher，因此 `observed_absences` 不會增加**——這是對的：那個計數的
+語意是「我們看了幾次都沒看到這個 zone」，而跳過的那次我們根本沒看。
+
+**S6：序列執行、單檔失敗不中斷、`enabled` 預設 false。**
+
+* **序列**（一檔跑完再跑下一檔）。11 檔 × 一次 scoring，這台 2GiB host 撐得住——
+  **注意 `sr-zone-scoring.md`「規模上限」講的是 `run_evaluation()` 把所有標的 DataFrame
+  一次全載，與本筆逐檔 scoring 是兩回事**，本筆的峰值就是單檔的 frame，
+  與使用者現在手動點一次分析完全相同。
+* 單檔失敗只記 warn 並繼續，最後由 `job_runs` 記 `total` / `failed` / `last_err`。
+* 行程內 `atomic.Bool` 擋重複觸發（比照 `universeSyncRunning`）。
+* `enabled` 預設 **false**，比照 `evaluation_universe` / `sr_evaluation` 的既有 pattern；
+  live 上線是一個明確的 config 動作。
+
+##### 受影響檔案與資料流
+
+```text
+config           ＋ sr_analysis: {enabled, cron, chip_cron, timeframe, limit}
+Go api/handler/sr_zones.go   Create 的核心抽成 RunAnalysis(ctx, symbol, timeframe, limit)
+                             ——**行為不變**，Create 改為呼叫它
+Go scheduler/scheduler.go    ＋ SRAnalysisRunner 介面、runSRAnalysis(slot)、兩個 cron 註冊、
+                             markRegistered("sr_analysis" / "sr_analysis_chip")、
+                             atomic.Bool 重複觸發守衛（兩個時段各一個）
+Go cmd/server（或 api/server.go）  把 handler 注入 scheduler（接線）
+Go api/handler/scheduler.go  ＋ 手動觸發入口（比照 RunDailyClose）
+```
+
+* Python：**不改**。
+* 前端：不改（`/scheduler/status` 會多一個 job 名稱，是純新增）。
+* DB：**不新增表也不新增欄位**。寫入的都是既有的 `stock_sr_zone_analyses` /
+  `stock_sr_zones` / 身分層四張表 / `job_runs`。
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| config ＋ `sr_analysis` 區塊 | 純新增，預設關閉 | 沒設＝行為與現在完全相同 |
+| `/scheduler/status` 多 `sr_analysis` / `sr_analysis_chip` | 純新增鍵 | 啟用時才出現，比照既有 job |
+| API／DB schema | **不變** | — |
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| **I-077 未上線就開排程**，排程與人工同日各跑一次，老化一天前進 2，**污染的正是要累積的母體** | I-077 已於 2026-08-20 修復（待 review）。本筆上線前先確認該修法已在 live |
+| 抽 `RunAnalysis` 時不慎改到 `Create` 的行為 | 純抽取、不改順序；`Create` 既有測試全綠即為證據，另加一支「兩個呼叫端走同一份邏輯」的測試 |
+| 排程在 candles 還沒到位時跑，產生一批基於舊 K 棒的分析 | S3 的「最新 candle 交易日必須是今天」前置檢查，不符就 skip 並記 `job_runs` |
+| 22:00 那輪在籌碼還沒進來時跑，等於白跑一次又多推一次 `observed_absences` | S3 的籌碼 `trade_date` 前置檢查，不是今天就 skip |
+| 一天兩次讓 `observed_absences` 前進兩次，`MAX_OBSERVED_ABSENCES=3` 的實質意義縮成約 1.5 個交易日 | S4：刻意接受並記錄。它同時讓 I-078 的 `EXPIRED` 收攤更快被觸發。要維持日數等價得調常數，屬另案 |
+| 11 檔逐檔 scoring 拖累這台 2GiB host | 序列執行；峰值等同使用者手動點一次分析。若實測不行，先降頻（改隔日）而不是加併發 |
+| 母體開始累積後，`zone_key_aliases` 撞頂比例上升（I-079） | 那正是本筆要量測的東西之一，見驗收門檻 |
+| 回滾 | `enabled: false` 即可停止；已寫入的分析留著無害（沒有任何決策讀身分層）。程式面 `git revert` |
+
+##### 測試與驗證策略
+
+* **單元（Go）**：`enabled=false` 或 runner 未注入時**不註冊** cron（比照 adjuster /
+  evaluationUniverse 的既有測試）；cron 字串壞掉時只記 log 不中止；單檔失敗時其餘照跑且
+  `job_runs` 的 `failed` 計數正確；candle 不是今天時 skip 而非 fail；重複觸發被 atomic 擋掉。
+* **不變式（Go）**：`Create` 與 `RunAnalysis` 走同一份邏輯——抽取後 handler 既有測試全綠。
+* **端到端（dev stack）**：手動觸發，確認
+  1. 每檔各產生一筆 `stock_sr_zone_analyses`；
+  2. 該次的 `stock_sr_zones.zone_uid` **非空**（證明走的是身分追蹤那條路，不是 provider）；
+  3. `job_runs` 有對應紀錄；
+  4. **同一時段**再觸發一次 → 全部 skip，不新增分析；
+  5. **另一時段**觸發 → 照常產生分析（守衛是 per 時段，不是 per 日）；
+  6. 22:00 那輪在籌碼未進來時 skip；籌碼進來後跑出的分析，其
+     `data_quality.updated_at.chip` 是**今天**、且 `chip_summary` 與 17:00 那輪不同。
+* **單元（Go）**：兩個時段的守衛互不干擾（跑過 17:00 不會擋掉 22:00）。
+* **回歸**：`backend/scripts/test.sh` 全綠。Python 未改，不需重跑（但抽取若動到 client 呼叫，仍跑一次）。
+
+##### 完成後歸檔
+
+* 排程職能新增一列 → [`architecture.md`](./architecture.md)「兩個標的清單」的分工表
+  （「SR zone 驗證 / production 分析」那一格從願景變成現況）。
+* **兩段式排程的理由**（17:00 不含當日籌碼、22:00 含；以及 `observed_absences` 因此
+  一天前進兩次）→ [`sr-zone-scoring.md`](./sr-zone-scoring.md)「資格閘門」與
+  「四個已知限制」那兩段——次數軸的實質日數等價值改變了，那裡必須寫明。
+* cron 預設值、`enabled` 語意、skip 條件與 `job_runs` 判讀 →
+  [`development-workflow.md`](./development-workflow.md) 或 `architecture/data-pipeline.md`
+  的排程段（比照 `corporate_action_sync` 的寫法）。
+* 「排程走 handler 的 `RunAnalysis`、與 `Create` 同一份身分追蹤」→
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher → 接線」，
+  並更新那裡「只接在 `reuse_existing=false` 那條路徑」的已知限制描述。
+
+##### 實作結果（2026-08-20）
+
+程式已完成，**但排程預設關閉，等同尚未上線**——實際開始累積母體是把
+`sr_analysis.enabled` 設成 true 的那一刻。
+
+| 驗證 | 結果 |
+|---|---|
+| Go 全量 `test.sh` | 全綠（+6 支排程測試） |
+| 註冊 | `enabled=true` 時多 **2** 個 cron entry；runner 未注入時 **0**（等同導入前） |
+| 端到端① 產生分析 | 觸發一次 → watchlist 兩檔各一筆（`total=2 analyzed=2 skipped=0 failed=0`） |
+| 端到端② **走的是身分追蹤那條路** | 新分析的 zone 全部帶 `zone_uid`（11/11、16/16） |
+| 端到端③ `job_runs` | `sr_analysis` success、`symbols_total=2`、`failed=0` |
+| 端到端④ 同時段重觸發 | 兩檔都 skip（`已分析過今日 K 棒`），不新增分析 |
+| 端到端⑤ **籌碼守衛**（P1 修正後複驗） | dev DB 的 `chip_scores` 是 0 筆 → `with_chip=true` **兩檔都 skip**（`沒有任何籌碼資料`），分析數 88→88。**同一個觸發在 P1 修正前會產生 2 筆**（86→88），這個前後差異就是修正生效的直接證據 |
+| 端到端⑥ **守衛是 per 時段** | 只在 P1 修正**前**實走過（17:00 跳過後，`with_chip=true` 仍照跑並新增 2 筆，86→88）。修正後 22:00 那輪多了「當日籌碼已入庫」的前提，而 dev DB 沒有籌碼資料，**無法在 dev 上重現這個組合**；改由單元測試 `TestSRAnalysisChipSlotRunsWhenTodayChipArrived` 覆蓋（17:00 已分析過今日 K 棒 ＋ 當日籌碼已入庫 → 22:00 照跑） |
+| 端到端⑦ timeframe 隔離（P2） | 未在 dev 實走（要先造一筆同日的 5m 分析）；由 `TestSRAnalysisIgnoresAnalysesFromOtherTimeframe` 覆蓋 |
+
+##### Review findings（2026-08-20，**已修正／待複審**）
+
+* **P1：`sr_analysis_chip` 沒有真的確認「當日籌碼已入庫」就會跑。** 原實作只看最新分析的
+  `chip_summary.trade_date` 是不是今天——但 21:00 的 chip sync 失敗或還沒寫完時，那個條件
+  同樣成立（最新分析用的是昨日籌碼），於是 22:00 會拿昨日籌碼再產生一筆內容相同的分析，
+  白算一次還多推一次 `observed_absences`，污染的正是 T-049 要用的 production 母體。
+  與同檔註解「當日籌碼必須已入庫」直接矛盾。
+  **已修正**：改為先查 `ChipScoreRepo.GetLatest`，`trade_date` 不是今天就跳過
+  （`當日籌碼尚未入庫` / `沒有任何籌碼資料`），再套原本的「已用今日籌碼分析過」冪等檢查。
+  原測試把錯誤行為固定成預期，已改寫並補上「籌碼停在昨天」「完全沒有籌碼」兩個案例。
+* **P2：skip 判斷沒有帶 `timeframe`。** 原本用 `srZoneRepo.List(symbol, 1)`，而 `List`
+  只按 symbol 過濾——使用者今天手動跑過一次 5m 分析，就會讓 1d 的排程誤判「今天已經分析過」
+  而整批跳過，`sr_analysis.timeframe` 這個設定形同失效。
+  **已修正**：新增 `SRZoneRepo.GetLatestByTimeframe`（`WHERE symbol=? AND timeframe=?`）
+  並改用它；補一支測試鎖住「5m 的分析不擋 1d 的排程」。
+* **P3：`docker-compose.dev.yml` 漏了 `SR_ANALYSIS_TIMEFRAME`。** compose 的
+  `environment:` 是白名單，沒列的變數不會進 container，於是 dev stack 無法覆寫 timeframe。
+  **已修正**。
+
+實作與計畫書的差異：
+
+* **多注入了一個 `store.CandleRepo`**。計畫書寫「job 開頭檢查最新 candle 的交易日是不是
+  今天」，但 scheduler 原本沒有任何 candle 查詢管道。改成由 `SetSRAnalysis` 一起注入，
+  比照既有選填相依的處理。
+* **跳過的判斷全部從資料推導，沒有行程內狀態**（最新 K 棒的交易日、最新分析的 K 棒交易日、
+  該筆分析用的籌碼日）。這比原本設想的「行程內記住今天跑過沒」好：重啟後行為一致，
+  而且兩輪的規則本來就必須不同。
+* **`docker-compose.dev.yml` 也要補環境變數**。第一次驗證時 `/scheduler/status` 回
+  `disabled`，原因是 compose 的 `environment:` 是白名單，沒列的變數不會進 container。
+
+##### 前置
+
+**I-077 必須先在 live 生效**（老化單位改為 K 棒推進）。理由見上方風險表第一列。
 
 #### 驗收門檻
 
 * 排程連續運行一段時間後，production `stock_sr_zone_analyses` 的母體足以跑
   `MODE=replay scripts/run-evaluation.sh` 做分佈比較（I-074 的關閉條件）。
+  **母體要按 (symbol, 交易日) 去重再計數**：兩段式一天會產生兩筆分析，兩筆站在**同一根
+  K 棒**、只有籌碼不同，當成兩個獨立樣本會高估母體。做分佈比較時取當日**含籌碼那一筆**
+  （22:00 那輪；當日籌碼沒進來時只會有 17:00 那筆）。
 * `zone_instances` 出現 `EXPIRED`，且 EXPIRED 收攤行為與單元測試一致（I-078 的第一個關閉條件）。
 * `MatchedByAlias` 不能假設一定會因排程自然變成非零：T-048 實測中第一段既有鏈命中會吃掉
   多數情況。排程上線後需設定觀察期限；若仍為 0，改用 targeted integration/live fixture
@@ -2494,7 +2714,7 @@ T-048 收斂時的 **4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，
 
 | 時序 | 項目 | 理由 |
 |---|---|---|
-| 上線前 | I-077 老化單位定案 | 見上方「要決定的事」第一條，不定就會污染母體 |
+| 上線前 | I-077 老化單位修法在 live 生效 | 見上方計畫書的「前置」與風險表第一列，不先修就會一邊累積一邊污染母體 |
 | 與本筆並行 | [T-051](#t-051event-timeline-改讀身分層讓修好的分裂真的看得到) | 零依賴，且是 T-048 唯一使用者看得到的成果 |
 | 累積期**當中** | [T-050](#t-050身分追蹤的可觀測性把關聯決策計數從-log-升級成可查詢的-metric) | 要趕在累積期內上線才看得到 alias 命中率與撞頂比例的**趨勢**，事後補等於白等一輪 |
 | 母體足夠後 | 並行比對 → I-074 關閉 → I-078／I-079 重新量測 | 純驗證，不寫功能 |

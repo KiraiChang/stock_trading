@@ -19,6 +19,7 @@ type Config struct {
 	Chip               ChipConfig
 	SREvaluation       SREvaluationConfig       `mapstructure:"sr_evaluation"`
 	EvaluationUniverse EvaluationUniverseConfig `mapstructure:"evaluation_universe"`
+	SRAnalysis         SRAnalysisConfig         `mapstructure:"sr_analysis"`
 	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 }
@@ -142,6 +143,31 @@ type SREvaluationConfig struct {
 	WriteDB        bool     `mapstructure:"write_db"`
 }
 
+// SRAnalysisConfig 是「定期對 watchlist 產生 SR zone 分析」的排程（todo.md T-052）。
+//
+// **兩個 cron 是刻意的，不是重複。** SR 分析吃籌碼（trading_score 的 Chip 佔 15%），
+// 而 FinMind 的法人／融資券要晚間才發布（chip.sync.cron 預設 21:00）：
+//
+//   - Cron（預設 17:00）：當日 K 棒 ＋ **前一日**籌碼。收盤後盡快有一份可看的分析。
+//   - ChipCron（預設 22:00）：當日 K 棒 ＋ **當日**籌碼。晚於籌碼採集、早於
+//     sr_evaluation（22:30）。
+//
+// 兩輪各自有前置檢查，不符就跳過該檔而不是失敗；ChipCron 那輪額外要求籌碼
+// trade_date 是今天，否則跑出來的東西與 17:00 那輪相同，白跑還多推一次
+// observed_absences（見 todo.md T-052 的 S4）。
+//
+// **預設關閉**，比照 sr_evaluation / evaluation_universe：啟用是一個明確的部署動作。
+type SRAnalysisConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Cron 是不含當日籌碼的那一輪（台北時區）。
+	Cron string `mapstructure:"cron"`
+	// ChipCron 是含當日籌碼的那一輪（台北時區）。
+	ChipCron string `mapstructure:"chip_cron"`
+	// Timeframe / Limit 與使用者手動觸發分析時的參數同義。
+	Timeframe string `mapstructure:"timeframe"`
+	Limit     int    `mapstructure:"limit"`
+}
+
 // EvaluationUniverseConfig 是評估標的池的每日日 K 維護排程（T-040 Step 5）。
 //
 // **預設關閉**：這個 job 一次會對整個池（實測 131 檔）各發一個 FinMind 請求，
@@ -224,6 +250,13 @@ func Load() (*Config, error) {
 	viper.SetDefault("evaluation_universe.enabled", false)
 	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
 	viper.SetDefault("evaluation_universe.days", 10)
+	// T-052：兩輪都預設關閉。17:00 那輪拿不到當日籌碼，22:00 那輪晚於 chip sync（21:00）
+	// 且早於 sr_evaluation（22:30）。
+	viper.SetDefault("sr_analysis.enabled", false)
+	viper.SetDefault("sr_analysis.cron", "0 17 * * 1-5")
+	viper.SetDefault("sr_analysis.chip_cron", "0 22 * * 1-5")
+	viper.SetDefault("sr_analysis.timeframe", "1d")
+	viper.SetDefault("sr_analysis.limit", 400)
 	viper.SetDefault("position_analysis.max_position_value", 200000)
 	viper.SetDefault("position_analysis.max_risk_amount", 10000)
 	viper.SetDefault("position_analysis.add_on_ratio", 0.25)

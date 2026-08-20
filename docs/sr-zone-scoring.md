@@ -2678,6 +2678,16 @@ ScoreZonesWithPreviousEvents → result.ToStore()
    但**不算一次觀測**，所以 `observed_absences` 統計的是分析的一個子集。刻意如此：重用既有
    分析的目的就是不重算，把它算成觀測會讓「我們看了幾次」失真。那條路徑寫出來的
    `stock_sr_zones` 列因此也沒有 `zone_uid`（三種 `NULL` 語意的第三種）。
+
+   **入口有兩個，但實作只有一份**：`POST /sr-zones` 與 SR 分析排程（平日 17:00／22:00，
+   見 [`architecture.md`](./architecture.md)「兩個標的清單」）都呼叫
+   `SRZoneHandler.RunAnalysis`。排程**不可以**改走 `SRAnalysisProvider`——那條不寫
+   `zone_uid` 也不追身分，換過去之後分析照樣產生、身分層卻完全沒有紀錄，而且不會報錯。
+
+   **排程一天兩輪會讓 `observed_absences` 一天前進兩次**（兩輪站在同一根 K 棒上，只有籌碼
+   不同）。因此 `MAX_OBSERVED_ABSENCES = 3` 的實質意義是**約 1.5 個交易日**，不是 3 個；
+   時間軸 `MAX_ABSENCE_TRADING_DAYS = 20` 用交易日計算，不受影響。這是刻意接受的：次數軸
+   的語意本來就是「我們看了幾次都沒看到」而不是「過了幾天」。
 2. **`as_of` 取的是 wall clock，不是資料日期**，所以 `observed_absences` 量的是分析次數
    而非時間。詳見 `database-schema.md`。
 3. **同一 symbol 的併發分析會產生身分 churn 或靜默的交易失敗。** 兩個同時的

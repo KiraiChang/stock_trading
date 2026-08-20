@@ -66,6 +66,21 @@ func (h *SchedulerHandler) RunEvaluationUniverseSync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "evaluation_universe_sync 已在背景重新觸發"})
 }
 
+// RunSRAnalysis 手動觸發 SR 分析排程（todo.md T-052）。
+//
+// `with_chip=true` 走 22:00 那輪的規則（額外要求當日籌碼已入庫）。**這個入口是必要的**：
+// cron 預設關閉，而 I-074 / T-049 要的母體得先有辦法補跑；另外排程漏跑時也只有這裡能補。
+// 重複觸發由 scheduler 內兩個時段各自的旗標擋掉。
+func (h *SchedulerHandler) RunSRAnalysis(c *gin.Context) {
+	withChip := c.Query("with_chip") == "true"
+	go h.sched.RunSRAnalysis(withChip)
+	job := "sr_analysis"
+	if withChip {
+		job = "sr_analysis_chip"
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": job + " 已在背景觸發"})
+}
+
 // KnownSchedulerJobs 匯出給測試用：DB 的 job_name 欄位必須容得下每一個名稱
 // （2026-08-11 正式環境因 VARCHAR(20) 裝不下 corporate_action_sync 而失敗）。
 func KnownSchedulerJobs() []string { return append([]string(nil), knownSchedulerJobs...) }
@@ -73,7 +88,7 @@ func KnownSchedulerJobs() []string { return append([]string(nil), knownScheduler
 // **`sr_zone_verify` 沒有自己的 cron**：它在 `RunDailyClose` 尾端無條件執行，
 // 但寫的是獨立的 job_runs 紀錄（失敗不影響 daily_close 的判定）。
 // 不列進來的話它的失敗只能靠直接查 DB 才看得到。
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync"}
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "sr_analysis", "sr_analysis_chip"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
@@ -90,6 +105,10 @@ var jobStaleThreshold = map[string]time.Duration{
 	// 平日 16:00 跑一次，同樣跨週末，取 80 小時。
 	// 本 job 與 sr_evaluation 預設關閉，未註冊時 GetStatus 回 disabled 而不套用這個門檻。
 	"evaluation_universe_sync": 80 * time.Hour,
+	// SR 分析排程（T-052）平日各跑一次（17:00 / 22:00），跨週末同樣取 80 小時。
+	// 預設關閉，未註冊時 GetStatus 回 disabled 而不套用門檻。
+	"sr_analysis":      80 * time.Hour,
+	"sr_analysis_chip": 80 * time.Hour,
 }
 
 type jobStatus struct {

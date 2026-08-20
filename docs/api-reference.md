@@ -627,6 +627,43 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 ---
 
+### POST `/scheduler/sr-analysis/run`
+
+手動觸發「對 watchlist 逐檔產生 SR zone 分析」，與 `sr_analysis` / `sr_analysis_chip`
+排程共用邏輯。立即回應、背景執行，結果查 `GET /scheduler/status`。
+
+**Query：** `with_chip=true` 走含當日籌碼那一輪（`sr_analysis_chip`），省略則是不含的那輪。
+
+**為什麼一天兩輪**：SR 分析吃籌碼（`trading_score` 的 Chip 佔 15%），而 FinMind 的法人／
+融資券要晚間才發布。`sr_analysis`（平日 17:00）拿到的是**前一日**籌碼，
+`sr_analysis_chip`（平日 22:00，晚於 21:00 的籌碼採集）才有當日的。兩輪站在同一根 K 棒上，
+只有籌碼不同。
+
+**跳過不是失敗**，每檔各自判斷，`job_runs.symbols_total` 會把跳過的扣掉：
+
+| 情況 | 適用 | 原因 |
+|---|---|---|
+| 最新 K 棒不是今天 | 兩輪 | 假日、停牌，或 `daily_close` 還沒跑完 |
+| 已分析過今日 K 棒 | 僅 17:00 那輪 | 同一根 K 棒不必重算 |
+| **當日籌碼尚未入庫** | 僅 22:00 那輪 | 21:00 的籌碼採集失敗或還沒寫完時，這一輪算出來的東西會與 17:00 那輪相同 |
+| 已用今日籌碼分析過 | 僅 22:00 那輪 | 再算一次結果相同，還會多推一次 zone 身分的缺席計數 |
+| 沒有任何 K 棒 / 沒有任何籌碼資料 | 依上面兩類 | 這檔還沒被採集過（新標的，或來源沒有收錄）。**不是錯誤**，不記 warn |
+| 查不到 K 棒 / 籌碼查詢失敗 | 依上面兩類 | 查詢本身失敗。記 warn，該檔跳過但不影響其餘標的 |
+
+**判斷帶 `timeframe`**：跳過與否只看同一個 `timeframe` 的分析。手動跑過的 5m 分析不會
+擋掉 1d 的排程。
+
+**為什麼需要這個入口**：兩輪都**預設關閉**（`sr_analysis.enabled`），而 decision replay
+的驗證母體得先有辦法補跑；排程漏跑時也只有這裡能補。重複觸發由行程旗標擋掉，
+**兩輪各自一個**——17:00 那輪還在跑不會擋掉 22:00。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "sr_analysis 已在背景觸發" }
+```
+
+---
+
 ## Evaluation Universe API
 
 評估標的池（T-040 Step 5）。**這個池不是 watchlist**：它只驅動每日盤後的日 K 維護，

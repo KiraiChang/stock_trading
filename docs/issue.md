@@ -148,7 +148,7 @@ T-048 立案要解的問題是「zone 邊界每次由 ATR 重算，事件鏈的�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | **已修復／待 review**（2026-08-20，修復方式與實測見下方「修法定案」與「實作結果」） |
 | 嚴重度 | 中（不影響既有單日流程，但一天多打幾次分析就會改變事件狀態與下游 Market State） |
 | 分類 | Python / SR Zone / 事件生命週期 |
 | 發現日期 | 2026-08-19 |
@@ -186,7 +186,138 @@ Bias／entry 的可見差異。
 **但決策點比 T-049 更早：T-052 上線前就要定。** 分析排程一上線，同一個交易日會出現
 「排程跑一次＋人工再點一次」，`age_bars` 一天前進 2——而 T-052 累積的正是 I-074 / T-049
 要用的驗證母體，**老化單位沒定就先開排程，等於一邊累積一邊污染**。
-選項與取捨見 todo.md T-052「要決定的事」第一條。
+
+---
+
+#### 修法定案（**已實作／待 review**，2026-08-20）
+
+**採 A ＋ B**：A 修老化單位（正確性），B 在 T-052 加同日守衛（**只為省資源，不是正確性依賴**）。
+
+##### 盤點推翻了上面「修法方向」的前提
+
+上面寫「把上次分析的最後一根 K 棒時間**存進 state**」——那繞遠了。實際盤點：
+
+| 事實 | 位置 |
+|---|---|
+| Python 早就有「這次的 K 棒時間」 | `pipeline.py:89` 的 `analyzed_at = frame.index[-1]`，是**資料日期不是 wall clock** |
+| Go 早就有「上次的 K 棒時間」 | `GetLatestMarketEventStates` 撈回的每一列都帶 `analyzed_at`，而 Go 的 `analyzed_at` 是從 Python 回應解析的（`client.go:79`）——整條鏈都是 K 棒時間 |
+| 唯一的洞 | `scoreZonesPreviousEventState`（`client.go:961`）是**手工白名單** struct，`state_json` 不整包轉發，所以 Python 現在拿不到上次的時間 |
+
+**與階段 E 的 `zone_uid` 漏欄位是同一個陷阱**：Go 往 Python 送、往前端回，兩個方向都是手工白名單。
+所以不必在每一列 state 重複存同一個純量，**送一個 request 層級的純量即可**。
+
+##### 修改目標與不做的範圍
+
+* **目標**：`age_bars` 只在最新 K 棒真的推進時 +1；同一根 K 棒重複分析不再老化。
+* **不做**：不改 `expires_after_bars` 的任何門檻值、不改 family lifecycle 規則、
+  不改事件偵測、不改 `_zone_key()`、不動身分層四張表。
+* **不做**：不改 `reuse_existing=true` 那條 provider 路徑（它不送 previous states）。
+
+##### 受影響檔案與資料流
+
+```text
+Go  analysis/client.go
+     ├─ scoreZonesRequest ＋ PreviousAnalyzedAt（request 層級純量）
+     └─ 取值：previousEventStates[0].AnalyzedAt
+        （該查詢用 analysis_id = (SELECT … LIMIT 1)，整批同一次分析，取 [0] 安全）
+Python http_server.py        /sr-zones request model ＋ previous_analyzed_at
+       scoring.py → pipeline.py → decision_engine.py   往下傳這個純量
+       event_engine.py
+         ├─ build_event_state_summary(..., previous_analyzed_at=None)
+         └─ _normalize_previous_event_state(state, bar_advanced)
+              age_bars += 1 只在 bar_advanced 時
+```
+
+**為什麼是 Go 送「上次的時間」而不是 Go 直接算 `bar_advanced`**：Go 在呼叫前不知道這次的
+`analyzed_at`（它由 Python 從 frame 算出）。Go 若改用自己 DB 的最新 candle ts 去比，
+就會出現第二個「這次的 K 棒是哪一根」的判準，而 limit／還原係數都可能讓兩邊不一致。
+**「這次分析站在哪根 K 棒」的 authority 留在 Python 一份。**
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| `/sr-zones` request ＋ `previous_analyzed_at`（RFC3339，可省略） | 純新增可選欄位 | 舊呼叫端不送＝維持現行行為 |
+| `/sr-zones` response | **不變** | — |
+| DB schema | **不變** | 不新增欄位、不 migration |
+
+##### 缺值與邊界
+
+* **缺 `previous_analyzed_at`**（舊呼叫端、沒有 previous states、evaluation/replay 未帶）
+  → `bar_advanced = True`，**完全等於現行行為**。既有資料與既有呼叫端不受影響。
+* **時間沒有前進反而倒退**（as-of 回放、資料修正）→ 視為未推進，不老化。保守側。
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 這是**決策可見改變**，照規矩該做 replay 分佈驗證，但母體正是 T-052 要產的（雞生蛋） | 影響面可窮舉：只在「兩次分析共用同一根最新 K 棒」時生效，而該情況今天的行為**可證明是錯的**（見上方實測）。因此改用**冪等性**驗收，不用分佈比較 |
+| 純量從 Go 一路傳到 `event_engine`，中間任一層漏傳就靜默退回舊行為 | 缺值語意刻意設計成「等於現行行為」，所以漏傳不會壞資料——但也因此**不會報錯**。以端到端冪等測試把守，不只靠單元測試 |
+| 動到 `pipeline.py` / `scoring.py` / `decision_engine.py` 這條決策核心路徑（階段 E 曾刻意迴避） | 這三層只是**傳遞純量**，不改任何判斷；判斷只發生在 `_normalize_previous_event_state` 一處 |
+| 回滾 | 純新增可選欄位 ＋ 一個條件式，無 migration。`git revert` 即可 |
+
+##### 測試與驗證策略
+
+* **單元（Python）**：`bar_advanced=False` 時 `age_bars` 不動、且不會提早轉 `EXPIRED`；
+  `True` 時行為與現行逐項相同；缺值時走 `True`。
+* **單元（Go）**：`previousEventStates` 為空時不送該欄位；非空時送的是那批 states 的
+  `analyzed_at`。
+* **端到端（現有 dev 階梯）**兩條門檻：
+  1. **冪等性（紅燈變綠燈）**：同一階連跑兩次，`market_event_states` 逐欄相同。
+     **今天會不同**——這是本 issue 的直接證據，修完必須相同。
+  2. **回歸**：四檔 21 階階梯。**判準不是「四檔都逐欄相同」**——計畫書初版寫錯了，
+     實測推翻：階梯是按**交易日**切的，但個股不一定每天都有 K 棒，於是有幾階是
+     「同一根 K 棒被連續分析」，那正是本 issue 的情境。實測分布：
+
+     | symbol | 分析次數 | 相異 K 棒 | 同棒重複階數 |
+     |---|---|---|---|
+     | 2330 | 21 | 21 | 0 |
+     | 3105 | 21 | 21 | 0 |
+     | 6182 | 21 | 18 | **3** |
+     | 8150 | 21 | 18 | **3** |
+
+     **baseline 本身就含有 I-077 的錯誤老化**，所以正確判準是：
+     * 2330／3105：決策**逐欄相同**（全是相異 K 棒，行為不該改變）。
+     * 6182／8150：差異**必須侷限在同棒那幾階**，且成因可歸因到老化欄位。
+       這裡有差異是**修法生效**，不是回歸失敗。
+     * 身分層（`zone_instances` / `zone_relations` / alias）與老化無關，數字應逐項重現；
+       事件鏈（`event_instances` / `event_transitions`）會因 6182／8150 的狀態改變而變動。
+* **回歸套件**：`backend/scripts/test.sh` 與 `python/scripts/test.sh` 全綠。
+
+##### 完成後歸檔（**已完成**）
+
+* 老化單位改為「K 棒推進」、`previous_analyzed_at` 的來源與缺值／時間倒退語意 →
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Aging → `EXPIRED`」那段。
+  **原本計畫寫要歸檔到 `api-reference.md`，那是錯的**：該文件只涵蓋 Go 對外 API，
+  Go↔Python 的 `/sr-zones` request contract 一直記在 `sr-zone-scoring.md`。
+* T-052 的同日守衛定位（省資源，非正確性依賴）→ 留在 todo.md T-052。
+
+##### 實作結果（2026-08-20）
+
+| 門檻 | 結果 |
+|---|---|
+| 單元（Python） | 599 passed / 1 skipped（+4：同棒不老化、推進照舊老化、缺值＝舊行為、`_bar_advanced_since` 六種邊界） |
+| 單元（Go） | 全綠（+2：有 previous states 時送出、無 previous states 時 `omitempty` 整個消失） |
+| **冪等性** | 同一根 K 棒（`2026-08-12`）再打一次：事件狀態 **33 vs 33 筆、逐欄 0 差異**，含 `age_bars`。且非空跑——該次有 **26 筆 carried、`age_bars` 4~19**，舊碼會全部 +1 |
+| 回歸：2330／3105 | 決策與事件狀態**逐欄相同**（21 階全是相異 K 棒） |
+| 回歸：6182／8150 | 有差異，且**全部 6 筆都落在同棒階；K 棒推進階 0 筆差異** |
+| 身分層 | 329 / 57 / 685 逐項重現，`zone_uid` 1282/1282 |
+| 六條門檻 ＋ D4 | 全部 0 |
+
+**差異的成因逐筆對得上**：
+
+* **8150**：只有 `age_bars 18 → 17`。那些事件早已 EXPIRED，所以事件狀態 CSV 逐欄相同
+  （`age_bars` 在 `state_json` 裡，不在該 CSV 的欄位集），差異只出現在 `decision_summary`。
+* **6182**：`active_event_types` 多出數個 `INTRADAY_RECLAIM`——**本來被提早老化掉的 reclaim
+  事件現在正確地留在 active**，正是本 issue 原始紀錄的情境。`event_transitions` 因此由 250
+  降到 246，少的 4 筆就是不再發生的提早 `EXPIRED` 轉換。
+* **頂層決策欄位沒有變**：6182 的差異欄位是 `decision_summary` / `price_path_json` /
+  `decision_derived_view_json`，`market_bias` / `entry_permission_state` /
+  `position_action` / `event_market_state` 在這個母體裡都沒被翻掉。
+
+**驗收判準本身在實作中被修正過一次**：計畫書初版假設「階梯每階 K 棒都推進」，實測發現
+6182／8150 各有 3 階是同一根 K 棒重複分析——**baseline 本身就含有本 issue 的錯誤老化**。
+修正後的判準見上方「測試與驗證策略」。
 
 ---
 

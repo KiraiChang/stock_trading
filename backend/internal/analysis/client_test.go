@@ -1045,3 +1045,61 @@ func TestGetModelStatusReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 		t.Fatal("expected error when baseURL is not configured")
 	}
 }
+
+// ── previous_analyzed_at：老化的單位是 K 棒推進（issue.md I-077）──
+
+// scoreZonesRequest 是**手工白名單**，漏欄位不會編譯失敗、也不會報錯——Python 端缺值時
+// 刻意退回舊行為，所以漏送的外觀與「這次 K 棒真的推進了」一模一樣。由這兩支測試釘住。
+func TestScoreZonesSendsPreviousAnalyzedAtFromPreviousStates(t *testing.T) {
+	analyzedAt := time.Date(2026, 8, 18, 16, 0, 0, 0, time.UTC)
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			PreviousAnalyzedAt string `json:"previous_analyzed_at"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		got = body.PreviousAnalyzedAt
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"symbol":"2330","timeframe":"1d","analyzed_at":"2026-08-19T16:00:00Z","current_price":600,"zones":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.ScoreZonesWithPreviousEvents(context.Background(), "2330", "1d", 0,
+		[]store.MarketEventState{
+			{EventKey: "ZONE:SUPPORT_BREAKDOWN:x", AnalyzedAt: analyzedAt},
+			// 整批必定同一次分析（GetLatestMarketEventStates 用 analysis_id = (SELECT … LIMIT 1)），
+			// 所以取 [0] 就夠——這一列只是證明不會被後面的列影響。
+			{EventKey: "ZONE:SUPPORT_RECLAIM:x", AnalyzedAt: analyzedAt},
+		})
+	if err != nil {
+		t.Fatalf("ScoreZonesWithPreviousEvents failed: %v", err)
+	}
+	if want := analyzedAt.Format(time.RFC3339); got != want {
+		t.Fatalf("previous_analyzed_at = %q, want %q", got, want)
+	}
+}
+
+// 沒有 previous states 時就沒有東西要老化，欄位要整個消失（omitempty），
+// 讓 Python 走「缺值＝舊行為」那條路。
+func TestScoreZonesOmitsPreviousAnalyzedAtWithoutPreviousStates(t *testing.T) {
+	var raw map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatalf("decode request body failed: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"symbol":"2330","timeframe":"1d","analyzed_at":"2026-08-19T16:00:00Z","current_price":600,"zones":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	if _, err := client.ScoreZones(context.Background(), "2330", "1d", 0); err != nil {
+		t.Fatalf("ScoreZones failed: %v", err)
+	}
+	if _, ok := raw["previous_analyzed_at"]; ok {
+		t.Fatalf("沒有 previous states 時不該送 previous_analyzed_at，got %v", raw["previous_analyzed_at"])
+	}
+}

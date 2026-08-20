@@ -2347,10 +2347,13 @@ def build_decision_summary(
     data_quality_metadata: Optional[dict[str, Any]] = None,
     model_governance: Optional[dict[str, Any]] = None,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
+    bar_advanced: bool = True,
 ) -> dict[str, Any]:
     global_confidence = global_metrics.get("confidence")
     market_events = detect_market_events(zone_scores, current_price, candle_high, candle_low, candle_close)
-    event_state_summary = build_event_state_summary(market_events, previous_states=previous_event_states)
+    event_state_summary = build_event_state_summary(
+        market_events, previous_states=previous_event_states, bar_advanced=bar_advanced,
+    )
     active_market_events = list(event_state_summary.get("active") or [])
     model_governance = model_governance or {
         "health_state": "UNKNOWN",
@@ -2668,10 +2671,29 @@ def build_decision_summary(
     }
 
 
+def _bar_advanced_since(analyzed_at: Any, previous_analyzed_at: Optional[str]) -> bool:
+    """這次分析站的 K 棒有沒有比上次新（issue.md I-077 的老化單位）。
+
+    **缺值或比不出來一律回 True＝維持舊行為**（照樣 age_bars +1）：沒有 previous states
+    時本來就沒有東西要老化，而舊呼叫端（evaluation / replay）不送這個值時，行為必須與
+    修改前逐項相同。
+
+    時間**沒有前進反而倒退**（as-of 回放、資料修正）時回 False——保守側，不老化。
+    """
+    if not previous_analyzed_at or analyzed_at is None:
+        return True
+    try:
+        previous = datetime.fromisoformat(str(previous_analyzed_at).replace("Z", "+00:00"))
+        return analyzed_at > previous
+    except (TypeError, ValueError):
+        return True
+
+
 def build_decision_from_evidence(
     evidence: AnalysisEvidence,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
     model_governance: Optional[dict[str, Any]] = None,
+    previous_analyzed_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """Decision's sole public input is the immutable Evidence stage output."""
     scores = evidence.scores
@@ -2706,4 +2728,8 @@ def build_decision_from_evidence(
         },
         model_governance=model_governance or build_model_governance_context(scores),
         previous_event_states=previous_event_states,
+        # 推導只發生在這一層——它是唯一同時握有「這次的 analyzed_at」與「上次的」的地方。
+        bar_advanced=_bar_advanced_since(
+            scores.features.data.analyzed_at, previous_analyzed_at,
+        ),
     )

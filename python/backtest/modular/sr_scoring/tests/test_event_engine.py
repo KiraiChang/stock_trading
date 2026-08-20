@@ -696,3 +696,96 @@ def test_stage_d_events_are_excluded_from_event_sequence_projection():
 
     assert "SUPPORT_RETEST_HELD" in _types(events)
     assert [item["type"] for item in _event_sequence(events)] == ["REVERSAL_CANDIDATE"]
+
+
+# ── 老化的單位是 K 棒推進，不是分析次數（issue.md I-077）──
+
+
+def _aging_previous(age_bars: int, expires_after: int = 2) -> list[dict]:
+    return [{
+        "type": "HIGH_VOLUME_BREAKDOWN",
+        "event_family": "SUPPORT_BREAKDOWN",
+        "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "root_event_type": "HIGH_VOLUME_BREAKDOWN",
+        "latest_event_type": "HIGH_VOLUME_BREAKDOWN",
+        "direction": "BEARISH",
+        "state": LIFECYCLE_CONFIRMED,
+        "active": True,
+        "age_bars": age_bars,
+        "expires_after_bars": expires_after,
+        "reason_codes": ["SUPPORT_CLOSED_BELOW"],
+    }]
+
+
+def test_same_bar_reanalysis_does_not_age_events():
+    """同一根 K 棒重打分析不能讓事件老化。
+
+    這是 I-077 的直接回歸：修法前每 carry 一次就 +1，於是「candles 一根都沒變、只是把
+    同一階再打一次」就足以把 CONFIRMED 推到 EXPIRED，而 market_state_from_event_states
+    只看 active——那會實際改變 Market State。
+    """
+    previous = _aging_previous(age_bars=1, expires_after=2)
+
+    summary = build_event_state_summary([], previous_states=previous, bar_advanced=False)
+
+    state = summary["states"][0]
+    assert state["age_bars"] == 1, "K 棒沒推進就不該累加"
+    assert state["state"] == LIFECYCLE_CONFIRMED
+    assert state["active"] is True
+    assert summary["active_bearish_events"] != [], "不該因為重打而退出 gating"
+
+
+def test_bar_advance_still_ages_to_expired():
+    """K 棒真的推進時，老化行為與修改前逐項相同。"""
+    previous = _aging_previous(age_bars=1, expires_after=2)
+
+    summary = build_event_state_summary([], previous_states=previous, bar_advanced=True)
+
+    state = summary["states"][0]
+    assert state["age_bars"] == 2
+    assert state["state"] == LIFECYCLE_EXPIRED
+    assert state["active"] is False
+    assert "EVENT_EXPIRED_STALE" in state["reason_codes"]
+    assert summary["active_bearish_events"] == []
+
+
+def test_bar_advanced_defaults_to_true():
+    """**缺值必須等於舊行為。** 沒帶這個參數的呼叫端（evaluation / replay / 既有測試）
+    行為不能改變，否則這筆修改的影響面就不只是「同一根 K 棒重打」。"""
+    previous = _aging_previous(age_bars=0, expires_after=3)
+
+    default = build_event_state_summary([], previous_states=previous)
+    explicit = build_event_state_summary([], previous_states=previous, bar_advanced=True)
+
+    assert default["states"][0]["age_bars"] == explicit["states"][0]["age_bars"] == 1
+
+
+# ── _bar_advanced_since 的邊界（issue.md I-077）──
+
+
+def test_bar_advanced_since_boundaries():
+    """**每一種「比不出來」都要退回 True＝舊行為。**
+
+    這個函式的失敗模式是靜默的：回錯 False 會讓事件永不老化、回錯 True 會讓同日重打
+    照樣老化，兩者都沒有任何東西會報錯，所以邊界逐條釘住。
+    """
+    import pandas as pd
+
+    from ..decision_engine import _bar_advanced_since
+
+    now = pd.Timestamp("2026-08-18T16:00:00Z")
+
+    # 推進：上一次站在更早的 K 棒
+    assert _bar_advanced_since(now, "2026-08-15T16:00:00Z") is True
+    # 同一根 K 棒：這就是 I-077 的情境
+    assert _bar_advanced_since(now, "2026-08-18T16:00:00Z") is False
+    # 時間倒退（as-of 回放、資料修正）：保守側，不老化
+    assert _bar_advanced_since(now, "2026-08-19T16:00:00Z") is False
+    # 缺值／無法解析／沒有 analyzed_at → 一律維持舊行為
+    assert _bar_advanced_since(now, None) is True
+    assert _bar_advanced_since(now, "") is True
+    assert _bar_advanced_since(now, "not-a-timestamp") is True
+    assert _bar_advanced_since(None, "2026-08-15T16:00:00Z") is True
+    # 帶時區偏移的 RFC3339（Go 不一定送 Z）
+    assert _bar_advanced_since(now, "2026-08-16T00:00:00+08:00") is True

@@ -830,13 +830,31 @@ resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw even
 覆蓋為新的 age=0 state。
 
 **Aging → `EXPIRED`（避免事件無限期停留在 active）**：每個 event state 帶 `age_bars`
-存活計數，隨 state JSON 經 Go round-trip 累積——每被 carry 一次（一根 K 棒/分析）+1，被
-當根新偵測覆蓋時歸零。carried state 的 `age_bars` 達到自身 `expires_after_bars` 即轉
-`EXPIRED`、`active=false`，退出 gating；resolved state 也會 aging 成 expired，避免已解除事件
-永久停留在 lifecycle snapshot。未定義 family 規則的事件套
-`DEFAULT_EVENT_EXPIRES_AFTER_BARS`（預設 3），確保沒有任何 carried 事件永生。
-`expires_after_bars` 與 `age_bars` 由 Go `scoreZonesPreviousEventStates` 從 `state_json`
-帶回（缺 `expires_after_bars` 時送 `null` 讓 Python 套預設，而非誤傳 0 造成立即過期）。
+存活計數，隨 state JSON 經 Go round-trip 累積，被當根新偵測覆蓋時歸零。carried state 的
+`age_bars` 達到自身 `expires_after_bars` 即轉 `EXPIRED`、`active=false`，退出 gating；
+resolved state 也會 aging 成 expired，避免已解除事件永久停留在 lifecycle snapshot。
+未定義 family 規則的事件套 `DEFAULT_EVENT_EXPIRES_AFTER_BARS`（預設 3），確保沒有任何
+carried 事件永生。`expires_after_bars` 與 `age_bars` 由 Go `scoreZonesPreviousEventStates`
+從 `state_json` 帶回（缺 `expires_after_bars` 時送 `null` 讓 Python 套預設，而非誤傳 0
+造成立即過期）。
+
+**老化的單位是「K 棒推進」，不是「被 carry 幾次」**（2026-08-20 起）。`/sr-zones` request
+另帶 `previous_analyzed_at`——產生 `previous_event_states` 那次分析站在哪根 K 棒（RFC3339，
+由 Go 從那批 state 的 `analyzed_at` 取；整批必定同一次分析）。Python 拿它與這次的
+`frame.index[-1]` 比，**只有 K 棒真的推進才 `age_bars + 1`**。
+
+在此之前是無條件 +1，等於把「又分析了一次」當成「又過了一根 K 棒」：同一個交易日重打幾次
+分析，事件就會提早老化到 `EXPIRED` 退出 gating，而 `market_state_from_event_states` 只看
+active——那會實際改變 Market State。實測（四檔 21 階，其中 6182／8150 各有 3 階因當日無 K 棒
+而重複分析同一根）：修法後那 6 階的 `age_bars` 停止虛增，6182 有數個
+`INTRADAY_RECLAIM` 因此**正確地留在 active** 而不再被提早 EXPIRED；K 棒真的推進的階次
+決策逐欄不變。
+
+* **缺 `previous_analyzed_at` ＝ 維持舊行為**（照樣 +1）。沒有 previous states 時本來就沒有
+  東西要老化，而不送這個值的呼叫端（evaluation / replay）行為必須與修改前逐項相同。
+* **時間倒退**（as-of 回放、資料修正）視為未推進，不老化——保守側。
+* 判斷只發生在 `decision_engine._bar_advanced_since` 一處；`pipeline` / `scoring` 這幾層
+  只是把純量往下傳，不做任何判斷。
 
 例外（刻意）：`_daily_candidate_zones` 與 `_defense_lines` 仍消費 raw `market_events` 而不是
 `active`——前者用「歷史上出現過 `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`」決定是否補日 K 候選區，

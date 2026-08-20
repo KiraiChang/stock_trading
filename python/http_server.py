@@ -189,6 +189,10 @@ class ScoreZonesRequest(BaseModel):
     timeframe: str = "1d"
     limit: int = SR_SCORING_DEFAULT_FETCH_LIMIT  # 抓取的歷史K棒根數，可由呼叫端覆寫
     previous_event_states: List[dict] = Field(default_factory=list)
+    # 產生 previous_event_states 那次分析站在哪根 K 棒（RFC3339）。只用來決定事件要不要
+    # 老化——同一根 K 棒重複分析不應該讓事件提早 EXPIRED（issue.md I-077）。
+    # 省略＝維持舊行為。
+    previous_analyzed_at: Optional[str] = None
 
 
 @app.post("/sr-zones")
@@ -203,7 +207,11 @@ async def sr_zones(req: ScoreZonesRequest):
         req.symbol, req.timeframe, req.limit, len(req.previous_event_states),
     )
     try:
-        return score_symbol(req.symbol, req.timeframe, req.limit, previous_event_states=req.previous_event_states)
+        return score_symbol(
+            req.symbol, req.timeframe, req.limit,
+            previous_event_states=req.previous_event_states,
+            previous_analyzed_at=req.previous_analyzed_at,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RuntimeError as exc:

@@ -952,9 +952,21 @@ func rawJSONOrDefault(raw json.RawMessage, fallback string) store.RawJSON {
 // scoreZonesRequest 對應 Python ScoreZonesRequest；Limit 為 0 時省略欄位，
 // 讓 Python 端套用它自己的預設值（理由同 analyzeRequest）。
 type scoreZonesRequest struct {
-	Symbol              string                         `json:"symbol"`
-	Timeframe           string                         `json:"timeframe"`
-	Limit               int                            `json:"limit,omitempty"`
+	Symbol    string `json:"symbol"`
+	Timeframe string `json:"timeframe"`
+	Limit     int    `json:"limit,omitempty"`
+	// PreviousAnalyzedAt 是**產生 PreviousEventStates 那次分析**站在哪根 K 棒（RFC3339）。
+	// Python 拿它跟自己這次的 frame.index[-1] 比，只有 K 棒真的推進才把 age_bars +1
+	// （issue.md I-077：同一根 K 棒重複分析會讓事件提早老化到 EXPIRED）。
+	//
+	// **為什麼送時間而不是送算好的 bar_advanced**：Go 在呼叫前不知道這次的 analyzed_at
+	// ——它由 Python 從 frame 算出。Go 若改用自己 DB 的最新 candle ts 去比，就會出現第二個
+	// 「這次站在哪根 K 棒」的判準，而 limit／還原係數都可能讓兩邊分歧。
+	// 「這次分析站在哪根 K 棒」的 authority 留在 Python 一份。
+	//
+	// **省略＝維持舊行為**（Python 端當成有推進，照樣 +1）。沒有 previous states 時本來就
+	// 沒有東西要老化，所以省略是安全的。
+	PreviousAnalyzedAt  string                         `json:"previous_analyzed_at,omitempty"`
 	PreviousEventStates []scoreZonesPreviousEventState `json:"previous_event_states,omitempty"`
 }
 
@@ -999,6 +1011,7 @@ func (c *Client) ScoreZonesWithPreviousEvents(
 		Symbol:              symbol,
 		Timeframe:           timeframe,
 		Limit:               limit,
+		PreviousAnalyzedAt:  scoreZonesPreviousAnalyzedAt(previousEventStates),
 		PreviousEventStates: scoreZonesPreviousEventStates(previousEventStates),
 	})
 	if err != nil {
@@ -1030,6 +1043,18 @@ func (c *Client) ScoreZonesWithPreviousEvents(
 		return nil, fmt.Errorf("python sr-zones decode error: body=%s: %w", truncateBody(respBody), err)
 	}
 	return &result, nil
+}
+
+// scoreZonesPreviousAnalyzedAt 取這批 previous states 所屬分析的 K 棒時間（I-077）。
+//
+// **整批必定同一次分析**：GetLatestMarketEventStates 的 WHERE 是
+// `analysis_id = (SELECT … ORDER BY analyzed_at DESC LIMIT 1)`，所以取 [0] 是安全的，
+// 不必逐列比對或取 max。
+func scoreZonesPreviousAnalyzedAt(states []store.MarketEventState) string {
+	if len(states) == 0 {
+		return ""
+	}
+	return states[0].AnalyzedAt.Format(time.RFC3339)
 }
 
 func scoreZonesPreviousEventStates(states []store.MarketEventState) []scoreZonesPreviousEventState {

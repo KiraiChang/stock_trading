@@ -22,13 +22,14 @@ ENDPOINT = "/sr-zones"
 def score_calls(monkeypatch) -> list[dict]:
     calls: list[dict] = []
 
-    def fake_score_symbol(symbol, timeframe, limit, previous_event_states=None):
+    def fake_score_symbol(symbol, timeframe, limit, previous_event_states=None, previous_analyzed_at=None):
         calls.append(
             {
                 "symbol": symbol,
                 "timeframe": timeframe,
                 "limit": limit,
                 "previous_event_states": previous_event_states,
+                "previous_analyzed_at": previous_analyzed_at,
             }
         )
         return {"zones": [], "model_version": "v1"}
@@ -47,12 +48,19 @@ def test_params_reach_score_symbol(client, score_calls):
             "timeframe": "5m",
             "limit": 77,
             "previous_event_states": previous,
+            "previous_analyzed_at": "2026-08-18T16:00:00Z",
         },
     )
 
     assert response.status_code == 200
     assert score_calls == [
-        {"symbol": "2330", "timeframe": "5m", "limit": 77, "previous_event_states": previous}
+        {
+            "symbol": "2330",
+            "timeframe": "5m",
+            "limit": 77,
+            "previous_event_states": previous,
+            "previous_analyzed_at": "2026-08-18T16:00:00Z",
+        }
     ]
 
 
@@ -63,6 +71,9 @@ def test_omitted_params_fall_back_to_defaults(client, score_calls):
     None 的語意是「呼叫端沒表態」。端點的 `default_factory=list` 是刻意的，
     這條測試鎖住它——改成 `Optional[...] = None` 會讓事件鏈的 diff 邏輯
     收到一個它沒預期的型別。
+
+    `previous_analyzed_at` 相反，**省略就是 None**：它的語意正是「呼叫端沒表態」，
+    下游據此退回舊的老化行為（issue.md I-077）。
     """
     response = client.post(ENDPOINT, json={"symbol": "2330"})
 
@@ -73,12 +84,13 @@ def test_omitted_params_fall_back_to_defaults(client, score_calls):
             "timeframe": "1d",
             "limit": DEFAULT_FETCH_LIMIT,
             "previous_event_states": [],
+            "previous_analyzed_at": None,
         }
     ]
 
 
 def test_value_error_maps_to_404(client, monkeypatch):
-    def raise_value_error(symbol, timeframe, limit, previous_event_states=None):
+    def raise_value_error(symbol, timeframe, limit, previous_event_states=None, previous_analyzed_at=None):
         raise ValueError("no candles found for symbol=9999 timeframe=1d")
 
     monkeypatch.setattr(http_server, "score_symbol", raise_value_error)
@@ -92,7 +104,7 @@ def test_value_error_maps_to_404(client, monkeypatch):
 def test_runtime_error_maps_to_503(client, monkeypatch):
     """模型不存在是「服務暫時不可用」，不是「查無資料」——必須是 503。"""
 
-    def raise_runtime_error(symbol, timeframe, limit, previous_event_states=None):
+    def raise_runtime_error(symbol, timeframe, limit, previous_event_states=None, previous_analyzed_at=None):
         raise RuntimeError("model not trained yet")
 
     monkeypatch.setattr(http_server, "score_symbol", raise_runtime_error)

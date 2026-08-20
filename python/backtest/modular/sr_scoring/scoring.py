@@ -814,9 +814,13 @@ def score_symbol(
     limit: int = DEFAULT_FETCH_LIMIT,
     builders: Optional[list[ZoneBuilder]] = None,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
+    previous_analyzed_at: Optional[str] = None,
 ) -> dict[str, Any]:
     """limit 為抓取的歷史K棒根數（不是天數），預設 DEFAULT_FETCH_LIMIT=250；
-    呼叫端（FastAPI /sr-zones、Go handler）可覆寫。"""
+    呼叫端（FastAPI /sr-zones、Go handler）可覆寫。
+
+    previous_analyzed_at 是產生 previous_event_states 那次分析的 K 棒時間，
+    決定事件要不要老化（issue.md I-077）。省略＝維持舊行為。"""
     from .pipeline import run_pipeline
 
     return run_pipeline(
@@ -828,4 +832,5 @@ def score_symbol(
         fetch_chip_fn=fetch_latest_chip_score,
         get_model_fn=get_model,
         previous_event_states=previous_event_states,
+        previous_analyzed_at=previous_analyzed_at,
     )

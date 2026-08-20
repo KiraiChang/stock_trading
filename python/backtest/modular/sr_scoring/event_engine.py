@@ -355,7 +355,7 @@ def normalize_market_events(events: list[dict[str, Any]]) -> list[dict[str, Any]
     return [normalize_market_event(event) for event in events]
 
 
-def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
+def _normalize_previous_event_state(state: dict[str, Any], bar_advanced: bool = True) -> dict[str, Any]:
     event_type = str(state.get("type") or state.get("event_type") or state.get("latest_event_type") or "UNKNOWN")
     meta = EVENT_TYPE_META.get(event_type, {})
     event_family = str(state.get("event_family") or meta.get("family") or event_type)
@@ -363,11 +363,16 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
     state_name = str(state.get("state") or state.get("lifecycle_state") or LIFECYCLE_ACTIVE)
     active = bool(state.get("active")) and _state_allows_gating(event_family, state_name)
 
-    # 每被 carry 一次代表多存活一根 K 棒（analysis）；被當根新偵測覆蓋時，會在 merge
-    # 迴圈以 age_bars=0 的新 state 取代（等於重置存活計數）。未被 resolve 的 carried
-    # active 事件老化到 expires_after_bars 門檻即轉 EXPIRED，完成 …→Resolved→Expired
-    # 生命週期，避免事件無限期停留在 active。
-    age_bars = int(state.get("age_bars") or 0) + 1
+    # 老化的單位是**K 棒推進**，不是 carry 次數（issue.md I-077）。原本這裡無條件 +1，
+    # 等於把「又分析了一次」當成「又過了一根 K 棒」——同一個交易日重打幾次分析，事件就會
+    # 提早老化到 EXPIRED，而 market_state_from_event_states 只看 active，所以那會實際改變
+    # Market State。bar_advanced 由呼叫端用「這次的 frame.index[-1] vs 上次分析的
+    # analyzed_at」算出；**缺值時是 True＝維持舊行為**。
+    #
+    # 被當根新偵測覆蓋時，會在 merge 迴圈以 age_bars=0 的新 state 取代（等於重置存活
+    # 計數）。未被 resolve 的 carried active 事件老化到 expires_after_bars 門檻即轉
+    # EXPIRED，完成 …→Resolved→Expired 生命週期，避免事件無限期停留在 active。
+    age_bars = int(state.get("age_bars") or 0) + (1 if bar_advanced else 0)
     raw_expires = state.get("expires_after_bars")
     expires_after = _event_expires_after_bars(event_type, event_family, raw_expires)
     expired = state_name != LIFECYCLE_EXPIRED and age_bars >= expires_after
@@ -407,6 +412,7 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
 def build_event_state_summary(
     events: list[dict[str, Any]],
     previous_states: Optional[list[dict[str, Any]]] = None,
+    bar_advanced: bool = True,
 ) -> dict[str, Any]:
     """Build an in-memory event lifecycle summary from latest detected events.
 
@@ -418,7 +424,7 @@ def build_event_state_summary(
     states: dict[tuple[str, str], dict[str, Any]] = {}
 
     for previous in previous_states or []:
-        event = _normalize_previous_event_state(previous)
+        event = _normalize_previous_event_state(previous, bar_advanced=bar_advanced)
         key = (str(event.get("zone_key") or "SYMBOL"), str(event.get("event_family") or event.get("type")))
         states[key] = event
 

@@ -207,6 +207,7 @@ def decide(
     evidence,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
     model_governance: Optional[dict[str, Any]] = None,
+    previous_analyzed_at: Optional[str] = None,
 ) -> AnalysisDecision:
     return AnalysisDecision(
         evidence=evidence,
@@ -214,6 +215,7 @@ def decide(
             evidence,
             previous_event_states=previous_event_states,
             model_governance=model_governance,
+            previous_analyzed_at=previous_analyzed_at,
         ),
     )
 
@@ -339,6 +341,9 @@ def run_pipeline(
     fetch_chip_fn=fetch_latest_chip_score,
     get_model_fn=get_model,
     previous_event_states: Optional[list[dict[str, Any]]] = None,
+    # previous_analyzed_at：產生 previous_event_states 那次分析站在哪根 K 棒（RFC3339）。
+    # 只用來決定事件要不要老化，見 issue.md I-077。省略＝維持舊行為。
+    previous_analyzed_at: Optional[str] = None,
 ) -> dict[str, Any]:
     from .serialization import _zone_score_to_dict
     from .summaries import _build_period_summaries
@@ -369,6 +374,7 @@ def run_pipeline(
         evidence,
         previous_event_states=previous_event_states,
         model_governance=probability_context["health"],
+        previous_analyzed_at=previous_analyzed_at,
     )
     explanation = build_explanation(evidence, decision.summary)
     scenario = build_analysis_scenario(evidence, decision.summary)

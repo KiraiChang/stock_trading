@@ -383,6 +383,16 @@ TWSE ISIN 同步仍存在的標的。
 **為什麼是 query 而不是 `/sr-zones/:symbol/...`**：同層已有 `GET /sr-zones/:id`，
 gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務啟動時 panic。
 
+**2026-08-20 起會出現只寫不讀的事件鏈。** `SUPPORT_RETEST` 與 `RESISTANCE_BREAKOUT`
+兩個 family 的鏈也會被寫入並在這裡回傳，但它們的 `state_json` 帶
+`decision_visible=false`——**它們不參與任何決策**，只是事實紀錄。前端若要呈現，要把這個
+旗標一起讀出來區分，不要當成會影響 Bias 或進場的事件。同一件事在 `POST /sr-zones` 的
+`decision_summary.market_events[]` 與 `event_state_summary.states[]` 也看得到；
+`active` / `candidates` / `confirmed` / `resolved` / `expired` 與兩個方向桶
+**不會**包含它們。`decision_visible` 這個鍵本身是**純新增**，既有事件項目上一律是
+`true`，缺鍵時也視為 `true`。語意見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」。
+
 **Query：**
 
 | 參數 | 說明 |

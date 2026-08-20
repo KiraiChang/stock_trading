@@ -773,6 +773,8 @@ Decision Engine 會在 action 前先偵測 `decision_summary.market_events`：
 | `HIGH_VOLUME_BREAKDOWN` | 支撐區被收盤跌破，且相對量放大或量能狀態為失敗 | 依破線 zone 嚴重度降風險；primary/main-structure 或高相關破線可強制 `EXIT`，短線非 primary 破線只降為 `REDUCE_ON_BREAKDOWN` 或 risk note |
 | `INTRADAY_RECLAIM` | 日 K 支撐測試後收盤收回區間上緣 | 提升內部 event-aware entry relevance，但對外分數不混入事件修正；內部 type 保留 `INTRADAY_RECLAIM` 作相容名稱，對外 label/reason 使用 close-based 語意避免 EOD 模式誤讀為即時盤中訊號 |
 | `REVERSAL_CANDIDATE` | 支撐測試未失守，且 EV / confidence 未轉弱 | 提升內部 event-aware entry relevance，作為候選反轉訊號 |
+| `SUPPORT_RETEST_HELD` | 支撐區被測試（`touched`）且收盤未跌破區間下緣。**純事實，不帶品質門檻** | **無**。`decision_visible=false`，只寫不讀 |
+| `RESISTANCE_BREAKOUT` | 壓力區被盤中或收盤突破（`closed_above` 或 `high > price_high`），且相對量達 `HIGH_VOLUME_BREAKDOWN_THRESHOLD` 或量能狀態為 `FAILED` | **無**。`decision_visible=false`，只寫不讀 |
 
 對外回傳的 `entry_relevance_score` 是不含事件修正的 base relevance，與 `zones[]` 同名欄位保持同義；事件影響另由 `market_events`、`event_state_summary`、`short_term_regime` 與 action/risk notes 呈現。
 
@@ -797,6 +799,8 @@ Lifecycle gating 與 aging 規則由 event family 統一定義，不得在 decis
 | `SUPPORT_BREAKDOWN` | `CONFIRMED` / `ACTIVE` | 2 | 同 zone 出現 confirmed/active `INTRADAY_RECLAIM` |
 | `SUPPORT_RECLAIM` | `CONFIRMED` / `ACTIVE` | 2 | 目前不 resolve bullish event；未延續則 aging 後 `EXPIRED` |
 | `SUPPORT_REVERSAL` | `ACTIVE` | 2 | candidate/confirmed 階段只作觀察，未升級前不進 gating |
+| `SUPPORT_RETEST` | `CONFIRMED` / `ACTIVE` | 2 | `resolves` 刻意留空——resolve 會把既有 family 改成 `RESOLVED`／`active=false`，那是決策可見的改變 |
+| `RESISTANCE_BREAKOUT` | `CONFIRMED` / `ACTIVE` | 2 | 同上。「壓力突破是否 resolve 支撐側事件」的語意留給 T-049 |
 
 同一 zone 若出現 `HIGH_VOLUME_BREAKDOWN → INTRADAY_RECLAIM → REVERSAL_CANDIDATE`，
 raw `market_events` 仍保留完整鏈，但 `HIGH_VOLUME_BREAKDOWN` 在
@@ -834,16 +838,70 @@ resolve 的 breakdown 不會再懲罰 relevance 或翻空 bias。完整 raw even
 `expires_after_bars` 與 `age_bars` 由 Go `scoreZonesPreviousEventStates` 從 `state_json`
 帶回（缺 `expires_after_bars` 時送 `null` 讓 Python 套預設，而非誤傳 0 造成立即過期）。
 
-例外（刻意）：`_daily_candidate_zones` 與 `_defense_lines` 仍消費完整 raw `market_events`——
-前者用「歷史上出現過 `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`」決定是否補日 K 候選區，後者用最近
-微結構事件的 zone_ref 定位戰術防守線；兩者是「候選區產生」與「防守線呈現」，不是進場 gating，需要
-完整事件脈絡才完整，故與「gating 只吃 active」並存而不矛盾。
+例外（刻意）：`_daily_candidate_zones` 與 `_defense_lines` 仍消費 raw `market_events` 而不是
+`active`——前者用「歷史上出現過 `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`」決定是否補日 K 候選區，
+後者用最近微結構事件的 zone_ref 定位戰術防守線；兩者是「候選區產生」與「防守線呈現」，不是進場
+gating，需要完整事件脈絡才完整，故與「gating 只吃 active」並存而不矛盾。**但「完整」只到
+`decision_visible=true` 為止**：`_defense_lines` 取的是「第一個 zone_ref 對得上的事件」，
+只寫不讀的事件插隊就會換掉戰術防守線，所以它 2026-08-20 起會跳過
+`decision_visible=false`（見下方「事件的決策可見性」）。`_daily_candidate_zones` 是名字型，
+不受影響。
 
 Daily candidate zone 若 `price_low == price_high`，不再以 `2405.00 ~ 2405.00` 這類零寬區間呈現，
 而改成 trigger 語意：resistance 端輸出 `zone_kind=BREAKOUT_TRIGGER`、support 端輸出
 `zone_kind=BREAKDOWN_TRIGGER`，並填 `trigger_price` 與 `BREAKOUT_TRIGGER 2405.00` /
 `BREAKDOWN_TRIGGER 2405.00` label。`price_low` / `price_high` 保留作舊 payload 相容；trigger
 不可直接成為 `best_trade_zone`。
+
+#### 事件的決策可見性（`decision_visible`）
+
+`SUPPORT_RETEST_HELD` 與 `RESISTANCE_BREAKOUT`（2026-08-20 起）是**只寫不讀**的事實層事件：
+寫進 `market_events`、`market_event_states` / `market_event_detections` 與
+`event_instances` / `event_transitions`，但**不參與任何決策**——不進 `market_state`、
+`lifecycle_phase`、`event_signal`，也不進 `decision_engine` 的任何分支。
+接進決策等於改變 Bias 與進場訊號，那要走 T-049 的 replay 分佈門檻，本層只負責累積事實。
+
+界線靠 `EVENT_TYPE_META` 的 **`decision_visible`** 旗標，**不靠副作用**（例如把
+`direction` 設成 `NEUTRAL`、`gating_states` 設空）。副作用式的隔離下一個加事件的人不會知道
+要維持，而且壞掉時沒有任何東西會報錯。旗標由 Python 單一產生並寫進 `state_json`，
+Go 只讀不推導；**缺鍵一律當 `true`**（既有列不會有這個鍵，當成 `false` 會讓既有事件整批
+從決策桶消失）。
+
+**決策端消費事件有三類讀法，只有第一類對新名字天然安全：**
+
+| 類型 | 位置 | 為什麼危險 |
+|---|---|---|
+| 名字型 | `market_state_from_event_states`、`resolve_event_signal`、`decision_engine` 的 `event_types`、`_market_event_adjustment`、`_high_volume_breakdown_action`、`_daily_candidate_zones` | 逐一比對既有型別名，新名字自然落到 `NORMAL`。安全 |
+| 方向型 | `active_bearish_events` / `active_bullish_events` | **只看 `direction`**。`resolve_lifecycle` 對前者取 truthiness 就判 `lifecycle_phase=BREAKDOWN`——新事件不必被任何人認識就會改決策 |
+| 位置型 | `_event_sequence`（投影整串）、`_defense_lines`（取**第一個** `zone_ref` 對得上的事件當戰術防守線） | 既不比對名字也不看方向，只看**在清單的第幾個**。新事件插隊就換答案，而 `defense_lines` 還會經 tactical stop 改到 `rr_context.stop_basis` / `stop_price` |
+
+因此過濾點有四個，缺一不可：
+
+1. `build_event_state_summary`：`states` 保留全部（它是持久化來源），**其餘六個桶與
+   `latest_event_type` 只收 `decision_visible=true`**。
+2. Go `eventStateSummaryJSON`（`sr_zones.go`）：同一套規則的第二份實作——
+   **carry-forward 的回程走的是 Go 這份**，少了它新事件會在下一次分析經方向桶進決策。
+3. `decision_engine._event_sequence`：它寫進 `stock_sr_decisions.event_sequence_json`。
+4. `decision_engine._defense_lines`：位置型讀者，見上表。
+
+**截斷順序也是決策可見的。** `detect_market_events` 結尾把事件截到
+`MAX_EVENTS_PER_ANALYSIS`（8），而排序（`EVENT_ORDER`）發生在**截斷之後**。原本的
+`events[:8]` 是插入序，壓力側開始產事件之後同一個上限要塞更多事件，會靜默擠掉後面 zone 的
+支撐事件。現在 `_truncate_events` 先依「`decision_visible` 優先、其次插入序」挑要留的，
+再還原成插入序輸出——**全部可見時與 `events[:8]` 逐項相同**，保證只會擠掉新事件。
+上限值本身不動（改上限也是決策可見的改變）。
+
+**壓力 zone 是第一次進入事件迴圈。** 在此之前 `detect_market_events` 的迴圈第一行是
+`if z.role != SUPPORT: continue`，壓力側完全不產生事件。守衛**不能直接放寬**——迴圈內
+既有三個分支（高量跌破 / `UNDERCUT_RECLAIM` / `REVERSAL_CANDIDATE`）全部假設 support。
+現在改成依 role 分派到兩段互斥邏輯，支撐側那段一行不動，`AT_ZONE` 維持兩段都不進。
+
+`SUPPORT_RETEST_HELD` 與既有 `REVERSAL_CANDIDATE` 的分工：前者是**事實**（碰到 zone
+且未收破，無門檻），後者是**帶品質門檻的方向性候選**（`confidence >= 0.45` ＋ `EV >= 0`
+＋ 近期驗證未失效）。兩者是不同 family，同一根 K 同時成立是正常的，互不 resolve。
+型別名刻意與 `scenario_engine._zone_state` 的場景字串 `SUPPORT_RETEST` 區隔——那個字串
+是由 `role` 直接推出來的展示標籤，與「有沒有真的回測」無關；family 名對齊需求用語，
+型別名保留「守住」這個事實。
 
 ### Daily Price Action / Data Quality
 
@@ -2694,6 +2752,38 @@ dev DB 上重跑後，**`alias_ambiguous` 由 77 降到 0**（整輪 84 次分�
 **逐段命中數只有 warn 時看得到。** `logging` 把 level 寫死 `zap.InfoLevel`，
 而完整欄位的 `event identity: zone association` 是 Debug 級別，只有觸發 warn 的那次分析
 才會印出整組欄位。所以上面的命中數是 warn 樣本內的統計；全量觀測要等 T-050 的 metric。
+
+**四個事件全部進事件層之後的復驗**（2026-08-20，同一組四檔 21 階，退乾淨的 dev DB）：
+84 次分析全部 201、整輪 **0 筆 warn**，六條門檻＋D4 全部 0。
+
+*決策逐欄不變是這一輪唯一的驗收條件，結果是通過*——`stock_sr_decisions` 全欄與上一輪基準
+比對，扣掉兩類定案的純新增（新事件的項目本身、每個事件項目多出的 `decision_visible` 鍵）後
+**84 / 84 列逐欄相同**，`decision_summary` 的巢狀結構也逐路徑相同。
+
+*身分層不受影響*：zone 身分 329、血緣邊 57、alias 685 筆，與上一輪逐項相同。
+
+*事件層如預期長大*：
+
+| 指標 | 兩個事件時 | 四個事件時 |
+|---|---:|---:|
+| `event_instances` 鏈數 | 59 | **128** |
+| `event_transitions` | 116 | **250** |
+| `ZONE_IDENTITY_ENDED` | 4 | **8** |
+
+新 family 的鏈確實寫進去了：`SUPPORT_RETEST` 55 條、`RESISTANCE_BREAKOUT` 14 條
+（既有 `SUPPORT_RECLAIM` 57、`VOLUME_CONTEXT` 2 不變）。`market_event_states` 的
+新型別列數 `SUPPORT_RETEST_HELD` 655、`RESISTANCE_BREAKOUT` 166，既有型別
+（`INTRADAY_RECLAIM` 668、`EXTREME_VOLUME` 27）逐欄相同。
+
+*第一輪沒過，漏的是位置型讀者*：`_defense_lines` 未加過濾時，84 筆決策有 **7 筆**的
+`defense_lines.tactical` 被 `SUPPORT_RETEST_HELD` 插隊換掉，連帶 `rr_context.stop_basis`
+7 筆、`stop_price` 2 筆——而 `market_bias` / `entry_permission_state` / `position_action` /
+`event_market_state` / `reason_codes` 全部逐欄相同。**方向桶與名字型的隔離都有效，
+被漏掉的是「取第幾個事件」這種讀法**，見上方「事件的決策可見性」。
+
+*`matched_by_alias` 仍然觀測不到*：新事件確實改變了 zone key 的產生量，但整輪沒有任何
+warn，而逐段命中數只有 warn 時才印（Debug 級別），所以「新事件是否讓 alias 備援第一次被
+真的走到」這一題**這一輪仍未取得答案**，要等 T-050 的 metric。
 
 要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
 「在 dev stack 上做『as-of 階梯』驗收」與其中的「as-of 階梯驗收的六條門檻」。

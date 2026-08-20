@@ -497,7 +497,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | resolved_by | 解除該事件的事件類型；可為 `NULL` |
 | confidence / price_level | 信心與價位；可為 `NULL` |
 | reason_codes | JSON 陣列，狀態 reason codes |
-| state_json | 事件狀態完整 detail JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON） |
+| state_json | 事件狀態完整 detail JSON（PostgreSQL 為 `JSONB`；SQLite/MySQL 文字 JSON）。內含 `carried_from_previous` 與 `decision_visible` 兩個由 Python 單一產生、Go 只讀的旗標，見下方「event_instances / event_transitions / zone_key_aliases」 |
 | created_at | 建立時間 |
 
 **Index：** `INDEX(analysis_id)`、`INDEX(symbol, timeframe, active, analyzed_at DESC)`。
@@ -921,6 +921,14 @@ ATR 邊界與 role 算出來——**兩者對不上是常態而非例外**（202
 `carried_from_previous` 由 Python 在 `build_event_state_summary`（新偵測寫 `false`）與
 `_normalize_previous_event_state`（carry forward 無條件寫 `true`）兩條路徑都寫進
 `state_json`；Go 只讀不推導。**缺鍵是異常**，不是「不是 carried」。
+
+`decision_visible`（2026-08-20 起）同樣寫在 `state_json`、同樣由 Python 單一產生
+（`event_engine.EVENT_TYPE_META`）、Go 只讀不推導；**但缺鍵的處理刻意相反：缺鍵一律當
+`true`**。既有四個事件型別都是決策可見的，而這個鍵出現之前寫下的列根本不會有它，
+當成 `false` 會讓既有事件整批從決策桶消失。它標示這個事件能不能被決策看到——
+`SUPPORT_RETEST_HELD` 與 `RESISTANCE_BREAKOUT` 是 `false`，只寫進
+`market_event_states` / `market_event_detections` / `event_instances`，不進任何決策桶。
+語意與消費端見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」。
 
 **zone 身分因 `SPLIT` / `MERGE` / `RESHAPE` 終止時，parent 身上的事件不傳給 child**，
 而是以 `end_reason='ZONE_IDENTITY_ENDED'` 收攤。那條鏈的前提（那個 zone 存在）已經消失，

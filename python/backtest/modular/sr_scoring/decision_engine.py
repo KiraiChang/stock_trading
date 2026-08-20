@@ -12,6 +12,7 @@ from typing import Any, Optional
 from .event_engine import (
     build_event_state_summary,
     detect_market_events,
+    is_decision_visible,
     entry_relevance_base_breakdown as _entry_relevance_base_breakdown,
     zone_interaction as _zone_interaction,
     _clamp_relevance,
@@ -1787,7 +1788,11 @@ def _event_sequence(market_events: list[dict[str, Any]]) -> list[dict[str, Any]]
     }
     seen: set[str] = set()
     sequence: list[dict[str, Any]] = []
-    for event in sorted(market_events, key=lambda e: order.get(str(e.get("type")), 999)):
+    # **只收決策可見的事件**：這個投影會寫進 stock_sr_decisions.event_sequence_json，
+    # 是決策表的既有欄位。階段 D 新增的事件要進 market_events（→ market_event_detections）
+    # 與 event_state_summary["states"]，但不能出現在這裡，否則「決策逐欄相同」就破了。
+    visible_events = [event for event in market_events if is_decision_visible(event)]
+    for event in sorted(visible_events, key=lambda e: order.get(str(e.get("type")), 999)):
         event_type = str(event.get("type"))
         if event_type in seen:
             continue
@@ -2282,6 +2287,14 @@ def _defense_lines(
 
     tactical_zone: Optional[ZoneScore] = None
     for event in market_events or []:
+        # **只收決策可見的事件**：這個迴圈是**位置型**讀者——取「第一個 zone_ref 對得上
+        # 的事件」當戰術防守線，不比對型別名。階段 D 的新事件（SUPPORT_RETEST_HELD
+        # 不帶品質門檻，碰到未收破就成立）一旦進 raw market_events 就會插隊換掉
+        # tactical zone，而 defense_lines 與其下游的 rr_context.stop_basis /
+        # stop_price 都是 stock_sr_decisions 的既有欄位。實測（2026-08-20，四檔 21 階）
+        # 未過濾時 84 筆決策裡有 7 筆的 defense_lines.tactical 被換掉。
+        if not is_decision_visible(event):
+            continue
         ref = event.get("zone_ref") or {}
         tactical_zone = next(
             (

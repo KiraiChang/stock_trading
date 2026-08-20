@@ -390,6 +390,12 @@ func eventStateSummaryJSON(base any, states []store.MarketEventState) map[string
 		item["price_level"] = nullableFloat(state.PriceLevel)
 		item["reason_codes"] = rawArray(state.ReasonCodes)
 		items = append(items, item)
+		// 階段 D：decision_visible=false 的事件只進 states，不進任何決策桶，
+		// 也不參與 latest_event_type。**carry-forward 的回程走的就是這裡**——
+		// Python 端的桶構建濾了、Go 端沒濾，等於完全沒有隔離。
+		if !eventDecisionVisible(state.StateJSON) {
+			continue
+		}
 		switch state.State {
 		case "CANDIDATE":
 			candidates = append(candidates, item)
@@ -1241,12 +1247,34 @@ func eventCarriedFromPrevious(raw store.RawJSON) (carried bool, parsed bool) {
 	return *payload.Carried, true
 }
 
+// eventDecisionVisible 讀 state_json 的 decision_visible：這個事件能不能被決策看到。
+//
+// **缺鍵一律當 true**，與 eventCarriedFromPrevious 的「缺鍵是異常」刻意相反：
+// 既有的四個事件型別都是決策可見的，而階段 D 之前寫進 market_event_states 的列
+// 根本不會有這個鍵。當成 false 會讓既有事件整批從決策桶消失——那是最嚴重的行為改變。
+//
+// 旗標由 Python 單一產生（event_engine.EVENT_TYPE_META），Go 只讀不推導，
+// 理由與 carried_from_previous 相同：兩份型別清單分歧時沒有東西會報錯。
+func eventDecisionVisible(raw store.RawJSON) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	var payload struct {
+		Visible *bool `json:"decision_visible"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil || payload.Visible == nil {
+		return true
+	}
+	return *payload.Visible
+}
+
 // buildEventIdentityWrite 把這次分析的事件狀態組成要寫的兩張表內容。
 //
 // 拆成純函數的理由與 buildZoneIdentityWrite 相同：這段的錯誤（事件掛錯 zone、
 // 鏈斷掉、root 被 latest 蓋掉）在資料裡看起來都很正常。
 //
-// **關聯決策是三段的**（2026-08-19 定案，見 docs/todo.md T-048「階段 C 修法計畫書」）：
+// **關聯決策是三段的**（2026-08-19 定案，現況見 docs/sr-zone-scoring.md
+// 「事件層：鏈的身分與三段關聯決策」）：
 //
 //	① 既有活鏈以 (last_zone_key, family) 直接命中 → 沿用 chain.zone_uid，不解析 key
 //	② 沒有活鏈 ＋ carried_from_previous == true → WARN / NOOP，**不建立新 occurrence**

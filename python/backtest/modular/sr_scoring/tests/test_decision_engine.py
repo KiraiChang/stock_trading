@@ -3,12 +3,14 @@ from __future__ import annotations
 from ..decision_engine import (
     _daily_confirmation,
     _decision_derived_view,
+    _defense_lines,
     _final_entry_risk_notes,
     _final_entry_permission,
     _position_action_condition,
     _risk_note,
     build_decision_summary,
 )
+from ..event_engine import detect_market_events
 from ..model import ModelBundle
 from ..types import (
     ConfidenceLevel,
@@ -1711,3 +1713,44 @@ def test_data_quality_marks_invalid_ohlc_and_validation_errors():
     assert quality["features"]["chip"]["reason_codes"] == ["SCORE_OUT_OF_RANGE"]
     assert set(quality["invalid_features"]) == {"daily_price", "chip"}
     assert quality["price_data_complete"] is False
+
+
+def test_defense_lines_tactical_skips_decision_invisible_events():
+    """階段 D：`_defense_lines` 是**位置型**讀者，必須跳過 `decision_visible=False` 的事件。
+
+    它取「raw `market_events` 裡第一個 `zone_ref` 對得上的事件」當戰術防守線，不比對型別名，
+    所以名字型的隔離（決策端不認識新名字）對它完全無效。`SUPPORT_RETEST_HELD` 不帶品質門檻
+    ——碰到 zone 且未收破就成立——會在低品質 zone 上先成立而插到清單最前面，把 tactical
+    換成那個 zone；`rr_context.stop_basis` / `stop_price` 吃 tactical，所以會一路改到
+    `stock_sr_decisions` 的既有欄位。實測（2026-08-20，四檔 21 階）未過濾時 84 筆決策
+    有 7 筆的 `defense_lines.tactical` 被換掉。
+    """
+    # weak 收在區間內（closed_inside）：既有分支全部不成立——沒有跌破、沒有 UNDERCUT_RECLAIM，
+    # REVERSAL_CANDIDATE 也被品質門檻擋掉——所以它**只**產出 SUPPORT_RETEST_HELD。
+    weak = _zone(
+        low=99.0,
+        high=100.0,
+        confidence=0.2,
+        confidence_level=ConfidenceLevel.LOW.value,
+        expected_value=-0.01,
+        tier=ZoneTier.TIER_3_SHORT_TERM.value,
+        tier_label="短期",
+    )
+    # good 被跌破後收回上緣，產出決策可見的 INTRADAY_RECLAIM。
+    good = _zone(low=97.0, high=98.0)
+    zones = [weak, good]
+
+    events = detect_market_events(
+        zones, current_price=99.5, candle_high=100.2, candle_low=96.5, candle_close=99.5
+    )
+
+    types = [event["type"] for event in events]
+    # 前提：新事件確實排在既有事件之前（低品質 zone 先成立），否則這條測試證明不到東西。
+    assert types[0] == "SUPPORT_RETEST_HELD"
+    assert "INTRADAY_RECLAIM" in types
+
+    lines = _defense_lines(zones, good, 99.5, events)
+
+    # tactical 要維持階段 D 之前的答案：INTRADAY_RECLAIM 那個 zone，不是先插隊的 weak。
+    assert lines["tactical"]["price_low"] == 97.0
+    assert lines["tactical"]["price_high"] == 98.0

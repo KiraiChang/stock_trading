@@ -2258,7 +2258,7 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（階段 A／B／C 已完成並 review 通過，2026-08-19；**階段 D 待規劃**——四個事件裡 `SUPPORT_RETEST` 與 `RESISTANCE_BREAKOUT` 是新增偵測邏輯，不是把既有東西存下來） |
+| 狀態 | **已實作／待 review**（階段 A／B／C 已 review 通過，2026-08-19；階段 D 於 2026-08-20 實作並通過四檔 21 階復驗——決策逐欄相同、六條門檻＋D4 全 0、新事件鏈確實落地，驗收數字見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「實測特性」） |
 | 優先度 | 高（T-049 與 T-041 的共同前置） |
 | 分類 | Python / Go / DB / SR Zone / 決策資料 |
 | 建立日期 | 2026-08-18 |
@@ -2365,25 +2365,251 @@ zone_key_aliases」，重跑驗收的步驟與六條門檻見
   沒有 `previous_zones`——要餵得動它就得改 contract。階段 C 未做（不動
   `scoring.py` / `pipeline.py`），仍是開放項目。
 
-#### 階段 D：Lifecycle Engine 支援 4 個事件
+#### 階段 D：Lifecycle Engine 支援 4 個事件（**計畫書待確認**，2026-08-19）
 
 要支援 `SUPPORT_BREAKDOWN` / `SUPPORT_RECLAIM` / `SUPPORT_RETEST` / `RESISTANCE_BREAKOUT`。
-**盤點後發現這四個的現況差很多，不是同一種工作：**
+**盤點後這四個的現況差很多，不是同一種工作：**
 
 | 事件 | 現況 |
 |---|---|
 | `SUPPORT_BREAKDOWN` | ✅ 已是 event family（`HIGH_VOLUME_BREAKDOWN`） |
 | `SUPPORT_RECLAIM` | ✅ 已是 event family（`INTRADAY_RECLAIM`） |
-| `SUPPORT_RETEST` | ❌ **不存在**。只在 `scenario_engine._zone_state` 當**場景字串**，不是事件 |
+| `SUPPORT_RETEST` | ❌ **不存在**。只在 `scenario_engine._zone_state` 當**場景字串**——由 `role` 直接推出來的展示標籤，與「有沒有真的回測」無關 |
 | `RESISTANCE_BREAKOUT` | ❌ **不存在**。只在 `evaluation.py` 當 replay 的兩根 K 結果標籤 |
 
-所以後兩個**是新增偵測邏輯**，不是把既有東西存下來。它們要各自定義：觸發條件、
-`EVENT_TYPE_META`（family / direction / default_state / resolves）、
-`EVENT_FAMILY_LIFECYCLE_RULES`（gating_states / expires_after_bars）、以及 `EVENT_ORDER`。
+盤點還多找到兩件計畫必須處理的事：
 
-**`RESISTANCE_BREAKOUT` 另外有一個結構性問題**：現行 `EVENT_FAMILY_LIFECYCLE_RULES`
-全部是 `SUPPORT_*` 與 `VOLUME_CONTEXT`，沒有任何壓力側的 family。加它進來會是第一個
-壓力側事件，`resolves` 的語意（壓力突破是否 resolve 支撐事件）要先想清楚。
+* **壓力側目前完全不產生事件。** `detect_market_events` 的主迴圈第一行就是
+  `if z.role != ZoneType.SUPPORT.value: continue`（`event_engine.py:458`）。
+  `RESISTANCE_BREAKOUT` 不是「多加一個 if」，是**第一次讓壓力 zone 進入事件迴圈**。
+* **事件直接改決策。** `market_state_from_event_states` 的輸出經
+  `event_state_summary.market_state` 走進 `decision_engine.py:312` 與 `:927`，
+  決定 `short_term_regime` / `market_bias` / `action_state` / `entry_permission`。
+  所以新增事件型別**預設就會改變交易訊號**，與階段 A～C 的「純新增」性質不同。
+
+##### 修改目標
+
+讓四個事件都在 event 層存在並被持久化，且**新增的兩個全程只寫不讀**
+（2026-08-19 使用者定案）：寫進 `market_event_states` / `market_event_detections` /
+`event_instances`，但不參與 `market_state`、不參與 `lifecycle_phase` / `event_signal`、
+不參與 `decision_engine` 的任何分支。**驗收條件是決策逐欄相同**——與階段 B／C 同一條。
+
+這條界線的理由：接進決策等於改變 Bias 與進場訊號，而 T-049 已經定下該類改動的門檻
+（`MODE=replay scripts/run-evaluation.sh` 對真實資料做分佈比較，母體要夠），
+那個母體要等 `issue.md` I-074 的補分析排程，現在不存在。先把事實層做出來並累積資料，
+接進決策由 T-049 一次做完。
+
+##### 不做的範圍
+
+* **不改任何決策行為。** `market_state` / `lifecycle_phase` / `event_signal` /
+  `market_bias` / `action_state` / `entry_permission` 全部逐欄不變。
+* **不改既有四個事件型別的觸發條件**（`EXTREME_VOLUME` / `HIGH_VOLUME_BREAKDOWN` /
+  `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`），連門檻常數都不動。
+* **不動前端。**
+* **不接 `ZoneScore.zone_uid`**（階段 C 遺留的開放項目，需要 `previous_zones` contract，
+  與本階段無關）。
+* 不做 T-050 的 metric。
+
+##### 實作偏離紀錄（2026-08-20，已回報並經使用者確認）
+
+**D1 的「名字型／方向型」二分不完整，實際上還有第三類：位置型讀者。** 這類讀者既不比對
+型別名、也不看 `direction`，而是**取事件清單裡的第幾個**——新事件一旦進 raw
+`market_events` 就會插隊改變答案。盤點到兩處，兩處都在 `decision_engine.py`：
+
+| 位置 | 讀法 | 影響的既有欄位 |
+|---|---|---|
+| `_event_sequence` | 排序後投影整串事件 | `stock_sr_decisions.event_sequence_json` |
+| `_defense_lines` | 取**第一個** `zone_ref` 對得上的事件當戰術防守線 | `defense_lines_json`、以及吃 tactical stop 的 `rr_context_json` |
+
+因此「`decision_engine.py` 不改」這條放寬為：**只加 `is_decision_visible` 過濾，不改任何
+判斷邏輯、門檻或分支**。其餘 raw `market_events` 讀者（`_market_event_adjustment`、
+`_high_volume_breakdown_action`、`_daily_candidate_zones`、`:312` 與 `:1185` 的
+`event_types`）都是名字型，確認安全、不動。
+
+`_defense_lines` 是**驗收跑出來才抓到的**，不是設計時想到的：第一輪四檔 21 階復驗
+84 筆決策中有 **7 筆**的 `defense_lines.tactical`（連帶 `rr_context.stop_basis` 7 筆、
+`stop_price` 2 筆）與基準不同，`market_bias` / `entry_permission_state` /
+`position_action` / `event_market_state` / `reason_codes` 則全部逐欄相同。回歸測試見
+`test_decision_engine.py::test_defense_lines_tactical_skips_decision_invisible_events`
+（拿掉過濾即失敗）。
+
+另一項定案：`decision_visible` 這個鍵也會出現在**對外 payload 的既有事件項目**上
+（`market_events[]` 與 `event_state_summary` 各桶），視為**純新增鍵**、不算決策差異——
+它是跨 Python／Go 的單一 authority 旗標，Go 端就是從 `state_json` 讀它。
+
+非阻斷、留給 T-049：`evaluation.py` 的 `market_event_types` 分層鍵會多出新型別，
+影響 replay／evaluation 的分層可比性，不影響 `stock_sr_decisions`。
+
+##### Review findings（2026-08-20，**已修正／待複審**）
+
+* **D2 文件一致性**：✅ 已修正。本 TODO 的 D2 修法段落現在寫「`decision_visible` 優先、
+  同一可見性內維持插入序」，與實作及 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+  「事件的決策可見性」一致。實作是
+  `sorted(enumerate(events), key=(0 if visible else 1, index))` 取前
+  `MAX_EVENTS_PER_ANALYSIS`，再依原 index 還原成插入序輸出——**全部可見時與
+  `events[:8]` 逐項相同**，`EVENT_ORDER` 只管 `build_event_state_summary` 的合併順序與
+  `latest_event_type`，不參與截斷。全檔已無「再依 `EVENT_ORDER`」的舊敘述
+  （只剩本條目引用舊字樣）。
+* **`decision_engine.py` 範圍描述一致性**：✅ 已修正。「受影響的檔案與資料流」的圖與清單
+  都改成「只加 `is_decision_visible` 過濾，不改判斷邏輯、門檻或分支」，
+  `decision_engine.py` 也已從「`lifecycle_engine.py` / `scenario_engine.py` /
+  `scoring.py` / `pipeline.py` 都不改」那串移出來單列。放寬的理由與實測證據見上方
+  「實作偏離紀錄」。過濾點共四個（Python 桶構建、Go `eventStateSummaryJSON`、
+  `_event_sequence`、`_defense_lines`），現況規格在 `sr-zone-scoring.md`。
+
+##### 五個設計決定
+
+**D1：隔離要顯式，不能靠「決策端不認識新名字」。**
+
+決策端對事件的消費有兩類，只有一類是安全的：
+
+| 類型 | 位置 | 對新事件的行為 |
+|---|---|---|
+| **名字型** | `market_state_from_event_states`、`resolve_event_signal`、`decision_engine` 的 `event_types` | 逐一比對 `HIGH_VOLUME_BREAKDOWN` / `INTRADAY_RECLAIM` / `REVERSAL_CANDIDATE`，新名字自然落到 `NORMAL` |
+| **方向型** | `active_bearish_events` / `active_bullish_events` 兩個桶 | **只看 `direction`**。`resolve_event_signal` 對 `active_bearish_states` 取 truthiness 就回 `CLOSE_BREAKDOWN`，`resolve_lifecycle` 直接判 `lifecycle_phase=BREAKDOWN` |
+
+所以只要新事件是 active 且帶方向，**不必被任何人認識就會改決策**。而且這組桶有**兩份
+實作**：Python 在 `build_event_state_summary`，Go 在 `sr_zones.go:404-410`
+（`eventStateSummaryJSON` 依 `state.Direction` 重建），carry-forward 的回程走的是 Go 那份。
+
+**修法**：在 `EVENT_TYPE_META` 加一個 `decision_visible`（新事件為 `False`，既有四個
+為 `True`），Python 的桶構建與 Go 的 `eventStateSummaryJSON` **各自**跳過
+`decision_visible=False` 的狀態。旗標要能從 `state_json` 讀到，Go 才不必複製型別清單。
+
+**備案（不建議）**：把新事件的 `direction` 設成 `NEUTRAL`、`gating_states` 設空，靠它們
+永遠進不了 active 與方向桶。這是靠副作用達成隔離——下一個人加第三個事件時不會知道
+要維持這組副作用，而且沒有任何東西會報錯。
+
+**D2：`events[:8]` 的截斷是插入序，不是優先序。**
+
+`detect_market_events` 結尾是 `normalize_market_events(events[:8])`，而 `events` 的順序
+是「`EXTREME_VOLUME` ＋ zone 迴圈的插入序」，**排序（`EVENT_ORDER`）發生在截斷之後**
+（`build_event_state_summary` 才排）。目前迴圈只跑支撐 zone，開放壓力 zone 之後同一個
+上限要塞更多事件，**可能把後面 zone 的支撐事件擠掉**——那是決策可見的改變，而且完全靜默。
+
+**修法**：截斷前先依「`decision_visible` 優先、同一可見性內維持插入序」處理，保證新事件
+只會擠掉新事件。上限值本身不動（改上限也是決策可見的改變）。
+
+**D3：兩個新事件的 `resolves` 都是空的。**
+
+`resolves` 會把既有 family 的狀態改成 `RESOLVED`／`active=False`，那是決策可見的改變。
+「壓力突破是否 resolve 支撐側事件」的語意本身是個真問題（現行
+`EVENT_FAMILY_LIFECYCLE_RULES` 全部是 `SUPPORT_*` 與 `VOLUME_CONTEXT`，沒有壓力側先例），
+但它只有在事件接進決策之後才有意義，**留給 T-049**。
+
+**D4：`SUPPORT_RETEST` 與既有 `REVERSAL_CANDIDATE` 重疊，要先分工再實作。**
+
+現行 `REVERSAL_CANDIDATE` 的 else 分支條件是「未收破 ＋ `confidence >= 0.45` ＋
+`EV >= 0` ＋ 近期驗證未失效」，已經涵蓋「測試到支撐且守住」。若把 `SUPPORT_RETEST`
+定義成 `rejection_type == "SUPPORT_HELD"`，它就是前者的**超集**。
+
+分工定義：`SUPPORT_RETEST` 是**事實**（碰到 zone 且未收破，不帶品質門檻），
+`REVERSAL_CANDIDATE` 是**帶品質門檻的方向性候選**。兩者是不同 family，同一根 K 同時
+成立是正常的，不互相 resolve。
+
+**命名要避開撞名**：`scenario_engine._zone_state` 已經有字串 `SUPPORT_RETEST`，語意是
+「這是支撐 zone」而不是「發生了回測」。事件型別若用同名，grep 與判讀都會混淆。
+**建議事件型別叫 `SUPPORT_RETEST_HELD`、family 叫 `SUPPORT_RETEST`**；family 名對齊
+需求用語，型別名保留「守住」這個事實。
+
+**D5：`RESISTANCE_BREAKOUT` 鏡像 `HIGH_VOLUME_BREAKDOWN`，但守衛要改成 role 分派。**
+
+觸發條件（鏡像既有跌破事件，常數沿用不新增）：壓力 zone、`touched`、
+收盤站上 `price_high`（`CONFIRMED`）或僅盤中 `high > price_high`（`CANDIDATE`），
+且 `relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD` 或
+`volume_confirmation == FAILED`。`zone_interaction` 對壓力 zone 已經算好
+`closed_above` / `penetration_pct` / `rejection_type="RESISTANCE_HELD"` /
+`reclaim_type="OVERTHROW_REJECTED"`，不必新增幾何判斷。
+
+**但 `if z.role != SUPPORT: continue` 不能直接移除**：迴圈內其餘分支
+（跌破、`UNDERCUT_RECLAIM`、`REVERSAL_CANDIDATE`）全部假設 support。移除守衛會讓壓力
+zone 掉進那些分支，那是決策可見的改變。**改成依 role 分派到兩段互斥的邏輯**，
+支撐側那段一行不動。`AT_ZONE` 維持現行行為（兩段都不進）。
+
+##### 受影響的檔案與資料流
+
+```
+event_engine.py
+  ├─ EVENT_TYPE_META        ＋2 型別、＋decision_visible 旗標
+  ├─ EVENT_FAMILY_LIFECYCLE_RULES ＋2 family
+  ├─ EVENT_ORDER            ＋2（排在既有之後）
+  ├─ detect_market_events   role 分派 ＋ 壓力側偵測 ＋ 截斷前排序（D2）
+  └─ build_event_state_summary  桶構建跳過 decision_visible=False（D1）
+                                      │
+                                      ▼
+  decision_engine.py（呼叫端，:2339）——只加 is_decision_visible 過濾，並證明輸出逐欄相同
+                                      │
+                                      ▼
+  Go: sr_zones.go eventStateSummaryJSON  桶構建跳過 decision_visible=False（D1）
+      ├─ market_event_states / market_event_detections（既有表，多出新型別的列）
+      └─ event_instances / event_transitions（新 family 的鏈，自動走既有路徑）
+```
+
+* Python：`event_engine.py`（主要）、`decision_engine.py`（只加 `is_decision_visible`
+  過濾）、對應測試。**`lifecycle_engine.py` / `scenario_engine.py` / `scoring.py` /
+  `pipeline.py` 都不改。**
+* Go：`internal/api/handler/sr_zones.go` 的 `eventStateSummaryJSON`（跳過不可見事件）；
+  `internal/store/` 與 `internal/analysis/` **不改**——`event_instances` 的
+  `event_family` / `*_event_type` / `direction` 都是 `VARCHAR(80)`／`VARCHAR(20)`
+  自由字串，新 family 走既有寫入路徑。
+* **Migration：不需要。** 三份 068／042 都沒有對 `event_family` / `event_type` 的
+  CHECK constraint（已確認）。這是階段 D 與 A／B／C 最大的不同。
+* 前端：不動。
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| `state_json` ＋ `decision_visible` | 純新增布林鍵 | 缺鍵視為 `True`（既有列都是決策可見的），與 `carried_from_previous` 的處理方式**刻意不同**——那個缺鍵是異常，這個缺鍵有合理預設 |
+| `market_event_states` 多出兩種 `type` / `event_family` 的**列** | 純新增列 | 既有列逐欄不變 |
+| `event_instances` 多出兩個 family 的鏈 | 新列 | 沒有讀者 |
+| `/sr-zones` 的 `event_state_summary.states` | 多出 `decision_visible=false` 的項目 | `active` / `candidates` / 方向桶**不變** |
+| `/sr-zones` 的 event timeline（`sr_zones.go:924`） | 會出現新事件的鏈 | 前端目前沒有讀這個端點，但這是對外可見的變化，要寫進歸檔 |
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| **以為是純新增、其實改了決策**（經方向桶或 `[:8]` 截斷靜默發生） | D1／D2 是針對這條的；驗收條件是 `stock_sr_decisions` 與 `market_event_*` 既有欄位逐欄相同 |
+| Python 與 Go 兩份桶構建對 `decision_visible` 的處理分歧 | 兩邊各補單元測試釘住；旗標值由 Python 單一產生、Go 只讀不推導（比照 `carried_from_previous` 的定案） |
+| 壓力 zone 首次進事件迴圈，掉進支撐側分支 | D5 的 role 分派；支撐側那段程式碼一行不動，用既有測試證明 |
+| 新事件讓 zone key 的漂移型態改變，第一次真的走到 alias 備援 | 不是缺陷。階梯復驗時觀察 `matched_by_alias` 是否首次非零，記進歸檔 |
+| 事件數增加撞上 `[:8]` | D2 的排序保證只擠掉新事件；階梯復驗比對既有事件數 |
+| 回滾 | 純新增（新型別、新旗標、新分支），既有路徑不改。`git revert` 即可；**沒有 migration 要退**，已寫入的新事件列留著無害（沒有讀者） |
+
+##### 測試與驗證策略
+
+* **單元（Python）**：兩個新事件各自的觸發與不觸發；`SUPPORT_RETEST_HELD` 與
+  `REVERSAL_CANDIDATE` 同一根 K 同時成立時互不干擾；壓力 zone 不會產生支撐側事件；
+  新事件不進 `active` / `active_bearish_events` / `active_bullish_events`；
+  `market_state` 在有新事件時仍是 `NORMAL`；截斷排序（構造超過 8 個事件，
+  驗證被擠掉的一定是 `decision_visible=False` 的）。
+* **單元（Go）**：`eventStateSummaryJSON` 對 `decision_visible=false` 的狀態
+  只放進 `states`、不放進其餘六個桶；缺鍵時視為可見。
+* **回歸**：`python/scripts/test.sh`、`backend/scripts/test.sh` 全綠。
+* **端到端（as-of 階梯）**：四檔 21 階同一組（`2330`／`3105`／`6182`／`8150`，
+  2026-07-21～08-18），腳本與基準都是現成的。門檻：
+  1. **決策逐欄相同**——`stock_sr_decisions` 與 `market_event_states` 的既有欄位
+     與階段 C 那輪比對無差異（新增的列除外）。這是本階段唯一真正的驗收條件。
+  2. **zone 身分數不變**（329）、血緣邊不變（57）——新事件不該影響身分層。
+  3. **事件鏈數增加**且新 family 的鏈確實寫進 `event_instances`（否則等於沒做）。
+  4. 六條門檻＋D4 專屬檢查仍然全部 0。
+* **不做 replay 分佈比較**：那是 T-049 的門檻，本階段因為決策逐欄不變而不需要
+  （反過來說，若比對出任何決策差異，就是本階段的界線被打破，不是可以放寬的門檻）。
+
+##### 完成後歸檔（**已完成，2026-08-20**）
+
+* 四個事件的定義、觸發條件、三類讀者與四個過濾點、截斷順序、role 分派 →
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Market Events」的新增列、family lifecycle
+  規則兩列，以及新增的「事件的決策可見性（`decision_visible`）」。
+* `state_json` 的 `decision_visible` 鍵與「缺鍵當 true」（與 `carried_from_previous`
+  刻意相反）→ [`database-schema.md`](./database-schema.md)「market_event_states」欄位表
+  與「event_instances / event_transitions / zone_key_aliases」。
+* event timeline 與 `/sr-zones` payload 會出現只寫不讀的事件鏈 →
+  [`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」。
+* 階梯復驗的新基準數字（事件鏈 128、transitions 250、`ZONE_IDENTITY_ENDED` 8、
+  新型別列數、以及第一輪 7 筆 `defense_lines` 差異的成因）→
+  `sr-zone-scoring.md` 的「實測特性」。
 
 #### 受影響的檔案與資料流
 

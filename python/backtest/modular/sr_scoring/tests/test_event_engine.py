@@ -83,7 +83,9 @@ def test_intraday_reclaim_excludes_reversal_candidate_for_same_zone():
 
     events = detect_market_events([z], current_price=99.0, candle_high=101.0, candle_low=97.0, candle_close=101.0)
 
-    assert _types(events) == {"INTRADAY_RECLAIM"}
+    # SUPPORT_RETEST_HELD 是階段 D 新增的事實事件（decision_visible=False），
+    # 與這條測試要釘的「只掛更明確的 INTRADAY_RECLAIM」互不衝突。
+    assert _types(events) == {"INTRADAY_RECLAIM", "SUPPORT_RETEST_HELD"}
 
 
 def test_high_volume_intraday_break_and_reclaim_keeps_full_event_chain():
@@ -96,6 +98,7 @@ def test_high_volume_intraday_break_and_reclaim_keeps_full_event_chain():
         "HIGH_VOLUME_BREAKDOWN",
         "INTRADAY_RECLAIM",
         "REVERSAL_CANDIDATE",
+        "SUPPORT_RETEST_HELD",
     ]
 
 
@@ -112,6 +115,7 @@ def test_0050_break_reclaim_reversal_resolves_active_bearish_event():
         "HIGH_VOLUME_BREAKDOWN",
         "INTRADAY_RECLAIM",
         "REVERSAL_CANDIDATE",
+        "SUPPORT_RETEST_HELD",
     ]
     assert summary["version"] == "event-lifecycle-p2"
     assert summary["active_bearish_events"] == []
@@ -160,7 +164,7 @@ def test_reversal_candidate_when_support_held_inside():
 
     events = detect_market_events([z], current_price=99.0, candle_high=99.5, candle_low=97.0, candle_close=99.0)
 
-    assert _types(events) == {"REVERSAL_CANDIDATE"}
+    assert _types(events) == {"REVERSAL_CANDIDATE", "SUPPORT_RETEST_HELD"}
     summary = build_event_state_summary(events)
     reversal = summary["candidates"][0]
     assert reversal["state"] == LIFECYCLE_CANDIDATE
@@ -177,11 +181,13 @@ def test_expired_support_held_inside_does_not_emit_reversal_candidate():
 
 
 def test_resistance_zone_does_not_produce_support_events():
+    # 階段 D 之後壓力 zone 會產生 RESISTANCE_BREAKOUT，但**不能**掉進支撐側的三個分支。
     z = _zone(role=ZoneType.RESISTANCE.value, low=98.0, high=100.0, relative_volume=2.0)
 
     events = detect_market_events([z], current_price=99.0, candle_high=101.0, candle_low=96.0, candle_close=97.0)
 
-    assert all(e["type"] == "EXTREME_VOLUME" for e in events) or events == []
+    support_side = {"HIGH_VOLUME_BREAKDOWN", "INTRADAY_RECLAIM", "REVERSAL_CANDIDATE", "SUPPORT_RETEST_HELD"}
+    assert _types(events) & support_side == set()
 
 
 def test_summary_groups_confirmed_and_candidate_states_separately():
@@ -562,3 +568,131 @@ def test_every_state_carries_the_carried_flag():
     second = build_event_state_summary([], previous_states=first["states"])
     for state in second["states"]:
         assert state["carried_from_previous"] is True, "沒有新偵測時抄過來的狀態是重報"
+
+
+# ── 階段 D：SUPPORT_RETEST_HELD / RESISTANCE_BREAKOUT 與只寫不讀的隔離 ──────────
+
+
+def test_resistance_breakout_confirmed_when_closed_above_with_volume():
+    z = _zone(role=ZoneType.RESISTANCE.value, low=98.0, high=100.0, relative_volume=2.0)
+
+    events = detect_market_events([z], current_price=101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+
+    assert _types(events) == {"RESISTANCE_BREAKOUT"}
+    breakout = events[0]
+    assert breakout["state"] == LIFECYCLE_CONFIRMED
+    assert breakout["active"] is True
+    assert breakout["direction"] == "BULLISH"
+    assert breakout["reason_codes"] == ["RESISTANCE_CLOSED_ABOVE"]
+    assert breakout["decision_visible"] is False
+
+
+def test_resistance_breakout_is_candidate_when_only_intrabar():
+    z = _zone(role=ZoneType.RESISTANCE.value, low=98.0, high=100.0, relative_volume=2.0)
+
+    events = detect_market_events([z], current_price=99.0, candle_high=101.0, candle_low=98.5, candle_close=99.0)
+
+    breakout = next(e for e in events if e["type"] == "RESISTANCE_BREAKOUT")
+    assert breakout["state"] == LIFECYCLE_CANDIDATE
+    assert breakout["active"] is False
+    assert breakout["reason_codes"] == ["RESISTANCE_INTRABAR_BREAK"]
+
+
+def test_resistance_breakout_requires_volume_confirmation():
+    # 量能未達門檻且 volume_confirmation 沒有失敗時不成立，與跌破事件同一組門檻。
+    z = _zone(role=ZoneType.RESISTANCE.value, low=98.0, high=100.0, relative_volume=1.0)
+
+    events = detect_market_events([z], current_price=101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+
+    assert "RESISTANCE_BREAKOUT" not in _types(events)
+
+
+def test_support_retest_held_is_a_fact_without_quality_gate():
+    # 與 REVERSAL_CANDIDATE 的分工：後者要 EV／信心／驗證都合格，這個只要「碰到且未收破」。
+    z = _zone(low=98.0, high=100.0, relative_volume=1.0, recent_validation=RecentValidation.EXPIRED.value)
+
+    events = detect_market_events([z], current_price=99.0, candle_high=99.5, candle_low=97.0, candle_close=99.0)
+
+    assert "REVERSAL_CANDIDATE" not in _types(events)
+    retest = next(e for e in events if e["type"] == "SUPPORT_RETEST_HELD")
+    assert retest["event_family"] == "SUPPORT_RETEST"
+    assert retest["decision_visible"] is False
+
+
+def test_support_retest_held_not_emitted_when_closed_below():
+    z = _zone(low=98.0, high=100.0, relative_volume=2.0)
+
+    events = detect_market_events([z], current_price=97.0, candle_high=99.0, candle_low=96.0, candle_close=97.0)
+
+    assert "SUPPORT_RETEST_HELD" not in _types(events)
+
+
+def test_stage_d_events_never_enter_decision_buckets():
+    # 這條是階段 D 的核心：新事件要寫得進 states（持久化），但不能出現在任何決策桶。
+    # 特別是 active_bullish_events——它只看 direction，少了過濾就會改決策。
+    z = _zone(low=98.0, high=100.0, relative_volume=1.0)
+
+    events = detect_market_events([z], current_price=99.0, candle_high=99.5, candle_low=97.0, candle_close=99.0)
+    summary = build_event_state_summary(events)
+
+    assert "SUPPORT_RETEST_HELD" in {state["type"] for state in summary["states"]}
+    for bucket in ("active", "candidates", "confirmed", "resolved", "expired",
+                   "active_bearish_events", "active_bullish_events"):
+        assert "SUPPORT_RETEST_HELD" not in {state["type"] for state in summary[bucket]}
+    assert summary["market_state"] == "NORMAL"
+    assert summary["latest_event_type"] == "REVERSAL_CANDIDATE"
+
+
+def test_truncation_drops_stage_d_events_before_decision_visible_ones():
+    # 舊寫法是 events[:8]（插入序），5 個 zone 各產一組 (REVERSAL_CANDIDATE,
+    # SUPPORT_RETEST_HELD) 時會把第 5 個 zone 的 REVERSAL_CANDIDATE 擠掉——那是決策可見的改變。
+    zones = [_zone(low=98.0 + i * 0.1, high=99.0 + i * 0.1, relative_volume=1.0) for i in range(5)]
+    price = 99.0
+
+    events = detect_market_events(
+        [zones[0]], current_price=price, candle_high=99.5, candle_low=97.0, candle_close=price
+    )
+    assert len(events) == 2  # 前提：單一 zone 會產出一組兩個事件
+
+    events = detect_market_events(
+        zones,
+        current_price=price,
+        candle_high=99.5,
+        candle_low=97.0,
+        candle_close=price,
+    )
+
+    types = [event["type"] for event in events]
+    assert len(types) == 8
+    assert types.count("REVERSAL_CANDIDATE") == 5
+    assert types.count("SUPPORT_RETEST_HELD") == 3
+
+
+def test_carried_state_without_flag_defaults_to_decision_visible():
+    # 階段 D 之前寫進 market_event_states 的列沒有這個鍵，缺鍵必須當成「可見」，
+    # 否則既有事件會整批從決策桶消失。
+    previous = [{
+        "type": "HIGH_VOLUME_BREAKDOWN",
+        "event_family": "SUPPORT_BREAKDOWN",
+        "zone_key": "SUPPORT:98.0000:100.0000",
+        "direction": "BEARISH",
+        "state": LIFECYCLE_CONFIRMED,
+        "active": True,
+    }]
+
+    summary = build_event_state_summary([], previous_states=previous)
+
+    assert [state["type"] for state in summary["active_bearish_events"]] == ["HIGH_VOLUME_BREAKDOWN"]
+    assert summary["states"][0]["decision_visible"] is True
+
+
+def test_stage_d_events_are_excluded_from_event_sequence_projection():
+    # event_sequence 會寫進 stock_sr_decisions.event_sequence_json（決策表既有欄位），
+    # 所以它跟決策桶一樣不能看到階段 D 的事件。
+    from ..decision_engine import _event_sequence
+
+    z = _zone(low=98.0, high=100.0, relative_volume=1.0)
+    events = detect_market_events([z], current_price=99.0, candle_high=99.5, candle_low=97.0, candle_close=99.0)
+
+    assert "SUPPORT_RETEST_HELD" in _types(events)
+    assert [item["type"] for item in _event_sequence(events)] == ["REVERSAL_CANDIDATE"]

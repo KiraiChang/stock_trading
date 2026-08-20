@@ -38,32 +38,82 @@ EVENT_FAMILY_LIFECYCLE_RULES = {
         "gating_states": (LIFECYCLE_ACTIVE,),
         "expires_after_bars": 2,
     },
+    # ── 階段 D 新增的兩個 family（decision_visible=False，見下方 EVENT_TYPE_META） ──
+    "SUPPORT_RETEST": {
+        "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
+        "expires_after_bars": 2,
+    },
+    "RESISTANCE_BREAKOUT": {
+        "gating_states": (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE),
+        "expires_after_bars": 2,
+    },
 }
 
+# 一次分析最多輸出幾個事件。**改這個值等於改決策**（截斷點一移，決策看得到的事件集合
+# 就變了），所以階段 D 沿用原本的 8，只改「先留誰」的順序，見 _truncate_events。
+MAX_EVENTS_PER_ANALYSIS = 8
+
+# decision_visible 缺鍵時的預設。既有四個型別都是決策可見的，而 042 之前寫進
+# market_event_states 的列不會有這個鍵——**缺鍵有合理預設，與 carried_from_previous
+# 「缺鍵是異常」的處理刻意不同**。
+DEFAULT_EVENT_DECISION_VISIBLE = True
+
+# `decision_visible` 是階段 D 的隔離旗標。**它必須是顯式的**：決策端對事件的消費有兩類，
+# 「名字型」（market_state_from_event_states / lifecycle_engine.resolve_event_signal /
+# decision_engine 的 event_types）逐一比對既有型別名，新名字自然落到 NORMAL；但
+# 「方向型」的 active_bearish_events / active_bullish_events **只看 direction**，
+# 而 resolve_lifecycle 對前者取 truthiness 就直接判 lifecycle_phase=BREAKDOWN。
+# 也就是說，一個 active 且帶方向的新事件**不必被任何人認識就會改決策**。
+#
+# 所以隔離不能靠「決策端不認識新名字」，也不靠把 direction 設成 NEUTRAL（那是副作用，
+# 下一個加事件的人不會知道要維持它，而且沒有東西會報錯）。桶構建改成顯式跳過
+# decision_visible=False——Python 在 build_event_state_summary，Go 在
+# sr_zones.go 的 eventStateSummaryJSON（carry-forward 的回程走 Go 那份）。
 EVENT_TYPE_META = {
     "EXTREME_VOLUME": {
         "family": "VOLUME_CONTEXT",
         "direction": "NEUTRAL",
         "default_state": LIFECYCLE_ACTIVE,
         "resolves": (),
+        "decision_visible": True,
     },
     "HIGH_VOLUME_BREAKDOWN": {
         "family": "SUPPORT_BREAKDOWN",
         "direction": "BEARISH",
         "default_state": LIFECYCLE_CANDIDATE,
         "resolves": (),
+        "decision_visible": True,
     },
     "INTRADAY_RECLAIM": {
         "family": "SUPPORT_RECLAIM",
         "direction": "BULLISH",
         "default_state": LIFECYCLE_CONFIRMED,
         "resolves": ("SUPPORT_BREAKDOWN",),
+        "decision_visible": True,
     },
     "REVERSAL_CANDIDATE": {
         "family": "SUPPORT_REVERSAL",
         "direction": "BULLISH",
         "default_state": LIFECYCLE_CANDIDATE,
         "resolves": ("SUPPORT_BREAKDOWN",),
+        "decision_visible": True,
+    },
+    # ── 階段 D 新增：只寫不讀 ──────────────────────────────────────────
+    # resolves 兩個都刻意留空：resolve 會把既有 family 改成 RESOLVED / active=False，
+    # 那是決策可見的改變。「壓力突破是否 resolve 支撐側事件」的語意留給 T-049。
+    "SUPPORT_RETEST_HELD": {
+        "family": "SUPPORT_RETEST",
+        "direction": "BULLISH",
+        "default_state": LIFECYCLE_CONFIRMED,
+        "resolves": (),
+        "decision_visible": False,
+    },
+    "RESISTANCE_BREAKOUT": {
+        "family": "RESISTANCE_BREAKOUT",
+        "direction": "BULLISH",
+        "default_state": LIFECYCLE_CANDIDATE,
+        "resolves": (),
+        "decision_visible": False,
     },
 }
 
@@ -72,6 +122,10 @@ EVENT_ORDER = {
     "HIGH_VOLUME_BREAKDOWN": 20,
     "INTRADAY_RECLAIM": 30,
     "REVERSAL_CANDIDATE": 40,
+    # 新事件排在既有之後：EVENT_ORDER 決定 build_event_state_summary 的合併順序與
+    # latest_event_type，排前面會讓既有事件的相對順序改變。
+    "SUPPORT_RETEST_HELD": 50,
+    "RESISTANCE_BREAKOUT": 60,
 }
 
 
@@ -239,6 +293,42 @@ def _state_allows_gating(event_family: str, state_name: str) -> bool:
     return state_name in set(_lifecycle_rule(event_family).get("gating_states") or ())
 
 
+def _event_decision_visible(event_type: str, explicit_value: Any = None) -> bool:
+    """這個事件型別能不能被決策看到。**這是階段 D 隔離的唯一判準。**"""
+    if explicit_value is not None:
+        return bool(explicit_value)
+    meta = EVENT_TYPE_META.get(event_type, {})
+    return bool(meta.get("decision_visible", DEFAULT_EVENT_DECISION_VISIBLE))
+
+
+def is_decision_visible(event: dict[str, Any]) -> bool:
+    """這一筆事件（或事件狀態）能不能被決策看到。**跨模組的唯一判準。**
+
+    決策端有三個地方要用同一個答案：`build_event_state_summary` 的桶構建、
+    `_truncate_events` 的截斷優先序、以及 `decision_engine._event_sequence`
+    （它會寫進 `stock_sr_decisions.event_sequence_json`，是決策表的既有欄位）。
+    """
+    return _event_decision_visible(str(event.get("type") or ""), event.get("decision_visible"))
+
+
+def _truncate_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """截到 MAX_EVENTS_PER_ANALYSIS，**決策可見的優先留下**。
+
+    原本是 `events[:8]`，也就是照**插入序**截斷——而排序（EVENT_ORDER）發生在截斷之後
+    （build_event_state_summary 才排）。支撐與壓力兩側都會產事件之後，同一個上限要塞
+    更多事件，插入序截斷會**靜默擠掉**後面 zone 的支撐事件，那是決策可見的改變。
+
+    這裡先依「decision_visible 優先、其次插入序」挑出要留的，再**還原成插入序**輸出：
+    當事件全部是決策可見時（新事件出現前的所有情形），結果與 `events[:8]` 逐項相同。
+    """
+    ranked = sorted(
+        enumerate(events),
+        key=lambda pair: (0 if is_decision_visible(pair[1]) else 1, pair[0]),
+    )
+    kept = sorted(index for index, _ in ranked[:MAX_EVENTS_PER_ANALYSIS])
+    return [events[index] for index in kept]
+
+
 def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
     event_type = str(event.get("type") or "UNKNOWN")
     meta = EVENT_TYPE_META.get(event_type, {})
@@ -255,6 +345,7 @@ def normalize_market_event(event: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("lifecycle_state", normalized["state"])
     normalized.setdefault("expires_after_bars", _event_expires_after_bars(event_type, event_family, event.get("expires_after_bars")))
     normalized.setdefault("confirmation_state", "CONFIRMED" if normalized["state"] in (LIFECYCLE_CONFIRMED, LIFECYCLE_ACTIVE) else "PENDING")
+    normalized["decision_visible"] = _event_decision_visible(event_type, event.get("decision_visible"))
     normalized["active"] = bool(normalized.get("active")) and _state_allows_gating(event_family, str(normalized["state"]))
     normalized.setdefault("reason_codes", [event_type])
     return normalized
@@ -307,6 +398,7 @@ def _normalize_previous_event_state(state: dict[str, Any]) -> dict[str, Any]:
             or ("RESOLVED" if state_name == LIFECYCLE_RESOLVED else ("CONFIRMED" if active else "PENDING")),
         )
         normalized.setdefault("reason_codes", reason_codes)
+    normalized["decision_visible"] = _event_decision_visible(event_type, state.get("decision_visible"))
     normalized["carried_from_previous"] = True
     normalized.setdefault("resolved_by", state.get("resolved_by"))
     return normalized
@@ -373,6 +465,8 @@ def build_event_state_summary(
             "reason_codes": list(event.get("reason_codes") or [event_type]),
             "resolved_by": None,
             "price_action_evidence": event.get("price_action_evidence"),
+            # 階段 D 的隔離旗標，要跟著寫進 state_json——Go 端的桶構建讀的就是它。
+            "decision_visible": _event_decision_visible(event_type, event.get("decision_visible")),
             # **兩條路徑都要寫這個旗標**：carry forward 那條在
             # _normalize_previous_event_state 無條件寫 True，這條是「這次真的偵測到」
             # 所以是 False。缺鍵不是「不是 carried」而是**異常**——Go 端據此計數
@@ -396,14 +490,25 @@ def build_event_state_summary(
             target["confirmation_state"] = f"RESOLVED_BY_{event_type}"
             target["reason_codes"] = [*target.get("reason_codes", []), f"RESOLVED_BY_{event_type}"]
 
-    active = [state for state in states.values() if state.get("active")]
-    candidates = [state for state in states.values() if state.get("state") == LIFECYCLE_CANDIDATE]
-    confirmed = [state for state in states.values() if state.get("state") == LIFECYCLE_CONFIRMED]
-    resolved = [state for state in states.values() if state.get("state") == LIFECYCLE_RESOLVED]
-    expired = [state for state in states.values() if state.get("state") == LIFECYCLE_EXPIRED]
+    # **除了 states 之外的每一個桶都只收 decision_visible 的狀態**（階段 D）。
+    # states 保留全部，因為它是持久化的來源——新事件要寫進 market_event_states 與
+    # event_instances，只是不能被決策看到。
+    #
+    # 特別注意 active_bearish / active_bullish：它們**只看 direction**，
+    # lifecycle_engine.resolve_lifecycle 對 active_bearish 取 truthiness 就判
+    # BREAKDOWN。少了這道過濾，一個 active 且帶方向的新事件不必被任何人認識就會改決策。
+    visible = [state for state in states.values() if is_decision_visible(state)]
+    active = [state for state in visible if state.get("active")]
+    candidates = [state for state in visible if state.get("state") == LIFECYCLE_CANDIDATE]
+    confirmed = [state for state in visible if state.get("state") == LIFECYCLE_CONFIRMED]
+    resolved = [state for state in visible if state.get("state") == LIFECYCLE_RESOLVED]
+    expired = [state for state in visible if state.get("state") == LIFECYCLE_EXPIRED]
     active_bearish = [state for state in active if state.get("direction") == "BEARISH"]
     active_bullish = [state for state in active if state.get("direction") == "BULLISH"]
-    latest_type = normalized[-1]["type"] if normalized else None
+    # latest_event_type 同樣只看得見決策可見的事件：新事件的 EVENT_ORDER 排在最後，
+    # 不過濾的話它會頂掉既有事件成為「最新」，而那個值是對外輸出的。
+    visible_normalized = [event for event in normalized if is_decision_visible(event)]
+    latest_type = visible_normalized[-1]["type"] if visible_normalized else None
     return {
         "version": "event-lifecycle-p2",
         "states": list(states.values()),
@@ -428,6 +533,50 @@ def market_state_from_event_states(active_states: list[dict[str, Any]]) -> str:
     if "REVERSAL_CANDIDATE" in active_types:
         return "REVERSAL_CANDIDATE"
     return "NORMAL"
+
+
+def _resistance_zone_events(
+    z: ZoneScore,
+    current_price: float,
+    candle_high: Optional[float],
+    candle_low: Optional[float],
+    candle_close: Optional[float],
+) -> list[dict[str, Any]]:
+    """壓力側事件（階段 D 新增，decision_visible=False）。
+
+    **壓力 zone 在階段 D 之前完全不產生事件**——`detect_market_events` 的迴圈第一行是
+    `if z.role != ZoneType.SUPPORT.value: continue`。這裡刻意寫成獨立的一段，而不是
+    放寬那個守衛：迴圈內既有的三個分支（高量跌破 / UNDERCUT_RECLAIM / REVERSAL_CANDIDATE）
+    **全部假設 support**，放寬守衛會讓壓力 zone 掉進它們，那是決策可見的改變。
+
+    觸發條件鏡像 HIGH_VOLUME_BREAKDOWN，門檻常數沿用不新增。
+    """
+    out: list[dict[str, Any]] = []
+    interaction = zone_interaction(z, current_price, candle_high, candle_low, candle_close)
+    if not interaction["touched"]:
+        return out
+    evidence = interaction["price_action_evidence"]
+    relative_volume = z.relative_volume or 0.0
+    high_volume = relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD or z.volume_confirmation == VolumeConfirmation.FAILED.value
+    broke_out = bool(evidence["closed_above"]) or (candle_high is not None and candle_high > z.price_high)
+    if broke_out and high_volume:
+        confirmed_breakout = bool(evidence["closed_above"])
+        out.append({
+            "type": "RESISTANCE_BREAKOUT",
+            "direction": "BULLISH",
+            "lifecycle_state": LIFECYCLE_CONFIRMED if confirmed_breakout else LIFECYCLE_CANDIDATE,
+            "confirmation_state": "CONFIRMED_CLOSE_ABOVE_ZONE" if confirmed_breakout else "PENDING_CLOSE_CONFIRMATION",
+            "active": confirmed_breakout,
+            "expires_after_bars": 2,
+            "confidence": min(1.0, max(0.45, relative_volume / 3.0)),
+            "zone_ref": event_zone_ref(z, current_price),
+            "price_level": z.price_high,
+            "reason": "壓力區被盤中或收盤突破，且量能放大或量能狀態確認失敗。",
+            "detected_at": "latest_candle",
+            "reason_codes": ["RESISTANCE_CLOSED_ABOVE" if confirmed_breakout else "RESISTANCE_INTRABAR_BREAK"],
+            "price_action_evidence": evidence,
+        })
+    return out
 
 
 def detect_market_events(
@@ -455,6 +604,10 @@ def detect_market_events(
         })
 
     for z in zone_scores:
+        # 依 role 分派到兩段互斥的邏輯。支撐側以下的程式碼與階段 D 之前**逐行相同**。
+        if z.role == ZoneType.RESISTANCE.value:
+            events.extend(_resistance_zone_events(z, current_price, candle_high, candle_low, candle_close))
+            continue
         if z.role != ZoneType.SUPPORT.value:
             continue
         interaction = zone_interaction(z, current_price, candle_high, candle_low, candle_close)
@@ -537,4 +690,25 @@ def detect_market_events(
                 "reason_codes": ["REVERSAL_CANDIDATE_AWAIT_CONFIRMATION"],
                 "price_action_evidence": evidence,
             })
-    return normalize_market_events(events[:8])
+        # ── 階段 D 新增：SUPPORT_RETEST_HELD（decision_visible=False） ──
+        # 這是**事實**：碰到 zone 且沒有收破，不帶任何品質門檻。與上面的
+        # REVERSAL_CANDIDATE 分工——後者是「守住**且** EV／信心／驗證都合格」的方向性
+        # 候選，條件較嚴。兩者是不同 family，同一根 K 同時成立是正常的，互不 resolve。
+        # 放在最後 append，插入序上不會影響任何既有事件。
+        if not evidence["closed_below"]:
+            events.append({
+                "type": "SUPPORT_RETEST_HELD",
+                "direction": "BULLISH",
+                "lifecycle_state": LIFECYCLE_CONFIRMED,
+                "confirmation_state": "CONFIRMED_CLOSE_NOT_BELOW",
+                "active": True,
+                "expires_after_bars": 2,
+                "confidence": min(1.0, max(0.40, z.confidence)),
+                "zone_ref": event_zone_ref(z, current_price),
+                "price_level": z.price_low,
+                "reason": "支撐區被測試且收盤未跌破區間下緣。",
+                "detected_at": "latest_candle",
+                "reason_codes": ["SUPPORT_RETEST_HELD"],
+                "price_action_evidence": evidence,
+            })
+    return normalize_market_events(_truncate_events(events))

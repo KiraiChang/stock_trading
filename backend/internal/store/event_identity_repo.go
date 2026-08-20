@@ -33,6 +33,33 @@ type EventIdentityRepo interface {
 	// 下界：加了就可能漏看歷史最大 seq 而撞唯一索引，而那個代價比多撈幾十列高。
 	// 單一 symbol 實測是數十列的量級，等真的變成問題再處理。
 	ListLatestChains(ctx context.Context, symbol, timeframe string) ([]LiveEvent, error)
+	// ListChains 取某檔某 timeframe 的**所有**事件鏈，供 Event Timeline 顯示
+	// （todo.md T-051）。
+	//
+	// **不能用 ListLatestChains 代替**：那支每個 (zone_scope_key, family) 只回最新一條，
+	// 因為它服務的是寫入端的 seq 分派。timeline 要看的是演進，`seq` 較小的舊鏈同樣要顯示。
+	//
+	// since 為視窗起點，**單位是 K 棒時間（stock_sr_zone_analyses.analyzed_at）**。
+	// 零值代表不設下界。
+	//
+	// **不能拿 event_instances 自己的時間欄位來比。** first_seen_at / last_seen_at /
+	// occurred_at 存的是 as_of 的 **wall clock**（身分層的已知限制之一：那個時間軸量的是
+	// 「我們看了幾次」而不是資料日期），而呼叫端拿到的視窗來自分析的 K 棒日期。
+	// 兩者混用時條件會恆真——過濾看起來有寫，實際上什麼都沒擋掉。
+	//
+	// 納入條件是「**有一步落在視窗內，或這條鏈還沒結束**」。後半是必要的：一條長壽而
+	// 這段期間剛好沒有狀態變化的鏈，在 timeline 上正是最該看到的東西。
+	//
+	// **視窗選的是「哪些鏈」，不是「鏈的哪幾步」**：被選中的鏈一律回完整歷史。
+	// 把鏈從中間切開會失去誕生那一步，而 `from_state IS NULL 恰好等於鏈誕生` 是
+	// event_transitions 的不變式——切一半的鏈會讓讀者以為它是從中途冒出來的。
+	//
+	// 依 first_seen_at 由舊到新排序，讓呼叫端不必再排。
+	ListChains(ctx context.Context, symbol, timeframe string, since time.Time) ([]EventInstance, error)
+	// ListTransitions 取這些鏈的所有轉換，**附帶該次分析的 K 棒時間**。
+	//
+	// 空的 eventUIDs 回空集合而不是「全部」——後者會在鏈清單為空時掃出整張表。
+	ListTransitions(ctx context.Context, eventUIDs []string) ([]EventTransitionView, error)
 	// Apply 把一次分析的結果整批寫入，**單一交易**。
 	//
 	// 兩張表必須一起成功：只寫了 instances 卻沒寫 transitions，鏈的狀態會變成
@@ -260,4 +287,79 @@ func (r *eventIdentityRepo) Apply(ctx context.Context, w EventIdentityWrite) err
 		return fmt.Errorf("event identity: commit: %w", err)
 	}
 	return nil
+}
+
+const listEventChainsSQL = `
+	SELECT e.event_uid, e.symbol, e.timeframe, e.zone_uid, e.zone_scope_key,
+	       e.event_scope, e.event_family, e.seq,
+	       e.root_event_type, e.latest_event_type, e.state, e.active, e.direction,
+	       e.resolved_by, e.first_seen_at, e.last_seen_at, e.ended_at,
+	       e.last_zone_key, e.end_reason
+	FROM event_instances e
+	WHERE e.symbol = ? AND e.timeframe = ?
+`
+
+func (r *eventIdentityRepo) ListChains(
+	ctx context.Context, symbol, timeframe string, since time.Time,
+) ([]EventInstance, error) {
+	query := listEventChainsSQL
+	args := []any{symbol, timeframe}
+	// 視窗比的是**分析的 K 棒時間**，不是 event_instances 自己的 wall-clock 欄位。
+	// 詳見介面上的說明——混用會讓條件恆真。
+	if !since.IsZero() {
+		query += `
+			AND (
+				e.ended_at IS NULL
+				OR EXISTS (
+					SELECT 1 FROM event_transitions t
+					JOIN stock_sr_zone_analyses a ON a.id = t.analysis_id
+					WHERE t.event_uid = e.event_uid AND a.analyzed_at >= ?
+				)
+			)`
+		args = append(args, since)
+	}
+	query += " ORDER BY e.first_seen_at ASC, e.event_uid ASC"
+	var rows []EventInstance
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// EventTransitionView 是 ListTransitions 的回傳：轉換本身 ＋ 它所屬分析的 K 棒時間。
+//
+// **為什麼要多帶這一欄**：`occurred_at` 是 as_of 的 wall clock，而同一份 timeline 裡的
+// `snapshots` 用的是 K 棒日期。兩個軸混在一起畫，整條鏈會擠在「跑分析的那一刻」，
+// 而不是它實際發生的那幾天。顯示層一律用這一欄；`analysis_id` 為 NULL（排程收尾）時
+// 才退回 `occurred_at`。
+type EventTransitionView struct {
+	EventTransition
+	AnalyzedAt sql.NullTime `db:"analyzed_at"`
+}
+
+func (r *eventIdentityRepo) ListTransitions(
+	ctx context.Context, eventUIDs []string,
+) ([]EventTransitionView, error) {
+	// **空集合直接回**：交給 sqlx.In 會產生 `IN ()`，在 postgres 是語法錯誤，
+	// 在 sqlite 則會掃出整張表——兩種都不是呼叫端要的。
+	if len(eventUIDs) == 0 {
+		return nil, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT t.event_uid, t.analysis_id, t.from_state, t.to_state,
+		       t.trigger_event_type, t.reason_codes, t.occurred_at,
+		       a.analyzed_at
+		FROM event_transitions t
+		LEFT JOIN stock_sr_zone_analyses a ON a.id = t.analysis_id
+		WHERE t.event_uid IN (?)
+		ORDER BY t.event_uid ASC, t.occurred_at ASC, t.id ASC
+	`, eventUIDs)
+	if err != nil {
+		return nil, err
+	}
+	var rows []EventTransitionView
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }

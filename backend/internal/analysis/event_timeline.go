@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"database/sql"
 	"encoding/json"
 	"sort"
 	"time"
@@ -8,55 +9,100 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// Event Timeline：把 market_event_states 的**每次分析快照**摺疊成事件鏈（chain）。
+// Event Timeline：把身分層的事件鏈（event_instances ＋ event_transitions）整理成
+// 前端與人工檢查看得懂的形狀。
 //
-// 背景見 docs/todo.md T-045。現在的事件模型以 (zone_key, event_family) 為鍵、
-// 新事件直接覆寫舊的，所以 in-memory 只看得到「當前狀態」，沒有演進歷程。
-// 但每次分析都把完整狀態寫進 market_event_states，**相鄰兩份快照的差異就是一次轉換**——
-// 鏈其實一直都在 DB 裡，只是沒有人把它讀出來。
+// 背景見 docs/todo.md T-045 / T-048 / T-051 與 docs/issue.md I-080。
+//
+// **2026-08-20 起改讀身分層，不再摺疊 market_event_states 的快照。** 舊作法以
+// `(zone_key, event_family)` 為鍵，而 zone 邊界每次由 ATR 重算、role 也會翻轉，
+// 於是同一個 zone 的鏈會被拆成好幾條（實測 329 個身分裡有 102 個漂移過 key）。
+//
+// **不能改成「在讀取時把 zone_key 換算成 zone_uid」**：`market_event_states` 沒有
+// `zone_uid` 欄位，唯一的換算路徑是 `zone_key_aliases`，而它每個身分只留最近 8 筆
+// （實測已有 23 個身分撞頂，見 issue.md I-079）——換算是有損的。寫入端在三段關聯決策裡
+// 已經把這件事做對了，讀取端重算一次只會產生第二份會漂移的事實。
 //
 // **這份資料是 display_chain**：供前端 timeline 顯示與人工檢查用，
 // 不是 Lifecycle Engine 的 runtime 輸入（那需要另補 Go→Python contract，見 T-045）。
 
-// EventTimelineTransition 是鏈上的一次狀態轉換。
+// EventTimelineTransition 是鏈上的一次狀態轉換，直接對應 event_transitions 的一列。
+//
+// 這裡**沒有** `active` 與 `changed`，兩者都是刻意拿掉的：
+//   - `active` 不等於 state，還要通過該 family 的 gating 規則才算數。要逐步重建它，
+//     Go 就得複製一份 gating_states——那是第二份判準，正是 T-048 一路在避免的東西。
+//     鏈層仍然有 `active`（寫入端算好的）。
+//   - `changed` 是舊作法比對相鄰快照推導出來的。現在 `from_state → to_state` 加上
+//     `event_type` 本身就說明了這一步改了什麼，而且是存下來的事實而不是推導。
 type EventTimelineTransition struct {
-	AnalyzedAt      time.Time `json:"analyzed_at"`
-	AnalysisID      uint64    `json:"analysis_id"`
-	State           string    `json:"state"`
-	Active          bool      `json:"active"`
-	EventType       string    `json:"event_type"`
-	LatestEventType string    `json:"latest_event_type"`
-	ResolvedBy      string    `json:"resolved_by,omitempty"`
-	ReasonCodes     []string  `json:"reason_codes,omitempty"`
-	// Changed 列出這一步相對前一步改變了哪些欄位，讓前端不必自己比對。
-	// 第一筆（鏈的起點）為空。
-	Changed []string `json:"changed,omitempty"`
+	// OccurredAt 是這一步所屬分析的 **K 棒時間**，不是跑分析的 wall clock。
+	//
+	// **這件事必須與 snapshots 同軸**：身分層存的 occurred_at 是 as_of 的 wall clock
+	// （已知限制：那個軸量的是「我們看了幾次」），而 snapshots 用的是 K 棒日期。
+	// 兩軸混用時整條鏈會擠在「跑分析的那一刻」——實測 2330 的 28 條鏈會全部顯示成
+	// 在同一秒內發生，而 snapshots 橫跨一個月。
+	// `analysis_id` 為 NULL（排程收尾）時才退回身分層的 occurred_at。
+	OccurredAt time.Time `json:"occurred_at"`
+	// AnalysisID 可為 0：鏈的終結有可能由排程收尾而不是某次分析。
+	AnalysisID uint64 `json:"analysis_id,omitempty"`
+	// FromState 為空代表**這是鏈的誕生**（event_transitions 的不變式）。
+	FromState string `json:"from_state,omitempty"`
+	State     string `json:"state"`
+	// EventType 是觸發這次轉換的事件型別。鏈誕生與 carried 事件過期時可能沒有觸發事件。
+	EventType   string   `json:"event_type,omitempty"`
+	ReasonCodes []string `json:"reason_codes,omitempty"`
 }
 
-// EventTimelineChain 是一條事件鏈：同一個 (zone_key, event_family) 從首次出現到終結。
+// EventTimelineChain 是一條事件鏈：一個 zone 身分 × 一個 family × 一個 seq。
 type EventTimelineChain struct {
-	ZoneKey       string    `json:"zone_key"`
-	EventFamily   string    `json:"event_family"`
-	Direction     string    `json:"direction"`
-	RootEventType string    `json:"root_event_type"`
-	FirstSeenAt   time.Time `json:"first_seen_at"`
-	LastSeenAt    time.Time `json:"last_seen_at"`
-	// Closed 代表鏈已終結（RESOLVED / EXPIRED）。未終結的鏈仍可能繼續演進。
-	Closed      bool                      `json:"closed"`
-	FinalState  string                    `json:"final_state"`
+	EventUID string `json:"event_uid"`
+	// ZoneUID 為 nil 代表 SYMBOL scope 的事件（不屬於任何 zone）。
+	//
+	// **是指標而不是 string + omitempty**：後者會讓 SYMBOL scope 時整個鍵消失，
+	// 而消費端很自然會寫「欄位存在但為 null ＝ SYMBOL scope」——鍵直接不見會讓那個
+	// 判斷靜默地走到 undefined 分支。DB 那一層本來就是 nullable，對外就照實表達成 null。
+	ZoneUID *string `json:"zone_uid"`
+	// ZoneKey 是**最近一次觀測到時事件帶的 key**（last_zone_key），只供人工比對。
+	// **它不再是鏈的身分**——那是 zone_uid 的工作。同樣可為 null（SYMBOL scope 沒有 key）。
+	ZoneKey         *string   `json:"zone_key"`
+	EventScope      string    `json:"event_scope"`
+	EventFamily     string    `json:"event_family"`
+	Seq             int       `json:"seq"`
+	Direction       string    `json:"direction"`
+	RootEventType   string    `json:"root_event_type"`
+	LatestEventType string    `json:"latest_event_type"`
+	FirstSeenAt     time.Time `json:"first_seen_at"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	// Closed 代表鏈已終結。未終結的鏈仍可能繼續演進。
+	Closed     bool   `json:"closed"`
+	Active     bool   `json:"active"`
+	FinalState string `json:"final_state"`
+	ResolvedBy string `json:"resolved_by,omitempty"`
+	// EndReason：RESOLVED / EXPIRED / ZONE_IDENTITY_ENDED。
+	//
+	// **ZONE_IDENTITY_ENDED 要看得出來**：那是「zone 因 SPLIT/MERGE/RESHAPE 終止，
+	// 所以鏈跟著收攤」，不是事件自己走完生命週期。畫成一般結束會誤導。
+	EndReason   string                    `json:"end_reason,omitempty"`
 	Transitions []EventTimelineTransition `json:"transitions"`
 }
 
 // EventTimeline 是一個標的的完整輸出。
 type EventTimeline struct {
-	Symbol    string               `json:"symbol"`
-	Timeframe string               `json:"timeframe"`
-	Chains    []EventTimelineChain `json:"chains"`
+	Symbol    string `json:"symbol"`
+	Timeframe string `json:"timeframe"`
+	// IdentitySince 是身分層對這檔最早的觀測時間。
+	//
+	// **必須揭露**：事件鏈是從 migration 068 才開始寫的，更早的分析沒有鏈資料，而且
+	// 刻意不回填（回填要解的正是「兩個舊 key 是不是同一個 zone」，那是身分層本身要建的
+	// 能力）。少了這個欄位，「這段期間沒有鏈」與「這段期間沒有事件」在畫面上分不開。
+	// 沒有任何鏈時為 nil。
+	IdentitySince *time.Time           `json:"identity_since"`
+	Chains        []EventTimelineChain `json:"chains"`
 	// Snapshots 是這段期間實際存在的分析次數與時間點。
 	//
-	// **必須誠實揭露**：timeline 的解析度等於 SR 分析的執行頻率，而目前沒有任何排程
-	// 會產生分析（見 T-045 前置條件），所以鏈上的空白**不代表那段期間沒有事件**，
-	// 只代表那段期間沒有分析。少了這個欄位，空白會被讀成「風平浪靜」。
+	// **必須誠實揭露**：timeline 的解析度等於 SR 分析的執行頻率，所以鏈上的空白
+	// **不代表那段期間沒有事件**，只代表那段期間沒有分析。分析排程見 todo.md T-052
+	// （平日 17:00 與 22:00 各一次，預設關閉）。
 	Snapshots []EventTimelineSnapshot `json:"snapshots"`
 }
 
@@ -68,27 +114,15 @@ type EventTimelineSnapshot struct {
 	GapDays int `json:"gap_days"`
 }
 
-// 終結狀態：到這兩個狀態之後，同一個 (zone_key, event_family) 再出現算新的一條鏈。
-// 值與 python/backtest/modular/sr_scoring/event_engine.py 的 LIFECYCLE_* 對齊。
-const (
-	eventStateResolved = "RESOLVED"
-	eventStateExpired  = "EXPIRED"
-)
-
-func isClosedEventState(state string) bool {
-	return state == eventStateResolved || state == eventStateExpired
-}
-
-// BuildEventTimeline 把狀態快照摺疊成事件鏈。
+// BuildEventTimeline 把身分層的鏈與轉換整理成對外形狀。
 //
-// 輸入必須是同一個 (symbol, timeframe) 的列，順序不拘——函式會自己依
-// (analyzed_at, analysis_id) 穩定排序，因為摺疊結果依賴順序決定性。
+// chains / transitions 來自 EventIdentityRepo 的 ListChains / ListTransitions，
+// 順序不拘——函式會自己排序，因為輸出的決定性不該依賴 SQL 的排序。
 // analyses 是這段期間**所有**分析的時間點，用來產生 Snapshots 與 gap。
-// 傳 nil 會退化成「由 rows 推導」——那會漏掉「跑了分析但沒有任何事件」的次數，
-// **只供單元測試使用**；正式路徑一定要帶（handler 會查 ListAnalysisSnapshots）。
 func BuildEventTimeline(
 	symbol, timeframe string,
-	rows []store.MarketEventState,
+	chains []store.EventInstance,
+	transitions []store.EventTransitionView,
 	analyses []store.AnalysisSnapshot,
 ) EventTimeline {
 	out := EventTimeline{
@@ -98,178 +132,123 @@ func BuildEventTimeline(
 		Snapshots: []EventTimelineSnapshot{},
 	}
 
-	sorted := make([]store.MarketEventState, len(rows))
-	copy(sorted, rows)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		a, b := sorted[i], sorted[j]
-		if !a.AnalyzedAt.Equal(b.AnalyzedAt) {
-			return a.AnalyzedAt.Before(b.AnalyzedAt)
-		}
-		if a.AnalysisID != b.AnalysisID {
-			return a.AnalysisID < b.AnalysisID
-		}
-		if a.ZoneKey != b.ZoneKey {
-			return a.ZoneKey < b.ZoneKey
-		}
-		if a.EventFamily != b.EventFamily {
-			return a.EventFamily < b.EventFamily
-		}
-		return a.ID < b.ID
-	})
+	out.Snapshots = buildTimelineSnapshots(analyses)
 
-	// 依分析分組：一次分析 ＝ 一份完整快照。
-	type snapshot struct {
-		analysisID uint64
-		analyzedAt time.Time
-		states     []store.MarketEventState
+	byUID := map[string][]EventTimelineTransition{}
+	for _, t := range transitions {
+		byUID[t.EventUID] = append(byUID[t.EventUID], EventTimelineTransition{
+			OccurredAt:  transitionTime(t),
+			AnalysisID:  uint64(t.AnalysisID.Int64),
+			FromState:   t.FromState.String,
+			State:       t.ToState,
+			EventType:   t.TriggerEventType.String,
+			ReasonCodes: decodeReasonCodes(t.ReasonCodes),
+		})
 	}
-	var snapshots []snapshot
-	for _, row := range sorted {
-		if n := len(snapshots); n > 0 && snapshots[n-1].analysisID == row.AnalysisID {
-			snapshots[n-1].states = append(snapshots[n-1].states, row)
-			continue
-		}
-		snapshots = append(snapshots, snapshot{
-			analysisID: row.AnalysisID,
-			analyzedAt: row.AnalyzedAt,
-			states:     []store.MarketEventState{row},
+	for uid := range byUID {
+		steps := byUID[uid]
+		sort.SliceStable(steps, func(i, j int) bool {
+			return steps[i].OccurredAt.Before(steps[j].OccurredAt)
 		})
 	}
 
-	// Snapshots 一律以「所有分析」為準，而不是有事件的那幾次。
-	// **實測 0050 有 14 次分析但只有 11 次留下事件狀態列**——用 rows 推導會把
-	// 那 3 次沒有事件的分析報成「沒有觀測」，而這個欄位正是 gap 揭露的唯一依據。
-	type snapPoint struct {
-		id uint64
-		at time.Time
-	}
-	points := make([]snapPoint, 0, len(analyses))
-	if len(analyses) > 0 {
-		for _, a := range analyses {
-			points = append(points, snapPoint{a.ID, a.AnalyzedAt})
+	sorted := make([]store.EventInstance, len(chains))
+	copy(sorted, chains)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		if !a.FirstSeenAt.Equal(b.FirstSeenAt) {
+			return a.FirstSeenAt.Before(b.FirstSeenAt)
 		}
-	} else {
-		for _, s := range snapshots {
-			points = append(points, snapPoint{s.analysisID, s.analyzedAt})
-		}
-	}
-	sort.SliceStable(points, func(i, j int) bool {
-		if !points[i].at.Equal(points[j].at) {
-			return points[i].at.Before(points[j].at)
-		}
-		return points[i].id < points[j].id
+		return a.EventUID < b.EventUID
 	})
 
+	for _, c := range sorted {
+		steps := byUID[c.EventUID]
+		if steps == nil {
+			// 鏈存在但沒有任何轉換，代表寫入端只寫了 instances 沒寫 transitions——
+			// 那是 Apply 的單一交易應該擋掉的情況。這裡不吞掉：鏈照樣輸出（空 transitions），
+			// 讓它在畫面上看得見，而不是靜靜消失。
+			steps = []EventTimelineTransition{}
+		}
+		// 鏈的起訖同樣要落在 K 棒軸上，否則鏈的長度會變成「跑了幾秒分析」。
+		// 沒有任何步驟時只好退回身分層存的 wall clock——那是上面說的降級情況。
+		firstSeen, lastSeen := c.FirstSeenAt, c.LastSeenAt
+		if len(steps) > 0 {
+			firstSeen, lastSeen = steps[0].OccurredAt, steps[len(steps)-1].OccurredAt
+		}
+		out.Chains = append(out.Chains, EventTimelineChain{
+			EventUID:        c.EventUID,
+			ZoneUID:         nullableString(c.ZoneUID),
+			ZoneKey:         nullableString(c.LastZoneKey),
+			EventScope:      c.EventScope,
+			EventFamily:     c.EventFamily,
+			Seq:             c.Seq,
+			Direction:       c.Direction,
+			RootEventType:   c.RootEventType,
+			LatestEventType: c.LatestEventType,
+			FirstSeenAt:     firstSeen,
+			LastSeenAt:      lastSeen,
+			Closed:          c.EndedAt.Valid,
+			Active:          c.Active,
+			FinalState:      c.State,
+			ResolvedBy:      c.ResolvedBy.String,
+			EndReason:       c.EndReason.String,
+			Transitions:     steps,
+		})
+		if out.IdentitySince == nil || firstSeen.Before(*out.IdentitySince) {
+			at := firstSeen
+			out.IdentitySince = &at
+		}
+	}
+	return out
+}
+
+// transitionTime 取這一步該顯示的時間：優先用所屬分析的 K 棒時間。
+func transitionTime(t store.EventTransitionView) time.Time {
+	if t.AnalyzedAt.Valid {
+		return t.AnalyzedAt.Time
+	}
+	return t.OccurredAt
+}
+
+// buildTimelineSnapshots 產生分析次數與 gap。
+//
+// **一律以「所有分析」為準**，而不是有事件的那幾次：實測 0050 有 14 次分析但只有 11 次
+// 留下事件列，用事件推導會把那 3 次報成「沒有觀測」，而這正是 gap 揭露的唯一依據。
+func buildTimelineSnapshots(analyses []store.AnalysisSnapshot) []EventTimelineSnapshot {
+	points := make([]store.AnalysisSnapshot, len(analyses))
+	copy(points, analyses)
+	sort.SliceStable(points, func(i, j int) bool {
+		if !points[i].AnalyzedAt.Equal(points[j].AnalyzedAt) {
+			return points[i].AnalyzedAt.Before(points[j].AnalyzedAt)
+		}
+		return points[i].ID < points[j].ID
+	})
+
+	out := make([]EventTimelineSnapshot, 0, len(points))
 	var prevAt time.Time
 	for i, pt := range points {
 		gap := 0
 		if i > 0 {
-			gap = int(pt.at.Sub(prevAt).Hours() / 24)
+			gap = int(pt.AnalyzedAt.Sub(prevAt).Hours() / 24)
 		}
-		out.Snapshots = append(out.Snapshots, EventTimelineSnapshot{
-			AnalysisID: pt.id,
-			AnalyzedAt: pt.at,
+		out = append(out, EventTimelineSnapshot{
+			AnalysisID: pt.ID,
+			AnalyzedAt: pt.AnalyzedAt,
 			GapDays:    gap,
 		})
-		prevAt = pt.at
+		prevAt = pt.AnalyzedAt
 	}
-
-	type chainKey struct{ zoneKey, family string }
-	// open 指向 chains 裡尚未終結的那一條；終結後從 open 移除。
-	open := map[chainKey]int{}
-	// last 指向該鍵最近一條鏈（不論是否已終結），用來辨識墓碑重複回報。
-	//
-	// **這是實測真實資料才發現的**：事件終結後，狀態表會把那筆 EXPIRED／RESOLVED
-	// 一直帶在後續每一份快照裡（0050 的 SUPPORT:92.1361:100.5139 從 7/23 EXPIRED 之後，
-	// 8/03～8/12 每份快照都還在回報同一筆）。若把「已終結的鍵再出現」一律當成新事件，
-	// 每份快照都會生出一條只有一筆 EXPIRED 的垃圾鏈。
-	// 規則因此是：**只有非終結狀態才會開新鏈**，終結狀態只是墓碑。
-	last := map[chainKey]int{}
-	chains := []EventTimelineChain{}
-
-	for _, s := range snapshots {
-		for _, st := range s.states {
-			key := chainKey{st.ZoneKey, st.EventFamily}
-			step := EventTimelineTransition{
-				AnalyzedAt:      s.analyzedAt,
-				AnalysisID:      s.analysisID,
-				State:           st.State,
-				Active:          st.Active,
-				EventType:       st.EventType,
-				LatestEventType: st.LatestEventType,
-				ResolvedBy:      st.ResolvedBy.String,
-				ReasonCodes:     decodeReasonCodes(st.ReasonCodes),
-			}
-
-			idx, ok := open[key]
-			if !ok {
-				// 已終結的鍵又回報終結狀態，多半是墓碑（狀態表會把終結狀態一直帶著）。
-				// **但不能一律當墓碑**：終結之後仍可能有真實的狀態變化，最典型的是
-				// RESOLVED 老化成 EXPIRED——`_normalize_previous_event_state` 在
-				// age_bars 達門檻時會把 carried 的 RESOLVED 翻成 EXPIRED
-				// （event_engine.py 的 expired 判定）。一律吞掉的話，鏈的 final_state
-				// 會永遠停在 RESOLVED，與 DB 裡的最新狀態矛盾。
-				// 所以只有**與前一步完全相同**才算墓碑。
-				if isClosedEventState(st.State) {
-					if prev, seen := last[key]; seen {
-						prevChain := &chains[prev]
-						lastStep := prevChain.Transitions[len(prevChain.Transitions)-1]
-						if changed := diffTransition(lastStep, step); len(changed) == 0 {
-							prevChain.LastSeenAt = s.analyzedAt
-							continue
-						} else {
-							// 有變化：接在同一條鏈上，讓終結後的演進仍然看得見。
-							step.Changed = changed
-							prevChain.Transitions = append(prevChain.Transitions, step)
-							prevChain.LastSeenAt = s.analyzedAt
-							prevChain.FinalState = st.State
-							continue
-						}
-					}
-					// 從未見過這個鍵、第一次看到就已終結：我們是在事件結束後才開始觀測，
-					// 仍要記一條（已終結的）鏈，否則這段歷史會完全消失。
-				}
-				chains = append(chains, EventTimelineChain{
-					ZoneKey:       st.ZoneKey,
-					EventFamily:   st.EventFamily,
-					Direction:     st.Direction,
-					RootEventType: st.RootEventType,
-					FirstSeenAt:   s.analyzedAt,
-					LastSeenAt:    s.analyzedAt,
-					FinalState:    st.State,
-					Transitions:   []EventTimelineTransition{step},
-				})
-				idx = len(chains) - 1
-				last[key] = idx
-				if isClosedEventState(st.State) {
-					chains[idx].Closed = true
-				} else {
-					open[key] = idx
-				}
-				continue
-			}
-
-			chain := &chains[idx]
-			last := chain.Transitions[len(chain.Transitions)-1]
-			changed := diffTransition(last, step)
-			chain.LastSeenAt = s.analyzedAt
-			chain.FinalState = st.State
-			// **同狀態不產生 transition**：分析每天跑一次，沒有變化的日子若都記一筆，
-			// 鏈會被「什麼都沒發生」淹沒。
-			if len(changed) == 0 {
-				continue
-			}
-			step.Changed = changed
-			chain.Transitions = append(chain.Transitions, step)
-			if isClosedEventState(st.State) {
-				chain.Closed = true
-				delete(open, key)
-			}
-		}
-	}
-
-	out.Chains = chains
 	return out
+}
+
+// nullableString 把 DB 的可空字串照實對應成「值或 null」，不折成空字串。
+func nullableString(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	out := v.String
+	return &out
 }
 
 // decodeReasonCodes：reason_codes 存的是 JSON 陣列字串。解析失敗回 nil 而不是報錯——
@@ -283,24 +262,4 @@ func decodeReasonCodes(raw store.RawJSON) []string {
 		return nil
 	}
 	return codes
-}
-
-// diffTransition 回傳這一步相對前一步改變的欄位名。
-// 只看語意上代表「事件推進」的欄位——confidence、price_level 這類數值每次分析都會微幅浮動，
-// 納入比對會讓每一天都變成一次 transition，鏈就失去可讀性。
-func diffTransition(prev, next EventTimelineTransition) []string {
-	var changed []string
-	if prev.State != next.State {
-		changed = append(changed, "state")
-	}
-	if prev.Active != next.Active {
-		changed = append(changed, "active")
-	}
-	if prev.LatestEventType != next.LatestEventType {
-		changed = append(changed, "latest_event_type")
-	}
-	if prev.ResolvedBy != next.ResolvedBy {
-		changed = append(changed, "resolved_by")
-	}
-	return changed
 }

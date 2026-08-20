@@ -954,21 +954,45 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 		opts.MaxAnalyses = n
 	}
 
-	rows, err := h.repo.ListMarketEventStateHistory(c.Request.Context(), opts)
-	if err != nil {
-		serverError(c, h.log, err, "sr-zones: event timeline")
-		return
-	}
-	// 另外查「所有分析」：沒有事件的分析不會在 market_event_states 留下任何列，
-	// 只靠 rows 推導 snapshots 會把它們報成「沒有觀測」（實測 0050 有 14 次分析、
-	// 只有 11 次留下事件列）。gap 揭露的正確性依賴這一查。
+	// **先查分析再查鏈**：`max_analyses` 的語意是「回溯幾次分析」，所以它同時決定了
+	// 鏈的視窗——最舊那次分析的時間就是視窗起點。少了這一步，鏈會不受參數控制地
+	// 撈出全部歷史（分析排程 T-052 上線後會愈長愈大），而 snapshots 卻只有 N 筆，
+	// 兩者的時間範圍對不起來。
+	//
+	// 「所有分析」也是 gap 揭露的唯一依據：沒有事件的分析在事件表裡不會留下任何列，
+	// 用鏈推導會把它們報成「沒有觀測」（實測 0050 有 14 次分析、只有 11 次留下事件）。
 	analyses, err := h.repo.ListAnalysisSnapshots(c.Request.Context(), opts)
 	if err != nil {
 		serverError(c, h.log, err, "sr-zones: event timeline analyses")
 		return
 	}
+	var since time.Time
+	if len(analyses) > 0 {
+		since = analyses[0].AnalyzedAt // ListAnalysisSnapshots 回的是最近 N 筆、依時間遞增
+	}
 
-	timeline := analysis.BuildEventTimeline(symbol, timeframe, rows, analyses)
+	// **鏈來自身分層，不再摺疊 market_event_states**（T-051）。未注入 eventIdentity 時
+	// 回空鏈——那與「這檔還沒有任何鏈」在畫面上一樣，但 snapshots 仍會照常揭露分析次數。
+	var chains []store.EventInstance
+	var transitions []store.EventTransitionView
+	if h.eventIdentity != nil {
+		chains, err = h.eventIdentity.ListChains(c.Request.Context(), symbol, timeframe, since)
+		if err != nil {
+			serverError(c, h.log, err, "sr-zones: event timeline chains")
+			return
+		}
+		uids := make([]string, 0, len(chains))
+		for i := range chains {
+			uids = append(uids, chains[i].EventUID)
+		}
+		transitions, err = h.eventIdentity.ListTransitions(c.Request.Context(), uids)
+		if err != nil {
+			serverError(c, h.log, err, "sr-zones: event timeline transitions")
+			return
+		}
+	}
+
+	timeline := analysis.BuildEventTimeline(symbol, timeframe, chains, transitions, analyses)
 	c.JSON(http.StatusOK, timeline)
 }
 

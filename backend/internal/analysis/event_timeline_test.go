@@ -2,159 +2,226 @@ package analysis
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/trading/backend/internal/store"
 )
 
+// Event Timeline 的單元測試（todo.md T-051）。
+//
+// **2026-08-20 改讀身分層後，原本那批「摺疊快照」的測試整批移除了**——墓碑重複、
+// 相鄰快照 diff、終結後開新鏈之類的情況全部消失，因為鏈的邊界不再是讀取時推導出來的，
+// 而是 event_instances / event_transitions 存下來的事實。留下來的是 snapshots／gap
+// 那幾條（與事件無關，換來源不影響）。
+
 func timelineDay(d int) time.Time {
-	return time.Date(2026, 8, d, 0, 0, 0, 0, time.UTC)
+	return time.Date(2026, 8, d, 13, 30, 0, 0, time.UTC)
 }
 
-type stateOpt func(*store.MarketEventState)
-
-func withResolvedBy(by string) stateOpt {
-	return func(s *store.MarketEventState) {
-		s.ResolvedBy = store.NullString{NullString: sql.NullString{String: by, Valid: true}}
-	}
-}
-func withLatestType(t string) stateOpt {
-	return func(s *store.MarketEventState) { s.LatestEventType = t }
-}
-func withActive(a bool) stateOpt {
-	return func(s *store.MarketEventState) { s.Active = a }
-}
-func withZone(z string) stateOpt {
-	return func(s *store.MarketEventState) { s.ZoneKey = z }
-}
-func withFamily(f string) stateOpt {
-	return func(s *store.MarketEventState) { s.EventFamily = f }
-}
-
-// st 造一列狀態快照。預設是同一個 zone／family，讓測試只需標出真正在變的欄位。
-func st(analysisID uint64, at time.Time, state string, opts ...stateOpt) store.MarketEventState {
-	s := store.MarketEventState{
-		AnalysisID:      analysisID,
+func chain(uid, family string, seq int, first, last time.Time, opts ...func(*store.EventInstance)) store.EventInstance {
+	c := store.EventInstance{
+		EventUID:        uid,
 		Symbol:          "2330",
 		Timeframe:       "1d",
-		AnalyzedAt:      at,
-		ZoneKey:         "S-1000",
-		EventFamily:     "SUPPORT_RECLAIM",
-		EventType:       "INTRADAY_RECLAIM",
-		RootEventType:   "INTRADAY_RECLAIM",
-		LatestEventType: "INTRADAY_RECLAIM",
-		Direction:       "BULLISH",
-		State:           state,
-		Active:          state == "ACTIVE" || state == "CONFIRMED",
-		ReasonCodes:     store.RawJSON(`["CLOSE_RECLAIM"]`),
+		ZoneUID:         sql.NullString{String: "Z-" + uid, Valid: true},
+		ZoneScopeKey:    "Z-" + uid,
+		EventScope:      "ZONE",
+		EventFamily:     family,
+		Seq:             seq,
+		RootEventType:   "HIGH_VOLUME_BREAKDOWN",
+		LatestEventType: "HIGH_VOLUME_BREAKDOWN",
+		State:           "CONFIRMED",
+		Active:          true,
+		Direction:       "BEARISH",
+		FirstSeenAt:     first,
+		LastSeenAt:      last,
+		LastZoneKey:     sql.NullString{String: "SUPPORT:98.0000:100.0000", Valid: true},
 	}
 	for _, o := range opts {
-		o(&s)
+		o(&c)
 	}
-	return s
+	return c
 }
 
-// 分析每天都跑，但多數日子事件沒有變化。若每份快照都記一筆 transition，
-// 鏈會被「什麼都沒發生」淹沒而失去可讀性。
-func TestBuildEventTimelineSkipsUnchangedSnapshots(t *testing.T) {
-	tl := BuildEventTimeline("2330", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "CANDIDATE"),
-		st(2, timelineDay(2), "CANDIDATE"),
-		st(3, timelineDay(3), "CANDIDATE"),
-	}, nil)
+func closedChain(reason string) func(*store.EventInstance) {
+	return func(c *store.EventInstance) {
+		c.State = "EXPIRED"
+		c.Active = false
+		c.EndedAt = sql.NullTime{Time: timelineDay(9), Valid: true}
+		c.EndReason = sql.NullString{String: reason, Valid: true}
+	}
+}
+
+// step 產生一筆轉換。**預設帶 AnalyzedAt（K 棒時間）**，因為顯示層一律用它；
+// occurred_at 刻意設成一個明顯不同的 wall clock，好讓「用錯軸」的測試會紅。
+func step(uid, from, to string, at time.Time, opts ...func(*store.EventTransitionView)) store.EventTransitionView {
+	t := store.EventTransitionView{
+		EventTransition: store.EventTransition{
+			EventUID:    uid,
+			ToState:     to,
+			OccurredAt:  wallClock,
+			ReasonCodes: store.RawJSON(`["SUPPORT_CLOSED_BELOW"]`),
+		},
+		AnalyzedAt: sql.NullTime{Time: at, Valid: true},
+	}
+	if from != "" {
+		t.FromState = sql.NullString{String: from, Valid: true}
+	}
+	for _, o := range opts {
+		o(&t)
+	}
+	return t
+}
+
+// wallClock 代表「跑分析的那一刻」——身分層存在 occurred_at / first_seen_at 的東西。
+// 它與 K 棒日期差了好幾天，任何把兩者搞混的實作都會在斷言上炸開。
+var wallClock = time.Date(2026, 9, 30, 9, 36, 55, 0, time.UTC)
+
+func TestBuildEventTimelineMapsChainsAndTransitions(t *testing.T) {
+	chains := []store.EventInstance{chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(3))}
+	transitions := []store.EventTransitionView{
+		step("E1", "", "CANDIDATE", timelineDay(1)),
+		step("E1", "CANDIDATE", "CONFIRMED", timelineDay(2)),
+	}
+
+	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil)
 
 	if len(tl.Chains) != 1 {
 		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
 	}
-	if got := len(tl.Chains[0].Transitions); got != 1 {
-		t.Errorf("transition 數 = %d, want 1——三份相同快照只該有起點那一筆", got)
+	c := tl.Chains[0]
+	if c.EventUID != "E1" || c.ZoneUID == nil || *c.ZoneUID != "Z-E1" || c.Seq != 1 {
+		t.Fatalf("鏈身分不對：%+v", c)
 	}
-	// 但 last_seen_at 要跟著推進，否則會看起來像鏈在第一天就停了
-	if !tl.Chains[0].LastSeenAt.Equal(timelineDay(3)) {
-		t.Errorf("LastSeenAt = %v, want %v", tl.Chains[0].LastSeenAt, timelineDay(3))
+	if c.ZoneKey == nil || *c.ZoneKey != "SUPPORT:98.0000:100.0000" {
+		t.Errorf("zone_key 應輸出 last_zone_key（人工比對用），得到 %v", c.ZoneKey)
 	}
-	if len(tl.Snapshots) != 3 {
-		t.Errorf("snapshot 數 = %d, want 3——快照本身要全數揭露", len(tl.Snapshots))
+	if len(c.Transitions) != 2 {
+		t.Fatalf("transition 數 = %d, want 2", len(c.Transitions))
 	}
-}
-
-func TestBuildEventTimelineRecordsTransitions(t *testing.T) {
-	cases := []struct {
-		name        string
-		second      store.MarketEventState
-		wantChanged []string
-	}{
-		{"state 改變", st(2, timelineDay(2), "CONFIRMED"), []string{"state", "active"}},
-		{"只有 active 改變", st(2, timelineDay(2), "CANDIDATE", withActive(true)), []string{"active"}},
-		{"latest_event_type 改變", st(2, timelineDay(2), "CANDIDATE", withLatestType("CLOSE_RECLAIM")), []string{"latest_event_type"}},
-		{"resolved_by 出現", st(2, timelineDay(2), "CANDIDATE", withResolvedBy("HIGH_VOLUME_BREAKDOWN")), []string{"resolved_by"}},
+	// **from_state 留白 ＝ 鏈的誕生**，這是 event_transitions 的不變式。
+	if c.Transitions[0].FromState != "" {
+		t.Errorf("誕生那步的 from_state 應留白，得到 %q", c.Transitions[0].FromState)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tl := BuildEventTimeline("2330", "1d", []store.MarketEventState{
-				st(1, timelineDay(1), "CANDIDATE"), tc.second,
-			}, nil)
-			if len(tl.Chains) != 1 || len(tl.Chains[0].Transitions) != 2 {
-				t.Fatalf("want 1 chain / 2 transitions, got %d chain", len(tl.Chains))
-			}
-			got := tl.Chains[0].Transitions[1].Changed
-			if len(got) != len(tc.wantChanged) {
-				t.Fatalf("changed = %v, want %v", got, tc.wantChanged)
-			}
-			for i, w := range tc.wantChanged {
-				if got[i] != w {
-					t.Errorf("changed[%d] = %q, want %q", i, got[i], w)
-				}
-			}
-		})
+	if c.Transitions[1].FromState != "CANDIDATE" || c.Transitions[1].State != "CONFIRMED" {
+		t.Errorf("第二步應是 CANDIDATE→CONFIRMED，得到 %+v", c.Transitions[1])
+	}
+	if tl.IdentitySince == nil || !tl.IdentitySince.Equal(timelineDay(1)) {
+		t.Errorf("identity_since = %v, want %v", tl.IdentitySince, timelineDay(1))
 	}
 }
 
-// 終結後同一個 (zone, family) 再出現算**新的一條鏈**，不是把舊鏈接下去。
-// 否則「這個 zone 被測試過三次」會被摺成一條看不出次數的長鏈。
-func TestBuildEventTimelineStartsNewChainAfterClose(t *testing.T) {
-	for _, closing := range []string{"RESOLVED", "EXPIRED"} {
-		t.Run(closing, func(t *testing.T) {
-			tl := BuildEventTimeline("2330", "1d", []store.MarketEventState{
-				st(1, timelineDay(1), "CANDIDATE"),
-				st(2, timelineDay(2), closing),
-				st(3, timelineDay(3), "CANDIDATE"),
-			}, nil)
-			if len(tl.Chains) != 2 {
-				t.Fatalf("chain 數 = %d, want 2——終結後再出現應是新的一條", len(tl.Chains))
-			}
-			if !tl.Chains[0].Closed || tl.Chains[0].FinalState != closing {
-				t.Errorf("第一條鏈未標記終結：closed=%v final=%q", tl.Chains[0].Closed, tl.Chains[0].FinalState)
-			}
-			if tl.Chains[1].Closed {
-				t.Error("第二條鏈不該是終結狀態")
-			}
-			if !tl.Chains[1].FirstSeenAt.Equal(timelineDay(3)) {
-				t.Errorf("第二條鏈 FirstSeenAt = %v, want %v", tl.Chains[1].FirstSeenAt, timelineDay(3))
-			}
-		})
+// **同一個 (zone, family) 的 seq 是先後兩條鏈，不能合併。** 前一條終結之後再出現同家族
+// 事件，寫入端就是當成新的一條——讀取端合併會讓「這個 zone 被測試過幾次」永遠答錯。
+func TestBuildEventTimelineKeepsSeqAsSeparateChains(t *testing.T) {
+	chains := []store.EventInstance{
+		chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(3), closedChain("EXPIRED")),
+		chain("E2", "SUPPORT_BREAKDOWN", 2, timelineDay(5), timelineDay(6)),
+	}
+	transitions := []store.EventTransitionView{
+		step("E1", "", "CONFIRMED", timelineDay(1)),
+		step("E2", "", "CANDIDATE", timelineDay(5)),
+	}
+
+	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil)
+
+	if len(tl.Chains) != 2 {
+		t.Fatalf("chain 數 = %d, want 2（seq 不同就是不同鏈）", len(tl.Chains))
+	}
+	if tl.Chains[0].Seq != 1 || tl.Chains[1].Seq != 2 {
+		t.Errorf("seq 應照 first_seen_at 由舊到新：%d, %d", tl.Chains[0].Seq, tl.Chains[1].Seq)
 	}
 }
 
-func TestBuildEventTimelineSeparatesChainsByZoneAndFamily(t *testing.T) {
-	tl := BuildEventTimeline("2330", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "CANDIDATE"),
-		st(1, timelineDay(1), "CANDIDATE", withZone("S-900")),
-		st(1, timelineDay(1), "CANDIDATE", withFamily("VOLUME")),
-	}, nil)
-	if len(tl.Chains) != 3 {
-		t.Fatalf("chain 數 = %d, want 3——(zone, family) 不同就是不同鏈", len(tl.Chains))
+// ZONE_IDENTITY_ENDED 是「zone 身分終止所以鏈收攤」，不是事件自己走完生命週期。
+// 前端把它畫成一般結束會誤導，所以必須輸出得出來。
+func TestBuildEventTimelineExposesZoneIdentityEnded(t *testing.T) {
+	chains := []store.EventInstance{
+		chain("E1", "SUPPORT_RECLAIM", 1, timelineDay(1), timelineDay(3), closedChain("ZONE_IDENTITY_ENDED")),
+	}
+
+	tl := BuildEventTimeline("2330", "1d", chains, nil, nil)
+
+	c := tl.Chains[0]
+	if !c.Closed {
+		t.Error("ended_at 有值時 closed 應為 true")
+	}
+	if c.EndReason != "ZONE_IDENTITY_ENDED" {
+		t.Errorf("end_reason = %q, want ZONE_IDENTITY_ENDED", c.EndReason)
 	}
 }
 
-// timeline 的解析度等於分析頻率，而目前沒有任何排程會產生分析（見 todo.md T-045）。
-// 鏈上的空白**不代表那段期間沒有事件**，只代表沒有分析——不揭露 gap 會被讀成風平浪靜。
+// SYMBOL scope 的事件不屬於任何 zone，zone_uid 是 NULL。取值不能 panic，
+// 輸出要是 nil（序列化成 JSON null），而不是 "SYMBOL" 這個投影鍵、也不是空字串。
+func TestBuildEventTimelineHandlesSymbolScopeChain(t *testing.T) {
+	c := chain("E1", "VOLUME_CONTEXT", 1, timelineDay(1), timelineDay(1))
+	c.ZoneUID = sql.NullString{}
+	c.ZoneScopeKey = store.SymbolScopeKey
+	c.EventScope = "SYMBOL"
+	c.LastZoneKey = sql.NullString{}
+
+	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{c}, nil, nil)
+
+	if got := tl.Chains[0].ZoneUID; got != nil {
+		t.Errorf("SYMBOL scope 的 zone_uid 應為 nil，得到 %q", *got)
+	}
+	if got := tl.Chains[0].EventScope; got != "SYMBOL" {
+		t.Errorf("event_scope = %q, want SYMBOL", got)
+	}
+}
+
+// 輸出必須是決定性的：同一份資料以任何輸入順序進來都要得到同一份 timeline，
+// 否則同一個查詢兩次會顯示不同結果。
+func TestBuildEventTimelineIsOrderIndependent(t *testing.T) {
+	chains := []store.EventInstance{
+		chain("E2", "SUPPORT_RECLAIM", 1, timelineDay(5), timelineDay(6)),
+		chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(3)),
+	}
+	transitions := []store.EventTransitionView{
+		step("E1", "CANDIDATE", "CONFIRMED", timelineDay(2)),
+		step("E1", "", "CANDIDATE", timelineDay(1)),
+	}
+
+	a := BuildEventTimeline("2330", "1d", chains, transitions, nil)
+	b := BuildEventTimeline("2330", "1d",
+		[]store.EventInstance{chains[1], chains[0]},
+		[]store.EventTransitionView{transitions[1], transitions[0]}, nil)
+
+	if a.Chains[0].EventUID != "E1" || b.Chains[0].EventUID != "E1" {
+		t.Fatalf("鏈應依 first_seen_at 排序：%q / %q", a.Chains[0].EventUID, b.Chains[0].EventUID)
+	}
+	for i := range a.Chains[0].Transitions {
+		if a.Chains[0].Transitions[i].State != b.Chains[0].Transitions[i].State {
+			t.Errorf("第 %d 步狀態不同：%q vs %q", i,
+				a.Chains[0].Transitions[i].State, b.Chains[0].Transitions[i].State)
+		}
+	}
+}
+
+// 鏈存在但沒有任何轉換：那是寫入端的單一交易應該擋掉的情況。
+// 讀取端不吞掉它——鏈照樣輸出（空 transitions），讓它在畫面上看得見而不是靜靜消失。
+func TestBuildEventTimelineKeepsChainWithoutTransitions(t *testing.T) {
+	tl := BuildEventTimeline("2330", "1d",
+		[]store.EventInstance{chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(1))},
+		nil, nil)
+
+	if len(tl.Chains) != 1 {
+		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
+	}
+	if tl.Chains[0].Transitions == nil {
+		t.Error("Transitions 應為空陣列而非 nil——序列化成 null 會讓前端 .map() 爆掉")
+	}
+}
+
+// ── 以下與事件無關，換來源不影響 ──────────────────────────
+
 func TestBuildEventTimelineExposesSnapshotGaps(t *testing.T) {
-	tl := BuildEventTimeline("2330", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "CANDIDATE"),
-		st(2, timelineDay(8), "CONFIRMED"),
-	}, nil)
+	tl := BuildEventTimeline("2330", "1d", nil, nil, []store.AnalysisSnapshot{
+		{ID: 1, AnalyzedAt: timelineDay(1)},
+		{ID: 2, AnalyzedAt: timelineDay(8)},
+	})
 
 	if len(tl.Snapshots) != 2 {
 		t.Fatalf("snapshot 數 = %d, want 2", len(tl.Snapshots))
@@ -167,52 +234,29 @@ func TestBuildEventTimelineExposesSnapshotGaps(t *testing.T) {
 	}
 }
 
-// 摺疊結果必須是決定性的：同一份資料以任何輸入順序進來都要得到同一條鏈，
-// 否則同一個查詢兩次會顯示不同的 timeline。
-func TestBuildEventTimelineIsOrderIndependent(t *testing.T) {
-	rows := []store.MarketEventState{
-		st(3, timelineDay(3), "RESOLVED", withResolvedBy("HIGH_VOLUME_BREAKDOWN")),
-		st(1, timelineDay(1), "CANDIDATE"),
-		st(2, timelineDay(2), "CONFIRMED"),
-	}
-	shuffled := []store.MarketEventState{rows[1], rows[0], rows[2]}
-
-	a := BuildEventTimeline("2330", "1d", rows, nil)
-	b := BuildEventTimeline("2330", "1d", shuffled, nil)
-
-	if len(a.Chains) != 1 || len(b.Chains) != 1 {
-		t.Fatalf("chain 數不符：%d / %d", len(a.Chains), len(b.Chains))
-	}
-	if len(a.Chains[0].Transitions) != len(b.Chains[0].Transitions) {
-		t.Fatalf("transition 數不同：%d vs %d", len(a.Chains[0].Transitions), len(b.Chains[0].Transitions))
-	}
-	for i := range a.Chains[0].Transitions {
-		if a.Chains[0].Transitions[i].State != b.Chains[0].Transitions[i].State {
-			t.Errorf("第 %d 步狀態不同：%q vs %q", i,
-				a.Chains[0].Transitions[i].State, b.Chains[0].Transitions[i].State)
-		}
-	}
-}
-
 func TestBuildEventTimelineEmptyInput(t *testing.T) {
-	tl := BuildEventTimeline("2330", "1d", nil, nil)
+	tl := BuildEventTimeline("2330", "1d", nil, nil, nil)
 	if tl.Chains == nil || tl.Snapshots == nil {
 		t.Error("空輸入時 Chains／Snapshots 應為空陣列而非 nil——序列化成 null 會讓前端 .map() 爆掉")
 	}
+	if tl.IdentitySince != nil {
+		t.Error("沒有任何鏈時 identity_since 應為 nil")
+	}
 }
 
-func TestBuildEventTimelineKeepsAnalysisSnapshotsWhenNoEvents(t *testing.T) {
-	analyses := []store.AnalysisSnapshot{
+// **有分析但沒有事件仍是有效觀測。** 少了這條，畫面上的空白會被讀成「風平浪靜」，
+// 而實際上可能是「那幾天根本沒跑分析」。
+func TestBuildEventTimelineKeepsAnalysisSnapshotsWhenNoChains(t *testing.T) {
+	tl := BuildEventTimeline("2330", "1d", nil, nil, []store.AnalysisSnapshot{
 		{ID: 10, AnalyzedAt: timelineDay(1)},
 		{ID: 11, AnalyzedAt: timelineDay(3)},
-	}
-	tl := BuildEventTimeline("2330", "1d", nil, analyses)
+	})
 
 	if len(tl.Chains) != 0 {
-		t.Fatalf("沒有事件列時 chain 數 = %d, want 0", len(tl.Chains))
+		t.Fatalf("沒有鏈時 chain 數 = %d, want 0", len(tl.Chains))
 	}
 	if len(tl.Snapshots) != 2 {
-		t.Fatalf("snapshot 數 = %d, want 2——有分析但沒有事件仍是有效觀測", len(tl.Snapshots))
+		t.Fatalf("snapshot 數 = %d, want 2", len(tl.Snapshots))
 	}
 	if tl.Snapshots[1].GapDays != 2 {
 		t.Errorf("第二份快照 GapDays = %d, want 2", tl.Snapshots[1].GapDays)
@@ -228,129 +272,80 @@ func TestDecodeReasonCodesTolerantOfBadJSON(t *testing.T) {
 	}
 }
 
-// TestBuildEventTimelineIgnoresTombstoneRepeats：**用 live 資料實測才發現的情況**。
-//
-// 事件終結後，狀態表會把那筆 EXPIRED／RESOLVED 一直帶在後續每一份快照裡——
-// 0050 的 SUPPORT:92.1361:100.5139 在 2026-07-23 轉 EXPIRED 之後，
-// 8/03～8/12 的每份快照都還在回報同一筆。
-// 若把「已終結的鍵再出現」一律當成新事件，每份快照都會生出一條垃圾鏈。
-func TestBuildEventTimelineIgnoresTombstoneRepeats(t *testing.T) {
-	tl := BuildEventTimeline("0050", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "ACTIVE"),
-		st(2, timelineDay(2), "EXPIRED"),
-		st(3, timelineDay(3), "EXPIRED"), // 墓碑
-		st(4, timelineDay(4), "EXPIRED"), // 墓碑
-		st(5, timelineDay(5), "EXPIRED"), // 墓碑
-	}, nil)
+// **JSON 層的形狀要釘住。** `zone_uid` 判斷 SYMBOL scope 的自然寫法是
+// 「欄位存在但為 null」，若序列化後鍵直接消失，那個判斷會靜默走到 undefined 分支。
+// Go 端看到的是 `*string(nil)`，兩者在 struct 上分不出來——只有序列化才驗得到。
+func TestEventTimelineJSONKeepsNullZoneUID(t *testing.T) {
+	symbolScope := chain("E1", "VOLUME_CONTEXT", 1, timelineDay(1), timelineDay(1))
+	symbolScope.ZoneUID = sql.NullString{}
+	symbolScope.LastZoneKey = sql.NullString{}
+	symbolScope.EventScope = "SYMBOL"
 
-	if len(tl.Chains) != 1 {
-		t.Fatalf("chain 數 = %d, want 1——重複回報的終結狀態是墓碑，不該各開一條鏈", len(tl.Chains))
-	}
-	c := tl.Chains[0]
-	if len(c.Transitions) != 2 {
-		t.Errorf("transition 數 = %d, want 2（ACTIVE → EXPIRED）", len(c.Transitions))
-	}
-	if !c.Closed || c.FinalState != "EXPIRED" {
-		t.Errorf("鏈未正確標記終結：closed=%v final=%q", c.Closed, c.FinalState)
-	}
-	// 墓碑仍要推進 LastSeenAt——那代表「這條鏈到這天都還看得到」
-	if !c.LastSeenAt.Equal(timelineDay(5)) {
-		t.Errorf("LastSeenAt = %v, want %v", c.LastSeenAt, timelineDay(5))
-	}
-}
+	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{
+		symbolScope,
+		chain("E2", "SUPPORT_BREAKDOWN", 1, timelineDay(2), timelineDay(2)),
+	}, nil, nil)
 
-// 終結之後出現**非終結**狀態才是真的新事件，這時才開新鏈。
-func TestBuildEventTimelineNewChainOnlyForNonTerminalState(t *testing.T) {
-	tl := BuildEventTimeline("0050", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "ACTIVE"),
-		st(2, timelineDay(2), "EXPIRED"),
-		st(3, timelineDay(3), "EXPIRED"),   // 墓碑，不開新鏈
-		st(4, timelineDay(4), "CANDIDATE"), // 真的有新事件
-	}, nil)
-	if len(tl.Chains) != 2 {
-		t.Fatalf("chain 數 = %d, want 2", len(tl.Chains))
+	raw, err := json.Marshal(tl)
+	if err != nil {
+		t.Fatalf("marshal 失敗: %v", err)
 	}
-	if !tl.Chains[1].FirstSeenAt.Equal(timelineDay(4)) {
-		t.Errorf("新鏈 FirstSeenAt = %v, want %v", tl.Chains[1].FirstSeenAt, timelineDay(4))
+	var decoded struct {
+		Chains []map[string]any `json:"chains"`
 	}
-}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal 失敗: %v", err)
+	}
 
-// 第一次看到就已經是終結狀態：我們是在事件結束後才開始觀測，
-// 仍要記一條已終結的鏈，否則這段歷史會完全消失。
-// 0050 的 SUPPORT:103.4487:104.0713 / SUPPORT_BREAKDOWN 就是這個形狀（首見即 RESOLVED）。
-func TestBuildEventTimelineKeepsChainFirstSeenAsClosed(t *testing.T) {
-	tl := BuildEventTimeline("0050", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "RESOLVED", withResolvedBy("INTRADAY_RECLAIM")),
-		st(2, timelineDay(2), "RESOLVED", withResolvedBy("INTRADAY_RECLAIM")),
-	}, nil)
-	if len(tl.Chains) != 1 {
-		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
-	}
-	if !tl.Chains[0].Closed {
-		t.Error("首見即終結的鏈應標記 closed")
-	}
-	if len(tl.Chains[0].Transitions) != 1 {
-		t.Errorf("transition 數 = %d, want 1", len(tl.Chains[0].Transitions))
-	}
-}
-
-// TestBuildEventTimelineRecordsPostCloseTransition：終結之後仍可能有真實的狀態變化。
-//
-// 最典型的是 RESOLVED 老化成 EXPIRED——event_engine.py 的
-// `_normalize_previous_event_state` 在 age_bars 達門檻時會把 carried 的 RESOLVED 翻成
-// EXPIRED。若把終結後的每一列都當墓碑吞掉，鏈的 final_state 會永遠停在 RESOLVED，
-// 與 DB 裡的最新狀態矛盾。
-func TestBuildEventTimelineRecordsPostCloseTransition(t *testing.T) {
-	tl := BuildEventTimeline("0050", "1d", []store.MarketEventState{
-		st(1, timelineDay(1), "ACTIVE"),
-		st(2, timelineDay(2), "RESOLVED", withResolvedBy("INTRADAY_RECLAIM")),
-		st(3, timelineDay(3), "RESOLVED", withResolvedBy("INTRADAY_RECLAIM")), // 墓碑
-		st(4, timelineDay(4), "EXPIRED", withResolvedBy("INTRADAY_RECLAIM")),  // 老化，真實變化
-	}, nil)
-
-	if len(tl.Chains) != 1 {
-		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
-	}
-	c := tl.Chains[0]
-	if c.FinalState != "EXPIRED" {
-		t.Errorf("FinalState = %q, want EXPIRED——終結後的老化被吞掉了", c.FinalState)
-	}
-	// ACTIVE → RESOLVED → EXPIRED，中間那筆相同的墓碑不算
-	if len(c.Transitions) != 3 {
-		t.Errorf("transition 數 = %d, want 3（含終結後的 RESOLVED→EXPIRED）", len(c.Transitions))
-	}
-}
-
-// TestBuildEventTimelineSnapshotsUseAllAnalyses：snapshots 必須反映**所有**分析，
-// 不是只有留下事件狀態列的那幾次。
-//
-// 實測 0050 有 14 次分析、只有 11 次產生事件列——用 rows 推導會把那 3 次報成
-// 「沒有觀測」，而 snapshots/gap_days 正是揭露觀測缺口的唯一依據。
-func TestBuildEventTimelineSnapshotsUseAllAnalyses(t *testing.T) {
-	analyses := []store.AnalysisSnapshot{
-		{ID: 10, AnalyzedAt: timelineDay(1)}, // 這次分析沒有任何事件
-		{ID: 11, AnalyzedAt: timelineDay(2)}, // 這次也沒有
-		{ID: 12, AnalyzedAt: timelineDay(3)}, // 事件從這裡才出現
-	}
-	tl := BuildEventTimeline("0050", "1d", []store.MarketEventState{
-		st(12, timelineDay(3), "CANDIDATE"),
-	}, analyses)
-
-	if len(tl.Snapshots) != 3 {
-		t.Fatalf("快照數 = %d, want 3——沒有事件的分析也是觀測，不能漏", len(tl.Snapshots))
-	}
-	if !tl.Snapshots[0].AnalyzedAt.Equal(timelineDay(1)) {
-		t.Errorf("第一份快照 = %v, want %v——觀測起點被往後挪了",
-			tl.Snapshots[0].AnalyzedAt, timelineDay(1))
-	}
-	// 三次分析連續，不該有任何 gap
-	for i, s := range tl.Snapshots {
-		want := 0
-		if i > 0 {
-			want = 1
+	for _, key := range []string{"zone_uid", "zone_key"} {
+		v, ok := decoded.Chains[0][key]
+		if !ok {
+			t.Fatalf("SYMBOL scope 的 %s 鍵不該消失——消費端會分不出 null 與 undefined", key)
 		}
-		if s.GapDays != want {
-			t.Errorf("第 %d 份快照 GapDays = %d, want %d", i, s.GapDays, want)
+		if v != nil {
+			t.Errorf("SYMBOL scope 的 %s 應為 null，得到 %v", key, v)
 		}
+	}
+	if got := decoded.Chains[1]["zone_uid"]; got != "Z-E2" {
+		t.Errorf("ZONE scope 的 zone_uid = %v, want Z-E2", got)
+	}
+}
+
+// **時間軸回歸**：身分層存的 occurred_at / first_seen_at 是跑分析的 wall clock，
+// 而同一份回應裡的 snapshots 用的是 K 棒日期。兩軸混用時整條鏈會擠在「跑分析的那一刻」
+// ——實測 2330 的 28 條鏈曾全部顯示成在同一秒內發生，而 snapshots 橫跨一個月。
+func TestBuildEventTimelineUsesCandleAxisNotWallClock(t *testing.T) {
+	c := chain("E1", "SUPPORT_BREAKDOWN", 1, wallClock, wallClock)
+	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{c}, []store.EventTransitionView{
+		step("E1", "", "CANDIDATE", timelineDay(1)),
+		step("E1", "CANDIDATE", "CONFIRMED", timelineDay(4)),
+	}, nil)
+
+	got := tl.Chains[0]
+	if !got.FirstSeenAt.Equal(timelineDay(1)) || !got.LastSeenAt.Equal(timelineDay(4)) {
+		t.Fatalf("鏈的起訖應落在 K 棒軸上，得到 %v ~ %v", got.FirstSeenAt, got.LastSeenAt)
+	}
+	for i, s := range got.Transitions {
+		if s.OccurredAt.Equal(wallClock) {
+			t.Errorf("第 %d 步用了 wall clock，應該用所屬分析的 K 棒時間", i)
+		}
+	}
+	if tl.IdentitySince == nil || !tl.IdentitySince.Equal(timelineDay(1)) {
+		t.Errorf("identity_since 也要在 K 棒軸上，得到 %v", tl.IdentitySince)
+	}
+}
+
+// analysis_id 為 NULL（鏈由排程收尾而不是某次分析）時沒有 K 棒時間可用，
+// 退回身分層的 occurred_at——這是明確的降級，不是預設路徑。
+func TestBuildEventTimelineFallsBackToOccurredAtWithoutAnalysis(t *testing.T) {
+	orphan := step("E1", "CONFIRMED", "EXPIRED", timelineDay(3))
+	orphan.AnalyzedAt = sql.NullTime{}
+
+	tl := BuildEventTimeline("2330", "1d",
+		[]store.EventInstance{chain("E1", "SUPPORT_BREAKDOWN", 1, wallClock, wallClock)},
+		[]store.EventTransitionView{orphan}, nil)
+
+	if got := tl.Chains[0].Transitions[0].OccurredAt; !got.Equal(wallClock) {
+		t.Errorf("沒有 analysis_id 時應退回 occurred_at，得到 %v", got)
 	}
 }

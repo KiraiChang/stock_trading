@@ -370,15 +370,19 @@ TWSE ISIN 同步仍存在的標的。
 ### GET `/sr-zones/event-timeline`
 
 取得事件鏈（Event Timeline），供決策畫面呈現「事件如何一路演進到現在」。
-背景與設計見 [`todo.md`](./todo.md) T-045。
+
+**資料來源是身分層**（`event_instances` ＋ `event_transitions`），不是把
+`market_event_states` 的快照摺疊出來的——後者以 `zone_key` 為鍵，會因邊界漂移把同一個
+zone 的鏈拆開（見 [`issue.md`](./issue.md) I-080）。背景見 [`todo.md`](./todo.md)
+T-045 / T-048 / T-051。
 
 **與 decision summary 的 `event_sequence` 不同，兩者不要混用：**
 
 | | `event_sequence`（decision summary 內） | 本端點的 `chains` |
 |---|---|---|
 | 範圍 | **當次分析**偵測到的事件，依優先序排序去重 | **跨分析**的完整演進 |
-| 有無時間 | 無 | 每一步都有 `analyzed_at` |
-| 有無狀態轉換 | 無 | 有，並標明改變了哪些欄位 |
+| 有無時間 | 無 | 每一步都有 `occurred_at` |
+| 有無狀態轉換 | 無 | 有，`from_state → state` |
 
 **為什麼是 query 而不是 `/sr-zones/:symbol/...`**：同層已有 `GET /sr-zones/:id`，
 gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務啟動時 panic。
@@ -399,25 +403,32 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 |------|------|
 | symbol | **必填** |
 | timeframe | 預設 `1d` |
-| max_analyses | 回溯幾次分析（不是幾列），預設 60、上限 500 |
+| max_analyses | 回溯幾次分析（不是幾列），預設 60、上限 500。**同時決定 `chains` 的視窗**——最舊那次分析的 K 棒時間就是起點 |
 
 **Response：**
 ```json
 {
   "symbol": "0050", "timeframe": "1d",
+  "identity_since": "2026-08-01T00:00:00Z",
   "chains": [{
+    "event_uid": "9a1c...",
+    "zone_uid": "0f1c9a2e-8b5d-4c31-9a77-2f6e1d4b8c05",
     "zone_key": "SUPPORT:103.4487:104.0713",
+    "event_scope": "ZONE",
     "event_family": "SUPPORT_RECLAIM",
+    "seq": 1,
     "direction": "BULLISH",
     "root_event_type": "INTRADAY_RECLAIM",
+    "latest_event_type": "INTRADAY_RECLAIM",
+    "active": true,
     "first_seen_at": "2026-08-10T00:00:00Z",
     "last_seen_at": "2026-08-12T00:00:00Z",
     "closed": false,
     "final_state": "CONFIRMED",
     "transitions": [
-      {"analyzed_at": "2026-08-10T00:00:00Z", "analysis_id": 41,
-       "state": "CONFIRMED", "active": true,
-       "event_type": "INTRADAY_RECLAIM", "latest_event_type": "INTRADAY_RECLAIM",
+      {"occurred_at": "2026-08-10T00:00:00Z", "analysis_id": 41,
+       "from_state": "CANDIDATE", "state": "CONFIRMED",
+       "event_type": "INTRADAY_RECLAIM",
        "reason_codes": ["CLOSE_RECLAIM"]}
     ]
   }],
@@ -428,22 +439,42 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 }
 ```
 
-**判讀時必須注意的三件事：**
+**判讀時必須注意的六件事：**
 
-1. **`snapshots[].gap_days` 不能忽略。** timeline 的解析度**等於 SR 分析的執行頻率**，
-   而目前沒有任何排程會產生分析（唯一路徑是 `POST /sr-zones`）。
-   鏈上的空白**不代表那段期間沒有事件**，只代表那段期間沒有分析。
+1. **一條 chain ＝ 一個 zone 身分 × 一個 family × 一個 `seq`。** 鍵是 **`zone_uid`**，
+   不是 `zone_key`——後者只是「最近一次觀測到時事件帶的 key」，供人工比對用。
+   zone 邊界每次由 ATR 重算、role 也會翻轉，**同一個 zone 的 key 會一直變**
+   （實測 329 個身分裡有 102 個漂移過 key），所以拿 `zone_key` 當身分會把一條鏈拆成好幾條。
 
-   `snapshots` 取自 **`stock_sr_zone_analyses`（所有分析）**，不是事件狀態列——
-   **一次沒有偵測到任何事件的分析不會留下任何 state 列**，只看事件列會把它報成「沒有觀測」。
-   實測 0050 有 14 次分析、只有 11 次產生事件列；若用事件列推導，觀測起點會從 07-13
-   誤植為 07-20，而且 07-15→07-20 那個五天的缺口會整個消失。
-2. **同狀態不產生 transition。** 只有 `state` / `active` / `latest_event_type` /
-   `resolved_by` 改變才記一步，並在 `changed[]` 標明改了什麼。
-   `confidence`、`price_level` 這類每次分析都會浮動的數值刻意不納入比對。
-3. **一條 chain ＝ 同一個 `(zone_key, event_family)` 從出現到終結**（`RESOLVED`／`EXPIRED`）。
-   終結後**只有再出現非終結狀態**才算新的一條；終結狀態被後續快照重複回報是墓碑，
-   只會推進 `last_seen_at`，不會產生新鏈。
+   **`seq > 1` 是新的一條鏈，不是舊鏈復活**：前一條 `RESOLVED`／`EXPIRED` 之後再出現
+   同家族事件就開新的一條，與寫入端語意一致。
+
+2. **`end_reason = ZONE_IDENTITY_ENDED` 不是自然結束。** 那代表 zone 因
+   `SPLIT`／`MERGE`／`RESHAPE` 而身分終止，鏈跟著收攤——把它畫成一般的
+   `RESOLVED`／`EXPIRED` 會誤導。血緣留在 `zone_relations`，本端點不接。
+
+3. **`snapshots[].gap_days` 不能忽略。** timeline 的解析度**等於 SR 分析的執行頻率**。
+   鏈上的空白**不代表那段期間沒有事件**，只代表那段期間沒有分析。分析排程見
+   `POST /scheduler/sr-analysis/run`（平日 17:00／22:00，預設關閉）。
+
+   `snapshots` 取自 **`stock_sr_zone_analyses`（所有分析）**，不是事件鏈——
+   一次沒有偵測到任何事件的分析不會留下任何鏈，只看鏈會把它報成「沒有觀測」。
+   實測 0050 有 14 次分析、只有 11 次產生事件。
+
+4. **視窗選的是「哪些鏈」，不是「鏈的哪幾步」。** 一條鏈只要**有一步落在視窗內、或它還沒
+   結束**就會整條回傳（含視窗之前的步驟）。把鏈從中間切開會失去誕生那一步，而
+   `from_state` 留白正是「鏈誕生」的標記——切一半的鏈會讓人以為它從中途冒出來。
+   「還沒結束也算」是必要的：一條長壽而這段期間剛好沒有狀態變化的鏈，正是最該看到的。
+
+5. **所有時間都在 K 棒軸上。** `transitions[].occurred_at`、`chains[].first_seen_at` /
+   `last_seen_at`、`identity_since` 用的都是**該次分析的 K 棒時間**，與
+   `snapshots[].analyzed_at` 同軸。身分層內部存的是 as_of 的 wall clock（那個軸量的是
+   「我們看了幾次」），但**對外一律換算過**——否則整條鏈會擠在「跑分析的那一刻」。
+   只有鏈由排程收尾、沒有 `analysis_id` 可依附時才會退回 wall clock。
+
+6. **`identity_since` 之前沒有鏈可看。** 事件鏈是身分層開始寫入之後才有的，更早的分析
+   **刻意不回填**（回填要解的正是「兩個舊 key 是不是同一個 zone」，而那正是身分層本身
+   要建的能力）。早於它的 `snapshots` 照常列出，讓「這段沒有鏈」與「這段沒有分析」分得開。
 
 這份資料定位為 **display chain**——供顯示與人工檢查，**不是** Lifecycle Engine 的 runtime 輸入。
 

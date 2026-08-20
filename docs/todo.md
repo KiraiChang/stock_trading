@@ -2389,7 +2389,7 @@ log 能回答「這一次分析發生了什麼」，但答不出**趨勢**問題
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | **已實作／待 review**（2026-08-20） |
 | 優先度 | 中（T-048 的價值兌現點、T-041 的前置；**不在 T-049 的路徑上**，服務的是 display_chain 而非決策，與下游 T-041 同級） |
 | 分類 | Go / SR Zone / 事件鏈 / 對外 API |
 | 建立日期 | 2026-08-20 |
@@ -2409,18 +2409,169 @@ T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來�
 對外唯一看得到的身分資料是階段 E 加的 `zones[].data.zone_uid`。身分層目前仍是
 「只寫不讀」，本筆是它的第一個真正讀者。
 
-#### 要決定的事（規劃時定案）
+#### 計畫書（**已實作／待 review**，2026-08-20）
 
-* **換來源還是併行**：直接讓端點改讀 `event_instances` / `event_transitions`
-  （鏈與轉換都是存下來的事實），或維持現行摺疊、只多帶 `zone_uid` 讓前端自己合併。
-  前者是 T-048 的原意，後者風險小但把合併責任推給每個消費者。
-* **回應 contract**：`display_chain` 目前以 `zone_key` 為鍵。改用 `zone_uid` 後
-  `zone_key` 要保留（人工比對還需要）還是降級成 alias 清單。
-* **重生鏈怎麼呈現**：`seq > 1` 的鏈（實測 10 條）與因 `ZONE_IDENTITY_ENDED` 收攤的鏈
-  （實測 8 條）在 timeline 上是同一條的延續還是兩條，語意要先定，
-  否則前端會自己猜。
-* **舊資料**：`stock_sr_zones.zone_uid` 不回填（見 `database-schema.md`），
-  早於 migration 069 的分析在新 timeline 上會缺身分，要決定是隱藏還是標示。
+##### 修改目標與不做的範圍
+
+* **目標**：`GET /sr-zones/event-timeline` 改以**身分層**為來源，讓同一個 zone 的鏈不再
+  因 `zone_key` 漂移而被拆開（[`issue.md`](./issue.md) I-080）。
+* **不做**：不改任何決策邏輯、不改事件偵測、不改 Python、不動身分層的寫入端。
+* **不做**：不接血緣（`zone_relations`）——把 `SPLIT`/`MERGE`/`RESHAPE` 前後的鏈串成一條
+  是獨立的一階，且寫入端刻意決定「parent 的事件不傳給 child」，讀取端不該偷偷接回去。
+* **不做**：不改前端（T-041 另案）。
+
+##### 四個定案
+
+**U1：換來源，不是「維持摺疊 ＋ 多帶 `zone_uid`」。**
+
+盤點後這其實不是偏好問題——**併行方案做不出來**：
+
+* `market_event_states` **沒有 `zone_uid` 欄位**，摺疊時拿不到身分。
+* 想在讀取時補上這個對應，只能拿 `zone_key` 去查 `zone_key_aliases`，而那是**有損的**：
+  每個身分只留最近 8 筆 alias，實測已有 **23 個身分撞頂**（I-079），超出的舊 key 永遠查不回來。
+* `stock_sr_zones` 雖然有 `zone_uid`，但**沒有存 `zone_key`**（`db:"-"`），
+  兩邊接不起來——除非用價格邊界回推，而那正是 T-048 要消滅的模式。
+
+反過來看，**寫入端在三段關聯決策裡已經把這個對應做對了**（既有鏈優先 → carried 護欄 →
+key 解析／alias 備援），答案就存在 `event_instances`。讀取時重算一次不但更差，還會與寫入端
+變成兩份會漂移的事實。
+
+**U2：三項現行輸出身分層沒有，逐項處置。**
+
+| 現行輸出 | 身分層有沒有 | 處置 |
+|---|---|---|
+| 每一步的 `state` / `reason_codes` / `event_type` | ✅ `event_transitions` 的 `to_state` / `reason_codes` / `trigger_event_type` | 直接對應 |
+| 每一步的 `active` | ❌ 只有鏈層的當前 `active` | **不再逐步輸出**。要重建它得把 family 的 `gating_states` 規則複製一份到 Go——那會是第二份判準，正是 T-048 一路在避免的東西。鏈層仍輸出 `active` |
+| `changed[]`（相鄰快照的差異欄位） | ❌ 摺疊時才算得出來 | **不需要了**。`from_state → to_state` ＋ `trigger_event_type` 本身就說明了這一步改了什麼，而且是存下來的事實而非推導 |
+
+`snapshots`（分析次數與 gap 揭露）**保留**——它查的是 `stock_sr_zone_analyses`，與事件無關，
+不受換來源影響。
+
+> 順帶：`event_timeline.go` 上 `Snapshots` 的註解寫著「目前沒有任何排程會產生分析」，
+> **T-052 之後這句已經過期**，本筆一併更新。
+
+**U3：鏈的鍵改成 `zone_uid`，`zone_key` 降級但不刪。**
+
+回應的 chain 物件：
+
+| 欄位 | 變化 |
+|---|---|
+| `zone_uid` | **新增**，鏈的身分（`event_scope='SYMBOL'` 時為 `null`） |
+| `event_uid` | **新增**，這條鏈自己的 id，供前端穩定 key 與後續下鑽 |
+| `seq` | **新增**，同一個 (zone, family) 的第幾條鏈 |
+| `end_reason` | **新增**，`RESOLVED` / `EXPIRED` / `ZONE_IDENTITY_ENDED` |
+| `zone_key` | **保留但語意改變**：從「鏈的身分」變成 `last_zone_key`（最近一次觀測到時事件帶的 key），只供人工比對 |
+| `closed` / `final_state` / `direction` / `root_event_type` / `first_seen_at` / `last_seen_at` | 不變 |
+
+**`seq > 1` 是新的一條鏈，不與前一條合併**——這與寫入端的語意一致（前一條 `RESOLVED`／
+`EXPIRED` 之後再出現同家族事件，是新的一條而不是舊鏈復活）。實測 10 條。
+`end_reason = ZONE_IDENTITY_ENDED`（實測 8 條）要在回應裡看得出來：那是「zone 身分終止所以
+鏈收攤」，不是自然結束，前端若把它畫成一般結束會誤導。
+
+**U4：涵蓋範圍要誠實揭露。**
+
+身分層是從 migration 068 才開始寫的，**更早的分析沒有事件鏈資料**，換來源後那段期間會
+從 timeline 上消失。回應新增 `identity_since`（身分層最早的 `first_seen_at`）；
+早於它的 `snapshots` 照常列出，讓「這段沒有鏈」與「這段沒有分析」在畫面上分得開。
+**不回填**——理由與 `stock_sr_zones.zone_uid` 相同，回填要解的正是「兩個舊 key 是不是同一個
+zone」，那是身分層本身要建的能力。
+
+##### 受影響的檔案與資料流
+
+```text
+Go store/event_identity_repo.go   ＋ ListChains(symbol, timeframe, opts)
+                                  ＋ ListTransitions(eventUIDs)
+                                  （目前只有 matcher 自己用的「找活鏈」，沒有任何列表查詢）
+Go analysis/event_timeline.go     BuildEventTimeline 改吃 chains ＋ transitions，
+                                  不再摺疊 market_event_states；移除 changed[] 的 diff 邏輯
+Go api/handler/sr_zones.go        EventTimeline handler 改叫新的 repo 方法
+```
+
+* Python：**不改**。前端：**不改**（T-041 另案）。DB：**不新增表也不新增欄位**。
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| chain ＋ `zone_uid` / `event_uid` / `seq` / `end_reason` | 純新增鍵 | 前端目前沒有任何呼叫端（`frontend/src` 查無 `event-timeline`） |
+| chain 的 `zone_key` 語意改為 `last_zone_key` | **語意變更** | 值的形狀不變；沒有消費者，但要寫進 `api-reference.md` |
+| transition 移除 `active` / `changed` | **移除欄位** | 同上，目前無消費者 |
+| 回應 ＋ `identity_since` | 純新增鍵 | — |
+| 鏈的數量與邊界 | **會變**（這正是目的） | 實測 I-080 的落差表 |
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 身分層是「只寫不讀」，本筆是**第一個真正的讀者**，寫入端的缺陷會第一次被看見 | 這是好事也是風險。驗收要求端點鏈數與 `event_instances` **逐檔相同**——對不上就是讀取端寫錯，不是資料壞 |
+| `event_transitions` 沒有 `active`，前端若已依賴它會壞 | 前端沒有任何呼叫端，現在改是最便宜的時機 |
+| 舊分析沒有鏈，看起來像「資料不見了」 | U4 的 `identity_since` ＋ 保留 `snapshots` |
+| 回滾 | 純讀取端改動，DB 與寫入端都沒動。`git revert` 即可 |
+
+##### 測試與驗證策略
+
+* **單元（Go）**：`event_instances` ＋ `event_transitions` 組成 chain 的映射；
+  `seq > 1` 不與前一條合併；`ZONE_IDENTITY_ENDED` 的 `end_reason` 有輸出；
+  `event_scope='SYMBOL'` 的鏈 `zone_uid` 為 null 不 panic；沒有身分層資料時回空鏈但仍有
+  `snapshots`。
+* **端到端（dev 階梯）**：重跑四檔 21 階（`ladder.sh`）後
+  1. 端點回傳的鏈數與 `event_instances` 的鏈數**逐檔相同**（2330 28／3105 38／6182 37／8150 25）；
+  2. 至少一個「漂移過 `zone_key` 的身分」在新端點上是**一條**鏈——舊實作會是多條；
+  3. 決策路徑逐欄不變（本筆只動讀取端，`stock_sr_decisions` 應完全相同）。
+
+##### Review findings（2026-08-20，**已修正／待複審**）
+
+* **P2：`max_analyses` 只限制了 `snapshots`，`chains` 仍撈全歷史。** 語意錯位，且 T-052
+  每日累積後回應會愈來愈大。**已修正**：先查分析、取最舊那次的時間當視窗起點再查鏈。
+  納入規則是「有一步落在視窗內，**或這條鏈還沒結束**」——後半是必要的，一條長壽而這段
+  期間沒有變化的鏈正是最該看到的。被選中的鏈一律回完整歷史（切一半會失去誕生那一步）。
+* **P3：`zone_uid` 用 `string + omitempty`，SYMBOL scope 時鍵會直接消失。** 與計畫書寫的
+  「為 null」不符，消費端寫「欄位存在但為 null」的判斷會靜默走到 undefined 分支。
+  **已修正**：`zone_uid` 與 `zone_key` 都改成 `*string`，並補一支**序列化層**的測試
+  （Go struct 上 `*string(nil)` 與 omitempty 分不出來，只有 marshal 才驗得到）。
+
+##### 修正 P2 時抓到的回歸（2026-08-20）
+
+**第一版的 P2 修正是空操作，而且它掩蓋著一個更大的問題：兩個時間軸混用。**
+
+| 欄位 | 時間基準 | 實測 |
+|---|---|---|
+| `stock_sr_zone_analyses.analyzed_at` | **K 棒日期** | 2026-07-20 ~ 08-17 |
+| `event_instances.first_seen_at` / `event_transitions.occurred_at` | **wall clock** | 2026-08-20 09:36 |
+
+過濾條件寫成 `last_seen_at >= since`，拿 wall-clock 欄位比 K 棒日期——**條件恆真**，
+`max_analyses=1` 照樣回 28 條鏈。單元測試抓不到，因為它測的是 Go 的映射而不是 SQL 的跨軸比較。
+
+同一個根因也造成**顯示回歸**：2330 的 28 條鏈會全部顯示成在同一秒內發生，而 snapshots
+橫跨一個月。舊實作用 `market_event_states.analyzed_at`（K 棒日期）所以內部一致，
+**這是換來源引入的新問題**，而門檻①（鏈數相同）驗不到它。
+
+**修法**：`event_transitions.analysis_id` join 回 `stock_sr_zone_analyses.analyzed_at`，
+對外一律用 K 棒軸；視窗過濾改用 `EXISTS(join analyses)`。沒有 `analysis_id`（排程收尾）
+才退回 wall clock。新增兩支測試釘住，其中 helper 刻意讓 `occurred_at` 與 K 棒時間差好幾天，
+任何把兩者搞混的實作都會炸開。
+
+##### 實作結果（2026-08-20）
+
+| 門檻 | 結果 |
+|---|---|
+| Go 全量 `test.sh` | 全綠 |
+| ① 端點鏈數 vs `event_instances` | **28 / 38 / 37 / 25 逐檔相同** |
+| ② 漂移過 key 的身分 | 用過 5 個 `zone_key` 的身分在新端點上是**一條**鏈（`seq=1`）；舊實作會是 5 條 |
+| ③ `max_analyses` 真的限制 chains | 1→0、3→4、10→10、500→28，且鏈的時間範圍與 snapshots 視窗一致 |
+| 時間軸 | `identity_since` 由 wall clock 的 `2026-08-20` 變成 K 棒軸的 `2026-07-20` |
+| 決策路徑 | 本筆只動讀取端，沒有任何寫入 |
+
+`max_analyses=1` 回 0 條鏈是**正確**的：最後一次分析沒有產生任何轉換，且 2330 的 28 條鏈
+全部已終結；`snapshots=1` 仍然揭露「那天有跑分析」。
+
+##### 完成後歸檔
+
+* timeline 改讀身分層、`display_chain` 的新語意與 `identity_since` →
+  [`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」。
+* 「身分層的第一個讀者」與 U1 的取捨（為什麼不能在讀取時重算 key → uid）→
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層：鏈的身分與三段關聯決策」。
+* I-080 修復後改狀態；I-079 的 alias 上限在此成為「讀取端不依賴 alias」的佐證，於該筆補一句。
 
 #### 驗收門檻
 

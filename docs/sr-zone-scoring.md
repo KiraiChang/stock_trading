@@ -2726,6 +2726,34 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 字串比對，**不自己用 `fmt.Sprintf("%s:%.4f:%.4f", …)` 重建**。兩份浮點格式化只要哪天
 分歧，關聯就會**靜默**失敗——事件掛不到 zone，外觀與「這次沒有 zone 事件」一模一樣。
 
+#### 第一個讀者：Event Timeline
+
+`GET /sr-zones/event-timeline` 從 2026-08-20 起**直接讀 `event_instances` ＋
+`event_transitions`**，不再摺疊 `market_event_states`（todo.md T-051）。這是身分層從
+「只寫不讀」走出來的第一步。
+
+**為什麼不能在讀取時把 `zone_key` 換算成 `zone_uid`**（那樣就能沿用舊的摺疊）：
+
+* `market_event_states` **沒有 `zone_uid` 欄位**。
+* 唯一的換算路徑是 `zone_key_aliases`，而它每個身分只留最近 8 筆——實測已有 23 個身分
+  撞頂（見 `issue.md` I-079），**換算是有損的**。
+* `stock_sr_zones` 雖有 `zone_uid` 卻**沒有存 `zone_key`**，兩邊接不起來，除非用價格邊界
+  回推——那正是身分層要消滅的模式。
+
+寫入端在三段關聯決策裡已經把這件事做對了，讀取端重算只會產生第二份會漂移的事實。
+
+**時間要換軸。** 身分層的 `first_seen_at` / `last_seen_at` / `occurred_at` 存的是 `as_of`
+的 **wall clock**（見「四個已知限制」第 2 條），而 timeline 的 `snapshots` 用的是 K 棒日期。
+直接輸出會讓整條鏈擠在「跑分析的那一刻」——實測 2330 的 28 條鏈全部落在同一秒，
+而 snapshots 橫跨一個月。所以讀取端一律經 `event_transitions.analysis_id` join 回
+`stock_sr_zone_analyses.analyzed_at`；只有鏈由排程收尾、沒有 `analysis_id` 時才退回 wall clock。
+**同一個理由，視窗過濾也不能拿身分層的時間欄位去比 K 棒日期**——那樣條件會恆真，
+過濾看起來有寫卻什麼都沒擋掉。
+
+**兩項舊輸出刻意不再提供**：每一步的 `active`（要重建它得把 family 的 `gating_states`
+複製一份到 Go，那是第二份判準）與 `changed[]`（`from_state → to_state` 加上
+`trigger_event_type` 本身就說明了這一步改了什麼，而且是存下來的事實而非推導）。
+
 事件層也沿用身分層四個已知限制中的兩條：`event_instances` 同樣**只在
 `reuse_existing=false` 那條路徑寫入**（統計的是分析的子集），同一 symbol 的併發分析
 同樣會撞唯一索引而整筆 rollback、且只記 log。

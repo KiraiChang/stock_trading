@@ -16,7 +16,8 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-081` 起算。** 檔案裡看得到的最大是 I-080，但被移除的條目
+- **下一個新編號從 `I-084` 起算。**（I-081～I-083 已於 2026-08-21 發出，見下方條目。）
+  檔案裡看得到的最大是 I-083，但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-070～I-072 更早）都佔用過編號。
   **不要用「檔案裡最大值 + 1」決定編號**——被移除的條目正是看不見的那些；
@@ -33,8 +34,246 @@
 
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
-  **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 與
-  下一個可用的 I-081），那是預期的，不是殘留。
+  **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
+  I-081～I-083 與下一個可用的 I-084），那是預期的，不是殘留。
+
+---
+
+### I-083：T-055/T-056 計畫書保留舊裁決文字，與第 3 版最終契約互相衝突
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **已修復／待 review**（2026-08-21；修復方式見下方「修復結果」） |
+| 嚴重度 | 中（文件會誤導後續實作欄位與 issue 編號，但不影響目前 runtime） |
+| 分類 | 文件 / Todo / Issue / SR Zone / 計畫書一致性 |
+| 發現日期 | 2026-08-21 |
+| 來源 | [`todo.md`](./todo.md) / [`issue.md`](./issue.md) staged 異動核實 |
+
+T-055/T-056 的第 3 版裁決已經把契約收斂，但 `todo.md` 仍保留幾段未標成歷史的舊文字，
+讀起來像仍可直接採用，會讓後續實作者看到兩套互斥答案。
+
+已核實的衝突：
+
+1. `todo.md`「建議裁決」仍寫 `rr_gate.gate_kind` 可用
+   `PROBE` / `FULL_ENTRY` / `EXECUTION`；但第 3 版裁決已明確把 `EXECUTION` 拿掉，
+   `gate_kind` 只保留 `PROBE` / `FULL_ENTRY`。
+2. 同一段仍寫 `rr_gate` 要補 `actual_rr_source`；但第 3 版裁決明確決定不新增
+   `actual_rr_source`，改由既有 `gate_basis` 承載 RR 來源。
+3. `todo.md` 的原始 `Review findings` 區塊仍寫「findings 修完前，兩筆都還不應進入實作」，
+   但後文已記錄 R1～R5 全部核實並回寫、契約全數定案。若保留作歷史紀錄，必須標明已被
+   第 2/3 版回應取代。
+4. 本次核實時，`issue.md` 使用說明已更新下一個編號為 I-083，但同節例外說明仍殘留
+   「下一個可用的 I-081」。這會誤導後續 issue 編號；**此項已於建立 I-083 時一併修正為 I-084**。
+
+建議修法：
+
+* 將 `todo.md` 的「Review findings」標題或前言改成「原始 review findings（已由第 2/3 版處理）」。
+* 將 `todo.md` 的「建議裁決」標題或前言改成「裁決前建議（已由第 3 版裁決修正）」，
+  並在 `gate_kind=EXECUTION`、`actual_rr_source` 兩處加註「已被第 3 版否決」，或直接改成最終契約。
+* `issue.md` 使用說明的下一個編號提示已修正，後續維持和實際最大 issue 編號一致。
+
+#### 修復結果（2026-08-21）
+
+四項全部核實成立，`todo.md` 已依「加註而非改寫」處理——**保留決策沿革**，
+不把被否決的建議直接抹掉，否則後人看不到「為什麼最後不是這樣定的」。
+
+| 項次 | 處置 |
+|---|---|
+| 1. `gate_kind=EXECUTION` | 「裁決前建議」該行改為刪除線 ＋ 「**已被第 3 版否決**：`EXECUTION` 是 RR 來源不是門檻層，值域收斂為 `PROBE` / `FULL_ENTRY`」，並指向 F1 定案「偏離 1」 |
+| 2. `actual_rr_source` | 同上處理，指向 F1 定案「偏離 2」（與 `gate_basis` 一對一重複，不新增） |
+| 3. 標題與前言未標成歷史 | `#### Review findings` → **`#### 原始 Review findings（已由第 2／3 版處理，保留作決策沿革）`**；`##### 建議裁決` → **`##### 裁決前建議（已由第 3 版裁決修正，保留作決策沿革）`**。前言改寫為「實作一律以 T-055／T-056 本文契約表與『裁決納入紀錄（第 3 版）』為準」 |
+| 4. `issue.md` 編號提示 | 建檔時已修正為 I-084（條列與小節末尾括號兩處都改） |
+
+**核實時另外補掉兩處 I-083 未列的殘留**（同一類問題，一併處理）：
+
+* 「Review 回應（第 2 版）」段補上前言，聲明表格內「四個待定案問題」一類描述是**當時狀態不是現況**，
+  待定案項目已於第 3 版全數關閉。
+* 「裁決前建議」提到的 `structural_resistance_zone` 也加註——**第 3 版收得比裁決更緊**：
+  裁決寫「不要直接等同 `primary_structural_zone`，除非先確認語意」，第 3 版直接決定**不建立這個欄位**。
+  T-056 契約表同步標明這是對裁決原文的收緊。
+
+**再核實補記（2026-08-21，F3）**：本筆修正後的再次 review 抓到一處**由這次修正產生的**
+新殘留——補記段的字串替換只匹配到句子前半，留下拼接殘句、語意重複與未更新的舊標題
+（詳見 `todo.md`「再核實 findings（2026-08-21）」F3）。已一併修正。
+隨後又做了一次**引用一致性補齊**：`todo.md` 內文引用小節時一律只寫小節名、版次寫在引號外，
+小節標題統一為 `小節名（日期，版次）`。因此**上表第 3 列引用的補記措辭是當時版本**，
+現行措辭以 `todo.md` 為準；命名慣例本身也記在該處的 F3 處理結果。
+**本節上方三處出現的「建議裁決」是改名前的舊標題，刻意保留**，
+否則這筆 issue 會讀起來像沒發生過。
+
+**review 通過後**：本筆可整筆移除；移除前不需要搬任何說明到主題文件——
+內容是計畫書自身的一致性，不是產品行為。
+
+---
+
+### I-081：`sr-zone-scoring.md` 的 legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（文件落後，runtime 行為正確且一致） |
+| 分類 | 文件 / Python / SR Zone / 決策語意 |
+| 發現日期 | 2026-08-21 |
+| 來源 | [`todo.md`](./todo.md) T-055 的 RR 語意核實（live 0050 分析） |
+
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Legacy action pipeline」第 3 條寫：
+
+> 3. 若 primary zone `risk_reward_ratio < 1.0`：加上風險報酬不足註記。
+
+實作用的是 **`< 1.5`**，而且出現兩次：
+
+* `decision_engine.py:499` —— `elif rr < 1.5:` → 「主交易區風險報酬比不足。」
+* `decision_engine.py:516` —— `if rr is None or rr < 1.5:` → 直接 `return "WATCH"`
+
+註記文案與文件描述一致，**只有門檻數字對不上**。1.0 和 1.5 之間的 RR 在實際系統裡
+會被加註記並擋到 `WATCH`，但照文件讀會以為它是乾淨通過的。
+
+**要改的是文件，不是程式碼**：1.5 與 `_minimum_rr()` 的下限一致，是刻意的調校結果，
+不是筆誤。
+
+**與 T-055 的關係**：T-055 會把 RR 門檻改成 `probe_min_rr` / `full_entry_min_rr` 兩層具名門檻，
+屆時這一條的敘述整段都要重寫。**因此建議與 T-055 一起改，不要先單獨改一次數字**——
+除非 T-055 遲遲沒排上，才單獨修正 1.0 → 1.5 止血。
+
+---
+
+### I-082：文件把 EXPIRED 的 `Buy` 守門記在錯的位置（**行為正確，原始指控已被重現推翻**）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 修復中（**迴歸保護已補完；只剩文件改寫，等 T-055 一起做**） |
+| 嚴重度 | 低（**由中下修**：行為正確，文件把守門機制記在錯的函式） |
+| 分類 | 文件 / Python / SR Zone / 決策語意 |
+| 發現日期 | 2026-08-21（同日以重現實驗推翻原始指控） |
+| 來源 | [`todo.md`](./todo.md) T-055 的 RR 語意核實（讀碼推論）→ 2026-08-21 重現實驗 |
+
+#### 重現結果（2026-08-21）：**無法重現，原始指控不成立**
+
+依既定流程「先重現再修法」建探針窮舉，結論是 **EXPIRED 的 primary zone 走不到 `Buy`**。
+
+| 組合 | `structure_state` | `action` |
+|---|---|---|
+| SUPPORT ＋ TREND_UP | `BREAKDOWN` | **Avoid** |
+| SUPPORT ＋ RANGE_BOUND | `BREAKDOWN` | **Avoid** |
+| SUPPORT ＋ TREND_DOWN | `BREAKDOWN` | **Avoid** |
+| RESISTANCE ＋ 三種 regime | `NORMAL` | **Avoid**（`bearish_setup` 擋下） |
+| **對照組**：同一 zone 只把 `EXPIRED` 換成 `VALIDATED_RECENTLY` | `NORMAL` | **Buy** |
+
+對照組是關鍵：其餘六個 `strong` 條件**確實全中**（relevance 84.81 ≥ 75、confidence 1.0、
+EV 0.05、RR 3.0、distance 0.0005、regime flags 空），足以產生 `Buy`。
+**唯一的差別就是 `recent_validation`**，所以 Avoid 確實由 EXPIRED 造成。
+端到端 `build_decision_summary` 同樣是 `action=Avoid` / `final_entry=BLOCKED`。
+
+#### 真正的守門在哪裡（原始分析漏看的一行）
+
+守門存在，只是**不在 `strong`**，而在 `_structure_state`（`decision_engine.py:2242-2243`）：
+
+```python
+if primary_zone.role == ZoneType.SUPPORT.value:
+    ...
+    if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
+        return "BREAKDOWN"
+```
+
+而 `_decision_action` 對 `structure_broken` 的判斷（`:512-518`）發生在 `strong` 計算**之前**，
+命中就直接 `return "AVOID", "EXIT", "Avoid"`。加上 `_pick_primary_zone` 的兩條清單
+（嚴格與 fallback）**都排除 `AT_ZONE`**，primary 只可能是 SUPPORT 或 RESISTANCE，於是：
+
+* SUPPORT ＋ EXPIRED → `BREAKDOWN` → Avoid，**永遠到不了 `strong`**；
+* RESISTANCE → `bearish_setup=True` 且 `bullish_setup=False` → Avoid，同樣到不了。
+
+`_decision_action` 與 `_structure_state` **各只有一個呼叫點**（`decision_engine.py:2402` / `:2388`，
+都在 `build_decision_summary` 內），所以上述窮舉涵蓋全部路徑。
+
+#### 原始分析錯在哪（留作教訓）
+
+1. **只讀了 `strong` 的條件式，沒有往上讀 `structure_broken` 的提前 return。**
+   「條件式裡沒有 X」不等於「X 沒被擋」——守門可以在更早的分支。
+2. **2026-08-21 的「嚴重度上調」也是錯的。** 當時推翻了「confidence 過不了 0.65」的舊推論
+   （那部分確實錯：EXPIRED 是「最近一次觸碰被跌破」而非「很久沒測試」，見 `scoring.py:420`），
+   但**用一個正確的觀察去支撐一個錯誤的結論**——實際上 confidence 拉到 1.0 也照樣 Avoid。
+3. 兩次都是**讀碼推論未經重現**就寫進 issue。這正是「先重現再修法」要防的情形。
+
+#### 剩下的兩件事（這才是本筆的實際範圍）
+
+**1.（文件）`sr-zone-scoring.md`「Legacy action pipeline」第 4 條把守門記在錯的位置。**
+
+原文是：
+
+> 4. 若 primary zone `recent_validation=EXPIRED`：加上近期驗證失效註記，**且不應升級到 `Buy`**。
+
+讀起來像「第 4 步自己會擋」，但第 4 步只加註記；**擋 `Buy` 的是第 5～6 步的
+`structure_broken` / `bearish_setup` 提前 return**。敘述的結論正確、機制錯位——
+正是這個錯位讓原始分析誤判。應改寫成明確指出擋在哪裡。
+
+**2.（迴歸保護）這道守門沒有任何測試釘住，而 T-055 就要動這段。**
+
+`strong` 擋得住，靠的是上游 `_structure_state` 的一行 `EXPIRED → BREAKDOWN`。
+**目前沒有任何測試斷言「EXPIRED primary 不得輸出 Buy」**：
+
+* 若日後有人把 `_structure_state` 改成「跌破後已收回就不算 BREAKDOWN」（合理的演進方向），
+  Buy 路徑會**靜默打開**；
+* T-055 的「F1 連帶後果」正要改 `_decision_action` 的 `strong` 讀哪個 RR，**改的就是這一段**。
+
+這與 [I-074](#i-074t-044-的-rr-解耦只有單元測試層級的證據decision-replay-驗證無法執行)
+記錄的「`test_continuation_only_needs_price_evidence` 無法防守 RR 被加回來」是同一類缺口：
+行為正確，但沒有東西釘住它。
+
+**建議**：把本次重現探針收成永久迴歸測試（`tests/test_decision_engine.py`），
+斷言「EXPIRED primary ＋ 其餘 strong 條件全中 → action 不得為 `Buy`」，**並附對照組**
+（換成 `VALIDATED_RECENTLY` 必須是 `Buy`）。沒有對照組，測試會在 fixture 退化成
+「根本達不到 strong」時假綠。
+
+#### 不做的事
+
+* **不改 `strong` 的條件式。** 行為已正確；加 `recent_validation != EXPIRED` 是重複守門，
+  且會讓「守門在哪」變成兩處，之後更難維護。
+* **不改 `_pick_primary_zone` 的 fallback。** 「沒有合格 zone 時仍要選一個出來」是刻意設計，
+  真正的守門在動作升級那一層，已證明有效。
+
+**與 T-055 的關係**：不再有修法衝突（本筆不動 `strong`）。迴歸測試已於 T-055 之前補完，
+成為 T-055 改 `_decision_action` 時的安全網。
+
+#### 實作結果（2026-08-21）：迴歸測試已補（**第 2 項完成**）
+
+`python/backtest/modular/sr_scoring/tests/test_decision_engine.py` 新增三條：
+
+| 測試 | 作用 |
+|---|---|
+| `test_expired_primary_zone_never_upgrades_to_buy` | 守門本體。EXPIRED primary × {SUPPORT, RESISTANCE} × {TREND_UP, RANGE_BOUND, TREND_DOWN} 六組，斷言 action 不得為 `Buy`（且為 `Avoid`） |
+| `test_expired_guard_control_group_would_otherwise_reach_buy` | **對照組，不可刪**。同一 fixture 只把 EXPIRED 換成 `VALIDATED_RECENTLY` → 必須是 `Buy`，證明其餘五個 `strong` 條件確實達標 |
+| `test_expired_primary_zone_end_to_end_is_not_buy` | 端到端補一刀，並斷言 primary **真的是** EXPIRED（fallback 生效），避免測試空轉 |
+
+**刻意停在 `_decision_action` 這一層**：文件那句「不應升級到 `Buy`」講的就是 legacy action
+pipeline。端到端還會再經 `final_entry_permission` 降級——實測對照組在端到端是
+`Hold` / `WAIT_CONFIRMATION`，用端到端做對照就分不出「被 EXPIRED 擋下」還是「被進場閘降級」。
+
+##### 變異測試：證明這組測試釘得住
+
+把 `_structure_state:2242-2243` 的 `EXPIRED → BREAKDOWN` 兩行移除後重跑：
+
+```
+FAILED test_expired_primary_zone_never_upgrades_to_buy
+AssertionError: EXPIRED primary zone 升級到 Buy（role=SUPPORT global_trend=0.05）——守門失效
+1 failed, 2 passed
+```
+
+**注意端到端那條在變異下仍然綠燈**（`final_entry_permission` 照樣把它降成 `Hold`）。
+所以**只有端到端測試是抓不到這個回歸的**——這正是守門測試要停在 `_decision_action`
+那一層的理由，也說明端到端斷言不能取代單元層斷言。
+
+##### 測試結果
+
+| 範圍 | 結果 |
+|---|---|
+| `test_decision_engine.py` | **78 passed**（原 75，+3） |
+| `python/scripts/test.sh` 全套 | **602 passed / 1 skipped**（原 599 / 1，+3） |
+
+##### 剩餘工作
+
+只剩本節第 1 項的**文件改寫**（`sr-zone-scoring.md`「Legacy action pipeline」第 4 條），
+依既定順序與 [I-081](#i-081sr-zone-scoringmd-的-legacy-action-pipeline-第-3-條門檻寫--10實作是--15)
+一起等 T-055 重寫該段時處理。
 
 ---
 

@@ -3533,7 +3533,7 @@ A 是唯一「零程式碼、立刻可逆、省下四分之一」的選項。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R1／R2／R3／R5、同日建議裁決與 F1 定案；契約全部定案、無待決項，尚未實作**） |
+| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R1／R2／R3／R5、同日「裁決前建議」與 F1 定案；契約全部定案、無待決項，尚未實作**） |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 決策語意 |
 | 建立日期 | 2026-08-21 |
@@ -3778,18 +3778,20 @@ target 封頂規則，以及 `probe_min_rr` / `full_entry_min_rr` 兩層具名�
 `MARKET_ENTRY_TARGET_UNAVAILABLE` → `TARGET_UNAVAILABLE` 的值域遷移說明。
 **review 通過後才把本筆從 todo.md 移除**，且移除時一併處理 R5 的兩筆 issue 搬移。
 
-#### 核實過程中的附帶發現（**判定：屬 `docs/issue.md`，待 review 通過後搬移**）
+#### 核實過程中的附帶發現（**R5 已結案：2026-08-21 搬入 `docs/issue.md`**）
 
-1. **文件與實作不一致**：`sr-zone-scoring.md`「Legacy action pipeline」第 3 條寫
-   「`risk_reward_ratio < 1.0`：加上風險報酬不足註記」，但 `decision_engine.py:499` 用的是 **`< 1.5`**。
-2. **待確認**：同段第 4 條寫 EXPIRED 的 primary zone「不應升級到 `Buy`」，但 `strong` 判定
-   （`decision_engine.py:520-527`）只排除 regime `flags`，未排除 `recent_validation=EXPIRED`。
-   實務上 EXPIRED zone 的 confidence 通常過不了 0.65，所以可能從未觸發——**未實測，僅為讀碼推論**。
+兩筆都已建立 issue 條目，本筆不再保留內文，避免 `docs/todo.md` 變成 issue 暫存區：
 
-**處置（R5）**：兩筆都已判定屬「文件與實作不一致」，依 CLAUDE.md 應進 `docs/issue.md`。
-本次為計畫書草案、只做計畫不實作，因此**暫存於此並明確標記待搬移**；
-T-055 進入實作、或計畫書 review 通過時，**必須同步建立 issue 條目並從這裡移除**，
-不讓 `docs/todo.md` 變成 issue 暫存區。
+| Issue | 內容 | 與本筆的關係 |
+|---|---|---|
+| [`issue.md`](./issue.md) **I-081** | `sr-zone-scoring.md` legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`（`decision_engine.py:499` 與 `:516`） | T-055 會把 RR 門檻改成兩層具名門檻，該段敘述整段要重寫——**建議與 T-055 一起改** |
+| [`issue.md`](./issue.md) **I-082** | ~~EXPIRED 的 primary zone 仍可能升級到 `Buy`~~ → **2026-08-21 重現實驗推翻**：行為正確，守門在 `_structure_state:2242`（`EXPIRED → BREAKDOWN`）而非 `strong`。剩下的只有文件錯位與缺迴歸保護 | **修法衝突已解除**（本筆不動 `strong`）。但 I-082 建議的迴歸測試「EXPIRED primary 不得輸出 `Buy`」**應在 T-055 之前先加**——它正是 T-055 改 `_decision_action` 時的安全網 |
+
+**I-082 的兩次判斷都被推翻，過程留在該筆**：先是誤判「`strong` 沒排除 EXPIRED 所以會發 Buy」，
+接著又錯誤地把嚴重度上調。實際窮舉（SUPPORT／RESISTANCE × 三種 regime ＋ 對照組）顯示
+**EXPIRED primary 走不到 `strong`**：SUPPORT 被 `structure_broken` 提前 return 擋下、
+RESISTANCE 被 `bearish_setup` 擋下，而兩條 `_pick_primary_zone` 清單都排除 `AT_ZONE`。
+嚴重度已由「中」下修為「低」，範圍縮小為**文件改寫 ＋ 補迴歸測試**。詳見 I-082。
 
 ---
 
@@ -3797,7 +3799,7 @@ T-055 進入實作、或計畫書 review 通過時，**必須同步建立 issue 
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R4 與同日建議裁決；契約已定案，尚未實作**） |
+| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R4 與同日「裁決前建議」；契約已定案，尚未實作**） |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 決策呈現 |
 | 建立日期 | 2026-08-21 |
@@ -3910,7 +3912,9 @@ summary 的 `nearest_*` 是兩條不同來源（前者可含 daily candidate）�
 | `structural_resistance_zone` | **不新增** | 見下方說明 |
 | `primary_structural_zone` | **保留原樣**，語意不變 | Tier-1 品質最高的**大結構參考**，不參與進場擋路判斷 |
 
-**`structural_resistance_zone` 刻意不建立**：`primary_structural_zone`（Tier-1 品質最高）與
+**`structural_resistance_zone` 刻意不建立**（**這是對裁決原文的收緊**：裁決寫「不要直接等同
+`primary_structural_zone`，除非先確認語意」，第 3 版直接決定不建這個欄位）：
+`primary_structural_zone`（Tier-1 品質最高）與
 `entry_blocking_zone.blocking_zone`（距離最近的 resistance）**不保證相同**，在 0050 這筆碰巧相同
 純屬巧合。直接把兩者合成一個「結構壓力」欄位，就是重演本筆要修的「同名不同義」。
 
@@ -3955,9 +3959,16 @@ UI 標籤請用「**前方擋路壓力**」而非「結構壓力」，否則 Tie
 
 ---
 
-#### Review findings（2026-08-21）
+#### 原始 Review findings（2026-08-21，**已由第 2／3 版處理，保留作決策沿革**）
 
-以下是 T-055 / T-056 計畫書 review 的待修正點。這些 findings 修完前，兩筆都還不應進入實作。
+> 文件核實補記（2026-08-21，**I-083 已修正**）：本節是原始 review findings，
+> R1～R5 已於下方「Review 回應」與「裁決納入紀錄」全數處理並回寫進計畫本文。
+> 本節與「裁決前建議」**只作決策沿革**，被第 3 版覆寫的欄位值已逐處加註。
+> **實作一律以 T-055／T-056 本文的契約表與「裁決納入紀錄」（第 3 版）為準**，
+> 不要拿本節或「裁決前建議」當實作契約。
+
+以下是 T-055 / T-056 計畫書 review 當時的待修正點。這些 findings 在當時修完前，
+兩筆都還不應進入實作；目前處理狀態以後續「Review 回應」與「裁決納入紀錄」為準。
 
 **R1.（P1）T-055 把「唯一門檻」直接等同 `_minimum_rr()`，會吃掉 Full Entry 語意。**
 
@@ -4019,8 +4030,49 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 `docs/issue.md`。若本次只是計畫書草案，短暫留在 T-055 內可以接受；若要提交，應同步建立 issue
 或明確標成「待 review 後搬移」，避免 `docs/todo.md` 變成 issue 暫存區。
 
+##### 再核實 findings（2026-08-21）
+
+**F3.（P3）I-083 的補記本身仍有小型殘字，容易讓歷史區塊讀起來不乾淨。**
+
+`原始 Review findings` 的補記已經說「實作一律以 T-055／T-056 本文契約表與
+裁決納入紀錄（第 3 版）為準」，但下一行又重複寫「不要直接引用本節或『建議裁決』作為
+實作契約，應以 T-055/T-056 本文契約表與『裁決納入紀錄』為準」。這段有三個小問題：
+
+* 同一個「以第 3 版為準」語意重複兩次；
+* `不要直接引用` 被硬斷行，讀起來像殘留拼接；
+* `建議裁決` 已改名為 `裁決前建議`，但這裡與下方「仍未定案」收斂句仍保留舊標題。
+
+建議後續修正時把補記收成一句，統一稱呼 `裁決前建議`，並刪掉重複的
+「以契約表與裁決納入紀錄為準」句子。
+
+**處理結果（2026-08-21）：三項全部核實成立，已修正。**
+
+成因是 I-083 修正時的**字串替換只匹配到句子前半**，把原句尾巴留在原地，
+接出「不要直接引用 ／ 本節或『建議裁決』作為實作契約，應以…為準」這段拼接殘句——
+所以三個小問題其實是同一個成因的三種表徵。
+
+| 子項 | 處置 |
+|---|---|
+| 語意重複兩次 | 補記末句收成一句：「**不要拿本節或「裁決前建議」當實作契約**」，刪掉重複的「應以…為準」 |
+| 硬斷行拼接殘字 | 殘句整段移除，補記現為五行完整句 |
+| 舊標題 `建議裁決` | todo.md 內四處全部改為 `裁決前建議`：補記、「仍未定案」收斂句、T-055／T-056 兩個狀態欄（後兩處加引號，明示是小節名而非泛稱） |
+
+**命名慣例（2026-08-21 定，避免再漂移）**：本區段內文引用小節時，
+**引號內只寫小節名本身**（`原始 Review findings` / `再核實 findings` / `Review 回應` /
+`裁決前建議` / `裁決納入紀錄`），**不帶日期與版次**；需要標示版次時寫在引號外，
+例如「裁決納入紀錄」（第 3 版）。小節標題本身統一為 `小節名（日期，版次）`。
+這樣標題補日期或改版次時，內文引用不會跟著失效。
+
+**`issue.md` 的三處「建議裁決」刻意不改**：I-083 的「已核實的衝突」與「建議修法」
+記錄的是**改名前**的狀態，「修復結果」表則記錄 `##### 建議裁決` → `##### 裁決前建議`
+這個改名動作本身。把它們一起改掉會讓那筆 issue 讀起來像沒發生過。
+
 
 #### Review 回應（2026-08-21，第 2 版）
+
+> **本節記錄的是第 2 版的處理狀態**：當時 R1／R2 只把問題列成「待定案表」，尚未定案。
+> 那些待定案項目已於**第 3 版全數關閉**（見下方「裁決前建議」與「裁決納入紀錄」）。
+> 表格內「四個待定案問題」一類的描述屬當時狀態，**不是現況**。
 
 五項 findings **全部核實成立**，計畫已據此修改。逐項對照：
 
@@ -4030,9 +4082,9 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 | **R2** | **成立**。`_rr_context()` 簽章確實沒有 `entry_blocking_zone`，呼叫端只傳 `target_zone=_nearest_resistance_above_entry(...)`（`:2481-2489`）。**另查到一個 finding 未提、對計畫有利的事實**：`_entry_blocking_zone_detail` 在 `:2434` 就算完，`_rr_context` 在 `:2481` 才呼叫——**呼叫順序已經是對的**，不需重排流程 | 受影響資料流補上精確行號；新增「target 封頂的 arbitration」小節，把 review 的四個問題逐條列成待定案表；標注與 T-056 的順序相依 |
 | **R3** | **成立**。`SRZones.svelte:2326-2340` 的 RR 區塊只有 `entry_rr` 與 `position_rr`，`execution_rr` 沒有顯示位置。**另查到**：`rr_gate` 區塊（`:2309-2324`）顯示 `qualified` / `minimum_rr` / `reason_code` 但**不顯示 `actual_rr`**——所以「1.87」與「通過」分屬兩個區塊、沒有任何標示說它們同源，這正是矛盾感被放大的原因 | 測試與驗證新增第 2 條前端測試（四個斷言），並把 `rr_gate` 缺 `actual_rr` 一併納入本筆處理範圍 |
 | **R4** | **成立**。Python 端**沒有** `_zone_summaries` 函式；是 `build_decision_summary()`（`:2331`）在 `:2637-2655` 直接組 top-level 欄位，`zone_summaries_json` 這個集合概念只存在於 Go 的 `buildDecisionZoneSummariesJSON()`（`client.go:807-832`）。原計畫另把 `_price_path` 與 summary 併在一行也不精準——兩者是不同來源 | T-056 受影響資料流整段重寫為精準落點，並加註修正說明 |
-| **R5** | **成立** | 附帶發現標題改為「**判定：屬 `docs/issue.md`，待 review 通過後搬移**」，處置段落寫明搬移時機與條件 |
+| **R5** | **成立** | 第 2 版標為待搬移；**2026-08-21 已結案**——兩筆搬入 `docs/issue.md` 成為 **I-081** / **I-082**，T-055 內只留指標表 |
 
-**~~仍未定案、需要你裁決的項目~~ → 已於下方「建議裁決」全數關閉，並回寫進兩筆計畫本文（第 3 版）。**
+**~~仍未定案、需要你裁決的項目~~ → 已於下方「裁決前建議」全數關閉，並回寫進兩筆計畫本文（第 3 版）。**
 
 1. ~~R1：門檻命名／`gate_kind`／前端顯示幾個 gate~~ → 定案見 T-055 修改目標第 1 條。
 2. ~~R2：target 來源／優先順序／`blocked=false` 是否封頂／傳參方式~~ → 定案見 T-055「target 封頂的 arbitration」。
@@ -4042,9 +4094,14 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 結構／擋路壓力確定採 `blocking_resistance_zone`。但**實作順序不變**：
 `blocking_resistance_zone` 欄位要先在 T-056 落地，T-055 才能引用它當 target cap。
 
-##### 建議裁決（2026-08-21）
+##### 裁決前建議（2026-08-21，**已由第 3 版裁決修正，保留作決策沿革**）
 
-以下是對上方三組未定案問題的建議定案方向；修計畫書時可直接採用，若實作前另有反例再回來調整。
+> 文件核實補記（2026-08-21）：本節保留裁決前建議，已被下方「裁決納入紀錄」（第 3 版）修正。
+> 其中 `gate_kind=EXECUTION` 與新增 `actual_rr_source` 兩點已被第 3 版否決；詳見
+> [`issue.md`](./issue.md) **I-083**。實作時以 T-055/T-056 本文契約表與第 3 版裁決為準。
+
+以下是對上方三組未定案問題的裁決前建議方向；第 3 版已採用其中方向並修正部分欄位契約，
+本節保留作決策沿革，實作時不要直接採用未經第 3 版覆寫的欄位值。
 
 1. **R1：保留兩個 gate，`rr_gate` 加 `gate_kind`；前端主顯示一個 authoritative gate，
    輔助顯示另一個 gate。**
@@ -4052,7 +4109,9 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
    不建議把「唯一門檻」解讀成只有 `_minimum_rr()` 一個數字。0050 這類情境應表達成
    「Probe RR 通過，但 Full Entry 未通過」，而不是把其中一句消掉。建議 contract：
 
-   * `rr_gate.gate_kind`：`PROBE` / `FULL_ENTRY` / `EXECUTION`；
+   * ~~`rr_gate.gate_kind`：`PROBE` / `FULL_ENTRY` / `EXECUTION`~~
+     → **已被第 3 版否決**：`EXECUTION` 是 RR 來源不是門檻層，值域收斂為
+     `PROBE` / `FULL_ENTRY`，執行性資訊改由 `gate_basis` 承載（見 F1 定案「偏離 1」）；
    * `rr_gate.minimum_rr`：目前實際仲裁用的門檻；
    * `rr_gate.actual_rr`：目前實際仲裁用的 RR；
    * `rr_gate.secondary_gate`：另一層 gate，例如
@@ -4091,7 +4150,8 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
    * 新增 `setup_rr`；
    * 新增 `executable_rr`；
    * 保留 `execution_rr` 作 `executable_rr` alias，一版後再評估是否 deprecate；
-   * `rr_gate` 補 `actual_rr_source` / `gate_kind` / `gate_basis`。
+   * ~~`rr_gate` 補 `actual_rr_source`~~ → **已被第 3 版否決**：與 `gate_basis` 一對一重複，
+     不新增（見 F1 定案「偏離 2」）；`gate_kind` / `gate_basis` 照補。
 
 4. **T-056 契約命名採 B + C：新增清楚欄位，同時保留 legacy alias。**
 
@@ -4101,7 +4161,9 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
    * `blocking_resistance_zone`：第一道前方擋路壓力，供顯示與 executable RR target cap 使用。
 
    `nearest_resistance_zone` 暫時保留為 `tactical_resistance_zone` 的 legacy alias，文件標明
-   「不是價格最近」。`structural_resistance_zone` 不要直接等同 `primary_structural_zone`，
+   「不是價格最近」。~~`structural_resistance_zone` 不要直接等同 `primary_structural_zone`~~
+   → **第 3 版收得更緊：`structural_resistance_zone` 直接不建立**（比本建議更嚴格，
+   理由見 T-056 契約表）。原文如下：`structural_resistance_zone` 不要直接等同 `primary_structural_zone`，
    除非先確認語意；目前 `primary_structural_zone` 是 Tier-1 品質最高的結構參考，
    `entry_blocking_zone.blocking_zone` 是最近擋路壓力，兩者不保證相同。
 
@@ -4110,7 +4172,7 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
    前方壓力，也就是 blocking / nearest-by-price。
 
 
-##### 裁決納入紀錄（第 3 版，2026-08-21）
+##### 裁決納入紀錄（2026-08-21，第 3 版）
 
 四項裁決**全數採用並回寫進計畫本文**，本節只記錄「納入時另外查到、需要在實作前關掉」的兩個旗標。
 

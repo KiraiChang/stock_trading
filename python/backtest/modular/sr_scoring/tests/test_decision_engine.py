@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from ..decision_engine import (
     _daily_confirmation,
+    _decision_action,
     _decision_derived_view,
     _defense_lines,
     _final_entry_risk_notes,
     _final_entry_permission,
+    _market_regime,
     _position_action_condition,
     _risk_note,
+    _structure_state,
+    _zone_interaction,
     build_decision_summary,
 )
 from ..event_engine import detect_market_events
@@ -1754,3 +1758,98 @@ def test_defense_lines_tactical_skips_decision_invisible_events():
     # tactical 要維持階段 D 之前的答案：INTRADAY_RECLAIM 那個 zone，不是先插隊的 weak。
     assert lines["tactical"]["price_low"] == 97.0
     assert lines["tactical"]["price_high"] == 98.0
+
+
+# ── I-082：EXPIRED 的 primary zone 不得升級到 `Buy` ────────────────────────────
+#
+# `sr-zone-scoring.md`「Legacy action pipeline」第 4 條要求 EXPIRED 的 primary zone
+# 「不應升級到 `Buy`」。這個保證**不是**由 `_decision_action` 的 `strong` 條件式提供的
+# （它只看 regime flags，不看 zone 層級的 recent_validation），而是由更上游的
+# `_structure_state` 提供：SUPPORT + EXPIRED → `BREAKDOWN` → `structure_broken` 提前
+# return `Avoid`，根本走不到 `strong`；RESISTANCE 則被 `bearish_setup` 擋下。
+#
+# 也就是說，**守門是隱含的**：任何人放寬 `_structure_state` 的 EXPIRED 規則
+# （例如改成「跌破後已收回就不算 BREAKDOWN」），Buy 路徑就會靜默打開，而在這組測試
+# 出現之前沒有任何東西會報錯。詳見 issue.md I-082。
+
+
+def _expired_guard_zone(recent_validation: str, role: str = ZoneType.SUPPORT.value) -> ZoneScore:
+    """把 `strong` 的其餘五個條件全部拉到達標，只留 `recent_validation` 當變因。
+
+    relevance 對 EXPIRED 仍有 84.8（>= 75）——EXPIRED 只讓 validation 分量歸零，
+    其餘分量（距離 30 / ev_rr 30 / volume 10 / role_readiness 10 / confidence 10）補得回來。
+    """
+    return _zone(
+        role=role,
+        low=99.9,
+        high=100.05,          # 距 current_price=100.1 僅 0.05%，distance 分量近滿分
+        confidence=1.0,       # >= 0.65
+        expected_value=0.05,  # > 0
+        risk_reward_ratio=3.0,  # >= 2.0
+        recent_validation=recent_validation,
+        volume_confirmation=VolumeConfirmation.CONFIRMED.value,
+    )
+
+
+def _legacy_action(zone: ZoneScore, global_trend: float) -> str:
+    """跑 legacy action pipeline（`_decision_action`），回傳 action。
+
+    刻意停在這一層而不是 `build_decision_summary`：文件那句「不應升級到 `Buy`」講的就是
+    legacy pipeline，而端到端還會再經 `final_entry_permission` 降級（實測對照組會變成
+    `Hold`/`WAIT_CONFIRMATION`），那樣就分不出「被 EXPIRED 擋下」還是「被進場閘降級」。
+    """
+    interaction = _zone_interaction(zone, 100.1, None, None, None)
+    structure_state = _structure_state(zone, interaction, None)
+    regime = _market_regime(
+        global_trend,
+        0.01,
+        1.0,
+        {"missing": False, "score": 55.0, "signal": "BULLISH"},
+        structure_state,
+        [],
+        None,
+        None,
+    )
+    return _decision_action(regime, zone, 100.1, interaction, [])[2]
+
+
+def test_expired_primary_zone_never_upgrades_to_buy():
+    """EXPIRED 的 primary zone 在任何 role × regime 組合下都不得輸出 `Buy`。"""
+    for role in (ZoneType.SUPPORT.value, ZoneType.RESISTANCE.value):
+        for global_trend in (0.05, 0.0, -0.05):
+            zone = _expired_guard_zone(RecentValidation.EXPIRED.value, role=role)
+            action = _legacy_action(zone, global_trend)
+            assert action != "Buy", (
+                f"EXPIRED primary zone 升級到 Buy（role={role} global_trend={global_trend}）"
+                "——守門失效，見 issue.md I-082"
+            )
+            assert action == "Avoid", (
+                f"預期 Avoid，實際 {action}（role={role} global_trend={global_trend}）"
+            )
+
+
+def test_expired_guard_control_group_would_otherwise_reach_buy():
+    """對照組：同一個 fixture 只把 EXPIRED 換成 VALIDATED_RECENTLY，必須拿到 `Buy`。
+
+    **這條測試是上一條的前提，不能刪。** 少了它，上一條會在 fixture 退化成
+    「根本達不到 `strong`」時假綠——那時它證明的是「這組數字進不了 Buy」，
+    而不是「EXPIRED 擋住了 Buy」。
+    """
+    zone = _expired_guard_zone(RecentValidation.VALIDATED_RECENTLY.value)
+
+    assert _legacy_action(zone, 0.05) == "Buy"
+
+
+def test_expired_primary_zone_end_to_end_is_not_buy():
+    """端到端補一刀：EXPIRED 真的成為 primary（fallback 生效）時，對外 action 不得是 `Buy`。
+
+    `_pick_primary_zone` 的嚴格清單會排除 EXPIRED，但清單落空時 fallback 只保留
+    `role != AT_ZONE`——所以只有一個 EXPIRED zone 時它仍會被選為 primary。
+    這裡順便斷言 primary 真的是 EXPIRED，避免測試變成空轉。
+    """
+    ds = _summary([_expired_guard_zone(RecentValidation.EXPIRED.value)])
+
+    assert ds["primary_zone"]["recent_validation"] == RecentValidation.EXPIRED.value, (
+        "fixture 沒讓 EXPIRED zone 成為 primary，這條測試就沒有在測 I-082 的情境"
+    )
+    assert ds["action"] != "Buy"

@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
   import SRChipPanel from '../components/chip/SRChipPanel.svelte'
+  import SREventTimeline from '../components/sr/SREventTimeline.svelte'
   import { ApiError } from '../lib/api/client'
   import { chipFreshness } from '../lib/utils/chipFreshness'
   import {
@@ -2233,7 +2234,10 @@
 
             {#if decisionSummary.event_sequence && decisionSummary.event_sequence.length > 0}
               <div class="border border-border/70 rounded-lg p-3 bg-panel/50 mb-4 text-xs">
-                <p class="text-muted mb-2">Event Sequence</p>
+                <!-- **與下方的 Event Timeline 不是同一件事**：這裡是「當次分析偵測到的事件」
+                     依優先序排序去重，沒有時間也沒有狀態轉換；Timeline 才是跨分析的演進。
+                     兩者名字相近，緊鄰擺放是為了讓差別看得出來（見 docs/api-reference.md）。 -->
+                <p class="text-muted mb-2">Event Sequence（當次分析）</p>
                 <div class="flex items-center gap-2 flex-wrap">
                   {#each decisionSummary.event_sequence as event, i}
                     {#if i > 0}<span class="text-muted">→</span>{/if}
@@ -2491,6 +2495,14 @@
             <p class="text-muted text-xs mt-1">此分析缺少 normalized decision snapshot；請重新分析以產生新版決策資料。</p>
           </div>
         {/if}
+
+        <!-- **刻意掛在 decision summary 面板之外**：事件鏈來自身分層，與 decision
+             summary 有沒有 market_regime / confidence_explanation 無關。放進面板內會被
+             hasDecisionDetail 連坐隱藏，讓身分層明明有鏈的舊分析看不到任何東西。
+             與面板內「Event Sequence（當次分析）」的語意差別靠標題文字區隔。 -->
+        <div class="px-5 pt-4">
+          <SREventTimeline symbol={current.symbol} timeframe={current.timeframe} analysisId={current.id} />
+        </div>
 
         <div class="divide-y divide-border border-b border-border">
           {#if periodSummaries.length > 0}

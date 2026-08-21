@@ -981,6 +981,23 @@ ATR 邊界與 role 算出來——**兩者對不上是常態而非例外**（202
 `market_event_states` / `market_event_detections` / `event_instances`，不進任何決策桶。
 語意與消費端見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」。
 
+**`event_instances.decision_visible`（migration 071，2026-08-21 起）** 把這個旗標從
+`state_json` 帶進身分層，讓 `GET /sr-zones/event-timeline` 能逐條回傳，顯示端才分得出
+「事實紀錄」與「會影響決策的事件」。三個 engine 都是
+`BOOLEAN NOT NULL DEFAULT TRUE`（sqlite 存 0/1）。要點：
+
+* **值由 `buildEventIdentityWrite` 從 `state_json` 搬過來**（`eventDecisionVisible`，
+  缺鍵回傳 `true`），Go **不依 `event_family` 推導**——那會變成第二份型別清單。
+* **每次觀測跟著 upsert 更新**（三個 engine 的 UPDATE 子句都要有這一欄）。鏈由排程收尾、
+  沒有本次 state 時不走這條路徑，所以已終結的鏈不會被寫回預設值。
+* **migration 內有一次性回填**
+  （`UPDATE ... SET decision_visible = FALSE WHERE event_family IN
+  ('SUPPORT_RETEST','RESISTANCE_BREAKOUT')`）。階段 D 上線（2026-08-20）到本次
+  migration 之間寫進去的鏈會落在預設 `TRUE`，而**已終結的鏈不會再被寫入、不會自動修正**。
+  這行**是資料修正、不是執行期推導**——不要把它當成「Go 側可以照 family 判斷」的先例。
+  不走「join `state_json` 回填」是因為三個 engine 的 JSON 取值語法各不相同，
+  而回填母體小又已知。
+
 **zone 身分因 `SPLIT` / `MERGE` / `RESHAPE` 終止時，parent 身上的事件不傳給 child**，
 而是以 `end_reason='ZONE_IDENTITY_ENDED'` 收攤。那條鏈的前提（那個 zone 存在）已經消失，
 接到 child 等於宣稱鏈延續了，而 `RESHAPE` 的定義正是「血緣無法解析」。血緣留在

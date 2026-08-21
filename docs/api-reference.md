@@ -388,12 +388,12 @@ T-045 / T-048 / T-051。
 gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務啟動時 panic。
 
 **2026-08-20 起會出現只寫不讀的事件鏈。** `SUPPORT_RETEST` 與 `RESISTANCE_BREAKOUT`
-兩個 family 的鏈也會被寫入並在這裡回傳，但它們的 `state_json` 帶
-`decision_visible=false`——**它們不參與任何決策**，只是事實紀錄。前端若要呈現，要把這個
-旗標一起讀出來區分，不要當成會影響 Bias 或進場的事件。同一件事在 `POST /sr-zones` 的
+兩個 family 的鏈也會被寫入並在這裡回傳，但**它們不參與任何決策**，只是事實紀錄。
+每條 chain 都帶 **`decision_visible`**（2026-08-21 起，見下方欄位說明），顯示端要靠它
+把事實紀錄與決策事件分開，不要當成會影響 Bias 或進場的事件。同一件事在 `POST /sr-zones` 的
 `decision_summary.market_events[]` 與 `event_state_summary.states[]` 也看得到；
 `active` / `candidates` / `confirmed` / `resolved` / `expired` 與兩個方向桶
-**不會**包含它們。`decision_visible` 這個鍵本身是**純新增**，既有事件項目上一律是
+**不會**包含它們。`decision_visible` 這個鍵本身是**純新增**，既有事件一律是
 `true`，缺鍵時也視為 `true`。語意見
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」。
 
@@ -425,6 +425,7 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
     "last_seen_at": "2026-08-12T00:00:00Z",
     "closed": false,
     "final_state": "CONFIRMED",
+    "decision_visible": true,
     "transitions": [
       {"occurred_at": "2026-08-10T00:00:00Z", "analysis_id": 41,
        "from_state": "CANDIDATE", "state": "CONFIRMED",
@@ -439,7 +440,7 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 }
 ```
 
-**判讀時必須注意的六件事：**
+**判讀時必須注意的七件事：**
 
 1. **一條 chain ＝ 一個 zone 身分 × 一個 family × 一個 `seq`。** 鍵是 **`zone_uid`**，
    不是 `zone_key`——後者只是「最近一次觀測到時事件帶的 key」，供人工比對用。
@@ -475,6 +476,20 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 6. **`identity_since` 之前沒有鏈可看。** 事件鏈是身分層開始寫入之後才有的，更早的分析
    **刻意不回填**（回填要解的正是「兩個舊 key 是不是同一個 zone」，而那正是身分層本身
    要建的能力）。早於它的 `snapshots` 照常列出，讓「這段沒有鏈」與「這段沒有分析」分得開。
+
+   **它不受 `max_analyses` 影響**：問的是「身分層何時開始有紀錄」，不是「這次查了多久」。
+   值由 `event_instances` 的**全歷史**算出（每條鏈取第一步所屬分析的 K 棒時間，沒有
+   `analysis_id` 才退回 `occurred_at`，完全沒有轉換的鏈才退回 `first_seen_at`），
+   所以它**可以早於 `chains` 裡最早的 `first_seen_at`**——那代表視窗之前還有已終結的鏈
+   沒被撈進來，不是資料不一致。
+
+7. **`decision_visible=false` 的鏈要標記，不要濾掉。** 這個欄位（2026-08-21 起）逐條帶出
+   階段 D 的隔離旗標：`false` 代表這條鏈只寫不讀，不進任何決策桶。值一路來自 Python 的
+   `event_engine.EVENT_TYPE_META`，**不要在呼叫端依 `event_family` 自己推導**——那等於
+   維護第二份型別清單，兩份分歧時沒有任何東西會報錯。**沒有 `omitempty`**，`false`
+   一定會出現在 JSON 裡；缺鍵（舊後端）一律視為 `true`。
+   顯示端的定案是**標記而非隱藏**：這些鏈是「這個 zone 最近有沒有被測試過」的唯一依據，
+   藏起來會讓人工判讀失去資訊。
 
 這份資料定位為 **display chain**——供顯示與人工檢查，**不是** Lifecycle Engine 的 runtime 輸入。
 

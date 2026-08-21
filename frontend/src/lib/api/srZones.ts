@@ -934,6 +934,81 @@ export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<S
   return res.analyses ?? []
 }
 
+// ── Event Timeline（跨分析事件鏈，todo.md T-045 / T-048 / T-051）────────────
+//
+// **與 decision summary 的 event_sequence 不是同一件事**：後者是「當次分析偵測到的事件」
+// 依優先序排序去重，沒有時間也沒有狀態轉換；這裡是**跨分析的完整演進**。
+// 兩者名字相近但語意不同，見 docs/api-reference.md。
+
+export interface SREventTimelineTransition {
+  /** 這一步所屬分析的 **K 棒時間**，與 snapshots 同軸（不是跑分析的 wall clock）。 */
+  occurred_at: string
+  analysis_id?: number
+  /** 留白代表**這是鏈的誕生**（event_transitions 的不變式）。 */
+  from_state?: string
+  state: string
+  event_type?: string
+  reason_codes?: string[]
+}
+
+export interface SREventTimelineChain {
+  event_uid: string
+  /** null 代表 SYMBOL scope 的事件（不屬於任何 zone）。 */
+  zone_uid: string | null
+  /** 最近一次觀測到時事件帶的 key，**只供人工比對**——鏈的身分是 zone_uid。 */
+  zone_key: string | null
+  event_scope: string
+  event_family: string
+  /** 同一個 (zone, family) 的第幾條鏈。**seq > 1 是新的一條，不是舊鏈復活**。 */
+  seq: number
+  direction: string
+  root_event_type: string
+  latest_event_type: string
+  first_seen_at: string
+  last_seen_at: string
+  closed: boolean
+  active: boolean
+  final_state: string
+  resolved_by?: string
+  /** RESOLVED / EXPIRED / ZONE_IDENTITY_ENDED，後者**不是自然結束**。 */
+  end_reason?: string
+  /**
+   * false 代表這條鏈是「只寫不讀的事實紀錄」，**不影響 Bias 或進場**
+   * （階段 D 的隔離旗標，目前是 SUPPORT_RETEST / RESISTANCE_BREAKOUT 兩個 family）。
+   *
+   * **optional 是為了相容舊後端**：缺鍵一律視為 true，判斷一律走 isDecisionVisible()，
+   * 不要在畫面上直接讀這個欄位的 truthiness。
+   */
+  decision_visible?: boolean
+  transitions: SREventTimelineTransition[]
+}
+
+export interface SREventTimelineSnapshot {
+  analysis_id: number
+  analyzed_at: string
+  /** 距上一次分析幾天。大於 1 代表中間沒有觀測——**空白不等於沒事發生**。 */
+  gap_days: number
+}
+
+export interface SREventTimeline {
+  symbol: string
+  timeframe: string
+  /** 身分層最早的觀測時間；更早的分析沒有鏈可看（刻意不回填）。 */
+  identity_since: string | null
+  chains: SREventTimelineChain[]
+  snapshots: SREventTimelineSnapshot[]
+}
+
+export async function getEventTimeline(
+  symbol: string,
+  timeframe = '1d',
+  maxAnalyses = 60,
+): Promise<SREventTimeline> {
+  const q = `symbol=${encodeURIComponent(symbol)}&timeframe=${encodeURIComponent(timeframe)}`
+    + `&max_analyses=${maxAnalyses}`
+  return apiFetch<SREventTimeline>(`/sr-zones/event-timeline?${q}`)
+}
+
 export async function getSRZoneAnalysis(id: number): Promise<{ analysis: SRZoneAnalysis; zones: SRZone[] }> {
   const response = await apiFetch<SRZonePipelineResponse>(`/sr-zones/${id}`)
   return normalizePipelineResponse(response)

@@ -82,8 +82,15 @@ type EventTimelineChain struct {
 	//
 	// **ZONE_IDENTITY_ENDED 要看得出來**：那是「zone 因 SPLIT/MERGE/RESHAPE 終止，
 	// 所以鏈跟著收攤」，不是事件自己走完生命週期。畫成一般結束會誤導。
-	EndReason   string                    `json:"end_reason,omitempty"`
-	Transitions []EventTimelineTransition `json:"transitions"`
+	EndReason string `json:"end_reason,omitempty"`
+	// DecisionVisible=false 是「只寫不讀的事實紀錄」（階段 D 的隔離旗標）：
+	// SUPPORT_RETEST / RESISTANCE_BREAKOUT 的鏈會回傳，但它們不進任何決策桶，
+	// 不影響 Bias 或進場。顯示端要把它與決策事件分開，否則會被讀成買賣訊號。
+	//
+	// **刻意沒有 omitempty**：那會把 false 整個吃掉，而 false 正是這個欄位唯一
+	// 有資訊量的值。缺值一律視為 true（既有事件都是決策可見的）。
+	DecisionVisible bool                      `json:"decision_visible"`
+	Transitions     []EventTimelineTransition `json:"transitions"`
 }
 
 // EventTimeline 是一個標的的完整輸出。
@@ -91,6 +98,11 @@ type EventTimeline struct {
 	Symbol    string `json:"symbol"`
 	Timeframe string `json:"timeframe"`
 	// IdentitySince 是身分層對這檔最早的觀測時間。
+	//
+	// **不受 max_analyses 影響**（todo.md T-051 R5）：它問的是「身分層何時開始有
+	// 紀錄」，不是「這次查了多久」。值由 EventIdentityRepo.GetIdentitySince 對
+	// **全歷史**算出來，與被視窗篩過的 Chains 無關——早期由 Chains 推導時，
+	// 視窗之前就終結的鏈會被濾掉，畫面會把「這次沒查到」說成「更早沒有事件鏈」。
 	//
 	// **必須揭露**：事件鏈是從 migration 068 才開始寫的，更早的分析沒有鏈資料，而且
 	// 刻意不回填（回填要解的正是「兩個舊 key 是不是同一個 zone」，那是身分層本身要建的
@@ -119,17 +131,26 @@ type EventTimelineSnapshot struct {
 // chains / transitions 來自 EventIdentityRepo 的 ListChains / ListTransitions，
 // 順序不拘——函式會自己排序，因為輸出的決定性不該依賴 SQL 的排序。
 // analyses 是這段期間**所有**分析的時間點，用來產生 Snapshots 與 gap。
+//
+// identitySince 是身分層對這檔最早的紀錄時間，來自 EventIdentityRepo.GetIdentitySince
+// （**全歷史、不套視窗**）。非 nil 時直接採用；nil 時退回由 chains 推導——那條路徑只給
+// 未接身分層的呼叫端，理由見迴圈內的說明。
 func BuildEventTimeline(
 	symbol, timeframe string,
 	chains []store.EventInstance,
 	transitions []store.EventTransitionView,
 	analyses []store.AnalysisSnapshot,
+	identitySince *time.Time,
 ) EventTimeline {
 	out := EventTimeline{
 		Symbol:    symbol,
 		Timeframe: timeframe,
 		Chains:    []EventTimelineChain{},
 		Snapshots: []EventTimelineSnapshot{},
+	}
+	if identitySince != nil {
+		at := *identitySince
+		out.IdentitySince = &at
 	}
 
 	out.Snapshots = buildTimelineSnapshots(analyses)
@@ -193,11 +214,19 @@ func BuildEventTimeline(
 			FinalState:      c.State,
 			ResolvedBy:      c.ResolvedBy.String,
 			EndReason:       c.EndReason.String,
+			DecisionVisible: c.DecisionVisible,
 			Transitions:     steps,
 		})
-		if out.IdentitySince == nil || firstSeen.Before(*out.IdentitySince) {
-			at := firstSeen
-			out.IdentitySince = &at
+		// **只在沒有注入全域值時才由鏈推導**（todo.md T-051 R5）。推導出來的是
+		// 「本次回傳的鏈裡最早的起點」，而 chains 已先被 max_analyses 的視窗篩過，
+		// 視窗之前就終結的鏈不在裡面——當成 identity_since 就會說謊。
+		// 呼叫端有身分層時一律注入 EventIdentityRepo.GetIdentitySince 的全域值；
+		// 這條降級路徑留給未注入身分層的呼叫端，那時 chains 必為空、結果同樣是 nil。
+		if identitySince == nil {
+			if out.IdentitySince == nil || firstSeen.Before(*out.IdentitySince) {
+				at := firstSeen
+				out.IdentitySince = &at
+			}
 		}
 	}
 	return out

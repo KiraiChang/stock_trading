@@ -72,7 +72,7 @@ func TestEventTimelineAgainstLiveData(t *testing.T) {
 		t.Fatalf("ListAnalysisSnapshots 失敗: %v", err)
 	}
 
-	tl := BuildEventTimeline(symbol, "1d", chains, transitions, analyses)
+	tl := BuildEventTimeline(symbol, "1d", chains, transitions, analyses, nil)
 
 	// 印出來供人工核對：鏈的形狀是否合理，是這次驗證的主要目的。
 	pretty, _ := json.MarshalIndent(tl, "", "  ")

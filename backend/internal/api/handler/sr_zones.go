@@ -980,7 +980,20 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 	// 回空鏈——那與「這檔還沒有任何鏈」在畫面上一樣，但 snapshots 仍會照常揭露分析次數。
 	var chains []store.EventInstance
 	var transitions []store.EventTransitionView
+	var identitySince *time.Time
 	if h.eventIdentity != nil {
+		// **identity_since 另外查一次，不能從 chains 推**（todo.md T-051 R5）：
+		// chains 已被上面的視窗篩過，視窗之前就終結的鏈不在裡面，拿它推導會把
+		// 「這次沒查到」說成「更早的分析沒有事件鏈」。這一支問的是全歷史。
+		got, err := h.eventIdentity.GetIdentitySince(c.Request.Context(), symbol, timeframe)
+		if err != nil {
+			serverError(c, h.log, err, "sr-zones: event timeline identity since")
+			return
+		}
+		if got.Valid {
+			at := got.Time
+			identitySince = &at
+		}
 		chains, err = h.eventIdentity.ListChains(c.Request.Context(), symbol, timeframe, since)
 		if err != nil {
 			serverError(c, h.log, err, "sr-zones: event timeline chains")
@@ -997,7 +1010,7 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 		}
 	}
 
-	timeline := analysis.BuildEventTimeline(symbol, timeframe, chains, transitions, analyses)
+	timeline := analysis.BuildEventTimeline(symbol, timeframe, chains, transitions, analyses, identitySince)
 	c.JSON(http.StatusOK, timeline)
 }
 
@@ -1647,6 +1660,10 @@ func buildEventIdentityWrite(
 			// **每次都更新成本次事件帶的 key**：停在誕生那天的值會讓第一把鑰匙
 			// 往後永遠 miss，整個①段等於沒做。
 			LastZoneKey: sql.NullString{String: lookupKey, Valid: lookupKey != ""},
+			// 決策可見性**只搬不推導**：值來自 Python 寫在 state_json 的旗標，
+			// 缺鍵回傳 true。Go 這邊若改成依 event_family 判斷，就會多出第二份
+			// 型別清單，而兩份分歧時沒有任何東西會報錯（同 carried_from_previous）。
+			DecisionVisible: eventDecisionVisible(st.StateJSON),
 		}
 		// RESOLVED / EXPIRED 是鏈的終態。**要在這裡收掉**，否則它會永遠停在未終結，
 		// 下次分析把它當成「還活著」而延續下去，同一條鏈就吃掉了兩段本該分開的歷史。

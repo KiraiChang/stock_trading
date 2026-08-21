@@ -1525,7 +1525,7 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃（**前置已解除**：T-044 已於 2026-08-18 收斂，Lifecycle 狀態定義已定案） |
+| 狀態 | **Event Timeline 面向已實作／待 review**；review 8 筆發現**全數已實作待 review**（R1、R5 於 2026-08-21 各依計畫書完成，見下方「Review 發現」）；Lifecycle 與 Strategy Layer 兩個面向仍待規劃（**前置已解除**：T-044 已於 2026-08-18 收斂，Lifecycle 狀態定義已定案） |
 | 優先度 | 中 |
 | 分類 | SR Zone / Decision UI / Position Action |
 | 建立日期 | 2026-08-07 |
@@ -1549,6 +1549,420 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
   支援前端顯示，哪些需要補 contract。
 - 若新增或改動 API contract，要同步更新 `docs/api-reference.md` 與 SR Zone 相關主題文件。
 - `Position Action` 的策略差異應先文件化仲裁規則，再實作 UI，避免前端自行推導交易語意。
+
+#### Event Timeline 面向的實作結果（2026-08-21，已實作／待 review）
+
+三個面向裡只做了 **Event Timeline**，接的是 T-051 改讀身分層之後的
+`GET /sr-zones/event-timeline`。Lifecycle 與 Strategy Layer 兩個面向**這一輪不做**，
+狀態不變。
+
+改動範圍：
+
+| 檔案 | 內容 |
+|---|---|
+| `frontend/src/lib/api/srZones.ts` | 新增 `SREventTimeline*` 型別與 `getEventTimeline()`；型別註解寫明 `zone_uid` 才是鏈的身分、`seq > 1` 是新鏈、`gap_days > 1` 代表沒有觀測 |
+| `frontend/src/lib/utils/eventTimeline.ts` | 語意判斷：`splitChains` / `chainEndNote` / `maxGapDays` / `chainZoneLabel` |
+| `frontend/src/lib/utils/eventTimeline.test.ts` | 上述四個函式的單元測試（10 條） |
+| `frontend/src/components/sr/SREventTimeline.svelte` | 預設收合的顯示元件；換 symbol／timeframe 時作廢已載入內容並重抓 |
+| `frontend/src/routes/SRZones.svelte` | 掛在 Event Sequence 正下方；順手把前者標成「Event Sequence（當次分析）」 |
+
+判讀規則與理由已歸檔到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「前端 Event Timeline 的判讀規則（現況）」。
+
+驗證：`npm run test:unit` 20 檔 131 條全過、`svelte-check` 0 errors / 0 warnings、
+`scripts/check-dist-assets.sh` 在 `git add` 前如預期報未納管（dist 已重建，
+`index.html` 指向 `index-DBnXF-i3.js` / `index-DVlyP0ZY.css`）。
+真實資料以 dev DB 的四檔 21 階看過：`2330` 28 條鏈全已終結（「全部終結時看起來像壞掉」
+那條規則就是這樣踩出來的，已修掉）、`6182` 涵蓋其餘邊界（7 條進行中、2 條 `seq > 1`、
+8 條 `ZONE_IDENTITY_ENDED`、1 條 `SYMBOL` scope）。
+
+**不做的範圍**：Lifecycle 正式顯示、Strategy Layer 三層 position action、
+timeline 的區間／筆數 UI（`max_analyses` 目前固定 60）、鏈的圖形化時間軸
+（現況是文字列表）。
+
+#### Review 發現（2026-08-21，R1～R4／R6～R8 已修，R5 待處理）
+
+`/code-review` 對上面這批異動的發現，逐筆對照過程式碼與 `api-reference.md` 後確認成立。
+**這些是本筆 review 的待辦，不是獨立 issue**——收斂 T-041 的 Event Timeline 面向之前
+要逐筆處理掉；若屆時決定不修而是接受，就要搬到 [`issue.md`](./issue.md) 記成已知限制，
+不能隨本筆一起消失。
+
+**R1.（已修，2026-08-21）`decision_visible` 沒被讀出來（要動後端，contract 異動）。**
+[`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」明寫
+`SUPPORT_RETEST` 與 `RESISTANCE_BREAKOUT` 的鏈會在這個端點回傳但帶
+`decision_visible=false`，「前端若要呈現，要把這個旗標一起讀出來區分，不要當成會影響
+Bias 或進場的事件」。實際上 `analysis.EventTimelineChain` **沒有這個欄位**，
+`SREventTimeline.svelte` 也就直接把 `event_family` 印出來——畫面會在 decision summary
+正下方顯示一條 `RESISTANCE_BREAKOUT / CONFIRMED / BULLISH`，讀起來像突破買訊，
+而引擎（`sr_zones.go` 的 `eventDecisionVisible`）刻意把它排除在所有決策桶之外。
+修法：後端 `EventTimelineChain` 補 `decision_visible`（比照既有慣例，缺鍵視為 `true`），
+前端據此把不可見的鏈標成「事實紀錄，不參與決策」。**這是對外 contract 異動，
+要先出計畫書**，並同步更新 `api-reference.md`。
+
+**R2.（已修，2026-08-21）Timeline 被 `hasDecisionDetail` 連坐隱藏。**
+元件掛在 `SRZones.svelte` 的 `{#if decisionSummary && hasDecisionDetail}` 區塊內，
+而 `hasDecisionDetail` 要求 `market_regime` **且** `confidence_explanation` 都存在。
+事件鏈與 decision summary 無關，卻會在缺任一者的分析上整個消失（例如舊分析、
+normalized decision 為 missing 的分析），身分層明明有鏈也看不到。
+順帶：內層的 `{#if current}` 是死碼——`decisionSummary = current?.decision_summary`，
+非 null 就代表 `current` 存在。修法：移到該 `{#if}` 之外，由 `current` 自己守衛。
+
+**R3.（已修，2026-08-21）首次載入失敗後換股票不會重抓。**
+`SREventTimeline.svelte` 的 reactive 守衛是 `if (symbol && loadedFor && …)`，
+而 `loadedFor` 只在**成功**時才賦值。情境：展開 2330 → 請求 500 → `error` 有值、
+`loadedFor` 仍是 `''` → 改看 6182 時守衛因 falsy 直接跳過，既不清 `error` 也不重抓，
+面板持續顯示 2330 的錯誤訊息，直到手動收合再展開。
+修法：失敗時也記下這次載入的目標，或把守衛改成比較「目前想看的」與「已載入的」。
+
+**R4.（已修，2026-08-21）快取鍵只有 `symbol:timeframe`，重跑分析後不更新。**
+`runAnalysis()` 直接以新分析覆寫 `current`、中途不會變 `null`，元件實例不重建；
+`ensureLoaded()` 因 `loadedFor` 沒變直接 return，面板仍顯示舊的鏈與「這段期間共 N 次分析」，
+畫面上沒有任何過期提示。修法：把 `current.id` 併進快取鍵。
+
+**R5.（已實作／待 review，2026-08-21）`identity_since` 在視窗被截斷時會說謊——但錯的是後端不是文案。**
+前端那句「更早的分析沒有事件鏈（刻意不回填）」忠實照著 `api-reference.md` 第 6 點寫。
+落差在實作：`identity_since` 取的是**回傳鏈中最早的 `first_seen`**，而
+`ListChains` 的視窗只保證**未終結**的鏈不受限制，視窗（前端固定 `max_analyses=60`）
+之前就已終結的鏈會被濾掉。於是半年歷史、60 次分析只涵蓋一個月時，畫面會宣告
+「身分層自 07-22 起有紀錄」，而更早的分析其實有鏈。
+**這筆屬於 T-051 交付的後端行為與文件不一致**，不在前端修。
+**2026-08-21 依下方「R5 計畫書」實作完成**：`identity_since` 改由
+`EventIdentityRepo.GetIdentitySince` 對全歷史查出來，前端文案不動。
+
+**R6.（已修，2026-08-21）`srZones.ts` 的註解被插隊孤立。** 新的 Event Timeline 區塊插在
+「limit 預設 20；未指定 symbol 時呼叫端應給更大的值……」這段註解與它描述的
+`listSRZoneAnalyses` 之間，現在那段註解讀起來像在講 Event Timeline。
+修法：把新區塊移到 `listSRZoneAnalyses` 之後。
+
+**R7.（已修，2026-08-21）`getEventTimeline` 的 `timeframe` 沒有 `encodeURIComponent`。** 同一行的 `symbol`
+有編碼。目前實際值是 `1d` / `5m`，屬於同一行內不一致的防護。
+
+**R8.（已修，2026-08-21）`splitChains` 用 `localeCompare` 比 RFC3339 字串。** Go 的 `time.Time` 在小數秒
+為 0 時不輸出小數部分，比較 `…T13:30:00.123456+08:00` 與 `…T13:30:00+08:00` 會落在
+`.` 對 `+` 的標點權重上；若哪天一端是 UTC、一端帶 `+08:00` 會直接錯。
+影響僅止於排序，改成 `Date.parse()` 相減成本很低。
+
+**修正結果（2026-08-21）**：純前端的 R2 / R3 / R4 / R6 / R7 / R8 六筆**已修完**；
+**R1 與 R5 各依下方計畫書實作完成**（R1：後端補 `event_instances.decision_visible`
+並逐條回傳，前端標記而不隱藏；R5：`identity_since` 改由身分層全歷史推導）。
+**八筆全部已實作，待 review**。
+
+修法重點：
+
+* R2 把 `<SREventTimeline>` 移出 `{#if decisionSummary && hasDecisionDetail}`，改掛在
+  該區塊之後（外層 `{#if current}` 已保證非 null，順手拿掉那個死碼守衛）。
+* R3 / R4 併成同一組：元件新增 `analysisId` prop，快取鍵改成
+  `symbol:timeframe:analysisId`，且 `loadedFor` 在 `finally` 裡**成功失敗都寫入**。
+* R8 改用 `Date.parse()` 相減，無法解析的排到最後；新增兩條單元測試
+  （小數秒／時區偏移混用、無法解析的值）鎖住行為。
+
+驗證：`npm run test:unit` 20 檔 **133** 條全過（原 131 ＋ R8 的 2 條）、
+`svelte-check` 0 errors / 0 warnings、`npm run build` 重建 dist 後
+`scripts/check-dist-assets.sh` 通過（`index-ZJ7kKgIi.js` / `index-1XCtV4KW.css`）。
+**尚未在真實資料上重看畫面**——R2 的位置調整與 R4 的重跑後更新要在 dev stack 上確認。
+
+顯示端的現況規格（擺放位置、快取鍵、失敗後重抓）已同步到
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「前端 Event Timeline 的判讀規則（現況）」。
+
+#### R1 計畫書：event-timeline 的 chain 補 `decision_visible`（已實作／待 review）
+
+跨 Go／DB／前端且動到對外 contract，依 CLAUDE.md 先留計畫書。
+**2026-08-21 已依本計畫實作完成，實作結果見本節最後的「實作結果」。**
+
+##### 修改目標
+
+讓 `GET /sr-zones/event-timeline` 的每一條 chain 帶出 `decision_visible`，前端據此把
+「只寫不讀的事實紀錄」與「會影響 Bias／進場的事件」在畫面上分開。目前
+`SUPPORT_RETEST` 與 `RESISTANCE_BREAKOUT` 兩個 family 的鏈會與其他鏈長得一模一樣，
+使用者會把 `RESISTANCE_BREAKOUT / CONFIRMED / BULLISH` 讀成突破買訊，
+而引擎刻意把它排除在所有決策桶之外——**這正是階段 D 的隔離在顯示層漏掉的一段**。
+
+##### 不做的範圍
+
+* **不改 Python。** 旗標已由 `event_engine.EVENT_TYPE_META` 單一產生，本筆只是把它
+  帶到顯示層。
+* **不改任何決策路徑**，不動 `market_event_states` / `market_event_detections`
+  的寫入與既有桶構建。
+* **不把不可見的鏈藏起來。** 它們是事實紀錄，要看得到——本筆做的是**標記**不是過濾。
+  藏起來會讓「這個 zone 最近有沒有被測試過」這種人工判讀失去依據。
+* **不處理 R5**（`identity_since` 的視窗截斷），那是另一條線（已於 2026-08-21 另案完成，
+  見下方「R5 計畫書」）。
+* 不做 T-041 的 Lifecycle 與 Strategy Layer 兩個面向。
+
+##### 受影響檔案與資料流
+
+資料流（現況 → 目標）：
+
+```text
+Python event_engine.EVENT_TYPE_META（旗標的唯一產生者）
+        ↓ state_json.decision_visible
+market_event_states
+        ↓ buildEventIdentityWrite（目前**沒有**把旗標帶進身分層）
+event_instances  ←── 本筆要補的斷點
+        ↓ BuildEventTimeline
+GET /sr-zones/event-timeline → 前端
+```
+
+| 檔案 | 內容 |
+|---|---|
+| `backend/internal/database/migrations/{postgres,sqlite,mysql}/071_event_decision_visible.sql` | `event_instances` 新增 `decision_visible BOOLEAN NOT NULL DEFAULT TRUE` ＋ 一次性回填。編號 `071`（070 已被 `sr_identity_stats` 佔用），三份 engine 各一份 |
+| `backend/internal/store/event_identity_repo.go` | `EventInstance` 加欄位；`instanceUpsertSQL()` 的 cols／VALUES／三個 engine 的 UPDATE 子句各加一行；`listEventChainsSQL` 與 `ListLive` 的 SELECT 加欄位 |
+| `backend/internal/api/handler/sr_zones.go` | `buildEventIdentityWrite` 用**既有的** `eventDecisionVisible(state.StateJSON)` 填值（該函式已存在於同檔 1454 行，缺鍵回傳 `true`） |
+| `backend/internal/analysis/event_timeline.go` | `EventTimelineChain` 加 ``DecisionVisible bool `json:"decision_visible"` `` |
+| `frontend/src/lib/api/srZones.ts` | `SREventTimelineChain` 加 `decision_visible?: boolean` |
+| `frontend/src/lib/utils/eventTimeline.ts`（＋測試） | 新增 `isDecisionVisible(chain)`：缺鍵視為 `true` |
+| `frontend/src/components/sr/SREventTimeline.svelte` | 不可見的鏈加標籤「事實紀錄・不參與決策」並淡化；標題列的計數在有不可見鏈時補「（其中 N 條不參與決策）」 |
+
+##### Contract 變化與仲裁順序
+
+1. **旗標仍由 Python 單一產生，Go 只讀不推導。** 這條沿用 `carried_from_previous` 的
+   定案：Go 或前端自己維護一份型別／family 清單時，兩份分歧不會有任何東西報錯。
+   所以**不接受**「Go 依 `event_family` 判斷」或「前端硬編兩個 family 名字」這兩種寫法。
+2. **缺值一律 `true`。** 與 `eventDecisionVisible` 現有語意、`api-reference.md` 的
+   「缺鍵時也視為 `true`」一致；當成 `false` 會讓既有事件整批被標成不參與決策。
+3. **JSON tag 不可加 `omitempty`。** `false` 會被 `omitempty` 整個吃掉，而 `false`
+   正是這個欄位唯一有資訊量的值——加了等於白做。（同樣的坑 `ZoneUID` 用指標避開過。）
+4. **寫入時機**：每次事件被觀測到就跟著 upsert 更新。鏈由排程收尾（沒有本次 state）時
+   不會走這條路徑，欄位維持既有值——實作時要確認收尾路徑不會把它寫成預設值。
+
+##### 回填策略
+
+新欄位預設 `TRUE`，但 2026-08-20 階段 D 之後寫進去的 `SUPPORT_RETEST` /
+`RESISTANCE_BREAKOUT` 鏈會因此被標成「參與決策」，且**已終結的鏈不會再被寫入、
+不會自動修正**。所以 migration 內做一次性回填：
+
+```sql
+UPDATE event_instances SET decision_visible = FALSE
+ WHERE event_family IN ('SUPPORT_RETEST', 'RESISTANCE_BREAKOUT');
+```
+
+這行**是資料修正、不是執行期推導**，要在 migration 註解裡寫明，避免下一個人把它當成
+「Go 側可以照 family 判斷」的先例。不走「join `market_event_states` 的 `state_json`
+回填」是因為三個 engine 的 JSON 取值語法各不相同，而回填母體小又已知。
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 前端把旗標讀成「要隱藏」 | 定案是**標記不隱藏**，寫進 `sr-zone-scoring.md` 的顯示規則；元件測試鎖住「不可見的鏈仍然出現在列表裡」 |
+| 三份 migration 分歧（mysql 從未部署） | 比照既有慣例跑 `scripts/test-mysql-migrations.sh`；注意它只驗 DDL 不驗 CRUD（`issue.md` I-054） |
+| upsert 漏改某個 engine 的 UPDATE 子句 | 新欄位在 sqlite 測試裡做「寫入 false → 重新觀測 → 仍為 false」的 round-trip |
+| 舊前端搭新後端／新前端搭舊後端 | 純新增欄位；前端型別是 optional 且缺鍵視為 `true`，兩個方向都不會壞 |
+| 回滾 | Down 移除欄位即可；API 欄位消失後前端走「缺鍵＝true」分支，退回本筆之前的顯示行為 |
+
+##### 測試與驗證策略
+
+1. Go 單元測試：`buildEventIdentityWrite` 對帶 `decision_visible=false` 的 state 寫出
+   `false`、缺鍵寫出 `true`；timeline handler 的 JSON 逐欄比對含 `decision_visible`。
+2. `backend/scripts/test.sh`（sqlite，含 repo 層 round-trip）。
+3. `scripts/test-postgres-migrations.sh` 與 `scripts/test-mysql-migrations.sh`。
+4. dev stack 的 as-of 階梯（四檔 21 階，步驟見
+   [`development-workflow.md`](./development-workflow.md)）：`SUPPORT_RETEST` /
+   `RESISTANCE_BREAKOUT` 的鏈全為 `false`、其餘全為 `true`；**決策輸出逐欄不變**
+   仍是驗收條件（本筆不碰決策，六條門檻要全過）。
+5. 前端：`npm run test:unit`＋`svelte-check`＋`npm run build`，並在 `6182` 上看畫面
+   （該檔有 8 條 `ZONE_IDENTITY_ENDED`、涵蓋兩個新 family）。
+6. 回填後對 dev DB 用唯讀 SQL 抽驗兩個 family 的列數與旗標值。
+
+##### 完成後歸檔位置
+
+* [`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」：欄位表補
+  `decision_visible`，並把「前端若要呈現，要把這個旗標一起讀出來區分」從待辦語氣改成現況。
+* [`database-schema.md`](./database-schema.md)「event_instances / event_transitions /
+  zone_key_aliases」：新欄位與回填說明。
+* [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」補上「旗標如何流到顯示層」，
+  「前端 Event Timeline 的判讀規則（現況）」補上顯示方式（標記不隱藏）。
+
+##### 實作結果（2026-08-21）
+
+實作與計畫一致，沒有偏離。落地內容：
+
+| 層 | 落地 |
+|---|---|
+| migration | `071_event_decision_visible.sql` × 3 engine，`BOOLEAN NOT NULL DEFAULT TRUE`（sqlite 為 `1`）＋ 兩個 family 的一次性回填 |
+| store | `EventInstance.DecisionVisible`；`instanceUpsertSQL()` 的 cols／VALUES ＋ 三個 engine 的 UPDATE 子句；`listLatestEventChainsSQL` 與 `listEventChainsSQL` 的 SELECT |
+| handler | `buildEventIdentityWrite` 用既有的 `eventDecisionVisible(st.StateJSON)` 填值（缺鍵 `true`） |
+| analysis | `EventTimelineChain.DecisionVisible`，JSON tag **無 `omitempty`** |
+| 前端 | `SREventTimelineChain.decision_visible?`、`isDecisionVisible()`（缺鍵 `true`）、元件標「事實紀錄・不參與決策」並淡化、標題列補「（其中 N 條不參與決策）」 |
+
+**已通過的驗證**：
+
+* `backend/scripts/test.sh ./internal/store/... ./internal/analysis/... ./internal/api/...`
+  全過（含新增的 upsert round-trip、`buildEventIdentityWrite` 缺鍵／`false` 兩案、
+  timeline handler 的 JSON 逐欄比對）。
+* `scripts/test-postgres-migrations.sh`、`scripts/test-mysql-migrations.sh` 皆通過
+  （up → 驗 schema → 分段 down 到 0）。
+* 前端 `npm run test:unit` 21 檔 **137** 條全過（原 133 ＋ `isDecisionVisible` 2 條
+  ＋ 元件的「標記不隱藏」／「缺鍵不標記」2 條）、`svelte-check` 0 errors / 0 warnings、
+  `npm run build` 重建 dist 後 `scripts/check-dist-assets.sh` 通過
+  （`index-3iMGK8fu.js` / `index-1XCtV4KW.css`）。
+
+**尚未做的驗證（review 時要補或明確放行）**：計畫第 4～6 點的 dev stack 驗收。
+**2026-08-21 已把新 image 換上 dev backend，migration 071 也已套到 dev DB
+（啟動 log `migrations applied version=71`）**，但回填後的抽驗、as-of 階梯的
+「兩個 family 全 `false` / 其餘全 `true`」、決策輸出逐欄不變，以及在 `6182` 上
+實看畫面，都還沒做。
+
+#### R5 計畫書：`identity_since` 改由身分層全歷史推導（已實作／待 review）
+
+動到對外 contract 的語意並跨 store／handler／analysis，依 CLAUDE.md 先留計畫書。
+
+##### 修改目標
+
+讓 `identity_since` 永遠等於「**身分層對這檔最早有紀錄的時間**」，不受 `max_analyses`
+視窗影響，與 `api-reference.md` 判讀第 6 點、`sr-zone-scoring.md` 的敘述一致。
+目前它取自「本次回傳 chains 中最早的 `first_seen`」（`event_timeline.go:206`），
+而 chains 已先被視窗篩過（`sr_zones.go:974`），於是視窗之前就終結的鏈被濾掉時，
+畫面會宣告「更早的分析沒有事件鏈」，實際上只是「這次沒查到」。
+
+修好之後前端那句「身分層自 X 起有紀錄；更早的分析沒有事件鏈（刻意不回填）」才成立。
+
+##### 不做的範圍
+
+* **不改 `chains` / `snapshots` 的視窗語意**：`max_analyses` 仍決定回傳哪些鏈，
+  判讀第 4 點不變。本筆只修 `identity_since` 這一個值。
+* **不改前端**：文案、快取鍵、排序都不動。
+* **不回填歷史**：`identity_since` 之前仍然沒有鏈可看，那是身分層的刻意選擇。
+* **不新增 migration**：純查詢，無 DDL 變更。
+* 不動任何決策路徑。
+* 不處理 `scripts/verify-event-timeline.sh` 對 live schema 缺 `decision_visible` 的相依，
+  那是另一條線。
+
+##### 受影響檔案與資料流
+
+| 層 | 修改 |
+|---|---|
+| store | `EventIdentityRepo` 介面新增 `GetIdentitySince(ctx, symbol, timeframe) (sql.NullTime, error)` ＋ `eventIdentityRepo` 的實作 SQL |
+| handler | `SRZoneHandler.EventTimeline` 在既有兩次查詢之外多查一次全域 `identity_since`，結果傳進 `BuildEventTimeline` |
+| analysis | `BuildEventTimeline` 新增 `identitySince *time.Time` 參數：非 nil 直接採用；nil 時維持既有「由 chains 推導」的降級路徑 |
+| 測試 | store（sqlite 五案）、analysis（注入優先）、handler（視窗截斷回歸） |
+| 文件 | `api-reference.md` 判讀第 6 點、`sr-zone-scoring.md` 對應段落 |
+
+資料流（目標）：
+
+```text
+event_instances（全歷史，**不套視窗**）
+   └─ 每條鏈的起點 = MIN(COALESCE(a.analyzed_at, t.occurred_at))
+        （無 analysis_id 退回 occurred_at；完全沒有 transition 才退回 e.first_seen_at）
+        └─ 全域 MIN → identity_since（K 棒軸）
+```
+
+##### 查詢
+
+**計畫時的寫法（單一聚合查詢，已作廢）**：
+
+```sql
+SELECT MIN(x.started_at) FROM ( ... COALESCE(MIN(COALESCE(a.analyzed_at, t.occurred_at)), e.first_seen_at) ... ) x
+```
+
+**實作時的偏離（2026-08-21）**：上面那支在 sqlite 直接炸——modernc 的 driver 只對
+「宣告型別是 DATETIME 的欄位」回 `time.Time`，**聚合／`COALESCE` 這類運算式沒有宣告型別、
+會回字串**，掃進 `sql.NullTime` 得到
+`unsupported Scan, storing driver.Value type string into type *time.Time`。
+改成**兩支查詢、`SELECT` 只挑真欄位、把運算式留在 `ORDER BY`**，三個 engine 都不必解析字串
+（語意、contract 與計畫完全相同，只有查詢形狀變了）：
+
+```sql
+-- 1. 全域最早的那一步（「每條鏈取最早一步再取全域最小」＝「全域最早的一步」，不需分組）
+SELECT a.analyzed_at AS analyzed_at, t.occurred_at AS occurred_at
+  FROM event_transitions t
+  JOIN event_instances e ON e.event_uid = t.event_uid
+  LEFT JOIN stock_sr_zone_analyses a ON a.id = t.analysis_id
+ WHERE e.symbol = ? AND e.timeframe = ?
+ ORDER BY COALESCE(a.analyzed_at, t.occurred_at) ASC
+ LIMIT 1;
+
+-- 2. 完全沒有轉換的鏈（寫入端異常，但仍要算進來）
+SELECT e.first_seen_at
+  FROM event_instances e
+ WHERE e.symbol = ? AND e.timeframe = ?
+   AND NOT EXISTS (SELECT 1 FROM event_transitions t WHERE t.event_uid = e.event_uid)
+ ORDER BY e.first_seen_at ASC
+ LIMIT 1;
+```
+
+兩支的較早者即 `identity_since`；都沒有列（`sql.ErrNoRows`）時回 `Valid=false`。
+
+* **與 `BuildEventTimeline` 的 `firstSeen` 規則同構**（優先 K 棒軸 → 無 analysis 退
+  wall clock → 無 transition 退 `first_seen_at`）。同一個時間點不能有兩套推導，
+  否則 `identity_since` 會與 `chains[0].first_seen_at` 對不起來。
+* **不能只寫 `MIN(e.first_seen_at)`**：那是 as_of 的 wall clock，與對外的 K 棒軸不同軸
+  （T-045 曾把它由 `2026-08-20` 修成 `2026-07-20`，見本檔 T-045 的驗收紀錄）。
+* 索引：外層走 `idx_event_instances_live (symbol, timeframe, …)`，相關子查詢走
+  `idx_event_transitions_event (event_uid, occurred_at)`；單檔是數十列的量級，
+  每次請求多一次聚合查詢的成本可接受。
+
+##### Contract 變化與仲裁順序
+
+| 項目 | 變化 | 相容性 |
+|---|---|---|
+| `identity_since` 值 | 由「視窗內最早鏈的起點」→「全歷史最早鏈的起點」，**只會變早不會變晚** | 鍵名、型別、時間軸都不變，前端不需改 |
+| 沒有任何鏈時 | 仍為 `null` | 不變 |
+| `chains` / `snapshots` | 完全不變 | 不變 |
+| repo 介面 | 新增一支方法 | 只有 `eventIdentityRepo` 一個實作，測試用真 repo 打 sqlite，沒有 fake 要跟著補 |
+
+仲裁順序：handler 查到的全域值**優先於**由 chains 推導的值；只有未注入
+`eventIdentity`（值為 nil）時才退回推導，而那條路徑下 chains 必為空、推導結果也是 nil。
+
+##### 主要風險與回滾
+
+* **多一次查詢**：見上面的索引分析。回滾只需把 handler 那幾行拿掉、`BuildEventTimeline`
+  傳 nil，行為即回到現況；無 schema 變更、不需要 down migration。
+* **`BuildEventTimeline` 多一個參數**：既有 9 個呼叫點（含 live test）要補參數，
+  保留 nil 降級後語意不變，編譯期就會抓到漏改。
+* **值變早之後畫面會多出一段「有分析、沒有鏈」的區間**：那正是誠實的表達，
+  `snapshots` 本來就照常列出，判讀第 6 點已寫明。
+
+##### 測試與驗證策略
+
+* store（sqlite，`event_identity_repo_test.go`）五案：
+  1. 有 `analysis_id` → 取 `stock_sr_zone_analyses.analyzed_at`；
+  2. transition 沒有 `analysis_id` → 退回 `occurred_at`；
+  3. 鏈完全沒有 transition → 退回 `first_seen_at`；
+  4. 這檔沒有任何鏈 → 回 `NULL`（`sql.NullTime.Valid=false`）；
+  5. **關鍵回歸**：一條早已 `ended_at` 而會被 `ListChains(since)` 濾掉的舊鏈，
+     仍要被算進 `identity_since`。
+* analysis（`event_timeline_test.go`）：注入值早於 chains 推導值時要採用注入值；
+  注入 nil 時維持既有推導（既有測試語意不動，只補參數）。
+* handler（`sr_zones_create_test.go` 或 `sr_zones_event_identity_test.go`）：
+  端點在「舊鏈被視窗濾掉」的情境下，回傳的 `identity_since` 早於 `chains[0].first_seen_at`。
+* `backend/scripts/test.sh ./internal/store/... ./internal/analysis/... ./internal/api/...`
+* 不跑 migration 測試（無 DDL）。前端不動，不需要重建 dist。
+* dev stack 實看：待 `verify-event-timeline.sh` 的資料來源路線定案後補。
+
+##### 完成後歸檔位置
+
+* `docs/api-reference.md` 判讀第 6 點補「`identity_since` **不受 `max_analyses` 影響**，
+  它問的是身分層何時開始有紀錄，不是這次查了多久」。
+* `docs/sr-zone-scoring.md` 對應段落同步成現況說明。
+* review 通過後，把 R5 連同本計畫書整筆從 `todo.md` 移除。
+
+##### 實作結果（2026-08-21）
+
+| 層 | 實際落點 |
+|---|---|
+| store | `EventIdentityRepo.GetIdentitySince`；兩支查詢見上（`identitySinceStepSQL` / `identitySinceOrphanSQL`），都沒有列時回 `Valid=false` |
+| handler | `SRZoneHandler.EventTimeline` 在 `h.eventIdentity != nil` 時多查一次，結果傳進 `BuildEventTimeline` |
+| analysis | `BuildEventTimeline` 新增 `identitySince *time.Time`（第 6 個參數）；非 nil 直接採用，nil 時維持由 chains 推導的降級 |
+| 前端 | **未改動**，文案照舊 |
+| 文件 | `api-reference.md` 判讀第 6 點補「不受 `max_analyses` 影響」與推導規則；`sr-zone-scoring.md` 的顯示規則同步 |
+
+**與計畫的差異**：查詢形狀由「單一聚合」改成「兩支、`SELECT` 只挑真欄位」，原因見上方
+「實作時的偏離」（sqlite driver 對運算式回字串）。語意、contract、仲裁順序都與計畫相同。
+
+**已通過的驗證**：`backend/scripts/test.sh ./internal/store/... ./internal/analysis/...
+./internal/api/...` 全過，含新增的 8 條測試——
+
+* store 5 條：`analyzed_at` 優先／無 `analysis_id` 退 `occurred_at`／無轉換退
+  `first_seen_at`／沒有鏈回 NULL／**視窗外的已終結舊鏈仍要算進去**（先斷言
+  `ListChains` 確實濾掉它，否則測試什麼都沒證明）。
+* analysis 2 條：注入值優先於推導；未注入時維持舊行為。
+* handler 1 條：走完整 HTTP 路徑，`max_analyses=1` 時回傳的 `identity_since`
+  早於 `chains[0].first_seen_at`。
+
+**尚未做的驗證**：dev stack 實看畫面。`scripts/verify-event-timeline.sh` 目前連 live DB，
+而 live 還沒有 migration 071 的 `decision_visible` 欄位（`ListChains` 會 42703），
+要等資料來源路線定案；本筆不含 DDL，不需要 migration 測試。
 
 ---
 

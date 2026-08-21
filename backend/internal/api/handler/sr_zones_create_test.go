@@ -785,3 +785,88 @@ func TestEventTimelineEmptyShapes(t *testing.T) {
 func (s *srZoneRepoStub) ListAnalysisSnapshots(ctx context.Context, opts store.MarketEventStateHistoryOptions) ([]store.AnalysisSnapshot, error) {
 	return s.analysisSnapshots, nil
 }
+
+// TestEventTimelineIdentitySinceIgnoresWindow：`identity_since` 不受 `max_analyses`
+// 影響（todo.md T-051 R5）。視窗只保證未終結的鏈不被濾掉，視窗之前就終結的舊鏈不會
+// 出現在 chains 裡；早期由 chains 推導時，畫面會把「這次沒查到」說成
+// 「更早的分析沒有事件鏈」。這條走完整的 HTTP 路徑，鎖住端點實際回出去的值。
+func TestEventTimelineIdentitySinceIgnoresWindow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _, eventRepo := newIdentityStackForTest(t)
+	ctx := context.Background()
+
+	oldAt := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	newAt := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	for _, a := range []struct {
+		id int64
+		at time.Time
+	}{{1, oldAt}, {2, newAt}} {
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO stock_sr_zone_analyses
+				(id, symbol, timeframe, analyzed_at, current_price, global_trend, global_volatility, model_version)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`), a.id, "0050", "1d", a.at, 100.0, 0.0, 0.0, "test"); err != nil {
+			t.Fatalf("seed analysis %d failed: %v", a.id, err)
+		}
+	}
+
+	// 兩條 SYMBOL scope 的鏈（不必先種 zone_instances）：舊的早已終結，新的還活著。
+	symbolChain := func(uid, state string, seq int, active bool) store.EventInstance {
+		return store.EventInstance{
+			EventUID: uid, Symbol: "0050", Timeframe: "1d",
+			ZoneScopeKey: store.SymbolScopeKey, EventScope: "SYMBOL",
+			EventFamily: "SUPPORT_BREAKDOWN", Seq: seq,
+			RootEventType: "SUPPORT_BREAKDOWN", LatestEventType: "SUPPORT_BREAKDOWN",
+			State: state, Active: active, Direction: "BEARISH",
+			FirstSeenAt: oldAt, LastSeenAt: newAt, DecisionVisible: true,
+		}
+	}
+	ended := symbolChain("E-OLD", "EXPIRED", 1, false)
+	ended.EndedAt = sql.NullTime{Time: oldAt, Valid: true}
+	ended.EndReason = sql.NullString{String: "EXPIRED", Valid: true}
+
+	if err := eventRepo.Apply(ctx, store.EventIdentityWrite{
+		Instances: []store.EventInstance{ended, symbolChain("E-NEW", "CONFIRMED", 2, true)},
+		Transitions: []store.EventTransition{
+			{EventUID: "E-OLD", AnalysisID: sql.NullInt64{Int64: 1, Valid: true}, ToState: "CONFIRMED", OccurredAt: oldAt},
+			{EventUID: "E-NEW", AnalysisID: sql.NullInt64{Int64: 2, Valid: true}, ToState: "CONFIRMED", OccurredAt: newAt},
+		},
+	}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	// 視窗只涵蓋最近一次分析（max_analyses=1），舊鏈因此被 ListChains 濾掉。
+	repo := &srZoneRepoStub{analysisSnapshots: []store.AnalysisSnapshot{{ID: 2, AnalyzedAt: newAt}}}
+	h := NewSRZoneHandler(nil, repo, nil, nil, nil, nil, zap.NewNop())
+	h.SetEventIdentity(eventRepo)
+
+	router := gin.New()
+	router.GET("/sr-zones/event-timeline", h.EventTimeline)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/sr-zones/event-timeline?symbol=0050&max_analyses=1", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		IdentitySince *time.Time `json:"identity_since"`
+		Chains        []struct {
+			EventUID    string    `json:"event_uid"`
+			FirstSeenAt time.Time `json:"first_seen_at"`
+		} `json:"chains"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("回應不是合法 JSON: %v", err)
+	}
+
+	// 前提：舊鏈確實不在回傳的 chains 裡，否則這條測試什麼都沒證明。
+	if len(body.Chains) != 1 || body.Chains[0].EventUID != "E-NEW" {
+		t.Fatalf("視窗應只留下 E-NEW，得到 %+v", body.Chains)
+	}
+	if body.IdentitySince == nil || !body.IdentitySince.UTC().Equal(oldAt) {
+		t.Errorf("identity_since = %v, want 視窗外舊鏈的 %v", body.IdentitySince, oldAt)
+	}
+	if !body.IdentitySince.Before(body.Chains[0].FirstSeenAt) {
+		t.Error("identity_since 應早於視窗內最早的鏈——這正是 R5 要修的情況")
+	}
+}

@@ -657,3 +657,55 @@ func TestAliasIndexDropsIdentitiesTheMatcherGaveUpOn(t *testing.T) {
 		t.Errorf("兩個活身分共用一個 key 仍是撞號，got %+v", amb)
 	}
 }
+
+// ── 決策可見性（階段 D 的隔離旗標，R1）────────────────────────────────────
+
+// 旗標必須從 state_json 一路搬進身分層。Go 若改成依 event_family 推導，就會多出
+// 第二份型別清單，而兩份分歧時沒有任何東西會報錯——與 carried_from_previous 同一個理由。
+func TestBuildEventIdentityWriteCarriesDecisionVisibleFromStateJSON(t *testing.T) {
+	invisible := eventState(zoneKeyA, "RESISTANCE_BREAKOUT", "RESISTANCE_BREAKOUT", "CANDIDATE")
+	invisible.StateJSON = store.RawJSON(`{"carried_from_previous": false, "decision_visible": false}`)
+
+	w, _ := buildEventIdentityWrite("0050", "1d", 7, eventNow,
+		[]store.MarketEventState{invisible}, nil,
+		outcome(map[string]string{zoneKeyA: "Z-1"}), testEventUID())
+
+	if len(w.Instances) != 1 {
+		t.Fatalf("要開一條鏈，got %+v", w.Instances)
+	}
+	if w.Instances[0].DecisionVisible {
+		t.Errorf("decision_visible=false 的事件不該被標成參與決策，got %+v", w.Instances[0])
+	}
+}
+
+// **缺鍵一律 true**：既有四個事件型別都是決策可見的，而階段 D 之前寫進
+// market_event_states 的列根本不會有這個鍵。當成 false 會讓既有事件整批
+// 從「參與決策」變成「事實紀錄」，那是最嚴重的行為改變。
+func TestBuildEventIdentityWriteDefaultsDecisionVisibleToTrue(t *testing.T) {
+	states := []store.MarketEventState{eventState(zoneKeyA, "SUPPORT_BREAKDOWN", "SUPPORT_BREAKDOWN", "CONFIRMED")}
+
+	w, _ := buildEventIdentityWrite("0050", "1d", 7, eventNow, states, nil,
+		outcome(map[string]string{zoneKeyA: "Z-1"}), testEventUID())
+
+	if !w.Instances[0].DecisionVisible {
+		t.Errorf("缺鍵要視為決策可見，got %+v", w.Instances[0])
+	}
+}
+
+// zone 身分終止時鏈由既有列收攤（不是這次觀測到的），旗標要原樣留著——
+// 這條路徑不帶 state_json，重算會把它寫回預設的 true。
+func TestBuildEventIdentityWriteKeepsDecisionVisibleWhenZoneIdentityEnds(t *testing.T) {
+	chain := liveChain("E-1", "Z-1", zoneKeyA, "RESISTANCE_BREAKOUT", "CANDIDATE", 1, false)
+	chain.DecisionVisible = false
+
+	w, _ := buildEventIdentityWrite("0050", "1d", 7, eventNow, nil,
+		[]store.LiveEvent{chain}, outcome(nil, "Z-1"), testEventUID())
+
+	inst := instanceByUID(t, w, "E-1")
+	if inst.EndReason.String != "ZONE_IDENTITY_ENDED" {
+		t.Fatalf("這條要以 zone 身分終止收攤，got %+v", inst)
+	}
+	if inst.DecisionVisible {
+		t.Errorf("收攤不該把旗標寫回預設值，got %+v", inst)
+	}
+}

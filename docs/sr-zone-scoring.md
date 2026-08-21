@@ -930,6 +930,26 @@ Go 只讀不推導；**缺鍵一律當 `true`**（既有列不會有這個鍵，
 3. `decision_engine._event_sequence`：它寫進 `stock_sr_decisions.event_sequence_json`。
 4. `decision_engine._defense_lines`：位置型讀者，見上表。
 
+**旗標也要流到顯示層，否則隔離只做了一半。** 過濾點擋住的是決策路徑，
+但 `GET /sr-zones/event-timeline` **照樣回傳**這些鏈（它們是事實紀錄，本來就該看得到）。
+沒有旗標時，畫面上的 `RESISTANCE_BREAKOUT / CONFIRMED / BULLISH` 與真正的突破事件
+長得一模一樣，會被讀成買訊——引擎排除了它，人卻沒有。所以身分層存
+`event_instances.decision_visible`（migration 071，2026-08-21），API 逐條回傳
+`decision_visible`，前端據此標記。整條路徑上**只有 Python 產生這個值**，
+Go 與前端都只搬不推導；缺鍵一律 `true`。流向：
+
+```text
+event_engine.EVENT_TYPE_META
+        ↓ state_json.decision_visible
+market_event_states
+        ↓ buildEventIdentityWrite（eventDecisionVisible，缺鍵 true）
+event_instances.decision_visible
+        ↓ BuildEventTimeline
+GET /sr-zones/event-timeline 的 chains[].decision_visible
+        ↓ isDecisionVisible（缺鍵 true）
+SREventTimeline.svelte：標記「事實紀錄・不參與決策」
+```
+
 **截斷順序也是決策可見的。** `detect_market_events` 結尾把事件截到
 `MAX_EVENTS_PER_ANALYSIS`（8），而排序（`EVENT_ORDER`）發生在**截斷之後**。原本的
 `events[:8]` 是插入序，壓力側開始產事件之後同一個上限要塞更多事件，會靜默擠掉後面 zone 的
@@ -2939,3 +2959,59 @@ warn，而逐段命中數只有 warn 時才印（Debug 級別），所以「新�
 
 要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
 「在 dev stack 上做『as-of 階梯』驗收」與其中的「as-of 階梯驗收的六條門檻」。
+
+### 前端 Event Timeline 的判讀規則（現況）
+
+`GET /sr-zones/event-timeline` 的顯示端在 SR Zone 決策頁，元件是
+`frontend/src/components/sr/SREventTimeline.svelte`，語意判斷抽到
+`frontend/src/lib/utils/eventTimeline.ts`（有單元測試——這些規則錯了會靜默誤導，
+不會壞掉，所以值得單獨測）。
+
+**與 `Event Sequence` 的區隔靠標題文字，不靠位置。** 兩者名字相近但語意不同：
+`Event Sequence` 是「當次分析偵測到的事件」依優先序排序去重，沒有時間也沒有狀態轉換；
+Timeline 才是跨分析的演進。所以面板內的前者標成「Event Sequence（當次分析）」。
+
+**Timeline 本身刻意掛在 decision summary 面板之外。** 事件鏈來自身分層，與 decision
+summary 有沒有 `market_regime` / `confidence_explanation` 無關；掛在面板內會被
+`hasDecisionDetail` 連坐隱藏，讓那些欄位不全的分析（舊分析、normalized decision 為
+missing 的分析）明明有鏈卻看不到任何東西。
+
+**快取鍵是 `symbol:timeframe:analysisId` 三者。** 重跑分析時 `current` 是被新分析直接
+覆寫、中途不會變成 `null`，元件實例不重建；少了 `analysisId`，新的 transitions 已落地而
+面板還停在舊的鏈，畫面上不會有任何過期提示。載入**失敗時也要記下這次的鍵**，否則第一次
+就失敗的面板會卡住：作廢判斷看的是「已載入過的鍵」，空字串會讓它整段跳過，換股票後既不
+清錯誤訊息也不重抓。
+
+規則與理由：
+
+* **鏈的身分顯示 `zone_uid` 前 8 碼，不顯示 `zone_key`。** `zone_key` 只是最近一次
+  觀測到時事件帶的 key，會隨 ATR 重算漂移；拿它當識別正是 [I-080](./issue.md) 修掉的
+  那個問題。`zone_key` 只留在 `title` 供人工比對。`event_scope` 為 `SYMBOL` 的鏈不屬於
+  任何 zone，顯示「整檔事件」。
+* **`seq > 1` 標成「第 N 條」。** 那是同一個 (zone, family) 的**新的一條鏈**，
+  不是舊鏈復活。
+* **`ZONE_IDENTITY_ENDED` 與 `RESOLVED` / `EXPIRED` 分開呈現**（前者標成需要強調的
+  黃字）。它是 zone 因 SPLIT／MERGE／RESHAPE 身分終止、鏈跟著收攤，不是事件自己走完
+  生命週期。畫成一般結束，會讓人以為「這個事件結束了」，實際上是「這個 zone 不存在了」。
+  終結了卻沒有 `end_reason` 時照實顯示「已終結」，不猜一個原因。
+* **鏈上的空白要標成「沒有分析」而不是「沒有事件」。** timeline 的解析度等於 SR 分析的
+  執行頻率，所以用 `snapshots[].gap_days` 的最大值提示最大觀測間隔。少了這行，空白會被
+  讀成「風平浪靜」。
+* **`identity_since` 之前沒有鏈可看**（身分層刻意不回填），這件事要寫在畫面上，
+  否則會被當成資料遺失。它由後端對 **event_instances 全歷史**算出來
+  （`EventIdentityRepo.GetIdentitySince`），**不受 `max_analyses` 視窗影響**——
+  早期由回傳的 chains 推導，視窗之前就終結的鏈會被濾掉，畫面因此把「這次沒查到」
+  說成「更早的分析沒有事件鏈」。
+* **`decision_visible=false` 的鏈標記，不隱藏。** 這些鏈是事實紀錄（`SUPPORT_RETEST` /
+  `RESISTANCE_BREAKOUT`），不進任何決策桶，所以要與決策事件分得開——標上
+  「事實紀錄・不參與決策」並淡化，標題列在有這種鏈時補「（其中 N 條不參與決策）」。
+  **不濾掉**是刻意的：「這個 zone 最近有沒有被測試過」只能從它們讀出來，藏起來等於
+  把人工判讀的依據拿走。判斷走 `isDecisionVisible()`，**缺鍵視為 `true`**——
+  前端不硬編 family 名字，那會變成第三份型別清單。
+* **「全部已終結」是常態，不是壞掉。** 未終結的鏈排前面、已終結的收在 `<details>` 裡；
+  當進行中為 0 時上半部會整片空掉，看起來像載入失敗，所以要明說「目前沒有進行中的鏈——
+  N 條都已終結」。標題列固定顯示「X 條進行中 / Y 條」，展開前就看得到比例。
+
+**實測涵蓋**（2026-08-21，dev DB 的四檔 21 階資料）：`2330` 的 28 條鏈**全部已終結**，
+正是上面最後一條規則的來源；`6182` 涵蓋其餘邊界——7 條進行中、2 條 `seq > 1`、
+8 條 `ZONE_IDENTITY_ENDED`、1 條 `SYMBOL` scope。

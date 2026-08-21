@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,6 +61,19 @@ type EventIdentityRepo interface {
 	//
 	// 空的 eventUIDs 回空集合而不是「全部」——後者會在鏈清單為空時掃出整張表。
 	ListTransitions(ctx context.Context, eventUIDs []string) ([]EventTransitionView, error)
+	// GetIdentitySince 回這檔在身分層**最早有紀錄的時間**，供 Event Timeline 的
+	// `identity_since` 使用（todo.md T-051 R5）。沒有任何鏈時 `Valid=false`。
+	//
+	// **刻意不吃視窗參數。** 它要回答的是「身分層何時開始有紀錄」，而不是「這次查了
+	// 多久」——拿 ListChains 的結果推導就會答成後者：視窗只保證未終結的鏈不受限制，
+	// 視窗之前就終結的鏈會被濾掉，於是畫面會宣告「更早的分析沒有事件鏈」，
+	// 實際上只是這次沒查到。
+	//
+	// 時間軸與 ListTransitions 一致，是**分析的 K 棒時間**：每條鏈取第一步所屬分析的
+	// analyzed_at，沒有 analysis_id 才退回 occurred_at，完全沒有轉換的鏈才退回
+	// first_seen_at。不能直接取 MIN(first_seen_at)——那是 as_of 的 wall clock，
+	// 與對外的 K 棒軸不同軸（T-045 踩過）。
+	GetIdentitySince(ctx context.Context, symbol, timeframe string) (sql.NullTime, error)
 	// Apply 把一次分析的結果整批寫入，**單一交易**。
 	//
 	// 兩張表必須一起成功：只寫了 instances 卻沒寫 transitions，鏈的狀態會變成
@@ -108,6 +122,13 @@ type EventInstance struct {
 	LastZoneKey sql.NullString `db:"last_zone_key"`
 	// EndReason：RESOLVED / EXPIRED / ZONE_IDENTITY_ENDED。
 	EndReason sql.NullString `db:"end_reason"`
+	// DecisionVisible 是這條鏈能不能被決策看到（階段 D 的隔離旗標）。
+	//
+	// **值一路來自 Python 的 event_engine.EVENT_TYPE_META**（經 state_json），
+	// Go 只搬不推導——依 event_family 自己判斷等於維護第二份型別清單，
+	// 兩份分歧時沒有任何東西會報錯。缺值一律 true，理由見 handler 的
+	// eventDecisionVisible。
+	DecisionVisible bool `db:"decision_visible"`
 }
 
 // EventTransition 是事件鏈的狀態轉換流水。
@@ -149,7 +170,7 @@ const listLatestEventChainsSQL = `
 	       e.event_scope, e.event_family, e.seq,
 	       e.root_event_type, e.latest_event_type, e.state, e.active, e.direction,
 	       e.resolved_by, e.first_seen_at, e.last_seen_at, e.ended_at,
-	       e.last_zone_key, e.end_reason
+	       e.last_zone_key, e.end_reason, e.decision_visible
 	FROM event_instances e
 	WHERE e.symbol = ? AND e.timeframe = ?
 	  AND e.seq = (SELECT MAX(e2.seq) FROM event_instances e2
@@ -172,16 +193,21 @@ func (r *eventIdentityRepo) ListLatestChains(
 func (r *eventIdentityRepo) instanceUpsertSQL() string {
 	const cols = `(event_uid, symbol, timeframe, zone_uid, zone_scope_key, event_scope,
 		event_family, seq, root_event_type, latest_event_type, state, active, direction,
-		resolved_by, first_seen_at, last_seen_at, ended_at, last_zone_key, end_reason)
+		resolved_by, first_seen_at, last_seen_at, ended_at, last_zone_key, end_reason,
+		decision_visible)
 		VALUES (:event_uid, :symbol, :timeframe, :zone_uid, :zone_scope_key, :event_scope,
 		:event_family, :seq, :root_event_type, :latest_event_type, :state, :active, :direction,
-		:resolved_by, :first_seen_at, :last_seen_at, :ended_at, :last_zone_key, :end_reason)`
+		:resolved_by, :first_seen_at, :last_seen_at, :ended_at, :last_zone_key, :end_reason,
+		:decision_visible)`
 	// 幾個欄位的更新規則與 zone_instances 同樣是「錯了也不會有人發現」的那種：
 	//
 	//   * first_seen_at 不更新——鏈的起點是事實。
 	//   * root_event_type 不更新——它是鏈的起點，被 latest 蓋掉就再也還原不回來。
 	//   * ended_at 用 COALESCE 保護，忘了帶會讓已終結的鏈復活。
 	//   * last_zone_key **要**更新——它記的是「最近一次」，停住就等於第一把鑰匙失效。
+	//   * decision_visible 跟著最近一次觀測更新——它是 latest_event_type 的性質，
+	//     值一路來自 Python 的旗標。收尾路徑（沒有本次事件）不會走到這裡，
+	//     所以已終結的鏈不會被寫回預設值。
 	//
 	// **state / active 用 CASE 綁在 ended_at 上**（T-048 階段 C 的 F4 修法）：
 	// 這兩個欄位原本是無條件覆寫，於是「已終結的鏈被寫入非終態」時 ended_at 靠
@@ -203,6 +229,7 @@ func (r *eventIdentityRepo) instanceUpsertSQL() string {
 				ended_at=COALESCE(ended_at, VALUES(ended_at)),
 				last_zone_key=VALUES(last_zone_key),
 				end_reason=COALESCE(end_reason, VALUES(end_reason)),
+				decision_visible=VALUES(decision_visible),
 				updated_at=CURRENT_TIMESTAMP`
 	case "sqlite", "sqlite3":
 		return `INSERT INTO event_instances ` + cols + `
@@ -218,6 +245,7 @@ func (r *eventIdentityRepo) instanceUpsertSQL() string {
 				ended_at=COALESCE(event_instances.ended_at, excluded.ended_at),
 				last_zone_key=excluded.last_zone_key,
 				end_reason=COALESCE(event_instances.end_reason, excluded.end_reason),
+				decision_visible=excluded.decision_visible,
 				updated_at=CURRENT_TIMESTAMP`
 	}
 	return `INSERT INTO event_instances ` + cols + `
@@ -233,6 +261,7 @@ func (r *eventIdentityRepo) instanceUpsertSQL() string {
 			ended_at=COALESCE(event_instances.ended_at, excluded.ended_at),
 			last_zone_key=excluded.last_zone_key,
 			end_reason=COALESCE(event_instances.end_reason, excluded.end_reason),
+			decision_visible=excluded.decision_visible,
 			updated_at=CURRENT_TIMESTAMP`
 }
 
@@ -294,7 +323,7 @@ const listEventChainsSQL = `
 	       e.event_scope, e.event_family, e.seq,
 	       e.root_event_type, e.latest_event_type, e.state, e.active, e.direction,
 	       e.resolved_by, e.first_seen_at, e.last_seen_at, e.ended_at,
-	       e.last_zone_key, e.end_reason
+	       e.last_zone_key, e.end_reason, e.decision_visible
 	FROM event_instances e
 	WHERE e.symbol = ? AND e.timeframe = ?
 `
@@ -324,6 +353,80 @@ func (r *eventIdentityRepo) ListChains(
 		return nil, err
 	}
 	return rows, nil
+}
+
+// identitySince 的兩支查詢（見介面上的 GetIdentitySince）。
+//
+// **與 analysis.BuildEventTimeline 的 firstSeen 規則同構**：優先用該步所屬分析的
+// K 棒時間、沒有 analysis_id 退回 occurred_at、完全沒有轉換的鏈才退回 first_seen_at。
+// 同一個時間點不能有兩套推導，否則 identity_since 會與 chains[0].first_seen_at
+// 對不起來，而兩者本來就該落在同一條軸上。
+//
+// **不套任何視窗**：這正是這兩支查詢存在的理由。
+//
+// **為什麼是兩支查詢、而且 SELECT 只挑真欄位**：本來寫成一支
+// `SELECT MIN(COALESCE(a.analyzed_at, t.occurred_at, e.first_seen_at))`，
+// 但 sqlite 的 driver 只對「宣告型別是 DATETIME 的欄位」回 time.Time，
+// **聚合／COALESCE 這種運算式沒有宣告型別，會回字串**，掃進 sql.NullTime 直接炸
+// （`unsupported Scan, storing driver.Value type string into type *time.Time`）。
+// 把運算式留在 ORDER BY、SELECT 只挑真欄位，三個 engine 就都不必解析字串。
+//
+// 「每條鏈取最早一步再取全域最小」等於「全域最早的那一步」，所以第一支不需要分組。
+const identitySinceStepSQL = `
+	SELECT a.analyzed_at AS analyzed_at, t.occurred_at AS occurred_at
+	  FROM event_transitions t
+	  JOIN event_instances e ON e.event_uid = t.event_uid
+	  LEFT JOIN stock_sr_zone_analyses a ON a.id = t.analysis_id
+	 WHERE e.symbol = ? AND e.timeframe = ?
+	 ORDER BY COALESCE(a.analyzed_at, t.occurred_at) ASC
+	 LIMIT 1`
+
+// 只有 instances 沒有 transitions 是寫入端的異常（Apply 的單一交易本該擋掉），
+// 但這種鏈仍要算進來——靜靜漏掉會讓「身分層從哪天開始有紀錄」答錯。
+const identitySinceOrphanSQL = `
+	SELECT e.first_seen_at
+	  FROM event_instances e
+	 WHERE e.symbol = ? AND e.timeframe = ?
+	   AND NOT EXISTS (SELECT 1 FROM event_transitions t WHERE t.event_uid = e.event_uid)
+	 ORDER BY e.first_seen_at ASC
+	 LIMIT 1`
+
+func (r *eventIdentityRepo) GetIdentitySince(
+	ctx context.Context, symbol, timeframe string,
+) (sql.NullTime, error) {
+	var out sql.NullTime
+
+	var step struct {
+		AnalyzedAt sql.NullTime `db:"analyzed_at"`
+		OccurredAt time.Time    `db:"occurred_at"`
+	}
+	err := r.db.GetContext(ctx, &step, r.db.Rebind(identitySinceStepSQL), symbol, timeframe)
+	switch {
+	case err == nil:
+		out = sql.NullTime{Time: step.OccurredAt, Valid: true}
+		if step.AnalyzedAt.Valid {
+			out.Time = step.AnalyzedAt.Time
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		// 這檔沒有任何轉換——可能一條鏈都沒有，也可能只有沒轉換的鏈，交給下一支。
+	default:
+		return sql.NullTime{}, fmt.Errorf("event identity: identity since: %w", err)
+	}
+
+	var orphan time.Time
+	err = r.db.GetContext(ctx, &orphan, r.db.Rebind(identitySinceOrphanSQL), symbol, timeframe)
+	switch {
+	case err == nil:
+		if !out.Valid || orphan.Before(out.Time) {
+			out = sql.NullTime{Time: orphan, Valid: true}
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		// 正常情況：每條鏈都有轉換。
+	default:
+		return sql.NullTime{}, fmt.Errorf("event identity: identity since (no-transition chains): %w", err)
+	}
+
+	return out, nil
 }
 
 // EventTransitionView 是 ListTransitions 的回傳：轉換本身 ＋ 它所屬分析的 K 棒時間。

@@ -38,6 +38,7 @@ func chain(uid, family string, seq int, first, last time.Time, opts ...func(*sto
 		FirstSeenAt:     first,
 		LastSeenAt:      last,
 		LastZoneKey:     sql.NullString{String: "SUPPORT:98.0000:100.0000", Valid: true},
+		DecisionVisible: true,
 	}
 	for _, o := range opts {
 		o(&c)
@@ -86,7 +87,7 @@ func TestBuildEventTimelineMapsChainsAndTransitions(t *testing.T) {
 		step("E1", "CANDIDATE", "CONFIRMED", timelineDay(2)),
 	}
 
-	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil)
+	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil, nil)
 
 	if len(tl.Chains) != 1 {
 		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
@@ -115,6 +116,38 @@ func TestBuildEventTimelineMapsChainsAndTransitions(t *testing.T) {
 
 // **同一個 (zone, family) 的 seq 是先後兩條鏈，不能合併。** 前一條終結之後再出現同家族
 // 事件，寫入端就是當成新的一條——讀取端合併會讓「這個 zone 被測試過幾次」永遠答錯。
+// TestBuildEventTimelineUsesInjectedIdentitySince：注入的全域值**優先於**由 chains
+// 推導（todo.md T-051 R5）。max_analyses 的視窗會濾掉早已終結的舊鏈，於是「回傳的鏈裡
+// 最早的起點」比身分層真正的起點晚——照鏈推導就會把「這次沒查到」說成「更早的分析
+// 沒有事件鏈」。
+func TestBuildEventTimelineUsesInjectedIdentitySince(t *testing.T) {
+	since := timelineDay(1)
+	tl := BuildEventTimeline("2330", "1d",
+		[]store.EventInstance{chain("E9", "SUPPORT_BREAKDOWN", 1, timelineDay(20), timelineDay(21))},
+		[]store.EventTransitionView{step("E9", "", "CONFIRMED", timelineDay(20))},
+		nil, &since)
+
+	if tl.IdentitySince == nil || !tl.IdentitySince.Equal(timelineDay(1)) {
+		t.Errorf("identity_since = %v, want 注入值 %v", tl.IdentitySince, timelineDay(1))
+	}
+	if len(tl.Chains) != 1 || !tl.Chains[0].FirstSeenAt.Equal(timelineDay(20)) {
+		t.Error("注入 identity_since 不該影響鏈本身")
+	}
+}
+
+// TestBuildEventTimelineFallsBackToChainsWithoutInjection：未注入時（沒接身分層的
+// 呼叫端）維持既有的推導，不因為新參數而變成 nil。
+func TestBuildEventTimelineFallsBackToChainsWithoutInjection(t *testing.T) {
+	tl := BuildEventTimeline("2330", "1d",
+		[]store.EventInstance{chain("E9", "SUPPORT_BREAKDOWN", 1, timelineDay(20), timelineDay(21))},
+		[]store.EventTransitionView{step("E9", "", "CONFIRMED", timelineDay(20))},
+		nil, nil)
+
+	if tl.IdentitySince == nil || !tl.IdentitySince.Equal(timelineDay(20)) {
+		t.Errorf("identity_since = %v, want 由鏈推導的 %v", tl.IdentitySince, timelineDay(20))
+	}
+}
+
 func TestBuildEventTimelineKeepsSeqAsSeparateChains(t *testing.T) {
 	chains := []store.EventInstance{
 		chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(3), closedChain("EXPIRED")),
@@ -125,7 +158,7 @@ func TestBuildEventTimelineKeepsSeqAsSeparateChains(t *testing.T) {
 		step("E2", "", "CANDIDATE", timelineDay(5)),
 	}
 
-	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil)
+	tl := BuildEventTimeline("2330", "1d", chains, transitions, nil, nil)
 
 	if len(tl.Chains) != 2 {
 		t.Fatalf("chain 數 = %d, want 2（seq 不同就是不同鏈）", len(tl.Chains))
@@ -142,7 +175,7 @@ func TestBuildEventTimelineExposesZoneIdentityEnded(t *testing.T) {
 		chain("E1", "SUPPORT_RECLAIM", 1, timelineDay(1), timelineDay(3), closedChain("ZONE_IDENTITY_ENDED")),
 	}
 
-	tl := BuildEventTimeline("2330", "1d", chains, nil, nil)
+	tl := BuildEventTimeline("2330", "1d", chains, nil, nil, nil)
 
 	c := tl.Chains[0]
 	if !c.Closed {
@@ -162,7 +195,7 @@ func TestBuildEventTimelineHandlesSymbolScopeChain(t *testing.T) {
 	c.EventScope = "SYMBOL"
 	c.LastZoneKey = sql.NullString{}
 
-	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{c}, nil, nil)
+	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{c}, nil, nil, nil)
 
 	if got := tl.Chains[0].ZoneUID; got != nil {
 		t.Errorf("SYMBOL scope 的 zone_uid 應為 nil，得到 %q", *got)
@@ -184,10 +217,10 @@ func TestBuildEventTimelineIsOrderIndependent(t *testing.T) {
 		step("E1", "", "CANDIDATE", timelineDay(1)),
 	}
 
-	a := BuildEventTimeline("2330", "1d", chains, transitions, nil)
+	a := BuildEventTimeline("2330", "1d", chains, transitions, nil, nil)
 	b := BuildEventTimeline("2330", "1d",
 		[]store.EventInstance{chains[1], chains[0]},
-		[]store.EventTransitionView{transitions[1], transitions[0]}, nil)
+		[]store.EventTransitionView{transitions[1], transitions[0]}, nil, nil)
 
 	if a.Chains[0].EventUID != "E1" || b.Chains[0].EventUID != "E1" {
 		t.Fatalf("鏈應依 first_seen_at 排序：%q / %q", a.Chains[0].EventUID, b.Chains[0].EventUID)
@@ -205,7 +238,7 @@ func TestBuildEventTimelineIsOrderIndependent(t *testing.T) {
 func TestBuildEventTimelineKeepsChainWithoutTransitions(t *testing.T) {
 	tl := BuildEventTimeline("2330", "1d",
 		[]store.EventInstance{chain("E1", "SUPPORT_BREAKDOWN", 1, timelineDay(1), timelineDay(1))},
-		nil, nil)
+		nil, nil, nil)
 
 	if len(tl.Chains) != 1 {
 		t.Fatalf("chain 數 = %d, want 1", len(tl.Chains))
@@ -221,7 +254,7 @@ func TestBuildEventTimelineExposesSnapshotGaps(t *testing.T) {
 	tl := BuildEventTimeline("2330", "1d", nil, nil, []store.AnalysisSnapshot{
 		{ID: 1, AnalyzedAt: timelineDay(1)},
 		{ID: 2, AnalyzedAt: timelineDay(8)},
-	})
+	}, nil)
 
 	if len(tl.Snapshots) != 2 {
 		t.Fatalf("snapshot 數 = %d, want 2", len(tl.Snapshots))
@@ -235,7 +268,7 @@ func TestBuildEventTimelineExposesSnapshotGaps(t *testing.T) {
 }
 
 func TestBuildEventTimelineEmptyInput(t *testing.T) {
-	tl := BuildEventTimeline("2330", "1d", nil, nil, nil)
+	tl := BuildEventTimeline("2330", "1d", nil, nil, nil, nil)
 	if tl.Chains == nil || tl.Snapshots == nil {
 		t.Error("空輸入時 Chains／Snapshots 應為空陣列而非 nil——序列化成 null 會讓前端 .map() 爆掉")
 	}
@@ -250,7 +283,7 @@ func TestBuildEventTimelineKeepsAnalysisSnapshotsWhenNoChains(t *testing.T) {
 	tl := BuildEventTimeline("2330", "1d", nil, nil, []store.AnalysisSnapshot{
 		{ID: 10, AnalyzedAt: timelineDay(1)},
 		{ID: 11, AnalyzedAt: timelineDay(3)},
-	})
+	}, nil)
 
 	if len(tl.Chains) != 0 {
 		t.Fatalf("沒有鏈時 chain 數 = %d, want 0", len(tl.Chains))
@@ -284,7 +317,7 @@ func TestEventTimelineJSONKeepsNullZoneUID(t *testing.T) {
 	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{
 		symbolScope,
 		chain("E2", "SUPPORT_BREAKDOWN", 1, timelineDay(2), timelineDay(2)),
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	raw, err := json.Marshal(tl)
 	if err != nil {
@@ -319,7 +352,7 @@ func TestBuildEventTimelineUsesCandleAxisNotWallClock(t *testing.T) {
 	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{c}, []store.EventTransitionView{
 		step("E1", "", "CANDIDATE", timelineDay(1)),
 		step("E1", "CANDIDATE", "CONFIRMED", timelineDay(4)),
-	}, nil)
+	}, nil, nil)
 
 	got := tl.Chains[0]
 	if !got.FirstSeenAt.Equal(timelineDay(1)) || !got.LastSeenAt.Equal(timelineDay(4)) {
@@ -343,9 +376,44 @@ func TestBuildEventTimelineFallsBackToOccurredAtWithoutAnalysis(t *testing.T) {
 
 	tl := BuildEventTimeline("2330", "1d",
 		[]store.EventInstance{chain("E1", "SUPPORT_BREAKDOWN", 1, wallClock, wallClock)},
-		[]store.EventTransitionView{orphan}, nil)
+		[]store.EventTransitionView{orphan}, nil, nil)
 
 	if got := tl.Chains[0].Transitions[0].OccurredAt; !got.Equal(wallClock) {
 		t.Errorf("沒有 analysis_id 時應退回 occurred_at，得到 %v", got)
+	}
+}
+
+// 決策可見性要一路帶到回應上，而且 **false 不可以被 omitempty 吃掉**——
+// false 正是這個欄位唯一有資訊量的值。少了它，顯示端會把「只寫不讀的事實紀錄」
+// （SUPPORT_RETEST / RESISTANCE_BREAKOUT）畫成會影響 Bias 或進場的事件。
+func TestEventTimelineJSONAlwaysCarriesDecisionVisible(t *testing.T) {
+	invisible := chain("E1", "RESISTANCE_BREAKOUT", 1, timelineDay(1), timelineDay(1))
+	invisible.DecisionVisible = false
+
+	tl := BuildEventTimeline("2330", "1d", []store.EventInstance{
+		invisible,
+		chain("E2", "SUPPORT_BREAKDOWN", 1, timelineDay(2), timelineDay(2)),
+	}, nil, nil, nil)
+
+	raw, err := json.Marshal(tl)
+	if err != nil {
+		t.Fatalf("marshal 失敗: %v", err)
+	}
+	var decoded struct {
+		Chains []map[string]any `json:"chains"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal 失敗: %v", err)
+	}
+
+	v, ok := decoded.Chains[0]["decision_visible"]
+	if !ok {
+		t.Fatalf("false 被 omitempty 吃掉了——消費端會分不出「不參與決策」與「舊版沒有這個欄位」")
+	}
+	if v != false {
+		t.Errorf("decision_visible = %v, want false", v)
+	}
+	if decoded.Chains[1]["decision_visible"] != true {
+		t.Errorf("決策可見的鏈要是 true, got %v", decoded.Chains[1]["decision_visible"])
 	}
 }

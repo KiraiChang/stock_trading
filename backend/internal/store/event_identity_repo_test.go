@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/config"
@@ -15,6 +16,14 @@ import (
 
 // **只跑 sqlite**，與其他 repo 測試相同的既有限制（issue.md I-054 第 1 項）。
 func newEventIdentityRepoForTest(t *testing.T) (EventIdentityRepo, context.Context) {
+	t.Helper()
+	_, repo, ctx := newEventIdentityStackForTest(t)
+	return repo, ctx
+}
+
+// newEventIdentityStackForTest 多回一個 *sqlx.DB，給需要自己種
+// stock_sr_zone_analyses（identity_since 的 K 棒軸來源）的測試用。
+func newEventIdentityStackForTest(t *testing.T) (*sqlx.DB, EventIdentityRepo, context.Context) {
 	t.Helper()
 	tmp, err := os.CreateTemp("", "event-identity-test-*.db")
 	if err != nil {
@@ -41,7 +50,7 @@ func newEventIdentityRepoForTest(t *testing.T) (EventIdentityRepo, context.Conte
 	}); err != nil {
 		t.Fatalf("seed zone identities failed: %v", err)
 	}
-	return NewEventIdentityRepo(db), context.Background()
+	return db, NewEventIdentityRepo(db), context.Background()
 }
 
 var eventSeenAt = time.Date(2026, 8, 18, 7, 0, 0, 0, time.UTC)
@@ -62,6 +71,8 @@ func eventInstance(uid, zoneUID, family, state string, seq int, seen time.Time) 
 		Direction:       "BEARISH",
 		FirstSeenAt:     seen,
 		LastSeenAt:      seen,
+		// 預設決策可見：既有四個事件型別都是，只有階段 D 那兩個 family 不是。
+		DecisionVisible: true,
 	}
 	if zoneUID == SymbolScopeKey {
 		inst.EventScope = "SYMBOL"
@@ -350,5 +361,198 @@ func TestEventIdentityUpsertRefreshesLastZoneKey(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].LastZoneKey.String != "SUPPORT:104.7412:105.3688" {
 		t.Fatalf("last_zone_key 要更新成最近一次觀測到的 key，got %+v", got)
+	}
+}
+
+// decision_visible 要能寫進去也讀得回來，而且**重新觀測不會把它翻回預設值**。
+// 這個欄位錯了資料看起來完全正常：鏈還在、狀態也對，只是決策可見性反了，
+// 而顯示端會照它把「只寫不讀的事實紀錄」畫成會影響進場的事件。
+func TestEventIdentityUpsertKeepsDecisionVisibleFalse(t *testing.T) {
+	repo, ctx := newEventIdentityRepoForTest(t)
+
+	first := eventInstance("E-1", "Z-1", "RESISTANCE_BREAKOUT", "CANDIDATE", 1, eventSeenAt)
+	first.DecisionVisible = false
+	if err := repo.Apply(ctx, EventIdentityWrite{Instances: []EventInstance{first}}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	next := eventInstance("E-1", "Z-1", "RESISTANCE_BREAKOUT", "CONFIRMED", 1, eventSeenAt.Add(24*time.Hour))
+	next.DecisionVisible = false
+	if err := repo.Apply(ctx, EventIdentityWrite{Instances: []EventInstance{next}}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	got, err := repo.ListLatestChains(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("要恰好一條鏈，got %+v", got)
+	}
+	if got[0].DecisionVisible {
+		t.Errorf("重新觀測不該把 decision_visible 翻回預設值，got %+v", got[0])
+	}
+	if got[0].State != "CONFIRMED" {
+		t.Errorf("其餘欄位照常更新，got %+v", got[0])
+	}
+}
+
+// 對照組：既有事件（沒有這個旗標的那四個型別）一律是決策可見的。
+func TestEventIdentityDecisionVisibleDefaultsToTrue(t *testing.T) {
+	repo, ctx := newEventIdentityRepoForTest(t)
+
+	inst := eventInstance("E-1", "Z-1", "SUPPORT_BREAKDOWN", "CONFIRMED", 1, eventSeenAt)
+	if err := repo.Apply(ctx, EventIdentityWrite{Instances: []EventInstance{inst}}); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+
+	got, err := repo.ListChains(ctx, "0050", "1d", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].DecisionVisible {
+		t.Fatalf("既有事件要是決策可見的，got %+v", got)
+	}
+}
+
+// ── GetIdentitySince（todo.md T-051 R5）────────────────────────────────
+
+// eventCandleDay 是 K 棒軸上的日期，與 eventSeenAt（as_of wall clock）刻意差好幾天：
+// 任何把兩條軸搞混的實作都會在斷言上炸開。
+func eventCandleDay(d int) time.Time {
+	return time.Date(2026, 7, d, 0, 0, 0, 0, time.UTC)
+}
+
+// seedAnalysis 種一列 stock_sr_zone_analyses；identity_since 的時間軸就取自它的 analyzed_at。
+func seedAnalysis(t *testing.T, db *sqlx.DB, id int64, at time.Time) {
+	t.Helper()
+	_, err := db.Exec(db.Rebind(`
+		INSERT INTO stock_sr_zone_analyses
+			(id, symbol, timeframe, analyzed_at, current_price, global_trend, global_volatility, model_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`), id, "0050", "1d", at, 100.0, 0.0, 0.0, "test")
+	if err != nil {
+		t.Fatalf("seed analysis %d failed: %v", id, err)
+	}
+}
+
+func TestGetIdentitySinceUsesAnalyzedAt(t *testing.T) {
+	db, repo, ctx := newEventIdentityStackForTest(t)
+	seedAnalysis(t, db, 1, eventCandleDay(3))
+	seedAnalysis(t, db, 2, eventCandleDay(9))
+
+	if err := repo.Apply(ctx, EventIdentityWrite{
+		Instances: []EventInstance{eventInstance("E-1", "Z-1", "SUPPORT_BREAKDOWN", "CONFIRMED", 1, eventSeenAt)},
+		Transitions: []EventTransition{
+			{EventUID: "E-1", AnalysisID: sql.NullInt64{Int64: 2, Valid: true}, FromState: sql.NullString{String: "CANDIDATE", Valid: true}, ToState: "CONFIRMED", OccurredAt: eventSeenAt},
+			{EventUID: "E-1", AnalysisID: sql.NullInt64{Int64: 1, Valid: true}, ToState: "CANDIDATE", OccurredAt: eventSeenAt},
+		},
+	}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	got, err := repo.GetIdentitySince(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatalf("get identity since failed: %v", err)
+	}
+	if !got.Valid || !got.Time.UTC().Equal(eventCandleDay(3)) {
+		t.Errorf("identity_since = %v, want 最早那次分析的 K 棒時間 %v", got, eventCandleDay(3))
+	}
+}
+
+// 鏈由排程收尾時 analysis_id 是 NULL，那一步只能用 occurred_at 的 wall clock。
+func TestGetIdentitySinceFallsBackToOccurredAt(t *testing.T) {
+	db, repo, ctx := newEventIdentityStackForTest(t)
+	seedAnalysis(t, db, 1, eventCandleDay(9))
+	// **要比有分析的那一步更早**，否則最早的一步仍是 analyzed_at，這條測試就沒有
+	// 測到 fallback（第一版就是這樣寫錯的）。
+	noAnalysisAt := eventCandleDay(9).Add(-72 * time.Hour)
+
+	if err := repo.Apply(ctx, EventIdentityWrite{
+		Instances: []EventInstance{eventInstance("E-1", "Z-1", "SUPPORT_BREAKDOWN", "CONFIRMED", 1, eventSeenAt)},
+		Transitions: []EventTransition{
+			{EventUID: "E-1", ToState: "CANDIDATE", OccurredAt: noAnalysisAt},
+			{EventUID: "E-1", AnalysisID: sql.NullInt64{Int64: 1, Valid: true}, FromState: sql.NullString{String: "CANDIDATE", Valid: true}, ToState: "CONFIRMED", OccurredAt: eventSeenAt},
+		},
+	}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	got, err := repo.GetIdentitySince(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatalf("get identity since failed: %v", err)
+	}
+	if !got.Valid || !got.Time.UTC().Equal(noAnalysisAt) {
+		t.Errorf("identity_since = %v, want 退回 occurred_at %v", got, noAnalysisAt)
+	}
+}
+
+// 只有 instances 沒有 transitions 是寫入端的異常，但鏈仍要被算進 identity_since——
+// 靜靜消失會讓「身分層從哪天開始有紀錄」答錯。
+func TestGetIdentitySinceFallsBackToFirstSeen(t *testing.T) {
+	repo, ctx := newEventIdentityRepoForTest(t)
+	if err := repo.Apply(ctx, EventIdentityWrite{
+		Instances: []EventInstance{eventInstance("E-1", "Z-1", "SUPPORT_BREAKDOWN", "CONFIRMED", 1, eventSeenAt)},
+	}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	got, err := repo.GetIdentitySince(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatalf("get identity since failed: %v", err)
+	}
+	if !got.Valid || !got.Time.UTC().Equal(eventSeenAt) {
+		t.Errorf("identity_since = %v, want 退回 first_seen_at %v", got, eventSeenAt)
+	}
+}
+
+func TestGetIdentitySinceReturnsNullWithoutChains(t *testing.T) {
+	repo, ctx := newEventIdentityRepoForTest(t)
+	got, err := repo.GetIdentitySince(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatalf("get identity since failed: %v", err)
+	}
+	if got.Valid {
+		t.Errorf("這檔沒有任何鏈時應為 NULL，得到 %v", got.Time)
+	}
+}
+
+// **R5 的回歸測試**：一條早已終結、會被 ListChains 的視窗濾掉的舊鏈，仍要被算進
+// identity_since。這正是原本「由回傳的 chains 推導」會答錯的情況——畫面會宣告
+// 「更早的分析沒有事件鏈」，而那條鏈其實存在，只是這次沒查到。
+func TestGetIdentitySinceIgnoresListChainsWindow(t *testing.T) {
+	db, repo, ctx := newEventIdentityStackForTest(t)
+	seedAnalysis(t, db, 1, eventCandleDay(2))
+	seedAnalysis(t, db, 2, eventCandleDay(28))
+
+	old := eventInstance("E-OLD", "Z-1", "SUPPORT_BREAKDOWN", "EXPIRED", 1, eventSeenAt)
+	old.Active = false
+	old.EndedAt = sql.NullTime{Time: eventSeenAt, Valid: true}
+	old.EndReason = sql.NullString{String: "EXPIRED", Valid: true}
+
+	if err := repo.Apply(ctx, EventIdentityWrite{
+		Instances: []EventInstance{old, eventInstance("E-NEW", "Z-2", "SUPPORT_BREAKDOWN", "CONFIRMED", 1, eventSeenAt)},
+		Transitions: []EventTransition{
+			{EventUID: "E-OLD", AnalysisID: sql.NullInt64{Int64: 1, Valid: true}, ToState: "CONFIRMED", OccurredAt: eventSeenAt},
+			{EventUID: "E-NEW", AnalysisID: sql.NullInt64{Int64: 2, Valid: true}, ToState: "CONFIRMED", OccurredAt: eventSeenAt},
+		},
+	}); err != nil {
+		t.Fatalf("apply failed: %v", err)
+	}
+
+	// 前提：視窗確實把舊鏈濾掉了，否則這條測試什麼都沒證明。
+	chains, err := repo.ListChains(ctx, "0050", "1d", eventCandleDay(20))
+	if err != nil {
+		t.Fatalf("list chains failed: %v", err)
+	}
+	if len(chains) != 1 || chains[0].EventUID != "E-NEW" {
+		t.Fatalf("視窗應只留下 E-NEW，得到 %d 條", len(chains))
+	}
+
+	got, err := repo.GetIdentitySince(ctx, "0050", "1d")
+	if err != nil {
+		t.Fatalf("get identity since failed: %v", err)
+	}
+	if !got.Valid || !got.Time.UTC().Equal(eventCandleDay(2)) {
+		t.Errorf("identity_since = %v, want 視窗外舊鏈的 %v", got, eventCandleDay(2))
 	}
 }

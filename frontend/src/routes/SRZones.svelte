@@ -3,6 +3,7 @@
   import Layout from '../components/layout/Layout.svelte'
   import SRChipPanel from '../components/chip/SRChipPanel.svelte'
   import { ApiError } from '../lib/api/client'
+  import { chipFreshness } from '../lib/utils/chipFreshness'
   import {
     createSRZoneAnalysis,
     listSRZoneAnalyses,
@@ -1060,7 +1061,9 @@
   async function loadHistory() {
     historyLoading = true
     try {
-      history = await listSRZoneAnalyses(symbol.trim() || undefined, 20)
+      // 全域檢視要更大的上限：排程一天約 22 筆（11 檔 × 兩輪），20 筆撐不到一天，
+      // 人工跑的分析當天就會被擠掉。60 筆約 3 天的排程量。
+      history = await listSRZoneAnalyses(symbol.trim() || undefined, symbol.trim() ? 20 : 60)
     } catch {
       // 沉默失敗，不影響主要分析結果的呈現
     } finally {
@@ -3023,6 +3026,10 @@
       <div class="px-5 py-3 border-b border-border flex items-center justify-between">
         <h2 class="text-sm font-semibold text-white">
           {symbol.trim() ? `${symbol} 歷史分析紀錄` : '最近分析紀錄（所有股票）'}
+          <!-- 截斷不能是靜默的：排程一天約 22 筆，看不到的部分要講清楚 -->
+          {#if history.length > 0}
+            <span class="ml-2 text-xs font-normal text-muted">顯示最近 {history.length} 筆</span>
+          {/if}
         </h2>
         {#if symbol.trim()}
           <button
@@ -3035,22 +3042,23 @@
         <thead>
           <tr class="text-muted text-xs border-b border-border">
             <th class="text-left px-5 py-2">股票</th>
-            <th class="text-left px-3 py-2">分析時間</th>
+            <th class="text-left px-3 py-2">K 棒時間</th>
+            <th class="text-left px-3 py-2">執行時間</th>
             <th class="text-right px-3 py-2">現價</th>
             <th class="text-right px-5 py-2">操作</th>
           </tr>
         </thead>
         <tbody>
           {#if historyLoading}
-            <tr><td colspan="4" class="px-5 py-6 text-center text-muted">載入中...</td></tr>
+            <tr><td colspan="5" class="px-5 py-6 text-center text-muted">載入中...</td></tr>
           {:else if history.length === 0}
-            <tr><td colspan="4" class="px-5 py-6 text-center text-muted">尚無歷史紀錄，輸入股票代號分析看看</td></tr>
+            <tr><td colspan="5" class="px-5 py-6 text-center text-muted">尚無歷史紀錄，輸入股票代號分析看看</td></tr>
           {:else}
             {#each history as h (h.id)}
               {#if confirmDeleteId === h.id}
                 <tr class="border-b border-border/50 bg-red-900/20">
-                  <td class="px-5 py-2 text-xs text-gray-300" colspan="2">
-                    確定刪除 <span class="font-semibold text-white">{h.symbol}（{formatDateTime(h.analyzed_at)}）</span> 這筆分析嗎？
+                  <td class="px-5 py-2 text-xs text-gray-300" colspan="3">
+                    確定刪除 <span class="font-semibold text-white">{h.symbol}（K 棒 {formatDateTime(h.analyzed_at)}／執行 {formatDateTime(h.created_at)}）</span> 這筆分析嗎？
                   </td>
                   <td class="px-5 py-2 text-right" colspan="2">
                     <div class="flex gap-2 justify-end">
@@ -3067,6 +3075,7 @@
                   </td>
                 </tr>
               {:else}
+                {@const chip = chipFreshness(h.analyzed_at, h.chip_summary)}
                 <tr
                   class="border-b border-border/50 hover:bg-border/20 cursor-pointer transition-colors group
                          {current?.id === h.id ? 'bg-indigo-900/20' : ''}"
@@ -3074,6 +3083,19 @@
                 >
                   <td class="px-5 py-2 text-white font-medium">{h.symbol}</td>
                   <td class="px-3 py-2 text-muted text-xs font-mono">{formatDateTime(h.analyzed_at)}</td>
+                  <!-- 執行時間是**唯一**能區分同日兩輪的欄位：兩輪站在同一根 K 棒上，
+                       analyzed_at 與現價都一樣（見 docs/sr-zone-scoring.md
+                       「`trade_date`：這份籌碼是哪一天的」）。 -->
+                  <td class="px-3 py-2 text-muted text-xs font-mono">
+                    {formatDateTime(h.created_at)}
+                    {#if chip}
+                      <span
+                        class="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-sans
+                               {chip.stale ? 'bg-border/40 text-muted' : 'bg-emerald-900/40 text-emerald-300'}"
+                        title="Chip 佔 trading_score 的 15%，兩輪分數不同多半來自這裡"
+                      >{chip.label}</span>
+                    {/if}
+                  </td>
                   <td class="px-3 py-2 text-right font-mono">{fmt(h.current_price)}</td>
                   <td class="px-5 py-2 text-right">
                     <div class="flex gap-2 justify-end">

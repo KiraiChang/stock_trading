@@ -590,6 +590,34 @@ Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重�
 現況與 shadow policy 的 top1/top3 zone 排名、摘要支撐/壓力選擇、分數差異分布，
 再決定是否移除或調低直接 `chip` 權重。
 
+### `trade_date`：這份籌碼是哪一天的，以及怎麼判讀同日兩筆分析
+
+`chip_summary.trade_date`（ISO `YYYY-MM-DD`，無資料時 `null`）是這份籌碼所屬的交易日。
+**它不一定等於分析站的那根 K 棒的交易日**——FinMind 的法人／融資券要晚間才發布，
+所以收盤後跑的分析拿到的必然是前一日籌碼。
+
+這件事在分析排程（平日 17:00／22:00 各一輪，見
+[`architecture.md`](./architecture.md)「兩個標的清單」）上線後變得必須講清楚，因為
+**同一個交易日的兩輪分析在多數欄位上完全相同**：
+
+| 欄位 | 兩輪是否相同 | 原因 |
+|---|---|---|
+| `analyzed_at` | **相同** | 它是 **K 棒時間**，兩輪站在同一根 K 棒上 |
+| `current_price` | **相同** | 該根 K 棒的收盤價 |
+| `created_at` | **不同** | 實際執行的 wall clock——**唯一能區分兩輪的欄位** |
+| `chip_summary.trade_date` | 通常不同 | 17:00 是前一日、22:00 是當日（籌碼採集 21:00） |
+| `trading_score` | 通常不同 | Chip 佔 15%，籌碼換了分數就會變 |
+
+所以判讀清單時：**只看 `analyzed_at` 會以為是重複紀錄**，要看 `created_at` 才知道是兩次
+執行，看 `trade_date` 才知道分數為什麼不同。
+
+**判斷新舊要用台北日曆日。** 日 K 的 `ts` 存的是 `16:00Z` ＝台北隔日 `00:00`，
+拿 UTC 日期去比會整批差一天（同一個坑在 Go 端的 `taipeiDate` 與前端的
+`lib/utils/date.ts` 都各自記過）。前端的判定收斂在 `lib/utils/chipFreshness.ts`。
+
+**標示落後時直接顯示日期而不是寫「前一日」**：籌碼可能落後不只一天（採集失敗、停牌、
+連假），寫死相對詞會在那些情況下說謊。
+
 **摘要 `reasons` 不再含籌碼句**：籌碼從 `_zone_summary` 的 `reasons[]` 拉出改成上述
 結構化 `chip` 欄位，`reasons` 只保留均線、驗證、量能、信心、共振等非籌碼理由，
 避免同一件事在文字與數字兩處重複。整檔跑馬燈 `analysis_tips` 改由 `tips.py`

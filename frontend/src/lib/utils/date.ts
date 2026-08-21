@@ -19,3 +19,12 @@ export function daysAgo(n: number): string {
   d.setDate(d.getDate() - n)
   return taipeiDateFormatter.format(d)
 }
+
+// taipeiDateOf 取任意時間戳在**台北時區**的日曆日（`YYYY-MM-DD`）。
+//
+// 與 todayStr 共用同一個 formatter，理由相同：日 K 的 ts 存的是 16:00Z＝台北隔日 00:00，
+// 用 UTC 日期判斷會整批差一天。
+export function taipeiDateOf(input: string | Date): string {
+  const d = typeof input === 'string' ? new Date(input) : input
+  return taipeiDateFormatter.format(d)
+}

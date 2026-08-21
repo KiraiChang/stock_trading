@@ -297,6 +297,11 @@ export interface SRChipSummary {
   margin_score: number | null
   broker_score: number | null
   concentration_score: number | null
+  // 這份籌碼是哪個交易日的（ISO `YYYY-MM-DD`）。**不一定等於分析當天**：
+  // FinMind 的法人／融資券晚間才發布，所以收盤後跑的分析拿到的是前一日籌碼。
+  // 判讀方式見 docs/sr-zone-scoring.md「`trade_date`：這份籌碼是哪一天的」。
+  // 沒有籌碼資料時為 null。
+  trade_date?: string | null
 }
 
 export interface SRPeriodSummary {
@@ -921,6 +926,8 @@ export async function createSRZoneAnalysis(
   return normalizePipelineResponse(response)
 }
 
+// limit 預設 20；**未指定 symbol 時呼叫端應給更大的值**——分析排程（T-052）一天會產生
+// 約 22 筆（watchlist 11 檔 × 兩輪），20 筆撐不到一天，人工跑的分析當天就會被擠出視野。
 export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<SRZoneAnalysis[]> {
   const query = symbol ? `?symbol=${symbol}&limit=${limit}` : `?limit=${limit}`
   const res = await apiFetch<{ analyses: SRZoneAnalysis[]; total: number }>(`/sr-zones${query}`)

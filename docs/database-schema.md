@@ -444,6 +444,41 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 
 ---
 
+## sr_identity_stats
+
+身分關聯決策的**逐次分析**統計（migration 070，todo.md T-050）。一次分析一列。
+
+**為什麼要有這張表**：同一組數字已經有結構化 log（見
+[sr-zone-scoring.md](./sr-zone-scoring.md)「可觀測性」），但 log 答不出趨勢問題。
+而現有唯一記錄排程行為的 `job_runs` **只保留當天**（`runPreMarket` 每天 08:50
+`DeleteBefore(TodayTaipei())`）——2026-08-21 實測：前一晚排程的紀錄早上就查不到了。
+**本表刻意不沿用那個保留策略**，否則等於白做。
+
+| 欄位 | 說明 |
+|------|------|
+| analysis_id | 對應的 `stock_sr_zone_analyses.id`。**沒有外鍵**，理由同 `stock_sr_zones.zone_uid`：統計寫入是 fail-open 的降級路徑，不該讓它反過來擋住主資料 |
+| symbol / timeframe | 便於直接篩選，不必每次 join |
+| matched_by_chain / matched_by_current / matched_by_alias | 三段關聯決策各自的命中數。優先序不可調換 |
+| unmatched_keys / carried_noop / zone_ended_skipped / chain_conflicts / chain_key_ambiguous / alias_ambiguous / carried_parse_fail | 各類異常的**筆數**（明細留在 log，表只要計數） |
+| invariant_violations | **必須恆為零**。與上面那些「分佈正不正常」的欄位語意不同，這一欄問的是不變式有沒有被違反，不要併進同一組比率 |
+| zone_identity_degraded | 該次 zone 身分比對整段沒跑成。**此時其餘計數全為 0**——別讀成「這次很乾淨」 |
+| event_identity_degraded | 事件層整段沒跑（多半是前者連帶） |
+| zone_live_candidates | 該次進入 matcher 的既有身分數，供比率當分母參考 |
+| zone_ended | 該次因 `SPLIT` / `MERGE` / `RESHAPE` 終止的身分數 |
+
+**Index：** `INDEX(symbol, created_at DESC)`、`INDEX(analysis_id)`。
+
+**母體是分析的子集**：統計只在 `reuse_existing=false` 那條路徑產生
+（`analysis/sr_analysis_provider.go` 的重用路徑不追身分，也就沒有統計）。
+算比率時分母要 join `stock_sr_zone_analyses`，不要拿本表列數當「所有分析」。
+
+**只存原始計數，不存比率**：比率的分母隨查詢區間而變，先算好等於把一個決定寫死在資料裡。
+聚合由 `GET /sr-zones/identity-stats` 負責。
+
+量級：一次分析一列，分析排程上線後約 22 列/天 ≈ 8000 列/年，欄位幾乎都是整數。
+
+---
+
 ## stock_sr_decisions
 
 每筆 SR Zone analysis 的 Decision Pipeline normalized snapshot。主欄位保存可查詢的

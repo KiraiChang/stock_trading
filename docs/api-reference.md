@@ -478,6 +478,61 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 
 這份資料定位為 **display chain**——供顯示與人工檢查，**不是** Lifecycle Engine 的 runtime 輸入。
 
+### GET `/sr-zones/identity-stats`
+
+身分關聯決策的逐次分析拆解與區間聚合（todo.md T-050）。
+
+**這個端點存在的理由是趨勢**：同一組數字已經有結構化 log，但 log 答不出
+「alias 命中率是不是在爬」「`chain_conflicts` 是不是開始非零」，而那正是這類缺陷的形狀
+——它們的症狀是資料表面上完全正常。另一個現有機制 `job_runs` **只保留當天**，
+隔天早上就查不到前一晚的排程做了什麼。
+
+**Query：**
+
+| 參數 | 說明 |
+|------|------|
+| symbol | 選填，省略代表全部標的 |
+| days | 回溯幾天，預設 30、範圍 1~365 |
+| limit | 最多幾列，預設 200、範圍 1~1000 |
+
+**Response：**
+```json
+{
+  "rows": [
+    {"analysis_id": 128, "symbol": "2330", "timeframe": "1d",
+     "matched_by_chain": 6, "matched_by_current": 2, "matched_by_alias": 0,
+     "unmatched_keys": 0, "chain_conflicts": 0, "alias_ambiguous": 0,
+     "invariant_violations": 0,
+     "zone_identity_degraded": false, "event_identity_degraded": false,
+     "zone_live_candidates": 14, "zone_ended": 1,
+     "created_at": "2026-08-21T17:00:12Z"}
+  ],
+  "summary": {
+    "analyses": 22, "degraded_analyses": 0,
+    "matched_by_chain": 130, "matched_by_current": 41, "matched_by_alias": 0,
+    "matched_total": 171, "alias_hit_rate": 0.0,
+    "unmatched_keys": 0, "chain_conflicts": 0, "chain_key_ambiguous": 0,
+    "alias_ambiguous": 0, "carried_parse_fail": 0, "invariant_violations": 0
+  }
+}
+```
+
+**判讀時必須注意的三件事：**
+
+1. **先看 `degraded_analyses` 再看比率。** 身分比對整段沒跑成的那幾次，所有計數都是 0，
+   會把比率稀釋成看起來很健康。`degraded_analyses` 非零代表那段期間有分析根本沒算身分。
+2. **`alias_hit_rate` 是主要的趨勢指標。** 它在爬代表 zone 邊界漂移在惡化、第一段
+   （既有鏈命中）愈來愈接不住。單一數值沒有意義，要看走勢。
+3. **`invariant_violations` 必須是 0。** 它與其他欄位語意不同——不是「比較差」而是
+   不變式被違反，所以獨立成欄而不併進比率。非零要當 bug 查。
+
+**母體是分析的子集**：統計只在 `reuse_existing=false` 那條路徑產生，`analyses` 不等於
+該期間的所有分析。要算真正的比例得用 `analysis_id` join `stock_sr_zone_analyses`。
+
+**未啟用時回 503**（repo 未注入）。
+
+---
+
 ### GET `/watchlist`
 
 取得監控清單。回傳會附帶 `stock_symbol` 主檔狀態；`exists=false` 代表該

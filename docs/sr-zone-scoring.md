@@ -2763,7 +2763,7 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 等於宣稱鏈延續了，而 `RESHAPE` 的定義正是「血緣無法解析」。血緣留在 `zone_relations`，
 之後沿 parent 回溯補得回來；反過來先接了就拆不回來。
 
-#### 可觀測性：一筆結構化 log 拆出關聯決策
+#### 可觀測性：log 看單次、`sr_identity_stats` 看趨勢
 
 每次分析輸出一筆 `event identity: zone association*`，欄位包含三段各自的命中數
 （`matched_by_chain` / `matched_by_current` / `matched_by_alias`）與各類異常。
@@ -2777,7 +2777,24 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 
 這是「鏈靜默凍結」唯一抓得到的東西：那個缺陷的症狀是資料表面上完全正常
 （鏈停在 `CONFIRMED` 不再更新），只有把「事件是怎麼找到身分的」逐段數出來才看得見。
-升級成可查詢的 metric 是 todo T-050。
+
+**但 log 只答得出「這一次分析發生了什麼」。** F1／F2 這類缺陷是**趨勢型**的——
+「alias 命中率從 2% 爬到 30%」代表 zone 邊界漂移在惡化，而沒有人會每天 grep
+（F1 在 live 存在了兩週沒被發現）。2026-08-21 的實測讓這件事更具體：分析排程跑完的隔天
+早上想查前一晚發生什麼事，`job_runs` 已經被 `runPreMarket` 的 `DeleteBefore(TodayTaipei())`
+清光了，唯一的線索只剩 `docker logs`。
+
+所以**同一組數字同時寫進 `sr_identity_stats`**（一次分析一列，T-050）：
+
+* **表只存原始計數，比率由 `GET /sr-zones/identity-stats` 在查詢時算**——分母隨「要看哪個
+  區間」而變，存進表等於把一個決定寫死。
+* **降級的那幾次也會留一列**，並帶 `zone_identity_degraded`。若那時候不寫，趨勢圖上會看到
+  「這天很乾淨」，而真相是「這天什麼都沒算」。**看比率之前要先看 degraded 次數。**
+* **`invariant_violations` 與其他欄位語意不同**：其他問「分佈正不正常」，它問「不變式有沒有
+  被違反」，必須恆為零，所以在 summary 裡獨立成欄而不併進比率。
+* 寫入是 **fail-open**：失敗只記 log，分析照常成立——統計缺一列比分析失敗好。
+* 母體仍是分析的**子集**（只有 `reuse_existing=false` 那條路徑有統計），所以每列都帶
+  `analysis_id`，分母要 join `stock_sr_zone_analyses` 算，而不是靠讀者記得這條限制。
 
 ### 實測特性
 

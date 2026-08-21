@@ -2339,7 +2339,7 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | **已實作／待 review**（2026-08-21） |
 | 優先度 | 中（T-048 階段 C 的後續；T-048 已於 2026-08-20 完成並收斂，本筆不擋任何人） |
 | 分類 | Go / 可觀測性 |
 | 建立日期 | 2026-08-19 |
@@ -2362,16 +2362,138 @@ log 能回答「這一次分析發生了什麼」，但答不出**趨勢**問題
 也沒有 `/metrics` 端點——引入是跨系統決策（要決定 exporter、抓取端、儀表板、
 保留期），不該夾帶在一個只寫不讀的功能裡交付。
 
-#### 要決定的事（規劃時定案，先不寫死）
+**2026-08-21 的實測讓這個缺口變得具體。** T-052 上線後的第一輪排程（8/20 22:00）跑完
+11 檔全部 skip，隔天早上想查發生什麼事時：
 
-* **要不要引入 prometheus client**，還是先用「寫進 DB 的一張輕量統計表 ＋ 一個查詢端點」。
-  後者不新增依賴、與現有 repo 模式一致，但沒有現成的告警管道。
-* **母體問題**：`zone_uid` 只在 `reuse_existing=false` 那條路徑產生
-  （T-048 階段 B／C 的既有已知限制），metric 統計的是分析的**子集**。
-  指標定義要把這件事寫進去，不然分母會被誤讀。
-* **哪些是 gauge、哪些是 counter**：命中率是比例（每次分析算一次），
-  `Invariant` 違反是**必須為零**的 counter，兩者的告警語意完全不同。
-* 是否一併涵蓋階段 B 的 zone 側（`zone identity: match failed` 等目前也只有 warn）。
+* `job_runs` **查不到任何 `sr_analysis` 紀錄**——因為 `runPreMarket`（每天 08:50）會
+  `DeleteBefore(TodayTaipei())`，**只保留當天**。前一晚的紀錄在早上 08:50 被例行清掉。
+* 唯一還原得出真相的只有 `docker logs`，而且要一路往回翻才看得到
+  `sr analysis done ... skipped=11` 與每檔的 skip 原因。
+
+也就是說**現有的兩個機制都答不出「昨晚那輪做了什麼」**：log 沒人翻，job_runs 隔天就沒了。
+本筆要建的表**因此不能沿用 job_runs 的當日清除策略**——那正是要解的問題。
+
+#### 計畫書（**已實作／待 review**，2026-08-21）
+
+##### 修改目標與不做的範圍
+
+* **目標**：讓「身分關聯決策的組成」變成**可查詢、且能跨日比較**的資料，回答
+  「alias 命中率是不是在爬」「`ChainConflicts` 是不是開始非零」這類趨勢問題。
+* **不做**：不改任何決策邏輯、不改身分層的判準、不改事件偵測。
+* **不做**：不做告警規則（要先有抓取端），不引入 metrics 依賴（見 V1）。
+* **不做**：不回填歷史——過去的 `eventIdentityStats` 只存在於 log，重建不可能可靠。
+
+##### 四個定案
+
+**V1：寫進 DB 的一張輕量表 ＋ 查詢端點，不引入 prometheus。**
+
+| 方案 | 判斷 |
+|---|---|
+| **DB 表 ＋ 端點**（採用） | 不新增依賴，與 `job_runs` / `stock_sr_regression_results` 的既有模式一致；查詢端點可直接餵給既有前端 |
+| prometheus client ＋ `/metrics` | 否決。要一併決定 exporter／抓取端／儀表板／保留期，是跨系統決策；而這台 host 只有 2GiB，再擺 Prometheus ＋ Grafana 不現實 |
+
+**決定性的理由是資料頻率**：這個 metric **一次分析產生一筆**，T-052 上線後是
+**每天約 22 筆**。Prometheus 是為了高頻抓取設計的，22 點/天本質上是一張**表**而不是
+time series。用它反而要處理「抓取間隔內沒有變化」這種與問題無關的複雜度。
+
+告警之後仍可加：`Invariant` 非零是唯一真正需要即時告警的訊號，而它現在已經是 Error 級 log。
+
+**V2：一次分析一列，母體寫在資料裡而不是靠讀者記得。**
+
+`eventIdentityStats` 只在 `reuse_existing=false` 那條路徑產生（身分層的既有已知限制），
+所以它統計的是分析的**子集**。**每列都帶 `analysis_id`**，讓「分母是哪些分析」可以直接
+join `stock_sr_zone_analyses` 算出來，而不是靠讀者記得這條限制。
+
+T-052 上線後這條限制的實務影響變小了——排程走的正是 `reuse_existing=false`——但
+`portfolio/analyzer` 那條重用路徑仍然不產生統計，欄位語意必須寫明。
+
+**V3：存原始計數，比率在查詢時算。**
+
+表裡只存**該次分析的原始計數**（`matched_by_chain` / `matched_by_current` /
+`matched_by_alias` …），不存比率。理由：比率的分母會隨「要看哪個區間」而變，先算好等於
+把一個決定寫死。查詢端點負責聚合。
+
+**`Invariant` 與其他欄位語意不同**，要分開：其他是「這樣的分佈正不正常」，而它是
+**必須恆為零**的不變式違反。表裡存計數，端點另外把它拉成獨立欄位，不要混進同一組比率裡。
+
+**V4：一併涵蓋 zone 側。**
+
+階段 B 的 zone 身分比對失敗目前只有 `zone identity: match failed` 這類 warn，同樣沒有趨勢。
+成本很低——同一列多幾個欄位即可（比對是否降級、`ListLive` 撈到幾個候選、終止了幾個身分），
+不必另開一張表。
+
+##### 受影響的檔案與資料流
+
+```text
+migrations/{postgres,sqlite,mysql}/0XX_sr_identity_stats.sql   **三份都要**
+Go store/model.go                    ＋ SRIdentityStats
+Go store/sr_identity_stats_repo.go   新增：Insert ＋ List（供端點查詢與聚合）
+Go api/handler/sr_zones.go           persistEventIdentity 算完 stats 後多寫一筆
+                                     （**fail-open**：寫入失敗只記 log，不影響分析）
+Go api/handler/sr_zones.go           ＋ GET /sr-zones/identity-stats
+Go api/server.go                     路由 ＋ repo 注入
+```
+
+* Python：**不改**。前端：不改（要接是 T-041／另案）。
+
+##### 資料 contract 變化
+
+| 變更 | 型態 | 相容性 |
+|---|---|---|
+| 新表 `sr_identity_stats` | 純新增 | 沒有任何既有查詢會碰到 |
+| `GET /sr-zones/identity-stats` | 純新增端點 | — |
+| 既有 API／決策欄位 | **不變** | 本筆只多寫一張表 |
+
+##### 主要風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 在分析路徑上多一次寫入，失敗會拖垮分析 | **fail-open**，比照身分層既有語意：寫入失敗只記 log，分析照常回 201。統計缺一列比分析失敗好 |
+| 表無限成長 | 22 列/天 ≈ 8000 列/年，欄位都是整數。**刻意不套 job_runs 的當日清除**——那正是要解的問題。真的要清也該是「保留 N 個月」而不是「保留當天」 |
+| 統計與 log 不一致（兩份事實） | 同一個 `eventIdentityStats` 值同時餵給 log 與表，不各算一次 |
+| 母體被誤讀成「所有分析」 | V2 的 `analysis_id` ＋ 欄位註解 ＋ 歸檔說明 |
+| 回滾 | 純新增表與端點，寫入是 fail-open。`git revert` ＋ `-- +goose Down` |
+
+##### 測試與驗證策略
+
+* **單元（Go）**：`eventIdentityStats` → 資料列的映射逐欄；寫入失敗時分析仍成立
+  （fail-open）；`Invariant` 非空時該列看得出來。
+* **Migration**：`scripts/test-postgres-migrations.sh`；sqlite 由 `backend/scripts/test.sh` 覆蓋；
+  mysql 依 I-054 既有處置。
+* **端到端（dev 階梯）**：重跑四檔 21 階後
+  1. `sr_identity_stats` 恰好 **84 列**（每次分析一列）；
+  2. **從表裡算得出目前只能靠 grep log 得到的數字**——`alias_ambiguous` 合計為 0
+     （F5 修法後的實測值），`MatchedByAlias` 合計為 0，`Invariant` 合計為 0；
+  3. 決策路徑逐欄不變。
+
+##### 實作結果（2026-08-21）
+
+| 門檻 | 結果 |
+|---|---|
+| Go 全量 `test.sh` | 全綠（+6 支） |
+| `scripts/test-postgres-migrations.sh` | 全綠（含 070 up/down） |
+| 一次分析一列 | **84 列 / 84 次分析** |
+| **表能重現只能靠 grep log 得到的數字** | `alias_ambiguous` **0**、`matched_by_alias` **0**、`invariant_violations` **0**、`unmatched_keys` **0**、降級 **0**——與 F5 修法後及階段 C 記錄的實測值一致 |
+| 端點 summary | `matched_total=382`（既有鏈 250 ／本次 map 132 ／alias 0）、`alias_hit_rate=0`；`symbol=2330` 篩選得 21 次分析、`matched_total=92` |
+
+**新拿到的數字**：`matched_by_chain` 250 與 `matched_by_current` 132 這兩個以前只在 log 裡的值，
+現在查得到也比得了——第一段（既有鏈命中）吃掉約 65%，這正是 `matched_by_alias` 一直是 0 的原因
+（見 `issue.md` I-078）。
+
+實作與計畫書的一處差異：
+
+* **寫入點放在 `RunAnalysis` 而不是 `persistEventIdentity` 內。** 後者在 zone 身分降級時會直接
+  return，而「這次降級了」正是最該留下的一列。改成 `persistEventIdentity` 回傳 stats、由
+  `RunAnalysis` 統一寫，降級時寫一列帶 `zone_identity_degraded=true`。
+  若那時候不寫，趨勢圖上會看到「這天很乾淨」，而真相是「這天什麼都沒算」。
+
+##### 完成後歸檔
+
+* 「可觀測性：一筆結構化 log 拆出關聯決策」改寫成 log ＋ 表兩層，並寫明**表才答得出趨勢**
+  → [`sr-zone-scoring.md`](./sr-zone-scoring.md)。
+* 新表 schema、保留策略（**不沿用 job_runs 的當日清除**）與母體語意 →
+  [`database-schema.md`](./database-schema.md)。
+* 新端點 → [`api-reference.md`](./api-reference.md)。
 
 #### 前置
 
@@ -2868,6 +2990,9 @@ dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法�
 
 **本筆是整條鏈的時鐘起點**，母體累積要數週，所以要最早啟動；其餘工作填滿等待期：
 
+本筆於 **2026-08-20 在 live 啟用**（`SR_ANALYSIS_ENABLED=true`）。啟用後對前端呈現的影響
+另立 [T-053](#t-053sr-zones-頁面因分析排程上線而需要的呈現調整)——資料正確性不受影響。
+
 | 時序 | 項目 | 理由 |
 |---|---|---|
 | 上線前 | I-077 老化單位修法在 live 生效 | 見上方計畫書的「前置」與風險表第一列，不先修就會一邊累積一邊污染母體 |
@@ -2875,3 +3000,56 @@ dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法�
 | 累積期**當中** | [T-050](#t-050身分追蹤的可觀測性把關聯決策計數從-log-升級成可查詢的-metric) | 要趕在累積期內上線才看得到 alias 命中率與撞頂比例的**趨勢**，事後補等於白等一輪 |
 | 母體足夠後 | 並行比對 → I-074 關閉 → I-078／I-079 重新量測 | 純驗證，不寫功能 |
 | 全綠後 | [T-049](#t-049market-state-與所有下游改讀同一套-state) | 動決策邏輯，另需計畫書 |
+
+---
+
+### T-053：SR Zones 頁面因分析排程上線而需要的呈現調整
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中（使用者馬上看得到，但**不影響資料正確性**，純呈現） |
+| 分類 | 前端 / SR Zone / Decision UI |
+| 建立日期 | 2026-08-20 |
+| 來源 | [T-052](#t-052定期對-watchlist-產生-sr-zone-分析分析排程) 於 2026-08-20 在 live 啟用後的影響盤點 |
+| 關聯 | 屬 [T-041](#t-041sr-zone-決策顯示補齊-lifecycleevent-timeline-與-strategy-layer) 的前端面向；成因是 T-052 |
+
+#### 問題
+
+排程一開，`stock_sr_zone_analyses` 從「幾乎不長」變成每交易日 11 檔 × 2 筆。
+後端資料是對的，但 SR Zones 頁面的兩個既有呈現方式在這個量級下會誤導使用者。
+
+**一、歷史清單會被排程灌滿，手動跑的分析當天就看不到。**
+
+`SRZones.svelte:1063` 是 `listSRZoneAnalyses(symbol || undefined, 20)`，固定 20 筆：
+
+| 情境 | 每天新增 | 20 筆能撐多久 |
+|---|---|---|
+| 有填 symbol | 2 筆 | 約 10 個交易日 |
+| **沒填 symbol（全域）** | 11 檔 × 2 ＝ **22 筆** | **不到一天** |
+
+使用者剛手動跑完一筆分析、隔天回來看全域清單，那筆已經被排程的結果擠出去了。
+
+**二、同一天兩筆、分數不同，而價格一根 K 棒都沒動。**
+
+17:00 那輪用**前一日**籌碼、22:00 那輪用**當日**籌碼，而 Chip 佔 `trading_score` 的 **15%**。
+所以同一檔、同一根 K 棒，早上看與晚上看會得到不同的 `trading_score`，甚至不同的
+`trading_recommendation`。**這是 T-052 兩段式排程的設計本意**（見該筆 S3），但畫面上沒有
+任何東西說明差異來自籌碼——使用者只會看到兩筆時間相近、分數卻不一樣的分析。
+
+#### 要決定的事（規劃時定案）
+
+* **歷史清單怎麼調**：把全域檢視的 limit 拉大、預設就帶 symbol 篩選、還是分頁。
+  拉大 limit 是最省事的，但全域每天 22 筆，撐一週就要 110 筆——治標。
+* **同日兩筆怎麼區分**：清單上標出該筆用的籌碼日期即可，**後端不必改**——
+  `stock_sr_zone_analyses.chip_summary.trade_date` 已經有這個值
+  （`data_quality.updated_at.chip` 也看得到）。要決定的是標成「含當日籌碼／前一日籌碼」
+  這種語意標籤，還是直接顯示日期。
+* **要不要區分「排程產生」與「人工觸發」**：目前 DB 沒有欄位記錄來源，兩者長得一模一樣。
+  若清單要標示，得先決定是加欄位（後端改動）還是用時間推測（17:00／22:00 附近視為排程，
+  不可靠）。**建議先不做**，等前兩項的實際使用感受再說。
+
+#### 不做的範圍
+
+* 不改後端、不改 API contract——上述三項的資料來源都已經存在。
+* 不動 Event Timeline 的呈現（那是 T-041 的獨立面向，資料面已由 T-051 備妥）。

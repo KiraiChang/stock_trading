@@ -166,6 +166,9 @@ func NewServer(
 		// 身分追蹤因此只有一份實作。**必須在 sched.Start() 之前**——Start() 當下才
 		// 決定要不要註冊 cron，main.go 的呼叫順序已保證這件事。
 		sched.SetSRAnalysis(szh, candleRepo, srAnalysisCfg)
+		// 身分關聯決策的統計（T-050）。**只寫不讀決策**：寫入 fail-open，
+		// 查詢端點只服務人工判讀與趨勢觀察。
+		szh.SetIdentityStats(store.NewSRIdentityStatsRepo(db))
 		srRegressionResultHandler := handler.NewSRRegressionResultHandler(
 			analysisClient,
 			store.NewSRRegressionResultRepo(db),
@@ -190,6 +193,7 @@ func NewServer(
 		// 靜態路徑 ＋ query：同層的 /sr-zones/:id 已佔用 wildcard 位置，
 		// 再放 /sr-zones/:symbol/... 會與它衝突（見 handler.EventTimeline 的說明）。
 		protected.GET("/sr-zones/event-timeline", szh.EventTimeline)
+		protected.GET("/sr-zones/identity-stats", szh.IdentityStats)
 		protected.DELETE("/sr-zones/:id", szh.Delete)
 
 		uh := handler.NewUserHandler(userRepo, log)

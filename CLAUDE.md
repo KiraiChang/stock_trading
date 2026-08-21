@@ -95,6 +95,53 @@ Language:
 
 ---
 
+## Analytics Runtime（Python，已實作）
+
+`python/` 是**第二個 runtime**：統計、機率模型與回測留在 Python，Go 不重做。
+Go 端透過 `PYTHON_SERVICE_URL` 以 HTTP 呼叫，兩者共用同一個資料庫——
+`python/config.yaml` 的 `database` 區段要與 `backend/config.yaml` 保持同步。
+
+技術：
+
+* Python 3.11（`python/Dockerfile`，基於 `python:3.11-slim`；lightgbm 需要 `libgomp1`）
+* FastAPI + uvicorn（`http_server.py`，預設 port 8001）
+* pandas / numpy（K 棒與特徵計算）
+* scikit-learn + LightGBM + joblib（SR Zone bounce / break 機率模型）
+* SHAP（zone evidence；**可降級的展示層**，缺套件或關閉時 `/sr-zones` 照樣回應）
+* backtrader（`backtest/` 的策略回測）
+* SQLAlchemy（以唯讀查詢為主，engine 支援 sqlite / postgres / mysql）
+* pytest（**一律用 `python/scripts/test.sh`**，在 docker 內跑，記憶體經 mem-guard 下修）
+
+兩個進入點：
+
+* `http_server.py`——Method B，Go 主動 POST 觸發。端點：`/analyze`、`/sr-zones`、
+  `/sr-scoring/train`、`/sr-scoring/evaluate`、`/sr-scoring/model-status`、
+  `/zone-identity/match`、`/backtest`、`/health`。
+* `worker.py`——Method A，輪詢 `backtest_jobs` 裡 `status='pending'` 的任務。
+
+主要模組：
+
+* `backtest/modular/sr_scoring/`——SR Zone 評分核心，本專案最大的 Python 子系統。
+  資料流由 `pipeline.py` 串起：`load_data` → `extract_features` → `calculate_scores`
+  → `build_evidence` → `decide`；各階段實作分散在 `zone_builder.py`、`features.py`、
+  `scoring.py`、`evidence.py`、`decision_engine.py`、`event_engine.py`、
+  `lifecycle_engine.py`、`zone_matcher.py`。
+* `train.py` / `evaluation.py`——模型訓練，以及 walk-forward evaluation 與 decision replay。
+* `backtest/modular/`——一般交易策略回測（`entries` / `exits` / `strategy` / `backtester`）。
+* `db.py`——**Python 端唯一的 candles 進入點**，預設回傳還原價（`adjusted=True`）。
+
+設計慣例：
+
+* **模組 import 不得有連線等副作用**——DB 連線檢查放在 FastAPI lifespan，不放 import 期。
+* 模型與 SHAP background 以 lazy singleton 快取（`model.py` 的 `_MODEL_CACHE`）。
+* 記憶體特性：`python-server` 穩態 RSS 約 254MB，其中 253MB 是直譯器＋套件＋模型，
+  單次分析的資料只有 KB 等級（實測見 `docs/todo.md` T-054；批次路徑的上限見 T-047 與
+  `docs/sr-zone-scoring.md`「規模上限」）。
+
+現況規格與已知限制寫在 `docs/sr-zone-scoring.md`。
+
+---
+
 ## Database (已實作)
 
 ### Primary Storage

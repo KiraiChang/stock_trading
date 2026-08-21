@@ -3418,3 +3418,111 @@ dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法�
 | 母體足夠後 | 並行比對 → I-074 關閉 → I-078／I-079 重新量測 | 純驗證，不寫功能 |
 | 全綠後 | [T-049](#t-049market-state-與所有下游改讀同一套-state) | 動決策邏輯，另需計畫書 |
 
+
+---
+
+### T-054：用 Redis 降低 Python 端 SR Zone 分析記憶體？——評估結論：不採用
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃（評估已完成，結論為**不走 Redis**；下方「可行的槓桿」待決定要不要做） |
+| 優先度 | 低 |
+| 分類 | Python / SR Zone / 效能 |
+| 建立日期 | 2026-08-21 |
+| 來源 | 使用者觀察「每次分析記憶體用量會增加」，要求評估以 Redis 外移資料 |
+| 相關 | [T-047](#t-047sr-evaluation-串流化解除全市場的記憶體上限)（批次路徑的記憶體上限） |
+
+#### 結論
+
+**Redis 在 `/sr-zones` 這條路徑上沒有可外移的東西，不採用。**
+實測 `python-server` 穩態 RSS 約 **254MB，其中 253MB 是直譯器＋套件＋模型**，
+單次分析的資料只有約 **16KB**（400 根 K × 5 欄 × 8B）。Redis 搬得走資料，
+搬不走 import。
+
+另外，「每次分析記憶體用量會增加」**不是洩漏，是暖機**：前 3 次分析從 140MB 爬到
+255MB 之後就持平，連續 75 次分析後反而微降。
+
+#### 量測一：`/sr-zones` 連續 75 次（dev stack，postgres，`limit=400`，4 檔輪流）
+
+RSS 取容器內 PID 1 的 `VmRSS`（不含 page cache），每次分析後取樣。
+
+| 分析次數 | RSS | 說明 |
+|---|---|---|
+| 0（idle，模型已載入） | 139.6 MB | 呼叫過 `/sr-scoring/model-status` 後的基線 |
+| 1 | 166.8 MB | +27 MB |
+| 2 | 167.2 MB | 幾乎不動 |
+| 3 | 259.2 MB | +92 MB，暖機完成 |
+| 4～75 | 253.7～259.2 MB | **持平**，末段 254.1 MB（比峰值低） |
+
+單次分析耗時 6.9～10.7 秒。**瓶頸是 CPU 不是記憶體**，與
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「規模上限」對 evaluation 的結論一致。
+
+RSS 不會退回 140MB，是因為 CPython／glibc 不把釋放的 arena 還給 OS，加上
+`shap` 是**延遲 import**（`evidence.py` 的 `_shap_available()` / `_build_explainers()`
+都在函式內 `import shap`），所以它的成本要等第一次真的產 evidence 才付。
+這就是使用者觀察到的「每次分析都在增加」——它有上界，且上界就是下面那張表的總和。
+
+#### 量測二：記憶體到底花在哪（同一個 image，拋棄式 container，`--memory=320m`）
+
+| 階段 | 累積 RSS | 增量 |
+|---|---|---|
+| bare interpreter | 7 MB | — |
+| + numpy | 23 MB | +16 |
+| + pandas | 64 MB | +41 |
+| + sqlalchemy | 79 MB | +15 |
+| + sklearn | 158 MB | **+79** |
+| + lightgbm | 161 MB | +3 |
+| + shap | 221 MB | **+60** |
+| + fastapi / uvicorn | 238 MB | +17 |
+| + `joblib.load(sr_scoring_v4.joblib)` | 253 MB | +15 |
+
+同一支探針**跳過 `import shap`** 時停在 **181 MB**——所以 shap 連同它拉進來的
+相依套件實際佔 **72 MB**。
+
+模型本身很小：檔案 4.2MB，`explanation_background` 只有 `(32, 15)` = 3,840 bytes。
+**SHAP 的成本在 import，不在資料。**
+
+#### 為什麼 Redis 幫不上忙
+
+1. **沒有資料規模可以外移**。254MB 裡真正屬於「這次分析的資料」的部分是 16KB 等級。
+   把它放進 Redis，Python 端省下的量小到量不出來。
+2. **省不掉的那 253MB 依定義不能外移**。pandas / sklearn / shap 的 module 物件與
+   原生庫必須留在會用到它們的行程裡；模型要拿來 `predict_proba` 就得是反序列化後的
+   Python 物件。存進 Redis 只是多一份序列化拷貝，用的時候還是要載回來。
+3. **Redis 與 Python 在同一台 host**。這台只有 2GiB，`redis` 是 `docker-compose.dev.yml`
+   的服務、跟 `python-server` 共用同一份實體記憶體。把 X MB 從 Python 搬到 Redis，
+   host 總用量不變（還多了 redis-py client 與序列化緩衝）。
+   Redis 要能真的降低本機壓力，前提是它跑在**別台機器**上——目前不是這個架構。
+
+批次路徑（`run_evaluation`）也一樣：全市場情境下最大的一塊確實是原始 frames（約 220MB），
+但 T-047 已經給出對的解法——**逐檔算完 profile 就釋放 frame** 的串流化。
+Redis 版本要付出同樣的峰值（用的時候還是要載回 pandas），外加序列化成本與 Redis 自己的 RSS。
+串流化嚴格優於 Redis。
+
+#### 可行的槓桿（真的想降記憶體時做這些）
+
+| 手段 | 省下 | 代價 | 需要改程式嗎 |
+|---|---|---|---|
+| **A. 關掉 SHAP evidence** | **72 MB（253→181，−28%）** | evidence 降級為 rules only，前端 badge 顯示「rules only」；規則式分數與機率不受影響 | **不用**。`config.py` 已有 `SR_SCORING_EVIDENCE_ENABLED` 環境變數覆寫，compose 加一行即可，可逆 |
+| B. 把 SHAP 隔到獨立子行程，用完回收 | 同 A，但保留 evidence 功能 | 每次分析多一次 fork ＋ import 成本（shap import 本身就要數秒），熱路徑延遲會明顯變差 | 要，且動到 `evidence.py` |
+| C. 批次路徑串流化 | 見 T-047 | 見 T-047 | 見 T-047 |
+
+A 是唯一「零程式碼、立刻可逆、省下四分之一」的選項。
+`build_evidence()` 的 `shap_ready = bool(evidence_enabled) and _shap_available() and ...`
+會短路，關掉時 `_shap_available()` 根本不會執行，shap 因此永遠不被 import。
+
+**本評估不建議現在就關**：dev 穩態 254MB 對 512m 的 `mem_limit` 還有一倍餘裕，
+沒有實際壓力就沒有理由犧牲 evidence。這一列是「真的撞到上限時先拉這根桿」的備案。
+
+#### 順帶發現（待確認，不屬於本評估範圍）
+
+`docker stats` 顯示 **live stack 的 `stock_trading-python-server-1` 啟動 2 分鐘就到 323MB**，
+比 dev 的穩態 254MB 高約 70MB。live 開了 `SR_ANALYSIS_ENABLED`（T-052），
+可能是排程分析的併發或 `SR_ANALYSIS_LIMIT=400` 下 zone 數較多所致，但沒有查證。
+若之後要收 `mem_limit`，要先量 live 的實際穩態，不能拿 dev 的數字外推。
+
+#### 驗證方式
+
+重跑量測一即可（容器外對 `http://127.0.0.1:18001/sr-zones` 連續打，
+每次後 `docker exec … grep VmRSS /proc/1/status`）。
+判準是**穩態是否收斂**，不是單次峰值——單看前 3 次一定會看到成長。

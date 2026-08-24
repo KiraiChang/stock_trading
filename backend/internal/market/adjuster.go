@@ -222,53 +222,158 @@ func (a *Adjuster) SymbolsWithCandles(ctx context.Context) ([]string, error) {
 //
 // **刻意逐檔獨立處理**：任一來源對單一標的失敗（格式變動、被限流）不該讓整輪停下來。
 // 失敗的檔維持前次係數（重算是冪等的），下一輪會自動補上。
-func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (int, error) {
+//
+// 回傳 `(processed, failed, err)`（2026-08-24 起的簽章）：
+//
+//   - `processed` 是**已經處理完的標的數**，不是事件筆數。呼叫端要拿它跟計畫要跑的
+//     標的數相比，才知道有沒有跑完；事件筆數只有 log 價值，改由 log 輸出。
+//   - `failed` 是**失敗的標的數**，同一檔不論在哪個階段失敗都只計一次——它會被寫進
+//     `job_runs.symbols_failed`（單位是標的數），重複計數會讓 `failed >= total` 的
+//     狀態判定失準（欄位語意見 docs/api-reference.md 的 /scheduler/status）。**抓取、寫入、重算三個階段都算失敗**：
+//     事件寫進去了但係數沒重算完，那檔的價格是不一致的，比抓不到事件更嚴重
+//     （2026-08-24 review 補；先前重算失敗只寫 log）。
+//   - `err` 只在 ctx 被取消／逾時時非 nil：迴圈頂端先檢查 `ctx.Err()`，一旦非 nil
+//     立刻 `break`。修掉的是「逾時後仍把剩下 800 多檔跑完、每檔發兩次注定失敗的請求
+//     並各記一行 warn」。此時 `processed` 停在實際跑完的檔數，
+//     未處理的部分由呼叫端換算。deadline 落在**最後一檔**的請求裡時不會再進下一輪，
+//     所以收尾另補一次檢查，否則會出現「partial 但 error 欄空白」
+//     （2026-08-24 review 補）。收尾檢查只在**有某一檔的失敗發生在 ctx 到期之後**時才歸因給
+//     ctx——單看整輪 `failed > 0` 會把「先前的一般失敗 ＋ 收尾後才到期」誤標成逾時
+//     （2026-08-24 review 補）；而那個判斷要**在各失敗分支當場採樣**，等整檔跑完才採樣一樣會誤判
+//     （同檔「dividends 一般失敗 → reductions 成功 → ctx 才到期」）。個別標的的失敗原因
+//     不往上傳，只進 log。
+func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (int, int, error) {
 	if len(symbols) == 0 || (a.dividends == nil && a.reductions == nil) {
-		return 0, nil
+		return 0, 0, nil
 	}
-	total, failed := 0, 0
+	events, processed, failed := 0, 0, 0
+	var ctxErr error
+	// deadlineHit 記「有沒有哪一檔的失敗發生在 ctx 已到期之後」，由下面的 markFailed
+	// **在各失敗分支當場採樣**。
+	//
+	// 不用 errors.Is 檢查各階段的錯誤，是因為 DB 那兩個階段穿不過去：
+	// lib/pq 被取消時回的是 `pq: canceling statement due to user request`，
+	// errors.Is(err, context.Canceled) 為 false。改用「失敗時 ctx 是否已到期」不依賴
+	// 錯誤包裝，四個階段一體適用。
+	//
+	// **限度**：操作因一般錯誤回傳、到 markFailed 讀 ctx.Err() 之間仍有幾奈秒的窗口，
+	// 那段時間內到期的話還是會誤歸因。要完全消除得靠錯誤鏈判斷，而那條被 lib/pq 擋住，
+	// 所以這裡是把窗口壓到最小，不是消滅它。
+	deadlineHit := false
 	for _, symbol := range symbols {
+		// 逾時後不再送出注定失敗的請求：停在這裡，未處理數由呼叫端從 processed 換算。
+		if err := ctx.Err(); err != nil {
+			ctxErr = err
+			break
+		}
+
 		var actions []store.CorporateAction
 		symbolFailed := false
+		// markFailed 把「這檔失敗了」與「失敗時 ctx 是不是已經到期」綁在一起採樣。
+		// **取樣點必須在失敗分支裡**：等整檔四個階段跑完才採樣的話，
+		// 「dividends 一般失敗 → reductions 成功 → ctx 才到期」會被誤歸因給預算
+		// （2026-08-24 review 的二次修正）。
+		markFailed := func() {
+			symbolFailed = true
+			if ctx.Err() != nil {
+				deadlineHit = true
+			}
+		}
+		// ctxDead 是**階段之間**的守衛：ctx 到期後這檔剩下的階段一定失敗，不必再送。
+		// 這是「逾時後不再送出注定失敗的請求」這條原則縮到單檔內——
+		// 先前只做到標的粒度，deadline 落在 dividends 時仍會對同一檔再送一次 reductions。
+		// 那次呼叫即使立刻失敗也有代價：rateLimiter.wait 是**先推進 next 才判 ctx**
+		// （finmind.go:68-88），所以它會燒掉一個 12 秒的節流槽，而那個 limiter 全 repo 共用。
+		//
+		// **skip 必須連著 markFailed**：只跳過不記的話，dividends 成功後才到期的那檔會變成
+		// 「處理完且沒失敗」，但它的減資沒查、事件沒寫——拿一次請求換一個新的漏報。
+		//
+		// **呼叫順序：先判斷「還有工作要做」，再呼叫 ctxDead。**
+		// 寫成 `!ctxDead() && len(actions) > 0` 的話，在「dividends 一般失敗 →
+		// reductions 成功回空集合 → ctx 才到期」時，明明沒有東西可跳過卻會採樣到已到期的
+		// ctx 並設 deadlineHit，把一般失敗誤標成逾時的問題就復活了。
+		ctxDead := func() bool {
+			if ctx.Err() == nil {
+				return false
+			}
+			markFailed()
+			return true
+		}
 
 		if a.dividends != nil {
 			got, err := a.dividends.FetchDividends(ctx, symbol)
 			if err != nil {
-				symbolFailed = true
+				markFailed()
 				a.log.Warn("fetch dividends failed", zap.String("symbol", symbol), zap.Error(err))
 			} else {
 				actions = append(actions, got...)
 			}
 		}
-		if a.reductions != nil {
+		if a.reductions != nil && !ctxDead() {
 			got, err := a.reductions.FetchCapitalReductions(ctx, symbol)
 			if err != nil {
-				symbolFailed = true
+				markFailed()
 				a.log.Warn("fetch capital reductions failed", zap.String("symbol", symbol), zap.Error(err))
 			} else {
 				actions = append(actions, got...)
 			}
 		}
+
+		if len(actions) > 0 && !ctxDead() {
+			if err := a.actions.Upsert(ctx, actions); err != nil {
+				// 同一檔前面已經計過失敗就不重複計（見函式註解的 failed 說明）。
+				markFailed()
+				a.log.Warn("upsert per-symbol events failed", zap.String("symbol", symbol), zap.Error(err))
+			} else {
+				events += len(actions)
+				// Upsert 成功之後**必定**還有重算要做，所以這裡直接問 ctxDead 就好，
+				// 不需要像上面兩處那樣先判斷「還有沒有工作」。
+				if ctxDead() {
+					// **跳過重算，但不能跳過訊號。** 事件已經寫進去、係數沒跟上，
+					// 這檔的價格現在是不一致的——job 層的 partial ＋ ctx 錯誤
+					// 只說得出「這輪沒跑完」，說不出**是哪一檔**不一致，那要靠這行 log。
+					// 這也比原本那行「recompute failed: context deadline exceeded」準確：
+					// 不是重算失敗，是預算用完、沒來得及重算。下一輪重跑會自癒（Upsert 冪等）。
+					a.log.Error("逾時，事件已寫入但未重算，該檔還原係數暫時落後",
+						zap.String("symbol", symbol))
+				} else if err := a.RecomputeSymbol(ctx, symbol); err != nil {
+					// **重算失敗要算這檔失敗**：事件已經寫進去了，但 K 棒的還原係數沒跟上，
+					// 這檔的價格從此不一致——比「抓不到事件」更嚴重，不能只留一行 log
+					// 等人工翻。RecomputeAffected 走的也是這條原則（會把 firstErr 往上傳）。
+					// symbolFailed 之前可能已經是 true，重複設定不會讓 failed 多加一次。
+					markFailed()
+					a.log.Error("recompute after per-symbol events failed",
+						zap.String("symbol", symbol), zap.Error(err))
+				}
+			}
+		}
+
+		processed++
 		if symbolFailed {
 			failed++
 		}
-		if len(actions) == 0 {
-			continue
-		}
-		if err := a.actions.Upsert(ctx, actions); err != nil {
-			failed++
-			a.log.Warn("upsert per-symbol events failed", zap.String("symbol", symbol), zap.Error(err))
-			continue
-		}
-		total += len(actions)
-		if err := a.RecomputeSymbol(ctx, symbol); err != nil {
-			a.log.Error("recompute after per-symbol events failed",
-				zap.String("symbol", symbol), zap.Error(err))
-		}
+	}
+	// 迴圈只在**每輪開頭**檢查 ctx，所以 deadline 落在最後一檔的請求裡時不會再進下一輪，
+	// ctxErr 會留在 nil：那一檔的失敗有計進 failed，但「為什麼失敗」不會往上傳，
+	// job_runs 就會出現「partial 但 error 欄空白」，與 api-reference.md 的契約不符。
+	// 收尾補一次檢查。
+	//
+	// **守衛看的是 deadlineHit 而不是整輪的 failed**：`failed > 0` 只說明「這輪有檔失敗」，
+	// 不說明失敗的原因。先前有檔因為一般 API 錯誤失敗、最後一檔跑完之後預算才到期時，
+	// 用 failed 推斷會把那輪誤標成逾時，job_runs.error 寫著 context deadline exceeded，
+	// 讀的人會去調 timeout_sec / shard_count，但真正該看的是資料源錯誤
+	// （2026-08-24 review）。
+	// deadlineHit 只在「某檔失敗時 ctx 已經到期」才為真，正好涵蓋
+	// 「deadline 落在最後一檔請求裡」的情境，又不會誤收一般失敗。
+	// ctx.Err() 一旦非 nil 就不會再變回 nil，所以這裡取值安全。
+	if ctxErr == nil && deadlineHit {
+		ctxErr = ctx.Err()
 	}
 	if failed > 0 {
 		a.log.Warn("逐檔事件同步有標的失敗",
-			zap.Int("failed", failed), zap.Int("total", len(symbols)))
+			zap.Int("failed", failed), zap.Int("processed", processed), zap.Int("planned", len(symbols)))
 	}
-	return total, nil
+	a.log.Info("逐檔事件同步完成",
+		zap.Int("events", events), zap.Int("processed", processed), zap.Int("planned", len(symbols)))
+	return processed, failed, ctxErr
 }

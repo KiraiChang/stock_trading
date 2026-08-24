@@ -46,11 +46,29 @@ fugle:
 # Yahoo 股市盤中資料源（非官方 API），作為 Tier-1 批次盤中源，與 Fugle 並存/擇一。
 # 免 token、單次請求可批次多檔；enabled=true 時 scheduler 盤中 job 會優先走 Yahoo。
 # 上線前請以 cmd/yahoo-check 於盤中時段驗證覆蓋率與延遲（見 docs/yahoo-intraday-integration.md）。
+#
+# **這段設定不是只有盤中在用**：Yahoo 在本系統有兩個客戶端，打的是兩個不同端點——
+#   1. 盤中報價（FinanceChartService.ApacLibraCharts）：受 enabled 控制，用 base_url。
+#   2. 除權息逐檔查詢（StockServices.dividendsByYear）：由 corporate_action_sync 使用，
+#      **無條件建立**（cmd/server/main.go），端點寫死在 yahoo_dividend.go，不讀 base_url。
+# 兩者**共用同一個節流器**（同一個 host，各自節流會讓實際速率加倍），而那個節流器的速率
+# 就是下面的 rate_limit。所以 enabled=false 不代表這段設定沒在用。
 yahoo:
   base_url: "https://tw.stock.yahoo.com/_td-stock/api/resource/FinanceChartService.ApacLibraCharts"  # 環境變數：YAHOO_BASE_URL
+                                              # **只作用於盤中報價端點**；除權息端點不受它影響。
   enabled: false                              # 環境變數：YAHOO_ENABLED，驗證通過前預設關閉
+                                              # **只控制盤中客戶端**；除權息同步照跑。
   rate_limit: 20                              # 環境變數：YAHOO_RATE_LIMIT，每分鐘請求上限（批次計為一次）
+                                              # **同時節流除權息逐檔同步，與 enabled 無關。**
+                                              # 這個值進了 corporate_action_sync 的預算算術：
+                                              # 逐檔要打 Yahoo（除權息）＋ FinMind（減資），節奏由慢的一邊決定。
+                                              # 目前 finmind.rate_limit=5 主導（每檔約 12 秒）；
+                                              # **把這裡調到 5 以下會換成 Yahoo 主導**，
+                                              # corporate_action.timeout_sec 的 45 分鐘預算就會失準。
+                                              # 分片與預算見 docs/architecture.md「公司行動同步是唯一
+                                              # 『watchlist 優先、其餘輪替』的排程」。
   batch_size: 40                              # 環境變數：YAHOO_BATCH_SIZE，單次請求最多帶入的 symbol 數
+                                              # 只作用於盤中批次；除權息只能逐檔（symbol 編在 URL path 裡）。
 
 # TWSE ISIN 股票主檔同步。每日抓上市＋上櫃有價證券清單並維護 stock_symbols.is_listed，
 # 供 watchlist 判斷原本加入的標的是否仍在交易所名單內。任一來源抓取失敗即整體略過本次
@@ -132,12 +150,33 @@ evaluation_universe:
 corporate_action:
   cron: "30 6 * * 1-5"           # 環境變數：CORPORATE_ACTION_CRON，台北時區。
                                  # 06:30 早於 08:50 的 pre_market，讓開盤前的分析已吃到最新係數。
-                                 # 需要多跑幾次時可設多時段（例如 "30 6,12 * * 1-5"）。
                                  # 打錯字時會退回預設值繼續跑並記 Error log——這支沒有 enabled
                                  # 開關，靜默停掉等於還原係數無聲過期。
                                  # **不要設得比 80 小時稀疏**（例如每週一）：/scheduler/status
                                  # 的 stale 門檻寫死 80 小時，會永遠顯示逾期。見 api-reference.md
                                  # 「`stale` 門檻寫死在程式裡，不隨 cron 調整」。
+                                 # **多時段（例如 "30 6,12 * * 1-5"）對覆蓋率沒有幫助**：
+                                 # 逐檔清單依日期分片，同一天的第二輪跑的是同一片。
+                                 # 要臨時全量補跑請把 shard_count 設成 1。
+  timeout_sec: 2700              # 環境變數：CORPORATE_ACTION_TIMEOUT_SEC。整輪預算，預設 45 分鐘。
+                                 # 預算怎麼算的：逐檔同步要打 Yahoo（除權息）與 FinMind（減資），
+                                 # 節奏由較慢的 FinMind 5 req/min 決定 → **每檔約 12 秒**。
+                                 # 當日名單 ≈ watchlist 11 檔 ＋ 每片約 170 檔 = 181 檔，
+                                 # 181 × 12 秒 ≈ 36 分鐘，45 分鐘留了餘裕，且 06:30 起跑會在
+                                 # 08:50 的 pre_market 之前結束。
+                                 # 逾時不再空轉：剩下的檔會被跳過並計進 job_runs 的
+                                 # symbols_failed，狀態記成 partial（見 api-reference.md）。
+  shard_count: 5                 # 環境變數：CORPORATE_ACTION_SHARD_COUNT。
+                                 # 非 watchlist 標的的分片數；watchlist **不分片，每輪全量**。
+                                 # 5 = 週一到週五各一片，每檔每週至少覆蓋一次（預設）。
+                                 # 10 = 兩週一輪，單輪時間砍半——job_runs 長期顯示 partial
+                                 # （代表某片跑不完）時調這個。
+                                 # 1 = 每天全量，除權息旺季臨時補跑用。
+                                 # **設 5 的倍數或 1**：片號由「週序號×5 ＋ 平日序號」推導，
+                                 # 非 5 的倍數會讓覆蓋週期落在非整數週、不好推理。
+                                 # 為什麼不是調高 finmind.rate_limit：全 repo 共用同一個
+                                 # FinMind client，調高會連帶放大籌碼同步的請求速率，
+                                 # 而 5/min 是綁帳號的保守值、額度未知。
 
 position_analysis:
   max_position_value: 200000

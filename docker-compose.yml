@@ -18,7 +18,12 @@ services:
       FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
       FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
       FUGLE_API_KEY: ${FUGLE_API_KEY}
+      # YAHOO_ENABLED 只控制**盤中報價**客戶端；除權息逐檔同步（corporate_action_sync）
+      # 無條件建立，不受它影響。
       YAHOO_ENABLED: ${YAHOO_ENABLED:-false}
+      # 兩個 Yahoo 客戶端**共用同一個節流器**，速率就是這個值——所以它也節流除權息同步。
+      # 調到 finmind.rate_limit（5）以下會換成 Yahoo 主導逐檔節奏，
+      # CORPORATE_ACTION_TIMEOUT_SEC 的預算會失準。詳見 backend/config.yaml 的 yahoo 註解。
       YAHOO_RATE_LIMIT: ${YAHOO_RATE_LIMIT:-20}
       YAHOO_BATCH_SIZE: ${YAHOO_BATCH_SIZE:-40}
       # 評估標的池的每日日 K 維護（T-040 Step 5）。**預設關閉**：一次會對整個池
@@ -52,6 +57,11 @@ services:
       # **不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
       # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
       CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
+      # 整輪預算與分片數。當日名單 = watchlist 全量 ＋ 其餘標的的當日分片，
+      # 預設 5 片（週一到週五各一片，每檔每週至少覆蓋一次）；設 1 = 每天全量。
+      # 預算算法與調參時機見 backend/config.yaml 的 corporate_action 註解。
+      CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
+      CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
       # 留白（預設）時 main.go 會把 gin 設成 release。**正式環境不要設 debug**：
       # 它會把完整路由表寫進 log，且 panic 時 recovery 會連整包 request header 一起印
       # （gin 只遮 Authorization，Cookie 與自訂 header 照樣落地）。

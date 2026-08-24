@@ -89,6 +89,11 @@ services:
       # 打錯字會退回預設值繼續跑並記 Error log。**不要設得比 80 小時稀疏**——
       # /scheduler/status 的 stale 門檻寫死 80 小時（見 docs/api-reference.md）。
       CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
+      # 整輪預算與分片數。逐檔同步每檔約 12 秒（FinMind 5 req/min 決定節奏），
+      # 當日名單 = watchlist 全量 ＋ 其餘標的的當日分片，預設 5 片（週一到週五各一片）。
+      # shard_count 設 1 = 每天全量（旺季補跑用）。詳見 backend/config.yaml 的註解。
+      CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
+      CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
       # 留白（預設）時 main.go 會把 gin 設成 release。要看啟動時的路由表就設 debug：
       #   GIN_MODE=debug scripts/smoke-dev.sh
       # debug 模式會多印 76 行 [GIN-debug]，且 panic 時 recovery 會連整包 request header

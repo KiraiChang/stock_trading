@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,9 +39,16 @@ const srZoneVerifyLimit = 50
 // 20 分鐘 = 2 來源 × 300 秒 + 來源間隔 + 寫入快照，仍有餘裕。
 const stockSymbolSyncTimeout = 20 * time.Minute
 
-// corporateActionSyncTimeout：一次批次請求 ＋ 逐檔重算。事件檔數少（全市場數十檔），
-// 但每檔要 UPDATE 整段歷史，所以留寬一點。
-const corporateActionSyncTimeout = 10 * time.Minute
+// defaultCorporateActionTimeout 是整輪公司行動同步的預設預算（config 沒給時的退路）。
+//
+// **45 分鐘是算出來的，不是拍的**（推導見 docs/architecture.md 的公司行動同步段）：逐檔同步的節奏由 FinMind 的
+// 5 req/min 決定（每檔約 12 秒），當日名單 ≈ watchlist 11 檔 ＋ 每片約 170 檔 = 181 檔，
+// 181 × 12 秒 ≈ 36 分鐘。舊值 10 分鐘只跑得完約 50 檔，正是覆蓋率破洞的直接成因。
+const defaultCorporateActionTimeout = 45 * time.Minute
+
+// defaultCorporateActionShardCount 是非 watchlist 標的的預設分片數。
+// 5 片對應週一到週五，每檔**每週至少覆蓋一次**。
+const defaultCorporateActionShardCount = 5
 
 type Scheduler struct {
 	fetcher          *market.Fetcher
@@ -279,8 +288,32 @@ func (s *Scheduler) startRun(ctx context.Context, jobName string) uint64 {
 	return runID
 }
 
-// finishRun 依失敗數量換算 status 並寫回執行紀錄
+// finishRunWriteTimeout 是「寫回結束狀態」這一步自己的預算。只是一次 UPDATE，
+// 短即可；它存在的目的是讓 finishRun 不會因為沒有上界而卡住排程 goroutine。
+const finishRunWriteTimeout = 10 * time.Second
+
+// finishRun 依失敗數量換算 status 並寫回執行紀錄。
+//
+// **刻意不沿用呼叫端的 ctx**（2026-08-24 起；語意見 docs/api-reference.md 的 /scheduler/status）：job 的 ctx
+// 逾時之後，用它去寫 `job_runs` 一定會失敗，那筆紀錄就**永遠卡在 `running`**——
+// 看起來像還在跑，實際早就結束了。這條**不只影響 corporate_action_sync**：任何 job
+// 的 ctx 逾時都會踩到。用 context.WithoutCancel 切斷取消訊號、只保留 value，
+// 再套自己的短 timeout，才能保證「跑失敗」與「沒回報」在資料上分得開。
+//
+// total / failed 的單位是**標的數**（欄位就叫 `symbols_total` / `symbols_failed`），
+// 呼叫端不要傳事件筆數——單位混用會讓下面的 `failed >= total` 判定失準。
 func (s *Scheduler) finishRun(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string) {
+	s.finishRunDegraded(ctx, runID, jobName, total, failed, lastErr, false)
+}
+
+// finishRunDegraded 與 finishRun 相同，但多一個 degraded 旗標：**這輪跑完了、名單內的標的
+// 也可能零失敗，但名單本身就不完整**——該同步的一批根本沒進去。
+//
+// 這種情況照 total/failed 推導會得到 `success`，而那是假的：數字只涵蓋得到「有跑的那些」，
+// 沒進名單的標的不在分母裡，所以再怎麼算都不會失敗。degraded 為真時至少記 `partial`，
+// 讓「跑得不完整」在 job_runs 上看得見（corporate_action_sync 讀不到 watchlist 時就是這樣）。
+// 已經是 failed 的不會被降級——degraded 只補強，不會讓狀態變樂觀。
+func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string, degraded bool) {
 	status := "success"
 	switch {
 	case total > 0 && failed >= total:
@@ -288,7 +321,12 @@ func (s *Scheduler) finishRun(ctx context.Context, runID uint64, jobName string,
 	case failed > 0:
 		status = "partial"
 	}
-	if err := s.jobRuns.Finish(ctx, runID, status, total, failed, lastErr); err != nil {
+	if degraded && status == "success" {
+		status = "partial"
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishRunWriteTimeout)
+	defer cancel()
+	if err := s.jobRuns.Finish(writeCtx, runID, status, total, failed, lastErr); err != nil {
 		s.log.Error("job_runs finish failed", zap.String("job", jobName), zap.Error(err))
 	}
 }
@@ -728,6 +766,120 @@ func (s *Scheduler) corporateActionCron() string {
 	return spec
 }
 
+// corporateActionTimeout 取設定的整輪預算，非正值時退回預設（比照 corporateActionCron
+// 的第二道防線：不經過 config.Load() 的呼叫端同樣要拿得到可用的值）。
+func (s *Scheduler) corporateActionTimeout() time.Duration {
+	if sec := s.corporateActionCfg.TimeoutSec; sec > 0 {
+		return time.Duration(sec) * time.Second
+	}
+	return defaultCorporateActionTimeout
+}
+
+// corporateActionShardCount 取設定的分片數，非正值時退回預設。
+func (s *Scheduler) corporateActionShardCount() int {
+	if n := s.corporateActionCfg.ShardCount; n > 0 {
+		return n
+	}
+	return defaultCorporateActionShardCount
+}
+
+// corporateActionEpochMonday 是片號週序號的起點——1970-01-05 是星期一。
+//
+// 用「自某個固定星期一起算的週數」而不是 ISO 週數，是因為 ISO 週數跨年會從 52 跳回 1，
+// 那個不連續會讓某一片被跳過或連跑兩次（shardCount > 5 時才看得出來）。
+var corporateActionEpochMonday = time.Date(1970, 1, 5, 0, 0, 0, 0, time.UTC)
+
+// corporateActionShardOfDay 算出 t 這天要跑第幾片：`(週序號×5 ＋ 平日序號) % shardCount`。
+//
+// **shardCount = 5 時等於「週一片 0、週五片 4」**（因為 `(5w+d) % 5 = d`），
+// 每檔每週覆蓋一次；shardCount = 10 則連續 10 個工作日走完一輪（兩週）；1 是每天全量。
+// **不能直接寫 `weekday-1`**：那只會產生 0～4，shardCount 設 7 或 10 時片 5 以後永遠輪不到——
+// 那正是分片要消滅的「永遠輪不到的尾段」。
+//
+// 週六日沿用**當週週五那一片**。排程是平日 cron，週末只會來自手動觸發；
+// 與其另外生一片打亂輪替，不如重跑最近一次排程日的名單（重算是冪等的）。
+func corporateActionShardOfDay(t time.Time, shardCount int) int {
+	if shardCount <= 1 {
+		return 0
+	}
+	local := t.In(timeutil.TaipeiTZ)
+	// 只取日期部分再換算天數，避免時分秒與時區位移影響整除結果。
+	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
+	week := int(day.Sub(corporateActionEpochMonday)/(24*time.Hour)) / 7
+	dayIdx := int(local.Weekday()) - 1 // 週一 = 0
+	if dayIdx < 0 || dayIdx > 4 {
+		dayIdx = 4 // 週六日：沿用當週週五那片
+	}
+	shard := (week*5 + dayIdx) % shardCount
+	if shard < 0 {
+		shard += shardCount
+	}
+	return shard
+}
+
+// corporateActionShardOf 算出 symbol 屬於哪一片。
+//
+// **用 symbol 的 hash 而不是「排序後的位置」**：清單來源是
+// `SELECT DISTINCT symbol FROM candles ORDER BY symbol`，順序穩定，但位置會漂移——
+// 新股上市或標的下架會讓它後面的所有標的整批位移一格，被推過當天那片的標的要再等一輪，
+// 「每檔每週至少覆蓋一次」在清單變動的那一週就不成立。hash 讓既有標的的片別
+// 不受清單增減影響。
+func corporateActionShardOf(symbol string, shardCount int) int {
+	if shardCount <= 1 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(symbol))
+	return int(h.Sum32() % uint32(shardCount))
+}
+
+// corporateActionSymbols 決定今天要逐檔同步哪些標的：
+// **watchlist 全量 ＋ 其餘標的的當日分片**（規則見 docs/architecture.md 的公司行動同步段）。
+//
+// **為什麼 watchlist 不分片**：它是實際拿來做交易決策的清單，還原係數過期會直接影響
+// 訊號與 SR 分析，所以每個排程日都要是最新的。其餘標的（評估標的池、有歷史但沒在看的檔）
+// 只維護資料完整性，晚幾天更新不會產生錯誤決策——分片換來的是「每檔都輪得到」，
+// 取代原本「每天固定只跑排序最前的約 50 檔、8xxx/9xxx 永遠輪不到」的確定性破洞。
+//
+// 只從 all（有 K 棒的標的）裡挑：沒有價格歷史的 watchlist 標的抓了事件也無從重算。
+//
+// **watchlist 讀不到時降級成「只跑當日分片」，不整輪放棄**（2026-08-24 review 後改）：
+// 分片那一批與 watchlist 無關，讓它們陪葬會多掉一整片，而片號由日期決定、沒有游標，
+// 掉的那片要等下一輪（預設一週）才輪得回來。回傳的 error **不是致命錯誤**，
+// 而是「這輪的名單不完整」的訊號——呼叫端要照樣跑分片，並把該輪記成 partial，
+// 才不會變成「有跑，但跑的不是該跑的」還顯示成功。
+func (s *Scheduler) corporateActionSymbols(ctx context.Context, all []string) ([]string, error) {
+	shardCount := s.corporateActionShardCount()
+	shard := corporateActionShardOfDay(time.Now(), shardCount)
+
+	watched := map[string]bool{}
+	var watchlistErr error
+	if s.watchlist != nil {
+		symbols, err := s.watchlist.Symbols(ctx)
+		if err != nil {
+			watchlistErr = fmt.Errorf("列出 watchlist 失敗: %w", err)
+			s.log.Error("列出 watchlist 失敗，本輪降級為只跑當日分片", zap.Error(err))
+		}
+		for _, symbol := range symbols {
+			watched[symbol] = true
+		}
+	}
+
+	selected := make([]string, 0, len(all))
+	for _, symbol := range all {
+		if watched[symbol] || corporateActionShardOf(symbol, shardCount) == shard {
+			selected = append(selected, symbol)
+		}
+	}
+	s.log.Info("公司行動同步的當日名單",
+		zap.Int("all", len(all)), zap.Int("selected", len(selected)),
+		zap.Int("watchlist", len(watched)),
+		// watchlist=0 有兩種可能（真的空 / 讀失敗降級），靠這個欄位分辨。
+		zap.Bool("watchlist_degraded", watchlistErr != nil),
+		zap.Int("shard", shard), zap.Int("shard_count", shardCount))
+	return selected, watchlistErr
+}
+
 // SetEvaluationUniverse 注入評估標的池與其排程設定。未呼叫或 cfg.Enabled=false 時
 // 不註冊該 job，行為與導入前完全相同（比照 SetAdjuster）。
 func (s *Scheduler) SetEvaluationUniverse(repo store.EvaluationUniverseRepo, cfg config.EvaluationUniverseConfig) {
@@ -825,17 +977,19 @@ func (s *Scheduler) RunCorporateActionSync() {
 	if s.adjuster == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), corporateActionSyncTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), s.corporateActionTimeout())
 	defer cancel()
 
 	runID := s.startRun(ctx, "corporate_action_sync")
 	start := time.Date(2015, 1, 1, 0, 0, 0, 0, timeutil.TaipeiTZ)
 	end := timeutil.TodayTaipei()
 
-	n, err := s.adjuster.SyncSplits(ctx, start, end)
+	splitEvents, err := s.adjuster.SyncSplits(ctx, start, end)
 	if err != nil {
 		s.log.Error("corporate action sync failed", zap.Error(err))
-		s.finishRun(ctx, runID, "corporate_action_sync", 0, 1, err.Error())
+		// total 傳 1 而不是 0：total=0 會落到 finishRun 的 `failed > 0` 分支被記成
+		// partial，但分割批次失敗時整輪根本沒開始跑，那是 failed 不是 partial。
+		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, err.Error())
 		return
 	}
 
@@ -844,18 +998,56 @@ func (s *Scheduler) RunCorporateActionSync() {
 	// 標的來源是 **candles 內所有相異 symbol**，不是 watchlist：評估標的池（T-040）的
 	// 標的不在 watchlist 裡，只跑 watchlist 會讓它們「分割有還原、除權息沒有」，
 	// 而且不會有任何東西報錯（2026-08-11 review）。
-	symbols, err := s.adjuster.SymbolsWithCandles(ctx)
+	all, err := s.adjuster.SymbolsWithCandles(ctx)
 	if err != nil {
 		s.log.Error("列出有 K 棒的標的失敗", zap.Error(err))
-	} else if d, derr := s.adjuster.SyncPerSymbolEvents(ctx, symbols); derr != nil {
-		// 個別標的失敗已在 Adjuster 內記錄並跳過；這裡只處理整體性錯誤。
-		s.log.Error("逐檔事件同步失敗", zap.Error(derr))
-	} else {
-		n += d
+		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, err.Error())
+		return
 	}
 
-	s.log.Info("corporate action sync done", zap.Int("events", n))
-	s.finishRun(ctx, runID, "corporate_action_sync", n, 0, "")
+	// 當日名單 = watchlist 全量 ＋ 其餘標的的當日分片。
+	// watchlistErr **不致命**：名單仍然可用，只是少了 watchlist 那批。這輪照跑分片，
+	// 但下面要記成 partial——分片與 watchlist 無關，讓它們陪葬會多掉一整片（2026-08-24 review）。
+	symbols, watchlistErr := s.corporateActionSymbols(ctx, all)
+
+	// 狀態誠實（語意見 docs/api-reference.md 的 /scheduler/status）：`job_runs` 的 total/failed 單位是**標的數**，
+	// 所以 total 傳「這輪計畫要跑的檔數」而不是事件筆數，failed 則是
+	// **失敗檔數 ＋ 因逾時沒輪到的檔數**。少了後面那一項，逾時被 break 掉的那輪會因為
+	// 「零失敗」被記成 success——跑了 50 檔就停掉卻顯示成功，正是修改前的主要症狀。
+	processed, failed, syncErr := s.adjuster.SyncPerSymbolEvents(ctx, symbols)
+	skipped := len(symbols) - processed
+	if skipped < 0 {
+		skipped = 0
+	}
+
+	// error 欄只有一格，但一輪可能同時撞到兩件事（名單降級 ＋ 逾時），所以串起來寫，
+	// 不讓後發生的那個蓋掉前一個。
+	var errParts []string
+	if syncErr != nil {
+		// 個別標的失敗已在 Adjuster 內記錄並跳過；這裡只處理整體性錯誤（目前只有 ctx 逾時／取消）。
+		s.log.Error("逐檔事件同步中止", zap.Error(syncErr),
+			zap.Int("processed", processed), zap.Int("planned", len(symbols)))
+		errParts = append(errParts, syncErr.Error())
+	} else if skipped > 0 {
+		// 有 syncErr 時它已經交代了為什麼停；沒有 syncErr 卻有沒跑到的檔才需要另外說明。
+		errParts = append(errParts, fmt.Sprintf("%d 檔未處理", skipped))
+	}
+	if watchlistErr != nil {
+		errParts = append(errParts, watchlistErr.Error())
+	}
+
+	s.log.Info("corporate action sync done",
+		zap.Int("split_events", splitEvents),
+		zap.Int("all", len(all)),
+		zap.Int("planned", len(symbols)),
+		zap.Int("processed", processed),
+		zap.Int("failed", failed),
+		zap.Int("skipped", skipped),
+		zap.Bool("watchlist_degraded", watchlistErr != nil))
+	// degraded 傳 watchlistErr != nil：watchlist 那批沒進名單，所以它們不可能算進
+	// failed，零失敗也不該記 success。
+	s.finishRunDegraded(ctx, runID, "corporate_action_sync", len(symbols), failed+skipped,
+		strings.Join(errParts, "; "), watchlistErr != nil)
 }
 
 // SetSRAnalysis 注入 SR 分析 runner 與其排程設定（todo.md T-052）。

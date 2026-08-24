@@ -3879,3 +3879,37 @@ T-055 / T-056 的契約至此**全部定案，無待決項**；剩下的是實�
 `RESISTANCE_BREAKOUT` 的 `resolves` 刻意留空、方向為 BULLISH——一旦可見，
 `active_bullish_events` 只看 direction 就會改變 lifecycle 判讀，**不需要任何人「認識」它就會改決策**
 （見 `event_engine.py:61-72` 的說明）。這是它必須留在 shadow 的技術理由，與今天行情走勢無關。
+
+---
+
+### T-058：除權息端點無法在 test 以外覆寫，dev 驗不了公司行動同步
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | Go / 可測試性 / 驗收流程 |
+| 建立日期 | 2026-08-24 |
+| 來源 | 公司行動同步分片改造的 dev 驗收（2026-08-24） |
+
+`YahooDividendClient` 的端點是檔案內的 const `yahooDividendURL`
+（`internal/market/yahoo_dividend.go:21`），只有一個**未匯出**的 `baseURLForTest`
+可以覆寫，給單元測試用。`yahoo.base_url` / `YAHOO_BASE_URL` 管的是**另一個端點**
+（盤中報價的 `FinanceChartService.ApacLibraCharts`），不是這一個。
+
+後果：**在 dev stack 上驗 `corporate_action_sync` 一定會打到真實 Yahoo。**
+2026-08-24 驗公司行動同步分片時，FinMind 可以用 `FINMIND_BASE_URL` 指到本地 stub，
+Yahoo 那半只能照打真實 API（實際寫進 dev 的 35 筆 `2330` 除權息就是真的）。
+規模一大就變成「驗收動作本身在對外部服務施壓」。
+
+可能作法（擇一，實作前要先確認）：
+
+* 加 `yahoo.dividend_base_url`（預設空＝走現行 const），只在 dev/測試環境設。
+* 或把 `baseURLForTest` 改成匯出的設定入口，由 `main.go` 依 config 注入。
+
+**不做的理由也要一併評估**：多一個設定就多一個「線上被設錯就靜默打到別的地方」的面。
+現況的 const 至少不可能被誤設。所以這筆的價值取決於「dev 驗收這條路徑」有多常做——
+若公司行動同步之後不再需要反覆驗，可以直接關掉這筆。
+
+**相關**：[`issue.md`](./issue.md) I-085（同一段設定的另一個文件缺口）。
+

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +64,9 @@ type schedulerJobRunRepoStub struct {
 	nextID   uint64
 	started  []string
 	finished []schedulerJobRunFinish
+	// finishCtxErr 記錄 Finish 收到的 ctx 當下的 Err()。finishRun 刻意不沿用 job 的 ctx
+	// （2026-08-24 起），這裡是唯一驗得到那件事的地方。
+	finishCtxErr []error
 }
 
 func (s *schedulerJobRunRepoStub) Start(ctx context.Context, jobName string) (uint64, error) {
@@ -73,6 +78,7 @@ func (s *schedulerJobRunRepoStub) Start(ctx context.Context, jobName string) (ui
 }
 
 func (s *schedulerJobRunRepoStub) Finish(ctx context.Context, runID uint64, status string, symbolsTotal, symbolsFailed int, errMsg string) error {
+	s.finishCtxErr = append(s.finishCtxErr, ctx.Err())
 	s.finished = append(s.finished, schedulerJobRunFinish{
 		runID:         runID,
 		status:        status,
@@ -975,5 +981,473 @@ func TestSRAnalysisIgnoresAnalysesFromOtherTimeframe(t *testing.T) {
 
 	if len(runner.calls) != 1 {
 		t.Fatalf("5m 的分析不該擋掉 1d 的排程，got %v", runner.calls)
+	}
+}
+
+// ── 狀態誠實與逾時止血（2026-08-24）──
+
+// TestFinishRunWritesEvenWhenContextDone 驗 job 的 ctx 逾時後仍寫得回結束狀態。
+// 修改前 finishRun 沿用同一個 ctx，逾時那輪連「寫回」都失敗，job_runs 那筆
+// **永遠卡在 running**，看起來像還在跑。這條不只影響
+// corporate_action_sync——任何 job 的 ctx 逾時都會踩到。
+func TestFinishRunWritesEvenWhenContextDone(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	s := &Scheduler{jobRuns: jobRuns, log: zap.NewNop()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	s.finishRun(ctx, 7, "any_job", 10, 3, "boom")
+
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("ctx 已取消時沒有寫回結束狀態: %+v", jobRuns.finished)
+	}
+	if got := jobRuns.finished[0]; got.status != "partial" || got.symbolsFailed != 3 {
+		t.Errorf("finish = %+v, 期望 status=partial failed=3", got)
+	}
+	if err := jobRuns.finishCtxErr[0]; err != nil {
+		t.Errorf("寫回時用的 ctx 仍帶著取消訊號 (%v)——finishRun 必須切斷它", err)
+	}
+}
+
+// schedulerAdjusterCandleStub 只提供 Symbols，讓 RunCorporateActionSync 拿到固定清單。
+type schedulerAdjusterCandleStub struct {
+	store.CandleRepo
+	symbols []string
+	err     error
+}
+
+func (s *schedulerAdjusterCandleStub) Symbols(context.Context) ([]string, error) {
+	return append([]string(nil), s.symbols...), s.err
+}
+
+// schedulerSplitSourceStub 讓分割批次成功且不產生事件——本組測試只關心逐檔那條路徑。
+type schedulerSplitSourceStub struct{}
+
+func (schedulerSplitSourceStub) FetchSplitPrices(context.Context, time.Time, time.Time) ([]store.CorporateAction, error) {
+	return nil, nil
+}
+
+// schedulerActionRepoStub 是事件表的空實作：本組測試不驗事件落地，只驗 job_runs 的數字。
+type schedulerActionRepoStub struct{}
+
+func (schedulerActionRepoStub) Upsert(context.Context, []store.CorporateAction) error { return nil }
+
+func (schedulerActionRepoStub) ListBySymbol(context.Context, string) ([]store.CorporateAction, error) {
+	return nil, nil
+}
+
+func (schedulerActionRepoStub) Symbols(context.Context) ([]string, error) { return nil, nil }
+
+// schedulerDividendStub 依 symbol 決定行為：failFor 的檔回錯誤，blockFor 的檔
+// 等到 ctx 結束才回——後者用來製造「跑到一半逾時」而不依賴 sleep 的時序賭博。
+type schedulerDividendStub struct {
+	mu      sync.Mutex
+	asked   []string
+	failFor map[string]bool
+	blockFor map[string]bool
+}
+
+func (s *schedulerDividendStub) FetchDividends(ctx context.Context, symbol string) ([]store.CorporateAction, error) {
+	s.mu.Lock()
+	s.asked = append(s.asked, symbol)
+	s.mu.Unlock()
+	if s.blockFor[symbol] {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	if s.failFor[symbol] {
+		return nil, errors.New("boom")
+	}
+	return nil, nil
+}
+
+func (s *schedulerDividendStub) askedSymbols() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.asked...)
+}
+
+func newCorporateActionTestScheduler(
+	t *testing.T, jobRuns *schedulerJobRunRepoStub, symbols []string, div market.DividendSource,
+) *Scheduler {
+	t.Helper()
+	candles := &schedulerAdjusterCandleStub{symbols: symbols}
+	adj := market.NewAdjuster(schedulerSplitSourceStub{}, schedulerActionRepoStub{}, candles, zap.NewNop())
+	adj.SetDividendSource(div)
+	return &Scheduler{jobRuns: jobRuns, adjuster: adj, log: zap.NewNop()}
+}
+
+// TestRunCorporateActionSyncReportsSymbolCounts 驗寫進 job_runs 的是**標的數**。
+// 修改前傳的是事件筆數，而欄位叫 symbols_total / symbols_failed；等 failed 開始帶
+// 標的數之後，兩個不同單位的數字互比會讓狀態判定失準。
+func TestRunCorporateActionSyncReportsSymbolCounts(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	div := &schedulerDividendStub{failFor: map[string]bool{"8088": true}}
+	s := newCorporateActionTestScheduler(t, jobRuns, []string{"0050", "2330", "8088"}, div)
+	// 本條只驗數字的單位，用 shard_count=1（每天全量）把分片變數排除掉。
+	s.corporateActionCfg = config.CorporateActionConfig{ShardCount: 1}
+
+	s.RunCorporateActionSync()
+
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finish 次數 = %d, 期望 1: %+v", len(jobRuns.finished), jobRuns.finished)
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != 3 {
+		t.Errorf("symbols_total = %d, 期望 3（標的數，不是事件筆數）", got.symbolsTotal)
+	}
+	if got.symbolsFailed != 1 {
+		t.Errorf("symbols_failed = %d, 期望 1", got.symbolsFailed)
+	}
+	if got.status != "partial" {
+		t.Errorf("status = %q, 期望 partial——修改前 failed 恆為 0，808 檔失敗也記 success", got.status)
+	}
+}
+
+// TestRunCorporateActionSyncPartialOnTimeout 驗逾時被砍斷時：
+// ① 剩下的檔不再被送出請求（止血）；② 沒輪到的檔算進 symbols_failed，
+// 狀態是 partial 而不是 success。少了 ②，「跑 50 檔就停」會顯示成功。
+func TestRunCorporateActionSyncPartialOnTimeout(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	// 第三檔一路擋到 ctx 逾時，之後的 9999 / 1101 應該完全不被問到。
+	div := &schedulerDividendStub{blockFor: map[string]bool{"8088": true}}
+	symbols := []string{"0050", "2330", "8088", "9999", "1101"}
+	s := newCorporateActionTestScheduler(t, jobRuns, symbols, div)
+	// 預算壓到 1 秒才驗得到逾時路徑；shard_count=1 保證五檔都在當日名單裡。
+	s.corporateActionCfg = config.CorporateActionConfig{TimeoutSec: 1, ShardCount: 1}
+
+	s.RunCorporateActionSync()
+
+	asked := div.askedSymbols()
+	if len(asked) != 3 {
+		t.Errorf("逾時後仍繼續送出請求：%v", asked)
+	}
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finish 次數 = %d, 期望 1: %+v", len(jobRuns.finished), jobRuns.finished)
+	}
+	got := jobRuns.finished[0]
+	if got.status != "partial" {
+		t.Errorf("status = %q, 期望 partial", got.status)
+	}
+	if got.symbolsTotal != 5 {
+		t.Errorf("symbols_total = %d, 期望 5（計畫要跑的檔數）", got.symbolsTotal)
+	}
+	// 8088 自己算失敗，9999 / 1101 是沒輪到的兩檔。
+	if got.symbolsFailed != 3 {
+		t.Errorf("symbols_failed = %d, 期望 3（1 檔失敗 ＋ 2 檔未處理）", got.symbolsFailed)
+	}
+	if got.errMsg == "" {
+		t.Error("逾時時 error 欄不該是空的")
+	}
+	if jobRuns.finishCtxErr[0] != nil {
+		t.Error("逾時後寫回結束狀態仍用了已逾時的 ctx")
+	}
+}
+
+// TestRunCorporateActionSyncFailsWhenSymbolListUnavailable 驗連清單都拿不到時記 failed。
+// 修改前這條路徑只記一行 log 就繼續往下走，最後仍以 success 收尾。
+func TestRunCorporateActionSyncFailsWhenSymbolListUnavailable(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	candles := &schedulerAdjusterCandleStub{err: errors.New("db down")}
+	adj := market.NewAdjuster(schedulerSplitSourceStub{}, schedulerActionRepoStub{}, candles, zap.NewNop())
+	adj.SetDividendSource(&schedulerDividendStub{})
+	s := &Scheduler{jobRuns: jobRuns, adjuster: adj, log: zap.NewNop()}
+
+	s.RunCorporateActionSync()
+
+	if len(jobRuns.finished) != 1 || jobRuns.finished[0].status != "failed" {
+		t.Fatalf("finish = %+v, 期望 status=failed", jobRuns.finished)
+	}
+}
+
+// TestRunCorporateActionSyncPartialWhenWatchlistUnavailable 驗 watchlist 讀不到時：
+// ① 當日分片照跑（不整輪放棄）；② 即使分片內零失敗，狀態也必須是 partial 而不是 success。
+//
+// ② 是這條的重點：watchlist 那批**根本沒進名單**，所以不可能被算進 symbols_failed，
+// 純看 total/failed 一定推導出 success——「有跑，但跑的不是該跑的」又會顯示成正常。
+func TestRunCorporateActionSyncPartialWhenWatchlistUnavailable(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	div := &schedulerDividendStub{} // 名單內的檔全部成功 → failed = 0
+	symbols := []string{"0050", "2330", "8088"}
+	s := newCorporateActionTestScheduler(t, jobRuns, symbols, div)
+	s.watchlist = &schedulerWatchlistStub{err: errors.New("db down")}
+	// shard_count=1（每天全量）把分片變數排除掉，讓斷言只盯著降級這件事。
+	s.corporateActionCfg = config.CorporateActionConfig{ShardCount: 1}
+
+	s.RunCorporateActionSync()
+
+	if got := len(div.askedSymbols()); got != len(symbols) {
+		t.Errorf("問到 %d 檔, 期望 %d——watchlist 失敗不該讓分片停跑", got, len(symbols))
+	}
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finish 次數 = %d, 期望 1: %+v", len(jobRuns.finished), jobRuns.finished)
+	}
+	got := jobRuns.finished[0]
+	if got.status != "partial" {
+		t.Errorf("status = %q, 期望 partial——名單不完整時零失敗也不算成功", got.status)
+	}
+	if got.symbolsFailed != 0 {
+		t.Errorf("symbols_failed = %d, 期望 0（名單內的檔都成功了）", got.symbolsFailed)
+	}
+	if got.symbolsTotal != len(symbols) {
+		t.Errorf("symbols_total = %d, 期望 %d（實際跑的名單大小）", got.symbolsTotal, len(symbols))
+	}
+	if !strings.Contains(got.errMsg, "watchlist") {
+		t.Errorf("error = %q, 期望說明 watchlist 讀取失敗", got.errMsg)
+	}
+}
+
+// TestFinishRunDegradedKeepsFailedStatus 驗 degraded 只補強、不會把狀態變樂觀：
+// 全數失敗仍是 failed，不會被降級旗標改寫成 partial。
+func TestFinishRunDegradedKeepsFailedStatus(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	s := &Scheduler{jobRuns: jobRuns, log: zap.NewNop()}
+
+	s.finishRunDegraded(context.Background(), 1, "job", 3, 3, "boom", true)
+
+	if len(jobRuns.finished) != 1 || jobRuns.finished[0].status != "failed" {
+		t.Fatalf("finish = %+v, 期望 status=failed", jobRuns.finished)
+	}
+}
+
+// ── 覆蓋率分片（2026-08-24）──
+
+// TestCorporateActionShardOfDayMatchesWeekdayForFiveShards 驗 shardCount=5 時
+// 片號就等於 weekday-1，與分片導入前規劃的「週一到週五各一片」完全一致。
+func TestCorporateActionShardOfDayMatchesWeekdayForFiveShards(t *testing.T) {
+	// 2026-08-24 是星期一。
+	monday := time.Date(2026, 8, 24, 6, 30, 0, 0, timeutil.TaipeiTZ)
+	for i := 0; i < 5; i++ {
+		day := monday.AddDate(0, 0, i)
+		if got := corporateActionShardOfDay(day, 5); got != i {
+			t.Errorf("%s（%s）的片號 = %d, 期望 %d", day.Format("2006-01-02"), day.Weekday(), got, i)
+		}
+	}
+}
+
+// TestCorporateActionShardOfDayCoversAllShards 驗 shardCount=10 時連續 10 個工作日
+// 恰好走完 0～9 各一次。這條擋的是「直接寫 weekday-1」那種寫法——它只產生 0～4，
+// 片 5 以後永遠輪不到，等於把原本的破洞換個規模保留下來。
+func TestCorporateActionShardOfDayCoversAllShards(t *testing.T) {
+	const shardCount = 10
+	day := time.Date(2026, 8, 24, 6, 30, 0, 0, timeutil.TaipeiTZ) // 星期一
+	seen := map[int]int{}
+	for len(seen) < shardCount && day.Before(time.Date(2026, 12, 31, 0, 0, 0, 0, timeutil.TaipeiTZ)) {
+		if wd := day.Weekday(); wd != time.Saturday && wd != time.Sunday {
+			seen[corporateActionShardOfDay(day, shardCount)]++
+		}
+		day = day.AddDate(0, 0, 1)
+	}
+	if len(seen) != shardCount {
+		t.Fatalf("只走到 %d 片: %v——有片永遠輪不到", len(seen), seen)
+	}
+	for shard, times := range seen {
+		if times != 1 {
+			t.Errorf("片 %d 在一輪內出現 %d 次, 期望 1", shard, times)
+		}
+	}
+}
+
+// TestCorporateActionShardOfDayCrossesYearBoundary 驗跨年不跳號、不重複。
+// 用 ISO 週數會在 12/31→1/1 從 52 跳回 1，那個不連續正是這條要擋的。
+func TestCorporateActionShardOfDayCrossesYearBoundary(t *testing.T) {
+	const shardCount = 10
+	var seq []int
+	day := time.Date(2026, 12, 21, 6, 30, 0, 0, timeutil.TaipeiTZ) // 星期一
+	for i := 0; i < 21; i++ {
+		if wd := day.Weekday(); wd != time.Saturday && wd != time.Sunday {
+			seq = append(seq, corporateActionShardOfDay(day, shardCount))
+		}
+		day = day.AddDate(0, 0, 1)
+	}
+	for i := 1; i < len(seq); i++ {
+		want := (seq[i-1] + 1) % shardCount
+		if seq[i] != want {
+			t.Fatalf("第 %d 個工作日的片號 = %d, 期望 %d（序列 %v）", i+1, seq[i], want, seq)
+		}
+	}
+}
+
+// TestCorporateActionSelectionIsStableAcrossListChanges 驗片別綁 symbol 而不是排序位置。
+// 這是 hash 取代 `index % 5` 的迴歸保護：位置分片下，清單前面多一檔新股會讓後面
+// 所有標的整批位移一格，被推過當天那片的標的要再等一輪——「每檔每週至少覆蓋一次」
+// 在清單變動的那一週就不成立。這裡走真正的選取路徑，比對兩份只差一檔的全集。
+func TestCorporateActionSelectionIsStableAcrossListChanges(t *testing.T) {
+	s := &Scheduler{
+		corporateActionCfg: config.CorporateActionConfig{ShardCount: 5},
+		log:                zap.NewNop(),
+	}
+	universe := make([]string, 0, 200)
+	for i := 1000; i < 1200; i++ {
+		universe = append(universe, strconv.Itoa(i))
+	}
+	// 新股上市：排在最前面，位置分片下會讓其餘 200 檔全部位移一格。
+	withNewListing := append([]string{"0001"}, universe...)
+
+	selected := func(all []string) map[string]bool {
+		out, err := s.corporateActionSymbols(context.Background(), all)
+		if err != nil {
+			t.Fatalf("組名單失敗: %v", err)
+		}
+		in := map[string]bool{}
+		for _, symbol := range out {
+			in[symbol] = true
+		}
+		return in
+	}
+
+	before, after := selected(universe), selected(withNewListing)
+	moved := 0
+	for _, symbol := range universe {
+		if before[symbol] != after[symbol] {
+			moved++
+		}
+	}
+	if moved != 0 {
+		t.Errorf("清單多一檔新股後有 %d 檔的當日歸屬改變——片別跟著位置走了", moved)
+	}
+}
+
+// TestCorporateActionShardsPartitionUniverse 驗各片是全集的一個分割：
+// 聯集等於全集、兩兩互斥。分片規則寫錯造成某片永遠空，是本筆最需要擋住的失誤。
+func TestCorporateActionShardsPartitionUniverse(t *testing.T) {
+	const shardCount = 5
+	universe := make([]string, 0, 200)
+	for i := 1000; i < 1200; i++ {
+		universe = append(universe, strconv.Itoa(i))
+	}
+
+	seen := map[string]int{}
+	for shard := 0; shard < shardCount; shard++ {
+		count := 0
+		for _, symbol := range universe {
+			if corporateActionShardOf(symbol, shardCount) == shard {
+				seen[symbol]++
+				count++
+			}
+		}
+		if count == 0 {
+			t.Errorf("片 %d 是空的", shard)
+		}
+	}
+	for _, symbol := range universe {
+		if seen[symbol] != 1 {
+			t.Errorf("%s 落在 %d 片, 期望 1", symbol, seen[symbol])
+		}
+	}
+}
+
+// TestCorporateActionSymbolsAlwaysIncludesWatchlist 驗當日名單一定含全部 watchlist 標的
+// （不是「每一片都含 watchlist」——watchlist 是分片之外另外加的）。
+func TestCorporateActionSymbolsAlwaysIncludesWatchlist(t *testing.T) {
+	universe := make([]string, 0, 200)
+	for i := 1000; i < 1200; i++ {
+		universe = append(universe, strconv.Itoa(i))
+	}
+	watched := []string{"1000", "1001", "1199"}
+
+	s := &Scheduler{
+		watchlist:          &schedulerWatchlistStub{symbols: watched},
+		corporateActionCfg: config.CorporateActionConfig{ShardCount: 5},
+		log:                zap.NewNop(),
+	}
+
+	selected, err := s.corporateActionSymbols(context.Background(), universe)
+	if err != nil {
+		t.Fatalf("組名單失敗: %v", err)
+	}
+	in := map[string]bool{}
+	for _, symbol := range selected {
+		in[symbol] = true
+	}
+	for _, symbol := range watched {
+		if !in[symbol] {
+			t.Errorf("watchlist 標的 %s 不在當日名單裡", symbol)
+		}
+	}
+	// 名單要比全集小得多，否則分片等於沒生效。
+	if len(selected) >= len(universe)/2 {
+		t.Errorf("當日名單 %d 檔 / 全集 %d 檔——分片沒有生效", len(selected), len(universe))
+	}
+}
+
+// TestCorporateActionSymbolsCoversEveryoneOverOneCycle 驗一個輪替週期內每檔都輪得到。
+// 這是分片的核心目標：取代「每天固定只跑排序最前的約 50 檔」的確定性破洞。
+func TestCorporateActionSymbolsCoversEveryoneOverOneCycle(t *testing.T) {
+	const shardCount = 5
+	universe := make([]string, 0, 200)
+	for i := 1000; i < 1200; i++ {
+		universe = append(universe, strconv.Itoa(i))
+	}
+
+	covered := map[string]bool{}
+	for shard := 0; shard < shardCount; shard++ {
+		for _, symbol := range universe {
+			if corporateActionShardOf(symbol, shardCount) == shard {
+				covered[symbol] = true
+			}
+		}
+	}
+	if len(covered) != len(universe) {
+		t.Fatalf("一輪只覆蓋 %d 檔 / 全集 %d 檔", len(covered), len(universe))
+	}
+}
+
+// TestCorporateActionSymbolsDegradesWhenWatchlistUnavailable 驗 watchlist 拿不到時
+// **降級成只跑當日分片**，而不是整輪放棄（2026-08-24 review 後改）。
+//
+// 分片那一批與 watchlist 無關；讓它們陪葬會多掉一整片，而片號由日期決定、沒有游標，
+// 掉的那片要等下一輪才輪得回來。回傳的 error 仍要有——那是給呼叫端記 partial 的訊號。
+func TestCorporateActionSymbolsDegradesWhenWatchlistUnavailable(t *testing.T) {
+	const shardCount = 5
+	universe := make([]string, 0, 200)
+	for i := 1000; i < 1200; i++ {
+		universe = append(universe, strconv.Itoa(i))
+	}
+	s := &Scheduler{
+		watchlist:          &schedulerWatchlistStub{err: errors.New("db down")},
+		corporateActionCfg: config.CorporateActionConfig{ShardCount: shardCount},
+		log:                zap.NewNop(),
+	}
+
+	selected, err := s.corporateActionSymbols(context.Background(), universe)
+	if err == nil {
+		t.Fatal("watchlist 讀取失敗時仍要回傳錯誤——呼叫端靠它把該輪記成 partial")
+	}
+
+	// 名單必須剛好等於當日分片：一檔都不能少（降級不等於不跑），也不能因為
+	// watchlist 讀失敗而混進不屬於今天的標的。
+	shard := corporateActionShardOfDay(time.Now(), shardCount)
+	want := map[string]bool{}
+	for _, symbol := range universe {
+		if corporateActionShardOf(symbol, shardCount) == shard {
+			want[symbol] = true
+		}
+	}
+	if len(want) == 0 {
+		t.Fatal("當日分片是空的，這條測試驗不到東西")
+	}
+	if len(selected) != len(want) {
+		t.Fatalf("降級後名單 %d 檔, 期望當日分片的 %d 檔", len(selected), len(want))
+	}
+	for _, symbol := range selected {
+		if !want[symbol] {
+			t.Errorf("名單裡的 %s 不屬於當日分片", symbol)
+		}
+	}
+}
+
+// TestCorporateActionTimeoutAndShardDefaults 驗設定缺漏或填了無效值時退回預設，
+// 而不是變成 0（0 秒預算 = 每輪立刻逾時；0 片 = 除以零）。
+func TestCorporateActionTimeoutAndShardDefaults(t *testing.T) {
+	for _, cfg := range []config.CorporateActionConfig{{}, {TimeoutSec: -1, ShardCount: -1}, {TimeoutSec: 0, ShardCount: 0}} {
+		s := &Scheduler{corporateActionCfg: cfg, log: zap.NewNop()}
+		if got := s.corporateActionTimeout(); got != defaultCorporateActionTimeout {
+			t.Errorf("cfg=%+v 的 timeout = %v, 期望 %v", cfg, got, defaultCorporateActionTimeout)
+		}
+		if got := s.corporateActionShardCount(); got != defaultCorporateActionShardCount {
+			t.Errorf("cfg=%+v 的 shard_count = %d, 期望 %d", cfg, got, defaultCorporateActionShardCount)
+		}
 	}
 }

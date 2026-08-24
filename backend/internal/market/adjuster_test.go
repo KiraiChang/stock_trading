@@ -2,6 +2,7 @@ package market
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -352,4 +353,427 @@ func TestSymbolsWithCandlesCoversNonWatchlistSymbols(t *testing.T) {
 	if len(got) != 2 || got[0] != "2330" || got[1] != "9999" {
 		t.Errorf("SymbolsWithCandles = %v, want [2330 9999]（依 symbol 升冪）", got)
 	}
+}
+
+// ── SyncPerSymbolEvents 的逾時止血與失敗計數（2026-08-24）──
+
+// stubDividendSource 依 symbol 決定成功或失敗，並記錄實際被問到的 symbol 順序。
+// 記錄「被問到誰」是關鍵：逾時止血要驗的是**沒有發出請求**，不是「請求失敗了」。
+type stubDividendSource struct {
+	asked   []string
+	failFor map[string]bool
+	actions map[string][]store.CorporateAction
+	onCall  func(symbol string)
+}
+
+func (s *stubDividendSource) FetchDividends(_ context.Context, symbol string) ([]store.CorporateAction, error) {
+	s.asked = append(s.asked, symbol)
+	if s.onCall != nil {
+		s.onCall(symbol)
+	}
+	if s.failFor[symbol] {
+		return nil, errors.New("fetch dividends boom")
+	}
+	return s.actions[symbol], nil
+}
+
+// failingUpsertRepo 包一層真的 repo，只讓 Upsert 失敗，用來製造
+// 「同一檔在 fetch 與 upsert 都失敗」這種會被重複計數的情境。
+type failingUpsertRepo struct {
+	store.CorporateActionRepo
+}
+
+func (r *failingUpsertRepo) Upsert(context.Context, []store.CorporateAction) error {
+	return errors.New("upsert boom")
+}
+
+func dividendAction(symbol string) store.CorporateAction {
+	return store.CorporateAction{
+		Symbol: symbol, EventDate: taipeiDay(2025, 7, 15),
+		ActionType: store.CorporateActionDividend,
+		BeforePrice: 100, AfterPrice: 97, Factor: 0.97, VolumeFactor: 1, Source: "test",
+	}
+}
+
+// TestSyncPerSymbolEventsSkipsAllWhenContextAlreadyDone 驗 ctx 已逾時的情況下
+// **一個請求都不該送出**。修改前的迴圈不看 ctx，會把剩下的檔全跑完，
+// 每檔兩次注定失敗的呼叫外加兩行 warn log。
+func TestSyncPerSymbolEventsSkipsAllWhenContextAlreadyDone(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	div := &stubDividendSource{}
+	adj.SetDividendSource(div)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330", "8088"})
+	if err == nil {
+		t.Fatal("ctx 已取消時應回傳錯誤，讓上層記成 partial")
+	}
+	if len(div.asked) != 0 {
+		t.Errorf("ctx 已取消卻仍送出請求：%v", div.asked)
+	}
+	if processed != 0 || failed != 0 {
+		t.Errorf("processed=%d failed=%d，期望都是 0", processed, failed)
+	}
+}
+
+// TestSyncPerSymbolEventsStopsMidwayOnCancel 驗跑到一半被取消時立刻停，
+// 且 processed 停在實際跑完的檔數——上層要靠 planned-processed 換算未處理數。
+func TestSyncPerSymbolEventsStopsMidwayOnCancel(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	div := &stubDividendSource{onCall: func(symbol string) {
+		if symbol == "2330" {
+			cancel() // 第二檔跑完後逾時
+		}
+	}}
+	adj.SetDividendSource(div)
+	t.Cleanup(cancel)
+
+	symbols := []string{"0050", "2330", "8088", "9999"}
+	processed, _, err := adj.SyncPerSymbolEvents(ctx, symbols)
+	if err == nil {
+		t.Fatal("中途取消應回傳錯誤")
+	}
+	if processed != 2 {
+		t.Errorf("processed = %d, 期望 2（0050 與 2330）", processed)
+	}
+	if len(div.asked) != 2 {
+		t.Errorf("取消後仍繼續送出請求：%v", div.asked)
+	}
+}
+
+// TestSyncPerSymbolEventsCountsFailedSymbols 驗失敗檔數會往上傳。
+// 修改前的簽章只回 (total, nil)，808 檔失敗在 job_runs 裡完全看不出來。
+func TestSyncPerSymbolEventsCountsFailedSymbols(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	adj.SetDividendSource(&stubDividendSource{
+		failFor: map[string]bool{"8088": true},
+		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
+	})
+
+	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330", "8088"})
+	if err != nil {
+		t.Fatalf("沒有逾時不該回錯誤: %v", err)
+	}
+	if processed != 3 {
+		t.Errorf("processed = %d, 期望 3", processed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1", failed)
+	}
+}
+
+// TestSyncPerSymbolEventsCountsSymbolFailureOnce 驗同一檔在 fetch 與 upsert 都失敗時
+// 只計一次。修改前兩處各 failed++（adjuster.go:253 與 :259），會讓 symbols_failed
+// 超過實際標的數，進而讓 finishRun 的 failed >= total 誤判成 failed。
+func TestSyncPerSymbolEventsCountsSymbolFailureOnce(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	adj.actions = &failingUpsertRepo{CorporateActionRepo: adj.actions}
+	// 除權息 fetch 失敗，但減資有拿到事件 → 走到必定失敗的 Upsert。
+	adj.SetDividendSource(&stubDividendSource{failFor: map[string]bool{"0050": true}})
+	adj.SetCapitalReductionSource(&stubReductionSource{
+		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
+	})
+
+	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050"})
+	if err != nil {
+		t.Fatalf("個別標的失敗不該讓整輪回錯誤: %v", err)
+	}
+	if processed != 1 {
+		t.Errorf("processed = %d, 期望 1", processed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——同一檔失敗兩次仍只能算一檔", failed)
+	}
+}
+
+// failingApplyRepo 包一層真的 repo，只讓 ApplyAdjFactors 失敗——用來製造
+// 「事件寫進去了，但還原係數重算不起來」這種資料不一致的情境。
+type failingApplyRepo struct {
+	store.CandleRepo
+}
+
+func (r *failingApplyRepo) ApplyAdjFactors(context.Context, string, []store.AdjFactorRange) error {
+	return errors.New("apply adj factors boom")
+}
+
+// TestSyncPerSymbolEventsCountsRecomputeFailure 驗**重算失敗也算這檔失敗**。
+//
+// 修改前（2026-08-24 review 之前）重算失敗只寫一行 log：事件已經 upsert 進去、
+// 但 K 棒的 adj_factor 沒跟上，那檔的價格從此不一致，而 processed 照加、failed 不動，
+// 其他標的正常時整輪還會記成 success——正是這批修改要消滅的「狀態不誠實」。
+func TestSyncPerSymbolEventsCountsRecomputeFailure(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	adj.candles = &failingApplyRepo{CandleRepo: adj.candles}
+	// 0050 有事件 → upsert 成功 → 走到必定失敗的重算；2330 沒事件，不該被牽連。
+	adj.SetDividendSource(&stubDividendSource{
+		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
+	})
+
+	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330"})
+	if err != nil {
+		t.Fatalf("個別標的失敗不該讓整輪回錯誤: %v", err)
+	}
+	if processed != 2 {
+		t.Errorf("processed = %d, 期望 2", processed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——重算失敗的 0050 必須算進失敗檔數", failed)
+	}
+}
+
+// TestSyncPerSymbolEventsReportsDeadlineHitOnLastSymbol 驗 deadline 落在**最後一檔**
+// 的請求裡時，逾時原因仍會往上傳。
+//
+// 迴圈只在每輪開頭檢查 ctx，最後一檔跑完就不會再進下一輪，ctxErr 會留在 nil；
+// 此時 processed == planned、skipped == 0，scheduler 端算不出任何未處理數，
+// job_runs 就會是「partial 但 error 欄空白」，與 api-reference.md 的契約不符。
+func TestSyncPerSymbolEventsReportsDeadlineHitOnLastSymbol(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// 只有最後一檔在請求「當中」撞到 deadline：取消後 fetch 才回錯誤。
+	div := &stubDividendSource{
+		failFor: map[string]bool{"2330": true},
+		onCall: func(symbol string) {
+			if symbol == "2330" {
+				cancel()
+			}
+		},
+	}
+	adj.SetDividendSource(div)
+
+	symbols := []string{"0050", "2330"}
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, symbols)
+	if processed != len(symbols) {
+		t.Fatalf("processed = %d, 期望 %d（最後一檔有跑到，不是沒輪到）", processed, len(symbols))
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1", failed)
+	}
+	// 這是本條的重點：上層要靠它填 job_runs.error，否則 partial 會不帶任何原因。
+	if err == nil {
+		t.Fatal("deadline 落在最後一檔時仍要回傳 ctx 錯誤，否則 job_runs 會是 partial 但 error 空白")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, 期望 ctx 錯誤", err)
+	}
+}
+
+// TestSyncPerSymbolEventsCleanRunReportsNoDeadline 是上一條的對照組：
+// 每檔都成功、只是預算在最後一檔之後才到期，那輪是真的做完了，
+// **不該**憑空長出一個逾時錯誤（會變成零失敗卻帶著 error 訊息）。
+func TestSyncPerSymbolEventsCleanRunReportsNoDeadline(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	div := &stubDividendSource{onCall: func(symbol string) {
+		if symbol == "2330" { // 最後一檔，成功之後預算才到期
+			cancel()
+		}
+	}}
+	adj.SetDividendSource(div)
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
+	if processed != 2 || failed != 0 {
+		t.Fatalf("processed=%d failed=%d, 期望 2/0", processed, failed)
+	}
+	if err != nil {
+		t.Errorf("err = %v, 期望 nil——每檔都跑完了，逾時只是發生在收尾之後", err)
+	}
+}
+
+// TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierFailure 是「歸因」的守門測試：
+// 先前有檔因為**一般** API 錯誤失敗，最後一檔跑完之後預算才到期——那輪的失敗與預算無關，
+// 不該回傳 ctx 錯誤。
+//
+// 舊寫法用整輪 `failed > 0` 推斷逾時，這個組合會被誤標成 context deadline exceeded，
+// job_runs.error 因此指向錯誤的方向：讀的人會去調 timeout_sec / shard_count，
+// 真正該看的是資料源的錯誤。上一條的對照組只涵蓋「全程零失敗」，補不到這裡。
+func TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierFailure(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	div := &stubDividendSource{
+		// 0050 是一般失敗（ctx 還活著），2330 成功之後預算才到期。
+		failFor: map[string]bool{"0050": true},
+		onCall: func(symbol string) {
+			if symbol == "2330" {
+				cancel()
+			}
+		},
+	}
+	adj.SetDividendSource(div)
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
+	if processed != 2 {
+		t.Fatalf("processed = %d, 期望 2（兩檔都跑到了）", processed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——0050 的一般失敗仍要計進失敗檔數", failed)
+	}
+	// 本條重點：failed > 0 不等於逾時。
+	if err != nil {
+		t.Errorf("err = %v, 期望 nil——0050 是一般失敗，預算是在最後一檔跑完之後才到期", err)
+	}
+}
+
+// TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierStageOfSameSymbol 驗**同一檔內**的歸因：
+// dividends 因一般 API 錯誤失敗（ctx 還活著），同檔的 reductions 成功之後預算才到期，
+// 那檔的失敗原因仍然是 dividends，不是預算。
+//
+// 上一條對照組只涵蓋「前一檔失敗、最後一檔成功」的跨檔組合。若 deadlineHit 是等整檔
+// 四個階段跑完才採樣（而不是在各失敗分支當場採樣），這個同檔組合會被誤歸因成逾時
+// （2026-08-24 review 的二次修正）。
+//
+// 這裡 reductions 回空集合，所以不會進 Upsert／Recompute——那兩階段若在已到期的 ctx 下
+// 執行並失敗，「這檔撞到預算」就是真的，不屬於誤判。
+func TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierStageOfSameSymbol(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// 階段 1：dividends 一般失敗，此時 ctx 正常。
+	adj.SetDividendSource(&stubDividendSource{failFor: map[string]bool{"2330": true}})
+	// 階段 2：reductions 成功（回空集合），回傳之後預算才到期。
+	adj.SetCapitalReductionSource(&stubReductionSource{
+		onCall: func(symbol string) {
+			if symbol == "2330" {
+				cancel()
+			}
+		},
+	})
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
+	if processed != 1 {
+		t.Fatalf("processed = %d, 期望 1", processed)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——dividends 失敗仍要計進失敗檔數", failed)
+	}
+	// 本條重點：失敗發生在 ctx 到期**之前**，不該歸因給預算。
+	if err != nil {
+		t.Errorf("err = %v, 期望 nil——dividends 是一般失敗，預算是在該階段成功之後才到期", err)
+	}
+}
+
+// TestSyncPerSymbolEventsSkipsRemainingStagesAfterDeadline 驗**階段之間**也不再送出
+// 注定失敗的請求：dividends 因 ctx 到期失敗後，同一檔的 reductions 一次都不該被呼叫。
+//
+// 修改前迴圈只在每輪開頭檢查 ctx，所以 deadline 落在 dividends 時，同檔的 reductions
+// 仍會被送出一次（原本只做到標的粒度，沒做到階段粒度）。那次呼叫即使立刻失敗
+// 也會燒掉一個節流槽——rateLimiter.wait 先推進 next 才判 ctx，而 limiter 全 repo 共用。
+//
+// 同時驗「skip 要連著記失敗」：跳過剩餘階段不等於這檔沒問題，failed 仍須為 1。
+func TestSyncPerSymbolEventsSkipsRemainingStagesAfterDeadline(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// dividends 在 ctx 到期之後才回傳錯誤——模擬 deadline 落在這個階段裡。
+	adj.SetDividendSource(&stubDividendSource{
+		failFor: map[string]bool{"2330": true},
+		onCall: func(symbol string) {
+			if symbol == "2330" {
+				cancel()
+			}
+		},
+	})
+	red := &stubReductionSource{}
+	adj.SetCapitalReductionSource(red)
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
+	if processed != 1 {
+		t.Fatalf("processed = %d, 期望 1（這檔有跑到，只是被逾時砍斷）", processed)
+	}
+	// 本條重點：逾時後同一檔剩下的階段不該再送出請求。
+	if len(red.asked) != 0 {
+		t.Errorf("逾時後仍呼叫了減資查詢：%v", red.asked)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——跳過剩餘階段不代表這檔沒問題", failed)
+	}
+	if err == nil {
+		t.Fatal("deadline 落在 dividends 階段時要回傳 ctx 錯誤")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, 期望 ctx 錯誤", err)
+	}
+}
+
+// cancelOnUpsertRepo 讓 Upsert **成功**回傳的同時預算到期，用來製造
+// 「事件寫進去了，但重算已經沒有預算」這個階段組合，並記錄 ListBySymbol 的呼叫數。
+//
+// 觀測點選 ListBySymbol 而不是 ApplyAdjFactors：ctx 已死時 RecomputeSymbol 在
+// ListBySymbol（adjuster.go:142）就會失敗，根本走不到 ApplyAdjFactors，
+// 兩條路徑都是 0 次、分不出「有沒有跳過重算」。
+type cancelOnUpsertRepo struct {
+	store.CorporateActionRepo
+	cancel    context.CancelFunc
+	listCalls int
+}
+
+func (r *cancelOnUpsertRepo) Upsert(ctx context.Context, actions []store.CorporateAction) error {
+	if err := r.CorporateActionRepo.Upsert(ctx, actions); err != nil {
+		return err
+	}
+	r.cancel() // 寫入成功之後預算才到期
+	return nil
+}
+
+func (r *cancelOnUpsertRepo) ListBySymbol(ctx context.Context, symbol string) ([]store.CorporateAction, error) {
+	r.listCalls++
+	return r.CorporateActionRepo.ListBySymbol(ctx, symbol)
+}
+
+// TestSyncPerSymbolEventsSkipsRecomputeAfterDeadline 驗階段守衛也涵蓋 Upsert 與重算之間：
+// Upsert 成功回傳時預算已到期，就不該再送出注定失敗的 RecomputeSymbol。
+//
+// 兩條路徑的結果本來就相同（該檔計為失敗、adj_factor 留在舊值、下一輪冪等重跑自癒），
+// 差別只有那一次注定失敗的本地查詢——所以這條的斷言重點是「有沒有送出」。
+func TestSyncPerSymbolEventsSkipsRecomputeAfterDeadline(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	repo := &cancelOnUpsertRepo{CorporateActionRepo: adj.actions, cancel: cancel}
+	adj.actions = repo
+	adj.SetDividendSource(&stubDividendSource{
+		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
+	})
+
+	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050"})
+	if processed != 1 {
+		t.Fatalf("processed = %d, 期望 1", processed)
+	}
+	// 本條重點：預算到期後不再送出注定失敗的重算查詢。
+	if repo.listCalls != 0 {
+		t.Errorf("逾時後仍呼叫了 RecomputeSymbol：ListBySymbol 被叫了 %d 次", repo.listCalls)
+	}
+	if failed != 1 {
+		t.Errorf("failed = %d, 期望 1——事件寫了但係數沒跟上，這檔要算失敗", failed)
+	}
+	if err == nil {
+		t.Fatal("預算在 Upsert 之後到期時要回傳 ctx 錯誤")
+	}
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, 期望 ctx 錯誤", err)
+	}
+}
+
+// stubReductionSource 是減資來源的測試替身。
+type stubReductionSource struct {
+	asked   []string
+	actions map[string][]store.CorporateAction
+	onCall  func(symbol string)
+}
+
+func (s *stubReductionSource) FetchCapitalReductions(_ context.Context, symbol string) ([]store.CorporateAction, error) {
+	s.asked = append(s.asked, symbol)
+	if s.onCall != nil {
+		s.onCall(symbol)
+	}
+	return s.actions[symbol], nil
 }

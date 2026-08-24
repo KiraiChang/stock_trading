@@ -657,6 +657,44 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 「跑過、後來被關閉」的 job 保留實際狀態，但 `stale` 為 `false`——舊紀錄不代表排程卡住。
 
+#### `symbols_total` / `symbols_failed` 的單位是**標的數**，`status` 由它們推導
+
+`Scheduler.finishRun` 依這兩個數字換算 `status`：`failed >= total`（且 `total > 0`）記 `failed`、
+`failed > 0` 記 `partial`、其餘記 `success`。因此**呼叫端一定要傳標的數，不能傳事件筆數**——
+單位混用會讓比較失去意義（`corporate_action_sync` 早期就是傳事件筆數，2026-08-24 修）。
+
+「跑到一半被逾時砍斷」也算失敗：`corporate_action_sync` 的 `symbols_failed` 是
+**實際失敗檔數 ＋ 因逾時沒輪到的檔數**（「實際失敗」涵蓋**抓取、寫入、還原係數重算**
+三個階段——重算失敗代表事件進了資料庫但 K 棒的 `adj_factor` 沒跟上，那檔的價格是不一致的，
+所以不能只當成一行 log），`error` 欄會帶 `context deadline exceeded`
+或「N 檔未處理」。少了未處理那一項，逾時的那輪會因為「零失敗」被記成 `success`，
+看起來一切正常，實際只跑了一小部分。
+
+**但 `error` 欄帶逾時訊息的條件很窄：必須真的有標的是在預算到期之後才失敗。**
+先前某檔因為一般 API 錯誤失敗、最後一檔跑完之後預算才到期的那種組合，
+`error` 欄會是**空的**（`symbols_failed` 仍為 1，個別標的的失敗原因只進 log）——
+這是刻意的，用整輪的 `failed > 0` 去推斷逾時會把資料源錯誤誤標成預算不足，
+讓人去調 `timeout_sec` / `shard_count` 而不是查資料源。
+所以讀 `error` 欄時：**有逾時訊息＝真的撞到預算；空白＋`symbols_failed > 0`＝去看 log 的個別失敗。**
+
+**`partial` 還有第二種成因：名單本身不完整。** `corporate_action_sync` 讀不到 watchlist 時
+會**降級成只跑當日分片**（不整輪放棄），此時 watchlist 那批根本沒進名單，
+不可能被算進 `symbols_failed`——純看數字必然推導出 `success`。所以這種情況由
+`finishRunDegraded` 的 `degraded` 旗標強制記成 `partial`，`error` 欄會帶
+「列出 watchlist 失敗: …」。讀 `partial` 的正確語意是**「這輪跑得不完整」**，
+涵蓋「名單內有標的失敗」「逾時沒跑完」「名單本身就少了一批」三種，
+`symbols_failed = 0` 的 `partial` 就是第三種。
+
+`error` 欄一輪可能同時記到兩件事（例如降級 ＋ 逾時），以 `; ` 串接。
+
+#### 逾時的 job 不會卡在 `running`
+
+`finishRun` **不沿用 job 自己的 ctx**，而是用 `context.WithoutCancel` 切斷取消訊號、
+另外套一個 10 秒的寫入預算。job 的 ctx 逾時之後，用它去寫 `job_runs` 一定會失敗，
+那筆紀錄就會**永遠停在 `running`**——看起來像還在跑，實際早就結束了（2026-08-24 修）。這條對**所有 job** 都成立，不限公司行動同步。
+
+所以 `running` 現在可以照字面解讀：真的還在跑，或行程在寫回之前就被砍掉。
+
 #### `stale` 門檻寫死在程式裡，不隨 cron 調整
 
 `jobStaleThreshold` 是每個 job 各自的常數（`handler/scheduler.go`），**不會依 config 的 cron 重算**。
@@ -698,9 +736,15 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 執行內容：
 
 1. 一次批次請求抓全市場的分割／反分割／面額變更（FinMind `TaiwanStockSplitPrice`）。
-2. 逐檔抓除權息（Yahoo `dividendsByYear`），標的來源是 **`candles` 內所有相異 symbol**，
-   不是 watchlist。
+2. 逐檔抓除權息（Yahoo `dividendsByYear`）與減資（FinMind），標的來源是
+   **`candles` 內所有相異 symbol**，不是 watchlist。
 3. 重算受影響標的的 `adj_factor`（價）與 `vol_factor`（量）。
+
+**手動觸發跑的是「當天那一份名單」，不是全市場**（2026-08-24 起）：逐檔那一步是
+**watchlist 全量 ＋ 其餘標的的當日分片**（預設 5 片，週一到週五各一片）。所以連按兩次
+不會多涵蓋任何標的——同一天算出來的片號一樣。要臨時全量補跑，把
+`corporate_action.shard_count` 設成 1 再觸發。分片規則見
+[`architecture.md`](./architecture.md)「公司行動同步是唯一『watchlist 優先、其餘輪替』的排程」。
 
 **Response（202 Accepted）：**
 ```json

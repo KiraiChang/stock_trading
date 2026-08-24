@@ -192,8 +192,25 @@ type EvaluationUniverseConfig struct {
 type CorporateActionConfig struct {
 	// Cron 為同步時間（robfig/cron 格式，台北時區）。預設 06:30 平日：
 	// 早於 08:50 的 pre_market，讓當天開盤前的分析已經吃到最新係數。
-	// 重算是冪等的，需要多跑幾次時可設多時段（例如 "30 6,12 * * 1-5"）。
+	//
+	// **多時段對覆蓋率沒有幫助**：逐檔清單依日期分片，同一天的第二輪跑的是
+	// 同一片。要臨時全量補跑請把 ShardCount 設成 1。
 	Cron string `mapstructure:"cron"`
+
+	// TimeoutSec 是整輪同步的預算（秒），預設 2700（45 分鐘）。
+	//
+	// 預算怎麼來的：逐檔事件同步的節奏由 FinMind 的 5 req/min 決定（每檔約 12 秒），
+	// 當日名單 ≈ watchlist 11 檔 ＋ 每片約 170 檔 = 181 檔 × 12 秒 ≈ 36 分鐘，
+	// 45 分鐘留了餘裕，且 06:30 起跑會在 08:50 的 pre_market 之前結束。
+	// 設 0 或負值時退回預設。
+	TimeoutSec int `mapstructure:"timeout_sec"`
+
+	// ShardCount 是非 watchlist 標的的分片數，預設 5（週一到週五各一片，每檔每週覆蓋一次）。
+	//
+	// **設 5 的倍數或 1**：片號由「週序號×5 ＋ 平日序號」推導，非 5 的倍數會讓覆蓋週期
+	// 落在非整數週、不好推理。10 = 兩週一輪（單輪時間砍半，適合預算吃緊時）；
+	// 1 = 每天全量（除權息旺季臨時補跑）。設 0 或負值時退回預設。
+	ShardCount int `mapstructure:"shard_count"`
 }
 
 func Load() (*Config, error) {
@@ -247,6 +264,9 @@ func Load() (*Config, error) {
 
 	// 與搬進 config 之前的硬編碼值相同，行為不變（T-042）。
 	viper.SetDefault("corporate_action.cron", "30 6 * * 1-5")
+	// 2026-08-24：預算由 10 分鐘改為 45 分鐘，並把非 watchlist 標的切成 5 片（週一到週五各一片）。
+	viper.SetDefault("corporate_action.timeout_sec", 2700)
+	viper.SetDefault("corporate_action.shard_count", 5)
 	viper.SetDefault("evaluation_universe.enabled", false)
 	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
 	viper.SetDefault("evaluation_universe.days", 10)

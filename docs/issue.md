@@ -582,7 +582,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 ---
 
-### I-074：T-044 的 RR 解耦只有單元測試層級的證據，decision replay 驗證無法執行
+### I-074：Lifecycle Engine 的 RR 解耦只有單元測試層級的證據，decision replay 驗證無法執行
 
 | 欄位 | 內容 |
 |---|---|
@@ -590,10 +590,10 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
-| 來源 | T-044 P0 實作後的驗證盤點 |
+| 來源 | Lifecycle Engine 抽離（原 `todo.md` T-044，已於 2026-08-18 收斂移出）P0 實作後的驗證盤點 |
 
-T-044 把 `rr_gate.qualified` 從 `CONTINUATION` 的判定條件移除（分層原則見
-[`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」）。
+`lifecycle_engine.py` 的抽離把 `rr_gate.qualified` 從 `CONTINUATION` 的判定條件移除（分層原則與
+四套同名詞彙對照見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」）。
 **這是一個已經上線的行為改變**，計畫要求用 decision replay 對真實資料比對
 `final_entry_state` / `lifecycle_phase` / `market_bias` 的分佈變化來評估影響。
 

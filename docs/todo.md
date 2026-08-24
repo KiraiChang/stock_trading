@@ -1525,7 +1525,7 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Event Timeline 面向已實作／待 review**；review 8 筆發現**全數已實作待 review**（R1、R5 於 2026-08-21 各依計畫書完成，見下方「Review 發現」）；Lifecycle 與 Strategy Layer 兩個面向仍待規劃（**前置已解除**：T-044 已於 2026-08-18 收斂，Lifecycle 狀態定義已定案） |
+| 狀態 | **Event Timeline 面向已實作／待 review**；review 8 筆發現**全數已實作待 review**（R1、R5 於 2026-08-21 各依計畫書完成，見下方「Review 發現」）；Lifecycle 與 Strategy Layer 兩個面向仍待規劃（**前置已解除**：Lifecycle Engine 已於 2026-08-18 收斂並移出本清單，狀態定義見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」） |
 | 優先度 | 中 |
 | 分類 | SR Zone / Decision UI / Position Action |
 | 建立日期 | 2026-08-07 |
@@ -2063,257 +2063,6 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 
 ---
 
-### T-044：抽出獨立的 Lifecycle Engine
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **P0 已實作，已收斂**（2026-08-13 實作、2026-08-18 review 確認）。驗證缺口記為 `issue.md` I-074 |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / 決策邏輯 |
-| 建立日期 | 2026-08-13 |
-| 來源 | 使用者需求：lifecycle 判定應與建議產出分離 |
-
-**目標**：新增一個獨立的 Lifecycle Engine，職責只有一件事——**依 Event 的演進決定當前
-處於哪一個生命週期狀態**。Decision Engine 改為消費這個狀態，再疊上 RR Gate、策略模式等
-條件才輸出最終建議。同一個 lifecycle 狀態因此可以在不同策略立場下得到不同建議，
-而狀態判定本身只有一套。
-
-#### 現況盤點（2026-08-13 對照程式碼）
-
-**一、lifecycle 不是不存在，而是存在四套不同的詞彙**
-
-| 來源 | 位置 | 狀態集合 | 語意 |
-|---|---|---|---|
-| **單一事件** | `event_engine.py:13-17` | `CANDIDATE` / `CONFIRMED` / `ACTIVE` / `RESOLVED` / `EXPIRED` | **一個事件自己的生老病死**——timeline 的基本單位 |
-| pipeline 層 | `decision_engine.py:957-975`（`_decision_semantic_pipeline` 內） | `NORMAL` / `TESTING` / `CONFIRMED` / `CONTINUATION` / `BREAKDOWN` / `INVALIDATED` / `NO_PRIMARY_ZONE` | **整體事件演進**——本次要抽出的就是這個 |
-| zone 層 | `decision_engine.py:162`（`_zone_lifecycle`） | `CANDIDATE` / `VALIDATED` / `CONFIRMED` / `WEAKENING` / `BROKEN` / `INVALIDATED` | **zone 本身的健康度**，與事件演進是不同軸 |
-| 規劃中 | [T-041](#t-041sr-zone-決策顯示補齊-lifecycleevent-timeline-與-strategy-layer) | `Started` / `Testing` / `Confirmed` / `Failed` | 前端顯示用，尚未實作 |
-
-**四套裡有三套共用 `CANDIDATE` / `CONFIRMED` 這兩個字但意思都不同**，這是這一塊難讀的主因。
-`_zone_lifecycle` 的輸出還以 `"lifecycle"` 為鍵放進 decision summary
-（`decision_engine.py:156`），與 pipeline 的 `lifecycle_phase` 在同一份報告裡並存。
-
-**分層的正確說法**：單一事件的狀態機（第 1 列）是**輸入**，pipeline lifecycle（第 2 列）是
-**輸出**。本筆要抽出的是後者，前者維持不動——但兩者都叫 lifecycle 會讓人以為是同一件事。
-
-**二、目前的 lifecycle 判定會讀 RR Gate——正是要拆掉的耦合**
-
-`_decision_semantic_pipeline` 的 `CONTINUATION` 分支條件包含 `rr_qualified`
-（`rr_gate.qualified`）。**風險報酬比是策略條件，不是事件事實**：同一段價格行為，
-在 RR 不合格時被判成 `CONFIRMED`、合格時才變 `CONTINUATION`。這讓「現在處於什麼階段」
-無法獨立回答，也是本次抽離最實質的一項。
-
-**三、Trading / Investment 策略模式目前不存在**
-
-全 repo 沒有任何 strategy mode 的實作（`swing` 只出現在防守線的價位計算，是不同概念）。
-T-041 規劃了 `Trading` / `Swing` / `Investment` 三層但仍是待規劃。
-
-#### 修改目標（2026-08-13 review 後定案為 P0）
-
-**採 P0：snapshot-compatible engine。** 輸入維持現有的
-`event_state_summary` / `daily_price_action` / `structure_state`，**不等 chain contract**。
-
-理由：T-045 P1 是 Go 端唯讀 API，產出的 chain **不會流進 Python 分析流程**——
-Python 目前只透過 `previous_event_states`（`analysis/client.go:952`）拿到最新快照。
-要讓 Lifecycle Engine 吃 chain 必須另補 Go→Python request contract、analysis client mapping
-與 replay 管線，那是獨立工程（見 T-045 的 `runtime_chain`）。**等 T-045 對本筆沒有幫助**，
-兩筆因此各自獨立、可並行。
-
-1. 新增 `lifecycle_engine.py`：**純函數**，輸出 lifecycle 狀態 ＋ reason codes。
-   不 import RR、不 import 策略模式。**文件要明說它現階段是 snapshot-based 而非 chain-based**，
-   避免日後誤以為它已經看得到事件演進的完整歷程。
-2. `decision_engine.py` 改為呼叫它，移除內嵌的 lifecycle 推導與 RR 耦合。
-3. `_zone_lifecycle` **改為增量式更名，不做破壞性改名**：新增語意清楚的鍵
-   （`zone_health_state`），舊的 `"lifecycle"` 鍵保留並標記 deprecated。
-   **不用 `zone_state`**：`scenario_engine.py` 已有一個同名但語意不同的函式（場景判定）。
-   原因是 `SRZones.svelte` 有 5 處消費它（`best_trade_zone` / `nearest_support_zone` /
-   `nearest_resistance_zone` / `primary_structural_zone`），破壞性改名會把「引擎抽離」
-   與「API／前端 contract 遷移」綁成同一批，兩件事的風險性質完全不同。
-   顯示名稱的收斂留給 T-041。
-
-#### 不做的範圍
-
-- **不實作 Trading / Investment 策略模式**。那是 T-041 的 Strategy Layer，範圍與風險都是
-  另一個量級。本次只**留出接縫**：Decision Engine 取得 lifecycle 之後的那一段，改寫成
-  可以依模式分岔的形狀，但只實作現有的單一模式。
-- **不新增第四套狀態詞彙**。T-041 的 `Started/Testing/Confirmed/Failed` 應改為直接渲染
-  本引擎的狀態集合，而不是再定義一組並維護對應表。
-- 不改 zone builder、probability、scoring 的任何邏輯。
-- 不改前端（T-041 另案）。
-
-#### 狀態機提案
-
-沿用 pipeline 現有的七個狀態，**不重新命名**——它們已經寫進 DB（`sr_zone_decision_events`）、
-API 與 replay 報告，改名的漣漪遠大於收益。判定順序即優先序：
-
-| # | 狀態 | 進入條件（抽出後） |
-|---|---|---|
-| 1 | `INVALIDATED` | `structure_state == SUPPORT_RECLAIM_INVALIDATED` |
-| 2 | `BREAKDOWN` | 有 active bearish event，或 `structure_state == BREAKDOWN` |
-| 3 | `CONTINUATION` | `CLOSE_RECLAIM` ＋ 價格延續 ＋ 動能確認 ＋ 明確突破 zone（**移除 `rr_qualified`**） |
-| 4 | `CONFIRMED` | `CLOSE_RECLAIM` ＋（`SUPPORT_RECLAIM_CONFIRMED` 或 reclaim 已滿一日） |
-| 5 | `TESTING` | `event_signal ∈ {CLOSE_RECLAIM, SUPPORT_TEST}` |
-| 6 | `NO_PRIMARY_ZONE` | 沒有 primary zone |
-| 7 | `NORMAL` | 其餘 |
-
-`event_signal` 的推導（`decision_engine.py:919-943`）一併移入本引擎——它本來就是純粹的
-事件分類，留在 decision engine 沒有理由。
-
-#### 預期的行為改變（使用者已同意重構可伴隨行為改變，此處逐項列出）
-
-**唯一的來源改變是 `CONTINUATION` 不再要求 `rr_qualified`**，但它的**影響面不只 lifecycle 欄位**
-——這點初版計畫低估了**兩次**：第一次漏了下游推導鏈，第二次（2026-08-13 review）
-漏了「原本落到 `TESTING` 的樣本也會變成 `CONTINUATION`」這一整條路徑。
-完整的行為改變清單與已接受的結論已歸檔到
-[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「已知並接受的行為改變」。`lifecycle_phase` 是下游一連串推導的輸入
-（`decision_engine.py:977-1035`），所以「RR 不合格但價格延續成立」的樣本會沿著整條鏈改變：
-
-```
-lifecycle_phase  CONFIRMED          → CONTINUATION
-market_state     BULLISH_RECOVERY   → BULLISH_CONTINUATION
-bias_state       BULLISH_BIAS       → BULLISH_CONTINUATION
-        ↓
-market_bias / position_action_condition / final_entry_permission / 前端顯示
-```
-
-因此**驗證不能只比對 `lifecycle_phase`**，必須涵蓋：
-`decision_derived_view.semantic_pipeline`、`market_bias`、`position_action_condition`、
-`final_entry_permission`，以及 replay 的 `final_entry_state` / `lifecycle_phase` /
-`market_bias` 分佈。
-
-`_zone_lifecycle` 改為**增量新增鍵**（見上方修改目標），因此不構成破壞性 contract 變更。
-
-其餘狀態的判定條件完全不變。
-
-#### 受影響檔案與資料流
-
-```
-event_engine.detect_market_events ─┐
-zone/structure state ──────────────┼→ [新] lifecycle_engine.resolve(...) → lifecycle + reason_codes
-daily_price_action ────────────────┘                                              │
-                                                                                  ▼
-rr_gate ──────────────────────────────────────────────→ decision_engine（建議產出）
-strategy mode（T-041，尚未存在）───────────────────────↗
-```
-
-| 檔案 | 動作 |
-|---|---|
-| `python/backtest/modular/sr_scoring/lifecycle_engine.py` | 新增：純函數 ＋ 狀態常數 |
-| `python/backtest/modular/sr_scoring/decision_engine.py` | 移除內嵌推導，改呼叫；`_zone_lifecycle` 更名 |
-| `python/backtest/modular/sr_scoring/tests/` | 新增 lifecycle 狀態機的單元測試 |
-| `docs/api-reference.md`、`docs/sr-zone-scoring.md` | contract 與現況說明 |
-
-#### 主要風險與回滾
-
-- **最大風險是「重構」變成「悄悄改變決策」**。`decision_engine.py` 有 2,747 行，
-  lifecycle 的下游消費點分散（`market_state`、`bias_state`、`action_state`、entry gate）。
-  對策：先寫**行為對照測試**——抽離前後對同一組輸入產出的完整 decision summary 必須逐欄一致，
-  只有上表列出的那一項可以不同。
-- RR 解耦後若下游沒有補上對應的 gate，會讓進場建議變寬鬆。上線前要用 decision replay
-  比對 `final_entry_state` 的分佈，確認沒有整體放寬。
-- 回滾：純 Python 變更，`git revert` 即可；沒有 migration、沒有資料寫入格式變更
-  （除非 zone `"lifecycle"` 鍵更名，那一項要與前端同批進退）。
-
-#### 測試與驗證策略
-
-- `python/scripts/test.sh`：lifecycle 狀態機的表格驅動測試，涵蓋七個狀態與優先序邊界
-  （例如 bearish event 與 CLOSE_RECLAIM 同時成立時必須是 `BREAKDOWN`）。
-- **行為對照**：抽離前先錄一組 decision summary 快照，抽離後逐欄比對。
-- `scripts/run-evaluation.sh MODE=replay`：對真實資料跑 decision replay，比對
-  `final_entry_state` 與 `lifecycle_phase` 的分佈變化，量化 RR 解耦的實際影響。
-- 記憶體：replay 走既有腳本，注意這台 host 的限制（見 `sr-zone-scoring.md`「規模上限」）。
-
-#### 完成後歸檔
-
-- 狀態機定義、優先序與各狀態語意 → [`sr-zone-scoring.md`](./sr-zone-scoring.md)。
-- 若 zone `"lifecycle"` 鍵更名 → [`api-reference.md`](./api-reference.md) 與
-  [`database-schema.md`](./database-schema.md)。
-- 「lifecycle 不看 RR」這條分層原則 → `sr-zone-scoring.md`，避免日後又被加回去。
-
-#### P0 實作結果（2026-08-13）
-
-| 項目 | 內容 |
-|---|---|
-| `lifecycle_engine.py`（新） | `resolve_lifecycle()` 純函數，**簽章裡沒有 `rr_gate`**。`event_state_types` / `event_state_max_age` 兩個純事件 helper 一併移入 |
-| `decision_engine.py` | 改為呼叫，移除內嵌的 `event_signal` ＋ `lifecycle_phase` 推導與 RR 耦合 |
-| `_zone_lifecycle` → `_zone_health_state` | **增量新增** `zone_health_state` 鍵，舊的 `lifecycle` 保留並標 deprecated |
-| 測試 | `test_lifecycle_engine.py` 12 個 test function（其中一支 parametrized 成 5 個 case，pytest 實收 16 個 lifecycle cases），涵蓋七個狀態、優先序、延續三條件的每一項缺失 |
-
-**差點自己製造出第五套同名詞彙**：原本要把 `_zone_lifecycle` 改名為 `_zone_state`，
-但 `scenario_engine.py` **已經有一個 `_zone_state`**，回傳的是場景判定
-（`WAIT_FOR_DIRECTION` / `RETEST_REQUIRED` / `SUPPORT_RETEST` / `RESISTANCE_REJECTION`），
-概念與值域都不同。同一個 package 內兩個同名不同義的函式，正是本筆開頭診斷的那個問題。
-改用 `_zone_health_state`，並在 docstring 同時標明它與 `lifecycle_phase`、
-`scenario_engine._zone_state` 三者的區別——**三者都在描述 zone，但問的是三個不同的問題**。
-
-#### 驗證現況與**尚未關閉的缺口**
-
-抽離後 428 支既有測試全數通過。**但這不是「沒有行為改變」的證據**——
-它是「沒有任何既有測試涵蓋 RR 解耦那條路徑」的證據。兩者結論完全不同，不能混為一談。
-
-行為改變確實存在且可由結構證明：舊條件要求 `rr_qualified`，不滿足時會落到下一個分支
-（`CONFIRMED` 或 `TESTING`）；移除後同樣輸入得到 `CONTINUATION`。
-兩支測試分工：`test_continuation_only_needs_price_evidence` 鎖住「延續只看三項價格證據」，
-`test_widened_path_previously_testing_now_continuation` 鎖住**真正變寬的那條路徑**
-（收復未確認 ＋ `age_bars=0`，舊碼落 `TESTING`、新碼是 `CONTINUATION`）。
-注意前者**無法**防守「RR 被加回來」——`resolve_lifecycle` 簽章裡沒有 `rr_gate`，
-真要加回來會是新增參數，那支測試照樣綠燈。
-
-**計畫要求的完整驗證尚未執行**：decision replay 對真實資料比對
-`final_entry_state` / `lifecycle_phase` / `market_bias` 的分佈變化。
-現實限制是 live 只有 **4 檔標的 / 20 次分析**（2026-08-18 重新確認，一筆都沒增加），
-replay 的統計意義有限。因此目前這個行為改變**只有單元測試層級的證據**。
-
-**2026-08-18 決定：接受現狀並收斂本筆。** 缺口不會消失，但它的本質是
-「production 分析資料太少」——那是獨立的問題，不該讓 T-044 無限期掛著。
-缺口已轉記為 [`issue.md`](./issue.md) **I-074**（含關閉條件）；
-現況規格早已歸檔在 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-「分層原則：lifecycle 不看 RR」與「已知並接受的行為改變」。
-
-#### 與 T-041 的關係
-
-T-041 的三個面向裡，**Lifecycle 正式顯示**與**Strategy Layer** 都依賴本筆先把狀態定義收斂。
-建議順序：T-044（本筆，後端分層）→ T-041 的 Lifecycle 顯示 → T-041 的 Strategy Layer。
-T-041 原訂的 `Started/Testing/Confirmed/Failed` 應改為直接使用本引擎的狀態集合。
-
-#### Review 決策紀錄（2026-08-13，已採納並整合進上文）
-
-**方向正確，但 T-044 / T-045 的接縫要先收斂再開工。** 現有程式碼確認
-`_decision_semantic_pipeline` 的 `CONTINUATION` 分支確實讀 `rr_gate.qualified`
-（`decision_engine.py:958-963`），所以「lifecycle 不應看 RR」這個拆分方向是對的：
-RR 是進場與策略條件，不是事件演進事實。
-
-需要修正的是輸入契約：T-045 規劃 Lifecycle Engine 應吃 `chain[]`，但本筆的修改目標目前寫成
-直接從事件狀態與價格結構抽出 `lifecycle_engine.resolve(...)`。現有 runtime 只把**最新 snapshot**
-透過 `previous_event_states` 傳回 Python，並沒有完整 chain。因此開工前要明確二選一：
-
-1. **T-044 P0：snapshot-compatible engine**。先抽出目前 `_decision_semantic_pipeline`
-   裡的 lifecycle 判定，輸入仍是 `event_state_summary` / `daily_price_action` / `structure_state`，
-   行為維持等價，只移除 RR 耦合。這條路可以先做，但文件要承認它還不是 chain-based engine。
-2. **T-045 先補 runtime chain contract**。先讓 Go / Python 在分析流程裡能傳遞 `chain[]`，
-   再讓 T-044 的 Lifecycle Engine 直接吃 chain。這條路設計較完整，但範圍明顯跨 Go API、
-   Python request contract、replay 與測試。
-
-RR 解耦的影響也不能只記成 `lifecycle_phase` 的變化。現有下游會接著用 `lifecycle_phase`
-推導 `market_state`、`bias_state`、`action_state`、`entry_permission_state`
-（`decision_engine.py:977-1035`）；因此 RR 不合格但價格延續成立的樣本，可能從
-`CONFIRMED / BULLISH_RECOVERY` 變成 `CONTINUATION / BULLISH_CONTINUATION`，再影響
-`market_bias`、`position_action_condition` 與前端顯示。驗證策略要擴成完整比對：
-
-- `decision_derived_view.semantic_pipeline`
-- `market_bias`
-- `position_action_condition`
-- `final_entry_permission`
-- replay 的 `final_entry_state` / `lifecycle_phase` / `market_bias` 分佈
-
-`_zone_lifecycle` 更名是正確方向，但不建議列為 T-044 必要同批。`"lifecycle"` 目前已在
-decision zone summary、frontend 型別與 `SRZones.svelte` 顯示中被消費；若同批破壞性改名，
-會把 lifecycle engine 抽離與 API/front-end contract migration 綁在一起。較穩的做法是：
-先保留舊 `"lifecycle"`，新增語意清楚的新鍵（例如 `zone_state` 或 `zone_health_state`），
-文件標記舊鍵 deprecated，等 T-041 前端整理時再收斂顯示名稱。
-
----
-
 ### T-045：Event Timeline——把事件狀態改成完整事件鏈
 
 | 欄位 | 內容 |
@@ -2327,10 +2076,14 @@ decision zone summary、frontend 型別與 `SRZones.svelte` 顯示中被消費�
 **目標**：把「目前有哪些事件」改成「事件如何一路演進到現在」——完整事件鏈，
 看得出何時開始、測試、確認、失敗、過期或被後續事件取代，並保留順序與轉換脈絡。
 
-> **與 [T-044](#t-044抽出獨立的-lifecycle-engine) 必須一起設計**：Lifecycle Engine 的職責是
-> 「依 **Event 的演進** 決定狀態」，而演進的載體就是 timeline。先做 timeline，
-> Lifecycle Engine 才有正確的輸入形狀；否則它只能繼續讀「當前狀態的快照」，
-> 那不是演進，是切片。**建議 T-045 先於或與 T-044 同批進行。**
+> **與 Lifecycle Engine 的關係**（原 T-044，**已於 2026-08-18 收斂並移出本清單**，
+> 現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」）：
+> Lifecycle Engine 的職責是「依 **Event 的演進** 決定狀態」，而演進的載體就是 timeline。
+> **它目前是 snapshot-based**——讀的是「當前狀態的快照」而不是演進，因為 runtime chain
+> 尚未接進 Python 分析流程。要讓它真正吃到演進，缺的是本筆的 `runtime_chain`（見下方
+> 「與 Lifecycle Engine（原 T-044）的接縫」）。
+> **本筆內文其餘的 T-044 字樣一律指這個已完成的 Lifecycle Engine**（`lifecycle_engine.py`），
+> 不是待辦項目。
 
 #### 為什麼現在「只有兩個 event」
 
@@ -2496,7 +2249,10 @@ type 永遠相同，覆寫從來沒有真的遺失過資訊。
 （含 `test_fresh_detection_resets_carried_event_age`）全數未受影響。
 `age_bars` 的重置行為**沒有動**——`_normalize_previous_event_state` 的註解明說那是刻意設計。
 
-#### 與 T-044 的接縫
+#### 與 Lifecycle Engine（原 T-044）的接縫
+
+**原 T-044 已完成並移出清單**；以下保留當時的接縫分析，其中的 `[T-044]` 指的是現行的
+`lifecycle_engine.py`。仍未完成的是本筆的 `runtime_chain` 那一半。
 
 ```
 market_event_states 快照序列
@@ -3126,7 +2882,7 @@ Go api/handler/sr_zones.go        EventTimeline handler 改叫新的 repo 方法
 | 分類 | Go / 排程 / SR Zone / 驗證母體 |
 | 建立日期 | 2026-08-20 |
 | 來源 | T-048 全案 review。T-049 已列它為前置，但**先前沒有任何 todo 在追**，只散見於 T-045 與 T-049 的討論段落 |
-| 關聯 | [`issue.md`](./issue.md) I-074（T-044 的 replay 驗證無法執行）、I-078（身分層兩條路徑從未被執行）；T-049 的前置條件② |
+| 關聯 | [`issue.md`](./issue.md) I-074（Lifecycle Engine RR 解耦的 replay 驗證無法執行）、I-078（身分層兩條路徑從未被執行）；T-049 的前置條件② |
 
 #### 問題
 
@@ -3134,7 +2890,7 @@ Go api/handler/sr_zones.go        EventTimeline handler 改叫新的 repo 方法
 （2026-08-18 盤點：4 檔 / 20 次分析），
 所有需要「分佈比較」的驗證因此都做不了。目前卡在這一點的至少有三筆：
 
-* **I-074**：T-044 的 RR 解耦只有單元測試層級的證據，`MODE=replay` 的 decision replay
+* **I-074**：Lifecycle Engine 的 RR 解耦只有單元測試層級的證據，`MODE=replay` 的 decision replay
   跑不起來。
 * **I-078**：T-048 身分層的 `EXPIRED` 收攤與 alias 備援兩條路徑，在 84 次分析的母體裡
   一次都沒被觸發——身分還來不及缺席到失格。

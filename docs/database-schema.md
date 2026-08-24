@@ -566,7 +566,7 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | analysis_id | FK → `stock_sr_zone_analyses.id` |
 | price_low / price_high | 候選區價格區間 |
 | label / role | 顯示標籤與角色（`SUPPORT`/`RESISTANCE`） |
-| source / lifecycle / decision_role | 候選來源、生命週期與決策角色 |
+| source / lifecycle / decision_role | 候選來源、zone 健康度與決策角色。**`lifecycle` 欄存的是 zone 本身的健康度**（`CANDIDATE` / `VALIDATED` / `CONFIRMED` / `WEAKENING` / `BROKEN` / `INVALIDATED`），**不是事件演進**；API / `decision_summary` 層對應的鍵已更名為 `zone_health_state`，同物件的 `lifecycle` 鍵是 deprecated alias（值相同）。欄位名維持 `lifecycle` 不改。四套同名不同義的 lifecycle 對照見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」 |
 | distance_pct / distance_label | 與現價距離百分比與標籤；`distance_pct` 可為 `NULL` |
 | reason | 候選成因說明文字 |
 | event_refs | JSON 陣列，關聯事件參照 |

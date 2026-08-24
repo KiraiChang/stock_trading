@@ -3538,7 +3538,7 @@ A 是唯一「零程式碼、立刻可逆、省下四分之一」的選項。
 | 分類 | Python / SR Zone / 決策語意 |
 | 建立日期 | 2026-08-21 |
 | 來源 | live 0050 分析（`analyzed_at=2026-08-20`）出現「Entry RR 1.87R 通過」與「RR 未達完整買進門檻」並存 |
-| 相關 | [T-056](#t-056壓力分層tactical-與-structural-兩層壓力必須同時可見)（同一份分析的另一半矛盾） |
+| 相關 | 壓力分層（原 T-056，**已完成並移出本清單**）——本筆要引用的 `blocking_resistance_zone` 由它落地，欄位分工見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「壓力分層」 |
 
 #### 核實結果：現象屬實，但成因有兩層，且與原始推測不完全相同
 
@@ -3677,7 +3677,7 @@ target_zone)`——**沒有 `entry_blocking_zone` 參數**，呼叫端只傳
 
 | 問題 | 定案 |
 |---|---|
-| target 原始來源 | candidates = `_nearest_resistance_above_entry()` ∪ `entry_blocking_zone.blocking_zone` ∪ T-056 的 `blocking_resistance_zone` |
+| target 原始來源 | candidates = `_nearest_resistance_above_entry()` ∪ `entry_blocking_zone.blocking_zone` ∪ `blocking_resistance_zone`（後兩者共用 `_blocking_resistance_zone`，恆指同一個 zone） |
 | 過濾條件 | 只納入 `price_low > entry_price` 的 candidate |
 | 衝突時誰優先 | **取最低 `price_low`**——Executable RR 問的是「entry 到第一道可量化前方阻力還有多少空間」，target 不得穿越任何前方壓力 |
 | `blocked=false` 但前方仍有 resistance | **仍封頂**。`blocked` 只代表「近到足以擋單」，不代表「可以把 target 設在更後面的壓力」 |
@@ -3695,8 +3695,10 @@ target_zone)`——**沒有 `entry_blocking_zone` 參數**，呼叫端只傳
 卻因為 `market_price_entry=false` 而**整個分支沒被執行**，最後走 `PRIMARY_ZONE_RR` 反推出 105.2738。
 所以主要工作是「讓非市價路徑也用這個值」，不是新建一套選擇邏輯。
 
-**與 T-056 的相依已解除**：結構／擋路壓力採 `blocking_resistance_zone`（見 T-056 定案）。
-但 **T-056 的 `blocking_resistance_zone` 欄位仍須先落地**，本筆才能引用，順序不變。
+**前置相依已解除且已完成**：結構／擋路壓力採 `blocking_resistance_zone`。該欄位已由原 T-056
+（壓力分層）於 2026-08-24 完成並歸檔，Python／Go 投影／API 展開／前端皆已落地，**本筆可直接引用**。
+語意與選法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「壓力分層」——特別注意它**沒有 tier 過濾**，
+不保證是結構性壓力。
 
 #### 契約變化（**定案：方案 C 折衷，2026-08-21 裁決**）
 
@@ -3809,216 +3811,16 @@ RESISTANCE 被 `bearish_setup` 擋下，而兩條 `_pick_primary_zone` 清單都
 
 ---
 
-### T-056：壓力分層——Tactical 與 Structural 兩層壓力必須同時可見
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待歸檔**（計畫書第 3 版契約已定案；Python → Go 投影 → API 展開 → 前端呈現全數落地。**F1 修正已於 2026-08-24 review 通過**。**唯一未結項：尚未做「完成後歸檔」到 `sr-zone-scoring.md`，歸檔完成後本筆才能整筆移除**） |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / 決策呈現 |
-| 建立日期 | 2026-08-21 |
-| 來源 | live 0050 分析：Nearest Resistance 顯示 107.18，實際擋住進場的是 105.19 |
-| 相關 | [T-055](#t-055rr-語意分層setup-rr-與-executable-rr-必須是兩個數字門檻必須具名分層) |
-
-#### 核實結果：現象屬實，但**現行選法是有規格的刻意設計，不是 bug**
-
-live 資料（同一筆 0050 決策，`current_price=104.65`）：
-
-| 欄位 | 區間 | tier | `decision_role` | 距現價 |
-|---|---|---|---|---|
-| `nearest_resistance_zone` | **107.18 ~ 107.82** | TIER_2_TRADING_ZONE | **`TACTICAL_RESISTANCE`** | 2.42% |
-| `entry_blocking_zone.blocking_zone` | **105.19 ~ 111.00** | TIER_1_MAIN_STRUCTURE | —（主結構壓力） | **0.51%** |
-| `primary_structural_zone` | 105.19 ~ 111.00 | TIER_1_MAIN_STRUCTURE | — | 0.51% |
-
-兩個欄位用**不同的選擇函式**：
-
-```python
-# decision_engine.py:1385  → nearest_resistance_zone
-min(candidates, key=_decision_distance_score)
-#   _decision_distance_score = _distance_pct_to_zone + _zone_width_penalty × 0.08
-
-# decision_engine.py:1955  → entry_blocking_zone
-min(resistance_candidates, key=_distance_pct_to_zone)   # 純距離
-```
-
-算給你看（數字全部與 live 存檔吻合）：
-
-| zone | 距離 | 寬度佔比 | width penalty | `_decision_distance_score` |
-|---|---|---|---|---|
-| 105.19 ~ 111.00 | 0.00512 | 5.55% | **0.6385** | 0.00512 + 0.6385×0.08 = **0.05620** |
-| 107.18 ~ 107.82 | 0.02415 | 0.62% | 0 | **0.02415** |
-
-**寬度懲罰 0.0511 是它真實距離 0.0051 的 10 倍**，把一個 0.5% 外的主結構壓力，
-推到 2.4% 外的窄壓力後面。
-
-而這正是文件寫明的意圖——[`sr-zone-scoring.md`](./sr-zone-scoring.md)：
-
-> `zone_width_penalty` 會併入 nearest decision 的距離評分（`price_path` 的
-> `nearest_support_zone` / `nearest_resistance_zone` 選擇），**避免過寬、模糊的區間僅因中心價較近
-> 就勝過較窄、較精確的關鍵價位**。
-
-**所以不能把它當 bug 直接改選法**——改了等於推翻既有設計並改變決策。
-真正的缺陷在**語意與呈現**：一個叫 `nearest_resistance_zone`（「最近」）的欄位回報的不是最近的壓力，
-而使用者同時在別處看到 105.19 正在擋住進場，兩者無法自洽。
-
-另外：**Tactical / Structural 這組概念契約裡已經有了**——`decision_role` 已輸出
-`TACTICAL_RESISTANCE`，`primary_structural_zone` 已存在。缺的不是概念，是**擺在一起呈現**。
-
-#### 修改目標
-
-1. **正名**：新增 `tactical_resistance_zone`，語意是「品質加權後最相關的戰術壓力」，
-   不是「價格上最近」；`nearest_resistance_zone` 降為 legacy alias 並在文件標明此事。
-2. **兩層同時輸出且同時顯示**：戰術壓力（窄、精確、可當短線目標）與**前方擋路壓力**
-   （`blocking_resistance_zone`，實際擋住進場）並列，不是二選一。
-3. **擋路壓力必須出現在主畫面**：`entry_blocking_zone` 目前只在 blocked 時透過 reason code
-   露出；升格成獨立的 `blocking_resistance_zone` 欄位，且當它與 `tactical_resistance_zone`
-   不是同一個 zone 時必須明確標示。
-4. 與 [T-055](#t-055rr-語意分層setup-rr-與-executable-rr-必須是兩個數字門檻必須具名分層) 對齊：
-   RR 的 target 封頂用的就是 `blocking_resistance_zone`。**本筆是 T-055 的前置**。
-
-#### 不做的範圍
-
-* **不改 `_decision_distance_score` 的寬度懲罰公式與 0.08 係數**——有規格、且會改變決策。
-* 不改 `_zone_width_penalty` 的 3% / 4% 轉折點。
-* 不改 `entry_blocking_zone` 的門檻。
-* 不新增 zone builder，不改 tier 分級。
-* **不把 `SUPPORT_RETEST_HELD` / `RESISTANCE_BREAKOUT` 接進 Decision**——見下方共同約束。
-
-#### 受影響檔案與資料流
-
-```
-decision_engine.py::build_decision_summary:2637-2655   ← top-level nearest_decision_zone /
-                                                          nearest_support_zone / nearest_resistance_zone /
-                                                          primary_structural_zone，各自由
-                                                          _decision_summary_zone() 組出
-decision_engine.py::_nearest_zone_by_role:1376-1385     ← 選法來源（**逐字不動**）
-decision_engine.py::_primary_structural_zone:1409       ← 結構層候選來源
-decision_engine.py::_entry_blocking_zone_detail:1935    ← 擋路層來源（不改門檻）
-decision_engine.py::_price_path:1985-                   ← 另一條路徑，產 price_path.blocking_zone
-                                                          （**與 summary 的 nearest_* 不同來源，不要混談**）
-        ↓ decision_summary 的 top-level 欄位
-        ↓ 新增 tactical_resistance_zone（＝nearest_resistance_zone 同源）
-        ↓ 新增 blocking_resistance_zone（來自 _entry_blocking_zone_detail 的 blocking_zone，
-                                          需經 _decision_summary_zone() 補齊 summary 形狀）
-backend/internal/analysis/client.go::buildDecisionZoneSummariesJSON:807-832
-        ← 投影白名單要同步加入兩個新欄位，否則 Python 產了但 DB 拿不到
-        ↓ 投影
-stock_sr_decisions.zone_summaries_json
-        ↓
-frontend/src/lib/api/srZones.ts → SRZones.svelte（壓力顯示區塊）
-```
-
-**R4 修正說明**：原計畫寫的 `decision_engine.py::_zone_summaries` **不存在**。
-Python 端沒有 summary 聚合函式，是 `build_decision_summary()` 直接組 top-level 欄位；
-`zone_summaries_json` 這個「集合」概念只存在於 **Go 投影層**。
-另外原計畫把 `_price_path` 與 summary 併在同一行也不精準——`price_path.blocking_zone` 與
-summary 的 `nearest_*` 是兩條不同來源（前者可含 daily candidate），實作時不可當成同一層。
-
-#### 契約變化（**定案：B + C，2026-08-21 裁決**）
-
-新增語意清楚的欄位，同時保留 legacy alias。
-
-| 欄位 | 處置 | 語意 |
-|---|---|---|
-| `tactical_resistance_zone` | **新增** | 品質加權後最相關的戰術壓力（＝現行 `_nearest_zone_by_role` 的輸出，選法逐字不動） |
-| `blocking_resistance_zone` | **新增** | **第一道前方擋路壓力**，供顯示與 T-055 的 executable RR target cap 使用 |
-| `nearest_resistance_zone` | **保留為 `tactical_resistance_zone` 的 legacy alias** | 文件必須標明「**不是價格最近**」 |
-| `structural_resistance_zone` | **不新增** | 見下方說明 |
-| `primary_structural_zone` | **保留原樣**，語意不變 | Tier-1 品質最高的**大結構參考**，不參與進場擋路判斷 |
-
-**`structural_resistance_zone` 刻意不建立**（**這是對裁決原文的收緊**：裁決寫「不要直接等同
-`primary_structural_zone`，除非先確認語意」，第 3 版直接決定不建這個欄位）：
-`primary_structural_zone`（Tier-1 品質最高）與
-`entry_blocking_zone.blocking_zone`（距離最近的 resistance）**不保證相同**，在 0050 這筆碰巧相同
-純屬巧合。直接把兩者合成一個「結構壓力」欄位，就是重演本筆要修的「同名不同義」。
-
-**「結構壓力」在交易顯示與 RR 計算裡採 `blocking_resistance_zone`**，不是
-`primary_structural_zone`——executable RR 與進場擋路要看的是**第一道前方壓力**。
-`primary_structural_zone` 保留為大結構參考。
-
-**⚠ 標籤警告（見下方 F2）**：`blocking_resistance_zone` 由
-`_entry_blocking_zone_detail` 供給，而該函式**沒有 tier 過濾**，所以它**不保證是結構性的**。
-UI 標籤請用「**前方擋路壓力**」而非「結構壓力」，否則 Tier-3 擋路時會再錯配一次。
-
-#### 風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| 改欄位名破壞既有前端／Go projection | 舊名保留為 alias，一個版本後再移除 |
-| 兩層壓力並列增加畫面複雜度 | 只在兩者不同時才並列；相同時合併為一列 |
-| 誤把「呈現調整」做成「選法調整」 | 本筆的 `_decision_distance_score` 必須逐字不動，PR review 以此為驗收條件 |
-| 回滾 | 若採方案 A/C 則無決策邏輯變動，回滾成本低 |
-
-#### 測試與驗證
-
-1. 單元測試：**用 0050 這組 zone 建 fixture**，斷言
-   * `tactical_resistance_zone` ＝ `nearest_resistance_zone` ＝ **107.18~107.82**（選法逐字不動）；
-   * `blocking_resistance_zone` ＝ **105.19~111.00**，且與 `entry_blocking_zone.blocking_zone` 同一個 zone；
-   * `primary_structural_zone` 維持原值、語意不變；
-   * 另建一組 **`blocking` 為 Tier-3 的 fixture**，確認欄位不因此改名或降級（F2 的迴歸保護）。
-2. 前端測試（`SRZones.test.ts`）：兩層壓力不同時的並列呈現、相同時的合併呈現；
-   **標籤必須是「前方擋路壓力」，不得出現「結構壓力」字樣**（F2）。
-3. Go 投影測試：`buildDecisionZoneSummariesJSON` 白名單含兩個新欄位，否則 Python 產了但 DB 拿不到。
-4. decision replay 前後比對：**`by_rr_gate` 等決策分佈應完全不變**（本筆若改到決策就是做錯了）。
-5. **驗收走 dev compose**。
-
-#### T-056 實作 review findings（2026-08-21）
-
-**F1.（P1）新壓力欄位只進了 DB 投影，API 展開與前端顯示沒有跟上。**——**已修正（2026-08-21）、
-review 通過（2026-08-24）**，修正落點見本節末的「F1 修正紀錄」。
-
-目前 staged 實作已讓 Python `decision_summary` 輸出 `tactical_resistance_zone` /
-`blocking_resistance_zone`，Go analysis 端 `buildDecisionZoneSummariesJSON()` 也已把兩個新欄位
-寫進 `stock_sr_decisions.zone_summaries_json`。但後端 API 回傳歷史決策時，還會經過
-`backend/internal/api/handler/sr_zones.go::applyDecisionZoneSummariesJSON()` 再展開一次白名單；
-該白名單目前仍只有 `nearest_decision_zone` / `nearest_support_zone` / `nearest_resistance_zone` /
-`primary_structural_zone` / `best_trade_zone` / `primary_zone`，**沒有**
-`tactical_resistance_zone` / `blocking_resistance_zone`。結果是 Python 產了、analysis client 寫進 DB 了，
-但 API `decision_summary` 會把兩個新欄位丟掉。
-
-前端也尚未完成 T-056 契約：`SRDecisionSummary` 型別沒有兩個新欄位，`SRZones.svelte` 壓力區塊
-仍只顯示 `Nearest Resistance Zone` / `Primary Structural Zone`，沒有並列顯示
-`tactical_resistance_zone` 與 `blocking_resistance_zone`，也沒有在兩者不同時標示「前方擋路壓力」。
-
-這違反本筆修改目標第 2、3 條：「兩層同時輸出且同時顯示」與「擋路壓力必須出現在主畫面」。
-
-建議修正範圍：
-
-* `applyDecisionZoneSummariesJSON()` 白名單補 `tactical_resistance_zone` / `blocking_resistance_zone`；
-* 補 API handler 測試，確認 DB 內 `zone_summaries_json` 的兩個新欄位會出現在 response `decision_summary`；
-* `frontend/src/lib/api/srZones.ts` 的 `SRDecisionSummary` 補兩個型別欄位；
-* `frontend/src/routes/SRZones.svelte` 壓力顯示區塊改為顯示戰術壓力與前方擋路壓力，兩者相同時可合併，
-  不同時必須並列，且標籤不得寫「結構壓力」。
-
-##### F1 修正紀錄（2026-08-21，review 通過 2026-08-24）
-
-| 落點 | 修改 |
-|---|---|
-| `backend/internal/api/handler/sr_zones.go::applyDecisionZoneSummariesJSON` | 白名單補 `tactical_resistance_zone` / `blocking_resistance_zone`，並註明**這條路上有兩份各自獨立的白名單**（投影一份、展開一份），只補其中一份會在讀歷史決策時再被丟一次 |
-| `backend/internal/api/handler/sr_zones_create_test.go` | 新增 `TestSRZoneGetExposesLayeredResistanceZonesFromZoneSummaries`：從 `GET /sr-zones/:id` 的 HTTP response 斷言兩個新欄位、legacy alias 與 `primary_structural_zone` 都在。**已驗對照組**——把白名單改回舊版時該測試會失敗 |
-| `frontend/src/lib/api/srZones.ts` | `SRDecisionSummary` 補 `tactical_resistance_zone` / `blocking_resistance_zone`；`nearest_resistance_zone` 標 `@deprecated` 並寫明「不是價格最近」；`primary_structural_zone` 註明不參與進場擋路 |
-| `frontend/src/routes/SRZones.svelte` | 新增 `tacticalResistanceZone`（fallback legacy alias，供舊分析）／`blockingResistanceZone`／`resistanceLayersMerged`（以區間端點判定是否同一 zone，summary 沒有 zone_key）三個推導；壓力卡片改為：同一 zone 合併成「戰術壓力 ＝ 前方擋路壓力」一格，不同 zone 時並列且擋路壓力用琥珀色強調。`Primary Structural Zone` 標籤改為「大結構參考 Primary Structural Zone」 |
-| `frontend/src/routes/SRZones.test.ts` | 三個 case：不同區間並列、同一區間合併、只有 legacy alias 的舊分析；三者都斷言畫面**不含**「結構壓力」字樣（F2） |
-
-**F1 review 結果（2026-08-24）**：上表五個落點的修正方向確認無誤，F1 結案。
-
-**仍未做**：`#### 完成後歸檔` 那一節（`docs/sr-zone-scoring.md` 的欄位分工說明）尚未執行；
-這是 T-056 目前唯一未結項，完成後才可把本筆整筆從 `todo.md` 移除。
-
-#### 完成後歸檔
-
-`docs/sr-zone-scoring.md`：在 `zone_width_penalty` 那段補上「`nearest_*_zone` 是品質加權後的
-最相關區，不是價格最近區」的明確措辭；並補一節說明三個欄位的分工——
-`tactical_resistance_zone`（品質加權最相關）、`blocking_resistance_zone`（第一道前方擋路，
-**不保證是結構性的**）、`primary_structural_zone`（Tier-1 大結構參考，不參與進場擋路），
-以及 `nearest_resistance_zone` 作為 legacy alias 的說明。
-**review 通過後才把本筆從 todo.md 移除。**
-
----
-
 #### 原始 Review findings（2026-08-21，**已由第 2／3 版處理，保留作決策沿革**）
 
-> 文件核實補記（2026-08-21，**I-083 已修正**）：本節是原始 review findings，
+> **本區塊（`原始 Review findings` 到 `裁決納入紀錄`）原為 T-055／T-056 共同的 review 沿革。
+> T-056 已於 2026-08-24 完成、review 通過並歸檔，整筆移出本清單**，現況規格見
+> [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「壓力分層：tactical / blocking / structural
+> 是三個不同欄位」。本區塊自此**只服務仍在規劃中的 T-055**；文中所有 T-056 字樣都是當時的
+> 決策沿革，`tactical_resistance_zone` / `blocking_resistance_zone` 的**現行契約以
+> `sr-zone-scoring.md` 為準**，不要回頭找已移除的 T-056 小節。
+
+> 文件核實補記（2026-08-21）：本節是原始 review findings，
 > R1～R5 已於下方「Review 回應」與「裁決納入紀錄」全數處理並回寫進計畫本文。
 > 本節與「裁決前建議」**只作決策沿革**，被第 3 版覆寫的欄位值已逐處加註。
 > **實作一律以 T-055／T-056 本文的契約表與「裁決納入紀錄」（第 3 版）為準**，
@@ -4089,7 +3891,8 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 
 ##### 再核實 findings（2026-08-21）
 
-**F3.（P3）I-083 的補記本身仍有小型殘字，容易讓歷史區塊讀起來不乾淨。**
+**F3.（P3）文件一致性修正（原記於 `issue.md` I-083，已於 2026-08-24 收斂移除）的補記本身
+仍有小型殘字，容易讓歷史區塊讀起來不乾淨。**
 
 `原始 Review findings` 的補記已經說「實作一律以 T-055／T-056 本文契約表與
 裁決納入紀錄（第 3 版）為準」，但下一行又重複寫「不要直接引用本節或『建議裁決』作為
@@ -4104,7 +3907,7 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 
 **處理結果（2026-08-21）：三項全部核實成立，已修正。**
 
-成因是 I-083 修正時的**字串替換只匹配到句子前半**，把原句尾巴留在原地，
+成因是該次文件一致性修正的**字串替換只匹配到句子前半**，把原句尾巴留在原地，
 接出「不要直接引用 ／ 本節或『建議裁決』作為實作契約，應以…為準」這段拼接殘句——
 所以三個小問題其實是同一個成因的三種表徵。
 
@@ -4120,9 +3923,9 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 例如「裁決納入紀錄」（第 3 版）。小節標題本身統一為 `小節名（日期，版次）`。
 這樣標題補日期或改版次時，內文引用不會跟著失效。
 
-**`issue.md` 的三處「建議裁決」刻意不改**：I-083 的「已核實的衝突」與「建議修法」
-記錄的是**改名前**的狀態，「修復結果」表則記錄 `##### 建議裁決` → `##### 裁決前建議`
-這個改名動作本身。把它們一起改掉會讓那筆 issue 讀起來像沒發生過。
+**這條命名慣例已歸檔**到 [`development-workflow.md`](./development-workflow.md)
+「文件收斂規則」，本節保留作沿革。原本承載這件事的 `issue.md` I-083 已於 2026-08-24
+review 通過後整筆收斂移除。
 
 
 #### Review 回應（2026-08-21，第 2 版）
@@ -4154,8 +3957,8 @@ T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實�
 ##### 裁決前建議（2026-08-21，**已由第 3 版裁決修正，保留作決策沿革**）
 
 > 文件核實補記（2026-08-21）：本節保留裁決前建議，已被下方「裁決納入紀錄」（第 3 版）修正。
-> 其中 `gate_kind=EXECUTION` 與新增 `actual_rr_source` 兩點已被第 3 版否決；詳見
-> [`issue.md`](./issue.md) **I-083**。實作時以 T-055/T-056 本文契約表與第 3 版裁決為準。
+> 其中 `gate_kind=EXECUTION` 與新增 `actual_rr_source` 兩點已被第 3 版否決，逐處已加註。
+> 實作時以 T-055 本文契約表與第 3 版裁決為準。
 
 以下是對上方三組未定案問題的裁決前建議方向；第 3 版已採用其中方向並修正部分欄位契約，
 本節保留作決策沿革，實作時不要直接採用未經第 3 版覆寫的欄位值。
@@ -4295,9 +4098,11 @@ T-055 / T-056 的契約至此**全部定案，無待決項**；剩下的是實�
 
 ---
 
-#### T-055 / T-056 共同約束：`SUPPORT_RETEST_HELD` 與 `RESISTANCE_BREAKOUT` 維持只寫不讀
+#### T-055 實作約束：`SUPPORT_RETEST_HELD` 與 `RESISTANCE_BREAKOUT` 維持只寫不讀
 
-**這兩筆計畫都不得順手把這兩個事件接進 Decision。**
+（原為 T-055／T-056 共同約束；T-056 已完成且**未**接入這兩個事件，約束對它已驗收通過。）
+
+**本筆計畫不得順手把這兩個事件接進 Decision。**
 
 核實現況（2026-08-21）：隔離是完整且顯式的。
 

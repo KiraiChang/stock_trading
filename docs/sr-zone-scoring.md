@@ -1036,9 +1036,60 @@ Zone lifecycle 目前由 deterministic EOD rule 產生，可能值包含 `CANDID
 不改寫原始 `zones[]` 的驗證結果。
 
 每個 decision zone 另輸出 `zone_width_pct`（區間寬度佔現價比例）與 `zone_width_penalty`
-（寬區間的距離評分懲罰）。`zone_width_penalty` 會併入 nearest decision 的距離評分（`price_path`
-的 `nearest_support_zone` / `nearest_resistance_zone` 選擇），避免過寬、模糊的區間僅因中心價較近
-就勝過較窄、較精確的關鍵價位。
+（寬區間的距離評分懲罰）。`zone_width_penalty` 會併入 nearest decision 的距離評分
+（`_decision_distance_score` ＝ `_distance_pct_to_zone` ＋ `zone_width_penalty × 0.08`），
+避免過寬、模糊的區間僅因中心價較近就勝過較窄、較精確的關鍵價位。這個評分同時決定
+`decision_summary` 的 `nearest_support_zone` / `nearest_resistance_zone`
+（`_nearest_zone_by_role`）與 `price_path.next_decision_source` 的取捨。
+
+**因此 `nearest_*_zone` 是「品質加權後最相關」的區，不是「價格上最近」的區。**
+寬區間的懲罰可以數倍於它的真實距離，把一個 0.5% 外的寬主結構壓力推到 2.4% 外的窄壓力後面
+（0050 實例見下方「壓力分層」）。要「價格上最近、實際擋住進場」的那道壓力，讀
+`blocking_resistance_zone`，不要讀 `nearest_resistance_zone`。
+
+#### 壓力分層：tactical / blocking / structural 是三個不同欄位
+
+同一份分析的壓力有三種問法，各自有獨立欄位與獨立選法，**不可互相替代**：
+
+| 欄位 | 語意 | 選法 | tier 過濾 | 用途 |
+|---|---|---|---|---|
+| `tactical_resistance_zone` | 品質加權後最相關的戰術壓力 | `_nearest_zone_by_role` → `_decision_distance_score`（含寬度懲罰）；排除 `EXPIRED` 與 low confidence，**全被排除時退回不過濾的候選** | 無 | 短線目標參考 |
+| `nearest_resistance_zone` | **legacy alias，與 tactical 同值** | 同上 | 無 | 相容舊前端；**名稱誤導，新程式不要用** |
+| `blocking_resistance_zone` | 前方第一道擋路壓力 | `_blocking_resistance_zone` → **純距離**（`_distance_pct_to_zone`）；只取 `price_high >= current_price`（現價之上或現價還在其中），排除 `EXPIRED`，**不看 confidence**，只看 scored zone | **無** | 進場擋路判斷、RR target 封頂 |
+| `primary_structural_zone` | Tier-1 品質最高的大結構參考 | 結構層挑選 | Tier-1 | 大格局參考，**不參與**進場擋路 |
+
+實例（0050，`current_price=104.65`）：`tactical_resistance_zone` ＝ 107.18~107.82（Tier-2，窄），
+`blocking_resistance_zone` ＝ 105.19~111.00（Tier-1，寬）。寬區間的
+`zone_width_penalty=0.6385`，乘上 0.08 後是 0.0511，而它的真實距離只有 0.0051——
+懲罰是距離的 10 倍，於是「較近的那道」在 `nearest_*` 排序裡輸給了「較窄的那道」。
+這是刻意設計，不是 bug；缺的是把兩層同時呈現。
+
+擋路層為什麼不加寬度懲罰：**擋路與否是物理問題**，寬區間一樣擋路，不該因為「寬而模糊」
+被推到後面；而 `nearest_*_zone` 要的是「最值得參考的價位」，寬度懲罰在那裡才合理。
+
+**`blocking_resistance_zone` 不保證是結構性的**——`_blocking_resistance_zone` 沒有任何 tier
+過濾，第一道擋路壓力完全可能是 Tier-3 短期壓力。因此：
+
+* UI 標籤一律用「**前方擋路壓力**」，**不得寫「結構壓力」**，否則 Tier-3 擋路時會出現
+  「標著結構壓力的短期壓力」。前端測試對「畫面不含『結構壓力』字樣」有斷言。
+* `structural_resistance_zone` 這個欄位**刻意不建立**。`primary_structural_zone`（Tier-1 品質最高）
+  與擋路壓力（距離最近）**不保證相同**，在 0050 碰巧相同純屬巧合；合成一個欄位就是重演
+  「同名不同義」。
+* 交易顯示與 RR 的「前方壓力」一律採 `blocking_resistance_zone`，`primary_structural_zone`
+  只作大結構參考。
+
+三條「blocking」路徑不可混談：
+
+| 出處 | 函式 | 資料源 |
+|---|---|---|
+| `decision_summary.blocking_resistance_zone` | `_blocking_resistance_zone` | 只有 scored zone |
+| `entry_blocking_zone.blocking_zone` | 同上（**共用同一個函式**，恆指同一個 zone） | 只有 scored zone |
+| `price_path.blocking_zone` | `_select_blocking_resistance` | scored zone **＋ daily candidate** |
+
+**兩份各自獨立的白名單**：`analysis.buildDecisionZoneSummariesJSON()` 把欄位投影進
+`zone_summaries_json`，`handler.applyDecisionZoneSummariesJSON()` 讀歷史決策時再展開一次。
+新增 `decision_summary` 的 zone 欄位時**兩份都要補**——只補投影那份，Python 產了、DB 存了，
+API 仍會在讀取時把它丟掉。
 
 ### Semantic Pipeline 與 Legacy Action
 
@@ -1212,7 +1263,9 @@ daily candidate zone。若最近 scored resistance 距離小於 proxy 門檻（�
 舊欄位 `distance_to_nearest_resistance` 與 `threshold` 暫時保留為比例值相容 alias，前端新顯示應改讀
 `distance_pct` / `threshold_pct` 或價格欄位。`price_path.blocking_zone` 仍是路徑提示，可包含 daily
 candidate；semantic entry gate 的 `BLOCKING_ZONE_AHEAD` 使用 entry 層近壓力判斷，path 層則仍可用
-完整路徑提示描述前方壓力。
+完整路徑提示描述前方壓力。`entry_blocking_zone.blocking_zone` 與
+`decision_summary.blocking_resistance_zone` 共用 `_blocking_resistance_zone`，恆指同一個 zone；
+三條 blocking 路徑的差異見「壓力分層」。
 
 `action` / `market_action` 是 final entry 對齊後的相容輸出，不得高於
 `final_entry_permission`。若 final entry 為 `WAIT_CONFIRMATION`，即使 legacy
@@ -1422,6 +1475,12 @@ period summaries。新分析若 `decision_summary` 缺欄位，應視為 Python 
 `price_follow_through_state` / `momentum_confirmation_state`、`nearest_support_zone` /
 `nearest_resistance_zone`（取代舊單一 `nearest_decision_zone` 的顯示位置）與
 `short_term_regime`；別名欄位 `tactical_regime` / `structural_trend` 不另外呈現，避免重複。
+
+壓力區塊呈現兩層（見「壓力分層」）：`tactical_resistance_zone`（fallback 到 legacy
+`nearest_resistance_zone`，供沒有新欄位的舊分析）與 `blocking_resistance_zone`。兩者是同一個
+區間時合併成一列「戰術壓力 ＝ 前方擋路壓力」；不同區間時並列，擋路壓力以琥珀色強調並註明
+「實際擋住進場的第一道壓力」。`primary_structural_zone` 標為「大結構參考」，明示不參與進場擋路。
+判斷是否同一個 zone 用區間端點比對——summary 欄位沒有 `zone_key`。
 
 ### 測試與驗收
 
@@ -1635,8 +1694,9 @@ P2-C-5 起，`stock_sr_decisions` 也保存尚未拆成獨立表、但前端決�
 `rr_gate_json`、`position_action_condition_json`、`market_context_json`、
 `confidence_explanation_json`、`risk_notes_json` 與 `zone_summaries_json`。
 `zone_summaries_json` 內含 `nearest_decision_zone`、`nearest_support_zone`、
-`nearest_resistance_zone`、`primary_structural_zone`、`best_trade_zone`、`primary_zone`
-與 `secondary_zones`。
+`nearest_resistance_zone`、`tactical_resistance_zone`、`blocking_resistance_zone`、
+`primary_structural_zone`、`best_trade_zone`、`primary_zone` 與 `secondary_zones`。
+三個壓力欄位的分工與「兩份白名單」的注意事項見「壓力分層」。
 
 AI Pipeline 的正規化分成兩層，不混用：
 

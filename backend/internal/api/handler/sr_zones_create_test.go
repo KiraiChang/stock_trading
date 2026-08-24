@@ -870,3 +870,81 @@ func TestEventTimelineIdentitySinceIgnoresWindow(t *testing.T) {
 		t.Error("identity_since 應早於視窗內最早的鏈——這正是 R5 要修的情況")
 	}
 }
+
+// T-056：兩層壓力欄位要從 DB 一路走到 API response。
+//
+// 這條路上有**兩份各自獨立的白名單**：analysis.buildDecisionZoneSummariesJSON() 決定哪些鍵
+// 寫得進 zone_summaries_json，applyDecisionZoneSummariesJSON() 決定哪些鍵展得回 decision_summary。
+// 只補前者的話 Python 產了、DB 也存了，讀歷史決策時仍會被第二道白名單丟掉——這正是
+// T-056 review F1 的缺口，所以本測試從 HTTP response 斷言，而不是只測投影函式。
+func TestSRZoneGetExposesLayeredResistanceZonesFromZoneSummaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	now := time.Now().UTC().Truncate(time.Second)
+	repo := &srZoneRepoStub{
+		analyses: []store.SRZoneAnalysis{{
+			ID: 56, Symbol: "0050", Timeframe: "1d", AnalyzedAt: now,
+			CurrentPrice: 104.65, PipelineVersion: "v2", ModelVersion: "v-test",
+		}},
+		zones: map[uint64][]store.SRZone{56: {{
+			ID: 1, AnalysisID: 56, PriceLow: 105.19, PriceHigh: 111, Method: "atr", Role: "RESISTANCE",
+			Status: "PENDING", TradingScore: 70,
+		}}},
+		decisions: map[uint64]*store.SRDecision{56: {
+			AnalysisID: 56, MarketBias: "NEUTRAL_BIAS",
+			// 戰術壓力（107.18~107.82，寬度懲罰加權後最相關）與前方擋路壓力
+			// （105.19~111.00，純距離最近）是**不同的 zone**，這是 T-056 要同時露出的情況。
+			ZoneSummariesJSON: store.RawJSON(`{"nearest_decision_zone":null,"nearest_support_zone":null,` +
+				`"nearest_resistance_zone":{"label":"107.18 ~ 107.82","decision_role":"TACTICAL_RESISTANCE"},` +
+				`"tactical_resistance_zone":{"label":"107.18 ~ 107.82","decision_role":"TACTICAL_RESISTANCE"},` +
+				`"blocking_resistance_zone":{"label":"105.19 ~ 111.00","decision_role":"BLOCKING_RESISTANCE"},` +
+				`"primary_structural_zone":{"label":"105.19 ~ 111.00"},"best_trade_zone":null,"primary_zone":null,"secondary_zones":[]}`),
+		}},
+	}
+	handler := NewSRZoneHandler(nil, repo, nil, nil, nil, nil, zap.NewNop())
+	router := gin.New()
+	router.GET("/sr-zones/:id", handler.Get)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sr-zones/56", nil)
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var parsed struct {
+		Decision struct {
+			NearestResistanceZone struct {
+				Label string `json:"label"`
+			} `json:"nearest_resistance_zone"`
+			TacticalResistanceZone struct {
+				Label        string `json:"label"`
+				DecisionRole string `json:"decision_role"`
+			} `json:"tactical_resistance_zone"`
+			BlockingResistanceZone struct {
+				Label        string `json:"label"`
+				DecisionRole string `json:"decision_role"`
+			} `json:"blocking_resistance_zone"`
+			PrimaryStructuralZone struct {
+				Label string `json:"label"`
+			} `json:"primary_structural_zone"`
+		} `json:"decision"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if parsed.Decision.TacticalResistanceZone.Label != "107.18 ~ 107.82" ||
+		parsed.Decision.TacticalResistanceZone.DecisionRole != "TACTICAL_RESISTANCE" {
+		t.Fatalf("tactical_resistance_zone 沒有展開到 decision_summary: %+v", parsed.Decision)
+	}
+	if parsed.Decision.BlockingResistanceZone.Label != "105.19 ~ 111.00" ||
+		parsed.Decision.BlockingResistanceZone.DecisionRole != "BLOCKING_RESISTANCE" {
+		t.Fatalf("blocking_resistance_zone 沒有展開到 decision_summary: %+v", parsed.Decision)
+	}
+	// legacy alias 與大結構參考都不能因為新增欄位而消失。
+	if parsed.Decision.NearestResistanceZone.Label != "107.18 ~ 107.82" {
+		t.Fatalf("nearest_resistance_zone legacy alias 遺失: %+v", parsed.Decision)
+	}
+	if parsed.Decision.PrimaryStructuralZone.Label != "105.19 ~ 111.00" {
+		t.Fatalf("primary_structural_zone 遺失: %+v", parsed.Decision)
+	}
+}

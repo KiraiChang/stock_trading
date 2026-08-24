@@ -3776,7 +3776,21 @@ target_zone)`——**沒有 `entry_blocking_zone` 參數**，呼叫端只傳
 target 封頂規則，以及 `probe_min_rr` / `full_entry_min_rr` 兩層具名門檻的定義與顯示規則；
 並補上 F1 定案的兩個正交軸（`gate_kind` 門檻層 / `gate_basis` RR 推導方式）與
 `MARKET_ENTRY_TARGET_UNAVAILABLE` → `TARGET_UNAVAILABLE` 的值域遷移說明。
-**review 通過後才把本筆從 todo.md 移除**，且移除時一併處理 R5 的兩筆 issue 搬移。
+
+**本筆同時負責關閉 I-081 與 I-082 的文件項（2026-08-21 定，非選配）。** 兩者要改的
+「Legacy action pipeline」第 3、4 條，正好是本筆重寫 RR 門檻敘述時會動到的同一段——
+分兩次改等於同一段寫兩遍，且中間那版必然又對不上實作。
+
+| Issue | T-055 必須完成的文件動作 | 完成後 |
+|---|---|---|
+| **I-081** | 第 3 條的 `risk_reward_ratio < 1.0` 改成正確門檻。**不是把 1.0 改成 1.5 了事**——本筆會把門檻改成 `probe_min_rr` / `full_entry_min_rr` 兩層，該條要照新語意整條重寫 | I-081 整筆可移除 |
+| **I-082** | 第 4 條改寫：EXPIRED 的 `Buy` 守門**不在第 4 步**，而在第 5～6 步的 `structure_broken` / `bearish_setup` 提前 return（`_structure_state:2242` 的 `EXPIRED → BREAKDOWN`）。敘述要指明擋在哪裡 | I-082 整筆可移除（迴歸測試已於 2026-08-21 先行補完） |
+
+**T-055 的驗收條件因此多一條**：`sr-zone-scoring.md`「Legacy action pipeline」第 3、4 條
+與實作一致，且 I-081 / I-082 可同步結案。漏掉這一條就不算完成。
+
+**review 通過後才把本筆從 todo.md 移除。**（R5 的兩筆搬移已於 2026-08-21 完成，
+即 I-081 / I-082 的建立，不再是移除時的待辦。）
 
 #### 核實過程中的附帶發現（**R5 已結案：2026-08-21 搬入 `docs/issue.md`**）
 
@@ -3784,8 +3798,8 @@ target 封頂規則，以及 `probe_min_rr` / `full_entry_min_rr` 兩層具名�
 
 | Issue | 內容 | 與本筆的關係 |
 |---|---|---|
-| [`issue.md`](./issue.md) **I-081** | `sr-zone-scoring.md` legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`（`decision_engine.py:499` 與 `:516`） | T-055 會把 RR 門檻改成兩層具名門檻，該段敘述整段要重寫——**建議與 T-055 一起改** |
-| [`issue.md`](./issue.md) **I-082** | ~~EXPIRED 的 primary zone 仍可能升級到 `Buy`~~ → **2026-08-21 重現實驗推翻**：行為正確，守門在 `_structure_state:2242`（`EXPIRED → BREAKDOWN`）而非 `strong`。剩下的只有文件錯位與缺迴歸保護 | **修法衝突已解除**（本筆不動 `strong`）。但 I-082 建議的迴歸測試「EXPIRED primary 不得輸出 `Buy`」**應在 T-055 之前先加**——它正是 T-055 改 `_decision_action` 時的安全網 |
+| [`issue.md`](./issue.md) **I-081** | `sr-zone-scoring.md` legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`（`decision_engine.py:499` 與 `:516`） | **已定案由本筆一併改**（2026-08-21）：本筆會把該段整條重寫成兩層具名門檻，見「完成後歸檔」 |
+| [`issue.md`](./issue.md) **I-082** | ~~EXPIRED 的 primary zone 仍可能升級到 `Buy`~~ → **2026-08-21 重現實驗推翻**：行為正確，守門在 `_structure_state:2242`（`EXPIRED → BREAKDOWN`）而非 `strong`。剩下的只有文件錯位與缺迴歸保護 | **修法衝突已解除**（本筆不動 `strong`）。迴歸測試「EXPIRED primary 不得輸出 `Buy`」**已於 2026-08-21 先行補完**（3 條測試＋變異驗證），是本筆改 `_decision_action` 時的安全網。**剩下的文件改寫已定案由本筆一併處理**，見「完成後歸檔」 |
 
 **I-082 的兩次判斷都被推翻，過程留在該筆**：先是誤判「`strong` 沒排除 EXPIRED 所以會發 Buy」，
 接著又錯誤地把嚴重度上調。實際窮舉（SUPPORT／RESISTANCE × 三種 regime ＋ 對照組）顯示
@@ -3799,7 +3813,7 @@ RESISTANCE 被 `bearish_setup` 擋下，而兩條 `_pick_primary_zone` 清單都
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R4 與同日「裁決前建議」；契約已定案，尚未實作**） |
+| 狀態 | **已實作／待歸檔**（計畫書第 3 版契約已定案；Python → Go 投影 → API 展開 → 前端呈現全數落地。**F1 修正已於 2026-08-24 review 通過**。**唯一未結項：尚未做「完成後歸檔」到 `sr-zone-scoring.md`，歸檔完成後本筆才能整筆移除**） |
 | 優先度 | 中 |
 | 分類 | Python / SR Zone / 決策呈現 |
 | 建立日期 | 2026-08-21 |
@@ -3947,6 +3961,49 @@ UI 標籤請用「**前方擋路壓力**」而非「結構壓力」，否則 Tie
 3. Go 投影測試：`buildDecisionZoneSummariesJSON` 白名單含兩個新欄位，否則 Python 產了但 DB 拿不到。
 4. decision replay 前後比對：**`by_rr_gate` 等決策分佈應完全不變**（本筆若改到決策就是做錯了）。
 5. **驗收走 dev compose**。
+
+#### T-056 實作 review findings（2026-08-21）
+
+**F1.（P1）新壓力欄位只進了 DB 投影，API 展開與前端顯示沒有跟上。**——**已修正（2026-08-21）、
+review 通過（2026-08-24）**，修正落點見本節末的「F1 修正紀錄」。
+
+目前 staged 實作已讓 Python `decision_summary` 輸出 `tactical_resistance_zone` /
+`blocking_resistance_zone`，Go analysis 端 `buildDecisionZoneSummariesJSON()` 也已把兩個新欄位
+寫進 `stock_sr_decisions.zone_summaries_json`。但後端 API 回傳歷史決策時，還會經過
+`backend/internal/api/handler/sr_zones.go::applyDecisionZoneSummariesJSON()` 再展開一次白名單；
+該白名單目前仍只有 `nearest_decision_zone` / `nearest_support_zone` / `nearest_resistance_zone` /
+`primary_structural_zone` / `best_trade_zone` / `primary_zone`，**沒有**
+`tactical_resistance_zone` / `blocking_resistance_zone`。結果是 Python 產了、analysis client 寫進 DB 了，
+但 API `decision_summary` 會把兩個新欄位丟掉。
+
+前端也尚未完成 T-056 契約：`SRDecisionSummary` 型別沒有兩個新欄位，`SRZones.svelte` 壓力區塊
+仍只顯示 `Nearest Resistance Zone` / `Primary Structural Zone`，沒有並列顯示
+`tactical_resistance_zone` 與 `blocking_resistance_zone`，也沒有在兩者不同時標示「前方擋路壓力」。
+
+這違反本筆修改目標第 2、3 條：「兩層同時輸出且同時顯示」與「擋路壓力必須出現在主畫面」。
+
+建議修正範圍：
+
+* `applyDecisionZoneSummariesJSON()` 白名單補 `tactical_resistance_zone` / `blocking_resistance_zone`；
+* 補 API handler 測試，確認 DB 內 `zone_summaries_json` 的兩個新欄位會出現在 response `decision_summary`；
+* `frontend/src/lib/api/srZones.ts` 的 `SRDecisionSummary` 補兩個型別欄位；
+* `frontend/src/routes/SRZones.svelte` 壓力顯示區塊改為顯示戰術壓力與前方擋路壓力，兩者相同時可合併，
+  不同時必須並列，且標籤不得寫「結構壓力」。
+
+##### F1 修正紀錄（2026-08-21，review 通過 2026-08-24）
+
+| 落點 | 修改 |
+|---|---|
+| `backend/internal/api/handler/sr_zones.go::applyDecisionZoneSummariesJSON` | 白名單補 `tactical_resistance_zone` / `blocking_resistance_zone`，並註明**這條路上有兩份各自獨立的白名單**（投影一份、展開一份），只補其中一份會在讀歷史決策時再被丟一次 |
+| `backend/internal/api/handler/sr_zones_create_test.go` | 新增 `TestSRZoneGetExposesLayeredResistanceZonesFromZoneSummaries`：從 `GET /sr-zones/:id` 的 HTTP response 斷言兩個新欄位、legacy alias 與 `primary_structural_zone` 都在。**已驗對照組**——把白名單改回舊版時該測試會失敗 |
+| `frontend/src/lib/api/srZones.ts` | `SRDecisionSummary` 補 `tactical_resistance_zone` / `blocking_resistance_zone`；`nearest_resistance_zone` 標 `@deprecated` 並寫明「不是價格最近」；`primary_structural_zone` 註明不參與進場擋路 |
+| `frontend/src/routes/SRZones.svelte` | 新增 `tacticalResistanceZone`（fallback legacy alias，供舊分析）／`blockingResistanceZone`／`resistanceLayersMerged`（以區間端點判定是否同一 zone，summary 沒有 zone_key）三個推導；壓力卡片改為：同一 zone 合併成「戰術壓力 ＝ 前方擋路壓力」一格，不同 zone 時並列且擋路壓力用琥珀色強調。`Primary Structural Zone` 標籤改為「大結構參考 Primary Structural Zone」 |
+| `frontend/src/routes/SRZones.test.ts` | 三個 case：不同區間並列、同一區間合併、只有 legacy alias 的舊分析；三者都斷言畫面**不含**「結構壓力」字樣（F2） |
+
+**F1 review 結果（2026-08-24）**：上表五個落點的修正方向確認無誤，F1 結案。
+
+**仍未做**：`#### 完成後歸檔` 那一節（`docs/sr-zone-scoring.md` 的欄位分工說明）尚未執行；
+這是 T-056 目前唯一未結項，完成後才可把本筆整筆從 `todo.md` 移除。
 
 #### 完成後歸檔
 

@@ -1932,14 +1932,35 @@ def _has_blocking_zone_ahead(
     return price_low is not None and current_price < price_low
 
 
-def _entry_blocking_zone_detail(zone_scores: list[ZoneScore], current_price: float) -> dict[str, Any]:
-    resistance_candidates = [
+def _blocking_resistance_zone(zone_scores: list[ZoneScore], current_price: float) -> Optional[ZoneScore]:
+    """前方第一道擋路壓力：現價之上（或現價還在其中）最近的有效 resistance。
+
+    **它不保證是結構性的**——這裡沒有任何 tier 過濾，第一道擋路壓力完全可能是 Tier-3
+    短期壓力。對外顯示一律用「前方擋路壓力」，**不要標成「結構壓力」**，否則 Tier-3 擋路時
+    會出現「標著結構壓力的短期壓力」（T-056 的 F2）。「大結構參考」是
+    `primary_structural_zone`（Tier-1 品質最高），兩者不保證相同。
+
+    選法**刻意與 `_nearest_zone_by_role` 不同**：這裡用純距離（`_distance_pct_to_zone`），
+    不加 `_zone_width_penalty`。擋路與否是物理問題——寬區間一樣擋路，不該因為「寬而模糊」
+    就被推到後面；而 `nearest_*_zone` 要的是「最值得參考的價位」，寬度懲罰在那裡才合理。
+
+    `_entry_blocking_zone_detail` 與 `zone_summaries.blocking_resistance_zone` 共用這個
+    函式，避免兩處選法漂移。
+    """
+    candidates = [
         z for z in zone_scores
         if z.role == ZoneType.RESISTANCE.value
         and z.recent_validation != RecentValidation.EXPIRED.value
         and z.price_high >= current_price
     ]
-    if not resistance_candidates:
+    if not candidates:
+        return None
+    return min(candidates, key=lambda z: _distance_pct_to_zone(z, current_price))
+
+
+def _entry_blocking_zone_detail(zone_scores: list[ZoneScore], current_price: float) -> dict[str, Any]:
+    zone = _blocking_resistance_zone(zone_scores, current_price)
+    if zone is None:
         return {
             "blocked": False,
             "reason_code": None,
@@ -1952,7 +1973,6 @@ def _entry_blocking_zone_detail(zone_scores: list[ZoneScore], current_price: flo
             "threshold_basis": "ZONE_WIDTH_OR_0_5_PERCENT_PROXY",
             "blocking_zone": None,
         }
-    zone = min(resistance_candidates, key=lambda z: _distance_pct_to_zone(z, current_price))
     distance_abs = max(float(zone.price_low) - current_price, 0.0)
     width = max(float(zone.price_high) - float(zone.price_low), 0.0)
     threshold_abs = max(width * 0.5, abs(current_price) * 0.005)
@@ -2432,6 +2452,15 @@ def build_decision_summary(
     )
     defense_lines = _defense_lines(zone_scores, primary_zone, current_price, market_events)
     entry_blocking_zone = _entry_blocking_zone_detail(zone_scores, current_price)
+    # T-056：擋路壓力升格成獨立的 summary 欄位。與 entry_blocking_zone 共用同一個選法
+    # （`_blocking_resistance_zone`），所以兩者恆指同一個 zone。
+    blocking_resistance_zone = _blocking_resistance_zone(zone_scores, current_price)
+    # 戰術壓力的 summary 只組一次，兩個鍵共用同一份（新鍵與 legacy alias 不得漂移）。
+    tactical_resistance_summary = _decision_summary_zone(
+        nearest_resistance_zone, current_price, "品質加權後最相關的戰術壓力（不是價格最近）",
+        candle_high, candle_low, candle_close,
+        decision_role="TACTICAL_RESISTANCE",
+    ) if nearest_resistance_zone else None
     blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price)
     entry_blocking_zone_ahead = bool(entry_blocking_zone.get("blocked"))
     decision_derived_view = _decision_derived_view(
@@ -2644,11 +2673,17 @@ def build_decision_summary(
             candle_high, candle_low, candle_close,
             decision_role="TACTICAL_SUPPORT",
         ) if nearest_support_zone else None,
-        "nearest_resistance_zone": _decision_summary_zone(
-            nearest_resistance_zone, current_price, "離現價最近的壓力決策參考區",
+        # T-056：戰術壓力與擋路壓力是兩層，必須同時輸出。
+        # `nearest_resistance_zone` **不是價格最近的壓力**——它經過 `_zone_width_penalty`
+        # 加權（見 sr-zone-scoring.md），所以更名為 `tactical_resistance_zone`；
+        # 舊鍵保留為 legacy alias，值完全相同。
+        "tactical_resistance_zone": tactical_resistance_summary,
+        "nearest_resistance_zone": tactical_resistance_summary,  # deprecated alias of tactical_resistance_zone
+        "blocking_resistance_zone": _decision_summary_zone(
+            blocking_resistance_zone, current_price, "前方第一道擋路壓力",
             candle_high, candle_low, candle_close,
-            decision_role="TACTICAL_RESISTANCE",
-        ) if nearest_resistance_zone else None,
+            decision_role="BLOCKING_RESISTANCE",
+        ) if blocking_resistance_zone else None,
         "primary_structural_zone": _decision_summary_zone(
             structural_zone, current_price, "主要結構區",
             candle_high, candle_low, candle_close,

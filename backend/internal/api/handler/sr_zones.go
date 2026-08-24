@@ -304,10 +304,16 @@ func applyDecisionZoneSummariesJSON(obj map[string]any, raw store.RawJSON) {
 		return
 	}
 	summaries := rawObjectOrEmpty(raw)
+	// 這份白名單要與 analysis.buildDecisionZoneSummariesJSON() 的投影白名單一致——
+	// 投影寫進 zone_summaries_json 的鍵若沒列在這裡，讀歷史決策時會被再丟掉一次。
+	// T-056：tactical_resistance_zone / blocking_resistance_zone 是兩層壓力欄位，
+	// nearest_resistance_zone 保留為 tactical 的 legacy alias（值相同）。
 	for _, key := range []string{
 		"nearest_decision_zone",
 		"nearest_support_zone",
 		"nearest_resistance_zone",
+		"tactical_resistance_zone",
+		"blocking_resistance_zone",
 		"primary_structural_zone",
 		"best_trade_zone",
 		"primary_zone",

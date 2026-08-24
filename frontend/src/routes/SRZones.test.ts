@@ -5,12 +5,16 @@ import SRZones from './SRZones.svelte'
 import {
   getModelStatus,
   getSREvaluationJob,
+  getSRZoneAnalysis,
   listSREvaluationJobs,
   listSRRegressionResults,
   listSRZoneAnalyses,
   listTrainJobs,
   runSREvaluation,
+  type SRDecisionSummary,
+  type SRDecisionZoneSummary,
   type SREvaluationJob,
+  type SRZoneAnalysis,
 } from '../lib/api/srZones'
 
 // 元件層測試：srZones.ts 的 API 契約已由 srZones.test.ts 保護，這裡驗的是
@@ -832,5 +836,140 @@ describe('SRZones evaluation 的 zone builder 參數輸入', () => {
     expect(runSREvaluation).toHaveBeenCalledWith(
       expect.objectContaining({ atrWidthMultiplier: 1.2, atrPeriod: 14 })
     )
+  })
+})
+
+// T-056：戰術壓力與前方擋路壓力是兩層，必須同時可見。
+//
+// 只顯示 `nearest_resistance_zone` 會誤導——它經 `zone_width_penalty` 加權，過寬的主結構
+// 會被推到窄壓力後面，於是「Nearest Resistance 顯示 107.18，實際擋住進場的是 105.19」。
+// 這裡驗的是呈現契約：兩者不同時並列、相同時合併，且標籤不得寫成「結構壓力」
+// （擋路壓力沒有 tier 過濾，可能是 Tier-3）。
+function zoneSummary(priceLow: number, priceHigh: number, overrides: Partial<SRDecisionZoneSummary> = {}): SRDecisionZoneSummary {
+  return {
+    price_low: priceLow,
+    price_high: priceHigh,
+    label: `${priceLow.toFixed(2)} ~ ${priceHigh.toFixed(2)}`,
+    role: 'RESISTANCE',
+    tier: 'TIER_2_TRADING_ZONE',
+    tier_label: '交易區',
+    trading_score: 70,
+    confidence: 0.6,
+    confidence_level: 'MEDIUM',
+    expected_value: 0.1,
+    risk_reward_ratio: 2,
+    distance_pct: 0.0242,
+    distance_label: '2.42%',
+    recent_validation: 'VALIDATED_RECENTLY',
+    volume_confirmation: 'CONFIRMED',
+    confluence_count: 2,
+    lifecycle: 'CONFIRMED',
+    reason: '測試用壓力區',
+    ...overrides,
+  }
+}
+
+function analysisWithDecision(decisionSummary: SRDecisionSummary): SRZoneAnalysis {
+  return {
+    id: 56,
+    symbol: '0050',
+    timeframe: '1d',
+    analyzed_at: '2026-08-21T01:30:00Z',
+    current_price: 104.65,
+    global_trend: 0.2,
+    global_volatility: 0.1,
+    global_expected_value: 0.1,
+    global_confidence: 0.6,
+    global_risk_reward_ratio: 2,
+    model_version: 'v-test',
+    model_config_hash: 'hash-test',
+    pipeline_version: 'v2',
+    evidence: null,
+    period_summaries: [],
+    analysis_tips: [],
+    decision_summary: decisionSummary,
+    created_at: '2026-08-21T01:30:00Z',
+  }
+}
+
+// hasDecisionDetail 需要 market_regime 與 confidence_explanation，壓力區塊才會渲染。
+function decisionSummaryWith(zones: Partial<SRDecisionSummary>): SRDecisionSummary {
+  return {
+    market_regime: {
+      primary: 'RANGE_BOUND',
+      flags: [],
+      label: '區間整理',
+      reasons: [],
+    },
+    confidence_explanation: {
+      value: 0.6,
+      level: 'MEDIUM',
+      label: '中',
+      formula_factors: [],
+      context_factors: [],
+    },
+    ...zones,
+  }
+}
+
+async function renderWithDecision(decisionSummary: SRDecisionSummary) {
+  const analysis = analysisWithDecision(decisionSummary)
+  vi.mocked(listSRZoneAnalyses).mockResolvedValue([analysis])
+  vi.mocked(getSRZoneAnalysis).mockResolvedValue({ analysis, zones: [] })
+
+  render(SRZones)
+  await tick()
+  await tick()
+  // 歷史列表的整列可點；點 symbol 儲存格會冒泡到 <tr> 的 selectHistory。
+  await fireEvent.click(screen.getAllByText('0050')[0])
+  await tick()
+  await tick()
+}
+
+describe('SRZones 決策摘要的兩層壓力呈現', () => {
+  it('戰術壓力與前方擋路壓力不同區間時並列顯示，且不使用「結構壓力」字樣', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      tactical_resistance_zone: zoneSummary(107.18, 107.82, { decision_role: 'TACTICAL_RESISTANCE' }),
+      nearest_resistance_zone: zoneSummary(107.18, 107.82, { decision_role: 'TACTICAL_RESISTANCE' }),
+      blocking_resistance_zone: zoneSummary(105.19, 111, {
+        tier: 'TIER_1_MAIN_STRUCTURE',
+        tier_label: '主結構',
+        decision_role: 'BLOCKING_RESISTANCE',
+        distance_pct: 0.0051,
+        distance_label: '0.51%',
+      }),
+      primary_structural_zone: zoneSummary(105.19, 111, { tier: 'TIER_1_MAIN_STRUCTURE', tier_label: '主結構' }),
+    }))
+
+    expect(await screen.findByText('戰術壓力')).toBeInTheDocument()
+    expect(screen.getByText('前方擋路壓力')).toBeInTheDocument()
+    expect(screen.getAllByText('107.18 ~ 107.82').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('105.19 ~ 111.00').length).toBeGreaterThan(0)
+    // 擋路壓力不保證是結構性的，標籤寫「結構壓力」會在 Tier-3 擋路時再錯配一次。
+    expect(screen.queryByText(/結構壓力/)).toBeNull()
+  })
+
+  it('兩層指向同一個區間時合併為一格', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      tactical_resistance_zone: zoneSummary(105.19, 111, { decision_role: 'TACTICAL_RESISTANCE' }),
+      nearest_resistance_zone: zoneSummary(105.19, 111, { decision_role: 'TACTICAL_RESISTANCE' }),
+      blocking_resistance_zone: zoneSummary(105.19, 111, { decision_role: 'BLOCKING_RESISTANCE' }),
+    }))
+
+    expect(await screen.findByText('戰術壓力 ＝ 前方擋路壓力')).toBeInTheDocument()
+    expect(screen.queryByText('戰術壓力')).toBeNull()
+    expect(screen.queryByText('前方擋路壓力')).toBeNull()
+    expect(screen.queryByText(/結構壓力/)).toBeNull()
+  })
+
+  it('舊分析只有 legacy alias 時仍顯示戰術壓力', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      nearest_resistance_zone: zoneSummary(107.18, 107.82, { decision_role: 'TACTICAL_RESISTANCE' }),
+    }))
+
+    expect(await screen.findByText('戰術壓力')).toBeInTheDocument()
+    expect(screen.getAllByText('107.18 ~ 107.82').length).toBeGreaterThan(0)
+    // 沒有 blocking 欄位時不硬生一格空的擋路壓力。
+    expect(screen.queryByText('前方擋路壓力')).toBeNull()
   })
 })

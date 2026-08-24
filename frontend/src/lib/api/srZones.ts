@@ -785,7 +785,22 @@ export interface SRDecisionSummary {
   rr_gate?: SRRRGate
   nearest_decision_zone?: SRDecisionZoneSummary | null
   nearest_support_zone?: SRDecisionZoneSummary | null
+  /**
+   * @deprecated 改用 `tactical_resistance_zone`；後端同時輸出兩者且值完全相同。
+   * **這個欄位不是「價格最近」的壓力**——它經 `zone_width_penalty` 加權，
+   * 過寬的區間會被推到較窄、較精確的價位後面（見 docs/sr-zone-scoring.md）。
+   * 真正擋住進場的第一道壓力是 `blocking_resistance_zone`。
+   */
   nearest_resistance_zone?: SRDecisionZoneSummary | null
+  /** 品質加權後最相關的戰術壓力（不是價格最近）。`nearest_resistance_zone` 是它的 legacy alias。 */
+  tactical_resistance_zone?: SRDecisionZoneSummary | null
+  /**
+   * 前方第一道擋路壓力（純距離最近的有效 resistance），供顯示與 executable RR target cap 使用。
+   * **不保證是結構性的**——來源沒有 tier 過濾，可能是 Tier-3 短期壓力，
+   * 所以 UI 標籤一律用「前方擋路壓力」，不得寫成「結構壓力」。
+   */
+  blocking_resistance_zone?: SRDecisionZoneSummary | null
+  /** Tier-1 品質最高的大結構參考，**不參與**進場擋路判斷。 */
   primary_structural_zone?: SRDecisionZoneSummary | null
   best_trade_zone?: SRDecisionZoneSummary | null
   primary_zone?: SRDecisionZoneSummary | null

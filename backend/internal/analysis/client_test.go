@@ -1103,3 +1103,59 @@ func TestScoreZonesOmitsPreviousAnalyzedAtWithoutPreviousStates(t *testing.T) {
 		t.Fatalf("沒有 previous states 時不該送 previous_analyzed_at，got %v", raw["previous_analyzed_at"])
 	}
 }
+
+// T-056：zone_summaries 是**白名單**投影，不是整包轉發。Python 新增了
+// tactical_resistance_zone / blocking_resistance_zone，白名單漏掉任何一個都會讓欄位
+// 靜默消失在 DB 裡——Python 端測試不會發現，因為它只驗到 decision_summary。
+func TestBuildDecisionZoneSummariesJSONCarriesTwoResistanceLayers(t *testing.T) {
+	obj := map[string]any{
+		"tactical_resistance_zone": map[string]any{"price_low": 107.1775, "decision_role": "TACTICAL_RESISTANCE"},
+		"nearest_resistance_zone":  map[string]any{"price_low": 107.1775, "decision_role": "TACTICAL_RESISTANCE"},
+		"blocking_resistance_zone": map[string]any{"price_low": 105.18616618688597, "decision_role": "BLOCKING_RESISTANCE"},
+		"primary_structural_zone":  map[string]any{"price_low": 105.18616618688597, "decision_role": "STRUCTURAL"},
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal([]byte(buildDecisionZoneSummariesJSON(obj)), &out); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	for _, key := range []string{
+		"tactical_resistance_zone",
+		"blocking_resistance_zone",
+		"nearest_resistance_zone",
+		"primary_structural_zone",
+	} {
+		zone, ok := out[key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s 沒有被投影出來（白名單漏了它，DB 會拿不到）", key)
+		}
+		if zone["decision_role"] == nil {
+			t.Fatalf("%s 的內容被截掉了: %v", key, zone)
+		}
+	}
+
+	// 擋路壓力與戰術壓力必須是**不同**的 zone——投影不得把兩者對調或合併。
+	blocking := out["blocking_resistance_zone"].(map[string]any)
+	tactical := out["tactical_resistance_zone"].(map[string]any)
+	if blocking["price_low"] == tactical["price_low"] {
+		t.Fatalf("兩層壓力被投影成同一個 zone: blocking=%v tactical=%v", blocking, tactical)
+	}
+}
+
+// 缺欄位時投影必須留 null 而不是整個 key 消失——前端與舊資料都靠「鍵在、值為 null」降級。
+func TestBuildDecisionZoneSummariesJSONKeepsNullForMissingResistanceLayers(t *testing.T) {
+	var out map[string]any
+	if err := json.Unmarshal([]byte(buildDecisionZoneSummariesJSON(map[string]any{})), &out); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	for _, key := range []string{"tactical_resistance_zone", "blocking_resistance_zone"} {
+		value, ok := out[key]
+		if !ok {
+			t.Fatalf("%s 這個鍵不見了", key)
+		}
+		if value != nil {
+			t.Fatalf("%s 應為 null，got %v", key, value)
+		}
+	}
+}

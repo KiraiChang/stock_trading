@@ -73,6 +73,17 @@
   $: missingNormalizedDecision = !!current && !decisionSummary && current.normalized_status?.decision === 'missing'
   $: missingModelGovernance = !!current && !current.probability_context && current.normalized_status?.model_governance === 'missing'
   $: hasDecisionDetail = !!decisionSummary?.market_regime && !!decisionSummary?.confidence_explanation
+  // T-056：壓力有兩層，必須同時可見。
+  // `tactical_resistance_zone`＝品質加權後最相關的壓力（**不是價格最近**，寬度懲罰會把過寬的
+  // 主結構推到窄壓力後面）；`blocking_resistance_zone`＝純距離最近、真正擋住進場的第一道壓力。
+  // 舊分析只有 legacy alias `nearest_resistance_zone`，所以 tactical 要 fallback。
+  $: tacticalResistanceZone = decisionSummary?.tactical_resistance_zone ?? decisionSummary?.nearest_resistance_zone ?? null
+  $: blockingResistanceZone = decisionSummary?.blocking_resistance_zone ?? null
+  // summary 沒有 zone_key，區間端點就是 zone 身分。同一個 zone 才合併成一格，避免畫面重複。
+  $: resistanceLayersMerged = !!tacticalResistanceZone && !!blockingResistanceZone
+    && tacticalResistanceZone.price_low === blockingResistanceZone.price_low
+    && tacticalResistanceZone.price_high === blockingResistanceZone.price_high
+  $: resistanceLayersSplit = !resistanceLayersMerged && !!blockingResistanceZone
   $: analysisExplanation = current?.explanation ?? null
   $: explanationSummary = analysisExplanation?.summary
     ?? analysisTips[0]
@@ -2415,8 +2426,8 @@
               </div>
             {/if}
 
-            {#if decisionSummary.best_trade_zone || decisionSummary.nearest_support_zone || decisionSummary.nearest_resistance_zone || decisionSummary.primary_structural_zone}
-              <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4 text-xs">
+            {#if decisionSummary.best_trade_zone || decisionSummary.nearest_support_zone || tacticalResistanceZone || blockingResistanceZone || decisionSummary.primary_structural_zone}
+              <div class="grid md:grid-cols-2 gap-3 mb-4 text-xs {resistanceLayersSplit ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">Best Trade Zone</p>
                   <p class="text-white font-mono">{decisionSummary.best_trade_zone?.label ?? '尚未成立'}</p>
@@ -2431,19 +2442,44 @@
                     <p class="text-muted mt-1">距離 {decisionSummary.nearest_support_zone.distance_label}{#if decisionSummary.nearest_support_zone.lifecycle} · {decisionSummary.nearest_support_zone.lifecycle}{/if}</p>
                   {/if}
                 </div>
-                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
-                  <p class="text-muted mb-1">Nearest Resistance Zone</p>
-                  <p class="text-white font-mono">{decisionSummary.nearest_resistance_zone?.label ?? '—'}</p>
-                  {#if decisionSummary.nearest_resistance_zone}
-                    <p class="text-muted mt-1">距離 {decisionSummary.nearest_resistance_zone.distance_label}{#if decisionSummary.nearest_resistance_zone.lifecycle} · {decisionSummary.nearest_resistance_zone.lifecycle}{/if}</p>
+                <!-- T-056：兩層壓力。同一個 zone 時合併成一格，不同 zone 時必須並列——
+                     只顯示戰術壓力會讓使用者看不到真正擋住進場的那道價位。
+                     擋路壓力沒有 tier 過濾，可能是 Tier-3，所以標籤是「前方擋路壓力」，
+                     **不能寫成「結構壓力」**。 -->
+                {#if resistanceLayersMerged}
+                  <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                    <p class="text-muted mb-1">戰術壓力 ＝ 前方擋路壓力</p>
+                    <p class="text-white font-mono">{tacticalResistanceZone?.label ?? '—'}</p>
+                    {#if tacticalResistanceZone}
+                      <p class="text-muted mt-1">距離 {tacticalResistanceZone.distance_label}{#if tacticalResistanceZone.lifecycle} · {tacticalResistanceZone.lifecycle}{/if}</p>
+                    {/if}
+                    <p class="text-muted mt-1">最相關的壓力同時就是前方第一道擋路壓力</p>
+                  </div>
+                {:else}
+                  <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                    <p class="text-muted mb-1">戰術壓力</p>
+                    <p class="text-white font-mono">{tacticalResistanceZone?.label ?? '—'}</p>
+                    {#if tacticalResistanceZone}
+                      <p class="text-muted mt-1">距離 {tacticalResistanceZone.distance_label}{#if tacticalResistanceZone.lifecycle} · {tacticalResistanceZone.lifecycle}{/if}</p>
+                    {/if}
+                    <p class="text-muted mt-1">品質加權後最相關，不是價格最近</p>
+                  </div>
+                  {#if blockingResistanceZone}
+                    <div class="border border-amber-500/60 rounded-lg p-3 bg-amber-950/20">
+                      <p class="text-amber-300 mb-1">前方擋路壓力</p>
+                      <p class="text-white font-mono">{blockingResistanceZone.label}</p>
+                      <p class="text-muted mt-1">距離 {blockingResistanceZone.distance_label}{#if blockingResistanceZone.lifecycle} · {blockingResistanceZone.lifecycle}{/if}</p>
+                      <p class="text-amber-300/80 mt-1">實際擋住進場的第一道壓力，與戰術壓力不是同一個區間</p>
+                    </div>
                   {/if}
-                </div>
+                {/if}
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
-                  <p class="text-muted mb-1">Primary Structural Zone</p>
+                  <p class="text-muted mb-1">大結構參考 Primary Structural Zone</p>
                   <p class="text-white font-mono">{decisionSummary.primary_structural_zone?.label ?? '—'}</p>
                   {#if decisionSummary.primary_structural_zone?.lifecycle}
                     <p class="text-muted mt-1">{decisionSummary.primary_structural_zone.source} · {decisionSummary.primary_structural_zone.lifecycle}</p>
                   {/if}
+                  <p class="text-muted mt-1">Tier-1 大結構參考，不參與進場擋路判斷</p>
                 </div>
               </div>
             {/if}

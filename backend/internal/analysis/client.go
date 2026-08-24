@@ -805,19 +805,26 @@ func decisionRawJSONAt(obj map[string]any, fallback string, path ...string) stor
 }
 
 func buildDecisionZoneSummariesJSON(obj map[string]any) store.RawJSON {
+	// T-056：tactical_resistance_zone 與 blocking_resistance_zone 是新的兩層壓力欄位。
+	// nearest_resistance_zone 保留為 tactical 的 legacy alias（Python 端同值輸出）。
+	// **這份白名單漏了誰，Python 產了 DB 也拿不到**——投影是白名單而不是整包轉發。
 	out := map[string]any{
-		"nearest_decision_zone":   nil,
-		"nearest_support_zone":    nil,
-		"nearest_resistance_zone": nil,
-		"primary_structural_zone": nil,
-		"best_trade_zone":         nil,
-		"primary_zone":            nil,
-		"secondary_zones":         []any{},
+		"nearest_decision_zone":    nil,
+		"nearest_support_zone":     nil,
+		"nearest_resistance_zone":  nil,
+		"tactical_resistance_zone": nil,
+		"blocking_resistance_zone": nil,
+		"primary_structural_zone":  nil,
+		"best_trade_zone":          nil,
+		"primary_zone":             nil,
+		"secondary_zones":          []any{},
 	}
 	for _, key := range []string{
 		"nearest_decision_zone",
 		"nearest_support_zone",
 		"nearest_resistance_zone",
+		"tactical_resistance_zone",
+		"blocking_resistance_zone",
 		"primary_structural_zone",
 		"best_trade_zone",
 		"primary_zone",
@@ -829,7 +836,7 @@ func buildDecisionZoneSummariesJSON(obj map[string]any) store.RawJSON {
 	}
 	data, err := json.Marshal(out)
 	if err != nil || !json.Valid(data) {
-		return store.RawJSON(`{"nearest_decision_zone":null,"nearest_support_zone":null,"nearest_resistance_zone":null,"primary_structural_zone":null,"best_trade_zone":null,"primary_zone":null,"secondary_zones":[]}`)
+		return store.RawJSON(`{"nearest_decision_zone":null,"nearest_support_zone":null,"nearest_resistance_zone":null,"tactical_resistance_zone":null,"blocking_resistance_zone":null,"primary_structural_zone":null,"best_trade_zone":null,"primary_zone":null,"secondary_zones":[]}`)
 	}
 	return store.RawJSON(data)
 }

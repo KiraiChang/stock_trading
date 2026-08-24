@@ -1853,3 +1853,123 @@ def test_expired_primary_zone_end_to_end_is_not_buy():
         "fixture 沒讓 EXPIRED zone 成為 primary，這條測試就沒有在測 I-082 的情境"
     )
     assert ds["action"] != "Buy"
+
+
+# ── T-056：戰術壓力與前方擋路壓力是兩層 ───────────────────────────────────────
+#
+# `nearest_resistance_zone` **不是價格最近的壓力**：它的選法是
+# `_decision_distance_score = _distance_pct_to_zone + _zone_width_penalty × 0.08`，
+# 寬區間會被推到後面（這是 sr-zone-scoring.md 寫明的刻意設計，不是 bug）。
+# 於是「顯示的最近壓力」與「實際擋住進場的壓力」可以是不同的 zone——live 0050
+# （2026-08-20）就是這樣：顯示 107.18，擋路的卻是 0.51% 外的 105.19。
+#
+# T-056 的作法是**正名 ＋ 兩層並列**，不動選法。下面這組 fixture 直接用 0050 的真實數字。
+
+
+def _zones_0050() -> list[ZoneScore]:
+    """live 0050（`analyzed_at=2026-08-20`，`current_price=104.65`）的三個關鍵 zone。"""
+    return [
+        # 主交易區：短期支撐
+        _zone(
+            role=ZoneType.SUPPORT.value, low=103.4886, high=104.1114,
+            tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期",
+            confidence=0.6553, risk_reward_ratio=1.8664,
+        ),
+        # 主結構壓力：**寬 5.55%**，距現價僅 0.51%——擋路的就是它
+        _zone(
+            role=ZoneType.RESISTANCE.value, low=105.18616618688597, high=110.99830961886403,
+            tier=ZoneTier.TIER_1_MAIN_STRUCTURE.value, tier_label="主結構",
+            confidence=0.6841, risk_reward_ratio=2.5514,
+        ),
+        # 交易區壓力：窄，距現價 2.42%——因為窄而沒有寬度懲罰，反而被選成 "nearest"
+        _zone(
+            role=ZoneType.RESISTANCE.value, low=107.1775, high=107.8225,
+            tier=ZoneTier.TIER_2_TRADING_ZONE.value, tier_label="交易區",
+            confidence=0.62, risk_reward_ratio=2.1,
+        ),
+    ]
+
+
+def test_tactical_resistance_keeps_the_existing_width_weighted_selection():
+    """`tactical_resistance_zone` 必須與改動前的 `nearest_resistance_zone` 逐字相同。
+
+    T-056 是呈現層調整，**不得改 `_decision_distance_score`**。這條就是那個界線的驗收：
+    0050 這組數字下，答案必須仍然是 107.18 那個窄區，而不是距離更近的 105.19。
+    """
+    ds = _summary(_zones_0050(), current_price=104.65)
+
+    assert ds["tactical_resistance_zone"]["price_low"] == 107.1775
+    assert ds["tactical_resistance_zone"]["decision_role"] == "TACTICAL_RESISTANCE"
+
+
+def test_nearest_resistance_zone_stays_as_legacy_alias():
+    """舊鍵保留且與新鍵**同值**——前端與 Go projection 還在讀它，漂移會靜默改變顯示。"""
+    ds = _summary(_zones_0050(), current_price=104.65)
+
+    assert ds["nearest_resistance_zone"] == ds["tactical_resistance_zone"]
+
+
+def test_blocking_resistance_zone_is_the_price_nearest_one_not_the_tactical_one():
+    """擋路壓力用純距離選，所以它可以比 `tactical_resistance_zone` 更近。
+
+    這正是 live 0050 的矛盾點：「最近壓力 107.18」與「擋住進場的 105.19」並存。
+    兩層都輸出之後才自洽。
+    """
+    ds = _summary(_zones_0050(), current_price=104.65)
+
+    blocking = ds["blocking_resistance_zone"]
+    tactical = ds["tactical_resistance_zone"]
+
+    assert blocking["price_low"] == 105.18616618688597
+    assert blocking["decision_role"] == "BLOCKING_RESISTANCE"
+    # 擋路的那個**在價格上更近**——這就是 "nearest" 這個舊名字誤導人的地方
+    assert blocking["distance_pct"] < tactical["distance_pct"]
+
+
+def test_blocking_resistance_zone_and_entry_blocking_zone_are_the_same_zone():
+    """兩者共用 `_blocking_resistance_zone`，恆指同一個 zone；分開實作就會漂移。"""
+    ds = _summary(_zones_0050(), current_price=104.65)
+
+    blocking = ds["blocking_resistance_zone"]
+    gate_zone = ds["entry_blocking_zone"]["blocking_zone"]
+
+    assert (blocking["price_low"], blocking["price_high"]) == (
+        gate_zone["price_low"], gate_zone["price_high"]
+    )
+
+
+def test_primary_structural_zone_is_not_redefined_by_t056():
+    """`primary_structural_zone` 語意不變：Tier-1 品質最高的**大結構參考**。
+
+    它與 `blocking_resistance_zone` 在 0050 碰巧是同一個 zone，**但那是巧合**——
+    前者取 Tier-1 品質最高者、後者取距離最近者。所以 T-056 刻意不建
+    `structural_resistance_zone` 把兩者混成一個欄位。
+    """
+    ds = _summary(_zones_0050(), current_price=104.65)
+
+    assert ds["primary_structural_zone"]["tier"] == ZoneTier.TIER_1_MAIN_STRUCTURE.value
+    assert ds["primary_structural_zone"]["decision_role"] == "STRUCTURAL"
+
+
+def test_blocking_resistance_zone_may_be_short_term_and_must_not_claim_structural():
+    """**F2 迴歸保護**：第一道擋路壓力不保證是結構性的。
+
+    `_blocking_resistance_zone` 沒有任何 tier 過濾，所以它可以是 Tier-3 短期壓力。
+    欄位不得因此改名或被標成結構層——UI 標籤要用「前方擋路壓力」而不是「結構壓力」。
+    這條測試就是在釘住「不要把它當結構壓力」這件事。
+    """
+    short_term_resistance = _zone(
+        role=ZoneType.RESISTANCE.value, low=100.4, high=100.6,
+        tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期",
+    )
+    support = _zone(role=ZoneType.SUPPORT.value, low=99.0, high=100.0)
+
+    ds = _summary([support, short_term_resistance], current_price=100.1)
+
+    blocking = ds["blocking_resistance_zone"]
+    assert blocking["tier"] == ZoneTier.TIER_3_SHORT_TERM.value
+    assert blocking["decision_role"] == "BLOCKING_RESISTANCE"
+    # 大結構參考是另一個欄位，不會因為擋路的是短期壓力就被改寫
+    assert ds["primary_structural_zone"] is None or (
+        ds["primary_structural_zone"]["tier"] == ZoneTier.TIER_1_MAIN_STRUCTURE.value
+    )

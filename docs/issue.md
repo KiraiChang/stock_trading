@@ -16,7 +16,7 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-086` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084／I-085 於 2026-08-24 發出。）
+- **下一個新編號從 `I-088` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出。）
   檔案裡看得到的最大是 I-085，但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-070～I-072 更早）都佔用過編號。
@@ -35,9 +35,90 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-083 / I-084 與下一個可用的 I-086），那是預期的，不是殘留。
+  I-083 / I-084 與下一個可用的 I-088），那是預期的，不是殘留。
   `todo.md` 的 T-055 review 沿革內也還有兩處 I-083 引用，都寫成「原記於…，已收斂」的歷史形式，
   同樣不是殘留。
+
+---
+
+### I-086：`sr_zone_verify` 的清單查詢失敗被記成 `success`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 中（整輪沒跑成，但 `job_runs` 顯示成功——與 I-084 缺陷 3 同類的「狀態不誠實」） |
+| 分類 | Go / Scheduler / 狀態誠實 |
+| 發現日期 | 2026-08-24 |
+| 來源 | SR zone 分析排程驗收（live 唯讀查詢 `job_runs` 與 backend log） |
+
+`runSRZoneVerification` 在取分析清單失敗時這樣收尾（`scheduler.go:559`）：
+
+```go
+analyses, err := s.srZoneRepo.List(ctx, "", srZoneVerifyLimit)
+if err != nil {
+    s.log.Error("sr zone list failed", zap.Error(err))
+    s.finishRun(ctx, runID, "sr_zone_verify", 0, 0, err.Error())
+    return
+}
+```
+
+而 `finishRunDegraded` 的狀態判定（`scheduler.go:317-325`）是：
+
+| 條件 | status |
+|---|---|
+| `total > 0 && failed >= total` | `failed` |
+| `failed > 0` | `partial` |
+| 其餘 | **`success`** |
+
+`total=0, failed=0` 必然落到最後一行，於是**整輪根本沒開始跑，`job_runs` 卻記 `success`**，
+只有 `error` 欄留著訊息——而讀 `/scheduler/status` 的人是先看 `status` 的。
+
+**這個模式 T-057 已經修過一次，只是沒有推廣。** T-057 P0 的「與計畫書差異 2、3」把
+`corporate_action_sync` 的兩條同型路徑改掉了（`SymbolsWithCandles` 失敗改記
+`finishRun(..., 1, 1, err)`、`SyncSplits` 失敗時 `total` 由 `0` 改傳 `1`），理由正是
+「`total=0` 會讓 `failed > 0` 判成 `partial`，但那時整輪根本沒開始跑」。
+`sr_zone_verify` 這條當時沒被掃到，而且它比那兩條更嚴重——`failed` 也是 0，
+連 `partial` 都到不了，直接是 `success`。
+
+**修法方向**：比照 T-057 的作法傳 `(1, 1, err)`，讓「整輪沒開始」記成 `failed`。
+同源的還有 [I-087](#i-087sr_analysis--sr_analysis_chip-的-watchlist-讀取失敗記成-partial-而非-failed)，
+兩筆一起修比較不會再漏。更根本的作法是讓 `finishRun` 對「`total=0` 但 `lastErr` 非空」
+直接判 `failed`，但那會改變所有 job 的共用判定，要先確認沒有「合法的零標的成功輪」
+會被誤判（`runSRAnalysis` 在 `len(symbols)==0` 時就是傳 `(0, 0, "")`，那是合法的）。
+
+**這是讀碼推論，尚未重現。** 依既定流程，修之前要先補一條重現測試：stub 的 `List`
+回錯誤時斷言 `job_runs.status == "failed"`，並附對照組（`List` 正常且零失敗時仍是
+`success`），否則測試會在 fixture 退化時假綠。
+
+---
+
+### I-087：`sr_analysis` / `sr_analysis_chip` 的 watchlist 讀取失敗記成 `partial` 而非 `failed`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（狀態語意不精確，但至少不是 `success`，看得出異常） |
+| 分類 | Go / Scheduler / 狀態誠實 |
+| 發現日期 | 2026-08-24 |
+| 來源 | SR zone 分析排程驗收（與 [I-086](#i-086sr_zone_verify-的清單查詢失敗被記成-success) 同一次） |
+
+`runSRAnalysis` 在 watchlist 讀不到時傳 `(0, 1)`（`scheduler.go:1098`）：
+
+```go
+s.finishRun(ctx, runID, jobName, 0, 1, err.Error())
+```
+
+`total=0` 讓 `total > 0 && failed >= total` 不成立，於是落到 `failed > 0` 記成 `partial`。
+
+但 `partial` 在 [`api-reference.md`](./api-reference.md) 的定義是**「這輪跑得不完整」**，
+三種成因（名單內有標的失敗、逾時沒跑完、名單本身少了一批）**都預設整輪有跑**。
+watchlist 讀不到時整輪一檔都沒分析，語意上是 `failed`。
+
+**與 `corporate_action_sync` 的降級不同，不要混為一談**：那邊 watchlist 讀不到時仍會跑
+當日分片，記 `partial` 是對的（真的跑了一批）；SR 分析的標的來源**只有** watchlist，
+讀不到就等於整輪沒有輸入。
+
+**修法方向**：傳 `(1, 1, err)`，與 I-086 一起改。
 
 ---
 

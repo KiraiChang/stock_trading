@@ -179,6 +179,14 @@ func (s *srZoneRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timef
 	return nil, nil
 }
 
+// ListRefsSince 只為滿足 store.SRZoneRepo 介面而存在——這個 stub 服務的 SRZoneHandler
+// 走的是 List／GetLatestByTimeframe，不碰這支（sr_zone_verify 排程才用它）。
+// 刻意回空而不是轉呼叫 List：真的有人在這裡依賴它時，測試會因為拿不到資料而失敗，
+// 比靜默回傳一份語意不同的清單好。
+func (s *srZoneRepoStub) ListRefsSince(ctx context.Context, since time.Time, limit int) ([]store.SRZoneAnalysisRef, error) {
+	return nil, nil
+}
+
 func (s *srZoneRepoStub) List(ctx context.Context, symbol string, limit int) ([]store.SRZoneAnalysis, error) {
 	rows := make([]store.SRZoneAnalysis, 0, len(s.analyses))
 	for _, a := range s.analyses {

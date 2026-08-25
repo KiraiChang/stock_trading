@@ -126,17 +126,22 @@ type jobStatus struct {
 // 排程有註冊的標 never_run（該跑卻沒跑），沒註冊的標 disabled（刻意沒開）。
 // 完整規格見 docs/api-reference.md 的 GET /scheduler/status。
 func (h *SchedulerHandler) GetStatus(c *gin.Context) {
-	runs, err := h.repo.GetRecent(c.Request.Context(), 50)
+	// **每個 job 各取最新一筆，不是「取最近 N 筆再分組」**：後者的視窗放不下一天的
+	// 紀錄——intraday 每 5 分鐘一筆、一天 55 筆，會把早上跑過的 job 整批擠出去，
+	// 於是 06:30 的 corporate_action_sync 每天過了 13:30 就被報成 never_run
+	// ＋ stale（規格見 docs/api-reference.md 的 GET /scheduler/status）。
+	// 查詢回的是「表裡有紀錄的 job_name 各一列」（沒跑過的不會出現），
+	// 下面遍歷 knownSchedulerJobs 時才補成 never_run / disabled——
+	// **固定回 11 列是這個迴圈的保證，不是那句 SQL 的**。
+	runs, err := h.repo.GetLatestPerJob(c.Request.Context())
 	if err != nil {
 		serverError(c, h.log, err, "scheduler: get status")
 		return
 	}
 
-	latest := map[string]store.JobRun{}
+	latest := make(map[string]store.JobRun, len(runs))
 	for _, r := range runs {
-		if _, ok := latest[r.JobName]; !ok {
-			latest[r.JobName] = r
-		}
+		latest[r.JobName] = r
 	}
 
 	result := make([]jobStatus, 0, len(knownSchedulerJobs))

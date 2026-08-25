@@ -499,8 +499,9 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 
 **這個端點存在的理由是趨勢**：同一組數字已經有結構化 log，但 log 答不出
 「alias 命中率是不是在爬」「`chain_conflicts` 是不是開始非零」，而那正是這類缺陷的形狀
-——它們的症狀是資料表面上完全正常。另一個現有機制 `job_runs` **只保留當天**，
-隔天早上就查不到前一晚的排程做了什麼。
+——它們的症狀是資料表面上完全正常。（立表時另一個理由是 `job_runs` 當時**只保留當天**、
+隔天就查不到前一晚的排程；那一點已於 2026-08-25 改成保留 30 天，但兩者粒度不同——
+`job_runs` 記每輪排程的成敗與標的數，答不出上面那些逐次分析的比率問題。）
 
 **Query：**
 
@@ -636,6 +637,57 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 ### GET `/scheduler/status`
 
 回傳每個 `knownSchedulerJobs` 的最新一筆執行紀錄。**即使從未執行過也會回一列。**
+
+#### 取數方式：每個 job 各取最新一筆（SQL 層），不是「取最近 N 筆再分組」
+
+`GetStatus` 走 `JobRunRepo.GetLatestPerJob()`，由 SQL 直接回每個 `job_name` 的最新一筆：
+
+```sql
+ROW_NUMBER() OVER (PARTITION BY job_name ORDER BY started_at DESC, id DESC) = 1
+```
+
+**要分清楚兩層保證**：
+
+* **repo 層**（`GetLatestPerJob`）回的是「**表裡有紀錄的** `job_name` 各一列」——
+  沒跑過的 job 不會出現，空表就回 0 筆。它保證的是「每個 job 至多一列」，不是「一定 11 列」。
+* **API 層**才固定回 11 列：`GetStatus` 遍歷 `knownSchedulerJobs`，把 repo 沒回到的
+  補成 `never_run` / `disabled`（見下一節）。
+
+所以**回傳筆數不隨 `job_runs` 累積多少資料而增加**——但查詢本身仍要處理保留期內的
+資料，受限的是輸出量而不是掃描量。
+
+**不能改回「取最近 N 筆再在記憶體分組」**（2026-08-25 修）：
+`intraday` 每 5 分鐘寫一筆、09:00–13:30 一天就 55 筆，單日 `job_runs` 實測 62 筆。
+舊版取最近 50 筆，於是**每天過了 13:30，06:30 的 `corporate_action_sync` 與 08:50 的
+`pre_market` 全被擠出視窗**，狀態頁把當天早上剛跑完的 job 報成 `never_run` ＋ `stale`
+——正是本頁反覆警告的那種「訓練使用者忽略 stale 旗標」，而且誤報方向是最不該錯的
+「該跑卻沒跑」。放大 N 只是把撞牆時間往後推，watchlist 一擴就再度失效。
+
+`ORDER BY` 帶 `id DESC` 有實際作用：`started_at` 精度到秒，手動觸發撞上排程時同一秒
+可能有兩筆，沒有它狀態頁會在兩筆之間跳動。
+
+查詢由 `idx_job_runs_job_name_started_at (job_name, started_at DESC)` 支撐
+（migration 072，三個引擎同步）。window function 需要 PostgreSQL / MySQL 8.0+ /
+SQLite 3.25+，三者都滿足——sqlite 走 `modernc.org/sqlite`，單元測試每次都會跑到這句。
+
+**測試慣例：`jobRunRepoStub` 必須遵守 `limit` 與排序。** 舊 stub 的 `GetRecent`
+忽略 limit 直接回傳全部餵進去的紀錄，而真實 repo 是 `ORDER BY started_at DESC LIMIT ?`
+——「視窗放不下」這一整類問題在測試裡永遠不會出現，這個誤報因此活了很久。
+stub 偏離真實 repo 的語意時，測試保護的是一個不存在的系統。
+
+#### `job_runs` 保留 30 天
+
+`runPreMarket` 每天開盤前刪掉 `jobRunRetentionDays`（30 天）以前的紀錄
+（`scheduler.go` 的 `jobRunRetentionCutoff()`）。
+
+**原本是「只保留當天」**，那讓排程健康史每天歸零：「昨天那輪是不是 `partial`」
+「這支這週失敗過幾次」隔天就查不到，而 2026-08-24 那次 `corporate_action_sync`
+的狀態修正（原記於 `issue.md` I-084，已收斂）正是靠 `job_runs` 的
+`failed=808` 發現的（2026-08-25 改）。
+
+30 天約 1900 筆，對三個引擎都微不足道。`/scheduler/status` 的**回傳筆數**不受保留期
+影響（見上節），但那條 window query 仍要處理保留期內的資料——真的把保留期拉到很長時，
+要重新評估的是掃描成本，不是回傳量。要調整時 `DeleteBefore` 的呼叫點只有一處。
 
 #### `status` 的三種「沒有執行紀錄」情形
 

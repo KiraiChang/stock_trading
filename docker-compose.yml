@@ -50,6 +50,10 @@ services:
       SR_ANALYSIS_CHIP_CRON: ${SR_ANALYSIS_CHIP_CRON:-0 22 * * 1-5}
       SR_ANALYSIS_TIMEFRAME: ${SR_ANALYSIS_TIMEFRAME:-1d}
       SR_ANALYSIS_LIMIT: ${SR_ANALYSIS_LIMIT:-400}
+      # 收盤 SR zone 驗證的覆蓋窗口（單位是天，不是筆數）。
+      # 詳見 backend/config.yaml 的 sr_zone_verify 註解。
+      SR_ZONE_VERIFY_DAYS: ${SR_ZONE_VERIFY_DAYS:-30}
+      SR_ZONE_VERIFY_MAX_ANALYSES: ${SR_ZONE_VERIFY_MAX_ANALYSES:-2000}
       # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
       # 漏跑一次就會讓該檔整段歷史出現假跳空，而重算是冪等的，所以沒有關掉它的情境。
       # 06:30 早於 08:50 的 pre_market，讓開盤前的分析已吃到最新係數。

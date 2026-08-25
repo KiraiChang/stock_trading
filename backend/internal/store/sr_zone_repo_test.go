@@ -880,3 +880,144 @@ func TestSRZoneRepoRoundTripsZoneUID(t *testing.T) {
 		t.Errorf("want 1 帶身分 / %d 不帶，got %d / %d", len(zones)-1, withUID, withoutUID)
 	}
 }
+
+// seedAnalysisAt 建一筆分析並把 created_at 改成指定時間。
+// Create 只會寫 CURRENT_TIMESTAMP，驗不了「跨多天的窗口怎麼取」。
+func seedAnalysisAt(t *testing.T, repo SRZoneRepo, symbol string, createdAt time.Time) uint64 {
+	t.Helper()
+	ctx := context.Background()
+	a := testAnalysis()
+	a.Symbol = symbol
+	id, err := repo.Create(ctx, a, testZones(), SRZoneNormalizedProjections{})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	r := repo.(*srZoneRepo)
+	if _, err := r.db.ExecContext(ctx,
+		r.db.Rebind(`UPDATE stock_sr_zone_analyses SET created_at=? WHERE id=?`),
+		createdAt, id,
+	); err != nil {
+		t.Fatalf("seed created_at failed: %v", err)
+	}
+	return id
+}
+
+// ListRefsSince 的本體：只回窗口內的分析，最新的優先。
+//
+// **對照組在同一條裡**：窗口外那筆一定不能出現。少了它，這條測試會在
+// 「WHERE 條件寫錯、全部都回」時假綠——而那正是最容易寫錯的地方。
+func TestSRZoneRepoListRefsSinceFiltersByWindow(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	since := now.AddDate(0, 0, -30)
+
+	outside := seedAnalysisAt(t, repo, "OUTSIDE", since.AddDate(0, 0, -1)) // 31 天前
+	older := seedAnalysisAt(t, repo, "OLDER", now.AddDate(0, 0, -20))
+	newer := seedAnalysisAt(t, repo, "NEWER", now.AddDate(0, 0, -1))
+
+	rows, err := repo.ListRefsSince(context.Background(), since, 100)
+	if err != nil {
+		t.Fatalf("ListRefsSince failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("回傳 %d 筆，期望 2 筆（窗口外那筆不該進來）", len(rows))
+	}
+	if rows[0].ID != newer || rows[1].ID != older {
+		t.Errorf("順序 = [%d %d]，期望最新的先（[%d %d]）", rows[0].ID, rows[1].ID, newer, older)
+	}
+	// **Symbol 也要斷言**：Ref 只有 ID 與 Symbol 兩個欄位，而 Symbol 是
+	// sr_zone_verify 失敗時 log 裡唯一能指出「哪一檔」的線索。少了這兩行，
+	// 把 SQL 改成 `SELECT id, '' AS symbol` 也會全綠——那時排程照跑，
+	// 但驗證失敗的 log 會少掉標的、沒人看得出是哪檔出事。
+	if rows[0].Symbol != "NEWER" || rows[1].Symbol != "OLDER" {
+		t.Errorf("Symbol = [%q %q]，期望 [\"NEWER\" \"OLDER\"]", rows[0].Symbol, rows[1].Symbol)
+	}
+	for _, r := range rows {
+		if r.ID == outside {
+			t.Error("窗口外的分析不該出現在結果裡")
+		}
+	}
+}
+
+// 硬上限：窗口再大也不會一次撈爆，而且截斷時留下的是**最新的**那些。
+func TestSRZoneRepoListRefsSinceRespectsMaxAnalyses(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	var newest uint64
+	for i := 0; i < 5; i++ {
+		id := seedAnalysisAt(t, repo, "2330", now.Add(-time.Duration(i)*time.Hour))
+		if i == 0 {
+			newest = id
+		}
+	}
+
+	rows, err := repo.ListRefsSince(context.Background(), now.AddDate(0, 0, -30), 2)
+	if err != nil {
+		t.Fatalf("ListRefsSince failed: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("回傳 %d 筆，期望被上限截成 2 筆", len(rows))
+	}
+	if rows[0].ID != newest {
+		t.Errorf("截斷後第一筆 = %d，期望最新那筆 %d", rows[0].ID, newest)
+	}
+}
+
+// 同一秒的多筆分析在撞到上限時必須有確定順序。
+//
+// **這是真實情境不是造出來的邊界**：created_at 只有秒級精度，而排程一輪會連續
+// 分析 watchlist 全部標的，同一秒寫進好幾筆很正常。沒有 id 決勝時，同秒那批由
+// 資料庫任意排序，截斷後留下哪幾筆會在不同引擎、不同執行計畫之間漂移——某筆分析
+// 就可能一直輪不到驗證。
+//
+// **這條測試能保護什麼、不能保護什麼（2026-08-25 變異測試實測）**：
+//   - 抓得到：tiebreak 方向寫反（id ASC）、ORDER BY 被整段改掉。
+//   - **抓不到：ORDER BY 少了 id DESC 這件事本身。** 把查詢改回
+//     `ORDER BY created_at DESC` 之後這條照樣 PASS——sqlite 在 created_at 相同時
+//     碰巧就是以 rowid 遞減回傳。
+//
+// 也就是說 id DESC 的正當性**不是這條測試證明的**，而是「跨引擎確定性」這個論證：
+// mysql / postgres 沒有義務比照 sqlite 的巧合順序。單元測試只跑 sqlite，
+// 本質上驗不出這種跨引擎差異——不要因為這條是綠的就以為那句 ORDER BY 有測試保護。
+func TestSRZoneRepoListRefsSinceIsDeterministicWithinSameSecond(t *testing.T) {
+	repo := newTestSRZoneRepo(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// 五筆全部落在同一秒，id 遞增。
+	ids := make([]uint64, 0, 5)
+	for i := 0; i < 5; i++ {
+		ids = append(ids, seedAnalysisAt(t, repo, "2330", now))
+	}
+	// 期望截斷後留下 id 最大的三筆，由大到小。
+	want := []uint64{ids[4], ids[3], ids[2]}
+
+	// 連續查兩次，除了內容要對，兩次也必須一致。
+	var first []uint64
+	for round := 0; round < 2; round++ {
+		rows, err := repo.ListRefsSince(context.Background(), now.AddDate(0, 0, -1), 3)
+		if err != nil {
+			t.Fatalf("round %d: ListRefsSince failed: %v", round, err)
+		}
+		if len(rows) != 3 {
+			t.Fatalf("round %d: 回傳 %d 筆，期望被上限截成 3 筆", round, len(rows))
+		}
+		got := []uint64{rows[0].ID, rows[1].ID, rows[2].ID}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("round %d: 順序 = %v，期望 %v（同秒時以 id DESC 決勝）", round, got, want)
+				break
+			}
+		}
+		if round == 0 {
+			first = got
+		} else {
+			for i := range first {
+				if got[i] != first[i] {
+					t.Errorf("兩次查詢結果不同：%v vs %v——同秒排序不確定", first, got)
+					break
+				}
+			}
+		}
+	}
+}

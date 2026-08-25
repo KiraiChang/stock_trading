@@ -2890,7 +2890,9 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 「alias 命中率從 2% 爬到 30%」代表 zone 邊界漂移在惡化，而沒有人會每天 grep
 （F1 在 live 存在了兩週沒被發現）。2026-08-21 的實測讓這件事更具體：分析排程跑完的隔天
 早上想查前一晚發生什麼事，`job_runs` 已經被 `runPreMarket` 的 `DeleteBefore(TodayTaipei())`
-清光了，唯一的線索只剩 `docker logs`。
+清光了，唯一的線索只剩 `docker logs`。（`job_runs` 的保留期已於 2026-08-25 改成 30 天，
+那個「隔天就沒了」的具體情境不再成立；但趨勢型缺陷需要逐次分析的計數，`job_runs`
+的粒度本來就答不出來，所以本節的結論不變。）
 
 所以**同一組數字同時寫進 `sr_identity_stats`**（一次分析一列，T-050）：
 

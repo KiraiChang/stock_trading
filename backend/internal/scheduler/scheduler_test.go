@@ -67,6 +67,7 @@ type schedulerJobRunRepoStub struct {
 	// finishCtxErr 記錄 Finish 收到的 ctx 當下的 Err()。finishRun 刻意不沿用 job 的 ctx
 	// （2026-08-24 起），這裡是唯一驗得到那件事的地方。
 	finishCtxErr []error
+	deleteCutoff *time.Time
 }
 
 func (s *schedulerJobRunRepoStub) Start(ctx context.Context, jobName string) (uint64, error) {
@@ -93,7 +94,13 @@ func (s *schedulerJobRunRepoStub) GetRecent(ctx context.Context, limit int) ([]s
 	return nil, nil
 }
 
+func (s *schedulerJobRunRepoStub) GetLatestPerJob(ctx context.Context) ([]store.JobRun, error) {
+	return nil, nil
+}
+
+// deleteCutoff 記下最後一次 DeleteBefore 收到的 cutoff，讓 retention 的測試驗得到它。
 func (s *schedulerJobRunRepoStub) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	s.deleteCutoff = &cutoff
 	return 0, nil
 }
 
@@ -765,6 +772,8 @@ type schedulerSRZoneRepoStub struct {
 	store.SRZoneRepo
 	analyses []store.SRZoneAnalysis
 	listErr  error
+	sinceArg *time.Time
+	limitArg int
 }
 
 // List 是 sr_zone_verify 取待驗清單的入口；listErr 讓測試重現「清單拿不到」那條路徑。
@@ -773,6 +782,22 @@ func (s *schedulerSRZoneRepoStub) List(ctx context.Context, symbol string, limit
 		return nil, s.listErr
 	}
 	return s.analyses, nil
+}
+
+// ListRefsSince 是 sr_zone_verify 實際走的入口（只回 id/symbol 的輕量 Ref）。
+// sinceArg / limitArg 記下收到的參數，讓「窗口算對了沒」驗得到。
+func (s *schedulerSRZoneRepoStub) ListRefsSince(ctx context.Context, since time.Time, limit int) ([]store.SRZoneAnalysisRef, error) {
+	s.sinceArg, s.limitArg = &since, limit
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	// 由同一份 analyses 導出 Ref，而不是另存一份：真實 repo 也是讀同一張表，
+	// stub 分兩份資料會讓「清單」與「單筆查詢」在測試裡看到不同的世界。
+	refs := make([]store.SRZoneAnalysisRef, 0, len(s.analyses))
+	for _, a := range s.analyses {
+		refs = append(refs, store.SRZoneAnalysisRef{ID: a.ID, Symbol: a.Symbol})
+	}
+	return refs, nil
 }
 
 // **stub 也要照 timeframe 過濾**：不濾的話，P2 那條隔離性的測試會假綠。
@@ -1560,5 +1585,114 @@ func TestCorporateActionTimeoutAndShardDefaults(t *testing.T) {
 		if got := s.corporateActionShardCount(); got != defaultCorporateActionShardCount {
 			t.Errorf("cfg=%+v 的 shard_count = %d, 期望 %d", cfg, got, defaultCorporateActionShardCount)
 		}
+	}
+}
+
+// TestJobRunRetentionCutoffIsThirtyDaysBack 驗保留期的起點算對。
+//
+// **原本是 TodayTaipei()（只留當天）**，於是排程健康史每天歸零：2026-08-24 那次
+// corporate_action_sync 狀態修正（原記於 issue.md I-084，已收斂）所依據的
+// 「failed=808」證據，當天不看、隔天就不存在了
+// （見 docs/api-reference.md 的「job_runs 保留 30 天」）。
+// 這條把「30 天」與「台北日界」兩件事一起釘住——用 UTC 日界會讓台灣時間的
+// 凌晨 08:00 前多刪或少刪一天。
+func TestJobRunRetentionCutoffIsThirtyDaysBack(t *testing.T) {
+	cutoff := jobRunRetentionCutoff()
+	today := timeutil.TodayTaipei()
+
+	if got := today.Sub(cutoff); got != 30*24*time.Hour {
+		t.Errorf("cutoff 距今 %v，期望剛好 30 天", got)
+	}
+	// 必須落在台北時區的日界上（00:00:00），否則同一天的紀錄會被部分刪除。
+	inTaipei := cutoff.In(timeutil.TaipeiTZ)
+	if h, m, sec := inTaipei.Clock(); h != 0 || m != 0 || sec != 0 {
+		t.Errorf("cutoff 台北時間是 %02d:%02d:%02d，期望落在日界 00:00:00", h, m, sec)
+	}
+}
+
+// ── sr_zone_verify 的覆蓋窗口（見 docs/architecture.md 的排程說明段）──
+
+// TestSRZoneVerifyUsesConfiguredWindow 驗排程真的照設定的天數取分析。
+// analyses 回空，所以不會走到 Verify（srZoneVerifier 是具體型別、無法 stub），
+// 這條只盯「窗口參數算得對不對」。
+func TestSRZoneVerifyUsesConfiguredWindow(t *testing.T) {
+	repo := &schedulerSRZoneRepoStub{}
+	s := &Scheduler{jobRuns: &schedulerJobRunRepoStub{}, srZoneRepo: repo, log: zap.NewNop()}
+	s.SetSRZoneVerify(config.SRZoneVerifyConfig{Days: 7, MaxAnalyses: 123})
+
+	s.runSRZoneVerification(context.Background())
+
+	if repo.sinceArg == nil {
+		t.Fatal("ListRefsSince 沒被呼叫——排程可能還走在舊的「最近 N 筆」路徑上")
+	}
+	gotDays := int(time.Since(*repo.sinceArg).Hours() / 24)
+	if gotDays < 6 || gotDays > 8 { // 容忍跨日與執行耗時
+		t.Errorf("窗口起點距今約 %d 天，期望 7 天", gotDays)
+	}
+	if repo.limitArg != 123 {
+		t.Errorf("limit = %d, 期望 123（硬上限應照設定）", repo.limitArg)
+	}
+}
+
+// 設定沒注入或填了非正值時要退回預設，不能變成「往回驗 0 天」而靜默驗不到東西。
+func TestSRZoneVerifyFallsBackToDefaults(t *testing.T) {
+	for _, cfg := range []config.SRZoneVerifyConfig{
+		{},                             // 完全沒注入
+		{Days: 0, MaxAnalyses: 0},      // 明確填 0
+		{Days: -5, MaxAnalyses: -1},    // 負值
+	} {
+		repo := &schedulerSRZoneRepoStub{}
+		s := &Scheduler{jobRuns: &schedulerJobRunRepoStub{}, srZoneRepo: repo, log: zap.NewNop()}
+		s.SetSRZoneVerify(cfg)
+
+		s.runSRZoneVerification(context.Background())
+
+		if repo.sinceArg == nil {
+			t.Fatalf("cfg=%+v：ListRefsSince 沒被呼叫", cfg)
+		}
+		gotDays := int(time.Since(*repo.sinceArg).Hours() / 24)
+		if gotDays < defaultSRZoneVerifyDays-1 || gotDays > defaultSRZoneVerifyDays+1 {
+			t.Errorf("cfg=%+v：窗口約 %d 天，期望退回預設 %d 天", cfg, gotDays, defaultSRZoneVerifyDays)
+		}
+		if repo.limitArg != defaultSRZoneVerifyMaxAnalyses {
+			t.Errorf("cfg=%+v：limit = %d，期望退回預設 %d", cfg, repo.limitArg, defaultSRZoneVerifyMaxAnalyses)
+		}
+	}
+}
+
+// 設定值超過 maxSRZoneVerifyMaxAnalyses 時要被截到上限，不能原封不動變成 SQL LIMIT。
+//
+// **這道 clamp 是唯一的底**：runSRZoneVerification 沒有 context.WithTimeout，
+// RunDailyClose 尾端也是無條件呼叫它。少了它，SR_ZONE_VERIFY_MAX_ANALYSES 多打
+// 一個零就會讓單輪逐筆驗證跑到失控。行為比照 store 的 maxTimelineMaxAnalyses。
+func TestSRZoneVerifyClampsMaxAnalysesToHardLimit(t *testing.T) {
+	cases := []struct {
+		name string
+		set  int
+		want int
+	}{
+		{"遠超上限", 10_000_000, maxSRZoneVerifyMaxAnalyses},
+		{"略超上限", maxSRZoneVerifyMaxAnalyses + 1, maxSRZoneVerifyMaxAnalyses},
+		// 對照組：剛好等於上限、以及上限以下的合法值都必須原封不動通過，
+		// 否則這條會在「clamp 寫成一律截到上限」時假綠。
+		{"剛好等於上限", maxSRZoneVerifyMaxAnalyses, maxSRZoneVerifyMaxAnalyses},
+		{"上限以下照設定", 123, 123},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &schedulerSRZoneRepoStub{}
+			s := &Scheduler{jobRuns: &schedulerJobRunRepoStub{}, srZoneRepo: repo, log: zap.NewNop()}
+			s.SetSRZoneVerify(config.SRZoneVerifyConfig{Days: 7, MaxAnalyses: tc.set})
+
+			s.runSRZoneVerification(context.Background())
+
+			if repo.sinceArg == nil {
+				t.Fatal("ListRefsSince 沒被呼叫")
+			}
+			if repo.limitArg != tc.want {
+				t.Errorf("設定 %d → limit = %d，期望 %d", tc.set, repo.limitArg, tc.want)
+			}
+		})
 	}
 }

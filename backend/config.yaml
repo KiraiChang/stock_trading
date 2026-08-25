@@ -121,6 +121,28 @@ sr_analysis:
   timeframe: "1d"                # 環境變數：SR_ANALYSIS_TIMEFRAME
   limit: 400                     # 環境變數：SR_ANALYSIS_LIMIT，抓取的歷史 K 棒根數
 
+# 收盤後的 SR zone 驗證窗口（平日 15:00 那支 sr_zone_verify）。
+# 這支**沒有 enabled 開關**：它是無條件註冊的，重驗既有分析裡的 zone 有沒有被突破。
+sr_zone_verify:
+  days: 30                       # 環境變數：SR_ZONE_VERIFY_DAYS。往回驗幾天的分析（依 created_at）。
+                                 # **單位是天不是筆數**：舊版寫死「最近 50 筆」，那是分析還沒
+                                 # 排程化時訂的（一天 1~3 筆 ≈ 20 個交易日）。watchlist 11 檔
+                                 # × 每日兩輪之後一天就 22 筆，50 筆只剩約 2.3 個交易日，
+                                 # 更早的分析裡那些 PENDING 的 zone 會永遠停在 PENDING。
+                                 # 成本不是限制：2026-08-25 在 dev postgres 實測
+                                 # 672 筆分析（10256 個 zone）整輪 20.0 秒。
+                                 # **用 created_at 而不是 analyzed_at**：後者是日期粒度
+                                 # （同一交易日兩輪都寫成當日 00:00）。
+  max_analyses: 2000             # 環境變數：SR_ZONE_VERIFY_MAX_ANALYSES。單輪處理筆數的
+                                 # 硬上限，防止窗口拉長後單輪無限成長。watchlist 擴大時先看
+                                 # job_runs 的 symbols_total 有沒有貼著這個數字。
+                                 # **調得再大也不會超過程式內的 10000**（scheduler 的
+                                 # maxSRZoneVerifyMaxAnalyses）：這支排程沒有 timeout，
+                                 # 那道 clamp 是唯一的底。
+                                 # 上限撐得住的前提是清單只取 id/symbol（ListRefsSince）；
+                                 # 撈整份分析的話 10000 筆約 276 MB 會 OOM。
+                                 # 詳見 docs/architecture.md 的排程說明段。
+
 # SR Zone evaluation / decision replay 自動驗證。預設關閉，避免開發環境啟動後自動跑大量
 # Python replay；開啟後若 symbols 留空，會使用 watchlist 全部股票。
 sr_evaluation:

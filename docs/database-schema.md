@@ -450,9 +450,15 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 
 **為什麼要有這張表**：同一組數字已經有結構化 log（見
 [sr-zone-scoring.md](./sr-zone-scoring.md)「可觀測性」），但 log 答不出趨勢問題。
-而現有唯一記錄排程行為的 `job_runs` **只保留當天**（`runPreMarket` 每天 08:50
-`DeleteBefore(TodayTaipei())`）——2026-08-21 實測：前一晚排程的紀錄早上就查不到了。
-**本表刻意不沿用那個保留策略**，否則等於白做。
+**立表當時**（2026-08-21）唯一記錄排程行為的 `job_runs` 只保留當天
+（`runPreMarket` 每天 08:50 `DeleteBefore(TodayTaipei())`）——實測前一晚排程的紀錄
+早上就查不到了，所以**本表刻意不沿用那個保留策略**。
+
+**`job_runs` 的保留期已於 2026-08-25 改成 30 天**（`jobRunRetentionDays`，
+見 [`api-reference.md`](./api-reference.md) 的「`job_runs` 保留 30 天」），
+上面那個「只保留當天」的前提已不成立。但本表仍有存在價值、也仍然不設保留期：
+`job_runs` 記的是**每輪排程的成敗與標的數**，本表記的是**每次分析的身分關聯計數**，
+兩者的粒度與問題域不同——`job_runs` 答不出「alias 命中率這個月往下掉了嗎」。
 
 | 欄位 | 說明 |
 |------|------|

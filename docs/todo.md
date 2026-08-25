@@ -2535,13 +2535,16 @@ log 能回答「這一次分析發生了什麼」，但答不出**趨勢**問題
 **2026-08-21 的實測讓這個缺口變得具體。** T-052 上線後的第一輪排程（8/20 22:00）跑完
 11 檔全部 skip，隔天早上想查發生什麼事時：
 
-* `job_runs` **查不到任何 `sr_analysis` 紀錄**——因為 `runPreMarket`（每天 08:50）會
-  `DeleteBefore(TodayTaipei())`，**只保留當天**。前一晚的紀錄在早上 08:50 被例行清掉。
+* `job_runs` **查不到任何 `sr_analysis` 紀錄**——當時 `runPreMarket`（每天 08:50）會
+  `DeleteBefore(TodayTaipei())`，**只保留當天**，前一晚的紀錄在早上 08:50 被例行清掉。
+  （保留期已於 2026-08-25 改成 30 天，這一點不再成立；但下面那條「唯一線索只剩 log」
+  的結論在當時是真的，也是本筆立案的背景。）
 * 唯一還原得出真相的只有 `docker logs`，而且要一路往回翻才看得到
   `sr analysis done ... skipped=11` 與每檔的 skip 原因。
 
-也就是說**現有的兩個機制都答不出「昨晚那輪做了什麼」**：log 沒人翻，job_runs 隔天就沒了。
-本筆要建的表**因此不能沿用 job_runs 的當日清除策略**——那正是要解的問題。
+也就是說**當時的兩個機制都答不出「昨晚那輪做了什麼」**：log 沒人翻，
+`job_runs` 隔天就沒了。本筆要建的表**因此不沿用 `job_runs` 當時的當日清除策略**
+——那正是要解的問題。（`job_runs` 已於 2026-08-25 改成保留 30 天，這段是立案背景。）
 
 #### 計畫書（**已實作／待 review**，2026-08-21）
 
@@ -3915,91 +3918,53 @@ Yahoo 那半只能照打真實 API（實際寫進 dev 的 35 筆 `2330` 除權�
 
 ---
 
-### T-059：`job_runs` 只保留當天，排程健康史無法回溯
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃 |
-| 優先度 | 中 |
-| 分類 | Go / Scheduler / 可觀測性 |
-| 建立日期 | 2026-08-24 |
-| 來源 | SR zone 分析排程驗收（live 唯讀查詢時實際踩到） |
-
-`runPreMarket` 每天開盤前把前一天以前的執行紀錄整批刪掉（`scheduler.go:337-341`）：
-
-```go
-// 只保留當天的排程執行紀錄，開盤前先清掉前幾天的舊資料
-if n, err := s.jobRuns.DeleteBefore(ctx, timeutil.TodayTaipei()); err != nil {
-```
-
-`DeleteBefore` 的註解也寫明「用於只保留當天資料」，所以這是刻意設計，不是 bug。
-但它與「靠 `job_runs` 發現排程問題」這個既定作法直接衝突：
-
-* **2026-08-24 的驗收就踩到了**：想查 2026-08-21（排程啟用後第一個完整交易日）那兩輪
-  `sr_analysis` / `sr_analysis_chip` 的 `status` 與 `symbols_total`，紀錄已經沒了，
-  只能改從 `stock_sr_zone_analyses` 的 `created_at` 分佈反推「兩輪都有跑、各 11 檔」。
-  現況佐證：全表 62 筆但 `id` 已經到 1763。
-* **I-084 正是靠 `job_runs` 的 `failed=808 / total=857` 發現的。** 那是當天查才看得到；
-  隔一天再看，`corporate_action_sync` 那筆就被清掉了，證據不存在。T-057 修完之後
-  「跑不完會持續顯示 `partial`」這個可觀察訊號，也只在**當天**成立。
-* `/scheduler/status` 的 `stale` 判斷本身不受影響（它看的是最後一次執行時間），
-  受影響的是**趨勢**：無法回答「這支這週失敗過幾次」「是哪一天開始變 partial 的」。
-
-**可能作法（擇一，實作前要先確認）**：
-
-* 改成保留 N 天（例如 14 或 30），`DeleteBefore(now - N days)`。改動最小，
-  但要先估資料量——目前一個交易日約 60 筆（`intraday` 就占 55 筆），30 天約 1800 筆，
-  對 PostgreSQL 完全不是問題。
-* 或分級保留：`intraday` 這種高頻的只留當天，其餘每日排程留 N 天。實作較複雜，
-  但避免高頻 job 洗掉低頻 job 的可見度。
-
-**不做的理由也要一併評估**：當初「只留當天」大概是為了讓 `/scheduler/status` 的查詢
-永遠很快、資料表不成長。若改成保留 N 天，要確認 `List(limit)` 那條查詢
-（`ORDER BY started_at DESC LIMIT ?`）在資料變多後仍走得到索引。
-
-**相關**：同一次驗收也發現兩筆狀態誠實缺陷（`sr_zone_verify` 與 `sr_analysis`
-在「整輪沒開始跑」時記成 `success` / `partial`），已於 2026-08-24 修復並收斂，
-現況規格見 [`api-reference.md`](./api-reference.md) 的
-「『整輪沒開始跑』記 `failed`，『沒有東西要跑』記 `success`」。
-那兩筆修好之後，失敗才會正確反映在 `status` 上，而本筆決定那個 `status` 留多久。
-
----
-
-### T-060：`srZoneVerifyLimit` 固定 50，驗證覆蓋窗口會隨資料成長縮短
+### T-061：`sr_zone_verify` 的排程層驗收補不齊——verifier 是具體型別，無法 stub
 
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待規劃 |
 | 優先度 | 低 |
-| 分類 | Go / Scheduler / SR Zone |
-| 建立日期 | 2026-08-24 |
-| 來源 | SR zone 分析排程驗收 |
+| 分類 | Go / Scheduler / 測試 |
+| 建立日期 | 2026-08-25 |
+| 來源 | 收盤驗證窗口改成「時間窗口」那輪（2026-08-25 收斂）的 code review；**承接該輪計畫書「測試與驗證策略」第 2 點**，那一點當時未完成、也未計入該輪的完成範圍 |
 
-`runSRZoneVerification` 每次只驗最近 `srZoneVerifyLimit = 50` 筆分析
-（`scheduler.go:32-34`、`:557`），常數註解寫明是「避免隨著資料成長無限制掃描」，
-所以這是刻意的取捨，不是缺陷。但那個數字是在**分析還沒排程化**的年代訂的：
+`runSRZoneVerification` 取到清單之後會逐筆呼叫 `s.srZoneVerifier.Verify(...)`，
+再把 `len(analyses)` 當成 `symbols_total` 寫進 `job_runs`。**這兩件事目前沒有測試。**
 
-| 時期 | 每交易日新增分析 | 50 筆涵蓋 |
-|---|---|---|
-| 排程啟用前（手動觸發） | 1～3 筆 | 約 20 個交易日 |
-| **現在**（watchlist 11 檔 × 2 輪） | **22 筆** | **約 2.3 個交易日** |
-| watchlist 若擴到 30 檔 | 60 筆 | **不到 1 個交易日** |
+現有的 `TestSRZoneVerifyUsesConfiguredWindow` / `TestSRZoneVerifyFallsBackToDefaults` /
+`TestSRZoneVerifyClampsMaxAnalysesToHardLimit` 都讓 stub 回**空清單**，只驗窗口參數
+（`since` / `limit`）算得對不對，走不到迴圈。測試註解已寫明卡點：
 
-2026-08-24 那輪實測驗了 45 筆——正好是當時全表分析數（15:02 執行時 56 − 今天 17:00
-那輪的 11 筆），還沒撞到 50 的上限。**下一個交易日起就會開始撞到。**
+```go
+// analyses 回空，所以不會走到 Verify（srZoneVerifier 是具體型別、無法 stub）
+```
 
-後果不是資料錯誤，而是**「zone 有沒有被突破」的驗證只回溯得到最近兩天**，
-更早的分析裡那些 `PENDING` 的 zone 會永遠停在 `PENDING`。
+`Scheduler.srZoneVerifier` 的型別是 `*analysis.SRZoneVerifier`（具體 struct），
+沒有介面可以替換，所以測不到：
+
+* **窗口內每一筆都真的被 `Verify` 到**（少驗一筆不會有任何跡象）。
+* **`job_runs.symbols_total` 等於實際處理筆數**——這個數字正是
+  [`architecture.md`](./architecture.md) 教人用來判斷「窗口有沒有被 `max_analyses`
+  截斷」的依據，它本身沒被釘住。（`sr_zone_verify_devbench_test.go` 有斷言它，
+  但那條要真的 postgres、預設 skip，不算日常保護。）
+* **單筆 `Verify` 失敗只記錄、不中斷其他筆**（這條規則寫在函式註解裡，同樣沒有測試）。
+
+**這段邏輯不是那輪改動的**：2026-08-25 把收盤驗證從「最近 N 筆」改成「最近 N 天」
+那一輪，只換了清單來源（`List` → `ListRefsSince`）與 log 欄位，迴圈與 `finishRun`
+一行都沒動（`git diff` 確認）。這是更早就存在的覆蓋缺口。
+
+但那一輪的計畫書把「每一筆都被 `Verify`、`symbols_total` 等於實際處理筆數」列為
+第 2 條驗收條件，是它自己承諾要驗、最後沒做到的。**本條目是把該承諾移交，不是註銷。**
+（該輪已於 2026-08-25 收斂，現況規格見 [`architecture.md`](./architecture.md) 的
+SR Zone Scoring 排程說明段。）
 
 **可能作法（擇一，實作前要先確認）**：
 
-* 改成「驗最近 N 個交易日的分析」而不是「最近 N 筆」，讓覆蓋窗口與 watchlist
-  大小脫鉤。
-* 或把 50 改成可設定，並讓預設值從 watchlist 檔數推導（例如 `檔數 × 2 輪 × N 天`）。
-* 或維持固定上限，但改成只驗 `status='PENDING'` 的 zone——已經驗過並定案的不必重驗，
-  同樣的預算能回溯更久。**這條要先確認 `Verify` 是不是冪等、以及已定案的 zone
-  會不會因為後續行情再次變化而需要重驗。**
+* 在 `scheduler` 端定義最小介面（只含 `Verify`），`Scheduler` 欄位改吃介面，
+  `main.go` 注入既有的 `*analysis.SRZoneVerifier`。比照 `SRAnalysisRunner` 的既有慣例。
+* 或改用可跑的整合 fixture：真的建一份分析與 zone，跑完之後斷言 zone 的
+  `status` / `broken_at` 有被更新。成本較高但連 `Verify` 的實際效果一起驗到。
 
-**不做的理由**：這台 host 只有 2GiB，驗證是逐筆跑的，放大窗口等於拉長排程佔用時間。
-真的要放大，要先量一筆驗證的實際成本。
-
+**不做的理由 / 風險**：動 `Scheduler` 的相依型別屬於排程修改，照 CLAUDE.md 要先有
+計畫書；而且 `sr_zone_verify` 是無條件註冊、每個交易日都會跑的 job，重構失手的代價
+是整支排程靜默失效。優先度低是因為這段邏輯本身很久沒變過，不是因為它不重要。

@@ -231,6 +231,21 @@ type StockAnalysisLevel struct {
 // ── SR Zone Scoring models（機構級版本，見 Python
 // backtest/modular/sr_scoring/scoring.py 開頭的完整說明）────────────────
 
+// SRZoneAnalysisRef 是分析的輕量參照：只有排程迴圈真正用得到的兩個欄位。
+//
+// **存在的理由是記憶體**（見 docs/architecture.md 的排程說明段）：
+// SRZoneAnalysis 有九個 RawJSON 欄位
+// （evidence / explanation / scenario / probability_context / period_summaries /
+// analysis_tips / chip_summary / decision_summary / zone_builder_runtime_config），
+// dev 實測平均列寬 28 kB。sr_zone_verify 的清單一次可以取到上限 10000 筆，
+// 用完整型別等於一次載入約 276 MB——實測在 256MB 與 512MB 的 container 都會被
+// OOM kill，而迴圈裡只用得到 ID（傳給 Verify）與 Symbol（失敗時的 log 欄位），
+// 其餘欄位 Verify 會自己重查。
+type SRZoneAnalysisRef struct {
+	ID     uint64 `db:"id"     json:"id"`
+	Symbol string `db:"symbol" json:"symbol"`
+}
+
 type SRZoneAnalysis struct {
 	ID           uint64    `db:"id"                    json:"id"`
 	Symbol       string    `db:"symbol"                json:"symbol"`

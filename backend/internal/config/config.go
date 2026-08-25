@@ -20,6 +20,7 @@ type Config struct {
 	SREvaluation       SREvaluationConfig       `mapstructure:"sr_evaluation"`
 	EvaluationUniverse EvaluationUniverseConfig `mapstructure:"evaluation_universe"`
 	SRAnalysis         SRAnalysisConfig         `mapstructure:"sr_analysis"`
+	SRZoneVerify       SRZoneVerifyConfig       `mapstructure:"sr_zone_verify"`
 	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 }
@@ -168,6 +169,33 @@ type SRAnalysisConfig struct {
 	Limit     int    `mapstructure:"limit"`
 }
 
+// SRZoneVerifyConfig 是收盤後 SR zone 驗證排程的覆蓋窗口
+// （現況規格見 docs/architecture.md 的排程說明段）。
+//
+// **窗口的單位是「天」而不是「筆數」**：原本寫死「最近 50 筆分析」，但那個數字是
+// 分析還沒排程化的年代訂的（一天 1~3 筆，涵蓋約 20 個交易日）。watchlist 11 檔
+// × 每日兩輪之後一天就 22 筆，50 筆只剩約 2.3 個交易日，watchlist 再擴大就不到一天，
+// 更早的分析裡那些 PENDING 的 zone 會永遠停在 PENDING。改用天數之後，
+// 覆蓋窗口與 watchlist 大小、與每日輪數都脫鉤。
+type SRZoneVerifyConfig struct {
+	// Days 是往回驗幾天的分析（依 created_at）。預設 30。
+	//
+	// 成本不是限制：**2026-08-25 在 dev postgres 實測 672 筆分析（10256 個 zone）
+	// 整輪 20.0 秒**，平均每筆 29.8ms。驗證是 I/O 為主的本地 DB 往返，不是 CPU 密集
+	// （單筆成本 = 5 次查詢 ＋ 每個 zone 一次 UpdateZoneStatus）。
+	// 立案時的「45 筆／1 秒」推估 660 筆約 15 秒，實測偏高約 33%，但結論不變。
+	Days int `mapstructure:"days"`
+	// MaxAnalyses 是單輪處理筆數的硬上限，防止窗口拉長後無限成長。預設 2000。
+	//
+	// 比照 timeline 的 maxTimelineMaxAnalyses 慣例，scheduler 端是**兩段式**：
+	// 非正值退回預設，超過 maxSRZoneVerifyMaxAnalyses（10000）則截到上限。
+	// 上限在記憶體上站得住的前提是**清單只取 id/symbol**（store 的
+	// ListRefsSince）。改回撈整份分析的話 10000 筆約 276 MB，會直接 OOM。
+	// 也就是說這個值調得再大也不會超過那個上限——排程沒有 timeout，
+	// 不能讓 env 的一個錯字決定單輪要跑多久。
+	MaxAnalyses int `mapstructure:"max_analyses"`
+}
+
 // EvaluationUniverseConfig 是評估標的池的每日日 K 維護排程（T-040 Step 5）。
 //
 // **預設關閉**：這個 job 一次會對整個池（實測 131 檔）各發一個 FinMind 請求，
@@ -263,6 +291,8 @@ func Load() (*Config, error) {
 	viper.SetDefault("sr_evaluation.write_db", true)
 
 	// 與搬進 config 之前的硬編碼值相同，行為不變（T-042）。
+	viper.SetDefault("sr_zone_verify.days", 30)
+	viper.SetDefault("sr_zone_verify.max_analyses", 2000)
 	viper.SetDefault("corporate_action.cron", "30 6 * * 1-5")
 	// 2026-08-24：預算由 10 分鐘改為 45 分鐘，並把非 watchlist 標的切成 5 片（週一到週五各一片）。
 	viper.SetDefault("corporate_action.timeout_sec", 2700)

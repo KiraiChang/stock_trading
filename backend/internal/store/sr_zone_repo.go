@@ -16,6 +16,20 @@ type SRZoneRepo interface {
 	Create(ctx context.Context, a *SRZoneAnalysis, zones []SRZone, projections SRZoneNormalizedProjections) (uint64, error)
 	Get(ctx context.Context, id uint64) (*SRZoneAnalysis, error)
 	List(ctx context.Context, symbol string, limit int) ([]SRZoneAnalysis, error)
+	// ListRefsSince 取 created_at >= since 的分析參照（全 symbol），最新的優先，
+	// 最多 limit 筆。
+	//
+	// **給 sr_zone_verify 用，不能用 List("", N) 代替**：那是「最近 N 筆」，
+	// 覆蓋窗口會隨 watchlist 大小與每日分析輪數縮短——11 檔 × 兩輪時 50 筆只剩
+	// 約 2.3 個交易日（見 docs/architecture.md 的排程說明段）。
+	// 這支讓窗口回到「時間」這個穩定的單位。
+	//
+	// **用 created_at 而不是 analyzed_at**：後者是日期粒度（同一交易日兩輪都寫成
+	// 當日 00:00），取不出「最近 N 天實際跑過的分析」。
+	//
+	// **回傳 Ref 而不是完整分析**：呼叫端（排程迴圈）只用得到 ID 與 Symbol，
+	// 而完整型別平均 28 kB／筆，上限 10000 筆時會 OOM（見 docs/architecture.md）。
+	ListRefsSince(ctx context.Context, since time.Time, limit int) ([]SRZoneAnalysisRef, error)
 	// GetLatestByTimeframe 取某檔某 timeframe 的最新一筆分析。
 	//
 	// **不能用 List(symbol, 1) 代替**：List 只按 symbol 過濾，使用者今天手動跑過一次 5m
@@ -399,6 +413,31 @@ func (r *srZoneRepo) List(ctx context.Context, symbol string, limit int) ([]SRZo
 			FROM stock_sr_zone_analyses ORDER BY created_at DESC LIMIT ?
 		`), limit)
 	}
+	return rows, err
+}
+
+// ListRefsSince 由 idx_stock_sr_zone_analyses_created_at 支撐（migration 073）——
+// 既有的 (symbol, created_at DESC) 索引 leading column 是 symbol，這條查詢不帶 symbol，
+// 走不到它。
+//
+// **ORDER BY 帶 id DESC 是必要的**，理由與 job_run_repo 的 GetLatestPerJob 相同：
+// created_at 只有秒級精度（mysql DATETIME(0)、sqlite CURRENT_TIMESTAMP），
+// 同一輪分析的多檔很容易落在同一秒。沒有 id 決勝時，同秒的那批由資料庫任意排序，
+// **撞到 limit 時邊界那幾筆會在不同引擎、不同執行計畫之間漂移**——某筆分析可能就
+// 一直輪不到驗證，正是「覆蓋窗口會隨資料成長縮短」那個問題的變形。
+//
+// **只 SELECT id, symbol，不要改回 srZoneAnalysisColumns**
+// （理由與實測見 docs/architecture.md 的排程說明段）：
+// 那份欄位清單含九個 RawJSON 欄位、平均 28 kB／筆，上限 10000 筆時一次載入約
+// 276 MB，實測 256MB 與 512MB 的 container 都會被 OOM kill。呼叫端只用得到這兩欄，
+// 其餘由 Verify 自己重查。symbol 不在索引裡所以要回表，但一萬次回表遠比 276 MB 便宜。
+func (r *srZoneRepo) ListRefsSince(ctx context.Context, since time.Time, limit int) ([]SRZoneAnalysisRef, error) {
+	var rows []SRZoneAnalysisRef
+	err := r.db.SelectContext(ctx, &rows, r.db.Rebind(`
+		SELECT id, symbol
+		FROM stock_sr_zone_analyses WHERE created_at >= ?
+		ORDER BY created_at DESC, id DESC LIMIT ?
+	`), since, limit)
 	return rows, err
 }
 

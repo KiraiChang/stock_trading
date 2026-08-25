@@ -29,9 +29,54 @@ import (
 // 也有可用的預設（見 corporateActionCron）。
 const defaultCorporateActionCron = "30 6 * * 1-5"
 
-// srZoneVerifyLimit 每次收盤驗證最多處理幾筆最近的 SR zone 分析，避免隨著
-// 歷史分析越積越多，這個 job 的執行時間跟著無上限成長（見 RunDailyClose）。
-const srZoneVerifyLimit = 50
+// jobRunRetentionDays 是 job_runs 的保留天數。
+//
+// **原本是「只保留當天」**，開盤前把前一天以前的整批刪掉。那讓排程健康史每天歸零：
+// 「昨天那輪是不是 partial」「這支這週失敗過幾次」都查不到，而 2026-08-24 那次
+// corporate_action_sync 狀態修正（原記於 issue.md I-084，已收斂）正是靠 job_runs
+// 的 failed=808 發現的——隔一天再看，證據就不存在了
+// （見 docs/api-reference.md 的「job_runs 保留 30 天」）。
+//
+// 30 天約 1900 筆（單日約 62 筆，其中 intraday 佔 55），對三個引擎都微不足道。
+// /scheduler/status 改用 GetLatestPerJob 之後，**回傳筆數**不隨保留期成長；
+// 但那條 window query 仍要處理保留期內的資料，保留期拉很長時要看的是掃描成本。
+const jobRunRetentionDays = 30
+
+// jobRunRetentionCutoff 回傳保留期的起點（台北時區的日界）。
+func jobRunRetentionCutoff() time.Time {
+	return timeutil.TodayTaipei().AddDate(0, 0, -jobRunRetentionDays)
+}
+
+// defaultSRZoneVerifyDays / defaultSRZoneVerifyMaxAnalyses 是收盤驗證覆蓋窗口的預設值
+// （見 docs/architecture.md 的排程說明段）。config 沒給時的退路，
+// 語意見 config.SRZoneVerifyConfig。
+//
+// **窗口的單位由「筆數」改成「天數」**：舊的固定上限 50 筆是分析還沒排程化的
+// 年代訂的（一天 1~3 筆 ≈ 20 個交易日）；watchlist 11 檔 × 每日兩輪之後一天 22 筆，
+// 50 筆只剩約 2.3 個交易日。天數讓窗口與 watchlist 大小脫鉤。
+// MaxAnalyses 仍保留硬上限，避免窗口拉長後無限成長。
+const (
+	defaultSRZoneVerifyDays        = 30
+	defaultSRZoneVerifyMaxAnalyses = 2000
+	// maxSRZoneVerifyMaxAnalyses 是設定值也不能突破的上限，比照 store 的
+	// maxTimelineMaxAnalyses 慣例（default fallback ＋ hard clamp 兩段）。
+	//
+	// **這支排程沒有任何其他攔截**：runSRZoneVerification 沒有 context.WithTimeout，
+	// RunDailyClose 尾端也是無條件呼叫它。少了這道 clamp，env 打錯一個零就會讓
+	// 單輪逐筆驗證跑到不知道什麼時候。
+	//
+	// 取 10000 的依據：**2026-08-25 dev postgres 實測 672 筆整輪 20.0 秒**
+	// （平均 29.8ms／筆），照此換算 10000 筆約 5 分鐘；而 watchlist 擴到 150 檔
+	// （T-040 的池 131 檔）× 每日兩輪 × 30 天 = 9000，這個上限不會誤傷合理的成長。
+	//
+	// **記憶體不再是瓶頸**：清單走 ListRefsSince（見 docs/architecture.md 的排程說明段），
+	// 每筆只有 id ＋ symbol，10000 筆約數百 KB。先前用完整分析型別時平均 28 kB／筆、
+	// 10000 筆約 276 MB，實測會被 OOM kill——所以那條查詢不要改回撈整份分析。
+	//
+	// 撞到上限時 job_runs 的 symbols_total 會等於這個數字——那是維運判斷
+	// 「窗口被截斷了」的訊號，見 docs/architecture.md。
+	maxSRZoneVerifyMaxAnalyses = 10000
+)
 
 // stockSymbolSyncTimeout 是整個 stock_symbol_sync job 的上限（抓取兩個來源 + 寫入快照）。
 // 單次 HTTP 請求另有 client timeout（預設 300 秒／來源），這層是最後防線：來源異常慢或
@@ -57,6 +102,7 @@ type Scheduler struct {
 	jobRuns          store.JobRunRepo
 	srZoneRepo       store.SRZoneRepo
 	srZoneVerifier   *analysis.SRZoneVerifier
+	srZoneVerifyCfg  config.SRZoneVerifyConfig
 	chipSyncer       *chip.Syncer
 	chipSyncCron     string
 	stockSyncer      *market.StockSymbolSyncer
@@ -334,8 +380,8 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 func (s *Scheduler) runPreMarket() {
 	ctx := context.Background()
 
-	// 只保留當天的排程執行紀錄，開盤前先清掉前幾天的舊資料
-	if n, err := s.jobRuns.DeleteBefore(ctx, timeutil.TodayTaipei()); err != nil {
+	// 保留最近 jobRunRetentionDays 天的排程執行紀錄，開盤前清掉更舊的。
+	if n, err := s.jobRuns.DeleteBefore(ctx, jobRunRetentionCutoff()); err != nil {
 		s.log.Warn("job_runs cleanup failed", zap.Error(err))
 	} else if n > 0 {
 		s.log.Info("job_runs cleanup done", zap.Int64("deleted", n))
@@ -548,13 +594,18 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 	s.finishRun(ctx, runID, "stock_symbol_sync", result.Seen, 0, "")
 }
 
-// runSRZoneVerification 對最近 srZoneVerifyLimit 筆 SR zone 分析重新驗證
-// zone 有沒有被突破（見 internal/analysis/sr_zone_verifier.go）。跟
-// indicator/signal 排程一樣，單筆驗證失敗只記錄、不中斷其他分析的驗證。
+// runSRZoneVerification 對**最近 N 天**的 SR zone 分析重新驗證 zone 有沒有被突破
+// （見 internal/analysis/sr_zone_verifier.go）。窗口天數與硬上限由
+// config.SRZoneVerifyConfig 決定，語意見那裡。跟 indicator/signal 排程一樣，
+// 單筆驗證失敗只記錄、不中斷其他分析的驗證。
 func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 	runID := s.startRun(ctx, "sr_zone_verify")
 
-	analyses, err := s.srZoneRepo.List(ctx, "", srZoneVerifyLimit)
+	// **窗口是時間不是筆數**（見 docs/architecture.md）：取最近 N 天的分析，上限只當保護。
+	// 取的是 Ref（只有 id/symbol）而不是完整分析——迴圈只用得到這兩欄，
+	// 完整型別平均 28 kB／筆，上限 10000 筆時會 OOM（見 docs/architecture.md）。
+	since := time.Now().In(timeutil.TaipeiTZ).AddDate(0, 0, -s.srZoneVerifyDays())
+	analyses, err := s.srZoneRepo.ListRefsSince(ctx, since, s.srZoneVerifyMaxAnalyses())
 	if err != nil {
 		s.log.Error("sr zone list failed", zap.Error(err))
 		// **total 傳 1 而不是 0**：finishRun 依 total/failed 推導狀態，(0, 0) 會落到
@@ -575,7 +626,9 @@ func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 			lastErr = err.Error()
 		}
 	}
-	s.log.Info("sr zone verification job completed", zap.Int("analyses", len(analyses)), zap.Int("failed", failed))
+	s.log.Info("sr zone verification job completed",
+		zap.Int("analyses", len(analyses)), zap.Int("failed", failed),
+		zap.Int("window_days", s.srZoneVerifyDays()), zap.Int("max_analyses", s.srZoneVerifyMaxAnalyses()))
 	s.finishRun(ctx, runID, "sr_zone_verify", len(analyses), failed, lastErr)
 }
 
@@ -1061,6 +1114,37 @@ func (s *Scheduler) SetSRAnalysis(runner SRAnalysisRunner, candles store.CandleR
 	s.srAnalysisRunner = runner
 	s.srAnalysisCandles = candles
 	s.srAnalysisCfg = cfg
+}
+
+// SetSRZoneVerify 注入收盤驗證的覆蓋窗口設定（見 docs/architecture.md 的排程說明段）。
+//
+// **沒注入也能跑**：零值會被 srZoneVerifyDays / srZoneVerifyMaxAnalyses 退回預設，
+// 這支排程是無條件註冊的，不能因為漏注入就驗不到東西。
+func (s *Scheduler) SetSRZoneVerify(cfg config.SRZoneVerifyConfig) {
+	s.srZoneVerifyCfg = cfg
+}
+
+// srZoneVerifyDays 是往回驗幾天，非正值退回預設。
+func (s *Scheduler) srZoneVerifyDays() int {
+	if s.srZoneVerifyCfg.Days > 0 {
+		return s.srZoneVerifyCfg.Days
+	}
+	return defaultSRZoneVerifyDays
+}
+
+// srZoneVerifyMaxAnalyses 是單輪處理筆數的硬上限。
+//
+// 兩段式：非正值退回預設，超過 maxSRZoneVerifyMaxAnalyses 則截到上限。
+// **後半段不能省**——設定來自 env，打錯字不會有人幫忙擋，而這支排程沒有 timeout。
+func (s *Scheduler) srZoneVerifyMaxAnalyses() int {
+	limit := s.srZoneVerifyCfg.MaxAnalyses
+	if limit <= 0 {
+		limit = defaultSRZoneVerifyMaxAnalyses
+	}
+	if limit > maxSRZoneVerifyMaxAnalyses {
+		limit = maxSRZoneVerifyMaxAnalyses
+	}
+	return limit
 }
 
 // RunSRAnalysis 供 API 手動觸發。withChip 決定是否要求「當日籌碼已入庫」。

@@ -351,11 +351,56 @@ Go 讀 candles，純 Go 比對支撐/壓力是否突破、停損/停利是否觸
 Go POST Python /sr-zones（zone 建立 + 特徵計算 + 機率模型預測 + 分數推導）
     ↓
 Go 寫入 stock_sr_zone_analyses + stock_sr_zones
-    ↓（手動 POST /sr-zones/:id/verify，或 daily_close 排程每天自動驗證最近幾筆）
+    ↓（手動 POST /sr-zones/:id/verify，或 daily_close 排程每天自動驗證最近 N 天）
 Go 讀 candles，純 Go 比對每個 zone 是否被突破
     ↓
 更新 stock_sr_zones.status/broken_at/broken_price
 ```
+
+**收盤驗證的覆蓋窗口單位是「天」，不是「筆數」**（平日 15:00 的 `sr_zone_verify`，
+2026-08-25 起）：
+
+| 設定 | 環境變數 | 預設 | 意義 |
+|---|---|---|---|
+| `sr_zone_verify.days` | `SR_ZONE_VERIFY_DAYS` | 30 | 往回驗幾天的分析（依 `created_at`） |
+| `sr_zone_verify.max_analyses` | `SR_ZONE_VERIFY_MAX_ANALYSES` | 2000 | 單輪處理筆數的硬上限，防止窗口拉長後無限成長。**調得再大也不會超過程式內的 10000** |
+
+**為什麼不是筆數**：舊版寫死「最近 50 筆」，那個數字是分析還沒排程化的年代訂的
+（一天 1～3 筆 ≈ 20 個交易日）。分析排程化之後 watchlist 11 檔 × 每日兩輪 = 一天 22 筆，
+50 筆只剩約 2.3 個交易日，watchlist 擴到 30 檔就不到一天——**後果不是資料錯誤，
+而是更早的分析裡那些 `PENDING` 的 zone 永遠停在 `PENDING`，再也不會被驗到**。
+換成天數之後，覆蓋窗口與 watchlist 大小、與每日輪數都脫鉤。
+
+**用 `created_at` 而不是 `analyzed_at`**：後者是日期粒度（同一交易日 17:00 與 22:00
+兩輪都寫成當日 00:00，它是「今天這根 K 棒分析過沒」的判定依據），取不出「最近 N 天
+實際跑過的分析」。查詢由 `idx_stock_sr_zone_analyses_created_at` 支撐（migration 073）
+——既有的 `(symbol, created_at DESC)` leading column 是 symbol，這條不帶 symbol 的
+查詢走不到它。
+
+**`max_analyses` 之上還有一道不可突破的 clamp（10000，`scheduler` 的
+`maxSRZoneVerifyMaxAnalyses`）**：這支排程沒有 `context.WithTimeout`，`RunDailyClose`
+尾端也是無條件呼叫它，那道 clamp 是單輪執行時間唯一的底，不能讓 env 的一個錯字決定。
+取 10000 的依據見該常數註解（依實測速率換算約 5 分鐘，且涵蓋 watchlist 150 檔 × 兩輪 × 30 天）。
+**清單只取 `id` 與 `symbol`（`SRZoneAnalysisRef`），不撈整份分析**——這是上限在
+記憶體上站得住的前提。排程迴圈只用得到這兩欄（ID 傳給 `Verify`、symbol 進失敗 log），
+其餘欄位 `Verify` 會自己重查。完整的 `SRZoneAnalysis` 有九個 `RawJSON` 欄位、
+實測平均 28 kB／筆，上限 10000 筆時一次載入約 276 MB，在 2GiB host 上會直接 OOM
+（2026-08-25 實測：256MB 與 512MB 的 container 都被 kill）。改成 Ref 之後同樣情境
+在 **256MB 下跑完**，所以那條查詢不要改回撈整份分析。
+
+**取分析的順序是 `created_at DESC, id DESC`**：`created_at` 只有秒級精度，同一輪的多檔
+常落在同一秒；少了 `id` 決勝，撞到上限時邊界那幾筆會在不同引擎之間漂移，某筆分析可能
+一直輪不到驗證。**注意單元測試證明不了這件事**——只跑 sqlite，而 sqlite 在同秒時碰巧
+就是回 id 遞減（2026-08-25 變異測試實測），這條 `ORDER BY` 的依據是跨引擎確定性的論證，
+不是測試保護。
+
+**成本不是限制（2026-08-25 dev postgres 實測）**：672 筆分析、10256 個 zone，
+整輪 **20.0 秒**，平均每筆 29.8ms。驗證是本地 DB 往返為主——單筆成本 = 5 次查詢
+＋ 每個 zone 一次 `UpdateZoneStatus`，所以成本跟著 **zone 數**走而不只是分析數。
+（立案時「45 筆／1 秒」的線性推估給出 660 筆約 15 秒，實測偏高約 33%。）
+重跑方式見 `internal/scheduler/sr_zone_verify_devbench_test.go` 的註解。
+**watchlist 擴大時要看的是 `job_runs` 裡 `sr_zone_verify` 的 `symbols_total` 有沒有
+貼著 `max_analyses`**——貼上去就代表窗口被上限截斷，實際回溯天數已經少於設定值。
 
 訓練是獨立的非同步流程，不在上面這條同步路徑裡：
 

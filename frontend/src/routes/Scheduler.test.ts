@@ -183,3 +183,31 @@ describe('Scheduler 頁面的 corporate_action_sync 區塊', () => {
     expect(screen.getByRole('button', { name: '手動執行還原同步' })).toBeTruthy()
   })
 })
+
+// `aborted` 是後端啟動時回收孤兒紀錄後才會出現的狀態（見 docs/api-reference.md 的
+// GET /scheduler/status）。沒有對照表時 statusLabel 會 fallback 成原始字串、顏色 fallback
+// 成灰色——**灰色在這頁的語意是「沒開／尚未執行」，讀起來像沒事**，
+// 而 aborted 的意思是「該輪沒跑完」。這條把標籤與顏色一起釘住。
+describe('Scheduler 頁面的 aborted 狀態', () => {
+  it('顯示成「已中斷」而不是原始字串，且不使用灰色', async () => {
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([
+      {
+        job_name: 'evaluation_universe_sync',
+        status: 'aborted',
+        symbols_total: 0,
+        symbols_failed: 0,
+        stale: false,
+        started_at: '2026-08-25T08:00:00Z',
+        finished_at: '2026-08-25T08:05:00Z',
+      },
+    ])
+    render(Scheduler)
+
+    const label = await screen.findByText('已中斷')
+    expect(screen.queryByText('aborted')).toBeNull()
+
+    // 顏色要與 failed（紅）、partial（黃）、以及「沒事」的灰色都分得開。
+    const badge = label.closest('span')
+    expect(badge?.className).toContain('orange')
+  })
+})

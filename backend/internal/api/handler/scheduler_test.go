@@ -39,6 +39,9 @@ func (s *jobRunRepoStub) GetRecent(_ context.Context, limit int) ([]store.JobRun
 }
 func (s *jobRunRepoStub) DeleteBefore(context.Context, time.Time) (int64, error) { return 0, nil }
 
+// AbortRunning 只有 main.go 會呼叫（啟動時回收孤兒紀錄），handler 自己不會用到。
+func (s *jobRunRepoStub) AbortRunning(context.Context) (int64, error) { return 0, nil }
+
 // GetLatestPerJob 模擬真實 SQL 的語意：每個 job_name 取最新一筆
 // （ORDER BY started_at DESC, id DESC）。**這裡刻意不套用任何筆數上限**——
 // 真實查詢回的是「有紀錄的 job_name 各一列」，筆數不隨同一個 job 累積多少紀錄而增加

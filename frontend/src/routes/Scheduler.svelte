@@ -34,6 +34,10 @@
     success: '成功',
     partial: '部分失敗',
     failed: '失敗',
+    // process 在該輪結束前被中斷（部署重啟、OOM、crash），由後端啟動時回收。
+    // **與 failed 分開**：failed 是「跑了但全軍覆沒」，中斷是「沒跑完、結果未知」，
+    // 已完成的部分仍然有效，要不要補跑是不同的判斷（見 docs/api-reference.md）。
+    aborted: '已中斷',
     skipped: '已跳過',
     never_run: '尚未執行',
     // 排程未註冊（config 關閉、或相依未注入）。與 never_run 分開：
@@ -46,6 +50,7 @@
     success: 'bg-green-900/40 text-green-400',
     partial: 'bg-yellow-900/40 text-yellow-400',
     failed: 'bg-red-900/40 text-red-400',
+    aborted: 'bg-orange-900/40 text-orange-400',
     skipped: 'bg-gray-700/60 text-gray-400',
     never_run: 'bg-gray-700/60 text-gray-400',
     disabled: 'bg-gray-800/60 text-gray-500',
@@ -56,6 +61,7 @@
     success: 'bg-green-400',
     partial: 'bg-yellow-400',
     failed: 'bg-red-400',
+    aborted: 'bg-orange-400',
     skipped: 'bg-gray-500',
     never_run: 'bg-gray-500',
     disabled: 'bg-gray-600',

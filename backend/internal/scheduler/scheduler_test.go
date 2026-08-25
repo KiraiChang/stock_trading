@@ -104,6 +104,11 @@ func (s *schedulerJobRunRepoStub) DeleteBefore(ctx context.Context, cutoff time.
 	return 0, nil
 }
 
+// AbortRunning 只有 main.go 會呼叫（啟動時回收孤兒紀錄），scheduler 自己不會用到。
+func (s *schedulerJobRunRepoStub) AbortRunning(ctx context.Context) (int64, error) {
+	return 0, nil
+}
+
 type schedulerSREvaluationJobRepoStub struct {
 	created     *store.SREvaluationJob
 	markRunning []string
@@ -631,7 +636,7 @@ func TestIsJobRegisteredReflectsActualRegistration(t *testing.T) {
 
 func TestIsJobRegisteredTrueWhenEnabled(t *testing.T) {
 	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: true, Cron: "30 22 * * 1-5"})
-	s.SetEvaluationUniverse(nil, config.EvaluationUniverseConfig{})
+	s.SetEvaluationUniverse(nil, nil, config.EvaluationUniverseConfig{})
 	s.Start()
 	defer s.Stop()
 
@@ -1694,5 +1699,181 @@ func TestSRZoneVerifyClampsMaxAnalysesToHardLimit(t *testing.T) {
 				t.Errorf("設定 %d → limit = %d，期望 %d", tc.set, repo.limitArg, tc.want)
 			}
 		})
+	}
+}
+
+// ── evaluation_universe_sync 跳過「今天已有日 K」的標的（architecture.md 日 K 維護段）──
+
+// universeRepoStub 只提供 ListActive——runEvaluationUniverseSync 只用到這一個方法。
+type universeRepoStub struct {
+	store.EvaluationUniverseRepo
+	symbols []string
+	err     error
+}
+
+func (s *universeRepoStub) ListActive(context.Context) ([]store.EvaluationUniverseEntry, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make([]store.EvaluationUniverseEntry, 0, len(s.symbols))
+	for _, sym := range s.symbols {
+		out = append(out, store.EvaluationUniverseEntry{Symbol: sym})
+	}
+	return out, nil
+}
+
+// universeCandleStub 提供「今天已有 K 棒的標的」與回補要用的 BulkInsert。
+type universeCandleStub struct {
+	store.CandleRepo
+	syncedToday []string
+	err         error
+	// gotSymbols / gotTimeframe / gotDay 記下查詢參數：帶錯 timeframe 或日界都會讓跳過失準，
+	// 而少了 symbols 會讓查詢退化成整張 candles 的 seq scan（2026-08-25 review）。
+	gotSymbols   []string
+	gotTimeframe string
+	gotDay       time.Time
+}
+
+func (s *universeCandleStub) SymbolsWithCandleOn(
+	_ context.Context, symbols []string, timeframe string, day time.Time,
+) ([]string, error) {
+	s.gotSymbols = append([]string(nil), symbols...)
+	s.gotTimeframe = timeframe
+	s.gotDay = day
+	if s.err != nil {
+		return nil, s.err
+	}
+	return append([]string(nil), s.syncedToday...), nil
+}
+
+func (s *universeCandleStub) BulkInsert(context.Context, []store.Candle) error { return nil }
+
+// universeSourceStub 記下實際被抓取的標的——這就是「有沒有真的跳過」的證據。
+type universeSourceStub struct {
+	mu      sync.Mutex
+	fetched []string
+}
+
+func (s *universeSourceStub) FetchDailyCandles(
+	_ context.Context, symbol string, _, _ time.Time,
+) ([]market.Candle, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fetched = append(s.fetched, symbol)
+	return nil, nil
+}
+
+func (s *universeSourceStub) FetchMinuteCandles(
+	context.Context, string, time.Time,
+) ([]market.Candle, error) {
+	return nil, nil
+}
+
+func newUniverseSyncScheduler(
+	pool []string, candles store.CandleRepo,
+) (*Scheduler, *universeSourceStub, *schedulerJobRunRepoStub) {
+	source := &universeSourceStub{}
+	jobRuns := &schedulerJobRunRepoStub{}
+	fetcher := market.NewFetcher(source, &universeCandleStub{}, zap.NewNop())
+	s := New(
+		fetcher, nil, nil, jobRuns, nil, nil, nil, "", nil, "", false,
+		nil, nil, nil, nil, config.SREvaluationConfig{}, false, zap.NewNop(),
+	)
+	s.SetEvaluationUniverse(
+		&universeRepoStub{symbols: pool}, candles,
+		config.EvaluationUniverseConfig{Days: 10},
+	)
+	return s, source, jobRuns
+}
+
+// 本體：已有當日 K 棒的標的不再送請求，其餘照跑。
+func TestEvaluationUniverseSyncSkipsSymbolsAlreadySyncedToday(t *testing.T) {
+	pool := []string{"1101", "1102", "1103", "1104", "1105"}
+	candles := &universeCandleStub{syncedToday: []string{"1101", "1103"}}
+	s, source, _ := newUniverseSyncScheduler(pool, candles)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	want := []string{"1102", "1104", "1105"}
+	if !reflect.DeepEqual(source.fetched, want) {
+		t.Errorf("實際抓取 %v, 期望 %v（1101/1103 今天已有 K 棒）", source.fetched, want)
+	}
+	// 查詢一定要帶 1d：池只維護日 K，帶錯 timeframe 會讓跳過完全失準。
+	if candles.gotTimeframe != "1d" {
+		t.Errorf("查詢的 timeframe = %q, 期望 1d", candles.gotTimeframe)
+	}
+	// 日界必須是台北時區的當日 00:00，用 UTC 日界會在台灣時間早上 08:00 前後各錯一天。
+	if !candles.gotDay.Equal(timeutil.TodayTaipei()) {
+		t.Errorf("查詢的日界 = %v, 期望 %v", candles.gotDay, timeutil.TodayTaipei())
+	}
+	// **池成員一定要帶進查詢**：複合索引首欄是 symbol，不帶會退化成整張 candles 的
+	// seq scan（2026-08-25 review，live 實測 368ms vs 1.96ms）。
+	if !reflect.DeepEqual(candles.gotSymbols, pool) {
+		t.Errorf("查詢帶入的 symbols = %v, 期望整池 %v", candles.gotSymbols, pool)
+	}
+}
+
+// **symbols_total 永遠是池大小，不是本輪實際抓取數。**
+// 換成抓取數的話狀態頁的數字會每天不同，看的人無從判斷哪個才是異常。
+func TestEvaluationUniverseSyncReportsPoolSizeNotAttemptedCount(t *testing.T) {
+	pool := []string{"1101", "1102", "1103", "1104", "1105"}
+	candles := &universeCandleStub{syncedToday: []string{"1101", "1103"}}
+	s, _, jobRuns := newUniverseSyncScheduler(pool, candles)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finishRun 被呼叫 %d 次，期望 1 次", len(jobRuns.finished))
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != len(pool) {
+		t.Errorf("symbols_total = %d, 期望 %d（池大小，不是抓取數 3）", got.symbolsTotal, len(pool))
+	}
+	if got.status != "success" {
+		t.Errorf("status = %q, 期望 success", got.status)
+	}
+}
+
+// 全部都已同步時一個請求都不送，但仍記成跑過一輪（池內資料已是最新，語意上是對的）。
+func TestEvaluationUniverseSyncSkipsEverythingWhenPoolIsUpToDate(t *testing.T) {
+	pool := []string{"1101", "1102"}
+	candles := &universeCandleStub{syncedToday: []string{"1101", "1102"}}
+	s, source, jobRuns := newUniverseSyncScheduler(pool, candles)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if len(source.fetched) != 0 {
+		t.Errorf("不該送出任何請求，實際抓取 %v", source.fetched)
+	}
+	if got := jobRuns.finished[0]; got.symbolsTotal != 2 || got.symbolsFailed != 0 {
+		t.Errorf("job_runs 記到 %d/%d, 期望 2/0", got.symbolsTotal, got.symbolsFailed)
+	}
+}
+
+// **降級方向要是「多抓一點」**：查詢失敗時退回全量抓取，不能靜默漏掉標的。
+func TestEvaluationUniverseSyncFallsBackToFullRunWhenLookupFails(t *testing.T) {
+	pool := []string{"1101", "1102", "1103"}
+	candles := &universeCandleStub{
+		syncedToday: []string{"1101"},
+		err:         errors.New("boom"),
+	}
+	s, source, _ := newUniverseSyncScheduler(pool, candles)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("查詢失敗時應全量抓取，實際 %v", source.fetched)
+	}
+}
+
+// 未注入 candles 時行為與導入這個最佳化之前完全相同（全量抓取）。
+func TestEvaluationUniverseSyncRunsFullWhenCandlesNotInjected(t *testing.T) {
+	pool := []string{"1101", "1102"}
+	s, source, _ := newUniverseSyncScheduler(pool, nil)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("未注入 candles 應全量抓取，實際 %v", source.fetched)
 	}
 }

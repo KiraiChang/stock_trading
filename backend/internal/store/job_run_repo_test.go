@@ -196,3 +196,130 @@ func TestDeleteBeforeKeepsRunsInsideRetention(t *testing.T) {
 		t.Error("當天的紀錄不該被刪")
 	}
 }
+
+// AbortRunning 的本體：只收掉還停在 running 的那些，已結束的一筆都不能碰。
+//
+// 這條守的是：process 被砍掉時 finishRun 沒機會執行，那筆紀錄會永遠停在 running，
+// 而 /scheduler/status 對 running 不套 stale 門檻，於是「跑到一半死掉」被顯示成
+// 「正在跑」（見 docs/api-reference.md 的 GET /scheduler/status）。
+func TestAbortRunningOnlyTouchesUnfinishedRuns(t *testing.T) {
+	repo, ctx := newJobRunRepoForTest(t)
+
+	doneID, err := repo.Start(ctx, "daily_close")
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	if err := repo.Finish(ctx, doneID, "partial", 11, 2, "上游逾時"); err != nil {
+		t.Fatalf("finish failed: %v", err)
+	}
+	orphanID, err := repo.Start(ctx, "evaluation_universe_sync")
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	n, err := repo.AbortRunning(ctx)
+	if err != nil {
+		t.Fatalf("AbortRunning failed: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("回收 %d 筆，期望 1 筆（只有未完成那筆）", n)
+	}
+
+	byID := map[uint64]JobRun{}
+	rows, err := repo.GetRecent(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetRecent failed: %v", err)
+	}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+
+	orphan := byID[orphanID]
+	// 狀態字串必須完整讀回 aborted。
+	//
+	// **這條守不住欄位長度**（2026-08-25 review 更正）：sqlite 的 status 是 TEXT，
+	// 多長都寫得進去，所以「寫進去讀回來一樣」在這裡不構成長度的證據。
+	// 長度由 jobRunStatusMaxLen 旁邊的編譯期斷言把守。
+	if orphan.Status != "aborted" {
+		t.Errorf("孤兒紀錄 status = %q, 期望 aborted", orphan.Status)
+	}
+	if !orphan.FinishedAt.Valid {
+		t.Error("孤兒紀錄的 finished_at 應該被補上，否則排程頁看起來仍在執行中")
+	}
+	if orphan.Error.String == "" {
+		t.Error("孤兒紀錄應寫入結束原因，那是排程頁唯一看得到的地方")
+	}
+	// symbols_total / symbols_failed 維持 0：那正確表達「沒有回報過」，
+	// 猜一個數字會讓「跑完但零標的」與「沒跑完」分不開。
+	if orphan.SymbolsTotal != 0 || orphan.SymbolsFailed != 0 {
+		t.Errorf("孤兒紀錄的標的數應維持 0/0, 得到 %d/%d",
+			orphan.SymbolsTotal, orphan.SymbolsFailed)
+	}
+
+	done := byID[doneID]
+	if done.Status != "partial" || done.SymbolsTotal != 11 || done.SymbolsFailed != 2 {
+		t.Errorf("已完成的紀錄被覆寫了：status=%q total=%d failed=%d",
+			done.Status, done.SymbolsTotal, done.SymbolsFailed)
+	}
+	if done.Error.String != "上游逾時" {
+		t.Errorf("已完成紀錄的 error 被覆寫成 %q", done.Error.String)
+	}
+}
+
+// 沒有孤兒時回 0 且不報錯——這是每次正常重啟都會走到的路徑。
+func TestAbortRunningWithNoOrphansIsNoop(t *testing.T) {
+	repo, ctx := newJobRunRepoForTest(t)
+
+	id, err := repo.Start(ctx, "intraday")
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	if err := repo.Finish(ctx, id, "success", 11, 0, ""); err != nil {
+		t.Fatalf("finish failed: %v", err)
+	}
+
+	n, err := repo.AbortRunning(ctx)
+	if err != nil {
+		t.Fatalf("AbortRunning failed: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("回收 %d 筆，期望 0 筆", n)
+	}
+}
+
+// 重複呼叫不會把已經回收過的紀錄再改一次——啟動失敗重試時會走到這條。
+func TestAbortRunningIsIdempotent(t *testing.T) {
+	repo, ctx := newJobRunRepoForTest(t)
+
+	if _, err := repo.Start(ctx, "corporate_action_sync"); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	if n, err := repo.AbortRunning(ctx); err != nil || n != 1 {
+		t.Fatalf("第一次回收 n=%d err=%v, 期望 1/nil", n, err)
+	}
+	n, err := repo.AbortRunning(ctx)
+	if err != nil {
+		t.Fatalf("AbortRunning failed: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("第二次回收 %d 筆，期望 0 筆（aborted 不該再被改）", n)
+	}
+}
+
+// 長度守門的可讀性測試：編譯期斷言（jobRunStatusMaxLen 旁）已經擋住超長的狀態值，
+// 但那道防線失效時的錯誤訊息是 `constant -N overflows uint`，看不出在講什麼。
+// 這條把意圖寫成可執行的形式，也讓日後新增狀態值的人有地方照抄。
+//
+// **不能改成「寫進 DB 再讀回來」**：單元測試只跑 sqlite，而 sqlite 的 status 是 TEXT，
+// 那種寫法在任何長度下都會通過（見 I-054：mysql / postgres 的 CRUD 沒有測試涵蓋）。
+func TestJobRunStatusValuesFitColumnWidth(t *testing.T) {
+	for _, status := range []string{
+		"running", "success", "partial", "failed", jobRunAbortedStatus,
+	} {
+		if len(status) > jobRunStatusMaxLen {
+			t.Errorf("status %q 有 %d 字元，超過 job_runs.status 的 %d 字元上限"+
+				"（postgres / mysql 是 VARCHAR(%d)；sqlite 是 TEXT 不會擋）",
+				status, len(status), jobRunStatusMaxLen, jobRunStatusMaxLen)
+		}
+	}
+}

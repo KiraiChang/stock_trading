@@ -124,6 +124,9 @@ type Scheduler struct {
 	// 不註冊該排程，行為與導入前完全相同。比照 adjuster 的處理。
 	evaluationUniverse    store.EvaluationUniverseRepo
 	evaluationUniverseCfg config.EvaluationUniverseConfig
+	// evaluationUniverseCandles 用來查「今天已經有日 K 的標的」，把它們排除在本輪之外
+	// （見 docs/architecture.md 的日 K 維護段）。**未注入時退回全量抓取**，行為與導入前相同。
+	evaluationUniverseCandles store.CandleRepo
 	// universeSyncRunning 擋重複觸發。這個 job 要跑約 26 分鐘，cron 與人工觸發撞在一起
 	// 會讓兩批請求共用同一個節流器互相拖慢，且 job_runs 出現兩筆難以判讀的紀錄。
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
@@ -938,10 +941,16 @@ func (s *Scheduler) corporateActionSymbols(ctx context.Context, all []string) ([
 	return selected, watchlistErr
 }
 
-// SetEvaluationUniverse 注入評估標的池與其排程設定。未呼叫或 cfg.Enabled=false 時
+// SetEvaluationUniverse 注入評估標的池、K 棒查詢與其排程設定。未呼叫或 cfg.Enabled=false 時
 // 不註冊該 job，行為與導入前完全相同（比照 SetAdjuster）。
-func (s *Scheduler) SetEvaluationUniverse(repo store.EvaluationUniverseRepo, cfg config.EvaluationUniverseConfig) {
+//
+// candles 用來跳過「今天已經有日 K」的標的，**傳 nil 時退回全量抓取**——
+// 那是最佳化，不是正確性的前提。依賴與設定一起注入，比照 SetSRAnalysis。
+func (s *Scheduler) SetEvaluationUniverse(
+	repo store.EvaluationUniverseRepo, candles store.CandleRepo, cfg config.EvaluationUniverseConfig,
+) {
 	s.evaluationUniverse = repo
+	s.evaluationUniverseCandles = candles
 	s.evaluationUniverseCfg = cfg
 }
 
@@ -986,6 +995,11 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	for i := range entries {
 		symbols = append(symbols, entries[i].Symbol)
 	}
+	// poolSize 在過濾之前先記下來：**symbols_total 永遠是池大小，不是本輪實際抓取數**
+	// （見 docs/architecture.md 的日 K 維護段）。換成抓取數會讓狀態頁的數字每天不同（135 / 81 / 0 …），
+	// 看的人無從判斷哪個才是異常，而 architecture.md 教的判讀方式是把它當「池有多大」在讀。
+	poolSize := len(entries)
+	symbols, skipped := s.dropSymbolsSyncedToday(ctx, symbols)
 
 	days := s.evaluationUniverseCfg.Days
 	if days <= 0 {
@@ -1021,9 +1035,61 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 			lastErr = "部分標的回補失敗，詳見 log"
 		}
 	}
+	// **skipped 一定要記**：全部跳過時 attempted=0、failed=0，狀態會是 success 而
+	// symbols_total=135——「135 檔全部成功」但一檔都沒抓。那個語意是對的（池內都已最新），
+	// 但少了這個欄位就變成另一個「看起來有跑，其實沒跑」。
 	s.log.Info("evaluation universe sync done",
-		zap.Int("symbols", len(symbols)), zap.Int("failed", failed), zap.Int("days", days))
-	s.finishRun(ctx, runID, "evaluation_universe_sync", len(symbols), failed, lastErr)
+		zap.Int("pool", poolSize), zap.Int("attempted", len(symbols)),
+		zap.Int("skipped", skipped), zap.Int("failed", failed), zap.Int("days", days))
+	s.finishRun(ctx, runID, "evaluation_universe_sync", poolSize, failed, lastErr)
+}
+
+// evaluationUniverseTimeframe 是這個池唯一維護的 timeframe。池不進盤中掃描，
+// 所以它只會有日 K（見 docs/architecture.md 的「兩個標的清單」）。
+const evaluationUniverseTimeframe = "1d"
+
+// dropSymbolsSyncedToday 濾掉今天已經有日 K 的標的，回傳（要跑的清單, 跳過數）。
+//
+// **為什麼跳過是安全的**（見 docs/architecture.md 的日 K 維護段）：
+// 跳過的前提是「已存在的當日日 K 是定案值」。
+// 池內標的**不進盤中掃描**，當日日 K 只有兩個可能來源——`daily_close`（15:00，只涵蓋與
+// watchlist 重疊的那幾檔）與本 job 自己（16:00），兩者都在收盤後。所以不存在
+// 「跳過了一根還會變動的盤中值」。
+//
+// ⚠️ **這個論證依賴「池不進盤中」這條分工。** 若日後池被接進盤中掃描或任何會在盤中寫入
+// 日 K 的流程，這個最佳化就不再安全——那時跳過的會是一根尚未定案的 K 棒，而且不會有任何
+// 東西報錯。要動那條分工之前，先回來改這裡。
+//
+// **查詢失敗時退回全量抓取，不是整輪放棄**：這是省請求的最佳化，不是正確性的守門。
+// 降級方向刻意選「多抓一點」而不是「少抓一點」——後者會靜默漏掉標的。
+func (s *Scheduler) dropSymbolsSyncedToday(ctx context.Context, symbols []string) ([]string, int) {
+	if s.evaluationUniverseCandles == nil {
+		return symbols, 0
+	}
+	// **把池成員一起帶進查詢**：複合索引的首欄是 symbol，不約束它會退化成整張
+	// candles 的 seq scan（2026-08-25 review，live 實測 368ms → 1.96ms）。
+	synced, err := s.evaluationUniverseCandles.SymbolsWithCandleOn(
+		ctx, symbols, evaluationUniverseTimeframe, timeutil.TodayTaipei())
+	if err != nil {
+		s.log.Warn("evaluation universe 今日 K 棒查詢失敗，本輪改為全量抓取", zap.Error(err))
+		return symbols, 0
+	}
+	if len(synced) == 0 {
+		return symbols, 0
+	}
+
+	have := make(map[string]bool, len(synced))
+	for _, symbol := range synced {
+		have[symbol] = true
+	}
+	kept := make([]string, 0, len(symbols))
+	for _, symbol := range symbols {
+		if have[symbol] {
+			continue
+		}
+		kept = append(kept, symbol)
+	}
+	return kept, len(symbols) - len(kept)
 }
 
 // RunCorporateActionSync 抓取公司行動並重算還原係數。

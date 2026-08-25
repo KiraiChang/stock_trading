@@ -298,7 +298,7 @@ Phase 2 的目的不是選股，而是維護已確認的標的池。
 |---|---|
 | migration `066` × postgres / sqlite / mysql | ✅ 兩支驗證腳本各跑過，含 up → 分段 down-to-0 |
 | `EvaluationUniverseRepo` ＋ `EvaluationUniverseEntry` | ✅ 7 支 sqlite 測試 |
-| `evaluation_universe_sync` 排程 | ✅ 預設關閉、16:00、`days=10`、每 25 檔記進度、`atomic.Bool` 防重入 |
+| `evaluation_universe_sync` 排程 | ✅ 預設關閉、16:00、`days=10`、每 25 檔記進度、`atomic.Bool` 防重入。**2026-08-25 起會跳過「今天已有日 K」的標的**（原記於 `todo.md` T-062，已收斂），現況規格與其安全性前提見 [`architecture.md`](./architecture.md) 的「日 K 維護（`evaluation_universe_sync`，平日 16:00）會跳過『今天已有日 K』的標的」 |
 | 三個 CRUD 端點 ＋ 手動觸發 | ✅ 9 支 handler 測試 |
 | `config.yaml`、`main.go` 接線 | ✅ setter 在 `go sched.Start()` **之前**（之後注入會靜默失效） |
 | 前端「③ 已入池」區塊 | ✅ `svelte-check` 0 errors、vitest 96 passed |

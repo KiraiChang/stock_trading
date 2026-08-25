@@ -624,7 +624,8 @@ describe('SRZones evaluation report 的核心指標區塊', () => {
     expect(screen.queryByText(/波動側寫/)).not.toBeInTheDocument()
   })
 
-  // daily confirmation 的分層才是 T-028 的價值所在：「量能不足時的隔日守住表現」
+  // daily confirmation 的分層才是 T-028（原 `todo.md` 項目，已收斂移出）的價值所在：
+  // 「量能不足時的隔日守住表現」
   // 這類問題總表的五個 rate 答不了。以下鎖住分層有被渲染、且分群是依語意切的。
   it('daily confirmation 的十五個分層依語意分三群顯示', async () => {
     const group = (rows: number) => ({

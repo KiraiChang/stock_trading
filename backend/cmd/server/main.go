@@ -224,10 +224,27 @@ func main() {
 	sched.SetAdjuster(adjuster, cfg.CorporateAction)
 	// **必須在 sched.Start() 之前**：Start() 當下才決定要不要註冊 cron，
 	// 之後再注入不會有任何效果也不會報錯（靜默失效）。
-	sched.SetEvaluationUniverse(evaluationUniverseRepo, cfg.EvaluationUniverse)
+	sched.SetEvaluationUniverse(evaluationUniverseRepo, candleRepo, cfg.EvaluationUniverse)
 	// 收盤驗證的覆蓋窗口（見 docs/architecture.md）。沒注入也能跑（零值退回預設），但那樣就吃不到
 	// config 的調整，所以與其他注入放在一起、同樣在 Start() 之前。
 	sched.SetSRZoneVerify(cfg.SRZoneVerify)
+
+	// 回收上一個 process 留下的孤兒執行紀錄。語意與「為什麼不在 shutdown 收尾」見
+	// docs/api-reference.md 的「`running` 不套 stale 門檻，孤兒紀錄由啟動時回收」。
+	//
+	// **必須在 sched.Start() 與 srv.Run() 之前**：這兩者都會寫出新的 `running`，
+	// 晚一步就會把自己剛起跑的 job 標成 `aborted`。
+	//
+	// 失敗不中斷啟動：這只影響 /scheduler/status 的顯示，不影響任何排程執行。
+	// **但要記 Error 而不是 Warn**——靜默失敗會讓孤兒繼續假裝成「執行中」，
+	// 那正是這段程式碼要解的問題。
+	abortCtx, cancelAbort := context.WithTimeout(context.Background(), 10*time.Second)
+	if n, err := jobRunRepo.AbortRunning(abortCtx); err != nil {
+		log.Error("回收孤兒 job_runs 失敗，被中斷的排程可能仍顯示為執行中", zap.Error(err))
+	} else if n > 0 {
+		log.Warn("回收上次未跑完的排程紀錄", zap.Int64("aborted", n))
+	}
+	cancelAbort()
 
 	go sched.Start()
 

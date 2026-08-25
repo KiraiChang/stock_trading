@@ -204,6 +204,49 @@ SR zone 分析——17:00 那輪拿到的是前一日籌碼，22:00 那輪（晚
 預設關閉，細節見 [`api-reference.md`](./api-reference.md) 的
 `POST /scheduler/sr-analysis/run`。
 
+### 日 K 維護（`evaluation_universe_sync`，平日 16:00）會跳過「今天已有日 K」的標的
+
+這支排程逐檔對池內標的呼叫 `BackfillHistory(days)`，在 FinMind 的 5 req/min 下
+135 檔約需 **27 分鐘**。它取到池成員之後、送請求之前，會先用
+`CandleRepo.SymbolsWithCandleOn(池成員, "1d", 台北當日)` 查出「今天已經有日 K」的標的並剔除，
+只對缺的那些送請求（2026-08-25 起，原記於 `todo.md` T-062，已收斂）。
+
+**查詢一定要把池成員帶進去。** `candles` 的複合索引是 `(symbol, timeframe, ts)`，
+symbol 是首欄；只約束 `timeframe` 與 `ts` 的話 PostgreSQL 16 沒有 skip scan 可用，
+會退化成整張 `candles` 的 seq scan。live 實測（2026-08-25 review）：
+
+| 查詢 | 計畫 | 耗時 | buffers |
+|---|---|---|---|
+| 只限 `timeframe` ＋ `ts` | Parallel Seq Scan（掃掉 211,837 列） | 368 ms | 13,814 |
+| 加上 `symbol IN (池 135 檔)` | **Index Only Scan**（Heap Fetches: 0） | **1.96 ms** | 409 |
+
+呼叫端本來就有那份清單，要問的問題也正是「**這些**標的今天抓過了沒」，
+所以這不需要新增索引。
+
+**為什麼跳過是安全的**：跳過的前提是「已存在的當日日 K 是定案值」。池內標的
+**不進盤中掃描**（見上方職能表），所以它們的當日日 K 只有兩個來源——
+`daily_close`（15:00，只涵蓋與 watchlist 重疊的那幾檔）與這支排程自己（16:00），
+兩者都在收盤後。不存在「跳過了一根還會變動的盤中值」。
+
+> ⚠️ **這個論證依賴「池不進盤中」這條分工。** 若日後把池接進盤中掃描，或任何會在盤中
+> 寫入日 K 的流程涵蓋到池成員，這個最佳化就不再安全，而且**不會有任何東西報錯**。
+> 要動那條分工之前，先回頭改 `dropSymbolsSyncedToday`。
+
+**這是效率與配額的最佳化，不是資料正確性的守門**：`BackfillHistory` 抓的是
+`today-days ~ today`（`days` 預設 10）且 `BulkInsert` 走 upsert，所以某天漏掉的 K 棒
+**隔天那輪本來就會補回來**。跳過機制解的是「中斷後補齊要重跑整輪 27 分鐘」與
+「池成長後每輪都全量重抓」。因此**查詢失敗時退回全量抓取而不是整輪放棄**——
+降級方向刻意選「多抓一點」，少抓會靜默漏標的。
+
+**`symbols_total` 仍然是池大小，不是本輪實際抓取數。** 換成抓取數會讓
+`/scheduler/status` 的數字每天不同（135 / 81 / 0 …），看的人無從判斷哪個才是異常。
+實際跑了多少要看 log 的 `evaluation universe sync done`，它帶
+`pool` / `attempted` / `skipped` / `failed` 四個欄位。
+
+**要注意的讀法**：池內資料都已最新時，那一輪是 `attempted=0`、`failed=0`、
+`symbols_total=135`、狀態 `success`——「135 檔全部成功」但一個請求都沒送。
+語意上是對的（池內資料確實都是最新），判讀時要看 log 的 `skipped` 才知道發生了什麼。
+
 ### 公司行動同步是唯一「watchlist 優先、其餘輪替」的排程
 
 `corporate_action_sync`（平日 06:30）的標的來源是 **`candles` 內所有相異 symbol**

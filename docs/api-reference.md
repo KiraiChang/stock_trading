@@ -695,7 +695,8 @@ stub 偏離真實 repo 的語意時，測試保護的是一個不存在的系統
 |---|---|---|
 | `disabled` | `false` | **排程沒有被註冊**——config 關閉（`sr_evaluation`、`evaluation_universe`）或相依未注入（`adjuster`、`stockSyncer`）。刻意沒開，不是異常 |
 | `never_run` | `true` | 已註冊但從未跑過——**該跑卻沒跑**，要查 |
-| 實際狀態（`success` / `partial` / `failed` / `running`） | 依 `jobStaleThreshold` | 跑過；`stale` **只在仍註冊時才計算** |
+| 實際狀態（`success` / `partial` / `failed` / `aborted`） | 依 `jobStaleThreshold` | 跑過；`stale` **只在仍註冊時才計算** |
+| `running` | 恆為 `false` | 正在跑。**`stale` 對 `running` 永遠不成立**，不套門檻，見下節 |
 
 **為什麼要分開**（2026-08-18 修正）：早期版本一律回 `never_run` ＋ `stale=true`，
 於是兩個預設關閉的排程（`sr_evaluation`、`evaluation_universe_sync`）常態顯示成 stale。
@@ -708,6 +709,87 @@ stub 偏離真實 repo 的語意時，測試保護的是一個不存在的系統
 行為上與「沒開」相同（都不會跑），成因要看啟動 log 的 `cron register failed`。
 
 「跑過、後來被關閉」的 job 保留實際狀態，但 `stale` 為 `false`——舊紀錄不代表排程卡住。
+
+#### `running` 不套 stale 門檻，孤兒紀錄由啟動時回收
+
+`stale` 的判定明確排除 `running`：
+
+```go
+stale := registered && r.Status != "running" && time.Since(r.StartedAt) > jobStaleThreshold[name]
+```
+
+排除本身是對的——**真的在跑的 job 不該被報成卡住**，而 `evaluation_universe_sync`
+一輪就要約 27 分鐘。但它的代價是：一筆停在 `running` 的紀錄**永遠不會被標成 stale**，
+不是「80 小時後才亮」，是不會亮。
+
+所以 `running` 應該在資料上只代表「真的正在跑」。process 被外力砍掉時
+（部署重啟、OOM kill、crash）`finishRun` 沒機會執行，紀錄會留在 `running`，
+於是 **`main.go` 在啟動時、`sched.Start()` 與 `srv.Run()` 之前**呼叫一次
+`JobRunRepo.AbortRunning()`，把殘留的 `running` 改寫成 `aborted`
+（2026-08-25 加，原記於 `issue.md` I-090，已收斂）。
+
+> ⚠️ **這是 best-effort，不是不變式。** 回收帶 10 秒 timeout，**失敗只記 Error log
+> 並繼續啟動**（`cmd/server/main.go`）——DB 當下不通或那句 UPDATE 逾時的話，孤兒會
+> 原封不動留在 `running`，而它**永遠不會被標成 stale**（見上），排程頁照樣顯示「執行中」。
+>
+> 所以「畫面上是 `running`」只能推出「**要嘛真的在跑，要嘛上次回收失敗過**」。
+> 要斷定是哪一種，去看啟動 log：
+>
+> * `回收上次未跑完的排程紀錄`（Warn，帶 `aborted` 筆數）＝ 有回收到東西，正常。
+> * `回收孤兒 job_runs 失敗，被中斷的排程可能仍顯示為執行中`（**Error**）＝ 這次沒收成功，
+>   畫面上的 `running` 不可信。
+> * 兩者都沒有 ＝ 上次關機時沒有 job 在跑，畫面上的 `running` 就是真的在跑。
+>
+> **刻意不讓回收失敗中止啟動**：它只影響狀態頁的顯示，不影響任何排程執行，
+> 為了一個顯示問題而讓整個 backend 起不來是更糟的交換。代價就是上面這條判讀規則。
+
+實例：2026-08-25 16:00 的 `evaluation_universe_sync` 跑到 135 檔中的第 54 檔時
+遇到重新部署，那筆紀錄停在 `running`、`finished_at` 為空，狀態頁一路顯示「執行中」
+直到隔天 16:00 的下一輪產生新紀錄才被蓋掉——**中間約 24 小時，排程頁在主動報平安。**
+
+**這與 `finishRun` 的 ctx 修法是同一個病灶的兩個入口**：2026-08-24 那次
+（原記於 `issue.md` I-084）堵的是「ctx 逾時之後寫不進 `job_runs`」，
+啟動回收堵的是「連寫的機會都沒有」。少任何一個，`running` 都會有假陽性。
+
+**為什麼不在 shutdown handler 收尾**：`main.go` 的訊號處理只收 SIGTERM，
+涵蓋不到 SIGKILL、OOM kill 與 crash；而 `docker compose down` 預設 10 秒後就把
+SIGTERM 升級成 SIGKILL，一輪 27 分鐘的 job 等不到自己收尾。**啟動時回收才是所有
+中斷路徑的共同出口。** 兩者可以並存，但單靠 shutdown 一定會漏。
+
+⚠️ **前提：同一個 DB 只有一個 backend 實例。** `AbortRunning` 不分實例，
+第二台 backend 啟動會把第一台**正在跑**的 job 一起標成 `aborted`。
+要橫向擴充 backend 之前，這裡必須先加實例識別。
+
+#### `aborted`：沒跑完，結果未知
+
+| 狀態 | 語意 | 該怎麼辦 |
+|---|---|---|
+| `failed` | 跑了，但名單內全軍覆沒（`failed >= total`） | 查資料源或上游 |
+| `aborted` | **沒跑完**——process 在結束前就被中斷 | 看該 job 是否需要補跑 |
+
+`aborted` 刻意不併進 `failed`：已完成的部分仍然有效（前述那次是 135 檔中的 54 檔），
+混用會讓「要不要重跑」失去判斷依據。
+
+`aborted` 的紀錄 `symbols_total` / `symbols_failed` **維持 0**——那兩個數字只在
+`finishRun` 寫入，沒跑完就沒有回報過，0 正確表達「未知」。
+真正跑了多少要看 log 的進度行（`evaluation universe sync progress` 等）。
+
+**狀態字串不得超過 10 字元**，但**三個引擎並不相同**（2026-08-25 review 更正）：
+
+| 引擎 | `job_runs.status` |
+|---|---|
+| postgres | `VARCHAR(10)` |
+| mysql | `VARCHAR(10)` |
+| sqlite | **`TEXT`——不限長度** |
+
+三者都沒有 CHECK 約束擋錯字。`interrupted` 是 11 字元，會踩到 2026-08-11
+`corporate_action_sync` 撞 `VARCHAR(20)` 的同一顆雷，所以用 `aborted`（7 字元）。
+
+**這個上限不能靠單元測試守**：測試只跑 sqlite（見 `issue.md` I-054），而 sqlite 是
+`TEXT`，超長的值照樣寫得進去也讀得回來——「寫進去讀回來一樣」在那裡證明不了任何事，
+真正會爆的 postgres 與 mysql 反而沒有 repo 層測試。所以改由 `store/job_run_repo.go`
+的**編譯期斷言**把守（`const _ = uint(jobRunStatusMaxLen - len(...))`，超長時
+`go vet` / build 直接失敗）。日後新增狀態值時比照加一行。
 
 #### `symbols_total` / `symbols_failed` 的單位是**標的數**，`status` 由它們推導
 

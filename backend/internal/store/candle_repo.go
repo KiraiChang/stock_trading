@@ -16,6 +16,26 @@ type CandleRepo interface {
 	GetLatestN(ctx context.Context, symbol, timeframe string, n int) ([]Candle, error)
 	GetRange(ctx context.Context, symbol, timeframe string, from, to time.Time) ([]Candle, error)
 	GetLatest(ctx context.Context, symbol, timeframe string) (*Candle, error)
+	// SymbolsWithCandleOn 從 symbols 裡挑出「在 day 當天已有該 timeframe K 棒」的標的（升冪）。
+	//
+	// **一句查詢，不是逐檔 GetLatest**（見 docs/architecture.md 的「日 K 維護……會跳過
+	// 『今天已有日 K』的標的」）：呼叫端
+	// `runEvaluationUniverseSync` 要對整個評估標的池（實測 135 檔）判斷「今天抓過了沒」，
+	// 逐檔查是 N+1，而且成本隨池成長。
+	//
+	// **一定要帶 symbols，不能只查 timeframe ＋ ts**（2026-08-25 review 後改）：
+	// 複合索引是 `(symbol, timeframe, ts)`，symbol 是首欄；不約束它的話 PostgreSQL 16
+	// 沒有 skip scan 可用，只能整張 candles 掃過去。live 實測差 188 倍：
+	// 不帶 symbols 是 Parallel Seq Scan、掃掉 211,837 列、368ms；帶 symbols 是
+	// Index Only Scan（Heap Fetches: 0）、1.96ms。而呼叫端本來就有那份清單，
+	// 要問的問題也正是「**這些**標的今天抓過了沒」。
+	//
+	// **day 是台北時區的日界**（`timeutil.TodayTaipei()`），比較用半開區間
+	// `[day, day+1d)`。刻意不寫 `DATE(ts)` 或 `AT TIME ZONE`——那兩者的語法與時區
+	// 語意三個 driver 各不相同，而半開區間只靠 timestamptz 的大小比較，三者一致。
+	//
+	// symbols 為空時回空集合，不送查詢。
+	SymbolsWithCandleOn(ctx context.Context, symbols []string, timeframe string, day time.Time) ([]string, error)
 
 	// 還原係數的維護（見 docs/todo.md T-042）。實作在 corporate_action_repo.go，
 	// 與事件表的操作放在一起比較好讀。
@@ -169,4 +189,25 @@ func (r *candleRepo) GetLatest(ctx context.Context, symbol, timeframe string) (*
 		return nil, err
 	}
 	return &c, nil
+}
+
+// SymbolsWithCandleOn 見介面上的說明。
+func (r *candleRepo) SymbolsWithCandleOn(
+	ctx context.Context, symbols []string, timeframe string, day time.Time,
+) ([]string, error) {
+	if len(symbols) == 0 {
+		return nil, nil
+	}
+	// sqlx.In 展開 IN 的佔位符後仍要 Rebind——展開出來的是 `?`，postgres 要的是 `$n`。
+	query, args, err := sqlx.In(`
+		SELECT DISTINCT symbol FROM candles
+		WHERE symbol IN (?) AND timeframe=? AND ts >= ? AND ts < ?
+		ORDER BY symbol
+	`, symbols, timeframe, day, day.AddDate(0, 0, 1))
+	if err != nil {
+		return nil, err
+	}
+	var rows []string
+	err = r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...)
+	return rows, err
 }

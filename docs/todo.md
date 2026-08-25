@@ -3957,7 +3957,10 @@ if n, err := s.jobRuns.DeleteBefore(ctx, timeutil.TodayTaipei()); err != nil {
 永遠很快、資料表不成長。若改成保留 N 天，要確認 `List(limit)` 那條查詢
 （`ORDER BY started_at DESC LIMIT ?`）在資料變多後仍走得到索引。
 
-**相關**：[`issue.md`](./issue.md) I-086 / I-087（同一次驗收發現的狀態誠實缺陷）——
+**相關**：同一次驗收也發現兩筆狀態誠實缺陷（`sr_zone_verify` 與 `sr_analysis`
+在「整輪沒開始跑」時記成 `success` / `partial`），已於 2026-08-24 修復並收斂，
+現況規格見 [`api-reference.md`](./api-reference.md) 的
+「『整輪沒開始跑』記 `failed`，『沒有東西要跑』記 `success`」。
 那兩筆修好之後，失敗才會正確反映在 `status` 上，而本筆決定那個 `status` 留多久。
 
 ---

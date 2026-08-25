@@ -764,6 +764,15 @@ func TestCorporateActionNotRegisteredWithoutAdjuster(t *testing.T) {
 type schedulerSRZoneRepoStub struct {
 	store.SRZoneRepo
 	analyses []store.SRZoneAnalysis
+	listErr  error
+}
+
+// List 是 sr_zone_verify 取待驗清單的入口；listErr 讓測試重現「清單拿不到」那條路徑。
+func (s *schedulerSRZoneRepoStub) List(ctx context.Context, symbol string, limit int) ([]store.SRZoneAnalysis, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	return s.analyses, nil
 }
 
 // **stub 也要照 timeframe 過濾**：不濾的話，P2 那條隔離性的測試會假綠。
@@ -981,6 +990,108 @@ func TestSRAnalysisIgnoresAnalysesFromOtherTimeframe(t *testing.T) {
 
 	if len(runner.calls) != 1 {
 		t.Fatalf("5m 的分析不該擋掉 1d 的排程，got %v", runner.calls)
+	}
+}
+
+// ── SR 排程的「整輪沒開始」必須記成 failed（2026-08-24）──
+//
+// 兩條 job 都曾經在「連輸入都拿不到」時把整輪記成成功或半成功：finishRun 依
+// total/failed 推導狀態，total=0 會讓 failed >= total 不成立，於是
+// (0, 0) 落到 success、(0, 1) 落到 partial。兩者都不誠實——那輪一檔都沒處理。
+//
+// **每條本體都配一個對照組**：修法是把 total 從 0 改成 1，若寫成「只要 total=0 就算
+// failed」會誤傷合法的零標的輪（清單是空的、但查詢本身成功），對照組就是釘住那件事的。
+
+// TestSRZoneVerifyFailsWhenListUnavailable 驗取不到待驗清單時整輪記 failed。
+// 修改前傳的是 (0, 0, err)：total 與 failed 同為 0，狀態必然推導成 success，
+// 只有 error 欄留著訊息——而讀 /scheduler/status 的人是先看 status 的。
+func TestSRZoneVerifyFailsWhenListUnavailable(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	s := &Scheduler{
+		jobRuns:    jobRuns,
+		srZoneRepo: &schedulerSRZoneRepoStub{listErr: errors.New("db down")},
+		log:        zap.NewNop(),
+	}
+
+	s.runSRZoneVerification(context.Background())
+
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finished = %+v, 期望剛好一筆", jobRuns.finished)
+	}
+	if got := jobRuns.finished[0].status; got != "failed" {
+		t.Fatalf("status = %q, 期望 failed（整輪沒開始跑）", got)
+	}
+	if jobRuns.finished[0].errMsg == "" {
+		t.Fatal("error 欄是空的，查不出整輪失敗的原因")
+	}
+}
+
+// TestSRZoneVerifySucceedsOnEmptyList 是上一條的對照組，**不可刪**。
+// 清單查詢成功但沒有任何待驗分析（新環境、或全部驗過了）是合法的零標的輪，
+// 必須維持 success。把修法寫成「total=0 一律 failed」時，只有這條會 fail。
+func TestSRZoneVerifySucceedsOnEmptyList(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	s := &Scheduler{
+		jobRuns:    jobRuns,
+		srZoneRepo: &schedulerSRZoneRepoStub{analyses: nil},
+		log:        zap.NewNop(),
+	}
+
+	s.runSRZoneVerification(context.Background())
+
+	if len(jobRuns.finished) != 1 || jobRuns.finished[0].status != "success" {
+		t.Fatalf("finished = %+v, 期望 status=success（零標的但查詢正常）", jobRuns.finished)
+	}
+}
+
+// TestSRAnalysisFailsWhenWatchlistUnavailable 驗 watchlist 讀不到時整輪記 failed。
+// 修改前傳的是 (0, 1, err) → partial。但 partial 在 api-reference.md 的定義是
+// 「這輪跑得不完整」，三種成因都預設整輪有跑；SR 分析的標的來源只有 watchlist，
+// 讀不到就等於整輪沒有輸入。
+//
+// **與 corporate_action_sync 的降級不同**：那邊讀不到 watchlist 仍會跑當日分片，
+// 記 partial 是對的（真的跑了一批）。
+func TestSRAnalysisFailsWhenWatchlistUnavailable(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	s := &Scheduler{
+		jobRuns:          jobRuns,
+		watchlist:        &schedulerWatchlistStub{err: errors.New("db down")},
+		srAnalysisRunner: runner,
+		log:              zap.NewNop(),
+	}
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finished = %+v, 期望剛好一筆", jobRuns.finished)
+	}
+	if got := jobRuns.finished[0].status; got != "failed" {
+		t.Fatalf("status = %q, 期望 failed（整輪沒有輸入）", got)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner 被呼叫 %d 次，整輪應該一檔都沒跑", len(runner.calls))
+	}
+}
+
+// TestSRAnalysisSucceedsWhenWatchlistEmpty 是上一條的對照組，**不可刪**。
+// watchlist 查得到但是空的（還沒加任何股票）同樣是合法的零標的輪，必須維持 success。
+// 這條與 TestSRZoneVerifySucceedsOnEmptyList 一起，界定「整輪沒開始」與
+// 「沒有東西要跑」的分界：**看的是查詢有沒有失敗，不是 total 是不是 0**。
+func TestSRAnalysisSucceedsWhenWatchlistEmpty(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	s := &Scheduler{
+		jobRuns:          jobRuns,
+		watchlist:        &schedulerWatchlistStub{symbols: nil},
+		srAnalysisRunner: runner,
+		log:              zap.NewNop(),
+	}
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(jobRuns.finished) != 1 || jobRuns.finished[0].status != "success" {
+		t.Fatalf("finished = %+v, 期望 status=success（watchlist 是空的但查詢正常）", jobRuns.finished)
 	}
 }
 

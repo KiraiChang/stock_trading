@@ -687,6 +687,31 @@ watchlist symbol 不在目前股票主檔內，`is_listed=false` 代表曾在主
 
 `error` 欄一輪可能同時記到兩件事（例如降級 ＋ 逾時），以 `; ` 串接。
 
+#### 「整輪沒開始跑」記 `failed`，「沒有東西要跑」記 `success`
+
+兩者的實際標的數都是 0，分界**看輸入的查詢有沒有失敗，不是看 `symbols_total` 是不是 0**：
+
+| 情境 | 傳給 `finishRun` | `status` |
+|---|---|---|
+| 取不到輸入（watchlist、待驗清單、標的清單查詢失敗） | `(1, 1, err)` | `failed` |
+| 輸入拿得到但是空的（watchlist 還沒加股票、沒有待驗分析） | `(0, 0, "")` | `success` |
+
+第一種**刻意傳 `(1, 1)` 而不是真實的 0**：`finishRun` 只在 `total > 0 && failed >= total`
+時判 `failed`，所以 `total=0` 會讓「整輪連輸入都沒拿到」落到 `success`（傳 `(0,0)`）
+或 `partial`（傳 `(0,1)`）——兩者都不誠實，那輪一檔都沒處理。
+`corporate_action_sync`、`sr_zone_verify`、`sr_analysis` / `sr_analysis_chip`
+四支都適用這條（2026-08-24）。
+
+**「讀不到 watchlist」在不同 job 有不同的正確答案，不要互相套用**：
+`corporate_action_sync` 讀不到時仍會跑當日分片，記 `partial` 是對的——真的跑了一批，
+只是名單不完整；`sr_analysis` / `sr_analysis_chip` 的標的來源**只有** watchlist，
+讀不到就等於整輪沒有輸入，那是 `failed`。判準始終是**那一輪到底有沒有處理任何標的**。
+
+**不要把它簡化成「`total=0` 一律 `failed`」**——那會誤傷第二種合法的零標的輪。
+`scheduler_test.go` 的 `TestSRZoneVerifySucceedsOnEmptyList` 與
+`TestSRAnalysisSucceedsWhenWatchlistEmpty` 兩條對照組釘住這個分界；變異測試實測：
+把判定改成「`total=0` 一律 `failed`」時**恰好只有那兩條 fail**。
+
 #### 逾時的 job 不會卡在 `running`
 
 `finishRun` **不沿用 job 自己的 ctx**，而是用 `context.WithoutCancel` 切斷取消訊號、

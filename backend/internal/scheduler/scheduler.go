@@ -557,7 +557,12 @@ func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 	analyses, err := s.srZoneRepo.List(ctx, "", srZoneVerifyLimit)
 	if err != nil {
 		s.log.Error("sr zone list failed", zap.Error(err))
-		s.finishRun(ctx, runID, "sr_zone_verify", 0, 0, err.Error())
+		// **total 傳 1 而不是 0**：finishRun 依 total/failed 推導狀態，(0, 0) 會落到
+		// success——整輪連清單都沒拿到卻顯示成功，只有 error 欄留著訊息。
+		// 與 corporate_action_sync 讀不到標的清單時的作法一致（規則見
+		// docs/api-reference.md 的「整輪沒開始跑」記 failed）。
+		// 清單拿得到但是空的是另一回事：那是合法的零標的輪，照樣走下面的 success。
+		s.finishRun(ctx, runID, "sr_zone_verify", 1, 1, err.Error())
 		return
 	}
 
@@ -1095,7 +1100,12 @@ func (s *Scheduler) runSRAnalysis(ctx context.Context, withChip bool) {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("sr analysis watchlist failed", zap.String("job", jobName), zap.Error(err))
-		s.finishRun(ctx, runID, jobName, 0, 1, err.Error())
+		// **total 傳 1 而不是 0**：(0, 1) 會落到 partial，但 partial 的語意是
+		// 「這輪跑得不完整」，預設整輪有跑。SR 分析的標的來源**只有** watchlist，
+		// 讀不到就等於整輪沒有輸入，那是 failed。
+		// 這與 corporate_action_sync 的降級不同：那邊讀不到 watchlist 仍會跑當日分片，
+		// 記 partial 是對的，因為真的跑了一批。
+		s.finishRun(ctx, runID, jobName, 1, 1, err.Error())
 		return
 	}
 	if len(symbols) == 0 {

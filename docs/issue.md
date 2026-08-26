@@ -23,10 +23,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-092` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-091 於 2026-08-25 發出。）
+- **下一個新編號從 `I-094` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 於 2026-08-26 發出。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-091，但被移除的條目
+  檔案裡看得到的最大是 I-093，但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
   I-070～I-072 更早）都佔用過編號。
@@ -56,7 +56,7 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-083 / I-084 / I-086～I-090 與下一個可用的 I-092），那是預期的，不是殘留。
+  I-083 / I-084 / I-086～I-090 與下一個可用的 I-094），那是預期的，不是殘留。
   `todo.md` 的 T-055 review 沿革內也還有兩處 I-083 引用，都寫成「原記於…，已收斂」的歷史形式，
   同樣不是殘留。
 
@@ -738,3 +738,235 @@ stock_sr_zone_analyses：4 檔標的 / 20 次分析（2026-07-14 ~ 2026-08-13）
 **另一件要一起確認的事**：`2867` 是否仍在 `universe-v2` 的統計母體內。
 若它已下市卻仍計入 bucket 邊界，選池的分位數會被一檔沒有未來資料的標的影響
 （相關背景見 [`todo.md`](./todo.md) T-040 的「bucket 邊界必須凍結進 universe artifact」）。
+
+---
+
+### I-092：`sr_analysis` 的 `symbols_total` 是「扣掉跳過後的實際處理數」，與其他排程相反，且與自己的 log 不一致
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **待修復** |
+| 嚴重度 | 中（數字本身正確，但同一個欄位在不同 job 代表不同東西，排程頁無法橫向比較） |
+| 分類 | Go / Scheduler / API / 可觀測性 |
+| 發現日期 | 2026-08-25 |
+| 來源 | SR zone 分析排程的 live 驗證（2026-08-25 唯讀盤點） |
+
+#### 現象
+
+`runSRAnalysis` 把**扣掉跳過之後**的數字寫進 `job_runs`，但同一輪的完成 log 印的是
+**清單原本的大小**（`scheduler/scheduler.go:1292`、`:1294`、`:1296`）：
+
+```go
+total := len(symbols) - skipped                     // :1292 → 寫進 job_runs
+s.log.Info("sr analysis done", …,
+    zap.Int("total", len(symbols)), …)              // :1294 → log 印 11
+s.finishRun(ctx, runID, jobName, total, failed, …)  // :1296 → job_runs 記 10
+```
+
+2026-08-21 那輪的實例（`0050` 因「已分析過今日 K 棒」被跳過）：
+
+```
+log:      {"msg":"sr analysis done","total":11,"analyzed":10,"skipped":1,"failed":0}
+job_runs: symbols_total = 10
+```
+
+**同一輪、同一個名字叫 `total` 的東西，兩處是不同的值。** 看排程頁的人會問
+「watchlist 明明 11 檔，為什麼顯示 10」，而畫面上沒有任何欄位解釋得了。
+
+#### 這是三支排程裡唯一的例外
+
+| Job | `symbols_total` 的語意 | 跳過／未處理怎麼算 |
+|---|---|---|
+| `corporate_action_sync` | **當日名單大小**（`len(symbols)`，`:1173`） | 併進 `symbols_failed`（刻意，見下） |
+| `evaluation_universe_sync` | **池大小**（`poolSize`，T-062 定案） | 不計入失敗，只記進 log 的 `skipped` |
+| `sr_analysis` / `sr_analysis_chip` | **名單大小 − 跳過** ← 唯一的例外 | 不計入失敗 |
+
+前兩者的分母都是「本輪該做的清單有多大」，只有 SR 分析的分母會浮動。
+
+**注意不要順手把第三欄也統一掉**：`corporate_action_sync` 把未處理併進 `failed`
+是刻意的，因為那邊的「沒輪到」是**逾時導致該做而沒做**；SR 分析與評估池的「跳過」
+是**判定過後確認不需要做**。兩者語意不同，現況是對的
+（見 [`api-reference.md`](./api-reference.md) 的「`symbols_total` / `symbols_failed`
+的單位是標的數」）。本筆只統一分母。
+
+#### 為什麼統一成「清單大小」而不是「實際處理數」
+
+`symbols_total` 在 [`architecture.md`](./architecture.md) 與
+[`api-reference.md`](./api-reference.md) 裡是被當成「這輪的清單有多大」在讀的，
+維運用它判斷「窗口有沒有被截斷」「池有多大」。改成實際處理數會讓數字每天浮動
+（11 / 10 / 11 …），而浮動的原因看不見——那正是這筆要解的問題，不能用它當解法。
+
+---
+
+#### 修改計畫書
+
+**修改目標**：`sr_analysis` / `sr_analysis_chip` 的 `job_runs.symbols_total`
+改為 `len(symbols)`（watchlist 大小），跳過數改由 log 呈現，與另外兩支排程一致。
+
+**不做的範圍**
+
+* **不動 `symbols_failed` 的語意**，也不把跳過併進失敗（理由見上表註記）。
+* 不動 `corporate_action_sync` 與 `evaluation_universe_sync`——它們的分母已經是清單大小。
+* 不改 `/scheduler/status` 的欄位或 JSON 形狀，不改前端。
+* 不改跳過的判定邏輯（`srAnalysisSkipReason` 一行不動）。
+
+**受影響檔案與資料流**
+
+| 檔案 | 變更 |
+|---|---|
+| `scheduler/scheduler.go` | `runSRAnalysis`：`finishRun` 改傳 `len(symbols)`；完成 log 的欄位改成與 `evaluation_universe_sync` 同名的 `total` / `analyzed` / `skipped` / `failed`，避免兩支排程的 log 欄位各叫各的 |
+| `scheduler/scheduler_test.go` | 補測試（見下） |
+| `docs/api-reference.md` | 在 `symbols_total` 那節寫明「分母一律是本輪的清單大小，跳過不扣」，並點名三支排程 |
+
+資料流不變，只有寫進 `job_runs` 的那一個整數變了。
+
+**狀態推導的變化**
+
+`finishRun` 依 `failed >= total` 推導 `failed`／`partial`／`success`。分母變大之後，
+**「全部跳過只剩一檔且那檔失敗」從 `failed` 變成 `partial`**——這是這次改動唯一會
+改到狀態字串的情境。`partial` 在這裡是對的：那輪確實有跑，只是跑得不完整。
+
+**主要風險與回滾**
+
+* 風險很低：只影響一個統計數字與其推導出的狀態字串，不影響任何分析行為。
+* **要注意歷史資料不會回填**：改動前後的 `job_runs` 列語意不同，跨 8/25 比較
+  `sr_analysis` 的 `symbols_total` 會看到一個階梯。這點要寫進 `api-reference.md`。
+* 回滾：把那一個參數改回 `total` 即可。
+
+**測試與驗證策略**
+
+* `scheduler` 測試：stub 讓 watchlist 回 3 檔、其中 1 檔跳過，斷言
+  `job_runs.symbols_total == 3`（不是 2）、`symbols_failed == 0`、狀態 `success`。
+* 邊界：全部跳過時 `symbols_total == 清單大小`、`failed == 0`、狀態 `success`。
+* 邊界：只剩一檔沒被跳過且該檔失敗時，狀態是 `partial` 而不是 `failed`
+  （把上面那個狀態變化釘住，否則日後會被當成迴歸改回去）。
+* dev 驗收非必要：這是純計數改動，單元測試涵蓋得完整。
+
+**完成後的歸檔位置**
+
+[`api-reference.md`](./api-reference.md) 的
+「`symbols_total` / `symbols_failed` 的單位是**標的數**」那一節——補上
+「分母是本輪的清單大小，跳過不扣」的通則、三支排程的對照，以及 8/25 前後的階梯。
+
+---
+
+### I-093：`defense_lines.tactical` 的 `source` 在 fallback 路徑仍標成 `recent_microstructure`，讓 shadow 隔離無法稽核
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **待修復** |
+| 嚴重度 | 中（決策數值不受影響，但這個欄位會讓人對 shadow 隔離做出相反的結論） |
+| 分類 | Python / SR Zone / 決策輸出 / 可觀測性 |
+| 發現日期 | 2026-08-25（SR zone 分析排程驗證；2026-08-26 立案） |
+| 來源 | live 分析結果檢視——查證「shadow events 是否維持只寫不讀」時被這個欄位誤導 |
+
+#### 現象
+
+`_defense_lines`（`decision_engine.py:2345`）不論 tactical zone 是**由事件比對得到**
+還是**由距離 fallback 得到**，回傳的 `source` 都寫死成 `recent_microstructure`：
+
+```python
+tactical_zone: Optional[ZoneScore] = None
+for event in market_events or []:
+    if not is_decision_visible(event):   # ← 過濾正確
+        continue
+    ...
+if tactical_zone is None:                # ← fallback：取最近的 TIER_3 zone
+    tactical_candidates = [...]
+    tactical_zone = min(tactical_candidates, key=...)
+...
+return {"tactical": line(tactical_zone, "recent_microstructure"), ...}
+```
+
+**過濾本身是對的**，fallback 也是合理設計；問題只在標籤沒有跟著分岔。
+
+#### 為什麼這比「標籤不精確」嚴重
+
+它**破壞了 shadow 隔離的可稽核性**，而那正是這個旗標存在的理由。
+
+實例（live，2026-08-25 17:00，`5490`）：
+
+* 該檔當日**唯一的 zone 範圍事件是 3 筆 `RESISTANCE_BREAKOUT`，全部 `decision_visible=false`**。
+* 唯一的 visible 事件 `EXTREME_VOLUME` 是 SYMBOL 範圍、`zone_ref` 為 `null`，對不上任何 zone。
+* 而 `defense_lines.tactical` 標著 `source: "recent_microstructure"`，落在
+  `RESISTANCE:28.9628:29.1372`——**正是其中一筆 shadow 事件的 zone**。
+
+從資料上看，這個組合與「過濾失效、shadow 事件產生了戰術防守線」**完全無法區分**。
+盤點當下據此判定為洩漏，翻到 `decision_engine.py` 才確認是 fallback
+（該 zone 是最近的 TIER_3，距離 0.2%，與 `tactical_resistance_zone` 逐欄吻合）。
+
+也就是說：**要確認隔離有沒有守住，目前必須讀原始碼**。而
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「事件的決策可見性」把
+`_defense_lines` 列為四個過濾點之一、明文要求它跳過 `decision_visible=false`——
+一個無法從輸出驗證的保證，等於要靠紀律維持。
+
+#### 測試缺口
+
+`test_defense_lines_tactical_skips_decision_invisible_events` 只涵蓋
+「**有** visible 事件可退」那條路：shadow 事件插隊後，tactical 應落在
+`INTRADAY_RECLAIM` 的 zone。**沒有任何測試涵蓋「所有對得上的事件都是 shadow → 走距離
+fallback」**——也就是 `5490` 當天的形狀。這條路徑目前只有 live 資料驗證過。
+
+#### 影響範圍
+
+* **決策數值不受影響**：`5490` 那筆的 tactical zone 與過濾前後相同（fallback 的結果本來
+  就該是它），`rr_context.stop_basis` / `stop_price` 沒有被 shadow 事件改到。
+* `source` 在 Go 端只是整包 JSON 轉存，不做推導；前端型別
+  `SRDefenseLine.source` 有這個欄位但目前**沒有渲染**。所以現階段唯一的受害者是
+  「讀 DB / API 做稽核的人」。**但欄位已經在契約裡**，日後前端一顯示就會直接誤導使用者。
+
+---
+
+#### 修改計畫書
+
+**修改目標**：讓 `defense_lines.tactical` 的來源在輸出上可分辨，
+使「shadow 事件有沒有被跳過」能從資料驗證，不必讀原始碼。
+
+**不做的範圍**
+
+* **不動過濾邏輯與 fallback 行為**——兩者都正確，這筆只改標籤。
+* 不動 `swing`（`primary_zone`）與 `strategic`（`main_structure`），它們的 source 名副其實。
+* 不動 `rr_context` 及其下游。
+* 不新增前端顯示（欄位可分辨之後要不要顯示是另一個決定）。
+
+**受影響檔案與資料 contract 變化**
+
+| 檔案 | 變更 |
+|---|---|
+| `decision_engine.py` `_defense_lines` | fallback 路徑的 source 值**定案為 `nearest_tier3`**（不是「建議」——測試要正向斷言這個字串，值必須先定死），事件路徑維持 `recent_microstructure` |
+| `tests/test_decision_engine.py` | 補 fallback 路徑的測試（見下） |
+| ~~`frontend/src/lib/api/srZones.ts`~~ | **盤點，不異動**（2026-08-26 review 確認）：`SRDefenseLine.source` 已是 `string`，新增第二個值不需要改型別，前端也沒有渲染這個欄位。要不要收斂成 union 型別是獨立的決定，不放進本筆 |
+| `docs/sr-zone-scoring.md` | 在「事件的決策可見性」的四個過濾點那段，寫明 tactical 的兩種來源與如何據此稽核 |
+
+**contract 變化**：`defense_lines.tactical.source` 會出現第二個值。
+既有列不回填，所以 2026-08-26 之前的 `stock_sr_decisions` 一律是
+`recent_microstructure`，**無法回溯區分**——這點要寫進主題文件，
+否則日後拿歷史資料稽核會得到與現在一樣的錯誤結論。
+
+**風險與回滾**
+
+* 風險低：只改一個字串常數與其測試。
+* 唯一要留意的是**有沒有下游對 `"recent_microstructure"` 做等值比對**。
+  盤點結果：Go 只轉存整包 JSON、前端未渲染、Python 測試只斷言價格欄位，
+  沒有任何等值比對。實作時要重跑一次這個盤點再改。
+* 回滾：把常數改回去即可。
+
+**測試與驗證策略**
+
+* 新增 fallback 測試：所有對得上的事件都是 `decision_visible=False` 時，
+  斷言 tactical **仍是最近的 TIER_3 zone**（行為不變）且
+  **`source == "nearest_tier3"`**。這條同時補上前述的路徑缺口。
+
+  **一律用正向等值斷言，不要寫成 `!= "recent_microstructure"`**（2026-08-26 review 修正）：
+  負向斷言在拼字錯誤、回空字串、回 `None` 的情況下**全部會通過**，而這條測試存在的
+  唯一理由就是釘住那個值。同理，事件路徑那條也要正向斷言。
+* 既有的 `test_defense_lines_tactical_skips_decision_invisible_events` 補一行
+  `assert lines["tactical"]["source"] == "recent_microstructure"`，把事件路徑釘住。
+* 邊界：`market_events` 為空時走 fallback，同樣斷言 `source == "nearest_tier3"`。
+* 用 `python/scripts/test.sh` 跑（在 docker 內，記憶體經 mem-guard 下修）。
+
+**完成後的歸檔位置**
+
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「事件的決策可見性（`decision_visible`）」
+——在四個過濾點的表格後補一段：tactical 防守線的兩種來源、對應的 `source` 值、
+以及「怎麼從輸出判斷 shadow 有沒有被跳過」，並註明 2026-08-26 之前的歷史資料無法區分。

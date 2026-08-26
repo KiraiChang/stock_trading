@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from ..decision_engine import (
+    TACTICAL_SOURCE_EVENT,
+    TACTICAL_SOURCE_FALLBACK,
     _daily_confirmation,
     _decision_action,
     _decision_derived_view,
@@ -1758,6 +1760,89 @@ def test_defense_lines_tactical_skips_decision_invisible_events():
     # tactical 要維持階段 D 之前的答案：INTRADAY_RECLAIM 那個 zone，不是先插隊的 weak。
     assert lines["tactical"]["price_low"] == 97.0
     assert lines["tactical"]["price_high"] == 98.0
+    # 這條走的是**事件路徑**（有 visible 事件可退），source 要能與 fallback 分得開。
+    assert lines["tactical"]["source"] == TACTICAL_SOURCE_EVENT
+
+
+def test_defense_lines_tactical_fallback_is_labelled_separately():
+    """所有對得上的事件都是 shadow 時，tactical 退到「最近的 TIER_3」且 **source 要換值**。
+
+    這是 `test_defense_lines_tactical_skips_decision_invisible_events` 沒涵蓋的另一半：
+    那條有一個 visible 的 `INTRADAY_RECLAIM` 可退，這條**一個 visible 的 zone 事件都沒有**。
+    live 上真的會出現（2026-08-25 `5490`：當日唯一的 zone 範圍事件是 3 筆
+    `RESISTANCE_BREAKOUT`，全部 decision_visible=False）。
+
+    重點在 source：行為（退到最近的 TIER_3）本來就對，但兩條路徑過去標成同一個值，
+    於是「過濾成功」與「過濾失效」在輸出上分不開
+    （見 docs/sr-zone-scoring.md「事件的決策可見性」；原記於 issue.md I-093，已收斂）。
+    """
+    # near/far 都是 TIER_3，near 距離現價較近；兩者都不會被事件比對到。
+    near = _zone(low=99.0, high=100.0, tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    far = _zone(low=90.0, high=91.0, tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    zones = [far, near]
+
+    # 唯一的事件是 shadow，且它的 zone_ref 對得上 far——沒被過濾的話 tactical 會變成 far。
+    shadow_event = {
+        "type": "SUPPORT_RETEST_HELD",
+        "decision_visible": False,
+        "zone_ref": {"price_low": 90.0, "price_high": 91.0},
+    }
+
+    lines = _defense_lines(zones, near, 99.5, [shadow_event])
+
+    # 行為不變：退到最近的 TIER_3（near），不是 shadow 指向的 far。
+    assert lines["tactical"]["price_low"] == 99.0
+    assert lines["tactical"]["price_high"] == 100.0
+    # **正向等值斷言**：寫成 `!= TACTICAL_SOURCE_EVENT` 的話，拼字錯誤、空字串、None
+    # 全都會通過，而這條測試存在的唯一理由就是釘住這個值。
+    assert lines["tactical"]["source"] == TACTICAL_SOURCE_FALLBACK
+
+
+def test_defense_lines_tactical_source_is_not_inferred_from_result():
+    """事件指向的 zone **剛好就是最近的 TIER_3** 時，source 仍必須是事件路徑的值。
+
+    這條鎖住的是 `_defense_lines` 的實作方式，不是它的輸出值：`tactical_source` 必須在
+    **分支裡**決定，不能事後從結果反推（例如比對「tactical 是不是等於最近的 TIER_3」）。
+    反推在這個形狀下會得到相反的答案——兩條路徑產生同一個 zone，結果無法區分來源，
+    而那正好讓這個欄位回到修正前的狀態：不可稽核
+    （見 docs/sr-zone-scoring.md「事件的決策可見性」）。
+
+    其餘兩支 fallback 測試證明不了這件事：那裡事件指向的 zone 是 TIER_1，
+    與最近的 TIER_3 是不同的 zone，反推式實作照樣會通過。
+    """
+    # near_t3 同時是「事件指向的 zone」與「距離現價最近的 TIER_3」。
+    near_t3 = _zone(low=99.0, high=100.0, tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    far_t3 = _zone(low=90.0, high=91.0, tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    zones = [far_t3, near_t3]
+
+    visible_event = {
+        "type": "INTRADAY_RECLAIM",
+        "decision_visible": True,
+        "zone_ref": {"price_low": 99.0, "price_high": 100.0},
+    }
+
+    lines = _defense_lines(zones, near_t3, 99.5, [visible_event])
+
+    # 前提：兩條路徑會挑到同一個 zone——否則這條測試證明不到「無法從結果反推」。
+    assert lines["tactical"]["price_low"] == 99.0
+    assert lines["tactical"]["price_high"] == 100.0
+    # 值必須來自事件路徑。反推式實作會在這裡回 nearest_tier3。
+    assert lines["tactical"]["source"] == TACTICAL_SOURCE_EVENT
+
+
+def test_defense_lines_tactical_fallback_when_no_events():
+    """完全沒有事件時同樣走 fallback，source 也必須是 fallback 值。
+
+    邊界：`market_events` 為空（或 None）時迴圈根本不執行，與「事件全被過濾掉」
+    走到同一個分支，標籤不能因為來源不同而漂移。
+    """
+    near = _zone(low=99.0, high=100.0, tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    zones = [near]
+
+    for events in ([], None):
+        lines = _defense_lines(zones, near, 99.5, events)
+        assert lines["tactical"]["price_low"] == 99.0
+        assert lines["tactical"]["source"] == TACTICAL_SOURCE_FALLBACK
 
 
 # ── I-082：EXPIRED 的 primary zone 不得升級到 `Buy` ────────────────────────────

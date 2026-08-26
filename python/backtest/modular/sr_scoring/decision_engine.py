@@ -2277,6 +2277,18 @@ def _structure_state(
     return "NORMAL"
 
 
+# tactical 防守線的兩個來源。**兩者必須在輸出上分得開**（現況規格見
+# docs/sr-zone-scoring.md 的「事件的決策可見性」；原記於 issue.md I-093，已收斂）：
+# `_defense_lines` 是四個 shadow 過濾點之一（見 docs/sr-zone-scoring.md
+# 「事件的決策可見性」），而「它有沒有跳過 decision_visible=False 的事件」
+# 過去無法從輸出判斷——fallback 出來的 zone 也標成 recent_microstructure，
+# 於是「過濾成功後退到最近的 TIER_3」與「過濾失效、shadow 事件產生了防守線」
+# 在資料上長得一模一樣。2026-08-25 的 live 盤點就是據此誤判成洩漏，
+# 翻原始碼才確認是 fallback。
+TACTICAL_SOURCE_EVENT = "recent_microstructure"
+TACTICAL_SOURCE_FALLBACK = "nearest_tier3"
+
+
 def _defense_lines(
     zone_scores: list[ZoneScore],
     primary_zone: Optional[ZoneScore],
@@ -2306,6 +2318,10 @@ def _defense_lines(
         }
 
     tactical_zone: Optional[ZoneScore] = None
+    # 預設是事件路徑；只有真的退到距離 fallback 才改值。**不要改成事後從結果反推**
+    # （例如比對 zone 是否等於最近的 TIER_3）——事件比對到的 zone 剛好就是最近的
+    # TIER_3 時兩者無法區分，那會把這個欄位變回不可稽核。
+    tactical_source = TACTICAL_SOURCE_EVENT
     for event in market_events or []:
         # **只收決策可見的事件**：這個迴圈是**位置型**讀者——取「第一個 zone_ref 對得上
         # 的事件」當戰術防守線，不比對型別名。階段 D 的新事件（SUPPORT_RETEST_HELD
@@ -2326,6 +2342,7 @@ def _defense_lines(
         if tactical_zone is not None:
             break
     if tactical_zone is None:
+        tactical_source = TACTICAL_SOURCE_FALLBACK
         tactical_candidates = [
             z for z in zone_scores
             if z.tier == ZoneTier.TIER_3_SHORT_TERM.value and z.role != ZoneType.AT_ZONE.value
@@ -2342,7 +2359,7 @@ def _defense_lines(
         default=None,
     )
     return {
-        "tactical": line(tactical_zone, "recent_microstructure"),
+        "tactical": line(tactical_zone, tactical_source),
         "swing": line(primary_zone, "primary_zone"),
         "strategic": line(strategic_zone, "main_structure"),
     }

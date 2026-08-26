@@ -930,6 +930,60 @@ Go 只讀不推導；**缺鍵一律當 `true`**（既有列不會有這個鍵，
 3. `decision_engine._event_sequence`：它寫進 `stock_sr_decisions.event_sequence_json`。
 4. `decision_engine._defense_lines`：位置型讀者，見上表。
 
+**tactical 防守線的兩個來源必須在輸出上分得開**（原記於 `issue.md` I-093，已收斂；
+**實作已在版控內，但尚未部署到 live**——資料分界見下方警告）。
+`_defense_lines` 的 tactical 有兩條路徑，`source` 各自不同：
+
+| `defense_lines.tactical.source` | 意義 |
+|---|---|
+| `recent_microstructure` | 由**決策可見的**事件的 `zone_ref` 比對到 zone |
+| `nearest_tier3` | 沒有任何可見事件對得上，**退到距離現價最近的 TIER_3 非 AT_ZONE zone** |
+
+**為什麼要分**：兩者過去都標成 `recent_microstructure`，於是
+「過濾成功、退到 fallback」與「過濾失效、shadow 事件產生了防守線」
+**在輸出上長得一模一樣**，要確認隔離有沒有守住只能讀原始碼。實例：2026-08-25 的
+live 盤點看到 `5490` 的 tactical 標著事件來源、卻落在當日唯一一批 shadow
+（3 筆 `RESISTANCE_BREAKOUT`）的 zone 上，據此誤判為洩漏；翻 `decision_engine.py`
+才確認是 fallback（那個 zone 是最近的 TIER_3，距離 0.2%）。
+
+**`source` 必須在分支裡決定，不能事後從結果反推。** 反推（例如比對「tactical 是不是
+等於最近的 TIER_3」）在**事件指向的 zone 剛好就是最近的 TIER_3** 時會給出相反的答案，
+而那個形狀下兩條路徑產生同一個 zone、結果本來就無法區分來源——欄位會直接退回不可稽核。
+`decision_engine._defense_lines` 用 `tactical_source` 變數在進入 fallback 分支時改值。
+
+守門的三支測試（`tests/test_decision_engine.py`）**不要合併或弱化**：
+
+| 測試 | 鎖住的東西 |
+|---|---|
+| `test_defense_lines_tactical_skips_decision_invisible_events` | 有可見事件可退時，shadow 不得插隊；且 `source == recent_microstructure` |
+| `test_defense_lines_tactical_fallback_is_labelled_separately` | 對得上的事件**全是 shadow** 時，退到最近 TIER_3 且 `source == nearest_tier3` |
+| `test_defense_lines_tactical_source_is_not_inferred_from_result` | 事件指向的 zone **同時就是**最近 TIER_3 時，`source` 仍是 `recent_microstructure`——擋反推式實作 |
+
+三支都用**正向等值斷言**。寫成 `!= recent_microstructure` 的話，拼字錯誤、空字串、`None`
+全部會通過，而這些測試存在的唯一理由就是釘住那兩個值。第三支經負向對照驗證過：
+把實作換成反推式時**只有它會失敗**，其餘兩支照樣綠燈。
+
+**怎麼用它稽核**：`source = nearest_tier3` 時，tactical **與事件無關**，
+所以 shadow 事件不可能是它的來源；`source = recent_microstructure` 時，
+該 zone 必定有至少一個 `decision_visible=true` 的事件對得上。
+兩條在測試裡都用**正向等值斷言**釘住（負向斷言遇到拼字錯誤或空值會全部通過）。
+
+⚠️ **部署前產出的資料無法回溯區分**：`nearest_tier3` 只會出現在**帶有這個修改的版本
+實際上線之後**產出的 `stock_sr_decisions`；更早的列一律是 `recent_microstructure`，不回填。
+拿那些資料做上述稽核會得到與當初一樣的錯誤結論。
+
+**分界是部署時間，不是日曆日期。** 這裡刻意不寫死日期——實作完成日與上線日不同，
+延後部署的話，實作完成之後、上線之前產出的資料仍然是舊標籤。
+上線後把實際的分界（部署時間或版本）補在這裡，並用一筆真實資料佐證
+（`source = nearest_tier3` 的列存在，即可證明新版已在跑）。
+
+> **待辦追蹤：[`todo.md`](./todo.md) T-063 的 B 項。** 不要只依賴這段文字——
+> 上一次就是把它只留在內文裡，收斂後沒有任何清單看得到。
+>
+> **這段 blockquote 本身是暫時的**：T-063 收斂時要連同上面那段「分界是部署時間」
+> 一起改寫成實際分界，並把這則引言刪掉。留著它就會變成指向不存在條目的斷鏈——
+> 正是本節在防的那件事。
+
 **旗標也要流到顯示層，否則隔離只做了一半。** 過濾點擋住的是決策路徑，
 但 `GET /sr-zones/event-timeline` **照樣回傳**這些鏈（它們是事實紀錄，本來就該看得到）。
 沒有旗標時，畫面上的 `RESISTANCE_BREAKOUT / CONFIRMED / BULLISH` 與真正的突破事件

@@ -23,13 +23,13 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-094` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 於 2026-08-26 發出。）
+- **下一個新編號從 `I-094` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 於 2026-08-26 發出並於同日收斂。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-093，但被移除的條目
+  檔案裡看得到的最大是 I-092，但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
-  I-070～I-072 更早）都佔用過編號。
+  I-093 於 2026-08-26 收斂，I-070～I-072 更早）都佔用過編號。
   **不要用「檔案裡最大值 + 1」決定編號**——被移除的條目正是看不見的那些；
   必要時翻 git log 或本節的收斂紀錄。
 - **移除條目前要先反轉依賴。** 主題文件與程式碼註解常寫「見 issue.md I-0xx」，
@@ -56,7 +56,7 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-083 / I-084 / I-086～I-090 與下一個可用的 I-094），那是預期的，不是殘留。
+  I-083 / I-084 / I-086～I-090 / I-093 與下一個可用的 I-094），那是預期的，不是殘留。
   `todo.md` 的 T-055 review 沿革內也還有兩處 I-083 引用，都寫成「原記於…，已收斂」的歷史形式，
   同樣不是殘留。
 
@@ -847,126 +847,3 @@ job_runs: symbols_total = 10
 [`api-reference.md`](./api-reference.md) 的
 「`symbols_total` / `symbols_failed` 的單位是**標的數**」那一節——補上
 「分母是本輪的清單大小，跳過不扣」的通則、三支排程的對照，以及 8/25 前後的階梯。
-
----
-
-### I-093：`defense_lines.tactical` 的 `source` 在 fallback 路徑仍標成 `recent_microstructure`，讓 shadow 隔離無法稽核
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **待修復** |
-| 嚴重度 | 中（決策數值不受影響，但這個欄位會讓人對 shadow 隔離做出相反的結論） |
-| 分類 | Python / SR Zone / 決策輸出 / 可觀測性 |
-| 發現日期 | 2026-08-25（SR zone 分析排程驗證；2026-08-26 立案） |
-| 來源 | live 分析結果檢視——查證「shadow events 是否維持只寫不讀」時被這個欄位誤導 |
-
-#### 現象
-
-`_defense_lines`（`decision_engine.py:2345`）不論 tactical zone 是**由事件比對得到**
-還是**由距離 fallback 得到**，回傳的 `source` 都寫死成 `recent_microstructure`：
-
-```python
-tactical_zone: Optional[ZoneScore] = None
-for event in market_events or []:
-    if not is_decision_visible(event):   # ← 過濾正確
-        continue
-    ...
-if tactical_zone is None:                # ← fallback：取最近的 TIER_3 zone
-    tactical_candidates = [...]
-    tactical_zone = min(tactical_candidates, key=...)
-...
-return {"tactical": line(tactical_zone, "recent_microstructure"), ...}
-```
-
-**過濾本身是對的**，fallback 也是合理設計；問題只在標籤沒有跟著分岔。
-
-#### 為什麼這比「標籤不精確」嚴重
-
-它**破壞了 shadow 隔離的可稽核性**，而那正是這個旗標存在的理由。
-
-實例（live，2026-08-25 17:00，`5490`）：
-
-* 該檔當日**唯一的 zone 範圍事件是 3 筆 `RESISTANCE_BREAKOUT`，全部 `decision_visible=false`**。
-* 唯一的 visible 事件 `EXTREME_VOLUME` 是 SYMBOL 範圍、`zone_ref` 為 `null`，對不上任何 zone。
-* 而 `defense_lines.tactical` 標著 `source: "recent_microstructure"`，落在
-  `RESISTANCE:28.9628:29.1372`——**正是其中一筆 shadow 事件的 zone**。
-
-從資料上看，這個組合與「過濾失效、shadow 事件產生了戰術防守線」**完全無法區分**。
-盤點當下據此判定為洩漏，翻到 `decision_engine.py` 才確認是 fallback
-（該 zone 是最近的 TIER_3，距離 0.2%，與 `tactical_resistance_zone` 逐欄吻合）。
-
-也就是說：**要確認隔離有沒有守住，目前必須讀原始碼**。而
-[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「事件的決策可見性」把
-`_defense_lines` 列為四個過濾點之一、明文要求它跳過 `decision_visible=false`——
-一個無法從輸出驗證的保證，等於要靠紀律維持。
-
-#### 測試缺口
-
-`test_defense_lines_tactical_skips_decision_invisible_events` 只涵蓋
-「**有** visible 事件可退」那條路：shadow 事件插隊後，tactical 應落在
-`INTRADAY_RECLAIM` 的 zone。**沒有任何測試涵蓋「所有對得上的事件都是 shadow → 走距離
-fallback」**——也就是 `5490` 當天的形狀。這條路徑目前只有 live 資料驗證過。
-
-#### 影響範圍
-
-* **決策數值不受影響**：`5490` 那筆的 tactical zone 與過濾前後相同（fallback 的結果本來
-  就該是它），`rr_context.stop_basis` / `stop_price` 沒有被 shadow 事件改到。
-* `source` 在 Go 端只是整包 JSON 轉存，不做推導；前端型別
-  `SRDefenseLine.source` 有這個欄位但目前**沒有渲染**。所以現階段唯一的受害者是
-  「讀 DB / API 做稽核的人」。**但欄位已經在契約裡**，日後前端一顯示就會直接誤導使用者。
-
----
-
-#### 修改計畫書
-
-**修改目標**：讓 `defense_lines.tactical` 的來源在輸出上可分辨，
-使「shadow 事件有沒有被跳過」能從資料驗證，不必讀原始碼。
-
-**不做的範圍**
-
-* **不動過濾邏輯與 fallback 行為**——兩者都正確，這筆只改標籤。
-* 不動 `swing`（`primary_zone`）與 `strategic`（`main_structure`），它們的 source 名副其實。
-* 不動 `rr_context` 及其下游。
-* 不新增前端顯示（欄位可分辨之後要不要顯示是另一個決定）。
-
-**受影響檔案與資料 contract 變化**
-
-| 檔案 | 變更 |
-|---|---|
-| `decision_engine.py` `_defense_lines` | fallback 路徑的 source 值**定案為 `nearest_tier3`**（不是「建議」——測試要正向斷言這個字串，值必須先定死），事件路徑維持 `recent_microstructure` |
-| `tests/test_decision_engine.py` | 補 fallback 路徑的測試（見下） |
-| ~~`frontend/src/lib/api/srZones.ts`~~ | **盤點，不異動**（2026-08-26 review 確認）：`SRDefenseLine.source` 已是 `string`，新增第二個值不需要改型別，前端也沒有渲染這個欄位。要不要收斂成 union 型別是獨立的決定，不放進本筆 |
-| `docs/sr-zone-scoring.md` | 在「事件的決策可見性」的四個過濾點那段，寫明 tactical 的兩種來源與如何據此稽核 |
-
-**contract 變化**：`defense_lines.tactical.source` 會出現第二個值。
-既有列不回填，所以 2026-08-26 之前的 `stock_sr_decisions` 一律是
-`recent_microstructure`，**無法回溯區分**——這點要寫進主題文件，
-否則日後拿歷史資料稽核會得到與現在一樣的錯誤結論。
-
-**風險與回滾**
-
-* 風險低：只改一個字串常數與其測試。
-* 唯一要留意的是**有沒有下游對 `"recent_microstructure"` 做等值比對**。
-  盤點結果：Go 只轉存整包 JSON、前端未渲染、Python 測試只斷言價格欄位，
-  沒有任何等值比對。實作時要重跑一次這個盤點再改。
-* 回滾：把常數改回去即可。
-
-**測試與驗證策略**
-
-* 新增 fallback 測試：所有對得上的事件都是 `decision_visible=False` 時，
-  斷言 tactical **仍是最近的 TIER_3 zone**（行為不變）且
-  **`source == "nearest_tier3"`**。這條同時補上前述的路徑缺口。
-
-  **一律用正向等值斷言，不要寫成 `!= "recent_microstructure"`**（2026-08-26 review 修正）：
-  負向斷言在拼字錯誤、回空字串、回 `None` 的情況下**全部會通過**，而這條測試存在的
-  唯一理由就是釘住那個值。同理，事件路徑那條也要正向斷言。
-* 既有的 `test_defense_lines_tactical_skips_decision_invisible_events` 補一行
-  `assert lines["tactical"]["source"] == "recent_microstructure"`，把事件路徑釘住。
-* 邊界：`market_events` 為空時走 fallback，同樣斷言 `source == "nearest_tier3"`。
-* 用 `python/scripts/test.sh` 跑（在 docker 內，記憶體經 mem-guard 下修）。
-
-**完成後的歸檔位置**
-
-[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「事件的決策可見性（`decision_visible`）」
-——在四個過濾點的表格後補一段：tactical 防守線的兩種來源、對應的 `source` 值、
-以及「怎麼從輸出判斷 shadow 有沒有被跳過」，並註明 2026-08-26 之前的歷史資料無法區分。

@@ -827,9 +827,15 @@ func (s *schedulerChipLatestStub) GetLatest(ctx context.Context, symbol string) 
 type schedulerCandleRepoStub struct {
 	store.CandleRepo
 	latest *store.Candle
+	// perSymbol 讓單一測試裡有的標的被跳過、有的照跑（`symbols_total` 的分母測試需要）。
+	// 留 nil 時所有標的共用 latest，既有測試行為不變。
+	perSymbol map[string]*store.Candle
 }
 
 func (s *schedulerCandleRepoStub) GetLatest(ctx context.Context, symbol, timeframe string) (*store.Candle, error) {
+	if s.perSymbol != nil {
+		return s.perSymbol[symbol], nil
+	}
 	return s.latest, nil
 }
 
@@ -888,7 +894,13 @@ func TestStartSkipsSRAnalysisWhenRunnerMissing(t *testing.T) {
 }
 
 // 今天的 K 棒還沒到就不要跑——假日、停牌、daily_close 尚未完成都落在這裡。
-// **跳過不是失敗**：job_runs 的 total 要把跳過的扣掉，否則每個假日都會看到一筆 failed。
+//
+// **跳過不是失敗，但分母仍是 watchlist 大小**（2026-08-26 改，原記於 issue.md I-092）：
+// `symbols_total` 一律是「本輪該做的清單有多大」，跳過的不扣。
+//
+// 這條原本的註解寫著「total 要把跳過的扣掉，否則每個假日都會看到一筆 failed」——
+// **那個理由不成立**：`finishRunDegraded` 的 `failed` 分支要 `total > 0 && failed >= total`，
+// 假日是 failed=0，兩種分母算出來都是 `success`（total=1/failed=0 與 total=0/failed=0 同解）。
 func TestSRAnalysisSkipsWhenLatestCandleIsNotToday(t *testing.T) {
 	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
 	runner := &schedulerSRAnalysisRunnerStub{}
@@ -902,8 +914,12 @@ func TestSRAnalysisSkipsWhenLatestCandleIsNotToday(t *testing.T) {
 	if len(runner.calls) != 0 {
 		t.Fatalf("K 棒不是今天時不該分析，got %v", runner.calls)
 	}
-	if len(jobRuns.finished) != 1 || jobRuns.finished[0].symbolsTotal != 0 || jobRuns.finished[0].symbolsFailed != 0 {
-		t.Fatalf("job_runs = %+v，want total=0 failed=0（跳過不算失敗）", jobRuns.finished)
+	if len(jobRuns.finished) != 1 {
+		t.Fatalf("finishRun 被呼叫 %d 次，want 1", len(jobRuns.finished))
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != 1 || got.symbolsFailed != 0 || got.status != "success" {
+		t.Fatalf("job_runs = %+v，want total=1（watchlist 大小）failed=0 status=success", got)
 	}
 }
 
@@ -1875,5 +1891,97 @@ func TestEvaluationUniverseSyncRunsFullWhenCandlesNotInjected(t *testing.T) {
 
 	if !reflect.DeepEqual(source.fetched, pool) {
 		t.Errorf("未注入 candles 應全量抓取，實際 %v", source.fetched)
+	}
+}
+
+// ── sr_analysis 的 symbols_total 分母（原記於 issue.md I-092）─────────────────
+//
+// 分母一律是 watchlist 大小，跳過的不扣。三支有「跳過」概念的排程共用這個通則
+// （corporate_action_sync 當日名單、evaluation_universe_sync 池大小、這裡 watchlist），
+// 換成「實際處理數」會讓狀態頁的數字每天浮動而看不出原因。
+
+// mixedCandles 讓 skipToday 裡的標的因為「最新 K 棒不是今天」被跳過，其餘照跑。
+func mixedCandles(all []string, skipToday map[string]bool) *schedulerCandleRepoStub {
+	per := map[string]*store.Candle{}
+	for _, sym := range all {
+		ts := timeutil.TodayTaipei()
+		if skipToday[sym] {
+			ts = ts.AddDate(0, 0, -1)
+		}
+		per[sym] = &store.Candle{Timestamp: ts}
+	}
+	return &schedulerCandleRepoStub{perSymbol: per}
+}
+
+func TestSRAnalysisReportsWatchlistSizeNotAttemptedCount(t *testing.T) {
+	symbols := []string{"1101", "1102", "1103"}
+	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	s := newSRAnalysisTestScheduler(symbols, jobRuns,
+		mixedCandles(symbols, map[string]bool{"1102": true}), nil, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 2 {
+		t.Fatalf("實際分析 %v，want 兩檔（1102 被跳過）", runner.calls)
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != 3 {
+		t.Errorf("symbols_total = %d, want 3（watchlist 大小，不是抓取數 2）", got.symbolsTotal)
+	}
+	if got.symbolsFailed != 0 || got.status != "success" {
+		t.Errorf("job_runs = %+v, want failed=0 status=success（跳過不算失敗）", got)
+	}
+}
+
+// 全部被跳過時分母仍是清單大小，狀態是 success。
+//
+// **這一輪一檔都沒分析，畫面上卻是「3 檔全部成功」**——語意上正確（該跑的都判定為
+// 不需要跑），但要靠 log 的 `skipped` 才看得出發生了什麼。這與 evaluation_universe_sync
+// 的讀法陷阱是同一個，現況說明見 docs/api-reference.md。
+func TestSRAnalysisReportsWatchlistSizeWhenAllSkipped(t *testing.T) {
+	symbols := []string{"1101", "1102", "1103"}
+	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
+	runner := &schedulerSRAnalysisRunnerStub{}
+	s := newSRAnalysisTestScheduler(symbols, jobRuns,
+		mixedCandles(symbols, map[string]bool{"1101": true, "1102": true, "1103": true}),
+		nil, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 0 {
+		t.Fatalf("全部應被跳過，got %v", runner.calls)
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != 3 || got.symbolsFailed != 0 || got.status != "success" {
+		t.Fatalf("job_runs = %+v, want total=3 failed=0 status=success", got)
+	}
+}
+
+// **這條釘住這次改動唯一會改到的狀態字串。**
+//
+// 只剩一檔沒被跳過、而那檔失敗時：新分母是 3（failed=1 < 3）→ `partial`；
+// 舊分母是 1（failed=1 >= 1）→ `failed`。`partial` 才是對的——那輪確實有跑，
+// 只是跑得不完整，而且另外兩檔是「判定為不需要跑」不是失敗。
+//
+// 沒有這條的話，日後有人看到「一檔失敗卻記 partial」會以為是迴歸而改回去。
+func TestSRAnalysisAllAttemptedFailedIsPartialNotFailed(t *testing.T) {
+	symbols := []string{"1101", "1102", "1103"}
+	jobRuns := &schedulerJobRunRepoStub{nextID: 1}
+	runner := &schedulerSRAnalysisRunnerStub{failFor: map[string]bool{"1103": true}}
+	s := newSRAnalysisTestScheduler(symbols, jobRuns,
+		mixedCandles(symbols, map[string]bool{"1101": true, "1102": true}), nil, runner, nil)
+
+	s.runSRAnalysis(context.Background(), false)
+
+	if len(runner.calls) != 1 || runner.calls[0] != "1103" {
+		t.Fatalf("只該分析 1103，got %v", runner.calls)
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsTotal != 3 || got.symbolsFailed != 1 {
+		t.Fatalf("job_runs = %+v, want total=3 failed=1", got)
+	}
+	if got.status != "partial" {
+		t.Errorf("status = %q, want partial（分母是清單大小，failed=1 < 3）", got.status)
 	}
 }

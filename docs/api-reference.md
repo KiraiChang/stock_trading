@@ -793,6 +793,29 @@ SIGTERM 升級成 SIGKILL，一輪 27 分鐘的 job 等不到自己收尾。**�
 
 #### `symbols_total` / `symbols_failed` 的單位是**標的數**，`status` 由它們推導
 
+**`symbols_total` 的分母一律是「本輪該做的清單有多大」，跳過的不扣**（2026-08-26 起統一，
+原記於 `issue.md` I-092）。三支有「跳過」概念的排程共用這個通則：
+
+| Job | 分母 | 跳過／未處理怎麼算 |
+|---|---|---|
+| `corporate_action_sync` | 當日名單大小 | **併進 `symbols_failed`**——那邊的「沒輪到」是**逾時導致該做而沒做** |
+| `evaluation_universe_sync` | 池大小（135） | 不計入失敗，只記進 log 的 `skipped` |
+| `sr_analysis` / `sr_analysis_chip` | watchlist 大小（11） | 同上 |
+
+**分母不能換成「實際處理數」**：那會讓狀態頁的數字每天浮動（11 / 10 / 11 …），
+而浮動的原因在畫面上看不到。`sr_analysis` 2026-08-26 之前就是這樣——同一輪裡
+log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值。
+
+**第三欄刻意不統一**：「逾時沒輪到」與「判定後確認不需要做」語意不同，前者該算失敗、
+後者不該。要看實際跑了多少，看各 job 完成 log 的 `skipped` 欄位。
+
+⚠️ **`sr_analysis` 的歷史資料有一個階梯**：2026-08-26 之前的列是「扣掉跳過後的處理數」，
+之後是 watchlist 大小，**不回填**。跨這個時點比較該 job 的 `symbols_total` 會看到跳變。
+
+**這次統一唯一會改到的狀態字串**：`sr_analysis` 在「多數標的被跳過、剩下的全部失敗」時，
+分母變大讓 `failed >= total` 不再成立，狀態從 `failed` 變成 `partial`。
+`partial` 才是對的——那輪確實有跑，只是跑得不完整，而被跳過的並不是失敗。
+
 `Scheduler.finishRun` 依這兩個數字換算 `status`：`failed >= total`（且 `total > 0`）記 `failed`、
 `failed > 0` 記 `partial`、其餘記 `success`。因此**呼叫端一定要傳標的數，不能傳事件筆數**——
 單位混用會讓比較失去意義（`corporate_action_sync` 早期就是傳事件筆數，2026-08-24 修）。

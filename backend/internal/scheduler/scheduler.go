@@ -1289,11 +1289,20 @@ func (s *Scheduler) runSRAnalysis(ctx context.Context, withChip bool) {
 				zap.String("job", jobName), zap.String("symbol", symbol), zap.Error(err))
 		}
 	}
-	total := len(symbols) - skipped
+	// **symbols_total 是 watchlist 大小，跳過的不扣**（原記於 issue.md I-092）。
+	//
+	// 三支有「跳過」概念的排程分母一律是「本輪該做的清單有多大」：
+	// corporate_action_sync 用當日名單、evaluation_universe_sync 用池大小、這裡用 watchlist。
+	// 換成「實際處理數」的話狀態頁的數字會每天浮動（11 / 10 / 11 …），而浮動的原因
+	// 在畫面上看不到——舊版就是這樣，log 印 total=11、job_runs 記 10，同一輪兩個數字。
+	//
+	// **跳過仍然不計入 symbols_failed**：那是「判定過後確認不需要做」，
+	// 與 corporate_action_sync 把「逾時沒輪到」併進 failed 不同（那邊是該做而沒做）。
+	analyzed := len(symbols) - skipped - failed
 	s.log.Info("sr analysis done",
 		zap.String("job", jobName), zap.Int("total", len(symbols)),
-		zap.Int("analyzed", total-failed), zap.Int("skipped", skipped), zap.Int("failed", failed))
-	s.finishRun(ctx, runID, jobName, total, failed, firstErr)
+		zap.Int("analyzed", analyzed), zap.Int("skipped", skipped), zap.Int("failed", failed))
+	s.finishRun(ctx, runID, jobName, len(symbols), failed, firstErr)
 }
 
 // srAnalysisSkipReason 回傳 (跳過原因, 是否該跑)。

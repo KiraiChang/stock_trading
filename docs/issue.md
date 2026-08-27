@@ -23,10 +23,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-095` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 / I-094 於 2026-08-26 發出，其中 I-093 已於同日收斂。）
+- **下一個新編號從 `I-098` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-094，但被移除的條目
+  檔案裡看得到的最大是 I-096，但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
   I-093 於 2026-08-26 收斂，I-070～I-072 更早）都佔用過編號。
@@ -56,7 +56,7 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-083 / I-084 / I-086～I-090 / I-093 與下一個可用的 I-095），那是預期的，不是殘留。
+  I-083 / I-084 / I-086～I-090 / I-093 與下一個可用的 I-098），那是預期的，不是殘留。
   `todo.md` 的 T-055 review 沿革內也還有兩處 I-083 引用，都寫成「原記於…，已收斂」的歷史形式，
   同樣不是殘留。
 
@@ -2079,3 +2079,325 @@ job_runs: symbols_total = 10
 **所以維持各自的欄位名，只在 `api-reference.md` 寫明「兩者的第一個欄位都是清單大小」。**
 這是與計畫書的字面偏離，理由如上；實質目標（分母統一、log 與 job_runs 不再打架）
 完全達成——改完之後 `sr_analysis` 的 log `total` 與 `job_runs.symbols_total` 就是同一個數。
+
+---
+
+### I-095：zone 角色翻轉只記在身分層，事件層沒有任何「壓力被突破」的紀錄
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **待決策**（要不要讓 role flip 也產生事件，是設計取捨不是明確的 bug） |
+| 嚴重度 | 低（**不影響任何決策**——該事件本來就是 `decision_visible=false`；影響的是「事實累積」的完整性） |
+| 分類 | Python / SR Zone / 事件層 / 身分層 |
+| 發現日期 | 2026-08-26 |
+| 來源 | 0050 `2026-08-26` 分析內容的逐項核實（`analysis_id=117`） |
+
+#### 現象
+
+`0050` 在 2026-08-26 把 `104.44～105.06`（zone `f2f1ab63`，`recent_pivot`）
+**從壓力翻成支撐**——身分層記得清清楚楚：
+
+| seq | role | state | started | ended | end_reason |
+|---|---|---|---|---|---|
+| 1 | RESISTANCE | INVALIDATED | 2026-08-20 18:22 | **2026-08-26 17:01:12** | **`ROLE_FLIPPED`** |
+| 2 | SUPPORT | ACTIVE | **2026-08-26 17:01:12** | — | — |
+
+⚠️ **這裡的 `SUPPORT / ACTIVE` 是 role incarnation；畫面事件鏈上的 `CONFIRMED`
+是另一層狀態**（2026-08-27 再核實）。`ROLE_FLIPPED` transition 指向 seq 2 的新
+incarnation UID，且這個 zone 在 seq 1 只有 `RESISTANCE`，**不存在可被復活的舊
+terminal SUPPORT incarnation**。同時出現的 `SUPPORT_RECLAIM / CONFIRMED` 與
+`SUPPORT_RETEST / CONFIRMED` 也都是當下新開的 event chain（各自 seq 1），不是舊鏈復活。
+所以「新 SUPPORT 一世有正確建立」是已驗證的正常行為，不是本筆的問題；本筆只問
+「角色翻轉所代表的壓力突破，是否也要在事件事實層留一筆紀錄」。
+
+價格也支持這個判斷：當日開 104.10、高 106.05、**收 105.90**，站上帶頂 105.06。
+
+**但事件層對這件事沒有 breakout 紀錄**：該分析的 23 筆 event-state snapshots 裡
+**沒有任何 `RESISTANCE_BREAKOUT`**；同日 22:00 的第二次 0050 分析（`analysis_id=128`）
+也同樣是 0，0050 全歷史的 `RESISTANCE_BREAKOUT` event chain 亦為 0。
+
+⚠️ 前一版寫「同日其他標的共產生 9 筆」不夠精確（2026-08-27 再核實）：
+
+* 9 筆是單輪 `market_event_states` 的 snapshots（`2478` 2、`3630` 1、`5490` 4、
+  `6243` 2），**包含 carry-forward，不能全叫做當輪新產生**。
+* 單輪真正新增的 `market_event_detections` 是 2 筆，分別在 `3630`、`5490`；
+  同日第二輪亦各 1 筆。
+* 這兩個有新 detection 的對照案例，其 `event_sequence_json` 與
+  `decision_derived_view_json` 都沒有 `RESISTANCE_BREAKOUT`，證明
+  **shadow event 的建立與 Decision 隔離機制本身正常**；缺的是 0050 這種 role-flip
+  breakout 根本沒有建立事件，不是「事件有建立但被 Decision 吃掉」。
+
+#### 成因：事件是依「當前 role」分派的，翻轉後就走不到壓力側
+
+`detect_market_events`（`event_engine.py:614`）：
+
+```python
+for z in zone_scores:
+    if z.role == ZoneType.RESISTANCE.value:
+        events.extend(_resistance_zone_events(...))   # RESISTANCE_BREAKOUT 在這裡
+        continue
+    if z.role != ZoneType.SUPPORT.value:
+        continue
+    ...                                                # 支撐側的三個分支
+```
+
+zone builder 在這根 K 棒已經把它歸類成 **SUPPORT**（價格收在帶頂之上），
+所以它走支撐分支、產出 `INTRADAY_RECLAIM` ＋ `SUPPORT_RETEST_HELD`，
+**`_resistance_zone_events` 對它一次都沒被呼叫**。
+
+換句話說：**「壓力被突破」正是它翻成支撐的原因，而那個原因讓它錯過了記錄突破的分支。**
+
+另一個佐證：`0050` 當日最近的壓力是 `107.18～107.82`，而最高只到 106.05，
+**沒碰到任何仍是壓力的 zone**，所以其他 zone 也不會補上這筆。
+
+#### 核實與更正（2026-08-27）
+
+本筆原本寫「同日那 9 筆就是『碰到壓力但還沒翻轉』」——**那句話是錯的**，逐筆查過之後：
+
+| **當輪的 9 筆 `RESISTANCE_BREAKOUT` state snapshot**（每輪各一份，兩輪共 18 列） | 筆數 |
+|---|---|
+| **當天新生成的事件**（`age_bars=0`、`carried_from_previous=false`） | **2**（`3630` / `5490` 各一） |
+| carry 進來的既有事件（`age_bars` 1～3，多數已 `EXPIRED`） | 7 |
+
+⚠️ **「9 筆」是當輪的 state snapshot 數，不是「當天新增 9 個事件」**——
+`market_event_states` 每輪都會把所有仍在追蹤的事件寫一份，所以同一個事件會在
+17:00 與 22:00 各留一列。
+
+而且其中 `2478` 的 `120.637~121.363` **今天確實翻轉了**（`ROLE_FLIPPED`），
+一度看起來像本筆的反例。追事件史才確認不是——那筆是 **08-24 新生成、carry 到今天已過期**的殘留：
+
+```
+08-24 17:02  CANDIDATE  age 0  carried=false   ← 新生成（當天 SUPPORT→RESISTANCE 翻轉）
+08-25 17:02  CANDIDATE  age 1  carried=true
+08-26 17:02  EXPIRED    age 2  carried=true    ← 今天 RESISTANCE→SUPPORT 翻轉，仍無新事件
+```
+
+**核實後結論反而更強**：2026-08-26 有**兩個** zone 發生 RESISTANCE→SUPPORT 翻轉——
+`0050` 的 `f2f1ab63` 與 `2478` 的 `120.637~121.363`——**兩個都沒有產生新的
+`RESISTANCE_BREAKOUT`**。原本只有一個樣本，現在有兩個獨立樣本。
+
+⚠️ **順帶發現一個不對稱**（尚未查明是否為預期）：`2478` 在 08-24 的
+**SUPPORT→RESISTANCE** 翻轉當下**有**新生成的 `RESISTANCE_BREAKOUT`（age 0、
+`PENDING_CLOSE_CONFIRMATION`，intrabar 突破未收上）。也就是說**兩個方向的翻轉行為不同**：
+翻成壓力時會產生事件，翻成支撐時不會。這是因為前者翻轉後 zone **仍是壓力**、走得到壓力分支，
+後者翻轉後變成支撐、走不到。處理方向若選 B，這個不對稱要一併考慮。
+
+#### 為什麼這仍然值得記
+
+`RESISTANCE_BREAKOUT` 是 `decision_visible=false` 的**只寫不讀事實層事件**
+（見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」），
+它存在的**唯一目的就是累積事實**，供日後的分佈分析與 replay 使用。
+
+而「壓力被站上」這件事：
+
+* **身分層有**（`zone_role_incarnations` 的 `ROLE_FLIPPED`）。
+* **事件層沒有**。
+
+於是兩層對「今天有沒有發生突破」給出不同答案。要用事件層做母體統計時
+（例如「突破後 N 根的表現」），**翻轉型的突破會整批缺席**——
+而那可能正是最值得看的一類，因為它是唯一「突破成功到足以改變角色」的樣本。
+
+**目前不影響任何決策**：該事件不進決策，`0050` 當日的
+`market_bias` / `entry_permission_state` / `position_action` 都由可見事件推導，
+已逐項核實無誤（`active` 桶 shadow 洩漏 0、`event_sequence_json` 無 shadow 名字）。
+
+#### 處理方向（**擇一，未定案**）
+
+**A. 維持現狀，只補文件。** 在 `sr-zone-scoring.md` 寫明
+「`RESISTANCE_BREAKOUT` 不涵蓋翻轉當下的突破，翻轉請看 `zone_role_incarnations`」。
+
+* 成本最低，且**不動任何會產生事件的程式碼**——事件層一旦多出事實，
+  即使 `decision_visible=false`，也會經 carry-forward 進入下一次分析的 `states`，
+  要重新確認四個過濾點都擋得住。
+* 代價：做事件層統計的人必須自己去 join 身分層，而那件事很容易被忘記。
+
+**B. 翻轉時補發一筆事件。** 在角色翻轉的路徑上補一筆
+`RESISTANCE_BREAKOUT`（或新的型別如 `ROLE_FLIP_BREAKOUT`），維持 `decision_visible=false`。
+
+* 讓「突破」這個事實在事件層完整。
+* ⚠️ **新事件型別要走完整的隔離檢查**：四個過濾點、
+  `EVENT_TYPE_META` 的 `decision_visible`、身分層寫入、前端標記，
+  缺一個就會經方向桶或位置型讀者改到決策（見「事件的決策可見性」的三類讀法）。
+* ⚠️ 若沿用既有的 `RESISTANCE_BREAKOUT` 型別，要注意它的觸發條件含**量能門檻**
+  （`relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD` 或 `volume_confirmation == FAILED`），
+  而角色翻轉**沒有**這個條件——兩者的語意會被混在同一個名字下。
+
+**傾向 A**：這是事實完整性問題，不是正確性問題；而 B 要動的是「產生事件」這條路徑，
+風險與收益不成比例。**但如果日後真的要用事件層做突破後表現的統計，就必須先解掉這筆**，
+否則母體會系統性地少掉最強的那一類樣本。
+
+**相關**：本次核實的另外兩項已分別立案——I-096（touch 被命名並解讀成 reclaim）
+與 [`todo.md`](./todo.md) T-064（中文標籤 SSOT／呈現契約待整理，**2026-08-27 由 I-097 改列**）。
+
+---
+
+### I-096：`structure_state` 把單純碰觸命名成「收復候選」，並會回饋 Lifecycle／Decision
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **待決策**（2026-08-27 診斷後從「待修復」下修——見下方診斷結果） |
+| 嚴重度 | **低**（**程式碼存在 touched-only fallback 的潛在風險，但 production 至今 0 筆實例**。原本標「已在 production 發生」是錯的：實際發生的是 `UNDERCUT_RECLAIM`，不是單純 touched） |
+| 分類 | Python / SR Zone / 決策語意 / 前端呈現 |
+| 發現日期 | 2026-08-26 |
+| 來源 | 0050 `2026-08-26` 分析內容的逐項核實 |
+
+#### 現象：畫面上有兩個不同粒度的「收復」輸出，但不是兩條獨立 SSOT
+
+| 畫面上的東西 | 欄位 | 推導來源 |
+|---|---|---|
+| `SEMANTIC_BULLISH_RECOVERY` | `decision_derived_view.bias_reason_codes` | ← `semantic_pipeline.market_state` ← Lifecycle；⚠️ Lifecycle **直接吃同一個 `structure_state`**，另加 event states 與價格延續證據 |
+| 「支撐收復候選」 | `position_action_condition.structure_state` → 前端 `structureStateText` | ← `_structure_state()` ← primary zone 的 `role` ＋價格互動證據（`closed_below` / `reclaim_type` / `touched`） |
+
+前一版寫「兩者沒有任何共用的中間結論」是錯的（2026-08-27 再核實）：
+`_decision_semantic_pipeline()` 把 `_structure_state()` 的輸出直接傳進 `resolve_lifecycle()`；
+`resolve_event_signal()` 又把 `SUPPORT_RECLAIM_CANDIDATE` / `CONFIRMED` 直接視為
+`CLOSE_RECLAIM`。正確資料流是：
+
+```text
+zone interaction → structure_state ───────────────→ position_action_condition / UI badge
+                         └→ Lifecycle + event states + price evidence
+                                      → semantic market_state → SEMANTIC_*
+```
+
+所以 semantic 是 structure 的**下游加料推導**，不是另一個互不相干的 SSOT。
+
+#### 不是理論風險——live 已出現多種上下游組合
+
+2026-08-21 起的 88 筆分析，兩個欄位的組合分佈：
+
+| `market_state` | `structure_state` | 筆數 | |
+|---|---|---|---|
+| `BULLISH_RECOVERY` | `SUPPORT_RECLAIM_CANDIDATE` | 34 | ✅ 一致 |
+| `BULLISH_RECOVERY` | **`NORMAL`** | **19** | 需逐筆分類：可能由 active event state 提供 reclaim 證據 |
+| `NORMAL` | `NORMAL` | 14 | ✅ |
+| `BULLISH_RECOVERY` | `SUPPORT_RECLAIM_CONFIRMED` | 12 | ✅ |
+| `REVERSAL_CANDIDATE` | `NORMAL` | 8 | 可由 candidate event state 提供，不必與當根 structure 相同 |
+| **`BULLISH_CONTINUATION`** | **`SUPPORT_RECLAIM_CANDIDATE`** | **1** | ⚠️ 名稱容易誤讀，但依現行 Lifecycle 契約不是互斥 |
+
+最後一筆是 **`2454`，`analysis_id=127`，2026-08-26 22:00**：
+
+* `market_state = BULLISH_CONTINUATION`、`lifecycle_phase = CONTINUATION`。
+* `event_signal = CLOSE_RECLAIM`，reason codes 明列 `CLOSE_RECLAIM` 與
+  `PRICE_UPSIDE_FOLLOW_THROUGH`。
+* `structure_state = SUPPORT_RECLAIM_CANDIDATE`。
+
+前一版把 `BULLISH_CONTINUATION` 解讀成「結構從未跌破」是錯的。現行 Lifecycle 的
+`CONTINUATION` 是：先有 `CLOSE_RECLAIM`，再同時滿足 price follow-through、momentum
+confirmed 與 clear zone breakout。它描述的是**收復後已有延續證據**，不是「從未跌破」。
+因此這一組不是邏輯互斥案例。
+
+#### 為什麼會這樣
+
+真正要核實的是 `_structure_state()` 的最後一個分支：只要 primary SUPPORT 的
+`touched=true`，即使 `reclaim_type` 不是 `UNDERCUT_RECLAIM`、也沒有先前跌破證據，
+仍回傳 `SUPPORT_RECLAIM_CANDIDATE`。這不只讓 UI 顯示「支撐收復候選」：Lifecycle
+會再把它當成 `CLOSE_RECLAIM`，因此可能改變 `semantic market_state`、Bias 與後續 gate。
+
+問題應改寫成：**「touch／test」是否應與「reclaim」使用同一個 structure state，
+以及沒有實際 reclaim event 時，structure state 是否有權單獨產生 `CLOSE_RECLAIM`。**
+
+#### 這不只是顯示問題
+
+`structure_state` 不是「回過頭」間接影響，而是 Lifecycle 的**明示輸入**；
+`SUPPORT_RECLAIM_CANDIDATE` 會直接產生 `CLOSE_RECLAIM`。所以這不是純顯示或雙 SSOT
+整理，若修改 `touched` 分支或 event-signal arbitration，屬於交易訊號／Decision 邏輯修改，
+必須先做 replay 分佈與案例分類。
+
+#### 處理方向（**擇一，未定案**）
+
+**A. 只改 UI 名稱**：若 `touched` 的現行決策語意是刻意的，把
+`SUPPORT_RECLAIM_CANDIDATE` 顯示成「支撐測試／互動候選」，避免宣稱已發生 reclaim。
+這不改 Decision，但仍保留「touch 可產生 `CLOSE_RECLAIM`」的現況。
+
+**B. 拆開狀態**：新增 `SUPPORT_TEST_CANDIDATE`（或等價名稱），只有真正的
+`UNDERCUT_RECLAIM` 才回傳 `SUPPORT_RECLAIM_CANDIDATE`；Lifecycle 再分別仲裁
+`SUPPORT_TEST` 與 `CLOSE_RECLAIM`。這會改 Decision，必須做 replay。
+
+**C. 收緊 Lifecycle arbitration**：structure 的 touch state 可保留供 UI 使用，
+但沒有 `INTRADAY_RECLAIM` 或其他實際 reclaim 證據時，不得只靠它產生 `CLOSE_RECLAIM`。
+同樣屬於決策修改。
+
+**先做診斷**：把上述 88 筆依「有無 active/candidate event、是否真的
+UNDERCUT_RECLAIM、是否只有 touched」分類，再決定 A、B 或 C。原本以「兩個 SSOT
+不一致」分類 20 筆的方向作廢。
+
+#### 診斷結果（2026-08-27，88 筆全數分類）
+
+判別欄位取自 `primary_zone.zone_interaction.price_action_evidence.reclaim_type`
+（`zone_interaction` 頂層沒有這個鍵，要往 `price_action_evidence` 取）：
+
+| `structure_state` | `reclaim_type` | 有 active `INTRADAY_RECLAIM` | 筆數 |
+|---|---|---|---|
+| `SUPPORT_RECLAIM_CANDIDATE` | **`UNDERCUT_RECLAIM`** | ✅ | **35** |
+| `SUPPORT_RECLAIM_CONFIRMED` | `UNDERCUT_RECLAIM` | ✅ | 6 |
+| `SUPPORT_RECLAIM_CONFIRMED` | `NONE` | ✅ | 4 |
+| `SUPPORT_RECLAIM_CONFIRMED` | `NONE` | ❌ | **2** |
+| `NORMAL` | — | — | 41 |
+
+**結論一：本筆最擔心的「只有 `touched` 就被命名成收復候選」，production 至今 0 筆。**
+全部 35 筆 `SUPPORT_RECLAIM_CANDIDATE` 的 `reclaim_type` 都是 `UNDERCUT_RECLAIM`——
+走的是 `_structure_state` 上面那個分支，**最後那個 `touched` 兜底分支從來沒被命中過**。
+
+**結論二：`structure_state` 單獨驅動 `CLOSE_RECLAIM` 的只有 2 筆**
+（`5490`，`analysis_id=122` / `133`），且都是 `SUPPORT_RECLAIM_CONFIRMED`——
+來自「前一根 `UNDERCUT_RECLAIM` 且本根未收破」那條分支，本身有跨根證據，
+不是無中生有。其餘 **45** 筆非 `NORMAL` 的案例都另有 active `INTRADAY_RECLAIM` 佐證
+（非 `NORMAL` 共 35+6+4+2 = **47** 筆，扣掉那 2 筆沒有 active reclaim 的），
+**`resolve_event_signal` 的 `or` 兩邊同時成立**，拿掉 `structure_state` 那半也不改結果。
+
+**結論三：`NORMAL` ＋ `touched=true` 不是矛盾。** 抽查（`analysis_id` 49 / 52 / 55 / 57）
+四筆的 `primary_zone.role` 都是 `RESISTANCE`——`_structure_state` 對非 SUPPORT 的
+primary zone 直接回 `NORMAL`，與 `touched` 無關。
+
+#### 診斷後的取捨修正
+
+* **B / C 的急迫性下降**：它們要解的「touch 被當成 reclaim 灌進 Decision」
+  **目前沒有任何實際案例**，而兩者都要動決策並跑 replay。
+* ⛔ **A（只改 UI 名稱）經診斷後不建議直接採用**（2026-08-27 review 定調，
+  取代先前「A 的價值上升且風險最低」那個結論——兩者不該並列）。
+
+  A 的前提是「名字宣稱得比實際強」，但診斷顯示**恰好相反**：現行 35 筆
+  `SUPPORT_RECLAIM_CANDIDATE` **全都是真正的 `UNDERCUT_RECLAIM`**，
+  改名成「支撐測試／互動候選」會讓**現行輸出的準確度下降**。
+
+  **根本原因是一個名字要同時描述兩種強度不同的事**——真正的 undercut-reclaim，
+  與（尚未發生但程式碼允許的）touched-only。**單一較弱的名稱兩者都描述不準**：
+  對前者太弱，對後者才剛好。所以「改名」解不了這個問題，只會換一個方向的失準。
+
+* ⚠️ **兜底分支仍在程式碼裡，但「保留現況」與「測試禁止 candidate」互相矛盾**
+  （2026-08-27 review 修正）。原本兩句話並列是錯的——現行 fallback **就是**會回傳
+  candidate。必須二選一：
+
+  | | 做法 | 測試 |
+  |---|---|---|
+  | **維持現況** | 不改 fallback | 測試**記錄**「touched-only 目前會回傳 `SUPPORT_RECLAIM_CANDIDATE`」，把現行契約釘住，日後有人改動時會被測試擋下並被迫做決定 |
+  | **收緊契約** | **先改** fallback 回傳 `SUPPORT_TEST_CANDIDATE`（或不回傳） | **改完之後**再加「touched-only 不得回傳 candidate」的 regression test |
+
+  在 0 筆實例的前提下，「收緊契約」是**預防性重構**而非修 bug，
+  且它會改 Decision（`resolve_event_signal` 吃 `structure_state`）而需要 replay——
+  取捨要用這個框架談，不要當成修 bug 排程。
+
+#### 真正待決策的只有一件事
+
+診斷之後**排除 A**，剩下三條路（**B 與 C 是不同的方案，不可合併**——
+2026-08-27 review 修正：前一版把兩者併成「拆分語意（B／C）」是錯的）：
+
+| | 改哪一層 | 做法 | 代價 |
+|---|---|---|---|
+| **維持現況** | 不改 | 承認「touched-only 也會回傳 `SUPPORT_RECLAIM_CANDIDATE`」是現行契約，用測試釘住 | 名稱對 touched-only 過強的風險**繼續存在**，只是無意的改動會被測試擋下 |
+| **B：拆狀態** | **`_structure_state`** | 新增 `SUPPORT_TEST_CANDIDATE`，只有真正的 `UNDERCUT_RECLAIM` 才回傳 `SUPPORT_RECLAIM_CANDIDATE`；Lifecycle 再分別仲裁 `SUPPORT_TEST` 與 `CLOSE_RECLAIM` | 改 Decision，需 replay。**UI 與資料層的狀態集合都變**，前端對照表要一起改 |
+| **C：收緊 arbitration** | **`resolve_event_signal`** | **`structure_state` 完全不動**，UI 照樣顯示 touch state；但沒有 `INTRADAY_RECLAIM` 或其他實際 reclaim 證據時，**不得只靠 `structure_state` 產生 `CLOSE_RECLAIM`** | 改 Decision，需 replay。狀態集合不變，**改動面比 B 小** |
+
+**B 與 C 的分野**：B 改「怎麼命名這件事」，C 改「這件事能不能單獨驅動決策」。
+兩者可以獨立採用，也可以都做——**C 不是 B 的一部分**。
+
+**診斷對 C 的影響範圍已經量出來了**：`structure_state` 單獨驅動 `CLOSE_RECLAIM` 的
+只有 **2 筆**（`5490`，`analysis_id=122` / `133`），且都是 `SUPPORT_RECLAIM_CONFIRMED`
+（來自前一根 `UNDERCUT_RECLAIM`）。**C 若把 CONFIRMED 也一併排除，就會改到這 2 筆**；
+若只排除 `CANDIDATE`，則**目前 0 筆會被改到**——這個界線要在計畫書裡定死。
+
+**三條路都不含「只改名」**——名稱的問題來自「一個名字要涵蓋兩種強度」，
+那要靠 B 拆分狀態解決，換一個字只會把失準的方向調換。
+
+**相關**：[`todo.md`](./todo.md) T-055（RR 語意分層）——同一類問題的另一個面向：
+決策語意的多個數字／狀態並列而未分層。

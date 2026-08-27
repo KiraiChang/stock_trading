@@ -10,12 +10,12 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-064 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出。）
+- **編號只增不重用，`下一個新編號從 T-065 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
   **仍然被佔用**：程式碼註解、主題文件與 git log 會留著舊 ID，重用會讓兩件無關的事
-  共用一個代號。本檔目前看得到的最大是 `T-063`，而 `T-062` 已經發出並收斂，
+  共用一個代號。本檔目前看得到的最大是 `T-064`，而 `T-062` 已經發出並收斂，
   更早也有多筆被移除（例如 `T-044` / `T-046` / `T-053` / `T-056` / `T-057` /
   `T-059` / `T-060`）。判斷可用編號時翻 git log 或本節，不要數檔案。
 - **移除條目前要先反轉依賴**（與 [`issue.md`](./issue.md) 同一條規則）：先把要長期保留的
@@ -3338,6 +3338,58 @@ live 資料（`stock_sr_decisions`，0050 / 1d / `analyzed_at=2026-08-20T16:00Z`
                 "executable_now": false, "entry_executability_reason_code": "ENTRY_ZONE_OVERSHOT" }
 ```
 
+##### 2026-08-27 再核實：0050 2026-08-26 已能算出真 Execution RR，但 UI 仍把 Setup RR 當進場 RR
+
+這次以 live `analysis_id=117`／`128` 再驗一次，兩筆的數字相同：
+
+| 欄位 | 值 | 正確語意 |
+|---|---:|---|
+| primary zone `risk_reward_ratio` / `rr_context.entry_rr` | **5.7141R** | **Zone Statistical RR / Setup RR**：由 zone 歷史統計的 expected gain/loss 得出 |
+| `rr_context.execution_rr` | **0.87246R** | **Execution RR**：entry 105.90、stop 104.43575、target 107.1775 的可執行價位比值 |
+| `rr_gate.actual_rr` | **0.87246R** | gate 真正仲裁的數字 |
+| `rr_gate.minimum_rr` | 1.8（117）／1.5（128） | 當次 gate 門檻；兩筆都 `qualified=false` |
+
+資料層這兩筆已經把 statistical 與 execution RR 分開，且 gate 也正確讀 execution RR；
+**目前剩下的直接誤導在 UI**：
+
+* Primary Zone 卡只顯示裸 `RR 5.71R`。
+* RR Context 又把同一個 `entry_rr=5.71R` 標成「進場 RR (Entry)」。
+* 真正的 `execution_rr=0.87R` **在個股決策區塊沒有顯示位置**。
+  （**2026-08-27 收緊措辭**：`execution_rr` 在前端**確實有兩處**——
+  `SRZones.svelte:219` 與 `:1790`——但兩處都在 **evaluation report 的 RR 分布區塊**
+  （中位數／分位數／列數），那是**回測母體統計**，不是個股決策卡。
+  原本寫「沒有顯示位置」過廣，會讓實作者誤以為要從零加欄位而忽略既有的分布區塊；
+  正確範圍是 **RR Context 與 RR Gate 這兩個個股決策區塊**。）
+* RR Gate 只顯示通過與否、最低 RR、reason code，沒有顯示它實際比較的 `actual_rr=0.87R`。
+
+**納入本筆既有前端驗收，不另立 issue**：
+
+1. `entry_rr_source=PRIMARY_ZONE_STATISTIC` 時，`entry_rr` 主標籤必須是
+   **「Zone Statistical RR」或「Setup RR」**，不得稱為「進場 RR」。
+2. **Primary Zone 卡的 `primary_zone.risk_reward_ratio`（`SRZones.svelte:2401`）
+   同樣必須標示為「Zone Statistical RR」／「Setup RR」，不得只顯示裸 `RR`。**
+   （2026-08-27 review 補：現象段已指出這張卡是裸 `RR 5.71R`，但驗收原本只涵蓋
+   `rr_context.entry_rr`——**只修 RR Context 的話，Primary Zone 卡會留著同一個誤導名稱**，
+   而它是使用者最先看到的位置。）0050 fixture 要一併斷言這個標籤。
+3. 同區塊顯示 **Execution RR** 與其 source；不可用時明示 unavailable，不能退回顯示 setup RR。
+4. RR Gate 顯示 `actual_rr`，且視覺上要能確認它與 Execution RR 是同一個值。
+5. 0050 analysis 117 的 UI fixture 必須同時斷言 **5.71R（Setup）**、
+   **0.87R（Execution／Gate actual）** 與 **未通過 1.8R 門檻**，避免只改標題卻仍搬錯欄位。
+6. **不得動到 evaluation report 的 RR 分布區塊**（`SRZones.svelte:219` / `:1790`）——
+   那裡的 `execution_rr` 是母體統計，語意與個股決策卡不同，兩者不要互相搬用。
+
+**資料層數字已於 2026-08-27 重新核對，逐項吻合**（`analysis_id=117` / `128`）：
+`entry_rr` = `5.71411`、`execution_rr` = `gate.actual_rr` = `0.87246`、
+`minimum_rr` = 1.8（117）／1.5（128）、兩筆 `qualified=false`、
+entry `105.90` / stop `104.43575` / target `107.1775`、
+`entry_rr_source = PRIMARY_ZONE_STATISTIC`。UI 四項主張中，
+「Primary Zone 卡裸 `RR`」（`:2401`）、「RR Context 標成進場 RR」（`:2340`）、
+「RR Gate 未顯示 `actual_rr`」（`:2320-2333` 三格只有 qualified／minimum_rr／reason_code）
+三項屬實，第四項的範圍如上收緊。
+
+這個案例不改變 T-055 的既定契約，只補上最新 production 驗收證據；也證明本筆不能
+只處理「舊路徑把 Setup RR 抄成 Execution RR」，還必須處理「新路徑已算對但 UI 沒顯示」的情況。
+
 **成因一：同一個數字被兩套門檻判定（這是「通過 vs 未達門檻」的直接來源）**
 
 | 判定點 | 位置 | 門檻 | 對 1.8664 的結果 |
@@ -4067,3 +4119,103 @@ A 與 B 都完成、兩份主題文件的待填處都補上實測數字之後，
 
 檢查方式就是本檔使用說明那條 `rg` 指令：收斂後輸出裡的 `T-063` **必須只剩
 「原記於…，已收斂」形式的歷史引用**，不能有任何具名的活指標。
+
+---
+
+### T-064：`structure_state` 中文標籤在前後端各定義一次，headline／badge 契約未定
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 低 |
+| 分類 | 前端 / Python / SSOT 整理 |
+| 建立日期 | 2026-08-26（**原為 `issue.md` I-097，2026-08-27 依分類移到本清單**——沒有證據造成錯誤呈現或交易語意改變，實質是 SSOT 整併與 dead-key 清理，屬維護性改善。**編號 I-097 不回收**） |
+| 來源 | 0050 `2026-08-26` 分析內容的逐項核實 |
+
+#### 現象
+
+同一組 `structure_state` 的中文對照表**存在兩份**：
+
+| key | Python `decision_engine.py:305` | 前端 `SRZones.svelte:596` |
+|---|---|---|
+| `NORMAL` | **`""`（空字串）** | **「結構正常」** |
+| `SUPPORT_RECLAIM_CANDIDATE` | 支撐收復候選 | 支撐收復候選 |
+| `SUPPORT_RECLAIM_CONFIRMED` | 支撐收復確認 | 支撐收復確認 |
+| `SUPPORT_RECLAIM_INVALIDATED` | 支撐收復失效 | 支撐收復失效 |
+| `BREAKDOWN` | 短線結構跌破 | 短線結構跌破 |
+| `RECOVERY_CANDIDATE` | **沒有** | 短線測試支撐 |
+| `RECOVERY` | **沒有** | 短線收回支撐 |
+| `RECOVERY_INVALIDATED` | **沒有** | 短線結構轉弱 |
+
+**兩份字典確實不同，但前一版直接稱為「已漂移」證據不足**（2026-08-27 再核實）：
+
+1. `NORMAL=""` 用在 Python 組合 **Market Regime headline** 時省略冗字；前端
+   badge 顯示「結構正常」。兩個位置目的不同，可能是刻意的摘要層次，不宜未定契約就判 bug。
+2. 前端多三個 `RECOVERY_*` key，而目前 live `market_regime.structure_state` 的全歷史
+   分佈確實是 0 筆；但刪除前仍要確認舊 API payload／fixture／保存報告的相容需求，
+   不能只因 live 為 0 就直接稱為死 key。
+
+#### 兩份各自流向不同的畫面位置
+
+* Python 的 `structure_label` 進 **`market_regime.label` headline**
+  （`:329～337` 組合 label），**不是** `confidence_explanation`；前一版資料流寫錯。
+* 前端的 `structureStateText` 用在 **`market_regime.structure_state` 的 badge**
+  （`SRZones.svelte:2154`）。
+
+所以同一頁會同時看到 Python headline 與前端 badge。對 `NORMAL` 而言，headline 省略
+「結構正常」、badge 明示它；這是兩層呈現，但目前沒有證據證明使用者會讀成互相矛盾。
+
+#### 處理方向（**擇一，未定案**）
+
+**A. 以 Python 為單一來源**：Python 額外輸出 `structure_state_label` 欄位，前端 badge 只搬值；
+`market_regime.label` 仍可保留「NORMAL 時省略」的 headline 組合規則。
+
+* 與既有慣例一致——`role_label` / `tier_label` / `market_bias_label` / `action_label`
+  等都已經是「Python 產生標籤、前端只搬」的形狀。
+* 需要處理 `NORMAL` 的空字串：要嘛給它一個實際的詞，要嘛明確定義「空字串＝不顯示」。
+
+**B. 以前端為單一來源**：Python 不再組中文，說明文字改用結構化欄位由前端組裝。
+
+* 改動面較大，且與上述既有慣例相反。
+
+**傾向 A，但先補契約測試**：同一 state 的 label 只能在一處定義；headline 是否省略
+NORMAL 是另一條 presentation rule，不要混成字典值。`RECOVERY_*` 三個 key 則先搜尋
+歷史 payload／fixture 的消費情況，確認不需相容後再刪除。
+
+#### 核實（2026-08-27）：相容性查核已結案，`RECOVERY_*` 可以安全刪除
+
+上面要求的「先搜尋歷史 payload／fixture 的消費情況」已做完，三個方向都查了：
+
+| 查核 | 結果 |
+|---|---|
+| `_structure_state()` 的**全部**回傳值（窮舉） | 只有 `BREAKDOWN` / `NORMAL` / `SUPPORT_RECLAIM_{CANDIDATE,CONFIRMED,INVALIDATED}` 五個——**產不出 `RECOVERY_*`** |
+| 原始碼／fixture 的消費者 | 只有 `SRZones.svelte:598-600` 的**定義本身**（三個 key 分別在 598／599／600），以及 `backend/internal/ui/dist` 的**編譯產物**（同一份原始碼）。**沒有任何測試或 fixture 消費它們** |
+| live 歷史 payload（**兩張表都查，2026-08-27 擷取**） | 見下方查詢與數字；**兩張表的 `RECOVERY_*` 都是零筆** |
+
+**live 統計的出處與可重現查詢**（2026-08-27 擷取，**兩張表數字不同是正常的**——
+並非每筆分析都會寫出 decision 列）：
+
+```sql
+-- 分析表（111 列）
+SELECT decision_summary->'market_regime'->>'structure_state', count(*)
+FROM stock_sr_zone_analyses GROUP BY 1;
+--  NORMAL 55 / SUPPORT_RECLAIM_CANDIDATE 40 / SUPPORT_RECLAIM_CONFIRMED 16
+
+-- 決策表（104 列）
+SELECT decision_summary->'market_regime'->>'structure_state', count(*)
+FROM stock_sr_decisions GROUP BY 1;
+--  NORMAL 53 / SUPPORT_RECLAIM_CANDIDATE 37 / SUPPORT_RECLAIM_CONFIRMED 14
+```
+
+**兩張表的 `RECOVERY_CANDIDATE` / `RECOVERY` / `RECOVERY_INVALIDATED` 都是 0 筆。**
+（原本只寫「全部 111 筆分析」而沒寫表名與欄位，導致無法重現——
+review 時用 `stock_sr_decisions` 查得 104 筆，兩個數字其實都對。）
+
+⚠️ **刪除前要確認的是「哪一個欄位」，不是「哪一個字串」**：Python 確實有
+`short_term_regime = "RECOVERY"`（`decision_engine.py:315`），前端也另有
+`shortTermRegimeText` 在處理它。**兩者名字像、欄位不同**——
+grep 到 `"RECOVERY"` 不代表 `structureStateText` 的那三個 key 還活著。
+這正是雙真相源最容易誤判的地方，也是本筆值得修的理由之一。
+
+**順帶一提**：`BREAKDOWN` 與 `SUPPORT_RECLAIM_INVALIDATED` 這兩個**產得出來但至今沒出現過**
+的值，其 label 兩邊是一致的，不在本筆的漂移範圍內。

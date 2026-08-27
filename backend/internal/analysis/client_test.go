@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -359,8 +360,8 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 			"defense_lines":{"tactical":{"label":"579.50 ~ 581.00"},"swing":null,"strategic":null},
 			"entry_executability":{"entry_price":581,"executable_now":true,"reason_code":"EXECUTABLE_NOW","price_basis":"PRIMARY_SUPPORT_UPPER"},
 			"entry_blocking_zone":{"blocked":false,"distance_price":12,"threshold_price":3,"distance_pct":0.02,"threshold_pct":0.005},
-			"rr_context":{"entry_rr":2.4,"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"},
-			"rr_gate":{"minimum_rr":1.5,"actual_rr":2.4,"qualified":true,"reason_code":"RR_OK"},
+			"rr_context":{"entry_rr":2.4,"setup_rr":2.4,"executable_rr":1.7257,"execution_rr":1.7257,"execution_target":{"price":105.1862,"basis":"FIRST_RESISTANCE_CAP","source":"blocking_resistance_zone"},"entry_rr_source":"PRIMARY_ZONE","position_rr":null,"position_rr_source":"UNAVAILABLE"},
+			"rr_gate":{"minimum_rr":1.5,"actual_rr":1.7257,"qualified":true,"reason_code":"RR_OK","gate_kind":"PROBE","gate_basis":"ENTRY_STOP_TARGET","zone_actual_rr":2.4,"secondary_gate":{"gate_kind":"FULL_ENTRY","minimum_rr":2.0,"qualified":false}},
 			"position_action_condition":{"state":"BREAKDOWN","invalidation_price":580,"recovery_price":585,"reason_codes":["SUPPORT_CLOSED_BELOW"]},
 			"market_context":[{"key":"trend","label":"趨勢","value":"偏空"}],
 			"confidence_explanation":{"value":0.72,"level":"HIGH","label":"高","formula_factors":[],"context_factors":[]},
@@ -429,6 +430,29 @@ func TestZoneScoreResultToStoreBuildsDecisionEventProjections(t *testing.T) {
 	}
 	if projections.Decision == nil {
 		t.Fatal("expected decision projection")
+	}
+
+	// T-055 的新 RR 欄位必須**原樣**通過 Go 投影。
+	//
+	// **Go 端刻意不認識這些欄位**：`decisionRawJSONAt` 直接 marshal 整個子物件、
+	// DB 欄位是 jsonb、API 用 `setRawObjectIfPresent` 原樣展開——所以 Python 端加欄位
+	// **不需要改 Go**。這幾行釘住的正是那個性質：日後有人把 rr_context / rr_gate
+	// 改成逐欄位 struct 時，新欄位會被靜默丟掉，而這裡會失敗。
+	for _, want := range []string{
+		`"setup_rr":2.4`, `"executable_rr":1.7257`,
+		`"execution_target"`, `"basis":"FIRST_RESISTANCE_CAP"`,
+	} {
+		if !strings.Contains(string(projections.Decision.RRContextJSON), want) {
+			t.Errorf("rr_context 少了 %s，實際：%s", want, projections.Decision.RRContextJSON)
+		}
+	}
+	for _, want := range []string{
+		`"gate_kind":"PROBE"`, `"gate_basis":"ENTRY_STOP_TARGET"`,
+		`"zone_actual_rr":2.4`, `"secondary_gate"`,
+	} {
+		if !strings.Contains(string(projections.Decision.RRGateJSON), want) {
+			t.Errorf("rr_gate 少了 %s，實際：%s", want, projections.Decision.RRGateJSON)
+		}
 	}
 	if projections.Decision.MarketBias != "BEARISH_BIAS" ||
 		projections.Decision.EntryPermissionState != "WAIT_CONFIRMATION" ||

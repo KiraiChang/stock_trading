@@ -23,7 +23,7 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-098` 起算。**（I-081～I-083 於 2026-08-21 發出，I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-098` 起算。**（I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出，I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
   檔案裡看得到的最大是 I-096，但被移除的條目
@@ -56,9 +56,7 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-083 / I-084 / I-086～I-090 / I-093 與下一個可用的 I-098），那是預期的，不是殘留。
-  `todo.md` 的 T-055 review 沿革內也還有兩處 I-083 引用，都寫成「原記於…，已收斂」的歷史形式，
-  同樣不是殘留。
+  I-081～I-084 / I-086～I-090 / I-093 與下一個可用的 I-098），那是預期的，不是殘留。
 
 ---
 
@@ -104,184 +102,6 @@
   `yahoo.rate_limit`，與 `enabled` 無關」。
 
 程式碼未動——共用節流器與 `enabled` 只管盤中客戶端都是刻意設計。
-
----
-
-### I-081：`sr-zone-scoring.md` 的 legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待修復 |
-| 嚴重度 | 低（文件落後，runtime 行為正確且一致） |
-| 分類 | 文件 / Python / SR Zone / 決策語意 |
-| 發現日期 | 2026-08-21 |
-| 來源 | [`todo.md`](./todo.md) T-055 的 RR 語意核實（live 0050 分析） |
-
-[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Legacy action pipeline」第 3 條寫：
-
-> 3. 若 primary zone `risk_reward_ratio < 1.0`：加上風險報酬不足註記。
-
-實作用的是 **`< 1.5`**，而且出現兩次：
-
-* `decision_engine.py:499` —— `elif rr < 1.5:` → 「主交易區風險報酬比不足。」
-* `decision_engine.py:516` —— `if rr is None or rr < 1.5:` → 直接 `return "WATCH"`
-
-註記文案與文件描述一致，**只有門檻數字對不上**。1.0 和 1.5 之間的 RR 在實際系統裡
-會被加註記並擋到 `WATCH`，但照文件讀會以為它是乾淨通過的。
-
-**要改的是文件，不是程式碼**：1.5 與 `_minimum_rr()` 的下限一致，是刻意的調校結果，
-不是筆誤。
-
-**與 T-055 的關係（2026-08-21 定案）**：**由 T-055 一併改，不單獨動。**
-T-055 會把 RR 門檻改成 `probe_min_rr` / `full_entry_min_rr` 兩層具名門檻，這一條的敘述
-整段都要照新語意重寫——先單獨把 1.0 改成 1.5，等於同一段寫兩遍，而且中間那版
-仍然對不上改完後的實作。該動作已列進 T-055 的「完成後歸檔」與驗收條件，
-**T-055 不做完就不算完成**；完成後本筆整筆移除。
-
----
-
-### I-082：文件把 EXPIRED 的 `Buy` 守門記在錯的位置（**行為正確，原始指控已被重現推翻**）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 修復中（**迴歸保護已補完；只剩文件改寫，等 T-055 一起做**） |
-| 嚴重度 | 低（**由中下修**：行為正確，文件把守門機制記在錯的函式） |
-| 分類 | 文件 / Python / SR Zone / 決策語意 |
-| 發現日期 | 2026-08-21（同日以重現實驗推翻原始指控） |
-| 來源 | [`todo.md`](./todo.md) T-055 的 RR 語意核實（讀碼推論）→ 2026-08-21 重現實驗 |
-
-#### 重現結果（2026-08-21）：**無法重現，原始指控不成立**
-
-依既定流程「先重現再修法」建探針窮舉，結論是 **EXPIRED 的 primary zone 走不到 `Buy`**。
-
-| 組合 | `structure_state` | `action` |
-|---|---|---|
-| SUPPORT ＋ TREND_UP | `BREAKDOWN` | **Avoid** |
-| SUPPORT ＋ RANGE_BOUND | `BREAKDOWN` | **Avoid** |
-| SUPPORT ＋ TREND_DOWN | `BREAKDOWN` | **Avoid** |
-| RESISTANCE ＋ 三種 regime | `NORMAL` | **Avoid**（`bearish_setup` 擋下） |
-| **對照組**：同一 zone 只把 `EXPIRED` 換成 `VALIDATED_RECENTLY` | `NORMAL` | **Buy** |
-
-對照組是關鍵：其餘六個 `strong` 條件**確實全中**（relevance 84.81 ≥ 75、confidence 1.0、
-EV 0.05、RR 3.0、distance 0.0005、regime flags 空），足以產生 `Buy`。
-**唯一的差別就是 `recent_validation`**，所以 Avoid 確實由 EXPIRED 造成。
-端到端 `build_decision_summary` 同樣是 `action=Avoid` / `final_entry=BLOCKED`。
-
-#### 真正的守門在哪裡（原始分析漏看的一行）
-
-守門存在，只是**不在 `strong`**，而在 `_structure_state`（`decision_engine.py:2242-2243`）：
-
-```python
-if primary_zone.role == ZoneType.SUPPORT.value:
-    ...
-    if primary_zone.recent_validation == RecentValidation.EXPIRED.value:
-        return "BREAKDOWN"
-```
-
-而 `_decision_action` 對 `structure_broken` 的判斷（`:512-518`）發生在 `strong` 計算**之前**，
-命中就直接 `return "AVOID", "EXIT", "Avoid"`。加上 `_pick_primary_zone` 的兩條清單
-（嚴格與 fallback）**都排除 `AT_ZONE`**，primary 只可能是 SUPPORT 或 RESISTANCE，於是：
-
-* SUPPORT ＋ EXPIRED → `BREAKDOWN` → Avoid，**永遠到不了 `strong`**；
-* RESISTANCE → `bearish_setup=True` 且 `bullish_setup=False` → Avoid，同樣到不了。
-
-`_decision_action` 與 `_structure_state` **各只有一個呼叫點**（`decision_engine.py:2402` / `:2388`，
-都在 `build_decision_summary` 內），所以上述窮舉涵蓋全部路徑。
-
-#### 原始分析錯在哪（留作教訓）
-
-1. **只讀了 `strong` 的條件式，沒有往上讀 `structure_broken` 的提前 return。**
-   「條件式裡沒有 X」不等於「X 沒被擋」——守門可以在更早的分支。
-2. **2026-08-21 的「嚴重度上調」也是錯的。** 當時推翻了「confidence 過不了 0.65」的舊推論
-   （那部分確實錯：EXPIRED 是「最近一次觸碰被跌破」而非「很久沒測試」，見 `scoring.py:420`），
-   但**用一個正確的觀察去支撐一個錯誤的結論**——實際上 confidence 拉到 1.0 也照樣 Avoid。
-3. 兩次都是**讀碼推論未經重現**就寫進 issue。這正是「先重現再修法」要防的情形。
-
-#### 剩下的兩件事（這才是本筆的實際範圍）
-
-**1.（文件）`sr-zone-scoring.md`「Legacy action pipeline」第 4 條把守門記在錯的位置。**
-
-原文是：
-
-> 4. 若 primary zone `recent_validation=EXPIRED`：加上近期驗證失效註記，**且不應升級到 `Buy`**。
-
-讀起來像「第 4 步自己會擋」，但第 4 步只加註記；**擋 `Buy` 的是第 5～6 步的
-`structure_broken` / `bearish_setup` 提前 return**。敘述的結論正確、機制錯位——
-正是這個錯位讓原始分析誤判。應改寫成明確指出擋在哪裡。
-
-**2.（迴歸保護）這道守門沒有任何測試釘住，而 T-055 就要動這段。**
-
-`strong` 擋得住，靠的是上游 `_structure_state` 的一行 `EXPIRED → BREAKDOWN`。
-**目前沒有任何測試斷言「EXPIRED primary 不得輸出 Buy」**：
-
-* 若日後有人把 `_structure_state` 改成「跌破後已收回就不算 BREAKDOWN」（合理的演進方向），
-  Buy 路徑會**靜默打開**；
-* T-055 的「F1 連帶後果」正要改 `_decision_action` 的 `strong` 讀哪個 RR，**改的就是這一段**。
-
-這與 [I-074](#i-074t-044-的-rr-解耦只有單元測試層級的證據decision-replay-驗證無法執行)
-記錄的「`test_continuation_only_needs_price_evidence` 無法防守 RR 被加回來」是同一類缺口：
-行為正確，但沒有東西釘住它。
-
-**建議**：把本次重現探針收成永久迴歸測試（`tests/test_decision_engine.py`），
-斷言「EXPIRED primary ＋ 其餘 strong 條件全中 → action 不得為 `Buy`」，**並附對照組**
-（換成 `VALIDATED_RECENTLY` 必須是 `Buy`）。沒有對照組，測試會在 fixture 退化成
-「根本達不到 strong」時假綠。
-
-#### 不做的事
-
-* **不改 `strong` 的條件式。** 行為已正確；加 `recent_validation != EXPIRED` 是重複守門，
-  且會讓「守門在哪」變成兩處，之後更難維護。
-* **不改 `_pick_primary_zone` 的 fallback。** 「沒有合格 zone 時仍要選一個出來」是刻意設計，
-  真正的守門在動作升級那一層，已證明有效。
-
-**與 T-055 的關係**：不再有修法衝突（本筆不動 `strong`）。迴歸測試已於 T-055 之前補完，
-成為 T-055 改 `_decision_action` 時的安全網。
-
-#### 實作結果（2026-08-21）：迴歸測試已補（**第 2 項完成**）
-
-`python/backtest/modular/sr_scoring/tests/test_decision_engine.py` 新增三條：
-
-| 測試 | 作用 |
-|---|---|
-| `test_expired_primary_zone_never_upgrades_to_buy` | 守門本體。EXPIRED primary × {SUPPORT, RESISTANCE} × {TREND_UP, RANGE_BOUND, TREND_DOWN} 六組，斷言 action 不得為 `Buy`（且為 `Avoid`） |
-| `test_expired_guard_control_group_would_otherwise_reach_buy` | **對照組，不可刪**。同一 fixture 只把 EXPIRED 換成 `VALIDATED_RECENTLY` → 必須是 `Buy`，證明其餘五個 `strong` 條件確實達標 |
-| `test_expired_primary_zone_end_to_end_is_not_buy` | 端到端補一刀，並斷言 primary **真的是** EXPIRED（fallback 生效），避免測試空轉 |
-
-**刻意停在 `_decision_action` 這一層**：文件那句「不應升級到 `Buy`」講的就是 legacy action
-pipeline。端到端還會再經 `final_entry_permission` 降級——實測對照組在端到端是
-`Hold` / `WAIT_CONFIRMATION`，用端到端做對照就分不出「被 EXPIRED 擋下」還是「被進場閘降級」。
-
-##### 變異測試：證明這組測試釘得住
-
-把 `_structure_state:2242-2243` 的 `EXPIRED → BREAKDOWN` 兩行移除後重跑：
-
-```
-FAILED test_expired_primary_zone_never_upgrades_to_buy
-AssertionError: EXPIRED primary zone 升級到 Buy（role=SUPPORT global_trend=0.05）——守門失效
-1 failed, 2 passed
-```
-
-**注意端到端那條在變異下仍然綠燈**（`final_entry_permission` 照樣把它降成 `Hold`）。
-所以**只有端到端測試是抓不到這個回歸的**——這正是守門測試要停在 `_decision_action`
-那一層的理由，也說明端到端斷言不能取代單元層斷言。
-
-##### 測試結果
-
-| 範圍 | 結果 |
-|---|---|
-| `test_decision_engine.py` | **78 passed**（原 75，+3） |
-| `python/scripts/test.sh` 全套 | **602 passed / 1 skipped**（原 599 / 1，+3） |
-
-##### 剩餘工作（2026-08-21 定案：由 T-055 承接）
-
-只剩本節第 1 項的**文件改寫**（`sr-zone-scoring.md`「Legacy action pipeline」第 4 條的機制錯位）。
-**由 T-055 一併處理，不單獨動**——它與
-[I-081](#i-081sr-zone-scoringmd-的-legacy-action-pipeline-第-3-條門檻寫--10實作是--15)
-要改的第 3、4 條，正是 T-055 重寫 RR 門檻敘述時會動到的同一段。
-該動作已列進 T-055 的「完成後歸檔」與驗收條件，**T-055 不做完就不算完成**；
-完成後本筆整筆移除。
-
-在那之前本筆維持「修復中」：runtime 行為正確且已有迴歸測試釘住，唯一未結的是文件敘述。
 
 ---
 
@@ -2399,5 +2219,5 @@ primary zone 直接回 `NORMAL`，與 `touched` 無關。
 **三條路都不含「只改名」**——名稱的問題來自「一個名字要涵蓋兩種強度」，
 那要靠 B 拆分狀態解決，換一個字只會把失準的方向調換。
 
-**相關**：[`todo.md`](./todo.md) T-055（RR 語意分層）——同一類問題的另一個面向：
-決策語意的多個數字／狀態並列而未分層。
+**相關**：[`sr-zone-scoring.md`](./sr-zone-scoring.md)「RR 語意分層」（原記於 `todo.md`
+T-055，已收斂）——同一類問題的另一個面向：決策語意的多個數字／狀態並列而未分層。

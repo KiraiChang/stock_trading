@@ -974,3 +974,118 @@ describe('SRZones 決策摘要的兩層壓力呈現', () => {
     expect(screen.queryByText('前方擋路壓力')).toBeNull()
   })
 })
+
+// ── T-055：RR 語意分層的顯示契約 ─────────────────────────────────────────────
+//
+// 用 live 0050（analysis 117）的真實數字：Setup 5.7141、Executable 0.87246、
+// gate 門檻 1.8 未通過。這組數字的重點是**兩個 RR 差 6.5 倍**——
+// 導入前畫面把 5.71 標成「進場 RR」而 gate 用 0.87 擋掉，兩個數字分屬不同區塊、
+// 沒有任何標示說它們同源。
+const RR_0050 = {
+  rr_context: {
+    entry_rr: 5.714110248748037,
+    setup_rr: 5.714110248748037,
+    entry_rr_source: 'PRIMARY_ZONE_STATISTIC',
+    execution_rr: 0.87246030390984,
+    executable_rr: 0.87246030390984,
+    execution_rr_source: 'ENTRY_STOP_TARGET',
+    execution_target: { price: 107.1775, basis: 'FIRST_RESISTANCE_CAP', source: 'nearest_resistance_above_entry' },
+    position_rr: null,
+    position_rr_source: 'UNAVAILABLE',
+    executable_now: true,
+    target_basis: 'FIRST_RESISTANCE_CAP',
+  },
+  rr_gate: {
+    minimum_rr: 1.8,
+    actual_rr: 0.87246030390984,
+    qualified: false,
+    reason_code: 'EXECUTION_RR_INSUFFICIENT',
+    gate_kind: 'PROBE',
+    gate_basis: 'ENTRY_STOP_TARGET',
+    zone_actual_rr: 5.714110248748037,
+    secondary_gate: { gate_kind: 'FULL_ENTRY', minimum_rr: 2, qualified: false },
+  },
+} as unknown as Partial<SRDecisionSummary>
+
+describe('SRZones 的 RR 語意分層（T-055）', () => {
+  it('0050：Setup 5.71 與 Executable 0.87 同時顯示，且 gate 顯示它實際仲裁的 0.87', async () => {
+    await renderWithDecision(decisionSummaryWith(RR_0050))
+
+    // Setup RR：**不得**被稱為「進場 RR」
+    expect(screen.getByTestId('setup-rr').textContent).toContain('5.71')
+    expect(screen.getByTestId('setup-rr-label').textContent).toContain('Setup')
+    expect(screen.queryByText('進場 RR (Entry)')).toBeNull()
+
+    // Executable RR 要有自己的顯示位置
+    expect(screen.getByTestId('executable-rr').textContent).toContain('0.87')
+
+    // gate 顯示的是它**實際仲裁**的數字，不是 setup
+    const gateActual = screen.getByTestId('gate-actual-rr').textContent ?? ''
+    expect(gateActual).toContain('0.87')
+    expect(gateActual).not.toContain('5.71')
+  })
+
+  it('secondary gate 以次要樣式呈現，且標明與主 gate 測同一個 RR', async () => {
+    await renderWithDecision(decisionSummaryWith(RR_0050))
+
+    const secondary = screen.getByTestId('secondary-gate')
+    expect(secondary.textContent).toContain('完整部位門檻')
+    expect(secondary.textContent).toContain('同一個實際 RR')
+    // 不得與主 gate 等權重：主 gate 是卡片、這裡只能是小字說明
+    expect(secondary.tagName.toLowerCase()).toBe('p')
+  })
+
+  it('executable_now=false 時，主顯示不得退回 setup RR', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      ...RR_0050,
+      rr_context: { ...(RR_0050 as any).rr_context, executable_now: false },
+    } as unknown as Partial<SRDecisionSummary>))
+
+    const executable = screen.getByTestId('executable-rr').textContent ?? ''
+    expect(executable).toContain('無法計算')
+    expect(executable).not.toContain('5.71')
+  })
+
+  it('executable RR 不可用時明示原因，不得留白或退回 setup RR', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      rr_context: {
+        entry_rr: 2.4, setup_rr: 2.4, entry_rr_source: 'PRIMARY_ZONE',
+        execution_rr: null, executable_rr: null, execution_target: null,
+        position_rr: null, position_rr_source: 'UNAVAILABLE',
+        executable_now: true, target_basis: 'TARGET_UNAVAILABLE',
+      },
+    } as unknown as Partial<SRDecisionSummary>))
+
+    const executable = screen.getByTestId('executable-rr').textContent ?? ''
+    expect(executable).toContain('無法計算')
+    expect(executable).not.toContain('2.4')
+    expect(screen.getByText(/前方無可量化 target/)).toBeTruthy()
+  })
+
+  it('舊分析缺新欄位時安全降級：沿用 legacy alias，不顯示錯的門檻層級', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      rr_context: {
+        entry_rr: 2.4, entry_rr_source: 'PRIMARY_ZONE',
+        execution_rr: 1.9, position_rr: null, position_rr_source: 'UNAVAILABLE',
+      },
+      rr_gate: { minimum_rr: 1.5, actual_rr: 1.9, qualified: true, reason_code: 'RR_QUALIFIED' },
+    } as unknown as Partial<SRDecisionSummary>))
+
+    // setup_rr / executable_rr 缺席 → 用 legacy alias
+    expect(screen.getByTestId('setup-rr').textContent).toContain('2.4')
+    expect(screen.getByTestId('executable-rr').textContent).toContain('1.9')
+    // gate_kind 缺席 → 中性字樣，不得編一個層級出來
+    expect(screen.queryByTestId('secondary-gate')).toBeNull()
+  })
+
+  it('Primary Zone 卡不得只顯示裸 RR', async () => {
+    await renderWithDecision(decisionSummaryWith({
+      ...RR_0050,
+      primary_zone: zoneSummary(104.44, 105.06, { risk_reward_ratio: 5.714110248748037 }),
+    } as unknown as Partial<SRDecisionSummary>))
+
+    const label = screen.getByTestId('primary-zone-rr').textContent ?? ''
+    expect(label).toContain('Setup RR')
+    expect(label).toContain('5.71')
+  })
+})

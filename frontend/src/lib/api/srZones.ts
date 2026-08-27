@@ -475,14 +475,41 @@ export interface SRConfidenceExplanation {
   context_factors: SRConfidenceFactor[]
 }
 
+/** 兩層具名門檻中的一層（T-055）。`secondary_gate` **刻意不帶 `actual_rr`**——兩層測的是同一個數字。 */
+export interface SRRRSecondaryGate {
+  gate_kind: 'PROBE' | 'FULL_ENTRY' | string
+  minimum_rr: number | null
+  qualified: boolean
+}
+
 export interface SRRRGate {
   minimum_rr: number | null
+  /**
+   * gate **實際仲裁**的 RR。通常是 Executable RR；
+   * ⚠️ **但 `gate_basis === 'ZONE_STATISTIC'` 時它就是 Setup RR**——
+   * 那是限價 entry 且沒有可量化 target 時的保守退路（沿用 setup-RR 判定，不放行）。
+   * 要判斷它是不是可執行 RR，**看 `gate_basis`，不要假設**。
+   */
   actual_rr: number | null
   qualified: boolean
   reason_code: string
+  /**
+   * `actual_rr` 是怎麼算出來的（T-055 起一律輸出，**三值**）：
+   * `ENTRY_STOP_TARGET`（entry/stop/target 算出）、
+   * `MARKET_ENTRY_TARGET_UNAVAILABLE`（市價型但前方無可量化壓力）、
+   * `ZONE_STATISTIC`（來自 zone 歷史統計）。
+   *
+   * ⚠️ **`TARGET_UNAVAILABLE` 不在這個欄位的值域裡**——它是
+   * `rr_context.target_basis` 的值，兩者是不同的軸。
+   */
   gate_basis?: string
+  /** setup RR（zone 歷史統計）。與 `actual_rr` **可以不同**，那正是 T-055 要讓人看見的。 */
   zone_actual_rr?: number | null
   target_known?: boolean
+  /** 這一層 gate 的名稱；主 gate 恆為 `PROBE`。 */
+  gate_kind?: 'PROBE' | 'FULL_ENTRY' | string
+  /** 另一層門檻（完整部位）。以次要樣式呈現，**不得與主 gate 等權重**。 */
+  secondary_gate?: SRRRSecondaryGate | null
 }
 
 export interface SRDataQuality {
@@ -606,11 +633,29 @@ export interface SRFinalEntryPermission {
   reason_codes: string[]
 }
 
+/** Executable RR 的 target 來源（T-055）：entry 前方第一道可量化阻力。 */
+export interface SRExecutionTarget {
+  price: number
+  basis: string
+  source: string
+}
+
 export interface SRRRContext {
+  /**
+   * Setup RR（zone 歷史統計）。
+   * @deprecated 顯示上請用 `setup_rr`；此欄位保留為 legacy alias，兩者恆同值。
+   */
   entry_rr: number | null
+  /** Setup RR 的正式欄位（T-055 新增）。**不是可執行 RR**。 */
+  setup_rr?: number | null
   entry_rr_source: string
+  /** @deprecated 顯示上請用 `executable_rr`；此欄位保留為 alias，兩者恆同值。 */
   execution_rr?: number | null
+  /** 從 `entry_price` 到封頂 target 的實際 RR（T-055 新增）。`null` 代表 target 未知。 */
+  executable_rr?: number | null
   execution_rr_source?: string
+  /** target 封頂的來源；`null` 代表前方沒有可量化阻力。 */
+  execution_target?: SRExecutionTarget | null
   position_rr: number | null
   position_rr_source: string
   entry_price?: number | null

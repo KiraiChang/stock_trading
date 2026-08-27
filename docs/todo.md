@@ -10,7 +10,7 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-065 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列。）
+- **編號只增不重用，`下一個新編號從 T-067 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出，承接 T-055 未完成的 decision replay 驗證。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
@@ -3314,655 +3314,6 @@ A 是唯一「零程式碼、立刻可逆、省下四分之一」的選項。
 
 ---
 
-### T-055：RR 語意分層——Setup RR 與 Executable RR 必須是兩個數字，門檻必須具名分層
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 規劃中（**計畫書第 3 版：已納入 2026-08-21 review R1／R2／R3／R5、同日「裁決前建議」與 F1 定案；契約全部定案、無待決項，尚未實作**） |
-| 優先度 | 中 |
-| 分類 | Python / SR Zone / 決策語意 |
-| 建立日期 | 2026-08-21 |
-| 來源 | live 0050 分析（`analyzed_at=2026-08-20`）出現「Entry RR 1.87R 通過」與「RR 未達完整買進門檻」並存 |
-| 相關 | 壓力分層（原 T-056，**已完成並移出本清單**）——本筆要引用的 `blocking_resistance_zone` 由它落地，欄位分工見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「壓力分層」 |
-
-#### 核實結果：現象屬實，但成因有兩層，且與原始推測不完全相同
-
-live 資料（`stock_sr_decisions`，0050 / 1d / `analyzed_at=2026-08-20T16:00Z`）：
-
-```json
-"rr_gate":    { "actual_rr": 1.8664, "minimum_rr": 1.5, "qualified": true, "reason_code": "RR_QUALIFIED" }
-"risk_notes": [ "風險報酬比未達完整買進門檻，Final Entry 需保守觀察。", ... ]
-"rr_context": { "entry_rr": 1.8664, "execution_rr": 1.8664, "execution_rr_source": "PRIMARY_ZONE",
-                "entry_price": 104.1114, "stop_price": 103.4886, "target_price": 105.2738,
-                "target_basis": "PRIMARY_ZONE_RR", "price_basis": "PRIMARY_SUPPORT_UPPER",
-                "executable_now": false, "entry_executability_reason_code": "ENTRY_ZONE_OVERSHOT" }
-```
-
-##### 2026-08-27 再核實：0050 2026-08-26 已能算出真 Execution RR，但 UI 仍把 Setup RR 當進場 RR
-
-這次以 live `analysis_id=117`／`128` 再驗一次，兩筆的數字相同：
-
-| 欄位 | 值 | 正確語意 |
-|---|---:|---|
-| primary zone `risk_reward_ratio` / `rr_context.entry_rr` | **5.7141R** | **Zone Statistical RR / Setup RR**：由 zone 歷史統計的 expected gain/loss 得出 |
-| `rr_context.execution_rr` | **0.87246R** | **Execution RR**：entry 105.90、stop 104.43575、target 107.1775 的可執行價位比值 |
-| `rr_gate.actual_rr` | **0.87246R** | gate 真正仲裁的數字 |
-| `rr_gate.minimum_rr` | 1.8（117）／1.5（128） | 當次 gate 門檻；兩筆都 `qualified=false` |
-
-資料層這兩筆已經把 statistical 與 execution RR 分開，且 gate 也正確讀 execution RR；
-**目前剩下的直接誤導在 UI**：
-
-* Primary Zone 卡只顯示裸 `RR 5.71R`。
-* RR Context 又把同一個 `entry_rr=5.71R` 標成「進場 RR (Entry)」。
-* 真正的 `execution_rr=0.87R` **在個股決策區塊沒有顯示位置**。
-  （**2026-08-27 收緊措辭**：`execution_rr` 在前端**確實有兩處**——
-  `SRZones.svelte:219` 與 `:1790`——但兩處都在 **evaluation report 的 RR 分布區塊**
-  （中位數／分位數／列數），那是**回測母體統計**，不是個股決策卡。
-  原本寫「沒有顯示位置」過廣，會讓實作者誤以為要從零加欄位而忽略既有的分布區塊；
-  正確範圍是 **RR Context 與 RR Gate 這兩個個股決策區塊**。）
-* RR Gate 只顯示通過與否、最低 RR、reason code，沒有顯示它實際比較的 `actual_rr=0.87R`。
-
-**納入本筆既有前端驗收，不另立 issue**：
-
-1. `entry_rr_source=PRIMARY_ZONE_STATISTIC` 時，`entry_rr` 主標籤必須是
-   **「Zone Statistical RR」或「Setup RR」**，不得稱為「進場 RR」。
-2. **Primary Zone 卡的 `primary_zone.risk_reward_ratio`（`SRZones.svelte:2401`）
-   同樣必須標示為「Zone Statistical RR」／「Setup RR」，不得只顯示裸 `RR`。**
-   （2026-08-27 review 補：現象段已指出這張卡是裸 `RR 5.71R`，但驗收原本只涵蓋
-   `rr_context.entry_rr`——**只修 RR Context 的話，Primary Zone 卡會留著同一個誤導名稱**，
-   而它是使用者最先看到的位置。）0050 fixture 要一併斷言這個標籤。
-3. 同區塊顯示 **Execution RR** 與其 source；不可用時明示 unavailable，不能退回顯示 setup RR。
-4. RR Gate 顯示 `actual_rr`，且視覺上要能確認它與 Execution RR 是同一個值。
-5. 0050 analysis 117 的 UI fixture 必須同時斷言 **5.71R（Setup）**、
-   **0.87R（Execution／Gate actual）** 與 **未通過 1.8R 門檻**，避免只改標題卻仍搬錯欄位。
-6. **不得動到 evaluation report 的 RR 分布區塊**（`SRZones.svelte:219` / `:1790`）——
-   那裡的 `execution_rr` 是母體統計，語意與個股決策卡不同，兩者不要互相搬用。
-
-**資料層數字已於 2026-08-27 重新核對，逐項吻合**（`analysis_id=117` / `128`）：
-`entry_rr` = `5.71411`、`execution_rr` = `gate.actual_rr` = `0.87246`、
-`minimum_rr` = 1.8（117）／1.5（128）、兩筆 `qualified=false`、
-entry `105.90` / stop `104.43575` / target `107.1775`、
-`entry_rr_source = PRIMARY_ZONE_STATISTIC`。UI 四項主張中，
-「Primary Zone 卡裸 `RR`」（`:2401`）、「RR Context 標成進場 RR」（`:2340`）、
-「RR Gate 未顯示 `actual_rr`」（`:2320-2333` 三格只有 qualified／minimum_rr／reason_code）
-三項屬實，第四項的範圍如上收緊。
-
-這個案例不改變 T-055 的既定契約，只補上最新 production 驗收證據；也證明本筆不能
-只處理「舊路徑把 Setup RR 抄成 Execution RR」，還必須處理「新路徑已算對但 UI 沒顯示」的情況。
-
-**成因一：同一個數字被兩套門檻判定（這是「通過 vs 未達門檻」的直接來源）**
-
-| 判定點 | 位置 | 門檻 | 對 1.8664 的結果 |
-|---|---|---|---|
-| `rr_gate` | `decision_engine.py::_rr_gate` → `_minimum_rr` | 動態 **1.5 / 1.8 / 2.0**（依 `entry_action_state` / tier / role；本例 `PROBE_ENTRY` → 1.5） | `qualified=true` |
-| `risk_notes` 階梯 | `decision_engine.py:496-502` | **寫死 1.5 / 2.0** | `1.5 ≤ rr < 2.0` → `RR_BELOW_FULL_ENTRY` |
-
-兩句話各自為真，但讀起來互相矛盾。**注意：就算 `_minimum_rr` 走的是預設 1.8 分支，
-1.8664 仍會同時「通過」與「未達完整買進門檻」**——所以這不是 `PROBE_ENTRY` 特例，是門檻本身有兩套。
-
-**成因二：這條路徑根本沒有真正的 Executable RR（原始推測命中的是這一層）**
-
-`execution_rr` 與 `entry_rr` 完全相同、`execution_rr_source=PRIMARY_ZONE`，因為
-`_rr_context` 只有在 **市價型 entry**（`price_basis ∈ {RECLAIM_CLOSE, CONTINUATION_MARKET_PRICE}`）
-才會走 `NEAREST_RESISTANCE_TARGET` 算真 RR；本例 `price_basis=PRIMARY_SUPPORT_UPPER`，
-落到 `elif entry_rr is not None` 分支，直接**把 setup RR 抄成 execution RR，再反推 target**：
-
-```
-target_price = entry_price + risk × entry_rr = 104.1114 + 0.6228 × 1.8664 = 105.2738
-```
-
-這個 target 是**由 RR 反推出來的產物，不是任何真實價位**，而且它落在
-`entry_blocking_zone` 的壓力區 **105.1862 ~ 110.9983 之內**（超出 0.0876）——
-同一份決策一邊說「前方壓力擋住進場」，一邊把獲利目標設在那道壓力後面。
-
-用同一組已存數字換算，真正可執行的 RR 是（以下為本計畫書的推算，非系統輸出）：
-
-| 情境 | entry | stop | target | RR |
-|---|---|---|---|---|
-| 系統目前顯示 | 104.1114 | 103.4886 | 105.2738（反推） | **1.87** |
-| target 封頂在擋路壓力 | 104.1114 | 103.4886 | 105.1862 | **1.73** |
-| 以現價進場（實際只能這樣） | **104.65** | 103.4886 | 105.1862 | **0.46** |
-
-`executable_now=false` / `ENTRY_ZONE_OVERSHOT` 已正確指出「104.1114 進不去了」，
-但畫面上的 RR 仍是用那個進不去的價位算的。**系統的擋單決策是對的，錯的是它展示的數字。**
-
-#### 修改目標
-
-1. **門檻具名分層（R1 修正，原「收斂成一套」作廢）**：不是把所有判斷折成 `_minimum_rr()` 一個值——
-   那會吃掉 Full Entry 語意。改成兩個**具名**門檻，各自有明確受眾：
-
-   | 門檻 | 目前值 | 用途 | 對應現況 |
-   |---|---|---|---|
-   | `probe_min_rr` | `_minimum_rr()`（1.5 / 1.8 / 2.0，依 state / tier / role） | 這次提議的動作能不能放行 | `rr_gate.minimum_rr` |
-   | `full_entry_min_rr` | 2.0 | 夠不夠格做完整部位 | ladder 的 `< 2.0` 與 `strong` 的 `rr >= 2.0` |
-
-   **為什麼 0050 會踩到**：2.0 在 `_minimum_rr()` 只出現在 Tier-1／Resistance 分支
-   （`decision_engine.py:1204-1207`）。Tier-1 zone 的 gate 與 full entry 剛好同值，折成一個不會出事；
-   0050 的 primary 是 **TIER_3 support**，gate 1.5（PROBE_ENTRY）而 full entry 2.0，**兩者必然分岔**。
-
-   **定案（2026-08-21 裁決）**：保留兩個 gate，`rr_gate` 加 `gate_kind`；
-   前端主顯示一個 authoritative gate，輔助顯示另一個。
-
-   ```jsonc
-   "rr_gate": {
-     "gate_kind":   "PROBE",                 // 只有 PROBE / FULL_ENTRY 兩值，見 F1 定案
-     "minimum_rr":  1.5,                     // 這一層的門檻
-     "actual_rr":   1.7257,                  // 被測試的 RR（封頂後的 executable_rr）
-     "gate_basis":  "ENTRY_STOP_TARGET",     // actual_rr 是怎麼算出來的，見 F1 定案
-     "qualified":   true,
-     "reason_code": "RR_QUALIFIED",
-     "zone_actual_rr": 1.8664,               // setup RR，保留供對照（既有欄位）
-     "secondary_gate": { "gate_kind": "FULL_ENTRY", "minimum_rr": 2.0, "qualified": false }
-   }
-   ```
-
-   **兩層 gate 測的是同一個 `actual_rr`，只有門檻不同**——這正是讓「通過」與「未達門檻」
-   不再矛盾的關鍵性質，所以 `secondary_gate` **不帶自己的 `actual_rr`**。
-
-   * `probe_min_rr` / `full_entry_min_rr` 是**內部命名與文件術語**，不是對外欄位名；
-     對外要能看出的是「目前用哪個 gate 仲裁」與「另一層 gate 的狀態」。
-   * `risk_notes` 的 `RR_BELOW_FULL_ENTRY` **保留原名**（既有測試以 reason code 驅動，見
-     `test_decision_engine.py:543-553`），但語意綁定到 `secondary_gate`。
-   * 前端主卡只顯示 authoritative `rr_gate`，`secondary_gate` 以小字或次要列呈現，
-     **不放兩張等權重卡片**——等權重會製造新的矛盾感，正是本筆要消滅的東西。
-
-   **驗收語意**：修完後「通過」與「未達門檻」仍可並存，但**必須各自標明是哪個 gate**；
-   不得出現不指明 gate 的裸「通過」。
-2. **Executable RR 在所有 entry 路徑都要是真的**：zone 限價路徑也要有 target 來源，
-   不得用 RR 反推 target；沒有可量化 target 時明確輸出 unknown
-   （`gate_basis=TARGET_UNAVAILABLE` ＋ `rr_formula_available=false`，語意沿用既有的
-   `MARKET_ENTRY_TARGET_UNAVAILABLE`，見 F1 定案的值域相容處置），而不是抄 setup RR。
-3. **target 不得穿越擋路壓力**：`target_price` 需與 `entry_blocking_zone` 一致，
-   封頂在擋路壓力的 `price_low`。
-4. **`executable_now=false` 時，RR 顯示要跟著失效**：不可用進不去的價位算出的 RR 當主顯示。
-
-#### 不做的範圍
-
-* **不改 `_minimum_rr()` 的 1.5 / 1.8 / 2.0 分級本身**，也**不改 `strong` 的 `rr >= 2.0`**——
-  兩者都是既有調校結果。本筆只替它們命名並讓對外顯示指明是哪一個，不動數值。
-* **不改 `entry_blocking_zone` 的擋單門檻**（`max(zone_width×0.5, price×0.005)`，見
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)）。
-* 不改 `position_rr` 維持 `null` 的設計（SR Zone 不讀持倉成本）。
-* **不把 `SUPPORT_RETEST_HELD` / `RESISTANCE_BREAKOUT` 接進 Decision**——見下方共同約束。
-
-#### 受影響檔案與資料流
-
-```
-decision_engine.py::_decision_action:496-502        ← 門檻具名分層（成因一）
-decision_engine.py::_rr_context:1237-1330           ← Executable RR 與 target 來源（成因二）
-decision_engine.py::_execution_rr_gate:1332         ← 解除「只有市價型才算」的限制
-decision_engine.py::_nearest_resistance_above_entry:1388  ← target 候選來源之一
-decision_engine.py::_entry_blocking_zone_detail:1935 ← target 封頂來源（唯讀，不改門檻）
-        ↓ decision_summary.rr_context / rr_gate / risk_notes
-backend/internal/analysis/client.go → stock_sr_decisions.rr_context_json / rr_gate_json
-        ↓
-frontend/src/lib/api/srZones.ts（型別）→ SRZones.svelte:2309-2340（RR Gate ＋ RR 區塊）
-```
-
-**target 封頂的 arbitration（R2 補充，實作前必須定案）**
-
-現況：`_rr_context()` 的簽章是 `(primary_zone, position_zone, entry_executability, defense_lines,
-target_zone)`——**沒有 `entry_blocking_zone` 參數**，呼叫端只傳
-`target_zone=_nearest_resistance_above_entry(...)`（`decision_engine.py:2481-2489`）。
-
-**但呼叫順序已經是對的**：`entry_blocking_zone = _entry_blocking_zone_detail(...)` 在 **2434** 就算完，
-`_rr_context(...)` 在 **2481** 才呼叫。所以不需要重排流程，只要把已算好的值傳進去——
-這降低了本項的實作風險。
-
-**定案（2026-08-21 裁決）**：target 取**所有前方壓力中最低的可用 `price_low`**；
-`blocked=false` 時也封頂；由**呼叫端先算好 `execution_target` 再傳入** `_rr_context()`。
-
-| 問題 | 定案 |
-|---|---|
-| target 原始來源 | candidates = `_nearest_resistance_above_entry()` ∪ `entry_blocking_zone.blocking_zone` ∪ `blocking_resistance_zone`（後兩者共用 `_blocking_resistance_zone`，恆指同一個 zone） |
-| 過濾條件 | 只納入 `price_low > entry_price` 的 candidate |
-| 衝突時誰優先 | **取最低 `price_low`**——Executable RR 問的是「entry 到第一道可量化前方阻力還有多少空間」，target 不得穿越任何前方壓力 |
-| `blocked=false` 但前方仍有 resistance | **仍封頂**。`blocked` 只代表「近到足以擋單」，不代表「可以把 target 設在更後面的壓力」 |
-| 傳參方式 | `_rr_context()` **不自己找 zone**；呼叫端算好 `execution_target` 物件再傳入 |
-
-```jsonc
-"execution_target": { "price": 105.1862, "basis": "FIRST_RESISTANCE_CAP", "source": "blocking_resistance_zone" }
-```
-
-**實作風險比預期低——正確的值早就算出來了，只是被丟掉。** 對 0050 這筆用
-`entry_price=104.1114` 跑 `_nearest_resistance_above_entry()`：符合「`price_low > entry_price`
-＋非 EXPIRED ＋非 LOW confidence」的 resistance 只有 **105.19~111.00**（105.1862）與
-**107.18~107.82**（107.1775），取最近者即 **105.1862**——**正是定案要的 cap**。
-它在 `:2485` 已經被算出來當 `target_zone` 傳進 `_rr_context()`，
-卻因為 `market_price_entry=false` 而**整個分支沒被執行**，最後走 `PRIMARY_ZONE_RR` 反推出 105.2738。
-所以主要工作是「讓非市價路徑也用這個值」，不是新建一套選擇邏輯。
-
-**前置相依已解除且已完成**：結構／擋路壓力採 `blocking_resistance_zone`。該欄位已由原 T-056
-（壓力分層）於 2026-08-24 完成並歸檔，Python／Go 投影／API 展開／前端皆已落地，**本筆可直接引用**。
-語意與選法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「壓力分層」——特別注意它**沒有 tier 過濾**，
-不保證是結構性壓力。
-
-#### 契約變化（**定案：方案 C 折衷，2026-08-21 裁決**）
-
-不一次移除 `entry_rr` / `execution_rr`——歷史資料、evaluation 統計與前端都已消費它們。
-
-| 欄位 | 處置 |
-|---|---|
-| `rr_context.entry_rr` | **保留**，文件改標為 setup RR 的 legacy alias |
-| `rr_context.setup_rr` | **新增**，語意＝zone 歷史統計 RR（與 `entry_rr` 同值） |
-| `rr_context.executable_rr` | **新增**，語意＝從 `entry_price` 到封頂 target 的實際 RR |
-| `rr_context.execution_rr` | **保留**為 `executable_rr` 的 alias，**一版後再評估 deprecate** |
-| `rr_context.execution_target` | **新增**（`price` / `basis` / `source`），見上方 arbitration |
-| `rr_gate.gate_kind` | **新增**：`PROBE` / `FULL_ENTRY`（**只有兩值**，見 F1 定案） |
-| `rr_gate.secondary_gate` | **新增**：另一層 gate 的 `gate_kind` / `minimum_rr` / `qualified`（**不含 `actual_rr`**） |
-| `rr_gate.gate_basis` | **既有欄位，改為一律輸出**，值域擴為三值（見 F1 定案） |
-| ~~`rr_gate.actual_rr_source`~~ | **不新增**——與 `gate_basis` 一對一重複，見 F1 定案 |
-| `rr_gate.zone_actual_rr` | **既有欄位保留**，語意＝`setup_rr`；改為一律輸出 |
-
-沿用既有語意不變的部分：`target_known=false` 時 `actual_rr=null` 但 **`qualified=true`**
-（target 未知 ≠ RR 不合格，見 `_execution_rr_gate:1344-1352` 與 `sr-zone-scoring.md`），
-`position_rr` 維持 `null`。
-
-#### 風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| **會改變決策輸出** | target 封頂會讓 RR 普遍下修，被擋掉的樣本變多——方向偏保守，但仍需 decision replay 前後比對 |
-| `execution_rr` 語意改變破壞既有 evaluation 統計 | `execution_rr_distribution` 的歷史值不可跨版本比較，report 需帶 `pipeline_version` |
-| 舊分析沒有新欄位 | 前端沿用「缺欄位安全降級」慣例（見 `sr-zone-scoring.md`） |
-| 回滾 | 純 Python 決策層改動，無 migration；回滾＝還原 `decision_engine.py` |
-
-#### 測試與驗證
-
-1. 單元測試（`python/scripts/test.sh backtest/modular/sr_scoring/tests/test_decision_engine.py`）：
-   * **迴歸案例直接用 0050 這組數字**（rr=1.8664 / probe min=1.5 / full entry min=2.0）：
-     `rr_gate.gate_kind="PROBE"` 且 `qualified=true`，同時
-     `rr_gate.secondary_gate={gate_kind:"FULL_ENTRY", minimum_rr:2.0, qualified:false}`；
-     `RR_BELOW_FULL_ENTRY` 仍可出現，但**不得出現不指明 gate 的裸「通過」**。
-   * `execution_target` 對 0050 必須是 **105.1862**（`basis=FIRST_RESISTANCE_CAP`），
-     而非現況反推的 105.2738；對應 `executable_rr` ≈ **1.726**。
-   * `blocked=false` 但前方仍有 `price_low > entry_price` 的 resistance 時，target 仍須封頂。
-   * `price_basis=PRIMARY_SUPPORT_UPPER` 時 `execution_rr` 不得等於 `entry_rr`（除非兩者本來就相等且 target 為真實價位）。
-   * `target_price` 不得 ≥ `entry_blocking_zone.blocking_zone.price_low`。
-   * `executable_now=false` 時 `rr_gate.actual_rr` 的處置需有明確斷言。
-   * **F1 契約**：`gate_kind` 值域只有 `PROBE` / `FULL_ENTRY`（出現 `EXECUTION` 即失敗）；
-     `gate_basis` 一律輸出且僅三值；`secondary_gate` **不得**含 `actual_rr`；
-     **不得**存在 `actual_rr_source` 欄位。
-   * **F1 迴歸保護**：`reason_code` 值域不得變動；特別斷言
-     `_final_entry_risk_notes` 對 `EXECUTION_RR_UNAVAILABLE` 的比對仍成立（`:602`）、
-     `_final_entry_permission` 對 `qualified` 的判斷仍成立（`:848`）。
-   * **F1 連帶後果**：`strong` 與 `secondary_gate` 必須讀同一個 `actual_rr`——
-     建構一組 `executable_rr < 2.0 ≤ setup_rr` 的 fixture，斷言
-     **不會同時出現 `action=Buy` 與 `secondary_gate.qualified=false`**。
-2. **前端測試（R3 補充，原計畫缺漏）**——`frontend/src/routes/SRZones.test.ts`：
-   * `executable_now=false` 時，主顯示 RR **不得**使用 setup／`entry_rr`；
-   * `execution_rr` 有值時要顯示 executable RR 及其 `execution_rr_source` / `gate_basis`；
-   * RR Gate 卡片必須同時顯示 `actual_rr` 與 `gate_kind`，且
-     `secondary_gate` 以次要樣式呈現（不得等權重）；
-   * `execution_rr` 為 unknown 時要明確顯示 unknown／target unavailable，不得留白或退回 setup RR；
-   * 舊分析缺新欄位時安全降級（沿用既有慣例）。
-
-   **為什麼一定要有這條**：現行 `SRZones.svelte:2326-2340` 的 RR 區塊只有「進場 RR (Entry)」
-   （`entry_rr`）與「持股 RR (Position)」（`position_rr`），**`execution_rr` 根本沒有顯示位置**。
-   後端就算修出正確的 executable RR，畫面仍會繼續把 setup RR 當主 RR——等於白修。
-
-   另一個現況問題一併處理：`rr_gate` 區塊（`:2309-2324`）顯示 `qualified` / `minimum_rr` /
-   `reason_code`，但**不顯示 `actual_rr`**。所以使用者看到的「1.87」來自 RR 區塊、「通過」來自
-   Gate 區塊，**兩個數字分屬不同區塊、沒有任何標示說它們同源**——這放大了本筆要修的矛盾感。
-3. decision replay（`POST /sr-scoring/evaluate`，`decision_replay=true`）比對改動前後
-   `by_rr_gate` / `by_rr_gate_reason_code` / `by_entry_executability` 分佈。
-4. **驗收一律走 dev compose**，不得用 live 做測試資料。
-
-#### 完成後歸檔
-
-`docs/sr-zone-scoring.md`：更新「`rr_context` 將新進場 RR 與既有部位 RR 拆開」與
-「`rr_gate` 是 final/execution gate 的對外結果」兩段，補上 Setup／Executable 的定義、
-target 封頂規則，以及 `probe_min_rr` / `full_entry_min_rr` 兩層具名門檻的定義與顯示規則；
-並補上 F1 定案的兩個正交軸（`gate_kind` 門檻層 / `gate_basis` RR 推導方式）與
-`MARKET_ENTRY_TARGET_UNAVAILABLE` → `TARGET_UNAVAILABLE` 的值域遷移說明。
-
-**本筆同時負責關閉 I-081 與 I-082 的文件項（2026-08-21 定，非選配）。** 兩者要改的
-「Legacy action pipeline」第 3、4 條，正好是本筆重寫 RR 門檻敘述時會動到的同一段——
-分兩次改等於同一段寫兩遍，且中間那版必然又對不上實作。
-
-| Issue | T-055 必須完成的文件動作 | 完成後 |
-|---|---|---|
-| **I-081** | 第 3 條的 `risk_reward_ratio < 1.0` 改成正確門檻。**不是把 1.0 改成 1.5 了事**——本筆會把門檻改成 `probe_min_rr` / `full_entry_min_rr` 兩層，該條要照新語意整條重寫 | I-081 整筆可移除 |
-| **I-082** | 第 4 條改寫：EXPIRED 的 `Buy` 守門**不在第 4 步**，而在第 5～6 步的 `structure_broken` / `bearish_setup` 提前 return（`_structure_state:2242` 的 `EXPIRED → BREAKDOWN`）。敘述要指明擋在哪裡 | I-082 整筆可移除（迴歸測試已於 2026-08-21 先行補完） |
-
-**T-055 的驗收條件因此多一條**：`sr-zone-scoring.md`「Legacy action pipeline」第 3、4 條
-與實作一致，且 I-081 / I-082 可同步結案。漏掉這一條就不算完成。
-
-**review 通過後才把本筆從 todo.md 移除。**（R5 的兩筆搬移已於 2026-08-21 完成，
-即 I-081 / I-082 的建立，不再是移除時的待辦。）
-
-#### 核實過程中的附帶發現（**R5 已結案：2026-08-21 搬入 `docs/issue.md`**）
-
-兩筆都已建立 issue 條目，本筆不再保留內文，避免 `docs/todo.md` 變成 issue 暫存區：
-
-| Issue | 內容 | 與本筆的關係 |
-|---|---|---|
-| [`issue.md`](./issue.md) **I-081** | `sr-zone-scoring.md` legacy action pipeline 第 3 條門檻寫 `< 1.0`，實作是 `< 1.5`（`decision_engine.py:499` 與 `:516`） | **已定案由本筆一併改**（2026-08-21）：本筆會把該段整條重寫成兩層具名門檻，見「完成後歸檔」 |
-| [`issue.md`](./issue.md) **I-082** | ~~EXPIRED 的 primary zone 仍可能升級到 `Buy`~~ → **2026-08-21 重現實驗推翻**：行為正確，守門在 `_structure_state:2242`（`EXPIRED → BREAKDOWN`）而非 `strong`。剩下的只有文件錯位與缺迴歸保護 | **修法衝突已解除**（本筆不動 `strong`）。迴歸測試「EXPIRED primary 不得輸出 `Buy`」**已於 2026-08-21 先行補完**（3 條測試＋變異驗證），是本筆改 `_decision_action` 時的安全網。**剩下的文件改寫已定案由本筆一併處理**，見「完成後歸檔」 |
-
-**I-082 的兩次判斷都被推翻，過程留在該筆**：先是誤判「`strong` 沒排除 EXPIRED 所以會發 Buy」，
-接著又錯誤地把嚴重度上調。實際窮舉（SUPPORT／RESISTANCE × 三種 regime ＋ 對照組）顯示
-**EXPIRED primary 走不到 `strong`**：SUPPORT 被 `structure_broken` 提前 return 擋下、
-RESISTANCE 被 `bearish_setup` 擋下，而兩條 `_pick_primary_zone` 清單都排除 `AT_ZONE`。
-嚴重度已由「中」下修為「低」，範圍縮小為**文件改寫 ＋ 補迴歸測試**。詳見 I-082。
-
----
-
-#### 原始 Review findings（2026-08-21，**已由第 2／3 版處理，保留作決策沿革**）
-
-> **本區塊（`原始 Review findings` 到 `裁決納入紀錄`）原為 T-055／T-056 共同的 review 沿革。
-> T-056 已於 2026-08-24 完成、review 通過並歸檔，整筆移出本清單**，現況規格見
-> [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「壓力分層：tactical / blocking / structural
-> 是三個不同欄位」。本區塊自此**只服務仍在規劃中的 T-055**；文中所有 T-056 字樣都是當時的
-> 決策沿革，`tactical_resistance_zone` / `blocking_resistance_zone` 的**現行契約以
-> `sr-zone-scoring.md` 為準**，不要回頭找已移除的 T-056 小節。
-
-> 文件核實補記（2026-08-21）：本節是原始 review findings，
-> R1～R5 已於下方「Review 回應」與「裁決納入紀錄」全數處理並回寫進計畫本文。
-> 本節與「裁決前建議」**只作決策沿革**，被第 3 版覆寫的欄位值已逐處加註。
-> **實作一律以 T-055／T-056 本文的契約表與「裁決納入紀錄」（第 3 版）為準**，
-> 不要拿本節或「裁決前建議」當實作契約。
-
-以下是 T-055 / T-056 計畫書 review 當時的待修正點。這些 findings 在當時修完前，
-兩筆都還不應進入實作；目前處理狀態以後續「Review 回應」與「裁決納入紀錄」為準。
-
-**R1.（P1）T-055 把「唯一門檻」直接等同 `_minimum_rr()`，會吃掉 Full Entry 語意。**
-
-目前計畫寫 `risk_notes` 階梯改讀 `_minimum_rr()` 的同一個值，讓「通過」與「未達門檻」在數學上
-不可能同時成立。但 `_minimum_rr()` 回的是**當前 gate 門檻**：`PROBE_ENTRY=1.5`、
-Tier-1／Resistance 為 `2.0`、其他為 `1.8`。如果 0050 這筆是 probe gate，`1.8664`
-通過 probe 是合理的；同時未達 full-size entry 也可能是合理語意。
-
-計畫應改成「**一套具名門檻／語意**」，而不是把所有判斷都折成 `_minimum_rr()` 一個值。實作前
-至少要定義清楚：
-
-* `probe_min_rr` 與 `full_entry_min_rr` 是否是兩個具名門檻；
-* `rr_gate.minimum_rr` 指的是哪個 gate；
-* `risk_notes` 要用哪個 gate 產生哪個 reason code；
-* 前端要顯示「Probe 通過但 Full Entry 未通過」還是只顯示一個主 gate。
-
-否則修完會把原本合理的「只允許試單，不是完整部位」語意消掉。
-
-**R2.（P2）T-055 的 target 封頂資料流還沒定義完整。**
-
-計畫要求 `target_price` 不得穿越 `entry_blocking_zone`，要封頂在
-`entry_blocking_zone.blocking_zone.price_low`。但目前受影響資料流只列 `_rr_context()` 與
-`_nearest_resistance_above_entry()`；現行 `_rr_context()` 沒拿 `entry_blocking_zone` 參數，
-呼叫端也只傳 `target_zone=_nearest_resistance_above_entry(...)`。
-
-實作前要補上 arbitration：
-
-* target 原始來源是 `nearest_resistance_above_entry`、`entry_blocking_zone`，還是 T-056 定義出的
-  structural／blocking zone；
-* 當「最近可當目標的 tactical resistance」與「擋路 structural resistance」不同時，誰優先；
-* `entry_blocking_zone.blocked=false` 但前方仍有 resistance 時是否封頂；
-* 要把 `entry_blocking_zone` 傳進 `_rr_context()`，還是呼叫端先算好 capped target 再傳入。
-
-**R3.（P2）T-055 缺前端驗收，可能修完後畫面仍顯示錯的 RR。**
-
-計畫目標寫 `executable_now=false` 時 RR 顯示要跟著失效，但測試策略只有 Python 單元測試與
-decision replay。現行前端 RR 區塊只顯示 `entry_rr` 與 `position_rr`，沒有主顯示
-`execution_rr`。也就是說後端即使修出正確 executable RR，畫面仍可能繼續把 setup RR 當主 RR。
-
-測試策略應補 `frontend/src/routes/SRZones.test.ts`：
-
-* 不可執行時主顯示不得使用 setup／entry RR；
-* `execution_rr` 有值時要顯示 executable RR 與 source／gate_basis；
-* `execution_rr` unknown 時要明確顯示 unknown／target unavailable；
-* 舊分析缺新欄位時要安全降級。
-
-**R4.（P3）T-056 的 affected data flow 有一個不存在／不精準的落點。**
-
-計畫寫 `decision_engine.py::_zone_summaries / _price_path`，但 Python 端目前沒有 `_zone_summaries`
-函式。實際資料流是 `build_decision_summary` 產生 top-level `nearest_*` /
-`primary_structural_zone`，Go 的 `buildDecisionZoneSummariesJSON()` 再把這些欄位投影進
-`stock_sr_decisions.zone_summaries_json`。
-
-請把 T-056 的受影響檔案與資料流改成精準落點，避免實作時找錯抽象層。
-
-**R5.（P3）附帶發現已判定屬 issue，但尚未進 `docs/issue.md`。**
-
-T-055 的「核實過程中的附帶發現」已寫明兩筆都是文件與實作不一致，依規則應進
-`docs/issue.md`。若本次只是計畫書草案，短暫留在 T-055 內可以接受；若要提交，應同步建立 issue
-或明確標成「待 review 後搬移」，避免 `docs/todo.md` 變成 issue 暫存區。
-
-##### 再核實 findings（2026-08-21）
-
-**F3.（P3）文件一致性修正（原記於 `issue.md` I-083，已於 2026-08-24 收斂移除）的補記本身
-仍有小型殘字，容易讓歷史區塊讀起來不乾淨。**
-
-`原始 Review findings` 的補記已經說「實作一律以 T-055／T-056 本文契約表與
-裁決納入紀錄（第 3 版）為準」，但下一行又重複寫「不要直接引用本節或『建議裁決』作為
-實作契約，應以 T-055/T-056 本文契約表與『裁決納入紀錄』為準」。這段有三個小問題：
-
-* 同一個「以第 3 版為準」語意重複兩次；
-* `不要直接引用` 被硬斷行，讀起來像殘留拼接；
-* `建議裁決` 已改名為 `裁決前建議`，但這裡與下方「仍未定案」收斂句仍保留舊標題。
-
-建議後續修正時把補記收成一句，統一稱呼 `裁決前建議`，並刪掉重複的
-「以契約表與裁決納入紀錄為準」句子。
-
-**處理結果（2026-08-21）：三項全部核實成立，已修正。**
-
-成因是該次文件一致性修正的**字串替換只匹配到句子前半**，把原句尾巴留在原地，
-接出「不要直接引用 ／ 本節或『建議裁決』作為實作契約，應以…為準」這段拼接殘句——
-所以三個小問題其實是同一個成因的三種表徵。
-
-| 子項 | 處置 |
-|---|---|
-| 語意重複兩次 | 補記末句收成一句：「**不要拿本節或「裁決前建議」當實作契約**」，刪掉重複的「應以…為準」 |
-| 硬斷行拼接殘字 | 殘句整段移除，補記現為五行完整句 |
-| 舊標題 `建議裁決` | todo.md 內四處全部改為 `裁決前建議`：補記、「仍未定案」收斂句、T-055／T-056 兩個狀態欄（後兩處加引號，明示是小節名而非泛稱） |
-
-**命名慣例（2026-08-21 定，避免再漂移）**：本區段內文引用小節時，
-**引號內只寫小節名本身**（`原始 Review findings` / `再核實 findings` / `Review 回應` /
-`裁決前建議` / `裁決納入紀錄`），**不帶日期與版次**；需要標示版次時寫在引號外，
-例如「裁決納入紀錄」（第 3 版）。小節標題本身統一為 `小節名（日期，版次）`。
-這樣標題補日期或改版次時，內文引用不會跟著失效。
-
-**這條命名慣例已歸檔**到 [`development-workflow.md`](./development-workflow.md)
-「文件收斂規則」，本節保留作沿革。原本承載這件事的 `issue.md` I-083 已於 2026-08-24
-review 通過後整筆收斂移除。
-
-
-#### Review 回應（2026-08-21，第 2 版）
-
-> **本節記錄的是第 2 版的處理狀態**：當時 R1／R2 只把問題列成「待定案表」，尚未定案。
-> 那些待定案項目已於**第 3 版全數關閉**（見下方「裁決前建議」與「裁決納入紀錄」）。
-> 表格內「四個待定案問題」一類的描述屬當時狀態，**不是現況**。
-
-五項 findings **全部核實成立**，計畫已據此修改。逐項對照：
-
-| # | 核實結果 | 計畫變更 |
-|---|---|---|
-| **R1** | **成立，且比 finding 更尖銳**。`2.0` 在三處同時出現：`_minimum_rr()` 的 Tier-1／Resistance 分支（`:1204-1207`）、ladder 的 `< 2.0`（`:501`）、`strong` 的 `rr >= 2.0`（`:524`）。Tier-1 zone 的 gate 與 full entry 剛好同值，折成一個看不出問題；**0050 的 primary 是 TIER_3 support，gate 1.5 而 full entry 2.0，必然分岔**——原方案會在這裡吃掉 Full Entry 語意 | 標題「門檻也必須只有一套」→「**門檻必須具名分層**」；修改目標第 1 條整條重寫為 `probe_min_rr` / `full_entry_min_rr` 兩層具名門檻＋四個待定案問題；不做範圍補上「`strong` 的 2.0 也不動」 |
-| **R2** | **成立**。`_rr_context()` 簽章確實沒有 `entry_blocking_zone`，呼叫端只傳 `target_zone=_nearest_resistance_above_entry(...)`（`:2481-2489`）。**另查到一個 finding 未提、對計畫有利的事實**：`_entry_blocking_zone_detail` 在 `:2434` 就算完，`_rr_context` 在 `:2481` 才呼叫——**呼叫順序已經是對的**，不需重排流程 | 受影響資料流補上精確行號；新增「target 封頂的 arbitration」小節，把 review 的四個問題逐條列成待定案表；標注與 T-056 的順序相依 |
-| **R3** | **成立**。`SRZones.svelte:2326-2340` 的 RR 區塊只有 `entry_rr` 與 `position_rr`，`execution_rr` 沒有顯示位置。**另查到**：`rr_gate` 區塊（`:2309-2324`）顯示 `qualified` / `minimum_rr` / `reason_code` 但**不顯示 `actual_rr`**——所以「1.87」與「通過」分屬兩個區塊、沒有任何標示說它們同源，這正是矛盾感被放大的原因 | 測試與驗證新增第 2 條前端測試（四個斷言），並把 `rr_gate` 缺 `actual_rr` 一併納入本筆處理範圍 |
-| **R4** | **成立**。Python 端**沒有** `_zone_summaries` 函式；是 `build_decision_summary()`（`:2331`）在 `:2637-2655` 直接組 top-level 欄位，`zone_summaries_json` 這個集合概念只存在於 Go 的 `buildDecisionZoneSummariesJSON()`（`client.go:807-832`）。原計畫另把 `_price_path` 與 summary 併在一行也不精準——兩者是不同來源 | T-056 受影響資料流整段重寫為精準落點，並加註修正說明 |
-| **R5** | **成立** | 第 2 版標為待搬移；**2026-08-21 已結案**——兩筆搬入 `docs/issue.md` 成為 **I-081** / **I-082**，T-055 內只留指標表 |
-
-**~~仍未定案、需要你裁決的項目~~ → 已於下方「裁決前建議」全數關閉，並回寫進兩筆計畫本文（第 3 版）。**
-
-1. ~~R1：門檻命名／`gate_kind`／前端顯示幾個 gate~~ → 定案見 T-055 修改目標第 1 條。
-2. ~~R2：target 來源／優先順序／`blocked=false` 是否封頂／傳參方式~~ → 定案見 T-055「target 封頂的 arbitration」。
-3. ~~契約命名 A/B/C 與「結構壓力」指哪一個 zone~~ → T-055 採 C、T-056 採 B+C，見兩筆的「契約變化」。
-
-**相依關係更新**：原本「若 target 來源選 (c) 則 T-056 必須先定案」的**不確定性已解除**——
-結構／擋路壓力確定採 `blocking_resistance_zone`。但**實作順序不變**：
-`blocking_resistance_zone` 欄位要先在 T-056 落地，T-055 才能引用它當 target cap。
-
-##### 裁決前建議（2026-08-21，**已由第 3 版裁決修正，保留作決策沿革**）
-
-> 文件核實補記（2026-08-21）：本節保留裁決前建議，已被下方「裁決納入紀錄」（第 3 版）修正。
-> 其中 `gate_kind=EXECUTION` 與新增 `actual_rr_source` 兩點已被第 3 版否決，逐處已加註。
-> 實作時以 T-055 本文契約表與第 3 版裁決為準。
-
-以下是對上方三組未定案問題的裁決前建議方向；第 3 版已採用其中方向並修正部分欄位契約，
-本節保留作決策沿革，實作時不要直接採用未經第 3 版覆寫的欄位值。
-
-1. **R1：保留兩個 gate，`rr_gate` 加 `gate_kind`；前端主顯示一個 authoritative gate，
-   輔助顯示另一個 gate。**
-
-   不建議把「唯一門檻」解讀成只有 `_minimum_rr()` 一個數字。0050 這類情境應表達成
-   「Probe RR 通過，但 Full Entry 未通過」，而不是把其中一句消掉。建議 contract：
-
-   * ~~`rr_gate.gate_kind`：`PROBE` / `FULL_ENTRY` / `EXECUTION`~~
-     → **已被第 3 版否決**：`EXECUTION` 是 RR 來源不是門檻層，值域收斂為
-     `PROBE` / `FULL_ENTRY`，執行性資訊改由 `gate_basis` 承載（見 F1 定案「偏離 1」）；
-   * `rr_gate.minimum_rr`：目前實際仲裁用的門檻；
-   * `rr_gate.actual_rr`：目前實際仲裁用的 RR；
-   * `rr_gate.secondary_gate`：另一層 gate，例如
-     `{ "gate_kind": "FULL_ENTRY", "minimum_rr": 2.0, "qualified": false }`。
-
-   `probe_min_rr` / `full_entry_min_rr` 可作為內部命名或文件術語；對外回應重點是能看出
-   「目前用哪個 gate 仲裁」與「另一層 gate 的狀態」。前端主卡只顯示 `rr_gate` 這個
-   authoritative gate，旁邊用小字或次要列顯示 `secondary_gate`，避免同時放兩張等權重卡片造成
-   新的矛盾感。
-
-2. **R2：target 取所有前方壓力中的最低可用 `price_low`；`blocked=false` 時也封頂；
-   呼叫端先算好 `execution_target` 再傳入 `_rr_context()`。**
-
-   Executable RR 問的是「從 entry 到第一道可量化前方阻力還有多少空間」，所以 target 不得穿越
-   任何前方壓力。建議 arbitration：
-
-   * candidates 包含 `_nearest_resistance_above_entry()`、`entry_blocking_zone.blocking_zone`，
-     以及 T-056 定義出的 `blocking_resistance_zone`；
-   * 只納入 `price_low > entry_price` 的 candidate；
-   * target = 最低 `price_low`；
-   * `entry_blocking_zone.blocked=false` 仍要封頂，因為「沒有近到足以擋單」不等於
-     「可以把 target 設在更後面的壓力」；
-   * `_rr_context()` 不自己找 zone。呼叫端先算 `execution_target`，例如
-     `{ "price": 105.1862, "basis": "FIRST_RESISTANCE_CAP", "source": "blocking_resistance_zone" }`，
-     再交給 `_rr_context()` 算 RR。
-
-   這會讓 RR 普遍下修，方向偏保守；必須用 decision replay 檢查 `by_rr_gate`、
-   `by_rr_gate_reason_code`、`by_entry_executability` 與 final entry 分佈。
-
-3. **T-055 契約命名採折衷 C：保留舊欄位作 alias，新增語意清楚的新欄位。**
-
-   不建議一次移除 `entry_rr` / `execution_rr`，因為歷史資料、evaluation 與前端都已消費它們。
-   建議：
-
-   * 保留 `entry_rr`，文件改成 setup RR alias；
-   * 新增 `setup_rr`；
-   * 新增 `executable_rr`；
-   * 保留 `execution_rr` 作 `executable_rr` alias，一版後再評估是否 deprecate；
-   * ~~`rr_gate` 補 `actual_rr_source`~~ → **已被第 3 版否決**：與 `gate_basis` 一對一重複，
-     不新增（見 F1 定案「偏離 2」）；`gate_kind` / `gate_basis` 照補。
-
-4. **T-056 契約命名採 B + C：新增清楚欄位，同時保留 legacy alias。**
-
-   建議新增：
-
-   * `tactical_resistance_zone`：品質加權後最相關的戰術壓力；
-   * `blocking_resistance_zone`：第一道前方擋路壓力，供顯示與 executable RR target cap 使用。
-
-   `nearest_resistance_zone` 暫時保留為 `tactical_resistance_zone` 的 legacy alias，文件標明
-   「不是價格最近」。~~`structural_resistance_zone` 不要直接等同 `primary_structural_zone`~~
-   → **第 3 版收得更緊：`structural_resistance_zone` 直接不建立**（比本建議更嚴格，
-   理由見 T-056 契約表）。原文如下：`structural_resistance_zone` 不要直接等同 `primary_structural_zone`，
-   除非先確認語意；目前 `primary_structural_zone` 是 Tier-1 品質最高的結構參考，
-   `entry_blocking_zone.blocking_zone` 是最近擋路壓力，兩者不保證相同。
-
-   「結構壓力」在交易顯示與 RR 計算裡建議採 `blocking_resistance_zone`，不是
-   `primary_structural_zone`。後者保留為大結構參考；executable RR 與進場擋路應看第一道
-   前方壓力，也就是 blocking / nearest-by-price。
-
-
-##### 裁決納入紀錄（2026-08-21，第 3 版）
-
-四項裁決**全數採用並回寫進計畫本文**，本節只記錄「納入時另外查到、需要在實作前關掉」的兩個旗標。
-
-**F1（P1）→ 已定案（2026-08-21）：兩個正交軸，`actual_rr_source` 不新增。**
-
-`gate_basis` **已經存在**於 `_execution_rr_gate`（`decision_engine.py:1332-1362`），
-現有值是 `ENTRY_STOP_TARGET` 與 `MARKET_ENTRY_TARGET_UNAVAILABLE`。定案如下：
-
-| 欄位 | 回答的問題 | 值域 | 正交性 |
-|---|---|---|---|
-| `gate_kind` | **這一層 gate 在問什麼**（門檻層） | `PROBE` / `FULL_ENTRY` | 只跟門檻有關，與 RR 怎麼來的無關 |
-| `gate_basis` | **`actual_rr` 是怎麼算出來的**（推導方式） | `ENTRY_STOP_TARGET` / `PRIMARY_ZONE_STATISTIC` / `TARGET_UNAVAILABLE` | 只跟 RR 來源有關，與門檻無關 |
-
-**⚠ 本定案偏離裁決原文兩處，理由如下（依 CLAUDE.md 需明確回報差異）：**
-
-**偏離 1：`gate_kind` 拿掉 `EXECUTION`，只留 `PROBE` / `FULL_ENTRY`。**
-`EXECUTION` 描述的是「這個 RR 是用執行價位算的」，那是 **RR 的來源**，不是**門檻層**。
-把它放進 `gate_kind` 會讓該欄位同時承載兩個軸——正是本計畫要消滅的「同名不同義」。
-執行性資訊改由 `gate_basis=ENTRY_STOP_TARGET` 承載。
-
-**偏離 2：不新增 `actual_rr_source`。**
-它與 `gate_basis` 是一對一映射（`EXECUTABLE_RR ⟺ ENTRY_STOP_TARGET`、
-`SETUP_RR ⟺ PRIMARY_ZONE_STATISTIC`、`無 ⟺ TARGET_UNAVAILABLE`），
-同時輸出就是在修「同名不同義」的計畫裡再造一組「**異名同義**」。
-保留既有的 `gate_basis`（已被 evaluation 的 `by_rr_gate_reason_code` 一類統計消費），
-不新造欄位。
-
-**值域相容處置**：`MARKET_ENTRY_TARGET_UNAVAILABLE` 泛化為 `TARGET_UNAVAILABLE`
-——T-055 後所有路徑都會算 target，`MARKET_ENTRY_` 前綴會變成謊話。
-舊值標為 legacy、**改動後不再產生**；前端與 evaluation 需在一個版本內把兩者視為同一桶，
-report 以 `pipeline_version` 區隔，不得跨版本混計。
-
-**明確不動的部分（避免有人順手「整理」而弄壞）**：
-
-* `reason_code` 的既有值域（`RR_QUALIFIED` / `RR_INSUFFICIENT` / `EXECUTION_RR_INSUFFICIENT` /
-  `EXECUTION_RR_UNAVAILABLE` / `RR_UNAVAILABLE` / `NO_PRIMARY_ZONE`）**一律不動**。
-  `_final_entry_permission:848` 讀 `qualified`、`_final_entry_risk_notes:602` 逐字比對
-  `"EXECUTION_RR_UNAVAILABLE"`——改了會靜默改變 final entry 行為。
-  新資訊由 `gate_kind` / `gate_basis` 承載，不靠改 reason code。
-* `target_known=false` 時 `actual_rr=null` 但 **`qualified=true`** 的語意不變。
-
-**連帶後果（必須一併處理，否則會產生新的自相矛盾）**：
-若 `full_entry_min_rr` 改成對 `executable_rr` 判定，則 `_decision_action` 的 `strong`
-（`decision_engine.py:520-527`）也必須讀**同一個** `actual_rr`，否則
-`action=Buy` 可能與 `secondary_gate.qualified=false` 並存——又是一組矛盾。
-**`strong` 的門檻值 2.0 仍不動**（不做範圍），改的只是它讀哪個 RR。
-`executable_rr ≤ setup_rr` 通常成立，所以方向偏保守，**必須用 decision replay 佐證**
-`by_rr_gate` 與 final entry 分佈的變化幅度。
-
-**F2（P2）`blocking_resistance_zone` 不保證是結構性的，UI 標籤不可寫「結構壓力」。**
-
-裁決把「結構壓力」在交易顯示與 RR 計算裡定為 `blocking_resistance_zone`。但它的來源
-`_entry_blocking_zone_detail`（`:1935-1955`）的過濾條件只有「role=RESISTANCE ＋ 非 EXPIRED ＋
-`price_high >= current_price`」，**沒有任何 tier 條件**——所以第一道擋路壓力完全可能是 Tier-3 短期壓力。
-
-0050 這筆它剛好是 Tier-1 主結構，屬巧合。若把 UI 標籤寫成「結構壓力」，
-遇到 Tier-3 擋路時就會出現「標著結構壓力的短期壓力」——與本筆要修的錯配同一類。
-**已在 T-056 契約表寫入標籤警告：UI 用「前方擋路壓力」，不用「結構壓力」。**
-
-**F1 已定案（含兩處偏離裁決原文的說明），F2 的標籤用詞已寫進 T-056 契約表。**
-兩者都不改變裁決的方向，只是把欄位分工與用詞收斂到不會再造成同名／異名混淆的程度。
-T-055 / T-056 的契約至此**全部定案，無待決項**；剩下的是實作與 replay 佐證。
-
----
-
-#### T-055 實作約束：`SUPPORT_RETEST_HELD` 與 `RESISTANCE_BREAKOUT` 維持只寫不讀
-
-（原為 T-055／T-056 共同約束；T-056 已完成且**未**接入這兩個事件，約束對它已驗收通過。）
-
-**本筆計畫不得順手把這兩個事件接進 Decision。**
-
-核實現況（2026-08-21）：隔離是完整且顯式的。
-
-| 層 | 機制 | 位置 |
-|---|---|---|
-| Python 事件桶 | `decision_visible=False`，`build_event_state_summary` 只收 visible | `event_engine.py:104-118, 499-516` |
-| Python 決策 | `is_decision_visible` 過濾 | `decision_engine.py:1794, 2296` |
-| Python 截斷 | `_truncate_events` 優先保留 visible，shadow 事件擠不掉正式事件 | `event_engine.py:314-330` |
-| Go carry-forward | `eventDecisionVisible` 跳過 | `backend/internal/api/handler/sr_zones.go:400-403` |
-| 持久化 | `event_instances.decision_visible`（migration 071） | — |
-
-**注意型別名**：事件型別是 `SUPPORT_RETEST_HELD`（family 才是 `SUPPORT_RETEST`）與
-`RESISTANCE_BREAKOUT`（family 與型別同名）。
-
-**接 Decision 的前提，不是單日行情看起來吻合**，而是母體累積後的驗證通過
-（見 [T-052](#t-052定期對-watchlist-產生-sr-zone-分析分析排程) 的累積、
-[T-049](#t-049market-state-與所有下游改讀同一套-state) 的 state 收斂）。
-`RESISTANCE_BREAKOUT` 的 `resolves` 刻意留空、方向為 BULLISH——一旦可見，
-`active_bullish_events` 只看 direction 就會改變 lifecycle 判讀，**不需要任何人「認識」它就會改決策**
-（見 `event_engine.py:61-72` 的說明）。這是它必須留在 shadow 的技術理由，與今天行情走勢無關。
-
----
-
 ### T-058：除權息端點無法在 test 以外覆寫，dev 驗不了公司行動同步
 
 | 欄位 | 內容 |
@@ -4046,79 +3397,6 @@ SR Zone Scoring 排程說明段。）
 **不做的理由 / 風險**：動 `Scheduler` 的相依型別屬於排程修改，照 CLAUDE.md 要先有
 計畫書；而且 `sr_zone_verify` 是無條件註冊、每個交易日都會跑的 job，重構失手的代價
 是整支排程靜默失效。優先度低是因為這段邏輯本身很久沒變過，不是因為它不重要。
-
----
-
-### T-063：兩筆已收斂修改的部署後驗證與資料分界補登
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 進行中（T-062 那半可在下一次排程執行後立即完成） |
-| 優先度 | 中（不補的話，主題文件裡會留下一個「待填」的分界，且兩筆修改都沒有 production 證據） |
-| 分類 | 驗證 / 部署 / 文件 |
-| 建立日期 | 2026-08-26 |
-| 來源 | I-093 收斂後的 review——**待執行的驗證只寫在主題文件內文裡，沒有任何清單追蹤** |
-
-#### 為什麼需要這一筆
-
-`issue.md` I-093 與 `todo.md` T-062 都已 review 通過並收斂移除，但兩者的
-**「尚未做的驗證」都隨著條目一起消失**，只剩 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-的內文寫著「上線後把實際的分界補在這裡」——那不是清單，沒有人會回頭看。
-
-**這筆不是缺陷追蹤，所以放 `todo.md` 不放 `issue.md`**：程式面的問題已經修完也驗過
-（單元測試 ＋ 負向對照），剩下的是**部署後才做得到的事實登錄**。條目生命週期看 review，
-資料語意看部署——兩者本來就該分開追蹤。
-
-#### 目前的部署狀態（2026-08-26 盤點）
-
-| 修改 | live（2026-08-25 18:13 部署）| 驗證方式 |
-|---|---|---|
-| I-090 啟動回收孤兒 | ✅ 已上線且**已命中**（回收 `job_runs` id 1826） | 已完成，無待辦 |
-| T-062 跳過已有當日 K 棒 | ✅ **已上線**（binary 含 `attempted` 欄位與「今日 K 棒查詢失敗」降級訊息） | ⬜ 見下方 A |
-| I-093 `nearest_tier3` | ❌ **未上線**（python-server 的 `decision_engine.py` 無此常數） | ⬜ 見下方 B |
-
-#### A. T-062：量一次實際節省（可立即做）
-
-已經上線，所以**下一次 `evaluation_universe_sync`（平日 16:00）跑完就能驗**：
-
-* 看 log 的 `evaluation universe sync done`，確認欄位是 `pool` / `attempted` / `skipped` / `failed`。
-* 對照：2026-08-25 16:21 那輪（舊版）是 135 檔全量、耗時 **27 分鐘**（`job_runs` id 1827）。
-  新版當日若已有部分標的被 `daily_close` 補過，`skipped` 應 > 0、耗時等比下降。
-* 確認 `job_runs.symbols_total` 仍是 **135**（池大小），不是 `attempted`。
-
-**完成後**：把實測數字補進 [`architecture.md`](./architecture.md) 的日 K 維護段，
-取代目前只有 dev 環境數據的敘述。
-
-#### B. I-093：部署後補資料分界（需先部署）
-
-* 部署帶有 `TACTICAL_SOURCE_FALLBACK` 的 python-server。
-* 確認 production 真的產出 `source = "nearest_tier3"` 的列：
-
-  ```sql
-  SELECT symbol, decision_summary->'defense_lines'->'tactical'->>'source' AS src
-  FROM stock_sr_zone_analyses WHERE created_at >= '<部署時間>';
-  ```
-
-* **用 2026-08-25 `5490` 的形狀複驗**：當日該檔唯一的 zone 範圍事件是 3 筆
-  `RESISTANCE_BREAKOUT`（全部 `decision_visible=false`），舊版把 tactical 標成
-  `recent_microstructure`。新版遇到同樣形狀應標 `nearest_tier3`。
-* **把實際分界（部署時間或版本）補進** [`sr-zone-scoring.md`](./sr-zone-scoring.md)
-  的「事件的決策可見性」段，取代目前的「部署前產出的資料無法區分」佔位敘述。
-
-#### 完成條件
-
-A 與 B 都完成、兩份主題文件的待填處都補上實測數字之後，整筆移除。
-**只完成 A 不能移除**——B 是這筆存在的主要理由。
-
-**移除前必須先反轉依賴**（與本檔使用說明的通則相同，這裡列出具體位置）：
-
-| 位置 | 移除 T-063 前要做的事 |
-|---|---|
-| [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」的 blockquote | **刪掉整則引言**（它具名指向 T-063，留著就是斷鏈），並把上方「分界是部署時間，不是日曆日期」那段改寫成**實際分界**（部署時間或版本）＋ production 佐證 |
-| [`architecture.md`](./architecture.md) 日 K 維護段 | 把 dev 數據換成 A 項量到的 live 實測值後，該段不再有待填處，無需指回本筆 |
-
-檢查方式就是本檔使用說明那條 `rg` 指令：收斂後輸出裡的 `T-063` **必須只剩
-「原記於…，已收斂」形式的歷史引用**，不能有任何具名的活指標。
 
 ---
 
@@ -4219,3 +3497,190 @@ grep 到 `"RECOVERY"` 不代表 `structureStateText` 的那三個 key 還活著�
 
 **順帶一提**：`BREAKDOWN` 與 `SUPPORT_RECLAIM_INVALIDATED` 這兩個**產得出來但至今沒出現過**
 的值，其 label 兩邊是一致的，不在本筆的漂移範圍內。
+
+---
+
+### T-065：進場強度判定仍讀 setup RR，與 execution gate 反方向矛盾
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中高（會產出**無法診斷**的 `BLOCKED`：兩層 gate 都通過、RR 11.0，卻禁止進場且沒有任何欄位說明理由） |
+| 分類 | Python / SR Zone / 決策語意 / 資料契約 |
+| 發現日期 | 2026-08-27 |
+| 來源 | 原記於 `todo.md` T-055 第三輪 review 的 F1 裁決（T-055 已於 2026-08-27 收斂）——封頂做法只涵蓋單向，反向由本筆承接。現況說明見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「已知的單向性」 |
+
+#### 成因：封頂是單調遞減運算
+
+現行實作在 `secondary_gate` 不合格時把 `decision_derived_view.semantic_pipeline`
+與 `final_entry_permission` **一起封頂**到 `PROBE_ALLOWED`。那解決的是
+**高估**：`setup_rr ≥ 2.0 > executable_rr`，畫面說 Buy 但 gate 說不夠。
+
+**封頂只能降不能升**，所以反方向完全碰不到：`executable_rr` 高於 `setup_rr` 時，
+判定在更上游就提前 return 了，下游拿不到控制權。
+
+#### 重現（2026-08-27，`_summary` 的 CONTINUATION fixture，support TIER_3、壓力放 122.0）
+
+| `setup_rr` | `rr_gate` | `semantic` / `final` | `action` | `risk_notes` |
+|---|---|---|---|---|
+| 1.4 | `qualified=True` `secondary=True` **`actual_rr=11.0`** | **`BLOCKED`** | `Hold` | 「主交易區風險報酬比不足。」＋「Final Entry 禁止進場…」 |
+| 1.7 | 同上 | **`BLOCKED`** | `Hold` | **只有**「Final Entry 禁止進場…」 |
+| 2.8（對照組） | `actual_rr=2.429` | `ENTRY_ALLOWED` | `BuySmall` | 正常 |
+
+`setup_rr=1.7` 那列最嚴重：**BLOCKED 但沒有任何欄位解釋為什麼**——
+`rr_gate` 顯示 11.0 兩層皆過，`risk_notes` 也沒提 RR。使用者與 API 消費者都無從診斷。
+
+#### 三處要改的上游提前 return
+
+| 位置 | 現況 | 問題 |
+|---|---|---|
+| `decision_engine.py:519` | `if rr is None or rr < 1.5: return "WATCH"` | `rr` 是 setup RR。setup 1.4 / executable 11.0 → 直接 WATCH ＋「風險報酬比不足」 |
+| `decision_engine.py:1042` | `elif not rr_qualified: entry_permission_state = "BLOCKED"` | `rr_gate` 是**更早的 setup-RR gate**。setup 1.7 < TIER_3 的 1.8 → BLOCKED |
+| `decision_engine.py:527` | `strong` 的 `rr >= 2.0` | 同樣讀 setup RR，方向 B 會少發 Buy |
+
+`constructive` 不看 rr，不在範圍內。
+
+#### 真正的工作：解資料流的環
+
+```
+execution gate ──需要──> entry_executability ──需要──> decision_derived_view ──需要──> execution gate
+```
+
+`_execution_target` 要 `entry_price`（來自 `entry_executability`），而 derived view
+只要 `rr_qualified` 一個布林。看起來可以兩階段（先用 setup gate 建 derived view 供
+executability 用，算出 execution gate 後重建 derived view），**但重建時
+`entry_executability` 不會跟著重算**——那正是殘留的來源。要真正一致，得處理這個定點問題
+或重新設計相依方向。
+
+⚠️ 這會同時動到 `_decision_action`、`_decision_semantic_pipeline`、`_entry_executability`
+三個 authoritative 欄位的產生路徑，屬 CLAUDE.md 的**大規模／高影響異動**，
+**實作前要先寫計畫書**，不能直接改。
+
+#### 驗收準則
+
+* 上表 `setup_rr=1.4` 與 `1.7` 兩組必須輸出與 `rr_gate` 一致的結果，
+  且 `BLOCKED` 時必須有欄位指明理由。
+* `setup_rr=2.8` 對照組行為不得改變。
+* 既有的封頂測試（`test_full_entry_gate_caps_authoritative_permission_end_to_end`
+  與其對照組）必須續存並通過——本筆是**擴充**單向為雙向，不是取代。
+
+#### 沿革：本筆是怎麼分出來的
+
+單向封頂原記於 `todo.md` T-055（已於 2026-08-27 收斂）。該筆的 F1 條目原本要求
+「`strong` 與 `secondary_gate` 讀同一個 `actual_rr`」，那是**雙向**不變式的一種實作手段；
+2026-08-27 裁決把範圍收在單向封頂，雙向一致轉由本筆承接。
+**本筆不阻擋既有的單向封頂**——它已獨立驗收通過。
+
+現況（含單向性的長期說明、實測形狀與端到端測試）在
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「RR 語意分層／已知的單向性」。
+**動手前先讀那一節**，本節只保留分家的理由。
+
+---
+
+### T-066：補跑 RR 語意分層（原 T-055）的 decision replay 前後比對
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃（**前置未滿足：dev 沒有 model bundle**） |
+| 優先度 | 中（RR 分層已上版控且行為有測試釘住，缺的是分佈影響的實測證據） |
+| 分類 | 驗證 / Python / SR Zone / 決策語意 |
+| 建立日期 | 2026-08-27 |
+| 來源 | T-055 收斂時未完成的驗收第 3 項——**條目移除後這件事會沒有清單追蹤**（同 T-063 的教訓） |
+
+#### 要驗什麼
+
+T-055 把 executable RR 的 target 改成「entry 前方第一道壓力封頂」，預期讓 RR 普遍下修、
+被擋掉的樣本變多。**這個幅度至今沒有量過**，只有單元／端到端測試證明行為正確。
+
+比對 `POST /sr-scoring/evaluate`（`decision_replay=true`）的三個分佈：
+`by_rr_gate` / `by_rr_gate_reason_code` / `by_entry_executability`。
+
+#### ⚠️ 那 84 筆**不是**合格的 before
+
+dev `stock_sr_decisions` 現有 84 筆確實是改動前的產物，分佈已擷取備查（見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「分佈影響尚未 decision replay 驗證」）。
+**但它不能拿來跟新跑的 replay 直接相減**：
+
+| 面向 | 那 84 筆 | 新跑的 replay |
+|---|---|---|
+| symbols | 當時累積下來的，未受控 | 本次指定的清單 |
+| as-of dates | 當時的分析日 | 本次 replay 的取樣列 |
+| 模型 | 當時的 bundle（或根本沒有） | 本次新訓練的 bundle |
+| 設定 | 當時的 `replay_max_rows` 等 | 本次的參數 |
+
+四項都不同，**樣本差異會被誤讀成 T-055 的因果影響**——而那正是這一筆要量的東西。
+所以那 84 筆只能當**描述性參考**（「改動前大致長這樣」），
+**不得寫成前後因果比較**，也不得用它算「被擋掉的樣本多了幾 %」。
+
+⚠️ **更根本的一點：`stock_sr_decisions` 根本不是 replay cohort 的來源。**
+decision replay 是拿 OHLCV **重算**決策（見下一節），不讀既有的 `stock_sr_decisions`。
+所以那 84 筆與新 replay 連「同一個母體的前後兩次觀察」都談不上——
+它們是兩組不同東西，不只是取樣不同。
+
+#### 唯一合格的做法：同一 cohort 跑兩次
+
+**先搞清楚 cohort 是什麼決定的**：`_decision_replay_rows`（`evaluation.py:1393`）的 as-of
+完全來自傳進去的 OHLCV DataFrame——`_candidate_bar_range` 取
+`[min_history_bars, len(df) - forward_bars - 1]`，再由
+`window_start = max(first_idx, last_idx - quota + 1)` 取**尾端** quota 根。
+**window 錨在資料尾端**，所以來源多一根 K 棒，整段 as-of 就位移。
+
+before 與 after 必須是**同一組輸入**，只差在程式碼版本：
+
+| 必須固定 | 為什麼 | 怎麼核對 |
+|---|---|---|
+| **OHLCV source snapshot**（含 `symbols`） | as-of 是 df 尾端；多一根 K 棒 window 就位移 | `replay_plan` 逐檔比 `candle_count` / `candidate_bars` / `start_as_of` / `end_as_of` |
+| **`dataset_config`**：`min_history_bars`、`forward_bars_support` / `forward_bars_resistance` | 直接決定 `_candidate_bar_range` 的頭尾 | `replay_plan` 已帶 `min_history_bars` / `forward_bars` |
+| **`replay_max_rows`** | 決定 `quota_by_symbol` → `window_start`（見「Decision Replay 的取樣規則」） | `replay_coverage.quota_by_symbol` |
+| **chip-score ／ model-governance context snapshot** | `_load_db_replay_chip_context` / `_load_db_replay_model_governance_context` 依 `[dataset_from, dataset_to]` **當下從 DB 撈**，DB 內容變了輸入就變 | `outcome_summary` 的 `rows_with_non_missing_chip` / `rows_with_model_governance` |
+| **model bundle** | 同一個 `model_path`，**不得各訓練一次** | `model_metadata` |
+| **`builder_config`** | zone 建構參數會改變 zone 本身 | 兩次設定相同 |
+
+⚠️ **凍結來源資料是前置動作，不是注意事項**：兩次 replay 之間
+**不得再匯入或補任何 K 棒**（含 `daily_close`、`evaluation_universe_sync`），
+也不得重跑籌碼或模型治理同步。做不到就先把 dev 的相關排程停掉。
+
+**before 怎麼取得**：T-055 的實作 commit 的 **parent** 就是乾淨的改動前基準，
+用 `git worktree` 取出該 commit 跑一次即可，**不需要手動回退檔案**。
+
+⚠️ **若最後無法重跑舊版**（例如環境湊不出同一個 bundle），本筆的產出就只能標成
+**描述性參考**，並在 `sr-zone-scoring.md` 明寫「未經因果驗證」——
+**不得**在任何文件裡把它敘述成 T-055 的前後影響。
+
+#### 為什麼現在跑不了（2026-08-27 實測）
+
+端點成功回應、產出 200 列 replay rows，但：
+
+```
+decision_replay_available: false
+decision_fields_available: false
+model_available:           false      ← 根因
+by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
+```
+
+`evaluation.py` 的 `if bundle is not None` 讓整段 `build_decision_summary(...)` 從未被執行，
+`rr_gate` / `entry_executability` / `final_entry_state` 全是 `None`。
+與 [`issue.md`](./issue.md) **I-074** 同一類阻塞（那筆缺 production 分析資料，這裡缺 dev 模型）。
+
+#### 前置步驟
+
+1. 在 dev 跑 `POST /sr-scoring/train` 產生 model bundle。
+2. ⚠️ **需要一個記憶體窗口，且需先徵得同意**：本機 host 只有 2GiB，起 dev python-server
+   之後只剩約 400MB available，LightGBM 訓練會再往上衝。依
+   [`development-workflow.md`](./development-workflow.md)「本機同時只留一組 stack」，
+   **應先停掉 live stack 再做**——停 live 不能自作主張。
+3. 訓練完再跑一次 evaluate，比對三個分佈。
+
+#### 完成條件
+
+1. **同一 replay cohort 跑兩次**（上表六項輸入全部固定，只差程式碼版本），
+   三個分佈都有實測數字。
+2. 報告要保留**兩次**的 `replay_plan`、`replay_coverage.quota_by_symbol`，以及
+   `rows_with_non_missing_chip` / `rows_with_model_governance` 兩個 context 覆蓋計數，
+   並**逐檔核對相同**——這是 cohort 一致的證據。**只貼分佈數字不算完成。**
+3. 結果寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分佈影響尚未 decision replay 驗證」
+   那一節，改寫成實測結論並移除「尚未驗證」的措辭。
+4. 若走了上面的降級路徑（無法重跑舊版），第 3 步改成寫入**描述性參考 ＋ 未經因果驗證**的
+   說明，且本筆**不視為完成**，狀態改為「擱置」並記下缺什麼。
+
+**驗收一律走 dev compose**，不得用 live 做測試資料。

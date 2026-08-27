@@ -22,6 +22,7 @@
     listSRRegressionResults,
     derivedReasonLabel,
     type SRZoneAnalysis,
+  type SRRRContext,
     type SRZone,
     type SRZoneSummaryItem,
     type ZoneTier,
@@ -593,6 +594,56 @@
   const regimePrimaryText: Record<string, string> = {
     TREND_UP: '偏多趨勢', TREND_DOWN: '偏空趨勢', RANGE_BOUND: '區間盤',
   }
+  // ── T-055：RR 語意分層的顯示規則 ────────────────────────────────────────
+  //
+  // 三個數字必須在畫面上分得開，否則會出現「5.71R 通過 1.8R 門檻」這種讀法：
+  //   Setup RR       zone 歷史統計（rr_context.setup_rr / primary_zone.risk_reward_ratio）
+  //   Executable RR  entry→封頂 target 的實際 RR（rr_context.executable_rr）
+  //   Gate actual_rr gate 真正仲裁的數字（＝ Executable RR，或 fallback 時的 Setup RR）
+  const gateKindTextMap: Record<string, string> = {
+    PROBE: '試單門檻',
+    FULL_ENTRY: '完整部位門檻',
+  }
+  function gateKindText(kind: string | undefined): string {
+    if (!kind) return '門檻'   // 舊分析沒有這個欄位 → 安全降級，不顯示錯的層級
+    return gateKindTextMap[kind] ?? kind
+  }
+
+  const gateBasisTextMap: Record<string, string> = {
+    ENTRY_STOP_TARGET: '由 entry／stop／target 計算',
+    MARKET_ENTRY_TARGET_UNAVAILABLE: '市價進場但前方無可量化壓力',
+    TARGET_UNAVAILABLE: '無可量化 target',
+    ZONE_STATISTIC: '來自 zone 歷史統計（非可執行 RR）',
+  }
+  function gateBasisText(basis: string | undefined): string {
+    if (!basis) return '—'
+    return gateBasisTextMap[basis] ?? basis
+  }
+
+  const targetBasisTextMap: Record<string, string> = {
+    FIRST_RESISTANCE_CAP: '前方第一道阻力封頂',
+    MARKET_ENTRY_TARGET_UNAVAILABLE: '市價進場但前方無可量化壓力',
+    TARGET_UNAVAILABLE: '前方無可量化 target',
+  }
+  function targetBasisText(basis: string | undefined): string {
+    if (!basis) return 'target 未知'
+    return targetBasisTextMap[basis] ?? basis
+  }
+
+  // `entry_rr_source=PRIMARY_ZONE_STATISTIC` 時**不得**叫「進場 RR」（T-055 驗收 1）。
+  function setupRRLabel(source: string | undefined): string {
+    return source === 'PRIMARY_ZONE_STATISTIC' ? 'Zone Statistical RR (Setup)' : 'Setup RR'
+  }
+
+  // **`executable_now=false` 時不得用 setup RR 當主顯示**（T-055 驗收：R3 第 1 條）。
+  // 進不去的價位算出來的 RR 不能拿來當「可執行」。
+  function executableRR(ctx: SRRRContext | undefined): number | null {
+    if (!ctx) return null
+    if (ctx.executable_now === false) return null
+    const value = ctx.executable_rr ?? ctx.execution_rr ?? null
+    return value ?? null
+  }
+
   const structureStateText: Record<string, string> = {
     NORMAL: '結構正常',
     RECOVERY_CANDIDATE: '短線測試支撐',
@@ -2318,10 +2369,19 @@
             {/if}
 
             {#if decisionSummary.rr_gate}
-              <div class="grid sm:grid-cols-3 gap-3 mb-4 text-xs">
+              <!-- T-055：gate 必須顯示它**實際仲裁的數字**與**是哪一層門檻**。
+                   導入前只有「通過/未通過 + 最低 RR + reason code」，
+                   使用者看到的 RR 數字來自另一個區塊，兩者沒有任何標示說它們同源——
+                   那正是「5.71R 通過 1.8R 門檻」這種誤讀的來源。 -->
+              <div class="grid sm:grid-cols-4 gap-3 mb-2 text-xs">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
-                  <p class="text-muted mb-1">RR Gate</p>
+                  <p class="text-muted mb-1">RR Gate（{gateKindText(decisionSummary.rr_gate.gate_kind)}）</p>
                   <p class="{decisionSummary.rr_gate.qualified ? 'text-rise' : 'text-yellow-300'} font-semibold">{decisionSummary.rr_gate.qualified ? '通過' : '未通過'}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <p class="text-muted mb-1">實際 RR (Gate)</p>
+                  <p class="text-white font-mono" data-testid="gate-actual-rr">{fmtRatio(decisionSummary.rr_gate.actual_rr)}</p>
+                  <p class="text-muted mt-1">{gateBasisText(decisionSummary.rr_gate.gate_basis)}</p>
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">最低 RR</p>
@@ -2332,14 +2392,39 @@
                   <p class="text-white font-mono break-words">{decisionSummary.rr_gate.reason_code}</p>
                 </div>
               </div>
+              {#if decisionSummary.rr_gate.secondary_gate}
+                <!-- **次要樣式，不與主 gate 等權重**：兩張等權重卡片會製造新的矛盾感，
+                     正是本筆要消滅的東西。兩層測的是同一個 actual_rr，只有門檻不同。 -->
+                <p class="text-muted text-[11px] mb-4" data-testid="secondary-gate">
+                  另一層門檻（{gateKindText(decisionSummary.rr_gate.secondary_gate.gate_kind)}）：
+                  最低 {fmtRatio(decisionSummary.rr_gate.secondary_gate.minimum_rr)}·
+                  {decisionSummary.rr_gate.secondary_gate.qualified ? '通過' : '未通過'}
+                  <span class="text-muted/70">（與上方測同一個實際 RR，只有門檻不同）</span>
+                </p>
+              {:else}
+                <div class="mb-4"></div>
+              {/if}
             {/if}
 
             {#if decisionSummary.rr_context}
-              <div class="grid sm:grid-cols-2 gap-3 mb-4 text-xs">
+              <div class="grid sm:grid-cols-3 gap-3 mb-4 text-xs">
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
-                  <p class="text-muted mb-1">進場 RR (Entry)</p>
-                  <p class="text-white font-mono">{fmtRatio(decisionSummary.rr_context.entry_rr)}</p>
+                  <!-- T-055：`entry_rr_source=PRIMARY_ZONE_STATISTIC` 時**不得**稱為「進場 RR」——
+                       它是 zone 歷史統計，不是這次能執行的 RR。 -->
+                  <p class="text-muted mb-1" data-testid="setup-rr-label">{setupRRLabel(decisionSummary.rr_context.entry_rr_source)}</p>
+                  <p class="text-white font-mono" data-testid="setup-rr">{fmtRatio(decisionSummary.rr_context.setup_rr ?? decisionSummary.rr_context.entry_rr)}</p>
                   <p class="text-muted mt-1">{decisionSummary.rr_context.entry_rr_source}</p>
+                </div>
+                <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
+                  <!-- **不可用時明示 unavailable，不得退回顯示 setup RR**（T-055 驗收 3）。 -->
+                  <p class="text-muted mb-1">可執行 RR (Executable)</p>
+                  {#if executableRR(decisionSummary.rr_context) !== null}
+                    <p class="text-white font-mono" data-testid="executable-rr">{fmtRatio(executableRR(decisionSummary.rr_context))}</p>
+                    <p class="text-muted mt-1">{decisionSummary.rr_context.execution_rr_source ?? '—'}</p>
+                  {:else}
+                    <p class="text-yellow-300 font-mono" data-testid="executable-rr">無法計算</p>
+                    <p class="text-muted mt-1">{targetBasisText(decisionSummary.rr_context.target_basis)}</p>
+                  {/if}
                 </div>
                 <div class="border border-border/70 rounded-lg p-3 bg-panel/50">
                   <p class="text-muted mb-1">持股 RR (Position)</p>
@@ -2398,7 +2483,9 @@
                     <span class="text-muted">區間辨識信心 {decisionSummary.confidence_explanation?.label ?? '—'}</span>
                     <span class="text-muted">Score {fmtScore100(decisionSummary.primary_zone.trading_score)}</span>
                     <span class="text-muted">EV {fmtSignedPct(decisionSummary.primary_zone.expected_value)}</span>
-                    <span class="text-muted">RR {fmtRatio(decisionSummary.primary_zone.risk_reward_ratio)}</span>
+                    <!-- T-055 驗收 2：這張卡是使用者最先看到的位置，**不得只顯示裸 RR**——
+                         它是 zone 歷史統計，與 gate 仲裁的可執行 RR 可以差好幾倍。 -->
+                    <span class="text-muted" data-testid="primary-zone-rr">Setup RR {fmtRatio(decisionSummary.primary_zone.risk_reward_ratio)}</span>
                     {#if (decisionSummary.primary_zone.confluence_family_count ?? decisionSummary.primary_zone.confluence_count) > 1}
                       <span class="text-indigo-300">證據族群 ×{decisionSummary.primary_zone.confluence_family_count ?? decisionSummary.primary_zone.confluence_count}</span>
                     {/if}

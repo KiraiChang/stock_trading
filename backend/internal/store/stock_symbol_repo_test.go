@@ -164,6 +164,88 @@ func TestStockSymbolRepoSearch(t *testing.T) {
 	}
 }
 
+// TestStockSymbolRepoStatesBySymbols 驗 I-094 的批次查詢本身。
+//
+// 三件事一次釘住：**只回問到的那幾檔**（不是整份主檔）、**Market 有帶回來**
+// （I-091 要靠它決定核對端點）、**查無的 symbol 不會出現在 map 裡**
+// （呼叫端據此區分 unknown 與下市，兩者處置相反）。
+func TestStockSymbolRepoStatesBySymbols(t *testing.T) {
+	tmp, err := os.CreateTemp("", "stock-symbol-states-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	db, err := NewDB(config.DatabaseConfig{Driver: "sqlite", DSN: tmp.Name()})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	defer db.Close()
+	if err := database.RunMigrations(context.Background(), db, "sqlite", zap.NewNop()); err != nil {
+		t.Fatalf("migrations failed: %v", err)
+	}
+
+	repo := NewStockSymbolRepo(db)
+	ctx := context.Background()
+	day1 := time.Date(2026, 7, 20, 6, 30, 0, 0, time.UTC)
+
+	// 三檔進主檔，隔天只重報兩檔——UpsertSnapshot 會把沒再出現的 1102 標為下市。
+	if _, err := repo.UpsertSnapshot(ctx, []StockSymbol{
+		stockSymbolForTest("1101", "TCC", "Cement"),
+		stockSymbolForTest("1102", "ACC", "Cement"),
+		stockSymbolForTest("2330", "TSMC", "Semiconductor"),
+	}, day1); err != nil {
+		t.Fatalf("seed failed: %v", err)
+	}
+	result, err := repo.UpsertSnapshot(ctx, []StockSymbol{
+		stockSymbolForTest("1101", "TCC", "Cement"),
+		stockSymbolForTest("2330", "TSMC", "Semiconductor"),
+	}, day1.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("delist snapshot failed: %v", err)
+	}
+	if result.Delisted != 1 {
+		t.Fatalf("應有 1 檔被標為下市，得到 %+v", result)
+	}
+
+	// 空清單不送查詢，回空 map 而不是 nil——呼叫端會直接對它取值。
+	empty, err := repo.StatesBySymbols(ctx, nil)
+	if err != nil {
+		t.Fatalf("empty lookup failed: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Errorf("空清單應回空 map，得到 %#v", empty)
+	}
+
+	// 9999 從沒進過主檔。
+	got, err := repo.StatesBySymbols(ctx, []string{"1101", "1102", "9999"})
+	if err != nil {
+		t.Fatalf("lookup failed: %v", err)
+	}
+	// **只回問到的那幾檔**：2330 在主檔裡但沒被問到，不該出現。
+	if len(got) != 2 {
+		t.Fatalf("應只回問到且存在的 2 檔，得到 %#v", got)
+	}
+	if state := got["1101"]; !state.IsListed || state.Market != "TWSE LISTED" {
+		t.Errorf("1101 應為上市且帶 market，得到 %+v", state)
+	}
+	// **下市要如實回 false**，而不是連 key 一起消失——呼叫端要靠 false 才知道該過濾掉，
+	// key 消失會被當成 unknown 而 fail-open 保留，那正好是相反的處置。
+	if state, ok := got["1102"]; !ok || state.IsListed {
+		t.Errorf("1102 應存在且 is_listed=false，得到 %+v（存在=%v）", state, ok)
+	}
+	// Market 不能省：I-091 要靠它決定打上市還是上櫃端點，只回布林會逼它再查一次主檔。
+	if got["1101"].Market == "" {
+		t.Error("Market 必須帶回來")
+	}
+	// **查無的 symbol 不出現在 map 裡**，而不是回一個 IsListed=false 的零值——
+	// 零值會讓呼叫端把「主檔還沒收錄」誤判成「已下市」，兩者處置相反。
+	if _, ok := got["9999"]; ok {
+		t.Error("主檔查無的 symbol 不該出現在 map 裡")
+	}
+}
+
 func stockSymbolForTest(symbol, name, industry string) StockSymbol {
 	return StockSymbol{
 		Symbol:       symbol,

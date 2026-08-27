@@ -127,6 +127,9 @@ type Scheduler struct {
 	// evaluationUniverseCandles 用來查「今天已經有日 K 的標的」，把它們排除在本輪之外
 	// （見 docs/architecture.md 的日 K 維護段）。**未注入時退回全量抓取**，行為與導入前相同。
 	evaluationUniverseCandles store.CandleRepo
+	// evaluationUniverseSymbols 是證券主檔，用來把已下市的池成員排除在回補之外
+	// （`issue.md` I-094）。**未注入時不過濾**，行為與導入前相同。
+	evaluationUniverseSymbols store.StockSymbolRepo
 	// universeSyncRunning 擋重複觸發。這個 job 要跑約 26 分鐘，cron 與人工觸發撞在一起
 	// 會讓兩批請求共用同一個節流器互相拖慢，且 job_runs 出現兩筆難以判讀的紀錄。
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
@@ -947,10 +950,12 @@ func (s *Scheduler) corporateActionSymbols(ctx context.Context, all []string) ([
 // candles 用來跳過「今天已經有日 K」的標的，**傳 nil 時退回全量抓取**——
 // 那是最佳化，不是正確性的前提。依賴與設定一起注入，比照 SetSRAnalysis。
 func (s *Scheduler) SetEvaluationUniverse(
-	repo store.EvaluationUniverseRepo, candles store.CandleRepo, cfg config.EvaluationUniverseConfig,
+	repo store.EvaluationUniverseRepo, candles store.CandleRepo,
+	stockSymbols store.StockSymbolRepo, cfg config.EvaluationUniverseConfig,
 ) {
 	s.evaluationUniverse = repo
 	s.evaluationUniverseCandles = candles
+	s.evaluationUniverseSymbols = stockSymbols
 	s.evaluationUniverseCfg = cfg
 }
 
@@ -999,6 +1004,9 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	// （見 docs/architecture.md 的日 K 維護段）。換成抓取數會讓狀態頁的數字每天不同（135 / 81 / 0 …），
 	// 看的人無從判斷哪個才是異常，而 architecture.md 教的判讀方式是把它當「池有多大」在讀。
 	poolSize := len(entries)
+	// **順序不能換**：下市過濾要在「今天抓過了沒」之前。反過來的話，已下市但今天
+	// 剛好被跳過的標的不會進入下市計數，`delisted` 就會隨當日的跳過情況浮動。
+	symbols, delisted, unknown := s.dropDelistedSymbols(ctx, symbols)
 	symbols, skipped := s.dropSymbolsSyncedToday(ctx, symbols)
 
 	days := s.evaluationUniverseCfg.Days
@@ -1038,15 +1046,76 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	// **skipped 一定要記**：全部跳過時 attempted=0、failed=0，狀態會是 success 而
 	// symbols_total=135——「135 檔全部成功」但一檔都沒抓。那個語意是對的（池內都已最新），
 	// 但少了這個欄位就變成另一個「看起來有跑，其實沒跑」。
+	// **delisted 與 skipped 分開記**：兩者原因完全不同——前者是「這檔已經死了」、
+	// 後者是「今天已經抓過了」。併成一個數字就看不出池裡累積了多少死標的。
 	s.log.Info("evaluation universe sync done",
 		zap.Int("pool", poolSize), zap.Int("attempted", len(symbols)),
-		zap.Int("skipped", skipped), zap.Int("failed", failed), zap.Int("days", days))
+		zap.Int("skipped", skipped), zap.Int("delisted", delisted),
+		zap.Int("stock_symbol_unknown", unknown),
+		zap.Int("failed", failed), zap.Int("days", days))
 	s.finishRun(ctx, runID, "evaluation_universe_sync", poolSize, failed, lastErr)
 }
 
 // evaluationUniverseTimeframe 是這個池唯一維護的 timeframe。池不進盤中掃描，
 // 所以它只會有日 K（見 docs/architecture.md 的「兩個標的清單」）。
 const evaluationUniverseTimeframe = "1d"
+
+// dropDelistedSymbols 把已下市的池成員排除在本輪回補之外（`issue.md` I-094 定案採 A）。
+//
+// **池成員與證券主檔是兩份獨立維護的清單**：`evaluation_universe.active` 由選池流程維護，
+// `stock_symbols.is_listed` 由 stock_symbol_sync 每日自 TWSE 清冊同步，兩者沒有任何連動。
+// 少了這個過濾，下市標的會每天被發一個註定拿不到資料的請求並記 success，而且數量隨時間累積。
+//
+// **判定是三態不是布林**，回傳 (保留的標的, 已下市數, 主檔查無數)：
+//
+//	is_listed = true   → 保留
+//	is_listed = false  → 過濾，計入 delisted
+//	主檔查無該 symbol   → **保留**（fail-open），計入 unknown
+//
+// 第三態不能省：新入池的標的可能還沒被 stock_symbol_sync 收錄，主檔同步失敗那天也會整批
+// 查無。**map 裡沒有那個 key 是 unknown 不是下市**——兩者處置相反，寫錯不會有任何東西報錯。
+//
+// **查詢本身失敗時維持全量回補**，降級方向與 dropSymbolsSyncedToday 一致：
+// 「多抓一點」可接受，「靜默少抓」不可接受。
+//
+// **不採「一次性把 active 設 false」**：那會在主檔誤判時靜默清掉池成員，而重新入池是人工
+// 動作。每輪過濾是可逆的——主檔隔天恢復，這裡就自動恢復抓取。
+func (s *Scheduler) dropDelistedSymbols(
+	ctx context.Context, symbols []string,
+) ([]string, int, int) {
+	if s.evaluationUniverseSymbols == nil {
+		return symbols, 0, 0
+	}
+	states, err := s.evaluationUniverseSymbols.StatesBySymbols(ctx, symbols)
+	if err != nil {
+		// Error 而不是 Warn：這代表主檔查不到，本輪會對已下市標的照樣發請求。
+		s.log.Error("evaluation universe 證券主檔查詢失敗，本輪不過濾下市標的", zap.Error(err))
+		return symbols, 0, 0
+	}
+
+	kept := make([]string, 0, len(symbols))
+	delisted := 0
+	unknown := 0
+	for _, symbol := range symbols {
+		state, ok := states[symbol]
+		if !ok {
+			// 主檔還沒收錄：保留回補，但要記下來——一直有數字代表兩份清單在分岔。
+			unknown++
+			kept = append(kept, symbol)
+			continue
+		}
+		if !state.IsListed {
+			delisted++
+			continue
+		}
+		kept = append(kept, symbol)
+	}
+	if delisted > 0 || unknown > 0 {
+		s.log.Info("evaluation universe 主檔過濾",
+			zap.Int("delisted", delisted), zap.Int("stock_symbol_unknown", unknown))
+	}
+	return kept, delisted, unknown
+}
 
 // dropSymbolsSyncedToday 濾掉今天已經有日 K 的標的，回傳（要跑的清單, 跳過數）。
 //

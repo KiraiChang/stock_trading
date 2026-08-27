@@ -636,7 +636,7 @@ func TestIsJobRegisteredReflectsActualRegistration(t *testing.T) {
 
 func TestIsJobRegisteredTrueWhenEnabled(t *testing.T) {
 	s := newStartTestScheduler(config.SREvaluationConfig{Enabled: true, Cron: "30 22 * * 1-5"})
-	s.SetEvaluationUniverse(nil, nil, config.EvaluationUniverseConfig{})
+	s.SetEvaluationUniverse(nil, nil, nil, config.EvaluationUniverseConfig{})
 	s.Start()
 	defer s.Stop()
 
@@ -1788,6 +1788,13 @@ func (s *universeSourceStub) FetchMinuteCandles(
 func newUniverseSyncScheduler(
 	pool []string, candles store.CandleRepo,
 ) (*Scheduler, *universeSourceStub, *schedulerJobRunRepoStub) {
+	// symbols 傳 nil＝未注入主檔，不做下市過濾——既有測試的行為與 I-094 導入前相同。
+	return newUniverseSyncSchedulerWithSymbols(pool, candles, nil)
+}
+
+func newUniverseSyncSchedulerWithSymbols(
+	pool []string, candles store.CandleRepo, symbols store.StockSymbolRepo,
+) (*Scheduler, *universeSourceStub, *schedulerJobRunRepoStub) {
 	source := &universeSourceStub{}
 	jobRuns := &schedulerJobRunRepoStub{}
 	fetcher := market.NewFetcher(source, &universeCandleStub{}, zap.NewNop())
@@ -1796,10 +1803,145 @@ func newUniverseSyncScheduler(
 		nil, nil, nil, nil, config.SREvaluationConfig{}, false, zap.NewNop(),
 	)
 	s.SetEvaluationUniverse(
-		&universeRepoStub{symbols: pool}, candles,
+		&universeRepoStub{symbols: pool}, candles, symbols,
 		config.EvaluationUniverseConfig{Days: 10},
 	)
 	return s, source, jobRuns
+}
+
+// ── I-094：已下市的池成員不該繼續被回補 ──────────────────────────────────────
+
+// universeSymbolStub 只回預先擺好的主檔狀態。**刻意用 map 而不是 slice**——
+// 這幾支測試驗的正是「key 不存在」與「key 存在但 is_listed=false」的處置不同。
+type universeSymbolStub struct {
+	states     map[string]store.StockSymbolState
+	err        error
+	gotSymbols []string
+	calls      int
+}
+
+func (s *universeSymbolStub) UpsertSnapshot(
+	context.Context, []store.StockSymbol, time.Time,
+) (store.StockSymbolSyncResult, error) {
+	return store.StockSymbolSyncResult{}, nil
+}
+func (s *universeSymbolStub) Get(context.Context, string) (*store.StockSymbol, error) {
+	return nil, nil
+}
+func (s *universeSymbolStub) List(context.Context, bool) ([]store.StockSymbol, error) {
+	return nil, nil
+}
+func (s *universeSymbolStub) Search(
+	context.Context, store.StockSymbolSearchOptions,
+) ([]store.StockSymbol, error) {
+	return nil, nil
+}
+func (s *universeSymbolStub) ListCandidates(
+	context.Context, store.StockSymbolCandidateOptions,
+) (store.StockSymbolCandidateResult, error) {
+	return store.StockSymbolCandidateResult{}, nil
+}
+func (s *universeSymbolStub) Facets(
+	context.Context, store.StockSymbolFacetOptions,
+) (store.StockSymbolFacets, error) {
+	return store.StockSymbolFacets{}, nil
+}
+func (s *universeSymbolStub) StatesBySymbols(
+	_ context.Context, symbols []string,
+) (map[string]store.StockSymbolState, error) {
+	s.calls++
+	s.gotSymbols = symbols
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.states, nil
+}
+
+func listedStates(listed []string, delisted []string) map[string]store.StockSymbolState {
+	out := make(map[string]store.StockSymbolState, len(listed)+len(delisted))
+	for _, symbol := range listed {
+		out[symbol] = store.StockSymbolState{Symbol: symbol, IsListed: true, Market: "上市"}
+	}
+	for _, symbol := range delisted {
+		out[symbol] = store.StockSymbolState{Symbol: symbol, IsListed: false, Market: "上市"}
+	}
+	return out
+}
+
+// 本體：is_listed=false 的池成員不再送請求。
+func TestEvaluationUniverseSyncDropsDelistedSymbols(t *testing.T) {
+	pool := []string{"1101", "1102", "1103"}
+	symbols := &universeSymbolStub{states: listedStates([]string{"1101", "1103"}, []string{"1102"})}
+	s, source, _ := newUniverseSyncSchedulerWithSymbols(pool, nil, symbols)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	want := []string{"1101", "1103"}
+	if !reflect.DeepEqual(source.fetched, want) {
+		t.Errorf("實際抓取 %v, 期望 %v（1102 已下市）", source.fetched, want)
+	}
+	// 一次查詢帶整池，不是逐檔——逐檔在 135 檔就是 N+1，那正是這支方法要消滅的。
+	if symbols.calls != 1 {
+		t.Errorf("主檔查詢次數 = %d, 期望 1（批次查詢）", symbols.calls)
+	}
+	if !reflect.DeepEqual(symbols.gotSymbols, pool) {
+		t.Errorf("查詢帶入的 symbols = %v, 期望整池 %v", symbols.gotSymbols, pool)
+	}
+}
+
+// 第三態：主檔查無該 symbol 時要 fail-open 保留，不能當成下市。
+//
+// 池成員與主檔是兩份獨立維護的清單——新入池的標的可能還沒被 stock_symbol_sync 收錄。
+// 把「查無」當成下市會讓它們**靜默停止更新**，而那正是 I-091 要消滅的失敗模式。
+func TestEvaluationUniverseSyncKeepsSymbolsMissingFromMasterList(t *testing.T) {
+	pool := []string{"1101", "9999"}
+	// 9999 不在 map 裡＝主檔查無。
+	symbols := &universeSymbolStub{states: listedStates([]string{"1101"}, nil)}
+	s, source, _ := newUniverseSyncSchedulerWithSymbols(pool, nil, symbols)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("實際抓取 %v, 期望整池 %v（主檔查無要 fail-open 保留）", source.fetched, pool)
+	}
+}
+
+// 主檔查詢整體失敗時維持全量回補，不能把整池跳過。
+// 降級方向與 dropSymbolsSyncedToday 一致：多抓可接受，靜默少抓不可接受。
+func TestEvaluationUniverseSyncFallsBackToFullPoolWhenMasterLookupFails(t *testing.T) {
+	pool := []string{"1101", "1102", "1103"}
+	symbols := &universeSymbolStub{err: errors.New("boom")}
+	s, source, _ := newUniverseSyncSchedulerWithSymbols(pool, nil, symbols)
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("實際抓取 %v, 期望整池 %v（主檔查詢失敗要退回全量）", source.fetched, pool)
+	}
+}
+
+// 迴歸保護：重新上市（is_listed 由 false 轉回 true）要自動恢復抓取。
+//
+// 沒有這條的話，日後有人把每輪過濾改成「一次性把 evaluation_universe.active 設 false」
+// 不會有任何東西報錯——那個作法在主檔誤判時會靜默清掉池成員，而重新入池是人工動作。
+func TestEvaluationUniverseSyncResumesAfterRelisting(t *testing.T) {
+	pool := []string{"1101", "1102"}
+	symbols := &universeSymbolStub{states: listedStates([]string{"1101"}, []string{"1102"})}
+	s, source, _ := newUniverseSyncSchedulerWithSymbols(pool, nil, symbols)
+
+	s.runEvaluationUniverseSync(context.Background())
+	if !reflect.DeepEqual(source.fetched, []string{"1101"}) {
+		t.Fatalf("第一輪應只抓 1101，得到 %v", source.fetched)
+	}
+
+	// 主檔恢復：1102 重新上市。過濾是每輪重算的，所以下一輪就該恢復。
+	symbols.states = listedStates(pool, nil)
+	source.fetched = nil
+	s.runEvaluationUniverseSync(context.Background())
+
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("重新上市後應恢復抓取整池，得到 %v", source.fetched)
+	}
 }
 
 // 本體：已有當日 K 棒的標的不再送請求，其餘照跑。

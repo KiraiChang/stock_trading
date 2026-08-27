@@ -25,6 +25,21 @@ type StockSymbolRepo interface {
 	UpsertSnapshot(ctx context.Context, symbols []StockSymbol, seenAt time.Time) (StockSymbolSyncResult, error)
 	Get(ctx context.Context, symbol string) (*StockSymbol, error)
 	List(ctx context.Context, onlyListed bool) ([]StockSymbol, error)
+	// StatesBySymbols 批次取這批 symbol 的主檔狀態（`issue.md` I-094 定案）。
+	//
+	// **既有兩支都不能用**：`Get` 逐檔查，對評估標的池（實測 135 檔）就是 N+1；
+	// `List` 會載入整份證券主檔（實測 `stock_symbols` 有 49,458 列）只為了過濾那 135 檔。
+	//
+	// **回傳 map 而不是 slice，是為了讓「查無」有語意**：key 不存在＝主檔還沒收錄，
+	// 與 `IsListed=false`（確定已下市）**處置相反**——前者要 fail-open 保留、
+	// 後者要過濾掉。呼叫端必須把這個區別寫死，寫錯不會有任何東西報錯。
+	//
+	// **一定要帶 Market**：`issue.md` I-091 的個股核對要靠它決定打上市還是上櫃端點
+	// （實測池內上市 101 / 上櫃 34）。只回布林的話 I-091 得再查一次主檔，
+	// 或退回逐檔查詢——那正是這支要消滅的 N+1。
+	//
+	// symbols 為空時回空 map，不送查詢。
+	StatesBySymbols(ctx context.Context, symbols []string) (map[string]StockSymbolState, error)
 	Search(ctx context.Context, opts StockSymbolSearchOptions) ([]StockSymbol, error)
 	// ListCandidates 批次取研究用的候選標的清單（todo.md T-040 Step 1／Step 3）。
 	// 與 Search **刻意分開**：Search 是 autocomplete，它把 limit 夾在 100 以內是刻意設計，
@@ -38,6 +53,16 @@ type StockSymbolRepo interface {
 type StockSymbolSyncResult struct {
 	Seen     int `json:"seen"`
 	Delisted int `json:"delisted"`
+}
+
+// StockSymbolState 是主檔裡與「這個標的還要不要繼續維護資料」有關的最小欄位集合。
+// 刻意不用整個 StockSymbol：批次查詢只該撈判斷需要的欄位。
+type StockSymbolState struct {
+	Symbol   string `db:"symbol"`
+	IsListed bool   `db:"is_listed"`
+	// Market 是「上市」/「上櫃」等市場別，供 I-091 決定核對端點。
+	// **查無主檔時整個 entry 都不存在**，所以拿不到 Market 的情況與 IsListed 未知是同一件事。
+	Market string `db:"market"`
 }
 
 type StockSymbolSearchOptions struct {
@@ -234,6 +259,33 @@ func (r *stockSymbolRepo) Get(ctx context.Context, symbol string) (*StockSymbol,
 		return nil, err
 	}
 	return &row, nil
+}
+
+func (r *stockSymbolRepo) StatesBySymbols(
+	ctx context.Context, symbols []string,
+) (map[string]StockSymbolState, error) {
+	if len(symbols) == 0 {
+		return map[string]StockSymbolState{}, nil
+	}
+	// sqlx.In 展開 IN 的佔位符後仍要 Rebind——展開出來的是 `?`，postgres 要的是 `$n`
+	// （與 CandleRepo.SymbolsWithCandleOn 同一個寫法）。
+	query, args, err := sqlx.In(`
+		SELECT symbol, is_listed, market
+		FROM stock_symbols
+		WHERE symbol IN (?)
+	`, symbols)
+	if err != nil {
+		return nil, err
+	}
+	var rows []StockSymbolState
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	out := make(map[string]StockSymbolState, len(rows))
+	for _, row := range rows {
+		out[row.Symbol] = row
+	}
+	return out, nil
 }
 
 func (r *stockSymbolRepo) List(ctx context.Context, onlyListed bool) ([]StockSymbol, error) {

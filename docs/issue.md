@@ -720,7 +720,7 @@ stat: OK   回傳 13 筆   最後一筆 115/08/19   收盤 9.70   成交 76,212,
   兩者耦合的話，調整回補成本會意外改變偵測範圍。
 * 交易日由年度日曆推導（見下），所以連假不會縮短實際涵蓋的交易日數。
 
-#### ⚠️ 「預期交易日集合」要從哪裡來（2026-08-26 review 補，**這是最大的未定案**）
+#### 「預期交易日集合」要從哪裡來（2026-08-26 review 補，**已定案**：靜態年度日曆為主、市場層級端點交叉驗證）
 
 **實際日期集合只能回答「有哪些天」，回答不了「少了哪些天」**——沒有預期集合就沒有缺口。
 而預期集合的來源決定了這個機制的盲點在哪：
@@ -1659,7 +1659,7 @@ CREATE TABLE candle_verification_state (
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待修復** |
+| 狀態 | **已實作／待 review**（2026-08-27 依「定案採 A」實作，計畫書保留供 review） |
 | 嚴重度 | 中（每天對已下市標的發一個無用請求並記 `success`；標的數會隨時間累積） |
 | 分類 | Go / Scheduler / 資料一致性 |
 | 發現日期 | 2026-08-26 |
@@ -1795,6 +1795,39 @@ key 存在且 true／key 存在且 false／**key 不存在＝unknown**，不必�
 分開測會讓「其中一邊忘了處理」看不出來。
 
 **相關**：[`issue.md`](./issue.md) I-091（同一個標的暴露的另一個問題：缺漏偵測）。
+
+#### 實作結果（2026-08-27）
+
+| 項目 | 內容 |
+|---|---|
+| 型別 | `store.StockSymbolState{ Symbol; IsListed; Market }`（`stock_symbol_repo.go`） |
+| repo | `StockSymbolRepo.StatesBySymbols(ctx, symbols)`——單一查詢，`sqlx.In` ＋ `Rebind`，比照 `SymbolsWithCandleOn`；symbols 為空回**空 map 不是 nil** |
+| 注入 | `SetEvaluationUniverse(repo, candles, **stockSymbols**, cfg)` ＋ `cmd/server/main.go` |
+| 過濾點 | `runEvaluationUniverseSync` 新增 `dropDelistedSymbols`，在 `ListActive` 之後、`dropSymbolsSyncedToday` **之前** |
+| log | `delisted` / `stock_symbol_unknown` **獨立計數**，未併進 `skipped` |
+| 未注入時 | `evaluationUniverseSymbols == nil` 直接原樣回傳——行為與導入前相同 |
+
+**`symbols_total` 未動**，仍是池大小（I-092 剛收斂的語意）。
+
+**測試**（`internal/store` ＋ `internal/scheduler`，全套 Go 測試綠燈：vet / test / build）：
+
+| 測試 | 釘住的東西 |
+|---|---|
+| `TestStockSymbolRepoStatesBySymbols` | 批次查詢本身：只回問到的那幾檔、`Market` 有帶回、**下市回 `false`**、**查無的 key 不出現**（零值會讓 unknown 被誤判成下市） |
+| `TestEvaluationUniverseSyncDropsDelistedSymbols` | 下市不再送請求；且**只查一次**（批次，不是 N+1） |
+| `TestEvaluationUniverseSyncKeepsSymbolsMissingFromMasterList` | 第三態 fail-open：主檔查無仍要回補 |
+| `TestEvaluationUniverseSyncFallsBackToFullPoolWhenMasterLookupFails` | 查詢整體失敗 → 全量回補，不是整池跳過 |
+| `TestEvaluationUniverseSyncResumesAfterRelisting` | **回歸保護**：`is_listed` 由 false 轉回 true 要自動恢復抓取——沒有它，日後有人改成「一次性退池」不會有任何東西報錯 |
+
+⚠️ **這次改完在 live 不會有任何標的被過濾**：2026-08-27 查證池內 135 檔
+（含 `2867`）全部 `is_listed=true`。**那是預期結果，不是沒生效**——
+行為改變由上表的單元測試證明，不是由 live 的數字證明。
+
+**現況說明已歸檔到** [`architecture.md`](./architecture.md)「日 K 維護……會跳過『今天已有日 K』的標的」，
+包含兩道過濾的順序、三態表與「不採一次性退池」的理由。
+
+**尚未做**：計畫書提到的整合測試「`StatesBySymbols` 整體失敗時一次斷言 I-094 與 I-091
+兩邊的收斂」——I-091 尚未實作，那條要等它落地才寫得出來，屆時一併補。
 
 ---
 

@@ -36,6 +36,9 @@ func (s *stockSymbolRepoStub) List(context.Context, bool) ([]store.StockSymbol, 
 func (s *stockSymbolRepoStub) Search(context.Context, store.StockSymbolSearchOptions) ([]store.StockSymbol, error) {
 	return nil, nil
 }
+func (s *stockSymbolRepoStub) StatesBySymbols(context.Context, []string) (map[string]store.StockSymbolState, error) {
+	return nil, nil
+}
 func (s *stockSymbolRepoStub) ListCandidates(_ context.Context, opts store.StockSymbolCandidateOptions) (store.StockSymbolCandidateResult, error) {
 	s.gotOpts = opts
 	return s.result, nil

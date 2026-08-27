@@ -207,9 +207,50 @@ SR zone 分析——17:00 那輪拿到的是前一日籌碼，22:00 那輪（晚
 ### 日 K 維護（`evaluation_universe_sync`，平日 16:00）會跳過「今天已有日 K」的標的
 
 這支排程逐檔對池內標的呼叫 `BackfillHistory(days)`，在 FinMind 的 5 req/min 下
-135 檔約需 **27 分鐘**。它取到池成員之後、送請求之前，會先用
-`CandleRepo.SymbolsWithCandleOn(池成員, "1d", 台北當日)` 查出「今天已經有日 K」的標的並剔除，
-只對缺的那些送請求（2026-08-25 起，原記於 `todo.md` T-062，已收斂）。
+135 檔約需 **27 分鐘**。它取到池成員之後、送請求之前會做**兩道過濾**，順序固定：
+
+| 順序 | 過濾 | 依據 | 計數欄位 |
+|---|---|---|---|
+| 1 | 剔除**已下市**的池成員 | `StockSymbolRepo.StatesBySymbols(池成員)` 的 `is_listed` | `delisted` / `stock_symbol_unknown` |
+| 2 | 剔除**今天已有日 K**的標的 | `CandleRepo.SymbolsWithCandleOn(池成員, "1d", 台北當日)` | `skipped` |
+
+（第 1 道 2026-08-27 起，原記於 `issue.md` I-094；第 2 道 2026-08-25 起，原記於
+`todo.md` T-062，兩者都已收斂。）
+
+**順序不能換。** 反過來的話，已下市但今天剛好被跳過的標的不會進入下市計數，
+`delisted` 會隨當日的跳過情況浮動，看的人無從判斷池裡到底累積了多少死標的。
+
+#### 下市過濾（第 1 道）：判定是三態，不是布林
+
+`evaluation_universe.active` 與 `stock_symbols.is_listed` 是**兩份獨立維護的清單**——
+前者由選池流程維護，後者由 `stock_symbol_sync`（每日 06:30）自 TWSE 清冊同步，
+兩者之間沒有任何連動。少了這道過濾，下市標的會每天被發一個註定拿不到資料的請求並記
+`success`，而且數量隨時間累積。
+
+| 主檔狀態 | 處置 | 計數 |
+|---|---|---|
+| `is_listed = true` | 保留，照常回補 | — |
+| `is_listed = false` | **過濾** | `delisted` |
+| **主檔查無該 symbol** | **保留**（fail-open） | `stock_symbol_unknown` |
+
+⚠️ **第三態不能省，而且缺席語意要在呼叫端寫死**：`StatesBySymbols` 回傳的 map 裡
+**沒有那個 key 是「主檔還沒收錄」，不是「已下市」**。新入池的標的可能還沒被
+`stock_symbol_sync` 收錄，主檔同步失敗那天也會整批查無。兩者的處置相反
+（前者保留、後者過濾），**寫錯不會有任何東西報錯**——標的會靜默停止更新，
+那正是 `issue.md` I-091 要消滅的失敗模式。
+
+**查詢本身失敗時維持全量回補**（記 Error log），降級方向與第 2 道一致：
+「多抓一點」可接受，「靜默少抓」不可接受。
+
+**刻意不採「一次性把 `evaluation_universe.active` 設 false」**：那會在主檔誤判
+（例如某天清冊抓取不完整）時**靜默清掉池成員**，而重新入池是人工動作。
+每輪重新過濾則是可逆的——主檔隔天恢復，抓取就自動恢復，這由
+`TestEvaluationUniverseSyncResumesAfterRelisting` 釘住。
+
+**`StatesBySymbols` 回傳值帶 `market` 不只帶布林**：這是刻意的，`issue.md` I-091 的
+個股核對要靠它決定打上市還是上櫃端點（實測池內上市 101 / 上櫃 34）。只回布林會逼
+I-091 再查一次主檔，或退回逐檔查詢——而逐檔查詢在 135 檔就是 N+1，
+正是這支批次方法要消滅的東西（`List` 會載入整份主檔，實測 49,458 列）。
 
 **查詢一定要把池成員帶進去。** `candles` 的複合索引是 `(symbol, timeframe, ts)`，
 symbol 是首欄；只約束 `timeframe` 與 `ts` 的話 PostgreSQL 16 沒有 skip scan 可用，

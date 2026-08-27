@@ -109,35 +109,84 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已知限制（不計畫單獨修復，關閉條件見下） |
-| 嚴重度 | 中（不影響現行結果，但這兩條路徑一旦真的被走到，沒有實測證據可依靠） |
+| 狀態 | 已知限制（不計畫單獨修復）——**兩個關閉條件已關掉一個**：收攤那半於 2026-08-27 以 live 證據關閉，alias 那半仍未觸發 |
+| 嚴重度 | 中（不影響現行結果。**剩下的** alias 路徑**單元層已覆蓋**，缺的是 integration／production 證據——真的被走到時沒有真實母體的行為可對照） |
 | 分類 | Go / Python / SR Zone / 身分追蹤 / 驗證缺口 |
 | 發現日期 | 2026-08-20 |
 | 來源 | T-048 全案 review（階段 A～E 實作後盤點） |
 
 四檔 21 階、84 次分析的 as-of 階梯是 T-048 唯一的端到端證據，但這份母體裡有兩條
-設計上很微妙的路徑**一次都沒被觸發**：
+設計上很微妙的路徑**一次都沒被觸發**（**指這份 as-of 階梯母體，不是指沒有測試**——
+兩條路徑在單元層都有斷言，見各條的說明）：
 
-* **`zone_instances` 的收攤（`EXPIRED`）**：329 個身分的狀態分布是
-  ACTIVE 293 / RESHAPED 20 / MERGED 12 / SPLIT 4，**`EXPIRED` 是 0**。
+* **缺席收攤（`EXPIRED_BY_ABSENCE`）**：兩輪階梯裡一次都沒被觸發。
   `ZoneIdentityRepo.ListLive` 的註解說明了這段最容易寫錯的地方——資格用
   `<= maxObservedAbsences` 而不是 `<`，否則剛好累到上限的身分再也撈不出來、
   永遠不會被判失格、收攤流程整條變成不可達的死碼。**這個陷阱的反面（正確版本）
-  目前只有單元測試證明。**
+  當時只有單元測試證明。**
+
+  ⚠️ **本筆原本把觀察對象寫成「`zone_instances` 出現 `EXPIRED`」，那是錯的**
+  （2026-08-27 更正）。依 `migrations/postgres/067_zone_identity.sql:31-32`，
+  兩張表的 `state` 值域**刻意不同**：
+
+  | 表 | `state` 值域 | 語意 |
+  |---|---|---|
+  | `zone_instances`（身分） | `ACTIVE` / `SPLIT` / `MERGED` / `RESHAPED` | **沒有 `EXPIRED`**。身分不因缺席而終止 |
+  | `zone_role_incarnations`（一世） | `ACTIVE` / `TESTING` / `INVALIDATED` / `EXPIRED` | `EXPIRED` ＝「我們不再認得它」 |
+
+  067 明寫「`INVALIDATED` 與 `EXPIRED` **兩者都不終止身分本身**，同一個價位之後可以開下一世」，
+  `buildZoneIdentityWrite` 的 doc comment 也是「失格的 → **一世**收成 EXPIRED」。
+  所以「`zone_instances` 出現 `EXPIRED`」是個**永遠不可能成立**的條件，
+  而原文引用的「ACTIVE 293 / … / `EXPIRED` 是 0」也是查錯表得到的數字。
+  **正確的觀察對象是 `zone_role_incarnations.state='EXPIRED'` ＋ `expired_at`。**
 * **alias 備援命中（`matched_by_alias`）**：兩輪階梯都是 0（階段 C 已記錄）。
   三段關聯決策的第一段（既有鏈命中）把所有情況都吃掉了。
 
+  **單元層已經覆蓋這條路徑**（`sr_zones_event_identity_test.go`）：
+  `TestBuildEventIdentityWriteFallsBackToAliasWhenRoleFlipped`（`:417`，斷言
+  `MatchedByAlias == 1`）、`...WhenBoundaryDrifted`（`:439`）、
+  `...CurrentMapWinsOverAlias`（`:457`，證明 current map 優先於 alias），
+  另有 `TestAliasIndexDropsIdentitiesTheMatcherGaveUpOn`（`:631`）與
+  `TestSummarizeIdentityStatsComputesAliasHitRate`。
+  **缺的是 as-of 階梯／integration／live 母體的自然命中**，不是缺測試。
+
 **成因是母體太小而不是實作有問題**：21 個交易日、4 檔，身分還來不及缺席到失格。
 真正的解法是補分析排程（見 `todo.md` T-052），不是為這兩條路徑另外造假資料。
+**這個判斷對收攤那半已被 2026-08-27 的 live 查證證實**（排程上線第 2 個交易日就觸發）；
+alias 那半則仍未觸發，見下方關閉條件。
 
 **關閉條件拆成兩段**：
 
-* **EXPIRED 收攤**：分析排程（todo.md T-052）上線、production 母體累積到身分會自然失格後，
-  確認 `zone_instances` 出現 `EXPIRED`，且行為與單元測試一致。
+* **缺席收攤**：分析排程（todo.md T-052）上線、production 母體累積到身分會自然失格後，
+  確認 `zone_role_incarnations` 出現 `state='EXPIRED'`（**不是 `zone_instances`**，見上），
+  且行為與單元測試一致。
+  ✅ **已達成（2026-08-27 查證 live）**——詳見下方「收攤路徑的 production 證據」。
 * **alias 備援**：不能假設 T-052 一定會讓 `eventIdentityStats.MatchedByAlias` 自然非零——
   T-048 實測中第一段既有鏈命中把多數情況吃掉了。排程上線後先觀察一段時間；若仍為 0，
   改由 targeted integration/live fixture 或 T-050 的可觀測性 metric 證明這條路徑，
   而不是把 T-052 卡死在不可控的自然觸發上。
+  ⬜ **仍未達成（2026-08-27 查證 live）**：`sr_identity_stats` 自 2026-08-21 起 88 筆，
+  `matched_by_alias` 合計 **0**（`matched_by_chain` 268 / `matched_by_current` 121 /
+  `unmatched_keys` 0）。觀察期已過，**該改走 fixture 或 metric 那條路**。
+
+#### 收攤路徑的 production 證據（2026-08-27 查 live）
+
+T-052 於 2026-08-20 上線後，缺席收攤**自 2026-08-24 起實際發生**，且與單元測試的斷言逐項吻合：
+
+| 單元測試斷言 | 測試 | live 實際 |
+|---|---|---|
+| 一世 `state='EXPIRED'` ＋ `end_reason='EXPIRED_BY_ABSENCE'` ＋ `expired_at` 有值 | `TestBuildZoneIdentityWriteExpiresIncarnationAndRecordsReason` | **38 筆，`ended_at` / `expired_at` 皆 38/38 有值** |
+| transition 存在，且 `to_state='EXPIRED'`、`from_state='ACTIVE'` | `TestBuildZoneIdentityWriteExpiresIncarnationAndRecordsReason`（`:136-145`） | **48 筆，`from_state` 全為 `ACTIVE`** |
+| transition 帶 `incarnation_uid` | `TestBuildZoneIdentityWritePushesExpiredPastTheAbsenceLimit`（`:310-317`） | **38 筆帶 `incarnation_uid`**（差額見下） |
+| 缺席次數推過上限（與 `ListLive` 的 `<=` 握手，避免重複收攤） | 同上（`:308-310`） | **48 個身分 `observed_absences=4 > 3`；48 筆 transition 對 48 個 distinct zone_uid，無重複收攤** |
+
+**48 vs 38 的差額是正常的**：`sr_zones.go:1947` 的 `if prev.IncarnationUID.Valid`——
+AT_ZONE 期間不開一世（067：「AT_ZONE 是『方向暫時無法解析』不是角色」），
+那些身分只有 transition、沒有一世可收。
+
+**那 48 個 `observed_absences=4` 的 `ACTIVE` 身分不是異常資料**：身分仍在（規格如此），
+只是被 `ListLive` 的次數軸擋在候選集合外，所以也不會被重複收攤。
+`zone_instances.ended_at` 維持 `NULL` 同理——結束的是一世，不是身分。
 
 ---
 

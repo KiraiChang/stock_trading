@@ -19,7 +19,7 @@ import (
 // ErrVerificationUnavailable 代表「**驗不了**」，而不是「驗過了，沒有缺口」。
 //
 // ⚠️ **這個區別是整個缺漏偵測的核心。** 把驗不了記成驗過了，機制就會在最需要它的時候
-// 靜默失效——那正是本筆（`issue.md` I-091）要消滅的形狀。所有解析不出來、歸屬對不上、
+// 靜默失效——那正是缺漏偵測要消滅的形狀。所有解析不出來、歸屬對不上、
 // 年份不符的情況都必須走這裡，**不得猜測、不得當成「無成交」**。
 var ErrVerificationUnavailable = errors.New("verification unavailable")
 
@@ -32,7 +32,7 @@ const (
 	tpexStockDayURL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
 )
 
-// 市場別。來自 `stock_symbols.market`（由 I-094 的 StatesBySymbols 一併帶回）。
+// 市場別。來自 `stock_symbols.market`（由 StockSymbolRepo.StatesBySymbols 一併帶回）。
 //
 // ⚠️ **主檔查無該標的時 Market 也不存在**，那類候選決定不了要打哪個端點，
 // 必須落 ErrVerificationUnavailable，**不得預設成上市**。
@@ -99,7 +99,7 @@ func (c *TradingCalendar) IsTradingDay(day time.Time) bool {
 
 // TradingDaysBetween 回傳左開右閉區間 `(after, through]` 內的交易日數。
 //
-// ⚠️ **左開右閉是刻意的，而且是修過的 off-by-one**（`issue.md` I-091）：
+// ⚠️ **左開右閉是刻意的，而且是修過的 off-by-one**：
 // 週一檢查、對照源停在週五時，區間是 `(週五, 週一]` = {週一} → **lag = 1 而不是 0**。
 // 少算右端點的話，`market_stale_days=1` 會永遠判不出過期。
 //

@@ -385,8 +385,8 @@ func TestCandleGapDetectionMarksUnavailableWhenLookupFails(t *testing.T) {
 	}
 }
 
-// 矩陣 #24：StatesBySymbols 整體失敗時，I-091 的收斂是**整批 unavailable ＋ partial**
-// （與 I-094 的「全量回補」不同）。
+// 矩陣 #24：StatesBySymbols 整體失敗時，偵測的收斂是**整批 unavailable ＋ partial**
+// （與回補的「全量重抓」不同）。
 //
 // 驗不了卻記 success，正是本筆要消滅的誤導。
 func TestCandleGapDetectionUnavailableWhenSymbolStatesFail(t *testing.T) {

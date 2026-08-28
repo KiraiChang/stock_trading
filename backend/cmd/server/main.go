@@ -225,7 +225,7 @@ func main() {
 	// **必須在 sched.Start() 之前**：Start() 當下才決定要不要註冊 cron，
 	// 之後再注入不會有任何效果也不會報錯（靜默失效）。
 	sched.SetEvaluationUniverse(evaluationUniverseRepo, candleRepo, stockSymbolRepo, cfg.EvaluationUniverse)
-	// 日 K 缺漏偵測（issue.md I-091）。另外兩項必要依賴（StockSymbolRepo / CandleRepo）
+	// 日 K 缺漏偵測（現況見 docs/architecture.md；原記於 issue.md I-091，已收斂）。另外兩項必要依賴（StockSymbolRepo / CandleRepo）
 	// 由上一行注入，這裡不重複收——各自注入會讓兩邊可能看到不同的東西。
 	// **breaker 與 client 同壽命**：斷路狀態是行程內的 runtime 安全閥，不跨重啟保存。
 	//

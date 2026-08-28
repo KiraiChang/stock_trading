@@ -212,7 +212,8 @@ type EvaluationUniverseConfig struct {
 	Days int `mapstructure:"days"`
 }
 
-// CandleGapDetectionConfig 是日 K 缺漏偵測的設定（`issue.md` I-091）。
+// CandleGapDetectionConfig 是日 K 缺漏偵測的設定。
+// 現況說明見 `docs/architecture.md`「日 K 缺漏偵測」（原記於 issue.md I-091，已收斂）。
 //
 // **這些是待調的初值，不是實測最佳值**——除了 MarketStaleDays 有一次 14:13 的觀測支撐，
 // 其餘都是保守猜測。
@@ -358,7 +359,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("evaluation_universe.enabled", false)
 	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
 	viper.SetDefault("evaluation_universe.days", 10)
-	// I-091：缺漏偵測沒有自己的 cron，跟著 evaluation_universe 那輪跑。**預設關閉。**
+	// 缺漏偵測沒有自己的 cron，跟著 evaluation_universe 那輪跑。**預設關閉。**
 	// 這裡只負責「有沒有設」，合法範圍由 scheduler 的正規化函式把關（config 層沒有 logger）。
 	viper.SetDefault("candle_gap_detection.enabled", false)
 	viper.SetDefault("candle_gap_detection.aggregate_ratio", 0.5)

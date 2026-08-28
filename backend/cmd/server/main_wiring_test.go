@@ -9,7 +9,7 @@ import (
 )
 
 // TestCandleGapWiringUsesNormalisingHelper 讀 main.go 的 AST，守住一個**被連續三輪
-// review 指出的接線缺口**（`issue.md` I-091）。
+// review 指出的接線缺口**（原記於 issue.md I-091，已收斂）。
 //
 // 缺口是：曾經用**原始設定**建 breaker 與 exchange client，之後才在
 // SetCandleGapDetection 裡正規化。於是 `request_interval_ms=0` 時 scheduler 顯示

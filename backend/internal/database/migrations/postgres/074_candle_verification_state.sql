@@ -1,4 +1,5 @@
--- 日 K 缺漏偵測的逐標的驗證簿記（issue.md I-091）。
+-- 日 K 缺漏偵測的逐標的驗證簿記（現況見 docs/database-schema.md 與 docs/architecture.md；
+-- 原記於 issue.md I-091，已收斂）。
 -- 現況規格見 docs/database-schema.md 與 docs/architecture.md 的日 K 維護段。
 --
 -- 要解的問題：`evaluation_universe_sync` 的 `success` 只代表「請求沒失敗」，

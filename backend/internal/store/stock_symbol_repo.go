@@ -25,7 +25,8 @@ type StockSymbolRepo interface {
 	UpsertSnapshot(ctx context.Context, symbols []StockSymbol, seenAt time.Time) (StockSymbolSyncResult, error)
 	Get(ctx context.Context, symbol string) (*StockSymbol, error)
 	List(ctx context.Context, onlyListed bool) ([]StockSymbol, error)
-	// StatesBySymbols 批次取這批 symbol 的主檔狀態（`issue.md` I-094 定案）。
+	// StatesBySymbols 批次取這批 symbol 的主檔狀態。
+	// 現況說明見 `docs/architecture.md`「日 K 維護」的下市過濾段（原記於 issue.md I-094，已收斂）。
 	//
 	// **既有兩支都不能用**：`Get` 逐檔查，對評估標的池（實測 135 檔）就是 N+1；
 	// `List` 會載入整份證券主檔（實測 `stock_symbols` 有 49,458 列）只為了過濾那 135 檔。
@@ -34,8 +35,8 @@ type StockSymbolRepo interface {
 	// 與 `IsListed=false`（確定已下市）**處置相反**——前者要 fail-open 保留、
 	// 後者要過濾掉。呼叫端必須把這個區別寫死，寫錯不會有任何東西報錯。
 	//
-	// **一定要帶 Market**：`issue.md` I-091 的個股核對要靠它決定打上市還是上櫃端點
-	// （實測池內上市 101 / 上櫃 34）。只回布林的話 I-091 得再查一次主檔，
+	// **一定要帶 Market**：缺漏偵測的個股核對要靠它決定打上市還是上櫃端點
+	// （實測池內上市 101 / 上櫃 34）。只回布林的話偵測得再查一次主檔，
 	// 或退回逐檔查詢——那正是這支要消滅的 N+1。
 	//
 	// symbols 為空時回空 map，不送查詢。
@@ -60,7 +61,7 @@ type StockSymbolSyncResult struct {
 type StockSymbolState struct {
 	Symbol   string `db:"symbol"`
 	IsListed bool   `db:"is_listed"`
-	// Market 是「上市」/「上櫃」等市場別，供 I-091 決定核對端點。
+	// Market 是「上市」/「上櫃」等市場別，供缺漏偵測決定核對端點。
 	// **查無主檔時整個 entry 都不存在**，所以拿不到 Market 的情況與 IsListed 未知是同一件事。
 	Market string `db:"market"`
 }

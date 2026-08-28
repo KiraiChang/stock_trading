@@ -89,7 +89,7 @@ func KnownSchedulerJobs() []string { return append([]string(nil), knownScheduler
 // 但寫的是獨立的 job_runs 紀錄（失敗不影響 daily_close 的判定）。
 // 不列進來的話它的失敗只能靠直接查 DB 才看得到。
 // **`candle_gap_detection` 同理**：它掛在 `runEvaluationUniverseSync` 尾端、沒有自己的
-// cron，但寫獨立的 job_runs（`issue.md` I-091）。它的註冊條件比 parent 嚴格——
+// cron，但寫獨立的 job_runs（現況見 `docs/architecture.md`）。它的註冊條件比 parent 嚴格——
 // 自身 enabled ＋ 四項依賴齊全，所以 parent 有註冊不代表它有。
 var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "candle_gap_detection", "sr_analysis", "sr_analysis_chip"}
 

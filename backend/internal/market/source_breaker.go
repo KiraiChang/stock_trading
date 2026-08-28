@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// 缺漏偵測的對照來源代號（`issue.md` I-091）。breaker 以此為鍵。
+// 缺漏偵測的對照來源代號。breaker 以此為鍵。
 const (
 	SourceTWSECalendar = "twse_calendar"
 	SourceTWSEMarket   = "twse_market"

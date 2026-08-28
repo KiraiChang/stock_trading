@@ -128,13 +128,14 @@ type Scheduler struct {
 	// （見 docs/architecture.md 的日 K 維護段）。**未注入時退回全量抓取**，行為與導入前相同。
 	evaluationUniverseCandles store.CandleRepo
 	// evaluationUniverseSymbols 是證券主檔，用來把已下市的池成員排除在回補之外
-	// （`issue.md` I-094）。**未注入時不過濾**，行為與導入前相同。
+	// （現況見 `docs/architecture.md`「日 K 維護」；原記於 issue.md I-094，已收斂）。
+	// **未注入時不過濾**，行為與導入前相同。
 	//
-	// ⚠️ 它同時是缺漏偵測（I-091）的必要依賴——那邊靠它的 `market` 決定要打 TWSE 還是
+	// ⚠️ 它同時是缺漏偵測的必要依賴——那邊靠它的 `market` 決定要打 TWSE 還是
 	// TPEx 端點。**對 parent 是 fail-open 的選填，對偵測是硬性必要**，見
 	// `candleGapDetectionReady`。
 	evaluationUniverseSymbols store.StockSymbolRepo
-	// 日 K 缺漏偵測（`issue.md` I-091）。沒有自己的 cron，掛在 runEvaluationUniverseSync
+	// 日 K 缺漏偵測（現況見 `docs/architecture.md`）。沒有自己的 cron，掛在 runEvaluationUniverseSync
 	// 尾端，但寫獨立的 job_runs 紀錄。四項必要依賴缺任一項即不註冊。
 	candleVerification store.CandleVerificationRepo
 	exchangeReference  market.ExchangeReference
@@ -1035,7 +1036,7 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	// **順序不能換**：下市過濾要在「今天抓過了沒」之前。反過來的話，已下市但今天
 	// 剛好被跳過的標的不會進入下市計數，`delisted` 就會隨當日的跳過情況浮動。
 	// **states 與 statesErr 之後要交給缺漏偵測**：同一次主檔查詢兩邊共用，
-	// 但兩者的收斂不同——I-094 查不到就全量回補（溫和），I-091 查不到則整批
+	// 但兩者的收斂不同——回補查不到就全量重抓（溫和），偵測查不到則整批
 	// verification_unavailable（驗不了卻記 success 正是它要消滅的誤導）。
 	poolSymbols := append([]string(nil), symbols...)
 	states, statesErr := s.loadStockSymbolStates(ctx, symbols)
@@ -1098,7 +1099,8 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 // 所以它只會有日 K（見 docs/architecture.md 的「兩個標的清單」）。
 const evaluationUniverseTimeframe = "1d"
 
-// dropDelistedSymbols 把已下市的池成員排除在本輪回補之外（`issue.md` I-094 定案採 A）。
+// dropDelistedSymbols 把已下市的池成員排除在本輪回補之外。
+// 現況說明見 `docs/architecture.md`「日 K 維護」的下市過濾段（原記於 issue.md I-094，已收斂）。
 //
 // **池成員與證券主檔是兩份獨立維護的清單**：`evaluation_universe.active` 由選池流程維護，
 // `stock_symbols.is_listed` 由 stock_symbol_sync 每日自 TWSE 清冊同步，兩者沒有任何連動。

@@ -1,4 +1,5 @@
--- 日 K 缺漏偵測的逐標的驗證簿記（issue.md I-091）。
+-- 日 K 缺漏偵測的逐標的驗證簿記（現況見 docs/database-schema.md 與 docs/architecture.md；
+-- 原記於 issue.md I-091，已收斂）。
 -- 完整設計理由見 postgres 版的註解與 docs/database-schema.md。
 --
 -- mysql 差異：DATETIME(0) 代替 TIMESTAMPTZ（本 schema 一律存 UTC，由應用層負責時區）。

@@ -8,7 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// 日 K 缺漏偵測的驗證結果值域（`issue.md` I-091）。
+// 日 K 缺漏偵測的驗證結果值域（見 `docs/database-schema.md`；原記於 issue.md I-091，已收斂）。
 //
 // **四個值不是同一個軸上的嚴重度階梯**，雖然 coalesce 時會照嚴重度取最大：
 // `gap` 是「驗成功了，結論是有缺口」，`unavailable` 是「根本沒驗成」。
@@ -47,7 +47,7 @@ type CandleVerificationState struct {
 //
 // ⚠️ **同一個 symbol 在一輪裡可能被驗多次**（視窗跨月時同一檔要查兩個月份，
 // 也可能同時落在多個 aggregate 分組）。呼叫端必須**先把跨月份／跨日期的結果彙整成
-// 唯一一筆**再送進來，合併規則見 `issue.md` I-091：
+// 唯一一筆**再送進來，合併規則見 `docs/database-schema.md` 的 `candle_verification_state`：
 //
 //	LastAttemptedAt      本輪最後一次 attempt 的時間
 //	LastVerifiedAt       只要有任何一次成功驗證（verified 或 gap）就更新

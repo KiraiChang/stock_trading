@@ -164,10 +164,10 @@ func TestStockSymbolRepoSearch(t *testing.T) {
 	}
 }
 
-// TestStockSymbolRepoStatesBySymbols 驗 I-094 的批次查詢本身。
+// TestStockSymbolRepoStatesBySymbols 驗批次查詢本身。
 //
 // 三件事一次釘住：**只回問到的那幾檔**（不是整份主檔）、**Market 有帶回來**
-// （I-091 要靠它決定核對端點）、**查無的 symbol 不會出現在 map 裡**
+// （缺漏偵測要靠它決定核對端點）、**查無的 symbol 不會出現在 map 裡**
 // （呼叫端據此區分 unknown 與下市，兩者處置相反）。
 func TestStockSymbolRepoStatesBySymbols(t *testing.T) {
 	tmp, err := os.CreateTemp("", "stock-symbol-states-*.db")
@@ -235,7 +235,7 @@ func TestStockSymbolRepoStatesBySymbols(t *testing.T) {
 	if state, ok := got["1102"]; !ok || state.IsListed {
 		t.Errorf("1102 應存在且 is_listed=false，得到 %+v（存在=%v）", state, ok)
 	}
-	// Market 不能省：I-091 要靠它決定打上市還是上櫃端點，只回布林會逼它再查一次主檔。
+	// Market 不能省：缺漏偵測要靠它決定打上市還是上櫃端點，只回布林會逼它再查一次主檔。
 	if got["1101"].Market == "" {
 		t.Error("Market 必須帶回來")
 	}

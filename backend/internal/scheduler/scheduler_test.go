@@ -1788,7 +1788,7 @@ func (s *universeSourceStub) FetchMinuteCandles(
 func newUniverseSyncScheduler(
 	pool []string, candles store.CandleRepo,
 ) (*Scheduler, *universeSourceStub, *schedulerJobRunRepoStub) {
-	// symbols 傳 nil＝未注入主檔，不做下市過濾——既有測試的行為與 I-094 導入前相同。
+	// symbols 傳 nil＝未注入主檔，不做下市過濾——行為與下市過濾導入前相同。
 	return newUniverseSyncSchedulerWithSymbols(pool, candles, nil)
 }
 
@@ -1809,7 +1809,7 @@ func newUniverseSyncSchedulerWithSymbols(
 	return s, source, jobRuns
 }
 
-// ── I-094：已下市的池成員不該繼續被回補 ──────────────────────────────────────
+// ── 已下市的池成員不該繼續被回補 ────────────────────────────────────────────
 
 // universeSymbolStub 只回預先擺好的主檔狀態。**刻意用 map 而不是 slice**——
 // 這幾支測試驗的正是「key 不存在」與「key 存在但 is_listed=false」的處置不同。
@@ -1892,7 +1892,7 @@ func TestEvaluationUniverseSyncDropsDelistedSymbols(t *testing.T) {
 // 第三態：主檔查無該 symbol 時要 fail-open 保留，不能當成下市。
 //
 // 池成員與主檔是兩份獨立維護的清單——新入池的標的可能還沒被 stock_symbol_sync 收錄。
-// 把「查無」當成下市會讓它們**靜默停止更新**，而那正是 I-091 要消滅的失敗模式。
+// 把「查無」當成下市會讓它們**靜默停止更新**，而那正是缺漏偵測要消滅的失敗模式。
 func TestEvaluationUniverseSyncKeepsSymbolsMissingFromMasterList(t *testing.T) {
 	pool := []string{"1101", "9999"}
 	// 9999 不在 map 裡＝主檔查無。

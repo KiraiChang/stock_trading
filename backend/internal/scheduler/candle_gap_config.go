@@ -9,7 +9,8 @@ import (
 	"github.com/trading/backend/internal/market"
 )
 
-// 缺漏偵測參數的預設與界限（`issue.md` I-091 定案）。
+// 缺漏偵測參數的預設與界限。合法範圍與非法值處置見 `backend/config.yaml` 的
+// `candle_gap_detection` 區段（原記於 issue.md I-091，已收斂）。
 //
 // **與 config.SetDefault 的那份是同一組數字，但職責不同**：viper 的預設處理「沒設」，
 // 這裡處理「設了但不合法」。兩者都要有，因為 viper 對 `cap: 0` 這種值是照收的。

@@ -22,7 +22,8 @@ import (
 // 兩者要分得開（比照 sr_zone_verify 掛在 daily_close 尾端卻寫自己的紀錄）。
 const candleGapDetectionJob = "candle_gap_detection"
 
-// SetCandleGapDetection 注入缺漏偵測的依賴與設定（`issue.md` I-091）。
+// SetCandleGapDetection 注入缺漏偵測的依賴與設定。
+// 現況說明見 `docs/architecture.md`「日 K 缺漏偵測」（原記於 issue.md I-091，已收斂）。
 //
 // **cfg 在這裡就正規化完畢**，之後的程式碼一律信任已正規化的值，不再各自防禦。
 // 形狀比照 corporateActionCron()：非法值退回預設 ＋ 記 Error。
@@ -119,8 +120,8 @@ func (s *Scheduler) runCandleGapDetection(
 	var errParts []string
 	degraded := false
 
-	// ⚠️ **StatesBySymbols 失敗時兩筆的收斂不同**：I-094 是全量回補（多抓幾檔，溫和），
-	// I-091 則是**完全失去 market routing**，決定不了個股核對端點。驗不了卻記 success
+	// ⚠️ **StatesBySymbols 失敗時，回補與偵測的收斂不同**：回補是全量重抓（多抓幾檔，溫和），
+	// 偵測則是**完全失去 market routing**，決定不了個股核對端點。驗不了卻記 success
 	// 正是本筆要消滅的誤導。
 	if statesErr != nil {
 		s.finishRunDegraded(ctx, runID, candleGapDetectionJob, len(symbols), 0,
@@ -639,7 +640,7 @@ func sourceForMarket(mkt string) string {
 
 // gapAttemptAgg 是「本輪這個 symbol 的所有結果」的累加器。
 //
-// **不能只累加 last_result**：I-091 的 coalesce 規則對四個欄位各有各的算法，
+// **不能只累加 last_result**：coalesce 規則對四個欄位各有各的算法，
 // 而 consecutive_failures 的判準是「**沒有任何成功，且至少一個 unavailable**」——
 // 那需要同時記住「有沒有成功過」與「有沒有真的失敗過」，單一個字串表達不了。
 type gapAttemptAgg struct {

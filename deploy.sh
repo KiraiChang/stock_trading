@@ -19,7 +19,7 @@ export EVALUATION_UNIVERSE_ENABLED="false"  # 匯入選池成員後改為 "true"
 export EVALUATION_UNIVERSE_CRON="0 16 * * 1-5"  # 台北時區
 export EVALUATION_UNIVERSE_DAYS="10"       # 往前幾個日曆天；10 是為了容忍連假，成本與天數無關
 
-# 日 K 缺漏偵測（issue.md I-091）。沒有自己的 cron，跟著 evaluation_universe 那輪
+# 日 K 缺漏偵測（現況見 docs/architecture.md；原記於 issue.md I-091，已收斂）。沒有自己的 cron，跟著 evaluation_universe 那輪
 # （16:00）在回補之後跑，但寫獨立的 job_runs 紀錄 candle_gap_detection。
 # 要解的是「evaluation_universe_sync 的 success 只代表請求沒失敗，不代表拿到該有的資料」。
 export CANDLE_GAP_DETECTION_ENABLED="false"          # 驗證通過前預設關閉

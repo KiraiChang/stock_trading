@@ -7,8 +7,9 @@
 #   - dev 的 backend 啟動時只會跑 **Up**，Down 那一半從來沒有執行路徑——
 #     017／018 的回滾鏈斷掉就是這樣一直沒被發現的（見 docs/development-workflow.md）。
 #   - 要驗 Down 就得 down 到 0，那會清光 dev 的資料，是另一個明確動作，不該混在驗收流程裡。
-#   - 這台 host 只有 2 GiB，dev stack（多個 container）與 live 併存會踩到 I-053。
-#     單獨一個 postgres 便宜得多。
+#   - 這台 host 只有 2 GiB，dev stack（多個 container）與 live 併存會撞到記憶體上限——
+#     本機同時只留一組 stack，見 docs/development-workflow.md。
+#     單獨起一個 postgres 便宜得多。
 #
 # 不要手動 `docker compose -f docker-compose.postgres.yml up`：請用
 # `scripts/test-postgres-migrations.sh`，它會照顧編譯與 postgres 的記憶體錯開、

@@ -10,7 +10,7 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-067 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出，承接 T-055 未完成的 decision replay 驗證。）
+- **編號只增不重用，`下一個新編號從 T-068 起算`。**（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出，承接 T-055 未完成的 decision replay 驗證；T-067 於 2026-08-28 發出，承接 `issue.md` I-091 未完成的驗收。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
@@ -26,13 +26,16 @@
   ```bash
   comm -13 <(grep -o '^### T-0[0-9][0-9]' docs/todo.md | sed 's/### //' | sort -u) \
            <(rg --no-filename --only-matching --no-messages \
-                --glob '!**/node_modules/**' --glob '*.{md,go,ts,svelte,py,sh}' \
+                --glob '!**/node_modules/**' --glob '!**/dist/**' \
+                --glob '*.{md,go,ts,svelte,py,sh,yml,yaml,sql}' \
                 'T-0[0-9][0-9]' . | sort -u)
   ```
 
-  副檔名**必須含 `.ts` / `.svelte`**（前端也會引用編號），而且**不要換回
-  `grep -rho … | grep -v node_modules`**——`-h` 去掉檔名之後那個 `grep -v` 濾不掉任何東西。
-  理由與實測見 [`issue.md`](./issue.md) 的同一條規則。
+  副檔名清單**每一種都是踩過才加的**，不要精簡它（完整理由見
+  [`issue.md`](./issue.md) 的同一條規則）：`.ts` / `.svelte` 是前端、
+  **`.yml` / `.yaml` 是 compose 與 config、`.sql` 是 migration 檔頭**。
+  另外**不要換回 `grep -rho … | grep -v node_modules`**——`-h` 去掉檔名之後那個
+  `grep -v` 濾不掉任何東西。
 
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「已收斂」），
   不能有任何「見 T-0xx」形式的活指標。**本節自己會出現在輸出裡**，那是預期的。
@@ -3684,3 +3687,352 @@ by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
    說明，且本筆**不視為完成**，狀態改為「擱置」並記下缺什麼。
 
 **驗收一律走 dev compose**，不得用 live 做測試資料。
+
+---
+
+### T-067：日 K 缺漏偵測的驗收——造缺口實測與 live 運作觀察
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待處理（**已上線但尚未驗收過任何一輪**） |
+| 優先度 | 中高（機制**已在 live 啟用**但還沒跑過任何一輪，沒有任何證據證明它真的抓得到缺口；誤報或漏報都還沒被排除） |
+| 分類 | 驗證 / Go / 排程 / 市場資料 |
+| 建立日期 | 2026-08-28 |
+| 來源 | `issue.md` I-091 收斂時未完成的驗收——**條目移除後這件事會沒有清單追蹤**（同 T-063 的教訓） |
+
+#### 背景
+
+`candle_gap_detection` 的實作、測試與文件歸檔都完成了（現況規格見
+[`architecture.md`](./architecture.md)「日 K 缺漏偵測」），並於 **2026-08-28 14:37** 隨
+`CANDLE_GAP_DETECTION_ENABLED=true` 上線。但**它的正確性目前只有單元測試層級的證據**：
+
+* 沒有跑過任何一輪（它跟著 `evaluation_universe_sync` 在平日 16:00 執行）；
+* **從來沒有用真實的缺口驗證過它會不會報**。
+
+⚠️ **`2867` 只能驗一半**（已向 TWSE 三層查證：它是合法的停止買賣，沒有任何資料遺失）：
+
+* **不能驗「正向缺口偵測」**——它沒有真的漏資料，在這個設計下本來就不該告警，
+  而且它不會復牌。要驗這一半得**自己造缺口**（下方 A 的第 1、2 步）。
+* **可以當「休市／停止買賣不誤報」的天然負向案例**——它的缺列是真實的、
+  交易所那邊也真的沒有成交（下方 A 的第 4 步）。
+
+兩半都要驗：只驗正向會漏掉誤報，只驗負向會漏掉漏報。
+
+#### A. 造缺口實測（dev compose）
+
+**必須走 dev**，不得在 live 刪資料。
+
+##### 前置：dev 不保證有可用的資料
+
+`docker-compose.dev.yml` 用的是**獨立的資料卷**，與 live 完全不共用。所以不能假設
+dev 裡有池成員、證券主檔或足夠的歷史 K 棒——**沒有這些，偵測會早退或算出空的候選集合，
+而那看起來會像「一切正常」**。
+
+開始前先確認三件事，缺哪一項就補哪一項：
+
+| 檢查 | 查法 | 不足時 |
+|---|---|---|
+| 池裡有成員 | `SELECT COUNT(*) FROM evaluation_universe WHERE active;` | 從前端「評估標的池 → ③ 已入池」匯入 selection report；**空池時偵測記 `success` / `total=0`，什麼都驗不到** |
+| 主檔有那幾檔且 `is_listed` | `SELECT symbol, is_listed, market FROM stock_symbols WHERE symbol IN (…);` | 跑一次 `stock_symbol_sync`（前端排程頁可手動觸發）。**查無主檔的標的會 fail-open 保留但沒有 `market`**，偵測會把它落成 `verification_unavailable` |
+| 視窗內有足夠日 K | `SELECT symbol, COUNT(*) FROM candles WHERE timeframe='1d' AND ts >= now() - interval '20 days' GROUP BY 1;` | 手動觸發 `evaluation_universe_sync` 回補（FinMind 5 req/min，135 檔約 26 分鐘；**只驗少數幾檔的話先把池縮小**） |
+
+⚠️ **`lookback_trading_days` 預設 10**，所以視窗內至少要有 10 個交易日的資料才驗得出
+「中段缺口」與「完整標的」的差別。資料太少時整池都會是候選，變成 aggregate 短路，
+驗不到逐檔那條路徑。
+
+##### 前置：dev 的**兩個開關**預設都是關的
+
+`docker-compose.dev.yml` 裡 `EVALUATION_UNIVERSE_ENABLED` 與
+`CANDLE_GAP_DETECTION_ENABLED` **都**預設 `false`。
+
+⚠️ **兩個開關是巢狀的，不是並列的**：偵測的註冊寫在 parent 的
+`if evaluationUniverse != nil && Enabled` 區塊裡（`scheduler.go`），所以
+
+* **parent 沒啟用 → 偵測不會被註冊，而且不會有任何 Error log**。
+  「candle gap detection 已啟用但依賴不齊，不註冊」那條**只在 parent 已註冊、
+  偵測自身 enabled、但四項依賴缺一時**才出現——只開偵測那個開關的話，
+  照那條訊息去排錯會一無所獲。
+* 未啟用時 `runCandleGapDetection` 在第一行就早退，**不執行也不寫任何 `job_runs`**——
+  照步驟跑會什麼都沒發生而且**沒有痕跡**，很容易被誤讀成「沒有缺口」。
+
+1. **兩個都設 `true`**：`EVALUATION_UNIVERSE_ENABLED=true` ＋
+   `CANDLE_GAP_DETECTION_ENABLED=true`。
+2. **重建 backend 容器**——環境變數只在容器建立時帶入，改了設定不重建等於沒改。
+3. 確認 `/scheduler/status` 的 `candle_gap_detection` **不是 `disabled`**。
+   （**不要要求它是 `never_run`**——dev 若已有歷史執行紀錄，狀態會是上一輪的結果。）
+   仍是 `disabled` 時依序看：parent 有沒有註冊 → 偵測的 `enabled` 有沒有生效 →
+   啟動 log 有沒有「依賴不齊」的 Error。
+
+##### 步驟
+
+**上面兩節的前置都確認過再開始**——資料不足或偵測未啟用時，下面每一步的結果都不能採信。
+
+⚠️ **這個流程會改動 dev 的持久化資料**（刪真實 K 棒、寫 verification state、可能改池成員），
+而 dev 用的是**具名 volume，不會自己還原**。**開始前先做 0. 備份，結束後一定要跑「還原」那一節。**
+
+0. **決定測試池要留哪幾檔，再備份要動的東西。**
+
+   **建議把池縮成三檔**：`<目標>`、`<對照>`、`<負向案例>`。
+   ⚠️ **不要縮成只剩 `<目標>`**——第 3、4 步需要另外兩檔**在池裡**才會被偵測碰到；
+   池裡只剩一檔的話，第 3 步的「對照組不出現在告警裡」會變成**永遠會過的空集合測試**，
+   第 4 步的負向案例也根本不會產生 `verified` state。
+
+   縮池的目的是**把回補從 26 分鐘縮到幾秒**，不是為了讓 `skipped` 變成某個數字
+   （那個數字不可靠，見第 2 步）。
+
+   ✅ **首選：三檔都從「原本就 `active`」的成員裡挑。** 這樣測試期間只會發生
+   「停用其他成員」一種變更，還原時把它們設回 `true` 就完整了。
+   ⚠️ **`<負向案例>` 最容易破這條**——dev 的池不一定有 `2867` 這類停止買賣的標的。
+   真的湊不出來、必須啟用一檔原本 inactive 的成員或新匯入一檔時，
+   **備份 (c) 與還原都要用下面的完整版**，否則還原不回去。
+
+   三檔各自要滿足的前提**不一樣**，不要以為都要有當日 K：
+
+   | 標的 | 前提 |
+   |---|---|
+   | `<目標>` | **必須有當日 K**——才會被跳過，人工缺口才不會在偵測前被補回 |
+   | `<對照>` | 視窗內完整即可；有沒有當日 K 都不影響（它本來就不會成為候選） |
+   | `<負向案例>` | 本來就沒有那些日子的 K——**那正是要驗的形狀**，不要幫它補資料 |
+
+   接著備份三份，缺一份就有東西還原不了：
+
+   ```sql
+   -- (a) 要刪掉的那根中段 K 棒：把整列存下來（最保險的一份）
+   --     ⛔ 日期比對一律用台北日，理由與寫法見下方第 1 步的 ⚠️
+   SELECT * FROM candles
+   WHERE symbol = '<目標>' AND timeframe = '1d'
+     AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '<中段日期>';
+
+   -- (b) 測試涉及標的的既有 verification state（可能本來就有）
+   --     **三檔都要**：負向案例那一檔在第 4 步會被寫成 verified，漏了就還原不了
+   SELECT * FROM candle_verification_state
+   WHERE symbol IN ('<目標>', '<對照>', '<負向案例>');
+
+   -- (c) 池的完整快照。⛔ **不要只記 active 的那些**——測試期間可能會「啟用」
+   --     原本 inactive 的成員，只記 active 清單的話還原時不會把它設回 false；
+   --     新匯入的 row 也認不出來（備份裡沒有 = 測試期間新增的）。
+   SELECT symbol, active FROM evaluation_universe ORDER BY symbol;
+   ```
+
+1. 在 dev 挑一檔池內標的，**而且那一檔必須已經有「今天」的日 K**（理由見下方 ⚠️），
+   刪掉它**視窗中段**的一根日 K（不是最新那根——尾端缺口會自癒，
+   中段才是 T-062 跳過最佳化之後的真正盲點）。
+
+   ```sql
+   DELETE FROM candles
+   WHERE symbol = '<目標>' AND timeframe = '1d'
+     AND (ts AT TIME ZONE 'Asia/Taipei')::date = DATE '<中段日期>';
+   ```
+
+   ⛔ **不要寫成 `ts = '<中段日期>'`**。`ts` 是 timestamptz，右側的日期字面值會用
+   **session timezone**（dev 是 UTC）解讀成 `00:00+00`，而日 K 存的是**台北 00:00**
+   ＝前一日 `16:00+00`——**刪不到任何東西，而你會以為已經刪了**。
+   備份、刪除、還原三處**用同一個 predicate**，日界線才不會各自為政。
+
+   ⚠️ **目標標的一定要落在 `skipped` 那批，否則正向驗收必然失敗。**
+   `runEvaluationUniverseSync` 的順序是
+   `dropSymbolsSyncedToday` → `BackfillHistory(days=10)` → **偵測**，
+   而 `BackfillHistory` 抓的是 `today-10 ~ today` 且走 upsert——
+   **沒被跳過的標的，人工刪掉的中段 K 棒會在偵測跑到之前先被補回來**，
+   偵測因此看不到缺口。那不是實作壞了，是驗收步驟設計錯了。
+
+   跳過的條件是「該檔有當日日 K」。**執行前直接查那一檔**，不要事後看 `skipped` 數字：
+
+   ```sql
+   SELECT symbol, MAX(ts) FROM candles
+   WHERE symbol = '<目標>' AND timeframe = '1d'
+     AND (ts AT TIME ZONE 'Asia/Taipei')::date = (now() AT TIME ZONE 'Asia/Taipei')::date
+   GROUP BY symbol;
+   ```
+
+   ⛔ **不要寫成 `ts >= (now() AT TIME ZONE 'Asia/Taipei')::date`**。`ts` 是 timestamptz，
+   右側的 `date` 會用 **session timezone** 轉回時間；dev postgres 的 `TimeZone` 是 **UTC**，
+   於是右側變成 `2026-08-28 00:00+00`——而系統把日 K 存成**台北 00:00**
+   （`market/finmind.go`），也就是 `2026-08-27 16:00+00`。兩者差 8 小時，
+   **真的存在的當日 K 一筆都比對不到**。
+
+   2026-08-28 在 live 實測：`ts >= …::date` 命中 **0** 筆，
+   `(ts AT TIME ZONE 'Asia/Taipei')::date = …` 命中 **9** 筆。
+   後果不對稱——誤判成「查無」會讓你走進 fixture 分支，替一檔**本來就有**當日 K 的標的
+   插一根假資料，忘了清就會讓之後每一輪都跳過它。
+
+   （跳過判定本身用的是 `timeutil.TodayTaipei()` 的台北日界，見 `scheduler.go`
+   的 `dropSymbolsSyncedToday`。這條查詢要對齊的就是它。）
+
+   查得到就會被跳過。查不到的兩條路：
+
+   * **正解——在交易日、上游資料發布後執行**（日 K 約 15:00 後才有），
+     先手動觸發一次 `evaluation_universe_sync` 讓它抓到當日 K。
+   * **退路——非交易日只能用人工 fixture**。⚠️ **非交易日回補拿不到當日 K**
+     （上游根本沒有那天的資料），所以那時**只能自己插一根**：
+
+     ```sql
+     -- 純粹為了觸發「今天已抓過」的跳過機制，不是真實行情。
+     -- ts 要寫成**台北當日 00:00 的那個時間點**，與系統存日 K 的方式一致。
+     INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
+     VALUES ('<目標>', '1d', 1, 1, 1, 1, 1, 1,
+             (((now() AT TIME ZONE 'Asia/Taipei')::date)::timestamp AT TIME ZONE 'Asia/Taipei'))
+     ON CONFLICT (symbol, timeframe, ts) DO NOTHING;
+     ```
+
+     ⛔ **`::timestamp` 不能省。** 少了它，`date` 會被隱式轉成 **timestamptz**，
+     `AT TIME ZONE` 就變成**反向**轉換，算出來的是台北當日 **16:00** 而不是 00:00。
+     2026-08-28 實測：`((…)::date) AT TIME ZONE 'Asia/Taipei'` → `2026-08-28 08:00`，
+     加了 `::timestamp` → `2026-08-27 16:00+00`，**後者才等於真實日 K 的存法**。
+     插錯時間點的 fixture 觸發不了跳過，而且下面那條 DELETE 也刪不到它。
+
+     **驗完一定要刪掉**——留著會讓之後每一輪都跳過它：
+
+     ```sql
+     DELETE FROM candles
+     WHERE symbol = '<目標>' AND timeframe = '1d'
+       AND (ts AT TIME ZONE 'Asia/Taipei')::date = (now() AT TIME ZONE 'Asia/Taipei')::date;
+     ```
+
+     **兩段都用同一種台北日期表示**——同一份流程裡混用兩種日界線，遲早會插進去一根
+     刪不掉的假 K 棒。
+2. 手動觸發 `evaluation_universe_sync`，再看偵測有沒有把那一天報成 `upstream_data_gap`。
+
+   ⚠️ **不要拿完成 log 的 `skipped` 當證據**：那行只記**數量**不記 symbol
+   （`evaluation universe sync done`），別的標的被跳過也會讓 `skipped > 0`，
+   證明不了目標那一檔。**目標有沒有被跳過，一律看第 1 步那條逐檔查詢**——
+   `skipped` 這個數字在任何池大小下都不可靠，不要試圖用它推論。
+3. **對照組（完整標的）**：另挑一檔不動它，確認它**不出現在告警裡**。
+   ⚠️ **不要期待它產生 `verified` state**——完整標的沒有缺漏日期，就不會進候選集合，
+   `verifyCandidates` 根本不會碰到它。那是設計如此，不是漏寫。
+4. **反向驗證（無成交，天然負向案例）**：**不要自己造**——交易所那天沒成交，
+   我們本來就沒有那根 K 棒可刪。用 **`2867` 在 2026-08-20 之後的日期**：
+   那些日子日曆說是交易日、我們沒有 K 棒，所以它**會**成為候選；
+   核對後交易所那邊也沒有成交，應判 **`verified` 且不告警**。
+   這證明的是「合法停止買賣不得誤報」——與第 1、2 步的正向驗證合起來才算完整。
+   ⚠️ **dev 不一定有 `2867` 的資料**（見上方前置）。沒有的話改用其他有停止買賣紀錄的
+   標的，或**標為無法執行**——不要為了湊這一步硬造一筆假的停止買賣。
+
+**要記錄的是「報了什麼」而不只是「有沒有報」**：`job_runs.error` 的前綴要是
+`upstream_data_gap`，不是 `verification_unavailable`——後者代表根本沒驗成，
+那不算驗證通過。
+
+⚠️ **需要記憶體窗口**：這台 host 只有 2GiB，起 dev stack 前**應先停掉 live stack**
+（見 [`development-workflow.md`](./development-workflow.md)「本機同時只留一組 stack」）。
+那是需要你同意的動作，不能自作主張。
+
+##### 還原（**驗完必做**）
+
+dev 是持久化 volume，上面每一項人工變更都會留著。**不還原的後果不是「資料髒了」而是
+「之後每一輪都產生假告警」**——而誤報訓練使用者忽略告警，正是本筆自己列的第一條風險。
+
+**1. 還原中段 K 棒——優先走自然路徑**
+
+先讓目標**不再被跳過**（刪掉當日 K，若當初插了 fixture 就是刪它），再觸發一次
+`evaluation_universe_sync`：`BackfillHistory` 抓 10 天視窗且走 upsert，會把中段那根補回來。
+
+```sql
+-- 補完確認日期集合完整（比對備份 (a) 的那一天有沒有回來）
+SELECT ts FROM candles
+WHERE symbol = '<目標>' AND timeframe = '1d'
+  AND ts >= now() - interval '20 days'
+ORDER BY ts;
+```
+
+上游拿不到時（非交易日、標的已停止買賣）才用備份 (a) 的值手動 `INSERT` 還原。
+
+**2. 清掉人工產生的 verification state**
+
+```sql
+DELETE FROM candle_verification_state
+WHERE symbol IN ('<目標>', '<對照>', '<負向案例>');
+```
+
+**三檔都要**——負向案例那一檔在第 4 步會被寫成 `verified`，漏掉它等於留下一筆人工 state。
+
+那是純簿記，刪掉之後下一輪會把它們當成**首次出現**——正是我們要的乾淨起點。
+備份 (b) 若顯示它們**本來就有** state，改成把原值寫回去，不要留空。
+
+**3. 恢復測試池——兩個方向都要，還要處理新增的 row**
+
+⛔ **不是「把備份裡的成員設回 true」就好**。測試期間可能發生三種變更，
+只還原第一種會讓池悄悄變成另一個樣子：
+
+| 測試期間做了什麼 | 還原要做什麼 |
+|---|---|
+| 停用其他成員（縮池） | 設回 `active = true` |
+| **啟用**原本 inactive 的成員 | **設回 `active = false`** |
+| **新匯入**一檔（備份裡沒有） | **刪掉那一列** |
+
+```sql
+-- (1) 依備份逐檔寫回原值，true / false 都要。
+--     把備份 (c) 的內容填成 VALUES 清單。
+UPDATE evaluation_universe AS e
+SET active = b.active
+FROM (VALUES ('<symbol1>', true), ('<symbol2>', false) /* …備份 (c) 全部… */)
+     AS b(symbol, active)
+WHERE e.symbol = b.symbol;
+
+-- (2) 刪掉測試期間新增的列（備份 (c) 裡沒有的就是新增的）
+DELETE FROM evaluation_universe
+WHERE symbol NOT IN (/* …備份 (c) 的全部 symbol… */);
+```
+
+⚠️ **(2) 執行前先用 `SELECT` 看一次結果**——備份清單貼漏一個，這條會把真實成員刪掉。
+
+**4. 收尾檢查——逐項比對備份，不要看整輪狀態**
+
+驗收結束時 dev 應該回到：**沒有任何人工缺口、沒有任何人工 state、池成員與縮池前相同**。
+逐項確認：
+
+| 檢查 | 判準 |
+|---|---|
+| 人工刪掉的那根 K 棒 | 用備份 (a) 的 `(symbol, 台北日期)` 查得回來 |
+| 三檔的 verification state | 與備份 (b) **逐檔相同**——本來沒有的要沒有，本來有的要是原值 |
+| 池 | **整張表的 `(symbol, active)` 集合等於備份 (c)**——只比對 active 集合看不出多留下來的 inactive 列 |
+
+⛔ **不要用「再跑一次應該是 `success`」當判準**。dev 本來就可能有**其他真實的缺口或
+驗證不可用**（歷史資料不完整、上游當初就沒給），那時整輪本來就會是 `partial`。
+拿它當還原乾淨的標準，會反過來訓練人把真實缺口當成「自己沒清乾淨」而去刪資料——
+方向完全相反。
+
+整輪的 `success` / `partial` **只當輔助觀察**：若出現 `upstream_data_gap`，
+先確認它報的是不是**你動過的那個 (symbol, 日期)**，不是就與本次驗收無關。
+
+#### B. live 首輪運作觀察
+
+第一輪會在**上線後的第一個平日 16:00** 跟著池同步跑（parent 約 25 分鐘，所以結果約 16:25）。
+
+```bash
+docker exec postgres-postgres-1 psql -U trading_username -d trading -c \
+  "SELECT job_name, status, symbols_total, symbols_failed, started_at, error
+   FROM job_runs WHERE job_name='candle_gap_detection' ORDER BY id DESC LIMIT 3;"
+
+docker logs stock_trading-backend-1 2>&1 | grep 'candle gap detection done'
+
+docker exec postgres-postgres-1 psql -U trading_username -d trading -c \
+  "SELECT last_result, COUNT(*) FROM candle_verification_state GROUP BY 1;"
+```
+
+要確認的：
+
+| 觀察 | 判讀 |
+|---|---|
+| `/scheduler/status` 顯示 `candle_gap_detection` | 應為 `never_run` 而**不是 `disabled`**；顯示 `disabled` 代表四項依賴有缺，看啟動 log |
+| 首輪 `status` | `success` 代表沒有候選缺口；`partial` 要**看 `error` 前綴**分辨是真缺口還是驗不了 |
+| `candle_verification_state` 有沒有列 | 全空代表根本沒有候選缺口（正常），或偵測沒跑到 |
+| 對交易所的請求量 | 確認沒有異常暴增（aggregate 短路 ＋ cap 20 ＋ 500ms 間隔應該壓得住） |
+
+⚠️ **首輪若是 `partial`，在 A 完成之前你分不出是真的抓到缺口還是實作有問題**——
+這正是 A 要先做的理由。
+
+#### 完成條件
+
+A 的四項情境都有實測結果、B 至少觀察三個交易日且請求量正常，並把結論補進
+[`architecture.md`](./architecture.md)「日 K 缺漏偵測」那一節（目前那節寫的是設計，
+還沒有任何實測數字）。
+
+**在 A 完成之前，不要把 live 的任何 `partial` 當成已證實的上游缺漏。**
+
+#### 順帶未補的一條測試
+
+原計畫的測試矩陣第 24 條要求「`StatesBySymbols` 整體失敗時**一次斷言**回補與偵測兩邊的
+收斂」。目前是**分成兩支**測的（`TestEvaluationUniverseSyncFallsBackToFullPoolWhenMasterLookupFails`
+與 `TestCandleGapDetectionUnavailableWhenSymbolStatesFail`），兩邊的行為都有守到，
+但**分開測會讓「其中一邊忘了處理」看不出來**——那正是原文要求合成一支的理由。
+做 A 的時候順手補一支端到端的。

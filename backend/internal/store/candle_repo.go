@@ -41,7 +41,7 @@ type CandleRepo interface {
 
 	// CandleDatesInRange 回傳這批標的在 [from, to) 內**實際有 K 棒的台北日期**
 	// （每檔升冪、已去重），鍵是 symbol。缺漏偵測用它跟「預期交易日集合」相減
-	// （見 docs/issue.md I-091）。
+	// （見 docs/architecture.md「日 K 缺漏偵測」；原記於 issue.md I-091，已收斂）。
 	//
 	// **與 SymbolsWithCandleOn 的差別是問題不同**：那支問「今天抓過了沒」（布林），
 	// 這支問「這段期間到底有哪幾天」——偵測要獨立於回補流程，不能掛在「本輪抓了什麼」

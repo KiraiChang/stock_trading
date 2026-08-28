@@ -166,7 +166,7 @@ evaluation_universe:
   days: 10                       # 環境變數：EVALUATION_UNIVERSE_DAYS，往前幾個日曆天。
                                  # 10 而非 5 是為了容忍連假；成本與天數無關（1 request/檔）。
 
-# 日 K 缺漏偵測（issue.md I-091）。**沒有自己的 cron**：跟著 evaluation_universe 那輪
+# 日 K 缺漏偵測（現況見 docs/architecture.md；原記於 issue.md I-091，已收斂）。**沒有自己的 cron**：跟著 evaluation_universe 那輪
 # （16:00）在回補之後跑，但寫獨立的 job_runs 紀錄 candle_gap_detection——
 # 偵測判 partial 不會污染 evaluation_universe_sync 的狀態。
 #

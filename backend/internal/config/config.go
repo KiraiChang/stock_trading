@@ -19,6 +19,7 @@ type Config struct {
 	Chip               ChipConfig
 	SREvaluation       SREvaluationConfig       `mapstructure:"sr_evaluation"`
 	EvaluationUniverse EvaluationUniverseConfig `mapstructure:"evaluation_universe"`
+	CandleGapDetection CandleGapDetectionConfig `mapstructure:"candle_gap_detection"`
 	SRAnalysis         SRAnalysisConfig         `mapstructure:"sr_analysis"`
 	SRZoneVerify       SRZoneVerifyConfig       `mapstructure:"sr_zone_verify"`
 	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
@@ -211,6 +212,63 @@ type EvaluationUniverseConfig struct {
 	Days int `mapstructure:"days"`
 }
 
+// CandleGapDetectionConfig 是日 K 缺漏偵測的設定（`issue.md` I-091）。
+//
+// **這些是待調的初值，不是實測最佳值**——除了 MarketStaleDays 有一次 14:13 的觀測支撐，
+// 其餘都是保守猜測。
+//
+// ⚠️ **合法範圍的檢查不在這一層。** `config.Load()` 在 `viper.Unmarshal` 失敗時直接回
+// error、`main.go` 收到就結束行程，而 `internal/config` 沒有 logger（全套件零筆 zap），
+// 記不了「已退回預設」這種需要被看見的訊息。所以：
+//
+//	型別解析失敗（ENABLED=abc）      → 維持既有行為：**啟動失敗**
+//	解析成功但超出範圍（cap=0）      → 由 scheduler 的正規化函式退回預設／截到界限 ＋ Error log
+//
+// 正規化見 `scheduler.normalizeCandleGapDetectionConfig`。**正規化之後的值才可以被信任**，
+// 下游不再各自防禦。
+type CandleGapDetectionConfig struct {
+	// Enabled 預設 false。新機制一律預設關閉，比照 evaluation_universe / sr_analysis。
+	Enabled bool `mapstructure:"enabled"`
+	// AggregateRatio 是單一 (market, date) 分組的缺漏比例達到（**>=**，不是 >）此值時
+	// 短路成來源級告警，不展開逐檔核對。合法範圍 (0, 1]：0 會讓任何缺口都短路、
+	// >1 則永不短路。
+	AggregateRatio float64 `mapstructure:"aggregate_ratio"`
+	// AggregateMinSymbols 是套用比例所需的**最小母體**。該市場當時有效池不足此數時
+	// 強制走逐檔核對——否則單檔市場的合法停止買賣會被短路成來源級告警。合法範圍 >= 1。
+	AggregateMinSymbols int `mapstructure:"aggregate_min_symbols"`
+	// CandidateCapPerRun 的單位是**候選標的數，不是 HTTP 請求數**。
+	// 視窗跨月時同一個候選要兩次請求，所以
+	// 請求數上限 = CandidateCapPerRun × 該輪視窗涵蓋的月份數（**不是固定值**，
+	// LookbackTradingDays 可設到 60，跨越月份數會跟著變）。
+	//
+	// 用候選數當單位是為了讓公平上界 ceil(N/cap) 成立——改用請求數的話每輪處理的候選數
+	// 會浮動，那個上界就不再可論證。合法範圍 1~100：不得為 0（一個都不驗卻回報成功），
+	// 也不得無上限（誤設大值會讓單輪請求量暴增，與「避免對交易所造成壓力」直接衝突）。
+	CandidateCapPerRun int `mapstructure:"candidate_cap_per_run"`
+	// TimeoutSec 是整輪偵測的上限，hard cap 900。
+	TimeoutSec int `mapstructure:"timeout_sec"`
+	// LookbackTradingDays 是往回檢查幾個**交易日**（不是日曆天）。
+	//
+	// **刻意與 evaluation_universe.days 解耦**：那個值控制「回補要抓多長」，
+	// 耦合的話調整回補成本會意外改變偵測範圍。合法範圍 1~60：0 會產生空視窗
+	// （沒有預期日期＝沒有缺口＝永遠正常），那是「看起來成功」的靜默失效。
+	LookbackTradingDays int `mapstructure:"lookback_trading_days"`
+	// RequestIntervalMs 是對交易所端點的節流間隔（預設 2 req/s），與 FinMind 的
+	// 5 req/min 無關。合法範圍 >= 100：**0 不是合法值**，那等於完全取消節流。
+	// 要壓測請改程式，不要靠設定關掉安全限制。
+	RequestIntervalMs int `mapstructure:"request_interval_ms"`
+	// MarketStaleDays 的單位是**預期交易日，不是日曆日**——跨週末時日曆日差 3 是誤導。
+	// 市場層級端點實測當日 14:13 尚未更新，所以容忍一個交易日的發布延遲，不容忍數日。
+	MarketStaleDays int `mapstructure:"market_stale_days"`
+	// CalendarTTLHours：歷史年度的日曆不會變；當年度容忍年中補班補假修訂。
+	CalendarTTLHours int `mapstructure:"calendar_ttl_hours"`
+	// BreakerFailures 是**來源層級**的連續失敗門檻（不是逐 symbol，兩者是不同的計數）。
+	// 合法範圍 >= 1：0 會讓 breaker 永遠開著。
+	BreakerFailures int `mapstructure:"breaker_failures"`
+	// BreakerCooldownMin 後**自動**恢復，恢復條件是時間到而不是人工介入。
+	BreakerCooldownMin int `mapstructure:"breaker_cooldown_min"`
+}
+
 // CorporateActionConfig 是公司行動（分割／除權息／減資）同步排程的設定。
 //
 // **沒有 Enabled 開關**：是否註冊由「有沒有注入 adjuster」決定（`SetAdjuster`），
@@ -300,6 +358,19 @@ func Load() (*Config, error) {
 	viper.SetDefault("evaluation_universe.enabled", false)
 	viper.SetDefault("evaluation_universe.cron", "0 16 * * 1-5")
 	viper.SetDefault("evaluation_universe.days", 10)
+	// I-091：缺漏偵測沒有自己的 cron，跟著 evaluation_universe 那輪跑。**預設關閉。**
+	// 這裡只負責「有沒有設」，合法範圍由 scheduler 的正規化函式把關（config 層沒有 logger）。
+	viper.SetDefault("candle_gap_detection.enabled", false)
+	viper.SetDefault("candle_gap_detection.aggregate_ratio", 0.5)
+	viper.SetDefault("candle_gap_detection.aggregate_min_symbols", 5)
+	viper.SetDefault("candle_gap_detection.candidate_cap_per_run", 20)
+	viper.SetDefault("candle_gap_detection.timeout_sec", 300)
+	viper.SetDefault("candle_gap_detection.lookback_trading_days", 10)
+	viper.SetDefault("candle_gap_detection.request_interval_ms", 500)
+	viper.SetDefault("candle_gap_detection.market_stale_days", 2)
+	viper.SetDefault("candle_gap_detection.calendar_ttl_hours", 24)
+	viper.SetDefault("candle_gap_detection.breaker_failures", 5)
+	viper.SetDefault("candle_gap_detection.breaker_cooldown_min", 60)
 	// T-052：兩輪都預設關閉。17:00 那輪拿不到當日籌碼，22:00 那輪晚於 chip sync（21:00）
 	// 且早於 sr_evaluation（22:30）。
 	viper.SetDefault("sr_analysis.enabled", false)

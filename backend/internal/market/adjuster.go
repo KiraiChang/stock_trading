@@ -23,8 +23,8 @@ type Adjuster struct {
 	dividends  DividendSource
 	reductions CapitalReductionSource
 	actions    store.CorporateActionRepo
-	candles   store.CandleRepo
-	log       *zap.Logger
+	candles    store.CandleRepo
+	log        *zap.Logger
 }
 
 // SetDividendSource 掛載除權息來源。未設定時該類事件不抓，行為與導入前相同。

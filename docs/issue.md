@@ -571,7 +571,7 @@ stock_sr_zone_analyses：4 檔標的 / 20 次分析（2026-07-14 ~ 2026-08-13）
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待修復** |
+| 狀態 | **已實作／待 review**（2026-08-28：2a～2e 全部完成，程式面通過四輪 review 修正；**live 仍預設關閉、造缺口驗證未做**，見下方「實作進度」） |
 | 嚴重度 | 中（**潛在偵測缺口**。已向 TWSE 查證：這次沒有任何資料遺失——缺的是「**真的漏了的時候有沒有人會知道**」） |
 | 分類 | Go / 市場資料 / 排程 / 可觀測性 |
 | 發現日期 | 2026-08-25；**2026-08-26 依實測整筆改寫**（原本兩個前提被推翻），同日再依 **TWSE 原始資料查證**修正處置方向 |
@@ -1645,6 +1645,68 @@ CREATE TABLE candle_verification_state (
 （缺口偵測與 T-062 自癒性質的關係已寫在那裡，把現況規格接上去）；
 參數說明放 `backend/config.yaml` 的區段註解，比照既有慣例。
 
+#### 實作進度（2026-08-28）
+
+分五段做，全部完成。
+
+| 段 | 內容 | 狀態 |
+|---|---|---|
+| 2a | migration 074 ×3（`candle_verification_state`）＋ `CandleVerificationRepo` ＋ `CandleRepo.CandleDatesInRange` | ✅ 三份 migration 驗證腳本皆通過 |
+| 2b | `config` 新區段 ＋ 11 參數 ＋ 兩層驗證（型別失敗→啟動失敗；超範圍→正規化＋Error log） | ✅ |
+| 2c | `market/exchange_reference.go` 四個端點 ＋ 來源層級 breaker ＋ 年度日曆快取 | ✅ |
+| 2d | scheduler 串接：早退組合、獨立 `job_runs`、公平排序掃描、aggregate 短路、`deferred`、`/scheduler/status`、前端標籤 | ✅ |
+| 2e | `architecture.md` / `api-reference.md` / `database-schema.md` 歸檔 | ✅ |
+
+**`StatesBySymbols`**（實作順序第 2 步）隨 I-094 完成。
+
+##### 三輪 review 的修正（都已修完並補上回歸測試）
+
+第一輪 5 項：
+
+| 問題 | 修法 |
+|---|---|
+| 正規化發生在建 client **之後**，client 用的是原始非法值（`request_interval_ms=0` 等於不節流） | 抽出 `scheduler.NewCandleGapDependencies`，**正規化與建 client 綁在同一支函式**；測試直接斷言回傳 breaker 的行為，不是只斷言正規化函式的輸出 |
+| `candidate_cap_per_run` 實際按**月份請求**扣額度，與契約的「候選標的數」不符 | 改以 `symbolCandidate` 為單位，一檔的所有月份一次做完才扣一個額度；同時解掉「月份中途停止導致跨月 coalesce 不完整」 |
+| 數值格式異常被靜默當成「沒有成交」 | 區分 `errExchangePlaceholder`（已知佔位符＝無成交）與 `ErrUnrecognisedExchangeValue`（讀不懂＝unavailable），錯誤用多重 `%w` |
+| state 讀取失敗不 degrade，且會把 `consecutive_failures` 覆寫成 0/1 | `LoadStates` 整輪只讀一次；失敗即 `partial` ＋ **該輪不寫回**（寧可不寫也不要寫錯的累積值） |
+| `calendar_ttl_hours` 是無效設定 | 在 client 內實作年度日曆快取；**失敗不寫快取** |
+
+第二輪 3 項（程式面）：
+
+| 問題 | 修法 |
+|---|---|
+| TWSE 個股回應**沒有歸屬驗證**（TPEx 有 subtitle 檢查，TWSE 沒有） | 驗 `resp.date` 的年月，並**逐列**確認日期落在請求的年月內；補「回應年月不符」「列的年月不符」「歸屬正確但空 data」三組 fixture |
+| 民國日期解析接受不存在的日期（`time.Date` 會把 `115/02/31` 正規化成 3/3） | 新增 `newStrictDate` 反向比對年月日；兩處解析共用。對照組確認**閏年 2/29 仍然合法** |
+| wiring 回歸測試沒真的覆蓋 `main.go` 接線 | 見上方 `NewCandleGapDependencies` |
+
+第三輪 2 項：
+
+| 問題 | 修法 |
+|---|---|
+| TWSE **空回應**沒有列可以交叉佐證歸屬，而 `date` 的檢查是「有值才做」＋ `HasPrefix`（`202608-invalid` 會被放行） | `date` 改為**必要且嚴格解析**（`YYYYMMDD`、走 `newStrictDate`、年月需相符）。補「缺欄位／格式錯／長度不足／非數字／不存在的日期／別的月份」六組，外加**對照組**：`date` 正確的空月份仍是合法的「該月無成交」——否則 `2867` 這類整月停止交易的標的會永遠驗不了 |
+| wiring 測試仍證明不了 `main.go` **有用** 那支 helper | 新增 `cmd/server/main_wiring_test.go`：用 `go/parser` 讀 `main.go` 的 AST，斷言有呼叫 `scheduler.NewCandleGapDependencies` **且沒有**直接呼叫 `market.NewExchangeReference` / `market.NewSourceBreaker`。**已做變異驗證**——把 main.go 改回直接建 client，三條斷言全部失敗 |
+
+⚠️ **AST 測試是刻意選的手段**：`main.go` 是接線本身，沒有可注入的縫，
+helper 的行為測試證明不了「有人在用它」。斷言刻意只有兩條（要有 helper、不得直接建 client），
+避免變成「改一行就紅」的脆弱測試；第二條是關鍵——只有第一條的話，「兩種都寫」仍會通過。
+
+##### 歸檔位置（2e）
+
+| 文件 | 內容 |
+|---|---|
+| [`architecture.md`](./architecture.md)「日 K 缺漏偵測」 | 資料流、三種結論的分界、預期集合為何來自年度日曆、陳舊與 `deferred`、請求量的三道防線、公平性 |
+| [`api-reference.md`](./api-reference.md) | `candle_gap_detection` 的 `symbols_total` 分母、**`partial` 的第四種成因**、stale 門檻、以及它**刻意不套**「取不到輸入記 `failed`」那條通則的理由 |
+| [`database-schema.md`](./database-schema.md) `candle_verification_state` | 欄位與值域、為何是獨立的表、**排序為何不能下放到 SQL**、`RecordAttempts` 的去重與 `COALESCE` 保護 |
+| `backend/config.yaml` | 11 個參數的合法範圍與非法值處置 |
+
+##### 已知未涵蓋
+
+* **測試矩陣第 8 條（零價缺口分類）**：依「缺口的三種分類」定案走**路線 1**——不分類，
+  一律 `upstream_data_gap`。零價被 `toStoreCandles` 濾掉造成的洞，與上游沒回傳造成的洞，
+  在偵測層走同一條路徑。要區分成因得查 log，那是計畫書明文接受的取捨。
+* **live 尚未啟用**（`candle_gap_detection.enabled` 預設 false）。計畫書寫明驗證修法要
+  **自己造缺口**（在 dev 刪掉某檔中間的一根 K 棒，看偵測會不會報）——那步還沒做。
+
 #### 這筆的價值與「不做」的選項
 
 已證實**目前沒有任何資料在流失**（`2867` 是合法的停止買賣），所以價值全在
@@ -1659,7 +1721,7 @@ CREATE TABLE candle_verification_state (
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作／待 review**（2026-08-27 依「定案採 A」實作，計畫書保留供 review） |
+| 狀態 | **review 完成，待收斂**（2026-08-27 依「定案採 A」實作並通過 review；**歸檔已完成**——現況說明見 [`architecture.md`](./architecture.md)「日 K 維護」段。計畫書保留至收斂時一併移除） |
 | 嚴重度 | 中（每天對已下市標的發一個無用請求並記 `success`；標的數會隨時間累積） |
 | 分類 | Go / Scheduler / 資料一致性 |
 | 發現日期 | 2026-08-26 |

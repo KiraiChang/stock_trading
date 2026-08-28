@@ -377,7 +377,7 @@ func TestListCandidatesPerIndustryLimit(t *testing.T) {
 }
 
 // TestListCandidatesPerIndustryLimitKeepsUnclassified 鎖住一個會靜靜砍掉 97% ETF 的 bug：
-// industry 是 NOT NULL DEFAULT ''，ETF 與權證全部落在空字串。若把空字串當成一個產業，
+// industry 是 NOT NULL DEFAULT ”，ETF 與權證全部落在空字串。若把空字串當成一個產業，
 // per_industry=9 會讓 354 檔 ETF 只剩 9 檔——而 ETF 是目前唯一填得進 LOW bucket 的類型。
 func TestListCandidatesPerIndustryLimitKeepsUnclassified(t *testing.T) {
 	repo, ctx := candidateTestRepo(t)

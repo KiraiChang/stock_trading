@@ -24,6 +24,7 @@ func (s *jobRunRepoStub) Start(context.Context, string) (uint64, error) { return
 func (s *jobRunRepoStub) Finish(context.Context, uint64, string, int, int, string) error {
 	return nil
 }
+
 // GetRecent **必須照 limit 截斷並依 started_at 由新到舊排序**，因為真實 repo 是
 // `ORDER BY started_at DESC LIMIT ?`。stub 忽略 limit 的話，「一天的紀錄放不進視窗」
 // 這類問題在測試裡永遠不會出現——GetStatus 靠這個視窗判斷 job 有沒有跑過。
@@ -45,7 +46,7 @@ func (s *jobRunRepoStub) AbortRunning(context.Context) (int64, error) { return 0
 // GetLatestPerJob 模擬真實 SQL 的語意：每個 job_name 取最新一筆
 // （ORDER BY started_at DESC, id DESC）。**這裡刻意不套用任何筆數上限**——
 // 真實查詢回的是「有紀錄的 job_name 各一列」，筆數不隨同一個 job 累積多少紀錄而增加
-// （固定 11 列是 GetStatus 遍歷 knownSchedulerJobs 補出來的，不是這句 SQL）。
+// （固定 len(knownSchedulerJobs) 列是 GetStatus 遍歷 knownSchedulerJobs 補出來的，不是這句 SQL）。
 // stub 若加了上限，就驗不出「視窗放不下一天的紀錄」那一整類問題。
 func (s *jobRunRepoStub) GetLatestPerJob(_ context.Context) ([]store.JobRun, error) {
 	latest := map[string]store.JobRun{}

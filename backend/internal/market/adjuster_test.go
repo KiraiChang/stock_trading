@@ -390,7 +390,7 @@ func (r *failingUpsertRepo) Upsert(context.Context, []store.CorporateAction) err
 func dividendAction(symbol string) store.CorporateAction {
 	return store.CorporateAction{
 		Symbol: symbol, EventDate: taipeiDay(2025, 7, 15),
-		ActionType: store.CorporateActionDividend,
+		ActionType:  store.CorporateActionDividend,
 		BeforePrice: 100, AfterPrice: 97, Factor: 0.97, VolumeFactor: 1, Source: "test",
 	}
 }

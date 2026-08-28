@@ -166,6 +166,50 @@ evaluation_universe:
   days: 10                       # 環境變數：EVALUATION_UNIVERSE_DAYS，往前幾個日曆天。
                                  # 10 而非 5 是為了容忍連假；成本與天數無關（1 request/檔）。
 
+# 日 K 缺漏偵測（issue.md I-091）。**沒有自己的 cron**：跟著 evaluation_universe 那輪
+# （16:00）在回補之後跑，但寫獨立的 job_runs 紀錄 candle_gap_detection——
+# 偵測判 partial 不會污染 evaluation_universe_sync 的狀態。
+#
+# 要解的問題：evaluation_universe_sync 的 success 只代表「請求沒失敗」，不代表
+# 「拿到了該有的資料」。2026-08-25 那輪 135 檔全成功，其中 2867 只回了 3 根
+# （視窗內有 7 個交易日），沒有任何東西報錯。
+#
+# ⚠️ 下列數值除了 market_stale_days 有一次 14:13 的觀測支撐，其餘都是保守初值，不是實測最佳值。
+# ⚠️ 超出合法範圍的值會被**退回預設或截到界限並記 Error log**（見 scheduler 的正規化函式）；
+#    型別解析失敗（例如 ENABLED=abc）則維持既有行為：**啟動失敗**。
+candle_gap_detection:
+  enabled: false                 # 環境變數：CANDLE_GAP_DETECTION_ENABLED
+  aggregate_ratio: 0.5           # 環境變數：CANDLE_GAP_DETECTION_AGGREGATE_RATIO
+                                 # 單一 (market, date) 缺漏比例「達到」(>=) 此值就短路成
+                                 # 來源級告警，不展開逐檔。合法 (0, 1]。
+  aggregate_min_symbols: 5       # 環境變數：CANDLE_GAP_DETECTION_AGGREGATE_MIN_SYMBOLS
+                                 # 該市場有效池不足此數時強制逐檔，不套比例——否則單檔
+                                 # 市場的合法停止買賣會被短路成來源級告警。合法 >= 1。
+  candidate_cap_per_run: 20      # 環境變數：CANDLE_GAP_DETECTION_CANDIDATE_CAP_PER_RUN
+                                 # **單位是候選標的數，不是 HTTP 請求數**：視窗跨月時同一
+                                 # 候選要兩次請求，請求上限＝cap × 視窗涵蓋的月份數。
+                                 # 池 135 檔時 ceil(135/20)=7 輪覆蓋完，約一週。合法 1~100。
+  timeout_sec: 300               # 環境變數：CANDLE_GAP_DETECTION_TIMEOUT_SEC，hard cap 900。
+                                 # 用自己的 context，不沿用回補的——回補逾時不該讓偵測連帶失效。
+  lookback_trading_days: 10      # 環境變數：CANDLE_GAP_DETECTION_LOOKBACK_TRADING_DAYS
+                                 # 往回幾個**交易日**（不是日曆天）。**刻意不沿用
+                                 # evaluation_universe.days**：那個值控制回補長度，耦合的話
+                                 # 調整回補成本會意外改變偵測範圍。合法 1~60。
+  request_interval_ms: 500       # 環境變數：CANDLE_GAP_DETECTION_REQUEST_INTERVAL_MS
+                                 # 對交易所端點的節流（2 req/s），與 FinMind 的 5 req/min 無關。
+                                 # 合法 >= 100；0 不是合法值（等於取消節流）。
+  market_stale_days: 2           # 環境變數：CANDLE_GAP_DETECTION_MARKET_STALE_DAYS
+                                 # 單位是**預期交易日不是日曆日**（跨週末時日曆日差 3 是誤導）。
+                                 # 市場層級端點實測當日 14:13 尚未更新，容忍一個交易日的發布延遲。
+  calendar_ttl_hours: 24         # 環境變數：CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS
+                                 # 年度日曆的行程內快取存活時間。歷史年度不會變，
+                                 # 當年度靠 TTL 容忍年中補班補假修訂。
+                                 # **失敗不寫快取**——否則一次限流會讓整個 TTL 期間都拿不到日曆。
+  breaker_failures: 5            # 環境變數：CANDLE_GAP_DETECTION_BREAKER_FAILURES
+                                 # **來源層級**的連續失敗門檻，與逐 symbol 的失敗計數是兩回事。
+  breaker_cooldown_min: 60       # 環境變數：CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN
+                                 # 冷卻後**自動**恢復，不需人工介入。
+
 # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
 # 是否啟用由程式有沒有注入 adjuster 決定。漏跑一次會讓該檔整段歷史出現假跳空，
 # 而重算是冪等的，所以沒有關掉它的情境。

@@ -48,12 +48,12 @@ func NewYahooDividendClient(ratePerMinute int, log *zap.Logger) *YahooDividendCl
 
 // rawYahooDividend 只列出實際會用到的欄位。
 type rawYahooDividend struct {
-	ExDate               string          `json:"exDate"`
-	RecordType           string          `json:"recordType"`
-	Symbol               string          `json:"symbol"`
-	ExDatePreviousClose  *rawYahooNumber `json:"exDatePreviousClose"`
-	ExDividend           *rawYahooCash   `json:"exDividend"`
-	ExRight              *rawYahooStock  `json:"exRight"`
+	ExDate              string          `json:"exDate"`
+	RecordType          string          `json:"recordType"`
+	Symbol              string          `json:"symbol"`
+	ExDatePreviousClose *rawYahooNumber `json:"exDatePreviousClose"`
+	ExDividend          *rawYahooCash   `json:"exDividend"`
+	ExRight             *rawYahooStock  `json:"exRight"`
 }
 
 type rawYahooNumber struct {

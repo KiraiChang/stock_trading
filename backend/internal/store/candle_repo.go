@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/trading/backend/pkg/timeutil"
 )
 
 const candleBulkInsertBatchSize = 50
@@ -36,6 +38,31 @@ type CandleRepo interface {
 	//
 	// symbols 為空時回空集合，不送查詢。
 	SymbolsWithCandleOn(ctx context.Context, symbols []string, timeframe string, day time.Time) ([]string, error)
+
+	// CandleDatesInRange 回傳這批標的在 [from, to) 內**實際有 K 棒的台北日期**
+	// （每檔升冪、已去重），鍵是 symbol。缺漏偵測用它跟「預期交易日集合」相減
+	// （見 docs/issue.md I-091）。
+	//
+	// **與 SymbolsWithCandleOn 的差別是問題不同**：那支問「今天抓過了沒」（布林），
+	// 這支問「這段期間到底有哪幾天」——偵測要獨立於回補流程，不能掛在「本輪抓了什麼」
+	// 上面。只看最新日期或本輪筆數都抓不到**視窗中段的洞**，而那正是跳過最佳化
+	// （T-062）之後的主要盲點。
+	//
+	// **一定要帶 symbols**，理由與 SymbolsWithCandleOn 相同：複合索引
+	// `(symbol, timeframe, ts)` 的首欄是 symbol，不約束它會退化成整張 candles 的
+	// seq scan（live 實測 368ms vs 1.96ms）。
+	//
+	// **回傳 `YYYY-MM-DD` 字串而不是 time.Time**：日期是拿來跟年度日曆推導出的預期
+	// 集合做集合運算的，字串比時間點更難用錯（不會有時區或時分秒殘留）。
+	// 這與 ZoneIdentityRepo.ListTradingDays 的選擇一致。
+	//
+	// **時區轉換在 Go 端做，不寫進 SQL**：`DATE(ts)` 與 `AT TIME ZONE` 的語法與時區
+	// 語意三個 driver 各不相同；查詢只用半開區間比較 timestamptz，三者一致。
+	//
+	// symbols 為空時回空 map，不送查詢。
+	CandleDatesInRange(
+		ctx context.Context, symbols []string, timeframe string, from, to time.Time,
+	) (map[string][]string, error)
 
 	// 還原係數的維護（見 docs/todo.md T-042）。實作在 corporate_action_repo.go，
 	// 與事件表的操作放在一起比較好讀。
@@ -189,6 +216,44 @@ func (r *candleRepo) GetLatest(ctx context.Context, symbol, timeframe string) (*
 		return nil, err
 	}
 	return &c, nil
+}
+
+// CandleDatesInRange 見介面上的說明。
+func (r *candleRepo) CandleDatesInRange(
+	ctx context.Context, symbols []string, timeframe string, from, to time.Time,
+) (map[string][]string, error) {
+	if len(symbols) == 0 {
+		return map[string][]string{}, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT symbol, ts FROM candles
+		WHERE symbol IN (?) AND timeframe=? AND ts >= ? AND ts < ?
+		ORDER BY symbol, ts
+	`, symbols, timeframe, from, to)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		Symbol string    `db:"symbol"`
+		TS     time.Time `db:"ts"`
+	}
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+
+	out := make(map[string][]string, len(symbols))
+	// 同一天可能有多列（不同 timeframe 已被 WHERE 濾掉，但仍防個位數的重複寫入），
+	// 所以用「與前一個相同就跳過」去重——輸入已依 (symbol, ts) 排序，相同日期必相鄰。
+	last := make(map[string]string, len(symbols))
+	for _, row := range rows {
+		day := row.TS.In(timeutil.TaipeiTZ).Format("2006-01-02")
+		if last[row.Symbol] == day {
+			continue
+		}
+		last[row.Symbol] = day
+		out[row.Symbol] = append(out[row.Symbol], day)
+	}
+	return out, nil
 }
 
 // SymbolsWithCandleOn 見介面上的說明。

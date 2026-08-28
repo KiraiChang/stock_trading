@@ -115,7 +115,7 @@ func TestSymbolConversion(t *testing.T) {
 	cases := []struct {
 		sys, yahoo string
 	}{
-		{"2330", "2330.TW"},   // TWSE 補預設尾碼
+		{"2330", "2330.TW"},      // TWSE 補預設尾碼
 		{"6488.TWO", "6488.TWO"}, // 已含尾碼原樣保留（上櫃）
 	}
 	for _, c := range cases {

@@ -12,7 +12,7 @@ import (
 // T-050：身分關聯決策的統計要能落地，而且**降級的那幾次也要留一列**。
 
 type identityStatsRepoStub struct {
-	rows     []store.SRIdentityStats
+	rows      []store.SRIdentityStats
 	insertErr error
 }
 

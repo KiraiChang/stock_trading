@@ -88,7 +88,10 @@ func KnownSchedulerJobs() []string { return append([]string(nil), knownScheduler
 // **`sr_zone_verify` 沒有自己的 cron**：它在 `RunDailyClose` 尾端無條件執行，
 // 但寫的是獨立的 job_runs 紀錄（失敗不影響 daily_close 的判定）。
 // 不列進來的話它的失敗只能靠直接查 DB 才看得到。
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "sr_analysis", "sr_analysis_chip"}
+// **`candle_gap_detection` 同理**：它掛在 `runEvaluationUniverseSync` 尾端、沒有自己的
+// cron，但寫獨立的 job_runs（`issue.md` I-091）。它的註冊條件比 parent 嚴格——
+// 自身 enabled ＋ 四項依賴齊全，所以 parent 有註冊不代表它有。
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "candle_gap_detection", "sr_analysis", "sr_analysis_chip"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
@@ -105,6 +108,10 @@ var jobStaleThreshold = map[string]time.Duration{
 	// 平日 16:00 跑一次，同樣跨週末，取 80 小時。
 	// 本 job 與 sr_evaluation 預設關閉，未註冊時 GetStatus 回 disabled 而不套用這個門檻。
 	"evaluation_universe_sync": 80 * time.Hour,
+	// 跟著 evaluation_universe_sync 那輪跑，所以門檻相同。
+	// 預設關閉；未註冊時 GetStatus 回 disabled 而不套用門檻——那正是「關閉」與
+	// 「該跑卻沒跑」要分得開的原因。
+	"candle_gap_detection": 80 * time.Hour,
 	// SR 分析排程（T-052）平日各跑一次（17:00 / 22:00），跨週末同樣取 80 小時。
 	// 預設關閉，未註冊時 GetStatus 回 disabled 而不套用門檻。
 	"sr_analysis":      80 * time.Hour,
@@ -132,7 +139,7 @@ func (h *SchedulerHandler) GetStatus(c *gin.Context) {
 	// ＋ stale（規格見 docs/api-reference.md 的 GET /scheduler/status）。
 	// 查詢回的是「表裡有紀錄的 job_name 各一列」（沒跑過的不會出現），
 	// 下面遍歷 knownSchedulerJobs 時才補成 never_run / disabled——
-	// **固定回 11 列是這個迴圈的保證，不是那句 SQL 的**。
+	// **固定回 len(knownSchedulerJobs) 列是這個迴圈的保證，不是那句 SQL 的**。
 	runs, err := h.repo.GetLatestPerJob(c.Request.Context())
 	if err != nil {
 		serverError(c, h.log, err, "scheduler: get status")

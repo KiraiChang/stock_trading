@@ -85,15 +85,15 @@ type ZoneIdentityRepo interface {
 
 // ZoneInstance 是身分本身。`PriceLow`/`PriceHigh` 是最近一次觀測值，**不是身分**。
 type ZoneInstance struct {
-	ZoneUID     string       `db:"zone_uid"`
-	Symbol      string       `db:"symbol"`
-	Timeframe   string       `db:"timeframe"`
-	Method      string       `db:"method"`
-	State       string       `db:"state"`
-	PriceLow    float64      `db:"price_low"`
-	PriceHigh   float64      `db:"price_high"`
-	FirstSeenAt time.Time    `db:"first_seen_at"`
-	LastSeenAt  time.Time    `db:"last_seen_at"`
+	ZoneUID     string    `db:"zone_uid"`
+	Symbol      string    `db:"symbol"`
+	Timeframe   string    `db:"timeframe"`
+	Method      string    `db:"method"`
+	State       string    `db:"state"`
+	PriceLow    float64   `db:"price_low"`
+	PriceHigh   float64   `db:"price_high"`
+	FirstSeenAt time.Time `db:"first_seen_at"`
+	LastSeenAt  time.Time `db:"last_seen_at"`
 	// ObservedAbsences 是資格閘門的次數軸：連續幾次「觀測到它不存在」。
 	// 由 matcher 的 next_observed_absences 維護，這裡只負責存回去。
 	ObservedAbsences int `db:"observed_absences"`
@@ -101,20 +101,20 @@ type ZoneInstance struct {
 	// AT_ZONE 期間 LastRole 是 AT_ZONE，而一世的角色仍是上一個已解析的方向。
 	// matcher 兩者都要——少了 LastRole 就分不出「這次才進 AT_ZONE」與
 	// 「已經在 AT_ZONE 好幾次了」，前者該記 ROLE_UNRESOLVED，後者不該。
-	LastRole string `db:"last_role"`
-	EndedAt          sql.NullTime `db:"ended_at"`
+	LastRole string       `db:"last_role"`
+	EndedAt  sql.NullTime `db:"ended_at"`
 }
 
 // ZoneRoleIncarnation 是「一世」。`Role` 只會是 SUPPORT / RESISTANCE——
 // AT_ZONE 是方向暫時無法解析，不開一世。
 type ZoneRoleIncarnation struct {
-	IncarnationUID string         `db:"incarnation_uid"`
-	ZoneUID        string         `db:"zone_uid"`
-	Seq            int            `db:"seq"`
-	Role           string         `db:"role"`
-	State          string         `db:"state"`
-	StartedAt      time.Time      `db:"started_at"`
-	EndedAt        sql.NullTime   `db:"ended_at"`
+	IncarnationUID string       `db:"incarnation_uid"`
+	ZoneUID        string       `db:"zone_uid"`
+	Seq            int          `db:"seq"`
+	Role           string       `db:"role"`
+	State          string       `db:"state"`
+	StartedAt      time.Time    `db:"started_at"`
+	EndedAt        sql.NullTime `db:"ended_at"`
 	// ExpiredAt 只在因長期缺席收攤時有值。與 EndedAt 分開：EndedAt 回答
 	// 「這一世何時結束」，ExpiredAt 回答「何時被判定為不再認得」。
 	ExpiredAt sql.NullTime   `db:"expired_at"`

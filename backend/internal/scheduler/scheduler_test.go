@@ -1199,9 +1199,9 @@ func (schedulerActionRepoStub) Symbols(context.Context) ([]string, error) { retu
 // schedulerDividendStub 依 symbol 決定行為：failFor 的檔回錯誤，blockFor 的檔
 // 等到 ctx 結束才回——後者用來製造「跑到一半逾時」而不依賴 sleep 的時序賭博。
 type schedulerDividendStub struct {
-	mu      sync.Mutex
-	asked   []string
-	failFor map[string]bool
+	mu       sync.Mutex
+	asked    []string
+	failFor  map[string]bool
 	blockFor map[string]bool
 }
 
@@ -1658,9 +1658,9 @@ func TestSRZoneVerifyUsesConfiguredWindow(t *testing.T) {
 // 設定沒注入或填了非正值時要退回預設，不能變成「往回驗 0 天」而靜默驗不到東西。
 func TestSRZoneVerifyFallsBackToDefaults(t *testing.T) {
 	for _, cfg := range []config.SRZoneVerifyConfig{
-		{},                             // 完全沒注入
-		{Days: 0, MaxAnalyses: 0},      // 明確填 0
-		{Days: -5, MaxAnalyses: -1},    // 負值
+		{},                          // 完全沒注入
+		{Days: 0, MaxAnalyses: 0},   // 明確填 0
+		{Days: -5, MaxAnalyses: -1}, // 負值
 	} {
 		repo := &schedulerSRZoneRepoStub{}
 		s := &Scheduler{jobRuns: &schedulerJobRunRepoStub{}, srZoneRepo: repo, log: zap.NewNop()}

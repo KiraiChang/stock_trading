@@ -824,6 +824,77 @@ T-002 / T-003 研究使用。**不參與任何交易決策或狀態推導。**
 
 ---
 
+## candle_verification_state
+
+日 K 缺漏偵測的逐標的驗證簿記（migration 074，原記於 `issue.md` I-091）。
+現況規格見 [`architecture.md`](./architecture.md)「日 K 缺漏偵測」。
+
+**要解的問題**：`evaluation_universe_sync` 的 `success` 只代表「請求沒失敗」，
+不代表「拿到了該有的資料」。2026-08-25 那輪 135 檔全成功，其中 `2867` 只回了 3 根
+（視窗內有 7 個交易日），沒有任何東西報錯。本表存的是**偵測自己的進度**，
+不是缺口本身。
+
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| symbol / timeframe | VARCHAR(10) / VARCHAR(5)（sqlite 為 TEXT） | 複合主鍵 |
+| last_attempted_at | TIMESTAMPTZ / DATETIME(0) / DATETIME，NULL | **公平排序鍵**。每次實際嘗試後更新，**不論成功或失敗** |
+| last_verified_at | TIMESTAMPTZ / DATETIME(0) / DATETIME，NULL | 只在**驗證成功**時更新。「確認有缺口」也算成功——那是一次有結論的驗證 |
+| last_result | VARCHAR(12)（sqlite 為 TEXT）NOT NULL | `verified` / `gap` / `deferred` / `unavailable`，有 CHECK 約束 |
+| consecutive_failures | INTEGER NOT NULL DEFAULT 0 | **逐 symbol** 的連續失敗數 |
+
+**時間欄位的三種型別依序為 PostgreSQL / MySQL / SQLite。**
+MySQL 用 `DATETIME(0)` 而非 `TIMESTAMPTZ`——本 schema 一律存 UTC，時區由應用層負責。
+
+**`last_result` 沒有 DEFAULT，寫入時必填**：給 `DEFAULT ''` 等於偷偷引入第五種狀態——
+宣告只有四個值卻讓空字串合法。值域靠 `CHECK` 把住（mysql 8.0.16 起才強制執行，
+更早的版本只解析不執行，所以寫入端本來就要保證）。
+
+⚠️ **`deferred` 必須在值域裡**：規格要求 `deferred` 也更新 `last_attempted_at`，
+而 `last_result` 是 NOT NULL ＋ CHECK——**首次就 deferred 的 symbol 沒有舊列可保留**，
+漏掉它會讓「對照源還沒發布到那天」這種正常情況變成寫入失敗。
+
+**`gap` 與 `unavailable` 是不同的軸，不是嚴重度階梯的兩格**：`gap` 是「驗成功了，
+結論是有缺口」，`unavailable` 是「根本沒驗成」。把兩者混為一談會讓「驗不了」被記成
+「驗過了沒問題」——那是這整個機制最該避免的失效。
+
+**刻意不建額外索引**：查詢一律是 `WHERE timeframe = ? AND symbol IN (…)`，由主鍵支撐；
+排序在 Go 端做（見下）。多一個沒人用的索引只是寫入成本。
+
+### 為什麼是獨立的表，而不是加欄位到 `evaluation_universe`
+
+1. 那張表的 `Upsert` 是「重新匯入 selection report」的**常態動作**，把驗證簿記混進去
+   會讓研究決策與運維狀態互相干擾；
+2. 候選來源日後可能不只池成員（`watchlists` 有同樣問題），綁在池表上會限制擴充；
+3. 入退池是研究決策、驗證進度是運維狀態，兩者生命週期不同。
+
+### ⛔ 排序不能下放到 SQL
+
+公平排序的第一順位是「**沒有列者優先**」，而兩個常見的寫法都不成立：
+
+* **沒有列 ≠ 欄位為 NULL**。`WHERE symbol IN (…)` 對首次出現的候選**根本不會回傳任何列**，
+  它不會變成排在最前面的 NULL，而是**直接消失**。
+* **`NULLS FIRST` 不是跨 driver 可用的語法**：MySQL 不支援，而且本 repo 至今從未用過它
+  （見 `issue.md` I-054：mysql 的 CRUD 從未被驗證）。
+
+所以 `LoadStates` **不帶 limit、也不排序**，只負責把已有的 state 查回來；
+候選清單與這份 map 的 LEFT-merge 與排序一律在 Go 端做。
+**repo 若先截斷，沒被回傳的既有 state 會被呼叫端誤認成「從未出現」而排到最前面**——
+排序直接壞掉，而且壞得很安靜。
+
+### `RecordAttempts` 的批次不得有重複鍵
+
+同一個 symbol 可能同時落在多個 aggregate 分組（它在兩個不同的缺漏日期都缺 K 棒）。
+PostgreSQL 的批次 `INSERT … ON CONFLICT DO UPDATE`
+**不允許同一個 statement 更新同一列兩次**，那會直接報錯而讓**整批**寫入失敗。
+
+去重是呼叫端的責任（它要做的本來就是「彙整成這個 symbol 的整體結論」），
+repo 仍會擋下重複鍵並回傳帶 symbol 的可讀錯誤。
+
+**`last_verified_at` 的 upsert 用 `COALESCE` 保護既有值**：本輪沒有任何成功驗證時傳 NULL
+進來，不能覆寫掉先前的成功時間——那會讓「上次驗成功是什麼時候」在一次失敗之後永遠遺失。
+
+---
+
 ## zone_instances / zone_role_incarnations / zone_transitions / zone_relations
 
 Zone 的跨交易日身分與生命週期（T-048 階段 B，migration 067）。**目前只寫不讀**——

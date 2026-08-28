@@ -289,7 +289,136 @@ symbol 是首欄；只約束 `timeframe` 與 `ts` 的話 PostgreSQL 16 沒有 sk
 >   任何 10 天內的洞都會被 upsert 補平——那個性質已經沒有了。
 >
 > 這是 T-062 的副作用，**當時沒有識別到**。缺口偵測因此不能只看「本輪筆數」或
-> 「最新日期」，必須對整池的**實際日期集合**掃缺洞，見 `issue.md` I-091。
+> 「最新日期」，必須對整池的**實際日期集合**掃缺洞——那就是下一節的
+> `candle_gap_detection`（原記於 `issue.md` I-091）。
+
+#### 日 K 缺漏偵測（`candle_gap_detection`）
+
+**要解的問題**：上面那支排程的 `success` 只代表「請求沒失敗」，不代表「拿到了該有的
+資料」。2026-08-25 那輪 135 檔全成功、`symbols_failed=0`，其中 `2867` 只回了 3 根
+（視窗內有 7 個交易日），**沒有任何東西報錯**。
+
+**沒有自己的 cron**：掛在 `runEvaluationUniverseSync` 尾端（回補之後才有意義），
+但寫**獨立的 `job_runs` 紀錄**，比照 `sr_zone_verify` 掛在 `daily_close` 尾端的既有 pattern
+——偵測判 `partial` 不會污染回補的狀態。用自己的 `context.WithTimeout`，
+**不沿用回補的 ctx**：回補逾時不該讓偵測連帶失效。**預設關閉。**
+
+##### 資料流
+
+```text
+池成員（ListActive）
+  → StatesBySymbols（is_listed / market，缺席＝unknown）
+  → 實際日期集合（CandleRepo.CandleDatesInRange，單一查詢）
+  → 預期交易日（TWSE 年度日曆，date= 參數，驗證年份）
+  → 差集 = 候選缺口
+  → 對照源陳舊度：lag >= market_stale_days → 整批 unavailable
+  → 缺漏日期晚於 source_as_of → deferred（不告警、不算失敗）
+  → 按 (market, missing_date) 分組；比例達標 → aggregate 告警，不逐檔
+  → 其餘：公平排序掃描 → 逐檔核對（TWSE STOCK_DAY／TPEx tradingStock）
+  → 依 (symbol, timeframe) coalesce → RecordAttempts
+  → finishRunDegraded(partial) ＋ error 以 "; " 合併
+```
+
+##### 三種結論必須分得開
+
+| 結論 | 條件 | job 狀態 |
+|---|---|---|
+| **正常** | 交易所那天也沒有成交（停止買賣／下市／休市） | `success` |
+| **確認缺口** | 交易所那天**有成交**、我們沒有 K 棒 | `partial` ＋ `upstream_data_gap` |
+| **驗不了** | 對照源失敗／格式變動／回應歸屬對不上／breaker 開啟／主檔查不到 | `partial` ＋ `verification_unavailable` |
+
+⚠️ **把第三種記成第一種，這個機制就在最需要它的時候靜默失效**——那正是它要消滅的
+問題形狀，只是換成發生在偵測器自己身上。所有讀不懂的回應一律 `verification_unavailable`，
+**不猜測、壞在明處**。
+
+⚠️ **`symbols_failed` 固定 0**：缺漏與不可用都不是「標的失敗」——那些標的的回補本身是
+成功的，上游回什麼就寫什麼。失敗的是「上游該給而沒給」。詳見
+[`api-reference.md`](./api-reference.md) 的 `partial` 第四種成因。
+
+##### 預期集合來自年度日曆，不是市場層級端點
+
+**實際日期集合只能回答「有哪些天」，回答不了「少了哪些天」**——沒有預期集合就沒有缺口。
+
+預期集合用 TWSE 的 `holidaySchedule`（整年預先公布，**不會停滯**），
+市場層級端點只用來算 `source_as_of` 與落後交易日數。
+
+⛔ **不能拿市場層級端點的最後日期當稽核右界**：它若回應成功、格式正常、內容卻停滯數日，
+視窗會跟著倒退，**所有比它新的缺口都不會被檢查，而且不會被歸類為驗證不可用**。
+
+⛔ **年度日曆不是「休市日清單」，不能集合相減**。實測 115 年度至少四種列型，
+兩個方向都會錯：
+
+| 列型 | 實例 | 是不是交易日 |
+|---|---|---|
+| 放假休市 | 1/1 開國紀念日、9/25 中秋節 | ❌ |
+| **正常交易日的標記** | 1/2 開始交易日、2/11 最後交易日、2/23 春節後開始交易 | ✅ **是** |
+| **市場無交易，僅辦理結算交割** | 2/12（四）、2/13（五） | ❌ |
+| 週末列 | 2/28（六） | ❌ |
+
+全部扣除 → 1/2、2/11、2/23 這三個真正的交易日被排除；只扣「放假」→ 2/12、2/13 被漏掉
+（它們是**平日、不是放假日，但市場無交易**）。所以規則是**逐列分類**，未知列型別一律
+`verification_unavailable`——這是中文字串比對，本質脆弱，那個降級方向就是為了讓
+TWSE 改字時**壞在明處**。
+
+**兩市場共用同一份日曆**（具名假設）：台灣兩市場的開休市日實務上一致。
+若日後出現單一市場臨時休市，該市場當天會整批落進 aggregate 告警而不是逐檔誤報——
+那是可接受的降級。
+
+##### 陳舊與 deferred
+
+`lag = |{ 交易日 d : source_as_of < d <= expected_last_trading_day }|`（**左開右閉**）。
+
+* **單位是交易日不是日曆日**：週五的資料到週一才更新，日曆日差 3、實際只落後一個交易時段。
+  用日曆日會讓每個週一都誤報。
+* **比較是 `lag >= market_stale_days`**（不是 `>`）：寫成 `>` 會在剛好等於門檻時漏報。
+  預設 2 的語意是「容忍一個交易日的發布延遲」。
+* 缺漏日期**晚於** `source_as_of` → **`deferred`**：對照源還沒發布那天，「查不到」不等於
+  「無成交」。不告警、不更新 `last_verified_at`、不加失敗計數，但**更新
+  `last_attempted_at`**（確實嘗試過，排序要前進），且**不讓該輪 degraded**。
+  它有時間上界——持續落後到 `lag >= market_stale_days` 就會升級成 `verification_unavailable`。
+
+##### 請求量的三道防線
+
+**最該被抓到的情境剛好也是請求量最大的情境**：上游某天整批漏給 → 全池都有候選 →
+逐檔逐月查個股端點 → 偵測本身變成對交易所的壓力測試。
+
+1. **aggregate 短路**：按 `(market, 缺漏日期)` 分組，該組 distinct symbol 數 ÷ 該市場有效池
+   達到 `aggregate_ratio` → 發一次來源級告警，**不展開逐檔**。
+   ⛔ 判定維度不是「缺口總筆數」——不同日期的零星缺口累加也會過門檻。
+   ⛔ 有效池 < `aggregate_min_symbols` 時**強制逐檔**：單檔市場那一檔合法停止買賣，
+   比例就是 100%，會被短路成來源級告警而違反「`2867` 不得告警」。
+2. **`candidate_cap_per_run`**：單位是**候選標的數，不是 HTTP 請求數**。一檔的所有月份
+   一次做完才扣一個額度——按月份扣會讓 cap 20 在跨月時只處理 10 檔，更嚴重的是可能
+   **在同一 symbol 的月份中途停止**，拿一半的結果去做跨月 coalesce。
+3. **`request_interval_ms` ＋ 來源層級 breaker**。breaker 是**行程內**的 runtime 安全閥，
+   與逐 symbol 的 `consecutive_failures` 是**兩層獨立的計數**——同一來源對五個 symbol
+   各失敗一次，逐 symbol 都是 1，推導不出「這個來源已連敗五次」。
+   ⚠️ **只有真的送出且失敗的請求才累加 breaker**：能力限制與 `deferred` 沒有發出失敗請求，
+   算進去等於用一個已知限制去癱瘓一個健康的來源。
+
+##### 公平性
+
+候選排序鍵是 **(沒有 state 者優先, `last_attempted_at` 由舊到新, symbol)**，
+**掃描而非預先截斷**——先截斷的話，處理到一半某來源才斷路，剩下的只會被跳過而
+其他來源的候選不會遞補，該輪等於只驗了幾個。
+
+⚠️ **排序鍵是 `last_attempted_at` 不是 `last_verified_at`**：只在成功後更新的話，
+持續失敗的前 `cap` 個會永遠最舊、每輪繼續佔滿配額，後面的候選永遠輪不到。
+
+在「breaker 未開啟」且「state 寫入成功」的前提下，**任一候選最遲在第 `ceil(N/cap)` 個
+排程週期被嘗試**。兩個前提失敗時都會讓該輪 `degraded`，所以**停滯是看得見的**。
+
+⛔ **只要有任何候選因 breaker 被跳過，該輪就是 `partial`**——否則「部分驗不了但其他驗成功」
+會顯示 `success`，又變回這支排程要消滅的形狀。
+
+**持續存在的缺口每輪都會回報**，這是刻意的：把它壓成一次性通知，等於讓一個仍然存在的
+問題消失。
+
+##### 相關
+
+* 表結構與 repo 契約：[`database-schema.md`](./database-schema.md) `candle_verification_state`
+* job 狀態與 `partial` 語意：[`api-reference.md`](./api-reference.md)
+* 參數與合法範圍：`backend/config.yaml` 的 `candle_gap_detection` 區段
 
 ##### live 實測：日常節省遠小於預期（2026-08-26 首次以新版執行）
 

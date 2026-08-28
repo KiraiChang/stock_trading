@@ -166,9 +166,9 @@ func TestDeleteBeforeKeepsRunsInsideRetention(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	cutoff := now.AddDate(0, 0, -30)
 
-	seedRun(t, repo, "old", "success", cutoff.AddDate(0, 0, -1))  // 31 天前 → 刪
-	seedRun(t, repo, "edge", "success", cutoff.AddDate(0, 0, 1))  // 29 天前 → 留
-	seedRun(t, repo, "today", "success", now)                     // 當天 → 留
+	seedRun(t, repo, "old", "success", cutoff.AddDate(0, 0, -1)) // 31 天前 → 刪
+	seedRun(t, repo, "edge", "success", cutoff.AddDate(0, 0, 1)) // 29 天前 → 留
+	seedRun(t, repo, "today", "success", now)                    // 當天 → 留
 
 	deleted, err := repo.DeleteBefore(ctx, cutoff)
 	if err != nil {

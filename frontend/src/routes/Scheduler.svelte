@@ -27,6 +27,10 @@
     sr_evaluation: 'SR Zone 驗證',
     corporate_action_sync: '公司行動與股價還原',
     evaluation_universe_sync: '評估標的池同步',
+    // 沒有自己的 cron，跟著 evaluation_universe_sync 在回補之後跑，但寫獨立的 job_runs。
+    // **狀態對照表不動**：它的 partial 沿用既有語意（見 statusLabel），
+    // 只是多了兩種成因——「驗不了」與「確認上游有缺漏」。
+    candle_gap_detection: '日 K 缺漏偵測',
   }
 
   const statusLabel: Record<string, string> = {

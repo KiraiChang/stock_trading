@@ -247,7 +247,7 @@ func (s *Syncer) computeAndStoreScore(ctx context.Context, symbol string, date t
 
 // hasDataForDate 檢查 date 當天是否有任一種原始資料落地（candle、法人
 // 買賣超、融資融券），藉此判斷這天是不是真的有發布資料的交易日。任一種
-//存在就視為有效，不要求三者都齊全——避免單一資料來源延遲就整天被跳過。
+// 存在就視為有效，不要求三者都齊全——避免單一資料來源延遲就整天被跳過。
 func (s *Syncer) hasDataForDate(ctx context.Context, symbol string, date time.Time) (bool, error) {
 	candles, err := s.candleRepo.GetRange(ctx, symbol, "1d", date, date)
 	if err != nil {

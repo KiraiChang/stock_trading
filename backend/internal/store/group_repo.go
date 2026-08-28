@@ -97,6 +97,7 @@ func (r *groupRepo) Create(ctx context.Context, userID uint64, name string) (*Gr
 //   - actor 不得修改自己的角色（擋 ADMIN 自我提權為 OWNER、擋 OWNER 自我降級鎖出）。
 //   - 只有 OWNER 能授予 OWNER 角色，或異動一個現任 OWNER 的角色；ADMIN 不得碰 OWNER。
 //   - 不得把最後一名 OWNER 降級，避免 group 變成無 OWNER。
+//
 // check 與 upsert 放在同一個交易內，避免併發下最後一名 OWNER 判斷產生 race。
 func (r *groupRepo) AddMember(ctx context.Context, actorUserID uint64, groupID uint64, userID uint64, role string) error {
 	role = normalizeGroupRole(role)

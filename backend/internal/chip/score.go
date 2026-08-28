@@ -1,7 +1,8 @@
 package chip
 
 // 對應 docs/chip-analysis-design.md 第5節總分公式：
-//   total_score = institutional*0.35 + margin*0.20 + broker*0.30 + concentration*0.15
+//
+//	total_score = institutional*0.35 + margin*0.20 + broker*0.30 + concentration*0.15
 const (
 	totalInstitutionalWeight = 0.35
 	totalMarginWeight        = 0.20

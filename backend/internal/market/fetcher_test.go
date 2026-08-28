@@ -114,7 +114,6 @@ func TestBackfillHistoryNilCallback(t *testing.T) {
 	}
 }
 
-
 func TestToStoreCandlesDropsNonPositivePrices(t *testing.T) {
 	// live DB 曾出現 4 根 OHLCV 全為 0 的日 K。無成交的日子應該是
 	// 「沒有那筆資料」，不是一根價格為 0 的 K 棒——留著會污染 MA / ATR / zone 建構，

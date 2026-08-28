@@ -192,7 +192,6 @@ func TestBuildZoneIdentityWriteCarriesLineageAndTransitions(t *testing.T) {
 	}
 }
 
-
 // ── review 修正的回歸測試 ──
 
 func TestBuildZoneIdentityWriteTerminatesSplitParents(t *testing.T) {

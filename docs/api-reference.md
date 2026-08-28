@@ -800,6 +800,7 @@ SIGTERM 升級成 SIGKILL，一輪 27 分鐘的 job 等不到自己收尾。**�
 |---|---|---|
 | `corporate_action_sync` | 當日名單大小 | **併進 `symbols_failed`**——那邊的「沒輪到」是**逾時導致該做而沒做** |
 | `evaluation_universe_sync` | 池大小（135） | 不計入失敗，只記進 log 的 `skipped` |
+| `candle_gap_detection` | 本輪有效池大小 | `symbols_failed` **固定 0**；缺漏與不可用一律走 `degraded`，見下方 `partial` 的第四種成因 |
 | `sr_analysis` / `sr_analysis_chip` | watchlist 大小（11） | 同上 |
 
 **分母不能換成「實際處理數」**：那會讓狀態頁的數字每天浮動（11 / 10 / 11 …），
@@ -842,7 +843,22 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 涵蓋「名單內有標的失敗」「逾時沒跑完」「名單本身就少了一批」三種，
 `symbols_failed = 0` 的 `partial` 就是第三種。
 
+**`candle_gap_detection` 為 `partial` 加了第四種成因：結論本身不完整或是壞消息**
+（原記於 `issue.md` I-091）。它的 `symbols_failed` **固定為 0**——缺漏與驗證不可用都不是
+「標的失敗」（那些標的的回補本身是成功的，上游回什麼就寫什麼），所以一律走 `degraded`：
+
+| `error` 前綴 | 意義 |
+|---|---|
+| `upstream_data_gap: …` | **驗過了，而且真的缺**——交易所那天有成交、我們沒有 K 棒 |
+| `verification_unavailable: …` | **驗不了**——對照源失敗／格式變動／回應歸屬對不上／breaker 開啟／主檔查不到 |
+| `verification_state_read_failed` / `verification_state_write_failed` | 公平排序簿記讀寫失敗，該輪的排序可能停滯 |
+
+⚠️ **`gap` 與 `unavailable` 不是同一件事的輕重**：前者是「驗成功了，結論是壞消息」，
+後者是「根本沒驗成」。把驗不了記成驗過了，這個機制就會在最需要它的時候靜默失效——
+那正是它要消滅的問題形狀。
+
 `error` 欄一輪可能同時記到兩件事（例如降級 ＋ 逾時），以 `; ` 串接。
+`candle_gap_detection` 同理：缺口、驗證不可用與 breaker 跳過會一起出現，**互不覆蓋**。
 
 #### 「整輪沒開始跑」記 `failed`，「沒有東西要跑」記 `success`
 
@@ -858,6 +874,11 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 或 `partial`（傳 `(0,1)`）——兩者都不誠實，那輪一檔都沒處理。
 `corporate_action_sync`、`sr_zone_verify`、`sr_analysis` / `sr_analysis_chip`
 四支都適用這條（2026-08-24）。
+
+⚠️ **`candle_gap_detection` 刻意不套這條**（原記於 `issue.md` I-091）：它取不到候選清單時
+記 **`partial`（`degraded`）而不是 `failed`**。理由是這支的產出是「結論」不是「處理量」——
+`failed` 的語意是「這輪整個沒跑起來」，而「拿不到清單所以驗不了」要落在**與其他驗不了
+情境同一個桶**（`verification_unavailable`），否則讀的人得分兩個地方看同一類問題。
 
 **「讀不到 watchlist」在不同 job 有不同的正確答案，不要互相套用**：
 `corporate_action_sync` 讀不到時仍會跑當日分片，記 `partial` 是對的——真的跑了一批，
@@ -888,6 +909,7 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 | `sr_evaluation` | 72 小時 | 每日 |
 | `corporate_action_sync` | 80 小時 | 平日每日（跨週末最長週五→週一） |
 | `evaluation_universe_sync` | 80 小時 | 平日每日 |
+| `candle_gap_detection` | 80 小時 | 跟著 `evaluation_universe_sync` 那輪跑，所以門檻相同 |
 
 **把 cron 設得比門檻稀疏會讓該 job 永遠顯示 stale**（例如改成每週一跑，間隔 168 小時 > 80），
 即使它完全照設定執行。這正是本頁上面警告的那種「訓練使用者忽略 stale 旗標」。

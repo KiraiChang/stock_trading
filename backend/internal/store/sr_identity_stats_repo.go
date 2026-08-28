@@ -26,13 +26,13 @@ type SRIdentityStats struct {
 	MatchedByCurrent int `db:"matched_by_current" json:"matched_by_current"`
 	MatchedByAlias   int `db:"matched_by_alias"   json:"matched_by_alias"`
 
-	UnmatchedKeys      int `db:"unmatched_keys"      json:"unmatched_keys"`
-	CarriedNoop        int `db:"carried_noop"        json:"carried_noop"`
-	ZoneEndedSkipped   int `db:"zone_ended_skipped"  json:"zone_ended_skipped"`
-	ChainConflicts     int `db:"chain_conflicts"     json:"chain_conflicts"`
-	ChainKeyAmbiguous  int `db:"chain_key_ambiguous" json:"chain_key_ambiguous"`
-	AliasAmbiguous     int `db:"alias_ambiguous"     json:"alias_ambiguous"`
-	CarriedParseFail   int `db:"carried_parse_fail"  json:"carried_parse_fail"`
+	UnmatchedKeys     int `db:"unmatched_keys"      json:"unmatched_keys"`
+	CarriedNoop       int `db:"carried_noop"        json:"carried_noop"`
+	ZoneEndedSkipped  int `db:"zone_ended_skipped"  json:"zone_ended_skipped"`
+	ChainConflicts    int `db:"chain_conflicts"     json:"chain_conflicts"`
+	ChainKeyAmbiguous int `db:"chain_key_ambiguous" json:"chain_key_ambiguous"`
+	AliasAmbiguous    int `db:"alias_ambiguous"     json:"alias_ambiguous"`
+	CarriedParseFail  int `db:"carried_parse_fail"  json:"carried_parse_fail"`
 
 	// InvariantViolations 與上面幾欄**語意不同**：上面問的是「分佈正不正常」，
 	// 這一欄問的是「不變式有沒有被違反」，而它**必須恆為零**。不要混進同一組比率。

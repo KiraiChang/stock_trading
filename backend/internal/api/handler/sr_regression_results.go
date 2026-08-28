@@ -194,4 +194,3 @@ func (h *SRRegressionResultHandler) runEvaluationJob(jobID string, request analy
 		h.log.Error("sr evaluation job: mark done failed", zap.String("job_id", jobID), zap.Error(err))
 	}
 }
-

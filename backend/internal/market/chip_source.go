@@ -8,7 +8,7 @@ import (
 
 // ErrBrokerDataUnsupported 代表目前 provider 沒有分點資料來源（例如 FinMind
 // 沒有這個 dataset），呼叫端（chip.Syncer）應把 broker_score fallback 為中性，
-//而不是視為抓取失敗（見 docs/chip-analysis-design.md 第2節 fallback 策略）。
+// 而不是視為抓取失敗（見 docs/chip-analysis-design.md 第2節 fallback 策略）。
 var ErrBrokerDataUnsupported = errors.New("chip: broker/branch trading data not supported by this provider")
 
 // InstitutionalTrade 為三大法人買賣超原始資料，單位為股。

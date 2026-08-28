@@ -1,13 +1,13 @@
 package market
 
 import (
-	"sync"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trading/backend/internal/config"

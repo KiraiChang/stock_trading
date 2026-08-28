@@ -19,6 +19,21 @@ export EVALUATION_UNIVERSE_ENABLED="false"  # 匯入選池成員後改為 "true"
 export EVALUATION_UNIVERSE_CRON="0 16 * * 1-5"  # 台北時區
 export EVALUATION_UNIVERSE_DAYS="10"       # 往前幾個日曆天；10 是為了容忍連假，成本與天數無關
 
+# 日 K 缺漏偵測（issue.md I-091）。沒有自己的 cron，跟著 evaluation_universe 那輪
+# （16:00）在回補之後跑，但寫獨立的 job_runs 紀錄 candle_gap_detection。
+# 要解的是「evaluation_universe_sync 的 success 只代表請求沒失敗，不代表拿到該有的資料」。
+export CANDLE_GAP_DETECTION_ENABLED="false"          # 驗證通過前預設關閉
+export CANDLE_GAP_DETECTION_AGGREGATE_RATIO="0.5"    # 單一 (market, date) 缺漏比例 >= 此值就短路，合法 (0, 1]
+export CANDLE_GAP_DETECTION_AGGREGATE_MIN_SYMBOLS="5"  # 有效池不足此數時強制逐檔，不套比例
+export CANDLE_GAP_DETECTION_CANDIDATE_CAP_PER_RUN="20" # **候選數不是請求數**；請求上限＝cap × 視窗月份數
+export CANDLE_GAP_DETECTION_TIMEOUT_SEC="300"        # 整輪上限，hard cap 900
+export CANDLE_GAP_DETECTION_LOOKBACK_TRADING_DAYS="10" # **交易日**不是日曆天；刻意不沿用 EVALUATION_UNIVERSE_DAYS
+export CANDLE_GAP_DETECTION_REQUEST_INTERVAL_MS="500"  # 對交易所節流（2 req/s）；合法 >= 100
+export CANDLE_GAP_DETECTION_MARKET_STALE_DAYS="2"    # 單位是預期交易日，不是日曆日
+export CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS="24"
+export CANDLE_GAP_DETECTION_BREAKER_FAILURES="5"     # **來源層級**，與逐 symbol 的失敗計數是兩回事
+export CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN="60"  # 冷卻後自動恢復
+
 # 定期對 watchlist 產生 SR zone 分析（T-052）：每交易日兩輪，17:00 與 22:00。
 # 這是 production 驗證母體的唯一來源——沒有它，stock_sr_zone_analyses 只會累積人工點擊的
 # 零星幾筆，decision replay 的分佈比較（issue.md I-074、todo.md T-049）永遠做不了。

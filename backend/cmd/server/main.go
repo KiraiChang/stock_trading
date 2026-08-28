@@ -225,6 +225,19 @@ func main() {
 	// **必須在 sched.Start() 之前**：Start() 當下才決定要不要註冊 cron，
 	// 之後再注入不會有任何效果也不會報錯（靜默失效）。
 	sched.SetEvaluationUniverse(evaluationUniverseRepo, candleRepo, stockSymbolRepo, cfg.EvaluationUniverse)
+	// 日 K 缺漏偵測（issue.md I-091）。另外兩項必要依賴（StockSymbolRepo / CandleRepo）
+	// 由上一行注入，這裡不重複收——各自注入會讓兩邊可能看到不同的東西。
+	// **breaker 與 client 同壽命**：斷路狀態是行程內的 runtime 安全閥，不跨重啟保存。
+	//
+	// ⚠️ **正規化與建 client 綁在同一支函式裡**（NewCandleGapDependencies）：
+	// 兩者脫鉤過一次——client 拿原始設定、scheduler 拿正規化後的，於是
+	// `request_interval_ms=0` 時畫面顯示 100ms 而實際完全不節流。
+	// **這一行的接線**由 cmd/server 的 TestCandleGapWiringUsesNormalisingHelper 守住
+	// （AST 檢查：必須呼叫這支 helper，且不得直接建 client）；
+	// helper 自身的行為則由 scheduler 的 TestCandleGapDependenciesUseNormalisedValues 守住。
+	// 兩者缺一不可——後者證明不了「有人在用它」。
+	gapCfg, _, gapReference := scheduler.NewCandleGapDependencies(cfg.CandleGapDetection, log)
+	sched.SetCandleGapDetection(store.NewCandleVerificationRepo(db), gapReference, gapCfg)
 	// 收盤驗證的覆蓋窗口（見 docs/architecture.md）。沒注入也能跑（零值退回預設），但那樣就吃不到
 	// config 的調整，所以與其他注入放在一起、同樣在 Start() 之前。
 	sched.SetSRZoneVerify(cfg.SRZoneVerify)

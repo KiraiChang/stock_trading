@@ -129,7 +129,16 @@ type Scheduler struct {
 	evaluationUniverseCandles store.CandleRepo
 	// evaluationUniverseSymbols 是證券主檔，用來把已下市的池成員排除在回補之外
 	// （`issue.md` I-094）。**未注入時不過濾**，行為與導入前相同。
+	//
+	// ⚠️ 它同時是缺漏偵測（I-091）的必要依賴——那邊靠它的 `market` 決定要打 TWSE 還是
+	// TPEx 端點。**對 parent 是 fail-open 的選填，對偵測是硬性必要**，見
+	// `candleGapDetectionReady`。
 	evaluationUniverseSymbols store.StockSymbolRepo
+	// 日 K 缺漏偵測（`issue.md` I-091）。沒有自己的 cron，掛在 runEvaluationUniverseSync
+	// 尾端，但寫獨立的 job_runs 紀錄。四項必要依賴缺任一項即不註冊。
+	candleVerification store.CandleVerificationRepo
+	exchangeReference  market.ExchangeReference
+	candleGapCfg       config.CandleGapDetectionConfig
 	// universeSyncRunning 擋重複觸發。這個 job 要跑約 26 分鐘，cron 與人工觸發撞在一起
 	// 會讓兩批請求共用同一個節流器互相拖慢，且 job_runs 出現兩筆難以判讀的紀錄。
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
@@ -290,6 +299,20 @@ func (s *Scheduler) Start() {
 				zap.String("cron", s.evaluationUniverseCfg.Cron), zap.Error(err))
 		} else {
 			s.markRegistered("evaluation_universe_sync")
+			// **兩個 job 的註冊條件不同，不得「同時標記」**：偵測還要額外滿足
+			// 「自身 enabled」與「四項必要依賴齊全」。同時標記會讓偵測關閉或依賴缺失時
+			// 仍顯示已註冊，/scheduler/status 就會出現 never_run ＋ stale 的假警報。
+			if s.candleGapCfg.Enabled && !s.candleGapDetectionReady() {
+				// **不得等到執行時才 nil panic**，比照 evaluationUniverse 的「未注入即不註冊」。
+				s.log.Error("candle gap detection 已啟用但依賴不齊，不註冊",
+					zap.Bool("verification", s.candleVerification != nil),
+					zap.Bool("reference", s.exchangeReference != nil),
+					zap.Bool("stock_symbols", s.evaluationUniverseSymbols != nil),
+					zap.Bool("candles", s.evaluationUniverseCandles != nil))
+			}
+			if s.candleGapDetectionEnabled() {
+				s.markRegistered(candleGapDetectionJob)
+			}
 		}
 	}
 
@@ -988,11 +1011,16 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	if err != nil {
 		s.log.Error("evaluation universe list failed", zap.Error(err))
 		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 1, err.Error())
+		// **偵測仍要跑到「建立紀錄」為止**：連候選清單都拿不到＝這輪驗不了，
+		// 那正是要看得見的狀態。靜默略過會讓 /scheduler/status 停在上一次的結果。
+		s.reportCandleGapDetectionUnavailable(ctx, "取不到候選清單")
 		return
 	}
 	if len(entries) == 0 {
 		// 空池不是錯誤：表建好但還沒匯入清單時就是這個狀態。
 		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 0, "")
+		// 偵測照跑，記 success / total=0——與 parent 的處理一致。
+		s.runCandleGapDetection(ctx, nil, map[string]store.StockSymbolState{}, nil)
 		return
 	}
 
@@ -1006,7 +1034,12 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	poolSize := len(entries)
 	// **順序不能換**：下市過濾要在「今天抓過了沒」之前。反過來的話，已下市但今天
 	// 剛好被跳過的標的不會進入下市計數，`delisted` 就會隨當日的跳過情況浮動。
-	symbols, delisted, unknown := s.dropDelistedSymbols(ctx, symbols)
+	// **states 與 statesErr 之後要交給缺漏偵測**：同一次主檔查詢兩邊共用，
+	// 但兩者的收斂不同——I-094 查不到就全量回補（溫和），I-091 查不到則整批
+	// verification_unavailable（驗不了卻記 success 正是它要消滅的誤導）。
+	poolSymbols := append([]string(nil), symbols...)
+	states, statesErr := s.loadStockSymbolStates(ctx, symbols)
+	symbols, delisted, unknown := dropDelistedSymbols(symbols, states, statesErr)
 	symbols, skipped := s.dropSymbolsSyncedToday(ctx, symbols)
 
 	days := s.evaluationUniverseCfg.Days
@@ -1054,6 +1087,11 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 		zap.Int("stock_symbol_unknown", unknown),
 		zap.Int("failed", failed), zap.Int("days", days))
 	s.finishRun(ctx, runID, "evaluation_universe_sync", poolSize, failed, lastErr)
+
+	// **偵測掛在尾端但寫獨立的 job_runs**（比照 sr_zone_verify 掛在 daily_close 尾端）：
+	// 它判 partial 時不會污染 evaluation_universe_sync 的狀態，兩者要分得開。
+	// 未啟用或依賴不齊時 runCandleGapDetection 自己會早退，不寫任何紀錄。
+	s.runCandleGapDetection(ctx, poolSymbols, states, statesErr)
 }
 
 // evaluationUniverseTimeframe 是這個池唯一維護的 timeframe。池不進盤中掃描，
@@ -1080,26 +1118,50 @@ const evaluationUniverseTimeframe = "1d"
 //
 // **不採「一次性把 active 設 false」**：那會在主檔誤判時靜默清掉池成員，而重新入池是人工
 // 動作。每輪過濾是可逆的——主檔隔天恢復，這裡就自動恢復抓取。
-func (s *Scheduler) dropDelistedSymbols(
+func (s *Scheduler) loadStockSymbolStates(
 	ctx context.Context, symbols []string,
-) ([]string, int, int) {
+) (map[string]store.StockSymbolState, error) {
 	if s.evaluationUniverseSymbols == nil {
-		return symbols, 0, 0
+		return nil, nil
 	}
 	states, err := s.evaluationUniverseSymbols.StatesBySymbols(ctx, symbols)
 	if err != nil {
-		// Error 而不是 Warn：這代表主檔查不到，本輪會對已下市標的照樣發請求。
+		// Error 而不是 Warn：這代表主檔查不到，本輪會對已下市標的照樣發請求，
+		// 而缺漏偵測那邊更嚴重——完全失去 market routing。
 		s.log.Error("evaluation universe 證券主檔查詢失敗，本輪不過濾下市標的", zap.Error(err))
+		return nil, err
+	}
+	return states, nil
+}
+
+// dropDelistedSymbols 依主檔狀態過濾，回傳 (保留的標的, 已下市數, 主檔查無數)。
+//
+// **是純函式**：查詢已由 loadStockSymbolStates 做掉，同一份結果要同時給回補與缺漏偵測用，
+// 查兩次會讓兩邊可能看到不同的主檔快照。
+//
+// 判定是三態：
+//
+//	is_listed = true   → 保留
+//	is_listed = false  → 過濾，計入 delisted
+//	主檔查無該 symbol   → **保留**（fail-open），計入 unknown
+//
+// 第三態不能省：新入池的標的可能還沒被 stock_symbol_sync 收錄，主檔同步失敗那天也會整批
+// 查無。**map 裡沒有那個 key 是 unknown 不是下市**——兩者處置相反，寫錯不會有任何東西報錯。
+//
+// **states 為 nil（未注入或查詢失敗）時維持全量回補**，降級方向與 dropSymbolsSyncedToday
+// 一致：「多抓一點」可接受，「靜默少抓」不可接受。
+func dropDelistedSymbols(
+	symbols []string, states map[string]store.StockSymbolState, err error,
+) ([]string, int, int) {
+	if err != nil || states == nil {
 		return symbols, 0, 0
 	}
-
 	kept := make([]string, 0, len(symbols))
 	delisted := 0
 	unknown := 0
 	for _, symbol := range symbols {
 		state, ok := states[symbol]
 		if !ok {
-			// 主檔還沒收錄：保留回補，但要記下來——一直有數字代表兩份清單在分岔。
 			unknown++
 			kept = append(kept, symbol)
 			continue
@@ -1109,10 +1171,6 @@ func (s *Scheduler) dropDelistedSymbols(
 			continue
 		}
 		kept = append(kept, symbol)
-	}
-	if delisted > 0 || unknown > 0 {
-		s.log.Info("evaluation universe 主檔過濾",
-			zap.Int("delisted", delisted), zap.Int("stock_symbol_unknown", unknown))
 	}
 	return kept, delisted, unknown
 }

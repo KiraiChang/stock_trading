@@ -7,7 +7,8 @@ import (
 )
 
 // 對應 docs/chip-analysis-design.md 第5節公式：
-//   institutional_score = foreign*0.4 + investment_trust*0.35 + dealer*0.1 + total_net_buy_ratio*0.15
+//
+//	institutional_score = foreign*0.4 + investment_trust*0.35 + dealer*0.1 + total_net_buy_ratio*0.15
 const (
 	institutionalForeignWeight    = 0.4
 	institutionalTrustWeight      = 0.35

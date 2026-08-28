@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -202,5 +203,105 @@ func TestSymbolsWithCandleOnWithNoSymbols(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("空清單應回 0 筆，得到 %v", got)
+	}
+}
+
+// ── I-091：缺漏偵測要的「實際日期集合」 ──────────────────────────────────────
+
+// 本體：回傳的是**台北日期**，而且中段的洞看得出來。
+//
+// 只看最新日期或本輪筆數都抓不到視窗中段的缺漏，而那正是 T-062 的跳過最佳化之後的
+// 主要盲點——某檔今天有 K 棒就會被整檔跳過，五天前那個洞永遠不會被重新抓取。
+func TestCandleDatesInRangeReturnsTaipeiDatesAndExposesMiddleGap(t *testing.T) {
+	repo, ctx := newCandleRepoForTest(t)
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, timeutil.TaipeiTZ)
+	to := from.AddDate(0, 0, 5)
+
+	// 8/24、8/26、8/27 有，8/25 是中段的洞。
+	seedCandle(t, repo, "2330", "1d", from.Add(13*time.Hour+30*time.Minute))
+	seedCandle(t, repo, "2330", "1d", from.AddDate(0, 0, 2).Add(13*time.Hour+30*time.Minute))
+	// **台北 00:30**：用 UTC 日界會被算成前一天，日期就會標錯。
+	seedCandle(t, repo, "2330", "1d", from.AddDate(0, 0, 3).Add(30*time.Minute))
+
+	got, err := repo.CandleDatesInRange(ctx, []string{"2330"}, "1d", from, to)
+	if err != nil {
+		t.Fatalf("CandleDatesInRange failed: %v", err)
+	}
+	want := []string{"2026-08-24", "2026-08-26", "2026-08-27"}
+	if !reflect.DeepEqual(got["2330"], want) {
+		t.Errorf("回傳 %v, 期望 %v（升冪、台北日期、8/25 應缺）", got["2330"], want)
+	}
+}
+
+// 區間是半開的 `[from, to)`，兩端都要驗——多算或少算一天都會直接造成誤報或漏報。
+func TestCandleDatesInRangeUsesHalfOpenInterval(t *testing.T) {
+	repo, ctx := newCandleRepoForTest(t)
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, timeutil.TaipeiTZ)
+	to := from.AddDate(0, 0, 2)
+
+	seedCandle(t, repo, "2330", "1d", from.Add(-time.Second)) // 區間前一刻，排除
+	seedCandle(t, repo, "2330", "1d", from)                   // 起點，含
+	seedCandle(t, repo, "2330", "1d", to.Add(-time.Second))   // 終點前一刻，含
+	seedCandle(t, repo, "2330", "1d", to)                     // 終點，排除
+
+	got, err := repo.CandleDatesInRange(ctx, []string{"2330"}, "1d", from, to)
+	if err != nil {
+		t.Fatalf("CandleDatesInRange failed: %v", err)
+	}
+	want := []string{"2026-08-24", "2026-08-25"}
+	if !reflect.DeepEqual(got["2330"], want) {
+		t.Errorf("回傳 %v, 期望 %v（半開區間 [from, to)）", got["2330"], want)
+	}
+}
+
+// 多檔一次查回，且**完全沒有 K 棒的標的不會有 key**。
+//
+// 呼叫端據此區分「這檔整段都缺」與「這檔有幾天缺」，兩者的處置不同。
+// timeframe 也要有效：同一檔的 1m K 棒不該混進日 K 的日期集合。
+func TestCandleDatesInRangeGroupsBySymbolAndFiltersTimeframe(t *testing.T) {
+	repo, ctx := newCandleRepoForTest(t)
+	from := time.Date(2026, 8, 24, 0, 0, 0, 0, timeutil.TaipeiTZ)
+	to := from.AddDate(0, 0, 3)
+
+	seedCandle(t, repo, "2330", "1d", from.Add(13*time.Hour))
+	seedCandle(t, repo, "2454", "1d", from.AddDate(0, 0, 1).Add(13*time.Hour))
+	// 1m 的 K 棒不該出現在 1d 的日期集合裡。
+	seedCandle(t, repo, "6182", "1m", from.Add(13*time.Hour))
+	// 沒被問到的標的不該出現。
+	seedCandle(t, repo, "9999", "1d", from.Add(13*time.Hour))
+
+	got, err := repo.CandleDatesInRange(ctx, []string{"2330", "2454", "6182"}, "1d", from, to)
+	if err != nil {
+		t.Fatalf("CandleDatesInRange failed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("應只有 2 檔有日期，得到 %#v", got)
+	}
+	if !reflect.DeepEqual(got["2330"], []string{"2026-08-24"}) {
+		t.Errorf("2330 = %v", got["2330"])
+	}
+	if !reflect.DeepEqual(got["2454"], []string{"2026-08-25"}) {
+		t.Errorf("2454 = %v", got["2454"])
+	}
+	// **整段都缺的標的沒有 key**，不是空 slice——呼叫端要看得出差別。
+	if _, ok := got["6182"]; ok {
+		t.Error("只有 1m K 棒的標的不該出現在 1d 的結果裡")
+	}
+	if _, ok := got["9999"]; ok {
+		t.Error("沒被問到的標的不該出現")
+	}
+}
+
+// 空清單回空 map 而不是 nil，也不送查詢——呼叫端會直接對它取值。
+func TestCandleDatesInRangeWithNoSymbols(t *testing.T) {
+	repo, ctx := newCandleRepoForTest(t)
+	day := time.Date(2026, 8, 25, 0, 0, 0, 0, timeutil.TaipeiTZ)
+
+	got, err := repo.CandleDatesInRange(ctx, nil, "1d", day, day.AddDate(0, 0, 1))
+	if err != nil {
+		t.Fatalf("CandleDatesInRange failed: %v", err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("空清單應回空 map，得到 %#v", got)
 	}
 }

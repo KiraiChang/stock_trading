@@ -2103,7 +2103,7 @@ func terminalStateByParent(relations []analysis.ZoneIdentityRelation) map[string
 	return out
 }
 
-// 空字串代表「這個轉換沒有這一側的角色」，要存 NULL 而不是 ''——
+// 空字串代表「這個轉換沒有這一側的角色」，要存 NULL 而不是 ”——
 // 之後查 from_role IS NULL 才問得出「哪些是第一次解析出方向」。
 // 本檔已有一個語意不同的 nullableString（處理 store.NullString），故另取名。
 func sqlNullString(s string) sql.NullString {

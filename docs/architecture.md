@@ -414,6 +414,55 @@ TWSE 改字時**壞在明處**。
 **持續存在的缺口每輪都會回報**，這是刻意的：把它壓成一次性通知，等於讓一個仍然存在的
 問題消失。
 
+##### 驗收實測（2026-08-28）
+
+2026-08-28 14:37 隨 `CANDLE_GAP_DETECTION_ENABLED=true` 上線。**正向（抓得到真缺口）與
+負向（合法無成交不誤報）兩半都驗過**——只驗正向會漏掉誤報，只驗負向會漏掉漏報。
+兩半的證據來源不同：負向來自 live 首輪的真實停止買賣標的，正向來自 dev 人工造缺口。
+
+**live 首輪（16:25:13 → 16:25:19，5.8 秒）**
+
+| 欄位 | 值 |
+|---|---|
+| `job_runs` | `success`、`symbols_total=135`、`symbols_failed=0`、`error` 空 |
+| log | `pool=135 candidates=6 gap=0 unavailable=0 deferred=0 breaker_skipped=0 source_as_of=2026-08-28` |
+| `candle_verification_state` | 1 列：`2867 / 1d / verified / consecutive_failures=0` |
+
+6 個候選**全部**來自 `2867`：它最後一根日 K 是 08-19（08-20 起停止買賣），在視窗內缺 6 天。
+逐檔核對後交易所那邊也沒有成交，判 `verified`、不計入 `gap`、不告警——
+這就是「合法停止買賣不得誤報」的天然負向案例。請求量方面，6 個候選收斂成 1 檔逐檔核對，
+遠低於 `candidate_cap_per_run=20`。
+
+⚠️ **視窗是「到前一交易日為止」的 N 個交易日，不含當日。** 該輪視窗是
+08-14、17、18、19、20、21、24、25、26、27（`lookback_trading_days=10`），
+`2867` 缺其中 6 天——`candidates` 是 6 而不是 7 就是這麼來的。判讀這個數字時要記得。
+
+**dev 造缺口（正向，池縮成三檔）**
+
+`2330` 目標／`1101` 對照／`2867` 負向，刪掉 `2330` 視窗中段的 08-21：
+
+| 觀察 | 結果 |
+|---|---|
+| `job_runs` | **`partial`**、`error` = **`upstream_data_gap: 1 筆缺漏已確認`** |
+| log | `pool=3 candidates=7 gap=1 unavailable=0 deferred=0` |
+| `2330` | `last_result=gap` |
+| `2867` | `last_result=verified`（負向案例在 dev 重現一次） |
+| `1101` | **無 state 列**——完整標的不會進候選集合，那是設計如此，不是漏寫 |
+
+`candidates=7` ＝ `2330` 的 1 天 ＋ `2867` 的 6 天；`gap=1` 只認人工那一筆。
+⛔ **判準是 `error` 的前綴**：`upstream_data_gap` 才算驗證通過，
+`verification_unavailable` 代表根本沒驗成。
+
+**跳過機制與人工缺口的交互，是驗收設計的關鍵**：那一輪 `skipped=2`
+（`2330` 與 `1101` 都有當日 K）。`runEvaluationUniverseSync` 的順序是
+`dropSymbolsSyncedToday` → `BackfillHistory(days=10)` → 偵測，而回補走 upsert，
+所以**目標必須落在跳過那批**，否則人工缺口會在偵測跑到之前被補回去、偵測什麼也看不到。
+那不是實作壞了，是驗收步驟設計錯了。
+
+**尚未驗到的**：live 端的**正向**告警（真實上游漏資料）至今沒有發生過，
+所以 `partial` ＋ `upstream_data_gap` 在 live 的表現只有 dev 的等價證據；
+`deferred`、陳舊升級與 breaker 三條路徑也都還沒在真實流量下被觸發。
+
 ##### 相關
 
 * 表結構與 repo 契約：[`database-schema.md`](./database-schema.md) `candle_verification_state`

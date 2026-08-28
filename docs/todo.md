@@ -3694,8 +3694,8 @@ by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待處理（**已上線但尚未驗收過任何一輪**） |
-| 優先度 | 中高（機制**已在 live 啟用**但還沒跑過任何一輪，沒有任何證據證明它真的抓得到缺口；誤報或漏報都還沒被排除） |
+| 狀態 | **A 已完成（2026-08-28），B 觀察中**——四項情境全部有實測結果，結果已歸檔到 [`architecture.md`](./architecture.md)「日 K 缺漏偵測 › 驗收實測（2026-08-28）」；B 還差兩個交易日（下週一、二）。**本筆保留供 review 與 B 收尾。** |
+| 優先度 | 中（**基本正向與負向路徑已驗證**：正向以 dev 造一個人工缺口驗到 `upstream_data_gap`，負向以 `2867` 的停止買賣在 live 與 dev 各驗一次判 `verified` 不告警。**這不等於誤報漏報已全面排除**——live 端正向、`deferred`、陳舊升級、breaker 四條路徑都還沒被觸發，見下方「B 的進度」） |
 | 分類 | 驗證 / Go / 排程 / 市場資料 |
 | 建立日期 | 2026-08-28 |
 | 來源 | `issue.md` I-091 收斂時未完成的驗收——**條目移除後這件事會沒有清單追蹤**（同 T-063 的教訓） |
@@ -3704,7 +3704,14 @@ by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
 
 `candle_gap_detection` 的實作、測試與文件歸檔都完成了（現況規格見
 [`architecture.md`](./architecture.md)「日 K 缺漏偵測」），並於 **2026-08-28 14:37** 隨
-`CANDLE_GAP_DETECTION_ENABLED=true` 上線。但**它的正確性目前只有單元測試層級的證據**：
+`CANDLE_GAP_DETECTION_ENABLED=true` 上線。
+
+> 📌 **原始的驗收步驟原文保留供 review 對照，未改寫。**
+> 其中**帶日期標註的段落（「2026-08-28 補」「（驗收前基線）」等）是執行後才加的**——
+> 執行中發現原文缺了什麼，就地補在該步驟旁邊，比另開一節更好用。
+> **整體現況以「A 的實作結果」與「B 的進度」兩節為準**，那兩節在本節之後。
+
+**（驗收前基線）** 當時它的正確性只有單元測試層級的證據：
 
 * 沒有跑過任何一輪（它跟著 `evaluation_universe_sync` 在平日 16:00 執行）；
 * **從來沒有用真實的缺口驗證過它會不會報**。
@@ -3728,13 +3735,31 @@ by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
 dev 裡有池成員、證券主檔或足夠的歷史 K 棒——**沒有這些，偵測會早退或算出空的候選集合，
 而那看起來會像「一切正常」**。
 
-開始前先確認三件事，缺哪一項就補哪一項：
+開始前先確認四件事，缺哪一項就補哪一項（**第四項是 2026-08-28 補的**，見表格下方）：
 
 | 檢查 | 查法 | 不足時 |
 |---|---|---|
 | 池裡有成員 | `SELECT COUNT(*) FROM evaluation_universe WHERE active;` | 從前端「評估標的池 → ③ 已入池」匯入 selection report；**空池時偵測記 `success` / `total=0`，什麼都驗不到** |
 | 主檔有那幾檔且 `is_listed` | `SELECT symbol, is_listed, market FROM stock_symbols WHERE symbol IN (…);` | 跑一次 `stock_symbol_sync`（前端排程頁可手動觸發）。**查無主檔的標的會 fail-open 保留但沒有 `market`**，偵測會把它落成 `verification_unavailable` |
 | 視窗內有足夠日 K | `SELECT symbol, COUNT(*) FROM candles WHERE timeframe='1d' AND ts >= now() - interval '20 days' GROUP BY 1;` | 手動觸發 `evaluation_universe_sync` 回補（FinMind 5 req/min，135 檔約 26 分鐘；**只驗少數幾檔的話先把池縮小**） |
+| **dev image 夠不夠新** | `docker exec <dev-pg> psql -tAc "SELECT max(version_id) FROM goose_db_version;"` 對照 `backend/internal/database/migrations/postgres/` 的最大編號 | **重建 image**（`docker compose -f docker-compose.dev.yml build backend`），不是只重建容器 |
+
+⛔ **第四項是 2026-08-28 實作時補的，原本沒有，而它的失敗模式最隱蔽。**
+migration 是 **embed 進 binary** 的，所以 image 的新舊決定了 schema 的新舊：
+當天 dev image 建於 08-25 17:28，而 `074_candle_verification_state.sql` 是 08-28 14:22 才加入，
+於是 `candle_verification_state` **整張表不存在**。這件事**三個地方都不會報**：
+
+* backend 照樣記 `migrations applied version=73` ——對舊 binary 而言 73 確實是最新，不是錯誤；
+* 偵測的**四項依賴檢查照樣通過**（repo 物件非 nil，nil 檢查看不出表在不在）；
+* 原本的三項前置（池成員／主檔／日 K）**沒有任何一項會碰到它**。
+
+**但實際執行時會明確降級，不會假裝正常**：`LoadStates` 炸在 `relation does not exist` 之後，
+`candle_gap_detection.go:203` 會記 `verification_state_read_failed` 並設 `degraded = true`，
+該輪收在 **`partial`**。所以危險不在於「結果看起來正常」，而在於
+**啟動與前置檢查都不會告訴你原因**——你會拿到一個 `partial`，然後從三項前置查不出所以然。
+
+**`docker compose up -d` 只重建容器、不重建 image**——T-067 原文只寫了「重建 backend 容器」，
+那對環境變數夠、對 migration 不夠。
 
 ⚠️ **`lookback_trading_days` 預設 10**，所以視窗內至少要有 10 個交易日的資料才驗得出
 「中段缺口」與「完整標的」的差別。資料太少時整池都會是候選，變成 aggregate 短路，
@@ -4024,10 +4049,14 @@ docker exec postgres-postgres-1 psql -U trading_username -d trading -c \
 #### 完成條件
 
 A 的四項情境都有實測結果、B 至少觀察三個交易日且請求量正常，並把結論補進
-[`architecture.md`](./architecture.md)「日 K 缺漏偵測」那一節（目前那節寫的是設計，
-還沒有任何實測數字）。
+[`architecture.md`](./architecture.md)「日 K 缺漏偵測」那一節。
 
-**在 A 完成之前，不要把 live 的任何 `partial` 當成已證實的上游缺漏。**
+**進度（2026-08-28）**：A 四項已完成，結論已寫進該節的「驗收實測（2026-08-28）」子節；
+**B 只完成第一個交易日**，還差兩個（見下方「B 的進度」）。所以本筆**尚未達成完成條件**。
+
+**（已失效，2026-08-28）** 原文警語是「在 A 完成之前，不要把 live 的任何 `partial`
+當成已證實的上游缺漏」。A 已完成，該限制解除：live 若出現 `partial`，照
+`architecture.md`「三種結論必須分得開」用 `error` 前綴判讀即可。
 
 #### 順帶未補的一條測試
 
@@ -4036,3 +4065,45 @@ A 的四項情境都有實測結果、B 至少觀察三個交易日且請求量�
 與 `TestCandleGapDetectionUnavailableWhenSymbolStatesFail`），兩邊的行為都有守到，
 但**分開測會讓「其中一邊忘了處理」看不出來**——那正是原文要求合成一支的理由。
 做 A 的時候順手補一支端到端的。
+
+✅ **已補（2026-08-28）**：`TestEvaluationUniverseSyncAndGapDetectionDivergeWhenMasterLookupFails`
+（`backend/internal/scheduler/candle_gap_detection_test.go`）。它跑的是
+`runEvaluationUniverseSync` 而不是 `runCandleGapDetection`，所以走的是
+`scheduler.go` 尾端那條真正的傳遞路徑（`poolSymbols, states, statesErr`），
+一次斷言兩個**方向相反**的收斂：回補退回**全量**、偵測**不猜端點**記
+`partial` ＋ `verification_unavailable`。順帶釘住兩筆 `job_runs` 是分開的
+（parent 維持 `success`，偵測的 `partial` 不污染它），以及偵測寫在 parent 自己的紀錄關閉之後。
+
+#### A 的實作結果（2026-08-28）
+
+**四項情境全部有實測結果，數字與判讀已歸檔到**
+[`architecture.md`](./architecture.md)「日 K 缺漏偵測 › 驗收實測（2026-08-28）」。
+以下只留這份清單要追蹤的東西。
+
+**負向那半改由 live 首輪承接，比原計畫更強。** T-067 原本擔心「dev 不一定有 `2867` 的資料」，
+結果 live 首輪（16:25）就自然涵蓋了：6 個候選全部來自 `2867`，對真實交易所核對後判
+`verified` 不告警。dev 那輪又獨立重現一次。
+
+**偏離計畫的一步：dev 的歷史 K 棒改用「從 live postgres 複製」而不是 FinMind 回補。**
+原因是 dev 沒有 `FINMIND_API_KEY`（`deploy.sh` 進版控的是佔位值，金鑰在
+`/opt/stacks/scripts/stock_trading/`），回補一定失敗。**這不影響驗收效力**——
+受測的偵測讀的是「DB 實際日期集合 ＋ TWSE 年度日曆 ＋ 交易所逐檔核對」，
+三者都不經過 FinMind。代價是還原不能走「自然路徑 upsert 補回」，改用備份手動處理
+（原文本來就留了這條退路）。**下次要在 dev 驗任何吃 FinMind 的東西之前，先確認金鑰。**
+
+**還原已逐項比對基準完成**：`2330` 537 列止於 08-18、`1101`/`2867` 各 0 列、
+`candle_verification_state` 0 列、池 0 列、暫存表已移除。
+⚠️ **dev 的基準比原文假設的乾淨**——池本來就是空的、`1101`/`2867` 本來就沒有 K 棒，
+所以還原是「移除我加的東西」而不是「把刪掉的補回去」。下次基準不同時不能照抄這段。
+
+#### B 的進度
+
+| 交易日 | 狀態 |
+|---|---|
+| 2026-08-28（五） | ✅ 首輪 `success`，數字見 `architecture.md` |
+| 2026-08-31（一） | ⬜ 待觀察 |
+| 2026-09-01（二） | ⬜ 待觀察 |
+
+**live 端的正向告警至今沒有發生過**，所以 `partial` ＋ `upstream_data_gap` 在 live 的
+表現目前只有 dev 的等價證據；`deferred`、陳舊升級、breaker 三條路徑也還沒被真實流量觸發。
+B 收完之後，若這幾條仍未觸發，要在 `architecture.md` 留一筆「未驗到」而不是當成已驗。

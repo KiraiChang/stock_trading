@@ -408,6 +408,74 @@ func TestCandleGapDetectionUnavailableWhenSymbolStatesFail(t *testing.T) {
 	}
 }
 
+// 矩陣 #24 的端到端合成：**同一次** StatesBySymbols 失敗，回補與偵測要走出方向相反的收斂。
+//
+// 這件事原本分成兩支測（上面那支，與 scheduler_test.go 的
+// TestEvaluationUniverseSyncFallsBackToFullPoolWhenMasterLookupFails），兩邊行為都有守到，
+// 但**分開測會讓「其中一邊忘了處理」看不出來**——那正是矩陣原文要求合成一支的理由：
+//
+//   - 回補：多抓可接受，靜默少抓不可接受 → 退回**全量**。
+//   - 偵測：失去 market routing 就決定不了核對端點，猜了會產生假結果 → **不猜**，
+//     記 partial ＋ verification_unavailable。
+//
+// 只驗其中一邊的話，另一邊被改成「跟著一起降級」或「跟著一起硬幹」都不會有東西報錯。
+//
+// 順帶釘住**兩筆 job_runs 是分開的**：偵測判 partial 不得污染 evaluation_universe_sync
+// 的狀態，而且偵測寫在 parent 自己的紀錄關閉之後（scheduler.go 的尾端呼叫）。
+func TestEvaluationUniverseSyncAndGapDetectionDivergeWhenMasterLookupFails(t *testing.T) {
+	pool := []string{"1101", "1102", "1103"}
+	symbols := &universeSymbolStub{err: errors.New("boom")}
+	// candles 不能是 nil：對 parent 它是合法的 nil（退回全量），但那樣偵測的四項依賴
+	// 不齊就不會註冊，這支測試會變成只驗了回補那一半而毫無提示。
+	s, source, jobRuns := newUniverseSyncSchedulerWithSymbols(pool, &universeCandleStub{}, symbols)
+	s.SetCandleGapDetection(&gapVerificationStub{}, &gapReferenceStub{},
+		config.CandleGapDetectionConfig{
+			Enabled: true, AggregateRatio: 0.5, AggregateMinSymbols: 5,
+			CandidateCapPerRun: 20, TimeoutSec: 300, LookbackTradingDays: 3,
+			RequestIntervalMs: 100, MarketStaleDays: 2, CalendarTTLHours: 24,
+			BreakerFailures: 5, BreakerCooldownMin: 60,
+		})
+
+	s.runEvaluationUniverseSync(context.Background())
+
+	// ── 前提：兩邊看到的必須是**同一次**查詢的失敗 ──
+	//
+	// 沒有這條斷言的話，日後若改成回補與偵測各查一次主檔、兩次都失敗，這支測試
+	// 照樣會過——但它宣稱守住的「同一個失敗走出兩個方向」就不再成立了，
+	// 而且多一次查詢本身就是迴歸（整輪只讀一次是刻意的）。
+	if symbols.calls != 1 {
+		t.Errorf("StatesBySymbols 被呼叫 %d 次, 期望 1 次（兩邊共用同一次查詢的結果）", symbols.calls)
+	}
+
+	// ── 回補側：退回全量 ──
+	if !reflect.DeepEqual(source.fetched, pool) {
+		t.Errorf("回補實際抓取 %v, 期望整池 %v（主檔查詢失敗要退回全量）", source.fetched, pool)
+	}
+
+	// ── 偵測側：同一個失敗走相反方向 ──
+	wantStarted := []string{"evaluation_universe_sync", candleGapDetectionJob}
+	if !reflect.DeepEqual(jobRuns.started, wantStarted) {
+		t.Fatalf("job_runs 應為兩筆且分開，實際 started=%v 期望 %v", jobRuns.started, wantStarted)
+	}
+	if len(jobRuns.finished) != 2 {
+		t.Fatalf("兩筆紀錄都要寫出結束狀態，finished=%v", jobRuns.finished)
+	}
+
+	parent, detection := jobRuns.finished[0], jobRuns.finished[1]
+	if parent.status != "success" {
+		t.Errorf("回補退回全量後本身是成功的，status = %q（偵測的 partial 不得污染它）", parent.status)
+	}
+	if detection.status != "partial" {
+		t.Errorf("偵測失去 market routing 要 partial，得到 %q", detection.status)
+	}
+	if !strings.Contains(detection.errMsg, "verification_unavailable") {
+		t.Errorf("偵測的 error 欄要帶 verification_unavailable，得到 %q", detection.errMsg)
+	}
+	if detection.symbolsTotal != len(pool) {
+		t.Errorf("偵測的 symbols_total = %d, 期望池大小 %d", detection.symbolsTotal, len(pool))
+	}
+}
+
 // 矩陣 #11、#17 在偵測層的收斂：日曆不可用 → 整輪 partial，不得回報正常。
 func TestCandleGapDetectionUnavailableWhenCalendarFails(t *testing.T) {
 	verification := &gapVerificationStub{}

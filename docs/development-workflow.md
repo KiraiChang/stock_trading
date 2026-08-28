@@ -495,6 +495,39 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 
 - **本機同時只允許一組 stack 常駐**。開工前先 `docker ps --format '{{.Names}}'` 看一眼，
   多餘的先 `compose down`（不帶 `-v`）。
+- ⛔ **停 live 之前先確認它是怎麼起來的，並確認你有能力把它原樣拉回來。**
+  live 的 `stock_trading` project **不是**由 repo 的 `docker-compose.yml` 部署的，而是
+  `/opt/stacks/scripts/stock_trading/`（`compose.yml` ＋ `deploy.sh`，`--project-directory`
+  指向 `/opt/stacks/deploy/...` 的另一份 clone）。開關與金鑰都在那裡的 `deploy.sh`／`compose.yml`。
+
+  **危險的地方是 project 名稱相同**：在 repo 目錄下跑
+  `docker compose -f docker-compose.yml down` **會成功停掉 live**（compose 以 project 名稱比對），
+  於是很容易誤以為 repo 的 compose 就是 live 的來源。**但用 repo 的 compose 拉回來時**，
+  `CANDLE_GAP_DETECTION_ENABLED` / `SR_ANALYSIS_ENABLED` / `EVALUATION_UNIVERSE_ENABLED`
+  會全部落回 `${VAR:-false}` 的預設、`FINMIND_API_KEY` 會是空字串——
+  **服務照樣起得來，什麼都不會報錯**，只是生產排程被靜默關掉、抓取全部失敗。
+  2026-08-28 做 T-067 驗收時踩到（停機時尚未發現，是準備復原才察覺）。
+
+  規則：**復原一律走 `/opt/stacks/scripts/stock_trading/deploy.sh`**（那份設定才是開關與金鑰的
+  權威來源），不要用 repo 的 compose 拉 live。
+
+  ⛔ **不要 dump 整份 container env 當備份。** `docker inspect --format '{{range .Config.Env}}…'`
+  會把 `AUTH_JWT_SECRET`、`FINMIND_API_KEY`、`FUGLE_API_KEY` 一起印出來，落進終端機
+  scrollback、log 或暫存檔就是外洩。**金鑰不需要備份**——它們在受控的 deploy 設定裡，
+  復原時由那份設定帶入。
+
+  要核對的話，**只查明確列名的非敏感開關**，例如：
+
+  ```bash
+  docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    | grep -E '^(CANDLE_GAP_DETECTION_ENABLED|SR_ANALYSIS_ENABLED|EVALUATION_UNIVERSE_ENABLED|YAHOO_ENABLED)='
+  ```
+
+  停機前跑一次、復原後再跑一次比對即可。**金鑰只確認「有沒有設定」，不要印出內容。**
+- **停 live 會讓那段時間的排程整段不執行**（沒有補跑機制）。動手前先看今晚還有哪些
+  cron：`daily_close` 15:00、`sr_analysis` 17:00、`chip_sync` 21:00、
+  `sr_analysis` chip 輪 22:00、`sr_evaluation` 22:30、`evaluation_universe_sync` 16:00。
+  挑窗口時把復原時間也算進去。
 - **不要在本機把 live/deploy project 拉起來**——驗收一律用 `docker-compose.dev.yml` 的
   dev project（CLAUDE.md 規定）。
 - 開跑前 `free -m` 的 `available` 低於 ~800 MB 就先清場再說，不要硬上。

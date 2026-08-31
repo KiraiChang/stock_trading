@@ -95,7 +95,7 @@ func (s *srProviderRepoStub) Get(ctx context.Context, id uint64) (*store.SRZoneA
 	return nil, errors.New("not found")
 }
 
-// 排程用的 timeframe-aware 查詢（todo.md T-052）。這些 stub 沒有用到它。
+// 排程用的 timeframe-aware 查詢。這些 stub 沒有用到它。
 func (s *srProviderRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, error) {
 	return nil, nil
 }

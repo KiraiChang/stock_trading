@@ -89,7 +89,7 @@ services:
       CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS: ${CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS:-24}
       CANDLE_GAP_DETECTION_BREAKER_FAILURES: ${CANDLE_GAP_DETECTION_BREAKER_FAILURES:-5}
       CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN: ${CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN:-60}
-      # 定期對 watchlist 產生 SR zone 分析（T-052）。**預設關閉**：它是 production
+      # 定期對 watchlist 產生 SR zone 分析。**預設關閉**：它是 production
       # 驗證母體的唯一來源（I-074 / T-049），開了就會每天累積分析。
       # 兩個 cron 是刻意的：17:00 那輪拿不到當日籌碼（FinMind 晚間才發布），
       # 22:00 那輪晚於 chip sync（21:00）、早於 sr_evaluation（22:30）。

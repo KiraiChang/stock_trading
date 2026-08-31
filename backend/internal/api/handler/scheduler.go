@@ -66,14 +66,25 @@ func (h *SchedulerHandler) RunEvaluationUniverseSync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "evaluation_universe_sync 已在背景重新觸發"})
 }
 
-// RunSRAnalysis 手動觸發 SR 分析排程（todo.md T-052）。
+// RunSRAnalysis 手動觸發 SR 分析排程（contract 見 docs/api-reference.md）。
 //
 // `with_chip=true` 走 22:00 那輪的規則（額外要求當日籌碼已入庫）。**這個入口是必要的**：
 // cron 預設關閉，而 I-074 / T-049 要的母體得先有辦法補跑；另外排程漏跑時也只有這裡能補。
-// 重複觸發由 scheduler 內兩個時段各自的旗標擋掉。
+//
+// **兩個時段共用一個執行所有權**（不是各自一個旗標）：任一輪在跑時這裡回 409，
+// 而不是讓兩輪並行——這台 host 只有 2GiB，逐檔的峰值等同使用者手動點一次分析。
+// 取得所有權是**同步**的，所以 409 與 202 是可信的答案，不是猜的；
+// 背景工作與釋放都由 scheduler.TryStartSRAnalysis 負責。
 func (h *SchedulerHandler) RunSRAnalysis(c *gin.Context) {
 	withChip := c.Query("with_chip") == "true"
-	go h.sched.RunSRAnalysis(withChip)
+	running, started := h.sched.TryStartSRAnalysis(withChip)
+	if !started {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":       "sr analysis already running",
+			"running_job": running,
+		})
+		return
+	}
 	job := "sr_analysis"
 	if withChip {
 		job = "sr_analysis_chip"
@@ -112,7 +123,7 @@ var jobStaleThreshold = map[string]time.Duration{
 	// 預設關閉；未註冊時 GetStatus 回 disabled 而不套用門檻——那正是「關閉」與
 	// 「該跑卻沒跑」要分得開的原因。
 	"candle_gap_detection": 80 * time.Hour,
-	// SR 分析排程（T-052）平日各跑一次（17:00 / 22:00），跨週末同樣取 80 小時。
+	// SR 分析排程平日各跑一次（17:00 / 22:00），跨週末同樣取 80 小時。
 	// 預設關閉，未註冊時 GetStatus 回 disabled 而不套用門檻。
 	"sr_analysis":      80 * time.Hour,
 	"sr_analysis_chip": 80 * time.Hour,

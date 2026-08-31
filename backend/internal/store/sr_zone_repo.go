@@ -33,7 +33,7 @@ type SRZoneRepo interface {
 	// GetLatestByTimeframe 取某檔某 timeframe 的最新一筆分析。
 	//
 	// **不能用 List(symbol, 1) 代替**：List 只按 symbol 過濾，使用者今天手動跑過一次 5m
-	// 分析，就會讓 1d 的排程誤判「今天已經分析過」而整批跳過（見 todo.md T-052）。
+	// 分析，就會讓 1d 的排程誤判「今天已經分析過」而整批跳過。
 	// 沒有任何分析時回 (nil, nil)——那不是錯誤，是「這檔還沒被分析過」。
 	GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*SRZoneAnalysis, error)
 	GetZones(ctx context.Context, analysisID uint64) ([]SRZone, error)

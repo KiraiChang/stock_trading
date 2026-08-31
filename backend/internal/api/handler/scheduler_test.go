@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -248,5 +249,165 @@ func TestSchedulerStatusFindsMorningJobsBeyondIntradayWindow(t *testing.T) {
 	// 真的來自「視窗被 intraday 佔滿」，而不是 stub 或排序寫錯。
 	if js := got["intraday"]; js.Status != "success" {
 		t.Fatalf("intraday 應在視窗內且為 success，得到 %q——測試前提不成立", js.Status)
+	}
+}
+
+
+// ── 手動觸發 SR 分析：空閒回 202、被佔用回 409 ────────────────
+// （contract 見 docs/api-reference.md 的手動觸發端點）
+//
+// **這個端點的答案必須是可信的**：舊版一律 `go` 出去然後回 202，
+// 兩個時段各有一個旗標，於是「兩輪同時跑」與「已被擋掉」都長得像成功。
+// 改成同步取得所有權之後，202 代表真的啟動了、409 代表真的被擋住。
+
+type srAnalysisRunnerStub struct {
+	mu      sync.Mutex
+	calls   int
+	block   chan struct{}
+	entered chan struct{}
+	blocked bool
+}
+
+func (r *srAnalysisRunnerStub) RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error) {
+	r.mu.Lock()
+	r.calls++
+	shouldBlock := r.block != nil && !r.blocked
+	if shouldBlock {
+		r.blocked = true
+	}
+	r.mu.Unlock()
+	if shouldBlock {
+		close(r.entered)
+		<-r.block
+	}
+	return 1, nil
+}
+
+func (r *srAnalysisRunnerStub) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
+}
+
+type srAnalysisCandleStub struct {
+	store.CandleRepo
+	latest *store.Candle
+}
+
+func (s *srAnalysisCandleStub) GetLatest(context.Context, string, string) (*store.Candle, error) {
+	return s.latest, nil
+}
+
+// srZoneRepo 不能傳 nil：srAnalysisSkipReason 會呼叫 GetLatestByTimeframe。
+// 回 nil 分析＝「今天還沒分析過」，所以每次觸發都會真的跑。
+type srAnalysisZoneRepoStub struct{ store.SRZoneRepo }
+
+func (s *srAnalysisZoneRepoStub) GetLatestByTimeframe(context.Context, string, string) (*store.SRZoneAnalysis, error) {
+	return nil, nil
+}
+
+type srAnalysisWatchlistStub struct{ store.WatchlistRepo }
+
+func (s *srAnalysisWatchlistStub) Symbols(context.Context) ([]string, error) {
+	return []string{"2330"}, nil
+}
+
+func newSRAnalysisHandler(runner scheduler.SRAnalysisRunner) (*SchedulerHandler, *gin.Engine) {
+	s := scheduler.New(
+		nil, nil, &srAnalysisWatchlistStub{}, &jobRunRepoStub{}, &srAnalysisZoneRepoStub{}, nil, nil,
+		"0 21 * * *", nil, "", false, nil, nil, nil, nil,
+		config.SREvaluationConfig{}, false, zap.NewNop(),
+	)
+	s.SetSRAnalysis(runner, &srAnalysisCandleStub{latest: &store.Candle{Timestamp: time.Now()}},
+		config.SRAnalysisConfig{Enabled: true, Timeframe: "1d", Limit: 400})
+	h := NewSchedulerHandler(&jobRunRepoStub{}, s, zap.NewNop())
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/scheduler/sr-analysis/run", h.RunSRAnalysis)
+	return h, r
+}
+
+func postSRAnalysis(r *gin.Engine, withChip bool) *httptest.ResponseRecorder {
+	url := "/scheduler/sr-analysis/run"
+	if withChip {
+		url += "?with_chip=true"
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, url, nil))
+	return w
+}
+
+func TestRunSRAnalysisAcceptsWhenIdle(t *testing.T) {
+	runner := &srAnalysisRunnerStub{}
+	_, r := newSRAnalysisHandler(runner)
+
+	w := postSRAnalysis(r, false)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("空閒時應回 202，got %d body=%s", w.Code, w.Body.String())
+	}
+	// 202 要代表真的啟動了工作，不能只是把請求吞掉。
+	deadline := time.Now().Add(2 * time.Second)
+	for runner.callCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if runner.callCount() == 0 {
+		t.Error("回了 202 卻沒有真的啟動分析")
+	}
+}
+
+func TestRunSRAnalysisConflictsWhileAnotherRoundRuns(t *testing.T) {
+	// 兩個方向都要驗：任一輪持有時，另一輪都該收到 409 並看到正確的持有者。
+	for _, tc := range []struct {
+		name       string
+		holderChip bool
+		otherChip  bool
+		wantJob    string
+	}{
+		{"17:00 持有", false, true, "sr_analysis"},
+		{"22:00 持有", true, false, "sr_analysis_chip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &srAnalysisRunnerStub{block: make(chan struct{}), entered: make(chan struct{})}
+			_, r := newSRAnalysisHandler(runner)
+
+			if w := postSRAnalysis(r, tc.holderChip); w.Code != http.StatusAccepted {
+				t.Fatalf("持有輪次應回 202，got %d", w.Code)
+			}
+			select {
+			case <-runner.entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("持有輪次沒有進到 runner")
+			}
+
+			w := postSRAnalysis(r, tc.otherChip)
+			if w.Code != http.StatusConflict {
+				t.Fatalf("被佔用時應回 409，got %d body=%s", w.Code, w.Body.String())
+			}
+			var body struct {
+				Error      string `json:"error"`
+				RunningJob string `json:"running_job"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("409 body 不是合法 JSON：%v", err)
+			}
+			if body.RunningJob != tc.wantJob {
+				t.Errorf("running_job 錯：got %q want %q", body.RunningJob, tc.wantJob)
+			}
+			if body.Error == "" {
+				t.Error("409 應該帶 error 訊息")
+			}
+
+			// 釋放之後要能再次接受請求。
+			close(runner.block)
+			deadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(deadline) {
+				if w := postSRAnalysis(r, tc.otherChip); w.Code == http.StatusAccepted {
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			t.Error("釋放後仍然拿不到 202")
+		})
 	}
 }

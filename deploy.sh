@@ -34,7 +34,7 @@ export CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS="24"
 export CANDLE_GAP_DETECTION_BREAKER_FAILURES="5"     # **來源層級**，與逐 symbol 的失敗計數是兩回事
 export CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN="60"  # 冷卻後自動恢復
 
-# 定期對 watchlist 產生 SR zone 分析（T-052）：每交易日兩輪，17:00 與 22:00。
+# 定期對 watchlist 產生 SR zone 分析：每交易日兩輪，17:00 與 22:00。
 # 這是 production 驗證母體的唯一來源——沒有它，stock_sr_zone_analyses 只會累積人工點擊的
 # 零星幾筆，decision replay 的分佈比較（issue.md I-074、todo.md T-049）永遠做不了。
 #

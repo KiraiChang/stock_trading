@@ -115,7 +115,8 @@ type EventTimeline struct {
 	// Snapshots 是這段期間實際存在的分析次數與時間點。
 	//
 	// **必須誠實揭露**：timeline 的解析度等於 SR 分析的執行頻率，所以鏈上的空白
-	// **不代表那段期間沒有事件**，只代表那段期間沒有分析。分析排程見 todo.md T-052
+	// **不代表那段期間沒有事件**，只代表那段期間沒有分析。分析排程見
+	// docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」
 	// （平日 17:00 與 22:00 各一次，預設關閉）。
 	Snapshots []EventTimelineSnapshot `json:"snapshots"`
 }

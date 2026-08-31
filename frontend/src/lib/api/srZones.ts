@@ -993,7 +993,7 @@ export async function createSRZoneAnalysis(
   return normalizePipelineResponse(response)
 }
 
-// limit 預設 20；**未指定 symbol 時呼叫端應給更大的值**——分析排程（T-052）一天會產生
+// limit 預設 20；**未指定 symbol 時呼叫端應給更大的值**——分析排程一天會產生
 // 約 22 筆（watchlist 11 檔 × 兩輪），20 筆撐不到一天，人工跑的分析當天就會被擠出視野。
 export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<SRZoneAnalysis[]> {
   const query = symbol ? `?symbol=${symbol}&limit=${limit}` : `?limit=${limit}`

@@ -47,7 +47,7 @@ services:
       CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS: ${CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS:-24}
       CANDLE_GAP_DETECTION_BREAKER_FAILURES: ${CANDLE_GAP_DETECTION_BREAKER_FAILURES:-5}
       CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN: ${CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN:-60}
-      # 定期對 watchlist 產生 SR zone 分析（T-052）。**預設關閉**：它是 production 驗證
+      # 定期對 watchlist 產生 SR zone 分析。**預設關閉**：它是 production 驗證
       # 母體的唯一來源（issue.md I-074、todo.md T-049 的前置），開了就會每天累積分析。
       #
       # **前置已滿足**：老化單位早已改為「K 棒推進」（2026-08-20 上線），排程與人工

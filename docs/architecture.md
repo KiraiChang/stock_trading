@@ -194,7 +194,7 @@ api-reference.md）。
 | **日 K 維護 16:00** | ❌ | ✅ **唯一職能** |
 | 籌碼同步 21:00 | ✅ | ❌ |
 | SR zone 驗證 | ✅ 每日盤後 | ❌ |
-| **SR zone production 分析** | ✅ **平日 17:00 ＋ 22:00**（T-052） | ❌ |
+| **SR zone production 分析** | ✅ **平日 17:00 ＋ 22:00** | ❌ |
 | 排程版 SR evaluation 的母體 | ✅ | ❌ |
 | **公司行動同步 06:30** | ✅ **每個排程日全量** | ⏳ 分片輪替（見下） |
 
@@ -566,6 +566,65 @@ limiter 是共用的——調高會同時放大籌碼同步的請求速率，而
 全庫只有 9 檔（皆為 watchlist 成員）有當日資料，池內其餘標的停在三天前。
 尾端不齊會讓 evaluation 的「最後 N 根」視窗錯開，同一份報告隔幾天重跑得到不同結果，
 且分不清是策略變了還是資料窗變了。池把這件事自動化了。
+
+### SR 分析的兩個時段共用一個執行所有權
+
+`sr_analysis`（17:00）與 `sr_analysis_chip`（22:00）是兩支獨立的 cron，
+但**執行層只有一個所有權**：任一輪在跑時，另一輪不論由 cron 或手動端點觸發都不會執行。
+
+⚠️ **資料層的時段冪等與執行層的併發是兩件事，混在一起就會改錯。**
+
+| | 資料層（`srAnalysisSkipReason`） | 執行層（所有權） |
+|---|---|---|
+| 問的問題 | 這一輪對這檔還有沒有事情要做 | 現在能不能開始跑 |
+| 兩輪的規則 | **刻意不同**（17:00 看今日 K 棒分析過沒；22:00 看當日籌碼入庫沒） | **共用一個** |
+| 粒度 | 逐檔 | 整輪 |
+
+**為什麼執行層必須共用**：這台 host 只有 2GiB，逐檔的峰值等同使用者手動點一次分析。
+舊版是兩個 `atomic.Bool`、註解寫「兩輪之間互不影響」，與序列執行的前提直接衝突；
+cron 相隔五小時撞不到，但**手動端點可以讓兩輪真的並行**。
+
+**所有權的實作**：一個 mutex 保護一個字串（`srAnalysisRunningJob`），
+「是否執行中」與「誰在跑」是同一個變數。⛔ **不要改回「`atomic.Bool` ＋ 另一個變數存持有者」**
+——CAS 成功到寫入持有者之間有窗口，釋放順序不嚴謹還會清掉下一輪的持有者。
+
+**三個入口，責任分明**（釋放只由一個層級負責）：
+
+| 入口 | 誰用 | 取得 | 釋放 |
+|---|---|---|---|
+| `RunSRAnalysis(withChip)` | cron | 自己 | 自己 `defer` |
+| `TryStartSRAnalysis(withChip) (running string, started bool)` | API handler | 自己，**同步** | 由它 spawn 的 goroutine `defer` |
+| `runSRAnalysisOwned(ctx, withChip)` | 上面兩者 | **不取得** | **不釋放** |
+
+**被擋時要看得見**，因為丟掉的那一輪**不會在隔天自動補回來**
+（隔天 17:00 分析的是下一根日 K，不會補建前一天缺少的 chip-round 分析）：
+
+* **cron 被擋** → 寫一筆 `failed` 的 `job_runs`，`error` 欄位帶持有者名稱。
+  兩支 cron 相隔五小時，撞上代表前一輪超時五小時以上，那是事故，該是紅的。
+* **手動被擋** → HTTP **409** ＋ `running_job`，**不寫 `job_runs`**。
+  那是使用者連點兩次，不是排程事故，寫進去只會污染排程頁。
+
+#### 判讀上線狀態的兩個陷阱
+
+**① 不要從 `backend/config.yaml` 推論排程有沒有開。** 那裡的 `sr_analysis.enabled`
+是 repo 預設值（`false`），兩份 compose 也是 `${SR_ANALYSIS_ENABLED:-false}`，
+而 **live 由環境變數覆寫**。實際狀態只有查容器才算數——查法與「不要 dump 整份 env」
+的理由見 [`development-workflow.md`](./development-workflow.md)。
+`candle_gap_detection` 與 `evaluation_universe_sync` 同一個模式。
+
+**② 不要從 `job_runs` 查不到早期輪次就推論「沒跑過」。** 該表 2026-08-25 之前
+**只保留當天**（之後才改成 30 天），所以更早的紀錄是被刪掉的，不是沒發生。
+要看一支排程實際運作多久，查**它寫入的業務表**——`sr_analysis` 看
+`stock_sr_zone_analyses.created_at` 的日期分佈。
+
+兩輪都正常時，每交易日產出 **watchlist 檔數 × 2** 筆分析
+（`created_at` 是唯一能區分兩輪的欄位，`analyzed_at` 兩輪相同——它是 K 棒時間）。
+
+⚠️ **不要把當下的檔數寫成常數**，watchlist 會變。要引用實測值就帶 as-of 日期，例如：
+**截至 2026-08-31，watchlist 11 檔、每交易日 22 筆、`stock_sr_zone_analyses` 累計 155 次**
+（2026-07-14 起算；排程 2026-08-20 上線，之前是零星的人工分析）。
+
+（原記於 `todo.md` T-052 的 review 發現。）
 
 ### 研究流程目前是半自動的
 

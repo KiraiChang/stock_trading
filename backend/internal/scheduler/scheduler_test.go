@@ -60,7 +60,14 @@ type schedulerJobRunFinish struct {
 	errMsg        string
 }
 
+// ⚠️ **這個 stub 要能被並行存取**（跨時段互擋測試）：
+// 那組測試會讓一輪卡在背景 goroutine 裡，主 goroutine 同時觸發另一輪並斷言結果，
+// 兩邊都會碰 started/finished。`-race` 會直接抓到沒保護的存取。
+//
+// **不是因為「兩個 runner 同時 append」**——互斥正確之後只會有一個 runner 在跑；
+// 真正並行的是**背景輪次與主測試的斷言**。
 type schedulerJobRunRepoStub struct {
+	mu       sync.Mutex
 	nextID   uint64
 	started  []string
 	finished []schedulerJobRunFinish
@@ -71,6 +78,8 @@ type schedulerJobRunRepoStub struct {
 }
 
 func (s *schedulerJobRunRepoStub) Start(ctx context.Context, jobName string) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.started = append(s.started, jobName)
 	if s.nextID == 0 {
 		s.nextID = 1
@@ -79,6 +88,8 @@ func (s *schedulerJobRunRepoStub) Start(ctx context.Context, jobName string) (ui
 }
 
 func (s *schedulerJobRunRepoStub) Finish(ctx context.Context, runID uint64, status string, symbolsTotal, symbolsFailed int, errMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.finishCtxErr = append(s.finishCtxErr, ctx.Err())
 	s.finished = append(s.finished, schedulerJobRunFinish{
 		runID:         runID,
@@ -88,6 +99,13 @@ func (s *schedulerJobRunRepoStub) Finish(ctx context.Context, runID uint64, stat
 		errMsg:        errMsg,
 	})
 	return nil
+}
+
+// snapshotFinished 供並行測試安全地讀取結果。
+func (s *schedulerJobRunRepoStub) snapshotFinished() []schedulerJobRunFinish {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]schedulerJobRunFinish(nil), s.finished...)
 }
 
 func (s *schedulerJobRunRepoStub) GetRecent(ctx context.Context, limit int) ([]store.JobRun, error) {
@@ -769,7 +787,7 @@ func TestCorporateActionNotRegisteredWithoutAdjuster(t *testing.T) {
 	}
 }
 
-// ── SR 分析排程（todo.md T-052）──
+// ── SR 分析排程 ──
 
 // 只實作用到的那一兩支，其餘由內嵌介面補齊：真的被呼叫到會 nil panic，
 // 那正是「這支測試碰到了不該碰的東西」的訊號，比回假資料好。
@@ -840,16 +858,43 @@ func (s *schedulerCandleRepoStub) GetLatest(ctx context.Context, symbol, timefra
 }
 
 type schedulerSRAnalysisRunnerStub struct {
+	mu      sync.Mutex
 	calls   []string
 	failFor map[string]bool
+	// block 非 nil 時，第一次呼叫會卡住直到它被 close——用來讓一輪「還在跑」，
+	// 好驗另一輪會不會被擋掉。entered 在卡住之前 close，讓測試知道可以開始競爭了。
+	block   chan struct{}
+	entered chan struct{}
+	blocked bool
 }
 
 func (r *schedulerSRAnalysisRunnerStub) RunAnalysis(ctx context.Context, symbol, timeframe string, limit int) (uint64, error) {
+	r.mu.Lock()
 	r.calls = append(r.calls, symbol)
-	if r.failFor[symbol] {
+	n := len(r.calls)
+	shouldBlock := r.block != nil && !r.blocked
+	if shouldBlock {
+		r.blocked = true
+	}
+	fail := r.failFor[symbol]
+	r.mu.Unlock()
+
+	if shouldBlock {
+		if r.entered != nil {
+			close(r.entered)
+		}
+		<-r.block
+	}
+	if fail {
 		return 0, errors.New("boom")
 	}
-	return uint64(len(r.calls)), nil
+	return uint64(n), nil
+}
+
+func (r *schedulerSRAnalysisRunnerStub) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
 }
 
 func newSRAnalysisTestScheduler(
@@ -909,7 +954,7 @@ func TestSRAnalysisSkipsWhenLatestCandleIsNotToday(t *testing.T) {
 	}}
 	s := newSRAnalysisTestScheduler([]string{"2330"}, jobRuns, stale, nil, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 0 {
 		t.Fatalf("K 棒不是今天時不該分析，got %v", runner.calls)
@@ -938,13 +983,13 @@ func TestSRAnalysisChipSlotRunsWhenTodayChipArrived(t *testing.T) {
 		todayCandle(), analyses, runner, chip)
 
 	// 17:00 那輪：今天這根 K 棒已經算過了 → 跳過
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 	if len(runner.calls) != 0 {
 		t.Fatalf("17:00 那輪應跳過（今日 K 棒已分析），got %v", runner.calls)
 	}
 
 	// 22:00 那輪：當日籌碼已入庫、最新分析用的還是昨日籌碼 → 照跑
-	s.runSRAnalysis(context.Background(), true)
+	s.RunSRAnalysis(true)
 	if len(runner.calls) != 1 {
 		t.Fatalf("22:00 那輪應照跑（當日籌碼已入庫），got %v", runner.calls)
 	}
@@ -972,7 +1017,7 @@ func TestSRAnalysisChipSlotSkipsWhenTodayChipNotLoaded(t *testing.T) {
 			s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
 				todayCandle(), analyses, runner, tc.chip)
 
-			s.runSRAnalysis(context.Background(), true)
+			s.RunSRAnalysis(true)
 
 			if len(runner.calls) != 0 {
 				t.Fatalf("當日籌碼未入庫時不該跑，got %v", runner.calls)
@@ -993,7 +1038,7 @@ func TestSRAnalysisChipSlotSkipsWhenTodayChipAlreadyUsed(t *testing.T) {
 	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
 		todayCandle(), analyses, runner, chip)
 
-	s.runSRAnalysis(context.Background(), true)
+	s.RunSRAnalysis(true)
 
 	if len(runner.calls) != 0 {
 		t.Fatalf("今日籌碼已用過時應跳過，got %v", runner.calls)
@@ -1007,7 +1052,7 @@ func TestSRAnalysisContinuesAfterSymbolFailure(t *testing.T) {
 	s := newSRAnalysisTestScheduler([]string{"2330", "3105", "6182"}, jobRuns,
 		todayCandle(), nil, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 3 {
 		t.Fatalf("失敗的那檔不該中斷其餘，got %v", runner.calls)
@@ -1032,7 +1077,7 @@ func TestSRAnalysisIgnoresAnalysesFromOtherTimeframe(t *testing.T) {
 	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{nextID: 1},
 		todayCandle(), analyses, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 1 {
 		t.Fatalf("5m 的分析不該擋掉 1d 的排程，got %v", runner.calls)
@@ -1107,7 +1152,7 @@ func TestSRAnalysisFailsWhenWatchlistUnavailable(t *testing.T) {
 		log:              zap.NewNop(),
 	}
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(jobRuns.finished) != 1 {
 		t.Fatalf("finished = %+v, 期望剛好一筆", jobRuns.finished)
@@ -1134,7 +1179,7 @@ func TestSRAnalysisSucceedsWhenWatchlistEmpty(t *testing.T) {
 		log:              zap.NewNop(),
 	}
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(jobRuns.finished) != 1 || jobRuns.finished[0].status != "success" {
 		t.Fatalf("finished = %+v, 期望 status=success（watchlist 是空的但查詢正常）", jobRuns.finished)
@@ -2062,7 +2107,7 @@ func TestSRAnalysisReportsWatchlistSizeNotAttemptedCount(t *testing.T) {
 	s := newSRAnalysisTestScheduler(symbols, jobRuns,
 		mixedCandles(symbols, map[string]bool{"1102": true}), nil, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 2 {
 		t.Fatalf("實際分析 %v，want 兩檔（1102 被跳過）", runner.calls)
@@ -2089,7 +2134,7 @@ func TestSRAnalysisReportsWatchlistSizeWhenAllSkipped(t *testing.T) {
 		mixedCandles(symbols, map[string]bool{"1101": true, "1102": true, "1103": true}),
 		nil, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 0 {
 		t.Fatalf("全部應被跳過，got %v", runner.calls)
@@ -2114,7 +2159,7 @@ func TestSRAnalysisAllAttemptedFailedIsPartialNotFailed(t *testing.T) {
 	s := newSRAnalysisTestScheduler(symbols, jobRuns,
 		mixedCandles(symbols, map[string]bool{"1101": true, "1102": true}), nil, runner, nil)
 
-	s.runSRAnalysis(context.Background(), false)
+	s.RunSRAnalysis(false)
 
 	if len(runner.calls) != 1 || runner.calls[0] != "1103" {
 		t.Fatalf("只該分析 1103，got %v", runner.calls)
@@ -2125,5 +2170,136 @@ func TestSRAnalysisAllAttemptedFailedIsPartialNotFailed(t *testing.T) {
 	}
 	if got.status != "partial" {
 		t.Errorf("status = %q, want partial（分母是清單大小，failed=1 < 3）", got.status)
+	}
+}
+
+
+// ── 兩個時段共用一個執行所有權 ────────────────────────────────
+// （現況規格見 docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」）
+//
+// 舊版是兩個 atomic.Bool，註解明寫「兩輪之間互不影響」——那與 runSRAnalysisOwned 上方
+// 「序列執行：這台 host 只有 2GiB」直接衝突，而且手動端點可以讓兩輪真的並行。
+//
+// **資料層的時段冪等（srAnalysisSkipReason）與執行層的併發是兩件事**：
+// 前者兩輪規則刻意不同，後者兩輪共用。這組測試守的是後者。
+
+// startBlockedSRAnalysis 讓 `holder` 那一輪卡在第一檔上，回傳「放行」函式與等待結束的 channel。
+func startBlockedSRAnalysis(t *testing.T, s *Scheduler, runner *schedulerSRAnalysisRunnerStub, holderChip bool) (func(), chan struct{}) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.RunSRAnalysis(holderChip)
+	}()
+	select {
+	case <-runner.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("持有輪次沒有進到 runner")
+	}
+	return func() { close(runner.block) }, done
+}
+
+func TestSRAnalysisRoundsShareOneOwnership(t *testing.T) {
+	// 兩個方向都要驗：任一輪持有時，另一輪都不該執行。
+	for _, tc := range []struct {
+		name       string
+		holderChip bool
+		otherChip  bool
+		holderJob  string
+	}{
+		{"17:00 持有時擋住 22:00", false, true, "sr_analysis"},
+		{"22:00 持有時擋住 17:00", true, false, "sr_analysis_chip"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &schedulerSRAnalysisRunnerStub{
+				block:   make(chan struct{}),
+				entered: make(chan struct{}),
+			}
+			jobRuns := &schedulerJobRunRepoStub{}
+			s := newSRAnalysisTestScheduler([]string{"2330", "0050"}, jobRuns, todayCandle(), nil,
+				runner, &schedulerChipLatestStub{latest: &store.ChipScore{TradeDate: timeutil.TodayTaipei()}})
+
+			release, done := startBlockedSRAnalysis(t, s, runner, tc.holderChip)
+
+			// 持有輪次還卡著時觸發另一輪：**不該有任何新的 runner 呼叫**。
+			before := runner.callCount()
+			s.RunSRAnalysis(tc.otherChip)
+			if got := runner.callCount(); got != before {
+				t.Errorf("被擋的輪次仍然呼叫了 runner：before=%d after=%d", before, got)
+			}
+
+			// cron 路徑被擋時要留下可觀察的紀錄，否則丟掉的那一輪沒人看得到。
+			var blocked *schedulerJobRunFinish
+			for _, f := range jobRuns.snapshotFinished() {
+				if f.status == "failed" && strings.Contains(f.errMsg, "仍在執行") {
+					cp := f
+					blocked = &cp
+				}
+			}
+			if blocked == nil {
+				t.Fatal("被擋的 cron 輪次沒有寫 job_run")
+			}
+			if !strings.Contains(blocked.errMsg, tc.holderJob) {
+				t.Errorf("job_run 沒記下持有者：errMsg=%q want contains %q", blocked.errMsg, tc.holderJob)
+			}
+
+			release()
+			<-done
+
+			// 釋放之後另一輪要能正常跑。
+			after := runner.callCount()
+			s.RunSRAnalysis(tc.otherChip)
+			if runner.callCount() <= after {
+				t.Error("所有權釋放後另一輪仍然跑不起來")
+			}
+		})
+	}
+}
+
+func TestSRAnalysisSameRoundReentryStillBlocked(t *testing.T) {
+	// 既有行為的回歸：同一輪重入本來就該被擋，改成共用所有權之後不能變。
+	runner := &schedulerSRAnalysisRunnerStub{
+		block:   make(chan struct{}),
+		entered: make(chan struct{}),
+	}
+	s := newSRAnalysisTestScheduler([]string{"2330", "0050"}, &schedulerJobRunRepoStub{}, todayCandle(), nil,
+		runner, nil)
+
+	release, done := startBlockedSRAnalysis(t, s, runner, false)
+
+	before := runner.callCount()
+	s.RunSRAnalysis(false)
+	if got := runner.callCount(); got != before {
+		t.Errorf("同一輪重入沒有被擋：before=%d after=%d", before, got)
+	}
+
+	release()
+	<-done
+}
+
+func TestTryStartSRAnalysisReportsHolder(t *testing.T) {
+	// 手動入口要**同步**拿到答案：擋住時回持有者名稱，這樣 handler 才回得出 409。
+	runner := &schedulerSRAnalysisRunnerStub{
+		block:   make(chan struct{}),
+		entered: make(chan struct{}),
+	}
+	s := newSRAnalysisTestScheduler([]string{"2330"}, &schedulerJobRunRepoStub{}, todayCandle(), nil,
+		runner, &schedulerChipLatestStub{latest: &store.ChipScore{TradeDate: timeutil.TodayTaipei()}})
+
+	release, done := startBlockedSRAnalysis(t, s, runner, false)
+
+	running, started := s.TryStartSRAnalysis(true)
+	if started {
+		t.Error("持有輪次還在跑，TryStartSRAnalysis 不該回 started=true")
+	}
+	if running != "sr_analysis" {
+		t.Errorf("持有者名稱錯：got %q want sr_analysis", running)
+	}
+
+	release()
+	<-done
+
+	if _, started := s.TryStartSRAnalysis(true); !started {
+		t.Error("釋放後 TryStartSRAnalysis 應該可以啟動")
 	}
 }

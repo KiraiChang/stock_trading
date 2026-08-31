@@ -640,7 +640,7 @@ func (e *srScoreError) Unwrap() error { return e.err }
 // RunAnalysis 跑一次完整的 SR zone 分析並落地，回傳 analysis id。
 //
 // **這是帶身分追蹤的那條路徑，而且全系統只有這一份。** `POST /sr-zones` 與排程
-// （docs/todo.md T-052）都呼叫它。不要為了排程另外複製一份：
+// （SR 分析排程）都呼叫它。不要為了排程另外複製一份：
 // `analysis.SRAnalysisProvider`（`reuse_existing=true` 那條）**不寫 zone_uid、不追身分**，
 // 兩者不可互換——用錯的那條，分析會產生但身分層完全沒有紀錄，而且不會報錯。
 //
@@ -967,7 +967,7 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 
 	// **先查分析再查鏈**：`max_analyses` 的語意是「回溯幾次分析」，所以它同時決定了
 	// 鏈的視窗——最舊那次分析的時間就是視窗起點。少了這一步，鏈會不受參數控制地
-	// 撈出全部歷史（分析排程 T-052 上線後會愈長愈大），而 snapshots 卻只有 N 筆，
+	// 撈出全部歷史（分析排程上線後會愈長愈大），而 snapshots 卻只有 N 筆，
 	// 兩者的時間範圍對不起來。
 	//
 	// 「所有分析」也是 gap 揭露的唯一依據：沒有事件的分析在事件表裡不會留下任何列，

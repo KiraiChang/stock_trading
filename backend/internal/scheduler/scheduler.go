@@ -145,7 +145,7 @@ type Scheduler struct {
 	// **行程內旗標而非查 job_runs**：目前是單一 backend 實例，DB 層檢查要多一個 repo 方法
 	// 卻只在多實例部署才有意義。
 	universeSyncRunning atomic.Bool
-	// srAnalysisRunner 為選填（todo.md T-052）：未注入或未啟用時不註冊排程，
+	// srAnalysisRunner 為選填：未注入或未啟用時不註冊排程，
 	// 行為與導入前完全相同（比照 adjuster / evaluationUniverse）。
 	//
 	// **介面由這裡定義、由 main 注入 handler**：身分追蹤只存在於
@@ -156,9 +156,19 @@ type Scheduler struct {
 	srAnalysisCfg    config.SRAnalysisConfig
 	// srAnalysisCandles 用來檢查「今天的 K 棒到了沒」。
 	srAnalysisCandles store.CandleRepo
-	// 兩個時段各一個併發旗標：17:00 那輪還在跑時 22:00 不該被它擋掉。
-	srAnalysisRunning     atomic.Bool
-	srAnalysisChipRunning atomic.Bool
+	// **兩個時段共用一個併發所有權**（現況規格見
+	// docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」）。
+	//
+	// 舊版是兩個 atomic.Bool、一段一個，註解寫「17:00 那輪還在跑時 22:00 不該被它擋掉」
+	// ——那與 runSRAnalysisOwned 上方「序列執行：這台 host 只有 2GiB」直接衝突，
+	// 而且手動端點可以讓兩輪真的並行。**資料層的時段冪等（srAnalysisSkipReason）
+	// 與執行層的併發是兩件事**：前者兩輪規則刻意不同，後者兩輪共用。
+	//
+	// **是否執行中與誰在跑必須是同一個變數**：用「atomic.Bool ＋ atomic.Value 存持有者」
+	// 會在 CAS 成功到寫入持有者之間留下窗口，釋放順序不嚴謹還會清掉下一輪的持有者。
+	// mutex 只保護這個字串，臨界區不涵蓋整輪分析。
+	srAnalysisMu         sync.Mutex
+	srAnalysisRunningJob string
 	// registeredJobs 記錄 Start() 實際註冊了哪些 cron job。
 	// **為什麼要記而不是讓呼叫端自己判斷**：註冊條件散在 Start() 各處
 	// （config 開關、adjuster 是否注入、repo 是否注入），複製一份到 API 層
@@ -317,10 +327,10 @@ func (s *Scheduler) Start() {
 		}
 	}
 
-	// SR 分析排程（T-052）：兩輪都跑同一份 runner，差別只在「要不要求當日籌碼」。
+	// SR 分析排程：兩輪都跑同一份 runner，差別只在「要不要求當日籌碼」。
 	if s.srAnalysisRunner != nil && s.srAnalysisCfg.Enabled {
 		if _, err := s.cron.AddFunc(s.srAnalysisCfg.Cron, func() {
-			s.runSRAnalysis(context.Background(), false)
+			s.RunSRAnalysis(false)
 		}); err != nil {
 			s.log.Error("sr analysis cron register failed",
 				zap.String("cron", s.srAnalysisCfg.Cron), zap.Error(err))
@@ -328,7 +338,7 @@ func (s *Scheduler) Start() {
 			s.markRegistered("sr_analysis")
 		}
 		if _, err := s.cron.AddFunc(s.srAnalysisCfg.ChipCron, func() {
-			s.runSRAnalysis(context.Background(), true)
+			s.RunSRAnalysis(true)
 		}); err != nil {
 			s.log.Error("sr analysis chip cron register failed",
 				zap.String("cron", s.srAnalysisCfg.ChipCron), zap.Error(err))
@@ -1303,7 +1313,7 @@ func (s *Scheduler) RunCorporateActionSync() {
 		strings.Join(errParts, "; "), watchlistErr != nil)
 }
 
-// SetSRAnalysis 注入 SR 分析 runner 與其排程設定（todo.md T-052）。
+// SetSRAnalysis 注入 SR 分析 runner 與其排程設定（現況見 docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」）。
 // 未呼叫或 cfg.Enabled=false 時不註冊，行為與導入前完全相同（比照 SetEvaluationUniverse）。
 func (s *Scheduler) SetSRAnalysis(runner SRAnalysisRunner, candles store.CandleRepo, cfg config.SRAnalysisConfig) {
 	s.srAnalysisRunner = runner
@@ -1342,12 +1352,76 @@ func (s *Scheduler) srZoneVerifyMaxAnalyses() int {
 	return limit
 }
 
-// RunSRAnalysis 供 API 手動觸發。withChip 決定是否要求「當日籌碼已入庫」。
-func (s *Scheduler) RunSRAnalysis(withChip bool) {
-	s.runSRAnalysis(context.Background(), withChip)
+// acquireSRAnalysis 取得 SR 分析的執行所有權。
+// 回傳 (目前持有者, 是否取得)；取得失敗時第一個回傳值是擋住它的 job 名稱。
+func (s *Scheduler) acquireSRAnalysis(jobName string) (string, bool) {
+	s.srAnalysisMu.Lock()
+	defer s.srAnalysisMu.Unlock()
+	if s.srAnalysisRunningJob != "" {
+		return s.srAnalysisRunningJob, false
+	}
+	s.srAnalysisRunningJob = jobName
+	return "", true
 }
 
-// runSRAnalysis 對 watchlist 逐檔跑一次帶身分追蹤的 SR zone 分析（todo.md T-052）。
+func (s *Scheduler) releaseSRAnalysis() {
+	s.srAnalysisMu.Lock()
+	s.srAnalysisRunningJob = ""
+	s.srAnalysisMu.Unlock()
+}
+
+// srAnalysisJobName 把時段對應到 job_runs 的名稱。
+func srAnalysisJobName(withChip bool) string {
+	if withChip {
+		return "sr_analysis_chip"
+	}
+	return "sr_analysis"
+}
+
+// RunSRAnalysis 是 **cron 的入口**：自己取得所有權、自己釋放。
+//
+// **取不到時會寫一筆 failed 的 job_run**，不是靜默返回。兩支 cron 相隔五小時，
+// 撞在一起代表前一輪超時五小時以上，那是事故；而且被丟掉的那一輪
+// **不會在隔天自動補回來**——隔天 17:00 分析的是下一根日 K，
+// 不會補建前一天缺少的 chip-round 分析。看不見就等於沒發生過。
+func (s *Scheduler) RunSRAnalysis(withChip bool) {
+	ctx := context.Background()
+	jobName := srAnalysisJobName(withChip)
+	running, ok := s.acquireSRAnalysis(jobName)
+	if !ok {
+		s.log.Warn("sr analysis already running, skipped",
+			zap.String("job", jobName), zap.String("running", running))
+		runID := s.startRun(ctx, jobName)
+		s.finishRun(ctx, runID, jobName, 1, 1, "另一輪 "+running+" 仍在執行，本輪跳過")
+		return
+	}
+	defer s.releaseSRAnalysis()
+	s.runSRAnalysisOwned(ctx, withChip)
+}
+
+// TryStartSRAnalysis 是 **API 手動觸發的入口**：同步取得所有權，成功才把工作丟到背景。
+//
+// 回傳 (目前持有者, 是否啟動)。取不到時**不寫 job_run**——那是使用者連點兩次，
+// 不是排程事故，寫進去只會污染排程頁；呼叫端該回 409 讓對方立刻知道。
+//
+// **釋放由這裡 spawn 的 goroutine 負責**，呼叫端不需要也不應該碰。
+func (s *Scheduler) TryStartSRAnalysis(withChip bool) (string, bool) {
+	jobName := srAnalysisJobName(withChip)
+	running, ok := s.acquireSRAnalysis(jobName)
+	if !ok {
+		return running, false
+	}
+	go func() {
+		defer s.releaseSRAnalysis()
+		s.runSRAnalysisOwned(context.Background(), withChip)
+	}()
+	return "", true
+}
+
+// runSRAnalysisOwned 對 watchlist 逐檔跑一次帶身分追蹤的 SR zone 分析。
+//
+// ⚠️ **呼叫者必須已持有 acquireSRAnalysis 的所有權**：這支自己不 acquire 也不 release。
+// 兩個入口各自負責——cron 走 RunSRAnalysis，手動走 TryStartSRAnalysis。
 //
 // **為什麼是 watchlist 而不是 evaluation_universe**：後者的唯一職能是日 K 維護，
 // 「不做任何分析，也不參與任何交易決策或狀態推導」——那是 T-040 的核心約束，
@@ -1359,20 +1433,15 @@ func (s *Scheduler) RunSRAnalysis(withChip bool) {
 //
 // **序列執行**：這台 host 只有 2GiB。逐檔的峰值等同使用者手動點一次分析；
 // 真的撐不住時要降頻而不是加併發。
-func (s *Scheduler) runSRAnalysis(ctx context.Context, withChip bool) {
+func (s *Scheduler) runSRAnalysisOwned(ctx context.Context, withChip bool) {
+	// **nil 檢查留在這一層**：擺在兩個入口會讓「未設定 runner」與「被別人擋住」
+	// 在 TryStartSRAnalysis 的回傳值上長得一樣（都是 started=false），
+	// handler 就會對一個沒設定的排程回 409 ＋ 空的 running_job。
+	// 擺在這裡也維持舊行為——未設定時不寫 job_run。
 	if s.srAnalysisRunner == nil {
 		return
 	}
-	jobName, guard := "sr_analysis", &s.srAnalysisRunning
-	if withChip {
-		jobName, guard = "sr_analysis_chip", &s.srAnalysisChipRunning
-	}
-	// 併發守衛只擋同一輪自己；兩輪之間互不影響。
-	if !guard.CompareAndSwap(false, true) {
-		s.log.Warn("sr analysis already running, skipped", zap.String("job", jobName))
-		return
-	}
-	defer guard.Store(false)
+	jobName := srAnalysisJobName(withChip)
 
 	runID := s.startRun(ctx, jobName)
 

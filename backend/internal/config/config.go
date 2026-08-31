@@ -145,7 +145,8 @@ type SREvaluationConfig struct {
 	WriteDB        bool     `mapstructure:"write_db"`
 }
 
-// SRAnalysisConfig 是「定期對 watchlist 產生 SR zone 分析」的排程（todo.md T-052）。
+// SRAnalysisConfig 是「定期對 watchlist 產生 SR zone 分析」的排程
+// （現況見 docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」）。
 //
 // **兩個 cron 是刻意的，不是重複。** SR 分析吃籌碼（trading_score 的 Chip 佔 15%），
 // 而 FinMind 的法人／融資券要晚間才發布（chip.sync.cron 預設 21:00）：
@@ -156,7 +157,9 @@ type SREvaluationConfig struct {
 //
 // 兩輪各自有前置檢查，不符就跳過該檔而不是失敗；ChipCron 那輪額外要求籌碼
 // trade_date 是今天，否則跑出來的東西與 17:00 那輪相同，白跑還多推一次
-// observed_absences（見 todo.md T-052 的 S4）。
+// observed_absences。**一天兩輪會讓 observed_absences 一天前進兩次**，
+// 於是 MAX_OBSERVED_ABSENCES=3 的實質意義是約 1.5 個交易日而不是 3 個——
+// 那是刻意接受並記錄的，見 docs/sr-zone-scoring.md「資格閘門」。
 //
 // **預設關閉**，比照 sr_evaluation / evaluation_universe：啟用是一個明確的部署動作。
 type SRAnalysisConfig struct {
@@ -372,7 +375,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("candle_gap_detection.calendar_ttl_hours", 24)
 	viper.SetDefault("candle_gap_detection.breaker_failures", 5)
 	viper.SetDefault("candle_gap_detection.breaker_cooldown_min", 60)
-	// T-052：兩輪都預設關閉。17:00 那輪拿不到當日籌碼，22:00 那輪晚於 chip sync（21:00）
+	// 兩輪都預設關閉。17:00 那輪拿不到當日籌碼，22:00 那輪晚於 chip sync（21:00）
 	// 且早於 sr_evaluation（22:30）。
 	viper.SetDefault("sr_analysis.enabled", false)
 	viper.SetDefault("sr_analysis.cron", "0 17 * * 1-5")

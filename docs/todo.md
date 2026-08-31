@@ -3092,7 +3092,7 @@ by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **A 已完成（2026-08-28），B 觀察中**——四項情境全部有實測結果，結果已歸檔到 [`architecture.md`](./architecture.md)「日 K 缺漏偵測 › 驗收實測（2026-08-28）」；B 還差兩個交易日（下週一、二）。**本筆保留供 review 與 B 收尾。** |
+| 狀態 | **A 已完成（2026-08-28），B 觀察中**——四項情境全部有實測結果，結果已歸檔到 [`architecture.md`](./architecture.md)「日 K 缺漏偵測 › 驗收實測（2026-08-28）」；B 還差一個交易日（2026-09-01；08-31 已查證通過，見下方「B 的進度」）。**本筆保留供 review 與 B 收尾。** |
 | 優先度 | 中（**基本正向與負向路徑已驗證**：正向以 dev 造一個人工缺口驗到 `upstream_data_gap`，負向以 `2867` 的停止買賣在 live 與 dev 各驗一次判 `verified` 不告警。**這不等於誤報漏報已全面排除**——live 端正向、`deferred`、陳舊升級、breaker 四條路徑都還沒被觸發，見下方「B 的進度」） |
 | 分類 | 驗證 / Go / 排程 / 市場資料 |
 | 建立日期 | 2026-08-28 |
@@ -3449,8 +3449,8 @@ docker exec postgres-postgres-1 psql -U trading_username -d trading -c \
 A 的四項情境都有實測結果、B 至少觀察三個交易日且請求量正常，並把結論補進
 [`architecture.md`](./architecture.md)「日 K 缺漏偵測」那一節。
 
-**進度（2026-08-28）**：A 四項已完成，結論已寫進該節的「驗收實測（2026-08-28）」子節；
-**B 只完成第一個交易日**，還差兩個（見下方「B 的進度」）。所以本筆**尚未達成完成條件**。
+**進度（2026-08-31 更新）**：A 四項已完成，結論已寫進該節的「驗收實測（2026-08-28）」子節；
+**B 已完成兩個交易日（08-28、08-31）**，還差 2026-09-01（見下方「B 的進度」）。所以本筆**尚未達成完成條件**。
 
 **（已失效，2026-08-28）** 原文警語是「在 A 完成之前，不要把 live 的任何 `partial`
 當成已證實的上游缺漏」。A 已完成，該限制解除：live 若出現 `partial`，照
@@ -3499,8 +3499,16 @@ A 的四項情境都有實測結果、B 至少觀察三個交易日且請求量�
 | 交易日 | 狀態 |
 |---|---|
 | 2026-08-28（五） | ✅ 首輪 `success`，數字見 `architecture.md` |
-| 2026-08-31（一） | ⬜ 待觀察 |
+| 2026-08-31（一） | ✅ **`success`／135 檔 0 失敗**，16:25:18～16:25:24（6.21 秒）。`error` 空，無 `partial`。`candle_verification_state` 全表仍只有 `2867` 一列，判 `verified`、`consecutive_failures=0`（16:25:24）。**請求量正常**：候選只有 `2867` 一檔，且它的缺漏日期（08-20 起，日 K 止於 08-19）全部落在 8 月——依 `groupCandidatesBySymbol` 的 **(symbol, month) 去重**（`candle_gap_detection.go:553`，個股端點按月回傳），個股核對就是 **1 次請求**，與首輪相同。`candidate_cap_per_run=20`（單位是候選標的）遠未逼近。⚠️ **6.21 秒 vs 首輪 5.81 秒的差異是執行時間波動，不是多送請求**——缺漏日期變多不會增加請求數，除非跨到新的月份 |
 | 2026-09-01（二） | ⬜ 待觀察 |
+
+⚠️ **`docker logs` 在這個環境不能當成 B 的證據來源**（2026-08-31 實測）。當天偵測跑完
+4 分鐘後，三個 `stock_trading-*` 容器於 **16:29:40 被重新建立**（`docker inspect` 的
+`Created` / `StartedAt` 皆為該時刻），backend 內只剩重建後的 6 行 log，
+B 段第二條指令（`docker logs … | grep 'candle gap detection done'`）**當天已無法執行**。
+**判定不受影響**——`job_runs` 與 `candle_verification_state` 兩項 DB 證據本身就足以判這一輪，
+而且比 log 耐久。要取 log 佐證只能在該輪跑完到下次重建之間，這一點收尾時要一併寫進
+[`architecture.md`](./architecture.md)。
 
 **live 端的正向告警至今沒有發生過**，所以 `partial` ＋ `upstream_data_gap` 在 live 的
 表現目前只有 dev 的等價證據；`deferred`、陳舊升級、breaker 三條路徑也還沒被真實流量觸發。

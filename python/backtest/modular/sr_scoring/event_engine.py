@@ -180,11 +180,16 @@ def zone_interaction(
     closed_inside = z.price_low <= close <= z.price_high
     closed_above = close > z.price_high
     closed_below = close < z.price_low
-    penetration_pct = 0.0
-    if low < z.price_low:
-        penetration_pct = max(penetration_pct, (z.price_low - low) / z.price_low)
-    if high > z.price_high:
-        penetration_pct = max(penetration_pct, (high - z.price_high) / z.price_high)
+    # **兩側各算各的**（原記於 issue.md I-098）。共用一個 `penetration_pct` 正是缺陷來源：
+    # `closed_above` 的定義是 `close > price_high`，而 K 棒 `high >= close`，
+    # 所以 `closed_above` 蘊含 `high > price_high` 蘊含「兩側取大 > 0」——那個守衛對支撐
+    # **恆真**，undercut 的判定退化成「收在帶上」，與有沒有跌破帶底無關。壓力側對稱：
+    # `closed_below` 蘊含 `low < price_low`，overthrow 的判定退化成「收在帶下」。
+    undercut_ratio = (z.price_low - low) / z.price_low if low < z.price_low else 0.0
+    overthrow_ratio = (high - z.price_high) / z.price_high if high > z.price_high else 0.0
+    # 語意維持「兩側取大」——前端型別與既有 payload 都照這個讀，改它會是第二個缺陷。
+    # ⚠️ **它不能用來判方向**，要判方向請用上面兩個比率。
+    penetration_pct = max(undercut_ratio, overthrow_ratio)
 
     if not touched:
         state_label = "尚未測試"
@@ -206,9 +211,10 @@ def zone_interaction(
         close_relative_to_zone = "INSIDE_ZONE"
     reclaim_type = "NONE"
     rejection_type = "NONE"
-    if z.role == ZoneType.SUPPORT.value and touched and closed_above and penetration_pct > 0:
+    # **undercut 只看跌破帶底那一側，overthrow 只看穿出帶頂那一側。**
+    if z.role == ZoneType.SUPPORT.value and touched and closed_above and undercut_ratio > 0:
         reclaim_type = "UNDERCUT_RECLAIM"
-    elif z.role == ZoneType.RESISTANCE.value and touched and closed_below and penetration_pct > 0:
+    elif z.role == ZoneType.RESISTANCE.value and touched and closed_below and overthrow_ratio > 0:
         reclaim_type = "OVERTHROW_REJECTED"
     elif z.role == ZoneType.SUPPORT.value and touched and not closed_below:
         rejection_type = "SUPPORT_HELD"
@@ -218,6 +224,9 @@ def zone_interaction(
         "reclaim_type": reclaim_type,
         "rejection_type": rejection_type,
         "penetration_ratio": penetration_pct,
+        # 兩側分開，供判方向用；`penetration_ratio` 是兩者取大，判不出方向。
+        "undercut_ratio": undercut_ratio,
+        "overthrow_ratio": overthrow_ratio,
         "close_relative_to_zone": close_relative_to_zone,
         "follow_through": "UNKNOWN",
         "touched": touched,

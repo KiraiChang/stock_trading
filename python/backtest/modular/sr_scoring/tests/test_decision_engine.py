@@ -592,7 +592,7 @@ def test_recovery_confirmed_outputs_recovery_regime_and_final_permission():
         candle_low=100.5,
         candle_close=101.0,
         previous_candle_high=101.0,
-        previous_candle_low=99.0,
+        previous_candle_low=97.5,  # < zone low：真 undercut
         previous_candle_close=100.5,
     )
 
@@ -718,7 +718,7 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
         candle_close=103.85,
         previous_candle_open=100.0,
         previous_candle_high=102.5,
-        previous_candle_low=99.85,
+        previous_candle_low=98.5,  # < zone low：真 undercut
         previous_candle_close=102.5,
         model_governance={
             "health_state": "DEGRADED",
@@ -1222,7 +1222,7 @@ def test_recovery_regime_does_not_force_bullish_continuation_when_action_avoids(
         candle_low=100.5,
         candle_close=101.0,
         previous_candle_high=101.0,
-        previous_candle_low=99.0,
+        previous_candle_low=97.5,  # < zone low：真 undercut
         previous_candle_close=100.5,
     )
 
@@ -1276,7 +1276,9 @@ def test_final_entry_permission_normalizes_buy_ready_to_entry_allowed():
 def test_zone_interaction_uses_intraday_high_low_close_not_only_current_price():
     zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
 
-    ds = _summary([zone], current_price=101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+    # candle_low 壓到帶底之下＝真 undercut（low>=98 只會是 SUPPORT_TEST_CANDIDATE）。
+    # touched 仍然由 candle_low 而不是 current_price 決定，本測試要驗的東西不變。
+    ds = _summary([zone], current_price=101.0, candle_high=101.5, candle_low=97.5, candle_close=101.0)
 
     interaction = ds["primary_zone"]["zone_interaction"]
     assert interaction["touched"] is True
@@ -1313,7 +1315,7 @@ def test_support_reclaim_confirmed_requires_following_bar_not_breaking_back_down
         candle_low=100.5,
         candle_close=101.0,
         previous_candle_high=101.0,
-        previous_candle_low=99.0,
+        previous_candle_low=97.5,  # < zone low：真 undercut
         previous_candle_close=100.5,
     )
 
@@ -2469,7 +2471,8 @@ def test_secondary_gate_not_qualified_when_no_statistic_exists():
     assert gate["secondary_gate"]["qualified"] is False, "沒有統計可比時不得標成通過"
 
 
-# ── I-096：碰觸與收復拆成兩個 structure state ──────────────────
+# ── 碰觸與收復拆成兩個 structure state ────────────────────────
+# （原記於 issue.md I-096，已收斂；現況見 docs/sr-zone-scoring.md 的 structure_state 對照表）
 # 拆分前 touched-only 與真正的 undercut-reclaim 共用 `SUPPORT_RECLAIM_CANDIDATE`，
 # 而 `resolve_event_signal` 會把 candidate 直接當成 `CLOSE_RECLAIM` 灌進 Lifecycle。
 # **這組測試的重點是「拆分不可以變成放寬」**——見下方 entry state 那一支。
@@ -2501,7 +2504,7 @@ def test_undercut_reclaim_still_returns_reclaim_candidate():
     """**回歸防線**：真正的 undercut-reclaim 必須維持 `SUPPORT_RECLAIM_CANDIDATE`。
 
     診斷過的 88 筆分析裡，35 筆 `SUPPORT_RECLAIM_CANDIDATE` **全部**是這一類；
-    這支測試釘住 I-096 的拆分沒有誤傷它們（預期影響筆數為 0）。
+    這支測試釘住拆分沒有誤傷它們（預期影響筆數為 0）。
     """
     zone = _support_zone_for_structure()
     interaction = _zone_interaction(zone, 100.5, 100.8, 97.0, 100.5)
@@ -2513,7 +2516,7 @@ def test_undercut_reclaim_still_returns_reclaim_candidate():
 
 
 def test_support_test_candidate_keeps_conservative_entry_state():
-    """**拆分不可以變成放寬**（I-096 計畫書的 R1）。
+    """**拆分不可以變成放寬**（原記於 issue.md I-096 計畫書的 R1，已收斂）。
 
     拆分前 touched-only 走 `SUPPORT_RECLAIM_CANDIDATE`，在 `_entry_action_state`
     被壓成 PROBE / WAIT。若新狀態沒被加進那個條件，它會掉到 `SMALL_ENTRY` /
@@ -2534,3 +2537,62 @@ def test_support_test_candidate_reason_code_is_not_generic_defense():
     condition = _position_action_condition(zone, "SUPPORT_TEST_CANDIDATE", None)
     assert "SUPPORT_TEST_AWAIT_RECLAIM" in condition["reason_codes"]
     assert "SUPPORT_DEFENSE" not in condition["reason_codes"]
+
+
+def test_close_above_without_undercut_flows_to_support_test_end_to_end():
+    """**兩次改動的接點**：假 undercut 一路走到 `SUPPORT_TEST`。
+
+    這一類（low 從未跌破帶底、卻收在帶頂之上）在 2026-08-31 修好前有**兩條**驅動
+    `CLOSE_RECLAIM` 的路徑——`structure_state` 與事件層的 `INTRADAY_RECLAIM`——
+    修好之後兩條都斷掉，落到拆分出來的 `SUPPORT_TEST_CANDIDATE`
+    （原記於 issue.md I-096 / I-098，均已收斂）。
+    live 母體有 25 筆屬於這一類（49 筆 UNDERCUT_RECLAIM 的 51%）。
+    """
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    ds = _summary([zone], current_price=101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+
+    evidence = ds["primary_zone"]["zone_interaction"]["price_action_evidence"]
+    assert evidence["undercut_ratio"] == 0.0
+    assert evidence["reclaim_type"] == "NONE"
+
+    assert ds["market_regime"]["structure_state"] == "SUPPORT_TEST_CANDIDATE"
+    assert "SUPPORT_TEST_AWAIT_RECLAIM" in ds["position_action_condition"]["reason_codes"]
+
+    # **斷言真正的終點**：只驗 structure_state 證明不了「一路走到 SUPPORT_TEST」，
+    # 因為中間還隔著 resolve_event_signal。這裡直接看 authoritative 的那個欄位。
+    assert ds["decision_derived_view"]["semantic_pipeline"]["event_signal"] == "SUPPORT_TEST"
+
+    # 事件層那條路徑也要斷掉，否則 INTRADAY_RECLAIM 會從另一邊把它推回 CLOSE_RECLAIM
+    assert not [e for e in ds["market_events"] if e["type"] == "INTRADAY_RECLAIM"]
+
+    # 對照組：同一組 K 棒只把 low 壓到帶底之下，兩條路徑都回到真收復
+    ds2 = _summary([zone], current_price=101.0, candle_high=101.5, candle_low=97.5, candle_close=101.0)
+    assert ds2["market_regime"]["structure_state"] == "SUPPORT_RECLAIM_CANDIDATE"
+    assert ds2["decision_derived_view"]["semantic_pipeline"]["event_signal"] == "CLOSE_RECLAIM"
+    assert [e for e in ds2["market_events"] if e["type"] == "INTRADAY_RECLAIM"]
+
+
+def test_undercut_that_closes_inside_zone_is_test_candidate_not_reclaim():
+    """跌破帶底但**收在帶內** → `SUPPORT_TEST_CANDIDATE`，不是 reclaim 也不是 invalidated。
+
+    這是 `SUPPORT_TEST_CANDIDATE` 的**第二條**進入路徑，容易被讀成
+    「沒有跌破帶底」而漏掉：`UNDERCUT_RECLAIM` 要「跌破帶底」**且**
+    「收回帶頂上方」兩件事同時成立，只做到前者不算收復。
+    """
+    zone = _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+    interaction = _zone_interaction(zone, 99.0, 99.5, 97.0, 99.0)
+    evidence = interaction["price_action_evidence"]
+
+    assert evidence["undercut_ratio"] > 0        # 確實跌破了帶底
+    assert evidence["closed_above"] is False     # 但沒有收回帶頂上方
+    assert evidence["closed_below"] is False     # 也沒有收破
+    assert evidence["reclaim_type"] == "NONE"
+
+    assert _structure_state(zone, interaction, None) == "SUPPORT_TEST_CANDIDATE"
+
+    # 對照組：同樣跌破帶底，但收回帶頂上方 → 才是 reclaim
+    reclaimed = _zone_interaction(zone, 100.5, 100.8, 97.0, 100.5)
+    assert reclaimed["price_action_evidence"]["reclaim_type"] == "UNDERCUT_RECLAIM"
+    assert _structure_state(zone, reclaimed, None) == "SUPPORT_RECLAIM_CANDIDATE"

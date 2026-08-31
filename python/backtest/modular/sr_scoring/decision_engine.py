@@ -692,7 +692,7 @@ def _entry_action_state(
     ):
         # `SUPPORT_TEST_CANDIDATE` **必須**留在這個保守分支。拆分前 touched-only
         # 走的就是 `SUPPORT_RECLAIM_CANDIDATE`、被壓成 PROBE / WAIT；漏掉它會讓
-        # touched-only 掉到下面的 SMALL_ENTRY / Buy，比拆分前更寬鬆——與 I-096
+        # touched-only 掉到下面的 SMALL_ENTRY / Buy，比拆分前更寬鬆——與拆分
         # 「名稱對 touched-only 過強」的動機完全相反。
         return "PROBE_ENTRY" if action == "BuySmall" else "WAIT_CONFIRMATION"
     if action == "BuySmall":

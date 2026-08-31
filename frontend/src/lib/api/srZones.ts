@@ -366,6 +366,10 @@ export interface SRZoneInteraction {
   state_label: string
   price_action_evidence?: {
     reclaim_type: string
+    // 兩側分開的穿越深度（原記於 docs/issue.md I-098）。
+    // penetration_ratio 是兩者取大，**判不出方向**，要判方向用這兩個。
+    undercut_ratio?: number
+    overthrow_ratio?: number
     rejection_type: string
     penetration_ratio: number
     close_relative_to_zone: string

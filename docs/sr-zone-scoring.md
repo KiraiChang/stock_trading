@@ -731,7 +731,7 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 
   | 值 | 條件 | 事件仲裁 |
   |---|---|---|
-  | `SUPPORT_RECLAIM_CANDIDATE` | `reclaim_type == UNDERCUT_RECLAIM`。**預期語意**是「跌破帶底後又收回帶頂上方」，⚠️ **但目前的實作不是這樣**——見下方「已知缺陷」 | 驅動 `CLOSE_RECLAIM` |
+  | `SUPPORT_RECLAIM_CANDIDATE` | `reclaim_type == UNDERCUT_RECLAIM`——**真的跌破帶底**（`low < price_low`）後又收回帶頂上方 | 驅動 `CLOSE_RECLAIM` |
   | `SUPPORT_TEST_CANDIDATE` | 只是 `touched`，沒有 undercut-reclaim、也沒有收破 | 走 `SUPPORT_TEST`，**不驅動** `CLOSE_RECLAIM` |
   | `SUPPORT_RECLAIM_CONFIRMED` | 前一根 `UNDERCUT_RECLAIM` 且本根未收破 | 驅動 `CLOSE_RECLAIM` |
   | `SUPPORT_RECLAIM_INVALIDATED` / `BREAKDOWN` | 收破 ／ `recent_validation=EXPIRED` | 走 breakdown 分支 |
@@ -740,18 +740,24 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
   對單純碰觸太強；而後者還會經 `resolve_event_signal` 被當成收復證據回饋到
   `market_state` 與 Bias。所以解法是拆狀態，不是改名。
 
-  ⚠️ **已知缺陷：`UNDERCUT_RECLAIM` 目前並不要求真的跌破帶底**（`issue.md` I-098，待修復）。
-  `zone_interaction` 的 `penetration_pct` 同時採計「跌破帶底」與「突破帶頂」兩側，
-  而判定只檢查它 `> 0`；因為 `closed_above` 蘊含 `high > price_high`、
-  進而蘊含 `penetration_pct > 0`，**那個守衛對 SUPPORT 恆真**。實際行為退化成：
+  **`penetration_ratio` 判不出方向，不要拿它當守衛**（2026-08-31 修正，原記於 `issue.md` I-098）。
+  `zone_interaction` 對每根 K 棒算三個數，用途各不相同：
 
-  ```text
-  UNDERCUT_RECLAIM  ⟺  touched ∧ closed_above      # 與有沒有跌破帶底無關
-  ```
+  | 欄位 | 算式 | 用途 |
+  |---|---|---|
+  | `undercut_ratio` | `(price_low - low) / price_low`，`low >= price_low` 時為 0 | **判 undercut 只能用它** |
+  | `overthrow_ratio` | `(high - price_high) / price_high`，`high <= price_high` 時為 0 | **判 overthrow 只能用它** |
+  | `penetration_ratio`／`penetration_pct` | 前兩者取大 | 顯示用的「這根穿了多深」，**不帶方向** |
 
-  所以「從帶內往上穿出、從未跌破帶底」目前也會拿到 `SUPPORT_RECLAIM_CANDIDATE`
-  並驅動 `CLOSE_RECLAIM`。**上表第一列寫的是預期語意，不是現行契約**——
-  在 I-098 修好之前不要把它當成保證。上表其餘各列不受影響。
+  ⛔ **這是踩過的坑**：舊實作兩側共用 `penetration_pct`，判定寫成
+  `touched ∧ closed_above ∧ penetration_pct > 0`。因為 `closed_above` 蘊含
+  `high > price_high` 蘊含 `penetration_pct > 0`，**那個守衛恆真**，
+  `UNDERCUT_RECLAIM` 退化成「碰到 ∧ 收在帶上」，與有沒有跌破帶底無關；
+  壓力側對稱（`closed_below` 蘊含 `low < price_low`）。
+  live 母體實測 **86 筆旗標裡 42 筆（49%）是錯的**——
+  `UNDERCUT_RECLAIM` 49 筆錯 25 筆、`OVERTHROW_REJECTED` 37 筆錯 17 筆。
+  **新增欄位而不改 `penetration_ratio` 的語意**是刻意的：前端型別與既有 payload
+  都照「兩側取大」讀，改它會製造第二個缺陷。
 
   ⚠️ **`SUPPORT_TEST_CANDIDATE` 在 `_entry_action_state` 與
   `SUPPORT_RECLAIM_CANDIDATE` 同待遇**（一樣壓成 `PROBE_ENTRY` / `WAIT_CONFIRMATION`）。
@@ -1483,10 +1489,32 @@ Setup 定義：
 
 | State | 條件 |
 |---|---|
-| `SUPPORT_RECLAIM_CANDIDATE` | 最新 K 的 low 進入支撐 zone，且 close 收回 `zone.high` 上方；這只代表候選，不代表確認 |
-| `SUPPORT_RECLAIM_CONFIRMED` | 前一根 K 已收回 `zone.high` 上方，且最新 K 沒有重新收破 `zone.low` |
+| `SUPPORT_RECLAIM_CANDIDATE` | 最新 K **真的跌破帶底**（`low < zone.low`，即 `undercut_ratio > 0`）後 close 又收回 `zone.high` 上方；這只代表候選，不代表確認 |
+| `SUPPORT_TEST_CANDIDATE` | 最新 K **碰到 zone、不是 `UNDERCUT_RECLAIM`、也沒有收破帶底**——**碰到不是收復**，走 `SUPPORT_TEST` 而不驅動 `CLOSE_RECLAIM`。⚠️ 這**包含**「跌破了帶底但收在帶內」，見下方 |
+| `SUPPORT_RECLAIM_CONFIRMED` | **前一根 K 是 `UNDERCUT_RECLAIM`**（跌破帶底後收回帶頂上方），且最新 K 沒有重新收破 `zone.low` |
 | `SUPPORT_RECLAIM_INVALIDATED` | 最新 K 收破 `zone.low`，支撐收復失效 |
 | `BREAKDOWN` | primary zone 近期驗證已失效或結構性跌破 |
+
+⚠️ **`SUPPORT_RECLAIM_CANDIDATE` 要的是「跌破帶底」＋「收回帶頂上方」兩件事同時成立**，
+不是「low 進入 zone」。價格從帶內往上穿出也會讓 low 落在 zone 內，但那不是收復。
+
+**`SUPPORT_TEST_CANDIDATE` 是兜底，落進去有兩條路**，不要把它讀成「沒有跌破帶底」：
+
+| 情境 | `low < zone.low`？ | close 位置 | `reclaim_type` | 結果 |
+|---|---|---|---|---|
+| 碰到帶子、收在帶內 | ❌ | 帶內 | `NONE` | `SUPPORT_TEST_CANDIDATE` |
+| **跌破帶底，但收在帶內**（沒收回帶頂） | ✅ | 帶內 | `NONE` | **`SUPPORT_TEST_CANDIDATE`** |
+| 跌破帶底，收回帶頂上方 | ✅ | 帶頂之上 | `UNDERCUT_RECLAIM` | `SUPPORT_RECLAIM_CANDIDATE` |
+| 跌破帶底，收破帶底 | ✅ | 帶底之下 | `NONE` | `SUPPORT_RECLAIM_INVALIDATED` |
+
+決定性的不是「有沒有跌破」，是**「有沒有跌破**並且**收回帶頂上方」**——
+`UNDERCUT_RECLAIM` 要兩件事同時成立。
+
+**這個缺陷的成因不是這張表的措辭**，是程式碼把 `penetration_pct`（兩側取大）
+當成方向守衛：`closed_above` 蘊含它 > 0，於是守衛恆真。這張表當時寫成
+「low 進入 zone」是同一個誤解的另一個面向，但**不是缺陷本身**。
+細節見「`penetration_ratio` 判不出方向，不要拿它當守衛」那一節，
+完整的五值對照與事件仲裁也在那裡；這裡只講 reclaim 這一組。
 
 這些狀態只影響 Decision/Scenario 與 Position Action 的條件呈現，不改寫 zone 的原始機率、EV/RR 或 score。
 原始 `recent_validation` 仍由 scoring / zone builder 的 touch classification 與 validation window
@@ -1724,6 +1752,39 @@ blocking zone 的來源。**目前限制**：`zone_id` 恆為 `null`（`ZoneScor
 只有 daily candidate 路徑會填 `"1d"`、`ZONE_SCORE_POOL` 路徑恆為 `null`；`tier`/`tier_label`/`confidence`/
 `confidence_level` 在 daily candidate 路徑也為 `null`（daily 候選無 tier/confidence）。前端應把這些欄位
 視為 nullable，不可假設一定有值。
+
+**同一個限制也適用於 2026-08-28／08-31 這兩次 `structure_state` 與 `reclaim_type` 的改動**
+（碰觸與收復拆成兩個狀態、undercut／overthrow 只看自己那一側；原記於 `issue.md`
+I-096 與 I-098，均已收斂）。兩次都**沒有**跑 decision replay，前置與本節相同——
+dev 沒有 model bundle。它們的影響面證據是對 live 既有分析的**重算**：
+
+| 改動 | 影響面證據 | 結果 |
+|---|---|---|
+| 碰觸／收復拆分 | 對 138 筆帶 `price_action_evidence` 的分析重放 `_structure_state` 新舊兩版 | 0 筆改變（證明拆分沒有誤傷既有分類，**不是**證明分類本身正確）。⚠️ 另有 3 筆舊 payload 有改變，見下 |
+| undercut／overthrow 分側 | 從 `candles` 重算 86 筆被標旗標的分析 | 42 筆翻轉為 `NONE`、44 筆維持，翻成非 `NONE` 的 0 筆 |
+| 兩者的接點 | 對 101 筆 SUPPORT primary 重算 `structure_state` | `SUPPORT_TEST_CANDIDATE` 從 0 筆變成 24 筆 |
+
+⛔ **不要把上表第一列讀成「production 全期 0 筆改變」。** 那 138 筆是**現行 schema**
+（帶 `price_action_evidence`）的母體。全期 144 筆分析裡另有 **6 筆舊 payload**
+（2026-07-14～15）**完全沒有 `price_action_evidence` 這個鍵**——欄位當時還不存在。
+
+那批的 `evidence` 取到空 dict，`evidence.get("reclaim_type")` 是 `None`，於是一路掉到
+`touched` 兜底分支。**其中 3 筆的輸出確實改變了**：
+
+| 母體 | 筆數 | 期間 | 差異 |
+|---|---|---|---|
+| 帶 `price_action_evidence`（現行 schema） | 138 | 2026-07-16 ~ 08-28 | **0 筆** |
+| 沒有該鍵的舊 payload | 6 | 2026-07-14 ~ 07-15 | **3 筆**（`SUPPORT_RECLAIM_CANDIDATE` → `SUPPORT_TEST_CANDIDATE`） |
+
+**這 3 筆是修好的證據不是回歸**：它們在舊版被叫做「支撐收復候選」時**手上一點收復證據
+都沒有**——連 evidence 本身都不存在。改叫「支撐測試候選」更準確。
+
+**對未來仍是 0**：現行 schema 一律帶 `price_action_evidence`，缺鍵不會再發生。
+但**兜底分支確實可達**，不是純理論——判讀舊分析時要把這件事算進去。
+
+⚠️ **重算不等於 decision replay**：它證明的是「這一層的輸出怎麼變」，
+不是「最終的 `by_rr_gate` / `by_entry_executability` 分佈怎麼變」。
+要補的話前置與本節同一個（見 `todo.md` T-066）。
 
 ### Primary Zone 與 Secondary Zones
 

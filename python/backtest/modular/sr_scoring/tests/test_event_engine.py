@@ -13,7 +13,7 @@ from ..event_engine import (
     zone_identity_key,
     zone_interaction,
 )
-from ..types import RecentValidation, VolumeConfirmation, ZoneType
+from ..types import RecentValidation, VolumeConfirmation, ZoneScore, ZoneType
 
 # 沿用 decision 測試的 ZoneScore 建構 helper，避免重複整包 dataclass 欄位。
 from .test_decision_engine import _zone
@@ -789,3 +789,98 @@ def test_bar_advanced_since_boundaries():
     assert _bar_advanced_since(None, "2026-08-15T16:00:00Z") is True
     # 帶時區偏移的 RFC3339（Go 不一定送 Z）
     assert _bar_advanced_since(now, "2026-08-16T00:00:00+08:00") is True
+
+
+# ── undercut / overthrow 只看自己那一側 ───────────────────────
+# （原記於 issue.md I-098，已收斂；現況見 docs/sr-zone-scoring.md
+#  「`penetration_ratio` 判不出方向，不要拿它當守衛」）
+# 舊實作用「兩側取大」的 `penetration_pct > 0` 當守衛。因為 `closed_above` 蘊含
+# `high > price_high`、`closed_below` 蘊含 `low < price_low`，那個守衛在兩側都**恆真**，
+# 判定退化成「收在帶上／帶下」，與有沒有真的穿越無關。live 母體 86 筆旗標裡 42 筆是錯的。
+
+
+def _support_zone_for_penetration() -> ZoneScore:
+    return _zone(role=ZoneType.SUPPORT.value, low=98.0, high=100.0)
+
+
+def _resistance_zone_for_penetration() -> ZoneScore:
+    return _zone(role=ZoneType.RESISTANCE.value, low=98.0, high=100.0)
+
+
+def test_real_undercut_reclaim_is_flagged():
+    """low 跌破帶底後收回帶頂上方 → `UNDERCUT_RECLAIM`。"""
+    z = _support_zone_for_penetration()
+    ev = zone_interaction(z, 100.5, 100.8, 97.0, 100.5)["price_action_evidence"]
+
+    assert ev["reclaim_type"] == "UNDERCUT_RECLAIM"
+    assert ev["undercut_ratio"] > 0
+    assert ev["rejection_type"] == "NONE"
+
+
+def test_close_above_without_undercut_is_not_reclaim():
+    """**這是分側判定的核心**：low 從未跌破帶底，只是從帶內往上穿出，不算收復。
+
+    `high=101.5 > 100` 讓舊的 `penetration_pct` 為正，於是舊實作照樣標
+    `UNDERCUT_RECLAIM`。新實作看的是 `undercut_ratio`，它為 0。
+    """
+    z = _support_zone_for_penetration()
+    it = zone_interaction(z, 101.0, 101.5, 99.0, 101.0)
+    ev = it["price_action_evidence"]
+
+    assert ev["touched"] is True
+    assert ev["closed_above"] is True
+    assert ev["undercut_ratio"] == 0.0          # 從未跌破帶底
+    assert ev["overthrow_ratio"] > 0            # 但確實穿出帶頂
+    assert it["penetration_pct"] > 0            # 舊守衛看的就是這個——所以它擋不住任何東西
+
+    assert ev["reclaim_type"] == "NONE"
+    assert ev["rejection_type"] == "SUPPORT_HELD"   # 落到 elif 第三支
+
+
+def test_real_overthrow_rejection_is_flagged():
+    """壓力側對稱：high 穿出帶頂後收在帶底之下 → `OVERTHROW_REJECTED`。"""
+    z = _resistance_zone_for_penetration()
+    ev = zone_interaction(z, 97.5, 101.0, 97.2, 97.5)["price_action_evidence"]
+
+    assert ev["reclaim_type"] == "OVERTHROW_REJECTED"
+    assert ev["overthrow_ratio"] > 0
+
+
+def test_close_below_without_overthrow_is_not_rejection():
+    """壓力側對稱的反例：high 從未穿出帶頂，只是從帶內往下跌破。"""
+    z = _resistance_zone_for_penetration()
+    ev = zone_interaction(z, 97.5, 99.5, 97.2, 97.5)["price_action_evidence"]
+
+    assert ev["closed_below"] is True
+    assert ev["overthrow_ratio"] == 0.0
+    assert ev["undercut_ratio"] > 0
+    assert ev["reclaim_type"] == "NONE"
+
+
+def test_penetration_ratio_stays_max_of_both_sides():
+    """**相容性回歸**：`penetration_pct` / `penetration_ratio` 的語意不變（兩側取大）。
+
+    前端型別與既有 payload 都照這個讀，所以本次只新增欄位、不改它。
+    """
+    z = _support_zone_for_penetration()
+    it = zone_interaction(z, 100.5, 102.0, 97.0, 100.5)
+    ev = it["price_action_evidence"]
+
+    assert it["penetration_pct"] == max(ev["undercut_ratio"], ev["overthrow_ratio"])
+    assert ev["penetration_ratio"] == it["penetration_pct"]
+    assert ev["undercut_ratio"] > 0 and ev["overthrow_ratio"] > 0   # 兩側都穿
+
+
+def test_false_undercut_produces_no_intraday_reclaim_event():
+    """事件層：假 undercut 不再產生 `INTRADAY_RECLAIM`。
+
+    那是 `decision_visible=true` 的事件，會經 `resolve_event_signal` 直接產生
+    `CLOSE_RECLAIM`——所以這條路徑與 `structure_state` 是兩條各自獨立的驅動。
+    """
+    z = _support_zone_for_penetration()
+
+    fake = detect_market_events([z], 101.0, candle_high=101.5, candle_low=99.0, candle_close=101.0)
+    assert not [e for e in fake if e["type"] == "INTRADAY_RECLAIM"]
+
+    real = detect_market_events([z], 100.5, candle_high=100.8, candle_low=97.0, candle_close=100.5)
+    assert [e for e in real if e["type"] == "INTRADAY_RECLAIM"]

@@ -2395,7 +2395,7 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **review 不通過／待修復**（2026-08-31：`summary` 被明細的 `limit` 截斷，區間語意失真，見下方「review 發現」） |
+| 狀態 | **review 不通過／待修復**（2026-08-31：`summary` 被明細的 `limit` 截斷，區間語意失真，見下方「review 發現」）。**修復計畫書已寫，採修法 A，並已依 2026-08-31 的計畫書 review 補強（逐欄 aggregate 測試、`Summarize` 失敗處理、型別責任邊界與改名），待確認後實作**（見下方「修復計畫書（2026-08-31）」） |
 | 優先度 | 中（T-048 階段 C 的後續；T-048 已於 2026-08-20 完成並收斂，本筆不擋任何人） |
 | 分類 | Go / 可觀測性 |
 | 建立日期 | 2026-08-19 |
@@ -2595,6 +2595,177 @@ Go api/server.go                     路由 ＋ repo 注入
   明確改成「**本批次**聚合」而不是「區間聚合」。
 
 ⚠️ 兩個方向都會改 API response 的語意或形狀，屬 contract 修改，實作前要先寫計畫書。
+
+#### 修復計畫書（2026-08-31，**採 A**，待實作）
+
+**裁決：走 A**——`summary` 改用未套 `limit` 的 SQL aggregate，`limit` 只限制明細 `rows`。
+不走 B 的理由：B 等於承認 `alias_hit_rate` 的分母由 `limit` 決定，而
+`identityStatsSummary` 的欄位註解自己寫著「**比率在這裡才算，不存進表**：分母隨
+『要看哪個區間』而變」——B 會讓那句註解與實作繼續互相矛盾，只是把矛盾改寫進文件。
+
+##### 修改目標與不做的範圍
+
+* **目標**：`summary` 成為**完整 `days` 區間**的聚合，與端點註解、`api-reference.md`
+  和欄位註解三者一致；`limit` 回歸它唯一該有的職責——限制明細列數。
+* **不做**：不改資料表結構（無 migration）、不改 `Insert` 路徑、不改任何身分比對或
+  決策邏輯、不新增欄位到 `sr_identity_stats`。
+* **不做**：**不新增 `total_rows` / `truncated` 欄位**。修好之後
+  `summary.analyses` 就是區間內的總分析次數，呼叫端拿它與 `len(rows)` 相比即可判斷
+  明細**通常**是否被截斷。多開一個欄位會有兩個真相來源。
+  ⚠️ **`analyses > len(rows)` 不是截斷的充分條件**：`summary` 與 `rows` 來自兩次查詢
+  （見下方風險表的 snapshot 那列），兩次之間若有新列寫入，即使 `len(rows) < limit`
+  沒被截斷，這個比較一樣會成立。措辭一律用「**通常表示明細被截斷；也可能是兩次查詢
+  之間有新列寫入**」，`api-reference.md` 採同一句，不要寫成「即代表」。
+* **不做**：不加索引（見下方「效能」）。
+
+##### 受影響檔案、模組與資料流
+
+| 檔案 | 修改 |
+|---|---|
+| `backend/internal/store/sr_identity_stats_repo.go` | 介面新增 `Summarize(ctx, q) (SRIdentityStatsAggregate, error)`；**新型別 `SRIdentityStatsAggregate` 定義在同檔、緊鄰 `SRIdentityStats`**（`SRIdentityStats` 就在這個檔案裡，不在 `store/model.go`——本筆立案時的檔案表寫錯了，實作沒照做）；**抽出共用的 where/args builder** 給 `List` 與 `Summarize` 兩邊用 |
+| `backend/internal/api/handler/sr_zones.go` | `IdentityStats` 改呼叫 `Summarize` 取聚合；`summarizeIdentityStats` 從「吃 rows」改成「吃 `SRIdentityStatsAggregate`」，只保留比率推導 |
+| `backend/internal/store/sr_identity_stats_repo_test.go` | **新檔**（目前沒有 store 層測試） |
+| `backend/internal/api/handler/sr_zones_identity_stats_test.go` | 補截斷情境的回歸測試；**`identityStatsRepoStub` 要擴充**（見下方「stub 現況」） |
+
+###### stub 現況（**比計畫原本假設的更空**）
+
+現行 `identityStatsRepoStub`（`sr_zones_identity_stats_test.go:14-29`）只有 `rows` 與
+`insertErr` 兩個欄位，**查詢端的錯誤欄位完全不存在**，而且 `List` 是
+`return s.rows, nil`——**完全忽略傳進來的 `q`**（symbol、日期、limit 一個都不看）。
+
+所以要擴充的是：
+
+* 保留 `insertErr`（既有 fail-open 測試在用）。
+* **新增 `listErr` 與 `summarizeErr`**，兩條路徑的失敗可以分別注入。
+* **新增可獨立設定的 aggregate 回傳值**，因為驗收準則那支測試的重點正是
+  「`rows` 被 `limit` 截斷、而 `summary` 沒有」——stub 若讓兩者共用同一份 `rows` 推導，
+  這支測試就造不出要驗的情境。
+
+###### 型別責任邊界（**這次刻意分兩個型別**）
+
+| 型別 | 位置 | 職責 |
+|---|---|---|
+| `store.SRIdentityStatsAggregate` | `store/sr_identity_stats_repo.go` | **只放 SQL 直接算得出的原始計數**：`Analyses`（`COUNT(*)`）、`Degraded`（`zone_identity_degraded` 的 CASE 計數）、以及 9 個 `SUM`——`MatchedByChain` / `MatchedByCurrent` / `MatchedByAlias` / `UnmatchedKeys` / `ChainConflicts` / `ChainKeyAmbiguous` / `AliasAmbiguous` / `CarriedParseFail` / `InvariantViolations`。**共 11 欄** |
+| `handler.identityStatsSummary` | `api/handler/sr_zones.go` | HTTP 的 derived view：吃上面 11 欄，**另外算** `MatchedTotal` 與 `AliasHitRate` |
+
+⛔ **`MatchedTotal` 與 `AliasHitRate` 不准下放到 store**。理由與 V3 是同一條——比率的分母
+隨「要看哪個區間」而變，是查詢端的決定；資料層一旦開始回傳 derived view，
+下一個人就會想把它存進表。**型別名刻意叫 `Aggregate` 不叫 `Summary`**：後者與 handler 的
+`identityStatsSummary` 只差大小寫，光靠註解擋不住後人往 store 型別裡塞比率。
+
+📌 **`SRIdentityStats` 有 20 個 struct 欄位，`Aggregate` 只涵蓋上表那 11 欄**——
+`CarriedNoop` / `ZoneEndedSkipped` / `ZoneLiveCandidates` / `ZoneEnded` /
+`EventIdentityDegraded` 現行 summary 本來就沒有，**本次不擴充**（那是新功能，不是本 review 的修復範圍）。
+
+資料流從
+
+```
+List（WHERE days ＋ LIMIT）→ rows → summarizeIdentityStats(rows) → summary
+```
+
+改成
+
+```
+List（WHERE days ＋ LIMIT）      → rows
+Summarize（同一組 WHERE，無 LIMIT）→ 原始計數 → 比率推導 → summary
+```
+
+⛔ **兩條路徑的 WHERE 必須來自同一個 builder**。各自拼一份 SQL 是這個修法最可能的
+長期敗因——之後有人加一個過濾條件只改一邊，`rows` 與 `summary` 就會悄悄對應到不同母體，
+而那與現在這個 bug 是同一類「不會報錯的失真」。
+
+##### 資料 contract 變化
+
+* **response 形狀不變**：仍是 `rows` ＋ `summary` 兩個鍵，欄位一個都不增減。
+* **`summary` 的語意改變**：從「本批次聚合」變成「`days` 區間聚合」。
+  `analyses` 與所有計數會**變大**，`alias_hit_rate` 的分母改由 `days` 決定。
+* **沒有前端消費者**——全庫搜尋 `identity-stats` 只有 `server.go:196` 的路由、
+  handler 自己、以及三份文件；`frontend/src` 內無任何引用。所以這次語意變更
+  **不需要前端配合**，回滾也不會留下半套狀態。
+
+##### 錯誤處理（**新增第二個 DB 失敗點**）
+
+改法把 handler 從「一次 DB 查詢」變成「兩次」，失敗語意必須先定死：
+
+* `Summarize` 失敗 → 與現行 `List` 失敗**完全同一條路**：`serverError`
+  （`api/handler/errors.go:29`）回 **500** ＋ 通用訊息，錯誤細節只進 log。
+* ⛔ **不准降級**：不准「List 成功就先回 rows、summary 給零值」，也不准回 200 帶部分結果。
+  零值 summary 與「區間內真的沒資料」在 response 上**長得一模一樣**，呼叫端無從分辨——
+  那正是本筆 review 要修掉的那類「不會報錯的失真」，不能一邊修一邊新造一個。
+* 兩次查詢的先後：`List` 先、`Summarize` 後（沿用現行 `List` 的錯誤處理位置即可）。
+
+##### 主要風險與回滾
+
+| 風險 | 處置 |
+|---|---|
+| 兩次查詢之間有新列寫入，`rows` 與 `summary` 對到微幅不同的 snapshot | 接受。頻率是每交易日約 22 列，而端點是趨勢用途；要消除得包 transaction，不值得為此增加一層。**在 `api-reference.md` 寫明**，不要讓讀者以為兩者恆等 |
+| aggregate SQL 的 engine 差異 | 只用 `COUNT(*)` 與 `COALESCE(SUM(...), 0)`，布林計數走 `CASE WHEN ... THEN 1 ELSE 0 END`——postgres 的 BOOLEAN、sqlite 的 0/1、mysql 的 TINYINT 三者都成立。**但實測只有 sqlite**，見下方測試策略的限制 |
+| 空集合 | `COUNT(*)` 回 0、`SUM` 回 NULL 由 `COALESCE` 收成 0，`alias_hit_rate` 維持 0——與現行空集合行為一致，`TestSummarizeIdentityStatsHandlesEmpty` 應續存並通過 |
+| 回滾 | 單一 commit 可整個 revert：無 migration、無資料寫入變更、無前端相依 |
+
+##### 效能
+
+`sr_identity_stats` 每交易日約 22 列（約 5.7k 列/年）。`070_sr_identity_stats.sql` 的索引是
+`(symbol, created_at DESC)`，**省略 `symbol` 的查詢用不到它**，aggregate 會走全表掃描——
+在這個量級下無關緊要，**本次不加索引**。母體量級改變時再評估。
+
+##### 測試與驗證策略
+
+1. **store 層（新檔）**：`limit` 不影響 `Summarize` 的結果（同一組資料，`limit=1` 與
+   `limit=1000` 的聚合必須相同）；空集合回全零；`degraded_analyses` 計數正確。
+   **過濾條件要逐個驗，不能只驗日期**——`SRIdentityStatsQuery` 有 `Symbol` / `From` / `To`
+   三個條件，共用 builder 只保證「兩邊拼出同一份 WHERE」，**不保證那份 WHERE 是對的**：
+   重構時把 `symbol` 一起漏掉，`List` 與 `Summarize` 仍然一致，其餘測試全綠，
+   而 `?symbol=2330` 的 summary 會悄悄聚合全市場。
+   * **`Symbol`**：fixture 至少放**兩個 symbol**，斷言 `Symbol=A` 時 `List` 與 `Summarize`
+     取到**同一個母體**（`Summarize().Analyses == len(List())`，且計數只含 A 的那幾列）。
+     per-symbol 趨勢是正式 API contract，不是附帶功能。
+   * **`From` / `To`**：明確涵蓋**邊界**（等於 `From`、等於 `To` 的列要落在區間內，
+     因為 SQL 用的是 `>=` / `<=`），且 `List` 與 `Summarize` 對邊界的判定一致。
+   ⚠️ **另加一支「逐欄」測試**：fixture 的**每一欄餵互不相同的非零值**（例如
+   `matched_by_chain=1`、`matched_by_current=2`、`matched_by_alias=3`、
+   `unmatched_keys=4`、`chain_conflicts=5`、`chain_key_ambiguous=6`、
+   `alias_ambiguous=7`、`carried_parse_fail=8`、`invariant_violations=9`），
+   逐欄斷言 `SRIdentityStatsAggregate` 的**全部 11 欄**。
+   **理由**：上面那四種情境（limit／日期／空集合／degraded）用的資料都不需要各欄可區分，
+   aggregate SQL 少一個 `SUM`、或把 `SUM(alias_ambiguous)` 掃進 `chain_conflicts`
+   這種對錯欄位的錯，四支全部照樣綠。而改法之後 `summarizeIdentityStats` 改吃 store 的
+   原始計數，**SQL 選錯欄位只有這一層抓得到**。
+2. **handler 層（回歸測試，直接對應本次 review 發現）**：造 `limit` 小於區間列數的情境，
+   斷言 `len(rows) == limit` 而 `summary.analyses` 等於**區間全部**列數，
+   且 `alias_hit_rate` 的分母不受 `limit` 影響。**這支測試就是本筆的驗收準則。**
+   同層另補兩支：
+   * **derived 欄位的推導**——`matched_total` ＝三個 `matched_by_*` 之和、
+     `alias_hit_rate` ＝ `matched_by_alias / matched_total`。這兩欄是 handler 的責任，
+     **不在 store 測試裡斷言**（見上方「型別責任邊界」）。
+   * **`List` 成功但 `Summarize` 失敗 → 500**，且 body 不含 `rows`（對應上方「錯誤處理」）。
+     需要先擴充 `identityStatsRepoStub` 成兩個錯誤欄位。
+3. **既有測試續存**：`TestSummarizeIdentityStatsComputesAliasHitRate` 與
+   `TestSummarizeIdentityStatsHandlesEmpty` 必須保留並通過。
+   ⚠️ **前者被 [`issue.md`](./issue.md) I-078 引用**為 alias 路徑的單元層證據之一——
+   若改了它的簽章或名稱，**要同步更新 I-078 的引用**，不能讓那筆指到不存在的測試。
+4. **執行**：`backend/scripts/test.sh`（sqlite）。
+5. **不需要 migration 測試**：本次無 DDL 變更。
+
+⚠️ **已知的驗證缺口**：aggregate SQL 的三 engine 相容性**只有 sqlite 被實際執行**。
+這正是 [`issue.md`](./issue.md) I-054 第 1 項所描述的缺口再增加一個——
+`Summarize` 會成為又一個「有 mysql 分支但從未在真實 MySQL 上跑過」的 repo 方法。
+**實作完成後要把這一項補進 I-054 的清單**，不要讓缺口默默變大。
+
+##### 完成後的歸檔位置
+
+| 文件 | 要更新的內容 |
+|---|---|
+| [`api-reference.md`](./api-reference.md) `GET /sr-zones/identity-stats` | **移除開頭的 ⚠️ 待修復警語**；改寫 `summary` 為區間聚合；補截斷判斷與兩次查詢的 snapshot 注意事項，措辭**必須**與上方「不做的範圍」一致——「`analyses > len(rows)` **通常**表示明細被截斷；也可能是兩次查詢之間有新列寫入」，**不可寫成「即代表」**；另補 `Summarize` 失敗時回 500（不回部分結果） |
+| [`database-schema.md`](./database-schema.md)（`sr_identity_stats` 那段） | 「聚合由 `GET /sr-zones/identity-stats` 負責」補上「聚合走獨立 aggregate，不受 `limit` 影響」 |
+| [`sr-zone-scoring.md`](./sr-zone-scoring.md)「表只存原始計數，比率由…在查詢時算」 | 補一句：比率的分母是 `days` 區間，不是回傳批次 |
+
+##### 這筆修好之後解鎖的東西
+
+* [`issue.md`](./issue.md) **I-078** 的 alias 半——該筆已判定「觀察期已過，該改走 fixture
+  或 metric」，而可信的 `alias_hit_rate` 正是那條 metric 路線的前提。
+* [`issue.md`](./issue.md) **I-079** 的上限決策——要判斷 alias 上限 8 該不該調，
+  得先看得到不被截斷的成長趨勢。
 
 ---
 

@@ -2953,6 +2953,156 @@ if withChip {
 **執行層改成共用一個全域 guard／mutex**。
 「允許不同時段各跑一次」不等於「允許兩輪同時跑」——現行實作把前者實作成了後者。
 
+#### 實作計畫（2026-08-31，第 3 版）——**待使用者確認後才實作**
+
+依 CLAUDE.md，本筆屬**排程修改**，是大規模／高影響異動。
+review 退回兩次，修正已併入：第 2 版修 mutex 原語與丟失可觀察性，
+本版補 **package boundary、409 contract 與 race 驗證範圍**。
+
+##### 1. 目標與不做的範圍
+
+**目標**：兩個時段共用**一個**併發所有權。任一輪在跑時另一輪不執行，
+且**丟失必須可觀察**——cron 寫 `job_runs`、手動回 HTTP 409。
+
+**明確不做**：
+
+* 不動 `srAnalysisSkipReason` 的四個跳過條件。那是**資料層的時段冪等規則**，
+  兩輪刻意不同，與併發無關。
+* 不動兩支 cron 的註冊（`TestStartRegistersBothSRAnalysisCronsOnlyWhenEnabled` 續存）。
+* **不新增 `job_runs.status` 值**（`VARCHAR(10)` ＋ 編譯期斷言，新增會牽動前端與三份 migration）。
+* 不動 `universeSyncRunning`（只有一輪）。
+
+##### 2. 所有權原語：一個 mutex 保護一個字串
+
+⛔ **不用「`atomic.Bool` ＋ `atomic.Value`」**：兩個 atomic 維護一個必須一致的狀態，
+CAS 成功到寫入 owner 之間有窗口，釋放順序不嚴謹還可能清掉**下一輪**的 owner。
+
+```go
+// srAnalysisMu 只保護 srAnalysisRunningJob；臨界區**絕不涵蓋整輪分析**。
+func (s *Scheduler) acquireSRAnalysis(jobName string) (string, bool) {
+    s.srAnalysisMu.Lock()
+    defer s.srAnalysisMu.Unlock()
+    if s.srAnalysisRunningJob != "" {
+        return s.srAnalysisRunningJob, false
+    }
+    s.srAnalysisRunningJob = jobName
+    return "", true
+}
+
+func (s *Scheduler) releaseSRAnalysis() { … }
+```
+
+「是否執行中」與「誰在跑」是同一個變數，不可能不一致。
+
+##### 3. Package boundary：三個入口，責任分明
+
+⚠️ **第 2 版只寫「拆出內層函式」是不夠的**（review 退回）：`acquireSRAnalysis` 未匯出，
+`api/handler` 呼叫不到；而 handler 若先取得再呼叫既有的 `RunSRAnalysis`，
+那支會**再取一次同一把鎖，等於擋掉自己**。所以介面要明確定義：
+
+| 入口 | 誰用 | 取得 | 釋放 | 取不到時 |
+|---|---|---|---|---|
+| `RunSRAnalysis(withChip bool)` | **cron** | 自己 acquire | 自己 `defer release` | 寫一筆 `failed` 的 `job_run` |
+| `TryStartSRAnalysis(withChip bool) (runningJob string, started bool)` | **handler**（匯出） | 自己 acquire（**同步**） | 成功時 `go` 出去，**由該 goroutine `defer release`** | 回 `(持有者, false)`，**不寫 `job_run`** |
+| `runSRAnalysisOwned(ctx, withChip)` | 上面兩者 | **不 acquire** | **不 release** | — |
+
+**每條路徑只有一個層級負責 release**：cron 在 `RunSRAnalysis` 裡 defer，
+手動在 `TryStartSRAnalysis` spawn 的 goroutine 裡 defer。
+`runSRAnalysisOwned` 的 doc comment 要寫明「**呼叫者必須已持有所有權**」。
+
+handler 變成：
+
+```go
+func (h *SchedulerHandler) RunSRAnalysis(c *gin.Context) {
+    withChip := c.Query("with_chip") == "true"
+    running, started := h.sched.TryStartSRAnalysis(withChip)
+    if !started {
+        c.JSON(http.StatusConflict, gin.H{
+            "error":       "sr analysis already running",
+            "running_job": running,
+        })
+        return
+    }
+    …202…
+}
+```
+
+##### 4. 被擋時的行為
+
+⚠️ **第 1 版寫「隔天 17:00 會自動補上」是錯的**：隔天 17:00 分析的是**下一根**日 K，
+不會補建前一天缺少的 chip-round 分析。那一輪永久少掉，所以必須看得見。
+
+| 觸發來源 | 結果 |
+|---|---|
+| **cron** | `startRun` 後立刻 `finishRun(total=1, failed=1, "另一輪 <job> 仍在執行，本輪跳過")` → 推導成 **`failed`**，排程頁看得到 |
+| **手動 API** | **HTTP 409**，body 為 `{"error": "sr analysis already running", "running_job": "<持有者>"}`；不寫 `job_run` |
+
+cron 用 `failed` 是因為「該跑而沒跑」語意正確（比照 `corporate_action_sync` 把逾時併進 failed），
+而且兩支 cron 相隔五小時，撞上本來就是異常。手動是使用者連點兩次，不是排程事故。
+
+##### 5. 受影響檔案
+
+| 檔案 | 改動 |
+|---|---|
+| `scheduler.go:159-161` | 兩個 `atomic.Bool` → `srAnalysisMu sync.Mutex` ＋ `srAnalysisRunningJob string`；**註解一起改**（見 R1） |
+| `scheduler.go:1362-1375` | 拆成 `RunSRAnalysis` / `TryStartSRAnalysis` / `runSRAnalysisOwned` 三層 |
+| `handler/scheduler.go:69-82` | 改呼叫 `TryStartSRAnalysis`，失敗回 409。**`:73` 的「兩個時段各自的旗標」是錯的**，要改 |
+| `scheduler_test.go` | 見 §6 第 1～4 項 |
+| **`handler/scheduler_test.go`** | 見 §6 第 5 項（**第 2 版漏列，檔案已存在**） |
+| `docs/api-reference.md:1010-1011` | 「兩輪各自一個——17:00 那輪還在跑不會擋掉 22:00」與修改後**相反**；補 409 的 response schema |
+| `docs/todo.md:2815` | 舊測試策略的「兩個時段的守衛互不干擾」改稱**「資料層的時段冪等守衛」** |
+
+##### 6. 測試與驗證策略
+
+**兩個 package 各跑一次 race**（`backend/scripts/test.sh` 明確支援，腳本自己就拿
+`./internal/scheduler/...` 當範例）。**分開跑是刻意的**——一次跑完整個 repo 的 race
+在這台 2GiB host 上負載過大：
+
+```bash
+RACE=1 TEST_FLAGS="-count=1" backend/scripts/test.sh ./internal/scheduler/...
+RACE=1 TEST_FLAGS="-count=1" backend/scripts/test.sh ./internal/api/handler/...
+```
+
+1. **跨時段互擋（table-driven，兩個方向）**：`sr_analysis` 持有時 `sr_analysis_chip`
+   被擋、反向亦然；被擋那輪 runner **零呼叫**。
+2. **釋放後另一輪可正常執行**（兩個方向）。
+3. **同一輪重入仍被擋**（既有行為回歸）。
+4. **cron 被擋會寫 `job_runs` 且狀態為 `failed`**，`last_error` 帶持有者名稱。
+5. **handler 四個情境**（`handler/scheduler_test.go`）：
+   * 空閒 → **202**，且確實啟動了工作；
+   * 被 `sr_analysis` 持有 → **409**，`running_job == "sr_analysis"`；
+   * 被 `sr_analysis_chip` 持有 → **409**，`running_job == "sr_analysis_chip"`；
+   * 背景工作完成並釋放後再請求 → **202**。
+6. `TestStartRegistersBothSRAnalysisCronsOnlyWhenEnabled` 續存並通過。
+7. 完整 `backend/scripts/test.sh` 全綠。
+
+⚠️ **測試前置：stub 要加鎖，但理由不是第 2 版寫的那個。**
+第 2 版寫「兩個 goroutine 會同時 append `runner.calls`」——**不正確**，
+互斥正確之後只會有一個 runner 在跑。真正的並行是**被阻塞的背景 goroutine 與
+主測試 goroutine 的斷言同時讀寫**。`schedulerSRAnalysisRunnerStub.calls` 與
+**`schedulerJobRunRepoStub` 的狀態**（第 4 項會在背景輪次進行中讀它）都要保護。
+
+##### 7. 主要風險與回滾
+
+* **R1：三處註解／文件目前寫的是相反的意圖**（`scheduler.go:159`、
+  `handler/scheduler.go:73`、`api-reference.md:1010`）。**不一起改掉，下一個人會照它改回去。**
+  `scheduler.go:159` 與同一函式上方的「序列執行：這台 host 只有 2GiB」直接衝突，本筆採後者。
+* **R2：手動 API 從一律 202 變成可能 409，是對外 contract 變更。**
+  ⚠️ **repo 內目前沒有任何前端 caller**（已 grep 確認：`frontend/src` 沒有
+  `sr-analysis/run`，`scheduler.ts` 只有 daily-close / stock-symbol-sync /
+  sr-evaluation / corporate-action-sync）。**受影響的是 repo 外的 API 使用者**
+  ——直接打這個端點的腳本或手動 curl 會開始看到 409。
+* **R3：live 目前撞不到這條路徑**（兩支 cron 相隔五小時、每輪秒級完成），
+  **修改後 live 不會有可觀察的行為變化**。價值在防手動端點與未來單輪變慢。
+* **回滾**：單一 commit 可 revert，無 schema 變更。
+
+##### 8. 完成後歸檔位置
+
+* [`api-reference.md`](./api-reference.md) 手動觸發端點：改掉「兩輪各自一個」，補 409 schema。
+* [`architecture.md`](./architecture.md) 排程章節：寫明**資料層冪等與執行層併發是兩件事**
+  ——前者兩輪規則不同（`srAnalysisSkipReason`），後者共用一個所有權；
+  以及被擋時 cron 記 `failed`、手動回 409。
+
 ---
 
 ### T-054：用 Redis 降低 Python 端 SR Zone 分析記憶體？——評估結論：不採用

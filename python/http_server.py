@@ -190,7 +190,7 @@ class ScoreZonesRequest(BaseModel):
     limit: int = SR_SCORING_DEFAULT_FETCH_LIMIT  # 抓取的歷史K棒根數，可由呼叫端覆寫
     previous_event_states: List[dict] = Field(default_factory=list)
     # 產生 previous_event_states 那次分析站在哪根 K 棒（RFC3339）。只用來決定事件要不要
-    # 老化——同一根 K 棒重複分析不應該讓事件提早 EXPIRED（issue.md I-077）。
+    # 老化——同一根 K 棒重複分析不應該讓事件提早 EXPIRED（原記於 issue.md I-077，已收斂）。
     # 省略＝維持舊行為。
     previous_analyzed_at: Optional[str] = None
 

@@ -73,7 +73,7 @@ def test_omitted_params_fall_back_to_defaults(client, score_calls):
     收到一個它沒預期的型別。
 
     `previous_analyzed_at` 相反，**省略就是 None**：它的語意正是「呼叫端沒表態」，
-    下游據此退回舊的老化行為（issue.md I-077）。
+    下游據此退回舊的老化行為（原記於 issue.md I-077，已收斂）。
     """
     response = client.post(ENDPOINT, json={"symbol": "2330"})
 

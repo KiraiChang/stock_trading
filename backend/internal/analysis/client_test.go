@@ -1070,7 +1070,7 @@ func TestGetModelStatusReturnsErrorWhenBaseURLNotConfigured(t *testing.T) {
 	}
 }
 
-// ── previous_analyzed_at：老化的單位是 K 棒推進（issue.md I-077）──
+// ── previous_analyzed_at：老化的單位是 K 棒推進（原記於 issue.md I-077，已收斂）──
 
 // scoreZonesRequest 是**手工白名單**，漏欄位不會編譯失敗、也不會報錯——Python 端缺值時
 // 刻意退回舊行為，所以漏送的外觀與「這次 K 棒真的推進了」一模一樣。由這兩支測試釘住。

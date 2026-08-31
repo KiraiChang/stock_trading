@@ -363,7 +363,7 @@ def _normalize_previous_event_state(state: dict[str, Any], bar_advanced: bool = 
     state_name = str(state.get("state") or state.get("lifecycle_state") or LIFECYCLE_ACTIVE)
     active = bool(state.get("active")) and _state_allows_gating(event_family, state_name)
 
-    # 老化的單位是**K 棒推進**，不是 carry 次數（issue.md I-077）。原本這裡無條件 +1，
+    # 老化的單位是**K 棒推進**，不是 carry 次數（原記於 issue.md I-077，已收斂）。原本這裡無條件 +1，
     # 等於把「又分析了一次」當成「又過了一根 K 棒」——同一個交易日重打幾次分析，事件就會
     # 提早老化到 EXPIRED，而 market_state_from_event_states 只看 active，所以那會實際改變
     # Market State。bar_advanced 由呼叫端用「這次的 frame.index[-1] vs 上次分析的

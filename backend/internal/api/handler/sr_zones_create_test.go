@@ -795,7 +795,7 @@ func (s *srZoneRepoStub) ListAnalysisSnapshots(ctx context.Context, opts store.M
 }
 
 // TestEventTimelineIdentitySinceIgnoresWindow：`identity_since` 不受 `max_analyses`
-// 影響（todo.md T-051 R5）。視窗只保證未終結的鏈不被濾掉，視窗之前就終結的舊鏈不會
+// 影響（原記於 todo.md T-051 R5，已收斂）。視窗只保證未終結的鏈不被濾掉，視窗之前就終結的舊鏈不會
 // 出現在 chains 裡；早期由 chains 推導時，畫面會把「這次沒查到」說成
 // 「更早的分析沒有事件鏈」。這條走完整的 HTTP 路徑，鎖住端點實際回出去的值。
 func TestEventTimelineIdentitySinceIgnoresWindow(t *testing.T) {

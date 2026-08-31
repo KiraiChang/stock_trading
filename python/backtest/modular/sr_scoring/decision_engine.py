@@ -217,6 +217,10 @@ def _position_action_condition(
         reason_codes.append("PRIMARY_SUPPORT")
         if structure_state == "SUPPORT_RECLAIM_CANDIDATE":
             reason_codes.append("SUPPORT_RECLAIM_AWAIT_CONFIRMATION")
+        elif structure_state == "SUPPORT_TEST_CANDIDATE":
+            # 不要讓它落到下面的 `SUPPORT_DEFENSE`：那會把「碰到支撐、尚未收復」
+            # 與「一般防守」混成同一個 reason code，等於把拆分的資訊丟掉。
+            reason_codes.append("SUPPORT_TEST_AWAIT_RECLAIM")
         elif structure_state == "SUPPORT_RECLAIM_CONFIRMED":
             reason_codes.append("SUPPORT_RECLAIM_CONFIRMED")
         elif structure_state in ("SUPPORT_RECLAIM_INVALIDATED", "BREAKDOWN"):
@@ -305,6 +309,8 @@ def _market_regime(
     structure_label = {
         "NORMAL": "",
         "SUPPORT_RECLAIM_CANDIDATE": "支撐收復候選",
+        # 與前端 SRZones.svelte 的 structureStateText 雙寫（見 todo.md T-064）
+        "SUPPORT_TEST_CANDIDATE": "支撐測試候選",
         "SUPPORT_RECLAIM_CONFIRMED": "支撐收復確認",
         "SUPPORT_RECLAIM_INVALIDATED": "支撐收復失效",
         "BREAKDOWN": "短線結構跌破",
@@ -682,8 +688,12 @@ def _entry_action_state(
         return "WAIT_CONFIRMATION"
     if (
         primary_zone.recent_validation == RecentValidation.PENDING_VALIDATION.value
-        or structure_state == "SUPPORT_RECLAIM_CANDIDATE"
+        or structure_state in ("SUPPORT_RECLAIM_CANDIDATE", "SUPPORT_TEST_CANDIDATE")
     ):
+        # `SUPPORT_TEST_CANDIDATE` **必須**留在這個保守分支。拆分前 touched-only
+        # 走的就是 `SUPPORT_RECLAIM_CANDIDATE`、被壓成 PROBE / WAIT；漏掉它會讓
+        # touched-only 掉到下面的 SMALL_ENTRY / Buy，比拆分前更寬鬆——與 I-096
+        # 「名稱對 touched-only 過強」的動機完全相反。
         return "PROBE_ENTRY" if action == "BuySmall" else "WAIT_CONFIRMATION"
     if action == "BuySmall":
         return "SMALL_ENTRY"
@@ -2488,7 +2498,15 @@ def _structure_state(
         if evidence.get("reclaim_type") == "UNDERCUT_RECLAIM":
             return "SUPPORT_RECLAIM_CANDIDATE"
         if evidence.get("touched", interaction["touched"]):
-            return "SUPPORT_RECLAIM_CANDIDATE"
+            # **碰到 ≠ 收復。** 這個兜底分支原本也回 `SUPPORT_RECLAIM_CANDIDATE`，
+            # 於是一個名字要同時描述兩種強度：真正的 undercut-reclaim，與只是碰到帶子。
+            # 對前者太弱、對後者太強，而且 `resolve_event_signal` 會把 candidate
+            # 直接當成 `CLOSE_RECLAIM` 灌進 Lifecycle 與 Bias（原記於 issue.md I-096）。
+            # 拆成獨立狀態後，命名與決策驅動權各自回到對的強度。
+            # ⚠️ **拆分不等於放寬**：新狀態在 `_entry_action_state` 與
+            # `SUPPORT_RECLAIM_CANDIDATE` 同待遇（一樣壓成 PROBE / WAIT），
+            # 否則 touched-only 會反而落到 SMALL_ENTRY / Buy，比拆分前更寬鬆。
+            return "SUPPORT_TEST_CANDIDATE"
     return "NORMAL"
 
 
@@ -2952,7 +2970,7 @@ def build_decision_summary(
 
 
 def _bar_advanced_since(analyzed_at: Any, previous_analyzed_at: Optional[str]) -> bool:
-    """這次分析站的 K 棒有沒有比上次新（issue.md I-077 的老化單位）。
+    """這次分析站的 K 棒有沒有比上次新（老化單位；原記於 issue.md I-077，已收斂）。
 
     **缺值或比不出來一律回 True＝維持舊行為**（照樣 age_bars +1）：沒有 previous states
     時本來就沒有東西要老化，而舊呼叫端（evaluation / replay）不送這個值時，行為必須與

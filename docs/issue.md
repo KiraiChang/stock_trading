@@ -23,10 +23,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-098` 起算。**（I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-100` 起算。**（**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-096，但被移除的條目
+  檔案裡看得到的最大是 I-098（**下一個可用的是 I-100**——I-099 已發出並作廢，編號不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
   I-093 於 2026-08-26 收斂，I-070～I-072 更早）都佔用過編號。
@@ -63,52 +63,7 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-081～I-084 / I-086～I-090 / I-093 與下一個可用的 I-098），那是預期的，不是殘留。
-
----
-
-### I-085：`yahoo.rate_limit` 同時節流除權息逐檔同步，但 config 註解只把它寫成「盤中」設定
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（2026-08-24 改完註解） |
-| 嚴重度 | 低（行為正確且是刻意設計，**只有文件沒寫**；但改錯會直接拖慢公司行動同步） |
-| 分類 | 文件 / Go / 設定 / 還原股價 |
-| 發現日期 | 2026-08-24 |
-| 來源 | 公司行動同步分片改造的 dev 驗收（2026-08-24，想用 stub 取代 Yahoo 時發現） |
-
-`backend/config.yaml` 的 `yahoo:` 整段前言寫的是
-「Yahoo 股市盤中資料源（非官方 API），作為 Tier-1 批次盤中源」，
-`rate_limit` 的註解是「每分鐘請求上限（批次計為一次）」——讀起來像**只在盤中生效**，
-而且 `enabled: false`（目前的預設）看起來等於「這段設定沒在用」。
-
-**實際上 `rate_limit` 一直在用，而且是被除權息同步用掉的。**
-`cmd/server/main.go:152` 無條件建立 `NewYahooDividendClient(cfg.Yahoo.RateLimit, log)`，
-它與盤中報價客戶端共用同一個節流器（`sharedYahooLimiter`，理由見
-`yahoo_dividend.go:42`——兩者打同一個 host，各自節流會讓實際速率加倍）。
-`enabled` 只控制盤中那個客戶端要不要建立，管不到除權息。
-
-**為什麼值得記**：這個數字直接進了 `corporate_action.timeout_sec` 的預算算術。逐檔同步每檔要打 Yahoo（除權息）
-與 FinMind（減資），節奏由較慢的一邊決定；目前 FinMind 5/min 主導（每檔約 12 秒），
-但**把 `yahoo.rate_limit` 調到 5 以下，主導權就換邊**，`corporate_action_sync`
-的 45 分鐘預算會跟著失準，而調的人以為自己只動了盤中設定。
-
-**要改的是註解，不是程式碼**：共用節流器是刻意的，且 `enabled` 只管盤中客戶端也合理。
-`config.yaml` 的 `yahoo:` 段要寫明「`rate_limit` 同時節流除權息逐檔同步（`corporate_action_sync`），
-與 `enabled` 無關」，並交叉引用 [`architecture.md`](./architecture.md) 的公司行動同步段。
-
-**修復內容（2026-08-24）**：
-
-* `backend/config.yaml` 的 `yahoo:` 段前言寫明「兩個客戶端、兩個端點、共用一個節流器」，
-  並逐項標註 `base_url`／`enabled`／`batch_size` **只作用於盤中**，`rate_limit` 兩邊都吃。
-* `rate_limit` 的註解補上它與 `corporate_action.timeout_sec` 的關係：調到 5 以下會換成
-  Yahoo 主導逐檔節奏，45 分鐘預算失準。
-* `docker-compose.yml` 的 `YAHOO_ENABLED` / `YAHOO_RATE_LIMIT` 補同樣的提醒
-  （dev compose 沒有透傳這兩個，不需要改）。
-* [`architecture.md`](./architecture.md) 公司行動同步那節補一段「Yahoo 那半的速率來自
-  `yahoo.rate_limit`，與 `enabled` 無關」。
-
-程式碼未動——共用節流器與 `enabled` 只管盤中客戶端都是刻意設計。
+  I-081～I-084 / I-086～I-090 / I-093、已作廢的 I-099 與下一個可用的 I-100），那是預期的，不是殘留。
 
 ---
 
@@ -229,222 +184,6 @@ AT_ZONE 期間不開一世（067：「AT_ZONE 是『方向暫時無法解析』�
 **承接觸發點**：T-052 上線並累積 production 母體後，重新量測「alias 數撞頂」
 （`alias_count >= 8`）的身分比例；若比例繼續上升，或 T-050 metric 顯示 alias 備援／撞頂
 已進入日常路徑，再規劃上限策略。現在保留為已知限制，不單獨開修法。
-
----
-
-### I-080：`/sr-zones/event-timeline` 仍以 `zone_key` 摺疊，同一個 zone 會被顯示成多條鏈
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已修復／待 review**（2026-08-20，修法見 `todo.md` T-051 的實作結果） |
-| 嚴重度 | 中（誤導：使用者看到的鏈數與實際身分不符，且沒有任何提示） |
-| 分類 | Go / SR Zone / 事件鏈 / 對外 API |
-| 發現日期 | 2026-08-20 |
-| 來源 | T-048 全案 review |
-
-T-048 立案要解的問題是「zone 邊界每次由 ATR 重算，事件鏈的身分綁在浮點邊界上會分裂」。
-身分層（`zone_instances` / `event_instances`）已經解掉了它——**但唯一會把事件鏈顯示給人看的
-端點沒有改**：`GET /sr-zones/event-timeline` 走的是 `analysis.BuildEventTimeline`，
-仍以 `(zone_key, event_family)` 把 `market_event_states` 的快照摺疊成鏈
-（`event_timeline.go` 的型別註解就寫著這個鍵）。
-
-**實測落差**（同一份 84 次分析的資料）：
-
-| symbol | `event_instances`（身分層真鏈） | timeline 端點的 `(zone_key, family)` 組合 |
-|---|---|---|
-| 2330 | 28 | 31 |
-| 3105 | 38 | 35 |
-| 6182 | 37 | 33 |
-| 8150 | 25 | 21 |
-
-**雙向都對不上**：timeline 多出來的是被 key 漂移拆開的鏈（102 個身分漂移過 key，
-見 [I-079](#i-079zone_key_aliases-每身分-8-筆上限已有-23-個身分撞頂)）；
-身分層多出來的是身分終止後的重生鏈（`seq > 1` 共 10 條）。
-
-**影響面**：T-041 的前端 timeline 正是要接這個端點，接上去等於把 T-048 修好的分裂
-原封不動顯示給使用者。發現當時前端還沒有引用它（`frontend/src` 沒有 `event-timeline`
-的呼叫），所以趕在接上之前修掉。
-
-**後續**：前端已於 2026-08-21 接上（T-041 的 Event Timeline 面向），讀到的是修好之後的
-身分層鏈；顯示端的判讀規則見
-[`sr-zone-scoring.md`](./sr-zone-scoring.md)「前端 Event Timeline 的判讀規則（現況）」。
-
----
-
-### I-077：同一個交易日重複分析會讓事件提早老化到 `EXPIRED`
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已修復／待 review**（2026-08-20，修復方式與實測見下方「修法定案」與「實作結果」） |
-| 嚴重度 | 中（不影響既有單日流程，但一天多打幾次分析就會改變事件狀態與下游 Market State） |
-| 分類 | Python / SR Zone / 事件生命週期 |
-| 發現日期 | 2026-08-19 |
-| 來源 | T-048 階段 C 修法後的 as-of 階梯驗收，重跑第七階時發現 |
-
-`_normalize_previous_event_state`（`python/backtest/modular/sr_scoring/event_engine.py`）
-把「被 carry 一次」直接當成「多存活一根 K 棒」：
-
-```python
-age_bars = int(state.get("age_bars") or 0) + 1
-expired = state_name != LIFECYCLE_EXPIRED and age_bars >= expires_after
-```
-
-計數單位其實是**分析次數**，不是 K 棒數。一個交易日只分析一次時兩者相等，這也是
-T-045 當初的隱含前提；但 `POST /sr-zones` 沒有任何「同一天只算一次」的限制。
-
-2026-08-19 的階梯實測：第七階（2026-08-18）跑完後有兩條 `SUPPORT_RECLAIM` 鏈是
-`CONFIRMED`／active；**candles 一根都沒變**，只是把同一階再打一次，兩條就同時
-`CONFIRMED → EXPIRED`，`event_transitions` 多出兩筆。下游 `market_state_from_event_states`
-只看 active 事件，所以這會實際改變 Market State。
-
-**不是 T-048 造成的**：老化規則屬於 T-045 的事件鏈，階段 C 只是把它的結果存進
-`event_instances`／`event_transitions`，於是這個原本只存在於記憶體摺疊裡的行為
-第一次留下可查的痕跡。
-
-**修法方向**（尚未決定，需與 T-049 一起看）：讓老化以「最新 K 棒的 timestamp 是否推進」
-為準，而不是以分析次數為準——例如把上次分析的最後一根 K 棒時間存進 state，
-carry 時只有時間推進才 +1。這會動到事件狀態的推導，屬於下游決策行為，
-依 T-048「不改任何下游決策邏輯」的界線不在該筆範圍內。
-
-**承接**：todo.md T-049 規劃時必須一起處理或明確排除本 issue；T-049 會讓 Market State
-與所有下游改讀同一套 state，若不先定義老化單位，重複分析造成的 `EXPIRED` 會被放大成
-Bias／entry 的可見差異。
-
-**但決策點比 T-049 更早：T-052 上線前就要定。** 分析排程一上線，同一個交易日會出現
-「排程跑一次＋人工再點一次」，`age_bars` 一天前進 2——而 T-052 累積的正是 I-074 / T-049
-要用的驗證母體，**老化單位沒定就先開排程，等於一邊累積一邊污染**。
-
----
-
-#### 修法定案（**已實作／待 review**，2026-08-20）
-
-**採 A ＋ B**：A 修老化單位（正確性），B 在 T-052 加同日守衛（**只為省資源，不是正確性依賴**）。
-
-##### 盤點推翻了上面「修法方向」的前提
-
-上面寫「把上次分析的最後一根 K 棒時間**存進 state**」——那繞遠了。實際盤點：
-
-| 事實 | 位置 |
-|---|---|
-| Python 早就有「這次的 K 棒時間」 | `pipeline.py:89` 的 `analyzed_at = frame.index[-1]`，是**資料日期不是 wall clock** |
-| Go 早就有「上次的 K 棒時間」 | `GetLatestMarketEventStates` 撈回的每一列都帶 `analyzed_at`，而 Go 的 `analyzed_at` 是從 Python 回應解析的（`client.go:79`）——整條鏈都是 K 棒時間 |
-| 唯一的洞 | `scoreZonesPreviousEventState`（`client.go:961`）是**手工白名單** struct，`state_json` 不整包轉發，所以 Python 現在拿不到上次的時間 |
-
-**與階段 E 的 `zone_uid` 漏欄位是同一個陷阱**：Go 往 Python 送、往前端回，兩個方向都是手工白名單。
-所以不必在每一列 state 重複存同一個純量，**送一個 request 層級的純量即可**。
-
-##### 修改目標與不做的範圍
-
-* **目標**：`age_bars` 只在最新 K 棒真的推進時 +1；同一根 K 棒重複分析不再老化。
-* **不做**：不改 `expires_after_bars` 的任何門檻值、不改 family lifecycle 規則、
-  不改事件偵測、不改 `_zone_key()`、不動身分層四張表。
-* **不做**：不改 `reuse_existing=true` 那條 provider 路徑（它不送 previous states）。
-
-##### 受影響檔案與資料流
-
-```text
-Go  analysis/client.go
-     ├─ scoreZonesRequest ＋ PreviousAnalyzedAt（request 層級純量）
-     └─ 取值：previousEventStates[0].AnalyzedAt
-        （該查詢用 analysis_id = (SELECT … LIMIT 1)，整批同一次分析，取 [0] 安全）
-Python http_server.py        /sr-zones request model ＋ previous_analyzed_at
-       scoring.py → pipeline.py → decision_engine.py   往下傳這個純量
-       event_engine.py
-         ├─ build_event_state_summary(..., previous_analyzed_at=None)
-         └─ _normalize_previous_event_state(state, bar_advanced)
-              age_bars += 1 只在 bar_advanced 時
-```
-
-**為什麼是 Go 送「上次的時間」而不是 Go 直接算 `bar_advanced`**：Go 在呼叫前不知道這次的
-`analyzed_at`（它由 Python 從 frame 算出）。Go 若改用自己 DB 的最新 candle ts 去比，
-就會出現第二個「這次的 K 棒是哪一根」的判準，而 limit／還原係數都可能讓兩邊不一致。
-**「這次分析站在哪根 K 棒」的 authority 留在 Python 一份。**
-
-##### 資料 contract 變化
-
-| 變更 | 型態 | 相容性 |
-|---|---|---|
-| `/sr-zones` request ＋ `previous_analyzed_at`（RFC3339，可省略） | 純新增可選欄位 | 舊呼叫端不送＝維持現行行為 |
-| `/sr-zones` response | **不變** | — |
-| DB schema | **不變** | 不新增欄位、不 migration |
-
-##### 缺值與邊界
-
-* **缺 `previous_analyzed_at`**（舊呼叫端、沒有 previous states、evaluation/replay 未帶）
-  → `bar_advanced = True`，**完全等於現行行為**。既有資料與既有呼叫端不受影響。
-* **時間沒有前進反而倒退**（as-of 回放、資料修正）→ 視為未推進，不老化。保守側。
-
-##### 主要風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| 這是**決策可見改變**，照規矩該做 replay 分佈驗證，但母體正是 T-052 要產的（雞生蛋） | 影響面可窮舉：只在「兩次分析共用同一根最新 K 棒」時生效，而該情況今天的行為**可證明是錯的**（見上方實測）。因此改用**冪等性**驗收，不用分佈比較 |
-| 純量從 Go 一路傳到 `event_engine`，中間任一層漏傳就靜默退回舊行為 | 缺值語意刻意設計成「等於現行行為」，所以漏傳不會壞資料——但也因此**不會報錯**。以端到端冪等測試把守，不只靠單元測試 |
-| 動到 `pipeline.py` / `scoring.py` / `decision_engine.py` 這條決策核心路徑（階段 E 曾刻意迴避） | 這三層只是**傳遞純量**，不改任何判斷；判斷只發生在 `_normalize_previous_event_state` 一處 |
-| 回滾 | 純新增可選欄位 ＋ 一個條件式，無 migration。`git revert` 即可 |
-
-##### 測試與驗證策略
-
-* **單元（Python）**：`bar_advanced=False` 時 `age_bars` 不動、且不會提早轉 `EXPIRED`；
-  `True` 時行為與現行逐項相同；缺值時走 `True`。
-* **單元（Go）**：`previousEventStates` 為空時不送該欄位；非空時送的是那批 states 的
-  `analyzed_at`。
-* **端到端（現有 dev 階梯）**兩條門檻：
-  1. **冪等性（紅燈變綠燈）**：同一階連跑兩次，`market_event_states` 逐欄相同。
-     **今天會不同**——這是本 issue 的直接證據，修完必須相同。
-  2. **回歸**：四檔 21 階階梯。**判準不是「四檔都逐欄相同」**——計畫書初版寫錯了，
-     實測推翻：階梯是按**交易日**切的，但個股不一定每天都有 K 棒，於是有幾階是
-     「同一根 K 棒被連續分析」，那正是本 issue 的情境。實測分布：
-
-     | symbol | 分析次數 | 相異 K 棒 | 同棒重複階數 |
-     |---|---|---|---|
-     | 2330 | 21 | 21 | 0 |
-     | 3105 | 21 | 21 | 0 |
-     | 6182 | 21 | 18 | **3** |
-     | 8150 | 21 | 18 | **3** |
-
-     **baseline 本身就含有 I-077 的錯誤老化**，所以正確判準是：
-     * 2330／3105：決策**逐欄相同**（全是相異 K 棒，行為不該改變）。
-     * 6182／8150：差異**必須侷限在同棒那幾階**，且成因可歸因到老化欄位。
-       這裡有差異是**修法生效**，不是回歸失敗。
-     * 身分層（`zone_instances` / `zone_relations` / alias）與老化無關，數字應逐項重現；
-       事件鏈（`event_instances` / `event_transitions`）會因 6182／8150 的狀態改變而變動。
-* **回歸套件**：`backend/scripts/test.sh` 與 `python/scripts/test.sh` 全綠。
-
-##### 完成後歸檔（**已完成**）
-
-* 老化單位改為「K 棒推進」、`previous_analyzed_at` 的來源與缺值／時間倒退語意 →
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Aging → `EXPIRED`」那段。
-  **原本計畫寫要歸檔到 `api-reference.md`，那是錯的**：該文件只涵蓋 Go 對外 API，
-  Go↔Python 的 `/sr-zones` request contract 一直記在 `sr-zone-scoring.md`。
-* T-052 的同日守衛定位（省資源，非正確性依賴）→ 留在 todo.md T-052。
-
-##### 實作結果（2026-08-20）
-
-| 門檻 | 結果 |
-|---|---|
-| 單元（Python） | 599 passed / 1 skipped（+4：同棒不老化、推進照舊老化、缺值＝舊行為、`_bar_advanced_since` 六種邊界） |
-| 單元（Go） | 全綠（+2：有 previous states 時送出、無 previous states 時 `omitempty` 整個消失） |
-| **冪等性** | 同一根 K 棒（`2026-08-12`）再打一次：事件狀態 **33 vs 33 筆、逐欄 0 差異**，含 `age_bars`。且非空跑——該次有 **26 筆 carried、`age_bars` 4~19**，舊碼會全部 +1 |
-| 回歸：2330／3105 | 決策與事件狀態**逐欄相同**（21 階全是相異 K 棒） |
-| 回歸：6182／8150 | 有差異，且**全部 6 筆都落在同棒階；K 棒推進階 0 筆差異** |
-| 身分層 | 329 / 57 / 685 逐項重現，`zone_uid` 1282/1282 |
-| 六條門檻 ＋ D4 | 全部 0 |
-
-**差異的成因逐筆對得上**：
-
-* **8150**：只有 `age_bars 18 → 17`。那些事件早已 EXPIRED，所以事件狀態 CSV 逐欄相同
-  （`age_bars` 在 `state_json` 裡，不在該 CSV 的欄位集），差異只出現在 `decision_summary`。
-* **6182**：`active_event_types` 多出數個 `INTRADAY_RECLAIM`——**本來被提早老化掉的 reclaim
-  事件現在正確地留在 active**，正是本 issue 原始紀錄的情境。`event_transitions` 因此由 250
-  降到 246，少的 4 筆就是不再發生的提早 `EXPIRED` 轉換。
-* **頂層決策欄位沒有變**：6182 的差異欄位是 `decision_summary` / `price_path_json` /
-  `decision_derived_view_json`，`market_bias` / `entry_permission_state` /
-  `position_action` / `event_market_state` 在這個母體裡都沒被翻掉。
-
-**驗收判準本身在實作中被修正過一次**：計畫書初版假設「階梯每階 K 棒都推進」，實測發現
-6182／8150 各有 3 階是同一根 K 棒重複分析——**baseline 本身就含有本 issue 的錯誤老化**。
-修正後的判準見上方「測試與驗證策略」。
 
 ---
 
@@ -574,313 +313,11 @@ stock_sr_zone_analyses：4 檔標的 / 20 次分析（2026-07-14 ~ 2026-08-13）
 
 ---
 
-### I-092：`sr_analysis` 的 `symbols_total` 是「扣掉跳過後的實際處理數」，與其他排程相反，且與自己的 log 不一致
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（2026-08-26 修完，**計畫書保留供 review**） |
-| 嚴重度 | 中（數字本身正確，但同一個欄位在不同 job 代表不同東西，排程頁無法橫向比較） |
-| 分類 | Go / Scheduler / API / 可觀測性 |
-| 發現日期 | 2026-08-25 |
-| 來源 | SR zone 分析排程的 live 驗證（2026-08-25 唯讀盤點） |
-
-#### 現象
-
-`runSRAnalysis` 把**扣掉跳過之後**的數字寫進 `job_runs`，但同一輪的完成 log 印的是
-**清單原本的大小**（`scheduler/scheduler.go:1292`、`:1294`、`:1296`）：
-
-```go
-total := len(symbols) - skipped                     // :1292 → 寫進 job_runs
-s.log.Info("sr analysis done", …,
-    zap.Int("total", len(symbols)), …)              // :1294 → log 印 11
-s.finishRun(ctx, runID, jobName, total, failed, …)  // :1296 → job_runs 記 10
-```
-
-2026-08-21 那輪的實例（`0050` 因「已分析過今日 K 棒」被跳過）：
-
-```
-log:      {"msg":"sr analysis done","total":11,"analyzed":10,"skipped":1,"failed":0}
-job_runs: symbols_total = 10
-```
-
-**同一輪、同一個名字叫 `total` 的東西，兩處是不同的值。** 看排程頁的人會問
-「watchlist 明明 11 檔，為什麼顯示 10」，而畫面上沒有任何欄位解釋得了。
-
-#### 這是三支排程裡唯一的例外
-
-| Job | `symbols_total` 的語意 | 跳過／未處理怎麼算 |
-|---|---|---|
-| `corporate_action_sync` | **當日名單大小**（`len(symbols)`，`:1173`） | 併進 `symbols_failed`（刻意，見下） |
-| `evaluation_universe_sync` | **池大小**（`poolSize`，T-062 定案） | 不計入失敗，只記進 log 的 `skipped` |
-| `sr_analysis` / `sr_analysis_chip` | **名單大小 − 跳過** ← 唯一的例外 | 不計入失敗 |
-
-前兩者的分母都是「本輪該做的清單有多大」，只有 SR 分析的分母會浮動。
-
-**注意不要順手把第三欄也統一掉**：`corporate_action_sync` 把未處理併進 `failed`
-是刻意的，因為那邊的「沒輪到」是**逾時導致該做而沒做**；SR 分析與評估池的「跳過」
-是**判定過後確認不需要做**。兩者語意不同，現況是對的
-（見 [`api-reference.md`](./api-reference.md) 的「`symbols_total` / `symbols_failed`
-的單位是標的數」）。本筆只統一分母。
-
-#### 為什麼統一成「清單大小」而不是「實際處理數」
-
-`symbols_total` 在 [`architecture.md`](./architecture.md) 與
-[`api-reference.md`](./api-reference.md) 裡是被當成「這輪的清單有多大」在讀的，
-維運用它判斷「窗口有沒有被截斷」「池有多大」。改成實際處理數會讓數字每天浮動
-（11 / 10 / 11 …），而浮動的原因看不見——那正是這筆要解的問題，不能用它當解法。
-
----
-
-#### 修改計畫書
-
-**修改目標**：`sr_analysis` / `sr_analysis_chip` 的 `job_runs.symbols_total`
-改為 `len(symbols)`（watchlist 大小），跳過數改由 log 呈現，與另外兩支排程一致。
-
-**不做的範圍**
-
-* **不動 `symbols_failed` 的語意**，也不把跳過併進失敗（理由見上表註記）。
-* 不動 `corporate_action_sync` 與 `evaluation_universe_sync`——它們的分母已經是清單大小。
-* 不改 `/scheduler/status` 的欄位或 JSON 形狀，不改前端。
-* 不改跳過的判定邏輯（`srAnalysisSkipReason` 一行不動）。
-
-**受影響檔案與資料流**
-
-| 檔案 | 變更 |
-|---|---|
-| `scheduler/scheduler.go` | `runSRAnalysis`：`finishRun` 改傳 `len(symbols)`；完成 log 的欄位改成與 `evaluation_universe_sync` 同名的 `total` / `analyzed` / `skipped` / `failed`，避免兩支排程的 log 欄位各叫各的 |
-| `scheduler/scheduler_test.go` | 補測試（見下） |
-| `docs/api-reference.md` | 在 `symbols_total` 那節寫明「分母一律是本輪的清單大小，跳過不扣」，並點名三支排程 |
-
-資料流不變，只有寫進 `job_runs` 的那一個整數變了。
-
-**狀態推導的變化**
-
-`finishRun` 依 `failed >= total` 推導 `failed`／`partial`／`success`。分母變大之後，
-**「全部跳過只剩一檔且那檔失敗」從 `failed` 變成 `partial`**——這是這次改動唯一會
-改到狀態字串的情境。`partial` 在這裡是對的：那輪確實有跑，只是跑得不完整。
-
-**主要風險與回滾**
-
-* 風險很低：只影響一個統計數字與其推導出的狀態字串，不影響任何分析行為。
-* **要注意歷史資料不會回填**：改動前後的 `job_runs` 列語意不同，跨 8/25 比較
-  `sr_analysis` 的 `symbols_total` 會看到一個階梯。這點要寫進 `api-reference.md`。
-* 回滾：把那一個參數改回 `total` 即可。
-
-**測試與驗證策略**
-
-* `scheduler` 測試：stub 讓 watchlist 回 3 檔、其中 1 檔跳過，斷言
-  `job_runs.symbols_total == 3`（不是 2）、`symbols_failed == 0`、狀態 `success`。
-* 邊界：全部跳過時 `symbols_total == 清單大小`、`failed == 0`、狀態 `success`。
-* 邊界：只剩一檔沒被跳過且該檔失敗時，狀態是 `partial` 而不是 `failed`
-  （把上面那個狀態變化釘住，否則日後會被當成迴歸改回去）。
-* dev 驗收非必要：這是純計數改動，單元測試涵蓋得完整。
-
-**完成後的歸檔位置**
-
-[`api-reference.md`](./api-reference.md) 的
-「`symbols_total` / `symbols_failed` 的單位是**標的數**」那一節——補上
-「分母是本輪的清單大小，跳過不扣」的通則、三支排程的對照，以及 8/25 前後的階梯。
-
----
-
-#### 修復方式（2026-08-26）
-
-照計畫書實作，**沒有偏離**。程式碼的實質改動只有一行。
-
-| 檔案 | 變更 |
-|---|---|
-| `scheduler/scheduler.go` | `runSRAnalysis` 的 `finishRun` 改傳 `len(symbols)`；`analyzed` 改由 `len(symbols) - skipped - failed` 算（同值，只是不再借用被移除的 `total` 變數）。加註解說明三支排程的共用通則，以及為什麼跳過仍不計入 `symbols_failed` |
-| `scheduler/scheduler_test.go` | candle stub 加 `perSymbol`（預設 nil，既有測試行為不變）；更新既有的全跳過測試；新增 3 支 |
-| `docs/api-reference.md` | `symbols_total` 那節補通則、三支排程對照表、歷史階梯警告、狀態字串變化 |
-
-**log 欄位維持原名，未改**——這點與計畫書的字面敘述不同，理由見下。
-
-**驗證結果**：
-
-* `backend/scripts/test.sh`（vet → test → build）全數通過。
-* **負向對照**：把分母改回 `len(symbols) - skipped` 重跑，**4 支測試全部失敗**，
-  其中 `TestSRAnalysisAllAttemptedFailedIsPartialNotFailed` 得到
-  `status:failed symbolsTotal:1`——正好呈現舊慣例下的那個狀態字串。已還原。
-* 新測試涵蓋計畫書列的三個情境：3 檔跳 1（`total=3` 非 2）、全部跳過（`total=3`、`success`）、
-  只剩一檔且失敗（**`partial` 而非 `failed`**）。
-
-#### 實作時發現的兩件事
-
-**1. 既有測試的註解寫著一個不成立的理由。**
-`TestSRAnalysisSkipsWhenLatestCandleIsNotToday` 原註解是
-「job_runs 的 total 要把跳過的扣掉，**否則每個假日都會看到一筆 failed**」。
-實際推導 `finishRunDegraded`：`failed` 分支要 `total > 0 && failed >= total`，
-而假日是 `failed = 0`，**兩種分母算出來都是 `success`**（`total=1/failed=0` 與
-`total=0/failed=0` 同解）。那個理由不成立，已在測試註解裡更正並留下推導。
-
-**2. 計畫書的 log 欄位那句是錯的，沒有照著做。**
-計畫書寫「完成 log 的欄位改成與 `evaluation_universe_sync` **同名的**
-`total` / `analyzed` / `skipped` / `failed`」——但 `evaluation_universe_sync` 的欄位其實是
-`pool` / `attempted` / `skipped` / `failed`，兩者並不同名，那句話自相矛盾。
-
-而且 `attempted` 與 `analyzed` **是不同的量**：前者含失敗（送出請求數），
-後者不含（成功數）。硬改成同名會讓兩個不同的數字共用一個名字，比現況更糟。
-
-**所以維持各自的欄位名，只在 `api-reference.md` 寫明「兩者的第一個欄位都是清單大小」。**
-這是與計畫書的字面偏離，理由如上；實質目標（分母統一、log 與 job_runs 不再打架）
-完全達成——改完之後 `sr_analysis` 的 log `total` 與 `job_runs.symbols_total` 就是同一個數。
-
----
-
-### I-095：zone 角色翻轉只記在身分層，事件層沒有任何「壓力被突破」的紀錄
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **待決策**（要不要讓 role flip 也產生事件，是設計取捨不是明確的 bug） |
-| 嚴重度 | 低（**不影響任何決策**——該事件本來就是 `decision_visible=false`；影響的是「事實累積」的完整性） |
-| 分類 | Python / SR Zone / 事件層 / 身分層 |
-| 發現日期 | 2026-08-26 |
-| 來源 | 0050 `2026-08-26` 分析內容的逐項核實（`analysis_id=117`） |
-
-#### 現象
-
-`0050` 在 2026-08-26 把 `104.44～105.06`（zone `f2f1ab63`，`recent_pivot`）
-**從壓力翻成支撐**——身分層記得清清楚楚：
-
-| seq | role | state | started | ended | end_reason |
-|---|---|---|---|---|---|
-| 1 | RESISTANCE | INVALIDATED | 2026-08-20 18:22 | **2026-08-26 17:01:12** | **`ROLE_FLIPPED`** |
-| 2 | SUPPORT | ACTIVE | **2026-08-26 17:01:12** | — | — |
-
-⚠️ **這裡的 `SUPPORT / ACTIVE` 是 role incarnation；畫面事件鏈上的 `CONFIRMED`
-是另一層狀態**（2026-08-27 再核實）。`ROLE_FLIPPED` transition 指向 seq 2 的新
-incarnation UID，且這個 zone 在 seq 1 只有 `RESISTANCE`，**不存在可被復活的舊
-terminal SUPPORT incarnation**。同時出現的 `SUPPORT_RECLAIM / CONFIRMED` 與
-`SUPPORT_RETEST / CONFIRMED` 也都是當下新開的 event chain（各自 seq 1），不是舊鏈復活。
-所以「新 SUPPORT 一世有正確建立」是已驗證的正常行為，不是本筆的問題；本筆只問
-「角色翻轉所代表的壓力突破，是否也要在事件事實層留一筆紀錄」。
-
-價格也支持這個判斷：當日開 104.10、高 106.05、**收 105.90**，站上帶頂 105.06。
-
-**但事件層對這件事沒有 breakout 紀錄**：該分析的 23 筆 event-state snapshots 裡
-**沒有任何 `RESISTANCE_BREAKOUT`**；同日 22:00 的第二次 0050 分析（`analysis_id=128`）
-也同樣是 0，0050 全歷史的 `RESISTANCE_BREAKOUT` event chain 亦為 0。
-
-⚠️ 前一版寫「同日其他標的共產生 9 筆」不夠精確（2026-08-27 再核實）：
-
-* 9 筆是單輪 `market_event_states` 的 snapshots（`2478` 2、`3630` 1、`5490` 4、
-  `6243` 2），**包含 carry-forward，不能全叫做當輪新產生**。
-* 單輪真正新增的 `market_event_detections` 是 2 筆，分別在 `3630`、`5490`；
-  同日第二輪亦各 1 筆。
-* 這兩個有新 detection 的對照案例，其 `event_sequence_json` 與
-  `decision_derived_view_json` 都沒有 `RESISTANCE_BREAKOUT`，證明
-  **shadow event 的建立與 Decision 隔離機制本身正常**；缺的是 0050 這種 role-flip
-  breakout 根本沒有建立事件，不是「事件有建立但被 Decision 吃掉」。
-
-#### 成因：事件是依「當前 role」分派的，翻轉後就走不到壓力側
-
-`detect_market_events`（`event_engine.py:614`）：
-
-```python
-for z in zone_scores:
-    if z.role == ZoneType.RESISTANCE.value:
-        events.extend(_resistance_zone_events(...))   # RESISTANCE_BREAKOUT 在這裡
-        continue
-    if z.role != ZoneType.SUPPORT.value:
-        continue
-    ...                                                # 支撐側的三個分支
-```
-
-zone builder 在這根 K 棒已經把它歸類成 **SUPPORT**（價格收在帶頂之上），
-所以它走支撐分支、產出 `INTRADAY_RECLAIM` ＋ `SUPPORT_RETEST_HELD`，
-**`_resistance_zone_events` 對它一次都沒被呼叫**。
-
-換句話說：**「壓力被突破」正是它翻成支撐的原因，而那個原因讓它錯過了記錄突破的分支。**
-
-另一個佐證：`0050` 當日最近的壓力是 `107.18～107.82`，而最高只到 106.05，
-**沒碰到任何仍是壓力的 zone**，所以其他 zone 也不會補上這筆。
-
-#### 核實與更正（2026-08-27）
-
-本筆原本寫「同日那 9 筆就是『碰到壓力但還沒翻轉』」——**那句話是錯的**，逐筆查過之後：
-
-| **當輪的 9 筆 `RESISTANCE_BREAKOUT` state snapshot**（每輪各一份，兩輪共 18 列） | 筆數 |
-|---|---|
-| **當天新生成的事件**（`age_bars=0`、`carried_from_previous=false`） | **2**（`3630` / `5490` 各一） |
-| carry 進來的既有事件（`age_bars` 1～3，多數已 `EXPIRED`） | 7 |
-
-⚠️ **「9 筆」是當輪的 state snapshot 數，不是「當天新增 9 個事件」**——
-`market_event_states` 每輪都會把所有仍在追蹤的事件寫一份，所以同一個事件會在
-17:00 與 22:00 各留一列。
-
-而且其中 `2478` 的 `120.637~121.363` **今天確實翻轉了**（`ROLE_FLIPPED`），
-一度看起來像本筆的反例。追事件史才確認不是——那筆是 **08-24 新生成、carry 到今天已過期**的殘留：
-
-```
-08-24 17:02  CANDIDATE  age 0  carried=false   ← 新生成（當天 SUPPORT→RESISTANCE 翻轉）
-08-25 17:02  CANDIDATE  age 1  carried=true
-08-26 17:02  EXPIRED    age 2  carried=true    ← 今天 RESISTANCE→SUPPORT 翻轉，仍無新事件
-```
-
-**核實後結論反而更強**：2026-08-26 有**兩個** zone 發生 RESISTANCE→SUPPORT 翻轉——
-`0050` 的 `f2f1ab63` 與 `2478` 的 `120.637~121.363`——**兩個都沒有產生新的
-`RESISTANCE_BREAKOUT`**。原本只有一個樣本，現在有兩個獨立樣本。
-
-⚠️ **順帶發現一個不對稱**（尚未查明是否為預期）：`2478` 在 08-24 的
-**SUPPORT→RESISTANCE** 翻轉當下**有**新生成的 `RESISTANCE_BREAKOUT`（age 0、
-`PENDING_CLOSE_CONFIRMATION`，intrabar 突破未收上）。也就是說**兩個方向的翻轉行為不同**：
-翻成壓力時會產生事件，翻成支撐時不會。這是因為前者翻轉後 zone **仍是壓力**、走得到壓力分支，
-後者翻轉後變成支撐、走不到。處理方向若選 B，這個不對稱要一併考慮。
-
-#### 為什麼這仍然值得記
-
-`RESISTANCE_BREAKOUT` 是 `decision_visible=false` 的**只寫不讀事實層事件**
-（見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件的決策可見性」），
-它存在的**唯一目的就是累積事實**，供日後的分佈分析與 replay 使用。
-
-而「壓力被站上」這件事：
-
-* **身分層有**（`zone_role_incarnations` 的 `ROLE_FLIPPED`）。
-* **事件層沒有**。
-
-於是兩層對「今天有沒有發生突破」給出不同答案。要用事件層做母體統計時
-（例如「突破後 N 根的表現」），**翻轉型的突破會整批缺席**——
-而那可能正是最值得看的一類，因為它是唯一「突破成功到足以改變角色」的樣本。
-
-**目前不影響任何決策**：該事件不進決策，`0050` 當日的
-`market_bias` / `entry_permission_state` / `position_action` 都由可見事件推導，
-已逐項核實無誤（`active` 桶 shadow 洩漏 0、`event_sequence_json` 無 shadow 名字）。
-
-#### 處理方向（**擇一，未定案**）
-
-**A. 維持現狀，只補文件。** 在 `sr-zone-scoring.md` 寫明
-「`RESISTANCE_BREAKOUT` 不涵蓋翻轉當下的突破，翻轉請看 `zone_role_incarnations`」。
-
-* 成本最低，且**不動任何會產生事件的程式碼**——事件層一旦多出事實，
-  即使 `decision_visible=false`，也會經 carry-forward 進入下一次分析的 `states`，
-  要重新確認四個過濾點都擋得住。
-* 代價：做事件層統計的人必須自己去 join 身分層，而那件事很容易被忘記。
-
-**B. 翻轉時補發一筆事件。** 在角色翻轉的路徑上補一筆
-`RESISTANCE_BREAKOUT`（或新的型別如 `ROLE_FLIP_BREAKOUT`），維持 `decision_visible=false`。
-
-* 讓「突破」這個事實在事件層完整。
-* ⚠️ **新事件型別要走完整的隔離檢查**：四個過濾點、
-  `EVENT_TYPE_META` 的 `decision_visible`、身分層寫入、前端標記，
-  缺一個就會經方向桶或位置型讀者改到決策（見「事件的決策可見性」的三類讀法）。
-* ⚠️ 若沿用既有的 `RESISTANCE_BREAKOUT` 型別，要注意它的觸發條件含**量能門檻**
-  （`relative_volume >= HIGH_VOLUME_BREAKDOWN_THRESHOLD` 或 `volume_confirmation == FAILED`），
-  而角色翻轉**沒有**這個條件——兩者的語意會被混在同一個名字下。
-
-**傾向 A**：這是事實完整性問題，不是正確性問題；而 B 要動的是「產生事件」這條路徑，
-風險與收益不成比例。**但如果日後真的要用事件層做突破後表現的統計，就必須先解掉這筆**，
-否則母體會系統性地少掉最強的那一類樣本。
-
-**相關**：本次核實的另外兩項已分別立案——I-096（touch 被命名並解讀成 reclaim）
-與 [`todo.md`](./todo.md) T-064（中文標籤 SSOT／呈現契約待整理，**2026-08-27 由 I-097 改列**）。
-
----
-
 ### I-096：`structure_state` 把單純碰觸命名成「收復候選」，並會回饋 Lifecycle／Decision
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待決策**（2026-08-27 診斷後從「待修復」下修——見下方診斷結果） |
+| 狀態 | **review 不通過／待修復**（2026-08-31。B 的實作本身正確且已上版控，但**前提被推翻**：它靠 `reclaim_type == UNDERCUT_RECLAIM` 分流，而那個旗標本身會誤標，見 **I-098**。**卡在 I-098，修好才能收斂**） |
 | 嚴重度 | **低**（**程式碼存在 touched-only fallback 的潛在風險，但 production 至今 0 筆實例**。原本標「已在 production 發生」是錯的：實際發生的是 `UNDERCUT_RECLAIM`，不是單純 touched） |
 | 分類 | Python / SR Zone / 決策語意 / 前端呈現 |
 | 發現日期 | 2026-08-26 |
@@ -1044,5 +481,296 @@ primary zone 直接回 `NORMAL`，與 `touched` 無關。
 **三條路都不含「只改名」**——名稱的問題來自「一個名字要涵蓋兩種強度」，
 那要靠 B 拆分狀態解決，換一個字只會把失準的方向調換。
 
+#### 實作計畫（B）——2026-08-28 定案，**待使用者確認後才實作**
+
+依 CLAUDE.md，本筆同時觸及**交易訊號／決策邏輯**與**前端 contract**，屬大規模／高影響異動。
+
+##### 1. 目標與不做的範圍
+
+**目標**：把 `_structure_state` 最後那個 touched-only 兜底分支的回傳值，從
+`SUPPORT_RECLAIM_CANDIDATE` 拆成新的 `SUPPORT_TEST_CANDIDATE`；只有真正的
+`reclaim_type == "UNDERCUT_RECLAIM"` 才保留 `SUPPORT_RECLAIM_CANDIDATE`。
+Lifecycle 端把 `SUPPORT_TEST_CANDIDATE` 仲裁成 `SUPPORT_TEST`，**不得**產生 `CLOSE_RECLAIM`。
+
+**明確不做**：
+
+* **不做 C**（收緊 `resolve_event_signal`，讓 `SUPPORT_RECLAIM_CONFIRMED` 不能單獨驅動
+  `CLOSE_RECLAIM`）。C 是獨立方案不是 B 的一部分；`5490` 的 `analysis_id=122` / `133`
+  那 2 筆**維持現行行為不變**。
+* 不動 `BREAKDOWN` / `SUPPORT_RECLAIM_INVALIDATED` / `SUPPORT_RECLAIM_CONFIRMED`
+  三個分支——診斷顯示它們各自都有 EXPIRED、收破或跨根 `UNDERCUT_RECLAIM` 證據。
+* 不動事件層任何型別或 `decision_visible` 旗標（角色翻轉的事件層缺口已決議維持現狀；
+  現況見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層不涵蓋『角色翻轉當下』的突破」，
+  原記於 I-095，已收斂）。
+* 不順手整理 `structureStateText` 裡已經沒人產生的舊鍵（`RECOVERY_CANDIDATE` /
+  `RECOVERY` / `RECOVERY_INVALIDATED`）——那是 [`todo.md`](./todo.md) T-064 的範圍。
+
+##### 2. 受影響檔案與資料流
+
+```text
+zone interaction ─→ _structure_state ─┬─→ position_action_condition / market_regime / UI badge
+                                      └─→ resolve_event_signal ─→ resolve_lifecycle
+                                              → semantic market_state → SEMANTIC_* / Bias / gate
+```
+
+| 檔案 | 位置 | 要改什麼 |
+|---|---|---|
+| `decision_engine.py` | `_structure_state`（約 `:2467`，最後的 `touched` 分支 `:2490-2491`） | 回傳 `SUPPORT_TEST_CANDIDATE` |
+| `decision_engine.py` | `:218` reason code 分支 | 新增 `SUPPORT_TEST_AWAIT_RECLAIM`，**不可**讓它落到 `else` 的 `SUPPORT_DEFENSE` |
+| `decision_engine.py` | `:307` `structure_label` 中文表 | 新增「支撐測試候選」 |
+| `decision_engine.py` | `:685` entry state | **新狀態必須與 `SUPPORT_RECLAIM_CANDIDATE` 同待遇**（見風險 R1） |
+| `lifecycle_engine.py` | `:106-111` `resolve_event_signal` | 新狀態走 `SUPPORT_TEST`，不進 `CLOSE_RECLAIM` |
+| `frontend/src/lib/api/srZones.ts` | `:326` `SRStructureState` | 封閉 union，**必須加值否則 TS build 失敗** |
+| `frontend/src/routes/SRZones.svelte` | `:647` `structureStateText` | 新增中文標籤 |
+
+**Go 端無 contract 變化**：`grep structure_state --include=*.go` 在 `backend/internal`
+只命中 `portfolio/analyzer_test.go:163` 的 JSON fixture，**沒有任何依名字分支的程式碼**，
+`structure_state` 對 Go 是純 passthrough。
+
+**`recovery_state` 會自動跟著變**：`decision_engine.py:327` 是
+`"RECOVERY" if ... == "SUPPORT_RECLAIM_CONFIRMED" else structure_state`，新狀態會**原樣流出**到
+`market_regime.recovery_state`，所以前端 union 兩處都要涵蓋。
+
+##### 3. 仲裁順序的變化（唯一需要拍板的設計取捨）
+
+`resolve_event_signal` 現行順序：
+`active_bearish` → `CLOSE_RECLAIM` → `REVERSAL_CANDIDATE` → `PENDING_ZONE_VALIDATION`
+→ `EXTREME_VOLUME` → `NO_EVENT`。
+
+**新分支放在 `REVERSAL_CANDIDATE` 之後、`PENDING_ZONE_VALIDATION` 之前**，回
+`EVENT_SIGNAL_SUPPORT_TEST` + reason code `STRUCTURE_SUPPORT_TOUCH`。
+
+理由：擺在這個位置，新狀態**只在原本會落到 `EXTREME_VOLUME` / `NO_EVENT` 的情況下**
+才改變答案；`REVERSAL_CANDIDATE`（有 candidate event 佐證）優先序不變，
+`PENDING_ZONE_VALIDATION` 與它同樣回 `SUPPORT_TEST`、只差 reason code，順序不影響 signal。
+這是最小擾動的插入點。
+
+##### 4. 主要風險與回滾
+
+* **R1（最高）：拆分不可以變成放寬。** 現行 touched-only 走
+  `SUPPORT_RECLAIM_CANDIDATE`，在 `decision_engine.py:685` 會被壓成
+  `PROBE_ENTRY` / `WAIT_CONFIRMATION`（保守）。若新狀態沒被加進那個條件，
+  touched-only 反而會落到 `SMALL_ENTRY` / `Buy` 路徑——**比現況更寬鬆**，
+  與本筆「名稱對 touched-only 過強」的動機完全相反。這是 B 最容易踩的坑。
+* **R2：`_structure_state` 有隱含守門。** `SUPPORT` ＋ `EXPIRED` → `BREAKDOWN` →
+  `_decision_action` 的 `structure_broken` 提前 `return "AVOID"`，是
+  `test_expired_primary_zone_never_upgrades_to_buy` 釘住的路徑（I-082）。
+  **動這個函式前先讀那兩條測試**，見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+  「Decision Action 判定順序」第 4 步。
+* **R3：中文標籤再次雙寫。** 新標籤會在 `decision_engine.py:307` 與
+  `SRZones.svelte:647` 各定義一次，讓 T-064 的問題多一筆。實作時在兩處都留
+  `見 todo.md T-064` 註記，不在本筆順手做 SSOT。
+* **回滾**：單一 commit 可整包 revert。相容性上新狀態**只增不改**既有值，
+  Go 是 passthrough，舊前端遇到未知值會走 `?? 原字串` 顯示英文而不會壞。
+
+##### 5. 測試與驗證策略
+
+**單元／端到端**（`python/scripts/test.sh`）：
+
+1. touched-only fixture → `SUPPORT_TEST_CANDIDATE`（新行為）。
+2. `UNDERCUT_RECLAIM` fixture → 仍 `SUPPORT_RECLAIM_CANDIDATE`（regression，確保沒改到那 35 筆的路徑）。
+3. `resolve_event_signal("SUPPORT_TEST_CANDIDATE")` → `SUPPORT_TEST`，**且不是** `CLOSE_RECLAIM`。
+4. **R1 專屬**：touched-only ＋ `action="BuySmall"` → 仍 `PROBE_ENTRY`（防放寬）。
+5. `test_expired_primary_zone_never_upgrades_to_buy` 與其對照組必須續存並通過。
+
+**影響面驗證——純函式重放，不需要 model bundle**：
+
+`_structure_state` 是純函式，輸入全在既有分析的
+`primary_zone.zone_interaction.price_action_evidence` 裡。拿 2026-08-21 起那 88 筆
+分析的 payload 對新舊兩版各跑一次，**預期 0 筆改變**——診斷已證 35 筆
+`SUPPORT_RECLAIM_CANDIDATE` 全是 `UNDERCUT_RECLAIM`，touched-only 兜底 0 筆命中。
+**若差異非 0，代表實作改到了 `UNDERCUT_RECLAIM` 分支，直接視為失敗。**
+
+⚠️ **完整 decision replay 跑不了，前置與 [`todo.md`](./todo.md) T-066 同源**
+（dev 沒有 model bundle，`model_available: false`）。本筆採上述純函式重放作為影響面證據，
+並在歸檔時**明寫「未經 decision replay 驗證」**；等 T-066 前置解除後可補跑。
+**這個取捨要在動工前確認**——不接受的話，本筆要排在 T-066 之後。
+
+##### 6. 完成後的歸檔位置
+
+* [`sr-zone-scoring.md`](./sr-zone-scoring.md) `market_regime` 欄位說明（約 `:727-729`）——
+  補上 `SUPPORT_TEST_CANDIDATE` 的語意，以及它與 `SUPPORT_RECLAIM_CANDIDATE` 的分野。
+* 同檔「Decision Action 判定順序」第 4 步——順手修掉那裡對
+  `decision_engine.py:2242-2243` 的**過期行號**（實際在 `:2467` 起）。
+* 前端狀態集合的變更記在同一節，不另開文件。
+
+#### 實作結果（2026-08-28）
+
+依計畫書的 B 實作完畢，六個檔案：
+
+| 檔案 | 改動 |
+|---|---|
+| `decision_engine.py` | `_structure_state` 兜底分支改回 `SUPPORT_TEST_CANDIDATE`；新增 reason code `SUPPORT_TEST_AWAIT_RECLAIM`；中文標籤「支撐測試候選」；**`_entry_action_state` 納入保守分支（R1）** |
+| `lifecycle_engine.py` | `resolve_event_signal` 新增分支回 `SUPPORT_TEST` + `STRUCTURE_SUPPORT_TOUCH`，位置在 `REVERSAL_CANDIDATE` 之後、`PENDING_ZONE_VALIDATION` 之前 |
+| `srZones.ts` / `SRZones.svelte` | union 加值、中文標籤，並補上與 Python 雙寫的 T-064 交叉註記 |
+| `test_decision_engine.py` / `test_lifecycle_engine.py` | 8 支新測試（含 R1 防放寬與兩支 `UNDERCUT_RECLAIM` 回歸防線） |
+
+Go 端一行未改——已確認 `structure_state` 對 Go 是純 passthrough，無依名字分支的程式碼。
+
+##### 驗證結果
+
+| 項目 | 結果 |
+|---|---|
+| `python/scripts/test.sh backtest/modular/sr_scoring/tests` | **444 passed, 1 skipped** |
+| `frontend/scripts/test.sh`（svelte-check → vitest → build） | **147 passed**，型別與 build 全過 |
+| `backend/scripts/test.sh` | 全過（dist 已重新 build 並納入版控） |
+
+##### 影響面驗證：純函式重放（**不需要 model bundle**）
+
+依計畫書 §5，對 live `stock_sr_zone_analyses` 的 **144 筆**分析做唯讀取樣，
+拿 `primary_zone.zone_interaction` 餵給新舊兩版 `_structure_state` 各跑一次。
+⚠️ `previous_interaction` 沒有被持久化（分析當下才用前一根 K 棒現算），重放一律傳 `None`，
+所以**絕對值**不等於 `stored_state`；但兩版拿到的輸入完全相同，**版本間的 diff 有效**。
+
+| 母體 | 筆數 | 期間 | 差異 |
+|---|---|---|---|
+| 帶 `price_action_evidence`（現行 schema） | 138 | 2026-07-16 ~ 08-28 | **0 筆** |
+| 沒有該鍵的舊 payload | 6 | 2026-07-14 ~ 07-15 | **3 筆** |
+
+現行 schema 那 138 筆裡，48 筆 `SUPPORT_RECLAIM_CANDIDATE` 的 `reclaim_type`
+**全部**是 `UNDERCUT_RECLAIM`——與 2026-08-27 的診斷一致，拆分沒有誤傷它們。
+
+##### ⚠️ 診斷的「production 至今 0 筆」是**視窗內**成立，不是全期
+
+那句話是拿 2026-08-21 起的 88 筆算的。把母體拉到全部 144 筆之後，
+**兜底分支在 production 歷史上被命中過 3 次**（`id=22` `0050` 07-14、
+`id=25` `0050` 07-15、`id=27` `2330` 07-15），全部落在 2026-07-16 之前。
+
+成因不是價格行為，是 **payload schema**：那批分析的 `zone_interaction`
+**根本沒有 `price_action_evidence` 這個鍵**（欄位當時還不存在），於是
+`evidence.get("reclaim_type")` 取到 `None`，一路掉到 touched 兜底。
+
+**這不是回歸，是修好的證據**：那 3 筆在舊版被叫做「支撐收復候選」時
+**手上一點收復證據都沒有**——正是 I-096 描述的失準。新版改叫「支撐測試候選」更準確。
+
+**對未來的影響仍是 0**：現行 schema 一律帶 `price_action_evidence`，
+兜底分支要再被命中得先有 payload 缺鍵。但它**確實可達**，不是純理論分支。
+
+##### 尚未做、與 T-066 同源的缺口
+
+完整 decision replay（`by_rr_gate` / `by_entry_executability` 分佈）**沒有跑**，
+前置與 [`todo.md`](./todo.md) T-066 相同：dev 沒有 model bundle，`model_available: false`。
+本筆以上述純函式重放作為影響面證據，**此變更未經 decision replay 驗證**——
+這句話已一併寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)。T-066 前置解除後可補跑。
+
+##### 現況說明歸檔位置
+
+[`sr-zone-scoring.md`](./sr-zone-scoring.md) `market_regime` 欄位說明的
+`structure_state` 五值對照表（含 R1 那條「拆分不等於放寬」的警告）。
+同時修掉了該檔對 `decision_engine.py:2242-2243` 的過期行號。
+
+#### review 發現（2026-08-31）——**不通過，卡在 I-098**
+
+實作、測試與歸檔都通過 review，**但拆分的分流依據本身是壞的**。
+
+B 用 `reclaim_type == "UNDERCUT_RECLAIM"` 當「真收復 vs 只是碰到」的判準。
+review 指出（並已實測重現）：對 SUPPORT 而言那個旗標**根本沒有在判斷有沒有跌破帶底**，
+詳見 **I-098**。結果是本筆想擋的那件事只擋掉了一部分：
+
+| 價格行為 | 拆分後的 `structure_state` | 對不對 |
+|---|---|---|
+| 跌破帶底後收回帶頂上方（真 undercut-reclaim） | `SUPPORT_RECLAIM_CANDIDATE` | ✅ |
+| **從帶內往上穿出、從未跌破帶底** | **`SUPPORT_RECLAIM_CANDIDATE`** | ❌ **仍被叫成收復，且仍驅動 `CLOSE_RECLAIM`** |
+| 碰到帶子、收在帶內 | `SUPPORT_TEST_CANDIDATE` | ✅（這一類是本次真正修好的） |
+
+也就是說**本筆實際達成的分野是「收在帶內 vs 收在帶上」，不是「碰到 vs 收復」**。
+名稱對第二列仍然過強——正是 I-096 一開始要解的問題，只是換了一個入口。
+
+⚠️ **2026-08-28 那次純函式重放看不出這件事**，因為它比對的是新舊兩版
+`_structure_state`，而兩版都吃同一個被誤標的 `reclaim_type`。
+**重放的「138 筆 0 差異」仍然成立，但它證明的是「拆分沒有誤傷既有分類」，
+不是「分類本身正確」。** 這個界線之前沒有寫清楚。
+
+**處置**：本筆不回滾（拆分方向正確、測試有價值、第三列確實修好了）。
+先修 I-098 讓 `reclaim_type` 誠實，再回來重跑重放並確認第二列落到
+`SUPPORT_TEST_CANDIDATE`，本筆才能收斂。
+
+**既有測試 `test_zone_interaction_uses_intraday_high_low_close_not_only_current_price`
+（`test_decision_engine.py:1276`）目前把錯誤行為釘住了**，修 I-098 時要一併處理。
+
 **相關**：[`sr-zone-scoring.md`](./sr-zone-scoring.md)「RR 語意分層」（原記於 `todo.md`
 T-055，已收斂）——同一類問題的另一個面向：決策語意的多個數字／狀態並列而未分層。
+
+---
+
+### I-098：`reclaim_type` 的 undercut 判定對 SUPPORT 恆真，`penetration_pct > 0` 守衛沒有作用
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **待修復**（2026-08-31 由 I-096 的 review 發現分出，已實測重現） |
+| 嚴重度 | **中**（誤導且會驅動決策：把「從未跌破支撐」標成 `UNDERCUT_RECLAIM`，一路產生 `CLOSE_RECLAIM`。不影響 zone 本身的計算，但影響 Lifecycle 與 Bias 的語意） |
+| 分類 | Python / SR Zone / 事件證據 / 決策語意 |
+| 發現日期 | 2026-08-31 |
+| 來源 | I-096 的 review。**這不是 I-096 改壞的**——缺陷早於 I-096，但 I-096 的分流正好建立在它之上，所以被暴露出來 |
+| 阻擋 | **I-096 收斂**（B 的分流依據就是這個旗標） |
+
+#### 成因：`penetration_pct` 混用兩側，而收在帶上必然讓它 > 0
+
+`zone_interaction`（`event_engine.py:183-187`）的 `penetration_pct` **同時採計兩側**：
+
+```python
+penetration_pct = 0.0
+if low < z.price_low:                 # 跌破帶底
+    penetration_pct = max(penetration_pct, (z.price_low - low) / z.price_low)
+if high > z.price_high:               # 突破帶頂
+    penetration_pct = max(penetration_pct, (high - z.price_high) / z.price_high)
+```
+
+而 `:209` 判 undercut 時只檢查它是不是 > 0：
+
+```python
+if z.role == ZoneType.SUPPORT.value and touched and closed_above and penetration_pct > 0:
+    reclaim_type = "UNDERCUT_RECLAIM"
+```
+
+**關鍵在於這個守衛恆真**：`closed_above` 的定義是 `close > price_high`，
+而 K 棒的 `high >= close`，所以 `closed_above` ⇒ `high > price_high` ⇒
+`penetration_pct > 0`。**`penetration_pct > 0` 對 SUPPORT 完全不做任何事**，
+判定實際上退化成：
+
+```text
+UNDERCUT_RECLAIM  ⟺  touched ∧ closed_above
+```
+
+——與「有沒有跌破帶底」**無關**。名字說的是 undercut，實際判的是 close-above。
+
+#### 重現（2026-08-31 實測，support zone `[98.0, 100.0]`）
+
+| 情境 | high | low | close | `low < 98`？ | `penetration_pct` | `reclaim_type` | `structure_state` | `event_signal` |
+|---|---|---|---|---|---|---|---|---|
+| 真 undercut | 100.8 | **97.0** | 100.5 | ✅ | 0.0102 | `UNDERCUT_RECLAIM` | `SUPPORT_RECLAIM_CANDIDATE` | `CLOSE_RECLAIM` |
+| **⚠️ 無 undercut** | 101.5 | **99.0** | 101.0 | ❌ | 0.0150 | **`UNDERCUT_RECLAIM`** | **`SUPPORT_RECLAIM_CANDIDATE`** | **`CLOSE_RECLAIM`** |
+| 對照（收在帶內） | 100.0 | 99.0 | 99.5 | ❌ | 0.0000 | `NONE` | `SUPPORT_TEST_CANDIDATE` | `SUPPORT_TEST` |
+
+第二列的 `penetration_pct` 比第一列**還大**，但它量的是往上穿出帶頂的幅度，
+不是往下跌破的深度。第三列是對照組：真的沒有任何穿越時才落到 `NONE`。
+
+#### live 母體的佐證
+
+144 筆分析裡 90 筆 primary 是 SUPPORT，`(reclaim_type, closed_above)` 只有兩種組合：
+
+| 組合 | 筆數 | 說明 |
+|---|---|---|
+| `(UNDERCUT_RECLAIM, True)` | 48 | 全部是 `touched ∧ closed_above` |
+| `(NONE, True)` | 42 | `touched=False`（價格整根都在帶子上方，沒碰到） |
+
+**沒有任何一筆 `touched ∧ closed_above ∧ NONE`**——與「守衛恆真」的推論完全一致。
+換句話說 live 那 48 筆 `UNDERCUT_RECLAIM` **無法分辨**哪些真的跌破過帶底。
+
+#### 修法方向（待計畫書）
+
+方向清楚但**會改決策語意**（`reclaim_type` 餵給 `_structure_state` →
+`resolve_event_signal` → Lifecycle → Bias），屬大規模／高影響異動，實作前要先寫計畫書：
+
+* undercut 深度**只能用 `low < price_low`**；overthrow 深度**只能用 `high > price_high`**。
+  兩側分開存（例如 `undercut_ratio` / `overthrow_ratio`），不要再共用一個
+  `penetration_pct`——共用正是這個缺陷的來源。
+* `penetration_pct` 這個欄位有別的讀者，**不能直接改它的語意**，要先盤點。
+* ⚠️ **既有測試 `test_zone_interaction_uses_intraday_high_low_close_not_only_current_price`
+  （`test_decision_engine.py:1276`）目前把錯誤行為釘住了**：它用
+  zone `[98,100]`、`low=99`（從未跌破）、`high=101.5`、`close=101`，
+  然後斷言 `structure_state == "SUPPORT_RECLAIM_CANDIDATE"`。修的時候要一起改，
+  並補「low 未跌破、但 close 在帶頂上方」的反例。
+* 修完要回頭重跑 I-096 的純函式重放，確認那一類落到 `SUPPORT_TEST_CANDIDATE`。
+
+**相關**：I-096（拆分 `SUPPORT_TEST_CANDIDATE`，卡在本筆）。

@@ -768,53 +768,6 @@ Yahoo 為非官方 API，上線前須於台股盤中時段（09:00–13:30）用
 
 ---
 
-### T-038：`http_server` 其餘端點的測試
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作，待 review**（2026-08-18：七個端點全部補完，新增 28 支測試） |
-| 優先度 | 低 |
-| 分類 | Python / 測試 |
-| 建立日期 | 2026-08-06 |
-| 來源 | `http_server` 可測性重構（2026-08-06） |
-
-`http_server.py` 的 DB 連線檢查已移出 import 期改到 FastAPI lifespan（見
-[`development-workflow.md`](./development-workflow.md) §4），`python/tests/` 因此可以用
-FastAPI TestClient，但當時只補了 `/sr-scoring/evaluate`。仍無測試的端點：
-
-- `/analyze`（`ValueError` → 404 映射）
-- `/sr-zones`（404 / 503 兩種映射、`previous_event_states` 轉發）
-- `/sr-scoring/train`（`ValueError` → 400、六個參數轉發）
-- `/sr-scoring/model-status`（模型不存在時**刻意回 200 + `exists: false`** 而非 503，是容易被
-  「順手改成 503」破壞的設計）
-- `/backtest`（`symbols` 接受 JSON string 的 `field_validator`、background task 不阻塞回應）
-- `/backtest/{job_id}`（查無 job → 404；需 monkeypatch `engine`）
-- `/health`
-
-分檔慣例比照 `tests/test_http_server_sr_evaluate_*.py`：一個測試範圍一支檔，不堆進同一個檔案。
-
-#### 實作結果（2026-08-18）
-
-七個端點各一支檔，共 **28 支測試**，全部走 conftest 既有的 `client` fixture
-（不用 `with`，所以不跑 lifespan、不連 DB）：
-
-| 檔案 | 支數 | 鎖住的重點 |
-|---|---|---|
-| `test_http_server_analyze.py` | 4 | 三參數轉發、`ValueError` → 404、缺 symbol → 422 |
-| `test_http_server_sr_zones.py` | 4 | 404 **與** 503 兩條分支、`previous_event_states` 省略時是**空 list 而非 None** |
-| `test_http_server_train.py` | 4 | 六參數轉發（都取非預設值）、`calibration_method: null` 不被當成沒給、`ValueError` → **400** |
-| `test_http_server_model_status.py` | 3 | 模型不存在回 **200 + `exists:false`**（測試明寫 `!= 503`）、其餘欄位為 None、`config_hash` 有帶出 |
-| `test_http_server_backtest_submit.py` | 6 | 202、`symbols` 收 JSON string 與 list、回應只有 `{job_id, status}` |
-| `test_http_server_backtest_get.py` | 5 | 查無 → 404 且不再查 results、`trigger_source` → `trigger` 改名、result 未寫入時為 null |
-| `test_http_server_health.py` | 2 | `{"status":"ok"}`、**把 engine 換成一碰就爆也仍是 200**（liveness 不該依賴 DB） |
-
-**沒能驗到的一項要說清楚**：TestClient 會在回應產生後、`client.post()` 回來前執行
-background task，所以 `/backtest` 的「不阻塞」**無法用時序證明**。測試鎖的是
-「工作有排進背景、回應不含執行結果」；真正的不阻塞來自 `BackgroundTasks.add_task`
-而不是 `await`，那是結構上的事實。這一點寫在該檔的 docstring 裡。
-
----
-
 ### T-039：SR Zone 調參與決策入口沒有前端，卡住 T-002 / T-003 的收尾
 
 | 欄位 | 內容 |
@@ -1038,7 +991,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作，待 review**（Step 0～5 全部完成；**池已匯入 live 並自主運作**，2026-08-18 盤點見下；只剩 `verify-regression-baseline.sh` 那半段驗收） |
+| 狀態 | **部分通過／主項保留**（2026-08-31 review：程式碼方向通過，但文件明列的 `verify-regression-baseline.sh` regression baseline 驗收**仍未完成**，不宜整筆移除。Step 0～5 已完成，池已匯入 live 並自主運作） |
 | 優先度 | 高（同時解掉 T-002 / T-003 共同的取樣限制） |
 | 分類 | Go / 資料同步 / 排程 / DB |
 | 建立日期 | 2026-08-06 |
@@ -1055,7 +1008,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 2 | Step 1 全市場短期回補與判讀 | ✅ 完成 2026-08-13（857 檔 / 454,152 列） |
 | 3 | selection report、選出最終清單 | ✅ 完成 2026-08-17（**131 檔**，計畫書階段 1～3 通過） |
 | 4 | deep backfill ＋ 階段 4～6 驗證 | ✅ 完成 2026-08-17（131/131 對齊、覆蓋率 99.1%+、峰值 382MB、回歸基準已落地） |
-| 5 | Phase 2：`evaluation_universe` 表與每日排程 | ✅ **已實作，待 review**（2026-08-17）。**2026-08-18 唯讀盤點：池已匯入（135 檔，非文件的 131）、排程已啟用、當日 15:06 同步 135 檔／0 失敗、池內日 K 全部到 08-18 且無手動回補**——端到端驗收的前半段成立。後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未跑。詳見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「live 現況與端到端驗收」 |
+| 5 | Phase 2：`evaluation_universe` 表與每日排程 | **實作 review 通過（2026-08-31）／regression baseline 驗收未完成**（2026-08-17 實作）。**2026-08-18 唯讀盤點：池已匯入（135 檔，非文件的 131）、排程已啟用、當日 15:06 同步 135 檔／0 失敗、池內日 K 全部到 08-18 且無手動回補**——端到端驗收的前半段成立。後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未跑。詳見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「live 現況與端到端驗收」 |
 
 #### 相依：T-003 邊界凍結
 
@@ -1554,14 +1507,15 @@ Step 3 的重點不是直接建 `evaluation_universe` 表，而是先產出 sele
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Event Timeline 面向已實作／待 review**；review 8 筆發現**全數已實作待 review**（R1、R5 於 2026-08-21 各依計畫書完成，見下方「Review 發現」）；Lifecycle 與 Strategy Layer 兩個面向仍待規劃（**前置已解除**：Lifecycle Engine 已於 2026-08-18 收斂並移出本清單，狀態定義見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」） |
+| 狀態 | **部分通過／主項保留**（2026-08-31 review：**Event Timeline 面向的後端與 8 筆 review 發現通過**，含當日對 live 重跑 `verify-event-timeline.sh` 通過；⚠️ **四項 dev stack 驗收仍未做**，見下方「尚未做的驗收（T-041 的單一權威清單）」。Lifecycle 與 Strategy Layer 兩個面向尚未完成，主項保留不移除）；那兩個面向仍待規劃（**前置已解除**：Lifecycle Engine 已於 2026-08-18 收斂並移出本清單，狀態定義見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分層原則：lifecycle 不看 RR」） |
 | 優先度 | 中 |
 | 分類 | SR Zone / Decision UI / Position Action |
 | 建立日期 | 2026-08-07 |
 | 來源 | 使用者需求：決策畫面需要更完整地呈現 lifecycle、事件鏈與策略層 |
 
-目前 SR Zone 決策顯示仍偏向單一摘要，還沒有把 lifecycle、完整事件鏈與不同策略層的
-position action 正式整理成可讀的前端狀態。後續應補齊下列三個面向：
+目前 SR Zone 決策顯示仍偏向單一摘要，還沒有把 lifecycle 與不同策略層的
+position action 正式整理成可讀的前端狀態。下列三個面向中，**Event Timeline 已於
+2026-08-21 交付**（後端與 review 發現已於 2026-08-31 通過），另兩個仍待規劃：
 
 - **Lifecycle 正式顯示**：在決策畫面明確呈現 `Started` / `Testing` / `Confirmed` /
   `Failed`，並定義這些狀態與既有 event lifecycle / daily confirmation / final entry state
@@ -1579,10 +1533,10 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
 - 若新增或改動 API contract，要同步更新 `docs/api-reference.md` 與 SR Zone 相關主題文件。
 - `Position Action` 的策略差異應先文件化仲裁規則，再實作 UI，避免前端自行推導交易語意。
 
-#### Event Timeline 面向的實作結果（2026-08-21，已實作／待 review）
+#### Event Timeline 面向的實作結果（2026-08-21 實作；後端於 2026-08-31 review 通過）
 
-三個面向裡只做了 **Event Timeline**，接的是 T-051 改讀身分層之後的
-`GET /sr-zones/event-timeline`。Lifecycle 與 Strategy Layer 兩個面向**這一輪不做**，
+三個面向裡只做了 **Event Timeline**，接的是 2026-08-20 改讀身分層之後的
+`GET /sr-zones/event-timeline`（原記於 `todo.md` T-051，已收斂）。Lifecycle 與 Strategy Layer 兩個面向**這一輪不做**，
 狀態不變。
 
 改動範圍：
@@ -1609,7 +1563,7 @@ position action 正式整理成可讀的前端狀態。後續應補齊下列三�
 timeline 的區間／筆數 UI（`max_analyses` 目前固定 60）、鏈的圖形化時間軸
 （現況是文字列表）。
 
-#### Review 發現（2026-08-21，R1～R4／R6～R8 已修，R5 待處理）
+#### Review 發現（2026-08-21 提出，八筆全數已修；2026-08-31 review 通過）
 
 `/code-review` 對上面這批異動的發現，逐筆對照過程式碼與 `api-reference.md` 後確認成立。
 **這些是本筆 review 的待辦，不是獨立 issue**——收斂 T-041 的 Event Timeline 面向之前
@@ -1648,14 +1602,14 @@ normalized decision 為 missing 的分析），身分層明明有鏈也看不到
 `ensureLoaded()` 因 `loadedFor` 沒變直接 return，面板仍顯示舊的鏈與「這段期間共 N 次分析」，
 畫面上沒有任何過期提示。修法：把 `current.id` 併進快取鍵。
 
-**R5.（已實作／待 review，2026-08-21）`identity_since` 在視窗被截斷時會說謊——但錯的是後端不是文案。**
+**R5.（2026-08-21 實作，2026-08-31 review 通過）`identity_since` 在視窗被截斷時會說謊——但錯的是後端不是文案。**
 前端那句「更早的分析沒有事件鏈（刻意不回填）」忠實照著 `api-reference.md` 第 6 點寫。
 落差在實作：`identity_since` 取的是**回傳鏈中最早的 `first_seen`**，而
 `ListChains` 的視窗只保證**未終結**的鏈不受限制，視窗（前端固定 `max_analyses=60`）
 之前就已終結的鏈會被濾掉。於是半年歷史、60 次分析只涵蓋一個月時，畫面會宣告
 「身分層自 07-22 起有紀錄」，而更早的分析其實有鏈。
-**這筆屬於 T-051 交付的後端行為與文件不一致**，不在前端修。
-**2026-08-21 依下方「R5 計畫書」實作完成**：`identity_since` 改由
+**這筆屬於當時後端交付的行為與文件不一致**（原記於 `todo.md` T-051，已收斂），不在前端修。
+**2026-08-21 依計畫書實作完成（計畫書已隨 review 通過移除）**：`identity_since` 改由
 `EventIdentityRepo.GetIdentitySince` 對全歷史查出來，前端文案不動。
 
 **R6.（已修，2026-08-21）`srZones.ts` 的註解被插隊孤立。** 新的 Event Timeline 區塊插在
@@ -1672,9 +1626,10 @@ normalized decision 為 missing 的分析），身分層明明有鏈也看不到
 影響僅止於排序，改成 `Date.parse()` 相減成本很低。
 
 **修正結果（2026-08-21）**：純前端的 R2 / R3 / R4 / R6 / R7 / R8 六筆**已修完**；
-**R1 與 R5 各依下方計畫書實作完成**（R1：後端補 `event_instances.decision_visible`
-並逐條回傳，前端標記而不隱藏；R5：`identity_since` 改由身分層全歷史推導）。
-**八筆全部已實作，待 review**。
+**R1 與 R5 各依計畫書實作完成**（R1：後端補 `event_instances.decision_visible`
+並逐條回傳，前端標記而不隱藏；R5：`identity_since` 改由身分層全歷史推導——
+R5 的計畫書已隨 review 通過移除，現況見 [`api-reference.md`](./api-reference.md) 判讀第 6 點）。
+**八筆全部已實作，並於 2026-08-31 review 通過**（前端畫面驗證另計，見「尚未做的驗證」）。
 
 修法重點：
 
@@ -1688,12 +1643,13 @@ normalized decision 為 missing 的分析），身分層明明有鏈也看不到
 驗證：`npm run test:unit` 20 檔 **133** 條全過（原 131 ＋ R8 的 2 條）、
 `svelte-check` 0 errors / 0 warnings、`npm run build` 重建 dist 後
 `scripts/check-dist-assets.sh` 通過（`index-ZJ7kKgIi.js` / `index-1XCtV4KW.css`）。
-**尚未在真實資料上重看畫面**——R2 的位置調整與 R4 的重跑後更新要在 dev stack 上確認。
+⚠️ **尚未在真實資料上重看畫面**——R2 的位置調整與 R4 的重跑後更新要在 dev stack 上以肉眼確認。
+**完整的未完成清單見本筆最後的「尚未做的驗收」**，那裡是單一權威來源（這一項只是其中之一）。
 
 顯示端的現況規格（擺放位置、快取鍵、失敗後重抓）已同步到
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「前端 Event Timeline 的判讀規則（現況）」。
 
-#### R1 計畫書：event-timeline 的 chain 補 `decision_visible`（已實作／待 review）
+#### R1 計畫書：event-timeline 的 chain 補 `decision_visible`（2026-08-31 review 通過）
 
 跨 Go／DB／前端且動到對外 contract，依 CLAUDE.md 先留計畫書。
 **2026-08-21 已依本計畫實作完成，實作結果見本節最後的「實作結果」。**
@@ -1715,7 +1671,7 @@ normalized decision 為 missing 的分析），身分層明明有鏈也看不到
 * **不把不可見的鏈藏起來。** 它們是事實紀錄，要看得到——本筆做的是**標記**不是過濾。
   藏起來會讓「這個 zone 最近有沒有被測試過」這種人工判讀失去依據。
 * **不處理 R5**（`identity_since` 的視窗截斷），那是另一條線（已於 2026-08-21 另案完成，
-  見下方「R5 計畫書」）。
+  現況見 [`api-reference.md`](./api-reference.md) event-timeline 判讀第 6 點）。
 * 不做 T-041 的 Lifecycle 與 Strategy Layer 兩個面向。
 
 ##### 受影響檔案與資料流
@@ -1826,172 +1782,53 @@ UPDATE event_instances SET decision_visible = FALSE
   `npm run build` 重建 dist 後 `scripts/check-dist-assets.sh` 通過
   （`index-3iMGK8fu.js` / `index-1XCtV4KW.css`）。
 
-**尚未做的驗證（review 時要補或明確放行）**：計畫第 4～6 點的 dev stack 驗收。
-**2026-08-21 已把新 image 換上 dev backend，migration 071 也已套到 dev DB
-（啟動 log `migrations applied version=71`）**，但回填後的抽驗、as-of 階梯的
-「兩個 family 全 `false` / 其餘全 `true`」、決策輸出逐欄不變，以及在 `6182` 上
-實看畫面，都還沒做。
+**尚未做的驗證——以下是 2026-08-21 當下的狀態，逐項現況見本筆最後的
+「尚未做的驗收」**（那裡是單一權威來源，不要在這裡各自更新）：
 
-#### R5 計畫書：`identity_since` 改由身分層全歷史推導（已實作／待 review）
-
-動到對外 contract 的語意並跨 store／handler／analysis，依 CLAUDE.md 先留計畫書。
-
-##### 修改目標
-
-讓 `identity_since` 永遠等於「**身分層對這檔最早有紀錄的時間**」，不受 `max_analyses`
-視窗影響，與 `api-reference.md` 判讀第 6 點、`sr-zone-scoring.md` 的敘述一致。
-目前它取自「本次回傳 chains 中最早的 `first_seen`」（`event_timeline.go:206`），
-而 chains 已先被視窗篩過（`sr_zones.go:974`），於是視窗之前就終結的鏈被濾掉時，
-畫面會宣告「更早的分析沒有事件鏈」，實際上只是「這次沒查到」。
-
-修好之後前端那句「身分層自 X 起有紀錄；更早的分析沒有事件鏈（刻意不回填）」才成立。
-
-##### 不做的範圍
-
-* **不改 `chains` / `snapshots` 的視窗語意**：`max_analyses` 仍決定回傳哪些鏈，
-  判讀第 4 點不變。本筆只修 `identity_since` 這一個值。
-* **不改前端**：文案、快取鍵、排序都不動。
-* **不回填歷史**：`identity_since` 之前仍然沒有鏈可看，那是身分層的刻意選擇。
-* **不新增 migration**：純查詢，無 DDL 變更。
-* 不動任何決策路徑。
-* 不處理 `scripts/verify-event-timeline.sh` 對 live schema 缺 `decision_visible` 的相依，
-  那是另一條線。
-
-##### 受影響檔案與資料流
-
-| 層 | 修改 |
-|---|---|
-| store | `EventIdentityRepo` 介面新增 `GetIdentitySince(ctx, symbol, timeframe) (sql.NullTime, error)` ＋ `eventIdentityRepo` 的實作 SQL |
-| handler | `SRZoneHandler.EventTimeline` 在既有兩次查詢之外多查一次全域 `identity_since`，結果傳進 `BuildEventTimeline` |
-| analysis | `BuildEventTimeline` 新增 `identitySince *time.Time` 參數：非 nil 直接採用；nil 時維持既有「由 chains 推導」的降級路徑 |
-| 測試 | store（sqlite 五案）、analysis（注入優先）、handler（視窗截斷回歸） |
-| 文件 | `api-reference.md` 判讀第 6 點、`sr-zone-scoring.md` 對應段落 |
-
-資料流（目標）：
-
-```text
-event_instances（全歷史，**不套視窗**）
-   └─ 每條鏈的起點 = MIN(COALESCE(a.analyzed_at, t.occurred_at))
-        （無 analysis_id 退回 occurred_at；完全沒有 transition 才退回 e.first_seen_at）
-        └─ 全域 MIN → identity_since（K 棒軸）
-```
-
-##### 查詢
-
-**計畫時的寫法（單一聚合查詢，已作廢）**：
-
-```sql
-SELECT MIN(x.started_at) FROM ( ... COALESCE(MIN(COALESCE(a.analyzed_at, t.occurred_at)), e.first_seen_at) ... ) x
-```
-
-**實作時的偏離（2026-08-21）**：上面那支在 sqlite 直接炸——modernc 的 driver 只對
-「宣告型別是 DATETIME 的欄位」回 `time.Time`，**聚合／`COALESCE` 這類運算式沒有宣告型別、
-會回字串**，掃進 `sql.NullTime` 得到
-`unsupported Scan, storing driver.Value type string into type *time.Time`。
-改成**兩支查詢、`SELECT` 只挑真欄位、把運算式留在 `ORDER BY`**，三個 engine 都不必解析字串
-（語意、contract 與計畫完全相同，只有查詢形狀變了）：
-
-```sql
--- 1. 全域最早的那一步（「每條鏈取最早一步再取全域最小」＝「全域最早的一步」，不需分組）
-SELECT a.analyzed_at AS analyzed_at, t.occurred_at AS occurred_at
-  FROM event_transitions t
-  JOIN event_instances e ON e.event_uid = t.event_uid
-  LEFT JOIN stock_sr_zone_analyses a ON a.id = t.analysis_id
- WHERE e.symbol = ? AND e.timeframe = ?
- ORDER BY COALESCE(a.analyzed_at, t.occurred_at) ASC
- LIMIT 1;
-
--- 2. 完全沒有轉換的鏈（寫入端異常，但仍要算進來）
-SELECT e.first_seen_at
-  FROM event_instances e
- WHERE e.symbol = ? AND e.timeframe = ?
-   AND NOT EXISTS (SELECT 1 FROM event_transitions t WHERE t.event_uid = e.event_uid)
- ORDER BY e.first_seen_at ASC
- LIMIT 1;
-```
-
-兩支的較早者即 `identity_since`；都沒有列（`sql.ErrNoRows`）時回 `Valid=false`。
-
-* **與 `BuildEventTimeline` 的 `firstSeen` 規則同構**（優先 K 棒軸 → 無 analysis 退
-  wall clock → 無 transition 退 `first_seen_at`）。同一個時間點不能有兩套推導，
-  否則 `identity_since` 會與 `chains[0].first_seen_at` 對不起來。
-* **不能只寫 `MIN(e.first_seen_at)`**：那是 as_of 的 wall clock，與對外的 K 棒軸不同軸
-  （T-045 曾把它由 `2026-08-20` 修成 `2026-07-20`，見本檔 T-045 的驗收紀錄）。
-* 索引：外層走 `idx_event_instances_live (symbol, timeframe, …)`，相關子查詢走
-  `idx_event_transitions_event (event_uid, occurred_at)`；單檔是數十列的量級，
-  每次請求多一次聚合查詢的成本可接受。
-
-##### Contract 變化與仲裁順序
-
-| 項目 | 變化 | 相容性 |
+| 計畫第 4～6 點 | 2026-08-21 當下 | 現況（2026-08-31） |
 |---|---|---|
-| `identity_since` 值 | 由「視窗內最早鏈的起點」→「全歷史最早鏈的起點」，**只會變早不會變晚** | 鍵名、型別、時間軸都不變，前端不需改 |
-| 沒有任何鏈時 | 仍為 `null` | 不變 |
-| `chains` / `snapshots` | 完全不變 | 不變 |
-| repo 介面 | 新增一支方法 | 只有 `eventIdentityRepo` 一個實作，測試用真 repo 打 sqlite，沒有 fake 要跟著補 |
+| 4. as-of 階梯 | 未做 | **仍未做**（權威清單第 1 項） |
+| 5. 前端測試 ＋ 在 `6182` 看畫面 | 測試已過、畫面未看 | 測試維持通過；**看畫面仍未做**（第 3 項） |
+| 6. 回填後 dev DB 抽驗 | 未做 | **仍未做**（第 2 項） |
+| 決策輸出逐欄不變 | 未做 | **已由後端側涵蓋**：2026-08-31 對 live 跑 `verify-event-timeline.sh` PASS |
 
-仲裁順序：handler 查到的全域值**優先於**由 chains 推導的值；只有未注入
-`eventIdentity`（值為 nil）時才退回推導，而那條路徑下 chains 必為空、推導結果也是 nil。
+**2026-08-21 已把新 image 換上 dev backend，migration 071 也已套到 dev DB
+（啟動 log `migrations applied version=71`）**——環境前置當時就備好了，
+卡住的是這四項都需要**人工在 dev stack 上確認**——形式包含人工操作、log／SQL 檢查與畫面確認。
 
-##### 主要風險與回滾
+#### 尚未做的驗收（T-041 的單一權威清單）
 
-* **多一次查詢**：見上面的索引分析。回滾只需把 handler 那幾行拿掉、`BuildEventTimeline`
-  傳 nil，行為即回到現況；無 schema 變更、不需要 down migration。
-* **`BuildEventTimeline` 多一個參數**：既有 9 個呼叫點（含 live test）要補參數，
-  保留 nil 降級後語意不變，編譯期就會抓到漏改。
-* **值變早之後畫面會多出一段「有分析、沒有鏈」的區間**：那正是誠實的表達，
-  `snapshots` 本來就照常列出，判讀第 6 點已寫明。
+⚠️ **前一版寫「唯一未完成的是前端畫面」是錯的**——R1 計畫書的驗收第 4、6 點與第 5 點的
+「看畫面」那半也都還沒做。全部未完成項集中在這裡，其他段落不要再各自宣稱進度：
 
-##### 測試與驗證策略
+| # | 項目 | 出處 | 狀態 |
+|---|---|---|---|
+| 1 | dev stack 的 as-of 階梯（四檔 21 階，兩個 family 全 `false` / 其餘全 `true`） | R1 計畫書驗收第 4 點 | **未做** |
+| 2 | 回填後對 dev DB 唯讀 SQL 抽驗兩個 family 的列數與旗標值 | R1 計畫書驗收第 6 點 | **未做** |
+| 3 | 在 `6182` 上看畫面（`decision_visible` 標記而不隱藏） | R1 計畫書驗收第 5 點的後半 | **未做**（前半的 `test:unit` / `svelte-check` / `build` 已過） |
+| 4 | R2 的位置調整、R4 的重跑後更新，在 dev stack 上以肉眼確認 | Review 發現 R2 / R4 | **未做** |
 
-* store（sqlite，`event_identity_repo_test.go`）五案：
-  1. 有 `analysis_id` → 取 `stock_sr_zone_analyses.analyzed_at`；
-  2. transition 沒有 `analysis_id` → 退回 `occurred_at`；
-  3. 鏈完全沒有 transition → 退回 `first_seen_at`；
-  4. 這檔沒有任何鏈 → 回 `NULL`（`sql.NullTime.Valid=false`）；
-  5. **關鍵回歸**：一條早已 `ended_at` 而會被 `ListChains(since)` 濾掉的舊鏈，
-     仍要被算進 `identity_since`。
-* analysis（`event_timeline_test.go`）：注入值早於 chains 推導值時要採用注入值；
-  注入 nil 時維持既有推導（既有測試語意不動，只補參數）。
-* handler（`sr_zones_create_test.go` 或 `sr_zones_event_identity_test.go`）：
-  端點在「舊鏈被視窗濾掉」的情境下，回傳的 `identity_since` 早於 `chains[0].first_seen_at`。
-* `backend/scripts/test.sh ./internal/store/... ./internal/analysis/... ./internal/api/...`
-* 不跑 migration 測試（無 DDL）。前端不動，不需要重建 dist。
-* dev stack 實看：待 `verify-event-timeline.sh` 的資料來源路線定案後補。
+四項都要 **dev stack**，且**沒有腳本可以代勞**——形式各不相同：
 
-##### 完成後歸檔位置
+* **人工操作**：第 1 項要把 live 日 K 唯讀複製到 staging，再依交易日**逐階釋出**到
+  `candles`，每釋出一階打一次分析（步驟見 [`development-workflow.md`](./development-workflow.md)
+  「在 dev stack 上做 as-of 階梯驗收」）。
+* **log 檢查**：第 1 項每一階要看 backend 的 `event identity: zone association`
+  結構化 log，對六條門檻逐條判（`unmatched_zone_keys` 空、`invariant_violations` 恆空、
+  `carried_parse_failed` 為 0…）。
+* **SQL 檢查**：第 1 項跑完要對 DB 跑不變式 SQL；第 2 項是回填後的唯讀抽驗。
+* **畫面確認**：第 3、4 項是肉眼看前端。
 
-* `docs/api-reference.md` 判讀第 6 點補「`identity_since` **不受 `max_analyses` 影響**，
-  它問的是身分層何時開始有紀錄，不是這次查了多久」。
-* `docs/sr-zone-scoring.md` 對應段落同步成現況說明。
-* review 通過後，把 R5 連同本計畫書整筆從 `todo.md` 移除。
+這是它們一直留著的原因，不是被遺忘。
 
-##### 實作結果（2026-08-21）
+**後端側已經驗過，不在缺口內**：`scripts/verify-event-timeline.sh` 於 2026-08-31
+對 live 重跑 **PASS**（`TestEventTimelineAgainstLiveData`）。
 
-| 層 | 實際落點 |
-|---|---|
-| store | `EventIdentityRepo.GetIdentitySince`；兩支查詢見上（`identitySinceStepSQL` / `identitySinceOrphanSQL`），都沒有列時回 `Valid=false` |
-| handler | `SRZoneHandler.EventTimeline` 在 `h.eventIdentity != nil` 時多查一次，結果傳進 `BuildEventTimeline` |
-| analysis | `BuildEventTimeline` 新增 `identitySince *time.Time`（第 6 個參數）；非 nil 直接採用，nil 時維持由 chains 推導的降級 |
-| 前端 | **未改動**，文案照舊 |
-| 文件 | `api-reference.md` 判讀第 6 點補「不受 `max_analyses` 影響」與推導規則；`sr-zone-scoring.md` 的顯示規則同步 |
-
-**與計畫的差異**：查詢形狀由「單一聚合」改成「兩支、`SELECT` 只挑真欄位」，原因見上方
-「實作時的偏離」（sqlite driver 對運算式回字串）。語意、contract、仲裁順序都與計畫相同。
-
-**已通過的驗證**：`backend/scripts/test.sh ./internal/store/... ./internal/analysis/...
-./internal/api/...` 全過，含新增的 8 條測試——
-
-* store 5 條：`analyzed_at` 優先／無 `analysis_id` 退 `occurred_at`／無轉換退
-  `first_seen_at`／沒有鏈回 NULL／**視窗外的已終結舊鏈仍要算進去**（先斷言
-  `ListChains` 確實濾掉它，否則測試什麼都沒證明）。
-* analysis 2 條：注入值優先於推導；未注入時維持舊行為。
-* handler 1 條：走完整 HTTP 路徑，`max_analyses=1` 時回傳的 `identity_since`
-  早於 `chains[0].first_seen_at`。
-
-**尚未做的驗證**：dev stack 實看畫面。`scripts/verify-event-timeline.sh` 目前連 live DB，
-而 live 還沒有 migration 071 的 `decision_visible` 欄位（`ListChains` 會 42703），
-要等資料來源路線定案；本筆不含 DDL，不需要 migration 測試。
+⚠️ **原本記的阻塞已於 2026-08-31 解除**：當時該腳本連 live DB，而 live 還沒有
+migration 071 的 `decision_visible` 欄位（`ListChains` 會 42703）。live 現在已在
+**migration 74**、`event_instances.decision_visible` 存在。
+**但那驗的是後端鏈資料，不是畫面**——上表四項與它無關，仍未做。
+本筆不含 DDL，不需要 migration 測試。
 
 ---
 
@@ -1999,7 +1836,7 @@ SELECT e.first_seen_at
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待處理（主體已完成並驗證，2026-08-11；**兩項小的已於 2026-08-18 實作，待 review**，只剩「逐檔事件的增量更新」） |
+| 狀態 | **部分通過／主項保留**（2026-08-31 review：cron config 與 volume float 兩個子項**通過**；「逐檔事件的增量更新」仍未完成，主項保留。主體已於 2026-08-11 完成並驗證） |
 | 優先度 | 中 |
 | 分類 | Go / Python / 資料正確性 |
 | 建立日期 | 2026-08-11 |
@@ -2018,10 +1855,10 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 
 | 項目 | 說明 |
 |---|---|
-| **逐檔事件的增量更新** | 除權息與減資都是逐檔、目前每次全抓。除權息走 Yahoo（20/分）；**減資走 FinMind（5/分），與每日抓價共用節流器**——1,900 檔光減資就要 6.3 小時且會排擠行情抓取。這是 T-040 擴標的池的**前置條件**，不是日後優化 |
+| **逐檔事件的增量更新** | 除權息與減資都是逐檔、目前每次全抓。除權息走 Yahoo（20/分）；**減資走 FinMind（5/分），與每日抓價共用節流器**——1,900 檔光減資就要 6.3 小時且會排擠行情抓取。這是**日後把池擴到約 1,900 檔的前置條件**，不是日後優化；⚠️ **不擋 T-040 已完成的第一階段（120～150 檔，實際 135 檔）**——那個規模下全抓仍可接受 |
 | ~~模型用未還原資料訓練~~ | **已驗證，不需重訓**（2026-08-11）。A/B 實測邊際分布沒有位移（`confidence` 與 `trading_score` 的中位數幾乎相同），個別決策改變 1.9%～5.4% 屬於還原修正錯誤輸入。結論與方法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 的「模型與還原股價的相容性」 |
-| ~~`corporate_action_sync` 的 cron 寫死~~ | **已實作，待 review**（2026-08-18）：改走 `corporate_action.cron`（環境變數 `CORPORATE_ACTION_CRON`），預設值等於原本的硬編碼 `"30 6 * * 1-5"`，**行為不變**。現況說明見 [`architecture/data-pipeline.md`](./architecture/data-pipeline.md)「公司行動同步」 |
-| ~~Python 的 volume 變 float~~ | **已盤查，結論是不改行為，待 review**（2026-08-18）：下游全部以 float 取用、原始 volume 不跨 Python→Go 邊界，**沒有假設整數的消費者**。補 9 支測試鎖住現況，說明見 [`database-schema.md`](./database-schema.md)「股價還原」 |
+| ~~`corporate_action_sync` 的 cron 寫死~~ | **review 通過（2026-08-31）**，2026-08-18 實作：改走 `corporate_action.cron`（環境變數 `CORPORATE_ACTION_CRON`），預設值等於原本的硬編碼 `"30 6 * * 1-5"`，**行為不變**。現況說明見 [`architecture/data-pipeline.md`](./architecture/data-pipeline.md)「公司行動同步」 |
+| ~~Python 的 volume 變 float~~ | **review 通過（2026-08-31）**，結論是不改行為，2026-08-18 盤查：下游全部以 float 取用、原始 volume 不跨 Python→Go 邊界，**沒有假設整數的消費者**。補 9 支測試鎖住現況，說明見 [`database-schema.md`](./database-schema.md)「股價還原」 |
 | ~~減資未涵蓋~~ | **已實作並在 live 驗證通過**（2026-08-11）：7 筆減資事件，三筆假跳空（+126.8% / +109.2% / +36.3%）全部消失。合併與下市重編仍無來源，見 [`database-schema.md`](./database-schema.md)「未涵蓋的公司行動」 |
 
 ### T-043：盤後用 Yahoo 批次補日 K（價格），成交量仍走 FinMind
@@ -2473,8 +2310,8 @@ Daily Confirmation / Reclaim / Event Sequence / Final Entry 全部改讀同一�
 T-048 已完成並收斂，身分層／事件鏈的現況規格見
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「Zone 身分與 ZoneMatcher」與「事件層：鏈的
 身分與三段關聯決策」，schema 見 [`database-schema.md`](./database-schema.md)。
-它明確延後、指名由本筆承接的有四項；另有一個 T-048 驗收踩出的 issue
-（I-077）也必須在本筆一起看，因為它會直接改 Market State：
+它明確延後、指名由本筆承接的有四項（第 5 項的老化單位**已於 2026-08-20 修好並收斂**，
+保留在此供閱讀脈絡）：
 
 1. **`ZoneScore.zone_uid` 仍未接上**（Python 端在分析當下拿不到身分）。要餵得動 matcher
    就得給它「上一次的 zone 清單」，而 Python 目前唯一的跨次狀態通道是 Go 傳進來的
@@ -2492,19 +2329,21 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
    evaluation 的分層可比性，不影響 `stock_sr_decisions`。非阻斷，但做分佈比較前要先處理，
    否則新舊兩批的分層對不起來。
 4. **新舊兩套並行比對還沒做**（見下方前置①）。
-5. **I-077：同一個交易日重複分析會讓事件提早老化到 `EXPIRED`。**
-   目前 `age_bars` 是「被 carry 的分析次數」而不是「K 棒推進次數」；
-   T-049 一旦讓 Market State 與下游全部改讀同一套 state，就不能再把這個問題留在旁邊。
-   規劃時要一起決定是否把老化改成依最新 K 棒 timestamp 推進，而不是依分析次數推進。
+5. ~~同一個交易日重複分析會讓事件提早老化到 `EXPIRED`。~~ **已解決**：
+   `age_bars` 已改成依「K 棒推進」而不是「被 carry 的分析次數」（2026-08-20 上線）。
+   現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「老化的單位是『K 棒推進』」
+   （原記於 `issue.md` I-077，已收斂）。**本筆不必再處理這一項。**
 
 #### 兩個前置條件，缺一不可
 
 1. **新舊兩套狀態並行比對過一段時間。** T-048 本身已完成，但它的驗收做的是**回歸比對**
    （改動前後決策逐欄相同、身分層數字逐項重現），**不是**計畫書要求的並行比對
    （逐日比對新舊兩套的 active 事件集合，差異只能來自「分裂被正確合併」）。
-   起點資料是 [`issue.md`](./issue.md) I-080 的落差表：同一份 84 次分析裡，
-   `event_instances` 的鏈數與 timeline 端點的 `(zone_key, family)` 組合數**雙向都對不上**
-   （多出來的是 key 漂移拆開的鏈，少的是身分終止後的重生鏈）。
+   起點資料是 2026-08-19 那份落差量測（原記於 `issue.md` I-080，已收斂）：同一份 84 次
+   分析裡，`event_instances` 的鏈數與當時 timeline 端點的 `(zone_key, family)` 組合數
+   **雙向都對不上**——多出來的是 key 漂移拆開的鏈，少的是身分終止後的重生鏈。
+   （端點已於 2026-08-20 改讀身分層，現況規格見
+   [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層：鏈的身分與三段關聯決策」。）
    這件事要等前置②給出母體才做得起來——21 個交易日湊不出「一段時間」。
 2. **補分析排程**——「定期對 watchlist 產生 SR zone 分析」。
    這是 `issue.md` **I-074** 的關閉條件，也是本筆唯一可行的驗證來源：
@@ -2538,7 +2377,7 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作／待 review**（2026-08-21） |
+| 狀態 | **review 不通過／待修復**（2026-08-31：`summary` 被明細的 `limit` 截斷，區間語意失真，見下方「review 發現」） |
 | 優先度 | 中（T-048 階段 C 的後續；T-048 已於 2026-08-20 完成並收斂，本筆不擋任何人） |
 | 分類 | Go / 可觀測性 |
 | 建立日期 | 2026-08-19 |
@@ -2575,7 +2414,7 @@ log 能回答「這一次分析發生了什麼」，但答不出**趨勢**問題
 `job_runs` 隔天就沒了。本筆要建的表**因此不沿用 `job_runs` 當時的當日清除策略**
 ——那正是要解的問題。（`job_runs` 已於 2026-08-25 改成保留 30 天，這段是立案背景。）
 
-#### 計畫書（**已實作／待 review**，2026-08-21）
+#### 計畫書（**已實作；2026-08-31 review 不通過**——見上方「review 發現」，2026-08-21）
 
 ##### 修改目標與不做的範圍
 
@@ -2709,199 +2548,34 @@ Go api/server.go                     路由 ＋ repo 注入
 
 ---
 
-### T-051：Event Timeline 改讀身分層，讓修好的分裂真的看得到
+#### review 發現（2026-08-31）——**不通過：summary 不是完整 days 區間的聚合**
 
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（2026-08-20） |
-| 優先度 | 中（T-048 的價值兌現點、T-041 的前置；**不在 T-049 的路徑上**，服務的是 display_chain 而非決策，與下游 T-041 同級） |
-| 分類 | Go / SR Zone / 事件鏈 / 對外 API |
-| 建立日期 | 2026-08-20 |
-| 來源 | T-048 全案 review：身分層四張表目前**沒有任何讀者** |
-| 關聯 | 修的是 [`issue.md`](./issue.md) I-080；下游是 T-041 的 Event Timeline 面向 |
+端點宣稱「回溯 `days` 天的區間聚合」（`sr_zones.go:2120-2127` 的註解：
+`days` 預設 30、`limit` 預設 200），但實際資料流是**先過濾日期、再截斷筆數、
+然後對截斷後的結果算 summary**：
 
-#### 問題
-
-T-048 已經把「同一個 zone 跨交易日的身分」算出來也存下來了，但
-`GET /sr-zones/event-timeline` 仍以 `(zone_key, event_family)` 摺疊
-`market_event_states`——**T-048 要修的分裂，在唯一會顯示鏈的端點上原封不動**。
-實測落差與成因見 I-080。
-
-更根本的一點：`zone_instances` / `event_instances` / `zone_relations` /
-`event_transitions` 四張表在 Go 端只有兩處 `SELECT`（`zone_identity_repo.go` 的
-`ListLive`、`event_identity_repo.go` 找活鏈），**兩處都是 matcher 自己餵自己**。
-對外唯一看得到的身分資料是階段 E 加的 `zones[].data.zone_uid`。身分層目前仍是
-「只寫不讀」，本筆是它的第一個真正讀者。
-
-#### 計畫書（**已實作／待 review**，2026-08-20）
-
-##### 修改目標與不做的範圍
-
-* **目標**：`GET /sr-zones/event-timeline` 改以**身分層**為來源，讓同一個 zone 的鏈不再
-  因 `zone_key` 漂移而被拆開（[`issue.md`](./issue.md) I-080）。
-* **不做**：不改任何決策邏輯、不改事件偵測、不改 Python、不動身分層的寫入端。
-* **不做**：不接血緣（`zone_relations`）——把 `SPLIT`/`MERGE`/`RESHAPE` 前後的鏈串成一條
-  是獨立的一階，且寫入端刻意決定「parent 的事件不傳給 child」，讀取端不該偷偷接回去。
-* **不做**：不改前端（T-041 另案）。
-
-##### 四個定案
-
-**U1：換來源，不是「維持摺疊 ＋ 多帶 `zone_uid`」。**
-
-盤點後這其實不是偏好問題——**併行方案做不出來**：
-
-* `market_event_states` **沒有 `zone_uid` 欄位**，摺疊時拿不到身分。
-* 想在讀取時補上這個對應，只能拿 `zone_key` 去查 `zone_key_aliases`，而那是**有損的**：
-  每個身分只留最近 8 筆 alias，實測已有 **23 個身分撞頂**（I-079），超出的舊 key 永遠查不回來。
-* `stock_sr_zones` 雖然有 `zone_uid`，但**沒有存 `zone_key`**（`db:"-"`），
-  兩邊接不起來——除非用價格邊界回推，而那正是 T-048 要消滅的模式。
-
-反過來看，**寫入端在三段關聯決策裡已經把這個對應做對了**（既有鏈優先 → carried 護欄 →
-key 解析／alias 備援），答案就存在 `event_instances`。讀取時重算一次不但更差，還會與寫入端
-變成兩份會漂移的事實。
-
-**U2：三項現行輸出身分層沒有，逐項處置。**
-
-| 現行輸出 | 身分層有沒有 | 處置 |
+| 步驟 | 位置 | 行為 |
 |---|---|---|
-| 每一步的 `state` / `reason_codes` / `event_type` | ✅ `event_transitions` 的 `to_state` / `reason_codes` / `trigger_event_type` | 直接對應 |
-| 每一步的 `active` | ❌ 只有鏈層的當前 `active` | **不再逐步輸出**。要重建它得把 family 的 `gating_states` 規則複製一份到 Go——那會是第二份判準，正是 T-048 一路在避免的東西。鏈層仍輸出 `active` |
-| `changed[]`（相鄰快照的差異欄位） | ❌ 摺疊時才算得出來 | **不需要了**。`from_state → to_state` ＋ `trigger_event_type` 本身就說明了這一步改了什麼，而且是存下來的事實而非推導 |
+| 1 | `sr_identity_stats_repo.go:108-136` | `WHERE created_at >= From` ＋ `ORDER BY created_at DESC` ＋ **`LIMIT 200`**（`q.Limit <= 0` 時的預設） |
+| 2 | `sr_zones.go:2159-2161` | `summarizeIdentityStats(rows)` —— 直接對**那 200 列**聚合 |
 
-`snapshots`（分析次數與 gap 揭露）**保留**——它查的是 `stock_sr_zone_analyses`，與事件無關，
-不受換來源影響。
+`sr_analysis` 排程上線後每交易日產出約 22 列（11 檔 × 兩輪，見 T-052「上線實績」），
+所以**預設的「30 天 summary」實際只涵蓋約 9 個交易日**。
 
-> 順帶：`event_timeline.go` 上 `Snapshots` 的註解寫著「目前沒有任何排程會產生分析」，
-> **T-052 之後這句已經過期**，本筆一併更新。
+而且 response 只有 `rows` 與 `summary` 兩個鍵，**沒有 `truncated` 或總列數提示**，
+呼叫端無從得知自己拿到的是截斷結果。本端點最主要的趨勢指標 `alias_hit_rate`
+是個比率，分母被無聲截斷正好讓它失真——而該欄位的註解自己寫著
+「**比率在這裡才算，不存進表**：分母隨『要看哪個區間』而變」，
+現在的實作等於讓分母由 `limit` 決定而不是由 `days` 決定。
 
-**U3：鏈的鍵改成 `zone_uid`，`zone_key` 降級但不刪。**
+**修法方向（擇一，待決策）**：
 
-回應的 chain 物件：
+* **A**：`summary` 改用**未套 `limit` 的 SQL aggregate**（`COUNT` / `SUM` 走
+  `WHERE` 但不走 `LIMIT`），`limit` 只限制明細 `rows`。語意與文件一致，需多一次查詢。
+* **B**：維持單次查詢，但回傳 `total_rows` / `truncated`，並把文件與欄位註解
+  明確改成「**本批次**聚合」而不是「區間聚合」。
 
-| 欄位 | 變化 |
-|---|---|
-| `zone_uid` | **新增**，鏈的身分（`event_scope='SYMBOL'` 時為 `null`） |
-| `event_uid` | **新增**，這條鏈自己的 id，供前端穩定 key 與後續下鑽 |
-| `seq` | **新增**，同一個 (zone, family) 的第幾條鏈 |
-| `end_reason` | **新增**，`RESOLVED` / `EXPIRED` / `ZONE_IDENTITY_ENDED` |
-| `zone_key` | **保留但語意改變**：從「鏈的身分」變成 `last_zone_key`（最近一次觀測到時事件帶的 key），只供人工比對 |
-| `closed` / `final_state` / `direction` / `root_event_type` / `first_seen_at` / `last_seen_at` | 不變 |
-
-**`seq > 1` 是新的一條鏈，不與前一條合併**——這與寫入端的語意一致（前一條 `RESOLVED`／
-`EXPIRED` 之後再出現同家族事件，是新的一條而不是舊鏈復活）。實測 10 條。
-`end_reason = ZONE_IDENTITY_ENDED`（實測 8 條）要在回應裡看得出來：那是「zone 身分終止所以
-鏈收攤」，不是自然結束，前端若把它畫成一般結束會誤導。
-
-**U4：涵蓋範圍要誠實揭露。**
-
-身分層是從 migration 068 才開始寫的，**更早的分析沒有事件鏈資料**，換來源後那段期間會
-從 timeline 上消失。回應新增 `identity_since`（身分層最早的 `first_seen_at`）；
-早於它的 `snapshots` 照常列出，讓「這段沒有鏈」與「這段沒有分析」在畫面上分得開。
-**不回填**——理由與 `stock_sr_zones.zone_uid` 相同，回填要解的正是「兩個舊 key 是不是同一個
-zone」，那是身分層本身要建的能力。
-
-##### 受影響的檔案與資料流
-
-```text
-Go store/event_identity_repo.go   ＋ ListChains(symbol, timeframe, opts)
-                                  ＋ ListTransitions(eventUIDs)
-                                  （目前只有 matcher 自己用的「找活鏈」，沒有任何列表查詢）
-Go analysis/event_timeline.go     BuildEventTimeline 改吃 chains ＋ transitions，
-                                  不再摺疊 market_event_states；移除 changed[] 的 diff 邏輯
-Go api/handler/sr_zones.go        EventTimeline handler 改叫新的 repo 方法
-```
-
-* Python：**不改**。前端：**不改**（T-041 另案）。DB：**不新增表也不新增欄位**。
-
-##### 資料 contract 變化
-
-| 變更 | 型態 | 相容性 |
-|---|---|---|
-| chain ＋ `zone_uid` / `event_uid` / `seq` / `end_reason` | 純新增鍵 | 前端目前沒有任何呼叫端（`frontend/src` 查無 `event-timeline`） |
-| chain 的 `zone_key` 語意改為 `last_zone_key` | **語意變更** | 值的形狀不變；沒有消費者，但要寫進 `api-reference.md` |
-| transition 移除 `active` / `changed` | **移除欄位** | 同上，目前無消費者 |
-| 回應 ＋ `identity_since` | 純新增鍵 | — |
-| 鏈的數量與邊界 | **會變**（這正是目的） | 實測 I-080 的落差表 |
-
-##### 主要風險與回滾
-
-| 風險 | 對策 |
-|---|---|
-| 身分層是「只寫不讀」，本筆是**第一個真正的讀者**，寫入端的缺陷會第一次被看見 | 這是好事也是風險。驗收要求端點鏈數與 `event_instances` **逐檔相同**——對不上就是讀取端寫錯，不是資料壞 |
-| `event_transitions` 沒有 `active`，前端若已依賴它會壞 | 前端沒有任何呼叫端，現在改是最便宜的時機 |
-| 舊分析沒有鏈，看起來像「資料不見了」 | U4 的 `identity_since` ＋ 保留 `snapshots` |
-| 回滾 | 純讀取端改動，DB 與寫入端都沒動。`git revert` 即可 |
-
-##### 測試與驗證策略
-
-* **單元（Go）**：`event_instances` ＋ `event_transitions` 組成 chain 的映射；
-  `seq > 1` 不與前一條合併；`ZONE_IDENTITY_ENDED` 的 `end_reason` 有輸出；
-  `event_scope='SYMBOL'` 的鏈 `zone_uid` 為 null 不 panic；沒有身分層資料時回空鏈但仍有
-  `snapshots`。
-* **端到端（dev 階梯）**：重跑四檔 21 階（`ladder.sh`）後
-  1. 端點回傳的鏈數與 `event_instances` 的鏈數**逐檔相同**（2330 28／3105 38／6182 37／8150 25）；
-  2. 至少一個「漂移過 `zone_key` 的身分」在新端點上是**一條**鏈——舊實作會是多條；
-  3. 決策路徑逐欄不變（本筆只動讀取端，`stock_sr_decisions` 應完全相同）。
-
-##### Review findings（2026-08-20，**已修正／待複審**）
-
-* **P2：`max_analyses` 只限制了 `snapshots`，`chains` 仍撈全歷史。** 語意錯位，且 T-052
-  每日累積後回應會愈來愈大。**已修正**：先查分析、取最舊那次的時間當視窗起點再查鏈。
-  納入規則是「有一步落在視窗內，**或這條鏈還沒結束**」——後半是必要的，一條長壽而這段
-  期間沒有變化的鏈正是最該看到的。被選中的鏈一律回完整歷史（切一半會失去誕生那一步）。
-* **P3：`zone_uid` 用 `string + omitempty`，SYMBOL scope 時鍵會直接消失。** 與計畫書寫的
-  「為 null」不符，消費端寫「欄位存在但為 null」的判斷會靜默走到 undefined 分支。
-  **已修正**：`zone_uid` 與 `zone_key` 都改成 `*string`，並補一支**序列化層**的測試
-  （Go struct 上 `*string(nil)` 與 omitempty 分不出來，只有 marshal 才驗得到）。
-
-##### 修正 P2 時抓到的回歸（2026-08-20）
-
-**第一版的 P2 修正是空操作，而且它掩蓋著一個更大的問題：兩個時間軸混用。**
-
-| 欄位 | 時間基準 | 實測 |
-|---|---|---|
-| `stock_sr_zone_analyses.analyzed_at` | **K 棒日期** | 2026-07-20 ~ 08-17 |
-| `event_instances.first_seen_at` / `event_transitions.occurred_at` | **wall clock** | 2026-08-20 09:36 |
-
-過濾條件寫成 `last_seen_at >= since`，拿 wall-clock 欄位比 K 棒日期——**條件恆真**，
-`max_analyses=1` 照樣回 28 條鏈。單元測試抓不到，因為它測的是 Go 的映射而不是 SQL 的跨軸比較。
-
-同一個根因也造成**顯示回歸**：2330 的 28 條鏈會全部顯示成在同一秒內發生，而 snapshots
-橫跨一個月。舊實作用 `market_event_states.analyzed_at`（K 棒日期）所以內部一致，
-**這是換來源引入的新問題**，而門檻①（鏈數相同）驗不到它。
-
-**修法**：`event_transitions.analysis_id` join 回 `stock_sr_zone_analyses.analyzed_at`，
-對外一律用 K 棒軸；視窗過濾改用 `EXISTS(join analyses)`。沒有 `analysis_id`（排程收尾）
-才退回 wall clock。新增兩支測試釘住，其中 helper 刻意讓 `occurred_at` 與 K 棒時間差好幾天，
-任何把兩者搞混的實作都會炸開。
-
-##### 實作結果（2026-08-20）
-
-| 門檻 | 結果 |
-|---|---|
-| Go 全量 `test.sh` | 全綠 |
-| ① 端點鏈數 vs `event_instances` | **28 / 38 / 37 / 25 逐檔相同** |
-| ② 漂移過 key 的身分 | 用過 5 個 `zone_key` 的身分在新端點上是**一條**鏈（`seq=1`）；舊實作會是 5 條 |
-| ③ `max_analyses` 真的限制 chains | 1→0、3→4、10→10、500→28，且鏈的時間範圍與 snapshots 視窗一致 |
-| 時間軸 | `identity_since` 由 wall clock 的 `2026-08-20` 變成 K 棒軸的 `2026-07-20` |
-| 決策路徑 | 本筆只動讀取端，沒有任何寫入 |
-
-`max_analyses=1` 回 0 條鏈是**正確**的：最後一次分析沒有產生任何轉換，且 2330 的 28 條鏈
-全部已終結；`snapshots=1` 仍然揭露「那天有跑分析」。
-
-##### 完成後歸檔
-
-* timeline 改讀身分層、`display_chain` 的新語意與 `identity_since` →
-  [`api-reference.md`](./api-reference.md)「GET /sr-zones/event-timeline」。
-* 「身分層的第一個讀者」與 U1 的取捨（為什麼不能在讀取時重算 key → uid）→
-  [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層：鏈的身分與三段關聯決策」。
-* I-080 修復後改狀態；I-079 的 alias 上限在此成為「讀取端不依賴 alias」的佐證，於該筆補一句。
-
-#### 驗收門檻
-
-* 同一組四檔 21 階 as-of 階梯，端點回傳的鏈數與 `event_instances` 的鏈數**逐檔相同**。
-* 至少一個「漂移過 `zone_key` 的身分」在新端點上是**一條**鏈（現行會是多條）。
-* 決策路徑逐欄不變——本筆只動讀取端。
+⚠️ 兩個方向都會改 API response 的語意或形狀，屬 contract 修改，實作前要先寫計畫書。
 
 ---
 
@@ -2909,12 +2583,47 @@ Go api/handler/sr_zones.go        EventTimeline handler 改叫新的 repo 方法
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作／待 review**（2026-08-20；上線＝把 `sr_analysis.enabled` 設成 true） |
+| 狀態 | **review 不通過／待修復**（2026-08-31：兩個時段可以同時執行，違反文件寫明的序列與記憶體假設，見下方「review 發現」。上線與資料累積本身通過，見「上線實績」） |
 | 優先度 | 高（同時是 T-049 的硬前置與三筆驗證缺口的唯一解） |
 | 分類 | Go / 排程 / SR Zone / 驗證母體 |
 | 建立日期 | 2026-08-20 |
 | 來源 | T-048 全案 review。T-049 已列它為前置，但**先前沒有任何 todo 在追**，只散見於 T-045 與 T-049 的討論段落 |
 | 關聯 | [`issue.md`](./issue.md) I-074（Lifecycle Engine RR 解耦的 replay 驗證無法執行）、I-078（身分層兩條路徑從未被執行）；T-049 的前置條件② |
+
+#### 上線實績（2026-08-28 核實）
+
+⚠️ **不要再從 `backend/config.yaml` 的 `sr_analysis.enabled: false` 推論它沒開。**
+那是 repo 預設值；live 由環境變數覆寫，實際狀態要查容器：
+
+```bash
+docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep SR_ANALYSIS
+# SR_ANALYSIS_ENABLED=true
+```
+
+（`candle_gap_detection` 同一個模式——config 預設 false，live 靠 env 開，見 T-067。）
+
+**排程執行**（`job_runs`）：
+
+| job | 輪數 | 狀態 | 每輪檔數 |
+|---|---|---|---|
+| `sr_analysis`（17:00） | 4 | 全 `success` | 11 |
+| `sr_analysis_chip`（22:00） | 3 | 全 `success` | 11 |
+
+**資料累積**（`stock_sr_zone_analyses`）：
+
+| 日期 | 分析筆數 | 檔數 |
+|---|---|---|
+| 2026-08-21 / 24 / 25 / 26 / 27 | 各 22 | 各 11 |
+| 2026-08-28 | 11（22:00 那輪尚未跑） | 11 |
+
+⚠️ **`job_runs` 只涵蓋 2026-08-25 起，那是該表的保留範圍、不是 sr_analysis 特有**——
+表裡**每一個** job 的最早紀錄都是 08-25。分析資料本身從 08-21 就已經是每日 22 筆，
+所以排程實際上線的時間早於 `job_runs` 能證明的範圍。
+
+**對下游的影響**：母體已從「4 檔 / 20 次」長到 144 次分析（2026-08-28 核實），
+I-074 / I-078 / T-049 的「母體太小」那一項前置**已經解除**。
+⚠️ 但 T-049 與 T-066 另有 **model bundle** 的前置沒解（`model_available: false`），
+那與本筆無關，不要把「母體夠了」誤讀成「replay 可以跑了」。
 
 #### 問題
 
@@ -2935,7 +2644,7 @@ T-048 收斂時的 **4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，
 自然母體；它能證明「改動前後逐欄相同」與「身分層數字重現」，但不能關閉 I-074 / T-049
 要求的 production 分佈比較。
 
-#### 計畫書（**已實作／待 review**，2026-08-20）
+#### 計畫書（**已實作；2026-08-31 review 不通過**——見上方「review 發現」，2026-08-20）
 
 ##### 修改目標與不做的範圍
 
@@ -3033,7 +2742,7 @@ func (h *SRZoneHandler) RunAnalysis(ctx context.Context, symbol, timeframe strin
 S3 改成兩段之後，「當日已分析過就跳過」會直接把 22:00 那輪整個擋掉，所以守衛的粒度是
 **(交易日, 時段)**：同一個時段今天已經跑過才跳過，17:00 與 22:00 互不影響。
 
-I-077 修完後（**必須先上線**，見下方前置），同時段重跑不再影響老化，所以這個守衛只是省一次
+老化單位修好之後（2026-08-20 已上線），同時段重跑不再影響老化，所以這個守衛只是省一次
 Python scoring ＋ 少推一次 `observed_absences`（S4）。
 
 **跳過就是完全不跑 matcher，因此 `observed_absences` 不會增加**——這是對的：那個計數的
@@ -3080,7 +2789,7 @@ Go api/handler/scheduler.go  ＋ 手動觸發入口（比照 RunDailyClose）
 
 | 風險 | 對策 |
 |---|---|
-| **I-077 未上線就開排程**，排程與人工同日各跑一次，老化一天前進 2，**污染的正是要累積的母體** | I-077 已於 2026-08-20 修復（待 review）。本筆上線前先確認該修法已在 live |
+| ~~老化單位未上線就開排程~~，排程與人工同日各跑一次，老化一天前進 2 | **已解除**：老化單位修法於 2026-08-20 上線（原記於 `issue.md` I-077，已收斂） |
 | 抽 `RunAnalysis` 時不慎改到 `Create` 的行為 | 純抽取、不改順序；`Create` 既有測試全綠即為證據，另加一支「兩個呼叫端走同一份邏輯」的測試 |
 | 排程在 candles 還沒到位時跑，產生一批基於舊 K 棒的分析 | S3 的「最新 candle 交易日必須是今天」前置檢查，不符就 skip 並記 `job_runs` |
 | 22:00 那輪在籌碼還沒進來時跑，等於白跑一次又多推一次 `observed_absences` | S3 的籌碼 `trade_date` 前置檢查，不是今天就 skip |
@@ -3128,7 +2837,7 @@ Go api/handler/scheduler.go  ＋ 手動觸發入口（比照 RunDailyClose）
 **上線步驟**（2026-08-20 補齊）：改 `deploy.sh` 的 `SR_ANALYSIS_ENABLED="true"` 再重新部署。
 環境變數已同時拉進 `docker-compose.yml`（正式）、`docker-compose.dev.yml` 與 `deploy.sh`
 三處——**compose 的 `environment:` 是白名單，沒列的變數不會進 container**，第一版只加了
-dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法必須先在 live 生效。**
+dev 那份，等於正式環境根本開不起來。**前置：老化單位修法必須先在 live 生效——2026-08-20 已滿足。**
 
 | 驗證 | 結果 |
 |---|---|
@@ -3174,7 +2883,7 @@ dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法�
 
 ##### 前置
 
-**I-077 必須先在 live 生效**（老化單位改為 K 棒推進）。理由見上方風險表第一列。
+**老化單位改為 K 棒推進必須先在 live 生效——2026-08-20 已滿足**（原記於 `issue.md` I-077，已收斂）。理由見上方風險表第一列。
 
 #### 驗收門檻
 
@@ -3200,12 +2909,49 @@ dev 那份，等於正式環境根本開不起來。**前置：I-077 的修法�
 
 | 時序 | 項目 | 理由 |
 |---|---|---|
-| 上線前 | I-077 老化單位修法在 live 生效 | 見上方計畫書的「前置」與風險表第一列，不先修就會一邊累積一邊污染母體 |
-| 與本筆並行 | [T-051](#t-051event-timeline-改讀身分層讓修好的分裂真的看得到) | 零依賴，且是 T-048 唯一使用者看得到的成果 |
+| 上線前 | ~~老化單位修法在 live 生效~~ **已於 2026-08-20 滿足** | 見上方計畫書的「前置」與風險表第一列 |
+| 與本筆並行 | ~~Event Timeline 改讀身分層~~ **已於 2026-08-20 完成**（原記於 `todo.md` T-051，已收斂） | 零依賴，且是 T-048 唯一使用者看得到的成果 |
 | 累積期**當中** | [T-050](#t-050身分追蹤的可觀測性把關聯決策計數從-log-升級成可查詢的-metric) | 要趕在累積期內上線才看得到 alias 命中率與撞頂比例的**趨勢**，事後補等於白等一輪 |
 | 母體足夠後 | 並行比對 → I-074 關閉 → I-078／I-079 重新量測 | 純驗證，不寫功能 |
 | 全綠後 | [T-049](#t-049market-state-與所有下游改讀同一套-state) | 動決策邏輯，另需計畫書 |
 
+
+---
+
+#### review 發現（2026-08-31）——**不通過：兩個時段可以同時跑**
+
+`runSRAnalysis`（`scheduler.go:1362-1376`）對兩個時段用**兩個不同的 atomic guard**，
+而且註解明講這是刻意的：
+
+```go
+jobName, guard := "sr_analysis", &s.srAnalysisRunning
+if withChip {
+    jobName, guard = "sr_analysis_chip", &s.srAnalysisChipRunning
+}
+// 併發守衛只擋同一輪自己；兩輪之間互不影響。
+```
+
+**但同一個函式上方的 doc comment 寫的是相反的假設**：
+
+> **序列執行**：這台 host 只有 2GiB。逐檔的峰值等同使用者手動點一次分析；
+> 真的撐不住時要降頻而不是加併發。
+
+兩句話直接衝突。而手動觸發端點（`handler/scheduler.go:69`）可以分別帶或不帶
+`with_chip=true`，所以**兩個請求可以同時對同一份 watchlist 跑分析**。後果有三個：
+
+1. **並行兩個 Python scoring**——直接違反 2GiB host 的序列假設（見
+   [`development-workflow.md`](./development-workflow.md) 的記憶體限制）。
+2. **同一 symbol 的身分匹配與事件鏈寫入並行**——`zone_matcher` 與
+   `event_instances` 的三段關聯決策不是為並行設計的。
+3. **skip 判斷與分析落地之間沒有鎖**——兩輪都可能在對方寫入前通過
+   「最新 K 棒不是今天就跳過」的判斷，於是同一根 K 棒被分析兩次。
+
+⚠️ **cron 排程本身撞不到**（17:00 與 22:00 相隔五小時），所以 live 至今沒有實例；
+可觸發的路徑是**手動端點**，以及未來任一輪耗時超過五小時。
+
+**修法方向**：資料層的「兩個時段各自冪等」規則保留不動，
+**執行層改成共用一個全域 guard／mutex**。
+「允許不同時段各跑一次」不等於「允許兩輪同時跑」——現行實作把前者實作成了後者。
 
 ---
 
@@ -3346,7 +3092,9 @@ Yahoo 那半只能照打真實 API（實際寫進 dev 的 35 筆 `2330` 除權�
 現況的 const 至少不可能被誤設。所以這筆的價值取決於「dev 驗收這條路徑」有多常做——
 若公司行動同步之後不再需要反覆驗，可以直接關掉這筆。
 
-**相關**：[`issue.md`](./issue.md) I-085（同一段設定的另一個文件缺口）。
+**相關**：`yahoo.rate_limit` 同時節流除權息逐檔同步這件事已寫進 `backend/config.yaml`
+的 `yahoo:` 段與 [`architecture.md`](./architecture.md) 的公司行動同步節
+（原記於 `issue.md` I-085，已收斂）。
 
 ---
 

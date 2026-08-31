@@ -344,10 +344,17 @@ select symbol, round(avg((high-low)/nullif(close,0))*100, 2) range_pct
 
 #### 一天不要重複打同一階
 
-事件的老化計數 `age_bars` 的單位是**分析次數**不是 K 棒數，所以同一階重打一次，
-active 的事件就多老一根。復驗時重跑第七階，兩條 `CONFIRMED` 的 `SUPPORT_RECLAIM`
-在 candles 一根都沒變的情況下同時轉 `EXPIRED`。判讀階梯結果時要把這件事算進去，
-細節見 [`issue.md`](./issue.md) I-077。
+⚠️ **這一節描述的是 2026-08-20 之前的行為，現在已經修掉了。**
+當時 `age_bars` 的單位是**分析次數**，所以同一階重打一次，active 的事件就多老一根：
+復驗時重跑第七階，兩條 `CONFIRMED` 的 `SUPPORT_RECLAIM` 在 candles 一根都沒變的
+情況下同時轉 `EXPIRED`。
+
+**現況是「K 棒推進」才老化**，同一根 K 棒重複分析不再讓事件提早 `EXPIRED`，
+所以重打同一階已經不會污染老化計數。現況規格見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「老化的單位是『K 棒推進』」
+（原記於 `issue.md` I-077，已收斂）。
+
+判讀**2026-08-20 之前**留下的階梯結果時，仍要把舊行為算進去。
 
 ### 字串欄位的寬度：不要訂「剛好夠用」
 

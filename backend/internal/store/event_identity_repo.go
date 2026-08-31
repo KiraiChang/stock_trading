@@ -35,7 +35,7 @@ type EventIdentityRepo interface {
 	// 單一 symbol 實測是數十列的量級，等真的變成問題再處理。
 	ListLatestChains(ctx context.Context, symbol, timeframe string) ([]LiveEvent, error)
 	// ListChains 取某檔某 timeframe 的**所有**事件鏈，供 Event Timeline 顯示
-	// （todo.md T-051）。
+	// （原記於 todo.md T-051，已收斂）。
 	//
 	// **不能用 ListLatestChains 代替**：那支每個 (zone_scope_key, family) 只回最新一條，
 	// 因為它服務的是寫入端的 seq 分派。timeline 要看的是演進，`seq` 較小的舊鏈同樣要顯示。
@@ -62,7 +62,7 @@ type EventIdentityRepo interface {
 	// 空的 eventUIDs 回空集合而不是「全部」——後者會在鏈清單為空時掃出整張表。
 	ListTransitions(ctx context.Context, eventUIDs []string) ([]EventTransitionView, error)
 	// GetIdentitySince 回這檔在身分層**最早有紀錄的時間**，供 Event Timeline 的
-	// `identity_since` 使用（todo.md T-051 R5）。沒有任何鏈時 `Valid=false`。
+	// `identity_since` 使用（原記於 todo.md T-051 R5，已收斂）。沒有任何鏈時 `Valid=false`。
 	//
 	// **刻意不吃視窗參數。** 它要回答的是「身分層何時開始有紀錄」，而不是「這次查了
 	// 多久」——拿 ListChains 的結果推導就會答成後者：視窗只保證未終結的鏈不受限制，

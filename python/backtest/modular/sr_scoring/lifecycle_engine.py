@@ -111,6 +111,16 @@ def resolve_event_signal(
         return EVENT_SIGNAL_CLOSE_RECLAIM, ["CLOSE_RECLAIM"]
     if "REVERSAL_CANDIDATE" in candidate_types:
         return EVENT_SIGNAL_SUPPORT_TEST, ["REVERSAL_CANDIDATE"]
+    # `SUPPORT_TEST_CANDIDATE`（只碰到帶子、沒有 UNDERCUT_RECLAIM）**不得產生
+    # `CLOSE_RECLAIM`**——那正是 I-096 要拆掉的東西：碰觸被命名成收復，再被
+    # Lifecycle 當成收復證據回饋到 market_state 與 Bias。它走 SUPPORT_TEST。
+    #
+    # **位置是刻意選的**：擺在 `REVERSAL_CANDIDATE` 之後、`PENDING_ZONE_VALIDATION`
+    # 之前，新狀態只會在原本要落到 EXTREME_VOLUME / NO_EVENT 的情況下改變答案。
+    # 有 candidate event 佐證的 REVERSAL_CANDIDATE 優先序不變；
+    # PENDING_ZONE_VALIDATION 與它同樣回 SUPPORT_TEST、只差 reason code。
+    if structure_state == "SUPPORT_TEST_CANDIDATE":
+        return EVENT_SIGNAL_SUPPORT_TEST, ["STRUCTURE_SUPPORT_TOUCH"]
     if (
         primary_zone is not None
         and primary_zone.role == ZoneType.SUPPORT.value

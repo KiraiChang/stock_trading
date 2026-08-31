@@ -373,8 +373,8 @@ TWSE ISIN 同步仍存在的標的。
 
 **資料來源是身分層**（`event_instances` ＋ `event_transitions`），不是把
 `market_event_states` 的快照摺疊出來的——後者以 `zone_key` 為鍵，會因邊界漂移把同一個
-zone 的鏈拆開（見 [`issue.md`](./issue.md) I-080）。背景見 [`todo.md`](./todo.md)
-T-045 / T-048 / T-051。
+zone 的鏈拆開。現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「事件層：鏈的身分與
+三段關聯決策」（原記於 `todo.md` T-045 / T-048 / T-051 與 `issue.md` I-080，均已收斂）。
 
 **與 decision summary 的 `event_sequence` 不同，兩者不要混用：**
 
@@ -495,7 +495,12 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 
 ### GET `/sr-zones/identity-stats`
 
-身分關聯決策的逐次分析拆解與區間聚合（todo.md T-050）。
+身分關聯決策的逐次分析拆解與聚合（todo.md T-050）。
+
+⚠️ **`summary` 目前聚合的是「回傳的這一批」，不是完整的 `days` 區間**（T-050 待修復）。
+repo 先依 `days` 過濾、再套 `limit`（預設 200）截斷，handler 才對截斷後的結果聚合；
+`sr_analysis` 排程每交易日產出約 22 列，所以預設的「30 天」實際只涵蓋約 9 個交易日，
+而且 response 沒有 `truncated` 或總列數提示。**`alias_hit_rate` 的區間語意在修好前不可靠。**
 
 **這個端點存在的理由是趨勢**：同一組數字已經有結構化 log，但 log 答不出
 「alias 命中率是不是在爬」「`chain_conflicts` 是不是開始非零」，而那正是這類缺陷的形狀

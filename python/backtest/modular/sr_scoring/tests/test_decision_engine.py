@@ -17,6 +17,7 @@ from ..decision_engine import (
     _risk_note,
     _risk_note_code,
     _risk_note_text,
+    _entry_action_state,
     _structure_state,
     _zone_interaction,
     build_decision_summary,
@@ -2466,3 +2467,70 @@ def test_secondary_gate_not_qualified_when_no_statistic_exists():
     assert gate["qualified"] is False
     assert gate["reason_code"] == "RR_UNAVAILABLE"
     assert gate["secondary_gate"]["qualified"] is False, "沒有統計可比時不得標成通過"
+
+
+# ── I-096：碰觸與收復拆成兩個 structure state ──────────────────
+# 拆分前 touched-only 與真正的 undercut-reclaim 共用 `SUPPORT_RECLAIM_CANDIDATE`，
+# 而 `resolve_event_signal` 會把 candidate 直接當成 `CLOSE_RECLAIM` 灌進 Lifecycle。
+# **這組測試的重點是「拆分不可以變成放寬」**——見下方 entry state 那一支。
+
+
+def _support_zone_for_structure() -> ZoneScore:
+    return _zone(low=98.0, high=100.0, risk_reward_ratio=2.5)
+
+
+def test_touched_only_support_is_test_candidate_not_reclaim():
+    """只碰到帶子、沒有跌破也沒有 undercut-reclaim → `SUPPORT_TEST_CANDIDATE`。
+
+    K 棒完全落在帶內（98.5~99.5、收 99.0）：`touched=True`、`penetration_ratio=0`，
+    所以 `zone_interaction` 給的 `reclaim_type` 是 `NONE` 而不是 `UNDERCUT_RECLAIM`。
+    這正是拆分前會被命名成「支撐收復候選」的那一類。
+    """
+    zone = _support_zone_for_structure()
+    interaction = _zone_interaction(zone, 99.0, 99.5, 98.5, 99.0)
+
+    evidence = interaction["price_action_evidence"]
+    assert evidence["touched"] is True
+    assert evidence["reclaim_type"] == "NONE"  # 沒有 undercut-reclaim
+    assert evidence["closed_below"] is False
+
+    assert _structure_state(zone, interaction, None) == "SUPPORT_TEST_CANDIDATE"
+
+
+def test_undercut_reclaim_still_returns_reclaim_candidate():
+    """**回歸防線**：真正的 undercut-reclaim 必須維持 `SUPPORT_RECLAIM_CANDIDATE`。
+
+    診斷過的 88 筆分析裡，35 筆 `SUPPORT_RECLAIM_CANDIDATE` **全部**是這一類；
+    這支測試釘住 I-096 的拆分沒有誤傷它們（預期影響筆數為 0）。
+    """
+    zone = _support_zone_for_structure()
+    interaction = _zone_interaction(zone, 100.5, 100.8, 97.0, 100.5)
+
+    evidence = interaction["price_action_evidence"]
+    assert evidence["reclaim_type"] == "UNDERCUT_RECLAIM"
+
+    assert _structure_state(zone, interaction, None) == "SUPPORT_RECLAIM_CANDIDATE"
+
+
+def test_support_test_candidate_keeps_conservative_entry_state():
+    """**拆分不可以變成放寬**（I-096 計畫書的 R1）。
+
+    拆分前 touched-only 走 `SUPPORT_RECLAIM_CANDIDATE`，在 `_entry_action_state`
+    被壓成 PROBE / WAIT。若新狀態沒被加進那個條件，它會掉到 `SMALL_ENTRY` /
+    `Buy` 分支——**比拆分前更寬鬆**，與本次修改的動機完全相反。
+    """
+    zone = _support_zone_for_structure()
+
+    assert _entry_action_state("BuySmall", zone, "SUPPORT_TEST_CANDIDATE", 99.0) == "PROBE_ENTRY"
+    assert _entry_action_state("Buy", zone, "SUPPORT_TEST_CANDIDATE", 99.0) == "WAIT_CONFIRMATION"
+
+    # 對照組：拆分前後行為一致，證明保守待遇是「延續」而不是新加的
+    assert _entry_action_state("BuySmall", zone, "SUPPORT_RECLAIM_CANDIDATE", 99.0) == "PROBE_ENTRY"
+
+
+def test_support_test_candidate_reason_code_is_not_generic_defense():
+    """新狀態要有自己的 reason code，不能落到兜底的 `SUPPORT_DEFENSE`。"""
+    zone = _support_zone_for_structure()
+    condition = _position_action_condition(zone, "SUPPORT_TEST_CANDIDATE", None)
+    assert "SUPPORT_TEST_AWAIT_RECLAIM" in condition["reason_codes"]
+    assert "SUPPORT_DEFENSE" not in condition["reason_codes"]

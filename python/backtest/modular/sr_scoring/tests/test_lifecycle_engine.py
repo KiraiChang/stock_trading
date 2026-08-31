@@ -14,6 +14,7 @@ from backtest.modular.sr_scoring.lifecycle_engine import (
     LIFECYCLE_NO_PRIMARY_ZONE,
     LIFECYCLE_NORMAL,
     LIFECYCLE_TESTING,
+    resolve_event_signal,
     resolve_lifecycle,
 )
 from backtest.modular.sr_scoring.types import RecentValidation, ZoneType
@@ -230,3 +231,59 @@ def test_resistance_zone_does_not_trigger_clear_breakout():
         current_price=103.5,
     )
     assert result["lifecycle_phase"] == LIFECYCLE_CONFIRMED
+
+
+# ── I-096：`SUPPORT_TEST_CANDIDATE` 不得驅動 CLOSE_RECLAIM ──────
+
+
+def test_support_test_candidate_resolves_to_support_test_not_close_reclaim():
+    """碰觸不是收復：新狀態走 `SUPPORT_TEST`，**不得**產生 `CLOSE_RECLAIM`。
+
+    這是 I-096 的核心——拆分前 touched-only 頂著
+    `SUPPORT_RECLAIM_CANDIDATE` 進到上面那個 `or`，於是「只是碰到帶子」
+    會被 Lifecycle 當成收復證據，改到 `market_state` 與 Bias。
+    """
+    signal, reason_codes = resolve_event_signal(
+        _summary(),
+        _zone(low=98.0, high=100.0),
+        "SUPPORT_TEST_CANDIDATE",
+    )
+    assert signal != "CLOSE_RECLAIM"
+    assert reason_codes == ["STRUCTURE_SUPPORT_TOUCH"]
+
+
+def test_reclaim_candidate_still_resolves_to_close_reclaim():
+    """**回歸防線**：真正的 undercut-reclaim 那一支行為不變。"""
+    signal, reason_codes = resolve_event_signal(
+        _summary(),
+        _zone(low=98.0, high=100.0),
+        "SUPPORT_RECLAIM_CANDIDATE",
+    )
+    assert signal == "CLOSE_RECLAIM"
+    assert reason_codes == ["CLOSE_RECLAIM"]
+
+
+def test_reversal_candidate_outranks_structure_touch():
+    """仲裁順序：有 candidate event 佐證的 `REVERSAL_CANDIDATE` 優先序不變。
+
+    新分支刻意插在它**後面**，所以新狀態只會在原本要落到
+    EXTREME_VOLUME / NO_EVENT 的情況下改變答案。
+    """
+    signal, reason_codes = resolve_event_signal(
+        _summary(candidates=[_state("REVERSAL_CANDIDATE")]),
+        _zone(low=98.0, high=100.0),
+        "SUPPORT_TEST_CANDIDATE",
+    )
+    assert reason_codes == ["REVERSAL_CANDIDATE"]
+
+
+def test_support_test_candidate_lifecycle_is_testing():
+    """端到端：新狀態在 lifecycle 層落在 `TESTING`，不是 `CONFIRMED`。"""
+    result = resolve_lifecycle(
+        event_state_summary=_summary(),
+        primary_zone=_zone(low=98.0, high=100.0),
+        structure_state="SUPPORT_TEST_CANDIDATE",
+        daily_price_action=FOLLOW_THROUGH,
+        current_price=99.0,
+    )
+    assert result["lifecycle_phase"] == LIFECYCLE_TESTING

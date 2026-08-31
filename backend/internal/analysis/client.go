@@ -964,7 +964,8 @@ type scoreZonesRequest struct {
 	Limit     int    `json:"limit,omitempty"`
 	// PreviousAnalyzedAt 是**產生 PreviousEventStates 那次分析**站在哪根 K 棒（RFC3339）。
 	// Python 拿它跟自己這次的 frame.index[-1] 比，只有 K 棒真的推進才把 age_bars +1
-	// （issue.md I-077：同一根 K 棒重複分析會讓事件提早老化到 EXPIRED）。
+	// （同一根 K 棒重複分析會讓事件提早老化到 EXPIRED；現況規格見
+	// docs/sr-zone-scoring.md「老化的單位是『K 棒推進』」，原記於 issue.md I-077，已收斂）。
 	//
 	// **為什麼送時間而不是送算好的 bar_advanced**：Go 在呼叫前不知道這次的 analyzed_at
 	// ——它由 Python 從 frame 算出。Go 若改用自己 DB 的最新 candle ts 去比，就會出現第二個
@@ -1052,7 +1053,8 @@ func (c *Client) ScoreZonesWithPreviousEvents(
 	return &result, nil
 }
 
-// scoreZonesPreviousAnalyzedAt 取這批 previous states 所屬分析的 K 棒時間（I-077）。
+// scoreZonesPreviousAnalyzedAt 取這批 previous states 所屬分析的 K 棒時間。
+// 用途見 docs/sr-zone-scoring.md「老化的單位是『K 棒推進』」（原記於 issue.md I-077，已收斂）。
 //
 // **整批必定同一次分析**：GetLatestMarketEventStates 的 WHERE 是
 // `analysis_id = (SELECT … ORDER BY analyzed_at DESC LIMIT 1)`，所以取 [0] 是安全的，

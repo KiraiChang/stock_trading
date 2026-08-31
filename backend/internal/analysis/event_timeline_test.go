@@ -9,7 +9,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// Event Timeline 的單元測試（todo.md T-051）。
+// Event Timeline 的單元測試（原記於 todo.md T-051，已收斂）。
 //
 // **2026-08-20 改讀身分層後，原本那批「摺疊快照」的測試整批移除了**——墓碑重複、
 // 相鄰快照 diff、終結後開新鏈之類的情況全部消失，因為鏈的邊界不再是讀取時推導出來的，
@@ -117,7 +117,7 @@ func TestBuildEventTimelineMapsChainsAndTransitions(t *testing.T) {
 // **同一個 (zone, family) 的 seq 是先後兩條鏈，不能合併。** 前一條終結之後再出現同家族
 // 事件，寫入端就是當成新的一條——讀取端合併會讓「這個 zone 被測試過幾次」永遠答錯。
 // TestBuildEventTimelineUsesInjectedIdentitySince：注入的全域值**優先於**由 chains
-// 推導（todo.md T-051 R5）。max_analyses 的視窗會濾掉早已終結的舊鏈，於是「回傳的鏈裡
+// 推導（原記於 todo.md T-051 R5，已收斂）。max_analyses 的視窗會濾掉早已終結的舊鏈，於是「回傳的鏈裡
 // 最早的起點」比身分層真正的起點晚——照鏈推導就會把「這次沒查到」說成「更早的分析
 // 沒有事件鏈」。
 func TestBuildEventTimelineUsesInjectedIdentitySince(t *testing.T) {

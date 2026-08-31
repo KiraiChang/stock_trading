@@ -12,7 +12,9 @@ import (
 // Event Timeline：把身分層的事件鏈（event_instances ＋ event_transitions）整理成
 // 前端與人工檢查看得懂的形狀。
 //
-// 背景見 docs/todo.md T-045 / T-048 / T-051 與 docs/issue.md I-080。
+// 現況規格見 docs/sr-zone-scoring.md「事件層：鏈的身分與三段關聯決策」與
+// 「第一個讀者：Event Timeline」（原記於 todo.md T-045 / T-048 / T-051 與
+// issue.md I-080，均已收斂）。
 //
 // **2026-08-20 起改讀身分層，不再摺疊 market_event_states 的快照。** 舊作法以
 // `(zone_key, event_family)` 為鍵，而 zone 邊界每次由 ATR 重算、role 也會翻轉，
@@ -99,7 +101,7 @@ type EventTimeline struct {
 	Timeframe string `json:"timeframe"`
 	// IdentitySince 是身分層對這檔最早的觀測時間。
 	//
-	// **不受 max_analyses 影響**（todo.md T-051 R5）：它問的是「身分層何時開始有
+	// **不受 max_analyses 影響**（原記於 todo.md T-051 R5，已收斂）：它問的是「身分層何時開始有
 	// 紀錄」，不是「這次查了多久」。值由 EventIdentityRepo.GetIdentitySince 對
 	// **全歷史**算出來，與被視窗篩過的 Chains 無關——早期由 Chains 推導時，
 	// 視窗之前就終結的鏈會被濾掉，畫面會把「這次沒查到」說成「更早沒有事件鏈」。
@@ -217,7 +219,7 @@ func BuildEventTimeline(
 			DecisionVisible: c.DecisionVisible,
 			Transitions:     steps,
 		})
-		// **只在沒有注入全域值時才由鏈推導**（todo.md T-051 R5）。推導出來的是
+		// **只在沒有注入全域值時才由鏈推導**（原記於 todo.md T-051 R5，已收斂）。推導出來的是
 		// 「本次回傳的鏈裡最早的起點」，而 chains 已先被 max_analyses 的視窗篩過，
 		// 視窗之前就終結的鏈不在裡面——當成 identity_since 就會說謊。
 		// 呼叫端有身分層時一律注入 EventIdentityRepo.GetIdentitySince 的全域值；

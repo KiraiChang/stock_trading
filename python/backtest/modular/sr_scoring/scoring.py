@@ -820,7 +820,7 @@ def score_symbol(
     呼叫端（FastAPI /sr-zones、Go handler）可覆寫。
 
     previous_analyzed_at 是產生 previous_event_states 那次分析的 K 棒時間，
-    決定事件要不要老化（issue.md I-077）。省略＝維持舊行為。"""
+    決定事件要不要老化（原記於 issue.md I-077，已收斂）。省略＝維持舊行為。"""
     from .pipeline import run_pipeline
 
     return run_pipeline(

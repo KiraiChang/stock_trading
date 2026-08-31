@@ -726,7 +726,40 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 - `structural_trend`：由 `global_trend` 判斷的中長線結構，值與相容欄位 `trend_regime` 一致。
 - `short_term_regime`：由最新 market events / structure state 判斷的短線狀態，例如 `BREAKDOWN_RISK`、`RECLAIM_ATTEMPT`、`REVERSAL_CANDIDATE`、`RECOVERY`、`EARLY_TREND`、`NORMAL`。`RECOVERY` 對應 `structure_state=SUPPORT_RECLAIM_CONFIRMED`；`EARLY_TREND` 對應區間盤但 `global_trend>0` 且 `global_confidence>=0.55` 的早期趨勢。
 - `tactical_regime`：短線戰術 regime，現階段與 `short_term_regime` 同值，作為 UI 與後續規則演進的明確欄位。
-- `recovery_state`：收復/失效狀態；`structure_state=SUPPORT_RECLAIM_CONFIRMED` 時為 `RECOVERY`，其餘與 `structure_state` 同值，避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
+- `structure_state`：主 zone 的短線結構狀態。**碰觸與收復是兩個狀態，不要混用**
+  （2026-08-28 拆分，原記於 `issue.md` I-096）：
+
+  | 值 | 條件 | 事件仲裁 |
+  |---|---|---|
+  | `SUPPORT_RECLAIM_CANDIDATE` | `reclaim_type == UNDERCUT_RECLAIM`。**預期語意**是「跌破帶底後又收回帶頂上方」，⚠️ **但目前的實作不是這樣**——見下方「已知缺陷」 | 驅動 `CLOSE_RECLAIM` |
+  | `SUPPORT_TEST_CANDIDATE` | 只是 `touched`，沒有 undercut-reclaim、也沒有收破 | 走 `SUPPORT_TEST`，**不驅動** `CLOSE_RECLAIM` |
+  | `SUPPORT_RECLAIM_CONFIRMED` | 前一根 `UNDERCUT_RECLAIM` 且本根未收破 | 驅動 `CLOSE_RECLAIM` |
+  | `SUPPORT_RECLAIM_INVALIDATED` / `BREAKDOWN` | 收破 ／ `recent_validation=EXPIRED` | 走 breakdown 分支 |
+
+  拆分的理由是**一個名字沒辦法同時描述兩種強度**：對真正的 undercut-reclaim 太弱，
+  對單純碰觸太強；而後者還會經 `resolve_event_signal` 被當成收復證據回饋到
+  `market_state` 與 Bias。所以解法是拆狀態，不是改名。
+
+  ⚠️ **已知缺陷：`UNDERCUT_RECLAIM` 目前並不要求真的跌破帶底**（`issue.md` I-098，待修復）。
+  `zone_interaction` 的 `penetration_pct` 同時採計「跌破帶底」與「突破帶頂」兩側，
+  而判定只檢查它 `> 0`；因為 `closed_above` 蘊含 `high > price_high`、
+  進而蘊含 `penetration_pct > 0`，**那個守衛對 SUPPORT 恆真**。實際行為退化成：
+
+  ```text
+  UNDERCUT_RECLAIM  ⟺  touched ∧ closed_above      # 與有沒有跌破帶底無關
+  ```
+
+  所以「從帶內往上穿出、從未跌破帶底」目前也會拿到 `SUPPORT_RECLAIM_CANDIDATE`
+  並驅動 `CLOSE_RECLAIM`。**上表第一列寫的是預期語意，不是現行契約**——
+  在 I-098 修好之前不要把它當成保證。上表其餘各列不受影響。
+
+  ⚠️ **`SUPPORT_TEST_CANDIDATE` 在 `_entry_action_state` 與
+  `SUPPORT_RECLAIM_CANDIDATE` 同待遇**（一樣壓成 `PROBE_ENTRY` / `WAIT_CONFIRMATION`）。
+  拆分前 touched-only 走的就是 candidate 那條保守路徑；把新狀態漏掉會讓它掉到
+  `SMALL_ENTRY` / `Buy`，**比拆分前更寬鬆**，與拆分動機完全相反。
+  由 `test_support_test_candidate_keeps_conservative_entry_state` 釘住。
+
+- `recovery_state`：收復/失效狀態；`structure_state=SUPPORT_RECLAIM_CONFIRMED` 時為 `RECOVERY`，其餘與 `structure_state` 同值（**含 `SUPPORT_TEST_CANDIDATE`**，它會原樣流出），避免 Structural Trend、Tactical Regime、Recovery State 混在同一欄位解讀。
 - `primary`：保留給舊前端/舊資料讀取的相容欄位，仍表示主要趨勢 regime。
 
 `decision_summary.decision_derived_view` 是 Event Lifecycle 與對外語意欄位之間的權威轉接層。
@@ -1037,6 +1070,52 @@ SREventTimeline.svelte：標記「事實紀錄・不參與決策」
 型別名刻意與 `scenario_engine._zone_state` 的場景字串 `SUPPORT_RETEST` 區隔——那個字串
 是由 `role` 直接推出來的展示標籤，與「有沒有真的回測」無關；family 名對齊需求用語，
 型別名保留「守住」這個事實。
+
+#### 事件層不涵蓋「角色翻轉當下」的突破
+
+`RESISTANCE_BREAKOUT` **不包含 zone 從壓力翻成支撐那一根**。要查翻轉型的突破得看身分層，
+不要只看事件層。**`ROLE_FLIPPED` 這個字在兩張表都出現，語意不同，別查錯**：
+
+| 表 | 欄位 | 它回答什麼 |
+|---|---|---|
+| `zone_role_incarnations` | `end_reason` | **這一世為何結束**（`INVALIDATED` / `ROLE_FLIPPED` / `EXPIRED_BY_ABSENCE` / `IDENTITY_ENDED`） |
+| `zone_transitions` | `transition_kind` | **轉換事件本身**（`STATE_CHANGE` / `ROLE_RESOLVED` / `ROLE_UNRESOLVED` / `ROLE_FLIPPED`） |
+
+翻轉當下會**同時**留下兩筆：舊一世的 `end_reason=ROLE_FLIPPED`，
+以及一筆 `transition_kind=ROLE_FLIPPED` 指向新一世的 incarnation UID。
+schema 見 [`database-schema.md`](./database-schema.md)。
+
+成因在 `detect_market_events`（`event_engine.py:614`）是**依 zone 的當前 role 分派**的：
+
+```python
+for z in zone_scores:
+    if z.role == ZoneType.RESISTANCE.value:
+        events.extend(_resistance_zone_events(...))   # RESISTANCE_BREAKOUT 在這裡
+        continue
+    if z.role != ZoneType.SUPPORT.value:
+        continue
+    ...                                                # 支撐側的三個分支
+```
+
+價格收上帶頂之後，zone builder 在**同一根**就已經把它歸成 SUPPORT，於是它走支撐分支、
+產出 `INTRADAY_RECLAIM` ＋ `SUPPORT_RETEST_HELD`，`_resistance_zone_events` 一次都沒被呼叫。
+換句話說：**「壓力被突破」正是它翻成支撐的原因，而那個原因讓它錯過了記錄突破的分支。**
+
+**方向是不對稱的**，這不是筆誤：
+
+| 翻轉方向 | 翻轉後的 role | 走得到壓力分支？ | 有無 `RESISTANCE_BREAKOUT` |
+|---|---|---|---|
+| SUPPORT → RESISTANCE | RESISTANCE | ✅ | **有資格產生**——仍需 `broke_out and high_volume` 兩個條件同時成立才會真的產生（`_resistance_zone_events`）。符合條件的實例：`2478` 2026-08-24，age 0、`PENDING_CLOSE_CONFIRMATION` |
+| RESISTANCE → SUPPORT | SUPPORT | ❌ | **不可能產生**——走不到壓力分支，與量能條件無關（實例：`0050` `f2f1ab63` 與 `2478` `120.637~121.363`，皆 2026-08-26） |
+
+**這不影響任何決策**——`RESISTANCE_BREAKOUT` 是 `decision_visible=false` 的只寫不讀事實層
+事件（見上一節）。影響的是**事實累積的完整性**：拿事件層當母體做「突破後 N 根表現」的統計時，
+**翻轉型的突破會整批缺席**，而那可能正是最值得看的一類——它是唯一「突破成功到足以改變角色」
+的樣本。做這類統計**必須自行 join 身分層**補回來。
+
+現況是**刻意保留**的（原記於 `issue.md` I-095，2026-08-28 決議維持現狀）：補發事件要動的是
+「產生事件」那條路徑，新型別得走完整的四個過濾點與 `EVENT_TYPE_META` 隔離檢查，
+風險與收益不成比例。日後若真要用事件層做突破後表現的統計，就得先解掉這件事。
 
 ### Daily Price Action / Data Quality
 
@@ -1374,7 +1453,7 @@ Legacy action pipeline：
      稍後由 `_final_entry_risk_notes` 依 `secondary_gate.qualified` 校正。
 4. 若 primary zone `recent_validation=EXPIRED`：**第 4 步本身只加註記**。
    結果上它確實升不到 `Buy`，但**擋下來的不是這一步**：`_structure_state`
-   （`decision_engine.py:2242-2243`）在 SUPPORT ＋ EXPIRED 時回 `BREAKDOWN`，
+   （`_structure_state` 的第一個分支）在 SUPPORT ＋ EXPIRED 時回 `BREAKDOWN`，
    而 `_decision_action` 對 `structure_broken` 的判斷（`:512-518`）在 `strong` 計算**之前**
    就 `return "AVOID"`；primary 若是 RESISTANCE 則由 `bearish_setup` 擋。
    兩條路都到不了 `strong`，所以 `strong` 的條件式裡沒有 `recent_validation` 是正確的、
@@ -3109,7 +3188,7 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 #### 第一個讀者：Event Timeline
 
 `GET /sr-zones/event-timeline` 從 2026-08-20 起**直接讀 `event_instances` ＋
-`event_transitions`**，不再摺疊 `market_event_states`（todo.md T-051）。這是身分層從
+`event_transitions`**，不再摺疊 `market_event_states`（原記於 `todo.md` T-051，已收斂）。這是身分層從
 「只寫不讀」走出來的第一步。
 
 **為什麼不能在讀取時把 `zone_key` 換算成 `zone_uid`**（那樣就能沿用舊的摺疊）：
@@ -3319,8 +3398,8 @@ missing 的分析）明明有鏈卻看不到任何東西。
 規則與理由：
 
 * **鏈的身分顯示 `zone_uid` 前 8 碼，不顯示 `zone_key`。** `zone_key` 只是最近一次
-  觀測到時事件帶的 key，會隨 ATR 重算漂移；拿它當識別正是 [I-080](./issue.md) 修掉的
-  那個問題。`zone_key` 只留在 `title` 供人工比對。`event_scope` 為 `SYMBOL` 的鏈不屬於
+  觀測到時事件帶的 key，會隨 ATR 重算漂移；拿它當識別正是 2026-08-20 那次修掉的
+  問題（原記於 `issue.md` I-080，已收斂）。`zone_key` 只留在 `title` 供人工比對。`event_scope` 為 `SYMBOL` 的鏈不屬於
   任何 zone，顯示「整檔事件」。
 * **`seq > 1` 標成「第 N 條」。** 那是同一個 (zone, family) 的**新的一條鏈**，
   不是舊鏈復活。

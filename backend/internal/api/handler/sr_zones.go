@@ -982,13 +982,13 @@ func (h *SRZoneHandler) EventTimeline(c *gin.Context) {
 		since = analyses[0].AnalyzedAt // ListAnalysisSnapshots 回的是最近 N 筆、依時間遞增
 	}
 
-	// **鏈來自身分層，不再摺疊 market_event_states**（T-051）。未注入 eventIdentity 時
+	// **鏈來自身分層，不再摺疊 market_event_states**（原記於 todo.md T-051，已收斂）。未注入 eventIdentity 時
 	// 回空鏈——那與「這檔還沒有任何鏈」在畫面上一樣，但 snapshots 仍會照常揭露分析次數。
 	var chains []store.EventInstance
 	var transitions []store.EventTransitionView
 	var identitySince *time.Time
 	if h.eventIdentity != nil {
-		// **identity_since 另外查一次，不能從 chains 推**（todo.md T-051 R5）：
+		// **identity_since 另外查一次，不能從 chains 推**（原記於 todo.md T-051 R5，已收斂）：
 		// chains 已被上面的視窗篩過，視窗之前就終結的鏈不在裡面，拿它推導會把
 		// 「這次沒查到」說成「更早的分析沒有事件鏈」。這一支問的是全歷史。
 		got, err := h.eventIdentity.GetIdentitySince(c.Request.Context(), symbol, timeframe)

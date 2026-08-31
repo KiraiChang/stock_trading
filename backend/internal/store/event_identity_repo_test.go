@@ -415,7 +415,7 @@ func TestEventIdentityDecisionVisibleDefaultsToTrue(t *testing.T) {
 	}
 }
 
-// ── GetIdentitySince（todo.md T-051 R5）────────────────────────────────
+// ── GetIdentitySince（原記於 todo.md T-051 R5，已收斂）────────────────────
 
 // eventCandleDay 是 K 棒軸上的日期，與 eventSeenAt（as_of wall clock）刻意差好幾天：
 // 任何把兩條軸搞混的實作都會在斷言上炸開。

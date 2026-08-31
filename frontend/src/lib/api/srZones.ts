@@ -323,6 +323,9 @@ export type SRMarketRegimePrimary = 'TREND_UP' | 'TREND_DOWN' | 'RANGE_BOUND'
 export type SRShortTermRegime = 'NORMAL' | 'BREAKDOWN_RISK' | 'RECLAIM_ATTEMPT' | 'REVERSAL_CANDIDATE' | string
 export type SRStructureState =
   | 'NORMAL'
+  // 碰到支撐但尚未 undercut-reclaim；與 SUPPORT_RECLAIM_CANDIDATE 是不同強度
+  // （原記於 docs/issue.md I-096）。recovery_state 也會出現這個值。
+  | 'SUPPORT_TEST_CANDIDATE'
   | 'SUPPORT_RECLAIM_CANDIDATE'
   | 'SUPPORT_RECLAIM_CONFIRMED'
   | 'SUPPORT_RECLAIM_INVALIDATED'
@@ -994,7 +997,7 @@ export async function listSRZoneAnalyses(symbol?: string, limit = 20): Promise<S
   return res.analyses ?? []
 }
 
-// ── Event Timeline（跨分析事件鏈，todo.md T-045 / T-048 / T-051）────────────
+// ── Event Timeline（跨分析事件鏈；原記於 todo.md T-045 / T-048 / T-051，已收斂）──
 //
 // **與 decision summary 的 event_sequence 不是同一件事**：後者是「當次分析偵測到的事件」
 // 依優先序排序去重，沒有時間也沒有狀態轉換；這裡是**跨分析的完整演進**。

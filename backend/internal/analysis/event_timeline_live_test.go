@@ -79,9 +79,11 @@ func TestEventTimelineAgainstLiveData(t *testing.T) {
 	t.Logf("鏈 %d 條 / 轉換 %d 筆 / 分析 %d 次 → %d 條鏈 / %d 份快照\n%s",
 		len(chains), len(transitions), len(analyses), len(tl.Chains), len(tl.Snapshots), pretty)
 
-	// **這是 T-051 的核心驗收**：端點回傳的鏈數必須等於身分層的鏈數。
+	// **核心驗收**：端點回傳的鏈數必須等於身分層的鏈數。
 	// 不相等就是讀取端漏了或多生了鏈——舊作法（摺疊 zone_key）在這裡必然對不上，
-	// 因為 key 漂移會把同一個身分拆成多條（見 issue.md I-080 的落差表）。
+	// 因為 key 漂移會把同一個身分拆成多條（現況規格見
+	// docs/sr-zone-scoring.md「事件層：鏈的身分與三段關聯決策」；
+	// 原記於 todo.md T-051 與 issue.md I-080，均已收斂）。
 	if len(tl.Chains) != len(chains) {
 		t.Errorf("輸出鏈數 %d != event_instances 鏈數 %d", len(tl.Chains), len(chains))
 	}

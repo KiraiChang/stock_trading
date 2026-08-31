@@ -698,7 +698,7 @@ def test_stage_d_events_are_excluded_from_event_sequence_projection():
     assert [item["type"] for item in _event_sequence(events)] == ["REVERSAL_CANDIDATE"]
 
 
-# ── 老化的單位是 K 棒推進，不是分析次數（issue.md I-077）──
+# ── 老化的單位是 K 棒推進，不是分析次數（原記於 issue.md I-077，已收斂）──
 
 
 def _aging_previous(age_bars: int, expires_after: int = 2) -> list[dict]:
@@ -721,7 +721,7 @@ def _aging_previous(age_bars: int, expires_after: int = 2) -> list[dict]:
 def test_same_bar_reanalysis_does_not_age_events():
     """同一根 K 棒重打分析不能讓事件老化。
 
-    這是 I-077 的直接回歸：修法前每 carry 一次就 +1，於是「candles 一根都沒變、只是把
+    這是原 I-077 的直接回歸（已收斂）：修法前每 carry 一次就 +1，於是「candles 一根都沒變、只是把
     同一階再打一次」就足以把 CONFIRMED 推到 EXPIRED，而 market_state_from_event_states
     只看 active——那會實際改變 Market State。
     """
@@ -761,7 +761,7 @@ def test_bar_advanced_defaults_to_true():
     assert default["states"][0]["age_bars"] == explicit["states"][0]["age_bars"] == 1
 
 
-# ── _bar_advanced_since 的邊界（issue.md I-077）──
+# ── _bar_advanced_since 的邊界（原記於 issue.md I-077，已收斂）──
 
 
 def test_bar_advanced_since_boundaries():
@@ -778,7 +778,7 @@ def test_bar_advanced_since_boundaries():
 
     # 推進：上一次站在更早的 K 棒
     assert _bar_advanced_since(now, "2026-08-15T16:00:00Z") is True
-    # 同一根 K 棒：這就是 I-077 的情境
+    # 同一根 K 棒：這就是原 issue.md I-077 的情境（已收斂）
     assert _bar_advanced_since(now, "2026-08-18T16:00:00Z") is False
     # 時間倒退（as-of 回放、資料修正）：保守側，不老化
     assert _bar_advanced_since(now, "2026-08-19T16:00:00Z") is False

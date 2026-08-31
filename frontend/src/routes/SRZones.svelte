@@ -644,11 +644,14 @@
     return value ?? null
   }
 
+  // ⚠️ 與 Python `decision_engine._decision_market_regime` 的 structure_label 雙寫；
+  // SSOT 待整理見 docs/todo.md T-064。新增狀態時兩邊都要改。
   const structureStateText: Record<string, string> = {
     NORMAL: '結構正常',
     RECOVERY_CANDIDATE: '短線測試支撐',
     RECOVERY: '短線收回支撐',
     RECOVERY_INVALIDATED: '短線結構轉弱',
+    SUPPORT_TEST_CANDIDATE: '支撐測試候選',
     SUPPORT_RECLAIM_CANDIDATE: '支撐收復候選',
     SUPPORT_RECLAIM_CONFIRMED: '支撐收復確認',
     SUPPORT_RECLAIM_INVALIDATED: '支撐收復失效',

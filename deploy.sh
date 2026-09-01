@@ -36,7 +36,9 @@ export CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN="60"  # 冷卻後自動恢復
 
 # 定期對 watchlist 產生 SR zone 分析：每交易日兩輪，17:00 與 22:00。
 # 這是 production 驗證母體的唯一來源——沒有它，stock_sr_zone_analyses 只會累積人工點擊的
-# 零星幾筆，decision replay 的分佈比較（issue.md I-074、todo.md T-049）永遠做不了。
+# 零星幾筆，todo.md T-049 前置①（新舊兩套 active 事件集合的逐日並行比對）永遠做不了。
+# ⚠️ 2026-09-01 移除此處對 issue.md I-074 的引用：decision replay 的母體是 candles
+# （run_decision_replay -> _load_db_sources），本排程從來不是它的前置。
 #
 # **前置已滿足**：事件老化早已改為依「K 棒推進」而不是「分析次數」（2026-08-20 上線），
 # 所以排程與人工同日各跑一次不再讓老化一天前進 2、污染要累積的母體。

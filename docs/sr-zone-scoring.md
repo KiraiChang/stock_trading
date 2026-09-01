@@ -1287,7 +1287,7 @@ Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 | `zone_health_state` | `decision_engine.py` | **zone 本身**的健康度（舊鍵 `lifecycle` 已 deprecated） |
 | `_zone_state` | `scenario_engine.py` | **場景判定**（`SUPPORT_RETEST`/`RETEST_REQUIRED`…） |
 
-#### 已知並接受的行為改變（待 replay 評估）
+#### 已知並接受的行為改變（2026-09-01 replay 實測：**在真實資料上一次都沒觸發**）
 
 RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持有建議**：
 
@@ -1298,14 +1298,98 @@ RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持�
 
 第二列的 `action_state` 會被 `_position_action_condition` 原樣採用，
 所以 `position_action_condition.state` 由「條件性續抱」變成「續抱」。
+
+##### decision replay 實測（2026-09-01）
+
+before ＝ `ecbc141^`、after ＝ `ecbc141`（T-044 抽離 Lifecycle Engine 的那個 commit），
+同一 cohort、同一顆 `sr_scoring_v4.joblib`、11 檔 200 列，走 live 唯讀。
+cohort 一致性 10 / 10 核對通過（項目同「分佈影響：decision replay 實測」那一節）。
+
+**結果：三個欄位的分佈完全相同，逐列 transition matrix 全部落在對角線上（0 筆轉移）。**
+
+| 欄位 | before ＝ after 的分佈 | 轉移列數 |
+|---|---|---:|
+| `lifecycle_phase` | `CONFIRMED` 99 / `TESTING` 65 / `NORMAL` 35 / **`CONTINUATION` 1** | **0** |
+| `final_entry_state` | `BLOCKED` 187 / `WAIT_CONFIRMATION` 13 | **0** |
+| `market_bias` | `BEARISH_BIAS` 164 / `BULLISH_BIAS` 33 / `REVERSAL_BIAS` 2 / `BULLISH_CONTINUATION` 1 | **0** |
+
+⚠️ **這是「沒有觸發」，不是「已證明無影響」。** 兩者要分清楚：
+
+* 唯一那列 `CONTINUATION`（`5490`，2026-08-02）在 before 版本**也**是 `CONTINUATION`——
+  它的 `rr_gate.qualified` 為 true，所以被移除的那個條件對它本來就不起作用。
+* after 相對 before **新增的 `CONTINUATION` 列數為 0**，因此 T-044 移除的條件
+  在這 200 列上**一次都沒有實際改變任何一列的判定**。
+
+**「完整 predicate 的命中數是 0」才是這次的關鍵數字。** 會被 T-044 改到的列必須**同時**
+滿足：`event_signal = CLOSE_RECLAIM`、`PRICE_UPSIDE_FOLLOW_THROUGH`、
+`MOMENTUM_CONFIRMED`、`clear_zone_breakout`，且 `rr_gate.qualified = false`
+（before 版會因為最後這一項掉到 `CONFIRMED` 或 `TESTING`，取決於 structure 與 `reclaim_age`）。
+**符合完整 predicate 的列數 ＝ 翻轉列數 ＝ 0。**
+
+⚠️ **不要把「RR 不合格的 CONFIRMED」當成「只差 RR 的列」。** before 版 RR 不合格的
+`CONFIRMED` 54 列 ＋ `TESTING` 33 列 ＝ **87 列，那是搜尋母體，不是候選集合**。
+把搜尋母體講成候選集合，會把「實際命中 0 列」說成「87 列瀕臨翻轉」。
+
+**三項價格證據其實部分可判讀**（2026-09-01 由既有欄位算出的漏斗，200 列）：
+
+| 條件 | 來源欄位 | 剩餘列數 |
+|---|---|---:|
+| `PRICE_UPSIDE_FOLLOW_THROUGH` | `daily_confirmation_context.daily_price_follow_through` | 65 |
+| ＋ `MOMENTUM_CONFIRMED` | `daily_confirmation_context.daily_momentum_confirmation` | **5** |
+| ＋ `clear_zone_breakout` | ⚠️ **只能近似**：用 replay row 的 `primary_zone.role == SUPPORT` 與 `current_price ≥ price_high × 1.03`（`CLEAR_BREAKOUT_MARGIN`）推導 | **3** |
+| ＋ `rr_gate.qualified = false` | `rr_gate` | **2** |
+
+⛔ **這個推導會產生偽陽性，不能拿來當「候選集合」。**
+上表最後那 2 列（`5490` 2026-07-30、`6243` 2026-08-13）依推導**應該要翻成
+`CONTINUATION`，實際上 after 版仍是 `CONFIRMED`**；三列裡只有 `5490` 2026-08-02
+真的是 `CONTINUATION`（而它 RR 本來就合格）。
+
+⛔ **成因是 replay row 的 `primary_zone` 不是 lifecycle 用的那一顆 zone。** 兩者不同源：
+
+| 用途 | 怎麼選 | 位置 |
+|---|---|---|
+| replay row 的 `primary_zone` | `_sort_zone_scores(zone_scores)[0]`——**排序後第一筆** | `evaluation.py` `_historical_zone_score_summary()` |
+| lifecycle 實際使用的 decision primary zone | `_pick_primary_zone()`——先濾掉 `AT_ZONE` / `EXPIRED` / 低信心 / 無 `expected_value`，再依 `_primary_zone_score(regime, market_events)` 取最大 | `decision_engine.py` |
+
+**用消去法可以證明差在這裡**：那 2 列在 before 版是 `CONFIRMED`，而 `CONFIRMED` 這個分支
+本身就要求 `event_signal == CLOSE_RECLAIM`，且排在它前面的 `active_bearish_states` /
+`structure_state ∈ {SUPPORT_RECLAIM_INVALIDATED, BREAKDOWN}` 分支沒有攔截它——
+**所以 `event_signal` 與 `structure_state` 兩項對這 2 列都是成立的，不可能是差異來源**。
+上行跟隨與動能確認又直接取自同一份 `daily_price_action`。
+剩下唯一能為 false 的就是 **`clear_zone_breakout`，而它算在 decision primary zone 上**。
+
+所以正確的說法是：**三項價格證據部分可判讀，但 `clear_zone_breakout` 只能用錯誤的 zone 近似**，
+因此目前沒有任何欄位組合能證明完整 predicate。要讓它可觀測，需要輸出
+**decision primary zone 或 `clear_zone_breakout` 本身**（或直接一個 predicate flag）；
+`event_signal` / `structure_state` 補上去仍有價值（省掉上面那段消去法推理），
+但**它們不是這 2 筆偽陽性的成因**。
+
+⚠️ **這個「兩顆 primary zone」的落差影響的不只本節**：replay row 的 `primary_zone`
+以及所有由它衍生的欄位（`primary_zone_role_counts`、`at_zone_rate`、
+`daily_confirmation_context` 的量能相關欄位）講的都是**排序第一筆**那顆，
+不是決策實際用的那顆。拿它們去解釋決策行為前要先確認這一點。
+
+**推論**：`CONTINUATION` 這條路徑在自然樣本裡極稀有（200 列僅 1 列，0.5%），
+**隨機加大列數的效益很低**。要真正驗到 T-044 的行為改變，必須用**定向 cohort**——
+刻意挑選含「收復 ＋ 上行跟隨 ＋ 動能確認 ＋ 明確突破」形態的標的與期間。
+在那之前，上表兩列的差異仍是**結構上可證明、實測未觸發**。
+
+（`lifecycle_phase` 原本不在 replay 報告裡，是這次為了讓上面這個判斷可觀測才補進
+`_decision_fields_from_summary()` 的；沒有它時分佈會全同，而「未觸發」與「無影響」
+分不出來。）
 **進場那條線沒有放寬**——`entry_permission_state` 的 `elif not rr_qualified: BLOCKED`
 排在 `ENTRY_ALLOWED` 之前，RR 不合格時進場一律仍是 `BLOCKED`。
 
 **目前刻意接受這個放寬**（2026-08-13 決定），理由是沒有乾淨的還原方式：
 舊行為的保守度來自「RR 失敗時掉回確認層級判斷」這個**順序副作用**，而抽離後那個區分
 已被收斂掉；硬加 RR gate 會讓第一列原本就該是 `HOLD` 的樣本變成 `CONDITIONAL_HOLD`，
-成為另一個方向的回歸。**待 decision replay 累積足夠資料後再評估**——
-而那依賴「有排程定期產生 SR 分析」，見 [`todo.md`](./todo.md) T-045 的前置條件。
+成為另一個方向的回歸。
+
+⚠️ **原文接著寫「待 decision replay 累積足夠資料後再評估——而那依賴有排程定期產生 SR 分析」，
+那是錯的**（2026-09-01 更正）：decision replay 的母體是 **candles**
+（`run_decision_replay()` → `_load_db_sources()`），**不讀 `stock_sr_zone_analyses`**，
+所以它從來不依賴分析排程。replay 已於 2026-09-01 執行，結論見下方
+「decision replay 實測（2026-09-01）」——缺的不是資料量，是**符合觸發條件的樣本**。
 
 `semantic_pipeline.version` 已由 `decision-semantic-pipeline-p3` 升為 `p4`，
 所以 `stock_sr_decisions` 裡的資料可以從版本字串分辨是改前還是改後產生的。
@@ -1709,38 +1793,122 @@ target 時，gate **沿用 setup-RR 判定**而不是放行。契約原本只寫
 但那條語意只適用於市價路徑（市價型沒有別的判準）；照搬會讓 **setup RR 1.49（低於 1.5 門檻）
 的 zone 從擋下變成放行**，方向與「target 封頂 → RR 下修 → 偏保守」相反。
 
-#### 分佈影響尚未 decision replay 驗證（已知限制）
+#### 分佈影響：decision replay 實測（2026-09-01）
 
-上面整套 RR 分層的**行為正確性**有單元／端到端測試釘住，但它對**決策分佈的實際影響幅度
-至今只有單元測試層級的證據**：target 封頂預期讓 RR 普遍下修、被擋掉的樣本變多，
-那個幅度沒有量過。
+**已完成因果比較。** 同一 cohort 跑兩次、只差程式碼版本：
+before ＝ `764998f`（RR 分層導入前）、after ＝ `eeb81f3`（RR 分層實作）。
+兩次都以 `scripts/run-evaluation.sh` 走 **live DB 唯讀**、掛同一顆 `sr_scoring_v4.joblib`
+（2026-08-11 訓練），11 檔標的、200 列、`--limit 1500`，全程未寫任何一張表。
 
-改動前的分佈已擷取備查（dev `stock_sr_decisions` 的 84 筆改動前產物）。
-⚠️ **這是描述性參考，不是對照組**——見下方說明：
+**cohort 一致性已逐項核對通過**（10 / 10 相同）：`replay_plan` 的逐檔
+`candle_count` / `candidate_bars` / `start_as_of` / `end_as_of`、
+`replay_coverage.quota_by_symbol` 與 `symbols_skipped`、`outcome_summary` 的
+`rows_with_non_missing_chip` / `rows_with_model_governance`、`model_metadata`、
+`builder_config`、`dataset_config`、`dataset_from/to`。所以下表是因果差異，不是取樣差異。
 
-| `reason_code` | `qualified` | 筆數 |
+<details><summary>cohort 佐證（四次 run 完全相同；`min_history_bars=80`、`forward_bars=5`、`replay_max_rows=200`）</summary>
+
+| symbol | candle_count | candidate_bars | start_as_of | end_as_of | quota |
+|---|---:|---:|---|---|---:|
+| `0050` | 1500 | 1415 | 2020-10-20 | 2026-08-23 | 19 |
+| `00830` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 19 |
+| `00947` | 540 | 455 | 2024-10-08 | 2026-08-23 | 18 |
+| `00981A` | 310 | 225 | 2025-09-16 | 2026-08-23 | 18 |
+| `2330` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 18 |
+| `2399` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 18 |
+| `2454` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 18 |
+| `2478` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 18 |
+| `3630` | 1500 | 1415 | 2020-10-26 | 2026-08-23 | 18 |
+| `5490` | 1500 | 1415 | 2020-10-27 | 2026-08-23 | 18 |
+| `6243` | 1500 | 1415 | 2020-10-20 | 2026-08-23 | 18 |
+
+`symbols_skipped` 空、`rows_with_non_missing_chip` 200、`rows_with_model_governance` 55、
+model `v4` / `config_hash=ec4cd416c66b` / `trained_at=2026-08-11T08:29:12Z`。
+
+**cohort 身分指紋**：六次 run（含 A/B 補欄位前後各一次）的 `(symbol, as_of)` 依序雜湊
+（SHA-256）**全部相同**：`bc7bc5e568ae51bd…`。它是**識別資訊**——用來確認「這幾份報告
+講的是同一組列」，**不是**防篡改保證。
+
+⛔ **這個 cohort 之後重建不回來，所以上面的數字就是最終證據。**
+`fetch_candles()` 取的是**最新** N 根（`ORDER BY ts DESC LIMIT` 後反轉），而
+`evaluation.py` 的 CLI **沒有 as-of 截止參數**——`--limit` 只能控制根數，不能把
+資料尾端釘在某一天。live 每天收盤都會新增 K 棒，window 錨在尾端，所以同樣的指令
+**隔天就會抽到不同的 200 列**。要讓 replay 可重現需要補一個 as-of 上界，
+追蹤在 [`issue.md`](./issue.md) **I-100**。
+
+✅ **逐列比較資料已進版控**：[`python/baselines/replay_cohort_2026-09-01.json`](../python/baselines/replay_cohort_2026-09-01.json)
+收了四份 report 的 200 列 ×（`lifecycle_phase` / `final_entry_state` / `market_bias` /
+`daily_confirmation_state` / `rr_gate` / `entry_executability` / 三項價格證據的來源欄位），
+**本節每一個數字都能從它重算**（transition matrix、分佈、下方 I-074 的漏斗）。
+原始 report JSON（每份約 1.4MB）不進版控，留下 SHA-256 供仍持有檔案的人核對：
+
+| run | 版本 | SHA-256（前 16 碼） |
 |---|---|---|
-| `RR_QUALIFIED` | true | 36 |
-| `RR_UNAVAILABLE` | false | 28 |
-| `RR_INSUFFICIENT` | false | 17 |
-| `EXECUTION_RR_INSUFFICIENT` | false | 3 |
+| C（T-055 before） | `764998f` | `8b81dccd6dc5d048` |
+| D（T-055 after） | `eeb81f3` | `e5587e79b3996285` |
+| A（T-044 before，補欄位後） | `ecbc141^` | `aaa9e91a9421b332` |
+| B（T-044 after，補欄位後） | `ecbc141` | `55ca164c502cc748` |
+| A（補欄位前） | `ecbc141^` | `c03706701aa77521` |
+| B（補欄位前） | `ecbc141` | `04b4a56f7e97ab8e` |
 
-**為什麼還沒跑**（2026-08-27 實測）：dev compose 的 `POST /sr-scoring/evaluate`
-（`decision_replay=true`）雖然成功回應並產出 200 列 replay rows，但
-`model_available=false` —— dev 沒有訓練好的 model bundle，`evaluation.py` 的
-`if bundle is not None` 讓整段 `build_decision_summary(...)` **從未被執行**，
-於是 `by_rr_gate` / `by_rr_gate_reason_code` / `by_entry_executability` 三個要比對的
-分佈全部不存在。這與 [`issue.md`](./issue.md) **I-074** 是同一類阻塞
-（那筆缺的是 production 分析資料，這裡缺的是 dev 的模型）。
+⚠️ **`end_as_of` 停在 2026-08-23 而不是最後一根 K 棒**，因為 `forward_bars=5` 要從尾端預留。
+**window 錨在資料尾端**，所以來源多一根 K 棒整段 as-of 就位移——四次 run 必須落在同一個
+資料凍結窗口內（當日 09:00–15:00，避開 `pre_market` / `daily_close` / 池同步 / chip 同步）。
 
-⚠️ **上表不能拿來跟新跑的 replay 相減。** decision replay 是拿 OHLCV **重算**決策，
-**不讀既有的 `stock_sr_decisions`**（見「Decision Replay 的取樣規則」），
-所以那 84 筆與新 replay 連「同一母體的前後兩次觀察」都談不上；symbols、as-of 範圍、
-model bundle 與 evaluate 設定也都不同。合格的 before／after 必須是**同一 cohort 跑兩次**，
-只差程式碼版本——要固定哪些輸入、用什麼佐證，見 [`todo.md`](./todo.md) **T-066**。
+</details>
 
-驗證本身追蹤在 [`todo.md`](./todo.md) **T-066**。**在它完成之前，讀到「RR 分層讓某某分佈
-變了多少」這類說法要當成推測，不是實測。**
+| `rr_gate.reason_code` | before | after | 差 |
+|---|---:|---:|---:|
+| `EXECUTION_RR_INSUFFICIENT` | 3 | 49 | **+46** |
+| `RR_INSUFFICIENT` | 63 | 31 | −32 |
+| `RR_UNAVAILABLE` | 37 | 20 | −17 |
+| `EXECUTION_RR_UNAVAILABLE` | 1 | 1 | ±0 |
+| `RR_QUALIFIED` | 96 | 99 | +3 |
+| **`qualified = true`** | **97** | **100** | **+3** |
+
+`by_entry_executability`（`ENTRY_ZONE_NOT_SUPPORT` 107 / `ENTRY_ZONE_OVERSHOT` 68 /
+`EXECUTABLE_NOW` 25）與 `executable_now` **完全沒有變化**。
+
+**aggregate 與 transition matrix 回答的是兩個不同問題，兩個都要看**：
+上表的淨值回答「這個 cohort 上整體鬆緊往哪邊走」，下面的逐列矩陣回答「內部有多少流動」。
+逐列（同一 `(symbol, as_of)` 對齊）是 **66 列改變、134 列不變**：
+
+| before → after | 列數 | 意義 |
+|---|---:|---|
+| `RR_QUALIFIED` → `EXECUTION_RR_INSUFFICIENT` | **17** | **原本合格、現在被 execution RR 擋掉**——這正是 T-055 預期的收緊 |
+| `RR_INSUFFICIENT` → `EXECUTION_RR_INSUFFICIENT` | 17 | 結論不變，判定依據從 setup RR 換成 execution RR |
+| `RR_INSUFFICIENT` → `RR_QUALIFIED` | **15** | **放寬** |
+| `RR_UNAVAILABLE` → `EXECUTION_RR_INSUFFICIENT` | 12 | 原本算不出 target，現在算得出且不足 |
+| `RR_UNAVAILABLE` → `RR_QUALIFIED` | **5** | 原本算不出 target，現在算得出且合格 |
+| （不變） | 134 | `RR_QUALIFIED` 79 / `RR_INSUFFICIENT` 31 / `RR_UNAVAILABLE` 20 / `EXECUTION_RR_INSUFFICIENT` 3 / `EXECUTION_RR_UNAVAILABLE` 1 |
+
+`qualified` 的逐列轉移同樣是雙向的：**`False → True` 20 列、`True → False` 17 列**，
+合計 **37 列變動**，淨值才是 +3。
+
+**兩層結論都成立，不要用其中一個否定另一個**：
+
+* **淨影響（aggregate）**：合格數 **+3**。在這個 cohort 上，整體分佈方向
+  **與「被擋樣本增加」的原假設相反**——這是有效的結論，不是統計錯覺。
+* **內部流動（transition matrix）**：37 列雙向變動。target／execution RR 的**收緊效果
+  確實觀測到了**（17 列由合格轉不合格），但同一批 T-055 行為**同時造成放寬**
+  （20 列由不合格轉合格），另有 29 列（17 + 12）是判定依據轉移而結論不變。
+
+⚠️ **只報淨值會漏掉「有 37 列的判定實際改變了」**；
+**只報矩陣則會漏掉「整體方向與原假設相反」**。兩者不可互相取代。
+
+`by_entry_executability` 則是**真正的零變化**：逐列 transition matrix 200 列全部落在對角線上。
+
+**歷史記錄：那 84 筆不是對照組。** 改動前曾擷取 dev `stock_sr_decisions` 的 84 筆
+（`RR_QUALIFIED` 36 / `RR_UNAVAILABLE` 28 / `RR_INSUFFICIENT` 17 /
+`EXECUTION_RR_INSUFFICIENT` 3）當參考。**它不能與上表相減**——decision replay 是拿 OHLCV
+**重算**決策，**不讀既有的 `stock_sr_decisions`**（見「Decision Replay 的取樣規則」），
+兩者連「同一母體的前後兩次觀察」都談不上。留著它是為了記住這個區別。
+
+**曾經以為跑不了的原因，以及它為什麼是錯的**（2026-09-01 更正）：2026-08-27 的結論是
+「dev 的 `POST /sr-scoring/evaluate` 回 `model_available=false`，所以驗不了」。
+`model_available=false` 是事實，但**「所以驗不了」是路徑選擇的結果**——
+`scripts/run-evaluation.sh` 從設計上就走 live 唯讀並掛 live 主機的 bundle，
+那顆 bundle 一直都在。**下次遇到「某環境缺某資源所以驗不了」，先確認是不是只有那一條路徑缺。**
 
 `price_path.next_decision_source` 只描述下一個決策價位來源。拆分 nearest support / resistance 後，
 有效值為 `nearest_support_zone`、`nearest_resistance_zone` 或 `daily_candidate_zone`；
@@ -1755,8 +1923,10 @@ blocking zone 的來源。**目前限制**：`zone_id` 恆為 `null`（`ZoneScor
 
 **同一個限制也適用於 2026-08-28／08-31 這兩次 `structure_state` 與 `reclaim_type` 的改動**
 （碰觸與收復拆成兩個狀態、undercut／overthrow 只看自己那一側；原記於 `issue.md`
-I-096 與 I-098，均已收斂）。兩次都**沒有**跑 decision replay，前置與本節相同——
-dev 沒有 model bundle。它們的影響面證據是對 live 既有分析的**重算**：
+I-096 與 I-098，均已收斂）。兩次都**沒有**跑 decision replay。
+⚠️ **當時記的理由（dev 沒有 model bundle）已於 2026-09-01 證明是錯的**——
+`scripts/run-evaluation.sh` 走 live 唯讀就有 bundle 可用，所以這兩筆現在是
+**「可以補跑但還沒跑」**，不是「跑不了」。它們既有的影響面證據是對 live 既有分析的**重算**：
 
 | 改動 | 影響面證據 | 結果 |
 |---|---|---|
@@ -1784,7 +1954,22 @@ dev 沒有 model bundle。它們的影響面證據是對 live 既有分析的**�
 
 ⚠️ **重算不等於 decision replay**：它證明的是「這一層的輸出怎麼變」，
 不是「最終的 `by_rr_gate` / `by_entry_executability` 分佈怎麼變」。
-要補的話前置與本節同一個（見 `todo.md` T-066）。
+
+**要補的話做法已經是現成的**（2026-09-01 由 T-055／T-044 那兩輪建立，該筆已收斂）：
+`MODE=replay scripts/run-evaluation.sh` 走 **live 唯讀**（`MODELS_DIR` 預設就指向
+live 主機的 `sr_scoring_v4.joblib`，全程不帶 `--write-db`），before／after 各用一個
+`git worktree` 取出對應 commit，並固定
+**「Decision Replay 的取樣規則」那張表列的六項輸入，缺一不可**——OHLCV 快照、
+`dataset_config`、`replay_max_rows`、**chip ／ model-governance context snapshots**、
+model bundle、`builder_config`。
+⚠️ **最容易漏的是 context 那一項（它含兩份快照，兩份都要固定）**：
+它們依 `[dataset_from, dataset_to]` **當下從 DB 撈**，
+所以「只凍結 K 棒」不夠，`sr_analysis_chip` 或模型治理同步跑過就會混入 DB 差異。
+兩次 run 必須落在同一個交易日的 **09:00–15:00**（避開 `pre_market` / `daily_close` /
+池同步 / chip 同步），事後用 `replay_plan` 逐檔核對 ＋ `outcome_summary` 的
+`rows_with_non_missing_chip` / `rows_with_model_governance` ＋ `(symbol, as_of)` 序列雜湊
+確認 cohort 相同。
+完整的操作細節與踩過的坑見「分佈影響：decision replay 實測（2026-09-01）」。
 
 ### Primary Zone 與 Secondary Zones
 
@@ -2240,6 +2425,11 @@ volatility_profiles = _volatility_profiles(sources, dataset)   # ← 同時要 s
 | 40 | 22,401 | 310 MB | 241 秒 |
 | **131** | **72,083** | **382 MB** | **約 12 分鐘** |
 
+**`MODE=replay` 的實測（2026-09-01）**：11 檔 × `--limit 1500`、`replay_max_rows=200`，
+峰值 **300MB**、單次 **2 分 50 秒**，量測當下 host available 低點 764MB。
+replay 與 evaluate 的成本結構不同——**replay 的時間由 `replay_max_rows` 決定**
+（每一列都要重建 zone 並跑完整 decision engine），標的數只影響 `sources` 的記憶體。
+
 **峰值由固定的 import 開銷主導**（pandas / numpy / sklearn / lightgbm / shap），
 資料本身只有數 MB。標的數 10→40（4 倍）、rows 3.7 倍，峰值只增加約 30MB——
 **邊際成本約 1.0 MB/檔**。
@@ -2300,8 +2490,21 @@ review 逐項確認：
 因此**來源資料多一根 K 棒，整段 as-of 就位移**——要做改動前後的比對，
 必須先凍結來源資料與 `dataset_config`，否則量到的是資料差異不是程式差異。
 `replay_plan` 每檔輸出的 `candle_count` / `candidate_bars` / `start_as_of` / `end_as_of` /
-`min_history_bars` / `forward_bars` 就是佐證 cohort 相同的現成欄位，不需要另外算雜湊。
-比對要求見 [`todo.md`](./todo.md) **T-066**。
+`min_history_bars` / `forward_bars` 就是佐證 cohort 相同的現成欄位。
+
+**改動前後比對的六項輸入，缺一不可**（2026-09-01 實跑驗證過的清單）：
+
+| 必須固定 | 為什麼 | 怎麼核對 |
+|---|---|---|
+| OHLCV source snapshot（含 `symbols`） | as-of 錨在資料尾端，多一根 K 棒整段就位移 | `replay_plan` 逐檔比 `candle_count` / `candidate_bars` / `start_as_of` / `end_as_of` |
+| `dataset_config` 的 `min_history_bars` / `forward_bars_*` | 直接決定 `_candidate_bar_range` 的頭尾 | `replay_plan` 已帶這兩個值 |
+| `replay_max_rows` | 決定 `quota_by_symbol` → `window_start` | `replay_coverage.quota_by_symbol` |
+| chip ／ model-governance context snapshot | 兩者依 `[dataset_from, dataset_to]` **當下從 DB 撈**，DB 變了輸入就變 | `outcome_summary` 的 `rows_with_non_missing_chip` / `rows_with_model_governance` |
+| model bundle | **不得各訓練一次** | `model_metadata` |
+| `builder_config` | zone 建構參數會改變 zone 本身 | 兩次設定相同 |
+
+`replay_plan` 逐項相同已經足夠；`(symbol, as_of)` 序列的 SHA-256 是**額外**的單一比對點，
+方便一眼確認兩份報告講的是同一組列（它是識別資訊，不是防篡改保證）。
 
 report 的 `symbols` / `sources` / `replay_plan` 描述的是「要求驗證的範圍」，新增的
 `replay_coverage`（`symbols_requested` / `symbols_covered` / `symbols_skipped` /
@@ -2425,6 +2628,11 @@ evaluation 分支組 `builder_config`，replay 分支漏傳，是同一個陷阱
   區間內、方向解析不出來，通常是 zone 畫得太寬——正是 ATR 寬度調校要看的訊號。
   這個指標**只有 replay 路徑量得到**：evaluation dataset 的 `role` 由 approach direction
   二選一決定（見 `features.py`），永遠不會是 `AT_ZONE`。
+  ⚠️ **但要記得這顆 zone 不是決策用的那一顆**：replay row 的 `primary_zone` 是
+  `_sort_zone_scores()[0]`，而 decision engine 用的是 `_pick_primary_zone()`——後者**明確排除
+  `AT_ZONE`**。所以 `at_zone_rate` 描述的是「排序第一筆常常落在區間內」，
+  不是「決策常常用 AT_ZONE 的 zone」（那不可能發生）。落差說明見
+  「已知並接受的行為改變 › decision replay 實測（2026-09-01）」。
 - **decision 層不一定能分出勝負**：若取樣區間內沒有任何列走到進場狀態（實測合成資料時
   所有列都落在 `BLOCKED`），各候選的 `by_final_entry_state` 會完全相同，
   `best_by.entry_average_forward_return` 也會是 `None`。這代表**資料本身沒有進場訊號**，

@@ -48,7 +48,9 @@ services:
       CANDLE_GAP_DETECTION_BREAKER_FAILURES: ${CANDLE_GAP_DETECTION_BREAKER_FAILURES:-5}
       CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN: ${CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN:-60}
       # 定期對 watchlist 產生 SR zone 分析。**預設關閉**：它是 production 驗證
-      # 母體的唯一來源（issue.md I-074、todo.md T-049 的前置），開了就會每天累積分析。
+      # 母體的唯一來源（todo.md T-049 前置①的並行比對），開了就會每天累積分析。
+      # ⚠️ 2026-09-01 移除此處對 issue.md I-074 的引用——decision replay 讀 candles，
+      # 不讀 stock_sr_zone_analyses，本排程從來不是它的前置。
       #
       # **前置已滿足**：老化單位早已改為「K 棒推進」（2026-08-20 上線），排程與人工
       # 同日各跑一次不再讓事件老化一天前進 2。現況規格見

@@ -23,11 +23,11 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-100` 起算。**（**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-101` 起算。**（I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-079（**下一個可用的是 I-100**——I-096 / I-098 已於 2026-08-31 收斂、
-  I-099 已發出並作廢，編號都不回收），但被移除的條目
+  檔案裡看得到的最大是 I-100（2026-09-01 發出，**下一個可用的是 I-101**——I-096 / I-098
+  已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
   I-093 於 2026-08-26 收斂，I-070～I-072 更早）都佔用過編號。
@@ -64,7 +64,8 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099 與下一個可用的 I-100），
+  I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、本檔現有的 I-100
+  與下一個可用的 I-101），
   那是預期的，不是殘留。
 
 ---
@@ -116,7 +117,8 @@
   **缺的是 as-of 階梯／integration／live 母體的自然命中**，不是缺測試。
 
 **成因是母體太小而不是實作有問題**（**立案當時**：21 個交易日、4 檔，身分還來不及缺席到失格；
-母體現況見 I-074 的「母體前置已解除」）。
+母體現況見 [`todo.md`](./todo.md) T-049 前置②的分析次數表——**本筆的母體確實是
+`stock_sr_zone_analyses`**，與 I-074 的 replay 母體是兩回事）。
 真正的解法是補分析排程（**已於 2026-08-20 上線**，現況見
 [`architecture.md`](./architecture.md)「SR 分析的兩個時段共用一個執行所有權」），
 不是為這兩條路徑另外造假資料。
@@ -283,11 +285,11 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 ---
 
-### I-074：Lifecycle Engine 的 RR 解耦只有單元測試層級的證據，decision replay 驗證無法執行
+### I-074：Lifecycle Engine 的 RR 解耦，decision replay 已跑但一次都沒觸發到
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **母體前置已解除／待執行 replay**（2026-08-31 更新：母體不再是 blocker，見下方「母體前置已解除」。剩下的是 replay 本身還沒跑，且真正的 blocker 需要重新確認） |
+| 狀態 | **待決策**（2026-09-01：replay 已執行，三個欄位零差異、逐列 0 筆轉移，但**符合完整觸發 predicate 的列數為 0**——是「未觸發」不是「已證明無影響」。**舊關閉條件形式上已達成但有缺陷，已重寫**，見下方「關閉條件（2026-09-01 重寫）」。待決策：投入定向 cohort，或明示接受並轉為已知限制。**在二者之一完成前不得移除本筆**） |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -298,22 +300,10 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 **這是一個已經上線的行為改變**，計畫要求用 decision replay 對真實資料比對
 `final_entry_state` / `lifecycle_phase` / `market_bias` 的分佈變化來評估影響。
 
-**立案當時無法執行，原因是 replay 的母體太小**（以下是**歷史原因，已於 2026-08-31 解除**）：
-
-```
-stock_sr_zone_analyses：4 檔標的 / 20 次分析（2026-07-14 ~ 2026-08-13）
-```
-
-2026-08-18 重新確認，**與 2026-08-13 記錄時完全相同，一筆都沒增加**。
-20 次分析做不出有統計意義的分佈比較。
-
-這裡的 **4 檔 / 20 次**（2026-08-13 當時）是 production live DB 的自然母體。T-048 收斂時使用的
-**4 檔 / 84 次** 是 isolated/as-of 階梯驗證 fixture，用來證明回歸與身分層寫入，
-不能替代 production 分佈比較母體。
-
-**評估標的池幫不上這個忙**：池只維護日 K，不產生 `stock_sr_zone_analyses`。
-要有 replay 母體必須先對標的跑 SR 分析，而那是 watchlist 的職能
-（分工見 [`architecture.md`](./architecture.md)「兩個標的清單」）。
+**立案時（2026-08-13）判定「跑不了」，理由是 `stock_sr_zone_analyses` 只有 4 檔 / 20 次分析。
+那個理由於 2026-09-01 證實是錯的**——replay 根本不讀那張表，見下方
+「replay 母體是 candles」。真正擋住本筆的東西直到 2026-09-01 才量出來：
+不是資料量，是**沒有任何一列符合觸發條件**。
 
 **現有證據的等級要說清楚**：抽離後 428 支既有測試全數通過，
 但那**不是**「沒有行為改變」的證據——它是「沒有任何既有測試涵蓋 RR 解耦那條路徑」的證據。
@@ -326,34 +316,154 @@ stock_sr_zone_analyses：4 檔標的 / 20 次分析（2026-07-14 ~ 2026-08-13）
 真要加回來會是新增參數，那支測試照樣綠燈。目前靠 `sr-zone-scoring.md` 的
 「請不要加回去」與本筆記錄把守。
 
-#### 母體前置已解除（2026-08-31 實測）
+#### replay 母體是 candles，不是 `stock_sr_zone_analyses`（2026-09-01 更正並收斂）
 
-分析排程於 2026-08-20 上線後（每交易日產出 watchlist 檔數 × 2 筆），母體已經長起來：
+**本筆從立案到 2026-08-31 的「母體太小」推理，量錯了對象。**
+`run_decision_replay()`（`evaluation.py:2254`）的資料來源是 `_load_db_sources()`——
+**`candles`**；整個 `python/` 沒有任何一處 reference `stock_sr_zone_analyses`（grep 0 命中）。
+決定 cohort 的是**每檔日 K 根數**與 `replay_max_rows`（總預算跨股票均分，
+`MIN_ROWS_PER_SYMBOL = 5`）。
 
-| 時點 | 檔數 | 分析次數 | 期間 |
-|---|---|---|---|
-| 2026-08-13（立案）／2026-08-18（複查） | 4 | 20 | 2026-07-14 ~ 08-13 |
-| **2026-08-28** | **11** | **144** | 2026-07-14 ~ 08-28 |
-| **2026-08-31（本次實測）** | **11** | **155** | 2026-07-14 ~ 08-28 |
+所以：
 
-**「母體太小」不再是 blocker。** 上表是 dated evidence，不要改成無日期的常數——
-watchlist 檔數會變。
+* **分析排程（`SR_ANALYSIS_CRON`）從來不是本筆的前置。** 那些「開了排程才做得了
+  I-074 的分佈比較」的註解已於 2026-09-01 一併修掉（`backend/config.yaml`、
+  `docker-compose.yml`、`docker-compose.dev.yml`、`deploy.sh`）。分析排程仍是
+  [`todo.md`](./todo.md) **T-049 前置①**（新舊兩套 active 事件集合的逐日並行比對）
+  的必要條件——**那一筆確實讀 `stock_sr_zone_analyses`**，不要一起拿掉。
+* 曾經記錄的分析次數成長（4 檔/20 次 → 11 檔/155 次，2026-08-13 ~ 08-31）
+  **與本筆無關**，已從本筆移除；它仍是 T-049 的 dated evidence，保留在該筆。
+* 實際用到的母體：11 檔各有 310～4882 根日 K（2026-09-01 實測），
+  抽出 200 列 as-of。日 K 從來就夠，**本筆從頭到尾都不曾被母體擋住**。
 
-#### 目前真正的 blocker 需要重新確認
+#### 2026-09-01 replay 實測：零差異，但屬於「未觸發」
 
-⚠️ **不要直接沿用「dev 沒有 model bundle」這個說法**，它有前提：
+以 `scripts/run-evaluation.sh` 走 **live 唯讀**（同一顆 `sr_scoring_v4.joblib`），
+before ＝ `ecbc141^`、after ＝ `ecbc141`，11 檔 200 列、cohort 10/10 核對通過。
+數字與完整判讀已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+「已知並接受的行為改變 › decision replay 實測（2026-09-01）」。
+
+| 觀察 | 結果 |
+|---|---|
+| `final_entry_state` / `market_bias` / `lifecycle_phase` 分佈 | **完全相同** |
+| 逐列翻轉 | **0 筆**（after 相對 before 新增的 `CONTINUATION` 列數為 0） |
+| `CONTINUATION` 出現次數 | before 1 / after 1——且那列（`5490`，2026-08-02）`rr_gate.qualified=true`，**被移除的條件對它本來就不起作用** |
+| 符合**完整 predicate** 的列數 | **0**（＝翻轉列數）。完整 predicate ＝ `CLOSE_RECLAIM` ＋ 上行跟隨 ＋ 動能確認 ＋ 明確突破 ＋ `rr_gate.qualified=false` |
+| 搜尋母體（**不是**候選集合） | before 版 RR 不合格的 `CONFIRMED` 54 列 ＋ `TESTING` 33 列 ＝ **87 列**。⚠️ **不要稱它們為「只差 RR」**——把搜尋母體講成候選集合，等於把「實際命中 0 列」說成「87 列瀕臨翻轉」 |
+| 由既有欄位推導的漏斗 | 65（上行跟隨）→ 5（＋動能確認）→ 3（＋明確突破，**只能近似**）→ 2（＋RR 不合格）。⛔ **那 2 列是偽陽性**：`5490` 2026-07-30 與 `6243` 2026-08-13 依推導應翻轉，實際 after 版仍是 `CONFIRMED`。**成因是 replay row 的 `primary_zone` 是「排序第一筆」，不是 lifecycle 用的 `_pick_primary_zone()` decision primary zone**——消去法見 [`sr-zone-scoring.md`](./sr-zone-scoring.md) |
+
+**所以這一輪回答不了本筆要問的問題**：`CONTINUATION` 這條路徑在自然樣本裡只有 0.5% 的出現率，
+**隨機加大列數效益很低**。要真正驗到，需要**定向 cohort**——刻意挑含
+「收復 ＋ 上行跟隨 ＋ 動能確認 ＋ 明確突破」形態的標的與期間。要不要投入這個成本待決策；
+在那之前，這個行為改變的接受仍然是**明示的決定**，不是「驗過沒問題」。
+
+⚠️ 順帶記一條方法論教訓：`lifecycle_phase` 原本不在 replay 報告裡，
+**分佈全同時分不出「未觸發」與「無影響」**。該欄位已於本次補進
+`_decision_fields_from_summary()`，並一併補進 `planned_fields` 與 `outcome_summary`
+（`lifecycle_phase_counts` / `by_lifecycle_phase`）與對應測試。
+
+#### 「dev 沒有 model bundle」不是 blocker（2026-09-01 定案）
 
 | 環境 | model bundle | 依據 |
 |---|---|---|
-| **live** | ✅ **有**——`sr_scoring_v4.joblib`，`exists: true`，2026-08-11 訓練 | 2026-08-31 實測 `GET /sr-scoring/model-status`（live python-server，唯讀） |
-| **dev** | ❌ 沒有（`model_available: false`） | 2026-08-27 實測，記於 `todo.md` T-066 |
+| **live** | ✅ **有**——`sr_scoring_v4.joblib`，2026-08-11 訓練 | 2026-08-31 實測 `GET /sr-scoring/model-status`（live python-server，唯讀）；2026-09-01 再以 `MODELS_DIR` 直接確認檔案 |
+| **dev** | ❌ 沒有（`model_available: false`） | 2026-08-27 實測（原記於 `todo.md` T-066，已於 2026-09-01 收斂） |
 
-也就是說 [`todo.md`](./todo.md) T-066 記的「跑不了」**是 dev 的狀況**。
-本筆的關閉條件在動工前要先回答：replay 要在哪個環境跑、
-用哪一份 bundle、以及 CLAUDE.md 的「驗收走 dev」要怎麼與「bundle 只在 live」調和。
-**在把答案量出來之前，不要在任何文件裡斷言本筆仍被 model bundle 擋住。**
+**`model_available: false` 是事實，但「所以驗不了」是路徑選擇的結果。**
+`scripts/run-evaluation.sh` 從設計上就接 **live DB 唯讀**、唯讀掛載 live 主機的
+`MODELS_DIR`（`/opt/stacks/scripts/stock_trading/python/models/`），預設不帶
+`--write-db`。那顆 bundle 一直都在，所以本筆從來沒有被 model bundle 擋住。
 
-**關閉條件**：跑 `MODE=replay scripts/run-evaluation.sh` 比對
-`final_entry_state` / `lifecycle_phase` / `market_bias` 三個欄位的分佈。
-在那之前，這個行為改變的接受是**明示的決定**（2026-08-13 決定放寬、2026-08-18 確認維持），
-不是「驗過沒問題」。
+**與 CLAUDE.md「驗收走 dev」的調和**：CLAUDE.md 禁的是拿 live 做**測試資料、
+migration 驗證與清空資料**；replay 全程不寫任何一張表，不在其列。
+（走 dev 的代價不只 bundle：dev 只有零星日 K，要先把資料搬進去才有母體。）
+
+⚠️ **通則**：下次遇到「某環境缺某資源所以驗不了」，先確認是不是**只有那一條路徑**缺。
+
+#### 關閉條件（2026-09-01 重寫）
+
+**舊條件已於 2026-09-01 執行完畢**：「跑 `MODE=replay scripts/run-evaluation.sh` 比對
+`final_entry_state` / `lifecycle_phase` / `market_bias` 三個欄位的分佈」——三個分佈都比了，
+結果是零差異。**但那個條件本身有缺陷**：它沒有要求 cohort 必須**命中被改動的路徑**，
+所以一個「一次都沒觸發」的 run 也能形式上滿足它，而那並沒有回答本筆要問的
+「這個已上線的行為改變影響多大」。
+
+**新條件（二選一即可關閉）**：
+
+1. **命中式**：跑一次 decision replay，並提出**至少一筆逐列證據**——同一個
+   `(symbol, as_of)` 上 **`before != CONTINUATION` 且 `after == CONTINUATION`**，
+   且該列符合完整觸發 predicate（`CLOSE_RECLAIM` ＋ 上行跟隨 ＋ 動能確認 ＋ 明確突破
+   ＋ `rr_gate.qualified = false`），並記錄 before/after 在該列上的下游欄位差異。
+
+   ⛔ **不接受 aggregate 當命中證據**（例如「after 的 `CONTINUATION` 總數大於 before」）——
+   總數可能被反向轉移抵銷或混淆，2026-09-01 那輪的 `qualified` 淨 +3 底下藏著 37 列
+   雙向流動就是現成的例子。**要逐列。**
+
+   ⚠️ **實務前置**：用現有欄位重建 predicate 會有偽陽性（見上表「由既有欄位推導的漏斗」）。
+   **根因是 replay row 的 `primary_zone` 是 `_sort_zone_scores()[0]`，而 lifecycle 用的是
+   `_pick_primary_zone()` 選出的 decision primary zone**——兩顆不是同一個。
+   所以要證明命中，得先輸出 **decision primary zone 或 `clear_zone_breakout` 本身**
+   （或直接一個 predicate flag）。`event_signal` / `structure_state` 也值得一併帶出來
+   （可省掉逐列的消去法推理），但**它們不是偽陽性的成因**。
+2. **明示接受**：判定「定向 cohort 的成本不值得」，把本筆轉為**已知限制**並在
+   [`sr-zone-scoring.md`](./sr-zone-scoring.md) 寫明「此行為改變在自然樣本上未觀測到，
+   接受是明示決定而非實測結論」。
+
+⚠️ **在二者之一完成前，本筆不得移除**。目前的接受仍是**明示的決定**
+（2026-08-13 決定放寬、2026-08-18 確認維持、2026-09-01 實測未觸發），不是「驗過沒問題」。
+
+**待決策**：要不要投入定向 cohort（條件 1），或直接走條件 2。
+
+---
+
+### I-100：decision replay 沒有 as-of 上界，cohort 隔天就重現不了
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 已知限制（**已造成一次實際後果**，見下） |
+| 嚴重度 | 中（不影響 runtime，只影響**驗收證據能不能被獨立複核**） |
+| 分類 | Python / SR Zone / 驗證工具 |
+| 發現日期 | 2026-09-01 |
+| 來源 | 原 `todo.md` T-066（decision replay 前後比對，已於 2026-09-01 收斂）執行時發現——四份 report 的數字在當天之後就無法用同一條指令重建 |
+
+⚠️ **這一筆原本寫在 `todo.md` T-068，2026-09-01 同日改列到這裡**（編號 T-068 不回收）。
+理由是 CLAUDE.md 的分流規則：它是**已經發生的已知限制**，不是待規劃的優化。
+下方「可能做法」是它的解法草案，不是另一個 todo 項目。
+
+#### 問題
+
+`fetch_candles()` 取的是**最新** N 根（`ORDER BY ts DESC LIMIT` 後反轉，`python/db.py`），
+而 `evaluation.py` 的 CLI **沒有 as-of 截止參數**——`--limit` 只能控制根數，
+不能把資料尾端釘在某一天。`_decision_replay_rows` 的取樣窗又是
+`window_start = max(first_idx, last_idx - quota + 1)`，**錨在資料尾端**。
+
+所以 live 每天收盤新增一根 K 棒，同一條指令隔天就抽到**不同的 200 列**。
+
+#### 已造成的實際後果
+
+2026-09-01 那四次 run 的結論（逐列 transition matrix、`CONTINUATION` 只有 1 列、
+完整 predicate 命中 0）**當天過後無法用指令重建**。
+處置是**把逐列比較資料進版控**：
+[`python/baselines/replay_cohort_2026-09-01.json`](../python/baselines/replay_cohort_2026-09-01.json)
+（四份 report × 200 列的比較欄位），配合
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「分佈影響：decision replay 實測（2026-09-01）」
+的分佈表與 cohort 佐證表。**那份 JSON 就是最終證據**——結論可以從它重算，
+但**不能**由獨立 reviewer 重跑 replay 得到。
+
+**這不只是存檔問題**：沒有 as-of 上界，任何「同一 cohort 跑兩次」的驗證都必須
+擠在同一個資料凍結窗口內（當日 09:00–15:00，避開 `pre_market` / `daily_close` /
+池同步 / chip 同步），跨日就得整批重跑。
+
+#### 可能做法（待評估）
+
+* 加 `--as-of <date>`：`_load_db_sources()` 傳入上界，`fetch_candles()` 加 `ts <= :as_of`。
+  **要注意 chip / model governance context 也是依 `[dataset_from, dataset_to]` 當下從 DB 撈的**
+  （`_load_db_replay_chip_context` / `_load_db_replay_model_governance_context`），
+  只釘 candles 不夠，那兩個也會隨 DB 內容變動。
+* 或者接受不可重現，改為**強制輸出 cohort 身分指紋**並要求驗收報告一律附上它。
+
+#### 關閉條件
+
+同一條指令在不同日期執行，能產出 `(symbol, as_of)` 完全相同的 cohort（指紋一致）；
+或明確決定走第二條路，並把「驗收報告必須附 cohort 指紋與逐列比較資料」寫進
+[`development-workflow.md`](./development-workflow.md)。

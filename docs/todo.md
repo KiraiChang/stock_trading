@@ -10,7 +10,7 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-068 起算`。**（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出，承接 T-055 未完成的 decision replay 驗證；T-067 於 2026-08-28 發出，承接 `issue.md` I-091 未完成的驗收。）
+- **編號只增不重用，`下一個新編號從 T-069 起算`。**（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出，承接 `issue.md` I-091 未完成的驗收；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
@@ -2355,6 +2355,10 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
 2. ~~**補分析排程**——「定期對 watchlist 產生 SR zone 分析」。~~
    ✅ **已完成（2026-08-20 上線）。這一項不再是 blocker。**
 
+   ⚠️ **這一項服務的是前置①（並行比對），不是 replay。** 前置①要比對
+   `event_instances` 與 timeline 端點的鏈，那確實讀 `stock_sr_zone_analyses`；
+   replay 讀的是 `candles`（2026-09-01 更正，見 [`issue.md`](./issue.md) I-074）。
+
    立案當時 production live DB 的 `stock_sr_zone_analyses` 只有 **4 檔 / 20 次分析**
    （2026-08-13 記錄、2026-08-18 再次確認未增加），而本筆會同時改動 Bias、進場、
    事件序列——**比 T-044 那次影響面大一個量級**，不能用「428 支測試全綠」當證據交付。
@@ -2380,14 +2384,20 @@ T-048 已完成並收斂，身分層／事件鏈的現況規格見
 #### 驗證門檻（現在就定，避免事後放寬）
 
 `MODE=replay scripts/run-evaluation.sh` 對真實資料比對 `final_entry_state` /
-`lifecycle_phase` / `market_bias` 的分佈變化，且**母體要足以做分佈比較**。
+`lifecycle_phase` / `market_bias` 的分佈變化，且 **cohort 必須命中本筆改動到的路徑**。
 在達到這個門檻之前，本筆不應開始實作階段 6。
 
-**這一條是從 T-044 的教訓來的**：那次的行為改變至今只有單元測試層級的證據
-（`issue.md` I-074）。當初的原因是**母體不足而延後**——**那個原因已經消失**
-（母體 11 檔 / 155 次，2026-08-31 實測），但 **replay 本身仍未執行**。
-也就是說那個缺口從「做不了」變成「還沒做」，仍然沒關上。
-同樣的缺口不應該在影響面更大的這一筆再發生一次。
+⚠️ **門檻的措辭已於 2026-09-01 修正**（原文是「母體要足以做分佈比較」）。兩件事要分清楚：
+
+* **replay 的母體是 `candles`，不是 `stock_sr_zone_analyses`**（`run_decision_replay()`
+  → `_load_db_sources()`）。日 K 一直都夠，「母體不足」對 replay 從來不成立。
+* **真正會擋住結論的是「cohort 有沒有命中被改動的路徑」**，而那跟母體大小是兩回事。
+
+**這一條是從 T-044 的教訓來的，而那個教訓在 2026-09-01 才真正學到**：I-074 的 replay
+當天跑完了，200 列、cohort 逐項核對一致，**三個欄位零差異**——但**符合觸發 predicate 的
+列數是 0**，所以那個 run 回答不了「影響多大」。**一個形式上完成、實際上零觸發的驗證，
+比沒做更危險**，因為它看起來像結論。本筆影響面更大（同時改 Bias、進場、事件序列），
+更不能只看「跑過了、分佈沒變」。
 
 ---
 
@@ -2761,123 +2771,6 @@ executability 用，算出 execution gate 後重建 derived view），**但重�
 現況（含單向性的長期說明、實測形狀與端到端測試）在
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「RR 語意分層／已知的單向性」。
 **動手前先讀那一節**，本節只保留分家的理由。
-
----
-
-### T-066：補跑 RR 語意分層（原 T-055）的 decision replay 前後比對
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 待規劃（**前置未滿足：dev 沒有 model bundle**） |
-| 優先度 | 中（RR 分層已上版控且行為有測試釘住，缺的是分佈影響的實測證據） |
-| 分類 | 驗證 / Python / SR Zone / 決策語意 |
-| 建立日期 | 2026-08-27 |
-| 來源 | T-055 收斂時未完成的驗收第 3 項——**條目移除後這件事會沒有清單追蹤**（同 T-063 的教訓） |
-
-#### 要驗什麼
-
-T-055 把 executable RR 的 target 改成「entry 前方第一道壓力封頂」，預期讓 RR 普遍下修、
-被擋掉的樣本變多。**這個幅度至今沒有量過**，只有單元／端到端測試證明行為正確。
-
-比對 `POST /sr-scoring/evaluate`（`decision_replay=true`）的三個分佈：
-`by_rr_gate` / `by_rr_gate_reason_code` / `by_entry_executability`。
-
-#### ⚠️ 那 84 筆**不是**合格的 before
-
-dev `stock_sr_decisions` 現有 84 筆確實是改動前的產物，分佈已擷取備查（見
-[`sr-zone-scoring.md`](./sr-zone-scoring.md)「分佈影響尚未 decision replay 驗證」）。
-**但它不能拿來跟新跑的 replay 直接相減**：
-
-| 面向 | 那 84 筆 | 新跑的 replay |
-|---|---|---|
-| symbols | 當時累積下來的，未受控 | 本次指定的清單 |
-| as-of dates | 當時的分析日 | 本次 replay 的取樣列 |
-| 模型 | 當時的 bundle（或根本沒有） | 本次新訓練的 bundle |
-| 設定 | 當時的 `replay_max_rows` 等 | 本次的參數 |
-
-四項都不同，**樣本差異會被誤讀成 T-055 的因果影響**——而那正是這一筆要量的東西。
-所以那 84 筆只能當**描述性參考**（「改動前大致長這樣」），
-**不得寫成前後因果比較**，也不得用它算「被擋掉的樣本多了幾 %」。
-
-⚠️ **更根本的一點：`stock_sr_decisions` 根本不是 replay cohort 的來源。**
-decision replay 是拿 OHLCV **重算**決策（見下一節），不讀既有的 `stock_sr_decisions`。
-所以那 84 筆與新 replay 連「同一個母體的前後兩次觀察」都談不上——
-它們是兩組不同東西，不只是取樣不同。
-
-#### 唯一合格的做法：同一 cohort 跑兩次
-
-**先搞清楚 cohort 是什麼決定的**：`_decision_replay_rows`（`evaluation.py:1393`）的 as-of
-完全來自傳進去的 OHLCV DataFrame——`_candidate_bar_range` 取
-`[min_history_bars, len(df) - forward_bars - 1]`，再由
-`window_start = max(first_idx, last_idx - quota + 1)` 取**尾端** quota 根。
-**window 錨在資料尾端**，所以來源多一根 K 棒，整段 as-of 就位移。
-
-before 與 after 必須是**同一組輸入**，只差在程式碼版本：
-
-| 必須固定 | 為什麼 | 怎麼核對 |
-|---|---|---|
-| **OHLCV source snapshot**（含 `symbols`） | as-of 是 df 尾端；多一根 K 棒 window 就位移 | `replay_plan` 逐檔比 `candle_count` / `candidate_bars` / `start_as_of` / `end_as_of` |
-| **`dataset_config`**：`min_history_bars`、`forward_bars_support` / `forward_bars_resistance` | 直接決定 `_candidate_bar_range` 的頭尾 | `replay_plan` 已帶 `min_history_bars` / `forward_bars` |
-| **`replay_max_rows`** | 決定 `quota_by_symbol` → `window_start`（見「Decision Replay 的取樣規則」） | `replay_coverage.quota_by_symbol` |
-| **chip-score ／ model-governance context snapshot** | `_load_db_replay_chip_context` / `_load_db_replay_model_governance_context` 依 `[dataset_from, dataset_to]` **當下從 DB 撈**，DB 內容變了輸入就變 | `outcome_summary` 的 `rows_with_non_missing_chip` / `rows_with_model_governance` |
-| **model bundle** | 同一個 `model_path`，**不得各訓練一次** | `model_metadata` |
-| **`builder_config`** | zone 建構參數會改變 zone 本身 | 兩次設定相同 |
-
-⚠️ **凍結來源資料是前置動作，不是注意事項**：兩次 replay 之間
-**不得再匯入或補任何 K 棒**（含 `daily_close`、`evaluation_universe_sync`），
-也不得重跑籌碼或模型治理同步。做不到就先把 dev 的相關排程停掉。
-
-**before 怎麼取得**：T-055 的實作 commit 的 **parent** 就是乾淨的改動前基準，
-用 `git worktree` 取出該 commit 跑一次即可，**不需要手動回退檔案**。
-
-⚠️ **若最後無法重跑舊版**（例如環境湊不出同一個 bundle），本筆的產出就只能標成
-**描述性參考**，並在 `sr-zone-scoring.md` 明寫「未經因果驗證」——
-**不得**在任何文件裡把它敘述成 T-055 的前後影響。
-
-#### 為什麼現在跑不了（2026-08-27 實測）
-
-端點成功回應、產出 200 列 replay rows，但：
-
-```
-decision_replay_available: false
-decision_fields_available: false
-model_available:           false      ← 根因
-by_rr_gate / by_rr_gate_reason_code / by_entry_executability：不存在
-```
-
-`evaluation.py` 的 `if bundle is not None` 讓整段 `build_decision_summary(...)` 從未被執行，
-`rr_gate` / `entry_executability` / `final_entry_state` 全是 `None`。
-與 [`issue.md`](./issue.md) **I-074** 同一類阻塞——但**兩者的成因已經不同了**
-（2026-08-31 更新）：I-074 的「缺 production 分析資料」**已解除**（母體 11 檔 / 155 次），
-這裡缺的是 **dev 的模型**。
-
-⚠️ **「缺 model bundle」要講清楚是哪個環境**：2026-08-31 實測
-`GET /sr-scoring/model-status`（live python-server，唯讀）回 `exists: true`
-——`sr_scoring_v4.joblib`，2026-08-11 訓練。**live 有 bundle，沒有 bundle 的是 dev。**
-下方的前置步驟（在 dev 跑 train）仍然成立，但不要把它寫成「整個專案沒有模型」。
-
-#### 前置步驟
-
-1. 在 dev 跑 `POST /sr-scoring/train` 產生 model bundle。
-2. ⚠️ **需要一個記憶體窗口，且需先徵得同意**：本機 host 只有 2GiB，起 dev python-server
-   之後只剩約 400MB available，LightGBM 訓練會再往上衝。依
-   [`development-workflow.md`](./development-workflow.md)「本機同時只留一組 stack」，
-   **應先停掉 live stack 再做**——停 live 不能自作主張。
-3. 訓練完再跑一次 evaluate，比對三個分佈。
-
-#### 完成條件
-
-1. **同一 replay cohort 跑兩次**（上表六項輸入全部固定，只差程式碼版本），
-   三個分佈都有實測數字。
-2. 報告要保留**兩次**的 `replay_plan`、`replay_coverage.quota_by_symbol`，以及
-   `rows_with_non_missing_chip` / `rows_with_model_governance` 兩個 context 覆蓋計數，
-   並**逐檔核對相同**——這是 cohort 一致的證據。**只貼分佈數字不算完成。**
-3. 結果寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「分佈影響尚未 decision replay 驗證」
-   那一節，改寫成實測結論並移除「尚未驗證」的措辭。
-4. 若走了上面的降級路徑（無法重跑舊版），第 3 步改成寫入**描述性參考 ＋ 未經因果驗證**的
-   說明，且本筆**不視為完成**，狀態改為「擱置」並記下缺什麼。
-
-**驗收一律走 dev compose**，不得用 live 做測試資料。
 
 ---
 

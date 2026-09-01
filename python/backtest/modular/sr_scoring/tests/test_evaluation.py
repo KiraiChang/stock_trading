@@ -14,6 +14,7 @@ from ..model import ModelBundle
 from .. import evaluation as evaluation_module
 from ..evaluation import (
     _daily_confirmation_summary,
+    _decision_fields_from_summary,
     _excursion_window,
     _decision_replay_governance_evaluation,
     _load_symbol_rows_json,
@@ -101,6 +102,26 @@ def test_load_symbol_rows_json_rejects_invalid_shape(tmp_path):
 
     with pytest.raises(ValueError, match="symbol value"):
         _load_symbol_rows_json(str(path))
+
+
+def test_decision_fields_from_summary_carries_lifecycle_phase():
+    """`lifecycle_phase` 必須從 `decision_derived_view.semantic_pipeline` 帶進 replay row。
+
+    **為什麼要釘住它**：decision replay 是唯一能對真實資料比較「事件演進階段有沒有被改掉」
+    的工具。這個欄位沒帶出來時，A/B 兩版的分佈會長得一模一樣，而那**分不出**是那條路徑
+    沒被觸發，還是改動真的沒有影響——2026-09-01 跑 issue.md I-074 的 replay 就踩到這件事。
+    """
+    summary = {
+        "market_bias": "BULLISH_BIAS",
+        "decision_derived_view": {"semantic_pipeline": {"lifecycle_phase": "CONTINUATION"}},
+    }
+    assert _decision_fields_from_summary(summary)["lifecycle_phase"] == "CONTINUATION"
+
+
+def test_decision_fields_from_summary_lifecycle_phase_absent_is_none():
+    """derived view 或 semantic pipeline 缺席時回 None，不得炸掉整份 replay。"""
+    assert _decision_fields_from_summary({})["lifecycle_phase"] is None
+    assert _decision_fields_from_summary({"decision_derived_view": {}})["lifecycle_phase"] is None
 
 
 def test_decision_replay_governance_evaluation_blocks_unavailable_model():
@@ -801,6 +822,7 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
     assert row["model_governance_source_time"] is None
     assert row["model_governance"] is None
     assert row["market_bias"] is None
+    assert row["lifecycle_phase"] is None
     assert row["daily_confirmation_state"] is None
     assert row["daily_confirmation_outcome"]["available"] is False
     assert row["daily_confirmation_outcome"]["reason_code"] == "DAILY_CONFIRMATION_STATE_UNAVAILABLE"
@@ -835,6 +857,8 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
     assert report["outcome_summary"]["daily_confirmation_state_counts"] == {}
     assert report["outcome_summary"]["daily_confirmation_summary"]["rows"] == 0
     assert report["outcome_summary"]["by_final_entry_state"] == {}
+    assert report["outcome_summary"]["by_lifecycle_phase"] == {}
+    assert report["outcome_summary"]["lifecycle_phase_counts"] == {}
     assert report["outcome_summary"]["by_daily_confirmation_state"] == {}
     assert report["outcome_summary"]["by_market_bias"] == {}
     empty_distribution = {
@@ -872,6 +896,7 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
     assert report["replay_plan"][0]["start_as_of"] is not None
     assert report["replay_plan"][0]["end_as_of"] is not None
     assert "final_entry_state" in report["planned_fields"]
+    assert "lifecycle_phase" in report["planned_fields"]
     assert "daily_confirmation_outcome" in report["planned_fields"]
     assert "daily_confirmation_context" in report["planned_fields"]
     assert "rr_gate" in report["planned_fields"]
@@ -936,6 +961,13 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     assert report["outcome_summary"]["zone_score_error_counts"] == {}
     assert report["outcome_summary"]["decision_error_counts"] == {}
     assert report["outcome_summary"]["final_entry_state_counts"]
+    # lifecycle 聚合與 final_entry_state 同級：沒有它，replay 的驗收就得回頭
+    # 自己撈原始 JSON 重算（見 docs/issue.md I-074 的 2026-09-01 實測）。
+    assert report["outcome_summary"]["lifecycle_phase_counts"]
+    assert sum(report["outcome_summary"]["lifecycle_phase_counts"].values()) == len(
+        [row for row in report["replay_rows"] if row.get("lifecycle_phase")]
+    )
+    assert report["outcome_summary"]["by_lifecycle_phase"]
     assert report["outcome_summary"]["daily_confirmation_state_counts"]
     assert report["outcome_summary"]["daily_confirmation_summary"]["rows"] > 0
     assert report["outcome_summary"]["daily_confirmation_summary"]["by_state"]
@@ -1022,6 +1054,7 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     assert scored_row["resolved_event_count"] >= 0
     assert scored_row["expired_event_count"] >= 0
     assert scored_row["market_bias"] is not None
+    assert scored_row["lifecycle_phase"] is not None
     assert scored_row["daily_confirmation_state"] is not None
     assert scored_row["daily_confirmation_outcome"]["available"] is True
     assert scored_row["daily_confirmation_context"]["rr_gate"] in {"RR_QUALIFIED", "RR_BLOCKED"}

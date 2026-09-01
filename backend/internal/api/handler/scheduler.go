@@ -69,7 +69,10 @@ func (h *SchedulerHandler) RunEvaluationUniverseSync(c *gin.Context) {
 // RunSRAnalysis 手動觸發 SR 分析排程（contract 見 docs/api-reference.md）。
 //
 // `with_chip=true` 走 22:00 那輪的規則（額外要求當日籌碼已入庫）。**這個入口是必要的**：
-// cron 預設關閉，而 I-074 / T-049 要的母體得先有辦法補跑；另外排程漏跑時也只有這裡能補。
+// cron 預設關閉，而 todo.md T-049 前置①（新舊兩套 active 事件集合的逐日並行比對）
+// 要的母體得先有辦法補跑；另外排程漏跑時也只有這裡能補。
+// **這裡原本還寫著 issue.md I-074，2026-09-01 移除**：decision replay 讀的是 candles
+// （run_decision_replay -> _load_db_sources），從來不依賴這個排程。
 //
 // **兩個時段共用一個執行所有權**（不是各自一個旗標）：任一輪在跑時這裡回 409，
 // 而不是讓兩輪並行——這台 host 只有 2GiB，逐檔的峰值等同使用者手動點一次分析。

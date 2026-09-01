@@ -791,8 +791,13 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
     final_entry_permission = summary.get("final_entry_permission") or {}
     event_state_summary = summary.get("event_state_summary") or {}
     rr_gate = summary.get("rr_gate") or {}
+    # `lifecycle_phase` 是 replay 唯一看得見事件演進階段的欄位。原本沒帶出來，於是
+    # 「RR 解耦有沒有改變 lifecycle 判定」在 replay 報告上不可觀測——分佈全同時，
+    # 分不出是那條路徑沒被觸發，還是真的沒影響（見 docs/issue.md I-074）。
+    semantic_pipeline = (summary.get("decision_derived_view") or {}).get("semantic_pipeline") or {}
     return {
         "market_bias": summary.get("market_bias"),
+        "lifecycle_phase": semantic_pipeline.get("lifecycle_phase"),
         "daily_confirmation_state": daily_confirmation.get("state"),
         "final_entry_state": final_entry_permission.get("state"),
         "rr_context": summary.get("rr_context"),
@@ -1456,6 +1461,7 @@ def _decision_replay_rows(
                 model_governance = dict(model_governance_snapshot)
                 model_governance_source_time = _snapshot_time(model_governance_snapshot)
             market_bias = None
+            lifecycle_phase = None
             daily_confirmation_state = None
             final_entry_state = None
             rr_context = None
@@ -1500,6 +1506,7 @@ def _decision_replay_rows(
                         )
                         fields = _decision_fields_from_summary(decision_summary)
                         market_bias = fields["market_bias"]
+                        lifecycle_phase = fields["lifecycle_phase"]
                         daily_confirmation_state = fields["daily_confirmation_state"]
                         final_entry_state = fields["final_entry_state"]
                         rr_context = fields["rr_context"]
@@ -1560,6 +1567,7 @@ def _decision_replay_rows(
                 "model_governance_source_time": model_governance_source_time,
                 "model_governance": model_governance,
                 "market_bias": market_bias,
+                "lifecycle_phase": lifecycle_phase,
                 "daily_confirmation_state": daily_confirmation_state,
                 "daily_confirmation_outcome": daily_confirmation_outcome,
                 "daily_confirmation_context": daily_confirmation_context,
@@ -1587,6 +1595,8 @@ def _decision_replay_outcome_summary(rows: list[dict[str, Any]]) -> dict[str, An
             "by_final_entry_state": {},
             "by_daily_confirmation_state": {},
             "by_market_bias": {},
+            "by_lifecycle_phase": {},
+            "lifecycle_phase_counts": {},
             "primary_zone_role_counts": {},
             "rows_with_primary_zone": 0,
             "at_zone_rate": None,
@@ -1597,6 +1607,7 @@ def _decision_replay_outcome_summary(rows: list[dict[str, Any]]) -> dict[str, An
     decision_error_counts: dict[str, int] = {}
     final_entry_state_counts: dict[str, int] = {}
     daily_confirmation_state_counts: dict[str, int] = {}
+    lifecycle_phase_counts: dict[str, int] = {}
     forward_returns: list[float] = []
     for row in rows:
         symbol = str(row["symbol"])
@@ -1613,6 +1624,9 @@ def _decision_replay_outcome_summary(rows: list[dict[str, Any]]) -> dict[str, An
         if row.get("daily_confirmation_state"):
             state = str(row["daily_confirmation_state"])
             daily_confirmation_state_counts[state] = daily_confirmation_state_counts.get(state, 0) + 1
+        if row.get("lifecycle_phase"):
+            phase = str(row["lifecycle_phase"])
+            lifecycle_phase_counts[phase] = lifecycle_phase_counts.get(phase, 0) + 1
         if row.get("forward_return") is not None:
             forward_returns.append(float(row["forward_return"]))
 
@@ -1659,10 +1673,12 @@ def _decision_replay_outcome_summary(rows: list[dict[str, Any]]) -> dict[str, An
         "decision_error_counts": dict(sorted(decision_error_counts.items())),
         "final_entry_state_counts": dict(sorted(final_entry_state_counts.items())),
         "daily_confirmation_state_counts": dict(sorted(daily_confirmation_state_counts.items())),
+        "lifecycle_phase_counts": dict(sorted(lifecycle_phase_counts.items())),
         "daily_confirmation_summary": _daily_confirmation_summary(rows),
         "by_final_entry_state": _decision_outcome_groups(rows, "final_entry_state"),
         "by_daily_confirmation_state": _decision_outcome_groups(rows, "daily_confirmation_state"),
         "by_market_bias": _decision_outcome_groups(rows, "market_bias"),
+        "by_lifecycle_phase": _decision_outcome_groups(rows, "lifecycle_phase"),
         "rr_summary": _rr_summary(rows),
     }
 
@@ -2389,6 +2405,7 @@ def run_decision_replay(
             "model_governance_source_time",
             "model_governance",
             "market_bias",
+            "lifecycle_phase",
             "daily_confirmation_state",
             "daily_confirmation_outcome",
             "daily_confirmation_context",

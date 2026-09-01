@@ -107,8 +107,11 @@ chip:
                                  # 太早抓會是空資料造成落後一天。需自動重試可設多時段如 "0 18,20,22 * * 1-5"。
 
 # 定期對 watchlist 產生 SR zone 分析。這是 production 驗證母體的來源：
-# 沒有它，stock_sr_zone_analyses 只會累積人工點擊的零星幾筆，I-074 / T-049 的分佈比較
-# 永遠做不了。走的是與使用者手動分析**同一條**帶身分追蹤的路徑（會寫 zone_uid）。
+# 沒有它，stock_sr_zone_analyses 只會累積人工點擊的零星幾筆，todo.md T-049 前置①
+# （新舊兩套 active 事件集合的逐日並行比對）永遠做不了。
+# ⚠️ 這裡原本還寫著 issue.md I-074，2026-09-01 移除：decision replay 讀的是 candles
+# （run_decision_replay -> _load_db_sources），從來不讀 stock_sr_zone_analyses。
+# 走的是與使用者手動分析**同一條**帶身分追蹤的路徑（會寫 zone_uid）。
 #
 # 兩個 cron 是刻意的：SR 分析吃籌碼（trading_score 的 Chip 佔 15%），而籌碼要晚間才發布。
 #   cron      17:00 → 當日 K 棒 ＋ 前一日籌碼（收盤後盡快有一份）

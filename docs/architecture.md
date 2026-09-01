@@ -200,7 +200,10 @@ api-reference.md）。
 
 **production 分析排程（2026-08-20 起）**：`watchlists` 每檔每交易日跑**兩輪**帶身分追蹤的
 SR zone 分析——17:00 那輪拿到的是前一日籌碼，22:00 那輪（晚於 21:00 的籌碼採集）才有當日的。
-它是 `stock_sr_zone_analyses` 的 production 母體來源，也是 decision replay 分佈驗證的前提。
+它是 `stock_sr_zone_analyses` 的 production 母體來源，也是 [`todo.md`](./todo.md) T-049 前置①
+（新舊兩套 active 事件集合逐日並行比對）的前提。
+⚠️ **它不是 decision replay 的前提**（2026-09-01 更正）——replay 讀的是 `candles`
+（`run_decision_replay()` → `_load_db_sources()`），不讀 `stock_sr_zone_analyses`。
 預設關閉，細節見 [`api-reference.md`](./api-reference.md) 的
 `POST /scheduler/sr-analysis/run`。
 

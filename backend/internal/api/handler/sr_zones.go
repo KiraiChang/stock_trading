@@ -64,7 +64,7 @@ type SRZoneHandler struct {
 	zoneIdentity store.ZoneIdentityRepo
 	// eventIdentity 同樣是**選填**（T-048 階段 C）：未注入時事件身分追蹤不執行。
 	eventIdentity store.EventIdentityRepo
-	// identityStats 為**選填**（T-050）：未注入時不寫統計，分析行為完全不變。
+	// identityStats 為**選填**：未注入時不寫統計，分析行為完全不變。
 	identityStats store.SRIdentityStatsRepo
 	log           *zap.Logger
 }
@@ -674,7 +674,7 @@ func (h *SRZoneHandler) RunAnalysis(ctx context.Context, symbol, timeframe strin
 	zoneOutcome := h.persistZoneIdentity(ctx, symbol, id, zones, zoneMatch)
 	eventStats := h.persistEventIdentity(ctx, symbol, timeframe, id, projections.EventStates, zoneOutcome)
 	// **寫在這裡而不是 persistEventIdentity 裡**：zone 身分降級時事件層整段不跑，
-	// 而「這次降級了」正是最該被記下來的一列（todo.md T-050 的 V4）。
+	// 而「這次降級了」正是最該被記下來的一列（見 docs/sr-zone-scoring.md 的「可觀測性」）。
 	h.persistIdentityStats(ctx, id, symbol, timeframe, zoneMatch, zoneOutcome, eventStats)
 	return id, nil
 }
@@ -1234,7 +1234,7 @@ const (
 // **依賴階段 B 先成功**：沒有 zone_uid 對應表就沒有可以指的身分，此時整段跳過，
 // 而不是寫出 zone_uid 為 NULL 的 ZONE scope 事件——那與「這是 SYMBOL 事件」
 // 在資料上無法區分。
-// persistEventIdentity 回傳這次的關聯決策拆解供 T-050 落地；**nil 代表整段沒跑**
+// persistEventIdentity 回傳這次的關聯決策拆解供 sr_identity_stats 落地；**nil 代表整段沒跑**
 // （沒接 repo，或 zone 身分已降級 → 事件層沒有可以掛的 zone_uid）。
 func (h *SRZoneHandler) persistEventIdentity(
 	ctx context.Context, symbol, timeframe string, analysisID uint64,
@@ -1269,7 +1269,7 @@ func (h *SRZoneHandler) persistEventIdentity(
 	return &stats
 }
 
-// identityStats 為選填（todo.md T-050）：未注入時不寫統計，行為與導入前完全相同。
+// identityStats 為選填：未注入時不寫統計，行為與導入前完全相同。
 // 比照 zoneIdentity / eventIdentity 的處理。
 //
 // SetIdentityStats 注入之。
@@ -1277,7 +1277,8 @@ func (h *SRZoneHandler) SetIdentityStats(repo store.SRIdentityStatsRepo) {
 	h.identityStats = repo
 }
 
-// persistIdentityStats 把這次分析的關聯決策拆解落地（todo.md T-050）。
+// persistIdentityStats 把這次分析的關聯決策拆解落地（表見 docs/database-schema.md
+// 的 sr_identity_stats）。
 //
 // **fail-open**：寫入失敗只記 log，分析照常成立——統計缺一列比分析失敗好。
 // 這條與身分層其餘寫入的語意一致。
@@ -1330,7 +1331,8 @@ func (h *SRZoneHandler) persistIdentityStats(
 // logEventIdentityStats 以**單筆**結構化 log 輸出整次分析的關聯決策拆解。
 //
 // 拆成多筆 log 會讓「這一次分析發生了什麼」要靠時間戳拼回去；一筆帶齊全部欄位，
-// 日誌聚合可以直接對欄位做計數與趨勢。升級成可查詢的 metric 是 todo T-050。
+// 日誌聚合可以直接對欄位做計數與趨勢。**同一組數字也寫進 sr_identity_stats**
+// 供趨勢查詢——log 答不出「alias 命中率是不是在爬」，而沒有人會每天 grep。
 //
 // **三個級別是刻意分開的**：
 //
@@ -1378,8 +1380,9 @@ const (
 // 「鏈靜默凍結」——資料表面上完全正常，只有把「事件是怎麼找到身分的」逐段數出來
 // 才看得見。單一個「成功／失敗」布林答不出「alias 命中率在上升」這種趨勢問題。
 //
-// backend 目前沒有 metrics 依賴，所以這份計數以單筆結構化 log 輸出；
-// 升級成可查詢的 metric 是 todo T-050。
+// backend 刻意沒有 metrics 依賴（理由見 docs/architecture.md「可觀測性：為什麼沒有
+// metrics 依賴」），所以這份計數走「單筆結構化 log ＋ sr_identity_stats 表」兩層：
+// log 答「這一次發生了什麼」，表答「這個月的走勢如何」。
 type eventIdentityStats struct {
 	// MatchedByChain：第一把鑰匙命中，直接沿用既有鏈的 zone_uid，完全不解析 key。
 	MatchedByChain int
@@ -2156,15 +2159,32 @@ func (h *SRZoneHandler) IdentityStats(c *gin.Context) {
 		serverError(c, h.log, err, "sr-zones: identity stats")
 		return
 	}
+	// summary 走**獨立的 aggregate 查詢**，不對 rows 加總——rows 被 limit 截斷，
+	// 對它加總等於讓 alias_hit_rate 的分母由 limit 決定而不是由 days 決定。
+	//
+	// ⛔ **失敗一律 500，不准降級成「只回 rows、summary 給零值」**：零值 summary 與
+	// 「區間內真的沒資料」在 response 上長得一模一樣，呼叫端無從分辨——那正是這次要修掉的
+	// 那類「不會報錯的失真」，不能一邊修一邊新造一個。
+	agg, err := h.identityStats.Summarize(c.Request.Context(), q)
+	if err != nil {
+		serverError(c, h.log, err, "sr-zones: identity stats summary")
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"rows":    rows,
-		"summary": summarizeIdentityStats(rows),
+		"summary": summarizeIdentityStats(agg),
 	})
 }
 
-// identityStatsSummary 是這批列的聚合。
+// identityStatsSummary 是**完整 days 區間**的聚合，不是「回傳的這一批」的聚合。
 //
 // **比率在這裡才算，不存進表**：分母隨「要看哪個區間」而變，存進去等於把一個決定寫死。
+// 同一條理由也決定了資料層的邊界——store.SRIdentityStatsAggregate 只回原始計數，
+// MatchedTotal 與 AliasHitRate 是這一層的 derived view。
+//
+// Analyses 是區間內的總分析次數，rows 則受 limit 截斷。所以 Analyses > len(rows)
+// **通常**表示明細被截斷——但 summary 與 rows 來自兩次查詢，兩次之間若有新列寫入，
+// 即使沒被截斷這個比較一樣會成立。
 type identityStatsSummary struct {
 	Analyses int `json:"analyses"`
 	// Degraded 是 zone 身分整段沒跑成的次數。**先看這個再看比率**——降級的那幾次
@@ -2189,22 +2209,23 @@ type identityStatsSummary struct {
 	InvariantViolations int `json:"invariant_violations"`
 }
 
-func summarizeIdentityStats(rows []store.SRIdentityStats) identityStatsSummary {
-	out := identityStatsSummary{Analyses: len(rows)}
-	for i := range rows {
-		r := rows[i]
-		if r.ZoneIdentityDegraded {
-			out.Degraded++
-		}
-		out.MatchedByChain += r.MatchedByChain
-		out.MatchedByCurrent += r.MatchedByCurrent
-		out.MatchedByAlias += r.MatchedByAlias
-		out.UnmatchedKeys += r.UnmatchedKeys
-		out.ChainConflicts += r.ChainConflicts
-		out.ChainKeyAmbiguous += r.ChainKeyAmbiguous
-		out.AliasAmbiguous += r.AliasAmbiguous
-		out.CarriedParseFail += r.CarriedParseFail
-		out.InvariantViolations += r.InvariantViolations
+// summarizeIdentityStats 把 store 的原始計數轉成 HTTP 的 derived view。
+//
+// **這裡只做推導，不做加總**——加總是 SQL 的事（store.Summarize），因為要涵蓋的是
+// 完整區間而不是被 limit 截斷的那一批。
+func summarizeIdentityStats(agg store.SRIdentityStatsAggregate) identityStatsSummary {
+	out := identityStatsSummary{
+		Analyses:            agg.Analyses,
+		Degraded:            agg.Degraded,
+		MatchedByChain:      agg.MatchedByChain,
+		MatchedByCurrent:    agg.MatchedByCurrent,
+		MatchedByAlias:      agg.MatchedByAlias,
+		UnmatchedKeys:       agg.UnmatchedKeys,
+		ChainConflicts:      agg.ChainConflicts,
+		ChainKeyAmbiguous:   agg.ChainKeyAmbiguous,
+		AliasAmbiguous:      agg.AliasAmbiguous,
+		CarriedParseFail:    agg.CarriedParseFail,
+		InvariantViolations: agg.InvariantViolations,
 	}
 	out.MatchedTotal = out.MatchedByChain + out.MatchedByCurrent + out.MatchedByAlias
 	if out.MatchedTotal > 0 {

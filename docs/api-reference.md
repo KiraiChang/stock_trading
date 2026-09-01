@@ -495,12 +495,13 @@ gin 不允許同一位置有兩個不同名的 wildcard，那樣寫會在服務�
 
 ### GET `/sr-zones/identity-stats`
 
-身分關聯決策的逐次分析拆解與聚合（todo.md T-050）。
+身分關聯決策的逐次分析拆解與聚合。資料表見
+[`database-schema.md`](./database-schema.md) 的 `sr_identity_stats`。
 
-⚠️ **`summary` 目前聚合的是「回傳的這一批」，不是完整的 `days` 區間**（T-050 待修復）。
-repo 先依 `days` 過濾、再套 `limit`（預設 200）截斷，handler 才對截斷後的結果聚合；
-`sr_analysis` 排程每交易日產出約 22 列，所以預設的「30 天」實際只涵蓋約 9 個交易日，
-而且 response 沒有 `truncated` 或總列數提示。**`alias_hit_rate` 的區間語意在修好前不可靠。**
+**`rows` 與 `summary` 的母體不同，這是刻意的**：`limit` 只截斷明細 `rows`，
+`summary` 走**獨立的 aggregate 查詢、不套 `limit`**，一律涵蓋完整的 `days` 區間。
+所以 `alias_hit_rate` 的分母由 `days` 決定，不會被 `limit` 無聲縮小
+（2026-08-31 修正；此前 summary 是對截斷後的那批加總，預設的「30 天」實際只涵蓋約 9 個交易日）。
 
 **這個端點存在的理由是趨勢**：同一組數字已經有結構化 log，但 log 答不出
 「alias 命中率是不是在爬」「`chain_conflicts` 是不是開始非零」，而那正是這類缺陷的形狀
@@ -547,10 +548,18 @@ repo 先依 `days` 過濾、再套 `limit`（預設 200）截斷，handler 才�
 3. **`invariant_violations` 必須是 0。** 它與其他欄位語意不同——不是「比較差」而是
    不變式被違反，所以獨立成欄而不併進比率。非零要當 bug 查。
 
+**`summary.analyses` 與 `len(rows)` 的關係**：`analyses` 是區間內的總列數，
+`rows` 受 `limit` 截斷，所以 `analyses > len(rows)` **通常**表示明細被截斷——
+但兩者來自**兩次查詢**，兩次之間若有新列寫入，即使沒被截斷這個比較一樣會成立。
+同樣地，`rows` 裡的列與 `summary` 的計數可能落在微幅不同的 snapshot；
+端點是趨勢用途，這個誤差被刻意接受（要消除得包 transaction，不值得為此多一層）。
+
 **母體是分析的子集**：統計只在 `reuse_existing=false` 那條路徑產生，`analyses` 不等於
 該期間的所有分析。要算真正的比例得用 `analysis_id` join `stock_sr_zone_analyses`。
 
-**未啟用時回 503**（repo 未注入）。
+**未啟用時回 503**（repo 未注入）。**明細或聚合任一查詢失敗時回 500**——
+不會退化成「只回 `rows`、`summary` 給零值」：零值 summary 與「區間內真的沒資料」
+在 response 上長得一模一樣，呼叫端無從分辨。
 
 ---
 

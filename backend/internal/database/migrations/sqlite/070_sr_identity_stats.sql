@@ -1,4 +1,4 @@
--- 身分關聯決策的逐次分析統計（todo.md T-050）。
+-- 身分關聯決策的逐次分析統計（設計見 docs/database-schema.md 的 sr_identity_stats）。
 -- 完整設計理由見 postgres 版的註解與 docs/database-schema.md。
 --
 -- sqlite 差異：INTEGER PRIMARY KEY AUTOINCREMENT、BOOLEAN 以 0/1 存、時間用 TEXT/TIMESTAMP。

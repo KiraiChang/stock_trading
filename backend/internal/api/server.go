@@ -166,7 +166,7 @@ func NewServer(
 		// 身分追蹤因此只有一份實作。**必須在 sched.Start() 之前**——Start() 當下才
 		// 決定要不要註冊 cron，main.go 的呼叫順序已保證這件事。
 		sched.SetSRAnalysis(szh, candleRepo, srAnalysisCfg)
-		// 身分關聯決策的統計（T-050）。**只寫不讀決策**：寫入 fail-open，
+		// 身分關聯決策的統計。**只寫不讀決策**：寫入 fail-open，
 		// 查詢端點只服務人工判讀與趨勢觀察。
 		szh.SetIdentityStats(store.NewSRIdentityStatsRepo(db))
 		srRegressionResultHandler := handler.NewSRRegressionResultHandler(

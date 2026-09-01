@@ -3306,10 +3306,14 @@ map 的鍵，是 Python 在 zone 序列化時呼叫**同一個** `_zone_key()` �
 那個「隔天就沒了」的具體情境不再成立；但趨勢型缺陷需要逐次分析的計數，`job_runs`
 的粒度本來就答不出來，所以本節的結論不變。）
 
-所以**同一組數字同時寫進 `sr_identity_stats`**（一次分析一列，T-050）：
+所以**同一組數字同時寫進 `sr_identity_stats`**（一次分析一列，schema 見
+[`database-schema.md`](./database-schema.md)）：
 
 * **表只存原始計數，比率由 `GET /sr-zones/identity-stats` 在查詢時算**——分母隨「要看哪個
-  區間」而變，存進表等於把一個決定寫死。
+  區間」而變，存進表等於把一個決定寫死。**比率的分母是 `days` 區間，不是回傳的那一批**：
+  聚合走未套 `limit` 的 SQL aggregate，`limit` 只截斷明細列數。同一條理由也劃出了分層——
+  store 只回原始計數（`SRIdentityStatsAggregate`），`matched_total` 與 `alias_hit_rate`
+  是 handler 的 derived view，資料層不碰。
 * **降級的那幾次也會留一列**，並帶 `zone_identity_degraded`。若那時候不寫，趨勢圖上會看到
   「這天很乾淨」，而真相是「這天什麼都沒算」。**看比率之前要先看 degraded 次數。**
 * **`invariant_violations` 與其他欄位語意不同**：其他問「分佈正不正常」，它問「不變式有沒有
@@ -3397,7 +3401,8 @@ dev DB 上重跑後，**`alias_ambiguous` 由 77 降到 0**（整輪 84 次分�
 
 **逐段命中數只有 warn 時看得到。** `logging` 把 level 寫死 `zap.InfoLevel`，
 而完整欄位的 `event identity: zone association` 是 Debug 級別，只有觸發 warn 的那次分析
-才會印出整組欄位。所以上面的命中數是 warn 樣本內的統計；全量觀測要等 T-050 的 metric。
+才會印出整組欄位。所以上面的命中數是 warn 樣本內的統計；**全量觀測改看
+`sr_identity_stats` 表與 `GET /sr-zones/identity-stats`**（每次分析都寫一列，不受 log level 限制）。
 
 **四個事件全部進事件層之後的復驗**（2026-08-20，同一組四檔 21 階，退乾淨的 dev DB）：
 84 次分析全部 201、整輪 **0 筆 warn**，六條門檻＋D4 全部 0。
@@ -3429,7 +3434,8 @@ dev DB 上重跑後，**`alias_ambiguous` 由 77 降到 0**（整輪 84 次分�
 
 *`matched_by_alias` 仍然觀測不到*：新事件確實改變了 zone key 的產生量，但整輪沒有任何
 warn，而逐段命中數只有 warn 時才印（Debug 級別），所以「新事件是否讓 alias 備援第一次被
-真的走到」這一題**這一輪仍未取得答案**，要等 T-050 的 metric。
+真的走到」這一題**在那一輪仍未取得答案**。現在這題查得到了：`sr_identity_stats`
+每次分析都寫一列，`GET /sr-zones/identity-stats` 的 `alias_hit_rate` 就是它的走勢。
 
 要重跑這套驗證，步驟見 [`development-workflow.md`](./development-workflow.md)
 「在 dev stack 上做『as-of 階梯』驗收」與其中的「as-of 階梯驗收的六條門檻」。

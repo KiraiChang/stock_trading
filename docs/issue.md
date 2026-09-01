@@ -111,7 +111,8 @@
   `MatchedByAlias == 1`）、`...WhenBoundaryDrifted`（`:439`）、
   `...CurrentMapWinsOverAlias`（`:457`，證明 current map 優先於 alias），
   另有 `TestAliasIndexDropsIdentitiesTheMatcherGaveUpOn`（`:631`）與
-  `TestSummarizeIdentityStatsComputesAliasHitRate`。
+  `TestSummarizeIdentityStatsComputesAliasHitRate`（2026-08-31 起吃
+  `store.SRIdentityStatsAggregate`，測的是 `alias_hit_rate` 的推導；名稱未變）。
   **缺的是 as-of 階梯／integration／live 母體的自然命中**，不是缺測試。
 
 **成因是母體太小而不是實作有問題**（**立案當時**：21 個交易日、4 檔，身分還來不及缺席到失格；
@@ -130,7 +131,8 @@ alias 那半則仍未觸發，見下方關閉條件。
   ✅ **已達成（2026-08-27 查證 live）**——詳見下方「收攤路徑的 production 證據」。
 * **alias 備援**：不能假設分析排程一定會讓 `eventIdentityStats.MatchedByAlias` 自然非零——
   T-048 實測中第一段既有鏈命中把多數情況吃掉了。排程上線後先觀察一段時間；若仍為 0，
-  改由 targeted integration/live fixture 或 T-050 的可觀測性 metric 證明這條路徑，
+  改由 targeted integration/live fixture 或 `GET /sr-zones/identity-stats` 的
+  `alias_hit_rate`（已可用）證明這條路徑，
   而不是把本筆卡死在不可控的自然觸發上。
   ⬜ **仍未達成（2026-08-27 查證 live）**：`sr_identity_stats` 自 2026-08-21 起 88 筆，
   `matched_by_alias` 合計 **0**（`matched_by_chain` 268 / `matched_by_current` 121 /
@@ -187,9 +189,16 @@ AT_ZONE 期間不開一世（067：「AT_ZONE 是『方向暫時無法解析』�
 避免把一個有界的表變成無界。
 
 **承接觸發點**：分析排程已於 2026-08-20 上線（每交易日 22 筆分析），母體累積到一定量後
-重新量測「alias 數撞頂」
-（`alias_count >= 8`）的身分比例；若比例繼續上升，或 T-050 metric 顯示 alias 備援／撞頂
-已進入日常路徑，再規劃上限策略。現在保留為已知限制，不單獨開修法。
+重新量測「alias 數撞頂」（`alias_count >= 8`）的身分比例。
+
+**這是兩個不同的問題，資料來源也不同**：
+
+* **alias 備援有沒有進入日常路徑**——看 `GET /sr-zones/identity-stats` 的
+  `alias_hit_rate`（`matched_by_alias / matched_total`）。
+* **撞頂比例**——⚠️ **要直接統計 `zone_key_aliases`**（每個 `zone_uid` 的 alias 筆數分佈）。
+  上面那個端點**答不出這一題**：它只有整體的關聯決策計數，沒有 per-zone 的 alias 數量。
+
+兩者任一惡化再規劃上限策略。現在保留為已知限制，不單獨開修法。
 
 ---
 
@@ -250,6 +259,11 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
    其餘 `internal/store` 的查詢與寫入仍只跑 sqlite。**每新增一個有 mysql 分支的 repo，
    這一項的缺口就多一個**——`EvaluationUniverseRepo` 的 `ListActive` / `SetActive`
    在真實 MySQL 上從未執行過。要補的話是讓 repo 測試整批對著真實 MySQL 跑一輪。
+
+   **2026-08-31 又多一個**：`SRIdentityStatsRepo.Summarize` 用了
+   `COUNT(*)`、`COALESCE(SUM(...), 0)` 與 `CASE WHEN <boolean> THEN 1 ELSE 0 END`。
+   三個 engine 的布林表示不同（postgres `BOOLEAN`／sqlite 0/1／mysql `TINYINT`），
+   寫法選成三者都成立的形式，但**只有 sqlite 被實際執行過**。
 2. **`time.Time` 寫進 DATE／DATETIME 的時區處理，mysql 與 postgres 不一致**（2026-08-12 發現）：
    `go-sql-driver` 寫入前會 `v.In(cfg.Loc)`（`connection.go:262`），驗證用 DSN 沒帶 `loc` 即 UTC，
    所以**台北午夜會被存成前一天**；`pgx` 取的是值本身時區的日曆日

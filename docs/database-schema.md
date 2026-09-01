@@ -446,7 +446,10 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 
 ## sr_identity_stats
 
-身分關聯決策的**逐次分析**統計（migration 070，todo.md T-050）。一次分析一列。
+身分關聯決策的**逐次分析**統計（migration 070）。一次分析一列。
+查詢端點見 [`api-reference.md`](./api-reference.md) 的 `GET /sr-zones/identity-stats`；
+為什麼是一張表而不是 prometheus，見 [`architecture.md`](./architecture.md)
+「可觀測性：為什麼沒有 metrics 依賴」。
 
 **為什麼要有這張表**：同一組數字已經有結構化 log（見
 [sr-zone-scoring.md](./sr-zone-scoring.md)「可觀測性」），但 log 答不出趨勢問題。
@@ -479,9 +482,14 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 算比率時分母要 join `stock_sr_zone_analyses`，不要拿本表列數當「所有分析」。
 
 **只存原始計數，不存比率**：比率的分母隨查詢區間而變，先算好等於把一個決定寫死在資料裡。
-聚合由 `GET /sr-zones/identity-stats` 負責。
+聚合由 `GET /sr-zones/identity-stats` 負責，**走獨立的 SQL aggregate、不受該端點的
+`limit` 影響**（`SRIdentityStatsRepo.Summarize`）——`limit` 只截斷明細。
+明細與聚合共用同一個 WHERE builder，兩邊的過濾條件不會分岔。
 
-量級：一次分析一列，分析排程上線後約 22 列/天 ≈ 8000 列/年，欄位幾乎都是整數。
+量級：一次分析一列，所以**每交易日約「watchlist 檔數 × 2」列**（每日兩輪）。
+以 2026-08-31 production 的 11 檔估算是每交易日約 22 列 ≈ 5.5k~5.7k 列/年，欄位幾乎都是整數。
+**檔數會變，要重估就套上面那條公式**，不要沿用 22 這個數字；也**別拿它去乘 365**——
+只有交易日會產出。
 
 ---
 

@@ -915,6 +915,29 @@ Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去
 
 ---
 
+## 可觀測性：為什麼沒有 metrics 依賴
+
+`backend/go.mod` **沒有 prometheus 或任何 metrics 套件**，整個 backend 也沒有
+`/metrics` 端點。趨勢型的觀測改用**一張表加一個查詢端點**：
+
+* 結構化 log 回答「這一次發生了什麼」。
+* `sr_identity_stats` 表（一次分析一列）＋ `GET /sr-zones/identity-stats`
+  回答「這個月的走勢如何」——例如 alias 命中率是不是在爬。
+  設計見 [`database-schema.md`](./database-schema.md)。
+
+**決定性的理由是資料頻率**：這類 metric 一次分析產生一筆，分析排程上線後是
+**每個交易日約「watchlist 檔數 × 2」筆**（每日兩輪）——以 2026-08-31 production 的
+11 檔估算是每交易日約 22 筆。Prometheus 是為高頻抓取設計的，這個數量級本質上是一張**表**而不是
+time series，用它反而要處理「抓取間隔內沒有變化」這種與問題無關的複雜度。
+
+另外兩個理由：引入 metrics 要一併決定 exporter、抓取端、儀表板與保留期，是跨系統決策，
+不該夾帶在單一功能裡交付；而這台 host 只有 2GiB，再擺 Prometheus ＋ Grafana 不現實。
+
+**告警之後仍可加**，但要先有抓取端。目前唯一真正需要即時告警的訊號是
+`invariant_violations` 非零（不變式被違反，不是「比較差」），而它已經是 Error 級 log。
+
+---
+
 ## 批次 vs 串流設計決策
 
 Phase 1 採用**批次計算**：

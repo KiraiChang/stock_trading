@@ -2,6 +2,7 @@ package database_test
 
 import (
 	"context"
+	"math"
 	"os"
 	"strconv"
 	"testing"
@@ -174,6 +175,8 @@ func TestPostgresMigrationsRealValuesFitAllColumns(t *testing.T) {
 		_, _ = db.Exec(`DELETE FROM corporate_actions`)
 		_, _ = db.Exec(`DELETE FROM job_runs`)
 		_, _ = db.Exec(`DELETE FROM evaluation_universe`)
+		_, _ = db.Exec(`DELETE FROM indicator_snapshots`)
+		_, _ = db.Exec(`DELETE FROM signals`)
 	})
 
 	// corporate_actions：走真實的 repo，每一組 (type, source) 都試。
@@ -223,6 +226,79 @@ func TestPostgresMigrationsRealValuesFitAllColumns(t *testing.T) {
 		if err := uniRepo.Upsert(ctx, []store.EvaluationUniverseEntry{entry}); err != nil {
 			t.Errorf("universe_role=%q(%d 字元) 寫不進 evaluation_universe: %v",
 				role, len(role), err)
+		}
+	}
+
+	// indicator_snapshots / signals 的數值邊界。
+	// 欄位型別與選型依據見 docs/database-schema.md。
+	//
+	// **為什麼一定要在這裡測**：sqlite 那份 migration 的 rsi14 / vol_ratio 是 REAL，
+	// 沒有精度概念，所以 backend/scripts/test.sh 底下**永遠測不到溢位**。
+	// 2026-09-01 的 live 事故（2454 的 RSI 算出 100、塞不進 DECIMAL(6,4)）就是這樣漏掉的。
+	//
+	// 兩個 vol_ratio 值都要測，缺一不可：
+	//   * 4204257454 是 live candles 實測的最大單根量。MA20 走整數除法且有 ma > 0 守門，
+	//     分母最小是 1，所以它同時就是「目前資料可能產生的 ratio 上界」。
+	//   * float64(math.MaxInt64) 是型別上的端點——volume 是 int64，ratio <= volume，
+	//     所以這是 DECIMAL(23,4) 宣稱要涵蓋的值域端點。**只測前者只證明「現在的資料塞得下」**，
+	//     證明不了「型別上不可能溢位」，而後者才是這一輪要立的主張。
+	//     ⚠️ math.MaxInt64 無法用 float64 精確表示，轉型後實際是 2^63
+	//     （9223372036854775808）。所以斷言比對的是 float64(math.MaxInt64) 這個運算式本身，
+	//     不是「與 int64 上界逐位相同」——後者在 float64 上本來就做不到。
+	indRepo := store.NewIndicatorRepo(db)
+	sigRepo := store.NewSignalRepo(db)
+	for i, volRatio := range []float64{4204257454, float64(math.MaxInt64)} {
+		snap := &store.IndicatorSnapshot{
+			Symbol:    "B" + strconv.Itoa(i),
+			Timeframe: "1m",
+			Timestamp: time.Now(),
+			RSI14:     100, // RSI 的數學上界；avgLoss == 0 且 avgGain > 0 時就是這個值
+			VolRatio:  volRatio,
+		}
+		if err := indRepo.Upsert(ctx, snap); err != nil {
+			t.Errorf("rsi14=100 vol_ratio=%v 寫不進 indicator_snapshots: %v", volRatio, err)
+			continue
+		}
+		got, err := indRepo.GetLatest(ctx, snap.Symbol, "1m")
+		if err != nil {
+			t.Errorf("讀不回 indicator_snapshots(%s): %v", snap.Symbol, err)
+		} else if got.RSI14 != 100 || got.VolRatio != volRatio {
+			t.Errorf("indicator_snapshots round-trip 失真：rsi14 %v→%v、vol_ratio %v→%v",
+				100.0, got.RSI14, volRatio, got.VolRatio)
+		}
+
+		sig := &store.Signal{
+			Symbol: "B" + strconv.Itoa(i), SignalType: "VOLUME_SPIKE", Direction: "BUY",
+			Price: 100, Volume: 1, VolRatio: volRatio, Trend: "Bullish",
+			Note: "numeric boundary", Timestamp: time.Now(), Strength: 1.0,
+		}
+		if err := sigRepo.Insert(ctx, sig); err != nil {
+			t.Errorf("vol_ratio=%v 寫不進 signals: %v", volRatio, err)
+		}
+	}
+
+	// 精度 metadata 本身也要釘住：上面的寫入證明「值進得去」，這一段證明
+	// **migration 真的把型別改了**——放寬前這三條會紅。兩者都要，因為
+	// 值的測試無法分辨「型別夠寬」與「剛好還沒撞到」。
+	for _, want := range []struct {
+		table, column     string
+		precision, scale  int
+	}{
+		{"indicator_snapshots", "rsi14", 7, 4},
+		{"indicator_snapshots", "vol_ratio", 23, 4},
+		{"signals", "vol_ratio", 23, 4},
+	} {
+		var gotPrecision, gotScale int
+		if err := db.QueryRow(
+			`SELECT numeric_precision, numeric_scale FROM information_schema.columns
+			 WHERE table_name = $1 AND column_name = $2`,
+			want.table, want.column).Scan(&gotPrecision, &gotScale); err != nil {
+			t.Errorf("查不到 %s.%s 的精度: %v", want.table, want.column, err)
+			continue
+		}
+		if gotPrecision != want.precision || gotScale != want.scale {
+			t.Errorf("%s.%s 精度應為 (%d,%d)，實際 (%d,%d)",
+				want.table, want.column, want.precision, want.scale, gotPrecision, gotScale)
 		}
 	}
 }

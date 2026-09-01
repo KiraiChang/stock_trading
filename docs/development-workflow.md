@@ -387,6 +387,87 @@ select symbol, round(avg((high-low)/nullif(close,0))*100, 2) range_pct
 **這類失敗特別容易被忽略**：`startRun` 與 `SyncPerSymbolEvents` 的寫入失敗都只記 log
 不中斷流程，所以 job 照跑、只是資料沒進去——除非有人去翻 log，否則不會發現。
 
+### schema migration 上 live 的程序
+
+**入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。
+它做的是 `git pull origin init` → `docker compose … down` → `up --build -d`，
+**開關與金鑰由該腳本的 `export` 提供**。所以：
+
+* 變更要先**推上 `init` 分支**，deploy.sh 才拉得到。
+* 它本身就是 `up --build`，**不要另外下 `build` 或 `up -d`**。
+* 它會先 `down` 再起，**有停機**。
+* ⛔ **不要用 repo 的 `docker-compose.yml` 操作 live**——理由見下方
+  「停 live 之前先確認它是怎麼起來的」，那是會靜默關掉生產排程的操作。
+
+**migration 是 embed 進 binary 的**，所以「schema 有沒有更新」等於「image 有沒有重建」。
+`docker compose up -d` 只重建容器不重建 image（T-067 踩過）。
+
+#### 挑窗口：先確認哪些排程會寫到你要改的表
+
+`ALTER TABLE` 要 `ACCESS EXCLUSIVE`，撞到寫入就會互相阻塞。動手前先對照排程表
+（現況見 [`architecture.md`](./architecture.md)），例如 `indicator_snapshots` / `signals`
+的寫入者是：08:50 `pre_market`、09:00–13:55 每 5 分的 `intraday`、**15:00 `daily_close`**
+（它逐檔跑 `signalEng.Evaluate`，而 `Evaluate` 第一行就是 `indicator.Compute`——**兩張表都寫**）、
+16:00 池同步。→ 安全窗口是 **13:56–14:59**，或確認 `daily_close` 已跑完之後到 16:00 之前。
+
+**`lock_timeout` 要寫在 migration 裡，不能用外部 psql 設**：migration 是 backend 啟動時
+由 goose 用它自己的連線跑的（`database/migrate.go` 的 `goose.UpContext`），
+另一個 session 的 `SET` 對它無效。postgres 用 `SET LOCAL lock_timeout = '5s';`
+放在 Up／Down 的第一行——作用域是 goose 包住該支 migration 的交易，結束即還原。
+
+#### 套用後驗收：分「立即可驗」與「要等資料」兩類
+
+立即可驗（migration 在 backend 啟動時就跑完）：
+
+```sql
+-- goose 版本。WHERE is_applied 不能省——goose_db_version 會留下已回捲的紀錄
+SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied;
+
+-- 型別真的變了（改欄位型別時）
+SELECT table_name, column_name, numeric_precision, numeric_scale
+FROM information_schema.columns WHERE table_name = '…' AND column_name = '…';
+```
+
+要等資料的（例如「某標的的指標重新落地」）**不會在部署後立刻成立**——
+盤中才有 1m 寫入，部署後直接查會看到舊值，**那不代表沒修好**。
+要當下就有結果就主動觸發（例如 `POST /api/v1/indicators/:symbol/compute`），
+⚠️ 但**判定要看 DB 不要看 API 回應**：`Compute` 在 `Upsert` 失敗時只記 warn 就繼續，
+照樣回 200（見 `issue.md` I-102）。
+
+#### 回滾：live 沒有執行 goose Down 的入口
+
+`RunMigrations` 只呼叫 `goose.UpContext`，整個 repo 裡 `DownToContext` **只出現在測試**。
+`compose.yml` 也只有 `build:`、沒有 `image:` tag，所以**沒有「回舊 tag」這個動作**。
+
+* **純放寬型別的 migration（加寬欄位、加可為 NULL 的欄位）不需要回滾 schema**：
+  舊 binary 對更寬的欄位完全相容。要退版就 **revert 程式碼並重跑 deploy.sh，schema 留著**。
+  ⚠️ **不要為了「型別看起來太寬」去縮回去**——那才是製造風險的動作。
+* 真的要縮回去時，**預設是中止而不是繼續**：先查有沒有超界的列，非零就停；
+  要刪必須先匯出留底並取得人工確認，且要分清楚哪些表是可重算的衍生資料、
+  哪些是**刪掉就永久消失的事件紀錄**。縮型別本身只能手動下 DDL。
+
+### migration 的註解裡不要出現 goose 的 annotation 標記
+
+goose 逐行掃描註解找它的 annotation 標記（加號接 `goose`），而且是看
+**整行有沒有那個字串**，不是只看行首。所以連「本檔不可加 ⟨某個 annotation⟩」
+這種**說明性文字**也會被當成真的 annotation，讓整支 migration 解析失敗：
+
+```
+failed to parse annotation line "-- 因此本檔**不可**加 …": not supported: invalid annotation
+```
+
+**要在註解裡提到某個 annotation 時，用文字描述而不要寫出標記字串**
+（例如寫「goose 那個 NO TRANSACTION 的 annotation」）。
+用反引號或引號包起來**沒有用**，goose 不管上下文。
+
+2026-09-01 寫 `075_widen_indicator_numeric.sql` 時連踩兩次（原記於 `issue.md` I-101）。
+⚠️ **`go vet` / `go build` 攔不到**——它是 goose 解析檔案時才報的。
+**每份 migration 只會被它自己那個 engine 的測試載入**：
+sqlite 的由 `backend/scripts/test.sh` 每次都跑，postgres 的只有
+`scripts/test-postgres-migrations.sh`、mysql 的只有 `scripts/test-mysql-migrations.sh`。
+所以**只改了 postgres 那一份時，常態的 `backend/scripts/test.sh` 是綠的**——
+2026-09-01 就是這樣，一直到跑 postgres 腳本才看到。
+
 ### migration 的 Down 區塊也要能跑
 
 **寫破壞性 migration（`DROP TABLE` 再 `CREATE`）時，Down 必須把前一版結構重建回來**，

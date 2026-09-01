@@ -23,7 +23,7 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-103` 起算。**（I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位，後者由它的 review 分出；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-103` 起算。**（I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接），後者由它的 review 分出；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
   檔案裡看得到的最大是 I-102（2026-09-01 發出，**下一個可用的是 I-103**——I-096 / I-098
@@ -38,11 +38,13 @@
   再把所有引用改指向該文件。收斂後用下面這條檢查沒有殘留：
 
   ```bash
-  comm -13 <(grep -o '^### I-0[0-9][0-9]' docs/issue.md | sed 's/### //' | sort -u) \
+  # ⚠️ 樣式是 I-[0-9]{3} 不是 I-0[0-9][0-9]——後者在編號進到 I-100 之後就掃不到了
+  # （2026-09-01 發現：當時的指令對 I-101 完全無效，等於檢查形同虛設）。
+  comm -13 <(grep -oE '^### I-[0-9]{3}' docs/issue.md | sed 's/### //' | sort -u) \
            <(rg --no-filename --only-matching --no-messages \
                 --glob '!**/node_modules/**' --glob '!**/dist/**' \
                 --glob '*.{md,go,ts,svelte,py,sh,yml,yaml,sql}' \
-                'I-0[0-9][0-9]' . | sort -u)
+                'I-[0-9]{3}' . | sort -u)
   ```
 
   **用 `rg` 而不是 `grep -r`，兩個理由都是踩過的**（2026-08-25 re-review 修正）：
@@ -64,8 +66,8 @@
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「當時編號…」），
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
-  I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、本檔現有的 I-100 / I-101 / I-102
-  與下一個可用的 I-103），
+  I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
+  本檔現有的 I-100 / I-102 與下一個可用的 I-103），
   那是預期的，不是殘留。
 
 ---
@@ -251,12 +253,15 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 **仍未解的三項**：
 
 1. **驗證仍不涵蓋 repo 層的 CRUD round-trip。** 「表建得起來」不等於「INSERT/SELECT 跑得動」。
-   目前對真實 MySQL 有執行證明的**只有兩個 repo 寫入路徑**，都是靠
+   目前對真實 MySQL 有執行證明的**只有四個 repo 寫入路徑**，都是靠
    `TestMySQLMigrationsRealValuesFitAllColumns` 順帶涵蓋的：
 
    * `CorporateActionRepo.Upsert`（`ON DUPLICATE KEY UPDATE`）
    * `EvaluationUniverseRepo.Upsert`（2026-08-17 T-040 Step 5 新增，同樣是
      `ON DUPLICATE KEY UPDATE` 分支）
+   * `IndicatorRepo.Upsert` ＋ `GetLatest`（2026-09-01 隨 migration 075 新增，
+     **唯一一條有 round-trip（寫入後讀回比對）的路徑**）
+   * `SignalRepo.Insert`（2026-09-01 隨 migration 075 新增）
 
    其餘 `internal/store` 的查詢與寫入仍只跑 sqlite。**每新增一個有 mysql 分支的 repo，
    這一項的缺口就多一個**——`EvaluationUniverseRepo` 的 `ListActive` / `SetActive`
@@ -470,391 +475,6 @@ migration 驗證與清空資料**；replay 全程不寫任何一張表，不在�
 
 ---
 
-### I-101：`rsi14` / `vol_ratio` 的 `DECIMAL(6,4)` 容不下合法值（indicator 與 signal 兩張表）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已規劃／待實作**（計畫書見下，未經確認前不實作） |
-| 嚴重度 | 中（單一標的的指標停止落地，只留 warn，且 Redis 與 DB 會不一致） |
-| 分類 | Go / 指標 / DB schema |
-| 發現日期 | 2026-09-01 |
-| 來源 | live warn log：`indicator upsert failed symbol=2454 error=ERROR: numeric field overflow (SQLSTATE 22003)` |
-
-#### 現象與成因
-
-2026-09-01 13:15 live 出現：
-
-```
-{"level":"warn","caller":"indicator/engine.go:69","msg":"indicator upsert failed",
- "symbol":"2454","error":"ERROR: numeric field overflow (SQLSTATE 22003)"}
-```
-
-**已用當時的完整輸入重現**（2026-09-01，唯讀）。`Engine.Compute` 取 `lookback = 120` 根，
-`CalcRSI` 用的是**整份輸入**（前 14 個 diff 算初始平均，其餘全部做 Wilder smoothing），
-所以必須看完整視窗才能斷定，不能只看最後幾根：
-
-```
-2454 / 1m / 截至 13:15 的 120 根：唯一收盤價 = [4315.0]
-119 個 diff：上漲 0、下跌 0、平盤 119
-初始 avgGain=0.000000 avgLoss=0.000000 → 最終 avgGain=0.0 avgLoss=0.0 → RSI = 100
-```
-
-`CalcRSI`（`backend/internal/indicator/rsi.go:34`）在 `avgLoss == 0` 時回傳 **100**，
-而 `indicator_snapshots.rsi14` 是 `DECIMAL(6,4)`——上限 **99.9999**，於是 `100.0000` 溢位。
-
-⚠️ **兩件事要分開講**（第一版計畫書把它們混在一起，只拿「最後 19 根平盤」當證據，不足）：
-
-1. **RSI = 100 會溢位**——這是型別問題，與怎麼走到 100 無關。
-   `avgLoss == 0 且 avgGain > 0`（單邊連漲、完全沒有下跌）**也**會回 100，
-   那條路徑**不是**下面的語意修正能解決的，只能靠放寬型別。
-2. **2454 這一次確實是「整個視窗完全無波動」**——上面的重現是這一項的證據。
-
-⚠️ **`diff == 0` 走的是 else 分支**（`lossSum -= 0`），所以「完全不動」與「單邊連漲」
-在 `CalcRSI` 裡是**同一條路徑**，都得到 RSI=100。對前者而言這個語意是錯的：
-沒有任何波動時 RSI 應為中性（50），而 100 表示「極度超買」。
-
-#### 影響
-
-* **2454 的 1m 指標從 11:24 之後就沒再寫進 DB**（最後一筆 `rsi14=98.7805`）。
-* `Upsert` 失敗只 `log.Warn` 不中斷，而 `cacheToRedis` 排在它**後面**照樣執行——
-  **Redis 有新值、DB 沒有**，這個不一致沒有任何其他訊號會提醒。
-* **這個不一致是使用者看得到的**：`GET /api/v1/indicators/:symbol`
-  （`api/handler/indicator.go:25`）走的是 `IndicatorRepo.GetLatest`——**只讀 DB，不讀 Redis**。
-  所以前端看到的 2454 1m 指標會停在 11:24，而且是 200 OK，不是錯誤。
-* RSI=100 會讓 `isRSIOverbought`（`signal/breakout.go:95`）擋掉 BUY 訊號，
-  所以「完全沒成交波動的標的」目前會被當成極度超買。
-
-#### 同一類的第二顆地雷：`vol_ratio`（**兩張表都有**）
-
-`vol_ratio` 也是 `DECIMAL(6,4)`（上限 99.9999），但量比 `current / MA20` **沒有上界**。
-
-⚠️ **它在兩張表裡各出現一次，只修一張等於沒修**：
-
-| 表 | 欄位 | 寫入路徑 |
-|---|---|---|
-| `indicator_snapshots` | `vol_ratio DECIMAL(6,4)` | `indicator/engine.go` → `IndicatorRepo.Upsert` |
-| `signals` | `vol_ratio DECIMAL(6,4)`（`003_create_signals.sql:9`） | `signal/breakout.go:37` → `SignalRepo.Insert`，**BREAKOUT / BREAKDOWN / VOLUME_SPIKE 三種訊號都會帶** |
-
-2026-09-01 實測 live 現況：
-
-| 欄位 | 型別上限 | 目前實際最大值（1m） |
-|---|---|---|
-| `rsi14` | 99.9999 | 99.5096 |
-| `vol_ratio` | 99.9999 | **92.5000** |
-
-**只差 8% 就會撞上同一個錯誤**，不是理論風險。而且量比越大越可能觸發爆量訊號——
-**最該被記錄的那些列，正是最可能寫不進去的**。
-
-#### 為什麼選 `DECIMAL(23,4)`（原訂 `DECIMAL(12,4)` → `DECIMAL(18,4)`，兩次 review 後定案）
-
-⚠️ **第一版用「單分鐘約 10⁵ 張」推導上界，那個推導是壞的**——它混用了成交量單位。
-`candles.volume` 的單位**依來源而不同**：
-
-| 來源 | 單位 | 實際落在哪個 timeframe |
-|---|---|---|
-| Yahoo（`volume`） | **張** | `1m` |
-| FinMind（`Trading_Volume`） | **股** | `1d` |
-
-（來源對照見 [`yahoo-intraday-integration.md`](./yahoo-intraday-integration.md)「成交量：單位是張」
-與 `backend/internal/market/model.go`。**ratio 本身會消掉單位**，因為分子分母同屬一條序列，
-而 `todo.md` T-043 明訂日 K 補價不補量、成交量仍走 FinMind，所以同一個
-`(symbol, timeframe)` 序列不會混用單位——**但拿 raw volume 去推 ratio 上界時不能混用**。）
-
-**改用可證明的上界＋實測值**：
-
-1. **`ratio ≤ current_volume`**。`MA20` 是整數除法（`volume.go:22`）且有 `ma > 0` 守門，
-   所以分母**最小為 1**——這是不等式，不是估計。因此「成交量的上界」就是「ratio 的上界」。
-2. **實測 live `candles` 的單根最大量**（2026-09-01，唯讀，含全部來源與單位）：
-
-   | timeframe | 列數 | max(volume) | p99.9 |
-   |---|---:|---:|---:|
-   | `1d` | 568,949 | **4,204,257,454**（約 4.2×10⁹，股） | 3.56×10⁸ |
-   | `1m` | 79,289 | 48,455（張） | 7,662 |
-
-3. **所以 `DECIMAL(12,4)`（上限約 10⁸）不夠**——1d 的最大量 4.2×10⁹ 已經超過它兩個數量級。
-   原本「多兩個數量級餘裕」的說法是錯的，方向還相反。
-
-**所以型別要蓋住的是「非負 `int64` 的完整值域」，不是實測值加餘裕。**
-`volume` 在 DB 是 `BIGINT`、在 Go 是 `int64`，上界 9.22×10¹⁸ 需要 **19 位整數位**。
-`DECIMAL(23,4)` 提供 19 位整數 ＋ 4 位小數，**涵蓋 `ratio` 在型別上可能出現的全部值**——
-於是「不會溢位」變成**建構上成立**，而不是「依實測估計應該夠」。
-mysql 的 DECIMAL 精度上限是 65、postgres 是 1000，23 對兩者都遠低於上限；
-兩張表各只有數千到兩萬列，儲存成本可忽略。
-
-⚠️ **中間版本曾訂為 `DECIMAL(18,4)`（約 10¹⁴），那是「營運容量選擇」不是可證明的上界**
-——它只比實測最大量多四個數量級，仍然**證明不了**不會溢位。既然這一整筆處理的就是
-「型別容不下合法值」這一類缺陷，就不要再留一個同型的估計值。
-
-**為什麼不用浮點**：這兩欄會參與比較與排序，維持 DECIMAL 與其他欄位一致。
-**為什麼不加 cap**：夾值會讓「100 倍爆量」與「1000 倍爆量」變成同一個數字，
-而那正是爆量訊號最需要分辨的資訊。
-
-#### 為什麼測試抓不到
-
-sqlite 那份 migration 的 `rsi14` / `vol_ratio` 是 **`REAL`（無精度限制）**，
-而 `backend/scripts/test.sh` 跑的就是 sqlite——**這類溢位在單元測試裡永遠不會出現**。
-這是 CLAUDE.md 記的「三份 migration 都要同步維護」在**型別語意**上的漏洞：
-編號同步了，精度約束沒有等價物。
-
-#### 修改目標
-
-1. 讓 schema 容得下兩個欄位的合法值域。
-2. 修正 `CalcRSI` 在「完全無波動」時的語意。
-
-**不做的範圍**：不改 RSI 的計算公式與 Wilder smoothing、不改 `isRSIOverbought` 的門檻、
-不改其他指標欄位的精度。另外兩項刻意排除，理由如下。
-
-##### 排除一：`Upsert` / `Insert` 失敗後繼續執行的行為 → 另立 **I-102**
-
-`indicator/engine.go:68` 與 `signal/engine.go:99` 都是**寫 DB 失敗只記 warn，
-然後照樣寫 Redis／推 WebSocket 並回傳成功**。放寬型別只消掉**目前已知的兩種**溢位，
-任何其他 DB 錯誤仍會造成同樣的 DB／Redis 不一致。
-
-**那是另一類缺陷**（錯誤處理與快取一致性，且牽涉「DB 掛掉時該不該繼續推訊號」這個設計取捨），
-不放在本筆一起改，**另立 [I-102](#i-102) 追蹤**。
-⚠️ **所以本筆不宣稱解決「靜默失效」**——標題已於 2026-09-01 依此修正。
-
-##### 排除二：不回填 11:24 之後已經漏掉的 indicator 列
-
-⚠️ **第一版計畫書寫「下一輪計算會自然覆蓋」，那是錯的。**
-`indicator_snapshots` 的唯一鍵是 `(symbol, timeframe, ts)`（`002_create_indicators.sql:23`），
-下一次 `Compute` 只會寫**最新**的 ts，**中間漏掉的那些 ts 永遠不會被補回**。
-
-**明示接受這個歷史缺口**，理由是它讀不到也用不到：`IndicatorRepo` 的介面只有
-`Upsert` 與 `GetLatest`（`store/indicator_repo.go:9`），**沒有任何區間查詢**，
-唯一的讀取端 `GET /api/v1/indicators/:symbol` 也只取最新一列。
-所以缺口的實質影響是「修好之前 API 一直回 11:24 的舊值」，
-**修好之後第一次成功 upsert 就恢復**，不需要回算。
-
-#### 受影響檔案與資料 contract 變化
-
-| 檔案 | 變更 |
-|---|---|
-| `migrations/postgres/075_widen_indicator_numeric.sql` | `indicator_snapshots`：`rsi14 → DECIMAL(7,4)`、`vol_ratio → DECIMAL(23,4)`；**`signals`：`vol_ratio → DECIMAL(23,4)`** |
-| `migrations/mysql/075_widen_indicator_numeric.sql` | 對應的 `MODIFY COLUMN`，同樣兩張表 |
-| `migrations/sqlite/075_widen_indicator_numeric.sql` | **no-op**（`REAL` 無精度概念），只為維持三份編號對齊，body 只有註解（既有慣例見 `sqlite/009_add_user_status.sql` 的 Down） |
-| `backend/internal/indicator/rsi.go` | `avgLoss == 0` 時再分兩種：`avgGain == 0` → **50**；否則維持 **100** |
-| `backend/internal/indicator/rsi_test.go` | 補「完全無波動 → 50」與「單邊連漲 → 100」兩條 |
-| `backend/internal/database/adjuster_postgres_test.go` | 擴充既有的 `TestPostgresMigrationsRealValuesFitAllColumns`（見下方測試策略） |
-| `backend/internal/database/adjuster_mysql_test.go` | 擴充既有的 `TestMySQLMigrationsRealValuesFitAllColumns` |
-| `docs/database-schema.md` | `indicator_snapshots` 與 `signals` 的欄位型別更新（現在寫的是 `DECIMAL(6,4)` ＋「RSI（0～100）」，型別容不下自己宣稱的上界，是文件與實作矛盾） |
-| `docs/indicator-spec.md` | RSI 的邊界定義補上「無波動 → 50」 |
-| `docs/issue.md` I-054 | 實作後把「已覆蓋的 repo 寫入路徑」由 2 條更新為 4 條 |
-
-**contract 變化**：`rsi14` 值域仍是 `[0, 100]`（型別終於容得下上界）；
-兩張表的 `vol_ratio` 上限由 99.9999 放寬到涵蓋非負 `int64` 的完整值域。
-**全部都是放寬，不影響既有讀取端。**
-
-#### 主要風險與回滾
-
-| 風險 | 處置 |
-|---|---|
-| **Down migration 會縮回原精度**，若屆時已有 `rsi14 = 100` 或任一張表的 `vol_ratio > 99.9999` 會失敗 | **預設中止，不自動刪任何列**——程序見下方「回滾程序」 |
-| RSI 語意改變影響訊號 | 只影響「完全無波動」這一種輸入。該情境下原本 RSI=100 會擋掉 BUY，改為 50 後不再擋——這是**刻意的修正**，已於 2026-09-01 取得同意 |
-| live 需要重建 image 才會套用 migration | migration 是 **embed 進 binary** 的，所以 image 的新舊決定 schema 的新舊（T-067 踩過）。live 的部署入口是 `/opt/stacks/scripts/stock_trading/deploy.sh`（`git pull origin init` → `down` → `up --build -d`），⛔ **不是** repo 的 compose——理由、窗口與套用後驗收見下方「live 執行程序」 |
-
-#### live 執行程序
-
-**兩張表都很小，鎖定時間不是主要風險**（2026-09-01 實測 live）：
-
-| 表 | 列數 | 大小 |
-|---|---:|---:|
-| `indicator_snapshots` | 18,159 | 5,360 kB |
-| `signals` | 5,265 | 1,480 kB |
-
-即使 postgres 對 numeric typmod 變更走整表重寫，這個量級也是次秒級。**但仍照程序做**：
-
-1. **`lock_timeout` 必須寫在 migration 裡，不能用外部 psql 設。**
-   ⚠️ migration 是 **backend 啟動時由 goose 用它自己的連線執行**
-   （`database/migrate.go` 的 `goose.UpContext`）——在另一個 psql session 下
-   `SET lock_timeout` 對它**完全無效**。
-   所以 postgres 的 075 在 Up 與 Down **各自的第一行**寫
-   `SET LOCAL lock_timeout = '5s';`（goose 預設把單一 migration 包在交易裡，
-   `SET LOCAL` 的作用域正好是那個交易，結束即還原，不影響 backend 後續連線）。
-   ⚠️ **不要加 `-- +goose NO TRANSACTION`**，否則 `SET LOCAL` 失去依附的交易。
-   `ALTER TABLE` 要 `ACCESS EXCLUSIVE`，卡住時寧可失敗中止，也不要排隊阻塞
-   `indicator upsert` 與 `signal insert`。
-
-2. **先在 dev 量耗時**：套用 075 並記錄；dev 資料量與 live 不同時以 live 列數推算，
-   不要直接套用 dev 的秒數。
-
-3. **挑窗口——「收盤後」不等於安全**。會寫這兩張表的排程：
-
-   | 時間 | 排程 | 為什麼會寫到 |
-   |---|---|---|
-   | 08:50 | `pre_market` | 預熱日線指標 |
-   | 09:00–13:55 每 5 分 | `intraday` | `signalEng.Evaluate(…, "1m")` |
-   | **15:00** | **`daily_close`** | 逐檔 `signalEng.Evaluate(…, "1d")`，而 `Evaluate` 第一行就是 `indicator.Compute`（`signal/engine.go:59`）——**兩張表都寫** |
-   | 16:00 | 池同步 ＋ 缺漏偵測 | 寫日 K，間接影響下一輪計算 |
-
-   → 安全窗口是 **13:56–14:59**，或**確認 `daily_close` 已跑完之後到 16:00 之前**
-   （查 `SELECT status, started_at FROM job_runs WHERE job_name='daily_close' ORDER BY id DESC LIMIT 1;`）。
-
-4. **部署走 live 的權威腳本，⛔ 不要用 repo 的 compose。**
-
-   ⚠️ **這是 2026-08-28 已經踩過一次的坑**（見
-   [`development-workflow.md`](./development-workflow.md)「停 live 之前先確認它是怎麼起來的」）：
-   live 的 `stock_trading` project **不是**由 repo 的 `docker-compose.yml` 部署的，
-   而是 `/opt/stacks/scripts/stock_trading/`（`compose.yml` ＋ `deploy.sh`，
-   `--project-directory` 指向 `/opt/stacks/deploy/...` 的另一份 clone）。
-   **project 名稱相同**，所以在 repo 目錄下操作**會成功動到 live**——
-   但拉回來時 `SR_ANALYSIS_ENABLED` / `EVALUATION_UNIVERSE_ENABLED` /
-   `CANDLE_GAP_DETECTION_ENABLED` 會全部落回 `${VAR:-false}`、`FINMIND_API_KEY` 變空字串，
-   **服務照樣起得來、什麼都不報錯**，只是生產排程被靜默關掉、抓取全部失敗。
-
-   正確流程：
-
-   1. 把變更**推上 `init` 分支**（`deploy.sh` 會 `git pull origin init`）。
-   2. 執行 `/opt/stacks/scripts/stock_trading/deploy.sh`。它會 `git pull` →
-      `docker compose … down` → `up --build -d`，**開關與金鑰由該腳本的 `export` 提供**。
-   3. 因為它本身就是 `up --build`，**不需要（也不要）另外下 `build` 或 `up -d`**。
-      ⚠️ 它會先 `down` 再起，**有停機**；配合下面的窗口安排。
-
-5. **套用後驗收——分兩個時點，不要混在一起。**
-
-   **A. 部署後立即可驗**（migration 在 backend 啟動時就跑完）：
-
-   ```sql
-   -- ① goose 版本應為 75。WHERE is_applied 不能省——goose_db_version 會留下
-   --    已回捲的紀錄，少了這個條件版本判讀會失真（慣例見 scripts/verify-adjustment.sh:57）
-   SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied;
-
-   -- ② 三個欄位的精度真的變了
-   SELECT table_name, column_name, numeric_precision, numeric_scale
-   FROM information_schema.columns
-   WHERE (table_name, column_name) IN
-         (('indicator_snapshots','rsi14'), ('indicator_snapshots','vol_ratio'), ('signals','vol_ratio'));
-   -- 期望：(7,4) / (23,4) / (23,4)
-   ```
-
-   **B. 要有新的 1m 寫入才驗得到**——1m 只在盤中寫（`*/5 9-13`），
-   ⚠️ **部署後直接查會看到 11:24 的舊值，那不代表沒修好**。兩條路擇一：
-
-   * **主動觸發（建議，當下就有結果）**：呼叫
-     `POST /api/v1/indicators/2454/compute?timeframe=1m`（`api/server.go:104`，需帶 auth）。
-     它同步跑一次 `Compute`，走的是同一條 `Upsert` 路徑。
-
-     ⛔ **不要拿 API 的回應當證據。** `Compute` 在 `Upsert` 失敗時**只記 warn 就繼續**
-     （`indicator/engine.go:68`），照樣回傳算好的 snapshot——**溢位時它一樣是 200**。
-     這正是 [I-102](#i-102) 那個行為。**API 只負責觸發，判定要看 DB。**
-
-     ```sql
-     -- ③ 唯一的判定證據：2454 的 1m 最新 ts 已經前進（晚於 2026-09-01 11:24）
-     SELECT ts AT TIME ZONE 'Asia/Taipei', rsi14 FROM indicator_snapshots
-     WHERE symbol='2454' AND timeframe='1m' ORDER BY ts DESC LIMIT 1;
-     ```
-
-     **ts 前進 ＝ `Upsert` 成功 ＝ 型別問題解除**，這就夠了。
-
-   * **被動等**：延到**下一個交易日**盤中再查 ③。
-
-   ⚠️ **不要硬性要求 `rsi14 = 50`。** 那個值只有在**呼叫當下的最新 120 根仍然完全無波動**
-   時才成立；隔一天或有任何成交波動，RSI 就會是別的值，而那**不代表沒修好**。
-   要順帶驗語意時，先確認輸入條件：
-
-   ```sql
-   -- 最新 120 根的相異收盤價數；等於 1 才適用「應為 50」這個期望
-   SELECT count(DISTINCT close) FROM (
-     SELECT close FROM candles WHERE symbol='2454' AND timeframe='1m'
-     ORDER BY ts DESC LIMIT 120) x;
-   ```
-
-   **RSI 的語意修正本來就該由 dev 的固定輸入單元測試證明**（見下方測試策略），
-   不需要靠 live 的浮動資料。
-
-   **④ 下一個交易日**再確認
-   `docker logs stock_trading-backend-1 | grep 'indicator upsert failed'` 不再出現。
-   ⚠️ `docker logs` 在這台機器上不耐久（容器會被重建，T-067 已記），
-   所以**一律以 ③ 的 DB 證據為主、log 只是輔助**。
-
-#### 回滾程序
-
-⛔ **live 沒有執行 goose Down 的入口。** `RunMigrations` 只呼叫 `goose.UpContext`
-（`database/migrate.go`），整個 repo 裡 `DownToContext` **只出現在測試**。
-
-⛔ **也沒有「回舊 image tag」這個機制。** live 的 `compose.yml` 只有 `build:`、
-沒有 `image:` tag，`deploy.sh` 每次都是 `up --build` 現地重建。
-
-**而這一筆根本不需要回滾 schema**：075 是**純放寬**，舊 binary 對更寬的欄位完全相容。
-所以退版的做法是**退程式碼、不退 schema**：
-
-1. 在 `init` 分支上 revert 掉這次的 commit 並推上去。
-2. 再跑一次 `/opt/stacks/scripts/stock_trading/deploy.sh`——它會 `git pull` 到 revert 後的
-   狀態並重建 image。舊 binary 對 `DECIMAL(23,4)` 的欄位讀寫完全正常。
-3. **schema 留著**。留著寬型別沒有任何害處，也不影響舊 binary。
-   ⚠️ **不要為了「型別看起來太寬」去縮回去**——那才是製造風險的動作。
-
-真的有非退 schema 不可的理由時（例如發現放寬本身造成問題），**預設是中止而不是繼續**：
-
-1. 先查三個超界條件的筆數，**任一非零就停**：
-
-   ```sql
-   SELECT count(*) FROM indicator_snapshots WHERE rsi14 > 99.9999;
-   SELECT count(*) FROM indicator_snapshots WHERE vol_ratio > 99.9999;
-   SELECT count(*) FROM signals            WHERE vol_ratio > 99.9999;
-   ```
-
-2. 非零時**先匯出留底**（`\copy (SELECT …) TO '…' CSV HEADER`），並取得**明確的人工確認**
-   要刪哪張表、可接受損失哪些列。兩張表性質不同：
-   * `indicator_snapshots` 是衍生快取，但唯一鍵含 `ts`，**只有最新那個 ts 會被重算補回**，
-     中間的歷史列不會回來。
-   * ⛔ **`signals` 是事件紀錄，刪掉永久消失**，沒有任何地方能重算。
-3. 縮型別本身只能**手動下 DDL**（backend 的啟動流程只跑 Up），這一步要先想清楚怎麼做、
-   並在 `goose_db_version` 留下對應處置，否則下次啟動會與 embed 的 migration 狀態不一致。
-
-#### 測試與驗證策略
-
-⚠️ **第一版寫「postgres migration 腳本是唯一能證明型別夠寬的驗證」，那是錯的**——
-`TestPostgresMigrationsUpAndDown` 只驗 migration 能 up/down，**不會檢查精度**；
-而 dev 上的「flat → RSI 50」在**舊的** `DECIMAL(6,4)` 底下也會通過（50 塞得進去），
-所以那一步也證明不了型別放寬。**必須有真的寫入邊界值的測試。**
-
-**擴充既有的 `…MigrationsRealValuesFitAllColumns`**（postgres 與 mysql 各一支）——
-那支測試的存在目的就是這一類「值塞不塞得下」的問題，目前涵蓋 `corporate_actions` /
-`job_runs` / `evaluation_universe`，**沒有涵蓋 `indicator_snapshots` 與 `signals`**：
-
-1. 走**真實 repo** `IndicatorRepo.Upsert`，`rsi14 = 100.0000`（RSI 的數學上界），
-   `vol_ratio` **兩個值都要測**：
-   * `4204257454.0000`——live 實測的最大單根量，等同 MA20=1 時的實際 ratio 上界；
-   * `float64(math.MaxInt64)`——**非負 `int64` 上界在 Go 端的實際表示**。
-     ⚠️ **不要寫成 `9223372036854775807`**：`VolRatio` 是 `float64`，
-     `math.MaxInt64` 無法精確表示，轉型後實際是 **9223372036854775808**（2⁶³）。
-     測試要用 `float64(math.MaxInt64)` 這個運算式本身，並斷言
-     **round-trip 回讀的值等於它**——目標是「不溢位且不失真地走完 repo/driver」，
-     **不是**「與 int64 上界逐位相同」，後者在 float64 上本來就做不到。
-     （2⁶³ ≈ 9.22×10¹⁸ 有 19 位整數位，`DECIMAL(23,4)` 的 19 位整數剛好容得下。）
-
-   ⚠️ **只測前者不算數**：那只證明「目前的資料塞得下」，而本筆的主張是
-   「**型別上不可能溢位**」。後者才驗得到 repo 與 driver 有沒有能力把這個量級的數
-   送進 DB 再讀回來——精度 metadata 只驗得到 DDL，驗不到傳遞路徑。
-2. 走**真實 repo** `SignalRepo.Insert`，同樣兩個 `vol_ratio` 值各寫一次。
-3. 讀 `information_schema.columns` 斷言三個欄位的 `numeric_precision` / `numeric_scale`
-   是 `(7,4)` / `(23,4)` / `(23,4)`——這一條在**放寬前會紅**，是「migration 真的生效」的證據。
-
-其餘：
-
-4. `backend/scripts/test.sh ./internal/indicator/...`——RSI 的兩條新測試。
-5. `scripts/test-postgres-migrations.sh` / `scripts/test-mysql-migrations.sh`——
-   帶著上面擴充的斷言跑。
-   ⚠️ **不要寫成「mysql 只涵蓋 DDL 層」**：`TestMySQLMigrationsRealValuesFitAllColumns`
-   本來就會走真實 repo（目前是 `CorporateActionRepo.Upsert` 與
-   `EvaluationUniverseRepo.Upsert` 兩條），本計畫再加 `IndicatorRepo.Upsert` 與
-   `SignalRepo.Insert`。正確的說法是**仍未涵蓋完整的 CRUD round-trip**
-   （只有寫入、沒有查詢與更新的回路），既有限制見 [I-054](#i-054)。
-   **實作完成後要同步更新 I-054 的「已覆蓋的 repo 寫入路徑」清單**（會從 2 條變成 4 條）——
-   那份清單是判斷 mysql 缺口大小的依據，不更新就會低估覆蓋。
-6. **dev compose 驗收**：套用 migration 後造一組「完全無波動」序列跑 `Compute`，
-   確認落地為 `rsi14 = 50` 且無 overflow。**這一步驗的是語意修正，不是型別**。
-7. ⚠️ **sqlite 永遠測不到溢位**（`REAL` 無精度），所以第 1～3 步是唯一的防線。
-
-#### 完成後歸檔
-
-`docs/database-schema.md`（兩張表的欄位型別與值域，含 `DECIMAL(23,4)` 的選型依據與 ratio ≤ volume ≤ int64 的推導）、
-`docs/indicator-spec.md`（RSI 邊界語意：無波動 → 50、單邊連漲 → 100）。
-review 通過後本筆整筆移除；I-102 獨立追蹤，不隨本筆移除。
-
----
-
 ### I-102：寫 DB 失敗後照樣寫 Redis／推 WebSocket，DB 與快取會靜默不一致
 
 | 欄位 | 內容 |
@@ -863,7 +483,7 @@ review 通過後本筆整筆移除；I-102 獨立追蹤，不隨本筆移除。
 | 嚴重度 | 中（**只有 warn log，沒有錯誤傳播、也沒有可操作的告警**；使用者看到的資料會依讀取路徑而不同） |
 | 分類 | Go / 錯誤處理 / 快取一致性 |
 | 發現日期 | 2026-09-01 |
-| 來源 | [I-101](#i-101) 的 review 分出——放寬型別只消掉已知的兩種溢位，這個行為本身沒被處理 |
+| 來源 | 原 I-101（`rsi14` / `vol_ratio` 型別溢位，已於 2026-09-01 修復並收斂）的 review 分出——放寬型別只消掉已知的兩種溢位，這個行為本身沒被處理 |
 
 #### 現象
 
@@ -884,7 +504,10 @@ review 通過後本筆整筆移除；I-102 獨立追蹤，不隨本筆移除。
 * `signals` 表少一列，但 `signal:queue` 與前端推播都有那一筆——
   **訊號歷史與實際發出的訊號對不起來**。
 
-I-101 的 2454 就是這個行為的一次實證：11:24 之後 API 一直回舊指標，而唯一的痕跡是那行 warn。
+**2026-09-01 的 2454 就是這個行為的一次實證**：`rsi14` 算出 100 卻塞不進當時的
+`DECIMAL(6,4)`，於是 11:24 之後 API 一直回舊指標，而唯一的痕跡是那行 warn。
+（型別本身已放寬並收斂，見 [`database-schema.md`](./database-schema.md)；
+**但那只消掉了那一種溢位，本筆的行為沒有改變**。）
 
 #### 待決策：要修成哪一種
 

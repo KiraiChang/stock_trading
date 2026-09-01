@@ -5,17 +5,23 @@
 
 ## 使用說明
 
-- **狀態**：`待規劃` / `規劃中` / `進行中` / `已完成` / `擱置`
+- **狀態**：`待規劃` / `規劃中` / `進行中` / `待執行` / `已實作／待 review` / `已完成` / `擱置`
+  - `待執行` 與 `進行中` 的差別是**還沒開始動手**：規劃與程式碼都完成了，只剩一個
+    明確的動作沒做（例如部署、跑一次驗收）。
+  - `已實作／待 review` 沿用 [`issue.md`](./issue.md) 的定義：改完先標這個並保留計畫書，
+    review 確認方向無誤後才收斂。
+  - 部分完成的大項用「**部分通過／主項保留**」，並在括號裡寫明哪些面向通過、哪些保留。
 - **優先度**：`高` / `中` / `低`（主觀評估，會隨情境調整，不是嚴格排序）
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-069 起算`。**（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出，承接 `issue.md` I-091 未完成的驗收；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**。）
+- **編號只增不重用，`下一個新編號從 T-070 起算`。**（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出，承接 `issue.md` I-091 未完成的驗收；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出，承接 `issue.md` I-101 未完成的 live 部署與驗收。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
   **仍然被佔用**：程式碼註解、主題文件與 git log 會留著舊 ID，重用會讓兩件無關的事
-  共用一個代號。本檔目前看得到的最大是 `T-064`，而 `T-062` 已經發出並收斂，
+  共用一個代號。本檔目前看得到的最大是 `T-069`（2026-09-01 發出），而 `T-062` / `T-066` 已經發出並收斂、
+  `T-068` 已改列為 `issue.md` I-100，
   更早也有多筆被移除（例如 `T-044` / `T-046` / `T-050` / `T-053` / `T-056` /
   `T-057` / `T-059` / `T-060`）。判斷可用編號時翻 git log 或本節，不要數檔案。
 - **移除條目前要先反轉依賴**（與 [`issue.md`](./issue.md) 同一條規則）：先把要長期保留的
@@ -24,11 +30,13 @@
   收斂後用這條檢查沒有殘留：
 
   ```bash
-  comm -13 <(grep -o '^### T-0[0-9][0-9]' docs/todo.md | sed 's/### //' | sort -u) \
+  # ⚠️ 樣式是 T-[0-9]{3} 不是 T-0[0-9][0-9]——後者在編號進到 T-100 之後就掃不到了
+  # （issue.md 那邊已經因為 I-100 真的失效過一次，這裡先改掉）。
+  comm -13 <(grep -oE '^### T-[0-9]{3}' docs/todo.md | sed 's/### //' | sort -u) \
            <(rg --no-filename --only-matching --no-messages \
                 --glob '!**/node_modules/**' --glob '!**/dist/**' \
                 --glob '*.{md,go,ts,svelte,py,sh,yml,yaml,sql}' \
-                'T-0[0-9][0-9]' . | sort -u)
+                'T-[0-9]{3}' . | sort -u)
   ```
 
   副檔名清單**每一種都是踩過才加的**，不要精簡它（完整理由見
@@ -39,6 +47,86 @@
 
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「已收斂」），
   不能有任何「見 T-0xx」形式的活指標。**本節自己會出現在輸出裡**，那是預期的。
+
+---
+
+### T-069：migration 075 尚未部署到 live，部署後的驗收也還沒做
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待執行（程式碼已完成並通過三層測試，**只差上 live**） |
+| 優先度 | 中（在部署之前，live 的 `rsi14` / `vol_ratio` 仍是 `DECIMAL(6,4)`，2454 這類「整段平盤」的標的**指標會繼續寫不進去**） |
+| 分類 | Go / DB / 部署 |
+| 建立日期 | 2026-09-01 |
+| 來源 | `issue.md` I-101 收斂時未完成的部署與驗收——**條目移除後這件事會沒有清單追蹤**（同 T-063、T-067 的教訓） |
+
+#### 背景
+
+I-101（`rsi14` / `vol_ratio` 的 `DECIMAL(6,4)` 容不下合法值）的修復已完成並收斂：
+migration `075_widen_indicator_numeric.sql` × 3、`CalcRSI` 的無波動語意修正、
+`indicator/rsi_test.go`、以及 postgres／mysql 的邊界寫入與精度斷言。
+`backend/scripts/test.sh`、`scripts/test-postgres-migrations.sh`、
+`scripts/test-mysql-migrations.sh` 全數通過。
+
+現況規格已歸檔在 [`database-schema.md`](./database-schema.md)（兩張表的欄位型別與選型依據）、
+[`indicator-spec.md`](./indicator-spec.md)（RSI 的邊界語意）、
+[`development-workflow.md`](./development-workflow.md)（schema migration 上 live 的程序、
+goose annotation 的坑）。
+
+**但 live 還沒部署**，所以那個 bug 在 live 仍然存在。
+
+#### 要做的事
+
+1. **推上 `init` 分支**，再跑 `/opt/stacks/scripts/stock_trading/deploy.sh`。
+   ⛔ **不要用 repo 的 compose**——完整理由與程序見
+   [`development-workflow.md`](./development-workflow.md)「schema migration 上 live 的程序」。
+2. **窗口**：`13:56–14:59`，或確認 `daily_close` 跑完之後到 16:00 之前。
+   （`indicator_snapshots` / `signals` 的寫入者見該節的排程對照。）
+3. **部署後立即驗**：
+   * `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied;` 應為 **75**。
+   * `information_schema` 三欄精度應為 `(7,4)` / `(23,4)` / `(23,4)`
+     （`indicator_snapshots.rsi14`、`indicator_snapshots.vol_ratio`、`signals.vol_ratio`）。
+4. **要等資料的驗收**——`2454` 的 1m 指標重新落地。
+
+   ⛔ **不要拿 `2026-09-01 11:24` 這個固定時間當門檻。** 那是立案當下的值；
+   若部署前指標曾經恢復寫入（例如盤中出現波動、RSI 不再是 100），
+   `ts` 本來就已經前進，於是「晚於 11:24」在**沒有產生任何新資料時也會通過**。
+   要比的是**相對基準**，不是絕對時間：
+
+   ```sql
+   -- (a) 部署前先記下基準：indicator 的最新 ts，以及 candles 的最新 ts
+   SELECT max(ts) AS indicator_before_ts FROM indicator_snapshots
+   WHERE symbol='2454' AND timeframe='1m';
+   SELECT max(ts) AS candle_before_ts FROM candles
+   WHERE symbol='2454' AND timeframe='1m';
+   ```
+
+   部署後（或主動觸發後）判定條件**兩個都要成立**：
+
+   * `candles` 有比 `candle_before_ts` 更新的 1m K 棒——**否則根本沒有新資料可寫**，
+     這時 indicator 沒動是正常的，不能當成失敗，也不能當成通過；
+   * `indicator_snapshots` 的最新 `ts` **前進到那根新 candle 的 ts**。
+
+   要當下就有結果，就主動觸發 `POST /api/v1/indicators/2454/compute?timeframe=1m`
+   （它算的是「目前最新那根」，所以搭配上面第一項一起看）。
+   ⛔ **判定要看 DB 不要看 API 回應**——`Compute` 在 `Upsert` 失敗時只記 warn 就回 200
+   （那正是 [`issue.md`](./issue.md) I-102）。
+
+5. **（非必要，僅供佐證）下一個交易日**看 `indicator upsert failed` 的 warn 有沒有再出現。
+   ⚠️ **不列入完成條件**：`docker logs` 在這台機器上不耐久（容器會被重建，T-067 已記），
+   查不到 log **不代表**沒修好，也不代表修好了。判定一律以第 3、4 步的 DB 證據為準。
+
+⚠️ **不要硬性要求 `rsi14 = 50`**：那個值只有在「呼叫當下最新 120 根仍完全無波動」時才成立，
+隔天或有任何波動就會是別的值，**那不代表沒修好**。RSI 的語意修正由
+`indicator/rsi_test.go` 的固定輸入證明，不靠 live 的浮動資料。
+
+#### 完成條件
+
+1. 第 3 步兩項都通過（goose 版本 75、三欄精度）。
+2. 第 4 步的**兩個條件同時成立**：有更新的 1m candle，且 indicator 的 `ts` 前進到它。
+3. 把部署日期、`indicator_before_ts` / `candle_before_ts` 基準值與驗收結果補進本筆後收斂。
+
+**第 5 步是佐證，不是完成條件**——理由見該步的說明。
 
 ---
 

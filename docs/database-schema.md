@@ -162,13 +162,13 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
 | 欄位 | 類型 | 說明 |
 |------|------|------|
 | ma5/10/20/60 | DECIMAL(10,4) | 移動平均 |
-| rsi14 | DECIMAL(6,4) | RSI（0～100） |
+| rsi14 | DECIMAL(7,4) | RSI（0～100）。⚠️ **3 位整數位是必要的**：`avgLoss = 0` 時 RSI 就是 100，`DECIMAL(6,4)` 容不下它——2026-09-01 因此讓 2454 的指標整支寫不進去（原記於 `issue.md` I-101） |
 | macd / macd_signal / macd_hist | DECIMAL(10,4) | MACD 三線 |
 | bb_upper / middle / lower | DECIMAL(10,4) | 布林通道 |
 | atr14 | DECIMAL(10,4) | 平均真實波幅 |
 | vwap | DECIMAL(10,4) | 成交量加權均價 |
 | vol_ma20 | BIGINT | 20 日均量 |
-| vol_ratio | DECIMAL(6,4) | 量比（當日量 / MA20） |
+| vol_ratio | DECIMAL(23,4) | 量比（當日量 / MA20）。**沒有業務上界**：MA20 走整數除法且有 `ma > 0` 守門，分母最小是 1，所以 `ratio ≤ current_volume`，而 volume 是 `BIGINT`。19 位整數位是為了涵蓋非負 `int64` 的完整值域，讓「不會溢位」在建構上成立，而不是依實測值估一個夠用的上限 |
 
 ---
 
@@ -180,7 +180,7 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
 |------|------|
 | signal_type | `BREAKOUT`, `BREAKDOWN`, `VOLUME_SPIKE` |
 | direction | `BUY`, `SELL`, `WATCH` |
-| vol_ratio | 觸發時的量比 |
+| vol_ratio | 觸發時的量比。`DECIMAL(23,4)`，與 `indicator_snapshots.vol_ratio` **同一個來源、同一個型別**——只放寬其中一張表等於沒放寬 |
 | resistance / support | 觸發的阻力 / 支撐價位 |
 | trend | 當時趨勢狀態（`BULLISH`, `BEARISH`, `SIDEWAYS`） |
 | strength | 訊號強度，預設 1.0；有籌碼資料時會依 `chip_scores.signal` 上修或下修 |

@@ -9,7 +9,8 @@
 
 ## 這裡的 lifecycle 是哪一個 lifecycle
 
-專案裡有四套同名不同義的狀態詞彙（見 docs/todo.md T-044），最容易混淆的是這兩層：
+專案裡有四套同名不同義的狀態詞彙（見 docs/sr-zone-scoring.md
+「分層原則：lifecycle 不看 RR」），最容易混淆的是這兩層：
 
 - **單一事件**的狀態機（`event_engine.py` 的 `LIFECYCLE_CANDIDATE/CONFIRMED/ACTIVE/
   RESOLVED/EXPIRED`）——每個事件自己的生老病死，是本模組的**輸入**。
@@ -176,7 +177,8 @@ def resolve_lifecycle(
         and momentum_state == "MOMENTUM_CONFIRMED"
         and clear_zone_breakout
     ):
-        # **這裡原本還要求 `rr_gate.qualified`**（T-044 移除）。
+        # **這裡原本還要求 `rr_gate.qualified`**（見 docs/sr-zone-scoring.md
+        # 「分層原則：lifecycle 不看 RR」）。
         # 那讓同一段價格行為在 RR 不合格時被判成 CONFIRMED、合格時才是 CONTINUATION——
         # 事件事實被策略條件改寫。移除後 lifecycle 只描述「價格延續且動能確認且明確突破」，
         # RR 由 Decision Engine 在 entry gate 端處理。

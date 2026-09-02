@@ -178,7 +178,8 @@ def _zone_health_state(z: ZoneScore, interaction: Optional[dict[str, Any]] = Non
     **三者都在描述 zone，但問的是三個不同的問題**，這正是原本命名混亂的來源。
     值域也不同——這裡的 CONFIRMED 指「zone 被收復確認」，那裡的 CONFIRMED 指
     「收復事件已確認」。原名 `_zone_lifecycle` 與另外三套 lifecycle 同名不同義，
-    是這一塊難讀的主因，因此更名（見 todo.md T-044）。
+    是這一塊難讀的主因，因此更名（見 docs/sr-zone-scoring.md
+    「分層原則：lifecycle 不看 RR」）。
     """
     if z.recent_validation == RecentValidation.EXPIRED.value:
         return "INVALIDATED"
@@ -1032,7 +1033,8 @@ def _decision_semantic_pipeline(
     blocking_zone_ahead: bool,
     current_price: float,
 ) -> dict[str, Any]:
-    # 生命週期由獨立的 Lifecycle Engine 判定（見 lifecycle_engine.py 與 todo.md T-044）。
+    # 生命週期由獨立的 Lifecycle Engine 判定（見 lifecycle_engine.py 與
+    # docs/sr-zone-scoring.md「分層原則：lifecycle 不看 RR」）。
     # **它不吃 rr_gate**：RR 是進場與策略條件，不是事件事實。原本 CONTINUATION 的條件
     # 含 rr_qualified，等於讓策略條件改寫事件事實；移除後保守度改由下方的 entry gate 負責。
     lifecycle = resolve_lifecycle(

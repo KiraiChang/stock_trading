@@ -1,6 +1,7 @@
-"""Lifecycle Engine 的狀態機測試（todo.md T-044）。
+"""Lifecycle Engine 的狀態機測試。
 
 重點在**優先序**與**RR 獨立性**：前者決定同時成立時誰贏，後者是本次抽離的目的。
+設計依據見 docs/sr-zone-scoring.md「分層原則：lifecycle 不看 RR」。
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def _state(event_type: str, age_bars: int = 0) -> dict:
     }
 
 
-# ── 這是整個 T-044 的目的：lifecycle 不看 RR ────────────────────
+# ── lifecycle 不看 RR（見 docs/sr-zone-scoring.md）──────────────
 def test_continuation_only_needs_price_evidence():
     """延續的判定只看價格證據（跟進 ＋ 動能 ＋ 明確突破），與 RR 無關。
 
@@ -77,7 +78,8 @@ def test_widened_path_previously_testing_now_continuation():
 
     下游影響是 `action_state` 由 `CONDITIONAL_HOLD` 變成 `HOLD`，
     再被 `_position_action_condition` 原樣採用——**持有建議這條線上沒有 RR gate**
-    （entry 有，position 沒有）。詳見 docs/todo.md T-044 的行為改變清單。
+    （entry 有，position 沒有）。詳見 docs/sr-zone-scoring.md
+    「分層原則：lifecycle 不看 RR」的行為改變說明。
     """
     result = resolve_lifecycle(
         event_state_summary=_summary(active=[_state("INTRADAY_RECLAIM", age_bars=0)]),

@@ -15,7 +15,7 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-070 起算`。**（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：三個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
+- **編號只增不重用，`下一個新編號從 T-071 起算`。**（**T-070 於 2026-09-02 發出**，承接 `issue.md` I-102 收斂時未完成的執行期觀察。）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
@@ -47,6 +47,108 @@
 
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「已收斂」），
   不能有任何「見 T-0xx」形式的活指標。**本節自己會出現在輸出裡**，那是預期的。
+
+---
+
+### T-070：I-102 上線後的執行期觀察（部署已完成，尚無任何排程跑過）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待執行（程式碼已上線並通過三層測試，**只差看一個交易日的實際行為**） |
+| 優先度 | 中（第 1 段本身就是一次診斷，會把原本被吞掉的寫入失敗變成可見的 `partial`；**不看一輪就不知道現況有多少**） |
+| 分類 | Go / 排程 / 驗收 |
+| 建立日期 | 2026-09-02 |
+| 來源 | `issue.md` I-102 收斂時未完成的執行期觀察——**條目移除後這件事會沒有清單追蹤**（同 T-063、T-067、T-069 的教訓） |
+
+#### 背景
+
+I-102 的兩段已於 **2026-09-02 16:35** 部署（commit `a791054` ＋ `730f05f`）。
+現況規格已歸檔到 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」與
+[`api-reference.md`](./api-reference.md) 的兩條端點。
+
+**但部署在收盤後**，當天 16:35 之後只有 `sr_analysis`（17:00）會跑，
+而那條路徑不走本次改動的四個 `Evaluate` 呼叫點。**所以完全沒有執行期證據。**
+
+已核實的只有靜態層：
+
+| 檢查 | 結果 |
+|---|---|
+| binary 含兩段的新字串 | ✅ `evaluate_failed` / `signal_persist_failed` / `dedup_degraded` / `queue_failed` / `insufficient_data` / `watchlist_fetch` / `signal:emitted:` / `service temporarily unavailable` |
+| 舊的 fail-open 痕跡 | ✅ **`indicator upsert failed` 已從 binary 消失** |
+| 啟動 | ✅ migrations 75、redis 連上、scheduler 啟動，無 error／warn |
+
+#### 要做的事（下一個交易日）
+
+**1. 看 live 實際啟用的三個 job 的 `job_runs`**——`pre_market`（08:50）、
+`intraday`（09:00–13:30 每 5 分）、`daily_close`（15:00）。
+
+⚠️ **程式碼有四個 `Evaluate` 呼叫點，但 live 一輪只走得到三個。**
+兩條盤中路徑是**互斥**的：`runIntradayJob` 在 `HasIntradaySource()` 為真時直接轉給
+`runIntradayBatch`（`scheduler.go:506`），而 live 是 `YAHOO_ENABLED=true` /
+`FINMIND_INTRADAY_ENABLED=false`，所以**走的是 Yahoo 批次那條**。
+兩者共用同一個 `job_name`（`intraday`），從 `job_runs` 分不出來。
+
+⛔ **FinMind 的 `runIntradayJob` 那條在 live 觀察不到**，由單元測試承接
+（它與批次路徑共用 `evaluateSymbol` 與 `finishRunWithTally`，差別只在前半的行情抓取）。
+**不要把它列進 live 的完成條件**——那是一個永遠達不到的條件。
+
+```sql
+SELECT job_name, status, symbols_total, symbols_failed,
+       (started_at + interval '8 hours')::timestamp(0) AS start_cst, error
+FROM job_runs WHERE started_at > <部署後> ORDER BY id;
+```
+
+⚠️ **`partial` 變多不代表新版有 bug**——第 1 段的目的就是把原本被吞掉的失敗變成可見。
+依 `architecture.md` 的判別表分辨：
+
+* `symbols_failed > 0` ＋ `evaluate_failed:` → **硬失敗**（原本被吞掉的那些）
+* `symbols_failed = 0` ＋ `degraded:` → **降級**（第 2 段的新語意）
+
+**2. 抓抑制過頭**——這是第 2 段唯一「症狀比 `partial` 更難察覺」的風險方向
+（訊號被靜默少發）。比對當日 `signals` 新增筆數與前幾個交易日：
+
+```sql
+SELECT (ts + interval '8 hours')::date AS d, COUNT(*)
+FROM signals WHERE ts > now() - interval '10 days' GROUP BY 1 ORDER BY 1;
+```
+
+⚠️ **這比看 `partial` 更重要**。reservation 在 Redis 停用／退避／錯誤時一律**放行**
+（fail-open），所以它壞掉的方向偏向「該擋沒擋」；但 local map 那層若有誤，就會變成
+「不該擋卻擋」。
+
+**3. 確認沒有原始錯誤外洩**——若出現 `partial`，檢查 `job_runs.error` 只含
+stage 前綴與封閉值域的 reason code，**不含 DSN／主機位址／SQL 片段**。
+
+**4.（非必要）驗 API 三分支**——`POST /indicators/:symbol/compute` 對資料不足的標的
+應回 422；503 那格要製造持久化失敗才驗得到，**不值得為此在 live 造錯**，
+單元測試已覆蓋。
+
+#### 完成條件
+
+1. 至少一個完整交易日、**live 啟用的三個 job**（`pre_market` / `intraday` / `daily_close`）
+   的 `job_runs` 已判讀，且每一筆 `partial`（若有）都能用上述判別表歸類。
+2. 出現過的 `job_runs.error` 均無原始錯誤文字。
+
+⚠️ **`signals` 筆數是觀察指標，不是通過條件**（2026-09-02 review 修正——前一版把
+「沒有異常減少」列成完成條件，那不客觀：**每日訊號量本來就隨行情變動**，
+十日筆數證明不了 local reservation 沒有過度抑制）。
+
+**它要怎麼用**：當日筆數明顯偏低時，**它是啟動調查的訊號，不是結論**。往下查：
+
+* 該日 `signal generated` 的 log 筆數與 `signals` 表筆數是否一致——不一致代表
+  訊號有產生但沒落盤（那是 `db_persisted=false`，不是被抑制）。
+* ⛔ **不要指望 `duplicate signal suppressed by reservation` 這行 log**——它是
+  **Debug** 級（`signal/engine.go:141`），而 live 的兩個 core 都從 **Info** 起收
+  （`logging/logger.go:73-76`），**根本不會被寫出來**。
+  要讓「被 reservation 擋下」變成可觀測的證據，得先加 Info 級摘要或計數——
+  那是另一件事，不在本筆範圍。
+* 反過來，若當日行情本來就平淡（大盤波動小、`intraday` 全 `success`），
+  筆數偏低是正常的，不構成證據。
+
+⛔ **不要只憑筆數下結論，也不要因為筆數正常就認定 reservation 沒問題**——
+過度抑制若只影響少數 identity，總筆數看不出來。
+3. 把觀察結果補進本筆後收斂；若發現行為與
+   [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」不符，另立 issue 而不是改文件。
 
 ---
 

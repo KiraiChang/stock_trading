@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// 指標計算失敗分成三種，**呼叫端要分得開**（見 docs/issue.md I-102）：
+// 指標計算失敗分成三種，**呼叫端要分得開**（見 docs/architecture.md「寫入失敗的一致性契約」）：
 //
 //   - ErrInsufficientCandles：查詢成功，但根數不足以計算指標。是「輸入不夠」，
 //     不是故障——API 回 422、排程摘要記 insufficient_data。

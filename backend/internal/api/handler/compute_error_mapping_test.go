@@ -20,7 +20,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組守的是 docs/issue.md I-102 的 API 三分支契約。
+// 這一組守的是 docs/api-reference.md 兩條端點的三分支錯誤契約。
 //
 // **兩條端點（/indicators/:symbol/compute 與 /signals/:symbol/evaluate）共用
 // indicatorComputeError**，所以測分流本身就等於同時測兩條；另外各補一支

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Redis emission 操作的整合測試：對**隔離的拋棄式 Redis** 驗 Lua compare-and-delete
-# 等「只有真實 Redis 才驗得到」的語意（見 docs/issue.md I-102）。
+# 等「只有真實 Redis 才驗得到」的語意（見 docs/architecture.md「寫入失敗的一致性契約」）。
 #
 # 用法：
 #   scripts/test-redis-emission.sh            # 起一個拋棄式 Redis，跑完即刪
@@ -12,7 +12,7 @@
 #
 # 為什麼另開腳本而不是塞進 backend/scripts/test.sh：
 #   那支跑在沒有網路相依的容器裡，是**每次都要跑**的基本驗證。把外部服務加進去
-#   會讓整條驗證需要 Redis 才跑得動——I-102 的「測試接縫」那節明確要避免這件事。
+#   會讓整條驗證需要 Redis 才跑得動——那是刻意要避免的。
 #   所以整合測試預設 skip，只有這支腳本會設 REDIS_TEST_ADDR。
 set -euo pipefail
 

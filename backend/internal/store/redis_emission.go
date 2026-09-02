@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// 這個檔案是 docs/issue.md I-102 第 2 段用的三個 Redis 操作。
+// 這個檔案是 signal emission 用的三個 Redis 操作（見 docs/architecture.md「寫入失敗的一致性契約」）。
 //
 // **為什麼不沿用既有方法**：既有的 HSet / SAdd / Set / LPush 把三種完全不同的狀態
 // 折成同一個 nil——
@@ -18,7 +18,7 @@ import (
 //   - skipWrite()（READONLY 退避期間）  → return nil
 //   - 實際收到 READONLY                → handleWriteErr 設完退避也 return nil
 //
-// 於是 `err == nil` **既不代表寫成功，也分不出是哪一種跳過**。而 I-102 的裁決要求
+// 於是 `err == nil` **既不代表寫成功，也分不出是哪一種跳過**。而設計上要求
 // 「設定停用不算 degraded、READONLY 算 degraded」——不分開就落實不了。
 //
 // ⛔ **這三個操作只回封閉的 status，不要改回用 err == nil 推導。**

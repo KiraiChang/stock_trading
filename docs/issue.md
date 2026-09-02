@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-105` 起算。**（**I-103 / I-104 於 2026-09-02 發出**——後者由 I-102 實作 review 分出，其餘排程與 job 紀錄仍直接寫入原始錯誤；I-103 同日發出——由 I-102 計畫書 review 分出，Yahoo 批次盤中路徑給不出逐檔寫入失敗；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-106` 起算。**（**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-104（2026-09-02 發出，**下一個可用的是 I-105**——I-096 / I-098
+  檔案裡看得到的最大是 I-105（2026-09-02 發出，**下一個可用的是 I-106**；I-102 已於同日收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,7 +70,7 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-102 / I-103 / I-104 與下一個可用的 I-105），
+  本檔現有的 I-100 / I-103 / I-104 / I-105、已收斂的 I-102 與下一個可用的 I-106），
   那是預期的，不是殘留。
 
 ---
@@ -884,6 +884,87 @@ artifact 及其 SHA-256」寫進
 
 ---
 
+### I-105：`verification_unavailable` 的成因被丟棄，live 的 `partial` 無法診斷
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 中（**不影響判定正確性**——三種結論仍分得開；但 `partial` 出現時查不出為什麼，等於「壞了卻不在明處」） |
+| 分類 | Go / 排程 / 市場資料 / 可觀測性 |
+| 發現日期 | 2026-09-02 |
+| 來源 | `2867` 跨月當天 live 首次出現 `partial`（原記於 `todo.md` T-067 的觀察，該筆已收斂） |
+
+#### 現象
+
+`candle_gap_detection.go:535-539`：
+
+```go
+traded, err := s.exchangeReference.StockTradedDates(ctx, sc.symbol, sc.market, mc.year, mc.month)
+if err != nil {
+    unavailable++
+    mergeAttempt(attempts, sc.symbol, now, store.VerificationUnavailable, false)
+    continue        // ← err 到此為止，沒有任何 log
+}
+```
+
+**`err` 被完全丟棄。** 而 `market/exchange_reference.go` 產生的錯誤其實很具體：
+
+* `verification unavailable: twse stat=%q (symbol=%s)`（`:526`）
+* `... %s status %d`（`:253`）、`... %s decode: %v`（`:263`）、`... request failed: %v`（`:247`）
+* `... 未知市場別 %q（symbol=%s）`（`:501`）
+
+**診斷資訊存在，但在那一行被扔掉**，最後只剩 `job_runs.error` 的
+`verification_unavailable: 1 筆驗不了` 與 log 的 `unavailable=1` 兩個計數。
+
+⚠️ 這與 [`architecture.md`](./architecture.md)「三種結論必須分得開」的宣示相牴觸：
+那節寫「所有讀不懂的回應一律 `verification_unavailable`，**不猜測、壞在明處**」——
+前半做到了，**後半沒有**。
+
+#### 2026-09-02 的實例（live 首次 `partial`）
+
+| 觀察 | 值 |
+|---|---|
+| `job_runs` | `partial`、135/0、16:25:03→16:25:10（6.41 秒）、`error` ＝ `verification_unavailable: 1 筆驗不了` |
+| log | `pool=135 candidates=9 gap=0 unavailable=1 deferred=0 breaker_skipped=0` |
+| `candle_verification_state` | `2867` 由 `verified` 轉為 **`unavailable`**，`consecutive_failures` **＝ 0** |
+
+**候選數 9 與跨月的預測完全吻合**（視窗 08-19～09-01，`2867` 日 K 止於 08-19，
+缺 08-20/21/24/25/26/27/28/31 ＋ 09-01，橫跨 8、9 兩個月）。
+
+⚠️ **`consecutive_failures = 0` 不是 bug，它是證據**：依合併規則
+（`candle_gap_detection.go:686-694`、`store/candle_verification_repo.go:55-56`）
+「有任何成功 → 歸零」，而 `last_verified_at` 也更新成 16:25:08。
+**所以兩個月份群組裡確實有一組成功、一組失敗。**
+
+**但查不出是哪一組失敗、更查不出為什麼。** 情況證據指向 9 月那組
+（前三個交易日只有 8 月、全部 `verified`，今天多了 9 月才出現 unavailable），
+⛔ **那是推論不是實測**——而這正是本筆要修的東西。
+
+#### 影響
+
+* live 出現 `partial` 時無法判斷是暫時性（限流、逾時）還是結構性（端點格式改變、
+  市場別判斷錯誤），也就無法決定要不要處置。
+* 跨月是**每個月月初都會發生**的常態，這個形狀會反覆出現。
+
+#### 可能做法
+
+* 在 `unavailable++` 那一行記一筆帶 `symbol` / `market` / `year` / `month` / `error`
+  的 **Warn** log。
+* 或更進一步：把**代表性的 reason** 併進 `job_runs.error` 的
+  `verification_unavailable:` 前綴後面。
+  ⚠️ **若要這樣做，必須先過安全分類器**——`job_runs.error` 是使用者可見面
+  （`GET /scheduler/status` → 前端 `Scheduler.svelte:227` 原樣渲染），
+  端點錯誤可能帶 URL 與回應片段。見 [I-104](#i-104其餘排程與-job-紀錄仍直接寫入原始錯誤可從前端外洩連線細節)，
+  那筆已經在處理同一類問題。
+
+#### 關閉條件
+
+live 再次出現 `verification_unavailable` 時，**能從 log 或 `job_runs` 判斷出成因類別**
+（哪一檔、哪一個年月、哪一種失敗）；並補一支測試：`StockTradedDates` 回錯時
+確實記錄了成因，而不只是計數加一。
+
+---
+
 ### I-104：其餘排程與 job 紀錄仍直接寫入原始錯誤，可從前端外洩連線細節
 
 | 欄位 | 內容 |
@@ -936,7 +1017,7 @@ I-102 定下的規則是「寫進使用者可見的 error 欄位前，一律過�
 `append(errParts, err.Error())` 的形式**，比單純的 `finishRun(..., err.Error())` 更容易漏掉——
 搜尋 `err.Error()` 抓得到，但只看 `finishRun` 的呼叫點抓不到。
 
-#### 為什麼不併進 I-102
+#### 為什麼當初沒有併進 I-102（已收斂）
 
 I-102 的範圍是「四個 `Evaluate` 路徑的寫入失敗語意」。把 7 個 job ＋ 2 個 handler
 一起改會讓那筆的受影響面翻倍，而且**驗收方式不同**——本筆純粹是輸出脫敏，
@@ -944,10 +1025,12 @@ I-102 的範圍是「四個 `Evaluate` 路徑的寫入失敗語意」。把 7 �
 
 #### 可能做法
 
-* 沿用 I-102 已建立的 `safeJobErrorReason` 與 `safeJobErrorSummary`，逐處替換。
+* 沿用**已存在的** `scheduler.safeJobErrorReason` 與 `safeJobErrorSummary`，逐處替換
+  （設計見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」）。
 * ⚠️ **不要只改 `finishRun` 的呼叫點**——上面那三處字串拼接形式同樣要處理。
 * handler 那兩處要決定分類器放哪裡：`safeJobErrorReason` 目前在 scheduler 套件
-  （I-102 的裁決是「它是寫進 job_runs 前的最後一道，與 `finishRunDegraded` 同層」）。
+  （既有的裁決是「它是寫進 job_runs 前的最後一道，與 `finishRunDegraded` 同層」，
+  見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」）。
   兩個 handler 也要用的話，得抽到共用位置——**那是這筆要做的第一個決定**。
 
 #### 關閉條件
@@ -965,7 +1048,7 @@ I-102 的範圍是「四個 `Evaluate` 路徑的寫入失敗語意」。把 7 �
 | 欄位 | 內容 |
 |---|---|
 | 狀態 | 待修復 |
-| 嚴重度 | 中（**live 走的正是這條路**；逐檔寫入失敗會靜默，`job_runs` 照樣 `success`。與本檔的 **I-102** 是同一類「失敗被吞掉」，但發生在**更上游的行情抓取層**） |
+| 嚴重度 | 中（**live 走的正是這條路**；逐檔寫入失敗會靜默，`job_runs` 照樣 `success`。與 **I-102**（已收斂）是同一類「失敗被吞掉」，但發生在**更上游的行情抓取層**） |
 | 分類 | Go / 排程 / 市場資料 / 可觀測性 |
 | 發現日期 | 2026-09-02 |
 | 來源 | I-102 計畫書 review——要定義 `fetchFailed` 集合時發現這條路徑給不出逐檔資訊 |
@@ -984,19 +1067,21 @@ I-102 的範圍是「四個 `Evaluate` 路徑的寫入失敗語意」。把 7 �
 **所以問題不是「完全沒有訊號」，而是「訊號不可用」**：知道少了幾檔，
 但不知道是哪幾檔、也不知道該不該告警。
 
-而呼叫端 `runIntradayBatch`（`scheduler.go:532-537`）**只有在整批呼叫回 error 時**才
+而呼叫端 `runIntradayBatch`（`scheduler.go:580-586`）**只有在整批呼叫回 error 時**才
 `failed += len(batch)`。所以「批次成功、但其中幾檔沒寫進去」這個形狀，
 **`job_runs` 完全看不到**。
 
 ⚠️ **live 走的就是這條路**：`YAHOO_ENABLED=true`、`FINMIND_INTRADAY_ENABLED=false`，
-`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`scheduler.go:461-464`）。
+`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`scheduler.go:506-513`）。
 FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——**但那條在 live 沒有啟用**。
 
 #### 影響
 
 * `job_runs.symbols_failed` 在 live 的盤中路徑**只有批次粒度**，不是逐檔。
-* 本檔 **I-102** 要定義的 `fetchFailed` 集合因此在這條路徑上**無法精確**——
-  該筆已明確把這個盲區排除在範圍外，並把 union 契約限定為「scheduler 目前識別得到的失敗」。
+* `job_runs` 的 `fetchFailed` 集合因此在這條路徑上**無法精確**。
+  該契約（`symbols_failed` ＝ `fetchFailed ∪ evaluateFailed`，且**限定為 scheduler 目前
+  識別得到的失敗**）現況見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」；
+  這個盲區當初就被明確排除在該筆範圍外（原記於 `issue.md` I-102，已收斂）。
 
 #### 可能做法（待評估）
 
@@ -1011,899 +1096,3 @@ FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——
 `runIntradayBatch` 能區分「整批失敗」「逐檔寫入失敗」「該檔本來就沒有資料」三種情形，
 並讓前兩種在 `job_runs` 可辨識；或明確決定不修，轉為已知限制並在
 [`architecture.md`](./architecture.md) 寫明 `symbols_failed` 在批次路徑的粒度限制。
-
----
-
-### I-102：寫 DB 失敗後照樣寫 Redis／推 WebSocket，DB 與快取會靜默不一致
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **兩段皆已實作／待 review（2026-09-02），尚未部署**。第 1 段＝indicator fail-fast ＋ 四個 scheduler 呼叫點接住 `Evaluate` ＋ 兩條 API 的三分支錯誤契約。第 2 段＝signal degraded-success ＋ 獨立 dedup（七步流程）＋ Redis 三個操作的明確語意 ＋ scheduler 收集 degraded。計畫書全文保留供 review |
-| 嚴重度 | 中（**只有 warn log，沒有錯誤傳播、也沒有可操作的告警**；使用者看到的資料會依讀取路徑而不同） |
-| 分類 | Go / 錯誤處理 / 快取一致性 |
-| 發現日期 | 2026-09-01 |
-| 來源 | 原 I-101（`rsi14` / `vol_ratio` 型別溢位，已於 2026-09-01 修復並收斂）的 review 分出——放寬型別只消掉已知的兩種溢位，這個行為本身沒被處理 |
-
-#### 現象
-
-兩個引擎都是「寫 DB 失敗只記 warn，然後照樣往下走」：
-
-| 位置 | 失敗後仍然做的事 |
-|---|---|
-| `indicator/engine.go:68` | 寫 Redis（`cacheToRedis` 排在後面）、回傳成功的 snapshot、讓 signal engine 繼續用它 |
-| `signal/engine.go:99` | `redis.LPush("signal:queue")`、`BroadcastFn` 推 WebSocket、記 `signal generated` |
-
-**後果是同一份資料依讀取路徑而不同。** 它不是完全無聲——兩處都會記一行 `log.Warn`——
-但**僅止於此**：錯誤不往上傳、呼叫端拿到的是成功、沒有失敗計數或告警可以觸發處置，
-所以除非有人正好在翻 log，否則不會被發現：
-
-* `GET /api/v1/indicators/:symbol`（`api/handler/indicator.go:25`）**只讀 DB**——
-  會回舊值，而且是 200 OK。
-* Redis 與 WebSocket 拿到的是新值。
-* `signals` 表少一列，但 `signal:queue` 與前端推播都有那一筆——
-  **訊號歷史與實際發出的訊號對不起來**。
-
-**2026-09-01 的 2454 就是這個行為的一次實證**：`rsi14` 算出 100 卻塞不進當時的
-`DECIMAL(6,4)`，於是 11:24 之後 API 一直回舊指標，而唯一的痕跡是那行 warn。
-（型別本身已放寬並收斂，見 [`database-schema.md`](./database-schema.md)；
-**但那只消掉了那一種溢位，本筆的行為沒有改變**。）
-
-##### live 實證：整個盤中 66 輪排程都回報成功（2026-09-01 收盤後查證）
-
-當天 live 的完整數字如下，**它同時證實了「靜默」與「排程看不見」兩件事**：
-
-| 觀察 | 值 |
-|---|---|
-| `2454` `indicator_snapshots` 最新 `ts` | **11:24**（`rsi14 = 98.7805`——再往上一格就是 100） |
-| `2454` `candles` 最新 `ts`（1m） | **13:25** |
-| 兩者之間的 1m K 棒 | **66 根，全部沒有對應的 indicator 列** |
-| 其餘 10 檔（`0050` / `2330` / `5490` …）indicator 與 candle | **全部對齊** |
-| 同期間 `intraday` 排程 | **66 輪，每一輪都是 `success`、`symbols_total=11`、`symbols_failed=0`** |
-
-⛔ **這 66 筆 `success` 就是本筆完成條件第 2 項要消滅的東西。** 排程逐檔呼叫
-`Compute`／`Evaluate`，單一 symbol 的寫入失敗既不回傳、也不計數，於是
-`job_runs` 一整天都顯示「11 檔全部成功」，而實際上有一檔從 11:24 起就沒再落盤過。
-**光看 `/scheduler/status` 或 `job_runs` 完全看不出來**——要比對
-`indicator_snapshots` 與 `candles` 的最新 `ts` 才會發現。
-
-⚠️ **但最新 `ts` 比對只抓得到「還在持續落後」這一種**，不要外推成通用的完整性檢查：
-中段漏掉幾筆之後只要成功寫入一筆，兩邊的最新 `ts` 就會重新對齊，缺口卻永久留著。
-而且三張表與 K 棒**不是一對一**（`2454` 於 2026-09-02 09:05–10:00 實測：
-candles 56 根、`indicator_snapshots` 12 列、`signals` 5 列）。
-要檢查某段時間有沒有缺列，得依各表自己的寫入契約算預期集合——
-見 [`development-workflow.md`](./development-workflow.md)「挑窗口」那節的對照表。
-
-⚠️ **這 66 輪實際走的路徑是 `Scheduler → signalEng.Evaluate → indicator.Compute`**
-（2026-09-01 review 修正——前一版寫成 `ComputeAll` 是錯的，**production scheduler 從來沒有
-呼叫過它**；`ComputeAll` 與 `EvaluateAll` 目前在 `backend/` 內除了測試以外都沒有呼叫者）。
-失敗被吞掉的地方有兩層，兩層都要處理：
-
-**第一層**：`indicator/engine.go:68` 的 `Upsert` 失敗只記 `log.Warn`，`Compute` 照樣回傳成功的
-snapshot，所以 `Evaluate` 收到的是成功。
-
-**第二層**：四個 scheduler 呼叫點**都是 `s.signalEng.Evaluate(ctx, sym, tf)`，回傳值連接都沒接**。
-各路徑的 `failed` / `lastErr` **只統計自己那條行情抓取／回補的失敗**，來源各不相同：
-
-| 路徑 | 函式 | `failed` 的唯一來源 | `Evaluate` |
-|---|---|---|---|
-| 盤前預熱 | `runPreMarket`（`:420`） | `BackfillHistory`（`:441`） | `:445`，丟棄 |
-| 盤中（FinMind 分 K） | `runIntradayJob`（`:456`） | `FetchAndStoreMinute`（`:487`） | `:501`，丟棄 |
-| **盤中（Yahoo 批次）** | `runIntradayBatch`（`:508`） | `FetchAndStoreIntradayBatch`（`:532`，以**整批**計 `failed += len(batch)`） | `:542`，丟棄 |
-| 收盤 | `RunDailyClose`（`:549`） | `FetchAndStoreDaily`（`:564`） | `:569`，丟棄 |
-
-⚠️ **這次 66 輪走的是 Yahoo 批次那條，不是 `FetchAndStoreMinute`**——live 的
-`YAHOO_ENABLED=true`、`FINMIND_INTRADAY_ENABLED=false`，而 `runIntradayJob` 在
-`HasIntradaySource()` 為真時會直接轉給 `runIntradayBatch`（`:461-464`）。
-該路徑的抓取與評估**分成兩個迴圈**（先跑完所有批次，再逐檔 `Evaluate`），
-所以失敗統計與 `Evaluate` 在結構上完全不相干。
-
-**四條路徑的共同問題是同一個**：只統計行情抓取／回補的失敗，**完全沒有統計 `Evaluate`
-的失敗**，所以 `finishRun` 永遠看不到指標或訊號寫入的問題。
-
-**所以 indicator 改成 fail-fast 只解掉第一層**：`Compute` 會回錯、`Evaluate` 會往上傳，
-但**四個 scheduler 呼叫點仍然必須改成接住 `Evaluate` 的 error 並彙整到 `job_runs`**，
-否則 66 輪 `success` 的現象一模一樣。這正是本筆完成條件第 2 項的內容。
-
-（`ComputeAll` / `EvaluateAll` 裡同樣的吞錯寫法可以順手一起修，但**它們不在這次實證經過的
-路徑上**，不要把它們當成主要修法。）
-
-**影響面剛好被限制住是運氣不是設計**：只有 `2454` 的 `rsi14` 撞到那個上限，
-所以只有它靜默停擺。同樣的行為換成 DB 短暫不可用，會是整池一起靜默。
-
-#### 裁決（2026-09-01）：採分路徑一致性契約
-
-採原方案 (3)，但不是單純把 warn 升級，而是把兩條路徑的成功語意分開定義：
-
-* **indicator 採 fail-fast**：DB `Upsert` 是成功的必要條件。失敗時回傳可辨識的 persistence
-  error，**不得**寫 Redis，也不得讓 signal evaluation 繼續使用這份未落盤 snapshot。
-  手動 API 將此類錯誤映射為 **503**，而不是目前籠統的 422。
-* **signal 採 degraded-success**：即時送出優先於歷史完整性。`signals` 的 `Insert` 失敗時
-  仍可嘗試 Redis queue 與 WebSocket，但結果必須明示哪些階段成功。
-  這個決定**明示接受局部故障期間可能永久缺少 signal 歷史**。
-
-##### ⚠️ degraded-success 涵蓋的是「局部失敗」，不是 DB outage
-
-**2026-09-02 review 修正——前一版的理由寫成「DB 短暫故障不應同時中斷 signal 即時推播」，
-那是錯的。** `Evaluate` 的第一行就是 `indicator.Compute`（`signal/engine.go:58-61`），
-所以 **indicator 一旦 fail-fast，全域 DB outage 會在那裡就 return，signal 根本不會被評估**，
-Redis queue 與 WebSocket 一樣不會被碰到。
-
-| 故障形狀 | 實際行為 |
-|---|---|
-| **全域 DB 不可用** | `Compute` 讀 candles 或 `Upsert` 就失敗 → `Evaluate` 早退 → **沒有推播**。degraded-success 這條路走不到 |
-| **`signals` 單表／單欄位／單筆失敗**（indicator 落盤正常） | `Insert` 失敗 → **走 degraded-success**：照樣推播，但標記 `db_persisted=false` |
-
-**所以真正的取捨是**：「`signals` 寫不進去時，不要因為歷史缺一列就吞掉一個已經算出來的
-即時訊號」——**不是**「DB 掛掉時保住推播」。這個範圍**剛好涵蓋 I-101 那種形狀**
-（`signals.vol_ratio` 的型別溢位就是單欄位失敗），也是本筆最可能真實遇到的情境。
-
-不採兩條路徑全面 fail-fast，是因為單表失敗不該連帶吞掉即時訊號；也不採兩條路徑都繼續，
-是因為 indicator API 直接讀 DB，同一 snapshot 在 DB 與 Redis 不一致會立即形成對外矛盾。
-
-⚠️ **實作與測試要照上表分兩種情境造**，不要只造「DB 全掛」——那個情境測不到 degraded 路徑。
-
-#### 目標流程與回傳契約
-
-**Indicator：** `Compute` 成功計算 → DB `Upsert` → Redis cache → 回傳 snapshot。
-DB 失敗就停在該步；Redis 失敗的既有容錯是否維持，實作時需明確保留或另案處理，不得把
-「Redis disabled／READONLY backoff 回 nil」誤記成已成功寫入。排程器應繼續處理其他 symbol，
-但該 symbol 必須計為失敗，並讓 `job_runs` 呈現 partial／failed，而不是整輪看似成功。
-
-**Signal：** indicator 成功 → 評估訊號 → DB `Insert` → Redis queue → WebSocket broadcast。
-回傳值需至少能表達：
-
-| 欄位 | 語意 |
-|---|---|
-| `signal_generated` | 本次是否產生訊號 |
-| `db_persisted` | signal history 是否成功落 DB |
-| `queue_enqueued` | 是否確認加入 Redis queue |
-| `broadcast_attempted` | 是否呼叫 broadcast；這只代表嘗試／送入程序內流程，不宣稱客戶端已收到 |
-| `degraded` | 任一必要持久化或分發步驟失敗（等同 `len(degraded_stages) > 0`） |
-| **`degraded_stages`** | **降級的分類清單**，值域為 `signal_persist_failed` / `queue_failed` / `dedup_degraded`。⚠️ **沒有這個欄位，scheduler 就產不出分類摘要**——只有一個布林時，`job_runs.error` 無法區分是哪一種降級 |
-| **`stage_errors`**（內部用） | `map[Stage]error`——**各 stage 的實際錯誤**。⚠️ **只有 stage 分類拿不到錯誤內容**：`job_runs.error` 的摘要要附**代表 reason code**，而 reason code 得由原始 error 分類而來——光有 `degraded_stages` 只能產出數量。**這是 Go 端的內部欄位，不進對外 JSON**——但 `json:"-"` **不足以防外洩**，見下方「錯誤訊息的外洩邊界」 |
-
-Signal API 在訊號已產生但 DB 寫入失敗時仍可回 200，但回應必須帶上述降級資訊；沒有 retry
-worker 時不得用 202 暗示稍後一定完成。若連 duplicate lookup 都因 DB 故障而失敗，仍要有一個
-**不依賴 signal DB 的短期 emission dedup**（以目前 15 分鐘 cooldown 為界），避免每次排程都
-重複推送同一訊號。`signal:queue` 目前沒有 consumer，不能把它描述成補寫 DB 的 retry 機制。
-
-#### 獨立 dedup 的設計（2026-09-02 補完）
-
-⚠️ **前一版只在風險段寫「必須定義 Redis 不可用時的行為」，那不是設計。**
-沒有下列裁決，result contract 與測試都沒有唯一答案。
-
-**為什麼需要它**：現行 `shouldSuppressDuplicate()`（`signal/engine.go:118`）靠
-`signals.GetBySymbol` 讀 DB 判重，**失敗時 fail-open**（`:86-88` 只記 warn 就往下走）。
-於是 `signals` 寫不進去時，判重與寫入**同時失效**——每一輪排程都會重新推送同一個訊號。
-
-| 項目 | 裁決 |
-|---|---|
-| **儲存位置** | Redis，key `signal:emitted:{symbol}:{identity}` |
-| **identity key** | 由 `sameSignalIdentity()` 現有的比對欄位推導（`signal_type` ＋ `direction` ＋ 該型別用到的價位）。⛔ **不要另立一套**，否則兩層判重對「同一個訊號」的定義會分歧 |
-| **原子 check-and-reserve** | `SET key <uuid_token> NX PX <cooldown_ms>`。**用 `NX` 而不是先 GET 再 SET**，多 instance 才不會同時放行。⚠️ **值是 UUID token 不是時間戳**，釋放時要靠它做 compare-and-delete。⛔ **API 必須回明確狀態，不能回 `(bool, error)` 再靠 `err == nil` 判斷**，見下 |
-| **TTL** | ＝ `signalCooldown`（現值 15 分鐘，`signal/engine.go:21`），自動過期，不需要清理 |
-| **何時保留／釋放** | **送出前先 reserve**；若 `queue_enqueued == false` **且** `broadcast_attempted == false`，以 compare-and-delete 釋放。⚠️ **判準是「有沒有嘗試」不是「有沒有成功」**——`BroadcastFn` 沒有回傳值（`signal/engine.go:34`），成敗根本表達不了。⚠️ **釋放只在「`signals.Insert` 也失敗」時真的有效**，見下 |
-| **與 DB 判重的順序** | ① DB 判重成功且說抑制 → 抑制、**不 reserve**；② DB 判重成功且說放行 → reserve 後送出；③ **DB 判重失敗（現在會 fail-open）→ 直接進 reserve**，由它擋下重複 |
-
-⚠️ **通過 DB 判重時也要 reserve**（上表第 ②列）——否則 cooldown 中途 DB 才掛掉時，
-Redis 裡沒有那筆保留，重複推送照樣發生。
-
-##### 三個必須先定義的邊界（2026-09-02 review 補上）
-
-**(a) 價位的 canonicalization——DB 與 Redis 必須用同一個定義**
-
-`sameSignalIdentity()` 現在用 `samePrice()` 的 `math.Abs(a-b) < 1e-6`（`signal/engine.go:151-153`）
-做**容差比較**，而 Redis key 需要的是**離散字串**。兩者各自為政時，同一組價位可能
-DB 判「同一訊號」、Redis 判「不同訊號」（或反之），判重就會出現破口。
-
-**裁決：只保留一個定義。** 新增
-
-```
-signalIdentityKey(sig) = symbol | signal_type | direction | canonicalPrice(該型別的價位)
-canonicalPrice(f)      = strconv.FormatFloat(math.Round(f*1e6)/1e6, 'f', 6, 64)
-```
-
-價位欄位依型別選取，與現行 `switch` 一致：`BREAKOUT` → `Resistance`；
-`BREAKDOWN` / `SUPPORT_BOUNCE` → `Support`；其餘型別不帶價位。
-
-**並把 `sameSignalIdentity()` 改成比較這個 key**，而不是留兩套。
-⚠️ **這會在 1e-6 邊界上微幅改變 DB 判重的語意**（原本的容差比較與量化後的字串相等
-在剛好差 ~1e-6 時可能不同調）。**這是刻意的取捨**：一個定義的可預測性，勝過兩個定義在
-邊界上各自正確。要有測試釘住量化行為與型別選欄。
-
-**(b) Redis 復原後不得繞過還沒過期的 local reservation**
-
-Redis 故障期間 reservation 寫在 process 內 map；Redis 一旦復原，**若只查 Redis 就會看不到
-那些還在 TTL 內的 local reservation**，於是同一個訊號在 cooldown 內被重複推送——
-故障復原的當下正是最容易重複的時刻。
-
-**裁決：先 local、後 Redis，五步一條路，不得改寫成別的順序。**
-
-前一版寫成「先查 local → Redis `SET NX` 成功後再寫 local」，那**沒有定義跨儲存的競爭**
-（2026-09-02 review 修正）：在第一個 goroutine 等待 Redis 回應的空窗裡，
-另一個 goroutine 可能因 Redis 暫時失敗而先取得 local reservation；等第一個的 Redis 成功回來，
-兩邊都認為自己拿到了，**同時放行**。
-
-**唯一流程：**
-
-| 步 | reservation API 的結果 | 動作 | degraded |
-|---|---|---|---|
-| 1 | — | **以 UUID token 原子取得 local reservation**（單一操作，見下方 mutex 規則） | — |
-| 2 | — | local **沒取得** → **抑制**，結束（不必問 Redis） | — |
-| 3 | `reserved` | **兩邊都保留** → **放行** | 無 |
-| 4 | `already_exists` | 以 compare-and-delete **回滾自己的 local token** → **抑制** | 無 |
-| 5 | `disabled`（`rdb == nil`，設定如此） | **保留 local reservation** → **放行** | **無**——設定狀態不是故障 |
-| 6 | `backoff`（READONLY 退避中，或本次就是 READONLY 錯誤） | **保留 local reservation** → **放行** | **`dedup_degraded`** |
-| 7 | `error`（其他非預期錯誤） | **保留 local reservation** → **放行** | **`dedup_degraded`** |
-
-⚠️ **第 5 與第 6 步的差別是本筆的既有裁決，不能合併**（2026-09-02 review 補上——
-前一版只有「成功／已存在／非預期錯誤」三個分支，把這兩種都漏了）：
-Redis **設定停用**是預期狀態，**不算 degraded**；**READONLY backoff** 是非預期失敗，
-**算 `dedup_degraded`**。兩者在現有 client 裡長得一模一樣（都回 `nil`），所以**必須靠
-reservation API 自己回報狀態**，見下。
-
-⚠️ **第 6 步只涵蓋 reservation 這一階段。** 同一輪稍後的 `LPush` 若也因 backoff 被跳過，
-那是**另一個 stage**，記 `queue_failed`，兩者可以同時出現。
-
-**這個順序的好處是 mutex 不必跨越 Redis 網路呼叫**——local 那一步自己就是完整的臨界區，
-Redis 抖動也不會讓兩邊同時放行（第 4 步負責回滾）。
-
-⛔ **第 1 步的「查 ＋ 寫」必須在同一個 mutex critical section 內完成。**
-寫成「先查、放開鎖、再寫」時，兩個 goroutine 會同時查無資料而一起通過第 1 步。
-介面上就設計成單一操作（`localReserve(key, token, ttl) (ok bool)`），
-**不要暴露分開的 `get` / `set`**，避免呼叫端組錯。
-
-* local map 用與 Redis **相同的 key 與 TTL**。
-
-  ⛔ **不能只做「讀到同一個 key 才刪」的惰性過期**（2026-09-02 review 修正——
-  前一版就是這樣寫的）：identity 帶價位，**價位一變就是新的 key**，
-  舊 key 再也不會被讀到，於是永遠不會被清掉——長時間執行下 map 會**持續成長**。
-
-  **裁決：定期整掃，只清除已過期項目**（2026-09-02 review 定案——前一版留了「二選一」，
-  其中的容量上限方案會破壞 cooldown 保證，見下）。
-
-  在 `localReserve` 的 mutex 內，**每分鐘至多一次**掃除**所有已過期**的項目
-  （用上次清理時間當節流，不另外開 goroutine）。
-
-  ⛔ **不採容量上限＋淘汰最舊項目。** Redis 處於 `disabled` / `backoff` 時，
-  **local map 是唯一的判重層**；淘汰一個**尚未過期**的 reservation 會讓同一個 identity
-  在 cooldown 內再次放行——**直接違反 dedup 契約**，而且正好發生在保證最弱的時候。
-  真要加容量上限，就得另外裁決「容量滿且全部未過期」時要**抑制新訊號**還是**接受重複**，
-  兩者都有業務影響，**不在本筆範圍**。
-
-  ⚠️ **成本的正確說法**：整掃仍由**某一次** `localReserve` 支付 O(n)，
-  只是**掃描頻率有上界**（每分鐘一次）。**不需要背景 goroutine**，
-  但不能說「不會讓清理成本落在單一次呼叫上」——前一版那句是錯的。
-* 第 4 步的回滾**同樣是 compare-and-delete**（只在值等於自己的 token 時才刪），
-  理由與 Redis 端相同。
-
-**(c)「送出成功」的定義，以及釋放時的 compare-and-delete**
-
-`BroadcastFn` 的簽章是 `func(symbol string, sig *store.Signal)`——**沒有回傳值**
-（`signal/engine.go:34`），所以**無法證明客戶端收到**，只能證明呼叫完成。
-
-**裁決：**
-
-* **`broadcast_attempted` ＝「`BroadcastFn` 非 nil 且已回傳」**，語意就是 *delivery
-  attempted*，**不宣稱 delivered**。`api-reference.md` 要照這個措辭寫。
-
-  ⛔ **本筆沒有「broadcast 失敗」這個狀態，全文不得使用該說法**（2026-09-02 review 修正）。
-  `BroadcastFn` 的簽章是 `func(symbol string, sig *store.Signal)`，**沒有回傳值**
-  （`signal/engine.go:34`），所以只分得出「有嘗試／沒嘗試」，**判定不了成敗，
-  更判定不了使用者有沒有收到**。要能觀測 broadcast 失敗，就得改 callback 與 Hub 的
-  回傳契約——**那會擴大本筆範圍，不在這次做**。
-* **保留 reservation 的條件**：`queue_enqueued`（真的寫進 Redis）**或** `broadcast_attempted`
-  任一成立。
-* **兩者都沒成立才釋放**，而且**必須是 compare-and-delete**：reserve 時寫入一個
-  **reservation token**，釋放時只在**值仍等於自己的 token** 時才刪。
-
-  ⛔ **token 一律用 UUID**（2026-09-02 review 裁決——前一版還列了 `runID+ts` 當選項，那不可行）：
-  signal engine 與手動 API **不一定有 scheduler 的 run ID**，而且**同一根 candle 的 `ts`
-  可以被重複評估**，兩者組不出唯一值。`github.com/google/uuid v1.6.0` **已在 `go.mod`**
-  且已被 `api/handler/sr_zones.go` 使用，直接用即可，不必新增相依。
-  ⛔ **不要用裸 `DEL`**——舊請求的釋放會刪掉後來那次已經成立的新 reservation，
-  等於自己打開重複推送的破口。
-  ⛔ **也不要用「`GET` 比對後再 `DEL`」**（2026-09-02 review 修正——前一版把它列為可行方案，
-  那是錯的）：兩個指令之間 reservation 可能已經過期並被別人重新取得，
-  於是照樣刪掉別人的。**Redis 端必須是原子的 compare-and-delete**——
-  用 **Lua 腳本**（`if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) end`）
-  或 `WATCH` 交易，二選一。local map 的比對與刪除同樣要在**同一個 critical section** 內。
-
-##### ⚠️ reservation API 不能沿用現有 client 的 `nil` 語意
-
-**2026-09-02 review 補上。** 現有 `RedisClient` 把**三種完全不同的狀態折成同一個 `nil`**：
-
-* `rdb == nil`（設定停用）→ `return nil`（例如 `Set` 在 `store/redis.go:126-128`）；
-* `skipWrite()`（READONLY 退避期間）→ `return nil`（`:129-131`）；
-* **實際的 READONLY 錯誤** → `handleWriteErr` 設定退避後**也 `return nil`**（`:151-154`）。
-
-所以 `err == nil` **既不代表寫成功、也分不出是哪一種跳過**——這正是 `LPush` 那個坑的同一個成因。
-
-**裁決：reservation 走自己的 API，回封閉的結果值域**：
-
-```
-type ReserveResult int   // reserved / already_exists / disabled / backoff / error
-```
-
-上表第 3～7 步就是照這五個值分支。**`disabled` 與 `backoff` 必須分得開**，否則
-「設定停用不算 degraded、READONLY 算 degraded」這條裁決在實作層無從落實。
-
-⛔ **compare-and-delete 也要走明確語意**，但**值域與 reservation 不同**：
-`deleted` / `not_owner` / `disabled` / `backoff` / `error`。
-
-**本筆新增或調整的三個 Redis 操作**（reservation / enqueue / compare-and-delete）
-**一律回「status ＋ cause」**，例如：
-
-```
-type ReserveOutcome struct { Status ReserveStatus; Err error }   // enqueue / 釋放各自同形
-```
-
-⛔ **限於這三個**（2026-09-02 review 修正——前一版寫「所有 Redis 操作」，
-字面上會要求連既有的 `HSet` / `SAdd` / `Set` 等一起改契約，那超出本筆範圍）。
-
-* **`Status` 決定流程**，⛔ **不得再用 `Err == nil` 推導狀態**。
-* **`Err` 只供內部觀測**——餵給 `stage_errors` 與 log，**寫進 `job_runs.error` 前一律
-  過分類器**（見「錯誤訊息的外洩邊界」）。
-
-##### `Err` 的不變量（三個操作一體適用）
-
-⚠️ **`backoff` 時沒有底層 error 可帶**——`skipWrite()`（`store/redis.go:142-145`）
-只回一個布林。若 `Err` 留空，`safeJobErrorReason(error)` 產不出 `readonly`，
-`stage_errors` 也沒有東西可存。**所以要有 sentinel**：
-
-| Status | `Err` |
-|---|---|
-| `backoff` | **必須是固定 sentinel**（例如 `ErrRedisWriteBackoff`），可用 `errors.Is` 判斷 |
-| `error` | **必須是非空的原始 cause** |
-| `reserved` / `enqueued` / `already_exists` / `disabled` / `deleted` / `not_owner` | **`Err == nil`** |
-
-* **分類器把 `ErrRedisWriteBackoff` 固定映射成 `readonly`。**
-* 這條不變量**三個操作都要遵守**，並各自有測試（見完成條件）。
-
-**compare-and-delete 的呼叫端處置（2026-09-02 review 補上，前一版只有值域沒有處置）：**
-
-| status | 處置 | `dedup_degraded`？ |
-|---|---|---|
-| `deleted` | 正常完成，接著做 local compare-delete | 否 |
-| `not_owner` | **正常完成**——那筆已經是別人的 reservation，本來就不該刪；接著做 local compare-delete | 否 |
-| `disabled` | 正常完成（Redis 本來就沒有那筆），接著做 local compare-delete | 否 |
-| `backoff` / `error` | **標記 `dedup_degraded`**、記錄 `cause`；**Redis 端的殘留交給 TTL 自然過期**（`PX` 已經設過，最多多擋一個 cooldown） | **是** |
-
-⚠️ **`backoff` / `error` 時 local token 仍要釋放。** 兩邊的保證等級不同：Redis 那筆
-反正會過期、且此刻也刪不掉；**local 若不釋放，本 instance 會被自己多擋一個 cooldown**，
-而那個 reservation 對應的是一次「連嘗試都沒送出去」的訊號。
-**寧可讓本 instance 下一輪能重試，也不要靠一個刪不掉的殘留把自己鎖住。**
-
-##### ⚠️ 錯誤訊息的外洩邊界：`job_runs.error` 是使用者可見面
-
-**2026-09-02 review 補上。** 前一版只規定「對外 JSON 要安全轉換」，那漏了一條路徑：
-**`job_runs.error` 本身就會流到前端**——
-
-* `GET /scheduler/status` 把 `error` 放進回應（`api/handler/scheduler.go:197` 起的 `jobStatus`）；
-* 前端 `Scheduler.svelte:227` 以 `{job.error}` **原樣渲染**。
-
-所以**只把 `stage_errors` 標成 `json:"-"` 完全擋不住**：原始 driver 錯誤常帶 DSN、
-主機位址、連線字串或底層 SQL 片段，寫進 `job_runs.error` 就等於直接顯示在畫面上。
-
-**規則（三個原始錯誤來源一體適用：`fetchFailed` / `evaluateFailed` / `stage_errors`）：**
-
-| 用途 | 可以帶什麼 |
-|---|---|
-| **內部 log／debug** | 原始 error 原文 |
-| **寫進 `job_runs.error`** | **只准 stage ＋ symbol ＋一個封閉值域的 reason code**，見下 |
-
-⚠️ **轉換要在寫入前做，不是在顯示端做**——`job_runs` 是持久化的，一旦寫進去，
-30 天內每次查詢都會再洩一次。
-
-**reason code 必須是封閉值域，而且未知一律吃掉**（2026-09-02 review 補上——
-前一版只舉了幾個例子沒有定義值域，那會留下最危險的實作空間：
-分類器遇到不認得的錯誤時 fallback 成 `err.Error()`，敏感資訊照樣寫進去）：
-
-* **由單一函式負責分類**，例如 `safeJobErrorReason(error) ReasonCode`。
-  ⛔ **只有它能決定寫進 `job_runs.error` 的原因字串**，其他地方不得自行拼接。
-* **`ReasonCode` 是封閉列舉**，起始值域（不足時再擴，但擴的是列舉不是規則）：
-
-  | reason code | 對應 |
-  |---|---|
-  | `numeric_overflow` | 欄位型別容不下（I-101 那種） |
-  | `constraint_violation` | 唯一鍵／外鍵／check 違反 |
-  | `conn_refused` | 連不上 DB |
-  | `timeout` | ctx 逾時或 statement timeout |
-  | `readonly` | Redis READONLY／退避 |
-  | `serialization_failure` | 交易衝突需重試 |
-  | `insufficient_data` | **資料不足**（例如 candles 少於 35 根）。⚠️ **必須有這一項**——否則排程上很常見的「這檔資料還不夠」會被歸成 `internal_error`，摘要就失去診斷價值 |
-  | **`internal_error`** | **以上都不匹配的一律歸這裡** |
-
-* ⛔ **未辨識的錯誤一律輸出 `internal_error`，不得退回原文**。
-  想知道細節就去看 log——那是原始 error 唯一被允許出現的地方。
-* ⛔ **禁止用原始 error 字串直接拼接**（`fmt.Sprintf("%v", err)`、`err.Error()` 等）
-  組出寫進 `job_runs.error` 的內容。
-* **三個原始錯誤來源（`fetchFailed` / `evaluateFailed` / `stage_errors`）全部走同一個分類器**，
-  不要各寫各的。
-
-##### 明確的限制（要寫進文件，不要事後被當成 bug）
-
-* **Redis 不可用時失效的是「跨 instance 保證」，不是整層**（2026-09-02 review 修正——
-  前一版寫「這層也失效」，不精確）。**local dedup 仍然有效**，只是保證範圍縮小：
-
-  | Redis 狀態 | 判重保證 |
-  |---|---|
-  | 正常 | **跨 instance**（`SET NX` 是全域仲裁） |
-  | 停用／backoff／錯誤 | **僅 per-instance**（只剩 local map） |
-
-  ⛔ **local map 是 per-instance 且重啟即失憶**——不能宣稱具有強一致性。
-  這是**刻意接受的降級**，不是待修的缺陷。
-* **「DB 與 Redis 同時不可用」不在保證範圍內。** 那個形狀由本筆下方
-  「`job_runs` 有循環依賴，接不住全域 DB outage」所定的 **`/health` 那一格**承接，
-  不是靠 dedup 硬撐。
-* ⛔ **「釋放 reservation 讓下一輪重試」只對「`signals.Insert` 也失敗」的情況成立**
-  （2026-09-02 review 修正——前一版一概宣稱能重試，那是錯的）。
-  若 **`Insert` 已成功、而 `queue_enqueued == false` 且 `broadcast_attempted == false`**，
-  下一輪會先被 **DB 判重**擋下（`shouldSuppressDuplicate` 讀得到剛寫進去的那一列，
-  且在 cooldown 內），**根本不會重送**——釋放 reservation 完全沒有作用。
-
-  **裁決：明示接受「DB 已落盤、但 `queue_enqueued` 與 `broadcast_attempted` 皆為 false 時
-  不自動重送」。**
-  理由是另一條路（delivery outbox ／ retry worker）會把本筆從「錯誤處理語意」
-  擴張成「投遞保證」，那是獨立的一階，且現況 `signal:queue` 連 consumer 都沒有。
-  **真有業務需求時另立項目**，見「風險與非範圍」。
-
-  ⚠️ **若 queue 是非預期失敗（READONLY／enqueue 回錯），這個情形仍必須是 `degraded`
-  且看得見**——歷史有那一列、即時通道卻一個都沒送出去，
-  是**最容易誤判成「系統沒發訊號」**的形狀。
-  ⛔ **但不要寫成「使用者沒收到推播」**：`broadcast_attempted` 只代表有沒有嘗試，
-  系統無從得知客戶端收到與否。
-
-##### 降級分類的裁決（測試要照這個斷言）
-
-| 情形 | `degraded`？ | 理由 |
-|---|---|---|
-| `signals.Insert` 失敗 | ✅ **是** | 歷史缺列，是非預期失敗 |
-| Redis **停用**（`rdb == nil`，設定如此） | ❌ **否** | 那是設定狀態不是故障。dedup 退回 process 內 map，屬已知限制 |
-| Redis **READONLY backoff 或 enqueue 回錯** | ✅ **是**（`queue_failed`） | 非預期失敗 |
-| Redis **非預期故障**導致 reservation 退回 local map | ✅ **是**（`dedup_degraded`） | 判重從跨 instance 退成 per-instance，保證變弱了 |
-| `BroadcastFn == nil` | ❌ **否** | 那是「沒有接 API 層」的接線方式（測試／CLI），不是故障 |
-| DB 判重查詢失敗但 reserve 成功、訊號正常送出 | ✅ **是** | 判重已降級成單層，要看得見 |
-
-⚠️ **`queue_enqueued` 只在「真的寫進去」時為 true。** 現行 `LPush`
-（`store/redis.go:77-88`）在 `rdb == nil` 與 `skipWrite()` 兩種情況都回 `nil`，
-**分不出「寫了」與「跳過」**，不能用 `err == nil` 推導。
-
-⛔ **三態不夠，必須四態**（2026-09-02 review 修正——前一版寫「寫入／跳過／錯誤」，
-但「跳過」同時混了兩種語意不同的情況）：
-
-```
-type EnqueueResult int   // enqueued / disabled / backoff / error
-```
-
-| 結果 | `queue_enqueued` | `queue_failed`？ |
-|---|---|---|
-| `enqueued` | `true` | 否 |
-| `disabled`（`rdb == nil`，設定如此） | `false` | **否**——設定狀態不是故障 |
-| `backoff`（退避中，**或本次就收到 READONLY**） | `false` | **是** |
-| `error` | `false` | **是** |
-
-⚠️ **第一次收到 READONLY 也必須回 `backoff`。** 現行 `handleWriteErr`
-（`store/redis.go:151-154`）在偵測到 READONLY 時**設完退避就 `return nil`**——
-等於把那一次的失敗吃成成功。**新 API 不得沿用這個行為。**
-
-這與 reservation 的五態是同一條規則：**disabled 與 backoff 必須分得開**，
-否則「停用不算 degraded、READONLY 算」在實作層落實不了。
-
-#### 可觀測性：承接點定為 `job_runs`，不新增表也不新增端點
-
-⚠️ **本節於 2026-09-02 定案。** 前一版只說「沿用 `architecture.md` 的可觀測性範圍、
-維護總失敗數與連續失敗數、透過既有 health/status 暴露」——那是**第三種做法**，
-既有的兩個承接點都接不住它：
-
-| 候選承接點 | 為什麼不用 |
-|---|---|
-| `/health`（`api/server.go:76-84`） | **不適合放 per-symbol 失敗計數**：它是**未授權**的 docker 探針，註解明寫「錯誤細節只寫 log，不回給呼叫端」，放逐檔失敗同時牴觸這個設計與授權邊界。⚠️ **但它並非只回 `ok`**——DB ping 失敗時會回 **503 `{"status":"down"}`**，所以它**正是「全域 DB 不可用」那一格的承接點**，見下方「`job_runs` 有循環依賴」 |
-| process 內計數器 | `architecture.md`「可觀測性：為什麼沒有 metrics 依賴」立的模式是**一張表 ＋ 一個查詢端點**（`sr_identity_stats`），不是記憶體計數器。計數器重啟歸零，也沒有查詢介面 |
-| 新開一張表 ＋ 端點 | 那個模式是為**趨勢型**觀測設計的（「這個月 alias 命中率有沒有在爬」）。本筆要答的是「**這一輪有沒有掉寫入**」——那是 per-run 事實，屬於執行紀錄，不是時間序列。而且會引入 migration，讓回滾多一個維度 |
-
-**定案：用既有的 `job_runs`。** 理由是它已經備妥了本筆需要的每一項：
-
-* **degraded 機制已存在**——`finishRunDegraded()`（`scheduler.go`）已經會把
-  `degraded && status == "success"` 改寫成 **`partial`**，`candle_gap_detection` 就是這樣用的。
-  本筆不需要新的 primitive，只要在四個 scheduler 迴圈裡**接住 `Evaluate` 的 error 並餵給它**。
-* **有查詢介面**——`GET /scheduler/status`（`handler/scheduler.go:149`）讀的就是這張表。
-  ⚠️ **但它每個 job 只回最新一筆**（`GetLatestPerJob`，那是刻意的：取最近 N 筆再分組會讓
-  早上跑過的 job 被 intraday 的 55 筆擠掉而誤報 `never_run`）。
-  **所以「連續降級」不是這個端點的能力**——它只能回答「最近一輪是不是 `partial`」。
-* **已經持久化且保留 30 天**——`jobRunRetentionDays = 30`（`scheduler.go:43`）。
-  連續失敗**不需要維護計數器**，但**要直連 DB 手動查**，屬人工診斷而非自動告警：
-
-  ```sql
-  SELECT started_at, status, symbols_failed, error
-  FROM job_runs WHERE job_name = 'intraday'
-  ORDER BY id DESC LIMIT 20;
-  ```
-
-  這正是保留期從「只留當天」改成 30 天的目的（見 `scheduler.go:32-38` 的沿革）。
-
-  ⛔ **本筆不提供自動的連續降級告警。** 想要的話是另一件事（要嘛給
-  `/scheduler/status` 加歷史查詢參數，要嘛照 `architecture.md` 的模式另開表與端點），
-  **不要夾帶在本筆交付**——那正是 `architecture.md`「可觀測性」那節說的
-  「引入 metrics 是跨系統決策，不該夾帶在單一功能裡」。
-* **不新增表 ⇒ 沒有 migration ⇒ 回滾是單純的 image 回退**（見下方回滾策略）。
-
-##### ⚠️ `job_runs` 有循環依賴，接不住全域 DB outage
-
-**2026-09-02 review 補上。** `job_runs` **和受影響的表在同一個 DB**，所以 DB 整個不可用時
-它自己也寫不進去，而且**失敗是靜默的**：
-
-* `startRun()`（`scheduler.go:369-375`）在 `jobRuns.Start` 失敗時**只記 Error log 並回傳
-  `runID = 0`**，呼叫端拿不到錯誤，照樣往下跑。
-* `Finish()`（`store/job_run_repo.go:112-119`）是 `UPDATE job_runs … WHERE id=?`。
-  `id=0` 更新到**零列**，但 `ExecContext` **不回錯**（零列不是錯誤），
-  於是 `finishRunDegraded` 也看不出問題。
-
-**結果：全域 DB outage 期間，`job_runs` 可能一筆紀錄都沒有**——不是「有一筆 failed」，
-是「什麼都沒有」。拿它當唯一觀測點會在最需要的時候失效。
-
-**所以觀測要照失敗形狀分工，不能只靠一個承接點：**
-
-| 失敗形狀 | 承接點 | 說明 |
-|---|---|---|
-| **單欄位／單表／單筆寫入失敗**（本筆的主要目標，含 I-101 那種型別溢位） | **`job_runs`** | DB 本身還活著，紀錄寫得進去。這是下面「具體要做的四件事」的範圍 |
-| **全域 DB 不可用** | **`/health` 的 DB ping ＋ 外部健康監控** | `/health`（`api/server.go:76-84`）本來就會 `db.PingContext`，失敗時回 **503 `{"status":"down"}`**。docker／uptime 探測接的就是這個 |
-
-⚠️ **前一版把 `/health` 描述成「只回 `{"status":"ok"}`」是不精確的**——它**會**回 503 down。
-它刻意隱藏的是**錯誤細節**（DSN 等只寫 log），不是「掛了」這件事本身。
-所以它不適合承載 per-symbol 的失敗計數（那是授權邊界問題），
-但**完全適合承接「DB 整個不可用」**，而那正是 `job_runs` 接不住的那一格。
-
-⛔ **不要為了補這一格去改 `startRun` / `Finish` 的錯誤處理。** 讓它們在 DB 不可用時噴錯，
-只會把排程 goroutine 變成另一個故障點，而 `/health` 已經覆蓋這個形狀。
-**要記的是「這兩個承接點各自的盲區」**，本節就是那份紀錄。
-
-##### 具體要做的四件事
-
-1. **四個 scheduler 呼叫點接住 `Evaluate` 的 error**（`scheduler.go:445` / `:501` / `:542` / `:569`）。
-
-   ⚠️ **`job_runs` 只有一個 `symbols_failed` 欄位，所以「分開累計」不能寫成相加**
-   （2026-09-02 review 修正——前一版只說「分開累計」，那會導致同一檔既抓取失敗又持久化失敗時
-   **被重複計數**，甚至讓 `failed >= total` 成立而把該輪誤判成 `failed`）。定義如下：
-
-   | 集合 | 內容 |
-   |---|---|
-   | `fetchFailed` | 行情抓取／回補失敗的 symbol（現有的 `failed` 來源，各路徑不同——見上方「live 實證」的對照表）。⚠️ **粒度受限，見下** |
-   | `evaluateFailed` | **`Evaluate` 回 error 的所有 symbol**（硬失敗：該檔這一輪等於沒產出）。⚠️ **名稱不叫 `persistFailed`**——見下 |
-   | `degraded` | **`EvaluateResult.degraded` 為真的所有 symbol**（不只「沒落盤」那一種——見下）|
-
-   ⚠️ **`degraded` 的來源是 `EvaluateResult.degraded`，不是「有沒有落盤」單一條件**
-   （2026-09-02 review 修正——前一版定義過窄，與上方「降級分類的裁決」那張表對不起來）。
-   依那張表，**至少三種 stage 都算 degraded**，scheduler 要一併收集並在摘要裡分開：
-
-   | stage 標記 | 觸發 |
-   |---|---|
-   | `signal_persist_failed` | `signals.Insert` 失敗 |
-   | `queue_failed` | Redis READONLY backoff 或 enqueue 回錯（**Redis 停用不算**） |
-   | `dedup_degraded` | 判重降級成單層或更弱：**DB 判重查詢失敗**，或 **Redis 非預期故障而改走 local reservation**。⛔ **Redis 設定為停用（`rdb == nil`）不算**——那是設定狀態，屬已知限制不是降級 |
-
-   ⛔ **`fetchFailed` 在 live 的盤中路徑只有批次粒度，本筆不修那一段。**
-   `FetchAndStoreIntradayBatch` 的逐檔 `BulkInsert` 失敗只記 log、不往上傳
-   （`market/fetcher.go:90-93`），呼叫端只有整批失敗時才累計（`scheduler.go:532-537`），
-   而 **live 走的正是這條路**。這個盲區已另立
-   [I-103](#i-103yahoo-批次盤中路徑的逐檔寫入失敗不會回報symbols_failed-在-live-路徑只有批次粒度)
-   追蹤，**不在本筆範圍**——擴充批次回傳值會把本筆的範圍推進 market 套件，是另一件事。
-
-   **所以本筆的 union 契約限定為「scheduler 目前識別得到的失敗」**：
-   `fetchFailed` 就是各路徑現有 `failed` 累計到的那些，批次路徑即批次粒度。
-   **`evaluateFailed` 與 `degraded` 則是逐檔精確的**——那兩個是本筆自己新增的。
-
-   * **`symbols_failed` 寫 `|fetchFailed ∪ evaluateFailed|`——聯集，不是相加。**
-
-   ⚠️ **命名為什麼是 `evaluateFailed` 而不是 `persistFailed`**（2026-09-02 review 修正）：
-   加入三分支錯誤契約後，`Evaluate` 的 hard error **至少有四種**——persistence error、
-   **candles 不足**、**DB read 失敗**、其他。仍叫 `persist_failed` 會把
-   「資料不足／讀取失敗」標成「持久化失敗」，摘要直接說謊。
-   **`signal_persist_failed` 不受影響**——那是 degraded stage，指的確實是 `signals.Insert` 失敗。
-   * **`degraded` 的 symbol 一律不進聯集**（那一檔評估其實成功了），
-     改由 `finishRunDegraded(..., degraded=true)` 讓該輪收成 `partial`。
-   * 同一檔可能同時帶多個 degraded stage，摘要要能表達（例如
-     `degraded:2 (signal_persist_failed:2, queue_failed:1)`）。
-   * **`error` 寫分類摘要**，保存各類的數量與一個**代表 reason code**（⛔ **不是代表錯誤**——
-     原始 error 只進 log，見「錯誤訊息的外洩邊界」），而不是只留最後一個 `lastErr`——
-     否則三種失敗混在一起，看到 `error` 也不知道是哪一類。
-     用可辨識前綴，比照 `candle_gap_detection` 的 `upstream_data_gap:` /
-     `verification_unavailable:` 慣例，例如：
-
-     ```
-     fetch_failed:3; evaluate_failed:2 (2454:numeric_overflow, 6182:insufficient_data);
-     degraded:2 (signal_persist_failed:2, queue_failed:1)
-     ```
-
-     ⚠️ **括號裡是 reason code 不是錯誤原文**（2026-09-02 review 修正——前一版範例寫的是
-     `2454: indicator upsert: numeric field overflow`，那是自由文字，與封閉值域的規則矛盾，
-     照抄會直接把原始 driver 訊息寫進去）。
-2. **indicator 持久化失敗 → 該 symbol 計入 failed**，其餘 symbol 繼續，
-   由 `finishRunDegraded` 自然收成 `partial` / `failed`。
-3. **收集 `EvaluateResult.degraded` 為真的所有 symbol → 走 `finishRunDegraded(..., degraded=true)`**，
-   該輪收 `partial`。
-   ⚠️ **不是只有「送出但沒落 DB」那一種**（2026-09-02 review 修正——前一版在這裡縮回了，
-   與上方「降級分類的裁決」對不起來）：**三個 stage 都要進 degraded 集合**，
-   並依 `degraded_stages` 產生分類摘要。
-   ⚠️ **一律不計入 `symbols_failed`**——那些 symbol 的評估其實成功了；
-   混進去會讓 `failed` 同時代表兩件事。
-4. **手動 API 路徑不需要計數器**——`POST /indicators/:symbol/compute` 直接回 **503**，
-   失敗當場就回給呼叫端了。
-
-##### log 分級
-
-* **每一輪結束時記一筆彙總 log**：帶該輪的 `fetch_failed` / `evaluate_failed` / `degraded`
-  各自的數量與**代表 reason code**（同樣過分類器，log 本身可另外帶原始 error）。
-  有任一類非零記 **Error**，全為零時**不額外記**
-  （成功那筆本來就有 `job runs`／job 完成的既有 log）。
-  ⛔ **不要寫成「進入 degraded 記 Error、恢復記 Info」**（2026-09-02 review 修正）——
-  那是**轉態**語意，需要在某處保存 per-symbol／per-stage 的前一狀態，
-  而本筆**沒有、也不打算**維護那份狀態（維護它等於在記憶體裡重建一個小狀態機，
-  重啟即失憶，還會與 `job_runs` 形成第二個真相源）。**每輪彙總就夠了**：
-  要看趨勢就查 `job_runs`，那才是持久化的那一份。
-* 這樣同時解掉現況的問題——現在是**每檔每輪各記一行 `Warn`**，量大又不可操作。
-* ⛔ **不要把 log 當成判定依據**——`docker logs` 在這台機器留不住（容器會被重建，
-  見 [`development-workflow.md`](./development-workflow.md)「挑窗口」）。判定一律看 `job_runs`。
-
-#### 受影響範圍
-
-**本次不引入 Prometheus，也不新增任何表或端點**（理由見上一節）。
-
-| 檔案 | 要改什麼 |
-|---|---|
-| `backend/internal/indicator/engine.go` | ①`Compute` 的 `Upsert` 失敗改回 **persistence typed error**、不再往下寫 Redis；②**拆開 `GetLatestN` 失敗與「不足 35 根」**（現況 `:33-36` 合在同一分支，且 `err == nil` 時 `%w` 包了 nil），新增 **`ErrInsufficientCandles`** sentinel |
-| `backend/internal/signal/engine.go` | `Evaluate` 的回傳值改成能表達降級；不依賴 signal DB 的短期 emission dedup；**新增最小 emission 介面與可注入時鐘**（見「測試接縫」）——`redis` 欄位由具體的 `*store.RedisClient`（`:28`）改成該介面 |
-| `backend/internal/scheduler/scheduler.go` | 四個 `Evaluate` 呼叫點（`:445` / `:501` / `:542` / `:569`）接住 error 並餵給 `finishRunDegraded` |
-| `backend/internal/api/handler/indicator.go` | 依三分支契約映射；⛔ **不得再直接回 `err.Error()`**（現況 `:44`） |
-| `backend/internal/api/handler/errors.go` | 新增 `serviceUnavailableError`（比照既有 `serverError` / `badGatewayError`：記 log、回 503 ＋ 固定安全訊息），兩條端點共用 |
-| `backend/internal/api/handler/signal.go` | 回應帶上降級欄位；依同一套三分支契約映射；⛔ **不得再直接回 `err.Error()`**（現況 `:57`） |
-| `backend/internal/store/redis.go` | ①`LPush` 改回 `EnqueueResult`（`enqueued`／`disabled`／`backoff`／`error`）；②新增 **`SET NX` reservation**，回 `reserved`／`already_exists`／`disabled`／`backoff`／`error`；③新增 **Lua compare-and-delete**，回 `deleted`／`not_owner`／`disabled`／`backoff`／`error`。⚠️ **三者的值域各不相同，不要共用同一個型別**。全部採「status ＋ cause」，各自補測試 |
-| **錯誤分類器**（`safeJobErrorReason`） | 放在 **scheduler 套件**——它是「寫進 `job_runs` 之前」的最後一道，與 `finishRunDegraded` 同層；⛔ **不要放在 store 或 handler**，那會讓「誰負責脫敏」變得不明確 |
-
-⛔ **`ComputeAll` / `EvaluateAll` 不在必要範圍內**——它們目前**沒有任何呼叫者**
-（`backend/` 內除測試外 0 處），不是這次 live 實證經過的路徑。同樣的吞錯寫法可以順手一起修，
-但不要當成主要修法。
-
-⚠️ **兩個 handler 都要改，不只 indicator**（2026-09-02 review 補上）。
-`SignalHandler.Evaluate`（`handler/signal.go:57`）目前把**所有** `Evaluate` 的 error 映射成
-**422**，而 `signal.Evaluate` 的第一行就是 `indicator.Compute`——**indicator 的 persistence
-typed error 會原樣從這條 API 傳出去**。只改 indicator handler 的話，同一個錯誤
-在 `/indicators/:symbol/compute` 回 503、在 `/signals/:symbol/evaluate` 回 422，
-對外契約自相矛盾。
-
-**兩個 handler 的映射規則一致**——照下一節「兩條手動 API 也是外洩面」的**三分支契約**
-（persistence → 503／`ErrInsufficientCandles` → 422／其餘含 DB read 失敗 → 5xx），
-兩邊都要有測試釘住每一個分支。
-⛔ **前一版在這裡寫「其餘 → 422」，那是錯的**，已由三分支取代。
-
-新的 typed error 或 result type **留在相應的 domain package**，不要讓 handler 以字串比對錯誤
-——兩個 handler 共用同一個 `errors.Is` 判斷，不要各寫各的。
-
-##### ⚠️ 兩條手動 API 也是外洩面，不能只改狀態碼
-
-**2026-09-02 review 補上。** 前一版的安全邊界只保護了 `job_runs.error`，
-**漏掉 API 這條路**——而兩個 handler 現況都是**直接把 `err.Error()` 回給前端**：
-
-* `handler/indicator.go:44`——`c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})`
-* `handler/signal.go:57`——同樣寫法
-
-**新的 persistence typed error 若包住 driver cause**，實作者只把狀態碼改成 503、
-保留 `err.Error()`，**DSN、主機位址、SQL 片段照樣從 API 洩出去**——
-剛建立的安全原則被整個繞過。
-
-⚠️ **這條規則專案早就有了**：`handler/errors.go` 的 `serverError()` doc comment 明寫
-「`err.Error()` 可能包含 DB 連線字串、SQL 片段、內部檔案路徑等不該外洩給客戶端的資訊，
-這些細節只留在伺服器的 log 裡」。**本筆要做的是把同一條套到這兩個端點，不是發明新規則。**
-
-##### 前置：`indicator.Compute` 現在分不出「讀失敗」與「資料不足」
-
-⚠️ **2026-09-02 review 補上——沒有這一步，上面的三分支契約在 handler 端根本實作不出來。**
-
-現況把兩件事併在同一個分支（`indicator/engine.go:33-36`）：
-
-```go
-candles, err := e.candles.GetLatestN(ctx, symbol, timeframe, lookback)
-if err != nil || len(candles) < 35 {
-    return nil, fmt.Errorf("not enough candles for %s/%s: %w", symbol, timeframe, err)
-}
-```
-
-* **DB `GetLatestN` 失敗**與**真的不足 35 根**產出**同一種 error**，handler 無從分辨；
-* 更糟的是 `len(candles) < 35` 但 `err == nil` 時，`%w` 包的是 **nil**——
-  `errors.Is` / `errors.Unwrap` 什麼都拿不到，訊息還會出現 `%!w(<nil>)`。
-
-**要拆成三種，且都可用 `errors.Is` 判斷：**
-
-| 情況 | 回傳 |
-|---|---|
-| `GetLatestN` 回 error | **保留 cause 的 infrastructure error**（包原 error） |
-| 查詢成功但 `len(candles) < 35` | **`ErrInsufficientCandles`**（indicator domain 的 sentinel，**不包 nil**） |
-| `Upsert` 失敗 | **persistence typed error**（本筆新增的那個） |
-
-**兩個 handler 的判定順序（先特殊後一般）：**
-
-1. `errors.Is(err, ErrPersistence)` → **安全 503**（`serviceUnavailableError`）
-2. `errors.Is(err, ErrInsufficientCandles)` → **安全 422**（訊息說明資料不足，不含原始文字）
-3. 其餘（含 DB read 失敗）→ **`serverError` 的安全 500**
-
-⚠️ **順序不能反**：`ErrInsufficientCandles` 若放在最前面用字串比對，DB read 失敗會被誤吃。
-
-⚠️ **scheduler 端也吃這個分類**——`insufficient_data` 這個 reason code 就是由
-`ErrInsufficientCandles` 映射出來的（見「錯誤訊息的外洩邊界」的值域表）。
-
-**API 錯誤契約（兩條端點一致）：**
-
-| 錯誤種類 | 狀態碼 | 回應內容 | cause |
-|---|---|---|---|
-| **persistence error**（本筆新增的 typed error） | **503** | **固定的安全訊息**，不含任何原始文字 | 只進 log |
-| **已知 domain／資料不足**（例如 candles 不足 35 根） | **422** | 安全的說明訊息（使用者要看得懂為什麼失敗） | 視情況 |
-| **其他未知錯誤，含 DB read 失敗** | **5xx**（沿用 `serverError` 的 500） | 通用訊息，不含原始文字 | 只進 log |
-
-⛔ **不要寫成「persistence error 回 503、其餘一律 422」**——那會把 **DB read 失敗
-（例如 `GetLatestN` 連不上）錯誤映射成 422**，對呼叫端等於謊稱「你的輸入有問題」。
-**只有已知的 domain error 才配 422。**
-
-**實作方式**：比照 `errors.go` 既有的 `serverError` / `badGatewayError`，
-**新增一個同模式的 helper**（例如 `serviceUnavailableError(c, log, err, context)`）——
-記 log、回 503 ＋ 固定訊息。兩條端點共用它，不要各寫各的。
-
-##### 測試接縫：現在沒有，要一併設計
-
-⚠️ **2026-09-02 review 補上。** 完成條件要求「可控的 Redis stub」「兩個獨立 Engine 共用
-同一個 Redis stub」「精確控制首次 READONLY／backoff／compare-delete」「TTL 與每分鐘整掃」，
-**但目前這些都做不到**——`signal.Engine.redis` 是**具體型別** `*store.RedisClient`
-（`signal/engine.go:28`），從 signal 的測試注入不了 stub；repo 也沒有 miniredis 之類的替代方案。
-
-⛔ **不把接縫寫進計畫，實作時就會臨時決定**——結果不是被迫接真 Redis，
-就是塞進一個沒經過確認的測試相依。**這正是 T-061 記錄過的同一種形狀**
-（verifier 是具體型別、排程層驗收補不齊）。
-
-**要一併做的三件事：**
-
-| # | 內容 |
-|---|---|
-| 1 | **signal 套件定義最小的 emission 介面**，只含本筆用到的三個操作：reservation、enqueue、compare-and-delete。⛔ **不要把整個 `RedisClient` 抽成介面**——那會把無關方法一起拖進來 |
-| 2 | **`*store.RedisClient` 實作該介面**；測試用的可控 stub 也實作它，能逐次指定回哪個 outcome（含 `Err` 不變量） |
-| 3 | **Engine 注入時鐘**：`now func() time.Time` 或最小 clock 介面，供 TTL、每分鐘整掃節流、以及「Redis 恢復後仍被未到期 local reservation 抑制」等時序測試使用 |
-
-⚠️ **介面定義在 signal 套件（消費端），不是 store**——依賴反轉，讓 store 不必知道 signal
-的需求。這與專案既有的 repo 介面慣例一致。
-
-**production constructor 維持傳現有的 Redis client**，`NewEngine` 的呼叫端不必改，
-**不動任何部署設定**。時鐘的預設值就是 `time.Now`。
-
-#### 回滾與相容策略
-
-⚠️ **本節於 2026-09-02 補上**——CLAUDE.md 對大規模／高影響異動要求「主要風險與回滾／相容
-策略」，前一版只有風險沒有回滾。
-
-##### 回滾：純 image 回退，沒有資料維度
-
-**本筆不含 migration、不新增表、不改任何欄位型別**（可觀測性走既有的 `job_runs`），
-所以回滾就是**把 backend image 換回前一版**，沒有 schema 要退、沒有資料要修。
-
-* 回滾後**不會留下壞資料**：新版在 DB 寫入失敗時是**少寫**（indicator 不落盤、
-  signal 不落盤），不是寫錯；退回舊版只是恢復「失敗照樣往下走」的舊行為。
-* ⚠️ **唯一不可逆的是 outage 期間的缺列**——那與版本無關，新舊版都補不回來
-  （本筆明示接受，見「風險與非範圍」）。
-* 走 `/opt/stacks/scripts/stock_trading/deploy.sh`，程序見
-  [`development-workflow.md`](./development-workflow.md)「schema migration 上 live 的程序」
-  （本筆雖無 migration，部署窗口與復原來源的規則一樣適用）。
-
-##### 分段上線：兩段可以拆開，而且應該拆
-
-建議分兩次部署，讓每一段的觀察期乾淨。
-
-⚠️ **兩段不是「互不相干」**（2026-09-02 review 修正——前一版寫「沒有互相依賴」）：
-**兩段都會改到 `scheduler.go` 的同四個呼叫點**——第 1 段讓它接住 `Evaluate` 的 error，
-第 2 段讓它再接住 degraded result 並餵給 `finishRunDegraded`。所以第 2 段是**疊在第 1 段
-之上**的增量，不能反序、也不能只上第 2 段。可以分開部署的是**行為**，不是檔案。
-
-| 段 | 內容 | 觀察什麼 |
-|---|---|---|
-| **第 1 段** | indicator fail-fast ＋ 四個 scheduler 呼叫點接住 error ＋ handler 503 | `job_runs` 是否如預期出現 `partial`；**正常日不應該有任何一輪變 partial**——若有，代表現在就有被吞掉的失敗 |
-| **第 2 段** | signal degraded-success ＋ 獨立 dedup ＋ Redis enqueue 語意 | degraded 是否只在該出現時出現；`signal:queue` 沒有重複推送 |
-
-⚠️ **第 1 段本身就是一次診斷**：它會把「目前有多少寫入失敗被吞掉」變成可見的
-`partial`。上線後第一個交易日如果 `partial` 大量出現，**先別當成新版有 bug**——
-比對 `indicator_snapshots` 與 `candles` 的最新 `ts` 確認是不是本來就在掉。
-
-⛔ **不做 feature flag。** 這是「DB 掛掉時系統該表現成什麼樣子」的語意選擇，
-用開關保留舊行為等於讓兩種語意同時存在，之後沒有人知道當下適用哪一種——
-而**分段部署已經提供了同等的風險控制**，回滾成本也只是 image 回退。
-
-##### 相容性：對外契約的三處變化
-
-| 變化 | 影響 | 相容性 |
-|---|---|---|
-| `POST /indicators/:symbol/compute` 在**持久化失敗**時由 422 → **503** | 前端 | ✅ **安全**。`apiFetch`（`frontend/src/lib/api/client.ts:34-42`）對所有非 2xx 一律 `throw new ApiError(status, body.error)`，**除了 401 之外沒有任何狀態碼分支**；`computeIndicators` 也只是把錯誤往上拋給呼叫端顯示。使用者看到的訊息會從「candles 不足」變成落盤失敗的訊息，那正是想要的 |
-| **已知 domain／資料不足**（candles 不足 35 根）**維持 422** | 前端 | ⛔ **這是硬性要求，不是選項**。`indicators.ts:35-37` 的註解明寫「candles 至少 35 根，不足時後端回 422」；把它改成 5xx 會讓「輸入不足」看起來像伺服器故障。⚠️ **但「其餘錯誤一律 422」不成立**——未知錯誤與 DB read 失敗要回 5xx，見「兩條手動 API 也是外洩面」的三分支契約 |
-| signal 回應**新增**降級欄位 | API 消費者 | ✅ **純新增，向後相容**。舊消費者忽略新欄位即可。⚠️ 但要在 [`api-reference.md`](./api-reference.md) 寫明：**HTTP 200 不再等於「已寫入 signal history」**，要看 `db_persisted` |
-
-⚠️ **`signal:queue` 的消費者**：目前**沒有任何 consumer**（全 repo 只有
-`signal/engine.go:103` 一個 producer），所以 enqueue 語意的改動不會影響任何下游。
-**但也因此不能把它描述成補寫 DB 的 retry 機制**（同「待決策」那節的警語）。
-
-#### 風險與非範圍
-
-* signal 的 degraded-success 會在 **`signals` 局部寫入失敗**時保住即時性，但那段期間的歷史
-  缺口可能永久存在；前端與操作人員不能把「收到 WebSocket」解讀成「已寫入 signal history」。
-  ⚠️ **不要寫成「DB outage 期間仍保住即時性」**——全域 outage 時 `Compute` 就先失敗了，
-  根本走不到推播，見上方「degraded-success 涵蓋的是『局部失敗』，不是 DB outage」。
-* 獨立 dedup 必須定義 Redis 不可用時的行為，且不能因程序重啟或多 instance 而宣稱具有強一致性。
-* 補寫歷史若有業務需求，另立 outbox／retry task；本筆不在沒有 consumer 的現況下承諾最終一致。
-* 本筆不順帶改變 signal 判斷條件、cooldown 長度或 Redis disabled／READONLY 的全域政策。
-
-#### 完成條件
-
-**第 1 段（indicator）**
-
-1. Indicator `Upsert` 失敗會回 typed error、不寫 Redis、不產生 signal。
-   **`POST /indicators/:symbol/compute` 與 `POST /signals/:symbol/evaluate` 兩條 API**
-   照「兩條手動 API 也是外洩面」那節的三分支契約：**persistence → 503**、
-   **已知 domain／資料不足（例如 candles 不足 35 根）→ 422**、
-   **其他未知錯誤含 DB read 失敗 → 5xx 通用訊息**。
-   ⛔ **不是「persistence 503、其餘一律 422」**——那會把 DB read 失敗謊報成輸入問題。
-   **每條端點的三個分支都要有測試釘住。**
-2. 四個 scheduler 呼叫路徑會接住 `Evaluate` 的 error、記錄該 symbol 的失敗、繼續其他 symbol，
-   並經 `finishRunDegraded` 正確收成 `partial` / `failed`；且該計數**與行情抓取／回補的
-   `failed` 分開**，`job_runs.error` 用可辨識前綴區分。
-
-**第 2 段（signal）**
-
-3. Signal `Insert` 失敗仍只推送一次，結果標示 degraded 且該輪 `job_runs` 收 `partial`
-   （**不計入 `symbols_failed`**）；DB duplicate lookup 與 `Insert` 都失敗時，
-   獨立 dedup 仍能阻止 cooldown 內重複推送。
-4. Redis enqueue 的成功語意可辨識——**`LPush` 回 `nil` 不再等於「已入列」**
-   （目前 disabled／READONLY backoff 都回 `nil`）；結果與 `job_runs` 看得到，
-   成功路徑行為維持不變。
-
-**兩段共同**
-
-5. 補齊 engine、handler、scheduler 的**失敗路徑**測試（目前兩條路徑都沒有測到
-   「寫 DB 失敗時會怎樣」）。⚠️ **「失敗路徑測試」太籠統，鎖不住本筆新增的並行契約**
-   （2026-09-02 review 補上），**下列每一條都要有對應測試**：
-
-   | # | 測試 | 釘住的契約 |
-   |---|---|---|
-   | 5-1 | canonical identity 的**量化邊界**（1e-6 附近）與**各 signal type 的選欄**（`BREAKOUT`→`Resistance`、`BREAKDOWN`／`SUPPORT_BOUNCE`→`Support`、其餘不帶價位） | DB 與 Redis 對「同一訊號」的定義只有一個 |
-   | 5-2 | **Redis 不可用時兩個 goroutine 競爭**同一個 identity，**只有一個**取得 local reservation | local check-and-reserve 在同一個 critical section |
-   | 5-3 | **Redis 恢復後**，仍會被**未到期的 local reservation** 抑制 | 復原當下不會重複推送 |
-   | 5-3b | **Redis 已有 reservation 時（第 4 步）會回滾自己的 local token** | 跨儲存仲裁不留孤兒 reservation |
-   | 5-3c | **兩個獨立的 Engine／local store 共用同一個 Redis stub**（模擬多 instance）→ **只有一個放行** | 跨 instance 仲裁由 Redis `SET NX` 負責 |
-   | 5-3d | **同一個 Engine 的第二個 goroutine 在第 2 步就被抑制，且完全沒有呼叫 Redis** | local-first 的短路 |
-   | 5-3e | 某 identity 過期後，**即使後續只操作其他 identity**，舊項目仍會被整掃清除 | local map 不會無界成長 |
-   | 5-3f | **未過期的 reservation 在任何情況下都不會被清理掉**（含大量 identity 湧入時） | 清理不得破壞 cooldown 保證 |
-   | 5-4 | compare-and-delete **不會刪掉不同 token 的新 reservation**——**Redis 端與 local map 兩邊都要斷言**（Redis 回 `not_owner` 且該 key 仍在；local 的替代 token 也未被刪） | 釋放不製造破口 |
-   | 5-5 | **DB 已落盤、`queue_enqueued=false`、`broadcast_attempted=false`**（queue 為非預期失敗）→ 結果為 `degraded`、**且下一輪會被 DB 判重抑制、不自動重送** | 明示接受的那個取捨。⛔ **斷言的是這三個欄位，不是「broadcast 失敗」**——那個狀態不存在 |
-   | 5-6 | **三種 degraded stage** 都會進 `job_runs` 摘要、**且不增加 `symbols_failed`** | 聯集語意與分類摘要 |
-   | 5-7 | 兩條 API（indicator／signal）× 三分支：persistence → **503**、**已知 domain／資料不足** → **422**、未知含 DB read 失敗 → **5xx** | 完成條件 1 的六個方向 |
-   | 5-7b | 兩條 API **各注入一個帶敏感標記的 persistence cause**，斷言**回應本文不含該標記**（標記只出現在 log） | API 也是外洩面 |
-   | 5-7c | 兩條 API **各注入一個帶敏感標記的 DB read error**（`GetLatestN` 失敗）→ 回**通用 5xx**、回應本文不含該標記 | 未知錯誤不得被當成 422，也不得外洩 |
-   | 5-7d | `GetLatestN` 成功但**不足 35 根** → `errors.Is(err, ErrInsufficientCandles)` 成立、API 回 **422**；⛔ 且該 error **不得包 nil cause** | 讀失敗與資料不足分得開 |
-   | 5-8 | `job_runs.error` 的摘要**保留 stage、symbol 與安全的 reason code**，**但不含測試植入的 DSN／連線字串**（注入一個帶假 DSN 的 error，斷言摘要裡沒有它） | 錯誤訊息的外洩邊界 |
-   | 5-8b | **注入一個分類器不認得、且帶唯一敏感字串的 error** → 輸出**只剩 `internal_error`**，該字串不出現在摘要任何位置 | 未知錯誤不得 fallback 成原文 |
-   | 5-9 | **enqueue** ＋ Redis **停用** → `queue_enqueued=false`，**且不產生 `queue_failed`** | `disabled` 不是故障 |
-   | 5-10 | **enqueue** ＋ Redis **READONLY／退避** → `queue_enqueued=false`，**且有 `queue_failed`**；**第一次收到 READONLY 就要如此**，不得被當成成功 | `backoff` 是故障 |
-   | 5-11 | **reservation** ＋ Redis **停用** → 保留 local、**放行**，**不產生 `dedup_degraded`** | 七步流程第 5 步 |
-   | 5-12 | **reservation** ＋ **首次 READONLY** 與**持續 backoff** 兩種情況 → 保留 local、**放行**，**產生 `dedup_degraded`**，且 `Err` 為 backoff sentinel | 七步流程第 6 步 |
-   | 5-13 | **compare-delete** ＋ `backoff` / `error` → **釋放自己的 local token**、標記 `dedup_degraded`，Redis 端殘留交由 TTL（不重試刪除） | 釋放的降級路徑 |
-   | 5-14 | **三個操作**各自的 **status／cause 不變量**：`backoff` 帶 sentinel（`errors.Is` 可判）、`error` 帶非空 cause、其餘狀態 `Err == nil` | 分類器產得出 `readonly` |
-
-   ⚠️ **5-2 / 5-3 系列是並行／時序測試**，要用可注入的時鐘與可控的 Redis stub，
-   不要靠 `time.Sleep` 賭時序。
-
-   ⛔ **5-3c 不能寫成「同一個 Engine 的兩個 goroutine，Redis 回不同結果」**
-   （2026-09-02 review 修正——前一版就是這樣寫的，它與 local-first 流程互斥）：
-   同一個 local store 底下，第二個 goroutine 會在**第 2 步**就被抑制、
-   **根本不會呼叫 Redis**，那個情境造不出來。要驗跨 instance 就得用
-   **兩個獨立的 local store 共用一個 Redis stub**。
-
-   實作完成後維持本筆為「已實作／待 review」。
-6. Review 通過後，把分路徑一致性、API degraded contract 與操作觀測方式分別歸檔到
-   [`architecture.md`](./architecture.md) 與 [`api-reference.md`](./api-reference.md)
-   （後者要寫明 **HTTP 200 不再等於已寫入 signal history**），修正引用後再移除本筆。
-
-⛔ **局部寫入失敗的驗收一律看 `job_runs` 與 DB，不看 log**——`docker logs` 在這台機器留不住。
-⚠️ **但「全域 DB 不可用」不能用 `job_runs` 驗**（它自己也寫不進去，見上方循環依賴那節），
-那一格的驗收看 **`/health` 回 503 `{"status":"down"}`**。**兩種形狀用兩套判準，不要混用。**

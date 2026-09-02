@@ -27,7 +27,7 @@ type Engine struct {
 	redis   *store.RedisClient
 	// emission 是本筆用到的三個 Redis 操作（reservation / enqueue / compare-delete）。
 	// 拆成介面是為了讓測試注入可控 stub——`*store.RedisClient` 是具體型別，
-	// 從 signal 的測試控制不了它的回應（見 docs/issue.md I-102「測試接縫」）。
+	// 從 signal 的測試控制不了它的回應。
 	emission emissionStore
 	// now 讓 TTL、每分鐘整掃與「Redis 恢復後仍被未到期 local reservation 抑制」
 	// 這類時序測試不必靠 time.Sleep 賭。production 就是 time.Now。
@@ -86,7 +86,7 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store
 // **degraded-success 的範圍是「局部失敗」，不是 DB outage**：Evaluate 第一行就是
 // indicator.Compute，全域 DB 不可用時會在那裡就 return，根本走不到推播。
 // 真正走得到這條路的是「indicator 落盤正常、但 signals 單表／單欄位寫入失敗」
-// ——I-101 的 signals.vol_ratio 型別溢位就是那個形狀。詳見 docs/issue.md I-102。
+// ——I-101 的 signals.vol_ratio 型別溢位就是那個形狀。詳見 docs/architecture.md「寫入失敗的一致性契約」。
 func (e *Engine) EvaluateWithResult(ctx context.Context, symbol, timeframe string) (*EvaluateResult, error) {
 	res := &EvaluateResult{}
 

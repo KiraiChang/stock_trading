@@ -423,7 +423,7 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 // ——回傳值連接都沒接。於是指標或訊號寫不進 DB 時，錯誤既不往上傳也不計數，
 // job_runs 一整天照樣顯示「N 檔全部成功」。2026-09-01 的 2454 就是這樣：
 // 66 輪 intraday 全部 success，而它的指標從 11:24 起就沒再落盤。
-// 詳見 docs/issue.md I-102。
+// 詳見 docs/architecture.md「寫入失敗的一致性契約」（原記於 issue.md I-102，已收斂）。
 //
 // ⚠️ **單一 symbol 失敗不中斷整輪**——其餘標的照跑，這一檔記進 tally。
 func (s *Scheduler) evaluateSymbol(ctx context.Context, tally *jobFailureTally, symbol, timeframe string) {

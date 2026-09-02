@@ -140,6 +140,35 @@ CLAUDE.md 禁止拿 live 做測試資料、migration 驗證與清空資料。少
 > psql 讀到 EOF 直接以 **exit 0** 結束——指令看起來成功，實際上一行都沒執行。
 > 2026-08-10 就這樣「刪除成功」了一次，是事後查資料才發現根本沒刪。
 
+### Redis emission 驗證：`scripts/test-redis-emission.sh`
+
+驗**只有真實 Redis 才驗得到**的語意——目前是 signal emission reservation 的
+**Lua 原子 compare-and-delete**（設計見 [`architecture.md`](./architecture.md)
+「寫入失敗的一致性契約」的 reservation 那節）。
+
+```bash
+scripts/test-redis-emission.sh                            # 起拋棄式 Redis，跑完即刪
+REDIS_TEST_ADDR=host:port scripts/test-redis-emission.sh  # 用既有的（自負隔離責任）
+```
+
+**為什麼不併進 `backend/scripts/test.sh`**：那支是**每次都要跑**的基本驗證，
+跑在沒有網路相依的容器裡。把外部服務加進去會讓整條驗證需要 Redis 才跑得動。
+所以那支整合測試**預設 `t.Skip`**，只有這個腳本會設 `REDIS_TEST_ADDR`。
+
+⛔ **不要把 `REDIS_TEST_ADDR` 指向 live 的 `redis-redis-1` / `trading-net`。**
+測試會寫入 key，指到 live 就是拿正式環境當測試資料。
+預設模式起的是**拋棄式容器**：獨立 network、**不掛 volume**、跑完即刪，
+與 live 和 dev 都不共用資料。
+
+⚠️ **寫這類腳本時的兩個坑**（2026-09-02 都踩過）：
+
+* ⛔ **不要用 `exec docker run`**——`exec` 會讓 shell 被 docker 取代，
+  `trap EXIT` 永遠不執行，拋棄式資源就殘留（那次留了一個跑 17 分鐘的容器）。
+  改成正常執行 ＋ 保留 exit code。
+* ⛔ **資源名稱不要固定**——固定名稱時兩個人同時跑，後啟動者的 `docker rm -f`
+  會刪掉前一輪正在用的容器。加 PID／時間戳後綴，並且**只清本輪確實建立的資源**
+  （network 與 container 各記一個旗標，否則 Redis 起不來時 network 會漏刪）。
+
 ### 用真實資料跑 evaluation：`scripts/run-evaluation.sh`
 
 SR Zone 的 evaluation / decision replay / sweep 要拿**真實的數千根日 K** 才有意義，
@@ -505,8 +534,8 @@ TWSE 年度日曆 ＋ 交易所逐檔核對」，三者都不經過它）。代�
 2026-09-01 的 migration 075 就是在 16:49 部署（窗口之外）；時序上確實避開了
 `intraday` 與 `daily_close`，當下也沒看到排程層級異常——**但那不等於沒造成問題**。
 同一天有 66 輪 `intraday` 回報 `success 11/11 0 failed`，而 `2454` 的指標從 11:24 起
-根本沒再落盤（成因見 [`issue.md`](./issue.md) I-102：寫 DB 失敗只記 warn，
-錯誤不往上傳，`job_runs` 因此照樣 `success`）。
+根本沒再落盤（**那個行為已於 2026-09-02 修正**，現況見
+[`architecture.md`](./architecture.md)「寫入失敗的一致性契約」；原記於 `issue.md` I-102，已收斂）。
 
 **`job_runs` 的 `success` 只能當輔助資訊，不能單獨排除被吞掉的寫入錯誤。**
 
@@ -555,9 +584,19 @@ FROM information_schema.columns WHERE table_name = '…' AND column_name = '…'
 
 要等資料的（例如「某標的的指標重新落地」）**不會在部署後立刻成立**——
 盤中才有 1m 寫入，部署後直接查會看到舊值，**那不代表沒修好**。
-要當下就有結果就主動觸發（例如 `POST /api/v1/indicators/:symbol/compute`），
-⚠️ 但**判定要看 DB 不要看 API 回應**：`Compute` 在 `Upsert` 失敗時只記 warn 就繼續，
-照樣回 200（見 `issue.md` I-102）。
+要當下就有結果就主動觸發（例如 `POST /api/v1/indicators/:symbol/compute`）。
+
+**現況（2026-09-02 起）**：`Upsert` 失敗時 `Compute` 會**回傳錯誤且不寫 Redis**，
+該端點對持久化失敗回 **503**（資料不足回 422、其他錯誤回 500）。
+契約見 [`api-reference.md`](./api-reference.md)，語意見
+[`architecture.md`](./architecture.md)「寫入失敗的一致性契約」。
+
+⚠️ **判定仍然要看 DB**——但理由變了：**不是因為 API 會誤回成功**（那個行為已修掉），
+而是因為**要的是資料真的落地的直接證據**。API 回 200 只證明「這一次呼叫成功」，
+證明不了排程路徑在跑、也證明不了後續每一輪都寫得進去。
+
+⛔ **在 2026-09-02 之前的舊版**，`Upsert` 失敗只記 warn 就繼續、照樣回 200——
+翻更早的驗收紀錄時要記得那時的 200 不代表落盤（原記於 `issue.md` I-102，已收斂）。
 
 #### 回滾：live 沒有執行 goose Down 的入口
 

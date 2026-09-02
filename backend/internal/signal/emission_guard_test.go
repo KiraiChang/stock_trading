@@ -11,7 +11,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組守的是 docs/issue.md I-102 第 2 段的並行契約（完成條件 5-1 ~ 5-4、5-9 ~ 5-14）。
+// 這一組守的是 signal emission 的並行契約（見 docs/architecture.md「寫入失敗的一致性契約」）。
 
 // ── 可控 Redis stub ───────────────────────────────────────────────
 //

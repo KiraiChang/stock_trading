@@ -188,7 +188,20 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 **Response（200）：** 格式同 `GET /indicators/:symbol`。
 
-**錯誤：** candles 不足 35 根時回傳 `422 Unprocessable Entity`。
+**錯誤：三分支**（與 `POST /signals/:symbol/evaluate` **共用同一套映射**，
+因為那條 API 內部也會走指標計算，同一個錯誤在兩邊必須得到同一個狀態碼）：
+
+| 情況 | 狀態碼 | 回應 |
+|---|---|---|
+| **資料不足**（candles 少於 35 根） | `422` | `{"error":"資料不足，無法計算指標"}` |
+| **指標算得出來但寫不進 DB** | `503` | `{"error":"service temporarily unavailable"}` |
+| 其他錯誤（含 `candles` 讀取失敗） | `500` | `{"error":"internal server error"}` |
+
+⚠️ **`503` 不是「請求有問題」而是「這一刻存不進去」**，重試有意義。
+⛔ **DB 讀取失敗不會回 422**——那會謊稱是呼叫端的輸入問題。
+
+⛔ **錯誤回應一律是固定訊息，不含原始錯誤文字。** driver 錯誤常帶 DSN、
+主機位址與 SQL 片段，cause 只寫進伺服器 log（同 `handler/errors.go` 的既有慣例）。
 
 前端「歷史資料回補」頁面（`/backfill`）下方有「手動計算指標」區塊，輸入任意
 股票代號即可觸發，不需要透過 API 手動呼叫。
@@ -239,15 +252,53 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
 
 **Response（200，有觸發）：**
 ```json
-{ "signal": { "id": 1, "symbol": "2330", "signal_type": "BREAKOUT", "direction": "BUY", "...": "..." } }
+{
+  "signal": { "id": 1, "symbol": "2330", "signal_type": "BREAKOUT", "direction": "BUY", "...": "..." },
+  "signal_generated": true,
+  "db_persisted": true,
+  "queue_enqueued": true,
+  "broadcast_attempted": true,
+  "degraded": false,
+  "degraded_stages": []
+}
 ```
 
-**Response（200，沒有觸發）：**
+**Response（200，沒有觸發）：** 欄位相同，另帶 `message`。
+**沒有訊號時也會回完整狀態**——判重降級等資訊不會因為「這次沒訊號」而消失。
+
 ```json
-{ "signal": null, "message": "沒有觸發訊號（不符合突破/跌破/爆量條件）" }
+{
+  "signal": null,
+  "signal_generated": false,
+  "db_persisted": false, "queue_enqueued": false, "broadcast_attempted": false,
+  "degraded": false, "degraded_stages": [],
+  "message": "沒有觸發訊號（不符合突破/跌破/爆量條件，或被判重抑制）"
+}
 ```
 
-**錯誤：** candles 不足 35 根時回傳 `422 Unprocessable Entity`。
+##### ⚠️ `200` 不等於「已寫入 signal history」
+
+`signals` 寫入失敗時**訊號仍會送出**（degraded-success），API 照樣回 `200`。
+**要判斷有沒有落盤只能看 `db_persisted`，不能用狀態碼推導。**
+
+| 欄位 | 語意 |
+|---|---|
+| `signal_generated` | 本次是否產生訊號（沒觸發條件、或被判重抑制時為 `false`） |
+| `db_persisted` | signal history 是否成功寫入 DB |
+| `queue_enqueued` | 是否**真的**寫進 Redis queue。⚠️ Redis 停用或退避時為 `false` |
+| `broadcast_attempted` | 是否呼叫過 broadcast。⛔ 語意是 **delivery attempted，不宣稱客戶端已收到**——broadcast callback 沒有回傳值，系統無從得知投遞結果。**本 API 沒有「broadcast 失敗」這個狀態** |
+| `degraded` | 等同 `len(degraded_stages) > 0` |
+| `degraded_stages` | 降級分類，**一律是陣列**（沒有降級時為空，不是 `null`）。值域：`signal_persist_failed` / `queue_failed` / `dedup_degraded` |
+
+⚠️ **`degraded_stages` 的三個值分別代表**：`signals.Insert` 失敗／Redis enqueue 非預期
+失敗（**設定停用不算**）／判重降級成單層（DB 判重查詢失敗，或 Redis 故障只剩
+process 內的 reservation）。
+
+⛔ **沒有 retry worker**：`db_persisted=false` 的那一筆**不會自動補寫**。
+`signal:queue` 目前也沒有 consumer，不能把它當成補寫機制。
+
+**錯誤：** 與 `POST /indicators/:symbol/compute` **完全相同的三分支**（`422` / `503` / `500`），
+見該節的表。
 
 前端「歷史資料回補」頁面（`/backfill`）下方有「手動評估訊號」區塊，輸入任意
 股票代號即可觸發，不需要透過 API 手動呼叫。

@@ -103,7 +103,7 @@ type reservation struct {
 	token string
 }
 
-// tryReserveEmission 執行 I-102 定下的七步流程。
+// tryReserveEmission 執行判重的七步流程（設計見 docs/architecture.md「寫入失敗的一致性契約」）。
 //
 //	1  以 UUID token 原子取得 local reservation
 //	2  local 沒取得              → 抑制（不必問 Redis）

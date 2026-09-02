@@ -10,7 +10,7 @@ import (
 	"github.com/trading/backend/internal/indicator"
 )
 
-// 這一組守的是 docs/issue.md I-102 的兩件事：
+// 這一組守的是 docs/architecture.md「寫入失敗的一致性契約」 的兩件事：
 // ① job_runs.error 只能出現封閉值域的 reason code；
 // ② symbols_failed 是聯集不是相加。
 

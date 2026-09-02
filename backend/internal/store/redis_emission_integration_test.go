@@ -23,7 +23,7 @@ import (
 // 環境隔離規則。**2026-09-02 的第一版註解就是這樣寫的，已修正。**
 //
 // ⛔ **也不要把它改成無條件執行**——那等於在單元測試裡加一個未經確認的外部相依，
-// 正是 I-102 計畫書「測試接縫」那節要避免的。
+// 正是 docs/architecture.md「寫入失敗的一致性契約」 要避免的（原記於 issue.md I-102 的「測試接縫」，已收斂）。
 func TestLuaCompareAndDeleteAgainstRealRedis(t *testing.T) {
 	addr := os.Getenv("REDIS_TEST_ADDR")
 	if addr == "" {

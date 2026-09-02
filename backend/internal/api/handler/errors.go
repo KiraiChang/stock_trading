@@ -51,7 +51,7 @@ func serviceUnavailableError(c *gin.Context, log *zap.Logger, err error, context
 
 // indicatorComputeError 是 /indicators/:symbol/compute 與 /signals/:symbol/evaluate
 // **共用**的錯誤分流——兩條端點都會走到 indicator.Compute，同一個錯誤在兩邊必須得到
-// 同一個狀態碼，否則對外契約自相矛盾（見 docs/issue.md I-102）。
+// 同一個狀態碼，否則對外契約自相矛盾（契約見 docs/api-reference.md 那兩條端點）。
 //
 // ⚠️ **順序是「先特殊後一般」，不能反**：
 //

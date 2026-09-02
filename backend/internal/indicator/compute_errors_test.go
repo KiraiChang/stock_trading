@@ -11,7 +11,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組測試守的是 docs/issue.md I-102 的第 1 段：
+// 這一組測試守的是 docs/architecture.md「寫入失敗的一致性契約」 的 indicator 那半：
 // Compute 的三種失敗必須分得開，且 Upsert 失敗要 fail-fast。
 
 // 嵌入介面：只實作這組測試會用到的方法，其餘被呼叫時 nil panic——
@@ -104,7 +104,7 @@ func TestComputeFailsFastWhenUpsertFails(t *testing.T) {
 		t.Fatalf("Upsert 失敗要回 ErrPersistence，得到 %v", err)
 	}
 	if snap != nil {
-		// 回傳非 nil 等於讓呼叫端拿一份沒落盤的 snapshot 繼續用——那正是 I-102 的成因。
+		// 回傳非 nil 等於讓呼叫端拿一份沒落盤的 snapshot 繼續用——那正是原本的成因。
 		t.Error("落盤失敗時不得回傳 snapshot")
 	}
 	if !errors.Is(err, cause) {

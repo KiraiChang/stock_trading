@@ -10,10 +10,10 @@ import (
 	"github.com/trading/backend/internal/config"
 )
 
-// 這一組守的是 docs/issue.md I-102 的 status／cause 不變量（完成條件 5-9、5-10、5-14）。
+// 這一組守的是三個 Redis 操作的 status／cause 不變量（見 docs/architecture.md「寫入失敗的一致性契約」）。
 //
 // **Redis 停用（rdb == nil）與退避是最重要的兩格**：既有方法把它們都折成 nil，
-// 而 I-102 的裁決是「停用不算 degraded、READONLY 算」——不分開就落實不了。
+// 而設計上「停用不算 degraded、READONLY 算」——不分開就落實不了。
 
 func disabledClient() *RedisClient { return &RedisClient{rdb: nil} }
 

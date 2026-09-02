@@ -486,22 +486,24 @@ TWSE 改字時**壞在明處**。
 **尚未驗到的**：live 端的**正向**告警（真實上游漏資料）至今沒有發生過，
 所以 `partial` ＋ `upstream_data_gap` 在 live 的表現只有 dev 的等價證據；
 `deferred`、陳舊升級與 breaker 三條路徑也都還沒在真實流量下被觸發。
-**這份清單的權威版本在下一節**（「live 運作觀察」的「仍未在 live 觸發的四條路徑」），
-截至 2026-09-01 連續三個交易日仍然一條都沒觸發——不要在兩個地方各自宣稱進度。
+**這份清單的權威版本在下一節**（「live 運作觀察」的「live 觸發狀況」表），
+不要在兩個地方各自宣稱進度。
+⚠️ **逐檔 `verification_unavailable` 已於 2026-09-02 首次觸發**，不再屬於未驗到的路徑——
+詳見下一節。
 
-##### live 運作觀察：三個交易日（2026-08-28 / 08-31 / 09-01）
+##### live 運作觀察：四個交易日（2026-08-28 ~ 09-02）
 
-上線後連續三個交易日的 16:25 輪次**全部 `success`**，`error` 欄皆空、無 `partial`：
+| 交易日 | status | 檔數／失敗 | 起訖（CST） | 耗時 | 備註 |
+|---|---|---|---|---|---|
+| 2026-08-28（五） | `success` | 135 / 0 | 16:25:13→16:25:19 | 5.81 秒 | 候選 6 天，單一月份 |
+| 2026-08-31（一） | `success` | 135 / 0 | 16:25:18→16:25:24 | 6.21 秒 | 候選 7 天，單一月份 |
+| 2026-09-01（二） | `success` | 135 / 0 | 16:25:08→16:25:14 | 5.69 秒 | 候選 8 天，單一月份 |
+| **2026-09-02（三）** | **`partial`** | 135 / 0 | 16:25:03→16:25:10 | 6.41 秒 | **候選 9 天、跨 8/9 兩個月**，`unavailable=1`，見下方「首次 `partial`」 |
 
-| 交易日 | status | 檔數／失敗 | 起訖（CST） | 耗時 |
-|---|---|---|---|---|
-| 2026-08-28（五） | `success` | 135 / 0 | 16:25:13→16:25:19 | 5.81 秒 |
-| 2026-08-31（一） | `success` | 135 / 0 | 16:25:18→16:25:24 | 6.21 秒 |
-| 2026-09-01（二） | `success` | 135 / 0 | 16:25:08→16:25:14 | 5.69 秒 |
-
-三輪的 `candle_verification_state` 全表都只有 **`2867` 一列**，判 `verified`、
-`consecutive_failures=0`。**耗時 5.7～6.2 秒的差異是執行時間波動，不是請求數變化**——
-缺漏日期變多不會增加請求數（理由見下）。
+前三輪的 `candle_verification_state` 全表都只有 **`2867` 一列**，判 `verified`、
+`consecutive_failures=0`；第四輪同一列轉為 `unavailable`。
+**耗時 5.7～6.4 秒的差異是執行時間波動，不是請求數變化**——缺漏日期變多不會增加請求數，
+**除非跨月**（理由見下）。
 
 **請求量可以事前算出來，不必靠 log。** 兩條規則決定它：
 
@@ -545,21 +547,50 @@ distinct `(year, month)` 數**，視窗滾過去之後舊月份就不再計入�
 **判定一律以 `job_runs` 與 `candle_verification_state` 兩項 DB 證據為準**，它們比 log 耐久；
 要取 log 佐證，只能在該輪跑完到下次容器重建之間。
 
-**仍未在 live 觸發的四條路徑**（截至 2026-09-01，三個交易日皆未發生）：
+**live 觸發狀況**（截至 2026-09-02）：
 
 | 路徑 | 現有證據 |
 |---|---|
-| 正向告警（`partial` ＋ `upstream_data_gap`） | 只有 dev 人工造缺口的等價證據 |
+| 正向告警（`partial` ＋ `upstream_data_gap`） | **仍未觸發**——只有 dev 人工造缺口的等價證據 |
+| **逐檔 `verification_unavailable`** | ✅ **2026-09-02 首次觸發**，見下方「首次 `partial`」 |
 | `deferred`（缺漏日期晚於 `source_as_of`） | **無** |
 | 陳舊升級（`lag >= market_stale_days` → 整批 `unavailable`） | **無** |
 | breaker 開啟後跳過 | **無** |
 
-⛔ **這四條列在這裡是為了不要被當成「已驗過」。** 三個交易日的 `success` 只證明了
-**「沒有真實上游資料缺口時不誤報」**與「合法停止買賣判 `verified`」這兩件事。
+⛔ **仍未觸發的那幾條列在這裡是為了不要被當成「已驗過」。** 前三個交易日的 `success`
+只證明了**「沒有真實上游資料缺口時不誤報」**與「合法停止買賣判 `verified`」這兩件事。
 
-⚠️ **不要寫成「沒有候選缺口」**（2026-09-01 review 修正）：三輪**都有** `2867` 的候選缺漏
+⚠️ **不要寫成「沒有候選缺口」**（2026-09-01 review 修正）：每一輪**都有** `2867` 的候選缺漏
 （8～9 天），只是逐檔核對後交易所那邊也沒有成交，所以判 `verified` 而不告警。
 **候選缺口一直都在，被驗掉的是「它是不是真的上游漏資料」。**
+
+##### 首次 `partial`：跨月當天的 `verification_unavailable`（2026-09-02）
+
+| 觀察 | 值 |
+|---|---|
+| `job_runs` | **`partial`**、135/0、16:25:03→16:25:10（6.41 秒）、`error` ＝ `verification_unavailable: 1 筆驗不了` |
+| log | `pool=135 candidates=9 gap=0 unavailable=1 deferred=0 breaker_skipped=0` |
+| `candle_verification_state` | `2867` 由 `verified` 轉為 **`unavailable`**、`consecutive_failures` ＝ **0** |
+
+**這不是上游漏資料**——`gap=0`、`breaker_skipped=0`，照「三種結論必須分得開」的判準，
+它是第三種「驗不了」。
+
+**候選數 9 與跨月的預測完全吻合**：視窗 08-19～09-01，`2867` 日 K 止於 08-19，
+缺 08-20/21/24/25/26/27/28/31 ＋ 09-01，橫跨 8、9 兩個月 → **兩組請求**
+（前一日是 8 天、單一月份、1 組）。上面「請求量可以事前算出來」那兩條規則再次驗證。
+
+⚠️ **`consecutive_failures = 0` 不是異常，它是證據**：依合併規則「有任何成功 → 歸零」
+（`candle_gap_detection.go:686-694`），而 `last_verified_at` 也更新了——
+**所以兩個月份群組裡有一組成功、一組失敗**。
+
+⛔ **但查不出是哪一組、更查不出為什麼**：`StockTradedDates` 的錯誤在
+`candle_gap_detection.go:537` 的 `unavailable++` 那裡被丟棄，沒有任何 log。
+這與本節「不猜測、**壞在明處**」的宣示相牴觸——壞了，但不在明處。
+已立案 [`issue.md`](./issue.md) I-105 追蹤。
+
+⚠️ **跨月是每個月月初的常態**，這個形狀會反覆出現；在 I-105 修好之前，
+看到月初的 `verification_unavailable` **不要當成新問題**，也不要當成已知無害——
+現有資料不足以區分這兩者。
 
 ##### 相關
 
@@ -1012,6 +1043,129 @@ Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去
 | Auth | JWT（HS256）+ bcrypt | 無狀態 token，密碼安全雜湊 |
 
 ---
+
+### 寫入失敗的一致性契約：indicator 與 signal 走不同語意
+
+**問題形狀**：兩個引擎原本都是「寫 DB 失敗只記 warn，然後照樣往下走」——indicator 失敗後
+照樣寫 Redis 並把 snapshot 交給 signal engine，signal 失敗後照樣推 queue 與 WebSocket。
+於是**同一份資料依讀取路徑而不同**：`GET /indicators/:symbol` 只讀 DB 會回舊值且 200 OK，
+Redis 與 WebSocket 拿到的是新值；`signals` 表少一列，但推播照發。
+
+**2026-09-01 的 `2454` 是這個行為的一次實證**：`rsi14` 算出 100 塞不進當時的
+`DECIMAL(6,4)`，於是 11:24 之後 API 一直回舊指標，中間 66 根 1m K 棒完全沒有對應的指標列，
+而同期 **66 輪 `intraday` 全部回報 `success 11/11 0 failed`**。
+（型別問題本身已由 migration 075 解決，見 [`database-schema.md`](./database-schema.md)；
+**那只消掉了那一種溢位，行為本身是另一件事**。）
+
+#### 兩條路徑刻意採不同語意
+
+| 路徑 | 語意 | 理由 |
+|---|---|---|
+| **indicator** | **fail-fast**——`Upsert` 是成功的必要條件。失敗時回 typed error、**不寫 Redis**、不讓 signal evaluation 拿到未落盤的 snapshot | 它有 API 直接讀 DB，不一致立刻對外可見 |
+| **signal** | **degraded-success**——`signals.Insert` 失敗時**仍然送出**，但結果必須明示哪些階段成功 | 單表寫入失敗不該吞掉一個已經算出來的即時訊號 |
+
+⚠️ **degraded-success 涵蓋的是「局部失敗」，不是 DB outage。**
+`signal.Evaluate` 的第一行就是 `indicator.Compute`，所以 **indicator 一旦 fail-fast，
+全域 DB 不可用時會在那裡就 return，根本走不到推播**。真正走得到 degraded 那條路的是
+「indicator 落盤正常、但 `signals` 單表／單欄位寫入失敗」——`signals.vol_ratio` 的型別溢位
+就是那個形狀。
+
+⛔ **不要把「DB 掛掉時仍保住推播」寫成這個設計的目的**，那是錯的。
+
+#### indicator 的三種失敗要分得開
+
+`indicator.Compute` 的失敗分成三類，**都可用 `errors.Is` 判斷**：
+
+| 情況 | 回傳 |
+|---|---|
+| `candles` 讀取失敗 | 包住原 cause 的 infrastructure error |
+| 查詢成功但根數不足 | `indicator.ErrInsufficientCandles`（**sentinel，不包 cause**） |
+| `Upsert` 失敗 | `indicator.ErrPersistence`（包住 cause，snapshot 為 nil） |
+
+兩條手動 API 依此映射成 `422` / `503` / `500`，見
+[`api-reference.md`](./api-reference.md) 的 `POST /indicators/:symbol/compute`。
+
+#### 判重有兩層，第二層在 Redis 失效時只剩 per-instance
+
+DB 判重（讀 `signals` 最近 N 筆比對 identity ＋ 15 分鐘 cooldown）在查詢失敗時 **fail-open**，
+於是 `signals` 寫不進去時「判重」與「寫入」同時失效，每一輪排程都會重推同一個訊號。
+第二層是 **emission reservation**：
+
+* key 是 `signal:emitted:{identity}`，**identity 與 DB 判重共用同一個定義**
+  （symbol ＋ type ＋ direction ＋ 依型別選取的價位，價位量化到 1e-6 後格式化成字串）。
+  ⛔ **不要讓兩層各自定義**——容差比較與離散字串各走各的，會出現「DB 說同一個、
+  Redis 說不同」的破口。
+* Redis 端用 `SET NX PX`（跨 instance 仲裁），釋放走 **Lua 的原子 compare-and-delete**
+  ——裸 `DEL` 或「GET 比對後 DEL」都會刪掉別人後來取得的 reservation。
+* **先 local 後 Redis**：process 內的 map 先原子取得保留，Redis 只負責跨 instance 仲裁，
+  mutex 因此不必跨越網路呼叫。Redis 回「已存在」時回滾自己的 local token。
+
+⚠️ **Redis 停用或故障時失效的是「跨 instance 保證」，不是整層**——local 判重仍然有效，
+只是縮成 per-instance 且重啟即失憶。**這是刻意接受的降級**，不是待修的缺陷。
+
+##### reservation 的結果／保留／釋放
+
+* **TTL ＝ `signalCooldown`（現值 15 分鐘）**，與 DB 判重用的 cooldown 同一個值——
+  兩層對「多久算重複」必須同調。
+  ⚠️ **兩邊的過期方式不同**：**Redis 靠 `PX` 自動過期**，不需要任何清理程序；
+  **process 內的 map 沒有自動過期**，靠每次 reserve 順手做的整掃
+  （**每分鐘至多一次、只清已過期項目**）。
+  ⛔ **local 不做容量上限淘汰**——Redis 停用或退避時它是唯一判重層，
+  淘汰一個尚未過期的 reservation 會讓同一 identity 在 cooldown 內再次放行。
+* **token 是每一次 reservation 的 ownership 憑證**（UUID）。
+  ⛔ **釋放一律 compare-and-delete**：只在值仍等於自己的 token 時才刪，
+  否則舊請求的釋放會刪掉別人後來取得的 reservation。
+
+**Redis 回應的處置**（`disabled` 與 `backoff` 在舊的 client 介面裡長得一樣，
+**必須分開**才落實得了「設定停用不算故障」）：
+
+| Redis 結果 | 動作 | 算 degraded？ |
+|---|---|---|
+| `reserved` | 兩邊都保留 → 放行 | 否 |
+| `already_exists` | 回滾自己的 local token → **抑制** | 否 |
+| `disabled`（設定停用） | 保留 local → 放行 | **否**——設定狀態不是故障 |
+| `backoff`（READONLY 退避） | 保留 local → 放行 | **是**（`dedup_degraded`） |
+| `error` | 保留 local → 放行 | **是**（`dedup_degraded`） |
+
+**釋放的時機**：**只有 `queue_enqueued` 與 `broadcast_attempted` 都不成立時才釋放**，
+讓下一輪能重試；任一成立就保留。
+
+⛔ **但釋放只在「`signals.Insert` 也失敗」時真的有效**——`Insert` 成功的話，下一輪會先被
+DB 判重擋下（讀得到剛寫進去那列、又在 cooldown 內），**不會重送**。
+那個情形是**明示接受**的取捨，見上方「不會自動重送」那條。
+
+⛔ **`signals` 已落盤、但 queue 與 broadcast 都沒送出時，不會自動重送**：下一輪會先被
+DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立的一階——
+現況 `signal:queue` 連 consumer 都沒有。
+
+#### 觀測走既有的 `job_runs`，沒有新增表或端點
+
+`job_runs` 已經備妥需要的一切：`finishRunDegraded` 會把 degraded 收成 `partial`、
+`GET /scheduler/status` 是現成的查詢介面、保留 30 天讓連續失敗查得到。
+**不新增表也就沒有 migration**，回滾是純 image 回退。
+
+| 現象 | `symbols_failed` | `error` 前綴 |
+|---|---:|---|
+| 行情抓取／回補失敗 | 計入 | `fetch_failed:N` |
+| `Evaluate` 硬失敗（含指標寫入失敗、資料不足、DB 讀取失敗） | 計入 | `evaluate_failed:N` |
+| 降級（訊號送出但某階段沒做到） | **不計入** | `degraded:N` |
+
+⚠️ **`symbols_failed` 是 `fetchFailed ∪ evaluateFailed` 的聯集，不是相加**——同一檔可能兩者
+皆有，相加會重複計數，甚至讓 `failed >= total` 成立而把整輪誤判成 `failed`。
+
+⚠️ **判別兩種 `partial`**：`symbols_failed > 0` ＋ `evaluate_failed:` 是硬失敗；
+`symbols_failed = 0` ＋ `degraded:` 是降級。
+
+⛔ **寫進 `job_runs.error` 的原因一律是封閉值域的 reason code**（`numeric_overflow` /
+`conn_refused` / `insufficient_data` / `readonly` / … / `internal_error`），
+**分類不出來一律 `internal_error`，不得退回 `err.Error()`**。
+理由：`job_runs.error` 會由 `GET /scheduler/status` 回傳、前端原樣渲染，
+而原始 driver 錯誤常帶 DSN 與 SQL 片段，寫進去就是顯示在畫面上——且保留 30 天。
+（其餘排程尚未套用同一條規則，見 [`issue.md`](./issue.md) I-104。）
+
+⚠️ **`job_runs` 接不住全域 DB outage**：它和受影響的表在同一個 DB，`Start` 失敗時只留
+`runID = 0`，後續 `UPDATE ... WHERE id=0` 更新零列**也不回錯**——那個形狀由 `/health`
+的 DB ping（失敗回 `503 {"status":"down"}`）承接，不是靠 `job_runs`。
 
 ## 可觀測性：為什麼沒有 metrics 依賴
 

@@ -15,7 +15,7 @@ import (
 // ⚠️ **job_runs.error 是使用者可見面**：GET /scheduler/status 會回傳它，
 // 前端 Scheduler.svelte 直接 `{job.error}` 原樣渲染。原始 driver 錯誤常帶 DSN、
 // 主機位址或 SQL 片段——寫進去就等於顯示在畫面上，而且 job_runs 保留 30 天，
-// 之後每次查詢都會再洩一次。詳見 docs/issue.md I-102「錯誤訊息的外洩邊界」。
+// 之後每次查詢都會再洩一次。詳見 docs/architecture.md「寫入失敗的一致性契約」。
 type reasonCode string
 
 const (

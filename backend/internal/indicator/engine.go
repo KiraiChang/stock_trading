@@ -78,7 +78,7 @@ func (e *Engine) Compute(ctx context.Context, symbol, timeframe string) (*store.
 	// Upsert 失敗後照樣寫 Redis、照樣把 snapshot 交給 signal engine——API 讀 DB 回舊值、
 	// Redis 與 WebSocket 是新值，同一份資料依讀取路徑而不同。2026-09-01 的 2454
 	// （rsi14 撞到 DECIMAL(6,4) 上限）整個盤中都是這個狀態，而 66 輪 intraday 全部
-	// 回報 success。詳見 docs/issue.md I-102。
+	// 回報 success。詳見 docs/architecture.md「寫入失敗的一致性契約」（原記於 issue.md I-102，已收斂）。
 	if err := e.indRepo.Upsert(ctx, snap); err != nil {
 		return nil, persistenceError(symbol, timeframe, err)
 	}

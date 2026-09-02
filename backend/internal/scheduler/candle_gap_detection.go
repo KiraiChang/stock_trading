@@ -58,8 +58,15 @@ func (s *Scheduler) candleGapDetectionReady() bool {
 
 // candleGapDetectionEnabled 是**有效**啟用條件。
 //
-// 偵測沒有自己的 cron，所以 parent 沒被註冊時它永遠不會執行。標成 registered 會讓
+// 偵測沒有自己的 cron，所以 parent 沒被註冊時它不會**自動**執行。標成 registered 會讓
 // /scheduler/status 顯示 never_run ＋ stale——那是假警報。
+//
+// ⚠️ **「不會自動執行」不等於「永遠不會執行」**：手動觸發 parent
+// （POST /scheduler/evaluation-universe-sync/run）走的是 runEvaluationUniverseSync，
+// 那條路徑**只檢查 evaluationUniverse != nil、不看 parent 的 Enabled**，尾端照樣呼叫
+// runCandleGapDetection。所以 parent 關閉、本項開啟、依賴齊全時，手動觸發仍會執行偵測
+// 並寫入 job_runs。本函式刻意**不含 parent 的開關**，因為它回答的是「本項自己備妥了沒」，
+// 不是「這一輪會不會被 cron 帶起來」。
 func (s *Scheduler) candleGapDetectionEnabled() bool {
 	return s.candleGapCfg.Enabled && s.candleGapDetectionReady()
 }

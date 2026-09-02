@@ -319,8 +319,15 @@ func TestCandleGapDetectionSkipsBreakerOpenSourceAndStillPartial(t *testing.T) {
 		openSource: map[string]bool{market.SourceTWSEStockDay: true},
 		traded:     map[string]map[string]bool{"6182": {}},
 	}
+	// ⚠️ **每檔只缺 days[2] 這一天，不要改成缺兩天以上。** `days` 由 recentTradingDays
+	// 依**真實今天**產生，每個月頭幾個交易日它必然跨月（例如 2026-09-02 會拿到
+	// 08-28 / 08-31 / 09-01）；缺兩天以上時 (symbol, month) 去重就會把同一檔拆成
+	// 兩次請求，下面的單一元素斷言在那幾天必然失敗——而且過幾天又自己好了。
+	// 缺單一天永遠只落在一個月份，與今天是哪一天無關。
+	// 跨月分組本身由 TestCandleGapDetectionQueriesEveryMonthInWindow 專門驗
+	// （那支直接呼叫 verifyCandidates 並寫死日期，同樣是為了不依賴今天）。
 	candles := &gapCandleStub{dates: map[string][]string{
-		"2330": {days[0]}, "6182": {days[0]},
+		"2330": {days[0], days[1]}, "6182": {days[0], days[1]},
 	}}
 	s, jobRuns := newGapScheduler(verification, reference, candles, nil, func(c *config.CandleGapDetectionConfig) {
 		c.CandidateCapPerRun = 1 // cap 只有 1：被跳過的不得佔用它
@@ -503,8 +510,15 @@ func TestCandleGapDetectionPrioritisesNeverAttemptedCandidates(t *testing.T) {
 			LastResult:      store.VerificationVerified},
 	}}
 	reference := &gapReferenceStub{traded: map[string]map[string]bool{}}
+	// ⚠️ **每檔只缺 days[2] 這一天，不要改成缺兩天以上。** `days` 由 recentTradingDays
+	// 依**真實今天**產生，每個月頭幾個交易日它必然跨月（例如 2026-09-02 會拿到
+	// 08-28 / 08-31 / 09-01）；缺兩天以上時 (symbol, month) 去重就會把同一檔拆成
+	// 兩次請求，下面的單一元素斷言在那幾天必然失敗——而且過幾天又自己好了。
+	// 缺單一天永遠只落在一個月份，與今天是哪一天無關。
+	// 跨月分組本身由 TestCandleGapDetectionQueriesEveryMonthInWindow 專門驗
+	// （那支直接呼叫 verifyCandidates 並寫死日期，同樣是為了不依賴今天）。
 	candles := &gapCandleStub{dates: map[string][]string{
-		"AAA": {days[0]}, "ZZZ": {days[0]},
+		"AAA": {days[0], days[1]}, "ZZZ": {days[0], days[1]},
 	}}
 	s, _ := newGapScheduler(verification, reference, candles, nil, func(c *config.CandleGapDetectionConfig) {
 		c.CandidateCapPerRun = 1
@@ -1009,7 +1023,7 @@ func TestCandleGapDetectionRegistrationCombinations(t *testing.T) {
 
 	// 矩陣 #29d：parent 的 cron 字串打錯（AddFunc 失敗）→ **兩個都不標記**。
 	//
-	// parent 沒註冊成功，掛在它尾端的偵測也不可能執行。
+	// parent 沒註冊成功，掛在它尾端的偵測也不會被 cron 帶起來。
 	t.Run("parent cron 打錯 → 兩個都不註冊", func(t *testing.T) {
 		s := newGapRegistrationScheduler("not a cron", true, true, true)
 		s.Start()
@@ -1018,11 +1032,15 @@ func TestCandleGapDetectionRegistrationCombinations(t *testing.T) {
 			t.Error("cron 打錯時 parent 不該被標記")
 		}
 		if s.IsJobRegistered(candleGapDetectionJob) {
-			t.Error("parent 沒註冊成功，偵測也不可能執行")
+			t.Error("parent 沒註冊成功，偵測不會被 cron 帶起來，不得標記")
 		}
 	})
 
-	// parent 關閉 → 偵測沒有自己的 cron，永遠不會執行，同樣不得標記。
+	// parent 關閉 → 偵測沒有自己的 cron，不會被自動帶起來，同樣不得標記。
+	//
+	// ⚠️ 這裡斷言的是**註冊狀態**，不是「偵測絕對不會執行」——手動觸發 parent 會繞過
+	// parent 的 Enabled，仍可能執行偵測（見 candleGapDetectionEnabled 的說明）。
+	// 標記與否服務的是 /scheduler/status 的 never_run ＋ stale 判讀，只跟 cron 有關。
 	t.Run("parent 關閉 → 兩個都不註冊", func(t *testing.T) {
 		s := newGapRegistrationScheduler(goodCron, false, true, true)
 		s.Start()
@@ -1031,7 +1049,7 @@ func TestCandleGapDetectionRegistrationCombinations(t *testing.T) {
 			t.Error("parent 關閉不該註冊")
 		}
 		if s.IsJobRegistered(candleGapDetectionJob) {
-			t.Error("parent 關閉時偵測永遠不會執行，不得標記")
+			t.Error("parent 關閉時偵測不會被 cron 帶起來，不得標記")
 		}
 	})
 }

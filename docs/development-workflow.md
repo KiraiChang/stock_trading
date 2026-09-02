@@ -356,6 +356,97 @@ select symbol, round(avg((high-low)/nullif(close,0))*100, 2) range_pct
 
 判讀**2026-08-20 之前**留下的階梯結果時，仍要把舊行為算進去。
 
+### 在 dev stack 上驗排程類功能
+
+要驗的是**排程本身會不會正確偵測／告警**（而不是某段演算法）時，dev 的預設狀態幾乎一定
+不夠用——`docker-compose.dev.yml` 用**獨立的資料卷**，與 live 完全不共用。
+**沒有資料時排程會早退或算出空的候選集合，而那看起來像「一切正常」。**
+2026-08-28 的 `candle_gap_detection` 驗收（原記於 `todo.md` T-067，已收斂）就是照這套做的。
+
+#### 開始前的四項前置，缺一項就驗不到東西
+
+| 檢查 | 查法 | 不足時 |
+|---|---|---|
+| 池／清單裡有成員 | `SELECT COUNT(*) FROM evaluation_universe WHERE active;` | 從前端「評估標的池 → ③ 已入池」匯入 selection report。**空池時排程記 `success` / `total=0`，什麼都驗不到** |
+| 主檔有那幾檔且 `is_listed` | `SELECT symbol, is_listed, market FROM stock_symbols WHERE symbol IN (…);` | 跑一次 `stock_symbol_sync`（前端排程頁可手動觸發）。**查無主檔的標的會 fail-open 保留但沒有 `market`** |
+| 視窗內有足夠資料 | `SELECT symbol, COUNT(*) FROM candles WHERE timeframe='1d' AND ts >= now() - interval '20 days' GROUP BY 1;` | 手動觸發回補（FinMind 5 req/min，135 檔約 26 分鐘；**只驗少數幾檔就先把池縮小**） |
+| **dev image 夠不夠新** | `docker exec <dev-pg> psql -tAc "SELECT max(version_id) FROM goose_db_version;"` 對照 `backend/internal/database/migrations/postgres/` 的最大編號 | **重建 image**，見下方「schema migration 上 live 的程序」的同一條 |
+
+⛔ **第四項的失敗模式最隱蔽，而且三個地方都不會報。** migration 是 embed 進 binary 的，
+所以 image 的新舊決定 schema 的新舊。2026-08-28 那次 dev image 建於 08-25，
+而要驗的表是 08-28 才加的 migration，於是**整張表不存在**，但：
+
+* backend 照樣記 `migrations applied version=<舊的最大值>`——對舊 binary 而言那確實是最新；
+* 排程自身的依賴檢查照樣通過（repo 物件非 nil，nil 檢查看不出表在不在）；
+* 其他三項前置沒有任何一項會碰到它。
+
+執行時會明確降級（讀取炸在 `relation does not exist` → 該輪收 `partial`），
+所以**危險不在「結果看起來正常」，而在啟動與前置檢查都不告訴你原因**——
+你會拿到一個 `partial`，然後從前三項前置查不出所以然。
+
+#### 巢狀開關：cron 路徑要兩個都開，手動觸發則不一定
+
+子排程若掛在 parent 排程底下（例如 `candle_gap_detection` 掛在
+`evaluation_universe_sync` 尾端），**兩條路徑的生效條件不同，不要混為一談**：
+
+| 路徑 | 生效條件 |
+|---|---|
+| **自動 cron** | **兩個開關都要開**——子排程的註冊寫在 parent 的 `if parent != nil && parentCfg.Enabled` 區塊裡，parent 沒啟用時子排程根本不會被註冊 |
+| **手動觸發 parent** | **會繞過 parent 的 `Enabled`**——parent 的執行函式通常只檢查依賴有沒有注入（`!= nil`），不重新檢查 `Enabled`；尾端照樣呼叫子排程。子排程是否執行**只看自身開關與自身依賴** |
+
+**所以「parent 關、子排程開、依賴齊」時，手動觸發 parent 仍會執行子排程並寫入
+`job_runs`。** `candle_gap_detection` 的實際條件與行號見
+[`architecture.md`](./architecture.md)「日 K 缺漏偵測」。
+
+⚠️ **`disabled` 沒有啟動錯誤可查**：「已啟用但依賴不齊，不註冊」那類訊息**只在
+parent 已註冊、子排程 enabled、但依賴缺一時**才出現——只開子排程開關的話，
+照那條訊息排錯會一無所獲。
+
+⚠️ **「不執行、不寫 `job_runs`、沒有痕跡」只成立於兩種情形**：完全沒有手動觸發的自動排程
+情境，或**子排程自身未啟用／依賴不足**（此時多半在函式第一行就早退）。照步驟跑卻什麼都
+沒發生時，先分清楚自己落在哪一種——否則很容易誤讀成「沒有問題」。
+
+所以：兩個開關都設 `true` → **重建容器**（環境變數只在容器建立時帶入）→ 確認
+`/scheduler/status` 該項**不是 `disabled`**。
+⚠️ **不要要求它是 `never_run`**——dev 若已有歷史執行紀錄，狀態會是上一輪的結果。
+💡 **想在 parent 關閉的情況下只驗子排程**，可以利用上表第二列：開子排程的開關、
+把依賴補齊，然後手動觸發 parent。
+
+#### dev 的資料是具名 volume，不會自己還原
+
+改動 dev 的持久化資料（刪 K 棒、寫 state、改池成員）前**先備份，驗完一定要還原**。
+三份缺一不可：
+
+1. **要刪掉的那幾列本身**——整列存下來，最保險。
+2. **測試涉及標的的既有 state**——**每一檔都要**，包含只當負向案例的那檔；
+   它在驗收過程中同樣會被寫入，漏了就還原不回去。
+3. **清單／池的完整快照**（`SELECT symbol, active … ORDER BY symbol`）。
+   ⛔ **不要只記 `active` 的那些**——測試期間可能「啟用」原本 inactive 的成員，
+   只記 active 清單的話還原時不會把它設回 `false`；新匯入的 row 也認不出來
+   （備份裡沒有 ＝ 測試期間新增的）。
+
+⛔ **日期比對一律用 `(ts AT TIME ZONE 'Asia/Taipei')::date`**，備份、刪除、還原三處
+**用同一個 predicate**，日界線才不會各自為政。理由與 `ts::date` 會整批差一天的說明見上方
+「在 dev stack 上做『as-of 階梯』驗收」的同一條。
+
+⛔ **收尾檢查要逐項比對備份，不要用「再跑一次應該是 `success`」當判準**——dev 本來就可能
+有其他真實的缺口或不完整資料，那個判準會同時掩蓋「沒還原乾淨」與「本來就有問題」。
+
+#### dev 沒有 FinMind 金鑰，吃 FinMind 的東西在 dev 驗不了
+
+`deploy.sh` 進版控的是佔位值，真金鑰在 `/opt/stacks/scripts/stock_trading/`，
+**dev 沒有**——所以任何走 FinMind 回補的步驟在 dev 一定失敗。
+2026-08-28 的作法是**把歷史 K 棒從 live postgres 唯讀複製過來**，而不是回補。
+
+這不影響驗收效力**只要受測邏輯不經過 FinMind**（那次受測的偵測讀的是「DB 實際日期集合 ＋
+TWSE 年度日曆 ＋ 交易所逐檔核對」，三者都不經過它）。代價是還原不能走「自然路徑 upsert
+補回」，要改用備份手動處理。
+
+⚠️ **下次要在 dev 驗任何吃 FinMind 的東西之前，先確認金鑰。**
+
+⚠️ **這台 host 只有 2GiB**：起 dev stack 前應先停掉 live stack，見下方
+「`MEM` 是上限，不是預留」與「container 上限的**總和**也要顧」。
+
 ### 字串欄位的寬度：不要訂「剛好夠用」
 
 2026-08-11 同一天內因為這件事失敗了**三次**，全部是同一個型態（SQLSTATE 22001）：
@@ -400,7 +491,7 @@ select symbol, round(avg((high-low)/nullif(close,0))*100, 2) range_pct
   「停 live 之前先確認它是怎麼起來的」，那是會靜默關掉生產排程的操作。
 
 **migration 是 embed 進 binary 的**，所以「schema 有沒有更新」等於「image 有沒有重建」。
-`docker compose up -d` 只重建容器不重建 image（T-067 踩過）。
+`docker compose up -d` 只重建容器不重建 image（原記於 `todo.md` T-067，已收斂）。
 
 #### 挑窗口：先確認哪些排程會寫到你要改的表
 
@@ -594,7 +685,7 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
   `CANDLE_GAP_DETECTION_ENABLED` / `SR_ANALYSIS_ENABLED` / `EVALUATION_UNIVERSE_ENABLED`
   會全部落回 `${VAR:-false}` 的預設、`FINMIND_API_KEY` 會是空字串——
   **服務照樣起得來，什麼都不會報錯**，只是生產排程被靜默關掉、抓取全部失敗。
-  2026-08-28 做 T-067 驗收時踩到（停機時尚未發現，是準備復原才察覺）。
+  2026-08-28 做日 K 缺漏偵測驗收時踩到（原記於 `todo.md` T-067，已收斂；停機時尚未發現，是準備復原才察覺）。
 
   規則：**復原一律走 `/opt/stacks/scripts/stock_trading/deploy.sh`**（那份設定才是開關與金鑰的
   權威來源），不要用 repo 的 compose 拉 live。

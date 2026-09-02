@@ -306,6 +306,27 @@ symbol 是首欄；只約束 `timeframe` 與 `ts` 的話 PostgreSQL 16 沒有 sk
 ——偵測判 `partial` 不會污染回補的狀態。用自己的 `context.WithTimeout`，
 **不沿用回補的 ctx**：回補逾時不該讓偵測連帶失效。**預設關閉。**
 
+⚠️ **兩個開關在 cron 路徑上是巢狀的，在手動路徑上不是**——這兩條要分開讀：
+
+| 路徑 | 生效條件 |
+|---|---|
+| **自動 cron** | **兩個開關都要開**。偵測的註冊寫在 parent 的 `if evaluationUniverse != nil && evaluationUniverseCfg.Enabled` 區塊裡（`scheduler.go:305`），所以 `EVALUATION_UNIVERSE_ENABLED` 沒開時，只設 `CANDLE_GAP_DETECTION_ENABLED=true` 不會讓它自動跑 |
+| **手動觸發 parent** | **繞過 parent 的 `Enabled`**。`POST /api/v1/scheduler/evaluation-universe-sync/run` → `RunEvaluationUniverseSync()` → `runEvaluationUniverseSync()`，後者**只檢查 `evaluationUniverse == nil`**（`:1009-1011`），不看 `Enabled`；尾端照樣呼叫 `runCandleGapDetection()`（`:1105`）。而偵測的有效啟用條件 `candleGapDetectionEnabled()` ＝ **自身開關 && 四項依賴**（`candle_gap_detection.go:63-65`），**不含 parent 開關** |
+
+**所以 parent 關閉、偵測開啟、依賴齊全時，手動觸發 parent 仍會執行偵測並寫入
+`job_runs`。**
+
+⚠️ **`disabled` 狀態沒有啟動錯誤可查**：「已啟用但依賴不齊，不註冊」那條 Error log
+**只在 parent 已註冊、偵測自身 enabled、但四項依賴缺一時**才出現（`scheduler.go:316-322`），
+只開偵測那個開關的話照它排錯會一無所獲。
+
+⚠️ **「不執行、不寫任何 `job_runs`、沒有痕跡」只成立於兩種情形**：完全沒有手動觸發的
+自動排程情境，或**偵測自身未啟用／依賴不足**（此時 `runCandleGapDetection` 在第一行早退）。
+在這兩種情形下很容易被誤讀成「沒有缺口」。
+
+在 dev 驗它的完整前置見
+[`development-workflow.md`](./development-workflow.md)「在 dev stack 上驗排程類功能」。
+
 ##### 資料流
 
 ```text

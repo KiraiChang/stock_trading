@@ -888,7 +888,7 @@ artifact 及其 SHA-256」寫進
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | **已實作／待 review（2026-09-02），尚未部署** |
 | 嚴重度 | 中（**不影響判定正確性**——三種結論仍分得開；但 `partial` 出現時查不出為什麼，等於「壞了卻不在明處」） |
 | 分類 | Go / 排程 / 市場資料 / 可觀測性 |
 | 發現日期 | 2026-09-02 |
@@ -946,22 +946,49 @@ if err != nil {
   市場別判斷錯誤），也就無法決定要不要處置。
 * 跨月是**每個月月初都會發生**的常態，這個形狀會反覆出現。
 
-#### 可能做法
+#### 修復方式（2026-09-02 實作）
 
-* 在 `unavailable++` 那一行記一筆帶 `symbol` / `market` / `year` / `month` / `error`
-  的 **Warn** log。
-* 或更進一步：把**代表性的 reason** 併進 `job_runs.error` 的
-  `verification_unavailable:` 前綴後面。
-  ⚠️ **若要這樣做，必須先過安全分類器**——`job_runs.error` 是使用者可見面
-  （`GET /scheduler/status` → 前端 `Scheduler.svelte:227` 原樣渲染），
-  端點錯誤可能帶 URL 與回應片段。見 [I-104](#i-104其餘排程與-job-紀錄仍直接寫入原始錯誤可從前端外洩連線細節)，
-  那筆已經在處理同一類問題。
+在 `unavailable++` 之前記一筆 **Warn** log，帶 `symbol` / `market` / `year` / `month` /
+`missing_dates` / `error`。
+
+**只加 log、不動 `job_runs.error`**，理由有二：
+
+1. **log 檔是持久化的、足以承接這個用途**——app log 鏡射到每日輪替的檔案
+   （bind mount `./logs/backend`、保留 14 天），**容器重建後仍在**，
+   實測可回溯到 2026-08-20。詳見 [`architecture.md`](./architecture.md) 的同一節。
+2. **要把 reason 併進 `job_runs.error` 就得先過安全分類器**——那是使用者可見面
+   （`GET /scheduler/status` → 前端 `Scheduler.svelte:227` 原樣渲染），
+   端點錯誤可能帶 URL 與回應片段。分類器目前在 scheduler 套件，而
+   [I-104](#i-104其餘排程與-job-紀錄仍直接寫入原始錯誤可從前端外洩連線細節)
+   正要決定它該抽到哪裡。**在那筆定案前不動 `job_runs.error`。**
+
+⚠️ **記 Warn 不是 Error**：驗不了是三種結論之一、預期會發生，不是不變式被違反。
+
+**測試**（`scheduler/gap_unavailable_log_test.go`）四支：
+
+| 測試 | 情境 | 斷言 |
+|---|---|---|
+| `LogsUnavailableCause` | 單一月份失敗 | 記下 `symbol` / `market` / 年月 / **原始 cause** |
+| `LogsEachFailedMonth` | **兩個月份都失敗** | `unavailable == 2`，**各記一筆共兩筆**，8 月與 9 月都出現 |
+| `CrossMonthOneSucceedsOneFails` | **8 月成功、9 月失敗**（＝2026-09-02 live 的形狀） | `unavailable == 1`；**只記一筆且 `month` 為 `September`**；`missing_dates == 1`；coalesce 契約（`anySuccess` 與 `anyUnavailable` 皆 true、`result` 取最嚴重為 `unavailable`） |
+| `DoesNotLogWhenSuccessful` | 核對成功 | `unavailable == 0`，**不得記這行** |
+
+⚠️ **兩種跨月情境要分開驗，不能只驗一種**（2026-09-02 review 修正——前一版只寫
+「跨月時兩個月份各記一次」，而當時的 stub 只能按 symbol 回錯，**做不出一成一敗**，
+於是「能不能指出是哪一個月失敗」根本沒被驗到，兩筆 Warn 蓋住了整個問題）。
+為此在 `gapReferenceStub` 補了 `tradedErrByMonth`（key 為 symbol＋year＋month，
+優先於既有的 `tradedErr`，沒設就退回原行為，既有使用者不受影響）。
+
+⚠️ **這件事值得測試的理由**：計數照樣會加、`job_runs` 照樣收 `partial`，
+所以「有沒有記成因」不會讓任何既有斷言變紅——**漏掉就是靜默漏掉**。
+實作完成後把 log 那段暫時移除重跑，**三支相關測試全部變紅**，確認它們真的擋得住。
 
 #### 關閉條件
 
-live 再次出現 `verification_unavailable` 時，**能從 log 或 `job_runs` 判斷出成因類別**
-（哪一檔、哪一個年月、哪一種失敗）；並補一支測試：`StockTradedDates` 回錯時
-確實記錄了成因，而不只是計數加一。
+live 再次出現 `verification_unavailable` 時，**能從 log 判斷出成因類別**
+（哪一檔、哪一個年月、哪一種失敗）。
+
+⚠️ **尚未部署**——下一個交易日（`2867` 仍在跨月視窗內，很可能再次觸發）驗到之後才算關閉。
 
 ---
 

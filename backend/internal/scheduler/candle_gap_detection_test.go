@@ -58,8 +58,14 @@ type gapReferenceStub struct {
 	calErr     error
 	traded     map[string]map[string]bool // symbol → date → 有成交
 	tradedErr  map[string]error
-	openSource map[string]bool
-	queried    []string
+	// tradedErrByMonth 讓「同一檔的某幾個月失敗、其餘成功」測得到——
+	// tradedErr 只以 symbol 為 key，做不出那個形狀（2026-09-02 live 的
+	// `2867` 跨月一成一敗就是那個形狀）。key 是 monthKey 的前三欄。
+	//
+	// **它優先於 tradedErr**；沒設就退回原本的逐 symbol 行為，既有測試不受影響。
+	tradedErrByMonth map[gapStubMonthKey]error
+	openSource       map[string]bool
+	queried          []string
 	// sourceAsOf 是市場層級端點涵蓋到的最後一天。留空代表「跟上了」——
 	// 由 newGapScheduler 填成最新的預期交易日，這樣預設情境不會落進 deferred。
 	sourceAsOf    string
@@ -80,13 +86,26 @@ func (r *gapReferenceStub) MarketLastTradingDate(context.Context) (string, error
 	return r.sourceAsOf, nil
 }
 
+// gapStubMonthKey 是 tradedErrByMonth 的鍵。
+type gapStubMonthKey struct {
+	symbol string
+	year   int
+	month  time.Month
+}
+
 func (r *gapReferenceStub) StockTradedDates(
-	_ context.Context, symbol, _ string, _ int, _ time.Month,
+	_ context.Context, symbol, _ string, year int, month time.Month,
 ) (map[string]bool, error) {
 	r.queried = append(r.queried, symbol)
-	if err, ok := r.tradedErr[symbol]; ok {
+	if err, ok := r.tradedErrByMonth[gapStubMonthKey{symbol, year, month}]; ok {
 		return nil, err
 	}
+	if r.tradedErr != nil {
+		if err, ok := r.tradedErr[symbol]; ok {
+			return nil, err
+		}
+	}
+	// tradedErrByMonth 有設但這個月份不在裡面 → 這個月**成功**。
 	return r.traded[symbol], nil
 }
 

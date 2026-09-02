@@ -541,11 +541,24 @@ distinct `(year, month)` 數**，視窗滾過去之後舊月份就不再計入�
 限制**；若中間某個月因長假而交易日極少，理論上 10 個交易日仍可能橫跨三個月份。
 除非另外有交易日曆的 invariant 保證，否則只該宣稱「不會永久累加」。
 
-⚠️ **`docker logs` 在這台機器不能當成運作觀察的證據來源。** 2026-08-31 實測：偵測跑完
-4 分鐘後三個 `stock_trading-*` 容器於 16:29:40 被重新建立，backend 內只剩重建後的數行 log，
-當天已無法用 `docker logs ... | grep 'candle gap detection done'` 取證。
-**判定一律以 `job_runs` 與 `candle_verification_state` 兩項 DB 證據為準**，它們比 log 耐久；
-要取 log 佐證，只能在該輪跑完到下次容器重建之間。
+⚠️ **`docker logs` 不能當成運作觀察的證據來源，但持久化的 log 檔可以**
+（2026-09-02 更正——前一版把兩者混為一談，說成「log 留不住」）。
+
+* ⛔ **`docker logs` 會隨容器重建歸零**。2026-08-31 實測：偵測跑完 4 分鐘後三個
+  `stock_trading-*` 容器於 16:29:40 被重新建立，當天已無法用
+  `docker logs ... | grep 'candle gap detection done'` 取證。
+* ✅ **但 app log 另外鏡射到每日輪替的檔案**（`logging/logger.go` 的 `NewTee`），
+  掛在 bind mount `./logs/backend:/app/logs/backend`、保留 14 天
+  （`LOG_RETENTION_DAYS`）。**容器重建後仍在**，實測可回溯到 2026-08-20。
+
+  ```bash
+  docker exec stock_trading-backend-1 sh -c \
+    'grep -h "candle gap detection done" /app/logs/backend/*.log' | tail -5
+  ```
+
+**判定仍以 `job_runs` 與 `candle_verification_state` 兩項 DB 證據為準**——
+它們是結構化的、可查詢的；**log 檔則是查「為什麼」時的必要補充**
+（例如 `verification_unavailable` 的成因就只在 log 裡，見 `issue.md` I-105）。
 
 **live 觸發狀況**（截至 2026-09-02）：
 

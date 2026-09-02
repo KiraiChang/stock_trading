@@ -534,6 +534,24 @@ func (s *Scheduler) verifyCandidates(
 		for _, mc := range sc.months {
 			traded, err := s.exchangeReference.StockTradedDates(ctx, sc.symbol, sc.market, mc.year, mc.month)
 			if err != nil {
+				// **成因一定要記下來。** 只把它收進 unavailable 這個計數的話，
+				// job_runs 只剩「N 筆驗不了」，看不出是暫時性（限流、逾時）還是
+				// 結構性（端點格式改變、市場別判斷錯誤）——也就無從決定要不要處置。
+				// 2026-09-02 live 首次 partial 時就是這個狀況：`2867` 跨月後兩個月份
+				// 群組一成一敗，但查不出是哪一個月、更查不出為什麼。
+				//
+				// exchange_reference 產生的錯誤本身很具體（twse stat=、status、decode…），
+				// 資訊一直都在，只是以前在這一行被丟掉。
+				//
+				// **記 Warn 不是 Error**：驗不了是預期會發生的情況之一（三種結論之一），
+				// 不是不變式被違反。Error 級留給真正需要立即處置的事。
+				s.log.Warn("candle gap verification unavailable",
+					zap.String("symbol", sc.symbol),
+					zap.String("market", sc.market),
+					zap.Int("year", mc.year),
+					zap.String("month", mc.month.String()),
+					zap.Int("missing_dates", len(mc.dates)),
+					zap.Error(err))
 				unavailable++
 				mergeAttempt(attempts, sc.symbol, now, store.VerificationUnavailable, false)
 				continue

@@ -99,7 +99,7 @@ func NewServer(
 		ch := handler.NewCandleHandler(candleRepo, log)
 		protected.GET("/candles/:symbol", ch.GetCandles)
 
-		ih := handler.NewIndicatorHandler(indEngine, indicatorRepo)
+		ih := handler.NewIndicatorHandler(indEngine, indicatorRepo, log)
 		protected.GET("/indicators/:symbol", ih.GetIndicators)
 		protected.POST("/indicators/:symbol/compute", ih.Compute)
 

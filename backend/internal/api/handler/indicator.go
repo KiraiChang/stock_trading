@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/indicator"
 	"github.com/trading/backend/internal/store"
@@ -12,10 +13,13 @@ import (
 type IndicatorHandler struct {
 	engine *indicator.Engine
 	repo   store.IndicatorRepo
+	// log 用來收 Compute 失敗的 cause——它不回給呼叫端（可能帶 DSN 與 SQL 片段），
+	// 所以沒有 logger 就等於把診斷資訊丟掉。
+	log *zap.Logger
 }
 
-func NewIndicatorHandler(engine *indicator.Engine, repo store.IndicatorRepo) *IndicatorHandler {
-	return &IndicatorHandler{engine: engine, repo: repo}
+func NewIndicatorHandler(engine *indicator.Engine, repo store.IndicatorRepo, log *zap.Logger) *IndicatorHandler {
+	return &IndicatorHandler{engine: engine, repo: repo, log: log}
 }
 
 func (h *IndicatorHandler) GetIndicators(c *gin.Context) {
@@ -41,7 +45,9 @@ func (h *IndicatorHandler) Compute(c *gin.Context) {
 
 	snap, err := h.engine.Compute(c.Request.Context(), symbol, timeframe)
 	if err != nil {
-		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		// 三分支分流（503 / 422 / 500）與「不得回 err.Error()」的理由見
+		// handler/errors.go 的 indicatorComputeError。
+		indicatorComputeError(c, h.log, err, "indicator: compute")
 		return
 	}
 

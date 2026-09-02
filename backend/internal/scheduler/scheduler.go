@@ -417,6 +417,50 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 	}
 }
 
+// evaluateSymbol 跑一檔的訊號評估，並把硬失敗記進 tally。
+//
+// **這是本筆的核心改動**：四個呼叫點以前都寫成 `s.signalEng.Evaluate(ctx, sym, tf)`
+// ——回傳值連接都沒接。於是指標或訊號寫不進 DB 時，錯誤既不往上傳也不計數，
+// job_runs 一整天照樣顯示「N 檔全部成功」。2026-09-01 的 2454 就是這樣：
+// 66 輪 intraday 全部 success，而它的指標從 11:24 起就沒再落盤。
+// 詳見 docs/issue.md I-102。
+//
+// ⚠️ **單一 symbol 失敗不中斷整輪**——其餘標的照跑，這一檔記進 tally。
+func (s *Scheduler) evaluateSymbol(ctx context.Context, tally *jobFailureTally, symbol, timeframe string) {
+	res, err := s.signalEng.EvaluateWithResult(ctx, symbol, timeframe)
+	if err != nil {
+		s.log.Warn("signal evaluate failed",
+			zap.String("symbol", symbol), zap.String("timeframe", timeframe), zap.Error(err))
+		tally.addEvaluateFailure(symbol, err)
+		return
+	}
+	if res == nil || !res.Degraded {
+		return
+	}
+	// **降級不是硬失敗**：訊號評估成功了，只是某個階段沒做到。
+	// 記進 degraded 集合（不進 symbols_failed），該輪由 finishRunDegraded 收成 partial。
+	// **把 cause 一起帶過去**：tally 內部會過安全分類器產生 reason code。
+	// 只傳 stage 名稱的話，摘要就只有數量、附不上計畫要求的代表 reason code。
+	stageErrs := make(map[string]error, len(res.DegradedStages))
+	stages := make([]string, 0, len(res.DegradedStages))
+	for _, st := range res.DegradedStages {
+		stageErrs[string(st)] = res.StageErrors[st]
+		stages = append(stages, string(st))
+	}
+	tally.addDegraded(symbol, stageErrs)
+
+	stage, cause := res.FirstStageError()
+	// 原始 cause **只進 log**，不進 job_runs.error。
+	s.log.Warn("signal evaluate degraded",
+		zap.String("symbol", symbol), zap.String("timeframe", timeframe),
+		zap.Strings("stages", stages), zap.String("first_stage", string(stage)), zap.Error(cause))
+}
+
+// finishRunWithTally 依 tally 收尾——**降級要讓該輪變 partial，但不計入 symbols_failed**。
+func (s *Scheduler) finishRunWithTally(ctx context.Context, runID uint64, jobName string, total int, tally *jobFailureTally) {
+	s.finishRunDegraded(ctx, runID, jobName, total, tally.failedCount(), tally.summary(), tally.hasDegraded())
+}
+
 func (s *Scheduler) runPreMarket() {
 	ctx := context.Background()
 
@@ -433,24 +477,30 @@ func (s *Scheduler) runPreMarket() {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "pre_market", 0, 0, err.Error())
+		s.finishRun(ctx, runID, "pre_market", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
 		return
 	}
 
 	// 補齊近 5 天日K（涵蓋週末 / 假日缺口），BulkInsert 有 UNIQUE 保護不會重複
-	failed := s.fetcher.BackfillHistory(ctx, symbols, 5, nil)
+	// **傳 callback 取得逐檔失敗**——BackfillHistory 本來就支援（fetcher.go 的 onSymbol），
+	// 傳 nil 只拿得到總數，聯集就得退化成 max() 而低估：A 回補失敗、B 評估失敗時
+	// 真正的聯集是 2，max(1,1) 只算成 1，甚至可能把該判 failed 的輪次判成 partial。
+	// （Yahoo 批次那條給不出逐檔資訊，那是 issue.md I-103 的範圍，不是這裡。）
+	tally := newJobFailureTally()
+	s.fetcher.BackfillHistory(ctx, symbols, 5, func(symbol string, err error) {
+		if err != nil {
+			tally.addFetchFailure(symbol, err)
+		}
+	})
 
 	// 預熱日線指標，讓第一根分K掃描前就有 MA / RSI / MACD 基準值
 	for _, sym := range symbols {
-		s.signalEng.Evaluate(ctx, sym, "1d")
+		s.evaluateSymbol(ctx, tally, sym, "1d")
 	}
+	failed := tally.failedCount()
 	s.log.Info("pre-market job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
 
-	lastErr := ""
-	if failed > 0 {
-		lastErr = "backfill failed for some symbols"
-	}
-	s.finishRun(ctx, runID, "pre_market", len(symbols), failed, lastErr)
+	s.finishRunWithTally(ctx, runID, "pre_market", len(symbols), tally)
 }
 
 func (s *Scheduler) runIntradayJob() {
@@ -476,31 +526,30 @@ func (s *Scheduler) runIntradayJob() {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "intraday", 0, 0, err.Error())
+		s.finishRun(ctx, runID, "intraday", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
 		return
 	}
 
 	today := timeutil.TodayTaipei()
-	failed := 0
-	lastErr := ""
+	tally := newJobFailureTally()
 	for i, sym := range symbols {
 		if err := s.fetcher.FetchAndStoreMinute(ctx, sym, today); err != nil {
 			if errors.Is(err, market.ErrInsufficientTier) {
 				// 帳號等級不足是整個 token 的限制，對其他 symbol 重試也一定會失敗，
 				// 記一次 log 後整輪跳過，避免每 5 分鐘對 watchlist 每檔股票都打一次注定失敗的請求
 				s.log.Warn("intraday job skipped: finmind token tier insufficient", zap.Error(err))
-				if ferr := s.jobRuns.Finish(ctx, runID, "skipped", len(symbols), len(symbols)-i, err.Error()); ferr != nil {
+				if ferr := s.jobRuns.Finish(ctx, runID, "skipped", len(symbols), len(symbols)-i,
+					safeJobErrorSummary("finmind_tier", err)); ferr != nil {
 					s.log.Error("job_runs finish failed", zap.String("job", "intraday"), zap.Error(ferr))
 				}
 				return
 			}
 			s.log.Warn("intraday fetch failed", zap.String("symbol", sym), zap.Error(err))
-			failed++
-			lastErr = err.Error()
+			tally.addFetchFailure(sym, err)
 		}
-		s.signalEng.Evaluate(ctx, sym, "1m")
+		s.evaluateSymbol(ctx, tally, sym, "1m")
 	}
-	s.finishRun(ctx, runID, "intraday", len(symbols), failed, lastErr)
+	s.finishRunWithTally(ctx, runID, "intraday", len(symbols), tally)
 }
 
 // runIntradayBatch 為批次盤中源（Yahoo）版本的盤中 job：把 watchlist 依 batch_size
@@ -512,7 +561,7 @@ func (s *Scheduler) runIntradayBatch() {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "intraday", 0, 0, err.Error())
+		s.finishRun(ctx, runID, "intraday", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
 		return
 	}
 
@@ -521,8 +570,7 @@ func (s *Scheduler) runIntradayBatch() {
 		batchSize = len(symbols)
 	}
 
-	failed := 0
-	lastErr := ""
+	tally := newJobFailureTally()
 	for start := 0; start < len(symbols); start += batchSize {
 		end := start + batchSize
 		if end > len(symbols) {
@@ -533,15 +581,16 @@ func (s *Scheduler) runIntradayBatch() {
 			// 批次請求失敗（例如 Yahoo 被限流/封鎖）：記錄後續跑其他批次。
 			// 未來的 Yahoo→FinMind fallback（T-008/T-031）會在此改為回退補資料。
 			s.log.Warn("intraday batch fetch failed", zap.Int("from", start), zap.Int("size", len(batch)), zap.Error(err))
-			failed += len(batch)
-			lastErr = err.Error()
+			// 整批失敗只知道筆數不知道是哪幾檔；逐檔的寫入失敗更是完全看不到
+			// （見 issue.md I-103）。
+			tally.addOpaqueFetchFailures(len(batch))
 		}
 	}
 
 	for _, sym := range symbols {
-		s.signalEng.Evaluate(ctx, sym, "1m")
+		s.evaluateSymbol(ctx, tally, sym, "1m")
 	}
-	s.finishRun(ctx, runID, "intraday", len(symbols), failed, lastErr)
+	s.finishRunWithTally(ctx, runID, "intraday", len(symbols), tally)
 }
 
 // RunDailyClose 執行「收盤後拉日K + 完整掃描」的邏輯，供 cron 排程與
@@ -553,23 +602,22 @@ func (s *Scheduler) RunDailyClose() {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "daily_close", 0, 0, err.Error())
+		s.finishRun(ctx, runID, "daily_close", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
 		return
 	}
 
 	today := timeutil.TodayTaipei()
-	failed := 0
-	lastErr := ""
+	tally := newJobFailureTally()
 	for _, sym := range symbols {
 		if err := s.fetcher.FetchAndStoreDaily(ctx, sym, today); err != nil {
 			s.log.Warn("daily fetch failed", zap.String("symbol", sym), zap.Error(err))
-			failed++
-			lastErr = err.Error()
+			tally.addFetchFailure(sym, err)
 		}
-		s.signalEng.Evaluate(ctx, sym, "1d")
+		s.evaluateSymbol(ctx, tally, sym, "1d")
 	}
+	failed := tally.failedCount()
 	s.log.Info("daily close job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
-	s.finishRun(ctx, runID, "daily_close", len(symbols), failed, lastErr)
+	s.finishRunWithTally(ctx, runID, "daily_close", len(symbols), tally)
 
 	// SR zone 驗證是獨立的 job_run 紀錄，失敗不影響上面已經完成的 daily_close
 	// 結果——兩者依序執行但彼此獨立記錄，其中一個出問題不會讓另一個也跟著

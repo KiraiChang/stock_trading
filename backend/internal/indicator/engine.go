@@ -12,6 +12,9 @@ import (
 
 const lookback = 120 // 拉取最近 120 根 K 棒，足夠所有指標計算
 
+// minCandles 是算得出指標的最低根數（MA60 需要 60 根，其餘指標更少）。
+const minCandles = 35
+
 type Engine struct {
 	candles store.CandleRepo
 	indRepo store.IndicatorRepo
@@ -30,9 +33,15 @@ func NewEngine(candles store.CandleRepo, indRepo store.IndicatorRepo, redis *sto
 
 // Compute 計算單一股票的所有指標，寫入 DB 與 Redis
 func (e *Engine) Compute(ctx context.Context, symbol, timeframe string) (*store.IndicatorSnapshot, error) {
+	// **讀取失敗與資料不足是兩件事，不能合流**（原本兩者共用一個分支，而且
+	// len(candles) < 35 但 err == nil 時 %w 包的是 nil）。呼叫端要靠 errors.Is
+	// 分流成 5xx 與 422，見 errors.go 的說明。
 	candles, err := e.candles.GetLatestN(ctx, symbol, timeframe, lookback)
-	if err != nil || len(candles) < 35 {
-		return nil, fmt.Errorf("not enough candles for %s/%s: %w", symbol, timeframe, err)
+	if err != nil {
+		return nil, fmt.Errorf("load candles for %s/%s: %w", symbol, timeframe, err)
+	}
+	if len(candles) < minCandles {
+		return nil, insufficientCandlesError(symbol, timeframe, len(candles))
 	}
 
 	closes := extractCloses(candles)
@@ -65,8 +74,13 @@ func (e *Engine) Compute(ctx context.Context, symbol, timeframe string) (*store.
 		VolRatio:   volResult.Ratio,
 	}
 
+	// **落盤是成功的必要條件（fail-fast）**：以前這裡只記 warn 就往下走，於是
+	// Upsert 失敗後照樣寫 Redis、照樣把 snapshot 交給 signal engine——API 讀 DB 回舊值、
+	// Redis 與 WebSocket 是新值，同一份資料依讀取路徑而不同。2026-09-01 的 2454
+	// （rsi14 撞到 DECIMAL(6,4) 上限）整個盤中都是這個狀態，而 66 輪 intraday 全部
+	// 回報 success。詳見 docs/issue.md I-102。
 	if err := e.indRepo.Upsert(ctx, snap); err != nil {
-		e.log.Warn("indicator upsert failed", zap.String("symbol", symbol), zap.Error(err))
+		return nil, persistenceError(symbol, timeframe, err)
 	}
 
 	e.cacheToRedis(ctx, symbol, timeframe, snap)

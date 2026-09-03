@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/config"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
@@ -143,8 +144,11 @@ func (s *Scheduler) runCandleGapDetection(
 
 	candidates, cal, expected, calErr := s.collectGapCandidates(ctx, symbols, states)
 	if calErr != nil {
+		// **前綴安全、後面接的原文不是**——這一支正是「用可辨識前綴」慣例的來源，
+		// 卻同樣把 cause 原文接在後面。原因一律過 joberr 分類器。
+		s.log.Warn("candle gap calendar unavailable", zap.Error(calErr))
 		s.finishRunDegraded(ctx, runID, candleGapDetectionJob, len(symbols), 0,
-			"verification_unavailable: "+calErr.Error(), true)
+			"verification_unavailable: "+string(joberr.Classify(calErr)), true)
 		return
 	}
 	if len(candidates) == 0 {
@@ -175,8 +179,9 @@ func (s *Scheduler) runCandleGapDetection(
 		} else {
 			s.log.Error("candle verification state 讀取失敗，本輪不寫回", zap.Error(err))
 		}
+		s.log.Warn("candle gap source staleness unavailable", zap.Error(staleErr))
 		s.finishRunDegraded(ctx, runID, candleGapDetectionJob, len(symbols), 0,
-			"verification_unavailable: "+staleErr.Error(), true)
+			"verification_unavailable: "+joberr.Describe(staleErr), true)
 		return
 	}
 
@@ -359,11 +364,27 @@ func (s *Scheduler) marketSourceAsOf(
 	}
 	lag := cal.TradingDaysBetween(asOf, expectedLast)
 	if lag >= s.candleGapCfg.MarketStaleDays {
-		return "", fmt.Errorf(
-			"市場層級對照源陳舊: source_as_of=%s 落後 %d 個交易日（門檻 %d）",
-			sourceAsOf, lag, s.candleGapCfg.MarketStaleDays)
+		return "", staleSourceError{asOf: sourceAsOf, lag: lag, threshold: s.candleGapCfg.MarketStaleDays}
 	}
 	return sourceAsOf, nil
+}
+
+// staleSourceError 是「市場層級對照源陳舊」——**我們自己組的訊息**，
+// 只含一個日期與兩個整數，沒有任何外來字串，所以可以原樣寫進 job_runs.error。
+//
+// 實作 joberr.SafeMessenger 讓它繞過分類器：壓成 internal_error 會把
+// 「陳舊多少天、門檻多少」這個唯一有用的資訊丟掉，而它本來就沒有外洩風險。
+type staleSourceError struct {
+	asOf      string
+	lag       int
+	threshold int
+}
+
+func (e staleSourceError) Error() string { return e.SafeJobMessage() }
+
+func (e staleSourceError) SafeJobMessage() string {
+	return fmt.Sprintf("市場層級對照源陳舊: source_as_of=%s 落後 %d 個交易日（門檻 %d）",
+		e.asOf, e.lag, e.threshold)
 }
 
 // recordAttempts 把本輪的結論寫回公平排序簿記。

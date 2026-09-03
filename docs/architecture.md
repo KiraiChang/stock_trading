@@ -1174,7 +1174,19 @@ DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立�
 **分類不出來一律 `internal_error`，不得退回 `err.Error()`**。
 理由：`job_runs.error` 會由 `GET /scheduler/status` 回傳、前端原樣渲染，
 而原始 driver 錯誤常帶 DSN 與 SQL 片段，寫進去就是顯示在畫面上——且保留 30 天。
-（其餘排程尚未套用同一條規則，見 [`issue.md`](./issue.md) I-104。）
+**適用範圍**：四個 `Evaluate` 路徑、其餘 7 個排程、`candle_gap_detection`、
+以及 handler 寫進 job 紀錄的 error 與 backfill／chip 的 `failures` 陣列——
+**所有會流到畫面的 job 錯誤欄位**（2026-09-02 起，原記於 `issue.md` I-104，
+已實作、**待部署驗證**）。分類器在 `internal/joberr`。
+
+⛔ **請求驗證錯誤不在此列**：`ShouldBindJSON` 的 400 回應描述的是呼叫端自己的 payload，
+不碰 driver，保留原文對呼叫端才有用。`position.go` 那幾處是 sentinel 比對的 domain error，
+同理。
+
+⚠️ **例外機制 `joberr.SafeMessenger`**：由本專案完整組出、不含任何外來字串的訊息
+（例如「市場層級對照源陳舊: source_as_of=… 落後 N 個交易日（門檻 M）」）可以原樣通過。
+壓成 `internal_error` 是資訊淨損失、零安全收益。
+⛔ **把外來 error 的 `%v` 包進訊息裡就不算安全**，不得實作該介面。
 
 ⚠️ **`job_runs` 接不住全域 DB outage**：它和受影響的表在同一個 DB，`Start` 失敗時只留
 `runID = 0`，後續 `UPDATE ... WHERE id=0` 更新零列**也不回錯**——那個形狀由 `/health`

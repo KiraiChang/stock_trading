@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
 )
@@ -827,7 +828,8 @@ func (h *SRZoneHandler) runTrainJob(jobID string, symbols []string, timeframe st
 	result, err := h.client.TrainModel(ctx, symbols, timeframe, limit, modelType, splitMethod, calibrationMethod)
 	if err != nil {
 		h.log.Error("sr_scoring train failed", zap.String("job_id", jobID), zap.Int("symbols", len(symbols)), zap.Error(err))
-		if markErr := h.trainJobs.MarkFailed(ctx, jobID, err.Error()); markErr != nil {
+		// 同上：寫進 job 紀錄的原因一律過分類器，原始 cause 只進 log。
+		if markErr := h.trainJobs.MarkFailed(ctx, jobID, joberr.Summary("sr_train", err)); markErr != nil {
 			h.log.Error("sr_scoring train job: mark failed failed", zap.String("job_id", jobID), zap.Error(markErr))
 		}
 		return

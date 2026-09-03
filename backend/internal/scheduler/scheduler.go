@@ -18,6 +18,7 @@ import (
 	"github.com/trading/backend/internal/analysis"
 	"github.com/trading/backend/internal/chip"
 	"github.com/trading/backend/internal/config"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
@@ -637,7 +638,7 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "chip_daily_sync", 0, 0, err.Error())
+		s.finishRun(ctx, runID, "chip_daily_sync", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
 		return
 	}
 
@@ -648,7 +649,7 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 		if err := s.chipSyncer.SyncDaily(ctx, sym, today); err != nil {
 			s.log.Warn("chip daily sync failed", zap.String("symbol", sym), zap.Error(err))
 			failed++
-			lastErr = err.Error()
+			lastErr = joberr.SummaryFor("chip_sync", sym, err)
 		}
 	}
 	s.log.Info("chip daily sync job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
@@ -676,7 +677,7 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 	result, err := s.stockSyncer.Sync(syncCtx, time.Now().In(timeutil.TaipeiTZ))
 	if err != nil {
 		s.log.Error("stock symbol sync failed", zap.Error(err))
-		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, err.Error())
+		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, safeJobErrorSummary("symbol_sync", err))
 		return
 	}
 	s.finishRun(ctx, runID, "stock_symbol_sync", result.Seen, 0, "")
@@ -701,7 +702,7 @@ func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 		// 與 corporate_action_sync 讀不到標的清單時的作法一致（規則見
 		// docs/api-reference.md 的「整輪沒開始跑」記 failed）。
 		// 清單拿得到但是空的是另一回事：那是合法的零標的輪，照樣走下面的 success。
-		s.finishRun(ctx, runID, "sr_zone_verify", 1, 1, err.Error())
+		s.finishRun(ctx, runID, "sr_zone_verify", 1, 1, safeJobErrorSummary("zone_verify", err))
 		return
 	}
 
@@ -711,7 +712,7 @@ func (s *Scheduler) runSRZoneVerification(ctx context.Context) {
 		if _, _, err := s.srZoneVerifier.Verify(ctx, a.ID); err != nil {
 			s.log.Warn("sr zone verify failed", zap.Uint64("analysis_id", a.ID), zap.String("symbol", a.Symbol), zap.Error(err))
 			failed++
-			lastErr = err.Error()
+			lastErr = joberr.SummaryFor("zone_verify", a.Symbol, err)
 		}
 	}
 	s.log.Info("sr zone verification job completed",
@@ -730,7 +731,7 @@ func (s *Scheduler) runSREvaluation(ctx context.Context) {
 	symbols, err := s.srEvaluationSymbols(ctx)
 	if err != nil {
 		s.log.Error("sr evaluation symbols failed", zap.Error(err))
-		s.finishRun(ctx, runID, "sr_evaluation", 1, 1, err.Error())
+		s.finishRun(ctx, runID, "sr_evaluation", 1, 1, safeJobErrorSummary("sr_evaluation", err))
 		return
 	}
 	if len(symbols) == 0 {
@@ -758,7 +759,7 @@ func (s *Scheduler) runSREvaluation(ctx context.Context) {
 	symbolsJSON, err := json.Marshal(symbols)
 	if err != nil {
 		s.log.Error("sr evaluation symbols marshal failed", zap.Error(err))
-		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), safeJobErrorSummary("sr_evaluation", err))
 		return
 	}
 
@@ -778,7 +779,7 @@ func (s *Scheduler) runSREvaluation(ctx context.Context) {
 		ReplayMaxRows: request.ReplayMaxRows,
 	}); err != nil {
 		s.log.Error("sr evaluation job create failed", zap.String("job_id", jobID), zap.Error(err))
-		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), safeJobErrorSummary("sr_evaluation", err))
 		return
 	}
 	if err := s.srEvaluationJobs.MarkRunning(ctx, jobID); err != nil {
@@ -788,10 +789,11 @@ func (s *Scheduler) runSREvaluation(ctx context.Context) {
 	report, err := s.analysisClient.RunSREvaluation(ctx, request)
 	if err != nil {
 		s.log.Error("sr evaluation failed", zap.String("job_id", jobID), zap.Error(err))
-		if markErr := s.srEvaluationJobs.MarkFailed(ctx, jobID, err.Error()); markErr != nil {
+		// **job 紀錄的 error 欄位同樣是使用者可見面**——前端 SRZones.svelte 會原樣渲染。
+		if markErr := s.srEvaluationJobs.MarkFailed(ctx, jobID, joberr.Summary("sr_evaluation", err)); markErr != nil {
 			s.log.Error("sr evaluation job mark failed failed", zap.String("job_id", jobID), zap.Error(markErr))
 		}
-		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), safeJobErrorSummary("sr_evaluation", err))
 		return
 	}
 
@@ -811,7 +813,7 @@ func (s *Scheduler) runSREvaluation(ctx context.Context) {
 		analysis.IntFromReport(report, "sources"),
 	); err != nil {
 		s.log.Error("sr evaluation job mark done failed", zap.String("job_id", jobID), zap.Error(err))
-		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), err.Error())
+		s.finishRun(ctx, runID, "sr_evaluation", len(symbols), len(symbols), safeJobErrorSummary("sr_evaluation", err))
 		return
 	}
 
@@ -1069,7 +1071,7 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 	entries, err := s.evaluationUniverse.ListActive(ctx)
 	if err != nil {
 		s.log.Error("evaluation universe list failed", zap.Error(err))
-		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 1, err.Error())
+		s.finishRun(ctx, runID, "evaluation_universe_sync", 0, 1, safeJobErrorSummary("universe_list", err))
 		// **偵測仍要跑到「建立紀錄」為止**：連候選清單都拿不到＝這輪驗不了，
 		// 那正是要看得見的狀態。靜默略過會讓 /scheduler/status 停在上一次的結果。
 		s.reportCandleGapDetectionUnavailable(ctx, "取不到候選清單")
@@ -1114,7 +1116,7 @@ func (s *Scheduler) runEvaluationUniverseSync(ctx context.Context) {
 		done++
 		if err != nil {
 			if firstErr == "" {
-				firstErr = symbol + ": " + err.Error()
+				firstErr = joberr.SummaryFor("universe_sync", symbol, err)
 			}
 			s.log.Warn("evaluation universe symbol failed",
 				zap.String("symbol", symbol), zap.Int("at", done), zap.Error(err))
@@ -1300,7 +1302,7 @@ func (s *Scheduler) RunCorporateActionSync() {
 		s.log.Error("corporate action sync failed", zap.Error(err))
 		// total 傳 1 而不是 0：total=0 會落到 finishRun 的 `failed > 0` 分支被記成
 		// partial，但分割批次失敗時整輪根本沒開始跑，那是 failed 不是 partial。
-		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, err.Error())
+		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, safeJobErrorSummary("corporate_action", err))
 		return
 	}
 
@@ -1312,7 +1314,7 @@ func (s *Scheduler) RunCorporateActionSync() {
 	all, err := s.adjuster.SymbolsWithCandles(ctx)
 	if err != nil {
 		s.log.Error("列出有 K 棒的標的失敗", zap.Error(err))
-		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, err.Error())
+		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, safeJobErrorSummary("corporate_action", err))
 		return
 	}
 
@@ -1338,13 +1340,13 @@ func (s *Scheduler) RunCorporateActionSync() {
 		// 個別標的失敗已在 Adjuster 內記錄並跳過；這裡只處理整體性錯誤（目前只有 ctx 逾時／取消）。
 		s.log.Error("逐檔事件同步中止", zap.Error(syncErr),
 			zap.Int("processed", processed), zap.Int("planned", len(symbols)))
-		errParts = append(errParts, syncErr.Error())
+		errParts = append(errParts, joberr.Summary("corporate_action_sync", syncErr))
 	} else if skipped > 0 {
 		// 有 syncErr 時它已經交代了為什麼停；沒有 syncErr 卻有沒跑到的檔才需要另外說明。
 		errParts = append(errParts, fmt.Sprintf("%d 檔未處理", skipped))
 	}
 	if watchlistErr != nil {
-		errParts = append(errParts, watchlistErr.Error())
+		errParts = append(errParts, joberr.Summary("corporate_action_watchlist", watchlistErr))
 	}
 
 	s.log.Info("corporate action sync done",
@@ -1501,7 +1503,7 @@ func (s *Scheduler) runSRAnalysisOwned(ctx context.Context, withChip bool) {
 		// 讀不到就等於整輪沒有輸入，那是 failed。
 		// 這與 corporate_action_sync 的降級不同：那邊讀不到 watchlist 仍會跑當日分片，
 		// 記 partial 是對的，因為真的跑了一批。
-		s.finishRun(ctx, runID, jobName, 1, 1, err.Error())
+		s.finishRun(ctx, runID, jobName, 1, 1, safeJobErrorSummary("sr_analysis", err))
 		return
 	}
 	if len(symbols) == 0 {
@@ -1528,7 +1530,7 @@ func (s *Scheduler) runSRAnalysisOwned(ctx context.Context, withChip bool) {
 		if _, err := s.srAnalysisRunner.RunAnalysis(ctx, symbol, timeframe, s.srAnalysisCfg.Limit); err != nil {
 			failed++
 			if firstErr == "" {
-				firstErr = symbol + ": " + err.Error()
+				firstErr = joberr.SummaryFor("sr_analysis", symbol, err)
 			}
 			// **單檔失敗不中斷整批**：一檔沒有 K 棒或 Python 逾時，不該讓其餘標的整天沒分析。
 			s.log.Warn("sr analysis symbol failed",

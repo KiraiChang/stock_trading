@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 )
@@ -90,7 +91,14 @@ func (h *MarketHandler) runBackfill(jobID string, symbols []string, days int) {
 		done++
 		if err != nil {
 			failed++
-			failures = append(failures, map[string]string{"symbol": symbol, "error": err.Error()})
+			// **failures 會被持久化並原樣渲染**（前端 Backfill.svelte 的
+			// `{f.symbol}: {f.error}`），所以原因一律過 joberr 分類器；
+			// 原始 cause 只進 log。
+			h.log.Warn("market backfill: symbol failed", zap.String("symbol", symbol), zap.Error(err))
+			failures = append(failures, map[string]string{
+				"symbol": symbol,
+				"error":  string(joberr.Classify(err)),
+			})
 		}
 		failuresJSON, _ := json.Marshal(failures)
 		if uerr := h.backfillJobs.UpdateProgress(ctx, jobID, done, failed, store.RawJSON(failuresJSON)); uerr != nil {

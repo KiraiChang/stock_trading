@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/indicator"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
 )
@@ -402,3 +403,41 @@ func (f *failingSignalRepo) GetBySymbol(context.Context, string, int) ([]store.S
 type noopIndicatorRepo struct{ store.IndicatorRepo }
 
 func (noopIndicatorRepo) Upsert(context.Context, *store.IndicatorSnapshot) error { return nil }
+
+// ── job 紀錄的 error 欄位不得外洩（I-104）─────────────────────────
+//
+// `MarkFailed` 寫進的 error 會由前端 SRZones.svelte 六處原樣渲染；
+// backfill／chip 的 failures 則由 Backfill.svelte 渲染。
+
+func TestJoberrClassifyNeverLeaksInHandlerContext(t *testing.T) {
+	// 兩個 handler 的 MarkFailed 與兩處 failures 全部走同一個分類器，
+	// 這裡守的是「分類器輸出對這些 cause 都安全」這個共同前提。
+	causes := []error{
+		errors.New("dial " + sensitiveMarker + ": connection refused"),
+		fmt.Errorf("upstream failed: %w", errors.New(sensitiveMarker)),
+		errors.New("unexpected status 500 from " + sensitiveMarker),
+	}
+	for i, err := range causes {
+		got := joberr.Summary("sr_evaluation", err)
+		if strings.Contains(got, sensitiveMarker) || strings.Contains(got, "s3cr3t") {
+			t.Errorf("cause%d 外洩：%q", i, got)
+		}
+		if !strings.HasPrefix(got, "sr_evaluation:") {
+			t.Errorf("cause%d 應為 stage:reason 形式，得到 %q", i, got)
+		}
+	}
+}
+
+// TestBackfillFailureEntryIsClassified 守住 failures 陣列的內容形狀——
+// 它會被持久化並原樣渲染，所以只能是封閉值域的 reason code。
+func TestBackfillFailureEntryIsClassified(t *testing.T) {
+	err := errors.New("fetch failed for 2454: dial " + sensitiveMarker + ": connection refused")
+	got := string(joberr.Classify(err))
+
+	if strings.Contains(got, sensitiveMarker) || strings.Contains(got, "2454") {
+		t.Errorf("failures 的 error 欄不得含原文或標的以外的細節：%q", got)
+	}
+	if got != string(joberr.ConnRefused) {
+		t.Errorf("應分類為 conn_refused，得到 %q", got)
+	}
+}

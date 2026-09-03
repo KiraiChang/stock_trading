@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/analysis"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/store"
 )
 
@@ -170,7 +171,9 @@ func (h *SRRegressionResultHandler) runEvaluationJob(jobID string, request analy
 	report, err := h.client.RunSREvaluation(ctx, request)
 	if err != nil {
 		h.log.Error("sr evaluation failed", zap.String("job_id", jobID), zap.Error(err))
-		if markErr := h.evalJobs.MarkFailed(ctx, jobID, err.Error()); markErr != nil {
+		// **job 紀錄的 error 是使用者可見面**——前端 SRZones.svelte 會原樣渲染，
+		// 原始錯誤可能帶上游 URL 與回應片段。原因一律過 joberr 分類器。
+		if markErr := h.evalJobs.MarkFailed(ctx, jobID, joberr.Summary("sr_evaluation", err)); markErr != nil {
 			h.log.Error("sr evaluation job: mark failed failed", zap.String("job_id", jobID), zap.Error(markErr))
 		}
 		return

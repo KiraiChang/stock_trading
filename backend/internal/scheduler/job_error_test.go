@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/trading/backend/internal/indicator"
+	"github.com/trading/backend/internal/joberr"
 )
 
 // 這一組守的是 docs/architecture.md「寫入失敗的一致性契約」 的兩件事：
@@ -20,14 +21,14 @@ func TestSafeJobErrorReasonMapsKnownCauses(t *testing.T) {
 	tests := []struct {
 		name string
 		err  error
-		want reasonCode
+		want joberr.Reason
 	}{
-		{"資料不足走 typed error", fmt.Errorf("%w: got 12", indicator.ErrInsufficientCandles), reasonInsufficientData},
-		{"型別溢位", errors.New("pq: numeric field overflow"), reasonNumericOverflow},
-		{"唯一鍵衝突", errors.New(`pq: duplicate key value violates unique constraint "x"`), reasonConstraintViolation},
-		{"連不上", errors.New("dial tcp: connection refused"), reasonConnRefused},
-		{"逾時 sentinel", context.DeadlineExceeded, reasonTimeout},
-		{"READONLY", errors.New("READONLY You can't write against a read only replica"), reasonReadonly},
+		{"資料不足走 typed error", fmt.Errorf("%w: got 12", indicator.ErrInsufficientCandles), joberr.InsufficientData},
+		{"型別溢位", errors.New("pq: numeric field overflow"), joberr.NumericOverflow},
+		{"唯一鍵衝突", errors.New(`pq: duplicate key value violates unique constraint "x"`), joberr.ConstraintViolation},
+		{"連不上", errors.New("dial tcp: connection refused"), joberr.ConnRefused},
+		{"逾時 sentinel", context.DeadlineExceeded, joberr.Timeout},
+		{"READONLY", errors.New("READONLY You can't write against a read only replica"), joberr.Readonly},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,7 +45,7 @@ func TestSafeJobErrorReasonMapsKnownCauses(t *testing.T) {
 // GET /scheduler/status 回傳、前端原樣渲染，而且保留 30 天。
 func TestSafeJobErrorReasonFallsBackToInternalError(t *testing.T) {
 	err := errors.New("totally unrecognised failure at " + jobSensitiveMarker)
-	if got := safeJobErrorReason(err); got != reasonInternal {
+	if got := safeJobErrorReason(err); got != joberr.Internal {
 		t.Fatalf("未知錯誤要回 internal_error，得到 %q", got)
 	}
 	if strings.Contains(string(safeJobErrorReason(err)), jobSensitiveMarker) {

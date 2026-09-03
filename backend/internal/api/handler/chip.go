@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/chip"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
 )
@@ -314,7 +315,14 @@ func (h *ChipHandler) runSync(jobID string, symbols []string, from, to time.Time
 		done++
 		if err != nil {
 			failed++
-			failures = append(failures, map[string]string{"symbol": symbol, "error": err.Error()})
+			// **failures 會被持久化並原樣渲染**（前端 Backfill.svelte 的
+			// `{f.symbol}: {f.error}`），所以原因一律過 joberr 分類器；
+			// 原始 cause 只進 log。
+			h.log.Warn("chip sync: symbol failed", zap.String("symbol", symbol), zap.Error(err))
+			failures = append(failures, map[string]string{
+				"symbol": symbol,
+				"error":  string(joberr.Classify(err)),
+			})
 		}
 		failuresJSON, _ := json.Marshal(failures)
 		if uerr := h.syncJobRepo.UpdateProgress(ctx, jobID, done, failed, store.RawJSON(failuresJSON)); uerr != nil {

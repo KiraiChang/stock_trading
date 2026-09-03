@@ -1,84 +1,25 @@
 package scheduler
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/trading/backend/internal/indicator"
+	"github.com/trading/backend/internal/joberr"
 )
 
-// reasonCode 是**可以寫進 job_runs.error 的封閉值域**。
-//
-// ⚠️ **job_runs.error 是使用者可見面**：GET /scheduler/status 會回傳它，
-// 前端 Scheduler.svelte 直接 `{job.error}` 原樣渲染。原始 driver 錯誤常帶 DSN、
-// 主機位址或 SQL 片段——寫進去就等於顯示在畫面上，而且 job_runs 保留 30 天，
-// 之後每次查詢都會再洩一次。詳見 docs/architecture.md「寫入失敗的一致性契約」。
-type reasonCode string
+// 分類器已抽到 internal/joberr——**handler 也要用它**，讓 handler 依賴 scheduler
+// 是錯的方向（原記於 issue.md I-104 的裁決）。這裡只保留別名，讓既有程式碼與
+// 註解不必全部改寫。
+type reasonCode = joberr.Reason
 
-const (
-	reasonNumericOverflow      reasonCode = "numeric_overflow"
-	reasonConstraintViolation  reasonCode = "constraint_violation"
-	reasonConnRefused          reasonCode = "conn_refused"
-	reasonTimeout              reasonCode = "timeout"
-	reasonReadonly             reasonCode = "readonly"
-	reasonSerializationFailure reasonCode = "serialization_failure"
-	reasonInsufficientData     reasonCode = "insufficient_data"
-	// reasonInternal 是**唯一的 fallback**。
-	//
-	// ⛔ 分類不出來時**一律回它，不得退回 err.Error()**——那正是最危險的實作空間：
-	// 一個沒被涵蓋的錯誤型別就足以讓敏感資訊寫進 job_runs.error。
-	// 想知道細節去看 log，那是原始 error 唯一被允許出現的地方。
-	reasonInternal reasonCode = "internal_error"
-)
-
-// safeJobErrorReason 是**唯一**能決定寫進 job_runs.error 的原因字串的地方。
-//
-// ⛔ 其他地方不得自行拼接，也不得用 fmt.Sprintf("%v", err) / err.Error() 組摘要。
-func safeJobErrorReason(err error) reasonCode {
-	if err == nil {
-		return reasonInternal
-	}
-	switch {
-	case errors.Is(err, indicator.ErrInsufficientCandles):
-		return reasonInsufficientData
-	case errors.Is(err, context.DeadlineExceeded):
-		return reasonTimeout
-	}
-	// 這一段是「沒有 typed error 可用」時的退路：driver 不提供可比對的 sentinel，
-	// 只能看訊息。**比對用的是錯誤類別關鍵字，輸出的仍是封閉值域的 code**，
-	// 原文不會外流。
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "numeric field overflow"), strings.Contains(msg, "out of range"):
-		return reasonNumericOverflow
-	case strings.Contains(msg, "violates") && strings.Contains(msg, "constraint"),
-		strings.Contains(msg, "unique constraint"), strings.Contains(msg, "duplicate key"):
-		return reasonConstraintViolation
-	case strings.Contains(msg, "connection refused"), strings.Contains(msg, "no such host"),
-		strings.Contains(msg, "connection reset"):
-		return reasonConnRefused
-	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"),
-		strings.Contains(msg, "context canceled"):
-		return reasonTimeout
-	case strings.Contains(msg, "readonly"), strings.Contains(msg, "read only"):
-		return reasonReadonly
-	case strings.Contains(msg, "serialization failure"), strings.Contains(msg, "could not serialize"):
-		return reasonSerializationFailure
-	}
-	return reasonInternal
-}
+func safeJobErrorReason(err error) reasonCode { return joberr.Classify(err) }
 
 // safeJobErrorSummary 是**整輪早退**時寫進 job_runs.error 的安全字串。
 //
 // ⛔ 早退路徑（watchlist 讀不到、token 等級不足…）原本直接寫 err.Error()，
-// 那是分類器的旁路——同一個外洩風險換個入口而已。stage 只用固定字面值，
-// 原因一律過 safeJobErrorReason。
-func safeJobErrorSummary(stage string, err error) string {
-	return fmt.Sprintf("%s:%s", stage, safeJobErrorReason(err))
-}
+// 那是分類器的旁路——同一個外洩風險換個入口而已。
+func safeJobErrorSummary(stage string, err error) string { return joberr.Summary(stage, err) }
 
 // jobFailureTally 累計一輪排程的失敗，並產出 job_runs 需要的兩個值。
 //
@@ -233,7 +174,7 @@ func formatStageCounts(m map[string]map[string]reasonCode) string {
 
 // dominantReason 取出現最多的 reason code；同票取字典序小的以求穩定輸出。
 func dominantReason(hits map[reasonCode]int) reasonCode {
-	best := reasonInternal
+	best := joberr.Internal
 	bestN := -1
 	codes := make([]string, 0, len(hits))
 	for rc := range hits {

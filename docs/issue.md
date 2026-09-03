@@ -996,7 +996,7 @@ live 再次出現 `verification_unavailable` 時，**能從 log 判斷出成因�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | **已實作／待 review（2026-09-02），尚未部署** |
 | 嚴重度 | 中（**不影響 runtime，但會把 DSN／主機位址／SQL 片段顯示在畫面上**，而且持久化後每次查詢都再洩一次） |
 | 分類 | Go / 排程 / 安全 / 可觀測性 |
 | 發現日期 | 2026-09-02 |
@@ -1050,23 +1050,132 @@ I-102 的範圍是「四個 `Evaluate` 路徑的寫入失敗語意」。把 7 �
 一起改會讓那筆的受影響面翻倍，而且**驗收方式不同**——本筆純粹是輸出脫敏，
 沒有行為語意的取捨要裁決。
 
-#### 可能做法
+#### 修復方式（2026-09-02 實作）
 
-* 沿用**已存在的** `scheduler.safeJobErrorReason` 與 `safeJobErrorSummary`，逐處替換
-  （設計見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」）。
-* ⚠️ **不要只改 `finishRun` 的呼叫點**——上面那三處字串拼接形式同樣要處理。
-* handler 那兩處要決定分類器放哪裡：`safeJobErrorReason` 目前在 scheduler 套件
-  （既有的裁決是「它是寫進 job_runs 前的最後一道，與 `finishRunDegraded` 同層」，
-  見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」）。
-  兩個 handler 也要用的話，得抽到共用位置——**那是這筆要做的第一個決定**。
+**① 分類器抽成 `internal/joberr` 套件。** 原本在 scheduler，但 handler 也要用，
+讓 handler 依賴 scheduler 是錯的方向；放 store 則不屬於它的資料存取職責。
+scheduler 保留 `type reasonCode = joberr.Reason` 的別名，既有程式碼不必全改。
+
+對外三個函式：`Classify(err) Reason`、`Summary(stage, err)`、`SummaryFor(stage, symbol, err)`。
+值域也補齊了（新增 `not_found` / `upstream_error`，並讓 `context.Canceled` 也歸 `timeout`）。
+
+**② 25 處全部替換**：`scheduler.go` 19 處（含 4 處字串拼接形式）、
+`candle_gap_detection.go` 2 處、handler 的 `MarkFailed` 2 處，
+**外加立案時漏掉的 2 處**——`market.go:93` 與 `chip.go:317` 把逐檔失敗寫進
+`failures` 陣列，那會被持久化並由前端 `Backfill.svelte:294` 原樣渲染。
+⚠️ **它們走的是 `UpdateProgress` 不是 `MarkFailed`**，所以最初只掃 `MarkFailed`
+與 `finishRun` 的盤點沒抓到。
+
+⛔ **明確不在範圍**（2026-09-02 逐處查證）：`ShouldBindJSON` 的 400 回應
+（`auth.go` / `watchlist.go` / `backtest.go` / `chip.go:232`）描述的是呼叫端自己的
+payload，不碰 driver，保留原文對呼叫端才有用；**`position.go` 的兩個 `ApplyEvent` handler**
+對 `ErrPositionVersionConflict` / `ErrPositionInvalidEvent` 的回應是 `errors.Is` 比對的
+sentinel domain error，安全由建構方式保證。
+⚠️ **這裡刻意不寫行號**——同一種輸出在兩個 handler 各有一對，用行號描述容易失準
+（前一版只列了其中一對）。
+
+**③ 新增 `joberr.SafeMessenger`**——這是實作時才浮現的問題：
+「市場層級對照源陳舊: source_as_of=… 落後 N 個交易日（門檻 M）」是**我們自己組的訊息**，
+只含日期與數字，把它壓成 `internal_error` 是**資訊淨損失、零安全收益**。
+所以讓實作該介面的錯誤原文通過（`joberr.Describe`），並在介面註解寫死使用條件：
+**訊息必須由本專案完整組出、不含任何來自外部系統的字串**。
+`staleSourceError` 是第一個使用者。
+
+⚠️ **既有測試 `TestRunSREvaluationFailsWhenWatchlistFallbackErrors` 原本斷言
+`errMsg == expectedErr.Error()`**——那等於把外洩釘死。已改成斷言 `stage:reason` 形式
+且不含原文。
+
+#### 測試
+
+* `joberr/joberr_test.go`——10 種已知成因的分類、未知一律 `internal_error`、
+  **四個對外函式對三種帶敏感標記的 cause 都不外洩**、`SafeMessenger` 的通過與邊界。
+* `scheduler/job_error_leak_test.go`——**逐 call-site 端到端**，分 A／B／C1～C4／D 七組：
+
+  | 組 | 涵蓋 |
+  |---|---|
+  | A. 取清單失敗的早退（8 處） | `pre_market` / `daily_close` / `chip_daily_sync` / `sr_evaluation` / `sr_analysis` / `sr_zone_verify` / `evaluation_universe_sync` / `stock_symbol_sync` |
+  | B. **逐檔失敗**（`SummaryFor`，4 處） | `sr_analysis` / `evaluation_universe_sync` / `chip_daily_sync` / `sr_zone_verify`——四處都**讓清單成功、逐檔才失敗**，真的執行到那一行並斷言 `stage:symbol:reason` |
+  | C1. `corporate_action_sync`（2 處） | **早退**（列標的失敗）＋ **`errParts`**（標的成功、watchlist 失敗，走 `corporate_action_watchlist:` 那一行） |
+  | C2. `sr_evaluation` 其餘替換點（3 個案例／**4 個替換點**） | **job create 失敗**／**`MarkDone` 失敗**（上游回 200、MarkDone 才失敗）／**上游失敗**（同時斷言 `job_runs.error` 與 `MarkFailed` 兩個欄位） |
+  | C3. `corporate_action_sync` 的 `SyncSplits` 早退 | 注入會失敗的 split source，走 `corporate_action(splits)` 那一行 |
+  | C4. `candle_gap_detection`（2 處） | **日曆取不到**（`calErr`）／**對照源日期取不到**，並斷言仍保留 `verification_unavailable: ` 前綴 |
+  | D. tally 摘要與 `safeJobErrorSummary` | 形式與不外洩 |
+
+  ⛔ **`SyncPerSymbolEvents` 回 `syncErr` 的那一格沒有測試**：依實作註解它只在
+  **ctx 逾時／取消**時發生，而 `RunCorporateActionSync()` 自己建 context、沒有注入點。
+  該分支的 cause 是 ctx sentinel（`context.DeadlineExceeded` / `Canceled`），
+  本來就不帶外部字串，由分類器測試與程式碼審查承接。
+
+  ⚠️ **每個案例都要真的走到「這次改動的那一行」**——第一版所有案例共用同一個
+  failing watchlist，於是多數只觸發早退分支，**逐檔那條根本沒被執行、測試卻是綠的**。
+  ⚠️ **只測分類器抓不到呼叫點漏接**——I-102 實作時就是這樣漏掉 `pre_market` 那一行。
+
+  **mutation check**：把 8 條 call-site 分別改回 `err.Error()` 重跑
+  （`sr_analysis` / `stock_symbol_sync` / `universe_sync` / `chip_sync` / `zone_verify` /
+  `corporate_action_watchlist` / `corporate_action`（splits）/ `candle_gap` 日曆），
+  加上後補的 `sr_evaluation` 的 `MarkDone`（`scheduler.go:816`）共 9 條，
+  **每一條都確實讓對應子測試變紅**。
 
 #### 關閉條件
 
-`rg 'err\.Error\(\)' backend/internal/scheduler/ backend/internal/api/handler/` 的結果裡，
-**沒有任何一處會流進使用者可見的 error 欄位**（log 不在此限）；並補一支測試，
-對每個 job 注入帶敏感標記的錯誤，斷言寫入的 error 欄位不含該標記
-——比照 I-102 的 `TestRunPreMarketEarlyReturnDoesNotLeakCause`
-（**只測分類器本身抓不到呼叫點漏接**，那個教訓就是 I-102 實作時踩到的）。
+1. ~~搜尋結果裡沒有任何一處 `err.Error()` 會流進使用者可見的 error 欄位。~~
+   ✅ **已達成**——`scheduler.go` 內 0 處（`zap.Error` 不在此限）。
+2. 逐 call-site 注入帶敏感標記的錯誤，斷言 error 欄位不含該標記。
+   ✅ **本筆 21 個替換點中 19 個已有實際執行到該行的測試**，逐處對照見下表。
+
+   | 檔案 | 替換點 | 測試 |
+   |---|---|---|
+   | `scheduler.go` | `chip_daily_sync` 早退 ＋ 逐檔 | ✅ ✅ |
+   | | `stock_symbol_sync` 早退 | ✅ |
+   | | `sr_zone_verify` 早退 ＋ 逐檔 | ✅ ✅ |
+   | | `sr_evaluation` ×6：早退／symbols marshal／job create／上游失敗的 `MarkFailed` ＋ `finishRun`／`MarkDone` 失敗 | ✅ 早退、job create、上游失敗兩處、`MarkDone`（共 5 處）；⬜ symbols marshal（見下） |
+   | | `evaluation_universe_sync` 早退 ＋ 逐檔 | ✅ ✅ |
+   | | `corporate_action_sync`：`SyncSplits` 早退／列標的早退／`errParts` watchlist／`errParts` syncErr | ✅ ✅ ✅；⬜ syncErr（見下） |
+   | | `sr_analysis` 早退 ＋ 逐檔 | ✅ ✅ |
+   | `candle_gap_detection.go` | 日曆取不到 ＋ 對照源陳舊 | ✅ ✅ |
+
+   ⛔ **兩個未覆蓋的分支，各有明確理由**：
+   * **`json.Marshal([]string)` 失敗**（`scheduler.go:759`）——輸入是 `[]string`，
+     **在現行型別下不可能失敗**，沒有注入點。
+   * **`SyncPerSymbolEvents` 回 `syncErr`**——依實作註解只在 **ctx 逾時／取消**時發生，
+     而 `RunCorporateActionSync()` 自己建 context。cause 是 ctx sentinel，不帶外部字串。
+
+   ⚠️ **report marshal（`scheduler.go:800`）不是本筆的替換點**——它失敗時只把
+   `reportJSON` 設成 `"null"`，**不寫進任何 job 欄位**，沒有外洩面。
+   前一版把它列進表格、又漏掉真正未覆蓋的 `MarkDone`，兩個錯誤剛好互相抵銷成
+   「19/21」；補上 `MarkDone` 測試後才是真的 19/21。
+
+   ⚠️ **`pre_market` 與 `daily_close` 不計入本筆**——那兩處是 I-102 改的，
+   本筆的測試順帶涵蓋它們，但**不能拿來充本筆的覆蓋率**（前一版的「14 個」就是這樣算出來的）。
+   ⚠️ **前一版聲稱「`stock_symbol_sync` 與 `corporate_action_sync` 注入不了 stub」是錯的**
+   ——`NewStockSymbolSyncer` 收的是 `StockSymbolSource` **介面**，
+   而 corporate action 早就有可注入的 stub 組合（`scheduler_test.go` 的
+   `TestRunCorporateActionSyncFailsWhenSymbolListUnavailable`）。兩者現在都有測試。
+
+   ✅ **handler 側四處也都有 call-site 測試**（`api/handler/job_error_leak_test.go`
+   ＋ 既有的 `TestMarketBackfill…`）：
+
+   | 呼叫點 | 測試方式 |
+   |---|---|
+   | `market.go` 的 `failures` | 既有的實際回補流程測試 |
+   | `chip.go` 的 `failures` | 實際跑 `runSync()`，來源回帶憑證的錯誤，斷言 `failures` 只含裸 reason code |
+   | `sr_regression_results.go` 的 `MarkFailed` | 實際跑 `runEvaluationJob()`，上游用回 500 的 `httptest` server |
+   | `sr_zones.go` 的 `MarkFailed` | 實際跑 `runTrainJob()`，同上 |
+
+   ⛔ **不要用分類器測試代替 call-site 測試**（那正是本筆第一版犯的錯）。
+   **mutation check**：把 `chip.go` 那行改回 `err.Error()`，該測試確實變紅並印出完整的
+   外洩內容。
+3. ⬜ **部署並在 live 觀察一次**。⚠️ **合法形式依欄位而不同，不要用單一格式判**：
+
+   | 欄位 | 合法形式 |
+   |---|---|
+   | `job_runs.error` | `stage:reason`、`stage:symbol:reason`、經核准的 `SafeMessenger` 描述（目前只有「市場層級對照源陳舊…」）、以及**既有的固定安全文字**（例如「部分標的回補失敗，詳見 log」「N 檔未處理」） |
+   | job 紀錄的 error（`MarkFailed`） | `stage:reason` |
+   | `failures[].error`（backfill／chip） | **裸 reason code**（例如 `conn_refused`）——symbol 已在同一列的 `symbol` 欄，不重複 |
+
+   **判準是「不含原始錯誤文字」，不是「符合某個格式」。**
+
+⚠️ **尚未部署。**
 
 ---
 

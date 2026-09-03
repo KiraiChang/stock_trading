@@ -15,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/store"
 )
@@ -313,8 +314,11 @@ func TestMarketBackfillPartialFailureRecordsFailures(t *testing.T) {
 	if len(failures) != 1 || failures[0].Symbol != "2454" {
 		t.Fatalf("failures = %+v, want 只有 2454", failures)
 	}
-	if !strings.Contains(failures[0].Error, "fetch failed for 2454") {
-		t.Fatalf("failures[0].error = %q, 應帶出原始錯誤供前端顯示", failures[0].Error)
+	// ⚠️ **不能斷言原始錯誤**（2026-09-02 改）——failures 會被持久化並由前端
+	// Backfill.svelte 原樣渲染，原始 driver 錯誤可能帶 DSN 與 SQL 片段。
+	// 現在存的是 joberr 的封閉值域 reason code，原文只進 log。
+	if failures[0].Error != string(joberr.Classify(errors.New("fetch failed for 2454"))) {
+		t.Fatalf("failures[0].error = %q, 應為分類後的 reason code", failures[0].Error)
 	}
 
 	// 進度是逐檔回報的（3 檔 → 3 次），不是跑完才一次寫入。

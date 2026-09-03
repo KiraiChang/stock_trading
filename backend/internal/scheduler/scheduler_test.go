@@ -416,8 +416,16 @@ func TestRunSREvaluationFailsWhenWatchlistFallbackErrors(t *testing.T) {
 		t.Fatalf("expected one job run finish, got %+v", jobRuns.finished)
 	}
 	finish := jobRuns.finished[0]
-	if finish.status != "failed" || finish.symbolsTotal != 1 || finish.symbolsFailed != 1 || finish.errMsg != expectedErr.Error() {
+	// ⚠️ **不能斷言 errMsg == expectedErr.Error()**（2026-09-02 改）——job_runs.error
+	// 是使用者可見面，原始 error 一律要過 joberr 分類器。斷言原文等於把外洩釘死。
+	if finish.status != "failed" || finish.symbolsTotal != 1 || finish.symbolsFailed != 1 {
 		t.Fatalf("unexpected watchlist failure finish: %+v", finish)
+	}
+	if !strings.HasPrefix(finish.errMsg, "sr_evaluation:") {
+		t.Errorf("errMsg 應為 stage:reason 形式，得到 %q", finish.errMsg)
+	}
+	if strings.Contains(finish.errMsg, expectedErr.Error()) {
+		t.Errorf("errMsg 不得含原始錯誤文字，得到 %q", finish.errMsg)
 	}
 }
 

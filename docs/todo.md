@@ -1118,7 +1118,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 2 | Step 1 全市場短期回補與判讀 | ✅ 完成 2026-08-13（857 檔 / 454,152 列） |
 | 3 | selection report、選出最終清單 | ✅ 完成 2026-08-17（**131 檔**，計畫書階段 1～3 通過） |
 | 4 | deep backfill ＋ 階段 4～6 驗證 | ✅ 完成 2026-08-17（131/131 對齊、覆蓋率 99.1%+、峰值 382MB、回歸基準已落地） |
-| 5 | Phase 2：`evaluation_universe` 表與每日排程 | **實作 review 通過（2026-08-31）／regression baseline 驗收未完成**（2026-08-17 實作）。**2026-08-18 唯讀盤點：池已匯入（135 檔，非文件的 131）、排程已啟用、當日 15:06 同步 135 檔／0 失敗、池內日 K 全部到 08-18 且無手動回補**——端到端驗收的前半段成立。後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未跑。詳見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「live 現況與端到端驗收」 |
+| 5 | Phase 2：`evaluation_universe` 表與每日排程 | **實作 review 通過（2026-08-31）／regression baseline 驗收未完成**（2026-08-17 實作）。**2026-08-18 唯讀盤點：池已匯入（135 檔，非文件的 131）、排程已啟用、當日 15:06 同步 135 檔／0 失敗、池內日 K 全部到 08-18 且無手動回補**——端到端驗收的前半段成立。**後半段已於 2026-09-03 跑完**：評估成功（135 檔／75,073 列／峰值 408MB），但基準比對有兩個 blocking 檢查未過（`波動最高者不變`、Spearman 0.8833）。**已證明不是迴歸**——pipeline 版本與門檻全同，且 `atr_pct` 可從 raw DB 逐位重現；根因是 `_atr_pct` 實際只取 14 根而非註解宣稱的 60 根；**後續 review 再查出 evaluation 用 TR SMA(14)、runtime 用 Wilder ATR(14)，兩者相差 17～42%**，見 [`issue.md`](./issue.md) I-106。**本 Step 要等 I-106 的比對方法改造完成後重跑才能判定通過**（判準：固定輸入 regression 通過、live drift 有合理說明）；公式裁決是 I-107，**不阻擋本 Step**。資源與資料完整性的部分（135 檔可執行、峰值 408MB）本次已驗到。詳見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「live 現況與端到端驗收」 |
 
 #### 相依：T-003 邊界凍結
 

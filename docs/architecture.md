@@ -556,6 +556,13 @@ distinct `(year, month)` 數**，視窗滾過去之後舊月份就不再計入�
     'grep -h "candle gap detection done" /app/logs/backend/*.log' | tail -5
   ```
 
+  ⚠️ **檔名的日期是 UTC，檔內時間戳是 +08:00**（`logging/logger.go:127` 用
+  `w.now().UTC().Format(...)`，是刻意的，有 `TestDailyFileWriterRotatesByUTCDate` 守著）。
+  所以**單一檔案橫跨兩個台北日期**：實測 `backend-2026-09-02.log` 涵蓋
+  local 09-02 08:07 → 09-03 07:14，台北早上 08:00 前的事件會落在**前一天**的檔名裡。
+  上面用 `*.log` 全掃再看時間戳就不會踩到；**若要指定單一檔案，先把台北時間換成 UTC**。
+  `job_runs.started_at` 同樣是 UTC，與 log 檔名一致、與檔內時間戳差 8 小時。
+
 **判定仍以 `job_runs` 與 `candle_verification_state` 兩項 DB 證據為準**——
 它們是結構化的、可查詢的；**log 檔則是查「為什麼」時的必要補充**
 （例如 `verification_unavailable` 的成因就只在 log 裡，見 `issue.md` I-105）。

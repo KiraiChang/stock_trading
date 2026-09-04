@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-106` 起算。**（**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-109` 起算。**（**I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-105（2026-09-02 發出，**下一個可用的是 I-106**；I-102 已於同日收斂、編號不回收——I-096 / I-098
+  檔案裡看得到的最大是 I-108（2026-09-04 發出，**下一個可用的是 I-109**；I-102 已於同日收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,7 +70,7 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-104 / I-105、已收斂的 I-102 與下一個可用的 I-106），
+  本檔現有的 I-100 / I-103 / I-104 / I-105 / I-106 / I-107 / I-108、已收斂的 I-102 與下一個可用的 I-109），
   那是預期的，不是殘留。
 
 ---
@@ -988,7 +988,13 @@ if err != nil {
 live 再次出現 `verification_unavailable` 時，**能從 log 判斷出成因類別**
 （哪一檔、哪一個年月、哪一種失敗）。
 
-⚠️ **尚未部署**——下一個交易日（`2867` 仍在跨月視窗內，很可能再次觸發）驗到之後才算關閉。
+✅ **已部署**（2026-09-03 10:59:53，image build 10:59:52、HEAD `cdf29b5`、工作樹乾淨）。
+容器內 binary 含 `candle gap verification unavailable`；啟動無誤（migrations v75、scheduler started）。
+
+⬜ **但 live 尚未產生證據**——`candle_gap_detection` 每日 **16:25（local）** 才跑，
+部署後到核實時只跑過 1 次 `intraday`。**部署完成 ≠ 關閉條件達成**：
+要等下一次真的出現 `verification_unavailable`，且 log 裡有對應的
+`candle gap verification unavailable`（含 symbol／year／month／missing_dates／error）才算關閉。
 
 ---
 
@@ -1175,7 +1181,17 @@ sentinel domain error，安全由建構方式保證。
 
    **判準是「不含原始錯誤文字」，不是「符合某個格式」。**
 
-⚠️ **尚未部署。**
+   ✅ **已部署**（2026-09-03 10:59:53，同上）。容器內 binary 含
+   `serialization_failure` / `internal_error` / `corporate_action(splits)` /
+   `corporate_action_watchlist`，且**已無**舊的 `err.Error()` 拼接字串。
+
+   ⬜ **但 live 尚未有失敗路徑可驗**——部署後只跑過 1 次 `intraday`（success，error 空）。
+   本條要等任一排程真的失敗、且 error 欄符合上表形式才算達成。**不要為了驗證去製造失敗。**
+
+   ℹ️ **附帶查證**（2026-09-03 06:30 的 `corporate_action_sync` `partial`）：
+   `symbols_failed=1` 但 `error` 為空，**這是既有設計不是迴歸**——逐檔失敗只計數，
+   成因記在 log（`adjuster.go:307`：`2867` dividends HTTP 404），
+   `errParts` 只承接整體性錯誤（syncErr／skipped／watchlistErr）。該輪為部署前的 binary。
 
 ---
 
@@ -1232,3 +1248,807 @@ FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——
 `runIntradayBatch` 能區分「整批失敗」「逐檔寫入失敗」「該檔本來就沒有資料」三種情形，
 並讓前兩種在 `job_runs` 可辨識；或明確決定不修，轉為已知限制並在
 [`architecture.md`](./architecture.md) 寫明 `symbols_failed` 在批次路徑的粒度限制。
+
+---
+
+### I-106：`verify-regression-baseline.sh` 不是程式回歸測試，它比的是會自己變的 live 資料
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待執行（2026-09-03 review 定案：**改造版方向 3 ＋ 最後執行方向 1**；公式裁決另立 I-107） |
+| 嚴重度 | 中（不影響 live 交易邏輯；影響的是 T-040 的驗收方法本身——**基準每隔幾個交易日就會失敗，且失敗不代表迴歸**） |
+| 分類 | Python / 驗收方法 / 文件與實作不一致 |
+| 建立日期 | 2026-09-03 |
+| 來源 | T-040 Step 5 的 regression baseline 驗收實跑（2026-09-03 11:11–11:23） |
+
+#### 現象
+
+2026-09-03 拿池內 135 檔重跑 `run-evaluation.sh --limit 1500` 再比對基準，
+**兩個 blocking 檢查失敗**：
+
+| 檢查 | blocking | 結果 |
+|---|---|---|
+| 所有基準標的都有 profile | ✅ | 通過 |
+| 波動最高者不變 | ✅ | ❌ `6243` → `2478` |
+| 波動最低兩檔不變 | ✅ | 通過 |
+| `atr_pct` 排名 Spearman ≥ 0.9 | ✅ | ❌ **0.8833** |
+| 門檻與現行一致（觀察項） | — | 通過（兩個門檻值完全相同） |
+| bucket 跨越（觀察項） | — | ⚠️ `5490` `HIGH_VOLATILITY` → `LOW_VOLATILITY` |
+
+#### 這不是迴歸——已證明是資料滾動
+
+**① pipeline 沒變**：`pipeline_version`（`sr_zone_evaluation_p1`）、
+`source_schema_version`（`sr_zone_evaluation_p0`）、`timeframe`、兩個門檻值、
+`lookback_bars`（60）、`candle_count`（1500）**全部與基準相同**。
+
+**② 從 raw DB 完整重現了兩個日期的 `atr_pct`，小數三位全中**：
+
+```sql
+-- 14 根 true range 平均 / 最後一根 close
+0050  2026-08-17 → 2.597%   2026-09-02 → 1.555%
+5490  2026-08-17 → 6.375%   2026-09-02 → 2.692%
+6243  2026-08-17 → 8.596%   2026-09-02 → 5.483%
+```
+
+與報告的 `atr_pct` **逐檔逐位相符**，所以數值本身沒有算錯。
+
+**③ 根因**：`evaluation.py:287` 的 `_atr_pct(df, atr_period: int = 14)` 取的是
+**`true_range.tail(14)`**，而 `_volatility_profiles` 只把 `recent = df.tail(60)` 傳進去
+（`:316`、`:321`）。也就是說：
+
+* `average_range_pct` 是**60 根**窗口 → 08-17→09-02 只掉 −0.4% ～ −8.7%
+* `atr_pct` 是 **14 根**窗口 → 同期掉 **−16% ～ −57.8%**
+
+兩者用同一批 K 棒、同一個 `lookback_bars: 60` 欄位，漂移幅度卻差一個數量級。
+`verify-regression-baseline.sh` 的檔頭註解寫「`atr_pct` 取近 60 根」——**與實作不符**，
+基準檔記的 `lookback_bars: 60` 也只是 `min(lookback, candle_count)`，
+**不是 `atr_pct` 真正用的窗口**。
+
+⚠️ **11 個交易日就換掉 14 根窗口裡的 11 根（79%）**，序數穩定性這個前提在這個窗口長度下
+本來就不成立。基準建立於 08-17，比對於 09-02——**基準的設計壽命遠短於當初的假設**。
+
+#### ⚠️ 前一版的兩個錯誤結論（2026-09-03 review 指出，已更正）
+
+**錯誤 A：宣稱 evaluation 與 runtime 的 ATR 實作一致。** 不成立——**是兩個不同的指標**：
+
+| 位置 | 演算法 | 誰在用 |
+|---|---|---|
+| `evaluation.py:287` `_atr_pct` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`（即凍結門檻的來源）** |
+| `scoring.py:216` → `indicators.py:100` `calc_atr` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
+
+**同一批 K 棒上的實測差距（2026-09-02）**：
+
+| 標的 | TR SMA(14) | Wilder ATR(14) | 差異 |
+|---|---|---|---|
+| `0050` | 1.555% | 1.933% | **+24.3%** |
+| `2330` | 1.722% | 2.052% | +19.2% |
+| `2478` | 7.025% | 8.319% | +18.4% |
+| `5490` | 2.692% | 3.832% | **+42.4%** |
+| `6243` | 5.483% | 6.435% | +17.4% |
+
+⚠️ **這是一個潛伏問題，不只是命名問題**：凍結門檻 `LOW/HIGH_VOLATILITY_THRESHOLD` 的
+P33/P67 是拿 **SMA 基準**量的，而 runtime 的自適應 builder 用 **Wilder**。
+Wilder 系統性高 17～42%，**一旦 `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 打開，
+分類就會系統性偏向高波動**——門檻與 runtime 不同源。目前該旗標是 `False`，所以還沒發作。
+
+**⛔ 這需要裁決，不是我可以逕行決定的**（三個選項互斥、都會動到已凍結的量）：
+
+1. **統一用 Wilder ATR(14)**——與 Go `CalcATR`、與 runtime 一致；但**凍結門檻必須重測**。
+2. **統一用 TR SMA(14)**——與凍結門檻、選池、既有基準一致；但 runtime 要改，
+   且與 Go 端的 ATR 定義分家。
+3. **承認是兩個指標**——分別命名（例如 `atr_pct_sma14` / `atr_pct_wilder14`）、
+   各自記 provenance，並明確寫出哪一個在分桶、哪一個在門檻。
+
+**錯誤 B：宣稱「pipeline 迴歸會動 `pipeline_version` 等不變量」。** 不成立——
+`pipeline_version` 是 `evaluation.py:46` 的**人工常數** `DEFAULT_PIPELINE_VERSION`。
+公式改壞而忘記升版時，pipeline_version / schema / 門檻 / timeframe **可以全部不變**。
+把它們當成迴歸的守門是假的保證。
+
+#### 定案（2026-09-03 review）
+
+⛔ **不是三選一。** 定案是「**改造版方向 3 ＋ 最後執行方向 1**」，方向 2 另立議題。
+
+| 方向 | 能解決什麼 | 主要問題 | 處置 |
+|---|---|---|---|
+| 1. 只重建基準 | 暫時讓驗收通過 | 幾週後可能再次失敗 | **不能單獨採用**；改造完成後作為**最後一步的 migration 動作** |
+| 2. 窗口 14→60 | 降低短窗口漂移 | 改變指標與 bucket 分佈，**且沒有解決現有的公式分歧** | **本次不做**，拆為 **I-107** |
+| 3. 改比對方法 | 解除 T-040 的假失敗 | 只換成 `average_range_pct` **仍不是程式回歸測試** | **改造後採用** |
+
+⚠️ **方向 1 是 migration／初始化動作，不是問題解法**——順序必須是
+「先改 schema 與比對方法 → 記錄公式／period／lookback／snapshot → 才重建一次新格式基準」。
+
+⚠️ **方向 2 單改 period 會變成 `TR SMA(60)`，仍然不等於 runtime 的 Wilder ATR(14)。**
+真正的維度有三個：**period 多少、方法是 SMA 還是 Wilder、給多少根 warm-up／lookback**。
+所以它不是「14 或 60」的選擇題，見 I-107。
+
+#### 改造內容：一份基準拆成兩層
+
+**blocking 語意（三段式，全文以此為準）**
+
+| | 內容 | 語意 |
+|---|---|---|
+| **A. 固定輸入的程式回歸** | golden `atr_pct` / `average_range_pct` / `bucket` 的**絕對值**；golden 記錄的 `calculation` 與門檻對照現況常數 | **blocking**——唯一真正偵測迴歸的一層 |
+| **B-1. 相容性與完整性** | **7 項**：`schema_version`／`calculation`／`timeframe`／`source_schema_version`／`thresholds`／profile 完整性／`pipeline_version`（**完整定義見下方 B-1 表，該表是唯一 contract**） | **blocking 前置條件**——不過就不進入漂移比對 |
+| **B-2. 市場漂移指標** | `average_range_pct` / `atr_pct` / `max()` 排名、波動最高／最低者、bucket 移動與分佈 | **一律只產生 warning**（見下方三行契約） |
+
+* **只有「相同輸入、不同程式輸出」才叫程式回歸**——那是 A。
+* B-2 回答的是「市場變了嗎」，不是「程式寫壞了嗎」，所以不阻擋。
+
+⚠️ **`passed` 有兩個層級，全文一律用這三行描述 B-2，不要再寫「必須失敗」或
+「`passed` 恆為 `true`」**（那兩種寫法都會被讀成整體失敗／單項不會紅）：
+
+1. `checks[i].passed = false`
+2. 該項名稱加入 `warnings`
+3. **`compare()["passed"]` 不受影響**（只由 B-1 決定）
+
+⚠️ **metadata 檢查保留為 blocking contract，但不宣稱它能單獨偵測程式迴歸**——
+`pipeline_version` 是 `evaluation.py:46` 的人工常數，改壞公式而忘記升版時它不會動。
+
+#### baseline schema（升版 p0 → p1）
+
+```json
+{
+  "schema_version": "sr_volatility_baseline_p1",
+  "calculation": {
+    "atr_method": "tr_sma",
+    "atr_period": 14,
+    "profile_lookback_bars": 60,
+    "average_range_period": 60,
+    "bucket_basis": "max(atr_pct,average_range_pct)"
+  }
+}
+```
+
+⚠️ **上面只是 `calculation` 的節錄**——p1 的完整必填欄位見下方計畫書「四、contract 變化」。
+
+* **只加 `atr_period: 14` 不夠**——兩種演算法的 period 都是 14，區分不出來。
+* **舊 p0 一律明確拒絕或要求重建，不得靜默補預設值**：p0 沒記演算法，
+  硬套會做出錯誤的「通過」。
+* I-107 若裁決成 Wilder，再把 `atr_method` 改為 `wilder`。
+
+#### 執行順序
+
+1. 修正 I-106 的前提敘述（不只是文件錯，還有 SMA14／Wilder14 差異）。✅ 已完成
+2. 把「程式回歸」與「live 資料漂移」拆成兩種檢查。
+3. 固定輸入 regression（A）設為 blocking。
+   ⚠️ B-1 是**七項**（`schema_version`／`calculation`／`timeframe`／`source_schema_version`／
+   `thresholds`／profile 完整性**兩側**／`pipeline_version`），不是前段可能讀到的三項。
+4. live 的 ATR／average range／max／bucket 改為 B-2 warning。
+5. B-1（schema／`calculation`／完整性）保留為 blocking 前置條件，但不宣稱它能單獨偵測迴歸。
+6. baseline schema 升版並記錄 method／period／lookback；
+   `build_baseline` 在 `missing` 非空時 `raise`，**且驗證必須早於開檔**（否則舊基準會先被截斷）；
+   寫檔改為 **`os.replace` atomic write**（基準檔是 migration artifact，不能被寫到一半的失敗截斷）。
+7. **完成上述後**才執行方向 1，重建基準。
+8. 重新跑 T-040：固定輸入 regression 通過、live drift 有合理說明即可驗收。
+
+#### 測試清單
+
+`python/tests/test_baseline_check.py` 現有 10 支全數通過，但**只驗舊的 ATR 排序邏輯**。要補：
+
+1. 固定輸入的 regression test（golden profile 逐位比對絕對值）。
+2. `average_range_pct` 排序翻轉 → 該項 `checks[i].passed=false`、進 `warnings`，**`compare()["passed"]` 不受影響**。
+3. 正常資料漂移（用本次 08-17→09-02 的實際數值）→ 產生 warning，**整體 `passed` 仍為 `true`**。
+4. p0 基準檔 → 明確拒絕並說明原因。
+5. **參數化竄改測試**：逐一竄改 B-1 的各項（`schema_version` 降回 p0、`calculation` 五欄位各一、`timeframe` 改 `1h`、`source_schema_version` 改版、`thresholds` 改值、**抽掉一檔 profile（baseline 側與 current report 側各測一次**，見下方測試 8b）、`pipeline_version` 改版）→ **每一項都必須讓 `compare()["passed"]` 變 `false`**。
+6. ⚠️ **既有的 threshold 檢查目前是 warning 語意，實作時必須改寫成 blocking**（`baseline_check.py:172-180`）。
+7. **`build` CLI 的檔案安全**：`missing` 非空時不得建立新檔、不得截斷既有檔（測試 8c）；
+   寫檔改為 **`os.replace` atomic write**，序列化中途失敗時舊檔不變（測試 8d）。
+
+#### 計畫書（2026-09-03 定案；固定輸入採**版控的合成 OHLC fixture**）
+
+##### 一、目標與不做的範圍
+
+**要做**：把現有的一份「基準比對」拆成 **A 固定輸入的程式回歸（blocking）** 與
+**B live 資料漂移觀察（B-1 前置條件 blocking、B-2 只出 warning）**，
+並讓 baseline 檔記錄自己是用哪個公式算的。語意以上方「blocking 語意（三段式）」表為準。
+
+⛔ **不做**：
+* **不改任何 ATR 公式**——`_atr_pct` 的 TR SMA(14) 與 `calc_atr` 的 Wilder 都原封不動。
+  公式裁決是 **I-107**，本筆只負責**如實記錄現況**（`atr_method: "tr_sma"`）。
+* **不動門檻**、不升 `universe_version`、不改 `evaluation_universe` 的 135 列。
+* **不動 runtime**（`scoring.py`、`pipeline.py`、adaptive builder 旗標）。
+  ⚠️ `zone_builder.py` 有動到，但**只加一個模組層級的字串常數**，不碰門檻值、
+  不碰 `volatility_bucket_from_profile` 的簽章與邏輯，行為完全不變。
+* 不改 `run-evaluation.sh` 的取數與資源行為。
+
+##### 二、受影響檔案與資料流
+
+| 檔案 | 動作 |
+|---|---|
+| `python/backtest/modular/sr_scoring/evaluation.py` | **只新增兩個導出常數** `ATR_PERIOD = 14`、`ATR_METHOD = "tr_sma"`，並讓 `_atr_pct` 用它們（行為不變） |
+| `python/backtest/modular/sr_scoring/zone_builder.py` | **只新增一個宣告式常數** `BUCKET_BASIS`，緊鄰 `volatility_bucket_from_profile`（**行為不變**，不動門檻、不動函式簽章） |
+| `python/baseline_check.py` | `build_baseline` 產 p1 schema；`compare` 收斂為 B-1 blocking 前置條件 ＋ B-2 全 warning；拒絕 p0 |
+| `python/tests/fixtures/volatility_regression/*.csv` | **新增**：版控的合成 OHLC |
+| `python/tests/fixtures/volatility_regression/golden_profiles.json` | **新增**：golden 輸出 |
+| `python/tests/test_volatility_regression.py` | **新增**：A 層，pytest |
+| `python/tests/test_baseline_check.py` | 改寫既有 10 支（它們驗的是舊的 ATR 排序 blocking 語意） |
+| `scripts/verify-regression-baseline.sh` | **更名**為 `scripts/observe-volatility-drift.sh` |
+| `python/baselines/sr_volatility_baseline.json` | **最後一步**才重建為 p1 |
+
+**兩層的執行位置刻意不同**（這是本計畫的核心決定）：
+
+| 層 | 跑在哪 | 何時跑 | 資料 |
+|---|---|---|---|
+| **A 程式回歸** | `python/scripts/test.sh`（pytest） | **每次測試都跑** | 版控 fixture，**完全不碰 DB** |
+| **B 漂移觀察** | `scripts/observe-volatility-drift.sh` | 驗收時手動 | live |
+
+⚠️ A 層放進測試套件才是真的 blocking——放在手動腳本裡的「blocking」沒有人擋得住。
+
+##### 三、fixture 設計
+
+* **合成，不從 live 抽樣**。理由：live 抽樣會把 `adj_factor` 重算改寫歷史的問題帶回來，
+  而那正是要脫鉤的東西（`baseline_check.py:3` 原本就把它列為「不能比絕對值」的理由之一）。
+* **每檔 80 根**（> `VOLATILITY_PROFILE_LOOKBACK` 60），才驗得到 `tail(60)` 有真的切。
+* 必須涵蓋：
+  1. 三個 bucket 各至少一檔，且 **`max()` 基準刻意遠離門檻**（避免 I-107 若重測門檻就整片翻桶）。
+  2. **一檔以跳空為主**——TR 由 `|high − prev_close|` 主導，才驗得到三項取 max
+     而不是只算 `high − low`。
+  3. 邊界：**只有 1 根**（`_atr_pct` 回 `None`）、`inf` / `NaN` 的四種情境（見下）。
+
+⚠️ **fixture 不是隨便造就能讓 mutation 變紅——每個 mutation 都要有對應的構造條件。**
+前一版只寫了「大小關係相反」「80 根」，**兩者都不足以保證**：
+
+| mutation（測試 #） | fixture 必須滿足 |
+|---|---|
+| `tail(14)` → `tail(20)`（#2） | **倒數第 15～20 根的 TR 必須刻意與最後 14 根明顯不同**。若那 6 根與其餘同分佈，平均值只會有小數末位的差異，`rel_tol=1e-12` 之外但肉眼難辨，甚至可能剛好相同 |
+| `_atr_pct` → `calc_atr`（Wilder）（#3） | ⛔ **不能拿 live 的 17～42% 當保證**——那是 live 資料的性質，與合成 fixture 沒有必然關係。要求：**fixture 的早期 TR 與最後 14 根屬於不同 regime**（Wilder 從第 15 根一路平滑，早期 regime 會殘留在結果裡；SMA 只看最後 14 根），並在**建 fixture 時實際算一次 SMA14 與 Wilder14，確認差距超出 `rel_tol=1e-12` 且肉眼可辨**，把該數字寫進測試註解 |
+| `max` → `min`（#4） | **至少一檔的 `atr_pct` 與 `average_range_pct` 要落在門檻的不同側**，使 `max` 與 `min` 得到**不同的 bucket**。⛔ **只有「大小關係相反」不夠**——兩個值若同在 NORMAL 區間內，換成 `min` 仍是 `NORMAL_VOLATILITY`，測試照樣綠 |
+| `tail(60)` 真的有切（切片本身） | **80 根的前 20 根要刻意放入不該參與計算的異常波動**（例如 10 倍振幅）。若前 20 根與其餘同分佈，拿掉 `tail(60)` 也算得出幾乎一樣的值 |
+* golden 比對 `atr_pct` / `average_range_pct` / `bucket` / `candle_count` / `lookback_bars`，
+  **浮點用 `math.isclose(rel_tol=1e-12)`**：足以抓公式改變（SMA↔Wilder 差 17～42%），
+  又不會被 numpy 版本的 ULP 差異誤擋。
+
+**`bucket` 怎麼比**（前一版寫「用 golden 記的門檻重算」，**沒說怎麼做，實作不出來**）：
+`volatility_bucket_from_profile()`（`zone_builder.py:401`）**不收門檻參數**，
+直接讀模組常數 `LOW/HIGH_VOLATILITY_THRESHOLD`。於是有兩條路，都不能單獨走：
+
+| 做法 | 問題 |
+|---|---|
+| 測試自己重寫一份 bucket 判定 | 正式函式的 `max` → `min` 改壞時**抓不到**（測試比的是自己那份） |
+| 直接呼叫正式函式、用現行常數 | I-107 一重測門檻，A 層整批變紅——**那不是程式迴歸** |
+
+✅ **定案**：**用 `monkeypatch` 把 `zone_builder` 的兩個門檻常數暫時換成 golden 記的值，
+再呼叫正式的 `volatility_bucket_from_profile()`。** 兩個問題同時解決——
+走的是正式函式（mutation 抓得到），用的是固定門檻（不受 I-107 影響）。
+* golden 檔**必須明確保存這兩個門檻值**（`thresholds.low_volatility_max` /
+  `high_volatility_min`），否則 monkeypatch 沒有來源。
+* ⚠️ `volatility_bucket_from_profile` 的邊界是 `basis < LOW` → LOW、`basis > HIGH` → HIGH，
+  **等於門檻時是 NORMAL**。fixture 的 `max()` 基準要遠離這兩個值，別去測邊界語意。
+
+**非有限值 fixture 的預期輸出**（前兩版都寫錯，**以下是 2026-09-04 的實測結果**）：
+
+前一版把不同的非有限值混成「髒列」一概而論，**不成立**——`NaN` 與 `inf` 的路徑完全不同，
+而且**位置**與**是整列還是單欄**也會改變結果。實測（30 根合成資料，baseline
+`atr_pct = 0.019436345966958212`）：
+
+| # | 情境 | `atr_pct` 實測 | 為什麼 |
+|---|---|---|---|
+| 1 | `high=NaN`，在最後 14 根**內** | **0.018672775232542**（有限，但**與 baseline 不同**） | 三個候選中 `\|low − prev_close\|` 仍有限，`max(skipna=True)` 取它，**該列沒有被丟掉**，只是 TR 變小 |
+| 2 | `high=NaN`，在最後 14 根**外** | 與 baseline 相同 | 不在 `tail(14)` 內 |
+| 3 | **整列 NaN**，在最後 14 根內 | 與 baseline 相同 | 三個候選全 NaN → `max` 回 NaN → `.dropna()` **真的丟掉該列**，`tail(14)` 因此往前多取一根 |
+| 4 | TR 候選 `+inf`（`high=inf`），在最後 14 根內 | **`None`** | `inf` **不會被 `.dropna()` 移除**，`mean` 為 `inf`，最後由 `_clean_metric` 轉成 `None` |
+| 5 | TR 候選 `+inf`，在最後 14 根外 | 與 baseline 相同 | |
+| 6 | `last_close = NaN` | **`None`** | `atr / nan = nan` |
+| 7 | **`last_close = +inf`** | **`0.0`**（**不是 `None`**） | `inf <= 0` 為 `False` 通過守門，`atr / inf = 0.0`，而 `0.0` 是有限值 |
+| 8 | `last_close = 0` | `None` | 被 `last_close <= 0` 擋掉 |
+| 9 | **整段 `close` 都是 `+inf`** | **`None`**（`atr_pct` 正確） | `prev_close` 也是 `inf` → TR 為 `inf` → `inf / inf = nan` → `None`。⚠️ **但同一檔的 `average_range_pct` 是 `0.0`，bucket 因此變 `LOW_VOLATILITY`**——見下 |
+
+`average_range_pct` 走的是另一條清理路徑（`.replace([inf,-inf], nan).dropna().mean()`），
+實測 `high=NaN` 與 `close=0`（振幅變 `inf`）**都得到同一個有限值** `0.019722593362700876`
+——兩種情況都只是把該列丟掉。
+
+⛔ **但那條清理路徑擋不住 `close = +inf`**：`(high - low) / inf = 0.0` 是**有限值**，
+`.replace([inf,-inf], nan)` 清不到它。實測情境 9：`atr_pct = None`（正確）、
+**`average_range_pct = 0.0`**、`volatility_bucket_from_profile(None, 0.0)` →
+`values = [0.0]` → `max` = `0.0` < `LOW` → **`LOW_VOLATILITY`**。
+這是整組情境裡**唯一真的把壞資料判成「最穩」的一條**，且入口是 `average_range_pct`
+而不是 `_atr_pct`。已併入 [I-108](#i-108volatility-profile-沒有完整拒絕非有限的-close會產出看似合法的-00) 的修正範圍。
+
+⚠️ **情境 9 的 golden 同樣是「I-108 修正前的觀察值」**：I-108 定案採逐列語意後，
+這一檔會變成 `average_range_pct = None`、bucket = `UNKNOWN_VOLATILITY`。
+本筆照現況記 `0.0` / `LOW_VOLATILITY` 並在 golden 與測試註解標明，
+**由 I-108 在自己的 commit 內一併更新**（順序：I-106 先、I-108 後）。
+
+✅ **fixture 依情境 1／3／4／6／7／9 各給一檔**（**6 種**），不再用單一「髒列」概括，
+也不再一律期待 `null`。**情境 9 是唯一需要同時釘住 `average_range_pct` 與 `bucket` 的**，
+其餘只釘 `atr_pct`。
+
+⛔ **上表的數字是診斷證據，不是 golden 值。** 它們來自 30 根的合成資料；正式 fixture
+要求每檔 80 根且**含 regime 變化**，算出來的有限值必然不同，而「只有 1 根」那個
+edge case 更不可能有 80 根。**fixture 長度依用途分**：
+
+| 用途 | 根數 |
+|---|---|
+| mutation／一般 profile fixture | **80**（含前 20 根的異常 regime） |
+| 非有限值 edge fixture | 依案例，**1／30／80 皆可** |
+
+**正式 golden 一律由版控 fixture 重新算出並獨立核對**（手算驗一檔，見風險表），
+**不得直接抄上表的數字**。上表只用來確定「哪些情境會落在哪一種輸出型態」
+（有限值／`None`／`0.0`）。
+
+⚠️ **情境 7 是既有的健壯性缺口，已另立 I-108**：`_atr_pct` 只守 `last_close <= 0`，
+沒守 `math.isfinite`，於是 `+inf` 產出 `0.0`——一個看似合法、實際是垃圾的數字。
+⛔ **不要寫成「因此會被分類成 `LOW_VOLATILITY`」**：bucket 用的是
+`max(atr_pct, average_range_pct)`，`0.0` 通常被另一個分量蓋過去，
+實測三種波動 regime 的 bucket **都沒有改變**（見 I-108 的表）。
+所以 golden 要釘住的是 **`atr_pct = 0.0` 這個欄位值**，不是 bucket。
+**本筆不修**（範圍是「行為不變」），golden 如實記錄 `0.0`，
+但**必須在 golden 檔與測試註解標明這是「I-108 修正前的觀察值」，不是認可的長期正確行為**；
+I-108 修正時要同步更新 golden。
+
+⛔ **不要說它「只是理論情境」**——前一版這樣寫是錯的。`candles.close` 確實是
+`numeric(10,2) NOT NULL` 取不到 `inf`，但 **evaluation 有 `--csv` 輸入路徑**
+（`evaluation.py:2508` → `_load_csv_sources` → `load_ohlcv_csv`），CSV 可以載入 `inf`。
+
+⚠️ **產生 golden 時要用 `json.dump(..., allow_nan=False)`**——Python 預設會寫出
+非標準的 `NaN` / `Infinity` 字面值，那種檔案別的 JSON parser 讀不了，
+而且會讓「漏轉 `None`」這個 bug 靜靜地被寫進 golden 當成正確答案。
+
+##### 四、contract 變化
+
+**baseline schema `p0` → `p1`**：
+
+```json
+{
+  "schema_version": "sr_volatility_baseline_p1",
+  "source_schema_version": "sr_zone_evaluation_p0",
+  "pipeline_version": "sr_zone_evaluation_p1",
+  "timeframe": "1d",
+  "thresholds": {
+    "low_volatility_max": 0.046089927430152715,
+    "high_volatility_min": 0.06278197721225691
+  },
+  "calculation": {
+    "atr_method": "tr_sma",
+    "atr_period": 14,
+    "profile_lookback_bars": 60,
+    "average_range_period": 60,
+    "bucket_basis": "max(atr_pct,average_range_pct)"
+  },
+  "snapshot": { "...": "產生當時的資料狀態，維持 p0 既有語意" },
+  "symbols": ["..."], "missing": [], "profiles": { "...": {} }
+}
+```
+
+⚠️ **這是完整的必填欄位，不是節錄**——前四個欄位 p0 就已經在存了
+（`baseline_check.py:91-95`），只是 `compare` 從來沒讀。p1 把它們全部升為 B-1 blocking。
+
+**五個欄位的來源不一樣，前一版說「全部由現況常數讀入」是錯的**：
+
+| 欄位 | 來源 | 是否從實作推導 |
+|---|---|---|
+| `atr_method` | 新增 `evaluation.ATR_METHOD` | ⚠️ **宣告式**——常數與 `_atr_pct` 的實作**綁在一起改**，靠 mutation test 約束 |
+| `atr_period` | 新增 `evaluation.ATR_PERIOD`，**`_atr_pct` 的預設參數改用它** | ✅ 真的從實作讀 |
+| `profile_lookback_bars` | `VOLATILITY_PROFILE_LOOKBACK` | ✅ |
+| `average_range_period` | `VOLATILITY_PROFILE_LOOKBACK`（**與上一欄同源**，`average_range_pct` 就是在同一個 `tail(lookback)` 切片上算的） | ✅ |
+| `bucket_basis` | 新增 `zone_builder.BUCKET_BASIS = "max(atr_pct,average_range_pct)"` | ⚠️ **宣告式，不是自動推導** |
+
+⚠️ **`bucket_basis` 與 `atr_method` 是宣告式 contract，不能假裝它們是從實作推導出來的。**
+`volatility_bucket_from_profile` 裡的 `max(values)`（`zone_builder.py:405`）沒有任何
+可供 metadata 讀取的 contract 常數，字串「`max(...)`」無論放哪裡都是人寫的。
+處置是**兩件事一起做**：
+
+1. **常數放在被描述的程式碼旁邊**（`BUCKET_BASIS` 緊鄰 `volatility_bucket_from_profile`、
+   `ATR_METHOD` 緊鄰 `_atr_pct`），改實作時看得到要一起改；
+2. **由 mutation test 保證一致**——`max` → `min` 必須讓 A 層變紅（測試 #4）。
+
+⛔ **不要在 `baseline_check.py` 裡手寫 `"max(...)"`**——那正是本筆要修的
+「metadata 與實作分離」再犯一次。
+
+**p0 一律拒絕**：`compare` 見到非 p1 直接 blocking 失敗並說明要重建，
+**不靜默補預設值**（p0 沒記演算法，補預設會做出錯誤的「通過」）。
+
+⛔ **`build_baseline` 遇到 `missing` 非空時改為直接失敗**（現行是寫檔後印 WARNING、
+仍回傳 0——`baseline_check.py:243-245`）。一份先天就缺標的的基準，之後每次比對都不會
+發現那一檔不見了——B-1 的 6a 是在補這個洞的下游，這裡則是堵住源頭。
+**寧可當場不產出，也不要產出一份看起來正常的殘缺基準。**
+
+⛔ **「不產出」必須包含檔案安全，光是回傳非零不夠。** 現行 CLI 的順序是
+`build_baseline()` → **`open(args.output, "w")` 覆寫** → 才檢查 `missing`
+（`baseline_check.py:230-241`）——`open(..., "w")` 一執行就已經把舊檔截斷成 0 bytes。
+若只在寫檔後加 `return 1`，結果是「回了非零，但舊基準已經沒了」，比現在更糟。
+
+**定案：驗證放在 `build_baseline()` 內部，`missing` 非空時 `raise ValueError`**
+（訊息帶上缺漏清單）。選這個而不是「CLI 在 open 前先檢查」的理由：純函式自己守住不變量，
+之後任何呼叫端（測試、其他腳本）都拿不到殘缺結果，不必各自記得複製那段檢查。
+CLI 只負責把例外轉成訊息與非零 exit code。四條驗收條件：
+
+1. `missing` 的驗證在**開啟 `args.output` 之前**完成（由 raise 的位置自然保證）；
+2. exit code 非零；
+3. **新檔不得被建立**；
+4. **`args.output` 已存在時，內容必須與執行前逐位元組相同**（不得截斷）。
+
+ℹ️ 這樣改之後，**新 `build` 產出的檔案 `missing` 恆為 `[]`**。
+`missing` 欄位仍留在 p1 schema，B-1 的 6a 也仍要檢查它——那是為了擋
+手改過的、或由舊版／其他來源產生的基準檔，不是為了擋新 `build` 的輸出。
+
+⛔ **`missing` 的 raise 只擋住了「已知的失敗」，寫檔本身仍不安全。**
+`open(args.output, "w")` 一旦執行，之後任何錯誤都會留下被截斷的舊基準——
+`json.dump` 的序列化例外、磁碟寫到一半、行程被中斷都算。
+基準檔是 **migration artifact**（第 7 步產出、之後每次比對都以它為準），
+截斷等於把唯一的參考點弄丟。
+
+**定案：改成 atomic write。**
+
+1. 寫到**同目錄**的暫存檔（同目錄才保證同一 filesystem，`os.replace` 才是原子的）；
+2. `flush()` 成功、檔案關閉後，再用 **`os.replace(tmp, output)`** 換上去；
+3. 任何一步失敗都要**刪掉暫存檔**並讓例外往上拋，`args.output` 保持原內容。
+
+⛔ **測試必須打到 CLI 層**（`main(["build", ...])` 或 subprocess）。
+只測 `build_baseline()` 純函式會通過，卻完全證明不了第 3、4 條——
+「先開檔再檢查」這個 bug 就活在純函式之外。
+
+**B-1 blocking 前置條件**（對應定案表）：
+
+| # | 檢查 | 為什麼是 blocking |
+|---|---|---|
+| 1 | `schema_version` 為 p1 | p0 沒記演算法，比不了 |
+| 2 | `calculation` 五欄位與當下實作相同 | 公式換了就不是同一把尺 |
+| 3 | **`timeframe` 相同** | ⚠️ **拿 1h report 比 1d baseline，只要標的齊全就會通過**——現有 `compare` 完全沒讀這個欄位 |
+| 4 | **`source_schema_version` 相同** | report 的結構換版就不保證欄位語意相同 |
+| 5 | **`thresholds` 相同** | bucket 是門檻的函數；門檻變了 bucket 比對不是同一把尺 |
+| 6a | **baseline 自身完整**：`missing` 為空，且 `symbols` 與 `profiles.keys()` 相同 | ⚠️ **現行漏檢**——`compare` 的 `base` 直接取 `baseline["profiles"]`（`baseline_check.py:142`），基準在**產生時**就漏掉的標的**根本不會進入 `base`**，於是 `set(base) - set(cur)` 永遠看不到它 |
+| 6b | **current report 完整**：所有 baseline symbols 在 report 裡都有 profile | 缺標的就沒有可比的母體（這是現行唯一有做的一項） |
+| 7 | `pipeline_version` 相同 | ⚠️ **相容性 contract，不是迴歸偵測器**（人工常數，見下） |
+
+⚠️ **`build_baseline` 本來就存了 `timeframe` / `source_schema_version` /
+`pipeline_version`（`baseline_check.py:93-95`），但 `compare` 一次都沒讀**——
+這是既有缺口，本筆一併補上。
+
+⛔ **`thresholds` 從觀察項升為 B-1 blocking**（前一版只在 A 層提到門檻、B-1 完全省略）。
+理由：門檻重定是刻意動作，**基準必須跟著重建**；讓它只出 warning 等於容忍
+「thresholds 與 profiles 不同源」的基準繼續被使用。
+
+其餘（`atr_pct` 排名、`average_range_pct` 排名、`max()` 排名、波動最高／最低者、
+bucket 移動與分佈）是 **B-2**，一律照三行契約處理：
+`checks[i].passed=false` → 進 `warnings` → **`compare()["passed"]` 不受影響**。
+
+⚠️ **metadata 是 contract 檢查，不是迴歸偵測**——`pipeline_version` 是
+`evaluation.py:46` 的人工常數，改壞公式而忘記升版時它不會動。真正的迴歸偵測在 A 層。
+
+##### 五、風險與回滾
+
+| 風險 | 處置 |
+|---|---|
+| 合成 fixture 不像真實資料，驗不到真實情形 | A 層只驗**公式正確性**，真實資料的規模／完整性由 B 層與 T-040 的 live run 承接，兩者不互相冒充 |
+| golden 值算錯 → 把錯的固定成「正確」 | golden 由程式產生後，**用手算獨立驗一檔**（TR 三項取 max、tail(14) 平均、除以最後 close），寫進測試註解 |
+| 降為觀察項後真的迴歸沒人擋 | 那正是 A 層存在的理由；且 B 層本來就擋不住（時間推進就會失敗，訊號早被雜訊蓋掉） |
+| 更名斷連結 | 更新 4 處引用：`evaluation-universe-selection-plan.md:509`、`:747`，本筆與 T-040 的敘述 |
+| `BUCKET_BASIS` / `ATR_METHOD` 是人寫的字串，改實作時忘了改它 | 常數放在被描述的函式旁邊；**mutation test #3／#4 是真正的保證**，不是靠自律 |
+
+**回滾**：本筆不動 live、不動 DB、不動 runtime，**回滾即 `git revert`**。
+舊的 `sr_volatility_baseline.json`（p0）在第 7 步之前都保持不動，
+真要退回只需還原腳本檔名與 `baseline_check.py`。
+
+##### 六、測試與驗證策略
+
+| # | 測試 | 期望 |
+|---|---|---|
+| 1 | fixture → golden 逐位比對 | 通過 |
+| 2 | **mutation**：把 `_atr_pct` 的 `tail(14)` 改成 `tail(20)` | **必須紅**（靠倒數 15～20 根的 TR 刻意不同） |
+| 3 | **mutation**：把 `_atr_pct` 換成 `calc_atr`（Wilder） | **必須紅** |
+| 4 | **mutation**：`volatility_bucket_from_profile` 的 `max` 改成 `min` | **必須紅**（靠那檔兩個值跨門檻不同側） |
+| 4b | **mutation**：拿掉 `_volatility_profiles` 的 `df.tail(lookback)` | **必須紅**（靠前 20 根的異常波動） |
+| 5 | `average_range_pct` 排序翻轉 | 該 check `passed=false` 並列入 `warnings`，**但整體 `passed` 仍為 `true`** |
+| 6 | 正常資料漂移（用本次 08-17→09-02 的**實際數值**當 fixture） | 整體 `passed` 為 `true`（可有 warnings） |
+| 6b | `inf` / `NaN` 輸入的**六種情境**（上表的 1／3／4／6／7／9） | 各自符合實際清理規則的輸出型態（**不是一律 `null`**），且 golden 檔不含 `NaN` / `Infinity` 字面值。情境 9 另需釘住 `average_range_pct = 0.0` 與 `bucket = LOW_VOLATILITY`（**I-108 修正前的觀察值**） |
+| 7 | p0 基準檔 | B-1 blocking 失敗，訊息指出要重建 |
+| 8 | **參數化竄改 B-1 的各項**（含 `timeframe`→`1h`、`source_schema_version`、`thresholds`、`pipeline_version`、`calculation` 五欄位） | **每一項都讓整體 `passed` 變 `false`** |
+| 8b | **profile 缺漏要分兩側各測一次**：①從 **baseline** 的 `profiles` 抽掉一檔（`symbols` 仍留著）②從 **current report** 抽掉一檔 | 兩者都必須 blocking 失敗。⛔ 只測其中一側會漏掉 6a 那條 |
+| 8c | **`build` CLI 的檔案安全**（`missing` 非空時）：①目標檔不存在 ②目標檔已存在且有內容 | ①exit code 非零且**檔案沒被建立**；②exit code 非零且**內容逐位元組不變**。⛔ 必須走 CLI，只呼叫 `build_baseline()` 證明不了這兩條 |
+| 8d | **atomic write**：`missing` 為空、但**序列化中途失敗**（注入一個 `json.dump` 會拋的值）| 例外往上拋、**既有 `args.output` 內容逐位元組不變**、**同目錄不留暫存檔**。⛔ 這條與 8c 不同：8c 擋的是已知的前置失敗，8d 擋的是寫檔過程本身 |
+
+⚠️ 第 2、3、4、4b 項是**驗「測試有效」而不是驗程式**——沒跑過 mutation 的 golden test
+很可能只是在比對自己產生的空氣（I-104 已經踩過一次）。
+
+##### 七、執行順序
+
+1. `evaluation.py` 加 `ATR_PERIOD` / `ATR_METHOD`、`zone_builder.py` 加 `BUCKET_BASIS`（皆行為不變）。
+2. 建 fixture 與 golden，寫 A 層測試，跑 mutation **2、3、4、4b**。
+3. `baseline_check.py`：p1 schema、拒絕 p0、**blocking 收斂為 B-1 那 7 項**、其餘轉 B-2 warning。
+4. 改寫 `test_baseline_check.py`，補測試 5～8d（含 8c 的 CLI 檔案安全與 8d 的 atomic write）。
+5. 腳本更名 `observe-volatility-drift.sh` 並更新 4 處引用。
+6. 更正[上表](#待更正的敘述完整盤點2026-09-03) 5 處錯誤與 2 處含混敘述。
+7. **最後**才重建 `sr_volatility_baseline.json` 為 p1（方向 1，migration 動作）。
+8. 重跑 T-040 驗收：A 層綠、B 層 drift 有合理說明。
+
+##### 八、完成後的歸檔位置
+
+* 兩層檢查的定位、fixture 設計原則、p1 schema →
+  [`sr-zone-scoring.md`](./sr-zone-scoring.md)（該檔已有門檻與 provenance 的段落）。
+* 驗收步驟與腳本新名 →
+  [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
+  「live 現況與端到端驗收」。
+* 「固定輸入 regression 與 live drift 不可互相冒充」的原則 →
+  [`development-workflow.md`](./development-workflow.md) 品質守則
+  （已有 §4「測試不要依賴『真實今天』」，這是同一類）。
+
+⛔ **本計畫書需經確認才進入實作。**
+
+#### 順帶量測到的事實（既有風險的量化，不是新 bug）
+
+以 09-02 的資料重算池內 135 檔的 bucket，**37 檔（27%）已與存下的 `bucket_hint` 不同**
+（`1736`、`2540` HIGH→LOW，`2615` LOW→HIGH 是跨兩桶）；分佈從
+LOW/NORMAL/HIGH = 53/49/33 變成 **75/39/21**（有一部分是全市場波動收斂）。
+
+這**符合既有設計**——`bucket_hint` 明定是「入池時」的快照，
+`bucket_edge_low/high` 存在每一列就是為了讓下游知道當初用的是哪組邊界
+（`store/model.go:951-954`），該風險也已列在
+[`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
+的風險表。這裡只是補上**幅度**：16 個日曆日 27%，比原本設想的「母體變動造成邊界移動」大得多。
+
+#### 待更正的敘述（完整盤點，2026-09-03）
+
+**明確寫錯的 5 處**（宣稱 `atr_pct` 取近 60 根）：
+
+| 位置 | 現況敘述 |
+|---|---|
+| `docs/evaluation-universe-selection-plan.md:62` | `atr_pct` \| 近 60 根 ATR / close |
+| `docs/evaluation-universe-selection-plan.md:698` | `atr_pct` 取**近 60 根** |
+| `python/backtest/modular/sr_scoring/zone_builder.py:67` | `"basis": "max(atr_pct, average_range_pct)，近 60 根"` |
+| `scripts/verify-regression-baseline.sh:5` | `atr_pct` 取近 60 根 |
+| `python/baseline_check.py:3` | `atr_pct` 取近 60 根 |
+
+**語意含混的 2 處**（講的是 60 根的**切片**，但讀起來像 ATR 窗口）：
+`evaluation-universe-selection-plan.md:100`、`selection_report.py:16`。
+
+**正確、不用改的 2 處**：`plan:63`（`average_range_pct` 確實是 60 根）、
+`db.py:166`（selection report 確實抓 60 根）。
+
+#### 關閉條件
+
+1. 上表 5 處錯誤敘述與 2 處含混敘述全部更正。
+2. **固定輸入的程式回歸測試存在、blocking，且會因公式改壞而紅**（不依賴 live 資料）。
+3. live 資料的排序／bucket 比較改為觀察項，**不再以 regression baseline 為名**。
+4. baseline schema 升到 `p1` 並記錄 `atr_method` / `atr_period` /
+   `profile_lookback_bars`；p0 被明確拒絕。
+5. 新格式基準重建完成，T-040 重跑後固定輸入 regression 通過、live drift 有合理說明。
+
+⚠️ **公式裁決不是本筆的關閉條件**——那是 I-107。本筆的 `atr_method` 先記錄**現況**
+（`tr_sma`），I-107 若改變 canonical formula 再更新。這樣兩件事才不會互相卡住。
+
+---
+
+### I-107：evaluation／selection 用 TR SMA(14)，runtime 用 Wilder ATR(14)，凍結門檻與 runtime 不同源
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待決策 |
+| 嚴重度 | 中（**目前不發作**——`SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 在 live 為 `False`；一旦打開就會系統性偏向高波動） |
+| 分類 | Python / 指標定義 / 已知限制 |
+| 建立日期 | 2026-09-03 |
+| 來源 | I-106 的 review——原以為只是「文件寫 60、實作是 14」，查證後發現是兩個不同演算法 |
+
+#### 現象
+
+| 位置 | 演算法 | 誰在用 |
+|---|---|---|
+| `evaluation.py:287` `_atr_pct` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`——即凍結門檻的來源** |
+| `scoring.py:216` → `indicators.py:100` `calc_atr` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
+
+同一批 K 棒的實測差距（2026-09-02，60 根切片）：
+
+| 標的 | TR SMA(14) | Wilder ATR(14) | 差異 |
+|---|---|---|---|
+| `0050` | 1.555% | 1.933% | **+24.3%** |
+| `2330` | 1.722% | 2.052% | +19.2% |
+| `2478` | 7.025% | 8.319% | +18.4% |
+| `5490` | 2.692% | 3.832% | **+42.4%** |
+| `6243` | 5.483% | 6.435% | +17.4% |
+
+#### 為什麼是問題
+
+`LOW/HIGH_VOLATILITY_THRESHOLD` 的 P33/P67 是拿 **TR SMA(14)** 基準對 319 檔量的
+（`zone_builder.py:59-70` 的 `VOLATILITY_THRESHOLD_PROVENANCE`），
+而 runtime 的自適應 builder 用 **Wilder**。Wilder 系統性高 17～42%，
+**門檻與 runtime 不同源**——打開旗標後分類會系統性偏向高波動。
+
+⚠️ **維度有三個，不是「14 或 60」的選擇題**：ATR period 多少、方法是 SMA 還是 Wilder、
+給多少根 warm-up／lookback。單把 evaluation 的 period 改成 60 會得到 **`TR SMA(60)`**，
+仍然不等於 runtime 的 Wilder ATR(14)。
+
+#### 待決策：canonical formula 三選一
+
+1. **統一用 Wilder ATR(14)**——與 Go `CalcATR`、與 runtime 一致；**凍結門檻必須重測**。
+2. **統一用 TR SMA(14)**——與凍結門檻、選池、既有基準一致；runtime 要改，
+   且與 Go 端的 ATR 定義分家。
+3. **承認是兩個指標**——分別命名（`atr_pct_sma14` / `atr_pct_wilder14`）、各自記
+   provenance，明確寫出哪一個在分桶、哪一個在門檻。
+
+#### 決策前的必要量測與步驟
+
+1. 先量測 **SMA14 與 Wilder14 在 319 檔上的分佈與 bucket 差異**（不能只看 5 檔）。
+2. 選定 canonical formula。
+3. 若公式改變：重算 P33/P67 → 升 `universe_version` → 更新 135 列的
+   `bucket_edge_low/high` → 與 T-003「bucket 邊界必須凍結」對齊。
+4. **完成前 `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 維持關閉。**
+
+#### 已知限制（在決策完成前成立）
+
+⛔ **evaluation／選池的 bucket 與未來 runtime adaptive 的 bucket 尚未證明同義。**
+現有報表、`evaluation_universe.bucket_hint`、前端顯示的 bucket 都是 **TR SMA(14)** 基準；
+不要拿它們去推論自適應 builder 打開後 runtime 會怎麼分類。
+
+#### 關閉條件
+
+canonical formula 有結論，evaluation、`selection_report.py`、runtime 三處與
+`VOLATILITY_THRESHOLD_PROVENANCE` 同源；若公式改變則門檻已重測、`universe_version` 已升、
+135 列邊界已更新。決策結果歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md)。
+
+---
+
+### I-108：volatility profile 沒有完整拒絕非有限的 `close`，會產出看似合法的 `0.0`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（live PostgreSQL 路徑取不到 `inf`；**但 `--csv` 明確可達，SQLite 也擋不住**） |
+| 分類 | Python / 健壯性 |
+| 建立日期 | 2026-09-04 |
+| 來源 | I-106 計畫書為了寫 fixture 而做的非有限值實測 |
+
+#### 現象
+
+`evaluation.py:303` 的守門只有 `if last_close <= 0: return None`。
+`float("inf") <= 0` 是 `False`，於是流程繼續：
+
+```
+atr / inf = 0.0   →   _clean_metric(0.0) = 0.0（有限值，不會變 None）
+```
+
+**實測**（30 根合成資料）：`last_close = +inf` → `atr_pct = 0.0`。
+
+對照組：`last_close = NaN` → `atr / nan = nan` → `_clean_metric` → **`None`**（正確）。
+`last_close = 0` → 被既有守門擋掉 → `None`（正確）。
+**只有 `+inf` 這條路徑會產出一個看起來正常的值。**
+
+#### bucket 的實際影響（訂正）
+
+⛔ **前一版寫「於是會被判成 `LOW_VOLATILITY`」是錯的**——那句話忽略了
+`volatility_bucket_from_profile` 用的是 `basis = max(atr_pct, average_range_pct)`
+（`zone_builder.py:405`）。`atr_pct = 0.0` 在 `max()` 裡是最小的那個，
+**通常會被另一個分量整個蓋過去**。
+
+實測（30 根合成資料，只把**最後一根** `close` 換成 `+inf`）：
+
+| fixture 波動 | 正常 `atr_pct` | `+inf` 後 `atr_pct` | `+inf` 後 `average_range_pct` | bucket |
+|---|---|---|---|---|
+| 2%   | 0.0200 | **0.0** | 0.01933 | `LOW_VOLATILITY`（**與正常時相同**） |
+| 5.5% | 0.0550 | **0.0** | 0.05317 | `NORMAL_VOLATILITY`（**與正常時相同**） |
+| 8%   | 0.0800 | **0.0** | 0.07733 | `HIGH_VOLATILITY`（**與正常時相同**） |
+
+正確的說法是三段：
+
+1. **`atr_pct` 本身一定是錯的**——該回 `None` 卻回 `0.0`，一個看似合法的數字；
+2. **bucket 只在 `average_range_pct` 也低於 `LOW` 門檻（或為 `None`）時才會被拖成 `LOW`**；
+3. 其餘情況 bucket 由另一個分量決定、外觀正常，**於是這個錯誤更難被發現**——
+   `atr_pct` 欄位已經是垃圾，卻沒有任何下游徵兆。
+
+⚠️ **另一個入口：`average_range_pct` 自己也守不住 `+inf`。**
+`_volatility_profiles`（`evaluation.py:319`）算的是 `(high - low) / close`，
+再用 `.replace([np.inf, -np.inf], np.nan).dropna()` 清理——但 `(h - l) / inf` 的結果是
+**`0.0`（有限值）**，清不掉。實測：**整段 `close` 都是 `+inf` 時
+`atr_pct` 正確回 `None`，`average_range_pct` 卻是 `0.0`，bucket 被判成 `LOW_VOLATILITY`。**
+「資料壞掉的標的被歸類成最穩」這個情境**確實存在，但入口是 `average_range_pct`，
+不是 `_atr_pct`**。修正範圍要涵蓋兩者。
+
+#### 可達性
+
+* ✅ **CSV 路徑明確可達**：`evaluation.py:2508` 的 `--csv` → `_load_csv_sources`
+  → `load_ohlcv_csv`，pandas 預設會把 `inf` / `Infinity` 字面值讀成 `float("inf")`。
+* ⛔ **live PostgreSQL 路徑不可達**：`candles.close` 是 `DECIMAL(10,2)`
+  （`migrations/postgres/001_create_candles.sql:9`）。實測 PostgreSQL 16.14：
+  `INSERT INTO t(close numeric(10,2)) VALUES ('Infinity')` →
+  `ERROR: numeric field overflow / A field with precision 10, scale 2 cannot hold an infinite value`。
+  ⚠️ **擋住它的是宣告精度，不是 CHECK**——同一測試裡不帶精度的 `numeric` **接受** `Infinity`，
+  而 `060_candle_positive_price_check.sql` 的 `close > 0` 對 `Infinity` 為真、擋不下來。
+* ⚠️ **SQLite 未排除**：`close` 是 `REAL`、約束同樣只有 `close > 0`
+  （`migrations/sqlite/060_candle_positive_price_check.sql:14,20`）。
+  實測：以該 DDL 建表後 `INSERT` `float("inf")` **成功寫入並讀回 `inf`**。
+* ⚠️ **Go 寫入前的守門也擋不住**：`fetcher.go:245` 只比 `c.Close <= 0`，
+  `inf <= 0` 為 `false`，直接放行。
+
+因此範圍是「**目前 live PostgreSQL DB 路徑不可達；CSV 明確可達，
+SQLite／直接 repository 寫入也未完整排除**」，而不是前一版寫的「DB 路徑不可達」。
+
+#### 處置
+
+✅ **定案：沿用現有的逐列清理語意，不改成「整檔失效」。**
+前一版把「剔除單列」與「整檔判為不可用」並列成兩個選項、關閉條件卻只寫得出後者，
+是沒定案就先寫驗收——這裡收斂掉。
+
+選逐列的理由：`average_range_pct` 現行就是逐列清理（`NaN` 列丟掉、其餘照算），
+`_atr_pct` 的 `last_close <= 0` 也只是**除數**守門而不是整檔守門。
+改成「任何一列 `close` 非有限就整檔 `UNKNOWN`」是**更嚴格的新 contract**，
+會連帶改動 `NaN` 與 `0` 的既有行為、以及 I-106 的情境 1／3／6／8 fixture——
+那是另一件事，不在本筆範圍。
+
+**兩處改動：**
+
+1. **`_atr_pct`**：守門改成 `if not math.isfinite(last_close) or last_close <= 0`。
+   ⚠️ **只加除數守門，不動 TR 的逐列清理**——`atr_pct` 是用**最後一根 close** 正規化的，
+   最後一根是垃圾就沒有有意義的分母，該回 `None`。
+   `math` 已經 import 過（`_clean_metric` 在用），不需要新相依。
+2. **`_volatility_profiles` 的 `average_range_pct`**：在算 `range_pct` **之前**
+   剔除 `close` 非有限的列（`recent[np.isfinite(recent["close"].astype(float))]`）。
+   現行的 `.replace([np.inf, -np.inf], np.nan)` 只清得掉**結果**為 `inf` 的列，
+   清不掉 `(h - l) / inf = 0.0`。
+
+⛔ **過濾後的 df 不可以拿去餵 `_atr_pct`**——那會讓「最後一根壞掉」變成
+「用倒數第二根當分母」，靜默算出一個有限值，等於換一種方式說謊。
+`_atr_pct` 要收到**未過濾**的 `recent`，由它自己的守門回 `None`。
+
+#### 處置後的預期輸出（原型實測，2026-09-04）
+
+30 根合成資料，`→` 標示與現況不同者：
+
+| 情境 | 現況 `atr_pct` / `avg` / bucket | 處置後 |
+|---|---|---|
+| 正常有限 | 0.02 / 0.02 / LOW | **完全不變** |
+| → 最後一根 `close=+inf` | **0.0** / 0.01933 / LOW | **`None`** / **0.02** / LOW |
+| → 中段 `close=+inf`（tail14 內） | `None` / 0.01933 / LOW | `None` / **0.02** / LOW |
+| → **全部 `close=+inf`** | `None` / **0.0** / **LOW** | `None` / **`None`** / **`UNKNOWN`** |
+| 最後一根 `close=NaN` | `None` / 0.02 / LOW | **完全不變** |
+| 最後一根 `close=0` | `None` / 0.02 / LOW | **完全不變** |
+| 中段 `high=NaN` | 0.01929 / 0.02 / LOW | **完全不變** |
+
+三件事值得先講清楚：
+
+* **bucket 只在「全部 `close` 非有限」時改變**（LOW → UNKNOWN）。單一壞列時
+  `average_range_pct` 仍由其餘有效列算得出來，bucket 由它決定——這正是逐列語意。
+* `average_range_pct` **本身會變**（0.01933 → 0.02）：現況把 `inf` 那列當成振幅 0
+  混進平均，處置後那列被剔除。這是修正，但**會動到既有數值**，golden 要跟著更新。
+* `NaN` / `0` / 中段 `high=NaN` **一位數都不變**——非回歸案例要把這幾條釘住。
+
+#### 實作計畫（最低限度）
+
+**受影響檔案**：`python/backtest/modular/sr_scoring/evaluation.py`
+（`_atr_pct`、`_volatility_profiles`）。**不動** `zone_builder.py`——
+`volatility_bucket_from_profile(None, None)` 本來就回 `UNKNOWN_VOLATILITY`。
+
+**測試**：`python/tests/`（與 I-106 的 A 層 golden 同一組 fixture），涵蓋
+* 上表七個情境全部，**四個「完全不變」的要當非回歸斷言寫死**；
+* 三種 `inf` 位置分開測：**單一最後一根／單一中段／全部**——只測其中一種會漏掉
+  「bucket 只在全部非有限時才變」這個結論；
+* `-inf` 與 `+inf` 各一（守門用 `math.isfinite`，兩者應同行為）。
+
+**與 I-106 的順序**：⚠️ **I-106 先做完、本筆才動手。**
+理由是**基礎設施依賴**——本筆的測試要沿用 I-106 建立的版控 OHLC fixture 與
+golden 比對機制，沒有那套東西就得自己再造一份。
+
+⛔ **不要寫成「反過來做 I-106 的 golden 一建立就是紅的」**——那個理由不成立：
+先做 I-108 的話，I-106 只會直接以**修正後**的行為建立 golden，不會先紅。
+順序是為了不重造 fixture，不是為了避開失敗。
+
+依現在這個順序，本筆會改動 I-106 golden 裡情境 7 與情境 9 的值
+（情境 7：`atr_pct` `0.0` → `None`；情境 9：`average_range_pct` `0.0` → `None`、
+bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
+「I-108 修正前的觀察值」註解**。
+
+⚠️ **這是行為變更**：`I-106` 的 golden 檔會記錄修正前的 `0.0`，
+**本筆修好時要同步更新 I-106 的 golden 與測試註解**（那裡已標明是「I-108 修正前的觀察值」）。
+
+#### 關閉條件
+
+「處置後的預期輸出」那張表的七個情境全部成立，具體是：
+
+1. **最後一根 `close` 為 `±inf`** → `atr_pct` 回 `None`（不再是 `0.0`）；
+   `average_range_pct` 由**其餘有效列**算出有限值；bucket 由它決定。
+2. **全部 `close` 非有限** → 兩個 metric 都是 `None`，
+   bucket 為 `UNKNOWN_VOLATILITY`（不再是 `LOW_VOLATILITY`）。
+3. **有限正常資料、`NaN`、`0` 的輸出逐位不變**（非回歸斷言）。
+
+且 I-106 的 golden 已在同一個 commit 內同步更新、
+「I-108 修正前的觀察值」註解已移除。
+
+**歸檔位置**：[`sr-zone-scoring.md`](./sr-zone-scoring.md) 的
+「Volatility bucket 門檻＝凍結的全市場分位數」章節之下，補一節現況說明，保留三件事：
+
+1. **非有限 `close` 採逐列清理**——該列從 `average_range_pct` 的母體剔除，
+   其餘列照算；不是整檔失效。
+2. **ATR 與 average range 的輸入處理不同**——`atr_pct` 是**除數**守門
+   （最後一根 `close` 非有限或 `<= 0` 就回 `None`，不改 TR 的逐列清理）；
+   `average_range_pct` 是**逐列**守門。兩者刻意不一樣，理由寫進去。
+3. **有效輸入全部消失時回 `UNKNOWN_VOLATILITY`** 的契約——
+   `volatility_bucket_from_profile(None, None)` → `UNKNOWN`，
+   ⛔ **不是** `LOW_VOLATILITY`。

@@ -329,10 +329,31 @@ evaluation_universe_sync  15:06  success  135 檔 / 0 失敗
 
 池內 135 檔的日 K **全部到 2026-08-18**，證明「隔一個交易日後池會自己補上」這條成立。
 
-**後半段（`run-evaluation.sh` → `verify-regression-baseline.sh`）尚未執行。**
-基準檔 `python/baselines/sr_volatility_baseline.json` 追蹤 9 檔的 profile 序數，
-其 snapshot 記的是 `sources: 131`；重跑時 `sources` 會變成 135，比對本身仍是那 9 檔的
-Spearman ≥ 0.9。成本約 12 分鐘、峰值約 382MB。
+**後半段已於 2026-09-03 11:11–11:23 執行**（唯讀，未帶 `--write-db`）。
+
+| 項目 | 基準（08-17） | 本次（09-03，資料到 09-02） |
+|---|---|---|
+| `sources` | 131 | **135** |
+| `rows` | 72,083 | **75,073** |
+| 峰值 | 382MB | **408MB**（cgroup 上限 456m，host available 低點 362MB） |
+| `limit` | 1500 | 1500 |
+
+**評估本身成功（exit 0），但基準比對失敗（exit 1）**：`波動最高者不變` 與
+`atr_pct 排名 Spearman ≥ 0.9`（0.8833）兩個 blocking 檢查沒過，另有觀察項
+`5490` 從 `HIGH_VOLATILITY` 掉到 `LOW_VOLATILITY`。
+
+⚠️ **但這不是 pipeline 迴歸**——`pipeline_version`、`source_schema_version`、
+兩個門檻值、`lookback_bars`、`candle_count` 全部與基準相同，且**兩個日期的
+`atr_pct` 都能從 raw DB 用「14 根 true range 平均 / 最後一根 close」小數三位重現**。
+根因是 `_atr_pct` 的窗口是 **14 根**而不是註解宣稱的 60 根，11 個交易日就換掉其中 11 根。
+⚠️ **後續 review 又查出更深一層**：`evaluation.py` 用的是 **TR SMA(14)**，而 runtime 的
+`scoring.py` 走 `calc_atr` 用的是 **Wilder ATR(14)**，同一批 K 棒相差 17～42%——
+**凍結門檻與 runtime 不同源**。**公式裁決另立 [`issue.md`](./issue.md) I-107**（待決策，決策前 adaptive builder 維持關閉）；
+比對方法的改造記在 I-106（待執行：固定輸入的程式回歸 ＋ live 漂移觀察兩層拆開，
+schema 升 p1，最後才重建基準）。
+
+**所以 Step 5 的端到端驗收：前半段（池維護）成立，後半段的「比對」尚不能當成通過**——
+要先把 I-106 的基準窗口定案。成本實測約 12 分鐘。
 
 ### 重跑選池前必須先回補池外標的
 

@@ -15,7 +15,7 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-071 起算`。**（**T-070 於 2026-09-02 發出**，承接 `issue.md` I-102 收斂時未完成的執行期觀察。）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
+- **編號只增不重用，`下一個新編號從 T-072 起算`。**（**T-071 於 2026-09-04 發出**——使用者要求用 TWSE 終止上市 CSV 設定下市，查證後改為「補下市日期＋對帳」，**CSV 不驅動 `is_listed`**。）（**T-070 於 2026-09-02 發出**，承接 `issue.md` I-102 收斂時未完成的執行期觀察。）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
@@ -47,6 +47,1208 @@
 
   列出的 ID 必須**只剩明確標為歷史沿革的引用**（「原記於…」「已收斂」），
   不能有任何「見 T-0xx」形式的活指標。**本節自己會出現在輸出裡**，那是預期的。
+
+---
+
+### T-071：用 TWSE 終止上市名單補下市日期並做每日對帳（**不驅動 `is_listed`**）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 規劃中（**計畫書待確認**，尚未實作。2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正**） |
+| 優先度 | 中 |
+| 分類 | Go / 排程 / DB schema / 資料品質 |
+| 建立日期 | 2026-09-04 |
+| 來源 | 使用者要求用 `https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv` 設定下市。**查證後方向改變**——見下方「為什麼不照原始需求做」 |
+
+#### 為什麼不照原始需求做（2026-09-04 實測）
+
+原始需求是「用這份 CSV 把 `stock_symbols.is_listed` 設成 false」。**查證後不可行。**
+
+**一、這件事系統已經在做了。** 既有的 `stock_symbol_sync`（每日 06:30）：
+
+* 來源是 ISIN 清冊，`config.go:332-333` **上市（`strMode=2`）＋上櫃（`strMode=4`）兩份都抓**；
+* 出現在清冊 → `is_listed=true` ＋ 更新 `last_seen_at`；
+* **清冊缺席 → `is_listed=false`**（`markMissingDelisted`，用 `last_seen_at` 浮水印而非 `NOT IN`）；
+* 截斷防護：快照數 < 現有上市數 × `minSnapshotListedRatio`(0.5) → 整批放棄；
+* 下游 `dropDelistedSymbols` 已用 `is_listed=false` 過濾回補與分析，且是三態
+  （主檔查無 = fail-open 保留）。
+
+實證：**`2867` 三商壽的 `is_listed` 已是 `false`，2026-08-31 標的——比 CSV 上的官方
+終止日 `115/09/01` 還早一天。**（同一檔就是 `issue.md` I-105 的 `verification_unavailable` 來源。）
+
+**二、CSV 直接套用會弄壞正在交易的股票。** 265 筆裡只有 4 筆在 `stock_symbols`：
+
+| CSV 內容 | 主檔現況 | 套用 `is_listed=false` 的後果 |
+|---|---|---|
+| `2867` 三商壽 `115/09/01` | `f`，08-31 已標，listed 2012-12-18 | 無變化 |
+| `6423` 億而得-創 `115/01/22` | **上櫃**、`t`、listed **2026-01-22** | ❌ 誤下市（**轉上櫃**，同日） |
+| `2432` 倚天資訊 `097/09/01` | 上市創新板「倚天酷碁-創」、`t`、listed **2023-05-31** | ❌ 誤下市（**代號重用**） |
+| `2301` **光寶電子** `091/11/04` | 上市「**光寶科**」、`t`、listed **1995-11-17** | ❌ **誤下市光寶科** |
+
+其餘 261 筆不在主檔——ISIN 清冊只列現存證券，早年下市的從未被收錄。
+**淨效果：修 0 筆，壞 3 筆。**
+
+⛔ **日期規則救不了 `2301`**：它的 `listed_date`（1995-11-17）**早於** CSV 終止日
+（2002-11-04），所以「終止日 > listed_date」照樣命中。
+
+**三、上櫃不必另找來源。** 這份 CSV 是 TWSE **終止上市**，只有上市。但上櫃下市已由
+ISIN `strMode=4` 缺席涵蓋（主檔現有 1381 筆 `上櫃 / is_listed=f`）。
+
+#### ⚠️ 核心難題：主檔沒有「證券世代」，代號會被重用
+
+`stock_symbols.symbol` 是 **UNIQUE**（`stock_symbol_repo.go:219` 的 `ON CONFLICT(symbol)`），
+**一個代號只有一列，沒有世代歷史**。而 CSV 只給「終止日＋公司名稱＋代號」，
+**沒有 ISIN 可以直接建立身分關聯**。
+
+這造成一個**延遲觸發**的錯誤：今天 `2301` 光寶科還在交易，所以任何以
+`is_listed=false` 為前置的規則都不會碰它。但**等光寶科將來真的下市**，
+CSV 那筆 2002 年的「光寶電子」就會同時滿足「已下市」與「終止日 ≥ listed_date」
+（2002-11-04 ≥ 1995-11-17），**回填上一代證券的日期**；
+接著「日期不同不覆蓋」還會**擋住正確日期的修復**。`6423` 轉上櫃後同理。
+
+⛔ **所以「`is_listed=false` ＋ 日期」不足以證明 CSV 事件屬於目前這一代證券。**
+本筆的設計必須 **fail-closed**：證不出身分就只告警、不寫入。
+
+#### 目標與不做的範圍
+
+**要做**：
+
+1. 新增 `delisting_events`：保存「TWSE 說了什麼」（來源＋代號＋公司名稱＋終止日）。
+   ⚠️ **不是 append-only**——是「**依身分 upsert、永不刪除、消失只標記**」，contract 見下節。
+2. 新增 `delisting_source_snapshots`：每次**成功**抓取的來源快照 metadata（筆數＋內容雜湊），
+   縮水防護的基準。
+3. `stock_symbols` 增加 `delisted_date`（可為 NULL）——**只投影身分可證的事件**。
+4. 新增每日排程：抓 CSV → 解析 → 寫事件 → **投影** → 對帳並告警。
+
+⚠️ **為什麼要兩層而不是直接寫主檔**：`delisting_events` 記錄的是**歷史事實**
+（可以有同一代號的多代紀錄），`stock_symbols` 是 **current-state 主檔**
+（一個代號一列）。把兩者混在一起，正是上面那個延遲觸發錯誤的成因。
+分開之後，證不出身分的事件仍被保存下來供人工判讀，而不是被丟掉或誤寫。
+
+**明確不做**：
+
+* ⛔ **CSV 不驅動 `is_listed`**。判定權責仍**只屬於** `stock_symbol_sync` 的 ISIN 缺席邏輯。
+* ⛔ **不加 `delisted_name` 欄位到 `stock_symbols`**。歷史名稱屬於 `delisting_events`；
+  把「光寶電子」寫進代號 `2301` 的 current-state 列，正是造成這次誤判的同一種混淆。
+* ⛔ **不做上櫃終止的第二來源**。上櫃下市仍只有「ISIN 缺席」單一訊號、**沒有第二來源可對帳**
+  ——本筆**接受並記錄**這條已知限制。
+* ⛔ 不動 `dropDelistedSymbols` 與任何下游過濾。
+* ⛔ **不自動修正身分不符的事件**——一律只告警，等人工判讀。
+
+#### 受影響檔案與資料流
+
+| 檔案 | 變更 |
+|---|---|
+| `migrations/{postgres,sqlite,mysql}/076_*.sql` | 建 `delisting_events` 與 `delisting_source_snapshots`、`stock_symbols` 加 `delisted_date` **與 `delisted_event_id`**。**三份都要**（mysql 從未部署，仍依慣例同步維護，見 `issue.md` I-054）。ℹ️ `job_runs.job_name` 已是 `VARCHAR(64)`（migration 063），`delisting_reconcile`（19 字元）不需要再放寬 |
+| `store/model.go`、`stock_symbol_repo.go` | 模型加 `delisted_date` **與 `delisted_event_id`**（provenance，見「投影所有權」；⛔ **job-owned 的寫入／撤銷時**兩欄同進同出，人工值是單欄有值的合法狀態）；新增投影／撤銷方法。⛔ **既有 `upsert` 的 `ON CONFLICT DO UPDATE` 必須把兩個欄位一起設成 `NULL`**——與第一版相反，理由見「重新上市時必須清除」（測試 #7／#20b） |
+| **`store/sqlite_test.go`**（新） | #20f5a（builder 單元測試）與 #20f5b（實際開啟的 integration test）。⛔ **不要放進 migration 測試**——那兩支腳本只編譯 `./internal/database` 並用 `-test.run` 篩名稱，這裡驗的是 `store` 的 DSN 組裝 |
+| **`store/sqlite.go`** | DSN 加上 `_pragma=busy_timeout(5000)` ＋ `_pragma=foreign_keys(1)`——⛔ **兩個都要**（都是 connection-local，現行一次性 `MustExec`（`sqlite.go:17-18`）在 connection 重建後靜默失效，FK 失效會讓 #19／#19d 整組落空），且⛔ **必須解析合併既有 query 而非字串拼接**（DSN 形態有 **file-backed 三種 ＋ memory 三種**，`Abs` 與否依三分支判準，見「SQLite 有兩種拓撲」）；`journal_mode=WAL` 是持久設定、留在原地並加註 |
+| `store/delisting_event_repo.go`（新） | 事件 upsert／查詢／消失標記；快照 metadata（`id` 單調排序、`job_run_id` nullable ＋ `ON DELETE SET NULL`） |
+| **`internal/database/`（新測試檔）** | postgres／mysql 的 repo 層 CRUD 測試，函式名用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴——⛔ 放在 `store` 套件的話兩支腳本跑不到（只編譯 `./internal/database` 並用 `-test.run` 篩名稱） |
+| `market/twse_suspend_listing.go`（新） | CSV client ＋ 解析器 |
+| `market/delisting_reconciler.go`（新） | 對帳與投影 |
+| `scheduler/scheduler.go` | 註冊 cron；三個方法比照 SR pattern（`scheduler.go:1436-1470`）：`RunDelistingReconcile()`（cron 入口，⛔ **不收 `acceptShrink` 參數**）／`TryStartDelistingReconcile(acceptShrink bool)`（API 入口，同步取鎖）／`runDelistingReconcileOwned(ctx, acceptShrink)`（核心，不取鎖）；**新增 `finishRunStatus`**——⛔ **與 `finishRunDegraded` 共用同一個底層 finish writer**，沿用 `context.WithoutCancel` |
+| `config/config.go`、`backend/config.yaml` | `delisting.enabled` / `url` / `cron` / `timeout_sec` |
+| **`cmd/server/main.go`** | 建立 client／reconciler 並注入 scheduler（比照 `main.go:160-168` 的 ISIN 組裝） |
+| **`api/handler/scheduler.go`** | 加進 `knownSchedulerJobs` **與** `jobStaleThreshold`。⛔ **不加的話 DB 有紀錄但 `GET /scheduler/status` 不會回傳它**（`scheduler.go:108`） |
+| **`api/server.go`** ＋ `api/handler/scheduler.go` | 加 route `POST /api/v1/scheduler/delisting-reconcile/run`（比照 `server.go:129-133` 的五條既有觸發路由），支援 `?accept_shrink=1`；⛔ handler **同步取鎖，取不到回 `409`**，不沿用既有的「先回 202 再背景跳過」 |
+| **`frontend/src/lib/api/scheduler.ts`、`routes/Scheduler.svelte`** | `JobName` union 加一項、中文 label、**API client function**、觸發按鈕與其測試 |
+| **`docs/api-reference.md`** | `GET /scheduler/status` 的 job 契約**與新增的手動觸發端點** |
+
+⚠️ **手動觸發是刻意保留的**（dev stack 驗收需要，見「完成與驗收條件」第 3 項），
+所以 handler、route、前端 client 與 api-reference **四處都要補齊**，
+不能只加 `knownSchedulerJobs`。
+
+資料流：`CSV → 解析 → 縮水防護（比對上次 accepted 快照）→ delisting_events（全部保存）
+→ 身分可證者投影到 stock_symbols.delisted_date → 其餘只告警 → 記錄本次快照`。
+**單向、全程唯讀 `is_listed`。**
+
+#### 事件資料模型與來源更正語意
+
+第一版同時寫了「append-only」與「upsert」卻沒定義 identity，**兩者互相矛盾**。定案如下。
+
+##### 同一批 CSV 內的重複 key
+
+⛔ **必須在解析階段處理完，不能丟給 DB。** postgres 的批次 upsert 對**同一批內**
+重複命中同一個 conflict target 會直接報
+`ON CONFLICT DO UPDATE command cannot affect row a second time`——**整批失敗**。
+
+| 同批出現兩次 | 處置 |
+|---|---|
+| 同 `(symbol, date)`、**名稱相同** | **去重**，保留一筆，記 Info（來源重複列） |
+| 同 `(symbol, date)`、**名稱不同** | ⛔ **來源自相矛盾 → 整輪解析失敗**。無法決定哪個名稱是對的，而名稱是投影條件 5 的輸入，猜錯就是誤投影 |
+
+**`row_count` 一律採「去重後的 canonical event 數」**，不是 CSV 原始列數——
+否則去重會被誤判成縮水。（測試 #2b）
+
+ℹ️ 2026-09-04 實測 265 筆**無重複代號**，但這是觀察不是保證，程式不得假設。
+
+**`delisting_events` 的身分鍵：`UNIQUE(source, symbol, delisted_date)`**
+——一筆事件代表「來源 S 說代號 X 在日期 D 終止上市」。欄位：
+`source` / `symbol` / `company_name` / `delisted_date` / `first_seen_at` /
+`last_seen_at` / `missing_from_source_at`（可為 NULL）。
+
+| 來源變化 | 判定 | 處置 |
+|---|---|---|
+| 同 `(symbol, date)`、名稱不變 | 同一事件 | `ON CONFLICT DO UPDATE SET last_seen_at = ?, missing_from_source_at = NULL`，不告警 |
+| 同 `(symbol, date)`、**名稱被改** | 同一事件、來源更正 | 同上再加 `company_name`，**Warn 告警**（名稱是投影條件 5 的輸入，改了要有人知道） |
+| **消失後又重新出現** | 同一事件、來源更正 | ⛔ **`missing_from_source_at` 必須清回 `NULL`**——見下 |
+| **日期被改** | 舊事件消失 ＋ 新事件出現 | 新的照 insert；**舊的不刪除**，走下面的「首次缺席」轉換 |
+| 事件從 CSV 消失（**首次**） | `missing_from_source_at` `NULL` → timestamp | **Warn ＋ 計一次更正**。⛔ **永不 DELETE** |
+| 事件**持續缺席**（第 2 輪起） | 已是非 NULL | ⛔ **不動 timestamp、不 Warn、不計更正**——見下 |
+
+⚠️ **`missing_from_source_at` 非 NULL 的事件不參與投影**，但保留供人工判讀。
+
+##### 來源更正計數只算「狀態轉換」，不算「狀態持續」
+
+⛔ **否則一筆早年消失的事件會讓這個 job 永久 `partial`。**
+來源更正現在會觸發 `partial`（見 Job 契約），所以計數規則必須是**邊緣觸發**：
+
+| 轉換 | 算一次更正？ | Warn？ |
+|---|---|---|
+| `NULL` → timestamp（首次缺席） | ✅ | ✅ |
+| 非 NULL → 非 NULL（持續缺席） | ⛔ **不算** | ⛔ **不 Warn**，且**不得改寫 timestamp** |
+| timestamp → `NULL`（重現） | ✅ | ✅ |
+| `company_name` 實際改變 | ✅ | ✅ |
+| `company_name` 相同 | ⛔ 不算 | ⛔ 不 Warn |
+
+⛔ **不能拿主 upsert 的 `RowsAffected` 當計數。** 正常路徑**每輪都會更新 `last_seen_at`**，
+於是即使一筆都沒更正，所有既有事件都會被算成 affected → **每天 `source_corrected > 0`、永久 `partial`**。
+三種 engine 的語意還各不相同（MySQL 的 `ON DUPLICATE KEY UPDATE` 值未變時回 0、
+更新回 2、插入回 1；postgres 的 `ON CONFLICT DO UPDATE` 一律計 1）——
+**拿它當語意來源本身就不可移植**。
+
+**計數規則依轉換類型分開取得：**
+
+| 轉換 | 計數來源 |
+|---|---|
+| 首次缺席（`NULL` → timestamp） | ✅ **可用 affected rows**——SQL 帶 `WHERE missing_from_source_at IS NULL`，predicate 自己保證了「只有真的轉換才會被更新」 |
+| 改名、重現（timestamp → `NULL`） | ⛔ **不可用 affected rows**。必須**先讀出本批 key 的既有狀態**（一次 `SELECT ... WHERE (source,symbol,delisted_date) IN batch`），在**記憶體裡比對更新前後**再計數 |
+
+**`source_corrected` 的單位定案：發生更正的 distinct event 數，不是轉換次數。**
+同一筆事件在同一輪同時「重現」與「改名」**算 1 不算 2**——
+它回答的是「有幾筆事件被來源動過」，那才是人要看的數字。
+
+⚠️ **三種 engine 都要測**（測試 #10j）：這正是 `issue.md` I-054 講的
+「mysql 只驗 DDL 不驗 repo 層 CRUD」會漏掉的地方。
+
+⛔ **但放在一般 `store` 測試裡跑不到 postgres／mysql**——那些只跑 SQLite。
+兩支腳本各自只編譯 `./internal/database` 並用 `-test.run` 挑名稱：
+
+| 腳本 | 編譯 | 篩選 |
+|---|---|---|
+| `scripts/test-postgres-migrations.sh:123,165` | `go test -c ./internal/database` | `TestPostgresMigrations` |
+| `scripts/test-mysql-migrations.sh` | 同上 | `TestMySQLMigrations` |
+
+✅ **定案：DB-specific 的 CRUD 測試放進 `backend/internal/database` 的外部測試 package，
+函式名用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴。**
+這樣**不必改任何腳本**就會被既有流程執行到。
+（SQLite 那份照舊留在 `store` 套件，由 `backend/scripts/test.sh` 每次跑。）
+
+⛔ **所以 `ON CONFLICT DO UPDATE` 一定要把 `missing_from_source_at` 設回 `NULL`。**
+少了這一句，任何一次來源暫時性缺漏（TWSE 當天輸出異常、我方解析失誤）都會讓該事件
+**永久失去投影資格**——重新出現時只更新 `last_seen_at`，標記還在，投影仍被擋掉，
+而且不會有任何東西報錯。若重新出現時名稱同時改變，一併套用上面的名稱更正告警。
+（測試 #10e）
+
+##### 縮水防護改用「上次成功快照」，不用累計事件數
+
+⛔ **第一版拿 `COUNT(delisting_events)` 比對本次筆數會自我鎖死**：TWSE 只要更正一筆日期，
+事件表就變成 266（舊的標記消失但仍在表裡）、來源仍是 265，**之後每一輪都永久失敗**。
+而且 TWSE 從未宣告這份名單的筆數是不可修正的單調 contract——那是我自己加的假設。
+
+改成 **`delisting_source_snapshots`**：每次**通過驗證並寫入**時記一列
+`(id, source, job_run_id, fetched_at, row_count, content_hash, accepted)`。
+
+⛔ **`id` 是單調遞增主鍵（`BIGSERIAL` / `INTEGER PRIMARY KEY AUTOINCREMENT` / `BIGINT AUTO_INCREMENT`），
+「上一筆 accepted」一律以 `ORDER BY id DESC LIMIT 1` 取得。**
+不可只靠 `fetched_at`——即使 single-flight 生效，兩次連續執行仍可能落在同一個時間戳，
+排序就變成未定義，縮水防護會拿到不確定的基準。`job_run_id` 只用於追溯，不參與排序。
+
+⚠️ **`job_run_id` 的生命週期比快照短，契約要寫明**：`job_runs` **只保留 30 天**
+（`api-reference.md`「`job_runs` 保留 30 天」，由 `DeleteBefore` 執行），
+而快照是縮水防護的基準、**必須長期保存**。
+
+* `job_run_id` **nullable**；
+* 若加 FK 必須是 **`ON DELETE SET NULL`**——⛔ 一般 FK 會讓 `DeleteBefore` 失敗，
+  `CASCADE` 更糟：**會把來源快照一起刪掉，縮水基準直接消失**；
+* 三個 engine 的欄位型別要與 `job_runs.id` 相容；
+* ⚠️ **`startRun` 失敗（`runID = 0`）時不會有快照可寫**——核心流程在那時就中止了
+  （見「SQLite 有兩種拓撲」第 4 點與測試 #20f4）。
+  ⛔ **前一版寫「`runID = 0` 要存成 `NULL`」與那條中止契約直接衝突**，已刪除。
+  `job_run_id` 保持 nullable ＋ `ON DELETE SET NULL` 的理由只有一個：
+  **`job_runs` 只留 30 天，被清掉後那個欄位必須能變 `NULL`**（測試 #19／#19b）。
+
+（測試 #19：跑一次 `DeleteBefore` 涵蓋期，**不得失敗、不得刪到任何快照**，
+被清掉的 `job_run` 對應的快照 `job_run_id` 變 `NULL` 而快照本身還在。）
+
+防護規則：
+
+* 本次 `row_count` **< 上次 `accepted` 快照的 `row_count`** → **放棄本輪、Warn**，不寫任何東西；
+* 本次 `row_count` **= 0** → **一律失敗，`accept_shrink` 也不能放行**（見下）；
+* `content_hash` 與上次相同 → 照常執行（冪等）：事件層**只更新 `last_seen_at`**、
+  投影結果不變，但**仍新增本輪 accepted 快照**（快照是每輪一筆，不因 hash 相同而跳過）；
+* **bootstrap**：沒有任何 accepted 快照時（首次執行），只要 `row_count > 0` 就通過。
+
+⛔ **`row_count = 0` 是硬失敗，與 `accept_shrink` 完全無關。**
+`accept_shrink` 只放行 **`0 < row_count < 上次 accepted 的 row_count`** 這一段。
+放行 0 的後果是災難性的：**所有事件會被標記消失**，而且**縮水基準被降成 0**，
+之後任何筆數都「不低於基準」，防護等於永久失效。
+（測試 #10／#10b 的「同一情境」指的是**縮水**那一種，不含零筆——見測試 #10g。）
+
+**人工解鎖**（來源合法縮減時）：
+
+⛔ **不用環境變數。** 第一版寫 `DELISTING_ACCEPT_SHRINK=1`「執行一次後恢復」是錯的——
+env 會**持續有效**，而且 **cron 很可能在操作人員手動觸發之前就先吃到它**，
+變成靜默放行一次縮水。那是「一次性」這個假設本身不成立。
+
+✅ **定案：只走手動觸發端點的參數**——
+`POST /api/v1/scheduler/delisting-reconcile/run?accept_shrink=1`。
+
+* **cron 路徑硬編 `false`**，結構上不可能吃到；
+* 端點在 `protected` 群組，需要授權；
+* 該輪照常寫入並把本次快照記為 `accepted`，**log 留明確的「人工核可縮水」審計紀錄**
+  （含本次與上次的 `row_count`）；
+* ⛔ **config 與 env 都不提供這個開關**，避免又出現一個會被排程讀到的入口。
+
+⛔ **不做自動放寬**——縮水必須有人看過。
+
+##### 重新上市時必須清除 `delisted_date`
+
+⛔ **第一版的測試 #7 契約是反的。** 那時寫「ISIN sync 不得洗掉 `delisted_date`」，
+但這與「`stock_symbols` 是 current-state 主檔」直接矛盾：證券重新上市、代號被重用、
+或先被誤標下市後又出現在清冊時，`upsert` 會把該列改回 `is_listed=true`，
+卻留著上一代／前一狀態的終止日，形成不可能的組合：
+
+```
+is_listed = true  +  delisted_date = 歷史日期
+```
+
+這也讓 TOCTOU 防護不完整：reconcile 先寫日期、ISIN sync 隨後把 `is_listed` 改回 `true`，
+最終仍留下錯誤日期。
+
+✅ **定案：`upsert` 的 `ON CONFLICT DO UPDATE` 要 `SET delisted_date = NULL`。**
+任何出現在成功 ISIN 快照、被設回 `is_listed=true` 的 current-state 列，
+一律清除終止日。**歷史不會遺失——它在 `delisting_events` 裡。**
+
+#### 投影規則（fail-closed，每一條都必須成立才寫入）
+
+| # | 條件 | 為什麼 |
+|---|---|---|
+| 1 | `is_listed = false` | 目前還在交易的，一律不碰 |
+| 2 | `market LIKE '上市%' AND security_type = '股票'` | CSV 只涵蓋上市股票；權證與上櫃不在其中，放進來只會製造假匹配 |
+| 3 | **`listed_date IS NOT NULL`** | ⛔ **NULL 不得放行**——沒有 `listed_date` 就無法做第 4 條，歸 **U 類**交人工 |
+| 4 | `delisted_date >= listed_date` | 終止日早於上市日，必然是上一代證券 |
+| 5 | **正規化公司名稱相符** | 唯一能區辨「代號重用」的訊號 |
+| 6 | 該代號的 **candidate 數恰好為 1**（candidate ＝ active 且通過 1～5） | ⚠️ **這是仲裁不是 predicate**——多筆即歧義，不寫入，歸 **D 類**。⛔ 不要把它寫回 candidate 的定義裡，那會讓「多筆」永遠算成 0 |
+| 7 | **ownership 仲裁**——依主檔目前的兩欄狀態決定，見下表 | 這一條不是布林 predicate，是四選一 |
+
+**規則 7 的四種狀態**（⛔ 前一版寫成「尚未有值／值相同／本 job 投影的」三個並列條件，
+會讓**首次投影**（兩欄皆 NULL、還不是 job-owned）與**來源更正**（已有不同日期）
+都落到 D，第一次 ownership 根本建立不起來、`D1 → D2` 也永遠換不掉）：
+
+| 主檔狀態 | 判定 | 動作 |
+|---|---|---|
+| `delisted_date IS NULL` ＋ `delisted_event_id IS NULL`（**空值**） | **P** | 寫入日期與 event ID，**建立 job ownership** |
+| **job-owned**（`delisted_event_id` 非 NULL），日期相同或不同 | **P** | 維持或**替換**日期與 event ID |
+| **人工值**（date 非 NULL、event_id NULL）且**日期相同** | **M** | ⛔ 不寫、不補 provenance |
+| **人工值**且**日期不同** | **D** | ⛔ 不覆蓋，告警等人工 |
+
+##### 投影所有權（provenance）：沒有它，來源更正永遠收斂不了
+
+⛔ **這是前幾版的核心缺口。** 日期由 `D1` 更正成 `D2` 時：舊事件標 missing、
+新事件以 `D2` 寫入，但 `stock_symbols.delisted_date` **還是 `D1`**；
+而規則 7 又禁止覆寫不同日期，於是新事件**永遠落在 D 類**、永遠修不好。
+事件被來源移除時同樣會留下**已失去來源支持**的舊日期。
+
+✅ **定案：`stock_symbols` 加 `delisted_event_id`（nullable，FK → `delisting_events.id`，
+⛔ `ON DELETE RESTRICT`／`NO ACTION`）。**
+
+⚠️ **這裡的刪除策略與鄰近的 `job_run_id` 相反，不可照抄。**
+`job_run_id` 用 `ON DELETE SET NULL` 是因為 `job_runs` 只留 30 天、那欄只供追溯；
+但 `delisted_event_id` **是所有權標記**——被清成 `NULL` 會讓一筆 job-owned 的投影
+**被誤認成人工值**，從此不參與重算、**永久無法收斂**。
+事件本來就「永不 DELETE、消失只標記」，所以 `RESTRICT` 不會擋到任何正常路徑。
+
+**migration 順序**：**Up** 先建 `delisting_events` → 再加 `stock_symbols` 的欄位與 FK；
+**Down** 先移除 `stock_symbols` 的 FK／欄位 → 再刪 `delisting_events`。
+三 engine 的 migration 測試要驗**刪除被拒絕**且投影資料不變（測試 #19d）。
+它回答「這個日期是誰寫的」：
+
+| `delisted_event_id` | 意義 | 本 job 可否改動 |
+|---|---|---|
+| 非 NULL | **本 job 投影的** | ✅ 可替換、可清除 |
+| NULL 但 `delisted_date` 非 NULL | **人工填的** | ⛔ **一律不動**，維持 fail-closed，差異歸 D 類 |
+
+##### 收斂方式：每輪「重算」，不是列舉觸發條件
+
+⛔ **不要用「哪些情況要撤銷」的列舉法**——必漏。前一版只寫「事件被標 missing 且無替代」，
+於是下面每一種都會留下**不再符合規則卻仍在主檔**的舊投影：
+
+* 同一事件**改了公司名稱**，正規化後不再與主檔相符；
+* 出現**兩筆都通過 1～5** 的事件（歧義）；
+* 有替代事件，但替代事件因名稱／日期／主檔條件不符而**不能投影**；
+* **主檔自己變了**（改名、`listed_date`、`market`、`security_type`），使舊事件失去資格。
+
+⛔ **不能用「通過規則 1～6」當候選定義——那是循環的。** 規則 6 本身就是
+「通過 1～5 的只有一筆」，所以兩筆並存時**兩筆都不通過規則 6**、數量變成 0，
+「多筆」這個分支在定義上永遠走不到。
+
+✅ **定案：候選（candidate）＝ `missing_from_source_at IS NULL`（active）
+且通過投影規則 1～5**。⚠️ **規則 6 不是 candidate 的 predicate，
+它是 candidate 數量的仲裁結果。** 每輪對每一個 job-owned 的主檔列重算：
+
+| candidate 數 | 動作 |
+|---|---|
+| **恰好 1** | 設定／更新 `delisted_date` 與 `delisted_event_id`（值相同就不寫） |
+| **0 或 > 1** | ⛔ **撤銷**：兩欄**一起清成 `NULL`**，計入 **R 類** |
+
+⚠️ **這是冪等的**：同樣的輸入永遠得到同樣的結果，不依賴「上一輪發生了什麼」。
+上面四種情境**全部自動涵蓋**，不需要各自寫一條規則。
+
+⛔ **人工值不參與重算**（`delisted_event_id IS NULL` 且 `delisted_date IS NOT NULL`）。
+
+⚠️ **但「人工值永不自動改動」只約束本 job（`delisting_reconcile`），不約束 ISIN sync。**
+兩條契約在「人工填了日期的股票**重新上市**」時會給出相反結果，優先權定案如下：
+
+**ISIN 清冊是 `is_listed` 的權威來源；它確認重新上市時，
+current-state 不變量優先——`delisted_date` 與 `delisted_event_id` 一律清除，人工值也不例外。**
+
+理由：留著就會做出 `is_listed=true` ＋ 有終止日的不可能狀態，
+那比「人工填的值被清掉」更糟；而且事件層的歷史仍在 `delisting_events`，
+人工那筆的原始意圖則本來就不在系統裡（它沒有事件可依附）。
+（測試 #20b 補「人工值重新上市」案例。）
+
+##### 人工所有權是單向的：⛔ 永不「升級」成 job-owned
+
+⚠️ **規則 7 允許「日期相同」通過，這裡有一個陷阱**：人工填的日期若剛好等於 CSV 日期，
+實作很可能順手補上 `delisted_event_id`——**那就把人工值轉成了 job-owned**，
+之後來源一消失就會被撤銷規則清掉。使用者填的東西被系統靜默刪除。
+
+✅ **定案：`delisted_event_id IS NULL && delisted_date IS NOT NULL` 一律保留人工所有權，
+即使日期完全相同也⛔不得補上 provenance。**
+那種情況記為「**來源佐證與人工值一致**」（Info），**不是 job 投影寫入**。
+
+所有權只有兩種來源：**本 job 從 `NULL` 開始寫入**（→ job-owned），
+或**人工填入**（→ 永遠人工）。⛔ **沒有任何路徑會把人工值變成 job-owned。**
+
+##### 兩欄的資料不變量
+
+⚠️ 「同進同出」只適用於 **job-owned 的寫入與撤銷**；人工值本來就是單欄有值。
+四種組合的合法性：
+
+| `delisted_date` | `delisted_event_id` | 合法？ | 意義 |
+|---|---|---|---|
+| NULL | NULL | ✅ | 沒有下市日期 |
+| 非 NULL | 非 NULL | ✅ | **job-owned**（可被重算改動） |
+| 非 NULL | NULL | ✅ | **人工值**（永不自動改動） |
+| **NULL** | **非 NULL** | ⛔ **非法** | 指向事件卻沒有日期——半套狀態 |
+
+⛔ **第四種是實作錯誤的訊號**，撤銷或重新上市時只清一欄就會產生它。
+資料層可用 `CHECK (delisted_event_id IS NULL OR delisted_date IS NOT NULL)` 把守。
+
+⚠️ **`ON CONFLICT` 清除 `delisted_date` 時（重新上市）`delisted_event_id` 要一起清**，
+否則會留下指向事件卻沒有日期的半套狀態。
+
+##### 七條規則的三種角色（⛔ 不是七個並排的 predicate）
+
+前一版寫「1～7 是 AND、全部必須出現在 `UPDATE` 的 `WHERE` 裡」，
+在規則 6 改成仲裁之後**已經不成立**——6 與 7 都不是逐列 predicate：
+
+| 規則 | 角色 | 說明 |
+|---|---|---|
+| **1～5** | **候選過濾**（逐列 predicate） | 決定一筆事件是不是這個代號的 candidate |
+| **6** | **候選數量仲裁** | 對 candidate **集合**求值，不是對單列 |
+| **7** | **ownership 寫入仲裁** | 決定「可以寫」還是「歸 D／M」——看的是主檔的 provenance 狀態 |
+
+⚠️ **順序仍然不是防線**：1～5 之間是 AND，`A AND B` 換順序結果相同。
+第一版寫「順序不可調換」是錯的，那條 mutation test 不成立（見測試 #4）。
+
+⛔ **但 TOCTOU 的防護仍然必要**：ISIN sync 的整輪上限是 **20 分鐘**
+（`scheduler.go:82`），06:30 起跑可能到 06:50，與 07:00 的本 job **有重疊窗口**，
+先 `SELECT` 出 id 再 `UPDATE` 會讓查到的 `is_listed=false` 在寫入前被 sync 改回 `true`。
+
+✅ **定案：最終 `UPDATE` 是一個 CAS（compare-and-swap），`WHERE` 要帶完整條件。**
+⛔ 前一版只寫「至少 `is_listed` 和 provenance」不夠——**名稱、`market`、
+`security_type`、`listed_date` 同樣是 candidate 的輸入**，讀取後若被改掉，
+記憶體裡的仲裁結果就已經過期。
+
+`WHERE` 必須包含：
+
+1. `is_listed = false`；
+2. **ownership 狀態仍等於讀取當時的狀態**（空值 → 兩欄仍為 NULL；
+   job-owned → `delisted_event_id` 仍等於讀到的那個值）；
+3. **`name` / `market` / `security_type` / `listed_date` 與讀取時相同**。
+
+⛔ **不可用 `updated_at` 當 row version。** MySQL 的 `stock_symbols.updated_at` 是
+**`DATETIME(0)`（秒級）**（`migrations/mysql/048_create_stock_symbols.sql:16`），
+同一秒內的兩次修改時間戳相同，偵測不到競爭。要 row version 就得另加單調遞增的
+版本欄位——本筆不做，固定比對上面那四個欄位 ＋ ownership。
+
+##### ⛔ `RowsAffected = 0` **不等於** CAS 落空
+
+MySQL 把欄位更新成**相同值**時通常回報 **0 affected rows**（與 `source_corrected`
+那裡是同一類陷阱）。於是一個**穩定且完全正確**的 job-owned 投影
+會**每天被誤判成 CAS 衝突**。
+
+✅ **定案：依「目標值是否與現值相同」走兩條路徑。**
+
+| 情形 | 作法 | 判定 |
+|---|---|---|
+| 目標日期／event ID **與現值不同** | 執行 CAS `UPDATE` | **`RowsAffected = 0` 才是 CAS 落空** |
+| 目標值**已相同** | ⛔ **不發 no-op `UPDATE`、不看它的 affected rows**；改用**帶同一組 CAS 條件的 guarded `SELECT ... FOR UPDATE`** 確認狀態仍成立 | 查到 → **P**（本來就不需要寫）；**查無 → X** |
+
+⛔ **guarded `SELECT` 必須是 current／locking read，不能是一般讀。**
+MySQL 預設是 **REPEATABLE READ**，本專案**沒有任何覆寫 isolation 的設定**
+（全 repo 查無 `SET TRANSACTION` / isolation 設定），
+所以交易內的一般 `SELECT` 走 consistent snapshot——**看不到另一條連線已提交的變更**，
+最後仍會錯計 P。這正是「用讀取來確認」最容易踩的陷阱。
+
+| engine | 作法 |
+|---|---|
+| PostgreSQL / MySQL | **`SELECT ... FOR UPDATE`** 帶完整 CAS 條件——取得 current row 並與 ISIN 的 `UPDATE` 串行 |
+| SQLite | 由**單 writer 契約**保護：本 job 的三項寫入在同一個 write transaction 內，該交易已持有 write lock。實作要在註解寫明這是等價策略，不是漏掉 `FOR UPDATE` |
+
+##### 主檔 snapshot 的讀取時點，與 SQLite 的競爭語意
+
+⛔ **SQLite 上做不出「判定後、CAS 前成功提交」的交錯**——前一版要求三 engine
+都這樣測，在 SQLite 上不可能成立。原因是本 job **先在同一交易寫 `delisting_events`、
+再處理主檔**，那時該交易已持有 write lock，第二個 writer 只能等待或拿到
+`SQLITE_BUSY`，**無法中途提交製造 CAS 0 列**。
+
+⚠️ **但這不是因為 `SetMaxOpenConns(1)`**（前一版把原因寫錯了）：
+那個設定只限制**單一 handle** 的併發，**兩個指向同一檔案的 handle 仍會競爭 writer lock**
+（`store/sqlite.go:20`）。真正的原因是 SQLite 的 **writer 本身就是串行的**。
+
+✅ **定案：**
+
+1. **主檔 snapshot 在 transaction 內讀取，但用一般 `SELECT`。**
+   ⛔ **snapshot 這一步不可以 `FOR UPDATE`**——鎖住之後 ISIN／人工更新只能等到本交易
+   結束，**根本無法在 snapshot 與最終 CAS 之間提交**，於是投影 CAS 不會落空成 X、
+   撤銷 CAS 不會落空成 RX，**#4c②③ 要驗的交錯永遠做不出來**（測試只會等待或逾時）。
+   我把自己的設計鎖死了。
+   ⛔ 也不在交易外先讀——那是更長的 TOCTOU 窗口。
+
+   **鎖只出現在最終寫入點**：
+
+   | 寫入點 | 作法 |
+   |---|---|
+   | 投影，目標值**不同** | 帶完整 predicate 的 **CAS `UPDATE`** |
+   | 投影，目標值**相同** | 帶完整 predicate 的 **`SELECT ... FOR UPDATE`**（current read） |
+   | **撤銷（R）** | 帶完整 predicate 的 **CAS `UPDATE`** |
+
+   MySQL 的舊 snapshot 問題仍由**最終**的 current read／CAS 解決，
+   而 X／RX 也仍然真的會發生。
+2. **SQLite 上 X／RX 正常情況下不會出現**，因為 writer 是串行的。
+   ⚠️ 但**不是「做不出跨連線競爭」**——前一版這樣寫是錯的：
+   `SetMaxOpenConns(1)`（`store/sqlite.go:20`）只限制**單一 handle** 的併發，
+   **兩個指向同一檔案的 handle 仍會競爭 writer lock**。
+
+   ⛔ **要分清楚是「誰」拿到 busy**（前一版把兩者混為一談）：
+
+   | 情境 | 誰拿到 busy | 本輪結果 |
+   |---|---|---|
+   | **reconcile 先持鎖** | **競爭者** | reconcile **正常收斂**，⛔ 不產生 X／RX |
+   | **競爭者先持鎖** | **reconcile 自己** | 依下面的 busy policy |
+
+3. **busy policy 定案（⛔ 不留「等待或 busy 都可以」——那寫不出穩定測試）**：
+   在 `store/sqlite.go` 加 **`busy_timeout = 5000`（5 秒）**。
+   ⛔ **這個常數現在就定，不留到實作時任選**：本 job 的交易只有三批寫入、
+   正常在毫秒級完成，5 秒足以吸收一次外部 writer 的短暫持鎖，
+   又遠短於 job 自己的 timeout。
+   **逾時仍拿不到鎖 → 整輪 `failed`**（走 `finishRunStatus`，reason code 由 `joberr` 分類），
+   ⛔ **不歸 X／RX**——那是「這一列有衝突」，busy 是「這一輪根本沒寫成」。
+   本 job 每日跑，下一輪重來即可。
+
+   ⛔ **不可沿用現有的 `db.MustExec("PRAGMA ...")` 寫法**（`sqlite.go:17-18` 那兩行）。
+   `*sqlx.DB` 是 **connection pool**，`MustExec` 只作用在**當下那一條** connection；
+   現在雖然限制成一條，但**它被關閉後重建時，新 connection 不會繼承先前的 PRAGMA**，
+   `busy_timeout` 會**靜默變回 0**。
+
+   ✅ **定案：用 DSN pragma**——`_pragma=busy_timeout(5000)` ＋ `_pragma=foreign_keys(1)`
+   （`modernc.org/sqlite` 支援，且**允許重複的 `_pragma`**）。
+   ⛔ **不留「DSN pragma 或 connection hook」二選一**：DSN 由 driver 對**每一條**
+   新 connection 套用，不需要額外註冊邏輯，也不會有人忘記在某條路徑掛 hook。
+   ⛔ **不得**只在 pool 上執行一次 `MustExec`。
+
+   ⛔ **不可直接字串拼接 `?_pragma=...`。** `NewSQLite` 收到的 DSN 有這些形態：
+
+   | 類別 | 形態 |
+   |---|---|
+   | **file-backed** | ①空字串（回退成 `./trading.db`，`sqlite.go:9-11`）；②**純檔名／相對路徑**（live 現況——`config.yaml:12` 的 `../../output/stock_trading/trading.db`）；③**已帶 query 的 `file:` URI** |
+   | **memory** | ④裸 `:memory:`；⑤`file::memory:?cache=shared`；⑥**named memory URI**：`file:<name>?mode=memory&cache=shared`（⑤⑥ 都是「已是 URI」，走同一條規則） |
+
+   ⛔ **除了 file-backed 形態，也必須識別這三種 memory DSN**——
+   它們**不得當成一般路徑執行 `filepath.Abs`**（判準見下方三分支表）。
+   直接字串拼接則會做出第二個 `?`，或蓋掉既有的 `mode` / `_txlock` / `cache` 等參數。
+
+   ✅ **改寫規則：解析既有 DSN → 合併 query → 保留其他參數 → 強制覆寫那兩個 pragma。**
+   非 URI 形態先轉成 `file:` URI。
+
+   ⛔ **路徑不可整條丟去做 percent-encode**——那會把目錄分隔的 `/` 一起編成 `%2F`，
+   做出一個「單一檔名裡有斜線」的路徑。要用 `url.URL` 來組，
+   它只編碼 `?`／`#`／空白等會破壞 URI 的字元，**`/` 保持原樣**。
+
+   ⛔ **但 `url.URL{Scheme:"file", Path: <相對路徑>}` 會把 live 的 DSN 弄壞。**
+   實測（Go 1.25）：
+
+   ```
+   Path="../../output/stock_trading/trading.db"
+     → String() = "file://../../output/stock_trading/trading.db"
+     → 反解得到 host=".."、path="/../output/stock_trading/trading.db"   ← 路徑被改掉了
+   ```
+
+   `url.URL` 在 `Host` 為空但 `Path` 不以 `/` 開頭時仍會輸出 `//`，
+   於是 **`..` 被當成 authority**。而 live 的 DSN 正是相對路徑
+   （`config.yaml:12`），**這條路一定會被踩到**。
+
+   ✅ **定案：路徑先 `filepath.Abs` 轉成絕對路徑，再組 `url.URL{Scheme:"file", Path: abs}`。**
+   絕對路徑以 `/` 開頭，輸出是 `file:///abs/...`（實測正確）。
+   ⛔ **不採 `OmitHost: true` 的方案**——它雖然能產生 `file:../..`（可正確反解），
+   但要求呼叫端記得設一個容易漏的旗標；先 `Abs` 之後**根本不存在相對路徑的分支**。
+   ⚠️ `Abs` 以行程的工作目錄為基準，與現行「直接把相對路徑交給 driver」的行為一致。
+
+   ⛔ **但 `:memory:` 必須先特判，不能走 `Abs`。** 實測
+   `filepath.Abs(":memory:")` = `/w/:memory:`——**記憶體 DB 會被變成磁碟檔**。
+   雖然目前 repo 沒有以它呼叫 `NewSQLite`，那仍是這個 helper 接受的標準 SQLite DSN，
+   靜默改掉它的語意是破壞性變更。
+
+   ✅ **裸 `:memory:` 轉成 `url.URL{Scheme:"file", Opaque:":memory:"}`**——
+   實測輸出 `file::memory:?_pragma=busy_timeout(5000)`，
+   既保有記憶體語意、又掛得上 pragma。
+
+   ✅ **「要不要 `Abs`」的判準是三分支，⛔ 不是「看 `Opaque`」**（前一版那樣寫會誤導——
+   `Opaque` 只適合用來**辨識**記憶體語意，不該單獨決定是否 `Abs`）：
+
+   | 輸入 | 處置 |
+   |---|---|
+   | **裸 `:memory:`** | 特判 → `url.URL{Scheme:"file", Opaque:":memory:"}` |
+   | **任何已是 `file:` 的 URI** | ⛔ **一律保留 URI 語意，不做 `Abs`**、不改 path／opaque，只合併 query |
+   | **一般檔案路徑**（含空字串回退值） | `filepath.Abs` 後組 `file://` URI |
+
+   ⚠️ 這條規則讓 `file::memory:?cache=shared`、
+   **`file:name?mode=memory&cache=shared`（named memory URI）** 等
+   全部自然落在第二分支，不需要為每種 memory 寫法各加一個特例。
+
+   ⛔ **「強制加入」與「既有 `_pragma` 照留」會打架，優先序要定死**：
+   輸入若帶 `_pragma=foreign_keys(0)` 或 `_pragma=busy_timeout(0)`，
+   driver 允許重複 `_pragma`，最後生效的取決於**參數排列與套用順序**——
+   那等於讓外部設定有機會關掉 FK，本筆的 #19／#19d 就整組落空。
+
+   ✅ **定案：`busy_timeout` 與 `foreign_keys` 是本專案的強制政策，不可被 DSN 覆寫。**
+   合併時**先移除既有的這兩個 `_pragma`**，再各加入**唯一一份**固定值。
+   ⛔ **其他 `_pragma` 一律保留**，只有這兩個被強制接管。
+
+   ⛔ **辨識不能只看 `(`。** driver 接受多種寫法，只依 `(` 切名稱的話
+   **`foreign_keys=OFF` 會整個穿過去**，強制政策等於沒做。要涵蓋：
+
+   | 變體 | 例子 |
+   |---|---|
+   | 括號形式 | `foreign_keys(0)` |
+   | **等號形式** | `foreign_keys=OFF`、`busy_timeout=0` |
+   | **前後／中間空白** | `foreign_keys = 0`、` foreign_keys(0) ` |
+   | **大小寫** | `FOREIGN_KEYS(0)`、`Busy_Timeout=0` |
+   | **URL encode** | `foreign_keys%3D0`（要在 **decode 後**才比對） |
+
+   ✅ **作法：用標準 query parser（`u.Query()`）取值 → trim → 取第一個 `(` 或 `=`
+   之前的 token 當 pragma 名稱 → 再 trim ＋ 轉小寫比對。** 命中那兩個就丟掉。
+
+   ⛔ **不要再自己 decode 一次。** `url.Parse(...).Query()` **已經 decode 過**，
+   前一版寫「先 URL decode」會造成 **double decode**：實測
+   `_pragma=foreign_keys%253D0` 經 `Query()` 得到 `"foreign_keys%3D0"`，
+   再 decode 一次就變成 `"foreign_keys=0"` ——一個**本來不是強制 pragma 的值
+   被錯誤地當成衝突項移除**，其他保留 pragma 的語意也會被改掉。
+   **decode 只發生在 parser 那一次。**
+
+   ⛔ **`foreign_keys=ON` 必須一起搬進 DSN——它是既有的同款漏洞。**
+   `sqlite.go:18` 現在也是一次性 `MustExec`，而 `foreign_keys` **同樣是 connection-local**。
+   physical connection 一旦重建，**SQLite 的 FK 就靜默失效**，
+   本筆賴以把關的 `delisted_event_id` `RESTRICT`（#19d）與 `job_run_id` `SET NULL`（#19）
+   **全部落空且不會報錯**。只搬 `busy_timeout` 等於修一半。
+
+   ℹ️ **`journal_mode=WAL` 不必搬**：它是寫進 DB 檔的**持久設定**，
+   不是 connection-local，語意與上面兩個不同——留在原地並加註說明即可。
+
+   ⚠️ **`busy_timeout` 是 connection-local**——正式 handle 與測試用的兩個 handle
+   **都必須經過同一條初始化路徑**（`store.NewSQLite`），
+   ⛔ 測試不可自己 `sqlx.Connect` 繞過去，否則那一邊會立刻 busy 而不是等待。
+   **另補 reconnect 測試**：關閉並重建 physical connection 後
+   **`busy_timeout` 與 `foreign_keys` 兩個都仍生效**（測試 #20f3）。
+
+##### ⚠️ SQLite 有兩種拓撲，`busy_timeout` 只管得到第二種
+
+正式程式**只建立一個 DB pool**（`cmd/server/main.go:72` 的 `store.NewDB`，
+所有 repo 共用），而 SQLite 的 pool 限制成一條 connection：
+
+| 拓撲 | 情形 | 行為 |
+|---|---|---|
+| **同程序**（ISIN sync 與 reconcile） | 兩者共用同一個 pool | **先在 `database/sql` 的 pool 排隊**，通常**根本不會進到 SQLite 層拿 `SQLITE_BUSY`** |
+| **外部 writer**（另一個程序、或第二個 handle） | 真的競爭 SQLite writer lock | 適用 `busy_timeout` |
+
+⛔ **所以 `busy_timeout` 的定位是「外部 writer 防護」，不是排程重疊的正式路徑。**
+
+⚠️ **要分清楚誰管什麼**（前一版把 single-flight 的範圍寫得太寬）：
+
+| 重疊情形 | 由誰管 |
+|---|---|
+| 本 job 的 cron 與手動入口互撞 | **single-flight**（#17～#17d）——它**只涵蓋 T-071 自己的入口** |
+| **ISIN sync 與本 job** 互撞 | ⛔ **single-flight 管不到**（不同 job）。靠的是**同日成功依賴**（#8）＋ **pool 排隊**＋**最終 CAS**（#4／#4b） |
+| 外部程序或第二個 handle | `busy_timeout` |
+（測試 #20f 用兩個 handle，驗的是**外部 writer** 這一種；
+**#20f2 補同一 pool 的排隊案例**：確認第二個呼叫在 pool 等待、
+context 逾時的話 job 結果符合 `failed` 契約。）
+4. ⛔ **`startRun` 拿到 `runID = 0` 時，核心流程必須中止。**
+   那代表這一輪**沒有任何 audit record**——繼續做下去會在鎖釋放後寫入一整輪資料，
+   卻在 `job_runs` 上完全看不到，事後查不到是誰改的。
+   `runID = 0` 時記 Error 並 return（⛔ 不呼叫 `finishRunStatus`，因為根本沒有那一列）。
+   ⚠️ 這條**不只影響 SQLite**——任何 engine 的 `startRun` 失敗都適用（測試 #20f4）。
+5. **要跑兩連線的測試就得用同一個檔案 DB 的兩個獨立 handle**——
+   ⛔ 不可沿用 `store.NewSQLite` 那個 `MaxOpenConns(1)` 的 handle，
+   也⛔ 不可用各自獨立的 `:memory:`（那是兩個不同的資料庫，測不到任何競爭）。
+
+⛔ **guarded `SELECT` 查無資料時歸 X，不得計 P。**
+
+**PG／MySQL 各測三條**（測試 #4c）：①值相同、狀態未變 → **P**；②投影 CAS 落空 → **X**；③R 撤銷競爭 → **RX**。⚠️ **SQLite 驗的是別的東西**（writer 串行化，正常情況不產生 X／RX），見 #4c 與 #20f。
+
+##### CAS 落空的處置：定案為 **X 類**，⛔ 不歸 U
+
+前一版留「重新判定或歸 U」二選一，**不可以留到實作時任選**——兩者的分類、log
+與 `job_runs` 摘要都不同。而歸 U 會把「**缺身分資料**」與「**併發衝突**」混成同一個
+語意，之後看 log 的人分不出該補資料還是該查排程重疊。
+
+✅ **定案：新增 X 類（`concurrency_conflict`）——安全跳過本列、⛔ 不重試、
+記 Warn 並計入 degraded（該輪 `partial`）。**
+不重試的理由：本 job 每日跑，下一輪自然會用新的主檔狀態重算；
+而重試會在 ISIN sync 仍在寫的窗口內反覆落空。
+
+（測試 #4 的 mutation 是移除／反轉 `UPDATE` 裡的 `is_listed` predicate；
+測試 #4b 驗「**真正的並行改動**導致 `UPDATE` 影響 0 列」→ 歸 **X**、不得計 P。）
+
+**第 5 條的正規化：規則必須是封閉的。**
+
+⛔ **不可寫成「`-創` / `-DR` 等後綴」**——「等」會被實作成「移除 `-` 之後的所有文字」，
+那會把兩個本來不同的公司名稱正規化成相等，**反而製造誤匹配**。
+名稱是唯一能辨識代號重用的訊號，放寬它等於拆掉最後一道防線。
+
+**封閉 allowlist（只有這些，新增要改計畫書）**：`-創`、`-DR`、`-KY`、`-創櫃`。
+
+**處理順序（固定）**：①全半形統一 → ②去除所有空白 → ③**只從字串尾端**移除
+allowlist 內的**完整** suffix，**最多移除一次**。
+
+⛔ **只比對尾端完整字串**：`-DR` 只在結尾才移除，出現在中間不動；
+不得用「切到第一個 `-`」這類規則。
+
+**負向測試（#3b）**：兩個原本不同的公司名稱，正規化後**必須仍然不同**——
+例如「台光電」與「台光電子材料」、「中華」與「中華電」。
+⛔ 沒有這條，過度正規化會靜默放行誤投影。
+
+實測四個案例：
+
+| 代號 | 主檔名稱 | CSV 名稱 | 正規化後 | 效果 |
+|---|---|---|---|---|
+| `2867` | 三商壽 | 三商壽 | ✅ 相符 | 正確投影 |
+| `6423` | 億而得 | 億而得-創 | ✅ 相符 | 同一家（轉上櫃），但被第 1 條擋下 |
+| `2432` | 倚天酷碁-創 | 倚天資訊 | ❌ 不符 | **擋住代號重用** |
+| `2301` | 光寶科 | 光寶電子 | ❌ 不符 | **擋住代號重用**——即使將來光寶科真的下市也不會誤填 2002 的日期 |
+
+⚠️ **名稱比對是啟發式，不是身分證明**（公司會改名；TWSE 這份 CSV 沒有 ISIN）。
+所以它的定位是**只准不放**：不符 → 不寫入、進 D 類告警等人工，
+**不會**因為名稱相符就放寬其他任何一條。
+
+#### 對帳分類（兩個方向，各自互斥）
+
+⛔ **第一版的 A～D 是混在一起的**：D 寫「通過條件 1～4」，但 `listed_date IS NULL`
+在條件 3 就失敗、根本到不了 D；而 B 與 C 會重疊（`2432` 同時命中兩者）。
+定案拆成**兩個方向**，方向內**依序判定、先命中先歸類、每筆事件恰好一類**。
+
+**方向一：CSV → 主檔**（母體 = 本次解析出的每一筆事件）
+
+| 序 | 類 | 條件 | 等級 | 處置 |
+|---|---|---|---|---|
+| 1 | **N** 無對應 | 主檔查無此代號 | 不告警 | 正常（實測 261/265） |
+| 2 | **B** 仍在交易 | `is_listed = true` | Info | 代號重用或轉櫃，不動作 |
+| 3 | **U** 無法判定 | `market`／`security_type` 不符，**或 `listed_date IS NULL`** | **Warn** | 缺身分依據，等人工 |
+| 4 | **C** 世代不符 | `delisted_date < listed_date` | Info | 明確的代號重用 |
+| 5 | **D** 身分存疑 | 名稱不符／多筆歧義／**人工值且日期不同**（⛔ 不是「已有不同日期」——job-owned 的不同日期是合法的來源更正，要走 P 替換） | **Warn** | 保留事件、**不寫主檔**，等人工 |
+| 6 | **M** 人工佐證 | 通過 1～6，但主檔是**人工值**（`delisted_event_id IS NULL`）**且日期相同** | Info | ⛔ **不寫主檔、不補 provenance**——來源佐證與人工值一致 |
+| 7 | **X** 併發衝突 | 通過 1～6，但寫入時 CAS 落空（主檔被並行改動） | **Warn** | 安全跳過、⛔ 不重試，計入 degraded |
+| 8 | **P** 已投影 | 通過 1～6，且規則 7 的 ownership 仲裁落在**空值**或 **job-owned** | 不告警 | 寫入／維持 `delisted_date` ＋ `delisted_event_id` |
+
+⛔ **M 必須通過 1～6，不能只比日期。** 只要求「人工日期 == CSV 日期」的話，
+`2301` 的人工日期若剛好是 `2002-11-04`，就會**名稱不符本該判 D、卻被說成
+「來源佐證一致」**。名稱不符或 `listed_date IS NULL` 時 candidate 數為 0，
+連 M 的門檻都到不了，⛔ **必須判 D／U**（測試 #20c④⑤）。
+
+⛔ **M 在方向一，不在方向二**（前一版放錯了）：人工同日期的那筆 **CSV 事件**
+不是 N／B／U／C，名稱與日期都相符所以也不是 D，而人工值又不算 P——
+放在方向二的話它在方向一**沒有任何類別**，方向一的計數總和就不等於事件數了。
+M 排在 D 與 P 之間，方向一才真的是「每筆恰好一類」。
+
+⛔ **人工值即使日期相同也不算 P**：它不會被寫入、也不會變成 job-owned。
+
+⚠️ **P 講的是結果不是輸入**：**P 的結果一定是 job-owned；輸入可以是空值
+（首次投影，建立 ownership）或既有 job-owned（維持／替換）。**
+前一版寫「P 的母體只有 job-owned」是錯的——首次投影的判定前狀態並不是 job-owned。
+
+⚠️ **順序有意義**：`2432` 因為 `is_listed=true` 在第 2 步就歸 **B**，
+**不會**再被算進 C——這正是修掉第一版重複計數的地方。
+`listed_date IS NULL` 明確歸 **U**，不再無處可去。
+
+**方向二：主檔 → CSV**（母體 = 主檔裡已下市的上市股票）
+
+⚠️ **方向二是「有條件的 outcome counters」，不是窮盡分割**——
+它只計「需要處置或需要人看」的兩種結果，**不覆蓋整個母體**。
+
+⛔ **不要宣告它「每筆恰好一類」**（前一版這樣寫是錯的）：一個成功投影且穩定的
+job-owned 列（例如投影後的 `2867`）不符合 R（candidate 數是 1）、
+不是人工值所以不符合 M、CSV 又有 candidate 所以不符合 A——**它不屬於任何一類，
+那是正常的**。契約要求的是 **R、RX、A 三者彼此不重複**。
+
+| 序 | 類 | 條件 | 等級 | 處置 |
+|---|---|---|---|---|
+| 1 | **R** | **job-owned**（`delisted_event_id` 非 NULL）且 **candidate 數 ≠ 1**，**且撤銷成功** | **Warn** | ⛔ **撤銷**：兩欄清成 `NULL` |
+| 1b | **RX** `revocation_conflict` | 同上，但**撤銷的 CAS 落空**（0 列） | **Warn** | 安全跳過、⛔ 不重試，計入 degraded |
+| 2 | **A** | `is_listed=false` 的**上市股票**、**非 job-owned**、且 CSV 查無 candidate | **Warn** | 最有價值：代表「**不是下市，而是清冊抓取異常／證券類型變更**」 |
+
+⛔ **撤銷本身也是一筆會被競爭的 `UPDATE`**（要清兩個欄位），前一版漏了它落空的處置。
+它**不能計 R**（本 job 其實沒完成撤銷），也**不能併進方向一的 X**——
+X 的單位是 CSV 事件，而撤銷的觸發情境常常是「**來源事件已經消失**」、
+根本沒有 CSV event 可承載；硬加進去還會破壞「方向一總和 == 事件數」。
+
+✅ **定案：方向二新增獨立的 `revocation_conflict`（RX），單位是主檔 symbol。**
+
+⛔ **撤銷的 CAS 要套用與投影**完全相同**的那組條件**——前一版只寫
+`delisted_event_id` ＋ `is_listed`，**不夠**：R 的判定依據裡有 `name`、`market`、
+`security_type`、`listed_date`（它們是 candidate 的輸入）。
+具體漏洞：R 因**名稱不符**而準備撤銷，期間名稱被修正成相符、投影重新成立，
+只比 ownership 的 CAS **仍會成功清除那筆已經正確的投影**。
+
+撤銷 `UPDATE` 的 `WHERE` 必須包含：
+`is_listed = false` ＋ `delisted_event_id` 仍等於讀到的值 ＋
+**`delisted_date` 仍等於讀到的值** ＋ `name` / `market` / `security_type` /
+`listed_date` 與讀取時相同。0 列即 **RX**。（測試 #20e）
+
+⛔ **`listed_date` 是 nullable，比較必須 null-safe。**
+三 engine 都是 nullable（`048_create_stock_symbols.sql:12`），
+而 **R 的觸發原因之一正是它為 `NULL`**（投影規則 3）。
+直接組出 `listed_date = NULL` 永遠不為 true，**沒有任何競爭也會誤判成 RX**，
+於是那些列永遠撤銷不掉。
+
+✅ **定案：由程式依 snapshot 是否為 `NULL` 組出 `listed_date IS NULL` 或
+`listed_date = ?`。** 不用 engine 專屬語法（`IS NOT DISTINCT FROM` / `<=>`），
+三 engine 共用同一條 SQL 產生邏輯。⚠️ **`delisted_date` 與 `delisted_event_id`
+同樣 nullable，適用同一條規則。**（測試 #20g）
+
+##### ⛔ MySQL 的字串比較預設**不是**精確比較
+
+`stock_symbols` 只寫 `DEFAULT CHARSET=utf8mb4`、**沒有指定 collation**
+（`migrations/mysql/048_create_stock_symbols.sql:20`），
+於是**繼承 database 的預設 collation**——⛔ **那可能是 case-insensitive 的**
+（MySQL 8 的常見預設 `utf8mb4_0900_ai_ci` 即是），
+但實際值取決於部署環境，**不能靠推論當定論**。
+
+後果：snapshot 名稱 `ABC-KY` 在並行期間被改成 `abc-KY`，
+**Go 的正規化結果已經不同**（名稱比對會得到不同答案），
+但 MySQL 的 `name = ?` **仍判為相等**，CAS 不會落空——
+違反「完整 snapshot 比較」的契約，會拿過期的仲裁結果寫入。
+
+✅ **定案：MySQL 對 `name` / `market` / `security_type` 統一寫成
+`BINARY <column> = BINARY ?`**（⛔ 不留 `CAST(... AS BINARY)` / `COLLATE utf8mb4_bin`
+的二選一——留著就會有兩種寫法各自發散）。
+⛔ **不改欄位本身的 collation**——那會動到既有查詢的語意，超出本筆範圍。
+PostgreSQL 與 SQLite 的 `=` 本來就是精確比較，不需處理。
+
+ℹ️ `delisted_date` 也納入比較，是為了涵蓋「**人工直接改動 job-owned 的日期**」——
+本筆不禁止那種操作，但它一旦發生，這一輪就該落空成 RX 而不是照舊清除。
+
+⚠️ **順序有意義**：已投影的事件從 CSV 消失時，**首輪是 R**（撤銷）；
+撤銷之後該列變成 `delisted_date IS NULL`、不再是 job-owned，**下一輪才會落到 A**。
+兩者是同一件事的兩個階段，不是同時發生。
+
+⛔ **但「首輪／次輪」要靠明確的計算時點兌現，不能只靠敘述。**
+R 與 A 在同一個 transaction 內執行，若先做 R 的撤銷、再用**更新後**的資料統計 A，
+那些剛被撤銷的列已經符合 A 的條件，**同一輪就會同時計進 R 和 A**。
+
+✅ **定案：R、RX、A 三者都基於撤銷前的同一份主檔 snapshot 判定。**
+
+⛔ **前一版留的第二個選項「A 排除本輪 R 命中的 symbol」在 RX 加入後已經不夠**：
+撤銷落空成 RX 時該列沒被清，但若並行修改剛好把它變成非 job-owned，
+A 會再計同一個 symbol，做出 **`RX=1, A=1`** 的重複計數。
+要用排除法的話，排除集合必須是 **R ∪ RX**（所有「撤銷嘗試」的 symbol），不只是 R。
+
+改用單一 snapshot 更簡單也更不容易寫錯，所以定為唯一作法。
+（測試 #12 要斷言：**同一輪 `R=1, A=0`；下一輪才是 `R=0, A=1`**，
+且 **RX 命中的 symbol 不得同時出現在 R 或 A**。）
+
+ℹ️ **M 已移到方向一**（它的母體是 CSV 事件，不是主檔列）。
+
+⛔ **R 不能併進 D**（前一版就是這樣寫的，不成立）：
+D 的母體是「本次 CSV 的事件」，而被來源移除的事件**根本不在本次 CSV 裡**，
+計不進 D；且 D 的處置是「**不寫主檔**」，與 R 需要「**清除主檔**」方向相反。
+兩者是不同的東西，計數與 log 都要分開（`projection_revoked`）。
+
+⛔ **A 不屬於方向一的列舉**——它的母體是主檔而不是 CSV，第一版把它跟 B/C/D 並列是分類錯誤。
+
+⚠️ **A 的母體必須限縮 `market LIKE '上市%' AND security_type = '股票'`。**
+不限縮的話，**4445 筆權證會全部命中**——權證是**到期**不是終止上市，不在這份 CSV。
+
+實測現況（2026-09-04）：
+
+| 母體 | 筆數 |
+|---|---|
+| `上市 / is_listed=f` 全部 | 4446（其中 **4445 是權證**） |
+| 限縮後（上市股票且下市） | **1**（`2867`），CSV 有對應 → **目前 0 誤報** |
+| B 類 | 3（`2301` / `2432` / `6423`） |
+| C 類 | 1（`2432`） |
+
+⚠️ **A 的樣本數只有 1**——`stock_symbols` 最早紀錄是 **2026-07-22**（建表 6 週），
+沒有足夠歷史證明訊噪比。觀察期見「完成與驗收條件」。
+
+#### Job 契約
+
+**一、依賴 ISIN sync 成功，不靠時間錯開。**
+
+⛔ 只把 cron 排在 06:30 之後**不構成依賴**——sync 可能失敗、被停用、逾時（上限 20 分鐘）
+或與手動觸發重疊。**本 job 起手要先確認同日 `stock_symbol_sync` 已成功**：
+用 `JobRunRepo.GetLatestPerJob()` 取該 job 最新一筆，要求 `status = success`
+且 `started_at` 是**台北時間今日**。不成立 → **本輪零寫入**（連 `delisting_events` 都不寫），
+以封閉 reason code 記 `job_runs` 後結束。
+
+⚠️ 這是 fail-closed：sync 沒跑成功時，`is_listed` 的狀態是舊的或不完整的，
+拿它當投影前置沒有意義。
+
+**二、cron**：`0 7 * * *`（sync 06:30 之後）。但**時間只是常態安排，正確性由上面那條依賴保證**。
+
+**三、single-flight：cron 與手動端點不得重疊。**
+
+⛔ **單一 transaction 只保證「單輪完整」，不保證「兩輪的先後」。**
+兩輪若抓到不同版本的 CSV，**較舊的一輪可能較晚 commit**，反過來把新事件標記成消失，
+並讓事件狀態與最新快照不一致——而且兩輪各自看起來都成功。
+
+**直接比照既有的 SR analysis pattern**（`scheduler.go:1436-1470`），三個方法職責封閉：
+
+| 方法 | 角色 | `acceptShrink` | 取鎖 | 釋放 | 取不到時 |
+|---|---|---|---|---|---|
+| `RunDelistingReconcile()` | **cron 入口** | ⛔ **不收參數**，內部固定傳 `false` | 自己取 | `defer` | 記 Warn，**不寫 `job_run`**（見下） |
+| `TryStartDelistingReconcile(acceptShrink bool) (string, bool)` | **API 入口** | ✅ 只有這裡能傳 | **同步取**，成功才 spawn goroutine | 由**它 spawn 的 goroutine** `defer`，呼叫端不碰 | 回 `(持有者, false)`，**不寫 `job_run`** |
+| `runDelistingReconcileOwned(ctx, acceptShrink)` | **核心** | 接收已裁決值 | ⛔ **不再取鎖** | — | — |
+
+⛔ **cron 入口不得收 `acceptShrink` 參數**——「cron 結構上不可能取得 override」這個保證
+必須由**型別**兌現，而不是靠呼叫端記得傳 `false`。留著參數就留著一個誤傳的入口。
+
+⛔ **手動端點在 handler 內同步取得 ownership，取不到直接回 `409`**——
+**不要先回 `202` 再由背景 goroutine 靜默跳過**。
+⚠️ 既有的 `evaluation_universe_sync` 正是後者（`handler/scheduler.go:64` 先回 202、
+`scheduler.go:1063` 才在背景 `CompareAndSwap` 失敗後只記一行 Warn），
+**本 job 不沿用那個模式**：呼叫端會以為觸發成功，實際上什麼都沒發生。
+
+⛔ **cron 被擋時只記 Warn、不寫 `job_run`**（**這是對我前一輪說法的再次修正**）。
+
+前一輪我改成「比照 SR pattern 寫一筆 `failed`」，**但 SR pattern 不適用於本 job**：
+SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影互不干擾；
+本 job 的 cron 與手動**共用同一個 `job_name`**。
+
+後果很具體：手動輪次先開始 → cron 隨後撞上並寫一筆 `failed`（`started_at` 較晚）→
+手動輪次接著成功。而 `GetLatestPerJob` 是
+`ORDER BY started_at DESC, id DESC`（`job_run_repo.go:132-136` 附近的 window function），
+於是**狀態頁選到 cron 那筆 `failed`**，把一次成功的執行顯示成失敗。
+
+**要保存觸發失敗的話得另設 attempt 類型**，⛔ 不能污染同名 job 的 latest-run 投影——
+本筆不做，記 Warn 已足夠（log 查得到，而且真正該看的是那輪手動有沒有成功）。
+
+⛔ **早退路徑也必須釋放鎖**：抓取失敗、解析失敗、縮水防護、ISIN 依賴不成立
+都在核心方法內 return，**鎖由入口的 `defer` 負責**，核心方法不得自行釋放（測試 #17d）。
+
+**四、all-or-nothing ＋ 單一 transaction**：CSV 抓取或解析失敗 → 整輪 `failed`，不做部分寫入。
+**三種寫入必須在同一個 transaction 內完成**：
+
+1. `delisting_events` 的 upsert 與消失標記；
+2. `stock_symbols` 的投影——⛔ **job-owned 的寫入／撤銷時，`delisted_date` 與
+   `delisted_event_id` 必須同進同出**，不得只寫其一（人工值的合法狀態見下方不變量）；
+3. **`delisting_source_snapshots` 的 accepted 快照**。
+
+⚠️ **第 3 項不能落在交易外**——它是下一輪縮水判斷的基準。
+「事件更新了但快照沒寫」會讓下一輪拿舊基準比新事件；反向則會讓基準跑在事件前面。
+任一步失敗 **三者全部 rollback**（測試 #9）。
+
+**五、筆數防護**：見上方「縮水防護改用『上次成功快照』」——基準是
+`delisting_source_snapshots` 的上一筆 `accepted`，**不是**累計事件數。
+
+**六、`job_runs` 契約**（第一版未定義，這裡定案）：
+
+| 欄位 | 值 |
+|---|---|
+| `job_name` | **`delisting_reconcile`**（19 字元；`job_name` 已是 `VARCHAR(64)`，不需 migration） |
+| `symbols_total` | **本次 CSV 解析出的 distinct 代號數**（不是事件筆數、不是投影數） |
+| `symbols_failed` | **恆為 0**。本 job 沒有「逐檔失敗」概念——抓取／解析／縮水防護／依賴不成立都是**整輪** `failed` |
+| `error` | `joberr` 的封閉值域；⛔ **原始錯誤只進 log**（`issue.md` I-104 契約） |
+
+⚠️ **事件筆數 ≠ 標的數**：身分鍵是 `(source, symbol, delisted_date)`，
+**同一代號可以有多筆不同日期的事件**（代號重用時必然如此）。
+而 `symbols_total` / `symbols_failed` 的單位由全域契約定死是**標的數**
+（`api-reference.md`「`symbols_total` / `symbols_failed` 的單位是標的數」，
+2026-08-26 統一，原記於 `issue.md` I-092），所以這裡放 distinct 代號數。
+**事件筆數只進結構化 log**。
+ℹ️ 2026-09-04 實測兩者恰好都是 265，**那是巧合不是保證**，不能拿它當依據。
+
+⛔ **現有 helper 推導不出「`failed` ＋ `symbols_failed = 0`」。**
+`finishRunDegraded`（`scheduler.go:403-413`）只看數量：
+`total>0 && failed>=total → failed`、`failed>0 → partial`、其餘 `success`。
+`failed = 0` 永遠拿不到 `failed`。
+
+✅ **定案：新增 `finishRunStatus(ctx, runID, jobName, status, total, failed, errMsg)`**，
+把 status 直接傳給 `JobRunRepo.Finish`（該介面本來就吃明確 status）。
+
+⛔ **必須與 `finishRunDegraded` 共用同一個底層 finish writer**，
+沿用 `context.WithoutCancel(ctx)` ＋ `finishRunWriteTimeout`（`scheduler.go:380-392`）。
+理由是既有的（2026-08-24，原 I-084）：job 的 ctx 逾時後用它去寫 `job_runs` 一定失敗，
+那筆紀錄會**永遠卡在 `running`**。
+
+⚠️ **本 job 特別容易踩到**：CSV 抓取逾時正是走這條新的 explicit-`failed` 路徑，
+而那時 ctx 已經被取消。**不共用底層 writer 就等於把 I-084 重新引入一次。**
+測試 #18：傳入**已取消的 context**，仍要成功寫成 `failed` ＋ `symbols_failed = 0`。
+⛔ **不得用假的 `1/1` 去湊**——`symbols_total` / `symbols_failed` 的單位是「標的數」，
+塞進「整輪失敗」這件事會讓欄位同時代表兩件事（`job_error.go:26-28` 已經記過同一個教訓）。
+
+**狀態推導**：
+
+| 情形 | 狀態 | 機制 |
+|---|---|---|
+| 全部正常（只有 N／B／C／P／**M**） | `success` | ⚠️ **M 是 Info 不是 degradation**——「人工值與來源一致」是好事，不該讓整輪變 `partial` |
+| **A／U／D／R／RX／X 任一 > 0**，**或來源更正 > 0** | **`partial`** | `finishRunDegraded(..., degraded=true)`（`scheduler.go:403-413`：`degraded && success → partial`） |
+| 抓取／解析／縮水防護／ISIN 依賴不成立 | `failed` | 零寫入，走 `finishRunStatus` |
+
+⛔ **來源更正（改名／改日期／消失／重現）也算 degraded。**
+第一版只讓 A／U／D 觸發 `partial`，於是「日期被更正、新事件成功投影為 P」
+會出 Warn 卻收成 `success`——**排程頁上完全看不出來源動過**。
+既然這件事值得 Warn，就值得讓那一輪是 `partial`。
+
+⚠️ **`partial` 也必須寫得出原因**，否則排程頁只看得到 `partial`、看不到為什麼。
+用 `joberr.SafeMessenger` 帶一則**只含類別名與數字**的自產訊息
+（例如 `delisting_reconcile: source_missing=1 unresolvable=0 identity_doubt=2 source_corrected=1 projection_revoked=1 concurrency_conflict=0 revocation_conflict=0`）——
+這正是 `SafeMessenger` 的既有用途（`joberr.go` 註解裡的「對照源陳舊」同款），
+內容沒有主機、DSN 或 SQL 片段，壓成 `internal_error` 是資訊淨損失。
+
+**完整計數（方向一 N／B／U／C／D／M／X／P ＋ 方向二 R／RX／A，共十一項）只進結構化 log**，
+不進 `job_runs` 的數值欄位——`job_runs` 沒有自由欄位。
+（`error` 只放上面那則 `SafeMessenger` 的類別＋數字摘要，不是完整計數。）
+
+#### 解析要點（皆為 2026-09-04 對真實回應的實測）
+
+| 項目 | 實測 |
+|---|---|
+| 編碼 | `text/csv;charset=ms950` → 用既有 `traditionalchinese.Big5.NewDecoder()`（`twse_isin.go:233` 已有同款判斷，可複用 `isTWSEISINBig5Charset`） |
+| 結構 | **兩行 header**（`"終止上市公司"` ＋ 欄位名），行尾多一個逗號（4 欄） |
+| 日期 | **民國年**，`115/09/01` → `2026-09-01` |
+| ⚠️ 格式不一致 | 民國 100 年以後 `"115/09/01"`；**099 年以前是 `="099/11/15"`（Excel 防轉型前綴，151/265 筆）**。解析要吃兩種 |
+| 代號 | 246 筆四碼；**19 筆六碼是 TDR（`91xxxx`）**——不特別處理，主檔沒有就自然不匹配 |
+| 筆數 | 265，**無重複代號**（但程式不得假設，見投影規則第 6 條） |
+
+#### 測試與驗證策略
+
+| # | 測試 | 期望 |
+|---|---|---|
+| 1 | 解析器：`="099/11/15"` 與 `"115/09/01"` 兩種前綴 | 都解析成正確西元日期 |
+| 2 | 解析器：兩行 header、行尾逗號、六碼代號、空檔、非 Big5 亂碼 | 各自的預期結果；空檔要明確報錯 |
+| 2b | **同批重複 key**：同 `(symbol,date)` 同名／同 `(symbol,date)` 不同名 | 前者去重＋Info 且 `row_count` 採去重後數量；後者**整輪解析失敗**。⛔ 不得把重複丟給 DB——postgres 會回 `cannot affect row a second time` 整批失敗 |
+| 3 | **投影規則用四個真實案例當 fixture** | `2867` **投影**；`2301` / `2432` / `6423` **都不投影** |
+| 3b | ⛔ **名稱正規化的負向測試——必須含連字號案例** | ①`甲-未知` ≠ `甲`（**不在 allowlist 的後綴不得移除**）；②`甲-DR科技` ≠ `甲科技`（**`-DR` 不在尾端就不移除**）；③`甲-創-DR` **只移除一次**（連續兩個 suffix）；④無連字號的「台光電」≠「台光電子材料」。⚠️ **①②③ 是關鍵**——只有無連字號的案例時，實作錯成「從第一個 `-` 截斷」仍會全過 |
+| 3c | 名稱正規化的**正向測試** | `-創`／`-DR`／`-KY`／`-創櫃` **各一個**，移除後與無後綴版本相等 |
+| 4 | ⛔ **mutation：從 `UPDATE` 的 `WHERE` 移除／反轉 `is_listed = false` predicate** | **必須紅**。⚠️ **不是**「調換條件順序」——`A AND B` 換順序結果相同，第一版那條測試不成立 |
+| 4b | **CAS 落空**：讀取後、`UPDATE` 前把主檔的 `name`（或 `market`／`security_type`／`listed_date`／ownership）改掉，使 `UPDATE` 影響 **0 列** | ⛔ **不得計 P**，歸 **X 類**（`concurrency_conflict`）、安全跳過、⛔ **不重試**、該輪 `partial` |
+| 4c | ⛔ **`RowsAffected = 0` ≠ CAS 落空**——**必須是真的跨連線 integration test**（另含 ④MySQL collation） | ⛔ **不可用 mock 或「在 `UPDATE` 前改 fixture」**：那驗不到 MySQL 的 transaction snapshot 問題（本專案沒有覆寫 isolation，MySQL 是 REPEATABLE READ，一般讀看不到別的連線已提交的變更）。**PG／MySQL** 要**兩個真實 connection／transaction 交錯**，各驗三條：①目標值相同、狀態未變 → **必須計 P**（走 `SELECT ... FOR UPDATE`）；②投影 CAS 落空 → **X**；③**R 撤銷競爭** → **RX**；④**MySQL 專屬**，只有**大小寫差異**的並行改動（`ABC-KY` → `abc-KY`），⛔ **拆成兩條、各自唯一結果**：**④a 投影路徑 → 必須是 X**、**④b 撤銷路徑 → 必須是 RX**。⛔ **fixture 必須把「實際受測的 `stock_symbols` 目標欄位」`ALTER` 成指定的 CI collation**（`utf8mb4_0900_ai_ci`；MySQL compose 固定 8.4，`docker-compose.mysql.yml:22`），**測試結束時清理還原**。⛔ **不可改用「另建一張測試表」**——那不會自然走到 repo 對 `stock_symbols` 的查詢，除非另做可替換資料表的測試介面，而那不在本筆範圍。⛔ 也不可依賴環境預設——剛好跑在 case-sensitive database 上時這個 fixture 什麼都證明不了。⛔ **也不可用「環境不合就 skip／只標示」當出口**：那會讓一個沒有證明力的測試被關閉條件當成通過。查詢實際 collation **只當診斷資訊**記進斷言訊息。**另加 mutation：拿掉 `BINARY` 時 ④a／④b 必須雙雙變紅**——那才是這兩條的證明力來源。⛔ 測試放 `internal/database` 且函式名用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴，否則會被兩支腳本的 `-test.run` 篩掉。⚠️ **SQLite 驗的是不同的東西**：writer 是串行的，所以正常情況**不產生 X／RX**，要驗的是**競爭被串行化**（兩種 busy 的分流見 #20f）。⛔ 測試必須用**同一個檔案 DB 的兩個獨立 handle**——不可沿用 `MaxOpenConns(1)` 的 handle（它只限單一 handle 的併發，跨 handle 仍會競爭），也不可用各自獨立的 `:memory:` |
+| 5 | **mutation：移除名稱比對** | **必須紅**——用「`2301` 假設已下市」的 fixture，沒有名稱比對就會回填 2002-11-04 |
+| 6 | **身分歧義** 與 **`listed_date IS NULL`** 各一 | 皆不寫入，但**分類不同**：歧義 → **D**、NULL → **U**（新版分類已把兩者分開） |
+| 7 | ⛔ **契約與第一版相反**：對已投影的列跑一次 ISIN sync（該代號重新出現在快照） | `is_listed` 回 `true` **且 `delisted_date` 被清成 `NULL`**。⛔ 舊契約「不得洗掉」會做出 `is_listed=true + delisted_date=歷史日期` |
+| 7b | **並行順序 A**：reconcile 先投影 → ISIN sync 隨後把該代號設回 `true` | 最終列 `delisted_date = NULL` |
+| 7c | **並行順序 B**：ISIN sync 先設回 `true` → reconcile 隨後執行 | 投影規則第 1 條擋下，`delisted_date` 仍為 `NULL` |
+| 8 | ISIN sync 當日未成功（失敗／未跑／running） | **零寫入**，`job_runs` 記封閉 reason code |
+| 9 | **transaction**：投影中途注入 DB 失敗 | **三項全部 rollback**（見 9b 的斷言清單） |
+| 9b | **transaction**：**快照寫入**時注入 DB 失敗 | 同樣三項全部 rollback。三條斷言**逐一檢查**：①`delisting_events` 無任何變更（含 `last_seen_at`）；②`stock_symbols` 的 **`delisted_date` 與 `delisted_event_id` 都**無變更；③`delisting_source_snapshots` **無新增**。⚠️ 快照是最後一步，只測前面兩步的失敗證明不了它有進交易 |
+| 10 | 縮水防護：本次 `row_count` < 上次 `accepted` 快照 | 放棄本輪、**零寫入**、Warn |
+| 10g | ⛔ **`row_count = 0` ＋ `accept_shrink=1`** | **仍然 `failed`、零業務寫入**。override 只放行 `0 < row_count < 上次 accepted`；放行 0 會把所有事件標記消失並把基準降成 0，防護永久失效 |
+| 10b | 同一情境改走 `POST .../run?accept_shrink=1` | 照常寫入，新快照記為 `accepted`，log 有含新舊 `row_count` 的「人工核可縮水」審計紀錄 |
+| 10b2 | **cron 路徑遇到同一情境** | ⛔ **仍必須放棄本輪**——證明 cron 硬編 `false`、吃不到這個參數 |
+| 10c | **bootstrap**：無任何 accepted 快照 | `row_count > 0` 即通過 |
+ℹ️ **#10d／#10e／#10h 的 fixture 必須先繞過縮水防護**——單純移除一列會在
+`row_count < 上次 accepted` 就被擋下，根本到不了缺席標記邏輯。兩種作法擇一並在測試裡註明：
+**①移除一列的同時新增另一列**（筆數不變，這也更貼近「日期被更正」的真實情境）；
+**②該輪明確走 `accept_shrink=1`**。
+
+| 10d | **來源更正三態**：同 `(symbol,date)` 改名／日期被改／事件消失 | 依序：更新名稱＋Warn／新增新事件且舊事件標 `missing_from_source_at`＋Warn／標記＋Warn。⛔ **三種都不得 DELETE**，且標記過的不參與投影 |
+| 10e | **消失 → 重新出現**：事件標記後，下一輪 CSV 又出現同 `(symbol,date)` | ⛔ **`missing_from_source_at` 必須清回 `NULL`** 且該事件**恢復投影資格**。少了這條，暫時性缺漏會讓事件永久不可投影而且不報錯 |
+| 10f | 同上但**名稱同時改變** | 除了清標記，還要套用名稱更正的 Warn |
+| 10h | ⛔ **連續兩輪仍缺席** | 第 1 輪：Warn ＋ `source_corrected=1` ＋ `partial`；**第 2 輪：不 Warn、`source_corrected=0`、`timestamp` 不變、狀態回 `success`**。⚠️ **fixture 必須讓該事件不會命中 A／R**（例如該代號根本不在主檔，或主檔不是「上市股票」），否則撤銷後下一輪會因 A 持續 `partial`，就測不到本條要驗的東西。⚠️ 少了這條，一筆早年消失的事件會讓 job **永久 `partial`** |
+| 10i | **重現但名稱不變** | 仍算一次更正（`timestamp` → `NULL`）、Warn、該輪 `partial` |
+| 10j | ⛔ **`source_corrected` 的三 engine 一致性**，四個分支都要驗：①無更正的一輪（只有 `last_seen_at` 推進）→ **0**；②**首次缺席 → 1**；③**同一事件第二輪持續缺席 → 0 且 `timestamp` 不變**；④同筆同時重現＋改名 → **1 不是 2** | 三種 engine 結果一致。⚠️ ②③ 是**唯一仍依賴 affected rows 的分支**，不驗等於沒驗到那條路徑；①會在誤用主 upsert `RowsAffected` 時等於既有事件數（MySQL 未變 0／更新 2／插入 1；postgres 一律 1）。⛔ 測試檔放 `internal/database` 且函式名用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴，否則兩支腳本跑不到 |
+| 11 | **冪等：同一天跑兩次** | ⛔ **不是「第二次零寫入」**——快照每輪都會新增一筆，那是設計而非缺陷。要斷言的是：①`delisting_events` **不新增重複事件**；②`stock_symbols` 的 **`delisted_date` 與 `delisted_event_id` 都完全不變**；③事件的 `last_seen_at` **正常推進**；④`delisting_source_snapshots` **每個成功 run 各新增一筆 `accepted`** |
+| 12 | **方向一 N／B／U／C／D／M／X／P 各一 ＋ 方向二 R／RX／A 各一** | ①**方向一每筆事件恰好一類**，計數總和 **== 去重後事件數**（M 在方向一，人工同日期的事件才有歸屬）；②**方向二只要求 R／RX／A 三者不重複**，⛔ **不要求覆蓋母體**——成功投影且穩定的列（如投影後的 `2867`）不屬於任何一類是正常的；③`2432` 只能記 B 不得同時計 C；`listed_date IS NULL` 落在 U；④⛔ **「已投影的事件從 CSV 消失」同一輪 `R=1, A=0`，下一輪才是 `R=0, A=1`**（驗計算時點，不只驗敘述），且 **RX 命中的 symbol 不得同時出現在 R 或 A**——R／RX／A 三者以**撤銷前的同一份 snapshot** 分類；⑤A 的母體限縮有生效（權證不得命中） |
+| 12b | **狀態推導**八種情形（②之外任一 degradation 都是 `partial`）：①只有 N／B／C／P → `success`；②**只有 M、無其他 degradation** → **`success`**（M 是 Info）；③A／U／D 任一 > 0 → `partial`；④**只有 R** → `partial`；⑤**R 與來源更正同時發生** → `partial`，且 `projection_revoked` 與 `source_corrected` **各自只計自己的單位**（⛔ 不得互相灌數）；⑥沒有 A／U／D／R 但有來源更正 → **仍是 `partial`**；⑦**只有 X** → `partial`；⑧**只有 RX** → `partial` | 與上表一致 |
+| 13 | job 層：CSV 抓取失敗 | `job_runs` `failed`，`error` 是 reason code、**不含原始訊息或連線細節** |
+| 14 | `GET /scheduler/status` | 回傳新 job（證明 `knownSchedulerJobs` 與 `jobStaleThreshold` 都有加） |
+| 15 | **`POST /api/v1/scheduler/delisting-reconcile/run`** | 回 202 並實際觸發；未帶授權時比照既有五條路由的行為 |
+| 16 | 前端：`JobName` union、label、觸發按鈕 | 既有 `Scheduler.svelte` 測試模式；按鈕能發出請求並顯示結果 |
+| 17 | **single-flight：手動先開始 → cron 撞上 → 手動成功完成** | ⛔ **`GetLatestPerJob` 必須仍顯示手動那筆的成功結果**。cron 被擋時只記 Warn、**不寫 `job_run`**——寫了的話它的 `started_at` 較晚，會在 `ORDER BY started_at DESC, id DESC` 下蓋掉手動的成功 |
+| 17b | **single-flight：手動與手動重疊** | 第二次 **同步回 `409`**。⛔ **不得回 `202` 再在背景靜默跳過**（那是既有 `evaluation_universe_sync` 的模式，本 job 不沿用） |
+| 17c | **single-flight：`accept_shrink` 手動與 cron 重疊** | 共用同一把鎖，行為與 17／17b 一致 |
+| 17d | **早退時的鎖釋放**：抓取失敗／解析失敗／縮水防護／ISIN 依賴不成立**各一** | 四種早退後**下一次都必須能取得鎖**。鎖由入口 `defer` 釋放，核心方法不自行釋放 |
+| 18 | ⛔ **`finishRunStatus` 傳入已取消的 context** | 仍成功寫成 `failed` ＋ `symbols_failed = 0`。必須與 `finishRunDegraded` 共用底層 writer（`context.WithoutCancel` ＋ `finishRunWriteTimeout`）——不共用就是把 I-084 重新引入 |
+| 19 | **`job_runs` 的 30 天清理**：跑一次 `DeleteBefore` 涵蓋期 | ⛔ **不得失敗、不得刪到任何快照**；被清掉的 `job_run` 對應的快照 `job_run_id` 變 `NULL`，**快照本身仍在**（它是縮水基準，不能跟著 job_runs 消失） |
+| 19b | **schema／repo 能正確接受 `job_run_id IS NULL`** | 寫入與讀回都正常，`CHECK`／FK 不會誤擋。⛔ **不是**驗「`startRun` 失敗時寫快照」——那個情境不存在（`runID = 0` 時核心已中止，見 #20f4） |
+| 19d | ⛔ **`delisted_event_id` 的 FK 是 `RESTRICT`**：試圖 `DELETE` 一筆被投影引用的事件 | **必須被拒絕**，且投影資料不變。⚠️ 不可照抄鄰近 `job_run_id` 的 `SET NULL`——那會把 job-owned 誤降成人工值、永久無法收斂 |
+| 19c | ⛔ **#19／#19b／#19d／#20d 必須在三種 engine 各跑一次** | `ON DELETE SET NULL` / `RESTRICT`、nullable FK、整數型別相容性**與 `CHECK` 的實際 enforcement 正是三 engine 會分歧的地方**——migration 套得上去**不等於**執行期行為正確。與 #10j 同樣放 `internal/database` 並用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴，由兩支腳本執行；SQLite 那份由 `backend/scripts/test.sh` 跑 |
+| 20 | **投影收斂**（每輪重算），七個案例 | ⓪**首次投影**：兩欄皆 NULL → 通過 1～6 → **建立 ownership**（⛔ 空值狀態必須落在 P，不得因「還不是 job-owned」被擋掉）；①已投影 `D1` → 來源更正為 `D2` → **走 P 替換**、最終 `D2` 且 provenance 指向新事件（⛔ 不得因「已有不同日期」先命中 D）；②已投影的事件消失且無替代 → 兩欄**一起清成 `NULL`** ＋ **R 類**；③**改名後不再相符** → 撤銷（R）；④**兩筆都通過 1～5 的歧義** → 撤銷（R）；⑤**有替代事件但替代不合格** → 撤銷（R）；⑥**主檔自己變了**（改名／`listed_date`／`market`／`security_type`）使舊事件失去資格 → 撤銷（R）。⚠️ ③～⑥ 是「列舉觸發條件」寫法會全部漏掉的，重算法自動涵蓋 |
+| 20c | ⛔ **人工所有權是單向的 ＋ M 的嚴格條件**，五個案例 | ①人工填的**不同**日期 → 不覆蓋、不清除，歸 D；②⛔ **人工日期與 CSV 完全相同** → **不得補 `delisted_event_id`**，記 **M**；③承②之後**來源事件消失** → 人工日期**仍在**、`delisted_event_id` **仍為 NULL**；④⛔ **日期相同但名稱不符**（`2301` 型）→ candidate 數為 0，**不得判 M**；⑤⛔ **日期相同但 `listed_date IS NULL`** → 同樣**不得判 M**。⚠️ ②③ 防人工值被靜默轉成 job-owned 再被撤銷刪掉；④⑤ 防「方向一判 D、方向二卻說來源佐證一致」的自相矛盾 |
+| 20e | **R 判定後、清除前被並行修改**，兩個案例 | ①ISIN／人工改動使撤銷 CAS 影響 0 列 → 歸 **RX**（`revocation_conflict`），⛔ **不得計 R**、⛔ **不得併進方向一的 X**（單位不同，且來源事件常已消失、沒有 CSV event 可承載）、不重試、該輪 `partial`；②⛔ **R 因名稱不符而準備撤銷，期間名稱被修正成相符** → 撤銷 CAS **必須落空**（歸 RX），⛔ **不得清除那筆已重新成立的投影**。這條證明撤銷 CAS 有帶 `name`／`market`／`security_type`／`listed_date`／`delisted_date`，不是只比 ownership |
+| 20f2 | **SQLite 同一 pool 的排隊**（正式拓撲），⛔ **時序必須固定** | 兩個呼叫共用 `store.NewDB` 的單一 pool → 第二個**在 `database/sql` 層排隊**，⛔ **不會拿到 `SQLITE_BUSY`**。**測試時序寫死為**：①`startRun` **先成功取得有效 `runID`** → ②競爭工作占用唯一 connection → ③reconcile 核心等待並 context timeout → ④釋放 connection → ⑤`finishRunStatus` 用**獨立 writer timeout** 把那筆既有 run 寫成 `failed`。⛔ **不可讓 connection 在 `startRun` 之前就被占用**：`startRun` 失敗只記 log 並**回傳 `runID = 0`**（`scheduler.go:370-375`），而 `Finish` **不檢查 affected rows**（`job_run_repo.go:112`），`WHERE id = 0` 會靜默更新零列——**DB 裡根本不會有可驗證的 `failed` 紀錄**，測試會驗到空氣。⚠️ **競爭者要模擬成 ISIN-like 的 DB consumer**，⛔ **不是第二個 T-071 入口**——後者會先被 single-flight 擋掉，**根本到不了 pool 排隊** |
+| 20f | **SQLite 的 writer 競爭（外部 writer）**，⛔ **三個案例，時序各不相同** | ①**reconcile 先持鎖** → 拿到 busy 的是**競爭者**，reconcile **正常收斂**、⛔ 不產生 X／RX；②**`startRun` 成功後**外部 writer 才持鎖 → business transaction 在 `busy_timeout` 內等待、逾時 → **把那筆既有 run 寫成 `failed`**（`finishRunStatus`，reason code 由 `joberr` 分類），⛔ 不歸 X／RX；③⛔ **外部 writer 在 `startRun` 之前就持鎖** → `startRun` 自己 timeout、回傳 **`runID = 0`** → **沒有 job row 可寫**，只能記 log，且**核心流程必須就此中止**（見下）。⚠️ 測試要用**同一檔案 DB 的兩個獨立 handle**（`MaxOpenConns(1)` 只限單一 handle 的併發，⛔ 不代表跨 handle 不會競爭） |
+| 20f3 | **SQLite 的 connection-local pragmas 在 physical connection 重建後仍生效**（⛔ **是 `busy_timeout` **與** `foreign_keys` 兩個**，不是只有前者），⛔ **四個步驟缺一不可** | ①**保留同一個 `*sql.DB` pool**（⛔ 不可關閉整個 pool 再 `NewSQLite` 一次——那樣即使用被禁止的「每個 pool `MustExec` 一次」也會通過，測不到東西）；②強制**丟棄既有的 physical connection**（例如 `SetConnMaxLifetime` 極短值後等待，或 `SetMaxIdleConns(0)` 觸發回收）；③讓 pool **自動建立下一條 connection**；④在**那條新 connection** 上同時查 `PRAGMA busy_timeout`（**必須仍是 5000**）**與 `PRAGMA foreign_keys`（必須仍是 1）**。⛔ 只驗 `busy_timeout` 會漏掉 FK 靜默失效——那會讓 #19／#19d 的 FK 契約整組落空 |
+| 20f4 | ⛔ **`startRun` 失敗（`runID = 0`）時核心必須中止**（任何 engine 都適用） | 記 Error 並 return，⛔ **不執行任何業務寫入**、不呼叫 `finishRunStatus`。⚠️ 沒有這條的話，鎖釋放後會寫入一整輪資料卻在 `job_runs` 上完全看不到 |
+| 20f5a | **DSN builder 的單元測試**（⛔ 只驗產生的字串，不連線） | ①空 DSN → 以 **`filepath.Abs("./trading.db")` 的結果**組成的 `file:///...` ＋ 兩個 pragma（⛔ **不要對字面 `./trading.db` 斷言**——builder 已改為先 `Abs`）；②純相對／絕對檔名；③已是 `file:` URI 且帶既有 query → **`mode` / `_txlock` 必須保留**；④⛔ **衝突值的五種語法變體都要測**：`foreign_keys(0)`（括號）、**`foreign_keys=OFF`（等號）**、`foreign_keys = 0`（含空白）、`FOREIGN_KEYS(0)` / `Busy_Timeout=0`（大小寫）、`foreign_keys%3D0`（URL encode，parser decode 後即 `foreign_keys=0`）→ **一律被移除，結果各只有一份強制值**。⚠️ 只測括號形式的話，實作若依 `(` 切名稱，`=OFF` 會整個穿過去；⑤其他 `_pragma`（如 `_pragma=cache_size(...)`）**必須保留**；⑥⛔ **memory DSN 三種都要測**：**裸 `:memory:`** → 必須是 `file::memory:?...`；**`file::memory:?cache=shared`** 與 **`file:<name>?mode=memory&cache=shared`** → 既有參數（`cache` / `mode`）**全部保留**、URI 語意不變。⛔ 三者**都不得**被 `Abs` 變成磁碟路徑（判準是上面那張三分支表：已是 `file:` URI 就不做 `Abs`）；⑦⛔ **double-encoded fixture**：`_pragma=foreign_keys%253D0` → `Query()` 得到 `foreign_keys%3D0`，**必須原樣保留**（它不是 `foreign_keys`），⛔ 不得再 decode 一次而誤判成衝突項 |
+| 20f5b | **DSN 的 SQLite integration test**（⛔ 這條**必須真的開啟連線**） | ⛔ **案例編號用 A／B／C，⛔ 不要再用 ①②③**——那會與下面的斷言編號撞號。**A｜絕對路徑**：`t.TempDir()` 下。**B｜相對路徑**：`t.Chdir` 到 temp dir 後用 `../<dir>/<file>`；⛔ **這條與它的 parent 都不得呼叫 `t.Parallel()`**（`t.Chdir` 改的是**行程層級**工作目錄，放在 parallel test 下會 panic 或讓結果不穩定）。**live 現況就是相對路徑**（`config.yaml:12`），只測 A 會漏掉 `file://../..` 把 `..` 當 host 的 bug。**A／B 的檔名都要含空白／`?`／`#`／中文**。**C｜memory DSN 三種**（裸 `:memory:`、`file::memory:?cache=shared`、**named memory URI** `file:<唯一名稱>?mode=memory&cache=shared`）；⛔ **後兩者要用雙 handle 證明 `cache=shared` 真的生效**——同一個 DSN 開兩個 handle，**第一個建表寫入、第二個讀得到**，只斷言「query 字串裡還有 `cache=shared`」證明不了參數有作用；⚠️ named memory 的名稱要**每個測試唯一**（例如帶 `t.Name()`），否則不同測試會共用同一塊記憶體 DB 互相污染。**三個案例都透過 `store.NewSQLite` 實際開啟**。斷言：**A／B／C 都驗 ①`PRAGMA busy_timeout` = 5000 與 ②`PRAGMA foreign_keys` = 1；A／B 另驗 ③`PRAGMA database_list` 的 `main` 路徑等於預期的絕對路徑，C 不驗 ③**（記憶體 DB 沒有檔案路徑）。⚠️ **③ 對 A／B 不可省**：escape 錯的話仍可能**成功開啟另一個被截斷或改名的 DB**，只查兩個 pragma 照樣會綠 |
+| 20g | **nullable 欄位的 null-safe 比較**，⛔ **依 engine 分流** | ①**三 engine 都要**：snapshot 的 `listed_date` 為 `NULL` 且**無競爭** → 必須正確組出 `IS NULL` 並**成功 R，不得是 RX**（⛔ 組出 `listed_date = NULL` 永遠不為 true，那些列永遠撤銷不掉）；②**僅 PG／MySQL**：真實跨連線的 `NULL ↔ 非 NULL` 改動 → **必須落空成 RX**；③**SQLite 不要求 RX**（writer 串行化，見 #20f），若要驗 predicate builder 只能寫成**非並行的單元測試**並在註解說明。`delisted_date` / `delisted_event_id` 同樣適用。⛔ **PG／MySQL 的部分與 #4c／#10j 同樣放 `internal/database` 並用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴**，否則會被兩支腳本的 `-test.run` 篩掉 |
+| 20b | **重新上市時的 `ON CONFLICT`**，兩個案例 | ①job-owned：兩欄**一起清成 `NULL`**，不留半套狀態；②⛔ **人工值重新上市** → **也要清除**。⚠️ 「人工值永不自動改動」只約束本 job；ISIN 清冊是 `is_listed` 的權威來源，留著會做出 `is_listed=true` ＋ 有終止日的不可能狀態 |
+| 20d | **兩欄不變量**：試圖寫入 `delisted_date IS NULL` ＋ `delisted_event_id` 非 NULL | 被 **`CHECK`** 拒絕，且該 `stock_symbols` 列**保持不變**。⛔ **必須先建立一筆有效的 `delisting_events.id` 再拿它去寫**——否則寫入可能只是**因為 FK 找不到目標而失敗**，`CHECK` 根本沒被驗到。⚠️ 撤銷或重新上市時只清一欄就會產生這個半套狀態 |
+
+**migration 驗證分工**（第一版寫錯，`backend/scripts/test.sh` **沒有 DSN 時 postgres 會直接 skip**）：
+
+| engine | 指令 |
+|---|---|
+| SQLite | `backend/scripts/test.sh` |
+| PostgreSQL | **`scripts/test-postgres-migrations.sh`** |
+| MySQL | `scripts/test-mysql-migrations.sh` |
+
+⚠️ **另外要跑一次 scheduler 的 race test**：
+`RACE=1 backend/scripts/test.sh ./internal/scheduler/...`
+本筆新增的 single-flight 涉及 goroutine ownership（`TryStartDelistingReconcile`
+自己 spawn、自己 `defer` 釋放），**一般 backend 測試預設不開 `-race`**
+（`backend/scripts/test.sh` 的 `RACE=1` 是選項，預設關閉，因為 race detector 需要 cgo
+且記憶體是這台 host 的極限）。不特別跑就偵測不到資料競爭。
+
+驗收在 **dev stack**（`docker-compose.dev.yml`），程序見
+[`development-workflow.md`](./development-workflow.md)「在 dev stack 上驗排程類功能」。
+
+#### 完成與驗收條件
+
+**預設開關**：`backend/config.yaml` 的 `delisting.enabled` **預設 `false`**
+（範本一律 false 是既有慣例），live 靠容器 env 開啟。
+
+關閉本筆需要**全部**成立：
+
+1. 三個 engine 的 migration 驗證各自通過（指令見上表）。
+2. 測試 #1～#20g（含 2b、3b／3c、4b／4c、7b／7c、9b、10b～10j、12b、17～17d、19～19d、20～20g、20f2～20f4、20f5a／20f5b）全綠，
+   **三組 mutation 各自確認會紅**：**#4**（移除／反轉 `UPDATE` 的 `is_listed` predicate）、
+   **#5**（移除名稱比對）、**#4c④ 的 `BINARY`**（拿掉後 ④a／④b 必須雙雙變紅），
+   且 `RACE=1` 的 scheduler race test 通過。
+3. dev stack 用**手動觸發端點**跑過一輪完整流程：
+
+   ```sql
+   -- dev stack 是 PostgreSQL，直接用 source 常數（? 是程式端的 bind placeholder，psql 不吃）
+   SELECT COUNT(*) FROM delisting_events
+    WHERE source = 'twse_suspend_listing' AND missing_from_source_at IS NULL;
+   ```
+
+   ⛔ **不是 `COUNT(*)` 全表**——事件表**永久保留 missing 事件**，
+   經過一次日期更正或移除之後總筆數就會**大於**當輪 CSV 筆數，
+   「總數等於解析筆數」只在乾淨的首次匯入成立。
+   另外驗證 **missing 歷史事件仍在表裡**（`missing_from_source_at IS NOT NULL` 的那些沒被刪）。
+   （2026-09-04 實測 CSV 為 265 筆，但官方名單會成長，⛔ **不要把 265 寫死成驗收值**。）
+   `delisting_source_snapshots` 有 1 筆 `accepted`。
+4. **live 首輪 `job_runs`** 一筆紀錄，且：
+   * `job_name = delisting_reconcile`、`symbols_total` **等於當日 CSV 的 distinct 代號數**
+     （⛔ 不是事件筆數；2026-09-04 兩者恰好都是 265 是巧合）、`symbols_failed = 0`；
+   * 狀態符合上面的推導表（**若 A／U／D／R／RX／X 或來源更正有值，`partial` 才是正確結果，
+     不是 `success`**）；
+   * log 有方向一 N／B／U／C／D／M／X／P ＋ 方向二 R／RX／A 的完整計數
+     （**方向一總和應等於去重後事件數**），**以及事件筆數**（它不在 `job_runs` 裡）。
+5. **live 實際結果符合預期案例**：
+   * `2867.delisted_date = 2026-09-01`，且 **`delisted_event_id` 非 NULL 並指向
+     「同代號、同日期、`missing_from_source_at IS NULL`」的那筆事件**
+     （只驗日期不足以證明 provenance 正確）；
+   * `2301` / `2432` / `6423` 的 `delisted_date` **與 `delisted_event_id` 都仍為 NULL**，
+     且 `2432` 記為 **B** 而非 C。
+6. `GET /scheduler/status` 回傳新 job 且非 `never_run`。
+7. **觀察期 20 個交易日**：記錄 A 類每日筆數與是否為真陽性，期滿後決定
+   A 類要維持 Warn 還是升級。⚠️ 期滿前不移除本筆。
+
+#### 風險與回滾
+
+| 風險 | 緩解 |
+|---|---|
+| **代號重用造成延遲觸發的錯誤回填** | 投影規則 1～7 全部 fail-closed ＋ 名稱比對（測試 #5 保證）＋ 事件表保留原始事實可事後修正 |
+| **重新上市留下 `is_listed=true + delisted_date`** | ISIN `upsert` **把 `delisted_date` 與 `delisted_event_id` 一起清除**（測試 #7／#7b／#7c 三種順序；人工值重新上市見 #20b②） |
+| **來源更正把縮水防護鎖死** | 基準改用上次 `accepted` 快照而非累計事件數；人工解鎖只走手動端點參數（測試 #10／#10b／#10b2） |
+| **暫時性缺漏讓事件永久不可投影** | `ON CONFLICT` 清回 `missing_from_source_at`（測試 #10e／#10f） |
+| **一筆早年消失的事件讓 job 永久 `partial`** | 更正計數改為邊緣觸發（只算狀態轉換），標記 SQL 帶 `WHERE missing_from_source_at IS NULL`（測試 #10h） |
+| **override 放行零筆，把防護基準降成 0** | `accept_shrink` 只允許 `0 < row_count < 上次 accepted`（測試 #10g） |
+| **cron 與手動重疊，舊資料後 commit 覆蓋新資料** | single-flight 一把鎖涵蓋全部入口；手動端點同步取鎖、失敗回 409；早退一律由入口 `defer` 釋放（測試 #17～#17d） |
+| **記憶體仲裁結果過期後仍寫入** | 最終 `UPDATE` 是 CAS：重驗 `is_listed`、ownership 狀態、以及 name／market／type／`listed_date`（⛔ 不用秒級的 `updated_at` 當 row version）；落空歸 X、不重試（測試 #4／#4b） |
+| **MySQL 的 no-op `UPDATE` 回 0 列，穩定投影每天被誤判成衝突** | 目標值相同時改走 guarded `SELECT ... FOR UPDATE`，⛔ 不看 no-op 的 affected rows；**PG／MySQL** 真跨連線驗（測試 #4c），SQLite 另驗串行化 |
+| **guarded `SELECT` 讀到舊 snapshot 仍錯計 P** | **最終寫入點**用 `SELECT ... FOR UPDATE`（MySQL 預設 REPEATABLE READ，本專案無 isolation 覆寫）；⛔ **初始 snapshot 用一般 `SELECT`**，否則鎖住列會讓 X／RX 不可達；SQLite 靠 write transaction 串行化；查無 → X |
+| **`listed_date` 等 nullable 欄位用 `= NULL` 比較，無競爭也誤判 RX** | 由程式依 snapshot 是否為 `NULL` 組出 `IS NULL` / `= ?`，三 engine 共用（測試 #20g①） |
+| **MySQL 繼承的 collation 可能大小寫不敏感，CAS 誤判成「沒變」** | `name`／`market`／`security_type` 在 CAS 統一寫 `BINARY col = BINARY ?`（⛔ 不改**正式**欄位的 collation）；**測試 fixture 自行釘住 CI collation** ＋ 拿掉 `BINARY` 的 mutation 必須變紅（測試 #4c④a／④b） |
+| **SQLite 的 busy policy 用錯地方** | `busy_timeout=5000` 定位為**外部 writer 防護**；本 job 自身入口重疊由 single-flight 管，**ISIN 與本 job 之間**靠同日依賴＋pool 排隊＋CAS（測試 #20f／#20f2） |
+| **PRAGMA 只設在 pool 上，connection 重建後靜默失效** | 定案用 **DSN pragma**，**`busy_timeout` 與 `foreign_keys` 一起搬**（⛔ 只搬前者的話 SQLite FK 會靜默失效，#19／#19d 整組落空）；測試兩個 handle 都走 `store.NewSQLite`，#20f3 保留同一 pool 並強制回收 physical connection、兩個 pragma 都驗 |
+| **DSN 直接字串拼接，做出第二個 `?` 或蓋掉既有參數** | 解析並合併既有 query 再加 pragma；live 現況是純相對路徑（`config.yaml:12`），另有空 DSN 與已帶 query 的 `file:` URI 三種形態（測試 #20f5a／#20f5b） |
+| **外部 DSN 帶 `foreign_keys(0)` 關掉 FK，#19／#19d 整組落空** | 那兩個 pragma 是強制政策：辨識涵蓋 `()`／`=`／空白／大小寫／URL encode 五種變體後移除再覆寫，其他 pragma 保留（測試 #20f5a④⑤） |
+| **`?`／`#` escape 錯誤，開到另一個被截斷的 DB** | 用 `url.URL{Scheme,Path}` 組（`/` 不編碼）；integration test 另查 `PRAGMA database_list` 比對 `main` 的絕對路徑（測試 **#20f5b A／B 的第 ③ 項斷言**） |
+| **相對路徑被 `url.URL` 做成 `file://../..`，`..` 被當 host** | 先 `filepath.Abs` 再組 URI（⛔ 不靠 `OmitHost` 旗標）；#20f5b **相對／絕對各測一次**——live DSN 正是相對路徑 |
+| **memory DSN 被 `Abs` 變成磁碟檔，靜默改掉既有語意** | 三分支判準：裸 `:memory:` 特判；**任何已是 `file:` URI 一律保留 URI 語意、不做 `Abs`**（涵蓋 `file::memory:?cache=shared` 與 named memory URI）；只有一般檔案路徑才 `Abs`（測試 #20f5a⑥／**#20f5b 案例 C**） |
+| **query 值被 double decode，非衝突 pragma 被誤移除** | decode 只發生在 `u.Query()` 那一次，⛔ 不再自己 decode；double-encoded fixture 把關（測試 #20f5a⑦） |
+| **`startRun` 就被卡住，`runID=0` 讓 `failed` 紀錄根本不存在** | **#20f②／#20f2 固定時序**：`startRun` 先取得有效 `runID` 才製造競爭；**#20f③ 則刻意讓外部 writer 在 `startRun` 之前持鎖**，驗的是「失敗後中止」而不是寫 `failed`（`Finish` 不檢查 affected rows，`WHERE id=0` 靜默更新零列） |
+| **`runID=0` 仍跑完一輪，寫了資料卻沒有 audit record** | `startRun` 失敗即中止核心流程（任何 engine 適用）（測試 #20f4） |
+| **撤銷本身 CAS 落空卻仍計 R** | 方向二獨立的 `revocation_conflict`（RX），單位是主檔 symbol，⛔ 不併進方向一的 X（測試 #20e①／#4c③） |
+| **撤銷 CAS 條件不足，清掉已重新成立的投影** | 撤銷套用與投影**完全相同**的那組條件（含 `name`／`market`／`security_type`／`listed_date`／`delisted_date`）（測試 #20e②） |
+| **SQLite 的兩種 busy 混為一談** | 分開：reconcile 先持鎖 → 競爭者 busy、本輪正常收斂；競爭者先持鎖 → 本 job 在 `busy_timeout` 內重試、逾時才整輪 `failed`。兩 handle 指向同一檔案 DB（測試 #4c／#20f） |
+| **`source_corrected` 誤採主 upsert 的 `RowsAffected` → 永久 `partial`** | 首次缺席才用 affected rows（predicate 保證轉換）；改名／重現改為讀取更新前狀態在記憶體比對；三 engine 各測一次（測試 #10j） |
+| **抓取逾時後 `job_runs` 永遠卡在 `running`** | `finishRunStatus` 與既有 helper 共用 `context.WithoutCancel` 的 writer（測試 #18）——不共用等於重新引入 I-084 |
+| **同批重複 key 讓 postgres 整批 upsert 失敗** | 解析階段去重／矛盾即失敗，`row_count` 採去重後數量（測試 #2b） |
+| **兩筆快照同時間戳，縮水基準不確定** | 快照加單調 `id`，一律 `ORDER BY id DESC LIMIT 1` |
+| **cron 被擋的紀錄蓋掉手動的成功** | cron 被擋只記 Warn、不寫 `job_run`（`GetLatestPerJob` 依 `started_at DESC, id DESC`，晚起跑的 failed 會勝出）（測試 #17） |
+| **30 天清理刪掉縮水基準或被 FK 擋住** | `job_run_id` nullable ＋ `ON DELETE SET NULL`；快照本身長期保存（測試 #19／#19b） |
+| **名稱正規化過度，兩家公司被判為同一家** | suffix allowlist 封閉、只從尾端移除完整 suffix 且最多一次；負向測試**含連字號案例**把關（測試 #3b／#3c） |
+| **來源更正後投影永遠停在舊日期** | `delisted_event_id` provenance ＋ **每輪重算唯一 active eligible event**（不是列舉觸發條件）（測試 #20／#20b） |
+| **人工值被靜默轉成 job-owned 再被撤銷刪掉** | 所有權單向：日期相同也不補 provenance，記 M 類（測試 #20c） |
+| **FK 誤用 `SET NULL`，job-owned 被降成人工值** | `delisted_event_id` 明定 `RESTRICT`；三 engine 各驗刪除被拒絕（測試 #19d） |
+| **A 與 R／RX 同時命中** | 方向二明訂判定順序 **R → RX → A**（M 已移至方向一），且**定為單一作法**：R／RX／A 都基於**撤銷前的同一份 snapshot** 分類（⛔ 排除法要排的是 R ∪ RX，已不採用）（測試 #12②④） |
+| **M 只比日期，把身分不符說成「來源佐證一致」** | M 要求 candidate 數恰為 1（已含名稱／`listed_date`／market 全通過）且日期相符（測試 #20c④⑤） |
+| **只清一欄留下半套狀態** | `CHECK (delisted_event_id IS NULL OR delisted_date IS NOT NULL)`，三 engine 各驗一次（測試 #20d／#19c） |
+| **人工同日期的 CSV 事件沒有分類** | M 移進方向一（排在 D 與 P 之間），方向一才真的每筆恰好一類（測試 #12①） |
+| **把方向二誤當窮盡分割** | 方向二明訂是 outcome counters、只要求 **R／RX／A 三者不重複**（測試 #12②） |
+| **single-flight 的 goroutine ownership 有資料競爭** | 驗收要跑 `RACE=1 backend/scripts/test.sh ./internal/scheduler/...`（預設不開 `-race`） |
+| 名稱比對誤判（公司改名） | 只會**少寫**不會多寫，落入 D 類告警等人工；不放寬其他條件 |
+| ISIN sync 與本 job 重疊的 TOCTOU | 最終 `UPDATE` **重驗可並行變動的主檔條件與 ownership**（CAS，測試 #4／#4b）＋ 同日成功依賴（測試 #8） |
+| 回填規則寫錯 | `delisted_date` **不影響任何抓取或分析**（那些只讀 `is_listed`）；可直接 `UPDATE` 清掉 |
+| 新排程拖慢或打爆 TWSE | 單一 URL、每日一次、有 timeout；比 ISIN sync（兩來源、7.5 MB）輕得多 |
+| TWSE 改格式 | 筆數防護 ＋ all-or-nothing ＋ 解析器測試；失敗整輪 `failed` 而非靜默 |
+| migration 076 | 兩張新表 ＋ `stock_symbols` 的**兩個 nullable 欄位**（`delisted_date`／`delisted_event_id`）＋ **FK（`RESTRICT`）＋ `CHECK`**，**回滾即 down migration**（順序：先移除主檔 FK／欄位再刪事件表）；排程可用 `delisting.enabled=false` 關掉 |
+
+#### 完成後的歸檔位置
+
+* [`database-schema.md`](./database-schema.md)——新表 `delisting_events`／
+  `delisting_source_snapshots` 與 `stock_symbols.delisted_date` 的語意、
+  **兩層設計的理由**（歷史事件 vs current-state 主檔）、事件身分鍵與來源更正三態，
+  以及**重新上市時 `delisted_date` 必須清除**的契約、
+  **來源更正計數是邊緣觸發**（只算狀態轉換、單位是 distinct event 數，避免永久 `partial`）、
+  快照的 `id` 單調排序契約、`job_run_id` 的 `ON DELETE SET NULL` 與 30 天清理的關係、
+  **名稱正規化的封閉 allowlist 與處理順序**、**`delisted_event_id` 的 provenance 語意**
+  （本 job 投影 vs 人工填入、所有權單向不可升級、FK 用 `RESTRICT` 的理由）、
+  **每輪重算而非列舉觸發條件**的收斂方式（含 candidate 的定義、七條規則的三種角色
+  ——1～5 候選過濾／6 數量仲裁／7 ownership 四態仲裁——`UPDATE` 的 CAS 契約
+  與「`RowsAffected = 0` 不等於 CAS 落空」、**guarded read 必須是 locking read
+  （MySQL REPEATABLE READ 的 snapshot 陷阱；初始 snapshot ⛔ 不可 `FOR UPDATE`）**、
+  **MySQL 字串 CAS 需 binary 比較**、**nullable 欄位的 null-safe 比較**、
+  **SQLite 的兩種拓撲與 `busy_timeout` 的定位（含 connection-local pragma 必須走 DSN
+  ——`busy_timeout` 與 `foreign_keys` 都是，`journal_mode` 不是）**、
+  **人工值保護只約束本 job、
+  ISIN 確認重新上市時 current-state 不變量優先**）、
+  **兩欄的資料不變量**，以及同批重複 key 的解析階段處置。
+* [`architecture.md`](./architecture.md)「下市過濾（第 1 道）」段（第 226 行起）——
+  **判定權責**：`is_listed` 只由 ISIN 清冊缺席決定，CSV 只補日期與對帳；
+  **代號重用**這個約束；以及**上櫃沒有第二來源可對帳**的已知限制。
+* [`api-reference.md`](./api-reference.md)——`GET /scheduler/status` 的 job 契約，
+  **以及 `POST /api/v1/scheduler/delisting-reconcile/run`**——含 `accept_shrink` 參數語意
+  （只放行 `0 < row_count < 上次 accepted`）與 **`409` 併發回應**。
 
 ---
 

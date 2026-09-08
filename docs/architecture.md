@@ -1208,6 +1208,64 @@ Redis 與 WebSocket 拿到的是新值；`signals` 表少一列，但推播照�
 
 ⛔ **不要把「DB 掛掉時仍保住推播」寫成這個設計的目的**，那是錯的。
 
+#### live 運作觀察：四個交易日（2026-09-03～09-08）
+
+I-102 的兩段於 2026-09-02 16:35 部署，2026-09-08 完成執行期觀察
+（原記於 `todo.md` T-070，**已收斂**——該筆的完整判讀過程已併入本節）。
+
+**觀察窗**：以三個 job name 篩選後 228 筆，id 落在 2223～2476 之間
+（⚠️ 該區間共 254 個 id，中間夾著其他 job 的紀錄，**區間長度不等於筆數**）；
+2026-09-03 08:50 ～ 2026-09-08 15:00（CST）。log 取自唯一的 live backend 容器
+`stock_trading-backend-1`。
+
+| job | 輪次 | success | partial | failed |
+|---|---|---|---|---|
+| `pre_market` | 4 | 4 | 0 | 0 |
+| `intraday` | 220 | 218 | 0 | **2** |
+| `daily_close` | 4 | 4 | 0 | 0 |
+
+⚠️ **三個層次的名字不一樣，查證時不要混用**：
+
+| 層次 | 實際的字串 | 觀察窗內 |
+|---|---|---|
+| `job_runs.error` | `evaluate_failed:` / `fetch_failed:`（`jobFailureTally.summary()` 產生） | 沒有 `evaluate_failed:`；只有 2 筆 `fetch_failed:11` |
+| 失敗 log | 訊息 **`signal evaluate failed`** | 0 筆 |
+| 降級 log | 訊息 **`signal evaluate degraded`**，降級標記在它的 `stages` 欄位 | 0 筆 |
+| 成功 log | `signal generated` 的**欄位** `db_persisted` / `degraded`（⛔ **不是 `signals` 的資料表欄位**） | 全部 `true` / `false` |
+
+**落盤核對**：主要證據是每一筆 `signal generated` 都帶 `db_persisted=true`
+（引擎對每次落盤結果的逐筆自述）；每日 log 筆數與 `signals` 表（依 `created_at`）
+四天相等（134／172／160／124）是**交叉佐證**。
+⛔ 後者不是逐筆鍵比對，**排除不了「一進一出」的錯配**——log 行沒有 `signals.id`。
+
+**結論：觀察窗內沒有出現這兩段涉及的任何失敗或降級**（四個層次都是零），
+**也未發現「產生了卻沒落盤」**——⚠️ 是「未發現」，不是「完全排除」。
+
+⚠️ **兩筆 `intraday` failed 不屬於這個契約**：`fetch_failed:11` 是 Yahoo 批次
+**行情抓取**整批失敗，發生在四個 `Evaluate` 呼叫點**之前**，原本就看得見。
+
+**`job_runs.error` 沒有原始錯誤外洩**（I-102 的另一半契約，見上方 `joberr` 那節）。
+⚠️ **這項查的範圍比上表寬**：同一時間窗內**所有** job 的非 success 紀錄，不只那三個。
+出現過的 error 只有下面三種，**都符合允許的安全格式**——但⛔ **三者的形態不同，
+不要一律說成「stage 前綴 ＋ 封閉值域 reason code」**（只有第三種是）：
+
+| error | 出處 | 形態 |
+|---|---|---|
+| `fetch_failed:11` | `intraday`（Yahoo 批次整批失敗） | stage token ＋ **計數**（不是 reason code）；原始 URL 只進 log |
+| `verification_unavailable: timeout` | `candle_gap_detection` | stage token ＋ reason code |
+| `verification_unavailable: 1 筆驗不了` | `candle_gap_detection` | stage token ＋ **固定安全文字＋計數** |
+| `sr_analysis:2330:internal_error` | `sr_analysis` | **stage ＋ symbol ＋ 封閉值域 reason code**（`joberr.SummaryFor`） |
+
+⚠️ **安全的判準是「不含原始錯誤文字、主機、DSN、SQL 片段」**，不是「一定長成
+reason code」——計數與本專案自己組的固定文字同樣安全（`joberr.SafeMessenger` 的用途）。
+
+ℹ️ 同期唯一的例外方向是 `corporate_action_sync` 的一筆 `partial`——它的 `error` 是
+**空字串**（逐檔失敗不寫原因），那是可觀測性缺口而不是外洩，已另立 `issue.md` I-112。
+
+⛔ **這次觀察證明不了 reservation 有沒有過度抑制**：`duplicate signal suppressed by
+reservation` 是 Debug 級而 live 從 Info 起收，那行不會被寫出來。上面那些證據處理的是
+「產生了之後有沒有落盤」（**未發現**異常），完全碰不到「該產生的有沒有產生」。
+
 #### indicator 的三種失敗要分得開
 
 `indicator.Compute` 的失敗分成三類，**都可用 `errors.Is` 判斷**：

@@ -185,6 +185,13 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
 | trend | 當時趨勢狀態（`BULLISH`, `BEARISH`, `SIDEWAYS`） |
 | strength | 訊號強度，預設 1.0；有籌碼資料時會依 `chip_scores.signal` 上修或下修 |
 | chip_signal | 評估當下使用的籌碼訊號；空值代表查無籌碼資料 |
+| **ts** | **觸發當下的 K 棒時間戳，⛔ 不是寫入時間** |
+| created_at | 實際寫入時間 |
+
+⚠️ **統計每日訊號量要用 `created_at`，不是 `ts`**（2026-09-08 的 live 觀察時踩到，原記於 `todo.md` T-070，已收斂；現況見 `architecture.md`「live 運作觀察：四個交易日」）：
+盤前那輪（08:50）產生的訊號帶的是**前一個交易時段**的 K 棒時間戳，用 `ts` 分組會把
+它們算到前一天，做出「log 比資料表多幾筆」的假象——那個差額看起來很像
+「訊號有產生但沒落盤」，實際上一筆都沒少。
 
 ---
 

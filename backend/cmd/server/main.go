@@ -242,6 +242,28 @@ func main() {
 	// config 的調整，所以與其他注入放在一起、同樣在 Start() 之前。
 	sched.SetSRZoneVerify(cfg.SRZoneVerify)
 
+	// 終止上市名單對帳（計畫書 docs/todo.md T-071）。⚠️ **全程唯讀 is_listed**：
+	// 只把官方的終止上市日期補進 stock_symbols.delisted_date 並對帳告警，
+	// 判定「還在不在交易」的權責仍只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。
+	//
+	// **readiness 走 jobRunRepo 而不是時間錯開**：sync 沒跑成功時 is_listed 是舊的或
+	// 不完整的，拿它當投影前置沒有意義（fail-closed，見 scheduler.JobRunReadiness）。
+	// Enabled=false（預設）時仍然建立並注入，由 Start() 決定不註冊 cron——
+	// 手動觸發端點在關閉時照樣可用，dev stack 的驗收需要它。
+	sched.SetDelistingReconcile(
+		market.NewDelistingReconciler(
+			market.NewTWSESuspendListingClient(
+				cfg.Delisting.URL,
+				time.Duration(cfg.Delisting.TimeoutSec)*time.Second,
+				log,
+			),
+			store.NewDelistingRepo(db),
+			scheduler.NewJobRunReadiness(jobRunRepo),
+			log,
+		),
+		cfg.Delisting,
+	)
+
 	// 回收上一個 process 留下的孤兒執行紀錄。語意與「為什麼不在 shutdown 收尾」見
 	// docs/api-reference.md 的「`running` 不套 stale 門檻，孤兒紀錄由啟動時回收」。
 	//

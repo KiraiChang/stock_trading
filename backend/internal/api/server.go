@@ -132,6 +132,7 @@ func NewServer(
 		protected.POST("/scheduler/corporate-action-sync/run", sch.RunCorporateActionSync)
 		protected.POST("/scheduler/evaluation-universe-sync/run", sch.RunEvaluationUniverseSync)
 		protected.POST("/scheduler/sr-analysis/run", sch.RunSRAnalysis)
+		protected.POST("/scheduler/delisting-reconcile/run", sch.RunDelistingReconcile)
 
 		eu := handler.NewEvaluationUniverseHandler(evaluationUniverseRepo, log)
 		protected.GET("/evaluation-universe", eu.List)

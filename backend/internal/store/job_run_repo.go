@@ -17,8 +17,9 @@ type JobRunRepo interface {
 	// 一天就 55 筆，會把早上跑過的 job 整批擠出視窗，讓 /scheduler/status 誤報成
 	// never_run（見 docs/api-reference.md 的 GET /scheduler/status「取數方式」）。
 	// **回傳的是「表裡有紀錄的 job_name 各一列」**：沒跑過的 job 不會出現，
-	// 空表回 0 筆。「/scheduler/status 一定回 11 列」是 handler 遍歷
-	// knownSchedulerJobs 補出來的，不是這個方法的保證。
+	// 空表回 0 筆。「/scheduler/status 一定回 len(knownSchedulerJobs) 列」是 handler
+	// 遍歷 knownSchedulerJobs 補出來的，不是這個方法的保證（⛔ 不要在這裡寫死筆數，
+	// 每加一支排程就會過時）。
 	GetLatestPerJob(ctx context.Context) ([]JobRun, error)
 	DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error)
 	// AbortRunning 把所有仍停在 `running` 的紀錄改寫成 `aborted`，回傳筆數。

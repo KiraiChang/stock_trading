@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（**計畫書待確認**，尚未實作。2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正**） |
+| 狀態 | **已實作，review 已通過（2026-09-08，兩輪：5 項程式問題 ＋ 2 項整理事項全部修完）**——⛔ **但本筆還不能收斂**，驗收條件 7 的 20 個交易日觀察期尚未開始（計畫書自己寫明「期滿前不移除本筆」）。**驗收條件 1、2 已完成**：三 engine migration 驗證各跑過、測試清單 #1～#20g 全數實作且全綠、三組 mutation（#4、#5、#4c④）都確認會變紅、`RACE=1` 通過。**剩下條件 3～6（dev stack 實跑）與 7（20 個交易日觀察期）**，操作步驟見下方「dev 驗收操作清單」。計畫階段 2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正** |
 | 優先度 | 中 |
 | 分類 | Go / 排程 / DB schema / 資料品質 |
 | 建立日期 | 2026-09-04 |
@@ -1171,6 +1171,133 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 7. **觀察期 20 個交易日**：記錄 A 類每日筆數與是否為真陽性，期滿後決定
    A 類要維持 Warn 還是升級。⚠️ 期滿前不移除本筆。
 
+#### dev 驗收操作清單（**待執行**——2026-09-07 未跑，使用者選擇不停 live）
+
+驗收條件 3～6 的可執行版本。⚠️ **這台 host 只有 2GiB，起 dev stack 前要先停 live**
+（見 `development-workflow.md`「`MEM` 是上限，不是預留」）；live 的排程時段是平日
+06:30／15:00／16:00／17:00／21:00／22:00，挑空窗做並在下一支之前起回來。
+
+**0. 停 live（不是 down，⛔ 不加 `-v`）**
+
+```bash
+docker compose -f /opt/stacks/scripts/stock_trading/compose.yml stop
+# 驗收結束後：
+docker compose -f /opt/stacks/scripts/stock_trading/compose.yml start
+```
+
+**1. 建 dev image 並起 stack**（⛔ 不要手打 `docker compose build`，理由見
+`development-workflow.md`：冷 cache build 峰值約 420MiB，腳本會先 `down` 才 build）
+
+```bash
+DELISTING_ENABLED=true scripts/smoke-dev.sh
+```
+
+ℹ️ `DELISTING_ENABLED` 只決定 **cron 要不要註冊**；手動端點一律可用
+（reconciler 在 `main.go` 無條件注入）。要驗條件 6 的「非 `never_run`」其實不必開它，
+但開了才驗得到 cron 註冊那條。⚠️ **環境變數只在容器建立時帶入**，改了要重建容器。
+
+**2. 確認 image 夠新**（⛔ 這是最隱蔽的失敗模式：migration 是 embed 進 binary 的）
+
+```bash
+docker exec stock_trading_dev-postgres-1 \
+  psql -U trading -d trading -tAc "SELECT max(version_id) FROM goose_db_version;"
+# 期望：>= 76
+```
+
+**3. 取得 token**（新帳號預設 `inactive`，dev 直接改 DB 最省事）
+
+```bash
+curl -s -X POST localhost:18080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dev@example.com","password":"devdevdev"}'
+docker exec stock_trading_dev-postgres-1 \
+  psql -U trading -d trading -c "UPDATE users SET status='active' WHERE email='dev@example.com';"
+TOKEN=$(curl -s -X POST localhost:18080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"dev@example.com","password":"devdevdev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+```
+
+**4. 前置依賴：當日的 `stock_symbol_sync` 必須成功**（⛔ 沒有它整輪會 `failed`；
+這支走 TWSE ISIN，**不吃 FinMind**，所以 dev 沒金鑰也跑得動）
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  localhost:18080/api/v1/scheduler/stock-symbol-sync/run
+# 等它跑完（約數十秒～數分鐘），確認 success：
+docker exec stock_trading_dev-postgres-1 psql -U trading -d trading -tAc \
+  "SELECT status, started_at FROM job_runs WHERE job_name='stock_symbol_sync' ORDER BY id DESC LIMIT 1;"
+```
+
+**5. 觸發對帳**（期望 `202` ＋ `accept_shrink:false`）
+
+```bash
+curl -i -X POST -H "Authorization: Bearer $TOKEN" \
+  localhost:18080/api/v1/scheduler/delisting-reconcile/run
+# 併發回應（可選）：立刻再打一次，期望 409
+```
+
+**6. 驗收條件 3：事件與快照**
+
+```sql
+-- 本輪仍在來源的事件數（⛔ 不是 COUNT(*) 全表：missing 事件永久保留）
+SELECT COUNT(*) FROM delisting_events
+ WHERE source = 'twse_suspend_listing' AND missing_from_source_at IS NULL;
+-- missing 的歷史事件仍在（首次匯入時會是 0，之後才會有）
+SELECT COUNT(*) FROM delisting_events WHERE missing_from_source_at IS NOT NULL;
+-- 快照 1 筆 accepted
+SELECT id, row_count, accepted, job_run_id FROM delisting_source_snapshots ORDER BY id DESC LIMIT 3;
+```
+
+⚠️ **2026-09-04 實測 CSV 是 265 筆，但官方名單會成長，⛔ 不要把 265 寫死成驗收值**——
+要比的是「事件數 == 本輪 log 的 `event_rows`」。
+
+**7. 驗收條件 4：`job_runs`**
+
+```sql
+SELECT job_name, status, symbols_total, symbols_failed, error, started_at, finished_at
+  FROM job_runs WHERE job_name = 'delisting_reconcile' ORDER BY id DESC LIMIT 1;
+```
+
+* `symbols_total` = **當日 CSV 的 distinct 代號數**（⛔ 不是事件筆數）、`symbols_failed = 0`；
+* 狀態依推導表：**A／U／D／R／RX／X 或來源更正有值時 `partial` 才是正確結果**；
+* log 要有方向一 N／B／U／C／D／M／X／P ＋ 方向二 R／RX／A 的完整計數與 `event_rows`：
+
+```bash
+docker compose -f docker-compose.dev.yml logs backend | grep "delisting reconcile completed"
+```
+
+**8. 驗收條件 5：實際結果符合預期案例**
+
+```sql
+SELECT s.symbol, s.name, s.is_listed, s.delisted_date, s.delisted_event_id,
+       e.symbol AS ev_symbol, e.delisted_date AS ev_date, e.missing_from_source_at
+  FROM stock_symbols s
+  LEFT JOIN delisting_events e ON e.id = s.delisted_event_id
+ WHERE s.symbol IN ('2867','2301','2432','6423') ORDER BY s.symbol;
+```
+
+* `2867`：`delisted_date = 2026-09-01`，且 `delisted_event_id` **非 NULL 並指向同代號、
+  同日期、`missing_from_source_at IS NULL` 的那筆事件**（⛔ 只驗日期證明不了 provenance）；
+* `2301` / `2432` / `6423`：`delisted_date` **與** `delisted_event_id` **都仍為 NULL**，
+  且 log 裡 `2432` 記為 **B（`still_listed`）而非 C**。
+
+**9. 驗收條件 6：`GET /scheduler/status`**
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/status \
+  | python3 -m json.tool | grep -A 8 delisting_reconcile
+```
+
+期望**不是** `never_run`（有紀錄之後顯示的就是那筆的狀態）。
+⚠️ 若步驟 1 沒帶 `DELISTING_ENABLED=true`，`stale` 會是 `false`（未註冊不套門檻）——
+那是正確的，不是缺陷。
+
+**10. 收尾**：起回 live（步驟 0 的第二條指令），並確認三個容器都 Up。
+
+⚠️ **live 要真的開排程，得改 `/opt/stacks/scripts/stock_trading/deploy.sh` 的 `export`**
+（`config.yaml` 一律 `false`，live 靠容器 env 開）——那是 repo 外的檔案，要另外處理。
+驗收條件 7 的 20 個交易日觀察期**要等 live 開起來才開始算**。
+
 #### 風險與回滾
 
 | 風險 | 緩解 |
@@ -1222,6 +1349,83 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 | 新排程拖慢或打爆 TWSE | 單一 URL、每日一次、有 timeout；比 ISIN sync（兩來源、7.5 MB）輕得多 |
 | TWSE 改格式 | 筆數防護 ＋ all-or-nothing ＋ 解析器測試；失敗整輪 `failed` 而非靜默 |
 | migration 076 | 兩張新表 ＋ `stock_symbols` 的**兩個 nullable 欄位**（`delisted_date`／`delisted_event_id`）＋ **FK（`RESTRICT`）＋ `CHECK`**，**回滾即 down migration**（順序：先移除主檔 FK／欄位再刪事件表）；排程可用 `delisting.enabled=false` 關掉 |
+
+#### 實作紀錄（2026-09-07）
+
+計畫書列的檔案全部完成：migration 076（三個 engine）、`store` 的模型／投影／事件 repo
+與 SQLite DSN pragma、`market` 的 CSV client 與對帳器、`scheduler` 的排程與
+`finishRunStatus`、`config` 的 `delisting` 區段、`main.go` 注入、
+`POST /api/v1/scheduler/delisting-reconcile/run` 與 `knownSchedulerJobs`／
+`jobStaleThreshold`、前端 `JobName`／label／API client／觸發按鈕。
+
+現況規格已歸檔（見下一節的位置）。**還沒做的是 dev stack 實跑驗收**——
+`enabled` 預設關閉，要用手動端點跑一輪並確認 `job_runs` 與投影結果。
+
+⚠️ **實作期間偏離計畫書一處**：`partial` 的原因原本寫成
+`joberr.Summary(stage, joberr.SafeMessenger(errors.New(...)))`，那是**編不過**的
+（`SafeMessenger` 是介面不是轉型函式），而且 `joberr.Summary` 走 `Classify`，
+即使編得過也會把整段計數壓成 `internal_error`。改成在 scheduler 內定義
+`delistingDegradedError`（實作 `SafeJobMessage`）並走 `joberr.Describe`——
+與 `candle_gap_detection` 的 `staleSourceError` 同款，語意與計畫書一致。
+
+#### Review 修正（2026-09-08，五項全部照改）
+
+review 提了 5 項（2 高 3 中）＋1 項文件整理。**逐項對照程式碼與計畫書後全部成立**，已修：
+
+| # | 問題 | 修法 | 回歸測試 |
+|---|---|---|---|
+| 高 1 | `Project`／`ConfirmProjection`／`Revoke` 的 **DB error 被吞成 X／RX**，交易仍會 commit | `tally` 與 `reconcileMaster` 改成回傳 error，`classifyEvent` 一路往上拋 → 整輪 `failed` ＋ rollback。X／RX 的定義收回「`UPDATE` 影響 0 列」 | `TestReconcileAbortsWhenProjectionWriteFails`（project／revoke 兩條，包住真實 tx 只讓單一方法回錯） |
+| 高 2 | CSV parser **靜默略過壞資料列**、也沒驗 header | 兩行 header 明確辨識（第 2 行三欄依序須含「日期」「名稱」「編號」）；header 之後任何非空列格式錯誤 → 整輪失敗。新增 `ErrUnexpectedSuspendListingHeader` / `ErrMalformedSuspendListingRow`；空行仍容忍 | `TestParseSuspendListingRejectsChangedHeader`（4 例）、`RejectsMalformedRows`（5 例）、`RejectsMalformedRowAmongValidRows`、`ToleratesBlankLines` |
+| 中 3 | MySQL 帶 `loc=Asia/Taipei` 時 **DATE key 差一天** | 新增 `store.DateKey` / `store.SameCalendarDay`（取掛鐘日期），`DelistingEvent.Key()`、`eventKeyOf`、`sameDay` 全部改用 | `TestDateKeyUsesCalendarDateNotUTC`、`TestMySQLMigrationsDelistingDateKeyUnderTaipeiLoc`（**另開帶 `loc` 的連線**，腳本 DSN 沒帶） |
+| 中 4 | U／D 與來源更正**缺規格要求的逐項 Warn** | 依分類表補齊等級：U／D → Warn（帶 symbol／新舊值），B／C／M → Info，來源更正三態各 Warn 一次且維持邊緣觸發 | `TestReconcileLogsPerItemWarnings`（含「持續缺席不得重複 Warn」） |
+| 中 5 | `delisted_event_id` 用 `sql.NullInt64`，JSON 變成 `{"Int64":…,"Valid":…}` | 改用既有的 `store.NullInt64` | `TestStockSymbolDelistedEventIDJSONShape` |
+| 文件 | `issue.md` 的「下一號」沒跟著推、檔尾多空行 | 改成 `I-112` 並補記 I-110／I-111 的發出原因；檔尾收乾淨 | — |
+
+⚠️ **第 4 項我一開始以為是「規格沒要求、不必改」**，對照計畫書「對帳分類」那張表的
+**等級欄**（U／D 標 **Warn**）與 #10d／#10i 之後確認 review 是對的——**規格有寫**。
+
+現況已同步到 `architecture.md`（三條契約：寫入失敗一律 rollback、解析器 fail-closed、
+DATE 用掛鐘日期）與 `database-schema.md`（DATE 比較那節 ＋ CAS 契約補一條）。
+
+#### 測試補齊（2026-09-07）
+
+計畫書測試清單裡原本缺的七項已補上：
+
+| # | 位置 | 內容 |
+|---|---|---|
+| 4c①②③ | `internal/database/delisting_cas_test.go` | PG／MySQL 各跑一次的**跨連線**交錯：值相同 → P、投影 CAS 落空 → X、撤銷 CAS 落空 → RX。⛔ 競爭者用**第二個獨立 pool**（同 pool 可能落在同一條 connection 上，就不是跨連線） |
+| 4c④a／④b | 同上（MySQL 專屬） | fixture 把 `stock_symbols.name` `ALTER` 成 `utf8mb4_0900_ai_ci` 並在結束還原；前置先證明該 collation 真的大小寫不敏感（**不成立就 Fatal，⛔ 不 skip**），再驗只有大小寫差異的並行改動必須讓投影／撤銷落空 |
+| 10j | 同上（三 engine） | `source_corrected` 的四個分支：無更正 → 0、首次缺席 → 1、持續缺席 → 0 且 timestamp 不變、重現＋改名 → 1 |
+| 20g①② | 同上 | `listed_date IS NULL` 無競爭時必須撤銷成功（三 engine）；`NULL → 非 NULL` 的跨連線改動必須落空成 RX（PG／MySQL） |
+| 9／9b | `internal/store/delisting_event_repo_test.go` | 兩個注入點（投影中途／快照寫入時）各一，三條斷言逐一檢查：事件無變更（**含 `last_seen_at`**）、快照無新增、投影未變 |
+| 20f①②③ | `store`（①）＋ `scheduler/delisting_sqlite_contention_test.go`（②③） | ①本輪先持鎖 → 拿到 busy 的是競爭者、本輪正常收斂；②`startRun` 之後外部 writer 持鎖 → 整輪 `failed` 且那筆既有 run 被寫回；③外部 writer 在 `startRun` 之前持鎖 → `runID = 0` → 中止且**沒有任何 job_run** |
+| 20f2 | `scheduler/delisting_sqlite_contention_test.go` | 同一 pool（`MaxOpenConns(1)`）的排隊：⛔ 不是 `SQLITE_BUSY` 而是 context 逾時，競爭者釋放後 `finishRunStatus` 仍把那筆寫成 `failed` |
+| 12b | `internal/market/delisting_reconciler_test.go` | 狀態推導八種情形 ＋ 摘要的計數不得互相灌數 |
+
+⚠️ **#20f② 實測推翻了計畫書的一個假設**：業務交易**不會**在 `busy_timeout` 內等待
+——`WithTx` 是 deferred transaction，先讀後寫，升級成 writer 時 SQLite 不呼叫 busy handler，
+直接回 `SQLITE_BUSY`（實測 0.06 秒就失敗）。`busy_timeout` 只保護**單句寫入**
+（`startRun` 的 INSERT 與 `finishRunStatus` 的 UPDATE，實測都會等滿 5 秒）。
+測試釘的是**實際行為**，處置選項記在 `issue.md` I-111。
+
+#### Mutation 檢查（2026-09-07 執行）
+
+驗收條件 2 要求的三組裡，**兩組已驗**（第三組 #4c④ 要等 #4c 實作出來才驗得了）：
+
+| Mutation | 手法 | 結果 |
+|---|---|---|
+| #4（移除） | `casPredicate` 拿掉 `is_listed = ?` 與對應的 `false` 參數 | 🔴 `TestProjectCASFailsWhenSnapshotStale/is_listed` 失敗（「CAS 應落空，但寫入成功了」） |
+| #4（反轉） | 同一條的參數 `false` → `true` | 🔴 上面那條 ＋ `TestProjectFromEmptyState`（首次投影反而做不到）雙雙失敗 |
+| #5 | `evaluateCandidateFilters` 移除規則 5 的名稱比對 | 🔴 `TestReconcileNameMismatchBlocksProjection` ＋ `TestReconcileManualOwnershipIsOneWay/④` 失敗 |
+| #4c④ | `casPredicate` 的 `str()` 拿掉 `BINARY col = BINARY ?` | 🔴 **`4c-4a` 與 `4c-4b` 雙雙失敗**，且**其餘 15 條 MySQL 子測試全部照常通過**——證明力來自這個對比 |
+
+四次都已還原（與備份 `diff` 一致），還原後 `store` ＋ `market` ＋ `scheduler` ＋
+`database` 全綠，MySQL／PostgreSQL 兩支腳本也各自重跑通過。
+
+ℹ️ **`TestReconcileRealWorldFourCases` 對 #5 不敏感是正確的**：fixture 裡的 `2301`
+（光寶科）`is_listed = true`，先被規則 1 擋下，根本走不到名稱比對。
+隔離規則 5 的是 `TestReconcileNameMismatchBlocksProjection`——這正是「四案例 fixture
+不能當成規則 5 的守門測試」的證據。
 
 #### 完成後的歸檔位置
 

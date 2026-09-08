@@ -7,9 +7,11 @@
     triggerSREvaluationRun,
     triggerCorporateActionSyncRun,
     triggerStockSymbolSyncRun,
+    triggerDelistingReconcileRun,
     type JobName,
     type SchedulerJob,
   } from '../lib/api/scheduler'
+  import { ApiError } from '../lib/api/client'
 
   const REFRESH_MS = 15000
 
@@ -31,6 +33,9 @@
     // **狀態對照表不動**：它的 partial 沿用既有語意（見 statusLabel），
     // 只是多了兩種成因——「驗不了」與「確認上游有缺漏」。
     candle_gap_detection: '日 K 缺漏偵測',
+    // ⚠️ **只補官方的終止上市日期並對帳**，不決定是否仍上市——那是「股票主檔同步」的權責。
+    // 標籤刻意不寫「下市同步」，避免被讀成它會把股票標成下市。
+    delisting_reconcile: '終止上市對帳',
   }
 
   const statusLabel: Record<string, string> = {
@@ -156,6 +161,29 @@
       triggerError = { ...triggerError, corporate_action_sync: '觸發失敗，請稍後再試' }
     } finally {
       triggering = { ...triggering, corporate_action_sync: false }
+    }
+  }
+
+  // 併發時後端**同步**回 409（cron 或另一次手動觸發正在跑）。
+  // **與觸發失敗分開顯示**：混在一起會讓使用者以為功能壞了而一直重按，
+  // 實際上那是「已經有一輪在跑」這個正常結果。
+  async function runDelistingReconcile() {
+    triggering = { ...triggering, delisting_reconcile: true }
+    triggerError = { ...triggerError, delisting_reconcile: '' }
+    triggerMessage = { ...triggerMessage, delisting_reconcile: '' }
+    try {
+      const res = await triggerDelistingReconcileRun()
+      triggerMessage = { ...triggerMessage, delisting_reconcile: res.message ?? '已在背景觸發' }
+    } catch (e) {
+      triggerError = {
+        ...triggerError,
+        delisting_reconcile:
+          e instanceof ApiError && e.status === 409
+            ? '已有一輪對帳在執行中，請稍後再試'
+            : '觸發失敗，請稍後再試',
+      }
+    } finally {
+      triggering = { ...triggering, delisting_reconcile: false }
     }
   }
 
@@ -309,6 +337,30 @@
                 {/if}
                 {#if triggerError.corporate_action_sync}
                   <p class="text-rise text-xs mt-2">{triggerError.corporate_action_sync}</p>
+                {/if}
+              </div>
+            {/if}
+
+            {#if job.job_name === 'delisting_reconcile'}
+              <div class="mt-3 pt-3 border-t border-border">
+                <button
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+                  disabled={triggering.delisting_reconcile}
+                  on:click={runDelistingReconcile}
+                >
+                  {triggering.delisting_reconcile ? '觸發中...' : '手動執行終止上市對帳'}
+                </button>
+                <p class="text-muted text-xs mt-2">
+                  抓 TWSE 終止上市名單，補上官方的終止上市日期並與主檔對帳。
+                  排程預設關閉且需要當日股票主檔同步已成功；名單比上次少時整輪會失敗，
+                  確認來源真的變少要用 API 的 accept_shrink 參數人工核可。
+                  <span class="text-white">不會</span>把任何股票標成下市——是否仍上市由主檔同步決定。
+                </p>
+                {#if triggerMessage.delisting_reconcile}
+                  <p class="text-green-400 text-xs mt-2">{triggerMessage.delisting_reconcile}</p>
+                {/if}
+                {#if triggerError.delisting_reconcile}
+                  <p class="text-rise text-xs mt-2">{triggerError.delisting_reconcile}</p>
                 {/if}
               </div>
             {/if}

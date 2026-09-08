@@ -715,7 +715,7 @@ ROW_NUMBER() OVER (PARTITION BY job_name ORDER BY started_at DESC, id DESC) = 1
 
 * **repo 層**（`GetLatestPerJob`）回的是「**表裡有紀錄的** `job_name` 各一列」——
   沒跑過的 job 不會出現，空表就回 0 筆。它保證的是「每個 job 至多一列」，不是「一定 11 列」。
-* **API 層**才固定回 11 列：`GetStatus` 遍歷 `knownSchedulerJobs`，把 repo 沒回到的
+* **API 層**才固定回 13 列：`GetStatus` 遍歷 `knownSchedulerJobs`，把 repo 沒回到的
   補成 `never_run` / `disabled`（見下一節）。
 
 所以**回傳筆數不隨 `job_runs` 累積多少資料而增加**——但查詢本身仍要處理保留期內的
@@ -867,6 +867,7 @@ SIGTERM 升級成 SIGKILL，一輪 27 分鐘的 job 等不到自己收尾。**�
 | `evaluation_universe_sync` | 池大小（135） | 不計入失敗，只記進 log 的 `skipped` |
 | `candle_gap_detection` | 本輪有效池大小 | `symbols_failed` **固定 0**；缺漏與不可用一律走 `degraded`，見下方 `partial` 的第四種成因 |
 | `sr_analysis` / `sr_analysis_chip` | watchlist 大小（11） | 同上 |
+| `delisting_reconcile` | **本次 CSV 解析出的 distinct 代號數**（2026-09-04 實測 265） | `symbols_failed` **恆為 0**——這個 job 沒有「逐檔失敗」的概念，抓取／解析／縮水防護／依賴不成立都是**整輪** `failed` |
 
 **分母不能換成「實際處理數」**：那會讓狀態頁的數字每天浮動（11 / 10 / 11 …），
 而浮動的原因在畫面上看不到。`sr_analysis` 2026-08-26 之前就是這樣——同一輪裡
@@ -975,6 +976,7 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 | `corporate_action_sync` | 80 小時 | 平日每日（跨週末最長週五→週一） |
 | `evaluation_universe_sync` | 80 小時 | 平日每日 |
 | `candle_gap_detection` | 80 小時 | 跟著 `evaluation_universe_sync` 那輪跑，所以門檻相同 |
+| `delisting_reconcile` | 26 小時 | **每天** 07:00（不限平日，所以不是 80 小時）。依賴不成立時仍會寫一筆 `failed`，`started_at` 照樣更新——stale 代表「這支排程沒在跑」，不是「這輪沒成功」 |
 
 **把 cron 設得比門檻稀疏會讓該 job 永遠顯示 stale**（例如改成每週一跑，間隔 168 小時 > 80），
 即使它完全照設定執行。這正是本頁上面警告的那種「訓練使用者忽略 stale 旗標」。
@@ -1096,6 +1098,59 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 被擋掉的手動請求**不寫 `job_runs`**（那是連點兩次，不是排程事故）；
 被擋掉的 **cron** 輪次則會寫一筆 `failed` 的 `job_runs`，`error` 欄位帶持有者名稱
 ——那一輪**不會在隔天自動補回來**（隔天 17:00 分析的是下一根日 K），所以必須看得見。
+
+---
+
+### POST `/scheduler/delisting-reconcile/run`
+
+手動觸發終止上市名單對帳，與 `delisting_reconcile` 排程共用邏輯。
+立即回應、背景執行，結果查 `GET /scheduler/status`。
+
+⚠️ **這個 job 不決定 `is_listed`。** 它只把 TWSE「終止上市公司」CSV 的官方終止日期
+補進 `stock_symbols.delisted_date`，並在主檔與官方名單對不上時告警——判定「還在不在
+交易」的權責只屬於 `stock_symbol_sync` 的 ISIN 缺席邏輯。那份 CSV 含**歷史**紀錄且
+代號會被重用（2002 年的光寶電子(2301) 與今天的光寶科(2301) 是兩家公司），
+拿它驅動 `is_listed` 會弄壞正在交易的股票。
+
+**前置是依賴而不是時間錯開**：當日的 `stock_symbol_sync` 必須已經成功，否則整輪
+`failed`（fail-closed）。sync 沒跑成功時 `is_listed` 是舊的或不完整的，拿它當投影
+前置沒有意義；cron 排在 06:30 之後只是常態安排，不構成保證。
+
+**為什麼需要這個入口**：cron **預設關閉**（`delisting.enabled`），dev stack 的驗收
+需要能立刻跑一輪；排程漏跑時也只有這裡能補。整輪是冪等的（事件以
+`(source, symbol, delisted_date)` upsert），重複觸發不會累積副作用。
+
+**Query：** `accept_shrink=1` **人工核可一次來源縮水**。
+
+⛔ **它只放行 `0 < row_count < 上次 accepted 的 row_count`**。來源回 **0 筆是硬失敗，
+與這個參數完全無關**——放行 0 會把所有事件標記成消失，並讓防護基準降成 0（永久失效）。
+⚠️ **只認字面值 `1`**，其餘一律視為沒帶（fail-closed：不放行只會讓那輪 `failed`，
+誤放行則是靜默寫入一份縮水的資料）。cron 路徑**結構上拿不到這個 override**——
+scheduler 的 cron 入口不收這個參數，不是靠呼叫端記得傳 `false`。
+
+**所有權是同步取得的**，所以回應碼是可信的答案而不是猜的：202 代表真的啟動了、
+409 代表真的被擋住。⛔ **不沿用 `evaluation_universe_sync` 的「先回 202 再由背景
+goroutine 靜默跳過」**——那會讓呼叫端以為觸發成功、實際上什麼都沒發生。
+cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
+
+**Response（202 Accepted）：**
+```json
+{ "message": "delisting_reconcile 已在背景觸發", "accept_shrink": false }
+```
+
+**Response（409 Conflict）**——cron 或另一次手動觸發仍在執行：
+```json
+{ "error": "delisting reconcile already running" }
+```
+
+被擋掉的請求**不寫 `job_runs`**（cron 輪次也一樣）：兩個入口共用同一個 `job_name`，
+寫一筆 `failed` 會讓「手動先開始 → cron 撞上寫 failed → 手動接著成功」在
+`GetLatestPerJob`（`ORDER BY started_at DESC, id DESC`）選到那筆 `failed`，
+把一次成功的執行顯示成失敗。
+
+**`partial` 的原因寫在 `error`**：格式是自產的安全摘要（只有類別名與數字），例如
+`delisting_reconcile: source_missing=1 unresolvable=0 identity_doubt=2 source_corrected=1 projection_revoked=1 concurrency_conflict=0 revocation_conflict=0`。
+完整的十一項計數只進結構化 log——`job_runs` 沒有自由欄位。
 
 ---
 

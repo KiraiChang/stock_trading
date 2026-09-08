@@ -24,6 +24,7 @@ type Config struct {
 	SRZoneVerify       SRZoneVerifyConfig       `mapstructure:"sr_zone_verify"`
 	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
+	Delisting          DelistingConfig          `mapstructure:"delisting"`
 }
 
 type PositionAnalysisConfig struct {
@@ -279,6 +280,26 @@ type CandleGapDetectionConfig struct {
 // 與 stock symbol／sr evaluation 那種 config 開關不同。多一個 enabled 會出現
 // 「adjuster 有注入但 enabled=false」這種要另外解釋的組合，而目前沒有關掉它的需求——
 // 漏跑一次就會讓該檔整段歷史出現假跳空。
+// DelistingConfig 是「終止上市名單對帳」的設定（計畫書 docs/todo.md T-071）。
+//
+// ⚠️ **這個 job 不決定 `is_listed`**——判定「還在不在交易」的權責只屬於
+// stock_symbol_sync 的 ISIN 缺席邏輯。它只補官方的終止上市日期，並在主檔與
+// 官方名單對不上時告警，全程唯讀 `is_listed`。
+type DelistingConfig struct {
+	// Enabled 預設關閉：未啟用時不註冊排程，行為與導入前完全相同
+	// （比照 evaluation_universe / sr_analysis）。
+	Enabled bool `mapstructure:"enabled"`
+	// URL 是 TWSE「終止上市公司」CSV 端點。
+	URL string `mapstructure:"url"`
+	// Cron 為空時退回 scheduler 的 defaultDelistingReconcileCron（06:30 的 ISIN sync 之後）。
+	// ⚠️ **時間只是常態安排**：正確性由「當日 stock_symbol_sync 必須已成功」那條依賴保證，
+	// 不是靠時間錯開。
+	Cron string `mapstructure:"cron"`
+	// TimeoutSec 是單一 CSV 請求（含讀 body）的上限秒數。0 或未設定時沿用 market
+	// 套件的預設（60 秒），讓預設值只有一個來源。
+	TimeoutSec int `mapstructure:"timeout_sec"`
+}
+
 type CorporateActionConfig struct {
 	// Cron 為同步時間（robfig/cron 格式，台北時區）。預設 06:30 平日：
 	// 早於 08:50 的 pre_market，讓當天開盤前的分析已經吃到最新係數。
@@ -389,6 +410,12 @@ func Load() (*Config, error) {
 	viper.SetDefault("position_analysis.breakout_target_risk_reward_ratio", 2.0)
 	viper.SetDefault("position_analysis.take_profit_reduction_ratio", 0.5)
 	viper.SetDefault("position_analysis.sr_reuse_max_age_hours", 24)
+	// 終止上市名單對帳（T-071）。**預設關閉**，比照其他選填排程。
+	// timeout_sec 給 0 代表沿用 market.NewTWSESuspendListingClient 的預設。
+	viper.SetDefault("delisting.enabled", false)
+	viper.SetDefault("delisting.url", "https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv")
+	viper.SetDefault("delisting.cron", "0 7 * * *")
+	viper.SetDefault("delisting.timeout_sec", 0)
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()

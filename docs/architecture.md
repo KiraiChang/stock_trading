@@ -295,6 +295,83 @@ symbol 是首欄；只約束 `timeframe` 與 `ts` 的話 PostgreSQL 16 沒有 sk
 > 「最新日期」，必須對整池的**實際日期集合**掃缺洞——那就是下一節的
 > `candle_gap_detection`（原記於 `issue.md` I-091）。
 
+#### 終止上市對帳（`delisting_reconcile`，每日 07:00）：補日期與告警，**不判定是否上市**
+
+（T-071，2026-09-07 實作。原始需求是「用 TWSE 終止上市 CSV 設定下市」，查證後方向改變。）
+
+**判定權責是單向的**：`stock_symbols.is_listed` **只由 TWSE ISIN 清冊的缺席決定**
+（`stock_symbol_sync`，每日 06:30）。這支排程抓 TWSE「終止上市公司」CSV
+（`rwd/zh/company/suspendListing?response=csv`），只做兩件事：
+
+1. 把官方的**終止上市日期**補進 `stock_symbols.delisted_date`（身分可證者才投影）；
+2. 主檔與官方名單對不上時**告警**（該輪收成 `partial`）。
+
+**全程唯讀 `is_listed`。** 三個理由：
+
+* **系統已經在做了，而直接套用會弄壞正在交易的股票**：2026-09-04 實測 CSV 的 265 筆
+  只有 4 筆出現在 `stock_symbols`——1 筆（`2867` 三商壽）的 `is_listed` 早就是 `false`
+  （08-31 標的，比官方終止日還早一天），另外 3 筆**都還在交易**
+  （`6423` 轉上櫃、`2432` 與 `2301` 是代號重用）。**淨效果是「修 0 筆、壞 3 筆」。**
+  其餘 261 筆根本不在主檔——ISIN 清冊只列現存證券，早年下市的從未被收錄。
+* ⚠️ **代號會被重用**：這份 CSV 含**歷史**紀錄，而主檔**一個代號只有一列、沒有世代歷史**。
+  2002 年終止上市的「光寶電子(2301)」與今天正在交易的「光寶科(2301)」是兩家公司。
+  CSV 也沒有 ISIN 可以直接建立身分關聯，只有「終止日＋公司名稱＋代號」。
+  ⛔ **日期規則救不了 `2301`**：光寶科的 `listed_date`（1995-11-17）**早於** CSV 的終止日
+  （2002-11-04），「終止日晚於上市日」照樣命中——擋下它的是名稱比對那條。
+* **上櫃不必另找來源**：這份 CSV 只有上市，而上櫃下市同樣由 ISIN 清冊缺席涵蓋。
+
+因為代號重用，投影**不是**「代號相符就寫」：要通過名稱正規化後相符、
+`listed_date` 早於終止日等一整組 fail-closed 規則，而且**每輪重算**
+（規則、CAS 契約與 provenance 語意見 [`database-schema.md`](./database-schema.md)
+的 `delisting_events`）。對不上的一律只告警。
+
+**前置是依賴，不是時間錯開**：當日的 `stock_symbol_sync` 必須已經成功
+（查 `job_runs` 的 latest-per-job），否則整輪 `failed`。sync 沒跑成功時
+`is_listed` 是舊的或不完整的，拿它當投影前置沒有意義；cron 排在 06:30 之後
+只是常態安排，sync 可能失敗、被停用、逾時或與手動觸發重疊。
+
+**cron 與手動端點共用一把鎖，也共用同一個 `job_name`。** 手動端點
+（`POST /api/v1/scheduler/delisting-reconcile/run`）**同步取鎖，取不到回 409**——
+⛔ 不沿用 `evaluation_universe_sync` 的「先回 202 再由背景 goroutine 靜默跳過」。
+被擋掉的 cron 輪次**不寫 `job_runs`**：兩個入口共用 `job_name`，寫一筆 `failed`
+會在 `GetLatestPerJob`（`ORDER BY started_at DESC, id DESC`）下蓋掉手動那次的成功。
+⚠️ 這與 `sr_analysis` 的處置相反，因為那邊的兩支 cron 是兩個不同的 `job_name`。
+
+**縮水防護**：本次筆數低於**上次 accepted 快照**時整輪 `failed`。
+基準是快照不是累計事件數——後者在來源更正一次之後就永久鎖死。
+人工核可走 `?accept_shrink=1`，⛔ **只放行 `0 < row_count < 上次 accepted`**；
+來源回 0 筆是硬失敗，與那個參數無關（放行 0 會把所有事件標記成消失，
+並把基準降成 0，防護永久失效）。cron 路徑**結構上拿不到這個 override**——
+cron 入口不收這個參數，不是靠呼叫端記得傳 `false`。
+
+**寫入失敗一律整輪 rollback，⛔ 不得降級成 X／RX。** X（`concurrency_conflict`）
+與 RX（`revocation_conflict`）的定義是「CAS 落空＝`UPDATE` 影響 0 列」，
+**不含 DB error**。把 error 也算成 X 會同時壞兩件事：分類語意（看 log 的人分不出
+「被並行改動」與「寫入根本失敗」），以及 all-or-nothing——**MySQL／SQLite 的單句錯誤
+不會中止整個 transaction**，於是事件與 accepted 快照照樣 commit、投影卻沒寫進去。
+（2026-09-08 review 修正；回歸測試 `TestReconcileAbortsWhenProjectionWriteFails`。）
+
+**解析器對格式變動是 fail-closed 的。** 兩行 header 要**明確辨識**
+（第 2 行的三欄依序必須含「日期」「名稱」「編號」），header 之後的非空列
+只要有任何格式錯誤（欄位數不足、空欄、日期解析失敗）就**整輪失敗**。
+⛔ 舊版是「解析不出日期就略過」——那讓 header 與**壞掉的資料列**走同一條路，
+只要還剩一筆有效資料就算成功。欄位被插入或重排時筆數不變，縮水防護攔不住，
+錯位的資料會把舊事件標成消失並撤銷正確的投影。空行仍然容忍（CSV 的正常結尾形態）。
+
+**`delisted_date` 是 DATE，比較一律用掛鐘日期**（`store.DateKey` /
+`store.SameCalendarDay`）。⛔ 不得先 `.UTC()` 再取日期：MySQL 依 `config.yaml` 的
+DSN 範例會帶 `loc=Asia/Taipei`，`2026-09-01 00:00 +08` 轉 UTC 後是 **2026-08-31**，
+身分鍵、事件 id 查找與「同一天」比對會整批差一天而且不報錯。
+
+**逐項 log 的等級**（分類表）：N 不告警、B／C／M 是 Info、**U／D／X／R／RX／A 是 Warn**，
+來源更正的三態（改名／重現／首次缺席）**各自 Warn 一次**且是**邊緣觸發**
+（持續缺席不重複告警）。⛔ 只留 aggregate 數字不夠——upsert 之後舊名稱與缺席時間
+就消失了，`identity_doubt=2` 這種數字無從查起。
+
+**已知限制：上櫃沒有第二來源可對帳。** 這份 CSV 只涵蓋上市，
+上櫃的終止日期沒有官方名單可補，也就沒有對帳的第二意見——
+上櫃標的的 `delisted_date` 只會有人工值或空值。
+
 #### 日 K 缺漏偵測（`candle_gap_detection`）
 
 **要解的問題**：上面那支排程的 `success` 只代表「請求沒失敗」，不代表「拿到了該有的

@@ -170,6 +170,18 @@ type Scheduler struct {
 	// mutex 只保護這個字串，臨界區不涵蓋整輪分析。
 	srAnalysisMu         sync.Mutex
 	srAnalysisRunningJob string
+	// delistingReconciler 為選填（見 docs/todo.md T-071）：未注入或未啟用時不註冊排程，
+	// 行為與導入前完全相同（比照 adjuster / evaluationUniverse / srAnalysis）。
+	//
+	// ⚠️ **它不寫 `is_listed`**：只補官方的終止上市日期並對帳，判定「還在不在交易」
+	// 的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。
+	delistingReconciler *market.DelistingReconciler
+	delistingCfg        config.DelistingConfig
+	// delistingRunning 是 **cron 與手動端點共用**的 single-flight 所有權旗標。
+	// 兩個入口共用同一個 job_name，重疊執行會讓 job_runs 出現互相蓋掉的紀錄，
+	// 而單一 transaction 只保證「單輪完整」、不保證「兩輪的先後」
+	// （較舊的一輪可能較晚 commit，反過來把新事件標記成消失）。
+	delistingRunning atomic.Bool
 	// registeredJobs 記錄 Start() 實際註冊了哪些 cron job。
 	// **為什麼要記而不是讓呼叫端自己判斷**：註冊條件散在 Start() 各處
 	// （config 開關、adjuster 是否注入、repo 是否注入），複製一份到 API 層
@@ -348,6 +360,20 @@ func (s *Scheduler) Start() {
 		}
 	}
 
+	// 終止上市名單對帳：補 delisted_date 並告警，⚠️ **全程唯讀 is_listed**。
+	// cron 入口不收 acceptShrink——「cron 結構上不可能取得 override」由型別兌現。
+	if s.delistingReconciler != nil && s.delistingCfg.Enabled {
+		cronSpec := s.delistingCron()
+		if _, err := s.cron.AddFunc(cronSpec, func() {
+			s.RunDelistingReconcile()
+		}); err != nil {
+			s.log.Error("delisting reconcile cron register failed",
+				zap.String("cron", cronSpec), zap.Error(err))
+		} else {
+			s.markRegistered(delistingReconcileJobName)
+		}
+	}
+
 	if s.srEvaluation.Enabled {
 		if _, err := s.cron.AddFunc(s.srEvaluation.Cron, func() {
 			s.RunSREvaluation()
@@ -411,6 +437,26 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 	if degraded && status == "success" {
 		status = "partial"
 	}
+	s.finishRunStatus(ctx, runID, jobName, status, total, failed, lastErr)
+}
+
+// finishRunStatus 用**明確指定的 status** 寫回執行紀錄。
+//
+// **為什麼需要它**：`finishRunDegraded` 只看數量推導狀態
+// （`total>0 && failed>=total → failed`、`failed>0 → partial`、其餘 `success`），
+// 所以「整輪 `failed` ＋ `symbols_failed = 0`」**推導不出來**——`failed = 0`
+// 永遠拿不到 `failed`。而 `delisting_reconcile` 沒有「逐檔失敗」的概念：
+// 抓取／解析／縮水防護／依賴不成立全都是整輪失敗，那些欄位的單位是**標的數**，
+// ⛔ 不能用假的 `1/1` 去湊（`job_error.go` 已經記過同一個教訓）。
+//
+// ⛔ **它與 finishRunDegraded 共用同一個底層寫入路徑**，沿用
+// `context.WithoutCancel` ＋ finishRunWriteTimeout：job 的 ctx 逾時之後用它去寫
+// job_runs 一定失敗，那筆紀錄會**永遠卡在 `running`**（2026-08-24，原 I-084）。
+// ⚠️ delisting_reconcile 特別容易踩到——CSV 抓取逾時正是走這條 explicit-failed 路徑，
+// 而那時 ctx 已經被取消。
+func (s *Scheduler) finishRunStatus(
+	ctx context.Context, runID uint64, jobName, status string, total, failed int, lastErr string,
+) {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishRunWriteTimeout)
 	defer cancel()
 	if err := s.jobRuns.Finish(writeCtx, runID, status, total, failed, lastErr); err != nil {

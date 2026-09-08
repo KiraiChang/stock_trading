@@ -95,6 +95,34 @@ func (h *SchedulerHandler) RunSRAnalysis(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": job + " 已在背景觸發"})
 }
 
+// RunDelistingReconcile 手動觸發終止上市名單對帳（contract 見 docs/api-reference.md）。
+//
+// **這個入口是刻意保留的**：cron 預設關閉，而 dev stack 的驗收需要能立刻跑一輪；
+// 排程漏跑時也只有這裡能補。整輪是冪等的（事件以 (source, symbol, delisted_date)
+// upsert），重複觸發不會累積副作用。
+//
+// `accept_shrink=1` 是**人工核可一次來源縮水**的 override：
+// ⛔ **只放行 `0 < row_count < 上次 accepted 的 row_count`**。`row_count = 0` 是硬失敗，
+// 與這個參數完全無關——放行 0 會把所有事件標記成消失，並把防護基準降成 0（永久失效）。
+// ⚠️ **只認字面值 `1`**，其餘一律當成沒帶（fail-closed：不放行縮水只會讓那輪 failed，
+// 而誤放行會靜默寫入一份縮水的資料）。
+//
+// **同步取得所有權**：cron 與手動共用同一把鎖，取不到就回 409。
+// ⛔ **不沿用「先回 202 再由背景 goroutine 靜默跳過」**（既有 evaluation_universe_sync
+// 的模式）——那會讓呼叫端以為觸發成功、實際上什麼都沒發生。
+// 背景工作與鎖的釋放都由 scheduler.TryStartDelistingReconcile 負責。
+func (h *SchedulerHandler) RunDelistingReconcile(c *gin.Context) {
+	acceptShrink := c.Query("accept_shrink") == "1"
+	if !h.sched.TryStartDelistingReconcile(acceptShrink) {
+		c.JSON(http.StatusConflict, gin.H{"error": "delisting reconcile already running"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"message":       "delisting_reconcile 已在背景觸發",
+		"accept_shrink": acceptShrink,
+	})
+}
+
 // KnownSchedulerJobs 匯出給測試用：DB 的 job_name 欄位必須容得下每一個名稱
 // （2026-08-11 正式環境因 VARCHAR(20) 裝不下 corporate_action_sync 而失敗）。
 func KnownSchedulerJobs() []string { return append([]string(nil), knownSchedulerJobs...) }
@@ -105,7 +133,7 @@ func KnownSchedulerJobs() []string { return append([]string(nil), knownScheduler
 // **`candle_gap_detection` 同理**：它掛在 `runEvaluationUniverseSync` 尾端、沒有自己的
 // cron，但寫獨立的 job_runs（現況見 `docs/architecture.md`）。它的註冊條件比 parent 嚴格——
 // 自身 enabled ＋ 四項依賴齊全，所以 parent 有註冊不代表它有。
-var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "candle_gap_detection", "sr_analysis", "sr_analysis_chip"}
+var knownSchedulerJobs = []string{"pre_market", "intraday", "daily_close", "sr_zone_verify", "chip_daily_sync", "stock_symbol_sync", "sr_evaluation", "corporate_action_sync", "evaluation_universe_sync", "candle_gap_detection", "sr_analysis", "sr_analysis_chip", "delisting_reconcile"}
 
 // jobStaleThreshold 是各 job 預期的最大執行間隔，超過視為 stale（排程可能卡住或程式沒在跑）
 var jobStaleThreshold = map[string]time.Duration{
@@ -130,6 +158,11 @@ var jobStaleThreshold = map[string]time.Duration{
 	// 預設關閉，未註冊時 GetStatus 回 disabled 而不套用門檻。
 	"sr_analysis":      80 * time.Hour,
 	"sr_analysis_chip": 80 * time.Hour,
+	// 終止上市名單對帳每天 07:00 跑（不限平日），所以是 26 小時而不是跨週末的 80。
+	// 依賴不成立（當日 stock_symbol_sync 未成功）時仍會寫一筆 failed，
+	// started_at 照樣更新——stale 代表「這支排程沒在跑」，不是「這輪沒成功」。
+	// 預設關閉；未註冊時 GetStatus 回 disabled 而不套用門檻。
+	"delisting_reconcile": 26 * time.Hour,
 }
 
 type jobStatus struct {

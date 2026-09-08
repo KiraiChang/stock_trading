@@ -188,6 +188,26 @@ func (r *stockSymbolRepo) countListed(ctx context.Context, tx *sqlx.Tx) (int, er
 	return n, err
 }
 
+// upsert 把一筆清冊資料寫進主檔。出現在快照裡就代表**還在交易**，所以 is_listed 恆為 true。
+//
+// ⛔ **命中既有列時一定要把 delisted_date 與 delisted_event_id 一起清成 NULL。**
+//
+// stock_symbols 是 **current-state 主檔**：一個代號一列、只描述「現在」。證券重新上市、
+// 代號被重用、或先被誤標下市後又出現在清冊時，這裡會把它改回 is_listed=true——
+// 若留著上一代／前一狀態的終止日，就做出一個不可能的組合：
+//
+//	is_listed = true  +  delisted_date = 歷史日期
+//
+// 這也是 delisting_reconcile 的 TOCTOU 防護的另一半：那邊先投影、ISIN sync 隨後把
+// is_listed 改回 true 時，錯誤的日期必須在這裡被清掉。
+//
+// ⚠️ **兩欄要一起清**，只清一欄會留下「指向事件卻沒有日期」的半套狀態（DB 的 CHECK 會擋）。
+//
+// ⚠️ **人工填的日期也一併清除**：delisting_reconcile 那邊「人工值永不自動改動」的規則
+// **只約束它自己**，不約束這裡。ISIN 清冊是 is_listed 的權威來源，它確認重新上市時
+// current-state 不變量優先；而事件層的歷史仍留在 delisting_events。
+//
+// 現況規格見 docs/architecture.md 的下市過濾段（計畫書 docs/todo.md T-071）。
 func (r *stockSymbolRepo) upsert(ctx context.Context, tx *sqlx.Tx, symbol StockSymbol, seenAt time.Time) error {
 	listedDate := sql.NullTime(symbol.ListedDate.NullTime)
 	if r.driver == "mysql" {
@@ -206,7 +226,9 @@ func (r *stockSymbolRepo) upsert(ctx context.Context, tx *sqlx.Tx, symbol StockS
 				listed_date=VALUES(listed_date),
 				is_listed=VALUES(is_listed),
 				last_seen_at=VALUES(last_seen_at),
-				updated_at=VALUES(updated_at)
+				updated_at=VALUES(updated_at),
+				delisted_date=NULL,
+				delisted_event_id=NULL
 		`), symbol.Symbol, symbol.Name, symbol.ISINCode, symbol.Market, symbol.SecurityType,
 			symbol.Industry, symbol.CFICode, symbol.Remarks, listedDate, true, seenAt, seenAt)
 		return err
@@ -227,7 +249,9 @@ func (r *stockSymbolRepo) upsert(ctx context.Context, tx *sqlx.Tx, symbol StockS
 			listed_date=excluded.listed_date,
 			is_listed=excluded.is_listed,
 			last_seen_at=excluded.last_seen_at,
-			updated_at=excluded.updated_at
+			updated_at=excluded.updated_at,
+			delisted_date=NULL,
+			delisted_event_id=NULL
 	`), symbol.Symbol, symbol.Name, symbol.ISINCode, symbol.Market, symbol.SecurityType,
 		symbol.Industry, symbol.CFICode, symbol.Remarks, listedDate, true, seenAt, seenAt)
 	return err
@@ -252,7 +276,8 @@ func (r *stockSymbolRepo) Get(ctx context.Context, symbol string) (*StockSymbol,
 	var row StockSymbol
 	err := r.db.GetContext(ctx, &row, r.db.Rebind(`
 		SELECT id, symbol, name, isin_code, market, security_type, industry, cfi_code, remarks,
-		       listed_date, is_listed, last_seen_at, created_at, updated_at
+		       listed_date, is_listed, last_seen_at, created_at, updated_at,
+		       delisted_date, delisted_event_id
 		FROM stock_symbols
 		WHERE symbol = ?
 	`), symbol)
@@ -293,7 +318,8 @@ func (r *stockSymbolRepo) List(ctx context.Context, onlyListed bool) ([]StockSym
 	var rows []StockSymbol
 	query := `
 		SELECT id, symbol, name, isin_code, market, security_type, industry, cfi_code, remarks,
-		       listed_date, is_listed, last_seen_at, created_at, updated_at
+		       listed_date, is_listed, last_seen_at, created_at, updated_at,
+		       delisted_date, delisted_event_id
 		FROM stock_symbols
 	`
 	args := []any{}
@@ -309,7 +335,8 @@ func (r *stockSymbolRepo) List(ctx context.Context, onlyListed bool) ([]StockSym
 }
 
 const stockSymbolColumns = `id, symbol, name, isin_code, market, security_type, industry, cfi_code, remarks,
-	       listed_date, is_listed, last_seen_at, created_at, updated_at`
+	       listed_date, is_listed, last_seen_at, created_at, updated_at,
+	       delisted_date, delisted_event_id`
 
 func (r *stockSymbolRepo) Facets(ctx context.Context, opts StockSymbolFacetOptions) (StockSymbolFacets, error) {
 	out := StockSymbolFacets{SecurityTypes: []StockSymbolFacet{}, Industries: []StockSymbolFacet{}}

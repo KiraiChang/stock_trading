@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-109` 起算。**（**I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-112` 起算。**（**I-110 / I-111 於 2026-09-07 發出**——I-110 由 T-071 實作時發現前端 `JobName` union 落後後端 `knownSchedulerJobs`；I-111 由 T-071 補 #20f 測試時實測發現 `busy_timeout` 保護不到 deferred transaction 的升級；**I-109 於 2026-09-07 發出**——T-071 實作時複用 `parseROCDate` 發現它接受民國 0 年；**I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  檔案裡看得到的最大是 I-108（2026-09-04 發出，**下一個可用的是 I-109**；I-102 已於同日收斂、編號不回收——I-096 / I-098
+  檔案裡看得到的最大是 I-111（2026-09-07 發出，**下一個可用的是 I-112**；I-102 已於同日收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,7 +70,7 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-104 / I-105 / I-106 / I-107 / I-108、已收斂的 I-102 與下一個可用的 I-109），
+  本檔現有的 I-100 / I-103 / I-104 / I-105 / I-106 / I-107 / I-108 / I-109 / I-110 / I-111、已收斂的 I-102 與下一個可用的 I-112），
   那是預期的，不是殘留。
 
 ---
@@ -1877,6 +1877,55 @@ canonical formula 有結論，evaluation、`selection_report.py`、runtime 三�
 
 ---
 
+### I-109：`parseROCDate` 接受民國 0 年，靜默算成西元 1911
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（現有兩個呼叫端的來源都不會產生這種輸入） |
+| 分類 | Go / 健壯性 |
+| 建立日期 | 2026-09-07 |
+| 來源 | T-071 實作時複用 `market/exchange_reference.go` 的 `parseROCDate`，寫測試時發現 |
+
+#### 現象
+
+`parseROCDate`（`exchange_reference.go:743`）把民國年直接 `+1911`，**沒有檢查年份下界**：
+
+```
+parseROCDate("0/01/01")  →  1911-01-01，err = nil
+```
+
+民國 0 年不存在（民國元年 = 西元 1912），所以這是一個**不存在的日期被靜默轉成
+一個合法日期**。`newStrictDate` 只擋月／日的歸一化（`115/02/31` → 3/3），
+**年份沒有對應的守門**。
+
+⚠️ 同一個函式對負數年份也照收：`"-5/01/01"` → 1906。
+
+#### 可達性與影響
+
+* 兩個呼叫端目前都取不到：TWSE 的終止上市名單最早是民國 090 年，
+  `exchange_reference` 的來源也只有近期日期。
+* 但它與本專案反覆處理的那類 bug 同型——**看起來完全正常、卻讓整條比對建立在
+  錯誤的日子上**，正是 `newStrictDate` 註解裡自己寫的那個顧慮。
+
+#### 處置
+
+`parseROCDate` 在 `+1911` 之前加下界檢查（`if y < 1 { return error }`）。
+
+⚠️ **這是共用函式**，收緊它會同時影響 `exchange_reference`——雖然那條路徑取不到
+這種輸入，改動仍要跟著跑一次 `./internal/market/...` 的回歸。
+
+⛔ **T-071 刻意不順手改**：那超出該筆的範圍，且會讓一個獨立的行為變更混進
+一份已經很大的 commit。`twse_suspend_listing_test.go` 目前**如實記錄現況**
+（斷言它回 1911 而不是報錯），本筆修好時要同步把那段改成期望報錯。
+
+#### 關閉條件
+
+`parseROCDate` 對民國年 `<= 0` 回錯誤，`./internal/market/...` 全綠，
+且 `twse_suspend_listing_test.go` 那段「既有行為」註解與斷言已同步更新。
+
+---
+
 ### I-108：volatility profile 沒有完整拒絕非有限的 `close`，會產出看似合法的 `0.0`
 
 | 欄位 | 內容 |
@@ -2078,3 +2127,69 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 3. **有效輸入全部消失時回 `UNKNOWN_VOLATILITY`** 的契約——
    `volatility_bucket_from_profile(None, None)` → `UNKNOWN`，
    ⛔ **不是** `LOW_VOLATILITY`。
+
+---
+
+### I-110：前端 `JobName` union 落後 backend 的 `knownSchedulerJobs`
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（型別不準，不影響 runtime） |
+| 發現日期 | 2026-09-07（實作 `todo.md` T-071 時順帶發現） |
+| 位置 | `frontend/src/lib/api/scheduler.ts` 的 `JobName` |
+
+`SchedulerJob.job_name` 宣告成 `JobName`，但那個 union 少了三個 backend 已經在回傳的
+job：`candle_gap_detection`、`sr_analysis`、`sr_analysis_chip`。
+
+**沒有 runtime 影響**：`jobLabel` / `statusLabel` 都是 `Record<string, string>`，
+畫面照樣渲染（`candle_gap_detection` 甚至已經有中文 label）。壞的是型別的可信度——
+`JobName` 讀起來像是「後端會回哪些 job」的清單，實際上不是，
+而以它為 key 的 `Partial<Record<JobName, …>>`（觸發狀態）也就跟著不完整。
+
+**修法**：把三個補進 union。⚠️ 這是**每加一支排程就會再發生一次**的落後，
+真正的修法是讓 union 從後端的 `knownSchedulerJobs` 產生，但那需要一套型別產生流程，
+本筆不做。
+
+（2026-09-07 加 `delisting_reconcile` 時已同步補進 union，所以清單裡只缺上述三個。）
+
+---
+
+### I-111：SQLite 的 `busy_timeout` 保護不到對帳的業務交易（deferred transaction 升級）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待決策 |
+| 嚴重度 | 中（誤導：設計文件把 `busy_timeout` 當成外部 writer 防護，實際只擋得住單句寫入） |
+| 發現日期 | 2026-09-07（補 T-071 的 #20f 測試時實測） |
+| 位置 | `backend/internal/store/sqlite.go` 的 DSN pragma、`delisting_event_repo.go` 的 `WithTx` |
+
+T-071 計畫書把 `_pragma=busy_timeout(5000)` 定位成「**外部 writer 防護**」，
+並預期「本 job 在 `busy_timeout` 內重試、逾時才整輪 `failed`」。**實測不是這樣。**
+
+`WithTx` 開的是 **deferred transaction**：先讀（`LastAcceptedSnapshot`／`LoadEvents`）
+再寫。SQLite 在「已經讀過、要升級成 writer」時**不呼叫 busy handler**——重試會破壞
+它已經拿到的讀快照——所以直接回 `SQLITE_BUSY`。實測外部 writer 持鎖時，
+業務交易在 **0.06 秒**就失敗，完全沒有用到那 5 秒。
+
+`busy_timeout` **有效的地方**是單句寫入：`startRun` 的 `INSERT`
+與 `finishRunStatus` 的 `UPDATE` 實測都會等滿 5 秒才放棄
+（`TestDelistingReconcileExternalWriterBeforeStartRunAborts` 就是靠這個等待）。
+
+**目前的影響是有限的**：
+
+* dev／live 都是 PostgreSQL，這條只影響 SQLite（單元測試與可能的小型部署）；
+* 整輪失敗是**安全**的失敗方向（零業務寫入，`job_runs` 記 `failed`）；
+* 外部 writer 若持鎖**超過 5 秒**，連 `finishRunStatus` 都會失敗，那筆紀錄會停在
+  `running`——但下次啟動的 `AbortRunning` 會把它收成 `aborted`，不會永遠假裝執行中。
+
+**可能的處置（未決定，所以先記在這裡）**：
+
+1. **維持現況**，只把文件改成「`busy_timeout` 保護單句寫入，不保護 read-then-write 的交易」。
+2. `WithTx` 對 SQLite 改用 **`BEGIN IMMEDIATE`**（開頭就取得 write lock，busy handler 才會生效）。
+   ⚠️ 要確認 `database/sql` 的交易介面拿不到這個語法，得改走 `Conn` 手動控制交易。
+3. DSN 加 **`_txlock=immediate`**。⛔ 影響**全部**交易（含唯讀），會把並行度整個壓掉，
+   不能只為這個 job 這樣改。
+
+⚠️ 現況已由 `TestDelistingReconcileExternalWriterAfterStartRunWritesFailed`
+的註解與斷言釘住——**改動處置方式時那支測試會變紅**，不會靜默飄移。

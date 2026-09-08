@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/trading/backend/internal/config"
@@ -597,5 +598,157 @@ func TestFacetsExcludesDelistedByDefault(t *testing.T) {
 	if count(def.Industries, "Shipping") >= count(withDelisted.Industries, "Shipping") {
 		t.Errorf("預設含了已下市標的：預設 %d、含下市 %d",
 			count(def.Industries, "Shipping"), count(withDelisted.Industries, "Shipping"))
+	}
+}
+
+// delistingTestDB 開一個跑完 migration 的 sqlite 暫存 DB。
+//
+// ⚠️ 走 NewDB → NewSQLite：**FK 是 connection-local**，繞過那條初始化路徑就拿不到
+// `_pragma=foreign_keys(1)`，delisted_event_id 的 RESTRICT 會靜默失效。
+func delistingTestDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+	tmp, err := os.CreateTemp("", "delisting-projection-*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp.Close()
+	t.Cleanup(func() { os.Remove(tmp.Name()) })
+
+	db, err := NewDB(config.DatabaseConfig{Driver: "sqlite", DSN: tmp.Name()})
+	if err != nil {
+		t.Fatalf("connect failed: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := database.RunMigrations(context.Background(), db, "sqlite", zap.NewNop()); err != nil {
+		t.Fatalf("migrations failed: %v", err)
+	}
+	return db
+}
+
+// seedProjectedSymbol 建一筆事件、一筆已下市的主檔列，並把它投影成 job-owned。
+// 回傳 event id。
+func seedProjectedSymbol(t *testing.T, db *sqlx.DB, symbol string) int64 {
+	t.Helper()
+	day := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO delisting_events (source, symbol, company_name, delisted_date)
+		VALUES (?, ?, ?, ?)`), "twse_suspend_listing", symbol, "測試公司", day); err != nil {
+		t.Fatalf("建事件: %v", err)
+	}
+	var eventID int64
+	if err := db.Get(&eventID, db.Rebind(
+		`SELECT id FROM delisting_events WHERE symbol = ?`), symbol); err != nil {
+		t.Fatalf("查事件 id: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO stock_symbols (symbol, name, market, security_type, is_listed,
+		                           delisted_date, delisted_event_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		symbol, "測試股", "上市", "股票", false, day, eventID); err != nil {
+		t.Fatalf("建已投影的主檔列: %v", err)
+	}
+	return eventID
+}
+
+func readDelistedPair(t *testing.T, db *sqlx.DB, symbol string) (sql.NullTime, sql.NullInt64, bool) {
+	t.Helper()
+	var date sql.NullTime
+	var id sql.NullInt64
+	var listed bool
+	if err := db.Get(&date, db.Rebind(`SELECT delisted_date FROM stock_symbols WHERE symbol = ?`), symbol); err != nil {
+		t.Fatalf("查 delisted_date: %v", err)
+	}
+	if err := db.Get(&id, db.Rebind(`SELECT delisted_event_id FROM stock_symbols WHERE symbol = ?`), symbol); err != nil {
+		t.Fatalf("查 delisted_event_id: %v", err)
+	}
+	if err := db.Get(&listed, db.Rebind(`SELECT is_listed FROM stock_symbols WHERE symbol = ?`), symbol); err != nil {
+		t.Fatalf("查 is_listed: %v", err)
+	}
+	return date, id, listed
+}
+
+// #7｜重新上市時，ISIN upsert 必須把兩個投影欄位一起清成 NULL。
+//
+// ⛔ **這條契約與計畫書第一版相反**（那時寫「不得洗掉 delisted_date」）。
+// 留著的話會做出 `is_listed=true + delisted_date=歷史日期` 這種不可能的組合——
+// stock_symbols 是 current-state 主檔，它只描述「現在」。
+// 歷史不會遺失，它在 delisting_events 裡。
+func TestUpsertSnapshotClearsDelistedColumnsOnRelist(t *testing.T) {
+	db := delistingTestDB(t)
+	repo := NewStockSymbolRepo(db)
+	ctx := context.Background()
+
+	seedProjectedSymbol(t, db, "T071R")
+
+	// 該代號重新出現在 ISIN 清冊。
+	seenAt := time.Date(2026, 9, 8, 6, 30, 0, 0, time.UTC)
+	if _, err := repo.UpsertSnapshot(ctx, []StockSymbol{
+		{Symbol: "T071R", Name: "測試股", Market: "上市", SecurityType: "股票"},
+	}, seenAt); err != nil {
+		t.Fatalf("UpsertSnapshot: %v", err)
+	}
+
+	date, id, listed := readDelistedPair(t, db, "T071R")
+	if !listed {
+		t.Fatal("重新出現在快照裡的標的，is_listed 應為 true")
+	}
+	if date.Valid {
+		t.Errorf("重新上市後 delisted_date 必須清成 NULL，得到 %v", date.Time)
+	}
+	if id.Valid {
+		t.Errorf("重新上市後 delisted_event_id 必須清成 NULL，得到 %d", id.Int64)
+	}
+}
+
+// #7b｜並行順序 A：reconcile 先投影 → ISIN sync 隨後把該代號設回 true。
+// 最終列必須是 delisted_date = NULL——這是 TOCTOU 防護的另一半。
+func TestUpsertSnapshotClearsAfterProjection(t *testing.T) {
+	db := delistingTestDB(t)
+	repo := NewStockSymbolRepo(db)
+	ctx := context.Background()
+
+	// reconcile 先投影（seed 已代表投影完成的狀態）。
+	seedProjectedSymbol(t, db, "T071B7")
+	if date, _, _ := readDelistedPair(t, db, "T071B7"); !date.Valid {
+		t.Fatal("前置條件不成立：投影應該已經寫入")
+	}
+
+	// ISIN sync 隨後跑。
+	if _, err := repo.UpsertSnapshot(ctx, []StockSymbol{
+		{Symbol: "T071B7", Name: "測試股", Market: "上市", SecurityType: "股票"},
+	}, time.Date(2026, 9, 8, 6, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("UpsertSnapshot: %v", err)
+	}
+
+	date, id, _ := readDelistedPair(t, db, "T071B7")
+	if date.Valid || id.Valid {
+		t.Errorf("sync 後兩欄都應為 NULL，得到 date=%v id=%v", date, id)
+	}
+}
+
+// #7c｜並行順序 B：ISIN sync 先把代號設回 true → reconcile 隨後執行。
+// 投影規則第 1 條（is_listed = false）會擋下，delisted_date 仍為 NULL。
+//
+// 這裡驗的是**前置條件**：sync 之後該列的 is_listed 是 true，
+// 所以 reconcile 的候選過濾根本不會選中它。
+func TestUpsertSnapshotLeavesRelistedSymbolIneligible(t *testing.T) {
+	db := delistingTestDB(t)
+	repo := NewStockSymbolRepo(db)
+	ctx := context.Background()
+
+	seedProjectedSymbol(t, db, "T071C7")
+
+	if _, err := repo.UpsertSnapshot(ctx, []StockSymbol{
+		{Symbol: "T071C7", Name: "測試股", Market: "上市", SecurityType: "股票"},
+	}, time.Date(2026, 9, 8, 6, 30, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("UpsertSnapshot: %v", err)
+	}
+
+	date, id, listed := readDelistedPair(t, db, "T071C7")
+	if !listed {
+		t.Fatal("sync 後 is_listed 應為 true —— 那正是讓 reconcile 跳過它的條件")
+	}
+	if date.Valid || id.Valid {
+		t.Errorf("兩欄都應為 NULL，得到 date=%v id=%v", date, id)
 	}
 }

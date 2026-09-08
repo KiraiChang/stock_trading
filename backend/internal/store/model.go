@@ -685,6 +685,23 @@ type StockSymbol struct {
 	LastSeenAt   time.Time `db:"last_seen_at"  json:"last_seen_at"`
 	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"    json:"updated_at"`
+
+	// DelistedDate / DelistedEventID 是**一組**（migration 076，計畫書 docs/todo.md T-071）。
+	//
+	// ⛔ **`is_listed` 不由這兩欄決定**——判定權責只屬於 stock_symbol_sync 的
+	// ISIN 缺席邏輯。這裡記的是「官方說它哪一天終止上市」，純屬補充資訊。
+	//
+	// **DelistedEventID 是 provenance，回答「這個日期是誰寫的」**：
+	//
+	//	非 NULL                          → delisting_reconcile 投影的，該 job 可替換／清除
+	//	NULL 但 DelistedDate 非 NULL     → **人工填的，該 job 永不自動改動**
+	//	兩者皆 NULL                       → 沒有下市日期
+	//	DelistedDate NULL 但 ID 非 NULL  → ⛔ **非法**，DB 的 CHECK 會擋（半套狀態）
+	DelistedDate    NullTime      `db:"delisted_date"     json:"delisted_date,omitempty"`
+	// ⛔ **用本套件的 NullInt64，不是 sql.NullInt64**：後者會序列化成
+	// `{"Int64":123,"Valid":true}`，而且 `omitempty` 對 struct 無效（NULL 也照樣出現）。
+	// 這個欄位是使用者可見面（`GET /stocks` 系列），形狀要與相鄰的 DelistedDate 一致。
+	DelistedEventID NullInt64 `db:"delisted_event_id" json:"delisted_event_id,omitempty"`
 }
 
 // ── Backtest models ───────────────────────────────────────────

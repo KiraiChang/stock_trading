@@ -5,8 +5,10 @@ import {
   fetchSchedulerStatus,
   triggerSREvaluationRun,
   triggerCorporateActionSyncRun,
+  triggerDelistingReconcileRun,
   type SchedulerJob,
 } from '../lib/api/scheduler'
+import { ApiError } from '../lib/api/client'
 
 // 元件層測試：API 契約已由 scheduler.test.ts 保護，這裡只驗「手動觸發 SR 驗證」
 // 的元件狀態機（是否呼叫 API、進行中禁用、成功／失敗訊息）。
@@ -16,6 +18,7 @@ vi.mock('../lib/api/scheduler', () => ({
   triggerStockSymbolSyncRun: vi.fn(),
   triggerSREvaluationRun: vi.fn(),
   triggerCorporateActionSyncRun: vi.fn(),
+  triggerDelistingReconcileRun: vi.fn(),
 }))
 
 const srEvaluationJob: SchedulerJob = {
@@ -209,5 +212,79 @@ describe('Scheduler 頁面的 aborted 狀態', () => {
     // 顏色要與 failed（紅）、partial（黃）、以及「沒事」的灰色都分得開。
     const badge = label.closest('span')
     expect(badge?.className).toContain('orange')
+  })
+})
+
+// 這個 job 的手動入口是**同步取鎖**的：後端回 409 代表「已經有一輪在跑」，
+// ⛔ 不是「先回 202 再靜默跳過」。畫面要把它與觸發失敗分開，
+// 否則使用者會以為功能壞了而一直重按。
+describe('Scheduler 頁面的 delisting_reconcile 區塊', () => {
+  const delistingJob: SchedulerJob = {
+    job_name: 'delisting_reconcile',
+    status: 'partial',
+    symbols_total: 265,
+    symbols_failed: 0,
+    error: 'delisting_reconcile: source_missing=1 unresolvable=0 identity_doubt=2 source_corrected=1 projection_revoked=1 concurrency_conflict=0 revocation_conflict=0',
+    stale: false,
+    started_at: '2026-09-07T07:00:00Z',
+    finished_at: '2026-09-07T07:00:12Z',
+  }
+
+  beforeEach(() => {
+    vi.mocked(triggerDelistingReconcileRun).mockReset()
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([delistingJob])
+  })
+
+  async function renderPage() {
+    render(Scheduler)
+    return screen.findByRole('button', { name: '手動執行終止上市對帳' })
+  }
+
+  it('渲染排程列、中文 label 與 partial 的原因', async () => {
+    await renderPage()
+
+    expect(screen.getByText('終止上市對帳')).toBeInTheDocument()
+    expect(screen.getByText('部分失敗')).toBeInTheDocument()
+    // partial 的原因必須看得到，否則排程頁只看得到 partial、看不到為什麼。
+    expect(screen.getByText(/source_missing=1/)).toBeInTheDocument()
+  })
+
+  it('點擊手動執行會呼叫 API（預設不帶 accept_shrink）並顯示後端訊息', async () => {
+    vi.mocked(triggerDelistingReconcileRun).mockResolvedValue({
+      message: 'delisting_reconcile 已在背景觸發',
+      accept_shrink: false,
+    })
+    const button = await renderPage()
+
+    await fireEvent.click(button)
+
+    expect(triggerDelistingReconcileRun).toHaveBeenCalledTimes(1)
+    // ⛔ 畫面不得自行帶 override：縮水核可只走 API。
+    expect(triggerDelistingReconcileRun).toHaveBeenCalledWith()
+    expect(await screen.findByText('delisting_reconcile 已在背景觸發')).toBeInTheDocument()
+  })
+
+  it('409 顯示「已在執行中」而不是通用的觸發失敗', async () => {
+    vi.mocked(triggerDelistingReconcileRun).mockRejectedValue(
+      new ApiError(409, 'delisting reconcile already running')
+    )
+    const button = await renderPage()
+
+    await fireEvent.click(button)
+
+    expect(await screen.findByText('已有一輪對帳在執行中，請稍後再試')).toBeInTheDocument()
+    expect(screen.queryByText('觸發失敗，請稍後再試')).not.toBeInTheDocument()
+  })
+
+  it('其他錯誤仍顯示觸發失敗且不留在觸發中狀態', async () => {
+    vi.mocked(triggerDelistingReconcileRun).mockRejectedValue(new Error('boom'))
+    const button = await renderPage()
+
+    await fireEvent.click(button)
+
+    expect(await screen.findByText('觸發失敗，請稍後再試')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '手動執行終止上市對帳' })).toBeEnabled()
+    )
   })
 })

@@ -84,6 +84,19 @@ stock_symbols:
   timeout_sec: 0                             # 環境變數：STOCK_SYMBOLS_TIMEOUT_SEC，單一 TWSE ISIN 請求（含讀 body）上限
   fetch_delay_sec: 0                         # 環境變數：STOCK_SYMBOLS_FETCH_DELAY_SEC，上市→上櫃兩次請求之間的間隔
 
+# TWSE 終止上市名單對帳（計畫書 docs/todo.md T-071）。每日抓「終止上市公司」CSV，
+# 把官方的終止上市日期補進 stock_symbols.delisted_date，並在主檔與官方名單對不上時告警。
+# ⚠️ **不驅動 is_listed**：那份 CSV 含歷史紀錄且代號會被重用（2002 年的光寶電子(2301)
+# 與今天的光寶科(2301) 是兩家公司），判定「還在不在交易」的權責只屬於 stock_symbols 的
+# ISIN 缺席邏輯。抓取／解析／縮水防護／依賴不成立都是整輪 failed，不做部分寫入。
+delisting:
+  enabled: false                              # 環境變數：DELISTING_ENABLED
+  url: "https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv"   # 環境變數：DELISTING_URL
+  cron: "0 7 * * *"                           # 環境變數：DELISTING_CRON，台北時區。
+                                              # 排在 stock_symbols 的 06:30 之後，但**時間只是常態安排**：
+                                              # 正確性由「當日 stock_symbol_sync 必須已成功」那條依賴保證。
+  timeout_sec: 0                              # 環境變數：DELISTING_TIMEOUT_SEC，0 代表沿用程式預設（60 秒）
+
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：
 #   openssl rand -hex 32

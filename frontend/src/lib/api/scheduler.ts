@@ -11,6 +11,8 @@ export type JobName =
   | 'sr_evaluation'
   | 'corporate_action_sync'
   | 'evaluation_universe_sync'
+  // 只補官方的終止上市日期並對帳，⚠️ **不驅動 is_listed**——那是 stock_symbol_sync 的權責
+  | 'delisting_reconcile'
 
 export interface SchedulerJob {
   job_name: JobName
@@ -48,4 +50,22 @@ export async function triggerSREvaluationRun(): Promise<{ message: string }> {
 // （見 scripts/verify-adjustment.sh）。重算是冪等的，重複觸發不會累積誤差。
 export async function triggerCorporateActionSyncRun(): Promise<{ message: string }> {
   return apiFetch('/scheduler/corporate-action-sync/run', { method: 'POST' })
+}
+
+// triggerDelistingReconcileRun 手動觸發終止上市名單對帳。
+//
+// cron 預設關閉，dev 驗收與排程漏跑時都只有這個入口。整輪是冪等的
+// （事件以 (source, symbol, delisted_date) upsert），重複觸發不會累積副作用。
+//
+// acceptShrink 是**人工核可一次來源縮水**的 override，只在確認 TWSE 名單真的變少時才帶。
+// ⛔ 它只放行「比上次 accepted 少、但大於 0」；來源回 0 筆是硬失敗，與這個參數無關
+// （放行 0 會把所有事件標記成消失並讓防護基準永久降成 0）。⚠️ 後端只認字面值 `1`。
+//
+// **併發時後端同步回 409**（cron 或另一次手動觸發正在跑），呼叫端要顯示出來——
+// 不是「先回 202 再靜默跳過」，那會讓使用者以為觸發成功。
+export async function triggerDelistingReconcileRun(
+  acceptShrink = false
+): Promise<{ message: string; accept_shrink: boolean }> {
+  const query = acceptShrink ? '?accept_shrink=1' : ''
+  return apiFetch(`/scheduler/delisting-reconcile/run${query}`, { method: 'POST' })
 }

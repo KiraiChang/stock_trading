@@ -224,10 +224,171 @@ watchlist 維護與下架標的判斷。任一來源抓取失敗、或快照涵�
 | remarks | 備註 |
 | listed_date | 上市日 |
 | is_listed | 是否仍出現在最近一次 TWSE ISIN 同步清單 |
+| delisted_date | 終止上市日期。**由 `delisting_reconcile` 投影或人工填入，⛔ 不參與 `is_listed` 的判定**，見下方 `delisting_events` |
+| delisted_event_id | 上面那個日期的 provenance：非 NULL＝本 job 投影的（可被替換／撤銷）、NULL 但 `delisted_date` 非 NULL＝**人工填的，永不自動改動** |
 | last_seen_at | 最近一次在來源清單看到的時間 |
 | created_at / updated_at | 建立與更新時間 |
 
+⚠️ **`delisted_date` 是敘述欄位，不是判定欄位。** 「還在不在交易」只看 `is_listed`
+（ISIN 清冊缺席），⛔ 不要改成查 `delisted_date IS NOT NULL`——上櫃標的沒有第二來源
+可補日期，那樣會把它們全部誤判成仍在交易。
+
+⛔ **重新上市時兩個欄位必須一起清成 `NULL`**（`upsert` 的 `ON CONFLICT DO UPDATE` 已經這麼做）：
+ISIN 清冊是 `is_listed` 的權威來源，它確認重新上市時留著終止日就會做出
+「`is_listed = true` ＋ 有終止日」的不可能狀態。**人工值也要清**——
+「人工值永不自動改動」只約束 `delisting_reconcile` 這支 job，不約束 current-state 不變量。
+
 ---
+
+## delisting_events / delisting_source_snapshots
+
+終止上市名單的**事件層**與來源快照（migration 076，T-071）。
+排程行為與「為什麼不驅動 `is_listed`」見
+[architecture.md 的終止上市對帳](./architecture.md)。
+
+### 為什麼分兩層
+
+`delisting_events` 記的是**歷史事實**——「來源 S 說代號 X 在日期 D 終止上市」，
+同一代號可以有多代紀錄；`stock_symbols` 是 **current-state 主檔**，一個代號只有一列。
+混在一起正是誤判的成因：TWSE 名單裡有 2002 年的「光寶電子(2301)」，
+而今天的 2301 是「光寶科」，直接寫主檔就會在光寶科將來下市時回填上一代證券的日期。
+分層之後，**證不出身分的事件仍被保存**供人工判讀。
+
+| `delisting_events` 欄位 | 說明 |
+|------|------|
+| source | 來源識別，目前只有 `twse_suspend_listing` |
+| symbol / company_name / delisted_date | 來源給的三個欄位（CSV 沒有 ISIN） |
+| first_seen_at / last_seen_at | 首次與最近一次在來源看到 |
+| missing_from_source_at | 非 NULL＝已從來源消失，**不參與投影**但保留 |
+| — | 身分鍵 `UNIQUE (source, symbol, delisted_date)` |
+
+**身分鍵含日期**，所以同一代號可以有多筆不同日期的事件（代號重用時必然如此）。
+這也是 `job_runs.symbols_total` 記**distinct 代號數**而不是事件筆數的原因——
+那個欄位的單位由全域契約定死是標的數。
+
+⛔ **事件永不 `DELETE`，消失只標記**（`missing_from_source_at`），而且只在
+**NULL → timestamp 的轉換當下**寫入。持續缺席不得重複改寫它，否則「來源更正」
+計數每輪都 > 0，job 會永久 `partial`。**來源更正計數是邊緣觸發的**，
+單位是 distinct event 數。
+
+⛔ **改名／重現的計數不能用 upsert 的 `RowsAffected`**：正常路徑每輪都會更新
+`last_seen_at`，一筆都沒更正也會被算成「全部都變了」；三種 engine 的 affected-row
+語意還各不相同（MySQL 值未變回 0、更新回 2；postgres 一律 1），拿它當語意來源
+本身就不可移植。實作改成在記憶體裡比對更新前後的狀態。
+**首次缺席可以用 affected rows**——那句 SQL 帶 `WHERE missing_from_source_at IS NULL`，
+predicate 自己保證了只有真的發生轉換的列才會被更新。
+
+### `delisting_source_snapshots`：縮水防護的基準
+
+每次**通過驗證並寫入**時記一列（`row_count` 是去重後的 canonical event 數，
+⛔ 不是 CSV 原始列數，否則去重會被誤判成縮水）。下一輪比的就是上一筆 `accepted`。
+
+⛔ **「上一筆」一律 `ORDER BY id DESC LIMIT 1`**：兩次連續執行可能落在同一個
+`fetched_at`（秒級精度），只靠時間戳排序就變成未定義，基準會不確定。
+
+⚠️ **`job_run_id` 的生命週期比快照短**：`job_runs` 只保留 30 天，而快照是縮水基準、
+必須長期保存。所以它是 nullable ＋ `ON DELETE SET NULL`——一般 FK 會讓 `DeleteBefore`
+失敗，`CASCADE` 更糟：會把縮水基準一起刪掉。
+
+**快照必須與事件寫入在同一個 transaction**：它是下一輪的判斷基準，
+「事件更新了但快照沒寫」會讓下一輪拿舊基準比新事件。
+
+### 投影的 provenance：`delisted_event_id` 的所有權是單向的
+
+| 狀態 | 意義 | 本 job 可否改動 |
+|---|---|---|
+| 兩欄皆 NULL | 沒有終止日 | 可投影（首次投影） |
+| 兩欄皆非 NULL | job-owned | 可替換、可撤銷 |
+| `delisted_date` 非 NULL、`delisted_event_id` NULL | **人工填的** | ⛔ 不可，只能告警 |
+| `delisted_date` NULL、`delisted_event_id` 非 NULL | 不可能狀態 | 由 `CHECK` 擋掉 |
+
+⛔ **人工值不得被靜默升級成 job-owned**：日期與來源完全相同時記 `manual_matched`
+（Info，不是 degradation），**不補 `delisted_event_id`**。補了之後那筆人工值
+就會在來源事件消失時被本 job 撤銷刪掉。
+
+⛔ **FK 用 `RESTRICT`，與鄰近 `job_run_id` 的 `SET NULL` 相反，不可照抄**：
+`delisted_event_id` 是**所有權標記**，被清成 NULL 會讓 job-owned 的投影被誤認成
+人工值，從此不參與重算、**永久無法收斂**。事件本來就永不 DELETE，
+所以 `RESTRICT` 不會擋到任何正常路徑。
+
+`CHECK (delisted_event_id IS NULL OR delisted_date IS NOT NULL)` 擋的是半套狀態——
+撤銷或重新上市時只清一欄的實作錯誤訊號。
+
+### 投影規則：每輪重算，不列舉觸發條件
+
+規則 1～5 是**候選過濾**（`evaluateCandidateFilters` 是唯一實作，
+一筆事件只會落在其中一種結果）：
+
+| 規則 | 條件 | 判定 |
+|---|---|---|
+| 1 | `is_listed = true` | 目前還在交易的**一律不碰** |
+| 2／3 | 市場別非上市、`security_type` 非「股票」，或 `listed_date IS NULL` | 無法解析（`unresolvable`） |
+| 4 | 終止日**早於**上市日 | 必然是上一代證券（`generation_gap`） |
+| 5 | 正規化後的公司名稱不符 | 代號重用（`identity_doubt`） |
+| — | 以上全數通過 | 成為候選 |
+
+規則 6 是**數量仲裁**（同一代號有多筆候選＝歧義，不投影）；
+規則 7 是 **ownership 四態仲裁**（上面那張表）。
+
+**名稱正規化是封閉的**（`NormalizeCompanyName`），固定順序：
+①全半形統一（NFKC）→ ②去除所有空白 → ③**只從字串尾端**移除 allowlist
+（`-創櫃`、`-創`、`-DR`、`-KY`，由長到短、最多移除一次）。
+⛔ `-DR` 只在結尾移除，出現在中間不動；不得用「切到第一個 `-`」這類規則。
+⚠️ **名稱比對是啟發式，不是身分證明**（公司會改名，CSV 沒有 ISIN），
+定位是**只准不放**：不符就不寫入、等人工，⛔ 不會因為名稱相符就放寬其他任何一條。
+
+**每輪重算而不是列舉觸發條件**：改名後不再相符、兩筆候選的歧義、
+替代事件不合格、主檔自己變了（改名／`listed_date`／`market`／`security_type`）
+——這些都會讓既有投影失去資格，而「列舉觸發條件」的寫法會全部漏掉。
+
+### DATE 欄位的比較：⛔ 不做時區換算
+
+`delisted_date` 是 **DATE**——沒有時刻也沒有時區，但各 driver 交還的 `time.Time`
+帶的 location 不同：
+
+| engine | 交還的值 |
+|---|---|
+| postgres（pgx） | `2026-09-01 00:00:00 UTC` |
+| mysql（`parseTime=true` ＋ `loc=Asia/Taipei`，見 `config.yaml` 的 DSN 範例） | `2026-09-01 00:00:00 +08:00` |
+
+⛔ **先 `.UTC()` 再取日期會讓後者變成 `2026-08-31`**：事件身分鍵、事件 id 查找與
+「同一天」比對整批差一天，而且**不會有任何東西報錯**。
+一律用 `store.DateKey` / `store.SameCalendarDay`（取掛鐘日期）。
+（2026-09-08 review 修正；回歸測試 `TestDateKeyUsesCalendarDateNotUTC` 與
+`TestMySQLMigrationsDelistingDateKeyUnderTaipeiLoc`——後者刻意另開一個帶 `loc` 的連線，
+因為 `scripts/test-mysql-migrations.sh` 的 DSN 沒帶它。）
+
+⚠️ `stock_symbols.delisted_event_id` 在 Go 端用 **`store.NullInt64`**，不是
+`sql.NullInt64`：後者會序列化成 `{"Int64":123,"Valid":true}`，而 `omitempty`
+對 struct 無效。這個欄位會經 `GET /stocks` 系列送到前端。
+
+### 寫入的 CAS 契約
+
+投影與撤銷都是 compare-and-swap，條件是**判定當下讀到的那份 snapshot**
+（含 `name` / `market` / `security_type` / `listed_date` / `delisted_date` /
+`delisted_event_id`）。落空就記 `concurrency_conflict`（投影）或
+`revocation_conflict`（撤銷），該輪 `partial`，⛔ 不重試。
+
+⛔ **撤銷的 CAS 條件必須與投影完全相同**：只比 ownership 的話，
+「因名稱不符而準備撤銷、期間名稱被修正成相符」仍會清除那筆已經重新成立的投影。
+
+三個 engine 的分歧點，都已在實作處理：
+
+* ⛔ **snapshot 讀取用一般 `SELECT`，不可 `FOR UPDATE`**——鎖住之後並行更新只能等到
+  本交易結束，CAS 就永遠不會落空，衝突路徑變成不可達（連測都測不到）。
+  鎖只出現在**最終寫入點**的 guarded read（pg/mysql 是 `FOR UPDATE`；
+  SQLite 沒有 `FOR UPDATE`，靠的是同一交易內的單 writer 契約）。
+* ⛔ **nullable 欄位要 null-safe**：以 `(col IS NULL AND ? IS NULL) OR col = ?`
+  的形式組出，不用 engine 專屬的 `IS NOT DISTINCT FROM` / `<=>`。
+  寫成 `col = NULL` 永遠不為真，那些列就永遠撤銷不掉。
+* ⛔ **MySQL 的字串比較要 binary**（`BINARY col = BINARY ?`）：預設 collation
+  不分大小寫，CAS 會在名稱只有大小寫差異時誤判成沒變，於是拿過期的仲裁結果寫入。
+* ⛔ **DB error 不是 CAS 落空**：`Project` / `ConfirmProjection` / `Revoke` 回 error 時
+  **整輪 rollback**，⛔ 不得記成 X／RX 再繼續寫 accepted 快照——MySQL／SQLite 的單句
+  錯誤不會中止整個 transaction，那會 commit「事件寫了、快照寫了、投影沒寫」的半套狀態。
+* ⛔ **不可用 no-op `UPDATE` 再看 affected rows 判斷「值相同」**：MySQL 把欄位更新成
+  相同值時通常回報 0 affected rows，一個穩定且完全正確的投影會**每天被誤判成衝突**。
+  「值相同」走的是帶同一組 CAS 條件的 current read。
 
 ## users
 

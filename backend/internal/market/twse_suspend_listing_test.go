@@ -206,14 +206,19 @@ func TestParseROCDateForSuspendListing(t *testing.T) {
 		}
 	}
 
-	// ⚠️ **既有行為，本筆不改**：民國 0 年（不存在）會被算成西元 1911，不報錯。
-	// parseROCDate 是 exchange_reference.go 的共用函式，收緊它會動到另一個呼叫端，
-	// 超出 T-071 的範圍。本來源不會產生這種輸入（TWSE 最早是 090 年），
-	// 所以這裡如實記錄現況而不是假裝它會擋。已另立 docs/issue.md 追蹤。
-	if got, err := parseROCDate("0/01/01"); err != nil {
-		t.Errorf("現況應可解析（不報錯）：%v", err)
-	} else if got.Year() != 1911 {
-		t.Errorf("現況會算成 1911，得到 %d —— 行為變了要同步更新 issue 那筆", got.Year())
+	// ⛔ **年份下界**（2026-09-08 修，原 issue.md I-109）：民國元年是西元 1912，
+	// 所以 0 年與負數年都不存在。舊版直接 `+1911`，把 `0/01/01` 靜默算成
+	// 1911-01-01、`-5/01/01` 算成 1906——**不存在的日期被轉成一個合法日期**。
+	for _, in := range []string{"0/01/01", "-5/01/01", "000/12/31"} {
+		if got, err := parseROCDate(in); err == nil {
+			t.Errorf("%q 是不存在的民國年，應該報錯，卻得到 %s", in, got.Format("2006-01-02"))
+		}
+	}
+	// 邊界的另一側：民國元年（西元 1912）必須照常解析。
+	if got, err := parseROCDate("1/01/01"); err != nil {
+		t.Errorf("民國元年應可解析：%v", err)
+	} else if got.Year() != 1912 {
+		t.Errorf("民國元年應是西元 1912，得到 %d", got.Year())
 	}
 }
 

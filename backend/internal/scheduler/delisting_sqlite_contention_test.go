@@ -125,23 +125,58 @@ func jobRunRows(t *testing.T, db *sqlx.DB) []store.JobRun {
 
 // #20f②｜startRun 成功之後，外部 writer 才持鎖。
 //
-// 整輪 `failed`，並把**那筆既有的** run 寫成 `failed`。
-// ⛔ 不歸 X／RX：那是 CAS 落空的分類，這裡根本沒寫進去。
+// **兩種結果依持鎖時間分流**（2026-09-08 起，見 `issue.md` I-111 的選項 2）：
+// 業務交易改用 `BEGIN IMMEDIATE`，在**任何讀取之前**取得 writer reservation，
+// 所以 `busy_timeout`（5 秒）對它**有效**了。
 //
-// ⚠️ **實測（2026-09-07）與計畫書的假設不同，這裡釘住的是實際行為**：
-// 業務交易**不會**在 `busy_timeout` 內等待——`WithTx` 是 deferred transaction，
-// 先讀（`LastAcceptedSnapshot`／`LoadEvents`）後寫，升級成 writer 時 SQLite
-// **不呼叫 busy handler**（重試會破壞它已經拿到的讀快照），直接回 `SQLITE_BUSY`。
-// `busy_timeout` 只保護**單句寫入**——也就是後面 `finishRunStatus` 那一句。
-// 現況與影響記在 `docs/issue.md` I-111。
-func TestDelistingReconcileExternalWriterAfterStartRunWritesFailed(t *testing.T) {
+//	持鎖 < busy_timeout → 等待之後**成功**
+//	持鎖 > busy_timeout → 整輪 `failed`，並把那筆既有的 run 寫回去
+//
+// ⛔ 舊版是 deferred transaction（先讀後寫），升級成 writer 時 SQLite 不呼叫
+// busy handler，**不管持鎖多久都立刻失敗**（實測 0.06 秒）。
+func TestDelistingReconcileWaitsOutShortExternalWriter(t *testing.T) {
 	var release func()
 	source := &contentionSourceStub{}
 	s, db, path := newSQLiteContentionFixture(t, source)
-	// 持鎖 1.5 秒：業務交易會**立刻**失敗（見上方說明），而 finishRunStatus 那一句
-	// 走 busy handler，等 1.5 秒拿到鎖後仍寫得回去（它的 writer timeout 是 10 秒，
-	// 連線的 busy_timeout 是 5 秒，兩個都夠）。
+	// 1.5 秒 < busy_timeout 5 秒 → 本輪應該等到鎖並正常收斂。
 	source.hook = func() { release = holdWriteLock(t, path, 1500*time.Millisecond) }
+
+	start := time.Now()
+	s.RunDelistingReconcile()
+	elapsed := time.Since(start)
+	if release != nil {
+		release()
+	}
+
+	rows := jobRunRows(t, db)
+	if len(rows) != 1 {
+		t.Fatalf("應只有一筆 job_run，得到 %d 筆：%+v", len(rows), rows)
+	}
+	if rows[0].Status != "success" {
+		t.Fatalf("⛔ 短暫持鎖應該等待後成功（BEGIN IMMEDIATE 讓 busy handler 生效），得到 %+v", rows[0])
+	}
+	if elapsed < time.Second {
+		t.Errorf("看起來沒有真的等待（%v）——fixture 可能沒造成競爭", elapsed)
+	}
+	// 等到鎖之後的業務寫入必須留下。
+	var events int
+	if err := db.Get(&events, `SELECT COUNT(*) FROM delisting_events`); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Errorf("等到鎖之後應寫入 1 筆事件，得到 %d", events)
+	}
+}
+
+// 持鎖**超過** busy_timeout → 整輪 `failed`，且那筆既有的 run 要被寫回去
+// （⛔ 不歸 X／RX：那是 CAS 落空的分類，這裡根本沒寫進去）。
+func TestDelistingReconcileExternalWriterBeyondBusyTimeoutWritesFailed(t *testing.T) {
+	var release func()
+	source := &contentionSourceStub{}
+	s, db, path := newSQLiteContentionFixture(t, source)
+	// 6 秒 > busy_timeout 5 秒：BEGIN IMMEDIATE 等滿之後放棄；
+	// 而 finishRunStatus 的 writer timeout 是 10 秒，鎖放掉後仍寫得回去。
+	source.hook = func() { release = holdWriteLock(t, path, 6*time.Second) }
 
 	s.RunDelistingReconcile()
 	if release != nil {
@@ -150,7 +185,7 @@ func TestDelistingReconcileExternalWriterAfterStartRunWritesFailed(t *testing.T)
 
 	rows := jobRunRows(t, db)
 	if len(rows) != 1 {
-		t.Fatalf("應**只有** startRun 那一筆紀錄，得到 %d 筆：%+v", len(rows), rows)
+		t.Fatalf("應只有 startRun 那一筆紀錄，得到 %d 筆：%+v", len(rows), rows)
 	}
 	if rows[0].JobName != delistingReconcileJobName || rows[0].Status != "failed" {
 		t.Fatalf("那筆既有的 run 必須被寫成 failed，得到 %+v", rows[0])
@@ -164,6 +199,17 @@ func TestDelistingReconcileExternalWriterAfterStartRunWritesFailed(t *testing.T)
 	}
 	if !rows[0].FinishedAt.Valid {
 		t.Error("⛔ 不得停在 running——finishRunStatus 必須走 WithoutCancel 的 writer")
+	}
+	// ⛔ 零業務寫入。
+	var events, snaps int
+	if err := db.Get(&events, `SELECT COUNT(*) FROM delisting_events`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Get(&snaps, `SELECT COUNT(*) FROM delisting_source_snapshots`); err != nil {
+		t.Fatal(err)
+	}
+	if events != 0 || snaps != 0 {
+		t.Errorf("整輪失敗不得留下寫入，得到 events=%d snapshots=%d", events, snaps)
 	}
 }
 

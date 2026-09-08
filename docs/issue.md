@@ -1881,7 +1881,7 @@ canonical formula 有結論，evaluation、`selection_report.py`、runtime 三�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | **已實作／待 review**（2026-09-08） |
 | 嚴重度 | 低（現有兩個呼叫端的來源都不會產生這種輸入） |
 | 分類 | Go / 健壯性 |
 | 建立日期 | 2026-09-07 |
@@ -1889,7 +1889,8 @@ canonical formula 有結論，evaluation、`selection_report.py`、runtime 三�
 
 #### 現象
 
-`parseROCDate`（`exchange_reference.go:743`）把民國年直接 `+1911`，**沒有檢查年份下界**：
+**（以下是 2026-09-08 修正前的行為）** `parseROCDate`（`exchange_reference.go`）
+把民國年直接 `+1911`，**沒有檢查年份下界**：
 
 ```
 parseROCDate("0/01/01")  →  1911-01-01，err = nil
@@ -1915,14 +1916,24 @@ parseROCDate("0/01/01")  →  1911-01-01，err = nil
 ⚠️ **這是共用函式**，收緊它會同時影響 `exchange_reference`——雖然那條路徑取不到
 這種輸入，改動仍要跟著跑一次 `./internal/market/...` 的回歸。
 
-⛔ **T-071 刻意不順手改**：那超出該筆的範圍，且會讓一個獨立的行為變更混進
-一份已經很大的 commit。`twse_suspend_listing_test.go` 目前**如實記錄現況**
-（斷言它回 1911 而不是報錯），本筆修好時要同步把那段改成期望報錯。
+ℹ️ **T-071 當時刻意不順手改**（2026-09-07）：那超出該筆的範圍，且會讓一個獨立的
+行為變更混進一份已經很大的 commit。`twse_suspend_listing_test.go` 當時**如實記錄現況**
+（斷言它回 1911 而不是報錯）。**2026-09-08 本筆修好時已把那段改成期望報錯**（見下方修法）。
 
 #### 關閉條件
 
 `parseROCDate` 對民國年 `<= 0` 回錯誤，`./internal/market/...` 全綠，
 且 `twse_suspend_listing_test.go` 那段「既有行為」註解與斷言已同步更新。
+
+#### 修法（2026-09-08）
+
+`parseROCDate` 在 `+1911` 之前加下界：`if y <= 0 { return error }`。
+`newStrictDate` 只守月／日的歸一化，年份沒有對應的守門，所以要在這一層擋。
+
+`twse_suspend_listing_test.go` 那段「如實記錄現況」的斷言已改成**期望報錯**，
+涵蓋 `0/01/01`、`-5/01/01`、`000/12/31` 三種寫法，並加上邊界的另一側：
+民國元年 `1/01/01` 必須照常解析成西元 1912。
+共用函式的另一個呼叫端（`exchange_reference`）跟著跑過 `./internal/market/...`，全綠。
 
 ---
 
@@ -2134,7 +2145,7 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | **已實作／待 review**（2026-09-08） |
 | 嚴重度 | 低（型別不準，不影響 runtime） |
 | 發現日期 | 2026-09-07（實作 `todo.md` T-071 時順帶發現） |
 | 位置 | `frontend/src/lib/api/scheduler.ts` 的 `JobName` |
@@ -2147,11 +2158,29 @@ job：`candle_gap_detection`、`sr_analysis`、`sr_analysis_chip`。
 `JobName` 讀起來像是「後端會回哪些 job」的清單，實際上不是，
 而以它為 key 的 `Partial<Record<JobName, …>>`（觸發狀態）也就跟著不完整。
 
-**修法**：把三個補進 union。⚠️ 這是**每加一支排程就會再發生一次**的落後，
-真正的修法是讓 union 從後端的 `knownSchedulerJobs` 產生，但那需要一套型別產生流程，
-本筆不做。
+**修法（2026-09-08）**：三個都補進 union。
 
-（2026-09-07 加 `delisting_reconcile` 時已同步補進 union，所以清單裡只缺上述三個。）
+⚠️ **修的時候發現更嚴重的一半**：`jobLabel` 也少了 `sr_analysis` / `sr_analysis_chip`，
+而那兩支**在 live 是開著的**——union 落後只是型別騙人，label 落後**畫面上看得到**
+（排程頁直接渲染 `sr_analysis` 這種原始字串）。兩支的中文 label 已補上
+（「SR 分析（前一日籌碼）」／「SR 分析（當日籌碼）」）。
+
+**防再犯**：新增 `scripts/check-job-names.sh`，比對後端 `knownSchedulerJobs` 與前端的
+union ＋ `jobLabel`，由 `frontend/scripts/test.sh` 在最後呼叫（比照
+`check-dist-assets.sh` 的既有模式）。
+
+⛔ **為什麼是 shell 而不是單元測試**：這道檢查跨兩個語言的原始碼，而
+`backend/scripts/test.sh` 只掛載 `backend/`（讀不到 `frontend/`）；前端沒有
+`@types/node`，vitest 裡讀檔要多裝相依。前端腳本掛的是 repo root，兩邊都讀得到。
+
+**已驗證有牙齒**：拿掉一個 label／拿掉一個 union 項目各跑一次，都正確變紅；
+還原後連跑 3 次都是綠的。
+⚠️ 建立當下有過**一次無法重現的誤報**（說 `daily_close` 缺 label，但檔案裡有），
+之後 5 次執行都正確；再出現要查 awk 區塊擷取。
+
+真正的修法仍然是讓型別從後端產生，但那需要一套產生流程，本筆不做。
+
+（2026-09-07 加 `delisting_reconcile` 時已同步補進 union，所以原本只缺上述三個。）
 
 ---
 
@@ -2159,15 +2188,16 @@ job：`candle_gap_detection`、`sr_analysis`、`sr_analysis_chip`。
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待決策 |
+| 狀態 | **已實作／待 review**（2026-09-08 依選項 2 修） |
 | 嚴重度 | 中（誤導：設計文件把 `busy_timeout` 當成外部 writer 防護，實際只擋得住單句寫入） |
 | 發現日期 | 2026-09-07（補 T-071 的 #20f 測試時實測） |
 | 位置 | `backend/internal/store/sqlite.go` 的 DSN pragma、`delisting_event_repo.go` 的 `WithTx` |
 
 T-071 計畫書把 `_pragma=busy_timeout(5000)` 定位成「**外部 writer 防護**」，
-並預期「本 job 在 `busy_timeout` 內重試、逾時才整輪 `failed`」。**實測不是這樣。**
+並預期「本 job 在 `busy_timeout` 內重試、逾時才整輪 `failed`」。**實測不是這樣**
+（以下是 **2026-09-08 修正前**的行為；現況見下方「處置」）。
 
-`WithTx` 開的是 **deferred transaction**：先讀（`LastAcceptedSnapshot`／`LoadEvents`）
+`WithTx` 當時開的是 **deferred transaction**：先讀（`LastAcceptedSnapshot`／`LoadEvents`）
 再寫。SQLite 在「已經讀過、要升級成 writer」時**不呼叫 busy handler**——重試會破壞
 它已經拿到的讀快照——所以直接回 `SQLITE_BUSY`。實測外部 writer 持鎖時，
 業務交易在 **0.06 秒**就失敗，完全沒有用到那 5 秒。
@@ -2183,13 +2213,43 @@ T-071 計畫書把 `_pragma=busy_timeout(5000)` 定位成「**外部 writer 防�
 * 外部 writer 若持鎖**超過 5 秒**，連 `finishRunStatus` 都會失敗，那筆紀錄會停在
   `running`——但下次啟動的 `AbortRunning` 會把它收成 `aborted`，不會永遠假裝執行中。
 
-**可能的處置（未決定，所以先記在這裡）**：
+⚠️ **修正後**：業務交易改用 `BEGIN IMMEDIATE`，持鎖短於 `busy_timeout` 時**等待後成功**，
+超過才整輪 `failed`（那筆 run 仍寫得回去，因為 `finishRunStatus` 是單句寫入）。
 
-1. **維持現況**，只把文件改成「`busy_timeout` 保護單句寫入，不保護 read-then-write 的交易」。
-2. `WithTx` 對 SQLite 改用 **`BEGIN IMMEDIATE`**（開頭就取得 write lock，busy handler 才會生效）。
-   ⚠️ 要確認 `database/sql` 的交易介面拿不到這個語法，得改走 `Conn` 手動控制交易。
-3. DSN 加 **`_txlock=immediate`**。⛔ 影響**全部**交易（含唯讀），會把並行度整個壓掉，
-   不能只為這個 job 這樣改。
+**處置：選項 2（2026-09-08 決定並實作）。**
 
-⚠️ 現況已由 `TestDelistingReconcileExternalWriterAfterStartRunWritesFailed`
-的註解與斷言釘住——**改動處置方式時那支測試會變紅**，不會靜默飄移。
+三個選項與取捨：
+
+1. 維持現況，只改文件。
+2. ✅ **`WithTx` 對 SQLite 改用 `BEGIN IMMEDIATE`**：在**任何讀取之前**取得 writer
+   reservation，busy handler 才生效（[SQLite 交易說明](https://www.sqlite.org/lang_transaction.html)）。
+3. DSN 加 `_txlock=immediate`。⛔ 影響**全部**交易（含唯讀），不能只為這個 job 改全域 DSN。
+
+**選 2 的理由**：這個交易成功時必然寫入（事件＋投影＋快照），本來就不是唯讀交易；
+網路抓取已在交易外，提前取得 write lock 增加的鎖定時間有限；`DelistingRepo.WithTx`
+是 T-071 專用介面，可以只改 SQLite 分支而不影響 PostgreSQL／MySQL 與其他 SQLite 交易；
+而且 `backend/config.yaml` 的預設仍是 SQLite，這不只是測試環境的問題。
+
+**實作要點**（`delisting_event_repo.go` 的 `withImmediateTx`）：
+
+* 只有 `driver == "sqlite"` 走這條，其他 engine **維持 `BeginTxx`**；
+* 綁在**單一 `*sqlx.Conn`** 上——`BEGIN`／所有查詢／`COMMIT`／`ROLLBACK` 落在同一條
+  physical connection，否則 pool 可能把後續語句派到別條連線；
+* rollback 走 `context.WithoutCancel` ＋ 獨立預算（呼叫端 ctx 取消後仍要收乾淨）；
+* ⛔ **rollback 失敗時用 `Raw` 回 `driver.ErrBadConn` 丟棄該連線**，
+  不把「可能還開著交易」的連線放回 pool；
+* COMMIT 失敗**不設 `committed`**，交由同一個 defer 收尾。
+
+**測試**（實測數字）：
+
+| 測試 | 情境 | 結果 |
+|---|---|---|
+| `TestWithImmediateTxWaitsForShortExternalLock` | 外部 writer 持鎖 1 秒 | **等待後成功**（實測 1.27 秒；修好前是 0.06 秒失敗） |
+| `TestWithImmediateTxFailsAfterBusyTimeoutAndKeepsPoolUsable` | 持鎖 6 秒 > `busy_timeout` | 整輪失敗，且**連線沒外洩**（`MaxOpenConns(1)`，外洩下一次會卡死） |
+| `TestWithImmediateTxRollsBackAndReusesConnection` | callback 失敗 | 完整 rollback ＋ 連線可重用 |
+| `TestWithImmediateTxWithCanceledContextLeavesPoolUsable` | ctx 已取消 | 取連線就失敗，pool 仍可用 |
+| `TestDelistingReconcileWaitsOutShortExternalWriter` | 排程層，持鎖 1.5 秒 | `job_runs` **`success`**，業務寫入留下 |
+| `TestDelistingReconcileExternalWriterBeyondBusyTimeoutWritesFailed` | 排程層，持鎖 6 秒 | 整輪 `failed`、零業務寫入、那筆 run 被寫回去 |
+
+⚠️ **COMMIT 失敗在 WAL 模式下無法穩定製造**（BEGIN 時就拿到 write lock），
+但它與 callback 失敗走**同一個 defer**——`committed` 沒被設成 true 就 rollback ＋ 收連線。

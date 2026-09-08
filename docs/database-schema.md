@@ -378,6 +378,13 @@ predicate 自己保證了只有真的發生轉換的列才會被更新。
   本交易結束，CAS 就永遠不會落空，衝突路徑變成不可達（連測都測不到）。
   鎖只出現在**最終寫入點**的 guarded read（pg/mysql 是 `FOR UPDATE`；
   SQLite 沒有 `FOR UPDATE`，靠的是同一交易內的單 writer 契約）。
+* ⚠️ **SQLite 的交易用 `BEGIN IMMEDIATE`，不是預設的 deferred**（2026-09-08，原 `issue.md` I-111）：
+  本交易先讀後寫，而 SQLite 在「已經讀過、要升級成 writer」時**不呼叫 busy handler**，
+  會直接回 `SQLITE_BUSY`——DSN 上的 `busy_timeout=5000` 對它形同不存在。
+  `BEGIN IMMEDIATE` 把等待移到交易開頭，外部 writer 短暫持鎖時才等得到。
+  ⛔ 實作必須綁在**單一 `*sqlx.Conn`** 上，且 rollback 失敗時要丟棄該連線
+  （`Raw` 回 `driver.ErrBadConn`），不能把還開著交易的連線放回 pool。
+  ℹ️ 只有 SQLite 分支這樣做，PostgreSQL／MySQL 維持 `BeginTxx`。
 * ⛔ **nullable 欄位要 null-safe**：以 `(col IS NULL AND ? IS NULL) OR col = ?`
   的形式組出，不用 engine 專屬的 `IS NOT DISTINCT FROM` / `<=>`。
   寫成 `col = NULL` 永遠不為真，那些列就永遠撤銷不掉。

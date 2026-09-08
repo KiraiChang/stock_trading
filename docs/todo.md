@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作、review 通過、dev 驗收完成（2026-09-08）**——驗收條件 **1～6 全數成立**（實測結果見下方「dev 驗收實測」與 `architecture.md`）。⛔ **本筆仍不能收斂**：條件 7 的 20 個交易日觀察期要等 live 開啟後才開始算（計畫書寫明「期滿前不移除本筆」）。**驗收條件 1、2 已完成**：三 engine migration 驗證各跑過、測試清單 #1～#20g 全數實作且全綠、三組 mutation（#4、#5、#4c④）都確認會變紅、`RACE=1` 通過。**剩下條件 3～6（dev stack 實跑）與 7（20 個交易日觀察期）**，操作步驟見下方「dev 驗收操作清單」。計畫階段 2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正** |
+| 狀態 | **已實作、review 通過、dev 驗收完成、live 已啟用（2026-09-08 10:57）**——驗收條件 **1～6 全數成立**：①三 engine migration 驗證各跑過；②測試 #1～#20g 全綠 ＋ 三組 mutation（#4／#5／#4c④）都確認會變紅 ＋ `RACE=1` 通過；③～⑥ dev stack 實跑（實測見下方「dev 驗收實測」）。⛔ **本筆仍不能收斂**：只剩條件 7 的 20 個交易日觀察期，**由 2026-09-09 07:00 的首輪起算**（計畫書寫明「期滿前不移除本筆」）。計畫階段 2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正**；實作後 2026-09-08 兩輪 review（5 高／中 ＋ 4 低）亦全部修完 |
 | 優先度 | 中 |
 | 分類 | Go / 排程 / DB schema / 資料品質 |
 | 建立日期 | 2026-09-04 |
@@ -1171,7 +1171,10 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 7. **觀察期 20 個交易日**：記錄 A 類每日筆數與是否為真陽性，期滿後決定
    A 類要維持 Warn 還是升級。⚠️ 期滿前不移除本筆。
 
-#### dev 驗收操作清單（**待執行**——2026-09-07 未跑，使用者選擇不停 live）
+#### dev 驗收操作清單（**2026-09-08 已執行完畢**，實測結果見下方「dev 驗收實測」）
+
+ℹ️ 保留步驟供日後補跑／複驗；實際執行時**沒有停 live**（改成只騰出 fin-api 的記憶體、
+單獨 build backend image、用 `--no-deps` 只起 postgres＋redis＋backend），細節見下方那節。
 
 驗收條件 3～6 的可執行版本。⚠️ **這台 host 只有 2GiB，起 dev stack 前要先停 live**
 （見 `development-workflow.md`「`MEM` 是上限，不是預留」）；live 的排程時段是平日
@@ -1314,7 +1317,7 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/statu
 | **guarded `SELECT` 讀到舊 snapshot 仍錯計 P** | **最終寫入點**用 `SELECT ... FOR UPDATE`（MySQL 預設 REPEATABLE READ，本專案無 isolation 覆寫）；⛔ **初始 snapshot 用一般 `SELECT`**，否則鎖住列會讓 X／RX 不可達；SQLite 靠 write transaction 串行化；查無 → X |
 | **`listed_date` 等 nullable 欄位用 `= NULL` 比較，無競爭也誤判 RX** | 由程式依 snapshot 是否為 `NULL` 組出 `IS NULL` / `= ?`，三 engine 共用（測試 #20g①） |
 | **MySQL 繼承的 collation 可能大小寫不敏感，CAS 誤判成「沒變」** | `name`／`market`／`security_type` 在 CAS 統一寫 `BINARY col = BINARY ?`（⛔ 不改**正式**欄位的 collation）；**測試 fixture 自行釘住 CI collation** ＋ 拿掉 `BINARY` 的 mutation 必須變紅（測試 #4c④a／④b） |
-| **SQLite 的 busy policy 用錯地方** | `busy_timeout=5000` 定位為**外部 writer 防護**；本 job 自身入口重疊由 single-flight 管，**ISIN 與本 job 之間**靠同日依賴＋pool 排隊＋CAS（測試 #20f／#20f2） |
+| **SQLite 的 busy policy 用錯地方** | `busy_timeout=5000` 定位為**外部 writer 防護**；本 job 自身入口重疊由 single-flight 管，**ISIN 與本 job 之間**靠同日依賴＋pool 排隊＋CAS（測試 #20f／#20f2）。⚠️ **要讓 `busy_timeout` 對業務交易真的生效，SQLite 分支必須用 `BEGIN IMMEDIATE`**——deferred transaction 先讀後寫時升級不走 busy handler（2026-09-08 修，見 `issue.md` I-111） |
 | **PRAGMA 只設在 pool 上，connection 重建後靜默失效** | 定案用 **DSN pragma**，**`busy_timeout` 與 `foreign_keys` 一起搬**（⛔ 只搬前者的話 SQLite FK 會靜默失效，#19／#19d 整組落空）；測試兩個 handle 都走 `store.NewSQLite`，#20f3 保留同一 pool 並強制回收 physical connection、兩個 pragma 都驗 |
 | **DSN 直接字串拼接，做出第二個 `?` 或蓋掉既有參數** | 解析並合併既有 query 再加 pragma；live 現況是純相對路徑（`config.yaml:12`），另有空 DSN 與已帶 query 的 `file:` URI 三種形態（測試 #20f5a／#20f5b） |
 | **外部 DSN 帶 `foreign_keys(0)` 關掉 FK，#19／#19d 整組落空** | 那兩個 pragma 是強制政策：辨識涵蓋 `()`／`=`／空白／大小寫／URL encode 五種變體後移除再覆寫，其他 pragma 保留（測試 #20f5a④⑤） |
@@ -1396,7 +1399,25 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/statu
 repo 的 `docker-compose.yml`／`deploy.sh`（已補），以及 **live 的
 `/opt/stacks/scripts/stock_trading/compose.yml`**（repo 外的手動副本，要另外加）。
 通則已歸檔到 [`development-workflow.md`](./development-workflow.md)
-「新增排程開關要改三個地方」。live 跑起來之後才開始算 20 個交易日。
+「新增排程開關要改三個地方」。
+
+**live 已於 2026-09-08 10:57 啟用並驗證**：env 進了容器、`migrations applied version=76`、
+schema 與 FK／CHECK／UNIQUE 就位、新端點 401、排程頁 `尚未執行`（＝已註冊）、
+部署落在兩次 intraday 之間沒中斷 live、重啟後 11:00 那輪 `success`。
+**首輪 2026-09-09 07:00，觀察期由它起算。**
+
+**觀察期每天要記的**（條件 7）：
+
+```sql
+SELECT status, symbols_total, symbols_failed, error FROM job_runs
+ WHERE job_name='delisting_reconcile' ORDER BY id DESC LIMIT 1;
+SELECT COUNT(*) FILTER (WHERE missing_from_source_at IS NULL) FROM delisting_events;
+SELECT symbol, delisted_date, delisted_event_id FROM stock_symbols WHERE delisted_date IS NOT NULL;
+```
+
+重點是 **A 類（`source_missing`）每天幾筆、是不是真陽性**——期滿後據此決定 A 類維持
+Warn 還是升級。⚠️ live 主檔比 dev 完整（46,635 vs 46,196），**投影數可能不只 `2867` 一檔，
+那不是異常**；要看的是 `partial` 時 `error` 帶出來的類別數字與 log 裡 A 類的內容。
 
 #### Review 修正（2026-09-08，五項全部照改）
 
@@ -1428,15 +1449,16 @@ DATE 用掛鐘日期）與 `database-schema.md`（DATE 比較那節 ＋ CAS 契�
 | 10j | 同上（三 engine） | `source_corrected` 的四個分支：無更正 → 0、首次缺席 → 1、持續缺席 → 0 且 timestamp 不變、重現＋改名 → 1 |
 | 20g①② | 同上 | `listed_date IS NULL` 無競爭時必須撤銷成功（三 engine）；`NULL → 非 NULL` 的跨連線改動必須落空成 RX（PG／MySQL） |
 | 9／9b | `internal/store/delisting_event_repo_test.go` | 兩個注入點（投影中途／快照寫入時）各一，三條斷言逐一檢查：事件無變更（**含 `last_seen_at`**）、快照無新增、投影未變 |
-| 20f①②③ | `store`（①）＋ `scheduler/delisting_sqlite_contention_test.go`（②③） | ①本輪先持鎖 → 拿到 busy 的是競爭者、本輪正常收斂；②`startRun` 之後外部 writer 持鎖 → 整輪 `failed` 且那筆既有 run 被寫回；③外部 writer 在 `startRun` 之前持鎖 → `runID = 0` → 中止且**沒有任何 job_run** |
+| 20f①②③ | `store`（①）＋ `scheduler/delisting_sqlite_contention_test.go`（②③） | ①本輪先持鎖 → 拿到 busy 的是競爭者、本輪正常收斂；②`startRun` 之後外部 writer 持鎖 → **依持鎖時間分流**（2026-09-08 起，`issue.md` I-111 改用 `BEGIN IMMEDIATE`）：**短於 `busy_timeout` → 等待後成功**、**超過 → 整輪 `failed` 且那筆既有 run 被寫回**；③外部 writer 在 `startRun` 之前持鎖 → `runID = 0` → 中止且**沒有任何 job_run** |
 | 20f2 | `scheduler/delisting_sqlite_contention_test.go` | 同一 pool（`MaxOpenConns(1)`）的排隊：⛔ 不是 `SQLITE_BUSY` 而是 context 逾時，競爭者釋放後 `finishRunStatus` 仍把那筆寫成 `failed` |
 | 12b | `internal/market/delisting_reconciler_test.go` | 狀態推導八種情形 ＋ 摘要的計數不得互相灌數 |
 
-⚠️ **#20f② 實測推翻了計畫書的一個假設**：業務交易**不會**在 `busy_timeout` 內等待
-——`WithTx` 是 deferred transaction，先讀後寫，升級成 writer 時 SQLite 不呼叫 busy handler，
-直接回 `SQLITE_BUSY`（實測 0.06 秒就失敗）。`busy_timeout` 只保護**單句寫入**
-（`startRun` 的 INSERT 與 `finishRunStatus` 的 UPDATE，實測都會等滿 5 秒）。
-測試釘的是**實際行為**，處置選項記在 `issue.md` I-111。
+⚠️ **#20f② 一度推翻了計畫書的假設，後來把實作修回計畫書**（2026-09-08，`issue.md` I-111）：
+`WithTx` 原本是 deferred transaction，先讀後寫，升級成 writer 時 SQLite 不呼叫
+busy handler，直接回 `SQLITE_BUSY`（實測 0.06 秒就失敗）——**`busy_timeout` 對它形同不存在**。
+**已依 I-111 的選項 2 改成 `BEGIN IMMEDIATE`**（只有 SQLite 分支），
+在任何讀取之前取得 writer reservation，計畫書原本寫的「在 `busy_timeout` 內等待、
+逾時才整輪 `failed`」**現在成立**：持鎖 1.5 秒 → 等待後成功；持鎖 6 秒 → 整輪 `failed`。
 
 #### Mutation 檢查（2026-09-07 執行）
 

@@ -844,3 +844,169 @@ func TestStockSymbolDelistedEventIDJSONShape(t *testing.T) {
 		t.Errorf("NULL 時應是 null，得到 %s", empty)
 	}
 }
+
+// ── BEGIN IMMEDIATE（I-111 選項 2）────────────────────────────────────────
+
+// openContentionDB 建一個檔案 DB ＋ 一條**獨立 handle** 當外部 writer。
+func openContentionDB(t *testing.T) (*sqlx.DB, string) {
+	t.Helper()
+	path := t.TempDir() + "/immediate.db"
+	db, err := NewDB(config.DatabaseConfig{Driver: "sqlite", DSN: path})
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := database.RunMigrations(context.Background(), db, "sqlite", zap.NewNop()); err != nil {
+		t.Fatalf("migrations: %v", err)
+	}
+	return db, path
+}
+
+// holdExternalWriteLock 用另一個 handle 持有 write lock 一段時間。
+func holdExternalWriteLock(t *testing.T, path string, hold time.Duration) (done <-chan struct{}) {
+	t.Helper()
+	rival, err := sqlx.Connect("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatalf("開競爭者連線: %v", err)
+	}
+	tx, err := rival.Beginx()
+	if err != nil {
+		t.Fatalf("競爭者開交易: %v", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO stock_symbols (symbol, name, market, security_type, is_listed)
+		VALUES ('RIVAL', '競爭者', '上市', '股票', 1)`); err != nil {
+		t.Fatalf("競爭者寫入: %v", err)
+	}
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		time.Sleep(hold)
+		tx.Rollback()
+		rival.Close()
+	}()
+	return ch
+}
+
+// ⛔ **這是 I-111 的核心**：外部 writer 短暫持鎖時，本交易要在 `busy_timeout` 內
+// **等待然後成功**。deferred transaction（舊版 `BeginTxx`）在這個情境會立刻回
+// `SQLITE_BUSY`——先讀後寫的升級不走 busy handler。
+func TestWithImmediateTxWaitsForShortExternalLock(t *testing.T) {
+	db, path := openContentionDB(t)
+	repo := NewDelistingRepo(db)
+
+	done := holdExternalWriteLock(t, path, 1*time.Second)
+	start := time.Now()
+
+	err := repo.WithTx(context.Background(), func(tx DelistingTx) error {
+		// 先讀後寫——正是舊版升級失敗的形態。
+		if _, err := tx.LastAcceptedSnapshot(testSource); err != nil {
+			return err
+		}
+		return tx.UpsertEvent(event("T1", "甲公司", day(2026, 9, 1)), day(2026, 9, 7))
+	})
+	elapsed := time.Since(start)
+	<-done
+
+	if err != nil {
+		t.Fatalf("⛔ 短暫持鎖應該等待後成功（BEGIN IMMEDIATE 讓 busy handler 生效），得到 %v", err)
+	}
+	if elapsed < 500*time.Millisecond {
+		t.Errorf("看起來沒有真的等待（%v）——fixture 可能沒造成競爭", elapsed)
+	}
+	var n int
+	if err := db.Get(&n, `SELECT COUNT(*) FROM delisting_events`); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("等到鎖之後的寫入必須留下，得到 %d 筆", n)
+	}
+}
+
+// 持鎖**超過** busy_timeout（5 秒）→ 整輪失敗，且**連線沒有外洩**：
+// 鎖放掉之後同一個 pool 仍然可用（`MaxOpenConns(1)`，外洩的話下一次會卡死）。
+func TestWithImmediateTxFailsAfterBusyTimeoutAndKeepsPoolUsable(t *testing.T) {
+	db, path := openContentionDB(t)
+	repo := NewDelistingRepo(db)
+
+	done := holdExternalWriteLock(t, path, 6*time.Second)
+	err := repo.WithTx(context.Background(), func(tx DelistingTx) error {
+		return tx.UpsertEvent(event("T1", "甲公司", day(2026, 9, 1)), day(2026, 9, 7))
+	})
+	if err == nil {
+		t.Fatal("持鎖超過 busy_timeout 時整輪必須失敗")
+	}
+	<-done
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := repo.WithTx(ctx, func(tx DelistingTx) error {
+		return tx.UpsertEvent(event("T2", "乙公司", day(2026, 9, 2)), day(2026, 9, 7))
+	}); err != nil {
+		t.Fatalf("⛔ 失敗那輪不得吃掉 pool 的唯一連線，後續交易失敗：%v", err)
+	}
+}
+
+// callback 失敗 → **完整 rollback**，而且連線立刻可以再用。
+//
+// ⚠️ COMMIT 失敗在 WAL 模式下沒有辦法穩定製造（我們在 BEGIN 時就拿到 write lock），
+// 但它與這裡走的是**同一個 defer**：`committed` 沒被設成 true 就會 rollback ＋ 收連線。
+func TestWithImmediateTxRollsBackAndReusesConnection(t *testing.T) {
+	db, _ := openContentionDB(t)
+	repo := NewDelistingRepo(db)
+	wantErr := errors.New("注入的 callback 失敗")
+
+	if err := repo.WithTx(context.Background(), func(tx DelistingTx) error {
+		if err := tx.UpsertEvent(event("T1", "甲公司", day(2026, 9, 1)), day(2026, 9, 7)); err != nil {
+			return err
+		}
+		return wantErr
+	}); !errors.Is(err, wantErr) {
+		t.Fatalf("應原樣回傳 callback 的錯誤，得到 %v", err)
+	}
+
+	var n int
+	if err := db.Get(&n, `SELECT COUNT(*) FROM delisting_events`); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("callback 失敗必須完整 rollback，得到 %d 筆", n)
+	}
+
+	// 連線可重用：⛔ MaxOpenConns(1)，外洩的話這裡會卡到 ctx 逾時。
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := repo.WithTx(ctx, func(tx DelistingTx) error {
+		return tx.UpsertEvent(event("T2", "乙公司", day(2026, 9, 2)), day(2026, 9, 7))
+	}); err != nil {
+		t.Fatalf("rollback 之後連線必須可重用：%v", err)
+	}
+	if err := db.Get(&n, `SELECT COUNT(*) FROM delisting_events`); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("後續交易應成功寫入 1 筆，得到 %d", n)
+	}
+}
+
+// ctx 已取消 → 取連線的當下就失敗，⛔ 不得留下開著的交易；pool 仍然可用。
+func TestWithImmediateTxWithCanceledContextLeavesPoolUsable(t *testing.T) {
+	db, _ := openContentionDB(t)
+	repo := NewDelistingRepo(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := repo.WithTx(ctx, func(DelistingTx) error {
+		t.Error("ctx 已取消時不該進到 callback")
+		return nil
+	}); err == nil {
+		t.Fatal("ctx 已取消時必須回錯")
+	}
+
+	okCtx, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+	if err := repo.WithTx(okCtx, func(tx DelistingTx) error {
+		return tx.UpsertEvent(event("T1", "甲公司", day(2026, 9, 1)), day(2026, 9, 7))
+	}); err != nil {
+		t.Fatalf("取消那次不得吃掉連線：%v", err)
+	}
+}

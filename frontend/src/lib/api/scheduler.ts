@@ -11,8 +11,21 @@ export type JobName =
   | 'sr_evaluation'
   | 'corporate_action_sync'
   | 'evaluation_universe_sync'
+  // 沒有自己的 cron（跟著 evaluation_universe_sync 那輪跑），但有獨立的 job_runs 紀錄
+  | 'candle_gap_detection'
+  // 平日兩輪：17:00 那輪拿前一日籌碼，22:00 那輪（_chip）才有當日的
+  | 'sr_analysis'
+  | 'sr_analysis_chip'
   // 只補官方的終止上市日期並對帳，⚠️ **不驅動 is_listed**——那是 stock_symbol_sync 的權責
   | 'delisting_reconcile'
+
+// ⚠️ **這個 union 必須與後端的 `knownSchedulerJobs` 一致**
+// （`backend/internal/api/handler/scheduler.go`）。少了項目不會有 runtime 影響
+// （label 表是 Record<string, string>），但型別會騙人，而以它為 key 的
+// `Partial<Record<JobName, …>>` 也跟著不完整。
+// ℹ️ 落後（或多出後端已移除的舊 job）時由 `scripts/check-job-names.sh` 擋下，
+// 它由 `frontend/scripts/test.sh` 在最後呼叫，對 union 與 `jobLabel` 各做一次
+// **雙向**集合比較（原 issue.md I-110：這是每加一支排程就會再發生一次的漂移）。
 
 export interface SchedulerJob {
   job_name: JobName

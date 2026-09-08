@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -167,7 +170,18 @@ func NewDelistingRepo(db *sqlx.DB) DelistingRepo {
 	return &delistingRepo{db: db, driver: db.DriverName()}
 }
 
+// delistingRollbackTimeout 是「交易已經失敗，還要把它收乾淨」的獨立預算。
+// ⚠️ 走 context.WithoutCancel：呼叫端的 ctx 逾時／取消之後仍然要 rollback，
+// 否則會把**還開著交易**的 connection 放回 pool。
+const delistingRollbackTimeout = 5 * time.Second
+
 func (r *delistingRepo) WithTx(ctx context.Context, fn func(DelistingTx) error) error {
+	// SQLite 走 BEGIN IMMEDIATE 的專用路徑，理由見 withImmediateTx。
+	// ⛔ 其他 engine **維持 BeginTxx 不動**：PostgreSQL／MySQL 沒有這個問題，
+	// 而手動交易要自己管 connection 生命週期，沒有理由讓它們一起承擔。
+	if r.driver == "sqlite" {
+		return r.withImmediateTx(ctx, fn)
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -179,9 +193,83 @@ func (r *delistingRepo) WithTx(ctx context.Context, fn func(DelistingTx) error) 
 	return tx.Commit()
 }
 
+// withImmediateTx 是 SQLite 專用路徑：在**任何讀取之前**用 `BEGIN IMMEDIATE`
+// 取得 writer reservation。
+//
+// ⛔ **不能用 `BeginTxx`**（deferred transaction）：本交易是「先讀後寫」
+// （`LastAcceptedSnapshot` / `LoadEvents` → upsert / 投影 / 快照），而 SQLite 在
+// 「已經讀過、要升級成 writer」的當下**不呼叫 busy handler**——重試會破壞它已經拿到的
+// 讀快照——直接回 `SQLITE_BUSY`。於是 DSN 上的 `busy_timeout=5000` 對這個交易
+// **完全沒有作用**（實測 0.06 秒就失敗，原 `issue.md` I-111）。
+// `BEGIN IMMEDIATE` 把等待移到交易開頭，busy handler 才生效
+// （見 https://www.sqlite.org/lang_transaction.html）。
+//
+// **為什麼這裡值得付這個複雜度**：這個交易成功時必然寫入（事件＋投影＋快照），
+// 本來就不是唯讀交易；而網路抓取已經在交易外完成，提前取得 write lock 增加的
+// 鎖定時間有限。專案的 `backend/config.yaml` 預設仍是 SQLite，所以這不只是測試問題。
+//
+// ⚠️ **必須綁在單一 `*sqlx.Conn` 上**：`BEGIN`／所有查詢／`COMMIT`／`ROLLBACK`
+// 要落在同一條 physical connection，否則 pool 可能把後續語句派到別條連線，
+// 那些語句就會跑在交易外面。
+func (r *delistingRepo) withImmediateTx(ctx context.Context, fn func(DelistingTx) error) (err error) {
+	conn, err := r.db.Connx(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		// 還沒開始交易，連線可以直接還回 pool。
+		conn.Close()
+		return fmt.Errorf("delisting: begin immediate: %w", err)
+	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			rbCtx, cancel := context.WithTimeout(
+				context.WithoutCancel(ctx), delistingRollbackTimeout)
+			defer cancel()
+			if _, rerr := conn.ExecContext(rbCtx, "ROLLBACK"); rerr != nil {
+				// ⛔ rollback 失敗代表這條連線**可能還開著交易**，還回 pool 的話
+				// 下一個使用者會繼承那個交易。用 Raw + driver.ErrBadConn 讓
+				// database/sql 直接丟棄它（重開一條的成本微不足道）。
+				discardBadConn(conn)
+				err = errors.Join(err, fmt.Errorf("delisting: rollback failed: %w", rerr))
+			}
+		}
+		conn.Close()
+	}()
+
+	if ferr := fn(&delistingTx{ctx: ctx, tx: conn, driver: r.driver}); ferr != nil {
+		return ferr
+	}
+	if _, cerr := conn.ExecContext(ctx, "COMMIT"); cerr != nil {
+		// ⚠️ 這裡**不設 committed**：COMMIT 失敗時交易通常仍是開著的
+		// （例如撞上 SQLITE_BUSY），要靠上面的 defer 收掉。
+		return fmt.Errorf("delisting: commit: %w", cerr)
+	}
+	committed = true
+	return nil
+}
+
+// discardBadConn 讓 database/sql 丟棄這條連線而不是還回 pool。
+// `Raw` 的 callback 回 driver.ErrBadConn 就是官方的作法。
+func discardBadConn(conn *sqlx.Conn) {
+	_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+}
+
+// delistingExec 是交易內用得到的**最小**介面。
+// `*sqlx.Tx`（其他 engine）與 `*sqlx.Conn`（SQLite 的 BEGIN IMMEDIATE 路徑）都滿足它，
+// 所以下面每一個方法都不必知道自己跑在哪一種交易上。
+type delistingExec interface {
+	GetContext(ctx context.Context, dest any, query string, args ...any) error
+	SelectContext(ctx context.Context, dest any, query string, args ...any) error
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	Rebind(query string) string
+}
+
 type delistingTx struct {
 	ctx    context.Context
-	tx     *sqlx.Tx
+	tx     delistingExec
 	driver string
 }
 

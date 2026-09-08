@@ -752,6 +752,13 @@ func parseROCDate(s string) (time.Time, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return time.Time{}, fmt.Errorf("非民國日期格式 %q", s)
 	}
+	// ⛔ **年份下界**：民國元年是西元 1912，所以 y <= 0 不存在。
+	// 少了這條，`0/01/01` 會被靜默算成 1911-01-01、`-5/01/01` 算成 1906——
+	// **不存在的日期被轉成一個合法日期**，正是 newStrictDate 要防的同一類問題，
+	// 只是它只守月／日（原 issue.md I-109）。
+	if y <= 0 {
+		return time.Time{}, fmt.Errorf("民國年不存在 %q", s)
+	}
 	return newStrictDate(y+1911, m, d, s)
 }
 

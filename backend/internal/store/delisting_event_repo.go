@@ -200,7 +200,7 @@ func (r *delistingRepo) WithTx(ctx context.Context, fn func(DelistingTx) error) 
 // （`LastAcceptedSnapshot` / `LoadEvents` → upsert / 投影 / 快照），而 SQLite 在
 // 「已經讀過、要升級成 writer」的當下**不呼叫 busy handler**——重試會破壞它已經拿到的
 // 讀快照——直接回 `SQLITE_BUSY`。於是 DSN 上的 `busy_timeout=5000` 對這個交易
-// **完全沒有作用**（實測 0.06 秒就失敗，原 `issue.md` I-111）。
+// **完全沒有作用**（實測 0.06 秒就失敗；原記於 `issue.md` I-111，已收斂，現況見 docs/database-schema.md）。
 // `BEGIN IMMEDIATE` 把等待移到交易開頭，busy handler 才生效
 // （見 https://www.sqlite.org/lang_transaction.html）。
 //

@@ -25,7 +25,8 @@ export type JobName =
 // `Partial<Record<JobName, …>>` 也跟著不完整。
 // ℹ️ 落後（或多出後端已移除的舊 job）時由 `scripts/check-job-names.sh` 擋下，
 // 它由 `frontend/scripts/test.sh` 在最後呼叫，對 union 與 `jobLabel` 各做一次
-// **雙向**集合比較（原 issue.md I-110：這是每加一支排程就會再發生一次的漂移）。
+// **雙向**集合比較（原記於 issue.md I-110，已收斂；現況見 docs/development-workflow.md
+// 「新增排程還要同步前端的 job 清單」）。
 
 export interface SchedulerJob {
   job_name: JobName

@@ -125,7 +125,7 @@ func jobRunRows(t *testing.T, db *sqlx.DB) []store.JobRun {
 
 // #20f②｜startRun 成功之後，外部 writer 才持鎖。
 //
-// **兩種結果依持鎖時間分流**（2026-09-08 起，見 `issue.md` I-111 的選項 2）：
+// **兩種結果依持鎖時間分流**（2026-09-08 起改用 `BEGIN IMMEDIATE`；原記於 `issue.md` I-111，已收斂）：
 // 業務交易改用 `BEGIN IMMEDIATE`，在**任何讀取之前**取得 writer reservation，
 // 所以 `busy_timeout`（5 秒）對它**有效**了。
 //

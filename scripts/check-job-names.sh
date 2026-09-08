@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # 前端的 job 清單是否與後端的 knownSchedulerJobs **完全一致**（雙向）。
 #
-# ⚠️ **要解的問題**：這是**每加一支排程就會再發生一次**的漂移（原 docs/issue.md I-110）。
+# ⚠️ **要解的問題**：這是**每加一支排程就會再發生一次**的漂移（原記於 docs/issue.md I-110，已收斂；現況見 docs/development-workflow.md）。
 # 2026-09-08 發現前端的 `JobName` union 少了 candle_gap_detection / sr_analysis /
 # sr_analysis_chip，其中兩支在 live 是開著的——`jobLabel` 也少了後兩支，
 # 所以排程頁直接把 `sr_analysis` 這種原始字串渲染出來。
 #
 # ⛔ **必須是雙向集合比較，不能只查「後端每一項有沒有出現在前端」**（2026-09-08 review）：
-#   * 單向查漏掉「前端留著後端已經移除的舊 job」——那會在畫面上留一列永遠 disabled 的殭屍；
+#   * 單向查漏掉「前端留著後端已經移除的舊 job」——⚠️ 那**不會**在畫面上多一列
+#     （頁面只渲染 GET /scheduler/status 回傳的清單），壞的是型別與資料跟後端脫節：
+#     union 宣稱一個後端不會回傳的 job，jobLabel 留著永遠不會被渲染的死 label；
 #   * 而且「有沒有出現」要比對**實際的 union 成員與 object key**，不能整份檔案 grep：
 #     job 名稱也會出現在**註解**裡（例如「那是 stock_symbol_sync 的權責」），
 #     從 union 移除之後照樣能通過。
@@ -72,7 +74,7 @@ report() { # report <來源> <缺少的檔案> <多出的檔案>
   fi
   if [ -n "$extra" ]; then
     echo "ERROR: 前端 $what 多出後端沒有的：$(echo $extra)" >&2
-    echo "       （後端移除排程時前端也要跟著移，否則畫面會留一列永遠 disabled 的殭屍）" >&2
+    echo "       （後端移除排程時前端也要跟著移：畫面不會多一列，但型別與 label 會停留在不存在的 job）" >&2
     fail=1
   fi
 }

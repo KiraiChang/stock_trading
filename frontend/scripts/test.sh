@@ -133,7 +133,7 @@ else
     "$REPO_ROOT/scripts/check-dist-assets.sh"
   fi
 
-  # 前端的 job 清單是否跟得上後端的 knownSchedulerJobs（原 docs/issue.md I-110）。
+  # 前端的 job 清單是否跟得上後端的 knownSchedulerJobs（原記於 docs/issue.md I-110，已收斂）。
   # ⚠️ 放這裡是因為它跨兩個語言的原始碼：backend/scripts/test.sh 只掛載 backend/，
   # 讀不到 frontend/。這一步失敗代表加了排程卻沒同步前端，不是測試壞了。
   "$REPO_ROOT/scripts/check-job-names.sh"

@@ -538,6 +538,36 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 再看 `GET /scheduler/status` 該 job **不是 `disabled`**——是的話就是變數沒進容器。
 現況也記在 memory 的「排程狀態看容器 env」。
 
+### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
+
+後端的 `knownSchedulerJobs`（`api/handler/scheduler.go`）與前端有兩份對應資料，
+**兩份都要跟著加**：
+
+| 位置 | 少了會怎樣 |
+|---|---|
+| `frontend/src/lib/api/scheduler.ts` 的 `JobName` union | 型別騙人（label 表是 `Record<string, string>`，runtime 照常渲染），以它為 key 的 `Partial<Record<JobName, …>>` 也跟著不完整 |
+| `frontend/src/routes/Scheduler.svelte` 的 `jobLabel` | **畫面上看得到**——排程頁直接渲染 `sr_analysis` 這種原始 job name |
+
+⚠️ **這是每加一支排程就會再發生一次的漂移**：2026-09-08 發現 union 少了三個、
+`jobLabel` 少了兩個，而那兩支**在 live 是開著的**（原記於 `issue.md` I-110，已收斂）。
+
+**`scripts/check-job-names.sh` 擋住它**，由 `frontend/scripts/test.sh` 在最後呼叫
+（比照 `check-dist-assets.sh`）。它做的是**雙向集合比較**：
+
+* ⛔ **不是「後端每一項有沒有出現在前端」**——單向查漏掉「前端留著後端已移除的舊 job」。
+  ⚠️ **那不會在畫面上多一列**（`{#each jobs}` 只跑 `GET /scheduler/status` 回傳的清單，
+  前端的 union／label 產生不了列），壞的是**型別與資料跟後端脫節**：union 宣稱一個
+  後端永遠不會回傳的 job，以它為 key 的 `Partial<Record<JobName, …>>` 跟著失真，
+  `jobLabel` 也留著一個永遠不會被渲染的死 label——維護的人會以為那支排程還在；
+* ⛔ **也不是整份檔案 grep**——job 名稱也會出現在**註解**裡，從 union 移除後照樣會通過。
+  所以只取 union 的實際成員（`  | 'name'`）與 `jobLabel` 的實際 object key。
+
+**為什麼是 shell 而不是單元測試**：這道檢查跨兩個語言的原始碼，而
+`backend/scripts/test.sh` 只掛載 `backend/`（讀不到 `frontend/`）；前端沒有
+`@types/node`，vitest 裡讀檔要多裝相依。前端腳本掛的是 repo root，兩邊都讀得到。
+
+ℹ️ 真正的修法是讓型別從後端產生，但那需要一套產生流程，目前用這道檢查代替。
+
 ### schema migration 上 live 的程序
 
 **入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。

@@ -845,7 +845,7 @@ func TestStockSymbolDelistedEventIDJSONShape(t *testing.T) {
 	}
 }
 
-// ── BEGIN IMMEDIATE（I-111 選項 2）────────────────────────────────────────
+// ── BEGIN IMMEDIATE（原記於 issue.md I-111，已收斂）────────────────────────────────────────
 
 // openContentionDB 建一個檔案 DB ＋ 一條**獨立 handle** 當外部 writer。
 func openContentionDB(t *testing.T) (*sqlx.DB, string) {
@@ -887,7 +887,7 @@ func holdExternalWriteLock(t *testing.T, path string, hold time.Duration) (done 
 	return ch
 }
 
-// ⛔ **這是 I-111 的核心**：外部 writer 短暫持鎖時，本交易要在 `busy_timeout` 內
+// ⛔ **這是 BEGIN IMMEDIATE 的核心價值**：外部 writer 短暫持鎖時，本交易要在 `busy_timeout` 內
 // **等待然後成功**。deferred transaction（舊版 `BeginTxx`）在這個情境會立刻回
 // `SQLITE_BUSY`——先讀後寫的升級不走 busy handler。
 func TestWithImmediateTxWaitsForShortExternalLock(t *testing.T) {

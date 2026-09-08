@@ -1317,7 +1317,7 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/statu
 | **guarded `SELECT` 讀到舊 snapshot 仍錯計 P** | **最終寫入點**用 `SELECT ... FOR UPDATE`（MySQL 預設 REPEATABLE READ，本專案無 isolation 覆寫）；⛔ **初始 snapshot 用一般 `SELECT`**，否則鎖住列會讓 X／RX 不可達；SQLite 靠 write transaction 串行化；查無 → X |
 | **`listed_date` 等 nullable 欄位用 `= NULL` 比較，無競爭也誤判 RX** | 由程式依 snapshot 是否為 `NULL` 組出 `IS NULL` / `= ?`，三 engine 共用（測試 #20g①） |
 | **MySQL 繼承的 collation 可能大小寫不敏感，CAS 誤判成「沒變」** | `name`／`market`／`security_type` 在 CAS 統一寫 `BINARY col = BINARY ?`（⛔ 不改**正式**欄位的 collation）；**測試 fixture 自行釘住 CI collation** ＋ 拿掉 `BINARY` 的 mutation 必須變紅（測試 #4c④a／④b） |
-| **SQLite 的 busy policy 用錯地方** | `busy_timeout=5000` 定位為**外部 writer 防護**；本 job 自身入口重疊由 single-flight 管，**ISIN 與本 job 之間**靠同日依賴＋pool 排隊＋CAS（測試 #20f／#20f2）。⚠️ **要讓 `busy_timeout` 對業務交易真的生效，SQLite 分支必須用 `BEGIN IMMEDIATE`**——deferred transaction 先讀後寫時升級不走 busy handler（2026-09-08 修，見 `issue.md` I-111） |
+| **SQLite 的 busy policy 用錯地方** | `busy_timeout=5000` 定位為**外部 writer 防護**；本 job 自身入口重疊由 single-flight 管，**ISIN 與本 job 之間**靠同日依賴＋pool 排隊＋CAS（測試 #20f／#20f2）。⚠️ **要讓 `busy_timeout` 對業務交易真的生效，SQLite 分支必須用 `BEGIN IMMEDIATE`**——deferred transaction 先讀後寫時升級不走 busy handler（2026-09-08 修，原記於 `issue.md` I-111，已收斂） |
 | **PRAGMA 只設在 pool 上，connection 重建後靜默失效** | 定案用 **DSN pragma**，**`busy_timeout` 與 `foreign_keys` 一起搬**（⛔ 只搬前者的話 SQLite FK 會靜默失效，#19／#19d 整組落空）；測試兩個 handle 都走 `store.NewSQLite`，#20f3 保留同一 pool 並強制回收 physical connection、兩個 pragma 都驗 |
 | **DSN 直接字串拼接，做出第二個 `?` 或蓋掉既有參數** | 解析並合併既有 query 再加 pragma；live 現況是純相對路徑（`config.yaml:12`），另有空 DSN 與已帶 query 的 `file:` URI 三種形態（測試 #20f5a／#20f5b） |
 | **外部 DSN 帶 `foreign_keys(0)` 關掉 FK，#19／#19d 整組落空** | 那兩個 pragma 是強制政策：辨識涵蓋 `()`／`=`／空白／大小寫／URL encode 五種變體後移除再覆寫，其他 pragma 保留（測試 #20f5a④⑤） |
@@ -1449,14 +1449,14 @@ DATE 用掛鐘日期）與 `database-schema.md`（DATE 比較那節 ＋ CAS 契�
 | 10j | 同上（三 engine） | `source_corrected` 的四個分支：無更正 → 0、首次缺席 → 1、持續缺席 → 0 且 timestamp 不變、重現＋改名 → 1 |
 | 20g①② | 同上 | `listed_date IS NULL` 無競爭時必須撤銷成功（三 engine）；`NULL → 非 NULL` 的跨連線改動必須落空成 RX（PG／MySQL） |
 | 9／9b | `internal/store/delisting_event_repo_test.go` | 兩個注入點（投影中途／快照寫入時）各一，三條斷言逐一檢查：事件無變更（**含 `last_seen_at`**）、快照無新增、投影未變 |
-| 20f①②③ | `store`（①）＋ `scheduler/delisting_sqlite_contention_test.go`（②③） | ①本輪先持鎖 → 拿到 busy 的是競爭者、本輪正常收斂；②`startRun` 之後外部 writer 持鎖 → **依持鎖時間分流**（2026-09-08 起，`issue.md` I-111 改用 `BEGIN IMMEDIATE`）：**短於 `busy_timeout` → 等待後成功**、**超過 → 整輪 `failed` 且那筆既有 run 被寫回**；③外部 writer 在 `startRun` 之前持鎖 → `runID = 0` → 中止且**沒有任何 job_run** |
+| 20f①②③ | `store`（①）＋ `scheduler/delisting_sqlite_contention_test.go`（②③） | ①本輪先持鎖 → 拿到 busy 的是競爭者、本輪正常收斂；②`startRun` 之後外部 writer 持鎖 → **依持鎖時間分流**（2026-09-08 起，改用 `BEGIN IMMEDIATE`；原記於 `issue.md` I-111，已收斂）：**短於 `busy_timeout` → 等待後成功**、**超過 → 整輪 `failed` 且那筆既有 run 被寫回**；③外部 writer 在 `startRun` 之前持鎖 → `runID = 0` → 中止且**沒有任何 job_run** |
 | 20f2 | `scheduler/delisting_sqlite_contention_test.go` | 同一 pool（`MaxOpenConns(1)`）的排隊：⛔ 不是 `SQLITE_BUSY` 而是 context 逾時，競爭者釋放後 `finishRunStatus` 仍把那筆寫成 `failed` |
 | 12b | `internal/market/delisting_reconciler_test.go` | 狀態推導八種情形 ＋ 摘要的計數不得互相灌數 |
 
-⚠️ **#20f② 一度推翻了計畫書的假設，後來把實作修回計畫書**（2026-09-08，`issue.md` I-111）：
+⚠️ **#20f② 一度推翻了計畫書的假設，後來把實作修回計畫書**（2026-09-08，原記於 `issue.md` I-111，已收斂）：
 `WithTx` 原本是 deferred transaction，先讀後寫，升級成 writer 時 SQLite 不呼叫
 busy handler，直接回 `SQLITE_BUSY`（實測 0.06 秒就失敗）——**`busy_timeout` 對它形同不存在**。
-**已依 I-111 的選項 2 改成 `BEGIN IMMEDIATE`**（只有 SQLite 分支），
+**已依 I-111 的選項 2 改成 `BEGIN IMMEDIATE`**（該筆已收斂，現況在 `database-schema.md`）（只有 SQLite 分支），
 在任何讀取之前取得 writer reservation，計畫書原本寫的「在 `busy_timeout` 內等待、
 逾時才整輪 `failed`」**現在成立**：持鎖 1.5 秒 → 等待後成功；持鎖 6 秒 → 整輪 `failed`。
 

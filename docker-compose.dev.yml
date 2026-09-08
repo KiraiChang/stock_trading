@@ -114,6 +114,15 @@ services:
       # shard_count 設 1 = 每天全量（旺季補跑用）。詳見 backend/config.yaml 的註解。
       CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
       CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
+      # TWSE ISIN 股票主檔同步。dev 與 live 都靠它決定 is_listed，而它同時是
+      # delisting_reconcile 的**當日前置依賴**（sync 沒成功 → 對帳整輪 failed）。
+      # ⚠️ timeout 留 0 = 沿用程式預設 300 秒。**盤中 ISIN 端點會被節流**
+      #（2026-09-08 dev 驗收實測：連續請求時 300 秒讀不到任何 body），
+      # 要在 dev 補跑時把它調大，例如 STOCK_SYMBOLS_TIMEOUT_SEC=900。
+      STOCK_SYMBOLS_ENABLED: ${STOCK_SYMBOLS_ENABLED:-true}
+      STOCK_SYMBOLS_CRON: ${STOCK_SYMBOLS_CRON:-30 6 * * *}
+      STOCK_SYMBOLS_TIMEOUT_SEC: ${STOCK_SYMBOLS_TIMEOUT_SEC:-0}
+      STOCK_SYMBOLS_FETCH_DELAY_SEC: ${STOCK_SYMBOLS_FETCH_DELAY_SEC:-0}
       # TWSE 終止上市名單對帳（T-071）。**預設關閉**。
       # ⚠️ 它**不驅動 is_listed**——只補官方的終止上市日期並對帳告警；判定「還在不在
       # 交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯（見 docs/architecture.md）。

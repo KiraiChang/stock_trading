@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作，review 已通過（2026-09-08，兩輪：5 項程式問題 ＋ 2 項整理事項全部修完）**——⛔ **但本筆還不能收斂**，驗收條件 7 的 20 個交易日觀察期尚未開始（計畫書自己寫明「期滿前不移除本筆」）。**驗收條件 1、2 已完成**：三 engine migration 驗證各跑過、測試清單 #1～#20g 全數實作且全綠、三組 mutation（#4、#5、#4c④）都確認會變紅、`RACE=1` 通過。**剩下條件 3～6（dev stack 實跑）與 7（20 個交易日觀察期）**，操作步驟見下方「dev 驗收操作清單」。計畫階段 2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正** |
+| 狀態 | **已實作、review 通過、dev 驗收完成（2026-09-08）**——驗收條件 **1～6 全數成立**（實測結果見下方「dev 驗收實測」與 `architecture.md`）。⛔ **本筆仍不能收斂**：條件 7 的 20 個交易日觀察期要等 live 開啟後才開始算（計畫書寫明「期滿前不移除本筆」）。**驗收條件 1、2 已完成**：三 engine migration 驗證各跑過、測試清單 #1～#20g 全數實作且全綠、三組 mutation（#4、#5、#4c④）都確認會變紅、`RACE=1` 通過。**剩下條件 3～6（dev stack 實跑）與 7（20 個交易日觀察期）**，操作步驟見下方「dev 驗收操作清單」。計畫階段 2026-09-04～07 二十七輪 review，累計 25 高 58 中 31 低，**皆已修正** |
 | 優先度 | 中 |
 | 分類 | Go / 排程 / DB schema / 資料品質 |
 | 建立日期 | 2026-09-04 |
@@ -1367,6 +1367,36 @@ curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/statu
 即使編得過也會把整段計數壓成 `internal_error`。改成在 scheduler 內定義
 `delistingDegradedError`（實作 `SafeJobMessage`）並走 `joberr.Describe`——
 與 `candle_gap_detection` 的 `staleSourceError` 同款，語意與計畫書一致。
+
+#### dev 驗收實測（2026-09-08 完成，條件 3～6 全數成立）
+
+⚠️ **在盤中做的，所以沒有停 live**：只騰出 fin-api（約 100MB）就把 available 拉到
+798MB，單獨 build backend image 後用 `--no-deps` 只起 dev 的 postgres＋redis＋backend
+（python 兩支這次用不到）。**live 的 `intraday` 全程每 5 分鐘沒有中斷。**
+
+結果與計畫書的預測**完全一致**，逐項見
+[`architecture.md`](./architecture.md)「終止上市對帳」的「dev 驗收實測」表：
+`job_runs` `success`／265／0、方向一 N 261 ＋ B 3 ＋ P 1 合計 265、方向二全 0、
+`2867` 的 provenance 指向正確事件、`2301`／`2432`／`6423` 兩欄皆 NULL（且 `2432` 記 B）、
+併發第二次回 409 且不寫 `job_run`、第二輪冪等且 `projected=1` 而非 `concurrency_conflict`。
+
+**過程中發現兩件事**（都已處理）：
+
+1. ⛔ **手打 `docker compose build` 在這台 host 會失敗**——實測 `redis/go-redis/v9:
+   compile: signal: killed`，available 一度掉到 156MB。Dockerfile 的編譯設定已經是最低值
+   （`GOMEMLIMIT=250MiB`，註解寫明需要「可用約 700MB」），唯一的槓桿是騰記憶體。
+   這再次印證 `development-workflow.md` 的「dev image build 一律走 `scripts/smoke-dev.sh`」。
+2. **`docker-compose.dev.yml` 少了 `STOCK_SYMBOLS_*` 那組旋鈕**（其他排程都有），
+   而 ISIN 端點盤中會節流（300 秒讀不到 body），dev 補跑必須把 timeout 調大。
+   已補上四個 env（預設值與 `config.yaml` 相同，不改變既有行為）。
+
+**剩下的**：條件 7 的觀察期。⛔ **啟用不是只加 `export`**——2026-09-08 使用者 review
+時發現計畫書的「受影響檔案」表**漏列 `docker-compose.yml` 與 `deploy.sh`**，
+而 compose 只會帶入「`environment:` 有宣告」的變數。三個地方都要有 `DELISTING_*`：
+repo 的 `docker-compose.yml`／`deploy.sh`（已補），以及 **live 的
+`/opt/stacks/scripts/stock_trading/compose.yml`**（repo 外的手動副本，要另外加）。
+通則已歸檔到 [`development-workflow.md`](./development-workflow.md)
+「新增排程開關要改三個地方」。live 跑起來之後才開始算 20 個交易日。
 
 #### Review 修正（2026-09-08，五項全部照改）
 

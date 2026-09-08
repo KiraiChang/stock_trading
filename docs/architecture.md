@@ -368,7 +368,26 @@ DSN 範例會帶 `loc=Asia/Taipei`，`2026-09-01 00:00 +08` 轉 UTC 後是 **202
 （持續缺席不重複告警）。⛔ 只留 aggregate 數字不夠——upsert 之後舊名稱與缺席時間
 就消失了，`identity_doubt=2` 這種數字無從查起。
 
-**已知限制：上櫃沒有第二來源可對帳。** 這份 CSV 只涵蓋上市，
+**dev 驗收實測（2026-09-08）**：手動端點跑兩輪，結果與計畫書的預測完全一致。
+
+| 項目 | 實測 |
+|---|---|
+| `job_runs` | `success`、`symbols_total=265`（distinct 代號數）、`symbols_failed=0`、`error` 空 |
+| 事件／快照 | active 265、missing 0、快照 1 筆 `accepted`（`row_count=265`） |
+| 方向一 | N 261 ／ B 3 ／ P 1 ／ 其餘 0，**合計 265 == `event_rows`**（每筆恰好一類） |
+| 方向二 | R／RX／A 皆 0 |
+| `2867` | `delisted_date=2026-09-01` ＋ `delisted_event_id` 指向**同代號同日期且仍 active** 的事件 |
+| `2301`／`2432`／`6423` | 兩欄皆 `NULL`；**`2432` 記 B 不是 C**（規則 1 先命中） |
+| 併發 | 第二次觸發同步回 **409**，且**沒有**寫 `job_run` |
+| 冪等（第二輪） | 事件仍 265（無重複）、快照增為 2 筆（設計如此）、`2867` 的 provenance 不變、**`projected=1` 而不是 `concurrency_conflict`**——穩定的投影沒有被誤判成衝突 |
+
+⚠️ **dev 補跑時 ISIN 端點會被節流**：盤中連續請求時 300 秒讀不到任何 body
+（實測 `body_bytes=0`，但同一容器用 `wget` 拉得下 8.35MB），而
+`delisting_reconcile` 的前置依賴正是「當日 `stock_symbol_sync` 成功」。
+dev 補跑要把 `STOCK_SYMBOLS_TIMEOUT_SEC` 調大（實測 900 秒可過），
+那組旋鈕 2026-09-08 才補進 `docker-compose.dev.yml`。
+
+**已知限制：上櫃沒有第二來源可對帳。****已知限制：上櫃沒有第二來源可對帳。** 這份 CSV 只涵蓋上市，
 上櫃的終止日期沒有官方名單可補，也就沒有對帳的第二意見——
 上櫃標的的 `delisted_date` 只會有人工值或空值。
 

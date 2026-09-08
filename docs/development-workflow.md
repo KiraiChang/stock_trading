@@ -507,6 +507,37 @@ TWSE 年度日曆 ＋ 交易所逐檔核對」，三者都不經過它）。代�
 **這類失敗特別容易被忽略**：`startRun` 與 `SyncPerSymbolEvents` 的寫入失敗都只記 log
 不中斷流程，所以 job 照跑、只是資料沒進去——除非有人去翻 log，否則不會發現。
 
+### 新增排程開關要改**三個**地方，只加 `export` 會靜默失效
+
+⛔ **live 用的 compose 檔不是 repo 的 `docker-compose.yml`**：`deploy.sh` 跑的是
+`-f ./compose.yml`（`/opt/stacks/scripts/stock_trading/compose.yml`，**手動維護的副本、
+不在版控**），只有 `--project-directory` 指向 git checkout。所以 repo 那份是範本。
+
+⚠️ **compose 只會把「服務的 `environment:` 區塊有宣告」的變數帶進容器。**
+沒宣告的 `export` 會被**靜默丟掉**——不會有任何錯誤訊息，容器裡讀到的是空字串，
+程式退回預設值（通常就是「關閉」），而排程頁只會顯示 `disabled`。
+
+所以加一個新排程的開關要**同時**改：
+
+| 檔案 | 動作 |
+|---|---|
+| `docker-compose.yml`（repo 範本） | backend 的 `environment:` 加鍵 |
+| `deploy.sh`（repo 範本） | 加對應的 `export` |
+| **`/opt/stacks/scripts/stock_trading/compose.yml`**（live，repo 外） | **同樣加鍵**——漏這步等於整件事沒做 |
+
+**2026-09-08 實例**：T-071 的 `DELISTING_ENABLED` 已加進 live 的 `deploy.sh`，
+但那份 compose 副本沒有對應的鍵，開關等於沒開。同一天 dev 驗收也踩過同款
+（`STOCK_SYMBOLS_TIMEOUT_SEC` 在 shell export 了，容器裡是空的）。
+
+**部署後的確認方式**（⛔ 不要只看 deploy.sh 改了就當作生效）：
+
+```bash
+docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
+```
+
+再看 `GET /scheduler/status` 該 job **不是 `disabled`**——是的話就是變數沒進容器。
+現況也記在 memory 的「排程狀態看容器 env」。
+
 ### schema migration 上 live 的程序
 
 **入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。

@@ -61,6 +61,17 @@ export SR_ANALYSIS_LIMIT="400"               # 抓取的歷史 K 棒根數
 # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
 export CORPORATE_ACTION_CRON="30 6 * * 1-5"  # 台北時區
 
+# TWSE 終止上市名單對帳（T-071）：每天 07:00 抓官方「終止上市公司」CSV，補
+# stock_symbols.delisted_date 並與主檔對帳。⚠️ **不驅動 is_listed**——那份 CSV 含歷史
+# 紀錄且代號會被重用（2002 年的光寶電子(2301) 與今天的光寶科(2301) 是兩家公司），
+# 判定「還在不在交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。
+# 前置是**依賴不是時間**：當日的 stock_symbol_sync（06:30）必須已成功，否則整輪 failed。
+# ⛔ **只加 export 不夠**：compose 的 backend environment 區塊也要有對應的鍵，
+# 否則變數不會被帶進容器（會靜默失效）。
+export DELISTING_ENABLED="false"       # dev 驗收通過後改為 "true"
+export DELISTING_CRON="0 7 * * *"      # 台北時區，每天（不限平日）；stale 門檻寫死 26 小時
+export DELISTING_TIMEOUT_SEC="0"       # 0 = 沿用程式預設 60 秒（單一 CSV 請求，實測 8KB）
+
 docker compose \
   -f "$PROJECT_DIR/docker-compose.yml" \
   --project-directory "$PROJECT_DIR" \

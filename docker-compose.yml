@@ -83,6 +83,18 @@ services:
       # 預算算法與調參時機見 backend/config.yaml 的 corporate_action 註解。
       CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
       CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
+      # TWSE 終止上市名單對帳（T-071）。**預設關閉**。
+      # ⚠️ 它**不驅動 is_listed**——只補官方的終止上市日期並對帳告警；判定「還在不在
+      # 交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯（見 docs/architecture.md）。
+      # 前置是**依賴不是時間**：當日的 stock_symbol_sync 必須已成功，否則整輪 failed。
+      # 07:00 排在 06:30 的 ISIN sync 之後，但正確性由那條依賴保證，不是靠時間錯開。
+      # ⚠️ **stale 門檻是 26 小時**（每天跑，不限平日），不要設得比它稀疏。
+      # ℹ️ 手動端點（POST /api/v1/scheduler/delisting-reconcile/run）**不看這個開關**
+      # ——reconciler 一律注入，開關只決定要不要註冊 cron。
+      DELISTING_ENABLED: ${DELISTING_ENABLED:-false}
+      DELISTING_URL: ${DELISTING_URL:-https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv}
+      DELISTING_CRON: ${DELISTING_CRON:-0 7 * * *}
+      DELISTING_TIMEOUT_SEC: ${DELISTING_TIMEOUT_SEC:-0}
       # 留白（預設）時 main.go 會把 gin 設成 release。**正式環境不要設 debug**：
       # 它會把完整路由表寫進 log，且 panic 時 recovery 會連整包 request header 一起印
       # （gin 只遮 Authorization，Cookie 與自訂 header 照樣落地）。

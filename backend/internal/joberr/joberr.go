@@ -9,7 +9,7 @@
 // 而原始 driver 錯誤常帶 DSN、主機位址、連線字串或 SQL 片段，寫進去就等於顯示在畫面上；
 // `job_runs` 還保留 30 天，之後每次查詢都再洩一次。
 //
-// **為什麼獨立成套件而不是放 scheduler 或 store**（原記於 issue.md I-104 的裁決）：
+// **為什麼獨立成套件而不是放 scheduler 或 store**（原記於 issue.md I-104 的裁決，該筆已收斂）：
 // 它與「job 紀錄的錯誤欄位」綁定，不屬於 store 的資料存取職責；
 // 而 handler 也要用，讓 handler 依賴 scheduler 是錯的方向。
 package joberr
@@ -23,7 +23,11 @@ import (
 	"github.com/trading/backend/internal/indicator"
 )
 
-// Reason 是**唯一**可以寫進使用者可見錯誤欄位的值域。
+// Reason 是**外來錯誤**（driver、上游端點）寫進使用者可見錯誤欄位時的唯一形式。
+//
+// ⚠️ 它不是「那些欄位只能長成 Reason」——本專案自己組的固定安全文字
+// （見下方 SafeMessenger）與純計數（`fetch_failed:11`）同樣合法。
+// 這個型別約束的是**外來錯誤怎麼變成字串**。
 type Reason string
 
 const (

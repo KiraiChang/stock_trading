@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
 )
@@ -214,6 +215,31 @@ func (a *Adjuster) SymbolsWithCandles(ctx context.Context) ([]string, error) {
 	return a.candles.Symbols(ctx)
 }
 
+// SyncFailure 是一次逐檔失敗的**階段 ＋ 分類**。
+//
+// ⚠️ **同一檔可以有多筆**：`dividends` 與 `reductions` 打的是**兩個不同來源**
+// （Yahoo／FinMind），前者失敗完全不蘊含後者失敗；`upsert`／`recompute` 更是
+// 獨立的 DB 失敗。⛔ **只保留第一筆會把後面那些獨立的原因丟掉**
+// （2026-09-08 review 修正——前一版就是那樣，還把資訊損失寫成測試期望值）。
+//
+// ⚠️ 它與 `job_runs.symbols_failed` 的單位不同：**那個欄位算的是標的數**
+// （同一檔多階段失敗只算一次），這裡算的是「失敗事件」。
+type SyncFailure struct {
+	Symbol string
+	// Stage 是封閉值域：dividends／capital_reductions／upsert／recompute／deadline。
+	Stage  string
+	Reason joberr.Reason
+}
+
+// 逐檔同步的失敗階段（寫進 job_runs.error 的 stage token，⛔ 不要自由字串）。
+const (
+	SyncStageDividends  = "dividends"
+	SyncStageReductions = "capital_reductions"
+	SyncStageUpsert     = "upsert"
+	SyncStageRecompute  = "recompute"
+	SyncStageDeadline   = "deadline"
+)
+
 // SyncPerSymbolEvents 逐檔抓「沒有批次端點」的事件——除權息與減資——並重算。
 //
 // **兩者合併在同一個迴圈**是為了每檔只重算一次：重算要 UPDATE 該檔的整段歷史，
@@ -223,7 +249,8 @@ func (a *Adjuster) SymbolsWithCandles(ctx context.Context) ([]string, error) {
 // **刻意逐檔獨立處理**：任一來源對單一標的失敗（格式變動、被限流）不該讓整輪停下來。
 // 失敗的檔維持前次係數（重算是冪等的），下一輪會自動補上。
 //
-// 回傳 `(processed, failed, err)`（2026-08-24 起的簽章）：
+// 回傳 `(processed, failed, failures, err)`（`failures` 於 2026-09-08 加入，原記於
+// `issue.md` I-112，已收斂）：
 //
 //   - `processed` 是**已經處理完的標的數**，不是事件筆數。呼叫端要拿它跟計畫要跑的
 //     標的數相比，才知道有沒有跑完；事件筆數只有 log 價值，改由 log 輸出。
@@ -240,13 +267,27 @@ func (a *Adjuster) SymbolsWithCandles(ctx context.Context) ([]string, error) {
 //     （2026-08-24 review 補）。收尾檢查只在**有某一檔的失敗發生在 ctx 到期之後**時才歸因給
 //     ctx——單看整輪 `failed > 0` 會把「先前的一般失敗 ＋ 收尾後才到期」誤標成逾時
 //     （2026-08-24 review 補）；而那個判斷要**在各失敗分支當場採樣**，等整檔跑完才採樣一樣會誤判
-//     （同檔「dividends 一般失敗 → reductions 成功 → ctx 才到期」）。個別標的的失敗原因
-//     不往上傳，只進 log。
-func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (int, int, error) {
+//     （同檔「dividends 一般失敗 → reductions 成功 → ctx 才到期」）。
+//   - `failures` 是**逐檔失敗的階段與分類**（`joberr` 的封閉值域），供呼叫端寫進
+//     `job_runs.error`。⛔ **原始錯誤仍然只進 log**（I-104 的契約，該筆已收斂）。
+//     ⚠️ 同一檔可以有多筆——階段之間彼此獨立，見 SyncFailure 的說明。
+func (a *Adjuster) SyncPerSymbolEvents(
+	ctx context.Context, symbols []string,
+) (int, int, []SyncFailure, error) {
 	if len(symbols) == 0 || (a.dividends == nil && a.reductions == nil) {
-		return 0, 0, nil
+		return 0, 0, nil, nil
 	}
 	events, processed, failed := 0, 0, 0
+	// failures 記「哪一檔、哪個階段、什麼類別」，供呼叫端寫進 job_runs.error
+	// （原記於 issue.md I-112，已收斂）。⛔ **只放封閉值域的 reason code，不放原始錯誤**——
+	// 那個欄位是使用者可見面（I-104 的契約，該筆已收斂），原始錯誤只進 log。
+	// ⚠️ **每個失敗階段各記一筆**；`failed`（標的數）才是一檔只算一次。
+	// ⛔ **同一個 (symbol, stage) 只記一次**：`ctxDead()` 是階段之間的守衛，
+	// 同一檔可能連續問它兩次（reductions 前一次、Upsert 前一次），
+	// 兩次都會採樣到同一個已到期的 ctx——不去重就會出現兩筆一模一樣的 `deadline`
+	// （2026-09-08 review 抓到；呼叫端的 map 分組會碰巧蓋掉，但契約本身就不該破）。
+	var failures []SyncFailure
+	seenFailure := map[string]struct{}{}
 	var ctxErr error
 	// deadlineHit 記「有沒有哪一檔的失敗發生在 ctx 已到期之後」，由下面的 markFailed
 	// **在各失敗分支當場採樣**。
@@ -273,7 +314,17 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 		// **取樣點必須在失敗分支裡**：等整檔四個階段跑完才採樣的話，
 		// 「dividends 一般失敗 → reductions 成功 → ctx 才到期」會被誤歸因給預算
 		// （2026-08-24 review 的二次修正）。
-		markFailed := func() {
+		markFailed := func(stage string, cause error) {
+			// ⚠️ **每個階段都記**：dividends 與 reductions 是兩個不同來源，
+			// upsert／recompute 是 DB——彼此獨立，⛔ 不能假設後面的失敗是連鎖反應。
+			// 但同一個 (symbol, stage) 只留第一筆，見上方 seenFailure 的說明。
+			key := symbol + "\x00" + stage
+			if _, dup := seenFailure[key]; !dup {
+				seenFailure[key] = struct{}{}
+				failures = append(failures, SyncFailure{
+					Symbol: symbol, Stage: stage, Reason: joberr.Classify(cause),
+				})
+			}
 			symbolFailed = true
 			if ctx.Err() != nil {
 				deadlineHit = true
@@ -296,14 +347,14 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 			if ctx.Err() == nil {
 				return false
 			}
-			markFailed()
+			markFailed(SyncStageDeadline, ctx.Err())
 			return true
 		}
 
 		if a.dividends != nil {
 			got, err := a.dividends.FetchDividends(ctx, symbol)
 			if err != nil {
-				markFailed()
+				markFailed(SyncStageDividends, err)
 				a.log.Warn("fetch dividends failed", zap.String("symbol", symbol), zap.Error(err))
 			} else {
 				actions = append(actions, got...)
@@ -312,7 +363,7 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 		if a.reductions != nil && !ctxDead() {
 			got, err := a.reductions.FetchCapitalReductions(ctx, symbol)
 			if err != nil {
-				markFailed()
+				markFailed(SyncStageReductions, err)
 				a.log.Warn("fetch capital reductions failed", zap.String("symbol", symbol), zap.Error(err))
 			} else {
 				actions = append(actions, got...)
@@ -322,7 +373,7 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 		if len(actions) > 0 && !ctxDead() {
 			if err := a.actions.Upsert(ctx, actions); err != nil {
 				// 同一檔前面已經計過失敗就不重複計（見函式註解的 failed 說明）。
-				markFailed()
+				markFailed(SyncStageUpsert, err)
 				a.log.Warn("upsert per-symbol events failed", zap.String("symbol", symbol), zap.Error(err))
 			} else {
 				events += len(actions)
@@ -341,7 +392,7 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 					// 這檔的價格從此不一致——比「抓不到事件」更嚴重，不能只留一行 log
 					// 等人工翻。RecomputeAffected 走的也是這條原則（會把 firstErr 往上傳）。
 					// symbolFailed 之前可能已經是 true，重複設定不會讓 failed 多加一次。
-					markFailed()
+					markFailed(SyncStageRecompute, err)
 					a.log.Error("recompute after per-symbol events failed",
 						zap.String("symbol", symbol), zap.Error(err))
 				}
@@ -375,5 +426,5 @@ func (a *Adjuster) SyncPerSymbolEvents(ctx context.Context, symbols []string) (i
 	}
 	a.log.Info("逐檔事件同步完成",
 		zap.Int("events", events), zap.Int("processed", processed), zap.Int("planned", len(symbols)))
-	return processed, failed, ctxErr
+	return processed, failed, failures, ctxErr
 }

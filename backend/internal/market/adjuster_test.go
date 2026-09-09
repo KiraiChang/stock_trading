@@ -3,6 +3,7 @@ package market
 import (
 	"context"
 	"errors"
+	"strings"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/database"
+	"github.com/trading/backend/internal/joberr"
 	"github.com/trading/backend/internal/store"
 	"github.com/trading/backend/pkg/timeutil"
 )
@@ -406,7 +408,7 @@ func TestSyncPerSymbolEventsSkipsAllWhenContextAlreadyDone(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330", "8088"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330", "8088"})
 	if err == nil {
 		t.Fatal("ctx 已取消時應回傳錯誤，讓上層記成 partial")
 	}
@@ -432,7 +434,7 @@ func TestSyncPerSymbolEventsStopsMidwayOnCancel(t *testing.T) {
 	t.Cleanup(cancel)
 
 	symbols := []string{"0050", "2330", "8088", "9999"}
-	processed, _, err := adj.SyncPerSymbolEvents(ctx, symbols)
+	processed, _, _, err := adj.SyncPerSymbolEvents(ctx, symbols)
 	if err == nil {
 		t.Fatal("中途取消應回傳錯誤")
 	}
@@ -453,7 +455,7 @@ func TestSyncPerSymbolEventsCountsFailedSymbols(t *testing.T) {
 		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
 	})
 
-	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330", "8088"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330", "8088"})
 	if err != nil {
 		t.Fatalf("沒有逾時不該回錯誤: %v", err)
 	}
@@ -477,7 +479,7 @@ func TestSyncPerSymbolEventsCountsSymbolFailureOnce(t *testing.T) {
 		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
 	})
 
-	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050"})
 	if err != nil {
 		t.Fatalf("個別標的失敗不該讓整輪回錯誤: %v", err)
 	}
@@ -512,7 +514,7 @@ func TestSyncPerSymbolEventsCountsRecomputeFailure(t *testing.T) {
 		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
 	})
 
-	processed, failed, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "2330"})
 	if err != nil {
 		t.Fatalf("個別標的失敗不該讓整輪回錯誤: %v", err)
 	}
@@ -546,7 +548,7 @@ func TestSyncPerSymbolEventsReportsDeadlineHitOnLastSymbol(t *testing.T) {
 	adj.SetDividendSource(div)
 
 	symbols := []string{"0050", "2330"}
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, symbols)
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, symbols)
 	if processed != len(symbols) {
 		t.Fatalf("processed = %d, 期望 %d（最後一檔有跑到，不是沒輪到）", processed, len(symbols))
 	}
@@ -576,7 +578,7 @@ func TestSyncPerSymbolEventsCleanRunReportsNoDeadline(t *testing.T) {
 	}}
 	adj.SetDividendSource(div)
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
 	if processed != 2 || failed != 0 {
 		t.Fatalf("processed=%d failed=%d, 期望 2/0", processed, failed)
 	}
@@ -607,7 +609,7 @@ func TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierFailure(t *testing.T) {
 	}
 	adj.SetDividendSource(div)
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"0050", "2330"})
 	if processed != 2 {
 		t.Fatalf("processed = %d, 期望 2（兩檔都跑到了）", processed)
 	}
@@ -646,7 +648,7 @@ func TestSyncPerSymbolEventsDoesNotBlameCtxForEarlierStageOfSameSymbol(t *testin
 		},
 	})
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
 	if processed != 1 {
 		t.Fatalf("processed = %d, 期望 1", processed)
 	}
@@ -684,7 +686,7 @@ func TestSyncPerSymbolEventsSkipsRemainingStagesAfterDeadline(t *testing.T) {
 	red := &stubReductionSource{}
 	adj.SetCapitalReductionSource(red)
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
 	if processed != 1 {
 		t.Fatalf("processed = %d, 期望 1（這檔有跑到，只是被逾時砍斷）", processed)
 	}
@@ -744,7 +746,7 @@ func TestSyncPerSymbolEventsSkipsRecomputeAfterDeadline(t *testing.T) {
 		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
 	})
 
-	processed, failed, err := adj.SyncPerSymbolEvents(ctx, []string{"0050"})
+	processed, failed, _, err := adj.SyncPerSymbolEvents(ctx, []string{"0050"})
 	if processed != 1 {
 		t.Fatalf("processed = %d, 期望 1", processed)
 	}
@@ -766,6 +768,7 @@ func TestSyncPerSymbolEventsSkipsRecomputeAfterDeadline(t *testing.T) {
 // stubReductionSource 是減資來源的測試替身。
 type stubReductionSource struct {
 	asked   []string
+	failFor map[string]bool
 	actions map[string][]store.CorporateAction
 	onCall  func(symbol string)
 }
@@ -775,5 +778,125 @@ func (s *stubReductionSource) FetchCapitalReductions(_ context.Context, symbol s
 	if s.onCall != nil {
 		s.onCall(symbol)
 	}
+	if s.failFor[symbol] {
+		// ⚠️ 刻意用**會被分類成別種 reason** 的訊息（見 joberr.Classify 的關鍵字比對）：
+		// 兩個階段給同一種 reason 的話，「兩筆都保留」與「同一筆被複製兩次」
+		// 在斷言上分不出來（見 TestSyncPerSymbolEventsKeepsEveryStageFailure）。
+		return nil, errors.New("connection refused")
+	}
 	return s.actions[symbol], nil
+}
+
+// ── 逐檔失敗要帶得出「哪一檔、哪個階段、什麼類別」（原記於 I-112，已收斂）────────────────
+
+// ⛔ 只有數量不夠：呼叫端把 failed 寫進 symbols_failed 之後，`job_runs.error` 是空的，
+// 排程頁只看得到 partial、看不到成因，得有人去翻 log。
+func TestSyncPerSymbolEventsReportsFailureReasons(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	adj.SetDividendSource(&stubDividendSource{
+		failFor: map[string]bool{"8088": true},
+		actions: map[string][]store.CorporateAction{"0050": {dividendAction("0050")}},
+	})
+
+	_, failed, failures, err := adj.SyncPerSymbolEvents(context.Background(), []string{"0050", "8088"})
+	if err != nil {
+		t.Fatalf("沒有逾時不該回錯誤: %v", err)
+	}
+	if failed != 1 || len(failures) != 1 {
+		t.Fatalf("failed=%d failures=%+v，期望各 1", failed, failures)
+	}
+	got := failures[0]
+	if got.Symbol != "8088" {
+		t.Errorf("Symbol = %q, want 8088", got.Symbol)
+	}
+	if got.Stage != SyncStageDividends {
+		t.Errorf("Stage = %q, want %q", got.Stage, SyncStageDividends)
+	}
+	// ⛔ Reason 必須是 joberr 的封閉值域，不是原始錯誤文字。
+	if got.Reason != joberr.Classify(errors.New("fetch dividends boom")) {
+		t.Errorf("Reason = %q，期望封閉值域的分類結果", got.Reason)
+	}
+	if strings.Contains(string(got.Reason), "boom") {
+		t.Errorf("⛔ Reason 不得帶原始錯誤文字：%q", got.Reason)
+	}
+}
+
+// ⛔ **同一檔的多個階段各記一筆**：`dividends`（Yahoo）與 `capital_reductions`
+// （FinMind）是兩個獨立來源，前者失敗不蘊含後者失敗。
+// ⚠️ 前一版只留第一筆，等於把第二個獨立的失敗原因丟掉（2026-09-08 review 抓到）。
+func TestSyncPerSymbolEventsKeepsEveryStageFailure(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	adj.SetDividendSource(&stubDividendSource{failFor: map[string]bool{"8088": true}})
+	adj.SetCapitalReductionSource(&stubReductionSource{failFor: map[string]bool{"8088": true}})
+
+	_, failed, failures, err := adj.SyncPerSymbolEvents(context.Background(), []string{"8088"})
+	if err != nil {
+		t.Fatalf("不該回錯誤: %v", err)
+	}
+	// ⚠️ 標的數只算一次——那是 symbols_failed 的單位。
+	if failed != 1 {
+		t.Errorf("failed = %d，期望 1（標的數，一檔只算一次）", failed)
+	}
+	// 但失敗事件有兩筆，階段各自不同。
+	if len(failures) != 2 {
+		t.Fatalf("兩個獨立來源各失敗一次，failures 應有 2 筆，得到 %+v", failures)
+	}
+	stages := map[string]joberr.Reason{}
+	for _, f := range failures {
+		if f.Symbol != "8088" {
+			t.Errorf("Symbol = %q, want 8088", f.Symbol)
+		}
+		stages[f.Stage] = f.Reason
+	}
+	if _, ok := stages[SyncStageDividends]; !ok {
+		t.Errorf("缺 %s 那一筆：%+v", SyncStageDividends, failures)
+	}
+	if _, ok := stages[SyncStageReductions]; !ok {
+		t.Errorf("缺 %s 那一筆：%+v", SyncStageReductions, failures)
+	}
+	// 兩個階段的分類刻意不同，證明**不是同一筆被複製**。
+	if stages[SyncStageDividends] == stages[SyncStageReductions] {
+		t.Errorf("兩個階段的 reason 應不同（fixture 刻意如此），得到 %v", stages)
+	}
+}
+
+// ⛔ **同一個 (symbol, stage) 只回一筆**（2026-09-08 review）。
+//
+// 觸發時序：dividends **成功且回傳非空 actions** ＋ ctx 在該階段之後到期。
+// `ctxDead()` 是階段之間的守衛，這一檔會連續問它兩次——reductions 前一次、
+// Upsert 前一次——兩次都採樣到同一個已到期的 ctx。不去重就會出現兩筆
+// 一模一樣的 `deadline`，違反「每個失敗階段一筆」的契約。
+//
+// ⚠️ 呼叫端（`formatSymbolFailures`）的 map 分組會**碰巧**蓋掉重複，
+// 所以這條要驗的是**回傳值本身**，不是最終字串。
+func TestSyncPerSymbolEventsDeduplicatesDeadlineStage(t *testing.T) {
+	adj, _, _ := newAdjusterTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	adj.SetDividendSource(&stubDividendSource{
+		// 成功且有事件 → 後面才會走到「Upsert 前的 ctxDead」。
+		actions: map[string][]store.CorporateAction{"2330": {dividendAction("2330")}},
+		onCall: func(symbol string) {
+			if symbol == "2330" {
+				cancel() // deadline 落在 dividends 之後
+			}
+		},
+	})
+	adj.SetCapitalReductionSource(&stubReductionSource{})
+
+	_, failed, failures, _ := adj.SyncPerSymbolEvents(ctx, []string{"2330"})
+
+	if failed != 1 {
+		t.Errorf("failed = %d, want 1", failed)
+	}
+	deadlines := 0
+	for _, f := range failures {
+		if f.Symbol == "2330" && f.Stage == SyncStageDeadline {
+			deadlines++
+		}
+	}
+	if deadlines != 1 {
+		t.Errorf("(2330, %s) 應只有一筆，得到 %d 筆：%+v", SyncStageDeadline, deadlines, failures)
+	}
 }

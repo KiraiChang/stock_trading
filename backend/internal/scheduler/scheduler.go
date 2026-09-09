@@ -1373,7 +1373,7 @@ func (s *Scheduler) RunCorporateActionSync() {
 	// 所以 total 傳「這輪計畫要跑的檔數」而不是事件筆數，failed 則是
 	// **失敗檔數 ＋ 因逾時沒輪到的檔數**。少了後面那一項，逾時被 break 掉的那輪會因為
 	// 「零失敗」被記成 success——跑了 50 檔就停掉卻顯示成功，正是修改前的主要症狀。
-	processed, failed, syncErr := s.adjuster.SyncPerSymbolEvents(ctx, symbols)
+	processed, failed, symbolFailures, syncErr := s.adjuster.SyncPerSymbolEvents(ctx, symbols)
 	skipped := len(symbols) - processed
 	if skipped < 0 {
 		skipped = 0
@@ -1391,6 +1391,14 @@ func (s *Scheduler) RunCorporateActionSync() {
 		// 有 syncErr 時它已經交代了為什麼停；沒有 syncErr 卻有沒跑到的檔才需要另外說明。
 		errParts = append(errParts, fmt.Sprintf("%d 檔未處理", skipped))
 	}
+	// **逐檔失敗也要寫得出階段與原因**（原記於 issue.md I-112，已收斂）：舊版只把它們計進
+	// symbols_failed，`error` 留空，於是排程頁只看得到 partial、看不到是哪一檔、
+	// 哪個階段、什麼類別——得有人去翻 log 才知道。格式沿用 jobFailureTally 那套
+	// （`stage:N (symbol:reason, …)`，明細上限 summaryDetailCap），⛔ 不另創一種。
+	//
+	// ⚠️ **依階段分組**：同一檔可能在兩個獨立來源各失敗一次（dividends 走 Yahoo、
+	// reductions 走 FinMind），⛔ 不能只留一筆——那會丟掉另一個獨立的原因。
+	errParts = append(errParts, formatSymbolFailures(symbolFailures)...)
 	if watchlistErr != nil {
 		errParts = append(errParts, joberr.Summary("corporate_action_watchlist", watchlistErr))
 	}

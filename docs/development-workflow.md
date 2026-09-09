@@ -507,6 +507,39 @@ TWSE 年度日曆 ＋ 交易所逐檔核對」，三者都不經過它）。代�
 **這類失敗特別容易被忽略**：`startRun` 與 `SyncPerSymbolEvents` 的寫入失敗都只記 log
 不中斷流程，所以 job 照跑、只是資料沒進去——除非有人去翻 log，否則不會發現。
 
+### ⚠️ log 檔名是 **UTC 日期**，內容時間戳卻是台北時間
+
+`logging.DailyFileWriter.ensureFile()` 用 `now().UTC().Format("2006-01-02")` 當檔名
+（保留期清理也用 UTC），而 zap 的 `ts` 走容器的 `TZ=Asia/Taipei`。兩者差 8 小時，
+所以：
+
+> **台北時間 00:00–08:00 發生的事，寫在「前一天日期」的 log 檔裡。**
+
+⛔ **早班排程全部落在那個區間**——查它們的 log 時對日期會抓到空檔案：
+
+| 排程 | 台北時間 | log 檔的日期 |
+|---|---|---|
+| `stock_symbol_sync` | 06:30 | **前一天** |
+| `corporate_action_sync` | 06:30 | **前一天** |
+| `delisting_reconcile` | 07:00 | **前一天** |
+| `pre_market` 之後的（08:50 起） | 08:50～ | 當天 |
+
+**2026-09-09 的實例**：T-071 首輪 07:00 跑完，`grep backend-2026-09-09.log` 得到 0 筆，
+內容其實在 `backend-2026-09-08.log`（＝ 2026-09-08 23:00 UTC）。
+
+**查早班排程 log 的正確做法**：兩天一起查，或直接用內容的時間戳過濾。
+
+```bash
+# ⛔ **不要用 {8,9} 這種 brace expansion**：容器是 alpine，`sh` 是 busybox ash，
+# **不支援**——實測會原樣當成檔名，回 "No such file or directory"。兩個檔名寫全。
+docker exec stock_trading-backend-1 sh -c \
+  'grep -h "<訊息>" /app/logs/backend/backend-2026-09-08.log \
+                   /app/logs/backend/backend-2026-09-09.log'
+```
+
+ℹ️ **`job_runs` 沒有這個問題**：那是 DB 欄位（UTC 存、查詢時 `+ interval '8 hours'`），
+與 log 檔名無關。混用時要記得兩者的「日界線」不同。
+
 ### 新增排程開關要改**三個**地方，只加 `export` 會靜默失效
 
 ⛔ **live 用的 compose 檔不是 repo 的 `docker-compose.yml`**：`deploy.sh` 跑的是

@@ -11,8 +11,11 @@ import (
 	"github.com/trading/backend/internal/joberr"
 )
 
-// 這一組守的是 docs/architecture.md「寫入失敗的一致性契約」 的兩件事：
-// ① job_runs.error 只能出現封閉值域的 reason code；
+// 這一組守的是 docs/architecture.md「寫入失敗的一致性契約」的兩件事：
+// ① **外來錯誤的 reason 必須是封閉值域**——本組驗的是 safeJobErrorReason 的分類，
+//    ⚠️ **不是**「job_runs.error 只能長成 reason code」：那個欄位還合法接受
+//    計數（`fetch_failed:11`）、`stage:N (symbol:reason, …)` 與經核准的
+//    SafeMessenger 描述，完整清單見該節的合法形式表；
 // ② symbols_failed 是聯集不是相加。
 
 const jobSensitiveMarker = "postgres://trading_user:s3cr3t@db.internal:5432/trading"

@@ -6,10 +6,11 @@ import (
 	"strings"
 
 	"github.com/trading/backend/internal/joberr"
+	"github.com/trading/backend/internal/market"
 )
 
 // 分類器已抽到 internal/joberr——**handler 也要用它**，讓 handler 依賴 scheduler
-// 是錯的方向（原記於 issue.md I-104 的裁決）。這裡只保留別名，讓既有程式碼與
+// 是錯的方向（原記於 issue.md I-104 的裁決，該筆已收斂）。這裡只保留別名，讓既有程式碼與
 // 註解不必全部改寫。
 type reasonCode = joberr.Reason
 
@@ -209,4 +210,38 @@ func formatReasons(m map[string]reasonCode) string {
 		items = append(items, "...")
 	}
 	return strings.Join(items, ", ")
+}
+
+// formatSymbolFailures 把逐檔失敗依**階段**分組，各自產生一段
+// `<stage>_failed:N (symbol:reason, …)`（原記於 docs/issue.md I-112，已收斂；現況見 docs/architecture.md）。
+//
+// ⚠️ **同一檔可以出現在多個階段**：`dividends` 與 `capital_reductions` 是兩個不同
+// 來源（Yahoo／FinMind），彼此獨立；`upsert`／`recompute` 是 DB 失敗。
+// ⛔ 只留第一筆會把後面那些獨立的原因丟掉。
+//
+// 明細沿用 formatReasons 的排序與 summaryDetailCap 截斷，⛔ 不另創一種格式。
+// ℹ️ 去重由 `SyncPerSymbolEvents` 負責（同一個 (symbol, stage) 只回一筆），
+// 所以這裡的 map 不會覆蓋掉資訊——⛔ **但別反過來依賴它**：這個 map 只是分組工具，
+// 不是去重機制（2026-09-08 review：`ctxDead()` 曾讓同一檔出現兩筆 deadline，
+// 當時就是靠這個 map 碰巧蓋掉的）。
+func formatSymbolFailures(failures []market.SyncFailure) []string {
+	if len(failures) == 0 {
+		return nil
+	}
+	byStage := map[string]map[string]reasonCode{}
+	order := []string{}
+	for _, f := range failures {
+		if _, ok := byStage[f.Stage]; !ok {
+			byStage[f.Stage] = map[string]reasonCode{}
+			order = append(order, f.Stage)
+		}
+		byStage[f.Stage][f.Symbol] = f.Reason
+	}
+	// 階段順序固定為首次出現的順序（迴圈本身就是固定順序），讓字串可重現。
+	parts := make([]string, 0, len(order))
+	for _, stage := range order {
+		m := byStage[stage]
+		parts = append(parts, fmt.Sprintf("%s_failed:%d (%s)", stage, len(m), formatReasons(m)))
+	}
+	return parts
 }

@@ -404,7 +404,7 @@ type noopIndicatorRepo struct{ store.IndicatorRepo }
 
 func (noopIndicatorRepo) Upsert(context.Context, *store.IndicatorSnapshot) error { return nil }
 
-// ── job 紀錄的 error 欄位不得外洩（I-104）─────────────────────────
+// ── job 紀錄的 error 欄位不得外洩（原記於 I-104，已收斂）─────────────────────────
 //
 // `MarkFailed` 寫進的 error 會由前端 SRZones.svelte 六處原樣渲染；
 // backfill／chip 的 failures 則由 Backfill.svelte 渲染。

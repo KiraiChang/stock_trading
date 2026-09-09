@@ -457,6 +457,21 @@ migration 76 已套用，兩張新表與 `stock_symbols` 的兩個新欄位、FK
 問題形狀，只是換成發生在偵測器自己身上。所有讀不懂的回應一律 `verification_unavailable`，
 **不猜測、壞在明處**。
 
+⛔ **`verification_unavailable` 一定要帶得出成因**（2026-09-02 起，原記於
+`issue.md` I-105，已收斂）。`job_runs.error` 只放得下類別
+（`verification_unavailable: timeout` / `: N 筆驗不了`），**逐檔的成因在 log**：
+
+```
+msg=candle gap verification unavailable  symbol=2867  market=上市
+year=2026  month=September  missing_dates=5
+error=verification unavailable: twse stat="很抱歉，沒有符合條件的資料!" (symbol=2867)
+```
+
+⚠️ **少了這行就只剩一個沒有成因的 `verification_unavailable`**，看的人分不出是
+「對照源掛了」「格式變了」還是「這檔本來就查不到」——三者的處置完全不同。
+**2026-09-08 live 驗證**：09-04／09-07／09-08 各一次，欄位齊全；成因是 `2867`
+（三商壽）已於 09-01 終止上市，交易所端點對它沒有資料。
+
 ⚠️ **`symbols_failed` 固定 0**：缺漏與不可用都不是「標的失敗」——那些標的的回補本身是
 成功的，上游回什麼就寫什麼。失敗的是「上游該給而沒給」。詳見
 [`api-reference.md`](./api-reference.md) 的 `partial` 第四種成因。
@@ -681,7 +696,7 @@ distinct `(year, month)` 數**，視窗滾過去之後舊月份就不再計入�
 
 **判定仍以 `job_runs` 與 `candle_verification_state` 兩項 DB 證據為準**——
 它們是結構化的、可查詢的；**log 檔則是查「為什麼」時的必要補充**
-（例如 `verification_unavailable` 的成因就只在 log 裡，見 `issue.md` I-105）。
+（例如 `verification_unavailable` 的成因就只在 log 裡，見上方「日 K 缺漏偵測」；原記於 `issue.md` I-105，已收斂）。
 
 **live 觸發狀況**（截至 2026-09-02）：
 
@@ -722,11 +737,12 @@ distinct `(year, month)` 數**，視窗滾過去之後舊月份就不再計入�
 ⛔ **但查不出是哪一組、更查不出為什麼**：`StockTradedDates` 的錯誤在
 `candle_gap_detection.go:537` 的 `unavailable++` 那裡被丟棄，沒有任何 log。
 這與本節「不猜測、**壞在明處**」的宣示相牴觸——壞了，但不在明處。
-已立案 [`issue.md`](./issue.md) I-105 追蹤。
+原記於 [`issue.md`](./issue.md) I-105（**已於 2026-09-09 收斂**，現況見「日 K 缺漏偵測」的成因要求）。
 
-⚠️ **跨月是每個月月初的常態**，這個形狀會反覆出現；在 I-105 修好之前，
-看到月初的 `verification_unavailable` **不要當成新問題**，也不要當成已知無害——
-現有資料不足以區分這兩者。
+⚠️ **跨月是每個月月初的常態**，這個形狀會反覆出現。
+**I-105 修好之後**（2026-09-02 起，該筆已收斂）成因會寫進 log，看到月初的
+`verification_unavailable` 要**先看那行 log 的 `error` 欄位**再判斷是不是新問題；
+⛔ 修好之前那段期間的紀錄沒有成因，現有資料不足以區分「已知無害」與「新問題」。
 
 ##### 相關
 
@@ -1246,8 +1262,8 @@ I-102 的兩段於 2026-09-02 16:35 部署，2026-09-08 完成執行期觀察
 
 **`job_runs.error` 沒有原始錯誤外洩**（I-102 的另一半契約，見上方 `joberr` 那節）。
 ⚠️ **這項查的範圍比上表寬**：同一時間窗內**所有** job 的非 success 紀錄，不只那三個。
-出現過的 error 只有下面三種，**都符合允許的安全格式**——但⛔ **三者的形態不同，
-不要一律說成「stage 前綴 ＋ 封閉值域 reason code」**（只有第三種是）：
+出現過的 error 如下，**都符合允許的安全格式**——但⛔ **形態各不相同，
+不要一律說成「stage 前綴 ＋ 封閉值域 reason code」**（只有最後一列是那個形狀）：
 
 | error | 出處 | 形態 |
 |---|---|---|
@@ -1260,7 +1276,7 @@ I-102 的兩段於 2026-09-02 16:35 部署，2026-09-08 完成執行期觀察
 reason code」——計數與本專案自己組的固定文字同樣安全（`joberr.SafeMessenger` 的用途）。
 
 ℹ️ 同期唯一的例外方向是 `corporate_action_sync` 的一筆 `partial`——它的 `error` 是
-**空字串**（逐檔失敗不寫原因），那是可觀測性缺口而不是外洩，已另立 `issue.md` I-112。
+**空字串**（逐檔失敗不寫原因），那是可觀測性缺口而不是外洩，已另立 `issue.md` I-112（**已於 2026-09-09 修復並收斂**，現況見下方「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」）。
 
 ⛔ **這次觀察證明不了 reservation 有沒有過度抑制**：`duplicate signal suppressed by
 reservation` 是 Debug 級而 live 從 Info 起收，那行不會被寫出來。上面那些證據處理的是
@@ -1350,15 +1366,50 @@ DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立�
 ⚠️ **判別兩種 `partial`**：`symbols_failed > 0` ＋ `evaluate_failed:` 是硬失敗；
 `symbols_failed = 0` ＋ `degraded:` 是降級。
 
-⛔ **寫進 `job_runs.error` 的原因一律是封閉值域的 reason code**（`numeric_overflow` /
-`conn_refused` / `insufficient_data` / `readonly` / … / `internal_error`），
+⛔ **外來錯誤（driver、上游端點）的原因一律先過分類器**，寫進 `job_runs.error` 的
+只能是封閉值域的 reason code（`numeric_overflow` / `conn_refused` /
+`insufficient_data` / `readonly` / … / `internal_error`），
 **分類不出來一律 `internal_error`，不得退回 `err.Error()`**。
+ℹ️ 這條約束的是「**外來錯誤怎麼變成字串**」，不是「error 欄只能長成 reason code」——
+計數（`fetch_failed:11`）與本專案自己組的固定安全文字同樣合法，見下方的合法形式表。
 理由：`job_runs.error` 會由 `GET /scheduler/status` 回傳、前端原樣渲染，
 而原始 driver 錯誤常帶 DSN 與 SQL 片段，寫進去就是顯示在畫面上——且保留 30 天。
 **適用範圍**：四個 `Evaluate` 路徑、其餘 7 個排程、`candle_gap_detection`、
 以及 handler 寫進 job 紀錄的 error 與 backfill／chip 的 `failures` 陣列——
-**所有會流到畫面的 job 錯誤欄位**（2026-09-02 起，原記於 `issue.md` I-104，
-已實作、**待部署驗證**）。分類器在 `internal/joberr`。
+**所有會流到畫面的 job 錯誤欄位**（2026-09-02 起；**2026-09-03 部署、2026-09-08
+以四個交易日的 live 紀錄驗證完成**——原記於 `issue.md` I-104，已收斂）。
+分類器在 `internal/joberr`。
+
+⚠️ **合法形式依欄位而不同，⛔ 不要用單一格式判**：
+
+| 欄位 | 合法形式 |
+|---|---|
+| `job_runs.error` | `stage:reason`、`stage:symbol:reason`、`stage:N (symbol:reason, …)`（`jobFailureTally.summary()` 與 `corporate_action_sync` 的 `<stage>_failed`，明細上限 `summaryDetailCap` 10 筆）、`stage:N`（沒有逐檔資訊時只記數量，例如 `fetch_failed:11`）、經核准的 `SafeMessenger` 描述、以及既有的固定安全文字 |
+| job 紀錄的 error（`MarkFailed`） | `stage:reason` |
+| `failures[].error`（backfill／chip） | **裸 reason code**（symbol 已在同一列的欄位裡） |
+
+**判準是「不含原始錯誤文字、主機、DSN、SQL 片段」，不是「符合某個格式」**——
+計數與本專案自己組的固定文字同樣安全。
+
+#### 逐檔失敗要帶得出「哪一檔、哪個階段、什麼類別」
+
+`corporate_action_sync` 的逐檔失敗寫成依**階段分組**的字串
+（2026-09-08 起，原記於 `issue.md` I-112，已收斂）：
+
+```
+dividends_failed:1 (8088:internal_error); recompute_failed:1 (2330:conn_refused)
+```
+
+* stage 是封閉值域：`dividends` / `capital_reductions` / `upsert` / `recompute` / `deadline`；
+* ⚠️ **同一檔可以出現在多個階段**——`dividends` 走 Yahoo、`capital_reductions` 走
+  FinMind，是**兩個獨立來源**，前者失敗不蘊含後者失敗；`upsert`／`recompute` 是
+  獨立的 DB 失敗。⛔ 只留第一筆會丟掉那些獨立的原因。
+* ⚠️ **但 `symbols_failed` 仍以標的數計、一檔只算一次**——兩者單位不同。
+* ⛔ **同一個 `(symbol, stage)` 只記一筆**：`ctxDead()` 是階段之間的守衛，
+  同一檔可能連續問它兩次，不去重就會出現兩筆一模一樣的 `deadline`。
+
+**修改前**：逐檔失敗只計進 `symbols_failed`、`error` 留空，排程頁只看得到 `partial`
+看不到為什麼——2026-09-08 的 live 觀察就撞到一次。
 
 ⛔ **請求驗證錯誤不在此列**：`ShouldBindJSON` 的 400 回應描述的是呼叫端自己的 payload，
 不碰 driver，保留原文對呼叫端才有用。`position.go` 那幾處是 sentinel 比對的 domain error，

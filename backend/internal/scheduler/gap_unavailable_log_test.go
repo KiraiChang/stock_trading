@@ -13,7 +13,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組守的是 docs/issue.md I-105：`StockTradedDates` 失敗時**成因要記下來**，
+// 這一組守的是 docs/architecture.md「日 K 缺漏偵測」的成因要求（原記於 docs/issue.md I-105，已收斂）：`StockTradedDates` 失敗時**成因要記下來**，
 // 不能只把它收進 unavailable 計數。
 //
 // **為什麼這件事值得一支測試**：計數本身照樣會加、job_runs 照樣收 partial，
@@ -104,7 +104,7 @@ func TestVerifyCandidatesLogsEachFailedMonth(t *testing.T) {
 // TestVerifyCandidatesCrossMonthOneSucceedsOneFails 重現 **2026-09-02 live 的實際形狀**：
 // `2867` 跨月後 8 月那組核對成功、9 月那組失敗。
 //
-// ⚠️ **這才是 I-105 要解的情境**。前一版的跨月測試讓兩個月份都失敗
+// ⚠️ **這才是那一筆要解的情境**（I-105，已收斂）。前一版的跨月測試讓兩個月份都失敗
 // （stub 的 tradedErr 只以 symbol 為 key，做不出一成一敗），
 // 於是「能不能指出是哪一個月失敗」根本沒被驗到——兩筆 Warn 蓋住了整個問題。
 func TestVerifyCandidatesCrossMonthOneSucceedsOneFails(t *testing.T) {

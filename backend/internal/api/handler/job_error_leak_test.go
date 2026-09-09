@@ -17,7 +17,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組是 docs/issue.md I-104 handler 側的 **call-site** 測試。
+// 這一組是 handler 側的 **call-site** 測試（原記於 docs/issue.md I-104，已收斂）。
 //
 // ⚠️ **只測 joberr 本身抓不到呼叫點退回 `err.Error()`。** 這裡實際執行三個
 // 非同步流程，斷言寫進 job 紀錄／`failures` 的內容不含敏感標記——

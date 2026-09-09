@@ -19,7 +19,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 這一組是 docs/issue.md I-104 的關閉條件：**對每個 job 注入帶敏感標記的錯誤，
+// 這一組守的是 docs/architecture.md「寫入失敗的一致性契約」（原記於 docs/issue.md I-104，已收斂）：**對每個 job 注入帶敏感標記的錯誤，
 // 斷言寫入的 error 欄位不含該標記。**
 //
 // ⚠️ **每個案例都要真的走到「這次改動的那一行」。** 2026-09-02 的第一版所有案例
@@ -509,4 +509,67 @@ type failingSymbolSource struct{}
 
 func (failingSymbolSource) FetchStockSymbols(context.Context) ([]store.StockSymbol, error) {
 	return nil, leakingError()
+}
+
+// ── 逐檔失敗要在 job_runs.error 看得見（原記於 docs/issue.md I-112，已收斂）──────────
+
+// ⛔ 修改前：逐檔失敗只計進 `symbols_failed`，`error` 留空，
+// 排程頁只看得到 `partial`、看不到成因（2026-09-08 的 live 觀察就撞到這個）。
+func TestCorporateActionSyncRecordsPerSymbolFailureReasons(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	candles := &schedulerAdjusterCandleStub{symbols: []string{"2330", "8088"}}
+	adj := market.NewAdjuster(schedulerSplitSourceStub{}, schedulerActionRepoStub{}, candles, zap.NewNop())
+	adj.SetDividendSource(&schedulerDividendStub{failFor: map[string]bool{"8088": true}})
+	s := &Scheduler{
+		jobRuns:  jobRuns,
+		adjuster: adj,
+		// ⚠️ **shard_count 設 1**：預設 5 片時「當日名單」只含今天輪到的那一片，
+		// 8088 不一定在裡面，測試會隨執行日期時綠時紅。
+		corporateActionCfg: config.CorporateActionConfig{ShardCount: 1},
+		watchlist:          &schedulerWatchlistStub{},
+		log:                zap.NewNop(),
+	}
+
+	s.RunCorporateActionSync()
+
+	if len(jobRuns.finished) == 0 {
+		t.Fatal("應寫入 job_runs")
+	}
+	got := jobRuns.finished[0]
+	if got.symbolsFailed != 1 {
+		t.Errorf("symbols_failed = %d, want 1", got.symbolsFailed)
+	}
+	// 格式沿用 jobFailureTally 那套，且**帶得出階段**：<stage>_failed:N (symbol:reason, …)。
+	if !strings.Contains(got.errMsg, "dividends_failed:1 (8088:") {
+		t.Errorf("error 應帶出階段、哪一檔與類別，得到 %q", got.errMsg)
+	}
+	// ⛔ 原始錯誤只進 log。
+	assertNoLeak(t, "corporate_action_sync(dividends_failed)", got.errMsg)
+	if strings.Contains(got.errMsg, "boom") {
+		t.Errorf("⛔ 原始錯誤外洩：%q", got.errMsg)
+	}
+}
+
+// 沒有逐檔失敗時**不得無中生有**——一輪乾淨的執行 error 必須是空的。
+func TestCorporateActionSyncLeavesErrorEmptyWhenNoFailures(t *testing.T) {
+	jobRuns := &schedulerJobRunRepoStub{}
+	candles := &schedulerAdjusterCandleStub{symbols: []string{"2330"}}
+	adj := market.NewAdjuster(schedulerSplitSourceStub{}, schedulerActionRepoStub{}, candles, zap.NewNop())
+	adj.SetDividendSource(&schedulerDividendStub{})
+	s := &Scheduler{
+		jobRuns:            jobRuns,
+		adjuster:           adj,
+		corporateActionCfg: config.CorporateActionConfig{ShardCount: 1},
+		watchlist:          &schedulerWatchlistStub{},
+		log:                zap.NewNop(),
+	}
+
+	s.RunCorporateActionSync()
+
+	if len(jobRuns.finished) == 0 {
+		t.Fatal("應寫入 job_runs")
+	}
+	if got := jobRuns.finished[0]; got.errMsg != "" || got.symbolsFailed != 0 {
+		t.Errorf("乾淨的一輪不該有 error／失敗數，得到 errMsg=%q failed=%d", got.errMsg, got.symbolsFailed)
+	}
 }

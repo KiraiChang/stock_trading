@@ -12,6 +12,7 @@ import math
 import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
@@ -74,23 +75,56 @@ SWEEP_DEFAULT_REPLAY_MAX_ROWS = 50
 DEFAULT_SYMBOL_ROWS_KEY = "__default__"
 
 
-def _load_db_sources(symbols: list[str], timeframe: str, limit: int) -> list[tuple[str, str, pd.DataFrame]]:
+def _load_db_candle_rows(
+    symbols: list[str],
+    timeframe: str,
+    limit: int,
+    as_of: str | None = None,
+    conn=None,
+) -> dict[str, list[dict]]:
+    """逐檔的**原始 candle 列**。
+
+    Stage 0 要把這些列原封不動封進 bundle，所以取數與轉成 DataFrame 分成兩步——
+    ⛔ 不能只留 DataFrame：那已經丟掉 `amount`／`adj_factor` 等欄位，
+    封進去的就不是「實際讀到的輸入」了。
+    """
     from db import fetch_candles
 
-    sources: list[tuple[str, str, pd.DataFrame]] = []
+    out: dict[str, list[dict]] = {}
     for symbol in symbols:
         symbol = symbol.strip()
         if not symbol:
             continue
-        rows = fetch_candles(symbol, timeframe, limit=limit)
+        out[symbol] = fetch_candles(symbol, timeframe, limit=limit, as_of=as_of, conn=conn)
+    return out
+
+
+def _sources_from_candle_rows(
+    rows_by_symbol: dict[str, list[dict]], timeframe: str, warn: bool = True
+) -> list[tuple[str, str, pd.DataFrame]]:
+    sources: list[tuple[str, str, pd.DataFrame]] = []
+    for symbol, rows in rows_by_symbol.items():
         if not rows:
-            print(f"[warn] no candles for symbol={symbol}, skipped", file=sys.stderr)
+            if warn:
+                print(f"[warn] no candles for symbol={symbol}, skipped", file=sys.stderr)
             continue
         df = pd.DataFrame(rows)
         df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True)
         df = df.set_index("datetime").sort_index()
         sources.append((symbol, timeframe, df[["open", "high", "low", "close", "volume"]].astype(float)))
     return sources
+
+
+def _load_db_sources(
+    symbols: list[str],
+    timeframe: str,
+    limit: int,
+    as_of: str | None = None,
+    conn=None,
+) -> list[tuple[str, str, pd.DataFrame]]:
+    return _sources_from_candle_rows(
+        _load_db_candle_rows(symbols, timeframe, limit, as_of=as_of, conn=conn), timeframe
+    )
 
 
 def _load_csv_sources(items: list[str], timeframe: str) -> list[tuple[str, str, pd.DataFrame]]:
@@ -2444,15 +2478,32 @@ def _load_db_replay_chip_context(
     dataset_from: str | None,
     dataset_to: str | None,
     warnings: list[str],
+    strict: bool = False,
+    conn=None,
 ) -> dict[str, list[dict]]:
+    """歷史籌碼 context。
+
+    **`strict`（I-100）**：Stage 0 一律 `strict=True`。⚠️ 預設的 fail-open 行為在產 bundle
+    時是有害的——某一檔的 chip 查詢在快照中途失敗時，會照常發布一份**少了那檔 context** 的
+    bundle，只在 warnings 裡留一行字，而那正是 I-100 要消滅的東西。
+    既有呼叫端不傳即維持現行行為。
+
+    ⚠️ **「合法零筆」與「查詢失敗」要分開**：某檔本來就沒有 chip 列 → 照常（零筆），
+    ⛔ 不是失敗；只有下面三個分支才中止。
+    """
     date_range = _date_range_for_context(dataset_from, dataset_to)
     if date_range is None:
+        # ⚠️ 這一條沒有原始例外可以 bare `raise`，所以要**主動** raise。
+        if strict:
+            raise ValueError("chip context unavailable: dataset range missing")
         warnings.append("chip context unavailable: dataset range missing")
         return {}
     from_date, to_date = date_range
     try:
         from db import fetch_chip_scores
     except Exception as exc:  # noqa: BLE001 - CLI can still run with missing chip context.
+        if strict:
+            raise
         warnings.append(f"chip context unavailable: {exc}")
         return {}
 
@@ -2462,8 +2513,10 @@ def _load_db_replay_chip_context(
         if not symbol:
             continue
         try:
-            rows = fetch_chip_scores(symbol, from_date, to_date)
+            rows = fetch_chip_scores(symbol, from_date, to_date, conn=conn)
         except Exception as exc:  # noqa: BLE001 - one symbol should not abort replay.
+            if strict:
+                raise
             warnings.append(f"chip context unavailable for {symbol}: {exc}")
             continue
         if rows:
@@ -2477,13 +2530,21 @@ def _load_db_replay_model_governance_context(
     dataset_from: str | None,
     dataset_to: str | None,
     warnings: list[str],
+    strict: bool = False,
+    conn=None,
 ) -> dict[str, list[dict]]:
+    """歷史 model governance context。`strict` 的語意與 `_load_db_replay_chip_context` 相同。"""
     if not dataset_from or not dataset_to:
+        # ⚠️ 同樣沒有原始例外可拋，要主動 raise。
+        if strict:
+            raise ValueError("model governance context unavailable: dataset range missing")
         warnings.append("model governance context unavailable: dataset range missing")
         return {}
     try:
         from db import fetch_sr_model_governance
     except Exception as exc:  # noqa: BLE001 - CLI can still run with missing governance context.
+        if strict:
+            raise
         warnings.append(f"model governance context unavailable: {exc}")
         return {}
 
@@ -2493,8 +2554,10 @@ def _load_db_replay_model_governance_context(
         if not symbol:
             continue
         try:
-            rows = fetch_sr_model_governance(symbol, timeframe, dataset_from, dataset_to)
+            rows = fetch_sr_model_governance(symbol, timeframe, dataset_from, dataset_to, conn=conn)
         except Exception as exc:  # noqa: BLE001 - one symbol should not abort replay.
+            if strict:
+                raise
             warnings.append(f"model governance context unavailable for {symbol}: {exc}")
             continue
         if rows:
@@ -2502,8 +2565,553 @@ def _load_db_replay_model_governance_context(
     return out
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate SR Zone walk-forward outcomes")
+# ── Stage 0：產生凍結輸入 bundle（I-100） ────────────────────────────────────
+#
+# ⛔ **Stage 0 是唯一會讀 DB 的階段，而且它不跑 replay。**
+# 讓 Stage 1 一邊讀 DB 一邊產 bundle 的話，bundle 是 Stage 1 執行過程的副產物——
+# Stage 1 自己的輸入就不是「從 bundle 載入的那一份」，真要重跑 Stage 1 時，
+# 你只能證明 Stage 2 用了同一份輸入，證明不了 Stage 1 用了。
+
+REPLAY_SCOPE_ALL_CANDIDATES = "all_candidates"
+
+
+def emit_replay_bundle(
+    *,
+    symbols: list[str],
+    timeframe: str,
+    limit: int,
+    as_of: str,
+    model_path: str,
+    baselines_dir: str,
+    image_digest: str,
+    source_root: str,
+    dataset_config: DatasetConfig | None = None,
+    builder_config: ZoneBuilderConfig | None = None,
+    report_max_rows: int | None = None,
+    trading_calendar_path: str | None = None,
+    argv: list[str] | None = None,
+    runner_sha256: str | None = None,
+    base_commit: str | None = None,
+    tooling_patch_sha256: str | None = None,
+    log=None,
+):
+    """讀 DB、封存凍結輸入 bundle，回傳 `PublishOutcome`。⛔ 全程不呼叫 replay engine。"""
+    from datetime import date as _date
+
+    import db as db_module
+
+    from .replay_bundle import (
+        TradingCalendar,
+        build_calendar_online,
+        build_manifest,
+        build_provenance,
+        emit_bundle,
+        load_frozen_calendar,
+        render_payloads,
+    )
+
+    log = log or (lambda message: print(message, file=sys.stderr))
+    dataset_config = dataset_config or DatasetConfig()
+    as_of_date = _date.fromisoformat(as_of)
+    clean_symbols = [s.strip() for s in symbols if s and s.strip()]
+    if not clean_symbols:
+        raise ValueError("Stage 0 需要至少一個 symbol")
+
+    model_file = Path(model_path)
+    if not model_file.is_file():
+        raise ValueError(f"model 檔不存在：{model_path}——bundle 必須封存實際載入的那一個檔案")
+
+    # ① 交易日曆（HTTP）在快照之外先做完——⛔ 不把網路等待放進 DB 交易。
+    #    ⚠️ 涵蓋範圍必須含 as_of 所在年度**以及前一年度**：as_of 落在年初時，
+    #    前一個交易日在去年，只抓當年會算錯。
+    years = sorted({as_of_date.year - 1, as_of_date.year})
+    if trading_calendar_path:
+        calendar_payload, calendar_provenance = load_frozen_calendar(trading_calendar_path)
+    else:
+        calendar_payload, calendar_provenance = build_calendar_online(years)
+    calendar = TradingCalendar(calendar_payload)
+    expected_latest = calendar.expected_latest(as_of_date)
+
+    # ② 唯讀快照：readiness 與三份 payload 全部在同一個交易內完成。
+    with db_module.readonly_snapshot() as conn:
+        # ③ readiness **必須是交易內的第一個查詢**——PG 的 REPEATABLE READ 快照建立在
+        #    第一個語句而不是 BEGIN。
+        market_latest = db_module.fetch_market_latest_trading_date(timeframe, conn=conn)
+        if market_latest is None:
+            raise ValueError(f"candles 裡沒有任何 timeframe={timeframe} 的資料，無法判斷 readiness")
+        if _date.fromisoformat(market_latest) < expected_latest:
+            raise ValueError(
+                f"資料還沒到齊：market_latest={market_latest} < expected_latest="
+                f"{expected_latest.isoformat()}（依交易日曆算出的 as_of 當下應有的最後一個交易日）"
+            )
+
+        # ④ 三份 payload 全部走同一個 connection。
+        candles_by_symbol = _load_db_candle_rows(
+            clean_symbols, timeframe, limit, as_of=as_of, conn=conn
+        )
+        _assert_symbol_coverage(candles_by_symbol, clean_symbols, dataset_config)
+        # ⚠️ **只給手動驗證用的 barrier**（預設 0＝完全不生效）：PG／MySQL 的實機一致性
+        # 快照無法在 CI 驗（測試容器不連那兩者），而手動驗證需要一個**可重複**的時點——
+        # 「candles 取完、chip 尚未取」正是同步工作 commit 進來會出事的那個縫。
+        # 步驟見 docs/development-workflow.md 的手動章節。
+        _snapshot_pause(log)
+        sources = _sources_from_candle_rows(candles_by_symbol, timeframe, warn=False)
+        dataset_from, dataset_to = _dataset_range(sources)
+        # ⚠️ chip／governance 的區間由 as-of 之後的 candles 推導，所以**它們也一起被釘住**——
+        #    只釘 candles 不夠（見 I-100「必須做到的範圍」第 1 項）。
+        strict_warnings: list[str] = []
+        chip_by_symbol = _load_db_replay_chip_context(
+            clean_symbols, dataset_from, dataset_to, strict_warnings, strict=True, conn=conn
+        )
+        governance_by_symbol = _load_db_replay_model_governance_context(
+            clean_symbols, timeframe, dataset_from, dataset_to, strict_warnings,
+            strict=True, conn=conn,
+        )
+
+    replay_config = {
+        "as_of": as_of,
+        "timeframe": timeframe,
+        "limit": int(limit),
+        # ⛔ 寫死 all_candidates：Stage 1／2 一律跑全候選，`report_max_rows` 只截斷人讀報告。
+        "replay_scope": REPLAY_SCOPE_ALL_CANDIDATES,
+        "dataset_config": asdict(dataset_config),
+        "builder_config": zone_builder_config_snapshot(builder_config),
+        "dataset_from": dataset_from,
+        "dataset_to": dataset_to,
+    }
+    payloads = render_payloads(
+        candles_by_symbol=candles_by_symbol,
+        chip_by_symbol=chip_by_symbol,
+        governance_by_symbol=governance_by_symbol,
+        replay_config=replay_config,
+        trading_calendar=calendar_payload,
+        model_bytes=model_file.read_bytes(),
+    )
+    _bundle_id, manifest = build_manifest(
+        payloads=payloads,
+        as_of=as_of,
+        timeframe=timeframe,
+        symbols=clean_symbols,
+        limit=limit,
+        replay_scope=REPLAY_SCOPE_ALL_CANDIDATES,
+        report_max_rows=report_max_rows,
+        captured_at=datetime.now(timezone.utc).isoformat(),
+        readiness={
+            "timeframe": timeframe,
+            "expected_latest": expected_latest.isoformat(),
+            "market_latest": market_latest,
+        },
+        calendar=calendar_provenance,
+        # ⚠️ provenance 一定要在**擷取完成之後**才建：`project_modules_sha256` 記的是
+        # 「實際執行涉及的模組」，而不少模組是 lazy import 的。太早建就會少記檔案。
+        provenance=build_provenance(
+            source_root=source_root,
+            image_digest=image_digest,
+            base_commit=base_commit,
+            tooling_patch_sha256=tooling_patch_sha256,
+            runner_sha256=runner_sha256,
+            argv=list(argv or sys.argv),
+        ),
+    )
+    return emit_bundle(Path(baselines_dir), payloads, manifest, log=log)
+
+
+def _snapshot_pause(log) -> None:
+    """`SR_REPLAY_SNAPSHOT_PAUSE_SECONDS` 秒的暫停，供手動並發驗證插入寫入。
+
+    ⛔ 這**不是**功能開關，也不影響任何輸出：它只是把「擷取中途」變成一個人手構得到的
+    時點。預設 0，正式執行一律不設。
+    """
+    import os
+    import time
+
+    raw = os.getenv("SR_REPLAY_SNAPSHOT_PAUSE_SECONDS", "")
+    try:
+        seconds = float(raw) if raw.strip() else 0.0
+    except ValueError:
+        raise ValueError(
+            f"SR_REPLAY_SNAPSHOT_PAUSE_SECONDS 不是數字：{raw!r}"
+        ) from None
+    if seconds <= 0:
+        return
+    log(f"[snapshot-pause] candles 已取完、chip 尚未取——暫停 {seconds} 秒供手動並發驗證。")
+    time.sleep(seconds)
+
+
+def _assert_symbol_coverage(
+    candles_by_symbol: dict[str, list[dict]],
+    symbols: list[str],
+    dataset_config: DatasetConfig,
+) -> None:
+    """逐檔只檢查兩件事：①存在；②歷史根數足夠。
+
+    ⛔ **不要求每一檔的最後一根都等於 `as_of`**——那對停牌／下市標的永遠不成立。
+    """
+    forward_bars = max(dataset_config.forward_bars_support, dataset_config.forward_bars_resistance)
+    required = dataset_config.min_history_bars + forward_bars
+    missing = [s for s in symbols if not candles_by_symbol.get(s)]
+    if missing:
+        raise ValueError(f"這些 symbol 在 as-of 範圍內沒有任何 candle：{missing}")
+    short = {s: len(candles_by_symbol[s]) for s in symbols if len(candles_by_symbol[s]) < required}
+    if short:
+        raise ValueError(
+            f"這些 symbol 的歷史根數不足（需要 >= min_history_bars + forward_bars = {required}）：{short}"
+        )
+
+
+# ── Stage 1／2：從 bundle 載入並跑 replay（I-100） ──────────────────────────
+#
+# ⛔ **全程不碰 DB**：Stage 1 與 Stage 2 一律從**同一份 bundle** 載入。
+# ⚠️ **manifest 只表示「要輸出／比對的觀察列」，不是「要計算的列」**——
+# `_decision_replay_rows()` 用 `previous_event_states_by_symbol` 把同一檔的相鄰列串起來，
+# 孤立計算 cohort 裡那幾列會讓狀態演進消失，算出來的 `event_signal` 與 `lifecycle_phase`
+# 對不起來，製造出一個看起來像差異、實際是取樣方式造成的假矛盾。
+# **所以 before 與 after 都從相同的固定起點連續 warm-up 到候選列，最後才依 manifest 過濾輸出。**
+
+
+def _builder_config_from_snapshot(snapshot: dict[str, Any] | None) -> ZoneBuilderConfig | None:
+    """由 bundle 的 `replay_config.builder_config` 還原出 builder 設定。"""
+    if not snapshot:
+        return None
+    atr = dict(snapshot.get("ATRZoneBuilder") or {})
+    if not atr:
+        return None
+    return ZoneBuilderConfig(atr=ATRZoneBuilderConfig(**atr))
+
+
+def _all_candidates_quota(
+    sources: list[tuple[str, str, pd.DataFrame]], dataset_config: DatasetConfig
+) -> dict[str, int]:
+    """把每一檔的配額設成它的全部 candidate bars——這就是 `replay_scope=all_candidates`。"""
+    quota: dict[str, int] = {}
+    for symbol, _timeframe, df in sources:
+        first_idx, last_idx = _candidate_bar_range(df, dataset_config)
+        bars = max(0, last_idx - first_idx + 1)
+        if bars > 0:
+            quota[str(symbol)] = bars
+    return quota
+
+
+def _bundle_universe_keys(
+    sources: list[tuple[str, str, pd.DataFrame]], dataset_config: DatasetConfig
+) -> list[tuple[str, str, str]]:
+    """bundle 蘊含的**全部候選列**的 key。①② 兩道檢查的左邊就是它。"""
+    keys: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for symbol, timeframe, df in sources:
+        symbol_key = str(symbol)
+        if symbol_key in seen:
+            continue
+        seen.add(symbol_key)
+        first_idx, last_idx = _candidate_bar_range(df, dataset_config)
+        for idx in range(first_idx, last_idx + 1):
+            keys.append((symbol_key, str(timeframe), pd.Timestamp(df.index[idx]).isoformat()))
+    return keys
+
+
+def _replay_from_bundle(loaded):
+    """把 bundle 還原成 replay 的輸入，跑完**全候選**並回傳 `(rows, context)`。"""
+    from .replay_bundle import row_key
+
+    replay_config = loaded.replay_config
+    timeframe = str(replay_config.get("timeframe") or loaded.manifest["timeframe"])
+    dataset_config = DatasetConfig(**(replay_config.get("dataset_config") or {}))
+    builder_config = _builder_config_from_snapshot(replay_config.get("builder_config"))
+
+    sources = _sources_from_candle_rows(loaded.candles, timeframe, warn=False)
+    if not sources:
+        raise ValueError(f"bundle {loaded.bundle_id} 裡沒有任何可用的 candles")
+
+    model_bundle = load_model(str(loaded.model_path))
+    quota = _all_candidates_quota(sources, dataset_config)
+    rows = _decision_replay_rows(
+        sources,
+        dataset_config,
+        quota,
+        bundle=model_bundle,
+        chip_scores_by_symbol=loaded.chip or None,
+        model_governance_by_symbol=loaded.governance or None,
+        builder_config=builder_config,
+    )
+    universe = _bundle_universe_keys(sources, dataset_config)
+    return rows, {
+        "timeframe": timeframe,
+        "dataset_config": dataset_config,
+        "universe": universe,
+        "keys": [row_key(row) for row in rows],
+        "model_metadata": _model_metadata(model_bundle),
+    }
+
+
+def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
+    """Stage 1（掃描）或 Stage 2（比對）。回傳給 stdout 的摘要。"""
+    from .replay_bundle import (
+        AFTER_ARTIFACT_NAME,
+        AFTER_KIND,
+        COHORT_KIND,
+        COHORT_MANIFEST_NAME,
+        COMPARISON_ARTIFACT_NAME,
+        REPORT_NAME,
+        ArtifactError,
+        assert_matches_bundle,
+        assert_same_keys,
+        assert_unique_keys,
+        build_after_artifact,
+        build_cohort_manifest,
+        build_comparison_artifact,
+        build_report,
+        build_provenance,
+        candidate_keys,
+        compare_rows,
+        load_artifact,
+        load_bundle,
+        prepare_output_dir,
+        publish_artifacts,
+        row_key,
+        validate_after_artifact,
+        validate_candidate_flags,
+        validate_cohort_manifest,
+    )
+    from .replay_bundle.canonical import canonical_json_bytes, sha256_hex
+
+    loaded = load_bundle(args.bundle)
+    # ⚠️ **Stage 2 的輸入檔要在跑 replay 之前就完整驗過**——結構、唯一性、候選欄位、
+    # 與 cohort 的一致性全部包含在內。replay 要跑約 3.7 小時，壞掉的 artifact 沒有理由
+    # 等到那之後才被發現。
+    after_artifact = cohort_manifest = None
+    after_sha = None
+    after_keys: list = []
+    cohort_keys: list = []
+    if stage == 2:
+        after_artifact, after_sha = load_artifact(args.after_artifact, AFTER_KIND)
+        cohort_manifest, _ = load_artifact(args.cohort_manifest, COHORT_KIND)
+        cohort_after_sha = cohort_manifest.get("after_artifact_sha256")
+        if cohort_after_sha != after_sha:
+            raise ArtifactError(
+                f"cohort manifest 記的 after artifact SHA-256 是 {cohort_after_sha}，"
+                f"實際讀到的是 {after_sha}——⛔ 兩者必須相符。"
+            )
+        after_keys = validate_after_artifact(after_artifact)
+        cohort_keys = validate_cohort_manifest(cohort_manifest)
+        # ⚠️ 身分欄位要與 bundle manifest 一致，⛔ 不只比 bundle_id——
+        # `timeframe`／`replay_scope` 會被寫進 comparison artifact 當成事實。
+        assert_matches_bundle(after_artifact, loaded.manifest, "after artifact")
+        assert_matches_bundle(cohort_manifest, loaded.manifest, "cohort manifest")
+        # ⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
+        assert_same_keys(cohort_keys, candidate_keys(after_artifact["rows"]),
+                         "③ cohort manifest vs 候選列")
+
+    output_dir = prepare_output_dir(args.output_dir)
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    rows, context = _replay_from_bundle(loaded)
+    keys = context["keys"]
+    assert_unique_keys(keys, "本次 replay 的輸出")
+    assert_unique_keys(context["universe"], "bundle universe")
+
+    # ⚠️ provenance 建在 replay **之後**：replay 會 lazy import pipeline／serialization／
+    # summaries 等模組，太早建的話 `project_modules_sha256` 少記的正是實際跑過的那些檔案。
+    provenance = build_provenance(
+        source_root=args.source_root,
+        image_digest=args.image_digest,
+        base_commit=args.base_commit,
+        tooling_patch_sha256=args.tooling_patch_sha256,
+        runner_sha256=args.runner_sha256,
+        argv=argv,
+    )
+
+    if stage == 1:
+        # ⚠️ 欄位守門排在**發布之前**：缺欄位就不會留下一份看起來可用的 after artifact。
+        validate_candidate_flags(rows, "Stage 1 的 replay 輸出")
+        assert_same_keys(context["universe"], keys, "① bundle universe vs after rows")
+        artifact = build_after_artifact(
+            bundle_id=loaded.bundle_id,
+            timeframe=context["timeframe"],
+            replay_scope=loaded.manifest["replay_scope"],
+            run_id=args.run_id,
+            pipeline_version=args.pipeline_version,
+            generated_at=generated_at,
+            provenance=provenance,
+            rows=rows,
+        )
+        after_sha = sha256_hex(canonical_json_bytes(artifact))
+        cohort = candidate_keys(rows)
+        assert_unique_keys(cohort, "候選列")
+        manifest = build_cohort_manifest(
+            bundle_id=loaded.bundle_id, after_artifact_sha256=after_sha,
+            keys=cohort, generated_at=generated_at, provenance=provenance,
+        )
+        # ⚠️ 順序就是契約：`cohort_manifest.json` **最後**才發布。
+        publish_artifacts(output_dir, [(AFTER_ARTIFACT_NAME, artifact),
+                                       (COHORT_MANIFEST_NAME, manifest)])
+        return {
+            "stage": 1,
+            "bundle_id": loaded.bundle_id,
+            "rows": len(rows),
+            "candidates": len(cohort),
+            "after_artifact_sha256": after_sha,
+            "output_dir": str(output_dir),
+        }
+
+    # ── Stage 2 ────────────────────────────────────────────────────────────
+    after_rows = after_artifact["rows"]
+    # ①② 依賴本次 replay 的輸出，所以只有這兩道排在 replay 之後；
+    # 唯一性、③ 與候選欄位守門都已在 replay 之前做完。
+    assert_same_keys(context["universe"], after_keys, "① bundle universe vs after rows")
+    assert_same_keys(keys, after_keys, "② before 全範圍 vs after rows")
+
+    before_by_key = {row_key(row): row for row in rows}
+    after_by_key = {key: row for key, row in zip(after_keys, after_rows)}
+    comparison_rows = [
+        compare_rows(before_by_key[key], after_by_key[key]) for key in sorted(cohort_keys)
+    ]
+    assert_same_keys(
+        [row_key(row) for row in comparison_rows], cohort_keys,
+        "④ comparison artifact vs cohort manifest",
+    )
+
+    comparison = build_comparison_artifact(
+        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
+        after_artifact_sha256=after_sha, generated_at=generated_at,
+        provenance=provenance, rows=comparison_rows,
+    )
+    comparison_sha = sha256_hex(canonical_json_bytes(comparison))
+    # ⚠️ 用 **bundle 記下的** `report_max_rows`：Stage 1／2 的參數清單刻意不含它，
+    # 人讀報告的截斷長度是 Stage 0 當下就決定好的，⛔ 不讓消費端各跑各的。
+    report = build_report(
+        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
+        comparison_sha256=comparison_sha, generated_at=generated_at,
+        rows=comparison_rows, report_max_rows=loaded.manifest.get("report_max_rows"),
+    )
+    # ⚠️ 先驗 comparison 的 hash，`report.json` **最後**才發布。
+    hashes = publish_artifacts(output_dir, [(COMPARISON_ARTIFACT_NAME, comparison),
+                                            (REPORT_NAME, report)])
+    if hashes[COMPARISON_ARTIFACT_NAME] != comparison_sha:
+        raise ArtifactError("comparison artifact 落地後的 SHA-256 與產生時不符")
+    return {
+        "stage": 2,
+        "bundle_id": loaded.bundle_id,
+        "rows": len(rows),
+        "candidates": len(comparison_rows),
+        "comparison_artifact_sha256": comparison_sha,
+        "output_dir": str(output_dir),
+    }
+
+
+# ── CLI：模式判定與輸入所有權（I-100） ──────────────────────────────────────
+#
+# ⚠️ **三種模式的參數所有權是封閉清單**：允許清單以外只要**明確傳入**就中止（含
+# 「明確傳入等於預設值」）。理由是官方腳本會注入 provenance 參數，而使用者若能傳同名參數，
+# 就能寫出與實際執行不符的 provenance——那等於留著一個偽造入口。
+#
+# ⛔ **所有衝突都要在 `check_connection()` 與任何擷取動作之前中止**：
+# Stage 0 是唯一會碰 live DB 的階段，錯誤的參數組合不該先連上去再說。
+# ⛔ 模式不完整（`--after-artifact` 與 `--cohort-manifest` 只給其一）也要在**跑 replay 之前**
+# 中止——否則跑滿數小時才發現。
+
+# Stage 0（`--emit-bundle`）：⚠️ `--model-path` 與 `--image-digest` 由官方腳本**無條件注入**，
+# 封閉式清單少列它們的話，Stage 0 一跑就會被自己擋下。
+STAGE0_ALLOWED_ARGS = frozenset({
+    "as_of", "symbols", "timeframe", "limit", "emit_bundle", "report_max_rows",
+    "run_id", "pipeline_version", "model_path", "image_digest", "trading_calendar",
+    "runner_sha256",
+})
+STAGE0_REQUIRED_ARGS = ("as_of", "symbols", "emit_bundle", "model_path", "image_digest")
+
+# Stage 1／2（`--bundle`）。
+BUNDLE_ALLOWED_ARGS = frozenset({
+    "bundle", "output_dir", "run_id", "pipeline_version", "after_artifact",
+    "cohort_manifest", "before_ref", "image_digest", "base_commit",
+    "tooling_patch_sha256", "source_root", "runner_sha256",
+})
+BUNDLE_REQUIRED_ARGS = ("bundle", "output_dir", "before_ref", "image_digest", "source_root")
+
+# ⛔ 這四個**只能由官方腳本注入**：使用者傳入時腳本會拒絕，而 CLI 這一端負責偵測
+# 「重複出現」（使用者一個、腳本一個）並中止——⛔ 不靜默採用最後一個。
+SCRIPT_INJECTED_ARGS = (
+    "--image-digest", "--base-commit", "--tooling-patch-sha256", "--source-root",
+    "--runner-sha256",
+)
+
+
+class CliUsageError(ValueError):
+    """參數組合不合法。⚠️ 一律在連 DB 或跑 replay 之前拋出。"""
+
+
+def _explicit_args(argv: list[str]) -> set[str]:
+    """哪些參數是**明確傳入**的（含「傳入的值剛好等於預設值」）。
+
+    做法是把同一份 parser 的所有 default 換成 `argparse.SUPPRESS` 再解析一次：
+    沒被傳入的 dest 就不會出現在 namespace 裡。
+    """
+    detector = _build_parser()
+    for action in detector._actions:  # noqa: SLF001 - argparse 沒有公開 API 可以做這件事
+        if action.dest != "help":
+            action.default = argparse.SUPPRESS
+    return set(vars(detector.parse_args(argv)))
+
+
+def _reject_duplicate_injected_args(argv: list[str]) -> None:
+    for name in SCRIPT_INJECTED_ARGS:
+        count = sum(1 for token in argv if token == name or token.startswith(name + "="))
+        if count > 1:
+            raise CliUsageError(
+                f"{name} 出現 {count} 次——這個值只能由官方腳本注入，"
+                "重複代表使用者也傳了一個。⛔ 不靜默採用最後一個。"
+            )
+
+
+def resolve_cli_mode(explicit: set[str]) -> str:
+    """回傳 `stage0` / `bundle` / `legacy`。"""
+    if "emit_bundle" in explicit and "bundle" in explicit:
+        raise CliUsageError("--emit-bundle（Stage 0）與 --bundle（Stage 1／2）不可同時使用")
+    if "emit_bundle" in explicit:
+        return "stage0"
+    if "bundle" in explicit:
+        return "bundle"
+    return "legacy"
+
+
+def resolve_bundle_stage(explicit: set[str]) -> int:
+    """成對規則：兩個都沒給→Stage 1；兩個都給→Stage 2；只給其中一個→⛔ 中止。"""
+    has_after = "after_artifact" in explicit
+    has_cohort = "cohort_manifest" in explicit
+    if has_after and has_cohort:
+        return 2
+    if has_after or has_cohort:
+        raise CliUsageError(
+            "--after-artifact 與 --cohort-manifest 必須成對出現："
+            "兩個都沒給是 Stage 1，兩個都給是 Stage 2，只給其中一個是不完整的模式。"
+        )
+    return 1
+
+
+def _validate_arg_ownership(mode: str, explicit: set[str]) -> None:
+    allowed, required, label = (
+        (STAGE0_ALLOWED_ARGS, STAGE0_REQUIRED_ARGS, "Stage 0（--emit-bundle）")
+        if mode == "stage0"
+        else (BUNDLE_ALLOWED_ARGS, BUNDLE_REQUIRED_ARGS, "bundle 模式（--bundle）")
+    )
+    forbidden = sorted(explicit - allowed)
+    if forbidden:
+        raise CliUsageError(
+            f"{label} 不接受這些參數：{['--' + n.replace('_', '-') for n in forbidden]}"
+        )
+    missing = [name for name in required if name not in explicit]
+    if missing:
+        raise CliUsageError(
+            f"{label} 缺少必填參數：{['--' + n.replace('_', '-') for n in missing]}"
+        )
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    # ⛔ `allow_abbrev=False` 是必要的，不是潔癖：argparse 預設接受**唯一前綴縮寫**，
+    # 所以 `--image-d` 會被展開成 `--image-digest`。腳本層只擋得住完整名稱與 `--name=value`，
+    # 縮寫形式會整條穿過去，而官方注入的值排在使用者參數之前——argparse 取最後一個，
+    # 使用者傳的那個就贏了。關掉縮寫之後，這種寫法會直接變成未知參數而中止。
+    parser = argparse.ArgumentParser(
+        description="Evaluate SR Zone walk-forward outcomes", allow_abbrev=False
+    )
     parser.add_argument("--symbols", help="逗號分隔的股票代碼，從 DB 讀取")
     parser.add_argument("--csv", action="append", default=[], help="CSV 路徑，格式 path[:symbol]，可重複給多筆")
     parser.add_argument("--timeframe", default="1d")
@@ -2534,7 +3142,92 @@ def main() -> None:
     parser.add_argument("--max-merge-width-multiple", type=float, default=2.0)
     parser.add_argument("--atr-lookback", type=int, default=60)
     parser.add_argument("--atr-period", type=int, default=14)
-    args = parser.parse_args()
+
+    # ── I-100 ──────────────────────────────────────────────────────────────
+    parser.add_argument("--as-of", default=None,
+                        help="Stage 0：把資料尾端釘在這個台北交易日（含當日），YYYY-MM-DD")
+    parser.add_argument("--emit-bundle", default=None,
+                        help="Stage 0：把凍結輸入 bundle 發布到這個目錄底下的 <bundle_id>/")
+    parser.add_argument("--trading-calendar", default=None,
+                        help="Stage 0：改用凍結的 canonical trading_calendar.json（⛔ 不接受 TWSE 原始 response）")
+    parser.add_argument("--bundle", default=None, help="Stage 1／2：從這份 bundle 載入輸入")
+    parser.add_argument("--output-dir", default=None, help="Stage 1／2：artifact 輸出目錄（必須不存在或為空）")
+    parser.add_argument("--after-artifact", default=None, help="Stage 2：Stage 1 產出的 after_artifact.json")
+    parser.add_argument("--cohort-manifest", default=None, help="Stage 2：Stage 1 產出的 cohort_manifest.json")
+    parser.add_argument("--before-ref", default=None,
+                        help="Stage 1／2：要比對的 before 版本（branch／tag／commit）——這是使用者唯一能指定的版本入口")
+    parser.add_argument("--report-max-rows", type=int, default=DEFAULT_REPLAY_MAX_ROWS,
+                        help="只截斷人讀報告的列數，⛔ 不影響實際運算範圍")
+    # ⛔ 以下四個只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
+    parser.add_argument("--image-digest", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--base-commit", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--tooling-patch-sha256", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--source-root", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--runner-sha256", default=None, help=argparse.SUPPRESS)
+    return parser
+
+
+def main() -> None:
+    from .replay_bundle import EXIT_DURABILITY_UNCONFIRMED, DurabilityUnconfirmed
+
+    parser = _build_parser()
+    argv = list(sys.argv[1:])
+    args = parser.parse_args(argv)
+
+    # ⚠️ 這一整段必須排在 check_connection() 與任何擷取動作之前。
+    try:
+        _reject_duplicate_injected_args(argv)
+        explicit = _explicit_args(argv)
+        mode = resolve_cli_mode(explicit)
+        if mode != "legacy":
+            _validate_arg_ownership(mode, explicit)
+        stage = resolve_bundle_stage(explicit) if mode == "bundle" else None
+    except CliUsageError as exc:
+        print(f"[error] {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if mode == "stage0":
+        try:
+            outcome = emit_replay_bundle(
+                symbols=args.symbols.split(","),
+                timeframe=args.timeframe,
+                limit=args.limit,
+                as_of=args.as_of,
+                model_path=args.model_path,
+                baselines_dir=args.emit_bundle,
+                image_digest=args.image_digest,
+                source_root=args.source_root or str(Path(__file__).resolve().parents[3]),
+                report_max_rows=args.report_max_rows,
+                trading_calendar_path=args.trading_calendar,
+                runner_sha256=args.runner_sha256,
+                argv=argv,
+            )
+        except DurabilityUnconfirmed as exc:
+            # ⚠️ **不是發布失敗**：bundle 已發布且可載入，只是還沒確認落盤。
+            print(f"[warn] {exc}", file=sys.stderr)
+            sys.exit(EXIT_DURABILITY_UNCONFIRMED)
+        except (ValueError, OSError) as exc:
+            print(f"[error] {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps({
+            "bundle_id": outcome.bundle_id,
+            "path": str(outcome.path),
+            "published": outcome.published,
+        }, indent=2, ensure_ascii=False))
+        return
+
+    if mode == "bundle":
+        try:
+            report = run_bundle_stage(args, stage=stage, argv=argv)
+        except DurabilityUnconfirmed as exc:  # pragma: no cover - bundle 模式不發布 bundle
+            print(f"[warn] {exc}", file=sys.stderr)
+            sys.exit(EXIT_DURABILITY_UNCONFIRMED)
+        except (CliUsageError, ValueError, OSError) as exc:
+            print(f"[error] {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        return
+
 
     if args.sweep and args.decision_replay:
         print("[error] --sweep 與 --decision-replay 不可同時使用", file=sys.stderr)

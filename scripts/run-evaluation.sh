@@ -10,6 +10,12 @@
 #   MODE=sweep  scripts/run-evaluation.sh --symbols 2330,2454    # ATR builder 參數 sweep
 #   OUTPUT=/tmp/report.json scripts/run-evaluation.sh --symbols … # 結果落檔（預設印到 stdout）
 #
+#   # I-100 Stage 0：讀 DB 並封存凍結輸入 bundle（⛔ 不跑 replay、⛔ 不寫 DB）
+#   scripts/run-evaluation.sh --as-of 2026-09-01 --symbols 2330,2454 \
+#       --emit-bundle /app/baselines --limit 1500
+#   ⚠️ Stage 0 與 WRITE_DB=1／MODE!=evaluate／OUTPUT= 互斥；`--image-digest` 由本腳本注入，
+#      ⛔ 使用者不得傳入（見 scripts/lib/replay-args.sh）。
+#
 # 額外參數會原樣轉交 evaluation.py，例如 --limit 1200、--atr-width-grid 0.8,1.0。
 #
 # 可覆寫的環境變數：
@@ -22,6 +28,10 @@
 #   MODELS_DIR   模型目錄（預設 /opt/stacks/scripts/stock_trading/python/models）
 #   MODEL_PATH   模型檔在 container 內的路徑（預設 /app/models/sr_scoring_v4.joblib）
 #   MEM / CPUS / PY_IMAGE / MEM_RESERVE_MB …  同 python/scripts/test.sh
+#   DB_DRIVER    容器內的 DATABASE_DRIVER（預設 postgres；手動驗 mysql 快照時要覆寫）
+#   REPLAY_DRY_RUN=1  只印出最終的 docker argv，不真的執行
+#   SR_REPLAY_SNAPSHOT_PAUSE_SECONDS  Stage 0 在「candles 取完、chip 未取」處暫停幾秒
+#                （只給 PG／MySQL 的手動一致性快照驗證用，預設不生效）
 #   WRITE_DB=1   **才會**加上 --write-db（預設不加，見下方安全預設）
 #   MEASURE_PEAK=1  量測 container 的記憶體峰值與 host available 低點（見下方）
 #
@@ -54,6 +64,36 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_DIR="$REPO_ROOT/python"
+
+# ── I-100：參數所有權與 Stage 0 互斥（⚠️ 必須排在讀 DSN／連 docker 之前） ──
+# shellcheck source=lib/replay-args.sh
+. "$REPO_ROOT/scripts/lib/replay-args.sh"
+replay_args_reject_injected "$@"
+
+STAGE0=0
+if replay_args_is_stage0 "$@"; then
+  STAGE0=1
+  # ⚠️ Stage 0 是唯一會碰 live DB 的階段，而 WRITE_DB=1 會讓它**真的寫進 live**。
+  if [ "${WRITE_DB:-0}" = "1" ]; then
+    echo "ERROR: Stage 0（--emit-bundle）⛔ 不接受 WRITE_DB=1——它只讀 DB 並封存輸入。" >&2
+    exit 1
+  fi
+  if [ "${MODE:-evaluate}" != "evaluate" ]; then
+    echo "ERROR: Stage 0（--emit-bundle）⛔ 不接受 MODE=${MODE}——它不跑 replay 也不跑 sweep。" >&2
+    exit 1
+  fi
+  if [ -n "${OUTPUT:-}" ]; then
+    echo "ERROR: Stage 0（--emit-bundle）⛔ 不接受 OUTPUT=——它的產出是 bundle 目錄，不是一份 JSON。" >&2
+    exit 1
+  fi
+fi
+
+# 只驗參數、不碰 docker 與 DB（給 scripts/test-replay-args.sh 用）。
+if [ "${REPLAY_ARGS_SELFTEST:-0}" = "1" ]; then
+  echo "==> replay-args selftest：參數驗證通過（stage0=$STAGE0）"
+  exit 0
+fi
+
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-700m}"
 CPUS="${CPUS:-1}"
@@ -63,6 +103,10 @@ MODELS_DIR="${MODELS_DIR:-/opt/stacks/scripts/stock_trading/python/models}"
 MODEL_PATH="${MODEL_PATH:-/app/models/sr_scoring_v4.joblib}"
 DSN_FROM="${DSN_FROM:-stock_trading-python-server-1}"
 OUTPUT="${OUTPUT:-}"
+# ⚠️ 預設 postgres（live 與 dev 的 system of record），但**必須可覆寫**：
+# development-workflow.md 要求用同一條 Stage 0 流程手動驗 mysql 的一致性快照，
+# 寫死 driver 會讓那一步根本跑不起來。sqlite 同理（本機小規模重現用）。
+DB_DRIVER="${DB_DRIVER:-postgres}"
 
 # DSN 從 live container 的環境變數讀，不寫進 repo：
 #   1. 密碼不該進版控；
@@ -99,6 +143,9 @@ EOF
   MODE_ARGS+=(--write-db)
 fi
 
+echo "==> 建置 image：$IMAGE"
+docker build -t "$IMAGE" "$PYTHON_DIR"
+
 if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
   echo "ERROR: 找不到 docker 網路 $NETWORK——live stack 沒起來？（NETWORK= 可覆寫）" >&2
   exit 1
@@ -117,15 +164,29 @@ DOCKER_ARGS=(
   --pids-limit=200
   -e HOME=/tmp
   -e PYTHONDONTWRITEBYTECODE=1
-  -e DATABASE_DRIVER=postgres
+  -e DATABASE_DRIVER="$DB_DRIVER"
   -e DATABASE_DSN="$DB_DSN"
   -e SR_SCORING_MODEL_PATH="$MODEL_PATH"
+  # 只給 PG／MySQL 的手動一致性快照驗證用；預設空＝完全不生效。
+  -e SR_REPLAY_SNAPSHOT_PAUSE_SECONDS="${SR_REPLAY_SNAPSHOT_PAUSE_SECONDS:-}"
   -v "$PYTHON_DIR":/app
   -v "$MODELS_DIR":/app/models:ro
   -w /app
 )
 
-CMD_ARGS=(python -m backtest.modular.sr_scoring.evaluation "${MODE_ARGS[@]}" --model-path "$MODEL_PATH" "$@")
+if [ "$STAGE0" = "1" ]; then
+  # ⚠️ image digest 是**執行環境的客觀識別值**，由這裡 inspect 後注入——
+  # 容器內的 Python 無法自己得知跑在哪個 image，而讓使用者填等於允許偽造 provenance。
+  IMAGE_DIGEST="$(docker image inspect "$IMAGE" -f '{{.Id}}' 2>/dev/null || true)"
+  if [ -z "$IMAGE_DIGEST" ]; then
+    echo "ERROR: 取不到 $IMAGE 的 image digest——⛔ 不產出說不清出處的 bundle。" >&2
+    exit 1
+  fi
+  RUNNER_SHA256="$(replay_args_runner_sha256 "${BASH_SOURCE[0]}")"
+  mapfile -t CMD_ARGS < <(replay_args_stage0 "$MODEL_PATH" "$IMAGE_DIGEST" "$RUNNER_SHA256" "$@")
+else
+  CMD_ARGS=(python -m backtest.modular.sr_scoring.evaluation "${MODE_ARGS[@]}" --model-path "$MODEL_PATH" "$@")
+fi
 
 if [ -n "$OUTPUT" ]; then
   OUT_DIR="$(cd "$(dirname "$OUTPUT")" && pwd)"
@@ -134,11 +195,13 @@ if [ -n "$OUTPUT" ]; then
   CMD_ARGS+=(--output "/out/$OUT_FILE")
 fi
 
-echo "==> 建置 image：$IMAGE"
-docker build -t "$IMAGE" "$PYTHON_DIR"
-
-echo "==> evaluation：mode=$MODE network=$NETWORK mem=$MEM write_db=${WRITE_DB:-0}"
+echo "==> evaluation：mode=$MODE network=$NETWORK mem=$MEM write_db=${WRITE_DB:-0} stage0=$STAGE0"
 echo "    args: $*"
+
+if [ "${REPLAY_DRY_RUN:-0}" = "1" ]; then
+  printf '%s\n' docker run --rm "${DOCKER_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}"
+  exit 0
+fi
 
 if [ "${MEASURE_PEAK:-0}" != "1" ]; then
   exec docker run --rm "${DOCKER_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}"

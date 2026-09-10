@@ -13,6 +13,8 @@
 #   CPUS       CPU 上限（預設 1）
 #   PY_IMAGE   測試用 image tag（預設 stock-trading-python-test:latest）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
+#   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh（預設會先跑）
+#   REPLAY_SMOKE=1      另外跑 scripts/smoke-replay-offline.sh（真的跑完 Stage 1／2；預設不跑）
 #   PY_ENV     以空白分隔的 NAME=VALUE，原樣傳進 container。給「預設 skip、明確要求
 #              才跑」的測試用（例如成本量測 SR_EXCURSION_BENCH=1）——這類測試不該
 #              進常態回合，但也不該退化成一次性 docker 指令繞過腳本。
@@ -50,6 +52,21 @@ ENV_ARGS=()
 for pair in ${PY_ENV:-}; do
   ENV_ARGS+=(-e "$pair")
 done
+
+# ── I-100：先跑 shell 層的參數所有權測試 ───────────────────────────────────
+# 為什麼放這裡：python 測試容器只掛 python/（見下方 -v），讀不到 scripts/。
+# 那一側驗「兩支官方腳本拒絕使用者傳入 provenance 參數」與「實際組出的 argv == 版控
+# fixture」，python 這一側再用同一份 fixture 跑 CLI 衝突矩陣。
+# ⚠️ 不掛進常態回合的話，它會變成沒人固定執行的手動項目。
+if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
+  "$REPO_ROOT/scripts/test-replay-args.sh"
+fi
+
+# 端到端 smoke（真的用官方腳本跑完 Stage 1／2）——⚠️ 要 docker build ＋ 兩次容器啟動
+# ＋ 兩個 git worktree，所以**預設不跑**，明確要求才跑。
+if [ "${REPLAY_SMOKE:-0}" = "1" ]; then
+  "$REPO_ROOT/scripts/smoke-replay-offline.sh"
+fi
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"

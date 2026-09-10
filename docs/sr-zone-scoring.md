@@ -1830,11 +1830,14 @@ model `v4` / `config_hash=ec4cd416c66b` / `trained_at=2026-08-11T08:29:12Z`。
 講的是同一組列」，**不是**防篡改保證。
 
 ⛔ **這個 cohort 之後重建不回來，所以上面的數字就是最終證據。**
-`fetch_candles()` 取的是**最新** N 根（`ORDER BY ts DESC LIMIT` 後反轉），而
+當時 `fetch_candles()` 取的是**最新** N 根（`ORDER BY ts DESC LIMIT` 後反轉），而
 `evaluation.py` 的 CLI **沒有 as-of 截止參數**——`--limit` 只能控制根數，不能把
 資料尾端釘在某一天。live 每天收盤都會新增 K 棒，window 錨在尾端，所以同樣的指令
-**隔天就會抽到不同的 200 列**。要讓 replay 可重現需要補一個 as-of 上界，
-追蹤在 [`issue.md`](./issue.md) **I-100**。
+**隔天就會抽到不同的 200 列**。
+
+✅ **as-of 上界與凍結輸入 bundle 已於 2026-09-10 實作**（I-100），現況規格見下方
+「Decision Replay 的可重現性：as-of、凍結 bundle 與三階段」。⚠️ **2026-09-01 這一份
+cohort 仍然重建不回來**——它是在那之前跑的，沒有 bundle 可載入。
 
 ✅ **逐列比較資料已進版控**：[`python/baselines/replay_cohort_2026-09-01.json`](../python/baselines/replay_cohort_2026-09-01.json)
 收了四份 report 的 200 列 ×（`lifecycle_phase` / `final_entry_state` / `market_bias` /
@@ -2469,6 +2472,221 @@ review 逐項確認：
   （`_chip_row_for_as_of` / `_snapshot_for_as_of`）。
 - 未來資料**只**用於 label：`forward_return` / `next_close_return` / `two_bar_close_return`。
 - 每檔的 as-of 區間上界固定留 `forward_bars` 根（`_candidate_bar_range`），確保 label 算得出來。
+
+### Decision Replay 的可重現性：as-of、凍結 bundle 與三階段
+
+**問題**：`fetch_candles()` 取的是**最新** N 根，`_decision_replay_rows` 的取樣窗又錨在
+資料尾端。live 每天收盤新增一根 K 棒，同一條指令隔天就抽到不同的列——任何「同一 cohort
+跑兩次」的驗證都被擠在當日的資料凍結窗內，跨日就得整批重跑。
+
+**兩個產物的分工，⛔ 不能互相取代**：
+
+| 產物 | 回答的問題 |
+|---|---|
+| **cohort manifest** | 「要觀察／比對哪些 `(symbol, timeframe, as_of)` 列」 |
+| **凍結 bundle** | 「用什麼輸入算出來的」——candles、chip、governance、交易日曆、模型、設定 |
+
+⚠️ **只有 as-of ＋ 指紋做不到可重現**：`--as-of` 固定的是**列範圍**，指紋能告訴你內容變了，
+但當 DB 歷史被修正、還原係數更新或 model bundle 被替換時，**能做的只有中止**——
+沒有 bundle 就沒有任何機制重新執行原來那份輸入。
+
+#### 三個階段
+
+| Stage | 跑哪一份程式碼 | 讀 DB | 跑 replay | 產出 |
+|---|---|---|---|---|
+| **0** | 目前版本 | ✅ **唯一** | ⛔ 不跑 | `<baselines>/<bundle_id>/` |
+| **1** | **after**（`AFTER_REF`，預設 `HEAD`） | ❌ | ✅ 全候選 | `after_artifact.json` ＋ `cohort_manifest.json` |
+| **2** | **before**（`--before-ref`） | ❌ | ✅ 全候選 | `comparison_artifact.json`（⛔ 不截斷）＋ `report.json` |
+
+⚠️ **Stage 1 跑的是 after、Stage 2 才是 before**——反過來的話，`after_artifact.json` 裡裝的
+其實是 before 的結果，而且舊版本根本沒有 bundle CLI。指令與掛載見
+[`development-workflow.md`](./development-workflow.md)。
+
+**成對規則**（`resolve_bundle_stage`）：兩個都沒給→Stage 1；兩個都給→Stage 2；
+**只給其中一個 ⛔ 在跑 replay 之前中止**——否則跑滿數小時才發現模式不完整。
+
+⛔ **不要讓 Stage 1 一邊讀 DB 一邊產 bundle**：那樣 bundle 是 Stage 1 執行過程的副產物，
+Stage 1 自己的輸入就不是「從 bundle 載入的那一份」，重跑時只能證明 Stage 2 用了同一份輸入。
+
+⚠️ **manifest 只表示「要輸出／比對的觀察列」，不是「要計算的列」**：
+`_decision_replay_rows()` 把同一檔的相鄰列串起來（`previous_event_states_by_symbol`），
+孤立計算 cohort 裡那幾列會讓狀態演進消失。**before 與 after 都從相同的固定起點連續
+warm-up 到候選列，最後才依 manifest 過濾輸出。**
+
+#### `replay_scope` 與 `report_max_rows` 的分工
+
+* `replay_scope`：Stage 0 寫死 `all_candidates`，Stage 1／2 一律跑**全候選**；
+* `report_max_rows`：**只截斷人讀報告**（`report.json`），⛔ 不影響運算範圍，
+  也⛔ 不截斷 `comparison_artifact.json`；
+* 舊路徑的 `--replay-max-rows`（跨股票均分預算）**語意不變**。
+
+#### bundle 的規格
+
+`python/baselines/<bundle_id>/` 下六份 payload ＋ `manifest.json` ＋ `manifest.sha256`：
+
+```
+candles.json.gz  chip.json.gz  governance.json.gz
+replay_config.json  trading_calendar.json  model.joblib
+```
+
+**canonical 規則**（`replay_bundle.canonical`）——同一份輸入必須逐位元重現：
+
+* JSON：`sort_keys` ／固定 separators ／`ensure_ascii=False` ／**`allow_nan=False`** ／
+  無結尾換行；datetime→ISO-8601 UTC、Decimal→字串；
+* gzip：`mtime=0` ＋ header 不寫 filename ＋ `compresslevel=9`；
+* 排序鍵：`trading_calendar` 依 `date`／candles `(symbol, timestamp)`／chip `(symbol, trade_date)`／
+  governance `(symbol, timeframe, as_of, created_at, model_version, model_config_hash)`，
+  **一律以「整列 canonical JSON bytes」當最終 tie-breaker**（⛔ 不加 `id`）。
+
+**身分**：
+
+```
+content_hash8 = SHA-256(canonical JSON of {檔名: 逐檔完整 SHA-256}) 的前 8 hex
+bundle_id     = b<schema>_<as_of:YYYYMMDD>_<timeframe>_<symbols_hash8>_<content_hash8>
+```
+
+⚠️ **必須是「檔名→hash」的 mapping**：只把 hash 串起來的話，`candles.json.gz` 與
+`chip.json.gz` 內容互換會得到相同的 hash——等於沒驗「哪一份資料放在哪個角色」。
+⛔ `bundle_id` **不放** `run_id`／`pipeline_version`／`captured_at`：前兩者是 Stage 1／2 的
+使用者參數（同一份 bundle 會被不同 run 消費），後者一變 ID 就變。
+
+**loader 驗的不只是 hash**（`load_bundle`）——⚠️ contract 明訂「builder 與 loader 兩端都要
+驗」，只驗檔案 hash 只證明「進來時是什麼就是什麼」，證明不了那份內容本身合法：
+
+* `trading_calendar.json` 走**完整的日曆 schema 驗證**（封閉欄位、`row_type` 與
+  `is_trading_day` 的映射、完整年度不變條件），並重做一次 canonical 序列化逐位元比對；
+* `replay_config.json` 走封閉欄位驗證，且 `as_of`／`timeframe`／`limit`／`replay_scope`
+  **必須與 manifest 一致**——Stage 1／2 讀 replay_config 決定怎麼算、卻用 manifest 的欄位
+  對外宣稱身分，兩份不一致等於算的和說的不是同一件事；
+* `manifest.content_hash8` 與 `symbols_hash8` **與重算值比對**：只驗 `bundle_id` 的話，
+  這兩格被改掉不會有任何東西報錯，但人在讀 manifest 時會直接引用它們。
+
+**loader 的三方相等契約**：
+
+```
+目錄 basename == manifest.bundle_id == 由 (schema_version, as_of, timeframe, symbols,
+                                          payload 逐檔 hash) 重新計算的值
+```
+
+⚠️ 少了這條，**被改名的 bundle、或 manifest 身分欄位被竄改的 bundle 照樣載得進來**——
+逐檔 hash 只證明「payload 沒被動過」，證明不了「這份 payload 就是這個身分宣稱的那一份」。
+⚠️ 8 hex ＝ 32 bit，本來就不是防碰撞用的；完整性由**逐檔完整 SHA-256** 保證。
+
+**只允許在重產時不同的欄位**：`captured_at`；online 模式另有 `calendar.years[].fetched_at`／
+`raw_row_count`；frozen 模式另有 `calendar.loaded_at`。⛔ `frozen_sha256` **不是** volatile。
+
+#### `--as-of` 的「資料是否到齊」怎麼判
+
+```
+expected_latest = max(trading_day <= as_of)                     -- 依交易日曆
+market_latest   = MAX(ts) over candles WHERE timeframe = :tf    -- 不分 symbol
+market_latest < expected_latest → 中止
+```
+
+⛔ **不逐檔判**：停牌、下市、或當天本來就沒有 K 棒的合法標的會被誤判成資料未到齊。
+逐檔只檢查兩件事：①該 symbol 在擷取範圍內**存在**；②歷史根數 ≥ `min_history_bars ＋
+forward_bars`。⛔ **不要求每一檔的最後一根都等於 `as_of`**。
+
+⚠️ 比較一律用 Asia/Taipei 的「日期」；`--as-of` 的邊界語意是 `ts < 次日 00:00（台北）`，
+三個 engine 都用同一個 epoch 上界，再各自套用**與 SELECT 相同的時間表示式**。
+
+#### 交易日曆（`trading_calendar.json`）
+
+來源是 TWSE `holidaySchedule`，與 Go 端 `exchange_reference.go` 同一個。
+⚠️ **query 一定是 `date=<YYYY>0101&response=json`，⛔ 禁用 `queryYear`**——後者會被
+**完全忽略**，端點照樣回 200、格式正常，但回的是**當年**資料。所以①逐列驗年、
+②⛔ 不用筆數當完整性門檻（2026 是 27 筆、2025 是 24 筆）。
+
+**存的是正規化後的逐日分類結果**，⛔ 不是 TWSE 原始列、也不是「例外日清單」——
+後兩者都要求 loader 重跑一次分類，那就無法保證與 Stage 0 得到相同答案：
+
+```json
+{"schema_version": 1, "source": "twse_holidaySchedule", "covered_years": [2025, 2026],
+ "days": [{"date": "2026-01-01", "is_trading_day": false, "row_type": "holiday"}, …]}
+```
+
+* `row_type` 是封閉 enum：`trading`／`weekend`／`holiday`／`settlement_only`／`trading_marked`；
+  固定映射 `trading`・`trading_marked` → `true`，其餘 → `false`，**builder 與 loader 兩端都驗**；
+* ⛔ **同一天出現兩列一律中止**，分類相同也不放行：那本身就是「回應與既有假設不符」的訊號，
+  靜默折疊會讓我們對輸入的理解與實際脫節，而這份日曆是 readiness 判斷的依據；
+* **完整年度不變條件**：每個 covered year 的 1/1～12/31 **每一天恰好一列**；
+  `covered_years` 嚴格升冪、不重複，且與 `days[].date` 的年度集合完全相等
+  （canonical JSON 的 `sort_keys` **只排物件的鍵，不排陣列**）；
+* **涵蓋範圍**必須含 `as_of` 所在年度**與前一年度**——`as_of` 落在年初時前一個交易日在去年；
+* 整數欄位一律用 `type(x) is int`、布林用 `isinstance(x, bool)`：`isinstance(True, int)` 是
+  `True` 且 `True == 1`，鬆一點連「值必須等於 1」那道檢查都會被 `true` 通過；
+* `--trading-calendar <file>` 是明確的替代入口，⛔ **只接受與 bundle 內完全相同的 canonical
+  檔**（loader 會重做一次序列化並逐位元比對，縮排／鍵序不同也拒絕）。
+
+⚠️ **與 Go 端的一個刻意差異**：Go 的 `IsTradingDay` 把「週末一律不是交易日」寫死在判定
+函式裡；這裡把結論**存進表**，並在 builder 就擋下「被分類成交易日、卻落在週末」的列
+（fail-closed）。TWSE 真的排出週末交易日時，這裡會中止而不是靜默給出與 Go 不同的答案。
+
+#### Stage 0 的跨來源一致性快照
+
+⛔ **四次擷取不能各自 `engine.connect()`**：同步工作在擷取途中 commit，bundle 就會混進
+不同時間點的資料——一份 candles 停在 commit 前、chip／governance 已是 commit 後的組合
+**在資料庫裡從未同時存在過**，而它還會被封成「可重現的證據」。
+
+| 步驟 | 內容 |
+|---|---|
+| ① 交易日曆（HTTP） | **在快照之外先做完**——⛔ 不把網路等待放進 DB 交易 |
+| ② 開唯讀快照 | 逐 driver 的順序見下表 |
+| ③ readiness | **交易內的第一個查詢**（PG 的 REPEATABLE READ 快照建立在第一個語句而不是 `BEGIN`） |
+| ④ 三份 payload | candles／chip／governance **全部走同一個 connection** |
+| ⑤ 結束 | `rollback`（唯讀不需要 commit；⚠️ PG 的長交易會擋 vacuum） |
+
+| driver | 順序 | 收尾 |
+|---|---|---|
+| postgres | `execution_options(isolation_level="REPEATABLE READ")` → `BEGIN` → `SET TRANSACTION READ ONLY` | `ROLLBACK` |
+| mysql | `execution_options(isolation_level="REPEATABLE READ")` → `START TRANSACTION READ ONLY` | 同上 |
+| sqlite | `PRAGMA query_only = 1` → `BEGIN DEFERRED` | `ROLLBACK` ＋ ⚠️ `finally` 把 `query_only` 復原成 0 |
+
+⛔ **mysql 不能只送 `START TRANSACTION READ ONLY`**：`READ ONLY` 設的是**存取模式，不是
+isolation**，落在 `READ COMMITTED` 時每次 consistent read 都會取新快照，同步期間的 commit
+照樣混得進來——而且**完全不會報錯**。
+⚠️ sqlite 的 `query_only` 是**連線層級**設定，不復原的話後續拿到同一條連線的寫入路徑會報錯。
+
+#### strict：Stage 0 不接受 fail-open
+
+`_load_db_replay_chip_context` / `_load_db_replay_model_governance_context` 的 `strict=True`
+（Stage 0 一律開）把六個 fail-open 分支改成中止：兩條 `dataset range missing` **主動
+`raise ValueError`**（它們沒有原始例外可拋），其餘四條 bare `raise`。
+⚠️ **「合法零筆」與「查詢失敗」要分開**：某檔本來就沒有 chip／governance 列 →
+**照常入 bundle（零筆）**，⛔ 不是失敗。既有呼叫端不傳 `strict` 即維持現行行為。
+
+#### Stage 2 的四道集合檢查
+
+⚠️ **除了 ①② 之外全部排在 replay 之前**：artifact 的封閉 schema、逐列唯一性、候選欄位守門
+與 ③ 都只看檔案內容，而 Stage 2 的 replay 要跑約 3.7 小時——壞掉的 artifact 沒有理由等到
+那之後才被發現。①② 需要本次 replay 的輸出，只有那兩道排在後面。
+
+
+```
+先各自驗唯一性：len(keys) == len(set(keys))      # ⛔ 不唯一即中止
+① sorted(keys(bundle universe))  == sorted(keys(after_artifact.rows))
+② sorted(keys(before 全範圍))     == sorted(keys(after_artifact.rows))
+③ sorted(cohort_manifest.keys)   == sorted(候選列的 key)
+④ sorted(keys(comparison_artifact.rows)) == sorted(cohort_manifest.keys)
+```
+
+⛔ **不能用 set 實作相等**——重複列會被折疊掉，而「before 版重複算了一列」正是要抓的錯誤。
+⚠️ ①② 不能省：before 少算／多算一列時比較就不完整，而只看 after 與 manifest 完全看不到。
+⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
+
+**候選欄位 `rr_decoupling_candidate` 的守門**：它是 `issue.md` I-074 Stage 0 才補上的診斷
+欄位，本工具**只消費、⛔ 不重算也不用近似欄位反推**。Stage 1 對每一列驗**嚴格 boolean**
+（⛔ 不收 `0`／`1`／`"true"`／`None`），缺欄位就**在發布 after artifact 與 cohort manifest
+之前**中止。⚠️ **欄位完整而全列為 `false` 時，空 cohort 是合法結果**——⛔ 不得與欄位缺失
+混為一談。
+
+#### 原子發布
+
+* **Stage 1／2（單檔 artifact）**：`--output-dir` 必須不存在或為空；逐檔先寫同目錄 temp 再
+  `os.replace`；**Stage 1 最後才發布 `cohort_manifest.json`；Stage 2 最後才發布
+  `report.json`**——指標檔存在即代表其指向的證據已完整落地。
+* **Stage 0（多檔目錄）**：走 `renameat2(RENAME_NOREPLACE)` 的整包發布，
+  細節見 [`development-workflow.md`](./development-workflow.md)。
 
 ### Decision Replay 的取樣規則（`replay_max_rows`）
 

@@ -759,6 +759,220 @@ down to 0   → 斷言除 goose_db_version 外一張表都不剩
 記憶體上限不足導致 Go build OOM、frontend 只掛 `frontend/` 導致 build 產物寫進
 container 內憑空消失且不會報錯。腳本是這些約束的唯一真實來源。
 
+## Decision Replay 的可重現執行（I-100）
+
+現況規格（bundle schema、canonical 規則、四道集合檢查、readiness 判準）在
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「Decision Replay 的可重現性」。這一節寫**怎麼跑**
+與**驗收報告要附什麼**。
+
+### 三條指令
+
+```bash
+# Stage 0：讀 live DB，封存凍結輸入 bundle（⛔ 不跑 replay、⛔ 不寫任何一張表）
+scripts/run-evaluation.sh --as-of 2026-09-01 --symbols 2330,2454,… \
+    --emit-bundle /app/baselines --limit 1500
+
+# Stage 1：用 **after** 版本跑全候選，掃描候選（完全離線）
+scripts/run-replay-offline.sh --bundle "$PWD/python/baselines/<bundle_id>" \
+    --output-dir /tmp/stage1 --before-ref ecbc141^
+
+# Stage 2：用 **before** 版本跑同一個範圍，再與 Stage 1 的輸出逐列對照
+scripts/run-replay-offline.sh --bundle "$PWD/python/baselines/<bundle_id>" \
+    --output-dir /tmp/stage2 --before-ref ecbc141^ \
+    --after-artifact /tmp/stage1/after_artifact.json \
+    --cohort-manifest /tmp/stage1/cohort_manifest.json
+```
+
+⚠️ **Stage 0 的 `--emit-bundle` 是容器內路徑**（`python/` 掛在 `/app`，所以
+`/app/baselines` 就是 repo 的 `python/baselines/`）；**離線腳本的 `--bundle`／
+`--output-dir`／兩份 artifact 一律用 host 絕對路徑**——它們在容器內掛在**相同的絕對路徑**上，
+所以參數不需要改寫。
+
+⚠️ **哪一個 stage 跑哪一份程式碼**（`run-replay-offline.sh` 最容易搞反的地方）：
+
+| stage | 跑的版本 | worktree 建在 |
+|---|---|---|
+| 1 | **after**（要驗的新版） | `AFTER_REF`（環境變數，預設 `HEAD`） |
+| 2 | **before**（對照組） | `--before-ref` |
+
+把 Stage 1 跑在 before 版上，產出的 `after_artifact.json` 裡裝的其實是 before 的結果，
+而且舊版本根本沒有 bundle CLI。⛔ **bundle 與 Stage 1 的 artifact 都不在版本 worktree 裡**
+（bundle 是之後才進版控的），所以兩者各自唯讀掛載。
+`REPLAY_DRY_RUN=1` 會只印出最終的 `docker run` argv 供核對，`scripts/test-replay-args.sh`
+就是拿它來斷言 stage↔版本與掛載。
+
+### 參數所有權：哪些值使用者不能給
+
+| 值 | 誰決定 |
+|---|---|
+| 要比哪個 before 版本 | **使用者**（`--before-ref`）——這是唯一的版本入口 |
+| `base_commit` | **腳本**，順序固定（見下方 TOCTOU） |
+| `tooling_patch_sha256` | **腳本**：worktree 實際 `git diff --binary` 的輸出 hash |
+| `source_root` / `image_digest` | **腳本**：實際掛載路徑與 `docker image inspect` 推導值 |
+| `runner_sha256` | **腳本**：腳本本身 ＋ `scripts/lib/replay-args.sh` 的內容指紋 |
+
+⛔ **兩支腳本都拒絕使用者傳入**這五個參數（`scripts/lib/replay-args.sh` 的
+`replay_args_reject_injected`），**而且連唯一前綴縮寫都擋**——argparse 預設會把
+`--image-d` 展開成 `--image-digest`，只比完整名稱的話縮寫形式會整條穿過去，
+而官方注入的值排在使用者參數之前，argparse 取最後一個，使用者傳的那個就贏了。
+Python 端另外用 `allow_abbrev=False` 把縮寫關掉，**兩層都要有**。
+**CLI 那一端**還負責偵測**重複出現**（使用者一個、腳本一個）並中止，⛔ 不靜默採用最後一個。
+⚠️ **驗證只能發生在 shell 層**：容器內的 Python 無法自己 `docker image inspect` 得知跑在
+哪個 image，也讀不到容器外的 `scripts/`。
+
+⚠️ **provenance 一律在 replay（或 Stage 0 的擷取）之後才建**：`project_modules_sha256` 記的
+是「實際執行涉及的模組」，而 pipeline／serialization／summaries 等都是 lazy import 的——
+太早建就會少記正是跑過的那些檔案。
+
+**Stage 0 是封閉式允許清單**：`--as-of`／`--symbols`／`--timeframe`／`--limit`／
+`--emit-bundle`／`--report-max-rows`／`--run-id`／`--pipeline-version`／`--model-path`／
+`--image-digest`／`--trading-calendar` 以外**明確傳入即中止**（含「傳入的值剛好等於預設」）。
+⚠️ 腳本層另外擋掉 `WRITE_DB=1`／`MODE!=evaluate`／`OUTPUT=`——`--write-db` 會讓 Stage 0
+**真的寫進 live**，所以要在連上 DB 之前就擋。
+
+### before／after 的執行模型
+
+兩個 git worktree ＋ **同一個 image**，皆唯讀掛載。`base_commit` 的取得順序**固定**
+（`replay_args_prepare_worktree`）：
+
+```
+① ref → immutable OID：  oid = git rev-parse <before-ref>^{commit}
+② 用該 OID 建 detached worktree（⛔ 不是用 branch 名建）
+③ 從 worktree 讀 HEAD
+④ 斷言 head == oid，不符即中止
+```
+
+⚠️ 少了 ①③④，branch 在 worktree 建立後被移動時，記進 artifact 的 commit 可能已經不是
+實際執行的那份程式碼。
+
+⚠️ `tooling_patch_sha256` 取自 **worktree 實際 diff 的輸出**，⛔ 不是「傳進來那個 patch 檔
+的 hash」。而 `git diff --binary` **預設不含 untracked**——所以用 `git apply --index` 套用、
+補 `git add -A -N`，取完 diff 再斷言 `git status --porcelain` 沒有 `??` 行。
+
+### 結構性離線
+
+`run-replay-offline.sh` 用 `--network none`、**不注入任何 DB 環境變數**、程式碼唯讀掛載，
+只有 `--output-dir` 可寫，且⛔ **不注入 `--model-path`**——模型是 bundle 的一部分。
+
+### Stage 0 的整包原子發布契約
+
+⛔ **不能逐檔 `os.replace`**：bundle 是**多檔目錄**。先建正式目錄再逐檔替換的話，別的程序
+會看到半成品、失敗時正式目錄會存在、而「先 `exists()` 再發布」有 TOCTOU。
+⛔ **也不能先 `os.mkdir` claim 再 rename**：那會先把一個**空的正式目錄公開出去**。
+
+```
+① staging：<baselines>/.staging-<random>/<bundle_id>/   ← 與正式路徑同一個 filesystem
+② 全部檔案只寫進 staging；⛔ 正式路徑全程不得被建立
+③ 逐檔 fsync ＋ fsync staging，再用**正式 loader** 完整驗證 staging
+④ renameat2(RENAME_NOREPLACE)：成功 → 正式路徑**一次完整出現**；EEXIST → ⑤
+⑤ 用正式 loader 驗既有那份，再比「六份 payload 的完整 SHA-256 mapping」：
+      相同 → no-op；任一不符 → **中止**（⛔ 不覆蓋、⛔ 不刪除）
+⑥ 兩條成功路徑都要在回傳前 fsync <baselines>
+⑦ finally：只刪本次的 .staging-<random>；⛔ 任何情況都不碰正式路徑
+```
+
+⛔ **`os.rename` / `os.replace` 不能用來發布目錄**：POSIX 的 `rename()` 會**直接蓋掉既有的
+空目錄**。⛔ probe 不通過（filesystem 不支援 `RENAME_NOREPLACE`，或 staging 與正式路徑跨
+filesystem 而回 `EXDEV`）即 **fail-closed，沒有弱化的 fallback**——用弱化保證去發布「不可
+竄改的證據」是本末倒置。補救是**讓最終的 `python/baselines/` 本身落在支援的 filesystem
+上**（搬移或重新掛載後重跑），⛔ 不是「產在別處再搬進來」（跨 filesystem 時 `mv` 會退化成
+copy ＋ delete）。
+
+**失敗後的正式目錄狀態依執行前狀態分流**：
+
+| 執行前 | 失敗後必須 |
+|---|---|
+| 正式目錄不存在 | **仍不存在** |
+| 已存在（同 ID 既有 bundle） | **逐位元完全不變**，且仍能通過正式 loader |
+| 已存在但為空或損壞 | **同樣逐位元不變**；⛔ 不自動刪除，fail-closed 並指出需人工處理 |
+
+**commit point**：④ 的 rename 成功即是邏輯上的 commit。之後 ⑥ 的 fsync 若失敗，那是
+**獨立狀態「已發布且 loader-valid，但 durability 未確認」**——回**專屬結束碼 3**
+（`EXIT_DURABILITY_UNCONFIRMED`），⛔ 不刪除正式路徑。重跑同一條指令會走 no-op **並重新
+fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改正式目錄。
+
+### 驗收報告必須附什麼
+
+1. **cohort 指紋**：`bundle_id`、`after_artifact.json` 的 SHA-256、`cohort_manifest.json` 的
+   key 數；
+2. **凍結輸入 bundle**：`python/baselines/<bundle_id>/` 已進版控的路徑；
+3. **涵蓋全部候選的逐列比較 artifact 及其 SHA-256**（`comparison_artifact.json`，⛔ 不截斷；
+   `report.json` 只是人讀摘要）；
+4. **跨日證據**：⛔ **D 日產 bundle 並跑、D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。
+   ⚠️ **同一天跑兩次證明不了任何事**——當日資料本來就沒變。
+
+⚠️ **preflight 與指紋檢查失敗不計入「一次正式 scan」**（`issue.md` I-074 的停止條件）：
+那是輸入還沒就位，不是驗證跑過了。
+
+### PostgreSQL／MySQL 的一致性快照要**手動**驗
+
+python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋這兩者的實機快照**。
+
+| 範圍 | 方式 |
+|---|---|
+| 三個 driver 的**交易語句與順序**斷言 | 自動化（`python/tests/test_db_snapshot.py`） |
+| SQLite 的**實際**唯讀強制、`rollback`、`query_only` 復原、concurrent-writer | 自動化 |
+| PostgreSQL 的**實機**一致性快照 | **手動**（下方步驟） |
+| MySQL／InnoDB 的**實機**一致性快照 | **手動**，⚠️ 另受 [`issue.md`](./issue.md) I-054 限制 |
+
+**手動步驟（PostgreSQL）**：
+
+1. 用 dev stack 起 postgres（⛔ 不要用 live／deploy 的 compose project）；
+2. 灌入兩檔以上的 candles 與對應 chip／governance 列；
+3. 跑 Stage 0，並用 **`SR_REPLAY_SNAPSHOT_PAUSE_SECONDS`** 把「candles 取完、chip 尚未取」
+   變成一個構得到的時點——那正是同步工作 commit 進來會出事的縫：
+
+   ```bash
+   SR_REPLAY_SNAPSHOT_PAUSE_SECONDS=30 \
+   scripts/run-evaluation.sh --as-of <d> --symbols 2330,2454 --emit-bundle /app/baselines
+   ```
+
+   ⚠️ 它**只是暫停**，不影響任何輸出，預設 0＝完全不生效；正式執行一律不設。
+4. 在那 30 秒內由另一個 session `INSERT` ＋ `COMMIT` 一批新 candles；
+5. 驗收：bundle 內的 candles／chip／governance **全部是 commit 前**的狀態，
+   且快照結束後從外面查得到新資料（證明那次 commit 真的成功）；
+6. 另驗快照內的寫入會被 `SET TRANSACTION READ ONLY` 直接擋下。
+
+**MySQL** 的步驟相同，用 **`DB_DRIVER=mysql`** ＋ `DB_DSN=mysql+pymysql://…` 覆寫
+（⛔ 腳本不得把 driver 寫死，否則這一步根本跑不起來），另加一步：先把 session 設成
+`READ COMMITTED`，Stage 0 必須**主動切回** `REPEATABLE READ` 才開交易。
+⚠️ MySQL 從未在任何環境部署過（I-054），這一路只有語句順序測試是自動化的。
+
+### 腳本層測試
+
+**兩層，職責不同**：
+
+| 腳本 | 驗什麼 | 何時跑 |
+|---|---|---|
+| `scripts/test-replay-args.sh` | 參數所有權（含**縮寫**與**重複**）、TOCTOU、tooling patch hash、以及**實際組出來的 `docker run` argv**（stage↔版本、bundle／artifact 掛載、`--network none`、無 DB 環境變數） | `python/scripts/test.sh` 在 pytest **之前**自動跑（`SKIP_SHELL_TESTS=1` 可跳過） |
+| `scripts/smoke-replay-offline.sh` | **真的**用官方腳本把 Stage 1／2 跑完一次（小型 fixture，秒級） | 預設不跑；`REPLAY_SMOKE=1 python/scripts/test.sh` 或直接執行 |
+
+⚠️ **兩層都需要，少了任一層都有洞**：argv 斷言攔得住「Stage 1 跑成 before」「bundle 沒掛
+進去」這類錯誤，但證明不了 CLI 在 worktree 裡啟動得起來、bundle 在容器內載入得了、
+Stage 1／2 在無網路無 DB 下跑得完。smoke 補的正是這一段。
+
+**Stage 0 的完整 argv 存成版控 fixture**（`python/scripts/fixtures/stage0_argv.json`，
+⛔ 存的是**參數 token 序列**，不是需要 `eval` 的 shell 字串），shell 側斷言「腳本輸出 ==
+fixture」、python 側用同一份 fixture 跑 CLI 衝突矩陣——兩側夾住同一份檔案才不會漂移。
+
+⚠️ **smoke 的 tooling patch 同時驗到兩件事**：①目前**工作樹**（可能尚未 commit）能經由
+patch 進到 worktree——離線腳本本來就是這樣支援「還沒進版控的 tooling 變更」；②Stage 1
+需要的 `rr_decoupling_candidate` 是 I-074 Stage 0 才會補的欄位，smoke 用一段**明確標示為
+smoke 專用**的 patch 補上它。⛔ 那一段永遠不會進版控的產品程式碼。
+
+⛔ **同步工作樹到 scratch 一定要有刪除語意**（`rm -rf` 之後再複製，⛔ 不是疊上去）：
+疊加會讓工作樹刪掉的檔案保留 HEAD 舊版，patch 表達不出那次刪除，smoke 就會跑在一份
+**現實中不存在的程式碼組合**上並給出綠燈。smoke 因此另有一道**忠實度守門**：把 patch 套到
+一份乾淨的 HEAD worktree，逐檔 hash 必須與 scratch 完全一致；⚠️ 檔案清單交給
+`git ls-files --cached --others --exclude-standard` 決定——那正好是「patch 帶得走的東西」，
+自己維護排除清單追不完 gitignore 的產物。
+
+⛔ **`--before-ref`／`--bundle`／`--output-dir`／`--after-artifact`／`--cohort-manifest`
+不接受重複**：腳本取**第一個**值去 checkout／掛載，argparse 取**最後一個**值寫進 artifact——
+重複會讓「實際執行的版本」與「報告宣稱的版本」不同，正好破壞這一整套要保護的版本身分。
+
+---
+
 ## Docker 驗收流程
 
 從 repo root 執行。

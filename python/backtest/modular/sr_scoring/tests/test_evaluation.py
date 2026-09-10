@@ -1182,8 +1182,9 @@ def test_run_decision_replay_loads_db_context_for_symbol_replay(tmp_path, monkey
         config_hash="hash123",
     )
     fake_db = types.ModuleType("db")
-    fake_db.fetch_candles = lambda symbol, timeframe, limit: _candle_rows(df)
-    fake_db.fetch_chip_scores = lambda symbol, from_date, to_date: [{
+    # 簽章跟著真實 API 走（I-100 加了 as_of / conn）——test double 與本尊不同步就驗不到東西。
+    fake_db.fetch_candles = lambda symbol, timeframe, limit, as_of=None, conn=None: _candle_rows(df)
+    fake_db.fetch_chip_scores = lambda symbol, from_date, to_date, conn=None: [{
         "trade_date": "1970-01-01",
         "signal_type": "BULLISH",
         "institutional_score": 30.0,
@@ -1191,7 +1192,7 @@ def test_run_decision_replay_loads_db_context_for_symbol_replay(tmp_path, monkey
         "broker_score": 20.0,
         "concentration_score": 40.0,
     }]
-    fake_db.fetch_sr_model_governance = lambda symbol, timeframe, from_ts, to_ts: [{
+    fake_db.fetch_sr_model_governance = lambda symbol, timeframe, from_ts, to_ts, conn=None: [{
         "as_of": "1970-01-01T00:00:00+00:00",
         "health_state": "HEALTHY",
         "quality_flags": [],

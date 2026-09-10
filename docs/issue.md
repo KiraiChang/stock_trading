@@ -421,7 +421,7 @@ migration 驗證與清空資料**；replay 全程不寫任何一張表，不在�
 
 | Stage | 內容 | 產出 |
 |---|---|---|
-| **0** | 完成可重現性前置（I-100）與診斷欄位，**並產生封存凍結輸入 bundle**（此時才讀 DB） | 可重跑的 replay 路徑 ＋ 新欄位 ＋ 已封存的 bundle |
+| **0** | 完成可重現性前置（I-100）與診斷欄位，**並產生封存凍結輸入 bundle**（此時才讀 DB）。⚠️ **I-100 的工具已於 2026-09-10 實作完成**（`--as-of`／`--emit-bundle`／`scripts/run-replay-offline.sh`，用法見 [`development-workflow.md`](./development-workflow.md)）；本階段還缺的是**診斷欄位**與**實際產出並進版控的 bundle** | 可重跑的 replay 路徑 ＋ 新欄位 ＋ 已封存的 bundle |
 | **1** | **只用 after 版本**、**從 bundle 載入**連續 replay 整個範圍，掃描精確 predicate | 候選 manifest（`(symbol, as_of)` 清單）＋ after 側的完整逐列輸出 |
 | **2** | 用 **before 版本**、**從同一份 bundle 載入**連續 replay **同一個範圍**，再與 Stage 1 的 after 輸出逐列對照 | **全候選**逐列比較 artifact（附 SHA-256）＋ 前 200 列的人讀報告 |
 | **3** | 依下方決策樹收斂並歸檔 | `sr-zone-scoring.md` 的結論 |
@@ -772,7 +772,7 @@ bundle 被換掉，**能做的只有中止，沒有辦法重跑原來那份輸�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待修復**（2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下） |
+| 狀態 | **已實作／待正式 bundle 與跨日驗收**（2026-09-10 依 v23 計畫書完成程式與自動化測試，見下方「實作結果」；2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下）。⚠️ **本輪只交付程式與自動化測試**，正式 bundle 與跨日驗收另立一輪，兩者仍是關閉條件，⛔ 本筆在那之前不得移除 |
 | 嚴重度 | 中（不影響 runtime，只影響**驗收證據能不能被獨立複核**） |
 | 分類 | Python / SR Zone / 驗證工具 |
 | 發現日期 | 2026-09-01 |
@@ -873,9 +873,12 @@ Stage 1 自己的輸入就不是「從 bundle 載入的那一份」——真要�
 ⚠️ **本筆已不是單純的工具小修**：它同時改到 replay 的取數邊界、cohort 的身分與失敗行為，
 依 CLAUDE.md 屬於「驗證流程修改」＝大規模／高影響異動，**實作前要先寫計畫書**。
 
-#### 計畫書 v22（2026-09-10，**待確認**）
+#### 計畫書 v23（2026-09-10，**已確認／實作中**）
 
-⚠️ v21 的 review 再抓到 3 項（2 中 1 低），全部已反映；修訂摘要在最後一節。
+⚠️ v22 於 2026-09-10 經使用者確認，並在確認實作範圍時裁決了 4 項（結構、Stage 1 的欄位守門、
+腳本測試的落地方式、自動化／手動驗證界線），全部已反映成 v23；修訂摘要在最後一節。
+⚠️ **本輪只做程式實作與自動化測試**：連 dev／live DB 產出正式 bundle 與**跨日驗收**
+另立一輪，兩者仍是 I-100 的必要交付與關閉條件，⛔ 不因本輪完成而省略。
 **量測、儲存、目標與不做範圍承前不變**：整包約 4.9 MB 進版控放
 `python/baselines/<bundle_id>/`、I-074 收斂後不刪除；不動 runtime、不改演算法、
 不建通用 artifact storage、不改既有預設行為。
@@ -885,7 +888,7 @@ Stage 1 自己的輸入就不是「從 bundle 載入的那一份」——真要�
 | Stage | 指令 | 讀 DB | 跑 replay | 產出（`--output-dir` 下固定檔名） |
 |---|---|---|---|---|
 | **0** | `--as-of <d> --symbols … --emit-bundle <dir> --model-path … --image-digest …（後兩者由官方腳本注入）[--report-max-rows 200] [--trading-calendar <f>]` | ✅ 唯一 | ⛔ 不跑 | bundle |
-| **1** | `--bundle <dir> --output-dir <dir> --before-ref <ref>`（⚠️ `--base-commit`／`--tooling-patch-sha256`／`--image-digest`／`--source-root` **由腳本內部注入，不是使用者參數**） | ❌ | ✅ 全候選 | `after_artifact.json` ＋ `cohort_manifest.json` |
+| **1** | `--bundle <dir> --output-dir <dir> --before-ref <ref>`（⚠️ `--base-commit`／`--tooling-patch-sha256`／`--image-digest`／`--source-root`／**`--runner-sha256`**（v23 review 新增） **由腳本內部注入，不是使用者參數**） | ❌ | ✅ 全候選 | `after_artifact.json` ＋ `cohort_manifest.json` |
 | **2** | Stage 1 的參數 ＋ `--after-artifact <f> --cohort-manifest <f>` | ❌ | ✅ 全候選 | `comparison_artifact.json`（⛔ 不截斷）＋ `report.json` |
 
 ⛔ **Stage 1／2 的判定是「成對」規則**（v7 新增——v6 的允許清單讓兩個參數可以各自出現）：
@@ -957,6 +960,19 @@ Stage 0 是唯一會碰 live DB 的階段，錯誤的參數組合不該先連上
 
 `key = (symbol, timeframe, as_of)`；另驗 after artifact 的 SHA-256 與 manifest 記的相符。
 ⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
+
+**`rr_decoupling_candidate` 的欄位守門（v23 裁決）**——⚠️ 這個欄位是
+[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) Stage 0 才會補上的
+診斷欄位（責任層見該筆「責任層」表），**本筆只消費、⛔ 不自行產生也不用近似欄位反推**：
+
+* **Stage 1**：每一列 replay row 都必須有 `rr_decoupling_candidate`，且型別必須是**嚴格 boolean**
+  （`isinstance(x, bool)`，⛔ 不收 `0`／`1`／`"true"`／`None`）。缺欄位、`null` 或非 boolean
+  → **在發布 `after_artifact.json`／`cohort_manifest.json` 之前中止**，訊息明講「I-074 Stage 0
+  的診斷欄位尚未就位」；
+* **Stage 2**：載入 after artifact 時**再驗一次**同一條 schema，只讀既有欄位；
+* ⚠️ **欄位完整、但所有列都明確為 `false` 時，空 cohort 是合法結果**——⛔ 不得把
+  「真正零命中」判成錯誤。這道守門禁止的是**因欄位缺失而靜默變成空 cohort**，兩者要分開；
+* ⚠️ **本筆可以先交付工具與護欄，但正式 Stage 1 要等 I-074 Stage 0 補齊欄位後才跑得動。**
 
 ⚠️ **為什麼 ①② 不能省**：I-074 要「全部候選逐列資料都能重算分支」，
 before 少算／多算一列時比較就不完整，而只看 after 與 manifest 完全看不到。
@@ -1265,7 +1281,7 @@ markdown 不會當成同一張表）。
 `tooling_patch_sha256` 來自腳本自建 worktree 後 `git diff --binary <base_commit>` 的**實際輸出**
 （⛔ 不是「傳進來那個 patch 檔的 hash」）——⚠️ **套用方式必須讓新增檔案進得了 diff**（v13 修正）：
 `git diff --binary <base_commit>` **預設不含 untracked file**，而本計畫明確會新增
-`replay_bundle.py` 與 `run-replay-offline.sh`，照 v12 的寫法**那兩個新檔不會進 hash**，
+`replay_bundle/` 整個 package 與三支腳本檔（見「十、受影響檔案」），照 v12 的寫法**那些新檔不會進 hash**，
 tooling patch 就沒有被完整涵蓋。定案：**用 `git apply --index` 套用**（新增檔直接進 index），
 套用後補一次 `git add -A -N`，取完 diff 再斷言 `git status --porcelain` **沒有 `??` 行**
 （還有 untracked 就代表仍有東西漏在 hash 外 → 中止）。
@@ -1468,7 +1484,10 @@ deterministic barrier，讓兩者在同一點碰撞：**一方成功、另一方
 可以是 branch／tag／commit——**這是使用者唯一能指定的版本入口**）。
 
 **⛔ 僅限官方腳本注入，使用者傳入即被腳本拒絕、CLI 對重複值中止**：
-`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root`。
+`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root`／
+**`--runner-sha256`**（v23 review 新增——runner 是容器外的 shell 腳本，容器內的 Python
+讀不到它，所以 hash 只能由腳本自己算好後注入）。
+⛔ **拒絕的範圍含唯一前綴縮寫**（`--image-d` 會被 argparse 展開），見「十五、review 修正」#3。
 
 ⚠️ **v10 只封閉了 `image_digest`，其餘三個仍是一般 CLI 參數**——那等於留著同一個偽造入口：
 後文要求它們「由實際 worktree／diff 推導」，但只要使用者能傳同名參數，
@@ -1494,7 +1513,8 @@ deterministic barrier，讓兩者在同一點碰撞：**一方成功、另一方
 ⚠️ **少了 ①③④ 的斷言**：branch 在 worktree 建立後被移動時，
 記進 manifest 的 commit 可能已經不是實際執行的那份程式碼。
 
-**測試**：四個欄位**各一條 spoof**（使用者傳同名參數 → 腳本拒絕）
+**測試**：**五個**欄位（v23 review 補上 `--runner-sha256`）**各一條 spoof**
+（使用者傳同名參數或**唯一前綴縮寫** → 腳本拒絕）
 ＋ **各一條「實際值與宣稱值不一致要被抓到」**
 ＋ **兩條 TOCTOU**（⛔ v12 那條的預期結果與流程相反——先解析 OID 再用 OID 建
 detached worktree，之後移動 branch **不可能**改變 worktree 的 HEAD）：
@@ -1524,9 +1544,25 @@ grid 與 builder 參數／`--write-db`／`--passed`／`--output`／`--emit-bundl
 
 ##### 十、受影響檔案
 
-`python/db.py`、`evaluation.py`、**新檔** `replay_bundle.py`、
-`scripts/run-evaluation.sh`（Stage 0 掛載、透傳、image digest 注入、**與 Stage 0 禁用參數的互斥**）、
-**新檔** `scripts/run-replay-offline.sh`、`docs/development-workflow.md`、`docs/sr-zone-scoring.md`。
+⚠️ **v23 更新**（結構裁決與腳本測試落地方式）：
+
+* `python/db.py`——`as_of` 上界、optional `conn`、逐 driver 唯讀快照、readiness 查詢；
+* `python/backtest/modular/sr_scoring/evaluation.py`——**只做流程協調**：三種模式判定、
+  參數所有權、strict loader、呼叫下方 package；
+* **新 package** `python/backtest/modular/sr_scoring/replay_bundle/`——
+  `__init__.py`（**穩定公開 API**）／`canonical.py`／`calendar.py`／`provenance.py`／
+  `publish.py`／`bundle.py`。⛔ **不得反向 import `evaluation.py`**（避免循環依賴）；
+  ⚠️ 拆成 package 只是結構調整，**v22 的資料 contract 一律不變**；
+* `scripts/run-evaluation.sh`（Stage 0 掛載、透傳、image digest 注入、**與 Stage 0 禁用參數的互斥**）；
+* **新檔** `scripts/run-replay-offline.sh`；
+* **新檔** `scripts/lib/replay-args.sh`——兩支腳本共用的 **argv builder ＋ 參數所有權驗證**；
+  ⚠️ `run-evaluation.sh` **必須呼叫同一個 builder**，shell 測試才算驗到官方實際組法；
+* **新檔** `scripts/test-replay-args.sh`——驗 spoof 與參數所有權；
+* **新檔** argv fixture（版控）——**存的是參數 token 序列，⛔ 不是需要 `eval` 的 shell 字串**；
+  digest、source root 等動態值一律用固定測試值或明確 placeholder；
+* `python/scripts/test.sh`——**在啟動 pytest container 之前先跑 `scripts/test-replay-args.sh`**，
+  ⚠️ 否則新測試會變成沒人固定執行的手動項目（掛載邊界只影響 container 內，host 端本來就讀得到 repo root）；
+* `docs/development-workflow.md`、`docs/sr-zone-scoring.md`。
 
 ##### 十一、失敗行為
 
@@ -1555,18 +1591,72 @@ provenance 推導失敗／canonical 遇到 NaN／Infinity——**一律中止**�
 | **日曆（五種中止條件一一對應）** | 取得失敗／缺年（含查詢超出 `covered_years`）／未知列型／重複日期／**算不出任何 `trading_day ≤ as_of`**；另加**年度內少一天**、日曆檔 hash 不符 |
 | **日曆解析器** | ISO（`2026-01-01`）／compact 民國（`1150101`）／閏日／不存在的日期／錯誤年份／空回應 |
 | **四道集合檢查** | 唯一性：universe／after／cohort／comparison **各一條重複列**；相等：before universe 缺／多列、comparison 少列、cohort 三種漂移；⚠️ before/after 的合法差異**不得**被判成輸入錯誤（正向對照組） |
-| **provenance** | patch hash 來自實際 worktree diff（傳錯 patch 檔要抓得到）；**專案模組落在 `source_root` 外要中止，stdlib／site-packages 不受此限**；`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root` **各一條 spoof（腳本拒絕）＋ 各一條實際值不符（中止）**；**兩支腳本各一條重複參數測試**（CLI 中止，⛔ 不採用最後一個） |
+| **provenance** | patch hash 來自實際 worktree diff（傳錯 patch 檔要抓得到）；**專案模組落在 `source_root` 外要中止，stdlib／site-packages 不受此限**；`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root`／**`--runner-sha256`** **各一條 spoof（腳本拒絕，含縮寫形式）＋ 各一條實際值不符（中止）**；**兩支腳本各一條重複參數測試**（CLI 中止，⛔ 不採用最後一個）；**`--before-ref`／`--bundle`／`--output-dir`／`--after-artifact`／`--cohort-manifest` 各一條重複測試**（腳本中止——腳本取第一個、argparse 取最後一個，重複會讓實際版本與報告宣稱的版本不同） |
 | **結構性離線** | `--network none` 下跑完 Stage 1／2；驗無 DB 環境變數、唯讀掛載 |
 | **跨日驗收** | ⛔ D 日產 bundle 並跑，**D+1 日載入同一份再跑**，輸入指紋與逐列結果相同 |
 
+##### 十二-B、自動化與手動驗證的界線（v23 裁決）
+
+| 範圍 | 方式 |
+|---|---|
+| PostgreSQL／MySQL／SQLite 的**交易語句與順序**斷言 | **自動化**（三 driver 各一條） |
+| SQLite 的**實際**唯讀強制、`rollback`、`query_only` 復原、concurrent-writer 快照 | **自動化** |
+| PostgreSQL 的**實機**一致性快照 | **手動**（`development-workflow.md` 的步驟） |
+| MySQL／InnoDB 的**實機**一致性快照 | **手動**，⚠️ 另受 [I-054](#i-054mysql-的執行期支援仍未被驗證ddl-已驗crud-未驗) 限制 |
+
+⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋 PostgreSQL／MySQL 的實機快照。**
+
+**腳本層測試怎麼跑（v23 裁決）**：`scripts/test-replay-args.sh` 由
+`python/scripts/test.sh` 在啟動 pytest container **之前**呼叫；shell 側驗 spoof 與參數所有權，
+Python 側從**同一份版控 argv fixture** 加上各種衝突參數，驗 CLI 在
+`check_connection()` 或 replay **之前**中止——兩側夾住同一份 fixture 才不會漂移。
+
 ##### 十三、完成後歸檔位置
 
-* [`sr-zone-scoring.md`](./sr-zone-scoring.md)——as-of 語意與 readiness 判準、bundle 與三份
-  artifact 的 schema 與 canonical 規則、四道集合檢查、`replay_scope`／`report_max_rows`
-  分工、strict、Stage 分工；
-* [`development-workflow.md`](./development-workflow.md)——驗收報告要附什麼、
-  `run-replay-offline.sh` 用法、before／after 的 worktree 執行模型、provenance 推導、
-  原子發布契約、Stage 0 與 bundle 模式的參數互斥。
+**已歸檔（2026-09-10）**：
+
+* [`sr-zone-scoring.md`](./sr-zone-scoring.md)「**Decision Replay 的可重現性：as-of、凍結
+  bundle 與三階段**」——as-of 語意與 readiness 判準、bundle 與三份 artifact 的 schema 與
+  canonical 規則、交易日曆、跨來源快照、strict、四道集合檢查、`replay_scope`／
+  `report_max_rows` 分工、Stage 分工。同時修掉了「1830 行附近仍寫『需要補一個 as-of 上界』」
+  的過期敘述；
+* [`development-workflow.md`](./development-workflow.md)「**Decision Replay 的可重現執行
+  （I-100）**」——三條指令、參數所有權、before／after 的 worktree 執行模型與 TOCTOU 順序、
+  tooling patch hash、結構性離線、Stage 0 的整包原子發布契約與 commit point、
+  **驗收報告要附什麼**、**PG／MySQL 實機快照的手動步驟**、腳本層測試。
+
+##### 十四、實作結果（2026-09-10）
+
+**本輪交付程式與自動化測試；正式 bundle 與跨日驗收另立一輪**（使用者 2026-09-10 裁決）。
+
+新增／修改：
+
+| 檔案 | 內容 |
+|---|---|
+| `python/db.py` | `fetch_candles(as_of=…)`、四個 helper 的 optional `conn`、`readonly_snapshot()`（逐 driver）、`fetch_market_latest_trading_date()`、`as_of_cutoff_epoch()` |
+| `python/backtest/modular/sr_scoring/replay_bundle/` | 新 package：`canonical` / `calendar` / `provenance` / `publish` / `bundle` / `artifacts`，`__init__` 提供穩定公開 API |
+| `.../evaluation.py` | `emit_replay_bundle()`（Stage 0）、`run_bundle_stage()`（Stage 1／2）、三種模式判定與封閉式參數所有權、兩個 context loader 的 `strict` |
+| `scripts/lib/replay-args.sh` | 共用 argv builder ＋ 參數所有權 ＋ worktree／tooling patch |
+| `scripts/run-evaluation.sh` | Stage 0 支援、image digest 注入、與 `WRITE_DB`／`MODE`／`OUTPUT` 互斥 |
+| `scripts/run-replay-offline.sh` | 新檔，Stage 1／2 的結構性離線執行 |
+| `scripts/test-replay-args.sh` ＋ `python/scripts/fixtures/stage0_argv.json` | 腳本層測試與版控 argv fixture |
+| `scripts/smoke-replay-offline.sh` ＋ `python/scripts/make_smoke_bundle.py` | 端到端 smoke：真的用官方腳本跑完 Stage 1／2（`REPLAY_SMOKE=1` 才跑） |
+| `python/scripts/test.sh` | pytest 之前先跑 `scripts/test-replay-args.sh`；`REPLAY_SMOKE=1` 時另跑 smoke |
+
+測試：`python/scripts/test.sh` **951 passed, 1 skipped**（含新增的
+`test_replay_bundle_{canonical,identity,publish,calendar,provenance,stage0,stages,cli}.py`
+與 `python/tests/test_db_snapshot.py`），`scripts/test-replay-args.sh` 全數通過。
+
+⚠️ **兩個尚未滿足的關閉條件**（見下方「關閉條件」第 2、3 項與十二的「跨日驗收」）：
+
+1. **正式 bundle 尚未產出**——要連 dev／live DB 跑一次 Stage 0，把
+   `python/baselines/<bundle_id>/` 納入版控；
+2. **跨日驗收尚未執行**——⛔ 必須真的 D 日產、D+1 日載入同一份再跑，同日重跑不能替代。
+
+⚠️ **Stage 1 目前跑不動，這是設計上的預期**：候選要靠 `rr_decoupling_candidate`，而那個
+欄位是 [I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到)
+Stage 0 才會補上的。本筆已交付**工具與護欄**（缺欄位會在發布 artifact 之前中止並指名
+I-074），欄位就位後才跑得動正式 Stage 1。
 
 ##### 修訂紀錄
 
@@ -1580,7 +1670,7 @@ provenance 推導失敗／canonical 遇到 NaN／Infinity——**一律中止**�
 | v10 | ①`image_digest` 的信任邊界沒閉合（Stage 1／2 仍當一般參數、且**容器內的 Python 無法自己 inspect**）→ 定案由兩支腳本各自拒絕使用者傳入再注入推導值，CLI 只負責對重複值中止，補 spoof 與重複參數測試；②日期解析器寫錯（holidaySchedule 是 ISO／compact 民國 `1150101`，`parseROCDate` 吃的是 `115/01/01`，照 v9 實作會全部拒絕）→ 改為移植 `parseCalendarDate` ＋ `newStrictDate`，並用同一組 fixture 驗；③`trading_calendar.json` 無可實作 schema → 定案存**正規化後的逐日分類結果**（含 `covered_years`），loader 直接查表、⛔ 不重新分類，超出涵蓋年度即中止；④中止條件與測試未一一對應 → 補「取得失敗」「算不出 `trading_day ≤ as_of`」及解析器的五條；⑤摘要殘留 → Stage 0 指令補必填參數、決定性測試改「四份 payload」、語意等價加日曆重建 |
 | v11 | ①`fetched_at`／`raw_row_count` 放進 hashed payload 會**破壞 bundle ID 決定性**（同內容不同抓取時間就換 ID）→ 移到 manifest 的 provenance 區，日曆 payload 只留影響交易日判定的穩定內容；②`base_commit`／`tooling_patch_sha256`／`source_root` 仍可從 CLI 注入 → 使用者只能給 `--before-ref`，其餘四個欄位一律腳本推導並拒絕同名外部參數，補 spoof 與「實際值不符」測試；③日曆缺「完整年度」不變條件 → 每個 covered year 的 1/1～12/31 **每天恰好一列**、`row_type` 封閉 enum（含普通平日與一般週末）、少一天即中止；④總表未反映前文新增測試 → 補日曆五種中止、解析器六種格式、provenance 的 spoof／不符／重複參數 |
 | v12 | ①`--before-ref` 有 TOCTOU 且主表與後文矛盾（主表仍列 `--base-commit`，一處說讀 worktree HEAD、一處說重新解析 ref）→ 主表改列 `--before-ref`、其餘標為腳本內部注入，並定死順序「ref→OID→用 OID 建 detached worktree→讀 HEAD→斷言相同」，補 TOCTOU 測試；②`--trading-calendar` 的輸入格式未定義 → **只接受與 bundle 內相同的 canonical `trading_calendar.json`**，⛔ 不收 TWSE 原始 response／單年度片段／多份集合，補「線上與 frozen 產出逐位元相同」等價測試；③決定性測試仍只允許 `captured_at` 不同 → 明列 volatile 欄位（`captured_at`／`calendar.fetched_at`／`calendar.raw_row_count`，多年度時按年度各記一份）；④`row_type` 與 `is_trading_day` 無一致性守門 → 定固定映射、builder 與 loader 兩端都驗、補矛盾組合測試；⑤「未知 schema version 四種檔案」數量漂移 → 改成列出五個受管制檔名 |
-| v13 | ①TOCTOU 測試的預期與固定流程相反（先解析 OID 再用 OID 建 detached worktree，之後移動 branch **不可能**改變 worktree HEAD）→ 拆成兩條：解析後移動 branch **應通過**、人為改動 worktree HEAD **應中止**；②frozen 模式**產不出**規定的 calendar provenance（canonical payload 不含 `fetched_at`／`raw_row_count`）→ 改成 discriminated union：`online` 按年度記抓取時間與原始列數、`frozen` 記輸入檔 SHA-256 與載入時間並標明原始抓取資訊不可得，兩者都只用 normalized payload 決定 `bundle_id`，決定性測試的 volatile 欄位隨之分流；③`git diff --binary` 不含 untracked，會漏掉 patch 新增的 `replay_bundle.py`／`run-replay-offline.sh` → 定案用 `git apply --index` ＋ `git add -A -N`，取完 diff 斷言無 `??` 行，補「只新增檔案也要改變 hash」測試；④`covered_years` 未定義 canonical 排序與唯一性（`sort_keys` 不排陣列，`[2025,2026]` 與 `[2026,2025]` 會得到不同 hash）→ 要求嚴格升冪、不重複、且與 `days[].date` 的年度集合完全相等，補非 canonical frozen 檔的拒絕測試 |
+| v13 | ①TOCTOU 測試的預期與固定流程相反（先解析 OID 再用 OID 建 detached worktree，之後移動 branch **不可能**改變 worktree HEAD）→ 拆成兩條：解析後移動 branch **應通過**、人為改動 worktree HEAD **應中止**；②frozen 模式**產不出**規定的 calendar provenance（canonical payload 不含 `fetched_at`／`raw_row_count`）→ 改成 discriminated union：`online` 按年度記抓取時間與原始列數、`frozen` 記輸入檔 SHA-256 與載入時間並標明原始抓取資訊不可得，兩者都只用 normalized payload 決定 `bundle_id`，決定性測試的 volatile 欄位隨之分流；③`git diff --binary` 不含 untracked，會漏掉 patch 新增的檔案（v23 起是 `replay_bundle/` 整個 package 與新增的腳本檔）→ 定案用 `git apply --index` ＋ `git add -A -N`，取完 diff 斷言無 `??` 行，補「只新增檔案也要改變 hash」測試；④`covered_years` 未定義 canonical 排序與唯一性（`sort_keys` 不排陣列，`[2025,2026]` 與 `[2026,2025]` 會得到不同 hash）→ 要求嚴格升冪、不重複、且與 `days[].date` 的年度集合完全相等，補非 canonical frozen 檔的拒絕測試 |
 | v14 | ①`content_hash8`／`bundle_id` 的組合演算法未定案（多檔如何排序、分隔、綁檔名都沒寫，不同實作者會算出不同 ID）→ 定成「逐檔完整 SHA-256 → `{檔名: hash}` mapping → 依檔名 UTF-8 位元組序 canonical JSON → 取前 8 hex」，並明列 `bundle_id` 的完整格式與正規表示式、說明為何不放 `run_id`／`pipeline_version`／`captured_at`、以及 8 hex 不負責防碰撞（完整性由 loader 逐檔驗）；②Python 端的 TWSE request 契約沒寫進計畫（Go 端已記錄 `queryYear` 會被忽略卻照回 200 ＋ 當年資料）→ 明訂 `date=<YYYY>0101&response=json`、⛔ 禁用 `queryYear`、逐列驗年、不用筆數當門檻，並補**斷言實際送出 query** 的測試；③frozen calendar 只有 JSON 範例與不變條件，缺精確欄位／型別／unknown-field 規則（多一個被忽略的欄位 → 語意不變卻換 bundle ID）→ 補 exact-field 表、bool 不得用 `isinstance(int)`、loader 重做 canonical 序列化並逐位元比對，補多餘／缺少／型別錯／非 canonical 排版四類測試；④標題與開頭仍寫 v12／v11 而修訂紀錄已是 v13 → 版本標示統一 |
 | v15 | ①**Stage 0 沒有跨來源的一致性快照**（readiness／candles／chip／governance 各自 `engine.connect()`，同步工作中途 commit 就會封出一份「資料庫裡從未同時存在過」的組合）→ 定案「日曆 HTTP 先做完 → 開單一唯讀快照（PG `REPEATABLE READ` ＋ `READ ONLY`／InnoDB `REPEATABLE READ`／sqlite 明確 `BEGIN`）→ readiness 為交易內第一個查詢 → 三份 payload 同一 connection → rollback 結束」，helper 加 optional `conn` 且預設行為不變，補 concurrent writer 與語句斷言測試（PG 實機驗證列為手動步驟）；②`bundle_id` 未綁定目錄名與 manifest → 補「目錄 basename ＝ `manifest.bundle_id` ＝ 重新計算值」三方相等契約，補改名與身分欄位竄改測試；③整數欄位的守門缺 bool 反例（`isinstance(True, int)` 為真且 `True == 1`，連值檢查都會通過）→ 整數一律用 `type(x) is int`，補 `schema_version: true`／`covered_years: [true]` 拒絕測試 |
 | v16 | ①三個 engine 的「唯讀快照」名實不符（只有 PG 真的唯讀，mysql 只有 `REPEATABLE READ`、sqlite 只有 `BEGIN`；測試也只列 PG 與 sqlite）→ 補逐 driver 的精確建立順序表（PG `BEGIN` → `SET TRANSACTION READ ONLY`；mysql `START TRANSACTION READ ONLY`；sqlite `PRAGMA query_only=1` → `BEGIN DEFERRED` ＋ **finally 復原**），統一「readiness 當交易內第一個查詢」為三 engine 的快照錨點，並補三 driver 的語句順序斷言、sqlite 的唯讀強制測試，明列 mysql 受 I-054 限制只有語句測試自動化；②快照內的查詢失敗仍會被既有 fail-open 吞掉（`evaluation.py:2467`／`:2498` 逐 symbol 轉 warning 後 `continue`，會發布一份少了 context 的 bundle）→ 兩個 loader 加 `strict` 參數、Stage 0 一律 `strict=True` 讓六個 fail-open 點原樣拋出，`rollback` 放 `finally`，失敗必須非零結束且正式目錄不存在，補四種注入失敗測試與「合法零筆仍應成功」對照組 |
@@ -1589,7 +1679,69 @@ provenance 推導失敗／canonical 遇到 NaN／Infinity——**一律中止**�
 | v19 | Stage 0 的「整包原子發布」沒真的定案（v18 只說同受契約約束，而契約寫的是**逐檔** `os.replace`；多檔 bundle 照這樣做會讓別的程序看到半成品正式目錄、失敗後正式目錄仍存在、且「先 `exists()` 再發布」有 TOCTOU）→ 新增七-B：staging 目錄放在同一 filesystem 且子目錄名正好是 `bundle_id`（滿足三方相等契約）、fsync 後先用正式 loader 驗 staging、以 **`os.mkdir` 原子 claim** 決定勝負、勝方一次 `os.rename` 整包發布、敗方改用正式 loader 驗既有那份（相同 no-op／不同中止）、`finally` 只刪本次 staging；明寫 POSIX rename 會蓋掉既有空目錄所以只對自己剛建的空目錄 rename、claim 與 rename 之間崩潰會留空目錄並在下次 fail-closed（⛔ 不自動刪正式路徑），四-B 分流表補「空／損壞」列，測試補四條 |
 | v20 | ①`os.mkdir` claim **不是**整包原子發布（先把空的正式目錄公開再 rename 蓋掉：reader 看得到空目錄、輸家只能在空目錄上中止而不是 no-op、rename 前崩潰就留下空的正式目錄）→ 改用 Linux 的 **`renameat2(RENAME_NOREPLACE)`**（`ctypes` 呼叫 `syscall`），正式路徑一次完整出現、全程不建立空目錄，`EEXIST` 才驗既有那份；補檔案系統 probe 與 **`O_EXCL` 發布鎖 fallback**（明說只在所有 producer 遵守同一把鎖時成立、殘留鎖 fail-closed）、發布後 fsync `<baselines>`、以及 rename 呼叫前的 deterministic barrier 測試；②競爭輸家比「逐檔 hash」會把允許 volatile 的 `manifest.json`／`manifest.sha256` 算進去，**同一份 payload 重產會被判成不同而中止** → 改比 manifest 內那份「六份 payload 的完整 SHA-256 mapping」，⛔ 不比 manifest bytes，兩份都先通過正式 loader；完整 hash 順帶抓 8-hex `bundle_id` 碰撞 |
 | v21 | ①`O_EXCL` fallback **沒定義正常競爭下怎麼取得鎖**（把「鎖已存在」一律當殘留鎖中止，兩個正常 producer 併發時第二個看到有效鎖也直接中止，達不到「一方 no-op」；且它的 no-clobber 只在合作者之間成立）→ **移除弱化 fallback**，probe 不通過即 fail-closed，訊息給出「產在支援的路徑再搬進版控」的補救；②rename 成功後 parent fsync 失敗**無處可歸**（回一般失敗違反「失敗後仍不存在」，刪掉又違反不碰正式路徑）→ 定義 **rename 成功＝commit point**，之後 fsync 失敗改回**專屬非零碼**「已發布且 loader-valid、durability 未確認」，⛔ 不刪正式路徑，重跑走 no-op ＋ 重新 fsync，四-B 與失敗行為段各補交叉說明；③raw syscall 的平台守門未閉合 → 優先用 **libc 的 `renameat2` symbol**，找不到才退回 `syscall()` 且**限定架構 allowlist**、未知架構 fail-closed，errno 用 `ctypes.get_errno()`，probe 明確驗「目的不存在→成功／已存在→`EEXIST` 且既有目的不變」並在所有路徑清掉 probe 檔 |
-| **v22** | ①**no-op 分支其實不會重新 fsync**（⑤ 直接「刪 staging、正常結束」，⑥ 只寫「發布成功後」——重跑一份 durability 未確認的 bundle 走的正是 no-op 這條）→ 改成**兩條成功路徑都要在回傳前 fsync `<baselines>`**，no-op 路徑的 fsync 失敗回同一個專屬狀態「既有 bundle 有效、durability 未確認」且⛔ 完全不修改正式目錄，commit point 分流表與測試各補一列；②「先產在支援路徑再搬進版控」**不是有效補救**（跨 filesystem 時 `renameat2` 回 `EXDEV`、`mv` 退化成 copy＋delete，正式路徑又暴露半成品且失去 no-clobber）→ 補救改為「讓最終的 `python/baselines/` 本身落在支援的 filesystem（搬移或重新掛載後重跑）」，另聲明「從別處匯入」需要另一套同樣原子的流程且本計畫不做，並明訂 staging 與正式路徑不同 fs（`EXDEV`）一律 fail-closed、⛔ 不得改用 copy；③probe 形狀不對 → 改成**目錄** rename 的 A／B 兩組（不存在的 destination → 成功；已存在 → `EEXIST` 且 source 與 destination 都不變），所有 probe 目錄在每條路徑都要清掉 |
+| v22 | ①**no-op 分支其實不會重新 fsync**（⑤ 直接「刪 staging、正常結束」，⑥ 只寫「發布成功後」——重跑一份 durability 未確認的 bundle 走的正是 no-op 這條）→ 改成**兩條成功路徑都要在回傳前 fsync `<baselines>`**，no-op 路徑的 fsync 失敗回同一個專屬狀態「既有 bundle 有效、durability 未確認」且⛔ 完全不修改正式目錄，commit point 分流表與測試各補一列；②「先產在支援路徑再搬進版控」**不是有效補救**（跨 filesystem 時 `renameat2` 回 `EXDEV`、`mv` 退化成 copy＋delete，正式路徑又暴露半成品且失去 no-clobber）→ 補救改為「讓最終的 `python/baselines/` 本身落在支援的 filesystem（搬移或重新掛載後重跑）」，另聲明「從別處匯入」需要另一套同樣原子的流程且本計畫不做，並明訂 staging 與正式路徑不同 fs（`EXDEV`）一律 fail-closed、⛔ 不得改用 copy；③probe 形狀不對 → 改成**目錄** rename 的 A／B 兩組（不存在的 destination → 成功；已存在 → `EEXIST` 且 source 與 destination 都不變），所有 probe 目錄在每條路徑都要清掉 |
+| **v23** | 使用者確認 v22 後，裁決 4 項實作範圍問題：①`replay_bundle.py` 單檔裝不下 canonical／日曆／provenance／發布／loader 五塊 → 改成 `replay_bundle/` package（`__init__.py` 提供穩定公開 API、`evaluation.py` 只做流程協調、⛔ package 不反向 import `evaluation.py`），**資料 contract 一律不變**，受影響檔案清單與 v13 的 provenance 敘述同步更新；②`rr_decoupling_candidate` 是 I-074 Stage 0 才補的欄位，本筆只消費 → Stage 1 對「缺欄位／`null`／非嚴格 boolean」**在發布 after artifact 與 cohort manifest 之前**中止並指名 I-074 Stage 0，Stage 2 載入時再驗一次，⚠️ 但**欄位完整而全列為 `false` 的空 cohort 是合法結果**，⛔ 不得與欄位缺失混為一談；③腳本層測試不只兩個新檔 → 明列 `scripts/lib/replay-args.sh`（兩支腳本共用的 argv builder ＋ 所有權驗證）、`scripts/test-replay-args.sh`、版控 argv fixture（**token 序列，⛔ 非 `eval` 字串**；動態值用固定測試值或 placeholder），並由 `python/scripts/test.sh` 在 pytest 之前呼叫，避免變成沒人跑的手動項目；④自動化／手動界線寫成十二-B 表，⛔ 文件與驗收報告不得宣稱 CI 已涵蓋 PG／MySQL 的實機快照 |
+
+##### 十五、review 修正（2026-09-10，v23 實作後第一輪 review）
+
+review 抓到 10 項（4 高 5 中 1 低），全部已修並補上回歸測試。⚠️ **其中兩項是自動化測試
+完全看不到的**——它們只在「照文件實際跑三條指令」時才會現形，所以修法一併補了
+`REPLAY_DRY_RUN=1`（印出實際 `docker run` argv）與對應的 shell 斷言。
+
+| # | 問題 | 修法 |
+|---|---|---|
+| 1（高） | **Stage 1 實際跑的是 before 版本**：離線腳本不分 stage 一律建 `--before-ref` 的 worktree 並掛載它。舊版根本沒有 bundle CLI；就算跑得動，也會把 before 結果標成 after artifact | 依 stage 選 source ref（Stage 1＝`AFTER_REF`，預設 `HEAD`；Stage 2＝`--before-ref`），各自推導 `base_commit` 與 `tooling_patch_sha256` |
+| 2（高） | **離線容器看不到 bundle，Stage 2 也看不到 Stage 1 的 artifact**：只掛了 before worktree 的 `python/` 與 output-dir。bundle 是之後才進版控的，舊 worktree 不會有它 | bundle 與兩份 artifact 各自**唯讀掛載在與 host 相同的絕對路徑**上（參數不需改寫，也就不會改寫錯） |
+| 3（高） | **argparse 縮寫繞過 provenance 守門**：shell 只擋完整名稱與 `--name=value`，而 `--image-d` 會被 argparse 展開；官方注入值排在使用者參數之前，argparse 取最後一個 → 使用者的值贏 | Python 端 `allow_abbrev=False`；shell 端改成**前綴比對**（任何 `--` 開頭、長度 ≥3 且是受保護名稱前綴者一律拒絕）。兩層都要有 |
+| 4（高） | **provenance 與計畫書不符**：`runner_sha256` 永遠是 `null`（Stage 0 沒傳、Stage 1／2 寫死 `None`）；且 provenance 建在 replay **之前**，lazy import 的模組沒進 `project_modules_sha256` | 新增腳本注入的 `--runner-sha256`（腳本本身 ＋ `replay-args.sh` 的指紋，⛔ 缺它即中止）；provenance 改在 replay／擷取**之後**才建 |
+| 5（中） | **loader 沒驗 `trading_calendar.json` 的 schema**，也沒驗 `replay_config` 與 manifest 的一致性、`content_hash8`／`symbols_hash8` 是否等於重算值。測試 fixture 只放一天卻能通過正式 loader | loader 補上日曆完整 schema ＋ canonical bytes 比對、replay_config 封閉欄位 ＋ 四個 mirrored 欄位一致性、兩個 hash 欄位的重算比對；fixture 改用**真的建出來的完整年度日曆** |
+| 6（中） | **Stage 2 沒在 replay 前完整驗 artifact**：只驗 `schema_version` 與 `kind`，其餘要等 before replay 跑完（約 3.7 小時）才發現 | 新增 `validate_after_artifact` / `validate_cohort_manifest`（封閉欄位、型別、唯一性、候選欄位守門），連同 ③ 全部移到 replay 之前；①② 依賴 replay 輸出，維持在後 |
+| 7（中） | **SQLite 狀態復原失敗被靜默吞掉**：`query_only` 復原失敗的連線仍回到 pool，後續**正常寫入會突然變成唯讀** | 收尾改成逐項記錄失敗；有失敗即 `invalidate()` 丟棄該連線並 raise，⚠️ 但已有例外在傳時只記 log ⛔ 不蓋掉原始成因 |
+| 8（中） | **MySQL 手動驗證跑不起來**：Stage 0 腳本把 `DATABASE_DRIVER` 寫死成 postgres；且文件沒有可控制「candles 取完、chip 未取」時點的 barrier | `DB_DRIVER` 可覆寫；新增 `SR_REPLAY_SNAPSHOT_PAUSE_SECONDS`（預設 0＝不生效，只給手動並發驗證用），文件補進手動步驟 |
+| 9（中） | **計畫要求的測試沒落地**：`fetch_candles(as_of)` 只有 sqlite 有邊界測試；「結構性離線」只 grep 腳本內容，所以抓不到 #1／#2 | 三個 engine 各驗實際送出的 SQL 與 `as_of_cutoff`（⚠️ PG／MySQL 仍**不能**在容器內真的跑，這一點不改）；離線腳本改用 `REPLAY_DRY_RUN=1` 斷言實際 argv 的 stage↔版本、bundle／artifact 掛載、`--network none`、無 DB 環境變數 |
+| 10（低） | TWSE 同日期**同分類**的重複列被靜默折疊 | 重複日期一律中止，分類相同也不放行 |
+
+⚠️ **#9 帶出的教訓值得留著**：#1 與 #2 都是「照文件實際跑」才會現形的錯誤，而原本的測試
+只 grep 腳本**內容**。**驗腳本要驗它實際組出來的指令**，不是驗它的原始碼裡有沒有某個字串。
+
+##### 十六、review 修正（2026-09-10，第二輪 review）
+
+第二輪抓到 4 項（1 高 2 中 1 低），全部已修。
+
+| # | 問題 | 修法 |
+|---|---|---|
+| 1（高） | **重複 `--before-ref` 會讓實際執行的版本與報告宣稱的版本不同**：腳本的 `replay_args_value_of` 取**第一個**值（拿它 checkout／掛載），argparse 取**最後一個**值（拿它寫進 comparison artifact）。實測 `--before-ref A --before-ref B` → 實際跑 A、報告寫 B，正好破壞本筆要保護的版本身分 | 新增 `replay_args_reject_duplicates`：`--before-ref`／`--bundle`／`--output-dir`／`--after-artifact`／`--cohort-manifest` 一律不接受重複，且排在任何取值之前 |
+| 2（中） | **artifact 的型別驗證不完整**：`row_key()` 用 `str()` 硬轉，`timeframe: 123` 會悄悄變成 `"123"`；top-level 的 `timeframe`／`replay_scope`／`generated_at`／`provenance` 沒驗型別，也沒與 bundle manifest 比對 | `row_key()` 改成嚴格型別（非空字串，⛔ 不轉型）；`validate_after_artifact`／`validate_cohort_manifest` 補齊 top-level 型別與 SHA-256 形狀；新增 `assert_matches_bundle` 比對 `bundle_id`／`timeframe`／`replay_scope` |
+| 3（中） | **結構性離線只驗 argv，沒有真的跑完 Stage 1／2**：證明不了 CLI 在 worktree 裡啟動得起來、bundle 與 artifact 在容器內載入得了、無網路無 DB 下跑得完 | 新增 **`scripts/smoke-replay-offline.sh`**（小型 fixture、秒級）：產一份合法 bundle → 把「目前工作樹 ＋ smoke 專用的 `rr_decoupling_candidate`」做成 tooling patch → 用官方腳本真的跑完 Stage 1／2 → 抽驗 artifact 自洽。⚠️ 預設不跑（要 docker build ＋ 兩次容器啟動 ＋ 兩個 worktree），`REPLAY_SMOKE=1` 才跑 |
+| 4（低） | `runner_sha256` 是第 5 個受保護參數，但主計畫的一覽與測試矩陣仍只列 4 個；Python 的重複參數測試也漏了它 | 三處全部補齊 |
+
+**實際執行結果**（2026-09-10，`scripts/smoke-replay-offline.sh`）：
+
+```
+bundle b1_20260901_1d_… → Stage 1（after）→ after_artifact 35 列、cohort 5 列
+                        → Stage 2（before）→ comparison 5 列、report 5 列
+```
+
+⚠️ **smoke 的 cohort 刻意用「決定性子集」而不是真的 predicate**：真的 predicate 在那份
+合成資料上命中 0 列，cohort 與 comparison 都會是空的，**Stage 2 的比較路徑等於沒被走到**。
+⛔ 這不能拿來推論任何命中率——它只證明管線走得完。
+
+##### 十七、review 修正（2026-09-10，第三輪 review）
+
+第三輪抓到 2 項（皆低），全部已修。⚠️ 兩項都是**回歸測試與文件的缺口**，不是功能漏洞——
+實作本身早已保護五個參數，但「測試沒涵蓋、文件沒對齊」本身就是下一次改壞的入口。
+
+| # | 問題 | 修法 |
+|---|---|---|
+| 1（低） | 測試矩陣與文件仍未對齊：spoof 迴圈漏 `--runner-sha256`；重複參數測試只涵蓋 3 個（漏 `--after-artifact`／`--cohort-manifest`）；`replay-args.sh` 的註解與本檔 1516 行仍寫「四個」 | spoof 迴圈補到五個；重複參數測試補到五個（Stage 2 的兩個用完整 Stage 2 argv 測）；兩處「四個」改成五個並註明是哪一輪補的 |
+| 2（低） | **smoke 的 tooling patch 表達不出刪檔**：`tar` 疊在 HEAD worktree 上沒有刪除語意，工作樹刪掉的檔案在 scratch 會保留 HEAD 舊版 → smoke 可能跑在一份**現實中不存在的程式碼組合**上而給出綠燈 | ①同步改成 `rm -rf $SCRATCH/python` 之後再複製（精確的刪除語意）；②新增 **patch 忠實度守門**：把 patch 套到一份乾淨的 HEAD worktree，逐檔 hash 必須與 scratch 完全一致 |
+
+⚠️ **忠實度守門的檔案清單交給 git 決定**（`ls-files --cached --others --exclude-standard`）：
+那正好是「patch 帶得走的東西」。自己維護排除清單追不完——實測第一版就被
+`.pytest_cache/` 與 `backtest/__init__.pyc` 這類 gitignore 產物擋下來過。
+
+**實測刪除語意**：把一個受追蹤檔暫時移出工作樹再跑 smoke → 檔案數 140 → 139，
+忠實度守門通過（舊的 tar 疊加版本在這裡會報「多了那個檔案」）。
 
 #### 關閉條件
 

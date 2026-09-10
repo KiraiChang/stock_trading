@@ -865,6 +865,724 @@ Stage 1 自己的輸入就不是「從 bundle 載入的那一份」——真要�
 ⚠️ **本筆已不是單純的工具小修**：它同時改到 replay 的取數邊界、cohort 的身分與失敗行為，
 依 CLAUDE.md 屬於「驗證流程修改」＝大規模／高影響異動，**實作前要先寫計畫書**。
 
+#### 計畫書 v22（2026-09-10，**待確認**）
+
+⚠️ v21 的 review 再抓到 3 項（2 中 1 低），全部已反映；修訂摘要在最後一節。
+**量測、儲存、目標與不做範圍承前不變**：整包約 4.9 MB 進版控放
+`python/baselines/<bundle_id>/`、I-074 收斂後不刪除；不動 runtime、不改演算法、
+不建通用 artifact storage、不改既有預設行為。
+
+##### 一、三種模式與判定規則
+
+| Stage | 指令 | 讀 DB | 跑 replay | 產出（`--output-dir` 下固定檔名） |
+|---|---|---|---|---|
+| **0** | `--as-of <d> --symbols … --emit-bundle <dir> --model-path … --image-digest …（後兩者由官方腳本注入）[--report-max-rows 200] [--trading-calendar <f>]` | ✅ 唯一 | ⛔ 不跑 | bundle |
+| **1** | `--bundle <dir> --output-dir <dir> --before-ref <ref>`（⚠️ `--base-commit`／`--tooling-patch-sha256`／`--image-digest`／`--source-root` **由腳本內部注入，不是使用者參數**） | ❌ | ✅ 全候選 | `after_artifact.json` ＋ `cohort_manifest.json` |
+| **2** | Stage 1 的參數 ＋ `--after-artifact <f> --cohort-manifest <f>` | ❌ | ✅ 全候選 | `comparison_artifact.json`（⛔ 不截斷）＋ `report.json` |
+
+⛔ **Stage 1／2 的判定是「成對」規則**（v7 新增——v6 的允許清單讓兩個參數可以各自出現）：
+
+```
+兩個都沒給 → Stage 1
+兩個都給   → Stage 2
+只給其中一個 → ⛔ 中止（在跑 replay 之前）
+```
+
+⚠️ **必須在 replay 開始前就擋下**——否則跑滿約 3.7 小時才發現模式不完整。
+
+##### 二、Stage 0 的輸入所有權（v7 新增）
+
+⛔ **v6 的所有權清單只涵蓋 `--bundle`，Stage 0 用的是 `--emit-bundle`，等於沒有規範。**
+而官方腳本可以用 `WRITE_DB=1` 注入 `--write-db`、`MODE=sweep` 注入 `--sweep`——
+前者會讓 Stage 0 真的寫進 live DB。
+
+**Stage 0 允許**：`--as-of`（**必填**）／`--symbols`（必填）／`--timeframe`／`--limit`／
+`--emit-bundle`（必填）／`--report-max-rows`／`--run-id`／`--pipeline-version`／
+**`--model-path`（必填）**／**`--image-digest`（必填）**／**`--trading-calendar`（選填）**。
+
+⚠️ **後三個是 v7 漏掉的，而漏掉會讓正式指令被自己擋下**：官方腳本**無條件**在指令尾端
+加 `--model-path`（`run-evaluation.sh` 的 `CMD_ARGS`），而 image digest 也定案由該腳本
+inspect 後注入。封閉式清單少列它們，Stage 0 一跑就中止。
+
+⚠️ **兩者的規則不同，⛔ 不能一視同仁**（v8 寫成「都可覆蓋」是錯的）：
+
+| 參數 | 可否覆蓋 | 理由 |
+|---|---|---|
+| `--model-path` | ✅ 可 | 驗另一個模型是合法用途；**hash 的是實際載入的那個檔案**，覆蓋不影響可追溯性 |
+| `--image-digest` | ⛔ **不可任意指定**（**三個 Stage 都是**） | 它是**執行環境的客觀識別值**，讓使用者填等於允許偽造 provenance |
+
+⚠️ **驗證只能發生在 shell 層，不能指望 Python CLI**（v9 沒講清楚）：容器內的 Python
+**無法自己 `docker image inspect` 得知自己跑在哪個 image**。所以定案：
+
+* **`run-evaluation.sh`（Stage 0）與 `run-replay-offline.sh`（Stage 1／2）都
+  ⛔ 拒絕使用者傳入 `--image-digest`**，再注入自己 build／resolve 後推導的值；
+* **Python CLI 端**只做一件事：偵測到**重複的 `--image-digest`**（使用者一個、腳本一個）
+  即中止，⛔ 不靜默採用最後一個；
+* **測試**：Stage 0 與離線腳本**各一條 spoof 測試**（使用者傳入偽造 digest → 腳本拒絕）
+  ＋ **各一條重複參數測試**（CLI 中止）。
+**CLI 衝突測試必須用官方腳本實際組出的完整 Stage 0 argv 跑一次。**
+
+**Stage 0 一律中止**：`--decision-replay`／`--write-db`／`--passed`／`--sweep` 及所有
+sweep 相關參數／`--bundle`／`--output-dir`／`--after-artifact`／`--cohort-manifest`／
+`--csv`／`--chip-json`／`--model-governance-json`／`--output`／grid 與 builder 參數。
+
+⚠️ **所有衝突都要在 `check_connection()` 與任何擷取動作之前中止**——
+Stage 0 是唯一會碰 live DB 的階段，錯誤的參數組合不該先連上去再說。
+
+##### 三、Stage 2 的四道集合檢查（v7 補多重集合語意）
+
+⛔ **`keys(...) == keys(...)` 不能用 set 實作**——重複列會被折疊掉，
+而「before 版重複算了一列」正是要抓的錯誤之一。
+
+**每一份資料先各自驗唯一性，再做排序後的 list 相等**：
+
+```
+對 universe / after_artifact / cohort_manifest / comparison_artifact 各驗：
+    len(keys) == len(set(keys))        # ⛔ 不唯一即中止
+
+再驗：
+① sorted(keys(bundle universe))  == sorted(keys(after_artifact.rows))
+② sorted(keys(before 全範圍))     == sorted(keys(after_artifact.rows))
+③ sorted(cohort_manifest.keys)   == sorted(候選列的 key)   # 候選＝ rr_decoupling_candidate
+④ sorted(keys(comparison_artifact.rows)) == sorted(cohort_manifest.keys)
+```
+
+`key = (symbol, timeframe, as_of)`；另驗 after artifact 的 SHA-256 與 manifest 記的相符。
+⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
+
+⚠️ **為什麼 ①② 不能省**：I-074 要「全部候選逐列資料都能重算分支」，
+before 少算／多算一列時比較就不完整，而只看 after 與 manifest 完全看不到。
+
+##### 四、`--as-of` 的「資料是否到齊」怎麼判（v7 新增定義）
+
+⛔ **v6 只寫「`--as-of` 晚於最新資料就中止」，沒說「最新」是誰的最新。**
+逐檔判會把**停牌、下市、或當天本來就沒有 K 棒的合法標的**誤判成資料未到齊。
+
+⛔ **v7 的公式 `as_of > market_latest → 中止` 與自己的週末測試直接矛盾**——
+週六 > 週五必然成立，那條測試永遠過不了。而且
+[`architecture.md`](./architecture.md) 早就寫明：**實際日期集合回答不了「少了哪些天」**，
+休市日要靠**交易日曆**判斷，⛔ 不能把「缺列的日子」都當成休市。
+
+**定案：用交易日曆算出「`as_of` 當下應該要有的最後一個交易日」再比**：
+
+```
+expected_latest = max(trading_day ≤ as_of)          -- 依權威交易日曆
+market_latest   = MAX(ts) over candles WHERE timeframe = :tf   -- 不分 symbol
+
+market_latest < expected_latest → 中止（資料還沒到齊）
+market_latest ≥ expected_latest → 通過
+```
+
+⚠️ **比較一律用 Asia/Taipei 的「日期」**，⛔ 不直接拿 `date` 去比 DB 的 timestamp。
+
+**交易日曆來源**：TWSE 的 `holidaySchedule`（與 Go 端 `exchange_reference.go` 同一個來源，
+整年預先公布、不會停滯）。
+⛔ **取得失敗即中止**（fail-closed）——猜不得。
+
+**HTTP request 契約（v14 補；⛔ 不能只寫「同一個來源」）**——Go 端
+（`exchange_reference.go:296` 的註解與 `:334` 的實作）已經踩過並記錄了這個坑：
+
+| 項目 | 定案 |
+|---|---|
+| query | **`date=<YYYY>0101&response=json`** |
+| ⛔ 禁用 | **`queryYear`**——2026-08-26 實測它會被**完全忽略**：端點照樣回 **HTTP 200**、格式正常，但回的是**當年**資料 |
+| 逐列驗年 | 每列日期解析後 `year == 請求年度`，⛔ 不符即中止（`exchange_reference.go:357`） |
+| ⛔ 不做的事 | **不用筆數當完整性門檻**（2026 是 27 筆、2025 是 24 筆，逐年本來就不同）；只驗「非空 ＋ 年份相符」 |
+
+⚠️ **少了逐列驗年，用錯參數名的實作會拿當年日曆去判斷去年的交易日，而且完全不會報錯**
+——這正是 v13「錯誤年份測試」擋不住的情況：它驗的是回應內容，沒有驗**實際送出的 query**。
+**測試**：①斷言實際送出的 query 恰為 `date=<YYYY>0101` ＋ `response=json`
+（⛔ **不得出現 `queryYear`**）；②回應是他年資料 → 中止；③`data` 為空 → 中止。
+**`--trading-calendar <file>` 是明確的替代入口**，⛔ **只接受一種格式：
+與 bundle 內完全相同的 canonical `trading_calendar.json`**（同一個 `schema_version`、
+同一套年度涵蓋與不變條件、同樣要通過下方所有驗證）。
+⛔ **不接受 TWSE 原始 response、不接受單年度片段、不接受多份 response 的集合**——
+那些都要求 loader 自己重跑一次正規化，就回到「無法保證與 Stage 0 得到相同答案」的問題。
+**測試**：線上取得與 frozen override 產出**逐位元相同的 normalized payload**（等價性）
+——⚠️ 比的是 payload 與 `bundle_id`，**manifest 的 calendar provenance 本來就會不同**（模式不同）。
+**Stage 0 一律把實際使用的日曆存進 bundle（`trading_calendar.json`）**，
+它是 payload 的一員（進 `content_hash8`），讓 readiness 這個判斷本身也可重現。
+
+**日曆的涵蓋範圍與解析規則（v9 補；v8 只說「用 holidaySchedule」是不夠的）**：
+
+* **涵蓋範圍**：必須包含 `as_of` 所在年度，**以及求得「前一個交易日」所需的前一年度**
+  ——⚠️ `as_of` 落在年初時（例如 1/2），前一個交易日在去年，只抓當年會算錯；
+* ⛔ **逐列分類，不是「休市日清單」**：`architecture.md` 已記錄實測至少四種列型
+  （放假休市／正常交易日的標記／市場無交易僅辦結算交割／週末列），
+  **全部扣除或只扣「放假」兩個方向都會錯**；
+* ⛔ **解析器要移植的是 `parseCalendarDate` ＋ `newStrictDate`，不是 `parseROCDate`**
+  （v9 寫錯）：holidaySchedule 的日期是 **ISO（`2026-01-01`）或 compact 民國（`1150101`）**，
+  而 `parseROCDate` 吃的是 `115/01/01`——照 v9 實作會把 TWSE 的合法格式**全部拒絕**。
+  嚴格語意（`1150231` 不得被正規化成 3/3）沿用 `newStrictDate`；列型判定沿用 Go 端那套。
+  **測試用與 Go 端相同的 fixture**：ISO、compact 民國、閏日、不存在的日期各一條；
+* **`trading_calendar.json` 的 schema（v10 定案）**：存的是**正規化後的逐日分類結果**，
+  ⛔ 不是 TWSE 原始列、也不是「例外日清單」——後兩者都要求 loader 重跑一次分類，
+  那就無法保證與 Stage 0 得到相同答案：
+
+  ```json
+  {"schema_version": 1,
+   "source": "twse_holidaySchedule",
+   "covered_years": [2025, 2026],
+   "days": [{"date": "2026-01-01", "is_trading_day": false, "row_type": "holiday"}, …]}
+  ```
+
+  **精確欄位與型別（v14 定案，⛔ 範例＋不變條件不夠當 contract）**——
+  ⚠️ 沒有 exact-field 規則時，**frozen 檔多一個 loader 會忽略的欄位，語意不變卻換一個
+  `bundle_id`**（多的欄位仍進 payload bytes → 進 `content_hash8`）：
+
+  | 位置 | 欄位 | 型別 |
+  |---|---|---|
+  | top-level | `schema_version` | `int`，必須 `== 1` |
+  | top-level | `source` | `str`，必須 `== "twse_holidaySchedule"` |
+  | top-level | `covered_years` | `list[int]`（嚴格升冪、不重複，見下） |
+  | top-level | `days` | `list[object]` |
+  | `days[]` | `date` | `str`，`YYYY-MM-DD`，⛔ 嚴格日期（`2026-02-30` 拒絕） |
+  | `days[]` | `is_trading_day` | **JSON `true`／`false`**，⛔ 不接受 `0`／`1`／`"true"` |
+  | `days[]` | `row_type` | `str`，五值封閉 enum |
+
+  * ⛔ **exact-field validation：多一個未知欄位、少一個必要欄位，一律中止**（兩層都是）；
+  * ⚠️ **驗 bool 要用 `isinstance(x, bool)`，⛔ 不能用 `isinstance(x, int)`**
+    ——Python 的 `bool` 是 `int` 的子類，後者會讓 `1` 通過；
+  * ⚠️ **整數欄位（`schema_version`、`covered_years[]`）一律用 `type(x) is int`，
+    ⛔ 不用 `isinstance(x, int)`**（v15 補）——同一個子類關係反過來也成立：
+    `isinstance(True, int)` 是 `True`，而且 `True == 1`，所以
+    `{"schema_version": true}` 連「值必須等於 1」那道檢查都會一起通過；
+    `"2026"`／`2026.0` 同樣拒絕；
+  * **loader 收下 frozen 檔後要重做一次 canonical 序列化，與輸入 bytes 逐位元比對，
+    不符即拒絕**——⚠️ 這條是**故意嚴格**的：語意相同但縮排、鍵序或多餘空白不同的檔案
+    也會被擋，因為它就是要求「與 bundle 內那一份完全相同」；
+  * **測試**：多餘欄位／缺欄位／型別錯（`"true"`、`0`、`"2026"`、
+    **`schema_version: true`**、**`covered_years: [true]`**）／
+    非 canonical 排版（pretty-print、鍵序不同）——**一律拒絕**。
+
+  **manifest 的 calendar provenance 依模式分流（v13 定案）**——⛔ v12 要求
+  「按年度記 `fetched_at`／`raw_row_count`」，但 frozen override 只收 normalized payload，
+  裡面**根本沒有原始抓取時間與原始列數**，那個要求對 frozen 模式不可能滿足：
+
+  | `mode` | manifest 記什麼 |
+  |---|---|
+  | `online` | **每個年度**各記 `fetched_at` 與 `raw_row_count` |
+  | `frozen` | 記 **frozen 輸入檔的 SHA-256** 與 `loaded_at`；⚠️ 原始抓取資訊**明確標為不可得**，⛔ 不假造 |
+
+  ⚠️ **兩種模式都只用 normalized payload 決定 `bundle_id`**——provenance 不參與 content identity。
+
+  ⛔ **`fetched_at` 與 `raw_row_count` 一律不在這個檔案裡**（v10 誤放，v11 修正）：
+  它進了 payload 就會進 `content_hash8`——**日曆內容完全相同、只是抓取時間不同，
+  bundle ID 就會變**，與「同輸入重產只有 `manifest.captured_at` 不同」直接矛盾。
+  兩者移到 **manifest 的 provenance 區**（不參與 content identity）。
+  ⚠️ `raw_row_count` 也要移：TWSE 多一列無實質影響的原始列時，正規化後的
+  `days[]` 可能完全一樣，不該因此換一個 bundle ID。
+
+  **完整年度不變條件（v11 新增）**：
+
+  * 每個 `covered_years` 的年度，**1/1～12/31 每一天恰好一列**（⛔ 不是「只列例外日」）；
+  * 每筆 `date` 必須落在 `covered_years` 內；
+  * ⛔ **`covered_years` 必須嚴格升冪、不得重複，且與 `days[].date` 的年度集合完全相等**
+    （v13 新增）：canonical JSON 的 `sort_keys` **只排物件的鍵，不排陣列**——
+    `[2025, 2026]` 與 `[2026, 2025]` 語意相同卻會得到**不同的 payload hash**，
+    同一份日曆因此可能拿到兩個 bundle ID。**測試**：非 canonical 的 frozen 檔
+    （年度倒序／重複年度／年度集合與 `days[]` 不符）**一律拒絕**；
+  * `row_type` 是**封閉 enum**：`trading`（普通交易日）／`weekend`（一般週末）／
+    `holiday`（放假休市）／`settlement_only`（市場無交易僅辦結算交割）／
+    `trading_marked`（正常交易日的標記列，例如「開始交易日」）——
+    ⛔ 未知值即中止；
+  * **年度內少任何一天 → loader 中止**，⛔ 不得把「查不到」當成交易日或非交易日；
+  * ⛔ **`row_type` 與 `is_trading_day` 必須一致**（v12 新增——同時存兩個能表達交易狀態的
+    欄位卻沒有映射規則，`{"row_type":"holiday","is_trading_day":true}` 目前不會被擋）：
+
+    | `row_type` | `is_trading_day` |
+    |---|---|
+    | `trading`／`trading_marked` | **true** |
+    | `weekend`／`holiday`／`settlement_only` | **false** |
+
+    **builder 與 loader 兩端都要驗**，矛盾組合即中止（補一條測試）。
+
+  **loader 直接查表**得到 `is_trading_day`，⛔ 不重新分類；
+  ⚠️ **查詢落在 `covered_years` 之外一律中止**；
+* **一律中止的情況**：取得失敗／缺年（含查詢超出 `covered_years`）／未知列型／
+  重複日期／**算不出任何 `trading_day ≤ as_of`**；
+* **測試（五種中止條件一一對應）**：**取得失敗**／缺年（含查詢超出 `covered_years`）／
+  未知列型／重複日期／**算不出任何 `trading_day ≤ as_of`**；
+  另加跨年（`as_of` 在年初、前一交易日落在去年）、日曆檔 hash 不符，
+  以及**解析器本身**的：ISO 格式、compact 民國格式、錯誤年份、空回應、不存在的日期。
+
+**逐檔只檢查兩件事**：①該 symbol 在 bundle 的擷取範圍內**存在**；
+②歷史根數足夠（≥ `min_history_bars` ＋ `forward_bars`）。
+⛔ **不要求每一檔的最後一根都等於 `as_of`**——那對停牌／下市標的永遠不成立。
+
+**測試**：`as_of` 落在週末／休市日（`expected_latest` 會退回前一個交易日，**應通過**）；
+某檔的最後交易日早於 `as_of`（下市／停牌，**應通過**且該檔照常入 bundle）；
+`market_latest < expected_latest`（資料還沒到齊，**應中止**）。
+
+##### 四-B、Stage 0 的跨來源一致性快照（v15 新增）
+
+⛔ **v14 為止，Stage 0 的四次擷取各自開一條連線**：`db.py` 的每個 helper 都是
+`with engine.connect()`（`db.py:94`／`:145`／`:257` 等），`evaluation.py:2298`／`:2319`／`:2321`
+也是分三次呼叫。**同步工作在擷取途中 commit，bundle 就會混進不同時間點的資料**——
+一份 candles 停在 commit 前、chip／governance 已是 commit 後的組合
+**在資料庫裡從未同時存在過**，而它還會被封成「可重現的證據」並拿去比對 before／after。
+
+**定案：readiness 與三份 payload 在同一個唯讀快照內完成。**
+
+| 步驟 | 內容 |
+|---|---|
+| ① 交易日曆（HTTP） | **在快照之外先做完**——⛔ 不把網路等待放進 DB 交易 |
+| ② 開唯讀快照（單一 connection） | **逐 driver 的精確順序見下表**——⛔ v15 只有 PG 真的唯讀，另兩個僅一致讀取 |
+| ③ readiness | `market_latest` 在**同一個交易**內查 |
+| ④ 三份 payload | candles／chip／governance **全部走同一個 connection** |
+| ⑤ 結束 | 取完立刻 `rollback` 結束交易（唯讀不需要 commit；⚠️ PG 的長交易會擋 vacuum） |
+
+**逐 driver 的交易建立順序（v16 定案，⛔ 全部在第一個 SELECT 之前完成）**：
+
+| driver | 順序 | 唯讀強制 | 收尾 |
+|---|---|---|---|
+| **postgres** | `execution_options(isolation_level="REPEATABLE READ")` → `BEGIN` → **`SET TRANSACTION READ ONLY`** | ✅ **交易層級**（寫入直接報錯） | `ROLLBACK`（交易結束即失效，⛔ 不需復原） |
+| **mysql**（InnoDB） | `execution_options(isolation_level="REPEATABLE READ")` → **`START TRANSACTION READ ONLY`** | ✅ **交易層級** | 同上（isolation 由 SQLAlchemy 在歸還 pool 時還原） |
+| **sqlite**（WAL） | **`PRAGMA query_only = 1`** → **`BEGIN DEFERRED`** | ✅ **連線層級** | `ROLLBACK` ＋ ⚠️ **`finally` 內把 `query_only` 復原成 0** |
+
+⚠️ **sqlite 的 `query_only` 一定要復原**：那是**連線層級**的設定，而連線用完會回到 pool
+——不復原的話，後續拿到同一條連線的寫入路徑會直接報錯。
+⚠️ **`BEGIN DEFERRED` 不能省**：pysqlite 預設不會為純 SELECT 開交易，
+每個 SELECT 會各自成為一次獨立讀取，WAL 的快照語意等於沒生效。
+⚠️ **三個 engine 的快照錨點一律是「交易內第一個查詢＝readiness」**
+——PG 的 REPEATABLE READ 快照建立在**第一個語句**而不是 `BEGIN`；
+⛔ 不能在交易外先查 readiness 再開交易。
+（mysql 亦可用 `WITH CONSISTENT SNAPSHOT` 把錨點提前到 `BEGIN`，
+**本計畫不依賴它**——統一走「readiness 當第一個查詢」這條規則，三個 engine 同一套語意。）
+
+⛔ **mysql 不能只送 `START TRANSACTION READ ONLY`**（v16 的漏洞）：`READ ONLY` 設的是
+**存取模式，不是 isolation**，而「InnoDB 預設是 `REPEATABLE READ`」是**可被改掉的**
+server／session 預設。落在 `READ COMMITTED` 時**每次 consistent read 都會取新快照**，
+同步期間的 commit 照樣混得進來——⚠️ 而且**完全不會報錯**，
+產出的 bundle 看起來一切正常。`db.py:20` 的 `create_engine()` 也沒有固定 isolation。
+**定案：用 SQLAlchemy 的 `execution_options(isolation_level=…)` 明確設定**，
+⛔ 不自己送 `SET SESSION TRANSACTION ISOLATION LEVEL` 再手動復原——
+那是 session 層級的污染，漏復原就會跟著連線回到 pool；
+SQLAlchemy 的 isolation API 會在連線歸還時還原成 dialect 預設。
+⛔ **不改全域 engine 的預設**（`http_server`／`worker` 共用同一個 engine）。
+**測試**：先把 session 設成 `READ COMMITTED`，再跑 Stage 0 →
+必須看到它**主動切回 `REPEATABLE READ`** 才開交易。
+
+**helper 介面**：`fetch_candles`／`fetch_chip_scores`／`fetch_sr_model_governance`
+與新的 readiness 查詢各加一個 **optional `conn` 參數**，`None` 時維持現行
+`engine.connect()` 行為——⛔ 不改既有呼叫端語意（`http_server` / `worker` / 既有 CLI 路徑照舊）；
+`_load_db_sources`／`_load_db_replay_chip_context`／`_load_db_replay_model_governance_context`
+把 `conn` 往下傳。
+
+**⛔ 傳 `conn` 還不夠——那兩個 loader 現在會把查詢失敗轉成 warning 後繼續**（v16 補）：
+`evaluation.py:2467` 與 `:2498` 是**逐 symbol** 的 `except → warnings.append → continue`，
+`:2456`／`:2487` 是 import 失敗、`:2450`／`:2482` 是「dataset range missing」。
+照 v15 的寫法，**某一檔的 chip 查詢在快照中途失敗，Stage 0 會照常發布一份少了那檔
+context 的 bundle，只在 warnings 裡留一行字**——那正是本筆要消滅的東西。
+v14「`--emit-bundle`／`--bundle` 一律 strict」只是一句概括，⛔ 沒有指定機制：
+
+兩個 loader 各加 **`strict: bool = False`**，**Stage 0 一律 `strict=True`**，
+既有呼叫端不傳即維持現行行為。**六個分支的處理方式不一樣，逐條列明**
+（v17 修正——⛔ v16 寫「六個都原樣往上拋」，但其中兩條**根本沒有例外可拋**）：
+
+| # | 位置 | 現況 | `strict=True` |
+|---|---|---|---|
+| 1 | `:2450` chip `dataset range missing` | warning ＋ `return {}` | ⚠️ **主動 `raise ValueError`**（無原始例外，⛔ 不能 bare `raise`） |
+| 2 | `:2456` chip `from db import` 失敗 | warning ＋ `return {}` | bare `raise`（原樣） |
+| 3 | `:2467` chip **逐 symbol** 查詢例外 | warning ＋ `continue` | bare `raise`（原樣） |
+| 4 | `:2482` governance `dataset range missing` | warning ＋ `return {}` | ⚠️ **主動 `raise ValueError`** |
+| 5 | `:2487` governance `from db import` 失敗 | warning ＋ `return {}` | bare `raise`（原樣） |
+| 6 | `:2498` governance **逐 symbol** 查詢例外 | warning ＋ `continue` | bare `raise`（原樣） |
+
+* ⚠️ **「合法零筆」與「查詢失敗」分開**：某檔本來就沒有 chip／governance 列
+  → **照常入 bundle（零筆）**，⛔ 不是失敗；只有上表六個分支才中止；
+* **`rollback` 放在 `finally`**，涵蓋 readiness／candles／chip／governance **任一步**失敗
+  （sqlite 另含 `query_only` 復原）；
+* 失敗即**非零結束碼**；**失敗後的正式目錄狀態依執行前狀態分流**（v18 修正——
+  ⛔ v17 無條件寫「正式目錄不得存在」，與「重複產生」允許正式目錄原本就存在、
+  驗證後 no-op 或中止、**不得覆蓋**的契約**無法同時成立**；照 v17 實作，
+  失敗清理會**刪掉原本有效的基準 bundle**，而那正是 I-074 要長期保留的證據）：
+
+  | 執行前 | 失敗後必須 |
+  |---|---|
+  | 正式目錄**不存在** | **仍不存在**（⛔ 不留半份可載入的產物） |
+  | 正式目錄**已存在**（同 ID 既有 bundle） | **逐位元完全不變**，且**仍能通過正式 loader** |
+  | 正式目錄**已存在但為空或損壞** | **同樣逐位元不變**（空的仍是空的）；⛔ 不自動刪除，fail-closed 中止並指出需人工處理 |
+
+  ⚠️ **發布本身不會製造中間狀態**：七-B 用 `RENAME_NOREPLACE` **一次**讓正式路徑出現，
+  ⛔ 全程不建立空的正式目錄——所以「失敗後仍不存在」在 rename 前的**任何**時點都成立。
+  ⚠️ **上表只涵蓋 rename 之前的失敗**；rename 成功之後只剩一種例外
+  （fsync 失敗 → 已發布但 durability 未確認），見七-B 的 commit point 分流表。
+
+  ⚠️ **清理只能刪「本次執行建立的 temp」**（隨機後綴），
+  ⛔ **任何情況都不得碰既有正式目錄**——包含失敗路徑與 `finally`。
+
+**測試矩陣**：上表**六個分支各一條**（⛔ v16 只測了查詢例外，漏掉 range missing 與
+import 失敗），另加 **readiness 失敗**與 **candles 中途失敗**兩條，共八條——
+每一條都要斷言①**非零結束碼**、②`rollback` 被呼叫（sqlite 另驗 `query_only` 已復原）、
+③**正式 bundle 目錄不存在且沒有殘留可載入的 temp**；
+另加**兩組「執行前已有同 ID 有效 bundle」情境**（取 chip 逐 symbol 失敗與 readiness 失敗各一）
+——斷言既有目錄**逐檔 hash 與 `manifest` 逐位元不變**且**仍能通過正式 loader**；
+⚠️ **空目錄／損壞 bundle 的不變性**另由七-B 的發布測試涵蓋；
+另補**對照組**：某檔 chip 為**合法零筆** → **正常產出 bundle**（⛔ 不得因此中止）。
+
+**測試**：
+
+* **concurrent writer**（sqlite WAL，可進常態回合）：擷取進行中由另一條連線 commit
+  一批新 candles → bundle 必須**全部是 commit 前**或全部是 commit 後，⛔ 不得混合；
+* **語句順序斷言（三個 driver 各一條）**：實際送出的語句與順序完全符合上表
+  （PG 的 `SET TRANSACTION READ ONLY` 在 `BEGIN` 之後、第一個 SELECT 之前；
+  **mysql 的 `START TRANSACTION READ ONLY`**；sqlite 的 `PRAGMA query_only=1` → `BEGIN DEFERRED`，
+  以及**收尾把 `query_only` 復原**）；
+* **唯讀強制**：sqlite 在快照內嘗試寫入 → 報錯（可進常態回合）；
+* ⚠️ **postgres 與 mysql 的實機快照驗證列進 `development-workflow.md` 的手動步驟**——
+  python 測試容器不連這兩者，⛔ 不宣稱 CI 已涵蓋；
+  ⚠️ **mysql 另受 I-054 限制**（從未部署，`test-mysql-migrations.sh` 只驗 DDL 不驗 repo 層），
+  所以 mysql 這一路只有**語句順序測試**是自動化的，快照行為僅止於手動驗證。
+
+##### 五、provenance 的檔案範圍（v7 修正）
+
+⛔ **v6 寫「依所有已 import 模組的 `__file__` 取 hash 並要求位於 `source_root`」會讓正常執行中止**
+——replay 必然載入 stdlib、pandas、numpy、joblib，那些本來就在 `source_root` 外。
+
+**分流**：
+
+| 類別 | 處理 |
+|---|---|
+| **專案模組**（⚠️ **依模組名稱判定，不是依路徑**） | 先用名稱界定：`backtest.modular.sr_scoring.*` ＋ 本次執行涉及的 top-level `config`／`db` ＋ 明列的 runner／loader 模組。再驗這些模組 resolved 後的 `__file__` **必須落在唯讀 `source_root` 內**，否則中止；通過的逐檔 SHA-256 |
+| **其餘（stdlib／site-packages）** | ⛔ 不做 containment 檢查、不逐檔 hash；改由 `image_digest` ＋ `python_version` ＋ `pip_freeze` 識別 |
+
+⛔ **不能用「`__file__` 在 `source_root` 下」來定義專案模組**（v7 的寫法是循環定義）：
+若真的從別的路徑 import 了一份 `backtest.modular.sr_scoring`，它會因為**路徑在 root 外**
+而被歸類成第三方套件，**正好繞過那道檢查**——那正是這道檢查要抓的情況。
+**runner script** 另記 `runner_sha256`（⚠️ v8 誤把這一列排在說明段落之後，
+markdown 不會當成同一張表）。
+
+其餘 provenance 承 v6：`base_commit` 來自 `git -C <worktree> rev-parse HEAD`；
+`tooling_patch_sha256` 來自腳本自建 worktree 後 `git diff --binary <base_commit>` 的**實際輸出**
+（⛔ 不是「傳進來那個 patch 檔的 hash」）——⚠️ **套用方式必須讓新增檔案進得了 diff**（v13 修正）：
+`git diff --binary <base_commit>` **預設不含 untracked file**，而本計畫明確會新增
+`replay_bundle.py` 與 `run-replay-offline.sh`，照 v12 的寫法**那兩個新檔不會進 hash**，
+tooling patch 就沒有被完整涵蓋。定案：**用 `git apply --index` 套用**（新增檔直接進 index），
+套用後補一次 `git add -A -N`，取完 diff 再斷言 `git status --porcelain` **沒有 `??` 行**
+（還有 untracked 就代表仍有東西漏在 hash 外 → 中止）。
+**測試**：patch **只新增一個檔案**時，`tooling_patch_sha256` 必須改變。`image_digest` 由 `docker image inspect` 推導，
+**Stage 0 也要**（由 `run-evaluation.sh` 注入）；另記 `argv` 與非敏感 `runtime_settings`
+（⛔ 不記 DSN／密碼）。
+**before／after 執行模型**：兩個 git worktree ＋ **同一個 image**，皆唯讀掛載。
+
+##### 六、bundle 規格與 canonical 規則（承 v6）
+
+* 檔案：`manifest.json`（`schema_version: 1`）＋ `manifest.sha256` ＋ payload
+  （`candles.json.gz`／`chip.json.gz`／`governance.json.gz`／`replay_config.json`／
+  **`trading_calendar.json`**／`model.joblib`）；
+  ⚠️ **`trading_calendar.json` 是 payload 不是附註**（v8 只說「存進 bundle 並記 hash」，
+  沒放進清單）：它是 readiness 判斷的依據，不納入 `content_hash8` 的話，
+  **兩份用不同日曆判定出來的 bundle 會拿到相同的 bundle ID**，
+  readiness 就沒有真正綁進證據身分。它同樣要走 canonical JSON、逐檔 hash、
+  loader 完整驗證，並補一條**竄改日曆要被 loader 抓到**的測試
+* ⛔ 不複製 `config.yaml`，改輸出**實際生效的 replay config**；
+* **排序鍵**：`trading_calendar.json` 依 `date` 升冪（⚠️ **重複日期即中止**，見下方日曆規格）／
+  candles `(symbol, timestamp)`／chip `(symbol, trade_date)`／
+  governance `(symbol, timeframe, as_of, created_at, model_version, model_config_hash)`，
+  **三份一律以「整列 canonical JSON bytes」當最終 tie-breaker**（⛔ 不加 `id`，那會動到
+  Go 注入 Python 的 row 形狀）；
+* canonical JSON：`sort_keys` ／固定 separators ／`ensure_ascii=False` ／**`allow_nan=False`** ／無結尾換行；
+  datetime→ISO-8601 UTC、Decimal→字串、float→最短往返 `repr`；
+* canonical gzip：`mtime=0` ＋ header 不寫 filename ＋ `compresslevel=9`；
+* `content_hash8` 只涵蓋 payload（⛔ 排除 `manifest.json`／`manifest.sha256`）；
+  `symbols_hash8` = 去重、UTF-8 位元組序排序、`\n` 連接後 SHA-256 前 8 碼；
+* **`content_hash8` 的組合演算法（v14 定案）**——⛔ 先前只說「涵蓋 payload」，
+  沒定多檔如何排序、如何分隔、如何綁檔名，不同實作者會算出不同 ID：
+
+  ```
+  ① 逐檔取完整 SHA-256，對**最終落地的 bytes**（.gz 就是壓縮後的 bytes，不是解壓內容）
+  ② 組成 mapping {bundle 內相對檔名: sha256 十六進位小寫}
+  ③ 依**檔名的 UTF-8 位元組序**排序，以同一套 canonical JSON 規則序列化
+  ④ content_hash8 = SHA-256(該 JSON 的 bytes) 的**前 8 個 hex 字元**
+  ```
+
+  ⚠️ **必須是「檔名→hash」的 mapping，不能只把各檔 hash 串起來**：後者在
+  `candles.json.gz` 與 `chip.json.gz` 內容互換時會得到**相同的 hash**——
+  檔名沒有綁進身分，等於少驗了「哪一份資料放在哪個角色」。
+
+* **`bundle_id` 的完整格式（v14 定案）**：
+
+  ```
+  bundle_id = "b<manifest schema_version>_<as_of:YYYYMMDD>_<timeframe>_<symbols_hash8>_<content_hash8>"
+  例：b1_20260901_1d_3f9a2c14_7b0e55d2      ⚠️ 必須完全符合 ^b[0-9]+_[0-9]{8}_[0-9a-z]+_[0-9a-f]{8}_[0-9a-f]{8}$
+  ```
+
+  ⛔ **不放 `run_id`／`pipeline_version`／`captured_at`**——前兩者是 Stage 1／2 的使用者參數
+  （同一份 bundle 會被不同 run 重複消費），後者一變 ID 就變，與決定性直接衝突。
+  字元集限定 `[a-z0-9_]`，可直接當目錄名。
+
+  **loader 的三方相等契約（v15 定案）**——⛔ 只驗逐檔 hash 不夠：
+
+  ```
+  目錄 basename  ==  manifest.bundle_id  ==  由 (schema_version, as_of, timeframe,
+                                              symbols, payload 逐檔 hash) 重新計算的值
+  ```
+
+  ⚠️ **任一不等即中止**。少了這條，**被改名的 bundle、或 `manifest` 的身分欄位
+  （`as_of`／`timeframe`／`symbols`）被竄改的 bundle 照樣載得進來**——逐檔 hash 只證明
+  「payload 沒被動過」，證明不了「這份 payload 就是這個身分宣稱的那一份」，
+  而那些欄位會被 Stage 1／2 當成事實寫進 artifact。
+  **測試**：目錄改名／`manifest.bundle_id` 改字／`as_of` 改／`timeframe` 改／
+  `symbols` 增刪——**一律中止**。
+  ⚠️ **8 hex ＝ 32 bit，本來就不是防碰撞用的**：真正的完整性由 loader 的**逐檔完整
+  SHA-256**保證，而目錄同名時走的是「用正式 loader 完整驗證既有 bundle，任一不符即中止」
+  （見下方「重複產生」）——所以碰撞會在載入時被抓到，⛔ 不會靜默採用另一份輸入。
+* **重複產生**：staging 用隨機後綴；正式目錄已存在時（含**發布時才發現**的競爭情況）
+  **用正式 loader 完整驗證**既有 bundle，通過且 payload 相同 → no-op，任一不符 → 中止；
+  ⛔ 不因新的 `captured_at` 覆蓋。**判定「是否已存在」一律靠七-B 的 no-clobber rename**
+  （`RENAME_NOREPLACE` 回 `EEXIST`），⛔ 不用 `exists()` 先查再發布（那有 TOCTOU）。
+  ⚠️ 比對用**六份 payload 的完整 SHA-256 mapping**，⛔ 不比 manifest bytes。
+
+##### 七、原子發布契約（承 v6）
+
+**Stage 1／2（單檔 artifact）**：`--output-dir` 必須不存在或為空；逐檔先寫同目錄 temp
+再 `os.replace`；**Stage 1 最後才發布 `cohort_manifest.json`；Stage 2 先驗
+`comparison_artifact.json` 的 hash，最後才發布 `report.json`**——
+「manifest／report 存在」即代表其指向的證據已完整落地。
+
+⛔ **Stage 0 不能沿用「逐檔 `os.replace`」**（v19 修正——v18 只寫「同受本契約約束」，
+但 bundle 是**多檔目錄**）：先建正式目錄再逐檔替換的話，①別的程序會在發布途中
+**看到一個半成品的正式目錄**；②中途失敗時正式目錄**會存在**，與四-B 的分流表直接矛盾；
+③兩個 producer 同時產同一 ID 時，「先檢查存在再發布」本身就有 TOCTOU。
+**Stage 0 走整包 no-clobber 發布，流程定死在七-B**：
+
+##### 七-B、Stage 0 的整包原子發布（v20 定案）
+
+⛔ **v19 的 `os.mkdir` claim 不是整包原子發布**：它**先把一個空的正式目錄公開出去**，
+之後才 rename 蓋掉。三個後果——①這段期間 reader 看得到空目錄；②A claim 完卡住時，
+B 拿到 `FileExistsError` 後用 loader 讀那個空目錄只能**中止**，
+所謂「其中一方 no-op」根本不成立；③rename 前崩潰就留下空的正式目錄，
+直接違反「執行前不存在 → 失敗後仍不存在」。既然 runtime 已限定 Linux，就用**真正的
+no-clobber rename**：
+
+```
+① staging：<baselines>/.staging-<random>/<bundle_id>/          ← 與正式路徑同一個 filesystem
+   ⚠️ 子目錄名必須**正好是 bundle_id**——loader 的三方相等契約要驗目錄 basename
+② 全部 payload、manifest、manifest.sha256 **只寫進 staging**；⛔ 正式路徑全程不得被建立
+③ 逐檔 fsync ＋ fsync staging 目錄，再**用正式 loader 完整驗證 staging**
+④ 發布：renameat2(AT_FDCWD, staging/<bundle_id>, AT_FDCWD, <baselines>/<bundle_id>,
+                  RENAME_NOREPLACE)
+      成功   → 正式路徑**一次完整出現**（⛔ 中間不存在任何可見的空目錄或半成品）
+      EEXIST → 走 ⑤（本次是競爭的輸家，或本來就有同 ID bundle）
+⑤ 用**正式 loader** 完整驗證既有的那一份，再比對「六份 payload 的完整 SHA-256 mapping」：
+      通過且 mapping 完全相同 → **no-op**（刪掉 staging）→ 一樣走 ⑥
+      任一不符或驗證失敗      → **中止**（⛔ 不覆蓋、⛔ 不刪除）
+⑥ **兩條成功路徑（④ rename 成功、⑤ no-op）都要在回傳前 fsync `<baselines>`**，才算
+   crash-durable ⚠️ v21 只寫「發布成功後」——重跑一份 durability 未確認的 bundle 時
+   走的正是 no-op 這條，反而**不會**執行文件承諾的重新 fsync
+⑦ finally：只刪本次的 .staging-<random>；⛔ 任何情況都不碰正式路徑
+```
+
+⛔ **不用 `os.rename`／`os.replace` 發布目錄**：POSIX 的 `rename()` 會**直接蓋掉既有的空目錄**。
+
+**怎麼呼叫 `renameat2`（v21 收斂，低 3）**：
+
+1. **優先用 libc 的 `renameat2` symbol**（`ctypes.CDLL(None, use_errno=True)`；
+   glibc ≥ 2.28 有這個包裝，`python:3.11-slim` 的 Debian glibc 符合）——
+   ⛔ 這樣就不必自己維護 syscall 號碼；
+2. 找不到 symbol 時才退回 `syscall()`，且**限定架構 allowlist**
+   （x86_64 = 316、aarch64 = 276）；⛔ **未知架構一律 fail-closed，
+   絕不套用其中任一號碼**（號碼是 per-ABI 的，猜錯會呼叫到完全不同的系統呼叫）；
+3. `AT_FDCWD = -100`、`RENAME_NOREPLACE = 1`；errno 一律用 `ctypes.get_errno()` 取得
+   （⛔ 不看回傳值猜原因）。
+
+⚠️ **`RENAME_NOREPLACE` 還需要檔案系統支援**，不支援時回 `EINVAL`／`ENOSYS`
+（`python/baselines/` 是 bind mount，實際 fs 依 host 而定）。**啟動時先 probe**，
+⚠️ **probe 要完全複製正式操作的形狀：rename 的是「目錄」，⛔ 不是檔案**（v22 修正——
+檔案 rename 通過不代表目錄 rename 也通過）。在 `<baselines>` 內用隨機名稱實測兩組：
+
+| 組 | 形狀 | 預期 |
+|---|---|---|
+| A | 隨機 **source 目錄** → **不存在**的 destination 目錄 | **成功** |
+| B | 隨機 **source 目錄** → **已存在**的 destination 目錄 | 回 **`EEXIST`**，且 **source 與 destination 兩邊都完全不變** |
+
+⚠️ **所有 probe 目錄在每一條路徑（含例外）都要清掉**；結果寫進執行 log
+（⛔ 不寫進 manifest——那是內容身分，與環境無關）。
+
+⛔ **probe 不通過就 fail-closed，本計畫不提供弱化的 fallback**（v21 定案）：
+v20 的 `O_EXCL` 發布鎖**沒有定義正常競爭下怎麼取得鎖**——它把「鎖已存在」一律當殘留鎖
+中止，於是兩個正常 producer 同時跑 fallback 時，第二個看到的是**有效鎖**卻直接中止，
+「一方成功、一方 no-op」根本達不到。而且那條路的 no-clobber 只在**合作者之間**成立，
+對不遵守鎖的 writer 沒有保證——**用弱化保證去發布「不可竄改的證據」是本末倒置**。
+**中止訊息要指出可行的補救——⛔ 不是「產在別處再搬進來」**（v22 修正）：
+`RENAME_NOREPLACE` 的能力取決於**最終 `<baselines>` 所在的 filesystem**，
+而從容器 volume 搬進 bind mount 通常是**跨 filesystem**——`renameat2` 直接回 `EXDEV`，
+`mv` 則**退化成 copy ＋ delete**：正式路徑又暴露半成品，no-clobber 也沒了。
+正解是**讓最終的 `python/baselines/` 本身落在支援的 filesystem 上**
+（搬移或重新掛載整個 repo／該目錄）再重跑。
+⚠️ 要支援「從別處匯入既有 bundle」的話，得另定一套**同樣原子且 no-clobber** 的匯入流程，
+**本計畫不做**。
+⚠️ 同理，① 的 staging **必須與正式路徑同一個 filesystem**——不是的話 `renameat2` 回 `EXDEV`，
+一律 **fail-closed**，⛔ 不得改用 copy 補上。
+
+⚠️ **⑤ 比的是「六份 payload 的完整 SHA-256 mapping」**（v20 修正——
+v19 寫「逐檔 hash 相同」會把 `manifest.json`／`manifest.sha256` 也算進去，
+但那兩份**本來就允許 volatile 欄位不同**（`captured_at`、calendar 時間欄位），
+於是**同一份 payload 的第二次產生會被判成不同而中止**，與「payload 相同 → no-op」矛盾）：
+
+* 比對來源是 manifest 內、用來算 `content_hash8` 的那份 `{檔名: 完整 SHA-256}` mapping；
+* ⛔ **不比 `manifest.json`／`manifest.sha256` 的 bytes**；
+* 兩份 bundle **都要先通過正式 loader 的完整驗證**才進行比對；
+* ⚠️ 用**完整 SHA-256** 比對，順帶把 8-hex `bundle_id` 的碰撞抓出來
+  （同 ID 但 payload 不同 → mapping 不同 → 中止）。
+
+**④ 的 rename 成功 ＝ 邏輯上的 commit point（v21 補，中 2）**——⚠️ 之後 ⑥ 的
+parent-directory fsync **仍可能失敗**，而那一刻正式路徑**已經存在且 loader-valid**：
+此時回一般失敗碼會違反「失敗後仍不存在」，刪掉它又違反「⛔ 不碰正式路徑」。定案：
+
+| 時點 | 結果 |
+|---|---|
+| rename **之前**任一步失敗 | 一般失敗：非零、**正式路徑不存在**、staging 清掉 |
+| rename **成功**、⑥ fsync 失敗 | ⚠️ **獨立狀態：「已發布且 loader-valid，但 durability 未確認」**——⛔ **不刪正式路徑**，回**與「未發布」不同的非零碼**，訊息明說 bundle 已發布 |
+| **no-op**（⑤ 判定相同）、⑥ fsync 失敗 | ⚠️ 同一類狀態：**「既有 bundle 有效，但 durability 未確認」**——⛔ **完全不修改正式目錄**，回同一個專屬非零碼 |
+
+⚠️ 這個狀態**不是**「發布失敗」，是「發布已 commit、只是還沒確認落盤」：
+重跑同一條指令會走 ⑤ → mapping 相同 → **no-op**（並重新 fsync），⛔ 不需要也不應該刪除重來。
+
+**測試**：①**兩個 producer 同時發布同一 ID**——在 ④ 的 rename **呼叫前**插入
+deterministic barrier，讓兩者在同一點碰撞：**一方成功、另一方 no-op**，
+⛔ 最終內容等於先寫入的那一份；②執行前已有**空的正式目錄** → **中止**且該目錄**仍是空的**；
+③執行前已有**損壞的 bundle** → **中止**且該目錄**逐位元不變**；
+④在 ③～④ 之間與 **④ 的 rename 呼叫前**各注入一次失敗 → 正式路徑**不存在**、staging 已清掉；
+⑤**同一份 payload 重產**（`captured_at` 不同）→ **no-op**，⛔ 不得因 manifest 差異中止；
+⑥**注入 ⑥ 的 fsync 失敗**——**rename 路徑與 no-op 路徑各一條**：都回專屬非零碼、
+**正式 bundle 完整且可載入**（⛔ 未被刪除、no-op 路徑⛔ 完全未被修改）、
+重跑該指令 → **no-op 並重新 fsync**；
+⑦**probe 的 A／B 兩組各一條**（目錄形狀：不存在的 destination → 成功；
+已存在的 destination → `EEXIST` 且 **source 與 destination 都不變**；probe 目錄已清掉）；⑧`RENAME_NOREPLACE` 不受支援 → **fail-closed**，
+訊息含補救指引（⛔ 不得有任何弱化的發布路徑）。
+
+##### 八、bundle 模式（Stage 1／2）的輸入所有權
+
+**允許（使用者可給）**：`--output-dir`／`--run-id`／`--pipeline-version`／
+`--after-artifact`／`--cohort-manifest`／**`--before-ref`**（要比對的 before 版本，
+可以是 branch／tag／commit——**這是使用者唯一能指定的版本入口**）。
+
+**⛔ 僅限官方腳本注入，使用者傳入即被腳本拒絕、CLI 對重複值中止**：
+`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root`。
+
+⚠️ **v10 只封閉了 `image_digest`，其餘三個仍是一般 CLI 參數**——那等於留著同一個偽造入口：
+後文要求它們「由實際 worktree／diff 推導」，但只要使用者能傳同名參數，
+就能寫出與實際執行不符的 provenance。定案的分工是：
+
+| 值 | 誰決定 |
+|---|---|
+| **要比哪個 before 版本** | 使用者（`--before-ref`） |
+| `base_commit` | **腳本**，且⛔ **順序固定**（見下方 TOCTOU 說明） |
+| `tooling_patch_sha256` | **腳本**：worktree 實際 `git diff --binary <base_commit>` 的輸出 hash，且⛔ **新增檔案必須含在內**（見下方套用方式） |
+| `source_root` / `image_digest` | **腳本**：實際掛載路徑與 `docker image inspect` 推導值 |
+
+⛔ **`base_commit` 的取得順序必須固定，否則有 TOCTOU**（v11 兩處寫法互相矛盾——
+一處說「從 worktree 的 HEAD 取」、一處說「在 worktree 重新解析 `<before-ref>`」）：
+
+```
+① ref → immutable OID：  oid = git rev-parse <before-ref>^{commit}
+② 用該 OID 建 detached worktree（⛔ 不是用 branch 名建）
+③ 從 worktree 讀 HEAD：  head = git -C <worktree> rev-parse HEAD
+④ 斷言 head == oid，不符即中止
+```
+
+⚠️ **少了 ①③④ 的斷言**：branch 在 worktree 建立後被移動時，
+記進 manifest 的 commit 可能已經不是實際執行的那份程式碼。
+
+**測試**：四個欄位**各一條 spoof**（使用者傳同名參數 → 腳本拒絕）
+＋ **各一條「實際值與宣稱值不一致要被抓到」**
+＋ **兩條 TOCTOU**（⛔ v12 那條的預期結果與流程相反——先解析 OID 再用 OID 建
+detached worktree，之後移動 branch **不可能**改變 worktree 的 HEAD）：
+
+| 情境 | 預期 |
+|---|---|
+| 解析出 OID 後**移動 branch** | worktree 仍建在原 OID，`head == oid` → **應通過**（這正是先解析 OID 的目的） |
+| **人為改動 detached worktree 的 HEAD** | `head != oid` → **中止** |
+
+**中止**：`--symbols`／`--csv`／`--timeframe`／`--limit`／`--as-of`／`--model-path`／
+`--chip-json`／`--model-governance-json`／`--replay-max-rows`／`--report-max-rows`／
+grid 與 builder 參數／`--write-db`／`--passed`／`--output`／`--emit-bundle`／`--sweep` 系列。
+
+⚠️ `--write-db` 要在 `check_connection()` 之前擋下。
+⛔ 「有沒有明確傳入」用 `argparse.SUPPRESS` ＋ 解析後套預設值表判斷。
+
+##### 九、其餘承前
+
+* `replay_scope`：`--emit-bundle` 寫死 `all_candidates`；`report_max_rows` 只截斷人讀報告；
+  舊路徑 `--replay-max-rows` 語意不變；Stage 2 先完整 warm-up ＋ 全範圍運算再過濾；
+* **三份 artifact 各有 `schema_version` 與必要欄位**，未知版本中止；
+* strict：`--emit-bundle` / `--bundle` 一律 strict，**四-B 表列的六個 fail-open 分支**
+  改中止（其中兩條是主動 `raise`，見該表），⚠️「合法零筆」與「查詢失敗」分開；
+* `--as-of` 邊界：台北交易日含當日 → `ts < 次日 00:00`，三 engine 各自換算，測三邊界；
+* 離線：`--network none`、無 DB 環境變數、唯讀掛載、只有 `--output-dir` 可寫、
+  ⛔ 不注入 `--model-path`。
+
+##### 十、受影響檔案
+
+`python/db.py`、`evaluation.py`、**新檔** `replay_bundle.py`、
+`scripts/run-evaluation.sh`（Stage 0 掛載、透傳、image digest 注入、**與 Stage 0 禁用參數的互斥**）、
+**新檔** `scripts/run-replay-offline.sh`、`docs/development-workflow.md`、`docs/sr-zone-scoring.md`。
+
+##### 十一、失敗行為
+
+Stage 0 或 bundle 模式併用被禁參數（含明確傳入等於預設值）／`--after-artifact` 與
+`--cohort-manifest` 只給其一／**`market_latest < expected_latest`**（資料未到齊）／任何 hash 不符／
+未知 `schema_version`（**受管制檔案：`manifest.json`／`trading_calendar.json`／`cohort_manifest.json`／`after_artifact.json`／`comparison_artifact.json`**——⛔ 列出檔名而不是寫數量，避免再漂移）／**strict 的六個 fail-open 分支**（四-B 表）／**四道集合檢查任一不成立或鍵不唯一**／
+`--output-dir` 非空／既有同 ID bundle 驗證失敗／專案模組落在 `source_root` 外／
+provenance 推導失敗／canonical 遇到 NaN／Infinity——**一律中止**。
+⚠️ preflight 失敗不計入 I-074 的正式 scan。
+⚠️ **唯一不屬於「中止」的非零結束**：七-B ⑥ 的 fsync 失敗（**rename 成功與 no-op 兩條路徑都算**）
+——那時 bundle **已發布且可載入**，⛔ 不刪除、不重來，回專屬錯誤碼
+（見七-B 的 commit point 分流表）。
+
+##### 十二、測試與驗證策略
+
+| 層次 | 內容 |
+|---|---|
+| 單元 | `fetch_candles(as_of=…)` 三邊界 × 三 engine；bundle 產生／載入／hash 不符／未知 schema／原子化／NaN 中止 |
+| **決定性** | 同輸入產兩次：payload hash 與 `bundle_id` 逐位元相同；`manifest.json` **只允許 volatile 欄位不同**——⚠️ **明列**：`captured_at`；**online 模式**另有 `calendar.years[].fetched_at`／`calendar.years[].raw_row_count`；**frozen 模式**另有 `calendar.loaded_at`（⛔ `frozen_sha256` **不是** volatile，同一份檔案必須得到相同值），其餘欄位必須完全相同；涵蓋 canonical JSON、**四份 payload 各自的排序鍵**（含 `trading_calendar.json` 依 `date`）**與整列 bytes tie-breaker**、gzip 三項 |
+| **語意等價** | loader 重建的 candles／chip／governance 與擷取前型別與值都相等；**日曆 loader 重建出的 `IsTradingDay` 與 Stage 0 當下的結果完全相同** |
+| **重複產生** | 同 ID 第二次 no-op；既有 bundle 的 manifest 損壞要中止；殘留 `.tmp` 不影響 |
+| **原子發布** | **Stage 0／1／2 各一組**：中途失敗不覆蓋既有證據、不留可載入的混合產物；**Stage 0 另驗七-B 的八條**：兩 producer 在 rename 前的 barrier 上碰撞（一方 no-op）／既有**空目錄**中止且仍為空／既有**損壞 bundle** 中止且逐位元不變／**rename 呼叫前**注入失敗則正式路徑不存在／同 payload 重產（`captured_at` 不同）仍 no-op／**fsync 失敗**（rename 與 no-op 兩條路徑各一）回專屬碼且 bundle 仍完整可載入、重跑 no-op ＋ 重新 fsync／probe 的 A／B 兩組（**目錄**形狀，`EEXIST` 時兩邊都不變，probe 目錄清掉）／`RENAME_NOREPLACE` 不受支援時 **fail-closed** |
+| **模式判定** | 三種模式各一條；**只給 `--after-artifact` 或只給 `--cohort-manifest` → 在 replay 前中止**；⛔ Stage 0 不得呼叫 replay engine（spy／mock 斷言） |
+| **CLI 衝突矩陣** | **Stage 0 與 bundle 模式各一組**；每個被禁參數各一條；「明確傳入等於預設值仍中止」；`--write-db` 在連 DB 前被擋 |
+| **as-of readiness** | 週末／休市日（`expected_latest` 退回前一交易日 → `market_latest ≥ expected_latest`，**應通過**）；某檔最後交易日早於 `as_of`（下市／停牌，**應通過**）；**`market_latest < expected_latest`（應中止）**；**跨年**（`as_of` 在年初、前一交易日落在去年） |
+| **日曆（五種中止條件一一對應）** | 取得失敗／缺年（含查詢超出 `covered_years`）／未知列型／重複日期／**算不出任何 `trading_day ≤ as_of`**；另加**年度內少一天**、日曆檔 hash 不符 |
+| **日曆解析器** | ISO（`2026-01-01`）／compact 民國（`1150101`）／閏日／不存在的日期／錯誤年份／空回應 |
+| **四道集合檢查** | 唯一性：universe／after／cohort／comparison **各一條重複列**；相等：before universe 缺／多列、comparison 少列、cohort 三種漂移；⚠️ before/after 的合法差異**不得**被判成輸入錯誤（正向對照組） |
+| **provenance** | patch hash 來自實際 worktree diff（傳錯 patch 檔要抓得到）；**專案模組落在 `source_root` 外要中止，stdlib／site-packages 不受此限**；`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root` **各一條 spoof（腳本拒絕）＋ 各一條實際值不符（中止）**；**兩支腳本各一條重複參數測試**（CLI 中止，⛔ 不採用最後一個） |
+| **結構性離線** | `--network none` 下跑完 Stage 1／2；驗無 DB 環境變數、唯讀掛載 |
+| **跨日驗收** | ⛔ D 日產 bundle 並跑，**D+1 日載入同一份再跑**，輸入指紋與逐列結果相同 |
+
+##### 十三、完成後歸檔位置
+
+* [`sr-zone-scoring.md`](./sr-zone-scoring.md)——as-of 語意與 readiness 判準、bundle 與三份
+  artifact 的 schema 與 canonical 規則、四道集合檢查、`replay_scope`／`report_max_rows`
+  分工、strict、Stage 分工；
+* [`development-workflow.md`](./development-workflow.md)——驗收報告要附什麼、
+  `run-replay-offline.sh` 用法、before／after 的 worktree 執行模型、provenance 推導、
+  原子發布契約、Stage 0 與 bundle 模式的參數互斥。
+
+##### 修訂紀錄
+
+| 版本 | 變更 |
+|---|---|
+| v1～v5 | 見前版（官方腳本離線／輸入所有權／fail-closed／as-of 邊界／manifest 規格／儲存位置／`--write-db` 連 DB／scope 退化／cohort 權威／canonical／provenance 分層／兩份產出／schema contract／排序鍵／重複產生） |
+| v6 | 四道集合檢查／原子發布／no-op 完整驗證／total order tie-breaker ＋ `allow_nan=False`／patch hash 來自實際 worktree diff |
+| v7 | ①Stage 0 沒有自己的輸入所有權（官方腳本可用 `WRITE_DB=1` 注入 `--write-db`）→ 新增 Stage 0 allow／deny 清單，並要求在連 DB 前中止；②Stage 1／2 缺成對參數規則 → 定義「都沒給／都給／只給一個」三種結果，且**在 replay 前**中止；③四道檢查需為多重集合 → 先驗 `len(keys)==len(set(keys))` 再比排序後 list，四份資料各補重複列測試；④`source_files_sha256` 會把 stdlib／site-packages 一起擋掉 → 分流：專案模組驗 containment ＋ 逐檔 hash，第三方套件改由 image digest／python version／pip freeze 識別；⑤`as-of` 的「最新」未定義 → 定為**該 timeframe 的市場整體最新交易日**，逐檔只驗存在與歷史根數，並補週末／停牌／下市的測試 |
+| v8 | ①Stage 0 的 allowlist 漏了 `--model-path`／`--image-digest`（官方腳本**無條件注入**前者，後者也定案由它注入）→ 補進清單並定為必填、允許使用者覆蓋但一律寫進 manifest；CLI 衝突測試要用**官方腳本實際組出的 argv**；②readiness 公式與週末測試**直接矛盾**（週六 > 週五必然中止）→ 改成「依交易日曆算 `expected_latest = max(trading_day ≤ as_of)`，`market_latest < expected_latest` 才中止」，日曆用 TWSE `holidaySchedule`（與 Go 端同源）、取得失敗即中止、`--trading-calendar` 為替代入口，且**實際用的日曆存進 bundle 並記 hash**；③專案模組的判定是循環定義 → 改成**先用模組名稱界定**（`backtest.modular.sr_scoring.*` ＋ `config`／`db` ＋ runner／loader），再驗 resolved `__file__` 落在 `source_root` 內 |
+| v9 | ①`trading_calendar.json` 沒進 payload 與 `content_hash8`（不同日曆會拿到相同 bundle ID）→ 納入 payload、hash、canonical 排序與 loader 驗證，補竄改測試；②`--image-digest` 不該可覆蓋（那等於允許偽造 provenance）→ 與 `--model-path` 拆開規則：前者只能由腳本推導、外部值須與實際 image 驗證一致；③日曆的涵蓋範圍與解析失敗條件未定義 → 補跨年度涵蓋、逐列分類、嚴格民國日期、五種中止條件與五條測試；④失敗條件與測試仍寫「`as_of` 晚於市場最新」→ 全部改成 `market_latest < expected_latest`；⑤`runner_sha256` 那列落在表格外 → 改成段落 |
+| v10 | ①`image_digest` 的信任邊界沒閉合（Stage 1／2 仍當一般參數、且**容器內的 Python 無法自己 inspect**）→ 定案由兩支腳本各自拒絕使用者傳入再注入推導值，CLI 只負責對重複值中止，補 spoof 與重複參數測試；②日期解析器寫錯（holidaySchedule 是 ISO／compact 民國 `1150101`，`parseROCDate` 吃的是 `115/01/01`，照 v9 實作會全部拒絕）→ 改為移植 `parseCalendarDate` ＋ `newStrictDate`，並用同一組 fixture 驗；③`trading_calendar.json` 無可實作 schema → 定案存**正規化後的逐日分類結果**（含 `covered_years`），loader 直接查表、⛔ 不重新分類，超出涵蓋年度即中止；④中止條件與測試未一一對應 → 補「取得失敗」「算不出 `trading_day ≤ as_of`」及解析器的五條；⑤摘要殘留 → Stage 0 指令補必填參數、決定性測試改「四份 payload」、語意等價加日曆重建 |
+| v11 | ①`fetched_at`／`raw_row_count` 放進 hashed payload 會**破壞 bundle ID 決定性**（同內容不同抓取時間就換 ID）→ 移到 manifest 的 provenance 區，日曆 payload 只留影響交易日判定的穩定內容；②`base_commit`／`tooling_patch_sha256`／`source_root` 仍可從 CLI 注入 → 使用者只能給 `--before-ref`，其餘四個欄位一律腳本推導並拒絕同名外部參數，補 spoof 與「實際值不符」測試；③日曆缺「完整年度」不變條件 → 每個 covered year 的 1/1～12/31 **每天恰好一列**、`row_type` 封閉 enum（含普通平日與一般週末）、少一天即中止；④總表未反映前文新增測試 → 補日曆五種中止、解析器六種格式、provenance 的 spoof／不符／重複參數 |
+| v12 | ①`--before-ref` 有 TOCTOU 且主表與後文矛盾（主表仍列 `--base-commit`，一處說讀 worktree HEAD、一處說重新解析 ref）→ 主表改列 `--before-ref`、其餘標為腳本內部注入，並定死順序「ref→OID→用 OID 建 detached worktree→讀 HEAD→斷言相同」，補 TOCTOU 測試；②`--trading-calendar` 的輸入格式未定義 → **只接受與 bundle 內相同的 canonical `trading_calendar.json`**，⛔ 不收 TWSE 原始 response／單年度片段／多份集合，補「線上與 frozen 產出逐位元相同」等價測試；③決定性測試仍只允許 `captured_at` 不同 → 明列 volatile 欄位（`captured_at`／`calendar.fetched_at`／`calendar.raw_row_count`，多年度時按年度各記一份）；④`row_type` 與 `is_trading_day` 無一致性守門 → 定固定映射、builder 與 loader 兩端都驗、補矛盾組合測試；⑤「未知 schema version 四種檔案」數量漂移 → 改成列出五個受管制檔名 |
+| v13 | ①TOCTOU 測試的預期與固定流程相反（先解析 OID 再用 OID 建 detached worktree，之後移動 branch **不可能**改變 worktree HEAD）→ 拆成兩條：解析後移動 branch **應通過**、人為改動 worktree HEAD **應中止**；②frozen 模式**產不出**規定的 calendar provenance（canonical payload 不含 `fetched_at`／`raw_row_count`）→ 改成 discriminated union：`online` 按年度記抓取時間與原始列數、`frozen` 記輸入檔 SHA-256 與載入時間並標明原始抓取資訊不可得，兩者都只用 normalized payload 決定 `bundle_id`，決定性測試的 volatile 欄位隨之分流；③`git diff --binary` 不含 untracked，會漏掉 patch 新增的 `replay_bundle.py`／`run-replay-offline.sh` → 定案用 `git apply --index` ＋ `git add -A -N`，取完 diff 斷言無 `??` 行，補「只新增檔案也要改變 hash」測試；④`covered_years` 未定義 canonical 排序與唯一性（`sort_keys` 不排陣列，`[2025,2026]` 與 `[2026,2025]` 會得到不同 hash）→ 要求嚴格升冪、不重複、且與 `days[].date` 的年度集合完全相等，補非 canonical frozen 檔的拒絕測試 |
+| v14 | ①`content_hash8`／`bundle_id` 的組合演算法未定案（多檔如何排序、分隔、綁檔名都沒寫，不同實作者會算出不同 ID）→ 定成「逐檔完整 SHA-256 → `{檔名: hash}` mapping → 依檔名 UTF-8 位元組序 canonical JSON → 取前 8 hex」，並明列 `bundle_id` 的完整格式與正規表示式、說明為何不放 `run_id`／`pipeline_version`／`captured_at`、以及 8 hex 不負責防碰撞（完整性由 loader 逐檔驗）；②Python 端的 TWSE request 契約沒寫進計畫（Go 端已記錄 `queryYear` 會被忽略卻照回 200 ＋ 當年資料）→ 明訂 `date=<YYYY>0101&response=json`、⛔ 禁用 `queryYear`、逐列驗年、不用筆數當門檻，並補**斷言實際送出 query** 的測試；③frozen calendar 只有 JSON 範例與不變條件，缺精確欄位／型別／unknown-field 規則（多一個被忽略的欄位 → 語意不變卻換 bundle ID）→ 補 exact-field 表、bool 不得用 `isinstance(int)`、loader 重做 canonical 序列化並逐位元比對，補多餘／缺少／型別錯／非 canonical 排版四類測試；④標題與開頭仍寫 v12／v11 而修訂紀錄已是 v13 → 版本標示統一 |
+| v15 | ①**Stage 0 沒有跨來源的一致性快照**（readiness／candles／chip／governance 各自 `engine.connect()`，同步工作中途 commit 就會封出一份「資料庫裡從未同時存在過」的組合）→ 定案「日曆 HTTP 先做完 → 開單一唯讀快照（PG `REPEATABLE READ` ＋ `READ ONLY`／InnoDB `REPEATABLE READ`／sqlite 明確 `BEGIN`）→ readiness 為交易內第一個查詢 → 三份 payload 同一 connection → rollback 結束」，helper 加 optional `conn` 且預設行為不變，補 concurrent writer 與語句斷言測試（PG 實機驗證列為手動步驟）；②`bundle_id` 未綁定目錄名與 manifest → 補「目錄 basename ＝ `manifest.bundle_id` ＝ 重新計算值」三方相等契約，補改名與身分欄位竄改測試；③整數欄位的守門缺 bool 反例（`isinstance(True, int)` 為真且 `True == 1`，連值檢查都會通過）→ 整數一律用 `type(x) is int`，補 `schema_version: true`／`covered_years: [true]` 拒絕測試 |
+| v16 | ①三個 engine 的「唯讀快照」名實不符（只有 PG 真的唯讀，mysql 只有 `REPEATABLE READ`、sqlite 只有 `BEGIN`；測試也只列 PG 與 sqlite）→ 補逐 driver 的精確建立順序表（PG `BEGIN` → `SET TRANSACTION READ ONLY`；mysql `START TRANSACTION READ ONLY`；sqlite `PRAGMA query_only=1` → `BEGIN DEFERRED` ＋ **finally 復原**），統一「readiness 當交易內第一個查詢」為三 engine 的快照錨點，並補三 driver 的語句順序斷言、sqlite 的唯讀強制測試，明列 mysql 受 I-054 限制只有語句測試自動化；②快照內的查詢失敗仍會被既有 fail-open 吞掉（`evaluation.py:2467`／`:2498` 逐 symbol 轉 warning 後 `continue`，會發布一份少了 context 的 bundle）→ 兩個 loader 加 `strict` 參數、Stage 0 一律 `strict=True` 讓六個 fail-open 點原樣拋出，`rollback` 放 `finally`，失敗必須非零結束且正式目錄不存在，補四種注入失敗測試與「合法零筆仍應成功」對照組 |
+| v17 | ①mysql 的快照仍靠**可被改掉的預設 isolation**（`START TRANSACTION READ ONLY` 只設存取模式；session／server 落在 `READ COMMITTED` 時每次 consistent read 都取新快照，同步期間的 commit 照樣混入且**不會報錯**，`db.py:20` 也沒固定 isolation）→ 定案先用 SQLAlchemy 的 `execution_options(isolation_level="REPEATABLE READ")` 明確設定再 `START TRANSACTION READ ONLY`，⛔ 不自己 `SET SESSION …` 手動復原（會跟著連線污染 pool）、⛔ 不改全域 engine，補「session 先設成 `READ COMMITTED`，Stage 0 必須主動切回」的測試；②strict 的分支數量與處理方式全文不一致（詳細段寫六個、他處仍寫「四處」「四種」；而 `dataset range missing` 兩條**沒有原始例外可 bare `raise`**）→ 列出六分支矩陣並標明其中兩條要**主動 `raise ValueError`**、其餘四條 bare `raise`，測試補到八條（六分支 ＋ readiness ＋ candles），全文數量統一改為「四-B 表列的六個分支」 |
+| v18 | 失敗清理與既有 bundle 的保留契約**互斥**（v17 無條件要求「失敗後正式目錄不得存在」，但「重複產生」明定正式目錄可以原本就存在且**不得覆蓋**——照 v17 實作會刪掉原本有效的基準 bundle，也就是 I-074 要長期保留的證據）→ 改成依**執行前狀態**分流（原本不存在 → 仍不存在；原本已存在 → **逐位元不變且仍通過正式 loader**），明定清理只能刪本次建立的 temp、⛔ 任何路徑都不得碰既有正式目錄，失敗測試加兩組「預先放置有效同 ID bundle」情境，並把 **Stage 0 納入原子發布契約與總表**（原文只寫 Stage 1／2） |
+| v19 | Stage 0 的「整包原子發布」沒真的定案（v18 只說同受契約約束，而契約寫的是**逐檔** `os.replace`；多檔 bundle 照這樣做會讓別的程序看到半成品正式目錄、失敗後正式目錄仍存在、且「先 `exists()` 再發布」有 TOCTOU）→ 新增七-B：staging 目錄放在同一 filesystem 且子目錄名正好是 `bundle_id`（滿足三方相等契約）、fsync 後先用正式 loader 驗 staging、以 **`os.mkdir` 原子 claim** 決定勝負、勝方一次 `os.rename` 整包發布、敗方改用正式 loader 驗既有那份（相同 no-op／不同中止）、`finally` 只刪本次 staging；明寫 POSIX rename 會蓋掉既有空目錄所以只對自己剛建的空目錄 rename、claim 與 rename 之間崩潰會留空目錄並在下次 fail-closed（⛔ 不自動刪正式路徑），四-B 分流表補「空／損壞」列，測試補四條 |
+| v20 | ①`os.mkdir` claim **不是**整包原子發布（先把空的正式目錄公開再 rename 蓋掉：reader 看得到空目錄、輸家只能在空目錄上中止而不是 no-op、rename 前崩潰就留下空的正式目錄）→ 改用 Linux 的 **`renameat2(RENAME_NOREPLACE)`**（`ctypes` 呼叫 `syscall`），正式路徑一次完整出現、全程不建立空目錄，`EEXIST` 才驗既有那份；補檔案系統 probe 與 **`O_EXCL` 發布鎖 fallback**（明說只在所有 producer 遵守同一把鎖時成立、殘留鎖 fail-closed）、發布後 fsync `<baselines>`、以及 rename 呼叫前的 deterministic barrier 測試；②競爭輸家比「逐檔 hash」會把允許 volatile 的 `manifest.json`／`manifest.sha256` 算進去，**同一份 payload 重產會被判成不同而中止** → 改比 manifest 內那份「六份 payload 的完整 SHA-256 mapping」，⛔ 不比 manifest bytes，兩份都先通過正式 loader；完整 hash 順帶抓 8-hex `bundle_id` 碰撞 |
+| v21 | ①`O_EXCL` fallback **沒定義正常競爭下怎麼取得鎖**（把「鎖已存在」一律當殘留鎖中止，兩個正常 producer 併發時第二個看到有效鎖也直接中止，達不到「一方 no-op」；且它的 no-clobber 只在合作者之間成立）→ **移除弱化 fallback**，probe 不通過即 fail-closed，訊息給出「產在支援的路徑再搬進版控」的補救；②rename 成功後 parent fsync 失敗**無處可歸**（回一般失敗違反「失敗後仍不存在」，刪掉又違反不碰正式路徑）→ 定義 **rename 成功＝commit point**，之後 fsync 失敗改回**專屬非零碼**「已發布且 loader-valid、durability 未確認」，⛔ 不刪正式路徑，重跑走 no-op ＋ 重新 fsync，四-B 與失敗行為段各補交叉說明；③raw syscall 的平台守門未閉合 → 優先用 **libc 的 `renameat2` symbol**，找不到才退回 `syscall()` 且**限定架構 allowlist**、未知架構 fail-closed，errno 用 `ctypes.get_errno()`，probe 明確驗「目的不存在→成功／已存在→`EEXIST` 且既有目的不變」並在所有路徑清掉 probe 檔 |
+| **v22** | ①**no-op 分支其實不會重新 fsync**（⑤ 直接「刪 staging、正常結束」，⑥ 只寫「發布成功後」——重跑一份 durability 未確認的 bundle 走的正是 no-op 這條）→ 改成**兩條成功路徑都要在回傳前 fsync `<baselines>`**，no-op 路徑的 fsync 失敗回同一個專屬狀態「既有 bundle 有效、durability 未確認」且⛔ 完全不修改正式目錄，commit point 分流表與測試各補一列；②「先產在支援路徑再搬進版控」**不是有效補救**（跨 filesystem 時 `renameat2` 回 `EXDEV`、`mv` 退化成 copy＋delete，正式路徑又暴露半成品且失去 no-clobber）→ 補救改為「讓最終的 `python/baselines/` 本身落在支援的 filesystem（搬移或重新掛載後重跑）」，另聲明「從別處匯入」需要另一套同樣原子的流程且本計畫不做，並明訂 staging 與正式路徑不同 fs（`EXDEV`）一律 fail-closed、⛔ 不得改用 copy；③probe 形狀不對 → 改成**目錄** rename 的 A／B 兩組（不存在的 destination → 成功；已存在 → `EEXIST` 且 source 與 destination 都不變），所有 probe 目錄在每條路徑都要清掉 |
+
 #### 關閉條件
 
 三項都要成立：

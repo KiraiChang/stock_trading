@@ -1779,7 +1779,7 @@ F1（scheduler 測試）與 F2（前端元件互動測試）已完成並通過 r
 | 來源 | `docs/sr-zone-scoring.md` 已知限制 |
 | P0 狀態 | 已實作（2026-08-05 review 通過） |
 | P1 狀態 | 已實作（2026-08-05 review 通過；計畫列的五個比較面向全數覆蓋） |
-| P2 狀態 | **可續作**（機制完整、預設關閉）。原本擱置的兩個阻礙都已解除：標的池已擴到 131 檔（T-040 Step 3）、bucket 門檻已於 2026-08-17 重定（見下方「門檻重定」）。下一步是跑 coarse sweep |
+| P2 狀態 | **卡前置**（2026-09-10 裁決：正式 P2 要等 `issue.md` I-107 的 **canonical formula 裁決**，以及隨後的門檻處理——**改用 Wilder 則重測門檻與升版是必要動作**；**維持 TR SMA(14) 才另行裁決是否因母體漂移升版**，此時升版與不升版都是合法結果。見下方「P2 的分組基準與執行順序」）。機制完整、預設關閉；原本擱置的兩個阻礙（標的池、bucket 門檻）確實已解除，但**分組基準出現新的漂移**，現在跑只能當探索性 dry run |
 
 `atr_width_multiplier`、`max_merge_width_multiple` 目前是全域固定預設值，
 沒有依個股的波動特性（例如高波動的中小型股 vs 低波動的權值股）系統化調整。
@@ -1937,13 +1937,159 @@ pipeline 的絕對門檻分類是 103 / 26 / 1，LOW 只剩一檔，`VOLATILITY_
 `universe_version`，是一次明確的版本動作而非每日漂移。`VOLATILITY_THRESHOLD_PROVENANCE`
 記下量測條件（母體、基準、分位數、工具）供重現。
 
-**P2 的下一步**：門檻已不再是阻礙，可以跑 coarse sweep 了。三桶分別有 53 / 46 / 32 檔，
-都遠超 `MIN_BUCKET_RECOMMENDATION_ROWS`。判讀時要帶上下方「HIGH bucket 天生帶半導體業偏斜」
-這個前提。
+**P2 的下一步**（2026-09-10 改寫，原文的兩處敘述已訂正，見下方「P2 的分組基準與執行順序」）：
+門檻本身不再是阻礙，但**分組基準已經漂了**，正式 sweep 要等 I-107。
+判讀時仍要帶上下方「HIGH bucket 天生帶半導體業偏斜」這個前提。
+
+⛔ **原文寫「三桶分別有 53 / 46 / 32 檔，都遠超 `MIN_BUCKET_RECOMMENDATION_ROWS`」，兩個地方都不對：**
+
+1. **53 / 46 / 32 不會是 sweep 實際用的分組**——sweep 每次從 K 棒重算，不讀 `bucket_hint`。
+   以 2026-09-09 的資料重算是 **79 / 37 / 18**。
+2. **單位錯置**：`MIN_BUCKET_RECOMMENDATION_ROWS = 20` 比的是 `bucket_metrics["rows"]`，
+   那是該桶的 **zone 觸碰列數**，不是檔數（`evaluation.py:635-660`）。拿檔數去比列數門檻
+   證明不了樣本足夠。實務上列數通常遠大於檔數，所以結論**可能**仍成立，
+   但**尚未實跑驗證**。
 
 **不做的事（明確記下來，避免日後誤動）**：不因這次結果調整 `build_zone_builders()` 的預設值。
 score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket` 的
-`insufficient_sample=false` 只保證樣本數夠，不保證候選之間有可分辨的差異。
+`insufficient_sample=false` **只代表該桶的 touch rows 達到程式門檻 20**
+（`MIN_BUCKET_RECOMMENDATION_ROWS`），⛔ **既不代表 symbol 數量充足，也不保證候選之間
+有可分辨的差異**——不要把這個機械門檻當成統計上的充分性。
+
+##### P2 的分組基準與執行順序（2026-09-10 裁決）
+
+**問題**：sweep 的 volatility bucket 分組，是讀 `evaluation_universe.bucket_hint`（凍結值），
+還是從 K 棒重算？
+
+**答案：重算，而且 `bucket_hint` 在整個 Python 端從來沒有被讀過。** 呼叫鏈：
+
+| # | 位置 | 做什麼 |
+|---|---|---|
+| 1 | `scripts/run-evaluation.sh:10,90` | `MODE=sweep` 只加 `--sweep`；**成員由呼叫端用 `--symbols` 明給**，腳本不查 `evaluation_universe` |
+| 2 | `evaluation.py:2148` `run_builder_sweep` | 每組 (width, max_merge) 候選各呼叫一次 `run_evaluation` |
+| 3 | `evaluation.py:379` | `volatility_profiles = _volatility_profiles(sources, dataset)` |
+| 4 | `evaluation.py:308-330` | `recent = df.tail(60)` → `_atr_pct(recent)` → `volatility_bucket_from_profile(...)`　←**當下 60 根重算，配凍結門檻常數** |
+| 5 | `evaluation.py:396` | `"zone_outcomes": _zone_outcomes(dataset, volatility_profiles)` |
+| 6 | `evaluation.py:256-263` | `profiled["volatility_bucket"] = symbol.map(...)` → `groupby` 分組 |
+| 7 | `evaluation.py:582` | `_sweep_result_summary` 原封保留 `report["zone_outcomes"]` |
+| 8 | `evaluation.py:624-628` | `_bucket_recommendations` 直接讀 `by_volatility_bucket` 的 key 當桶名 |
+
+反證：全 `python/`（排除 tests）grep `bucket_hint` / `evaluation_universe`，
+只有三處**註解**（`zone_builder.py:56,58`、`selection_report.py:647`），**沒有任何查詢**。
+DB 那兩欄只有 Go 端與前端在用。
+
+**因此分組會漂**（2026-09-09 資料實測）：
+
+| | LOW | NORMAL | HIGH | 合計 |
+|---|---|---|---|---|
+| 本文件原本記載 | 53 | 46 | 32 | 131 |
+| **該 134 檔清單對應的** DB `bucket_hint` | 52 | 49 | 33 | **134** |
+| **該 134 檔清單今天重算的分桶** | **79** | **37** | **18** | **134** |
+
+⛔ **後兩列都是「本次實測那 134 檔清單」的統計，不是 `evaluation_universe` 的原始統計**
+（2026-09-10 review 訂正）。DB 是 **135 筆 `active`**；第 135 筆是 `2867`，它在
+**不指定 symbols 的路徑**上被 `is_listed=false` 濾掉（見 [`issue.md`](./issue.md) I-113），
+所以沒有進入這張表。
+
+⚠️ **因此「79/37/18」不是「sweep 一定會拿到的分組」**——sweep 的成員完全取決於
+**本次明確傳入的 `--symbols`**。`evaluation.py:77` 的 `_load_db_sources` 逐檔直接呼叫
+`fetch_candles`，**不檢查 `is_listed`**；只要清單裡帶了 `2867`，它照樣會被載入並算出
+profile（用停在 2026-08-18 的 K 棒）。上表描述的是「這次實測用的 134 檔清單」的結果。
+
+漂移**與 I-107 的公式無關**，純粹是凍結門檻遇上市場波動整體下降。HIGH 從 32 掉到 18，
+會讓「HIGH bucket 天生帶半導體業偏斜」那個前提更難處理。
+
+**跑 T-003 P2 前先做兩個區分**：這一輪是「探索性取樣」還是「可作為 P2 裁決依據的正式
+sweep」，以及 bucket 的**權威來源**要用哪一個。三個選項：
+
+**(a) 沿用現行 evaluation 行為**——由當次 K 棒重算 volatility profile，再套用 v2 的凍結門檻。
+以 2026-09-10 實測的那 **134 檔清單**為例，分佈是 LOW／NORMAL／HIGH ＝ **79／37／18**
+（⚠️ 這個數字取決於本次傳入的 `--symbols`，見上方訂正）。
+
+這可以先做探索性 sweep，但 **I-107 尚未裁決前，不應用來**：
+
+* 關閉 P2；
+* 調整正式 bucket config（`VOLATILITY_BUCKET_ATR_CONFIGS` 與 `build_zone_builders()` 的預設值）；
+* 啟用 adaptive builder（`SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED`）。
+
+判讀時必須明列三件事：
+
+1. **HIGH 只有 18 檔**，且仍有半導體產業偏斜（見下方「判讀前提」）。
+2. `insufficient_sample=false` 看的是 **touch rows**（≥ 20），**不代表 symbol 數量充足**
+   （`evaluation.py:624-660`）。
+3. 三桶合計 **134**，而 universe 是 **135** 筆 `active`。缺的那一檔是 `2867`——
+   **不是 inactive、不是載入失敗、也不是產不出 profile**，而是
+   `stock_symbols.is_listed=false` 讓它在 `db.fetch_symbol_universe()`（`python/db.py:191-192`）
+   就被濾掉，見 [`issue.md`](./issue.md) I-113。
+   ⚠️ **那道濾網在「產生輸入清單」的路徑，不在 sweep 本身**——若這次的 `--symbols`
+   明確帶了 135 檔，`2867` 會被載入，分桶合計就是 135 而不是 134。
+   **跑前要先決定它的處置，並讓報告寫明本次實際傳入幾檔。**
+
+**(b) 先完成 I-107 與門檻升版裁決，再用「裁決後的凍結門檻」跑正式 sweep**——
+先裁決 canonical ATR formula，再以**相同公式、相同 bucket basis**
+（`max(atr_pct, average_range_pct)`）量測當下合格股票母體的 P33/P67，
+然後**另外**裁決要不要升版。
+
+⛔ **(b) 的重點不是「一定會重建門檻」，而是「先把裁決做完」**（2026-09-10 review 訂正——
+原本把 (b) 命名成「重建凍結門檻與 universe 版本」，會讓「維持 SMA14 且不升版」
+這個合法結果看起來不屬於 (b)）。
+
+⛔ **但升版與否不是自由選項，取決於公式裁決的結果**（2026-09-10 第二輪 review 訂正——
+前一版把兩者並列成「公式裁決後都能選」，那只在維持 SMA14 時成立）。
+**判準是「裁決後的 bucket authority 與 v2 門檻的 provenance 是否同源」**——
+v2 的 `VOLATILITY_THRESHOLD_PROVENANCE` 記的基準是 **TR SMA(14)**：
+
+| 公式裁決 | 重測門檻＋升版 | 說明 |
+|---|---|---|
+| **① 改用 Wilder ATR(14)** | **必要，不能選「不升版」** | v2 門檻的 provenance 仍是 SMA14，與新 authority 不同源。必須重測 P33/P67、更新 `VOLATILITY_THRESHOLD_PROVENANCE`、升 `universe_version`、同步 `bucket_edge_low/high` 與 `bucket_hint` |
+| **② 維持 TR SMA(14)** | **另行裁決**——此時升版與不升版**才都是合法結果** | 與 v2 provenance 同源，所以重測不是必要動作；要不要因**母體漂移**升版是獨立決策。不升版就**明確接受當時的不均衡分桶**，並把理由與當下分佈寫進報告 |
+| **③ 承認是兩個指標** | **先決定 bucket authority，再套上面兩條** | 若 authority 與 v2 provenance 同源（SMA14）→ 走 ②；不同源（Wilder）→ 走 ①。⛔ authority 沒定之前這一支無法執行 |
+
+⚠️ **只有 ②-不升版 的執行形狀與 (a) 相同**——都是由 evaluation 重算 profile ＋ 套現行
+v2 門檻。**差別在裁決狀態，不在機制**：(a) 是 I-107 未定案時的探索性取樣，
+②-不升版 是**裁決已完成、且明確接受該分佈**。所以 (b) 的產出可以晉升，(a) 不行。
+⛔ **①（Wilder）不存在「與 (a) 相同」的分支**——它一定會換掉門檻。
+
+⚠️ **另一個限定不要省掉**：**P33/P67 只保證「量測母體」本身近似三等分。**
+固定的 evaluation pool 是人工決策的子集，不是量測母體——它的分佈只能**預期較均衡**，
+**不保證精確三等分**。
+
+⚠️ **若 I-107 最後維持 TR SMA(14)**，重測門檻就**不是** I-107 的必要關閉條件；
+此時「要不要因母體漂移而升版」是**另一個獨立的 `universe_version` 決策**，
+⛔ 不能當成 I-107 的附帶結果。
+
+**(c) 讓 sweep 改讀 `bucket_hint`**——**不建議。** 這會讓 evaluation 新增對
+**DB universe artifact 與版本資料**的依賴，使 bucket 不再能**單由本次 K 棒與門檻重現**，
+也會造成 DB 與 CSV evaluation 路徑**語意不一致**。
+`bucket_hint` 適合作為**選池與稽核紀錄**，不宜直接變成 sweep 的分組權威來源。
+
+**裁決（2026-09-10）**：
+
+* **正式 P2 必須先完成 I-107 的公式裁決與隨後的門檻處理**；之後**一律由 evaluation
+  重算 profile，並套用裁決後的凍結門檻**。門檻要不要換**由公式裁決決定，不是自由選項**：
+  * **改用 Wilder** → **必須**重測門檻並升版（v2 provenance 是 SMA14，不同源），
+    先完成門檻及 universe artifact 更新，再跑正式 sweep。
+  * **維持 TR SMA(14)** → 再**另行裁決**是否因母體漂移升版；此時升版與不升版都合法，
+    **不升版就要明確接受當時的不均衡分桶**（並在報告寫明分佈與接受理由）。
+  * **兩指標方案** → 先決定 bucket authority，再依它與 v2 provenance 是否同源套上面兩條。
+* 若要在 I-107 前先確認候選差異，可採 **(a)** 跑一輪**明確標記為「探索性、不可晉升」**的 sweep。
+* **(c) 排除。**
+
+**執行順序**（步驟 0～4 的**權威版本在 [`issue.md`](./issue.md) I-107**「因此原步驟 1 之前
+多兩步」，本筆是最後一步；這裡只摘要，⛔ 有出入時以 I-107 為準）：
+
+0. 回補池外標的的日 K（目前被 I-075 擋住）。
+1. **決定母體是固定 cohort 還是動態規則**——⛔ 不要寫成「讓 319 檔母體重新可量」，
+   回補後重新套用資格規則，合格數量不保證仍是 319。要重測當下母體的 P33/P67 就走**動態母體**，
+   驗收條件是**母體規則與資料新鮮度**，不是恰好 319 檔。
+2. 在該母體上重跑 SMA14／Wilder14 量測。
+3. **裁決 canonical formula。**
+4. **依裁決結果分三支**（I-107 有完整對照表）：
+   * **統一 Wilder ATR(14)** → 重測門檻、升 `universe_version`、同步 `bucket_edge_low/high` 與 `bucket_hint`；
+   * **統一 TR SMA(14)** → 門檻重測**不是必要條件**，是否因母體漂移升版**另行裁決**；
+   * **承認是兩個指標** → **先裁決 bucket authority，再套 I-107 的同源判準**
+     （authority 一定，門檻與升版處理就自動決定）。⛔ authority 沒定之前這一支無法執行。
+5. **才跑正式 P2 coarse sweep。**
 
 ##### 判讀前提：HIGH bucket 的結論天生帶半導體業偏斜
 

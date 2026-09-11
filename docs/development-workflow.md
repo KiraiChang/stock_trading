@@ -601,6 +601,31 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 
 ℹ️ 真正的修法是讓型別從後端產生，但那需要一套產生流程，目前用這道檢查代替。
 
+### live 現在跑的是哪一版程式碼
+
+**Python 是烤進 image 的**，只有 `models/` 與 `logs/` 是 bind mount（`docker inspect` 的
+`Mounts` 可確認）。所以 live 跑的是**build 當下的快照**，⛔ 不會因為 repo 更新而跟著變。
+
+比對漂移用逐檔 hash 對 git，⚠️ **不要只比一兩個檔案**——只動到某一支模組時單檔比對看不出來：
+
+```bash
+docker exec stock_trading-python-server-1 sh -c \
+  "cd /app && find . -name '*.py' -not -path '*/__pycache__/*' | sort | xargs sha256sum" > /tmp/live_py.txt
+# 再對每個候選 commit 用 `git show <commit>:python/<path>` 算同一組 hash 比對
+```
+
+（dev stack 的等價做法在上方「不要為了這件事重建 image」，那邊比單檔就夠，因為 dev 是
+自己剛 build 的。）
+
+**2026-09-10 實測**：live 的 108 個 `.py` 與 `0c2fd75` **逐檔完全相同**（image 建於
+2026-09-08 07:13 UTC）。中間的 commit 只動 docs，所以一路對到 `cdf29b5`（09-03）都一致。
+
+⚠️ **哪些 job 依賴 python-server**：`sr_analysis`（17:00／22:00 兩輪）經
+`SRZoneHandler.RunAnalysis` → `analysis.Client` → `POST /sr-zones`；`sr_evaluation` 經
+`analysisClient.RunSREvaluation`。python-worker 另外輪詢 `backtest_jobs`。
+**重啟 python 服務會讓這幾條在窗口內失敗**，重啟後第一個 `/sr-zones` 還要付一次
+lazy model load（4.17 MB joblib ＋ SHAP background）的暖機成本。
+
 ### schema migration 上 live 的程序
 
 **入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。

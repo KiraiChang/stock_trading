@@ -1743,6 +1743,51 @@ bundle b1_20260901_1d_… → Stage 1（after）→ after_artifact 35 列、coho
 **實測刪除語意**：把一個受追蹤檔暫時移出工作樹再跑 smoke → 檔案數 140 → 139，
 忠實度守門通過（舊的 tar 疊加版本在這裡會報「多了那個檔案」）。
 
+##### 十八、Stage 0 正式執行（2026-09-10，D 日）
+
+**已產出正式 bundle**：`b1_20260901_1d_74350966_5e92c731`，落在
+`python/baselines/<bundle_id>/`，**4.7 MB**（計畫書估約 4.9 MB）。
+
+| 項目 | 實際值 |
+|---|---|
+| 指令 | `scripts/run-evaluation.sh --as-of 2026-09-01 --symbols <11 檔> --emit-bundle /app/baselines --limit 1500` |
+| 資料來源 | **live postgres，唯讀**（`write_db=0`；Stage 0 本身也擋 `WRITE_DB=1`）。與 2026-09-01 baseline 同源（`_cohort.source`） |
+| symbols | `0050,00830,00947,00981A,2330,2399,2454,2478,3630,5490,6243`——由 `replay_cohort_2026-09-01.json` 的 `runs[*].rows[*].symbol` 實際取出 |
+| readiness | `expected_latest=2026-09-01`、`market_latest=2026-09-10` → 通過 |
+| 交易日曆 | `online`，涵蓋 `[2025, 2026]`（跨年涵蓋如規格要求） |
+| provenance | image digest、`runner_sha256`、31 個專案模組 hash、python 3.11.16、runtime settings（⛔ 無 DSN） |
+| chip／governance | 11／11 檔都有列（無「合法零筆」情境） |
+
+**as-of 上界確實生效**——每一檔的最後一根都正好落在 **2026-09-01**（沒有它會是擷取當天的
+2026-09-10），含兩檔短歷史標的：
+
+```
+0050/00830/2330/2399/2454/2478/3630/5490/6243  各 1500 根，末根 2026-09-01
+00947   541 根（2024-06-12 起）、00981A  311 根（2025-05-27 起），末根同為 2026-09-01
+```
+
+**同日重跑驗證 no-op**：同一條指令再跑一次 → `published: false`、`bundle_id` 相同、
+既有目錄**無任何檔案被改動**。⚠️ 這證明的是「同輸入 → 同 bundle ID」與重複產生的
+no-op 路徑，**⛔ 不能替代跨日驗收**——當日資料本來就沒變。
+
+⚠️ **與 I-074 記錄的可用根數有 1 根差異**：I-074 寫「11 檔的可用上限是 310～4,882 根」，
+本次 `00981A` 在同一個 as-of 下是 **311** 根。差異落在誤差範圍內（可能是當時的量測日期或
+事後補資料），⛔ 不影響本 bundle——**從現在起輸入以 bundle 為準**，那正是本筆要達成的事。
+
+**尚未完成**：D+1（2026-09-11）載入同一份 bundle 重跑，確認輸入指紋與逐列結果相同。
+bundle 依裁決在跨日驗收通過後才納入版控。
+
+**⛔ 本筆的變更不上 live（2026-09-10 裁決）**——live runtime 用不到 `replay_bundle/`、
+Stage 0／1／2 或那兩支腳本，而 Stage 0 讀 live 與 D+1 的離線 replay **都不需要部署**
+（前者由 `run-evaluation.sh` 自己 build image 並掛 repo 的 `python/`，後者是 `--network none`
+且無 DB 環境變數）。上線唯一會帶進 live 的行為差異是 `_load_db_sources` 的**重複 symbol
+去重**（方向是修正——下游的 `_allocate_replay_quota` 與 `_decision_replay_rows` 本來就去重）。
+
+⚠️ **因此 live 從 2026-09-10 起與 repo 有 2 個 runtime 檔的漂移**（`python/db.py`、
+`evaluation.py`；此前為零漂移）。等下次有實際需要上 live 的異動時一起走 deploy 程序。
+比對漂移的方法見 [`development-workflow.md`](./development-workflow.md)
+「live 現在跑的是哪一版程式碼」。
+
 #### 關閉條件
 
 三項都要成立：

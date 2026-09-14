@@ -672,10 +672,11 @@ before ＝ `ecbc141^`，而 `lifecycle_engine.py` 是 `ecbc141` 才新增的（`
 均分（baseline 那輪 11 檔 200 列 ＝ 每檔只有 18～19 個 as_of，全部擠在 07-28～08-23）。
 照抄會讓「全掃」實際變成「只掃尾端 19 個交易日」。
 
-#### Stage 0 計畫書 v16（2026-09-11 起草，2026-09-14 更新；**已確認計次裁決／其餘待確認**）
+#### Stage 0 計畫書 v17（2026-09-11 起草，2026-09-14 **已確認；已實作，review 已通過**）
 
-⚠️ **v15 的 review 抓到 1 低，已修**；修訂摘要在本節最後。
-v13～v16 都是**純格式／紀錄修正**，⛔ 沒有動任何語意契約——語意在 v12 就收斂了。
+⚠️ **v16 的 review 抓到 3 中 1 低，已修**；修訂摘要在本節最後。
+v13～v16 都是**純格式／紀錄修正**，v17 修的是**實作與測試**——⛔ 三者都沒有動任何語意契約，
+語意在 v12 就收斂了。
 
 ⚠️ v11 的教訓仍然有效：**描述形狀時要貼實際產物**（`compare_rows()` 在
 `artifacts.py:229`），⛔ 不能憑印象寫「同形狀」。
@@ -1193,6 +1194,64 @@ Stage 1／2 一律用 **`python/baselines/b1_20260901_1d_74350966_5d7ecb10`**
 | **v14** | review 抓到 1 低（格式殘留），已修，⛔ **未動任何語意契約**：v13 把 schema 從表格列移出來時，**保留了原儲存格結尾的 `|`**——它已不再負責結束儲存格，會被渲染成正文裡的多餘字元 → 刪除。⚠️ **成因是移動內容時只搬了本文、沒清邊界**；已**全檔掃過**⛔ 無其他「非表格行卻以 `|` 結尾」的殘留 |
 | v15 | review 抓到 1 低（紀錄數字過期），已修，⛔ **未動任何語意契約**：v13／v14 的修訂紀錄曾寫入當下的**檔案行數**，但本檔每次編輯都會變 → ⚠️ **⛔ 不更新數字，直接移除**：驗證紀錄要記「**做了什麼檢查**」而不是「當時的檔案有多大」，後者必然過期而且沒有人會回頭更新它。fence 數量同理一併移除 |
 | **v16** | review 抓到 1 低，已修，⛔ **未動任何語意契約**：⚠️ **v15 在「移除會過期數字」那一列裡，自己又寫進了三個具體行數**——而且送審時它們就已經過期了。**規則寫對、執行時違反自己**：宣告某個東西不該寫，最容易的犯法方式就是在宣告它的同一句話裡示範一次。→ 該列改成⛔ 不含任何具體數字的敘述 |
+| **v17** | review 抓到 3 中 1 低，全部反映——⚠️ **這一輪抓的是實作與測試，⛔ 不是計畫書文字**，語意契約一個字沒動：①**no-zone validator 沒對齊 durable schema**——只釘三個 boolean，於是 before 側的 `rr_decoupling_candidate=true`（before ⛔ 不驗等價式，攔不到）、三個字串被改成一般列的值、`position_action_condition`／`position_action` 非 null 全都靜默通過 → 改成**逐欄對照完整 mapping**，並把 `DIAGNOSTIC_NO_ZONE_FALLBACK`／`DIAGNOSTIC_FIELDS`／`NO_ZONE_SCORES_ERROR` 統一落在 `replay_bundle/artifacts.py`、經 package 公開 API 匯出（⚠️ 順帶收掉 `NO_ZONE_SCORES_ERROR` 的**雙真相源**——`evaluation.py` 與 `artifacts.py` 各有一份同值常數，改了一邊而另一邊沒跟上時⛔ 沒有任何東西會報錯）；⚠️ 舊的 tamper 測試對三個字串欄位會**一併改 `lifecycle_phase`**，實際攔下它的是 phase 規則，⛔ 沒有證明字串欄位本身會被拒 → 改成**九欄全驗、每案只動目標欄位**，壞值挑型別與結構都合法的（`position_action_condition` 給與兩個 state **交叉一致**的 object），並用 `side="before"` 跑以證明擋下 candidate 的是固定 mapping 而非等價式；②**mismatch validator 只驗內部自洽**——一份「漏掉一個真實 mismatch」的產物可以完全自洽（集合、差值公式、下界、方向、`differences` 全過，只是少記一筆）→ 新增**第三層：與實際來源精確比對**，`before_by_key`／`after_by_key`／`expected_after_sha256` 三個參數**必填**（⛔ 不提供「不給就跳過」的模式，可選等於留一道 fail-open），驗差集、計數、每列兩側 row、after artifact 的 SHA，並要求來源列的 candidate 是嚴格 boolean；⚠️ 測試必須持 **pristine copy**——`compare_rows()` 把來源 dict 直接放進 artifact，竄改 artifact 會一併改到來源，來源對照就變成自己跟自己比；③**三個新測試沒刺激到聲稱保護的產品分支** → pass-through 改用 **monkeypatch sentinel**（回傳與輸入推導相反的值，重算就會紅；⛔ 不再「同一組輸入跑兩次」）、補 **primary zone 的 replay 層 regression**（decision primary 為 `None`、排序第一筆非空）、「zone 在但 metrics 缺」改成 monkeypatch `_historical_zone_score_summary()` 的**完整資料形狀**後走**真正的 `_decision_replay_rows()`**（⛔ 不在 stub 輸出上手改欄位），並補「真的沒有 zone 時**應該**套 fallback」的對照組；④**低：`evaluation.py` 的 primary-zone 註解描述錯誤**——寫成「EXPIRED／LOW confidence／缺 expected_value 也會讓 `_pick_primary_zone()` 回 None」，但 `decision_engine.py` 的**第二層 fallback 只看 `role != AT_ZONE`**，那三者只影響第一層篩選、會被收回來 → 更正為「**沒有任何非 AT_ZONE zone** 才回 None」，並把它變成**可執行的斷言**放進 `test_decision_engine.py`（⚠️ 單元契約留在它所屬模組），補 LOW／缺 expected_value 的 fallback 案例 |
+
+#### Stage 0 實作結果（2026-09-14）
+
+**已依 v17 計畫書實作完成，2026-09-14 review 已確認實作方向、⛔ 無高／中嚴重度問題。**
+（v16 的 review 抓到 3 中 1 低，修正內容見修訂表 v17 與下方各列的 ⚠️ 標註。）
+
+⚠️ **review 通過的是 Stage 0，⛔ 不是本筆**：I-074 的狀態仍是「待執行」——決策樹的三個分支
+都還沒被走完，正式 Stage 1／2 尚未執行。⛔ 本筆在那之前不得移除。
+
+| 檔案 | 內容 |
+|---|---|
+| `lifecycle_engine.py` | `resolve_lifecycle()` 回傳新增 `clear_zone_breakout`、`continuation_price_evidence_met` |
+| `decision_engine.py` | `_decision_semantic_pipeline()` 新增**四鍵**（兩個透傳 ＋ `setup_rr_qualified` ＋ `rr_decoupling_candidate`）；`_decision_summary_zone()` 補 `relative_volume` |
+| `evaluation.py` | 匯出九欄位；no-zone fallback；primary zone 三個 consumer 一起切；Stage 1／2 的運算完整性 fail-closed；第五道集合檢查 ＋ mismatch 發布；CLI 在 generic catch **之前** handle `CandidateMismatch` |
+| `replay_bundle/artifacts.py` | `validate_diagnostics()`（九欄位 ＋ `lifecycle_phase` 依賴 ＋ 交叉一致性 ＋ 依版本分流的等價式 ＋ ⚠️ **v17：no-zone 逐欄對照完整 mapping**）、mismatch 的 builder／validator（⚠️ **v17：新增與實際來源精確比對的第三層，三個來源參數必填**）、`CandidateMismatch`；⚠️ **v17：`DIAGNOSTIC_NO_ZONE_FALLBACK`／`DIAGNOSTIC_FIELDS`／`NO_ZONE_SCORES_ERROR` 統一落在這裡**（⛔ 收掉雙真相源） |
+| `replay_bundle/publish.py`／`__init__.py` | `EXIT_CANDIDATE_MISMATCH = 4`；公開 API 匯出（⚠️ v17 加上三個診斷常數） |
+| `test_decision_engine.py` | ⚠️ **v17**：`_pick_primary_zone()` 真正的 `None` 條件（單元契約留在它所屬模組），補 LOW／缺 `expected_value` 的 fallback 案例 |
+| `frontend/.../srZones.ts` | `SRSemanticPipeline` 四鍵、`SRDecisionZoneSummary.relative_volume`（**僅型別，⛔ 不接線**） |
+| `scripts/smoke-replay-offline.sh` | ⛔ 移除假 candidate 注入 ＋ 非空 cohort 斷言，改驗合法空集合 |
+| `scripts/test-replay-args.sh` | exit 4 passthrough（fake `docker` 依子命令分流，並斷言**確實走到 `docker run`**） |
+
+**新增測試**：`test_i074_diagnostics.py`（84）、`test_i074_mismatch.py`（36），
+並擴充 `test_replay_bundle_stages.py`（57）與 `test_decision_engine.py`。
+
+**驗證**（2026-09-14 v17 修正後重跑）：
+
+| 層 | 結果 |
+|---|---|
+| `python/scripts/test.sh` | **1090 passed, 1 skipped**（v16 當時是 1040 passed, 1 skipped） |
+| `scripts/test-replay-args.sh` | 62 項全過。⚠️ **已由 `python/scripts/test.sh` 自動先跑**，⛔ 不必單獨再跑一次 |
+| `scripts/smoke-replay-offline.sh` | 全過——⚠️ **用的是真實 candidate**，`after rows=35 cohort=0 comparison=0` 是自然零命中（合法結果） |
+| `frontend/scripts/test.sh` | svelte-check ＋ vitest（21 檔 155 測試）＋ vite build ＋ dist／job-name 檢查全過 |
+
+⚠️ **前端那一列是 2026-09-14 後續 review 時補跑的實際結果，⛔ 不是 v16 當時就執行過的另一條命令。**
+v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器上會被 host OOM killer 砍掉
+**呼叫端**（node 沒有 cgroup 擋、也沒給 `--max-old-space-size`）。前端唯一的驗收入口是
+`frontend/scripts/test.sh`（三步各一個 container），見 [`development-workflow.md`](./development-workflow.md)。
+
+⚠️ **v17 的新測試做過「會不會假綠」的反向驗證**：把兩個回歸注回產品程式——
+① primary zone 改回 `if decision_primary is not None` 的舊寫法、
+② no-zone fallback 的守門條件放寬成 `else`——
+`test_replay_primary_zone_follows_decision_primary_even_when_it_is_none` 與
+`test_zone_present_but_metrics_missing_is_not_a_legal_fallback` 各自紅了，
+而對照組 `test_real_no_zone_rows_do_get_the_fallback` 正確地維持綠。
+⛔ 沒做這一步的話，「測試通過」證明不了測試有在測東西——那正是 v17 review 抓到的第 3 項。
+
+⚠️ **一個既有契約測試被正確地攔下來**：`test_evaluation.py` 有一條「replay row 的
+`primary_zone` 欄位增減要在這裡被擋一次」的斷言，註解寫明它是**Python 與前端型別之間唯一的
+連結點**。primary zone 換來源後它紅了——**那正是它該做的事**。已更新清單並寫明分界點，
+⛔ 不是把斷言放寬。
+
+**歸檔**：現況規格已寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+「Decision Replay 的診斷欄位（I-074 Stage 0）」；Stage 2 兩種 terminal outcome 與結束碼 4
+補進 [`development-workflow.md`](./development-workflow.md) 的驗收章節。
+
+⛔ **尚未執行**：正式 Stage 1／2（那是下一階段，且依已確認的計次裁決，D／D+1 兩趟 after
+合為一次）。
 
 #### 關閉條件（2026-09-01 改為單一決策樹）
 

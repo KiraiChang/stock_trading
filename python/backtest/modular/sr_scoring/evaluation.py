@@ -25,6 +25,11 @@ from .decision_engine import build_decision_summary
 from .features import trend_slope, zone_volatility
 from .model import FEATURE_COLUMNS, ModelBundle, load_model
 from .ranking import _assign_tiers, _sort_zone_scores
+from .replay_bundle import (
+    DIAGNOSTIC_FIELDS,
+    DIAGNOSTIC_NO_ZONE_FALLBACK,
+    NO_ZONE_SCORES_ERROR,
+)
 from .event_engine import EXTREME_VOLUME_THRESHOLD
 from .scoring import (
     VOLUME_CONFIRMATION_HIGH,
@@ -794,6 +799,11 @@ def _historical_zone_score_summary(
         for zone, tier in zip(zones, tiers)
     ]
     sorted_scores = _sort_zone_scores(zone_scores)
+    # ⚠️ 這一顆是**排序第一筆**，⛔ **不是決策用的 primary zone**。
+    # decision 用的是 `_pick_primary_zone()` 的結果，會出現在
+    # `decision_summary["primary_zone"]`——兩者可能不同顆（見 issue.md I-074）。
+    # 這裡保留排序第一筆只為了 `zone_count`／`global_metrics` 這類彙總；
+    # replay row 的 `primary_zone` 由呼叫端改用 decision primary 覆蓋。
     primary = sorted_scores[0] if sorted_scores else None
     global_metrics = _compute_global_metrics(sorted_scores)
     return {
@@ -840,7 +850,28 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "event_sequence": summary.get("event_sequence") or [],
         "event_market_state": event_state_summary.get("market_state"),
         "daily_price_action": summary.get("daily_price_action") or {},
+        # ── I-074 Stage 0 的診斷欄位：**只匯出，⛔ 不自行重算** ────────────────
+        # 任何在 replay 端重算的版本都會重蹈偽陽性（見 issue.md I-074「責任層」）。
+        "clear_zone_breakout": semantic_pipeline.get("clear_zone_breakout"),
+        "continuation_price_evidence_met": semantic_pipeline.get("continuation_price_evidence_met"),
+        # ⚠️ `setup_rr_qualified` ⛔ 不是上面那個 `rr_gate.qualified`——後者已被
+        # execution gate 覆寫。candidate 的等價式要用**這一顆**驗。
+        "setup_rr_qualified": semantic_pipeline.get("setup_rr_qualified"),
+        "rr_decoupling_candidate": semantic_pipeline.get("rr_decoupling_candidate"),
+        "event_signal": semantic_pipeline.get("event_signal"),
+        "action_state": semantic_pipeline.get("action_state"),
+        # ⚠️ `structure_state` **沒有** top-level 來源，它只存在於 position_action_condition
+        # 裡（decision_engine.py 的 `_position_action_condition()`）。⛔ 不另設第二個來源。
+        "position_action_condition": summary.get("position_action_condition"),
+        "structure_state": (summary.get("position_action_condition") or {}).get("structure_state"),
+        "position_action": summary.get("position_action"),
     }
+
+
+# ⚠️ **no-zone 列的合法缺席 fallback 與九欄位名稱都在 `replay_bundle` package**
+# （import 在本檔頂部）：匯出端與驗證端共用**同一份**定義。
+# ⛔ 這裡⛔ 不得再放一份同值常數——先前 `NO_ZONE_SCORES_ERROR` 就是這樣變成雙真相源，
+# 改了一邊而另一邊沒跟上時沒有任何東西會報錯。契約值本身見 `replay_bundle/artifacts.py`。
 
 
 def _event_key(items: list[dict[str, Any]], field: str = "type") -> str:
@@ -1503,6 +1534,9 @@ def _decision_replay_rows(
             decision_field_context: dict[str, Any] = {}
             decision_fields_available = False
             decision_error = None
+            # I-074 Stage 0 的九個診斷欄位。⚠️ 先給 None：只有「真的沒有 zone」才會被
+            # 換成 DIAGNOSTIC_NO_ZONE_FALLBACK，其餘留 None 讓 Stage 1／2 的守門抓到。
+            diagnostics: dict[str, Any] = dict.fromkeys(DIAGNOSTIC_FIELDS)
             event_lifecycle_replay_available = False
             event_state_count = 0
             active_event_count = 0
@@ -1547,6 +1581,20 @@ def _decision_replay_rows(
                         rr_gate = fields["rr_gate"]
                         decision_field_context = fields
                         decision_fields_available = True
+                        # **只匯出**（issue.md I-074「責任層」：evaluation 不自行重算）。
+                        diagnostics = {name: fields[name] for name in DIAGNOSTIC_FIELDS}
+                        # ⚠️ **改用 decision primary zone**（issue.md I-074：replay 原本取的是
+                        # `_sort_zone_scores()[0]`，而決策看的是 `_pick_primary_zone()`）。
+                        # ⛔ **三個 consumer 必須一起切**——replay row、daily_confirmation_context
+                        # 與 daily_confirmation_outcome 共用這個變數，只切一處會讓同一列混用兩顆 zone。
+                        # ⛔ **無條件指定，不得 fallback 回排序第一筆**：
+                        # `_pick_primary_zone()` 在**沒有任何非 AT_ZONE zone** 時合法回 None
+                        # （`decision_engine.py` 的第二層 fallback 只看 `role != AT_ZONE`，
+                        # 所以 EXPIRED／LOW confidence／缺 expected_value 只影響第一層篩選，
+                        # 會被那層 fallback 收回來，⛔ 它們本身不會讓結果變成 None）。
+                        # 那時退回 `_sort_zone_scores()[0]` 正是這次要消除的雙來源問題——
+                        # 同一列會混用兩種 primary zone，而且沒有任何東西會報錯。
+                        primary_zone = decision_summary.get("primary_zone")
                         event_state_summary = decision_summary.get("event_state_summary") or {}
                         states = list(event_state_summary.get("states") or [])
                         active_events = list(event_state_summary.get("active") or [])
@@ -1558,6 +1606,12 @@ def _decision_replay_rows(
                         active_event_count = len(active_events)
                         resolved_event_count = len(resolved_events)
                         expired_event_count = len(expired_events)
+                    elif not zone_score_available and zone_score_error == NO_ZONE_SCORES_ERROR:
+                        # ⚠️ **合法缺席**：這一列本來就沒有 zone。⛔ 這不是重算上游判斷，
+                        # 是 serialization 層填「沒有 decision summary 可匯出」的固定值。
+                        # ⚠️ zone 在、但 trend／volatility／metrics 缺的情況**不會**走到這裡
+                        # ——那是異常，`diagnostics` 維持全 None，由 Stage 1／2 的守門中止。
+                        diagnostics = dict(DIAGNOSTIC_NO_ZONE_FALLBACK)
                 except Exception as exc:  # noqa: BLE001 - one replay row must not abort the whole report.
                     if zone_score_available:
                         decision_error = str(exc)
@@ -1615,6 +1669,7 @@ def _decision_replay_rows(
                 "active_event_count": active_event_count,
                 "resolved_event_count": resolved_event_count,
                 "expired_event_count": expired_event_count,
+                **diagnostics,
             })
     return rows
 
@@ -2843,6 +2898,80 @@ def _replay_from_bundle(loaded):
     }
 
 
+def _publish_candidate_mismatch(
+    *, output_dir, loaded, args, provenance, generated_at, after_sha,
+    before_candidates, after_candidates, before_by_key, after_by_key,
+) -> None:
+    """發布 `candidate_mismatch.json` 後拋 `CandidateMismatch`。
+
+    ⚠️ **順序定死**：`build → validate → publish → raise`。
+    ⛔ validator 只是「存在」保護不了任何東西，它必須在**發布之前**被實際呼叫；
+    驗證失敗時⛔ 不得留下一份沒通過驗證的證據（那時回的是**一般中止 1**，
+    ⛔ 不是 4——4 的語意是「mismatch 已完整記錄」，而那個承諾並沒有兌現）。
+    """
+    from .replay_bundle import (
+        MISMATCH_ARTIFACT_NAME,
+        CandidateMismatch,
+        build_candidate_mismatch,
+        publish_artifacts,
+        validate_candidate_mismatch,
+    )
+
+    before_set, after_set = set(before_candidates), set(after_candidates)
+    artifact = build_candidate_mismatch(
+        bundle_id=loaded.bundle_id,
+        after_artifact_sha256=after_sha,
+        before_ref=args.before_ref,
+        generated_at=generated_at,
+        provenance=provenance,
+        before_only=sorted(before_set - after_set),
+        after_only=sorted(after_set - before_set),
+        before_candidate_count=len(before_candidates),
+        after_candidate_count=len(after_candidates),
+        before_by_key=before_by_key,
+        after_by_key=after_by_key,
+    )
+    # ⛔ 沒過就不准往下走。⚠️ 三個來源參數是**必填**的——validator 要拿本次 replay 的
+    # 實際 row 重建候選集合與計數再精確比對，光驗「artifact 自己對得起來」擋不住
+    # 一份漏掉真實 mismatch 卻內部自洽的產物。
+    validate_candidate_mismatch(
+        artifact,
+        before_by_key=before_by_key,
+        after_by_key=after_by_key,
+        expected_after_sha256=after_sha,
+    )
+    hashes = publish_artifacts(output_dir, [(MISMATCH_ARTIFACT_NAME, artifact)])
+    raise CandidateMismatch(
+        f"before／after 的候選集合不一致——⚠️ 這**本身就是分支 C**（tooling 不對稱），"
+        f"⛔ 不是輸入錯誤。before_only={len(before_set - after_set)}、"
+        f"after_only={len(after_set - before_set)}；證據已完整寫入 "
+        f"{output_dir / MISMATCH_ARTIFACT_NAME}（SHA-256 {hashes[MISMATCH_ARTIFACT_NAME]}）。"
+        f"⛔ 本次不產出 comparison_artifact.json 與 report.json。",
+        path=output_dir / MISMATCH_ARTIFACT_NAME,
+    )
+
+
+def _assert_no_replay_errors(rows: list[dict[str, Any]], label: str) -> None:
+    """⚠️ **「合法零 zone」與「運算失敗」要分開。**
+
+    `zone_score_error == "NO_ZONE_SCORES"` 是合法的——那一列本來就沒有 zone，
+    `candidate = false` 是**真實的 false**。⛔ 其餘任何 error 值都是運算失敗，
+    在發布 artifact 之前就要中止。
+    """
+    failures: list[str] = []
+    for row in rows:
+        zone_error = row.get("zone_score_error")
+        if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
+            failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
+        if row.get("decision_error"):
+            failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
+    if failures:
+        raise ValueError(
+            f"{label} 有 {len(failures)} 列運算失敗，⛔ 不發布任何 artifact："
+            + "；".join(failures[:5]) + ("…" if len(failures) > 5 else "")
+        )
+
+
 def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
     """Stage 1（掃描）或 Stage 2（比對）。回傳給 stdout 的摘要。"""
     from .replay_bundle import (
@@ -2853,6 +2982,8 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         COMPARISON_ARTIFACT_NAME,
         REPORT_NAME,
         ArtifactError,
+        CandidateMismatch,
+        MISMATCH_ARTIFACT_NAME,
         assert_matches_bundle,
         assert_same_keys,
         assert_unique_keys,
@@ -2867,12 +2998,15 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         load_bundle,
         prepare_output_dir,
         publish_artifacts,
+        build_candidate_mismatch,
         row_key,
         validate_after_artifact,
         validate_candidate_flags,
+        validate_candidate_mismatch,
         validate_cohort_manifest,
+        validate_diagnostics,
     )
-    from .replay_bundle.canonical import canonical_json_bytes, sha256_hex
+    from .replay_bundle import canonical_json_bytes, sha256_hex
 
     loaded = load_bundle(args.bundle)
     # ⚠️ **Stage 2 的輸入檔要在跑 replay 之前就完整驗過**——結構、唯一性、候選欄位、
@@ -2892,6 +3026,8 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
                 f"實際讀到的是 {after_sha}——⛔ 兩者必須相符。"
             )
         after_keys = validate_after_artifact(after_artifact)
+        # ⚠️ 載入時**再驗一次**九欄位——檔案可能來自別處或被改過。
+        validate_diagnostics(after_artifact["rows"], "載入的 after artifact", side="after")
         cohort_keys = validate_cohort_manifest(cohort_manifest)
         # ⚠️ 身分欄位要與 bundle manifest 一致，⛔ 不只比 bundle_id——
         # `timeframe`／`replay_scope` 會被寫進 comparison artifact 當成事實。
@@ -2908,6 +3044,12 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
     keys = context["keys"]
     assert_unique_keys(keys, "本次 replay 的輸出")
     assert_unique_keys(context["universe"], "bundle universe")
+    # ① 運算完整性（**通用於 Stage 1／2**）：除 NO_ZONE_SCORES 外，任一 decision／zone
+    # error 都在發布之前中止。⛔ 少了它，逐列被吞掉的 exception 會讓「大量運算失敗」
+    # 長得跟「零候選」一模一樣，然後被誤判成分支 A。
+    _assert_no_replay_errors(rows, "本次 replay")
+    # 九欄位 schema（本次輸出一律是 after 側的形狀；Stage 2 的 before rows 另外驗）。
+    validate_diagnostics(rows, "本次 replay 的輸出", side="after" if stage == 1 else "before")
 
     # ⚠️ provenance 建在 replay **之後**：replay 會 lazy import pipeline／serialization／
     # summaries 等模組，太早建的話 `project_modules_sha256` 少記的正是實際跑過的那些檔案。
@@ -2962,6 +3104,19 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
 
     before_by_key = {row_key(row): row for row in rows}
     after_by_key = {key: row for key, row in zip(after_keys, after_rows)}
+
+    # ⑤ **兩邊的候選集合必須相同**（issue.md I-074：「不相同本身就是分支 C」）。
+    # ⛔ 只用 after 的 cohort 過濾會讓 before 多出來的候選被**靜默漏掉**。
+    before_candidates = candidate_keys(rows)
+    after_candidates = candidate_keys(after_rows)
+    if sorted(before_candidates) != sorted(after_candidates):
+        _publish_candidate_mismatch(
+            output_dir=output_dir, loaded=loaded, args=args, provenance=provenance,
+            generated_at=generated_at, after_sha=after_sha,
+            before_candidates=before_candidates, after_candidates=after_candidates,
+            before_by_key=before_by_key, after_by_key=after_by_key,
+        )
+
     comparison_rows = [
         compare_rows(before_by_key[key], after_by_key[key]) for key in sorted(cohort_keys)
     ]
@@ -3168,7 +3323,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    from .replay_bundle import EXIT_DURABILITY_UNCONFIRMED, DurabilityUnconfirmed
+    from .replay_bundle import (
+        EXIT_CANDIDATE_MISMATCH,
+        EXIT_DURABILITY_UNCONFIRMED,
+        CandidateMismatch,
+        DurabilityUnconfirmed,
+    )
 
     parser = _build_parser()
     argv = list(sys.argv[1:])
@@ -3219,6 +3379,11 @@ def main() -> None:
     if mode == "bundle":
         try:
             report = run_bundle_stage(args, stage=stage, argv=argv)
+        # ⚠️ **必須排在 generic `except ValueError` 之前**：`CandidateMismatch` 刻意不繼承
+        # `ValueError`，但順序寫反的話仍會被下面那條吃掉，專屬碼就出不來。
+        except CandidateMismatch as exc:
+            print(f"[mismatch] {exc}", file=sys.stderr)
+            sys.exit(EXIT_CANDIDATE_MISMATCH)
         except DurabilityUnconfirmed as exc:  # pragma: no cover - bundle 模式不發布 bundle
             print(f"[warn] {exc}", file=sys.stderr)
             sys.exit(EXIT_DURABILITY_UNCONFIRMED)

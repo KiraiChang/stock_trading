@@ -145,7 +145,18 @@ def resolve_lifecycle(
     **參數裡沒有 rr_gate，是刻意的。** 風險報酬比是進場與策略條件，不是事件事實；
     要維持保守度應該由 Decision Engine 用 RR Gate 去擋，而不是讓 lifecycle 說謊。
 
-    回傳 `{"event_signal", "lifecycle_phase", "reason_codes"}`。
+    回傳 `{"event_signal", "lifecycle_phase", "reason_codes", "clear_zone_breakout",
+    "continuation_price_evidence_met"}`。
+
+    **後兩個是 validation-only 的診斷欄位**（issue.md I-074 Stage 0）：
+
+    * `clear_zone_breakout` 原本只是這個函式內的區域變數、從不回傳，而它是
+      `CONTINUATION` 分支唯一「只有 lifecycle 算得出來」的證據；
+    * `continuation_price_evidence_met` 是**三項價格證據**齊備與否。
+      ⚠️ 它是**診斷用，⛔ 不是 candidate 的定義**——真正的 candidate 還要求
+      `event_signal == CLOSE_RECLAIM`，而且高優先分支會先把整列吃掉。
+
+    ⛔ **兩者都只是把既有的中間結果帶出來，不新增任何判斷、不改任何分支與優先序。**
     """
     active_states = list(event_state_summary.get("active") or [])
     active_bearish_states = list(event_state_summary.get("active_bearish_events") or [])
@@ -199,4 +210,12 @@ def resolve_lifecycle(
         "event_signal": event_signal,
         "lifecycle_phase": lifecycle_phase,
         "reason_codes": reason_codes,
+        # ── validation-only 診斷欄位（issue.md I-074 Stage 0）────────────────
+        # ⛔ 只是把上面已經算好的中間結果帶出來，⛔ 不參與任何判定。
+        "clear_zone_breakout": bool(clear_zone_breakout),
+        "continuation_price_evidence_met": bool(
+            price_follow_through == "PRICE_UPSIDE_FOLLOW_THROUGH"
+            and momentum_state == "MOMENTUM_CONFIRMED"
+            and clear_zone_breakout
+        ),
     }

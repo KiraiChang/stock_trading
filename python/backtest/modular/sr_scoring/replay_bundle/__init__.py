@@ -16,6 +16,15 @@ from __future__ import annotations
 
 from .artifacts import (
     AFTER_ARTIFACT_NAME,
+    MISMATCH_ARTIFACT_NAME,
+    MISMATCH_KIND,
+    NO_ZONE_SCORES_ERROR,
+    DIAGNOSTIC_FIELDS,
+    DIAGNOSTIC_NO_ZONE_FALLBACK,
+    CandidateMismatch,
+    build_candidate_mismatch,
+    validate_candidate_mismatch,
+    validate_diagnostics,
     AFTER_KIND,
     ARTIFACT_SCHEMA_VERSION,
     CANDIDATE_FIELD,
@@ -91,6 +100,7 @@ from .provenance import (
 )
 from .publish import (
     EXIT_ABORT,
+    EXIT_CANDIDATE_MISMATCH,
     EXIT_DURABILITY_UNCONFIRMED,
     DurabilityUnconfirmed,
     NoClobberUnsupported,
@@ -101,6 +111,16 @@ from .publish import (
 
 __all__ = [
     "AFTER_ARTIFACT_NAME",
+    "CandidateMismatch",
+    "EXIT_CANDIDATE_MISMATCH",
+    "MISMATCH_ARTIFACT_NAME",
+    "MISMATCH_KIND",
+    "NO_ZONE_SCORES_ERROR",
+    "DIAGNOSTIC_FIELDS",
+    "DIAGNOSTIC_NO_ZONE_FALLBACK",
+    "build_candidate_mismatch",
+    "validate_candidate_mismatch",
+    "validate_diagnostics",
     "AFTER_KIND",
     "ARTIFACT_SCHEMA_VERSION",
     "ArtifactError",

@@ -924,8 +924,9 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
 3. **涵蓋全部候選的逐列比較 artifact 及其 SHA-256**（`comparison_artifact.json`，⛔ 不截斷；
    `report.json` 只是人讀摘要）。
    ⚠️ **Stage 2 有兩種終止狀態**：before／after 的候選集合不一致時**不會有 comparison
-   artifact**，而是 `candidate_mismatch.json` ＋ 專屬結束碼——那一份就是該次的證據，
-   且該結果**直接判為分支 C**（見 `issue.md` I-074）；
+   artifact**，而是 `candidate_mismatch.json` ＋ **結束碼 4**（`EXIT_CANDIDATE_MISMATCH`）
+   ——那一份就是該次的證據（含完整差集與兩側逐列 row），且該結果**直接判為分支 C**
+   （見 `issue.md` I-074）。⛔ 此時不產出 comparison／report 是**預期的**，不是失敗殘骸；
 4. **跨日證據**：⛔ **D 日產 bundle 並跑、D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。
    ⚠️ **同一天跑兩次證明不了任何事**——當日資料本來就沒變。
 

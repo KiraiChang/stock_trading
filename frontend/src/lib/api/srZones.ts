@@ -384,6 +384,12 @@ export interface SRDecisionZoneSummary {
   price_low: number
   price_high: number
   label: string
+  /**
+   * ⚠️ I-074 Stage 0 補上：replay 的 `_volume_strength_bucket()` 讀的就是它。
+   * decision primary zone 原本沒有這一欄，切換取值來源後不補會讓 volume context
+   * **靜默退化成 unavailable**。⛔ 本次不接線，僅宣告型別。
+   */
+  relative_volume?: number | null
   role: 'SUPPORT' | 'RESISTANCE' | 'AT_ZONE'
   tier: ZoneTier
   tier_label: string
@@ -727,6 +733,24 @@ export interface SRSemanticPipeline {
   entry_permission_state?: string
   reason_codes?: string[]
   source_order?: string[]
+  /**
+   * 以下四個是 **validation-only 的診斷欄位**（見 docs/issue.md I-074 Stage 0）。
+   *
+   * ⛔ **本次刻意不接線**：它們是驗證 RR 解耦用的證據，不是給使用者判讀的資訊，
+   * 渲染出來只會增加畫面噪音。
+   *
+   * ⚠️ **但型別必須宣告**——不宣告會讓 `decision_derived_view` 的 TS 型別與實際回應分岔，
+   * 而那正是 docs/development-workflow.md §3 記錄過**踩過兩次**的坑
+   * （key 名寫錯、型別不符，都因為沒有消費者而潛伏數週）。
+   */
+  clear_zone_breakout?: boolean
+  continuation_price_evidence_met?: boolean
+  /**
+   * ⚠️ **不是** `rr_gate.qualified`：這一顆是 **setup gate**，而對外的 `rr_gate`
+   * 稍後會被 execution gate 覆寫。兩者對同一列可能不同值。
+   */
+  setup_rr_qualified?: boolean
+  rr_decoupling_candidate?: boolean
 }
 
 export interface SRDecisionDerivedView {

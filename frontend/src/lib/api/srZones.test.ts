@@ -7,6 +7,7 @@ import {
   listSRRegressionResults,
   runSREvaluation,
 } from './srZones'
+import type { SRDecisionZoneSummary, SRSemanticPipeline } from './srZones'
 
 vi.mock('./client', () => ({
   apiFetch: vi.fn(),
@@ -199,5 +200,46 @@ describe('srZones analysis 的 zone builder runtime config', () => {
     const { analysis } = await getSRZoneAnalysis(1)
 
     expect(analysis.zone_builder_runtime_config).toBeNull()
+  })
+})
+
+
+// ── I-074 Stage 0 的診斷欄位型別（2026-09-14）────────────────────────────────
+//
+// ⚠️ 這些欄位**刻意不接線**（不渲染），所以沒有 UI 測試會碰到它們。
+// 但 docs/development-workflow.md §3 記錄過**踩過兩次**的坑：沒被消費的型別會默默寫錯
+// （key 名不符、型別不符），而 `svelte-check` 與 build 都不會比對它跟真實資料。
+//
+// ⛔ **fixture 從 Python 的真實輸出取樣，不憑記憶手寫**——下面這份對應
+// `_decision_semantic_pipeline()` 的回傳與 `_decision_summary_zone()` 的新欄位。
+describe('I-074 診斷欄位的型別契約', () => {
+  it('SRSemanticPipeline 接得住四個新欄位', () => {
+    const pipeline: SRSemanticPipeline = {
+      version: 'decision-semantic-pipeline-p4',
+      event_signal: 'CLOSE_RECLAIM',
+      lifecycle_phase: 'CONTINUATION',
+      market_state: 'BULLISH_CONTINUATION',
+      action_state: 'HOLD',
+      entry_permission_state: 'ENTRY_ALLOWED',
+      reason_codes: ['PRICE_UPSIDE_FOLLOW_THROUGH'],
+      source_order: ['Event', 'Lifecycle', 'Market State', 'Bias', 'Action', 'Entry'],
+      clear_zone_breakout: true,
+      continuation_price_evidence_met: true,
+      setup_rr_qualified: false,
+      rr_decoupling_candidate: true,
+    }
+    // ⚠️ candidate 的等價式：⛔ 只有兩個條件。
+    expect(pipeline.rr_decoupling_candidate).toBe(
+      pipeline.lifecycle_phase === 'CONTINUATION' && pipeline.setup_rr_qualified === false,
+    )
+    // ⚠️ `setup_rr_qualified` **不是** `rr_gate.qualified`——後者已被 execution gate 覆寫。
+    expect(pipeline.setup_rr_qualified).toBe(false)
+  })
+
+  it('SRDecisionZoneSummary 接得住 relative_volume', () => {
+    const zone: Pick<SRDecisionZoneSummary, 'relative_volume'> = { relative_volume: 1.42 }
+    expect(zone.relative_volume).toBeCloseTo(1.42)
+    const missing: Pick<SRDecisionZoneSummary, 'relative_volume'> = { relative_volume: null }
+    expect(missing.relative_volume).toBeNull()
   })
 })

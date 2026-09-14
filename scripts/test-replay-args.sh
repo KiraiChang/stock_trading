@@ -334,6 +334,49 @@ else
   fail "DB_DRIVER 沒有生效（手動驗 mysql 會跑不起來）"
 fi
 
+echo "==> run-replay-offline.sh：專屬結束碼 4 必須原樣傳出"
+# ⚠️ smoke 兩側都跑同一個 HEAD，正常⛔ 不會 mismatch，驗不到這條——所以用 fake docker。
+# ⛔ **fake 不能「一律 exit 4」**：腳本的順序是 build → image inspect → exec run，
+# 一律回 4 的話**在 build 就退出**，測試看到 4 卻完全沒驗到 passthrough（false pass）。
+FAKE_BIN="$(mktemp -d)"
+FAKE_LOG="$FAKE_BIN/calls.log"
+cat > "$FAKE_BIN/docker" <<'FAKEEOF'
+#!/usr/bin/env bash
+echo "$1 $2" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+  build) exit 0 ;;
+  image)
+    # image inspect → 印出合法 digest 並回 0
+    printf 'sha256:%064d\n' 0
+    exit 0 ;;
+  run) exit 4 ;;   # ← 模擬 CLI 回 EXIT_CANDIDATE_MISMATCH
+  *) exit 0 ;;
+esac
+FAKEEOF
+chmod +x "$FAKE_BIN/docker"
+
+DRY_BUNDLE2="$(mktemp -d)"
+DRY_OUT2="$(mktemp -d)"
+set +e
+FAKE_DOCKER_LOG="$FAKE_LOG" PATH="$FAKE_BIN:$PATH" AFTER_REF="$HEAD_OID" \
+  "$REPO_ROOT/scripts/run-replay-offline.sh" \
+    --bundle "$DRY_BUNDLE2" --output-dir "$DRY_OUT2" --before-ref "$PARENT_OID" >/dev/null 2>&1
+exit4_code=$?
+set -e
+
+if [ "$exit4_code" -eq 4 ]; then
+  pass "run-replay-offline.sh 原樣傳出 exit 4"
+else
+  fail "exit code 被吞掉了：預期 4，實際 $exit4_code"
+fi
+# ⚠️ ⛔ 只看結束碼不夠——要確認真的走到 docker run，否則 build 階段就退出也會看到 4。
+if grep -q "^run " "$FAKE_LOG" 2>/dev/null; then
+  pass "確實執行到 docker run（⛔ 不是在 build 階段就退出）"
+else
+  fail "沒有執行到 docker run——這個 4 是別的階段回的"
+fi
+rm -rf "$FAKE_BIN" "$DRY_BUNDLE2" "$DRY_OUT2"
+
 if [ "$fails" -ne 0 ]; then
   echo "==> replay-args 測試失敗：$fails 項" >&2
   exit 1

@@ -13,6 +13,7 @@ from ..decision_engine import (
     _final_entry_permission,
     _final_entry_risk_notes,
     _market_regime,
+    _pick_primary_zone,
     _position_action_condition,
     _risk_note,
     _risk_note_code,
@@ -1967,6 +1968,42 @@ def test_expired_primary_zone_end_to_end_is_not_buy():
         "fixture 沒讓 EXPIRED zone 成為 primary，這條測試就沒有在測 I-082 的情境"
     )
     assert ds["action"] != "Buy"
+
+
+# ── `_pick_primary_zone()` 真正的 None 條件（I-074 Stage 0 review）────────────
+#
+# ⚠️ replay row 的 `primary_zone` 現在**無條件**取 decision primary（`evaluation.py`），
+# 所以「它什麼時候是 None」已經是 replay 產物契約的一部分，必須在**它所屬的模組**釘死。
+#
+# ⛔ 這裡曾被描述錯：`evaluation.py` 的註解一度寫「EXPIRED／LOW confidence／缺
+# expected_value 也會讓它回 None」。那三者只影響**第一層**嚴格篩選——第二層 fallback
+# 只看 `role != AT_ZONE`，會把它們全部收回來。**唯一**的 None 條件是
+# 「沒有任何非 AT_ZONE zone」。
+
+
+@pytest.mark.parametrize("zones,expect_none,label", [
+    ([], True, "空清單"),
+    ([_zone(role=ZoneType.AT_ZONE.value)], True, "只有一個 AT_ZONE"),
+    ([_zone(role=ZoneType.AT_ZONE.value), _zone(role=ZoneType.AT_ZONE.value)],
+     True, "全部都是 AT_ZONE"),
+    ([_zone(recent_validation=RecentValidation.EXPIRED.value)],
+     False, "EXPIRED 只落出第一層，第二層 fallback 收回"),
+    ([_zone(confidence_level=ConfidenceLevel.LOW.value)],
+     False, "LOW confidence 只落出第一層，第二層 fallback 收回"),
+    ([_zone(expected_value=None)],
+     False, "缺 expected_value 只落出第一層，第二層 fallback 收回"),
+    ([_zone(role=ZoneType.AT_ZONE.value), _zone(confidence_level=ConfidenceLevel.LOW.value)],
+     False, "AT_ZONE 永遠出局，但同時存在的 LOW 仍會被選"),
+])
+def test_pick_primary_zone_returns_none_only_without_non_at_zone(zones, expect_none, label):
+    picked = _pick_primary_zone(zones, 100.1, "TREND_UP")
+
+    if expect_none:
+        assert picked is None, label
+    else:
+        assert picked is not None, label
+        # ⛔ 被選中的永遠不會是 AT_ZONE——兩層篩選都排除它。
+        assert picked.role != ZoneType.AT_ZONE.value, label
 
 
 # ── T-056：戰術壓力與前方擋路壓力是兩層 ───────────────────────────────────────

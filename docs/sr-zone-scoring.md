@@ -2688,6 +2688,168 @@ isolation**，落在 `READ COMMITTED` 時每次 consistent read 都會取新快�
 * **Stage 0（多檔目錄）**：走 `renameat2(RENAME_NOREPLACE)` 的整包發布，
   細節見 [`development-workflow.md`](./development-workflow.md)。
 
+### Decision Replay 的診斷欄位（I-074 Stage 0，2026-09-14）
+
+九個 **validation-only** 的欄位，用來驗證 RR 解耦是否真的改變了 lifecycle 判定。
+⛔ **前端刻意不接線**（只宣告 TS 型別）——它們是驗證證據，不是給使用者判讀的資訊。
+
+#### 責任層：三層各做各的，⛔ 沒有任何一層自行重算
+
+| 層 | 產出 |
+|---|---|
+| `lifecycle_engine.resolve_lifecycle()` | `clear_zone_breakout`、`continuation_price_evidence_met` |
+| `decision_engine._decision_semantic_pipeline()` | **四鍵**：上面兩個**逐鍵透傳** ＋ `setup_rr_qualified` ＋ `rr_decoupling_candidate` |
+| `evaluation.py` | **只匯出**；唯一例外是 no-zone 列的合法缺席 fallback（見下） |
+
+⚠️ **透傳不能省**：semantic pipeline 原本只取 lifecycle 的三個既有鍵，不透傳的話新增欄位
+會在 lifecycle → decision summary 之間**直接消失**，replay 端就只能重算——
+而任何在 replay 端重算的版本都會重蹈偽陽性。
+
+#### ⚠️ `setup_rr_qualified` **不是** `rr_gate.qualified`
+
+```
+_rr_gate(…)            → setup gate    → semantic pipeline 讀到的那顆 → candidate 用它
+_execution_rr_gate(…)  → **覆寫**       → decision_summary["rr_gate"] → replay row 匯出的那顆
+```
+
+**candidate 的精確定義**（⛔ 只有兩個條件）：
+
+```
+rr_decoupling_candidate ≡ lifecycle_phase == "CONTINUATION" 且 setup_rr_qualified == false
+```
+
+⛔ **拿對外的 `rr_gate.qualified` 去驗這條等價式會得到矛盾**——它已被 execution gate 覆寫。
+用 setup gate 的理由是：本筆要驗的是**歷史上被移除的那個條件**，而 before 版用的正是它。
+
+#### no-zone 列的「合法缺席 fallback」
+
+⚠️ `build_decision_summary()` 只在 **zone 可用且 trend／volatility／metrics 都在**時才被呼叫。
+所以「沒有 decision summary」有兩種，**處置完全不同**：
+
+| 情況 | 處置 |
+|---|---|
+| `zone_score_available == false` **且** `zone_score_error == "NO_ZONE_SCORES"` | ✅ 套固定 fallback（`rr_decoupling_candidate=false` 是**真實的 false**） |
+| 其餘（zone 在、但 trend／volatility／metrics 缺） | ⛔ **異常，fail-closed** |
+
+⚠️ fallback 的 `lifecycle_phase` **維持 `null`**——⛔ 不補成 `NO_PRIMARY_ZONE`：
+no-zone 列根本不進 lifecycle，補值等於 evaluation 替上游推導答案。
+`null != "CONTINUATION"` → candidate 為 `false`，兩者一致。
+
+#### primary zone 的取值來源已切換（**分界點：2026-09-14**）
+
+replay row 原本取 `_sort_zone_scores()[0]`（排序第一筆），現在取
+`decision_summary["primary_zone"]`（`_pick_primary_zone()`，決策真正看的那顆）。
+
+⛔ **新舊 replay report 的 `primary_zone_role_counts` 等統計不可直接比較。**
+
+⚠️ 三個 consumer（replay row／`daily_confirmation_context`／`daily_confirmation_outcome`）
+**共用同一個變數，一起切**——只切一處會讓同一列混用兩顆 zone。
+並在 `_decision_summary_zone()` 補了 `relative_volume`：decision primary 原本沒有它，
+不補會讓 `_volume_strength_bucket()` **靜默退化成 unavailable**。
+
+#### 九個診斷欄位的完整 schema
+
+⚠️ **這張表是永久 contract**：`issue.md` 的 I-074 收斂後會被移除，規格必須留在這裡。
+
+| JSON path（replay row） | 型別 | nullable | 來源 | no-zone fallback 值 |
+|---|---|---|---|---|
+| `clear_zone_breakout` | `bool` | ⛔ 否 | lifecycle | `false` |
+| `continuation_price_evidence_met` | `bool` | ⛔ 否 | lifecycle（三項證據合取） | `false` |
+| `setup_rr_qualified` | `bool` | ⛔ 否 | **setup gate** 的 `qualified` | `false` |
+| `rr_decoupling_candidate` | `bool` | ⛔ 否 | semantic pipeline 組合 | `false`（**真實的 false**） |
+| `event_signal` | 非空 `str` | 否 | semantic pipeline | `"NO_EVENT"` |
+| `structure_state` | 非空 `str` | 否 | `position_action_condition.structure_state` | `"UNKNOWN"` |
+| `action_state` | 非空 `str` | 否 | semantic pipeline | `"WATCH"` |
+| `position_action_condition` | `object` | ✅ 是（**僅 no-zone 列**） | `_position_action_condition()` | `null` |
+| `position_action` | 非空 `str` | ✅ 是 | `_decision_action()`；⚠️ **只記錄不判定** | `null` |
+
+**另有的不變條件**：
+
+* `lifecycle_phase`（既有欄位）：一般列**必須是非空字串**，no-zone 列**必須是 `null`**，
+  ⛔ 缺 key 一律中止。⚠️ 少了這條，`candidate=false` 時
+  `false == (None == "CONTINUATION" and …)` → `false == false` → 等價式**照樣通過**；
+* **欄位交叉一致性**：`structure_state == position_action_condition.structure_state`、
+  `action_state == position_action_condition.state`；
+* **no-zone 列：九欄逐欄對照完整的固定 mapping**。上表最後一欄那組值**整組都是契約**，
+  validator 逐欄比對 `DIAGNOSTIC_NO_ZONE_FALLBACK`，⛔ 不是只挑幾個 boolean 驗。
+  ⚠️ **只釘三個 boolean 是不夠的**，三類漏洞都會靜默通過：
+  ① `rr_decoupling_candidate=true`——after 側會被等價式間接擋下（`lifecycle_phase` 是
+  null，兩邊都算出 false 而相等），但 **before 側⛔ 不驗等價式**，於是照樣放行；
+  ② 三個字串被改成一般列的值（整列偽裝成「有算過」）；
+  ③ `position_action_condition`／`position_action` 非 null。
+  ⚠️ 這道檢查排在型別與交叉一致性**之後**，失敗訊息才指得出「固定 mapping 不符」而非「型別錯」。
+  ⛔ **這組值只有一份定義**（`replay_bundle/artifacts.py`），匯出端與驗證端共用；
+  兩邊各寫一份的話，改了一邊而另一邊沒跟上時沒有任何東西會報錯；
+* **等價式依版本分流**：after 用
+  `candidate == (lifecycle_phase == "CONTINUATION" and not setup_rr_qualified)`；
+  ⛔ **before 不驗展開式**——展開式需要 `active_bearish_states`，那是 `event_state_summary`
+  的內容、lifecycle 的**獨立輸入**，光靠 row 算不出來，要在 before tooling 內驗。
+
+#### `candidate_mismatch.json` 的完整 schema
+
+**top-level 封閉欄位集合**（⛔ 多欄或缺欄一律拒絕）：
+
+| 欄位 | 型別 |
+|---|---|
+| `schema_version` | `int`，必須 `== 1` |
+| `kind` | `"sr_zone_replay_candidate_mismatch"` |
+| `bundle_id`／`before_ref`／`generated_at` | 非空 `str` |
+| `after_artifact_sha256` | **64 字元小寫 hex** |
+| `provenance` | `object` |
+| `before_only`／`after_only` | `[[symbol, timeframe, as_of], …]`，各自**排序、唯一**，兩者**互斥** |
+| `before_candidate_count`／`after_candidate_count` | `type(x) is int` 且 `>= 0`（⚠️ ⛔ 排除 `bool`） |
+| `rows` | 見下 |
+
+**不變條件**：
+
+* `before_only ∪ after_only` **必須非空**（⛔ 擋掉「零差集卻宣稱 mismatch」）；
+* **差值公式**：`before_count − after_count == len(before_only) − len(after_only)`；
+* ⚠️ **數量下界**：`before_count >= len(before_only)` 且 `after_count >= len(after_only)`
+  ——⛔ 差值公式**取代不了**它：「兩側 count 都是 0、兩側差集各一筆」會通過 `0−0 == 1−1`，
+  但那在集合上根本不可能成立；
+* **`rows` 直接重用 `compare_rows()`**，形狀是
+  `{symbol, timeframe, as_of, differences, before, after}`（⛔ 封閉欄位集合）；
+* `[row_key(item) for item in rows] == sorted(set(before_only) | set(after_only))`；
+* 每列 `row_key(item) == row_key(item["before"]) == row_key(item["after"])`；
+* `before`／`after` 都必須是 `object`，**⛔ 不得為 `null`**；
+* **`differences` 必須與 `compare_rows()` 算出完全相同的值**（⛔ 不接受空陣列／錯欄位／
+  重複／未排序），且⚠️ **必然包含 `rr_decoupling_candidate`**——mismatch key 來自候選集合的
+  **symmetric difference**，兩側必然不同；
+* ⚠️ **差集方向**：`before_only` 的列必然 `before=true`／`after=false`，`after_only` 相反。
+  ⛔ 少了它，一份**格式合法但內容顛倒**的 artifact 照樣通過。
+
+**⚠️ 第三層：與實際來源精確比對**（上面全部是 artifact 的**內部自洽**檢查）。
+
+⛔ 一份「漏掉一個真實 mismatch」的產物可以完全內部自洽——集合、差值公式、下界、方向、
+`differences` 全部通過，只是少記了一筆。唯一能發現它的東西是本次 replay 的實際 row，
+所以 `validate_candidate_mismatch()` 的三個來源參數（`before_by_key`／`after_by_key`／
+`expected_after_sha256`）是**必填**的，⛔ 不提供「不給就跳過」的模式——可選等於留一道
+fail-open。⚠️ 這⛔ **不是重算 predicate**：`rr_decoupling_candidate` 是上游產好的嚴格
+boolean，這裡只消費它來重建集合與計數。
+
+* `before_only`／`after_only` **精確等於**由兩份來源 map 重建的差集；
+* 兩個 candidate count **精確等於**來源列的實際計數；
+* 每一列的 `before`／`after` **精確等於**對應的來源 row；
+* `after_artifact_sha256` **精確等於**實際載入那個檔案的 SHA-256；
+* 來源列的 `rr_decoupling_candidate` 必須是嚴格 boolean——⛔ 缺值當成 false 的話，
+  一個真實候選會從重建出來的集合裡靜默消失，比對反而「通過」。
+
+⚠️ **測試必須持有來源的 pristine copy**：`compare_rows()` 把來源 dict **直接**放進
+artifact，所以 `artifact["rows"][i]["before"]` **就是** `before_by_key[key]` 那個物件。
+竄改 artifact 時會一併改到來源，來源對照就變成「自己跟自己比」而永遠通過。
+
+#### Stage 2 有**兩種** terminal outcome
+
+| 候選集合檢查 | 產出 | 結束碼 |
+|---|---|---|
+| 一致 | `comparison_artifact.json` ＋ `report.json` | 0 |
+| **不一致** | **`candidate_mismatch.json`**（完整差集 ＋ 兩側逐列 row） | **4**（`EXIT_CANDIDATE_MISMATCH`），**直接判為分支 C** |
+
+⚠️ 集合不一致**本身就是分支 C**（tooling 不對稱），⛔ 不是輸入錯誤。
+⛔ 此時**不產出** comparison／report——那是**預期的終止狀態**，不是失敗殘骸。
+⚠️ `CandidateMismatch` **刻意不繼承 `ValueError`**：CLI 的 bundle 分支用
+`except (…, ValueError, …) → exit 1` 統一收斂，繼承下去專屬碼根本出不來。
+
 ### Decision Replay 的取樣規則（`replay_max_rows`）
 
 `replay_max_rows` 是**所有股票加總**的預算，不是每檔的配額。分配規則在

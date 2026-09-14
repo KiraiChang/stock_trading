@@ -36,6 +36,9 @@ RENAME_NOREPLACE = 1
 # 所以給它專屬碼——呼叫端才分得出「要重跑」與「重跑會走 no-op」。
 EXIT_ABORT = 1
 EXIT_DURABILITY_UNCONFIRMED = 3
+# Stage 2 的候選集合不一致——⚠️ 這是**終止狀態**（分支 C 的證據已完整記錄），
+# ⛔ 不是一般失敗，所以與 EXIT_ABORT 分開。
+EXIT_CANDIDATE_MISMATCH = 4
 
 # syscall 號碼是 **per-ABI** 的，猜錯會呼叫到完全不同的系統呼叫。
 # 只在找不到 libc 的 renameat2 symbol 時才會用到，且未知架構一律 fail-closed。

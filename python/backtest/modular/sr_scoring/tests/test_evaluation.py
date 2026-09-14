@@ -1015,6 +1015,13 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     scored_row = next(row for row in report["replay_rows"] if row["zone_score_available"])
     assert scored_row["zone_count"] > 0
     assert scored_row["zone_score_error"] is None
+    # ⚠️ **2026-09-14（I-074 Stage 0）：這一顆的來源換了。**
+    # 舊：`_historical_zone_score_summary()` 的**排序第一筆**（`_sort_zone_scores()[0]`）。
+    # 新：`decision_summary["primary_zone"]`，也就是決策真正看的那顆（`_pick_primary_zone()`）。
+    # 兩者可能不是同一顆 zone，所以欄位集合也整個換成 `_decision_summary_zone()` 的形狀。
+    # ⛔ **新舊 replay report 的 `primary_zone_role_counts` 等統計不可直接比較**——
+    # 分界點是這次變更（見 docs/issue.md I-074 Stage 0 計畫書七）。
+    #
     # replay row 的 primary_zone 是對外 projection，欄位增減要在這裡被擋一次。
     #
     # **這是 Python 與前端型別之間唯一的連結點。** TypeScript 偵測不到 Python 的變動
@@ -1027,14 +1034,43 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     # 這份清單就是日後真的要加型別時的權威來源，不要憑記憶手寫。
     assert set(scored_row["primary_zone"]) == {
         "role",
+        "role_label",
         "tier",
+        "tier_label",
+        "display_label",
+        "label",
         "price_low",
         "price_high",
         "confidence",
+        "confidence_level",
         "trading_score",
+        "zone_quality_score",
+        "structural_score",
+        "entry_relevance_score",
+        "decision_relevance_score",
+        "tradability_score",
+        "entry_relevance_breakdown",
+        "expected_value",
         "risk_reward_ratio",
+        "distance_pct",
+        "distance_label",
+        "zone_width_pct",
+        "zone_width_penalty",
+        "zone_interaction",
+        "recent_validation",
         "volume_confirmation",
+        # ⚠️ **本次特意補進 `_decision_summary_zone()`**：replay 的
+        # `_volume_strength_bucket()` 讀的就是它，decision primary 原本沒有，
+        # 不補的話 volume context 會**靜默退化成 unavailable**。
         "relative_volume",
+        "confluence_count",
+        "confluence_families",
+        "confluence_family_count",
+        "zone_health_state",
+        "lifecycle",
+        "decision_role",
+        "source",
+        "reason",
     }
     assert scored_row["primary_zone"]["role"] in {"SUPPORT", "RESISTANCE", "AT_ZONE"}
     assert scored_row["primary_zone"]["price_low"] < scored_row["primary_zone"]["price_high"]

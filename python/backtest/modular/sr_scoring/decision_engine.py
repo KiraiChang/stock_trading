@@ -145,6 +145,10 @@ def _decision_summary_zone(
         "entry_relevance_breakdown": _entry_relevance_base_breakdown(z, current_price),
         "confidence": z.confidence,
         "confidence_level": z.confidence_level,
+        # ⚠️ replay 端的 `_volume_strength_bucket()` 讀的就是這一欄。decision primary zone
+        # 原本沒有它，切換取值來源後 volume context 會**靜默退化成 unavailable**
+        # （見 issue.md I-074 Stage 0 計畫書七）。
+        "relative_volume": z.relative_volume,
         "expected_value": z.expected_value,
         "risk_reward_ratio": z.risk_reward_ratio,
         "distance_pct": interaction["distance_pct"],
@@ -1120,6 +1124,22 @@ def _decision_semantic_pipeline(
         "entry_permission_state": entry_permission_state,
         "reason_codes": _unique_reason_codes(reason_codes),
         "source_order": ["Event", "Lifecycle", "Market State", "Bias", "Action", "Entry"],
+        # ── validation-only 診斷欄位（issue.md I-074 Stage 0）────────────────
+        # ⚠️ 前兩個是**逐鍵透傳** lifecycle 的輸出，⛔ 不在這裡重算——不透傳的話，
+        # 它們會在 lifecycle → decision summary 之間直接消失，replay 端就只能重算，
+        # 而任何在 replay 端重算的版本都會重蹈偽陽性。
+        "clear_zone_breakout": bool(lifecycle["clear_zone_breakout"]),
+        "continuation_price_evidence_met": bool(lifecycle["continuation_price_evidence_met"]),
+        # ⚠️ **`setup_rr_qualified` ⛔ 不是對外的 `rr_gate.qualified`**：這裡讀到的是
+        # **setup gate**（`_rr_gate()`，見 build_decision_summary 的呼叫順序），而對外那顆
+        # 稍後會被 `_execution_rr_gate()` 覆寫。candidate 要驗的是**歷史上被移除的那個
+        # 條件**，而它用的正是 setup gate，所以明確把這一顆匯出，⛔ 不讓人拿錯。
+        "setup_rr_qualified": bool(rr_qualified),
+        # candidate 的精確定義（issue.md I-074「candidate 的精確定義」）：
+        # ⛔ 只有這兩個條件，不得有第三個。
+        "rr_decoupling_candidate": bool(
+            lifecycle_phase == "CONTINUATION" and not rr_qualified
+        ),
     }
 
 

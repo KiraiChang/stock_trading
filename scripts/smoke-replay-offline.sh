@@ -16,9 +16,8 @@
 # ⚠️ **tooling patch 是這支腳本的關鍵**，而且它同時驗到兩件事：
 #   * 目前**工作樹**（可能尚未 commit）要能經由 patch 進到 worktree——離線腳本本來就是
 #     這樣支援「還沒進版控的 tooling 變更」的；
-#   * Stage 1 需要 `rr_decoupling_candidate`，而那是 issue.md I-074 Stage 0 才會補的欄位。
-#     這裡用一段**明確標示為 smoke 專用**的 patch 補上它，讓 Stage 1／2 走得完全程。
-#     ⛔ 這一段永遠不會進版控的產品程式碼——它只存在於本腳本產生的暫時 patch 裡。
+#   * ⚠️ `rr_decoupling_candidate` 現在由**產品端**產出（I-074 Stage 0 已實作），
+#     ⛔ 本腳本不再注入假值——注入會覆蓋真欄位而造成 false pass。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -61,7 +60,7 @@ else
 fi
 
 # ── ② 把「目前工作樹 ＋ smoke 專用欄位」做成 tooling patch ────────────────
-echo "==> 組 tooling patch（目前工作樹 ＋ smoke 專用的 rr_decoupling_candidate）"
+echo "==> 組 tooling patch（目前工作樹，⛔ 不再注入任何假欄位）"
 git -C "$REPO_ROOT" worktree add --detach "$SCRATCH" HEAD >/dev/null 2>&1
 # ⚠️ **先整個刪掉再複製**，⛔ 不要用 tar 疊上去：疊加沒有刪除語意，工作樹刪掉的檔案在
 # scratch 裡會保留 HEAD 的舊版，patch 就表達不出那次刪除——smoke 會拿一份**現實中不存在
@@ -73,26 +72,10 @@ mkdir -p "$SCRATCH/python"
 tar -C "$REPO_ROOT/python" \
   --exclude=__pycache__ --exclude=logs --exclude=.pytest_cache -cf - . \
   | tar -C "$SCRATCH/python" -xf -
-python3 - "$SCRATCH" <<'PY'
-import sys
-from pathlib import Path
-
-# ⛔ smoke 專用：模擬 I-074 Stage 0 會補上的診斷欄位，讓 Stage 1／2 走得完全程。
-# 這段只存在於暫時 worktree 裡，⛔ 不會進版控。
-path = Path(sys.argv[1]) / "python/backtest/modular/sr_scoring/evaluation.py"
-text = path.read_text(encoding="utf-8")
-needle = '                "expired_event_count": expired_event_count,\n            })'
-assert needle in text, "smoke patch 的錨點不見了——evaluation.py 的 row 結構改過了"
-text = text.replace(needle, needle.replace(
-    '            })',
-    '                # [smoke-only] I-074 Stage 0 的診斷欄位替身。\n'
-    '                # ⚠️ 用**決定性的子集**而不是真的 predicate：真的 predicate 在這份\n'
-    '                # 合成資料上命中 0 列，cohort 與 comparison 就都是空的，\n'
-    '                # Stage 2 的比較路徑等於沒被走到。\n'
-    '                "rr_decoupling_candidate": bool(idx % 7 == 0),\n'
-    '            })'), 1)
-path.write_text(text, encoding="utf-8")
-PY
+# ⚠️ **2026-09-14：這裡原本會注入一個假的 `rr_decoupling_candidate`**（I-074 Stage 0
+# 完成前產品端還沒有那個欄位）。⛔ **已移除**——產品端現在會自己產出真欄位，而同名鍵
+# 在同一個 dict literal 裡排在後面會**覆蓋掉它**，於是正式資料流壞掉也照樣綠燈。
+# 現在 smoke 驗的是**真實 candidate**；合成資料自然零命中時，**空 cohort 是合法結果**。
 git -C "$SCRATCH" add -A -N >/dev/null
 git -C "$SCRATCH" diff --binary HEAD > "$WORK/tooling.patch"
 
@@ -201,8 +184,12 @@ report = json.load(open(f"{stage2}/report.json", encoding="utf-8"))
 assert after["bundle_id"] == bundle_id, after["bundle_id"]
 assert cohort["after_artifact_sha256"] == hashlib.sha256(after_raw).hexdigest()
 assert after["rows"], "after artifact 沒有任何列"
+# ⚠️ 這一條現在驗的是**產品端真的產出了欄位**，⛔ 不再是 smoke 自己注入的假值。
 assert all("rr_decoupling_candidate" in r for r in after["rows"])
-assert cohort["keys"], "cohort 是空的——Stage 2 的比較路徑沒被走到"
+# ⚠️ **⛔ 不再斷言 cohort 非空**（2026-09-14）：移除假 candidate 之後，合成資料很可能
+# 自然零命中，而**空 cohort 是合法結果**——Stage 1／2 都成功、artifact 都產出來了。
+# 非空 cohort 的比較路徑改由 artifact-layer 的 pytest 涵蓋
+# （`test_replay_bundle_stages.py` 的 stub，⛔ 不經過產品資料流）。
 assert len(comparison["rows"]) == len(cohort["keys"])
 assert report["candidate_rows"] == len(cohort["keys"])
 assert all(set(r) >= {"symbol", "timeframe", "as_of", "differences", "before", "after"}

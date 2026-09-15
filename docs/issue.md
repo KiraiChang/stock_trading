@@ -1253,6 +1253,851 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 ⛔ **尚未執行**：正式 Stage 1／2（那是下一階段，且依已確認的計次裁決，D／D+1 兩趟 after
 合為一次）。
 
+#### Stage 1 計畫書 v25（2026-09-14 起草，**待確認**）
+
+⚠️ **v24 的 review 抓到 1 中，已反映**；修訂摘要在本節最後。
+⚠️ **本版依「零、改版守則」以增補方式修訂，⛔ 未整段重寫**——v7 的條款逐條保留。
+
+##### ⚠️ 零、改版守則（v7 新增——**連續兩輪栽在同一種錯**）
+
+**v4 弄丟了 v3 的「validator 來源綁定」契約，v6 又弄丟了 v4 的「crossday 型別契約」。**
+兩次都不是判斷錯誤，是**整段重寫時的遺失**——而且兩次都被 review 當成高風險抓回來。
+
+**守則一**：改版時⛔ **不得刪除任何既有契約條款**，只能改寫表達或補強；精簡只能作用在
+敘述文字上，⛔ 不能作用在**可驗證的條款**上。每次改版後要逐條回查前一版的條款是否都還在。
+
+**守則二（v11 新增——⚠️ 已經漏了三次）**：同一個規則常常同時寫在**正文**與**測試矩陣**兩處
+（v8 改了 orchestrator 流程卻漏改測試矩陣、v10 改了 recovery 回傳卻又漏改 11-B）。
+⛔ **改動任何正文條款後，必須同步檢查測試矩陣裡對應的那一條**；改完的驗證要**限定在計畫書正文
+行號範圍內**（⛔ 不用全檔 grep——修訂紀錄的命中會掩蓋正文沒改到的事實，v8 就是這樣過關的）。
+
+⚠️ **v17 補一個可操作的做法**（⛔ 光有原則不夠——這條到 v16 為止已經被違反**五次**）：
+每一輪改完，**逐一列出本輪新增或修改的「可驗證條款」，對照測試矩陣確認每一條都有對應項**，
+⛔ 沒有對應項就是還沒改完。
+
+⚠️ **v22 再加一道**（⛔ 連 checklist 也不夠——v21 又違反了一次，累計**六次**）：
+**修訂紀錄裡每一條新增契約都要標註它對應的測試項編號**。漏掉的話，在寫修訂紀錄時就會卡住，
+⛔ 不必等到下一輪 review 才發現。
+
+##### 一、目標與不做的範圍
+
+**目標**：交付 **preflight**、**crossday**、**capacity probe**、**evidence finalizer**、
+**image pin** 與 **orchestrator**，完成 D／D+1 兩趟正式 Stage 1 replay，並結清 I-100 關閉條件 2
+的後半與條件 3。
+
+**⛔ 不做**：⛔ 不跑 Stage 2；⛔ 不改交易 predicate、decision 結果或任何通用的未啟用路徑；
+⛔ 不重產 bundle；⛔ 不把 bundle ID 硬編進通用 evaluation contract；
+⛔ 不動 `load_artifact()`／`after_sha`／cohort／受管制清單的既有 contract，
+且⛔ 不改 `build_provenance()` 的輸出形狀。
+
+##### 二、受影響檔案
+
+| 檔案 | 內容 |
+|---|---|
+| `replay_bundle/i074_preflight.py`（**新增**） | preflight（三、四） |
+| `replay_bundle/crossday.py`（**新增**） | crossday builder／validator ＋ 獨立 CLI（五～七） |
+| `replay_bundle/provenance.py` | `PROVENANCE_FIELDS` ＋ `validate_provenance(prov, *, role)`（八） |
+| `replay_bundle/evidence.py`（**新增**） | finalizer、`evidence_manifest.json`、archived 層（十、十一） |
+| `replay_bundle/publish.py` | `EXIT_CROSSDAY_MISMATCH = 5`（既有 `rename_noreplace`／`fsync_*`／`remove_tree` 沿用） |
+| `replay_bundle/artifacts.py`／`canonical.py`／`__init__.py` | `CROSSDAY_*`、公開 API |
+| `evaluation.py` | preflight 與 capacity probe 兩個 opt-in（⛔ 不含 crossday） |
+| `scripts/pin-replay-image.sh`（**新增**） | **唯一** build／pin 入口（十三）；⚠️ 同時是 **run identity 檔的 producer**（十三-B） |
+| `replay_bundle/run_identity.py`（**新增**） | run identity 的 schema、`validate_run_identity()`、原子建立與重入語意（十三-B） |
+| `scripts/run-i074-stage1.sh`（**新增**） | **orchestrator**（十-B） |
+| `scripts/run-replay-offline.sh` | 新參數、**一律以 image ID 執行**、peak 量測 fail-closed |
+| `scripts/compare-replay-crossday.sh`／`scripts/finalize-evidence.sh`（**新增**） | crossday 與 finalizer 入口 |
+| `scripts/lib/replay-args.sh`／`scripts/test-replay-args.sh` | 參數所有權、stage 限定、exit 5 passthrough、pinned-image 未 build |
+| `python/scripts/fixtures/stage1_argv.json`（**新增**） | 目前只有 `stage0_argv.json` |
+| `python/scripts/fixtures/finalizer_argv.json`（**新增**） | finalizer 專屬 argv fixture，⚠️ **分別保存 normal 與 recovery 兩組**（十三-B、十七-12） |
+| `python/scripts/validate-i074-run-identity.py`（**新增**） | ⚠️ **host 端**（無 pandas）的 identity 驗證入口，**四類角色**在 `docker run` 前都呼叫它；⚠️ **同時支援 `.json` 與 `.json.gz`**（十三-C-B） |
+| `python/scripts/fixtures/comparator_argv.json`（**新增**） | comparator 的 argv fixture（含 `--run-identity`；v21） |
+| `tests/test_i074_preflight.py`／`test_crossday.py`／`test_evidence.py`（**新增**） | 單元測試 |
+| `docs/development-workflow.md` | **`:930` 要修**（十四） |
+
+##### 三、preflight
+
+| 時點 | 檢查 |
+|---|---|
+| **pre**（replay context 推導後、`_decision_replay_rows()` 之前） | ① `bundle_id` 相符；② symbols 集合恰為 11 檔；③ 每檔末根**台北日期**是 `2026-09-01`；④ `sum(quota) == 13417` 且 `len(universe) == 13417` |
+| **post**（replay 後、發布前） | ⑤ 實際 `rows` 數 == 13417 且 `keys` 集合與 ④ 的 universe 完全相等 |
+
+⛔ helper 不得自己重寫 `bars − 80 − 5`（唯一真相源 `_candidate_bar_range()`）。
+**13417** ＝ 14352 − 11 × 85（**11 檔合計**）。
+
+##### 四、`2026-09-01` 是**台北交易日**
+
+末根 epoch **1788192000**：UTC 是 `2026-08-31T16:00:00Z`（日期 **08-31**），Asia/Taipei 才是
+`2026-09-01`。明訂 **epoch → UTC → `Asia/Taipei` → local date**。
+
+##### 五、crossday 輸入有效性（⛔ 不合法一律 exit 1 且不產 artifact）
+
+兩側 SHA 不同；`generated_at` 合法含時區、轉台北後 `d1 == d + 1 day` 且順序正確；記錄的時間與來源
+完全相同；⚠️ **同檔／同 SHA／同日 ＝ invalid input**（⛔ 不是 mismatch）；
+**來源驗證鏈** **`load_canonical_evidence_artifact()`**（見八-B）→ `validate_after_artifact()`
+→ **`validate_diagnostics(side="after")`**（⚠️ 中間那個**不驗**九欄位）；
+五個身分欄位兩側相同；來源 provenance 形狀錯亦屬 invalid input。
+
+##### 六、crossday 的**完整 schema 與型別契約**
+
+⚠️ **來源重算⛔ 取代不了型別驗證**：Python 裡 `1 == True`、`0 == False`，一份用 `1`／`0` 冒充
+boolean 的 artifact 可以通過所有「重算後相等」的比對。v6 精簡時把型別條款刪掉了，v7 恢復。
+
+```
+rows_match       = d_key_order == d1_key_order 且 d_only／d1_only／row_differences 三者皆空
+provenance_match = provenance_differences 為空
+matched          = rows_match and provenance_match
+```
+
+| 欄位 | 型別契約 |
+|---|---|
+| `schema_version` | `type(x) is int` 且 **== 1** |
+| `kind` | **== `"sr_zone_replay_crossday"`** |
+| `bundle_id` | 非空 str |
+| `d_artifact_sha256`／`d1_artifact_sha256` | **裸 64 字元 lowercase hex**，且**兩者不同** |
+| `d_generated_at`／`d1_generated_at` | 非空 str、含時區 RFC3339 |
+| `d_row_count`／`d1_row_count` | **`type(x) is int` 且 >= 0**（⛔ 排除 bool） |
+| `d_key_order`／`d1_key_order` | 陣列，每個元素是 **`[symbol, timeframe, as_of]` 三個非空 str**；元素**唯一**；⛔ 不排序（順序本身是語意） |
+| `rows_match`／`provenance_match`／`matched` | **`isinstance(x, bool)` 嚴格 bool** |
+| `outcome` | 封閉列舉，且**與三個旗標精確對應**（見下真值表） |
+| `d_only`／`d1_only` | key list：元素同上三元組、**排序**、**唯一**、兩者**互斥** |
+| `d_only_rows`／`d1_only_rows` | 完整 rows，**key 序列逐項等於對應 key list** |
+| `row_differences` | 重用 `compare_rows()` 的形狀；⛔ **不得包含空 `differences`** |
+| `provenance_differences` | `{field, d, d1}`，依 `field` 排序且唯一 |
+| `comparator_provenance` | 通過 `validate_provenance(role="comparator")` |
+| `generated_at` | 非空、含時區 RFC3339，⛔ 不早於 `d1_generated_at` |
+
+⚠️ **top-level 欄位集合是封閉的**（v8 明訂）：以 `_CROSSDAY_FIELDS` 表示，**缺欄或多一個未知欄位
+一律拒絕**——三份 probe 與 evidence manifest 同樣各有自己的 `_FIELDS` 封閉集合。
+
+**`outcome` 真值表**（⛔ 任一組合不符即拒絕）：
+
+| `rows_match` | `provenance_match` | `outcome` | `matched` |
+|---|---|---|---|
+| true | true | `MATCH` | true |
+| false | true | `ROW_MISMATCH` | false |
+| true | false | `PROVENANCE_MISMATCH` | false |
+| false | false | `ROW_AND_PROVENANCE_MISMATCH` | false |
+
+**`row_differences[]` ＝ 直接重用 `compare_rows()`**（`artifacts.py:410`），**`before` 裝 D、
+`after` 裝 D+1**——⛔ 不改欄位名、⛔ 不複述形狀。
+
+**validator 的來源綁定**：`validate_crossday()` **必填**收兩份**實際** artifact 與兩個**實際** SHA，
+**全部由來源重算後精確比對**（SHA、row count、key order、兩個差集、兩份 exclusive rows、
+所有共同 key 的 `compare_rows()`、來源時間與五個身分欄位、`provenance_differences`、
+三個 flag 與 `outcome`），⛔ 不接受 artifact 自報的任何值。
+⚠️ **`by_key` 由 validator 自己從兩份 artifact 的 `rows` 建**，⛔ 不收外部傳入版本
+（⛔ 不製造第三個真相源）。
+
+**有效來源 ＋ `outcome != MATCH` → 先發布再 exit 5；來源不合法或 validator 失敗 → exit 1 且⛔ 不發布。**
+
+##### 七、provenance 的型別契約
+
+⚠️ `build_provenance()` 的輸出形狀⛔ 不動（只補 validator）。`PROVENANCE_FIELDS` 是 10 個欄位的
+單一真相源；`validate_provenance(prov, *, role)` 的 `role` 是封閉列舉
+**`stage0`／`stage1`／`comparator`／`finalizer`**。
+
+| 欄位 | 型別 |
+|---|---|
+| `image_digest` | `sha256:` ＋ 64 hex |
+| `pip_freeze_sha256`／`runner_sha256`／`tooling_patch_sha256`／module hash values | 裸 64 hex |
+| `base_commit` | 40 hex |
+| `source_root` | 絕對路徑字串 |
+| `argv` | 非空字串陣列 |
+| `python_version` | 非空字串 |
+| `project_modules_sha256` | ⚠️ **「Python module name → 64 hex」的 mapping**（`out[name] = …`，`provenance.py:59-75`）——⛔ **不是相對路徑**，寫錯會拒絕現有所有合法 provenance |
+| `runtime_settings` | ⚠️ 鍵集合是**「⊆ 五個」⛔ 不是「恰好五個」**（builder 是 `if hasattr` 才寫，`provenance.py:104`）：`db_driver`(str)／`sr_scoring_model_path`(str)／`sr_scoring_evidence_enabled`(bool)／`sr_scoring_evidence_max_zones`(int)／`sr_scoring_adaptive_zone_builders_enabled`(bool) |
+
+**nullability 依 role**：`base_commit`／`tooling_patch_sha256` 在 `stage0` 可為 null；
+在 `stage1`／`comparator`／`finalizer` ⛔ 不得為 null。
+**唯一允許不同的是 `argv` 裡的 `--output-dir` 值**：接受兩種寫法，取值後換成固定佔位符再比較；
+⛔ 缺值或重複即 invalid input。
+⚠️ **`comparator_provenance` 要與 comparator 的實際執行環境對照**——comparator 執行時自產一份，
+validator 必填收它並逐欄比對。
+
+⚠️ **comparator／finalizer 的 provenance 怎麼推導出來**（v8 新增——v7 只定了 image ID 的來源）：
+兩支官方腳本**沿用與 replay runner 相同的 worktree／tooling-patch 推導流程**
+（`replay_args_prepare_worktree` → `replay_args_tooling_patch_sha256` → `replay_args_runner_sha256`），
+取得 immutable `base_commit`、實際 tooling patch SHA、`source_root` 與 runner SHA；
+⚠️ **provenance 要在實際工作完成、lazy import 都發生之後才建**（與 Stage 1 同一條理由：
+太早建的話 `project_modules_sha256` 少記的正是實際跑過的那些檔案）。
+⛔ **不得直接複製 D 的 provenance**——comparator 與 finalizer 載入的模組集合與 replay 不同。
+
+##### 八、SHA 與 canonical 的精確語意
+
+⛔ `load_artifact()` 算的是**檔案 raw bytes** 的 SHA（`artifacts.py:725`），⛔ 沒有重新 canonicalize。
+
+| 輸入 | 規則 |
+|---|---|
+| `.json` | **要求 raw bytes == `canonical_json_bytes(parsed)`**，`artifact_sha256` **直接算 raw bytes**（與現行語意一致） |
+| `.json.gz` | ⚠️ **`raw_gzip == canonical_gzip_bytes(gunzip_bytes(raw_gzip))`**（見下），解壓後亦須 == `canonical_json_bytes(parsed)`；`artifact_sha256` 算**解壓後的 bytes** |
+| 兩者 | `stored_sha256` 是**實際落地檔案**的 SHA |
+
+⚠️ **canonical gzip ⛔ 不能只驗 `mtime=0` 與無 filename**（v7 修正）：compression level、XFL、
+OS byte 或 deflate 表示不同都會產出不同 bytes 卻通過那兩項。既然 archive 的**唯一 producer**
+是 `canonical_gzip_bytes()`，契約直接定為**整段 round-trip byte-identical**——它同時驗 header、
+壓縮內容與 footer。
+**✅ 2026-09-14 實測**：既有 bundle 的三個 payload（`candles`／`chip`／`governance`）
+全部 round-trip byte-identical，所以此契約可行，且**既有 bundle 可直接當測試 fixture**。
+測試補「**不同 compression level 或其他 header byte → 拒絕**」。
+
+##### 八-B、⚠️ `.json.gz` 的 loader 落點（v8 新增）
+
+⛔ **v7 的矛盾**：來源鏈寫「`load_artifact`」，SHA 章節卻允許 `.json.gz`，而範圍又明訂⛔ 不改
+`load_artifact()`——實作者無從判斷那是指舊函式還是某個新 wrapper。而既有 loader 直接把 raw bytes
+解碼成 UTF-8 JSON（`artifacts.py:703`），**確實讀不了 gzip**。
+
+**定案：新增 `load_canonical_evidence_artifact(path, kind)`**，⛔ 既有 `load_artifact()` **完全不動**。
+
+| 副檔名 | 流程 |
+|---|---|
+| `.json` | 呼叫**既有** `load_artifact()`，取它回傳的 `(parsed, raw_sha)`，再驗 **`raw_sha == sha256_hex(canonical_json_bytes(parsed))`** |
+| `.json.gz` | 讀 raw gzip → 驗 **round-trip byte-identical** → 解壓 → 驗 **== `canonical_json_bytes(parsed)`** → 檢查 `schema_version`／`kind` |
+
+* **回傳 `EvidenceLoad`**（v11 擴充——⚠️ v10 只回 `(parsed, artifact_sha256)`，但 finalizer
+  還需要 `stored_sha256` 與 `stored_bytes`，而 raw bytes ⛔ 沒有從 loader 傳出；finalizer 若自己
+  再讀一次就**違反「同一次讀取」契約**）：
+
+  | 欄位 | 內容 |
+  |---|---|
+  | `parsed` | 解析後的 artifact |
+  | `artifact_sha256` | **解壓後 bytes** 的 SHA（`.json` 時即 raw bytes，與 `load_artifact()` 語意一致） |
+  | `stored_sha256` | **實際落地檔案** raw bytes 的 SHA |
+  | `stored_bytes` | 該 raw bytes 的長度 |
+
+  ⚠️ **crossday 只取前兩項**，**finalizer／recovery 用完整結果**——這樣三項 metadata 都來自
+  **同一次讀取**。既有 `load_artifact()` 的公開 API ⛔ 不變；
+* ⚠️ **crossday CLI 與 finalizer 都只用這個入口**；既有 Stage 1／2 繼續用 `load_artifact()`。
+
+⚠️ **`.json` 這條⛔ 不得讀第二次檔案**（v9 修正）：`load_artifact()` 只回傳 `(parsed, sha)`，
+**raw bytes ⛔ 不會傳出**——wrapper 若自己再讀一次，parsed／SHA 與第二份 raw 可能已不是同一版本
+（檔案在兩次讀取之間被換掉）。改用 **SHA 對照**：`raw_sha == sha256_hex(canonical_json_bytes(parsed))`
+等價於「raw bytes 就是 canonical bytes」，且只讀一次。⛔ 不為此改 `load_artifact()` 的公開 API。
+
+##### 九、operational 與 archived 是兩層
+
+| 層 | 形式 | 產生者 | SHA |
+|---|---|---|---|
+| **operational** | `.json`（canonical，現況不動） | replay／crossday／probe 各自的行程 | `artifact_sha256` |
+| **archived** | `.json.gz` | ⚠️ **只有 evidence finalizer** | `stored_sha256` ＋ `stored_bytes` |
+
+**所有產生者只寫 canonical operational `.json`**；`.json.gz` 與 `stored_sha256` **一律由 finalizer
+統一產生**。probe completion 引用的是前兩份的 **`artifact_sha256`**。
+**實測依據**：baseline replay row 每列約 599 B → 13417 列約 7.7 MiB、gzip 25x → 約 0.3 MiB。
+⚠️ Git LFS **未安裝**、無不可變外部儲存。
+
+##### 十、⚠️ 三個位置**完全分離**——v6 的 root 與 logs 互相衝突
+
+⛔ **v6 的邏輯矛盾**：finalizer 要求正式 root **必須不存在**（整包 rename 發布），卻又把執行 log
+放在該 root 底下的 `logs/`——D／D+1 執行期間一建 log 目錄，root 就存在了，最後的
+`rename_noreplace()` **必然失敗**。**定案：三個位置完全分離**：
+
+| 用途 | 位置 | 版控 |
+|---|---|---|
+| **operational artifacts**（runner 的 `--output-dir`） | **repo 外**的暫存／工作目錄 | ⛔ 否 |
+| **execution logs** | **repo 外**的持久工作目錄 | ⛔ 否 |
+| **archived evidence** | `python/baselines/i074_stage1/` | ✅ 是 |
+
+⚠️ **archived evidence root 在 finalizer 執行前必須完全不存在**，⛔ 任何其他步驟都不得在它底下
+建任何東西。
+
+**精確路徑表**（共 **10 個檔案**）：
+
+| 子目錄 | 檔案 |
+|---|---|
+| `d/` | `after_artifact.json.gz`、`cohort_manifest.json.gz` |
+| `d1/` | `after_artifact.json.gz`、`cohort_manifest.json.gz` |
+| `crossday/` | `crossday_artifact.json.gz` |
+| `probe/` | `capacity_probe_computation.json.gz`、`capacity_probe_measurement.json.gz`、`capacity_probe.json.gz` |
+| `identity/` | `run_identity.json.gz`（⚠️ **v11 納入**——見下） |
+| root | `evidence_manifest.json`（⛔ **不壓縮**——索引要能直接讀；**排除自身**） |
+
+⛔ **禁止未知 evidence**（多檔即中止）。
+
+⚠️ **run identity 要進證據包**（v11 修正）：v10 一邊說 recovery「⛔ 不讀 operational inputs、
+只驗既有九檔」，一邊又要求 manifest 與 **repo 外**的 run identity 比對——**兩者矛盾**，
+而且外部 identity 一旦遺失，**已完整發布的 evidence 就再也 recovery 不了**。
+→ **把 canonical run identity 納入 archived evidence**（`identity/run_identity.json.gz`），
+於是 **recovery 只依賴既有 root 內部的關係**，證據自足。
+⚠️ repo 外那份仍然存在，它是**操作期的跨日協調檔**；歸檔的這份是**證據**，兩者內容必須逐欄相同
+（正常 finalization 時比對，⛔ recovery 時不需要外部那份）。
+
+##### 十-B、⚠️ orchestrator：exit 5 之後誰跑 finalizer
+
+⛔ **v6 沒定義**。`compare-replay-crossday.sh` 一回傳 5，普通 `set -e` 流程就停了，
+finalizer 永遠不會執行——而 mismatch **正是**最需要保存證據的情況。
+
+**`scripts/run-i074-stage1.sh`（orchestrator）的流程定死**：
+
+1. **捕捉** crossday 的 exit code（⛔ 不讓 `set -e` 直接中斷）；
+2. **只接受 0 或 5**——其餘一律視為失敗，⛔ 不執行 finalizer；
+3. 執行 **finalizer**；
+4. finalizer 成功 → **回傳原始的 0 或 5**；
+5. finalizer 失敗 → **回 1**；
+6. ⚠️ **finalizer 回 `EXIT_DURABILITY_UNCONFIRMED`（3）時，durability code 優先於原始 0／5**
+   （v8 新增）——證據已發布但落盤未確認，那是**必須被看見**的狀態，⛔ 不得被 `MATCH` 的 0 蓋掉。
+
+##### 十一、evidence finalizer：一次發布整包
+
+⚠️ **順序定死為兩階段**（v10 修正——v9 的「寫 manifest → 全圖驗證」與「provenance 要在 lazy
+import 都發生後才建」直接衝突：manifest 內含 `finalizer_provenance`，而全圖驗證期間才載入的專案
+模組**不會進** provenance）：
+
+* **階段 A**：讀入所有 operational inputs、完成 **9 個 archive payload** 的**全部驗證**
+  （⚠️ **含 `identity/run_identity.json.gz`**；manifest 才在階段 B 建立）——此時所有 project import 都已發生；
+* **階段 B**：**才建 `finalizer_provenance` 與 manifest**，放進 staging；
+* ⚠️ 階段 B 之後的封閉 schema 檢查與來源複核**⛔ 不得再產生任何新的 project import**。
+
+⚠️ **「import 都已發生」需要可執行的保證，⛔ 不能只用文字宣告**（v11）：
+`build_provenance()` 的 dict literal 裡 **`project_module_hashes()` 排在 `runtime_settings()`
+之前**求值（`provenance.py:133-147`），而後者在 `config_module is None` 時會 **lazy-import
+`config`**——⚠️ 而 **`config` 正是專案模組**（`PROJECT_MODULE_NAMES = ("config", "db")`，`:26`）。
+所以 finalizer 若沒先載入 config 就呼叫 builder，**`config` 的 hash 會被漏記**。
+
+* **階段 A 要預先 `import config` 並把它以 `config_module=` 傳進 builder**；
+* **階段 B 完成後重算一次 project-module mapping，斷言與 manifest 裡的 provenance 完全相同**
+  ——這才是「⛔ 不得新增 import」的**實際守門**，⛔ 不是註解。
+
+沿用 `publish.py` 既有機制：**`probe_no_clobber()` 先實測目錄 rename 語意** → **sibling staging**
+建完整 tree → **階段 A 全圖驗證** → **階段 B 建 provenance 與 manifest** → fsync →
+**`rename_noreplace()` 一次發布整個 root**
+（正式路徑「**不存在** → **完整**」）→ rename 前任一步失敗**只 `remove_tree(staging)`**，⛔ 不碰正式路徑。
+
+⚠️ **rename 成功不等於落盤——commit point 之後是另一種狀態**（v8 新增）。
+既有 bundle 發布已經處理過這個分界（`bundle.py:362`）：rename 後還要 fsync 正式 root 的
+**parent**，失敗時拋 `DurabilityUnconfirmed` 並明寫「⛔ 不刪除、不重來」。
+⛔ **v7 的「finalizer 失敗一律回 1」在這個狀態下是錯的**——那時正式 root **已經存在且有效**。
+
+| 階段 | 失敗處置 |
+|---|---|
+| rename **前**（建 staging、全圖驗證、逐一 `fsync_file` **10 個檔案** ＋ 所有巢狀目錄的 `fsync_dir`） | `remove_tree(staging)`、**exit 1**，正式路徑仍不存在 |
+| `rename_noreplace()` 本身 | 同上（`FileExistsError` 代表正式 root 已存在 → ⛔ 不覆蓋，exit 1） |
+| rename **後** fsync `python/baselines/` 失敗 | ⚠️ **正式 root 保留、⛔ 不刪除**，回 **`EXIT_DURABILITY_UNCONFIRMED = 3`** |
+
+⚠️ **復原路徑要用專屬模式，⛔ 不能靠「偵測到 root 已存在」分流**（v9 修正）：
+「重複發布」與「durability recovery」**從檔案狀態看完全相同**——都是正式 root 已存在。
+v8 同時規定前者 exit 1、後者回 0，實作者無從判斷該走哪條。**定案：`--recover-durability` 明示模式**：
+
+| 模式 | root 已存在時 |
+|---|---|
+| 一般 finalizer | ⛔ **仍回 1**（那是重複發布，⛔ 不覆蓋、⛔ 不當成成功） |
+| **`--recover-durability`** | **要求 root 必須已存在**；⛔ 不讀 operational inputs、⛔ 不重新壓縮、⛔ 不覆寫任何檔案；**只驗證既有 10 個檔案（全圖驗證，⚠️ 含歸檔的 run identity）並重新 fsync parent**，通過後⚠️ **依已驗證的 crossday artifact 還原原始結果**（見下） |
+| `--recover-durability` 但 root 不存在／缺檔／驗證不過 | **回 1** |
+
+⚠️ **recovery ⛔ 不得固定回 0——那會讓 mismatch 的 5 永遠消失**（v10 修正）。情境是：
+crossday mismatch（5）→ finalizer 已發布但 parent fsync 失敗（**3 覆蓋 5**）→ recovery 成功（**0**）。
+⛔ 最後**沒有任何一次成功結束的指令回傳過 5**，機器端會把 recovery 的 0 讀成「整組 Stage 1 成功匹配」。
+**定案**：recovery 成功 fsync 後，**從已通過驗證的 `crossday_artifact.json.gz` 讀 `outcome`**
+還原終端結果——**`MATCH` → 0**、**其餘三種 → 5**。測試要**分別覆蓋原始 0 與原始 5 兩條路徑**。
+
+**全圖驗證**：D／D+1 的 after 與 cohort 的 schema ＋ **diagnostics**；**cohort 記的 SHA 確實指向
+對應的 after**；**crossday 以這兩份實際 after 重跑 `validate_crossday()`**；probe completion
+**指向實際的 computation／measurement**，且⚠️ **呼叫三份完整的 probe schema validator**
+（v9 修正——v8 只寫「指向」，那會讓「computation、completion SHA 與 manifest 被同步改掉」的
+**無效 probe** 照樣歸檔），並驗**三份 provenance 完全相同、確實來自同一個 runner invocation**；
+**所有檔案同一個 `bundle_id`**；
+**provenance 依 role 驗證**；⚠️ **所有 provenance 的 `image_digest` 等於 manifest 記的
+`expected_image_id`**（見十三）。
+
+⚠️ **manifest 的每一項 metadata 都要從實際 archive 重算並逐項比對**（v10 新增——v9 只定了型別，
+而 **recovery 完全依賴既有 root**，只驗型別的話一份索引值錯誤的 manifest 照樣通過）：
+
+| 欄位 | 必須等於 |
+|---|---|
+| `artifact_sha256` | **同一次讀取**所解壓內容的 SHA |
+| `stored_sha256` | **同一次讀取**的 gzip raw bytes 的 SHA |
+| `stored_bytes` | 該 raw bytes 的**長度** |
+
+並且 manifest 的 **`bundle_id` 與 `expected_image_id` 要與**歸檔的** `identity/run_identity.json.gz`
+比對**（⚠️ **recovery 也走這條**，⛔ 不依賴 repo 外那份）；正常 finalization 時**另外**確認歸檔的
+這份與 repo 外那份逐欄相同（十三-B）。
+測試要含**三種 metadata 各自被竄改**的拒絕案例。
+
+**`evidence_manifest.json` 的封閉 schema**（v8 補型別）：
+
+| 欄位 | 型別 |
+|---|---|
+| `schema_version` | `type(x) is int` 且 **== 1** |
+| `kind` | == `"sr_zone_evidence_manifest"` |
+| `bundle_id`／`generated_at` | 非空 str（後者含時區 RFC3339） |
+| `expected_image_id` | **`sha256:` ＋ 64 lowercase hex** |
+| `files` | mapping：**key 精確等於那 9 個 archive 相對路徑**（⚠️ manifest 排除自身，故是 9 不是 10）；value 為 `{artifact_sha256, stored_sha256, stored_bytes}`，兩個 SHA 皆**裸 64 lowercase hex**、`stored_bytes` 為 **`type(x) is int` 且 > 0** |
+| `finalizer_provenance` | 通過 `validate_provenance(role="finalizer")` |
+
+⛔ 缺欄／多欄／`files` key 不符一律拒絕。
+
+##### 十二、probe 三檔的封閉 schema 與**不變條件**
+
+三份都是 operational `.json`，都有 `schema_version`（== 1）、`kind`、`bundle_id`、`generated_at`、
+`provenance`。⚠️ **⛔ 不設頂層 `argv`**（v7 修正）——只留 `provenance.argv`，⛔ 不製造雙真相源。
+⚠️ 三份的 provenance **role 都是 `stage1`**，且 measurement／completion 是**同一個 runner
+invocation 的外層產物**，⛔ 不各自虛構一份執行身分。
+
+**共同欄位的型別契約**（v9 補——⚠️ 與 crossday 同一條理由：`True == 1`、`1 == True`，
+只寫「== 1」而不定型別的話，`True` 會通過）：
+
+| 欄位 | 型別 |
+|---|---|
+| `schema_version` | **`type(x) is int`** 且 == 1 |
+| `kind` | 各自的常數字串 |
+| `bundle_id` | **非空 str** |
+| `generated_at` | 非空 str、**含時區 RFC3339** |
+| `provenance` | 通過 **`validate_provenance(role="stage1")`** |
+| `completed`（completion） | **`type(x) is bool` 且 `is True`** |
+| 兩個 `*_artifact_sha256`（completion） | **裸 64 字元 lowercase hex** |
+
+測試要含「用 `True` 冒充 `schema_version`」「用 `1` 冒充 `completed`」「大寫 SHA」
+「`generated_at` 缺時區」四組拒絕案例。
+
+⚠️ **專屬欄位同樣要嚴格型別，⛔ 不能只靠數值等式**（v10）：`200.0 == 200` 為真，所以
+`row_count` 只寫「== 200」會放行 float。測試補 **`row_count=200.0`**、
+**`elapsed_seconds=True`**（bool 是 int 的子類）與 `quota_by_symbol`／`rows` **容器型別錯**三組。
+
+| 檔案 | `kind` | 專屬欄位 |
+|---|---|---|
+| `capacity_probe_computation.json` | `sr_zone_probe_computation` | `quota_by_symbol`（**mapping**）、`row_count`（**`type(x) is int`**）、`rows`（**list**）、`elapsed_seconds`（**`type(x) is float`** 且 > 0） |
+| `capacity_probe_measurement.json` | `sr_zone_probe_measurement` | `peak_rss_bytes`／`host_low_bytes`／`cgroup_limit_bytes`（**皆 `type(x) is int` 且 > 0，單位 bytes**，⛔ 不得 null 或 0 佔位） |
+| `capacity_probe.json`（**最後寫**） | `sr_zone_probe_completion` | `computation_artifact_sha256`／`measurement_artifact_sha256`（前兩份的 **`artifact_sha256`**，64 hex）、`completed`（必須 `true`） |
+
+**computation 的不變條件**（v7 新增）：
+
+* **`row_count == len(rows) == sum(quota_by_symbol.values()) == 200`**；
+* **`quota_by_symbol` 的 key 恰為 preflight 的 11 個 symbols**；
+* 每個 quota 是**嚴格正整數**（`type(x) is int` 且 > 0，⛔ 排除 bool）；
+* **`rows` 的 key 唯一**，且**每個 symbol 的實際列數等於它的 quota**；
+* `rows` 必須通過 **`validate_replay_errors()` 與 `validate_diagnostics()`**。
+  ⚠️ **守門要先搬家**（v8）：它目前是 `evaluation.py` 私有的 `_assert_no_replay_errors()`
+  （`evaluation.py:2954`），而 `replay_bundle` ⛔ 不得反向 import `evaluation.py`；另抄一份又是
+  **雙真相源**（`NO_ZONE_SCORES_ERROR` 已經犯過一次）→ **移到 `replay_bundle/artifacts.py`
+  改成公開的 `validate_replay_errors()`**，`evaluation.py` 與 probe／finalizer **共用同一份**。
+  ⛔ **`NO_ZONE_SCORES` 仍是唯一合法例外，行為一字不改。**
+
+⚠️ **peak／host low／cgroup limit 任一取得失敗 → ⛔ 不發布 completion**
+（`run-evaluation.sh:261` 現在是「警告 ＋ 寫 0」，正式 probe ⛔ 不得把「量不到」歸檔成 0）。
+三份都納入受管制清單。
+
+##### 十三、image pin：唯一入口與**全部消費者**
+
+* **唯一入口 `scripts/pin-replay-image.sh`**：build → inspect 取 ID →
+  **stdout 只印 machine-readable 的 `sha256:…`**（其餘訊息走 stderr）；
+* ⚠️ **消費者是五個**（v7 修正——v6 漏了 probe，那會讓容量驗證量到**另一個 image**）：
+  **capacity probe、D、D+1、crossday comparator、evidence finalizer**。
+  其中 **probe／D／D+1 必須使用完全相同的 image ID**；
+* `evidence_manifest.json` 保存 **`expected_image_id`**，由**全圖驗證**確認各 provenance 的
+  `image_digest` 與它一致；⚠️ **probe／D／D+1 的 image ID 相同這件事要在執行時就驗**
+  （v8）——⛔ 不能只留到 finalizer 最後才發現，那時三趟都跑完了；
+* ⚠️ **runner 無 `REPLAY_IMAGE_ID` 時的行為定案**（v7 修正——v6 只寫「有 ID 時禁止 build」，
+  留下兩種都符合文字的實作）：**runner 自己呼叫 `pin-replay-image.sh` 取得 ID，再一律以 ID 執行**。
+  這樣既保留「不設環境變數也能跑」的既有使用方式，又維持**單一 build 實作**；
+  **正式模式則要求預先提供 ID**——⚠️ **「正式模式」的判定定死**（v8）：
+  帶 **`--i074-preflight` 或 `--i074-capacity-probe`** 即視為 I-074 正式流程，
+  **缺 `REPLAY_IMAGE_ID` 立即拒絕**（⛔ 不自動 pin）；**crossday 與 finalizer 一律要求** ID；
+  其餘既有 Stage 1／2 才允許無 ID 時自動呼叫 pin script；
+* ⛔ **衝突變數精確列為 `PY_IMAGE`**，同時設定即拒絕；
+* ⚠️ **跨日的共同狀態由 run identity 檔承擔**——完整 contract 見十三-B。
+* ⚠️ **所有模式最終都以 image ID 執行**——⛔ 不用 tag（現行 `:176` 用 `$IMAGE`，build 與 run
+  之間有 tag 移動窗口）。測試要證明**無 pin 路徑也是 `docker run <image-id>`**。
+
+##### 十三-B、⚠️ run identity 檔的完整 contract（v10）
+
+⛔ **v9 只寫「repo 外、原子建立、no-clobber、至少兩欄」，那不足以唯一實作**——producer、路徑、
+schema、重入語意、取得方式全都沒定，不同實作者會做出互不相容的流程。
+
+| 項目 | 定案 |
+|---|---|
+| **producer** | **`scripts/pin-replay-image.sh`**（它已是唯一 build／pin 入口，image ID 就在它手上） |
+| **位置** | **repo 外的持久目錄**：`${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage1/run_identity.json`。⛔ **不得放 `/tmp`**——那會被清掉，而這份要跨日存活 |
+| **封閉 schema** | `schema_version`（`type(x) is int` 且 == 1）、`kind`（== `"sr_zone_run_identity"`）、`bundle_id`（非空 str）、`expected_image_id`（`sha256:` ＋ 64 lowercase hex）、`created_at`（含時區 RFC3339）。⛔ 缺欄／多欄一律拒絕 |
+| **序列化** | `canonical_json_bytes()` ＋ 同目錄 temp ＋ `rename_noreplace()`（與既有原子發布同一機制） |
+| **validator** | `validate_run_identity()`，與其他 artifact 同樣是封閉 schema ＋ 型別 |
+| **重入語意** | ⚠️ **依「檔案存不存在」分流，⛔ 不比對 `created_at`**（見下） |
+| **消費者** | ⚠️ **依模式分流**（v18 修正）：**probe／D／D+1 三趟 runner ＋ comparator ＋ normal finalizer** 讀**這份 repo 外的協調檔**；⛔ **`--recover-durability` 例外**——它**只讀 evidence 內的 archived copy**（`identity/run_identity.json.gz`），⛔ 不碰 repo 外那份 |
+| **比對時機** | ⚠️ **依角色分成四類**（v20 修正）——⛔ **「有沒有 bundle path」才是分界**，見下表 |
+
+⚠️ **v19 把「Docker 前驗四種」套到了全部一般消費者，但只有 runner 手上有 bundle path**：
+`compare-replay-crossday.sh` 只收 `--d`／`--d1`／`--output-dir`（十三-C 的 A），
+normal finalizer 只收 evidence root ＋ 8 份 operational artifact ＋ identity ＋ provenance 參數
+（同表）——**兩者都⛔ 沒有 bundle path**，照 v19 的文字⛔ 無法唯一實作。
+
+| 角色 | 缺檔／schema／`expected_image_id`／image 存在 | **`bundle_id` 的比對時點** |
+|---|---|---|
+| **probe／D／D+1**（runner） | **Docker 前** | **Docker 前**——⚠️ 它們有實際的 `--bundle` path 可當第二來源 |
+| **comparator** | **Docker 前** | **容器內**：來源驗證（兩份 after artifact 讀進來）之後、**crossday artifact 發布之前**——⚠️ **需要 identity 當獨立第二來源**，見下 |
+| **normal finalizer** | **Docker 前** | **容器內**：**階段 A**，**manifest／fsync／rename 之前**（v21 修正——既定流程是**先建 sibling staging、才做階段 A 全圖驗證**，所以⛔ 不能承諾「staging 前」；失敗時**清除 staging、正式 root 不存在**） |
+| **`--recover-durability`** | **Docker 前** | **容器內**：全圖驗證的「所有檔案同一個 `bundle_id`」，**fsync 之前** |
+
+⚠️ **comparator 也要掛 identity**（v21 修正）：v20 說它「載入兩份 after 後比對」，但
+`compare-replay-crossday.sh` 只有 `--d`／`--d1`／`--output-dir`，⛔ **沒有把 identity 掛入或注入**
+——兩份 after 只能**互相**比對，**若兩份都帶同一個錯誤 `bundle_id`，就沒有任何獨立來源能發現**。
+→ **comparator 比照 normal finalizer**：**same-path 唯讀掛載** ＋ 受保護的 **`--run-identity`**
+（自己的 ownership checker、`allow_abbrev=False`、拒絕重複），以 identity 對照兩份 after 的
+`bundle_id`。新增 **`python/scripts/fixtures/comparator_argv.json`**，並補
+**comparator 的 argv／mount／ownership 測試**。
+
+⚠️ 四類的共同點是**前四項一律在 Docker 前**；差別只在 **`bundle_id` 要等到哪一刻才有第二來源**。
+⛔ **不得為了統一而在 comparator／finalizer／recovery 的 host 端補一個 bundle path**——
+那等於把 operational input 帶進不該有它的角色。
+
+⚠️ **v10 的重入語意自相矛盾**：pin script 是 build → inspect，而 identity 含**每次都會變的
+`created_at`**，所以「所有欄位完全相同才 no-op」**永遠不成立**；而且重新 build 也⛔ 不保證得到
+相同的 image ID。**定案：依檔案存不存在分流**：
+
+| identity | pin script 的行為 |
+|---|---|
+| **已存在** | 驗 schema ＋ 確認 `bundle_id` 與請求的相同 → **`docker image inspect` 確認其中的 image ID 仍存在** → **直接輸出既有 ID**。⛔ **不 build、⛔ 不產新 `created_at`、⛔ 不重寫檔案** |
+| **不存在** | 才 build → inspect → 產生**一次性**的 `created_at` → 原子發布 |
+| 已存在但**該 image 已不在本機** | ⚠️ **fail-closed（exit 1）**——⛔ **不得重建後換一個 ID**，那會讓跨日的三趟跑在不同 image 上 |
+
+⚠️ **identity 也要有 commit-point 狀態機**（v12——v11 只說「要 fsync」，⛔ 沒定失敗處置）。
+⚠️ 少了它會有一個**永遠修不好**的狀態：rename 成功但 parent fsync 失敗後 identity 已存在，
+下次執行走「既有 identity」分支直接回傳 ID 而**不重新 fsync**，durability 就再也不會被確認。
+**比照 evidence root 定案**：
+
+| 階段 | 處置 |
+|---|---|
+| temp 寫入後 `fsync_file` 失敗 | **pre-commit**：清 temp、**回 1**，正式路徑仍不存在 |
+| `rename_noreplace()` 成功、parent `fsync_dir` 失敗 | ⚠️ **保留正式 identity**、**回 3** |
+| **既有合法 identity 的 no-op 路徑** | ⚠️ **也必須重新 `fsync_file` ＋ parent `fsync_dir`**，成功才回 0——**這就是上述狀態的修復路徑** |
+| **no-op 路徑的兩次 fsync 任一失敗** | ⚠️ **保留 identity**、⛔ **不得 build 或重寫**、回 **3**（v13 補——v12 只定義了成功回 0） |
+| 既有 identity 但 image 已不在本機 | 仍 **fail-closed（1）**，⛔ 不因 recovery 而重建 |
+
+⚠️ **非零結果時⛔ 不得在 stdout 輸出 image ID**（v13）：stdout 是消費者讀取 ID 的唯一管道，
+失敗卻照樣印出來，下游會拿著一個 durability 未確認的 ID 繼續跑。
+⚠️ **v14 修正**：上面這段在 v13 被夾在**表格中間**，把最後一列切出了表外——Markdown ⛔ 不會把
+它算進狀態表。⚠️ 這與 I-100 Stage 0 計畫書 v13 踩到的是**同一種錯**（表格被段落截斷）；
+增補式修訂要特別注意**插入點是否落在表格內部**。
+⚠️ **⛔ 移除 `I074_RUN_IDENTITY`**（v11）——「只供測試」在實作上**無法強制**。
+測試改為**覆寫 `XDG_DATA_HOME`**，正式流程一律用固定推導值。
+
+**消費端的改動**：`scripts/run-replay-offline.sh`、`scripts/compare-replay-crossday.sh`、
+`scripts/finalize-evidence.sh` 各自在 `docker run` 前讀取並比對；`scripts/test-replay-args.sh`
+補 shell 測試矩陣：**四類角色的前四項**（缺檔／schema／`expected_image_id` 不符／image 不存在）
+**都要在 Docker 啟動前**被拒絕；⚠️ **`bundle_id` 那一項只有 runner 在 Docker 前**，
+comparator／finalizer／recovery 各自在容器內的對應時點（見上表）——
+⛔ 測試⛔ 不得承諾某個角色的 host 端做不到的檢查。producer 與 schema 見二的檔案表。
+
+⚠️ **容器內怎麼讀到它——normal finalizer 的資料流**（v12 新增）：finalizer 跑在容器裡，而
+identity 在 **host 的 repo 外**；⛔ **容器內⛔ 不能自己依 `XDG_DATA_HOME` 重新推導**——容器的
+`HOME` 與環境和 host 不同，推出來的是另一個路徑。**定案**：
+
+| 模式 | 資料流 |
+|---|---|
+| **normal finalization** | shell 推導並驗證 **host 的絕對路徑** → ⚠️ **same-path 唯讀掛載**（見下） → 由官方腳本注入受保護的 **`--run-identity <該同一個絕對路徑>`** |
+| **`--recover-durability`** | ⛔ **不掛載、不注入**外部 identity——**只讀 archived 的那份**（`identity/run_identity.json.gz`） |
+
+⚠️ **`--run-identity` ⛔ 不得加進既有的兩份 injected-args 清單**（v13 修正——v12 寫錯了）：
+
+* `SCRIPT_INJECTED_ARGS` 在 `evaluation.py:3186`，那是 **evaluation CLI** 的；
+  而 finalizer 規劃在 **`replay_bundle/evidence.py`**，⛔ 根本不走那個 parser；
+* shell 側的攔截由 `REPLAY_INJECTED_ARGS`（`scripts/lib/replay-args.sh:16`）控制，
+  而它會**連唯一前綴縮寫一起擋**。⚠️ **實測（2026-09-14）**：把 `--run-identity` 加進去之後，
+  **既有合法的 `--run-id` 立刻被拒絕**，訊息還會誤稱它「會被展開成 `--run-identity`」——
+  ⛔ 那會直接弄壞 Stage 1／2 的既有參數。
+
+**定案**：
+
+| 項目 | 做法 |
+|---|---|
+| 所有權檢查 | finalizer **自己的** injected-args ownership checker，⛔ **不共用** `REPLAY_INJECTED_ARGS` 的前綴清單 |
+| parser | `evidence.py` 的 finalizer parser 自設 **`allow_abbrev=False`** ＋ 自行檢查**重複參數** |
+| 模式規則 | **normal 模式要求** identity path；**recovery 模式明確禁止**（傳了即拒絕） |
+| fixture | **`python/scripts/fixtures/finalizer_argv.json`**，⛔ 不把 finalizer 參數塞進 `stage1_argv.json`；⚠️ **分別保存 normal 與 recovery 兩組 argv** |
+| fixture 的用法 | ⚠️ **兩端共用同一份**：shell 測試斷言**官方腳本實際產生的 argv 與 fixture 逐 token 相同**；`test_evidence.py` 用**同一份** fixture 餵 finalizer parser（normal 恰好一個 identity path、recovery ⛔ 不含）。⛔ 只驗行為而不比對 argv，等於沒有釘住兩端的契約 |
+| fixture 的來源 | ⚠️ **依十三-C 的 CLI matrix 建立**，⛔ 不是由實作者自選 argv 再凍結——後者只凍結「實作者選了什麼」，⛔ 證明不了它符合已裁決的契約 |
+| 回歸 | ⚠️ 必須有測試確認**既有合法的 `--run-id` 仍可使用** |
+
+##### 十三-C、⚠️ finalizer 的完整 CLI matrix 與 recovery 的 image 守門（v15）
+
+⛔ **v14 的缺口**：十三要求 finalizer 一律以指定 image ID 執行、十三-B 要求 identity 在
+`docker run` **之前**比對，但 recovery **只讀 evidence 內的 archived identity**（一個 `.json.gz`）
+——**「Docker 啟動前讀 gzip 內的 identity」沒有定義路徑**。照 v14 的文字，實作者只能三選一，
+而三條都不可接受：①先用**尚未驗證**的 image 啟動 Docker 再在容器內檢查（違反「Docker 前拒絕」）；
+②**完全不比對** recovery 的 image（recovery 會在另一個 image 上完成）；③各自發明 host 端驗證入口
+（不同實作不一致，且是**雙真相源**）。
+
+**A-0、⚠️ `--run-identity` 的路徑語意：same-path bind mount**（v16 定案）
+
+⛔ **v15 自相矛盾**：十三-B 寫「注入**容器內**絕對路徑」，十三-C 的 matrix 卻寫
+「`--run-identity <**host** 絕對路徑>`」。⚠️ 除非明訂掛載方式，否則 Python finalizer 會收到
+**容器內不存在**的 host path。
+
+**定案：沿用既有慣例 same-path bind mount**——`run-replay-offline.sh:113` 對 bundle 與 output dir
+就是這樣做的（`-v "$ABS":"$ABS":ro`），註解寫明理由：**「掛在與 host 相同的絕對路徑上，
+這樣參數不用改寫，也就不會改寫錯」**。
+
+| 層 | 內容 |
+|---|---|
+| shell | 推導 identity 的 **host 絕對路徑** `$ID_ABS` 並驗證存在 |
+| docker | `-v "$ID_ABS":"$ID_ABS":ro`——⚠️ **同一個絕對路徑**，⛔ 不改寫 |
+| python argv | `--run-identity "$ID_ABS"`——host 與 container 看到的是同一個路徑，⛔ **不存在兩種路徑之分** |
+| fixture | 保存該 argv（動態路徑用 placeholder，與 `stage0_argv.json` 同一慣例） |
+| shell 測試 | 另外斷言 **mount 是 same-path 且為 `:ro`** |
+
+**A、CLI matrix**（⚠️ fixture 依這張表建立，⛔ 不是由實作者自選 argv 再凍結——
+fixture 只能凍結「實作者選了什麼」，⛔ 證明不了它符合已裁決的契約）：
+
+| | **normal finalization** | **`--recover-durability`** |
+|---|---|---|
+| evidence root | **必填** | **必填** |
+| 8 份 operational artifact（D 的 after＋cohort、D+1 的 after＋cohort、crossday、probe ×3） | **全部必填** | ⛔ **一律禁止** |
+| `--run-identity <絕對路徑>` | **必填**，且⚠️ **只能由官方腳本注入**（finalizer 自己的 ownership checker）；⚠️ **same-path**，見十三-C-0 | ⛔ **禁止**（傳入即拒絕） |
+| `--recover-durability` | ⛔ **禁止** | **必填** |
+| provenance 注入參數（`image_digest`／`base_commit`／`tooling_patch_sha256`／`source_root`／`runner_sha256`） | 由腳本依十三-B 的推導流程取得後注入，**寫進新建的 `finalizer_provenance`** | ⚠️ **同樣注入，但用途不同**——recovery ⛔ 不建新 provenance，改**逐欄比對**，見 A-2 |
+
+**B、recovery 的 image 守門——host 端、Docker 之前**：
+
+recovery shell 在 `docker run` **之前**，以**host 端、dependency-light 的入口**
+讀取並**完整驗證** `<evidence-root>/identity/run_identity.json.gz`：
+canonical gzip **round-trip byte-identical** → 解壓 → canonical JSON → **`validate_run_identity()`**
+（⚠️ **同一份 validator**，⛔ 不在 shell 裡另寫一套 schema 檢查）。
+接著把其中的 **`expected_image_id` 與 `REPLAY_IMAGE_ID` 比對**，並以 `docker image inspect`
+**確認該 image ID 存在**。⚠️ **任一不符 → Docker 尚未啟動就中止。**
+
+⚠️ **這一關⛔ 不驗 `bundle_id`**（v19）：recovery ⛔ 不讀 operational inputs，**host 端沒有第二個
+可信的 bundle_id 來源**——⚠️ **validator 雖然支援 `--bundle`，但 recovery ⛔ 不傳**（v23 澄清：
+它手上根本沒有 bundle 路徑），所以「與誰不符」無從判斷。`bundle_id` 與 manifest／其他 evidence 的關係由**容器內的全圖驗證**
+（「所有檔案同一個 `bundle_id`」）負責，**在 fsync 之前**拒絕。
+⛔ **不得為此在 host 端補一個「可信 bundle_id 來源」**——那等於把 operational input 帶回 recovery，
+違反它「只依賴既有 root」的前提。
+
+⚠️ **這個入口要有正式、可測的落點，⛔ 不能散在 shell heredoc 裡**（v16 修正）：
+
+| 項目 | 定案 |
+|---|---|
+| 檔案 | **`python/scripts/validate-i074-run-identity.py`**（列入受影響檔案表） |
+| 用法 | `validate-i074-run-identity.py <identity 路徑> --expect-image-id sha256:… [--bundle <bundle 目錄>]` |
+| ⚠️ **`--bundle`**（v22 新增、**v23 改為收路徑**，**可選**） | ⛔ v21 的 CLI 只收 identity path 與 `--expect-image-id`，於是 **runner 要做 Docker 前的 `bundle_id` 比對就只能在 shell 再解析一次 identity**——那是**雙真相源**且兩次讀取之間有 **TOCTOU**。⚠️ **v23 進一步修正**：v22 寫「`--expect-bundle-id`，值取自實際 bundle」仍未唯一化——**取目錄 basename／直接讀 `manifest.bundle_id`／經正式 loader 驗證**是**三種強度不同**的做法，前兩種擋不住偽造。→ **改收 `--bundle <目錄路徑>`，由 validator 自己呼叫既有的 `load_bundle()`**（`bundle.py:401`，做**三方相等**與**完整 hash 驗證**）取得 `bundle_id` 再與 identity 比對。⚠️ **這比傳值更強**：shell ⛔ 完全不解析，`bundle_id` 的來源只有一條路，而且 identity 與 bundle 在**同一個行程**內讀完——⚠️ **精確地說（v24 修正，v23 的「連 TOCTOU 都消除」講過頭了）：它消除的是「shell 與 validator 各解析一次 identity」那個窗口**；⛔ **兩個路徑仍是依序讀取**，且 **validator 結束到 `docker run` 之間仍有窗口**。⚠️ 那一段由**容器內的正式 loader 在 replay 前重新完整驗證**兜底——本計畫的威脅模型⛔ 不處理並行的外部竄改。✅ **實測（2026-09-14）**：`bundle.py` 只依標準庫與同 package 模組，**在 host（無 pandas）能跑完 `load_bundle()`** 並取得正確的 `bundle_id`。**probe／D／D+1 必須傳**；**comparator／normal finalizer／recovery ⛔ 不傳**。**不符 → 非零退出且 stdout ⛔ 無輸出** |
+| ⚠️ **兩種格式** | v21 修正——⛔ v20 只定義了 archived `.json.gz`，但 **probe／D／D+1／comparator／normal finalizer 讀的是 repo 外的 plain `run_identity.json`**，⛔ 沒有入口就只能各自發明解析方式（**雙真相源**）→ **同一支 validator 同時支援 `.json` 與 `.json.gz`**：`.json` 驗 **raw bytes == `canonical_json_bytes(parsed)`**；`.json.gz` 驗 **round-trip byte-identical** 後解壓再驗 canonical；⚠️ **兩條路最後共用同一個 `validate_run_identity()`** |
+| stdout | ⚠️ **成功時只印 `expected_image_id` 一行**（machine-readable），其餘訊息一律走 stderr |
+| exit code | 0 ＝ 通過；**非 0 ＝ 拒絕**，且 stdout ⛔ 無輸出 |
+| package bootstrap | ⚠️ **封裝在這個檔案裡**，⛔ 不散落在 shell |
+
+⚠️ **這條路徑實測可行**（2026-09-14）：host 沒有 pandas，而
+`backtest/modular/sr_scoring/__init__.py` 會 `import pandas`——但用**最小 package context**
+（`types.ModuleType` ＋ `__path__`）繞過它之後，`canonical`／`publish`／`artifacts` **含相對 import
+都能在 host 載入**。⚠️ **這個技法要當成受測的正式相容層**，⛔ 不是「記錄一次人工實測」就算數：
+測試必須涵蓋「**host 環境沒有 pandas 時仍能正常驗證**」以及「**malformed gzip／schema 一律非零退出**」。
+⛔ **因此有一條硬性約束**（v24 擴大範圍、⚠️ **v25 修正措辭**）：
+**host validator 實際執行的 import／call graph 必須 dependency-light**——
+⚠️ v23 讓它多呼叫 `load_bundle()`，涉及的模組因此從 `canonical`／`publish`／`artifacts`
+擴大為 **`canonical`／`publish`／`calendar`／`artifacts`／`bundle`／`run_identity`**
+（⛔ v23 的約束只套在 `run_identity.py`，涵蓋不到新增的這兩個）。
+該路徑上⛔ **不得**（直接或間接）碰 pandas／sklearn／lightgbm 等第三方套件，否則守門會失效。
+
+⚠️ **⛔ 這條契約⛔ 不是「整個模組只能 import 標準庫」**（v25 修正——v24 那樣寫與現況直接衝突）：
+`calendar.py` 的**線上抓取分支** `fetch_year_rows()`（`:110`）裡有 **lazy `import httpx`**（`:152`），
+那是第三方套件。但 **loader 走的是 `validate_calendar_payload()`（`:272`），⛔ 不經過那個分支**，
+所以 lazy import 從不發生。
+⛔ **不為此把 HTTP 抓取移出 `calendar.py`**——那會動到 I-100 已收斂的模組，也違反本計畫
+「⛔ 不改通用未啟用路徑」的範圍宣告；lazy import 本來就是為了這種情形而存在的。
+
+✅ **實測（2026-09-14）**：在 **`python3 -S`**（確認 site-packages ⛔ 不在 `sys.path`）下，
+`canonical → publish → calendar → artifacts → bundle → load_bundle()` **全鏈跑通**並取得正確的
+`bundle_id`。⚠️ **這個實測證明的正是「實際呼叫路徑不碰第三方」**——⛔ 它證明不了（也不需要證明）
+「整個 `calendar.py` 只依標準庫」，因為 `python3 -S` 下若那條路徑真的碰到 `httpx` 就會 ImportError，
+**測試本身就是這條契約的守門**。
+⚠️ **一個陷阱要記著**：`replay_bundle/calendar.py` 與**標準庫的 `calendar`** 同名——
+bootstrap 以 `rb.calendar` 之類的前綴註冊才不會撞名，⛔ 別用裸名載入。
+
+**A-2、⚠️ recovery 為什麼也要注入那五個參數**（v16 裁決）
+
+⛔ **v15 沒說用途**：matrix 要求 recovery 也注入五個 provenance 參數，但 recovery 正文只說
+「驗既有證據並 fsync、⛔ 不建新 provenance」——那它們就成了沒有消費者的參數。
+
+**定案：用來確認 recovery 跑的是同一份程式碼**（⛔ 不是拿來建新 provenance）。
+recovery 以本次執行身分**逐欄比對** archived 的 `finalizer_provenance`：
+
+| 欄位 | 比對？ | 理由 |
+|---|---|---|
+| `image_digest`／`base_commit`／`tooling_patch_sha256`／`runner_sha256`／`source_root` | ✅ **必須相同** | 這五個決定「跑的是哪一版程式碼與哪個環境」 |
+| **`runtime_settings`** | ✅ **必須相同**（v17 改） | ⚠️ 它**⛔ 不是由 image 決定**——`config.py` 的五個值全是 **`os.getenv(...) or config.yaml`**（`config.py:14`／`:40`／`:54`／`:57`／`:60`），環境變數可覆寫，`TRADING_CONFIG` 甚至能換掉整個 config 檔。normal 與 recovery 本來就該在**相同的封閉環境**跑，直接逐欄比最清楚 |
+| `argv` | ⛔ 不比 | normal 與 recovery 的參數**天生不同**（A 的 matrix） |
+| `project_modules_sha256` | ⛔ 不比 | recovery ⛔ 不讀 operational inputs，**載入的模組集合本來就較少**，那是預期而非漂移 |
+| `python_version`／`pip_freeze_sha256` | ⛔ 不比 | 這兩個**確實**由 image 內的 Python 與套件決定，`image_digest` 相同即涵蓋 |
+
+⚠️ **任一比對欄位不符 → 在 fsync 之前中止**（⛔ 不得先 fsync 再報錯）。
+⚠️ 比對欄位共 **6 個**（五個執行身分 ＋ `runtime_settings`）。
+
+**C、測試**：跨模式參數（normal 帶 `--recover-durability`、recovery 帶任一 operational input 或
+`--run-identity`）、缺必填參數、**recovery 的 image ID 與 archived identity 不符**——
+⚠️ **三類都必須在 `docker run` 與任何寫檔之前被拒絕**。
+**再加一類**：recovery 的**本次執行身分與 archived `finalizer_provenance` 的六個欄位任一不符**
+（五個執行身分 ＋ **`runtime_settings`**）→ ⚠️ **在 fsync 之前中止**（A-2）。
+
+##### 十四、I-100 條件 3 的 negative acceptance
+
+複製正式 bundle 到暫存目錄——⚠️ **basename 必須仍是正式 `bundle_id`**（`load_bundle()` 要求
+目錄 basename == `manifest.bundle_id`）→ 竄改任一 payload 或 `manifest.json` → 經官方入口執行
+→ 斷言 **replay 前中止**且 output dir ⛔ 無任何 artifact。⛔ 不計正式 scan。
+⚠️ **同時修 `development-workflow.md:930`**（「⛔ D 日產 bundle 並跑」）。
+
+##### 十五、capacity probe 的執行語意
+
+flag **`--i074-capacity-probe`**，quota **固定 200**（`MIN_ROWS_PER_SYMBOL = 5`，11 檔下限 55），
+由 `_allocate_replay_quota()` 分配並**驗證 11 檔全部拿到**；**隱含執行 preflight-pre**，
+⛔ 不得與 `--i074-preflight` 同時出現；⛔ 跳過 post 守門、⛔ 不發布 after／cohort。
+⚠️ 結果**只作 sanity check**，⛔ 不得線性外推。
+
+##### 十六、主要風險
+
+| 風險 | 處置 |
+|---|---|
+| **記憶體**（最高） | 十五的 bounded probe（⚠️ 與正式同一個 image ID）；⛔ 不線性外推 |
+| **時間**：約 3.2 小時／趟 | 背景執行、log 落地（**repo 外**）；⛔ 不用 pipe 掩蓋 exit code |
+| **被 host OOM killer 砍掉呼叫端** | 開跑前清場；被砍後**先撈 log** |
+| **兩趟 image 不同** | 十三的 pin ＋ 七的 `provenance_differences` ＋ 全圖驗證 |
+| **兩趟結果不一致** | ⛔ 立案調查，**不得以重跑覆蓋或取代** |
+| **假跨日通過** | 五 |
+| **半包證據** | 十一的 staging ＋ 整包 `rename_noreplace` |
+| **mismatch 時證據沒被保存** | 十-B 的 orchestrator |
+
+##### 十七、測試與驗證策略
+
+1. **preflight**：`bundle_id`／symbols／**末根台北日期**（UTC 是 08-31 的專屬案例）／`sum(quota)`。
+2. **CLI matrix**：Stage 2 帶任一 flag → 拒絕；preflight ＋ probe 同時出現 → 衝突；重複 flag → 中止。
+3. **crossday 正向**：rows 相同、僅 `generated_at` 與 output dir 不同 → `MATCH`。
+4. **crossday 型別 tamper**（v7 恢復）：SHA 非 64 hex 或大寫；row count 用 `True`／負數；
+   三個 flag 用 `1`／`0` 冒充 bool；key 三元組含空字串；`d_only` 未排序／有重複／與 `d1_only` 重疊；
+   `d_key_order` 元素形狀錯；`row_differences` 含**空 `differences`**；
+   **`outcome` 與三旗標的組合不符真值表**。
+5. **crossday 內容 tamper**：兩份 exclusive rows 缺列／換列／順序錯；只有 row order 不同；
+   `provenance_differences` 漏記／多記／值被改；`comparator_provenance` 缺欄或**格式合法但偽造**；
+   五個身分欄位任一不一致；**漏記一筆真實差異 → 由來源重算抓到**。
+6. **invalid input**：同檔／同 SHA／同日；來源 provenance 形狀錯 → 皆 exit 1 且⛔ 無 artifact。
+7. **serialization**：JSON 語意相同但**非 canonical 編碼**（空白／key order）→ 拒絕；
+   **gzip round-trip 不 byte-identical**（不同 compression level／header byte）→ 拒絕；
+   gzip 損毀；錯副檔名；**cohort 記的 SHA 與實際 after bytes 不符**；
+   ⚠️ **既有 bundle 的三個 payload 必須通過**（防止「照文件實作反而拒絕合法輸入」）。
+8. **provenance**：`project_modules_sha256` **以 module name 為 key 的合法值必須通過**；
+   `runtime_settings` **少一個鍵仍通過**、多未知鍵拒絕；nested 型別錯；
+   `role="stage1"` 時 `base_commit` 為 null → 拒絕，`role="stage0"` → 通過。
+9. **probe**：三檔缺欄／多欄／錯 SHA；**不變條件**各自違反（`row_count` 與 quota 和不符、
+   quota key 不是 11 檔、quota 用 `True`、某 symbol 列數與 quota 不符）；
+   **量測任一項缺失 → ⛔ 無 completion**。
+10. **finalizer**：全圖驗證各項各自失敗；**中途失敗 → 正式 root 仍不存在、staging 已清除**；
+    重複發布（no-clobber）；**未知 evidence** → 中止；manifest 排除自身；
+    **`expected_image_id` 與某份 provenance 不符 → 中止**。
+11. **orchestrator**：crossday 回 0 → finalizer 跑 → 回 0；回 5 → **finalizer 照樣跑 → 回 5**；
+    回其他碼 → ⛔ 不跑 finalizer；finalizer 一般失敗 → 回 1；
+    ⚠️ **finalizer 回 3（durability 未確認）→ orchestrator 回 3**，⛔ 不被原始 0／5 蓋掉
+    （v9 修正——v8 的測試矩陣仍寫「一律回 1」，與同版新增的 rc 3 優先規則直接衝突）。
+11-B. **durability**：rename 後 parent fsync 失敗 → **正式 root 保留**、回 3；一般模式在
+    root 已存在時 → 回 1；
+    `--recover-durability` 遇 root 不存在／缺檔／驗證不過 → 回 1。
+11-C. **recovery 還原原始結果**（v11 補——⚠️ v10 改了正文卻漏改這裡）：
+    已歸檔 `outcome == MATCH` → **recovery 回 0**；已歸檔**任一 mismatch** → **recovery 回 5**。
+    ⛔ 兩條都要測——只測前者的話，「mismatch 的 5 被 recovery 吞成 0」正好測不出來。
+11-D. **run identity producer 的三條分支**（v12 補）：**不存在** → build ＋ 發布；
+    **既有合法** → ⛔ 不 build、⛔ 不改 `created_at`、直接輸出既有 ID；
+    **既有但該 image 已不在本機** → **fail-closed 回 1**，⛔ 不得重建後換 ID。
+11-E. **identity 的 commit point**（v12 補）：temp `fsync_file` 失敗 → 清 temp、回 1、
+    正式路徑仍不存在；**rename 後 parent fsync 失敗 → 檔案保留、回 3**；
+    ⚠️ **接著重跑 → 走 no-op 分支並重新 fsync → 回 0**（⛔ 這條就是那個狀態的唯一修復路徑，
+    少了它 durability 會永遠未確認）。
+11-E-2. **no-op 修復本身再次失敗**（v13 補）：no-op 路徑的 **`fsync_file` 失敗**、
+    **parent `fsync_dir` 失敗**兩種各測一次 → 都要**保留 identity、⛔ 不 build／不重寫、回 3**，
+    且 **stdout ⛔ 沒有 image ID**；再重試成功 → 回 0 且 **`created_at` 不變**。
+11-F. **identity 與 evidence 的一致性**（v12 補）：**archived identity 與 repo 外那份不一致**
+    → normal finalization 中止；⚠️ **repo 外那份已被刪除時，`--recover-durability` 仍能完成**
+    （⛔ recovery 只依賴 archived 的那份）。
+11-G. **`EvidenceLoad`**（v12 補）：四個欄位的值各自正確（`artifact_sha256` ＝ 解壓內容、
+    `stored_sha256` ＝ raw bytes、`stored_bytes` ＝ raw 長度）；⚠️ **每個檔案只被讀取一次**
+    （以 spy／計數斷言，⛔ 不是靠註解宣告）。
+11-H. **階段 B 之後⛔ 不得新增 project import**（v12 補）：在階段 B 之後故意觸發一個新的專案模組
+    import → **重算的 mapping 與 manifest provenance 不符 → 中止**。
+12. **shell**：fake-docker 證明走到 `docker run`、原樣傳出 exit 5、
+    **pinned 模式沒有執行 `docker build`**、**無 pin 路徑也是 `docker run <image-id>` 而非 tag**；
+    `pin-replay-image.sh` 的 stdout 只有 image ID；
+    ⚠️ **normal finalizer 以唯讀掛入 identity 並注入 `--run-identity`**，
+    使用者自行傳入或重複傳入 → **拒絕**（由 finalizer **自己的** ownership checker 擋，
+    ⛔ 不是 `REPLAY_INJECTED_ARGS`）；**recovery 模式傳入 `--run-identity` → 拒絕**、
+    且⛔ 不掛載也不注入；⚠️ **回歸：既有合法的 `--run-id` 仍可使用**
+    （⛔ 前綴攔截不得誤殺它——實測若共用清單會壞）；
+    ⚠️ **argv 逐 token 比對**：normal 與 recovery 兩組實際 argv 各自等於
+    `finalizer_argv.json` 裡對應的那組（⛔ 非 `eval` 字串，動態值用固定測試值或 placeholder，
+    與 `stage0_argv.json` 同一慣例）；**Docker 唯讀 mount 由 shell 測試另外斷言**；
+    ⚠️ **十三-C 的三類拒絕**（跨模式參數、缺必填、recovery image ID 與 archived identity 不符）
+    **都要斷言發生在 `docker run` 與任何寫檔之前**。
+12-A. **comparator 的 argv／mount／ownership**（v22 補——⚠️ v21 在正文新增了 comparator 的
+    identity 契約卻漏了測試矩陣，**第六次違反守則二**）：官方腳本實際產生的 argv
+    **逐 token 等於 `comparator_argv.json`**；**same-path 且 `:ro` 的 mount**；
+    使用者自行注入／**唯一前綴縮寫**／**重複** `--run-identity` **三種都拒絕**
+    （由 comparator **自己的** ownership checker 擋）；
+    ⚠️ 三種都要斷言**發生在 `docker run` 與任何 artifact 寫入之前**。
+    ⚠️ **核心產品分支**（v23 補——⛔ v22 的 12-A 只驗 argv／mount／所有權，
+    **沒測到新增 identity 真正要抓的那件事**，identity 就算成功掛入、實作者漏掉實際比對仍會全綠）：
+    **D 與 D+1 兩份 after 都合法且帶相同的 `bundle_id = B`、identity 合法但記 `bundle_id = A`**
+    → comparator 必須**一般失敗**且⛔ **不得發布 crossday artifact**。
+12-B. **host 端 validator**（v17 補；v19／v20／v23 修正承諾範圍——⚠️ v16 把它寫進正文卻漏了
+    測試矩陣，**違反守則二**）：⚠️ **`bundle_id` 檢查是條件式的**（v23 統一）——
+    **runner 必須傳 `--bundle`**，validator 以 `load_bundle()` 取得 ID 後比對；
+    **comparator／normal finalizer／recovery ⛔ 不傳**（它們手上沒有可信的 bundle 第二來源）；⚠️ **`bundle_id` 的斷言依角色分四個時點**（十三-B 的表）：runner 在 **Docker 前**、
+    comparator 在 **crossday 發布前**、normal finalizer 在**階段 A**、recovery 在 **fsync 前**
+    ——⛔ 測試要按這四類分別描述，⛔ 不得把 runner 才有的 bundle path 套到其他角色；
+    以**實際的 `python/scripts/validate-i074-run-identity.py`** 驗 valid identity 通過、
+    **malformed gzip**、**錯 schema** 各自非零退出；⚠️ **兩種格式都要測**（v21）：
+    repo 外的 plain `.json`（含**非 canonical 編碼 → 拒絕**）與 archived `.json.gz`
+    （含**非 canonical gzip → 拒絕**）；⚠️ **`--bundle` 的 match／mismatch 各一組**
+    （v22 提出、v23 改為傳路徑，以 plain `.json` 測）——**mismatch 要非零退出且 stdout 無輸出**；
+    ⚠️ **不傳該參數時⛔ 不得因此失敗**（comparator／finalizer／recovery 的用法）；
+    ⚠️ **runner 的接線整合測試**（v23 補）：由**官方 runner 實際**帶 `--bundle` 呼叫 validator，
+    **identity 的 `bundle_id` 與該 bundle 不符時，在 `docker run` 與任何 artifact 寫入之前中止**
+    ——⛔ 只直接測 validator 證明不了 runner 真的接上了這段；**stdout／exit code contract**
+    （成功只印一行 image ID、失敗時 stdout ⛔ 無輸出）；
+    ⚠️ 用 **`python3 -S`** 或等價隔離方式證明它**⛔ 不依賴 site-packages／pandas**——
+    ⚠️ **且至少一組必須同時帶 `--bundle <合法 bundle>` 並真的跑完 `load_bundle()`**
+    （v24 補：⛔ 只測不帶 bundle 的路徑會全綠，卻測不到 `bundle`／`calendar` 這兩個
+    v23 才加進閉包的 import）；**再一組給損壞的 bundle → 非零退出且 stdout ⛔ 無輸出**。
+12-C. **recovery 的執行身分比對**（v17 補，v18 釘死 tamper 的一側）：
+    ⚠️ **archived evidence 必須維持完全合法且一個位元都不改**——⛔ **不得改 archived 端**：
+    改了 `image_digest` 之類的欄位，會**先被既有的 manifest／image 一致性守門攔下**，
+    那條測試就證明不了「本次身分 vs archived provenance」這個**新分支**真的生效
+    （⚠️ 與前幾輪「測試沒刺激到它聲稱保護的分支」是同一類錯）。
+    **改的是本次 recovery 這一側**：五個注入值（`image_digest`／`base_commit`／
+    `tooling_patch_sha256`／`runner_sha256`／`source_root`）逐一改動，
+    **`runtime_settings` 則由當次的 config／env 改動**（⚠️ 它本來就可由 env 覆寫）。
+    斷言：**確實在身分比較這個分支中止**，且 ⚠️ **`fsync_dir` 尚未被呼叫、正式 root 完全未變**
+    （以 spy 斷言，⛔ 不是只看 exit code）。
+13. **smoke**：⛔ 不帶 flag；另補「帶 flag → replay 前因身分不符失敗」。
+14. **I-100 條件 3**：十四。
+15. **正式**：D 與 D+1 各一趟（**符號日期**），除 output dir 外參數正規化後相同、image ID 相同。
+
+⚠️ **「evidence 已進版控」的驗收分三個時點**：實作期自動化測試**用 fixture**（⛔ 不碰正式
+evidence）；正式執行後人工確認 **staged／tracked**；**本筆關閉前**用
+**`git ls-tree -r <commit>`** 確認**目標 commit 確實包含**，⛔ 不是只在工作樹或 index 裡。
+
+##### 十八、回滾／相容策略與歸檔位置
+
+所有入口都是**純新增且 opt-in**，不帶 flag 時既有路徑行為完全不變。回滾單位＝本輪 diff。
+歸檔：`sr-zone-scoring.md`（preflight／crossday／probe／evidence 四個契約）、
+`development-workflow.md`（執行程序、evidence 規則、`:930` 修正）、I-100 的受管制清單與關閉條件。
+
+##### 修訂紀錄
+
+| 版本 | 內容 |
+|---|---|
+| v1～v3 | 起草；3 高 5 中 3 低（crossday 成功失敗都產出、兩個全新目錄、bounded probe、**台北交易日**、flag 限定 Stage 1）；3 高 6 中 3 低（**假跨日**、`matched` 拆解 ＋ `outcome`、CLI 落點分流、`REPLAY_IMAGE_ID`、exit 5 落點） |
+| v4～v5 | 3 高 4 中 3 低（schema 補兩份 exclusive rows、**`row_differences[]` 改為重用 `compare_rows()`**、provenance 補 `source_root`、evidence gzip 進版控、`d_key_order`）；4 高 3 中（**operational／archived 兩層**、恢復 v4 弄丟的 validator 來源綁定、`validate_provenance`、probe 封閉 schema ＋ peak fail-closed、finalizer） |
+| v6 | 4 高 3 中：`project_modules_sha256` 是 **module name → hash**（⛔ 不是相對路徑）；`runtime_settings` 是「⊆ 五個」；`artifact_sha256` 維持 **raw bytes** 語意；finalizer 改為 staging ＋ 整包 rename；probe 三檔只寫 operational JSON；`by_key` 由 validator 自建；`pin-replay-image.sh`；git tracked 驗收分三時點 |
+| v7 | review 抓到 3 高 3 中，全部反映：①**crossday 的型別契約在 v6 精簡時遺失**——v6 只剩欄位名，而**來源重算⛔ 取代不了型別驗證**（Python 裡 `1 == True`，用 `1`／`0` 冒充 bool 可通過所有「重算後相等」的比對）→ **恢復完整型別表**（`kind` 常數、裸 64 lowercase hex、`type(x) is int` 非負、三個 flag 嚴格 bool、key 三元組形狀／排序／唯一／互斥、`d_key_order` 的完整 schema、`row_differences` ⛔ 不得含空 `differences`）並補 **`outcome` 真值表**；②**正式 evidence root 與 `logs/` 互相衝突**——finalizer 要求 root 必須不存在，v6 卻把 log 放在 root 底下，D 趟一開始建 log 目錄就讓最後的 `rename_noreplace()` **必然失敗** → **三個位置完全分離**（operational 與 log 都在 **repo 外**，archived root 在 finalizer 前⛔ 必須完全不存在）；⚠️ 並補上 v6 沒定義的 **orchestrator**：`compare-replay-crossday.sh` 一回 5，`set -e` 就會讓 finalizer 永遠不執行——而 mismatch 正是最需要保存證據的情況 → `scripts/run-i074-stage1.sh` 定死「捕捉 exit code → 只接受 0 或 5 → 跑 finalizer → 成功回原碼 → finalizer 失敗一律回 1」；③**capacity probe 沒綁定 pinned image**（v6 只列 D／D+1／crossday）→ 消費者定為**五個**（probe、D、D+1、comparator、finalizer），probe／D／D+1 必須完全相同 ID，manifest 存 **`expected_image_id`** 並由全圖驗證確認各 provenance 一致；④**probe 缺欄位間不變條件** → 補 `row_count == len(rows) == sum(quota) == 200`、quota key 恰為 11 檔、quota 嚴格正整數（排除 bool）、rows key 唯一且每檔列數等於 quota、rows 須過 replay error 與 diagnostics 守門；⚠️ **移除頂層 `argv`**（只留 `provenance.argv`，⛔ 不製造雙真相源），三份的 role 都是 `stage1` 且 measurement／completion 是**同一個 runner invocation 的外層產物**；⑤**canonical gzip ⛔ 不能只驗兩個 header 欄位**（compression level／XFL／OS byte 不同仍會通過）→ 契約改為**整段 round-trip byte-identical**：`raw_gzip == canonical_gzip_bytes(gunzip_bytes(raw_gzip))`；**✅ 實測既有 bundle 三個 payload 全部成立**，可直接當 fixture；⑥**runner 無 pin 時的行為未定案**（v6 只寫「有 ID 時禁止 build」，兩種實作都符合文字）→ 定案「**無 ID 時 runner 自己呼叫 `pin-replay-image.sh` 取得 ID，再一律以 ID 執行**」，保留既有使用方式同時維持單一 build 實作，並補測試證明**無 pin 路徑也是 `docker run <image-id>` 而非 tag**；⑦**新增「改版守則」**（零）——v4 弄丟 v3 的 validator 來源綁定、v6 弄丟 v4 的型別契約，**連續兩輪栽在同一種錯**：改版時⛔ 不得刪除任何既有契約條款，精簡只能作用在敘述文字上 |
+| v8 | review 抓到 3 高 3 中，全部反映——⚠️ **本版依「零、改版守則」以增補方式修訂，⛔ 未整段重寫**：①**`.json.gz` 沒有合法 loader 落點**——來源鏈寫 `load_artifact`、SHA 章節卻允許 `.json.gz`，而範圍又明訂⛔ 不改 `load_artifact()`（它直接把 raw bytes 解碼成 UTF-8 JSON，`artifacts.py:703`，**讀不了 gzip**），實作者無從判斷是舊函式還是新 wrapper → 新增 **`load_canonical_evidence_artifact(path, kind)`**（`.json` 走既有 loader ＋ 驗 canonical；`.json.gz` 驗 round-trip byte-identical ＋ 解壓驗 canonical ＋ 檢查 schema／kind），**統一回傳解壓後 bytes 的 SHA**，crossday 與 finalizer 只用它，⛔ 既有 `load_artifact()` 完全不動；②**整包發布缺 rename 後的 durability 分流**——⛔ v7 的「finalizer 失敗一律回 1」在「rename 已成功、parent fsync 失敗」時是錯的，那時正式 root **已存在且有效**；既有 bundle 發布早就處理過這個分界（`bundle.py:362` 的 `DurabilityUnconfirmed`，訊息明寫「⛔ 不刪除、不重來」）→ 補**三階段分流**（rename 前失敗 → 清 staging ＋ exit 1；rename 本身 `FileExistsError` → ⛔ 不覆蓋；**rename 後 parent fsync 失敗 → 正式 root 保留 ＋ `EXIT_DURABILITY_UNCONFIRMED`(3)**），明訂**復原路徑是「只重新驗證並重新 fsync 已發布 root」⛔ 不重產證據**，並沿用 **`probe_no_clobber()`** 先實測目錄 rename 語意；orchestrator 補第 6 條：**durability code 優先於原始 0／5**（⛔ 不得被 `MATCH` 的 0 蓋掉）；③**probe 的 replay-error 守門沒有共用落點**——它是 `evaluation.py` 私有的 `_assert_no_replay_errors()`（`:2954`），而 package ⛔ 不得反向 import，另抄一份又是雙真相源（`NO_ZONE_SCORES_ERROR` 已犯過一次）→ **移到 `replay_bundle/artifacts.py` 改成公開的 `validate_replay_errors()`**，兩邊共用，⛔ 行為一字不改；全圖驗證改為**呼叫完整的 probe schema validator**，⛔ 不只比對 completion 的兩個 SHA；④**封閉欄位集合要明寫** → crossday、三份 probe、evidence manifest 各自 `_FIELDS`，**缺欄／多欄一律拒絕**並補 unknown／missing 測試；evidence manifest 補完整型別（`schema_version == 1`、`expected_image_id` 為 `sha256:` ＋ 64 hex、`stored_bytes` 嚴格正整數、兩個 SHA 裸 64 lowercase hex、**`files` key 精確等於 8 個 archive 相對路徑**——manifest 排除自身故是 8 不是 9）；⑤**正式模式的判定未明確** → 定死「帶 `--i074-preflight` 或 `--i074-capacity-probe` 即為正式流程，**缺 `REPLAY_IMAGE_ID` 立即拒絕**、⛔ 不自動 pin；crossday 與 finalizer 一律要求 ID；其餘既有 Stage 1／2 才允許自動 pin」，且 **probe／D／D+1 的 image ID 相同要在執行時就驗**，⛔ 不能留到 finalizer 最後（那時三趟都跑完了）；⑥**comparator／finalizer 的 provenance 推導未落地** → 明訂沿用與 replay runner **相同的 worktree／tooling-patch 推導流程**取得 immutable `base_commit`／tooling patch SHA／`source_root`／runner SHA，且**在實際工作完成、lazy import 都發生後才建**，⛔ **不得直接複製 D 的 provenance**（載入的模組集合不同） |
+| v9 | review 抓到 2 高 3 中，全部反映——⚠️ **本版同樣以增補方式修訂**，並補掉 v8 的**兩處遺漏**：①**跨日 image ID 沒有可執行的共同狀態**——probe／D／D+1 是**跨日、分開啟動**的三個行程，D+1 ⛔ 無從知道前兩趟用了哪個 ID，v8 的「執行時就驗」在沒有共同狀態時**根本不可執行**，實際只能靠操作者手動傳對值 → 新增 **run identity 檔**（**repo 外**、**原子建立**、**no-clobber**，記 `bundle_id` 與 `expected_image_id`），三趟正式 runner 都必須讀同一份並在 **`docker run` 之前**比對，crossday／finalizer 沿用；測試涵蓋「**D+1 傳入不同 ID → Docker 尚未啟動就拒絕**」；②**既有 evidence root 分不出「重複發布」與「durability recovery」**——兩者從檔案狀態看**完全相同**，v8 卻同時規定前者 exit 1、後者回 0 → 定案 **`--recover-durability` 明示模式**（一般模式遇 root 已存在**仍回 1**；recovery **要求 root 必須已存在**，⛔ 不讀 operational inputs、⛔ 不重新壓縮、⛔ 不覆寫，只驗證既有 9 檔並重新 fsync parent，通過回 0；root 不存在／缺檔／驗證不過回 1）；③**正文的全圖驗證只驗 probe SHA 指向**——⚠️ **v8 宣稱改了但實際只寫進修訂紀錄，正文沒改到**（替換未匹配而我只用全檔 grep 驗證，被修訂紀錄的命中掩蓋）→ 正文補「**呼叫三份完整的 probe schema validator**」與「**三份 provenance 完全相同、確實來自同一 runner invocation**」，否則「computation、completion SHA 與 manifest 被同步改掉」的無效 probe 會被歸檔；④**probe 的型別契約不完整** → 補共同欄位型別表（`type(x) is int`、`type(x) is bool and is True`、lowercase hex、含時區 RFC3339、`validate_provenance(role="stage1")`），並補「用 `True` 冒充 `schema_version`」「用 `1` 冒充 `completed`」「大寫 SHA」「`generated_at` 缺時區」四組拒絕測試；⑤**`.json` loader 暗示要讀兩次檔**——`load_artifact()` 只回傳 `(parsed, sha)`，**raw bytes ⛔ 不傳出**，wrapper 再讀一次可能已不是同一版本 → 改用 **SHA 對照** `raw_sha == sha256_hex(canonical_json_bytes(parsed))`（等價且只讀一次），⛔ 不為此改 `load_artifact()` 的公開 API；⑥**同時修掉 v8 漏改的測試矩陣**——它仍寫「finalizer 失敗一律回 1」，與同版新增的 **rc 3 優先**規則直接衝突 → 改為「一般失敗回 1、**回 3 時 orchestrator 回 3**」並新增 11-B 的 durability／recovery 案例 |
+| v10 | review 抓到 3 高 2 中，全部反映（增補式）：①**run identity 仍不足以唯一實作**——v9 只寫「repo 外、原子建立、no-clobber、至少兩欄」，producer／路徑／schema／重入語意／取得方式全未定 → 新增**十三-B 完整 contract**：producer 是 `pin-replay-image.sh`、位置是 **`${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage1/run_identity.json`**（⛔ 不得放 `/tmp`，要跨日存活）、封閉 schema ＋ `validate_run_identity()`、canonical ＋ `rename_noreplace()` 原子建立、**重入語意定為「內容逐欄相同 → no-op 回 0；任一欄不同 → 拒絕」**、消費者是五個角色、**四種拒絕條件全部在 `docker run` 之前**，並把 `replay_bundle/run_identity.py` 補進受影響檔案表；②**durability recovery 會讓 mismatch 的 exit 5 永遠消失**——crossday mismatch（5）→ parent fsync 失敗（**3 覆蓋 5**）→ recovery 固定回 **0**，⛔ 最後沒有任何一次成功結束的指令回傳過 5，機器端會把它讀成「整組成功匹配」 → 定案 **recovery 成功後從已驗證的 crossday artifact 讀 `outcome` 還原終端結果**（`MATCH` → 0、其餘 → 5），測試分別覆蓋原始 0 與原始 5；③**evidence manifest 的 metadata 沒有來源綁定**——v9 只定型別，而 **recovery 完全依賴既有 root**，索引值錯誤的 manifest 照樣通過 → 明訂三項都要**從同一次讀取的實際 archive 重算**（`artifact_sha256` ＝ 解壓內容、`stored_sha256` ＝ gzip raw bytes、`stored_bytes` ＝ raw bytes 長度），且 manifest 的 `bundle_id`／`expected_image_id` 要與 **run identity 比對**，並補三種竄改的拒絕測試；④**finalizer provenance 的建立時點與發布順序衝突**——manifest 內含 `finalizer_provenance`，而 v9 是「寫 manifest → 全圖驗證」，**全圖驗證期間才載入的模組不會進 provenance** → 定死**兩階段**（A：讀入 inputs 並完成八檔全部驗證，此時 import 都已發生；B：才建 provenance 與 manifest），且 **B 之後⛔ 不得再產生任何新的 project import**；⑤**probe computation 專屬欄位缺嚴格型別**——`200.0 == 200` 為真，只寫「== 200」會放行 float → 補 `type(row_count) is int`、`type(elapsed_seconds) is float`、`quota_by_symbol` 為 mapping、`rows` 為 list，測試補 `row_count=200.0`／`elapsed_seconds=True`／容器型別錯三組 |
+| v11 | review 抓到 2 高 3 中，全部反映（增補式）：①**run identity 的重入語意自相矛盾**——pin script 是 build → inspect，而 identity 含**每次都會變的 `created_at`**，所以 v10 的「所有欄位完全相同才 no-op」**永遠不成立**；重新 build 也⛔ 不保證得到相同 image ID → 改為**依檔案存不存在分流**（已存在：驗 schema ＋ `bundle_id` 相符 ＋ **確認該 image 仍在本機** → **直接輸出既有 ID**，⛔ 不 build／不產新 `created_at`／不重寫；不存在：才 build 並發布；**image 已不在本機 → fail-closed，⛔ 不得重建後換 ID**），發布後補 **`fsync_file` ＋ parent `fsync_dir`**（rename 的原子性⛔ 不保證跨日 durability），並⛔ **移除 `I074_RUN_IDENTITY`**（「只供測試」無法強制，測試改覆寫 `XDG_DATA_HOME`）；②**manifest metadata 的「同一次讀取」拿不到**——v10 的 loader 只回 `(parsed, artifact_sha256)`，raw bytes ⛔ 沒傳出，finalizer 再讀一次就違反契約 → loader 改回 **`EvidenceLoad`**（`parsed`／`artifact_sha256`／`stored_sha256`／`stored_bytes`），crossday 只取前兩項、finalizer 與 recovery 用完整結果，既有 `load_artifact()` API ⛔ 不變；③**recovery 是否依賴外部 run identity 前後矛盾**——v10 一邊說 recovery ⛔ 不讀 operational inputs、一邊要求與 **repo 外**的 identity 比對，且外部那份一旦遺失，**已完整發布的 evidence 就再也 recovery 不了** → **把 canonical run identity 納入 archived evidence**（`identity/run_identity.json.gz`），證據自足；檔案數同步更新（**總數 9 → 10**、**manifest `files` key 8 → 9**、fsync 與 recovery 的驗證檔數一併改），repo 外那份降為**操作期協調檔**，正常 finalization 時另外確認兩份逐欄相同；④**測試矩陣仍寫 recovery「成功 → 0」**（⚠️ **第三次漏改測試矩陣**）→ 拆出 **11-C**：已歸檔 `MATCH` → 回 0、已歸檔任一 mismatch → **回 5**，⛔ 兩條都要測；並在**改版守則新增第二條**：改正文後必須同步檢查測試矩陣，且驗證要**限定在計畫書正文行號範圍內**（⛔ 全檔 grep 會被修訂紀錄的命中掩蓋——v8 就是這樣過關的）；⑤**「import 都已發生」缺可執行保證**——`build_provenance()` 的 dict literal 裡 **`project_module_hashes()` 排在 `runtime_settings()` 之前**求值（`provenance.py:133-147`），後者在 `config_module is None` 時 **lazy-import `config`**，而 ⚠️ **`config` 正是專案模組**（`PROJECT_MODULE_NAMES = ("config", "db")`）→ 明訂**階段 A 預先 import config 並以 `config_module=` 傳入 builder**、**階段 B 後重算 project-module mapping 並斷言與 manifest 的 provenance 完全相同**，讓「⛔ 不得新增 import」成為實際守門而非註解 |
+| v12 | review 抓到 2 高 2 中，全部反映（增補式）：①**normal finalizer 沒有取得 repo 外 identity 的容器資料流**——finalizer 跑在容器裡、identity 在 host 的 repo 外，而⛔ **容器內不能自己依 `XDG_DATA_HOME` 重新推導**（容器的 `HOME` 與環境和 host 不同，推出來的是另一個路徑）→ 定案 normal finalization 由 **shell 推導並驗證 host 絕對路徑 → 唯讀掛入 → 注入受保護的 `--run-identity <容器內絕對路徑>`**，該參數**納入 `SCRIPT_INJECTED_ARGS`**（使用者傳入或重複傳入一律拒絕，⛔ 不靜默採用最後一個），**`--recover-durability` 則⛔ 不掛載也不注入**、只讀 archived 的那份；`stage1_argv.json` fixture 與 shell 測試同步；②**identity 的 fsync 失敗沒有 commit-point 狀態機**——v11 只說「要 fsync」，而 rename 成功但 parent fsync 失敗後 identity 已存在，下次走「既有 identity」分支**直接回傳 ID 而不重新 fsync**，durability 會**永遠**未確認 → 比照 evidence root 定三段（temp fsync 失敗 → 清 temp 回 1；rename 後 parent fsync 失敗 → **保留檔案回 3**；⚠️ **既有合法 identity 的 no-op 路徑也必須重新 `fsync_file` ＋ parent `fsync_dir`，成功才回 0**——那是上述狀態的**唯一修復路徑**），image 不在本機仍 fail-closed；③**階段 A 仍寫「八檔」**，與 v11 改成的 9 個 archive 不一致 → 改為「完成 **9 個 archive payload** 的全部驗證（含 `identity/run_identity.json.gz`），manifest 才在階段 B 建立」；④**測試矩陣未涵蓋 v11／v12 的新契約** → 新增 **11-D**（producer 三分支）、**11-E**（identity commit point 與 **no-op 重新 fsync 的修復路徑**）、**11-F**（archived 與 repo 外不一致要中止；**repo 外那份被刪除時 recovery 仍能完成**）、**11-G**（`EvidenceLoad` 四欄值 ＋ ⚠️ **以 spy 斷言每檔只讀一次**，⛔ 不靠註解宣告）、**11-H**（階段 B 後故意觸發新 import → 重算 mapping 與 manifest 不符 → 中止），並在第 12 項補 normal finalizer 的唯讀掛載與受保護參數、recovery ⛔ 不掛載 |
+| v13 | review 抓到 1 高 1 中，全部反映（增補式）：①**`--run-identity` 放錯 CLI 所有權邊界**——v12 要求把它納入 `SCRIPT_INJECTED_ARGS`，但那是 **evaluation CLI** 的清單（`evaluation.py:3186`），而 finalizer 規劃在 **`replay_bundle/evidence.py`**、⛔ 根本不走那個 parser；shell 側的 `REPLAY_INJECTED_ARGS`（`replay-args.sh:16`）又會**連唯一前綴縮寫一起擋** → ⚠️ **實測證實**：把 `--run-identity` 加進去之後，**既有合法的 `--run-id` 立刻被拒絕**（訊息還誤稱它「會被展開成 `--run-identity`」），⛔ 那會直接弄壞 Stage 1／2 的既有參數 → 定案 **finalizer 自建 ownership checker**（⛔ 不共用前綴清單）、parser 自設 **`allow_abbrev=False`** ＋ 自查重複、**normal 要求／recovery 禁止** identity path、**finalizer 專屬 argv fixture**（⛔ 不塞進 `stage1_argv.json`），並補**「既有 `--run-id` 仍可使用」的回歸測試**；②**identity no-op 修復失敗的狀態未定義**——v12 只定義兩次 fsync 都成功回 0 → 補「no-op 路徑的 `fsync_file` 或 `fsync_dir` **任一失敗 → 保留 identity、⛔ 不 build 或重寫、回 3**」，並明訂⚠️ **非零結果時 stdout ⛔ 不得輸出 image ID**（否則下游會拿著一個 durability 未確認的 ID 繼續跑）；測試新增 **11-E-2**（兩種 fsync 失敗各一次、stdout 無 ID、重試成功且 **`created_at` 不變**） |
+| v14 | review 抓到 1 中 1 低，全部反映（增補式）：①**finalizer 專屬 fixture 沒進檔案與測試閉環**——v13 的正文要求新增它，但受影響檔案表仍只列 `stage1_argv.json`、⛔ 沒指定路徑，測試矩陣也只驗行為、⛔ 沒要求比對 argv → 新增並列入 **`python/scripts/fixtures/finalizer_argv.json`**（⚠️ **分別保存 normal 與 recovery 兩組**），明訂**兩端共用同一份**：shell 測試斷言**官方腳本實際產生的 argv 與 fixture 逐 token 相同**、`test_evidence.py` 用**同一份**餵 parser（normal 恰好一個 identity path、recovery ⛔ 不含），**Docker 唯讀 mount 另由 shell 測試斷言**；⚠️ ⛔ 只驗行為而不比對 argv 等於沒釘住兩端契約；②**低：commit-point 表格被段落截斷**——v13 把「非零結果 stdout ⛔ 不得輸出 ID」那段插在**表格中間**，於是「image 已不在本機」那一列落到表外、Markdown ⛔ 不會算進狀態表 → 把該列移回表內、說明移到整張表之後。⚠️ 這與 **I-100 Stage 0 計畫書 v13 是同一種錯**（表格被段落截斷），已在正文註記：**增補式修訂要檢查插入點是否落在表格內部** |
+| v15 | review 抓到 1 高，已反映（增補式）：**finalizer／recovery 的完整 CLI contract 未定義，且 recovery 的 image 守門沒有可執行路徑**——十三要求一律以指定 image ID 執行、十三-B 要求 identity 在 `docker run` **之前**比對，但 recovery **只讀 evidence 內的 archived identity**（一個 `.json.gz`），而「**Docker 啟動前讀 gzip 內的 identity**」⛔ 沒有定義路徑；照 v14 的文字只剩三條都不可接受的選擇（先用未驗證的 image 啟動再在容器內檢查／完全不比對 recovery 的 image／各自發明 host 端入口造成**雙真相源**）→ 新增**十三-C**：①**精確 CLI matrix**（normal：evidence root ＋ **8 份 operational artifact** ＋ 腳本注入的 `--run-identity`，⛔ 禁 `--recover-durability`；recovery：只收 evidence root ＋ `--recover-durability`，⛔ 禁全部 operational input 與 `--run-identity`；provenance 注入參數依十三-B 推導），並明訂 **fixture 依這張 matrix 建立**⛔ 不是由實作者自選 argv 再凍結（後者證明不了符合契約）；②**recovery 的 host 端守門**：`docker run` 之前以 **host 端 dependency-light 入口**讀 `identity/run_identity.json.gz`，走 canonical gzip round-trip → 解壓 → canonical JSON → **`validate_run_identity()`（同一份 validator，⛔ 不在 shell 另寫 schema 檢查）**，再把 `expected_image_id` 與 `REPLAY_IMAGE_ID` 比對並 `docker image inspect` 確認該 image 存在，**任一不符即 Docker 尚未啟動就中止**；⚠️ **實測（2026-09-14）此路徑可行**——host 無 pandas 且 `sr_scoring/__init__.py` 會 import 它，但用**最小 package context**（`types.ModuleType` ＋ `__path__`）繞過後，`canonical`／`publish`／`artifacts` **含相對 import 都能在 host 載入**；⛔ 因此加一條硬性約束：**`run_identity.py` 只能 import 標準庫與同 package 的 dependency-light 模組**，⛔ 不得直接或間接碰 pandas／sklearn／lightgbm，否則這道守門會失效；③測試補**三類拒絕**（跨模式參數、缺必填、recovery image ID 與 archived identity 不符）**都要發生在 `docker run` 與任何寫檔之前** |
+| v16 | review 抓到 1 高 2 中，全部反映（增補式）：①**`--run-identity` 的路徑語意自相矛盾**——十三-B 寫「注入**容器內**絕對路徑」、十三-C 的 matrix 卻寫「**host** 絕對路徑」，⚠️ 除非明訂掛載方式，Python finalizer 會收到**容器內不存在**的 host path → **定案沿用既有慣例 same-path bind mount**（`run-replay-offline.sh:113` 對 bundle 與 output dir 就是 `-v "$ABS":"$ABS":ro`，註解寫明「掛在與 host 相同的絕對路徑，參數不用改寫，也就不會改寫錯」），新增 **A-0** 逐層定死 shell／docker／argv／fixture／測試，於是⛔ **不存在兩種路徑之分**；②**host 端 validator 沒有正式可測的落點**——v15 只記錄了一次人工實測的 `types.ModuleType` 技法，⛔ 沒有檔案、沒有 contract，最後會變成 shell heredoc 裡的特殊 bootstrap → 指定 **`python/scripts/validate-i074-run-identity.py`** 並列入受影響檔案表，明訂 **stdout 只印 image ID 一行／其餘走 stderr／非 0 時 stdout 無輸出**，**package bootstrap 封裝在該檔**，並把該技法列為**受測的正式相容層**（測試涵蓋「host 無 pandas 仍能驗證」與「malformed gzip／schema 非零退出」）；③**recovery 注入五個 provenance 參數卻沒有消費者**——recovery ⛔ 不建新 provenance → 裁決其用途是**確認 recovery 跑的是同一份程式碼**：以本次執行身分**逐欄比對** archived `finalizer_provenance` 的 **`image_digest`／`base_commit`／`tooling_patch_sha256`／`runner_sha256`／`source_root`** 五欄，⛔ **不比** `argv`（模式天生不同）、`project_modules_sha256`（recovery 不讀 operational inputs，載入集合本來就較少）與 `python_version`／`pip_freeze_sha256`／`runtime_settings`（由 image 決定，`image_digest` 已涵蓋）；⚠️ **任一不符 → 在 fsync 之前中止**，並補對應測試 |
+| v17 | review 抓到 1 中 1 低，全部反映（增補式）：①**v16 新增的驗證要求沒有同步進測試矩陣**——「host 無 pandas 仍可執行／malformed gzip 與錯 schema 必須失敗」與「recovery 的執行身分欄位任一不符要在 fsync 前中止」都只寫在正文，第十七節第 12 項仍只有跨模式、缺必填、image ID 不符三類；⚠️ **這正好違反計畫書自己的守則二** → 新增 **12-B**（以**實際的 `validate-i074-run-identity.py`** 驗 valid／malformed gzip／錯 schema、stdout 與 exit code contract，並用 **`python3 -S`** 或等價隔離證明⛔ 不依賴 site-packages／pandas）與 **12-C**（**6 個欄位逐一 tamper**，各自中止並以 spy 斷言 ⚠️ **正式 root 完全未變、`fsync_dir` 尚未被呼叫**）；⚠️ 同時在**守則二補一個可操作的做法**——每輪改完**逐一列出本輪的可驗證條款並對照測試矩陣**，⛔ 沒有對應項就是還沒改完（這條原則到 v16 為止已被違反**五次**，光有原則顯然不夠）；②**低：`runtime_settings`「由 image 決定」的理由不精確**——`config.py` 的五個值全是 **`os.getenv(...) or config.yaml`**（`:14`／`:40`／`:54`／`:57`／`:60`），環境變數可覆寫、`TRADING_CONFIG` 甚至能換掉整個 config 檔，⛔ 不是單由 image filesystem 決定 → 採「**recovery 直接逐欄比較 `runtime_settings`**」（normal 與 recovery 本來就該在相同封閉環境跑，最清楚），比對欄位由 5 個增為 **6 個**；`python_version`／`pip_freeze_sha256` 維持不比——那兩個**確實**由 image 內的 Python 與套件決定 |
+| v18 | review 抓到 1 中 2 低，全部反映（增補式）：①**run identity 的消費來源自相矛盾**——十三-B 寫「五個消費者**全部讀同一份**（repo 外）」，但十三-C 與 recovery 正文明訂 **recovery 只讀 archived copy** → 改成**依模式分流**：**probe／D／D+1／comparator／normal finalizer** 讀 repo 外的協調檔，⛔ **`--recover-durability` 只讀 `identity/run_identity.json.gz`**、⛔ 不碰 repo 外那份（這也正是 v11 把 identity 納入證據包的目的——外部那份遺失仍能 recovery）；②**低：正文殘留「五個欄位」**（十三-C 的 C 段）與 A-2 的六欄契約及 12-C 不一致 → 改為**六個**並明列含 `runtime_settings`；③**低：12-C 沒釘死 tamper 的一側**——若竄改 **archived** 端的 `image_digest`，會**先被既有 manifest／image 一致性守門攔下**，那條測試就證明不了「本次身分 vs archived provenance」這個**新分支**真的生效（⚠️ 與前幾輪「測試沒刺激到它聲稱保護的分支」同類） → 明訂 **archived evidence 維持完全合法且一位元不改**，**改的是本次 recovery 這一側**（五個注入值逐一改動，`runtime_settings` 由當次 config／env 改動），並斷言**確實在身分比較分支中止**且 `fsync_dir` 未呼叫、正式 root 未變 |
+| v19 | review 抓到 1 中，已反映（增補式）：**recovery 的 pre-Docker `bundle_id` 比對沒有可執行來源**——十三-B 統一要求四種（缺檔／`bundle_id` 不符／`expected_image_id` 不符／schema 不合法）都在 Docker 前拒絕，但 recovery 的 host validator CLI 只收 identity 路徑與 `--expect-image-id`，⛔ **沒有 expected bundle ID、也沒有可信的 host 端來源**，於是「`bundle_id` 與誰不符」根本無從判斷；⚠️ 而那層關係實際上是容器內**全圖驗證**的「所有檔案同一個 `bundle_id`」在做 → **依模式拆開**：**一般消費者**（probe／D／D+1／comparator／normal finalizer，手上有 bundle 路徑可當第二來源）維持**四種都在 Docker 前拒絕**；**recovery** 在 Docker 前只驗**缺檔／schema／`expected_image_id != REPLAY_IMAGE_ID`／image 存在**，**`bundle_id` 留到容器內、fsync 之前**拒絕；⛔ **不得為此在 host 端補一個「可信 bundle_id 來源」**——那等於把 operational input 帶回 recovery，違反它「只依賴既有 root」的前提；十三-B 的拒絕描述、十三-C-B 的守門範圍與測試矩陣 12-B 同步調整，⚠️ **⛔ 不讓測試承諾一個 host validator 做不到的檢查** |
+| v20 | review 抓到 1 中，已反映（增補式）：**v19 把「Docker 前驗四種」從 recovery 移走，卻套到了全部「一般消費者」——但只有 runner 手上有 bundle path**：`compare-replay-crossday.sh` 只收 `--d`／`--d1`／`--output-dir`，normal finalizer 只收 evidence root ＋ 8 份 operational artifact ＋ identity ＋ provenance 參數，**兩者都⛔ 沒有 bundle path**，照 v19 的文字⛔ 無法唯一實作 → **依角色拆成四類**，共同點是**前四項（缺檔／schema／`expected_image_id`／image 存在）一律在 Docker 前**，差別只在 **`bundle_id` 何時才有第二來源**：**probe／D／D+1** 在 **Docker 前**（有 `--bundle`）、**comparator** 在容器內**兩份 after artifact 讀進來之後、crossday 發布之前**、**normal finalizer** 在容器內**階段 A、建立 staging 或發布之前**、**recovery** 在容器內**全圖驗證、fsync 之前**；⛔ **不得為了統一而在 comparator／finalizer／recovery 的 host 端補一個 bundle path**（那等於把 operational input 帶進不該有它的角色）；十三-B 的時機表、shell 測試描述與測試矩陣 12-B 同步改成四類時點，⛔ 不得把 runner 才有的 bundle path 套到其他角色 |
+| v21 | review 抓到 3 中，全部反映（增補式）：①**repo 外的 plain JSON identity 沒有正式 host 驗證入口**——v20 要求四類角色都在 Docker 前驗，但唯一的 host validator 只定義接收 archived `.json.gz`、且明確是 recovery 入口；probe／D／D+1／comparator／normal finalizer 讀的是 repo 外的 plain `run_identity.json`，⛔ 只能各自發明解析方式（**雙真相源**）→ **同一支 validator 同時支援 `.json` 與 `.json.gz`**（前者驗 raw bytes == canonical bytes、後者驗 round-trip byte-identical 後解壓再驗 canonical），⚠️ **兩條路共用同一個 `validate_run_identity()`**，12-B 覆蓋兩種格式（含非 canonical 編碼／非 canonical gzip 的拒絕）；②**comparator 在容器內沒有獨立的 `bundle_id` 第二來源**——`compare-replay-crossday.sh` 只有 `--d`／`--d1`／`--output-dir`，⛔ 沒把 identity 掛入或注入，兩份 after 只能互比，**若兩份都帶同一個錯誤 `bundle_id` 就沒有任何獨立來源能發現** → **comparator 比照 normal finalizer**：same-path 唯讀掛載 ＋ 受保護的 `--run-identity`（自己的 ownership checker、`allow_abbrev=False`、拒絕重複），新增 **`comparator_argv.json`** 並補 argv／mount／ownership 測試（⚠️ ⛔ 不採「只由 finalizer 最終攔截」——crossday artifact 會進證據包，`bundle_id` 錯了該當場擋）；③**normal finalizer 的「建立 staging 前」與既定發布順序衝突**——既定流程是**先建完整 sibling staging、才做階段 A 全圖驗證**，且既有測試只保證失敗後 staging 被清除、⛔ 沒保證從未建立 → 改寫為「**階段 A、manifest／fsync／rename 之前**拒絕；失敗時清除 staging、正式 root 不存在」，⛔ 不為此重排兩階段流程 |
+| v22 | review 抓到 2 中，全部反映（增補式）：①**runner 的 pre-Docker `bundle_id` 比對無法透過唯一 host validator 完成**——v21 的 CLI 只收 identity path 與 `--expect-image-id`，成功也只輸出 image ID，於是 runner 要做這項比對**只能在 shell 再解析一次 identity**，⛔ 那是**雙真相源**且兩次讀取之間有 **TOCTOU** → validator 新增**可選的 `--expect-bundle-id`**：**probe／D／D+1 傳入**（值取自實際 bundle）、**comparator／finalizer／recovery ⛔ 不傳**（依既定容器內時點比對），**不符即非零退出且 stdout ⛔ 無輸出**〔測試：**12-B**，含 match／mismatch 各一組，以及「**不傳時⛔ 不得因此失敗**」〕；②**v21 新增的 comparator 契約沒進測試矩陣**——正文要求 comparator fixture 與 argv／mount／ownership 驗證、受影響檔案表也加了 `comparator_argv.json`，但第 12 項仍只列 normal finalizer／recovery，⚠️ **第六次違反守則二** → 新增 **12-A**：argv **逐 token 等於 `comparator_argv.json`**、**same-path `:ro` mount**、使用者注入／**縮寫**／**重複** `--run-identity` 三種都拒絕，且**都發生在 `docker run` 與任何 artifact 寫入之前**〔測試：**12-A**〕；⚠️ 同時在**守則二再加一道機制**：**修訂紀錄裡每條新增契約都要標註對應的測試項編號**——⛔ 連 checklist 都擋不住（v21 又漏一次、累計六次），標編號的話在寫修訂紀錄當下就會卡住 |
+| v23 | review 抓到 3 中，全部反映（增補式）：①**`--expect-bundle-id` 的來源未唯一化**——v22 只寫「值取自實際 bundle」，而**取目錄 basename／直接讀 `manifest.bundle_id`／經正式 loader 驗證**是**三種強度不同**的做法，前兩種擋不住偽造 → **改為 `--bundle <目錄路徑>`，由 validator 自己呼叫既有 `load_bundle()`**（`bundle.py:401`，含三方相等與完整 hash 驗證）取得 ID 再比對；⚠️ **這比傳值更強**：shell ⛔ 完全不解析、來源只有一條路，且 identity 與 bundle 在**同一行程內**讀完、⛔ 連 TOCTOU 都消除；✅ **實測**：`bundle.py` 只依標準庫與同 package 模組，**host（無 pandas）能跑完 `load_bundle()`**〔測試：**12-B**，含 match／mismatch、不傳不得失敗，**以及 v23 新增的 runner 接線整合測試**——⛔ 只直接測 validator 證明不了 runner 真的接上〕；②**12-A 沒測到 comparator 新增契約的核心分支**——identity 的目的是抓「**兩份 after 都帶同一個錯誤 `bundle_id`**」，但 12-A 只驗 argv／mount／所有權，identity 就算成功掛入、實作者漏掉實際比對仍會全綠（⚠️ 與前幾輪「測試沒刺激到它聲稱保護的分支」同類） → 補產品分支：**兩份 after 合法且同為 `bundle_id = B`、identity 記 `bundle_id = A`** → **一般失敗且⛔ 不得發布 crossday artifact**〔測試：**12-A**〕；③**正文與測試矩陣殘留舊 CLI 契約**（一處寫「只收 identity 路徑與 `--expect-image-id`」、一處寫「不承諾 `bundle_id` 檢查」，與新增的可選 bundle 參數衝突）→ 統一為「**validator 條件式支援 bundle ID：runner 必須傳 `--bundle`；comparator／normal finalizer／recovery ⛔ 不傳**（該角色沒有可信的 bundle 第二來源），recovery 的 invocation 只傳 image ID」 |
+| v24 | review 抓到 1 中 1 低，全部反映（增補式）：①**`python3 -S` 沒覆蓋 v23 新增的 bundle 載入路徑**——v23 讓 host validator 多呼叫 `load_bundle()`，依賴閉包因此多了 **`bundle.py` → `calendar.py`**，但 bootstrap 說明仍只列 `canonical`／`publish`／`artifacts`、dependency-light 約束也只套在 `run_identity.py`，且 12-B 沒明訂 `python3 -S` 那組要帶 `--bundle`；⚠️ **於是只測不帶 bundle 的 recovery 路徑就會全綠，而 runner 的新路徑仍可能因 bundle／calendar 的 import 失敗** → **約束擴及 host validator 實際載入的完整模組閉包**（`canonical`／`publish`／`calendar`／`artifacts`／`bundle`／`run_identity`），12-B **至少一組用 `python3 -S` ＋ plain identity ＋ `--bundle <合法 bundle>` 並真的跑完 `load_bundle()`**，**再一組給損壞 bundle → 非零退出且 stdout 無輸出**；✅ **實測**：`python3 -S`（site-packages ⛔ 不在 `sys.path`）下全鏈跑通；⚠️ 並記下陷阱——**`replay_bundle/calendar.py` 與標準庫的 `calendar` 同名**，bootstrap 要用前綴註冊、⛔ 別用裸名〔測試：**12-B**〕；②**低：「連 TOCTOU 都消除」講過頭**——兩個路徑仍是**依序讀取**，且 **validator 結束到 `docker run` 之間仍有窗口** → 改成精確描述「消除的是**shell 與 validator 各解析一次 identity** 那個窗口」，並明講**那一段由容器內的正式 loader 在 replay 前重新完整驗證兜底**，本計畫的威脅模型⛔ 不處理並行的外部竄改 |
+| **v25** | review 抓到 1 中，已反映（增補式）：**dependency-light 契約與現有 `calendar.py` 衝突**——v24 寫「閉包內模組**只能 import 標準庫與彼此**」，但 `calendar.py` 的線上抓取分支 `fetch_year_rows()`（`:110`）裡有 **lazy `import httpx`**（`:152`），那是第三方套件，⛔ 該敘述與現況直接衝突；⚠️ 而 `python3 -S` 的實測之所以仍通過，是因為 **loader 走的是 `validate_calendar_payload()`（`:272`）、⛔ 不經過那個分支**——也就是說，那個測試證明的是「**host validator 實際呼叫路徑不碰第三方**」，⛔ 不是「整個模組只依標準庫」 → **契約限縮為「host validator 實際執行的 import／call graph 必須 dependency-light」**，並明列 `calendar.py` 的線上抓取分支與 lazy `httpx` ⛔ **不在該路徑內**；⛔ **不採「把 HTTP 抓取移出 `calendar.py`」**——那會動到 I-100 已收斂的模組，也違反本計畫「⛔ 不改通用未啟用路徑」的範圍宣告，而 lazy import 本來就是為這種情形存在的；⚠️ 同時把實測的**證明範圍**寫精確：`python3 -S` 下那條路徑若真的碰到 `httpx` 就會 ImportError，**測試本身就是這條契約的守門**〔測試：**12-B**，沿用既有的 `python3 -S` ＋ `--bundle` 那組〕 |
+
 #### 關閉條件（2026-09-01 改為單一決策樹）
 
 結果只會落在三個分支之一。**分支 A 在 Stage 1 就判得出來**——零候選代表沒有東西可比，

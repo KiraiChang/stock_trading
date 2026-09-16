@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "I-074 Stage 1：finalize-evidence.sh 實際組出的 python argv，**normal 與 recovery 各一組**。",
+    "⚠️ 兩組的差異就是計畫書十三-C 的 CLI matrix：",
+    "  normal   — evidence root ＋ 9 份 --source ＋ 腳本注入的 --run-identity；⛔ 禁 --recover-durability",
+    "  recovery — 只有 evidence root ＋ --recover-durability；⛔ 禁全部 operational input 與 --run-identity",
+    "⛔ 存的是參數 token 序列；動態值用 placeholder。"
+  ],
+  "placeholders": {
+    "<ROOT>": "evidence root（repo 內；normal 時事前必須完全不存在）",
+    "<SRC:rel>": "該 archive 相對路徑對應的 operational 檔案（唯讀、same-path 掛載）",
+    "<IDENTITY>": "repo 外的 run identity 協調檔",
+    "<IMAGE_ID>": "sha256: ＋ 64 hex",
+    "<BASE_COMMIT>": "40 hex",
+    "<TOOLING_PATCH_SHA256>": "64 hex",
+    "<RUNNER_SHA256>": "64 hex"
+  },
+  "normal_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.evidence",
+    "--evidence-root", "<ROOT>",
+    "--run-identity", "<IDENTITY>",
+    "--source", "d/after_artifact.json.gz=<SRC:d/after_artifact.json.gz>",
+    "--source", "d/cohort_manifest.json.gz=<SRC:d/cohort_manifest.json.gz>",
+    "--source", "d1/after_artifact.json.gz=<SRC:d1/after_artifact.json.gz>",
+    "--source", "d1/cohort_manifest.json.gz=<SRC:d1/cohort_manifest.json.gz>",
+    "--source", "crossday/crossday_artifact.json.gz=<SRC:crossday/crossday_artifact.json.gz>",
+    "--source", "probe/capacity_probe_computation.json.gz=<SRC:probe/capacity_probe_computation.json.gz>",
+    "--source", "probe/capacity_probe_measurement.json.gz=<SRC:probe/capacity_probe_measurement.json.gz>",
+    "--source", "probe/capacity_probe.json.gz=<SRC:probe/capacity_probe.json.gz>",
+    "--source", "identity/run_identity.json.gz=<SRC:identity/run_identity.json.gz>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>"
+  ],
+  "recovery_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.evidence",
+    "--evidence-root", "<ROOT>",
+    "--recover-durability",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>"
+  ]
+}

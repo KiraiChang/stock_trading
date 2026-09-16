@@ -1020,7 +1020,7 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     # 新：`decision_summary["primary_zone"]`，也就是決策真正看的那顆（`_pick_primary_zone()`）。
     # 兩者可能不是同一顆 zone，所以欄位集合也整個換成 `_decision_summary_zone()` 的形狀。
     # ⛔ **新舊 replay report 的 `primary_zone_role_counts` 等統計不可直接比較**——
-    # 分界點是這次變更（見 docs/issue.md I-074 Stage 0 計畫書七）。
+    # 分界點是這次變更（見 docs/sr-zone-scoring.md 的 primary zone 段落；I-074 Stage 0 計畫書已收斂）。
     #
     # replay row 的 primary_zone 是對外 projection，欄位增減要在這裡被擋一次。
     #

@@ -58,18 +58,25 @@ done
 # 那一側驗「兩支官方腳本拒絕使用者傳入 provenance 參數」與「實際組出的 argv == 版控
 # fixture」，python 這一側再用同一份 fixture 跑 CLI 衝突矩陣。
 # ⚠️ 不掛進常態回合的話，它會變成沒人固定執行的手動項目。
-if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
-  "$REPO_ROOT/scripts/test-replay-args.sh"
-fi
 
 # 端到端 smoke（真的用官方腳本跑完 Stage 1／2）——⚠️ 要 docker build ＋ 兩次容器啟動
 # ＋ 兩個 git worktree，所以**預設不跑**，明確要求才跑。
+
 if [ "${REPLAY_SMOKE:-0}" = "1" ]; then
   "$REPO_ROOT/scripts/smoke-replay-offline.sh"
 fi
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
+
+# ⚠️ **shell 測試排在 build 之後**（⛔ 不是之前）：comparator 與 Stage 1 的 argv 測試
+# 需要 image 才跑得起來，放在前面的話**乾淨環境第一次執行會整段跳過**——
+# 那正是「evidence 錯綁」這類問題沒有被測試抓到的原因之一。
+if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
+  # ⚠️ `IMAGE_REQUIRED=1`：image 剛建好，需要它的那幾段⛔ 不得靜默 skip。
+  IMAGE_REQUIRED=1 PY_IMAGE="$IMAGE" "$REPO_ROOT/scripts/test-replay-args.sh"
+fi
+
 
 echo "==> pytest：$* image=$IMAGE mem=$MEM"
 exec docker run --rm \

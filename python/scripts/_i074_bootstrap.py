@@ -1,0 +1,50 @@
+"""host 端載入 `replay_bundle` 的最小 package context（I-074 Stage 1）。
+
+⚠️ **為什麼需要 bootstrap**：host 沒有 pandas，而
+`backtest/modular/sr_scoring/__init__.py` 會 `import pandas`。要在 `docker run` **之前**用
+**同一份** validator 驗 identity，就得繞過那個 `__init__`。
+
+⚠️ **抽成共用模組**是刻意的：`validate-i074-run-identity.py` 與
+`ensure-i074-run-identity.py` 都要它，各寫一份就是**雙真相源**（這個計畫已經在
+`NO_ZONE_SCORES_ERROR` 上犯過一次）。
+
+⛔ **這條路徑上的模組必須 dependency-light**：只能 import 標準庫與彼此，
+⛔ 不得（直接或間接）碰 pandas／sklearn／lightgbm，否則 host 端守門會失效。
+"""
+from __future__ import annotations
+
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
+_PKG = "_i074_rb"
+# ⚠️ 依賴順序：canonical → publish → calendar → artifacts → bundle → run_identity。
+_MODULES = ("canonical", "publish", "calendar", "artifacts", "bundle", "run_identity")
+
+
+def load_replay_bundle(repo_python: Path | None = None) -> dict:
+    """回傳 `{模組名: module}`。
+
+    ⚠️ **一律以 `_i074_rb.` 前綴註冊**：`replay_bundle/calendar.py` 與**標準庫的
+    `calendar` 同名**，用裸名會把標準庫那個蓋掉。
+    """
+    if repo_python is None:
+        repo_python = Path(__file__).resolve().parent.parent
+    root = repo_python / "backtest" / "modular" / "sr_scoring" / "replay_bundle"
+    if not root.is_dir():
+        raise SystemExit(f"找不到 replay_bundle：{root}")
+    if _PKG not in sys.modules:
+        pkg = types.ModuleType(_PKG)
+        pkg.__path__ = [str(root)]
+        sys.modules[_PKG] = pkg
+    loaded = {}
+    for name in _MODULES:
+        key = f"{_PKG}.{name}"
+        if key not in sys.modules:
+            spec = importlib.util.spec_from_file_location(key, root / f"{name}.py")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[key] = module
+            spec.loader.exec_module(module)
+        loaded[name] = sys.modules[key]
+    return loaded

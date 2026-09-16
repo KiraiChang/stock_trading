@@ -37,6 +37,41 @@ RUNTIME_SETTING_KEYS = (
 )
 
 
+# ⚠️ **provenance 的封閉欄位集合——單一真相源**（I-074 Stage 1）。
+# `build_provenance()` 產出它、`validate_provenance()` 驗它、crossday 逐欄比對也用它。
+# ⛔ 各處自己手列一份子集的話，改了一邊而另一邊沒跟上時**沒有任何東西會報錯**
+# （`NO_ZONE_SCORES_ERROR` 已經這樣犯過一次）。
+PROVENANCE_FIELDS = (
+    "source_root",
+    "image_digest",
+    "python_version",
+    "pip_freeze_sha256",
+    "project_modules_sha256",
+    "runner_sha256",
+    "base_commit",
+    "tooling_patch_sha256",
+    "argv",
+    "runtime_settings",
+)
+
+# `validate_provenance(role=...)` 的封閉列舉。
+PROVENANCE_ROLES = ("stage0", "stage1", "comparator", "finalizer")
+
+# ⚠️ 只有 Stage 0 允許這兩個為 null——它不做 before／after 比對，沒有 worktree 可推導。
+_NULLABLE_IN_STAGE0 = ("base_commit", "tooling_patch_sha256")
+
+# `runtime_settings` 的合法鍵（builder 以 lowercase 寫入）。
+# ⚠️ 是「**⊆**」而不是「恰好等於」：builder 是 `if hasattr(config_module, key)` 才寫，
+# config 少一個那個鍵就不會出現。
+_RUNTIME_SETTING_TYPES = {
+    "db_driver": str,
+    "sr_scoring_model_path": str,
+    "sr_scoring_evidence_enabled": bool,
+    "sr_scoring_evidence_max_zones": int,
+    "sr_scoring_adaptive_zone_builders_enabled": bool,
+}
+
+
 class ProvenanceError(ValueError):
     """provenance 推導失敗——⛔ 一律中止，不留一份說不清出處的證據。"""
 
@@ -145,3 +180,95 @@ def build_provenance(
         "argv": list(argv),
         "runtime_settings": runtime_settings(config_module),
     }
+
+
+# ── 驗證（I-074 Stage 1 新增）──────────────────────────────────────────────
+#
+# ⚠️ `build_provenance()` 只是 builder。crossday 要逐欄比對兩份 provenance、finalizer 要驗
+# archived 的那份，都需要一個**共用的、封閉的**驗證器，否則每個消費端各驗一部分。
+
+def _is_hex(value: object, length: int) -> bool:
+    """裸十六進位小寫字串。⛔ 大寫不算——SHA 的表示法要唯一，否則同內容會有兩種寫法。"""
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and value == value.lower()
+        and all(c in "0123456789abcdef" for c in value)
+    )
+
+
+def validate_provenance(prov: object, *, role: str) -> None:
+    """封閉欄位集合 ＋ 精確型別。⛔ 多欄、缺欄、型別不符一律中止。
+
+    `role` 決定 nullability：⚠️ 只有 `stage0` 允許 `base_commit`／`tooling_patch_sha256`
+    為 null（它沒有 worktree 可推導）；`stage1`／`comparator`／`finalizer` ⛔ 不得為 null。
+    """
+    if role not in PROVENANCE_ROLES:
+        raise ProvenanceError(f"未知的 provenance role={role!r}，只接受 {PROVENANCE_ROLES}")
+    if not isinstance(prov, dict):
+        raise ProvenanceError(f"provenance 必須是 object，實際 {type(prov).__name__}")
+
+    actual, expected = set(prov), set(PROVENANCE_FIELDS)
+    if actual != expected:
+        raise ProvenanceError(
+            f"provenance 欄位集合不符（role={role}）："
+            f"多={sorted(actual - expected)}、缺={sorted(expected - actual)}"
+        )
+
+    if not _is_hex(str(prov["image_digest"]).removeprefix("sha256:"), 64) \
+            or not str(prov["image_digest"]).startswith("sha256:"):
+        raise ProvenanceError(f"image_digest 必須是 sha256: ＋ 64 字元小寫 hex：{prov['image_digest']!r}")
+
+    for field in ("pip_freeze_sha256", "runner_sha256"):
+        if not _is_hex(prov[field], 64):
+            raise ProvenanceError(f"{field} 必須是 64 字元小寫 hex：{prov[field]!r}")
+
+    for field in _NULLABLE_IN_STAGE0:
+        value = prov[field]
+        if value is None:
+            # ⚠️ 只有 Stage 0 沒有 worktree，其餘 role 一律由官方腳本注入。
+            if role != "stage0":
+                raise ProvenanceError(f"{field} 在 role={role} ⛔ 不得為 null")
+            continue
+        length = 40 if field == "base_commit" else 64
+        if not _is_hex(value, length):
+            raise ProvenanceError(f"{field} 必須是 {length} 字元小寫 hex：{value!r}")
+
+    source_root = prov["source_root"]
+    if not isinstance(source_root, str) or not source_root.startswith("/"):
+        raise ProvenanceError(f"source_root 必須是絕對路徑字串：{source_root!r}")
+
+    python_version = prov["python_version"]
+    if not isinstance(python_version, str) or not python_version:
+        raise ProvenanceError(f"python_version 必須是非空字串：{python_version!r}")
+
+    argv = prov["argv"]
+    if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+        raise ProvenanceError("argv 必須是非空的字串陣列")
+
+    modules = prov["project_modules_sha256"]
+    if not isinstance(modules, dict):
+        raise ProvenanceError("project_modules_sha256 必須是 object")
+    for name, digest in modules.items():
+        # ⚠️ key 是 **Python module name**（`project_module_hashes()` 寫的是 `out[name]`），
+        # ⛔ 不是相對路徑——寫錯會讓所有合法 provenance 都被拒絕。
+        if not isinstance(name, str) or not name:
+            raise ProvenanceError(f"project_modules_sha256 的 key 必須是非空字串：{name!r}")
+        if not _is_hex(digest, 64):
+            raise ProvenanceError(f"project_modules_sha256[{name}] 必須是 64 字元小寫 hex：{digest!r}")
+
+    settings = prov["runtime_settings"]
+    if not isinstance(settings, dict):
+        raise ProvenanceError("runtime_settings 必須是 object")
+    unknown = set(settings) - set(_RUNTIME_SETTING_TYPES)
+    if unknown:
+        raise ProvenanceError(f"runtime_settings 有未知的鍵：{sorted(unknown)}")
+    for key, value in settings.items():
+        want = _RUNTIME_SETTING_TYPES[key]
+        # ⛔ bool 是 int 的子類，int 欄位要先排除 bool。
+        if want is int and isinstance(value, bool):
+            raise ProvenanceError(f"runtime_settings.{key} 必須是 int，⛔ 不接受 bool：{value!r}")
+        if not isinstance(value, want):
+            raise ProvenanceError(
+                f"runtime_settings.{key} 必須是 {want.__name__}：{value!r}"
+            )

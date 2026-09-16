@@ -2785,6 +2785,16 @@ replay row 原本取 `_sort_zone_scores()[0]`（排序第一筆），現在取
   ⛔ **before 不驗展開式**——展開式需要 `active_bearish_states`，那是 `event_state_summary`
   的內容、lifecycle 的**獨立輸入**，光靠 row 算不出來，要在 before tooling 內驗。
 
+#### Stage 2 的**第五道**集合檢查
+
+⚠️ Stage 2 原本只用 **after 的 cohort** 過濾比較，於是 **before 多出來的候選會被靜默漏掉**
+——而主文明訂「兩邊算出來的 candidate 集合必須完全相同；不相同**本身就是分支 C**」。
+
+**第五道檢查**：`candidate_keys(before) == candidate_keys(after)`，
+⛔ 不相等即中止並保留差集，**排在比較與發布之前**。
+⚠️ ⛔ **不採「兩邊候選的聯集」**：那會讓既有的第四道檢查必然不成立——新增一份
+`candidate_mismatch.json` 比鬆動既有契約安全。
+
 #### `candidate_mismatch.json` 的完整 schema
 
 **top-level 封閉欄位集合**（⛔ 多欄或缺欄一律拒絕）：
@@ -2837,6 +2847,125 @@ boolean，這裡只消費它來重建集合與計數。
 ⚠️ **測試必須持有來源的 pristine copy**：`compare_rows()` 把來源 dict **直接**放進
 artifact，所以 `artifact["rows"][i]["before"]` **就是** `before_by_key[key]` 那個物件。
 竄改 artifact 時會一併改到來源，來源對照就變成「自己跟自己比」而永遠通過。
+
+#### I-074 Stage 1 的四個永久契約
+
+⚠️ **這一節是永久 contract**：`issue.md` 的 I-074 收斂後會被移除，規格必須留在這裡。
+
+##### 一、Stage 1 專屬 preflight
+
+| 時點 | 檢查 |
+|---|---|
+| **pre**（replay context 推導後、`_decision_replay_rows()` 之前） | ① `bundle_id == b1_20260901_1d_74350966_5d7ecb10`；② symbols 恰為那 11 檔；③ 每檔末根的**台北日期**是 `2026-09-01`；④ `sum(quota) == len(universe) == 13417` |
+| **post**（replay 後、發布前） | ⑤ 實際列數 == 13417 且 key 集合與 universe 完全相等 |
+
+⚠️ **③ 比的是台北交易日，⛔ 不是 UTC 日期**：末根 epoch `1788192000` 的 UTC 日期是
+**2026-08-31**，轉 `Asia/Taipei` 才是 `2026-09-01`——直接比 UTC 會把**正確的** bundle 擋掉。
+⚠️ **④ 與 ⑤ ⛔ 不是重複**：前者用**輸入**推導的配額、後者用**輸出**；兩個都等於 13417
+才代表「載入範圍對」且「replay 真的走完」。
+⛔ preflight ⛔ 不得自己重算 candidate range——唯一真相源是 `_candidate_bar_range()`。
+
+##### 二、crossday（跨日逐列比對）
+
+⛔ **不能用 after artifact 的 SHA-256 比**：它含 `generated_at` 與 argv，兩趟必然不同。要比的是 `rows`。
+
+**輸入有效性**（⛔ 不合法一律 exit 1 且**不產** artifact，⛔ 這**不是** mismatch）：
+兩側 SHA 不同、`generated_at` 含時區、轉台北後相鄰一天且順序正確、五個身分欄位一致、
+來源 provenance 形狀合法。⚠️ **同檔／同 SHA／同日是 invalid input**——把它算成 mismatch
+等於承認那是一次有效的跨日比較。
+
+```text id="i074_crossday_matched_001"
+rows_match       = d_key_order == d1_key_order 且 d_only／d1_only／row_differences 三者皆空
+provenance_match = provenance_differences 為空
+matched          = rows_match and provenance_match
+outcome          = MATCH／ROW_MISMATCH／PROVENANCE_MISMATCH／ROW_AND_PROVENANCE_MISMATCH
+```
+
+* `row_differences[]` **直接重用 `compare_rows()`**，`before` 位裝 **D**、`after` 位裝 **D+1**；
+* **validator 必填收兩份實際 artifact 與實際 SHA**，所有欄位**由來源重算後比對**，
+  ⛔ 不接受 artifact 自報的值；`by_key` 由 validator 自建，⛔ 不收外部（⛔ 不製造第三真相源）；
+* ⚠️ **durable validator 自己也驗輸入有效性**——⛔ 不能依賴「producer 當初呼叫過」，
+  否則重新封裝一套內部自洽的來源就能放行同一天；
+* provenance 比對**全部 10 個欄位**，唯一允許不同的是 `argv` 裡的 `--output-dir` 值。
+
+##### 三、capacity probe
+
+三份 operational `.json`：**computation**（Python）、**measurement**（Shell）、
+**completion**（Shell，**最後**才寫）。
+⚠️ 不變條件：`row_count == len(rows) == sum(quota) == 200`、quota key 恰為 11 檔、
+每檔實際列數等於 quota、rows 要過 `validate_replay_errors()` 與 `validate_diagnostics()`。
+⚠️ **量測三值都是正整數 bytes**——⛔ 量不到就**不發布 completion**，
+⛔ 不得寫 0 佔位（那會讓後續判讀以為峰值極低）。
+⚠️ 結果**只作 sanity check**，⛔ 不得線性外推 13417 列的正式峰值。
+
+##### 四、evidence（整包原子發布與 recovery）
+
+**9 個 `.json.gz` archive ＋ root 的 `evidence_manifest.json`（⛔ 不壓縮）＝ 10 檔。**
+
+* **兩層分明**：operational 是 `.json`（各行程寫在 repo 外）、archived 是 `.json.gz`
+  （⚠️ **只有 finalizer 產生**）；manifest 對每檔同時記 `artifact_sha256`（解壓內容）與
+  `stored_sha256`／`stored_bytes`（實際落地），⛔ 不混用；
+* **全圖驗證**：兩趟的 after ＋ cohort 的完整 validator（含 diagnostics 與「cohort keys ＝
+  after 的候選列」）、cohort SHA 指向對應 after、crossday **以實際 after 重跑 validator**、
+  probe 三份完整 validator ＋ provenance 相同、所有檔案同一 `bundle_id`、
+  ⚠️ **每一份 provenance 的 `image_digest` 逐一列舉比對**（⛔ 不用
+  `.get("provenance")` 推測——crossday 用的是 `comparator_provenance`，通用推測會整份漏掉）；
+* **順序**：`probe_no_clobber()` → staging → 階段 A（讀入＋全部驗證，**所有 project import
+  在此發生**）→ 階段 B（**才**建 `finalizer_provenance` 與 manifest）→ fsync →
+  `rename_noreplace()` **一次發布整個 root**；⚠️ 階段 B 後重算 module mapping 當守門；
+* **durability 分流**：rename 前失敗 → 清 staging、exit 1；**rename 後 parent fsync 失敗 →
+  正式 root 保留、exit 3**（⛔ 不刪除）；
+* **`--recover-durability`**：⛔ 不讀 operational inputs、⛔ 不重新壓縮，只驗既有 10 檔並重新
+  fsync；⚠️ **依 crossday 的 `outcome` 還原終端結果**（`MATCH` → 0、其餘 → **5**）——
+  ⛔ 固定回 0 會讓 mismatch 的 5 **永遠消失**。
+
+##### 五、provenance 的欄位集合與型別
+
+⚠️ **單一真相源是 `replay_bundle/provenance.py` 的 `PROVENANCE_FIELDS`**——builder 產出它、
+`validate_provenance(prov, *, role)` 驗它、crossday 逐欄比對也用它。
+⛔ 各處自己手列一份子集的話，改了一邊而另一邊沒跟上時**沒有任何東西會報錯**。
+
+| 欄位 | 型別 |
+|---|---|
+| `image_digest` | `sha256:` ＋ 64 字元小寫 hex |
+| `pip_freeze_sha256`／`runner_sha256`／`tooling_patch_sha256`／module hash values | 裸 64 hex |
+| `base_commit` | 40 hex |
+| `source_root` | 絕對路徑字串 |
+| `argv` | 非空字串陣列 |
+| `python_version` | 非空字串 |
+| `project_modules_sha256` | ⚠️ **「Python module name → 64 hex」**（`out[name] = …`）——⛔ **不是相對路徑**，寫錯會拒絕現有所有合法 provenance |
+| `runtime_settings` | ⚠️ 鍵集合是「**⊆** 五個」⛔ **不是「恰好五個」**（builder 是 `if hasattr` 才寫）：`db_driver`／`sr_scoring_model_path`／`sr_scoring_evidence_enabled`／`sr_scoring_evidence_max_zones`／`sr_scoring_adaptive_zone_builders_enabled` |
+
+**`role` 是封閉列舉** `stage0`／`stage1`／`comparator`／`finalizer`：只有 `stage0` 允許
+`base_commit`／`tooling_patch_sha256` 為 null（它沒有 worktree 可推導）。
+
+⚠️ **`build_provenance()` 的求值順序有陷阱**：dict literal 裡 `project_module_hashes()` 排在
+`runtime_settings()` **之前**，而後者在 `config_module is None` 時才 lazy-import `config`
+——⚠️ 而 `config` 正是專案模組。呼叫端若沒先載入 config 並以 `config_module=` 傳入，
+**它的 hash 會被漏記**。
+
+##### 六、SHA 與 canonical 的精確語意
+
+⛔ **`load_artifact()` 算的是檔案 raw bytes 的 SHA**，⛔ **沒有**重新 canonicalize。
+
+| 輸入 | 規則 |
+|---|---|
+| `.json` | 要求 **raw bytes == `canonical_json_bytes(parsed)`**（非 canonical 編碼⛔ 直接拒絕）；SHA **直接算 raw bytes**——與 `load_artifact()` 現行語意一致 |
+| `.json.gz` | ⚠️ **`raw == canonical_gzip_bytes(gunzip_bytes(raw))`**（整段 round-trip byte-identical）；解壓後亦須 == canonical bytes；`artifact_sha256` 算**解壓後**的 bytes |
+| 兩者 | `stored_sha256`／`stored_bytes` 才是**實際落地檔案**的 |
+
+⚠️ **canonical gzip ⛔ 不能只驗 `mtime=0` 與無 filename**：compression level、XFL、OS byte
+或 deflate 表示不同都會產出不同 bytes 卻通過那兩項。既然唯一 producer 是
+`canonical_gzip_bytes()`，契約就直接定為**整段 round-trip 相同**——它同時驗 header、
+壓縮內容與 footer。**✅ 實測**：既有 bundle 的三個 payload 全部 round-trip byte-identical。
+
+⚠️ **`.json` 這條⛔ 不得讀第二次檔案**：`load_artifact()` 只回傳 `(parsed, sha)`，
+raw bytes ⛔ 不會傳出——再讀一次可能已不是同一版本。用 **SHA 對照**
+（`raw_sha == sha256_hex(canonical_json_bytes(parsed))`）等價且只讀一次。
+
+**evidence 的統一入口是 `load_canonical_evidence_artifact(path, kind)`**（兩種副檔名都收），
+回傳 `EvidenceLoad`（`parsed`／`artifact_sha256`／`stored_sha256`／`stored_bytes`）——
+⚠️ 四個值**都來自同一次讀取**，finalizer 才不必為了 `stored_*` 再讀一遍。
 
 #### Stage 2 有**兩種** terminal outcome
 

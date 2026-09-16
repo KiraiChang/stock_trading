@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import os
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .canonical import canonical_json_bytes, sha256_hex
+from .canonical import canonical_gzip_bytes, canonical_json_bytes, gunzip_bytes, sha256_hex
 from .publish import fsync_dir, fsync_file
 
 ARTIFACT_SCHEMA_VERSION = 1
@@ -203,7 +204,7 @@ DIAGNOSTIC_NULLABLE_FIELDS = ("position_action_condition", "position_action")
 
 NO_ZONE_SCORES_ERROR = "NO_ZONE_SCORES"
 
-# ⚠️ **no-zone 列的合法缺席 fallback**（issue.md I-074 Stage 0 計畫書六-B）。
+# ⚠️ **no-zone 列的合法缺席 fallback**（契約見 docs/sr-zone-scoring.md「九個診斷欄位的完整 schema」；計畫書已收斂）。
 #
 # ⛔ 這**不是**重算上游判斷，語意是「這一列沒有 decision summary 可匯出」。
 # ⚠️ 觸發條件**只有**「真的沒有 zone」：`zone_score_available == False` 且
@@ -228,6 +229,33 @@ DIAGNOSTIC_NO_ZONE_FALLBACK: dict[str, Any] = {
 
 # 九個診斷欄位的名稱（給匯出與驗證兩端共用，⛔ 不在兩處各列一份）。
 DIAGNOSTIC_FIELDS = tuple(DIAGNOSTIC_NO_ZONE_FALLBACK)
+
+
+def validate_replay_errors(rows: Iterable[dict[str, Any]], label: str) -> None:
+    """⚠️ **「合法零 zone」與「運算失敗」要分開。**
+
+    `zone_score_error == "NO_ZONE_SCORES"` 是合法的——那一列本來就沒有 zone，
+    `candidate = false` 是**真實的 false**。⛔ 其餘任何 error 值都是運算失敗，
+    在發布 artifact 之前就要中止。
+
+    ⚠️ **原本是 `evaluation.py` 的私有 `_assert_no_replay_errors()`**（I-074 Stage 1 搬來）：
+    probe 與 finalizer 也要用它，而本 package ⛔ 不得反向 import `evaluation.py`；
+    另抄一份就是**雙真相源**（`NO_ZONE_SCORES_ERROR` 已經這樣犯過一次）。
+    ⛔ **行為一字不改**——`ArtifactError` 是 `ValueError` 的子類，既有的
+    `pytest.raises(ValueError)` 與 CLI 的 generic catch 都照樣接得到。
+    """
+    failures: list[str] = []
+    for row in rows:
+        zone_error = row.get("zone_score_error")
+        if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
+            failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
+        if row.get("decision_error"):
+            failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
+    if failures:
+        raise ArtifactError(
+            f"{label} 有 {len(failures)} 列運算失敗，⛔ 不發布任何 artifact："
+            + "；".join(failures[:5]) + ("…" if len(failures) > 5 else "")
+        )
 
 
 def _is_no_zone_fallback_row(row: dict[str, Any]) -> bool:
@@ -723,6 +751,79 @@ def load_artifact(path: str | Path, kind: str) -> tuple[dict[str, Any], str]:
     if data.get("kind") != kind:
         raise ArtifactError(f"{path.name} 的 kind={data.get('kind')!r}，預期 {kind!r}")
     return data, sha256_hex(raw)
+
+
+@dataclass(frozen=True)
+class EvidenceLoad:
+    """`load_canonical_evidence_artifact()` 的回傳。
+
+    ⚠️ **四個值都來自同一次讀取**——finalizer 要用 `stored_*` 建 manifest，若它自己再讀一次
+    檔案，`parsed`／`artifact_sha256` 與那份 raw bytes 可能已經不是同一版本。
+    """
+
+    parsed: dict[str, Any]
+    artifact_sha256: str   # 解壓後 bytes 的 SHA（`.json` 時即 raw bytes）
+    stored_sha256: str     # **實際落地檔案** raw bytes 的 SHA
+    stored_bytes: int      # 該 raw bytes 的長度
+
+
+def load_canonical_evidence_artifact(path: str | Path, kind: str) -> EvidenceLoad:
+    """evidence 的統一載入入口：`.json` 與 `.json.gz` 都收。
+
+    ⚠️ 既有的 `load_artifact()` 直接把檔案當 UTF-8 JSON 讀，**⛔ 讀不了 gzip**；
+    而本輪 archived evidence 是 `.json.gz`。⛔ **不改 `load_artifact()` 的公開 API**，
+    改在這裡分流：
+
+    * `.json`——呼叫既有 `load_artifact()`，再驗 **raw bytes 就是 canonical bytes**
+      （⚠️ 用 SHA 對照，⛔ **不重讀檔案**：`load_artifact()` 只回傳 `(parsed, sha)`，
+      raw bytes 不會傳出，再讀一次可能已不是同一版本）；
+    * `.json.gz`——驗 **round-trip byte-identical**（⛔ 只驗 mtime／filename 兩個 header 欄位
+      擋不住 compression level／XFL／OS byte 的差異），解壓後再驗 canonical 與 schema／kind。
+    """
+    import json
+
+    path = Path(path)
+    name = path.name
+    if name.endswith(".json"):
+        parsed, raw_sha = load_artifact(path, kind)
+        if raw_sha != sha256_hex(canonical_json_bytes(parsed)):
+            raise ArtifactError(
+                f"{name} 的內容不是 canonical JSON——⛔ 語意相同但編碼不同也不接受"
+            )
+        return EvidenceLoad(parsed, raw_sha, raw_sha, path.stat().st_size)
+
+    if not name.endswith(".json.gz"):
+        raise ArtifactError(f"evidence 只接受 .json 或 .json.gz：{name}")
+
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise ArtifactError(f"讀不到 evidence {path}：{exc}") from exc
+    try:
+        payload = gunzip_bytes(raw)
+    except Exception as exc:  # noqa: BLE001 - gzip 的例外型別依內容而異
+        raise ArtifactError(f"{name} 不是合法 gzip：{exc}") from exc
+    if canonical_gzip_bytes(payload) != raw:
+        raise ArtifactError(
+            f"{name} ⛔ 不是 canonical gzip（round-trip 不是逐位元相同）——"
+            "compression level／header 欄位不同都會落在這裡"
+        )
+    try:
+        parsed = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ArtifactError(f"{name} 解壓後不是合法 JSON：{exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ArtifactError(f"{name} 必須是 object")
+    if payload != canonical_json_bytes(parsed):
+        raise ArtifactError(f"{name} 解壓後的內容不是 canonical JSON")
+    version = parsed.get("schema_version")
+    if type(version) is not int or version != ARTIFACT_SCHEMA_VERSION:
+        raise ArtifactError(
+            f"未知的 {name} schema_version={version!r}（本實作只支援 {ARTIFACT_SCHEMA_VERSION}）"
+        )
+    if parsed.get("kind") != kind:
+        raise ArtifactError(f"{name} 的 kind={parsed.get('kind')!r}，預期 {kind!r}")
+    return EvidenceLoad(parsed, sha256_hex(payload), sha256_hex(raw), len(raw))
 
 
 # ── 原子發布 ────────────────────────────────────────────────────────────────

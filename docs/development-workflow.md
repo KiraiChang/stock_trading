@@ -927,11 +927,123 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
    artifact**，而是 `candidate_mismatch.json` ＋ **結束碼 4**（`EXIT_CANDIDATE_MISMATCH`）
    ——那一份就是該次的證據（含完整差集與兩側逐列 row），且該結果**直接判為分支 C**
    （見 `issue.md` I-074）。⛔ 此時不產出 comparison／report 是**預期的**，不是失敗殘骸；
-4. **跨日證據**：⛔ **D 日產 bundle 並跑、D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。
+4. **跨日證據**：⛔ **D 日跑、D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。
    ⚠️ **同一天跑兩次證明不了任何事**——當日資料本來就沒變。
+   ⚠️ **⛔ 不是「D 日產 bundle」**（2026-09-15 更正）：bundle 是 2026-09-11 就凍結並進版控的
+   那一份，⛔ 不得重產——每過一天還原係數還會再變，重產出來的是**另一份**輸入
+   （見 `issue.md` I-100 十九的實證）。
 
 ⚠️ **preflight 與指紋檢查失敗不計入「一次正式 scan」**（`issue.md` I-074 的停止條件）：
 那是輸入還沒就位，不是驗證跑過了。
+
+### I-074 Stage 1 的正式執行程序
+
+⚠️ **六個角色共用同一個 image ID 與同一份 run identity**——⛔ 跨日的三趟跑在不同 image 上，
+整組證據就不可比。
+
+```text id="i074_stage1_flow_001"
+① pin      ⚠️ **正式流程寫成腳本**（⛔ 不要整段貼進互動 shell——最後的 `exit` 會關掉它）：
+
+             set -euo pipefail
+             if REPLAY_IMAGE_ID="$(scripts/pin-replay-image.sh <bundle>)"; then
+               export REPLAY_IMAGE_ID
+             else
+               pin_rc=$?
+               echo "pin 失敗（rc=$pin_rc）——⛔ 不要執行後面任何一步" >&2
+               exit "$pin_rc"
+             fi
+
+           ⚠️ **⛔ 不可寫成 `export VAR="$(...)"`**：bash 的 `export` builtin 成功會
+              **掩蓋 command substitution 的非零結束碼**——pin 回 3（durability 未確認）
+              時整行仍是 0。實測：`export V="$(exit 3)"` → **rc=0**；拆開寫 → rc=3。
+           ⚠️ **⛔ 「拆成兩行」也不夠**：沒有 `set -e` 時，第一行回 3 之後第二行照樣執行。
+           ⚠️ **⛔ 連 `if … else echo …; fi` 也不夠**：`echo` 是**成功**的指令，
+              所以整個 `if` 最終仍回 **0**，流程會繼續、原始的 3 也不再是終端碼。
+              實測：`if V="$(exit 3)"; then :; else echo x; fi` → **rc=0**；
+              捕捉 `pin_rc=$?` 後才是 3。**必須 `exit "$pin_rc"`。**
+           ⚠️ **互動 shell 沒有自動停止這回事**：那時這一步是**人工停止點**——
+              ⛔ 看到非零就不要往下做，⛔ 不要假裝它會自己擋。
+           ⚠️ 已有 identity 時⛔ 不 build、⛔ 不改 created_at，只重新 fsync
+② probe    MEASURE_PEAK=1 scripts/run-replay-offline.sh \
+             --bundle <bundle> --output-dir <probe 目錄> --i074-capacity-probe
+           ⚠️ quota 固定 200、載入全部 11 檔與模型；⛔ 不發布 after／cohort
+③ D       scripts/run-replay-offline.sh \
+             --bundle <bundle> --output-dir <D 目錄> --i074-preflight
+④ D+1     隔天在新的正式執行腳本裡，**重新執行步驟 ① 的完整 guarded pin 區塊**
+           （環境變數⛔ 不會跨 session／重開機保存），再跑與 ③ 相同的指令、
+           **只換 --output-dir**
+           ⚠️ ⛔ **不是「只重跑 assignment ＋ export」**——那會把剛修掉的結束碼問題
+              原樣帶回來（pin 回 3 時整段仍以 0 結束）。要連 `if/else/exit` 一起。
+           ⚠️ 既有 identity 會走 no-op，⛔ 不 build，取得的是**同一個** image ID
+⑤ 仲裁    scripts/run-i074-stage1.sh --d <D>/after_artifact.json \
+             --d1 <D+1>/after_artifact.json --crossday-output-dir <cd 目錄> \
+             --evidence-root python/baselines/i074_stage1 --source <其餘六份>
+           ⚠️ D／D+1／crossday 三份由 orchestrator **自己綁定**，⛔ 不接受 --source 覆寫
+⑥ 修復    rc=3 時：scripts/finalize-evidence.sh --evidence-root <同一路徑> \
+             --recover-durability
+```
+
+**結束碼**（⚠️ 都是**終止狀態**，⛔ 不是失敗殘骸）：
+
+| rc | 意義 |
+|---|---|
+| 0 | 跨日逐列結果與執行身分都相同（`MATCH`） |
+| **5** | 不一致——⚠️ **證據已完整發布**；⛔ 立案調查，**不得以重跑覆蓋或取代** |
+| **3** | evidence 已發布但 **durability 未確認**——⛔ 不刪除，用 `--recover-durability` 修復 |
+| 1 | 一般失敗（輸入不合法、validator 不過）——⛔ 此時不留下任何 artifact |
+
+⚠️ **三個位置完全分離**：operational artifact 與執行 log 都在 **repo 外**；
+archived evidence 在 `python/baselines/i074_stage1/`，**finalizer 執行前必須完全不存在**
+（整包一次 rename 發布：正式路徑由「不存在」直接變成「完整」）。
+
+⚠️ **run identity 的路徑固定由 `XDG_DATA_HOME` 推導**，⛔ 沒有覆寫參數——
+測試改覆寫 `XDG_DATA_HOME` 本身。
+
+#### finalizer 的 CLI matrix
+
+| | **normal finalization** | **`--recover-durability`** |
+|---|---|---|
+| evidence root | 必填 | 必填 |
+| 9 份 `--source` | **全部必填** | ⛔ **一律禁止** |
+| `--run-identity`（same-path 唯讀掛載 ＋ 腳本注入） | **必填** | ⛔ **禁止**（只讀 evidence 內的 archived copy） |
+| `--recover-durability` | ⛔ 禁止 | 必填 |
+| provenance 注入參數 | 依 worktree／tooling-patch 推導後注入 | 同左，但**用途是比對**——見下 |
+
+⚠️ **recovery 的那五個注入值⛔ 不是拿來建新 provenance**：它們用來**確認 recovery 跑的是
+同一份程式碼**——以本次執行身分逐欄比對 archived `finalizer_provenance` 的
+`image_digest`／`base_commit`／`tooling_patch_sha256`／`runner_sha256`／`source_root`／
+**`runtime_settings`** 六欄，**任一不符就在 fsync 之前中止**。
+⛔ 不比 `argv`（兩種模式天生不同）、`project_modules_sha256`（recovery 不讀 operational
+inputs，載入集合本來就較少）、`python_version`／`pip_freeze_sha256`（由 image 決定）。
+
+⚠️ **`bundle_id` 的比對時點依角色分四類**——共同點是「缺檔／schema／`expected_image_id`／
+image 存在」四項**一律在 `docker run` 之前**，差別只在 `bundle_id` 何時才有第二來源：
+
+| 角色 | `bundle_id` 比對時點 |
+|---|---|
+| probe／D／D+1（runner） | **Docker 前**——只有它們手上有 `--bundle` path |
+| comparator | 容器內：兩份 after 讀進來之後、**crossday 發布之前** |
+| normal finalizer | 容器內：**階段 A**，manifest／fsync／rename 之前 |
+| recovery | 容器內：全圖驗證，**fsync 之前** |
+
+⛔ **不得為了統一而在 comparator／finalizer／recovery 的 host 端補一個 bundle path**——
+那等於把 operational input 帶進不該有它的角色。
+
+#### ⚠️ 寫多輪計畫書的兩條守則
+
+這兩條是 I-074 Stage 0／1 共 42 個版次換來的，⛔ 不是抽象原則：
+
+1. **改版時⛔ 不得刪除任何既有契約條款**，只能改寫表達或補強；精簡只能作用在敘述文字上，
+   ⛔ 不能作用在**可驗證的條款**上。⚠️ 整段重寫最容易犯——實際發生過兩次
+   （validator 的來源綁定、crossday 的型別契約各弄丟一次，都由 review 抓回來）。
+2. **改動任何正文條款後，必須同步檢查測試矩陣裡對應的那一條**；
+   驗證要**限定在計畫書正文的行號範圍內**——⛔ 全檔 grep 會被修訂紀錄的命中掩蓋
+   （曾因此讓「正文根本沒改到」過關）。
+   ⚠️ 光有原則不夠，所以還要：**修訂紀錄裡每條新增契約都標註對應的測試項編號**——
+   漏標就會在寫修訂紀錄當下卡住，⛔ 不必等下一輪 review。
+
+⚠️ 另有一條與此相關的**增補式修訂**風險：插入點若落在**表格內部**，會把後面的列切出表外
+（Markdown 不會把它算進那張表）。這個錯在 I-100 與 I-074 各發生過一次。
 
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 

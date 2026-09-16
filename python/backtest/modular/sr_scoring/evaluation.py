@@ -29,6 +29,7 @@ from .replay_bundle import (
     DIAGNOSTIC_FIELDS,
     DIAGNOSTIC_NO_ZONE_FALLBACK,
     NO_ZONE_SCORES_ERROR,
+    validate_replay_errors,
 )
 from .event_engine import EXTREME_VOLUME_THRESHOLD
 from .scoring import (
@@ -2864,8 +2865,14 @@ def _bundle_universe_keys(
     return keys
 
 
-def _replay_from_bundle(loaded):
-    """把 bundle 還原成 replay 的輸入，跑完**全候選**並回傳 `(rows, context)`。"""
+def _replay_from_bundle(loaded, *, quota_override=None, on_context=None):
+    """把 bundle 還原成 replay 的輸入，跑完**全候選**並回傳 `(rows, context)`。
+
+    `quota_override`——capacity probe 用（`(sources, dataset_config) -> quota`）。
+    `on_context`——⚠️ **在 replay 之前**拿到已推導的 replay context，I-074 Stage 1 的
+    preflight-pre 靠它。⛔ preflight 自己⛔ 不得重算 candidate range：唯一真相源是
+    `_candidate_bar_range()`。
+    """
     from .replay_bundle import row_key
 
     replay_config = loaded.replay_config
@@ -2878,7 +2885,21 @@ def _replay_from_bundle(loaded):
         raise ValueError(f"bundle {loaded.bundle_id} 裡沒有任何可用的 candles")
 
     model_bundle = load_model(str(loaded.model_path))
-    quota = _all_candidates_quota(sources, dataset_config)
+    quota = (
+        quota_override(sources, dataset_config) if quota_override is not None
+        else _all_candidates_quota(sources, dataset_config)
+    )
+    universe = _bundle_universe_keys(sources, dataset_config)
+    if on_context is not None:
+        # ⚠️ 每檔最後一根 candle 的 epoch 秒——preflight 要用它驗**台北**交易日。
+        last_timestamps = {
+            str(symbol): int(pd.Timestamp(df.index[-1]).timestamp())
+            for symbol, _timeframe, df in sources
+        }
+        on_context(
+            sources=sources, dataset_config=dataset_config,
+            quota=quota, universe=universe, last_timestamps=last_timestamps,
+        )
     rows = _decision_replay_rows(
         sources,
         dataset_config,
@@ -2888,10 +2909,10 @@ def _replay_from_bundle(loaded):
         model_governance_by_symbol=loaded.governance or None,
         builder_config=builder_config,
     )
-    universe = _bundle_universe_keys(sources, dataset_config)
     return rows, {
         "timeframe": timeframe,
         "dataset_config": dataset_config,
+        "quota": quota,
         "universe": universe,
         "keys": [row_key(row) for row in rows],
         "model_metadata": _model_metadata(model_bundle),
@@ -2951,25 +2972,9 @@ def _publish_candidate_mismatch(
     )
 
 
-def _assert_no_replay_errors(rows: list[dict[str, Any]], label: str) -> None:
-    """⚠️ **「合法零 zone」與「運算失敗」要分開。**
-
-    `zone_score_error == "NO_ZONE_SCORES"` 是合法的——那一列本來就沒有 zone，
-    `candidate = false` 是**真實的 false**。⛔ 其餘任何 error 值都是運算失敗，
-    在發布 artifact 之前就要中止。
-    """
-    failures: list[str] = []
-    for row in rows:
-        zone_error = row.get("zone_score_error")
-        if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
-        if row.get("decision_error"):
-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
-    if failures:
-        raise ValueError(
-            f"{label} 有 {len(failures)} 列運算失敗，⛔ 不發布任何 artifact："
-            + "；".join(failures[:5]) + ("…" if len(failures) > 5 else "")
-        )
+# ⚠️ **「合法零 zone vs 運算失敗」的守門已搬到 `replay_bundle/artifacts.py`**
+# （公開的 `validate_replay_errors()`，import 在本檔頂部）：I-074 Stage 1 的 capacity probe
+# 與 evidence finalizer 也要用它，而 package ⛔ 不得反向 import 本檔；另抄一份就是雙真相源。
 
 
 def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
@@ -3040,14 +3045,60 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
     output_dir = prepare_output_dir(args.output_dir)
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    rows, context = _replay_from_bundle(loaded)
+    # ── I-074 Stage 1 的兩個 opt-in ────────────────────────────────────────
+    want_preflight = bool(getattr(args, "i074_preflight", False))
+    want_probe = bool(getattr(args, "i074_capacity_probe", False))
+    assert_i074_flags(
+        {name for name in ("i074_preflight", "i074_capacity_probe")
+         if getattr(args, name, False)},
+        stage=stage,
+    )
+
+    on_context = None
+    quota_override = None
+    if want_preflight or want_probe:
+        from .replay_bundle import preflight_pre
+
+        def on_context(*, sources, dataset_config, quota, universe, last_timestamps):  # noqa: F811
+            # ⚠️ **在 `_decision_replay_rows()` 之前**——跑完 3.2 小時才發現輸入不對
+            # 就不叫 preflight。probe 也走這一關（它隱含 preflight-pre）。
+            #
+            # ⚠️ probe 的 quota 是**壓過的**，⛔ 不能拿它驗 13417；要驗的是「這份 bundle
+            # 的完整候選範圍對不對」，所以一律用**完整配額**重算一次。
+            preflight_pre(
+                bundle_id=loaded.bundle_id,
+                universe=universe,
+                quota=_all_candidates_quota(sources, dataset_config),
+                last_timestamps=last_timestamps,
+            )
+
+    if want_probe:
+        from .replay_bundle import PROBE_QUOTA
+
+        def quota_override(sources, dataset_config):  # noqa: F811
+            quota, _skipped = _allocate_replay_quota(sources, dataset_config, PROBE_QUOTA)
+            missing = {str(symbol) for symbol, _tf, _df in sources} - set(quota)
+            if missing:
+                raise ValueError(
+                    f"capacity probe 的 quota 沒有涵蓋全部標的，缺：{sorted(missing)}"
+                    "——⛔ 量到的峰值就不能代表正式執行"
+                )
+            return quota
+
+    import time as _time
+
+    _replay_started = _time.monotonic()
+    rows, context = _replay_from_bundle(
+        loaded, quota_override=quota_override, on_context=on_context
+    )
+    replay_elapsed = float(_time.monotonic() - _replay_started)
     keys = context["keys"]
     assert_unique_keys(keys, "本次 replay 的輸出")
     assert_unique_keys(context["universe"], "bundle universe")
     # ① 運算完整性（**通用於 Stage 1／2**）：除 NO_ZONE_SCORES 外，任一 decision／zone
     # error 都在發布之前中止。⛔ 少了它，逐列被吞掉的 exception 會讓「大量運算失敗」
     # 長得跟「零候選」一模一樣，然後被誤判成分支 A。
-    _assert_no_replay_errors(rows, "本次 replay")
+    validate_replay_errors(rows, "本次 replay")
     # 九欄位 schema（本次輸出一律是 after 側的形狀；Stage 2 的 before rows 另外驗）。
     validate_diagnostics(rows, "本次 replay 的輸出", side="after" if stage == 1 else "before")
 
@@ -3062,10 +3113,54 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         argv=argv,
     )
 
+    if want_probe:
+        # ── capacity probe：⛔ 不發布 after／cohort、⛔ 跳過 post 的 13417 守門 ──
+        #
+        # ⚠️ 它的 quota 被壓到 200，列數本來就**不等於** 13417；⛔ 套 post 守門會必然失敗。
+        # 而 preflight-**pre**（bundle 身分、11 檔、末根台北日期、完整配額 13417）已經在
+        # replay 之前跑過了——那才是「這份 bundle 對不對」該問的事。
+        from .replay_bundle import (
+            ARTIFACT_SCHEMA_VERSION,
+            PROBE_COMPUTATION_KIND,
+            PROBE_COMPUTATION_NAME,
+            validate_probe_computation,
+        )
+
+        quota_by_symbol = {str(k): int(v) for k, v in sorted(context["quota"].items())}
+        computation = {
+            "schema_version": ARTIFACT_SCHEMA_VERSION,
+            "kind": PROBE_COMPUTATION_KIND,
+            "bundle_id": loaded.bundle_id,
+            "generated_at": generated_at,
+            "provenance": provenance,
+            "quota_by_symbol": quota_by_symbol,
+            "row_count": len(rows),
+            "rows": rows,
+            "elapsed_seconds": replay_elapsed,
+        }
+        validate_probe_computation(computation)
+        hashes = publish_artifacts(output_dir, [(PROBE_COMPUTATION_NAME, computation)])
+        return {
+            "stage": 1,
+            "mode": "capacity_probe",
+            "bundle_id": loaded.bundle_id,
+            "rows": len(rows),
+            "quota_by_symbol": quota_by_symbol,
+            "elapsed_seconds": replay_elapsed,
+            "computation_artifact_sha256": hashes[PROBE_COMPUTATION_NAME],
+            "output_dir": str(output_dir),
+        }
+
     if stage == 1:
         # ⚠️ 欄位守門排在**發布之前**：缺欄位就不會留下一份看起來可用的 after artifact。
         validate_candidate_flags(rows, "Stage 1 的 replay 輸出")
         assert_same_keys(context["universe"], keys, "① bundle universe vs after rows")
+        if want_preflight:
+            # ⚠️ preflight-**post**：用**輸出**驗。⛔ 這不是 pre 的重複——pre 用的是輸入
+            # 推導的配額，兩個都等於 13417 才代表「載入範圍對」且「replay 真的走完」。
+            from .replay_bundle import preflight_post
+
+            preflight_post(rows=rows, universe=context["universe"])
         artifact = build_after_artifact(
             bundle_id=loaded.bundle_id,
             timeframe=context["timeframe"],
@@ -3178,6 +3273,9 @@ BUNDLE_ALLOWED_ARGS = frozenset({
     "bundle", "output_dir", "run_id", "pipeline_version", "after_artifact",
     "cohort_manifest", "before_ref", "image_digest", "base_commit",
     "tooling_patch_sha256", "source_root", "runner_sha256",
+    # I-074 Stage 1 的兩個 opt-in。⚠️ **只限 Stage 1**——這份清單是 Stage 1／2 共用的，
+    # 光加進來 Stage 2 也會接受，所以另有 `assert_i074_flags()` 做 stage 限定。
+    "i074_preflight", "i074_capacity_probe",
 })
 BUNDLE_REQUIRED_ARGS = ("bundle", "output_dir", "before_ref", "image_digest", "source_root")
 
@@ -3206,7 +3304,22 @@ def _explicit_args(argv: list[str]) -> set[str]:
     return set(vars(detector.parse_args(argv)))
 
 
+# I-074 的兩個 opt-in。⚠️ argparse 的 `store_true` 對重複是**靜默接受**的，
+# 而測試矩陣要求「重複 flag → 中止」，所以要自己數。
+I074_FLAGS = ("--i074-preflight", "--i074-capacity-probe")
+
+
+def _reject_duplicate_i074_flags(argv: list[str]) -> None:
+    for name in I074_FLAGS:
+        count = sum(1 for token in argv if token == name)
+        if count > 1:
+            raise CliUsageError(
+                f"{name} 出現 {count} 次——⛔ 不接受重複（argparse 的 store_true 會靜默吃掉）。"
+            )
+
+
 def _reject_duplicate_injected_args(argv: list[str]) -> None:
+    _reject_duplicate_i074_flags(argv)
     for name in SCRIPT_INJECTED_ARGS:
         count = sum(1 for token in argv if token == name or token.startswith(name + "="))
         if count > 1:
@@ -3225,6 +3338,25 @@ def resolve_cli_mode(explicit: set[str]) -> str:
     if "bundle" in explicit:
         return "bundle"
     return "legacy"
+
+
+def assert_i074_flags(explicit: set[str], *, stage: int) -> None:
+    """I-074 的兩個 opt-in **只限 Stage 1**，且**⛔ 互斥**。
+
+    ⚠️ `--i074-capacity-probe` **隱含執行 preflight-pre**，所以⛔ 不需要也⛔ 不得同時帶
+    `--i074-preflight`——留著兩種讀法的話，「probe 到底有沒有驗 bundle 身分」就沒有唯一答案。
+    """
+    preflight = "i074_preflight" in explicit
+    probe = "i074_capacity_probe" in explicit
+    if preflight and probe:
+        raise CliUsageError(
+            "--i074-preflight 與 --i074-capacity-probe ⛔ 不可同時使用："
+            "probe 已隱含執行 preflight-pre。"
+        )
+    if (preflight or probe) and stage != 1:
+        raise CliUsageError(
+            f"--i074-preflight／--i074-capacity-probe 只能用於 Stage 1，實際 stage={stage}"
+        )
 
 
 def resolve_bundle_stage(explicit: set[str]) -> int:
@@ -3313,6 +3445,12 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Stage 1／2：要比對的 before 版本（branch／tag／commit）——這是使用者唯一能指定的版本入口")
     parser.add_argument("--report-max-rows", type=int, default=DEFAULT_REPLAY_MAX_ROWS,
                         help="只截斷人讀報告的列數，⛔ 不影響實際運算範圍")
+    # ── I-074 Stage 1 的兩個 opt-in（⚠️ **只限 Stage 1**、⛔ 互斥）────────────
+    parser.add_argument("--i074-preflight", action="store_true",
+                        help="I-074 Stage 1 專屬 preflight：bundle 身分／11 檔／末根台北日期／13417 列")
+    parser.add_argument("--i074-capacity-probe", action="store_true",
+                        help="I-074 容量量測：載入全部 11 檔與模型，但 quota 固定 200；"
+                             "隱含執行 preflight-pre，⛔ 不發布 after／cohort")
     # ⛔ 以下四個只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
     parser.add_argument("--image-digest", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-commit", default=None, help=argparse.SUPPRESS)

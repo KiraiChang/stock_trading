@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "I-074 Stage 1：compare-replay-crossday.sh 實際組出的 python argv。",
+    "⛔ 存的是**參數 token 序列**，不是需要 eval 的 shell 字串。",
+    "⚠️ 動態值一律換成 placeholder：測試把實際輸出正規化後逐 token 比對。",
+    "⚠️ fixture 依計畫書十三-C 的 CLI matrix 建立——⛔ 不是由實作者自選 argv 再凍結，",
+    "後者只凍結『實作者選了什麼』，⛔ 證明不了它符合已裁決的契約。"
+  ],
+  "placeholders": {
+    "<D>": "D 的 after_artifact.json（host 絕對路徑，same-path 掛載）",
+    "<D1>": "D+1 的 after_artifact.json",
+    "<OUT>": "--output-dir（唯一可寫的 host mount）",
+    "<IDENTITY>": "run identity（唯讀、由腳本注入，⛔ 使用者不得傳入）",
+    "<IMAGE_ID>": "sha256: ＋ 64 hex（REPLAY_IMAGE_ID）",
+    "<BASE_COMMIT>": "40 hex",
+    "<TOOLING_PATCH_SHA256>": "64 hex",
+    "<RUNNER_SHA256>": "64 hex"
+  },
+  "comparator_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.crossday",
+    "--d", "<D>",
+    "--d1", "<D1>",
+    "--output-dir", "<OUT>",
+    "--run-identity", "<IDENTITY>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>"
+  ]
+}

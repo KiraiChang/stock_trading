@@ -381,4 +381,489 @@ if [ "$fails" -ne 0 ]; then
   echo "==> replay-args 測試失敗：$fails 項" >&2
   exit 1
 fi
+# ── 12-B：host 端 run identity validator ───────────────────────────────────
+#
+# ⚠️ 它在 **host**（沒有 pandas）以 Docker **之前**的守門身分執行，所以這一組要證明：
+# 兩種格式都收、契約（stdout／exit code）成立、**⛔ 不依賴 site-packages**，
+# 而且 `--bundle` 這條新路徑（v23 加的 `load_bundle()`）真的跑得動。
+echo "==> i074：host 端 run identity validator"
+I074_TD="$(mktemp -d)"
+I074_ID="$I074_TD/xdg/stock_trading/i074_stage1/run_identity.json"
+I074_IMG="sha256:$(printf 'a%.0s' $(seq 64))"
+I074_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+ENSURE="$REPO_ROOT/python/scripts/ensure-i074-run-identity.py"
+VALIDATE="$REPO_ROOT/python/scripts/validate-i074-run-identity.py"
+
+if [ -d "$I074_BUNDLE" ]; then
+  XDG_DATA_HOME="$I074_TD/xdg" python3 "$ENSURE" --bundle "$I074_BUNDLE" --image-id "$I074_IMG" >/dev/null 2>&1 \
+    && pass "ensure 建立 run identity" || fail "ensure 建立 run identity"
+
+  # ⚠️ **`python3 -S`**：site-packages ⛔ 不在 sys.path，證明整條路徑 dependency-light。
+  # ⚠️ 且**必須同時帶 `--bundle`**——只測不帶的路徑會全綠，卻測不到 v23 才加進閉包的
+  # `bundle`／`calendar` 這兩個 import。
+  out="$(python3 -S "$VALIDATE" "$I074_ID" --expect-image-id "$I074_IMG" --bundle "$I074_BUNDLE" 2>/dev/null)"
+  if [ "$out" = "$I074_IMG" ]; then
+    pass "python3 -S ＋ --bundle：通過且 stdout 只有 image ID"
+  else
+    fail "python3 -S ＋ --bundle 的 stdout 是 '$out'"
+  fi
+
+  # ⛔ 不傳 --bundle 也不得失敗（comparator／finalizer／recovery 的用法）。
+  python3 -S "$VALIDATE" "$I074_ID" --expect-image-id "$I074_IMG" >/dev/null 2>&1 \
+    && pass "不傳 --bundle 仍通過" || fail "不傳 --bundle 竟然失敗"
+
+  # image id 不符 → 非零且 **stdout 無輸出**。
+  set +e
+  out="$(python3 -S "$VALIDATE" "$I074_ID" --expect-image-id "sha256:$(printf 'b%.0s' $(seq 64))" 2>/dev/null)"; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
+    pass "image id 不符 → 非零且 stdout 無輸出"
+  else
+    fail "image id 不符：rc=$rc stdout='$out'"
+  fi
+
+  # --bundle 不符 → 非零（validator 自己 load_bundle 取 ID 再比對）。
+  set +e
+  out="$(python3 -S "$VALIDATE" "$I074_ID" --expect-image-id "$I074_IMG" --bundle "$I074_TD" 2>/dev/null)"; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
+    pass "--bundle 不符 → 非零且 stdout 無輸出"
+  else
+    fail "--bundle 不符：rc=$rc"
+  fi
+
+  # 壞 schema → 非零。
+  echo '{"bad":1}' > "$I074_TD/broken.json"
+  set +e
+  out="$(python3 -S "$VALIDATE" "$I074_TD/broken.json" --expect-image-id "$I074_IMG" 2>/dev/null)"; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && [ -z "$out" ]; then
+    pass "壞 schema → 非零且 stdout 無輸出"
+  else
+    fail "壞 schema：rc=$rc"
+  fi
+
+  # ⚠️ **peek 的三條分支**：不存在 → exit 2（⛔ 不是失敗，是「還沒 pin」）。
+  set +e
+  XDG_DATA_HOME="$I074_TD/empty" python3 "$ENSURE" --bundle "$I074_BUNDLE" --peek >/dev/null 2>&1; rc=$?
+  set -e
+  [ "$rc" -eq 2 ] && pass "peek 於 identity 不存在時回 exit 2" || fail "peek 不存在時 rc=$rc（預期 2）"
+else
+  echo "  skip 找不到正式 bundle，略過 host validator 測試" >&2
+fi
+rm -rf "$I074_TD"
+
+# ── 12-A：comparator 的 argv／mount／ownership ──────────────────────────────
+# ⚠️ **呼叫被測腳本時要 `env -u PY_IMAGE`**：`PY_IMAGE` 只用來查剛建好的 image ID，
+# 而被測腳本**刻意禁止** `PY_IMAGE` 與 `REPLAY_IMAGE_ID` 併用（兩個 image 來源）。
+echo "==> i074：comparator 的 argv／mount／所有權"
+CMP_TD="$(mktemp -d)"
+CMP_FIXTURE="$REPO_ROOT/python/scripts/fixtures/comparator_argv.json"
+CMP_IMG="$(docker image inspect "${PY_IMAGE:-stock-trading-python-test:latest}" -f '{{.Id}}' 2>/dev/null || true)"
+CMP_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+
+if [ -n "$CMP_IMG" ] && [ -d "$CMP_BUNDLE" ]; then
+  CMP_ID="$CMP_TD/xdg/stock_trading/i074_stage1/run_identity.json"
+  # ⚠️ 覆寫 `XDG_DATA_HOME`——⛔ 沒有「只給測試用」的路徑參數（那是強制不了的後門）。
+  XDG_DATA_HOME="$CMP_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
+      --bundle "$CMP_BUNDLE" --image-id "$CMP_IMG" >/dev/null 2>&1
+  : > "$CMP_TD/d.json"; : > "$CMP_TD/d1.json"
+
+  set +e
+  CMP_OUT="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$CMP_IMG" XDG_DATA_HOME="$CMP_TD/xdg" \
+      "$REPO_ROOT/scripts/compare-replay-crossday.sh" \
+      --d "$CMP_TD/d.json" --d1 "$CMP_TD/d1.json" --output-dir "$CMP_TD/out" 2>/dev/null)"
+  set -e
+
+  # ⚠️ **argv 逐 token 比對**：把動態值換成 placeholder 再和 fixture 比。
+  # ⛔ 只驗行為而不比對 argv，等於沒有釘住兩端的契約。
+  ACTUAL="$(printf '%s\n' "$CMP_OUT" | sed -n '/^python$/,$p' \
+    | sed -e "s|^$CMP_TD/d\.json\$|<D>|" -e "s|^$CMP_TD/d1\.json\$|<D1>|" \
+          -e "s|^$CMP_TD/out\$|<OUT>|" -e "s|^$CMP_ID\$|<IDENTITY>|" \
+          -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" \
+          -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+    | python3 -c 'import sys;print(chr(10).join(l.rstrip(chr(10)) for l in sys.stdin))')"
+  EXPECTED="$(python3 -c '
+import json,sys,re
+fx=json.load(open(sys.argv[1],encoding="utf-8"))["comparator_argv"]
+print("\n".join(fx))' "$CMP_FIXTURE")"
+  # 兩個 64-hex（tooling patch／runner）在正規化後仍是實際值，逐行換成 placeholder。
+  ACTUAL="$(printf '%s\n' "$ACTUAL" | awk '
+    prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+    prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+    {print; prev=$0}')"
+  if [ "$ACTUAL" = "$EXPECTED" ]; then
+    pass "comparator argv 與 fixture 逐 token 相同"
+  else
+    fail "comparator argv 與 fixture 不符"
+    diff <(printf '%s\n' "$EXPECTED") <(printf '%s\n' "$ACTUAL") >&2 || true
+  fi
+
+  # ⚠️ **same-path 且 `:ro`** 的掛載。
+  for target in "$CMP_TD/d.json" "$CMP_TD/d1.json" "$CMP_ID"; do
+    if printf '%s\n' "$CMP_OUT" | grep -qx -- "$target:$target:ro"; then
+      pass "same-path :ro 掛載 $(basename "$target")"
+    else
+      fail "$(basename "$target") 不是 same-path :ro 掛載"
+    fi
+  done
+
+  # ⛔ 使用者⛔ 不得自己傳 `--run-identity`（它只能由官方腳本注入）。
+  set +e
+  env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$CMP_IMG" XDG_DATA_HOME="$CMP_TD/xdg" \
+    "$REPO_ROOT/scripts/compare-replay-crossday.sh" \
+    --d "$CMP_TD/d.json" --d1 "$CMP_TD/d1.json" --output-dir "$CMP_TD/out2" \
+    --run-identity /evil >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && pass "使用者傳入 --run-identity 被拒絕" || fail "使用者傳入 --run-identity 竟然通過"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  # ⚠️ 由 `python/scripts/test.sh` 呼叫時 image **剛建好**——找不到代表環境有問題，
+  # ⛔ 不得靜默 skip（那正是這幾段測試長期沒被執行到的原因）。
+  fail "comparator argv 測試：找不到 image 或正式 bundle（IMAGE_REQUIRED=1）"
+else
+  echo "  skip 找不到 image 或正式 bundle，略過 comparator argv 測試" >&2
+fi
+rm -rf "$CMP_TD"
+
+# ── Stage 1 的 argv fixture（含 --i074-preflight 的透傳）────────────────────
+echo "==> i074：Stage 1 argv 與 fixture 相同"
+S1_TD="$(mktemp -d)"
+S1_FIXTURE="$REPO_ROOT/python/scripts/fixtures/stage1_argv.json"
+S1_IMG="$(docker image inspect "${PY_IMAGE:-stock-trading-python-test:latest}" -f '{{.Id}}' 2>/dev/null || true)"
+S1_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+
+if [ -n "$S1_IMG" ] && [ -d "$S1_BUNDLE" ]; then
+  S1_ID="$S1_TD/xdg/stock_trading/i074_stage1/run_identity.json"
+  XDG_DATA_HOME="$S1_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
+      --bundle "$S1_BUNDLE" --image-id "$S1_IMG" >/dev/null 2>&1
+  set +e
+  S1_OUT="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$S1_IMG" XDG_DATA_HOME="$S1_TD/xdg" \
+      "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle "$S1_BUNDLE" \
+      --output-dir "$S1_TD/out" --before-ref HEAD --i074-preflight 2>/dev/null)"
+  set -e
+
+  S1_ACTUAL="$(printf '%s\n' "$S1_OUT" | sed -n '/^python$/,$p' \
+    | sed -e "s|^$S1_BUNDLE\$|<BUNDLE>|" -e "s|^$S1_TD/out\$|<OUT>|" \
+          -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" \
+          -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+    | awk '
+        prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+        prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+        {print; prev=$0}')"
+  S1_EXPECTED="$(python3 -c '
+import json,sys
+print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["stage1_argv"]))' "$S1_FIXTURE")"
+  if [ "$S1_ACTUAL" = "$S1_EXPECTED" ]; then
+    pass "Stage 1 argv 與 fixture 逐 token 相同"
+  else
+    fail "Stage 1 argv 與 fixture 不符"
+    diff <(printf '%s\n' "$S1_EXPECTED") <(printf '%s\n' "$S1_ACTUAL") >&2 || true
+  fi
+  # ⚠️ flag ⛔ 不得被 shell 吃掉——它要原樣出現在容器內的 CLI。
+  printf '%s\n' "$S1_OUT" | grep -qx -- "--i074-preflight" \
+    && pass "--i074-preflight 透傳進容器內的 CLI" || fail "--i074-preflight 沒有透傳"
+
+  # ⛔ I-074 正式流程缺 REPLAY_IMAGE_ID → **立即拒絕**，⛔ 不自動 pin。
+  set +e
+  env -u PY_IMAGE XDG_DATA_HOME="$S1_TD/xdg" "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle "$S1_BUNDLE" \
+      --output-dir "$S1_TD/out2" --before-ref HEAD --i074-preflight >/dev/null 2>&1
+  rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && pass "正式流程缺 REPLAY_IMAGE_ID 被拒絕" || fail "缺 REPLAY_IMAGE_ID 竟然通過"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "Stage 1 argv 測試：找不到 image 或正式 bundle（IMAGE_REQUIRED=1）"
+else
+  echo "  skip 找不到 image 或正式 bundle，略過 Stage 1 argv 測試" >&2
+fi
+rm -rf "$S1_TD"
+
+# ── pin-replay-image.sh 的三條 producer 分支與 stdout contract ─────────────
+#
+# ⚠️ 用 **fake docker**：⛔ 不能真的 build（那要好幾分鐘，也會動到本機 image）。
+echo "==> i074：pin-replay-image.sh 的三條分支"
+PIN_TD="$(mktemp -d)"
+PIN_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+mkdir -p "$PIN_TD/bin" "$PIN_TD/xdg"
+cat > "$PIN_TD/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+  build) exit 0 ;;
+  image)
+    # $3 是 tag 或 image id
+    if [ -n "${FAKE_MISSING:-}" ] && [ "$3" = "$FAKE_MISSING" ]; then exit 1; fi
+    printf 'sha256:%064d\n' 1
+    exit 0 ;;
+esac
+exit 0
+FAKE
+chmod +x "$PIN_TD/bin/docker"
+PIN_ID="sha256:$(printf '%064d' 1)"
+
+if [ -d "$PIN_BUNDLE" ]; then
+  # ① identity 不存在 → 會 build
+  : > "$PIN_TD/log1"
+  set +e
+  out="$(PATH="$PIN_TD/bin:$PATH" XDG_DATA_HOME="$PIN_TD/xdg" FAKE_DOCKER_LOG="$PIN_TD/log1" \
+      "$REPO_ROOT/scripts/pin-replay-image.sh" "$PIN_BUNDLE" 2>/dev/null)"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$out" = "$PIN_ID" ] && grep -qx build "$PIN_TD/log1"; then
+    pass "identity 不存在 → build 並印出 image ID"
+  else
+    fail "identity 不存在的分支：rc=$rc out='$out'"
+  fi
+
+  # ② identity 已存在 → ⛔ 不 build
+  : > "$PIN_TD/log2"
+  set +e
+  out2="$(PATH="$PIN_TD/bin:$PATH" XDG_DATA_HOME="$PIN_TD/xdg" FAKE_DOCKER_LOG="$PIN_TD/log2" \
+      "$REPO_ROOT/scripts/pin-replay-image.sh" "$PIN_BUNDLE" 2>/dev/null)"
+  rc2=$?
+  set -e
+  if [ "$rc2" -eq 0 ] && [ "$out2" = "$PIN_ID" ] && ! grep -qx build "$PIN_TD/log2"; then
+    pass "identity 已存在 → ⛔ 不 build，直接沿用既有 ID"
+  else
+    fail "identity 已存在的分支：rc=$rc2 out='$out2' build=$(grep -cx build "$PIN_TD/log2")"
+  fi
+
+  # ③ image 已不在本機 → **fail-closed**，且 stdout ⛔ 無輸出
+  : > "$PIN_TD/log3"
+  set +e
+  out3="$(PATH="$PIN_TD/bin:$PATH" XDG_DATA_HOME="$PIN_TD/xdg" FAKE_DOCKER_LOG="$PIN_TD/log3" \
+      FAKE_MISSING="$PIN_ID" "$REPO_ROOT/scripts/pin-replay-image.sh" "$PIN_BUNDLE" 2>/dev/null)"
+  rc3=$?
+  set -e
+  if [ "$rc3" -ne 0 ] && [ -z "$out3" ] && ! grep -qx build "$PIN_TD/log3"; then
+    pass "image 已不在本機 → fail-closed、stdout 無輸出、⛔ 不重建"
+  else
+    fail "image 消失的分支：rc=$rc3 out='$out3'"
+  fi
+
+  # ④ --no-identity：只 build，⛔ 不碰 identity
+  rm -rf "$PIN_TD/xdg2"; : > "$PIN_TD/log4"
+  set +e
+  out4="$(PATH="$PIN_TD/bin:$PATH" XDG_DATA_HOME="$PIN_TD/xdg2" FAKE_DOCKER_LOG="$PIN_TD/log4" \
+      "$REPO_ROOT/scripts/pin-replay-image.sh" --no-identity 2>/dev/null)"
+  rc4=$?
+  set -e
+  # ⚠️ 要**確認真的有 build**——⛔ 只看 rc／stdout 的話，日後誤刪 build 也會通過
+  # （fake 的 `image inspect` 仍會回 ID）。
+  if [ "$rc4" -eq 0 ] && [ "$out4" = "$PIN_ID" ] && [ ! -d "$PIN_TD/xdg2" ] \
+     && grep -qx build "$PIN_TD/log4"; then
+    pass "--no-identity → **確實 build**，⛔ 不建立 run identity"
+  else
+    fail "--no-identity 分支：rc=$rc4 out='$out4'"
+  fi
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "pin-replay-image.sh 測試：找不到正式 bundle（IMAGE_REQUIRED=1）"
+else
+  echo "  skip 找不到正式 bundle，略過 pin 測試" >&2
+fi
+rm -rf "$PIN_TD"
+
+# ── finalizer 的 argv（normal／recovery 兩組）與模式衝突 ───────────────────
+#
+# ⚠️ fixture 沒有任何測試讀取的話，它就只是一份沒人維護的檔案——⛔ 釘不住任何契約。
+echo "==> i074：finalizer 的 argv 與模式衝突"
+FIN_TD="$(mktemp -d)"
+FIN_FIXTURE="$REPO_ROOT/python/scripts/fixtures/finalizer_argv.json"
+FIN_IMG="$(docker image inspect "${PY_IMAGE:-stock-trading-python-test:latest}" -f '{{.Id}}' 2>/dev/null || true)"
+FIN_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+
+if [ -n "$FIN_IMG" ] && [ -d "$FIN_BUNDLE" ]; then
+  XDG_DATA_HOME="$FIN_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
+      --bundle "$FIN_BUNDLE" --image-id "$FIN_IMG" >/dev/null 2>&1
+  FIN_ID="$FIN_TD/xdg/stock_trading/i074_stage1/run_identity.json"
+  mkdir -p "$FIN_TD/src"
+  FIN_SRC_ARGS=()
+  for rel in d/after_artifact.json.gz d/cohort_manifest.json.gz \
+             d1/after_artifact.json.gz d1/cohort_manifest.json.gz \
+             crossday/crossday_artifact.json.gz \
+             probe/capacity_probe_computation.json.gz \
+             probe/capacity_probe_measurement.json.gz probe/capacity_probe.json.gz \
+             identity/run_identity.json.gz; do
+    f="$FIN_TD/src/$(printf '%s' "$rel" | tr '/' '_')"
+    : > "$f"
+    FIN_SRC_ARGS+=(--source "$rel=$f")
+  done
+
+  set +e
+  FIN_OUT="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$FIN_IMG" XDG_DATA_HOME="$FIN_TD/xdg" \
+      "$REPO_ROOT/scripts/finalize-evidence.sh" --evidence-root "$FIN_TD/ev" \
+      "${FIN_SRC_ARGS[@]}" 2>/dev/null)"
+  set -e
+  FIN_ACTUAL="$(printf '%s\n' "$FIN_OUT" | sed -n '/^python$/,$p' \
+    | sed -e "s|^$FIN_TD/ev\$|<ROOT>|" -e "s|^$FIN_ID\$|<IDENTITY>|" \
+          -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+          -e "s|^\(.*\)=$FIN_TD/src/.*\$|\1=<SRC:\1>|" \
+    | awk '
+        prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+        prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+        {print; prev=$0}')"
+  FIN_EXPECTED="$(python3 -c '
+import json,sys
+print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' "$FIN_FIXTURE")"
+  # ⚠️ **mount 也要驗**——只從 `python` token 開始比 argv 的話，前面的 Docker mounts
+  # 全被丟掉，「identity 是否 :ro 掛載」這條計畫書明列的 contract 就沒人守。
+  if printf '%s\n' "$FIN_OUT" | grep -qx -- "$FIN_ID:$FIN_ID:ro"; then
+    pass "finalizer normal：identity 以 same-path :ro 掛載"
+  else
+    fail "finalizer normal 的 identity 不是 same-path :ro 掛載"
+  fi
+  if [ "$FIN_ACTUAL" = "$FIN_EXPECTED" ]; then
+    pass "finalizer normal argv 與 fixture 逐 token 相同"
+  else
+    fail "finalizer normal argv 與 fixture 不符"
+    diff <(printf '%s\n' "$FIN_EXPECTED") <(printf '%s\n' "$FIN_ACTUAL") >&2 || true
+  fi
+
+  # ⛔ **模式衝突**：recovery ⛔ 不接受 --source。
+  set +e
+  env -u PY_IMAGE REPLAY_IMAGE_ID="$FIN_IMG" XDG_DATA_HOME="$FIN_TD/xdg" \
+    "$REPO_ROOT/scripts/finalize-evidence.sh" --evidence-root "$FIN_TD/ev" \
+    --recover-durability "${FIN_SRC_ARGS[@]}" >/dev/null 2>&1
+  rc=$?
+  # ⛔ normal ⛔ 不接受空的 --source。
+  env -u PY_IMAGE REPLAY_IMAGE_ID="$FIN_IMG" XDG_DATA_HOME="$FIN_TD/xdg" \
+    "$REPO_ROOT/scripts/finalize-evidence.sh" --evidence-root "$FIN_TD/ev2" >/dev/null 2>&1
+  rc2=$?
+  set -e
+  [ "$rc" -ne 0 ] && pass "recovery ⛔ 不接受 --source" || fail "recovery 竟接受 --source"
+
+  # ⚠️ **recovery_argv 也要有人讀**——fixture 沒有測試使用等於沒釘住契約。
+  mkdir -p "$FIN_TD/ev/identity"
+  python3 - "$FIN_ID" "$FIN_TD/ev/identity/run_identity.json.gz" <<'EMBED'
+import gzip, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_bytes()
+import io
+buf = io.BytesIO()
+with gzip.GzipFile(filename="", mode="wb", fileobj=buf, compresslevel=9, mtime=0) as fh:
+    fh.write(raw)
+pathlib.Path(sys.argv[2]).write_bytes(buf.getvalue())
+EMBED
+  set +e
+  FIN_REC="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$FIN_IMG" XDG_DATA_HOME="$FIN_TD/xdg" \
+      "$REPO_ROOT/scripts/finalize-evidence.sh" --evidence-root "$FIN_TD/ev" \
+      --recover-durability 2>/dev/null)"
+  set -e
+  FIN_REC_ACTUAL="$(printf '%s\n' "$FIN_REC" | sed -n '/^python$/,$p' \
+    | sed -e "s|^$FIN_TD/ev\$|<ROOT>|" -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" \
+          -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+    | awk '
+        prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+        prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+        {print; prev=$0}')"
+  FIN_REC_EXPECTED="$(python3 -c '
+import json,sys
+print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["recovery_argv"]))' "$FIN_FIXTURE")"
+  # ⚠️ **recovery ⛔ 不得以任何形式碰外部 identity**——它只讀 evidence 內的 archived copy。
+  # ⛔ 只比對 `$FIN_ID:$FIN_ID:ro` 這一個精確字串是不夠的：回歸成 **RW mount** 或掛到
+  # **另一個 container path** 時仍會通過。斷言**整份輸出完全不含該路徑**。
+  if printf '%s\n' "$FIN_REC" | grep -qF -- "$FIN_ID"; then
+    fail "recovery 的指令出現了外部 identity 路徑"
+  else
+    pass "finalizer recovery：整份指令⛔ 完全不含外部 identity 路徑"
+  fi
+  if [ "$FIN_REC_ACTUAL" = "$FIN_REC_EXPECTED" ]; then
+    pass "finalizer recovery argv 與 fixture 逐 token 相同"
+  else
+    fail "finalizer recovery argv 與 fixture 不符"
+    diff <(printf '%s\n' "$FIN_REC_EXPECTED") <(printf '%s\n' "$FIN_REC_ACTUAL") >&2 || true
+  fi
+  [ "$rc2" -ne 0 ] && pass "normal 缺 --source 被拒絕" || fail "normal 缺 --source 竟通過"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "finalizer argv 測試：找不到 image 或正式 bundle（IMAGE_REQUIRED=1）"
+else
+  echo "  skip 找不到 image 或正式 bundle，略過 finalizer argv 測試" >&2
+fi
+rm -rf "$FIN_TD"
+
+# ── orchestrator 的結束碼仲裁與 source 綁定 ────────────────────────────────
+#
+# ⚠️ 用 **fake 的 compare／finalize** 測仲裁：把 orchestrator 複製到臨時目錄後，
+# 它的 `REPO_ROOT` 會跟著變，於是 `$REPO_ROOT/scripts/*.sh` 指到同目錄的 fake。
+echo "==> i074：orchestrator 的 0／5／3 仲裁"
+ORC_TD="$(mktemp -d)"
+mkdir -p "$ORC_TD/scripts"
+cp "$REPO_ROOT/scripts/run-i074-stage1.sh" "$ORC_TD/scripts/"
+cat > "$ORC_TD/scripts/compare-replay-crossday.sh" <<'FAKE'
+#!/usr/bin/env bash
+exit "${FAKE_CROSSDAY_RC:-0}"
+FAKE
+cat > "$ORC_TD/scripts/finalize-evidence.sh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$FAKE_FINAL_ARGS_OUT"
+exit "${FAKE_FINAL_RC:-0}"
+FAKE
+chmod +x "$ORC_TD/scripts/"*.sh
+: > "$ORC_TD/d.json"; : > "$ORC_TD/d1.json"
+
+orc() {  # $1=crossday rc  $2=finalizer rc
+  set +e
+  FAKE_CROSSDAY_RC="$1" FAKE_FINAL_RC="$2" FAKE_FINAL_ARGS_OUT="$ORC_TD/final_args" \
+    "$ORC_TD/scripts/run-i074-stage1.sh" --d "$ORC_TD/d.json" --d1 "$ORC_TD/d1.json" \
+    --crossday-output-dir "$ORC_TD/cd" --evidence-root "$ORC_TD/ev" \
+    --source "probe/capacity_probe.json.gz=$ORC_TD/d.json" >/dev/null 2>&1
+  local rc=$?
+  set -e
+  printf '%s' "$rc"
+}
+
+[ "$(orc 0 0)" = "0" ] && pass "crossday 0 ＋ finalizer 0 → 0" || fail "crossday 0 ＋ finalizer 0"
+[ "$(orc 5 0)" = "5" ] && pass "crossday 5 ＋ finalizer 0 → **5**（mismatch 也 finalize）" \
+  || fail "crossday 5 的原始碼沒有保留"
+[ "$(orc 5 3)" = "3" ] && pass "finalizer 3 **優先於**原始的 5（durability 未確認要被看見）" \
+  || fail "durability 未確認沒有優先"
+[ "$(orc 0 3)" = "3" ] && pass "finalizer 3 優先於原始的 0" || fail "durability 未確認沒有優先"
+[ "$(orc 0 1)" = "1" ] && pass "finalizer 一般失敗 → 1" || fail "finalizer 一般失敗"
+[ "$(orc 2 0)" = "2" ] && pass "crossday 非 0／5 → ⛔ 不跑 finalizer" || fail "crossday 非 0／5"
+
+# ⚠️ **本次 comparator 的輸入與輸出由 orchestrator 綁定**——⛔ 否則可以
+# 「比較本次 D／D+1、卻封存另一組舊產物」，最終 exit code 與 evidence 包不是同一次比較。
+orc 0 0 >/dev/null
+for rel in d/after_artifact.json.gz d1/after_artifact.json.gz crossday/crossday_artifact.json.gz; do
+  if grep -q "^--source$" "$ORC_TD/final_args" && grep -q "^$rel=" "$ORC_TD/final_args"; then
+    pass "orchestrator 綁定 $rel"
+  else
+    fail "orchestrator 沒有綁定 $rel"
+  fi
+done
+set +e
+FAKE_CROSSDAY_RC=0 FAKE_FINAL_RC=0 FAKE_FINAL_ARGS_OUT="$ORC_TD/x" \
+  "$ORC_TD/scripts/run-i074-stage1.sh" --d "$ORC_TD/d.json" --d1 "$ORC_TD/d1.json" \
+  --crossday-output-dir "$ORC_TD/cd" --evidence-root "$ORC_TD/ev" \
+  --source "d/after_artifact.json.gz=/evil" >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" -ne 0 ] && pass "使用者⛔ 不得用 --source 覆寫被綁定的三份" || fail "被綁定的來源竟可覆寫"
+
+# ⚠️ **而且要在 comparator 之前擋**：放在後面的話，錯誤呼叫會先產出 crossday artifact，
+# comparator 回 5 之後流程又因覆寫回 1 → **跳過 finalizer**，⛔ 掩蓋掉 mismatch。
+cat > "$ORC_TD/scripts/compare-replay-crossday.sh" <<'FAKE'
+#!/usr/bin/env bash
+: > "$FAKE_COMPARATOR_MARKER"
+exit "${FAKE_CROSSDAY_RC:-0}"
+FAKE
+chmod +x "$ORC_TD/scripts/compare-replay-crossday.sh"
+rm -f "$ORC_TD/comparator_ran"
+set +e
+FAKE_CROSSDAY_RC=5 FAKE_COMPARATOR_MARKER="$ORC_TD/comparator_ran" \
+  "$ORC_TD/scripts/run-i074-stage1.sh" --d "$ORC_TD/d.json" --d1 "$ORC_TD/d1.json" \
+  --crossday-output-dir "$ORC_TD/cd" --evidence-root "$ORC_TD/ev" \
+  --source "crossday/crossday_artifact.json.gz=/evil" >/dev/null 2>&1
+set -e
+[ ! -f "$ORC_TD/comparator_ran" ] \
+  && pass "覆寫在 **comparator 之前**就被擋（⛔ 不留下任何產物）" \
+  || fail "comparator 竟已執行——mismatch 可能被掩蓋"
+rm -rf "$ORC_TD"
+
+# ⚠️ **結尾要再檢查一次**：`$fails` 的第一次檢查在上面的 I-100 段落結束處，
+# ⛔ 之後新增的 I-074 測試若呼叫 `fail`，沒有這一段就會照樣印「全部通過」並回 0，
+# 連帶讓 `python/scripts/test.sh` 誤報成功。
+if [ "$fails" -ne 0 ]; then
+  echo "==> replay-args 測試失敗：$fails 項" >&2
+  exit 1
+fi
 echo "==> replay-args 測試全部通過"

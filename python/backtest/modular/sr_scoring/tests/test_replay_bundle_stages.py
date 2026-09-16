@@ -482,9 +482,11 @@ def test_provenance_is_built_after_the_replay(tmp_path, stub_replay, monkeypatch
 
     real_replay = evaluation_module._replay_from_bundle
 
-    def spy_replay(loaded):
+    def spy_replay(loaded, **kwargs):
+        # ⚠️ `**kwargs`：I-074 Stage 1 讓 `_replay_from_bundle()` 多了 `quota_override`／
+        # `on_context`（capacity probe 與 preflight-pre 用），spy 要原樣轉交。
         order.append("replay")
-        return real_replay(loaded)
+        return real_replay(loaded, **kwargs)
 
     def spy_provenance(**kwargs):
         order.append("provenance")

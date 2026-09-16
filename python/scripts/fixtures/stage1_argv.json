@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "I-074 Stage 1：run-replay-offline.sh 帶 --i074-preflight 時實際組出的 python argv。",
+    "⛔ 存的是**參數 token 序列**，不是需要 eval 的 shell 字串。",
+    "⚠️ 注入參數（image-digest／source-root／base-commit／tooling-patch／runner）在前，",
+    "使用者參數在後——⚠️ `--i074-preflight` 必須**原樣出現在尾端**，那證明 flag 真的",
+    "透傳進了容器內的 CLI，⛔ 不是被 shell 吃掉。",
+    "⚠️ 這份與 stage0_argv.json 同一慣例：動態值用 placeholder，兩側夾住同一份檔案。"
+  ],
+  "placeholders": {
+    "<IMAGE_ID>": "sha256: ＋ 64 hex（REPLAY_IMAGE_ID，⚠️ Stage 1 正式流程必須預先提供）",
+    "<BASE_COMMIT>": "40 hex",
+    "<TOOLING_PATCH_SHA256>": "64 hex",
+    "<RUNNER_SHA256>": "64 hex",
+    "<BUNDLE>": "凍結 bundle 目錄（host 絕對路徑，same-path 唯讀掛載）",
+    "<OUT>": "--output-dir（唯一可寫的 host mount）"
+  },
+  "stage1_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.evaluation",
+    "--image-digest", "<IMAGE_ID>",
+    "--source-root", "/app",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--runner-sha256", "<RUNNER_SHA256>",
+    "--bundle", "<BUNDLE>",
+    "--output-dir", "<OUT>",
+    "--before-ref", "HEAD",
+    "--i074-preflight"
+  ]
+}

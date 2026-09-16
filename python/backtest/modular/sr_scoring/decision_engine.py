@@ -147,7 +147,7 @@ def _decision_summary_zone(
         "confidence_level": z.confidence_level,
         # ⚠️ replay 端的 `_volume_strength_bucket()` 讀的就是這一欄。decision primary zone
         # 原本沒有它，切換取值來源後 volume context 會**靜默退化成 unavailable**
-        # （見 issue.md I-074 Stage 0 計畫書七）。
+        # （見 docs/sr-zone-scoring.md 的 primary zone 段落；I-074 Stage 0 計畫書已收斂）。
         "relative_volume": z.relative_volume,
         "expected_value": z.expected_value,
         "risk_reward_ratio": z.risk_reward_ratio,

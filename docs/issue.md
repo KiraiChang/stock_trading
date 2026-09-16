@@ -421,7 +421,7 @@ migration 驗證與清空資料**；replay 全程不寫任何一張表，不在�
 
 | Stage | 內容 | 產出 |
 |---|---|---|
-| **0** | 完成可重現性前置（I-100）與診斷欄位，**並產生封存凍結輸入 bundle**（此時才讀 DB）。⚠️ **I-100 的工具已於 2026-09-10 實作完成**（`--as-of`／`--emit-bundle`／`scripts/run-replay-offline.sh`，用法見 [`development-workflow.md`](./development-workflow.md)）；本階段還缺的是**診斷欄位**與**實際產出並進版控的 bundle** | 可重跑的 replay 路徑 ＋ 新欄位 ＋ 已封存的 bundle |
+| **0** | 完成可重現性前置（I-100）與診斷欄位，**並產生封存凍結輸入 bundle**（此時才讀 DB）。⚠️ **I-100 的工具已於 2026-09-10 實作完成**（`--as-of`／`--emit-bundle`／`scripts/run-replay-offline.sh`，用法見 [`development-workflow.md`](./development-workflow.md)）。⚠️ **本階段已於 2026-09-14 全部完成**（2026-09-16 更新）：診斷欄位已實作並 review 通過，bundle `b1_20260901_1d_74350966_5d7ecb10` 已進版控 | ✅ 可重跑的 replay 路徑 ＋ 新欄位 ＋ 已封存的 bundle |
 | **1** | **只用 after 版本**、**從 bundle 載入**連續 replay 整個範圍，掃描精確 predicate | 候選 manifest（`(symbol, as_of)` 清單）＋ after 側的完整逐列輸出 |
 | **2** | 用 **before 版本**、**從同一份 bundle 載入**連續 replay **同一個範圍**，再與 Stage 1 的 after 輸出逐列對照 | **全候選**逐列比較 artifact（附 SHA-256）＋ 前 200 列的人讀報告 |
 | **3** | 依下方決策樹收斂並歸檔 | `sr-zone-scoring.md` 的結論 |
@@ -759,8 +759,8 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 
 #### Stage 1 實作結果（2026-09-15）
 
-**已依 v25 計畫書完成程式與自動化測試；2026-09-15 的第一輪 review 抓到 5 高 4 中 2 低，
-全部修正，待再次 review。**
+**已依 v25 計畫書完成程式與自動化測試；2026-09-15～16 共七輪 review 全部通過**
+（各輪發現與修正見下方四張表）。⛔ **正式的 D／D+1 兩趟 replay 尚未執行**，本筆不得關閉。
 ⚠️ **本輪只交付程式與測試**——正式的 D／D+1 兩趟 replay 尚未執行，⛔ 本筆在那之前不得關閉。
 
 | 檔案 | 內容 |
@@ -785,9 +785,14 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 | `scripts/run-replay-offline.sh` | `REPLAY_IMAGE_ID` 釘死、**一律以 image ID 執行**（⛔ 不用 tag）、I-074 模式的 identity 守門、**`MEASURE_PEAK=1` 的 peak 落檔**（⚠️ 前景執行以保留即時串流；⛔ 讀不到即 fail-closed，不寫 0 佔位、也不寫 completion） |
 | `scripts/test-replay-args.sh` | 新增 12-B：host validator 的 7 條（含 `python3 -S` ＋ `--bundle`） |
 
-**新增測試**：`test_run_identity.py`（29）、`test_crossday.py`（43）、`test_i074_preflight.py`（32）、
-`test_evidence.py`（16），共 **120 條**；`test-replay-args.sh` 另加 **15 條**
-（12-B 的 host validator 7 條、12-A 的 comparator argv／mount／所有權 5 條、Stage 1 argv 3 條）。
+**新增測試**（⚠️ 數字是**七輪 review 後的最終值**）：`test_run_identity.py`（29）、
+`test_crossday.py`（43）、`test_i074_preflight.py`（32）、
+**`test_replay_evidence.py`**（25），共 **129 條**；`test-replay-args.sh` 的斷言由原本的
+62 條增為 **98 條**（host validator、comparator／finalizer／Stage 1 的 argv 與 mount、
+pin 四分支、orchestrator 的 0／5／3 仲裁）。
+
+⚠️ **檔名是 `test_replay_evidence.py`，⛔ 不是 `test_evidence.py`**——後者是既有的
+SHAP evidence regression（第一輪 review 發現它被覆寫後已還原，見下方修正表中 9）。
 
 **新增 argv fixture**：`stage1_argv.json`／`comparator_argv.json`／`finalizer_argv.json`
 （⚠️ 依十三-C 的 CLI matrix 建立，⛔ 不是由實作者自選 argv 再凍結；動態值用 placeholder，
@@ -813,7 +818,7 @@ shell 測試把實際輸出正規化後**逐 token 比對**）。
 ⚠️ **一條測試紅了但成因是 fixture**：用 `"1"*64` 當 SHA 時，純數字的 `.upper()` 不會變，
 所以「⛔ 大寫 hex」那條檢查測不到。改成含字母的 SHA 後通過——**實作本身沒有問題**。
 
-⚠️ **12-C（recovery 的六欄執行身分 tamper）由 pytest 涵蓋**（`test_evidence.py` 的
+⚠️ **12-C（recovery 的六欄執行身分 tamper）由 pytest 涵蓋**（`test_replay_evidence.py` 的
 `test_recovery_rejects_execution_identity_drift`），⛔ 不在 shell 層重複一份：
 它要斷言的是「**在 `fsync_dir` 被呼叫之前**中止」，那要 spy 才驗得到。
 ⚠️ 該測試**改的是本次 recovery 這一側**、archived evidence 一個位元都不動——
@@ -1078,7 +1083,7 @@ bundle 被換掉，**能做的只有中止，沒有辦法重跑原來那份輸�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **已實作／待正式 bundle 與跨日驗收**（2026-09-10 依 v23 計畫書完成程式與自動化測試，見下方「實作結果」；2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下）。⚠️ **本輪只交付程式與自動化測試**，正式 bundle 與跨日驗收另立一輪，兩者仍是關閉條件，⛔ 本筆在那之前不得移除 |
+| 狀態 | **正式 bundle 已封存，待 D／D+1 跨日逐列驗收與失敗行為正式實測**（2026-09-16 更新——⚠️ 舊敘述「待正式 bundle」已不成立：`b1_20260901_1d_74350966_5d7ecb10` 於 2026-09-11 選定並進版控，見下方十八／十九）（2026-09-10 依 v23 計畫書完成程式與自動化測試，見下方「實作結果」；2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下）。⚠️ **仍未滿足的是關閉條件 2 的後半（逐列結果跨日相同）與條件 3（失敗行為正式實測）**，⛔ 本筆在那之前不得移除 |
 | 嚴重度 | 中（不影響 runtime，只影響**驗收證據能不能被獨立複核**） |
 | 分類 | Python / SR Zone / 驗證工具 |
 | 發現日期 | 2026-09-01 |
@@ -1953,16 +1958,17 @@ Python 側從**同一份版控 argv fixture** 加上各種衝突參數，驗 CLI
 `test_replay_bundle_{canonical,identity,publish,calendar,provenance,stage0,stages,cli}.py`
 與 `python/tests/test_db_snapshot.py`），`scripts/test-replay-args.sh` 全數通過。
 
-⚠️ **兩個尚未滿足的關閉條件**（見下方「關閉條件」第 2、3 項與十二的「跨日驗收」）：
+⚠️ **當時（2026-09-10）尚未滿足的兩項，現況如下**（2026-09-16 更新）：
 
-1. **正式 bundle 尚未產出**——要連 dev／live DB 跑一次 Stage 0，把
-   `python/baselines/<bundle_id>/` 納入版控；
-2. **跨日驗收尚未執行**——⛔ 必須真的 D 日產、D+1 日載入同一份再跑，同日重跑不能替代。
+1. ~~正式 bundle 尚未產出~~ → ✅ **已完成**：`b1_20260901_1d_74350966_5d7ecb10`
+   於 2026-09-11 選定並**已進版控**（8 個檔案 tracked），見十八／十九；
+2. **跨日驗收仍未執行**——⛔ 必須真的 D 日跑、D+1 日載入同一份再跑，同日重跑不能替代。
+   ⚠️ **⛔ 不是「D 日產 bundle」**：bundle 已凍結，⛔ 不得重產（重產的是另一份輸入）。
 
-⚠️ **Stage 1 目前跑不動，這是設計上的預期**：候選要靠 `rr_decoupling_candidate`，而那個
-欄位是 [I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到)
-Stage 0 才會補上的。本筆已交付**工具與護欄**（缺欄位會在發布 artifact 之前中止並指名
-I-074），欄位就位後才跑得動正式 Stage 1。
+⚠️ ~~Stage 1 目前跑不動~~ → ✅ **已可執行**（2026-09-16）：`rr_decoupling_candidate`
+由 [I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到)
+Stage 0 補上並已 review 通過，Stage 1 的 preflight／crossday／probe／evidence 程式與測試
+也已完成。**剩下的只有正式的 D／D+1 兩趟執行。**
 
 ##### 修訂紀錄
 

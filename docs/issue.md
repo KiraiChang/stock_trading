@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-114` 起算。**（**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現池內成員數對不上（`evaluation_universe` 135 筆 `active`，實際只掃到 134 檔）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-117` 起算。**（⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-113（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，**下一個可用的是 I-114**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-116（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），**下一個可用的是 I-117**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,8 +70,8 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113、已收斂的 I-102 / I-104 / I-105 / I-109～I-112、
-  以及下一個可用的 I-114），
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115 / I-116、已收斂的 I-102 / I-104 / I-105 / I-109～I-112、
+  已跳號的 I-114，以及下一個可用的 I-117），
   那是預期的，不是殘留。
 
 ---
@@ -2400,7 +2400,7 @@ P33/P67 是拿 **SMA 基準**量的，而 runtime 的自適應 builder 用 **Wil
 ①統一用 Wilder ATR(14)／②統一用 TR SMA(14)／③承認是兩個指標。
 
 ⚠️ **三個選項的權威定義在 [I-107](#i-107evaluationselection-用-tr-sma14runtime-用-wilder-atr14凍結門檻與-runtime-不同源)
-的「待決策：canonical formula 三選一」，本筆不再複述**（2026-09-10 review 訂正——
+的「已裁決：canonical formula ＝ Wilder ATR(14)」，本筆不再複述**（2026-09-10 review 訂正——
 這裡原本維護第二份定義，其中選項 ③ 寫成「明確寫出哪一個在分桶、哪一個在門檻」，
 ⛔ 會被讀成分桶與門檻可採不同公式；實際規則是**先選 bucket authority、門檻必須與它同源、
 另一個指標僅供獨立觀察**。兩份定義各自漂移正是這次要消滅的問題）。
@@ -2879,7 +2879,7 @@ LOW/NORMAL/HIGH = 53/49/33 變成 **75/39/21**（有一部分是全市場波動�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待決策（2026-09-10：步驟 1 已執行，但**量到的母體不合格**——池外資料變舊，合格母體塌縮成 125 檔（2026-08-17 的同一套規則當時得到 319 檔），見下方「步驟 1 量測（2026-09-10 執行）」。裁決前置因此多兩步：**先回補池外日 K，再定義母體是固定 cohort 還是動態規則**） |
+| 狀態 | **公式已裁決／遷移待執行**（2026-09-17 使用者確認：**canonical formula ＝ Wilder ATR(14)**，見下方「已裁決」）。⚠️ 剩下的是**遷移**——完整合格母體量測、重算 P33/P67、升 `universe_version`、更新 `bucket_edge_*`／`bucket_hint`，⛔ 仍被 [I-075](#i-075重跑選池會因池外資料變舊而靜默通過) 擋住（2026-09-10 量到的母體塌縮成 125 檔，見下方「步驟 1 量測」） |
 | 嚴重度 | 中（**目前不發作**——`SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 在 live 為 `False`。確定的是**公式與門檻不同源**；打開後**可能造成系統性分桶偏差，但方向與幅度待合格母體量測**——⛔ 2026-09-10 前寫的「一旦打開就會系統性偏向高波動」是未經證實的斷言，見下方「步驟 1 量測」） |
 | 分類 | Python / 指標定義 / 已知限制 |
 | 建立日期 | 2026-09-03 |
@@ -2920,7 +2920,9 @@ LOW/NORMAL/HIGH = 53/49/33 變成 **75/39/21**（有一部分是全市場波動�
 給多少根 warm-up／lookback。單把 evaluation 的 period 改成 60 會得到 **`TR SMA(60)`**，
 仍然不等於 runtime 的 Wilder ATR(14)。
 
-#### 待決策：canonical formula 三選一
+#### 已裁決：canonical formula ＝ Wilder ATR(14)（2026-09-17 使用者確認）
+
+⚠️ 下面三個選項**保留作為裁決理由的紀錄**，⛔ 不再是開放選項。
 
 1. **統一用 Wilder ATR(14)**——與 Go `CalcATR`、與 runtime 一致；**凍結門檻必須重測**。
 2. **統一用 TR SMA(14)**——與凍結門檻、選池、既有基準一致；runtime 要改，
@@ -2934,23 +2936,123 @@ LOW/NORMAL/HIGH = 53/49/33 變成 **75/39/21**（有一部分是全市場波動�
    authority 定了之後，門檻要不要重測與 `universe_version` 要不要升版，
    由下方步驟 4 的同源判準自動決定。
 
-#### 決策前的必要量測與步驟
+#### ⚠️ 結構性事實：分桶 basis 是 `max(atr_pct, average_range_pct)`，⛔ 不是 atr 單獨決定
 
-1. 先量測 **SMA14 與 Wilder14 在「資料新鮮、且套用既定資格規則的全市場股票母體」上的
-   分佈與 bucket 差異**（不能只看 5 檔）。
-   ⛔ **不要寫成「319 檔」**——319 是 **2026-08-17 那次量測的歷史規模**，不是驗收筆數；
-   只有明確選定「固定 cohort」時 319 才是必要筆數（見下方「因此原步驟 1 之前多兩步」）。
-2. 選定 canonical formula。
-3. 若公式改變：重算 P33/P67 → 升 `universe_version` → 更新 135 列的
-   `bucket_edge_low/high` → 與 T-003「bucket 邊界必須凍結」對齊。
-4. **完成前 `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 維持關閉。**
+（2026-09-17 讀碼 ＋ live 唯讀量測補上。**這⛔ 不能取代步驟 1**，母體仍不合格；
+它回答的是另一個問題——**換公式的影響面有多大**。）
+
+兩側最後都走**同一個** `zone_builder.volatility_bucket_from_profile()`：
+
+```python id="i107_basis_001"
+# zone_builder.py:401-410
+values = [v for v in (atr_pct, average_range_pct) if v is not None]
+basis = max(values)          # ← ⚠️ 取大者
+if basis < LOW_VOLATILITY_THRESHOLD:  return "LOW_VOLATILITY"
+if basis > HIGH_VOLATILITY_THRESHOLD: return "HIGH_VOLATILITY"
+```
+
+| 側 | atr 那一半 | range 那一半 |
+|---|---|---|
+| selection（凍結門檻來源） | `_atr_pct`＝**TR SMA(14)** | `((high-low)/close).mean()`，近 60 根 |
+| runtime（自適應 builder） | `calc_atr`＝**Wilder(14)** | `((high-low)/close).mean()`，近 60 根 |
+
+⚠️ **`average_range_pct` 兩側的算法完全相同**。所以換公式對分桶零影響的條件是：
+
+```text id="i107_invariance_001"
+average_range_pct >= max(atr_pct_sma14, atr_pct_wilder14)
+```
+
+⛔ **只比「目前的 SMA」不夠**（本節初稿寫成「`average_range_pct` 較大時零影響」，那是錯的）。
+反例：`SMA = 3%`、`range = 4%`、`Wilder = 5%` —— selection 側 basis 是 4%，
+換成 Wilder 後 basis 變成 **5%**，⚠️ 這一檔仍會受影響，即使它在「SMA 主導」的統計裡
+被算成「range 主導」。
+
+##### 敏感度情境（選池 135 檔，2026-09-17）——⛔ **不是實際 Wilder 影響範圍的估計**
+
+| 情境 | basis 由 atr 決定 | 性質 |
+|---|---|---|
+| TR SMA(14)（現行 selection 側） | **22 / 135** | ⚠️ 這是**目前 raw SMA 的實況**，⛔ 不是「換公式後不受影響的檔數」 |
+| 每檔一律 × 1.130（125 檔量測的**中位數**比值） | 47 / 135 | ⚠️ **敏感度情境**——⛔ 不是實際 Wilder，也⛔ 不是上下界 |
+| 每檔一律 × 1.562（該量測的**最大**比值） | 111 / 135 | 同上 |
+
+⛔ **這張表不能用來估計實際的 Wilder 影響範圍**：真值要用 `indicators.calc_atr`
+逐檔重算（見「遷移步驟」）。⚠️ 「basis 由 atr 決定」也⛔ 不等於換桶——
+還要跨過 P33/P67 門檻才會換，這是上方 125 檔實測**只有 2 檔換桶且都往 LOW** 的部分機制。
+
+##### ⚠️ 方法與限制（⛔ 不要把這組數字當成步驟 1 的替代）
+
+* 母體是**選池 135 檔**（資料新鮮），⛔ 不是步驟 1 要的「全市場合格母體」。
+* Wilder 那兩欄是**用比值外推**的，⛔ 不是重算——SQL 難以表達 Wilder 的遞迴平滑。
+  真值要用 `indicators.calc_atr` 重算。
+* ⚠️ **量測走原始價，python 端走還原價**（`db.py` 預設 `adjusted=True`）。
+  `range_pct` 是單日內比值，⛔ 不受還原影響；但 TR 的 `|high − prev_close|` 跨日，
+  除權息造成的跳空會被當成真實波動——而 60 根切片（2026-06 ～ 09）正好涵蓋台股除權息旺季。
+  **2026-09-17 review 以 `adj_factor` 複算了這一項**：adjusted 情境下 SMA 主導**仍是 22/135**，
+  逐檔比較為「adjusted 低於 raw **6 檔**、相同 **129 檔**、高於 raw **0 檔**」。
+  ⚠️ 所以**在這 135 檔樣本上** raw ATR 沒有低估 adjusted ATR；
+  ⛔ 這是樣本觀察，**不是一般性的公式保證**。
+
+##### 這對裁決的意義
+
+⚠️ 上表顯示**在選池樣本上，預期會改變 basis／bucket 的比例可能偏低**。但兩件事⛔ 不可混為一談：
+
+| | 影響面 | 重測成本 |
+|---|---|---|
+| 這批分析說得上話 | ✅ 可能較低（⚠️ 僅限選池 135 檔樣本、且為敏感度情境） | ❌ ⛔ 說不上話 |
+| 為什麼 | 換桶要同時滿足「atr 主導」與「跨越門檻」 | **P33/P67 重測必須用完整合格母體重算所有 basis**，⛔ 不是只重測 atr 主導的那些標的 |
+
+⛔ **「不同源」是整套 provenance contract 的問題，⛔ 不能限縮成「16～35% 的標的」**：
+`VOLATILITY_THRESHOLD_PROVENANCE` 記的是拿 **SMA 側**量出來的門檻，而 runtime 用 **Wilder 側**——
+契約層面它整份都不同源，與有多少檔實際換桶無關。
+**門檻重測、升 `universe_version`、資料遷移的工程步驟一步都不會少。**
+
+#### 裁決（2026-09-17 使用者確認）：**選項 1——canonical formula ＝ Wilder ATR(14)**
+
+理由：
+
+* runtime 的 adaptive profile 已用 Wilder；實際 ATR zone builder 也用 Wilder。
+* Go 的 `CalcATR`（`backend/internal/indicator/atr.go`）同樣是 Wilder。
+* 選 SMA 會讓「分桶用的 ATR」與「實際 zone width 用的 ATR」**仍是兩種語意**。
+* 選項 3 最後還是要選 bucket authority；authority 若選 Wilder，
+  本質上就是選項 1 再加一層欄位契約。
+
+⚠️ **但公式決策與遷移執行要拆開**——這批分析足以支持**架構裁決**，
+⛔ 不足以取代正式的門檻量測：
+
+| # | 步驟 | 現在能不能做 |
+|---|---|---|
+| 1 | 決定 canonical formula ＝ Wilder ATR(14) | ✅ **可以**（架構裁決，不依賴母體） |
+| 2 | I-075 回補後，以**資料新鮮的動態全市場母體**、用真正的 `calc_atr` **逐檔重算** | ❌ 被 I-075 擋住；⛔ **不可用 1.130 外推** |
+| 3 | 用 `max(wilder_atr_pct, average_range_pct)` 重算 P33/P67 | ❌ 等步驟 2 |
+| 4 | 升 `universe_version` | ❌ 等步驟 3 |
+| 5 | 更新 provenance、`bucket_edge_low/high` 與 `bucket_hint` | ❌ 等步驟 4 |
+| 6 | 完成後再跑 T-003 P2 | ❌ 等步驟 5 |
+
+#### 遷移步驟（⚠️ **公式已定，以下是執行順序**）
+
+⚠️ 2026-09-17 起**完整母體量測⛔ 不再是公式選擇的前置條件**——它的角色改成
+**量化影響 ＋ 產生新 P33/P67 ＋ 完成遷移**。舊版「先量測才裁決」那套已移除，
+⛔ **不得再引用**。
+
+1. ✅ **已完成**：canonical formula ＝ **Wilder ATR(14)**。
+2. **完整合格母體量測**——以資料新鮮的動態全市場母體，用**真正的 `indicators.calc_atr`
+   逐檔重算**（⛔ **不可用 1.130 之類的比值外推**）。⛔ 仍被 I-075 擋住；
+   ⛔ **不要寫成「319 檔」**——319 是 2026-08-17 那次量測的歷史規模，不是驗收筆數
+   （見下方「因此原步驟 1 之前多兩步」）。
+3. 用 `max(wilder_atr_pct, average_range_pct)` **重算 P33/P67**。
+4. 升 `universe_version`。
+5. 更新 `VOLATILITY_THRESHOLD_PROVENANCE`、135 列的 `bucket_edge_low/high` 與 `bucket_hint`，
+   並與 T-003「bucket 邊界必須凍結」對齊。
+6. **完成前 `SR_SCORING_ADAPTIVE_ZONE_BUILDERS_ENABLED` 維持關閉**；完成後再跑 T-003 P2。
 
 #### 步驟 1 量測（2026-09-10 執行）
 
 ⚠️ **這次量測沒有完成步驟 1**——步驟 1 要的是「資料新鮮、且套用既定資格規則的全市場
 股票母體」（同一套規則在 2026-08-17 得到 **319 檔**），實際只量到 **125 檔**。
 兩件事要分開讀：下方「量到什麼」在它自己的母體上可信，
-但「能不能拿來裁決 canonical formula」的答案是**不能**。
+但「能不能拿來**產生新的 P33/P67**」的答案是**不能**。
+⚠️ **2026-09-17 起這句的適用範圍縮小了**：canonical formula 已裁決為 Wilder ATR(14)
+（⛔ 不再需要靠量測來選公式），本節資料仍**不足以支撐門檻重測與遷移**。
 
 ##### 母體塌縮：同一套規則從 319 檔（2026-08-17）掉到 125 檔，成因是 I-075
 
@@ -3031,8 +3133,21 @@ SMA14 用 `evaluation._atr_pct`；Wilder14 照 `scoring._adaptive_zone_builder_p
 公式變化混在一起，回答不了公式本身的影響。
 
 **為什麼影響這麼小**：`bucket_basis = max(atr_pct, average_range_pct)`，而
-**99/125（79.2%）的 basis 就是 `average_range_pct`**。對這 79% 來說，ATR 用哪個公式
-對分桶毫無影響。**這是原本三選一的討論沒有納入的因素**，也是重新評估嚴重度時要帶上的前提。
+**99/125（79.2%）的 basis 就是 `average_range_pct`**。
+**這是原本三選一的討論沒有納入的因素**，也是重新評估嚴重度時要帶上的前提。
+
+⚠️ **2026-09-17 訂正**：本段原本接著寫「對這 79% 來說 ATR 用哪個公式對分桶毫無影響」，
+⛔ **那句已移除**——「不受公式影響」的正確條件是
+
+```text id="i107_invariance_002"
+average_range_pct >= max(atr_pct_sma14, atr_pct_wilder14)
+```
+
+而**本節⛔ 沒有載明那 99 檔是在哪一個公式下統計的**。若只比 SMA，
+`range` 介於 SMA 與 Wilder 之間的標的會被誤算進「不受影響」那一側
+（反例與同類訂正見下方「結構性事實」段）。
+⚠️ **上方情境 a／b 的換桶數（2/125、4/125）⛔ 不受這個缺口影響**——
+那兩組是用 Wilder **逐檔實際重算**的結果，不是由這個 79% 推導出來的。
 
 切點對照：
 
@@ -3059,8 +3174,9 @@ P33 兩者完全相同，同樣是因為該位置的 basis 是 `average_range_pc
    本筆步驟 3 的目的是重測當下母體的分位數，因此**預設走動態母體**。
    **驗收條件是「母體規則與資料新鮮度」，⛔ 不是「恰好 319 檔」。**
 2. 在該母體上重跑本節的量測。
-3. 裁決 canonical formula。
-4. **依裁決結果分三支**（對應「待決策」段的三個選項，⛔ 三支都要有交代，不能只寫兩支）：
+3. ~~裁決 canonical formula~~ ✅ **已於 2026-09-17 裁決為 Wilder ATR(14)**，
+   ⛔ 這一步不再是流程的一部分。
+4. **依裁決結果執行——實際走的是下表 ①**（②③ 保留為當時的分支紀錄，⛔ 不再是開放選項）：
 
    | 裁決 | 門檻要不要重測 | `universe_version` | bucket authority |
    |---|---|---|---|
@@ -3080,9 +3196,12 @@ P33 兩者完全相同，同樣是因為該位置的 basis 是 `average_range_pc
    ⛔ authority 沒定之前這一支無法執行；若不打算定，就先明確撤銷選項 ③。
 
    ⚠️ 更新池資料時注意筆數：`evaluation_universe` 是 135 筆 `active`，
-   但不指定 symbols 的路徑實際只跑到 134 檔（`2867` 被 `is_listed=false` 濾掉，見
-   [I-113](#i-1132867-是-active-選池成員但-is_listedfalse未指定-symbols-的全市場路徑會靜默排除它)）。
-5. 完成後才跑 [`todo.md`](./todo.md) T-003 P2 的 coarse sweep（三選一的完整比較與裁決見那裡）。
+   但不指定 symbols 的 full-market 路徑母體是 134 檔（`2867` 已下市，⚠️ **那是正確行為**；
+   缺的是對帳證據，見
+   [I-113](#i-113i-107-量測把-135-筆-active-cohort-與-134-筆-listed-eligible-cohort-混為同一母體且沒有對帳證據)）。
+5. 完成後才跑 [`todo.md`](./todo.md) T-003 P2 的 coarse sweep
+   （⚠️ 公式已裁決為 **Wilder ATR(14)**，T-003 那側的執行順序已同步收斂成單一路徑；
+   舊的三分支只作為歷史裁決紀錄保留在本筆）。
 
 ⚠️ **P33/P67 只保證「量測母體」本身近似三等分**——固定的 evaluation pool 是人工決策的子集，
 不是量測母體，它的分佈只能**預期較均衡**，**不保證精確三等分**。
@@ -3091,7 +3210,7 @@ P33 兩者完全相同，同樣是因為該位置的 basis 是 `average_range_pc
 從「全市場流動性合格股票」（2026-08-17 套此規則得到 319 檔）改成「選池」。那會讓步驟 1 立刻可執行（本節就是），
 但**等於換掉凍結門檻的母體，屬於 contract 變更**，要另外裁決，不能當成省事的預設。
 
-#### 已知限制（在決策完成前成立）
+#### 已知限制（在**遷移**完成前成立）
 
 ⛔ **evaluation／選池的 bucket 與未來 runtime adaptive 的 bucket 尚未證明同義。**
 現有報表、`evaluation_universe.bucket_hint`、前端顯示的 bucket 都是 **TR SMA(14)** 基準；
@@ -3309,15 +3428,15 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 
 ---
 
-### I-113：`2867` 是 `active` 選池成員但 `is_listed=false`，未指定 symbols 的全市場路徑會靜默排除它
+### I-113：I-107 量測把 135 筆 active cohort 與 134 筆 listed-eligible cohort 混為同一母體，且沒有對帳證據
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待決策（**不知道是刻意保留還是漏收**，見下方「尚未查證」） |
-| 嚴重度 | 中（**只影響不指定 symbols 的路徑**；那些路徑宣稱 135 檔、實際 134 檔，而且**差在哪不會有任何訊息**） |
+| 狀態 | **待修復**（2026-09-17 使用者確認裁決：⚠️ **維持 `active`／`is_listed` 可逆契約⛔ 不自動停用**，對帳責任流採 **方案 B——`python/db.py` 新增唯讀 reconciliation 查詢**。⛔ 已查證 `active` 與 `is_listed` 不連動是明文契約、⛔ 不是漏收；待實作的是 cohort 對帳輸出） |
+| 嚴重度 | 中（**只影響「把不指定 symbols 的 full-market report 拿來代表或對照 evaluation cohort、卻沒有 reconciliation」的工作流**；⛔ **full-market selection 本身沒有錯**——它建立的就是「仍上市的全市場母體」。缺的是 135 vs 134 的對帳證據，差在哪不會有任何訊息） |
 | 分類 | 資料一致性 / 評估標的池 |
 | 建立日期 | 2026-09-10 |
-| 來源 | [I-107](#i-107evaluationselection-用-tr-sma14runtime-用-wilder-atr14凍結門檻與-runtime-不同源) 步驟 1 量測時池內成員數對不上（135 vs 134）|
+| 來源 | I-107 步驟 1 量測時，把 `evaluation_universe` 的 135 筆 `active` cohort 與 full-market report 可辨識的 134 檔當成同一個母體（135 vs 134）|
 
 #### 事實（2026-09-10 對 live 唯讀查證）
 
@@ -3338,43 +3457,268 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 
 | 路徑 | 會不會排除 `2867` |
 |---|---|
-| `selection_report.py:717` → `db.fetch_symbol_universe()`（不帶 `symbols`） | ✅ **會**——`WHERE is_listed = :listed`（`python/db.py:191-192`，`listed=True`） |
-| `evaluation.py:77` `_load_db_sources` → `fetch_candles(symbol, …)` | ❌ **不會**——逐檔直接取 K 棒，**完全不檢查 `is_listed`** |
+| `selection_report.py:717` → `db.fetch_symbol_universe()`（不帶 `symbols`） | ✅ **會**——`WHERE is_listed = :listed`（`python/db.py:374`，`listed=True`） |
+| `evaluation.py:124` `_load_db_sources` → `fetch_candles(symbol, …)` | ❌ **不會**——逐檔直接取 K 棒，**完全不檢查 `is_listed`** |
 
 全 repo（排除 tests）只有 `selection_report.py:717` 呼叫 `fetch_symbol_universe`。
 所以 `run_evaluation` / `run_builder_sweep` 只要 `--symbols` 裡帶了 `2867`，
 **它照樣會被載入並算出 profile**——用的是停在 2026-08-18 的 K 棒
 （`_volatility_profiles` 本身沒有 stale 判定，那是 `selection_report` 才有的邏輯）。
 
-**問題出在哪**：`2867` 在**不指定 symbols 的全市場 selection／measurement 路徑**上
-**從一開始就沒有進入母體**——不是算不出 profile 被排除，是根本沒被載入，因此
-**不會出現在任何排除原因統計裡**，也沒有 warning。這類路徑「池有 135 檔」的敘述
-與實際跑到的 134 檔之間，沒有東西對得起來。
+**問題出在哪**：`2867` 在**不指定 symbols 的全市場路徑**上從一開始就沒有進入母體——
+不是算不出 profile 被排除，是根本沒被載入，因此**不會出現在任何排除原因統計裡**，也沒有 warning。
+⚠️ **那條路徑這樣做是對的**（它要的就是「仍上市的全市場母體」）；
+⛔ **錯的是把它的結果拿來代表 evaluation cohort 卻不留對帳**——
+「池有 135 檔」與該報告實際跑到的 134 檔之間，沒有東西對得起來。
 
-`066_evaluation_universe.sql:29` 的註解寫「`false` ＝ 保留紀錄但不再納入每日維護」——
-一檔已下市的標的仍掛 `active=true`，與那句話的語意對不上。
+`066_evaluation_universe.sql:29` 的註解寫「`false` ＝ 保留紀錄但不再納入每日維護」。
+⚠️ **2026-09-17 訂正**：那句話只描述 `active=false` 的語意，⛔ **並沒有**宣稱
+`active=true` 就一定會被納入——`active=true` 仍要再經過**本輪的 listing eligibility 過濾**
+（見下方「已查證」②）。⛔ 本筆初稿寫的「與那句話的語意對不上」因此不成立。
 
-#### 尚未查證（所以狀態是待決策而非待修復）
+#### 已查證（2026-09-17，讀碼 ＋ live 唯讀查詢）
 
-* **`is_listed` 是怎麼變成 `false` 的**。`todo.md` T-071 明訂**不驅動 `is_listed`**，
-  所以來源不是它；沒有進一步追。
-* **是否刻意保留在池內**。入池/退池的歷史本身是研究紀錄（同上註解），
-  所以「下市了還留著紀錄」可能是預期行為，只是 `active` 該不該同時轉 `false` 沒有定義。
+原本列為「尚未查證」的兩件事都查清楚了。
 
-⛔ **在這兩件事查清楚之前不要直接改資料**——把 `active` 改成 `false` 會改動選池成員數，
-那是 T-040 的人工決策範圍。
+**① `is_listed` 是怎麼變成 `false` 的 → TWSE ISIN 名單同步，⛔ 與 T-071 無關。**
+
+寫入點只有一處，`store/stock_symbol_repo.go` 的 `markMissingDelisted()`：
+
+```sql id="i113_mark_delisted_001"
+UPDATE stock_symbols SET is_listed = false, updated_at = <seenAt>
+WHERE is_listed = true AND last_seen_at < <seenAt>
+```
+
+同步時每個出現在官方名單的 symbol 都會把 `last_seen_at` 推到 `seenAt`，
+**本次快照缺席**的就被標為下市（用浮水印取代逐一列舉的 `NOT IN`）。
+⚠️ 所以它反映的是**官方名單的缺席**，⛔ 不是 T-071 的對帳結果——T-071「不驅動
+`is_listed`」的約定沒有被違反。
+
+**⚠️ 而且 `2867` 是真的下市了**，⛔ 不是資料錯誤：
+
+| 欄位 | 值 |
+|---|---|
+| `last_seen_at` | 2026-08-30（最後一次出現在官方名單） |
+| `delisted_date` | **2026-09-01** |
+| `delisted_event_id` | 1（有正式的下市事件紀錄） |
+
+**② 是否刻意保留在池內 → ⚠️ 是刻意的，而且是明文的可逆契約。**
+
+⛔ **本節 2026-09-17 初稿寫成「沒有機制維護、所以不是刻意保留」，那是錯的**，
+成因是**只查了寫入端（`SetActive()` 沒有自動呼叫者）卻沒查消費端**。既有契約明文寫著：
+
+> **刻意不採「一次性把 `evaluation_universe.active` 設 false」**：那會在主檔誤判
+> （例如某天清冊抓取不完整）時**靜默清掉池成員**，而重新入池是人工動作。
+> 每輪重新過濾則是可逆的——主檔隔天恢復，抓取就自動恢復。
+>
+> —— `docs/architecture.md`「日 K 維護」的下市過濾段，
+> 同一段註解也寫在 `backend/internal/scheduler/scheduler.go` 的 `dropDelistedSymbols`
+
+| 狀態 | 語意 | 由誰維護 |
+|---|---|---|
+| `evaluation_universe.active` | **cohort membership**（人工／選池） | 選池流程；`SetActive()` 的唯一入口是 API `PATCH /api/v1/evaluation-universe/:symbol` |
+| `stock_symbols.is_listed` | **本輪是否具備上市資格** | `stock_symbol_sync` 每日自 TWSE 清冊同步 |
+
+⚠️ **兩者刻意不連動**：`active` 決定 **cohort membership**，
+而**只有已知 `is_listed=false` 才在本輪排除**——⛔ **不是嚴格的 `active AND is_listed`**。
+主檔查無或查詢失敗時一律 **fail-open 保留**（`scheduler.go:1215` 起的三態判定）：
+
+```text id="i113_eligibility_001"
+active AND ( is_listed = true  OR  主檔查無該 symbol  OR  主檔查詢失敗 )
+```
+
+⛔ **寫成 `active AND is_listed` 會誤導後續實作者把 unknown 也靜默排掉**，
+而那正是契約裡「多抓一點可接受、靜默少抓不可接受」要防的事。
+可逆性由 `TestEvaluationUniverseSyncResumesAfterRelisting`（`scheduler_test.go:1980`）釘住。
+所以「`SetActive()` 沒有自動呼叫入口」**只能證明兩份狀態刻意不連動**，
+⛔ 證明不了系統漏做退池。
+
+#### 真正的缺口：⛔ 不是「沒有回收路徑」，是**對帳不可見**
+
+⛔ 初稿寫的「池成員下市／停牌後沒有任何回收路徑」也不準確，兩處要訂正：
+
+* **日 K 維護路徑本來就有每輪過濾**，而且**會計數**——`dropDelistedSymbols` 回傳
+  `(保留的標的, delisted 數, 主檔查無數)`，並寫進 log（`scheduler.go:1193` 的
+  `zap.Int("delisted", …)`）。三態判定（`true` 保留／`false` 過濾／**主檔查無時 fail-open 保留**）
+  也都在契約裡。
+* ⛔ **「停牌」不等於 `is_listed=false`**，⛔ 不要在這裡混用——`is_listed` 反映的是
+  TWSE 清冊的缺席（見上方 ①）。
+
+⚠️ **⛔ 這⛔ 不是 `selection_report.py` 的缺陷**（2026-09-17 再訂正）：
+不帶 symbols 呼叫 `fetch_symbol_universe()` 時，它建立的本來就是
+**「目前仍上市的全市場母體」**——把 `is_listed=false` 的 `2867` 排除**是正確行為**。
+
+**真正出錯的是量測流程**：I-107 把 `evaluation_universe.active` 的 **135 筆 cohort membership**
+直接拿去和 full-market report 裡可辨識的 **134 檔**相比，**卻沒有留下 reconciliation**。
+兩者是不同的母體定義，⛔ 不該當成同一個數字。
+
+⛔ **修法⛔ 不是改 `fetch_symbol_universe()` 的全市場母體，也⛔ 不是把 `2867` 納入 P33/P67**——
+新增的 reconciliation 是**獨立旁證**，⛔ 不參與 selection、分位數或 bucket 計算。
+
+相關的程式碼事實（**供理解兩個母體為何不同，⛔ 不是要改它**）：
+
+```python id="i113_universe_gap_001"
+# python/db.py:361-375
+def fetch_symbol_universe(symbols: list[str] | None = None) -> list[dict]:
+    if symbols:
+        sql = text(base + " WHERE symbol IN :symbols")      # ⚠️ ⛔ 不過濾 is_listed
+    else:
+        sql = text(base + " WHERE is_listed = :listed")     # ← 靜默排除 2867
+```
+
+`selection_report.py:717` 走的正是 `fetch_symbol_universe()`（不帶 symbols）那一條，
+所以它的母體是 **listed-eligible 的全市場**，⛔ **它從未宣稱自己在跑 135 檔 evaluation cohort**。
+⚠️ **要修的是工作流**：把這份 full-market report 拿來代表或對照 evaluation cohort 時，
+⛔ 不得沒有 reconciliation。⛔ 與 `active` 該不該轉 false 無關。
+
+#### 裁決（2026-09-17 使用者確認）
+
+**維持既有可逆契約**，⛔ 不自動把 `active` 轉成 `false`：
+
+| 項目 | 裁決 |
+|---|---|
+| `2867` | ⛔ **不做單筆資料修改** |
+| `universe_version` | ⛔ **不因這件事升版** |
+| 重新上市 | 保留 cohort membership，下一輪自動恢復 |
+
+要補的是**可見性**——凡是宣稱在跑「135 檔池」的路徑，都要產出這組對帳：
+
+**固定九欄位**（2026-09-17 使用者裁決）。成功時：
+
+```json id="i113_reconciliation_001"
+{
+  "cohort_source": "evaluation_universe.active",
+  "pool_members_total": 135,
+  "eligible_members_total": 134,
+  "excluded_unlisted_count": 1,
+  "excluded_unlisted_symbols": ["2867"],
+  "unknown_master_count": 0,
+  "unknown_master_symbols": [],
+  "reconciliation_status": "ok",
+  "error_category": null
+}
+```
+
+查詢失敗時**照樣產出 artifact**，⛔ 不是缺席：
+
+```json id="i113_reconciliation_002"
+{
+  "cohort_source": "evaluation_universe.active",
+  "pool_members_total": null,
+  "eligible_members_total": null,
+  "excluded_unlisted_count": null,
+  "excluded_unlisted_symbols": null,
+  "unknown_master_count": null,
+  "unknown_master_symbols": null,
+  "reconciliation_status": "unavailable",
+  "error_category": "database_query_failed"
+}
+```
+
+⚠️ **為什麼是「產出 unavailable」而不是「直接中止」**：artifact 證明**有執行但對帳失敗**，
+又⛔ 不會被讀成「沒有落差」。直接中止會把**執行失敗**與**根本沒執行**混成同一種缺席。
+
+⚠️ **`error_category` 是獨立欄位，⛔ 不得塞進 `reconciliation_status` 字串**——
+既然要求穩定的錯誤類別，它就該是可枚舉、可比對的欄位。
+
+##### 欄位語意
+
+| 欄位 | 語意 |
+|---|---|
+| `cohort_source` | cohort authority 是誰（⛔ 不要讓讀的人猜） |
+| `eligible_members_total` | **已上市 ＋ 主檔查無後 fail-open 保留**的成員（⛔ 不是只有 `is_listed=true`） |
+| `unknown_master_*` | 主檔查無那一態，⛔ **不得併進 `excluded_unlisted`**——兩者處置相反 |
+| `reconciliation_status` | `ok`／`unavailable` |
+| `error_category` | **封閉枚舉**；`ok` 時為 `null`（合法值見下表） |
+
+##### 不變式（⛔ 兩組都要成立）
+
+**`reconciliation_status == "ok"`**：
+
+* 六個 counts／lists **全部非 null**；`error_category` 為 **null**。
+* 每個 list 的**長度等於對應的 count**。
+* `pool_members_total == eligible_members_total + excluded_unlisted_count`
+* `unknown_master_count` **已包含在** `eligible_members_total` 之內。
+
+**`reconciliation_status == "unavailable"`**：
+
+* 六個 counts／lists **一律 null**——⛔ **不得用 `0` 或 `[]`**。
+* `error_category` 必須是**封閉枚舉的合法值**——⚠️ **現階段唯一合法的非 null 值是
+  `database_query_failed`**：
+
+  | 值 | 何時用 |
+  |---|---|
+  | `null` | **只在** `reconciliation_status == "ok"` 時 |
+  | `database_query_failed` | cohort 查詢本身失敗（連線、SQL、逾時） |
+
+  ⛔ **要新增類別就要同步更新本表**——⛔ 不得在程式裡臨時發明字串，
+  那會讓下游的分類統計靜默失準。
+* ⛔ **原始 exception 只進 log／stderr，⛔ 不寫進 artifact**。
+
+##### ⚠️ 產出 artifact ⛔ 不等於執行成功
+
+| 情境 | scheduler（日 K 回補） | 對帳報告 |
+|---|---|---|
+| 主檔查詢整體失敗 | **fail-open**：維持全量回補（寧可多抓） | **fail-closed**：⛔ 不得假裝全部 eligible |
+
+⚠️ **operational fail-open 與報告 fail-closed 是兩件不同的事，⛔ 不要混寫。**
+unavailable 時：
+
+* artifact **可以落地**，供追蹤與監控。
+* ⛔ **但這次報告⛔ 不得被視為「cohort reconciliation 通過」。**
+* 依賴 cohort 證據的**匯入、門檻重測、升版或正式 P2 必須中止**。
+* CLI **寫完 artifact 後回傳非零 exit code**——⚠️ **「有證據產出」⛔ 不等於「執行成功」**。
+
+⛔ **最糟的輸出是六個零值卻標成 `ok`**——那讓「沒有落差」與「沒查到」看起來一模一樣。
+
+⚠️ **關閉條件要移除「自動 `SetActive(false)`」這個選項**——它⛔ 不是普通選項，
+而是推翻既有可逆契約的另一次設計變更。
 
 #### 關閉條件
 
-任一即可：
+⚠️ **單一路徑，⛔ 不是「任一即可」**（2026-09-17 訂正——舊版把「自動 `SetActive(false)`」
+列為第一個合法選項，與上方正文直接矛盾）：
 
-1. 定義出「池內成員下市時 `active` 要不要跟著轉 `false`」的規則，
-   寫進 [`database-schema.md`](./database-schema.md) 的 `evaluation_universe` 章節，
-   並依該規則處理 `2867`；或
-2. 明確決定維持現狀，但讓落差**可見**——例如讀池成員的路徑在
-   `active` 與 `is_listed` 不一致時發 warning，而不是靜默少一檔。
+1. **維持 `active` 與 `is_listed` 分離**——⛔ 不修改 `2867`、⛔ 不因本項升 `universe_version`。
+2. **凡是宣稱在跑 evaluation cohort 的路徑，都要輸出 membership／eligible／excluded 對帳**——
+   ✅ 責任流已裁決為 **方案 B**（`python/db.py` 新增唯讀 reconciliation 查詢），
+   **固定九欄位**、兩組不變式與三態處置見上方「裁決」與「對帳之前要先定 cohort 由誰提供」。
+3. 行為歸檔到 [`database-schema.md`](./database-schema.md) 的 `evaluation_universe` 章節
+   或 [`architecture.md`](./architecture.md)。
 
-無論走哪一條，「池 135 檔」這個數字在文件與報告裡都要能對得上實際參與數。
+⛔ **「未來自動停用下市成員」⛔ 不是本筆的關閉分支**——它推翻既有可逆契約，
+要另立一次 contract change。
+
+##### ⚠️ 對帳之前要先定「cohort 由誰提供」——⛔ 目前的輸入根本拿不到
+
+`selection_report.py:717` 呼叫 `fetch_symbol_universe()` **不帶參數**，載入的是
+**全市場仍上市標的**；它⛔ **不知道 evaluation cohort 是哪 135 檔**。
+所以那九個欄位現在只是**期望輸出**，⛔ 還不是可執行契約。三條可選的資料流：
+
+| 方案 | 內容 | 代價 |
+|---|---|---|
+| A | **呼叫端傳入** active symbols | selection 這一側不必碰 DB，但每個入口都要記得傳 |
+| B | 新增**專門讀 `evaluation_universe` 的唯讀查詢** | 單一真相源；`python/db.py` 多一個函式 |
+| C | 擴充現有 `--pin-symbols` 的對帳 | 重用既有機制，⚠️ 但**只在 `--import-payload` 那條路徑上處理**（`selection_report.py:686` 產出 `missing_symbols`、`:773-775` 發 warning，整段包在 `if args.import_payload:` 裡），而且⛔ **分不出「未上市」與「主檔不存在」**——那正是 `dropDelistedSymbols` 三態裡處置相反的兩態 |
+
+**2026-09-17 使用者確認：採 B。** ⛔ 不選 A 是因為每個呼叫端都可能漏傳或傳入過期清單；
+⛔ 不選 C 是因為 `--pin-symbols` 是人工輸入，且目前分不出「未上市」與「主檔缺席」。
+（A／C 保留為評估紀錄，⛔ 不再是開放選項。）
+
+B 的形狀：
+
+| 項目 | 內容 |
+|---|---|
+| cohort authority | `evaluation_universe.active` |
+| 取值方式 | **單一 SQL**，`LEFT JOIN stock_symbols`——⚠️ 同一個 statement 才拿得到**一致快照** |
+| `is_listed = true` | `eligible` |
+| `is_listed = false` | `excluded_unlisted` |
+| **無對應主檔** | `unknown_master`，⚠️ **仍計入 `eligible`**（fail-open，與 scheduler 同向） |
+| 查詢失敗 | **產出 `reconciliation_status="unavailable"` 的 artifact**（counts／lists 一律 `null`、帶 `error_category`），⛔ **不得中止到沒有 artifact**，也⛔ **不得產出看似成功的零值**；CLI 仍回**非零 exit code**，下游一律中止 |
+| 輸出位置 | 獨立的 `evaluation_cohort_reconciliation` 區塊 |
+| 邊界 | ⛔ **不影響** full-market selection 母體、P33/P67 與 `selected_symbols` |
+
+⚠️ **這是待實作項，⛔ 不是已完成**——本筆要到對帳輸出實際產出後才能關閉。
 
 ⚠️ **順帶**：`2867` 也是 I-105（已收斂）的來源標的——當時是它跨月當天在 live 首次
 `partial`。兩者是不同的問題，這裡只記關聯，不要當成同一筆。
@@ -3439,3 +3783,64 @@ ERROR: 需要 --before-ref.        ← 照文件抄就跑不起來
 ⚠️ 改之前要先確認：`provenance_differences()` 逐欄比對全部 10 欄，`argv` 只正規化
 `--output-dir`。動 `--before-ref` 的必填性**會改變 `argv` 的形狀**，對已產出的 artifact
 不相容。I-074 這一輪⛔ 不要動它——先跑完，之後再決定。
+
+---
+
+### I-116：凍結 bundle 的可重現性只靠「image 還在」——`requirements.txt` 是下限釘法，bundle 也沒記訓練時的套件版本
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待決策（⚠️ **⛔ 不影響 I-074 本輪**——image 已釘死且 D／D+1 共用，見下方「對 I-074 的影響」） |
+| 嚴重度 | 中（不影響當下結果，但**侵蝕 I-100 整套凍結 bundle 的目的**） |
+| 分類 | Python / SR Zone / 可重現性 |
+| 建立日期 | 2026-09-17 |
+| 來源 | I-074 Stage 1 正式執行時，probe 與 D 兩趟的 log 各出現 3 次 `InconsistentVersionWarning` |
+
+#### 事實
+
+```text id="i116_warning_001"
+InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from version
+1.9.0 when using version 1.9.1. This might lead to breaking code or invalid results.
+```
+
+（`LabelEncoder`／`_SigmoidCalibration`／`CalibratedClassifierCV` 各一次。）
+
+| 事實 | 值 |
+|---|---|
+| 模型檔 | `model.joblib`，**凍結在 bundle 內**（`b1_20260901_1d_74350966_5d7ecb10/`） |
+| 訓練時 sklearn | **1.9.0**（⚠️ **只能從 warning 反推**——bundle 自己沒記） |
+| 執行時 sklearn | 1.9.1（image `sha256:d66030dca485…`） |
+| `requirements.txt` | `scikit-learn>=1.4.0`、`lightgbm>=4.0.0`、`joblib>=1.3.0`——**全是下限，⛔ 無上界** |
+| bundle `manifest.json` | 只有 `schema_version`，**⛔ 不記任何套件版本** |
+
+#### 缺口在哪：偵測 ≠ 可重建
+
+現有防線是**偵測**，而且運作正常：
+
+* provenance 有 `pip_freeze_sha256` 與 `python_version`，跨日比對逐欄比 → 版本一漂就判 `MISMATCH`。
+* `pin-replay-image.sh` 對「identity 已存在但 image 已不在本機」**fail-closed**，
+  ⛔ 不得重建後換一個 ID。
+
+⚠️ **但那兩道都只是止血**。一旦那個 image 從本機消失，`requirements.txt` 的 `>=` 會讓重建
+裝到**當時最新**的版本，`pip_freeze_sha256` 必然不同——於是**這份凍結 bundle 再也產不出
+可比的證據**。凍結 bundle 的整個目的是「日後還能重建同一條指令的結果」，而現在它實際上
+依賴的是「那個 image 一直沒被清掉」這件事。
+
+⚠️ 另有一層：`model.joblib` 是 pickle。sklearn 自己警告 unpickle 跨版本
+「may lead to breaking code or **invalid results**」——目前沒有任何測試在驗
+「同一份 model.joblib 在不同 sklearn 版本下給出相同預測」。
+
+#### 對 I-074 的影響：⛔ 無
+
+D／D+1／comparator／finalizer **共用同一個釘死的 image ID**，所以兩趟的 sklearn 版本必然相同，
+跨日比對不受影響；warning 在 probe 與 D 都出現，是**既有且一致**的狀況。
+⛔ 本輪不要為了這筆去動 image 或 requirements——那會讓已經跑掉的 probe 失去可比性。
+
+#### 待決策
+
+| 選項 | 代價 |
+|---|---|
+| `requirements.txt` 改精確釘版（`==`） | 要一併處理既有 image 與 live 的版本差；影響範圍超出 SR Zone |
+| bundle `manifest.json` 增記訓練時的 `pip_freeze`／sklearn 版本 | 只解決「知道差在哪」，⛔ 不解決「裝得回去」 |
+| 為 bundle 保存 image tarball（`docker save`） | 最徹底，但每份 bundle 多數百 MB |
+| 維持現狀，明確接受「image 消失即不可重現」 | ⚠️ 那要寫進 `sr-zone-scoring.md` 成為**明示的已知限制**，⛔ 不能默認 |

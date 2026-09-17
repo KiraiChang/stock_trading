@@ -759,9 +759,10 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 
 #### Stage 1 實作結果（2026-09-15）
 
-**已依 v25 計畫書完成程式與自動化測試；2026-09-15～16 共七輪 review 全部通過**
-（各輪發現與修正見下方四張表）。⛔ **正式的 D／D+1 兩趟 replay 尚未執行**，本筆不得關閉。
-⚠️ **本輪只交付程式與測試**——正式的 D／D+1 兩趟 replay 尚未執行，⛔ 本筆在那之前不得關閉。
+**已依 v25 計畫書完成程式與自動化測試；2026-09-15～16 經多輪 review，逐輪修正如下。**
+⚠️ 這裡**刻意不寫輪數與表數的摘要**——每次 re-review 都會讓那個數字漂掉；
+實際輪次以本節末各張「第 N 輪 review 的修正」表為準。
+⛔ **本輪只交付程式與測試：正式的 D／D+1 兩趟 replay 尚未執行，本筆在那之前不得關閉。**
 
 | 檔案 | 內容 |
 |---|---|
@@ -785,10 +786,10 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 | `scripts/run-replay-offline.sh` | `REPLAY_IMAGE_ID` 釘死、**一律以 image ID 執行**（⛔ 不用 tag）、I-074 模式的 identity 守門、**`MEASURE_PEAK=1` 的 peak 落檔**（⚠️ 前景執行以保留即時串流；⛔ 讀不到即 fail-closed，不寫 0 佔位、也不寫 completion） |
 | `scripts/test-replay-args.sh` | 新增 12-B：host validator 的 7 條（含 `python3 -S` ＋ `--bundle`） |
 
-**新增測試**（⚠️ 數字是**七輪 review 後的最終值**）：`test_run_identity.py`（29）、
+**新增測試**（⚠️ 數字是**歷次 review 修正後的最終值**）：`test_run_identity.py`（29）、
 `test_crossday.py`（43）、`test_i074_preflight.py`（32）、
 **`test_replay_evidence.py`**（25），共 **129 條**；`test-replay-args.sh` 的斷言由原本的
-62 條增為 **98 條**（host validator、comparator／finalizer／Stage 1 的 argv 與 mount、
+62 條增為 **103 條**（host validator、comparator／finalizer／Stage 1 的 argv 與 mount、
 pin 四分支、orchestrator 的 0／5／3 仲裁）。
 
 ⚠️ **檔名是 `test_replay_evidence.py`，⛔ 不是 `test_evidence.py`**——後者是既有的
@@ -798,7 +799,8 @@ SHAP evidence regression（第一輪 review 發現它被覆寫後已還原，見
 （⚠️ 依十三-C 的 CLI matrix 建立，⛔ 不是由實作者自選 argv 再凍結；動態值用 placeholder，
 shell 測試把實際輸出正規化後**逐 token 比對**）。
 
-**驗證**（2026-09-15）：
+**驗證**（⚠️ 下表是 **2026-09-15 初版實作當時**的結果；歷次 review 修正後的最終值見
+本節末的「最終驗證」）：
 
 | 層 | 結果 |
 |---|---|
@@ -899,6 +901,65 @@ shell 測試把實際輸出正規化後**逐 token 比對**）。
 
 ⛔ **本輪尚未完成**：**正式的 D／D+1 兩趟 replay**——那本來就是下一步，
 且依已確認的計次裁決合為一次。⛔ 本筆在那之前不得關閉。
+
+##### 第七輪起的 review 修正（2026-09-16）
+
+| 輪 | 問題 | 修正 |
+|---|---|---|
+| 七（1 低） | D+1 步驟仍寫「重新執行①的**那兩行**」，但①已改成完整的 guarded `if/else/exit` 區塊——照字面只重跑 assignment ＋ export 會**把剛修掉的結束碼問題帶回來** | 改成「重新執行步驟①的**完整 guarded pin 區塊**」，並註明⛔ 不是只重跑兩行 |
+| 八（2 中 1 低） | 文件狀態沒跟上事實：I-100 仍寫「待正式 bundle／Stage 1 跑不動」、I-074 的四階段總表仍寫 Stage 0「還缺診斷欄位與 bundle」、Stage 1 實作結果仍寫「待再次 review」且測試檔名是舊的 `test_evidence.py` | 三處全部對齊現況；測試數字由第一輪基準更新為最終值 |
+| 九（1 中 3 低） | 跨日策略殘留「D 日產 bundle」（兩處）；review 輪次與表數不符；未執行警語重複；驗證數字停在初版 | 本表所列 |
+| 十（1 中 2 低） | 正式測試入口出現**偶發失敗**：`test-replay-args.sh` 的 comparator identity `:ro` 掛載斷言在完整 `python/scripts/test.sh` 中失敗、單獨重跑又全過；review 輪次仍有四種說法；`**……共 **8 輪** review……**` 巢狀粗體 | 補失敗時的診斷輸出並修掉調查中發現的兩個缺陷（⚠️ **根因仍未證實**，見下）；拿掉所有輪數摘要數字；解掉巢狀粗體 |
+| 十一（2 中） | 第十輪把根因寫成定論，但當時是「argv 通過、只有 identity mount 紅」，與該推論矛盾（argv 比對不涵蓋 mount）；`replay_args_abs_path()` 只驗父目錄，檔名打錯仍會走到 `docker -v` | 文件改記成「調查時另外發現的兩個缺陷」並標明根因未證實；由各 caller 在 Docker 前以 `-f` 驗證必要輸入檔 |
+
+⚠️ **第九輪順帶抓到一個真實 bug**：smoke 在**工作區乾淨時會失敗**——
+`git diff --binary HEAD` 產出空 patch，而 `git apply` 對空輸入報
+`error: unrecognized input`。⚠️ 那不是失敗，是「這一輪沒有 tooling 變更」。
+⛔ **之前沒發現，是因為工作區一直有未 commit 的改動**；commit 之後才暴露。
+`run-replay-offline.sh` 本來就用 `if [ -n "$patch_file" ]` 處理這件事（空 patch 時
+`tooling_patch_sha256` 是空字串的 SHA-256 `e3b0c442…`），**smoke 現在與它一致**。
+
+⚠️ **第十輪的偶發失敗：根因⛔ 尚未證實，⛔ 不得標成「已修」**。
+
+當時的實際輸出是「comparator argv 通過、D／D1 mount 通過、**只有 identity mount 失敗**」，
+而那一輪的輸出**沒有被保存**。⛔ 不能宣稱已證實是記憶體競爭或 ensure 失敗所致：
+
+* 一度推論「`ensure` 失敗 → `CMP_OUT` 為空 → 下游整排失敗」，但**那個推論是錯的**——
+  argv 比對只取 `sed -n '/^python$/,$p'`，而 `-v` 掛載排在 `python` **之前**
+  （實測：identity mount 在第 22 行、`python` 在第 28 行），所以 argv 比對**根本不涵蓋
+  mount**。「argv 通過、單一 mount 紅」因此完全可以並存，⛔ 不能用來反推 `CMP_OUT` 為空。
+* 有效路徑下，新 helper 與舊算法的結果**逐字相同**，mount 比對本身也沒有改動。
+
+**現況**：原始那次單一 identity mount 失敗的直接原因**仍然未知**，等待重現。
+本輪已在該斷言失敗時印出**預期 mount 與實際 `-v` token、輸出行數、`CMP_IMG`、
+identity 是否存在**，下次重現才抓得到證據。⛔ 在那之前不得以「重跑通過」收斂。
+
+##### 調查時另外發現並修正的兩個缺陷（⚠️ 與上述偶發失敗的因果**未經證實**）
+
+1. **測試吞掉了前置步驟的失敗**。comparator／Stage 1／finalizer 三段在跑被測腳本前，
+   都會先呼叫 `ensure-i074-run-identity.py` 建立 run identity，而那三個呼叫**都寫成
+   `>/dev/null 2>&1` 且不檢查 rc**。它一失敗，identity 就不存在、被測腳本整支 `exit 1`，
+   而真正的錯誤訊息完全看不到。
+   → 改用 `ensure_identity()`：檢查 rc、印出 stderr、明說「以下斷言的失敗都源自這裡」，
+   並額外確認 identity 檔真的產出來了。
+2. **路徑轉絕對值會靜默退化**。`$(cd "$(dirname "$p")" && pwd)/$(basename "$p")` 在目錄
+   不存在時，command substitution 只是回空字串，於是算出 `/run_identity.json` 這種
+   **看起來完全合法**的絕對路徑，一路傳進 `-v` 掛載與容器 argv。
+   → 新增 `replay_args_abs_path()`（`scripts/lib/replay-args.sh`）改為硬失敗，
+   `compare-replay-crossday.sh` 與 `finalize-evidence.sh` 全面改用它。
+
+⚠️ **兩項都做了反向驗證**：把 `replay_args_abs_path()` 改回舊實作後，
+`--d` 指向不存在的目錄竟然 **rc=0 且照樣印出 docker 指令**（證實會掛 `/d.json`）；
+把 comparator 的 bundle 換成壞路徑後，輸出第一行就是根因＋traceback，
+後續失敗被明確標註來源。
+
+##### 最終驗證（2026-09-16，歷次 review 修正後）
+
+| 層 | 結果 |
+|---|---|
+| `python/scripts/test.sh` | **1219 passed, 1 skipped** |
+| `scripts/test-replay-args.sh` | **103 條斷言**全過（由 `python/scripts/test.sh` 以 `IMAGE_REQUIRED=1` 自動先跑） |
+| `scripts/smoke-replay-offline.sh` | 全過，`after rows=35 cohort=0 comparison=0`（⚠️ **工作區乾淨時亦然**——空 patch 的處理見上） |
 
 #### 正式 scan 的計次裁決（2026-09-11 使用者明文確認）
 
@@ -1904,7 +1965,7 @@ provenance 推導失敗／canonical 遇到 NaN／Infinity——**一律中止**�
 | **四道集合檢查** | 唯一性：universe／after／cohort／comparison **各一條重複列**；相等：before universe 缺／多列、comparison 少列、cohort 三種漂移；⚠️ before/after 的合法差異**不得**被判成輸入錯誤（正向對照組） |
 | **provenance** | patch hash 來自實際 worktree diff（傳錯 patch 檔要抓得到）；**專案模組落在 `source_root` 外要中止，stdlib／site-packages 不受此限**；`--image-digest`／`--base-commit`／`--tooling-patch-sha256`／`--source-root`／**`--runner-sha256`** **各一條 spoof（腳本拒絕，含縮寫形式）＋ 各一條實際值不符（中止）**；**兩支腳本各一條重複參數測試**（CLI 中止，⛔ 不採用最後一個）；**`--before-ref`／`--bundle`／`--output-dir`／`--after-artifact`／`--cohort-manifest` 各一條重複測試**（腳本中止——腳本取第一個、argparse 取最後一個，重複會讓實際版本與報告宣稱的版本不同） |
 | **結構性離線** | `--network none` 下跑完 Stage 1／2；驗無 DB 環境變數、唯讀掛載 |
-| **跨日驗收** | ⛔ D 日產 bundle 並跑，**D+1 日載入同一份再跑**，輸入指紋與逐列結果相同 |
+| **跨日驗收** | ⛔ **D 日載入已凍結的 bundle 執行**，**D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。⚠️ **⛔ 不是「D 日產 bundle」**（2026-09-16 更正）——bundle 已凍結且⛔ 不得重產，重產出來的是**另一份**輸入（見十九的實證） |
 
 ##### 十二-B、自動化與手動驗證的界線（v23 裁決）
 
@@ -2147,7 +2208,11 @@ Stage 0／1／2 或那兩支腳本，而 Stage 0 讀 live 與 D+1 的離線 repl
 那份再也產不出來，所以上表的差異證據先記在這裡。
 
 ⚠️ **跨日驗收的基準日因此重設**：選定的 bundle 是 2026-09-11 產的，
-「逐列結果跨日相同」要以**今天為 D 日**、**2026-09-12 為 D+1**。
+當時**原訂**以 2026-09-11 為 D 日、2026-09-12 為 D+1。
+⚠️ **⛔ 那個窗口已過且未執行**（2026-09-16 更正）：實際的 D／D+1 依 I-074 的正式流程
+另行安排，見 [`development-workflow.md`](./development-workflow.md)
+「I-074 Stage 1 的正式執行程序」與本檔 I-074 的「正式 scan 的計次裁決」。
+⚠️ 這⛔ **不影響 bundle 的有效性**——它已凍結並進版控，D／D+1 都是**載入**它，⛔ 不重產。
 
 **尚未完成**：條件 2 的後半（逐列結果跨日相同）與條件 3 的正式實測。
 

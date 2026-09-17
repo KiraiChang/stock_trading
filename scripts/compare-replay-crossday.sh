@@ -59,10 +59,13 @@ IDENTITY="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage1/run_ide
 python3 "$PYTHON_DIR/scripts/validate-i074-run-identity.py" "$IDENTITY" \
     --expect-image-id "$IMAGE_ID" >/dev/null
 
-D_ABS="$(cd "$(dirname "$D")" && pwd)/$(basename "$D")"
-D1_ABS="$(cd "$(dirname "$D1")" && pwd)/$(basename "$D1")"
+# ⚠️ `--d`／`--d1` 是**輸入**，⛔ 進 Docker 前必須確定是既有檔案。
+replay_args_require_file "$D" --d
+replay_args_require_file "$D1" --d1
+D_ABS="$(replay_args_abs_path "$D" --d)"
+D1_ABS="$(replay_args_abs_path "$D1" --d1)"
 mkdir -p "$OUT"; OUT_ABS="$(cd "$OUT" && pwd)"
-ID_ABS="$(cd "$(dirname "$IDENTITY")" && pwd)/$(basename "$IDENTITY")"
+ID_ABS="$(replay_args_abs_path "$IDENTITY" "run identity")"
 
 WORKTREE="$(mktemp -d)"
 trap 'rm -rf "$WORKTREE"' EXIT

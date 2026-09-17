@@ -51,7 +51,7 @@ IMAGE_ID="${REPLAY_IMAGE_ID:-}"
 [ -z "${PY_IMAGE:-}" ] || { echo "ERROR: REPLAY_IMAGE_ID 與 PY_IMAGE ⛔ 不可同時設定。" >&2; exit 1; }
 docker image inspect "$IMAGE_ID" >/dev/null 2>&1 || { echo "ERROR: image $IMAGE_ID 不在本機。" >&2; exit 1; }
 
-mkdir -p "$(dirname "$ROOT")"; ROOT_ABS="$(cd "$(dirname "$ROOT")" && pwd)/$(basename "$ROOT")"
+mkdir -p "$(dirname "$ROOT")"; ROOT_ABS="$(replay_args_abs_path "$ROOT" --source-root)"
 MOUNTS=(-v "$(dirname "$ROOT_ABS")":"$(dirname "$ROOT_ABS")")
 CMD_EXTRA=()
 
@@ -70,15 +70,17 @@ else
   # ⚠️ ⛔ 固定由 XDG 推導，⛔ 沒有覆寫參數。
   IDENTITY="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage1/run_identity.json"
   [ -f "$IDENTITY" ] || { echo "ERROR: 找不到 run identity：$IDENTITY" >&2; exit 1; }
-  ID_ABS="$(cd "$(dirname "$IDENTITY")" && pwd)/$(basename "$IDENTITY")"
+  ID_ABS="$(replay_args_abs_path "$IDENTITY" "run identity")"
   python3 "$PYTHON_DIR/scripts/validate-i074-run-identity.py" "$ID_ABS" \
       --expect-image-id "$IMAGE_ID" >/dev/null
   # ⚠️ **same-path 唯讀掛載** ＋ 由本腳本注入 `--run-identity`。
   MOUNTS+=(-v "$ID_ABS":"$ID_ABS":ro)
   CMD_EXTRA=(--run-identity "$ID_ABS")
+  # ⚠️ 每份 `--source` 都是**輸入**，⛔ 進 Docker 前必須確定是既有檔案。
   for item in "${SOURCES[@]}"; do
     path="${item#*=}"
-    abs="$(cd "$(dirname "$path")" && pwd)/$(basename "$path")"
+    replay_args_require_file "$path" "--source ${item%%=*}"
+    abs="$(replay_args_abs_path "$path" "--source ${item%%=*}")"
     MOUNTS+=(-v "$abs":"$abs":ro)
     CMD_EXTRA+=(--source "${item%%=*}=$abs")
   done

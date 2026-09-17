@@ -78,6 +78,16 @@ tar -C "$REPO_ROOT/python" \
 # 現在 smoke 驗的是**真實 candidate**；合成資料自然零命中時，**空 cohort 是合法結果**。
 git -C "$SCRATCH" add -A -N >/dev/null
 git -C "$SCRATCH" diff --binary HEAD > "$WORK/tooling.patch"
+# ⚠️ **工作樹乾淨時 patch 是空的**（剛 commit 完就會這樣），而 `git apply` 對空輸入會報
+# `error: unrecognized input`——⛔ 那不是失敗，是「這一輪沒有 tooling 變更」。
+# `run-replay-offline.sh` 本來就用 `if [ -n "$patch_file" ]` 處理這件事
+# （空 patch 時 `tooling_patch_sha256` 就是空字串的 SHA-256），smoke 要跟它一致。
+if [ -s "$WORK/tooling.patch" ]; then
+  TOOLING_PATCH_ARG="$WORK/tooling.patch"
+else
+  echo "  note 工作樹與 HEAD 相同——本輪沒有 tooling patch（⛔ 不是錯誤）" >&2
+  TOOLING_PATCH_ARG=""
+fi
 
 # ── 2-B：patch 必須忠實表達 scratch 的內容（含**刪除**） ──────────────────
 # ⚠️ 這一條是 false pass 的守門：把 patch 套到一份乾淨的 HEAD worktree 上，結果必須與
@@ -122,7 +132,7 @@ VERIFYPY
 
 VERIFY="$WORK/verify"
 git -C "$REPO_ROOT" worktree add --detach "$VERIFY" HEAD >/dev/null 2>&1
-git -C "$VERIFY" apply --index "$WORK/tooling.patch"
+[ -n "$TOOLING_PATCH_ARG" ] && git -C "$VERIFY" apply --index "$TOOLING_PATCH_ARG"
 if python3 "$WORK/verify_patch.py" "$SCRATCH" "$VERIFY"; then
   pass "tooling patch 忠實表達工作樹（含刪除）"
 else
@@ -133,7 +143,7 @@ git -C "$REPO_ROOT" worktree remove --force "$SCRATCH" >/dev/null 2>&1
 
 # ── ③ Stage 1（after 版本） ───────────────────────────────────────────────
 echo "==> Stage 1（after）"
-if TOOLING_PATCH="$WORK/tooling.patch" AFTER_REF=HEAD \
+if TOOLING_PATCH="$TOOLING_PATCH_ARG" AFTER_REF=HEAD \
    "$REPO_ROOT/scripts/run-replay-offline.sh" \
      --bundle "$BUNDLE_ROOT/$BUNDLE_ID" --output-dir "$STAGE1_OUT" \
      --before-ref HEAD > "$WORK/stage1.log" 2>&1; then
@@ -152,7 +162,7 @@ done
 
 # ── ④ Stage 2（before 版本） ──────────────────────────────────────────────
 echo "==> Stage 2（before）"
-if TOOLING_PATCH="$WORK/tooling.patch" AFTER_REF=HEAD \
+if TOOLING_PATCH="$TOOLING_PATCH_ARG" AFTER_REF=HEAD \
    "$REPO_ROOT/scripts/run-replay-offline.sh" \
      --bundle "$BUNDLE_ROOT/$BUNDLE_ID" --output-dir "$STAGE2_OUT" \
      --before-ref HEAD \

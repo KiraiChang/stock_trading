@@ -184,3 +184,32 @@ replay_args_tooling_patch_sha256() {
   fi
   git -C "$worktree" diff --binary "$base_commit" | sha256sum | cut -d' ' -f1
 }
+
+# ⚠️ **把 host 路徑轉成絕對路徑，⛔ 目錄不存在時硬失敗**。
+# ⛔ 不可再用裸的 `$(cd "$(dirname "$p")" && pwd)/$(basename "$p")`：`cd` 失敗時
+# command substitution 只是回空字串，於是 `/run_identity.json` 這種**看起來完全合法**
+# 的絕對路徑會一路傳進 `-v` 掛載與容器 argv，最後的錯誤訊息完全指不到真正的原因。
+# ⚠️ **本函式⛔ 只保證「父目錄存在」，⛔ 不保證「檔案存在」**——那是刻意的：
+# evidence root 這類**輸出**路徑本來就允許尚未存在。**必要的輸入檔要由 caller 自己 `-f` 驗**
+# （見 `replay_args_require_file`）。⛔ 漏驗的後果不是「早點報錯」而已：實測 `docker -v`
+# 會把不存在的來源**建成 root 擁有的目錄**留在 host 上，錯誤延後到容器內才爆。
+replay_args_abs_path() {
+  local p="$1" label="${2:-路徑}" dir
+  dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd)" || dir=""
+  if [ -z "$dir" ]; then
+    echo "ERROR: $label 的所在目錄不存在：$(dirname "$p")" >&2
+    return 1
+  fi
+  printf '%s/%s\n' "$dir" "$(basename "$p")"
+}
+
+# ⚠️ **必要輸入檔的 fail-closed 檢查**：在組 `docker -v` **之前**呼叫。
+# ⛔ 不可省略——`docker -v` 對不存在的來源會自己建目錄（實測是 root 擁有，host 上還刪不掉），
+# 於是「檔名打錯」會變成容器內「不是檔案」這種指不到原因的錯誤。
+replay_args_require_file() {
+  local p="$1" label="${2:-輸入檔}"
+  if [ ! -f "$p" ]; then
+    echo "ERROR: $label 必須是既有檔案：$p" >&2
+    return 1
+  fi
+}

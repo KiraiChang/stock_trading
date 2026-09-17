@@ -453,6 +453,26 @@ else
 fi
 rm -rf "$I074_TD"
 
+# ⚠️ **建立 run identity 的失敗⛔ 不得被吞掉**。
+# 這一步失敗（例如剛 docker build 完、host 記憶體吃緊）而 rc 沒被檢查時，identity
+# 不會存在，後續被測腳本整支 exit 非零，於是**下游出現一整排看似隨機的斷言失敗**
+# ——真正的原因卻因為 `2>&1 >/dev/null` 完全看不到。實例見 docs/issue.md I-074。
+ensure_identity() {
+  local xdg="$1" bundle="$2" image="$3" label="$4" err rc
+  err="$(XDG_DATA_HOME="$xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
+      --bundle "$bundle" --image-id "$image" 2>&1 >/dev/null)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "$label：建立 run identity 失敗（rc=$rc）——以下斷言的失敗都源自這裡"
+    printf '%s\n' "$err" | sed 's/^/    /' >&2
+    return 1
+  fi
+  if [ ! -f "$xdg/stock_trading/i074_stage1/run_identity.json" ]; then
+    fail "$label：ensure 回 0 但 identity 檔不存在"
+    return 1
+  fi
+  return 0
+}
+
 # ── 12-A：comparator 的 argv／mount／ownership ──────────────────────────────
 # ⚠️ **呼叫被測腳本時要 `env -u PY_IMAGE`**：`PY_IMAGE` 只用來查剛建好的 image ID，
 # 而被測腳本**刻意禁止** `PY_IMAGE` 與 `REPLAY_IMAGE_ID` 併用（兩個 image 來源）。
@@ -465,8 +485,7 @@ CMP_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
 if [ -n "$CMP_IMG" ] && [ -d "$CMP_BUNDLE" ]; then
   CMP_ID="$CMP_TD/xdg/stock_trading/i074_stage1/run_identity.json"
   # ⚠️ 覆寫 `XDG_DATA_HOME`——⛔ 沒有「只給測試用」的路徑參數（那是強制不了的後門）。
-  XDG_DATA_HOME="$CMP_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
-      --bundle "$CMP_BUNDLE" --image-id "$CMP_IMG" >/dev/null 2>&1
+  ensure_identity "$CMP_TD/xdg" "$CMP_BUNDLE" "$CMP_IMG" comparator || true
   : > "$CMP_TD/d.json"; : > "$CMP_TD/d1.json"
 
   set +e
@@ -505,6 +524,13 @@ print("\n".join(fx))' "$CMP_FIXTURE")"
       pass "same-path :ro 掛載 $(basename "$target")"
     else
       fail "$(basename "$target") 不是 same-path :ro 掛載"
+      # ⚠️ **失敗要印出可比對的證據**——⛔ 不能只靠重跑就宣告收斂：
+      # 這條曾出現過「完整跑失敗、單獨重跑通過」的非決定性結果。
+      echo "    預期 mount : $target:$target:ro" >&2
+      echo "    實際 -v    :" >&2
+      printf '%s\n' "$CMP_OUT" | grep -A1 -x -- '-v' | grep -v '^-v$\|^--$' | sed 's/^/      /' >&2
+      echo "    dry-run 輸出行數: $(printf '%s\n' "$CMP_OUT" | wc -l)" >&2
+      echo "    CMP_IMG=$CMP_IMG CMP_ID 存在=$( [ -f "$CMP_ID" ] && echo yes || echo NO )" >&2
     fi
   done
 
@@ -517,6 +543,36 @@ print("\n".join(fx))' "$CMP_FIXTURE")"
   rc=$?
   set -e
   [ "$rc" -ne 0 ] && pass "使用者傳入 --run-identity 被拒絕" || fail "使用者傳入 --run-identity 竟然通過"
+
+  # ⚠️ **路徑轉絕對值⛔ 不得靜默退化**：舊寫法在目錄不存在時會算出 `/d.json` 這種
+  # 看似合法的路徑並照樣掛載。⚠️ 這裡**直接測 helper**——caller 端的 `-f` 會更早攔下，
+  # 所以⛔ 不能透過 caller 驗這條。
+  set +e
+  ABS_OUT="$(bash -c '. "$1/scripts/lib/replay-args.sh"; replay_args_abs_path "$2" --demo' \
+      _ "$REPO_ROOT" "$CMP_TD/no-such-dir/d.json" 2>"$CMP_TD/abs.err")"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && grep -q "所在目錄不存在" "$CMP_TD/abs.err" && [ -z "$ABS_OUT" ]; then
+    pass "abs_path：目錄不存在 → 非零且⛔ 不吐出 /d.json"
+  else
+    fail "abs_path 目錄不存在：rc=$rc stdout=[$ABS_OUT] 首行=$(head -1 "$CMP_TD/abs.err")"
+  fi
+
+  # ⚠️ **父目錄存在但檔案不存在**也要 fail-closed。⛔ 不擋的話 `docker -v` 會把來源
+  # **建成 root 擁有的目錄**（實測）留在 host 上，錯誤延後到容器內才爆。
+  set +e
+  MISS_ERR="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$CMP_IMG" XDG_DATA_HOME="$CMP_TD/xdg" \
+      "$REPO_ROOT/scripts/compare-replay-crossday.sh" \
+      --d "$CMP_TD/typo.json" --d1 "$CMP_TD/d1.json" --output-dir "$CMP_TD/out4" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$MISS_ERR" | grep -q "必須是既有檔案"; then
+    pass "--d 檔名打錯（父目錄存在）→ 明確錯誤"
+  else
+    fail "--d 檔名打錯：rc=$rc 首行=$(printf '%s' "$MISS_ERR" | head -1)"
+  fi
+  [ ! -e "$CMP_TD/typo.json" ] && pass "被拒後 host 上⛔ 沒有被 docker 建出殘留" \
+    || fail "host 上出現殘留：$CMP_TD/typo.json"
 elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
   # ⚠️ 由 `python/scripts/test.sh` 呼叫時 image **剛建好**——找不到代表環境有問題，
   # ⛔ 不得靜默 skip（那正是這幾段測試長期沒被執行到的原因）。
@@ -535,8 +591,7 @@ S1_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
 
 if [ -n "$S1_IMG" ] && [ -d "$S1_BUNDLE" ]; then
   S1_ID="$S1_TD/xdg/stock_trading/i074_stage1/run_identity.json"
-  XDG_DATA_HOME="$S1_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
-      --bundle "$S1_BUNDLE" --image-id "$S1_IMG" >/dev/null 2>&1
+  ensure_identity "$S1_TD/xdg" "$S1_BUNDLE" "$S1_IMG" "stage 1" || true
   set +e
   S1_OUT="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$S1_IMG" XDG_DATA_HOME="$S1_TD/xdg" \
       "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle "$S1_BUNDLE" \
@@ -673,8 +728,7 @@ FIN_IMG="$(docker image inspect "${PY_IMAGE:-stock-trading-python-test:latest}" 
 FIN_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
 
 if [ -n "$FIN_IMG" ] && [ -d "$FIN_BUNDLE" ]; then
-  XDG_DATA_HOME="$FIN_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
-      --bundle "$FIN_BUNDLE" --image-id "$FIN_IMG" >/dev/null 2>&1
+  ensure_identity "$FIN_TD/xdg" "$FIN_BUNDLE" "$FIN_IMG" finalizer || true
   FIN_ID="$FIN_TD/xdg/stock_trading/i074_stage1/run_identity.json"
   mkdir -p "$FIN_TD/src"
   FIN_SRC_ARGS=()
@@ -718,6 +772,29 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' 
     fail "finalizer normal argv 與 fixture 不符"
     diff <(printf '%s\n' "$FIN_EXPECTED") <(printf '%s\n' "$FIN_ACTUAL") >&2 || true
   fi
+
+  # ⚠️ 九份 `--source` 任一不存在就要 fail-closed（⛔ 同樣不能讓 docker 建出目錄）。
+  FIN_MISS_ARGS=(); FIN_MISS_PATH=""
+  for a in "${FIN_SRC_ARGS[@]}"; do
+    case "$a" in
+      d1/cohort_manifest.json.gz=*) FIN_MISS_PATH="$FIN_TD/src/typo_missing"
+                                    FIN_MISS_ARGS+=("d1/cohort_manifest.json.gz=$FIN_MISS_PATH") ;;
+      *) FIN_MISS_ARGS+=("$a") ;;
+    esac
+  done
+  set +e
+  FIN_MISS_ERR="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$FIN_IMG" XDG_DATA_HOME="$FIN_TD/xdg" \
+      "$REPO_ROOT/scripts/finalize-evidence.sh" --evidence-root "$FIN_TD/root2" \
+      "${FIN_MISS_ARGS[@]}" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && printf '%s\n' "$FIN_MISS_ERR" | grep -q "必須是既有檔案"; then
+    pass "finalizer：--source 指向不存在的檔案 → 明確錯誤"
+  else
+    fail "finalizer --source 不存在：rc=$rc 首行=$(printf '%s' "$FIN_MISS_ERR" | head -1)"
+  fi
+  [ ! -e "$FIN_MISS_PATH" ] && pass "finalizer 被拒後 host 上⛔ 沒有殘留" \
+    || fail "host 上出現殘留：$FIN_MISS_PATH"
 
   # ⛔ **模式衝突**：recovery ⛔ 不接受 --source。
   set +e

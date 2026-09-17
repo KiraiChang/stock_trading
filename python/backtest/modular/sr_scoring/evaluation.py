@@ -3003,6 +3003,7 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         load_bundle,
         prepare_output_dir,
         publish_artifacts,
+        write_canonical_atomic,
         build_candidate_mismatch,
         row_key,
         validate_after_artifact,
@@ -3011,7 +3012,7 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         validate_cohort_manifest,
         validate_diagnostics,
     )
-    from .replay_bundle import canonical_json_bytes, sha256_hex
+    from .replay_bundle import canonical_json_bytes, sha256_file, sha256_hex
 
     loaded = load_bundle(args.bundle)
     # ⚠️ **Stage 2 的輸入檔要在跑 replay 之前就完整驗過**——結構、唯一性、候選欄位、
@@ -3171,7 +3172,10 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
             provenance=provenance,
             rows=rows,
         )
-        after_sha = sha256_hex(canonical_json_bytes(artifact))
+        # ⚠️ **串流寫出＋增量算 SHA**——⛔ 不要改回「先 canonical_json_bytes 再 publish」：
+        # 那會讓整份 JSON 同時以 str 與 bytes 存在記憶體裡（13,417 列實測**單次峰值
+        # 275 MiB**），正是 2026-09-17 那次 OOM（anon-rss 492 MiB）的成因。
+        after_sha = write_canonical_atomic(output_dir, AFTER_ARTIFACT_NAME, artifact)
         cohort = candidate_keys(rows)
         assert_unique_keys(cohort, "候選列")
         manifest = build_cohort_manifest(
@@ -3179,8 +3183,7 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
             keys=cohort, generated_at=generated_at, provenance=provenance,
         )
         # ⚠️ 順序就是契約：`cohort_manifest.json` **最後**才發布。
-        publish_artifacts(output_dir, [(AFTER_ARTIFACT_NAME, artifact),
-                                       (COHORT_MANIFEST_NAME, manifest)])
+        publish_artifacts(output_dir, [(COHORT_MANIFEST_NAME, manifest)])
         return {
             "stage": 1,
             "bundle_id": loaded.bundle_id,
@@ -3225,7 +3228,14 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         after_artifact_sha256=after_sha, generated_at=generated_at,
         provenance=provenance, rows=comparison_rows,
     )
-    comparison_sha = sha256_hex(canonical_json_bytes(comparison))
+    # ⚠️ 串流寫出（理由同 Stage 1 的 after artifact）。
+    comparison_sha = write_canonical_atomic(output_dir, COMPARISON_ARTIFACT_NAME, comparison)
+    # ⚠️ **落地後重新讀檔驗一次**——⛔ 不是拿同一次計算的值自己比自己。
+    # 舊寫法是「序列化兩次再比 hash」，改成串流後那種比法已無意義；
+    # 改讀磁碟內容重算，驗的是**真正落地的 bytes**，比原本更強。
+    # ⚠️ 這一步要排在 `report.json` **之前**：報告存在即代表它指向的證據已完整。
+    if sha256_file(output_dir / COMPARISON_ARTIFACT_NAME) != comparison_sha:
+        raise ArtifactError("comparison artifact 落地後的 SHA-256 與寫入時不符")
     # ⚠️ 用 **bundle 記下的** `report_max_rows`：Stage 1／2 的參數清單刻意不含它，
     # 人讀報告的截斷長度是 Stage 0 當下就決定好的，⛔ 不讓消費端各跑各的。
     report = build_report(
@@ -3233,11 +3243,8 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
         comparison_sha256=comparison_sha, generated_at=generated_at,
         rows=comparison_rows, report_max_rows=loaded.manifest.get("report_max_rows"),
     )
-    # ⚠️ 先驗 comparison 的 hash，`report.json` **最後**才發布。
-    hashes = publish_artifacts(output_dir, [(COMPARISON_ARTIFACT_NAME, comparison),
-                                            (REPORT_NAME, report)])
-    if hashes[COMPARISON_ARTIFACT_NAME] != comparison_sha:
-        raise ArtifactError("comparison artifact 落地後的 SHA-256 與產生時不符")
+    hashes = publish_artifacts(output_dir, [(REPORT_NAME, report)])
+    hashes[COMPARISON_ARTIFACT_NAME] = comparison_sha
     return {
         "stage": 2,
         "bundle_id": loaded.bundle_id,

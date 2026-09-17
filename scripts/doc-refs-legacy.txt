@@ -1,0 +1,119 @@
+# check-doc-refs.py 的 legacy 基準線：**既有**的 line-only 引用（無緊鄰識別符可比對）。
+#
+# ⚠️ 這些只擋得住「檔案消失／行號超出檔案長度／區間終點不合法」，
+#   ⛔ 擋不住「行號漂到別的地方」。
+# ⛔ **只准變短，⛔ 不准變長**——新引用一律要寫成「識別符緊鄰行號」的格式
+#   （見 docs/development-workflow.md「文件引用原始碼的寫法」）。
+# ⚠️ **數量也算數**：`x4` 代表該 key 在那份文件裡有 4 處；新增第 5 處會失敗。
+# ⚠️ 基準線裡**多出來的份額**同樣會讓檢查失敗——改掉引用時記得順手減。
+#
+# 格式：<docs 檔名>|<原始碼路徑>:<行號>[ x<次數>]
+architecture.md|candle_gap_detection.go:388
+architecture.md|candle_gap_detection.go:537
+architecture.md|candle_gap_detection.go:63
+architecture.md|candle_gap_detection.go:686
+architecture.md|internal/scheduler/scheduler.go:305
+architecture.md|internal/scheduler/scheduler.go:316
+architecture.md|logging/logger.go:127
+evaluation-universe-selection-plan.md|market/finmind.go:182
+issue.md|baseline_check.py:142
+issue.md|baseline_check.py:172
+issue.md|baseline_check.py:230
+issue.md|baseline_check.py:243
+issue.md|baseline_check.py:3
+issue.md|baseline_check.py:91
+issue.md|db.py:166
+issue.md|db.py:20
+issue.md|db.py:94
+issue.md|decision_engine.py:1079
+issue.md|decision_engine.py:1086
+issue.md|decision_engine.py:1098
+issue.md|decision_engine.py:205
+issue.md|decision_engine.py:2678
+issue.md|decision_engine.py:2982
+issue.md|evaluation.py:1505
+issue.md|evaluation.py:2298
+issue.md|evaluation.py:2467 x2
+issue.md|evaluation.py:287
+issue.md|evaluation.py:303
+issue.md|evaluation.py:3403 x2
+issue.md|evaluation.py:53 x3
+issue.md|exchange_reference.go:296
+issue.md|exchange_reference.go:357
+issue.md|fetcher.go:245
+issue.md|internal/scheduler/scheduler.go:1193
+issue.md|internal/scheduler/scheduler.go:1215
+issue.md|lifecycle_engine.py:136
+issue.md|lifecycle_engine.py:172
+issue.md|lifecycle_engine.py:175
+issue.md|lifecycle_engine.py:187
+issue.md|migrations/postgres/001_create_candles.sql:9
+issue.md|migrations/postgres/066_evaluation_universe.sql:29
+issue.md|migrations/postgres/067_zone_identity.sql:31
+issue.md|pipeline.py:50
+issue.md|python/backtest/modular/sr_scoring/zone_builder.py:67
+issue.md|python/baseline_check.py:3
+issue.md|python/db.py:374
+issue.md|scoring.py:216 x2
+issue.md|scripts/verify-regression-baseline.sh:5
+issue.md|selection_report.py:119 x2
+issue.md|selection_report.py:16
+issue.md|selection_report.py:686
+issue.md|selection_report.py:717 x4
+issue.md|sr_zones.go:1947
+issue.md|store/model.go:951
+issue.md|zone_builder.py:405 x2
+sr-zone-scoring.md|decision_engine.py:1450
+sr-zone-scoring.md|decision_engine.py:516
+todo.md|SRZones.svelte:2154
+todo.md|SRZones.svelte:596
+todo.md|SRZones.svelte:598
+todo.md|api/handler/scheduler.go:108
+todo.md|cmd/server/main.go:160
+todo.md|cmd/server/main.go:72
+todo.md|config.go:332
+todo.md|decision_engine.py:1042
+todo.md|decision_engine.py:1826
+todo.md|decision_engine.py:305
+todo.md|decision_engine.py:315
+todo.md|decision_engine.py:519
+todo.md|decision_engine.py:527
+todo.md|evaluation.py:2167
+todo.md|evaluation.py:256
+todo.md|evaluation.py:308
+todo.md|evaluation.py:379
+todo.md|evaluation.py:396
+todo.md|evaluation.py:582
+todo.md|evaluation.py:624 x2
+todo.md|evaluation.py:635
+todo.md|evaluation.py:92
+todo.md|handler/market.go:27
+todo.md|handler/scheduler.go:64
+todo.md|handler/sr_zones.go:524
+todo.md|internal/market/yahoo_dividend.go:21
+todo.md|internal/scheduler/scheduler.go:1063
+todo.md|internal/scheduler/scheduler.go:116
+todo.md|internal/scheduler/scheduler.go:1436 x2
+todo.md|internal/scheduler/scheduler.go:370
+todo.md|internal/scheduler/scheduler.go:409
+todo.md|internal/scheduler/scheduler.go:429
+todo.md|internal/scheduler/scheduler.go:82
+todo.md|job_error.go:26
+todo.md|job_run_repo.go:112
+todo.md|job_run_repo.go:132
+todo.md|migrations/mysql/048_create_stock_symbols.sql:16
+todo.md|migrations/mysql/048_create_stock_symbols.sql:20
+todo.md|migrations/postgres/048_create_stock_symbols.sql:12
+todo.md|python/backtest/modular/sr_scoring/zone_builder.py:43
+todo.md|python/db.py:361
+todo.md|selection_report.py:647
+todo.md|server.go:129
+todo.md|server.go:163
+todo.md|sqlite.go:17
+todo.md|sqlite.go:18
+todo.md|sqlite.go:9
+todo.md|sr_zone_repo.go:558
+todo.md|stock_symbol_repo.go:219
+todo.md|store/sqlite.go:20 x2
+todo.md|twse_isin.go:233
+todo.md|zone_builder.py:43

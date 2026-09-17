@@ -765,6 +765,20 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' 
     pass "finalizer normal：identity 以 same-path :ro 掛載"
   else
     fail "finalizer normal 的 identity 不是 same-path :ro 掛載"
+    # ⚠️ **失敗要印出可比對的證據**——⛔ 不能只靠重跑收斂。
+    echo "    預期 mount : $FIN_ID:$FIN_ID:ro" >&2
+    echo "    實際 -v 值 :" >&2
+    printf '%s\n' "$FIN_OUT" | grep -- ':ro$' | sed 's/^/      /' >&2
+    echo "    identity 檔存在=$( [ -f "$FIN_ID" ] && echo yes || echo NO )" >&2
+    # ⚠️ **完整輸出落地**——這條斷言已經非決定性失敗兩次（2026-09-17 兩次都在完整
+    # `python/scripts/test.sh` 流程中、單獨重跑都通過）。⛔ 現場只有一次，要留得下來。
+    _dump="${TMPDIR:-/tmp}/i074-finalizer-fail.$$.txt"
+    { echo "=== env ==="; echo "TMPDIR=${TMPDIR:-}"; echo "PWD=$PWD"; echo "FIN_TD=$FIN_TD";
+       echo "readlink -f FIN_TD=$(readlink -f "$FIN_TD")"; echo "=== 完整 dry-run 輸出 ===";
+       printf '%s\n' "$FIN_OUT"; } > "$_dump" 2>&1
+    echo "    ⚠️ 完整輸出已存到：$_dump" >&2
+    echo "    realpath(FIN_ID)=$(readlink -f "$FIN_ID" 2>/dev/null || echo n/a)" >&2
+    echo "    argv 裡的 --run-identity：$(printf '%s\n' "$FIN_OUT" | grep -A1 -x -- '--run-identity' | tail -1)" >&2
   fi
   if [ "$FIN_ACTUAL" = "$FIN_EXPECTED" ]; then
     pass "finalizer normal argv 與 fixture 逐 token 相同"

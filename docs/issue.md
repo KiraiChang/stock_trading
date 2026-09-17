@@ -232,6 +232,33 @@ distinct 日期算的——於是那個窗會被池內成員自己定義，池�
 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)
 「重跑選池前必須先回補池外標的」。
 
+##### 2026-09-17 回補成本重算（live 唯讀量測）
+
+⚠️ **成本比 2026-08-18 記錄的那次少一半**——當時要補 706 檔，現在是 **377 檔**：
+
+| 日 K 最後一天 | 檔數 | 位置 |
+|---|---|---|
+| 2026-09-15 | 126 | ✅ 池內（新鮮） |
+| **2026-08-12** | **364** | ❌ 池外 |
+| 2026-08-11 | 1 | ❌ 池外 |
+| 2026-08-05 | 11 | ❌ 池外 |
+| 2026-04-12 | 1 | ❌ 池外 |
+
+（母體＝`stock_symbols` 裡 `is_listed AND security_type='股票'` 共 503 檔。）
+
+| 項目 | 值 |
+|---|---|
+| 要回補的檔數 | **377** |
+| 落後天數 | 約 **36 天**（2026-08-12 → 09-17），約 24 個交易日 |
+| 速率 | FinMind **5 req/min**，每檔一次呼叫取一段區間 |
+| **預估耗時** | **約 75 分鐘**（377 ÷ 5；對照 2026-08-18 的 706 檔／2.4 小時，模型一致） |
+
+⛔ **現階段沒有更快的路徑**：`T-043`（盤後用 Yahoo 批次補日 K）**仍是「待規劃」**，
+現有的 `yahoo_quote.go` 是**盤中報價**批次（40 檔／次），⛔ 不是歷史日 K 回補。
+
+⚠️ **這 75 分鐘是 I-107 遷移的唯一硬前置**——公式已裁決為 Wilder ATR(14)，
+但重測 P33/P67 需要「資料新鮮的動態全市場母體」，而那正是本筆擋住的東西。
+
 **2026-09-10 實證：影響範圍不只「重跑選池」。** I-107 步驟 1 要在「資料新鮮、
 且套用既定資格規則的全市場股票母體」上量 SMA14 vs Wilder14（同一套規則在 2026-08-17
 得到 319 檔），實跑得到的母體只有 **125 檔、且全部都在池內**——503 檔上市股票裡
@@ -306,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待執行**（處置已定；⚠️ **2026-09-16 起 I-100 的前置阻擋已解除**——凍結 bundle 已進版控、Stage 0 的診斷欄位與 Stage 1 的程式／測試都已完成並通過 review，**只剩正式的 D／D+1 兩趟 replay**）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **待執行**（⚠️ **2026-09-17**：③ 第一次實跑被 cgroup OOM 殺掉，**根因已定位並修正**——尾段整份 JSON 一次成形，序列化增量 **+351 MiB**，改串流後降到 **+2 MiB**，見下方「③ 第一次執行：OOM 失敗」與「修正」。⚠️ **D／D+1 兩趟都要重跑**）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -336,7 +363,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 #### replay 母體是 candles，不是 `stock_sr_zone_analyses`（2026-09-01 更正並收斂）
 
 **本筆從立案到 2026-08-31 的「母體太小」推理，量錯了對象。**
-`run_decision_replay()`（`evaluation.py:2254`）的資料來源是 `_load_db_sources()`——
+`run_decision_replay()`（`evaluation.py`）的資料來源是 `_load_db_sources()`——
 **`candles`**；整個 `python/` 沒有任何一處 reference `stock_sr_zone_analyses`（grep 0 命中）。
 決定 cohort 的是**每檔日 K 根數**與 `replay_max_rows`（總預算跨股票均分，
 `MIN_ROWS_PER_SYMBOL = 5`）。
@@ -546,8 +573,8 @@ before**，⛔ 不是舊文的「一趟 after ＋ 一趟 before」。
 | 速度 | 200 列／165.3 秒 ＝ **0.826 秒／列** | 比舊估的 0.85 **快 2.8%** |
 | 全量推算 | **3.08 小時／趟**；D＋D+1 共 **6.16 小時** | 落在上表 3.7 小時保守上界內 |
 
-⚠️ **容量結論：③ 跑得動**——峰值離 cgroup 上限與 host low watermark 都有餘裕，
-⛔ 不需要調降 `MEM`（調高更是錯的，見 `development-workflow.md`「`MEM` 是上限，不是預留」）。
+⛔ **上面那句「容量結論：③ 跑得動」已被 2026-09-17 的實跑推翻**——見下方
+「③ 第一次執行：OOM 失敗」。⚠️ **probe 的峰值⛔ 不能外推到全量。**
 
 ⚠️ 執行時踩到 [I-115](#i-115stage-1-強制要求---before-ref但那一趟根本不用它六步程序漏寫正式執行第一步就失敗)：
 六步程序的 ②③ 漏寫必填的 `--before-ref`，文件已補 `ecbc141^`。
@@ -571,11 +598,11 @@ replay row 目前拿不到 lifecycle 真正使用的判斷輸入，用相近欄�
 
 | 欄位 | 現況 | 取得方式 |
 |---|---|---|
-| **decision primary zone** | ⚠️ **已經有了，只是 replay 取錯顆** | `build_decision_summary()` 早就輸出 `decision_summary["primary_zone"]`（`decision_engine.py:2962`，來源是 `_pick_primary_zone()`）；`evaluation.py` 卻用 `_historical_zone_score_summary` 的排序第一筆（`:773`）。⚠️ **2026-09-11 修正：「不需要動 `decision_engine.py`」不成立**——`_decision_summary_zone()`（`:112`）**沒有 `relative_volume`**，直接切過去會讓 `_volume_strength_bucket()` 靜默退化成 unavailable，所以要在那裡補一個欄位；且 `evaluation.py` 有**三個** consumer 必須一起切（replay row `:1519`／`daily_confirmation_context` `:1078`／`daily_confirmation_outcome` `:1215`） |
-| `price_follow_through_state` / `momentum_confirmation_state` | ✅ 已在 replay row | `evaluation.py:968-969` 的 `daily_price_follow_through` / `daily_momentum_confirmation` |
+| **decision primary zone** | ⚠️ **已經有了，只是 replay 取錯顆** | `build_decision_summary()` 早就輸出 `decision_summary["primary_zone"]`（`decision_engine.py:2982`，來源是 `_pick_primary_zone()`）；`evaluation.py` 卻用 `_historical_zone_score_summary` 的排序第一筆（`:773`）。⚠️ **2026-09-11 修正：「不需要動 `decision_engine.py`」不成立**——`_decision_summary_zone()`（`:112`）**沒有 `relative_volume`**，直接切過去會讓 `_volume_strength_bucket()` 靜默退化成 unavailable，所以要在那裡補一個欄位；且 `evaluation.py` 有**三個** consumer 必須一起切（replay row `:1519`／`daily_confirmation_context` `:1009`／`daily_confirmation_outcome` `:1155`） |
+| `price_follow_through_state` / `momentum_confirmation_state` | ✅ 已在 replay row | `evaluation.py:1034-1035` 的 `daily_price_follow_through` / `daily_momentum_confirmation` |
 | `rr_gate.qualified` | ✅ 已在 replay row | `_decision_fields_from_summary`（`:804`） |
 | `event_signal` / `structure_state` | 需補 | 自 decision summary 帶出 |
-| `clear_zone_breakout` | ❌ **拿不到** | `resolve_lifecycle()` 內的區域變數（`lifecycle_engine.py:161`），從不回傳。**由 lifecycle 層新增輸出**（診斷用） |
+| `clear_zone_breakout` | ❌ **拿不到** | `resolve_lifecycle()` 內的區域變數（`lifecycle_engine.py:172`），從不回傳。**由 lifecycle 層新增輸出**（診斷用） |
 | `continuation_price_evidence_met` | 新增 | **診斷用，不是 candidate 的定義**：三項價格證據齊備與否。**由 lifecycle 層新增輸出** |
 | `rr_decoupling_candidate` | 新增 | 定義見下方「candidate 的精確定義」。**由 decision semantic pipeline 組合**——lifecycle 拿不到 RR，組不出這個值 |
 | `action_state` | 需補 | semantic pipeline 的 `action_state`，也是 `position_action_condition.state` 的來源 |
@@ -949,9 +976,27 @@ shell 測試把實際輸出正規化後**逐 token 比對**）。
   mount**。「argv 通過、單一 mount 紅」因此完全可以並存，⛔ 不能用來反推 `CMP_OUT` 為空。
 * 有效路徑下，新 helper 與舊算法的結果**逐字相同**，mount 比對本身也沒有改動。
 
-**現況**：原始那次單一 identity mount 失敗的直接原因**仍然未知**，等待重現。
-本輪已在該斷言失敗時印出**預期 mount 與實際 `-v` token、輸出行數、`CMP_IMG`、
-identity 是否存在**，下次重現才抓得到證據。⛔ 在那之前不得以「重跑通過」收斂。
+⚠️ **2026-09-17：同型失敗第二次出現——⛔ 不是偶然。**
+
+| | 第一次 | 第二次 |
+|---|---|---|
+| 失敗斷言 | **comparator** 的 identity same-path `:ro` | **finalizer** 的 identity same-path `:ro` |
+| 情境 | 完整 `python/scripts/test.sh` | 完整 `python/scripts/test.sh` |
+| argv 逐 token 比對 | ✅ 通過 | ✅ 通過 |
+| 單獨重跑 | ✅ 全過 | ✅ 全過（連跑 3 次） |
+| 完整流程再跑 | — | ✅ 通過（⛔ 未重現） |
+
+**共同特徵**：⚠️ **兩次都是「identity」那一份**——同一段測試裡的 `--d`／`--d1`／
+`--source` 掛載都正常，只有由 `XDG_DATA_HOME` 推導、經 `ensure-i074-run-identity.py`
+建立的那一份出問題。⚠️ 而且 `ensure_identity()` 的 rc 檢查與「identity 檔存在」檢查
+**都沒有報錯**，所以⛔ 不是「identity 沒建出來」。
+
+**現況**：直接原因**仍然未知**，⛔ 兩次都沒能在可觀察的情況下重現。
+診斷已就位且**兩段都有**（第一次只加在 comparator，第二次才發現 finalizer 沒有）：
+失敗時印出**預期 mount、實際 `-v` token、identity 是否存在、`readlink -f` 的實體路徑、
+argv 裡的 `--run-identity` 值**，並把**完整 dry-run 輸出與環境（`TMPDIR`／`PWD`／
+temp 目錄的實體路徑）落地成檔案**——⚠️ 現場只有一次，⛔ 不能再讓它消失。
+⛔ **在抓到現場之前不得以「重跑通過」收斂。**
 
 ##### 調查時另外發現並修正的兩個缺陷（⚠️ 與上述偶發失敗的因果**未經證實**）
 
@@ -979,6 +1024,77 @@ identity 是否存在**，下次重現才抓得到證據。⛔ 在那之前不�
 | `python/scripts/test.sh` | **1219 passed, 1 skipped** |
 | `scripts/test-replay-args.sh` | **103 條斷言**全過（由 `python/scripts/test.sh` 以 `IMAGE_REQUIRED=1` 自動先跑） |
 | `scripts/smoke-replay-offline.sh` | 全過，`after rows=35 cohort=0 comparison=0`（⚠️ **工作區乾淨時亦然**——空 patch 的處理見上） |
+
+##### ③ 第一次執行：**OOM 失敗**（2026-09-17，⛔ 沒有產出任何 artifact）
+
+| 事實 | 值 |
+|---|---|
+| 結束碼 | **137**（128+9 ＝ SIGKILL） |
+| `dmesg` | `OOM killed process 1 (python) total-vm:1028184kB, **anon-rss:503752kB**` |
+| 被殺時 RSS | **491.9 MiB** —— 撞上 mem-guard 給的 cgroup 上限 **504m** |
+| 產出 | ⛔ **空的**——`$RUN_DIR/d/` 一個檔案都沒有 |
+| 已耗時 | 約 2.5 小時（⚠️ 全部作廢） |
+
+⚠️ **這是 container 內的 cgroup OOM**（`process 1 (python)`），⛔ 不是 host OOM killer
+砍掉呼叫端——⚠️ 兩者的處置方向相反，⛔ 不要混為一談。
+
+**根因（2026-09-17 實測定位並修正）：⛔ 不是 replay 過程累積，是最後一步整份 JSON 一次成形。**
+
+⛔ **本節初稿把成因寫成「`_replay_from_bundle()` 把每列累積在記憶體、峰值隨列數線性成長」，
+那是錯的**，並據此外推「13,417 列需要約 1.07 GB」——兩者都被實測推翻：
+
+| 證據 | 內容 |
+|---|---|
+| D 那趟跑了 **183 分鐘**才 OOM | 全量預估 185 分鐘——**幾乎跑完了才爆**，⛔ 不是中途 |
+| 過程中 RSS **穩定** | 另跑一趟量曲線（`MEM=350m`、29 分鐘、~2,100 列），RSS 一路在 **190～205 MiB**，斜率為負 |
+| 尾段序列化的實測增量 | 13,417 列（每列實測 6,898 bytes）→ JSON 88.3 MiB，而 `canonical_json_bytes()` 會讓 **str 與 bytes 兩份完整拷貝同時存在** |
+
+**獨立行程量測（同一份資料、同一個 SHA）**：
+
+| 寫法 | baseline | 峰值 | 序列化增量 |
+|---|---|---|---|
+| `canonical_json_bytes()`（舊） | 47 MiB | 398 MiB | **+351 MiB** |
+| `canonical_json_chunks()` 串流（新） | 47 MiB | 49 MiB | **+2 MiB** |
+
+⚠️ 對得起來：基礎 RSS 195 ＋ 351 ＝ **546 MiB**，而 mem-guard 給的上限是 **504m**
+——必然 OOM，被殺時的 492 MiB 正是爬升途中。修正後是 195 ＋ 2 ＝ **197 MiB**。
+
+**⛔ probe 為什麼測不到**：`PROBE_QUOTA` 固定 200，而峰值來自**尾段序列化**、
+規模隨列數走。200 列的序列化增量只有約 5 MiB，⛔ 完全反映不出 13,417 列的 351 MiB。
+⚠️ 它叫 capacity probe，卻回答不了「全量跑不跑得動」——**這個缺陷仍然存在**，
+⛔ 修好 OOM ⛔ 不等於修好 probe。
+
+#### 修正（2026-09-17）
+
+| 檔案 | 改動 |
+|---|---|
+| `replay_bundle/canonical.py` | 新增 `canonical_json_chunks()`——用 `JSONEncoder.iterencode()` 分段吐出，⛔ 不讓整份 JSON 一次成形。⚠️ 與 `canonical_json_bytes()` **共用 `_ENCODER_KWARGS`**，⛔ 不各寫一份 |
+| `replay_bundle/artifacts.py` | 新增 `write_canonical_atomic()`：串流寫入 ＋ `hashlib` 增量算 SHA ＋ 64 KiB 緩衝（19.6 萬個片段逐片 write 會讓系統呼叫爆掉）。`publish_artifacts()` 改走它 |
+| `evaluation.py` Stage 1 | `after_sha` 改由串流寫入回傳——⛔ 不再「先 `canonical_json_bytes()` 算 SHA、`publish` 時再序列化一次」 |
+| `evaluation.py` Stage 2 | 同樣改串流；原本「序列化兩次比 hash」的雙重確認改成**讀回磁碟重算**（`sha256_file`），驗的是真正落地的 bytes，比原本更強，且排在 `report.json` **之前** |
+
+⚠️ **bytes 逐字相同是整套契約的根**，由三支測試釘住（含 NaN／Inf 兩條路徑都要擋、
+temp 檔不得殘留）。**反向驗證**：把 chunks 的 `sort_keys` 改掉 → byte-identity 測試變紅、
+並連帶抓到 Stage 2 的 SHA 不符；把 cohort manifest 改成先發布 → 順序測試變紅。
+
+⚠️ 順序契約的測試也改了觀察點：原本 spy `write_atomic`，現在 spy **`os.replace`**——
+after artifact 走 `write_canonical_atomic()`、manifest 走 `publish_artifacts()`，
+但兩條路徑最後都以 `os.replace` 原子發布。盯發布動作本身，換實作也不會讓守衛失效。
+
+⛔ **本筆在容量問題解決前無法往下走**——④⑤ 都建立在「③ 有 artifact」之上。
+
+###### ⚠️ 這一次⛔ 不適用「D 之後不得 commit」的凍結窗口
+
+⛔ **否則會形成死結**：操作文件要求 D 跑完到仲裁結束之間⛔ 不得 commit（`base_commit`
+一漂跨日就判 mismatch），但這次**根本沒有 artifact 可以仲裁**，而要解決 OOM
+**一定得改程式**。兩條規則同時成立就卡死了。明訂如下：
+
+| 條款 | 內容 |
+|---|---|
+| **無 artifact 的 OOM ⛔ 不算一次正式 scan** | 「只執行一次有界定向驗證」的計次⛔ 不因本次消耗——⚠️ 它連 artifact 都沒產出，⛔ 沒有任何可判讀的結果 |
+| **凍結窗口解除** | 本次 D 作廢，⛔ 沒有任何東西需要與它對齊；修復期間**可以正常 commit** |
+| **重新開始** | 容量問題修好後，D／D+1 **兩趟都要重跑**，凍結窗口從**新的 D** 開始重新計算 |
+| **步驟 ③ 暫停** | ⛔ **在容量問題解決前，⛔ 不要再照六步程序執行 ③** |
 
 #### 正式 scan 的計次裁決（2026-09-11 使用者明文確認）
 
@@ -2267,7 +2383,7 @@ artifact 及其 SHA-256」寫進
 
 #### 現象
 
-`FetchAndStoreIntradayBatch`（`backend/internal/market/fetcher.go:76-98`）的回傳值是
+`FetchAndStoreIntradayBatch`（`backend/internal/market/fetcher.go`）的回傳值是
 `(stored int, err error)`，**沒有逐檔結果**：
 
 * 逐檔 `BulkInsert` 失敗時只 `log.Warn` 然後 `continue`（`:90-93`），**錯誤不往上傳**。
@@ -2279,12 +2395,12 @@ artifact 及其 SHA-256」寫進
 **所以問題不是「完全沒有訊號」，而是「訊號不可用」**：知道少了幾檔，
 但不知道是哪幾檔、也不知道該不該告警。
 
-而呼叫端 `runIntradayBatch`（`scheduler.go:580-586`）**只有在整批呼叫回 error 時**才
+而呼叫端 `runIntradayBatch`（`internal/scheduler/scheduler.go:627-634`）**只有在整批呼叫回 error 時**才
 `failed += len(batch)`。所以「批次成功、但其中幾檔沒寫進去」這個形狀，
 **`job_runs` 完全看不到**。
 
 ⚠️ **live 走的就是這條路**：`YAHOO_ENABLED=true`、`FINMIND_INTRADAY_ENABLED=false`，
-`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`scheduler.go:506-513`）。
+`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`internal/scheduler/scheduler.go:558-561`）。
 FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——**但那條在 live 沒有啟用**。
 
 #### 影響
@@ -2373,8 +2489,8 @@ FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——
 
 | 位置 | 演算法 | 誰在用 |
 |---|---|---|
-| `evaluation.py:287` `_atr_pct` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`（即凍結門檻的來源）** |
-| `scoring.py:216` → `indicators.py:100` `calc_atr` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
+| `evaluation.py` 的 `_atr_pct()` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`（即凍結門檻的來源）** |
+| `scoring.py:216` → `backtest/indicators.py` 的 `calc_atr()` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
 
 **同一批 K 棒上的實測差距（2026-09-02）**：
 
@@ -2406,7 +2522,7 @@ P33/P67 是拿 **SMA 基準**量的，而 runtime 的自適應 builder 用 **Wil
 另一個指標僅供獨立觀察**。兩份定義各自漂移正是這次要消滅的問題）。
 
 **錯誤 B：宣稱「pipeline 迴歸會動 `pipeline_version` 等不變量」。** 不成立——
-`pipeline_version` 是 `evaluation.py:46` 的**人工常數** `DEFAULT_PIPELINE_VERSION`。
+`pipeline_version` 是 `evaluation.py:53` 的**人工常數** `DEFAULT_PIPELINE_VERSION`。
 公式改壞而忘記升版時，pipeline_version / schema / 門檻 / timeframe **可以全部不變**。
 把它們當成迴歸的守門是假的保證。
 
@@ -2448,7 +2564,7 @@ P33/P67 是拿 **SMA 基準**量的，而 runtime 的自適應 builder 用 **Wil
 3. **`compare()["passed"]` 不受影響**（只由 B-1 決定）
 
 ⚠️ **metadata 檢查保留為 blocking contract，但不宣稱它能單獨偵測程式迴歸**——
-`pipeline_version` 是 `evaluation.py:46` 的人工常數，改壞公式而忘記升版時它不會動。
+`pipeline_version` 是 `evaluation.py:53` 的人工常數，改壞公式而忘記升版時它不會動。
 
 #### baseline schema（升版 p0 → p1）
 
@@ -2565,7 +2681,7 @@ P33/P67 是拿 **SMA 基準**量的，而 runtime 的自適應 builder 用 **Wil
   又不會被 numpy 版本的 ULP 差異誤擋。
 
 **`bucket` 怎麼比**（前一版寫「用 golden 記的門檻重算」，**沒說怎麼做，實作不出來**）：
-`volatility_bucket_from_profile()`（`zone_builder.py:401`）**不收門檻參數**，
+`volatility_bucket_from_profile()`（`zone_builder.py`）**不收門檻參數**，
 直接讀模組常數 `LOW/HIGH_VOLATILITY_THRESHOLD`。於是有兩條路，都不能單獨走：
 
 | 做法 | 問題 |
@@ -2644,7 +2760,7 @@ I-108 修正時要同步更新 golden。
 
 ⛔ **不要說它「只是理論情境」**——前一版這樣寫是錯的。`candles.close` 確實是
 `numeric(10,2) NOT NULL` 取不到 `inf`，但 **evaluation 有 `--csv` 輸入路徑**
-（`evaluation.py:2508` → `_load_csv_sources` → `load_ohlcv_csv`），CSV 可以載入 `inf`。
+（`evaluation.py:3403` → `_load_csv_sources` → `load_ohlcv_csv`），CSV 可以載入 `inf`。
 
 ⚠️ **產生 golden 時要用 `json.dump(..., allow_nan=False)`**——Python 預設會寫出
 非標準的 `NaN` / `Infinity` 字面值，那種檔案別的 JSON parser 讀不了，
@@ -2770,7 +2886,7 @@ bucket 移動與分佈）是 **B-2**，一律照三行契約處理：
 `checks[i].passed=false` → 進 `warnings` → **`compare()["passed"]` 不受影響**。
 
 ⚠️ **metadata 是 contract 檢查，不是迴歸偵測**——`pipeline_version` 是
-`evaluation.py:46` 的人工常數，改壞公式而忘記升版時它不會動。真正的迴歸偵測在 A 層。
+`evaluation.py:53` 的人工常數，改壞公式而忘記升版時它不會動。真正的迴歸偵測在 A 層。
 
 ##### 五、風險與回滾
 
@@ -2889,8 +3005,8 @@ LOW/NORMAL/HIGH = 53/49/33 變成 **75/39/21**（有一部分是全市場波動�
 
 | 位置 | 演算法 | 誰在用 |
 |---|---|---|
-| `evaluation.py:287` `_atr_pct` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`——即凍結門檻的來源** |
-| `scoring.py:216` → `indicators.py:100` `calc_atr` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
+| `evaluation.py` 的 `_atr_pct()` | **最後 14 根 true range 的算術平均** / 最後一根 close | evaluation 報表、**`selection_report.py:119`——即凍結門檻的來源** |
+| `scoring.py:216` → `backtest/indicators.py` 的 `calc_atr()` | **Wilder smoothing**：seed = `mean(tr[1:15])`，再一路平滑到第 60 根 | `_adaptive_zone_builder_profile`（runtime 自適應 builder） |
 
 同一批 K 棒的實測差距（2026-09-02，60 根切片）：
 
@@ -3272,7 +3388,7 @@ atr / inf = 0.0   →   _clean_metric(0.0) = 0.0（有限值，不會變 None）
    `atr_pct` 欄位已經是垃圾，卻沒有任何下游徵兆。
 
 ⚠️ **另一個入口：`average_range_pct` 自己也守不住 `+inf`。**
-`_volatility_profiles`（`evaluation.py:319`）算的是 `(high - low) / close`，
+`_volatility_profiles()`（`evaluation.py`）算的是 `(high - low) / close`，
 再用 `.replace([np.inf, -np.inf], np.nan).dropna()` 清理——但 `(h - l) / inf` 的結果是
 **`0.0`（有限值）**，清不掉。實測：**整段 `close` 都是 `+inf` 時
 `atr_pct` 正確回 `None`，`average_range_pct` 卻是 `0.0`，bucket 被判成 `LOW_VOLATILITY`。**
@@ -3281,7 +3397,7 @@ atr / inf = 0.0   →   _clean_metric(0.0) = 0.0（有限值，不會變 None）
 
 #### 可達性
 
-* ✅ **CSV 路徑明確可達**：`evaluation.py:2508` 的 `--csv` → `_load_csv_sources`
+* ✅ **CSV 路徑明確可達**：`evaluation.py:3403` 的 `--csv` → `_load_csv_sources`
   → `load_ohlcv_csv`，pandas 預設會把 `inf` / `Infinity` 字面值讀成 `float("inf")`。
 * ⛔ **live PostgreSQL 路徑不可達**：`candles.close` 是 `DECIMAL(10,2)`
   （`migrations/postgres/001_create_candles.sql:9`）。實測 PostgreSQL 16.14：
@@ -3458,7 +3574,7 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 | 路徑 | 會不會排除 `2867` |
 |---|---|
 | `selection_report.py:717` → `db.fetch_symbol_universe()`（不帶 `symbols`） | ✅ **會**——`WHERE is_listed = :listed`（`python/db.py:374`，`listed=True`） |
-| `evaluation.py:124` `_load_db_sources` → `fetch_candles(symbol, …)` | ❌ **不會**——逐檔直接取 K 棒，**完全不檢查 `is_listed`** |
+| `evaluation.py` 的 `_load_db_sources()` → `fetch_candles(symbol, …)` | ❌ **不會**——逐檔直接取 K 棒，**完全不檢查 `is_listed`** |
 
 全 repo（排除 tests）只有 `selection_report.py:717` 呼叫 `fetch_symbol_universe`。
 所以 `run_evaluation` / `run_builder_sweep` 只要 `--symbols` 裡帶了 `2867`，
@@ -3471,7 +3587,7 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 ⛔ **錯的是把它的結果拿來代表 evaluation cohort 卻不留對帳**——
 「池有 135 檔」與該報告實際跑到的 134 檔之間，沒有東西對得起來。
 
-`066_evaluation_universe.sql:29` 的註解寫「`false` ＝ 保留紀錄但不再納入每日維護」。
+`migrations/postgres/066_evaluation_universe.sql:29` 的註解寫「`false` ＝ 保留紀錄但不再納入每日維護」。
 ⚠️ **2026-09-17 訂正**：那句話只描述 `active=false` 的語意，⛔ **並沒有**宣稱
 `active=true` 就一定會被納入——`active=true` 仍要再經過**本輪的 listing eligibility 過濾**
 （見下方「已查證」②）。⛔ 本筆初稿寫的「與那句話的語意對不上」因此不成立。
@@ -3521,7 +3637,7 @@ WHERE is_listed = true AND last_seen_at < <seenAt>
 
 ⚠️ **兩者刻意不連動**：`active` 決定 **cohort membership**，
 而**只有已知 `is_listed=false` 才在本輪排除**——⛔ **不是嚴格的 `active AND is_listed`**。
-主檔查無或查詢失敗時一律 **fail-open 保留**（`scheduler.go:1215` 起的三態判定）：
+主檔查無或查詢失敗時一律 **fail-open 保留**（`internal/scheduler/scheduler.go:1215` 起的三態判定）：
 
 ```text id="i113_eligibility_001"
 active AND ( is_listed = true  OR  主檔查無該 symbol  OR  主檔查詢失敗 )
@@ -3529,7 +3645,7 @@ active AND ( is_listed = true  OR  主檔查無該 symbol  OR  主檔查詢失�
 
 ⛔ **寫成 `active AND is_listed` 會誤導後續實作者把 unknown 也靜默排掉**，
 而那正是契約裡「多抓一點可接受、靜默少抓不可接受」要防的事。
-可逆性由 `TestEvaluationUniverseSyncResumesAfterRelisting`（`scheduler_test.go:1980`）釘住。
+可逆性由 `TestEvaluationUniverseSyncResumesAfterRelisting`（`internal/scheduler/scheduler_test.go:1980`）釘住。
 所以「`SetActive()` 沒有自動呼叫入口」**只能證明兩份狀態刻意不連動**，
 ⛔ 證明不了系統漏做退池。
 
@@ -3538,7 +3654,7 @@ active AND ( is_listed = true  OR  主檔查無該 symbol  OR  主檔查詢失�
 ⛔ 初稿寫的「池成員下市／停牌後沒有任何回收路徑」也不準確，兩處要訂正：
 
 * **日 K 維護路徑本來就有每輪過濾**，而且**會計數**——`dropDelistedSymbols` 回傳
-  `(保留的標的, delisted 數, 主檔查無數)`，並寫進 log（`scheduler.go:1193` 的
+  `(保留的標的, delisted 數, 主檔查無數)`，並寫進 log（`internal/scheduler/scheduler.go:1193` 的
   `zap.Int("delisted", …)`）。三態判定（`true` 保留／`false` 過濾／**主檔查無時 fail-open 保留**）
   也都在契約裡。
 * ⛔ **「停牌」不等於 `is_listed=false`**，⛔ 不要在這裡混用——`is_listed` 反映的是

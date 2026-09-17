@@ -66,6 +66,14 @@ if [ "${REPLAY_SMOKE:-0}" = "1" ]; then
   "$REPO_ROOT/scripts/smoke-replay-offline.sh"
 fi
 
+# ⚠️ **文件裡的原始碼行號引用**——改完程式碼忘了更新文件是**每次都會再發生**的漂移
+# （2026-09-17 一次掃描就抓到 16 處指錯）。
+# ⛔ **刻意放在 docker build 之前、也刻意不放進 `SKIP_SHELL_TESTS` 區塊**：
+# 它⛔ 不需要 image，幾秒就跑完，文件錯誤應該**最快失敗**；而 `SKIP_SHELL_TESTS`
+# 的語意是「跳過 replay 的 shell 測試」，⛔ 不該順手把文件檢查也關掉。
+"$REPO_ROOT/scripts/test-doc-refs.sh"   # ⚠️ 守門工具自己的迴歸測試（初版曾 fail-open）
+python3 "$REPO_ROOT/scripts/check-doc-refs.py"
+
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
 

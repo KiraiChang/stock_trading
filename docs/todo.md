@@ -142,18 +142,25 @@ CSV 那筆 2002 年的「光寶電子」就會同時滿足「已下市」與「�
 | `migrations/{postgres,sqlite,mysql}/076_*.sql` | 建 `delisting_events` 與 `delisting_source_snapshots`、`stock_symbols` 加 `delisted_date` **與 `delisted_event_id`**。**三份都要**（mysql 從未部署，仍依慣例同步維護，見 `issue.md` I-054）。ℹ️ `job_runs.job_name` 已是 `VARCHAR(64)`（migration 063），`delisting_reconcile`（19 字元）不需要再放寬 |
 | `store/model.go`、`stock_symbol_repo.go` | 模型加 `delisted_date` **與 `delisted_event_id`**（provenance，見「投影所有權」；⛔ **job-owned 的寫入／撤銷時**兩欄同進同出，人工值是單欄有值的合法狀態）；新增投影／撤銷方法。⛔ **既有 `upsert` 的 `ON CONFLICT DO UPDATE` 必須把兩個欄位一起設成 `NULL`**——與第一版相反，理由見「重新上市時必須清除」（測試 #7／#20b） |
 | **`store/sqlite_test.go`**（新） | #20f5a（builder 單元測試）與 #20f5b（實際開啟的 integration test）。⛔ **不要放進 migration 測試**——那兩支腳本只編譯 `./internal/database` 並用 `-test.run` 篩名稱，這裡驗的是 `store` 的 DSN 組裝 |
-| **`store/sqlite.go`** | DSN 加上 `_pragma=busy_timeout(5000)` ＋ `_pragma=foreign_keys(1)`——⛔ **兩個都要**（都是 connection-local，現行一次性 `MustExec`（`sqlite.go:17-18`）在 connection 重建後靜默失效，FK 失效會讓 #19／#19d 整組落空），且⛔ **必須解析合併既有 query 而非字串拼接**（DSN 形態有 **file-backed 三種 ＋ memory 三種**，`Abs` 與否依三分支判準，見「SQLite 有兩種拓撲」）；`journal_mode=WAL` 是持久設定、留在原地並加註 |
+| **`store/sqlite.go`** | DSN 加上 `_pragma=busy_timeout(5000)` ＋ `_pragma=foreign_keys(1)`——⛔ **兩個都要**（都是 connection-local，當時的一次性 `MustExec` 寫法在 connection 重建後靜默失效（⚠️ **這是實作前的描述**，見表格下方註記），FK 失效會讓 #19／#19d 整組落空），且⛔ **必須解析合併既有 query 而非字串拼接**（DSN 形態有 **file-backed 三種 ＋ memory 三種**，`Abs` 與否依三分支判準，見「SQLite 有兩種拓撲」）；`journal_mode=WAL` 是持久設定、留在原地並加註 |
 | `store/delisting_event_repo.go`（新） | 事件 upsert／查詢／消失標記；快照 metadata（`id` 單調排序、`job_run_id` nullable ＋ `ON DELETE SET NULL`） |
 | **`internal/database/`（新測試檔）** | postgres／mysql 的 repo 層 CRUD 測試，函式名用 `TestPostgresMigrations…` / `TestMySQLMigrations…` 前綴——⛔ 放在 `store` 套件的話兩支腳本跑不到（只編譯 `./internal/database` 並用 `-test.run` 篩名稱） |
 | `market/twse_suspend_listing.go`（新） | CSV client ＋ 解析器 |
 | `market/delisting_reconciler.go`（新） | 對帳與投影 |
-| `scheduler/scheduler.go` | 註冊 cron；三個方法比照 SR pattern（`scheduler.go:1436-1470`）：`RunDelistingReconcile()`（cron 入口，⛔ **不收 `acceptShrink` 參數**）／`TryStartDelistingReconcile(acceptShrink bool)`（API 入口，同步取鎖）／`runDelistingReconcileOwned(ctx, acceptShrink)`（核心，不取鎖）；**新增 `finishRunStatus`**——⛔ **與 `finishRunDegraded` 共用同一個底層 finish writer**，沿用 `context.WithoutCancel` |
+| `scheduler/scheduler.go` | 註冊 cron；三個方法比照 SR pattern（`internal/scheduler/scheduler.go:1436-1470`）：`RunDelistingReconcile()`（cron 入口，⛔ **不收 `acceptShrink` 參數**）／`TryStartDelistingReconcile(acceptShrink bool)`（API 入口，同步取鎖）／`runDelistingReconcileOwned(ctx, acceptShrink)`（核心，不取鎖）；**新增 `finishRunStatus`**——⛔ **與 `finishRunDegraded` 共用同一個底層 finish writer**，沿用 `context.WithoutCancel` |
 | `config/config.go`、`backend/config.yaml` | `delisting.enabled` / `url` / `cron` / `timeout_sec` |
-| **`cmd/server/main.go`** | 建立 client／reconciler 並注入 scheduler（比照 `main.go:160-168` 的 ISIN 組裝） |
-| **`api/handler/scheduler.go`** | 加進 `knownSchedulerJobs` **與** `jobStaleThreshold`。⛔ **不加的話 DB 有紀錄但 `GET /scheduler/status` 不會回傳它**（`scheduler.go:108`） |
+| **`cmd/server/main.go`** | 建立 client／reconciler 並注入 scheduler（比照 `cmd/server/main.go:160-168` 的 ISIN 組裝） |
+| **`api/handler/scheduler.go`** | 加進 `knownSchedulerJobs` **與** `jobStaleThreshold`。⛔ **不加的話 DB 有紀錄但 `GET /scheduler/status` 不會回傳它**（`api/handler/scheduler.go:108`） |
 | **`api/server.go`** ＋ `api/handler/scheduler.go` | 加 route `POST /api/v1/scheduler/delisting-reconcile/run`（比照 `server.go:129-133` 的五條既有觸發路由），支援 `?accept_shrink=1`；⛔ handler **同步取鎖，取不到回 `409`**，不沿用既有的「先回 202 再背景跳過」 |
 | **`frontend/src/lib/api/scheduler.ts`、`routes/Scheduler.svelte`** | `JobName` union 加一項、中文 label、**API client function**、觸發按鈕與其測試 |
 | **`docs/api-reference.md`** | `GET /scheduler/status` 的 job 契約**與新增的手動觸發端點** |
+
+⚠️ **上表「`store/sqlite.go`」那一列是實作前的描述**（2026-09-17 註記）：
+`busy_timeout` / `foreign_keys` **現況已改由 DSN 帶**，見 `store/sqlite.go` 的
+`enforcedSQLitePragmas`——⛔ 別把它讀成現行行為。留在 `sqlite.go` 的 `MustExec`
+只剩 `journal_mode=WAL`，那個**可以**用 Exec 設，因為它是寫進 DB 檔的持久設定、
+⛔ 不是 connection-local。
+
 
 ⚠️ **手動觸發是刻意保留的**（dev stack 驗收需要，見「完成與驗收條件」第 3 項），
 所以 handler、route、前端 client 與 api-reference **四處都要補齊**，
@@ -465,7 +472,7 @@ current-state 不變量優先——`delisted_date` 與 `delisted_event_id` 一�
 第一版寫「順序不可調換」是錯的，那條 mutation test 不成立（見測試 #4）。
 
 ⛔ **但 TOCTOU 的防護仍然必要**：ISIN sync 的整輪上限是 **20 分鐘**
-（`scheduler.go:82`），06:30 起跑可能到 06:50，與 07:00 的本 job **有重疊窗口**，
+（`internal/scheduler/scheduler.go:82`），06:30 起跑可能到 06:50，與 07:00 的本 job **有重疊窗口**，
 先 `SELECT` 出 id 再 `UPDATE` 會讓查到的 `is_listed=false` 在寫入前被 sync 改回 `true`。
 
 ✅ **定案：最終 `UPDATE` 是一個 CAS（compare-and-swap），`WHERE` 要帶完整條件。**
@@ -829,7 +836,7 @@ X 的單位是 CSV 事件，而撤銷的觸發情境常常是「**來源事件�
 `listed_date` 與讀取時相同。0 列即 **RX**。（測試 #20e）
 
 ⛔ **`listed_date` 是 nullable，比較必須 null-safe。**
-三 engine 都是 nullable（`048_create_stock_symbols.sql:12`），
+三 engine 都是 nullable（`migrations/postgres/048_create_stock_symbols.sql:12`），
 而 **R 的觸發原因之一正是它為 `NULL`**（投影規則 3）。
 直接組出 `listed_date = NULL` 永遠不為 true，**沒有任何競爭也會誤判成 RX**，
 於是那些列永遠撤銷不掉。
@@ -925,7 +932,7 @@ D 的母體是「本次 CSV 的事件」，而被來源移除的事件**根本�
 兩輪若抓到不同版本的 CSV，**較舊的一輪可能較晚 commit**，反過來把新事件標記成消失，
 並讓事件狀態與最新快照不一致——而且兩輪各自看起來都成功。
 
-**直接比照既有的 SR analysis pattern**（`scheduler.go:1436-1470`），三個方法職責封閉：
+**直接比照既有的 SR analysis pattern**（`internal/scheduler/scheduler.go:1436-1470`），三個方法職責封閉：
 
 | 方法 | 角色 | `acceptShrink` | 取鎖 | 釋放 | 取不到時 |
 |---|---|---|---|---|---|
@@ -939,7 +946,7 @@ D 的母體是「本次 CSV 的事件」，而被來源移除的事件**根本�
 ⛔ **手動端點在 handler 內同步取得 ownership，取不到直接回 `409`**——
 **不要先回 `202` 再由背景 goroutine 靜默跳過**。
 ⚠️ 既有的 `evaluation_universe_sync` 正是後者（`handler/scheduler.go:64` 先回 202、
-`scheduler.go:1063` 才在背景 `CompareAndSwap` 失敗後只記一行 Warn），
+`internal/scheduler/scheduler.go:1063` 才在背景 `CompareAndSwap` 失敗後只記一行 Warn），
 **本 job 不沿用那個模式**：呼叫端會以為觸發成功，實際上什麼都沒發生。
 
 ⛔ **cron 被擋時只記 Warn、不寫 `job_run`**（**這是對我前一輪說法的再次修正**）。
@@ -992,7 +999,7 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 ℹ️ 2026-09-04 實測兩者恰好都是 265，**那是巧合不是保證**，不能拿它當依據。
 
 ⛔ **現有 helper 推導不出「`failed` ＋ `symbols_failed = 0`」。**
-`finishRunDegraded`（`scheduler.go:403-413`）只看數量：
+`finishRunDegraded`（`internal/scheduler/scheduler.go:429-456`）只看數量：
 `total>0 && failed>=total → failed`、`failed>0 → partial`、其餘 `success`。
 `failed = 0` 永遠拿不到 `failed`。
 
@@ -1000,7 +1007,7 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 把 status 直接傳給 `JobRunRepo.Finish`（該介面本來就吃明確 status）。
 
 ⛔ **必須與 `finishRunDegraded` 共用同一個底層 finish writer**，
-沿用 `context.WithoutCancel(ctx)` ＋ `finishRunWriteTimeout`（`scheduler.go:380-392`）。
+沿用 `context.WithoutCancel(ctx)` ＋ `finishRunWriteTimeout`（`internal/scheduler/scheduler.go:404-406`）。
 理由是既有的（2026-08-24，原 I-084）：job 的 ctx 逾時後用它去寫 `job_runs` 一定失敗，
 那筆紀錄會**永遠卡在 `running`**。
 
@@ -1015,7 +1022,7 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 | 情形 | 狀態 | 機制 |
 |---|---|---|
 | 全部正常（只有 N／B／C／P／**M**） | `success` | ⚠️ **M 是 Info 不是 degradation**——「人工值與來源一致」是好事，不該讓整輪變 `partial` |
-| **A／U／D／R／RX／X 任一 > 0**，**或來源更正 > 0** | **`partial`** | `finishRunDegraded(..., degraded=true)`（`scheduler.go:403-413`：`degraded && success → partial`） |
+| **A／U／D／R／RX／X 任一 > 0**，**或來源更正 > 0** | **`partial`** | `finishRunDegraded(..., degraded=true)`（`internal/scheduler/scheduler.go:429-456`：`degraded && success → partial`） |
 | 抓取／解析／縮水防護／ISIN 依賴不成立 | `failed` | 零寫入，走 `finishRunStatus` |
 
 ⛔ **來源更正（改名／改日期／消失／重現）也算 degraded。**
@@ -1100,7 +1107,7 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 | 20 | **投影收斂**（每輪重算），七個案例 | ⓪**首次投影**：兩欄皆 NULL → 通過 1～6 → **建立 ownership**（⛔ 空值狀態必須落在 P，不得因「還不是 job-owned」被擋掉）；①已投影 `D1` → 來源更正為 `D2` → **走 P 替換**、最終 `D2` 且 provenance 指向新事件（⛔ 不得因「已有不同日期」先命中 D）；②已投影的事件消失且無替代 → 兩欄**一起清成 `NULL`** ＋ **R 類**；③**改名後不再相符** → 撤銷（R）；④**兩筆都通過 1～5 的歧義** → 撤銷（R）；⑤**有替代事件但替代不合格** → 撤銷（R）；⑥**主檔自己變了**（改名／`listed_date`／`market`／`security_type`）使舊事件失去資格 → 撤銷（R）。⚠️ ③～⑥ 是「列舉觸發條件」寫法會全部漏掉的，重算法自動涵蓋 |
 | 20c | ⛔ **人工所有權是單向的 ＋ M 的嚴格條件**，五個案例 | ①人工填的**不同**日期 → 不覆蓋、不清除，歸 D；②⛔ **人工日期與 CSV 完全相同** → **不得補 `delisted_event_id`**，記 **M**；③承②之後**來源事件消失** → 人工日期**仍在**、`delisted_event_id` **仍為 NULL**；④⛔ **日期相同但名稱不符**（`2301` 型）→ candidate 數為 0，**不得判 M**；⑤⛔ **日期相同但 `listed_date IS NULL`** → 同樣**不得判 M**。⚠️ ②③ 防人工值被靜默轉成 job-owned 再被撤銷刪掉；④⑤ 防「方向一判 D、方向二卻說來源佐證一致」的自相矛盾 |
 | 20e | **R 判定後、清除前被並行修改**，兩個案例 | ①ISIN／人工改動使撤銷 CAS 影響 0 列 → 歸 **RX**（`revocation_conflict`），⛔ **不得計 R**、⛔ **不得併進方向一的 X**（單位不同，且來源事件常已消失、沒有 CSV event 可承載）、不重試、該輪 `partial`；②⛔ **R 因名稱不符而準備撤銷，期間名稱被修正成相符** → 撤銷 CAS **必須落空**（歸 RX），⛔ **不得清除那筆已重新成立的投影**。這條證明撤銷 CAS 有帶 `name`／`market`／`security_type`／`listed_date`／`delisted_date`，不是只比 ownership |
-| 20f2 | **SQLite 同一 pool 的排隊**（正式拓撲），⛔ **時序必須固定** | 兩個呼叫共用 `store.NewDB` 的單一 pool → 第二個**在 `database/sql` 層排隊**，⛔ **不會拿到 `SQLITE_BUSY`**。**測試時序寫死為**：①`startRun` **先成功取得有效 `runID`** → ②競爭工作占用唯一 connection → ③reconcile 核心等待並 context timeout → ④釋放 connection → ⑤`finishRunStatus` 用**獨立 writer timeout** 把那筆既有 run 寫成 `failed`。⛔ **不可讓 connection 在 `startRun` 之前就被占用**：`startRun` 失敗只記 log 並**回傳 `runID = 0`**（`scheduler.go:370-375`），而 `Finish` **不檢查 affected rows**（`job_run_repo.go:112`），`WHERE id = 0` 會靜默更新零列——**DB 裡根本不會有可驗證的 `failed` 紀錄**，測試會驗到空氣。⚠️ **競爭者要模擬成 ISIN-like 的 DB consumer**，⛔ **不是第二個 T-071 入口**——後者會先被 single-flight 擋掉，**根本到不了 pool 排隊** |
+| 20f2 | **SQLite 同一 pool 的排隊**（正式拓撲），⛔ **時序必須固定** | 兩個呼叫共用 `store.NewDB` 的單一 pool → 第二個**在 `database/sql` 層排隊**，⛔ **不會拿到 `SQLITE_BUSY`**。**測試時序寫死為**：①`startRun` **先成功取得有效 `runID`** → ②競爭工作占用唯一 connection → ③reconcile 核心等待並 context timeout → ④釋放 connection → ⑤`finishRunStatus` 用**獨立 writer timeout** 把那筆既有 run 寫成 `failed`。⛔ **不可讓 connection 在 `startRun` 之前就被占用**：`startRun` 失敗只記 log 並**回傳 `runID = 0`**（`internal/scheduler/scheduler.go:370-375`），而 `Finish` **不檢查 affected rows**（`job_run_repo.go:112`），`WHERE id = 0` 會靜默更新零列——**DB 裡根本不會有可驗證的 `failed` 紀錄**，測試會驗到空氣。⚠️ **競爭者要模擬成 ISIN-like 的 DB consumer**，⛔ **不是第二個 T-071 入口**——後者會先被 single-flight 擋掉，**根本到不了 pool 排隊** |
 | 20f | **SQLite 的 writer 競爭（外部 writer）**，⛔ **三個案例，時序各不相同** | ①**reconcile 先持鎖** → 拿到 busy 的是**競爭者**，reconcile **正常收斂**、⛔ 不產生 X／RX；②**`startRun` 成功後**外部 writer 才持鎖 → business transaction 在 `busy_timeout` 內等待、逾時 → **把那筆既有 run 寫成 `failed`**（`finishRunStatus`，reason code 由 `joberr` 分類），⛔ 不歸 X／RX；③⛔ **外部 writer 在 `startRun` 之前就持鎖** → `startRun` 自己 timeout、回傳 **`runID = 0`** → **沒有 job row 可寫**，只能記 log，且**核心流程必須就此中止**（見下）。⚠️ 測試要用**同一檔案 DB 的兩個獨立 handle**（`MaxOpenConns(1)` 只限單一 handle 的併發，⛔ 不代表跨 handle 不會競爭） |
 | 20f3 | **SQLite 的 connection-local pragmas 在 physical connection 重建後仍生效**（⛔ **是 `busy_timeout` **與** `foreign_keys` 兩個**，不是只有前者），⛔ **四個步驟缺一不可** | ①**保留同一個 `*sql.DB` pool**（⛔ 不可關閉整個 pool 再 `NewSQLite` 一次——那樣即使用被禁止的「每個 pool `MustExec` 一次」也會通過，測不到東西）；②強制**丟棄既有的 physical connection**（例如 `SetConnMaxLifetime` 極短值後等待，或 `SetMaxIdleConns(0)` 觸發回收）；③讓 pool **自動建立下一條 connection**；④在**那條新 connection** 上同時查 `PRAGMA busy_timeout`（**必須仍是 5000**）**與 `PRAGMA foreign_keys`（必須仍是 1）**。⛔ 只驗 `busy_timeout` 會漏掉 FK 靜默失效——那會讓 #19／#19d 的 FK 契約整組落空 |
 | 20f4 | ⛔ **`startRun` 失敗（`runID = 0`）時核心必須中止**（任何 engine 都適用） | 記 Error 並 return，⛔ **不執行任何業務寫入**、不呼叫 `finishRunStatus`。⚠️ 沒有這條的話，鎖釋放後會寫入一整輪資料卻在 `job_runs` 上完全看不到 |
@@ -1966,7 +1973,7 @@ score 全距 0.0056 不足以支撐任何調整；`recommended_configs_by_bucket
 | # | 位置 | 做什麼 |
 |---|---|---|
 | 1 | `scripts/run-evaluation.sh:10,90` | `MODE=sweep` 只加 `--sweep`；**成員由呼叫端用 `--symbols` 明給**，腳本不查 `evaluation_universe` |
-| 2 | `evaluation.py:2148` `run_builder_sweep` | 每組 (width, max_merge) 候選各呼叫一次 `run_evaluation` |
+| 2 | `evaluation.py` 的 `run_builder_sweep()` | 每組 (width, max_merge) 候選各呼叫一次 `run_evaluation` |
 | 3 | `evaluation.py:379` | `volatility_profiles = _volatility_profiles(sources, dataset)` |
 | 4 | `evaluation.py:308-330` | `recent = df.tail(60)` → `_atr_pct(recent)` → `volatility_bucket_from_profile(...)`　←**當下 60 根重算，配凍結門檻常數** |
 | 5 | `evaluation.py:396` | `"zone_outcomes": _zone_outcomes(dataset, volatility_profiles)` |
@@ -1993,7 +2000,7 @@ DB 那兩欄只有 Go 端與前端在用。
 所以沒有進入這張表。
 
 ⚠️ **因此「79/37/18」不是「sweep 一定會拿到的分組」**——sweep 的成員完全取決於
-**本次明確傳入的 `--symbols`**。`evaluation.py:124` 的 `_load_db_sources` 逐檔直接呼叫
+**本次明確傳入的 `--symbols`**。`evaluation.py` 的 `_load_db_sources()` 逐檔直接呼叫
 `fetch_candles`，**不檢查 `is_listed`**；只要清單裡帶了 `2867`，它照樣會被載入並算出
 profile（用停在 2026-08-18 的 K 棒）。上表描述的是「這次實測用的 134 檔清單」的結果。
 
@@ -2756,7 +2763,7 @@ evaluation 從未實測，若跑不動，前面所有抓取與建表都是白工
 | 4 | Step 3 選 120～150 檔並深抓 | 最終標的池 | 150 requests ≈ 30 分鐘 |
 | 5 | Phase 2：`evaluation_universe` 表與排程 | 常態維護。詳細計畫見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)「Step 5 執行計畫書」 | 見上方檔案表 |
 
-**Step 1 與 Step 3 不合併（2026-08-12 決定）**：`FetchDailyCandles`（`market/finmind.go:182`）
+**Step 1 與 Step 3 不合併（2026-08-12 決定）**：`FetchDailyCandles`（`market/finmind.go`）
 **帶日期區間與單日同價**，都是 1 request/檔，所以 650 檔直接抓 5 年與抓 130 天是**同樣 650
 requests**——合併可省下 Step 3 那趟 30 分鐘。**但不採用**：代價是 `candles` 從約 18 萬列變
 約 78 萬列（現有 29,208 列的 27 倍），多出的 60 萬列有九成以上屬於不會入選的標的，
@@ -3529,7 +3536,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 1. **這個端點取不到歷史日 K**。它是當日分 K 專用，唯一用法是盤後把**今天**的分 K
    聚合成一根日 K。而 T-040 的兩筆抓取成本全是歷史回補——Step 1 是 650 檔 × 130 天、
    Step 3 是 150 檔 × 5 年，Yahoo 一天都補不了。
-2. **日常維護那 30 分鐘也省不下來**。`FetchDailyCandles`（`market/finmind.go:182`）
+2. **日常維護那 30 分鐘也省不下來**。`FetchDailyCandles`（`market/finmind.go`）
    一次請求就回傳 O/H/L/C/**Volume/Amount**，且**帶日期區間與單日同價**。只要還需要成交量，
    那一個 FinMind 請求就跑不掉；從 Yahoo 另外抓價格不會減少任何 FinMind 請求。
 3. **evaluation pipeline 硬性需要成交量**。`evaluation.py:92` 直接取
@@ -3546,7 +3553,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 
 不在吞吐量，在**時效性**與**未來的價格層級掃描**：
 
-1. **當日價格的前哨與交叉檢核**。`scheduler.go:116` 記錄了 FinMind 當日日 K 不會在收盤當下
+1. **當日價格的前哨與交叉檢核**。`internal/scheduler/scheduler.go:116` 記錄了 FinMind 當日日 K 不會在收盤當下
    發布，曾在 14:00 拉到 `count=0` 且**靜默成功**（空陣列 BulkInsert 視為成功、`job_runs`
    顯示 success，沒有任何錯誤訊號）。Yahoo 盤後聚合可以在 13:30 收盤後立刻拿到當日價格，
    用來提前偵測「FinMind 這批是空的」並交叉檢核價格——這是 FinMind 給不了的。
@@ -3596,7 +3603,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
 
 不是顯示層的問題，是**資料模型結構上就沒有鏈**：
 
-1. `build_event_state_summary`（`event_engine.py:298`）以 `(zone_key, event_family)` 為鍵，
+1. `build_event_state_summary()`（`event_engine.py`）以 `(zone_key, event_family)` 為鍵，
    **新事件直接整筆覆寫** `states[key] = state`。同一家族的前一個事件連同它的
    `root_event_type` 一起被蓋掉——`root_event_type` 在覆寫時被設成新事件的 type，
    **根本不是 root**。
@@ -3735,8 +3742,12 @@ version control（`A` 狀態）。若未來常發生類似問題，應補一個�
 type 永遠相同，覆寫從來沒有真的遺失過資訊。
 
 這一點很重要，因為 `root_event_type` **確實被 decision 消費**
-（`decision_engine.py:864` 的 `_event_state_types` 與 `:877` 的 `_event_state_max_age`
-都把它併進事件類型集合，而該集合直接決定 `event_signal` → `lifecycle_phase`）。
+（`decision_engine.py:1162-1163` 的 `_event_state_types` 把它併進事件類型集合，
+而該集合直接決定 `event_signal` → `lifecycle_phase`。
+⚠️ **2026-09-17 訂正**：本句原本還列了 `decision_engine.py` 的 `_event_state_max_age`（行號寫 877），
+但 T-044 把 lifecycle 抽離後 `decision_engine.py` 已**完全不使用 max_age**——
+它現在是 `lifecycle_engine.py` 的 `event_state_max_age()`，在 `resolve_lifecycle()` 裡消費。
+論點不受影響，⛔ 但位置不能再寫成 decision 那一側）。
 若 root 真的會與 latest 不同，這次修改就會改變決策；正因為兩者恆等，**本次修改是純粹的
 正確性補強**，不需要 decision 對照測試。
 
@@ -3819,7 +3830,7 @@ Timeline 上線後兩者會同時存在且名字近似，容易誤用。建議�
 | 事實 | 依據 |
 |---|---|
 | 9 個排程 job 沒有任何一個建立 SR zone 分析 | `scheduler.go` 的 `startRun` 呼叫點：`pre_market`／`intraday`／`daily_close`／`chip_daily_sync`／`stock_symbol_sync`／`sr_zone_verify`／`sr_evaluation`／`corporate_action_sync` |
-| `sr_zone_verify` **不建立分析**，只重驗既有分析的 zone 有沒有被突破 | `scheduler.go:409-412` 的說明 |
+| `sr_zone_verify` **不建立分析**，只重驗既有分析的 zone 有沒有被突破 | `internal/scheduler/scheduler.go:409-412` 的說明 |
 | 唯一的建立路徑是手動／API | `POST /sr-zones` → `handler/sr_zones.go:524` |
 | live 實際只有 **20 次分析 / 4 檔標的**（2026-07-13～08-12） | `stock_sr_zone_analyses`：0050 十四次、2330 四次、`00981A` 與 `00947` 各一次 |
 | 連帶 `market_event_states` 只有 **76 列 / 13 次分析 / 2 檔標的** | 同上，事件狀態只在有分析時才寫入 |

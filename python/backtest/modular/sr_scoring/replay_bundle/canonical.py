@@ -25,7 +25,7 @@ import json
 import math
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Iterator
 
 # canonical JSON 的固定 separators：預設的 ", " / ": " 會多出空白，
 # 而空白同樣進 payload bytes → 進 content_hash8。
@@ -58,6 +58,19 @@ def _default(value: Any) -> Any:
     raise CanonicalError(f"canonical JSON 不支援的型別：{type(value).__name__}")
 
 
+
+# ⚠️ **`canonical_json_bytes()` 與 `canonical_json_chunks()` 共用這組參數**——
+# ⛔ 不可各寫一份：任何一個參數漂掉都會讓兩條路徑產生不同的 bytes，
+# 而它們的 SHA 是整套 artifact 契約的根。
+_ENCODER_KWARGS = {
+    "sort_keys": True,
+    "separators": _SEPARATORS,
+    "ensure_ascii": False,
+    "allow_nan": False,
+    "default": _default,
+}
+
+
 def _reject_non_finite(obj: Any) -> None:
     """先掃一遍拒絕 NaN / Infinity。
 
@@ -84,15 +97,30 @@ def _reject_non_finite(obj: Any) -> None:
 def canonical_json_bytes(obj: Any) -> bytes:
     """canonical JSON 的 bytes。**無結尾換行**——多一個 `\\n` 就是不同的 hash。"""
     _reject_non_finite(obj)
-    text = json.dumps(
-        obj,
-        sort_keys=True,
-        separators=_SEPARATORS,
-        ensure_ascii=False,
-        allow_nan=False,
-        default=_default,
-    )
-    return text.encode("utf-8")
+    return json.dumps(obj, **_ENCODER_KWARGS).encode("utf-8")
+
+
+def canonical_json_chunks(obj: Any) -> Iterator[bytes]:
+    """與 `canonical_json_bytes()` **逐 byte 相同**的內容，但**分段吐出**。
+
+    ⚠️ **為什麼需要它**：`canonical_json_bytes()` 會讓整份 JSON 同時以
+    `json.dumps()` 的 **str** 與 `.encode()` 的 **bytes** 兩份完整拷貝存在記憶體裡。
+    I-074 的 after artifact 有 13,417 列（實測每列約 6.9 KB）：
+
+        bytes 88 MiB ＋ str 187 MiB（Python str 開銷 ×2.12）＝ **單次序列化峰值 275 MiB**
+
+    加上基礎 RSS 約 195 MiB 就是 470 MiB——而 2026-09-17 那次 OOM 被殺時的
+    `anon-rss` 正是 **492 MiB**（差 4.5%）。⛔ 峰值⛔ 不是 replay 過程造成的
+    （實測過程中 RSS 穩定在 190～205 MiB），是**最後一步整份 JSON 一次成形**造成的。
+
+    ⚠️ **`json` 保證 `''.join(iterencode(o)) == dumps(o)`**，所以編碼器參數必須與
+    `canonical_json_bytes()` **完全一致**——⛔ 任何一個參數不同都會改掉 SHA，
+    連帶讓所有既有 artifact 的 canonical 契約失效。兩者共用 `_ENCODER_KWARGS`。
+    """
+    _reject_non_finite(obj)
+    encoder = json.JSONEncoder(**_ENCODER_KWARGS)
+    for piece in encoder.iterencode(obj):
+        yield piece.encode("utf-8")
 
 
 def canonical_gzip_bytes(payload: bytes) -> bytes:

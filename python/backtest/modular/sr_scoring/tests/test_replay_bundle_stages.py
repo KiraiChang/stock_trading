@@ -7,6 +7,7 @@ replay 本身的行為由 test_evaluation.py 覆蓋。
 from __future__ import annotations
 
 import json
+import pathlib
 from types import SimpleNamespace
 
 import pytest
@@ -190,14 +191,22 @@ def test_cohort_manifest_is_published_last(tmp_path, stub_replay, monkeypatch):
     output = tmp_path / "stage1"
     from ..replay_bundle import artifacts as artifacts_module
 
+    # ⚠️ **spy 在 `os.replace`**——⛔ 不要綁定某一支寫檔函式：after artifact 走
+    # `write_canonical_atomic()`（串流，避免 OOM）、cohort manifest 走
+    # `publish_artifacts()`，但**兩條路徑最後都以 `os.replace` 原子發布**。
+    # 盯住發布動作本身，換實作也不會讓這條契約失去守衛。
     seen: list[tuple[str, bool]] = []
-    real = artifacts_module.write_atomic
+    real = artifacts_module.os.replace
 
-    def spy(directory, name, payload):
-        seen.append((name, (directory / AFTER_ARTIFACT_NAME).is_file()))
-        return real(directory, name, payload)
+    def spy(src, dst):
+        result = real(src, dst)
+        name = pathlib.Path(dst).name
+        if name in (AFTER_ARTIFACT_NAME, COHORT_MANIFEST_NAME):
+            seen.append((name, name != AFTER_ARTIFACT_NAME
+                         and (output / AFTER_ARTIFACT_NAME).is_file()))
+        return result
 
-    monkeypatch.setattr(artifacts_module, "write_atomic", spy)
+    monkeypatch.setattr(artifacts_module.os, "replace", spy)
     run_bundle_stage(_args(bundle, output), stage=1, argv=[])
     assert seen == [(AFTER_ARTIFACT_NAME, False), (COHORT_MANIFEST_NAME, True)]
 
@@ -383,16 +392,22 @@ def test_report_is_published_last(tmp_path, stub_replay, monkeypatch):
     bundle, stage1_out, _ = _with_candidates(tmp_path, stub_replay)
     from ..replay_bundle import artifacts as artifacts_module
 
+    # ⚠️ 同上：盯 `os.replace` 這個共同的原子發布點。
+    stage2_out = tmp_path / "stage2"
     seen: list[tuple[str, bool]] = []
-    real = artifacts_module.write_atomic
+    real = artifacts_module.os.replace
 
-    def spy(directory, name, payload):
-        seen.append((name, (directory / COMPARISON_ARTIFACT_NAME).is_file()))
-        return real(directory, name, payload)
+    def spy(src, dst):
+        result = real(src, dst)
+        name = pathlib.Path(dst).name
+        if name in (COMPARISON_ARTIFACT_NAME, REPORT_NAME):
+            seen.append((name, name != COMPARISON_ARTIFACT_NAME
+                         and (stage2_out / COMPARISON_ARTIFACT_NAME).is_file()))
+        return result
 
-    monkeypatch.setattr(artifacts_module, "write_atomic", spy)
+    monkeypatch.setattr(artifacts_module.os, "replace", spy)
     run_bundle_stage(
-        _args(bundle, tmp_path / "stage2",
+        _args(bundle, stage2_out,
               after_artifact=str(stage1_out / AFTER_ARTIFACT_NAME),
               cohort_manifest=str(stage1_out / COHORT_MANIFEST_NAME)),
         stage=2, argv=[],
@@ -802,3 +817,56 @@ def test_replay_primary_zone_follows_decision_primary_even_when_it_is_none(tmp_p
             "replay row 留了排序第一筆——⛔ 那正是 I-074 要消除的雙來源"
         )
     assert result["candidates"] == 0
+
+
+# ── canonical 串流寫出：bytes 必須與一次成形的版本逐字相同 ──────────────────
+
+def test_canonical_json_chunks_are_byte_identical():
+    """⚠️ **這是整套 artifact 契約的根**：SHA 由這些 bytes 算出來。
+
+    `canonical_json_chunks()` 存在的理由是避免整份 JSON 一次成形（I-074 的 OOM
+    成因，實測單次序列化峰值 275 MiB）。⛔ 但它一旦與 `canonical_json_bytes()`
+    產出不同的 bytes，所有既有 artifact 的 SHA 都會對不上。
+    """
+    from ..replay_bundle import canonical_json_bytes, canonical_json_chunks
+
+    cases = [
+        {},
+        [],
+        {"k": []},
+        {"b": 1, "a": 2, "C": 3},                      # sort_keys
+        {"中文": "值", "nested": {"a": [1, 2.5, None, True]}},
+        {"esc": 'quote" back\\ slash/ tab\t nl\n'},
+        {"深": {"層": {"巢": [{"狀": 1}]}}},
+        {"big": list(range(3000))},
+        {"rows": [{"symbol": "2330", "as_of": "2026-09-01", "v": i} for i in range(500)]},
+    ]
+    for case in cases:
+        assert b"".join(canonical_json_chunks(case)) == canonical_json_bytes(case), case
+
+
+def test_canonical_json_chunks_reject_non_finite():
+    """⛔ 兩條路徑都要擋非有限值——⛔ 不能只有一條擋。"""
+    from ..replay_bundle import canonical_json_bytes, canonical_json_chunks
+    from ..replay_bundle.canonical import CanonicalError
+
+    for produce in (canonical_json_bytes,
+                    lambda obj: b"".join(canonical_json_chunks(obj))):
+        with pytest.raises(CanonicalError):
+            produce({"x": float("nan")})
+        with pytest.raises(CanonicalError):
+            produce({"x": float("inf")})
+
+
+def test_write_canonical_atomic_matches_one_shot_sha(tmp_path):
+    """串流寫出的 SHA 必須等於「一次成形再算」的 SHA，且檔案內容逐字相同。"""
+    from ..replay_bundle import canonical_json_bytes, sha256_hex
+    from ..replay_bundle.artifacts import write_canonical_atomic
+
+    payload = {"rows": [{"i": i, "s": "值" * 20} for i in range(2000)], "z": None}
+    expected = canonical_json_bytes(payload)
+    got_sha = write_canonical_atomic(tmp_path, "x.json", payload)
+    assert got_sha == sha256_hex(expected)
+    assert (tmp_path / "x.json").read_bytes() == expected
+    # ⛔ 不得留下 temp 檔
+    assert [p.name for p in tmp_path.iterdir()] == ["x.json"]

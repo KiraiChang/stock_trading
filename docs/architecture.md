@@ -412,14 +412,14 @@ migration 76 已套用，兩張新表與 `stock_symbols` 的兩個新欄位、FK
 
 | 路徑 | 生效條件 |
 |---|---|
-| **自動 cron** | **兩個開關都要開**。偵測的註冊寫在 parent 的 `if evaluationUniverse != nil && evaluationUniverseCfg.Enabled` 區塊裡（`scheduler.go:305`），所以 `EVALUATION_UNIVERSE_ENABLED` 沒開時，只設 `CANDLE_GAP_DETECTION_ENABLED=true` 不會讓它自動跑 |
+| **自動 cron** | **兩個開關都要開**。偵測的註冊寫在 parent 的 `if evaluationUniverse != nil && evaluationUniverseCfg.Enabled` 區塊裡（`internal/scheduler/scheduler.go:305`），所以 `EVALUATION_UNIVERSE_ENABLED` 沒開時，只設 `CANDLE_GAP_DETECTION_ENABLED=true` 不會讓它自動跑 |
 | **手動觸發 parent** | **繞過 parent 的 `Enabled`**。`POST /api/v1/scheduler/evaluation-universe-sync/run` → `RunEvaluationUniverseSync()` → `runEvaluationUniverseSync()`，後者**只檢查 `evaluationUniverse == nil`**（`:1009-1011`），不看 `Enabled`；尾端照樣呼叫 `runCandleGapDetection()`（`:1105`）。而偵測的有效啟用條件 `candleGapDetectionEnabled()` ＝ **自身開關 && 四項依賴**（`candle_gap_detection.go:63-65`），**不含 parent 開關** |
 
 **所以 parent 關閉、偵測開啟、依賴齊全時，手動觸發 parent 仍會執行偵測並寫入
 `job_runs`。**
 
 ⚠️ **`disabled` 狀態沒有啟動錯誤可查**：「已啟用但依賴不齊，不註冊」那條 Error log
-**只在 parent 已註冊、偵測自身 enabled、但四項依賴缺一時**才出現（`scheduler.go:316-322`），
+**只在 parent 已註冊、偵測自身 enabled、但四項依賴缺一時**才出現（`internal/scheduler/scheduler.go:316-322`），
 只開偵測那個開關的話照它排錯會一無所獲。
 
 ⚠️ **「不執行、不寫任何 `job_runs`、沒有痕跡」只成立於兩種情形**：完全沒有手動觸發的

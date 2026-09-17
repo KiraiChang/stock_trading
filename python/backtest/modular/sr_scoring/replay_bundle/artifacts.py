@@ -9,13 +9,14 @@ replay 的流程協調在 `evaluation.py`——⛔ 本 package 不 import 它。
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from .canonical import canonical_gzip_bytes, canonical_json_bytes, gunzip_bytes, sha256_hex
+from .canonical import canonical_json_chunks, canonical_gzip_bytes, canonical_json_bytes, gunzip_bytes, sha256_hex
 from .publish import fsync_dir, fsync_file
 
 ARTIFACT_SCHEMA_VERSION = 1
@@ -858,6 +859,46 @@ def write_atomic(directory: Path, name: str, payload: bytes) -> str:
     return sha256_hex(payload)
 
 
+# 串流寫檔的緩衝大小。⚠️ `iterencode` 吐的是**極小**的片段
+# （13,417 列的 artifact 有 19.6 萬個片段、平均約 7 bytes），逐片 `write()` 會讓
+# 系統呼叫次數爆掉；累到 64 KiB 再寫一次，記憶體與速度都顧到。
+_STREAM_CHUNK = 64 * 1024
+
+
+def write_canonical_atomic(directory: Path, name: str, obj: Any) -> str:
+    """把 `obj` 以 canonical JSON **串流**寫進 `directory/name`，回傳 SHA-256。
+
+    ⚠️ **為什麼不先 `canonical_json_bytes()` 再 `write_atomic()`**：那會讓整份 JSON
+    同時以 str 與 bytes 兩份完整拷貝存在記憶體裡。I-074 的 after artifact 實測
+    **單次序列化峰值 275 MiB**，正是 2026-09-17 那次 OOM（`anon-rss` 492 MiB）的成因
+    ——⛔ 不是 replay 過程累積（過程中 RSS 穩定在 190～205 MiB）。
+
+    ⚠️ 產出的 bytes 與 `canonical_json_bytes()` **逐字相同**（共用 `_ENCODER_KWARGS`），
+    所以 SHA 與既有 artifact 的契約不變。
+    """
+    tmp = directory / f".{name}.{secrets.token_hex(6)}.tmp"
+    digest = hashlib.sha256()
+    try:
+        with open(tmp, "wb") as fh:
+            buf = bytearray()
+            for chunk in canonical_json_chunks(obj):
+                digest.update(chunk)
+                buf += chunk
+                if len(buf) >= _STREAM_CHUNK:
+                    fh.write(buf)
+                    buf.clear()
+            if buf:
+                fh.write(buf)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, directory / name)
+        fsync_dir(directory)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return digest.hexdigest()
+
+
 def publish_artifacts(directory: Path, artifacts: Sequence[tuple[str, dict[str, Any]]]) -> dict[str, str]:
     """依序寫出；**最後一個是「指標」檔**（Stage 1 的 cohort manifest／Stage 2 的 report）。
 
@@ -865,5 +906,6 @@ def publish_artifacts(directory: Path, artifacts: Sequence[tuple[str, dict[str, 
     """
     hashes: dict[str, str] = {}
     for name, data in artifacts:
-        hashes[name] = write_atomic(directory, name, canonical_json_bytes(data))
+        # ⚠️ 走串流版本——⛔ 不要改回「先整份序列化再寫」，那是 I-074 OOM 的成因。
+        hashes[name] = write_canonical_atomic(directory, name, data)
     return hashes

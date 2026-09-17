@@ -985,6 +985,14 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
              --recover-durability
 ```
 
+⚠️ **2026-09-17：③ 的 OOM 已修**——第一次實跑被 cgroup OOM 殺掉（結束碼 137、
+⛔ 沒有產出任何 artifact、燒掉 183 分鐘）。⛔ **成因⛔ 不是 replay 過程累積**
+（實測過程中 RSS 穩定在 190～205 MiB），是**最後一步整份 JSON 一次成形**：
+序列化增量實測 **+351 MiB**，基礎 195 ＋ 351 ＝ 546 MiB 超過上限 504m。
+改成串流寫出後降到 **+2 MiB**。⚠️ `--i074-capacity-probe` 的 quota 固定 200，
+**量不到尾段的峰值**——⛔ 那個缺陷仍在，⛔ 不要再拿 probe 的結果當「全量跑得動」的依據。
+詳見 `issue.md` I-074。
+
 ⚠️ **③ 開跑之後、⑤ 仲裁通過之前，這個 repo ⛔ 不得再有新 commit**（2026-09-17 查證）：
 
 `provenance_differences()` 逐欄比對**全部 10 個** provenance 欄位，**唯一允許不同的是
@@ -999,6 +1007,9 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
 | **D 與 D+1 之間 commit** | ⛔ **base_commit 漂移 → rc=5** |
 | 工作樹有未 commit 的改動 | ✅ 不影響——worktree 是從 OID **乾淨 checkout**，`tooling_patch_sha256` 只反映 `TOOLING_PATCH` 有沒有傳（沒傳就是空字串的 `e3b0c442…`） |
 | probe（②）與 D／D+1 的 `base_commit` 不同 | ✅ 不影響——finalizer 的 `verify_evidence_graph()` 只要求**所有檔案同一個 `bundle_id`**、**所有 provenance 同一個 `image_digest`**，以及 **probe 三份之間**完全相同；⛔ 它不要求 probe 與 D／D+1 的 `base_commit` 一致 |
+
+⚠️ **例外：③ 失敗且⛔ 沒有產出 artifact 時，凍結窗口⛔ 不成立**——
+沒有東西需要對齊，而修復往往就是要改程式。⛔ 不要讓這兩條規則互相卡死。
 
 ⚠️ 所以**要上版就趁 ③ 開跑之前**。一旦 D 跑完，就進入「⛔ 不得 commit」的窗口，
 直到 ⑤ 仲裁拿到 0（或 3 修復完成）為止。
@@ -1019,6 +1030,43 @@ Lifecycle Engine 抽離，`lifecycle_engine.py` 是該 commit 才新增的）。
 | **5** | 不一致——⚠️ **證據已完整發布**；⛔ 立案調查，**不得以重跑覆蓋或取代** |
 | **3** | evidence 已發布但 **durability 未確認**——⛔ 不刪除，用 `--recover-durability` 修復 |
 | 1 | 一般失敗（輸入不合法、validator 不過）——⛔ 此時不留下任何 artifact |
+
+#### ⑦ 判讀：⚠️ **exit code 與決策樹是兩個不同維度，⛔ 不要混在一起看**
+
+| 維度 | 問的問題 | 看哪裡 |
+|---|---|---|
+| **⑤ 的 exit code** | **跨日重現性**——同一份 input／code 在兩天跑出來一不一樣 | `run-i074-stage1.sh` 的 rc（0／5／3） |
+| **決策樹 A／B／C** | **RR 解耦驗證**——有沒有列符合觸發條件、行為是否如預期 | D+1 的 `after_artifact.json` 逐列 |
+
+⛔ **rc 不是 0 就⛔ 不要進 A／B／C 判讀**——跨日都對不起來的話，逐列結論沒有意義：
+
+```text id="i074_verdict_order_001"
+rc=3 → 先跑 ⑥ recover-durability，修完再看 rc
+rc=5 → ⚠️ 跨日不一致。證據已封存，⛔ 立案調查，⛔ 不得重跑覆蓋。
+        ⛔ 這⛔ 不是決策樹的 C——C 是「候選行為不符預期」，
+        rc=5 是「同一份東西兩天跑出不同結果」，比 C 更根本。
+rc=0 → ✅ 才進入下面的 A／B／C
+```
+
+**取候選數**（`rr_decoupling_candidate` 為 `true` 的列）：
+
+```bash id="i074_count_candidates_001"
+python3 -c "
+import json;d=json.load(open('$HOME/i074_stage1_run/d1/after_artifact.json'))
+rows=d['rows']; cand=[r for r in rows if r.get('rr_decoupling_candidate') is True]
+print('總列數', len(rows)); print('候選數', len(cand))
+for r in cand[:20]: print(' ', r.get('symbol'), r.get('as_of'), r.get('lifecycle_phase'), r.get('setup_rr_qualified'))
+"
+```
+
+| 候選數 | 分支 | 下一步 |
+|---|---|---|
+| **0** | **A** | ⚠️ 記錄實際掃描的標的、日期範圍、載入根數、eligible rows、模型 bundle 與設定 → 轉為**已知限制**歸檔 → **本筆關閉**。⛔ **不必再跑 Stage 2**（省下 before 那趟約 3.7 小時） |
+| **> 0** | **B 或 C** | 需要 Stage 2（before 全掃）才分得出來。⚠️ 先核對 `candidate_mismatch.json` 是否存在——**before／after 的候選集合不一致直接是 C**，⛔ 此時沒有 comparison artifact |
+
+⚠️ **B 的「如預期」有明確定義**（見 `issue.md` I-074），⛔ 不是判定當下的主觀認定；
+⚠️ **before 有兩種合法形狀**（`CONDITIONAL_HOLD → HOLD` 與 `CONFIRMED`／`CONTINUATION` → `HOLD`），
+⛔ 只認一種會把另一種合法命中誤判成 C。
 
 ⚠️ **三個位置完全分離**：operational artifact 與執行 log 都在 **repo 外**；
 archived evidence 在 `python/baselines/i074_stage1/`，**finalizer 執行前必須完全不存在**
@@ -1724,6 +1772,52 @@ key 集合斷言**（`assert set(row["primary_zone"]) == {...}`），註解指�
   lifespan**。所以端點測試一律用 `TestClient(app)`（不加 `with`）＝ 完全不需要 DB；只有要驗證
   啟動行為的測試才寫 `with TestClient(app):`。這點寫在 `python/tests/conftest.py` 的 `client`
   fixture 註解裡——若有人順手改成 `with`，整批端點測試會突然需要 DB。
+
+### 文件引用原始碼的寫法：定義⛔ 不帶行號，行內才帶
+
+⚠️ **行號會漂，而且⛔ 不會有任何東西報錯**。2026-09-17 一次掃描就在 144 個引用裡抓到
+**16 處已經指錯**——其中 `evaluation.py` 的 `_atr_pct()` 是 `issue.md` I-107
+「兩個 ATR 公式」對照表的**核心證據**，文件寫的行號停在 287、實際已漂到 327；`decision_engine.py` /
+`lifecycle_engine.py` 那幾處則是 I-074 Stage 0 加診斷欄位時自己推移的。
+連續三輪 review 都在抓同一類問題。
+
+| 引用的是 | 寫法 | 為什麼 |
+|---|---|---|
+| **函式／類別本身** | `` `檔名.py` 的 `func()` `` ⛔ **不帶行號** | 函式改名有 grep 抓得到，行號漂了⛔ 沒人知道 |
+| **函式內某一段邏輯** | `` `檔名.py:123` `func` ``（⚠️ **識別符要緊鄰行號**） | 這種確實需要行號定位，但要讓檢查工具認得出來 |
+
+`scripts/check-doc-refs.py` 擋住第二類的漂移，由 `python/scripts/test.sh` 自動執行。
+它**只認「識別符與行號緊鄰」的四種寫法**：
+
+```text id="doc_ref_forms_001"
+`file.py:123` `ident`          `ident`（`file.py:123`）
+`file.py:123` 的 `ident`        `ident()`（`file.py:123`）
+```
+
+⚠️ **要在文件裡「引述一個錯誤的引用」時，⛔ 不要寫成合法形式**——檢查工具分不出
+「這是引用」與「這是在講某個引用曾經寫錯」，會把它判成漂移（本節初稿就中過一次）。
+改成把行號與識別符拆開敘述即可，例如「`_atr_pct()` 的行號停在 287」。
+
+⛔ **散在一行各處的識別符不算**——那會把 `BEGIN`、`raise`、`MustExec` 這種字誤判成漂移。
+⚠️ 引用落在該函式**範圍內**就算對（很多引用指的是函式內部某段，⛔ 不是定義行）；
+⛔ **repo 內找不到的檔案預設是「錯」，⛔ 不會自動當成外部套件放行**——
+否則檔名拼錯或檔案被刪掉都會靜默通過。要引用外部套件（`pgtype/date.go:164` 這種）
+得列進 `check-doc-refs.py` 的 `EXTERNAL_ALLOWLIST` 並**寫明來源**。
+
+#### `scripts/doc-refs-legacy.txt`：line-only 引用的凍結基準線
+
+沒有緊鄰識別符的舊引用（只有 `檔名:行號`）全部凍結在這份清單裡。
+⚠️ 它們**只擋得住「檔案消失／行號超出檔案長度／區間終點不合法」**，
+⛔ **擋不住「行號漂到別的地方」**——那正是要逐步改掉它們的原因。
+
+| 規則 | 說明 |
+|---|---|
+| ⛔ **只准變短** | 新引用一律要寫成「識別符緊鄰行號」的格式；⛔ 不得往基準線加新項目 |
+| ⚠️ **數量也算數** | `x4` 代表該 key 在那份文件裡有 4 處。**新增第 5 處會失敗**——⛔ 光比 key 不夠 |
+| ⚠️ **多出來的份額會失敗** | 改掉或刪掉某個引用後，要**順手把基準線的數字減掉**；殘留一樣讓檢查紅燈 |
+| 改到哪就修到哪 | 動到某一筆引用時，順手改成緊鄰格式並從基準線移除 |
+
+---
 
 ## 文件收斂規則
 

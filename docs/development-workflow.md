@@ -965,10 +965,12 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
               ⛔ 看到非零就不要往下做，⛔ 不要假裝它會自己擋。
            ⚠️ 已有 identity 時⛔ 不 build、⛔ 不改 created_at，只重新 fsync
 ② probe    MEASURE_PEAK=1 scripts/run-replay-offline.sh \
-             --bundle <bundle> --output-dir <probe 目錄> --i074-capacity-probe
+             --bundle <bundle> --output-dir <probe 目錄> \
+             --before-ref ecbc141^ --i074-capacity-probe
            ⚠️ quota 固定 200、載入全部 11 檔與模型；⛔ 不發布 after／cohort
 ③ D       scripts/run-replay-offline.sh \
-             --bundle <bundle> --output-dir <D 目錄> --i074-preflight
+             --bundle <bundle> --output-dir <D 目錄> \
+             --before-ref ecbc141^ --i074-preflight
 ④ D+1     隔天在新的正式執行腳本裡，**重新執行步驟 ① 的完整 guarded pin 區塊**
            （環境變數⛔ 不會跨 session／重開機保存），再跑與 ③ 相同的指令、
            **只換 --output-dir**
@@ -982,6 +984,32 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
 ⑥ 修復    rc=3 時：scripts/finalize-evidence.sh --evidence-root <同一路徑> \
              --recover-durability
 ```
+
+⚠️ **③ 開跑之後、⑤ 仲裁通過之前，這個 repo ⛔ 不得再有新 commit**（2026-09-17 查證）：
+
+`provenance_differences()` 逐欄比對**全部 10 個** provenance 欄位，**唯一允許不同的是
+`argv` 裡的 `--output-dir`**。而 `base_commit` 取自 worktree 的 OID ＝ **執行當下的 HEAD**
+（`replay_args_prepare_worktree`），所以 D 與 D+1 之間只要 HEAD 動過一次，
+跨日比對就會判 **`MISMATCH`（rc=5）**——⚠️ 那是**終止狀態、要立案調查**，
+⛔ 不得以重跑覆蓋，等於整整兩趟 6 小時作廢。
+
+| 動作 | 影響 |
+|---|---|
+| D 之前 commit | ✅ 安全（D 與 D+1 都會用新的 HEAD） |
+| **D 與 D+1 之間 commit** | ⛔ **base_commit 漂移 → rc=5** |
+| 工作樹有未 commit 的改動 | ✅ 不影響——worktree 是從 OID **乾淨 checkout**，`tooling_patch_sha256` 只反映 `TOOLING_PATCH` 有沒有傳（沒傳就是空字串的 `e3b0c442…`） |
+| probe（②）與 D／D+1 的 `base_commit` 不同 | ✅ 不影響——finalizer 的 `verify_evidence_graph()` 只要求**所有檔案同一個 `bundle_id`**、**所有 provenance 同一個 `image_digest`**，以及 **probe 三份之間**完全相同；⛔ 它不要求 probe 與 D／D+1 的 `base_commit` 一致 |
+
+⚠️ 所以**要上版就趁 ③ 開跑之前**。一旦 D 跑完，就進入「⛔ 不得 commit」的窗口，
+直到 ⑤ 仲裁拿到 0（或 3 修復完成）為止。
+
+⚠️ **`--before-ref` 是必填的，⛔ 即使 Stage 1 根本不用它**（2026-09-17 正式執行時踩到）：
+`run-replay-offline.sh` 對 `--bundle`／`--output-dir`／`--before-ref` 三者一律強制檢查，
+但 Stage 1 的 worktree 建在 `AFTER_REF`（預設 HEAD），`--before-ref` **只進 provenance**、
+不影響這一趟跑什麼程式碼。I-074 的 before 版固定是 **`ecbc141^`**（`ecbc141` ＝ T-044
+Lifecycle Engine 抽離，`lifecycle_engine.py` 是該 commit 才新增的）。
+⚠️ 用 `ecbc141^` 這種**綁定固定 SHA** 的寫法，D 與 D+1 才會拿到同一個值——
+⛔ 不要寫成 `HEAD^` 之類會隨時間漂移的表達式。
 
 **結束碼**（⚠️ 都是**終止狀態**，⛔ 不是失敗殘骸）：
 

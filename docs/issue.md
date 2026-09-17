@@ -533,6 +533,25 @@ before**，⛔ 不是舊文的「一趟 after ＋ 一趟 before」。
 直接充當比對的 after 半邊。這是把成本壓在「三趟」而不是「四趟」的關鍵，
 兩趟 after 因此都必須輸出**完整逐列資料**而不是只有候選名單。
 
+##### ①②實際執行結果（2026-09-17，上表的估算已由實測取代）
+
+步驟 ① pin 與 ② capacity probe 都已完成（rc=0）。**③ D 尚未執行。**
+
+| 項目 | 值 | 判讀 |
+|---|---|---|
+| image ID（六個角色共用） | `sha256:d66030dca485…` | 已釘死；identity 已建立，後續 pin 走 no-op、⛔ 不 build |
+| probe `base_commit` | `745b74332dc2…` | ⚠️ 若 ③ 之前又上版，D／D+1 會是新的 commit——**不影響**（見 `development-workflow.md`） |
+| 峰值 RSS | **265.2 MiB** | cgroup 上限 396.0 MiB，**餘裕 130.8 MiB** |
+| host low watermark | 343.0 MiB | 峰值低於它，⛔ 不會觸發 host OOM killer |
+| 速度 | 200 列／165.3 秒 ＝ **0.826 秒／列** | 比舊估的 0.85 **快 2.8%** |
+| 全量推算 | **3.08 小時／趟**；D＋D+1 共 **6.16 小時** | 落在上表 3.7 小時保守上界內 |
+
+⚠️ **容量結論：③ 跑得動**——峰值離 cgroup 上限與 host low watermark 都有餘裕，
+⛔ 不需要調降 `MEM`（調高更是錯的，見 `development-workflow.md`「`MEM` 是上限，不是預留」）。
+
+⚠️ 執行時踩到 [I-115](#i-115stage-1-強制要求---before-ref但那一趟根本不用它六步程序漏寫正式執行第一步就失敗)：
+六步程序的 ②③ 漏寫必填的 `--before-ref`，文件已補 `ecbc141^`。
+
 記憶體不是瓶頸（邊際約 1.0 MB/檔，此規模約 300MB，131 檔實測才 382MB），**時間才是**。
 
 ⚠️ **v8 更正一句 v7 寫錯的話**：v7 寫「單趟 3.7 小時就遠遠跨出當日 09:00–15:00 的凍結窗」
@@ -3359,3 +3378,64 @@ bucket `LOW` → `UNKNOWN`），**同一個 commit 內更新 golden 並移除
 
 ⚠️ **順帶**：`2867` 也是 I-105（已收斂）的來源標的——當時是它跨月當天在 live 首次
 `partial`。兩者是不同的問題，這裡只記關聯，不要當成同一筆。
+
+---
+
+### I-115：Stage 1 強制要求 `--before-ref`，但那一趟根本不用它；六步程序漏寫，正式執行第一步就失敗
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | **已修文件／待 review**（⚠️ 文件已補齊可執行的指令；**腳本的參數契約本身尚未決定要不要改**，見「待決策」） |
+| 嚴重度 | 低（不影響結果正確性，但**擋住正式執行**且錯誤訊息指不到原因） |
+| 分類 | Python / SR Zone / 腳本契約 · 文件與實作不一致 |
+| 建立日期 | 2026-09-17 |
+| 來源 | I-074 Stage 1 正式執行步驟 ② 實際踩到 |
+
+#### 事實
+
+`scripts/run-replay-offline.sh` 對 `--bundle`／`--output-dir`／`--before-ref` **三者一律**
+強制檢查（`:88`），但 Stage 1 的 worktree 建在 `AFTER_REF`（預設 `HEAD`）——
+
+```bash id="i115_stage_ref_001"
+# scripts/run-replay-offline.sh:98-102
+if [ "$STAGE" = "1" ]; then
+  SOURCE_REF="$AFTER_REF"      # ← Stage 1 用 after，--before-ref ⛔ 不參與執行
+else
+  SOURCE_REF="$BEFORE_REF"
+fi
+```
+
+所以 Stage 1 的 `--before-ref` **只進 provenance 的 `argv`**，⛔ 不決定這一趟跑哪份程式碼。
+而 `development-workflow.md` 的「I-074 Stage 1 的正式執行程序」六步裡，②（probe）與
+③（D）兩條指令**都沒寫這個必填參數**，於是 2026-09-17 正式執行時：
+
+```text id="i115_symptom_001"
+=== ① pin ===        → 成功，image ID 已釘死
+=== ② capacity probe ===
+ERROR: 需要 --before-ref.        ← 照文件抄就跑不起來
+```
+
+⚠️ **錯誤訊息⛔ 指不到原因**：它說「需要 `--before-ref`」，但使用者照著的是一份
+**宣稱完整**的執行程序，而且這個參數在 Stage 1 還不影響執行——很難想到要去翻腳本原始碼。
+
+#### 已做的處置（2026-09-17）
+
+`development-workflow.md` 的六步程序 ②③ 補上 `--before-ref ecbc141^`，並寫明：
+
+* I-074 的 before 版固定是 **`ecbc141^`**（`ecbc141` ＝ T-044 Lifecycle Engine 抽離，
+  `lifecycle_engine.py` 是該 commit 才新增的）。
+* ⛔ **不要寫成 `HEAD^` 這種會漂移的表達式**——D 與 D+1 的 `argv` 必須逐 token 相同，
+  綁固定 SHA 才拿得到同一個值。
+
+#### 待決策（⛔ 不要順手改掉，會動到 provenance 契約）
+
+要不要讓 Stage 1 的 `--before-ref` 變成**非必填**？兩邊都有道理：
+
+| 主張 | 理由 |
+|---|---|
+| 維持必填 | Stage 1 產出的 after artifact 本來就**是為了跟某個 before 版比**；把「要比誰」記進 provenance 能讓這份 artifact 自帶比對對象，Stage 2 才有唯一版本入口 |
+| 改為選填 | Stage 1 不用它卻擋住執行，且 `argv` 進 provenance 後**會成為跨日比對的一部分**——一個不影響結果的參數卻能讓 D／D+1 判 mismatch |
+
+⚠️ 改之前要先確認：`provenance_differences()` 逐欄比對全部 10 欄，`argv` 只正規化
+`--output-dir`。動 `--before-ref` 的必填性**會改變 `argv` 的形狀**，對已產出的 artifact
+不相容。I-074 這一輪⛔ 不要動它——先跑完，之後再決定。

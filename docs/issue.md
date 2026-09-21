@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **待執行**（⚠️ **2026-09-17**：③ 第一次實跑被 cgroup OOM 殺掉，**根因已定位並修正**——尾段整份 JSON 一次成形，序列化增量 **+351 MiB**，改串流後降到 **+2 MiB**，見下方「③ 第一次執行：OOM 失敗」與「修正」。⚠️ **D／D+1 兩趟都要重跑**）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／待 Stage 2**（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -562,7 +562,9 @@ before**，⛔ 不是舊文的「一趟 after ＋ 一趟 before」。
 
 ##### ①②實際執行結果（2026-09-17，上表的估算已由實測取代）
 
-步驟 ① pin 與 ② capacity probe 都已完成（rc=0）。**③ D 尚未執行。**
+步驟 ① pin 與 ② capacity probe 都已完成（rc=0）。
+⚠️ **本節是 2026-09-17 當下的紀錄**——③ 當時尚未執行，
+**已由 2026-09-18 的「Stage 1 正式執行結果」取代**（D／D+1／仲裁全部跑完、`MATCH`）。
 
 | 項目 | 值 | 判讀 |
 |---|---|---|
@@ -737,7 +739,8 @@ before ＝ `ecbc141^`，而 `lifecycle_engine.py` 是 `ecbc141` 才新增的（`
 **已依 v17 計畫書實作完成，2026-09-14 review 已確認實作方向、⛔ 無高／中嚴重度問題。**
 （v16 的 review 抓到 3 中 1 低，修正內容見修訂表 v17 與下方各列的 ⚠️ 標註。）
 
-⚠️ **review 通過的是 Stage 0，⛔ 不是本筆**：I-074 的狀態仍是「待執行」——決策樹的三個分支
+⚠️ **review 通過的是 Stage 0，⛔ 不是本筆**：I-074 當時的狀態是「待執行」
+（⚠️ **截至 2026-09-16**；Stage 1 已於 2026-09-18 執行完畢並 `MATCH`）——決策樹的三個分支
 都還沒被走完，正式 Stage 1／2 尚未執行。⛔ 本筆在那之前不得移除。
 
 | 檔案 | 內容 |
@@ -786,7 +789,8 @@ v16 記的是 host 上的 `npx tsc --noEmit`——那條在這台 2GiB 的機器
 「Decision Replay 的診斷欄位（I-074 Stage 0）」；Stage 2 兩種 terminal outcome 與結束碼 4
 補進 [`development-workflow.md`](./development-workflow.md) 的驗收章節。
 
-⛔ **尚未執行**：正式 Stage 1／2（那是下一階段，且依已確認的計次裁決，D／D+1 兩趟 after
+⛔ **截至 2026-09-16 尚未執行**（⚠️ **Stage 1 已於 2026-09-18 完成**，見上方
+「Stage 1 正式執行結果」；此處保留當時敘述）：正式 Stage 1／2（那是下一階段，且依已確認的計次裁決，D／D+1 兩趟 after
 合為一次）。
 
 #### Stage 1 計畫書（v1～v25，2026-09-16 收斂）
@@ -976,27 +980,45 @@ shell 測試把實際輸出正規化後**逐 token 比對**）。
   mount**。「argv 通過、單一 mount 紅」因此完全可以並存，⛔ 不能用來反推 `CMP_OUT` 為空。
 * 有效路徑下，新 helper 與舊算法的結果**逐字相同**，mount 比對本身也沒有改動。
 
-⚠️ **2026-09-17：同型失敗第二次出現——⛔ 不是偶然。**
+#### ✅ 根因已定位並修正（2026-09-18）：`printf | grep -q` 在 `pipefail` 下的 SIGPIPE 競爭
 
-| | 第一次 | 第二次 |
-|---|---|---|
-| 失敗斷言 | **comparator** 的 identity same-path `:ro` | **finalizer** 的 identity same-path `:ro` |
-| 情境 | 完整 `python/scripts/test.sh` | 完整 `python/scripts/test.sh` |
-| argv 逐 token 比對 | ✅ 通過 | ✅ 通過 |
-| 單獨重跑 | ✅ 全過 | ✅ 全過（連跑 3 次） |
-| 完整流程再跑 | — | ✅ 通過（⛔ 未重現） |
+⚠️ 這條斷言先後非決定性失敗**兩次**（第一次 comparator、第二次 finalizer，都是 identity
+那一份、都在完整 `python/scripts/test.sh` 裡、單獨重跑都通過）。根因是 **shell 寫法**，
+⛔ 與 identity、docker、記憶體壓力**全都無關**：
 
-**共同特徵**：⚠️ **兩次都是「identity」那一份**——同一段測試裡的 `--d`／`--d1`／
-`--source` 掛載都正常，只有由 `XDG_DATA_HOME` 推導、經 `ensure-i074-run-identity.py`
-建立的那一份出問題。⚠️ 而且 `ensure_identity()` 的 rc 檢查與「identity 檔存在」檢查
-**都沒有報錯**，所以⛔ 不是「identity 沒建出來」。
+```bash id="i074_sigpipe_race_001"
+# ⛔ 舊寫法
+if printf '%s\n' "$CMP_OUT" | grep -qx -- "$target:$target:ro"; then
+```
 
-**現況**：直接原因**仍然未知**，⛔ 兩次都沒能在可觀察的情況下重現。
-診斷已就位且**兩段都有**（第一次只加在 comparator，第二次才發現 finalizer 沒有）：
-失敗時印出**預期 mount、實際 `-v` token、identity 是否存在、`readlink -f` 的實體路徑、
-argv 裡的 `--run-identity` 值**，並把**完整 dry-run 輸出與環境（`TMPDIR`／`PWD`／
-temp 目錄的實體路徑）落地成檔案**——⚠️ 現場只有一次，⛔ 不能再讓它消失。
-⛔ **在抓到現場之前不得以「重跑通過」收斂。**
+腳本開頭是 `set -euo pipefail`。**`grep -q` 一找到匹配就立刻退出**，此時 `printf` 若還沒把
+剩下的輸出寫完就會收到 **SIGPIPE**，於是 pipeline 的結束碼變成非零——
+⚠️ **即使字串明明匹配成功**，`if` 仍走 else 分支。
+
+⚠️ **這就是它「非決定性」的來源**：觸發與否取決於 `printf` 寫入與 `grep` 退出的時序，
+輸出愈大愈容易撞上。也解釋了先前所有觀察：
+argv 逐 token 比對用的是 `[ "$A" = "$B" ]`（⛔ 沒有 pipe）所以從不失敗；
+單獨重跑時序不同所以通過；診斷印出來的「實際 mount」永遠是對的——**因為它本來就是對的**。
+
+**修正**：改用 here-string，⛔ 不經 pipe。
+
+```bash id="i074_sigpipe_fix_001"
+# ✅ 新寫法
+if grep -qx -- "$target:$target:ro" <<< "$CMP_OUT"; then
+```
+
+**反向驗證**（`scripts/test-doc-refs.sh`，同型寫法）：
+
+| 版本 | 20 次執行的失敗次數 |
+|---|---|
+| `printf \| grep -q`（舊） | **4 次**（20%） |
+| `grep -q <<<`（新） | **0 次** |
+
+⚠️ **⛔ 這不只是測試的問題**——任何 `set -o pipefail` 的腳本裡，
+`大量輸出 | grep -q` 都有同樣的競爭。`scripts/test-replay-args.sh` 已全部改掉：**6 處斷言**（2026-09-21 補上漏網的
+`--i074-preflight` 那條）、**3 處 fail 分支的診斷輸出**，以及 **2 處 `| head -1`**
+——⚠️ `head` 同樣**會提早退出**，⛔ 不要只盯著 `grep -q`。
+剩下的 `sed`／`awk`／`wc` 都會讀完輸入，⛔ 不具這個風險。
 
 ##### 調查時另外發現並修正的兩個缺陷（⚠️ 與上述偶發失敗的因果**未經證實**）
 
@@ -1024,6 +1046,64 @@ temp 目錄的實體路徑）落地成檔案**——⚠️ 現場只有一次，
 | `python/scripts/test.sh` | **1219 passed, 1 skipped** |
 | `scripts/test-replay-args.sh` | **103 條斷言**全過（由 `python/scripts/test.sh` 以 `IMAGE_REQUIRED=1` 自動先跑） |
 | `scripts/smoke-replay-offline.sh` | 全過，`after rows=35 cohort=0 comparison=0`（⚠️ **工作區乾淨時亦然**——空 patch 的處理見上） |
+
+##### ✅ Stage 1 正式執行結果（2026-09-17～18）
+
+| 步驟 | 時間 | 結果 |
+|---|---|---|
+| ① pin | 2026-09-17 | image `sha256:d66030dca485…` 釘死，identity 建立 |
+| ② probe | 2026-09-17 | 200 列／165 秒；⚠️ 峰值 265 MiB **但那個數字⛔ 不能外推**（見下方 probe 缺陷） |
+| ③ D（第一次） | 2026-09-17 | ⛔ **OOM 失敗**，183 分鐘後 SIGKILL、零產出（見下節） |
+| ③ D（重跑） | 2026-09-17 16:42→19:42 | ✅ **180 分鐘跑完**，13,417 列、候選 **156** |
+| ④ D+1 | 2026-09-18 09:16→12:18 | ✅ **182 分鐘**，13,417 列、候選 **156** |
+| ⑤ 仲裁 | 2026-09-18 | ✅ **rc=0 `MATCH`** |
+
+**跨日比對結果**：
+
+```text id="i074_stage1_match_001"
+outcome                 MATCH
+d_only                  0 筆     ← D 有而 D+1 沒有的列
+d1_only                 0 筆     ← 反向
+provenance_differences  0 筆     ← 正規化 argv 的 --output-dir 後，10 欄逐欄無差異
+```
+
+⚠️ **候選集合也逐 key 相同**（⛔ 不只是數量相同）。
+
+⚠️ **「10 欄逐欄相同」要講精確**（⛔ 不要簡化成「只有 generated_at 不同」）：
+
+| 項目 | 狀態 |
+|---|---|
+| 頂層 `generated_at` | **不同**——⚠️ 它是 artifact 的**頂層欄位**，⛔ **不是** provenance 的一欄 |
+| `argv` 裡的 `--output-dir` | **不同**（兩趟本來就要用不同的全新目錄） |
+| **10 個 provenance 欄位** | ⚠️ **把 `argv` 的 `--output-dir` 正規化之後**，逐欄**無差異** |
+
+⛔ 所以⛔ 不能說「provenance 完全相同」——`provenance_differences()` 是**先正規化
+`--output-dir`**，其餘才全等；這正是它為什麼要有那段正規化邏輯。
+
+**證據位置**：`python/baselines/i074_stage1/`，**10 檔 14 MB**（9 個 `.json.gz` ＋
+`evidence_manifest.json`），整包一次 rename 發布。
+
+##### ⛔ 分支 A 已排除——**必須跑 Stage 2**
+
+候選數 **156 > 0**，且**跨日穩定重現**。所以：
+
+* ⛔ **走不到「零命中即收斂成已知限制」**那條路；
+* 需要 Stage 2（before 全掃）才分得出 **B**（如預期翻轉）或 **C**（不符預期／集合不一致）；
+* Stage 2 的前置盤點與那個**謂詞不對稱**的設計題見下方「Stage 2 的前置盤點」。
+
+##### ⚠️ comparator 也有容量問題（2026-09-18 實測，⛔ 尚未解決）
+
+⑤ 的 comparator 要**同時載入 D 與 D+1 兩份 78 MB artifact**（`build_crossday()` 要算
+`d_only`／`d1_only` 差集，兩邊的 rows 必須同時在場），實測**單份載入 +365 MiB、兩份約 730 MiB**，
+而 mem-guard 在常態下只給得出 **531m**——⛔ 必然 OOM。
+
+⚠️ 這次是**停掉全部 7 個常駐 container**（釋放約 490 MB，available 670→1158 MB）
+再以 `MEM=900m` 跑過的，跑完立刻還原。⛔ **那是權宜之計，⛔ 不是解法**：
+
+* ⚠️ Stage 2 會撞上**同一道牆**（它也要載入兩份全量 artifact 逐列比對）；
+* ⛔ 停 live 服務換記憶體⛔ 不能變成常態程序；
+* 真正的解法是讓比對走**串流**——⚠️ 但那與 Stage 1 的「串流寫出」是**不同的問題**
+  （這次是**讀入**），⛔ 不能沿用同一個修法。
 
 ##### ③ 第一次執行：**OOM 失敗**（2026-09-17，⛔ 沒有產出任何 artifact）
 
@@ -1082,6 +1162,8 @@ after artifact 走 `write_canonical_atomic()`、manifest 走 `publish_artifacts(
 但兩條路徑最後都以 `os.replace` 原子發布。盯發布動作本身，換實作也不會讓守衛失效。
 
 ⛔ **本筆在容量問題解決前無法往下走**——④⑤ 都建立在「③ 有 artifact」之上。
+⚠️ **這段是 2026-09-17 OOM 當下的判斷**；容量問題已於同日修正，
+**D／D+1／⑤ 已於 2026-09-18 全部完成**，⛔ 不要再依本段暫停 ③。
 
 ###### ⚠️ 這一次⛔ 不適用「D 之後不得 commit」的凍結窗口
 
@@ -1094,12 +1176,63 @@ after artifact 走 `write_canonical_atomic()`、manifest 走 `publish_artifacts(
 | **無 artifact 的 OOM ⛔ 不算一次正式 scan** | 「只執行一次有界定向驗證」的計次⛔ 不因本次消耗——⚠️ 它連 artifact 都沒產出，⛔ 沒有任何可判讀的結果 |
 | **凍結窗口解除** | 本次 D 作廢，⛔ 沒有任何東西需要與它對齊；修復期間**可以正常 commit** |
 | **重新開始** | 容量問題修好後，D／D+1 **兩趟都要重跑**，凍結窗口從**新的 D** 開始重新計算 |
-| **步驟 ③ 暫停** | ⛔ **在容量問題解決前，⛔ 不要再照六步程序執行 ③** |
+| ~~**步驟 ③ 暫停**~~ | ⚠️ **2026-09-18 解除**——OOM 已修、D／D+1 已跑完；此列保留為當時的處置紀錄 |
+
+#### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
+
+D 的候選數是 **156（> 0）**，所以⛔ 走不到分支 A，**Stage 2 幾乎確定要跑**。
+趁 ④ 執行時把前置條件盤清楚：
+
+**① 範圍是全量，⛔ 不是只跑 156 列。** `evaluation.py` 的 Stage 2 明寫
+`assert_same_keys(keys, after_keys, "② before 全範圍 vs after rows")`，
+理由也寫在程式裡：「⛔ 只用 after 的 cohort 過濾會讓 before 多出來的候選被**靜默漏掉**」。
+所以成本與 D 同級（實測 **180 分鐘**）。
+
+**② before 版沒有 bundle CLI，也沒有 `lifecycle_engine.py`。**
+`git ls-tree` 實查：`ecbc141^` 底下 `replay_bundle/` **一個檔都沒有**。
+所以 Stage 2 的 worktree 必須靠 `TOOLING_PATCH` 把整套 bundle CLI 套進去。
+
+**③ ✅ 好消息：before 版要帶出來的中間變數**全部**已經存在**`ecbc141^` 的 `decision_engine.py` 第 946-975 行——`price_follow_through`／`momentum_state`／
+`rr_qualified`／`clear_zone_breakout` 都是現成的區域變數，而且全在**同一個函式內**
+（不像 after 版分散在三個檔案）。⚠️ 所以 before tooling 是「**把既有中間結果帶出來**」，
+⛔ **不是重新實作判定**——與 Stage 0 對 after 版做的事完全對稱，風險比預期低。
+
+**④ ⚠️ 但有一個設計層級的問題必須在計畫書裡先解決：candidate 的謂詞在兩版⛔ 不對稱。**
+
+```python id="i074_candidate_asymmetry_001"
+# after（decision_engine.py:1140-1142）
+"rr_decoupling_candidate": bool(lifecycle_phase == "CONTINUATION" and not rr_qualified)
+
+# before（ecbc141^ decision_engine.py:958-963）——CONTINUATION 的條件**本身就含 rr_qualified**
+elif event_signal == "CLOSE_RECLAIM" and (
+        price_follow_through == "PRICE_UPSIDE_FOLLOW_THROUGH"
+        and momentum_state == "MOMENTUM_CONFIRMED"
+        and rr_qualified          # ← 正是本筆要驗的那個條件
+        and clear_zone_breakout):
+    lifecycle_phase = "CONTINUATION"
+```
+
+⚠️ **把 after 的謂詞原樣搬到 before，結果恆為 `False`**（CONTINUATION 蘊含 `rr_qualified`，
+所以 `CONTINUATION and not rr_qualified` 永遠不成立）。於是 before 的候選集合必然是空的，
+而 after 有 156——⛔ **那會讓「兩邊候選集合必須完全相同」這道檢查必然落空**，
+被誤判成分支 C（tooling 不對稱），但實際上是謂詞定義的問題。
+
+⛔ **這一點⛔ 不在本節裁決**，它是 Stage 2 計畫書要處理的第一個設計題。方向大致有：
+
+| 方向 | 內容 | 要注意 |
+|---|---|---|
+| 版本無關的謂詞 | 用「三項價格證據齊備 ＋ `not rr_qualified`」這種**兩版都算得出來**的條件當 candidate | ⚠️ 要確認它與 after 現有的 156 列**完全同集合**，否則等於換了驗證對象 |
+| 兩版各自定義 | before 用「若移除 `rr_qualified` 則會變成 CONTINUATION」的反事實條件 | ⚠️ 那是在 before 版裡模擬 after 的行為，⛔ 容易變成「用實作驗實作」 |
+
+⚠️ 無論走哪個方向，**`sr-zone-scoring.md` 的九個診斷欄位 schema 是 before 側也要對齊的契約**
+（2026-09-11 已定），⛔ 不是只補 `rr_decoupling_candidate` 一欄。
 
 #### 正式 scan 的計次裁決（2026-09-11 使用者明文確認）
 
-⚠️ **從 Stage 0 計畫書移出**（2026-09-16 收斂計畫書時）：這是**尚未執行**的政策，
-⛔ 不能跟著計畫書一起刪。
+⚠️ **從 Stage 0 計畫書移出**（2026-09-16 收斂計畫書時）：移出當下**尚未執行**，
+⛔ 不能跟著計畫書一起刪。⚠️ **Stage 1 已於 2026-09-18 依此政策執行完畢**
+（D／D+1 兩趟 ＋ 仲裁 `MATCH`，見上方「Stage 1 正式執行結果」）；
+本節保留為**政策本身**，⛔ 不是待辦事項。
 
 | 條款 | 內容 |
 |---|---|

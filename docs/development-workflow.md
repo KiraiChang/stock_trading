@@ -985,6 +985,12 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
              --recover-durability
 ```
 
+✅ **2026-09-18：Stage 1 已完整跑完（D／D+1／仲裁），`outcome = MATCH`（rc=0）**，
+證據封存在 `python/baselines/i074_stage1/`。⚠️ 候選數 **156 > 0**，⛔ 分支 A 已排除。
+⚠️ **⑤ 的 comparator 要同時載入兩份 78 MB artifact（實測約 730 MiB），常態的 531m ⛔ 不夠**
+——這次是停掉全部常駐 container 再以 `MEM=900m` 跑過的，⛔ **那是權宜之計**，
+Stage 2 會撞上同一道牆。詳見 `issue.md` I-074。
+
 ⚠️ **2026-09-17：③ 的 OOM 已修**——第一次實跑被 cgroup OOM 殺掉（結束碼 137、
 ⛔ 沒有產出任何 artifact、燒掉 183 分鐘）。⛔ **成因⛔ 不是 replay 過程累積**
 （實測過程中 RSS 穩定在 190～205 MiB），是**最後一步整份 JSON 一次成形**：
@@ -1022,6 +1028,13 @@ Lifecycle Engine 抽離，`lifecycle_engine.py` 是該 commit 才新增的）。
 ⚠️ 用 `ecbc141^` 這種**綁定固定 SHA** 的寫法，D 與 D+1 才會拿到同一個值——
 ⛔ 不要寫成 `HEAD^` 之類會隨時間漂移的表達式。
 
+⚠️ **`REPLAY_DRY_RUN=1` 對 ⑤ ⛔ 無法端到端**（2026-09-18 實測）：orchestrator 的
+comparator 在 dry-run 下**只印 argv、⛔ 不產出 `crossday_artifact.json`**，而 finalizer 的
+`replay_args_require_file` 要求那份來源檔存在，於是整串在 finalizer 卡住（rc=1）。
+⛔ **那不是設定錯誤**，是 dry-run 與「orchestrator 自己綁定本次產物」的固有矛盾。
+要驗參數形狀就**分兩段各驗一次**：comparator 用 `compare-replay-crossday.sh`、
+finalizer 用 `finalize-evidence.sh` 並自備一份 placeholder crossday artifact。
+
 **結束碼**（⚠️ 都是**終止狀態**，⛔ 不是失敗殘骸）：
 
 | rc | 意義 |
@@ -1048,16 +1061,24 @@ rc=5 → ⚠️ 跨日不一致。證據已封存，⛔ 立案調查，⛔ 不�
 rc=0 → ✅ 才進入下面的 A／B／C
 ```
 
-**取候選數**（`rr_decoupling_candidate` 為 `true` 的列）：
+**取候選數**（`rr_decoupling_candidate` 為 `true` 的列）——⚠️ **封存後要讀 evidence root
+裡的 `.json.gz`**，⛔ 不要再讀 repo 外那份未壓縮的 operational artifact（它是暫時產物）：
 
 ```bash id="i074_count_candidates_001"
 python3 -c "
-import json;d=json.load(open('$HOME/i074_stage1_run/d1/after_artifact.json'))
-rows=d['rows']; cand=[r for r in rows if r.get('rr_decoupling_candidate') is True]
+import gzip, json
+p = 'python/baselines/i074_stage1/d1/after_artifact.json.gz'
+d = json.loads(gzip.decompress(open(p, 'rb').read()))
+rows = d['rows']; cand = [r for r in rows if r.get('rr_decoupling_candidate') is True]
 print('總列數', len(rows)); print('候選數', len(cand))
-for r in cand[:20]: print(' ', r.get('symbol'), r.get('as_of'), r.get('lifecycle_phase'), r.get('setup_rr_qualified'))
+for r in cand[:20]:
+    print(' ', r.get('symbol'), r.get('as_of'), r.get('lifecycle_phase'), r.get('setup_rr_qualified'))
 "
 ```
+
+⚠️ 要做**完整驗證**（SHA、schema、跨檔關聯）時⛔ 不要自己解壓比對，
+用正式 loader：`replay_bundle.load_canonical_evidence_artifact()`，
+它會一併驗 canonical gzip 的 round-trip 與 artifact kind。
 
 | 候選數 | 分支 | 下一步 |
 |---|---|---|
@@ -1217,7 +1238,23 @@ ID_ABS="$(replay_args_abs_path "$IDENTITY" "run identity")"
 `docker -v` 對不存在的來源會**自己建成目錄**，於是錯誤延後到容器內才爆，訊息也變成
 「不是檔案」這種指不到原因的樣子。
 
-**四、斷言失敗時⛔ 要印出可比對的證據。**
+**四、⛔ 不可用 `大量輸出 | grep -q`——`pipefail` 下那是競爭條件。**
+`grep -q` 一找到就退出，`printf`／`cat` 若還沒寫完就收到 **SIGPIPE**，
+於是 `set -o pipefail` 讓整個 pipeline 回非零——⚠️ **即使字串明明匹配成功**。
+輸出愈大愈容易撞上，表現出來就是「偶爾失敗、重跑又過」。
+
+```bash id="pipefail_grep_race_001"
+# ⛔ 錯：I-074 的 identity mount 斷言就是這樣非決定性失敗兩次的
+if printf '%s\n' "$OUT" | grep -qx -- "$target"; then
+# ✓ 對：here-string ⛔ 不經 pipe
+if grep -qx -- "$target" <<< "$OUT"; then
+```
+
+⚠️ **實測**（`scripts/test-doc-refs.sh`）：pipe 版 20 次失敗 **4 次**，
+here-string 版 **0 次**。⚠️ 診斷用的 `grep -A1`／`grep -v`／`tail` 風險低——
+它們**會讀完輸入**，⛔ 不像 `grep -q` 會提早退出。
+
+**五、斷言失敗時⛔ 要印出可比對的證據。**
 偶發失敗只有一次現場。斷言只寫「不相符」而不印**預期值與實際值**，那一次就白費了，
 於是只剩「重跑一次看看」——⛔ 那不是收斂，是把問題留到下次。
 

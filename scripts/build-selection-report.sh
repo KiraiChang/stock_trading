@@ -61,7 +61,7 @@ MEM="$(mem_guard_clamp "$MEM")"
 
 if [ -z "${DB_DSN:-}" ]; then
   DB_DSN="$(docker inspect "$DSN_FROM" -f '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-    | sed -n 's/^DATABASE_DSN=//p' | head -1)"
+    | sed -n 's/^DATABASE_DSN=//p' | sed -n '1p')"
   if [ -z "$DB_DSN" ]; then
     echo "ERROR: 從 $DSN_FROM 讀不到 DATABASE_DSN（live stack 沒起來？）。" >&2
     echo "       可用 DB_DSN=... 直接指定，或 DSN_FROM=<container> 換來源。" >&2

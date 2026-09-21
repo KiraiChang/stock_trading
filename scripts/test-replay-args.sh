@@ -215,6 +215,63 @@ else
   fail "新增檔案沒有進 diff——tooling patch 沒被完整涵蓋"
 fi
 
+# ⚠️ **untracked 守門的 SIGPIPE 迴歸**（2026-09-21 review）：舊寫法
+# `git status --porcelain | grep -q '^??'` 在 `pipefail` 下有競爭——`grep -q` 一找到就退出、
+# `git` 收到 SIGPIPE，整條 pipeline 回非零，於是 `if` 走不進去、**守門反而被繞過**。
+#
+# ⛔ **⛔ 不能用「在 worktree 裡放一堆檔案」來測**：`replay_args_tooling_patch_sha256()`
+# 會先跑 `git add -A -N`，把 untracked **全部吸收成 intent-to-add**，`??` 根本不會出現
+# ——那樣測到的是「沒有 untracked」，⛔ 不是守門本身。所以這裡直接驗**比對模式**：
+# 大量輸出下仍要找得到 `??`，且結束碼正確。
+# ⚠️ **要讓 helper 本身收到大量 `??`**（⛔ 不是只測旁邊的 grep）：
+# 用 PATH 注入假 `git`，讓 `status --porcelain` 吐 5000 行 untracked，
+# 其餘子命令（`add`／`diff`／`rev-parse`）一律成功且無輸出。
+FAKE_GIT_DIR="$TMP_REPO/../fakegit-$$"
+mkdir -p "$FAKE_GIT_DIR"
+cat > "$FAKE_GIT_DIR/git" <<'FAKEGIT'
+#!/usr/bin/env bash
+# ⚠️ 只為這條測試存在：讓 `status --porcelain` 產生大量 ?? 行。
+for a in "$@"; do
+  if [ "$a" = "status" ]; then
+    for i in $(seq 1 5000); do printf '?? many/file_%s.txt\n' "$i"; done
+    exit 0
+  fi
+done
+exit 0
+FAKEGIT
+chmod +x "$FAKE_GIT_DIR/git"
+WT5="$TMP_REPO/../wt5-$$"
+mkdir -p "$WT5"
+set +e
+many_out="$(PATH="$FAKE_GIT_DIR:$PATH" replay_args_tooling_patch_sha256 "$WT5" "$BASE_OID" 2>&1)"
+many_rc=$?
+set -e
+rm -rf "$WT5" "$FAKE_GIT_DIR"
+if [ "$many_rc" -ne 0 ] && grep -q "仍有 untracked" <<< "$many_out"; then
+  pass "helper 收到 5000 行 ?? 時確實回非零並報漏檔（⛔ 無 SIGPIPE fail-open）"
+else
+  fail "大量 untracked 未被 helper 擋下：rc=$many_rc"
+fi
+
+# ⚠️ 靜態確認產品端⛔ 不是用 pipe——用 `-F` 字面比對，
+# ⛔ 不要用 ERE：`\|` 在不同 grep 實作下語意不一致（本機是 ugrep），
+# pattern 不匹配會讓這條斷言**永遠是綠的**（2026-09-21 反向驗證抓到）。
+if grep -qF 'status --porcelain | grep -q' "$REPO_ROOT/scripts/lib/replay-args.sh"; then
+  fail "lib 仍用 git status | grep -q（⛔ pipefail 下的 SIGPIPE 競爭）"
+else
+  pass "lib 的 untracked 守門⛔ 不經 pipe"
+fi
+
+# ⚠️ `git status` 自己失敗時也⛔ 不得靜默放行。
+WT6="$TMP_REPO/../wt6-$$"
+mkdir -p "$WT6"                      # ⛔ 不是 git worktree，status 會失敗
+set +e
+bad_out="$(replay_args_tooling_patch_sha256 "$WT6" "$BASE_OID" 2>&1)"; bad_rc=$?
+set -e
+rm -rf "$WT6"
+[ "$bad_rc" -ne 0 ] && pass "git status 失敗 → 非零（⛔ 不靜默放行）" \
+  || fail "git status 失敗竟然回 0"
+
 echo "==> run-replay-offline.sh：結構性離線"
 offline_script="$REPO_ROOT/scripts/run-replay-offline.sh"
 if grep -q -- "--network none" "$offline_script"; then
@@ -520,7 +577,7 @@ print("\n".join(fx))' "$CMP_FIXTURE")"
 
   # ⚠️ **same-path 且 `:ro`** 的掛載。
   for target in "$CMP_TD/d.json" "$CMP_TD/d1.json" "$CMP_ID"; do
-    if printf '%s\n' "$CMP_OUT" | grep -qx -- "$target:$target:ro"; then
+    if grep -qx -- "$target:$target:ro" <<< "$CMP_OUT"; then
       pass "same-path :ro 掛載 $(basename "$target")"
     else
       fail "$(basename "$target") 不是 same-path :ro 掛載"
@@ -528,7 +585,7 @@ print("\n".join(fx))' "$CMP_FIXTURE")"
       # 這條曾出現過「完整跑失敗、單獨重跑通過」的非決定性結果。
       echo "    預期 mount : $target:$target:ro" >&2
       echo "    實際 -v    :" >&2
-      printf '%s\n' "$CMP_OUT" | grep -A1 -x -- '-v' | grep -v '^-v$\|^--$' | sed 's/^/      /' >&2
+      grep -A1 -x -- '-v' <<< "$CMP_OUT" | grep -v '^-v$\|^--$' | sed 's/^/      /' >&2
       echo "    dry-run 輸出行數: $(printf '%s\n' "$CMP_OUT" | wc -l)" >&2
       echo "    CMP_IMG=$CMP_IMG CMP_ID 存在=$( [ -f "$CMP_ID" ] && echo yes || echo NO )" >&2
     fi
@@ -566,10 +623,10 @@ print("\n".join(fx))' "$CMP_FIXTURE")"
       --d "$CMP_TD/typo.json" --d1 "$CMP_TD/d1.json" --output-dir "$CMP_TD/out4" 2>&1)"
   rc=$?
   set -e
-  if [ "$rc" -ne 0 ] && printf '%s\n' "$MISS_ERR" | grep -q "必須是既有檔案"; then
+  if [ "$rc" -ne 0 ] && grep -q "必須是既有檔案" <<< "$MISS_ERR"; then
     pass "--d 檔名打錯（父目錄存在）→ 明確錯誤"
   else
-    fail "--d 檔名打錯：rc=$rc 首行=$(printf '%s' "$MISS_ERR" | head -1)"
+    fail "--d 檔名打錯：rc=$rc 首行=$(head -1 <<< "$MISS_ERR")"
   fi
   [ ! -e "$CMP_TD/typo.json" ] && pass "被拒後 host 上⛔ 沒有被 docker 建出殘留" \
     || fail "host 上出現殘留：$CMP_TD/typo.json"
@@ -616,7 +673,7 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["stage1_argv"]))' 
     diff <(printf '%s\n' "$S1_EXPECTED") <(printf '%s\n' "$S1_ACTUAL") >&2 || true
   fi
   # ⚠️ flag ⛔ 不得被 shell 吃掉——它要原樣出現在容器內的 CLI。
-  printf '%s\n' "$S1_OUT" | grep -qx -- "--i074-preflight" \
+  grep -qx -- "--i074-preflight" <<< "$S1_OUT" \
     && pass "--i074-preflight 透傳進容器內的 CLI" || fail "--i074-preflight 沒有透傳"
 
   # ⛔ I-074 正式流程缺 REPLAY_IMAGE_ID → **立即拒絕**，⛔ 不自動 pin。
@@ -761,14 +818,14 @@ import json,sys
 print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' "$FIN_FIXTURE")"
   # ⚠️ **mount 也要驗**——只從 `python` token 開始比 argv 的話，前面的 Docker mounts
   # 全被丟掉，「identity 是否 :ro 掛載」這條計畫書明列的 contract 就沒人守。
-  if printf '%s\n' "$FIN_OUT" | grep -qx -- "$FIN_ID:$FIN_ID:ro"; then
+  if grep -qx -- "$FIN_ID:$FIN_ID:ro" <<< "$FIN_OUT"; then
     pass "finalizer normal：identity 以 same-path :ro 掛載"
   else
     fail "finalizer normal 的 identity 不是 same-path :ro 掛載"
     # ⚠️ **失敗要印出可比對的證據**——⛔ 不能只靠重跑收斂。
     echo "    預期 mount : $FIN_ID:$FIN_ID:ro" >&2
     echo "    實際 -v 值 :" >&2
-    printf '%s\n' "$FIN_OUT" | grep -- ':ro$' | sed 's/^/      /' >&2
+    grep -- ':ro$' <<< "$FIN_OUT" | sed 's/^/      /' >&2
     echo "    identity 檔存在=$( [ -f "$FIN_ID" ] && echo yes || echo NO )" >&2
     # ⚠️ **完整輸出落地**——這條斷言已經非決定性失敗兩次（2026-09-17 兩次都在完整
     # `python/scripts/test.sh` 流程中、單獨重跑都通過）。⛔ 現場只有一次，要留得下來。
@@ -778,7 +835,7 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' 
        printf '%s\n' "$FIN_OUT"; } > "$_dump" 2>&1
     echo "    ⚠️ 完整輸出已存到：$_dump" >&2
     echo "    realpath(FIN_ID)=$(readlink -f "$FIN_ID" 2>/dev/null || echo n/a)" >&2
-    echo "    argv 裡的 --run-identity：$(printf '%s\n' "$FIN_OUT" | grep -A1 -x -- '--run-identity' | tail -1)" >&2
+    echo "    argv 裡的 --run-identity：$(grep -A1 -x -- '--run-identity' <<< "$FIN_OUT" | tail -1)" >&2
   fi
   if [ "$FIN_ACTUAL" = "$FIN_EXPECTED" ]; then
     pass "finalizer normal argv 與 fixture 逐 token 相同"
@@ -802,10 +859,10 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["normal_argv"]))' 
       "${FIN_MISS_ARGS[@]}" 2>&1)"
   rc=$?
   set -e
-  if [ "$rc" -ne 0 ] && printf '%s\n' "$FIN_MISS_ERR" | grep -q "必須是既有檔案"; then
+  if [ "$rc" -ne 0 ] && grep -q "必須是既有檔案" <<< "$FIN_MISS_ERR"; then
     pass "finalizer：--source 指向不存在的檔案 → 明確錯誤"
   else
-    fail "finalizer --source 不存在：rc=$rc 首行=$(printf '%s' "$FIN_MISS_ERR" | head -1)"
+    fail "finalizer --source 不存在：rc=$rc 首行=$(head -1 <<< "$FIN_MISS_ERR")"
   fi
   [ ! -e "$FIN_MISS_PATH" ] && pass "finalizer 被拒後 host 上⛔ 沒有殘留" \
     || fail "host 上出現殘留：$FIN_MISS_PATH"
@@ -852,7 +909,7 @@ print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["recovery_argv"]))
   # ⚠️ **recovery ⛔ 不得以任何形式碰外部 identity**——它只讀 evidence 內的 archived copy。
   # ⛔ 只比對 `$FIN_ID:$FIN_ID:ro` 這一個精確字串是不夠的：回歸成 **RW mount** 或掛到
   # **另一個 container path** 時仍會通過。斷言**整份輸出完全不含該路徑**。
-  if printf '%s\n' "$FIN_REC" | grep -qF -- "$FIN_ID"; then
+  if grep -qF -- "$FIN_ID" <<< "$FIN_REC"; then
     fail "recovery 的指令出現了外部 identity 路徑"
   else
     pass "finalizer recovery：整份指令⛔ 完全不含外部 identity 路徑"

@@ -114,7 +114,7 @@ DB_DRIVER="${DB_DRIVER:-postgres}"
 #   3. 密碼含 `@` 之類的字元時，手抄進 DSN 很容易寫出解析錯誤的字串。
 if [ -z "${DB_DSN:-}" ]; then
   DB_DSN="$(docker inspect "$DSN_FROM" -f '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-    | sed -n 's/^DATABASE_DSN=//p' | head -1)"
+    | sed -n 's/^DATABASE_DSN=//p' | sed -n '1p')"
   if [ -z "$DB_DSN" ]; then
     echo "ERROR: 從 $DSN_FROM 讀不到 DATABASE_DSN（live stack 沒起來？）。" >&2
     echo "       可用 DB_DSN=... 直接指定，或用 DSN_FROM=<container> 換一個來源。" >&2
@@ -242,7 +242,7 @@ docker logs -f "$CONTAINER" 2>&1 &
 LOGS_PID=$!
 
 # host available 低點仍由外面取樣——那本來就不是單調值，只能取樣。
-while docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; do
+while grep -q true <<< "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)"; do
   if avail="$(mem_guard_available_mb)"; then
     if [ -z "$HOST_LOW_MB" ] || [ "$avail" -lt "$HOST_LOW_MB" ]; then
       HOST_LOW_MB="$avail"

@@ -30,6 +30,10 @@
 引用只要落在**該函式範圍內**就算對（很多引用指的是函式內部某段，⛔ 不是定義行）；
 沒有定義時則要求它出現在行號的 ±WINDOW 內。
 
+⚠️ **引用「歷史 commit 的行號」時⛔ 不要寫成 `檔名:行號` 的形式**：本工具一律拿
+**當前工作樹**的檔案驗，⛔ 驗不了 `ecbc141^` 那種舊版本的行號，只會報成漂移。
+改寫成「`<commit>` 的 `檔名` 第 N-M 行」即可。
+
 ⚠️ **要在文件裡「引述一個寫錯的引用」時，⛔ 不要寫成上面的合法形式**——
 工具分不出「這是引用」與「這是在講某個引用曾經寫錯」。把行號與識別符拆開敘述即可。
 
@@ -94,8 +98,15 @@ def resolve(name: str):
     """
     if name in _cache:
         return _cache[name]
+    # ⛔ **先看原始字串，⛔ 不要等組合成路徑才驗**（2026-09-21 review）：
+    # `ROOT / "/abs/path"` 在 pathlib 裡**會直接變成 `/abs/path`**（絕對路徑吃掉左邊），
+    # 而 `scripts/../scripts/x.py` 解析後仍在 repo 內，兩者都會通過 containment 檢查。
+    # ⚠️ 文件引用必須是**可攜的 repo-relative 路徑**——絕對路徑與 `..` 一律不收。
+    if pathlib.PurePath(name).is_absolute() or ".." in pathlib.PurePath(name).parts:
+        _cache[name] = ("missing", None)
+        return _cache[name]
     p = ROOT / name
-    if p.is_file():
+    if _is_acceptable_local_file(p):
         out = ("ok", p.read_text(encoding="utf-8", errors="replace").splitlines())
     else:
         # ⚠️ **用「路徑後綴」比對，⛔ 不是只比檔名**：文件常寫成
@@ -103,11 +114,11 @@ def resolve(name: str):
         # 只比 basename 會把這些判成歧義（repo 裡 scheduler.go / model.go 各有兩個），
         # 於是**帶了足夠路徑的正確引用反而被擋下來**。
         base = name.split("/")[-1]
-        hits = sorted(
-            h for h in ROOT.glob(f"**/{base}")
-            if "node_modules" not in str(h) and "/.git/" not in str(h)
-            and str(h.relative_to(ROOT)).endswith(name)
-        )
+        # ⚠️ **⛔ 不要用 `ROOT.glob("**/…")`**：它會**先遞迴走進** `.git/worktrees`
+        # 之類的目錄、之後才過濾——而臨時 git worktree 隨時可能被移除，
+        # 走訪途中目錄消失就丟 `FileNotFoundError`，造成偶發假紅。
+        # 改成自己走訪並在**遞迴之前**就剪掉，順便容忍走訪期間消失的路徑。
+        hits = sorted(_find_by_basename(base, name))
         if len(hits) == 1:
             out = ("ok", hits[0].read_text(encoding="utf-8", errors="replace").splitlines())
         elif hits:
@@ -118,6 +129,85 @@ def resolve(name: str):
             out = ("missing", None)
     _cache[name] = out
     return out
+
+
+_PRUNE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache"}
+
+
+def _is_acceptable_local_file(path: pathlib.Path) -> bool:
+    """直接路徑（`ROOT / name`）也要通過與 walker **同一套**檢查。
+
+    ⛔ **⛔ 不能只寫 `p.is_file()`**（2026-09-21 review）：`is_file()` 會**跟隨 symlink**，
+    而且 `name` 可能帶 `..` 或絕對路徑。於是 `linked_out/pkg/a/sample.py`、
+    `../outside/sample.py`、甚至 `.git/…` 都會**直接命中、完全繞過 walker 的防線**。
+    三道都要驗：
+
+    * `resolve()` 之後必須**仍在 ROOT 內**；
+    * 路徑元件⛔ 不得包含 `_PRUNE_DIRS`（`.git`、`node_modules`…）；
+    * **任何一段是 symlink 都拒絕**——與 walker 的「一律不跟隨」同一個契約。
+    """
+    try:
+        if not path.is_file():
+            return False
+        # ⚠️ 逐段檢查 symlink：⛔ 只看最後一段不夠，中間目錄是 symlink 一樣能跳出 ROOT。
+        probe = ROOT
+        for part in path.relative_to(ROOT).parts if _under_root_lexically(path) else []:
+            probe = probe / part
+            if probe.is_symlink():
+                return False
+        resolved = path.resolve()
+        if not resolved.is_relative_to(ROOT.resolve()):
+            return False
+        if any(part in _PRUNE_DIRS for part in resolved.relative_to(ROOT.resolve()).parts):
+            return False
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _under_root_lexically(path: pathlib.Path) -> bool:
+    try:
+        path.relative_to(ROOT)
+        return True
+    except ValueError:
+        return False
+
+
+def _find_by_basename(base: str, suffix: str) -> list[pathlib.Path]:
+    """走訪 repo 找出 basename 相符、且路徑以 `suffix` 結尾的檔案。
+
+    ⚠️ **在遞迴之前剪掉 `.git` 等目錄**，⛔ 不是先全走一遍再過濾——
+    臨時 worktree 在走訪途中被移除會丟 `FileNotFoundError`。
+
+    ⛔ **一律跳過 symlink**（2026-09-21 review）：`is_dir()` 會**跟隨** symlink，
+    於是一條指向 repo 外的目錄 symlink 就能把外部檔案掃進來當成「本地引用」，
+    symlink cycle 還會讓走訪重複甚至打轉。⚠️ 判斷用 `is_symlink()` 先擋，
+    ⛔ 不要依賴 `is_dir()`／`is_file()`。
+
+    ⛔ **只容忍「競爭造成的消失」**：`FileNotFoundError`／`NotADirectoryError` 跳過；
+    `PermissionError` 與其他 `OSError` **一律往上拋**——⚠️ 讀不到目錄代表**候選可能漏掉**，
+    而漏掉候選會讓原本該判 `ambiguous` 的引用**靜默通過**，那是 fail-open。
+    """
+    found: list[pathlib.Path] = []
+    stack = [ROOT]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except (FileNotFoundError, NotADirectoryError):
+            continue            # ⚠️ 走訪期間消失——⛔ 這一種才可以跳過
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue    # ⛔ 不跟隨：可能指向 repo 外，或形成 cycle
+                if entry.is_dir():
+                    if entry.name not in _PRUNE_DIRS:
+                        stack.append(entry)
+                elif entry.name == base and str(entry.relative_to(ROOT)).endswith(suffix):
+                    found.append(entry)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+    return found
 
 
 def _def_line(src: list[str], ident: str) -> int | None:

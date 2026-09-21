@@ -177,9 +177,18 @@ replay_args_tooling_patch_sha256() {
     git -C "$worktree" apply --index "$patch_file" || return 1
   fi
   git -C "$worktree" add -A -N >/dev/null 2>&1 || true
-  if git -C "$worktree" status --porcelain | grep -q '^??'; then
+  # ⚠️ **⛔ 不可寫成 `git status | grep -q`**：`grep -q` 一找到就退出，`git` 收到
+  # SIGPIPE 後在 `set -o pipefail` 下讓整條 pipeline 回非零——於是 `if` 走不進去，
+  # **這道 fail-closed 守門反而被繞過**。輸出愈多（untracked 愈多）愈容易撞上。
+  # ⚠️ 先把 status 取成變數（順便讓 git 自己的失敗能被看見），再用 here-string 比對。
+  local status_out
+  if ! status_out="$(git -C "$worktree" status --porcelain)"; then
+    echo "ERROR: 讀不到 worktree 的 git status——⛔ 無法確認有沒有漏檔，中止。" >&2
+    return 1
+  fi
+  if grep -q '^??' <<< "$status_out"; then
     echo "ERROR: worktree 仍有 untracked 檔案——代表還有東西漏在 tooling patch hash 外，⛔ 中止。" >&2
-    git -C "$worktree" status --porcelain | grep '^??' >&2
+    grep '^??' <<< "$status_out" >&2
     return 1
   fi
   git -C "$worktree" diff --binary "$base_commit" | sha256sum | cut -d' ' -f1

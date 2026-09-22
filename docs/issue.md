@@ -1178,10 +1178,565 @@ after artifact 走 `write_canonical_atomic()`、manifest 走 `publish_artifacts(
 | **重新開始** | 容量問題修好後，D／D+1 **兩趟都要重跑**，凍結窗口從**新的 D** 開始重新計算 |
 | ~~**步驟 ③ 暫停**~~ | ⚠️ **2026-09-18 解除**——OOM 已修、D／D+1 已跑完；此列保留為當時的處置紀錄 |
 
+#### I-074 Stage 2 計畫書 v15（2026-09-22，⚠️ **待使用者確認**）
+
+⚠️ **v15 是文件一致性收尾**（⛔ 無架構變更）：spool 清理時機**唯一裁定為
+「archive rename ＋ parent fsync 成功後才清」**（⛔ 不再是「兩者都可以」——測試 o 與
+`P_C` 容量情境需要唯一行為）、移除空表頭、測試 l 改成 archive 層措辭、
+兩處舊指向改為直接陳述。
+
+⚠️ **v14 把 v13 混進來的方案 A 拆掉**：v13 為了解釋「commit 前保留 spool」，寫成
+「spool 是 recovery 唯一的 before／after 來源」——⛔ **那等於要求 spool 具備獨立的
+hash／fsync／durability／防竄改契約，正是已拒絕的方案 A**。現在回到**純方案 B**：
+spool 只是暫存、⛔ **不是 recovery 輸入**，recovery 一律用**正式 archive 內的
+before source artifact ＋ manifest SHA ＋ 已封存的 Stage 1 after artifact**，
+而 evidence contract **必須釘住 Stage 1 after artifact 的 SHA 與位置**。
+
+⚠️ **v13 修掉 spool 清理時機的矛盾**：v12 的流程在 **commit 之前**就清 spool，
+但 durability 表與測試 o 又定義「archive 已 durable 後清理失敗仍回 0／4」——**那條路徑
+依流程不可能發生**。當時明訂 spool 在**正式 archive 之外**、commit 之前保留、rename ＋ parent fsync 都成功後才清。
+⛔ **但 v13 給的理由（「它是 recovery 唯一的 before／after 來源」）已被 v14 推翻**
+——那等於把方案 A 混進來；⚠️ **本段是歷史說明，⛔ 不是現行契約**。
+另把殘留的單檔語意與 `M` 的舊名稱一併改掉。
+
+⚠️ **v12 統一 commit point 的層級**：v11 只改了原子邊界那一節，**前面的 spool 流程、
+durability 分流與測試 m～o 仍是「`candidate_mismatch.json` 單檔 commit」的舊語意**
+——同一份文件裡兩套規則。現在一律以 **evidence archive 層**為準：staging 內的單檔換名
+⛔ **不是** terminal commit，staging 內任何失敗都回一般失敗且⛔ 無正式 archive。
+另訂正磁碟公式（`max(P_B, P_C) ＋ M_safety`，⛔ 不是 `3 × S ＋ M`——那會重複計算），
+並把 before source artifact **裁定為 Stage 2 evidence artifact**（⛔ 不改既有 replay schema）。
+
+⚠️ **v11 補掉方案 B 自己製造的第二個 rc=3**：before source artifact 若先發布，
+它的 fsync 也可能失敗，而那時 **B／C 還沒判定**——⛔ recovery **不能固定回 rc=4**。
+處置是**單一 evidence archive 一次性原子發布**，recovery 從 manifest 讀回原 terminal outcome。
+另把**謂詞設計提前到 evidence contract 之前**（schema 依賴它），harness 矩陣補上 **B／C 兩條路徑**。
+
+⚠️ **v10 裁決採方案 B 並把 evidence contract 提前**：before source artifact 會決定發布順序、
+schema、SHA 關係、B／C 兩分支的輸出集合、orphan 判定與磁碟模型，**所以 evidence 計畫書
+必須排在串流／發布實作之前**（執行順序 ②）。另把磁碟門檻標明**要由含該 artifact 的
+harness 重新證明**（⚠️ 當時的 `3 × S ＋ M` 公式已於 v12 改掉），並要求 before source artifact 的**定位二選一、⛔ 不能只留名稱**。
+
+⚠️ **v9 揭露一個阻擋點並訂正 M 的時序**：①實查 `evaluation.py` 確認
+**Stage 2 從未單獨發布 before rows**，因此 rc=3 的 recovery ⛔ **無法同時做到
+「不重跑」與「重驗來源」**——列出三個方案待裁決；②`M` 的「實測決定」與「實作前定案」
+互相矛盾，改成「sizing harness → 實測 → 裁定固定 bytes → 確認後才實作 preflight」。
+
+⚠️ **v8 原擬**讓 rc=3 有可執行出口：訂 recovery 契約（⛔ 禁止重新 replay／重建、
+重驗用同一套串流驗證、成功後恢復 rc=4、再失敗的退出碼與保留政策、必須有 recovery 測試），
+並把磁碟公式固定成 `3 × S ＋ M`（⚠️ **該公式已於 v12 改掉**——把峰值當 `M` 會重複計算 `3 × S`）。
+⛔ **但 v9 證明那還不成立**——沒有可獨立驗證的 before 來源，「不重跑」與「重驗來源」
+無法同時做到；`M` 的決定時序也矛盾。⚠️ **本段是歷史說明，⛔ 不是現行契約。**
+
+⚠️ **v7 補上 commit point 之後的終端狀態分流**：`os.replace` 成功但 `fsync_dir` 失敗時
+**保留正式檔並回 `EXIT_DURABILITY_UNCONFIRMED=3`**（沿用 Stage 1 finalizer 的既有設計），
+spool 清理失敗⛔ 不得遮蔽有效的 rc=4；另明訂 **temp validator 本身也必須串流**
+（否則整份載回記憶體會抵銷 spool），並把磁碟門檻具體化為 `3 × S ＋ margin`。
+
+⚠️ **v6 補上 spool 的完整流程契約**：`build → validate → publish → raise` 在改成 spool
+之後要重新定義（⚠️ **validator 必須驗實際 temp bytes**、⛔ 正式檔發布後才可回 rc=4），
+並補磁碟容量事前檢查與 **orphan spool／temp 的中止政策**。
+
+⚠️ **v5 補掉一個高風險容量缺口並裁決峰值方案**：①第二趟在**大型 mismatch**（最壞 13,417 筆）
+會重新 OOM（實測 535 MiB ＋ before rows），改用 **disk-backed spool**；
+②峰值驗收**裁決走 memory harness**（⛔ 不新增 limited-quota probe——200 列 probe 量不到全量
+峰值是本筆自己的教訓），且 harness 必須涵蓋 **worst-case 全量 mismatch**。
+
+⚠️ **v4 修掉 v3 的兩個實質錯誤**：①測試矩陣誤用了 crossday 的案例（candidate_mismatch 沒有 d_only_rows，而全量 key 差異會先被集合檢查②擋下）；②峰值驗收有雞生蛋問題（沒 patch 跑不起 Stage 2、跑了就是正式 scan），已列出兩個方案待裁決。evidence 計畫也改成純外部前置。
+
+⚠️ **v3 的範圍比 v2 小**：移除 `crossday.py` 改造（Stage 1 已完成，⛔ 不是 Stage 2 前置）、
+把 Stage 2 evidence contract 拆成獨立計畫書、mismatch 證據改兩趟串流。
+
+⚠️ **v2 訂正了 v1 的兩個高風險錯誤**：①容量改錯執行路徑（v1 量的是 `crossday.py`，而 Stage 2 真正跑的是 `evaluation.py`）；②candidate 謂詞方案不完整且**違反「Stage 2 ⛔ 不得重算 predicate」的 durable contract**。另補 tooling patch 的可重建性與 mismatch 契約的測試缺口。
+
+⚠️ 前置盤點（下一節）是本計畫書的事實基礎，⛔ 不要只讀其中一邊。
+
+##### 一、目標與⛔ 不做的範圍
+
+**目標**：用 before 版（`ecbc141^`）跑完同一份凍結 bundle 的全量 13,417 列，與 Stage 1
+已封存的 after 結果逐列對照，判定 I-074 決策樹的 **B**（如預期翻轉）或 **C**（不符預期／
+集合不一致）。
+
+| ⛔ 不做 | 理由 |
+|---|---|
+| ⛔ 不改任一版本的**判定邏輯** | tooling 只把既有中間結果帶出來；改判定就失去對照意義 |
+| ⛔ 不重產 bundle | 見 `development-workflow.md`「凍結 bundle 一旦選定就不得重產」 |
+| ⛔ 不動 Stage 1 已封存的證據 | `python/baselines/i074_stage1/` 是終態 |
+| ⛔ 不改 canonical JSON 的位元組輸出 | 所有既有 SHA 與 artifact 契約的根 |
+| ⛔ 不為了省記憶體停 live container | 那是 2026-09-18 的權宜之計，⛔ 不得變成程序 |
+
+##### 二、三個必須先解的子問題
+
+**① candidate 謂詞在兩版⛔ 不對稱（設計題，⚠️ 本計畫書的第一決策點）**
+
+after 的定義是 `lifecycle_phase == "CONTINUATION" and not rr_qualified`，
+但 before 的 CONTINUATION 條件**本身就含 `rr_qualified`**
+（`ecbc141^` 的 `decision_engine.py` 第 946-975 行），原樣搬過去**恆為 `False`**
+——於是 before 候選集合必然是空的、after 有 156，**會被誤判成分支 C**。
+
+⛔ **v1 建議的「三項價格證據 ＋ `not rr_qualified`」有兩個問題，v2 撤回**：
+
+1. ⛔ **條件不完整**。`resolve_lifecycle()` 的判定順序即優先序，candidate 還需要
+   **高優先失敗分支未命中**（`active_bearish_states`／`SUPPORT_RECLAIM_INVALIDATED`／
+   `BREAKDOWN`）**且** `event_signal == "CLOSE_RECLAIM"`。⚠️ 只看三項價格證據
+   會把被高優先分支吃掉的列也算進來。
+2. ⛔ **違反 durable contract**。`sr-zone-scoring.md` 明訂：
+   「**Stage 2 ⛔ 不得重算 predicate**——③ 依 after artifact 既有的欄位」、
+   「本工具**只消費、⛔ 不重算也不用近似欄位反推**」。
+   在 after 側用新謂詞重算，正是那條禁止的事。
+
+**v2 裁決方向**（⚠️ 待使用者確認）：
+
+| 側 | 做法 |
+|---|---|
+| **after** | ⛔ **不重算**，直接用已封存的 `rr_decoupling_candidate`（156 列） |
+| **before** | tooling 在**仍持有 `active_bearish_states` 的位置**計算**完整反事實**：<br>`無高優先失敗分支` ＋ `event_signal == CLOSE_RECLAIM` ＋ `三項價格證據齊備` ＋ `not setup_rr_qualified` |
+| **比對** | before 的反事實集合 vs after 已封存的集合 |
+
+⚠️ 「三項價格證據也得到 156 筆」可以留作 **sanity check**，
+⛔ **不得升格成正式 predicate**。
+
+**② before tooling：把既有中間結果帶出來**
+
+✅ **好消息**：before 版要的中間變數**全部已存在**且在**同一個函式內**
+（`price_follow_through`／`momentum_state`／`rr_qualified`／`clear_zone_breakout`），
+⛔ **不是重新實作判定**——與 Stage 0 對 after 版做的事完全對稱。
+
+⚠️ **要對齊的是九個診斷欄位的完整 schema**（見 `sr-zone-scoring.md`），
+⛔ 不是只補 `rr_decoupling_candidate` 一欄。Stage 0 已預留介面：
+`validate_diagnostics(side="before")` 存在，且**刻意不驗展開式**
+（展開式需要 `active_bearish_states`，光靠 row 算不出來）——
+⚠️ **那一項要在 before tooling 內自己驗**，它還持有原始 `event_state_summary`。
+
+**③ Stage 2 的容量（⚠️ v1 改錯了路徑，v2 訂正）**
+
+⛔ **v1 把 `crossday.py` 當成 Stage 2 的執行路徑，那是錯的**——
+`crossday.py` 是 **Stage 1 的 D／D+1 comparator**；Stage 2 真正跑的是 `evaluation.py`：
+
+| 位置 | 行為 |
+|---|---|
+| `evaluation.py:3026` `load_artifact` | **replay 之前**就完整載入 after artifact |
+| `evaluation.py:3197` `after_rows` | replay 之後 **before rows 與 after rows 同時在場**，再建兩份 by_key map |
+
+**實測真正的 Stage 2 路徑**（用已封存的 D+1 artifact，before rows 以同量級模擬）：
+
+| 階段 | 峰值 |
+|---|---|
+| 載入 after artifact | 449 MiB |
+| ＋ before rows 同時在場 | **524 MiB** |
+| ＋ 兩份 by_key map | 524 MiB（map 只存引用，⚠️ 增量小） |
+| **建議：after 只常駐頂層 ＋ 全量 keys ＋ 156 筆候選列** | **234 MiB** |
+
+⚠️ **524 MiB 對上 mem-guard 的 531m，只差 7 MiB**——而且這**還沒算 replay 本身**
+（Stage 1 實測約 197 MiB）。⛔ **現行做法估計會超過上限**（524 ＋ replay 的 ~197，⚠️ **峰值⛔ 不能直接相加**，
+這只是量級判斷）——**正式結論待改完後實測**。
+改成串流後**估**約 **431 MiB**（replay 約 197 ＋ 串流後常駐 234）。
+⚠️ **這是估算，⛔ 不是實測**——峰值⛔ 不能直接相加（配置器重用、GC 時機都會影響）。
+**正式結論只採「改完之後，在釘死的 image 與 cgroup 下實跑 Stage 2 量到的峰值」。**
+
+**改法：兩趟串流**（⚠️ v2 只寫一趟，⛔ 那產不出 mismatch 證據）。
+
+⛔ **只留 156 筆 after candidate 是不夠的**：若 before 多出候選，
+那個 key 在 after 側正是 `candidate=false`，**根本不在那 156 筆裡**。
+而 mismatch 契約要求「**差集裡每個 key 的兩側 row 都要存**」，
+validator 第三層還要驗「內嵌的兩側 row **就是**本次 replay 的實際 row」。
+
+| 趟次 | 時機 | 常駐內容 |
+|---|---|---|
+| **第一趟** | **replay 之前** | 完成全量 schema／diagnostics 驗證、算出 artifact SHA、全量 keys（13,417 tuple）、156 筆 candidate rows |
+| **第二趟** | **只在集合不一致時** | 依 symmetric difference 的 key 集合，回頭擷取那些 key 的 after rows |
+
+⚠️ **第二趟必須防 TOCTOU**：重新讀取後算出的 SHA **必須與第一趟、以及 cohort manifest
+記的值完全相同**——⛔ 不符就中止，⛔ 不得用「檔案應該沒變」當理由。
+
+⛔ **第二趟⛔ 不得把命中的 after rows 全部留在記憶體**（v4 漏了這一點）。
+**差集沒有大小上限**：before tooling 只要出系統性錯誤，就可能**全部 13,417 筆都 mismatch**。
+而契約明寫 `candidate_mismatch` **⛔ 不截斷**、差集每個 key 的**兩側完整 row 都要存**、
+且它是**正式終端證據⛔ 不得用重跑取代**。
+
+**實測最壞情況**：第二趟取回全部 13,417 筆 after rows ＝ **535 MiB**，
+再加上仍在記憶體的 before rows（同量級）→ **700+ MiB**
+——⚠️ **那會重現本輪正在修的問題，而且剛好發生在最需要保住證據的分支 C。**
+
+**處置：disk-backed spool**（⚠️ ⛔ 不接受「只測一兩筆 before-only／after-only」）：
+
+⚠️ **⛔ 不能只寫「寫 spool 再串流發布」**——現行契約要求
+**`build → validate → publish → raise` 的順序**，而 `validate_candidate_mismatch()`
+吃的是完整的 `before_by_key`／`after_by_key`、`write_canonical_atomic()` 吃的是完整 object。
+改成 spool 之後，這條流程要重新定義：
+
+```text id="i074_mismatch_spool_flow_001"
+建 spool（第二趟逐筆落地）
+  → 驗 spool：key 集合、唯一性、來源 row、candidate 方向與計數
+  → 在 **evidence staging 內**串流寫 candidate_mismatch temp
+  → ⚠️ 對**實際 temp bytes** 做完整 validator ＋ SHA 驗證
+  → fsync temp
+  → os.replace 成 staging 內的 candidate_mismatch.json
+     ⛔ **這⛔ 不是 terminal commit point**——只是 staging 內部的原子換名
+  → （B 分支則改寫 comparison／report 到同一個 staging）
+  → 驗整份 manifest 與所有 SHA
+  → **staging archive → 正式 evidence archive 的 rename**  ← ⚠️ **唯一的 commit point**
+  → fsync parent dir
+  → ⚠️ **到這裡才清 spool**（唯一裁定；⛔ recovery 不依賴它，但行為要唯一）
+  → 依 manifest 的 terminal outcome 回 **0 或 4**
+```
+
+⚠️ **spool 的位置與清理時機是契約的一部分**：
+
+⛔ **v13 曾寫「spool 是 recovery 期間唯一的 before／after 來源」——那是錯的，
+而且等於把已拒絕的方案 A 混了進來**。spool **只存第二趟取得的 after rows**、
+在 archive 之外、⛔ 不屬於 manifest；若 recovery 依賴它，就必須替它定義
+**獨立的 hash、fsync、durability 與防竄改契約**——⛔ **那正是方案 A。**
+
+| 項目 | 規則（**純方案 B**） |
+|---|---|
+| 定位 | ⚠️ **spool 只是暫存**，⛔ **不是 recovery 輸入** |
+| commit 前的用途 | 與 **staging 內的 before source artifact** ＋ **Stage 1 已封存的 after artifact** 一起，用來**驗證 terminal artifact** |
+| **清理時機（唯一裁定）** | ⚠️ **archive rename ＋ parent fsync 都成功後才清 spool**——⛔ 不是「兩者都可以」，測試 o 與 `P_C` 容量情境需要**唯一行為** |
+| `finally` | ⚠️ **rc=3 路徑的 `finally` 可以提前清**——⛔ recovery 不依賴 spool，所以⛔ 不需要為它排除 `DurabilityUnconfirmed` |
+| 清理失敗 | 只留下**不可信的 orphan**；⚠️ **正式 archive ⛔ 不受 spool 存在與否影響** |
+
+⚠️ **recovery 的來源因此是**：正式 Stage 2 archive 裡的 **before source artifact**、
+**manifest 的 SHA**，以及**已封存的 Stage 1 after artifact**。
+⛔ **evidence contract 必須釘住 Stage 1 after artifact 的 SHA 與位置**——
+⛔ 否則 recovery 又會缺一邊來源。
+
+⚠️ **staging 內的任何寫入／驗證／fsync 失敗一律回「一般失敗」**，
+⛔ **正式 archive 不存在**——⛔ 不會有半成品被當成證據。
+
+**必須成立的不變條件**：
+
+| # | 不變條件 |
+|---|---|
+| a | spool 的 key **恰好等於 sorted symmetric difference**——⛔ 不能缺、不能多、⛔ 不能重複 |
+| b | 串流輸出的 bytes 在小型 fixture 上**逐字等於** `canonical_json_bytes(build_candidate_mismatch(...))` |
+| c | ⚠️ validator 驗的是**實際 temp artifact**，⛔ **不是 writer 用的同一批中間值** |
+| c2 | ⚠️ **那個 validator 本身也必須是串流的**——⛔ 直接沿用 `load_artifact()`／現行 `validate_candidate_mismatch()` 會把 worst-case artifact 整份載回記憶體，**把 spool 的作用完全抵銷**。要求：⛔ 不建立完整 parsed artifact 或完整 rows list；**增量**算 raw SHA；**逐列**核對 sorted keys、before row、spool 的 after row、candidate 方向與 differences；最後才驗列數、集合、計數與**封閉 top-level schema** |
+| d | validator 失敗時⛔ **不得出現正式 evidence archive**；⚠️ **staging 的內容⛔ 不得被視為證據** |
+| e | ⚠️ **只有正式 evidence archive 發布之後**才可回終端碼；⛔ **staging 內的單檔換名⛔ 不是** commit point，見下表 |
+
+⚠️ **rename 成功⛔ 不等於落盤**。⚠️ **沿用 Stage 1 finalizer 既有的 durability 分流**
+（`publish.py` 的 `EXIT_DURABILITY_UNCONFIRMED = 3`、`evidence.py` 的「commit point 之後
+parent fsync 失敗⛔ 不刪除」）——⚠️ **但套用的層級是整個 evidence archive**
+（v11 裁定的唯一 commit point），⛔ **不是 `candidate_mismatch.json` 單檔**：
+
+⚠️ **分流看的是 archive 層，⛔ 不是 `candidate_mismatch.json` 單檔層**：
+
+| 情況 | 正式 **archive** | 結束碼 |
+|---|---|---|
+| **archive rename 之前**任何失敗（staging 寫入／驗證／fsync、含 validator 不過） | ⛔ **不存在** | **1**（一般失敗） |
+| archive rename 成功 ＋ parent dir fsync 成功 | 存在且 durable | ⚠️ 依 manifest 的 terminal outcome 回 **0（B 分支）或 4（C 分支）** |
+| **archive rename 成功但 parent dir fsync 失敗** | ⚠️ **保留，⛔ 不刪除** | **3**（`EXIT_DURABILITY_UNCONFIRMED`）——出口見「rc=3 的 recovery 契約」 |
+| archive 已 durable，**只剩 spool／其他輔助 temp 清理失敗** | durable | ⚠️ **仍回原本的 0／4**——⛔ 不得降成一般失敗；記錄 orphan 依清理程序處理。⚠️ **此時已無 staging 可清**——`os.replace` 之後原 staging 目錄**就是**正式 archive |
+
+⚠️ 容量驗收要把「**13,417 筆全量 mismatch**」納入——證明完整 artifact 能發布且低於門檻。
+
+##### rc=3 的 recovery 契約（⚠️ **Stage 2 evidence 計畫書的必備項目**）
+
+⛔ **只寫「由 recovery 流程重新驗證並 fsync」是不夠的**——那樣 rc=3 會變成
+**只有描述、沒有可執行出口**的狀態。evidence 計畫書**必須**釘死下列各項：
+
+| 項目 | 契約 |
+|---|---|
+| 輸入 | ⚠️ **使用既有的正式 evidence archive**——⛔ **禁止重新 replay、⛔ 禁止重建 mismatch** |
+| 驗證 | 重新做**串流**的 schema、來源與 SHA 驗證（與發布前同一套，⛔ 不得放寬） |
+| ⚠️ **before 來源** | ⚠️ **使用正式 archive 內的 before source artifact**（＋ manifest SHA ＋ 已封存的 Stage 1 after artifact） |
+| 成功 | ⚠️ **恢復 manifest 記錄的原本終端結果**——⛔ **不是固定回 4**，見下方「✅ 已避免：兩階段發布會製造第二個 rc=3」 |
+| 再失敗 | ⚠️ 明訂退出碼與保留政策——⛔ **不刪除既有的正式 evidence archive** |
+| 測試 | ⚠️ evidence 計畫**必須包含對應的 recovery 測試**，⛔ 不能只在文件描述 |
+
+###### ✅ 已由方案 B 解決：recovery 的 **before 來源**
+
+⚠️ **此阻擋點由 evidence archive 內的 before source artifact 解決**——
+⛔ 但**正式執行仍以 evidence contract 完成為前置**（執行順序 ③）。
+下面保留成因，⛔ 它⛔ 不是現行的未解問題：
+
+⚠️ 當初的矛盾是「⛔ 禁止重跑」與「重做**同強度**的來源驗證」**無法同時成立**：
+
+| 事實 | 後果 |
+|---|---|
+| Stage 2 **只發布** `comparison_artifact`／`report`／`candidate_mismatch`（實查 `evaluation.py`） | ⛔ **before rows 從未被單獨發布** |
+| before rows 只存在正式程序的**記憶體** | 程序結束就沒了 |
+| spool 只保存**第二趟取得的 after rows** | ⛔ 不含 before |
+| `finally` 會清除 spool | rc=3 之後連 spool 都不在 |
+| mismatch 路徑⛔ **不產** comparison artifact | before 也不在那裡 |
+| `candidate_mismatch.json` **內嵌**的 before row | ⛔ **不能當自己的獨立來源**——那是循環論證，抓不出漏列或來源被竄改 |
+
+**裁決：採方案 B**（2026-09-21 review 建議，⚠️ **待使用者最終確認**）。
+理由：讓**正式的 before replay 本身**成為可獨立複核的證據，比把暫存 spool 升格成
+**半永久的 recovery 狀態**清楚；代價是**必須先完成 evidence contract**，
+並把新 artifact 納入容量與發布模型。
+
+| 方案 | 做法 | 代價 |
+|---|---|---|
+| **A** | rc=3 時**保留並 durability-protect** 一份已驗證、含 before／after 來源的 recovery spool；成功恢復後才清除 | ⚠️ spool 從「暫存」升級成**受保護的中間狀態**，要定義它的完整性檢查與清理時機 |
+| **B（採用）** | ⚠️ **commit 之前在 evidence staging 內寫入並驗證** before source artifact；⛔ **不獨立發布**，**只隨整個 archive 一次性發布** | ⚠️ 要定義**檔名、schema、在 archive 內的位置、SHA 關係、recovery 用法**——⛔ 目前完全未定義；但 before rows 本來就該是證據的一部分 |
+| C | 明確**降低** recovery 的驗證範圍 | ⛔ **不建議**——違反上表「⛔ 不得放寬」那一列，等於讓 rc=3 的恢復結果不可信 |
+
+###### ✅ 已避免：**兩階段發布**會製造第二個 rc=3
+
+⚠️ 若 before source artifact 在 terminal artifact **之前**正式發布，
+**它的 directory fsync 也可能失敗**。那個時點：
+
+* 正式 replay **已經跑完**，⛔ 禁止重跑；
+* **B／C 還沒判定**；
+* ⛔ **所以 recovery 成功後⛔ 不能固定回 rc=4**——最後可能走正常比較的 **B 分支（rc=0）**。
+
+**處置：單一 evidence archive、一次性原子發布**（比照 Stage 1 finalizer 的整包 rename）：
+
+```text id="i074_stage2_atomic_001"
+staging 寫入 before source artifact
+  → 產生 B 分支的 comparison／report，或 C 分支的 candidate mismatch
+  → 完整驗證 manifest 與**所有** SHA
+  → **最後一次性發布整個 evidence archive**   ← 唯一的 commit point
+  → recovery 從 **manifest 讀回原本的 terminal outcome**，恢復 **rc=0 或 rc=4**
+```
+
+⚠️ **若改採「分兩階段正式發布」**，就**必須**另外定義
+「**before source 已發布、但 B／C 尚未判定**」的 **resume 模式**，
+且 ⛔ **不得 replay**——⚠️ 那是額外的狀態機，⛔ 不要順手做。
+
+⚠️ 計畫書目前雖提到「before after_artifact」，但**只有名字**——⛔ 檔名、schema、發布順序、
+durability 與 recovery 用法**全部未定義**，⛔ **不能當成已解決**。
+
+⚠️ **`validate_candidate_mismatch()` 的來源介面要改**，但⛔ **不得降低第三層驗證強度**：
+它現在吃完整的 `after_by_key`；改成「第一趟的完整 candidate 集合／計數 ＋ 第二趟取得的
+mismatch rows」之後，**仍要能驗出「before 少算／多算一列」**。
+
+⛔ **`crossday.py` 的改造⛔ 不在本計畫範圍**（v2 說「另列」卻仍把它寫進受影響檔案、
+風險、測試與執行順序——那是自相矛盾，v3 整個移除）。理由：
+
+* **Stage 1 已完成**，`crossday.py` 是它的 comparator，⛔ **不是 Stage 2 的前置**；
+* 混進來只會**擴大正式執行前的變更面**，而 Stage 1 的教訓正是「變更面愈大、愈晚才發現問題」。
+
+⚠️ 它確實也有 730 MiB 的問題（實測 OOM），**另立一筆處理**。
+⚠️ 真要一起做就⛔ **不能叫「另列」**，而且必須明訂演算法——
+⛔ **不是同步 `zip()`**（插入／刪除／換序會整個錯位），
+而是能維持**排序交集**與**兩側差集 row** 的具體做法。
+
+##### 二之二、⚠️ disk-backed spool 的磁碟與中止政策
+
+⚠️ worst-case 的磁碟佔用是**數百 MiB**。mismatch 路徑本身：
+**rename 之前**是「spool ＋ temp」、**rename 之後**是「spool ＋ 正式檔」
+——⛔ temp 與正式檔**不是兩份同時存在**（`os.replace` 是同一個 inode 的改名）。
+
+⛔ **但採方案 B 之後這個模型不夠了**：還要加上 **before source artifact 及其 temp／正式檔**。
+⚠️ **磁碟門檻必須由「包含該 artifact」的 harness 重新實測**（公式見「六、1」的
+`max(P_B, P_C) ＋ M_safety`），⛔ **不得沿用只算 spool／mismatch 的舊模型**。
+
+| 項目 | 政策 |
+|---|---|
+| **事前檢查** | ⚠️ **replay 之前**就檢查可用空間，⛔ 不要跑完三小時才因 `ENOSPC` 失去證據。**公式固定為一條**：`required = max(P_B, P_C) ＋ M_safety`（⚠️ **⛔ 不是 `3 × S ＋ M`**，理由見「六、1」）。`P_B`／`P_C` 由 sizing harness 實測，`M_safety` 為寫死常數；⚠️ **兩者目前都是占位符**，決定時序見下 |
+| Python exception／validator 失敗 | `finally` 清除 spool 與 temp。⚠️ **含 rc=3（archive 已 rename、parent fsync 失敗）那條路徑也可以清**——⛔ **recovery 不依賴 spool**，所以⛔ 不需要為它排除 `DurabilityUnconfirmed` |
+| **SIGKILL／主機斷電** | ⛔ **無法保證即時清除**——要定義 **orphan spool／temp 的辨識方式**與人工清理（或安全 recovery）程序 |
+| ⛔ **orphan 不得被誤認為證據** | ⚠️ orphan 的 spool／staging ⛔ **不得**被當成正式 evidence archive——命名與位置要能一眼分辨；⚠️ **只有正式 archive 才帶 terminal outcome** |
+
+⚠️ **`M` 的決定有時序矛盾，v9 訂正**：v8 寫「由 harness 實測決定」但「實作前定案」
+——而 harness 自己排在步驟 ②，那時還沒有實測結果。⛔ 這條門檻目前**還不可落實**。
+改成明確的四步：
+
+```text id="i074_disk_margin_order_001"
+① 先實作**獨立的 sizing harness**（⛔ 不含正式 preflight）
+② 記錄實測的 spool、temp／final 峰值
+③ 記錄 **P_B／P_C** 基準，據此裁定 **M_safety = <固定 bytes>**
+④ 更新計畫並經確認後，才實作正式 preflight
+```
+
+⛔ **在 ③ 定案之前⛔ 不得實作 preflight**——否則就是把占位符寫進程式。
+
+##### 三、受影響檔案與資料流
+
+| 檔案 | 改動 | 風險 |
+|---|---|---|
+| **`evaluation.py`** ⬅️ **最主要** | Stage 2 的 after loader 改兩趟串流；⛔ 不再完整保留 13,417 筆 after rows；mismatch 時的第二趟讀取 | ⚠️ 這是**真正的 Stage 2 執行路徑**，v2 漏列 |
+| `replay_bundle/artifacts.py` | `validate_after_artifact()`／`validate_diagnostics()` 支援逐列餵入；`validate_candidate_mismatch()` 換來源介面 | ⛔ **驗證強度不得下降**（尤其第三層「內嵌 row 就是實際 row」） |
+| Stage 2 streaming loader 所在模組 | 新增／調整（`replay_bundle/` 底下）；**含 mismatch 的 disk-backed spool** | ⚠️ 要能**重新開啟**，⛔ 不是一次性 iterator；⚠️ spool 要有**清理保證** |
+| **memory harness** | 新增（13,417 列 normal／worst-case） | ⚠️ 在釘死的 image／cgroup 內跑，⛔ 不是一般 CI 測試 |
+| **Stage 2 evidence contract**（含 **before source artifact** ＋ tooling patch） | ⚠️ **外部硬性前置，排在實作之前**（執行順序 ②） | ⛔ 在它確認前，⛔ 不得決定發布順序、schema、patch 版控位置或 manifest 寫法 |
+| Python 測試 | `tests/test_replay_bundle_stages.py`、`tests/test_i074_mismatch.py` | 測試矩陣 **a～p**（見「六、2」） |
+| shell 測試 | `scripts/test-replay-args.sh` | Stage 2 的 argv／mount |
+| **before tooling patch** | `ecbc141^` 的 `decision_engine.py` 加九個診斷欄位輸出 ＋ 整套 bundle CLI | ⚠️ **patch 本體要進版控**，見「三之二」 |
+| `scripts/run-replay-offline.sh` | Stage 2 路徑帶 `TOOLING_PATCH` | 既有機制，⛔ 不新增參數 |
+
+**資料流**：`ecbc141^` worktree ＋ tooling patch → 全量 13,417 列 → before after_artifact
+→ 與 Stage 1 已封存的 D+1 artifact 逐列對照 → `comparison_artifact.json` ＋ `report.json`
+（集合不一致時改出 `candidate_mismatch.json` ＋ **結束碼 4**）。
+
+##### 三之二、⚠️ tooling patch 要保存內容——⛔ 但那需要一套**新的 evidence contract**
+
+⛔ **v2 寫「把 binary patch 加進 evidence manifest」是做不到的**：
+現有的 `evidence_manifest.json` 是 **Stage 1 專用的封閉九檔 layout**，
+validator 明文要求 `set(files)` **恰好等於** `ARCHIVE_PATHS`
+（`evidence.py` 的 `validate_evidence_manifest()`），binary patch ⛔ 塞不進這個 schema。
+
+⚠️ **需求本身成立**：`replay_args_tooling_patch_sha256()` 算的是當下 worktree 實際 diff 的
+hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失，Stage 2 的證據就無法獨立複核
+——而「可獨立複核」正是 I-100 存在的理由。
+
+⛔ **但這是一套要另外設計的 contract，⛔ 不是本計畫書塞得下的一段**。要定義的至少有：
+
+| 項目 | 內容 |
+|---|---|
+| 目錄與檔名 | Stage 2 evidence 的路徑、**封閉檔案集合** |
+| patch 的形式 | raw binary entry？還是另包一份 metadata artifact？ |
+| schema 與 validator | 新 manifest 的封閉欄位、完整性檢查 |
+| 發布與修復 | 原子發布、durability、recovery（比照 Stage 1 的 finalizer） |
+| **三方 SHA 關係** | `stored_sha256`、**實際套用後的 diff SHA**、provenance 記的 SHA，三者必須一致 |
+| 對應程式 | publisher／finalizer ＋ Python 與 shell 測試 |
+
+⚠️ **建議：本計畫書只定義「需求與驗收條件」，實作另立一份 Stage 2 evidence 計畫書。**
+⛔ 在那份完成之前，Stage 2 **不得進入正式執行**——否則證據無處可放。
+
+##### 四、contract 變化
+
+⚠️ **要分兩層講，⛔ 不能一句「沒有格式變化」帶過**（v2 的說法與「patch 進 manifest」自相矛盾）：
+
+| 層 | 變化 |
+|---|---|
+| **既有 replay artifact schema** | ⛔ **不變**——串流只改「怎麼讀」，⛔ 不改「讀出來是什麼」；canonical JSON 的位元組輸出、所有 SHA、`after_artifact`／`comparison`／`candidate_mismatch` 的 schema 全部照舊 |
+| **Stage 2 evidence archive** | ⚠️ **新增一套 contract**（見「三之二」）——現有的封閉九檔 manifest ⛔ 容不下 tooling patch |
+| **before source artifact**（方案 B） | ⚠️ **裁定為 (i)：新的 Stage 2 evidence artifact**——⛔ **不改既有 replay artifact schema**。理由：v11 已裁定「單一 evidence archive 一次性發布」，它本來就在 archive 內；**schema、SHA、validator 與 archive layout 由步驟 ③ 的 evidence contract 定義** |
+| `validate_candidate_mismatch()` 的**來源介面** | ⚠️ 會變（改吃兩趟串流的結果），⛔ 但驗證強度不得下降 |
+
+##### 五、風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| ⚠️ 串流後 after 的驗證強度下降 | ⛔ **第三層「內嵌 row 就是實際 row」不得放寬**；測試矩陣見「六、測試與驗證策略」第 2 項 |
+| ⚠️ 第二趟讀取時檔案已變（TOCTOU） | 重算 SHA 必須等於第一趟與 cohort manifest 的值，⛔ 不符即中止 |
+| ⛔ **大型 mismatch 讓第二趟重新 OOM** | 差集無上限（最壞 13,417 筆＝**535 MiB**＋before rows）。改 **disk-backed spool** 逐筆落地、依 sorted keys 串流發布；⚠️ **harness 必須涵蓋全量 mismatch**，⛔ 不接受只測一兩筆 |
+| ⚠️ spool 殘留 | 發布後刪除，⛔ **失敗路徑也要清**；harness 的 e 項要驗 |
+| ⚠️ `validate_after_artifact()` 與 `validate_diagnostics()` **各自遍歷一次 rows** | 改成 iterator 後⛔ 不能重複消費。要嘛定義**單趟複合驗證**，要嘛提供**可重新開啟的 iterator factory**——⛔ 不得因為改串流而少驗一道 |
+| ⚠️ 逐列驗證漏掉整份層級的檢查 | 保留 `bundle_id`／`kind`／`schema_version` 等頂層驗證，只把 rows 那段改串流 |
+| ⚠️ before tooling 改到判定 | 套用前後跑 `ecbc141^` 的既有測試，**必須全綠**；patch 只加輸出、⛔ 不動分支 |
+| ⚠️ 謂詞換掉後驗錯對象 | 「同集合」是硬性前置，⛔ 不同就停下來重新設計 |
+| **回滾** | 串流是純讀取路徑的改寫，`git revert` 即可；before tooling 本來就不進主線 |
+
+##### 六、測試與驗證策略
+
+1. **Stage 2 峰值驗收——裁決走方案 B（memory harness）**：
+
+   ⛔ **不走「新增 Stage 2 limited-quota probe」**：本筆自己的教訓就是
+   **200 列的 probe 量不到全量峰值**（見「③ 第一次執行：OOM 失敗」），
+   受限 quota 的 Stage 2 probe 同樣會**低估完整 before rows 與大型 mismatch evidence**，
+   而且還要多背一套 CLI contract。
+
+   ⚠️ **harness 必須在釘死的 image／cgroup 內**涵蓋下列全部，⛔ 少一項都不算數：
+
+   | # | 涵蓋項目 |
+   |---|---|
+   | a | **13,417 筆同尺寸 before rows**（replay 產出的量級） |
+   | b | 第一趟串流後常駐的 metadata、**完整 keys**、156 筆候選 |
+   | c | 正常 comparison 路徑 |
+   | d | **全量（或保守上界）的 candidate mismatch 第二趟與發布路徑** |
+   | e | SHA、validator 與 **temp-file 清理** |
+
+   ⚠️ **採方案 B 之後要明列兩個峰值情境**（⛔ 不能只測一條）：
+
+   | 路徑 | 同時存在的東西 |
+   |---|---|
+   | **B 路徑** | before source artifact ＋ comparison temp／final ＋ report ＋ **evidence staging** |
+   | **C 路徑** | before source artifact ＋ **spool** ＋ candidate mismatch temp／final ＋ **evidence staging** |
+
+   ⛔ **⛔ 不可寫成「`M` 取兩者較大的峰值」**——公式是 `required = 3 × S ＋ M`，
+   把完整峰值當 `M` 會**重複計算 `3 × S`**。**改用單一公式**：
+
+   ```text id="i074_disk_formula_001"
+   required = max(P_B, P_C) ＋ M_safety
+   ```
+
+   `P_B`／`P_C` 是 sizing harness 實測的**兩條路徑磁碟峰值**，
+   `M_safety` 是**寫死的固定餘裕**（⛔ 不得執行期解讀）。
+   ⚠️ **記憶體 < 450 MiB 也要兩條路徑都通過。**
+   ⚠️ **核心實作完成後，正式 memory harness 還要再驗一次「實際生產流程的磁碟峰值
+   ⛔ 沒有超出 sizing harness 的結果」**——⛔ 不能只驗記憶體。
+
+   **acceptance 門檻：< 450 MiB**（⚠️ **B 路徑與 C 路徑都要通過**），在正式執行**之前**通過。
+   ⚠️ 唯一一次正式 Stage 2 再記錄**實際全路徑峰值**，⛔ **但不為了量測而重跑**。
+   ⚠️ 這是 capacity acceptance，⛔ **不適合當環境無關的一般 CI 單元測試**。
+   ⚠️ 現行實測 **524 MiB（還沒算 replay）**，⛔ 不得用 `crossday.py` 的數字代替。
+
+2. **candidate mismatch 的測試矩陣**（⚠️ v3 之前列的是 **crossday 的**案例，v4 換掉）：
+
+   ⛔ **`candidate_mismatch.json` 沒有 `d_only_rows`**——那是 `crossday_artifact` 的欄位。
+   ⚠️ 而且「全量 key 新增／刪除／換序」**走不到 candidate mismatch**：
+   `assert_same_keys(keys, after_keys, "② before 全範圍 vs after rows")` 會**先擋下**。
+   正確的案例是**全量 keys 相同、只有 candidate 布林值不同**：
+
+   | # | 案例 | 要驗什麼 |
+   |---|---|---|
+   | a | `before_only`：before `candidate=true`、after `false` | ⚠️ **第二趟要能取回 after 的「非候選」完整 row** |
+   | b | `after_only`：before `false`、after `true` | 同上，反向 |
+   | c | a 與 b **同時存在** | 兩側差集都要完整 |
+   | d | 第二趟**缺少**指定 key | ⛔ **fail-closed** |
+   | e | 第二趟 SHA 與第一趟不同 | ⛔ **fail-closed**（TOCTOU） |
+   | f | 來源 candidate 集合／計數被竄改 | 第三層來源驗證要抓到 |
+   | g | 內嵌的 before／after row 與實際來源不同 | 同上 |
+   | h | **候選集合一致時** | ⛔ **不得啟動第二趟** |
+
+   ⚠️ **a～h 只覆蓋 candidate 集合**，spool 與發布流程的不變條件要另外測：
+
+   | # | 案例 | 要驗什麼 |
+   |---|---|---|
+   | i | spool **缺 key／多 key／重複 key** | 不變條件 a |
+   | j | **writer 之後、validator 之前竄改 temp** | ⚠️ 必須被「**實際 bytes** validator」抓到（不變條件 c） |
+   | k | 小型 fixture：streamed bytes vs `canonical_json_bytes(build_candidate_mismatch(...))` | **逐 byte 相同**（不變條件 b） |
+   | l | validator 失敗 | ⛔ **沒有正式 evidence archive**；⚠️ **staging ⛔ 不得被視為證據**（不變條件 d） |
+   | m | **archive rename 的時機** | ⛔ **只在整份 manifest 與所有 SHA 驗過之後**發生；⚠️ staging 內的單檔 `os.replace` **⛔ 不是** terminal commit |
+   | n | **staging 內 fsync 失敗** vs **archive parent dir fsync 失敗** | 前者 **rc=1 且⛔ 無正式 archive**；後者 **rc=3 且保留 archive** |
+   | o | archive 已 durable、**spool／其他輔助 temp 清理失敗** | ⛔ **不得遮蔽原本的 0／4**（⚠️ 此時已無 staging 可清） |
+   | p | **ENOSPC** 與 **orphan 清理** | 事前檢查要擋下；orphan ⛔ 不得被當成正式證據 |
+3. **TOCTOU**：第二趟讀取的 SHA 與第一趟、cohort manifest 三者一致；不符即中止。
+4. **tooling patch 可重建**：斷言「套用 stored patch 後的 `git diff --binary` SHA」
+   等於 provenance 記錄的值。
+5. **逐列驗證強度**：現有 `validate_diagnostics`／`validate_after_artifact` 的測試**全部續跑**。
+6. **謂詞比對**：⛔ **after 側不重算**——用已封存的 156 列，與 before tooling 算出的**完整反事實集合**逐 key 比對。
+7. **before tooling**：套用前後 `ecbc141^` 既有測試全綠；九個診斷欄位的 schema 由
+   `validate_diagnostics(side="before")` 驗。
+8. **端到端**：`smoke-replay-offline.sh` 的 Stage 2 路徑照跑。
+
+##### 七、完成後的歸檔位置
+
+| 內容 | 歸檔到 |
+|---|---|
+| 串流比對的理由與峰值數字 | `development-workflow.md`（比照「凍結 bundle 不得重產」那兩節） |
+| **mismatch streaming contract** ⚠️ **v6 補** | `sr-zone-scoring.md`——⚠️ 它現在保存的是 **in-memory validator 契約**，改成 spool ＋ 串流 validator 後必須一併更新：<br>① **spool ⛔ 不是正式 artifact**；② **完整差集、⛔ 不截斷**；③ **canonical byte identity**；④ **validate-before-publish**；⑤ **archive 是唯一的 commit point，terminal outcome（0／4）由 manifest 記錄**；⑥ **TOCTOU 與來源第三層驗證** |
+| 九個診斷欄位的 before／after 對稱契約 | `sr-zone-scoring.md`「九個診斷欄位的完整 schema」 |
+| B／C 判定結果與證據 SHA | `issue.md` I-074，⛔ 在決策樹走完之前不得移除本筆 |
+
+##### 八、執行順序
+
+```text id="i074_stage2_order_001"
+① 裁決採方案 B（before source artifact）              ← ⚠️ 本輪要確認的
+② **before tooling ／反事實謂詞設計**（⛔ after 側不重算）
+   ⚠️ **必須排在 evidence contract 之前**——before source artifact 的
+      schema、candidate 集合與 validator **全都依賴這個設計**
+③ **Stage 2 evidence contract**（含 before source artifact ＋ tooling patch）
+   計畫書 → 確認 → 實作 → review
+   ⚠️ 要裁定**原子邊界**：單一 evidence archive 一次性發布，
+      recovery 從 manifest 讀回原 terminal outcome（rc=0 或 rc=4）
+④ 實作獨立 sizing harness（⛔ 不含正式 preflight）
+⑤ 實測並記錄 **P_B／P_C** 的磁碟／記憶體峰值，裁定 **M_safety = <固定 bytes>**
+⑥ 更新計畫並**再次確認**
+⑦ 實作：兩趟串流、disk-backed spool、preflight、發布、recovery
+   ＋ memory harness：兩條路徑都要 < 450 MiB
+⑧ 測試矩陣 a～p ＋ TOCTOU 防護
+⑨ 產生並封存 exact tooling patch，驗三方 SHA
+   （＋ ecbc141^ 既有測試套用 patch 前後全綠）
+⑩ **唯一一次**正式 Stage 2（約 180 分鐘）      ← ⚠️ 開跑後進入凍結窗口
+⑪ 判讀 B／C 與歸檔
+```
+
+⚠️ **①～⑨ 都是分鐘～小時級且可獨立驗證**，⛔ 不要跳過直接跑 **⑩**——
+Stage 1 的教訓是「跑了 183 分鐘才發現容量不夠」。
+⚠️ 另外 **③ 未完成前⛔ 不得進入 ⑦**——發布順序與 schema 還沒定，實作會白做；
+而 **② 未完成前⛔ 不得進入 ③**——謂詞決定 schema 與 validator。
+⚠️ **⑩ 是唯一一次**：峰值驗收已裁決走 **memory harness**（步驟 ⑦），
+全路徑峰值只在 **⑩** 記錄，⛔ **不作為 ⑩ 的前置**，也⛔ **不為量測而重跑**。
+
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 
 D 的候選數是 **156（> 0）**，所以⛔ 走不到分支 A，**Stage 2 幾乎確定要跑**。
-趁 ④ 執行時把前置條件盤清楚：
+趁 D+1（當時的步驟 ④）執行時把前置條件盤清楚：
 
 **① 範圍是全量，⛔ 不是只跑 156 列。** `evaluation.py` 的 Stage 2 明寫
 `assert_same_keys(keys, after_keys, "② before 全範圍 vs after rows")`，
@@ -1412,7 +1967,7 @@ bundle 被換掉，**能做的只有中止，沒有辦法重跑原來那份輸�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **正式 bundle 已封存，待 D／D+1 跨日逐列驗收與失敗行為正式實測**（2026-09-16 更新——⚠️ 舊敘述「待正式 bundle」已不成立：`b1_20260901_1d_74350966_5d7ecb10` 於 2026-09-11 選定並進版控，見下方十八／十九）（2026-09-10 依 v23 計畫書完成程式與自動化測試，見下方「實作結果」；2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下）。⚠️ **仍未滿足的是關閉條件 2 的後半（逐列結果跨日相同）與條件 3（失敗行為正式實測）**，⛔ 本筆在那之前不得移除 |
+| 狀態 | **已完成／待 review 後移除**（⚠️ 三個關閉條件與文件要求全部成立，見本格末）（2026-09-16 更新——⚠️ 舊敘述「待正式 bundle」已不成立：`b1_20260901_1d_74350966_5d7ecb10` 於 2026-09-11 選定並進版控，見下方十八／十九）（2026-09-10 依 v23 計畫書完成程式與自動化測試，見下方「實作結果」；2026-09-01 由已知限制升級——[I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到) 已把本筆列為硬性前置，見下方「必須做到的範圍」。**已造成一次實際後果**，見下）。✅ **三個關閉條件已全部成立**（條件 1：2026-09-11；條件 2 前半：2026-09-11、後半：**2026-09-18** 的 I-074 跨日 `MATCH`；條件 3：**2026-09-21** 正式實測，見下方十九之後）。✅ **文件要求也已滿足**（`development-workflow.md`「驗收報告必須附什麼」三項齊全）。**長期知識已於 2026-09-21 歸檔**到該文件的「凍結 bundle 一旦選定就不得重產」與「loader 的失敗行為」兩節。⚠️ **本筆狀態＝已完成／待 review 後移除**。⛔ **移除前必須先改掉指向本筆的引用**——⚠️ **不只文件，`python/backtest/modular/sr_scoring/replay_bundle/` 底下有 7 處**（`canonical.py`、`bundle.py`、`publish.py` 等的模組註解），要改指向 `development-workflow.md` 的永久章節 |
 | 嚴重度 | 中（不影響 runtime，只影響**驗收證據能不能被獨立複核**） |
 | 分類 | Python / SR Zone / 驗證工具 |
 | 發現日期 | 2026-09-01 |
@@ -2482,7 +3037,24 @@ Stage 0／1／2 或那兩支腳本，而 Stage 0 讀 live 與 D+1 的離線 repl
 「I-074 Stage 1 的正式執行程序」與本檔 I-074 的「正式 scan 的計次裁決」。
 ⚠️ 這⛔ **不影響 bundle 的有效性**——它已凍結並進版控，D／D+1 都是**載入**它，⛔ 不重產。
 
-**尚未完成**：條件 2 的後半（逐列結果跨日相同）與條件 3 的正式實測。
+**✅ 條件 2 的後半已於 2026-09-18 滿足**（I-074 Stage 1 的 D／D+1 跨日仲裁
+`outcome = MATCH`：`d_only`／`d1_only`／`provenance_differences` 全為 0，
+候選集合逐 key 相同——見 [I-074](#i-074lifecycle-engine-的-rr-解耦decision-replay-已跑但一次都沒觸發到)
+的「Stage 1 正式執行結果」）。
+
+**✅ 條件 3 已於 2026-09-21 正式實測**（`load_bundle()` 對正式 bundle 的副本逐項竄改）：
+
+| 情境 | 結果 |
+|---|---|
+| 對照組：未竄改 | ✅ 載入成功，`bundle_id` 正確 |
+| 竄改 payload 內容（`candles.json.gz` 一個 byte） | **中止**：`BundleError: candles.json.gz 的 SHA-256 不符` |
+| 竄改 `manifest.json` 裡記的 hash | **中止**：`BundleError: manifest.json 的 SHA-256 不符` |
+| 刪掉一份 payload（`chip.json.gz`） | **中止**：`BundleError: bundle 目錄內容不符：缺 [...]` |
+| 目錄 basename 與 `manifest.bundle_id` 不符 | **中止**：`BundleError: 三方相等契約不成立` |
+
+⚠️ **⛔ 都是中止，⛔ 沒有任何一種情況「照樣輸出一份看起來可比較的報告」**——
+那正是條件 3 要防的。⚠️ 測 manifest 竄改時**目錄名要保持正確**，
+否則抓到的是「三方相等」那道、⛔ 不是 manifest 本身的 hash 檢查。
 
 #### 關閉條件
 

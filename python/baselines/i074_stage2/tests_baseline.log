@@ -1,0 +1,162 @@
+==> [mem-guard] MEM 由 700m 下修為 401m。
+    host available=551MB、保留 150MB 給呼叫端。--memory 是 cgroup 上限而非
+    預留，設得比 host 供得起的量高時，host OOM killer 會先砍掉呼叫測試的行程而不是 container。
+    若這步真的塞不進 401MB，要降的是實際用量（拆步驟、限制 runtime heap），不是上限。
+  ok   定義行引用 → rc=0
+  ok   函式內部行 → rc=0
+  ok   漂移引用 → rc=1
+  ok   識別符已刪除 → rc=1 且訊息明確
+  ok   同名檔案歧義 → rc=1
+  ok   帶路徑 → 歧義解除
+  ok   repo 外檔案且不在 allowlist → rc=1
+  ok   行號超出 → rc=1
+  ok   合法格式：`pkg/a/sample.py:4` `alpha`
+  ok   合法格式：`pkg/a/sample.py:4` 的 `alpha`
+  ok   合法格式：`alpha`（`pkg/a/sample.py:4`）
+  ok   合法格式：`alpha()`（`pkg/a/sample.py:4`）
+  ok   非緊鄰格式 → rc=1（⛔ 不只計數放行）
+  ok   總數涵蓋每一個引用
+  ok   未知檔案 → rc=1（⛔ 不 fail-open）
+  ok   allowlist 內 → 略過
+  ok   區間終點超出 → rc=1
+  ok   區間終點 < 起點 → rc=1
+  ok   新 line-only 不在基準線 → rc=1
+  ok   line-only 在基準線內 → rc=0
+  ok   基準線殘留 → rc=1（⛔ 不是只警告）
+  ok   同 key 剛好用滿基準線額度 → rc=0
+  ok   同 key 新增第 3 筆超出額度 → rc=1
+  ok   同一行兩個區間 → 第二筆仍被驗
+  ok   同起點不同終點 → 識別符各自綁定
+  ok   座標相同、識別符不同 → 各自驗
+  ok   座標相同、識別符都合法 → rc=0
+  ok   同行重複的 line-only → 各自計數（⛔ 不去重）
+  ok   基準線額度不合法（x.md|pkg/a/sample.py:4 x0）→ rc=2
+  ok   基準線額度不合法（x.md|pkg/a/sample.py:4 x-1）→ rc=2
+  ok   基準線額度不合法（x.md|pkg/a/sample.py:4 xabc）→ rc=2
+  ok   識別符邊界比對（alpha ≠ alphabet）
+  ok   --list 多印通過的引用（0 → 1 行）
+  ok   未知參數 → rc=2
+  ok   --root 缺值 → rc=2
+
+==> doc-refs 測試：35 通過、0 失敗
+==> check-doc-refs：引用共 140 個：識別符已驗 11、僅驗檔案與行號 122、外部套件略過 7、問題 0
+==> 建置測試 image：stock-trading-python-e1cbbbd:test
+Sending build context to Docker daemon  7.361MB
+Step 1/7 : FROM python:3.11-slim
+ ---> b8fe4ce3655e
+Step 2/7 : WORKDIR /app
+ ---> Using cache
+ ---> 5bceb31c6243
+Step 3/7 : RUN apt-get update     && apt-get install -y --no-install-recommends libgomp1     && rm -rf /var/lib/apt/lists/*
+ ---> Using cache
+ ---> 660115f77c46
+Step 4/7 : COPY requirements.txt .
+ ---> Using cache
+ ---> 04659ef017e0
+Step 5/7 : RUN pip install --no-cache-dir -r requirements.txt
+ ---> Using cache
+ ---> 57cb8ff4dc4a
+Step 6/7 : COPY . .
+ ---> Using cache
+ ---> 4b84c07ac616
+Step 7/7 : CMD ["python", "worker.py"]
+ ---> Using cache
+ ---> c6f6cd5ef1fe
+Successfully built c6f6cd5ef1fe
+Successfully tagged stock-trading-python-e1cbbbd:test
+==> pytest：backtest/ tests/ image=stock-trading-python-e1cbbbd:test mem=401m
+============================= test session starts ==============================
+platform linux -- Python 3.11.16, pytest-9.1.1, pluggy-1.6.0
+rootdir: /app
+plugins: anyio-4.15.1
+collected 1223 items
+
+backtest/modular/sr_scoring/tests/test_crossday.py ..................... [  1%]
+......................                                                   [  3%]
+backtest/modular/sr_scoring/tests/test_dataset.py .........              [  4%]
+backtest/modular/sr_scoring/tests/test_decision_engine.py .............. [  5%]
+........................................................................ [ 11%]
+.............................                                            [ 13%]
+backtest/modular/sr_scoring/tests/test_evaluation.py ................... [ 15%]
+............................................                             [ 18%]
+backtest/modular/sr_scoring/tests/test_event_engine.py ................. [ 20%]
+................................                                         [ 22%]
+backtest/modular/sr_scoring/tests/test_evidence.py .......               [ 23%]
+backtest/modular/sr_scoring/tests/test_excursion_cost.py s               [ 23%]
+backtest/modular/sr_scoring/tests/test_explain_engine.py .........       [ 24%]
+backtest/modular/sr_scoring/tests/test_features.py ...............       [ 25%]
+backtest/modular/sr_scoring/tests/test_i074_diagnostics.py ............. [ 26%]
+.......................................................................  [ 32%]
+backtest/modular/sr_scoring/tests/test_i074_mismatch.py ................ [ 33%]
+....................                                                     [ 35%]
+backtest/modular/sr_scoring/tests/test_i074_preflight.py ............... [ 36%]
+.................                                                        [ 37%]
+backtest/modular/sr_scoring/tests/test_labeling.py ..........            [ 38%]
+backtest/modular/sr_scoring/tests/test_lifecycle_engine.py ............. [ 39%]
+.......                                                                  [ 40%]
+backtest/modular/sr_scoring/tests/test_model.py .......................  [ 42%]
+backtest/modular/sr_scoring/tests/test_pipeline.py .....                 [ 42%]
+backtest/modular/sr_scoring/tests/test_probability_engine.py ....        [ 42%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_calendar.py ....... [ 43%]
+....................................................                     [ 47%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_canonical.py ...... [ 48%]
+......                                                                   [ 48%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_cli.py ............ [ 49%]
+.....................................................                    [ 54%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_identity.py ....... [ 54%]
+.........................                                                [ 56%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_provenance.py ..... [ 57%]
+..................                                                       [ 58%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_publish.py ........ [ 59%]
+.........                                                                [ 59%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_stage0.py ......... [ 60%]
+...........                                                              [ 61%]
+backtest/modular/sr_scoring/tests/test_replay_bundle_stages.py ......... [ 62%]
+...................................................                      [ 66%]
+backtest/modular/sr_scoring/tests/test_replay_evidence.py .............. [ 67%]
+...........                                                              [ 68%]
+backtest/modular/sr_scoring/tests/test_run_identity.py ................. [ 69%]
+............                                                             [ 70%]
+backtest/modular/sr_scoring/tests/test_scenario_engine.py ....           [ 71%]
+backtest/modular/sr_scoring/tests/test_scoring.py ...................... [ 73%]
+......................................................                   [ 77%]
+backtest/modular/sr_scoring/tests/test_tips.py ..                        [ 77%]
+backtest/modular/sr_scoring/tests/test_train.py ....                     [ 77%]
+backtest/modular/sr_scoring/tests/test_zone_builder.py ...........       [ 78%]
+backtest/modular/sr_scoring/tests/test_zone_matcher.py ................. [ 80%]
+..................                                                       [ 81%]
+backtest/modular/tests/test_analysis.py ..........                       [ 82%]
+backtest/modular/tests/test_backtester.py ..........                     [ 83%]
+backtest/modular/tests/test_entries.py .................                 [ 84%]
+backtest/modular/tests/test_exits.py .....                               [ 85%]
+backtest/modular/tests/test_support_resistance.py ......                 [ 85%]
+backtest/modular/tests/test_type_safety.py ......                        [ 86%]
+tests/test_baseline_check.py ..........                                  [ 86%]
+tests/test_db_fetch_candles.py .........                                 [ 87%]
+tests/test_db_snapshot.py ..................................             [ 90%]
+tests/test_http_server_analyze.py ....                                   [ 90%]
+tests/test_http_server_backtest_get.py .....                             [ 91%]
+tests/test_http_server_backtest_submit.py ......                         [ 91%]
+tests/test_http_server_health.py ..                                      [ 91%]
+tests/test_http_server_model_status.py ...                               [ 92%]
+tests/test_http_server_sr_evaluate_validation.py ..........              [ 92%]
+tests/test_http_server_sr_evaluate_wiring.py ...................         [ 94%]
+tests/test_http_server_sr_zones.py ....                                  [ 94%]
+tests/test_http_server_startup.py ...                                    [ 95%]
+tests/test_http_server_train.py ....                                     [ 95%]
+tests/test_http_server_zone_identity.py .......                          [ 95%]
+tests/test_logging_setup.py ..                                           [ 96%]
+tests/test_selection_report.py ......................................... [ 99%]
+.......                                                                  [100%]
+
+=============================== warnings summary ===============================
+../usr/local/lib/python3.11/site-packages/fastapi/testclient.py:1
+  /usr/local/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+../usr/local/lib/python3.11/site-packages/starlette/testclient.py:53
+  /usr/local/lib/python3.11/site-packages/starlette/testclient.py:53: DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated, use anyio.from_thread.BlockingPortal instead.
+    _PortalFactoryType = Callable[[], AbstractContextManager[anyio.abc.BlockingPortal]]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============ 1222 passed, 1 skipped, 2 warnings in 89.78s (0:01:29) ============

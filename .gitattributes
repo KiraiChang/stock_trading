@@ -1,0 +1,15 @@
+# ⚠️ **I-074 Stage 2 的證據檔一律逐位元保存**，⛔ 不做換行或 whitespace 正規化：
+#
+# * **反事實 patch**：unified diff 對「空白 context 行」用的就是**單獨一個空格**作前綴，
+#   `git diff --check` 會報成 trailing whitespace。⛔ **不得批次 trim**——那會破壞套用能力，
+#   並改掉已記錄在 `docs/issue.md` 的 patch SHA。
+# * **測試 log**：是 docker／pytest 的逐字輸出（含 `====` 分隔線，會被誤判成 conflict marker）。
+#
+# ⚠️ **`-text` 才是保證位元組的那一項**——⛔ `-whitespace` 只關掉診斷，⛔ 不會阻止 Git
+# 在 checkout／commit 時做換行正規化；⛔ 改一個位元組，記錄的 SHA-256 就對不上。
+# ⚠️ **逐副檔名指定，⛔ 不用 `**` 涵蓋整個目錄**：之後 Stage 2 的 JSON artifact 會放進
+# 同一個目錄，⛔ 那些不該跟著繞過 whitespace 檢查。
+#
+# ⚠️ 正式的保存路徑與格式仍由步驟 ③ 的 evidence contract 定案。
+python/baselines/i074_stage2/*.patch -text -whitespace
+python/baselines/i074_stage2/*.log   -text -whitespace conflict-marker-size=200

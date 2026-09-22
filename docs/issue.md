@@ -2354,6 +2354,115 @@ counterfactual patch ⛔ 不需要重建它們。
 
 ⛔ **本步驟⛔ 不跑 replay**。
 
+#### ② 執行結果（2026-09-22，⚠️ **待 review**）
+
+✅ **計畫書 v25 已確認，② 依序執行完畢**（⛔ 本步驟沒有跑 replay）。
+
+##### 反事實 patch 的實際範圍
+
+| 檔案 | 真正的程式碼改動 | 性質 |
+|---|---|---|
+| `lifecycle_engine.py` | ⚠️ **兩行**：`resolve_lifecycle()` 新增必填參數 `setup_rr_qualified: bool`；`CONTINUATION` 分支加 `and setup_rr_qualified` | ⚠️ **唯一的產品語意變因** |
+| `decision_engine.py` | ⚠️ **兩行搬移 ＋ 一行傳參**：`rr_qualified = bool((rr_gate or {}).get("qualified"))` 從呼叫**後**移到呼叫**前**，並以 `setup_rr_qualified=rr_qualified` 傳入 | ⚠️ 純取值時機搬移——`rr_gate` 在此之前就已算完，⛔ 值不受影響 |
+| `tests/test_lifecycle_engine.py` | 14 個呼叫點補參數；兩支 RR 專屬測試改寫 | 測試對齊 |
+| `tests/test_i074_diagnostics.py` | helper 補參數；真值表首列改 `False`；**新增一支正向測試** | 測試對齊 ＋ 防假綠 |
+
+⚠️ **其餘都是註解與 docstring**（每一處都標了 `I-074 COUNTERFACTUAL PATCH`，⛔ 讓它⛔ 不可能被誤認為主線行為）。
+
+##### ⚠️ 執行中發現：只翻轉真值表**⛔ 不夠**
+
+⚠️ 套上 patch 後唯一失敗的既有測試是
+`test_pipeline_candidate_truth_table[CONTINUATION-False-True]`——
+⚠️ **那正是 patch 要改變的語意**（`rr_decoupling_candidate` 在 before 側變成不可達）。
+⛔ **但把它改成 `False` 就收工是假綠**：⚠️ 全 `False` 有兩種成因，
+①RR 條件真的加回來了（要的）、②pipeline 整個壞掉走不到 `CONTINUATION`（⛔ 不要的）。
+所以另補一支**正向**測試 `test_counterfactual_continuation_requires_setup_rr()`：
+同一組價格證據下，**RR 合格 → `CONTINUATION`、RR 不合格 → `CONFIRMED`**。
+
+##### 驗收條件對照
+
+| # | 條件 | 結果 |
+|---|---|---|
+| 1 | 唯一產品語意變因是 setup RR 條件 | ✅ 產品程式碼實改 **5 行**（2 ＋ 3），逐行可讀；⛔ 其餘為註解、測試與參數傳遞 |
+| 2 | 套用 patch 前後 `e1cbbbd` 既有測試全綠 | ⚠️ **範圍要講清楚**：**Python pytest 全量通過**（baseline 1222 passed／1 skipped；patched 1223 passed／1 skipped），⛔ **shell 的 argv 測試本步驟未執行**（`SKIP_SHELL_TESTS=1`）。理由：patch ⛔ 沒有碰 `scripts/`，那一段兩側完全相同 |
+| 3 | patch 的 SHA 與本體 | ✅ SHA 見下方「⒝」；本體與三份測試 log 暫存於 `python/baselines/i074_stage2/`（⚠️ **正式位置由步驟 ③ 的 evidence contract 決定**） |
+| 4 | before 的 candidate 集合預期恆空 | ✅ 真值表四格全 `False` ＋ 等價式斷言，⚠️ **在 fixture 層已成立**；⛔ 全量證明要等 ⑩ |
+
+##### 測試的執行身分（⚠️ **可複核**）
+
+⚠️ **兩側走的是同一個驗證入口**——⛔ 光記「1222 → 1223」證明不了這件事：
+
+| 項目 | baseline | patched（第 1 次） | patched（第 2 次） |
+|---|---|---|---|
+| tree SHA | `6bbd804e49e329dd85103aa2f510ec07760a9609`（＝`e1cbbbd^{tree}`） | ⛔ **未保存**（見下方說明） | `a1649733b910ae90f08efc5f215f31f898619f52` |
+| 入口 | `python/scripts/test.sh`（**worktree 自己那份**，⛔ 不是主線的） | 同左 | 同左 |
+| 參數 | ⛔ **無參數**（預設 `backtest/ tests/` 全量） | 同左 | 同左 |
+| 環境 | `SKIP_SHELL_TESTS=1`、`PY_IMAGE=stock-trading-python-e1cbbbd:test` | 同左 | 同左 |
+| ⚠️ **image ID**（⛔ **三次⛔ 不同**） | `sha256:c6f6cd5ef1fee48f7b8daf87b2615cd52e576301808d74be9a93d455e70c8167` | `sha256:e81b17fefe961f6118ebdae370a5a9fb9254f010422c04a401e76d4d472c436b` | `sha256:51cdac600c28d91c43970ced98db3dad9ffc624607747494b0a275611b579955` |
+| 結果 | **1222 passed, 1 skipped** | ⛔ **1 failed, 1221 passed, 1 skipped** | **1223 passed, 1 skipped** |
+| exit code | **0** | ⛔ **1** | **0** |
+| log | `tests_baseline.log`<br>`927300e5…8141` | `tests_patched_run1_failed.log`<br>`f36743ba…4ee0` | `tests_patched_run2.log`<br>`7adf7826…8a27` |
+
+⛔ **⛔ 不能寫成「同一顆 image」**（2026-09-22 訂正）：`python/Dockerfile` 會
+`COPY` 原始碼進去，來源內容不同，最終 image 本來就不同——三次的 tag 相同但 ID 不同，
+⚠️ 而 `test.sh` 每次都會重新 `docker build`。**真正相同的是**：
+同一份 `Dockerfile`、同一組 base 與 dependency layer、
+以及三份 log 都記到的 **Python 3.11.16 ／ pytest-9.1.1**。
+
+⚠️ **patched 第 1 次的 tree ⛔ 沒有保存**：那次是把 patch 套上去、尚未補正向測試的中間態，
+⛔ 已不可重建。⚠️ **它只作為「失敗曾經發生」的歷史 log，⛔ 不列為可重現的驗收證據**——
+驗收採 baseline 與 patched 第 2 次這兩個有 tree SHA 的執行。
+
+⚠️ **log 三份都封存在 `python/baselines/i074_stage2/`**（含**失敗那次**——
+⛔ 失敗紀錄不得只留在對話裡，它正是「只翻轉真值表不夠」的證據）。
+⚠️ `SKIP_SHELL_TESTS=1` 的理由：那一段驗的是 **replay 腳本的 argv 所有權**，
+與反事實 patch ⛔ 無關（patch ⛔ 沒有碰 `scripts/`），且兩側完全相同。
+⛔ **所以⛔ 不能說「既有測試全綠」**——⚠️ 精確的說法是
+**「Python pytest 全量通過；shell argv 測試本步驟未執行」**。
+
+⚠️ **另有一次先跑的局部驗證**（只跑 `backtest/modular/sr_scoring/tests`，998 passed／1 skipped），
+⛔ **不作為驗收依據**。⚠️ **驗收採 baseline 與 patched 第 2 次**（兩者都有 tree SHA、
+都可重現）；**patched 第 1 次只保留為歷史失敗紀錄**。
+
+##### ⚠️ patch 檔的保存格式：⛔ 不得做 whitespace 正規化
+
+⚠️ `git diff --cached --check` 會在 patch 檔報 **27 處 trailing whitespace**——
+⚠️ 那是 unified diff 對**空白 context 行**使用的**單獨一個空格**前綴，⛔ **不是損壞**。
+⛔ **批次 trim 會同時破壞套用能力、並改掉上表記錄的 patch SHA。**
+
+**處置**：新增 `.gitattributes`，**逐副檔名**（`*.patch`／`*.log`，⛔ 不是整個目錄）指定
+`-text`（⛔ **關掉換行正規化**——⚠️ 只寫 `-whitespace` 只關診斷，跨平台 checkout 仍可能改掉
+位元組）、`-whitespace`，log 另加 `conflict-marker-size`
+（⚠️ pytest 的 `=======` 分隔線剛好達到預設門檻 7）。
+⛔ **⛔ 不用 `**` 涵蓋整個目錄**：之後 Stage 2 的 JSON artifact 會放進同一個目錄，
+⚠️ 那些⛔ 不該跟著繞過 whitespace 檢查。
+⚠️ **這只改 git 的檢查行為，⛔ 一個位元組都沒動**——patch SHA 仍是 `ef7a4cdf…4f93`。
+⚠️ **正式保存路徑與格式仍由步驟 ③ 的 evidence contract 定案。**
+
+##### ⒝ 兩份 patch 的 SHA 機制——**實測可行**
+
+⚠️ v25 的 `git write-tree` 方案已在真實 worktree 跑過：
+
+| 項目 | 值 |
+|---|---|
+| base commit | `e1cbbbdab44f8cf2d152e6ade9235d844f590d7f` |
+| 中繼 tree `T1` | `a1649733b910ae90f08efc5f215f31f898619f52` |
+| `counterfactual_patch_sha256` | `ef7a4cdf23dce70cda77abe8d49cdcc8e3a3829c0212b4202e747b343c4b4f93` |
+| `tooling_patch_sha256`（本次為空） | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`（空字串的 SHA，⚠️ 與 smoke 既有慣例一致） |
+| 合成 hash | 同 counterfactual（⚠️ tooling 為空時必然相等） |
+
+✅ **三項關鍵性質都驗過**：
+① **HEAD 全程等於 base**——⛔ 沒有中繼 commit，
+⛔ 不牴觸 `replay-args.sh:148` 的 `replay_args_prepare_worktree()` HEAD 斷言；
+② **stored patch 重新套用後的增量 diff SHA 等於原值**（三方一致）；
+③ 空 tooling patch 的 SHA 有明確值，⛔ 不是缺欄位。
+
+##### 仍未做（⛔ 不屬 ②）
+
+⛔ **replay ⛔ 沒有跑**。⚠️ `--i074-counterfactual`、`--counterfactual-patch-sha256`
+與 runner 的兩份 patch 輸入**都還沒實作**——它們屬於 ⑦，
+⚠️ 而 schema 與 manifest 欄位要等 ③ 的 evidence contract 定案。
+
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 
 D 的候選數是 **156（> 0）**，所以⛔ 走不到分支 A，**Stage 2 幾乎確定要跑**。

@@ -1,0 +1,301 @@
+diff --git a/python/backtest/modular/sr_scoring/decision_engine.py b/python/backtest/modular/sr_scoring/decision_engine.py
+index c01488e..3be5130 100644
+--- a/python/backtest/modular/sr_scoring/decision_engine.py
++++ b/python/backtest/modular/sr_scoring/decision_engine.py
+@@ -1037,23 +1037,26 @@ def _decision_semantic_pipeline(
+     blocking_zone_ahead: bool,
+     current_price: float,
+ ) -> dict[str, Any]:
+-    # 生命週期由獨立的 Lifecycle Engine 判定（見 lifecycle_engine.py 與
++    # ⚠️ **I-074 COUNTERFACTUAL PATCH**：主線這裡明寫「**它不吃 rr_gate**」，
++    # 因為 RR 是進場與策略條件、不是事件事實（見 lifecycle_engine.py 與
+     # docs/sr-zone-scoring.md「分層原則：lifecycle 不看 RR」）。
+-    # **它不吃 rr_gate**：RR 是進場與策略條件，不是事件事實。原本 CONTINUATION 的條件
+-    # 含 rr_qualified，等於讓策略條件改寫事件事實；移除後保守度改由下方的 entry gate 負責。
++    # 這份 patch 刻意把 **setup gate** 的結果餵回去，重建 T-044 之前的行為。
++    # ⚠️ 取值必須早於呼叫，所以 `rr_qualified` 從原本的呼叫後移到呼叫前——
++    # ⛔ 這是純粹的取值時機搬移，`rr_gate` 本身在此之前就已算完，值不受影響。
++    rr_qualified = bool((rr_gate or {}).get("qualified"))
++
+     lifecycle = resolve_lifecycle(
+         event_state_summary=event_state_summary,
+         primary_zone=primary_zone,
+         structure_state=structure_state,
+         daily_price_action=daily_price_action,
+         current_price=current_price,
++        setup_rr_qualified=rr_qualified,
+     )
+     event_signal = lifecycle["event_signal"]
+     lifecycle_phase = lifecycle["lifecycle_phase"]
+     reason_codes: list[str] = list(lifecycle["reason_codes"])
+ 
+-    rr_qualified = bool((rr_gate or {}).get("qualified"))
+-
+     if lifecycle_phase in ("BREAKDOWN", "INVALIDATED"):
+         market_state = "BREAKDOWN_RISK"
+     elif lifecycle_phase == "CONTINUATION":
+diff --git a/python/backtest/modular/sr_scoring/lifecycle_engine.py b/python/backtest/modular/sr_scoring/lifecycle_engine.py
+index a900f9a..af6ec15 100644
+--- a/python/backtest/modular/sr_scoring/lifecycle_engine.py
++++ b/python/backtest/modular/sr_scoring/lifecycle_engine.py
+@@ -139,11 +139,15 @@ def resolve_lifecycle(
+     structure_state: str,
+     daily_price_action: Optional[dict[str, Any]],
+     current_price: float,
++    setup_rr_qualified: bool,
+ ) -> dict[str, Any]:
+     """依事件演進決定生命週期狀態。
+ 
+-    **參數裡沒有 rr_gate，是刻意的。** 風險報酬比是進場與策略條件，不是事件事實；
+-    要維持保守度應該由 Decision Engine 用 RR Gate 去擋，而不是讓 lifecycle 說謊。
++    ⚠️ **I-074 COUNTERFACTUAL PATCH：`setup_rr_qualified` 是刻意加回來的。**
++    主線的簽章**沒有**這個參數（RR 是進場與策略條件、不是事件事實）。
++    這份 patch 只為 Stage 2 的反事實對照存在：把 T-044 移除的 setup RR 條件加回
++    `CONTINUATION` 分支，好量測「RR 解耦改變了哪些列」。
++    ⛔ **它不得進主線**，也⛔ 不得改動其他任何分支、優先序或診斷欄位。
+ 
+     回傳 `{"event_signal", "lifecycle_phase", "reason_codes", "clear_zone_breakout",
+     "continuation_price_evidence_met"}`。
+@@ -186,13 +190,13 @@ def resolve_lifecycle(
+     elif event_signal == EVENT_SIGNAL_CLOSE_RECLAIM and (
+         price_follow_through == "PRICE_UPSIDE_FOLLOW_THROUGH"
+         and momentum_state == "MOMENTUM_CONFIRMED"
++        and setup_rr_qualified
+         and clear_zone_breakout
+     ):
+-        # **這裡原本還要求 `rr_gate.qualified`**（見 docs/sr-zone-scoring.md
+-        # 「分層原則：lifecycle 不看 RR」）。
+-        # 那讓同一段價格行為在 RR 不合格時被判成 CONFIRMED、合格時才是 CONTINUATION——
+-        # 事件事實被策略條件改寫。移除後 lifecycle 只描述「價格延續且動能確認且明確突破」，
+-        # RR 由 Decision Engine 在 entry gate 端處理。
++        # ⚠️ **I-074 COUNTERFACTUAL PATCH：`setup_rr_qualified` 是這份 patch 的唯一語意變因。**
++        # 主線在 T-044 把它移除了（見 docs/sr-zone-scoring.md「分層原則：lifecycle 不看 RR」）：
++        # 它讓同一段價格行為在 RR 不合格時被判成 CONFIRMED、合格時才是 CONTINUATION。
++        # 這裡把它加回來，好讓 Stage 2 能對照「移除前 / 移除後」的逐列差異。
+         lifecycle_phase = LIFECYCLE_CONTINUATION
+         reason_codes.append("PRICE_UPSIDE_FOLLOW_THROUGH")
+     elif event_signal == EVENT_SIGNAL_CLOSE_RECLAIM and (
+diff --git a/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py b/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
+index e33091b..50f82f2 100644
+--- a/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
++++ b/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
+@@ -23,7 +23,8 @@ def _zone(low=98.0, high=100.0, role=ZoneType.SUPPORT.value):
+     return _base_zone(role=role, low=low, high=high)
+ 
+ 
+-def _lifecycle(*, follow_through, momentum, current_price, zone=None, signal_states=None):
++def _lifecycle(*, follow_through, momentum, current_price, zone=None, signal_states=None,
++               setup_rr_qualified=True):
+     return resolve_lifecycle(
+         event_state_summary={"active": signal_states or [], "active_bearish_events": []},
+         primary_zone=zone if zone is not None else _zone(),
+@@ -33,6 +34,7 @@ def _lifecycle(*, follow_through, momentum, current_price, zone=None, signal_sta
+             "momentum_confirmation_state": momentum,
+         },
+         current_price=current_price,
++        setup_rr_qualified=setup_rr_qualified,
+     )
+ 
+ 
+@@ -355,7 +357,11 @@ def test_pipeline_passes_through_lifecycle_keys_unchanged(monkeypatch):
+ 
+ 
+ @pytest.mark.parametrize("phase,rr_qualified,expected", [
+-    ("CONTINUATION", False, True),
++    # ⚠️ **I-074 COUNTERFACTUAL PATCH**：RR 加回之後 `CONTINUATION` 蘊含
++    # `setup_rr_qualified`，所以 candidate（＝`CONTINUATION` ∧ ¬RR）**恆為 False**。
++    # ⚠️ 主線第一列是 `True`；這裡的 `False` 正是 Stage 2 `before_candidates == ∅`
++    # 守門所依賴的性質。⛔ 只改這張表是不夠的，見下一支測試。
++    ("CONTINUATION", False, False),
+     ("CONTINUATION", True, False),
+     ("TESTING", False, False),
+     ("TESTING", True, False),
+@@ -370,6 +376,23 @@ def test_pipeline_candidate_truth_table(phase, rr_qualified, expected):
+     )
+ 
+ 
++def test_counterfactual_continuation_requires_setup_rr():
++    """⚠️ **I-074 COUNTERFACTUAL PATCH 新增**：⛔ 不能只把上表改成全 `False`。
++
++    上表全 `False` 有兩種成因：①RR 條件真的加回來了（要的）；
++    ②pipeline 整個壞掉、根本走不到 `CONTINUATION`（⛔ 不要的）。
++    ⚠️ 這支正面釘住反事實行為：**同一組價格證據**下，
++    RR 合格才是 `CONTINUATION`，RR 不合格落回 `CONFIRMED`。
++    """
++    qualified = _pipeline(lifecycle_phase_wanted="CONTINUATION", rr_qualified=True)
++    blocked = _pipeline(lifecycle_phase_wanted="CONTINUATION", rr_qualified=False)
++    assert qualified["lifecycle_phase"] == "CONTINUATION"
++    assert blocked["lifecycle_phase"] == "CONFIRMED", (
++        "RR 不合格時必須落回 CONFIRMED；若仍是 CONTINUATION 代表 patch 沒生效，"
++        "若是別的值代表 patch 改壞了優先序"
++    )
++
++
+ def test_pipeline_setup_rr_qualified_mirrors_the_setup_gate():
+     for qualified in (True, False):
+         pipeline = _pipeline(lifecycle_phase_wanted="TESTING", rr_qualified=qualified)
+diff --git a/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py b/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
+index f26cc47..8887c0e 100644
+--- a/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
++++ b/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
+@@ -47,13 +47,11 @@ def _state(event_type: str, age_bars: int = 0) -> dict:
+ 
+ # ── lifecycle 不看 RR（見 docs/sr-zone-scoring.md）──────────────
+ def test_continuation_only_needs_price_evidence():
+-    """延續的判定只看價格證據（跟進 ＋ 動能 ＋ 明確突破），與 RR 無關。
++    """⚠️ **I-074 COUNTERFACTUAL PATCH 下改寫**：延續需要價格證據**且 RR 合格**。
+ 
+-    `resolve_lifecycle` 的簽章裡沒有 `rr_gate`，所以這支測試**無法**防守
+-    「RR 被加回來」的回歸——真要加回來會是新增參數，這支照樣綠燈。
+-    它能防守的是**這三個條件被改動**（例如有人再塞第四個條件進來）。
+-    RR 獨立性的真正防線是 `test_widened_path_previously_testing_now_continuation`
+-    與 decision 層的 entry gate 測試。
++    主線版本的標題是「只看價格證據，與 RR 無關」；這份 patch 把 setup RR 加了回去，
++    所以這支改成「**三項價格證據 ＋ `setup_rr_qualified=True`** 才是 CONTINUATION」。
++    RR 不合格那一側由 `test_counterfactual_rr_blocks_continuation` 守。
+     """
+     result = resolve_lifecycle(
+         event_state_summary=_summary(active=[_state("INTRADAY_RECLAIM", age_bars=1)]),
+@@ -61,25 +59,24 @@ def test_continuation_only_needs_price_evidence():
+         structure_state="SUPPORT_RECLAIM_CONFIRMED",
+         daily_price_action=FOLLOW_THROUGH,
+         current_price=103.5,  # >= 100 * 1.03，明確突破
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_CONTINUATION
+     assert "PRICE_UPSIDE_FOLLOW_THROUGH" in result["reason_codes"]
+ 
+ 
+-def test_widened_path_previously_testing_now_continuation():
+-    """**這是 RR 解耦真正變寬的那條路徑**，計畫書原本漏記、測試也沒蓋到。
++def test_counterfactual_rr_blocks_continuation():
++    """⚠️ **I-074 COUNTERFACTUAL PATCH 下反轉**：這正是 RR 解耦變寬的那條路徑。
+ 
+     情境：收復尚未被結構確認（`SUPPORT_RECLAIM_CANDIDATE`）、`age_bars=0`，
+-    但價格跟進、動能確認、明確突破都成立。
++    但價格跟進、動能確認、明確突破都成立，**而 RR 不合格**。
+ 
+-    - 舊碼：CONTINUATION 分支因 `rr_qualified` 為 False 而不成立
+-      → CONFIRMED 分支也不成立（structure 未確認且 age=0）→ **TESTING**
+-    - 新碼：**CONTINUATION**
++    - 主線（RR 已解耦）：**CONTINUATION**
++    - 這份 patch（RR 加回）：CONTINUATION 分支因 `setup_rr_qualified=False` 不成立
++      → CONFIRMED 也不成立（structure 未確認且 age=0）→ **TESTING**
+ 
+-    下游影響是 `action_state` 由 `CONDITIONAL_HOLD` 變成 `HOLD`，
+-    再被 `_position_action_condition` 原樣採用——**持有建議這條線上沒有 RR gate**
+-    （entry 有，position 沒有）。詳見 docs/sr-zone-scoring.md
+-    「分層原則：lifecycle 不看 RR」的行為改變說明。
++    ⚠️ **這支斷言的就是 Stage 2 要量的那個翻轉**；⛔ 若它回到 CONTINUATION，
++    代表 counterfactual patch 沒有生效。
+     """
+     result = resolve_lifecycle(
+         event_state_summary=_summary(active=[_state("INTRADAY_RECLAIM", age_bars=0)]),
+@@ -87,9 +84,10 @@ def test_widened_path_previously_testing_now_continuation():
+         structure_state="SUPPORT_RECLAIM_CANDIDATE",
+         daily_price_action=FOLLOW_THROUGH,
+         current_price=103.5,
++        setup_rr_qualified=False,
+     )
+-    assert result["lifecycle_phase"] == LIFECYCLE_CONTINUATION, (
+-        "這條路徑舊碼是 TESTING；若改回 TESTING 代表 RR 耦合被加回來了"
++    assert result["lifecycle_phase"] == LIFECYCLE_TESTING, (
++        "RR 加回之後這條路徑必須落回 TESTING；若是 CONTINUATION 代表 patch 沒生效"
+     )
+ 
+ 
+@@ -105,6 +103,7 @@ def test_bearish_event_wins_over_reclaim():
+         structure_state="SUPPORT_RECLAIM_CONFIRMED",
+         daily_price_action=FOLLOW_THROUGH,
+         current_price=103.5,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_BREAKDOWN
+ 
+@@ -117,6 +116,7 @@ def test_invalidated_and_breakdown_are_distinguished():
+         structure_state="SUPPORT_RECLAIM_INVALIDATED",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     breakdown = resolve_lifecycle(
+         event_state_summary=_summary(),
+@@ -124,6 +124,7 @@ def test_invalidated_and_breakdown_are_distinguished():
+         structure_state="BREAKDOWN",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert invalidated["lifecycle_phase"] == LIFECYCLE_INVALIDATED
+     assert breakdown["lifecycle_phase"] == LIFECYCLE_BREAKDOWN
+@@ -147,6 +148,7 @@ def test_continuation_requires_all_three_conditions(price_action, current_price,
+         structure_state="SUPPORT_RECLAIM_CONFIRMED",
+         daily_price_action=price_action,
+         current_price=current_price,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == expected
+ 
+@@ -159,6 +161,7 @@ def test_reclaim_without_confirmation_is_testing():
+         structure_state="SUPPORT_RECLAIM_CANDIDATE",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_TESTING
+ 
+@@ -171,6 +174,7 @@ def test_reclaim_age_one_bar_is_confirmed():
+         structure_state="SUPPORT_RECLAIM_CANDIDATE",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_CONFIRMED
+ 
+@@ -183,6 +187,7 @@ def test_pending_validation_zone_is_support_test():
+         structure_state="NORMAL",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["event_signal"] == "SUPPORT_TEST"
+     assert result["lifecycle_phase"] == LIFECYCLE_TESTING
+@@ -195,6 +200,7 @@ def test_no_primary_zone():
+         structure_state="NORMAL",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_NO_PRIMARY_ZONE
+ 
+@@ -206,6 +212,7 @@ def test_normal_when_zone_exists_without_events():
+         structure_state="NORMAL",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_NORMAL
+ 
+@@ -218,6 +225,7 @@ def test_extreme_volume_alone_is_context_not_a_phase():
+         structure_state="NORMAL",
+         daily_price_action=None,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["event_signal"] == "VOLUME_CONTEXT"
+     assert result["lifecycle_phase"] == LIFECYCLE_NORMAL
+@@ -231,6 +239,7 @@ def test_resistance_zone_does_not_trigger_clear_breakout():
+         structure_state="SUPPORT_RECLAIM_CONFIRMED",
+         daily_price_action=FOLLOW_THROUGH,
+         current_price=103.5,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_CONFIRMED
+ 
+@@ -289,5 +298,6 @@ def test_support_test_candidate_lifecycle_is_testing():
+         structure_state="SUPPORT_TEST_CANDIDATE",
+         daily_price_action=FOLLOW_THROUGH,
+         current_price=99.0,
++        setup_rr_qualified=True,
+     )
+     assert result["lifecycle_phase"] == LIFECYCLE_TESTING

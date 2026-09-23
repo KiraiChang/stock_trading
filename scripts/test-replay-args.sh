@@ -1311,6 +1311,82 @@ if [ -d "$S2_BUNDLE" ]; then
   set -e
   [ "$rc" -ne 0 ] && [ -z "$out" ] && pass "找不到 tarball → fail-closed（⛔ 不改為重建）" || fail "沒有 tarball 竟通過"
   [ "$rc4" -ne 0 ] && pass "restore 只支援 --stage 2" || fail "restore --stage 1 竟通過"
+
+  # ── --adopt-image：採用既有 image、⛔ 不 build（2026-09-23 使用者裁決）────────
+  echo "==> i074 Stage 2：pin-replay-image.sh --stage 2 --adopt-image"
+  mkdir -p "$S2_TD/abin"
+  cat > "$S2_TD/abin/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+  image) [ "$3" = "$FAKE_KNOWN" ] && { printf '%s\n' "$3"; exit 0; }; exit 1 ;;
+  run) printf '%s\n' "$FAKE_ENV_JSON"; exit 0 ;;          # 容器內算出的環境
+  save) printf 'fake-image-%s' "$4" > "$3"; exit 0 ;;
+esac
+exit 0
+FAKE
+  chmod +x "$S2_TD/abin/docker"
+  A_ID="sha256:$(printf '%064d' 3)"
+  A_XDG="$S2_TD/adoptxdg"
+  # ⚠️ 預期值取自**已驗證的** Stage 1 信任錨——與 pin 用的是同一支。
+  A_ENV="$(python3 "$REPO_ROOT/python/scripts/print-i074-environment.py" --stage1 2>/dev/null || true)"
+  s2_adopt() {  # $1＝log；$2＝容器內要回報的環境 JSON；其餘＝參數
+    local log="$1" env_json="$2"; shift 2
+    : > "$log"
+    env -u PY_IMAGE PATH="$S2_TD/abin:$PATH" XDG_DATA_HOME="$A_XDG" FAKE_DOCKER_LOG="$log" \
+      FAKE_KNOWN="$A_ID" FAKE_ENV_JSON="$env_json" \
+      "$REPO_ROOT/scripts/pin-replay-image.sh" "$@" 2>/dev/null
+  }
+  A_IDENTITY="$A_XDG/stock_trading/i074_stage2/run_identity.json"
+  set +e
+  out="$(s2_adopt "$S2_TD/a1" "$A_ENV" --adopt-image "$A_ID" "$S2_BUNDLE")"; rc1=$?
+  out2="$(s2_adopt "$S2_TD/a2" "$A_ENV" --stage 2 --adopt-image stock_trading-python-server:latest "$S2_BUNDLE")"; rc2=$?
+  out3="$(s2_adopt "$S2_TD/a3" "$A_ENV" --stage 2 --adopt-image "$A_ID" --adopt-image "$A_ID" "$S2_BUNDLE")"; rc3=$?
+  out4="$(s2_adopt "$S2_TD/a4" "$A_ENV" --stage 2 --adopt-image "sha256:$(printf '%064d' 9)" "$S2_BUNDLE")"; rc4=$?
+  set -e
+  [ "$rc1" -ne 0 ] && pass "--adopt-image 只限 --stage 2" || fail "--adopt-image 竟可用於 Stage 1"
+  [ "$rc2" -ne 0 ] && pass "--adopt-image ⛔ 不收 tag，只收完整 image ID" || fail "--adopt-image 竟收了 tag"
+  [ "$rc3" -ne 0 ] && pass "--adopt-image 重複 → 拒絕" || fail "--adopt-image 重複竟通過"
+  [ "$rc4" -ne 0 ] && [ ! -e "$A_IDENTITY" ] \
+    && pass "本機找不到要採用的 image → 拒絕、⛔ 不建立 identity" || fail "採用不存在的 image 竟通過"
+
+  if [ -n "$A_ENV" ]; then
+    A_BAD="$(sed 's/"python_version":"[^"]*"/"python_version":"3.11.99"/' <<< "$A_ENV")"
+    set +e
+    out="$(s2_adopt "$S2_TD/a5" "$A_BAD" --stage 2 --adopt-image "$A_ID" "$S2_BUNDLE")"; rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && [ -z "$out" ] && [ ! -e "$A_IDENTITY" ] \
+       && ! grep -q '^tag\|^save\|^build' "$S2_TD/a5"; then
+      pass "環境與 Stage 1 不同 → ⛔ 不採用（⛔ 沒有 tag、identity、tarball）"
+    else
+      fail "環境不同竟被採用：rc=$rc out='$out'"
+    fi
+    set +e
+    out="$(s2_adopt "$S2_TD/a6" "$A_ENV" --stage 2 --adopt-image "$A_ID" "$S2_BUNDLE")"; rc=$?
+    set -e
+    A_HEX="$(printf '%064d' 3)"
+    if [ "$rc" -eq 0 ] && [ "$out" = "$A_ID" ] && ! grep -q '^build' "$S2_TD/a6" \
+       && grep -qx "tag $A_ID stock-trading-python-replay:i074-stage2" "$S2_TD/a6" \
+       && grep -qF "\"expected_image_id\":\"$A_ID\"" "$A_IDENTITY" \
+       && ( . "$REPO_ROOT/scripts/lib/image-tarball.sh"; image_tarball_verify \
+              "$A_XDG/stock_trading/i074_stage2/images" "$A_HEX" ); then
+      pass "環境相同 → 採用：⛔ 不 build、掛上專用 tag、identity 記的是它、tarball 可驗證"
+    else
+      fail "採用的正常分支：rc=$rc out='$out'"
+      sed 's/^/    /' "$S2_TD/a6" >&2
+    fi
+    set +e
+    out="$(s2_adopt "$S2_TD/a7" "$A_ENV" --stage 2 --adopt-image "sha256:$(printf '%064d' 4)" "$S2_BUNDLE")"; rc7=$?
+    out8="$(s2_adopt "$S2_TD/a8" "$A_ENV" --stage 2 --adopt-image "$A_ID" "$S2_BUNDLE")"; rc8=$?
+    set -e
+    [ "$rc7" -ne 0 ] && pass "identity 已釘死後 --adopt-image 指向別的 image → 拒絕（⛔ 不換）" \
+      || fail "identity 已釘死卻換了 image"
+    [ "$rc8" -eq 0 ] && [ "$out8" = "$A_ID" ] && ! grep -q '^run\|^build' "$S2_TD/a8" \
+      && pass "identity 已釘死、--adopt-image 同一個 → no-op（⛔ 不重跑環境比對）" \
+      || fail "同一個 image 的 no-op 分支：rc=$rc8 out='$out8'"
+  elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+    fail "--adopt-image 測試：讀不到 Stage 1 的環境指紋（IMAGE_REQUIRED=1）"
+  fi
 elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
   fail "pin --stage 2 測試：找不到正式 bundle（IMAGE_REQUIRED=1）"
 fi

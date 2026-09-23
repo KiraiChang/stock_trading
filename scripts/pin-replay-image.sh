@@ -30,6 +30,13 @@
 #   | identity | Stage 2 自己的一份（`…/stock_trading/i074_stage2/run_identity.json`，依 stage 固定推導） |
 #   | tarball | pin 之後 `docker save` 到 repo 外的 `…/stock_trading/i074_stage2/images/<hex>.tar`，旁邊一份 `<hex>.tar.sha256` |
 #   | image 已不在本機 | ⚠️ 仍 fail-closed；⚠️ 改用 `scripts/restore-replay-image.sh --stage 2 <bundle>` 從 tarball 還原（先驗 SHA、`docker load` 後再驗 image ID） |
+#   | `--adopt-image <完整 image ID>` | ⚠️ **採用既有 image、⛔ 不 build**（2026-09-23 使用者裁決，見下方） |
+#
+# ⚠️ **`--adopt-image`（只限 `--stage 2`、只在 identity 還不存在時）**：2026-09-23 實測
+# `stock_trading-python-server:latest`（與遺失的 image 同一份 Dockerfile、只晚 16 分鐘 build）的
+# `pip_freeze_sha256` 與 Stage 1 **完全相同**，而今天重新 build 會裝到不同的套件（layer cache 已更新）。
+# 所以採用它。⚠️ 採用前**必須證明環境相同**：容器內算出的 `{pip_freeze_sha256, python_version}`
+# 要**逐字等於**已封存 Stage 1 after 的（`print-i074-environment.py`，經 Stage 1 信任錨），⛔ 不符即中止。
 #
 # ⚠️ **Stage 1 的行為逐項不變**（它的 fail-closed 是正確的）。
 set -euo pipefail
@@ -47,8 +54,13 @@ ENSURE="$PYTHON_DIR/scripts/ensure-i074-run-identity.py"
 NO_IDENTITY=0
 STAGE=1
 STAGE_SEEN=0
+ADOPT_IMAGE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --adopt-image)
+      [ "$#" -ge 2 ] || { echo "ERROR: --adopt-image 需要完整的 image ID。" >&2; exit 1; }
+      [ -z "$ADOPT_IMAGE" ] || { echo "ERROR: --adopt-image 重複出現——⛔ 不靜默採用最後一個。" >&2; exit 1; }
+      ADOPT_IMAGE="$2"; shift 2 ;;
     --no-identity)
       [ "$NO_IDENTITY" = "0" ] || { echo "ERROR: --no-identity 重複出現。" >&2; exit 1; }
       NO_IDENTITY=1; shift ;;
@@ -69,6 +81,14 @@ if [ "$NO_IDENTITY" = "1" ] && [ "$STAGE" != "1" ]; then
   echo "ERROR: --no-identity ⛔ 不可與 --stage 2 並用——Stage 2 一定要有自己的 identity。" >&2
   exit 1
 fi
+if [ -n "$ADOPT_IMAGE" ]; then
+  [ "$STAGE" = "2" ] || { echo "ERROR: --adopt-image 只限 --stage 2。" >&2; exit 1; }
+  # ⚠️ 只收**完整 image ID**：⛔ 不收 tag（tag 會移動，採用的必須是當下確認過的那一個）。
+  if ! [[ "$ADOPT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "ERROR: --adopt-image 必須是完整的 image ID（sha256: ＋ 64 hex），⛔ 不收 tag：'$ADOPT_IMAGE'" >&2
+    exit 1
+  fi
+fi
 if [ "$STAGE" = "2" ]; then
   # ⚠️ 專用 tag：⛔ 與 build 腳本共用 tag 正是 Stage 1 的 image 遺失的可能成因。
   if [ -n "${PY_IMAGE:-}" ]; then
@@ -81,7 +101,7 @@ fi
 
 BUNDLE="${1:-}"
 if [ "$NO_IDENTITY" = "0" ] && [ -z "$BUNDLE" ]; then
-  echo "用法: $0 [--no-identity] [--stage 1|2] <bundle 絕對路徑>" >&2
+  echo "用法: $0 [--no-identity] [--stage 1|2 [--adopt-image <image ID>]] <bundle 絕對路徑>" >&2
   exit 1
 fi
 # ⚠️ bundle 之後⛔ 不得還有別的參數（⛔ 不靜默忽略）；`--no-identity` 不吃 bundle。
@@ -144,6 +164,29 @@ if [ "$NO_IDENTITY" = "1" ]; then
   exit 0
 fi
 
+# ── Stage 2 的 --adopt-image：採用前證明環境與 Stage 1 相同 ──────────────────
+adopt_stage2_image() {
+  local image_id="$1" actual expected current
+  actual="$(docker image inspect "$image_id" -f '{{.Id}}' 2>/dev/null || true)"
+  if [ "$actual" != "$image_id" ]; then
+    echo "ERROR: 本機找不到 image $image_id（實際 '$actual'）——⛔ 無法採用。" >&2
+    return 1
+  fi
+  # ⚠️ 預期值取自**已驗證的** Stage 1 信任錨（⛔ 不是直接讀檔）。
+  expected="$(python3 "$PYTHON_DIR/scripts/print-i074-environment.py" --stage1)" || return 1
+  # ⚠️ 實際值**在要採用的那個 image 裡**算（⛔ 不是 host 的環境）；程式碼唯讀掛入、⛔ 不連網。
+  current="$(docker run --rm --network none --memory=300m --memory-swap=300m \
+      -v "$PYTHON_DIR":/repo-python:ro "$image_id" \
+      python /repo-python/scripts/print-i074-environment.py --current)" || return 1
+  if [ -z "$expected" ] || [ "$expected" != "$current" ]; then
+    echo "ERROR: $image_id 的環境與 Stage 1 當時⛔ 不同——⛔ 不採用。" >&2
+    echo "       Stage 1 ：$expected" >&2
+    echo "       本 image：$current" >&2
+    return 1
+  fi
+  echo "==> 環境與 Stage 1 相同：$current" >&2
+}
+
 # ── ① 已有 identity？ ───────────────────────────────────────────────────────
 # `--peek` 的語意：存在 → 印既有 ID 並**重新 fsync**；不存在 → **exit 2**（⛔ 不是失敗）。
 set +e
@@ -152,6 +195,11 @@ PEEK_RC=$?
 set -e
 
 if [ "$PEEK_RC" -eq 0 ]; then
+  # ⚠️ 已有 identity 時 `--adopt-image` 只能指向**同一個** image（⛔ 不得藉此換掉已釘死的 image）。
+  if [ -n "$ADOPT_IMAGE" ] && [ "$ADOPT_IMAGE" != "$EXISTING" ]; then
+    echo "ERROR: Stage 2 identity 已釘死 $EXISTING，--adopt-image 卻指向 $ADOPT_IMAGE——⛔ 不換。" >&2
+    exit 1
+  fi
   # ⚠️ **image 必須仍在本機**，否則後面三趟會跑在別的 image 上。
   if ! docker image inspect "$EXISTING" >/dev/null 2>&1; then
     echo "ERROR: identity 記的 image $EXISTING 已不在本機——⛔ fail-closed。" >&2
@@ -177,13 +225,21 @@ if [ "$PEEK_RC" -ne 2 ]; then
   exit "$PEEK_RC"
 fi
 
-# ── ② 沒有 identity：build 一次並釘死 ──────────────────────────────────────
-echo "==> 建置 image：$IMAGE" >&2
-docker build -t "$IMAGE" "$PYTHON_DIR" >&2
-IMAGE_ID="$(docker image inspect "$IMAGE" -f '{{.Id}}' 2>/dev/null || true)"
-if [ -z "$IMAGE_ID" ]; then
-  echo "ERROR: 取不到 $IMAGE 的 image ID。" >&2
-  exit 1
+# ── ② 沒有 identity：build（或採用）一次並釘死 ──────────────────────────────
+if [ -n "$ADOPT_IMAGE" ]; then
+  echo "==> 採用既有 image（⛔ 不 build）：$ADOPT_IMAGE" >&2
+  adopt_stage2_image "$ADOPT_IMAGE"
+  IMAGE_ID="$ADOPT_IMAGE"
+  # ⚠️ 先掛上專用 tag（被 prune 保護的前提），再建立 identity。
+  docker tag "$IMAGE_ID" "$IMAGE" >&2
+else
+  echo "==> 建置 image：$IMAGE" >&2
+  docker build -t "$IMAGE" "$PYTHON_DIR" >&2
+  IMAGE_ID="$(docker image inspect "$IMAGE" -f '{{.Id}}' 2>/dev/null || true)"
+  if [ -z "$IMAGE_ID" ]; then
+    echo "ERROR: 取不到 $IMAGE 的 image ID。" >&2
+    exit 1
+  fi
 fi
 
 # ⚠️ identity 由 Python 寫（canonical ＋ 原子 rename ＋ 兩次 fsync），

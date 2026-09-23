@@ -1198,6 +1198,11 @@ tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。�
              fi
            ⚠️ `--stage 2`：**專用 tag** `stock-trading-python-replay:i074-stage2`（⛔ 不接受 PY_IMAGE）、
               Stage 2 自己的 identity、`docker save` tarball（見下方「tarball」）
+           ⚠️ **2026-09-23 裁決：採用既有 image、⛔ 不重新 build**——加上
+              `--adopt-image sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027`
+              （`stock_trading-python-server:latest`，套件指紋與 Stage 1 完全相同；重新 build 會吃到
+              已更新的 layer cache）。採用前腳本會**在該 image 內**比對 `{pip_freeze_sha256, python_version}`
+              與 Stage 1 信任錨，⛔ 不同即中止
 ② 見證趟  AFTER_REF=e1cbbbd I074_STAGE=2 scripts/run-replay-offline.sh --bundle <bundle> \
              --output-dir <run 目錄>/witness --before-ref 'ecbc141^' --i074-preflight
            ⚠️ `AFTER_REF=e1cbbbd`：after' 跑的是**原始 e1cbbbd**、⛔ 不設 TOOLING_PATCH（E7 會擋）

@@ -1869,7 +1869,7 @@ parent fsync 失敗⛔ 不刪除」），⚠️ **套用層級是整個 evidence
 |---|---|
 | 新 image | ⚠️ **專用 tag**（例如 `stock-trading-python-replay:i074-stage2`，⛔ 不與任何 build 腳本共用）；pin 之後立刻 `docker save` 成 tarball，**放在 repo 外**，記下 tarball 的 SHA-256 與還原程序（⚠️ `docker load` 之後 image ID 不變）。⚠️ **v28（review 附帶條件）**：正式操作文件要**寫死保存位置與驗 SHA 的步驟**——建議位置與 identity 同一個 XDG 基底（`…/stock_trading/i074_stage2/images/`，⛔ 不放 `/tmp`），還原前先驗 tarball 的 SHA-256、`docker load` 之後再驗 image ID 等於 identity 的 `expected_image_id`，任一不符即中止 |
 | 套件清單 | ⚠️ 記錄**完整的 distributions 清單**（⛔ 不只 `pip_freeze_sha256`），由環境等價比對**在同一個 image 內**產出，並與 hash 交叉驗證——⚠️ 部分補上 I-116「偵測 ≠ 可重建」的缺口 |
-| 💡 build 的建議 | 先在容器內算 `stock_trading-python-server:latest`（與遺失的 image 同一份 Dockerfile、只晚 16 分鐘 build）的 `pip_freeze_sha256`；若等於 Stage 1 provenance 的 `7a39573e…`，就用它的清單**精確釘版**來 build 新 image，提高等價的機會。⚠️ **這只提高機率，⛔ 不取代下面的見證趟** |
+| 💡 build 的建議 | 先在容器內算 `stock_trading-python-server:latest`（與遺失的 image 同一份 Dockerfile、只晚 16 分鐘 build）的 `pip_freeze_sha256`；若等於 Stage 1 provenance 的 `7a39573e…`，就用它的清單**精確釘版**來 build 新 image，提高等價的機會。⚠️ **這只提高機率，⛔ 不取代下面的見證趟**。✅ **2026-09-23 實測相等，使用者裁決改為直接採用該 image**（`pin-replay-image.sh --stage 2 --adopt-image`，⛔ 不重新 build），見「③c 準備」 |
 | identity | ⚠️ **依 stage 固定推導**：`…/stock_trading/i074_stage2/run_identity.json`（⛔ 不開放任意路徑覆寫，沿用「測試改覆寫 `XDG_DATA_HOME`」的慣例）；`bundle_id` 與 Stage 1 相同、`expected_image_id` 是新 image。⚠️ **建立一次，after' 與 before 都用它**——identity 仍然⛔ 不是變數 |
 | **after' 見證趟** | 新 image ＋ **原始 `e1cbbbd`** ＋ 空的 tooling patch，**Stage 1 模式**（含 `--i074-preflight`）跑同一份 bundle，產出 after' 與 cohort'。⚠️ **它只是見證**：⛔ 不是新的正式 Stage 1 scan，⛔ 結果不得取代 D+1 |
 | 環境等價判定 | 見下表，**事前寫死** |
@@ -3811,6 +3811,41 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 **歸檔**（⚠️ 待 review）：操作程序寫進 [`development-workflow.md`](./development-workflow.md)
 「I-074 Stage 2 的環境見證程序」（含 tarball 的保存位置與驗 SHA 步驟）；契約寫進
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的環境見證契約」。
+
+#### ③c 準備：Stage 2 image 的來源（2026-09-23，⚠️ `--adopt-image` 待 review）
+
+⚠️ **③c 開始前的實測**（唯讀；在容器內用 `provenance.py` 的同一套計算）：
+
+| image | 建立時間 | `pip_freeze_sha256` | 與 Stage 1（`7a39573e…`） |
+|---|---|---|---|
+| `stock_trading-python-server:latest`（`sha256:2a90ad1c1dd8…`） | 2026-09-17 10:05（遺失的 image 之後 16 分鐘，同一份 Dockerfile） | `7a39573e…` | ✅ **完全相同**（Python 3.11.16、sklearn 1.9.1、pandas 3.0.5） |
+| `stock-trading-python-test:latest` | 2026-09-23（本輪測試重新 build） | `dd7d34c7…` | ❌ 不同（例如 pandas 3.0.6）——⚠️ **layer cache 已更新**，照原設計 `pin --stage 2` 重新 build 也會裝到這一組 |
+
+⚠️ **所以照原設計重新 build，見證趟判成 NOT_EQUIVALENT 的風險明顯較高**，而 after' 只有一趟。
+
+✅ **使用者裁決（2026-09-23）**：**採用 python-server image**，⛔ 不重新 build；commit 由使用者自己做。
+
+**實作**（⚠️ 待 review）：
+
+| 檔案 | 內容 |
+|---|---|
+| `scripts/pin-replay-image.sh` | 新增 `--adopt-image <完整 image ID>`：只限 `--stage 2`、⛔ 不收 tag、重複即中止；identity **還不存在**時：確認 image 在本機 → **在該 image 內**算 `{pip_freeze_sha256, python_version}` → 必須**逐字等於** Stage 1 信任錨的 → 才掛上專用 tag、建立 Stage 2 identity、存 tarball；identity **已存在**時只接受指向同一個 image（no-op），⛔ 不得藉此換掉已釘死的 image |
+| `python/scripts/print-i074-environment.py`（**新增**） | `--stage1`：取自**已驗證的** Stage 1 信任錨（`load_stage1_anchor()` 的 after provenance）；`--current`：該環境自己的——與 `build_provenance()` 同一個來源。stdout 只印一行 canonical JSON |
+| `python/scripts/_i074_bootstrap.py` | `load_replay_bundle()` 可指定只載入部分模組（`--current` 只要 `canonical`／`provenance`） |
+| `scripts/test-replay-args.sh` | `--adopt-image` 的八條：非 Stage 2、tag、重複、找不到 image、環境不同（⛔ 沒有 tag／identity／tarball）、環境相同（⛔ 不 build、tag、identity、tarball 可驗證）、identity 已釘死時換 image（拒絕）與同一個（no-op） |
+
+實測：`print-i074-environment.py --current` 在 python-server image 內的輸出與 `--stage1` **逐字相同**，
+在今天的測試 image 內則不同（`dd7d34c7…`）。
+
+**③c 的接續步驟**（commit 之後）：
+
+```text id="i074_stage2_3c_steps_001"
+① pin      scripts/pin-replay-image.sh --stage 2 \
+             --adopt-image sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 <bundle>
+             （guarded 寫法見 development-workflow.md「I-074 Stage 2 的環境見證程序」）
+② 見證趟  AFTER_REF=e1cbbbd I074_STAGE=2 scripts/run-replay-offline.sh … --i074-preflight  （約 180 分鐘；凍結窗口 A 開始）
+③ 判定    scripts/finalize-stage2-evidence.sh --envcheck --run-dir <run 目錄>
+```
 
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 

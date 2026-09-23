@@ -28,6 +28,9 @@
 #   AFTER_REF      Stage 1 要跑的版本（預設 HEAD）
 #   TOOLING_PATCH  要套進 worktree 的 patch 檔（本階段的 tooling 變更）
 #   REPLAY_DRY_RUN=1  只印出最終的 docker argv，不真的執行（給測試與人工核對用）
+#   I074_STAGE     I-074 正式流程要用哪一份 run identity（封閉列舉 1／2，預設 1）。
+#                  ⚠️ 只在 I-074 正式流程有意義；Stage 2 的環境見證趟（after'）用 2——
+#                  見 issue.md I-074 Stage 2 計畫書「二、⑤」。⛔ 它不是路徑，⛔ 不開放任意覆寫。
 #   MEM / CPUS / PY_IMAGE  同 python/scripts/test.sh
 #
 # 設計重點：
@@ -65,6 +68,16 @@ for _arg in "$@"; do
     --i074-preflight|--i074-capacity-probe) I074_MODE=1 ;;
   esac
 done
+
+I074_STAGE="${I074_STAGE:-1}"
+case "$I074_STAGE" in
+  1|2) ;;
+  *) echo "ERROR: I074_STAGE 只接受 1 或 2（封閉列舉），實際 '$I074_STAGE'。" >&2; exit 1 ;;
+esac
+if [ "$I074_STAGE" != "1" ] && [ "$I074_MODE" = "0" ]; then
+  echo "ERROR: I074_STAGE=$I074_STAGE 只在 I-074 正式流程（--i074-preflight／--i074-capacity-probe）有意義。" >&2
+  exit 1
+fi
 
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-700m}"
@@ -129,10 +142,11 @@ MOUNTS=(-v "$BUNDLE_ABS":"$BUNDLE_ABS":ro -v "$OUT_ABS":"$OUT_ABS")
 if [ "$I074_MODE" = "1" ]; then
   # ⚠️ ⛔ **沒有路徑覆寫參數**：v25 已裁決「正式流程固定由 XDG 推導，測試改覆寫
   # `XDG_DATA_HOME`」——⛔ 換個名字加回來等於把移除掉的後門原樣放回去。
-  I074_IDENTITY_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage1/run_identity.json"
+  # ⚠️ `I074_STAGE` 只決定推導出哪一份（封閉列舉），⛔ 不是路徑。
+  I074_IDENTITY_PATH="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage${I074_STAGE}/run_identity.json"
   if [ ! -f "$I074_IDENTITY_PATH" ]; then
     echo "ERROR: 找不到 run identity：$I074_IDENTITY_PATH" >&2
-    echo "       先執行 scripts/pin-replay-image.sh <bundle> 建立它。" >&2
+    echo "       先執行 scripts/pin-replay-image.sh --stage $I074_STAGE <bundle> 建立它。" >&2
     exit 1
   fi
   python3 "$PYTHON_DIR/scripts/validate-i074-run-identity.py" "$I074_IDENTITY_PATH" \
@@ -165,6 +179,16 @@ trap cleanup EXIT
 BASE_COMMIT="$(replay_args_prepare_worktree "$REPO_ROOT" "$SOURCE_REF" "$WORKTREE")"
 TOOLING_PATCH_SHA256="$(replay_args_tooling_patch_sha256 "$WORKTREE" "$BASE_COMMIT" "$TOOLING_PATCH")"
 RUNNER_SHA256="$(replay_args_runner_sha256 "${BASH_SOURCE[0]}")"
+
+# ── I-074 Stage 2 的 after' 見證趟：E7 **在 replay 之前**就驗 ──────────────────
+#
+# ⚠️ Stage 2 identity ＋ Stage 1 模式＝環境見證趟。它必須跑**原始的 Stage 1 base**、⛔ 不套 patch
+# （E7）；⛔ 不能等到 envcheck 發布才擋——那時已燒完約 180 分鐘，而 after' 只有一趟。
+# 兩個值都已由上面算好（worktree 實際的 HEAD 與 diff），這裡用 Stage 1 信任錨比對。
+if [ "$I074_MODE" = "1" ] && [ "$I074_STAGE" = "2" ] && [ "$STAGE" = "1" ]; then
+  python3 "$PYTHON_DIR/scripts/check-i074-witness-run.py" \
+      --base-commit "$BASE_COMMIT" --tooling-patch-sha256 "$TOOLING_PATCH_SHA256"
+fi
 
 # ── image：⚠️ **一律以 image ID 執行**，⛔ 不用 tag ──────────────────────────
 #

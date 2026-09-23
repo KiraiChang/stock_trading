@@ -42,6 +42,10 @@ EXIT_CANDIDATE_MISMATCH = 4
 # I-074 Stage 1 的 crossday：兩份 after artifact 的逐列結果或執行身分不一致。
 # ⚠️ 與 4 同樣是**終止狀態**（證據已完整發布），⛔ 不是一般失敗。
 EXIT_CROSSDAY_MISMATCH = 5
+# I-074 Stage 2 的環境見證：新 image 上的 after' 與 Stage 1 D+1 **不等價**。
+# ⚠️ 與 5 同樣是**終止狀態**（見證證據已完整發布），⛔ 不是一般失敗；
+# 它讓 Stage 2 停在 before 之前（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+EXIT_ENV_NOT_EQUIVALENT = 7
 
 # syscall 號碼是 **per-ABI** 的，猜錯會呼叫到完全不同的系統呼叫。
 # 只在找不到 libc 的 renameat2 symbol 時才會用到，且未知架構一律 fail-closed。

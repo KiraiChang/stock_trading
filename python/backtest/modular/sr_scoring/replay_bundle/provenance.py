@@ -119,6 +119,15 @@ def pip_freeze_sha256(distributions: Iterable[tuple[str, str]] | None = None) ->
     用 `importlib.metadata` 而不是 `pip freeze` 子行程：離線容器不見得裝了 pip，
     而且**多開一個行程只為了拿一份清單**在 2GiB 的 host 上不值得。
     """
+    return sha256_hex(canonical_json_bytes(installed_distributions(distributions)))
+
+
+def installed_distributions(distributions: Iterable[tuple[str, str]] | None = None) -> list[list[str]]:
+    """已安裝套件的**完整清單**：`[[name, version], …]`，去重、排序。
+
+    ⚠️ `pip_freeze_sha256()` 就是這份清單的 canonical SHA——兩者⛔ 不得各自推導
+    （I-074 Stage 2 的環境見證要同時封存清單與 hash，並交叉驗證，見 issue.md I-074「二、⑤」）。
+    """
     if distributions is None:
         from importlib import metadata
 
@@ -127,7 +136,7 @@ def pip_freeze_sha256(distributions: Iterable[tuple[str, str]] | None = None) ->
             for dist in metadata.distributions()
         ]
     items = sorted({(str(name), str(version)) for name, version in distributions if name})
-    return sha256_hex(canonical_json_bytes([list(item) for item in items]))
+    return [list(item) for item in items]
 
 
 def runtime_settings(config_module=None) -> dict[str, Any]:

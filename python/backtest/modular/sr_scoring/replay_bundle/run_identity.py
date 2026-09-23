@@ -35,16 +35,24 @@ RUN_IDENTITY_FIELDS = frozenset(
 )
 
 
-def default_run_identity_path() -> Path:
+# identity 的 stage（⚠️ 封閉列舉）。Stage 2 用自己的一份：Stage 1 釘住的 image 已不在本機，
+# Stage 2 改在新 image 上跑（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+RUN_IDENTITY_STAGES = (1, 2)
+
+
+def default_run_identity_path(stage: int = 1) -> Path:
     """固定推導值。⛔ **不放 `/tmp`**——這份要跨日存活。
 
     ⚠️ ⛔ 沒有「只給測試用」的路徑覆寫參數（那在實作上強制不了）：測試改為覆寫
-    `XDG_DATA_HOME`。
+    `XDG_DATA_HOME`。⚠️ `stage` 是**封閉列舉**（1／2），⛔ 不是路徑——
+    它只決定推導出哪一份，⛔ 不開放任意路徑。Stage 1 的推導結果與改版前逐字相同。
     """
     import os
 
+    if type(stage) is not int or stage not in RUN_IDENTITY_STAGES:
+        raise ArtifactError(f"run identity 的 stage 只接受 {RUN_IDENTITY_STAGES}，實際 {stage!r}")
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "stock_trading" / "i074_stage1" / RUN_IDENTITY_NAME
+    return Path(base) / "stock_trading" / f"i074_stage{stage}" / RUN_IDENTITY_NAME
 
 
 def _is_image_id(value: object) -> bool:

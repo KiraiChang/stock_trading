@@ -1007,6 +1007,389 @@ set -e
   || fail "comparator 竟已執行——mismatch 可能被掩蓋"
 rm -rf "$ORC_TD"
 
+# ── I-074 Stage 2（③b）：環境見證的 finalizer argv／mount／模式、pin --stage 2、restore、I074_STAGE ──
+#
+# 對應 issue.md I-074 ③ evidence contract「七之四」與測試 bg；Stage 2 計畫書「二、⑤」。
+#
+# ⚠️ **finalizer 的測試一律在隔離的最小 repo 裡跑**（2026-09-23 review）：它的路徑是寫死常數
+# （`python/baselines/i074_stage2/envcheck/`），⛔ 沒有覆寫參數。先前在真正的 repo 裡暫放 fixture，
+# 正式 `envcheck/` 一進版控，recover 的 argv 測試就會**永久 skip**——shell 的 mount、注入參數與
+# fixture 就沒人守了。現在把**工作樹現行的**腳本與模組複製進一個 `git init` 的暫存 repo，
+# 所有斷言都對它做，⛔ 完全不碰真正的 repo，也⛔ 不因正式證據存在而略過。
+echo "==> i074 Stage 2：finalize-stage2-evidence.sh 的 argv、mount 與模式（隔離 repo）"
+S2_TD="$(mktemp -d)"
+S2_FIXTURE="$REPO_ROOT/python/scripts/fixtures/stage2_finalizer_argv.json"
+S2_IMG="$(docker image inspect "${PY_IMAGE:-stock-trading-python-test:latest}" -f '{{.Id}}' 2>/dev/null || true)"
+S2_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+
+S2_REPO="$S2_TD/repo"
+mkdir -p "$S2_REPO/scripts/lib" "$S2_REPO/python/scripts" \
+         "$S2_REPO/python/backtest/modular/sr_scoring" "$S2_REPO/python/baselines/i074_stage1"
+cp "$REPO_ROOT/scripts/finalize-stage2-evidence.sh" "$S2_REPO/scripts/"
+cp "$REPO_ROOT"/scripts/lib/*.sh "$S2_REPO/scripts/lib/"
+cp "$REPO_ROOT/python/scripts/validate-i074-run-identity.py" "$REPO_ROOT/python/scripts/_i074_bootstrap.py" \
+   "$S2_REPO/python/scripts/"
+cp -r "$REPO_ROOT/python/backtest/modular/sr_scoring/replay_bundle" "$S2_REPO/python/backtest/modular/sr_scoring/"
+find "$S2_REPO" -name __pycache__ -prune -exec rm -rf {} +
+: > "$S2_REPO/python/baselines/i074_stage1/.keep"
+git -C "$S2_REPO" init -q
+git -C "$S2_REPO" add -A
+git -C "$S2_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
+S2_FIN="$S2_REPO/scripts/finalize-stage2-evidence.sh"
+S2_PYROOT="$S2_REPO/python"
+S2_ENVCHECK="$S2_PYROOT/baselines/i074_stage2/envcheck"
+
+s2_normalize() {
+  # $1＝dry-run 輸出。⚠️ 從 `python` token 開始比；mount 另外驗。
+  sed -n '/^python$/,$p' <<< "$1" \
+    | sed -e "s|^$S2_TD/run\$|<RUN_DIR>|" -e "s|^$S2_ID\$|<IDENTITY>|" \
+          -e "s|^$S2_PYROOT\$|<PYTHON_ROOT>|" \
+          -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+    | awk '
+        prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+        prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+        {print; prev=$0}'
+}
+s2_expected() {
+  python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))[sys.argv[2]]))' \
+    "$S2_FIXTURE" "$1"
+}
+s2_fin() {  # 在隔離 repo 裡跑 finalizer（dry-run）；stdout＝docker argv
+  env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="${S2_IMAGE_OVERRIDE:-$S2_IMG}" \
+    XDG_DATA_HOME="$S2_TD/xdg" "$S2_FIN" "$@"
+}
+
+if [ -n "$S2_IMG" ] && [ -d "$S2_BUNDLE" ]; then
+  set +e
+  XDG_DATA_HOME="$S2_TD/xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
+      --stage 2 --bundle "$S2_BUNDLE" --image-id "$S2_IMG" >/dev/null 2>&1
+  rc=$?
+  set -e
+  S2_ID="$S2_TD/xdg/stock_trading/i074_stage2/run_identity.json"
+  if [ "$rc" -eq 0 ] && [ -f "$S2_ID" ] && [ ! -e "$S2_TD/xdg/stock_trading/i074_stage1" ]; then
+    pass "ensure --stage 2 → 只建立 i074_stage2 的 identity（⛔ 不碰 Stage 1 那份）"
+  else
+    fail "ensure --stage 2：rc=$rc"
+  fi
+  mkdir -p "$S2_TD/run/witness"
+  : > "$S2_TD/run/witness/after_artifact.json"
+  : > "$S2_TD/run/witness/cohort_manifest.json"
+
+  set +e
+  S2_OUT="$(s2_fin --envcheck --run-dir "$S2_TD/run" 2>/dev/null)"
+  set -e
+  if [ "$(s2_normalize "$S2_OUT")" = "$(s2_expected envcheck_argv)" ]; then
+    pass "envcheck argv 與 fixture 逐 token 相同"
+  else
+    fail "envcheck argv 與 fixture 不符"
+    diff <(s2_expected envcheck_argv) <(s2_normalize "$S2_OUT") >&2 || true
+  fi
+  # ⚠️ mount 的四條契約（⛔ 只比 argv 會把 mount 全丟掉）。⚠️ 用 here-string，⛔ 不用 `| grep -q`。
+  grep -qx -- "$S2_ID:$S2_ID:ro" <<< "$S2_OUT" \
+    && pass "envcheck：Stage 2 identity 以 same-path :ro 掛載" || fail "envcheck：identity 不是 same-path :ro"
+  grep -qx -- "$S2_TD/run/witness:$S2_TD/run/witness:ro" <<< "$S2_OUT" \
+    && pass "envcheck：witness 目錄以 same-path :ro 掛載" || fail "envcheck：witness 不是 same-path :ro"
+  grep -qx -- "$S2_PYROOT/baselines/i074_stage1:$S2_PYROOT/baselines/i074_stage1:ro" <<< "$S2_OUT" \
+    && pass "envcheck：Stage 1 證據⛔ 只讀" || fail "envcheck：Stage 1 證據不是 :ro"
+  grep -qx -- "$S2_PYROOT/baselines/i074_stage2:$S2_PYROOT/baselines/i074_stage2" <<< "$S2_OUT" \
+    && pass "envcheck：只有 baselines/i074_stage2 可寫" || fail "envcheck：i074_stage2 的掛載不符"
+  if grep -q -- '/stock_trading/i074_stage1/run_identity.json' <<< "$S2_OUT"; then
+    fail "envcheck 的指令出現了 Stage 1 的 identity"
+  else
+    pass "envcheck：⛔ 完全不碰 Stage 1 的 identity"
+  fi
+  if grep -qF -- "$REPO_ROOT/python/baselines" <<< "$S2_OUT"; then
+    fail "隔離失效：指令裡出現了真正 repo 的 baselines 路徑"
+  else
+    pass "隔離：指令⛔ 完全不含真正 repo 的 baselines 路徑"
+  fi
+
+  # 模式衝突與輸入檢查
+  s2_rejects() {  # $1＝說明；其餘＝參數
+    local label="$1"; shift
+    set +e
+    s2_fin "$@" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    [ "$rc" -ne 0 ] && pass "$label" || fail "$label（竟然 rc=0）"
+  }
+  s2_rejects "兩個模式旗標互斥" --envcheck --recover-envcheck --run-dir "$S2_TD/run"
+  s2_rejects "沒有模式旗標 → 拒絕" --run-dir "$S2_TD/run"
+  s2_rejects "--envcheck 缺 --run-dir → 拒絕" --envcheck
+  s2_rejects "--recover-envcheck ⛔ 不接受 --run-dir" --recover-envcheck --run-dir "$S2_TD/run"
+  s2_rejects "--run-dir 重複 → 拒絕" --envcheck --run-dir "$S2_TD/run" --run-dir "$S2_TD/run"
+  s2_rejects "--source-ref 重複 → 拒絕（⛔ 不靜默採用最後一個）" --envcheck --run-dir "$S2_TD/run" \
+    --source-ref HEAD --source-ref HEAD
+  s2_rejects "使用者注入 --run-identity → 拒絕" --envcheck --run-dir "$S2_TD/run" --run-identity "$S2_ID"
+  s2_rejects "使用者注入 --python-root → 拒絕" --envcheck --run-dir "$S2_TD/run" --python-root /x
+  S2_IMAGE_OVERRIDE="sha256:$(printf '%064d' 7)" s2_rejects "REPLAY_IMAGE_ID 不在本機 → 拒絕" \
+    --envcheck --run-dir "$S2_TD/run"
+  mv "$S2_TD/run/witness/cohort_manifest.json" "$S2_TD/run/cohort.bak"
+  s2_rejects "witness 輸入缺檔 → Docker 之前就拒絕" --envcheck --run-dir "$S2_TD/run"
+  mv "$S2_TD/run/cohort.bak" "$S2_TD/run/witness/cohort_manifest.json"
+  s2_rejects "--recover-envcheck 找不到封存的 identity → 拒絕" --recover-envcheck
+
+  # recover-envcheck：在隔離 repo 裡放一份封存 identity（⛔ 不碰真正的證據，⛔ 也不因它存在而 skip）。
+  mkdir -p "$S2_ENVCHECK/identity"
+  python3 - "$S2_ID" "$S2_ENVCHECK/identity/run_identity.json.gz" <<'EMBED'
+import gzip, io, pathlib, sys
+buf = io.BytesIO()
+with gzip.GzipFile(filename="", mode="wb", fileobj=buf, compresslevel=9, mtime=0) as fh:
+    fh.write(pathlib.Path(sys.argv[1]).read_bytes())
+pathlib.Path(sys.argv[2]).write_bytes(buf.getvalue())
+EMBED
+  set +e
+  S2_REC="$(s2_fin --recover-envcheck 2>/dev/null)"
+  set -e
+  if [ "$(s2_normalize "$S2_REC")" = "$(s2_expected recover_envcheck_argv)" ]; then
+    pass "recover-envcheck argv 與 fixture 逐 token 相同"
+  else
+    fail "recover-envcheck argv 與 fixture 不符"
+    diff <(s2_expected recover_envcheck_argv) <(s2_normalize "$S2_REC") >&2 || true
+  fi
+  if grep -qF -- "$S2_ID" <<< "$S2_REC"; then
+    fail "recover-envcheck 的指令出現了外部 identity 路徑"
+  else
+    pass "recover-envcheck：整份指令⛔ 完全不含外部 identity 路徑"
+  fi
+  grep -qx -- "$S2_PYROOT/baselines/i074_stage1:$S2_PYROOT/baselines/i074_stage1:ro" <<< "$S2_REC" \
+    && pass "recover-envcheck：Stage 1 證據⛔ 只讀" || fail "recover-envcheck：Stage 1 證據不是 :ro"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "Stage 2 finalizer 測試：找不到 image 或正式 bundle（IMAGE_REQUIRED=1）"
+else
+  echo "  skip 找不到 image 或正式 bundle，略過 Stage 2 finalizer 測試" >&2
+fi
+
+# ── pin --stage 2：專用 tag、tarball、Stage 1 行為不變 ─────────────────────
+echo "==> i074 Stage 2：pin-replay-image.sh --stage 2"
+mkdir -p "$S2_TD/bin" "$S2_TD/state"
+cat > "$S2_TD/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+ID="sha256:$(printf '%064d' 2)"
+case "$1" in
+  build) exit 0 ;;
+  tag) exit 0 ;;
+  save)  # save -o <file> <id>
+    printf 'fake-image-%s' "$4" > "$3"; exit 0 ;;
+  load) : > "$FAKE_STATE/loaded"; exit 0 ;;
+  image)  # image inspect <ref> [-f …]
+    if [ -n "${FAKE_MISSING:-}" ] && [ "$3" = "$FAKE_MISSING" ] && [ ! -f "$FAKE_STATE/loaded" ]; then exit 1; fi
+    printf '%s\n' "$ID"; exit 0 ;;
+esac
+exit 0
+FAKE
+chmod +x "$S2_TD/bin/docker"
+S2_PIN_ID="sha256:$(printf '%064d' 2)"
+S2_IMAGES="$S2_TD/pinxdg/stock_trading/i074_stage2/images"
+s2_pin() {  # $1＝log 檔；其餘＝參數
+  local log="$1"; shift
+  : > "$log"
+  env -u PY_IMAGE PATH="$S2_TD/bin:$PATH" XDG_DATA_HOME="$S2_TD/pinxdg" FAKE_DOCKER_LOG="$log" \
+    FAKE_STATE="$S2_TD/state" "$REPO_ROOT/scripts/pin-replay-image.sh" "$@" 2>/dev/null
+}
+
+if [ -d "$S2_BUNDLE" ]; then
+  set +e
+  out="$(s2_pin "$S2_TD/p1" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$out" = "$S2_PIN_ID" ] \
+     && grep -qx "build -t stock-trading-python-replay:i074-stage2 $REPO_ROOT/python" "$S2_TD/p1" \
+     && [ -f "$S2_TD/pinxdg/stock_trading/i074_stage2/run_identity.json" ] \
+     && [ ! -e "$S2_TD/pinxdg/stock_trading/i074_stage1" ]; then
+    pass "--stage 2 → 以**專用 tag** build、建立 Stage 2 identity（⛔ 不碰 Stage 1）"
+  else
+    fail "--stage 2 的建立分支：rc=$rc out='$out'"
+    sed 's/^/    /' "$S2_TD/p1" >&2
+  fi
+  S2_HEX="$(printf '%064d' 2)"
+  if [ -f "$S2_IMAGES/$S2_HEX.tar" ] && (cd "$S2_IMAGES" && sha256sum -c --status "$S2_HEX.tar.sha256"); then
+    pass "--stage 2 → tarball 與 .sha256 已落地且可驗證"
+  else
+    fail "--stage 2 → 找不到可驗證的 tarball"
+  fi
+
+  set +e
+  out="$(s2_pin "$S2_TD/p2" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$out" = "$S2_PIN_ID" ] && ! grep -q '^build' "$S2_TD/p2" \
+     && ! grep -q '^save' "$S2_TD/p2" && grep -qx "tag $S2_PIN_ID stock-trading-python-replay:i074-stage2" "$S2_TD/p2"; then
+    pass "identity 已存在 → ⛔ 不 build、⛔ 不重存 tarball，只重新掛上專用 tag"
+  else
+    fail "--stage 2 no-op 分支：rc=$rc out='$out'"
+  fi
+
+  cp "$S2_IMAGES/$S2_HEX.tar.sha256" "$S2_TD/sidecar.orig"
+  printf 'x' >> "$S2_IMAGES/$S2_HEX.tar"
+  set +e
+  out="$(s2_pin "$S2_TD/p3" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && [ -z "$out" ] && pass "既有 tarball 的 SHA 不符 → fail-closed、stdout 無輸出" \
+    || fail "tarball 被改過竟通過：rc=$rc out='$out'"
+
+  set +e
+  out="$(FAKE_MISSING="$S2_PIN_ID" s2_pin "$S2_TD/p4" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && [ -z "$out" ] && ! grep -q '^build' "$S2_TD/p4" \
+    && pass "image 已不在本機 → fail-closed、⛔ 不重建" || fail "image 消失分支：rc=$rc out='$out'"
+
+  set +e
+  PY_IMAGE=foo:bar PATH="$S2_TD/bin:$PATH" XDG_DATA_HOME="$S2_TD/pinxdg" FAKE_DOCKER_LOG="$S2_TD/p5" \
+    FAKE_STATE="$S2_TD/state" "$REPO_ROOT/scripts/pin-replay-image.sh" --stage 2 "$S2_BUNDLE" >/dev/null 2>&1
+  rc=$?
+  out="$(s2_pin "$S2_TD/p6" --no-identity --stage 2)"; rc2=$?
+  out3="$(s2_pin "$S2_TD/p7" --stage 3 "$S2_BUNDLE")"; rc3=$?
+  set -e
+  [ "$rc" -ne 0 ] && pass "--stage 2 ⛔ 不接受 PY_IMAGE（⛔ 不與 build 腳本共用 tag）" || fail "--stage 2 竟接受 PY_IMAGE"
+  [ "$rc2" -ne 0 ] && pass "--no-identity ⛔ 不可與 --stage 2 並用" || fail "--no-identity --stage 2 竟通過"
+  [ "$rc3" -ne 0 ] && pass "--stage 只接受 1／2" || fail "--stage 3 竟通過"
+
+  # ⚠️ 重複／多餘參數一律中止（⛔ 不靜默採用最後一個、⛔ 不靜默忽略）。
+  set +e
+  out="$(s2_pin "$S2_TD/p8" --stage 2 --stage 2 "$S2_BUNDLE")"; rc8=$?
+  out="$(s2_pin "$S2_TD/p9" --stage 2 "$S2_BUNDLE" extra)"; rc9=$?
+  out="$(s2_pin "$S2_TD/p10" --no-identity extra)"; rc10=$?
+  set -e
+  [ "$rc8" -ne 0 ] && ! grep -q '^build' "$S2_TD/p8" \
+    && pass "--stage 重複 → 拒絕（⛔ 不靜默採用最後一個）" || fail "--stage 重複竟通過"
+  [ "$rc9" -ne 0 ] && ! grep -q '^build' "$S2_TD/p9" \
+    && pass "bundle 之後的多餘參數 → 拒絕" || fail "多餘參數竟被忽略"
+  [ "$rc10" -ne 0 ] && ! grep -q '^build' "$S2_TD/p10" \
+    && pass "--no-identity 之後的多餘參數 → 拒絕" || fail "--no-identity 的多餘參數竟被忽略"
+
+  # ── restore：先驗 SHA → load → 再驗 image ID ──
+  echo "==> i074 Stage 2：restore-replay-image.sh"
+  s2_restore() {
+    local log="$1"; shift
+    : > "$log"
+    env -u PY_IMAGE PATH="$S2_TD/bin:$PATH" XDG_DATA_HOME="$S2_TD/pinxdg" FAKE_DOCKER_LOG="$log" \
+      FAKE_STATE="$S2_TD/state" FAKE_MISSING="$S2_PIN_ID" \
+      "$REPO_ROOT/scripts/restore-replay-image.sh" "$@" 2>/dev/null
+  }
+  set +e
+  out="$(s2_restore "$S2_TD/r1" --stage 2 "$S2_BUNDLE")"; rc=$?   # tarball 已被改過（上面）
+  set -e
+  [ "$rc" -ne 0 ] && [ -z "$out" ] && ! grep -q '^load' "$S2_TD/r1" \
+    && pass "tarball 的 SHA 不符 → ⛔ 不 load" || fail "SHA 不符竟 load：rc=$rc"
+  # ⚠️ **decoy**（2026-09-23 review）：tar 仍是被改過的，但 sidecar 改指向同目錄一份**合法的**
+  # decoy——`sha256sum -c` 會通過，⛔ 但要 load 的仍是那份被改過的 tar。必須被擋下。
+  printf 'decoy' > "$S2_IMAGES/decoy.tar"
+  printf '%s  decoy.tar\n' "$(sha256sum "$S2_IMAGES/decoy.tar" | cut -d' ' -f1)" > "$S2_IMAGES/$S2_HEX.tar.sha256"
+  set +e
+  out="$(s2_restore "$S2_TD/r_decoy" --stage 2 "$S2_BUNDLE")"; rc=$?
+  out2="$(s2_pin "$S2_TD/p_decoy" --stage 2 "$S2_BUNDLE")"; rc2=$?
+  set -e
+  [ "$rc" -ne 0 ] && [ -z "$out" ] && ! grep -q '^load' "$S2_TD/r_decoy" \
+    && pass "restore：sidecar 指向 decoy → ⛔ 不 load" || fail "restore 被 decoy 繞過：rc=$rc"
+  [ "$rc2" -ne 0 ] && [ -z "$out2" ] \
+    && pass "pin：sidecar 指向 decoy → fail-closed" || fail "pin 被 decoy 繞過：rc=$rc2"
+  rm -f "$S2_IMAGES/decoy.tar"
+  # 修回原本的 tarball（重算它原本記錄的內容）——⚠️ 下一支要**只剩**「sidecar 不是一行」這個缺陷
+  printf 'fake-image-%s' "$S2_PIN_ID" > "$S2_IMAGES/$S2_HEX.tar"
+  # 兩行的 sidecar（tar 本身合法、digest 也對）也⛔ 不接受——⛔ 不猜哪一行才算數
+  { cat "$S2_TD/sidecar.orig"; cat "$S2_TD/sidecar.orig"; } > "$S2_IMAGES/$S2_HEX.tar.sha256"
+  set +e
+  out="$(s2_restore "$S2_TD/r_two" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && ! grep -q '^load' "$S2_TD/r_two" \
+    && pass "restore：sidecar 不是恰好一行 → ⛔ 不 load" || fail "兩行 sidecar 竟通過"
+  cp "$S2_TD/sidecar.orig" "$S2_IMAGES/$S2_HEX.tar.sha256"
+  set +e
+  out="$(s2_restore "$S2_TD/r2" --stage 2 "$S2_BUNDLE")"; rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$out" = "$S2_PIN_ID" ] && grep -q '^load' "$S2_TD/r2" \
+     && grep -qx "tag $S2_PIN_ID stock-trading-python-replay:i074-stage2" "$S2_TD/r2"; then
+    pass "SHA 相符 → load、再驗 image ID、重新掛上專用 tag"
+  else
+    fail "restore 正常分支：rc=$rc out='$out'"
+  fi
+  rm -f "$S2_TD/state/loaded"
+  rm -f "$S2_IMAGES/$S2_HEX.tar"
+  set +e
+  out="$(s2_restore "$S2_TD/r3" --stage 2 "$S2_BUNDLE")"; rc=$?
+  out4="$(s2_restore "$S2_TD/r4" --stage 1 "$S2_BUNDLE")"; rc4=$?
+  set -e
+  [ "$rc" -ne 0 ] && [ -z "$out" ] && pass "找不到 tarball → fail-closed（⛔ 不改為重建）" || fail "沒有 tarball 竟通過"
+  [ "$rc4" -ne 0 ] && pass "restore 只支援 --stage 2" || fail "restore --stage 1 竟通過"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "pin --stage 2 測試：找不到正式 bundle（IMAGE_REQUIRED=1）"
+fi
+
+# ── run-replay-offline.sh 的 I074_STAGE ──────────────────────────────────
+echo "==> i074 Stage 2：run-replay-offline.sh 的 I074_STAGE"
+set +e
+I074_STAGE=3 REPLAY_ARGS_SELFTEST=1 "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle /b --output-dir /o \
+  --before-ref HEAD --i074-preflight >/dev/null 2>&1; rc=$?
+I074_STAGE=2 REPLAY_ARGS_SELFTEST=1 "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle /b --output-dir /o \
+  --before-ref HEAD >/dev/null 2>&1; rc2=$?
+set -e
+[ "$rc" -ne 0 ] && pass "I074_STAGE 只接受 1／2" || fail "I074_STAGE=3 竟通過"
+[ "$rc2" -ne 0 ] && pass "I074_STAGE=2 ⛔ 只在 I-074 正式流程有意義" || fail "一般流程竟接受 I074_STAGE=2"
+if [ -d "$S2_BUNDLE" ]; then
+  set +e
+  err="$(env -u PY_IMAGE I074_STAGE=2 REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="sha256:$(printf '%064d' 2)" \
+      XDG_DATA_HOME="$S2_TD/emptyxdg" "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle "$S2_BUNDLE" \
+      --output-dir "$S2_TD/witness_out" --before-ref HEAD --i074-preflight 2>&1)"; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && grep -q "i074_stage2/run_identity.json" <<< "$err" \
+    && pass "I074_STAGE=2 → 推導的是 Stage 2 的 identity 路徑" \
+    || fail "I074_STAGE=2 的 identity 路徑不符：rc=$rc $(head -1 <<< "$err")"
+fi
+
+# ── 見證趟的 E7：**在 replay 之前**就擋（2026-09-23 review 高 1） ─────────────
+#
+# ⚠️ 錯設 AFTER_REF 或殘留 TOOLING_PATCH ⛔ 不得燒完一整趟 replay 才被拒——after' 只有一趟。
+# 用 fake docker 跑**非 dry-run**：失敗時 log 裡⛔ 不得出現 `run`，正確時才出現。
+echo "==> i074 Stage 2：見證趟的 E7 前置守門"
+if [ -d "$S2_BUNDLE" ] && [ -n "$S2_IMG" ] && [ -f "${S2_ID:-/nonexistent}" ]; then
+  mkdir -p "$S2_TD/e7bin"
+  cat > "$S2_TD/e7bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+  image) printf '%s\n' "$3"; exit 0 ;;   # inspect：回傳被問的那個 ID
+esac
+exit 0
+FAKE
+  chmod +x "$S2_TD/e7bin/docker"
+  # Stage 1 after 的 base commit（⚠️ 只讀檔頭，⛔ 不用 `zcat | head`——pipefail 下會 SIGPIPE 假失敗）
+  S1_BASE="$(python3 -c '
+import gzip, re, sys
+head = gzip.open(sys.argv[1]).read(65536).decode("utf-8", "replace")
+print(re.search(r"\"base_commit\":\"([0-9a-f]{40})\"", head).group(1))' \
+    "$REPO_ROOT/python/baselines/i074_stage1/d1/after_artifact.json.gz")"
+  printf '%s\n' 'diff --git a/zz_e7_probe.txt b/zz_e7_probe.txt' 'new file mode 100644' \
+    '--- /dev/null' '+++ b/zz_e7_probe.txt' '@@ -0,0 +1 @@' '+e7' > "$S2_TD/e7.patch"
+  e7_run() {  # $1＝log；$2＝AFTER_REF；$3＝TOOLING_PATCH（可空）
+    : > "$1"
+    env -u PY_IMAGE PATH="$S2_TD/e7bin:$PATH" FAKE_DOCKER_LOG="$1" I074_STAGE=2 \
+      REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" AFTER_REF="$2" TOOLING_PATCH="$3" \
+      "$REPO_ROOT/scripts/run-replay-offline.sh" --bundle "$S2_BUNDLE" \
+      --output-dir "$S2_TD/e7out.$(basename "$1")" --before-ref 'ecbc141^' --i074-preflight
+  }
+  set +e
+  err="$(e7_run "$S2_TD/e7a" HEAD "" 2>&1)"; rca=$?
+  errb="$(e7_run "$S2_TD/e7b" "$S1_BASE" "$S2_TD/e7.patch" 2>&1)"; rcb=$?
+  # ⚠️ 放行的那一支用 dry-run：真的走到 `exec docker run` 時 runner 的 EXIT trap 不會執行，
+  # worktree 會留在 /tmp。dry-run 印出的 `docker run` 就證明守門已放行。
+  outc="$(REPLAY_DRY_RUN=1 e7_run "$S2_TD/e7c" "$S1_BASE" "" 2>/dev/null)"; rcc=$?
+  set -e
+  if [ "$(git -C "$REPO_ROOT" rev-parse HEAD)" != "$S1_BASE" ]; then
+    [ "$rca" -ne 0 ] && grep -q "E7" <<< "$err" && ! grep -qx run "$S2_TD/e7a" \
+      && pass "AFTER_REF 不是 Stage 1 base → replay 之前中止、⛔ 沒有 docker run" \
+      || fail "錯的 AFTER_REF 沒有在 replay 之前被擋：rc=$rca"
+  fi
+  [ "$rcb" -ne 0 ] && grep -q "E7" <<< "$errb" && ! grep -qx run "$S2_TD/e7b" \
+    && pass "見證趟套了 TOOLING_PATCH → replay 之前中止、⛔ 沒有 docker run" \
+    || fail "殘留的 TOOLING_PATCH 沒有在 replay 之前被擋：rc=$rcb"
+  [ "$rcc" -eq 0 ] && grep -qx run <<< "$outc" \
+    && pass "正確的 base、無 patch → 守門放行，才走到 docker run" \
+    || fail "正確的見證趟竟被擋下：rc=$rcc"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "E7 前置守門測試：找不到 image、正式 bundle 或 Stage 2 identity（IMAGE_REQUIRED=1）"
+fi
+rm -rf "$S2_TD"
+
 # ⚠️ **結尾要再檢查一次**：`$fails` 的第一次檢查在上面的 I-100 段落結束處，
 # ⛔ 之後新增的 I-074 測試若呼叫 `fail`，沒有這一段就會照樣印「全部通過」並回 0，
 # 連帶讓 `python/scripts/test.sh` 誤報成功。

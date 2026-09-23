@@ -21,9 +21,12 @@ from pathlib import Path
 _PKG = "_i074_rb"
 # ⚠️ 依賴順序：canonical → publish → calendar → artifacts → bundle → run_identity。
 _MODULES = ("canonical", "publish", "calendar", "artifacts", "bundle", "run_identity")
+# ⚠️ I-074 Stage 2：host 端要跑 Stage 1 信任錨（見證趟的 E7 前置守門）時，再多載這幾個
+# （同樣 dependency-light；2026-09-23 在沒有 pandas 的 host 上實測可載入並跑完）。
+STAGE2_MODULES = _MODULES + ("provenance", "crossday", "probe", "evidence", "stream", "stage2_evidence")
 
 
-def load_replay_bundle(repo_python: Path | None = None) -> dict:
+def load_replay_bundle(repo_python: Path | None = None, modules: tuple[str, ...] = _MODULES) -> dict:
     """回傳 `{模組名: module}`。
 
     ⚠️ **一律以 `_i074_rb.` 前綴註冊**：`replay_bundle/calendar.py` 與**標準庫的
@@ -39,7 +42,7 @@ def load_replay_bundle(repo_python: Path | None = None) -> dict:
         pkg.__path__ = [str(root)]
         sys.modules[_PKG] = pkg
     loaded = {}
-    for name in _MODULES:
+    for name in modules:
         key = f"{_PKG}.{name}"
         if key not in sys.modules:
             spec = importlib.util.spec_from_file_location(key, root / f"{name}.py")

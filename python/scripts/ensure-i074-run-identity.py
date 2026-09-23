@@ -31,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="建立時必填；`--peek` 時忽略（沿用既有值）")
     parser.add_argument("--print-path", action="store_true",
                         help="只印出 identity 的絕對路徑（給 shell 掛載用）")
+    # ⚠️ **stage 是封閉列舉**，⛔ 不是路徑：只決定推導出哪一份 identity（Stage 2 用自己的，
+    # 見 issue.md I-074 Stage 2 計畫書「二、⑤」）。預設 1，Stage 1 的既有用法逐字不變。
+    parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
     parser.add_argument("--peek", action="store_true",
                         help="⚠️ 既有才沿用：存在→印既有 ID 並**重新 fsync**（durability 的修復路徑）；"
                              "不存在→**exit 2**（呼叫端據此決定要不要 build）")
@@ -38,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mods = load_replay_bundle()
     run_identity, publish = mods["run_identity"], mods["publish"]
-    path = run_identity.default_run_identity_path()
+    path = run_identity.default_run_identity_path(args.stage)
     if args.print_path:
         print(path)
         return 0

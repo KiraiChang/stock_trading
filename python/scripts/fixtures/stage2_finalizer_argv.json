@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "I-074 Stage 2：finalize-stage2-evidence.sh 實際組出的 python argv（issue.md I-074 ③ evidence contract「七之四：CLI matrix」）。",
+    "⚠️ ③b 第一包只有環境見證的兩種模式；其餘五種（normal／recover-durability／publish-failed-record／check-failed-record／recover-failed-record）屬 ③d，屆時補進本檔。",
+    "  envcheck         — --run-dir ＋ 腳本注入的 --run-identity（Stage 2 identity）；⛔ 禁 --recover-envcheck",
+    "  recover-envcheck — ⛔ 禁 --run-dir 與 --run-identity：它只依賴既有的 envcheck/",
+    "⛔ 存的是參數 token 序列（⛔ 非 eval 字串）；動態值用 placeholder。"
+  ],
+  "placeholders": {
+    "<RUN_DIR>": "見證趟的 run 目錄（host 絕對路徑，witness/ 以 same-path 唯讀掛載）",
+    "<IDENTITY>": "repo 外的 Stage 2 run identity（…/stock_trading/i074_stage2/run_identity.json）",
+    "<PYTHON_ROOT>": "repo 的 python/（host 絕對路徑；只掛 baselines/i074_stage1（唯讀）與 baselines/i074_stage2）",
+    "<IMAGE_ID>": "sha256: ＋ 64 hex",
+    "<BASE_COMMIT>": "40 hex",
+    "<TOOLING_PATCH_SHA256>": "64 hex",
+    "<RUNNER_SHA256>": "64 hex"
+  },
+  "envcheck_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.envcheck",
+    "--envcheck",
+    "--run-dir", "<RUN_DIR>",
+    "--run-identity", "<IDENTITY>",
+    "--python-root", "<PYTHON_ROOT>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>"
+  ],
+  "recover_envcheck_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.envcheck",
+    "--recover-envcheck",
+    "--python-root", "<PYTHON_ROOT>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>"
+  ]
+}

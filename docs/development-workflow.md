@@ -1180,6 +1180,58 @@ image 存在」四項**一律在 `docker run` 之前**，差別只在 `bundle_id
 ⚠️ 另有一條與此相關的**增補式修訂**風險：插入點若落在**表格內部**，會把後面的列切出表外
 （Markdown 不會把它算進那張表）。這個錯在 I-100 與 I-074 各發生過一次。
 
+### I-074 Stage 2 的環境見證程序（2026-09-23 實作 ③b；⚠️ 待 review）
+
+⚠️ **為什麼有這一段**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機——當時 pin 用的
+tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。使用者裁決 **兩側都在新 image 重跑**：
+先在新 image 上以原始 `e1cbbbd` 跑一趟 **after' 見證**，逐列與已封存的 Stage 1 D+1 比對，
+**逐位元相同**才證明新舊 image 對這份 bundle 等價。完整契約見 `issue.md` I-074 的 Stage 2 計畫書
+「二、⑤」與 ③ evidence contract「三之三」（現行版）；本節只寫**操作程序**。
+
+```text id="i074_stage2_envcheck_flow_001"
+① pin      ⚠️ 與 Stage 1 相同的 guarded 寫法（⛔ 不可寫成 `export VAR="$(…)"`，理由見上一節）：
+             set -euo pipefail
+             if REPLAY_IMAGE_ID="$(scripts/pin-replay-image.sh --stage 2 <bundle>)"; then
+               export REPLAY_IMAGE_ID
+             else
+               pin_rc=$?; echo "pin 失敗（rc=$pin_rc）——⛔ 不要執行後面任何一步" >&2; exit "$pin_rc"
+             fi
+           ⚠️ `--stage 2`：**專用 tag** `stock-trading-python-replay:i074-stage2`（⛔ 不接受 PY_IMAGE）、
+              Stage 2 自己的 identity、`docker save` tarball（見下方「tarball」）
+② 見證趟  AFTER_REF=e1cbbbd I074_STAGE=2 scripts/run-replay-offline.sh --bundle <bundle> \
+             --output-dir <run 目錄>/witness --before-ref 'ecbc141^' --i074-preflight
+           ⚠️ `AFTER_REF=e1cbbbd`：after' 跑的是**原始 e1cbbbd**、⛔ 不設 TOOLING_PATCH（E7 會擋）
+           ⚠️ `--before-ref` 與 D+1 相同；Stage 1 模式⛔ 不使用它，只是 CLI 必填（見 issue.md I-115）
+           ⚠️ `I074_STAGE` 是封閉列舉（1／2），只決定用哪一份 identity，⛔ 不是路徑
+           ⚠️ **E7 在 Docker 之前就驗**：runner 用 Stage 1 信任錨比對這一趟的 base commit 與
+              tooling patch——錯設 AFTER_REF 或殘留 TOOLING_PATCH 會**立刻**中止（⛔ 不燒完一整趟）
+③ 判定    scripts/finalize-stage2-evidence.sh --envcheck --run-dir <run 目錄>
+           → python/baselines/i074_stage2/envcheck/（EQUIVALENT 與 NOT_EQUIVALENT **都發布證據**）
+④ 修復    rc=3 時：scripts/finalize-stage2-evidence.sh --recover-envcheck
+```
+
+| 結束碼（③／④） | 意義 | 下一步 |
+|---|---|---|
+| **0** | EQUIVALENT | 可以進入 ③d（Stage 2 其餘實作） |
+| **7** | NOT_EQUIVALENT——⚠️ **證據已發布** | ⛔ **停在 before 之前**、另立 issue；⛔ 不得改用 after' 取代 D+1、⛔ 不得放寬判定後重比 |
+| **3** | 已發布但 durability 未確認 | `--recover-envcheck`（⛔ 不刪除、不重跑 replay） |
+| **1** | 其他失敗（含 E7：見證趟跑錯版本或套了 patch——那⛔ 不是環境見證，⛔ 不發布） | 依錯誤訊息處理 |
+
+**tarball 的保存與還原**（review 要求寫死位置與驗 SHA 的步驟）：
+
+| 項目 | 規則 |
+|---|---|
+| 位置 | `${XDG_DATA_HOME:-~/.local/share}/stock_trading/i074_stage2/images/<image hex>.tar`，旁邊一份 `<image hex>.tar.sha256`（⛔ 不放 repo、⛔ 不放 `/tmp`） |
+| 建立 | `pin-replay-image.sh --stage 2` 在建立 identity 之後 `docker save`（temp → sha256 → rename）；既有 tarball **先驗 SHA**、⛔ 不覆寫 |
+| 還原 | `scripts/restore-replay-image.sh --stage 2 <bundle>`：① 讀 identity 的 image ID ② **先驗 tarball 的 SHA-256** ③ `docker load` ④ **再驗 image ID 等於 identity 的 `expected_image_id`** ⑤ 重新掛上專用 tag——任一步不符即中止，⛔ 不改為重建 |
+| 驗 SHA 的規則 | ⚠️ **⛔ 不用 `sha256sum -c`**：它驗的是 sidecar 裡寫的檔名，sidecar 改指向同目錄的合法 decoy 就能繞過。改由 `scripts/lib/image-tarball.sh` 驗：sidecar **恰好一行**、檔名**恰好是 `<hex>.tar`**、讀出 digest 後**對 tar 本身重算** |
+
+**凍結窗口 A**：從 ② 開跑到 `envcheck/` 已 durable 且結束碼是 0 或 7 為止（若先回 3，延續到
+`--recover-envcheck` 完成），⛔ 不得 commit 動到 `python/`、`scripts/`、`.gitattributes` 的變更。
+
+⚠️ **`envcheck/` 與 `python/baselines/i074_stage1/` 必須一起保存**：Stage 2 的證據以 Stage 1 的
+manifest 為信任錨，單獨搬走會斷鏈。
+
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 
 python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋這兩者的實機快照**。

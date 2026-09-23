@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-118` 起算。**（**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-119` 起算。**（**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-116（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），**下一個可用的是 I-117**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-118（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），**下一個可用的是 I-119**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,8 +70,8 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115 / I-116、已收斂的 I-102 / I-104 / I-105 / I-109～I-112、
-  已跳號的 I-114，以及下一個可用的 I-117），
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118、已收斂的 I-102 / I-104 / I-105 / I-109～I-112、
+  已跳號的 I-114，以及下一個可用的 I-119），
   那是預期的，不是殘留。
 
 ---
@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 準備中**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書與 ③ evidence contract 的現行版（v28／v12）待確認**；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 準備中**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認；③b 已實作／⚠️ 待 review**（見「③b 實作結果」）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -1195,11 +1195,13 @@ after artifact 走 `write_canonical_atomic()`、manifest 走 `publish_artifacts(
 | **重新開始** | 容量問題修好後，D／D+1 **兩趟都要重跑**，凍結窗口從**新的 D** 開始重新計算 |
 | ~~**步驟 ③ 暫停**~~ | ⚠️ **2026-09-18 解除**——OOM 已修、D／D+1 已跑完；此列保留為當時的處置紀錄 |
 
-#### I-074 Stage 2 計畫書 v28（2026-09-23，⚠️ **待確認**）
+#### I-074 Stage 2 計畫書 v28（2026-09-23，✅ **已確認**）
+
+✅ **使用者於 2026-09-23 確認 v28 與 ③ evidence contract v12，並指示開始 ③a／③b 的實作**。
 
 ⚠️ **v28 修掉 v27 review 的兩個中等問題與一項文字殘留**，並記錄同一輪 review 的裁決。
 v27 的五個阻擋點經 review **確認已實質修正**；其餘內容不變。
-⛔ **v28 與 ③ v12 一起確認前，⛔ 不得進入 ③ 的實作**。
+（確認前的規則：⛔ v28 與 ③ v12 一起確認前，⛔ 不得進入 ③ 的實作——✅ 已於 2026-09-23 滿足。）
 
 | # | 問題 | v28 的處置 | 同步的節 |
 |---|---|---|---|
@@ -1370,7 +1372,7 @@ append `PRICE_UPSIDE_FOLLOW_THROUGH`，
 | 1 | ⛔ **正式 artifact ⛔ 沒有 `market_state` 與 `entry_permission_state`**——凍結 row 只有 `market_bias`／`final_entry_state`／`lifecycle_phase`／`action_state`／`position_action_condition`——見 `evaluation.py:834` 的 `_decision_fields_from_summary()`，而 after artifact **已凍結、⛔ 不能補欄位** | ⚠️ B／C 判讀改用**實有欄位**，`market_state`／`entry_permission_state` 降為**推導含意**，見「二、①之二」 |
 | 2 | ⚠️ 模式旗標與 patch 的**所有權／啟用關係尚未封閉** | ⚠️ 補 **truth table**：flag 是使用者 opt-in（⛔ 不屬 `SCRIPT_INJECTED_ARGS`）、`--counterfactual-patch-sha256` 由 runner 注入；✅ **`I074_MODE` 納入**，見「二、④」 |
 | 3 | ⛔ **⛔ 不可用「中繼 commit」切分兩份 patch**——會動到 detached worktree 的 HEAD，與 `replay_args_prepare_worktree()`（`replay-args.sh:148`）的「HEAD 必須等於解析出的 OID」契約衝突 | ⚠️ 改用 **`git write-tree` 的中繼 tree**，HEAD 全程不動；⛔ 並撤回「交換順序合成 hash 必然不同」的錯誤假設，見「三之一之二」 |
-| 4 | ⚠️ differential guard 的**允許差異集合太窄**——合法翻轉還會連帶改 `market_bias`——`decision_engine.py:1318` 的 `_market_bias()` 直接回傳 `bias_state`與 reason codes，而 `compare_rows()`（`artifacts.py:439`）**⛔ 不挑欄位比** | ⚠️ 改成明確的 **comparison projection ＋ lifecycle 下游依賴閉包**，見「六、3」 |
+| 4 | ⚠️ differential guard 的**允許差異集合太窄**——合法翻轉還會連帶改 `market_bias`——`decision_engine.py:1318` 的 `_market_bias()` 直接回傳 `bias_state`與 reason codes，而 `artifacts.py` 的 `compare_rows()`**⛔ 不挑欄位比** | ⚠️ 改成明確的 **comparison projection ＋ lifecycle 下游依賴閉包**，見「六、3」 |
 
 **⚠️ 一併採納的裁決建議**：`I074_MODE` **納入** counterfactual flag（否則正式反事實執行反而
 繞過既有 run identity 守門）；⛔ **不採中繼 commit**、改用中繼 tree；
@@ -2312,7 +2314,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    | e | 上游輸入：`setup_rr_qualified`、`event_signal`／`event_state_summary`、`structure_state`、primary zone 選擇 | ⛔ **必須完全相同**——⚠️ 不同就代表 patch 溢出到 lifecycle 之外 |
 
    ⛔ **guard 的 comparison projection 必須是精確的 allowlist（v21）**——⛔ 不能沿用
-   `compare_rows()`（`artifacts.py:439`）的全欄位比對：它的 docstring 明寫「⛔ 不挑欄位比」，
+   `artifacts.py` 的 `compare_rows()`的全欄位比對：它的 docstring 明寫「⛔ 不挑欄位比」，
    而**合法的 lifecycle 翻轉⛔ 本來就會連帶改動下游欄位**，全欄位比會把**合法 patch 判成不合格**。
 
    ⚠️ **方向必須寫死，⛔ 不得寫反**：
@@ -2460,8 +2462,8 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **必備輸出還有 failed-attempt record**（「二、①」）——⛔ 它⛔ 不是成功 archive
    ⚠️ 要裁定**原子邊界**：單一 evidence archive 一次性發布，
       recovery 從 manifest 讀回原 terminal outcome（⚠️ v3 之下恆為 rc=0）
-   ③a ③ evidence contract 現行版確認（⚠️ 連同本計畫書現行版；② 的 review 已於 2026-09-23 通過）
-   ③b 實作第一包 → review：
+   ③a ③ evidence contract 現行版確認（⚠️ 連同本計畫書現行版；② 的 review 已於 2026-09-23 通過）  ← ✅ 2026-09-23
+   ③b 實作第一包 → review：   ← ✅ 2026-09-23 實作完成、⚠️ **待 review**
         stage-scoped identity ＋ 專用 tag ＋ tarball 的 pin 流程、共用的串流讀取、
         ⚠️ `artifacts.py` 的 row-level 共用原語（v27）、
         可共用的 archive 核心、環境等價比對模組 ＋ `envcheck/` 小 archive
@@ -2783,7 +2785,9 @@ counterfactual patch ⛔ 不需要重建它們。
 與 runner 的兩份 patch 輸入**都還沒實作**——它們屬於 ⑦，
 ⚠️ 而 schema 與 manifest 欄位要等 ③ 的 evidence contract 定案。
 
-#### ③ Stage 2 evidence contract 計畫書 v12（2026-09-23，⚠️ **待確認**）
+#### ③ Stage 2 evidence contract 計畫書 v12（2026-09-23，✅ **已確認**）
+
+✅ **使用者於 2026-09-23 與 Stage 2 計畫書 v28 一起確認**。
 
 ⚠️ **v12 隨 Stage 2 計畫書 v28 修掉 v11 review 的兩項**：
 
@@ -3728,8 +3732,8 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
 ⚠️ **v10 依 Stage 2 計畫書 v26 的 ③a～③d 重排**（⚠️ 待確認）：
 
 ```text id="i074_stage2_evidence_order_001"
-① 本計畫書與 Stage 2 計畫書的現行版確認（② 的 review 已於 2026-09-23 通過）   ← ⚠️ **現在在這裡**
-② 第一包（Stage 2 的 ③b）：
+① 本計畫書與 Stage 2 計畫書的現行版確認（② 的 review 已於 2026-09-23 通過）   ← ✅ 2026-09-23
+② 第一包（Stage 2 的 ③b）：   ← ✅ 2026-09-23 實作完成、⚠️ **待 review**（見「③b 實作結果」）
      共用的封閉 layout archive 核心、串流讀取、⚠️ `artifacts.py` 的 row-level 共用原語（v11）、
      環境等價比對、envcheck manifest（v11）、stage-scoped identity ＋ 專用 tag ＋ tarball、
      finalize 腳本的 envcheck／recover-envcheck 兩種模式
@@ -3745,6 +3749,68 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
 ```
 
 ⛔ **④ 未完成前⛔ 不得進入 Stage 2 計畫書的 ⑦**；⛔ **③ 判 NOT_EQUIVALENT 就⛔ 不進 ④**。
+
+#### ③b 實作結果（2026-09-23，⚠️ **待 review**）
+
+✅ **依 Stage 2 計畫書 v28 與 ③ evidence contract v12 完成第一包**（環境閘門的前置）。
+⛔ **本輪沒有跑任何 replay、沒有 pin 新 image、沒有 commit**——那些屬 ③c，要等 review 通過。
+
+| 檔案 | 內容 |
+|---|---|
+| `replay_bundle/artifacts.py` | 抽出 **row-level 共用原語**：`check_row_object()`／`check_candidate_flag()`／`replay_error_messages()` ＋ `raise_replay_errors()`／`check_diagnostics_row()`，以及 `validate_after_envelope()`；既有整批 validator 改為呼叫它們（⚠️ 以 `git diff -w` 確認規則本體**一字未改**）；新增單趟組合的 `StreamRowValidator` |
+| `replay_bundle/stream.py`（**新增**） | `stream_canonical_artifact()`：一趟讀取完成 raw／payload SHA、**逐欄逐列重新編碼比 SHA**（canonical 檢查）、`.json.gz` 的 **round-trip 串流比 SHA**、schema／kind；可在同一趟寫出 canonical gzip 副本（`copy_to`）。`stream_after_artifact()`：只常駐 keys、每列 digest 與指定的完整列 |
+| `replay_bundle/stage2_evidence.py`（**新增**，本包只放共用部分） | 串流版 `load_stage1_anchor()` ＋ `validate_stage1_anchor_graph()`（道 10 已改寫）、`stage1_evidence` 的 builder／validator、`ClosedArchiveWriter`（staging → **對 staging 跑完整驗證** → `rename_noreplace` → fsync parent）、`resolve_repo_path()`、`DIAGNOSTIC_SAMPLE_LIMIT = 20` |
+| `replay_bundle/envcheck.py`（**新增**） | 環境等價判定、equivalence／envcheck manifest 的封閉 schema、E1～E7（E3a／E3b）、`publish_envcheck()`、`recover_envcheck()`、`verify_envcheck_for_stage2()`、CLI（`--envcheck`／`--recover-envcheck`） |
+| `replay_bundle/provenance.py` | 抽出 `installed_distributions()`，`pip_freeze_sha256()` 改為它的 SHA（⛔ 兩者不各自推導） |
+| `replay_bundle/run_identity.py`、`python/scripts/ensure-i074-run-identity.py` | identity 路徑**依 stage 固定推導**（封閉列舉 1／2）；Stage 1 的推導結果不變 |
+| `replay_bundle/publish.py` | 新增 `EXIT_ENV_NOT_EQUIVALENT = 7`（⚠️ 結束碼 6 屬 ⑦，本輪未加） |
+| `scripts/pin-replay-image.sh` | `--stage 2`：**專用 tag**、⛔ 不接受 `PY_IMAGE`、Stage 2 identity、`docker save` tarball ＋ `.sha256`；Stage 1 行為逐項不變 |
+| `scripts/restore-replay-image.sh`（**新增**） | 先驗 tarball SHA → `docker load` → 再驗 image ID → 重新掛上專用 tag |
+| `scripts/run-replay-offline.sh` | `I074_STAGE`（封閉列舉 1／2）選 identity；⛔ 只在 I-074 正式流程有意義 |
+| `scripts/finalize-stage2-evidence.sh`（**新增**） | CLI matrix 的 `--envcheck`／`--recover-envcheck` 兩種模式（其餘五種屬 ③d） |
+| `python/scripts/fixtures/stage2_finalizer_argv.json`（**新增**） | 兩種模式的 argv token 序列 |
+
+**測試**：新增 `test_replay_stream.py`、`test_replay_row_primitives.py`（bj0）、`test_replay_envcheck.py`
+（bd～bd4、be／be2、bf、bk，以及信任錨、CLI matrix、stage-scoped identity、**對真正封存的 Stage 1
+evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` 新增 Stage 2 段落（finalizer
+兩種模式的 argv／mount／模式衝突、`pin --stage 2`、restore、`I074_STAGE`）。
+
+| 層 | 結果 |
+|---|---|
+| `python/scripts/test.sh`（完整） | **1361 passed, 1 skipped**（② 的 baseline 是 1222）；doc-refs 與 `test-replay-args.sh` 全過（184 項 ok） |
+| 反向驗證（把回歸注回產品程式，確認測試會紅） | ① 拿掉 E3b → `be2` 三支紅；② `row_mismatch` 誤計單側 key → `be2`／`bk` 紅；③ 拿掉 gzip round-trip 檢查 → 四支非 canonical gzip 測試紅；④ 拿掉 E7 的 base_commit 檢查 → E7 測試紅；⑤ 串流 validator 漏掉 diagnostics → bj0 七支紅。全部還原後重跑通過 |
+
+**真實資料實測**（host，2026-09-23）：
+
+| 項目 | 結果 |
+|---|---|
+| 分塊重新壓縮 D+1 是否與封存檔逐位元相同 | ✅ 相同（stored `8cab461c…`、payload `33a6b166…` 都與 Stage 1 manifest 一致），2.2 秒 |
+| 串流驗證 D+1（13,417 列、156 候選） | 8.7 秒，峰值 RSS **135 MiB**（整份載入約 449 MiB） |
+| 串流信任錨 `load_stage1_anchor()` ＋ 跨檔關係 | 9.3 秒，峰值 RSS **138 MiB**；156 列 cohort rows 全部保留 |
+
+**⚠️ 與計畫的差異（待 review 確認）**：
+
+| # | 差異 | 理由 |
+|---|---|---|
+| 1 | ⚠️ **判定表第 3 條的 `base_commit`／`tooling_patch_sha256` 不符 → 結束碼 1、⛔ 不發布**，⛔ 不是計畫寫的 NOT_EQUIVALENT（7）。✅ **review（2026-09-23）同意這個方向**，但要求**在 replay 之前就擋**——見下方「第一輪 review 的修正」高 1 | 這兩欄同時也是 **E7**（after' 必須是原始 `e1cbbbd`、⛔ 不套 patch）——E7 先擋。跑錯版本的那一趟⛔ 不是環境見證；若當成 NOT_EQUIVALENT 發布，會依計次政策（after' 不得重跑）**永久擋住 Stage 2**。`project_modules_sha256`／`runtime_settings` 不符仍是 NOT_EQUIVALENT（7）。測試 `be` 已依此拆成兩組 |
+| 2 | ~~recover-envcheck 的 shell argv 測試只在 repo 內還沒有真正的 `envcheck/` 時才跑~~ | ⛔ **已由第一輪 review 推翻並修正**（中 3）：改在隔離的最小 repo 裡跑，⛔ 不再因正式證據存在而 skip |
+| 3 | 發布時對 staging 跑**完整**的 E1～E7（與 recovery 同一段程式） | 比「只驗記憶體物件」強；代價是多串流讀一次 staging 內的副本 |
+
+##### ③b 第一輪 review 的修正（2026-09-23）
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 高 1 | ⛔ **E7 只在 replay 完成後才檢查**——runner 在 Docker 之前就算出了 `BASE_COMMIT` 與 `TOOLING_PATCH_SHA256` 卻沒驗，錯設 `AFTER_REF` 或殘留 `TOOLING_PATCH` 要燒完約 180 分鐘才在 envcheck 被拒，而 after' 只有一趟 | ✅ 新增 `python/scripts/check-i074-witness-run.py`（host 端、用**同一套** Stage 1 信任錨）；`run-replay-offline.sh` 在 **Stage 2 identity ＋ Stage 1 模式**（＝見證趟）時，於 worktree 建好、兩個值算完之後、**Docker 之前**呼叫它。envcheck 發布與 recovery 的 E7 照舊保留（⛔ 提早擋不取代正式那一道）。測試分兩種跑法：⚠️ **兩個錯誤案例**（錯的 `AFTER_REF`、殘留的 patch）以 fake docker 跑**非 dry-run**，斷言中止且 fake docker 的 log 裡⛔ 沒有 `run`；⚠️ **放行案例**（正確的 base、無 patch）改用 **dry-run**，斷言輸出裡出現 `docker run`——真的走到 `exec docker run` 時 runner 的 EXIT trap 不會執行、worktree 會留在 `/tmp`（見 [I-118](#i-118replay-相關腳本會洩漏-git-worktree註冊與-tmp-目錄都會累積)） |
+| 中 2 | ⛔ **`.sha256` 沒有綁死實際的 tarball**——`sha256sum -c` 驗的是 sidecar 裡寫的那個檔名，sidecar 改指向同目錄的合法 decoy 就能讓被改過的 tar 照樣被 load | ✅ 新增 `scripts/lib/image-tarball.sh` 的 `image_tarball_verify()`（pin 與 restore 共用）：sidecar **恰好一行**、檔名**恰好是 `<hex>.tar`**、讀出 digest **對 tar 本身重算**。測試補「tar 被改＋sidecar 指向合法 decoy」（pin 與 restore 各一）與「sidecar 兩行」 |
+| 中 3 | ⛔ **正式 `envcheck/` 產生後，shell 的 recovery 測試會永久 skip** | ✅ finalizer 的 shell 測試**全部**改在隔離的最小 repo（`git init` ＋ 工作樹現行的腳本與模組）裡跑，⛔ 完全不碰真正的 repo；並斷言指令裡⛔ 沒有真正 repo 的 baselines 路徑 |
+| 低 4 | ⚠️ 新增的 shell CLI 仍靜默接受部分重複／多餘參數 | ✅ `finalize-stage2-evidence.sh` 的 `--source-ref` 重複、`pin-replay-image.sh` 的 `--stage` 重複與 bundle 之後的多餘參數（含 `--no-identity` 之後）一律中止；各補 shell 測試 |
+
+⚠️ **③c 之前要注意**：`finalize-stage2-evidence.sh` 跑的是 **`--source-ref`（預設 HEAD）worktree 裡的程式**
+——③b 必須**先 commit** 才會被正式執行用到（與 Stage 1 finalizer 相同）。
+
+**歸檔**（⚠️ 待 review）：操作程序寫進 [`development-workflow.md`](./development-workflow.md)
+「I-074 Stage 2 的環境見證程序」（含 tarball 的保存位置與驗 SHA 步驟）；契約寫進
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的環境見證契約」。
 
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 
@@ -6831,3 +6897,36 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 * ⚠️ 可以沿用 I-074 Stage 2 的串流讀取模組（③b 產出），⛔ 不另寫一份；
 * ⛔ **不得改變 Stage 1 已封存證據的驗證結果**——修完後，對 `python/baselines/i074_stage1/` 跑
   recovery 的驗證結論必須與現在相同（只差記憶體用量）。
+
+---
+
+### I-118：replay 相關腳本會洩漏 git worktree（註冊與 `/tmp` 目錄都會累積）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待修復 |
+| 嚴重度 | 低（不影響任何證據或判定；會讓 `.git/worktrees` 與 `/tmp` 持續累積） |
+| 分類 | Scripts / 測試衛生 |
+| 建立日期 | 2026-09-23 |
+| 來源 | I-074 ③b 第一輪 review 修正時，量測 `scripts/test-replay-args.sh` 前後的 worktree 數量 |
+
+#### 事實（2026-09-23 實測）
+
+跑一次 `IMAGE_REQUIRED=1 scripts/test-replay-args.sh`：`git worktree list` 由 **18 → 22**，`/tmp/tmp.*` 多 1 個；
+當時 repo 已累積 18 筆 worktree 註冊，其中多筆是 `prunable`（目錄已不在、註冊還在）。
+
+| 成因 | 位置 | 後果 |
+|---|---|---|
+| cleanup 只 `rm -rf "$WORKTREE"`，⛔ 沒有 `git worktree remove` | `scripts/finalize-evidence.sh`、`scripts/compare-replay-crossday.sh` 的 `trap` | 目錄刪了，**註冊留在 `.git/worktrees`**（變成 prunable） |
+| 最後一步是 `exec docker run` | `scripts/run-replay-offline.sh`、`scripts/finalize-evidence.sh`、`scripts/compare-replay-crossday.sh` 等 | `exec` 取代了 shell，**EXIT trap 不會執行**——worktree 目錄與註冊都留下。⚠️ 正式執行時容器還在用這個 worktree，⛔ 不能在 `exec` 之前清；但執行完也沒有人清 |
+| 測試以 fake docker 跑到 `exec docker run` | `scripts/test-replay-args.sh`（例如「結束碼 4 原樣傳出」） | 每跑一次常態測試就多一個 |
+
+⚠️ **I-074 ③b 新增的部分已避開**：`finalize-stage2-evidence.sh` 用 `git worktree remove --force` ＋ 前景執行
+（⛔ 不 `exec`）；它的 shell 測試在隔離的暫存 repo 裡跑；見證趟 E7 守門的放行案例改用 dry-run。
+
+#### 處置方向（⚠️ 待規劃）
+
+* cleanup 一律 `git worktree remove --force` ＋ `rm -rf`（比照 `run-replay-offline.sh` 既有的 `cleanup()`）；
+* `exec docker run` 改為前景執行並保留 trap，原樣傳出結束碼（比照 `finalize-stage2-evidence.sh`）；
+  ⚠️ 要確認不影響即時串流與結束碼的既有契約（Stage 1 的 exit 4／5 傳遞測試）；
+* 測試結束時斷言 worktree 數量**沒有增加**，⛔ 不靠人工 `git worktree prune`。

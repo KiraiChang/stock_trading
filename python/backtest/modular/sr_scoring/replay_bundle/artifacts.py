@@ -93,6 +93,22 @@ def assert_same_keys(left: Sequence[tuple], right: Sequence[tuple], label: str) 
         )
 
 
+def check_candidate_flag(row: dict[str, Any], label: str) -> None:
+    """**row-level 原語**：這一列必須有嚴格 boolean 的 `rr_decoupling_candidate`。
+
+    ⚠️ 整批的 `validate_candidate_flags()` 與串流的 `StreamRowValidator` 都呼叫這一支
+    ——⛔ 不各寫一份規則（兩套實作＝兩套語意，見 issue.md I-074 ③ evidence contract「五之一」）。
+    """
+    if CANDIDATE_FIELD not in row:
+        raise ArtifactError(f"{label}：{_I074_HINT}")
+    value = row[CANDIDATE_FIELD]
+    # ⛔ 不能用 `isinstance(x, int)`：bool 是 int 的子類，`0`／`1` 會通過。
+    if not isinstance(value, bool):
+        raise ArtifactError(
+            f"{label}：{CANDIDATE_FIELD} 必須是 JSON true/false，實際是 {value!r}。{_I074_HINT}"
+        )
+
+
 def validate_candidate_flags(rows: Iterable[dict[str, Any]], label: str) -> None:
     """每一列都必須有嚴格 boolean 的 `rr_decoupling_candidate`。
 
@@ -100,14 +116,7 @@ def validate_candidate_flags(rows: Iterable[dict[str, Any]], label: str) -> None
     「真正零命中」判成錯誤。這道守門禁止的是**因欄位缺失而靜默變成空 cohort**。
     """
     for row in rows:
-        if CANDIDATE_FIELD not in row:
-            raise ArtifactError(f"{label}：{_I074_HINT}")
-        value = row[CANDIDATE_FIELD]
-        # ⛔ 不能用 `isinstance(x, int)`：bool 是 int 的子類，`0`／`1` 會通過。
-        if not isinstance(value, bool):
-            raise ArtifactError(
-                f"{label}：{CANDIDATE_FIELD} 必須是 JSON true/false，實際是 {value!r}。{_I074_HINT}"
-            )
+        check_candidate_flag(row, label)
 
 
 def _require_fields(data: dict[str, Any], fields: set[str], label: str) -> None:
@@ -124,11 +133,11 @@ def _require_type(data: dict[str, Any], field: str, types, label: str, *, option
         raise ArtifactError(f"{label}.{field} 型別不符：{value!r}")
 
 
-def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
-    """after artifact 的完整結構檢查，回傳逐列 key。
+def validate_after_envelope(artifact: dict[str, Any]) -> None:
+    """after artifact 的**頂層**欄位與型別（⛔ 不看 rows 的內容）。
 
-    ⚠️ **這一整組必須在跑 replay 之前做完**：Stage 2 的 replay 要跑約 3.7 小時，
-    壞掉的 artifact 沒有理由等到那之後才被發現。
+    ⚠️ 串流載入時 rows 不在記憶體裡：呼叫端傳入的頂層 dict 要帶一個 `rows` 佔位
+    （只為了讓封閉欄位集合的檢查成立），rows 本身由 row-level 原語逐列驗。
     """
     _require_fields(artifact, _AFTER_FIELDS, "after artifact")
     for field in ("bundle_id", "timeframe", "replay_scope", "generated_at"):
@@ -136,12 +145,26 @@ def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, st
     for field in ("run_id", "pipeline_version"):
         _require_type(artifact, field, str, "after artifact", optional=True)
     _require_type(artifact, "provenance", dict, "after artifact")
+
+
+def check_row_object(row: Any, label: str) -> None:
+    """**row-level 原語**：rows[] 的每一列都必須是 object。"""
+    if not isinstance(row, dict):
+        raise ArtifactError(f"{label} 的 rows[] 每一列都必須是 object")
+
+
+def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """after artifact 的完整結構檢查，回傳逐列 key。
+
+    ⚠️ **這一整組必須在跑 replay 之前做完**：Stage 2 的 replay 要跑約 3.7 小時，
+    壞掉的 artifact 沒有理由等到那之後才被發現。
+    """
+    validate_after_envelope(artifact)
     rows = artifact["rows"]
     if not isinstance(rows, list):
         raise ArtifactError("after artifact 的 rows 必須是陣列")
     for row in rows:
-        if not isinstance(row, dict):
-            raise ArtifactError("after artifact 的 rows[] 每一列都必須是 object")
+        check_row_object(row, "after artifact")
     keys = [row_key(row) for row in rows]
     assert_unique_keys(keys, "after artifact")
     validate_candidate_flags(rows, "after artifact")
@@ -247,11 +270,26 @@ def validate_replay_errors(rows: Iterable[dict[str, Any]], label: str) -> None:
     """
     failures: list[str] = []
     for row in rows:
-        zone_error = row.get("zone_score_error")
-        if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
-        if row.get("decision_error"):
-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
+        failures.extend(replay_error_messages(row))
+    raise_replay_errors(failures, label)
+
+
+def replay_error_messages(row: dict[str, Any]) -> list[str]:
+    """**row-level 原語**：這一列的運算失敗描述（沒有失敗就回空 list）。
+
+    ⚠️ 這一道是**彙總後才拋**（訊息要帶總數），所以原語只回傳描述、由呼叫端累積，
+    最後交給 `raise_replay_errors()`——整批與串流兩條路徑的訊息因此逐字相同。
+    """
+    failures: list[str] = []
+    zone_error = row.get("zone_score_error")
+    if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
+        failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
+    if row.get("decision_error"):
+        failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
+    return failures
+
+
+def raise_replay_errors(failures: Sequence[str], label: str) -> None:
     if failures:
         raise ArtifactError(
             f"{label} 有 {len(failures)} 列運算失敗，⛔ 不發布任何 artifact："
@@ -279,122 +317,190 @@ def validate_diagnostics(rows: Iterable[dict[str, Any]], label: str, *, side: st
     獨立輸入，**光靠 row 算不出來**。before 的展開式在 before tooling 內驗（它還持有原始
     `event_state_summary`），那是 Stage 2 的 patch 責任。
     """
+    check_diagnostics_side(side)
+    for row in rows:
+        check_diagnostics_row(row, label, side=side)
+
+
+def check_diagnostics_side(side: str) -> None:
     if side not in ("before", "after"):
         raise ArtifactError(f"validate_diagnostics 的 side 只接受 'before'／'after'，實際 {side!r}")
 
-    for row in rows:
-        key = row_key(row)
-        where = f"{label} {key}"
-        no_zone = _is_no_zone_fallback_row(row)
 
-        for field in DIAGNOSTIC_BOOL_FIELDS:
-            if field not in row:
-                raise ArtifactError(f"{where}：缺少 {field}。{_I074_HINT}")
-            value = row[field]
-            # ⛔ 不能用 isinstance(x, int)：bool 是 int 的子類，`0`／`1` 會通過。
-            if not isinstance(value, bool):
-                raise ArtifactError(f"{where}：{field} 必須是 JSON true/false，實際 {value!r}")
+def check_diagnostics_row(row: dict[str, Any], label: str, *, side: str) -> None:
+    """**row-level 原語**：一列的九欄位 ＋ `lifecycle_phase` 的 schema 與交叉一致性。
 
-        for field in DIAGNOSTIC_STR_FIELDS:
-            if field not in row:
-                raise ArtifactError(f"{where}：缺少 {field}")
-            value = row[field]
+    ⚠️ 本體就是原本 `validate_diagnostics()` 迴圈內的那一段，**⛔ 一字不改**——
+    整批與串流兩條路徑呼叫同一支，⛔ 不另寫一份。
+    """
+    check_diagnostics_side(side)
+    key = row_key(row)
+    where = f"{label} {key}"
+    no_zone = _is_no_zone_fallback_row(row)
+
+    for field in DIAGNOSTIC_BOOL_FIELDS:
+        if field not in row:
+            raise ArtifactError(f"{where}：缺少 {field}。{_I074_HINT}")
+        value = row[field]
+        # ⛔ 不能用 isinstance(x, int)：bool 是 int 的子類，`0`／`1` 會通過。
+        if not isinstance(value, bool):
+            raise ArtifactError(f"{where}：{field} 必須是 JSON true/false，實際 {value!r}")
+
+    for field in DIAGNOSTIC_STR_FIELDS:
+        if field not in row:
+            raise ArtifactError(f"{where}：缺少 {field}")
+        value = row[field]
+        if not isinstance(value, str) or not value:
+            raise ArtifactError(f"{where}：{field} 必須是非空字串，實際 {value!r}")
+
+    for field in DIAGNOSTIC_NULLABLE_FIELDS:
+        if field not in row:
+            raise ArtifactError(f"{where}：缺少 {field}")
+
+    # ⛔ `position_action` 可以是 null，但**非 null 時必須是非空字串**——
+    # 只驗「存在」等於放行任何型別。
+    action = row["position_action"]
+    if action is not None and (not isinstance(action, str) or not action):
+        raise ArtifactError(f"{where}：position_action 非 null 時必須是非空字串，實際 {action!r}")
+
+    condition = row["position_action_condition"]
+    if condition is None:
+        # ⚠️ 只有明確的 no-zone fallback 列才允許為 null。
+        if not no_zone:
+            raise ArtifactError(
+                f"{where}：position_action_condition 為 null，但這一列**不是** no-zone "
+                f"fallback（zone_score_available={row.get('zone_score_available')!r}、"
+                f"zone_score_error={row.get('zone_score_error')!r}）"
+            )
+    else:
+        if not isinstance(condition, dict):
+            raise ArtifactError(f"{where}：position_action_condition 必須是 object")
+        for sub in ("state", "structure_state"):
+            value = condition.get(sub)
             if not isinstance(value, str) or not value:
-                raise ArtifactError(f"{where}：{field} 必須是非空字串，實際 {value!r}")
-
-        for field in DIAGNOSTIC_NULLABLE_FIELDS:
-            if field not in row:
-                raise ArtifactError(f"{where}：缺少 {field}")
-
-        # ⛔ `position_action` 可以是 null，但**非 null 時必須是非空字串**——
-        # 只驗「存在」等於放行任何型別。
-        action = row["position_action"]
-        if action is not None and (not isinstance(action, str) or not action):
-            raise ArtifactError(f"{where}：position_action 非 null 時必須是非空字串，實際 {action!r}")
-
-        condition = row["position_action_condition"]
-        if condition is None:
-            # ⚠️ 只有明確的 no-zone fallback 列才允許為 null。
-            if not no_zone:
                 raise ArtifactError(
-                    f"{where}：position_action_condition 為 null，但這一列**不是** no-zone "
-                    f"fallback（zone_score_available={row.get('zone_score_available')!r}、"
-                    f"zone_score_error={row.get('zone_score_error')!r}）"
+                    f"{where}：position_action_condition.{sub} 必須是非空字串，實際 {value!r}"
                 )
-        else:
-            if not isinstance(condition, dict):
-                raise ArtifactError(f"{where}：position_action_condition 必須是 object")
-            for sub in ("state", "structure_state"):
-                value = condition.get(sub)
-                if not isinstance(value, str) or not value:
-                    raise ArtifactError(
-                        f"{where}：position_action_condition.{sub} 必須是非空字串，實際 {value!r}"
-                    )
-            # ── 欄位交叉一致性 ──────────────────────────────────────────────
-            # ⛔ 少了它，互相矛盾的證據仍會通過。
-            if row["structure_state"] != condition["structure_state"]:
+        # ── 欄位交叉一致性 ──────────────────────────────────────────────
+        # ⛔ 少了它，互相矛盾的證據仍會通過。
+        if row["structure_state"] != condition["structure_state"]:
+            raise ArtifactError(
+                f"{where}：structure_state={row['structure_state']!r} 與 "
+                f"position_action_condition.structure_state={condition['structure_state']!r} 不一致"
+            )
+        # ⚠️ `_position_action_condition()` 寫的是 `action_state or "WATCH"`，所以
+        # `action_state` 為空字串時兩者會分岔——而空字串已被上面的「非空字串」擋掉，
+        # 這裡只需驗非空時必須相等。
+        if row["action_state"] != condition["state"]:
+            raise ArtifactError(
+                f"{where}：action_state={row['action_state']!r} 與 "
+                f"position_action_condition.state={condition['state']!r} 不一致"
+            )
+
+    # ── no-zone 列：**逐欄對照完整的固定 mapping** ─────────────────────────
+    #
+    # ⛔ 「它是 fallback」不等於「它可以是任何值」——那九個值**整組都是契約**
+    # （`DIAGNOSTIC_NO_ZONE_FALLBACK`，與匯出端同一份定義）。
+    #
+    # ⚠️ 這道檢查排在型別與交叉一致性**之後**：前面已保證型別合法，這裡只比值，
+    # 失敗訊息才指得出「是固定 mapping 不符」而不是「型別錯」。
+    #
+    # ⚠️ **只釘三個 boolean 是不夠的**，先前漏掉的三類都會靜默通過：
+    #   * `rr_decoupling_candidate=true`——after 側會被等價式間接擋下
+    #     （lifecycle_phase 是 null），但 **before 側⛔ 不驗等價式**，於是照樣放行；
+    #   * 三個字串被改成一般列的值（整列偽裝成「有算過」）；
+    #   * `position_action_condition`／`position_action` 非 null。
+    if no_zone:
+        for field, want in DIAGNOSTIC_NO_ZONE_FALLBACK.items():
+            actual = row[field]
+            # bool 與 None 用 `is`（⛔ `0 == False` 會過）；字串用 `==`。
+            matched = actual is want if want is None or isinstance(want, bool) else actual == want
+            if not matched:
                 raise ArtifactError(
-                    f"{where}：structure_state={row['structure_state']!r} 與 "
-                    f"position_action_condition.structure_state={condition['structure_state']!r} 不一致"
-                )
-            # ⚠️ `_position_action_condition()` 寫的是 `action_state or "WATCH"`，所以
-            # `action_state` 為空字串時兩者會分岔——而空字串已被上面的「非空字串」擋掉，
-            # 這裡只需驗非空時必須相等。
-            if row["action_state"] != condition["state"]:
-                raise ArtifactError(
-                    f"{where}：action_state={row['action_state']!r} 與 "
-                    f"position_action_condition.state={condition['state']!r} 不一致"
+                    f"{where}：no-zone fallback 列的 {field} 必須是 {want!r}，實際 {actual!r}"
+                    "——⛔ 那九個值整組都是契約，不是「可以是任何值」的預設"
                 )
 
-        # ── no-zone 列：**逐欄對照完整的固定 mapping** ─────────────────────────
-        #
-        # ⛔ 「它是 fallback」不等於「它可以是任何值」——那九個值**整組都是契約**
-        # （`DIAGNOSTIC_NO_ZONE_FALLBACK`，與匯出端同一份定義）。
-        #
-        # ⚠️ 這道檢查排在型別與交叉一致性**之後**：前面已保證型別合法，這裡只比值，
-        # 失敗訊息才指得出「是固定 mapping 不符」而不是「型別錯」。
-        #
-        # ⚠️ **只釘三個 boolean 是不夠的**，先前漏掉的三類都會靜默通過：
-        #   * `rr_decoupling_candidate=true`——after 側會被等價式間接擋下
-        #     （lifecycle_phase 是 null），但 **before 側⛔ 不驗等價式**，於是照樣放行；
-        #   * 三個字串被改成一般列的值（整列偽裝成「有算過」）；
-        #   * `position_action_condition`／`position_action` 非 null。
-        if no_zone:
-            for field, want in DIAGNOSTIC_NO_ZONE_FALLBACK.items():
-                actual = row[field]
-                # bool 與 None 用 `is`（⛔ `0 == False` 會過）；字串用 `==`。
-                matched = actual is want if want is None or isinstance(want, bool) else actual == want
-                if not matched:
-                    raise ArtifactError(
-                        f"{where}：no-zone fallback 列的 {field} 必須是 {want!r}，實際 {actual!r}"
-                        "——⛔ 那九個值整組都是契約，不是「可以是任何值」的預設"
-                    )
+    # ── 既有依賴欄位 `lifecycle_phase` ────────────────────────────────────
+    # ⛔ 少了它，等價式會被空值蒙混：candidate 為 false 時
+    # `false == (None == "CONTINUATION" and …)` → `false == false` → 照樣通過。
+    if "lifecycle_phase" not in row:
+        raise ArtifactError(f"{where}：缺少 lifecycle_phase（candidate 的等價式依賴它）")
+    phase = row["lifecycle_phase"]
+    if no_zone:
+        if phase is not None:
+            raise ArtifactError(
+                f"{where}：no-zone fallback 列的 lifecycle_phase 必須是 null，實際 {phase!r}"
+            )
+    elif not isinstance(phase, str) or not phase:
+        raise ArtifactError(f"{where}：lifecycle_phase 必須是非空字串，實際 {phase!r}")
 
-        # ── 既有依賴欄位 `lifecycle_phase` ────────────────────────────────────
-        # ⛔ 少了它，等價式會被空值蒙混：candidate 為 false 時
-        # `false == (None == "CONTINUATION" and …)` → `false == false` → 照樣通過。
-        if "lifecycle_phase" not in row:
-            raise ArtifactError(f"{where}：缺少 lifecycle_phase（candidate 的等價式依賴它）")
-        phase = row["lifecycle_phase"]
-        if no_zone:
-            if phase is not None:
-                raise ArtifactError(
-                    f"{where}：no-zone fallback 列的 lifecycle_phase 必須是 null，實際 {phase!r}"
-                )
-        elif not isinstance(phase, str) or not phase:
-            raise ArtifactError(f"{where}：lifecycle_phase 必須是非空字串，實際 {phase!r}")
-
-        if side == "after":
-            expected = bool(phase == "CONTINUATION" and not row["setup_rr_qualified"])
-            if row[CANDIDATE_FIELD] != expected:
-                raise ArtifactError(
-                    f"{where}：{CANDIDATE_FIELD}={row[CANDIDATE_FIELD]!r} 與等價式不符"
-                    f"（lifecycle_phase={phase!r}、setup_rr_qualified={row['setup_rr_qualified']!r}）"
-                )
+    if side == "after":
+        expected = bool(phase == "CONTINUATION" and not row["setup_rr_qualified"])
+        if row[CANDIDATE_FIELD] != expected:
+            raise ArtifactError(
+                f"{where}：{CANDIDATE_FIELD}={row[CANDIDATE_FIELD]!r} 與等價式不符"
+                f"（lifecycle_phase={phase!r}、setup_rr_qualified={row['setup_rr_qualified']!r}）"
+            )
 
 
 def candidate_keys(rows: Iterable[dict[str, Any]]) -> list[tuple[str, str, str]]:
     return [row_key(row) for row in rows if row[CANDIDATE_FIELD] is True]
+
+
+class StreamRowValidator:
+    """**單趟組合驗證**：逐列餵入，一次套用整批 validator 的每一道 row-level 規則。
+
+    ⚠️ **為什麼需要它**：I-074 Stage 2 的 finalizer／recovery／preflight 讀的是全量 artifact
+    （13,417 列，整份載入實測約 +365～449 MiB），⛔ 不能整份進記憶體；而既有的整批 validator
+    各自讀一遍 rows，⛔ 串流的 iterator 不能重複消費。見 issue.md I-074 ③ evidence contract「五之一」。
+
+    ⚠️ **驗證強度⛔ 不得下降**：每一列套用的就是整批 validator 呼叫的**同一組原語**——
+    `check_row_object()`、`row_key()`、`check_candidate_flag()`、`replay_error_messages()`、
+    `check_diagnostics_row()`；key 唯一性與運算失敗這兩道「要看完全部才知道」的規則，
+    延到 `finish()` 用與整批版本逐字相同的訊息拋出。
+
+    ⚠️ 例外的**先後**可能與整批版本不同（整批是一道規則掃完全部再換下一道，這裡是一列套完
+    全部規則再換下一列）；單一缺陷時兩者的例外型別與訊息相同。
+    """
+
+    def __init__(self, label: str, *, side: str) -> None:
+        check_diagnostics_side(side)
+        self.label = label
+        self.side = side
+        self.keys: list[tuple[str, str, str]] = []
+        self.candidate_keys: list[tuple[str, str, str]] = []
+        self._seen: set[tuple[str, str, str]] = set()
+        self._duplicates: set[tuple[str, str, str]] = set()
+        self._failures: list[str] = []
+        self._finished = False
+
+    def feed(self, row: Any) -> tuple[str, str, str]:
+        if self._finished:
+            raise ArtifactError(f"{self.label}：validator 已 finish，⛔ 不得再餵入列")
+        check_row_object(row, self.label)
+        key = row_key(row)
+        if key in self._seen:
+            self._duplicates.add(key)
+        self._seen.add(key)
+        self.keys.append(key)
+        check_candidate_flag(row, self.label)
+        self._failures.extend(replay_error_messages(row))
+        check_diagnostics_row(row, self.label, side=self.side)
+        if row[CANDIDATE_FIELD] is True:
+            self.candidate_keys.append(key)
+        return key
+
+    def finish(self) -> list[tuple[str, str, str]]:
+        """拋出延後的兩道規則；通過就回傳全部 key（依餵入順序）。"""
+        self._finished = True
+        if self._duplicates:
+            duplicates = sorted(self._duplicates)
+            raise ArtifactError(
+                f"{self.label} 有重複的 key：{duplicates[:5]}（共 {len(duplicates)} 組）"
+            )
+        raise_replay_errors(self._failures, self.label)
+        return self.keys
 
 
 # ── 產生 ────────────────────────────────────────────────────────────────────

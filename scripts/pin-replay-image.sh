@@ -3,6 +3,7 @@
 #
 # 用法：
 #   scripts/pin-replay-image.sh <bundle 絕對路徑>
+#   scripts/pin-replay-image.sh --stage 2 <bundle 絕對路徑>   # I-074 Stage 2（見下方）
 #
 # **stdout 只印 `sha256:…` 一行**（machine-readable），其餘訊息一律走 stderr。
 # ⚠️ **非零結果時 stdout ⛔ 無輸出**——probe／D／D+1／comparator／finalizer 都是靠 stdout
@@ -18,27 +19,116 @@
 #   | 已存在但 image 已不在本機 | ⚠️ **fail-closed**，⛔ 不得重建後換一個 ID——那會讓跨日的三趟跑在不同 image 上 |
 #
 # 結束碼：0 ＝ 成功；3 ＝ durability 未確認（檔案有效，重跑會走 no-op 並重新 fsync）；1 ＝ 其他。
+#
+# ⚠️ **`--stage 2`（I-074 Stage 2，issue.md I-074 Stage 2 計畫書「二、⑤」）**：Stage 1 釘住的
+# image 已不在本機（2026-09-23 查證）。可能成因是 pin 用的 tag 與 `python/scripts/test.sh`
+# 等腳本**共用**——任何一次重新 build 都會讓釘住的 ID 失去 tag、之後被 prune 清掉。所以 Stage 2：
+#
+#   | 項目 | 做法 |
+#   |---|---|
+#   | tag | ⚠️ **專用 tag** `stock-trading-python-replay:i074-stage2`，⛔ 不與任何 build 腳本共用；⛔ 不接受 `PY_IMAGE` |
+#   | identity | Stage 2 自己的一份（`…/stock_trading/i074_stage2/run_identity.json`，依 stage 固定推導） |
+#   | tarball | pin 之後 `docker save` 到 repo 外的 `…/stock_trading/i074_stage2/images/<hex>.tar`，旁邊一份 `<hex>.tar.sha256` |
+#   | image 已不在本機 | ⚠️ 仍 fail-closed；⚠️ 改用 `scripts/restore-replay-image.sh --stage 2 <bundle>` 從 tarball 還原（先驗 SHA、`docker load` 後再驗 image ID） |
+#
+# ⚠️ **Stage 1 的行為逐項不變**（它的 fail-closed 是正確的）。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_DIR="$REPO_ROOT/python"
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 ENSURE="$PYTHON_DIR/scripts/ensure-i074-run-identity.py"
+# shellcheck source=lib/image-tarball.sh
+. "$REPO_ROOT/scripts/lib/image-tarball.sh"
 
 # ⚠️ `--no-identity`：**只 build 並印出 image ID**，⛔ 不建立／不讀 run identity。
 # 給**非 I-074** 的一般 Stage 1／2 用——它們需要的只是「單一 build 實作 ＋ 以 ID 執行」，
 # ⛔ 不該因此在使用者家目錄產生 I-074 的協調檔。
 NO_IDENTITY=0
-if [ "${1:-}" = "--no-identity" ]; then
-  NO_IDENTITY=1
-  shift
+STAGE=1
+STAGE_SEEN=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --no-identity)
+      [ "$NO_IDENTITY" = "0" ] || { echo "ERROR: --no-identity 重複出現。" >&2; exit 1; }
+      NO_IDENTITY=1; shift ;;
+    --stage)
+      [ "$#" -ge 2 ] || { echo "ERROR: --stage 需要值（1 或 2）。" >&2; exit 1; }
+      # ⚠️ ⛔ 不靜默採用最後一個（CLI matrix：重複參數一律中止）。
+      [ "$STAGE_SEEN" = "0" ] || { echo "ERROR: --stage 重複出現——⛔ 不靜默採用最後一個。" >&2; exit 1; }
+      STAGE_SEEN=1; STAGE="$2"; shift 2 ;;
+    --*) echo "ERROR: 未知參數 $1" >&2; exit 1 ;;
+    *) break ;;
+  esac
+done
+case "$STAGE" in
+  1|2) ;;
+  *) echo "ERROR: --stage 只接受 1 或 2（封閉列舉），實際 '$STAGE'。" >&2; exit 1 ;;
+esac
+if [ "$NO_IDENTITY" = "1" ] && [ "$STAGE" != "1" ]; then
+  echo "ERROR: --no-identity ⛔ 不可與 --stage 2 並用——Stage 2 一定要有自己的 identity。" >&2
+  exit 1
+fi
+if [ "$STAGE" = "2" ]; then
+  # ⚠️ 專用 tag：⛔ 與 build 腳本共用 tag 正是 Stage 1 的 image 遺失的可能成因。
+  if [ -n "${PY_IMAGE:-}" ]; then
+    echo "ERROR: --stage 2 ⛔ 不接受 PY_IMAGE——它一律使用專用 tag，⛔ 不與任何 build 腳本共用。" >&2
+    exit 1
+  fi
+  IMAGE="stock-trading-python-replay:i074-stage2"
+  IMAGES_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/images"
 fi
 
 BUNDLE="${1:-}"
 if [ "$NO_IDENTITY" = "0" ] && [ -z "$BUNDLE" ]; then
-  echo "用法: $0 [--no-identity] <bundle 絕對路徑>" >&2
+  echo "用法: $0 [--no-identity] [--stage 1|2] <bundle 絕對路徑>" >&2
   exit 1
 fi
+# ⚠️ bundle 之後⛔ 不得還有別的參數（⛔ 不靜默忽略）；`--no-identity` 不吃 bundle。
+if [ "$NO_IDENTITY" = "1" ] && [ "$#" -gt 0 ] || [ "$#" -gt 1 ]; then
+  echo "ERROR: 多餘的參數：$*——⛔ 不靜默忽略。" >&2
+  exit 1
+fi
+
+# ── Stage 2：repo 外的 tarball（`docker save`）───────────────────────────────
+#
+# ⚠️ 已有 tarball 時**先驗 SHA**，⛔ 不覆寫；沒有才 save（temp → sha256 → rename）。
+# ⚠️ save 失敗時 identity 仍在、tarball 沒有——重跑本腳本會走 no-op 分支並補做這一步。
+save_stage2_tarball() {
+  local image_id="$1" hex tar sum tmp digest
+  hex="${image_id#sha256:}"
+  tar="$IMAGES_DIR/$hex.tar"
+  sum="$IMAGES_DIR/$hex.tar.sha256"
+  mkdir -p "$IMAGES_DIR"
+  if [ -f "$tar" ] || [ -f "$sum" ]; then
+    if [ ! -f "$tar" ] || [ ! -f "$sum" ]; then
+      echo "ERROR: tarball 與它的 .sha256 只剩其中一個（$IMAGES_DIR）——⛔ 不猜，人工處理。" >&2
+      return 1
+    fi
+    # ⚠️ ⛔ 不用 `sha256sum -c`：sidecar 可以改指向同目錄的 decoy（見 lib/image-tarball.sh）。
+    if ! image_tarball_verify "$IMAGES_DIR" "$hex"; then
+      echo "ERROR: 既有 tarball 驗證不過：$tar——⛔ 不覆寫，人工處理。" >&2
+      return 1
+    fi
+    echo "==> 既有 tarball 驗證通過：$tar" >&2
+    return 0
+  fi
+  tmp="$IMAGES_DIR/.$hex.tar.tmp.$$"
+  echo "==> docker save → $tar" >&2
+  if ! docker save -o "$tmp" "$image_id" >&2; then
+    rm -f "$tmp"
+    echo "ERROR: docker save 失敗。" >&2
+    return 1
+  fi
+  sync "$tmp"
+  digest="$(sha256sum "$tmp" | cut -d' ' -f1)"
+  mv "$tmp" "$tar"
+  printf '%s  %s\n' "$digest" "$hex.tar" > "$sum.tmp.$$"
+  sync "$sum.tmp.$$"
+  mv "$sum.tmp.$$" "$sum"
+  sync "$IMAGES_DIR"
+  echo "==> tarball SHA-256：$digest（記錄在 $sum）" >&2
+}
 BUNDLE_ABS=""
 [ -n "$BUNDLE" ] && BUNDLE_ABS="$(cd "$BUNDLE" && pwd)"
 
@@ -57,7 +147,7 @@ fi
 # ── ① 已有 identity？ ───────────────────────────────────────────────────────
 # `--peek` 的語意：存在 → 印既有 ID 並**重新 fsync**；不存在 → **exit 2**（⛔ 不是失敗）。
 set +e
-EXISTING="$(python3 "$ENSURE" --bundle "$BUNDLE_ABS" --peek 2>/dev/null)"
+EXISTING="$(python3 "$ENSURE" --stage "$STAGE" --bundle "$BUNDLE_ABS" --peek 2>/dev/null)"
 PEEK_RC=$?
 set -e
 
@@ -66,8 +156,17 @@ if [ "$PEEK_RC" -eq 0 ]; then
   if ! docker image inspect "$EXISTING" >/dev/null 2>&1; then
     echo "ERROR: identity 記的 image $EXISTING 已不在本機——⛔ fail-closed。" >&2
     echo "       ⛔ 不得重建後換一個 ID：那會讓跨日的三趟跑在不同 image 上。" >&2
-    echo "       要換 image 等於整組 Stage 1 重來（連同已產出的證據）。" >&2
+    if [ "$STAGE" = "2" ]; then
+      echo "       改用 scripts/restore-replay-image.sh --stage 2 <bundle> 從 tarball 還原。" >&2
+    else
+      echo "       要換 image 等於整組 Stage 1 重來（連同已產出的證據）。" >&2
+    fi
     exit 1
+  fi
+  if [ "$STAGE" = "2" ]; then
+    # ⚠️ 重新掛上專用 tag（被 prune 保護的前提），並補齊／驗證 tarball。
+    docker tag "$EXISTING" "$IMAGE" >&2
+    save_stage2_tarball "$EXISTING"
   fi
   echo "==> 沿用既有的 run identity（⛔ 未 build、未改 created_at）" >&2
   printf '%s\n' "$EXISTING"
@@ -90,11 +189,14 @@ fi
 # ⚠️ identity 由 Python 寫（canonical ＋ 原子 rename ＋ 兩次 fsync），
 # ⛔ shell 不自己組 JSON——schema 只能有一份。
 set +e
-OUT="$(python3 "$ENSURE" --bundle "$BUNDLE_ABS" --image-id "$IMAGE_ID")"
+OUT="$(python3 "$ENSURE" --stage "$STAGE" --bundle "$BUNDLE_ABS" --image-id "$IMAGE_ID")"
 RC=$?
 set -e
 if [ "$RC" -ne 0 ]; then
   exit "$RC"
+fi
+if [ "$STAGE" = "2" ]; then
+  save_stage2_tarball "$IMAGE_ID"
 fi
 echo "==> 已釘死 image ID 與 bundle 身分" >&2
 printf '%s\n' "$OUT"

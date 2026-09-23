@@ -2967,6 +2967,53 @@ raw bytes ⛔ 不會傳出——再讀一次可能已不是同一版本。用 **
 回傳 `EvidenceLoad`（`parsed`／`artifact_sha256`／`stored_sha256`／`stored_bytes`）——
 ⚠️ 四個值**都來自同一次讀取**，finalizer 才不必為了 `stored_*` 再讀一遍。
 
+#### I-074 Stage 2 的環境見證契約（2026-09-23 實作 ③b；⚠️ 待 review）
+
+⚠️ **背景**：Stage 1 釘住的 image 已不在本機，Stage 2 改在新 image 上跑。要繼續拿已封存的 D+1
+當 after 側，先要證明新舊 image 對這份 bundle **等價**。完整計畫與修訂經過見 `issue.md` I-074
+（Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一」「七之四」）；操作程序見
+[`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的環境見證程序」。
+實作在 `replay_bundle/` 的 `envcheck.py`、`stage2_evidence.py`、`stream.py`。
+
+**`envcheck/` 的封閉 layout**（`python/baselines/i074_stage2/envcheck/`；多一個未知檔案即中止）：
+`witness/after_artifact.json.gz`（after'）、`witness/cohort_manifest.json.gz`、
+`equivalence/equivalence.json.gz`、`identity/run_identity.json.gz`（唯一固定的 Stage 2 identity）、
+`evidence_manifest.json`（kind `sr_zone_stage2_envcheck_manifest`）。
+
+**環境等價判定**（事前寫死，⛔ 不得看到結果再調）：
+
+| 條件 | 規則 |
+|---|---|
+| key 集合 | 兩側全量 key 相同；只在單側的 key 記入 `key_mismatch_*`（sample 帶 `side` ∈ {`REFERENCE_ONLY`, `WITNESS_ONLY`}） |
+| 逐列 | `rows_compared` ＝ **交集**；`row_mismatch_count` **只計交集內** canonical row bytes 不同的 key |
+| cohort | cohort' 的 keys 等於 Stage 1 D+1 cohort |
+| provenance | **必須相同**：`base_commit`／`tooling_patch_sha256`／`project_modules_sha256`／`runtime_settings`；**允許不同但逐欄記錄**：其餘六欄（合起來恰好 10 欄） |
+| 結果 | 四項全成立 → `EQUIVALENT`（結束碼 0）；否則 `NOT_EQUIVALENT`（7，⚠️ 證據照樣發布） |
+
+⚠️ **outcome 的唯一來源是 equivalence artifact**，且 validator 由各欄**重算**；manifest 的
+`terminal_outcome` 只是推導值（0／7），發布與 recovery 都要求「重算值 ＝ 封存值 ＝ manifest 反推值」。
+
+**錨定規則 E1～E7**（每個呼叫端都做；⛔ 不得只比 SHA）：E1 封閉 layout ＋ 每個成員重算 metadata ＋
+`stage1_evidence` 綁到本次重算的 Stage 1 信任錨；E2 完整 validator ＋ cohort' 綁到 after'；
+**E3a** 重新串流比對、封存值必須等於重算值（EQUIVALENT／NOT_EQUIVALENT 都合法）；
+E4 `witness_distributions` 的 hash 等於 after' 的 `pip_freeze_sha256`；E5 image 鏈；E6 bundle 鏈；
+E7 after' 的 `base_commit` 等於 Stage 1 after 的、`tooling_patch_sha256` 是空字串的 SHA。
+**E3b（Stage 2 使用資格）只有 Stage 2 的 preflight／finalize／recovery 做**：⛔ 只接受 EQUIVALENT——
+NOT_EQUIVALENT 的 archive 是合法證據，⛔ 但⛔ 不得拿來放行 Stage 2。
+
+⚠️ **E7 與判定表的關係**：`base_commit`／`tooling_patch_sha256` 同時出現在「必須相同」與 E7；
+E7 先擋，所以這兩欄不符的見證趟⛔ **不發布**（結束碼 1），⛔ 不是 NOT_EQUIVALENT——跑錯版本的
+那一趟⛔ 不是環境見證（✅ review 同意，2026-09-23）。⚠️ **而且要在 replay 之前就擋**：runner 在見證趟
+（Stage 2 identity ＋ Stage 1 模式）啟動 Docker 前，用同一套 Stage 1 信任錨比對 base commit 與
+tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
+
+**記憶體模型**（「五之一」）：全量 artifact 一律**串流**讀，一趟讀取同時完成增量 SHA、canonical
+檢查（逐欄／逐列重新編碼比 SHA；`.json.gz` 的 round-trip 用同參數 gzip 串流比 SHA）與逐列驗證，
+只常駐 keys、每列 digest 與 cohort rows；⛔ 不得同時持有兩份全量 rows。逐列驗證用 `artifacts.py` 的
+**row-level 共用原語**（整批 validator 與 `StreamRowValidator` 呼叫同一套，公開 contract 不變）。
+實測（2026-09-23，host）：串流驗證真實的 D+1 artifact 峰值 RSS **135 MiB**、8.7 秒；
+整份載入是約 449 MiB。
+
 #### Stage 2 有**兩種** terminal outcome
 
 | 候選集合檢查 | 產出 | 結束碼 |

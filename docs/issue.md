@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：③d 已實作、⚠️ 待 review**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、⚠️ 待 review**（見「③d 實作結果」），review 通過後回到 Stage 2 計畫書的步驟 ④（sizing harness）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：③ 全部完成，下一步 Stage 2 計畫書步驟 ④（sizing harness）**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**下一步：Stage 2 計畫書的步驟 ④（sizing harness）**；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -2463,7 +2463,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ 要裁定**原子邊界**：單一 evidence archive 一次性發布，
       recovery 從 manifest 讀回原 terminal outcome（⚠️ v3 之下恆為 rc=0）
    ③a ③ evidence contract 現行版確認（⚠️ 連同本計畫書現行版；② 的 review 已於 2026-09-23 通過）  ← ✅ 2026-09-23
-   ③b 實作第一包 → review：   ← ✅ 2026-09-23 實作完成、⚠️ **待 review**
+   ③b 實作第一包 → review：   ← ✅ 2026-09-23 實作完成、✅ review 通過
         stage-scoped identity ＋ 專用 tag ＋ tarball 的 pin 流程、共用的串流讀取、
         ⚠️ `artifacts.py` 的 row-level 共用原語（v27）、
         可共用的 archive 核心、環境等價比對模組 ＋ `envcheck/` 小 archive
@@ -2471,8 +2471,8 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
         → 環境等價比對 → 發布 `envcheck/`（0 或 7）  ← ⚠️ 凍結窗口 A（見「八之一」）
         ✅ 2026-09-23：**EQUIVALENT（rc=0）**，凍結窗口 A 已結束（見「③c 執行結果」）
         └ NOT_EQUIVALENT → ⛔ 停止，另立 issue；⛔ 不進 ③d
-   ③d 實作 ③ 的其餘部分（Stage 2 archive、failed record、check／recover）→ review
-④ 實作獨立 sizing harness（⛔ 不含正式 preflight）
+   ③d 實作 ③ 的其餘部分（Stage 2 archive、failed record、check／recover）→ review   ← ✅ 2026-09-24 實作完成、✅ review 通過
+④ 實作獨立 sizing harness（⛔ 不含正式 preflight）   ← 現在在這裡：計畫書 v7 ⚠️ 待確認（見「Stage 2 步驟 ④：sizing harness 計畫書」）
 ⑤ 實測並記錄 **P_B** 的磁碟／記憶體峰值，裁定 **M_safety = <固定 bytes>**
 ⑥ 更新計畫並**再次確認**
 ⑦ 實作：`--i074-counterfactual` opt-in、兩份 patch 的 runner／SHA 機制、orchestrator、
@@ -3734,7 +3734,7 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
 
 ```text id="i074_stage2_evidence_order_001"
 ① 本計畫書與 Stage 2 計畫書的現行版確認（② 的 review 已於 2026-09-23 通過）   ← ✅ 2026-09-23
-② 第一包（Stage 2 的 ③b）：   ← ✅ 2026-09-23 實作完成、⚠️ **待 review**（見「③b 實作結果」）
+② 第一包（Stage 2 的 ③b）：   ← ✅ 2026-09-23 實作完成、✅ review 通過（見「③b 實作結果」）
      共用的封閉 layout archive 核心、串流讀取、⚠️ `artifacts.py` 的 row-level 共用原語（v11）、
      環境等價比對、envcheck manifest（v11）、stage-scoped identity ＋ 專用 tag ＋ tarball、
      finalize 腳本的 envcheck／recover-envcheck 兩種模式
@@ -3742,7 +3742,7 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
      → review
 ③ 環境閘門（Stage 2 的 ③c）：pin → after' 見證趟 → `--envcheck`   ← ✅ 2026-09-23 EQUIVALENT（rc=0）
      └ rc=7（NOT_EQUIVALENT）→ ⛔ 停止，另立 issue；⛔ 不進 ④
-④ 第二包（Stage 2 的 ③d）：stage2_evidence.py 的其餘部分 ＋ finalize 腳本的其餘五種模式   ← ✅ 2026-09-24 實作完成、⚠️ **待 review**（見「③d 實作結果」）
+④ 第二包（Stage 2 的 ③d）：stage2_evidence.py 的其餘部分 ＋ finalize 腳本的其餘五種模式   ← ✅ 2026-09-24 實作完成、✅ review 通過（見「③d 實作結果」）
      → 測試矩陣 `a`～`aw` ＋ `ay` ＋ `az` ＋ `ah4`／`ah5` ＋ `bb`～`bk`（⚠️ `bd2` 的「Stage 2 被 E3b 擋下」那一半在本包驗）
        （⚠️ **`ax`、`ba` 與 `n`／`ai`／`ay` 的「在 replay 之前」那一層屬 Stage 2 步驟 ⑦ 的驗收**，⛔ 不在本輪）
      → review
@@ -3751,7 +3751,7 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
 
 ⛔ **④ 未完成前⛔ 不得進入 Stage 2 計畫書的 ⑦**；⛔ **③ 判 NOT_EQUIVALENT 就⛔ 不進 ④**。
 
-#### ③b 實作結果（2026-09-23，⚠️ **待 review**）
+#### ③b 實作結果（2026-09-23，✅ **review 通過**）
 
 ✅ **依 Stage 2 計畫書 v28 與 ③ evidence contract v12 完成第一包**（環境閘門的前置）。
 ⛔ **本輪沒有跑任何 replay、沒有 pin 新 image、沒有 commit**——那些屬 ③c，要等 review 通過。
@@ -3789,7 +3789,7 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 | 串流驗證 D+1（13,417 列、156 候選） | 8.7 秒，峰值 RSS **135 MiB**（整份載入約 449 MiB） |
 | 串流信任錨 `load_stage1_anchor()` ＋ 跨檔關係 | 9.3 秒，峰值 RSS **138 MiB**；156 列 cohort rows 全部保留 |
 
-**⚠️ 與計畫的差異（待 review 確認）**：
+**⚠️ 與計畫的差異（✅ review 同意）**：
 
 | # | 差異 | 理由 |
 |---|---|---|
@@ -3809,11 +3809,11 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 ⚠️ **③c 之前要注意**：`finalize-stage2-evidence.sh` 跑的是 **`--source-ref`（預設 HEAD）worktree 裡的程式**
 ——③b 必須**先 commit** 才會被正式執行用到（與 Stage 1 finalizer 相同）。
 
-**歸檔**（⚠️ 待 review）：操作程序寫進 [`development-workflow.md`](./development-workflow.md)
+**歸檔**（✅ review 通過）：操作程序寫進 [`development-workflow.md`](./development-workflow.md)
 「I-074 Stage 2 的環境見證程序」（含 tarball 的保存位置與驗 SHA 步驟）；契約寫進
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的環境見證契約」。
 
-#### ③c 準備：Stage 2 image 的來源（2026-09-23，⚠️ `--adopt-image` 待 review）
+#### ③c 準備：Stage 2 image 的來源（2026-09-23，✅ `--adopt-image` review 通過）
 
 ⚠️ **③c 開始前的實測**（唯讀；在容器內用 `provenance.py` 的同一套計算）：
 
@@ -3826,7 +3826,7 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 
 ✅ **使用者裁決（2026-09-23）**：**採用 python-server image**，⛔ 不重新 build；commit 由使用者自己做。
 
-**實作**（⚠️ 待 review）：
+**實作**（✅ review 通過）：
 
 | 檔案 | 內容 |
 |---|---|
@@ -3878,7 +3878,7 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 * 見證趟的 runner 以 `exec docker run` 結束，留下一個 detached worktree（I-118 的同一個成因），已手動移除；
 * ~~下一步：**③d**（Stage 2 archive、failed record、check／recover 的其餘部分）~~——✅ 2026-09-24 已實作，見「③d 實作結果」。
 
-#### ③d 實作結果（2026-09-24，⚠️ **待 review**）
+#### ③d 實作結果（2026-09-24，✅ **review 通過**）
 
 ✅ **依 Stage 2 計畫書 v28 與 ③ evidence contract v12 完成第二包**（「十二、執行順序」的 ④）。
 ⛔ **本輪沒有跑任何正式 replay、沒有動 `python/baselines/` 的任何檔案、沒有 commit**；真實規模的實測與
@@ -3936,7 +3936,7 @@ shell 入口**與 Stage 2 image）：`--finalize` rc=0（42 秒，合成守門�
 `rr_not_restored`）rc=**1** → 同一份 patch 再 `--check-failed-record` rc=**2** → `--recover-failed-record`
 rc=**1**；複本的 worktree 全部清掉。⚠️ 那份複本裡的 commit ⛔ 不在真正的 repo。
 
-**⚠️ 與計畫的差異（待 review 確認）**：
+**⚠️ 與計畫的差異（✅ review 同意）**：
 
 | # | 差異 | 理由 |
 |---|---|---|
@@ -3959,13 +3959,350 @@ rc=**1**；複本的 worktree 全部清掉。⚠️ 那份複本裡的 commit �
 反向驗證：拿掉 finalize 的交接比對（`test_toctou_finalize_*` 變紅）、把 buffer 改回無界（四支變紅）、shell 不送
 `--verified-*`（四種模式的 argv 比對與兩支交接測試變紅），全部還原後重跑通過。
 
-**歸檔**（⚠️ 待 review）：契約寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」；
+**歸檔**（✅ review 通過）：契約寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」；
 操作程序（CLI matrix、合成守門、check 的順序、failed record 的重跑資格、三者一起保存、記憶體）寫進
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的正式證據與 failed record 程序」。
 
 ⚠️ **待辦**：
-* review ③d（含上表的差異 2～7）；通過後回到 Stage 2 計畫書的步驟 ④（sizing harness），⑦ 之前⛔ 不得正式執行 Stage 2；
+* ~~review ③d（含上表的差異 2～7）~~——✅ 2026-09-24 review 通過並 commit；下一步回到 Stage 2 計畫書的步驟 ④（sizing harness），⑦ 之前⛔ 不得正式執行 Stage 2；
 * [I-118](#i-118replay-相關腳本會洩漏-git-worktree註冊與-tmp-目錄都會累積) 的既有洩漏仍在：本輪反覆跑常態 shell 測試，真正的 repo 的 worktree 註冊由 33 累積到 89；每一輪完整 `test.sh` 都量得 **＋4**（例如 85 → 89），與 I-118 記錄的每輪增量相同——③d 沒有加重（它的測試全在隔離 repo 裡跑，並已斷言那邊歸零）。⛔ 本輪沒有清理，留待 I-118 處理或由使用者決定。
+
+#### Stage 2 步驟 ④：sizing harness 計畫書 v7（2026-09-24，⚠️ **待確認**）
+
+⚠️ 定位：Stage 2 計畫書「八、執行順序」的 **④ 實作獨立 sizing harness（⛔ 不含正式 preflight）**，對應「二之二」
+磁碟時序的第 ① 步。**⑤ 才正式實測並記錄 `P_B`、裁定 `M_safety`**；⛔ 在 ⑤ 定案之前⛔ 不得實作 preflight。
+
+**v7 修訂表**（v6 的 review，2026-09-24，⛔ 未確認）：
+
+| # | v6 的問題 | v7 的改法 | 改到哪 |
+|---|---|---|---|
+| 中 | ⛔ **規格矛盾**：索引記的是完整的 `docker run` argv、twin 用 `docker create`，而正規化只允許替換 `--cidfile`／`--name` 的值——兩者必然分別含 `run` 與 `create`，SHA 不可能相同，**每個 twin 都會 fail-closed** | 改成對 **container spec** 取 hash：`container_spec_argv` ＝ 排除 docker 執行檔與 operation（`run`／`create`）之後的 options、image、容器指令與參數；`--cidfile`／`--name` 的值仍換成佔位字。測試：同一份 spec 的 run 與 create hash 相等；除 operation、`--cidfile`、`--name` 以外，任一 option、image、指令或參數改變都讓 hash 不同 | 二、六 |
+| 補 1 | 在允許位置內建檔會改到**父目錄**的 mtime，父目錄若不在 allowlist 會被誤判 | 每條路徑記 inventory **之前**，先建好 L1～L5 的根目錄與必要的父目錄；「允許位置」明訂為**根目錄本身及其下所有項目**——允許位置以外的目錄（例如 `<work>`、`<work>/runs`）只有在它**直接底下**的項目增減時 mtime 才會變，那正是要抓的 | 二、三 |
+| 補 2 | 容器「生命週期不重疊」用 wall clock 證明，校時會造成誤判 | 改用 **lifecycle event sequence**：shim 在 S 以 `flock` 保護的單調計數器記錄每個容器的 `create_begin` 與 `rm_done` 事件（另附 `CLOCK_MONOTONIC` 時間戳，只作輔助）；同一路徑內前一個容器的 `rm_done` 事件號 < 下一個的 `create_begin` 才算不重疊；⚠️ **任一事件缺失或無法證明順序 → 一律相加** | 二、六 |
+
+**v6 修訂表**（v5 的 review，2026-09-24；⚠️ argv 正規化與不重疊的證明已由 v7 再改寫）：
+
+| # | v5 的問題 | v6 的改法 | 改到哪 |
+|---|---|---|---|
+| 中 1 | 宣稱 `measurement_overhead_bytes = 0`，但 shim 加的 `--name`、`--cidfile`、`--read-only`、`/peak` mount 與 memory wrapper 的 argv **會寫進 Docker Root Dir 的 metadata**——L0 上仍有儀器造成的開銷 | 分成兩項、分開記錄：**`host_measurement_artifact_bytes = 0`**（harness 的 host 端量測檔全在 S）；**`docker_instrumentation_overhead = "included_unseparated"`**（儀器造成的 metadata 增量**保守地含在**容器 metadata 的採用值裡，⛔ 不從 `P_B` 扣除） | 二 |
+| 中 2 | twin 延後到窗口後建，但沒定義每一筆 invocation 回填到哪一條 `P_path`、同一路徑多個容器怎麼合併、缺漏／重複／亂序怎麼拒絕；完整 argv 裡的 `--cidfile` 也不能原樣重播 | 每筆 invocation 在**執行前**寫一份不可變的索引（`sequence`、`phase`、`role`、`included_in_disk_path`、正規化 argv 的 SHA-256、sidecar 路徑）；各路徑記錄起訖 sequence；步驟 4 一律 `phase = "memory_only"`、`included_in_disk_path = false`；每個預期的 sequence **恰好**一份索引、一份 command sidecar、一份 twin 結果，缺失／重複／未知 phase／SHA 不一致一律 fail-closed。同一路徑內的容器足跡：生命週期**不重疊**（前一個已刪除才建下一個，由 sidecar 的時間戳證明）取最大，否則相加。twin 只替換 `--cidfile` 與 `--name` 的值（**等長、唯一、事前⛔ 不存在**），其餘 token 逐字不變，正規化規則寫死（見「二」） | 二、三、六 |
+| 中 3 | fail-closed 時宣稱「保留原始量測檔」，但原始量測全在 tmpfs 的 S，正常流程到最後才複製；中途失敗若 EXIT trap 直接清 S，診斷證據就消失 | 明訂失敗時的清理順序：停取樣 → 以 CID 強制移除容器 → 窗口標 `aborted`（⛔ 不再計算 `P_path`）→ 複製 S 到 `<work>/raw-failed/` → 寫**不宣稱 `P_B`** 的 `failure_summary.json`（失敗階段、原指令結束碼）→ 複製成功才清 S；複製也失敗就**保留 S** 並把位置印到 stderr | 三、六 |
+| 補 | 自我檢查只看「新建／修改」，⛔ 沒看刪除與型別改變；以結束時的 `git status` 為準也不夠 | 改成**完整 inventory 比較**（路徑、型別、allocated bytes、mtime、inode）：baseline 已存在的項目被**刪除或改變型別**——在任何位置都 fail-closed（會壓低 L0 的 delta）；新建／修改只允許在 L1、L2、L3、L5 | 二 |
+
+**v5 修訂表**（v4 的 review，2026-09-24；⚠️ 「`measurement_overhead_bytes` 的設計值是 0」已由 v6 分成兩項）：
+
+| # | v4 的問題 | v5 的改法 | 改到哪 |
+|---|---|---|---|
+| 中高 1 | host 端的 identity validator 與宣告值小工具經 `exec_module()` 載入整組模組，**會在複本的 source tree 寫 `__pycache__`**（`PYTHONDONTWRITEBYTECODE=1` 只設在 Docker 參數）——不在任何量測位置、也不在已知寫入清單 | ⚠️ 2026-09-24 實查確認：③d 端到端用的 clone 已多出 `python/scripts/__pycache__/` 與 `replay_bundle/__pycache__/`。**裁決：禁止寫入**——harness 以 `PYTHONDONTWRITEBYTECODE=1` 的 host 環境呼叫所有正式入口，全部模式跑完後斷言複本 source tree ⛔ 沒有新的 `__pycache__`／`.pyc`；⚠️ ⑦ 的正式 orchestrator 必須沿用，否則 ⑩ 會多寫、觸發「五」的回退 | 二、三、五、六 |
+| 中 2 | harness 自己的寫入（cidfile、sidecar、取樣原始值、`MemAvailable` 取樣、twin 的 cidfile）沒定義納入或排除；twin 還在 baseline 之後建——`fs_peak` 混進 harness 開銷、`accounted` 又沒涵蓋 | harness 的狀態**全部**放 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S；實查：tmpfs、1.0 GB、可寫），⛔ 不落 L0；metadata twin 移到**所有量測窗口結束後**才依 shim 記下的完整 argv 重建；報告與原始量測最後才寫 `<work>`。`measurement_overhead_bytes` 的設計值是 0，窗口內 L0 上的 harness 寫入一律視為缺陷：每條路徑結束後**自我檢查**，不過即 fail-closed | 二、三、六 |
+| 中 3 | 取樣用 block 用量，會計卻混用「檔案大小」「實際大小」與內容長度 | ⚠️ **一律 allocated bytes**（`du --block-size=1` 或 `st_blocks × 512`），目錄 blocks 一併計入；operational 輸出與正式 archive 量**整棵 tree**，⛔ 不逐檔 `st_size` 相加；內容長度只用於讀不到的 docker log 與 metadata，且以 block 上捨；`probe_no_clobber()` 改為步驟 0 **實建同形狀**量測；會 rename 的目錄每個加 1 block。新增測試 d0（1 byte 多檔、多層空目錄、非整 block、temp → rename、index 與 `index.lock` 並存），並斷言 `st_size` 相加的算法會低估 | 二、六 |
+
+**v4 修訂表**（v3 的 review，2026-09-24；⚠️ metadata twin 的時點與已知寫入清單的單位已由 v5 再改寫）：
+
+| # | v3 的問題 | v4 的改法 | 改到哪 |
+|---|---|---|---|
+| 高 1 | 可寫的容器 `/tmp`（bind mount）仍可能「兩次取樣之間寫入再刪除」，會計表只寫了「容器 `/tmp` 的峰值」卻⛔ 沒有可證明的來源 | ⚠️ **⛔ 不提供可寫的 `/tmp`**：容器的 root filesystem 與 `/tmp` 一律唯讀，只有正式模式本來就需要的 bind mount 可寫（L2 的 `i074_stage2/`、fixture 的 run 目錄、只寫一個數字的 `/peak`）。2026-09-24 實查：完全唯讀下 `config`、`stage2_archive`、`envcheck`、sklearn、pandas、joblib 全部 import 成功，而 `tempfile.gettempdir()` **直接拋 `FileNotFoundError`**——任何需要暫存磁碟的路徑都會**大聲失敗**，所以「全部正式模式成功」就證明不需要；`replay_bundle/` 與 `config.py` 也沒有任何 tempfile 用法。可寫的 bind mount 內的寫入改由**程式碼盤點的已知寫入清單**逐項給上界（見「二」） | 二、三、六 |
+| 中 2 | 用 `sleep` 容器量 metadata 證明不了正式容器的上界（argv、mounts、環境、名稱都不同） | 對**每一次**正式 invocation，shim 以**完全相同**的 options、mounts、image、環境與指令 `docker create` 三個 twin（⛔ 不執行）量 L0 的已用量差；採用值 ＝ max(三次原始值取 64 KiB 上捨, 2 × `docker inspect` JSON 長度取 4 KiB 上捨) ＋ 64 KiB（啟動時才建立的 `hosts`／`hostname`／`resolv.conf` 等）；原始值與採用值都記錄 | 二、六 |
+| 中 3 | json-file 的 log 上界沒有守前提：driver 可能不是 json-file、可能有 rotation | 每個容器結束後讀它**實際的** `HostConfig.LogConfig`（並記錄 daemon 的預設）：⚠️ 必須是 `json-file` 且⛔ 沒有 `max-size`／`max-file`，否則 fail-closed（2026-09-24 實查：daemon 預設與容器實際都是 `json-file`、`Config` 為空）。上界公式涵蓋 stdout／stderr 分流、無結尾換行、JSON 跳脫（逐 byte 最壞 6 倍）與 16 KiB 的長行分段 | 二、六 |
+| 低 4 | ⑦ 若發現實際磁碟峰值超過 `P_B`，回退順序沒寫死 | 明訂：⑦ 的實際流程峰值 > ⑤ 裁定的 `P_B` → ⛔ 不得進入 ⑩；更新 `P_B`／`M_safety`、重跑 ⑤、回到 ⑥ 確認（⑥ 時併入 Stage 2 計畫書「六、1」） | 五、七 |
+| 補 | ⚠️ v3 **自己漏列**的兩類寫入（實作前自查） | ① git 在複本 `.git` 裡的寫入（每個 worktree 的 admin 目錄與 index、`write-tree` 的物件，實測約 128 KiB；更新 index 時的 `index.lock` 暫存）——新增量測位置 **L5**；② `probe_no_clobber()` 在 L2 的暫態寫入（同一時間最多 3 個目錄 ＋ 3 個 marker 檔） | 二 |
+
+**v3 修訂表**（v2 的 review，2026-09-24；⚠️ 高 1 的「可寫 `/tmp`」與容器 metadata 的量法已由 v4 再改寫）：
+
+| # | v2 的問題 | v3 的改法 | 改到哪 |
+|---|---|---|---|
+| 高 1 | `SizeRw` 是容器**結束時**的值，⛔ 不是 writable layer 的峰值——程序若在 layer 寫入後刪除，結束後的 inspect 與 0.2 秒取樣都可能漏掉，會計法因此稱不上上界 | 改成**可證明的封閉寫入模型**：shim 加 `--read-only`，容器的 `/tmp` bind mount 到 L3 底下的**每容器目錄**（⛔ 不用 tmpfs），`/peak`、Stage 2 archive、run 目錄維持既有 bind mount——**全部模式在這個條件下跑完，就證明沒有未列管的 layer 寫入**（2026-09-24 實查：Stage 2 image 在 `--read-only` 下 import 全部模組成功、寫 `/` 得到 EROFS）。`SizeRw` 降級為**終止值／交叉檢查**（期望 0） | 二、三、六 |
+| 高 2 | 同檔案系統守門只驗 L1～L3 與 L0，⛔ 沒驗 Docker Root Dir——data root 可以被 daemon 設定搬到別的 mount，那時 L0 的 `statvfs("/")` 捕捉不到 Docker 用量 | 執行時由 daemon 取得 `DockerRootDir`（⛔ 不寫死 `/var/lib/docker`），列為 **L4**：canonical path ＋ `st_dev`。**與 L0 不同檔案系統 → fail-closed**（單一 `required = P_B ＋ M_safety` 只對一個檔案系統有意義；兩個檔案系統要改 preflight 設計，屬計畫變更）。2026-09-24 實查：`/var/lib/docker`、同一個 device；非 root 可以 `stat`／`statvfs` | 二、六 |
+| 中 3 | `P_failure ≤ P_success` 被當成硬守門、⛔ 不產報告——但 `P_B` 已取三者最大，單一公式⛔ 不依賴它；硬擋反而丟掉最需要的反例數據 | 降為**預期假設／診斷**：不成立時照樣產出帶完整數字的 canonical 報告，`status = "assumption_violated"`，⛔ 不得進入 ⑤ 的正式裁定、回頭 review 計畫；`P_B` 仍取三者最大 | 二、六 |
+| 中 4 | 資料流漏了兩個正式 CLI 的必填參數 | check 用**步驟 3 凍結的那一份** counterfactual patch；recover 用步驟 3 **實際發布**的 record 目錄——由「發布前後 `failed/` 的集合差恰好一筆」取得，並必須等於發布 CLI 輸出的 `published`，⛔ 不得用「排序第一個」之類的方式猜 | 三、六 |
+| 中 5 | shim 沒有釘 I/O 透明（`--check-failed-record` 直接把 `docker run` 的 stdout 當 JSON 解析）；中斷清理只寫「EXIT trap 移除具名容器」，容器還在跑時一般 `docker rm` 會失敗 | shim **自己⛔ 不向 stdout／stderr 寫任何 byte**，計量結果只寫 sidecar 檔；`docker logs` 只導進計數、⛔ 不重新輸出；以 `--cidfile` 記錄本次實際建立的容器 ID，清理只對已記錄的 CID `docker rm -f`；inspect／logs／rm 任一步失敗 → sidecar 標「量測失敗」並保存原指令結束碼，report fail-closed | 三、五、六 |
+
+**v2 修訂表**（v1 的 review，2026-09-24；⚠️ 高 1 與中 4 已由 v3 再改寫）：
+
+| # | v1 的問題 | v2 的改法 | 改到哪 |
+|---|---|---|---|
+| 高 1 | `P_B` 定義為同一檔案系統的全部新增用量，卻**先假定**容器 writable layer 與 log 只有 KB 而排除——`required = P_B ＋ M_safety` 就不是真正的上界 | 兩層都納入：① **根檔案系統已用量差**（`statvfs`）當 catch-all 取樣；② 每個容器的 writable layer（`docker inspect --size` 的 `SizeRw`）與 json-file log（⚠️ 非 root **讀不到** log 檔，2026-09-24 實查——改由 `docker logs` 的內容算**上界**）明列進會計上界。「只有 KB」只能是報告的結論，⛔ 不是前提 | 二、三 |
+| 高 2 | 上游的 `P_B` 還涵蓋見證路徑（after'／cohort'、`envcheck/`），preflight 也要在見證趟之前做一次；v1 只量 replay → finalize | 公式明訂 **`P_B = max(P_witness, P_success, P_failure)`**，三條路徑用**同一套**量法實測；見證路徑的 operational 輸出取自已封存的真正 after'／cohort' | 二、三 |
+| 高 3 | 取樣的是**絕對** `du`——複本的 `python/baselines/i074_stage2/` 已有 `envcheck/` 等既有內容，會被算進 `P_B` | 每條路徑開始前對每個**互不重疊**的量測位置記錄 `baseline_bytes`；`delta(t) = Σ max(current(t) − baseline, 0)`、`sample_peak = max(delta(t))`；報告保留每個位置的 baseline、peak、delta 與 device；會計法的組成路徑也明定互不重疊 | 二 |
+| 中 4 | failure 路徑只宣稱「必然較小」 | 納入 `max()`；另加斷言 **`P_failure ≤ P_success`**（「二之二」只留一條公式的前提），⛔ 不成立即 fail-closed、要回頭改計畫；報告自我檢查每條 `P_path ≤ P_B` | 二、六 |
+| 中 5 | wrapper 只寫 cgroup v1 | 與 `run-replay-offline.sh` 相同的 **v1 → v2 fallback**（`memory.max_usage_in_bytes` → `memory.peak`）；兩者皆缺、值為 0 → fail-closed；保留原結束碼——計畫、shim、測試同步釘住 | 三、六 |
+| 中 6 | 只警告 dirty worktree，無法辨識實際用了哪一版 harness；work 目錄防護只做字串判斷 | 分兩種模式：**④ 可用性驗證**允許未 commit，報告記錄 harness／shim／fixture 的 SHA-256；**⑤ 正式量測**（`--formal`）要求相關 tracked 檔案 clean，記錄 source commit OID、image identity 與各腳本 SHA-256。work 目錄以 **canonical path** 判斷，補「parent symlink 指回 repo」的拒絕測試 | 三、六 |
+
+##### 一、目標與⛔ 不做的範圍
+
+**目標**：一支可重複執行、在釘死的 Stage 2 image 與 mem-guard cgroup 內跑的 harness，量出：
+
+1. **`P_B = max(P_witness, P_success, P_failure)`**：三條路徑各自從 replay 開始、到發布完成為止，**新增**的磁碟用量峰值
+   （repo、run 目錄、`/tmp` 與 Docker Root Dir 必須在同一個檔案系統，執行時驗證）；
+2. 階段二（證據層）**每一個程序**的記憶體峰值，供 ⑤ 對照 < 450 MiB（「六、1」的 d～i）。
+
+| ⛔ 不做 | 理由 |
+|---|---|
+| ⛔ 不實作正式 preflight（可用空間檢查、`M_safety` 常數） | 「二之二」：`M_safety` 未定案前寫進程式就是把占位符寫進程式 |
+| ⛔ 不裁定 `M_safety` | 屬 ⑤ |
+| ⛔ 不量 replay 程序本身的**記憶體**（「六、1」的 a～c） | 那條路徑（`evaluation.py` 的串流 loader 與 `--i074-counterfactual`）是 ⑦ 才實作；⑦ 的 memory harness 量它，並再驗「實際流程的磁碟峰值⛔ 沒有超出 sizing harness 的結果」（回退規則見「五」）。⚠️ replay 的**磁碟**足跡（worktree ＋ operational 輸出）照樣算進 `P_B` |
+| ⛔ 不改任何正式入口 | `finalize-stage2-evidence.sh`、`run-replay-offline.sh`、`replay_bundle/*`、`evaluation.py` 一行不動——harness 只從外面呼叫它們 |
+| ⛔ 不支援 Docker Root Dir 在另一個檔案系統、⛔ 不支援 json-file 以外的 log driver 或 log rotation | 遇到即 fail-closed（單一公式只對一個檔案系統、一個已定義的 log 模型成立） |
+| ⛔ 不碰真正的 `python/baselines/` 與 live | 全部在 repo 外的 `git clone --shared` 複本裡跑（見「三」） |
+
+##### 二、`P_B` 的定義與量法
+
+**三條路徑**（每條各自量，`P_B` 取最大）：
+
+| 路徑 | 從 → 到 | 磁碟上新增的東西 |
+|---|---|---|
+| **witness** | 見證趟的 replay 開始 → `--envcheck` 發布完成 | replay worktree（`e1cbbbd`、⛔ 無 patch）、after'／cohort' 的 operational 輸出（含寫入 temp）、finalize 的程式碼 worktree、`envcheck/` 的 staging（→ rename 成正式，同一份 bytes）、git 寫入、容器足跡 |
+| **success** | before 正式趟的 replay 開始 → `--finalize` 發布完成 | replay worktree（`e1cbbbd` ＋ 兩份 patch）、before source／comparison／report（含 temp）、凍結 patch、finalize 的程式碼 worktree、合成守門的 worktree 與 patch 快照、`evidence/` 的 staging、git 寫入、容器足跡 |
+| **failure** | before 正式趟的 replay 開始（回 6）→ `--publish-failed-record` 發布完成 | replay worktree、`bounded_diagnostics.json`、凍結 patch、finalize 的兩種 worktree 與快照、`failed/<…>/` 的 staging、git 寫入、容器足跡 |
+
+⚠️ replay worktree：現行 runner 以 `exec docker run` 結束，worktree **不會被清掉**（I-118）——每條路徑都以最壞情況計，
+**一直存在到該路徑結束**。⚠️ 見證路徑的 operational 輸出取自**已封存的真正 after'／cohort'**（③c 的產物），⛔ 不用估計值。
+
+**量測位置**（⚠️ **互不重疊**；每條路徑開始前各記一次 `baseline` 與 `st_dev`）：
+
+| 位置 | 內容 |
+|---|---|
+| L0 根檔案系統 | `statvfs` 的已用量——⚠️ **catch-all**（Docker 的 log 與容器 metadata、任何沒列到的寫入） |
+| L1 run 根目錄 | 三條路徑各自的 run 目錄（`<work>/runs/{witness,success,failure}`） |
+| L2 複本的 `python/baselines/i074_stage2/` | `envcheck/`、`evidence/`、`failed/`、它們的 staging 與 `probe_no_clobber()` 的暫態目錄 |
+| L3 harness 的 `TMPDIR` | replay worktree、正式腳本 `mktemp -d` 建的所有 worktree 與快照（⚠️ v5：`/peak` 已移到 S） |
+| L4 Docker Root Dir | 執行時由 `docker info` 取得、取 canonical path；⚠️ 只驗 `st_dev` 必須等於 L0（非 root 讀不了它的內容，用量由 L0 涵蓋） |
+| L5 複本的 `.git` | 各 worktree 的 admin 目錄（index、HEAD、logs）、`git apply --index` 與 `git write-tree` 寫的物件、`index.lock` |
+| ⚠️ S harness 的狀態根目錄（v5） | **host 的 tmpfs** `/dev/shm/i074-sizing-<run id>/`（2026-09-24 實查：tmpfs、1.0 GB、可寫）——cidfile、shim 的 sidecar、每容器的 `/peak`、取樣的 rolling 狀態與原始值、`MemAvailable` 取樣、harness 自己的 console log、baseline marker。⚠️ **⛔ 不在 L0**：harness 的量測開銷⛔ 不混進 `P_B`（見下方「harness 開銷」） |
+
+**封閉寫入模型**（v4，高 1）：shim 讓每個容器以 **`--read-only`** 執行，**⛔ 不提供可寫的 `/tmp`**；唯一可寫的是
+正式模式本來就有的 bind mount——L2（check 模式連它也唯讀）、fixture 容器的 run 目錄（L1）、以及 `/peak`（v5：在 S
+的 tmpfs，只寫一個數字，⛔ 不佔磁碟）。`/dev/shm` 是 Docker 預設的 tmpfs，屬**記憶體**（計入 cgroup 峰值），⛔ 不佔磁碟。**正式模式全部在這個
+條件下跑完，就證明程序沒有其他暫存磁碟需求**（需要的話 `tempfile` 會直接失敗，見 v4 修訂表高 1）；`SizeRw` 仍記錄，
+定位為**終止值／交叉檢查**（期望 0，非 0 即 fail-closed）。
+
+**host 端的 Python**（v5，中高 1）：正式腳本在 host 直接執行 identity validator 與合成守門的宣告值小工具，兩者經
+`exec_module()` 載入整組 `replay_bundle` 模組——⚠️ ③d 端到端用的 clone 實查已經多出 `python/scripts/__pycache__/` 與
+`replay_bundle/__pycache__/`（`PYTHONDONTWRITEBYTECODE=1` 只設在 Docker 參數裡）。這些位置⛔ 不在任何量測位置內。
+**裁決：禁止寫入**——harness 以 `PYTHONDONTWRITEBYTECODE=1` 的 host 環境呼叫所有正式入口（它自己的 host Python 也一樣），
+並在全部模式跑完後斷言複本的 source tree ⛔ 沒有任何新的 `__pycache__`／`.pyc`。⚠️ ⑦ 的正式 orchestrator 必須沿用
+同一個環境；⛔ 沒有沿用的話 ⑩ 會多寫，觸發「五」的回退。
+
+**harness 開銷**（v5，中 2）：harness 自己的寫入**全部**放在 S（tmpfs），⛔ 不落在 L0；量測窗口內⛔ 不寫 `<work>`；
+metadata twin 移到**所有量測窗口結束之後**才建（見「三」的步驟 5）；canonical 報告與要保存的原始量測在最後才複製到
+`<work>`。開銷分兩項記錄（v6）：
+
+| 報告欄位 | 值 | 意思 |
+|---|---|---|
+| `host_measurement_artifact_bytes` | **0**（設計值） | harness 的 host 端量測檔（cidfile、sidecar、取樣、log）全在 S；量測窗口內落在 L0 上的 harness 寫入一律是缺陷——每條路徑結束後自我檢查，⛔ 不默默混進 `P_B` |
+| `docker_instrumentation_overhead` | **`"included_unseparated"`** | shim 加的 `--name`、`--cidfile`、`--read-only`、`/peak` mount 與 memory wrapper 的 argv 會寫進 Docker Root Dir 的 metadata——⚠️ 它們**保守地含在**容器 metadata 的採用值裡（twin 用的就是改寫後的 argv），⛔ 不分離、⛔ 不從 `P_B` 扣除 |
+
+**自我檢查**（v6 改為完整 inventory 比較）：每條路徑開始前，⚠️ **先建好 L1～L5 的根目錄與必要的父目錄**（v7：
+否則在允許位置內建第一個檔案，就會改到不在 allowlist 的父目錄的 mtime），再對複本整棵 tree（含 `.git`）、`<work>` 與
+真正的 repo（含 `.git`）各記一份 inventory（路徑、型別、allocated bytes、mtime、inode）；路徑結束後再記一次比對。
+⚠️ 「允許位置」明訂為**根目錄本身及其下所有項目**：
+
+| 變化 | 允許嗎 |
+|---|---|
+| 新建、修改 | 只允許在 L1、L2、L3、L5 |
+| baseline 已存在的項目被**刪除**或**改變型別** | ⛔ 任何位置都不允許——刪除會壓低 L0 的 delta，讓 `P_path` 被低估而不被指出 |
+| 複本 source tree 出現 `__pycache__`／`.pyc` | ⛔ 不允許（見上方「host 端的 Python」） |
+
+⚠️ 量測期間請勿操作真正的 repo——它的 inventory 有任何變化都會 fail-closed（寧可重量，⛔ 不猜是誰改的）。
+
+**會計的單位**（v5，中 3）：⚠️ **所有落在檔案系統上的組成一律用 allocated bytes**——`du -sx --block-size=1`
+（或 `st_blocks × 512`），**目錄本身與所有子目錄的 blocks 一併計入**；operational 輸出與正式 archive 直接量**整棵 tree**，
+⛔ 不逐檔 `st_size` 相加（1 byte 的檔案至少占一個 block、目錄也占 block、sparse／壓縮檔的 apparent size 與 allocated size
+不同）。**內容長度只用在還沒落盤、讀不到的東西**（docker log、容器 metadata）的保守推導，且推導結果以 block 上捨。
+
+**已知寫入清單**（程式碼盤點；會計上界的每一項；⚠️ 單位全部是 allocated bytes）：
+
+| 寫入 | 位置 | 上界的來源 |
+|---|---|---|
+| replay worktree 的 checkout | L3 | 步驟 0 實建同一個 worktree（`e1cbbbd` ＋ 兩份 patch）量整棵 tree |
+| operational 輸出（`publish_artifacts()`：同目錄 temp → `os.replace`） | L1 | 發布完成後量整棵 run 目錄 tree ＋ **每個目錄 1 個 block**（temp 的目錄項暫時多一筆；⛔ 不依賴「目錄不縮」這種檔案系統特性）。⚠️ 依序寫、temp 就地變成正式檔，⛔ 不會與自己的正式檔並存 |
+| 凍結 patch、`bounded_diagnostics.json` | L1 | 同上（在同一棵 run 目錄 tree 內） |
+| finalize 的程式碼 worktree（HEAD） | L3 | 步驟 0 實建同一個 worktree 量整棵 tree |
+| 合成守門的 worktree（`e1cbbbd` ＋ patch）與 patch 快照 | L3 | 同上；快照目錄以實建同形狀的目錄量 |
+| archive 的 staging（含 before source 的串流副本）→ 正式 archive | L2 | 發布完成後量**整棵**正式 archive tree（含 manifest 與各層目錄）＋ 每個目錄 1 個 block（rename，⛔ 不複製） |
+| `probe_no_clobber()` | L2 | 步驟 0 在 L2 的檔案系統上**實建同形狀**的結構（3 個目錄 ＋ 3 個內容 1～3 bytes 的 marker 檔）量 allocated bytes，每次發布計一份 |
+| git 的寫入（每個同時存在的 worktree） | L5 | 步驟 0 實建時量到的 `.git` 增量 ＋ **一份 index 的 allocated bytes**（`index.lock` 與 index 同時存在的那一刻） |
+| 容器足跡 | L4（＝ L0） | 見下表 |
+
+⚠️ `/peak` 在 S（tmpfs），⛔ 不佔磁碟，v5 起不再列入。
+
+**容器足跡**：
+
+| 成分 | 量法 | 為什麼是上界 |
+|---|---|---|
+| writable layer | `--read-only` ⇒ 恆為 0；`SizeRw` 交叉檢查 | 封閉寫入模型 |
+| json-file log | ⚠️ 先驗容器實際的 `HostConfig.LogConfig`：`Type` 必須是 `json-file`、`Config` ⛔ 不得有 `max-size`／`max-file`（否則 fail-closed）。上界：`docker logs` 的 stdout 與 stderr **分流**導進計數（⛔ 不重新輸出），逐行（含無結尾換行的最後一段）切成 ≤ 16 KiB 的片段，每段 `6 × 長度 ＋ 128` bytes（JSON 逐 byte 跳脫的最壞倍數 ＋ `log`／`stream`／`time` 欄位與換行的固定開銷），總和取 4 KiB 上捨 | log 由 daemon **只增不減**地寫到容器刪除為止（⛔ 沒有 rotation），結束時的大小就是峰值 |
+| 容器 metadata（`config.v2.json`、`hostconfig.json`、`hosts` 等） | shim 在每一次正式 invocation 把**改寫後的完整 argv** 記到 S 的索引；⚠️ **所有量測窗口結束後**（v5），harness 以**完全相同**的 options、mounts、image、環境與指令 `docker create` 三個 twin（⛔ 不執行；`--cidfile`／`--name` 的值依下方正規化規則替換成等長、唯一的值），量每次建立前後 L0 的已用量差後 `docker rm`（等 removal 完成）；**採用值 ＝ max(三次原始值的最大值取 64 KiB 上捨, 2 × `docker inspect` JSON 長度取 4 KiB 上捨) ＋ 64 KiB**（啟動時才建立的 `hosts`／`hostname`／`resolv.conf` 與目錄項）；原始值與採用值都寫進 sidecar | metadata 是容器的組態本身——同一組參數的大小固定、存活期間不變；L0 的干擾只會墊高原始值，`inspect` 長度的下限擋住被其他程序的刪除壓低 |
+
+**三種量法，取大者**：
+
+| 量法 | 定義 |
+|---|---|
+| 目錄取樣 | 每 0.2 秒同步量 L1、L2、L3、L5（`du -sx --block-size=1`，⚠️ **block 用量**，⛔ 不是 apparent size）：`delta_dirs(t) = Σ max(current(t) − baseline, 0)`；`dirs_peak = max(delta_dirs(t))` |
+| 檔案系統取樣 | 同一個取樣點量 L0：`delta_fs(t) = used(t) − used_baseline`；`fs_peak = max(delta_fs(t))`（其他程序的寫入只會**墊高**它；刪除則可能壓低，所以⛔ 不單獨使用） |
+| 會計上界 | 上面「已知寫入清單」逐項相加（組成路徑互不重疊）——⚠️ 這是 `P_path` 的**上界來源**；兩種取樣是交叉檢查與 catch-all |
+
+**invocation 索引**（v6，中 2；v7 改為 container spec 的 hash）：shim 在每一次 `docker run` **執行前**，以 exclusive
+create 寫一份不可變的 `<S>/index/<sequence>.json`：
+
+```json
+{"sequence": 7, "phase": "success", "role": "finalizer", "included_in_disk_path": true,
+ "container_spec_sha256": "…", "argv": ["…"], "sidecar_path": "<S>/containers/o0070.json"}
+```
+
+| 規則 | 內容 |
+|---|---|
+| `phase`／`role` 的來源 | harness 在呼叫前以環境變數交給 shim（⛔ shim 不自己推論）；`phase` ∈ {`witness`, `success`, `failure`, `memory_only`}、`role` ∈ {`fixture`, `finalizer`, `recovery`, `check`}——封閉列舉 |
+| 各路徑的範圍 | harness 在每條路徑開始與結束時記錄 sequence 的起訖；預期的 invocation 寫死：witness ＝ fixture ＋ `--envcheck`、success ＝ fixture ＋ `--finalize`、failure ＝ fixture ＋ `--publish-failed-record`、memory_only ＝ 步驟 4 的四個 |
+| memory-only | 步驟 4 一律 `phase = "memory_only"`、`included_in_disk_path = false`，⛔ 不得計入任何 `P_path`；`included_in_disk_path` 必須與 `phase` 相符 |
+| 完整性 | 每個預期的 sequence **恰好**一份索引、一份 command sidecar（`<S>/containers/<ID>.json`）、一份 twin 結果；缺失、重複、未知 phase／role、sequence 不連續、索引與 sidecar 或 twin 的 `container_spec_sha256` 不一致 → fail-closed |
+| 同一路徑內的合併（v7） | shim 在 S 以 `flock` 保護的單調計數器記錄 **lifecycle event**：每個容器的 `create_begin`（`docker run` 之前）與 `rm_done`（`docker rm` 回傳之後）各取一個事件號，另附 `CLOCK_MONOTONIC` 時間戳（⚠️ 只作輔助，⛔ 不作判定）。同一路徑內依 sequence 排列，**前一個的 `rm_done` 事件號 < 下一個的 `create_begin`** 才算不重疊 → 容器足跡取**最大**；⚠️ **任一事件缺失、事件號重複或無法證明順序 → 一律相加** |
+| container spec 的 hash（v7） | `container_spec_argv` ＝ 從 docker 指令列**排除 docker 執行檔與 operation token**（`run`／`create`）後剩下的 options、image、容器指令與參數；其中 `--cidfile` 與 `--name` 的**值**換成固定的 `<CIDFILE>`、`<NAME>`，其餘 token 逐字保留，以 NUL 串接後取 SHA-256（索引欄位名 `container_spec_sha256`）。twin 以 `docker create <同一份 spec>` 建立，它的 spec hash 必須與索引的相同。⚠️ 正式參數裡若出現 `docker create` 不接受的 option（run 專屬），twin 建不起來 → fail-closed、回頭改計畫（現行正式入口只用 `--network`／`--user`／`--cpus`／`--memory`／`--memory-swap`／`--pids-limit`／`-e`／`-v`／`-w`，`--rm` 由 shim 拿掉） |
+| twin 的 cidfile／name | 容器 ID 形如 `<kind><sequence 三位><k>`（正式 `o…0`、twin `t…1`～`t…3`），名稱 `i074sz-<run id>-<ID>`、cidfile `<S>/cid/<ID>.cid`——**與正式那一份等長**、各自唯一；建立前斷言 cidfile ⛔ 不存在（Docker 遇到既有的 cidfile 會失敗），twin 刪除後一併刪 cidfile |
+
+`P_path = max(dirs_peak, fs_peak, accounted)`；`P_B = max(P_witness, P_success, P_failure)`。
+
+**判定**：
+
+| 情況 | 結果 |
+|---|---|
+| 任一位置、組成、容器足跡或程序峰值量不到（⛔ 不得寫成 0）；shim sidecar 標「量測失敗」；`SizeRw ≠ 0`；log driver 不是 `json-file` 或有 rotation；L1～L5 任一與 L0 的 `st_dev` 不同、或 S ⛔ 不是 tmpfs；任一正式入口的結束碼不符預期；`--read-only` 下任一模式失敗；⚠️ **自我檢查**不過（v6：完整 inventory 比較，見「二」）；⚠️ invocation 索引不完整或不一致（見「二」）；harness 的 stdout／stderr 是 L0 上的一般檔案（`--formal` 時） | ⛔ **fail-closed**：⛔ 不產報告；原始量測依「三」的失敗清理順序保存到 `<work>/raw-failed/`（或保留 S） |
+| `P_failure ≤ P_success` 不成立（⚠️ 只是**預期假設**，⛔ 不是單一公式的前提） | **照樣產出**完整報告，`status = "assumption_violated"`；⛔ 不得進入 ⑤ 的正式裁定，回頭 review 計畫；`P_B` 仍取三者最大 |
+| 其餘 | `status = "ok"`；報告自我檢查每條 `P_path ≤ P_B` |
+
+##### 三、資料流
+
+```text id="i074_stage2_sizing_flow_001"
+0. 準備   模式：④ 可用性驗證（預設）或 ⑤ 正式量測（--formal：相關 tracked 檔案必須 clean）
+          建 S＝/dev/shm/i074-sizing-<run id>/（必須是 tmpfs）；harness 的所有狀態與 console log 都寫在 S
+          work 目錄以 canonical path 判斷，⛔ 不得在 repo 內（含 parent symlink 指回 repo）、⛔ 不得已存在
+          git clone --shared <repo> <work>/repo（HEAD）；REPLAY_IMAGE_ID 必須是 Stage 2 identity 的 image
+          取得 DockerRootDir（L4）並驗 st_dev；記錄 daemon 的預設 logging driver
+          把複本已封存的 envcheck/ 複製到 <work>/cache/（不在量測位置內），再從複本移除 envcheck/
+          ——見證路徑要從「還沒有 envcheck/」的狀態開始
+          實建兩種 worktree（HEAD；e1cbbbd ＋ 兩份 patch ＋ write-tree）量整棵 tree 與 .git 增量（allocated），量完移除
+          在 L2 的檔案系統上實建 probe_no_clobber() 同形狀的結構量 allocated bytes，量完移除
+          建好 <work>/tmp（L3）與 <work>/runs；⚠️ 之後所有 host 端指令都帶 PYTHONDONTWRITEBYTECODE=1
+1. witness  建好本路徑的 L1 根（runs/witness/）→ 記 baseline（各位置、inventory ＋ S 內的 marker）→ 在 TMPDIR 建 replay worktree（e1cbbbd）→ fixture 容器（唯讀
+            rootfs）把 cache 的 after'／cohort' 以 publish_artifacts() 寫進 runs/witness/witness/ → 正式 --envcheck
+            （期望 0）→ 記 P_witness → 自我檢查
+2. success  建好 runs/success/ → 記 baseline → replay worktree（e1cbbbd ＋ git apply --index 兩份 patch）→ fixture 容器以已錨定的 D+1 合成
+            13,417 列 before source（156 列候選把 RR 加回去）、comparison、report，以 publish_artifacts() 寫進
+            runs/success/stage2/ → 凍結 patch → 正式 --finalize（期望 0）→ 記 P_success → 自我檢查
+3. failure  建好 runs/failure/ → 記 baseline 與 failed/ 的項目集合 → replay worktree（同上）→ fixture 容器寫 bounded_diagnostics.json
+            （156 列 rr_not_restored）→ 凍結 patch（runs/failure/patches/）→ 正式 --publish-failed-record（期望 1）
+            → 記 P_failure → 自我檢查；RECORD ＝ 發布後 failed/ 的集合差（⚠️ 必須恰好一筆），且必須等於 CLI 輸出的 "published"
+4. 其餘程序（只量記憶體與耗時；⛔ 不在任何 P_path 的窗口內）：
+            --recover-envcheck（期望 0；E3a 全量重比＝「環境等價比對程序」）
+            --recover-durability（期望 0）
+            --check-failed-record --counterfactual-patch runs/failure/patches/counterfactual.patch（期望 2：命中 RECORD）
+            --recover-failed-record RECORD（期望 1）
+5. metadata twin：對 S 裡記下的每一個正式 invocation 的完整 argv 各建三個 twin 量 metadata（v5：移出量測窗口）
+6. 報告     全部量測結束後才寫 <work>/sizing_report.json（canonical）＋ sizing_report.txt，並把 S 的原始量測複製到
+            <work>/raw/；⛔ 不寫進 repo（⑤ 轉錄到本筆）；最後清掉 S
+```
+
+**中途失敗或被中斷時的清理順序**（v6，中 3；⚠️ 全部發生在窗口終止之後，⛔ 不污染 `P_B`）：
+
+| 序 | 動作 |
+|---|---|
+| 1 | 停止 sampler |
+| 2 | 以 **CID** 強制移除本次的所有容器（含 twin） |
+| 3 | 把進行中的量測窗口標成 `aborted`——⛔ 不再計算任何 `P_path` |
+| 4 | 把 S 複製到 `<work>/raw-failed/` |
+| 5 | 寫 `<work>/failure_summary.json`：失敗的階段、原指令的結束碼、已完成的路徑——⚠️ **⛔ 不宣稱 `P_B`** |
+| 6 | 複製成功才清 S；⚠️ 複製失敗就**保留 S**，並把它的位置印到 stderr |
+
+⚠️ 所有正式入口都以 `TMPDIR=<work>/tmp PYTHONDONTWRITEBYTECODE=1 PATH=<shim>:$PATH <work>/repo/scripts/finalize-stage2-evidence.sh …` 執行——
+路徑常數由腳本位置推導，從複本執行就只會寫複本。fixture 容器同樣經 shim（唯讀 rootfs），但它只是模擬 replay 的寫檔，
+⛔ 它的記憶體⛔ 不列入程序峰值。
+
+**docker shim**（正式腳本⛔ 不改；只改寫 `docker run`，其餘子指令原樣 exec 真正的 docker）：
+
+| 項目 | 契約 |
+|---|---|
+| 改寫 | 在 image 前加 `--cidfile <S>/cid/<ID>.cid`、`--name i074sz-<run id>-<ID>`（`<ID>` 的格式見「二」的 invocation 索引）、`--read-only`、`-v <S 內的 peak 目錄>:/peak`，拿掉 `--rm`（⛔ **不**加任何可寫的 `/tmp`）；容器指令包進與 `run-replay-offline.sh` 的 `MEASURE_PEAK` **同一套** wrapper：指令結束後、退出前讀 cgroup 峰值——**v1 `memory.max_usage_in_bytes` → v2 `memory.peak`**——並保留原結束碼；原本的 option 與容器指令**逐 token 不變** |
+| 記錄 | **執行前**以 exclusive create 寫不可變的 invocation 索引（含改寫後的完整 argv 與正規化 SHA，見「二」）——metadata twin 由 harness 在**所有量測窗口結束後**依它重建；⚠️ shim ⛔ 不在窗口內建 twin |
+| ⚠️ I/O 透明 | shim **自己⛔ 不向 stdout／stderr 寫任何 byte**——容器的 stdout／stderr 原樣直通（`--check-failed-record` 要把 stdout 當 JSON 解析）；計量結果只寫 sidecar 檔（`<S>/containers/<ID>.json`，tmpfs）；`docker logs` 只導進計數程序，⛔ 不重新輸出 |
+| 結束之後 | 讀 `SizeRw`、實際的 `LogConfig`、log 上界、cgroup 峰值 → 寫 sidecar → `docker rm`；**傳回原指令的結束碼** |
+| 失敗 | inspect、logs、rm 任一步失敗（twin 的 create／rm 失敗由 harness 在步驟 5 記錄）→ sidecar 標「量測失敗」並保存原結束碼（shim 仍傳回原結束碼），report fail-closed |
+| 中斷 | shim 與 harness 都 trap `INT`／`TERM`／`EXIT`：對 **`--cidfile` 記錄到的 CID**（含 twin）`docker rm -f`（⛔ 不以名稱猜；容器還在跑也移除得掉） |
+
+host 的 `MemAvailable` 低點另外每 2 秒取樣。⚠️ cgroup 峰值讀不到或為 0 → fail-closed。⚠️ 這個數字含 page cache
+（與 Stage 1 probe 的量法一致，⛔ 不另換指標）。
+
+⚠️ **「六、1」的 h（preflight）**：正式 preflight 入口屬 ⑦；本 harness 以 `--check-failed-record` 的 Python 段
+代量（它同樣載入兩個信任錨並掃 `failed/`），報告裡明確標示「代量」。
+
+**報告的來源紀錄**：
+
+| 模式 | 要求 | 記錄 |
+|---|---|---|
+| ④ 可用性驗證（預設） | 允許未 commit | 複本的 HEAD OID、工作樹是否 dirty，以及**實際執行的** harness、shim、fixture 與正式入口的 SHA-256 |
+| ⑤ 正式量測（`--formal`） | `scripts/`、`python/`、`.gitattributes` 的 tracked 檔案⛔ 不得有未 commit 變更（`git status --porcelain`）；harness 自己的檔案必須已進版控，且 SHA-256 等於 HEAD 的 blob | 上欄全部 ＋ source commit OID、image ID 與 Stage 2 identity 檔的 SHA-256、mem-guard 上限、DockerRootDir、logging driver |
+
+##### 四、受影響檔案
+
+| 檔案 | 改動 |
+|---|---|
+| `scripts/i074-stage2-sizing.sh`（**新增**） | 編排：模式、S（tmpfs）與 work 目錄防護、複本、L4／logging 檢查、兩種 worktree 與 probe 結構的實建量測、TMPDIR／PATH／`PYTHONDONTWRITEBYTECODE` 導向、取樣、呼叫正式入口、record 目錄的集合差、自我檢查、窗口後的 metadata twin、CID 清理、收集結果；⛔ 不含可用空間檢查 |
+| `scripts/lib/i074-sizing-docker-shim.sh`（**新增**） | docker shim（見上表） |
+| `python/scripts/i074_stage2_sizing.py`（**新增**） | `fixture`（容器內：見證路徑的 after'／cohort'、成功路徑的 operational 輸出、失敗路徑的中繼檔）、`logbound`（host：json-file log 上界，stdlib）、`allocated`（host：整棵 tree 的 allocated bytes，含目錄）與 `report`（host：三種量法、判定、canonical 報告） |
+| `scripts/test-replay-args.sh` | shim 的改寫、I/O 透明、wrapper、metadata twin、log 模型守門、中斷清理；harness 的模式與 work 目錄防護 |
+| `python/backtest/modular/sr_scoring/tests/test_i074_stage2_sizing.py`（**新增**） | fixture 產出通過**正式**的 envcheck／finalize／publish-failed-record；log 上界；report 的公式與判定 |
+| `docs/development-workflow.md` | harness 的操作程序 |
+| ⛔ `finalize-stage2-evidence.sh`、`run-replay-offline.sh`、`replay_bundle/*`、`evaluation.py` | ⛔ 一行不改 |
+
+##### 五、風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 取樣漏掉短暫峰值 | 封閉寫入模型：唯讀 rootfs、⛔ 無可寫 `/tmp`，可寫的 bind mount 內只有「已知寫入清單」的寫入，逐項給上界；兩種取樣是交叉檢查與 catch-all |
+| 其他程序的寫入干擾 L0 | 只會墊高（保守）；報告並列三種量法，差距過大時標示，⑤ 判讀 |
+| ⚠️ harness 自己的寫入混進 `P_B`（v5） | 全部放 S（tmpfs）；twin 移出窗口；報告最後才寫；每條路徑結束後自我檢查 |
+| ⚠️ host 端 Python 寫 bytecode（v5） | `PYTHONDONTWRITEBYTECODE=1` ＋ 自我檢查；⑦ 的 orchestrator 必須沿用（⛔ 沒沿用就走下一列之後的回退） |
+| ⚠️ apparent size 低估實際占用（v5） | 會計一律 allocated bytes、量整棵 tree（含目錄）；推導值以 block 上捨 |
+| 合成的 before source 與 ⑦ 實際產出的尺寸不同 | 反事實只改 156 列的少數欄位，量級相同；報告並列 D+1 after 的大小對照。見證路徑用的是真正的 after'，⛔ 沒有這個落差 |
+| `--read-only` 與 ⑩ 的實際執行條件不同 | ⚠️ 只**縮小**可寫範圍——⑩（不加 `--read-only`）若寫到別處，就是 harness 沒量到的用量 |
+| ⚠️ **⑦ 的實際流程峰值超過 ⑤ 裁定的 `P_B`**（v4，低 4） | **寫死的回退順序**：⛔ 不得進入 ⑩ → 更新 `P_B`／`M_safety` → 重跑 ⑤ → 回到 ⑥ 確認。⚠️ ⑦ 的 memory harness 再驗實際磁碟峰值時，要一併確認上一列的 `--read-only` 落差 |
+| 誤寫到真正的證據目錄 | 正式腳本的路徑常數由腳本位置推導——從複本執行只會寫複本；canonical path 的 work 目錄防護；測試斷言 |
+| shim 拿掉 `--rm` 後中途被中斷、容器殘留 | `--cidfile` 記錄的 CID（含 twin）一律 `docker rm -f`（shim 與 harness 兩層 trap） |
+| shim 汙染 stdout | shim 本身⛔ 不寫 stdout／stderr；測試逐 byte 比對 |
+| host 只有 2 GiB | 程序依序執行、各自經 mem-guard；harness 本身只跑 `du`、`statvfs` 與 shell |
+| **回滾** | 全部是新檔（＋ shell 測試段落），單一 `git revert` |
+
+##### 六、測試與驗證
+
+| # | 案例 |
+|---|---|
+| a | shim 的改寫：`docker run OPTS IMAGE CMD…` → `OPTS'（加 --cidfile、--name、--read-only、-v /peak，⛔ --rm、⛔ 可寫 /tmp）IMAGE sh -c <wrapper> _ CMD…`，OPTS 與 CMD 逐 token 不變；非 `run` 原樣傳遞；容器的結束碼（0、非 0）原樣傳出 |
+| a2 | wrapper：cgroup v1 存在 → 讀 v1；v1 缺、v2 存在 → 讀 v2；兩者皆缺 → peak 檔空 → report fail-closed；值為 0 → fail-closed；原指令的結束碼保留（⚠️ 以可覆寫的 cgroup 根目錄在 host 上測，並斷言候選路徑與 `run-replay-offline.sh` 的相同） |
+| a3 | ⚠️ **I/O 透明**：經 shim 的 stdout 與未包裝的 `docker run` **逐 byte 相同**；應用程式的 stderr ⛔ 不被重複；在隔離 repo 經 shim 跑 `--check-failed-record`，JSON 能被正式 shell 段解析且決策正確 |
+| a4 | 足跡與失敗：sidecar 記錄 `SizeRw`、實際 `LogConfig`、log 上界、cgroup 峰值與原結束碼（metadata 的原始值與採用值由步驟 5 記錄）；inspect／logs／rm 任一步失敗 → sidecar 標「量測失敗」、shim 仍傳回原結束碼、report fail-closed；twin 的 create／rm 失敗 → report fail-closed；`SizeRw ≠ 0` → report fail-closed |
+| a5 | ⚠️ **中斷**：容器仍在執行時對 harness 送 `SIGINT`／`SIGTERM` → cidfile 記錄的容器被 `docker rm -f`（fake docker 斷言呼叫與 CID；④ 的驗證執行再以真的 Docker 做一次，斷言 `docker ps -a` 沒有本次 run id 的容器） |
+| a6 | ⚠️ **封閉寫入**（v4，高 1）：經 shim 的容器寫 `/tmp` 或 `/` 都失敗（EROFS）、`tempfile.gettempdir()` 失敗——證明⛔ 沒有可寫的暫存位置 |
+| a7 | ⚠️ **metadata**（v4，中 2）：以真的 Docker 建長 argv（≥ 32 KiB）與長 mount path 的 invocation → 採用值 ≥ 三次原始值的最大值、且 ≥ 2 × `inspect` 長度（採用值隨 argv 變大）；一般長度的 invocation 同樣成立 |
+| a8 | ⚠️ **log 模型**（v4，中 3）：`LogConfig.Type` 不是 `json-file` → fail-closed；有 `max-size` 或 `max-file` → fail-closed；上界 ≥ 以 json-file 格式實際編碼的長度（參考編碼器）——涵蓋 stdout 與 stderr、`"`、`\`、控制字元、非 ASCII、無結尾換行、> 16 KiB 的單行 |
+| a9 | ⚠️ **bytecode**（v5，中高 1）：在全新的 clone 經 harness 跑完全部模式 → 複本 source tree ⛔ 沒有任何新的 `__pycache__`／`.pyc`；harness 呼叫正式入口的環境帶 `PYTHONDONTWRITEBYTECODE=1`（fake 入口斷言） |
+| a10 | ⚠️ **harness 開銷**（v5，中 2）：cidfile、sidecar、`/peak`、取樣狀態、console log 的路徑全部在 S 之下且 S 是 tmpfs；量測窗口內 shim ⛔ 不建 twin；`--formal` 時 stdout 被導到 L0 上的一般檔案 → 拒絕；報告的 `host_measurement_artifact_bytes = 0`、`docker_instrumentation_overhead = "included_unseparated"` |
+| a11 | ⚠️ **invocation 索引**（v6，中 2）：順序打亂、缺 sidecar、重複 sidecar、重複索引、未知 phase／role、memory-only 被標成 `included_in_disk_path = true`、索引與 sidecar 的 SHA 不一致、twin 的 cidfile 已存在 → 全部 fail-closed；twin 的 cidfile／name 與正式的等長 |
+| a11b | ⚠️ **container spec hash**（v7）：同一份 spec 的 `docker run` 與 `docker create` 的 hash **相等**；只改 operation、`--cidfile` 或 `--name` 的值 → 相等；改任一 option、option 的值、image、容器指令或任一參數（含順序）→ **不同** |
+| a11c | ⚠️ **不重疊的證明**（v7）：前一個的 `rm_done` 事件號 < 下一個的 `create_begin` → 取最大；事件號交錯、缺一個事件、事件號重複 → 相加；`CLOCK_MONOTONIC` 時間戳與事件號矛盾時仍以事件號為準（時間戳⛔ 不作判定） |
+| a12 | ⚠️ **中止時的原始量測**（v6，中 3）：在 witness 路徑中、正式入口失敗、metadata twin 失敗、以及 `SIGTERM` 四個中止點——`<work>/raw-failed/` 與 `failure_summary.json` 都存在（⛔ 不含 `P_B`）、本次容器全部被移除、S 已清；模擬複製失敗 → S 被保留且位置印在 stderr |
+| a13 | ⚠️ **inventory**（v6，補）：baseline 已存在的檔案被刪除、目錄換成檔案（型別改變）、允許位置以外新建或修改 → fail-closed；允許位置內的新建與修改（含第一次在允許的根目錄內建檔）→ 通過；⚠️ v7：允許根目錄**事先建好**時，它的父目錄 mtime ⛔ 不變 |
+| b | harness 拒絕：work 目錄在 repo 內、**parent symlink 指回 repo**、已存在；沒有 `REPLAY_IMAGE_ID`；`--formal` 時相關 tracked 檔案 dirty、或 harness 檔案未進版控／SHA 不等於 HEAD |
+| b2 | L4：Docker Root Dir 與 L0 同一個 device → 通過；不同 device → fail-closed（以注入的 `st_dev` 測 report 的判定；harness 以 daemon 回報的路徑取值、⛔ 不寫死） |
+| b3 | record 目錄：發布前後 `failed/` 的集合差恰好一筆且等於 CLI 的 `published` → 通過；零筆、兩筆、或與 `published` 不符 → fail-closed |
+| c | fixture：在測試用的小型信任錨上合成 → **正式**的 `publish_envcheck()`（見證）、`finalize_stage2_evidence()`（成功）、`publish_failed_record()`（失敗）都通過（證明合成的輸入是合法的 operational 輸出） |
+| d0 | ⚠️ **allocated bytes**（v5，中 3）：以真的檔案系統建出下列形狀，逐步量實際 allocated 的峰值，斷言會計值 ≥ 峰值：多個 1 byte 的檔案、多層空目錄、非整 block 的大小、temp → rename 的依序寫入、index 與 `index.lock` 同時存在；⚠️ 並斷言以 `st_size` 相加的算法會**低估**（證明測試有鑑別力） |
+| d | report：`delta` 以各位置的 baseline 相減、逐位置 clamp 為 0；三種量法取大；`P_B` 取三條路徑的最大；已知寫入清單逐項相加（含 probe、git、容器足跡；⛔ 不含在 S 的 `/peak`）；任一位置／組成／足跡／程序峰值缺失或為 0、`st_dev` 不一致 → fail-closed、⛔ 不產報告；`P_failure > P_success` → **照樣產出**、`status = "assumption_violated"` |
+| e | 驗證執行（④）：在 host 以真實資料完整跑一次，**全部在唯讀 rootfs、⛔ 無可寫 `/tmp`、host 端⛔ 不寫 bytecode** 下完成、自我檢查通過、所有程序結束碼符合預期（envcheck 0、finalize 0、publish 1、recover-envcheck 0、recovery 0、check 2、recover-failed 1）；另做一次 a5 的真 Docker 中斷演練；數字只當「harness 可用」的證據，**正式紀錄與 `M_safety` 裁定在 ⑤（`--formal`）** |
+
+##### 七、完成後的歸檔
+
+操作程序寫進 [`development-workflow.md`](./development-workflow.md)（I-074 Stage 2 各節之後）；
+實作與驗證結果寫在本筆「④ 實作結果」；`P_B`、各程序峰值與 `M_safety` 的裁定在 ⑤ 寫進本筆與「二之二」；
+⚠️ 「五」的 ⑦ 回退順序在 ⑥ 併入 Stage 2 計畫書「六、1」。
 
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 

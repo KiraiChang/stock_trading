@@ -1180,7 +1180,7 @@ image 存在」四項**一律在 `docker run` 之前**，差別只在 `bundle_id
 ⚠️ 另有一條與此相關的**增補式修訂**風險：插入點若落在**表格內部**，會把後面的列切出表外
 （Markdown 不會把它算進那張表）。這個錯在 I-100 與 I-074 各發生過一次。
 
-### I-074 Stage 2 的環境見證程序（2026-09-23 實作 ③b；⚠️ 待 review）
+### I-074 Stage 2 的環境見證程序（2026-09-23 實作 ③b；✅ review 通過）
 
 ⚠️ **為什麼有這一段**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機——當時 pin 用的
 tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。使用者裁決 **兩側都在新 image 重跑**：
@@ -1237,7 +1237,7 @@ tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。�
 ⚠️ **`envcheck/` 與 `python/baselines/i074_stage1/` 必須一起保存**：Stage 2 的證據以 Stage 1 的
 manifest 為信任錨，單獨搬走會斷鏈。
 
-### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；⚠️ 待 review）
+### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；✅ review 通過）
 
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」與 `issue.md`
 I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）

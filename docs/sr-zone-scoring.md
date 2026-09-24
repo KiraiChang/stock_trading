@@ -2967,7 +2967,7 @@ raw bytes ⛔ 不會傳出——再讀一次可能已不是同一版本。用 **
 回傳 `EvidenceLoad`（`parsed`／`artifact_sha256`／`stored_sha256`／`stored_bytes`）——
 ⚠️ 四個值**都來自同一次讀取**，finalizer 才不必為了 `stored_*` 再讀一遍。
 
-#### I-074 Stage 2 的環境見證契約（2026-09-23 實作 ③b；⚠️ 待 review）
+#### I-074 Stage 2 的環境見證契約（2026-09-23 實作 ③b；✅ review 通過）
 
 ⚠️ **背景**：Stage 1 釘住的 image 已不在本機，Stage 2 改在新 image 上跑。要繼續拿已封存的 D+1
 當 after 側，先要證明新舊 image 對這份 bundle **等價**。完整計畫與修訂經過見 `issue.md` I-074
@@ -3014,7 +3014,7 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 實測（2026-09-23，host）：串流驗證真實的 D+1 artifact 峰值 RSS **135 MiB**、8.7 秒；
 整份載入是約 449 MiB。
 
-#### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；⚠️ 待 review）
+#### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；✅ review 通過）
 
 ⚠️ **範圍**：Stage 2（counterfactual）正式執行的**證據層**——成功 archive、反事實沒有生效時的
 failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過見 `issue.md` I-074

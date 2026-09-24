@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 準備中**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認；③b 已實作／⚠️ 待 review**（見「③b 實作結果」）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 準備中**（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認；③b 已實作並 commit；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布、⚠️ 尚未進版控），下一步 ③d**（見「③c 執行結果」）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -2469,6 +2469,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
         可共用的 archive 核心、環境等價比對模組 ＋ `envcheck/` 小 archive
    ③c **環境閘門**：pin 新 image ＋ tarball → after' 見證趟（約 180 分鐘）
         → 環境等價比對 → 發布 `envcheck/`（0 或 7）  ← ⚠️ 凍結窗口 A（見「八之一」）
+        ✅ 2026-09-23：**EQUIVALENT（rc=0）**，凍結窗口 A 已結束（見「③c 執行結果」）
         └ NOT_EQUIVALENT → ⛔ 停止，另立 issue；⛔ 不進 ③d
    ③d 實作 ③ 的其餘部分（Stage 2 archive、failed record、check／recover）→ review
 ④ 實作獨立 sizing harness（⛔ 不含正式 preflight）
@@ -3739,7 +3740,7 @@ token 序列（⛔ 非 `eval` 字串；動態值用 placeholder），由 `script
      finalize 腳本的 envcheck／recover-envcheck 兩種模式
      → 測試：`bd`～`bd4`（能在本包驗的部分）、`be`、`bf`（環境等價比對的部分）、`bg`（兩種模式）、`bj0`
      → review
-③ 環境閘門（Stage 2 的 ③c）：pin → after' 見證趟 → `--envcheck`
+③ 環境閘門（Stage 2 的 ③c）：pin → after' 見證趟 → `--envcheck`   ← ✅ 2026-09-23 EQUIVALENT（rc=0）
      └ rc=7（NOT_EQUIVALENT）→ ⛔ 停止，另立 issue；⛔ 不進 ④
 ④ 第二包（Stage 2 的 ③d）：stage2_evidence.py 的其餘部分 ＋ finalize 腳本的其餘五種模式
      → 測試矩陣 `a`～`aw` ＋ `ay` ＋ `az` ＋ `ah4`／`ah5` ＋ `bb`～`bk`（⚠️ `bd2` 的「Stage 2 被 E3b 擋下」那一半在本包驗）
@@ -3846,6 +3847,36 @@ evidence 跑串流信任錨**），共 139 條；`scripts/test-replay-args.sh` �
 ② 見證趟  AFTER_REF=e1cbbbd I074_STAGE=2 scripts/run-replay-offline.sh … --i074-preflight  （約 180 分鐘；凍結窗口 A 開始）
 ③ 判定    scripts/finalize-stage2-evidence.sh --envcheck --run-dir <run 目錄>
 ```
+
+#### ③c 執行結果（2026-09-23，✅ **EQUIVALENT**）
+
+| 步驟 | 時間 | 結果 |
+|---|---|---|
+| ① pin | 2026-09-23 16:31 | ✅ `pin-replay-image.sh --stage 2 --adopt-image sha256:2a90ad1c…`：在該 image 內比對 `{pip_freeze_sha256: 7a39573e…, python_version: 3.11.16}` **逐字等於** Stage 1 → 掛上專用 tag、建立 Stage 2 identity（`created_at` 2026-09-23T08:31:33Z）、tarball `…/i074_stage2/images/2a90ad1c….tar`（832,766,976 bytes，SHA-256 `a3c2d3a8c1c57f75c61a3faa12fe55ed1aefb290b8ce19ccacc832d7741ca583`，以 `image_tarball_verify()` 重驗通過） |
+| ② 見證趟 | 16:33:47 → 19:32:10（**178 分鐘**） | ✅ rc=0；HEAD `3d37691`、程式碼 `e1cbbbd`、⛔ 無 patch（E7 前置守門通過）；13,417 列、候選 **156**；after' `f5d6d9ea…`（77,904,262 bytes）；mem-guard 上限 549m，**峰值約 315 MiB**（每 5 分鐘取樣）；三次 `InconsistentVersionWarning`（sklearn 1.9.0 → 1.9.1）與 Stage 1 當時相同 |
+| ③ envcheck | 19:36 | ✅ **rc=0，EQUIVALENT**；`python/baselines/i074_stage2/envcheck/` 已發布（5 檔，⚠️ **尚未進版控**） |
+
+**環境等價判定的內容**（`equivalence/equivalence.json.gz`）：
+
+| 項目 | 值 |
+|---|---|
+| key 集合 | reference 13,417 ＝ witness 13,417；`rows_compared` 13,417；`key_mismatch_count` **0** |
+| 逐列 | `row_mismatch_count` **0**——⚠️ **13,417 列的 canonical row bytes 全部逐位元相同** |
+| cohort | `cohort_equal` **true**（156 keys） |
+| 必須相同的四欄 | `base_commit`／`tooling_patch_sha256`／`project_modules_sha256`／`runtime_settings` **全部相同** |
+| 允許不同的六欄 | `image_digest`（`d66030dc…` → `2a90ad1c…`）、`runner_sha256`、`argv`（只有 `--output-dir`）不同；`pip_freeze_sha256`、`python_version`、`source_root` 相同 |
+| 信任錨 | reference after `33a6b166…`、Stage 1 manifest `485fb601…`；witness after `f5d6d9ea…`、cohort' `d5768e8f…` |
+
+**獨立複核**：在 host 以 `verify_envcheck_for_stage2()` 對已發布的 `envcheck/` 重跑 **E1～E7 ＋ E3b**，通過（17.9 秒）。
+
+⚠️ **這代表什麼**：新 image（`2a90ad1c…`）與遺失的 Stage 1 image 對這份 bundle 的每一列輸出**逐位元相同**
+——封存的 D+1 可以繼續當 after 側，before 正式趟（⑩）與 D+1 之間的差異只能來自 counterfactual patch。
+⚠️ **凍結窗口 A 已結束**（`envcheck/` durable、rc=0）。
+
+⚠️ **待辦**：
+* `python/baselines/i074_stage2/envcheck/` 要**進版控**（使用者 commit）——它與 `python/baselines/i074_stage1/` 必須一起保存；
+* 見證趟的 runner 以 `exec docker run` 結束，留下一個 detached worktree（I-118 的同一個成因），已手動移除；
+* 下一步：**③d**（Stage 2 archive、failed record、check／recover 的其餘部分）。
 
 #### Stage 2 的前置盤點（2026-09-18，⚠️ **計畫書的材料，⛔ 不是計畫書本身**）
 

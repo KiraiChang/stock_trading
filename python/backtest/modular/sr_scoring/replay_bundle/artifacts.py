@@ -573,6 +573,116 @@ def build_report(*, bundle_id: str, before_ref: str, comparison_sha256: str,
     )
 
 
+# ── comparison／report 的 validator（I-074 Stage 2 的 ③d） ────────────────────
+#
+# ⚠️ 原本只有 builder、⛔ 沒有 validator——Stage 2 的正式證據要能**獨立複核**，只驗「檔案與
+# hash 沒變」證明不了內容一開始就是對的（issue.md I-074 ③ evidence contract「三之二」）。
+# 這兩支只驗**單檔**能驗的部分；跨檔的「`before`／`after` 等於來源 row」「keys 等於 cohort」
+# 由 `stage2_archive.verify_stage2_graph()` 負責。
+
+_COMPARISON_FIELDS = {"schema_version", "kind", "bundle_id", "before_ref", "after_artifact_sha256",
+                      "generated_at", "provenance", "rows"}
+_COMPARISON_ROW_FIELDS = {"symbol", "timeframe", "as_of", "differences", "before", "after"}
+_REPORT_FIELDS = {"schema_version", "kind", "bundle_id", "before_ref", "comparison_artifact_sha256",
+                  "generated_at", "candidate_rows", "rows_shown", "difference_field_counts", "rows"}
+
+
+def _require_envelope(artifact: dict[str, Any], kind: str, label: str) -> None:
+    if type(artifact.get("schema_version")) is not int or artifact["schema_version"] != ARTIFACT_SCHEMA_VERSION:
+        raise ArtifactError(f"{label} 的 schema_version={artifact.get('schema_version')!r} 不是 {ARTIFACT_SCHEMA_VERSION}")
+    if artifact.get("kind") != kind:
+        raise ArtifactError(f"{label} 的 kind={artifact.get('kind')!r}，預期 {kind!r}")
+
+
+def _is_sha256_hex(value: object) -> bool:
+    return (isinstance(value, str) and len(value) == 64 and value == value.lower()
+            and all(c in "0123456789abcdef" for c in value))
+
+
+def validate_comparison_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """comparison artifact 的封閉 schema ＋ 每列 `differences` **重算**，回傳 keys（已驗排序唯一）。
+
+    ⚠️ 每一列必須**恰好等於** `compare_rows(before, after)` 的輸出——⛔ 不信任封存的
+    `differences`；`before` 與 `after` 的 key 也必須相同（⛔ 否則 `symbol` 會被當成一個差異欄位混過去）。
+    """
+    if not isinstance(artifact, dict):
+        raise ArtifactError("comparison artifact 必須是 object")
+    _require_fields(artifact, _COMPARISON_FIELDS, "comparison artifact")
+    _require_envelope(artifact, COMPARISON_KIND, "comparison artifact")
+    for field in ("bundle_id", "before_ref", "generated_at"):
+        _require_type(artifact, field, str, "comparison artifact")
+        if not artifact[field]:
+            raise ArtifactError(f"comparison artifact.{field} 必須是非空字串")
+    if not _is_sha256_hex(artifact["after_artifact_sha256"]):
+        raise ArtifactError("comparison artifact 的 after_artifact_sha256 必須是 64 字元小寫 hex")
+    _require_type(artifact, "provenance", dict, "comparison artifact")
+    rows = artifact["rows"]
+    if not isinstance(rows, list):
+        raise ArtifactError("comparison artifact 的 rows 必須是陣列")
+    keys: list[tuple[str, str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != _COMPARISON_ROW_FIELDS:
+            raise ArtifactError(f"comparison 的每一列欄位必須恰好是 {sorted(_COMPARISON_ROW_FIELDS)}")
+        before, after = row["before"], row["after"]
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            raise ArtifactError("comparison 的 before／after 必須是 object")
+        key = row_key(after)
+        if row_key(before) != key:
+            raise ArtifactError(f"comparison 某列的 before key {row_key(before)} 與 after key {key} 不同")
+        if not isinstance(row["differences"], list) or not all(isinstance(f, str) for f in row["differences"]):
+            raise ArtifactError(f"comparison {key} 的 differences 必須是字串陣列")
+        if row != compare_rows(before, after):
+            raise ArtifactError(
+                f"comparison {key} 與 compare_rows() 重算的結果不符（differences 或 key 欄位）——⛔ 不信任封存值"
+            )
+        keys.append(key)
+    if any(a >= b for a, b in zip(keys, keys[1:])):
+        raise ArtifactError("comparison 的 rows 必須依 (symbol, timeframe, as_of) 排序且⛔ 不重複")
+    return keys
+
+
+def validate_report(report: dict[str, Any], *, comparison: dict[str, Any], comparison_sha256: str,
+                    report_max_rows: int | None) -> None:
+    """report 的封閉 schema，並**由完整 comparison 重算**截斷與統計。
+
+    ⚠️ `rows_shown` 必須恰好是 `min(report_max_rows, candidate_rows)`——⛔ 只寫「取前
+    `rows_shown` 列」會讓 `rows_shown = 0` 的空報告合法通過；`candidate_rows` 與
+    `difference_field_counts` 由**完整** comparison 算，⛔ 不得由截斷後的 rows 算。
+    """
+    if not isinstance(report, dict):
+        raise ArtifactError("report 必須是 object")
+    _require_fields(report, _REPORT_FIELDS, "report")
+    _require_envelope(report, REPORT_KIND, "report")
+    if report["comparison_artifact_sha256"] != comparison_sha256:
+        raise ArtifactError("report 的 comparison_artifact_sha256 與實際 comparison 不符")
+    for field in ("bundle_id", "before_ref"):
+        if report[field] != comparison.get(field):
+            raise ArtifactError(f"report.{field}={report[field]!r} 與 comparison 的 {comparison.get(field)!r} 不符")
+    _require_type(report, "generated_at", str, "report")
+    for field in ("candidate_rows", "rows_shown"):
+        if type(report[field]) is not int or report[field] < 0:
+            raise ArtifactError(f"report.{field} 必須是非負整數：{report[field]!r}")
+    full = sorted(comparison["rows"], key=lambda r: (r["symbol"], r["timeframe"], r["as_of"]))
+    if report["candidate_rows"] != len(full):
+        raise ArtifactError(
+            f"report.candidate_rows={report['candidate_rows']} ≠ 完整 comparison 的 {len(full)} 列"
+        )
+    want_shown = len(full) if report_max_rows is None else min(report_max_rows, len(full))
+    if report["rows_shown"] != want_shown:
+        raise ArtifactError(
+            f"report.rows_shown={report['rows_shown']} ≠ min({report_max_rows}, {len(full)})={want_shown}"
+            "——⛔ 空報告或多截少截都不接受"
+        )
+    counts: dict[str, int] = {}
+    for row in full:
+        for field in row["differences"]:
+            counts[field] = counts.get(field, 0) + 1
+    if report["difference_field_counts"] != dict(sorted(counts.items())):
+        raise ArtifactError("report.difference_field_counts 與由完整 comparison 重算的結果不符")
+    if report["rows"] != full[:want_shown]:
+        raise ArtifactError("report.rows 必須是 comparison rows 依 key 排序後的前 rows_shown 列——⛔ 不得抽樣或換序")
+
+
 # ── 候選集合不一致：終止狀態的證據 ──────────────────────────────────────────
 #
 # ⚠️ 這是 Stage 2 的**第二種 terminal outcome**，⛔ 不是失敗殘骸：

@@ -1237,6 +1237,58 @@ tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。�
 ⚠️ **`envcheck/` 與 `python/baselines/i074_stage1/` 必須一起保存**：Stage 2 的證據以 Stage 1 的
 manifest 為信任錨，單獨搬走會斷鏈。
 
+### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；⚠️ 待 review）
+
+⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」與 `issue.md`
+I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）
+由 ⑦ 的 orchestrator 串起來，⚠️ ⑦ 尚未實作——下列入口是它要呼叫的**唯一**一套（⛔ 不得另寫 lookup）。
+
+**CLI matrix**（`scripts/finalize-stage2-evidence.sh`；一律要求 `REPLAY_IMAGE_ID` 是 Stage 2 identity 的 image；
+模式互斥、參數重複即中止；路徑一律寫死常數或由 `--run-dir` 固定推導，⛔ 沒有逐檔覆寫）：
+
+| 模式 | 輸入 | 結束碼 |
+|---|---|---|
+| `--envcheck --run-dir <dir>` | `witness/after_artifact.json`、`witness/cohort_manifest.json` | 0／**7**／3／1（見上一節） |
+| `--recover-envcheck` | 既有 `envcheck/` | manifest 的 0 或 7／3／1 |
+| `--finalize --run-dir <dir>` | `stage2/before_source_artifact.json`、`stage2/comparison_artifact.json`、`stage2/report.json`、`patches/counterfactual.patch`、`patches/tooling.patch`（凍結副本） | **0**／3（⛔ 不刪除，用 `--recover-durability`）／1（⛔ 沒有正式 archive） |
+| `--recover-durability` | 既有 `evidence/`（⛔ 不讀 operational 來源、⛔ 不重跑 replay） | manifest 的 `terminal_outcome`／3／1 |
+| `--publish-failed-record --run-dir <dir>` | `stage2/bounded_diagnostics.json`（replay 回 6 時寫出的中繼檔）＋ 凍結 patch | ⚠️ **1**（完整發布——那一次執行本來就是失敗的）／3／1 |
+| `--check-failed-record --counterfactual-patch <patch>` | ⚠️ **只吃 patch 路徑、⛔ 不吃 SHA** | **0** 無命中／**2** 命中／**1** 損壞、套用失敗或非 canonical |
+| `--recover-failed-record <record 目錄>` | `failed/` 的**直接子目錄** | ⚠️ **1**（成功也是 1）／3 |
+
+**合成守門在 host、Docker 之前**：`--finalize`／`--recover-durability`／`--publish-failed-record`／
+`--recover-failed-record` 先由 `python/scripts/i074-stage2-patch-claims.py` 取出宣告值（只讀小檔），
+在隔離 worktree 依 counterfactual → tooling 套用、`git write-tree`、重算三個 SHA；⛔ 任一不符即中止，
+⛔ 不呼叫 Python。⚠️ 驗過的 patch base 與三個 SHA 再以 `--verified-*` 注入容器，Python 拿實際要封存
+（或要 fsync）的內容比對，相符才允許 commit point——擋的是「合成守門之後、Python 讀檔之前」輸入被換掉
+（2026-09-24 review；`--verified-*` 與其他注入參數一樣⛔ 不接受使用者傳入）。`--check-failed-record` 則是
+**Python 段先過**（容器內逐份驗 F1～F10，`i074_stage2` 唯讀掛載）才跑 shell 段——失敗點要唯一；shell 段
+驗的 patch bytes 必須等於 Python 段回報的 SHA。
+
+**check 的比對鍵與順序**（⛔ 不直接雜湊輸入檔：同一份變更可以有不同的文字表示）：在 Stage 1 after 的
+base 套用輸入 patch、`write-tree` 得 T1，鍵 ＝ `sha256(git diff --binary <base> <T1>)`；
+① 先查命中 → **2**；② 未命中但輸入 bytes ≠ canonical diff → **1**（正式 archive 無條件要求兩者相等，
+⛔ 不能等跑完數小時 replay 才被 finalizer 拒絕）；③ 否則 **0**。⚠️ **2 與 1 都必須讓 runner 在 replay 之前停下**。
+
+**failed record 的重跑資格**：
+
+| 情況 | 結束碼 | 同一份反事實 patch 能不能重跑 |
+|---|---|---|
+| rename 之前失敗 | 1 | ✅ 可以（⛔ 沒有留下紀錄）；⚠️ 報告要標明**事故紀錄遺失** |
+| rename 成功、parent fsync 失敗 | 3 | ⛔ 不行（lookup 讀得到＝視同已記錄）→ `--recover-failed-record` 補 fsync |
+| 完整發布 | 1 | ⛔ 不行；⚠️ **改 patch 後**才可 |
+
+⚠️ `failed/` 底下**任何認不得的東西**（含發布中斷留下的 `.…staging-…` 殘骸）都讓 lookup fail-closed，
+需人工處理——⛔ 不得「忽略後繼續」，那等於讓壞 patch 靠弄壞自己的紀錄重新過關。
+
+⚠️ **三者必須一起保存**：`python/baselines/i074_stage1/`、`python/baselines/i074_stage2/envcheck/`、
+`python/baselines/i074_stage2/evidence/`——Stage 2 archive 以前兩者的 manifest 為信任錨，⛔ 不自足。
+`.gitattributes` 以 `python/baselines/i074_stage2/**/*.patch`（與 `*.log`）的 `-text` 保證 patch 逐位元保存
+（⛔ 第一層規則對 `evidence/patch/`、`failed/*/patch/` 無效）。
+
+**記憶體與耗時**（真實規模，2026-09-24，Stage 2 image，mem-guard 527m）：`--finalize` 約 42 秒、峰值
+299 MiB；`--recover-durability` 約 33 秒、314 MiB；`--check-failed-record` 約 24 秒、274 MiB——都 < 450 MiB。
+
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 
 python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋這兩者的實機快照**。

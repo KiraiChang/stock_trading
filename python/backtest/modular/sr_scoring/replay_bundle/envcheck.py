@@ -359,6 +359,8 @@ class EnvcheckResult:
     terminal_outcome: int
     identity: dict[str, Any]
     manifest: dict[str, Any]
+    # ⚠️ ③d：Stage 2 manifest 的 `environment_witness` 以它錨定（與 manifest 內容來自同一次讀取）。
+    manifest_sha256: str
 
 
 def _check_entry(rel: str, entry: Mapping[str, Any], *, artifact_sha: str, stored_sha: str,
@@ -492,7 +494,8 @@ def verify_envcheck(
             "E3b：環境見證的結果是 NOT_EQUIVALENT——它是合法證據，⛔ 但⛔ 不得拿來放行 Stage 2"
         )
     return EnvcheckResult(outcome=outcome, terminal_outcome=TERMINAL_OUTCOME[outcome],
-                          identity=identity, manifest=manifest)
+                          identity=identity, manifest=manifest,
+                          manifest_sha256=manifest_load.stored_sha256)
 
 
 def verify_envcheck_for_stage2(python_root: str | Path, stage2_identity: Mapping[str, Any]) -> EnvcheckResult:

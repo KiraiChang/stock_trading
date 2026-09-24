@@ -1028,10 +1028,12 @@ mkdir -p "$S2_REPO/scripts/lib" "$S2_REPO/python/scripts" \
 cp "$REPO_ROOT/scripts/finalize-stage2-evidence.sh" "$S2_REPO/scripts/"
 cp "$REPO_ROOT"/scripts/lib/*.sh "$S2_REPO/scripts/lib/"
 cp "$REPO_ROOT/python/scripts/validate-i074-run-identity.py" "$REPO_ROOT/python/scripts/_i074_bootstrap.py" \
-   "$S2_REPO/python/scripts/"
+   "$REPO_ROOT/python/scripts/i074-stage2-patch-claims.py" "$S2_REPO/python/scripts/"
 cp -r "$REPO_ROOT/python/backtest/modular/sr_scoring/replay_bundle" "$S2_REPO/python/backtest/modular/sr_scoring/"
 find "$S2_REPO" -name __pycache__ -prune -exec rm -rf {} +
 : > "$S2_REPO/python/baselines/i074_stage1/.keep"
+# ③d 的合成守門要一個真的 base：兩份 patch 的目標檔（反事實改它、tooling 新增另一個）。
+printf 'a\n' > "$S2_REPO/cf_target.txt"
 git -C "$S2_REPO" init -q
 git -C "$S2_REPO" add -A
 git -C "$S2_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
@@ -1042,12 +1044,17 @@ S2_ENVCHECK="$S2_PYROOT/baselines/i074_stage2/envcheck"
 s2_normalize() {
   # $1＝dry-run 輸出。⚠️ 從 `python` token 開始比；mount 另外驗。
   sed -n '/^python$/,$p' <<< "$1" \
-    | sed -e "s|^$S2_TD/run\$|<RUN_DIR>|" -e "s|^$S2_ID\$|<IDENTITY>|" \
+    | sed -e "s|^$S2_TD/[a-z0-9_]*run\$|<RUN_DIR>|" -e "s|^$S2_ID\$|<IDENTITY>|" \
+          -e "s|^$S2_PYROOT/baselines/i074_stage2/failed/[^/]*\$|<RECORD_DIR>|" \
           -e "s|^$S2_PYROOT\$|<PYTHON_ROOT>|" \
           -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
     | awk '
         prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
         prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+        prev=="--verified-patch-base"{print "<VERIFIED_PATCH_BASE>"; prev=$0; next}
+        prev=="--verified-counterfactual-sha256"{print "<VERIFIED_COUNTERFACTUAL_SHA256>"; prev=$0; next}
+        prev=="--verified-tooling-sha256"{print "<VERIFIED_TOOLING_SHA256>"; prev=$0; next}
+        prev=="--verified-composed-sha256"{print "<VERIFIED_COMPOSED_SHA256>"; prev=$0; next}
         {print; prev=$0}'
 }
 s2_expected() {
@@ -1154,10 +1161,359 @@ EMBED
   fi
   grep -qx -- "$S2_PYROOT/baselines/i074_stage1:$S2_PYROOT/baselines/i074_stage1:ro" <<< "$S2_REC" \
     && pass "recover-envcheck：Stage 1 證據⛔ 只讀" || fail "recover-envcheck：Stage 1 證據不是 :ro"
+
+  # ── ③d：其餘五種模式、合成守門與 check 的決策 ─────────────────────────────
+  #
+  # 對應 ③ evidence contract「四之二」「七之一」「七之四」與測試 y、bg、bh、bi、ah3、ak～av。
+  # ⚠️ 合成守門跑的是**真的 git**：隔離 repo 裡的 base ＋ 用 tree diff 產生的真 canonical patch。
+  # Python 段在 dry-run 下⛔ 不執行；check 的決策改用 fake docker 回傳固定的 Python 段輸出
+  # （Python 段本身的 F1～F10 在 pytest 的 test_replay_stage2_archive.py）。
+  echo "==> i074 Stage 2（③d）：其餘五種模式、合成守門與 check 的決策（隔離 repo）"
+  S2_BASE_OID="$(git -C "$S2_REPO" rev-parse HEAD)"
+  s2_sha() { sha256sum < "$1" | cut -d' ' -f1; }
+  s2_make_patches() {  # $1＝輸出目錄；$2＝反事實寫進 cf_target.txt 的內容；$3＝tooling 新增檔的內容（空＝0-byte）
+    local out="$1" wt="$S2_TD/gen.$RANDOM$RANDOM" t1 t2
+    mkdir -p "$out"
+    git -C "$S2_REPO" worktree add -q --detach "$wt" "$S2_BASE_OID"
+    printf '%s\n' "$2" > "$wt/cf_target.txt"
+    git -C "$wt" add -A
+    t1="$(git -C "$wt" write-tree)"
+    git -C "$wt" diff --binary "$S2_BASE_OID" "$t1" > "$out/counterfactual.patch"
+    # ⚠️ 同一個 T1、不同的文字表示（完整 index hash）——⛔ 不是 canonical 的 stored patch。
+    git -C "$wt" diff --binary --full-index "$S2_BASE_OID" "$t1" > "$out/counterfactual.fullindex.patch"
+    if [ -n "$3" ]; then
+      printf '%s\n' "$3" > "$wt/tool_target.txt"
+      git -C "$wt" add -A
+    fi
+    t2="$(git -C "$wt" write-tree)"
+    git -C "$wt" diff --binary "$t1" "$t2" > "$out/tooling.patch"
+    git -C "$wt" diff --binary "$S2_BASE_OID" "$t2" | sha256sum | cut -d' ' -f1 > "$out/composed.sha256"
+    git -C "$S2_REPO" worktree remove --force "$wt"
+  }
+  s2_json() {  # $1＝輸出（.json 或 .json.gz，canonical）；$2＝內容（⚠️ 只放 claims 小工具要讀的欄位）
+    python3 - "$REPO_ROOT/python" "$1" "$2" <<'PY'
+import json, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + "/scripts")
+from _i074_bootstrap import load_replay_bundle
+c = load_replay_bundle(Path(sys.argv[1]), ("canonical",))["canonical"]
+raw = c.canonical_json_bytes(json.loads(sys.argv[3]))
+out = Path(sys.argv[2])
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_bytes(c.canonical_gzip_bytes(raw) if out.name.endswith(".gz") else raw)
+PY
+  }
+  s2_patches_json() {  # $1＝cf SHA；$2＝tooling SHA；$3＝composed SHA
+    printf '{"counterfactual_patch_sha256":"%s","tooling_patch_sha256":"%s","composed_sha256":"%s","ordered_components":["counterfactual","tooling"]}' "$1" "$2" "$3"
+  }
+  s2_prov_json() {  # $1＝composed SHA
+    printf '{"base_commit":"%s","tooling_patch_sha256":"%s"}' "$S2_BASE_OID" "$1"
+  }
+  S2_P="$S2_TD/p_main"; s2_make_patches "$S2_P" b ""       # 反事實 ＋ 空 tooling
+  S2_PT="$S2_TD/p_tool"; s2_make_patches "$S2_PT" b x      # 同一份反事實 ＋ 非空 tooling
+  S2_P2="$S2_TD/p_other"; s2_make_patches "$S2_P2" c ""    # 另一份反事實
+  S2_PX="$S2_TD/p_swap"; s2_make_patches "$S2_PX" b y      # tooling 換成另一份**合法**的 patch
+  S2_CF="$(s2_sha "$S2_P/counterfactual.patch")"
+  S2_COMP_T="$(cat "$S2_PT/composed.sha256")"
+  S2_TOOL_T="$(s2_sha "$S2_PT/tooling.patch")"
+  [ "$(cat "$S2_P/composed.sha256")" = "$S2_CF" ] && [ "$(s2_sha "$S2_P/tooling.patch")" = "$(sha256sum < /dev/null | cut -d' ' -f1)" ] \
+    && pass "fixture：空 tooling 的 SHA 是空字串的 SHA、composed ＝ counterfactual" || fail "fixture 的 patch 不符預期"
+
+  s2_dry() {  # $1＝輸出檔前綴；其餘＝參數。回傳 rc，stdout／stderr 分別存檔
+    local tag="$1"; shift
+    set +e
+    s2_fin "$@" > "$S2_TD/$tag.out" 2> "$S2_TD/$tag.err"
+    local rc=$?
+    set -e
+    return "$rc"
+  }
+  s2_argv_ok() {  # $1＝說明；$2＝fixture key；$3＝輸出檔前綴
+    if [ "$(s2_normalize "$(cat "$S2_TD/$3.out")")" = "$(s2_expected "$2")" ]; then
+      pass "$1 argv 與 fixture 逐 token 相同"
+    else
+      fail "$1 argv 與 fixture 不符"
+      diff <(s2_expected "$2") <(s2_normalize "$(cat "$S2_TD/$3.out")") >&2 || true
+      cat "$S2_TD/$3.err" >&2
+    fi
+  }
+  s2_mount_ok() {  # $1＝說明；$2＝輸出檔前綴；$3＝完整的 mount 字串
+    grep -qx -- "$3" "$S2_TD/$2.out" && pass "$1" || fail "$1（找不到 $3）"
+  }
+  s2_blocked() {  # $1＝說明；$2＝輸出檔前綴；$3＝stderr 必須含的字串。⚠️ 合成守門擋下時⛔ 不得印出 docker 指令
+    if [ ! -s "$S2_TD/$2.out" ] && grep -q -- "$3" "$S2_TD/$2.err"; then
+      pass "$1"
+    else
+      fail "$1"; cat "$S2_TD/$2.err" >&2
+    fi
+  }
+
+  # ── normal（--finalize） ──
+  S2_FRUN="$S2_TD/s2run"
+  mkdir -p "$S2_FRUN/stage2" "$S2_FRUN/patches"
+  : > "$S2_FRUN/stage2/before_source_artifact.json"
+  : > "$S2_FRUN/stage2/report.json"
+  s2_json "$S2_FRUN/stage2/comparison_artifact.json" \
+    "{\"schema_version\":1,\"kind\":\"sr_zone_replay_comparison\",\"provenance\":$(s2_prov_json "$S2_COMP_T")}"
+  cp "$S2_PT/counterfactual.patch" "$S2_PT/tooling.patch" "$S2_FRUN/patches/"
+  s2_dry fin --finalize --run-dir "$S2_FRUN" || true
+  s2_argv_ok "finalize" finalize_argv fin
+  s2_mount_ok "finalize：run 目錄的 stage2/ 以 same-path :ro 掛載" fin "$S2_FRUN/stage2:$S2_FRUN/stage2:ro"
+  s2_mount_ok "finalize：凍結 patch 以 same-path :ro 掛載" fin "$S2_FRUN/patches:$S2_FRUN/patches:ro"
+  s2_mount_ok "finalize：Stage 2 identity 以 same-path :ro 掛載" fin "$S2_ID:$S2_ID:ro"
+  s2_mount_ok "finalize：Stage 1 證據⛔ 只讀" fin "$S2_PYROOT/baselines/i074_stage1:$S2_PYROOT/baselines/i074_stage1:ro"
+  # y（成功 archive）：tooling 換成另一份**合法** patch → 各自的 SHA 都對得上檔案，⛔ 但合成不出宣告的 composed。
+  cp "$S2_PX/tooling.patch" "$S2_FRUN/patches/tooling.patch"
+  s2_dry fin_y --finalize --run-dir "$S2_FRUN" && fail "y：換掉 tooling patch 竟通過" || \
+    s2_blocked "y：finalize 換掉 tooling patch → 合成守門中止、⛔ 不呼叫 Python" fin_y "合成 SHA"
+  cp "$S2_PT/tooling.patch" "$S2_FRUN/patches/tooling.patch"
+  # 非 canonical 的反事實 patch（同一個 T1、不同的文字表示）→ 正式 archive 無條件拒絕
+  cp "$S2_PT/counterfactual.fullindex.patch" "$S2_FRUN/patches/counterfactual.patch"
+  s2_dry fin_nc --finalize --run-dir "$S2_FRUN" && fail "非 canonical 的反事實 patch 竟通過" || \
+    s2_blocked "finalize：反事實 patch ⛔ 不是 canonical 的 git diff --binary 輸出 → 中止" fin_nc "canonical"
+  cp "$S2_PT/counterfactual.patch" "$S2_FRUN/patches/counterfactual.patch"
+  mv "$S2_FRUN/stage2/report.json" "$S2_TD/report.bak"
+  s2_dry fin_miss --finalize --run-dir "$S2_FRUN" && fail "缺 report 竟通過" || \
+    s2_blocked "finalize：run 目錄缺輸入 → Docker 之前就拒絕" fin_miss "report.json"
+  mv "$S2_TD/report.bak" "$S2_FRUN/stage2/report.json"
+  s2_json "$S2_TD/badkind.json" "{\"schema_version\":1,\"kind\":\"sr_zone_replay_report\",\"provenance\":$(s2_prov_json "$S2_COMP_T")}"
+  cp "$S2_FRUN/stage2/comparison_artifact.json" "$S2_TD/comparison.bak"
+  cp "$S2_TD/badkind.json" "$S2_FRUN/stage2/comparison_artifact.json"
+  s2_dry fin_claims --finalize --run-dir "$S2_FRUN" && fail "取不到宣告值竟通過" || \
+    s2_blocked "finalize：取不到合成守門的宣告值 → 中止、⛔ 不呼叫 Python" fin_claims "宣告值"
+  cp "$S2_TD/comparison.bak" "$S2_FRUN/stage2/comparison_artifact.json"
+
+  # ── 高 1（2026-09-24 review）：合成守門與封存之間的交接 ──
+  # ⚠️ shell 驗過的四個值以 `--verified-*` 交給 Python；Python 拿實際要封存的內容比對（pytest 的
+  # test_toctou_*）。這裡守 shell 那一半：交出去的就是**合成守門驗過的**值，⛔ 不是事後重讀的。
+  s2_after_flag() {  # $1＝檔案；$2＝旗標 → 印出它後面那個 token
+    awk -v f="$2" 'prev==f{print; exit} {prev=$0}' "$1"
+  }
+  if [ "$(s2_after_flag "$S2_TD/fin.out" --verified-patch-base)" = "$S2_BASE_OID" ] \
+     && [ "$(s2_after_flag "$S2_TD/fin.out" --verified-counterfactual-sha256)" = "$S2_CF" ] \
+     && [ "$(s2_after_flag "$S2_TD/fin.out" --verified-tooling-sha256)" = "$S2_TOOL_T" ] \
+     && [ "$(s2_after_flag "$S2_TD/fin.out" --verified-composed-sha256)" = "$S2_COMP_T" ]; then
+    pass "高 1：finalize 把合成守門驗過的 base 與三個 SHA 交給 Python"
+  else
+    fail "高 1：交接值與合成守門驗過的值不符"
+  fi
+  s2_rejects "高 1：使用者自帶 --verified-composed-sha256 → 拒絕（只能由腳本注入）" \
+    --finalize --run-dir "$S2_FRUN" --verified-composed-sha256 "$S2_COMP_T"
+  # 合成守門之後、Docker 之前把 tooling patch 換成另一份合法 patch（fake docker 在 `run` 的第一步換檔）：
+  # ⚠️ 交出去的必須仍是 A 的值——Python 讀到的是 B，比對不符即中止（見 pytest）。
+  mkdir -p "$S2_TD/swapbin"
+  cat > "$S2_TD/swapbin/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  image) printf '%s\n' "$3"; exit 0 ;;
+  run) cp "$SWAP_FROM" "$SWAP_TO"; shift; printf '%s\n' "$@" > "$FAKE_ARGV"; exit 0 ;;
+esac
+exit 0
+FAKE
+  chmod +x "$S2_TD/swapbin/docker"
+  set +e
+  env -u PY_IMAGE PATH="$S2_TD/swapbin:$PATH" SWAP_FROM="$S2_PX/tooling.patch" SWAP_TO="$S2_FRUN/patches/tooling.patch" \
+    FAKE_ARGV="$S2_TD/swap.argv" REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" \
+    "$S2_FIN" --finalize --run-dir "$S2_FRUN" >/dev/null 2>"$S2_TD/swap.err"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$(s2_sha "$S2_FRUN/patches/tooling.patch")" != "$S2_TOOL_T" ] \
+     && [ "$(s2_after_flag "$S2_TD/swap.argv" --verified-tooling-sha256)" = "$S2_TOOL_T" ] \
+     && [ "$(s2_after_flag "$S2_TD/swap.argv" --verified-composed-sha256)" = "$S2_COMP_T" ]; then
+    pass "高 1：合成守門之後換掉輸入 → 交給 Python 的仍是驗過的 A（Python 讀到 B 即中止）"
+  else
+    fail "高 1：換檔回歸測試不符（rc=$rc）"; cat "$S2_TD/swap.err" >&2
+  fi
+  cp "$S2_PT/tooling.patch" "$S2_FRUN/patches/tooling.patch"
+
+  # ── recover-durability ──
+  S2_EVID="$S2_PYROOT/baselines/i074_stage2/evidence"
+  mkdir -p "$S2_EVID/patch" "$S2_EVID/identity"
+  cp "$S2_PT/counterfactual.patch" "$S2_PT/tooling.patch" "$S2_EVID/patch/"
+  cp "$S2_ENVCHECK/identity/run_identity.json.gz" "$S2_EVID/identity/"
+  s2_json "$S2_EVID/evidence_manifest.json" \
+    "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_evidence_manifest\",\"patches\":$(s2_patches_json "$S2_CF" "$S2_TOOL_T" "$S2_COMP_T")}"
+  s2_json "$S2_EVID/comparison/comparison_artifact.json.gz" \
+    "{\"schema_version\":1,\"kind\":\"sr_zone_replay_comparison\",\"provenance\":$(s2_prov_json "$S2_COMP_T")}"
+  s2_dry rd --recover-durability || true
+  s2_argv_ok "recover-durability" recover_durability_argv rd
+  if grep -qF -- "$S2_ID" "$S2_TD/rd.out"; then
+    fail "recover-durability 的指令出現了外部 identity 路徑"
+  else
+    pass "recover-durability：⛔ 不掛載也⛔ 不注入外部 identity"
+  fi
+  # bi：換掉 archive 內的 tooling patch 並**同步改 manifest**——metadata 全對，⛔ 只有合成守門擋得下。
+  cp "$S2_PX/tooling.patch" "$S2_EVID/patch/tooling.patch"
+  s2_json "$S2_EVID/evidence_manifest.json" \
+    "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_evidence_manifest\",\"patches\":$(s2_patches_json "$S2_CF" "$(s2_sha "$S2_PX/tooling.patch")" "$S2_COMP_T")}"
+  s2_dry rd_bi --recover-durability && fail "bi：recovery 竟放行換過的 patch" || \
+    s2_blocked "bi：recover-durability 重做合成守門 → 中止、⛔ 不呼叫 Python" rd_bi "合成 SHA"
+  cp "$S2_PT/tooling.patch" "$S2_EVID/patch/tooling.patch"
+
+  # ── publish-failed-record ──
+  S2_XRUN="$S2_TD/failrun"
+  mkdir -p "$S2_XRUN/stage2" "$S2_XRUN/patches"
+  s2_json "$S2_XRUN/stage2/bounded_diagnostics.json" \
+    "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_counterfactual_failure\",\"provenance\":$(s2_prov_json "$S2_CF")}"
+  cp "$S2_P/counterfactual.patch" "$S2_P/tooling.patch" "$S2_XRUN/patches/"
+  s2_dry pf --publish-failed-record --run-dir "$S2_XRUN" || true
+  s2_argv_ok "publish-failed-record" publish_failed_record_argv pf
+  s2_mount_ok "publish-failed-record：中繼檔目錄以 same-path :ro 掛載" pf "$S2_XRUN/stage2:$S2_XRUN/stage2:ro"
+  # y／bh（failed record）：反事實換成另一份合法 patch → 合成不出中繼檔記的 composed → ⛔ 不發布。
+  cp "$S2_P2/counterfactual.patch" "$S2_XRUN/patches/counterfactual.patch"
+  s2_dry pf_y --publish-failed-record --run-dir "$S2_XRUN" && fail "bh：換掉 patch 竟發布" || \
+    s2_blocked "y／bh：publish-failed-record 的 F8-a 不過 → ⛔ 不發布、⛔ 不呼叫 Python" pf_y "合成 SHA"
+  cp "$S2_P/counterfactual.patch" "$S2_XRUN/patches/counterfactual.patch"
+
+  # ── recover-failed-record ──
+  S2_FAILED="$S2_PYROOT/baselines/i074_stage2/failed"
+  s2_record() {  # $1＝record 目錄；$2＝patch 目錄；$3＝宣告的 composed（空＝用 $2 的）
+    mkdir -p "$1/patch"
+    cp "$2/counterfactual.patch" "$2/tooling.patch" "$1/patch/"
+    local comp="${3:-$(cat "$2/composed.sha256")}"
+    s2_json "$1/failure_record.json" \
+      "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_failed_attempt\",\"patches\":$(s2_patches_json "$(s2_sha "$2/counterfactual.patch")" "$(s2_sha "$2/tooling.patch")" "$comp"),\"provenance\":$(s2_prov_json "$comp")}"
+  }
+  S2_REC1="$S2_FAILED/b1_fixture-$S2_CF"
+  s2_record "$S2_REC1" "$S2_P"
+  s2_dry rf --recover-failed-record "$S2_REC1" || true
+  s2_argv_ok "recover-failed-record" recover_failed_record_argv rf
+  mkdir -p "$S2_TD/elsewhere"
+  cp -r "$S2_REC1" "$S2_TD/elsewhere/"
+  s2_dry rf_out --recover-failed-record "$S2_TD/elsewhere/$(basename "$S2_REC1")" && fail "failed root 外的目錄竟被接受" || \
+    s2_blocked "recover-failed-record：只接受 failed/ 的直接子目錄" rf_out "只接受"
+  ln -s "$S2_REC1" "$S2_TD/reclink"
+  s2_dry rf_ln --recover-failed-record "$S2_TD/reclink" && fail "symlink 竟被接受" || \
+    s2_blocked "recover-failed-record：⛔ 不接受 symlink" rf_ln "symlink"
+  S2_REC_BAD="$S2_FAILED/b1_fixture-$(printf '%064d' 1)"
+  s2_record "$S2_REC_BAD" "$S2_PX" "$S2_CF"         # tooling 非空、卻宣告「composed ＝ 反事實」
+  s2_dry rf_y --recover-failed-record "$S2_REC_BAD" && fail "F8-a：recovery 竟放行合成不出的 record" || \
+    s2_blocked "F8-a：recover-failed-record 重做合成守門 → 中止" rf_y "合成 SHA"
+
+  # ── check-failed-record：argv 與「只吃路徑」 ──
+  s2_dry chk --check-failed-record --counterfactual-patch "$S2_P/counterfactual.patch" || true
+  s2_argv_ok "check-failed-record" check_failed_record_argv chk
+  s2_mount_ok "check-failed-record：lookup 唯讀，連 i074_stage2 也 :ro" chk \
+    "$S2_PYROOT/baselines/i074_stage2:$S2_PYROOT/baselines/i074_stage2:ro"
+  if grep -qF -- "$S2_P/counterfactual.patch" "$S2_TD/chk.out"; then
+    fail "check-failed-record：使用者的 patch 路徑進了容器"
+  else
+    pass "check-failed-record：使用者的 patch ⛔ 不進容器（比對鍵只在 host 推導）"
+  fi
+  s2_rejects "ar：--counterfactual-patch 給 SHA（⛔ 不是檔案）→ 拒絕" --check-failed-record --counterfactual-patch "$S2_CF"
+  s2_rejects "ar：⛔ 沒有吃 SHA 的參數" --check-failed-record --counterfactual-patch-sha256 "$S2_CF"
+
+  # ── bg：模式互斥、重複、⛔ 逐檔覆寫 ──
+  s2_rejects "bg：--finalize 與 --recover-durability 互斥" --finalize --recover-durability --run-dir "$S2_FRUN"
+  s2_rejects "bg：--check-failed-record 缺 --counterfactual-patch → 拒絕" --check-failed-record
+  s2_rejects "bg：--counterfactual-patch 只屬於 check" --finalize --run-dir "$S2_FRUN" --counterfactual-patch "$S2_P/counterfactual.patch"
+  s2_rejects "bg：--counterfactual-patch 重複 → 拒絕" --check-failed-record \
+    --counterfactual-patch "$S2_P/counterfactual.patch" --counterfactual-patch "$S2_P/counterfactual.patch"
+  s2_rejects "bg：--recover-failed-record 重複 → 拒絕" --recover-failed-record "$S2_REC1" --recover-failed-record "$S2_REC1"
+  s2_rejects "bg：--recover-durability ⛔ 不接受 --run-dir" --recover-durability --run-dir "$S2_FRUN"
+  s2_rejects "bg：--publish-failed-record 缺 --run-dir → 拒絕" --publish-failed-record
+  s2_rejects "bg：⛔ 不接受 --source 逐檔覆寫" --finalize --run-dir "$S2_FRUN" \
+    --source "stage2/report.json=$S2_TD/other.json"
+
+  # ── check-failed-record 的決策（fake docker 回傳 Python 段的輸出） ──
+  mkdir -p "$S2_TD/chkbin"
+  cat > "$S2_TD/chkbin/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  image) printf '%s\n' "$3"; exit 0 ;;
+  run) printf 'run\n' >> "$FAKE_DOCKER_LOG"
+       [ "${FAKE_CHECK_RC:-0}" = "0" ] || exit "$FAKE_CHECK_RC"
+       cat "$FAKE_CHECK_JSON"; exit 0 ;;
+esac
+exit 0
+FAKE
+  chmod +x "$S2_TD/chkbin/docker"
+  s2_check_json() {  # $1＝輸出；其餘＝record 目錄（宣告值讀自各自的 failure_record.json）
+    python3 - "$S2_BASE_OID" "$@" <<'PY'
+import json, sys
+base, out, dirs = sys.argv[1], sys.argv[2], sys.argv[3:]
+records = []
+for d in dirs:
+    r = json.load(open(d + "/failure_record.json"))
+    records.append({"dir": d, "base_commit": r["provenance"]["base_commit"],
+                    **{k: r["patches"][k] for k in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256")}})
+json.dump({"mode": "check_failed_record", "base_commit": base, "records": records}, open(out, "w"))
+PY
+  }
+  s2_check() {  # $1＝輸出檔前綴；$2＝canned JSON；$3＝輸入 patch；回傳 finalizer 的 rc
+    local tag="$1"
+    : > "$S2_TD/$tag.log"
+    set +e
+    env -u PY_IMAGE PATH="$S2_TD/chkbin:$PATH" FAKE_DOCKER_LOG="$S2_TD/$tag.log" FAKE_CHECK_JSON="$2" \
+      FAKE_CHECK_RC="${S2_FAKE_RC:-0}" REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" \
+      "$S2_FIN" --check-failed-record --counterfactual-patch "$3" > "$S2_TD/$tag.out" 2> "$S2_TD/$tag.err"
+    local rc=$?
+    set -e
+    return "$rc"
+  }
+  s2_check_rc() {  # $1＝說明；$2＝預期 rc；$3＝輸出檔前綴；其餘＝s2_check 的參數
+    local label="$1" want="$2" tag="$3" rc=0
+    shift 3
+    s2_check "$tag" "$@" || rc=$?
+    if [ "$rc" = "$want" ]; then pass "$label"; else fail "$label（rc=$rc，預期 $want）"; cat "$S2_TD/$tag.err" >&2; fi
+  }
+  s2_check_json "$S2_TD/none.json"
+  s2_check_json "$S2_TD/hit.json" "$S2_REC1"
+  S2_REC2="$S2_FAILED/b1_fixture-$(s2_sha "$S2_P2/counterfactual.patch")"
+  s2_record "$S2_REC2" "$S2_P2"
+  s2_check_json "$S2_TD/other.json" "$S2_REC2"
+  s2_check_json "$S2_TD/bad.json" "$S2_REC_BAD"
+  printf '%s\n' 'diff --git a/cf_target.txt b/cf_target.txt' '--- a/cf_target.txt' '+++ b/cf_target.txt' \
+    '@@ -1 +1 @@' '-zzz' '+b' > "$S2_TD/conflict.patch"
+  s2_check_json "$S2_TD/outside.json" "$S2_TD/elsewhere/$(basename "$S2_REC1")"
+
+  s2_check_rc "ak：沒有任何 record → rc=0 放行" 0 ck_none "$S2_TD/none.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "al：records 都有效、完整 SHA 都不同 → rc=0" 0 ck_other "$S2_TD/other.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "am／n：完整 SHA 命中 → rc=2" 2 ck_hit "$S2_TD/hit.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "as／av：bytes 不同但 T1 相同（非 canonical）→ 仍命中 rc=2（命中優先）" 2 ck_as "$S2_TD/hit.json" \
+    "$S2_P/counterfactual.fullindex.patch"
+  s2_check_rc "au：非 canonical 且未命中 → rc=1（replay 之前拒絕）" 1 ck_au "$S2_TD/none.json" \
+    "$S2_P/counterfactual.fullindex.patch"
+  grep -q "canonical" "$S2_TD/ck_au.err" && pass "au：錯誤訊息指出不是 canonical" || fail "au 的錯誤訊息不符"
+  s2_check_rc "at：patch 套用失敗 → rc=1" 1 ck_at "$S2_TD/none.json" "$S2_TD/conflict.patch"
+  s2_check_rc "ap／ah3：Python 段過、F8-a 失敗 → rc=1" 1 ck_ap "$S2_TD/bad.json" "$S2_P/counterfactual.patch"
+  grep -q "合成守門" "$S2_TD/ck_ap.err" && pass "ap：失敗點是合成守門" || fail "ap 的失敗點不符"
+  S2_FAKE_RC=1 s2_check_rc "an／aq／ah3：Python 段失敗（record 損壞、信任錨失敗）→ rc=1" 1 ck_ao "$S2_TD/bad.json" \
+    "$S2_P/counterfactual.patch"
+  if grep -q "Python 段失敗" "$S2_TD/ck_ao.err" && ! grep -q "合成守門" "$S2_TD/ck_ao.err"; then
+    pass "ao：Python 段失敗時 shell 合成段⛔ 不執行（失敗點唯一）"
+  else
+    fail "ao：Python 段失敗後 shell 段仍被執行"; cat "$S2_TD/ck_ao.err" >&2
+  fi
+  s2_check_rc "Python 段回報 failed root 外的 record → rc=1" 1 ck_out "$S2_TD/outside.json" "$S2_P/counterfactual.patch"
+  grep -qx run "$S2_TD/ck_hit.log" && pass "check：Python 段在容器內執行（fake docker 收到 run）" || fail "check：沒有執行 Python 段"
+
+  # ⚠️ 合成守門與程式碼 worktree 都要被清掉（dry-run、中止、fake docker 三種路徑）。
+  S2_WT_COUNT="$(git -C "$S2_REPO" worktree list | wc -l)"
+  [ "$S2_WT_COUNT" = "1" ] && pass "③d 的每一條路徑都清掉了暫時 worktree" \
+    || { fail "③d 留下了 worktree（$S2_WT_COUNT 條）"; git -C "$S2_REPO" worktree list >&2; }
 elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
   fail "Stage 2 finalizer 測試：找不到 image 或正式 bundle（IMAGE_REQUIRED=1）"
 else
   echo "  skip 找不到 image 或正式 bundle，略過 Stage 2 finalizer 測試" >&2
+fi
+
+# ── aj：`.gitattributes` 對巢狀的 patch／log 生效（③ evidence contract「三之零」） ──
+echo "==> i074 Stage 2：.gitattributes 的巢狀規則"
+for s2_attr_path in python/baselines/i074_stage2/evidence/patch/counterfactual.patch \
+                    python/baselines/i074_stage2/failed/b1_x-0/patch/tooling.patch \
+                    python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
+                    python/baselines/i074_stage2/failed/b1_x-0/run.log; do
+  if [ "$(git -C "$REPO_ROOT" check-attr text -- "$s2_attr_path")" = "$s2_attr_path: text: unset" ]; then
+    pass "aj：$s2_attr_path 的 text 是 unset（逐位元保存）"
+  else
+    fail "aj：$s2_attr_path 的 text ⛔ 不是 unset"
+  fi
+done
+if [ "$(git -C "$REPO_ROOT" check-attr text -- python/baselines/i074_stage2/evidence/evidence_manifest.json)" \
+     = "python/baselines/i074_stage2/evidence/evidence_manifest.json: text: unspecified" ]; then
+  pass "aj：JSON artifact ⛔ 不跟著繞過 whitespace 檢查"
+else
+  fail "aj：JSON artifact 被 patch 的規則波及"
 fi
 
 # ── pin --stage 2：專用 tag、tarball、Stage 1 行為不變 ─────────────────────

@@ -11,7 +11,8 @@
   的發布段：staging 建完整 tree → `rename_noreplace()` 是**唯一的 commit point** → fsync parent；
 * 路徑安全 `resolve_repo_path()`。
 
-Stage 2 archive 本身、failed-attempt record 與 check／recover 屬 ③d，⛔ 不在本檔。
+Stage 2 archive 本身、failed-attempt record 與 check／recover 屬 ③d，在 `stage2_archive.py`
+（⚠️ ⛔ 不放本檔：`envcheck.py` import 本檔，而 ③d 要用 `envcheck.py`——放這裡會循環 import）。
 
 ⛔ **不改 Stage 1 的 `evidence.py`**——`ARCHIVE_LAYOUT` 是 9 檔封閉集合，動它會讓
 `python/baselines/i074_stage1/` 已封存的證據立刻驗不過。這裡只**呼叫**它的 validator。
@@ -170,7 +171,14 @@ def load_stage1_anchor(python_root: str | Path) -> Stage1Anchor:
     base = STAGE1_EVIDENCE_MANIFEST_PATH.rsplit("/", 1)[0]
 
     def member_path(rel: str) -> Path:
-        return resolve_repo_path(python_root, f"{base}/{rel}")
+        path = resolve_repo_path(python_root, f"{base}/{rel}")
+        # ⚠️ 缺檔時錯誤訊息要指出原因（③ evidence contract 測試 h）——⛔ 不只丟一個 ENOENT。
+        if not path.is_file():
+            raise ArtifactError(
+                f"Stage 1 信任錨：找不到 {base}/{rel}——⚠️ Stage 2 的證據與 python/baselines/i074_stage1/ "
+                "**必須一起保存**"
+            )
+        return path
 
     members: dict[str, dict[str, str]] = {}
 
@@ -376,6 +384,17 @@ class ClosedArchiveWriter:
         target.write_bytes(blob)
         entry = {"artifact_sha256": sha256_hex(raw), "stored_sha256": sha256_hex(blob),
                  "stored_bytes": len(blob)}
+        self.files[rel] = entry
+        return entry
+
+    def add_raw(self, rel: str, blob: bytes) -> dict[str, Any]:
+        """raw bytes（patch）：⛔ 不壓縮、⛔ 不包進 JSON——位元組必須等於 `git diff --binary` 的輸出。
+
+        ⚠️ entry 是 `raw_blob` 型別：只有 `stored_sha256`／`stored_bytes`（⛔ 沒有 `artifact_sha256`）。
+        """
+        target = self.path_for(rel)
+        target.write_bytes(blob)
+        entry = {"stored_sha256": sha256_hex(blob), "stored_bytes": len(blob)}
         self.files[rel] = entry
         return entry
 

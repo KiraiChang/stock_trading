@@ -7,9 +7,12 @@
 #
 # ⚠️ **`-text` 才是保證位元組的那一項**——⛔ `-whitespace` 只關掉診斷，⛔ 不會阻止 Git
 # 在 checkout／commit 時做換行正規化；⛔ 改一個位元組，記錄的 SHA-256 就對不上。
-# ⚠️ **逐副檔名指定，⛔ 不用 `**` 涵蓋整個目錄**：之後 Stage 2 的 JSON artifact 會放進
-# 同一個目錄，⛔ 那些不該跟著繞過 whitespace 檢查。
+# ⚠️ **逐副檔名指定，⛔ 不用 `**` 涵蓋整個目錄的所有檔案**：Stage 2 的 JSON artifact 也在
+# 同一棵樹裡，⛔ 那些不該跟著繞過 whitespace 檢查。
 #
-# ⚠️ 正式的保存路徑與格式仍由步驟 ③ 的 evidence contract 定案。
-python/baselines/i074_stage2/*.patch -text -whitespace
-python/baselines/i074_stage2/*.log   -text -whitespace conflict-marker-size=200
+# ⚠️ **必須用 `**/`**（③ evidence contract「三之零」，2026-09-24 ③d）：成功 archive 的
+# `evidence/patch/*.patch` 與 failed record 的 `failed/*/patch/*.patch` 都在**巢狀**目錄；
+# ⛔ 原本的第一層規則 `i074_stage2/*.patch` 對它們**無效**（已用 `git check-attr` 實查）。
+# `**/` 也涵蓋第一層（② 的產物留在原處）。
+python/baselines/i074_stage2/**/*.patch -text -whitespace
+python/baselines/i074_stage2/**/*.log   -text -whitespace conflict-marker-size=200

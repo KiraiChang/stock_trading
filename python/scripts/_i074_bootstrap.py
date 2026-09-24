@@ -24,6 +24,9 @@ _MODULES = ("canonical", "publish", "calendar", "artifacts", "bundle", "run_iden
 # ⚠️ I-074 Stage 2：host 端要跑 Stage 1 信任錨（見證趟的 E7 前置守門）時，再多載這幾個
 # （同樣 dependency-light；2026-09-23 在沒有 pandas 的 host 上實測可載入並跑完）。
 STAGE2_MODULES = _MODULES + ("provenance", "crossday", "probe", "evidence", "stream", "stage2_evidence")
+# ⚠️ ③d：host 端取合成守門的宣告值（`i074-stage2-patch-claims.py`）還要 envcheck 與 stage2_archive
+# （同樣 dependency-light；2026-09-24 在沒有 pandas 的 host 上實測可載入）。
+STAGE2_ARCHIVE_MODULES = STAGE2_MODULES + ("envcheck", "stage2_archive")
 
 
 def load_replay_bundle(repo_python: Path | None = None, modules: tuple[str, ...] = _MODULES) -> dict:

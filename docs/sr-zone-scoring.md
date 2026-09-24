@@ -3014,6 +3014,100 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 實測（2026-09-23，host）：串流驗證真實的 D+1 artifact 峰值 RSS **135 MiB**、8.7 秒；
 整份載入是約 449 MiB。
 
+#### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；⚠️ 待 review）
+
+⚠️ **範圍**：Stage 2（counterfactual）正式執行的**證據層**——成功 archive、反事實沒有生效時的
+failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過見 `issue.md` I-074
+「③ Stage 2 evidence contract」（現行版）與「③d 實作結果」；操作程序見
+[`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的正式證據與 failed record 程序」。
+實作在 `replay_bundle/stage2_archive.py`（⚠️ ⛔ 不在 `stage2_evidence.py`：`envcheck.py` import 後者，
+放一起會循環 import），合成守門在 `scripts/finalize-stage2-evidence.sh`。
+
+**成功 archive 的封閉 layout**（`python/baselines/i074_stage2/evidence/`；6 個 payload ＋ manifest ＝ 7 檔，
+多一個未知檔案即中止）：
+
+| 路徑 | 內容 | entry 型別 |
+|---|---|---|
+| `before/before_source_artifact.json.gz` | before 全量（kind `sr_zone_stage2_before_source`） | `canonical_artifact` |
+| `comparison/comparison_artifact.json.gz` | cohort 的逐列比較（`COMPARISON_KIND`） | `canonical_artifact` |
+| `comparison/report.json.gz` | 人看的前 200 列（`REPORT_KIND`） | `canonical_artifact` |
+| `identity/run_identity.json.gz` | ⚠️ **逐位元等於** `envcheck/` 封存的那一份（唯一固定的 Stage 2 identity） | `canonical_artifact` |
+| `patch/counterfactual.patch` | ⚠️ **raw bytes**（⛔ 不壓縮、⛔ 不包進 JSON），⛔ 不得為 0 bytes | `raw_blob` |
+| `patch/tooling.patch` | raw bytes，**可為 0 bytes** | `raw_blob` |
+| `evidence_manifest.json` | kind `sr_zone_stage2_evidence_manifest`，⛔ 不壓縮 | — |
+
+⚠️ **entry 型別由 layout 決定**，⛔ 不由 manifest 宣告——否則 `.json.gz` 可以被宣告成 `raw_blob`
+來跳過 canonical 驗證。`canonical_artifact` ＝ `{artifact_sha256, stored_sha256, stored_bytes}`；
+`raw_blob` ＝ `{stored_sha256, stored_bytes}`（⛔ 沒有 `artifact_sha256`）。
+
+**manifest 的封閉欄位**：`schema_version`／`kind`／`bundle_id`／`expected_image_id`／`files`／`patches`／
+`stage1_evidence`（與 envcheck manifest **同一個定義**）／`environment_witness`（第二個信任錨：
+`envcheck/evidence_manifest.json` 的寫死路徑、SHA 與四個成員）／`terminal_outcome`（v3 模型下恆為 0，
+⚠️ recovery 仍讀回並回傳，⛔ 不寫死）／`generated_at`／`finalizer_provenance`（role `finalizer`）。
+
+**兩份 patch 的三方 SHA**（⚠️ 這是「⛔ 不讓語意修改偽裝成 instrumentation」的那道綁定）：
+
+```text id="sr_zone_stage2_patch_sha_001"
+counterfactual_patch_sha256 = sha256(git diff --binary <base> <T1>)
+tooling_patch_sha256        = sha256(git diff --binary <T1> <T2>)     ← tooling 為空時是空字串的 SHA
+composed_sha256             = sha256(git diff --binary <base> <T2>)   ＝ before source 的 provenance.tooling_patch_sha256
+ordered_components          = ["counterfactual", "tooling"]            ← 順序由此強制，⛔ 不靠「hash 必然不同」
+```
+
+⚠️ Python 段只能驗**宣告值彼此一致**（兩份 raw patch 的 SHA、`ordered_components`、tooling 為空時
+`composed == counterfactual`、`composed` 等於 before 的 provenance）；**合成關係本身**由 shell 在隔離
+worktree 實際重建：在 base 依序 `git apply --index`、每一步 `git write-tree` 取中繼 tree（⛔ 不建中繼
+commit、HEAD 全程不動）、重算三個 SHA——⛔ 任一不符即中止、⛔ 不呼叫 Python。成功 archive 的發布與
+recovery、failed record 的發布、lookup 與 recovery **五處都做**。
+⚠️ **合成守門與封存之間的交接**（2026-09-24 review）：Python 在 shell 之後**重新讀**來源，兩段之間來源若被
+一致地換掉，shell 證明的是 A、封存的卻是 B（`:ro` 掛載凍結不了 host 上的內容）。所以 shell 把驗過的
+**patch base 與三個 SHA** 以 `--verified-*` 注入（⛔ 不是 `--base-commit`——那是 finalizer 程式碼的來源），
+Python 拿**實際要封存（或要 fsync）的內容**比對（`check_verified_composition()`），相符才允許 commit point；
+成功 archive 的發布與 recovery、failed record 的發布與 recovery 都要求它。shell 端也先把兩份 patch 各讀一次到
+私有目錄，SHA 與 `git apply` 都用那份副本。
+
+**before source 的額外守門**（Stage 2 計畫書「①之三」，⚠️ 由 `CounterfactualEffectCheck` 實作，
+執行期與證據層共用同一支）：`validate_diagnostics(side="before")` 刻意不驗等價式（公開行為不改），
+所以另外依**固定順序**驗——① 每列 `rr_decoupling_candidate == (lifecycle_phase == "CONTINUATION" and not
+setup_rr_qualified)`，不成立 ⇒ `candidate_flag_inconsistent`；② ①成立後候選集合必須為空，否則 ⇒
+`rr_not_restored`。⚠️ 同時違反時一律是前者（flag 不可信，由它算的候選集合也不可信）。⛔ 只看
+`candidate_keys == ∅` 會在 flag 壞成恆 false 時假綠。
+
+**comparison／report 的 validator**（`artifacts.py` 的 `validate_comparison_artifact()`／`validate_report()`，
+③d 新增——原本只有 builder）：comparison 每列必須**恰好等於** `compare_rows(before, after)`（⛔ 不信任
+封存的 `differences`），keys 已排序且唯一；report 的 `candidate_rows`／`difference_field_counts` 由
+**完整** comparison 重算，`rows_shown` 必須恰好是 `min(200, candidate_rows)`（⛔ 空報告不合法；200 是
+bundle 的 `report_max_rows`，測試釘住兩者相等），`rows` 是依 key 排序後的前 `rows_shown` 列。
+
+**全圖十六道**（`verify_stage2_graph()`；finalize 對 staging、recovery 對正式 archive **呼叫同一支**）：
+四份 canonical artifact 的完整 validator；Stage 1 信任錨十道；comparison 每列的 `before`／`after`
+**逐鍵等於**來源列（before source 與已錨定的 D+1）；comparison keys 恰好是 D+1 cohort；report 重算；
+bundle 鏈（含 envcheck manifest）；provenance 位置與 role **逐一列舉**（before source、comparison 是
+`stage1`，manifest 的 `finalizer_provenance` 是 `finalizer`，image 都等於 `expected_image_id`）；
+`before_ref` ＝ 兩份的 `provenance.base_commit` ＝ ⚠️ Stage 1 after 的 base（③d 補的綁定）；
+`timeframe`／`replay_scope` 等於 D+1；before source 與 comparison 的 provenance 逐欄相等；
+report 綁回 comparison；`rows_shown`；comparison keys 排序唯一；before 的候選集合為空；「①之三」；
+環境見證錨 E1～E7 ＋ **E3b**（只接受 EQUIVALENT）與 image 鏈、identity 逐位元相等。
+另有全量守門：before 的 keys **依序恰好等於**已錨定 D+1 的全量 keys（⛔ 不是「等於 bundle universe」
+——archive 裡沒有 bundle manifest，recovery 跑不了那一條）。
+
+**failed-attempt record**（`python/baselines/i074_stage2/failed/<bundle_id>-<counterfactual_patch_sha256>/`，
+⚠️ 完整 64 碼；⛔ 不是成功 archive）：`failure_record.json`（kind `sr_zone_stage2_failed_attempt`，canonical、
+⛔ 不壓縮）＋ `patch/counterfactual.patch` ＋ `patch/tooling.patch`，⛔ 多一個檔案即中止。
+`bounded_diagnostics` 是依 `failure_reason` 分流的封閉 union：`candidate_flag_inconsistent` →
+`{inconsistent_row_count, sample_keys}`、`rr_not_restored` → `{before_candidate_count, sample_keys}`；
+sample 依 key 排序取前 `min(20, count)` 個、⛔ 不重複，每項恰好
+`{symbol, timeframe, as_of, lifecycle_phase, setup_rr_qualified, rr_decoupling_candidate}`，且**必須真的違反**
+它宣稱的那一條（F10）；完整計數照樣保留。⚠️ **計算過程也有界**（2026-09-24 review）：兩種違規各一個
+計數器 ＋ 只保留排序最前面 20 筆的 buffer（`BoundedSample`），⛔ 不先收集全部違規列再排序截斷。F1～F10 的其餘各項：embedded identity 通過 validator 且
+**完整等於**唯一固定的 Stage 2 identity（F2-a——只差 `created_at` 也拒絕）、provenance 是那一次 replay 的
+（role `stage1`、`tooling_patch_sha256` ＝ composed、`base_commit` ＝ Stage 1 after 的 base）、目錄名與內容
+相符（F4）、兩份 patch 的實際 bytes 重算相符（F8）。
+
+⚠️ **記憶體**（「五之一」）：before source 一律串流，只常駐 keys 與 cohort 那幾列；真實規模實測
+（2026-09-24，Stage 2 image，13,417 列、156 列 cohort）：finalize 峰值 **299 MiB**、recovery **314 MiB**、
+lookup **274 MiB**，都在 450 MiB 以內。
+
 #### Stage 2 有**兩種** terminal outcome
 
 | 候選集合檢查 | 產出 | 結束碼 |

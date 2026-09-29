@@ -1289,6 +1289,36 @@ base 套用輸入 patch、`write-tree` 得 T1，鍵 ＝ `sha256(git diff --binar
 **記憶體與耗時**（真實規模，2026-09-24，Stage 2 image，mem-guard 527m）：`--finalize` 約 42 秒、峰值
 299 MiB；`--recover-durability` 約 33 秒、314 MiB；`--check-failed-record` 約 24 秒、274 MiB——都 < 450 MiB。
 
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作，⚠️ 待 review）
+
+⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
+它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
+供步驟 ⑤ 裁定 `M_safety`。⛔ 它**不是**正式的證據入口，⛔ 也⛔ 不做可用空間檢查（preflight 屬 ⑦）。
+
+```text id="i074_stage2_sizing_usage_001"
+# ④ 可用性驗證（允許未 commit；報告記錄實際執行的腳本 SHA-256）
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --work-dir ~/i074_stage2_sizing/<名稱>
+
+# ⑤ 正式量測（scripts/、python/、.gitattributes 必須 clean；harness 檔案必須等於 HEAD；
+#   stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案——要保存請導到 /dev/shm 或留在終端機）
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work-dir ~/i074_stage2_sizing/<名稱>
+```
+
+| 項目 | 規則 |
+|---|---|
+| `--work-dir` | ⚠️ 必須在 repo **外**（以 canonical path 判斷，parent symlink 指回 repo 也拒絕）、⛔ 不得已存在；harness 在裡面建 `git clone --no-hardlinks` 的複本並從**複本**執行正式入口——正式腳本的路徑常數由腳本位置推導，⛔ 不會寫到真正的 repo |
+| 耗時與空間 | 約 6～7 分鐘；`<work>` 約 450 MB（複本 ＋ 三條路徑的 run 目錄與 worktree），用完可整個刪除 |
+| ⚠️ 量測期間 | ⛔ **不要動真正的 repo**（含 commit、編輯檔案）——harness 每條路徑前後比對它的完整 inventory，任何變化都會 fail-closed；也⛔ 不要在 `<work>` 裡建檔 |
+| harness 的狀態 | 全在 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S），⛔ 不落在量測的檔案系統；成功時複製到 `<work>/raw/`、失敗時複製到 `<work>/raw-failed/`，⚠️ **步驟的 process group 確實結束（`TERM` 等 20 秒、仍有成員就升級 `KILL` 再等 5 秒）、容器全部清掉、原始量測的複製與失敗摘要都成功**才清 S（任一沒成功就保留 S 並印出位置——仍存活的程序可能還在寫 S；移除不了的容器 CID 會印到 stderr 並寫進 `failure_summary.json` 的 `leftover_containers`，請手動 `docker rm -f`） |
+| 容器 | 經 docker shim 以**唯讀 rootfs、⛔ 無可寫 `/tmp`** 執行，具名 `i074sz-<run id>-<ID>`；中斷時以 cidfile 記錄的 CID `docker rm -f`。每個步驟在自己的 process group 執行，⚠️ leader 結束後 group 裡**仍有活著的成員**（背景子程序）也算失敗並收尾。成功路徑在寫出報告之前以 `docker ps` 確認本次的容器一個都不剩——⚠️ `docker ps` 本身失敗也算失敗（⛔ 查不到不能當作沒有殘留）。殘留時可用 `docker ps -a --filter name=i074sz-` 檢查 |
+| 輸出 | `<work>/sizing_report.json`（canonical）與 `sizing_report.txt`：三條路徑各自的目錄取樣峰值、檔案系統取樣峰值、會計上界與 `P_path`，`P_B`，每個程序的 cgroup 峰值（含 page cache；⚠️ 旁邊的結束碼是**容器內 Python 段**的，例如 check 的 Python 段回 0、shell 段才依命中回 2），`status`（`ok`／`assumption_violated`） |
+| 失敗 | 結束碼 1、⛔ 不產報告；`<work>/failure_summary.json` 記失敗的階段與結束碼（⛔ 不宣稱 `P_B`） |
+| 演練用的故障注入 | `I074_SIZING_FAULT=twins`（在 metadata twin 那一步中止）／`copy`（中止時讓複製 S 失敗）／`summary`（中止時讓失敗摘要寫不出來）／`cleanup`（放一份假 cidfile 後中止，搭配移除不了的 docker 驗證 S 會被保留）／`stuck`（放一個忽略 `TERM` 的步驟後中止，驗證升級 `KILL`）／`group-alive`（讓 group 在 `KILL` 之後仍被視為存活，驗證 S 會被保留）／`final-check`（直接跑成功路徑結束前的容器檢查，搭配 `docker ps` 失敗驗證 fail-closed）／`orphan-ok`、`orphan-bad`（步驟的 leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡，驗證一律收尾並中止）——⚠️ 只給 ④ 的中止點演練，`--formal` 一律拒絕 |
+
+⚠️ **`status = "assumption_violated"`**（failure 路徑的峰值大於 success 路徑）時報告照樣產出，⛔ 但不得進入 ⑤ 的
+正式裁定，要回頭 review 計畫。⚠️ ⑦ 的正式流程若量到比 ⑤ 裁定的 `P_B` 更大的實際峰值：⛔ 不得進入 ⑩，更新
+`P_B`／`M_safety`、重跑 ⑤、回到 ⑥ 確認。
+
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 
 python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋這兩者的實機快照**。

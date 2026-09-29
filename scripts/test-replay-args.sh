@@ -1820,6 +1820,385 @@ print(re.search(r"\"base_commit\":\"([0-9a-f]{40})\"", head).group(1))' \
 elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
   fail "E7 前置守門測試：找不到 image、正式 bundle 或 Stage 2 identity（IMAGE_REQUIRED=1）"
 fi
+# ── I-074 Stage 2 步驟 ④：sizing harness 的 shim、wrapper 與參數檢查 ─────────────────
+#
+# 對應 issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異）的測試 a、a2～a7、b。
+# ⚠️ ⛔ 任何一條都不得真的啟動 harness 的量測（那要跑數分鐘並建 clone）——harness 只測「在動手之前就拒絕」。
+echo "==> i074 Stage 2 步驟 ④：sizing harness 的 docker shim"
+SZ_TD="$(mktemp -d)"
+SZ_SHIM="$REPO_ROOT/scripts/lib/i074-sizing-docker-shim.sh"
+SZ_HELPER="$REPO_ROOT/python/scripts/i074_stage2_sizing.py"
+SZ_IMG="sha256:$(printf '%064d' 5)"
+mkdir -p "$SZ_TD/real" "$SZ_TD/cg1/memory" "$SZ_TD/cg2" "$SZ_TD/cgnone" "$SZ_TD/cg0/memory"
+echo 123456789 > "$SZ_TD/cg1/memory/memory.max_usage_in_bytes"
+echo 987654321 > "$SZ_TD/cg2/memory.peak"
+echo 0 > "$SZ_TD/cg0/memory/memory.max_usage_in_bytes"
+# fake 的「真正 docker」：記錄參數；run 時依 --cidfile 寫 CID，並在 host 上執行容器指令（含 wrapper，
+# /peak 由 SIZING_PEAK_DIR 指到 -v 的來源、cgroup 由 SIZING_CGROUP_ROOT 指到假的 cgroup 樹）。
+cat > "$SZ_TD/real/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_LOG"
+case "$1" in
+  run)
+    shift; args=("$@"); cidfile=""; peak=""; i=0
+    [ -n "${FAKE_RUNARGS:-}" ] && printf '%s\0' "$@" > "$FAKE_RUNARGS"   # ⚠️ NUL 分隔：wrapper 內含換行
+    while [ "$i" -lt "${#args[@]}" ]; do
+      case "${args[$i]}" in
+        --cidfile) cidfile="${args[$((i+1))]}"; i=$((i+2)) ;;
+        -v) case "${args[$((i+1))]}" in *:/peak) peak="${args[$((i+1))]%:/peak}" ;; esac; i=$((i+2)) ;;
+        "$FAKE_IMAGE") i=$((i+1)); break ;;
+        *) i=$((i+1)) ;;
+      esac
+    done
+    [ -n "$cidfile" ] && printf 'cid-%s' "$(basename "$cidfile" .cid)" > "$cidfile"
+    [ -n "${FAKE_SLEEP:-}" ] && sleep "$FAKE_SLEEP"
+    SIZING_PEAK_DIR="${peak:-$FAKE_NOPEAK}" SIZING_CGROUP_ROOT="${FAKE_CGROUP:-/nonexistent}" "${args[@]:i}"
+    exit $? ;;
+  inspect)
+    [ -z "${FAKE_INSPECT_FAIL:-}" ] || exit 1
+    case "$*" in
+      *SizeRw*) echo "${FAKE_SIZE_RW:-0}" ;;
+      *LogConfig*) echo "${FAKE_LOGCONFIG:-{\"Type\":\"json-file\",\"Config\":{}}}" ;;
+      *) echo '[{}]' ;;
+    esac ;;
+  logs) printf 'out\n'; printf 'err\n' >&2 ;;
+esac
+exit 0
+FAKE
+chmod +x "$SZ_TD/real/docker"
+mkdir -p "$SZ_TD/bin"
+ln -s "$SZ_SHIM" "$SZ_TD/bin/docker"
+sz_run() {  # $1＝S 目錄；其餘＝docker 參數。stdout／stderr 分別寫進 $1.out／$1.err，回傳 shim 的結束碼
+  local st="$1"; shift
+  mkdir -p "$st"
+  set +e
+  env PATH="$SZ_TD/bin:$PATH" SIZING_REAL_DOCKER="$SZ_TD/real/docker" SIZING_STATE="$st" SIZING_RUN_ID=t \
+      SIZING_IMAGE="$SZ_IMG" SIZING_PHASE="${SZ_PHASE:-success}" SIZING_ROLE="${SZ_ROLE:-finalizer}" \
+      SIZING_INCLUDED="${SZ_INCLUDED:-true}" SIZING_HELPER="$SZ_HELPER" FAKE_LOG="$st.log" FAKE_IMAGE="$SZ_IMG" \
+      FAKE_RUNARGS="$st.runargs" \
+      FAKE_CGROUP="${SZ_CG:-$SZ_TD/cg1}" docker "$@" > "$st.out" 2> "$st.err"
+  local rc=$?
+  set -e
+  return "$rc"
+}
+sz_sidecar() {  # $1＝S；$2＝python 運算式（變數 s＝sidecar）
+  python3 -c 'import json,sys,glob; s=json.load(open(glob.glob(sys.argv[1]+"/containers/*.json")[0])); print(eval(sys.argv[2]))' "$1" "$2"
+}
+SZ_CMD=(sh -c 'printf "OUT\n"; printf "ERR\n" >&2; exit 3')
+
+# a：改寫與 I/O 透明
+rc=0; sz_run "$SZ_TD/sa" run --rm --network none -v /x:/y:ro "$SZ_IMG" "${SZ_CMD[@]}" || rc=$?
+direct_out="$("${SZ_CMD[@]}" 2>/dev/null)" || true
+[ "$rc" = 3 ] && pass "a：shim 原樣傳回容器的結束碼（3）" || fail "a：結束碼不符（rc=$rc）"
+if [ "$(cat "$SZ_TD/sa.out")" = "$direct_out" ] && [ "$(cat "$SZ_TD/sa.err")" = "ERR" ] \
+   && [ "$(wc -c < "$SZ_TD/sa.out")" = "4" ]; then
+  pass "a3：經 shim 的 stdout 與未包裝的逐 byte 相同、stderr ⛔ 沒有被重複或加料"
+else
+  fail "a3：shim 汙染了 stdout／stderr"; od -c "$SZ_TD/sa.out" | head -3 >&2
+fi
+if python3 - "$SZ_TD/sa.runargs" "$SZ_TD/sa" "$SZ_IMG" <<'PY'
+import sys
+args = open(sys.argv[1], "rb").read().decode().split("\0")[:-1]
+st, img = sys.argv[2], sys.argv[3]
+pos = args.index(img)
+want_opts = ["--network", "none", "-v", "/x:/y:ro", "--cidfile", f"{st}/cid/o0010.cid", "--name", "i074sz-t-o0010",
+             "--read-only", "-v", f"{st}/peak/o0010:/peak"]
+assert args[:pos] == want_opts, args[:pos]
+assert args[pos + 1:pos + 3] == ["sh", "-c"] and "memory.max_usage_in_bytes" in args[pos + 3], args[pos + 1:pos + 4]
+assert args[pos + 4:] == ["_", "sh", "-c", r'printf "OUT\n"; printf "ERR\n" >&2; exit 3'], args[pos + 4:]
+PY
+then
+  pass "a：改寫＝原 option 逐 token 保留 ＋ cidfile／name／--read-only／/peak、⛔ --rm、指令逐 token 包進 wrapper"
+else
+  fail "a：改寫後的 argv 不符"
+fi
+if python3 - "$SZ_TD/sa.runargs" "$SZ_IMG" <<'PY'
+import sys
+args = open(sys.argv[1], "rb").read().decode().split("\0")[:-1]
+opts = args[:args.index(sys.argv[2])]
+targets = [opts[i + 1].split(":")[1] for i, t in enumerate(opts) if t == "-v"]
+assert "/tmp" not in targets and "--tmpfs" not in opts and not any(t.startswith("--mount") for t in opts), opts
+PY
+then
+  pass "a6：shim ⛔ 沒有提供任何 /tmp 掛載（bind 或 tmpfs）"
+else
+  fail "a6：shim 提供了可寫的 /tmp"
+fi
+[ "$(sz_sidecar "$SZ_TD/sa" 's["status"], s["rc"], s["peak_bytes"], s["log_bound"] > 0')" = "('ok', 3, 123456789, True)" ] \
+  && pass "a4：sidecar 記錄結束碼、cgroup v1 峰值與 log 上界" || fail "a4：sidecar 內容不符：$(sz_sidecar "$SZ_TD/sa" 's')"
+set +e
+env PATH="$SZ_TD/bin:$PATH" SIZING_REAL_DOCKER="$SZ_TD/real/docker" FAKE_LOG="$SZ_TD/pass.log" \
+  docker image inspect whatever >/dev/null 2>&1
+set -e
+grep -qx 'image inspect whatever' "$SZ_TD/pass.log" && pass "a：非 run 的子指令原樣轉給真正的 docker" \
+  || fail "a：非 run 的子指令沒有原樣轉交"
+
+# a2：wrapper 的 v1 → v2 → 缺 → 0
+rc=0; SZ_CG="$SZ_TD/cg2" sz_run "$SZ_TD/sv2" run "$SZ_IMG" true || rc=$?
+[ "$rc" = 0 ] && [ "$(sz_sidecar "$SZ_TD/sv2" 's["peak_bytes"]')" = 987654321 ] \
+  && pass "a2：v1 缺、v2 存在 → 讀 memory.peak" || fail "a2：v2 fallback 不符"
+rc=0; SZ_CG="$SZ_TD/cgnone" sz_run "$SZ_TD/svn" run "$SZ_IMG" sh -c 'exit 7' || rc=$?
+[ "$rc" = 7 ] && [ "$(sz_sidecar "$SZ_TD/svn" 's["status"]')" = measure_failed ] \
+  && pass "a2：兩者皆缺 → 量測失敗、原結束碼（7）保留" || fail "a2：兩者皆缺時不符（rc=$rc）"
+rc=0; SZ_CG="$SZ_TD/cg0" sz_run "$SZ_TD/sv0" run "$SZ_IMG" true || rc=$?
+[ "$(sz_sidecar "$SZ_TD/sv0" 's["status"]')" = measure_failed ] && pass "a2：峰值為 0 → 量測失敗（⛔ 不當成 0）" \
+  || fail "a2：峰值為 0 竟被接受"
+if grep -q 'memory/memory.max_usage_in_bytes' "$SZ_SHIM" && grep -q 'memory.peak' "$SZ_SHIM" \
+   && grep -q 'memory/memory.max_usage_in_bytes' "$REPO_ROOT/scripts/run-replay-offline.sh" \
+   && grep -q 'memory.peak' "$REPO_ROOT/scripts/run-replay-offline.sh"; then
+  pass "a2：wrapper 的候選路徑與 run-replay-offline.sh 的 MEASURE_PEAK 相同"
+else
+  fail "a2：wrapper 的候選路徑與 runner 不同"
+fi
+
+# a4：inspect 失敗 → 量測失敗，但結束碼照樣傳回
+rc=0; FAKE_INSPECT_FAIL=1 sz_run "$SZ_TD/sif" run "$SZ_IMG" sh -c 'exit 4' || rc=$?
+[ "$rc" = 4 ] && [ "$(sz_sidecar "$SZ_TD/sif" 's["status"]')" = measure_failed ] \
+  && pass "a4：inspect 失敗 → sidecar 標量測失敗、shim 仍傳回原結束碼" || fail "a4：inspect 失敗時不符（rc=$rc）"
+rc=0; FAKE_LOGCONFIG='{"Type":"local","Config":{}}' sz_run "$SZ_TD/slc" run "$SZ_IMG" true || rc=$?
+[ "$(sz_sidecar "$SZ_TD/slc" 's["status"]')" = measure_failed ] && pass "a8：log driver 不是 json-file → 量測失敗" \
+  || fail "a8：非 json-file 竟被接受"
+rc=0; FAKE_LOGCONFIG='{"Type":"json-file","Config":{"max-size":"10m"}}' sz_run "$SZ_TD/slr" run "$SZ_IMG" true || rc=$?
+[ "$(sz_sidecar "$SZ_TD/slr" 's["status"]')" = measure_failed ] && pass "a8：log 有 rotation → 量測失敗" \
+  || fail "a8：log rotation 竟被接受"
+rc=0; FAKE_SIZE_RW=4096 sz_run "$SZ_TD/srw" run "$SZ_IMG" true || rc=$?
+[ "$(sz_sidecar "$SZ_TD/srw" 's["size_rw"]')" = 4096 ] && pass "a4：SizeRw 原樣記錄（report 對非 0 fail-closed）" \
+  || fail "a4：SizeRw 沒有記錄"
+
+# a5：中斷——容器還在跑時送 SIGTERM，shim 以 cidfile 記錄的 CID docker rm -f
+# ⚠️ 以 setsid 放進自己的 process group：shim 就是 group leader（$sz_pid），收尾時只對這個 group 送 KILL，
+#   ⛔ 不用 pkill -f——以指令字串比對會連呼叫端（例如命令列裡含同一段字串的 shell）一起殺掉。
+mkdir -p "$SZ_TD/sint"
+setsid env PATH="$SZ_TD/bin:$PATH" SIZING_REAL_DOCKER="$SZ_TD/real/docker" SIZING_STATE="$SZ_TD/sint" SIZING_RUN_ID=t \
+    SIZING_IMAGE="$SZ_IMG" SIZING_PHASE=success SIZING_ROLE=finalizer SIZING_INCLUDED=true SIZING_HELPER="$SZ_HELPER" \
+    FAKE_LOG="$SZ_TD/sint.log" FAKE_IMAGE="$SZ_IMG" FAKE_CGROUP="$SZ_TD/cg1" FAKE_SLEEP=30 \
+    docker run "$SZ_IMG" true > /dev/null 2>&1 &
+sz_pid=$!
+for _ in $(seq 1 100); do [ -s "$SZ_TD/sint/cid/o0010.cid" ] && break; sleep 0.1; done
+kill -TERM "$sz_pid" 2>/dev/null || true
+set +e; wait "$sz_pid"; set -e
+if grep -qx 'rm -f cid-o0010' "$SZ_TD/sint.log" && [ "$(sz_sidecar "$SZ_TD/sint" '"TERM" in " ".join(s["failures"])')" = True ]; then
+  pass "a5：SIGTERM → 以 cidfile 的 CID docker rm -f、sidecar 標中斷"
+else
+  fail "a5：中斷時沒有以 CID 移除容器"; cat "$SZ_TD/sint.log" >&2
+fi
+kill -KILL -- "-$sz_pid" 2>/dev/null || true
+
+# a7：metadata twin（真的 Docker；長 argv 與長 mount path）
+if [ -n "$S2_IMG" ]; then
+  st7="$SZ_TD/s7"
+  long_arg="$(python3 -c 'print("a" * 33000)')"
+  long_src="$SZ_TD/$(python3 -c 'print("/".join(["d" * 200] * 10))')"
+  python3 "$SZ_HELPER" index --state "$st7" --sequence 1 --phase witness --role fixture --included true \
+    --image "$S2_IMG" -- --cidfile "$st7/cid/o0010.cid" --name i074sz-t-o0010 --read-only -v "$long_src:/x" \
+    "$S2_IMG" true "$long_arg"
+  if python3 "$SZ_HELPER" twins --state "$st7" --docker "$(command -v docker)" --run-id t --fs-path "$SZ_TD" \
+     && python3 -c '
+import json,sys
+t=json.load(open(sys.argv[1]))
+assert t["status"]=="ok", t
+assert t["adopted_bytes"] >= max(t["raw_bytes"]) and t["adopted_bytes"] >= 2*max(t["inspect_lengths"]) >= 66000, t
+' "$st7/twins/o0010.json"; then
+    pass "a7：長 argv／長 mount path 的 twin——採用值 ≥ 原始值、≥ 2 × inspect 長度"
+  else
+    fail "a7：metadata twin 不符"
+  fi
+  [ -z "$(docker ps -a --filter name=i074sz-t- -q)" ] && pass "a7：twin 全部移除" || fail "a7：留下了 twin 容器"
+
+  # a6：封閉寫入（真的 Docker）：寫 /tmp、寫 /、tempfile 都失敗；一般指令照常
+  sz_real() {  # $1＝S；其餘＝容器指令
+    local st="$1"; shift
+    mkdir -p "$st"
+    set +e
+    env PATH="$SZ_TD/bin:$PATH" SIZING_REAL_DOCKER="$(command -v docker)" SIZING_STATE="$st" SIZING_RUN_ID=t \
+        SIZING_IMAGE="$S2_IMG" SIZING_PHASE=success SIZING_ROLE=finalizer SIZING_INCLUDED=true SIZING_HELPER="$SZ_HELPER" \
+        docker run --rm --network none --user "$(id -u):$(id -g)" "$S2_IMG" "$@" >/dev/null 2>&1
+    local rc=$?
+    set -e
+    return "$rc"
+  }
+  sz_real "$SZ_TD/r1" sh -c 'echo ok' && pass "a6：對照組——一般指令照常成功" || fail "a6：對照組失敗"
+  sz_real "$SZ_TD/r2" sh -c 'touch /tmp/x' && fail "a6：竟然寫得了 /tmp" || pass "a6：寫 /tmp → 失敗（唯讀）"
+  sz_real "$SZ_TD/r3" sh -c 'touch /x' && fail "a6：竟然寫得了 /" || pass "a6：寫 / → 失敗（唯讀）"
+  sz_real "$SZ_TD/r4" python -c 'import tempfile; tempfile.gettempdir()' && fail "a6：tempfile 竟可用" \
+    || pass "a6：tempfile.gettempdir() → 失敗（⛔ 沒有可寫的暫存位置）"
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "sizing 的真 Docker 測試：找不到 image（IMAGE_REQUIRED=1）"
+fi
+
+# b：harness 在動手之前就拒絕
+echo "==> i074 Stage 2 步驟 ④：sizing harness 的參數與 work 目錄防護"
+SZ_H="$REPO_ROOT/scripts/i074-stage2-sizing.sh"
+sz_rejects() {  # $1＝說明；$2＝stderr 必須含的字串；其餘＝參數（⚠️ 一律帶 REPLAY_IMAGE_ID，除非另外清空）
+  local label="$1" want="$2" rc=0; shift 2
+  set +e
+  env -u PY_IMAGE REPLAY_IMAGE_ID="${SZ_IMAGE_OVERRIDE-$S2_IMG}" "$SZ_H" "$@" > /dev/null 2> "$SZ_TD/b.err"; rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && grep -q -- "$want" "$SZ_TD/b.err"; then pass "$label"; else fail "$label（rc=$rc）"; cat "$SZ_TD/b.err" >&2; fi
+}
+ln -s "$REPO_ROOT" "$SZ_TD/repo-link"
+mkdir "$SZ_TD/exists"
+SZ_IMAGE_OVERRIDE="" sz_rejects "b：沒有 REPLAY_IMAGE_ID → 拒絕" "REPLAY_IMAGE_ID" --work-dir "$SZ_TD/w1"
+if [ -n "$S2_IMG" ]; then
+  sz_rejects "b：work 目錄在 repo 內 → 拒絕" "repo 內" --work-dir "$REPO_ROOT/sizing-should-not-exist"
+  sz_rejects "b：parent symlink 指回 repo → 拒絕" "repo 內" --work-dir "$SZ_TD/repo-link/sizing-x"
+  sz_rejects "b：work 目錄已存在 → 拒絕（⛔ 不覆蓋）" "已存在" --work-dir "$SZ_TD/exists"
+  sz_rejects "b：--work-dir 重複 → 拒絕" "重複" --work-dir "$SZ_TD/w2" --work-dir "$SZ_TD/w3"
+  sz_rejects "b：未知參數 → 拒絕" "未知參數" --work-dir "$SZ_TD/w4" --bogus
+  I074_SIZING_FAULT=bogus sz_rejects "b：I074_SIZING_FAULT 不認得的值 → 拒絕" "只接受" --work-dir "$SZ_TD/w5"
+  [ ! -e "$REPO_ROOT/sizing-should-not-exist" ] && [ ! -e "$SZ_TD/w2" ] && [ ! -e "$SZ_TD/w4" ] && [ ! -e "$SZ_TD/w5" ] \
+    && pass "b：被拒絕時⛔ 沒有建立任何 work 目錄" || fail "b：被拒絕後仍留下 work 目錄"
+  # --formal：在隔離的最小 repo 裡測（⛔ 不碰真正的 repo，也⛔ 不讓測試真的開始量測）
+  SZ_REPO="$SZ_TD/frepo"
+  mkdir -p "$SZ_REPO/scripts/lib" "$SZ_REPO/python/scripts"
+  cp "$SZ_H" "$SZ_REPO/scripts/"; cp "$SZ_SHIM" "$REPO_ROOT/scripts/lib/mem-guard.sh" "$SZ_REPO/scripts/lib/"
+  cp "$SZ_HELPER" "$SZ_REPO/python/scripts/"
+  git -C "$SZ_REPO" init -q
+  git -C "$SZ_REPO" add -A
+  git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
+  sz_formal() {  # $1＝說明；$2＝stderr 必須含的字串；stdout 導到 /dev/null、stderr 導到 tmpfs
+    local label="$1" want="$2" rc=0 err="/dev/shm/sz-formal-$$.err"
+    set +e
+    env -u PY_IMAGE REPLAY_IMAGE_ID="$S2_IMG" "$SZ_REPO/scripts/i074-stage2-sizing.sh" --formal \
+      --work-dir "$SZ_TD/fw" > /dev/null 2> "$err"; rc=$?
+    set -e
+    if [ "$rc" -ne 0 ] && grep -q -- "$want" "$err" && [ ! -e "$SZ_TD/fw" ]; then pass "$label"
+    else fail "$label（rc=$rc）"; cat "$err" >&2; fi
+    rm -f "$err"
+  }
+  printf 'dirty\n' >> "$SZ_REPO/python/scripts/i074_stage2_sizing.py"
+  sz_formal "b：--formal 時 python/ 有未 commit 的變更 → 拒絕" "未 commit"
+  git -C "$SZ_REPO" checkout -q -- python/scripts/i074_stage2_sizing.py
+  git -C "$SZ_REPO" rm -q --cached scripts/lib/i074-sizing-docker-shim.sh
+  git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm untrack
+  printf 'scripts/lib/i074-sizing-docker-shim.sh\n' > "$SZ_REPO/.git/info/exclude"
+  sz_formal "b：--formal 時 harness 檔案未進版控 → 拒絕" "尚未進版控"
+  I074_SIZING_FAULT=twins sz_formal "b：--formal ⛔ 不接受演練用的故障注入" "故障注入"
+  set +e
+  env -u PY_IMAGE REPLAY_IMAGE_ID="$S2_IMG" "$SZ_REPO/scripts/i074-stage2-sizing.sh" --formal \
+    --work-dir "$SZ_TD/fw2" > "$SZ_TD/formal.out" 2>/dev/null; rc=$?
+  set -e
+  [ "$rc" -ne 0 ] && [ ! -e "$SZ_TD/fw2" ] && pass "b：--formal 時 stdout 導到量測中的檔案系統 → 拒絕" \
+    || fail "b：--formal 沒有擋下導到 L0 的輸出（rc=$rc）"
+fi
+# 容器清理失敗（review）：helper 與 fallback 的 rm -f 都失敗 → S 與 cidfile 保留，摘要與 stderr 列出 CID。
+# ⚠️ fake docker：image inspect 成功（⛔ 不需要真的 image）、rm 一律失敗、inspect 顯示容器仍在、ps 沒有具名容器。
+mkdir -p "$SZ_TD/nodel"
+cat > "$SZ_TD/nodel/docker" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$NODEL_LOG"
+case "$1" in
+  image|inspect|ps) exit 0 ;;
+  rm) exit 1 ;;
+esac
+exit 0
+FAKE
+chmod +x "$SZ_TD/nodel/docker"
+set +e
+env -u PY_IMAGE PATH="$SZ_TD/nodel:$PATH" NODEL_LOG="$SZ_TD/nodel.log" I074_SIZING_FAULT=cleanup \
+  REPLAY_IMAGE_ID="sha256:$(printf '%064d' 6)" "$SZ_H" --work-dir "$SZ_TD/wclean" > /dev/null 2> "$SZ_TD/clean.err"
+rc=$?
+set -e
+kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/clean.err" | tail -1)"
+if [ "$rc" -ne 0 ] && [ -n "$kept" ] && [ "$(cat "$kept/cid/o0000.cid" 2>/dev/null)" = "fault-injected-cid" ] \
+   && grep -qx 'fault-injected-cid' "$SZ_TD/clean.err" \
+   && [ "$(grep -c '^rm -f fault-injected-cid$' "$SZ_TD/nodel.log")" -ge 2 ] \
+   && python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["leftover_containers"]==["fault-injected-cid"]' \
+        "$SZ_TD/wclean/failure_summary.json"; then
+  pass "a12：容器移除不了 → S 與 cidfile 保留、摘要與 stderr 列出 CID（helper 與 fallback 都試過 rm -f）"
+else
+  fail "a12：容器清理失敗時沒有保留 S（rc=$rc）"; cat "$SZ_TD/clean.err" >&2
+fi
+[ -n "$kept" ] && [ -d "$kept" ] && rm -rf "$kept"
+
+# 步驟收不掉與成功路徑的 docker ps（review）：fake docker 的 ps 由 FAKE_PS_RC 控制，其餘一律成功、容器都已不在。
+mkdir -p "$SZ_TD/okd"
+cat > "$SZ_TD/okd/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  image|rm) exit 0 ;;
+  inspect) exit 1 ;;
+  ps) exit "${FAKE_PS_RC:-0}" ;;
+esac
+exit 0
+FAKE
+chmod +x "$SZ_TD/okd/docker"
+sz_fault() {  # $1＝故障；$2＝work 目錄名；stderr 寫到 $SZ_TD/<名>.err，回傳 harness 的結束碼
+  local rc=0
+  set +e
+  env -u PY_IMAGE PATH="${SZ_FAULT_PATH:+$SZ_FAULT_PATH:}$SZ_TD/okd:$PATH" I074_SIZING_FAULT="$1" \
+    REPLAY_IMAGE_ID="sha256:$(printf '%064d' 6)" \
+    "$SZ_H" --work-dir "$SZ_TD/$2" > /dev/null 2> "$SZ_TD/$2.err"; rc=$?
+  set -e
+  return "$rc"
+}
+sz_pgid() {  # harness 在 stderr 印出的 process group（⛔ 不用 pgrep -f／pkill -f 以指令字串找程序）
+  grep -o 'process group [0-9]*' "$1" | head -1 | grep -o '[0-9]*$' || true
+}
+# ⚠️ 耗時上限：注入的步驟是 `sleep 60`、演練的窗口是 2 ＋ 1 秒——超過 30 秒代表收尾又被 `wait` leader 卡住
+#   （第三輪修正時實測過：先 wait 會一直等到 sleep 自己結束，逾時與 KILL 永遠輪不到）。
+t0=$SECONDS; rc=0; sz_fault stuck wstuck || rc=$?; el=$((SECONDS - t0))
+pg="$(sz_pgid "$SZ_TD/wstuck.err")"
+if [ "$rc" = 1 ] && [ -n "$pg" ] && [ "$el" -lt 30 ] && grep -q "升級 KILL" "$SZ_TD/wstuck.err" \
+   && grep -q "原始量測：" "$SZ_TD/wstuck.err" && ! pgrep -g "$pg" >/dev/null 2>&1 \
+   && [ -f "$SZ_TD/wstuck/failure_summary.json" ]; then
+  pass "a12：忽略 TERM 的步驟 → 升級 KILL、group 確實結束後才照常清 S（${el} 秒）"
+else
+  fail "a12：忽略 TERM 的步驟沒有被收掉（rc=$rc、${el} 秒）"; cat "$SZ_TD/wstuck.err" >&2
+fi
+[ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
+t0=$SECONDS; rc=0; sz_fault group-alive walive || rc=$?; el=$((SECONDS - t0))
+pg="$(sz_pgid "$SZ_TD/walive.err")"
+kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/walive.err" | tail -1)"
+if [ "$rc" = 1 ] && [ "$el" -lt 30 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/walive.err"; then
+  pass "a12：KILL 之後 group 仍有成員 → 保留 S（仍存活的程序可能還在寫它）"
+else
+  fail "a12：group 沒結束卻清掉了 S（rc=$rc）"; cat "$SZ_TD/walive.err" >&2
+fi
+[ -n "$kept" ] && [ -d "$kept" ] && rm -rf "$kept"
+[ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
+# host 的 ps 失敗 → 查不到 group 的成員 ⇒ ⛔ 不能當作已結束：S 保留
+mkdir -p "$SZ_TD/psfail"; printf '#!/bin/sh\nexit 1\n' > "$SZ_TD/psfail/ps"; chmod +x "$SZ_TD/psfail/ps"
+rc=0; SZ_FAULT_PATH="$SZ_TD/psfail" sz_fault stuck wpsx || rc=$?
+pg="$(sz_pgid "$SZ_TD/wpsx.err")"
+kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/wpsx.err" | tail -1)"
+if [ "$rc" = 1 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/wpsx.err"; then
+  pass "a12：host 的 ps 失敗 → 不當作 group 已結束、保留 S"
+else
+  fail "a12：ps 失敗竟被當成 group 已結束（rc=$rc）"; cat "$SZ_TD/wpsx.err" >&2
+fi
+[ -n "$kept" ] && [ -d "$kept" ] && rm -rf "$kept"
+[ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
+# leader 自己退出、背景子程序仍在同一個 group 裡（第四輪 review）：不論結束碼符不符合預期，都要以同一個 PGID 收尾並中止
+for kind in ok bad; do
+  rc=0; sz_fault "orphan-$kind" "worph$kind" || rc=$?
+  pg="$(sz_pgid "$SZ_TD/worph$kind.err")"
+  if [ "$kind" = ok ]; then want_stage='fault_orphan：leader 已結束（結束碼 0）但 process group'; want_rc=1
+  else want_stage='fault_orphan'; want_rc=7; fi
+  if [ "$rc" = 1 ] && [ -n "$pg" ] && grep -q "收尾：process group $pg（成員：[0-9]" "$SZ_TD/worph$kind.err" \
+     && ! pgrep -g "$pg" >/dev/null 2>&1 \
+     && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["failed_stage"].startswith(sys.argv[2]) and d["rc"]==int(sys.argv[3]), d' \
+          "$SZ_TD/worph$kind/failure_summary.json" "$want_stage" "$want_rc"; then
+    pass "a12：leader 以$([ "$kind" = ok ] && echo 預期 || echo 非預期)的結束碼退出、背景子程序仍存活 → 以同一個 PGID 收尾並中止"
+  else
+    fail "a12：leader 退出後殘留的 group 成員沒有被收尾（orphan-$kind，rc=$rc）"; cat "$SZ_TD/worph$kind.err" >&2
+  fi
+  [ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
+done
+rc=0; FAKE_PS_RC=1 sz_fault final-check wps || rc=$?
+if [ "$rc" = 1 ] && grep -q "docker ps 失敗" "$SZ_TD/wps/failure_summary.json" && [ ! -e "$SZ_TD/wps/sizing_report.json" ]; then
+  pass "成功路徑：docker ps 失敗 → fail-closed（⛔ 查不到不能當作沒有殘留）"
+else
+  fail "成功路徑：docker ps 失敗竟被當成沒有殘留（rc=$rc）"; cat "$SZ_TD/wps.err" >&2
+fi
+rc=0; sz_fault final-check wps0 || rc=$?
+[ "$rc" = 0 ] && pass "成功路徑：ps 成功且沒有本次的容器 → 通過（對照組）" || fail "對照組失敗（rc=$rc）"
+for k in $(ls /dev/shm | grep '^i074-sizing-' || true); do
+  grep -qF "/dev/shm/$k" "$SZ_TD"/*.err 2>/dev/null && rm -rf "/dev/shm/$k"
+done
+
+rm -rf "$SZ_TD"
+
 rm -rf "$S2_TD"
 
 # ⚠️ **結尾要再檢查一次**：`$fails` 的第一次檢查在上面的 I-100 段落結束處，

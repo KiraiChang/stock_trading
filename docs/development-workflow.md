@@ -1289,7 +1289,7 @@ base 套用輸入 patch、`write-tree` 得 T1，鍵 ＝ `sha256(git diff --binar
 **記憶體與耗時**（真實規模，2026-09-24，Stage 2 image，mem-guard 527m）：`--finalize` 約 42 秒、峰值
 299 MiB；`--recover-durability` 約 33 秒、314 MiB；`--check-failed-record` 約 24 秒、274 MiB——都 < 450 MiB。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作，⚠️ 待 review）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，

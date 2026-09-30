@@ -9,7 +9,7 @@
     "  publish-failed-record  — --run-dir ＋ 注入的 --run-identity；⚠️ 成功發布也回 1",
     "  check-failed-record    — ⛔ 使用者的 --counterfactual-patch 只在 host 端用（合成比對鍵），⛔ 不進容器；i074_stage2 唯讀",
     "  recover-failed-record  — record 目錄必須是 failed/ 的直接子目錄",
-    "⚠️ 合成守門（「四之二」、F8-a）在 host 端、Docker 之前執行；除了 check，其餘四種模式把驗過的四個值以 --verified-* 交給 Python，Python 以實際要封存的內容比對後才允許 commit point／fsync（2026-09-24 review：兩段之間的 TOCTOU）。",
+    "⚠️ 合成守門（「四之二」、F8-a）在 host 端、Docker 之前執行；除了 check，其餘四種模式把驗過的四個值以 --verified-* 交給 Python，Python 以實際要封存的內容比對後才允許 commit point／fsync（2026-09-24 review：兩段之間的 TOCTOU）。⚠️ ⑦a：publish／recover-failed-record 另外帶 shell 由實際 patch 重算的語意 SHA（--verified-counterfactual-semantic-sha256，failed record 的目錄鍵），其餘模式⛔ 不帶。",
     "⛔ 存的是參數 token 序列（⛔ 非 eval 字串）；動態值用 placeholder。"
   ],
   "placeholders": {
@@ -20,11 +20,12 @@
     "<BASE_COMMIT>": "40 hex",
     "<TOOLING_PATCH_SHA256>": "64 hex",
     "<RUNNER_SHA256>": "64 hex",
-    "<RECORD_DIR>": "python/baselines/i074_stage2/failed/<bundle_id>-<counterfactual_patch_sha256> 的 host 絕對路徑",
+    "<RECORD_DIR>": "python/baselines/i074_stage2/failed/<bundle_id>-<counterfactual_semantic_sha256> 的 host 絕對路徑",
     "<VERIFIED_PATCH_BASE>": "40 hex：shell 合成守門驗過的**兩份 patch 所依附的 base**（⛔ 不是 --base-commit）",
     "<VERIFIED_COUNTERFACTUAL_SHA256>": "64 hex：合成守門驗過的反事實 patch SHA",
     "<VERIFIED_TOOLING_SHA256>": "64 hex：合成守門驗過的 tooling patch SHA",
-    "<VERIFIED_COMPOSED_SHA256>": "64 hex：合成守門重建出的 composed SHA"
+    "<VERIFIED_COMPOSED_SHA256>": "64 hex：合成守門重建出的 composed SHA",
+    "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "64 hex：shell 由實際 counterfactual patch 重算的語意 SHA（只涵蓋兩個產品檔；⑦a）"
   },
   "envcheck_argv": [
     "python", "-m", "backtest.modular.sr_scoring.replay_bundle.envcheck",
@@ -92,7 +93,8 @@
     "--verified-patch-base", "<VERIFIED_PATCH_BASE>",
     "--verified-counterfactual-sha256", "<VERIFIED_COUNTERFACTUAL_SHA256>",
     "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
-    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>"
+    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>",
+    "--verified-counterfactual-semantic-sha256", "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>"
   ],
   "check_failed_record_argv": [
     "python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive",
@@ -116,6 +118,7 @@
     "--verified-patch-base", "<VERIFIED_PATCH_BASE>",
     "--verified-counterfactual-sha256", "<VERIFIED_COUNTERFACTUAL_SHA256>",
     "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
-    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>"
+    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>",
+    "--verified-counterfactual-semantic-sha256", "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>"
   ]
 }

@@ -832,11 +832,12 @@ scripts/run-replay-offline.sh --bundle "$PWD/python/baselines/<bundle_id>" \
 |---|---|
 | 要比哪個 before 版本 | **使用者**（`--before-ref`）——這是唯一的版本入口 |
 | `base_commit` | **腳本**，順序固定（見下方 TOCTOU） |
-| `tooling_patch_sha256` | **腳本**：worktree 實際 `git diff --binary` 的輸出 hash |
+| `tooling_patch_sha256` | **腳本**：base 到實際套用後的 tree 的 **canonical diff** hash（`replay_args_compose()`；⚠️ 2026-09-30 ⑦a 起，原本是 worktree 的 `git diff --binary`） |
+| `counterfactual_patch_sha256` | **腳本**（I-074 Stage 2 反事實模式才有）：反事實 patch 的 canonical SHA，由凍結副本推導 |
 | `source_root` / `image_digest` | **腳本**：實際掛載路徑與 `docker image inspect` 推導值 |
 | `runner_sha256` | **腳本**：腳本本身 ＋ `scripts/lib/replay-args.sh` 的內容指紋 |
 
-⛔ **兩支腳本都拒絕使用者傳入**這五個參數（`scripts/lib/replay-args.sh` 的
+⛔ **兩支腳本都拒絕使用者傳入**這些參數（`scripts/lib/replay-args.sh` 的
 `replay_args_reject_injected`），**而且連唯一前綴縮寫都擋**——argparse 預設會把
 `--image-d` 展開成 `--image-digest`，只比完整名稱的話縮寫形式會整條穿過去，
 而官方注入的值排在使用者參數之前，argparse 取最後一個，使用者傳的那個就贏了。
@@ -870,9 +871,13 @@ Python 端另外用 `allow_abbrev=False` 把縮寫關掉，**兩層都要有**�
 ⚠️ 少了 ①③④，branch 在 worktree 建立後被移動時，記進 artifact 的 commit 可能已經不是
 實際執行的那份程式碼。
 
-⚠️ `tooling_patch_sha256` 取自 **worktree 實際 diff 的輸出**，⛔ 不是「傳進來那個 patch 檔
-的 hash」。而 `git diff --binary` **預設不含 untracked**——所以用 `git apply --index` 套用、
-補 `git add -A -N`，取完 diff 再斷言 `git status --porcelain` 沒有 `??` 行。
+⚠️ `tooling_patch_sha256` 取自 **實際套用後的 tree**，⛔ 不是「傳進來那個 patch 檔的 hash」。
+⑦a（2026-09-30）起一律由**唯一的合成函式** `replay_args_compose()` 算：`git apply --index` 套用、
+`git write-tree` 取 tree（⛔ 不建中繼 commit）、斷言工作樹**恰好等於 index**（⛔ 沒有 untracked、⛔ 沒有
+unstaged——`write-tree` 只看 index，容器掛的卻是工作樹），再以 `replay_args_canonical_diff()` 算 base 的 tree
+到該 tree 的 **canonical diff**（`--full-index` ＋ 全部釘死的參數、在只借物件的暫存 bare repo 計算，git config 與
+屬性都改不了 bytes；定義見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」）。
+空 patch 的值不變（空字串的 SHA），Stage 1 與 `envcheck/` 已封存的證據不受影響；⛔ 不再 `git add -A -N`。
 
 ### 結構性離線
 
@@ -1258,25 +1263,31 @@ I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作�
 
 **合成守門在 host、Docker 之前**：`--finalize`／`--recover-durability`／`--publish-failed-record`／
 `--recover-failed-record` 先由 `python/scripts/i074-stage2-patch-claims.py` 取出宣告值（只讀小檔），
-在隔離 worktree 依 counterfactual → tooling 套用、`git write-tree`、重算三個 SHA；⛔ 任一不符即中止，
+以**唯一的合成函式** `replay_args_compose()` 在隔離 worktree 依 counterfactual → tooling 套用、`git write-tree`、
+以 canonical diff 重算三個 SHA 與語意 SHA（並驗反事實改動的檔案**恰好**是固定的四個）；⛔ 任一不符即中止，
 ⛔ 不呼叫 Python。⚠️ 驗過的 patch base 與三個 SHA 再以 `--verified-*` 注入容器，Python 拿實際要封存
 （或要 fsync）的內容比對，相符才允許 commit point——擋的是「合成守門之後、Python 讀檔之前」輸入被換掉
-（2026-09-24 review；`--verified-*` 與其他注入參數一樣⛔ 不接受使用者傳入）。`--check-failed-record` 則是
+（2026-09-24 review；`--verified-*` 與其他注入參數一樣⛔ 不接受使用者傳入）。⚠️ **語意 SHA 的交接**（⑦a）：
+`--verified-counterfactual-semantic-sha256` **只有** `--publish-failed-record`（值 ＝ 由凍結 patch 重算，就是目錄鍵）
+與 `--recover-failed-record`（shell 先比對「record 宣告值 ＝ 由 record 內實際 patch 重算的值」，不符即 rc=1、
+⛔ 不呼叫 Python）必須帶；其餘模式帶了就拒。`--check-failed-record` 則是
 **Python 段先過**（容器內逐份驗 F1～F10，`i074_stage2` 唯讀掛載）才跑 shell 段——失敗點要唯一；shell 段
 驗的 patch bytes 必須等於 Python 段回報的 SHA。
 
 **check 的比對鍵與順序**（⛔ 不直接雜湊輸入檔：同一份變更可以有不同的文字表示）：在 Stage 1 after 的
-base 套用輸入 patch、`write-tree` 得 T1，鍵 ＝ `sha256(git diff --binary <base> <T1>)`；
-① 先查命中 → **2**；② 未命中但輸入 bytes ≠ canonical diff → **1**（正式 archive 無條件要求兩者相等，
-⛔ 不能等跑完數小時 replay 才被 finalizer 拒絕）；③ 否則 **0**。⚠️ **2 與 1 都必須讓 runner 在 replay 之前停下**。
+base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 與**語意 SHA**（只涵蓋兩個產品檔；改動檔案⛔ 不是
+固定的四個 → **1**）；每份 record 也由 shell 從它封存的 patch **重算**語意 SHA，≠ 宣告值 → **1**（F4 的 shell 層）；
+① 先以**語意 SHA** 查命中 → **2**（⚠️ 只改測試檔的 patch 也命中）；② 未命中但輸入 bytes ≠ canonical diff → **1**
+（正式 archive 無條件要求兩者相等，⛔ 不能等跑完數小時 replay 才被 finalizer 拒絕）；③ 否則 **0**。
+⚠️ **2 與 1 都必須讓 runner 在 replay 之前停下**。
 
 **failed record 的重跑資格**：
 
-| 情況 | 結束碼 | 同一份反事實 patch 能不能重跑 |
+| 情況 | 結束碼 | 同一個**語意 SHA** 能不能重跑 |
 |---|---|---|
 | rename 之前失敗 | 1 | ✅ 可以（⛔ 沒有留下紀錄）；⚠️ 報告要標明**事故紀錄遺失** |
 | rename 成功、parent fsync 失敗 | 3 | ⛔ 不行（lookup 讀得到＝視同已記錄）→ `--recover-failed-record` 補 fsync |
-| 完整發布 | 1 | ⛔ 不行；⚠️ **改 patch 後**才可 |
+| 完整發布 | 1 | ⛔ 不行；⚠️ **只有兩個白名單產品檔的 diff 改變**（語意 SHA 不同）才可——⛔ 只改測試檔不算 |
 
 ⚠️ `failed/` 底下**任何認不得的東西**（含發布中斷留下的 `.…staging-…` 殘骸）都讓 lookup fail-closed，
 需人工處理——⛔ 不得「忽略後繼續」，那等於讓壞 patch 靠弄壞自己的紀錄重新過關。
@@ -1288,6 +1299,38 @@ base 套用輸入 patch、`write-tree` 得 T1，鍵 ＝ `sha256(git diff --binar
 
 **記憶體與耗時**（真實規模，2026-09-24，Stage 2 image，mem-guard 527m）：`--finalize` 約 42 秒、峰值
 299 MiB；`--recover-durability` 約 33 秒、314 MiB；`--check-failed-record` 約 24 秒、274 MiB——都 < 450 MiB。
+
+### I-074 Stage 2 的 tooling patch（⑦a；2026-09-30 實作，⚠️ 待 review）
+
+⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」；本節只寫**操作程序**。
+
+⑩ 的 replay 跑在 **`e1cbbbd` worktree**，所以 HEAD 對 `evaluation.py` 與 `replay_bundle/` 的任何改動都要經
+`python/baselines/i074_stage2/tooling_e1cbbbd.patch` 進入 replay。**⑦a～⑦d 只要動到這兩個路徑，就照下列流程**
+（維持單一 commit、⛔ 不先 commit 未 review 的程式）：
+
+```text
+① git add <待 review 的程式碼>
+② T=$(git write-tree)                                     ← proposed source tree
+③ scripts/make-i074-tooling-patch.sh --source-tree "$T" > <暫存檔>   ← ⛔ 不讀 HEAD、⛔ 不讀工作樹
+④ mv <暫存檔> python/baselines/i074_stage2/tooling_e1cbbbd.patch && git add 它
+⑤ 使用者 review 整份 staged 結果 → ⑥ commit
+⑦ scripts/make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"
+   並比對 HEAD 與 ② 的 tree 在 evaluation.py、replay_bundle/ 的物件 OID 相同
+```
+
+⚠️ **漂移測試**（`scripts/test-replay-args.sh`，由 `python/scripts/test.sh` 呼叫）：對「目前 index 的 tree」重新產生，
+必須與 index 中的 patch 逐位元相同。⚠️ 開發途中（程式已改但還沒照上面的流程 stage）它**必然失敗**——那是預期
+行為，提醒要重新產生；完整驗收在 stage 之後跑。
+⚠️ 產生器的四條不變條件（見契約）任一不成立就中止、stdout ⛔ 無輸出；其中「產品碼不變」擋的是：HEAD 若改了
+`evaluation.py`、`replay_bundle/` 以外的產品碼，tooling patch 帶不進 replay，⑩ 會**靜默**跑到舊版。
+⚠️ 產生器與 runner 都會在真正 repo 建暫時 worktree（EXIT trap 移除）；測試斷言登記數前後不變。
+⚠️ runner 走到 `exec docker run` 時 EXIT trap 不會執行（I-118 的既有成因）：會走到那一步的測試與 smoke 讓 runner 以
+**本次專屬、新建**的 `TMPDIR` 執行，事後以 `replay_args_remove_worktrees_under()` **只清那個目錄底下**的登記。
+⛔ 不可改用「執行前後的登記差集」——同一段時間內別人建立的 worktree 也會被誤刪。
+⚠️ 兩支輔助函式都 **fail-closed**（⑦a 實作第二輪 review）：`replay_args_remove_worktrees_under()` 的
+`worktree list` 或 `worktree remove` 失敗都回非零（remove 失敗時⛔ 不刪實體目錄）；`replay_args_path_clean()` 把
+「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
+的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
 ### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過）
 

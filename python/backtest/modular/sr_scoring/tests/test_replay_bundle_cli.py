@@ -187,6 +187,7 @@ def test_bundle_mode_rejects_forbidden_args(monkeypatch, capsys, extra):
     ("--tooling-patch-sha256", "0" * 64),
     ("--source-root", "/elsewhere"),
     ("--runner-sha256", "d" * 64),
+    ("--counterfactual-patch-sha256", "f" * 64),     # I-074 Stage 2 ⑦a
 ])
 def test_duplicate_script_injected_args_abort(monkeypatch, capsys, name, value):
     """⛔ 不靜默採用最後一個——重複代表使用者也傳了一個。"""
@@ -204,7 +205,7 @@ def test_duplicate_script_injected_args_abort(monkeypatch, capsys, name, value):
 
 
 @pytest.mark.parametrize("abbrev", ["--image-d", "--base-c", "--tooling-p",
-                                   "--source-r", "--runner-s"])
+                                   "--source-r", "--runner-s", "--counterfactual-p"])
 def test_argparse_abbreviation_cannot_smuggle_a_protected_arg(monkeypatch, capsys, abbrev):
     """⛔ argparse 預設接受唯一前綴縮寫——`--image-d` 會被展開成 `--image-digest`。
 
@@ -245,3 +246,19 @@ def test_official_stage0_argv_plus_conflict_aborts(monkeypatch, capsys, extra):
     cli_args = argv[argv.index("-m") + 2:] + extra
     code, reached = _run_cli(monkeypatch, cli_args)
     assert code == 1 and "stage0" not in reached
+
+
+def test_official_stage2_counterfactual_argv_fixture_is_accepted(monkeypatch):
+    """I-074 Stage 2 ⑦a：`stage2_argv.json`（runner 實際組出的 argv）會被 CLI 接受並進入 Stage 2。
+
+    ⚠️ 另一側由 `scripts/test-replay-args.sh` 斷言「真正 repo 的 dry-run 輸出 == 本 fixture」。
+    """
+    doc = json.loads((FIXTURE.parent / "stage2_argv.json").read_text(encoding="utf-8"))
+    subst = {"<IMAGE_ID>": "sha256:" + "a" * 64, "<BASE_COMMIT>": "e" * 40, "<TOOLING_PATCH_SHA256>": "1" * 64,
+             "<RUNNER_SHA256>": "c" * 64, "<COUNTERFACTUAL_PATCH_SHA256>": "f" * 64, "<BUNDLE>": "/b",
+             "<OUT>": "/out", "<AFTER_ARTIFACT>": "/a.json", "<COHORT_MANIFEST>": "/c.json"}
+    tokens = [subst.get(t, t) for t in doc["stage2_counterfactual_argv"]]
+    assert tokens[:3] == ["python", "-m", "backtest.modular.sr_scoring.evaluation"]
+    assert tokens[-1] == "--i074-counterfactual"
+    code, reached = _run_cli(monkeypatch, tokens[3:])
+    assert code == 0 and reached == {"bundle": 2}

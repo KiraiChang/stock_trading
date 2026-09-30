@@ -42,6 +42,11 @@ EXIT_CANDIDATE_MISMATCH = 4
 # I-074 Stage 1 的 crossday：兩份 after artifact 的逐列結果或執行身分不一致。
 # ⚠️ 與 4 同樣是**終止狀態**（證據已完整發布），⛔ 不是一般失敗。
 EXIT_CROSSDAY_MISMATCH = 5
+# I-074 Stage 2 的反事實 replay：counterfactual patch **沒有生效**（「①之三」的檢查順序得出
+# `candidate_flag_inconsistent` 或 `rr_not_restored`）。⚠️ 與 4 不同：它是 **tooling 缺陷信號**，
+# ⛔ 不是產品發現；replay 已在 operational 目錄留下 `bounded_diagnostics.json`，由 orchestrator
+# 發布 failed-attempt record（issue.md I-074 Stage 2 計畫書「二、①」）。
+EXIT_COUNTERFACTUAL_INEFFECTIVE = 6
 # I-074 Stage 2 的環境見證：新 image 上的 after' 與 Stage 1 D+1 **不等價**。
 # ⚠️ 與 5 同樣是**終止狀態**（見證證據已完整發布），⛔ 不是一般失敗；
 # 它讓 Stage 2 停在 before 之前（issue.md I-074 Stage 2 計畫書「二、⑤」）。

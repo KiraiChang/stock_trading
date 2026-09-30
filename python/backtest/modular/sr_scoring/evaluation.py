@@ -2977,8 +2977,214 @@ def _publish_candidate_mismatch(
 # 與 evidence finalizer 也要用它，而 package ⛔ 不得反向 import 本檔；另抄一份就是雙真相源。
 
 
+def _is_lower_hex(value: object, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(c in "0123456789abcdef" for c in value)
+
+
+def assert_counterfactual_args(args, *, stage: int) -> bool:
+    """I-074 Stage 2 反事實模式的**成對守門**（Stage 2 計畫書「二、④」的五條）。回傳是否走反事實路徑。
+
+    ⚠️ ⛔ 不能只靠 runner：runner 若漏注入 SHA，Python 端仍會進反事實路徑並產出不完整的證據。
+    ⚠️ 排在 `load_bundle()` 與任何讀檔之前。模式**只由明示的 flag 決定**——⛔ 不從 ref、hash 或 cohort 推斷。
+    """
+    flag = bool(getattr(args, "i074_counterfactual", False))
+    sha = getattr(args, "counterfactual_patch_sha256", None)
+    if flag:
+        # stage 限定與既有兩個 flag 共用同一套（⚠️ 方向相反：這個只限 Stage 2）。
+        assert_i074_flags({"i074_counterfactual"}, stage=stage)
+    if sha is not None and stage != 2:
+        raise CliUsageError(f"Stage {stage} ⛔ 不得帶 --counterfactual-patch-sha256（只屬於 Stage 2 的反事實模式）")
+    if flag and sha is None:
+        raise CliUsageError("--i074-counterfactual 缺少官方腳本注入的 --counterfactual-patch-sha256——⛔ 不進反事實路徑")
+    if sha is not None and not flag:
+        raise CliUsageError("--counterfactual-patch-sha256 ⛔ 不得出現在一般路徑（沒有 --i074-counterfactual）")
+    if sha is not None and not _is_lower_hex(sha, 64):
+        raise CliUsageError(f"--counterfactual-patch-sha256 必須是 64 字元小寫 hex：{sha!r}")
+    return flag
+
+
+def _run_counterfactual_stage2(args, *, argv: list[str]) -> dict[str, Any]:
+    """I-074 Stage 2 的**反事實路徑**（`--i074-counterfactual`；⑦a 細部計畫 B4）。
+
+    before ＝ `e1cbbbd` ＋ counterfactual（把 setup RR 加回 `CONTINUATION`），after ＝ 已封存的 Stage 1 D+1。
+    ⚠️ **順序即契約**：
+      1. replay 之前：cohort 先讀（小）→ after **一趟串流**（只常駐 keys、每列 digest 與 cohort rows）→
+         兩份 provenance → 與 bundle／彼此的身分 → 版本守門（`--before-ref` ＝ `--base-commit` ＝ after 的 base）；
+      2. replay ＋ 既有的 row-level 守門；
+      3. 全量 key 守門（**有序**相等）——排在反事實生效檢查**之前**；
+      4. 以**本次 replay 的 before rows** 跑「①之三」（`CounterfactualEffectCheck`）：不生效 → 只發布
+         `bounded_diagnostics.json`、結束碼 6；⛔ 永遠不走 candidate mismatch（rc=4 在本路徑不可達）；
+      5. 生效 → before source → comparison（落地重讀驗 SHA）→ report **最後**寫。
+    ⚠️ 終態恰好一種：rc=0 ＝ 恰好三檔、rc=6 ＝ 只有中繼檔。檔名取自 `stage2_archive` 的 `OPERATIONAL_*`。
+    """
+    from .replay_bundle import (
+        COHORT_KIND,
+        OPERATIONAL_BEFORE_SOURCE,
+        OPERATIONAL_COMPARISON,
+        OPERATIONAL_FAILURE,
+        OPERATIONAL_REPORT,
+        ArtifactError,
+        CounterfactualEffectCheck,
+        CounterfactualIneffective,
+        assert_matches_bundle,
+        assert_same_keys,
+        assert_unique_keys,
+        build_before_source,
+        build_comparison_artifact,
+        build_counterfactual_failure,
+        build_provenance,
+        build_report,
+        candidate_keys,
+        compare_rows,
+        load_bundle,
+        load_canonical_evidence_artifact,
+        prepare_output_dir,
+        publish_artifacts,
+        row_key,
+        sha256_file,
+        stream_after_artifact,
+        validate_cohort_manifest,
+        validate_counterfactual_failure,
+        validate_diagnostics,
+        validate_provenance,
+        write_canonical_atomic,
+    )
+
+    # ⚠️ runner 的 `--output-dir` 就是 orchestrator 的 `<run>/stage2`——`OPERATIONAL_*` 的 parent 必須是它。
+    names = {}
+    for label, rel in (("before", OPERATIONAL_BEFORE_SOURCE), ("comparison", OPERATIONAL_COMPARISON),
+                       ("report", OPERATIONAL_REPORT), ("failure", OPERATIONAL_FAILURE)):
+        if Path(rel).parent != Path("stage2"):
+            raise ArtifactError(f"{rel} 的 parent ⛔ 不是 stage2——與 finalizer 的 run 目錄佈局對不上")
+        names[label] = Path(rel).name
+
+    loaded = load_bundle(args.bundle)
+
+    # ── 1. replay 之前（⚠️ 讀法與 role 照 `load_stage1_anchor()`：cohort 先讀、after 串流，兩者都是 stage1） ──
+    cohort_load = load_canonical_evidence_artifact(args.cohort_manifest, COHORT_KIND)
+    cohort_payload = cohort_load.parsed
+    cohort_keys = validate_cohort_manifest(cohort_payload)
+    validate_provenance(cohort_payload["provenance"], role="stage1")
+    assert_matches_bundle(cohort_payload, loaded.manifest, "cohort manifest")
+    after = stream_after_artifact(args.after_artifact, label="after artifact", side="after",
+                                  keep_keys=set(cohort_keys))
+    after_top = after.load.top
+    validate_provenance(after_top["provenance"], role="stage1")
+    assert_matches_bundle(after_top, loaded.manifest, "after artifact")
+    after_sha = after.load.artifact_sha256
+    if cohort_payload["after_artifact_sha256"] != after_sha:
+        raise ArtifactError(
+            f"cohort manifest 記的 after artifact SHA-256 是 {cohort_payload['after_artifact_sha256']}，"
+            f"串流讀到的是 {after_sha}——⛔ 兩者必須相符。"
+        )
+    # ⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
+    assert_same_keys(cohort_keys, after.candidate_keys, "③ cohort manifest vs 候選列")
+    missing = [key for key in cohort_keys if key not in after.kept_rows]
+    if missing:
+        raise ArtifactError(f"after artifact 缺少 cohort 的完整列：{missing[:5]}")
+    # 版本守門（全圖第 8 道提前到 replay 之前）：CLI 的 `--before-ref`（40 碼）＝ CLI 的 `--base-commit`
+    # （runner 注入的 worktree HEAD）＝ after artifact 的 `provenance.base_commit`。
+    after_base = after_top["provenance"]["base_commit"]
+    if not _is_lower_hex(args.before_ref, 40):
+        raise ArtifactError(f"反事實模式的 --before-ref 必須是 40 碼 commit OID：{args.before_ref!r}")
+    if not (args.before_ref == args.base_commit == after_base):
+        raise ArtifactError(
+            f"--before-ref={args.before_ref}、--base-commit={args.base_commit}、after artifact 的 "
+            f"provenance.base_commit={after_base} 必須全部相同——before 必須跑在 Stage 1 after 的同一個 base"
+        )
+
+    output_dir = prepare_output_dir(args.output_dir)
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    # ── 2. replay ───────────────────────────────────────────────────────────
+    rows, context = _replay_from_bundle(loaded)
+    keys = context["keys"]
+    assert_unique_keys(keys, "本次 replay 的輸出")
+    assert_unique_keys(context["universe"], "bundle universe")
+    validate_replay_errors(rows, "本次 replay")
+    validate_diagnostics(rows, "本次 replay 的輸出", side="before")
+    provenance = build_provenance(
+        source_root=args.source_root,
+        image_digest=args.image_digest,
+        base_commit=args.base_commit,
+        tooling_patch_sha256=args.tooling_patch_sha256,
+        runner_sha256=args.runner_sha256,
+        argv=argv,
+    )
+
+    # ── 3. 全量 key 守門（⚠️ 先於反事實生效檢查；⛔ 只用 cohort 過濾會靜默漏掉 before 多出來的列） ──
+    assert_same_keys(context["universe"], after.keys, "① bundle universe vs after rows")
+    assert_same_keys(keys, after.keys, "② before 全範圍 vs after rows")
+    if list(keys) != list(after.keys):
+        raise ArtifactError("② before 的列順序 ≠ after（換序）——⛔ 全圖要求 before source 與錨定的 D+1 同序")
+
+    # ── 4. 「①之三」：反事實是否真的生效（⚠️ 餵的是**本次 replay 的 before rows**） ───────────
+    effect = CounterfactualEffectCheck()
+    for row in rows:
+        effect.feed(row)
+    result = effect.result()
+    if result is not None:
+        failure = build_counterfactual_failure(bundle_id=loaded.bundle_id, generated_at=generated_at,
+                                               provenance=provenance, effect=result)
+        validate_counterfactual_failure(failure)
+        publish_artifacts(output_dir, [(names["failure"], failure)])
+        raise CounterfactualIneffective(
+            f"反事實沒有生效（{result['failure_reason']}，{result['bounded_diagnostics']}）——⚠️ 這是 tooling "
+            f"缺陷信號，⛔ 不是分支 C；有界診斷已寫入 {output_dir / names['failure']}，⛔ 本次不產出 before source、"
+            "comparison 與 report。",
+            path=output_dir / names["failure"],
+        )
+    if candidate_keys(rows):
+        raise ArtifactError("反事實生效檢查通過卻仍有候選列——實作缺陷，⛔ 不產出比較")
+
+    # ── 5. operational 輸出（⚠️ report 最後寫：它存在即代表它指向的證據已完整） ──────────
+    before_source = build_before_source(
+        bundle_id=loaded.bundle_id, before_ref=args.before_ref, timeframe=context["timeframe"],
+        replay_scope=loaded.manifest["replay_scope"], generated_at=generated_at,
+        provenance=provenance, rows=rows,
+    )
+    before_sha = write_canonical_atomic(output_dir, names["before"], before_source)
+    before_by_key = {row_key(row): row for row in rows}
+    comparison_rows = [
+        compare_rows(before_by_key[key], after.kept_rows[key]) for key in sorted(cohort_keys)
+    ]
+    assert_same_keys(
+        [row_key(row) for row in comparison_rows], cohort_keys,
+        "④ comparison artifact vs cohort manifest",
+    )
+    # ⚠️ 與 before source 共用**同一個** provenance 物件（全圖第 10 道：兩者逐欄相等）。
+    comparison = build_comparison_artifact(
+        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
+        after_artifact_sha256=after_sha, generated_at=generated_at,
+        provenance=provenance, rows=comparison_rows,
+    )
+    comparison_sha = write_canonical_atomic(output_dir, names["comparison"], comparison)
+    if sha256_file(output_dir / names["comparison"]) != comparison_sha:
+        raise ArtifactError("comparison artifact 落地後的 SHA-256 與寫入時不符")
+    report = build_report(
+        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
+        comparison_sha256=comparison_sha, generated_at=generated_at,
+        rows=comparison_rows, report_max_rows=loaded.manifest.get("report_max_rows"),
+    )
+    publish_artifacts(output_dir, [(names["report"], report)])
+    return {
+        "stage": 2,
+        "mode": "counterfactual",
+        "bundle_id": loaded.bundle_id,
+        "rows": len(rows),
+        "candidates": len(comparison_rows),
+        "counterfactual_patch_sha256": args.counterfactual_patch_sha256,
+        "before_source_artifact_sha256": before_sha,
+        "comparison_artifact_sha256": comparison_sha,
+        "output_dir": str(output_dir),
+    }
+
+
 def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
     """Stage 1（掃描）或 Stage 2（比對）。回傳給 stdout 的摘要。"""
+    # ⚠️ I-074 Stage 2 的反事實模式：成對守門排在任何讀檔之前；⛔ 一般路徑以下一行不動。
+    if assert_counterfactual_args(args, stage=stage):
+        return _run_counterfactual_stage2(args, argv=argv)
     from .replay_bundle import (
         AFTER_ARTIFACT_NAME,
         AFTER_KIND,
@@ -3283,14 +3489,19 @@ BUNDLE_ALLOWED_ARGS = frozenset({
     # I-074 Stage 1 的兩個 opt-in。⚠️ **只限 Stage 1**——這份清單是 Stage 1／2 共用的，
     # 光加進來 Stage 2 也會接受，所以另有 `assert_i074_flags()` 做 stage 限定。
     "i074_preflight", "i074_capacity_probe",
+    # I-074 Stage 2 的反事實 opt-in（⚠️ **只限 Stage 2**，同樣由 `assert_i074_flags()` 限定）與它的
+    # SHA（⚠️ 只能由官方腳本注入，見 `SCRIPT_INJECTED_ARGS`）。
+    "i074_counterfactual", "counterfactual_patch_sha256",
 })
 BUNDLE_REQUIRED_ARGS = ("bundle", "output_dir", "before_ref", "image_digest", "source_root")
 
-# ⛔ 這四個**只能由官方腳本注入**：使用者傳入時腳本會拒絕，而 CLI 這一端負責偵測
+# ⛔ 這些**只能由官方腳本注入**：使用者傳入時腳本會拒絕，而 CLI 這一端負責偵測
 # 「重複出現」（使用者一個、腳本一個）並中止——⛔ 不靜默採用最後一個。
+# ⚠️ `--counterfactual-patch-sha256` 是 I-074 Stage 2 ⑦a 加的；它的模式旗標 `--i074-counterfactual`
+# 是使用者 opt-in，⛔ 不在這裡（在 `I074_FLAGS`）。
 SCRIPT_INJECTED_ARGS = (
     "--image-digest", "--base-commit", "--tooling-patch-sha256", "--source-root",
-    "--runner-sha256",
+    "--runner-sha256", "--counterfactual-patch-sha256",
 )
 
 
@@ -3311,9 +3522,9 @@ def _explicit_args(argv: list[str]) -> set[str]:
     return set(vars(detector.parse_args(argv)))
 
 
-# I-074 的兩個 opt-in。⚠️ argparse 的 `store_true` 對重複是**靜默接受**的，
+# I-074 的三個 opt-in。⚠️ argparse 的 `store_true` 對重複是**靜默接受**的，
 # 而測試矩陣要求「重複 flag → 中止」，所以要自己數。
-I074_FLAGS = ("--i074-preflight", "--i074-capacity-probe")
+I074_FLAGS = ("--i074-preflight", "--i074-capacity-probe", "--i074-counterfactual")
 
 
 def _reject_duplicate_i074_flags(argv: list[str]) -> None:
@@ -3348,11 +3559,13 @@ def resolve_cli_mode(explicit: set[str]) -> str:
 
 
 def assert_i074_flags(explicit: set[str], *, stage: int) -> None:
-    """I-074 的兩個 opt-in **只限 Stage 1**，且**⛔ 互斥**。
+    """I-074 Stage 1 的兩個 opt-in **只限 Stage 1**，且**⛔ 互斥**；Stage 2 的反事實 opt-in **只限 Stage 2**。
 
     ⚠️ `--i074-capacity-probe` **隱含執行 preflight-pre**，所以⛔ 不需要也⛔ 不得同時帶
     `--i074-preflight`——留著兩種讀法的話，「probe 到底有沒有驗 bundle 身分」就沒有唯一答案。
     """
+    if "i074_counterfactual" in explicit and stage != 2:
+        raise CliUsageError(f"--i074-counterfactual 只能用於 Stage 2，實際 stage={stage}")
     preflight = "i074_preflight" in explicit
     probe = "i074_capacity_probe" in explicit
     if preflight and probe:
@@ -3458,20 +3671,27 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--i074-capacity-probe", action="store_true",
                         help="I-074 容量量測：載入全部 11 檔與模型，但 quota 固定 200；"
                              "隱含執行 preflight-pre，⛔ 不發布 after／cohort")
-    # ⛔ 以下四個只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
+    # ── I-074 Stage 2 的反事實 opt-in（⚠️ **只限 Stage 2**；⛔ 預設關閉）──────────────
+    parser.add_argument("--i074-counterfactual", action="store_true",
+                        help="I-074 Stage 2 反事實模式：after cohort 逐列比較、before 候選必須為空、"
+                             "反事實沒有生效時回 6；⛔ 無候選集合相等檢查")
+    # ⛔ 以下只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
     parser.add_argument("--image-digest", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--base-commit", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--tooling-patch-sha256", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--source-root", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--runner-sha256", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--counterfactual-patch-sha256", default=None, help=argparse.SUPPRESS)
     return parser
 
 
 def main() -> None:
     from .replay_bundle import (
         EXIT_CANDIDATE_MISMATCH,
+        EXIT_COUNTERFACTUAL_INEFFECTIVE,
         EXIT_DURABILITY_UNCONFIRMED,
         CandidateMismatch,
+        CounterfactualIneffective,
         DurabilityUnconfirmed,
     )
 
@@ -3529,6 +3749,10 @@ def main() -> None:
         except CandidateMismatch as exc:
             print(f"[mismatch] {exc}", file=sys.stderr)
             sys.exit(EXIT_CANDIDATE_MISMATCH)
+        # ⚠️ 同理排在一般 `except ValueError` 之前（`CounterfactualIneffective` 也刻意不繼承它）。
+        except CounterfactualIneffective as exc:
+            print(f"[counterfactual-ineffective] {exc}", file=sys.stderr)
+            sys.exit(EXIT_COUNTERFACTUAL_INEFFECTIVE)
         except DurabilityUnconfirmed as exc:  # pragma: no cover - bundle 模式不發布 bundle
             print(f"[warn] {exc}", file=sys.stderr)
             sys.exit(EXIT_DURABILITY_UNCONFIRMED)

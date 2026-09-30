@@ -72,7 +72,7 @@ else
 fi
 
 echo "==> replay-args：離線模式⛔ 不注入 --model-path"
-offline="$(replay_args_offline "sha256:x" "/app" "abc" "def" "ghi" --bundle /b --output-dir /o --before-ref main)"
+offline="$(replay_args_offline "sha256:x" "/app" "abc" "def" "ghi" "" --bundle /b --output-dir /o --before-ref main)"
 if grep -q -- "--model-path" <<<"$offline"; then
   fail "離線模式不該注入 --model-path（模型在 bundle 裡）"
 else
@@ -83,6 +83,24 @@ for required in --image-digest --source-root --base-commit --tooling-patch-sha25
     pass "離線模式注入了 $required"
   else
     fail "離線模式少了 $required"
+  fi
+done
+# ⚠️ I-074 Stage 2 ⑦a：第 6 個參數＝反事實 patch 的 SHA；空字串⛔ 不注入，非空時緊接在 --runner-sha256 之後。
+grep -qx -- "--counterfactual-patch-sha256" <<<"$offline" \
+  && fail "一般路徑（第 6 參數空）竟注入了 --counterfactual-patch-sha256" \
+  || pass "一般路徑⛔ 不注入 --counterfactual-patch-sha256"
+cf_offline="$(replay_args_offline "sha256:x" "/app" "abc" "def" "ghi" "$(printf 'f%.0s' {1..64})" --bundle /b)"
+cf_expected="$(printf '%s\n' python -m backtest.modular.sr_scoring.evaluation --image-digest sha256:x \
+  --source-root /app --base-commit abc --tooling-patch-sha256 def --runner-sha256 ghi \
+  --counterfactual-patch-sha256 "$(printf 'f%.0s' {1..64})" --bundle /b)"
+[ "$cf_offline" = "$cf_expected" ] \
+  && pass "反事實 SHA 注入在 --runner-sha256 之後、使用者參數之前" \
+  || { fail "反事實 SHA 的注入位置不符"; diff <(printf '%s\n' "$cf_expected") <(printf '%s\n' "$cf_offline") >&2 || true; }
+for spoof in --counterfactual-patch-sha256 --counterfactual-patch-sha256=x --counterfactual-p; do
+  if replay_args_reject_injected --bundle /b "$spoof" >/dev/null 2>&1; then
+    fail "使用者傳入 $spoof 竟未被拒（s：只能由 runner 注入）"
+  else
+    pass "使用者傳入 $spoof → 拒絕（含縮寫與 =value）"
   fi
 done
 
@@ -219,23 +237,21 @@ fi
 # `git status --porcelain | grep -q '^??'` 在 `pipefail` 下有競爭——`grep -q` 一找到就退出、
 # `git` 收到 SIGPIPE，整條 pipeline 回非零，於是 `if` 走不進去、**守門反而被繞過**。
 #
-# ⛔ **⛔ 不能用「在 worktree 裡放一堆檔案」來測**：`replay_args_tooling_patch_sha256()`
-# 會先跑 `git add -A -N`，把 untracked **全部吸收成 intent-to-add**，`??` 根本不會出現
-# ——那樣測到的是「沒有 untracked」，⛔ 不是守門本身。所以這裡直接驗**比對模式**：
-# 大量輸出下仍要找得到 `??`，且結束碼正確。
-# ⚠️ **要讓 helper 本身收到大量 `??`**（⛔ 不是只測旁邊的 grep）：
-# 用 PATH 注入假 `git`，讓 `status --porcelain` 吐 5000 行 untracked，
-# 其餘子命令（`add`／`diff`／`rev-parse`）一律成功且無輸出。
+# ⛔ **⛔ 不能用「在 worktree 裡放一堆檔案」來測**：那樣測到的只是 git 的行為，⛔ 不是守門的比對模式。
+# ⚠️ **要讓 helper 本身收到大量 `??`**（⛔ 不是只測旁邊的 grep）：用 PATH 注入假 `git`，讓
+# `status --porcelain` 吐 5000 行 untracked。⚠️ ⑦a 起守門在 `replay_args_compose()` 裡，它先驗
+# 「HEAD ＝ base、index ＝ base 的 tree」——所以假 `git` 對 `rev-parse`／`write-tree` 一律回同一個 OID，
+# 讓流程**真的走到** status 那一道；其餘子命令成功且無輸出。
 FAKE_GIT_DIR="$TMP_REPO/../fakegit-$$"
 mkdir -p "$FAKE_GIT_DIR"
 cat > "$FAKE_GIT_DIR/git" <<'FAKEGIT'
 #!/usr/bin/env bash
 # ⚠️ 只為這條測試存在：讓 `status --porcelain` 產生大量 ?? 行。
 for a in "$@"; do
-  if [ "$a" = "status" ]; then
-    for i in $(seq 1 5000); do printf '?? many/file_%s.txt\n' "$i"; done
-    exit 0
-  fi
+  case "$a" in
+    status) for i in $(seq 1 5000); do printf '?? many/file_%s.txt\n' "$i"; done; exit 0 ;;
+    rev-parse|write-tree) printf '%040d\n' 7; exit 0 ;;
+  esac
 done
 exit 0
 FAKEGIT
@@ -433,6 +449,60 @@ else
   fail "沒有執行到 docker run——這個 4 是別的階段回的"
 fi
 rm -rf "$FAKE_BIN" "$DRY_BUNDLE2" "$DRY_OUT2"
+
+echo "==> run-replay-offline.sh：I-074 Stage 2 的結束碼 6（反事實沒有生效）也必須原樣傳出"
+# ⚠️ 同上：fake docker 只在 `run` 回 6；另驗真的走到 docker run。
+# ⚠️ 走到 `exec docker run` 時 runner 的 EXIT trap 不會執行，worktree 會留下（I-118 的既有成因）——這支⑦a 新增的
+# 測試自己收掉它造成的登記。⛔ **不用「前後差集」**（⑦a 實作第一輪 review）：同時段別人建立的 worktree 也會被誤刪。
+# runner 以本次專屬的 TMPDIR 執行，只清這個目錄底下的登記（`replay_args_remove_worktrees_under()`）。
+# 為了證明這一點，fake docker 在 runner **執行途中**另建一個無關的 worktree（放在 TMPDIR 以外），結束後它必須還在。
+FAKE_BIN="$(mktemp -d)"
+FAKE_LOG="$FAKE_BIN/calls.log"
+cat > "$FAKE_BIN/docker" <<'FAKEEOF'
+#!/usr/bin/env bash
+echo "$1 $2" >> "$FAKE_DOCKER_LOG"
+case "$1" in
+  build) exit 0 ;;
+  image) printf 'sha256:%064d\n' 0; exit 0 ;;
+  run)
+    # 模擬「同一段時間內的另一個程序」建立 worktree（⚠️ 在 runner 的 TMPDIR 以外）。
+    git -C "$FAKE_REPO" worktree add -q --detach "$FAKE_OTHER_WT" HEAD >/dev/null 2>&1
+    exit 6 ;;   # ← 模擬 CLI 回 EXIT_COUNTERFACTUAL_INEFFECTIVE
+  *) exit 0 ;;
+esac
+FAKEEOF
+chmod +x "$FAKE_BIN/docker"
+DRY_BUNDLE2="$(mktemp -d)"
+DRY_OUT2="$(mktemp -d)"
+EXIT6_TMP="$(mktemp -d)"                       # runner 本次專屬的 TMPDIR（⚠️ 新建、只給這一次）
+EXIT6_OTHER="$(mktemp -d)/unrelated-wt"        # 無關的 worktree（TMPDIR 以外）
+set +e
+FAKE_DOCKER_LOG="$FAKE_LOG" FAKE_REPO="$REPO_ROOT" FAKE_OTHER_WT="$EXIT6_OTHER" PATH="$FAKE_BIN:$PATH" \
+  TMPDIR="$EXIT6_TMP" AFTER_REF="$HEAD_OID" "$REPO_ROOT/scripts/run-replay-offline.sh" \
+    --bundle "$DRY_BUNDLE2" --output-dir "$DRY_OUT2" --before-ref "$PARENT_OID" >/dev/null 2>&1
+exit6_code=$?
+set -e
+[ "$exit6_code" -eq 6 ] && grep -q "^run " "$FAKE_LOG" 2>/dev/null \
+  && pass "run-replay-offline.sh 原樣傳出 exit 6（且確實走到 docker run）" \
+  || fail "exit 6 被吞掉或沒走到 docker run：實際 $exit6_code"
+exit6_list() { git -C "$REPO_ROOT" worktree list --porcelain | sed -n 's/^worktree //p'; }
+grep -qF -- "$EXIT6_TMP/" <<< "$(exit6_list)" \
+  && pass "前提：runner 確實在專屬的 TMPDIR 底下留下了 worktree（⛔ 不是空測）" \
+  || fail "前提不成立：專屬 TMPDIR 底下沒有 worktree 登記"
+replay_args_remove_worktrees_under "$REPO_ROOT" "$EXIT6_TMP" \
+  && pass "清理函式回 0（範圍內的登記都移除了）" || fail "清理函式回報失敗"
+if grep -qF -- "$EXIT6_TMP/" <<< "$(exit6_list)"; then
+  fail "exit 6 的測試沒有收掉專屬 TMPDIR 底下的 worktree"
+else
+  pass "exit 6 的測試收掉了自己（專屬 TMPDIR 底下）的 worktree 登記"
+fi
+if grep -qxF -- "$EXIT6_OTHER" <<< "$(exit6_list)" && [ -d "$EXIT6_OTHER" ]; then
+  pass "執行期間另建的無關 worktree（範圍外）⛔ 沒有被刪"
+else
+  fail "清理誤刪了範圍外的 worktree"
+fi
+git -C "$REPO_ROOT" worktree remove --force "$EXIT6_OTHER" >/dev/null 2>&1 || true
+rm -rf "$FAKE_BIN" "$DRY_BUNDLE2" "$DRY_OUT2" "$EXIT6_TMP" "$(dirname "$EXIT6_OTHER")"
 
 if [ "$fails" -ne 0 ]; then
   echo "==> replay-args 測試失敗：$fails 項" >&2
@@ -1025,15 +1095,18 @@ S2_BUNDLE="$REPO_ROOT/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
 S2_REPO="$S2_TD/repo"
 mkdir -p "$S2_REPO/scripts/lib" "$S2_REPO/python/scripts" \
          "$S2_REPO/python/backtest/modular/sr_scoring" "$S2_REPO/python/baselines/i074_stage1"
-cp "$REPO_ROOT/scripts/finalize-stage2-evidence.sh" "$S2_REPO/scripts/"
+cp "$REPO_ROOT/scripts/finalize-stage2-evidence.sh" "$REPO_ROOT/scripts/run-replay-offline.sh" "$S2_REPO/scripts/"
 cp "$REPO_ROOT"/scripts/lib/*.sh "$S2_REPO/scripts/lib/"
 cp "$REPO_ROOT/python/scripts/validate-i074-run-identity.py" "$REPO_ROOT/python/scripts/_i074_bootstrap.py" \
    "$REPO_ROOT/python/scripts/i074-stage2-patch-claims.py" "$S2_REPO/python/scripts/"
 cp -r "$REPO_ROOT/python/backtest/modular/sr_scoring/replay_bundle" "$S2_REPO/python/backtest/modular/sr_scoring/"
 find "$S2_REPO" -name __pycache__ -prune -exec rm -rf {} +
 : > "$S2_REPO/python/baselines/i074_stage1/.keep"
-# ③d 的合成守門要一個真的 base：兩份 patch 的目標檔（反事實改它、tooling 新增另一個）。
-printf 'a\n' > "$S2_REPO/cf_target.txt"
+# ③d 的合成守門要一個真的 base。⚠️ ⑦a 起反事實 patch 改動的檔案集合**恰好**是固定的四個檔
+# （`I074_CF_FILES`，兩個產品檔 ＋ 兩個測試檔），所以 base 放這四個檔的佔位內容；tooling 另外新增檔案。
+mkdir -p "$S2_REPO/python/backtest/modular/sr_scoring/tests" "$S2_REPO/docs"
+for _f in "${I074_CF_FILES[@]}"; do printf 'base\n' > "$S2_REPO/$_f"; done
+printf 'docs\n' > "$S2_REPO/docs/notes.md"
 git -C "$S2_REPO" init -q
 git -C "$S2_REPO" add -A
 git -C "$S2_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
@@ -1055,6 +1128,7 @@ s2_normalize() {
         prev=="--verified-counterfactual-sha256"{print "<VERIFIED_COUNTERFACTUAL_SHA256>"; prev=$0; next}
         prev=="--verified-tooling-sha256"{print "<VERIFIED_TOOLING_SHA256>"; prev=$0; next}
         prev=="--verified-composed-sha256"{print "<VERIFIED_COMPOSED_SHA256>"; prev=$0; next}
+        prev=="--verified-counterfactual-semantic-sha256"{print "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>"; prev=$0; next}
         {print; prev=$0}'
 }
 s2_expected() {
@@ -1171,23 +1245,36 @@ EMBED
   echo "==> i074 Stage 2（③d）：其餘五種模式、合成守門與 check 的決策（隔離 repo）"
   S2_BASE_OID="$(git -C "$S2_REPO" rev-parse HEAD)"
   s2_sha() { sha256sum < "$1" | cut -d' ' -f1; }
-  s2_make_patches() {  # $1＝輸出目錄；$2＝反事實寫進 cf_target.txt 的內容；$3＝tooling 新增檔的內容（空＝0-byte）
-    local out="$1" wt="$S2_TD/gen.$RANDOM$RANDOM" t1 t2
+  S2_BASE_TREE="$(git -C "$S2_REPO" rev-parse "$S2_BASE_OID^{tree}")"
+  # $1＝輸出目錄；$2＝反事實附加到兩個**產品檔**的內容（空＝不動）；$3＝附加到兩個**測試檔**的內容（空＝不動）；
+  # $4＝tooling 新增檔的內容（空＝0-byte）；其餘＝另外要改的檔（⚠️ 用來造「四檔集合不符」的反事實）。
+  # ⚠️ ⑦a 起 stored patch 一律是**共用函式**產生的 canonical diff；另存一份預設 `git diff --binary`
+  # （縮寫的 index 行）當「同一個 T1、不同文字表示」的非 canonical 對照。
+  s2_make_patches() {
+    local out="$1" prod="$2" tests="$3" tool="$4" wt="$S2_TD/gen.$RANDOM$RANDOM" t1 t2 f
+    shift 4
     mkdir -p "$out"
     git -C "$S2_REPO" worktree add -q --detach "$wt" "$S2_BASE_OID"
-    printf '%s\n' "$2" > "$wt/cf_target.txt"
+    if [ -n "$prod" ]; then for f in "${I074_CF_PRODUCT_PATHS[@]}"; do printf '%s\n' "$prod" >> "$wt/$f"; done; fi
+    if [ -n "$tests" ]; then
+      for f in "${I074_CF_FILES[@]}"; do
+        case " ${I074_CF_PRODUCT_PATHS[*]} " in *" $f "*) ;; *) printf '%s\n' "$tests" >> "$wt/$f" ;; esac
+      done
+    fi
+    for f in "$@"; do mkdir -p "$(dirname "$wt/$f")"; printf 'extra\n' >> "$wt/$f"; done
     git -C "$wt" add -A
     t1="$(git -C "$wt" write-tree)"
-    git -C "$wt" diff --binary "$S2_BASE_OID" "$t1" > "$out/counterfactual.patch"
-    # ⚠️ 同一個 T1、不同的文字表示（完整 index hash）——⛔ 不是 canonical 的 stored patch。
-    git -C "$wt" diff --binary --full-index "$S2_BASE_OID" "$t1" > "$out/counterfactual.fullindex.patch"
-    if [ -n "$3" ]; then
-      printf '%s\n' "$3" > "$wt/tool_target.txt"
+    replay_args_canonical_diff "$S2_REPO" "$S2_BASE_TREE" "$t1" > "$out/counterfactual.patch"
+    git -C "$wt" diff --binary "$S2_BASE_OID" "$t1" > "$out/counterfactual.noncanon.patch"
+    replay_args_canonical_sha256 "$S2_REPO" "$S2_BASE_TREE" "$t1" "${I074_CF_PRODUCT_PATHS[@]}" > "$out/semantic.sha256"
+    if [ -n "$tool" ]; then
+      printf '%s\n' "$tool" > "$wt/tool_target.txt"
       git -C "$wt" add -A
     fi
     t2="$(git -C "$wt" write-tree)"
-    git -C "$wt" diff --binary "$t1" "$t2" > "$out/tooling.patch"
-    git -C "$wt" diff --binary "$S2_BASE_OID" "$t2" | sha256sum | cut -d' ' -f1 > "$out/composed.sha256"
+    replay_args_canonical_diff "$S2_REPO" "$t1" "$t2" > "$out/tooling.patch"
+    git -C "$wt" diff --binary "$t1" "$t2" > "$out/tooling.noncanon.patch"
+    replay_args_canonical_sha256 "$S2_REPO" "$S2_BASE_TREE" "$t2" > "$out/composed.sha256"
     git -C "$S2_REPO" worktree remove --force "$wt"
   }
   s2_json() {  # $1＝輸出（.json 或 .json.gz，canonical）；$2＝內容（⚠️ 只放 claims 小工具要讀的欄位）
@@ -1209,11 +1296,19 @@ PY
   s2_prov_json() {  # $1＝composed SHA
     printf '{"base_commit":"%s","tooling_patch_sha256":"%s"}' "$S2_BASE_OID" "$1"
   }
-  S2_P="$S2_TD/p_main"; s2_make_patches "$S2_P" b ""       # 反事實 ＋ 空 tooling
-  S2_PT="$S2_TD/p_tool"; s2_make_patches "$S2_PT" b x      # 同一份反事實 ＋ 非空 tooling
-  S2_P2="$S2_TD/p_other"; s2_make_patches "$S2_P2" c ""    # 另一份反事實
-  S2_PX="$S2_TD/p_swap"; s2_make_patches "$S2_PX" b y      # tooling 換成另一份**合法**的 patch
+  S2_P="$S2_TD/p_main"; s2_make_patches "$S2_P" b b ""           # 反事實 ＋ 空 tooling
+  S2_PT="$S2_TD/p_tool"; s2_make_patches "$S2_PT" b b x          # 同一份反事實 ＋ 非空 tooling
+  S2_P2="$S2_TD/p_other"; s2_make_patches "$S2_P2" c c ""        # 產品檔也不同的另一份反事實（語意 SHA 不同）
+  S2_PX="$S2_TD/p_swap"; s2_make_patches "$S2_PX" b b y          # tooling 換成另一份**合法**的 patch
+  S2_PTEST="$S2_TD/p_tests"; s2_make_patches "$S2_PTEST" b z ""  # ⚠️ 只有測試檔不同：完整 SHA 不同、語意 SHA 相同
+  S2_PEXTRA="$S2_TD/p_extra"; s2_make_patches "$S2_PEXTRA" b b "" docs/notes.md   # 多一個非白名單檔
+  S2_PMISS="$S2_TD/p_miss"; s2_make_patches "$S2_PMISS" "" b ""                    # 只改測試檔（少兩個產品檔）
   S2_CF="$(s2_sha "$S2_P/counterfactual.patch")"
+  S2_SEM="$(cat "$S2_P/semantic.sha256")"
+  [ "$(cat "$S2_PTEST/semantic.sha256")" = "$S2_SEM" ] && [ "$(s2_sha "$S2_PTEST/counterfactual.patch")" != "$S2_CF" ] \
+    && [ "$(cat "$S2_P2/semantic.sha256")" != "$S2_SEM" ] \
+    && pass "語意鍵：只改測試檔 → 完整 SHA 不同、語意 SHA 相同；產品檔不同 → 語意 SHA 不同" \
+    || fail "語意鍵的 fixture 不符預期"
   S2_COMP_T="$(cat "$S2_PT/composed.sha256")"
   S2_TOOL_T="$(s2_sha "$S2_PT/tooling.patch")"
   [ "$(cat "$S2_P/composed.sha256")" = "$S2_CF" ] && [ "$(s2_sha "$S2_P/tooling.patch")" = "$(sha256sum < /dev/null | cut -d' ' -f1)" ] \
@@ -1267,9 +1362,13 @@ PY
     s2_blocked "y：finalize 換掉 tooling patch → 合成守門中止、⛔ 不呼叫 Python" fin_y "合成 SHA"
   cp "$S2_PT/tooling.patch" "$S2_FRUN/patches/tooling.patch"
   # 非 canonical 的反事實 patch（同一個 T1、不同的文字表示）→ 正式 archive 無條件拒絕
-  cp "$S2_PT/counterfactual.fullindex.patch" "$S2_FRUN/patches/counterfactual.patch"
+  cp "$S2_PT/counterfactual.noncanon.patch" "$S2_FRUN/patches/counterfactual.patch"
   s2_dry fin_nc --finalize --run-dir "$S2_FRUN" && fail "非 canonical 的反事實 patch 竟通過" || \
-    s2_blocked "finalize：反事實 patch ⛔ 不是 canonical 的 git diff --binary 輸出 → 中止" fin_nc "canonical"
+    s2_blocked "finalize：反事實 patch ⛔ 不是 canonical diff（預設縮寫的 index 行）→ 中止" fin_nc "canonical"
+  # ⑦a：四檔不變條件在共用合成函式裡，所以成功 archive 也拒絕多出非白名單檔的反事實。
+  cp "$S2_PEXTRA/counterfactual.patch" "$S2_FRUN/patches/counterfactual.patch"
+  s2_dry fin_extra --finalize --run-dir "$S2_FRUN" && fail "多出非白名單檔的反事實竟通過 finalize" || \
+    s2_blocked "finalize：反事實改到固定四檔以外的檔案 → 合成守門中止" fin_extra "四個"
   cp "$S2_PT/counterfactual.patch" "$S2_FRUN/patches/counterfactual.patch"
   mv "$S2_FRUN/stage2/report.json" "$S2_TD/report.bak"
   s2_dry fin_miss --finalize --run-dir "$S2_FRUN" && fail "缺 report 竟通過" || \
@@ -1357,6 +1456,30 @@ FAKE
   cp "$S2_P/counterfactual.patch" "$S2_P/tooling.patch" "$S2_XRUN/patches/"
   s2_dry pf --publish-failed-record --run-dir "$S2_XRUN" || true
   s2_argv_ok "publish-failed-record" publish_failed_record_argv pf
+  [ "$(s2_after_flag "$S2_TD/pf.out" --verified-counterfactual-semantic-sha256)" = "$S2_SEM" ] \
+    && pass "publish-failed-record：交給 Python 的語意 SHA ＝ 由凍結 patch 重算的值（failed record 的目錄鍵）" \
+    || fail "publish-failed-record：語意 SHA 的交接值不符"
+  grep -qx -- "--verified-counterfactual-semantic-sha256" "$S2_TD/fin.out" \
+    && fail "finalize 竟帶了語意 SHA（成功 archive ⛔ 不存語意 SHA）" \
+    || pass "finalize：⛔ 不帶語意 SHA 的交接"
+  s2_rejects "使用者自帶 --verified-counterfactual-semantic-sha256 → 拒絕（只能由腳本注入）" \
+    --publish-failed-record --run-dir "$S2_XRUN" --verified-counterfactual-semantic-sha256 "$S2_SEM"
+  # TOCTOU（⑦a）：合成守門之後、Docker 之前把反事實換成「只改測試檔」的那一份（語意 SHA 相同、完整 SHA 不同）。
+  # ⚠️ 交出去的必須仍是 A 的兩個值——Python 讀到 B 的完整 SHA 不符即中止（pytest 的 test_toctou_*）。
+  set +e
+  env -u PY_IMAGE PATH="$S2_TD/swapbin:$PATH" SWAP_FROM="$S2_PTEST/counterfactual.patch" \
+    SWAP_TO="$S2_XRUN/patches/counterfactual.patch" FAKE_ARGV="$S2_TD/swap_pf.argv" REPLAY_IMAGE_ID="$S2_IMG" \
+    XDG_DATA_HOME="$S2_TD/xdg" "$S2_FIN" --publish-failed-record --run-dir "$S2_XRUN" >/dev/null 2>"$S2_TD/swap_pf.err"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && [ "$(s2_sha "$S2_XRUN/patches/counterfactual.patch")" != "$S2_CF" ] \
+     && [ "$(s2_after_flag "$S2_TD/swap_pf.argv" --verified-counterfactual-sha256)" = "$S2_CF" ] \
+     && [ "$(s2_after_flag "$S2_TD/swap_pf.argv" --verified-counterfactual-semantic-sha256)" = "$S2_SEM" ]; then
+    pass "TOCTOU：驗完之後換掉反事實 → 交給 Python 的仍是驗過的 A（完整 SHA 與語意 SHA）"
+  else
+    fail "TOCTOU（publish）回歸測試不符（rc=$rc）"; cat "$S2_TD/swap_pf.err" >&2
+  fi
+  cp "$S2_P/counterfactual.patch" "$S2_XRUN/patches/counterfactual.patch"
   s2_mount_ok "publish-failed-record：中繼檔目錄以 same-path :ro 掛載" pf "$S2_XRUN/stage2:$S2_XRUN/stage2:ro"
   # y／bh（failed record）：反事實換成另一份合法 patch → 合成不出中繼檔記的 composed → ⛔ 不發布。
   cp "$S2_P2/counterfactual.patch" "$S2_XRUN/patches/counterfactual.patch"
@@ -1366,17 +1489,25 @@ FAKE
 
   # ── recover-failed-record ──
   S2_FAILED="$S2_PYROOT/baselines/i074_stage2/failed"
-  s2_record() {  # $1＝record 目錄；$2＝patch 目錄；$3＝宣告的 composed（空＝用 $2 的）
+  s2_record() {  # $1＝record 目錄；$2＝patch 目錄；$3＝宣告的 composed（空＝用 $2 的）；$4＝宣告的語意 SHA（空＝用 $2 的）
     mkdir -p "$1/patch"
     cp "$2/counterfactual.patch" "$2/tooling.patch" "$1/patch/"
-    local comp="${3:-$(cat "$2/composed.sha256")}"
+    local comp="${3:-$(cat "$2/composed.sha256")}" sem="${4:-$(cat "$2/semantic.sha256")}"
     s2_json "$1/failure_record.json" \
-      "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_failed_attempt\",\"patches\":$(s2_patches_json "$(s2_sha "$2/counterfactual.patch")" "$(s2_sha "$2/tooling.patch")" "$comp"),\"provenance\":$(s2_prov_json "$comp")}"
+      "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_failed_attempt\",\"patches\":$(s2_patches_json "$(s2_sha "$2/counterfactual.patch")" "$(s2_sha "$2/tooling.patch")" "$comp"),\"provenance\":$(s2_prov_json "$comp"),\"counterfactual_semantic_sha256\":\"$sem\"}"
   }
-  S2_REC1="$S2_FAILED/b1_fixture-$S2_CF"
+  S2_REC1="$S2_FAILED/b1_fixture-$S2_SEM"
   s2_record "$S2_REC1" "$S2_P"
   s2_dry rf --recover-failed-record "$S2_REC1" || true
   s2_argv_ok "recover-failed-record" recover_failed_record_argv rf
+  [ "$(s2_after_flag "$S2_TD/rf.out" --verified-counterfactual-semantic-sha256)" = "$S2_SEM" ] \
+    && pass "recover-failed-record：宣告的語意 SHA ＝ 由 record 內實際 patch 重算的值 → 才注入" \
+    || fail "recover-failed-record：語意 SHA 的交接值不符"
+  # F4 的 shell 層：record 宣告的語意 SHA ≠ 由封存 patch 重算的值 → ⛔ 不呼叫 Python、⛔ 不 fsync。
+  S2_REC_SEMBAD="$S2_FAILED/b1_fixture-$(printf 'd%.0s' {1..64})"
+  s2_record "$S2_REC_SEMBAD" "$S2_P2" "" "$(printf 'd%.0s' {1..64})"
+  s2_dry rf_sem --recover-failed-record "$S2_REC_SEMBAD" && fail "宣告的語意 SHA 與重算值不符竟被接受" || \
+    s2_blocked "recover-failed-record：宣告的語意 SHA ≠ 重算值 → 中止、⛔ 不呼叫 Python" rf_sem "counterfactual_semantic_sha256"
   mkdir -p "$S2_TD/elsewhere"
   cp -r "$S2_REC1" "$S2_TD/elsewhere/"
   s2_dry rf_out --recover-failed-record "$S2_TD/elsewhere/$(basename "$S2_REC1")" && fail "failed root 外的目錄竟被接受" || \
@@ -1435,7 +1566,8 @@ records = []
 for d in dirs:
     r = json.load(open(d + "/failure_record.json"))
     records.append({"dir": d, "base_commit": r["provenance"]["base_commit"],
-                    **{k: r["patches"][k] for k in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256")}})
+                    **{k: r["patches"][k] for k in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256")},
+                    "counterfactual_semantic_sha256": r["counterfactual_semantic_sha256"]})
 json.dump({"mode": "check_failed_record", "base_commit": base, "records": records}, open(out, "w"))
 PY
   }
@@ -1458,21 +1590,35 @@ PY
   }
   s2_check_json "$S2_TD/none.json"
   s2_check_json "$S2_TD/hit.json" "$S2_REC1"
-  S2_REC2="$S2_FAILED/b1_fixture-$(s2_sha "$S2_P2/counterfactual.patch")"
+  S2_REC2="$S2_FAILED/b1_fixture-$(cat "$S2_P2/semantic.sha256")"
   s2_record "$S2_REC2" "$S2_P2"
   s2_check_json "$S2_TD/other.json" "$S2_REC2"
   s2_check_json "$S2_TD/bad.json" "$S2_REC_BAD"
-  printf '%s\n' 'diff --git a/cf_target.txt b/cf_target.txt' '--- a/cf_target.txt' '+++ b/cf_target.txt' \
+  s2_check_json "$S2_TD/sembad.json" "$S2_REC_SEMBAD"
+  _cf0="${I074_CF_PRODUCT_PATHS[0]}"
+  printf '%s\n' "diff --git a/$_cf0 b/$_cf0" "--- a/$_cf0" "+++ b/$_cf0" \
     '@@ -1 +1 @@' '-zzz' '+b' > "$S2_TD/conflict.patch"
   s2_check_json "$S2_TD/outside.json" "$S2_TD/elsewhere/$(basename "$S2_REC1")"
 
   s2_check_rc "ak：沒有任何 record → rc=0 放行" 0 ck_none "$S2_TD/none.json" "$S2_P/counterfactual.patch"
-  s2_check_rc "al：records 都有效、完整 SHA 都不同 → rc=0" 0 ck_other "$S2_TD/other.json" "$S2_P/counterfactual.patch"
-  s2_check_rc "am／n：完整 SHA 命中 → rc=2" 2 ck_hit "$S2_TD/hit.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "al：records 都有效、語意 SHA 都不同 → rc=0" 0 ck_other "$S2_TD/other.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "am／n：語意 SHA 命中（完整 SHA 也相同）→ rc=2" 2 ck_hit "$S2_TD/hit.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "o2／am：只改測試檔（完整 SHA 不同、語意 SHA 相同）→ 仍命中 rc=2" 2 ck_o2 "$S2_TD/hit.json" \
+    "$S2_PTEST/counterfactual.patch"
+  s2_check_rc "o：白名單產品檔的 diff 改變（語意 SHA 不同）→ rc=0 放行" 0 ck_o "$S2_TD/hit.json" \
+    "$S2_P2/counterfactual.patch"
+  s2_check_rc "ab：recover 之後同語意 SHA 仍⛔ 不得重跑 → rc=2" 2 ck_ab "$S2_TD/hit.json" "$S2_P/counterfactual.patch"
+  s2_check_rc "F4（shell 層）：record 宣告的語意 SHA ≠ 由封存 patch 重算的值 → rc=1" 1 ck_sem "$S2_TD/sembad.json" \
+    "$S2_P/counterfactual.patch"
+  grep -q "重算" "$S2_TD/ck_sem.err" && pass "F4：錯誤訊息指出宣告值 ≠ 重算值" || fail "F4 的錯誤訊息不符"
+  s2_check_rc "語意鍵：反事實多出非白名單檔 → rc=1（replay 之前拒絕）" 1 ck_extra "$S2_TD/none.json" \
+    "$S2_PEXTRA/counterfactual.patch"
+  s2_check_rc "語意鍵：只改測試檔、沒改產品檔的反事實 → rc=1" 1 ck_miss "$S2_TD/none.json" \
+    "$S2_PMISS/counterfactual.patch"
   s2_check_rc "as／av：bytes 不同但 T1 相同（非 canonical）→ 仍命中 rc=2（命中優先）" 2 ck_as "$S2_TD/hit.json" \
-    "$S2_P/counterfactual.fullindex.patch"
+    "$S2_P/counterfactual.noncanon.patch"
   s2_check_rc "au：非 canonical 且未命中 → rc=1（replay 之前拒絕）" 1 ck_au "$S2_TD/none.json" \
-    "$S2_P/counterfactual.fullindex.patch"
+    "$S2_P/counterfactual.noncanon.patch"
   grep -q "canonical" "$S2_TD/ck_au.err" && pass "au：錯誤訊息指出不是 canonical" || fail "au 的錯誤訊息不符"
   s2_check_rc "at：patch 套用失敗 → rc=1" 1 ck_at "$S2_TD/none.json" "$S2_TD/conflict.patch"
   s2_check_rc "ap／ah3：Python 段過、F8-a 失敗 → rc=1" 1 ck_ap "$S2_TD/bad.json" "$S2_P/counterfactual.patch"
@@ -1486,6 +1632,97 @@ PY
   fi
   s2_check_rc "Python 段回報 failed root 外的 record → rc=1" 1 ck_out "$S2_TD/outside.json" "$S2_P/counterfactual.patch"
   grep -qx run "$S2_TD/ck_hit.log" && pass "check：Python 段在容器內執行（fake docker 收到 run）" || fail "check：沒有執行 Python 段"
+
+  # ── ⑦a：runner 的反事實模式（Stage 2 計畫書「六、2」的 s～x、ba 的 runner 層；隔離 repo） ──────
+  #
+  # ⚠️ 全部用 dry-run（⛔ 不真的跑 docker）；runner 在印出 docker argv 之前就完成凍結、合成與前置守門。
+  echo "==> i074 Stage 2（⑦a）：run-replay-offline.sh 的反事實模式（隔離 repo）"
+  mkdir -p "$S2_TD/s7a"
+  : > "$S2_TD/s7a/after_artifact.json"
+  : > "$S2_TD/s7a/cohort_manifest.json"
+  S7_ARGS=(--bundle "$S2_BUNDLE" --output-dir "$S2_TD/s7out" --before-ref "$S2_BASE_OID"
+           --after-artifact "$S2_TD/s7a/after_artifact.json" --cohort-manifest "$S2_TD/s7a/cohort_manifest.json")
+  s7_run() {  # $1＝輸出檔前綴；$2＝COUNTERFACTUAL_PATCH；$3＝TOOLING_PATCH；其餘＝runner 參數
+    local tag="$1" cf="$2" tool="$3" rc
+    shift 3
+    set +e
+    env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="${S7_IMG-$S2_IMG}" XDG_DATA_HOME="$S2_TD/xdg" \
+      I074_STAGE="${S7_STAGE:-2}" COUNTERFACTUAL_PATCH="$cf" TOOLING_PATCH="$tool" \
+      "$S2_REPO/scripts/run-replay-offline.sh" "$@" > "$S2_TD/$tag.out" 2> "$S2_TD/$tag.err"
+    rc=$?
+    set -e
+    return "$rc"
+  }
+  s7_blocked() {  # $1＝說明；$2＝輸出檔前綴；$3＝stderr 必須含的字串（空＝不看訊息）。⚠️ ⛔ 不得印出 docker 指令
+    if ! grep -qx run "$S2_TD/$2.out" && { [ -z "$3" ] || grep -q -- "$3" "$S2_TD/$2.err"; }; then
+      pass "$1"
+    else
+      fail "$1"; cat "$S2_TD/$2.err" >&2
+    fi
+  }
+  S2_TOOL_EMPTY="$(sha256sum < /dev/null | cut -d' ' -f1)"
+  # 正向：兩份 canonical patch → 注入反事實 SHA；三個增量 SHA 各自正確（t：⛔ 不靠「hash 必然不同」）。
+  if s7_run s7_ok "$S2_PT/counterfactual.patch" "$S2_PT/tooling.patch" "${S7_ARGS[@]}" --i074-counterfactual; then
+    if [ "$(s2_after_flag "$S2_TD/s7_ok.out" --counterfactual-patch-sha256)" = "$S2_CF" ] \
+       && [ "$(s2_after_flag "$S2_TD/s7_ok.out" --tooling-patch-sha256)" = "$S2_COMP_T" ] \
+       && grep -qx -- "==> patches: counterfactual=$S2_CF tooling=$S2_TOOL_T composed=$S2_COMP_T" "$S2_TD/s7_ok.out"; then
+      pass "t：反事實 SHA、增量 tooling SHA 與合成 SHA 各自等於獨立推導的值（固定順序 counterfactual → tooling）"
+    else
+      fail "t：runner 的三個 SHA 不符"; cat "$S2_TD/s7_ok.out" >&2
+    fi
+    grep -qx -- "--i074-counterfactual" "$S2_TD/s7_ok.out" \
+      && pass "--i074-counterfactual 透傳進容器內的 CLI" || fail "--i074-counterfactual 沒有透傳"
+    [ "$(awk 'prev=="--runner-sha256"{getline; print; exit} {prev=$0}' "$S2_TD/s7_ok.out")" = "--counterfactual-patch-sha256" ] \
+      && pass "--counterfactual-patch-sha256 注入在 --runner-sha256 之後" || fail "--counterfactual-patch-sha256 的位置不符"
+  else
+    fail "反事實模式的正向 dry-run 失敗"; cat "$S2_TD/s7_ok.err" >&2
+  fi
+  # u／ba（runner 層）：TOOLING_PATCH 空 → 0-byte 凍結副本，兩個 SHA 都有明確值、合成 ＝ 反事實。
+  if s7_run s7_u "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+     && grep -q -- "==> patches: counterfactual=$S2_CF tooling=$S2_TOOL_EMPTY composed=$S2_CF" "$S2_TD/s7_u.out" \
+     && [ "$(s2_after_flag "$S2_TD/s7_u.out" --tooling-patch-sha256)" = "$S2_CF" ]; then
+    pass "u／ba：空的 TOOLING_PATCH → 0-byte 凍結副本（tooling ＝ 空字串的 SHA、composed ＝ 反事實）"
+  else
+    fail "u／ba：空 TOOLING_PATCH 的處理不符"; cat "$S2_TD/s7_u.err" >&2
+  fi
+  s7_run s7_v "" "" "${S7_ARGS[@]}" --i074-counterfactual && fail "v：flag 開啟但沒有 patch 竟通過" || \
+    s7_blocked "v：flag 開啟但 COUNTERFACTUAL_PATCH 空 → 中止" s7_v "COUNTERFACTUAL_PATCH"
+  S7_STAGE=1 s7_run s7_w "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" && fail "w：沒帶 flag 卻帶語意 patch 竟通過" || \
+    s7_blocked "w：flag 關閉但 COUNTERFACTUAL_PATCH 非空 → 中止" s7_w "一般路徑"
+  s7_run s7_s1 "$S2_P/counterfactual.patch" "" --bundle "$S2_BUNDLE" --output-dir "$S2_TD/s7out" \
+    --before-ref "$S2_BASE_OID" --i074-counterfactual && fail "flag 帶在 Stage 1 竟通過" || \
+    s7_blocked "p（runner）：flag 帶在 Stage 1 → 中止" s7_s1 "只限 Stage 2"
+  S7_STAGE=1 s7_run s7_id1 "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "flag 搭 I074_STAGE=1 竟通過" || \
+    s7_blocked "flag 必須搭 I074_STAGE=2（Stage 2 identity）→ 否則中止" s7_id1 "I074_STAGE=2"
+  s7_run s7_eq "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual=1 \
+    && fail "--i074-counterfactual=1 竟被接受" || s7_blocked "--i074-counterfactual=value → 中止" s7_eq "=value"
+  S7_IMG="" s7_run s7_x "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "x：缺 REPLAY_IMAGE_ID 竟通過（⛔ 不得自動 pin）" || \
+    s7_blocked "x：flag 納入 I074_MODE → 缺 REPLAY_IMAGE_ID 即拒絕、⛔ 不自動 pin" s7_x ""
+  s7_run s7_spoof "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+    --counterfactual-patch-sha256 "$S2_CF" && fail "s：使用者自帶反事實 SHA 竟通過" || \
+    s7_blocked "s：使用者自帶 --counterfactual-patch-sha256 → 拒絕（只能由 runner 注入）" s7_spoof "只能由官方腳本注入"
+  s7_run s7_nc "$S2_PT/counterfactual.noncanon.patch" "$S2_PT/tooling.patch" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "非 canonical 的反事實 patch 竟通過 runner" || \
+    s7_blocked "runner 前置守門：反事實 patch 的 raw bytes ≠ canonical → docker 之前中止" s7_nc "不是 canonical"
+  s7_run s7_nct "$S2_PT/counterfactual.patch" "$S2_PT/tooling.noncanon.patch" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "非 canonical 的 tooling patch 竟通過 runner" || \
+    s7_blocked "runner 前置守門：tooling patch 的 raw bytes ≠ canonical → docker 之前中止" s7_nct "TOOLING_PATCH"
+  s7_run s7_extra "$S2_PEXTRA/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "多出非白名單檔的反事實竟通過 runner" || \
+    s7_blocked "語意鍵（runner）：反事實改動⛔ 不是固定的四個檔 → 中止" s7_extra "四個"
+  ln -s "$S2_P/counterfactual.patch" "$S2_TD/cf_link.patch"
+  s7_run s7_link "$S2_TD/cf_link.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
+    && fail "symlink 的反事實 patch 竟被凍結" || s7_blocked "凍結：COUNTERFACTUAL_PATCH ⛔ 不得是 symlink" s7_link "一般檔案"
+  # 一般路徑（⛔ 沒有 flag）：只有 tooling，⛔ 不注入反事實 SHA。
+  if S7_STAGE=1 s7_run s7_gen "" "$S2_PT/tooling.patch" "${S7_ARGS[@]}" \
+     && ! grep -qx -- "--counterfactual-patch-sha256" "$S2_TD/s7_gen.out" \
+     && grep -q -- "==> patches: counterfactual=- " "$S2_TD/s7_gen.out"; then
+    pass "一般路徑：⛔ 不注入 --counterfactual-patch-sha256（逐項不變）"
+  else
+    fail "一般路徑的 runner 行為不符"; cat "$S2_TD/s7_gen.err" >&2
+  fi
 
   # ⚠️ 合成守門與程式碼 worktree 都要被清掉（dry-run、中止、fake docker 三種路徑）。
   S2_WT_COUNT="$(git -C "$S2_REPO" worktree list | wc -l)"
@@ -2199,7 +2436,370 @@ done
 
 rm -rf "$SZ_TD"
 
+# ── I-074 Stage 2 ⑦a：Stage 2 反事實 argv（真正 repo、真正的兩份 patch、dry-run） ─────────────
+#
+# ⚠️ 真的在 `e1cbbbd` 建 worktree、套上**已封存的** counterfactual 與**版控中的** tooling patch：
+# 同時證明兩份 patch 能依固定順序合成、raw ＝ canonical，而 argv 與 fixture 逐 token 相同。
+echo "==> i074 Stage 2（⑦a）：Stage 2 反事實 argv 與 fixture 相同（真正 repo）"
+S7R_FIXTURE="$REPO_ROOT/python/scripts/fixtures/stage2_argv.json"
+S7R_CF="$REPO_ROOT/python/baselines/i074_stage2/counterfactual_e1cbbbd.patch"
+S7R_TOOL="$REPO_ROOT/python/baselines/i074_stage2/tooling_e1cbbbd.patch"
+S7R_BASE=e1cbbbdab44f8cf2d152e6ade9235d844f590d7f
+if [ -n "$S2_IMG" ] && [ -d "$S2_BUNDLE" ] && [ -f "${S2_ID:-/nonexistent}" ]; then
+  if [ ! -f "$S7R_TOOL" ]; then
+    fail "找不到 $S7R_TOOL——要依版控流程（scripts/make-i074-tooling-patch.sh）產生並 stage"
+  else
+    mkdir -p "$S2_TD/s7r"
+    : > "$S2_TD/s7r/after_artifact.json"
+    : > "$S2_TD/s7r/cohort_manifest.json"
+    S7R_WT0="$(git -C "$REPO_ROOT" worktree list | wc -l)"
+    set +e
+    S7R_OUT="$(env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" I074_STAGE=2 \
+      COUNTERFACTUAL_PATCH="$S7R_CF" TOOLING_PATCH="$S7R_TOOL" "$REPO_ROOT/scripts/run-replay-offline.sh" \
+      --bundle "$S2_BUNDLE" --output-dir "$S2_TD/s7r/out" --before-ref "$S7R_BASE" \
+      --after-artifact "$S2_TD/s7r/after_artifact.json" --cohort-manifest "$S2_TD/s7r/cohort_manifest.json" \
+      --i074-counterfactual 2>"$S2_TD/s7r.err")"
+    rc=$?
+    set -e
+    S7R_ACTUAL="$(sed -n '/^python$/,$p' <<< "$S7R_OUT" \
+      | sed -e "s|^$S2_BUNDLE\$|<BUNDLE>|" -e "s|^$S2_TD/s7r/out\$|<OUT>|" \
+            -e "s|^$S2_TD/s7r/after_artifact.json\$|<AFTER_ARTIFACT>|" \
+            -e "s|^$S2_TD/s7r/cohort_manifest.json\$|<COHORT_MANIFEST>|" \
+            -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
+      | awk '
+          prev=="--tooling-patch-sha256"{print "<TOOLING_PATCH_SHA256>"; prev=$0; next}
+          prev=="--runner-sha256"{print "<RUNNER_SHA256>"; prev=$0; next}
+          prev=="--counterfactual-patch-sha256"{print "<COUNTERFACTUAL_PATCH_SHA256>"; prev=$0; next}
+          {print; prev=$0}')"
+    S7R_EXPECTED="$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1],encoding="utf-8"))["stage2_counterfactual_argv"]))' "$S7R_FIXTURE")"
+    if [ "$rc" -eq 0 ] && [ "$S7R_ACTUAL" = "$S7R_EXPECTED" ]; then
+      pass "Stage 2 反事實 argv 與 fixture 逐 token 相同"
+    else
+      fail "Stage 2 反事實 argv 與 fixture 不符（rc=$rc）"; cat "$S2_TD/s7r.err" >&2
+      diff <(printf '%s\n' "$S7R_EXPECTED") <(printf '%s\n' "$S7R_ACTUAL") >&2 || true
+    fi
+    S7R_CF_SHA="$(sha256sum < "$S7R_CF" | cut -d' ' -f1)"
+    [ "$(awk 'prev=="--counterfactual-patch-sha256"{print; exit} {prev=$0}' <<< "$S7R_OUT")" = "$S7R_CF_SHA" ] \
+      && [ "$(awk 'prev=="--before-ref"{print; exit} {prev=$0}' <<< "$S7R_OUT")" = "$S7R_BASE" ] \
+      && [ "$(awk 'prev=="--base-commit"{print; exit} {prev=$0}' <<< "$S7R_OUT")" = "$S7R_BASE" ] \
+      && pass "真正的兩份 patch：raw ＝ canonical、注入的反事實 SHA ＝ 封存 patch 的 SHA、before-ref ＝ base ＝ e1cbbbd" \
+      || fail "真正的兩份 patch 的 SHA 或 base 不符"
+    [ "$(git -C "$REPO_ROOT" worktree list | wc -l)" = "$S7R_WT0" ] \
+      && pass "runner 的 worktree 已清掉（真正 repo 的登記數不變）" || fail "runner 在真正 repo 留下了 worktree"
+  fi
+elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
+  fail "Stage 2 反事實 argv 測試：找不到 image、正式 bundle 或 Stage 2 identity（IMAGE_REQUIRED=1）"
+fi
+
 rm -rf "$S2_TD"
+
+# ── I-074 Stage 2 ⑦a：canonical diff 在惡意 git config／屬性下 bytes 不變（⑦ 總綱 v1「二」） ─────
+#
+# ⚠️ 每一層單獨、再全部同時；另有對照組證明這些設定**真的會**改變一般 `git diff` 的 bytes（⛔ 不是空測）。
+echo "==> i074 Stage 2（⑦a）：canonical diff 在惡意 git config／屬性下 bytes 不變"
+MC_TD="$(mktemp -d)"
+MC_REPO="$MC_TD/repo"
+git init -q "$MC_REPO"
+(
+  cd "$MC_REPO"
+  printf 'def foo():\n    x = 1\n\n    y = 2\n    return x + y\n' > a.py          # funcname 行 ＋ 空白 context 行
+  printf 'rename me please\nline2\nline3\nline4\n' > old_name.txt              # rename（⛔ 內容不變）
+  printf 'first\n' > z_first.txt
+  printf 'last\n' > a_last.txt                                                  # 多檔案（順序）
+  mkdir 資料 && printf '中文\n' > 資料/檔案.txt                                  # 非 ASCII 檔名
+  printf 'bin\000\001\002' > bin.dat                                            # binary
+  git add -A && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm A
+  printf 'def foo():\n    x = 1\n\n    y = 3\n    return x + y\n' > a.py
+  git mv old_name.txt new_name.txt
+  printf 'first changed\n' > z_first.txt
+  printf 'last changed\n' > a_last.txt
+  printf '中文改\n' > 資料/檔案.txt
+  printf 'bin\000\003\004' > bin.dat
+  git add -A && git -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm B
+)
+MC_A="$(git -C "$MC_REPO" rev-parse 'HEAD~1^{tree}')"
+MC_B="$(git -C "$MC_REPO" rev-parse 'HEAD^{tree}')"
+replay_args_canonical_diff "$MC_REPO" "$MC_A" "$MC_B" > "$MC_TD/ref.patch"
+printf 'z_first.txt\n' > "$MC_TD/order"
+printf '* diff=evil\n*.txt -diff\n*.dat diff\n' > "$MC_TD/evil_attrs"
+mc_evil_config() {  # $1＝config 檔
+  local kv
+  for kv in diff.noprefix=true diff.context=9 diff.renames=copies "diff.orderFile=$MC_TD/order" \
+            core.quotePath=false diff.mnemonicPrefix=true diff.algorithm=patience diff.indentHeuristic=false \
+            diff.suppressBlankEmpty=true diff.interHunkContext=9 core.abbrev=12 color.diff=always \
+            'diff.evil.xfuncname=^(.*)$'; do
+    git config -f "$1" "${kv%%=*}" "${kv#*=}"
+  done
+}
+mc_same() {  # 在目前的環境下算一次 canonical diff，bytes ＝ 參考值才回 0
+  replay_args_canonical_diff "$MC_REPO" "$MC_A" "$MC_B" > "$MC_TD/out.patch" && cmp -s "$MC_TD/out.patch" "$MC_TD/ref.patch"
+}
+mc_check() {  # $1＝說明；$2＝0／1（上一步 mc_same 的結果）
+  # ⚠️ pass／fail 一律在主 shell 呼叫——subshell 裡的 `fails` 計數傳不回來。
+  if [ "$2" = 0 ]; then
+    pass "惡意 config：$1 → bytes ＝ 乾淨環境的參考值"
+  else
+    fail "惡意 config：$1 改變了 canonical diff 的 bytes"
+  fi
+}
+# ⚠️ 完整 index 行要看**文字檔**那一段：`--binary` 對 binary 檔本來就印完整 OID（反向驗證抓到的空測）。
+grep -q '^diff --git a/new_name.txt b/new_name.txt$' "$MC_TD/ref.patch" && ! grep -q '^rename from' "$MC_TD/ref.patch" \
+  && grep -q '^index [0-9a-f]\{40\}\.\.[0-9a-f]\{40\} ' \
+       <<< "$(awk '/^diff --git a\/a.py b\/a.py$/{f=1; next} f && /^index /{print; exit}' "$MC_TD/ref.patch")" \
+  && grep -q '^GIT binary patch$' "$MC_TD/ref.patch" \
+  && grep -q '"a/\\350' "$MC_TD/ref.patch" \
+  && pass "參考值：--no-renames、--full-index、binary、非 ASCII 以 quotePath 跳脫" || fail "參考值的形狀不符"
+cp "$MC_REPO/.git/config" "$MC_TD/config.orig"
+mc_evil_config "$MC_REPO/.git/config"
+# 對照組：同一組惡意設定下，一般 `git diff` 的 bytes 確實不同。
+git -C "$MC_REPO" diff --binary "$MC_A" "$MC_B" > "$MC_TD/plain.patch" 2>/dev/null || true
+cmp -s "$MC_TD/plain.patch" "$MC_TD/ref.patch" && fail "對照組：惡意 config 竟沒有改變一般 git diff（測試是空的）" \
+  || pass "對照組：惡意 config 確實改變一般 git diff 的 bytes"
+rc=0; mc_same || rc=1; mc_check "來源 repo 的 .git/config" "$rc"
+cp "$MC_TD/config.orig" "$MC_REPO/.git/config"
+mkdir -p "$MC_TD/home"
+mc_evil_config "$MC_TD/home/.gitconfig"
+rc=0; ( export HOME="$MC_TD/home" XDG_CONFIG_HOME="$MC_TD/home"; mc_same ) || rc=1
+mc_check "呼叫端 HOME 的 .gitconfig" "$rc"
+mkdir -p "$MC_REPO/.git/info"
+cp "$MC_TD/evil_attrs" "$MC_REPO/.git/info/attributes"
+rc=0; mc_same || rc=1; mc_check "info/attributes" "$rc"
+rm -f "$MC_REPO/.git/info/attributes"
+cp "$MC_TD/evil_attrs" "$MC_REPO/.gitattributes"
+rc=0; mc_same || rc=1; mc_check "工作樹的 .gitattributes" "$rc"
+rm -f "$MC_REPO/.gitattributes"
+git -C "$MC_REPO" config core.attributesFile "$MC_TD/evil_attrs"
+rc=0; mc_same || rc=1; mc_check "core.attributesFile" "$rc"
+cp "$MC_TD/config.orig" "$MC_REPO/.git/config"
+rc=0
+( export GIT_CONFIG_PARAMETERS="'diff.noprefix'='true' 'diff.context'='0' 'core.quotepath'='false'" \
+         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=copies
+  mc_same ) || rc=1
+mc_check "GIT_CONFIG_PARAMETERS／GIT_CONFIG_COUNT" "$rc"
+mc_evil_config "$MC_REPO/.git/config"
+git -C "$MC_REPO" config core.attributesFile "$MC_TD/evil_attrs"
+cp "$MC_TD/evil_attrs" "$MC_REPO/.git/info/attributes"
+cp "$MC_TD/evil_attrs" "$MC_REPO/.gitattributes"
+rc=0
+( export HOME="$MC_TD/home" XDG_CONFIG_HOME="$MC_TD/home" \
+         GIT_CONFIG_PARAMETERS="'diff.noprefix'='true' 'diff.context'='0'" \
+         GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=diff.renames GIT_CONFIG_VALUE_0=copies
+  mc_same ) || rc=1
+mc_check "全部同時" "$rc"
+replay_args_canonical_diff "$MC_REPO" "$(git -C "$MC_REPO" rev-parse HEAD)" "$MC_B" >/dev/null 2>&1 \
+  && fail "canonical diff 竟接受 commit OID" || pass "canonical diff ⛔ 接受 commit OID（只收 tree）"
+replay_args_canonical_diff "$MC_REPO" HEAD "$MC_B" >/dev/null 2>&1 \
+  && fail "canonical diff 竟接受 ref" || pass "canonical diff ⛔ 接受 ref（只收 40 碼 tree OID）"
+rm -rf "$MC_TD"
+
+# ── I-074 Stage 2 ⑦a：tooling patch 產生器（隔離 repo；複製腳本 ＋ sed 常數） ─────────────────
+echo "==> i074 Stage 2（⑦a）：tooling patch 產生器的四條不變條件（隔離 repo）"
+GEN_TD="$(mktemp -d)"
+GEN="$GEN_TD/repo"
+GEN_SR=python/backtest/modular/sr_scoring
+mkdir -p "$GEN/scripts/lib" "$GEN/$GEN_SR/tests" "$GEN/$GEN_SR/replay_bundle" "$GEN/python/scripts"
+cp "$REPO_ROOT/scripts/make-i074-tooling-patch.sh" "$GEN/scripts/"
+cp "$REPO_ROOT/scripts/lib/replay-args.sh" "$GEN/scripts/lib/"
+for _f in "${I074_CF_FILES[@]}"; do printf 'base\n' > "$GEN/$_f"; done
+printf 'eval0\n' > "$GEN/$GEN_SR/evaluation.py"
+printf 'rb0\n' > "$GEN/$GEN_SR/replay_bundle/a.py"
+printf 'other0\n' > "$GEN/$GEN_SR/other.py"
+printf 'x0\n' > "$GEN/python/scripts/x.py"
+git -C "$GEN" init -q
+git -C "$GEN" add -A
+git -C "$GEN" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm base
+GEN_BASE="$(git -C "$GEN" rev-parse HEAD)"
+GEN_BT="$(git -C "$GEN" rev-parse 'HEAD^{tree}')"
+sed -i "s/^I074_TOOLING_BASE=[0-9a-f]\{40\}\$/I074_TOOLING_BASE=$GEN_BASE/" "$GEN/scripts/make-i074-tooling-patch.sh"
+GEN_DIFF="$(diff "$REPO_ROOT/scripts/make-i074-tooling-patch.sh" "$GEN/scripts/make-i074-tooling-patch.sh" | grep -c '^[<>]' || true)"
+[ "$GEN_DIFF" = 2 ] && pass "產生器的複本與正式檔案只差 base 常數那一行" || fail "產生器的複本與正式檔案差了 $GEN_DIFF 行"
+gen_tree() {  # $1＝底的 tree；其餘＝「路徑=內容」或「路徑=@檔案」→ 印出新 tree（⚠️ 暫存 index，⛔ 不建 worktree）
+  local idx="$GEN_TD/idx.$RANDOM$RANDOM" kv path val oid
+  local base="$1"; shift
+  GIT_INDEX_FILE="$idx" git -C "$GEN" read-tree "$base"
+  for kv in "$@"; do
+    path="${kv%%=*}"; val="${kv#*=}"
+    if [ "${val#@}" != "$val" ]; then
+      oid="$(git -C "$GEN" hash-object -w "${val#@}")"
+    else
+      oid="$(printf '%s\n' "$val" | git -C "$GEN" hash-object -w --stdin)"
+    fi
+    GIT_INDEX_FILE="$idx" git -C "$GEN" update-index --add --cacheinfo "100644,$oid,$path"
+  done
+  GIT_INDEX_FILE="$idx" git -C "$GEN" write-tree
+  rm -f "$idx"
+}
+GEN_CFSPEC=(); for _f in "${I074_CF_FILES[@]}"; do GEN_CFSPEC+=("$_f=cf"); done
+GEN_T1="$(gen_tree "$GEN_BT" "${GEN_CFSPEC[@]}")"
+replay_args_canonical_diff "$GEN" "$GEN_BT" "$GEN_T1" > "$GEN_TD/cf.patch"
+GEN_CFPATH=python/baselines/i074_stage2/counterfactual_e1cbbbd.patch
+GEN_TOOLPATH=python/baselines/i074_stage2/tooling_e1cbbbd.patch
+GEN_S1="$(gen_tree "$GEN_BT" "$GEN_CFPATH=@$GEN_TD/cf.patch" "$GEN_SR/evaluation.py=eval1" \
+  "$GEN_SR/replay_bundle/a.py=rb1" "$GEN_SR/replay_bundle/new.py=new" "python/scripts/x.py=x1" \
+  "$GEN_SR/tests/test_new.py=t1")"
+GEN_MK="$GEN/scripts/make-i074-tooling-patch.sh"
+if "$GEN_MK" --source-tree "$GEN_S1" > "$GEN_TD/tool.patch" 2> "$GEN_TD/tool.err"; then
+  GEN_NAMES="$(grep '^diff --git' "$GEN_TD/tool.patch" | sed 's|^diff --git a/||;s| b/.*||' | LC_ALL=C sort | tr '\n' ' ')"
+  [ "$GEN_NAMES" = "$GEN_SR/evaluation.py $GEN_SR/replay_bundle/a.py $GEN_SR/replay_bundle/new.py " ] \
+    && pass "產生器：只含 evaluation.py 與 replay_bundle/（⛔ 不含測試、腳本與 baselines）" \
+    || fail "產生器的路徑集合不符：$GEN_NAMES"
+else
+  fail "產生器的正向路徑失敗"; cat "$GEN_TD/tool.err" >&2
+fi
+GEN_S1V="$(gen_tree "$GEN_S1" "$GEN_TOOLPATH=@$GEN_TD/tool.patch")"
+"$GEN_MK" --verify "$GEN_S1V" >/dev/null 2>&1 && pass "--verify：tree 內的 patch 與重新產生的逐位元相同 → 0" \
+  || fail "--verify 對一致的 tree 竟不回 0"
+: > "$GEN_TD/stale.patch"
+GEN_S1S="$(gen_tree "$GEN_S1" "$GEN_TOOLPATH=@$GEN_TD/stale.patch")"
+"$GEN_MK" --verify "$GEN_S1S" >/dev/null 2>&1 && fail "--verify 對漂移的 patch 竟回 0" || pass "--verify：patch 漂移 → 1"
+"$GEN_MK" --verify "$GEN_S1" >/dev/null 2>&1 && fail "--verify 對缺 patch 的 tree 竟回 0" || pass "--verify：tree 裡沒有 patch → 1"
+GEN_S4="$(gen_tree "$GEN_S1" "$GEN_SR/other.py=other1")"
+set +e
+"$GEN_MK" --source-tree "$GEN_S4" > "$GEN_TD/s4.out" 2> "$GEN_TD/s4.err"; rc=$?
+set -e
+[ "$rc" -ne 0 ] && [ ! -s "$GEN_TD/s4.out" ] && grep -q "④" "$GEN_TD/s4.err" \
+  && pass "④ 產品碼不變條件：來源 tree 改到其他產品檔 → 中止、stdout ⛔ 無輸出" || fail "④ 沒有擋下（rc=$rc）"
+"$GEN_MK" --source-tree "$GEN_BT" >/dev/null 2>&1 && fail "來源 tree 沒有 counterfactual 竟通過" \
+  || pass "來源 tree 裡沒有 counterfactual patch → 中止"
+"$GEN_MK" --source-tree HEAD >/dev/null 2>&1 && fail "產生器竟接受 ref" || pass "產生器 ⛔ 接受 ref（⛔ 不讀 HEAD）"
+"$GEN_MK" --source-tree "$GEN_BASE" >/dev/null 2>&1 && fail "產生器竟接受 commit OID" || pass "產生器只接受 tree OID"
+gen_inv() { ( . "$GEN_MK"; mk_check_invariants "$@" ) }
+GEN_T2="$(gen_tree "$GEN_T1" "$GEN_SR/evaluation.py=eval1" "$GEN_SR/replay_bundle/a.py=rb1" "$GEN_SR/replay_bundle/new.py=new")"
+gen_inv "$GEN_BT" "$GEN_S1" "$GEN_T1" "$GEN_T2" 2>/dev/null && pass "不變條件：合法的 T1／T2 → 通過（對照組）" \
+  || fail "不變條件的對照組竟失敗"
+GEN_T1BAD="$(gen_tree "$GEN_T1" "$GEN_SR/evaluation.py=evalX")"
+gen_inv "$GEN_BT" "$GEN_S1" "$GEN_T1BAD" "$GEN_T2" 2> "$GEN_TD/i1.err" && fail "① 沒有擋下" \
+  || { grep -q "①" "$GEN_TD/i1.err" && pass "①：counterfactual 改到 tooling 路徑 → 中止" || fail "① 的失敗點不符"; }
+GEN_T2BAD="$(gen_tree "$GEN_T1" "$GEN_SR/evaluation.py=evalZ")"
+gen_inv "$GEN_BT" "$GEN_S1" "$GEN_T1" "$GEN_T2BAD" 2> "$GEN_TD/i2.err" && fail "② 沒有擋下" \
+  || { grep -q "②" "$GEN_TD/i2.err" && pass "②：T2 在 tooling 路徑上 ≠ 來源 → 中止" || fail "② 的失敗點不符"; }
+GEN_T2X="$(gen_tree "$GEN_T2" "$GEN_SR/other.py=other1")"
+gen_inv "$GEN_BT" "$GEN_S1" "$GEN_T1" "$GEN_T2X" 2> "$GEN_TD/i3.err" && fail "③ 沒有擋下" \
+  || { grep -q "③" "$GEN_TD/i3.err" && pass "③：T1..T2 改到 tooling 以外 → 中止" || fail "③ 的失敗點不符"; }
+gen_inv "$GEN_BT" "$GEN_S4" "$GEN_T1" "$GEN_T2" 2> "$GEN_TD/i4.err" && fail "④ 沒有擋下" \
+  || { grep -q "④" "$GEN_TD/i4.err" && pass "④：來源 tree 的產品碼 ≠ base → 中止" || fail "④ 的失敗點不符"; }
+# 自我驗證：讓產出在自我驗證之前被竄改（另一份複本注入一行）→ 必須中止、stdout ⛔ 無輸出。
+# ⚠️ 用 Python 做字串替換（⛔ 不用 sed／grep 的 regex：這台的 grep 是 ugrep，`||` 的語意不同）。
+python3 - "$GEN_MK" "$GEN/scripts/mk_tampered.sh" <<'TAMPER'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+anchor = '  replay_args_canonical_diff "$REPO_ROOT" "$t1" "$t2" > "$out" || return 1\n'
+assert text.count(anchor) == 1
+open(dst, "w", encoding="utf-8").write(text.replace(anchor, anchor + '  printf "# tampered\\n" >> "$out"\n'))
+TAMPER
+chmod +x "$GEN/scripts/mk_tampered.sh"
+set +e
+"$GEN/scripts/mk_tampered.sh" --source-tree "$GEN_S1" > "$GEN_TD/tamper.out" 2> "$GEN_TD/tamper.err"; rc=$?
+set -e
+[ "$rc" -ne 0 ] && [ ! -s "$GEN_TD/tamper.out" ] && grep -q "自我驗證" "$GEN_TD/tamper.err" \
+  && pass "自我驗證：產出寫出之後被改動 → 中止、stdout ⛔ 無輸出" || fail "自我驗證沒有擋下被竄改的產出（rc=$rc）"
+rm -f "$GEN/scripts/mk_tampered.sh"
+[ "$(git -C "$GEN" worktree list | wc -l)" = 1 ] && pass "產生器的暫時 worktree 全部清掉" \
+  || { fail "產生器留下了 worktree"; git -C "$GEN" worktree list >&2; }
+
+# ── I-074 Stage 2 ⑦a：乾淨檢查與 worktree 清理的錯誤處理（⑦a 實作第二輪 review：⛔ fail-open） ──────
+echo "==> i074 Stage 2（⑦a）：replay_args_path_clean／replay_args_remove_worktrees_under 的錯誤處理"
+FC_TD="$(mktemp -d)"
+FC_REPO="$FC_TD/repo"
+mkdir -p "$FC_REPO/bundle"
+printf 'x\n' > "$FC_REPO/bundle/a.txt"
+git -C "$FC_REPO" init -q
+git -C "$FC_REPO" add -A
+git -C "$FC_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm base
+REAL_GIT="$(command -v git)"
+mkdir -p "$FC_TD/bin"
+cat > "$FC_TD/bin/git" <<'FAKEGIT'
+#!/usr/bin/env bash
+# ⚠️ 只攔 `status`（FAKE_STATUS＝fail：失敗且沒有 stdout；dirty：成功但輸出一行），其餘交給真的 git。
+for a in "$@"; do
+  if [ "$a" = status ]; then
+    case "${FAKE_STATUS:-}" in
+      fail)  echo "fatal: simulated status failure" >&2; exit 128 ;;
+      dirty) printf ' M python/baselines/x/manifest.json\n'; exit 0 ;;
+    esac
+  fi
+done
+exec "$REAL_GIT" "$@"
+FAKEGIT
+chmod +x "$FC_TD/bin/git"
+fc_clean() {  # $1＝預期 rc；$2＝說明；其餘＝環境變數
+  local want="$1" label="$2" rc=0
+  shift 2
+  env "$@" PATH="$FC_TD/bin:$PATH" REAL_GIT="$REAL_GIT" bash -c \
+    '. "$1/scripts/lib/replay-args.sh"; replay_args_path_clean "$2" "$2/bundle"' _ "$REPO_ROOT" "$FC_REPO" \
+    >/dev/null 2>&1 || rc=$?
+  [ "$rc" = "$want" ] && pass "$label" || fail "$label（rc=$rc，預期 $want）"
+}
+fc_clean 0 "path_clean：乾淨 → 0"
+fc_clean 2 "path_clean：git status 失敗（沒有 stdout）→ 2（⛔ 不當成乾淨）" FAKE_STATUS=fail
+fc_clean 1 "path_clean：status 成功但有輸出 → 1" FAKE_STATUS=dirty
+printf 'y\n' >> "$FC_REPO/bundle/a.txt"
+fc_clean 1 "path_clean：已追蹤檔被改 → 1"
+git -C "$FC_REPO" checkout -q -- bundle/a.txt
+printf 'z\n' > "$FC_REPO/bundle/new.txt"
+fc_clean 1 "path_clean：多一個 untracked 檔 → 1"
+rm -f "$FC_REPO/bundle/new.txt"
+fc_clean 0 "path_clean：還原之後 → 0（對照組）"
+
+# smoke：來源檢查在 docker build 與任何 replay 之前——status 失敗或 dirty 都⛔ 不得呼叫 docker。
+cat > "$FC_TD/bin/docker" <<'FAKEDOCKER'
+#!/usr/bin/env bash
+echo "$*" >> "$FAKE_DOCKER_LOG"
+exit 1
+FAKEDOCKER
+chmod +x "$FC_TD/bin/docker"
+for fc_mode in fail dirty; do
+  : > "$FC_TD/docker_$fc_mode.log"
+  set +e
+  env FAKE_STATUS="$fc_mode" REAL_GIT="$REAL_GIT" FAKE_DOCKER_LOG="$FC_TD/docker_$fc_mode.log" \
+    PATH="$FC_TD/bin:$PATH" "$REPO_ROOT/scripts/smoke-replay-offline.sh" > "$FC_TD/smoke_$fc_mode.out" 2>&1
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ] && [ ! -s "$FC_TD/docker_$fc_mode.log" ] && grep -q "不啟動任何 replay" "$FC_TD/smoke_$fc_mode.out"; then
+    pass "smoke：來源的 git status $([ "$fc_mode" = fail ] && echo 失敗 || echo 不為空) → 中止、docker ⛔ 一次都沒被呼叫"
+  else
+    fail "smoke：來源的 git status $fc_mode 沒有在 replay 之前擋下（rc=$rc）"; cat "$FC_TD/smoke_$fc_mode.out" >&2
+  fi
+done
+
+# 清理函式：list 失敗 → 非零；remove 失敗 → 非零、⛔ 不刪實體目錄、登記仍在。
+mkdir -p "$FC_TD/scope"
+set +e
+replay_args_remove_worktrees_under "$FC_TD/not-a-repo" "$FC_TD/scope" >/dev/null 2>&1; rc=$?
+set -e
+[ "$rc" -ne 0 ] && pass "remove_worktrees_under：worktree list 失敗 → 非零（⛔ 不當成沒有東西要清）" \
+  || fail "worktree list 失敗竟回 0"
+git -C "$FC_REPO" worktree add -q --detach "$FC_TD/scope/locked" HEAD
+git -C "$FC_REPO" worktree lock "$FC_TD/scope/locked"
+set +e
+replay_args_remove_worktrees_under "$FC_REPO" "$FC_TD/scope" >/dev/null 2>&1; rc=$?
+set -e
+if [ "$rc" -ne 0 ] && [ -d "$FC_TD/scope/locked" ] \
+   && grep -qxF -- "worktree $FC_TD/scope/locked" <<< "$(git -C "$FC_REPO" worktree list --porcelain)"; then
+  pass "remove_worktrees_under：worktree remove 失敗 → 非零、⛔ 不刪實體目錄、登記仍在"
+else
+  fail "worktree remove 失敗時的處理不符（rc=$rc）"
+fi
+git -C "$FC_REPO" worktree unlock "$FC_TD/scope/locked"
+replay_args_remove_worktrees_under "$FC_REPO" "$FC_TD/scope" && [ ! -e "$FC_TD/scope/locked" ] \
+  && pass "remove_worktrees_under：解鎖之後 → 0 且已移除（對照組）" || fail "解鎖之後仍移除不了"
+rm -rf "$FC_TD"
+
+# ⚠️ **漂移測試**（⑦ 總綱 v1「二」的版控列）：對「目前 index 的 tree」重新產生，必須與 index 中的 patch 逐位元相同。
+# 開發途中（index 還沒有新 patch）會失敗是預期行為——依版控流程 stage 之後才會通過。
+echo "==> i074 Stage 2（⑦a）：tooling patch 漂移測試（真正 repo 的 index）"
+DRIFT_WT0="$(git -C "$REPO_ROOT" worktree list | wc -l)"
+if DRIFT_TREE="$(git -C "$REPO_ROOT" write-tree)" \
+   && "$REPO_ROOT/scripts/make-i074-tooling-patch.sh" --verify "$DRIFT_TREE" > "$GEN_TD/drift.out" 2> "$GEN_TD/drift.err"; then
+  pass "tooling patch：index 的 tree 重新產生的結果 ＝ index 中的 patch（沒有漂移）"
+else
+  fail "tooling patch 漂移了（或 index 還沒有它）——依版控流程重新產生並 stage"; cat "$GEN_TD/drift.err" >&2
+fi
+[ "$(git -C "$REPO_ROOT" worktree list | wc -l)" = "$DRIFT_WT0" ] \
+  && pass "漂移測試沒有在真正 repo 留下 worktree" || fail "漂移測試在真正 repo 留下了 worktree"
+rm -rf "$GEN_TD"
+
 
 # ⚠️ **結尾要再檢查一次**：`$fails` 的第一次檢查在上面的 I-100 段落結束處，
 # ⛔ 之後新增的 I-074 測試若呼叫 `fail`，沒有這一段就會照樣印「全部通過」並回 0，

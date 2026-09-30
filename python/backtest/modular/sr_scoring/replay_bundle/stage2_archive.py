@@ -5,9 +5,11 @@
 * **成功 archive**（`python/baselines/i074_stage2/evidence/`，封閉 7 檔）：before source 全量、
   comparison、report、兩份 raw patch、Stage 2 identity ＋ manifest；`verify_stage2_graph()` 的
   十六道由 finalize（對 staging）與 recovery **共用同一段程式**；
-* **failed-attempt record**（`failed/<bundle_id>-<counterfactual_patch_sha256>/`）：反事實沒有生效
+* **failed-attempt record**（`failed/<bundle_id>-<counterfactual_semantic_sha256>/`）：反事實沒有生效
   （「①之三」的檢查順序得出 `candidate_flag_inconsistent` 或 `rr_not_restored`）時的事故紀錄，
-  ⛔ 不是成功 archive；
+  ⛔ 不是成功 archive；⚠️ 目錄鍵是**語意 SHA**（只涵蓋兩個產品檔的 canonical diff，⑦ 總綱 v1 決策表
+  第 9 列）——只改測試檔⛔ 換不了鍵；語意 SHA 要用 git 算，由 shell 以
+  `--verified-counterfactual-semantic-sha256` 交給本模組；
 * check／recover 的 Python 段——⚠️ **合成守門（F8-a、「四之二」）在 shell**
   （`scripts/finalize-stage2-evidence.sh`），⛔ 本模組不碰 git；shell 把驗過的四個值以 `--verified-*`
   交給本模組（`VerifiedComposition`），commit point／fsync 之前必須與**實際要封存的內容**相符
@@ -144,7 +146,7 @@ _WITNESS_REF_FIELDS = frozenset({"manifest_path", "manifest_sha256", "members"})
 _MEMBER_FIELDS = frozenset({"artifact_sha256", "stored_sha256"})
 _FAILED_RECORD_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "expected_image_id", "run_identity",
                                    "patches", "files", "bounded_diagnostics", "failure_reason",
-                                   "generated_at", "provenance"})
+                                   "generated_at", "provenance", "counterfactual_semantic_sha256"})
 _FAILURE_SOURCE_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "generated_at", "provenance",
                                     "failure_reason", "bounded_diagnostics"})
 _FAILED_DIR_RE = re.compile(r"^(?P<bundle>[^/]+)-(?P<sha>[0-9a-f]{64})$")
@@ -193,6 +195,19 @@ class BoundedSample:
 
     def samples(self) -> list[dict[str, Any]]:
         return [sample for _key, _seq, sample in self._buffer]
+
+
+class CounterfactualIneffective(Exception):
+    """反事實 replay 的 counterfactual patch **沒有生效**（結束碼 6）。
+
+    ⛔ **刻意不繼承 `ValueError`**（比照 `CandidateMismatch`）：evaluation 的 CLI 以
+    `except (CliUsageError, ValueError, OSError) → sys.exit(1)` 統一收斂，繼承下去的話專屬碼出不來。
+    ⚠️ 拋出之前，`bounded_diagnostics.json` 必須已經發布（`path` 指向它）。
+    """
+
+    def __init__(self, message: str, *, path) -> None:
+        super().__init__(message)
+        self.path = path
 
 
 class CounterfactualEffectCheck:
@@ -705,17 +720,36 @@ class VerifiedComposition:
     counterfactual_patch_sha256: str
     tooling_patch_sha256: str
     composed_sha256: str
+    # ⚠️ ⑦a：shell 從**實際 patch** 重算的語意 SHA（只有 publish／recover-failed-record 會帶）。
+    counterfactual_semantic_sha256: str | None = None
 
     def __post_init__(self) -> None:
         _claims(self.base_commit, self.counterfactual_patch_sha256, self.tooling_patch_sha256,
                 self.composed_sha256)
+        if self.counterfactual_semantic_sha256 is not None:
+            validate_semantic_sha256(self.counterfactual_semantic_sha256, "交接的語意 SHA")
 
 
 def check_verified_composition(verified: VerifiedComposition, *, base_commit: str,
-                               patches: Mapping[str, Any], label: str) -> None:
-    """實際讀到、要封存（或要 fsync）的內容 ⇔ shell 合成守門驗過的值。⛔ 任一不符即中止。"""
+                               patches: Mapping[str, Any], label: str,
+                               semantic_sha256: str | None = None) -> None:
+    """實際讀到、要封存（或要 fsync）的內容 ⇔ shell 合成守門驗過的值。⛔ 任一不符即中止。
+
+    `semantic_sha256`：failed record 實際的 `counterfactual_semantic_sha256`（成功 archive ⛔ 不存語意 SHA，
+    傳 `None`）。⚠️ 交接值與實際欄位必須**同時存在**且相等——一邊有、一邊沒有也是不符。
+    """
     if not isinstance(verified, VerifiedComposition):
         raise ArtifactError(f"{label}：缺少 shell 合成守門的交接值——⛔ 沒有它就無法證明封存的就是驗過的那一份")
+    if (semantic_sha256 is None) != (verified.counterfactual_semantic_sha256 is None):
+        raise ArtifactError(
+            f"{label}：語意 SHA 的交接值與實際欄位⛔ 必須同時存在（交接 "
+            f"{verified.counterfactual_semantic_sha256!r}、實際 {semantic_sha256!r}）"
+        )
+    if semantic_sha256 is not None and semantic_sha256 != verified.counterfactual_semantic_sha256:
+        raise ArtifactError(
+            f"{label}：record 的 counterfactual_semantic_sha256 與 shell 由實際 patch 重算的值不符——"
+            "⛔ 不發布、⛔ 不 fsync"
+        )
     actual = {"base_commit": base_commit,
               **{f: patches[f] for f in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256")}}
     expected = {"base_commit": verified.base_commit,
@@ -880,18 +914,29 @@ def validate_counterfactual_failure(payload: object) -> None:
     validate_bounded_diagnostics(payload["failure_reason"], payload["bounded_diagnostics"])
 
 
-def failed_record_dir_name(bundle_id: str, counterfactual_patch_sha256: str) -> str:
-    """⚠️ 完整 64 碼，⛔ 不截斷——截成 12 碼會讓不同的完整 SHA 映到同一路徑。"""
-    if not is_hex64(counterfactual_patch_sha256):
-        raise ArtifactError("counterfactual_patch_sha256 必須是 64 字元小寫 hex")
+def validate_semantic_sha256(value: object, label: str) -> None:
+    """語意 SHA：64 字元小寫 hex，⛔ 不得是空 diff 的 SHA（語意 diff 必須非空）。"""
+    if not is_hex64(value):
+        raise ArtifactError(f"{label} 必須是 64 字元小寫 hex：{value!r}")
+    if value == EMPTY_SHA256:
+        raise ArtifactError(f"{label} ⛔ 不得是空 diff 的 SHA——反事實在兩個產品檔上必須有改動")
+
+
+def failed_record_dir_name(bundle_id: str, counterfactual_semantic_sha256: str) -> str:
+    """`<bundle_id>-<counterfactual_semantic_sha256>`。
+
+    ⚠️ 完整 64 碼，⛔ 不截斷——截成 12 碼會讓不同的完整 SHA 映到同一路徑。⚠️ 鍵是**語意 SHA**
+    （⑦ 總綱 v1 決策表第 9 列）：只改測試檔的 counterfactual 得到同一個目錄，⛔ 不能靠它解鎖重跑。
+    """
+    validate_semantic_sha256(counterfactual_semantic_sha256, "counterfactual_semantic_sha256")
     if not isinstance(bundle_id, str) or not bundle_id or "/" in bundle_id or bundle_id in (".", ".."):
         raise ArtifactError(f"bundle_id ⛔ 不能當目錄名：{bundle_id!r}")
-    return f"{bundle_id}-{counterfactual_patch_sha256}"
+    return f"{bundle_id}-{counterfactual_semantic_sha256}"
 
 
 def build_failed_record(*, identity: Mapping[str, Any], patches: dict[str, Any],
                         files: Mapping[str, Mapping[str, Any]], failure: Mapping[str, Any],
-                        generated_at: str) -> dict[str, Any]:
+                        generated_at: str, counterfactual_semantic_sha256: str) -> dict[str, Any]:
     return {
         "schema_version": ARTIFACT_SCHEMA_VERSION,
         "kind": FAILED_ATTEMPT_KIND,
@@ -904,6 +949,7 @@ def build_failed_record(*, identity: Mapping[str, Any], patches: dict[str, Any],
         "failure_reason": failure["failure_reason"],
         "generated_at": generated_at,
         "provenance": failure["provenance"],
+        "counterfactual_semantic_sha256": counterfactual_semantic_sha256,
     }
 
 
@@ -925,6 +971,7 @@ def validate_failed_record(record: object) -> None:
         if record[f] != identity[f]:
             raise ArtifactError(f"F2：failed record 的 {f} ≠ embedded run_identity 的同名欄位")
     validate_generated_at(record["generated_at"], "failed record")
+    validate_semantic_sha256(record["counterfactual_semantic_sha256"], "failed record 的 counterfactual_semantic_sha256")
     validate_patches(record["patches"])
     files = record["files"]
     if not isinstance(files, dict) or set(files) != set(FAILED_LAYOUT):
@@ -964,8 +1011,11 @@ def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[s
         raise ArtifactError(
             f"F3：provenance.base_commit={record['provenance']['base_commit']} ≠ 兩份 patch 所依附的 base {base_commit}"
         )
+    # F4 的 Python 層：目錄名 ＝ `<bundle_id>-<宣告的語意 SHA>`。⚠️ 宣告值是否等於由封存 patch **重算**的
+    # 語意 SHA 要用 git，是 F4 的 shell 層（`finalize-stage2-evidence.sh`）；宣告值 ＝ 交接值由
+    # `check_verified_composition()` 驗。
     name = record_dir.name if dir_name is None else dir_name
-    if name != failed_record_dir_name(record["bundle_id"], record["patches"]["counterfactual_patch_sha256"]):
+    if name != failed_record_dir_name(record["bundle_id"], record["counterfactual_semantic_sha256"]):
         raise ArtifactError(f"F4：目錄名 {name} 與 record 內容不符——⛔ 改目錄名不能繞過 lookup")
     for rel in FAILED_LAYOUT:                                                                # F8
         _read_raw_member(record_dir, rel, record["files"][rel])
@@ -975,13 +1025,17 @@ def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[s
 def publish_failed_record(*, python_root: str | Path, run_dir: str | Path,
                           stage2_identity: Mapping[str, Any], generated_at: str,
                           verified: VerifiedComposition) -> Path:
-    """中繼檔 ＋ 凍結 patch → `failed/<bundle_id>-<counterfactual_patch_sha256>/`。回傳發布的目錄。
+    """中繼檔 ＋ 凍結 patch → `failed/<bundle_id>-<counterfactual_semantic_sha256>/`。回傳發布的目錄。
 
-    ⚠️ **合成守門（F8-a）已由 shell 在呼叫前做完**。⚠️ 呼叫端（CLI）⛔ 不得把成功發布當成 0——
+    ⚠️ **合成守門（F8-a）與語意 SHA 已由 shell 在呼叫前做完**；目錄名與 record 的語意欄位都取交接值，
+    staging 驗證時再從磁碟重讀 record，確認「目錄名 ＝ 宣告值 ＝ 交接值」才 rename。⚠️ 呼叫端（CLI）⛔ 不得把成功發布當成 0——
     那一次執行本來就是失敗的（結束碼 1）；rename 成功、fsync 失敗拋 `DurabilityUnconfirmed`（3）。
     """
     validate_run_identity(stage2_identity)
     stage2_identity = dict(stage2_identity)
+    if not isinstance(verified, VerifiedComposition) or verified.counterfactual_semantic_sha256 is None:
+        raise ArtifactError("publish-failed-record：缺少 shell 交接的語意 SHA——⛔ 無從決定目錄名")
+    semantic = verified.counterfactual_semantic_sha256
     run_dir = Path(run_dir)
     anchor, envcheck = _load_trust_anchors(python_root, stage2_identity)
     failure = load_canonical_evidence_artifact(run_dir / OPERATIONAL_FAILURE, COUNTERFACTUAL_FAILURE_KIND).parsed
@@ -997,21 +1051,23 @@ def publish_failed_record(*, python_root: str | Path, run_dir: str | Path,
         "ordered_components": list(ORDERED_COMPONENTS),
     }
     failed_root = resolve_repo_path(python_root, STAGE2_FAILED_ROOT_PATH)
-    name = failed_record_dir_name(stage2_identity["bundle_id"], patches["counterfactual_patch_sha256"])
+    name = failed_record_dir_name(stage2_identity["bundle_id"], semantic)
     root = failed_root / name
     hint = f"{RECOVER_FAILED_HINT} {STAGE2_FAILED_ROOT_PATH}/{name}"
     with ClosedArchiveWriter(root, FAILED_LAYOUT, recover_hint=hint) as writer:
         writer.add_raw(COUNTERFACTUAL_PATCH, counterfactual)
         writer.add_raw(TOOLING_PATCH, tooling)
         record = build_failed_record(identity=stage2_identity, patches=patches, files=writer.files,
-                                     failure=failure, generated_at=generated_at)
+                                     failure=failure, generated_at=generated_at,
+                                     counterfactual_semantic_sha256=semantic)
         validate_failed_record(record)
 
         def verify_staging(staging: Path) -> None:
             staged = verify_failed_record(staging, envcheck_identity=envcheck.identity,
                                           base_commit=anchor.after_base_commit, dir_name=name)
             check_verified_composition(verified, base_commit=staged["provenance"]["base_commit"],
-                                       patches=staged["patches"], label="publish-failed-record")
+                                       patches=staged["patches"], label="publish-failed-record",
+                                       semantic_sha256=staged["counterfactual_semantic_sha256"])
 
         writer.commit(FAILED_RECORD_NAME, record, verify=verify_staging)
     return root
@@ -1023,6 +1079,7 @@ def _record_summary(record_dir: Path, record: Mapping[str, Any]) -> dict[str, An
         "base_commit": record["provenance"]["base_commit"],
         **{f: record["patches"][f] for f in ("counterfactual_patch_sha256", "tooling_patch_sha256",
                                              "composed_sha256")},
+        "counterfactual_semantic_sha256": record["counterfactual_semantic_sha256"],
     }
 
 
@@ -1064,7 +1121,8 @@ def recover_failed_record(*, python_root: str | Path, record_dir: str | Path,
     """rc=3 的出口：完整重驗 F1～F10（F8-a 由 shell 先做）→ `_fsync_tree` ＋ fsync parent。
 
     ⛔ 不重建、⛔ 不重跑 replay。⚠️ 呼叫端成功時仍回 1——那一次執行本來就是失敗的；
-    重跑資格仍是「⛔ 同 SHA 不得重跑」。
+    重跑資格仍是「⛔ 同語意 SHA 不得重跑」。⚠️ fsync 之前比對 record 宣告的語意 SHA ＝ shell 由 record 內
+    實際 patch 重算的交接值。
     """
     failed_root = resolve_repo_path(python_root, STAGE2_FAILED_ROOT_PATH)
     record_dir = Path(record_dir)
@@ -1074,7 +1132,8 @@ def recover_failed_record(*, python_root: str | Path, record_dir: str | Path,
     anchor, envcheck = _load_trust_anchors(python_root, None)
     record = verify_failed_record(record_dir, envcheck_identity=envcheck.identity, base_commit=anchor.after_base_commit)
     check_verified_composition(verified, base_commit=record["provenance"]["base_commit"],
-                               patches=record["patches"], label="recover-failed-record")
+                               patches=record["patches"], label="recover-failed-record",
+                               semantic_sha256=record["counterfactual_semantic_sha256"])
     _fsync_tree(record_dir)
     fsync_parent_or_unconfirmed(record_dir, published=False,
                                 recover_hint=f"{RECOVER_FAILED_HINT} {STAGE2_FAILED_ROOT_PATH}/{record_dir.name}")
@@ -1124,9 +1183,13 @@ def patch_claims(*, mode: str, python_root: str | Path, run_dir: str | Path | No
     if mode == "failed-record":
         record = load_canonical_evidence_artifact(Path(record_dir) / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
         patches = record.get("patches") or {}
-        return _claims((record.get("provenance") or {}).get("base_commit"),
-                       patches.get("counterfactual_patch_sha256"), patches.get("tooling_patch_sha256"),
-                       patches.get("composed_sha256"))
+        claims = _claims((record.get("provenance") or {}).get("base_commit"),
+                         patches.get("counterfactual_patch_sha256"), patches.get("tooling_patch_sha256"),
+                         patches.get("composed_sha256"))
+        # ⚠️ ⑦a：record **宣告的**語意 SHA——shell 從 record 內的實際 patch 重算並比對它，相等才注入。
+        semantic = record.get("counterfactual_semantic_sha256")
+        validate_semantic_sha256(semantic, "record 宣告的 counterfactual_semantic_sha256")
+        return {**claims, "counterfactual_semantic_sha256": semantic}
     raise ArtifactError(f"未知的 claims 模式：{mode!r}")
 
 
@@ -1141,13 +1204,16 @@ STAGE2_INJECTED_ARGS = (
     "--run-identity", "--python-root", "--image-digest", "--base-commit",
     "--tooling-patch-sha256", "--source-root", "--runner-sha256",
     "--verified-patch-base", "--verified-counterfactual-sha256", "--verified-tooling-sha256",
-    "--verified-composed-sha256",
+    "--verified-composed-sha256", "--verified-counterfactual-semantic-sha256",
 )
 # shell 合成守門的交接值（`VerifiedComposition`）。⚠️ 除了 check，其餘四種模式**必須**有；check 的 F8-a 在
 # Python 段之後由 shell 做，⛔ 不接受。
 VERIFIED_COMPOSITION_ARGS = ("verified_patch_base", "verified_counterfactual_sha256",
                              "verified_tooling_sha256", "verified_composed_sha256")
 MODES_WITH_COMPOSITION = ("finalize", "recover_durability", "publish_failed_record", "recover_failed_record")
+# ⚠️ ⑦a：shell 由實際 patch 重算的語意 SHA。⚠️ **只有**這兩種模式必須帶（failed record 以它為目錄鍵）；
+# 成功 archive ⛔ 不存語意 SHA，check 的命中判定在 shell——其餘模式帶了就拒。
+MODES_WITH_SEMANTIC = ("publish_failed_record", "recover_failed_record")
 STAGE2_MODES = ("finalize", "recover_durability", "publish_failed_record", "check_failed_record",
                 "recover_failed_record")
 
@@ -1180,6 +1246,7 @@ def build_stage2_parser():
     parser.add_argument("--verified-counterfactual-sha256", default=None)
     parser.add_argument("--verified-tooling-sha256", default=None)
     parser.add_argument("--verified-composed-sha256", default=None)
+    parser.add_argument("--verified-counterfactual-semantic-sha256", default=None)
     return parser
 
 
@@ -1221,11 +1288,21 @@ def run_stage2(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
                 counterfactual_patch_sha256=args.verified_counterfactual_sha256,
                 tooling_patch_sha256=args.verified_tooling_sha256,
                 composed_sha256=args.verified_composed_sha256,
+                counterfactual_semantic_sha256=args.verified_counterfactual_semantic_sha256,
             )
         except ArtifactError as exc:
             raise Stage2UsageError(f"--verified-* 的格式不符：{exc}") from exc
     elif given:
         raise Stage2UsageError(f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-*（F8-a 在 Python 段之後由 shell 做）")
+    semantic = args.verified_counterfactual_semantic_sha256
+    if mode in MODES_WITH_SEMANTIC and semantic is None:
+        raise Stage2UsageError(
+            f"--{mode.replace('_', '-')} 需要 shell 注入的 --verified-counterfactual-semantic-sha256（failed record 的目錄鍵）"
+        )
+    if mode not in MODES_WITH_SEMANTIC and semantic is not None:
+        raise Stage2UsageError(
+            f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-counterfactual-semantic-sha256（只屬於 failed record 的發布與 recovery）"
+        )
 
     # ⚠️ 階段 A 明確載入 `config`（理由同 Stage 1 finalizer：⛔ 靠間接 import 是 incidental）。
     import config as _config_module

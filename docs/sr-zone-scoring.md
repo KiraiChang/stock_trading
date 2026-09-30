@@ -3045,26 +3045,52 @@ failed-attempt record，以及兩者的 check／recover。完整計畫與修訂�
 `envcheck/evidence_manifest.json` 的寫死路徑、SHA 與四個成員）／`terminal_outcome`（v3 模型下恆為 0，
 ⚠️ recovery 仍讀回並回傳，⛔ 不寫死）／`generated_at`／`finalizer_provenance`（role `finalizer`）。
 
-**兩份 patch 的三方 SHA**（⚠️ 這是「⛔ 不讓語意修改偽裝成 instrumentation」的那道綁定）：
+**兩份 patch 的三方 SHA 與語意 SHA**（⚠️ 這是「⛔ 不讓語意修改偽裝成 instrumentation」的那道綁定）：
 
 ```text id="sr_zone_stage2_patch_sha_001"
-counterfactual_patch_sha256 = sha256(git diff --binary <base> <T1>)
-tooling_patch_sha256        = sha256(git diff --binary <T1> <T2>)     ← tooling 為空時是空字串的 SHA
-composed_sha256             = sha256(git diff --binary <base> <T2>)   ＝ before source 的 provenance.tooling_patch_sha256
-ordered_components          = ["counterfactual", "tooling"]            ← 順序由此強制，⛔ 不靠「hash 必然不同」
+counterfactual_patch_sha256    = sha256(canonical_diff(<base 的 tree>, <T1>))
+tooling_patch_sha256           = sha256(canonical_diff(<T1>, <T2>))            ← tooling 為空時是空字串的 SHA
+composed_sha256                = sha256(canonical_diff(<base 的 tree>, <T2>))  ＝ before source 的 provenance.tooling_patch_sha256
+counterfactual_semantic_sha256 = sha256(canonical_diff(<base 的 tree>, <T1>, -- decision_engine.py lifecycle_engine.py))
+ordered_components             = ["counterfactual", "tooling"]                  ← 順序由此強制，⛔ 不靠「hash 必然不同」
 ```
 
+**canonical diff 的唯一定義**（⑦a 起，2026-09-30；⚠️ 取代原本的 `git diff --binary`——它的 `index` 行只印
+**縮寫**的 blob OID，長度隨 repo 的物件數而變，而 git config 與屬性也會改變 bytes）：`scripts/lib/replay-args.sh`
+的 `replay_args_canonical_diff()`——兩端必須是 **40 碼 tree OID**（⛔ commit、ref、工作樹），在只以 alternates
+借來源物件的**暫存 bare repo** 計算（沒有工作樹與 `info/`，`.gitattributes`／`info/attributes` 讀不到；`env -i`、
+`HOME`／`XDG_CONFIG_HOME` 指向空目錄、`GIT_CONFIG_NOSYSTEM=1`、`GIT_ATTR_NOSYSTEM=1`），參數全部釘死：
+`-c core.quotePath=true -c diff.suppressBlankEmpty=false -c core.attributesFile=/dev/null diff --binary --full-index
+--no-ext-diff --no-textconv --no-color --src-prefix=a/ --dst-prefix=b/ -U3 --inter-hunk-context=0
+--diff-algorithm=myers --no-renames --indent-heuristic -O/dev/null --no-relative`。測試在每一層放惡意設定
+（來源 repo 的 config、`HOME` 的 `.gitconfig`、`info/attributes`、工作樹 `.gitattributes`、`core.attributesFile`、
+`GIT_CONFIG_PARAMETERS`／`GIT_CONFIG_COUNT`）並斷言 bytes 不變。⚠️ 殘餘限制：定義綁定 host 的 git（2.30.2）；
+升級 git 導致 bytes 不同時，由 runner 在 docker 之前的「raw ＝ canonical」**fail-closed**（⛔ 不會靜默通過）。
+`python/baselines/i074_stage2/counterfactual_e1cbbbd.patch` 因此換成 canonical 格式（內容不變：`fa7f5ba8…`；
+舊格式的 `ef7a4cdf…` 是歷史值）。
+
+**語意 SHA**（⚠️ failed record 的查找鍵）：只涵蓋兩個**產品檔**（正向白名單，⛔ 不用排除式 pathspec）；
+前提是反事實改動的檔案**恰好**是固定的四個（兩個產品檔 ＋ `tests/test_i074_diagnostics.py`、
+`tests/test_lifecycle_engine.py`），多一個、少一個一律拒絕，而且語意 diff 必須非空。⚠️ **殘餘限制（照實）**：
+它防的是「兩個產品檔的 canonical diff 逐位元相同」的重跑，⛔ **不是語意等價**——只改這兩個檔的註解或空白，鍵仍會變。
+
 ⚠️ Python 段只能驗**宣告值彼此一致**（兩份 raw patch 的 SHA、`ordered_components`、tooling 為空時
-`composed == counterfactual`、`composed` 等於 before 的 provenance）；**合成關係本身**由 shell 在隔離
-worktree 實際重建：在 base 依序 `git apply --index`、每一步 `git write-tree` 取中繼 tree（⛔ 不建中繼
-commit、HEAD 全程不動）、重算三個 SHA——⛔ 任一不符即中止、⛔ 不呼叫 Python。成功 archive 的發布與
-recovery、failed record 的發布、lookup 與 recovery **五處都做**。
-⚠️ **合成守門與封存之間的交接**（2026-09-24 review）：Python 在 shell 之後**重新讀**來源，兩段之間來源若被
-一致地換掉，shell 證明的是 A、封存的卻是 B（`:ro` 掛載凍結不了 host 上的內容）。所以 shell 把驗過的
+`composed == counterfactual`、`composed` 等於 before 的 provenance）；**合成關係本身**由 shell 以**唯一的合成
+函式** `replay_args_compose()` 在隔離 worktree 實際重建：在 base 依序 `git apply --index`、每一步
+`git write-tree` 取中繼 tree（⛔ 不建中繼 commit、HEAD 全程不動）、工作樹必須恰好等於 index（無 untracked、
+無 unstaged）、以 canonical diff 重算三個 SHA 與語意 SHA（含四檔集合）——⛔ 任一不符即中止、⛔ 不呼叫 Python。
+runner、成功 archive 的發布與 recovery、failed record 的發布、lookup 與 recovery、tooling patch 產生器**都呼叫
+同一支**（⛔ 不各寫一份；⚠️ 所以四檔集合對成功 archive 同樣成立）。
+⚠️ **合成守門與封存之間的交接**（2026-09-24 review；⑦a 補語意 SHA）：Python 在 shell 之後**重新讀**來源，兩段之間
+來源若被一致地換掉，shell 證明的是 A、封存的卻是 B（`:ro` 掛載凍結不了 host 上的內容）。所以 shell 把驗過的
 **patch base 與三個 SHA** 以 `--verified-*` 注入（⛔ 不是 `--base-commit`——那是 finalizer 程式碼的來源），
 Python 拿**實際要封存（或要 fsync）的內容**比對（`check_verified_composition()`），相符才允許 commit point；
-成功 archive 的發布與 recovery、failed record 的發布與 recovery 都要求它。shell 端也先把兩份 patch 各讀一次到
-私有目錄，SHA 與 `git apply` 都用那份副本。
+成功 archive 的發布與 recovery、failed record 的發布與 recovery 都要求它。⚠️ **語意 SHA** 另以
+`--verified-counterfactual-semantic-sha256` 注入，而且**只有** failed record 的發布與 recovery 必須帶
+（`--finalize`／`--recover-durability`／`--check-failed-record` 帶了就拒——成功 archive ⛔ 不存語意 SHA）：
+發布時它就是目錄鍵與 record 欄位，staging 重讀 record 驗「目錄名 ＝ 宣告值 ＝ 交接值」後才 rename；recovery 時
+shell 先從 record 內的實際 patch 重算並比對宣告值，Python 在 fsync 之前再比一次。shell 端也先把兩份 patch
+各讀一次到私有目錄，SHA 與 `git apply` 都用那份副本。
 
 **before source 的額外守門**（Stage 2 計畫書「①之三」，⚠️ 由 `CounterfactualEffectCheck` 實作，
 執行期與證據層共用同一支）：`validate_diagnostics(side="before")` 刻意不驗等價式（公開行為不改），
@@ -3091,9 +3117,11 @@ report 綁回 comparison；`rows_shown`；comparison keys 排序唯一；before 
 另有全量守門：before 的 keys **依序恰好等於**已錨定 D+1 的全量 keys（⛔ 不是「等於 bundle universe」
 ——archive 裡沒有 bundle manifest，recovery 跑不了那一條）。
 
-**failed-attempt record**（`python/baselines/i074_stage2/failed/<bundle_id>-<counterfactual_patch_sha256>/`，
-⚠️ 完整 64 碼；⛔ 不是成功 archive）：`failure_record.json`（kind `sr_zone_stage2_failed_attempt`，canonical、
-⛔ 不壓縮）＋ `patch/counterfactual.patch` ＋ `patch/tooling.patch`，⛔ 多一個檔案即中止。
+**failed-attempt record**（`python/baselines/i074_stage2/failed/<bundle_id>-<counterfactual_semantic_sha256>/`，
+⚠️ 完整 64 碼的**語意 SHA**（⑦a 起；只改測試檔⛔ 換不了目錄）；⛔ 不是成功 archive）：`failure_record.json`
+（kind `sr_zone_stage2_failed_attempt`，canonical、⛔ 不壓縮；封閉欄位含 `counterfactual_semantic_sha256`——hex64、
+⛔ 不得是空 diff 的 SHA；`patches` 四欄與兩份完整 patch 照舊保存）＋ `patch/counterfactual.patch` ＋
+`patch/tooling.patch`，⛔ 多一個檔案即中止。
 `bounded_diagnostics` 是依 `failure_reason` 分流的封閉 union：`candidate_flag_inconsistent` →
 `{inconsistent_row_count, sample_keys}`、`rr_not_restored` → `{before_candidate_count, sample_keys}`；
 sample 依 key 排序取前 `min(20, count)` 個、⛔ 不重複，每項恰好
@@ -3102,13 +3130,62 @@ sample 依 key 排序取前 `min(20, count)` 個、⛔ 不重複，每項恰好
 計數器 ＋ 只保留排序最前面 20 筆的 buffer（`BoundedSample`），⛔ 不先收集全部違規列再排序截斷。F1～F10 的其餘各項：embedded identity 通過 validator 且
 **完整等於**唯一固定的 Stage 2 identity（F2-a——只差 `created_at` 也拒絕）、provenance 是那一次 replay 的
 （role `stage1`、`tooling_patch_sha256` ＝ composed、`base_commit` ＝ Stage 1 after 的 base）、目錄名與內容
-相符（F4）、兩份 patch 的實際 bytes 重算相符（F8）。
+相符（F4——⚠️ 分兩層：Python 驗 hex64、目錄名 ＝ 宣告的語意 SHA ＝ 交接值；shell 從封存的 patch **重算**語意 SHA、
+驗四檔集合、重算值 ＝ 宣告值）、兩份 patch 的實際 bytes 重算相符（F8）。
 
 ⚠️ **記憶體**（「五之一」）：before source 一律串流，只常駐 keys 與 cohort 那幾列；真實規模實測
 （2026-09-24，Stage 2 image，13,417 列、156 列 cohort）：finalize 峰值 **299 MiB**、recovery **314 MiB**、
 lookup **274 MiB**，都在 450 MiB 以內。
 
-#### Stage 2 有**兩種** terminal outcome
+#### I-074 Stage 2 的反事實 replay 路徑與 tooling patch（2026-09-30 實作 ⑦a；⚠️ 待 review）
+
+⚠️ **範圍**：⑩ 的 before 正式趟在 replay 程序內做的事（Stage 2 計畫書 v3 比較模型的執行期那一半）；證據層見上一節。
+計畫與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑦ 總綱 v1」與「Stage 2 步驟 ⑦a 細部計畫 v1」。
+
+**啟用**：⚠️ 只有明示的 `--i074-counterfactual` 會走反事實路徑（⛔ 預設關閉、⛔ 不從 ref／hash／cohort 推斷），
+**只限 Stage 2**。它的 SHA `--counterfactual-patch-sha256` **只能由 runner 注入**（使用者傳入、縮寫、`=value`
+一律拒絕）。Python CLI 自己再做**成對守門**（在 `load_bundle()` 之前）：flag 沒有 SHA、SHA 沒有 flag、Stage 1
+帶了任一個、SHA 不是 64 位小寫 hex → 結束碼 1。⚠️ **未帶 flag 時一般 Stage 2 逐項不變**——候選集合相等檢查、
+`candidate_mismatch.json`、結束碼 4 都還在（下一節）。
+
+**runner**（`scripts/run-replay-offline.sh`）：flag 納入 `I074_MODE`（⛔ 不自動 pin、必須有 `REPLAY_IMAGE_ID` 與
+identity），而且必須搭 `I074_STAGE=2`；flag 開啟時 `COUNTERFACTUAL_PATCH` 必須非空、沒帶 flag 時必須是空的——
+以上都在建 worktree 之前。兩份 patch 先各讀一次**凍結**到私有目錄（空的 `TOOLING_PATCH` 建 0-byte 副本），之後只用
+副本；以唯一的合成函式依 counterfactual → tooling 套用，**docker 之前**斷言兩份 patch 的 raw bytes SHA 各自 ＝
+增量 canonical SHA（⛔ 不讓非 canonical 的 patch 燒完一整趟才在 finalize 被擋）；`--tooling-patch-sha256` 是合成
+SHA。dry-run 另印 `==> patches: counterfactual=… tooling=… composed=…`。
+
+**replay 程序的順序**（`evaluation.py` 的 `_run_counterfactual_stage2()`；⚠️ 順序即契約）：
+
+| 階段 | 內容 |
+|---|---|
+| replay 之前 | cohort 先讀（canonical loader，`.json`／`.json.gz` 都收）→ `validate_cohort_manifest()` → provenance（role `stage1`）→ 與 bundle 的身分；after **一趟串流**（`stream_after_artifact()`，逐列套整批 validator 的全部 row-level 規則，只常駐 keys、每列 digest 與 cohort 的完整列）→ provenance（`stage1`）→ 身分 → cohort 記的 after SHA ＝ 串流算出的 payload SHA → cohort ＝ after 的候選列 → **版本守門**：`--before-ref`（40 碼）＝ `--base-commit` ＝ after 的 `provenance.base_commit`（全圖第 8 道提前到 replay 之前）。讀取順序與 role 照 `load_stage1_anchor()` |
+| replay | 既有的 row-level 守門；provenance 在 replay 之後建 |
+| 全量 key 守門 | universe ＝ after keys ＝ before keys，而且 before 與 after **同序**（⚠️ 排在反事實生效檢查之前） |
+| 反事實生效 | 以**本次 replay 的 before rows** 餵 `CounterfactualEffectCheck`（「①之三」）：不生效 → **只**發布 `stage2/bounded_diagnostics.json`（kind `sr_zone_stage2_counterfactual_failure`）→ 結束碼 **6**（`EXIT_COUNTERFACTUAL_INEFFECTIVE`；`CounterfactualIneffective` 刻意不繼承 `ValueError`）。⛔ 永遠不走 candidate mismatch——結束碼 4 在本路徑不可達，出現就是缺陷 |
+| 輸出（rc=0） | 檔名取自 `stage2_archive` 的 `OPERATIONAL_*`（`--output-dir` 就是 orchestrator 的 `<run>/stage2`）：before source（全量、replay 順序）→ comparison（cohort 排序、與 before source 共用同一個 provenance 物件）→ 落地重讀驗 SHA → report **最後**寫 |
+
+⚠️ **終態恰好一種**：rc=0 ＝ 恰好 before source、comparison、report 三檔；rc=6 ＝ 只有 `bounded_diagnostics.json`；
+其他（rc=1）＝ 沒有 report（report 存在才代表它指向的證據已完整）。反事實路徑的 replay 只可能回 0／1／2／6。
+
+**tooling patch**（`python/baselines/i074_stage2/tooling_e1cbbbd.patch`，進版控）：⚠️ ⑩ 的 replay 容器掛的是
+**`e1cbbbd` worktree** 的 `python/`，⛔ 不是 HEAD——HEAD 對 `evaluation.py` 與 `replay_bundle/` 的改動只能經由它
+進入 replay。它 ＝ `T1..T2` 的 canonical diff（`T1` ＝ `e1cbbbd` ＋ counterfactual，`T2` ＝ `T1` 但 tooling 路徑換成
+來源 tree 的內容），由 `scripts/make-i074-tooling-patch.sh --source-tree <tree>` 產生（⛔ 不讀 HEAD、⛔ 不讀工作樹）。
+四條不變條件：① counterfactual 與 tooling 路徑不相交；② `T2` 在 tooling 路徑上 ＝ 來源；③ `T1..T2` 只動 tooling 路徑；
+④ **產品碼不變**——`python/` 扣掉 `baselines/`、`scripts/`、`sr_scoring/tests/`、`replay_bundle/`、`evaluation.py`
+之後，`e1cbbbd` → 來源 tree 沒有差異（⛔ 否則 ⑩ 會靜默跑到舊版）；最後以唯一的合成函式重建自我驗證。
+⚠️ tooling patch **⛔ 不得含判定變更**——由 ⑨ 的 tooling 非語意 guard 與 differential guard 驗（⑦a 不做）。
+版控流程與漂移測試見 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 tooling patch」。
+
+⚠️ **非空翻轉的端到端證據**：pytest 以 stub 取代 replay，只驗路徑的邏輯與順序；`REPLAY_SMOKE=1` 的
+`scripts/smoke-replay-offline.sh` 另外從已進版控的正式 bundle 切出 6243 最後 250 根（`make_counterfactual_smoke_bundle.py`，
+bundle_id 由內容決定：`b1_20260901_1d_de3ab843_a7c9ffb4`），在 `e1cbbbd` ＋ 真正的兩份 patch 上跑一次，斷言 cohort ≥ 1、
+comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有 6 筆候選（與 D+1 cohort 在該期間的 6 筆逐 key 相同），
+反事實側 6 筆全數翻轉、其餘 159 列逐列相同。⚠️ 這份衍生 bundle ⛔ 不是證據（佔位 provenance 只標示身分，
+`load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
+
+#### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 
 | 候選集合檢查 | 產出 | 結束碼 |
 |---|---|---|

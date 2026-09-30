@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "I-074 Stage 2（⑦a）：run-replay-offline.sh 帶 --i074-counterfactual 時實際組出的 python argv。",
+    "⛔ 存的是**參數 token 序列**，不是需要 eval 的 shell 字串；動態值用 placeholder，兩側夾住同一份檔案：",
+    "  scripts/test-replay-args.sh 斷言「真正 repo、真正的兩份 patch、dry-run 的輸出 == 本檔」；",
+    "  test_replay_bundle_cli.py 斷言「本檔（代換 placeholder 後）會被 Python CLI 接受並進入 Stage 2」。",
+    "⚠️ 注入參數在前（image-digest／source-root／base-commit／tooling-patch／runner，⑦a 起再加反事實 SHA，",
+    "緊接在 --runner-sha256 之後），使用者參數在後——⚠️ `--i074-counterfactual` 必須**原樣出現在尾端**，",
+    "那證明 flag 真的透傳進了容器內的 CLI，⛔ 不是被 shell 吃掉。",
+    "⚠️ `--before-ref` 與 `--base-commit` 是同一個 40 碼 OID（`e1cbbbd`）——反事實模式在 replay 之前就驗它們相等。"
+  ],
+  "placeholders": {
+    "<IMAGE_ID>": "sha256: ＋ 64 hex（REPLAY_IMAGE_ID，⚠️ 反事實模式納入 I074_MODE，必須預先提供）",
+    "<BASE_COMMIT>": "40 hex（runner 解析出的 worktree HEAD；使用者的 --before-ref 也必須是同一個完整 OID）",
+    "<TOOLING_PATCH_SHA256>": "64 hex：base 到 counterfactual ＋ tooling 之後的 tree 的 canonical diff SHA（合成 hash）",
+    "<RUNNER_SHA256>": "64 hex",
+    "<COUNTERFACTUAL_PATCH_SHA256>": "64 hex：base 到 counterfactual 之後的 tree 的 canonical diff SHA（＝凍結 patch 的 raw bytes SHA）",
+    "<BUNDLE>": "凍結 bundle 目錄（host 絕對路徑，same-path 唯讀掛載）",
+    "<OUT>": "--output-dir（唯一可寫的 host mount；orchestrator 的 <run>/stage2）",
+    "<AFTER_ARTIFACT>": "Stage 1 D+1 的 after artifact（.json 或 .json.gz，唯讀掛載）",
+    "<COHORT_MANIFEST>": "Stage 1 D+1 的 cohort manifest（.json 或 .json.gz，唯讀掛載）"
+  },
+  "stage2_counterfactual_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.evaluation",
+    "--image-digest", "<IMAGE_ID>",
+    "--source-root", "/app",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--runner-sha256", "<RUNNER_SHA256>",
+    "--counterfactual-patch-sha256", "<COUNTERFACTUAL_PATCH_SHA256>",
+    "--bundle", "<BUNDLE>",
+    "--output-dir", "<OUT>",
+    "--before-ref", "<BASE_COMMIT>",
+    "--after-artifact", "<AFTER_ARTIFACT>",
+    "--cohort-manifest", "<COHORT_MANIFEST>",
+    "--i074-counterfactual"
+  ]
+}

@@ -174,6 +174,15 @@ def _verified(prov, cf=CF, tooling=b""):
                                   composed_sha256=prov["tooling_patch_sha256"])
 
 
+def _sem(cf=CF):
+    """測試用的**語意 SHA 替身**（⑦a）。
+
+    ⚠️ 真正的值要用 git 由兩個產品檔的 canonical diff 算，只能在 shell 做（`replay_args_compose()`）；
+    Python 端只驗「目錄名 ＝ 宣告值 ＝ 交接值」這條鏈，所以這裡用一個由 patch bytes 決定的 hex64 代替。
+    """
+    return sha256_hex(b"semantic:" + cf)
+
+
 def _finalize(env, run, **overrides):
     kwargs = {"python_root": env.root, "run_dir": run, "stage2_identity": tec._identity(),
               "provenance_factory": _fin_prov, "generated_at": GEN}
@@ -859,11 +868,14 @@ def _write_failure_run(env, *, effect=None, prov=None, cf=CF, tooling=b"", name=
     return run
 
 
-def _publish_failure(env, run, **overrides):
+def _publish_failure(env, run, *, semantic=None, **overrides):
     kwargs = {"python_root": env.root, "run_dir": run, "stage2_identity": tec._identity(), "generated_at": GEN}
     kwargs.update(overrides)
     if "verified" not in kwargs:
-        kwargs["verified"] = _claimed("failure", env, run_dir=run)
+        # 比照 shell：宣告值 ＋ 由**凍結的** counterfactual 算出的語意 SHA（替身，見 `_sem()`）。
+        claims = sa.patch_claims(mode="failure", python_root=env.root, run_dir=run)
+        cf = (Path(run) / sa.FROZEN_COUNTERFACTUAL_PATCH).read_bytes()
+        kwargs["verified"] = sa.VerifiedComposition(**claims, counterfactual_semantic_sha256=semantic or _sem(cf))
     return sa.publish_failed_record(**kwargs)
 
 
@@ -896,12 +908,14 @@ def _write_record(root, record):
 def test_m_failed_record_is_published_and_identifiable(recorded):
     env, root = recorded
     assert root.parent == _failed_root(env)
-    assert root.name == f"{BUNDLE}-{sha256_hex(CF)}"               # ⚠️ 完整 64 碼
+    assert root.name == f"{BUNDLE}-{_sem()}"                        # ⚠️ 完整 64 碼的**語意 SHA**（⑦a）
     assert s2.archive_file_set(root) == {sa.FAILED_RECORD_NAME, sa.COUNTERFACTUAL_PATCH, sa.TOOLING_PATCH}
     record = _record(root)
     assert record["kind"] == sa.FAILED_ATTEMPT_KIND and record["failure_reason"] == sa.FAILURE_RR_NOT_RESTORED
     assert record["bounded_diagnostics"]["before_candidate_count"] == 2
     assert record["run_identity"] == tec._identity()
+    assert record["counterfactual_semantic_sha256"] == _sem()
+    assert record["patches"]["counterfactual_patch_sha256"] == sha256_hex(CF)    # 完整 SHA 照舊保存
     assert (root / sa.COUNTERFACTUAL_PATCH).read_bytes() == CF
     assert not _archive(env).exists()                                  # ⛔ 不是成功 archive
 
@@ -913,6 +927,7 @@ def test_check_lists_valid_records(recorded):
     assert result["records"] == [{
         "dir": str(root), "base_commit": BASE, "counterfactual_patch_sha256": sha256_hex(CF),
         "tooling_patch_sha256": s2.EMPTY_SHA256, "composed_sha256": sha256_hex(CF),
+        "counterfactual_semantic_sha256": _sem(),
     }]
 
 
@@ -922,19 +937,31 @@ def test_ak_no_or_empty_failed_root(env):
     assert sa.check_failed_records(python_root=env.root)["records"] == []
 
 
-def test_al_two_records_with_different_shas(recorded):
+def test_al_two_records_with_different_semantic_shas(recorded):
+    """al（⑦a 改寫）：兩份 record 的**語意 SHA** 不同 → 各自一個目錄。"""
     env, _ = recorded
     other = CF.replace(b"+b", b"+c")
     _publish_failure(env, _write_failure_run(env, cf=other, prov=_before_prov(tooling_patch_sha256=sha256_hex(other)),
                                              name="fail_run2"))
-    shas = {r["counterfactual_patch_sha256"] for r in sa.check_failed_records(python_root=env.root)["records"]}
-    assert shas == {sha256_hex(CF), sha256_hex(other)}
+    records = sa.check_failed_records(python_root=env.root)["records"]
+    assert {r["counterfactual_semantic_sha256"] for r in records} == {_sem(), _sem(other)}
+    assert {r["counterfactual_patch_sha256"] for r in records} == {sha256_hex(CF), sha256_hex(other)}
 
 
 def test_same_sha_cannot_be_recorded_twice(recorded):
     env, _ = recorded
     with pytest.raises(ArtifactError, match="已存在"):
         _publish_failure(env, _write_failure_run(env, name="fail_again"))
+
+
+def test_only_tests_changed_maps_to_the_same_record(recorded):
+    """o2／am（⑦a）：完整 SHA 不同、語意 SHA 相同（只改測試檔）→ 同一個目錄，⛔ 不能靠它另開一份紀錄。"""
+    env, _ = recorded
+    tests_only = CF + b"# only a test file changed\n"
+    run = _write_failure_run(env, cf=tests_only, prov=_before_prov(tooling_patch_sha256=sha256_hex(tests_only)),
+                             name="tests_only")
+    with pytest.raises(ArtifactError, match="已存在"):
+        _publish_failure(env, run, semantic=_sem())
 
 
 def _tamper(recorded, mutate):
@@ -1019,6 +1046,74 @@ def test_ab_recover_failed_record(recorded):
     env, root = recorded
     summary = _recover_record(env, root)
     assert summary["counterfactual_patch_sha256"] == sha256_hex(CF)
+    assert summary["counterfactual_semantic_sha256"] == _sem()
+
+
+# ── ⑦a：語意 SHA 的欄位與交接 ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("mutate,match", [
+    (lambda r: r.pop("counterfactual_semantic_sha256"), "欄位集合"),
+    (lambda r: r.__setitem__("counterfactual_semantic_sha256", "A" * 64), "64 字元小寫 hex"),
+    (lambda r: r.__setitem__("counterfactual_semantic_sha256", "a" * 63), "64 字元小寫 hex"),
+    (lambda r: r.__setitem__("counterfactual_semantic_sha256", s2.EMPTY_SHA256), "空 diff"),
+    (lambda r: r.__setitem__("counterfactual_semantic_sha256", "d" * 64), "F4"),
+], ids=["missing", "uppercase", "short", "empty_diff", "declared_differs_from_dir"])
+def test_semantic_field_is_part_of_the_closed_schema(recorded, mutate, match):
+    env = _tamper(recorded, mutate)
+    with pytest.raises(ArtifactError, match=match):
+        sa.check_failed_records(python_root=env.root)
+
+
+def test_recover_rejects_a_declared_semantic_differing_from_the_handoff(recorded, monkeypatch):
+    """F4 的交接層：record 宣告的語意 SHA ≠ shell 由實際 patch 重算的值 → ⛔ 不 fsync。"""
+    env, root = recorded
+    fsynced = []
+    monkeypatch.setattr(sa, "_fsync_tree", lambda path: fsynced.append(path))
+    claims = sa.patch_claims(mode="failed-record", python_root=env.root, record_dir=root)
+    wrong = sa.VerifiedComposition(**(claims | {"counterfactual_semantic_sha256": "d" * 64}))
+    with pytest.raises(ArtifactError, match="重算的值不符"):
+        _recover_record(env, root, verified=wrong)
+    missing = sa.VerifiedComposition(**{k: v for k, v in claims.items() if k != "counterfactual_semantic_sha256"})
+    with pytest.raises(ArtifactError, match="同時存在"):
+        _recover_record(env, root, verified=missing)
+    assert fsynced == []
+
+
+def test_publish_rejects_a_record_whose_semantic_differs_from_the_handoff(env, monkeypatch):
+    """staging 從磁碟重讀 record：欄位 ≠ 交接值（或目錄名）→ ⛔ 不 rename、⛔ 不留下任何紀錄。"""
+    real = sa.build_failed_record
+
+    def tampered(**kwargs):
+        return real(**(kwargs | {"counterfactual_semantic_sha256": "d" * 64}))
+
+    monkeypatch.setattr(sa, "build_failed_record", tampered)
+    with pytest.raises(ArtifactError, match="F4|重算的值不符"):
+        _publish_failure(env, _write_failure_run(env))
+    assert not _failed_root(env).exists() or not list(_failed_root(env).iterdir())
+
+
+def test_publish_requires_the_semantic_handoff(env):
+    claims = sa.patch_claims(mode="failure", python_root=env.root, run_dir=_write_failure_run(env))
+    with pytest.raises(ArtifactError, match="語意 SHA"):
+        _publish_failure(env, env.tmp / "fail_run", verified=sa.VerifiedComposition(**claims))
+
+
+def test_success_archive_never_takes_a_semantic_handoff(env):
+    run = _write_run(env)
+    claims = sa.patch_claims(mode="finalize", python_root=env.root, run_dir=run)
+    with pytest.raises(ArtifactError, match="同時存在"):
+        _finalize(env, run, verified=sa.VerifiedComposition(**claims, counterfactual_semantic_sha256=_sem()))
+    assert not _archive(env).exists()
+
+
+def test_semantic_handoff_format_is_validated():
+    base = {"base_commit": BASE, "counterfactual_patch_sha256": "1" * 64, "tooling_patch_sha256": "2" * 64,
+            "composed_sha256": "3" * 64}
+    for bad in ("x", "A" * 64, s2.EMPTY_SHA256):
+        with pytest.raises(ArtifactError):
+            sa.VerifiedComposition(**base, counterfactual_semantic_sha256=bad)
+    with pytest.raises(ArtifactError):
+        sa.failed_record_dir_name(BUNDLE, s2.EMPTY_SHA256)
 
 
 def test_recover_failed_record_rejects_paths_outside_the_failed_root(recorded, tmp_path):
@@ -1050,8 +1145,8 @@ def test_p_publish_outcomes(env, monkeypatch):
         _publish_failure(env, _write_failure_run(env))
     monkeypatch.setattr(s2, "fsync_dir", real)
     assert len(sa.check_failed_records(python_root=env.root)["records"]) == 1
-    # ③ recovery 補 fsync 之後仍是「同 SHA 不得重跑」
-    _recover_record(env, _failed_root(env) / f"{BUNDLE}-{sha256_hex(CF)}")
+    # ③ recovery 補 fsync 之後仍是「同語意 SHA 不得重跑」
+    _recover_record(env, _failed_root(env) / f"{BUNDLE}-{_sem()}")
 
 
 def test_failure_intermediate_must_match_the_identity(env):
@@ -1122,6 +1217,10 @@ def _verified_argv(claims=None):
             "--verified-composed-sha256", claims["composed_sha256"]]
 
 
+def _semantic_argv(value=None):
+    return ["--verified-counterfactual-semantic-sha256", value or "4" * 64]
+
+
 @pytest.mark.parametrize("argv,match", [
     ([], "恰好給一個"),
     (["--finalize", "--recover-durability"], "恰好給一個"),
@@ -1134,6 +1233,15 @@ def _verified_argv(claims=None):
     (["--recover-durability", *_verified_argv()[:-2]], "verified_composed_sha256"),
     (["--check-failed-record", *_verified_argv()], "不接受 --verified"),
     (["--recover-durability", *_verified_argv()[:-1], "not-hex"], "格式"),
+    # ⑦a：語意 SHA 的交接只屬於 failed record 的發布與 recovery。
+    (["--publish-failed-record", "--run-dir", "/r", "--run-identity", "/i", *_verified_argv()],
+     "--verified-counterfactual-semantic-sha256"),
+    (["--recover-failed-record", "/d", *_verified_argv()], "--verified-counterfactual-semantic-sha256"),
+    (["--finalize", "--run-dir", "/r", "--run-identity", "/i", *_verified_argv(), *_semantic_argv()], "不接受"),
+    (["--recover-durability", *_verified_argv(), *_semantic_argv()], "不接受"),
+    (["--check-failed-record", *_semantic_argv()], "不接受"),
+    (["--recover-failed-record", "/d", *_verified_argv(), *_semantic_argv("not-hex")], "格式"),
+    (["--recover-failed-record", "/d", *_verified_argv(), *_semantic_argv(s2.EMPTY_SHA256)], "格式"),
 ])
 def test_cli_matrix_usage_errors(argv, match):
     with pytest.raises(sa.Stage2UsageError, match=match):
@@ -1146,6 +1254,9 @@ def test_cli_rejects_duplicated_injected_args():
     with pytest.raises(sa.Stage2UsageError, match="只能由官方腳本注入"):
         sa.run_stage2(["--recover-durability", *_INJECTED, *_verified_argv(),
                        "--verified-composed-sha256", "4" * 64])
+    with pytest.raises(sa.Stage2UsageError, match="只能由官方腳本注入"):
+        sa.run_stage2(["--recover-failed-record", "/d", *_INJECTED, *_verified_argv(),
+                       *_semantic_argv(), *_semantic_argv("5" * 64)])
 
 
 @pytest.mark.parametrize("mode,rc", [
@@ -1186,9 +1297,10 @@ def test_publish_failed_record_cli_returns_one_even_when_published(recorded, mon
     monkeypatch.setattr(sa, "publish_failed_record", spy)
     claims = sa.patch_claims(mode="failure", python_root=env.root, run_dir=root_other)
     rc, result = sa.run_stage2(["--publish-failed-record", "--run-dir", str(root_other),
-                                "--run-identity", str(identity), *_INJECTED, *_verified_argv(claims)])
-    # ⚠️ 完整發布仍回 1——那一次執行本來就是失敗的。
-    assert rc == 1 and result["published"].endswith(sha256_hex(CF + b"\n"))
+                                "--run-identity", str(identity), *_INJECTED, *_verified_argv(claims),
+                                *_semantic_argv(_sem(CF + b"\n"))])
+    # ⚠️ 完整發布仍回 1——那一次執行本來就是失敗的。目錄鍵是交接的語意 SHA。
+    assert rc == 1 and result["published"].endswith(_sem(CF + b"\n"))
     assert seen["stage2_identity"] == tec._identity() and seen["run_dir"] == str(root_other)
 
 
@@ -1202,7 +1314,8 @@ def test_patch_claims(published, recorded):
         "tooling_patch_sha256": s2.EMPTY_SHA256, "composed_sha256": sha256_hex(CF)}
     assert sa.patch_claims(mode="archive", python_root=env.root)["composed_sha256"] == sha256_hex(CF)
     _, root = recorded
-    assert sa.patch_claims(mode="failed-record", python_root=env.root, record_dir=root)["base_commit"] == BASE
+    claims = sa.patch_claims(mode="failed-record", python_root=env.root, record_dir=root)
+    assert claims["base_commit"] == BASE and claims["counterfactual_semantic_sha256"] == _sem()
     assert sa.patch_claims(mode="failure", python_root=env.root,
                            run_dir=env.tmp / "fail_run")["counterfactual_patch_sha256"] == sha256_hex(CF)
     with pytest.raises(ArtifactError):
@@ -1235,7 +1348,7 @@ def test_bg_fixture_argv_is_accepted_by_the_python_cli(monkeypatch, key, mode, r
              "<BASE_COMMIT>": "a" * 40, "<TOOLING_PATCH_SHA256>": "b" * 64, "<RUNNER_SHA256>": "c" * 64,
              "<RECORD_DIR>": "/d", "<VERIFIED_PATCH_BASE>": BASE,
              "<VERIFIED_COUNTERFACTUAL_SHA256>": "1" * 64, "<VERIFIED_TOOLING_SHA256>": "2" * 64,
-             "<VERIFIED_COMPOSED_SHA256>": "3" * 64}
+             "<VERIFIED_COMPOSED_SHA256>": "3" * 64, "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "4" * 64}
     argv = [subst.get(t, t) for t in doc[key]]
     assert argv[:3] == ["python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive"]
     called = []
@@ -1284,7 +1397,8 @@ def test_toctou_finalize_rejects_inputs_swapped_after_the_composition_guard(env,
 
 def test_toctou_publish_failed_record(env):
     run = _write_failure_run(env)
-    verified_a = _claimed("failure", env, run_dir=run)
+    verified_a = sa.VerifiedComposition(**sa.patch_claims(mode="failure", python_root=env.root, run_dir=run),
+                                        counterfactual_semantic_sha256=_sem())
     b_run = _write_failure_run(env, cf=CF2, prov=_before_prov(tooling_patch_sha256=sha256_hex(CF2)), name="b_fail")
     for rel in (sa.OPERATIONAL_FAILURE, sa.FROZEN_COUNTERFACTUAL_PATCH, sa.FROZEN_TOOLING_PATCH):
         (run / rel).write_bytes((b_run / rel).read_bytes())

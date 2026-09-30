@@ -1,5 +1,5 @@
 diff --git a/python/backtest/modular/sr_scoring/decision_engine.py b/python/backtest/modular/sr_scoring/decision_engine.py
-index c01488e..3be5130 100644
+index c01488e49d3d9ac1f53e8ad446669e699ccaf649..3be5130b0710855fad2a4f26c7566fd4f3ce778d 100644
 --- a/python/backtest/modular/sr_scoring/decision_engine.py
 +++ b/python/backtest/modular/sr_scoring/decision_engine.py
 @@ -1037,23 +1037,26 @@ def _decision_semantic_pipeline(
@@ -35,7 +35,7 @@ index c01488e..3be5130 100644
          market_state = "BREAKDOWN_RISK"
      elif lifecycle_phase == "CONTINUATION":
 diff --git a/python/backtest/modular/sr_scoring/lifecycle_engine.py b/python/backtest/modular/sr_scoring/lifecycle_engine.py
-index a900f9a..af6ec15 100644
+index a900f9a0c5a00bca773c2aa451b9f4d7232b4f73..af6ec15c753c1065aa2d6598458ebe48af836ef9 100644
 --- a/python/backtest/modular/sr_scoring/lifecycle_engine.py
 +++ b/python/backtest/modular/sr_scoring/lifecycle_engine.py
 @@ -139,11 +139,15 @@ def resolve_lifecycle(
@@ -76,7 +76,7 @@ index a900f9a..af6ec15 100644
          reason_codes.append("PRICE_UPSIDE_FOLLOW_THROUGH")
      elif event_signal == EVENT_SIGNAL_CLOSE_RECLAIM and (
 diff --git a/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py b/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
-index e33091b..50f82f2 100644
+index e33091b2ee85f20fcb6d57c06fe7ba8c7202c483..50f82f2653b9dd910bcb83bf2c78ae702c768120 100644
 --- a/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
 +++ b/python/backtest/modular/sr_scoring/tests/test_i074_diagnostics.py
 @@ -23,7 +23,8 @@ def _zone(low=98.0, high=100.0, role=ZoneType.SUPPORT.value):
@@ -135,7 +135,7 @@ index e33091b..50f82f2 100644
      for qualified in (True, False):
          pipeline = _pipeline(lifecycle_phase_wanted="TESTING", rr_qualified=qualified)
 diff --git a/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py b/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
-index f26cc47..8887c0e 100644
+index f26cc479744b0274f9ce8852ca1a77cb793655d1..8887c0e285cfc85628487aca07144fdeebf8290e 100644
 --- a/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
 +++ b/python/backtest/modular/sr_scoring/tests/test_lifecycle_engine.py
 @@ -47,13 +47,11 @@ def _state(event_type: str, age_bars: int = 0) -> dict:

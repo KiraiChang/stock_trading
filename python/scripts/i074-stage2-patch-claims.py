@@ -9,6 +9,8 @@
     i074-stage2-patch-claims.py --failed-record <record 目錄>   # --recover-failed-record：該份 record
 
 stdout **只印一行**：`<base_commit> <counterfactual_sha256> <tooling_sha256> <composed_sha256>`；
+⚠️ `--failed-record` 另外在尾端加第 5 個 token：record **宣告的** `counterfactual_semantic_sha256`
+（shell 從 record 內的實際 patch 重算並比對它，相等才以 `--verified-counterfactual-semantic-sha256` 注入）。
 失敗時 stdout ⛔ 無輸出、結束碼 1。
 
 ⚠️ **這只是「取出宣告」，⛔ 不是驗證**（見 `stage2_archive.patch_claims()`）：shell 拿它們在隔離
@@ -49,8 +51,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - 任何失敗都 fail-closed，stdout ⛔ 無輸出
         print(f"ERROR: 取不到合成守門的宣告值：{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
-    print(" ".join(claims[f] for f in ("base_commit", "counterfactual_patch_sha256",
-                                       "tooling_patch_sha256", "composed_sha256")))
+    fields = ["base_commit", "counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256"]
+    if args.failed_record:
+        fields.append("counterfactual_semantic_sha256")
+    print(" ".join(claims[f] for f in fields))
     return 0
 
 

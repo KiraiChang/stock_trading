@@ -12,7 +12,7 @@
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --finalize --run-dir <Stage 2 的 run 目錄>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --recover-durability
 #
-#   # ③d failed-attempt record（反事實沒有生效，replay 回 6 時）→ …/i074_stage2/failed/<bundle>-<sha>/
+#   # ③d failed-attempt record（反事實沒有生效，replay 回 6 時）→ …/i074_stage2/failed/<bundle>-<語意 SHA>/
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --publish-failed-record --run-dir <run 目錄>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --check-failed-record --counterfactual-patch <patch>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --recover-failed-record <record 目錄>
@@ -29,18 +29,23 @@
 #   --finalize：0；3（⛔ 不刪除，用 --recover-durability）；1
 #   --recover-durability：manifest 記的 terminal_outcome；3；1
 #   --publish-failed-record：⚠️ **1**（完整發布——那一次執行本來就是失敗的）；3（rename 成功、fsync 失敗）；
-#                            1（rename 之前失敗：⚠️ 事故紀錄遺失，允許以同一 SHA 重跑）
-#   --check-failed-record：0＝無命中、放行；**2＝命中**（已記錄的壞 patch）；1＝record 損壞、驗證失敗、
-#                          patch 套用失敗，或輸入⛔ 不是 canonical 的 `git diff --binary` 輸出
+#                            1（rename 之前失敗：⚠️ 事故紀錄遺失，允許以同一語意 SHA 重跑）
+#   --check-failed-record：0＝無命中、放行；**2＝命中**（同一個語意 SHA 的已記錄壞 patch）；1＝record 損壞、
+#                          驗證失敗、patch 套用失敗、改動檔案⛔ 不是固定的四個，或輸入⛔ 不是 canonical diff
 #   --recover-failed-record：⚠️ **1**（成功也是 1）；3
 #
 # 設計重點：
 #   - ⚠️ Python 段在 **Stage 2 identity 的 image** 內執行（`REPLAY_IMAGE_ID` 必須與它相符）；
 #   - ⚠️ Stage 1 證據**唯讀**掛載，只有 `python/baselines/i074_stage2/` 可寫（check 模式連它也唯讀）；
 #   - 程式碼來自 `--source-ref`（預設 HEAD）的 detached worktree，唯讀掛在 `/app`；
-#   - ⚠️ **合成守門**（「四之二」、F8-a）在 host 的隔離 worktree 執行：依 ordered components 套用兩份
-#     patch、`git write-tree` 取中繼 tree、重算三個 SHA——⛔ 不建中繼 commit、HEAD 全程不動；
-#     ⛔ 任一不符即中止、⛔ 不呼叫 Python。check 模式則是 Python 段先過才跑（失敗點要唯一）。
+#   - ⚠️ **合成守門**（「四之二」、F8-a）在 host 的隔離 worktree 執行：一律呼叫 `scripts/lib/replay-args.sh`
+#     的**唯一合成函式** `replay_args_compose()`——依 ordered components 套用兩份 patch、`git write-tree` 取
+#     中繼 tree、以 canonical diff 重算三個 SHA 與**語意 SHA**（只涵蓋兩個產品檔，並先驗改動檔案恰好是
+#     固定的四個）——⛔ 不建中繼 commit、HEAD 全程不動；⛔ 任一不符即中止、⛔ 不呼叫 Python。
+#     check 模式則是 Python 段先過才跑（失敗點要唯一）。
+#   - ⚠️ **語意 SHA 的交接**（I-074 ⑦ 總綱 v1「二」的交接列）：Python ⛔ 不碰 git，所以 failed record 的
+#     目錄鍵由 shell 從實際 patch 重算、以 `--verified-counterfactual-semantic-sha256` 注入——⚠️ **只有**
+#     publish／recover-failed-record 帶；check 的命中判定（`R_SEM = 本次的語意 SHA`）完全在 shell。
 #   - ⚠️ **合成守門與封存之間的交接**（2026-09-24 review 高 1）：Python 之後會**重新讀**來源，兩段之間
 #     來源被一致地換掉的話，shell 證明的是 A、封存的卻是 B（`:ro` 只擋容器寫入，⛔ 凍結不了 host）。
 #     所以驗過的 patch base 與三個 SHA 以 `--verified-*` 注入，Python 拿**實際要封存的內容**比對，
@@ -54,7 +59,8 @@ PYTHON_DIR="$REPO_ROOT/python"
 
 # ⚠️ 注入參數只能由本腳本給——**精確比對**（⛔ 不共用前綴清單，理由見 finalize-evidence.sh）。
 STAGE2_INJECTED=(--run-identity --python-root --image-digest --base-commit --tooling-patch-sha256 --source-root --runner-sha256
-                 --verified-patch-base --verified-counterfactual-sha256 --verified-tooling-sha256 --verified-composed-sha256)
+                 --verified-patch-base --verified-counterfactual-sha256 --verified-tooling-sha256 --verified-composed-sha256
+                 --verified-counterfactual-semantic-sha256)
 for _arg in "$@"; do
   for _inj in "${STAGE2_INJECTED[@]}"; do
     if [ "$_arg" = "$_inj" ] || [ "${_arg%%=*}" = "$_inj" ]; then
@@ -233,12 +239,14 @@ new_compose_tree() {
 }
 
 # 合成守門（「四之二」、F8-a）：依 ordered components（counterfactual → tooling）套用兩份 patch，
-# 每一步 `git write-tree` 取中繼 tree，重算三個 SHA 並與宣告值比對。
+# 由**唯一的合成函式** `replay_args_compose()` 以 canonical diff 重算三個 SHA 與語意 SHA，並與宣告值比對。
 # 用法：compose_check <說明> <base> <cf 檔> <tooling 檔> <cf SHA> <tooling SHA> <composed SHA>
+# 成功時把**由實際 patch 重算的**語意 SHA 放進 `COMPOSE_SEM`（publish／recover-failed-record 用它交接）。
 # ⚠️ 失敗一律回 1（⛔ 不讓 git 的 128 之類漏成結束碼）；呼叫端一律 `|| exit 1`。
 compose_check() {
   local label="$1" base="$2" src_cf="$3" src_tool="$4" want_cf="$5" want_tool="$6" want_comp="$7"
-  local t1 t2 got_cf got_tool got_comp head base_oid snap cf tool
+  local out t1 t2 got_cf got_tool got_comp got_sem snap cf tool
+  COMPOSE_SEM=""
   # ⚠️ 先把兩份 patch **各讀一次**到私有目錄，之後的 SHA 與 `git apply` 都用這份副本——
   # ⛔ 不讓「算 SHA 的那次」與「套用的那次」讀到不同的內容。
   snap="$(mktemp -d)" || return 1
@@ -251,23 +259,13 @@ compose_check() {
   fi
   [ -s "$cf" ] || { echo "ERROR: 合成守門（$label）：counterfactual patch ⛔ 不得為 0 bytes。" >&2; return 1; }
   new_compose_tree "$base" || return 1
-  git -C "$NEW_TREE" apply --index "$cf" || {
-    echo "ERROR: 合成守門（$label）：counterfactual patch 套不上 base $base。" >&2; return 1; }
-  t1="$(git -C "$NEW_TREE" write-tree)" || return 1
-  if [ -s "$tool" ]; then
-    git -C "$NEW_TREE" apply --index "$tool" || {
-      echo "ERROR: 合成守門（$label）：tooling patch 套不上 counterfactual 之後的 tree。" >&2; return 1; }
-  fi
-  t2="$(git -C "$NEW_TREE" write-tree)" || return 1
-  got_cf="$(git -C "$NEW_TREE" diff --binary "$base" "$t1" | sha256sum | cut -d' ' -f1)" || return 1
-  got_tool="$(git -C "$NEW_TREE" diff --binary "$t1" "$t2" | sha256sum | cut -d' ' -f1)" || return 1
-  got_comp="$(git -C "$NEW_TREE" diff --binary "$base" "$t2" | sha256sum | cut -d' ' -f1)" || return 1
-  head="$(git -C "$NEW_TREE" rev-parse HEAD)" || return 1
-  base_oid="$(git -C "$REPO_ROOT" rev-parse "${base}^{commit}")" || return 1
-  [ "$head" = "$base_oid" ] || { echo "ERROR: 合成守門（$label）：HEAD 被動到了（$head）。" >&2; return 1; }
+  out="$(replay_args_compose "$NEW_TREE" "$base" "$cf" "$tool")" || {
+    echo "ERROR: 合成守門（$label）：兩份 patch 合成失敗（套不上、改動檔案⛔ 不是固定的四個，或語意 diff 為空）。" >&2
+    return 1; }
+  read -r t1 t2 got_cf got_tool got_comp got_sem <<< "$out"
   if [ "$got_cf" != "$want_cf" ]; then
     echo "ERROR: 合成守門（$label）：counterfactual 的重建 SHA $got_cf ≠ 宣告的 $want_cf" \
-         "（patch 不是 canonical 的 git diff --binary 輸出）。" >&2; return 1
+         "（patch 不是 canonical diff 的輸出）。" >&2; return 1
   fi
   if [ "$got_tool" != "$want_tool" ]; then
     echo "ERROR: 合成守門（$label）：tooling 的重建 SHA $got_tool ≠ 宣告的 $want_tool。" >&2; return 1
@@ -276,17 +274,33 @@ compose_check() {
     echo "ERROR: 合成守門（$label）：合成 SHA $got_comp ≠ 宣告的 composed $want_comp" \
          "——⛔ 兩份 patch 合成不出 before 實際跑的那一份。" >&2; return 1
   fi
+  COMPOSE_SEM="$got_sem"
   return 0
 }
 
 if [ "${#CLAIM_ARGS[@]}" -gt 0 ]; then
   # ⚠️ 宣告值由 host 端小工具取出（只讀小檔）；⛔ 取不到就中止、⛔ 不呼叫 Python finalizer。
+  # ⚠️ `--failed-record` 多一個 token：record **宣告的**語意 SHA。
   CLAIMS="$(python3 "$PYTHON_DIR/scripts/i074-stage2-patch-claims.py" "${CLAIM_ARGS[@]}")" || exit 1
-  read -r C_BASE C_CF C_TOOL C_COMP <<< "$CLAIMS"
+  C_SEM=""
+  read -r C_BASE C_CF C_TOOL C_COMP C_SEM <<< "$CLAIMS"
   compose_check "$MODE" "$C_BASE" "$CF_FILE" "$TOOL_FILE" "$C_CF" "$C_TOOL" "$C_COMP" || exit 1
   # ⚠️ 交接：Python 必須證明它**實際要封存的**就是這一份（見檔頭「合成守門與封存之間的交接」）。
   VERIFY_ARGS=(--verified-patch-base "$C_BASE" --verified-counterfactual-sha256 "$C_CF"
                --verified-tooling-sha256 "$C_TOOL" --verified-composed-sha256 "$C_COMP")
+  case "$MODE" in
+    publish-failed-record)
+      # 目錄鍵：由**凍結的** counterfactual 重算的語意 SHA（Python 寫進 record，rename 之前比對）。
+      VERIFY_ARGS+=(--verified-counterfactual-semantic-sha256 "$COMPOSE_SEM") ;;
+    recover-failed-record)
+      # F4 的 shell 層：record 宣告的語意 SHA ⇔ 由 record 內**實際 patch** 重算的值。
+      if [ "$COMPOSE_SEM" != "$C_SEM" ]; then
+        echo "ERROR: record 宣告的 counterfactual_semantic_sha256 $C_SEM ≠ 由封存 patch 重算的 $COMPOSE_SEM" \
+             "——⛔ 不呼叫 Python、⛔ 不 fsync。" >&2
+        exit 1
+      fi
+      VERIFY_ARGS+=(--verified-counterfactual-semantic-sha256 "$COMPOSE_SEM") ;;
+  esac
 fi
 
 WORKTREE="$(mktemp -d)"
@@ -343,39 +357,52 @@ import json, sys
 doc = json.loads(sys.stdin.read())
 print(doc["base_commit"])
 for r in doc["records"]:
-    print(r["dir"], r["base_commit"], r["counterfactual_patch_sha256"], r["tooling_patch_sha256"], r["composed_sha256"])
+    print(r["dir"], r["base_commit"], r["counterfactual_patch_sha256"], r["tooling_patch_sha256"], r["composed_sha256"],
+          r["counterfactual_semantic_sha256"])
 ' <<< "$CHECK_JSON")" || { echo "ERROR: 讀不懂 --check-failed-record 的 Python 段輸出——⛔ fail-closed。" >&2; exit 1; }
 CHECK_BASE="$(head -n 1 <<< "$PARSED")"
 RECORDS="$(tail -n +2 <<< "$PARSED")"
 
-# 本次的比對鍵：⚠️ 與 runner 同一套推導——在 Stage 1 after 的 base 套用輸入 patch，`write-tree` 得 T1，
-# 鍵 ＝ sha256(git diff --binary <base> <T1>)。⛔ 不直接雜湊檔案：同一份變更可以有不同的文字表示。
+# 本次的比對鍵：⚠️ 與 runner 同一支合成函式——在 Stage 1 after 的 base 套用輸入 patch（先讀一次到私有副本），
+# 得 `T1`、完整的 canonical SHA 與**語意 SHA**（只涵蓋兩個產品檔；改動檔案⛔ 不是固定的四個即拒絕）。
+# ⛔ 不直接雜湊檔案：同一份變更可以有不同的文字表示。
+CF_SNAP_DIR="$(mktemp -d)" || exit 1
+COMPOSE_TREES+=("$CF_SNAP_DIR")
+CF_SNAP="$CF_SNAP_DIR/counterfactual.patch"
+cp -- "$CF_ABS" "$CF_SNAP" || { echo "ERROR: 讀不到 --counterfactual-patch。" >&2; exit 1; }
 new_compose_tree "$CHECK_BASE" || exit 1
-git -C "$NEW_TREE" apply --index "$CF_ABS" || {
-  echo "ERROR: --counterfactual-patch 套不上 base $CHECK_BASE——⛔ 在 replay 之前拒絕。" >&2; exit 1; }
-T1="$(git -C "$NEW_TREE" write-tree)" || exit 1
-CANON_KEY="$(git -C "$NEW_TREE" diff --binary "$CHECK_BASE" "$T1" | sha256sum | cut -d' ' -f1)" || exit 1
+INPUT_OUT="$(replay_args_compose "$NEW_TREE" "$CHECK_BASE" "$CF_SNAP" "")" || {
+  echo "ERROR: --counterfactual-patch 套不上 base $CHECK_BASE、改動檔案⛔ 不是固定的四個，或語意 diff 為空" \
+       "——⛔ 在 replay 之前拒絕。" >&2; exit 1; }
+read -r _ _ CANON_KEY _ _ INPUT_SEM <<< "$INPUT_OUT"
 
 HIT=""
-while read -r R_DIR R_BASE R_CF R_TOOL R_COMP; do
+while read -r R_DIR R_BASE R_CF R_TOOL R_COMP R_SEM; do
   [ -n "$R_DIR" ] || continue
   [ "$(dirname "$R_DIR")" = "$FAILED_ROOT" ] || {
     echo "ERROR: Python 段回報的 record 不在 $FAILED_ROOT/ 底下：$R_DIR——⛔ fail-closed。" >&2; exit 1; }
   # F8-a：每份 record 的兩份 patch 都要合成得出它宣告的 composed。
   compose_check "failed record $(basename "$R_DIR")" "$R_BASE" "$R_DIR/patch/counterfactual.patch" \
     "$R_DIR/patch/tooling.patch" "$R_CF" "$R_TOOL" "$R_COMP" || exit 1
-  if [ "$R_CF" = "$CANON_KEY" ]; then HIT="$R_DIR"; fi
+  # F4 的 shell 層：宣告的語意 SHA ⇔ 由封存 patch **重算**的值（Python 段已驗目錄名 ＝ 宣告值）。
+  if [ "$COMPOSE_SEM" != "$R_SEM" ]; then
+    echo "ERROR: failed record $(basename "$R_DIR") 宣告的語意 SHA $R_SEM ≠ 由封存 patch 重算的 $COMPOSE_SEM" \
+         "——record 損壞，⛔ fail-closed。" >&2
+    exit 1
+  fi
+  if [ "$R_SEM" = "$INPUT_SEM" ]; then HIT="$R_DIR"; fi
 done <<< "$RECORDS"
 
-# ⚠️ 順序固定：① 先用重建出的 canonical SHA 查找——命中 → 2；② 未命中但輸入 bytes ≠ canonical diff → 1。
+# ⚠️ 順序固定：① 先用重建出的**語意 SHA** 查找——命中 → 2；② 未命中但輸入 bytes ≠ canonical diff → 1。
 if [ -n "$HIT" ]; then
-  echo "ERROR: 命中已記錄的失敗：$HIT——同一份反事實 patch ⛔ 不得重跑（改 patch 後才可）。" >&2
+  echo "ERROR: 命中已記錄的失敗：$HIT——同一個語意 SHA（兩個產品檔的 canonical diff）⛔ 不得重跑；" \
+       "只有白名單產品檔的 diff 改變才可重跑（⛔ 只改測試檔不算）。" >&2
   exit 2
 fi
-if [ "$(sha_of "$CF_ABS")" != "$CANON_KEY" ]; then
-  echo "ERROR: --counterfactual-patch ⛔ 不是 canonical 的 git diff --binary 輸出（bytes 的 SHA ≠ 重建的 $CANON_KEY）" \
+if [ "$(sha_of "$CF_SNAP")" != "$CANON_KEY" ]; then
+  echo "ERROR: --counterfactual-patch ⛔ 不是 canonical diff 的輸出（bytes 的 SHA ≠ 重建的 $CANON_KEY）" \
        "——正式 archive 無條件要求兩者相等，⛔ 在 replay 之前拒絕。" >&2
   exit 1
 fi
-echo "OK: 沒有命中任何 failed record（比對鍵 $CANON_KEY）。"
+echo "OK: 沒有命中任何 failed record（語意鍵 $INPUT_SEM、完整 SHA $CANON_KEY）。"
 exit 0

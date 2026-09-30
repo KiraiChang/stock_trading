@@ -1,0 +1,4156 @@
+diff --git a/python/backtest/modular/sr_scoring/evaluation.py b/python/backtest/modular/sr_scoring/evaluation.py
+index 0329576affe6a618fd6647ababd1b9ca576de707..6eefa111543bcc360dfff47a94e73af1ca554f7d 100644
+--- a/python/backtest/modular/sr_scoring/evaluation.py
++++ b/python/backtest/modular/sr_scoring/evaluation.py
+@@ -2977,8 +2977,214 @@ def _publish_candidate_mismatch(
+ # 與 evidence finalizer 也要用它，而 package ⛔ 不得反向 import 本檔；另抄一份就是雙真相源。
+ 
+ 
++def _is_lower_hex(value: object, length: int) -> bool:
++    return isinstance(value, str) and len(value) == length and all(c in "0123456789abcdef" for c in value)
++
++
++def assert_counterfactual_args(args, *, stage: int) -> bool:
++    """I-074 Stage 2 反事實模式的**成對守門**（Stage 2 計畫書「二、④」的五條）。回傳是否走反事實路徑。
++
++    ⚠️ ⛔ 不能只靠 runner：runner 若漏注入 SHA，Python 端仍會進反事實路徑並產出不完整的證據。
++    ⚠️ 排在 `load_bundle()` 與任何讀檔之前。模式**只由明示的 flag 決定**——⛔ 不從 ref、hash 或 cohort 推斷。
++    """
++    flag = bool(getattr(args, "i074_counterfactual", False))
++    sha = getattr(args, "counterfactual_patch_sha256", None)
++    if flag:
++        # stage 限定與既有兩個 flag 共用同一套（⚠️ 方向相反：這個只限 Stage 2）。
++        assert_i074_flags({"i074_counterfactual"}, stage=stage)
++    if sha is not None and stage != 2:
++        raise CliUsageError(f"Stage {stage} ⛔ 不得帶 --counterfactual-patch-sha256（只屬於 Stage 2 的反事實模式）")
++    if flag and sha is None:
++        raise CliUsageError("--i074-counterfactual 缺少官方腳本注入的 --counterfactual-patch-sha256——⛔ 不進反事實路徑")
++    if sha is not None and not flag:
++        raise CliUsageError("--counterfactual-patch-sha256 ⛔ 不得出現在一般路徑（沒有 --i074-counterfactual）")
++    if sha is not None and not _is_lower_hex(sha, 64):
++        raise CliUsageError(f"--counterfactual-patch-sha256 必須是 64 字元小寫 hex：{sha!r}")
++    return flag
++
++
++def _run_counterfactual_stage2(args, *, argv: list[str]) -> dict[str, Any]:
++    """I-074 Stage 2 的**反事實路徑**（`--i074-counterfactual`；⑦a 細部計畫 B4）。
++
++    before ＝ `e1cbbbd` ＋ counterfactual（把 setup RR 加回 `CONTINUATION`），after ＝ 已封存的 Stage 1 D+1。
++    ⚠️ **順序即契約**：
++      1. replay 之前：cohort 先讀（小）→ after **一趟串流**（只常駐 keys、每列 digest 與 cohort rows）→
++         兩份 provenance → 與 bundle／彼此的身分 → 版本守門（`--before-ref` ＝ `--base-commit` ＝ after 的 base）；
++      2. replay ＋ 既有的 row-level 守門；
++      3. 全量 key 守門（**有序**相等）——排在反事實生效檢查**之前**；
++      4. 以**本次 replay 的 before rows** 跑「①之三」（`CounterfactualEffectCheck`）：不生效 → 只發布
++         `bounded_diagnostics.json`、結束碼 6；⛔ 永遠不走 candidate mismatch（rc=4 在本路徑不可達）；
++      5. 生效 → before source → comparison（落地重讀驗 SHA）→ report **最後**寫。
++    ⚠️ 終態恰好一種：rc=0 ＝ 恰好三檔、rc=6 ＝ 只有中繼檔。檔名取自 `stage2_archive` 的 `OPERATIONAL_*`。
++    """
++    from .replay_bundle import (
++        COHORT_KIND,
++        OPERATIONAL_BEFORE_SOURCE,
++        OPERATIONAL_COMPARISON,
++        OPERATIONAL_FAILURE,
++        OPERATIONAL_REPORT,
++        ArtifactError,
++        CounterfactualEffectCheck,
++        CounterfactualIneffective,
++        assert_matches_bundle,
++        assert_same_keys,
++        assert_unique_keys,
++        build_before_source,
++        build_comparison_artifact,
++        build_counterfactual_failure,
++        build_provenance,
++        build_report,
++        candidate_keys,
++        compare_rows,
++        load_bundle,
++        load_canonical_evidence_artifact,
++        prepare_output_dir,
++        publish_artifacts,
++        row_key,
++        sha256_file,
++        stream_after_artifact,
++        validate_cohort_manifest,
++        validate_counterfactual_failure,
++        validate_diagnostics,
++        validate_provenance,
++        write_canonical_atomic,
++    )
++
++    # ⚠️ runner 的 `--output-dir` 就是 orchestrator 的 `<run>/stage2`——`OPERATIONAL_*` 的 parent 必須是它。
++    names = {}
++    for label, rel in (("before", OPERATIONAL_BEFORE_SOURCE), ("comparison", OPERATIONAL_COMPARISON),
++                       ("report", OPERATIONAL_REPORT), ("failure", OPERATIONAL_FAILURE)):
++        if Path(rel).parent != Path("stage2"):
++            raise ArtifactError(f"{rel} 的 parent ⛔ 不是 stage2——與 finalizer 的 run 目錄佈局對不上")
++        names[label] = Path(rel).name
++
++    loaded = load_bundle(args.bundle)
++
++    # ── 1. replay 之前（⚠️ 讀法與 role 照 `load_stage1_anchor()`：cohort 先讀、after 串流，兩者都是 stage1） ──
++    cohort_load = load_canonical_evidence_artifact(args.cohort_manifest, COHORT_KIND)
++    cohort_payload = cohort_load.parsed
++    cohort_keys = validate_cohort_manifest(cohort_payload)
++    validate_provenance(cohort_payload["provenance"], role="stage1")
++    assert_matches_bundle(cohort_payload, loaded.manifest, "cohort manifest")
++    after = stream_after_artifact(args.after_artifact, label="after artifact", side="after",
++                                  keep_keys=set(cohort_keys))
++    after_top = after.load.top
++    validate_provenance(after_top["provenance"], role="stage1")
++    assert_matches_bundle(after_top, loaded.manifest, "after artifact")
++    after_sha = after.load.artifact_sha256
++    if cohort_payload["after_artifact_sha256"] != after_sha:
++        raise ArtifactError(
++            f"cohort manifest 記的 after artifact SHA-256 是 {cohort_payload['after_artifact_sha256']}，"
++            f"串流讀到的是 {after_sha}——⛔ 兩者必須相符。"
++        )
++    # ⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
++    assert_same_keys(cohort_keys, after.candidate_keys, "③ cohort manifest vs 候選列")
++    missing = [key for key in cohort_keys if key not in after.kept_rows]
++    if missing:
++        raise ArtifactError(f"after artifact 缺少 cohort 的完整列：{missing[:5]}")
++    # 版本守門（全圖第 8 道提前到 replay 之前）：CLI 的 `--before-ref`（40 碼）＝ CLI 的 `--base-commit`
++    # （runner 注入的 worktree HEAD）＝ after artifact 的 `provenance.base_commit`。
++    after_base = after_top["provenance"]["base_commit"]
++    if not _is_lower_hex(args.before_ref, 40):
++        raise ArtifactError(f"反事實模式的 --before-ref 必須是 40 碼 commit OID：{args.before_ref!r}")
++    if not (args.before_ref == args.base_commit == after_base):
++        raise ArtifactError(
++            f"--before-ref={args.before_ref}、--base-commit={args.base_commit}、after artifact 的 "
++            f"provenance.base_commit={after_base} 必須全部相同——before 必須跑在 Stage 1 after 的同一個 base"
++        )
++
++    output_dir = prepare_output_dir(args.output_dir)
++    generated_at = datetime.now(timezone.utc).isoformat()
++
++    # ── 2. replay ───────────────────────────────────────────────────────────
++    rows, context = _replay_from_bundle(loaded)
++    keys = context["keys"]
++    assert_unique_keys(keys, "本次 replay 的輸出")
++    assert_unique_keys(context["universe"], "bundle universe")
++    validate_replay_errors(rows, "本次 replay")
++    validate_diagnostics(rows, "本次 replay 的輸出", side="before")
++    provenance = build_provenance(
++        source_root=args.source_root,
++        image_digest=args.image_digest,
++        base_commit=args.base_commit,
++        tooling_patch_sha256=args.tooling_patch_sha256,
++        runner_sha256=args.runner_sha256,
++        argv=argv,
++    )
++
++    # ── 3. 全量 key 守門（⚠️ 先於反事實生效檢查；⛔ 只用 cohort 過濾會靜默漏掉 before 多出來的列） ──
++    assert_same_keys(context["universe"], after.keys, "① bundle universe vs after rows")
++    assert_same_keys(keys, after.keys, "② before 全範圍 vs after rows")
++    if list(keys) != list(after.keys):
++        raise ArtifactError("② before 的列順序 ≠ after（換序）——⛔ 全圖要求 before source 與錨定的 D+1 同序")
++
++    # ── 4. 「①之三」：反事實是否真的生效（⚠️ 餵的是**本次 replay 的 before rows**） ───────────
++    effect = CounterfactualEffectCheck()
++    for row in rows:
++        effect.feed(row)
++    result = effect.result()
++    if result is not None:
++        failure = build_counterfactual_failure(bundle_id=loaded.bundle_id, generated_at=generated_at,
++                                               provenance=provenance, effect=result)
++        validate_counterfactual_failure(failure)
++        publish_artifacts(output_dir, [(names["failure"], failure)])
++        raise CounterfactualIneffective(
++            f"反事實沒有生效（{result['failure_reason']}，{result['bounded_diagnostics']}）——⚠️ 這是 tooling "
++            f"缺陷信號，⛔ 不是分支 C；有界診斷已寫入 {output_dir / names['failure']}，⛔ 本次不產出 before source、"
++            "comparison 與 report。",
++            path=output_dir / names["failure"],
++        )
++    if candidate_keys(rows):
++        raise ArtifactError("反事實生效檢查通過卻仍有候選列——實作缺陷，⛔ 不產出比較")
++
++    # ── 5. operational 輸出（⚠️ report 最後寫：它存在即代表它指向的證據已完整） ──────────
++    before_source = build_before_source(
++        bundle_id=loaded.bundle_id, before_ref=args.before_ref, timeframe=context["timeframe"],
++        replay_scope=loaded.manifest["replay_scope"], generated_at=generated_at,
++        provenance=provenance, rows=rows,
++    )
++    before_sha = write_canonical_atomic(output_dir, names["before"], before_source)
++    before_by_key = {row_key(row): row for row in rows}
++    comparison_rows = [
++        compare_rows(before_by_key[key], after.kept_rows[key]) for key in sorted(cohort_keys)
++    ]
++    assert_same_keys(
++        [row_key(row) for row in comparison_rows], cohort_keys,
++        "④ comparison artifact vs cohort manifest",
++    )
++    # ⚠️ 與 before source 共用**同一個** provenance 物件（全圖第 10 道：兩者逐欄相等）。
++    comparison = build_comparison_artifact(
++        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
++        after_artifact_sha256=after_sha, generated_at=generated_at,
++        provenance=provenance, rows=comparison_rows,
++    )
++    comparison_sha = write_canonical_atomic(output_dir, names["comparison"], comparison)
++    if sha256_file(output_dir / names["comparison"]) != comparison_sha:
++        raise ArtifactError("comparison artifact 落地後的 SHA-256 與寫入時不符")
++    report = build_report(
++        bundle_id=loaded.bundle_id, before_ref=args.before_ref,
++        comparison_sha256=comparison_sha, generated_at=generated_at,
++        rows=comparison_rows, report_max_rows=loaded.manifest.get("report_max_rows"),
++    )
++    publish_artifacts(output_dir, [(names["report"], report)])
++    return {
++        "stage": 2,
++        "mode": "counterfactual",
++        "bundle_id": loaded.bundle_id,
++        "rows": len(rows),
++        "candidates": len(comparison_rows),
++        "counterfactual_patch_sha256": args.counterfactual_patch_sha256,
++        "before_source_artifact_sha256": before_sha,
++        "comparison_artifact_sha256": comparison_sha,
++        "output_dir": str(output_dir),
++    }
++
++
+ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
+     """Stage 1（掃描）或 Stage 2（比對）。回傳給 stdout 的摘要。"""
++    # ⚠️ I-074 Stage 2 的反事實模式：成對守門排在任何讀檔之前；⛔ 一般路徑以下一行不動。
++    if assert_counterfactual_args(args, stage=stage):
++        return _run_counterfactual_stage2(args, argv=argv)
+     from .replay_bundle import (
+         AFTER_ARTIFACT_NAME,
+         AFTER_KIND,
+@@ -3283,14 +3489,19 @@ BUNDLE_ALLOWED_ARGS = frozenset({
+     # I-074 Stage 1 的兩個 opt-in。⚠️ **只限 Stage 1**——這份清單是 Stage 1／2 共用的，
+     # 光加進來 Stage 2 也會接受，所以另有 `assert_i074_flags()` 做 stage 限定。
+     "i074_preflight", "i074_capacity_probe",
++    # I-074 Stage 2 的反事實 opt-in（⚠️ **只限 Stage 2**，同樣由 `assert_i074_flags()` 限定）與它的
++    # SHA（⚠️ 只能由官方腳本注入，見 `SCRIPT_INJECTED_ARGS`）。
++    "i074_counterfactual", "counterfactual_patch_sha256",
+ })
+ BUNDLE_REQUIRED_ARGS = ("bundle", "output_dir", "before_ref", "image_digest", "source_root")
+ 
+-# ⛔ 這四個**只能由官方腳本注入**：使用者傳入時腳本會拒絕，而 CLI 這一端負責偵測
++# ⛔ 這些**只能由官方腳本注入**：使用者傳入時腳本會拒絕，而 CLI 這一端負責偵測
+ # 「重複出現」（使用者一個、腳本一個）並中止——⛔ 不靜默採用最後一個。
++# ⚠️ `--counterfactual-patch-sha256` 是 I-074 Stage 2 ⑦a 加的；它的模式旗標 `--i074-counterfactual`
++# 是使用者 opt-in，⛔ 不在這裡（在 `I074_FLAGS`）。
+ SCRIPT_INJECTED_ARGS = (
+     "--image-digest", "--base-commit", "--tooling-patch-sha256", "--source-root",
+-    "--runner-sha256",
++    "--runner-sha256", "--counterfactual-patch-sha256",
+ )
+ 
+ 
+@@ -3311,9 +3522,9 @@ def _explicit_args(argv: list[str]) -> set[str]:
+     return set(vars(detector.parse_args(argv)))
+ 
+ 
+-# I-074 的兩個 opt-in。⚠️ argparse 的 `store_true` 對重複是**靜默接受**的，
++# I-074 的三個 opt-in。⚠️ argparse 的 `store_true` 對重複是**靜默接受**的，
+ # 而測試矩陣要求「重複 flag → 中止」，所以要自己數。
+-I074_FLAGS = ("--i074-preflight", "--i074-capacity-probe")
++I074_FLAGS = ("--i074-preflight", "--i074-capacity-probe", "--i074-counterfactual")
+ 
+ 
+ def _reject_duplicate_i074_flags(argv: list[str]) -> None:
+@@ -3348,11 +3559,13 @@ def resolve_cli_mode(explicit: set[str]) -> str:
+ 
+ 
+ def assert_i074_flags(explicit: set[str], *, stage: int) -> None:
+-    """I-074 的兩個 opt-in **只限 Stage 1**，且**⛔ 互斥**。
++    """I-074 Stage 1 的兩個 opt-in **只限 Stage 1**，且**⛔ 互斥**；Stage 2 的反事實 opt-in **只限 Stage 2**。
+ 
+     ⚠️ `--i074-capacity-probe` **隱含執行 preflight-pre**，所以⛔ 不需要也⛔ 不得同時帶
+     `--i074-preflight`——留著兩種讀法的話，「probe 到底有沒有驗 bundle 身分」就沒有唯一答案。
+     """
++    if "i074_counterfactual" in explicit and stage != 2:
++        raise CliUsageError(f"--i074-counterfactual 只能用於 Stage 2，實際 stage={stage}")
+     preflight = "i074_preflight" in explicit
+     probe = "i074_capacity_probe" in explicit
+     if preflight and probe:
+@@ -3458,20 +3671,27 @@ def _build_parser() -> argparse.ArgumentParser:
+     parser.add_argument("--i074-capacity-probe", action="store_true",
+                         help="I-074 容量量測：載入全部 11 檔與模型，但 quota 固定 200；"
+                              "隱含執行 preflight-pre，⛔ 不發布 after／cohort")
+-    # ⛔ 以下四個只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
++    # ── I-074 Stage 2 的反事實 opt-in（⚠️ **只限 Stage 2**；⛔ 預設關閉）──────────────
++    parser.add_argument("--i074-counterfactual", action="store_true",
++                        help="I-074 Stage 2 反事實模式：after cohort 逐列比較、before 候選必須為空、"
++                             "反事實沒有生效時回 6；⛔ 無候選集合相等檢查")
++    # ⛔ 以下只能由官方腳本注入（見 SCRIPT_INJECTED_ARGS）。
+     parser.add_argument("--image-digest", default=None, help=argparse.SUPPRESS)
+     parser.add_argument("--base-commit", default=None, help=argparse.SUPPRESS)
+     parser.add_argument("--tooling-patch-sha256", default=None, help=argparse.SUPPRESS)
+     parser.add_argument("--source-root", default=None, help=argparse.SUPPRESS)
+     parser.add_argument("--runner-sha256", default=None, help=argparse.SUPPRESS)
++    parser.add_argument("--counterfactual-patch-sha256", default=None, help=argparse.SUPPRESS)
+     return parser
+ 
+ 
+ def main() -> None:
+     from .replay_bundle import (
+         EXIT_CANDIDATE_MISMATCH,
++        EXIT_COUNTERFACTUAL_INEFFECTIVE,
+         EXIT_DURABILITY_UNCONFIRMED,
+         CandidateMismatch,
++        CounterfactualIneffective,
+         DurabilityUnconfirmed,
+     )
+ 
+@@ -3529,6 +3749,10 @@ def main() -> None:
+         except CandidateMismatch as exc:
+             print(f"[mismatch] {exc}", file=sys.stderr)
+             sys.exit(EXIT_CANDIDATE_MISMATCH)
++        # ⚠️ 同理排在一般 `except ValueError` 之前（`CounterfactualIneffective` 也刻意不繼承它）。
++        except CounterfactualIneffective as exc:
++            print(f"[counterfactual-ineffective] {exc}", file=sys.stderr)
++            sys.exit(EXIT_COUNTERFACTUAL_INEFFECTIVE)
+         except DurabilityUnconfirmed as exc:  # pragma: no cover - bundle 模式不發布 bundle
+             print(f"[warn] {exc}", file=sys.stderr)
+             sys.exit(EXIT_DURABILITY_UNCONFIRMED)
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/__init__.py b/python/backtest/modular/sr_scoring/replay_bundle/__init__.py
+index d52368ddbd56635aa49890767ac056740d7e9fca..1b72f877341fc5b012c7d38eb85f959460736432 100644
+--- a/python/backtest/modular/sr_scoring/replay_bundle/__init__.py
++++ b/python/backtest/modular/sr_scoring/replay_bundle/__init__.py
+@@ -27,6 +27,8 @@ from .artifacts import (
+     CandidateMismatch,
+     build_candidate_mismatch,
+     validate_candidate_mismatch,
++    validate_comparison_artifact,
++    validate_report,
+     validate_diagnostics,
+     AFTER_KIND,
+     ARTIFACT_SCHEMA_VERSION,
+@@ -55,6 +57,14 @@ from .artifacts import (
+     validate_after_artifact,
+     validate_candidate_flags,
+     validate_cohort_manifest,
++    # ⚠️ I-074 Stage 2（③b）：row-level 共用原語與單趟組合驗證
++    StreamRowValidator,
++    check_candidate_flag,
++    check_diagnostics_row,
++    check_row_object,
++    raise_replay_errors,
++    replay_error_messages,
++    validate_after_envelope,
+ )
+ from .bundle import (
+     MANIFEST_NAME,
+@@ -101,6 +111,7 @@ from .provenance import (
+     PROVENANCE_ROLES,
+     ProvenanceError,
+     build_provenance,
++    installed_distributions,
+     is_project_module,
+     pip_freeze_sha256,
+     project_module_hashes,
+@@ -156,13 +167,84 @@ from .run_identity import (
+     ensure_run_identity,
+     load_run_identity,
+     publish_run_identity,
++    RUN_IDENTITY_STAGES,
+     validate_run_identity,
+ )
++from .stream import (
++    AfterStream,
++    StreamLoad,
++    stream_after_artifact,
++    stream_canonical_artifact,
++)
++from .stage2_evidence import (
++    DIAGNOSTIC_SAMPLE_LIMIT,
++    STAGE1_ANCHOR_MEMBERS,
++    STAGE1_EVIDENCE_MANIFEST_PATH,
++    ClosedArchiveWriter,
++    Stage1Anchor,
++    build_stage1_evidence_ref,
++    load_stage1_anchor,
++    resolve_repo_path,
++    validate_stage1_anchor_graph,
++    validate_stage1_evidence_ref,
++)
++from .envcheck import (
++    ENV_EQUIVALENCE_KIND,
++    ENVCHECK_LAYOUT,
++    ENVCHECK_MANIFEST_KIND,
++    ENVCHECK_ROOT_PATH,
++    OUTCOME_EQUIVALENT,
++    OUTCOME_NOT_EQUIVALENT,
++    EnvcheckResult,
++    compare_environment,
++    publish_envcheck,
++    recover_envcheck,
++    validate_envcheck_manifest,
++    validate_equivalence_artifact,
++    verify_envcheck,
++    verify_envcheck_for_stage2,
++)
++from .stage2_archive import (
++    BEFORE_SOURCE_KIND,
++    COUNTERFACTUAL_FAILURE_KIND,
++    FAILED_ATTEMPT_KIND,
++    FAILURE_REASONS,
++    OPERATIONAL_BEFORE_SOURCE,
++    OPERATIONAL_COMPARISON,
++    OPERATIONAL_FAILURE,
++    OPERATIONAL_REPORT,
++    STAGE2_EVIDENCE_ROOT_PATH,
++    STAGE2_FAILED_ROOT_PATH,
++    STAGE2_LAYOUT,
++    STAGE2_MANIFEST_KIND,
++    STAGE2_REPORT_MAX_ROWS,
++    CounterfactualEffectCheck,
++    CounterfactualIneffective,
++    Stage2Verified,
++    VerifiedComposition,
++    build_before_source,
++    build_counterfactual_failure,
++    check_failed_records,
++    check_verified_composition,
++    finalize_stage2_evidence,
++    publish_failed_record,
++    recover_failed_record,
++    recover_stage2_durability,
++    stream_before_source,
++    validate_bounded_diagnostics,
++    validate_counterfactual_failure,
++    validate_failed_record,
++    validate_stage2_manifest,
++    verify_failed_record,
++    verify_stage2_graph,
++)
+ from .publish import (
+     EXIT_ABORT,
+     EXIT_CANDIDATE_MISMATCH,
++    EXIT_COUNTERFACTUAL_INEFFECTIVE,
+     EXIT_CROSSDAY_MISMATCH,
+     EXIT_DURABILITY_UNCONFIRMED,
++    EXIT_ENV_NOT_EQUIVALENT,
+     DurabilityUnconfirmed,
+     NoClobberUnsupported,
+     PublishError,
+@@ -185,6 +267,8 @@ __all__ = [
+     "validate_replay_errors",
+     "build_candidate_mismatch",
+     "validate_candidate_mismatch",
++    "validate_comparison_artifact",
++    "validate_report",
+     "validate_diagnostics",
+     "AFTER_KIND",
+     "ARTIFACT_SCHEMA_VERSION",
+@@ -304,4 +388,76 @@ __all__ = [
+     "sha256_file",
+     "sha256_hex",
+     "symbols_hash8",
++    # ⚠️ I-074 Stage 2（③b）
++    "StreamRowValidator",
++    "check_candidate_flag",
++    "check_diagnostics_row",
++    "check_row_object",
++    "raise_replay_errors",
++    "replay_error_messages",
++    "validate_after_envelope",
++    "installed_distributions",
++    "RUN_IDENTITY_STAGES",
++    "AfterStream",
++    "StreamLoad",
++    "stream_after_artifact",
++    "stream_canonical_artifact",
++    "DIAGNOSTIC_SAMPLE_LIMIT",
++    "STAGE1_ANCHOR_MEMBERS",
++    "STAGE1_EVIDENCE_MANIFEST_PATH",
++    "ClosedArchiveWriter",
++    "Stage1Anchor",
++    "build_stage1_evidence_ref",
++    "load_stage1_anchor",
++    "resolve_repo_path",
++    "validate_stage1_anchor_graph",
++    "validate_stage1_evidence_ref",
++    "ENV_EQUIVALENCE_KIND",
++    "ENVCHECK_LAYOUT",
++    "ENVCHECK_MANIFEST_KIND",
++    "ENVCHECK_ROOT_PATH",
++    "EXIT_ENV_NOT_EQUIVALENT",
++    "OUTCOME_EQUIVALENT",
++    "OUTCOME_NOT_EQUIVALENT",
++    "EnvcheckResult",
++    "compare_environment",
++    "publish_envcheck",
++    "recover_envcheck",
++    "validate_envcheck_manifest",
++    "validate_equivalence_artifact",
++    "verify_envcheck",
++    "verify_envcheck_for_stage2",
++    "BEFORE_SOURCE_KIND",
++    "COUNTERFACTUAL_FAILURE_KIND",
++    "FAILED_ATTEMPT_KIND",
++    "FAILURE_REASONS",
++    "STAGE2_EVIDENCE_ROOT_PATH",
++    "STAGE2_FAILED_ROOT_PATH",
++    "STAGE2_LAYOUT",
++    "STAGE2_MANIFEST_KIND",
++    "STAGE2_REPORT_MAX_ROWS",
++    "CounterfactualEffectCheck",
++    "CounterfactualIneffective",
++    "EXIT_COUNTERFACTUAL_INEFFECTIVE",
++    "OPERATIONAL_BEFORE_SOURCE",
++    "OPERATIONAL_COMPARISON",
++    "OPERATIONAL_FAILURE",
++    "OPERATIONAL_REPORT",
++    "validate_counterfactual_failure",
++    "Stage2Verified",
++    "VerifiedComposition",
++    "build_before_source",
++    "build_counterfactual_failure",
++    "check_failed_records",
++    "check_verified_composition",
++    "finalize_stage2_evidence",
++    "publish_failed_record",
++    "recover_failed_record",
++    "recover_stage2_durability",
++    "stream_before_source",
++    "validate_bounded_diagnostics",
++    "validate_failed_record",
++    "validate_stage2_manifest",
++    "verify_failed_record",
++    "verify_stage2_graph",
+ ]
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/artifacts.py b/python/backtest/modular/sr_scoring/replay_bundle/artifacts.py
+index 435c6bfa488639184fa412c5bd739eb704f92a6c..40d9309040e873e6aa951776e5d3fabe4d7b592e 100644
+--- a/python/backtest/modular/sr_scoring/replay_bundle/artifacts.py
++++ b/python/backtest/modular/sr_scoring/replay_bundle/artifacts.py
+@@ -93,6 +93,22 @@ def assert_same_keys(left: Sequence[tuple], right: Sequence[tuple], label: str)
+         )
+ 
+ 
++def check_candidate_flag(row: dict[str, Any], label: str) -> None:
++    """**row-level 原語**：這一列必須有嚴格 boolean 的 `rr_decoupling_candidate`。
++
++    ⚠️ 整批的 `validate_candidate_flags()` 與串流的 `StreamRowValidator` 都呼叫這一支
++    ——⛔ 不各寫一份規則（兩套實作＝兩套語意，見 issue.md I-074 ③ evidence contract「五之一」）。
++    """
++    if CANDIDATE_FIELD not in row:
++        raise ArtifactError(f"{label}：{_I074_HINT}")
++    value = row[CANDIDATE_FIELD]
++    # ⛔ 不能用 `isinstance(x, int)`：bool 是 int 的子類，`0`／`1` 會通過。
++    if not isinstance(value, bool):
++        raise ArtifactError(
++            f"{label}：{CANDIDATE_FIELD} 必須是 JSON true/false，實際是 {value!r}。{_I074_HINT}"
++        )
++
++
+ def validate_candidate_flags(rows: Iterable[dict[str, Any]], label: str) -> None:
+     """每一列都必須有嚴格 boolean 的 `rr_decoupling_candidate`。
+ 
+@@ -100,14 +116,7 @@ def validate_candidate_flags(rows: Iterable[dict[str, Any]], label: str) -> None
+     「真正零命中」判成錯誤。這道守門禁止的是**因欄位缺失而靜默變成空 cohort**。
+     """
+     for row in rows:
+-        if CANDIDATE_FIELD not in row:
+-            raise ArtifactError(f"{label}：{_I074_HINT}")
+-        value = row[CANDIDATE_FIELD]
+-        # ⛔ 不能用 `isinstance(x, int)`：bool 是 int 的子類，`0`／`1` 會通過。
+-        if not isinstance(value, bool):
+-            raise ArtifactError(
+-                f"{label}：{CANDIDATE_FIELD} 必須是 JSON true/false，實際是 {value!r}。{_I074_HINT}"
+-            )
++        check_candidate_flag(row, label)
+ 
+ 
+ def _require_fields(data: dict[str, Any], fields: set[str], label: str) -> None:
+@@ -124,11 +133,11 @@ def _require_type(data: dict[str, Any], field: str, types, label: str, *, option
+         raise ArtifactError(f"{label}.{field} 型別不符：{value!r}")
+ 
+ 
+-def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
+-    """after artifact 的完整結構檢查，回傳逐列 key。
++def validate_after_envelope(artifact: dict[str, Any]) -> None:
++    """after artifact 的**頂層**欄位與型別（⛔ 不看 rows 的內容）。
+ 
+-    ⚠️ **這一整組必須在跑 replay 之前做完**：Stage 2 的 replay 要跑約 3.7 小時，
+-    壞掉的 artifact 沒有理由等到那之後才被發現。
++    ⚠️ 串流載入時 rows 不在記憶體裡：呼叫端傳入的頂層 dict 要帶一個 `rows` 佔位
++    （只為了讓封閉欄位集合的檢查成立），rows 本身由 row-level 原語逐列驗。
+     """
+     _require_fields(artifact, _AFTER_FIELDS, "after artifact")
+     for field in ("bundle_id", "timeframe", "replay_scope", "generated_at"):
+@@ -136,12 +145,26 @@ def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, st
+     for field in ("run_id", "pipeline_version"):
+         _require_type(artifact, field, str, "after artifact", optional=True)
+     _require_type(artifact, "provenance", dict, "after artifact")
++
++
++def check_row_object(row: Any, label: str) -> None:
++    """**row-level 原語**：rows[] 的每一列都必須是 object。"""
++    if not isinstance(row, dict):
++        raise ArtifactError(f"{label} 的 rows[] 每一列都必須是 object")
++
++
++def validate_after_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
++    """after artifact 的完整結構檢查，回傳逐列 key。
++
++    ⚠️ **這一整組必須在跑 replay 之前做完**：Stage 2 的 replay 要跑約 3.7 小時，
++    壞掉的 artifact 沒有理由等到那之後才被發現。
++    """
++    validate_after_envelope(artifact)
+     rows = artifact["rows"]
+     if not isinstance(rows, list):
+         raise ArtifactError("after artifact 的 rows 必須是陣列")
+     for row in rows:
+-        if not isinstance(row, dict):
+-            raise ArtifactError("after artifact 的 rows[] 每一列都必須是 object")
++        check_row_object(row, "after artifact")
+     keys = [row_key(row) for row in rows]
+     assert_unique_keys(keys, "after artifact")
+     validate_candidate_flags(rows, "after artifact")
+@@ -247,11 +270,26 @@ def validate_replay_errors(rows: Iterable[dict[str, Any]], label: str) -> None:
+     """
+     failures: list[str] = []
+     for row in rows:
+-        zone_error = row.get("zone_score_error")
+-        if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
+-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
+-        if row.get("decision_error"):
+-            failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
++        failures.extend(replay_error_messages(row))
++    raise_replay_errors(failures, label)
++
++
++def replay_error_messages(row: dict[str, Any]) -> list[str]:
++    """**row-level 原語**：這一列的運算失敗描述（沒有失敗就回空 list）。
++
++    ⚠️ 這一道是**彙總後才拋**（訊息要帶總數），所以原語只回傳描述、由呼叫端累積，
++    最後交給 `raise_replay_errors()`——整批與串流兩條路徑的訊息因此逐字相同。
++    """
++    failures: list[str] = []
++    zone_error = row.get("zone_score_error")
++    if zone_error and zone_error != NO_ZONE_SCORES_ERROR:
++        failures.append(f"{row.get('symbol')}@{row.get('as_of')} zone_score_error={zone_error}")
++    if row.get("decision_error"):
++        failures.append(f"{row.get('symbol')}@{row.get('as_of')} decision_error={row['decision_error']}")
++    return failures
++
++
++def raise_replay_errors(failures: Sequence[str], label: str) -> None:
+     if failures:
+         raise ArtifactError(
+             f"{label} 有 {len(failures)} 列運算失敗，⛔ 不發布任何 artifact："
+@@ -279,124 +317,192 @@ def validate_diagnostics(rows: Iterable[dict[str, Any]], label: str, *, side: st
+     獨立輸入，**光靠 row 算不出來**。before 的展開式在 before tooling 內驗（它還持有原始
+     `event_state_summary`），那是 Stage 2 的 patch 責任。
+     """
++    check_diagnostics_side(side)
++    for row in rows:
++        check_diagnostics_row(row, label, side=side)
++
++
++def check_diagnostics_side(side: str) -> None:
+     if side not in ("before", "after"):
+         raise ArtifactError(f"validate_diagnostics 的 side 只接受 'before'／'after'，實際 {side!r}")
+ 
+-    for row in rows:
+-        key = row_key(row)
+-        where = f"{label} {key}"
+-        no_zone = _is_no_zone_fallback_row(row)
+-
+-        for field in DIAGNOSTIC_BOOL_FIELDS:
+-            if field not in row:
+-                raise ArtifactError(f"{where}：缺少 {field}。{_I074_HINT}")
+-            value = row[field]
+-            # ⛔ 不能用 isinstance(x, int)：bool 是 int 的子類，`0`／`1` 會通過。
+-            if not isinstance(value, bool):
+-                raise ArtifactError(f"{where}：{field} 必須是 JSON true/false，實際 {value!r}")
+ 
+-        for field in DIAGNOSTIC_STR_FIELDS:
+-            if field not in row:
+-                raise ArtifactError(f"{where}：缺少 {field}")
+-            value = row[field]
++def check_diagnostics_row(row: dict[str, Any], label: str, *, side: str) -> None:
++    """**row-level 原語**：一列的九欄位 ＋ `lifecycle_phase` 的 schema 與交叉一致性。
++
++    ⚠️ 本體就是原本 `validate_diagnostics()` 迴圈內的那一段，**⛔ 一字不改**——
++    整批與串流兩條路徑呼叫同一支，⛔ 不另寫一份。
++    """
++    check_diagnostics_side(side)
++    key = row_key(row)
++    where = f"{label} {key}"
++    no_zone = _is_no_zone_fallback_row(row)
++
++    for field in DIAGNOSTIC_BOOL_FIELDS:
++        if field not in row:
++            raise ArtifactError(f"{where}：缺少 {field}。{_I074_HINT}")
++        value = row[field]
++        # ⛔ 不能用 isinstance(x, int)：bool 是 int 的子類，`0`／`1` 會通過。
++        if not isinstance(value, bool):
++            raise ArtifactError(f"{where}：{field} 必須是 JSON true/false，實際 {value!r}")
++
++    for field in DIAGNOSTIC_STR_FIELDS:
++        if field not in row:
++            raise ArtifactError(f"{where}：缺少 {field}")
++        value = row[field]
++        if not isinstance(value, str) or not value:
++            raise ArtifactError(f"{where}：{field} 必須是非空字串，實際 {value!r}")
++
++    for field in DIAGNOSTIC_NULLABLE_FIELDS:
++        if field not in row:
++            raise ArtifactError(f"{where}：缺少 {field}")
++
++    # ⛔ `position_action` 可以是 null，但**非 null 時必須是非空字串**——
++    # 只驗「存在」等於放行任何型別。
++    action = row["position_action"]
++    if action is not None and (not isinstance(action, str) or not action):
++        raise ArtifactError(f"{where}：position_action 非 null 時必須是非空字串，實際 {action!r}")
++
++    condition = row["position_action_condition"]
++    if condition is None:
++        # ⚠️ 只有明確的 no-zone fallback 列才允許為 null。
++        if not no_zone:
++            raise ArtifactError(
++                f"{where}：position_action_condition 為 null，但這一列**不是** no-zone "
++                f"fallback（zone_score_available={row.get('zone_score_available')!r}、"
++                f"zone_score_error={row.get('zone_score_error')!r}）"
++            )
++    else:
++        if not isinstance(condition, dict):
++            raise ArtifactError(f"{where}：position_action_condition 必須是 object")
++        for sub in ("state", "structure_state"):
++            value = condition.get(sub)
+             if not isinstance(value, str) or not value:
+-                raise ArtifactError(f"{where}：{field} 必須是非空字串，實際 {value!r}")
+-
+-        for field in DIAGNOSTIC_NULLABLE_FIELDS:
+-            if field not in row:
+-                raise ArtifactError(f"{where}：缺少 {field}")
+-
+-        # ⛔ `position_action` 可以是 null，但**非 null 時必須是非空字串**——
+-        # 只驗「存在」等於放行任何型別。
+-        action = row["position_action"]
+-        if action is not None and (not isinstance(action, str) or not action):
+-            raise ArtifactError(f"{where}：position_action 非 null 時必須是非空字串，實際 {action!r}")
+-
+-        condition = row["position_action_condition"]
+-        if condition is None:
+-            # ⚠️ 只有明確的 no-zone fallback 列才允許為 null。
+-            if not no_zone:
+-                raise ArtifactError(
+-                    f"{where}：position_action_condition 為 null，但這一列**不是** no-zone "
+-                    f"fallback（zone_score_available={row.get('zone_score_available')!r}、"
+-                    f"zone_score_error={row.get('zone_score_error')!r}）"
+-                )
+-        else:
+-            if not isinstance(condition, dict):
+-                raise ArtifactError(f"{where}：position_action_condition 必須是 object")
+-            for sub in ("state", "structure_state"):
+-                value = condition.get(sub)
+-                if not isinstance(value, str) or not value:
+-                    raise ArtifactError(
+-                        f"{where}：position_action_condition.{sub} 必須是非空字串，實際 {value!r}"
+-                    )
+-            # ── 欄位交叉一致性 ──────────────────────────────────────────────
+-            # ⛔ 少了它，互相矛盾的證據仍會通過。
+-            if row["structure_state"] != condition["structure_state"]:
+                 raise ArtifactError(
+-                    f"{where}：structure_state={row['structure_state']!r} 與 "
+-                    f"position_action_condition.structure_state={condition['structure_state']!r} 不一致"
+-                )
+-            # ⚠️ `_position_action_condition()` 寫的是 `action_state or "WATCH"`，所以
+-            # `action_state` 為空字串時兩者會分岔——而空字串已被上面的「非空字串」擋掉，
+-            # 這裡只需驗非空時必須相等。
+-            if row["action_state"] != condition["state"]:
+-                raise ArtifactError(
+-                    f"{where}：action_state={row['action_state']!r} 與 "
+-                    f"position_action_condition.state={condition['state']!r} 不一致"
++                    f"{where}：position_action_condition.{sub} 必須是非空字串，實際 {value!r}"
+                 )
++        # ── 欄位交叉一致性 ──────────────────────────────────────────────
++        # ⛔ 少了它，互相矛盾的證據仍會通過。
++        if row["structure_state"] != condition["structure_state"]:
++            raise ArtifactError(
++                f"{where}：structure_state={row['structure_state']!r} 與 "
++                f"position_action_condition.structure_state={condition['structure_state']!r} 不一致"
++            )
++        # ⚠️ `_position_action_condition()` 寫的是 `action_state or "WATCH"`，所以
++        # `action_state` 為空字串時兩者會分岔——而空字串已被上面的「非空字串」擋掉，
++        # 這裡只需驗非空時必須相等。
++        if row["action_state"] != condition["state"]:
++            raise ArtifactError(
++                f"{where}：action_state={row['action_state']!r} 與 "
++                f"position_action_condition.state={condition['state']!r} 不一致"
++            )
+ 
+-        # ── no-zone 列：**逐欄對照完整的固定 mapping** ─────────────────────────
+-        #
+-        # ⛔ 「它是 fallback」不等於「它可以是任何值」——那九個值**整組都是契約**
+-        # （`DIAGNOSTIC_NO_ZONE_FALLBACK`，與匯出端同一份定義）。
+-        #
+-        # ⚠️ 這道檢查排在型別與交叉一致性**之後**：前面已保證型別合法，這裡只比值，
+-        # 失敗訊息才指得出「是固定 mapping 不符」而不是「型別錯」。
+-        #
+-        # ⚠️ **只釘三個 boolean 是不夠的**，先前漏掉的三類都會靜默通過：
+-        #   * `rr_decoupling_candidate=true`——after 側會被等價式間接擋下
+-        #     （lifecycle_phase 是 null），但 **before 側⛔ 不驗等價式**，於是照樣放行；
+-        #   * 三個字串被改成一般列的值（整列偽裝成「有算過」）；
+-        #   * `position_action_condition`／`position_action` 非 null。
+-        if no_zone:
+-            for field, want in DIAGNOSTIC_NO_ZONE_FALLBACK.items():
+-                actual = row[field]
+-                # bool 與 None 用 `is`（⛔ `0 == False` 會過）；字串用 `==`。
+-                matched = actual is want if want is None or isinstance(want, bool) else actual == want
+-                if not matched:
+-                    raise ArtifactError(
+-                        f"{where}：no-zone fallback 列的 {field} 必須是 {want!r}，實際 {actual!r}"
+-                        "——⛔ 那九個值整組都是契約，不是「可以是任何值」的預設"
+-                    )
+-
+-        # ── 既有依賴欄位 `lifecycle_phase` ────────────────────────────────────
+-        # ⛔ 少了它，等價式會被空值蒙混：candidate 為 false 時
+-        # `false == (None == "CONTINUATION" and …)` → `false == false` → 照樣通過。
+-        if "lifecycle_phase" not in row:
+-            raise ArtifactError(f"{where}：缺少 lifecycle_phase（candidate 的等價式依賴它）")
+-        phase = row["lifecycle_phase"]
+-        if no_zone:
+-            if phase is not None:
++    # ── no-zone 列：**逐欄對照完整的固定 mapping** ─────────────────────────
++    #
++    # ⛔ 「它是 fallback」不等於「它可以是任何值」——那九個值**整組都是契約**
++    # （`DIAGNOSTIC_NO_ZONE_FALLBACK`，與匯出端同一份定義）。
++    #
++    # ⚠️ 這道檢查排在型別與交叉一致性**之後**：前面已保證型別合法，這裡只比值，
++    # 失敗訊息才指得出「是固定 mapping 不符」而不是「型別錯」。
++    #
++    # ⚠️ **只釘三個 boolean 是不夠的**，先前漏掉的三類都會靜默通過：
++    #   * `rr_decoupling_candidate=true`——after 側會被等價式間接擋下
++    #     （lifecycle_phase 是 null），但 **before 側⛔ 不驗等價式**，於是照樣放行；
++    #   * 三個字串被改成一般列的值（整列偽裝成「有算過」）；
++    #   * `position_action_condition`／`position_action` 非 null。
++    if no_zone:
++        for field, want in DIAGNOSTIC_NO_ZONE_FALLBACK.items():
++            actual = row[field]
++            # bool 與 None 用 `is`（⛔ `0 == False` 會過）；字串用 `==`。
++            matched = actual is want if want is None or isinstance(want, bool) else actual == want
++            if not matched:
+                 raise ArtifactError(
+-                    f"{where}：no-zone fallback 列的 lifecycle_phase 必須是 null，實際 {phase!r}"
++                    f"{where}：no-zone fallback 列的 {field} 必須是 {want!r}，實際 {actual!r}"
++                    "——⛔ 那九個值整組都是契約，不是「可以是任何值」的預設"
+                 )
+-        elif not isinstance(phase, str) or not phase:
+-            raise ArtifactError(f"{where}：lifecycle_phase 必須是非空字串，實際 {phase!r}")
+ 
+-        if side == "after":
+-            expected = bool(phase == "CONTINUATION" and not row["setup_rr_qualified"])
+-            if row[CANDIDATE_FIELD] != expected:
+-                raise ArtifactError(
+-                    f"{where}：{CANDIDATE_FIELD}={row[CANDIDATE_FIELD]!r} 與等價式不符"
+-                    f"（lifecycle_phase={phase!r}、setup_rr_qualified={row['setup_rr_qualified']!r}）"
+-                )
++    # ── 既有依賴欄位 `lifecycle_phase` ────────────────────────────────────
++    # ⛔ 少了它，等價式會被空值蒙混：candidate 為 false 時
++    # `false == (None == "CONTINUATION" and …)` → `false == false` → 照樣通過。
++    if "lifecycle_phase" not in row:
++        raise ArtifactError(f"{where}：缺少 lifecycle_phase（candidate 的等價式依賴它）")
++    phase = row["lifecycle_phase"]
++    if no_zone:
++        if phase is not None:
++            raise ArtifactError(
++                f"{where}：no-zone fallback 列的 lifecycle_phase 必須是 null，實際 {phase!r}"
++            )
++    elif not isinstance(phase, str) or not phase:
++        raise ArtifactError(f"{where}：lifecycle_phase 必須是非空字串，實際 {phase!r}")
++
++    if side == "after":
++        expected = bool(phase == "CONTINUATION" and not row["setup_rr_qualified"])
++        if row[CANDIDATE_FIELD] != expected:
++            raise ArtifactError(
++                f"{where}：{CANDIDATE_FIELD}={row[CANDIDATE_FIELD]!r} 與等價式不符"
++                f"（lifecycle_phase={phase!r}、setup_rr_qualified={row['setup_rr_qualified']!r}）"
++            )
+ 
+ 
+ def candidate_keys(rows: Iterable[dict[str, Any]]) -> list[tuple[str, str, str]]:
+     return [row_key(row) for row in rows if row[CANDIDATE_FIELD] is True]
+ 
+ 
++class StreamRowValidator:
++    """**單趟組合驗證**：逐列餵入，一次套用整批 validator 的每一道 row-level 規則。
++
++    ⚠️ **為什麼需要它**：I-074 Stage 2 的 finalizer／recovery／preflight 讀的是全量 artifact
++    （13,417 列，整份載入實測約 +365～449 MiB），⛔ 不能整份進記憶體；而既有的整批 validator
++    各自讀一遍 rows，⛔ 串流的 iterator 不能重複消費。見 issue.md I-074 ③ evidence contract「五之一」。
++
++    ⚠️ **驗證強度⛔ 不得下降**：每一列套用的就是整批 validator 呼叫的**同一組原語**——
++    `check_row_object()`、`row_key()`、`check_candidate_flag()`、`replay_error_messages()`、
++    `check_diagnostics_row()`；key 唯一性與運算失敗這兩道「要看完全部才知道」的規則，
++    延到 `finish()` 用與整批版本逐字相同的訊息拋出。
++
++    ⚠️ 例外的**先後**可能與整批版本不同（整批是一道規則掃完全部再換下一道，這裡是一列套完
++    全部規則再換下一列）；單一缺陷時兩者的例外型別與訊息相同。
++    """
++
++    def __init__(self, label: str, *, side: str) -> None:
++        check_diagnostics_side(side)
++        self.label = label
++        self.side = side
++        self.keys: list[tuple[str, str, str]] = []
++        self.candidate_keys: list[tuple[str, str, str]] = []
++        self._seen: set[tuple[str, str, str]] = set()
++        self._duplicates: set[tuple[str, str, str]] = set()
++        self._failures: list[str] = []
++        self._finished = False
++
++    def feed(self, row: Any) -> tuple[str, str, str]:
++        if self._finished:
++            raise ArtifactError(f"{self.label}：validator 已 finish，⛔ 不得再餵入列")
++        check_row_object(row, self.label)
++        key = row_key(row)
++        if key in self._seen:
++            self._duplicates.add(key)
++        self._seen.add(key)
++        self.keys.append(key)
++        check_candidate_flag(row, self.label)
++        self._failures.extend(replay_error_messages(row))
++        check_diagnostics_row(row, self.label, side=self.side)
++        if row[CANDIDATE_FIELD] is True:
++            self.candidate_keys.append(key)
++        return key
++
++    def finish(self) -> list[tuple[str, str, str]]:
++        """拋出延後的兩道規則；通過就回傳全部 key（依餵入順序）。"""
++        self._finished = True
++        if self._duplicates:
++            duplicates = sorted(self._duplicates)
++            raise ArtifactError(
++                f"{self.label} 有重複的 key：{duplicates[:5]}（共 {len(duplicates)} 組）"
++            )
++        raise_replay_errors(self._failures, self.label)
++        return self.keys
++
++
+ # ── 產生 ────────────────────────────────────────────────────────────────────
+ 
+ def _envelope(kind: str, **fields: Any) -> dict[str, Any]:
+@@ -467,6 +573,116 @@ def build_report(*, bundle_id: str, before_ref: str, comparison_sha256: str,
+     )
+ 
+ 
++# ── comparison／report 的 validator（I-074 Stage 2 的 ③d） ────────────────────
++#
++# ⚠️ 原本只有 builder、⛔ 沒有 validator——Stage 2 的正式證據要能**獨立複核**，只驗「檔案與
++# hash 沒變」證明不了內容一開始就是對的（issue.md I-074 ③ evidence contract「三之二」）。
++# 這兩支只驗**單檔**能驗的部分；跨檔的「`before`／`after` 等於來源 row」「keys 等於 cohort」
++# 由 `stage2_archive.verify_stage2_graph()` 負責。
++
++_COMPARISON_FIELDS = {"schema_version", "kind", "bundle_id", "before_ref", "after_artifact_sha256",
++                      "generated_at", "provenance", "rows"}
++_COMPARISON_ROW_FIELDS = {"symbol", "timeframe", "as_of", "differences", "before", "after"}
++_REPORT_FIELDS = {"schema_version", "kind", "bundle_id", "before_ref", "comparison_artifact_sha256",
++                  "generated_at", "candidate_rows", "rows_shown", "difference_field_counts", "rows"}
++
++
++def _require_envelope(artifact: dict[str, Any], kind: str, label: str) -> None:
++    if type(artifact.get("schema_version")) is not int or artifact["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"{label} 的 schema_version={artifact.get('schema_version')!r} 不是 {ARTIFACT_SCHEMA_VERSION}")
++    if artifact.get("kind") != kind:
++        raise ArtifactError(f"{label} 的 kind={artifact.get('kind')!r}，預期 {kind!r}")
++
++
++def _is_sha256_hex(value: object) -> bool:
++    return (isinstance(value, str) and len(value) == 64 and value == value.lower()
++            and all(c in "0123456789abcdef" for c in value))
++
++
++def validate_comparison_artifact(artifact: dict[str, Any]) -> list[tuple[str, str, str]]:
++    """comparison artifact 的封閉 schema ＋ 每列 `differences` **重算**，回傳 keys（已驗排序唯一）。
++
++    ⚠️ 每一列必須**恰好等於** `compare_rows(before, after)` 的輸出——⛔ 不信任封存的
++    `differences`；`before` 與 `after` 的 key 也必須相同（⛔ 否則 `symbol` 會被當成一個差異欄位混過去）。
++    """
++    if not isinstance(artifact, dict):
++        raise ArtifactError("comparison artifact 必須是 object")
++    _require_fields(artifact, _COMPARISON_FIELDS, "comparison artifact")
++    _require_envelope(artifact, COMPARISON_KIND, "comparison artifact")
++    for field in ("bundle_id", "before_ref", "generated_at"):
++        _require_type(artifact, field, str, "comparison artifact")
++        if not artifact[field]:
++            raise ArtifactError(f"comparison artifact.{field} 必須是非空字串")
++    if not _is_sha256_hex(artifact["after_artifact_sha256"]):
++        raise ArtifactError("comparison artifact 的 after_artifact_sha256 必須是 64 字元小寫 hex")
++    _require_type(artifact, "provenance", dict, "comparison artifact")
++    rows = artifact["rows"]
++    if not isinstance(rows, list):
++        raise ArtifactError("comparison artifact 的 rows 必須是陣列")
++    keys: list[tuple[str, str, str]] = []
++    for row in rows:
++        if not isinstance(row, dict) or set(row) != _COMPARISON_ROW_FIELDS:
++            raise ArtifactError(f"comparison 的每一列欄位必須恰好是 {sorted(_COMPARISON_ROW_FIELDS)}")
++        before, after = row["before"], row["after"]
++        if not isinstance(before, dict) or not isinstance(after, dict):
++            raise ArtifactError("comparison 的 before／after 必須是 object")
++        key = row_key(after)
++        if row_key(before) != key:
++            raise ArtifactError(f"comparison 某列的 before key {row_key(before)} 與 after key {key} 不同")
++        if not isinstance(row["differences"], list) or not all(isinstance(f, str) for f in row["differences"]):
++            raise ArtifactError(f"comparison {key} 的 differences 必須是字串陣列")
++        if row != compare_rows(before, after):
++            raise ArtifactError(
++                f"comparison {key} 與 compare_rows() 重算的結果不符（differences 或 key 欄位）——⛔ 不信任封存值"
++            )
++        keys.append(key)
++    if any(a >= b for a, b in zip(keys, keys[1:])):
++        raise ArtifactError("comparison 的 rows 必須依 (symbol, timeframe, as_of) 排序且⛔ 不重複")
++    return keys
++
++
++def validate_report(report: dict[str, Any], *, comparison: dict[str, Any], comparison_sha256: str,
++                    report_max_rows: int | None) -> None:
++    """report 的封閉 schema，並**由完整 comparison 重算**截斷與統計。
++
++    ⚠️ `rows_shown` 必須恰好是 `min(report_max_rows, candidate_rows)`——⛔ 只寫「取前
++    `rows_shown` 列」會讓 `rows_shown = 0` 的空報告合法通過；`candidate_rows` 與
++    `difference_field_counts` 由**完整** comparison 算，⛔ 不得由截斷後的 rows 算。
++    """
++    if not isinstance(report, dict):
++        raise ArtifactError("report 必須是 object")
++    _require_fields(report, _REPORT_FIELDS, "report")
++    _require_envelope(report, REPORT_KIND, "report")
++    if report["comparison_artifact_sha256"] != comparison_sha256:
++        raise ArtifactError("report 的 comparison_artifact_sha256 與實際 comparison 不符")
++    for field in ("bundle_id", "before_ref"):
++        if report[field] != comparison.get(field):
++            raise ArtifactError(f"report.{field}={report[field]!r} 與 comparison 的 {comparison.get(field)!r} 不符")
++    _require_type(report, "generated_at", str, "report")
++    for field in ("candidate_rows", "rows_shown"):
++        if type(report[field]) is not int or report[field] < 0:
++            raise ArtifactError(f"report.{field} 必須是非負整數：{report[field]!r}")
++    full = sorted(comparison["rows"], key=lambda r: (r["symbol"], r["timeframe"], r["as_of"]))
++    if report["candidate_rows"] != len(full):
++        raise ArtifactError(
++            f"report.candidate_rows={report['candidate_rows']} ≠ 完整 comparison 的 {len(full)} 列"
++        )
++    want_shown = len(full) if report_max_rows is None else min(report_max_rows, len(full))
++    if report["rows_shown"] != want_shown:
++        raise ArtifactError(
++            f"report.rows_shown={report['rows_shown']} ≠ min({report_max_rows}, {len(full)})={want_shown}"
++            "——⛔ 空報告或多截少截都不接受"
++        )
++    counts: dict[str, int] = {}
++    for row in full:
++        for field in row["differences"]:
++            counts[field] = counts.get(field, 0) + 1
++    if report["difference_field_counts"] != dict(sorted(counts.items())):
++        raise ArtifactError("report.difference_field_counts 與由完整 comparison 重算的結果不符")
++    if report["rows"] != full[:want_shown]:
++        raise ArtifactError("report.rows 必須是 comparison rows 依 key 排序後的前 rows_shown 列——⛔ 不得抽樣或換序")
++
++
+ # ── 候選集合不一致：終止狀態的證據 ──────────────────────────────────────────
+ #
+ # ⚠️ 這是 Stage 2 的**第二種 terminal outcome**，⛔ 不是失敗殘骸：
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/envcheck.py b/python/backtest/modular/sr_scoring/replay_bundle/envcheck.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2798111c0ebd99cd3bcfad898d10c3d97b860097
+--- /dev/null
++++ b/python/backtest/modular/sr_scoring/replay_bundle/envcheck.py
+@@ -0,0 +1,731 @@
++"""I-074 Stage 2 的環境見證：新 image 上的 after' 與 Stage 1 D+1 是否等價，以及 `envcheck/` 小 archive。
++
++⚠️ **為什麼需要它**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機。使用者裁決
++**兩側都在新 image 重跑**：先在新 image 上以原始 `e1cbbbd` 跑一趟 after'，逐列與已封存的 D+1
++比對——**逐位元相同**才證明兩個 image 對這份 bundle 等價，才能繼續拿封存的 D+1 當 after 側。
++規格見 issue.md I-074 Stage 2 計畫書「二、⑤」與 ③ evidence contract「三之三」（⚠️ 現行版）。
++
++⚠️ **after' 只是見證**：⛔ 不是新的正式 Stage 1 scan，⛔ 結果不得取代 D+1。
++
++**兩層驗證**（v11 由原本的 E3 拆開）：
++
++| 層 | 誰做 | 結果 |
++|---|---|---|
++| **E3a** archive 自洽 | 發布（`--envcheck`）、`--recover-envcheck`、Stage 2 的三個呼叫端 | ⚠️ EQUIVALENT 與 NOT_EQUIVALENT **都合法**；封存值必須等於重算值 |
++| **E3b** Stage 2 使用資格 | Stage 2 的 preflight、`--finalize`、`--recover-durability` | ⛔ 只接受 EQUIVALENT |
++
++⚠️ 全量比對一律**串流**（「五之一」）：⛔ 不得把兩份 rows 同時整份載入——那正是 I-117 的 730 MiB。
++"""
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Mapping, Sequence
++
++from .artifacts import (
++    ARTIFACT_SCHEMA_VERSION,
++    COHORT_KIND,
++    ArtifactError,
++    assert_same_keys,
++    load_canonical_evidence_artifact,
++    validate_cohort_manifest,
++)
++from .evidence import RECOVERY_IDENTITY_FIELDS, _fsync_tree
++from .provenance import PROVENANCE_FIELDS, installed_distributions, pip_freeze_sha256, validate_provenance
++from .publish import EXIT_ENV_NOT_EQUIVALENT, DurabilityUnconfirmed
++from .run_identity import RUN_IDENTITY_KIND, load_run_identity, validate_run_identity
++from .stage2_evidence import (
++    DIAGNOSTIC_SAMPLE_LIMIT,
++    EMPTY_SHA256,
++    STAGE1_ANCHOR_AFTER,
++    ClosedArchiveWriter,
++    Stage1Anchor,
++    archive_file_set,
++    build_stage1_evidence_ref,
++    fsync_parent_or_unconfirmed,
++    is_hex64,
++    is_image_id,
++    load_stage1_anchor,
++    resolve_repo_path,
++    validate_file_entry,
++    validate_generated_at,
++    validate_stage1_anchor_graph,
++    validate_stage1_evidence_ref,
++)
++from .stream import AfterStream, stream_after_artifact
++
++# ── 常數 ────────────────────────────────────────────────────────────────────
++
++# ⚠️ 寫死常數（repo 相對），⛔ 不是執行期參數。
++ENVCHECK_ROOT_PATH = "python/baselines/i074_stage2/envcheck"
++ENVCHECK_MANIFEST_NAME = "evidence_manifest.json"
++ENVCHECK_MANIFEST_KIND = "sr_zone_stage2_envcheck_manifest"
++ENV_EQUIVALENCE_KIND = "sr_zone_stage2_env_equivalence"
++
++WITNESS_AFTER = "witness/after_artifact.json.gz"
++WITNESS_COHORT = "witness/cohort_manifest.json.gz"
++EQUIVALENCE = "equivalence/equivalence.json.gz"
++ENVCHECK_IDENTITY = "identity/run_identity.json.gz"
++# ⚠️ **封閉 layout**：4 個 payload ＋ manifest ＝ 5 檔，⛔ 多一個未知檔案即中止。
++ENVCHECK_LAYOUT = (WITNESS_AFTER, WITNESS_COHORT, EQUIVALENCE, ENVCHECK_IDENTITY)
++
++# operational 的見證輸出（`--run-dir` 底下；after' 以 Stage 1 模式跑，`--output-dir <run-dir>/witness`）。
++OPERATIONAL_WITNESS_AFTER = "witness/after_artifact.json"
++OPERATIONAL_WITNESS_COHORT = "witness/cohort_manifest.json"
++
++OUTCOME_EQUIVALENT = "EQUIVALENT"
++OUTCOME_NOT_EQUIVALENT = "NOT_EQUIVALENT"
++# ⚠️ **outcome 的唯一來源是 equivalence artifact**；manifest 的 `terminal_outcome` 只是由它推導的值。
++TERMINAL_OUTCOME = {OUTCOME_EQUIVALENT: 0, OUTCOME_NOT_EQUIVALENT: EXIT_ENV_NOT_EQUIVALENT}
++
++SIDE_REFERENCE_ONLY = "REFERENCE_ONLY"   # 只在 Stage 1 D+1
++SIDE_WITNESS_ONLY = "WITNESS_ONLY"       # 只在 after'
++_SIDES = (SIDE_REFERENCE_ONLY, SIDE_WITNESS_ONLY)
++
++# ⚠️ **判定表的第 3、4 條，合起來恰好是 provenance 的 10 欄**——⛔ 不留未分類的欄位。
++REQUIRED_EQUAL_FIELDS = ("base_commit", "tooling_patch_sha256", "project_modules_sha256", "runtime_settings")
++ALLOWED_DIFFERENT_FIELDS = ("image_digest", "pip_freeze_sha256", "python_version", "runner_sha256",
++                            "argv", "source_root")
++if set(REQUIRED_EQUAL_FIELDS) & set(ALLOWED_DIFFERENT_FIELDS) or \
++        set(REQUIRED_EQUAL_FIELDS) | set(ALLOWED_DIFFERENT_FIELDS) != set(PROVENANCE_FIELDS):
++    raise RuntimeError("環境等價判定的欄位分類與 PROVENANCE_FIELDS 不一致——⛔ 每一欄都必須恰好分到一類")
++
++# 由比對重算出來的欄位（E3a 逐欄比對的對象）。
++_RECOMPUTED_FIELDS = (
++    "bundle_id", "reference", "witness",
++    "reference_key_count", "witness_key_count", "key_mismatch_count", "key_mismatch_sample_keys",
++    "rows_compared", "row_mismatch_count", "mismatch_sample_keys",
++    "cohort_equal", "provenance_required_equal", "provenance_allowed_differences", "outcome",
++)
++_EQUIVALENCE_FIELDS = frozenset(
++    _RECOMPUTED_FIELDS
++    + ("schema_version", "kind", "generated_at", "witness_distributions", "comparator_provenance")
++)
++_REFERENCE_FIELDS = frozenset({"stage1_manifest_sha256", "after_artifact_sha256"})
++_WITNESS_FIELDS = frozenset({"after_artifact_sha256", "cohort_manifest_sha256"})
++_KEY_SAMPLE_FIELDS = frozenset({"symbol", "timeframe", "as_of", "side"})
++_ROW_SAMPLE_FIELDS = frozenset({"symbol", "timeframe", "as_of"})
++_ENVCHECK_MANIFEST_FIELDS = frozenset({
++    "schema_version", "kind", "bundle_id", "expected_image_id", "files", "stage1_evidence",
++    "terminal_outcome", "generated_at", "finalizer_provenance",
++})
++
++RECOVER_HINT = "scripts/finalize-stage2-evidence.sh --recover-envcheck"
++
++
++# ── 比對 ────────────────────────────────────────────────────────────────────
++
++def _key_item(key: tuple[str, str, str], **extra: str) -> dict[str, str]:
++    return {"symbol": key[0], "timeframe": key[1], "as_of": key[2], **extra}
++
++
++def derive_outcome(eq: Mapping[str, Any]) -> str:
++    """⚠️ 判定式寫死（v12）：`EQUIVALENT` ⇔ key 集合相同 ＋ 交集內逐列相同 ＋ cohort 相同 ＋
++    四個必須相同的 provenance 欄位都相同。"""
++    equivalent = (
++        eq["key_mismatch_count"] == 0
++        and eq["row_mismatch_count"] == 0
++        and eq["cohort_equal"] is True
++        and all(eq["provenance_required_equal"][f] is True for f in REQUIRED_EQUAL_FIELDS)
++    )
++    return OUTCOME_EQUIVALENT if equivalent else OUTCOME_NOT_EQUIVALENT
++
++
++def compare_environment(
++    *,
++    anchor: Stage1Anchor,
++    witness: AfterStream,
++    witness_cohort_keys: Sequence[tuple[str, str, str]],
++    witness_cohort_sha256: str,
++) -> dict[str, Any]:
++    """由已驗證的兩側摘要算出判定（equivalence artifact 中「重算得出」的那些欄位）。
++
++    ⚠️ 只用**每列 digest** 比，⛔ 不同時持有兩份全量 rows。
++    """
++    reference = anchor.after_row_digests
++    witnessed = witness.row_digests
++    ref_keys, wit_keys = set(reference), set(witnessed)
++    common = ref_keys & wit_keys
++    key_mismatch = sorted(
++        [(key, SIDE_REFERENCE_ONLY) for key in ref_keys - wit_keys]
++        + [(key, SIDE_WITNESS_ONLY) for key in wit_keys - ref_keys]
++    )
++    # ⚠️ `row_mismatch` 只計**兩側都有**、但 canonical row bytes 不同的 key（v12）。
++    row_mismatch = sorted(key for key in common if reference[key] != witnessed[key])
++
++    ref_prov = anchor.after_top["provenance"]
++    wit_prov = witness.load.top["provenance"]
++    eq: dict[str, Any] = {
++        "bundle_id": anchor.bundle_id,
++        "reference": {
++            "stage1_manifest_sha256": anchor.manifest_sha256,
++            "after_artifact_sha256": anchor.members[STAGE1_ANCHOR_AFTER]["artifact_sha256"],
++        },
++        "witness": {
++            "after_artifact_sha256": witness.load.artifact_sha256,
++            "cohort_manifest_sha256": witness_cohort_sha256,
++        },
++        "reference_key_count": len(ref_keys),
++        "witness_key_count": len(wit_keys),
++        "key_mismatch_count": len(key_mismatch),
++        "key_mismatch_sample_keys": [
++            _key_item(key, side=side) for key, side in key_mismatch[:DIAGNOSTIC_SAMPLE_LIMIT]
++        ],
++        "rows_compared": len(common),
++        "row_mismatch_count": len(row_mismatch),
++        "mismatch_sample_keys": [_key_item(key) for key in row_mismatch[:DIAGNOSTIC_SAMPLE_LIMIT]],
++        "cohort_equal": sorted(witness_cohort_keys) == sorted(anchor.cohort_keys),
++        "provenance_required_equal": {f: ref_prov[f] == wit_prov[f] for f in REQUIRED_EQUAL_FIELDS},
++        "provenance_allowed_differences": {
++            f: {"reference": ref_prov[f], "witness": wit_prov[f]} for f in ALLOWED_DIFFERENT_FIELDS
++        },
++    }
++    eq["outcome"] = derive_outcome(eq)
++    return eq
++
++
++# ── equivalence artifact 的封閉 schema ─────────────────────────────────────
++
++def _require_count(eq: Mapping[str, Any], name: str) -> int:
++    value = eq[name]
++    if type(value) is not int or value < 0:
++        raise ArtifactError(f"equivalence.{name} 必須是非負整數：{value!r}")
++    return value
++
++
++def _validate_key_sample(items: object, *, name: str, fields: frozenset, count: int) -> list[tuple]:
++    if not isinstance(items, list):
++        raise ArtifactError(f"equivalence.{name} 必須是陣列")
++    if len(items) != min(DIAGNOSTIC_SAMPLE_LIMIT, count):
++        raise ArtifactError(
++            f"equivalence.{name} 的長度必須恰好是 min({DIAGNOSTIC_SAMPLE_LIMIT}, {count})，實際 {len(items)}"
++        )
++    keys: list[tuple] = []
++    for item in items:
++        if not isinstance(item, dict) or set(item) != fields:
++            raise ArtifactError(f"equivalence.{name}[] 的欄位集合必須恰好是 {sorted(fields)}")
++        for f in ("symbol", "timeframe", "as_of"):
++            if not isinstance(item[f], str) or not item[f]:
++                raise ArtifactError(f"equivalence.{name}[].{f} 必須是非空字串")
++        if "side" in fields and item["side"] not in _SIDES:
++            raise ArtifactError(f"equivalence.{name}[].side 只接受 {_SIDES}：{item['side']!r}")
++        keys.append((item["symbol"], item["timeframe"], item["as_of"]))
++    if any(a >= b for a, b in zip(keys, keys[1:])):
++        raise ArtifactError(f"equivalence.{name} 必須依 (symbol, timeframe, as_of) 排序且⛔ 不重複")
++    return keys
++
++
++def validate_equivalence_artifact(eq: object) -> None:
++    """封閉 schema ＋ 計數不變條件 ＋ outcome 由各欄重算（⛔ 不信任封存值）。"""
++    if not isinstance(eq, dict) or set(eq) != _EQUIVALENCE_FIELDS:
++        actual = set(eq) if isinstance(eq, dict) else set()
++        raise ArtifactError(
++            "equivalence 的欄位集合不符："
++            f"多={sorted(actual - _EQUIVALENCE_FIELDS)}、缺={sorted(_EQUIVALENCE_FIELDS - actual)}"
++        )
++    if type(eq["schema_version"]) is not int or eq["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的 equivalence schema_version={eq['schema_version']!r}")
++    if eq["kind"] != ENV_EQUIVALENCE_KIND:
++        raise ArtifactError(f"equivalence 的 kind={eq['kind']!r}，預期 {ENV_EQUIVALENCE_KIND!r}")
++    if not isinstance(eq["bundle_id"], str) or not eq["bundle_id"]:
++        raise ArtifactError("equivalence.bundle_id 必須是非空字串")
++    validate_generated_at(eq["generated_at"], "equivalence")
++    for name, fields in (("reference", _REFERENCE_FIELDS), ("witness", _WITNESS_FIELDS)):
++        block = eq[name]
++        if not isinstance(block, dict) or set(block) != fields:
++            raise ArtifactError(f"equivalence.{name} 的欄位集合必須恰好是 {sorted(fields)}")
++        if not all(is_hex64(block[f]) for f in fields):
++            raise ArtifactError(f"equivalence.{name} 的 SHA 必須是 64 字元小寫 hex")
++
++    ref_count = _require_count(eq, "reference_key_count")
++    wit_count = _require_count(eq, "witness_key_count")
++    key_mismatch = _require_count(eq, "key_mismatch_count")
++    compared = _require_count(eq, "rows_compared")
++    row_mismatch = _require_count(eq, "row_mismatch_count")
++    # ⚠️ 計數不變條件（v12）：rows_compared ＝ 交集；兩側「只在單側」的數量由總數與交集推得。
++    if compared > ref_count or compared > wit_count:
++        raise ArtifactError("equivalence.rows_compared（交集）⛔ 不得大於任一側的 key 數")
++    ref_only, wit_only = ref_count - compared, wit_count - compared
++    if key_mismatch != ref_only + wit_only:
++        raise ArtifactError(
++            "equivalence 的計數不變條件不成立：key_mismatch_count 必須等於 "
++            "(reference_key_count − rows_compared) ＋ (witness_key_count − rows_compared)"
++        )
++    if row_mismatch > compared:
++        raise ArtifactError("equivalence.row_mismatch_count ⛔ 不得大於 rows_compared（它只計交集）")
++    _validate_key_sample(eq["key_mismatch_sample_keys"], name="key_mismatch_sample_keys",
++                         fields=_KEY_SAMPLE_FIELDS, count=key_mismatch)
++    sides = [item["side"] for item in eq["key_mismatch_sample_keys"]]
++    if sides.count(SIDE_REFERENCE_ONLY) > ref_only or sides.count(SIDE_WITNESS_ONLY) > wit_only:
++        raise ArtifactError("equivalence.key_mismatch_sample_keys 的 side 分佈與計數不符")
++    _validate_key_sample(eq["mismatch_sample_keys"], name="mismatch_sample_keys",
++                         fields=_ROW_SAMPLE_FIELDS, count=row_mismatch)
++
++    if not isinstance(eq["cohort_equal"], bool):
++        raise ArtifactError("equivalence.cohort_equal 必須是嚴格 boolean")
++    required = eq["provenance_required_equal"]
++    if not isinstance(required, dict) or set(required) != set(REQUIRED_EQUAL_FIELDS) \
++            or not all(isinstance(v, bool) for v in required.values()):
++        raise ArtifactError(
++            f"equivalence.provenance_required_equal 必須恰好是 {list(REQUIRED_EQUAL_FIELDS)} 的嚴格 boolean"
++        )
++    allowed = eq["provenance_allowed_differences"]
++    if not isinstance(allowed, dict) or set(allowed) != set(ALLOWED_DIFFERENT_FIELDS) or not all(
++        isinstance(v, dict) and set(v) == {"reference", "witness"} for v in allowed.values()
++    ):
++        raise ArtifactError(
++            f"equivalence.provenance_allowed_differences 必須恰好是 {list(ALLOWED_DIFFERENT_FIELDS)}，"
++            "每一欄恰好 {reference, witness}"
++        )
++
++    dists = eq["witness_distributions"]
++    if not isinstance(dists, list) or not all(
++        isinstance(item, list) and len(item) == 2 and all(isinstance(v, str) for v in item) and item[0]
++        for item in dists
++    ):
++        raise ArtifactError("equivalence.witness_distributions 必須是 [[name, version], …]")
++    if any(tuple(a) >= tuple(b) for a, b in zip(dists, dists[1:])):
++        raise ArtifactError("equivalence.witness_distributions 必須排序且⛔ 不重複")
++
++    if eq["outcome"] not in TERMINAL_OUTCOME:
++        raise ArtifactError(f"equivalence.outcome 只接受 {list(TERMINAL_OUTCOME)}：{eq['outcome']!r}")
++    if eq["outcome"] != derive_outcome(eq):
++        raise ArtifactError("equivalence.outcome 與各欄重算的結果不符——⛔ 不信任封存值")
++    validate_provenance(eq["comparator_provenance"], role="comparator")
++
++
++# ── envcheck manifest 的封閉 schema ────────────────────────────────────────
++
++def build_envcheck_manifest(
++    *, bundle_id: str, expected_image_id: str, files: Mapping[str, Mapping[str, Any]],
++    stage1_evidence: dict[str, Any], terminal_outcome: int, generated_at: str,
++    finalizer_provenance: dict[str, Any],
++) -> dict[str, Any]:
++    return {
++        "schema_version": ARTIFACT_SCHEMA_VERSION,
++        "kind": ENVCHECK_MANIFEST_KIND,
++        "bundle_id": bundle_id,
++        "expected_image_id": expected_image_id,
++        "files": {rel: dict(files[rel]) for rel in sorted(files)},
++        "stage1_evidence": stage1_evidence,
++        "terminal_outcome": terminal_outcome,
++        "generated_at": generated_at,
++        "finalizer_provenance": finalizer_provenance,
++    }
++
++
++def validate_envcheck_manifest(manifest: object) -> None:
++    if not isinstance(manifest, dict) or set(manifest) != _ENVCHECK_MANIFEST_FIELDS:
++        actual = set(manifest) if isinstance(manifest, dict) else set()
++        raise ArtifactError(
++            "envcheck manifest 的欄位集合不符："
++            f"多={sorted(actual - _ENVCHECK_MANIFEST_FIELDS)}、缺={sorted(_ENVCHECK_MANIFEST_FIELDS - actual)}"
++        )
++    if type(manifest["schema_version"]) is not int or manifest["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的 envcheck manifest schema_version={manifest['schema_version']!r}")
++    if manifest["kind"] != ENVCHECK_MANIFEST_KIND:
++        raise ArtifactError(f"envcheck manifest 的 kind={manifest['kind']!r}，預期 {ENVCHECK_MANIFEST_KIND!r}")
++    if not isinstance(manifest["bundle_id"], str) or not manifest["bundle_id"]:
++        raise ArtifactError("envcheck manifest 的 bundle_id 必須是非空字串")
++    if not is_image_id(manifest["expected_image_id"]):
++        raise ArtifactError("envcheck manifest 的 expected_image_id 必須是 sha256: ＋ 64 字元小寫 hex")
++    files = manifest["files"]
++    if not isinstance(files, dict) or set(files) != set(ENVCHECK_LAYOUT):
++        actual = set(files) if isinstance(files, dict) else set()
++        raise ArtifactError(
++            f"envcheck manifest 的 files 必須恰好是 {list(ENVCHECK_LAYOUT)}："
++            f"多={sorted(actual - set(ENVCHECK_LAYOUT))}、缺={sorted(set(ENVCHECK_LAYOUT) - actual)}"
++        )
++    for rel, entry in files.items():
++        # ⚠️ 四個都是 canonical artifact——⛔ 沒有 raw_blob（型別由 layout 決定，⛔ 不由 manifest 宣告）。
++        validate_file_entry(rel, entry)
++    validate_stage1_evidence_ref(manifest["stage1_evidence"])
++    outcome = manifest["terminal_outcome"]
++    if type(outcome) is not int or outcome not in TERMINAL_OUTCOME.values():
++        raise ArtifactError(
++            f"envcheck manifest 的 terminal_outcome 只接受 {sorted(TERMINAL_OUTCOME.values())}：{outcome!r}"
++        )
++    validate_generated_at(manifest["generated_at"], "envcheck manifest")
++    validate_provenance(manifest["finalizer_provenance"], role="finalizer")
++    if manifest["finalizer_provenance"]["image_digest"] != manifest["expected_image_id"]:
++        raise ArtifactError("envcheck manifest 的 finalizer_provenance.image_digest 與 expected_image_id 不符")
++
++
++# ── E1～E7 ──────────────────────────────────────────────────────────────────
++
++@dataclass(frozen=True)
++class EnvcheckResult:
++    outcome: str
++    terminal_outcome: int
++    identity: dict[str, Any]
++    manifest: dict[str, Any]
++    # ⚠️ ③d：Stage 2 manifest 的 `environment_witness` 以它錨定（與 manifest 內容來自同一次讀取）。
++    manifest_sha256: str
++
++
++def _check_entry(rel: str, entry: Mapping[str, Any], *, artifact_sha: str, stored_sha: str,
++                 stored_bytes: int) -> None:
++    if (entry["artifact_sha256"], entry["stored_sha256"], entry["stored_bytes"]) != \
++            (artifact_sha, stored_sha, stored_bytes):
++        raise ArtifactError(f"E1：manifest 記的 {rel} metadata 與實際檔案不符")
++
++
++def verify_envcheck(
++    root: str | Path,
++    anchor: Stage1Anchor,
++    *,
++    require_equivalent: bool,
++    stage2_identity: Mapping[str, Any] | None = None,
++) -> EnvcheckResult:
++    """E1～E7。`require_equivalent=True` 時再加 **E3b**（Stage 2 的使用資格）。
++
++    ⚠️ 每份檔案**只讀一次**；全量的 after' 用串流讀。
++    """
++    root = Path(root)
++    manifest_load = load_canonical_evidence_artifact(root / ENVCHECK_MANIFEST_NAME, ENVCHECK_MANIFEST_KIND)
++    manifest = manifest_load.parsed
++    validate_envcheck_manifest(manifest)
++
++    # ── E1：封閉 layout、每個成員重算 metadata、stage1_evidence 綁到本次重算的信任錨 ──
++    actual = archive_file_set(root)
++    expected = set(ENVCHECK_LAYOUT) | {ENVCHECK_MANIFEST_NAME}
++    if actual != expected:
++        raise ArtifactError(
++            f"E1：envcheck 的檔案集合不符：多={sorted(actual - expected)}、缺={sorted(expected - actual)}"
++        )
++    validate_stage1_evidence_ref(manifest["stage1_evidence"], anchor=anchor)
++    files = manifest["files"]
++
++    cohort_load = load_canonical_evidence_artifact(root / WITNESS_COHORT, COHORT_KIND)
++    _check_entry(WITNESS_COHORT, files[WITNESS_COHORT], artifact_sha=cohort_load.artifact_sha256,
++                 stored_sha=cohort_load.stored_sha256, stored_bytes=cohort_load.stored_bytes)
++    identity_load = load_canonical_evidence_artifact(root / ENVCHECK_IDENTITY, RUN_IDENTITY_KIND)
++    _check_entry(ENVCHECK_IDENTITY, files[ENVCHECK_IDENTITY], artifact_sha=identity_load.artifact_sha256,
++                 stored_sha=identity_load.stored_sha256, stored_bytes=identity_load.stored_bytes)
++    eq_load = load_canonical_evidence_artifact(root / EQUIVALENCE, ENV_EQUIVALENCE_KIND)
++    _check_entry(EQUIVALENCE, files[EQUIVALENCE], artifact_sha=eq_load.artifact_sha256,
++                 stored_sha=eq_load.stored_sha256, stored_bytes=eq_load.stored_bytes)
++    witness = stream_after_artifact(root / WITNESS_AFTER, label="環境見證 after'", side="after")
++    _check_entry(WITNESS_AFTER, files[WITNESS_AFTER], artifact_sha=witness.load.artifact_sha256,
++                 stored_sha=witness.load.stored_sha256, stored_bytes=witness.load.stored_bytes)
++
++    # ── E2：完整 validator（⛔ 錨定⛔ 不等於驗過） ────────────────────────────
++    cohort = cohort_load.parsed
++    cohort_keys = validate_cohort_manifest(cohort)
++    validate_provenance(cohort["provenance"], role="stage1")
++    witness_prov = witness.load.top["provenance"]
++    validate_provenance(witness_prov, role="stage1")
++    identity = identity_load.parsed
++    validate_run_identity(identity)
++    eq = eq_load.parsed
++    validate_equivalence_artifact(eq)
++    # cohort' 必須綁到這一份 after'（比照 Stage 1 信任錨第 8、9 道；⛔ 不重算 predicate）。
++    if cohort.get("after_artifact_sha256") != witness.load.artifact_sha256:
++        raise ArtifactError("E2：cohort' 記的 after_artifact_sha256 與 after' 不符")
++    assert_same_keys(cohort_keys, witness.candidate_keys, "E2：cohort' vs after' 的候選列")
++
++    # ── E3a：重新串流比對，封存值必須等於重算值；outcome 三者一致 ──────────────
++    recomputed = compare_environment(
++        anchor=anchor, witness=witness, witness_cohort_keys=cohort_keys,
++        witness_cohort_sha256=cohort_load.artifact_sha256,
++    )
++    for name in _RECOMPUTED_FIELDS:
++        if eq[name] != recomputed[name]:
++            raise ArtifactError(f"E3a：封存的 equivalence.{name} 與重算值不符——⛔ 不信任封存值")
++    outcome = recomputed["outcome"]
++    if manifest["terminal_outcome"] != TERMINAL_OUTCOME[outcome]:
++        raise ArtifactError(
++            f"E3a：outcome 三者不一致——重算／封存＝{outcome}，manifest 的 terminal_outcome="
++            f"{manifest['terminal_outcome']}"
++        )
++
++    # ── E4：封存的套件清單與 after' 的 pip_freeze_sha256 交叉驗證 ───────────────
++    if pip_freeze_sha256([tuple(item) for item in eq["witness_distributions"]]) != \
++            witness_prov["pip_freeze_sha256"]:
++        raise ArtifactError("E4：witness_distributions 的 hash 與 after' 的 pip_freeze_sha256 不符")
++
++    # ── E5：image 鏈 ────────────────────────────────────────────────────────
++    image_chain = {
++        "envcheck identity": identity["expected_image_id"],
++        "after'": witness_prov["image_digest"],
++        "cohort'": cohort["provenance"]["image_digest"],
++        "equivalence comparator": eq["comparator_provenance"]["image_digest"],
++        "envcheck manifest": manifest["expected_image_id"],
++    }
++    if len(set(image_chain.values())) != 1:
++        raise ArtifactError(f"E5：image 等式鏈斷了：{image_chain}")
++    if stage2_identity is not None:
++        validate_run_identity(stage2_identity)
++        if dict(stage2_identity) != identity:
++            raise ArtifactError("E5：Stage 2 的 run identity 與 envcheck 封存的那一份⛔ 不完全相同")
++
++    # ── E6：bundle 鏈 ───────────────────────────────────────────────────────
++    bundle_chain = {
++        "Stage 1 manifest": anchor.bundle_id,
++        "envcheck manifest": manifest["bundle_id"],
++        "envcheck identity": identity["bundle_id"],
++        "after'": witness.load.top["bundle_id"],
++        "cohort'": cohort["bundle_id"],
++        "equivalence": eq["bundle_id"],
++    }
++    if len(set(bundle_chain.values())) != 1:
++        raise ArtifactError(f"E6：bundle_id 等式鏈斷了：{bundle_chain}")
++
++    # ── E7：after' 跑的是原始 e1cbbbd、⛔ 沒有套任何 patch ─────────────────────
++    if witness_prov["base_commit"] != anchor.after_base_commit:
++        raise ArtifactError(
++            f"E7：after' 的 base_commit={witness_prov['base_commit']} 與 Stage 1 after 的 "
++            f"{anchor.after_base_commit} 不符"
++        )
++    if witness_prov["tooling_patch_sha256"] != EMPTY_SHA256:
++        raise ArtifactError("E7：after' ⛔ 不得套任何 patch（tooling_patch_sha256 必須是空字串的 SHA）")
++
++    # Stage 1 信任錨的跨檔關係（第 6、8、9、10 道）。
++    validate_stage1_anchor_graph(
++        anchor,
++        stage2_identity=stage2_identity if stage2_identity is not None else identity,
++        envcheck_identity=identity,
++        expected_bundle_id=identity["bundle_id"],
++    )
++
++    # ── E3b：Stage 2 使用資格 ───────────────────────────────────────────────
++    if require_equivalent and outcome != OUTCOME_EQUIVALENT:
++        raise ArtifactError(
++            "E3b：環境見證的結果是 NOT_EQUIVALENT——它是合法證據，⛔ 但⛔ 不得拿來放行 Stage 2"
++        )
++    return EnvcheckResult(outcome=outcome, terminal_outcome=TERMINAL_OUTCOME[outcome],
++                          identity=identity, manifest=manifest,
++                          manifest_sha256=manifest_load.stored_sha256)
++
++
++def verify_envcheck_for_stage2(python_root: str | Path, stage2_identity: Mapping[str, Any]) -> EnvcheckResult:
++    """Stage 2 的 preflight／finalize／recovery 用：E1～E7 ＋ **E3b**。"""
++    anchor = load_stage1_anchor(python_root)
++    root = resolve_repo_path(python_root, ENVCHECK_ROOT_PATH)
++    return verify_envcheck(root, anchor, require_equivalent=True, stage2_identity=stage2_identity)
++
++
++# ── 發布與 recovery ─────────────────────────────────────────────────────────
++
++def publish_envcheck(
++    *,
++    python_root: str | Path,
++    run_dir: str | Path,
++    stage2_identity: Mapping[str, Any],
++    provenance_factory,
++    generated_at: str,
++    distributions: list[list[str]] | None = None,
++) -> int:
++    """見證趟的 operational 輸出 → 串流比對 → 發布 `envcheck/`。回傳 0 或 7。
++
++    ⚠️ **兩種結果都發布證據**：NOT_EQUIVALENT 是合法的終止狀態，⛔ 不是一般失敗。
++    ⚠️ 階段 A 讀入並完成全部驗證（所有 project import 在此發生）；階段 B 才建 provenance。
++    """
++    validate_run_identity(stage2_identity)
++    stage2_identity = dict(stage2_identity)
++    root = resolve_repo_path(python_root, ENVCHECK_ROOT_PATH)
++    run_dir = Path(run_dir)
++
++    anchor = load_stage1_anchor(python_root)
++    validate_stage1_anchor_graph(
++        anchor, stage2_identity=stage2_identity, envcheck_identity=stage2_identity,
++        expected_bundle_id=stage2_identity["bundle_id"],
++    )
++
++    with ClosedArchiveWriter(root, ENVCHECK_LAYOUT, recover_hint=RECOVER_HINT) as writer:
++        # ── 階段 A ──────────────────────────────────────────────────────────
++        cohort_load = load_canonical_evidence_artifact(run_dir / OPERATIONAL_WITNESS_COHORT, COHORT_KIND)
++        cohort = cohort_load.parsed
++        cohort_keys = validate_cohort_manifest(cohort)
++        validate_provenance(cohort["provenance"], role="stage1")
++        # ⚠️ after' 在**驗證的同一趟**寫出封存副本——⛔ 不得事後另讀一次。
++        witness = stream_after_artifact(
++            run_dir / OPERATIONAL_WITNESS_AFTER, label="環境見證 after'", side="after",
++            copy_to=writer.path_for(WITNESS_AFTER),
++        )
++        writer.record_streamed(WITNESS_AFTER, witness.load)
++        validate_provenance(witness.load.top["provenance"], role="stage1")
++        writer.add_canonical(WITNESS_COHORT, cohort)
++        writer.add_canonical(ENVCHECK_IDENTITY, stage2_identity)
++        core = compare_environment(
++            anchor=anchor, witness=witness, witness_cohort_keys=cohort_keys,
++            witness_cohort_sha256=cohort_load.artifact_sha256,
++        )
++        dists = installed_distributions() if distributions is None else distributions
++
++        # ── 階段 B ──────────────────────────────────────────────────────────
++        provenance = provenance_factory()
++        validate_provenance(provenance, role="comparator")
++        validate_provenance(provenance, role="finalizer")
++        equivalence = {
++            "schema_version": ARTIFACT_SCHEMA_VERSION,
++            "kind": ENV_EQUIVALENCE_KIND,
++            "generated_at": generated_at,
++            **core,
++            "witness_distributions": dists,
++            "comparator_provenance": provenance,
++        }
++        validate_equivalence_artifact(equivalence)
++        writer.add_canonical(EQUIVALENCE, equivalence)
++        terminal = TERMINAL_OUTCOME[core["outcome"]]
++        manifest = build_envcheck_manifest(
++            bundle_id=stage2_identity["bundle_id"],
++            expected_image_id=stage2_identity["expected_image_id"],
++            files=writer.files,
++            stage1_evidence=build_stage1_evidence_ref(anchor),
++            terminal_outcome=terminal,
++            generated_at=generated_at,
++            finalizer_provenance=provenance,
++        )
++        validate_envcheck_manifest(manifest)
++
++        def verify_staging(staging: Path) -> None:
++            # ⚠️ 發布前對 staging 跑**與 recovery 相同**的 E1～E7（E3 只做 E3a）。
++            verify_envcheck(staging, anchor, require_equivalent=False, stage2_identity=stage2_identity)
++            # ⚠️ ⛔ 階段 B 之後⛔ 不得有新的 project import——重算一次，與封存的比對。
++            if provenance_factory()["project_modules_sha256"] != provenance["project_modules_sha256"]:
++                raise ArtifactError("階段 B 之後又載入了新的專案模組——⛔ 封存的 provenance 已經記不全了")
++
++        writer.commit(ENVCHECK_MANIFEST_NAME, manifest, verify=verify_staging)
++    return terminal
++
++
++def recover_envcheck(*, python_root: str | Path, provenance: dict[str, Any]) -> int:
++    """⚠️ **只重新驗證既有 `envcheck/` 並重新 fsync**，⛔ 不讀 operational 輸入、⛔ 不重跑 replay。
++
++    回傳 manifest 的 `terminal_outcome`（0 或 7）——⛔ 不得固定回 0。
++    """
++    root = resolve_repo_path(python_root, ENVCHECK_ROOT_PATH)
++    if not root.is_dir():
++        raise ArtifactError(f"--recover-envcheck 要求 envcheck/ 已存在：{root}")
++    anchor = load_stage1_anchor(python_root)
++    result = verify_envcheck(root, anchor, require_equivalent=False)
++    # ⚠️ 本次執行身分必須與封存的 finalizer_provenance 相同——**在 fsync 之前**比。
++    archived = result.manifest["finalizer_provenance"]
++    validate_provenance(provenance, role="finalizer")
++    for name in RECOVERY_IDENTITY_FIELDS:
++        if provenance.get(name) != archived.get(name):
++            raise ArtifactError(
++                f"recovery 的執行身分與封存的 finalizer_provenance 的 {name} 不符——⛔ 在 fsync 之前中止"
++            )
++    _fsync_tree(root)
++    fsync_parent_or_unconfirmed(root, published=False, recover_hint=RECOVER_HINT)
++    return result.terminal_outcome
++
++
++# ── CLI ─────────────────────────────────────────────────────────────────────
++
++class EnvcheckUsageError(ValueError):
++    """CLI 用法錯誤。"""
++
++
++# ⚠️ 只能由 `scripts/finalize-stage2-evidence.sh` 注入。精確比對（⛔ 不用前綴清單）。
++ENVCHECK_INJECTED_ARGS = (
++    "--run-identity", "--python-root", "--image-digest", "--base-commit",
++    "--tooling-patch-sha256", "--source-root", "--runner-sha256",
++)
++
++
++def assert_envcheck_arg_ownership(argv: Sequence[str]) -> None:
++    for injected in ENVCHECK_INJECTED_ARGS:
++        count = sum(1 for a in argv if a == injected or a.startswith(injected + "="))
++        if count > 1:
++            raise EnvcheckUsageError(
++                f"{injected} 出現 {count} 次——它只能由官方腳本注入。⛔ 不靜默採用最後一個。"
++            )
++
++
++def build_envcheck_parser():
++    import argparse
++
++    parser = argparse.ArgumentParser(prog="envcheck", allow_abbrev=False)
++    parser.add_argument("--envcheck", action="store_true")
++    parser.add_argument("--recover-envcheck", action="store_true")
++    parser.add_argument("--run-dir", default=None)
++    parser.add_argument("--run-identity", default=None)
++    parser.add_argument("--python-root", required=True)
++    parser.add_argument("--image-digest", required=True)
++    parser.add_argument("--base-commit", required=True)
++    parser.add_argument("--tooling-patch-sha256", required=True)
++    parser.add_argument("--source-root", required=True)
++    parser.add_argument("--runner-sha256", required=True)
++    return parser
++
++
++def run_envcheck(argv: Sequence[str]) -> dict[str, Any]:
++    from datetime import datetime, timezone
++
++    from .provenance import build_provenance
++
++    argv = list(argv)
++    assert_envcheck_arg_ownership(argv)
++    args = build_envcheck_parser().parse_args(argv)
++    # ⚠️ **CLI matrix**（③ evidence contract「七之四」）：兩種模式互斥且必選其一。
++    if args.envcheck == args.recover_envcheck:
++        raise EnvcheckUsageError("--envcheck 與 --recover-envcheck 必須恰好給一個")
++    if args.envcheck:
++        if not args.run_dir or not args.run_identity:
++            raise EnvcheckUsageError("--envcheck 需要 --run-dir 與 --run-identity")
++    elif args.run_dir or args.run_identity:
++        raise EnvcheckUsageError(
++            "--recover-envcheck ⛔ 不接受 --run-dir 或 --run-identity：它只依賴既有的 envcheck/"
++        )
++
++    # ⚠️ 階段 A 明確載入 `config`（理由同 Stage 1 finalizer：⛔ 靠間接 import 是 incidental）。
++    import config as _config_module
++
++    def _provenance_factory():
++        return build_provenance(
++            config_module=_config_module,
++            source_root=args.source_root,
++            image_digest=args.image_digest,
++            base_commit=args.base_commit,
++            tooling_patch_sha256=args.tooling_patch_sha256,
++            runner_sha256=args.runner_sha256,
++            argv=argv,
++        )
++
++    if args.recover_envcheck:
++        terminal = recover_envcheck(python_root=args.python_root, provenance=_provenance_factory())
++        mode = "recover_envcheck"
++    else:
++        identity = load_run_identity(args.run_identity)
++        if identity["expected_image_id"] != args.image_digest:
++            raise EnvcheckUsageError(
++                f"Stage 2 identity 記的 image {identity['expected_image_id']} 與本次執行的 "
++                f"{args.image_digest} 不符"
++            )
++        terminal = publish_envcheck(
++            python_root=args.python_root,
++            run_dir=args.run_dir,
++            stage2_identity=identity,
++            provenance_factory=_provenance_factory,
++            generated_at=datetime.now(timezone.utc).isoformat(),
++        )
++        mode = "envcheck"
++    outcome = OUTCOME_EQUIVALENT if terminal == 0 else OUTCOME_NOT_EQUIVALENT
++    return {"mode": mode, "outcome": outcome, "terminal_outcome": terminal}
++
++
++def main(argv=None) -> int:
++    import json
++    import sys
++
++    from .publish import EXIT_ABORT, EXIT_DURABILITY_UNCONFIRMED
++
++    argv = list(sys.argv[1:] if argv is None else argv)
++    try:
++        result = run_envcheck(argv)
++    except DurabilityUnconfirmed as exc:
++        print(f"ERROR: {exc}", file=sys.stderr)
++        return EXIT_DURABILITY_UNCONFIRMED
++    except (EnvcheckUsageError, ValueError, OSError) as exc:
++        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
++        return EXIT_ABORT
++    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
++    # ⚠️ ⛔ 不得固定回 0：NOT_EQUIVALENT（7）是要讓 Stage 2 停下來的終止狀態。
++    return result["terminal_outcome"]
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/provenance.py b/python/backtest/modular/sr_scoring/replay_bundle/provenance.py
+index fdfe4651796596d9ce427b791bd3bcaab902c1b2..ed80654fc6252e1a2992fed9087e0be8553b324d 100644
+--- a/python/backtest/modular/sr_scoring/replay_bundle/provenance.py
++++ b/python/backtest/modular/sr_scoring/replay_bundle/provenance.py
+@@ -119,6 +119,15 @@ def pip_freeze_sha256(distributions: Iterable[tuple[str, str]] | None = None) ->
+     用 `importlib.metadata` 而不是 `pip freeze` 子行程：離線容器不見得裝了 pip，
+     而且**多開一個行程只為了拿一份清單**在 2GiB 的 host 上不值得。
+     """
++    return sha256_hex(canonical_json_bytes(installed_distributions(distributions)))
++
++
++def installed_distributions(distributions: Iterable[tuple[str, str]] | None = None) -> list[list[str]]:
++    """已安裝套件的**完整清單**：`[[name, version], …]`，去重、排序。
++
++    ⚠️ `pip_freeze_sha256()` 就是這份清單的 canonical SHA——兩者⛔ 不得各自推導
++    （I-074 Stage 2 的環境見證要同時封存清單與 hash，並交叉驗證，見 issue.md I-074「二、⑤」）。
++    """
+     if distributions is None:
+         from importlib import metadata
+ 
+@@ -127,7 +136,7 @@ def pip_freeze_sha256(distributions: Iterable[tuple[str, str]] | None = None) ->
+             for dist in metadata.distributions()
+         ]
+     items = sorted({(str(name), str(version)) for name, version in distributions if name})
+-    return sha256_hex(canonical_json_bytes([list(item) for item in items]))
++    return [list(item) for item in items]
+ 
+ 
+ def runtime_settings(config_module=None) -> dict[str, Any]:
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/publish.py b/python/backtest/modular/sr_scoring/replay_bundle/publish.py
+index 5dd761e6a26ab6d8dd57e5ee2f4e033112ad373c..4d18491c1d4c5268d0052946509d1c753418ac49 100644
+--- a/python/backtest/modular/sr_scoring/replay_bundle/publish.py
++++ b/python/backtest/modular/sr_scoring/replay_bundle/publish.py
+@@ -42,6 +42,15 @@ EXIT_CANDIDATE_MISMATCH = 4
+ # I-074 Stage 1 的 crossday：兩份 after artifact 的逐列結果或執行身分不一致。
+ # ⚠️ 與 4 同樣是**終止狀態**（證據已完整發布），⛔ 不是一般失敗。
+ EXIT_CROSSDAY_MISMATCH = 5
++# I-074 Stage 2 的反事實 replay：counterfactual patch **沒有生效**（「①之三」的檢查順序得出
++# `candidate_flag_inconsistent` 或 `rr_not_restored`）。⚠️ 與 4 不同：它是 **tooling 缺陷信號**，
++# ⛔ 不是產品發現；replay 已在 operational 目錄留下 `bounded_diagnostics.json`，由 orchestrator
++# 發布 failed-attempt record（issue.md I-074 Stage 2 計畫書「二、①」）。
++EXIT_COUNTERFACTUAL_INEFFECTIVE = 6
++# I-074 Stage 2 的環境見證：新 image 上的 after' 與 Stage 1 D+1 **不等價**。
++# ⚠️ 與 5 同樣是**終止狀態**（見證證據已完整發布），⛔ 不是一般失敗；
++# 它讓 Stage 2 停在 before 之前（issue.md I-074 Stage 2 計畫書「二、⑤」）。
++EXIT_ENV_NOT_EQUIVALENT = 7
+ 
+ # syscall 號碼是 **per-ABI** 的，猜錯會呼叫到完全不同的系統呼叫。
+ # 只在找不到 libc 的 renameat2 symbol 時才會用到，且未知架構一律 fail-closed。
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/run_identity.py b/python/backtest/modular/sr_scoring/replay_bundle/run_identity.py
+index 688c858e72b48bf42075aef8c2c6c2bc386f868e..a153b99f12e64b0f26c20eedbc7f1516526beff1 100644
+--- a/python/backtest/modular/sr_scoring/replay_bundle/run_identity.py
++++ b/python/backtest/modular/sr_scoring/replay_bundle/run_identity.py
+@@ -35,16 +35,24 @@ RUN_IDENTITY_FIELDS = frozenset(
+ )
+ 
+ 
+-def default_run_identity_path() -> Path:
++# identity 的 stage（⚠️ 封閉列舉）。Stage 2 用自己的一份：Stage 1 釘住的 image 已不在本機，
++# Stage 2 改在新 image 上跑（issue.md I-074 Stage 2 計畫書「二、⑤」）。
++RUN_IDENTITY_STAGES = (1, 2)
++
++
++def default_run_identity_path(stage: int = 1) -> Path:
+     """固定推導值。⛔ **不放 `/tmp`**——這份要跨日存活。
+ 
+     ⚠️ ⛔ 沒有「只給測試用」的路徑覆寫參數（那在實作上強制不了）：測試改為覆寫
+-    `XDG_DATA_HOME`。
++    `XDG_DATA_HOME`。⚠️ `stage` 是**封閉列舉**（1／2），⛔ 不是路徑——
++    它只決定推導出哪一份，⛔ 不開放任意路徑。Stage 1 的推導結果與改版前逐字相同。
+     """
+     import os
+ 
++    if type(stage) is not int or stage not in RUN_IDENTITY_STAGES:
++        raise ArtifactError(f"run identity 的 stage 只接受 {RUN_IDENTITY_STAGES}，實際 {stage!r}")
+     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+-    return Path(base) / "stock_trading" / "i074_stage1" / RUN_IDENTITY_NAME
++    return Path(base) / "stock_trading" / f"i074_stage{stage}" / RUN_IDENTITY_NAME
+ 
+ 
+ def _is_image_id(value: object) -> bool:
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/stage2_archive.py b/python/backtest/modular/sr_scoring/replay_bundle/stage2_archive.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c6b8ade926f87fd34e67bfe68a4393854af46730
+--- /dev/null
++++ b/python/backtest/modular/sr_scoring/replay_bundle/stage2_archive.py
+@@ -0,0 +1,1367 @@
++"""I-074 Stage 2 的正式證據（③d）：成功 archive、failed-attempt record 與 check／recover。
++
++規格見 issue.md I-074「③ Stage 2 evidence contract 計畫書」（⚠️ 現行版）的「三」～「七之四」。
++
++* **成功 archive**（`python/baselines/i074_stage2/evidence/`，封閉 7 檔）：before source 全量、
++  comparison、report、兩份 raw patch、Stage 2 identity ＋ manifest；`verify_stage2_graph()` 的
++  十六道由 finalize（對 staging）與 recovery **共用同一段程式**；
++* **failed-attempt record**（`failed/<bundle_id>-<counterfactual_semantic_sha256>/`）：反事實沒有生效
++  （「①之三」的檢查順序得出 `candidate_flag_inconsistent` 或 `rr_not_restored`）時的事故紀錄，
++  ⛔ 不是成功 archive；⚠️ 目錄鍵是**語意 SHA**（只涵蓋兩個產品檔的 canonical diff，⑦ 總綱 v1 決策表
++  第 9 列）——只改測試檔⛔ 換不了鍵；語意 SHA 要用 git 算，由 shell 以
++  `--verified-counterfactual-semantic-sha256` 交給本模組；
++* check／recover 的 Python 段——⚠️ **合成守門（F8-a、「四之二」）在 shell**
++  （`scripts/finalize-stage2-evidence.sh`），⛔ 本模組不碰 git；shell 把驗過的四個值以 `--verified-*`
++  交給本模組（`VerifiedComposition`），commit point／fsync 之前必須與**實際要封存的內容**相符
++  （2026-09-24 review：兩段之間輸入被換掉的 TOCTOU）。
++
++⚠️ **為什麼⛔ 放進 `stage2_evidence.py`**：`envcheck.py` import 它（③b），而這裡要用 `envcheck.py`
++的 E1～E7——放同一檔會循環 import；延後到函式內 import 又會踩到「階段 B 之後⛔ 不得有新的
++project import」。所以共用核心留在 `stage2_evidence.py`，③d 放本檔。
++
++⚠️ **記憶體**（「五之一」）：全量的 before source 一律串流，只常駐 keys 與 cohort 那幾列的完整 row；
++⛔ 不得同時持有兩份全量 rows。
++"""
++from __future__ import annotations
++
++import bisect
++import re
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Mapping, Sequence
++
++from .artifacts import (
++    ARTIFACT_SCHEMA_VERSION,
++    CANDIDATE_FIELD,
++    COMPARISON_KIND,
++    REPORT_KIND,
++    ArtifactError,
++    StreamRowValidator,
++    load_canonical_evidence_artifact,
++    validate_comparison_artifact,
++    validate_report,
++)
++from .canonical import sha256_hex
++from .envcheck import (
++    ENVCHECK_IDENTITY,
++    ENVCHECK_LAYOUT,
++    ENVCHECK_MANIFEST_NAME,
++    ENVCHECK_ROOT_PATH,
++    OUTCOME_EQUIVALENT,
++    EnvcheckResult,
++    verify_envcheck,
++)
++from .evidence import RECOVERY_IDENTITY_FIELDS, _fsync_tree
++from .provenance import validate_provenance
++from .publish import DurabilityUnconfirmed
++from .run_identity import RUN_IDENTITY_KIND, load_run_identity, validate_run_identity
++from .stage2_evidence import (
++    DIAGNOSTIC_SAMPLE_LIMIT,
++    EMPTY_SHA256,
++    STAGE1_ANCHOR_AFTER,
++    ClosedArchiveWriter,
++    Stage1Anchor,
++    archive_file_set,
++    build_stage1_evidence_ref,
++    fsync_parent_or_unconfirmed,
++    is_hex64,
++    is_image_id,
++    load_stage1_anchor,
++    resolve_repo_path,
++    validate_file_entry,
++    validate_generated_at,
++    validate_stage1_anchor_graph,
++    validate_stage1_evidence_ref,
++)
++from .stream import StreamLoad, stream_canonical_artifact
++
++# ── 常數 ────────────────────────────────────────────────────────────────────
++
++# ⚠️ 全部寫死常數（repo 相對），⛔ 不是執行期參數。
++STAGE2_EVIDENCE_ROOT_PATH = "python/baselines/i074_stage2/evidence"
++STAGE2_FAILED_ROOT_PATH = "python/baselines/i074_stage2/failed"
++ENVCHECK_MANIFEST_PATH = f"{ENVCHECK_ROOT_PATH}/{ENVCHECK_MANIFEST_NAME}"
++
++STAGE2_MANIFEST_NAME = "evidence_manifest.json"
++STAGE2_MANIFEST_KIND = "sr_zone_stage2_evidence_manifest"
++BEFORE_SOURCE_KIND = "sr_zone_stage2_before_source"
++FAILED_ATTEMPT_KIND = "sr_zone_stage2_failed_attempt"
++# replay 在反事實沒有生效（結束碼 6）時寫出的中繼檔（⚠️ ③d 訂定，見 `validate_counterfactual_failure()`）。
++COUNTERFACTUAL_FAILURE_KIND = "sr_zone_stage2_counterfactual_failure"
++
++BEFORE_SOURCE = "before/before_source_artifact.json.gz"
++COMPARISON = "comparison/comparison_artifact.json.gz"
++REPORT = "comparison/report.json.gz"
++COUNTERFACTUAL_PATCH = "patch/counterfactual.patch"
++TOOLING_PATCH = "patch/tooling.patch"
++IDENTITY = "identity/run_identity.json.gz"
++# ⚠️ **封閉 layout**：6 個 payload ＋ manifest ＝ 7 檔。⚠️ entry 的型別**由這裡決定**，⛔ 不由 manifest 宣告
++# ——否則竄改者可以把 `.json.gz` 宣告成 `raw_blob` 來跳過 canonical 驗證。
++CANONICAL_MEMBERS = (BEFORE_SOURCE, COMPARISON, REPORT, IDENTITY)
++RAW_MEMBERS = (COUNTERFACTUAL_PATCH, TOOLING_PATCH)
++STAGE2_LAYOUT = (BEFORE_SOURCE, COMPARISON, REPORT, COUNTERFACTUAL_PATCH, TOOLING_PATCH, IDENTITY)
++
++FAILED_RECORD_NAME = "failure_record.json"
++FAILED_LAYOUT = RAW_MEMBERS
++
++# operational 輸入（⚠️ 一律由 orchestrator 的 run 目錄固定推導，⛔ 不開逐檔覆寫）。
++OPERATIONAL_BEFORE_SOURCE = "stage2/before_source_artifact.json"
++OPERATIONAL_COMPARISON = "stage2/comparison_artifact.json"
++OPERATIONAL_REPORT = "stage2/report.json"
++OPERATIONAL_FAILURE = "stage2/bounded_diagnostics.json"
++FROZEN_COUNTERFACTUAL_PATCH = "patches/counterfactual.patch"
++FROZEN_TOOLING_PATCH = "patches/tooling.patch"
++
++# ⚠️ 順序即套用順序，由此**強制**——⛔ 不靠「hash 必然不同」（改不同檔案時交換順序得到同一個 tree）。
++ORDERED_COMPONENTS = ("counterfactual", "tooling")
++# report 的截斷上限。⚠️ 它是 bundle manifest 的 `report_max_rows`（實查＝200）；Stage 2 archive 不含
++# bundle manifest，所以寫死，並由測試斷言它等於該 bundle 的值（測試 bj）。
++STAGE2_REPORT_MAX_ROWS = 200
++# ⚠️ v3 模型下恆為 0——⛔ 仍要寫進 manifest、recovery ⛔ 仍要讀回並回傳，⛔ 不得寫死在回傳路徑。
++STAGE2_TERMINAL_OUTCOMES = (0,)
++
++FAILURE_CANDIDATE_FLAG_INCONSISTENT = "candidate_flag_inconsistent"
++FAILURE_RR_NOT_RESTORED = "rr_not_restored"
++# ⚠️ **封閉列舉，恰好兩個值**；優先序由 Stage 2 計畫書「①之三」的檢查順序決定。
++FAILURE_REASONS = (FAILURE_CANDIDATE_FLAG_INCONSISTENT, FAILURE_RR_NOT_RESTORED)
++FAILURE_COUNT_FIELD = {
++    FAILURE_CANDIDATE_FLAG_INCONSISTENT: "inconsistent_row_count",
++    FAILURE_RR_NOT_RESTORED: "before_candidate_count",
++}
++SAMPLE_KEY_FIELDS = frozenset({"symbol", "timeframe", "as_of", "lifecycle_phase",
++                               "setup_rr_qualified", CANDIDATE_FIELD})
++
++RECOVER_DURABILITY_HINT = "scripts/finalize-stage2-evidence.sh --recover-durability"
++RECOVER_FAILED_HINT = "scripts/finalize-stage2-evidence.sh --recover-failed-record"
++
++_BEFORE_SOURCE_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "before_ref", "timeframe",
++                                   "replay_scope", "generated_at", "provenance", "rows"})
++_MANIFEST_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "expected_image_id", "files", "patches",
++                              "stage1_evidence", "environment_witness", "terminal_outcome",
++                              "generated_at", "finalizer_provenance"})
++_PATCHES_FIELDS = frozenset({"counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256",
++                             "ordered_components"})
++RAW_BLOB_FIELDS = frozenset({"stored_sha256", "stored_bytes"})
++_WITNESS_REF_FIELDS = frozenset({"manifest_path", "manifest_sha256", "members"})
++_MEMBER_FIELDS = frozenset({"artifact_sha256", "stored_sha256"})
++_FAILED_RECORD_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "expected_image_id", "run_identity",
++                                   "patches", "files", "bounded_diagnostics", "failure_reason",
++                                   "generated_at", "provenance", "counterfactual_semantic_sha256"})
++_FAILURE_SOURCE_FIELDS = frozenset({"schema_version", "kind", "bundle_id", "generated_at", "provenance",
++                                    "failure_reason", "bounded_diagnostics"})
++_FAILED_DIR_RE = re.compile(r"^(?P<bundle>[^/]+)-(?P<sha>[0-9a-f]{64})$")
++
++# 第 7 道：provenance 的位置與 role **逐一列舉**——⛔ 不用 `.get("provenance") or …` 通用推測
++# （Stage 1 的教訓：那樣會整份漏掉 `comparator_provenance`）。沒有 provenance 的是 report
++# （靠 `comparison_artifact_sha256` 綁回 comparison）、identity（身分宣告）與兩份 raw patch。
++PROVENANCE_MAP = (
++    (BEFORE_SOURCE, "provenance", "stage1"),
++    (COMPARISON, "provenance", "stage1"),
++    (STAGE2_MANIFEST_NAME, "finalizer_provenance", "finalizer"),
++)
++
++
++def _key_tuple(item: Mapping[str, Any]) -> tuple[str, str, str]:
++    return (item["symbol"], item["timeframe"], item["as_of"])
++
++
++# ── 「①之三」：反事實是否真的生效（執行期與證據層共用） ─────────────────────
++
++class BoundedSample:
++    """**計數完整、sample 有界**：只保留依 `(symbol, timeframe, as_of)` 排序最前面的 `limit` 筆。
++
++    ⚠️ 2026-09-24 review：原本把每一筆違規都留下、最後才排序截斷——**輸出有界、計算過程卻無界**，
++    「大量列同時違規」時記憶體隨違規列數成長，⛔ 與「五之一」的串流記憶體模型不符。
++    這裡的 buffer 任何時刻都⛔ 超過 `limit` 筆（插入後立即丟掉最大的那一筆）。
++    ⚠️ 以 `(key, 序號)` 排序：序號唯一，⛔ 永遠不會拿 sample 本身（dict）來比大小。
++    """
++
++    def __init__(self, limit: int = DIAGNOSTIC_SAMPLE_LIMIT) -> None:
++        self.limit = limit
++        self.count = 0
++        self._buffer: list[tuple[tuple[str, str, str], int, dict[str, Any]]] = []
++
++    def add(self, key: tuple[str, str, str], sample: dict[str, Any]) -> None:
++        self.count += 1
++        if len(self._buffer) >= self.limit and key >= self._buffer[-1][0]:
++            return
++        bisect.insort(self._buffer, (key, self.count, sample))
++        if len(self._buffer) > self.limit:
++            self._buffer.pop()
++
++    def __len__(self) -> int:
++        """目前 buffer 內的筆數（⛔ 不是完整計數；完整計數是 `count`）。"""
++        return len(self._buffer)
++
++    def samples(self) -> list[dict[str, Any]]:
++        return [sample for _key, _seq, sample in self._buffer]
++
++
++class CounterfactualIneffective(Exception):
++    """反事實 replay 的 counterfactual patch **沒有生效**（結束碼 6）。
++
++    ⛔ **刻意不繼承 `ValueError`**（比照 `CandidateMismatch`）：evaluation 的 CLI 以
++    `except (CliUsageError, ValueError, OSError) → sys.exit(1)` 統一收斂，繼承下去的話專屬碼出不來。
++    ⚠️ 拋出之前，`bounded_diagnostics.json` 必須已經發布（`path` 指向它）。
++    """
++
++    def __init__(self, message: str, *, path) -> None:
++        super().__init__(message)
++        self.path = path
++
++
++class CounterfactualEffectCheck:
++    """Stage 2 計畫書「①之三」的兩條不變條件與**檢查順序**。
++
++    ⚠️ `before_candidates == ∅` 單獨成立⛔ 證明不了 RR 真的加回去：flag 若恆為 `False`、而 RR 其實
++    沒加回 `CONTINUATION`，那道守門會空洞通過。所以固定順序驗：
++
++    1. 每列 `rr_decoupling_candidate == (lifecycle_phase == "CONTINUATION" and not setup_rr_qualified)`
++       ——不成立 → `candidate_flag_inconsistent`（flag 不可信，由它算的候選集合也不可信）；
++    2. 第 1 條成立後，`before_candidates == ∅`（此時等同「沒有任何一列是 CONTINUATION 且
++       setup_rr_qualified == false」）——不成立 → `rr_not_restored`。
++
++    ⚠️ 只能餵**已通過 row-level 原語**的列（型別由 `StreamRowValidator` 保證）。
++    ⚠️ sample 依 `(symbol, timeframe, as_of)` 排序取前 `DIAGNOSTIC_SAMPLE_LIMIT` 個；完整計數照樣保留。
++    ⚠️ 兩種違規各自一個 `BoundedSample`：**計算過程**的記憶體也有界（⛔ 不是只有輸出有界）。
++    """
++
++    def __init__(self) -> None:
++        self.inconsistent = BoundedSample()
++        self.candidates = BoundedSample()
++
++    @staticmethod
++    def _sample(row: Mapping[str, Any]) -> dict[str, Any]:
++        return {f: row[f] for f in ("symbol", "timeframe", "as_of", "lifecycle_phase",
++                                    "setup_rr_qualified", CANDIDATE_FIELD)}
++
++    def feed(self, row: Mapping[str, Any]) -> None:
++        expected = bool(row.get("lifecycle_phase") == "CONTINUATION" and not row["setup_rr_qualified"])
++        if row[CANDIDATE_FIELD] is not expected:
++            self.inconsistent.add(_key_tuple(row), self._sample(row))
++        elif row[CANDIDATE_FIELD] is True:
++            self.candidates.add(_key_tuple(row), self._sample(row))
++
++    def result(self) -> dict[str, Any] | None:
++        """生效時回 `None`；否則回 `{failure_reason, bounded_diagnostics}`。"""
++        if self.inconsistent.count:
++            reason, bucket = FAILURE_CANDIDATE_FLAG_INCONSISTENT, self.inconsistent
++        elif self.candidates.count:
++            reason, bucket = FAILURE_RR_NOT_RESTORED, self.candidates
++        else:
++            return None
++        return {
++            "failure_reason": reason,
++            "bounded_diagnostics": {
++                FAILURE_COUNT_FIELD[reason]: bucket.count,
++                "sample_keys": bucket.samples(),
++            },
++        }
++
++
++def validate_bounded_diagnostics(failure_reason: object, diagnostics: object) -> None:
++    """F5～F7、F10：依 `failure_reason` 分流的封閉 union。"""
++    if not isinstance(failure_reason, str) or failure_reason not in FAILURE_REASONS:     # F5
++        raise ArtifactError(f"F5：failure_reason 只接受 {FAILURE_REASONS}：{failure_reason!r}")
++    count_field = FAILURE_COUNT_FIELD[failure_reason]
++    want = {count_field, "sample_keys"}
++    if not isinstance(diagnostics, dict) or set(diagnostics) != want:                    # F6
++        actual = sorted(diagnostics) if isinstance(diagnostics, dict) else diagnostics
++        raise ArtifactError(
++            f"F6：failure_reason={failure_reason} 的 bounded_diagnostics 欄位必須恰好是 {sorted(want)}，實際 {actual!r}"
++        )
++    count = diagnostics[count_field]
++    if type(count) is not int or count <= 0:                                             # F6-a
++        raise ArtifactError(f"F6-a：{count_field} 必須是正整數：{count!r}")
++    samples = diagnostics["sample_keys"]
++    if not isinstance(samples, list) or len(samples) != min(DIAGNOSTIC_SAMPLE_LIMIT, count):
++        raise ArtifactError(
++            f"F6-a：sample_keys 的長度必須恰好是 min({DIAGNOSTIC_SAMPLE_LIMIT}, {count})"
++        )
++    keys = []
++    for item in samples:
++        if not isinstance(item, dict) or set(item) != SAMPLE_KEY_FIELDS:                 # F6-b
++            raise ArtifactError(f"F6-b：sample_keys[] 的欄位集合必須恰好是 {sorted(SAMPLE_KEY_FIELDS)}")
++        for f in ("symbol", "timeframe", "as_of", "lifecycle_phase"):                    # F6-c
++            if not isinstance(item[f], str) or not item[f]:
++                raise ArtifactError(f"F6-c：sample_keys[].{f} 必須是非空字串：{item[f]!r}")
++        for f in ("setup_rr_qualified", CANDIDATE_FIELD):                                # F7
++            if not isinstance(item[f], bool):
++                raise ArtifactError(f"F7：sample_keys[].{f} 必須是嚴格 boolean：{item[f]!r}")
++        continuation = item["lifecycle_phase"] == "CONTINUATION"
++        if failure_reason == FAILURE_CANDIDATE_FLAG_INCONSISTENT:                       # F10
++            violates = item[CANDIDATE_FIELD] != (continuation and not item["setup_rr_qualified"])
++        else:
++            violates = continuation and item["setup_rr_qualified"] is False and item[CANDIDATE_FIELD] is True
++        if not violates:
++            raise ArtifactError(
++                f"F10：sample {_key_tuple(item)} 沒有違反 {failure_reason} 宣稱的那一條——⛔ 不接受無關的列"
++            )
++        keys.append(_key_tuple(item))
++    if any(a >= b for a, b in zip(keys, keys[1:])):
++        raise ArtifactError("F6-a：sample_keys 必須依 (symbol, timeframe, as_of) 排序且⛔ 不重複")
++
++
++# ── before source artifact（「三之二」①） ───────────────────────────────────
++
++def build_before_source(*, bundle_id: str, before_ref: str, timeframe: str, replay_scope: str,
++                        generated_at: str, provenance: dict[str, Any],
++                        rows: list[dict[str, Any]]) -> dict[str, Any]:
++    """⚠️ **新 kind**，⛔ 不冒用 `AFTER_KIND`（那是 after 側的語意）。⛔ 不截斷。"""
++    return {
++        "schema_version": ARTIFACT_SCHEMA_VERSION, "kind": BEFORE_SOURCE_KIND,
++        "bundle_id": bundle_id, "before_ref": before_ref, "timeframe": timeframe,
++        "replay_scope": replay_scope, "generated_at": generated_at, "provenance": provenance,
++        "rows": rows,
++    }
++
++
++def validate_before_source_envelope(top: Mapping[str, Any]) -> None:
++    """頂層封閉欄位（串流時 `rows` 由呼叫端補佔位）。"""
++    if set(top) != _BEFORE_SOURCE_FIELDS:
++        raise ArtifactError(
++            "before source 的欄位集合不符："
++            f"多={sorted(set(top) - _BEFORE_SOURCE_FIELDS)}、缺={sorted(_BEFORE_SOURCE_FIELDS - set(top))}"
++        )
++    if type(top["schema_version"]) is not int or top["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的 before source schema_version={top['schema_version']!r}")
++    if top["kind"] != BEFORE_SOURCE_KIND:
++        raise ArtifactError(f"before source 的 kind={top['kind']!r}，預期 {BEFORE_SOURCE_KIND!r}")
++    for f in ("bundle_id", "before_ref", "timeframe", "replay_scope"):
++        if not isinstance(top[f], str) or not top[f]:
++            raise ArtifactError(f"before source 的 {f} 必須是非空字串")
++    validate_generated_at(top["generated_at"], "before source")
++    validate_provenance(top["provenance"], role="stage1")
++
++
++@dataclass(frozen=True)
++class BeforeStream:
++    """一份 before source 的串流摘要。⚠️ 只常駐 keys、候選 keys 與指定要留的完整列。"""
++
++    load: StreamLoad
++    keys: list[tuple[str, str, str]]
++    candidate_keys: list[tuple[str, str, str]]
++    kept_rows: dict[tuple[str, str, str], dict[str, Any]]
++    effect: dict[str, Any] | None   # `CounterfactualEffectCheck.result()`
++
++
++def stream_before_source(path: str | Path, *, keep_keys=frozenset(),
++                         copy_to: str | Path | None = None) -> BeforeStream:
++    """串流讀 before source：row-level 的**沿用三道**（`assert_unique_keys()`／`validate_replay_errors()`／
++    `validate_diagnostics(side="before")`，由 `StreamRowValidator` 以同一組原語逐列套用）＋「①之三」。
++
++    ⚠️ `side="before"` 的 `validate_diagnostics()` 刻意**不驗等價式**（Stage 0 已驗收的公開行為，⛔ 不改）；
++    等價式由 `CounterfactualEffectCheck` 在這裡另外驗——⛔ 不是只看 flag。
++    """
++    validator = StreamRowValidator("before source", side="before")
++    effect = CounterfactualEffectCheck()
++    kept: dict[tuple[str, str, str], dict[str, Any]] = {}
++    keep = frozenset(keep_keys)
++
++    def on_row(row: Any, _row_bytes: bytes) -> None:
++        key = validator.feed(row)
++        effect.feed(row)
++        if key in keep:
++            kept[key] = row
++
++    load = stream_canonical_artifact(path, BEFORE_SOURCE_KIND, on_row=on_row, copy_to=copy_to)
++    try:
++        validator.finish()
++        validate_before_source_envelope(load.top | {"rows": []})
++    except BaseException:
++        if copy_to is not None:
++            Path(copy_to).unlink(missing_ok=True)
++        raise
++    return BeforeStream(load=load, keys=validator.keys, candidate_keys=validator.candidate_keys,
++                        kept_rows=kept, effect=effect.result())
++
++
++# ── patches 與 raw blob（「四」「四之一」） ─────────────────────────────────
++
++def validate_raw_blob_entry(rel: str, entry: object) -> None:
++    """`raw_blob` entry：只有 `stored_sha256`／`stored_bytes`（⛔ 沒有 `artifact_sha256`）。
++
++    ⚠️ **只有 `patch/tooling.patch` 允許 0 bytes**——空的反事實 patch ＝ 根本沒做反事實。
++    """
++    if not isinstance(entry, dict) or set(entry) != RAW_BLOB_FIELDS:
++        raise ArtifactError(f"files[{rel}] 是 raw_blob，欄位集合必須恰好是 {sorted(RAW_BLOB_FIELDS)}")
++    if not is_hex64(entry["stored_sha256"]):
++        raise ArtifactError(f"files[{rel}].stored_sha256 必須是 64 字元小寫 hex")
++    size = entry["stored_bytes"]
++    if type(size) is not int or size < 0:
++        raise ArtifactError(f"files[{rel}].stored_bytes 必須是非負整數：{size!r}")
++    if size == 0 and rel != TOOLING_PATCH:
++        raise ArtifactError(f"files[{rel}] ⛔ 不得為 0 bytes——空的反事實 patch 等於根本沒做反事實")
++    if size == 0 and entry["stored_sha256"] != EMPTY_SHA256:
++        raise ArtifactError(f"files[{rel}] 是 0 bytes，stored_sha256 必須是空字串的 SHA")
++
++
++def validate_patches(patches: object) -> None:
++    """`patches` 的封閉 schema ＋ 第 4 條（`ordered_components` 恰好是固定順序）。"""
++    if not isinstance(patches, dict) or set(patches) != _PATCHES_FIELDS:
++        raise ArtifactError(f"patches 的欄位集合必須恰好是 {sorted(_PATCHES_FIELDS)}")
++    for f in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256"):
++        if not is_hex64(patches[f]):
++            raise ArtifactError(f"patches.{f} 必須是 64 字元小寫 hex（⛔ 不得省略或寫 null）")
++    if patches["ordered_components"] != list(ORDERED_COMPONENTS):
++        raise ArtifactError(
++            f"patches.ordered_components 必須恰好是 {list(ORDERED_COMPONENTS)}——順序即套用順序，由此強制"
++        )
++    # tooling 為空時 T2 ＝ T1，合成 diff 必然等於 counterfactual 的 diff。
++    if patches["tooling_patch_sha256"] == EMPTY_SHA256 and patches["composed_sha256"] != patches["counterfactual_patch_sha256"]:
++        raise ArtifactError("tooling patch 為空時 composed_sha256 必須等於 counterfactual_patch_sha256")
++
++
++def check_patch_bindings(files: Mapping[str, Any], patches: Mapping[str, Any]) -> None:
++    """「四之一」第 1、2 條：raw patch 的 `stored_sha256` 等於 `patches` 的宣告值。"""
++    if files[COUNTERFACTUAL_PATCH]["stored_sha256"] != patches["counterfactual_patch_sha256"]:
++        raise ArtifactError("files[patch/counterfactual.patch].stored_sha256 ≠ patches.counterfactual_patch_sha256")
++    if files[TOOLING_PATCH]["stored_sha256"] != patches["tooling_patch_sha256"]:
++        raise ArtifactError("files[patch/tooling.patch].stored_sha256 ≠ patches.tooling_patch_sha256")
++
++
++def _read_raw_member(root: Path, rel: str, entry: Mapping[str, Any]) -> bytes:
++    """讀 raw blob **一次**，重算 SHA 與長度並與 entry 比對（F8、recovery 的 metadata）。"""
++    path = root / rel
++    if path.is_symlink() or not path.is_file():
++        raise ArtifactError(f"{rel} 必須是一般檔案")
++    blob = path.read_bytes()
++    if (sha256_hex(blob), len(blob)) != (entry["stored_sha256"], entry["stored_bytes"]):
++        raise ArtifactError(f"{rel} 的實際 bytes 與宣告的 stored_sha256／stored_bytes 不符")
++    return blob
++
++
++# ── 環境見證錨的宣告值（「四」的 `environment_witness`） ─────────────────────
++
++def build_environment_witness_ref(envcheck: EnvcheckResult) -> dict[str, Any]:
++    files = envcheck.manifest["files"]
++    return {
++        "manifest_path": ENVCHECK_MANIFEST_PATH,
++        "manifest_sha256": envcheck.manifest_sha256,
++        "members": {rel: {"artifact_sha256": files[rel]["artifact_sha256"],
++                          "stored_sha256": files[rel]["stored_sha256"]} for rel in ENVCHECK_LAYOUT},
++    }
++
++
++def validate_environment_witness_ref(ref: object, *, envcheck: EnvcheckResult | None = None) -> None:
++    """封閉 schema；有 `envcheck` 時再比「宣告值 ＝ 本次重新驗證的環境見證錨」。"""
++    if not isinstance(ref, dict) or set(ref) != _WITNESS_REF_FIELDS:
++        raise ArtifactError(f"environment_witness 的欄位集合必須恰好是 {sorted(_WITNESS_REF_FIELDS)}")
++    if ref["manifest_path"] != ENVCHECK_MANIFEST_PATH:
++        raise ArtifactError(f"environment_witness.manifest_path 必須等於寫死常數 {ENVCHECK_MANIFEST_PATH!r}")
++    if not is_hex64(ref["manifest_sha256"]):
++        raise ArtifactError("environment_witness.manifest_sha256 必須是 64 字元小寫 hex")
++    members = ref["members"]
++    if not isinstance(members, dict) or set(members) != set(ENVCHECK_LAYOUT):
++        raise ArtifactError(f"environment_witness.members 的 key 必須恰好是 {list(ENVCHECK_LAYOUT)}")
++    for rel, entry in members.items():
++        if not isinstance(entry, dict) or set(entry) != _MEMBER_FIELDS or not all(
++                is_hex64(entry[f]) for f in _MEMBER_FIELDS):
++            raise ArtifactError(f"environment_witness.members[{rel}] 必須恰好是兩個 64 字元小寫 hex 的 SHA")
++    if envcheck is not None and ref != build_environment_witness_ref(envcheck):
++        raise ArtifactError("environment_witness 的宣告值與本次重新驗證的環境見證錨不符")
++
++
++# ── Stage 2 manifest（「四」） ───────────────────────────────────────────────
++
++def build_stage2_manifest(
++    *, bundle_id: str, expected_image_id: str, files: Mapping[str, Mapping[str, Any]],
++    patches: dict[str, Any], stage1_evidence: dict[str, Any], environment_witness: dict[str, Any],
++    terminal_outcome: int, generated_at: str, finalizer_provenance: dict[str, Any],
++) -> dict[str, Any]:
++    return {
++        "schema_version": ARTIFACT_SCHEMA_VERSION,
++        "kind": STAGE2_MANIFEST_KIND,
++        "bundle_id": bundle_id,
++        "expected_image_id": expected_image_id,
++        "files": {rel: dict(files[rel]) for rel in sorted(files)},
++        "patches": patches,
++        "stage1_evidence": stage1_evidence,
++        "environment_witness": environment_witness,
++        "terminal_outcome": terminal_outcome,
++        "generated_at": generated_at,
++        "finalizer_provenance": finalizer_provenance,
++    }
++
++
++def validate_stage2_manifest(manifest: object) -> None:
++    """封閉 schema。⛔ 多欄、缺欄、型別不符一律中止。"""
++    if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_FIELDS:
++        actual = set(manifest) if isinstance(manifest, dict) else set()
++        raise ArtifactError(
++            "Stage 2 manifest 的欄位集合不符："
++            f"多={sorted(actual - _MANIFEST_FIELDS)}、缺={sorted(_MANIFEST_FIELDS - actual)}"
++        )
++    if type(manifest["schema_version"]) is not int or manifest["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的 Stage 2 manifest schema_version={manifest['schema_version']!r}")
++    if manifest["kind"] != STAGE2_MANIFEST_KIND:
++        raise ArtifactError(f"Stage 2 manifest 的 kind={manifest['kind']!r}，預期 {STAGE2_MANIFEST_KIND!r}")
++    if not isinstance(manifest["bundle_id"], str) or not manifest["bundle_id"]:
++        raise ArtifactError("Stage 2 manifest 的 bundle_id 必須是非空字串")
++    if not is_image_id(manifest["expected_image_id"]):
++        raise ArtifactError("Stage 2 manifest 的 expected_image_id 必須是 sha256: ＋ 64 字元小寫 hex")
++    files = manifest["files"]
++    if not isinstance(files, dict) or set(files) != set(STAGE2_LAYOUT):
++        actual = set(files) if isinstance(files, dict) else set()
++        raise ArtifactError(
++            f"Stage 2 manifest 的 files 必須恰好是 layout 的 {len(STAGE2_LAYOUT)} 項："
++            f"多={sorted(actual - set(STAGE2_LAYOUT))}、缺={sorted(set(STAGE2_LAYOUT) - actual)}"
++        )
++    for rel in CANONICAL_MEMBERS:
++        validate_file_entry(rel, files[rel])
++    for rel in RAW_MEMBERS:
++        validate_raw_blob_entry(rel, files[rel])
++    validate_patches(manifest["patches"])
++    check_patch_bindings(files, manifest["patches"])
++    validate_stage1_evidence_ref(manifest["stage1_evidence"])
++    validate_environment_witness_ref(manifest["environment_witness"])
++    outcome = manifest["terminal_outcome"]
++    if type(outcome) is not int or outcome not in STAGE2_TERMINAL_OUTCOMES:
++        raise ArtifactError(f"Stage 2 manifest 的 terminal_outcome 只接受 {STAGE2_TERMINAL_OUTCOMES}：{outcome!r}")
++    validate_generated_at(manifest["generated_at"], "Stage 2 manifest")
++    validate_provenance(manifest["finalizer_provenance"], role="finalizer")
++
++
++# ── 全圖（「五之零」的十六道） ───────────────────────────────────────────────
++
++@dataclass(frozen=True)
++class Stage2Verified:
++    manifest: dict[str, Any]
++    identity: dict[str, Any]
++    terminal_outcome: int
++    before_base_commit: str   # before source 的 provenance.base_commit（道 8 已綁到 Stage 1 after 的 base）
++
++
++def _check_canonical_entry(rel: str, entry: Mapping[str, Any], load) -> None:
++    got = (load.artifact_sha256, load.stored_sha256, load.stored_bytes)
++    if got != (entry["artifact_sha256"], entry["stored_sha256"], entry["stored_bytes"]):
++        raise ArtifactError(f"manifest 記的 {rel} metadata 與實際檔案不符")
++
++
++def verify_stage2_graph(
++    root: str | Path,
++    *,
++    anchor: Stage1Anchor,
++    envcheck: EnvcheckResult,
++    stage2_identity: Mapping[str, Any] | None = None,
++) -> Stage2Verified:
++    """十六道（「五之零」）＋ 封閉檔案集合 ＋ manifest 每一項由實際檔案重算。
++
++    ⚠️ finalize（對 staging）與 recovery **呼叫同一支**。`anchor` 與 `envcheck` 由呼叫端以
++    `load_stage1_anchor()`／`verify_envcheck(require_equivalent=True)` 在**同一個程序**重新取得
++    ——⛔ 不接受跨程序傳遞的 snapshot。
++    ⚠️ 每份檔案**只讀一次**；before source 用串流。
++    """
++    root = Path(root)
++    manifest_load = load_canonical_evidence_artifact(root / STAGE2_MANIFEST_NAME, STAGE2_MANIFEST_KIND)
++    manifest = manifest_load.parsed
++    validate_stage2_manifest(manifest)
++    actual = archive_file_set(root)
++    expected = set(STAGE2_LAYOUT) | {STAGE2_MANIFEST_NAME}
++    if actual != expected:
++        raise ArtifactError(
++            f"Stage 2 archive 的檔案集合不符：多={sorted(actual - expected)}、缺={sorted(expected - actual)}"
++        )
++    files = manifest["files"]
++
++    # 道 2（Stage 1 信任錨）與道 16（環境見證錨）：manifest 的宣告值必須等於本次重算的值。
++    validate_stage1_evidence_ref(manifest["stage1_evidence"], anchor=anchor)
++    validate_environment_witness_ref(manifest["environment_witness"], envcheck=envcheck)
++    if envcheck.outcome != OUTCOME_EQUIVALENT:
++        raise ArtifactError("道 16／E3b：環境見證的結果不是 EQUIVALENT——⛔ 不得放行 Stage 2")
++
++    # ── 讀檔（每份一次）＋ metadata 重算 ＋ 單檔 validator（道 1） ──────────────
++    for rel in RAW_MEMBERS:
++        _read_raw_member(root, rel, files[rel])
++    identity_load = load_canonical_evidence_artifact(root / IDENTITY, RUN_IDENTITY_KIND)
++    _check_canonical_entry(IDENTITY, files[IDENTITY], identity_load)
++    identity = identity_load.parsed
++    validate_run_identity(identity)
++    comparison_load = load_canonical_evidence_artifact(root / COMPARISON, COMPARISON_KIND)
++    _check_canonical_entry(COMPARISON, files[COMPARISON], comparison_load)
++    comparison = comparison_load.parsed
++    comparison_keys = validate_comparison_artifact(comparison)                      # 道 1、13
++    report_load = load_canonical_evidence_artifact(root / REPORT, REPORT_KIND)
++    _check_canonical_entry(REPORT, files[REPORT], report_load)
++    report = report_load.parsed
++    validate_report(report, comparison=comparison, comparison_sha256=comparison_load.artifact_sha256,
++                    report_max_rows=STAGE2_REPORT_MAX_ROWS)                          # 道 1、5、11、12
++    before = stream_before_source(root / BEFORE_SOURCE, keep_keys=set(anchor.cohort_keys))
++    _check_canonical_entry(BEFORE_SOURCE, files[BEFORE_SOURCE], before.load)
++    before_top = before.load.top
++
++    # ── 道 2：Stage 1 信任錨的跨檔關係（第 6、8、9、10 道） ───────────────────
++    validate_stage1_anchor_graph(anchor, stage2_identity=identity, envcheck_identity=envcheck.identity,
++                                 expected_bundle_id=manifest["bundle_id"])
++    if stage2_identity is not None and dict(stage2_identity) != identity:
++        raise ArtifactError("本次的 Stage 2 run identity 與 archive 封存的那一份⛔ 不完全相同")
++
++    # ── 道 16：identity 逐位元等於 envcheck 封存的那一份 ─────────────────────
++    env_entry = envcheck.manifest["files"][ENVCHECK_IDENTITY]
++    if (identity_load.artifact_sha256, identity_load.stored_sha256) != \
++            (env_entry["artifact_sha256"], env_entry["stored_sha256"]):
++        raise ArtifactError("道 16：identity/run_identity.json.gz 與 envcheck 封存的 identity ⛔ 不是逐位元相同")
++
++    # ── 道 3、4：comparison 的每列等於來源 row；keys 恰好是 Stage 1 D+1 cohort ────
++    if comparison_keys != sorted(anchor.cohort_keys):
++        only_c = sorted(set(comparison_keys) - set(anchor.cohort_keys))[:5]
++        only_a = sorted(set(anchor.cohort_keys) - set(comparison_keys))[:5]
++        raise ArtifactError(
++            f"道 4：comparison 的 keys ≠ Stage 1 D+1 cohort（只在 comparison {only_c}、只在 cohort {only_a}）"
++        )
++    for row in comparison["rows"]:
++        key = _key_tuple(row)
++        if key not in before.kept_rows or row["before"] != before.kept_rows[key]:
++            raise ArtifactError(f"道 3：comparison {key} 的 before ≠ before source 中同 key 的那一列")
++        if row["after"] != anchor.cohort_rows[key]:
++            raise ArtifactError(f"道 3：comparison {key} 的 after ≠ Stage 1 D+1 after 中同 key 的那一列")
++    if comparison["after_artifact_sha256"] != anchor.members[STAGE1_ANCHOR_AFTER]["artifact_sha256"]:
++        raise ArtifactError("comparison 的 after_artifact_sha256 ≠ 已錨定的 Stage 1 D+1 after")
++
++    # ── 道 6：bundle 鏈 ─────────────────────────────────────────────────────
++    bundle_chain = {
++        "Stage 2 manifest": manifest["bundle_id"], "identity": identity["bundle_id"],
++        "before source": before_top["bundle_id"], "comparison": comparison["bundle_id"],
++        "report": report["bundle_id"], "Stage 1 manifest": anchor.bundle_id,
++        "envcheck manifest": envcheck.manifest["bundle_id"],
++    }
++    if len(set(bundle_chain.values())) != 1:
++        raise ArtifactError(f"道 6：bundle_id 等式鏈斷了：{bundle_chain}")
++
++    # ── 道 7：provenance 逐一列舉的位置與 role ──────────────────────────────
++    holders = {BEFORE_SOURCE: before_top, COMPARISON: comparison, STAGE2_MANIFEST_NAME: manifest}
++    for rel, field, role in PROVENANCE_MAP:
++        holder = holders[rel]
++        if field not in holder:
++            raise ArtifactError(f"道 7：{rel} 缺少 {field}")
++        validate_provenance(holder[field], role=role)
++        if holder[field]["image_digest"] != manifest["expected_image_id"]:
++            raise ArtifactError(f"道 7：{rel}.{field}.image_digest ≠ manifest 的 expected_image_id")
++
++    # ── 道 8：before_ref ────────────────────────────────────────────────────
++    before_prov, comparison_prov = before_top["provenance"], comparison["provenance"]
++    refs = {
++        "before source.before_ref": before_top["before_ref"],
++        "comparison.before_ref": comparison["before_ref"],
++        "before source.provenance.base_commit": before_prov["base_commit"],
++        "comparison.provenance.base_commit": comparison_prov["base_commit"],
++        # ⚠️ ③d 補：before 必須跑在 Stage 1 after 的同一個 base 上（v3 模型：e1cbbbd ＋ 反事實 patch）
++        # ——合成守門與 failed record 的查找鍵都以它為 base，⛔ 不得各自漂移。
++        "Stage 1 after.provenance.base_commit": anchor.after_base_commit,
++    }
++    if len(set(refs.values())) != 1:
++        raise ArtifactError(f"道 8：before_ref／base_commit 不一致：{refs}")
++
++    # ── 道 9：timeframe／replay_scope ───────────────────────────────────────
++    for f in ("timeframe", "replay_scope"):
++        if before_top[f] != anchor.after_top[f]:
++            raise ArtifactError(f"道 9：before source 的 {f}={before_top[f]!r} ≠ Stage 1 D+1 的 {anchor.after_top[f]!r}")
++
++    # ── 道 10：同一次 runner invocation → provenance 逐欄相等 ──────────────────
++    if before_prov != comparison_prov:
++        diff = sorted(f for f in before_prov if before_prov[f] != comparison_prov.get(f))
++        raise ArtifactError(f"道 10：before source 與 comparison 的 provenance 不相等（{diff}）")
++
++    # ── 全量守門：before keys 恰好等於已錨定 D+1 的全量 keys（唯一、固定排序） ────
++    if any(a >= b for a, b in zip(before.keys, before.keys[1:])):
++        raise ArtifactError("before source 的 rows 必須依 (symbol, timeframe, as_of) 排序且⛔ 不重複")
++    if before.keys != anchor.after_keys:
++        only_b = sorted(set(before.keys) - set(anchor.after_keys))[:5]
++        only_a = sorted(set(anchor.after_keys) - set(before.keys))[:5]
++        raise ArtifactError(
++            f"before source 的 keys ≠ 已錨定 Stage 1 D+1 的全量 keys（只在 before {only_b}、只在 D+1 {only_a}）"
++        )
++
++    # ── 道 15 → 14：「①之三」的檢查順序（flag 不可信時，候選集合也不可信） ───────
++    if before.effect is not None:
++        raise ArtifactError(
++            f"道 15／14：反事實沒有生效（{before.effect['failure_reason']}，"
++            f"{before.effect['bounded_diagnostics']}）——⛔ 這不是成功 archive"
++        )
++    if before.candidate_keys:
++        raise ArtifactError(f"道 14：before source 的 candidate_keys 必須為空：{before.candidate_keys[:5]}")
++
++    # ── 道 16：image 鏈 ─────────────────────────────────────────────────────
++    image_chain = {
++        "before source": before_prov["image_digest"], "comparison": comparison_prov["image_digest"],
++        "Stage 2 manifest": manifest["expected_image_id"], "identity": identity["expected_image_id"],
++        "envcheck identity": envcheck.identity["expected_image_id"],
++        "finalizer": manifest["finalizer_provenance"]["image_digest"],
++    }
++    if len(set(image_chain.values())) != 1:
++        raise ArtifactError(f"道 16：image 等式鏈斷了：{image_chain}")
++
++    # ── 「四之一」第 3 條：合成 hash 綁到 before 實際跑的那一份 ─────────────────
++    # ⚠️ 這是「⛔ 不讓語意修改偽裝成 instrumentation」的那道綁定。
++    if manifest["patches"]["composed_sha256"] != before_prov["tooling_patch_sha256"]:
++        raise ArtifactError(
++            "patches.composed_sha256 ≠ before source 的 provenance.tooling_patch_sha256——⛔ 合成關係對不上"
++        )
++    return Stage2Verified(manifest=manifest, identity=identity, terminal_outcome=manifest["terminal_outcome"],
++                          before_base_commit=before_prov["base_commit"])
++
++
++# ── shell 合成守門的交接（2026-09-24 review 高 1） ───────────────────────────
++
++@dataclass(frozen=True)
++class VerifiedComposition:
++    """shell **已在隔離 worktree 重建並比對過**的合成關係（由 `finalize-stage2-evidence.sh` 以
++    `--verified-*` 注入）。
++
++    ⚠️ **為什麼需要交接**：合成守門（F8-a、「四之二」）在 host、Docker 之前做，Python 之後**重新讀**
++    operational artifact 與 patch。兩段之間來源若被一致地換成 B，shell 證明的是 A 的合成關係、Python
++    驗證並封存的卻是 B——而 Python ⛔ 不碰 git，只能驗 B 的宣告值彼此一致。`:ro` 掛載只擋容器寫入，
++    ⛔ 凍結不了 host 上的內容。所以 Python 必須拿**自己實際讀到、要封存的**內容與這四個值比對，
++    相符才允許 commit point（fsync 之前）。
++    ⚠️ `base_commit` 是**兩份 patch 所依附的 base**，⛔ 不是 `--base-commit`（那是 finalizer 程式碼的來源）。
++    """
++
++    base_commit: str
++    counterfactual_patch_sha256: str
++    tooling_patch_sha256: str
++    composed_sha256: str
++    # ⚠️ ⑦a：shell 從**實際 patch** 重算的語意 SHA（只有 publish／recover-failed-record 會帶）。
++    counterfactual_semantic_sha256: str | None = None
++
++    def __post_init__(self) -> None:
++        _claims(self.base_commit, self.counterfactual_patch_sha256, self.tooling_patch_sha256,
++                self.composed_sha256)
++        if self.counterfactual_semantic_sha256 is not None:
++            validate_semantic_sha256(self.counterfactual_semantic_sha256, "交接的語意 SHA")
++
++
++def check_verified_composition(verified: VerifiedComposition, *, base_commit: str,
++                               patches: Mapping[str, Any], label: str,
++                               semantic_sha256: str | None = None) -> None:
++    """實際讀到、要封存（或要 fsync）的內容 ⇔ shell 合成守門驗過的值。⛔ 任一不符即中止。
++
++    `semantic_sha256`：failed record 實際的 `counterfactual_semantic_sha256`（成功 archive ⛔ 不存語意 SHA，
++    傳 `None`）。⚠️ 交接值與實際欄位必須**同時存在**且相等——一邊有、一邊沒有也是不符。
++    """
++    if not isinstance(verified, VerifiedComposition):
++        raise ArtifactError(f"{label}：缺少 shell 合成守門的交接值——⛔ 沒有它就無法證明封存的就是驗過的那一份")
++    if (semantic_sha256 is None) != (verified.counterfactual_semantic_sha256 is None):
++        raise ArtifactError(
++            f"{label}：語意 SHA 的交接值與實際欄位⛔ 必須同時存在（交接 "
++            f"{verified.counterfactual_semantic_sha256!r}、實際 {semantic_sha256!r}）"
++        )
++    if semantic_sha256 is not None and semantic_sha256 != verified.counterfactual_semantic_sha256:
++        raise ArtifactError(
++            f"{label}：record 的 counterfactual_semantic_sha256 與 shell 由實際 patch 重算的值不符——"
++            "⛔ 不發布、⛔ 不 fsync"
++        )
++    actual = {"base_commit": base_commit,
++              **{f: patches[f] for f in ("counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256")}}
++    expected = {"base_commit": verified.base_commit,
++                "counterfactual_patch_sha256": verified.counterfactual_patch_sha256,
++                "tooling_patch_sha256": verified.tooling_patch_sha256,
++                "composed_sha256": verified.composed_sha256}
++    diff = sorted(f for f in expected if actual[f] != expected[f])
++    if diff:
++        raise ArtifactError(
++            f"{label}：實際讀到的 {diff} 與 shell 合成守門驗過的值不符——合成守門之後輸入被換掉了（TOCTOU），"
++            "⛔ 不發布、⛔ 不 fsync"
++        )
++
++
++# ── 發布與 recovery（「五」「六」） ──────────────────────────────────────────
++
++def _load_trust_anchors(python_root: str | Path, stage2_identity: Mapping[str, Any] | None):
++    """Stage 1 信任錨（第 1～10 道）＋ 環境見證錨（E1～E7 ＋ E3b）。⚠️ 每次呼叫都重新載入。"""
++    anchor = load_stage1_anchor(python_root)
++    envcheck = verify_envcheck(resolve_repo_path(python_root, ENVCHECK_ROOT_PATH), anchor,
++                               require_equivalent=True, stage2_identity=stage2_identity)
++    identity = envcheck.identity if stage2_identity is None else dict(stage2_identity)
++    validate_stage1_anchor_graph(anchor, stage2_identity=identity, envcheck_identity=envcheck.identity,
++                                 expected_bundle_id=identity["bundle_id"])
++    return anchor, envcheck
++
++
++def _read_frozen_patch(run_dir: Path, rel: str) -> bytes:
++    path = run_dir / rel
++    if path.is_symlink() or not path.is_file():
++        raise ArtifactError(f"凍結 patch 必須是 run 目錄內的一般檔案：{path}")
++    return path.read_bytes()
++
++
++def finalize_stage2_evidence(
++    *,
++    python_root: str | Path,
++    run_dir: str | Path,
++    stage2_identity: Mapping[str, Any],
++    provenance_factory,
++    generated_at: str,
++    verified: VerifiedComposition,
++) -> int:
++    """run 目錄的 operational 輸出 ＋ 凍結 patch → 發布成功 archive。回傳 manifest 的 `terminal_outcome`。
++
++    ⚠️ **合成守門已由 shell 在呼叫前做完**（「四之二」）；這裡驗內部一致性與全圖，並在 commit point
++    之前確認 staging 裡要封存的內容**就是** shell 驗過的那一份（`verified`）。
++    階段 A：信任錨 ＋ 環境見證錨 ＋ 讀入全部來源（所有 project import 在此發生；before source
++    在**驗證的同一趟**寫出封存副本）；階段 B：才建 finalizer_provenance 與 manifest，對 staging 跑
++    **與 recovery 相同的**十六道，最後 `rename_noreplace()`——唯一的 commit point。
++    """
++    validate_run_identity(stage2_identity)
++    stage2_identity = dict(stage2_identity)
++    run_dir = Path(run_dir)
++    root = resolve_repo_path(python_root, STAGE2_EVIDENCE_ROOT_PATH)
++    anchor, envcheck = _load_trust_anchors(python_root, stage2_identity)
++
++    with ClosedArchiveWriter(root, STAGE2_LAYOUT, recover_hint=RECOVER_DURABILITY_HINT) as writer:
++        # ── 階段 A ──────────────────────────────────────────────────────────
++        comparison = load_canonical_evidence_artifact(run_dir / OPERATIONAL_COMPARISON, COMPARISON_KIND)
++        report = load_canonical_evidence_artifact(run_dir / OPERATIONAL_REPORT, REPORT_KIND)
++        before = stream_before_source(run_dir / OPERATIONAL_BEFORE_SOURCE, keep_keys=set(anchor.cohort_keys),
++                                      copy_to=writer.path_for(BEFORE_SOURCE))
++        writer.record_streamed(BEFORE_SOURCE, before.load)
++        writer.add_canonical(COMPARISON, comparison.parsed)
++        writer.add_canonical(REPORT, report.parsed)
++        writer.add_canonical(IDENTITY, stage2_identity)
++        # ⚠️ 只讀 orchestrator 的**凍結副本**，⛔ 不讀使用者原始路徑（「七之三」）。
++        counterfactual = writer.add_raw(COUNTERFACTUAL_PATCH, _read_frozen_patch(run_dir, FROZEN_COUNTERFACTUAL_PATCH))
++        tooling = writer.add_raw(TOOLING_PATCH, _read_frozen_patch(run_dir, FROZEN_TOOLING_PATCH))
++        patches = {
++            "counterfactual_patch_sha256": counterfactual["stored_sha256"],
++            "tooling_patch_sha256": tooling["stored_sha256"],
++            "composed_sha256": before.load.top["provenance"]["tooling_patch_sha256"],
++            "ordered_components": list(ORDERED_COMPONENTS),
++        }
++
++        # ── 階段 B ──────────────────────────────────────────────────────────
++        provenance = provenance_factory()
++        validate_provenance(provenance, role="finalizer")
++        manifest = build_stage2_manifest(
++            bundle_id=stage2_identity["bundle_id"],
++            expected_image_id=stage2_identity["expected_image_id"],
++            files=writer.files, patches=patches,
++            stage1_evidence=build_stage1_evidence_ref(anchor),
++            environment_witness=build_environment_witness_ref(envcheck),
++            terminal_outcome=STAGE2_TERMINAL_OUTCOMES[0],
++            generated_at=generated_at, finalizer_provenance=provenance,
++        )
++        validate_stage2_manifest(manifest)
++
++        def verify_staging(staging: Path) -> None:
++            graph = verify_stage2_graph(staging, anchor=anchor, envcheck=envcheck, stage2_identity=stage2_identity)
++            check_verified_composition(verified, base_commit=graph.before_base_commit,
++                                       patches=graph.manifest["patches"], label="finalize")
++            # ⚠️ ⛔ 階段 B 之後⛔ 不得有新的 project import——重算一次，與封存的比對。
++            if provenance_factory()["project_modules_sha256"] != provenance["project_modules_sha256"]:
++                raise ArtifactError("階段 B 之後又載入了新的專案模組——⛔ 封存的 provenance 已經記不全了")
++
++        writer.commit(STAGE2_MANIFEST_NAME, manifest, verify=verify_staging)
++    return manifest["terminal_outcome"]
++
++
++def recover_stage2_durability(*, python_root: str | Path, provenance: dict[str, Any],
++                              verified: VerifiedComposition) -> int:
++    """⚠️ 只重新驗證既有的成功 archive 並重新 fsync——⛔ 不讀 operational 來源、⛔ 不重建、⛔ 不重跑 replay。
++
++    完整重做 Stage 1 信任錨、環境見證錨（含 E3a 全量重比 ＋ E3b）與十六道，**在 fsync 之前**
++    比對執行身分。成功時回 manifest 的 `terminal_outcome`（⛔ 不得寫死）。再失敗 ⛔ 不刪除。
++    """
++    root = resolve_repo_path(python_root, STAGE2_EVIDENCE_ROOT_PATH)
++    if not root.is_dir():
++        raise ArtifactError(f"--recover-durability 要求成功 archive 已存在：{root}")
++    anchor, envcheck = _load_trust_anchors(python_root, None)
++    graph = verify_stage2_graph(root, anchor=anchor, envcheck=envcheck)
++    check_verified_composition(verified, base_commit=graph.before_base_commit,
++                               patches=graph.manifest["patches"], label="recover-durability")
++    archived = graph.manifest["finalizer_provenance"]
++    validate_provenance(provenance, role="finalizer")
++    for name in RECOVERY_IDENTITY_FIELDS:
++        if provenance.get(name) != archived.get(name):
++            raise ArtifactError(
++                f"recovery 的執行身分與封存的 finalizer_provenance 的 {name} 不符——⛔ 在 fsync 之前中止"
++            )
++    _fsync_tree(root)
++    fsync_parent_or_unconfirmed(root, published=False, recover_hint=RECOVER_DURABILITY_HINT)
++    return graph.terminal_outcome
++
++
++# ── failed-attempt record（「七」） ─────────────────────────────────────────
++
++def build_counterfactual_failure(*, bundle_id: str, generated_at: str, provenance: dict[str, Any],
++                                 effect: Mapping[str, Any]) -> dict[str, Any]:
++    """replay 在結束碼 6 時寫出的中繼檔（`<run>/stage2/bounded_diagnostics.json`）。
++
++    ⚠️ **③d 訂定**：除了 `failure_reason` ＋ 分流欄位，還帶 `bundle_id` 與該次 replay 的
++    `provenance`——F3 要求 record 的 provenance 是**那一次 replay** 的（`tooling_patch_sha256` ＝ 合成
++    hash），而 finalizer 自己的 provenance 記的是 finalizer 的 argv 與 base，⛔ 不能代替。
++    """
++    return {
++        "schema_version": ARTIFACT_SCHEMA_VERSION, "kind": COUNTERFACTUAL_FAILURE_KIND,
++        "bundle_id": bundle_id, "generated_at": generated_at, "provenance": provenance,
++        "failure_reason": effect["failure_reason"], "bounded_diagnostics": effect["bounded_diagnostics"],
++    }
++
++
++def validate_counterfactual_failure(payload: object) -> None:
++    if not isinstance(payload, dict) or set(payload) != _FAILURE_SOURCE_FIELDS:
++        actual = set(payload) if isinstance(payload, dict) else set()
++        raise ArtifactError(
++            "bounded_diagnostics 中繼檔的欄位集合不符："
++            f"多={sorted(actual - _FAILURE_SOURCE_FIELDS)}、缺={sorted(_FAILURE_SOURCE_FIELDS - actual)}"
++        )
++    if type(payload["schema_version"]) is not int or payload["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的中繼檔 schema_version={payload['schema_version']!r}")
++    if payload["kind"] != COUNTERFACTUAL_FAILURE_KIND:
++        raise ArtifactError(f"中繼檔的 kind={payload['kind']!r}，預期 {COUNTERFACTUAL_FAILURE_KIND!r}")
++    if not isinstance(payload["bundle_id"], str) or not payload["bundle_id"]:
++        raise ArtifactError("中繼檔的 bundle_id 必須是非空字串")
++    validate_generated_at(payload["generated_at"], "bounded_diagnostics 中繼檔")
++    validate_provenance(payload["provenance"], role="stage1")
++    validate_bounded_diagnostics(payload["failure_reason"], payload["bounded_diagnostics"])
++
++
++def validate_semantic_sha256(value: object, label: str) -> None:
++    """語意 SHA：64 字元小寫 hex，⛔ 不得是空 diff 的 SHA（語意 diff 必須非空）。"""
++    if not is_hex64(value):
++        raise ArtifactError(f"{label} 必須是 64 字元小寫 hex：{value!r}")
++    if value == EMPTY_SHA256:
++        raise ArtifactError(f"{label} ⛔ 不得是空 diff 的 SHA——反事實在兩個產品檔上必須有改動")
++
++
++def failed_record_dir_name(bundle_id: str, counterfactual_semantic_sha256: str) -> str:
++    """`<bundle_id>-<counterfactual_semantic_sha256>`。
++
++    ⚠️ 完整 64 碼，⛔ 不截斷——截成 12 碼會讓不同的完整 SHA 映到同一路徑。⚠️ 鍵是**語意 SHA**
++    （⑦ 總綱 v1 決策表第 9 列）：只改測試檔的 counterfactual 得到同一個目錄，⛔ 不能靠它解鎖重跑。
++    """
++    validate_semantic_sha256(counterfactual_semantic_sha256, "counterfactual_semantic_sha256")
++    if not isinstance(bundle_id, str) or not bundle_id or "/" in bundle_id or bundle_id in (".", ".."):
++        raise ArtifactError(f"bundle_id ⛔ 不能當目錄名：{bundle_id!r}")
++    return f"{bundle_id}-{counterfactual_semantic_sha256}"
++
++
++def build_failed_record(*, identity: Mapping[str, Any], patches: dict[str, Any],
++                        files: Mapping[str, Mapping[str, Any]], failure: Mapping[str, Any],
++                        generated_at: str, counterfactual_semantic_sha256: str) -> dict[str, Any]:
++    return {
++        "schema_version": ARTIFACT_SCHEMA_VERSION,
++        "kind": FAILED_ATTEMPT_KIND,
++        "bundle_id": identity["bundle_id"],
++        "expected_image_id": identity["expected_image_id"],
++        "run_identity": dict(identity),
++        "patches": patches,
++        "files": {rel: dict(files[rel]) for rel in sorted(files)},
++        "bounded_diagnostics": failure["bounded_diagnostics"],
++        "failure_reason": failure["failure_reason"],
++        "generated_at": generated_at,
++        "provenance": failure["provenance"],
++        "counterfactual_semantic_sha256": counterfactual_semantic_sha256,
++    }
++
++
++def validate_failed_record(record: object) -> None:
++    """單份 record 的封閉 schema：F1、F2、F3（role／image／合成 hash）、F5～F7、F10，patch 宣告值。"""
++    if not isinstance(record, dict) or set(record) != _FAILED_RECORD_FIELDS:
++        actual = set(record) if isinstance(record, dict) else set()
++        raise ArtifactError(
++            "failed record 的欄位集合不符："
++            f"多={sorted(actual - _FAILED_RECORD_FIELDS)}、缺={sorted(_FAILED_RECORD_FIELDS - actual)}"
++        )
++    if type(record["schema_version"]) is not int or record["schema_version"] != ARTIFACT_SCHEMA_VERSION:
++        raise ArtifactError(f"未知的 failed record schema_version={record['schema_version']!r}")
++    if record["kind"] != FAILED_ATTEMPT_KIND:
++        raise ArtifactError(f"failed record 的 kind={record['kind']!r}，預期 {FAILED_ATTEMPT_KIND!r}")
++    identity = record["run_identity"]
++    validate_run_identity(identity)                                                          # F1
++    for f in ("bundle_id", "expected_image_id"):                                             # F2
++        if record[f] != identity[f]:
++            raise ArtifactError(f"F2：failed record 的 {f} ≠ embedded run_identity 的同名欄位")
++    validate_generated_at(record["generated_at"], "failed record")
++    validate_semantic_sha256(record["counterfactual_semantic_sha256"], "failed record 的 counterfactual_semantic_sha256")
++    validate_patches(record["patches"])
++    files = record["files"]
++    if not isinstance(files, dict) or set(files) != set(FAILED_LAYOUT):
++        raise ArtifactError(f"failed record 的 files 必須恰好是 {list(FAILED_LAYOUT)}")
++    for rel in FAILED_LAYOUT:
++        validate_raw_blob_entry(rel, files[rel])
++    check_patch_bindings(files, record["patches"])
++    prov = record["provenance"]
++    validate_provenance(prov, role="stage1")                                                 # F3
++    if prov["image_digest"] != record["expected_image_id"]:
++        raise ArtifactError("F3：provenance.image_digest ≠ expected_image_id")
++    if prov["tooling_patch_sha256"] != record["patches"]["composed_sha256"]:
++        raise ArtifactError("F3：provenance.tooling_patch_sha256 ≠ patches.composed_sha256")
++    validate_bounded_diagnostics(record["failure_reason"], record["bounded_diagnostics"])    # F5～F7、F10
++
++
++def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[str, Any], base_commit: str,
++                         dir_name: str | None = None) -> dict[str, Any]:
++    """F1～F10 中⛔ 不需要 git 的各項（⚠️ F8-a 的合成守門在 shell）。回傳已驗證的 record。
++
++    ⚠️ 發布（對 staging，`dir_name` 給正式目錄名）、lookup 與 recovery 三處都呼叫這一支。
++    """
++    record_dir = Path(record_dir)
++    actual = archive_file_set(record_dir)                                                    # F9
++    expected = set(FAILED_LAYOUT) | {FAILED_RECORD_NAME}
++    if actual != expected:
++        raise ArtifactError(
++            f"F9：failed record {record_dir.name} 的檔案集合不符：多={sorted(actual - expected)}、缺={sorted(expected - actual)}"
++        )
++    record = load_canonical_evidence_artifact(record_dir / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
++    validate_failed_record(record)
++    if record["run_identity"] != dict(envcheck_identity):                                    # F2-a
++        raise ArtifactError(
++            "F2-a：embedded run_identity ⛔ 不完全等於唯一固定的 Stage 2 identity（環境見證錨封存的那一份）"
++        )
++    if record["provenance"]["base_commit"] != base_commit:                                   # F3
++        raise ArtifactError(
++            f"F3：provenance.base_commit={record['provenance']['base_commit']} ≠ 兩份 patch 所依附的 base {base_commit}"
++        )
++    # F4 的 Python 層：目錄名 ＝ `<bundle_id>-<宣告的語意 SHA>`。⚠️ 宣告值是否等於由封存 patch **重算**的
++    # 語意 SHA 要用 git，是 F4 的 shell 層（`finalize-stage2-evidence.sh`）；宣告值 ＝ 交接值由
++    # `check_verified_composition()` 驗。
++    name = record_dir.name if dir_name is None else dir_name
++    if name != failed_record_dir_name(record["bundle_id"], record["counterfactual_semantic_sha256"]):
++        raise ArtifactError(f"F4：目錄名 {name} 與 record 內容不符——⛔ 改目錄名不能繞過 lookup")
++    for rel in FAILED_LAYOUT:                                                                # F8
++        _read_raw_member(record_dir, rel, record["files"][rel])
++    return record
++
++
++def publish_failed_record(*, python_root: str | Path, run_dir: str | Path,
++                          stage2_identity: Mapping[str, Any], generated_at: str,
++                          verified: VerifiedComposition) -> Path:
++    """中繼檔 ＋ 凍結 patch → `failed/<bundle_id>-<counterfactual_semantic_sha256>/`。回傳發布的目錄。
++
++    ⚠️ **合成守門（F8-a）與語意 SHA 已由 shell 在呼叫前做完**；目錄名與 record 的語意欄位都取交接值，
++    staging 驗證時再從磁碟重讀 record，確認「目錄名 ＝ 宣告值 ＝ 交接值」才 rename。⚠️ 呼叫端（CLI）⛔ 不得把成功發布當成 0——
++    那一次執行本來就是失敗的（結束碼 1）；rename 成功、fsync 失敗拋 `DurabilityUnconfirmed`（3）。
++    """
++    validate_run_identity(stage2_identity)
++    stage2_identity = dict(stage2_identity)
++    if not isinstance(verified, VerifiedComposition) or verified.counterfactual_semantic_sha256 is None:
++        raise ArtifactError("publish-failed-record：缺少 shell 交接的語意 SHA——⛔ 無從決定目錄名")
++    semantic = verified.counterfactual_semantic_sha256
++    run_dir = Path(run_dir)
++    anchor, envcheck = _load_trust_anchors(python_root, stage2_identity)
++    failure = load_canonical_evidence_artifact(run_dir / OPERATIONAL_FAILURE, COUNTERFACTUAL_FAILURE_KIND).parsed
++    validate_counterfactual_failure(failure)
++    if failure["bundle_id"] != stage2_identity["bundle_id"]:
++        raise ArtifactError("中繼檔的 bundle_id ≠ Stage 2 identity 的")
++    counterfactual = _read_frozen_patch(run_dir, FROZEN_COUNTERFACTUAL_PATCH)
++    tooling = _read_frozen_patch(run_dir, FROZEN_TOOLING_PATCH)
++    patches = {
++        "counterfactual_patch_sha256": sha256_hex(counterfactual),
++        "tooling_patch_sha256": sha256_hex(tooling),
++        "composed_sha256": failure["provenance"]["tooling_patch_sha256"],
++        "ordered_components": list(ORDERED_COMPONENTS),
++    }
++    failed_root = resolve_repo_path(python_root, STAGE2_FAILED_ROOT_PATH)
++    name = failed_record_dir_name(stage2_identity["bundle_id"], semantic)
++    root = failed_root / name
++    hint = f"{RECOVER_FAILED_HINT} {STAGE2_FAILED_ROOT_PATH}/{name}"
++    with ClosedArchiveWriter(root, FAILED_LAYOUT, recover_hint=hint) as writer:
++        writer.add_raw(COUNTERFACTUAL_PATCH, counterfactual)
++        writer.add_raw(TOOLING_PATCH, tooling)
++        record = build_failed_record(identity=stage2_identity, patches=patches, files=writer.files,
++                                     failure=failure, generated_at=generated_at,
++                                     counterfactual_semantic_sha256=semantic)
++        validate_failed_record(record)
++
++        def verify_staging(staging: Path) -> None:
++            staged = verify_failed_record(staging, envcheck_identity=envcheck.identity,
++                                          base_commit=anchor.after_base_commit, dir_name=name)
++            check_verified_composition(verified, base_commit=staged["provenance"]["base_commit"],
++                                       patches=staged["patches"], label="publish-failed-record",
++                                       semantic_sha256=staged["counterfactual_semantic_sha256"])
++
++        writer.commit(FAILED_RECORD_NAME, record, verify=verify_staging)
++    return root
++
++
++def _record_summary(record_dir: Path, record: Mapping[str, Any]) -> dict[str, Any]:
++    return {
++        "dir": str(record_dir),
++        "base_commit": record["provenance"]["base_commit"],
++        **{f: record["patches"][f] for f in ("counterfactual_patch_sha256", "tooling_patch_sha256",
++                                             "composed_sha256")},
++        "counterfactual_semantic_sha256": record["counterfactual_semantic_sha256"],
++    }
++
++
++def _record_dirs(failed_root: Path) -> list[Path]:
++    """failed root 底下的每一項都必須是合法的 record 目錄——⛔ 不認得的東西一律 fail-closed。"""
++    if not failed_root.exists():
++        return []
++    if failed_root.is_symlink() or not failed_root.is_dir():
++        raise ArtifactError(f"failed root 必須是目錄：{failed_root}")
++    out = []
++    for entry in sorted(failed_root.iterdir()):
++        if entry.is_symlink() or not entry.is_dir() or not _FAILED_DIR_RE.match(entry.name):
++            raise ArtifactError(
++                f"failed root 內有無法辨識的項目：{entry.name}——⛔ 不得忽略後繼續（可能是發布中斷的殘骸，需人工處理）"
++            )
++        out.append(entry)
++    return out
++
++
++def check_failed_records(*, python_root: str | Path) -> dict[str, Any]:
++    """`--check-failed-record` 的 **Python 段**：逐份完整驗 F1～F10（⛔ 不含 git 的 F8-a）。
++
++    回傳 `{base_commit, records: [...]}`——`base_commit` 取自**已驗證的** Stage 1 after provenance，
++    供 shell 推導本次的 canonical 比對鍵；每份 record 附宣告值，供 shell 做 F8-a。
++    ⚠️ 任一份損壞就整個 fail-closed（⛔ 不得「跳過壞的繼續掃」）。
++    """
++    anchor, envcheck = _load_trust_anchors(python_root, None)
++    failed_root = resolve_repo_path(python_root, STAGE2_FAILED_ROOT_PATH)
++    records = []
++    for record_dir in _record_dirs(failed_root):
++        record = verify_failed_record(record_dir, envcheck_identity=envcheck.identity,
++                                      base_commit=anchor.after_base_commit)
++        records.append(_record_summary(record_dir, record))
++    return {"base_commit": anchor.after_base_commit, "records": records}
++
++
++def recover_failed_record(*, python_root: str | Path, record_dir: str | Path,
++                          verified: VerifiedComposition) -> dict[str, Any]:
++    """rc=3 的出口：完整重驗 F1～F10（F8-a 由 shell 先做）→ `_fsync_tree` ＋ fsync parent。
++
++    ⛔ 不重建、⛔ 不重跑 replay。⚠️ 呼叫端成功時仍回 1——那一次執行本來就是失敗的；
++    重跑資格仍是「⛔ 同語意 SHA 不得重跑」。⚠️ fsync 之前比對 record 宣告的語意 SHA ＝ shell 由 record 內
++    實際 patch 重算的交接值。
++    """
++    failed_root = resolve_repo_path(python_root, STAGE2_FAILED_ROOT_PATH)
++    record_dir = Path(record_dir)
++    if record_dir.is_symlink() or not record_dir.is_dir() or \
++            record_dir.resolve().parent != failed_root.resolve() or not _FAILED_DIR_RE.match(record_dir.name):
++        raise ArtifactError(f"--recover-failed-record 只接受 {STAGE2_FAILED_ROOT_PATH}/ 底下的 record 目錄：{record_dir}")
++    anchor, envcheck = _load_trust_anchors(python_root, None)
++    record = verify_failed_record(record_dir, envcheck_identity=envcheck.identity, base_commit=anchor.after_base_commit)
++    check_verified_composition(verified, base_commit=record["provenance"]["base_commit"],
++                               patches=record["patches"], label="recover-failed-record",
++                               semantic_sha256=record["counterfactual_semantic_sha256"])
++    _fsync_tree(record_dir)
++    fsync_parent_or_unconfirmed(record_dir, published=False,
++                                recover_hint=f"{RECOVER_FAILED_HINT} {STAGE2_FAILED_ROOT_PATH}/{record_dir.name}")
++    return _record_summary(record_dir, record)
++
++
++# ── 合成守門的宣告值（給 shell，⛔ 不是 validator） ──────────────────────────
++
++def _claims(base_commit: object, counterfactual: object, tooling: object, composed: object) -> dict[str, str]:
++    if not isinstance(base_commit, str) or len(base_commit) != 40 or base_commit != base_commit.lower() \
++            or not all(c in "0123456789abcdef" for c in base_commit):
++        raise ArtifactError(f"base_commit 必須是 40 字元小寫 hex：{base_commit!r}")
++    for name, value in (("counterfactual", counterfactual), ("tooling", tooling), ("composed", composed)):
++        if not is_hex64(value):
++            raise ArtifactError(f"{name} 的 SHA 必須是 64 字元小寫 hex：{value!r}")
++    return {"base_commit": base_commit, "counterfactual_patch_sha256": counterfactual,
++            "tooling_patch_sha256": tooling, "composed_sha256": composed}
++
++
++def patch_claims(*, mode: str, python_root: str | Path, run_dir: str | Path | None = None,
++                 record_dir: str | Path | None = None) -> dict[str, str]:
++    """shell 合成守門要比對的**宣告值**：`{base_commit, counterfactual／tooling／composed 的 SHA}`。
++
++    ⚠️ 這裡只「取出宣告」，⛔ 不是驗證——shell 用它們在隔離 worktree 重建並比對，之後 Python 段
++    仍會完整驗證全部內容。只讀小檔（comparison、中繼檔、manifest、record），⛔ 不讀全量 before source。
++    """
++    if mode == "finalize":
++        run_dir = Path(run_dir)
++        prov = load_canonical_evidence_artifact(run_dir / OPERATIONAL_COMPARISON, COMPARISON_KIND).parsed["provenance"]
++        return _claims(prov.get("base_commit"),
++                       sha256_hex(_read_frozen_patch(run_dir, FROZEN_COUNTERFACTUAL_PATCH)),
++                       sha256_hex(_read_frozen_patch(run_dir, FROZEN_TOOLING_PATCH)),
++                       prov.get("tooling_patch_sha256"))
++    if mode == "failure":
++        run_dir = Path(run_dir)
++        prov = load_canonical_evidence_artifact(run_dir / OPERATIONAL_FAILURE, COUNTERFACTUAL_FAILURE_KIND).parsed["provenance"]
++        return _claims(prov.get("base_commit"),
++                       sha256_hex(_read_frozen_patch(run_dir, FROZEN_COUNTERFACTUAL_PATCH)),
++                       sha256_hex(_read_frozen_patch(run_dir, FROZEN_TOOLING_PATCH)),
++                       prov.get("tooling_patch_sha256"))
++    if mode == "archive":
++        root = resolve_repo_path(python_root, STAGE2_EVIDENCE_ROOT_PATH)
++        patches = load_canonical_evidence_artifact(root / STAGE2_MANIFEST_NAME, STAGE2_MANIFEST_KIND).parsed["patches"]
++        prov = load_canonical_evidence_artifact(root / COMPARISON, COMPARISON_KIND).parsed["provenance"]
++        return _claims(prov.get("base_commit"), patches.get("counterfactual_patch_sha256"),
++                       patches.get("tooling_patch_sha256"), patches.get("composed_sha256"))
++    if mode == "failed-record":
++        record = load_canonical_evidence_artifact(Path(record_dir) / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
++        patches = record.get("patches") or {}
++        claims = _claims((record.get("provenance") or {}).get("base_commit"),
++                         patches.get("counterfactual_patch_sha256"), patches.get("tooling_patch_sha256"),
++                         patches.get("composed_sha256"))
++        # ⚠️ ⑦a：record **宣告的**語意 SHA——shell 從 record 內的實際 patch 重算並比對它，相等才注入。
++        semantic = record.get("counterfactual_semantic_sha256")
++        validate_semantic_sha256(semantic, "record 宣告的 counterfactual_semantic_sha256")
++        return {**claims, "counterfactual_semantic_sha256": semantic}
++    raise ArtifactError(f"未知的 claims 模式：{mode!r}")
++
++
++# ── CLI（`scripts/finalize-stage2-evidence.sh` 的 ③d 五種模式） ─────────────
++
++class Stage2UsageError(ValueError):
++    """CLI 用法錯誤。"""
++
++
++# ⚠️ 只能由官方腳本注入。精確比對（⛔ 不用前綴清單）。
++STAGE2_INJECTED_ARGS = (
++    "--run-identity", "--python-root", "--image-digest", "--base-commit",
++    "--tooling-patch-sha256", "--source-root", "--runner-sha256",
++    "--verified-patch-base", "--verified-counterfactual-sha256", "--verified-tooling-sha256",
++    "--verified-composed-sha256", "--verified-counterfactual-semantic-sha256",
++)
++# shell 合成守門的交接值（`VerifiedComposition`）。⚠️ 除了 check，其餘四種模式**必須**有；check 的 F8-a 在
++# Python 段之後由 shell 做，⛔ 不接受。
++VERIFIED_COMPOSITION_ARGS = ("verified_patch_base", "verified_counterfactual_sha256",
++                             "verified_tooling_sha256", "verified_composed_sha256")
++MODES_WITH_COMPOSITION = ("finalize", "recover_durability", "publish_failed_record", "recover_failed_record")
++# ⚠️ ⑦a：shell 由實際 patch 重算的語意 SHA。⚠️ **只有**這兩種模式必須帶（failed record 以它為目錄鍵）；
++# 成功 archive ⛔ 不存語意 SHA，check 的命中判定在 shell——其餘模式帶了就拒。
++MODES_WITH_SEMANTIC = ("publish_failed_record", "recover_failed_record")
++STAGE2_MODES = ("finalize", "recover_durability", "publish_failed_record", "check_failed_record",
++                "recover_failed_record")
++
++
++def assert_stage2_arg_ownership(argv: Sequence[str]) -> None:
++    for injected in STAGE2_INJECTED_ARGS:
++        count = sum(1 for a in argv if a == injected or a.startswith(injected + "="))
++        if count > 1:
++            raise Stage2UsageError(f"{injected} 出現 {count} 次——它只能由官方腳本注入。⛔ 不靜默採用最後一個。")
++
++
++def build_stage2_parser():
++    import argparse
++
++    parser = argparse.ArgumentParser(prog="stage2_archive", allow_abbrev=False)
++    parser.add_argument("--finalize", action="store_true")
++    parser.add_argument("--recover-durability", action="store_true")
++    parser.add_argument("--publish-failed-record", action="store_true")
++    parser.add_argument("--check-failed-record", action="store_true")
++    parser.add_argument("--recover-failed-record", default=None, metavar="RECORD_DIR")
++    parser.add_argument("--run-dir", default=None)
++    parser.add_argument("--run-identity", default=None)
++    parser.add_argument("--python-root", required=True)
++    parser.add_argument("--image-digest", required=True)
++    parser.add_argument("--base-commit", required=True)
++    parser.add_argument("--tooling-patch-sha256", required=True)
++    parser.add_argument("--source-root", required=True)
++    parser.add_argument("--runner-sha256", required=True)
++    parser.add_argument("--verified-patch-base", default=None)
++    parser.add_argument("--verified-counterfactual-sha256", default=None)
++    parser.add_argument("--verified-tooling-sha256", default=None)
++    parser.add_argument("--verified-composed-sha256", default=None)
++    parser.add_argument("--verified-counterfactual-semantic-sha256", default=None)
++    return parser
++
++
++def run_stage2(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
++    """回傳 `(結束碼, 結果)`。⚠️ publish-failed-record 與 recover-failed-record **成功時也回 1**。"""
++    from datetime import datetime, timezone
++
++    from .provenance import build_provenance
++
++    argv = list(argv)
++    assert_stage2_arg_ownership(argv)
++    args = build_stage2_parser().parse_args(argv)
++    chosen = [m for m, on in (
++        ("finalize", args.finalize), ("recover_durability", args.recover_durability),
++        ("publish_failed_record", args.publish_failed_record), ("check_failed_record", args.check_failed_record),
++        ("recover_failed_record", args.recover_failed_record is not None),
++    ) if on]
++    if len(chosen) != 1:
++        raise Stage2UsageError(f"模式旗標必須恰好給一個，實際 {chosen}")
++    mode = chosen[0]
++    needs_run = mode in ("finalize", "publish_failed_record")
++    if needs_run and (not args.run_dir or not args.run_identity):
++        raise Stage2UsageError(f"--{mode.replace('_', '-')} 需要 --run-dir 與 --run-identity")
++    if not needs_run and (args.run_dir or args.run_identity):
++        raise Stage2UsageError(
++            f"--{mode.replace('_', '-')} ⛔ 不接受 --run-dir 或 --run-identity：它只依賴既有的證據與寫死常數"
++        )
++
++    given = [name for name in VERIFIED_COMPOSITION_ARGS if getattr(args, name) is not None]
++    if mode in MODES_WITH_COMPOSITION:
++        if len(given) != len(VERIFIED_COMPOSITION_ARGS):
++            raise Stage2UsageError(
++                f"--{mode.replace('_', '-')} 需要 shell 合成守門注入的四個 --verified-* 值（缺 "
++                f"{sorted(set(VERIFIED_COMPOSITION_ARGS) - set(given))}）"
++            )
++        try:
++            verified = VerifiedComposition(
++                base_commit=args.verified_patch_base,
++                counterfactual_patch_sha256=args.verified_counterfactual_sha256,
++                tooling_patch_sha256=args.verified_tooling_sha256,
++                composed_sha256=args.verified_composed_sha256,
++                counterfactual_semantic_sha256=args.verified_counterfactual_semantic_sha256,
++            )
++        except ArtifactError as exc:
++            raise Stage2UsageError(f"--verified-* 的格式不符：{exc}") from exc
++    elif given:
++        raise Stage2UsageError(f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-*（F8-a 在 Python 段之後由 shell 做）")
++    semantic = args.verified_counterfactual_semantic_sha256
++    if mode in MODES_WITH_SEMANTIC and semantic is None:
++        raise Stage2UsageError(
++            f"--{mode.replace('_', '-')} 需要 shell 注入的 --verified-counterfactual-semantic-sha256（failed record 的目錄鍵）"
++        )
++    if mode not in MODES_WITH_SEMANTIC and semantic is not None:
++        raise Stage2UsageError(
++            f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-counterfactual-semantic-sha256（只屬於 failed record 的發布與 recovery）"
++        )
++
++    # ⚠️ 階段 A 明確載入 `config`（理由同 Stage 1 finalizer：⛔ 靠間接 import 是 incidental）。
++    import config as _config_module
++
++    def _provenance_factory():
++        return build_provenance(
++            config_module=_config_module, source_root=args.source_root, image_digest=args.image_digest,
++            base_commit=args.base_commit, tooling_patch_sha256=args.tooling_patch_sha256,
++            runner_sha256=args.runner_sha256, argv=argv,
++        )
++
++    now = datetime.now(timezone.utc).isoformat()
++    if needs_run:
++        identity = load_run_identity(args.run_identity)
++        if identity["expected_image_id"] != args.image_digest:
++            raise Stage2UsageError(
++                f"Stage 2 identity 記的 image {identity['expected_image_id']} 與本次執行的 {args.image_digest} 不符"
++            )
++    if mode == "finalize":
++        terminal = finalize_stage2_evidence(
++            python_root=args.python_root, run_dir=args.run_dir, stage2_identity=identity,
++            provenance_factory=_provenance_factory, generated_at=now, verified=verified,
++        )
++        return terminal, {"mode": mode, "terminal_outcome": terminal}
++    if mode == "recover_durability":
++        terminal = recover_stage2_durability(python_root=args.python_root, provenance=_provenance_factory(),
++                                             verified=verified)
++        return terminal, {"mode": mode, "terminal_outcome": terminal}
++    if mode == "publish_failed_record":
++        root = publish_failed_record(python_root=args.python_root, run_dir=args.run_dir,
++                                     stage2_identity=identity, generated_at=now, verified=verified)
++        # ⚠️ 完整發布仍回 1：那一次執行本來就是失敗的（「七之三」的重跑資格表）。
++        return 1, {"mode": mode, "published": str(root)}
++    if mode == "check_failed_record":
++        result = check_failed_records(python_root=args.python_root)
++        return 0, {"mode": mode, **result}
++    summary = recover_failed_record(python_root=args.python_root, record_dir=args.recover_failed_record,
++                                    verified=verified)
++    return 1, {"mode": mode, "recovered": summary}
++
++
++def main(argv=None) -> int:
++    import json
++    import sys
++
++    from .publish import EXIT_ABORT, EXIT_DURABILITY_UNCONFIRMED
++
++    argv = list(sys.argv[1:] if argv is None else argv)
++    try:
++        rc, result = run_stage2(argv)
++    except DurabilityUnconfirmed as exc:
++        print(f"ERROR: {exc}", file=sys.stderr)
++        return EXIT_DURABILITY_UNCONFIRMED
++    except (Stage2UsageError, ValueError, OSError) as exc:
++        print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
++        return EXIT_ABORT
++    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
++    return rc
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/stage2_evidence.py b/python/backtest/modular/sr_scoring/replay_bundle/stage2_evidence.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ab63135ac9d63a2af3c6b38b2deb0b37ad28484e
+--- /dev/null
++++ b/python/backtest/modular/sr_scoring/replay_bundle/stage2_evidence.py
+@@ -0,0 +1,454 @@
++"""I-074 Stage 2 的證據契約：共用的信任錨與封閉 layout 的 archive 核心。
++
++規格見 issue.md I-074「③ Stage 2 evidence contract 計畫書」（⚠️ 現行版）。本檔目前只有
++**③b 第一包**要用的部分：
++
++* **Stage 1 信任錨**（「三之一」）的串流版：`load_stage1_anchor()` ＋ `validate_stage1_anchor_graph()`
++  ——⚠️ 只常駐 keys、每列 digest 與 156 筆 cohort rows，⛔ 不整份載入 after（「五之一」）；
++* `stage1_evidence` 欄位的 builder／validator——Stage 2 manifest 與 envcheck manifest
++  **共用同一個定義**（⛔ 不各訂一份）；
++* **封閉 layout 的 archive 核心** `ClosedArchiveWriter`——比照 Stage 1 `finalize_evidence()`
++  的發布段：staging 建完整 tree → `rename_noreplace()` 是**唯一的 commit point** → fsync parent；
++* 路徑安全 `resolve_repo_path()`。
++
++Stage 2 archive 本身、failed-attempt record 與 check／recover 屬 ③d，在 `stage2_archive.py`
++（⚠️ ⛔ 不放本檔：`envcheck.py` import 本檔，而 ③d 要用 `envcheck.py`——放這裡會循環 import）。
++
++⛔ **不改 Stage 1 的 `evidence.py`**——`ARCHIVE_LAYOUT` 是 9 檔封閉集合，動它會讓
++`python/baselines/i074_stage1/` 已封存的證據立刻驗不過。這裡只**呼叫**它的 validator。
++"""
++from __future__ import annotations
++
++import secrets
++from dataclasses import dataclass, field
++from pathlib import Path, PurePosixPath
++from typing import Any, Mapping
++
++from .artifacts import (
++    COHORT_KIND,
++    ArtifactError,
++    assert_same_keys,
++    load_canonical_evidence_artifact,
++    validate_cohort_manifest,
++)
++from .canonical import canonical_gzip_bytes, canonical_json_bytes, sha256_hex
++from .evidence import EVIDENCE_MANIFEST_KIND, _fsync_tree, validate_evidence_manifest
++from .provenance import validate_provenance
++from .publish import DurabilityUnconfirmed, fsync_dir, probe_no_clobber, remove_tree, rename_noreplace
++from .run_identity import RUN_IDENTITY_KIND, validate_run_identity
++from .stream import StreamLoad, stream_after_artifact
++
++# ── 常數 ────────────────────────────────────────────────────────────────────
++
++# ⚠️ **寫死常數，⛔ 不是執行期參數**：I-074 是一次性正式驗證，⛔ 不需要通用性；
++# 留成可指定的話，另一份同 bundle／同 image 的合法 manifest 也能充數（「三之一」）。
++STAGE1_EVIDENCE_MANIFEST_PATH = "python/baselines/i074_stage1/evidence_manifest.json"
++
++STAGE1_ANCHOR_AFTER = "d1/after_artifact.json.gz"
++STAGE1_ANCHOR_COHORT = "d1/cohort_manifest.json.gz"
++STAGE1_ANCHOR_IDENTITY = "identity/run_identity.json.gz"
++# ⛔ key 集合**恰好是這三個**，⛔ 不可增減。
++STAGE1_ANCHOR_MEMBERS = (STAGE1_ANCHOR_AFTER, STAGE1_ANCHOR_COHORT, STAGE1_ANCHOR_IDENTITY)
++
++# 有界診斷的 sample 上限。⚠️ **寫死的共用常數**，⛔ 不開 CLI 參數；failed record 與環境等價判定
++# **共用**這個上限，但 sample 的欄位集合各自封閉。⛔ 不得套用到 B／C 的正式證據。
++DIAGNOSTIC_SAMPLE_LIMIT = 20
++
++# 空 tooling patch 的 SHA（空字串的 SHA-256）。
++EMPTY_SHA256 = sha256_hex(b"")
++
++_MEMBER_FIELDS = frozenset({"artifact_sha256", "stored_sha256"})
++_STAGE1_REF_FIELDS = frozenset({"manifest_path", "manifest_sha256", "members"})
++FILE_ENTRY_FIELDS = frozenset({"artifact_sha256", "stored_sha256", "stored_bytes"})
++
++
++def is_hex64(value: object) -> bool:
++    return (
++        isinstance(value, str) and len(value) == 64 and value == value.lower()
++        and all(c in "0123456789abcdef" for c in value)
++    )
++
++
++def is_image_id(value: object) -> bool:
++    return isinstance(value, str) and value.startswith("sha256:") and is_hex64(value[7:])
++
++
++def validate_generated_at(value: object, label: str) -> None:
++    """ISO-8601 且**含時區**——⛔ 只驗「非空字串」的話，裸日期字串也會過。"""
++    from datetime import datetime
++
++    if not isinstance(value, str) or not value:
++        raise ArtifactError(f"{label} 的 generated_at 必須是非空字串")
++    try:
++        parsed = datetime.fromisoformat(value)
++    except ValueError as exc:
++        raise ArtifactError(f"{label} 的 generated_at 不是合法 ISO-8601：{exc}") from exc
++    if parsed.tzinfo is None:
++        raise ArtifactError(f"{label} 的 generated_at ⛔ 必須含時區")
++
++
++# ── 路徑安全 ────────────────────────────────────────────────────────────────
++
++def resolve_repo_path(python_root: str | Path, rel: str) -> Path:
++    """把 `python/…` 形式的 repo 相對路徑解析到 `python_root` 底下。
++
++    ⚠️ 威脅模型與 `scripts/check-doc-refs.py` 的 `_is_acceptable_local_file()` 相同
++    （⛔ 不另造一套語意）：拒絕**絕對路徑**、含 `..`／`.` 的成分、**任何一段是 symlink**，
++    以及**解析後逃出 `python_root`** 的路徑。
++    """
++    if not isinstance(rel, str) or not rel:
++        raise ArtifactError(f"repo 相對路徑必須是非空字串：{rel!r}")
++    pure = PurePosixPath(rel)
++    if pure.is_absolute() or "\\" in rel:
++        raise ArtifactError(f"⛔ 不接受絕對路徑：{rel!r}")
++    parts = pure.parts
++    if not parts or parts[0] != "python" or len(parts) < 2:
++        raise ArtifactError(f"repo 相對路徑必須位於 python/ 底下：{rel!r}")
++    if any(part in ("..", ".") for part in rel.split("/")):
++        raise ArtifactError(f"⛔ 路徑不得含 '..' 或 '.'：{rel!r}")
++    root = Path(python_root)
++    probe = root
++    for part in parts[1:]:
++        probe = probe / part
++        # ⚠️ 逐段檢查：⛔ 只看最後一段不夠，中間目錄是 symlink 一樣能跳出 root。
++        if probe.is_symlink():
++            raise ArtifactError(f"⛔ 路徑中有 symlink：{probe}")
++    if not probe.resolve().is_relative_to(root.resolve()):
++        raise ArtifactError(f"⛔ 路徑解析後逃出 python root：{rel!r}")
++    return probe
++
++
++# ── Stage 1 信任錨（「三之一」，串流版） ───────────────────────────────────
++
++@dataclass(frozen=True)
++class Stage1Anchor:
++    """`load_stage1_anchor()` 的 snapshot。⚠️ 每一項都來自**同一次讀取**（⛔ 之後不再重讀）。"""
++
++    manifest_path: str
++    manifest_sha256: str
++    manifest_payload: dict[str, Any]
++    members: dict[str, dict[str, str]]
++    identity: dict[str, Any]
++    bundle_id: str          # 取自已驗證的 manifest
++    expected_image_id: str  # 取自已驗證的 manifest
++    after_base_commit: str  # 取自已驗證的 after provenance（checker 推導 base 要用）
++    after_top: dict[str, Any]
++    after_keys: list[tuple[str, str, str]]
++    after_row_digests: dict[tuple[str, str, str], bytes]
++    after_candidate_keys: list[tuple[str, str, str]]
++    cohort_payload: dict[str, Any]
++    cohort_keys: list[tuple[str, str, str]]
++    cohort_rows: dict[tuple[str, str, str], dict[str, Any]] = field(repr=False)
++
++
++def _check_member_shas(rel: str, manifest_files: Mapping[str, Any], *, artifact_sha: str,
++                       stored_sha: str) -> dict[str, str]:
++    entry = manifest_files[rel]
++    if entry["artifact_sha256"] != artifact_sha or entry["stored_sha256"] != stored_sha:
++        raise ArtifactError(
++            f"Stage 1 信任錨：{rel} 重算的 SHA 與 Stage 1 manifest 記的不符——"
++            "⚠️ Stage 2 archive 與 python/baselines/i074_stage1/ **必須一起保存**"
++        )
++    return {"artifact_sha256": artifact_sha, "stored_sha256": stored_sha}
++
++
++def load_stage1_anchor(python_root: str | Path) -> Stage1Anchor:
++    """單次讀取 ＋ 單檔驗證（「三之一」第 1～5、7 道）。
++
++    ⚠️ **hash、validator 與回傳值全部來自同一次讀取**——⛔ 不得為了省記憶體之後再讀一次。
++    ⚠️ after 用串流讀（「五之一」）：只常駐 keys、每列 digest 與 cohort 那幾列的完整 row。
++    """
++    manifest_path = resolve_repo_path(python_root, STAGE1_EVIDENCE_MANIFEST_PATH)
++    try:
++        manifest_load = load_canonical_evidence_artifact(manifest_path, EVIDENCE_MANIFEST_KIND)
++    except ArtifactError as exc:
++        raise ArtifactError(
++            f"Stage 1 信任錨：{exc}——⚠️ Stage 2 的證據必須與 python/baselines/i074_stage1/ 一起保存"
++        ) from exc
++    manifest = manifest_load.parsed
++    validate_evidence_manifest(manifest)                                   # 道 2
++    files = manifest["files"]
++    base = STAGE1_EVIDENCE_MANIFEST_PATH.rsplit("/", 1)[0]
++
++    def member_path(rel: str) -> Path:
++        path = resolve_repo_path(python_root, f"{base}/{rel}")
++        # ⚠️ 缺檔時錯誤訊息要指出原因（③ evidence contract 測試 h）——⛔ 不只丟一個 ENOENT。
++        if not path.is_file():
++            raise ArtifactError(
++                f"Stage 1 信任錨：找不到 {base}/{rel}——⚠️ Stage 2 的證據與 python/baselines/i074_stage1/ "
++                "**必須一起保存**"
++            )
++        return path
++
++    members: dict[str, dict[str, str]] = {}
++
++    # cohort 先讀（小）——才知道 after 串流時要留哪幾列的完整 row。
++    cohort_load = load_canonical_evidence_artifact(member_path(STAGE1_ANCHOR_COHORT), COHORT_KIND)
++    members[STAGE1_ANCHOR_COHORT] = _check_member_shas(
++        STAGE1_ANCHOR_COHORT, files,
++        artifact_sha=cohort_load.artifact_sha256, stored_sha=cohort_load.stored_sha256,
++    )
++    cohort = cohort_load.parsed
++    cohort_keys = validate_cohort_manifest(cohort)
++    validate_provenance(cohort["provenance"], role="stage1")
++
++    identity_load = load_canonical_evidence_artifact(member_path(STAGE1_ANCHOR_IDENTITY), RUN_IDENTITY_KIND)
++    members[STAGE1_ANCHOR_IDENTITY] = _check_member_shas(
++        STAGE1_ANCHOR_IDENTITY, files,
++        artifact_sha=identity_load.artifact_sha256, stored_sha=identity_load.stored_sha256,
++    )
++    identity = identity_load.parsed
++    validate_run_identity(identity)
++
++    after = stream_after_artifact(
++        member_path(STAGE1_ANCHOR_AFTER), label="Stage 1 D+1 after artifact", side="after",
++        keep_keys=set(cohort_keys),
++    )
++    members[STAGE1_ANCHOR_AFTER] = _check_member_shas(
++        STAGE1_ANCHOR_AFTER, files,
++        artifact_sha=after.load.artifact_sha256, stored_sha=after.load.stored_sha256,
++    )
++    after_top = after.load.top
++    validate_provenance(after_top["provenance"], role="stage1")
++
++    return Stage1Anchor(
++        manifest_path=STAGE1_EVIDENCE_MANIFEST_PATH,
++        manifest_sha256=manifest_load.stored_sha256,
++        manifest_payload=manifest,
++        members={rel: members[rel] for rel in STAGE1_ANCHOR_MEMBERS},
++        identity=identity,
++        bundle_id=manifest["bundle_id"],
++        expected_image_id=manifest["expected_image_id"],
++        after_base_commit=after_top["provenance"]["base_commit"],
++        after_top=after_top,
++        after_keys=after.keys,
++        after_row_digests=after.row_digests,
++        after_candidate_keys=after.candidate_keys,
++        cohort_payload=cohort,
++        cohort_keys=cohort_keys,
++        cohort_rows=after.kept_rows,
++    )
++
++
++def validate_stage1_anchor_graph(
++    anchor: Stage1Anchor,
++    *,
++    stage2_identity: Mapping[str, Any],
++    envcheck_identity: Mapping[str, Any],
++    expected_bundle_id: str,
++) -> None:
++    """跨檔關係（「三之一」第 6、8、9、10 道 ＋ 等式鏈 6-a／6-b）。
++
++    ⚠️ **三個呼叫端（preflight／finalizer／recovery）都要呼叫**——⛔ 第 8、9 道⛔ 不得只留到
++    finalizer：cohort 壞掉要跑完數小時 replay 才被發現就太晚了。
++    """
++    validate_run_identity(stage2_identity)
++    validate_run_identity(envcheck_identity)
++
++    if anchor.bundle_id != expected_bundle_id:                                     # 道 6
++        raise ArtifactError(
++            f"Stage 1 manifest 的 bundle_id={anchor.bundle_id!r} 與 Stage 2 的 "
++            f"{expected_bundle_id!r} 不符——⛔ 不得拿別次執行的 evidence 充數"
++        )
++    cohort_after_sha = anchor.cohort_payload.get("after_artifact_sha256")          # 道 8
++    if cohort_after_sha != anchor.members[STAGE1_ANCHOR_AFTER]["artifact_sha256"]:
++        raise ArtifactError("Stage 1 cohort 的 after_artifact_sha256 與已錨定的 after 不符")
++    assert_same_keys(anchor.cohort_keys, anchor.after_candidate_keys,             # 道 9
++                     "Stage 1 cohort vs 已錨定 after 的候選列")
++
++    # 道 10（⚠️ v10 改寫）：Stage 2 identity 必須**逐位元**等於 envcheck 封存的那一份；
++    # ⛔ v4～v9 的「等於 Stage 1 archived identity」已不可能成立（Stage 1 的 image 已遺失）。
++    if dict(stage2_identity) != dict(envcheck_identity):
++        raise ArtifactError(
++            "Stage 2 的 run identity 與環境見證封存的那一份⛔ 不完全相同"
++            f"（本次={dict(stage2_identity)!r}、envcheck={dict(envcheck_identity)!r}）"
++        )
++    if stage2_identity["bundle_id"] != anchor.bundle_id:
++        raise ArtifactError("Stage 2 identity 的 bundle_id 與 Stage 1 manifest 不符")
++
++    # 6-a：bundle 鏈。⛔ 單檔 validator 只驗型別與 role，擋不住「各檔都合法、鏈條對不起來」。
++    bundle_chain = {
++        "Stage 1 manifest": anchor.manifest_payload["bundle_id"],
++        "Stage 1 identity": anchor.identity["bundle_id"],
++        "Stage 1 after": anchor.after_top["bundle_id"],
++        "Stage 1 cohort": anchor.cohort_payload["bundle_id"],
++        "Stage 2": expected_bundle_id,
++    }
++    if len(set(bundle_chain.values())) != 1:
++        raise ArtifactError(f"bundle_id 等式鏈斷了：{bundle_chain}")
++    # 6-b：image 鏈——⚠️ v10 起**只在 Stage 1 內部成立**，⛔ 不再延伸到 Stage 2 的 image。
++    image_chain = {
++        "Stage 1 manifest": anchor.manifest_payload["expected_image_id"],
++        "Stage 1 identity": anchor.identity["expected_image_id"],
++        "Stage 1 after": anchor.after_top["provenance"]["image_digest"],
++        "Stage 1 cohort": anchor.cohort_payload["provenance"]["image_digest"],
++    }
++    if len(set(image_chain.values())) != 1:
++        raise ArtifactError(f"Stage 1 內部的 image 等式鏈斷了：{image_chain}")
++
++
++def build_stage1_evidence_ref(anchor: Stage1Anchor) -> dict[str, Any]:
++    """Stage 2 manifest 與 envcheck manifest 的 `stage1_evidence` 欄位（⚠️ 同一個定義）。"""
++    return {
++        "manifest_path": STAGE1_EVIDENCE_MANIFEST_PATH,
++        "manifest_sha256": anchor.manifest_sha256,
++        "members": {rel: dict(anchor.members[rel]) for rel in STAGE1_ANCHOR_MEMBERS},
++    }
++
++
++def validate_stage1_evidence_ref(ref: object, *, anchor: Stage1Anchor | None = None) -> None:
++    """封閉 schema；有 `anchor` 時再比「宣告值 ＝ 本次重算的值」。"""
++    if not isinstance(ref, dict) or set(ref) != _STAGE1_REF_FIELDS:
++        raise ArtifactError(f"stage1_evidence 的欄位集合必須恰好是 {sorted(_STAGE1_REF_FIELDS)}")
++    if ref["manifest_path"] != STAGE1_EVIDENCE_MANIFEST_PATH:
++        raise ArtifactError(
++            f"stage1_evidence.manifest_path 必須等於寫死常數 {STAGE1_EVIDENCE_MANIFEST_PATH!r}"
++        )
++    if not is_hex64(ref["manifest_sha256"]):
++        raise ArtifactError("stage1_evidence.manifest_sha256 必須是 64 字元小寫 hex")
++    members = ref["members"]
++    if not isinstance(members, dict) or set(members) != set(STAGE1_ANCHOR_MEMBERS):
++        raise ArtifactError(f"stage1_evidence.members 的 key 必須恰好是 {list(STAGE1_ANCHOR_MEMBERS)}")
++    for rel, entry in members.items():
++        if not isinstance(entry, dict) or set(entry) != _MEMBER_FIELDS:
++            raise ArtifactError(f"stage1_evidence.members[{rel}] 的欄位必須恰好是 {sorted(_MEMBER_FIELDS)}")
++        if not all(is_hex64(entry[f]) for f in _MEMBER_FIELDS):
++            raise ArtifactError(f"stage1_evidence.members[{rel}] 的 SHA 必須是 64 字元小寫 hex")
++    if anchor is not None and ref != build_stage1_evidence_ref(anchor):
++        raise ArtifactError("stage1_evidence 的宣告值與本次重算的 Stage 1 信任錨不符")
++
++
++def validate_file_entry(rel: str, entry: object) -> None:
++    """`canonical_artifact` entry：`artifact_sha256`／`stored_sha256`／`stored_bytes`。"""
++    if not isinstance(entry, dict) or set(entry) != FILE_ENTRY_FIELDS:
++        raise ArtifactError(f"files[{rel}] 的欄位集合必須恰好是 {sorted(FILE_ENTRY_FIELDS)}")
++    for name in ("artifact_sha256", "stored_sha256"):
++        if not is_hex64(entry[name]):
++            raise ArtifactError(f"files[{rel}].{name} 必須是 64 字元小寫 hex")
++    size = entry["stored_bytes"]
++    if type(size) is not int or size <= 0:
++        raise ArtifactError(f"files[{rel}].stored_bytes 必須是正整數：{size!r}")
++
++
++# ── 封閉 layout 的 archive 核心 ─────────────────────────────────────────────
++
++class ClosedArchiveWriter:
++    """整包原子發布：sibling staging 建完整 tree → `rename_noreplace()` → fsync parent。
++
++    ⚠️ **只接受 layout 內的相對路徑**，每個路徑恰好寫一次；commit 時檔案集合必須**恰好**
++    等於 layout——⛔ 多一個、少一個都中止。
++    ⚠️ **rename 之前的任何失敗**：只清 staging，正式路徑仍不存在（`with` 區塊自動處理）。
++    ⚠️ **rename 成功⛔ 不等於落盤**：之後 parent fsync 失敗時⛔ 不刪除，拋
++    `DurabilityUnconfirmed`（結束碼 3），由呼叫端提示對應的 recovery 模式。
++    """
++
++    def __init__(self, root: str | Path, layout: tuple[str, ...], *, recover_hint: str) -> None:
++        self.root = Path(root)
++        self.layout = tuple(layout)
++        self.recover_hint = recover_hint
++        if self.root.exists():
++            raise ArtifactError(
++                f"archive root 已存在：{self.root}——⛔ 不覆蓋。（durability 未確認時請用 {recover_hint}）"
++            )
++        parent = self.root.parent
++        parent.mkdir(parents=True, exist_ok=True)
++        # ⚠️ 正式發布前先實測 no-clobber rename 的**目錄**語意。
++        probe_no_clobber(parent)
++        self.staging = parent / f".{self.root.name}.staging-{secrets.token_hex(8)}"
++        self.staging.mkdir()
++        self.files: dict[str, dict[str, Any]] = {}
++        self._committed = False
++
++    def __enter__(self) -> "ClosedArchiveWriter":
++        return self
++
++    def __exit__(self, exc_type, exc, tb) -> None:
++        if not self._committed:
++            remove_tree(self.staging)
++
++    def path_for(self, rel: str) -> Path:
++        """staging 內 `rel` 的路徑（⚠️ 先驗 layout 與「只寫一次」，並建好父目錄）。"""
++        if rel not in self.layout:
++            raise ArtifactError(f"{rel} 不在封閉 layout 內：{list(self.layout)}")
++        if rel in self.files:
++            raise ArtifactError(f"{rel} 已經寫過——⛔ 每個路徑只寫一次")
++        target = self.staging / rel
++        target.parent.mkdir(parents=True, exist_ok=True)
++        return target
++
++    def add_canonical(self, rel: str, payload: dict[str, Any]) -> dict[str, Any]:
++        """小型 payload：整份編碼成 canonical gzip。⚠️ 三項 metadata 來自同一次寫入的 bytes。"""
++        target = self.path_for(rel)
++        raw = canonical_json_bytes(payload)
++        blob = canonical_gzip_bytes(raw)
++        target.write_bytes(blob)
++        entry = {"artifact_sha256": sha256_hex(raw), "stored_sha256": sha256_hex(blob),
++                 "stored_bytes": len(blob)}
++        self.files[rel] = entry
++        return entry
++
++    def add_raw(self, rel: str, blob: bytes) -> dict[str, Any]:
++        """raw bytes（patch）：⛔ 不壓縮、⛔ 不包進 JSON——位元組必須等於 `git diff --binary` 的輸出。
++
++        ⚠️ entry 是 `raw_blob` 型別：只有 `stored_sha256`／`stored_bytes`（⛔ 沒有 `artifact_sha256`）。
++        """
++        target = self.path_for(rel)
++        target.write_bytes(blob)
++        entry = {"stored_sha256": sha256_hex(blob), "stored_bytes": len(blob)}
++        self.files[rel] = entry
++        return entry
++
++    def record_streamed(self, rel: str, load: StreamLoad) -> dict[str, Any]:
++        """全量 payload：`stream_canonical_artifact(copy_to=path_for(rel))` 在**驗證的同一趟**寫出的副本。"""
++        if rel not in self.layout or rel in self.files:
++            raise ArtifactError(f"{rel} 不在 layout 內或已經寫過")
++        if load.copy_sha256 is None or load.copy_bytes is None:
++            raise ArtifactError(f"{rel}：沒有同一趟寫出的副本——⛔ 不得事後另讀一次補寫")
++        if not (self.staging / rel).is_file():
++            raise ArtifactError(f"{rel}：staging 內找不到同一趟寫出的副本")
++        entry = {"artifact_sha256": load.artifact_sha256, "stored_sha256": load.copy_sha256,
++                 "stored_bytes": load.copy_bytes}
++        self.files[rel] = entry
++        return entry
++
++    def commit(self, manifest_name: str, manifest: dict[str, Any], *, verify=None) -> None:
++        """寫 manifest →（`verify(staging)`：**對 staging 跑與 recovery 相同的完整驗證**）→ rename。
++
++        ⚠️ `verify` 排在 rename **之前**：驗的是真正要發布的那一棵 tree（含 manifest），
++        ⛔ 不是記憶體裡的物件。
++        """
++        if set(self.files) != set(self.layout):
++            raise ArtifactError(
++                f"archive 的檔案集合不符 layout：缺={sorted(set(self.layout) - set(self.files))}"
++            )
++        (self.staging / manifest_name).write_bytes(canonical_json_bytes(manifest))
++        if verify is not None:
++            verify(self.staging)
++        _fsync_tree(self.staging)
++        rename_noreplace(self.staging, self.root)          # ← ⚠️ 唯一的 commit point
++        self._committed = True
++        fsync_parent_or_unconfirmed(self.root, published=True, recover_hint=self.recover_hint)
++
++
++def fsync_parent_or_unconfirmed(root: Path, *, published: bool, recover_hint: str) -> None:
++    """⚠️ **commit point 之後**：parent fsync 失敗⛔ 不刪除，回報 durability 未確認。"""
++    try:
++        fsync_dir(Path(root).parent)
++    except OSError as exc:
++        raise DurabilityUnconfirmed(
++            f"archive {root} " + ("已發布" if published else "既有那份有效")
++            + f"，但 {Path(root).parent} 的 fsync 失敗（{exc}）——durability 未確認。"
++            f"⛔ 不刪除、不重產：用 {recover_hint} 重新驗證並 fsync。",
++            published=published,
++        ) from exc
++
++
++def archive_file_set(root: Path) -> set[str]:
++    """archive 內實際的檔案（相對路徑）。⚠️ symlink 一律拒絕。"""
++    out: set[str] = set()
++    for path in root.rglob("*"):
++        if path.is_symlink():
++            raise ArtifactError(f"archive 內⛔ 不得有 symlink：{path}")
++        if path.is_file():
++            out.add(path.relative_to(root).as_posix())
++    return out
+diff --git a/python/backtest/modular/sr_scoring/replay_bundle/stream.py b/python/backtest/modular/sr_scoring/replay_bundle/stream.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6eec5dc612eb9a4a702736bd91cd8af2eb724e27
+--- /dev/null
++++ b/python/backtest/modular/sr_scoring/replay_bundle/stream.py
+@@ -0,0 +1,453 @@
++"""串流讀 canonical artifact：一趟讀取完成 hash、canonical 檢查與逐列驗證（I-074 Stage 2）。
++
++⚠️ **為什麼需要它**：Stage 2 的 finalizer／recovery／preflight 與環境等價比對都要讀**全量**
++artifact（13,417 列；整份載入實測約 +365～449 MiB），而 mem-guard 常態只給得出 531m。
++Stage 1 的 comparator 就是整份載入兩份才撞到約 730 MiB（issue.md I-117）。
++規格見 issue.md I-074 ③ evidence contract「五之一：記憶體模型」。
++
++**與 `load_canonical_evidence_artifact()` 同強度**（⛔ 驗證強度不得下降）：
++
++| 檢查 | 整份載入版 | 本模組 |
++|---|---|---|
++| `.json`：raw bytes 就是 canonical bytes | 整份重新編碼比 SHA | 逐欄／逐列重新編碼，**增量** SHA 與 raw SHA 比 |
++| `.json.gz`：round-trip 逐位元相同 | 整份重新壓縮比 bytes | 解壓的 payload **同時**餵進同參數的 gzip，比 SHA（⚠️ 分塊寫入與一次寫入的輸出逐位元相同——2026-09-23 以 Stage 1 D+1 實測） |
++| `schema_version`／`kind` | ✅ | ✅ |
++
++⚠️ **hash、驗證與回傳值全部來自同一次讀取**——⛔ 不得「先算 hash、再讀一次驗證」
++（兩次讀取之間檔案可能被換掉）。要封存的副本也在**同一趟**寫出（`copy_to`）。
++
++⚠️ **`on_row` 收到的列在函式正常回傳之前都只是暫定值**：canonical 與 hash 的比對要讀完
++整份才知道結果。呼叫端只能累積，⛔ 不得在回傳前據以做任何不可逆的事。
++
++⛔ **本模組必須 dependency-light**（只用標準庫與同 package）。
++"""
++from __future__ import annotations
++
++import codecs
++import gzip
++import hashlib
++import json
++import os
++import zlib
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, Callable
++
++from .artifacts import (
++    AFTER_KIND,
++    ARTIFACT_SCHEMA_VERSION,
++    ArtifactError,
++    StreamRowValidator,
++    validate_after_envelope,
++)
++from .canonical import CanonicalError, canonical_json_bytes
++
++# 每次讀取的 raw bytes。⚠️ 是模組層級變數，測試會把它調到極小，逼出「一列跨兩個 chunk」的邊界。
++READ_CHUNK = 1 << 20
++# 已消費的文字累積到這個長度就丟掉，避免 buffer 隨檔案長度成長。
++_COMPACT_AT = 1 << 20
++_WHITESPACE = " \t\n\r"
++
++
++@dataclass(frozen=True)
++class StreamLoad:
++    """`stream_canonical_artifact()` 的回傳。⚠️ 全部來自**同一次讀取**。"""
++
++    top: dict[str, Any]     # 頂層欄位，⛔ 不含被串流的陣列欄位
++    artifact_sha256: str    # 解壓後 bytes 的 SHA（`.json` 時即 raw bytes）
++    stored_sha256: str      # 實際落地檔案 raw bytes 的 SHA
++    stored_bytes: int
++    row_count: int
++    # `copy_to` 有給時：寫出的 canonical gzip 副本的 SHA 與長度
++    copy_sha256: str | None = None
++    copy_bytes: int | None = None
++
++
++class _HashSink:
++    """給 `GzipFile` 當 fileobj：只算 hash，⛔ 不留 bytes。"""
++
++    def __init__(self) -> None:
++        self.digest = hashlib.sha256()
++        self.size = 0
++
++    def write(self, data: bytes) -> int:
++        self.digest.update(data)
++        self.size += len(data)
++        return len(data)
++
++    def flush(self) -> None:
++        pass
++
++
++class _HashingFile:
++    """寫進真正的檔案，同時算 hash 與長度。"""
++
++    def __init__(self, fh) -> None:
++        self._fh = fh
++        self.digest = hashlib.sha256()
++        self.size = 0
++
++    def write(self, data: bytes) -> int:
++        self._fh.write(data)
++        self.digest.update(data)
++        self.size += len(data)
++        return len(data)
++
++    def flush(self) -> None:
++        self._fh.flush()
++
++
++def _canonical_gzip_writer(fileobj) -> gzip.GzipFile:
++    """⚠️ 參數必須與 `canonical.canonical_gzip_bytes()` **完全相同**：`mtime=0`、
++    header 不寫 filename、`compresslevel=9`。"""
++    return gzip.GzipFile(filename="", mode="wb", fileobj=fileobj, compresslevel=9, mtime=0)
++
++
++class _Source:
++    """raw bytes →（gzip 解壓）→ UTF-8 文字，途中維護全部 hash 與副本。"""
++
++    def __init__(self, fh, *, gz: bool, name: str, copy_fh=None) -> None:
++        self._fh = fh
++        self._gz = gz
++        self._name = name
++        self.stored = hashlib.sha256()
++        self.stored_bytes = 0
++        self.payload = hashlib.sha256()
++        self._text = codecs.getincrementaldecoder("utf-8")()
++        self._inflate = zlib.decompressobj(31) if gz else None
++        self._regz_sink = _HashSink() if gz else None
++        self._regz = _canonical_gzip_writer(self._regz_sink) if gz else None
++        self._copy_file = _HashingFile(copy_fh) if copy_fh is not None else None
++        self._copy = _canonical_gzip_writer(self._copy_file) if copy_fh is not None else None
++        self.eof = False
++
++    def _inflate_chunk(self, raw: bytes) -> bytes:
++        if self._inflate.eof:
++            raise ArtifactError(f"{self._name}：gzip 結尾之後還有多餘資料——⛔ 不是單一 canonical member")
++        try:
++            out = self._inflate.decompress(raw)
++        except zlib.error as exc:
++            raise ArtifactError(f"{self._name} 不是合法 gzip：{exc}") from exc
++        if self._inflate.eof and self._inflate.unused_data:
++            raise ArtifactError(f"{self._name}：gzip 結尾之後還有多餘資料——⛔ 不是單一 canonical member")
++        return out
++
++    def _finish_inflate(self) -> bytes:
++        try:
++            out = self._inflate.flush()
++        except zlib.error as exc:
++            raise ArtifactError(f"{self._name} 不是合法 gzip：{exc}") from exc
++        if not self._inflate.eof:
++            raise ArtifactError(f"{self._name} 的 gzip 不完整（被截斷）")
++        return out
++
++    def read_text(self) -> str:
++        """下一段文字。讀到檔尾時設 `eof` 並回傳剩下的文字（可能是空字串）。"""
++        if self.eof:
++            return ""
++        while True:
++            raw = self._fh.read(READ_CHUNK)
++            if raw:
++                self.stored.update(raw)
++                self.stored_bytes += len(raw)
++                payload = self._inflate_chunk(raw) if self._gz else raw
++            else:
++                payload = self._finish_inflate() if self._gz else b""
++            if payload:
++                self.payload.update(payload)
++                if self._regz is not None:
++                    self._regz.write(payload)
++                if self._copy is not None:
++                    self._copy.write(payload)
++            try:
++                text = self._text.decode(payload, final=not raw)
++            except UnicodeDecodeError as exc:
++                raise ArtifactError(f"{self._name} 不是合法 UTF-8：{exc}") from exc
++            if not raw:
++                self.eof = True
++                return text
++            if text:
++                return text
++
++    def finish(self) -> tuple[str, str, int, str | None, int | None]:
++        """回傳 `(payload_sha, stored_sha, stored_bytes, copy_sha, copy_bytes)`。"""
++        if self._regz is not None:
++            self._regz.close()
++            if self._regz_sink.digest.hexdigest() != self.stored.hexdigest():
++                raise ArtifactError(
++                    f"{self._name} ⛔ 不是 canonical gzip（round-trip 不是逐位元相同）——"
++                    "compression level／header 欄位不同都會落在這裡"
++                )
++        copy_sha = copy_bytes = None
++        if self._copy is not None:
++            self._copy.close()
++            self._copy_file.flush()
++            copy_sha, copy_bytes = self._copy_file.digest.hexdigest(), self._copy_file.size
++        return (self.payload.hexdigest(), self.stored.hexdigest(), self.stored_bytes,
++                copy_sha, copy_bytes)
++
++
++class _Parser:
++    """只懂 canonical artifact 形狀的最小串流解析器：頂層 object ＋ 其中一個欄位是陣列。
++
++    ⚠️ 單一值（含一整列）交給標準庫的 `JSONDecoder.raw_decode()`——⛔ 不自己解析 JSON 語法。
++    值可能被 chunk 切斷，所以「解不出來」或「剛好解到 buffer 尾端」（數字可能還沒讀完）
++    都要再讀一段重試。
++    """
++
++    def __init__(self, source: _Source, name: str) -> None:
++        self._src = source
++        self._name = name
++        self._buf = ""
++        self._pos = 0
++        self._decoder = json.JSONDecoder()
++
++    def _fill(self) -> bool:
++        if self._src.eof:
++            return False
++        if self._pos > _COMPACT_AT:
++            self._buf = self._buf[self._pos:]
++            self._pos = 0
++        self._buf += self._src.read_text()
++        return True
++
++    def _peek(self) -> str:
++        while self._pos >= len(self._buf):
++            if not self._fill():
++                return ""
++        return self._buf[self._pos]
++
++    def _skip_ws(self) -> None:
++        while True:
++            ch = self._peek()
++            if ch and ch in _WHITESPACE:
++                self._pos += 1
++            else:
++                return
++
++    def _expect(self, ch: str) -> None:
++        self._skip_ws()
++        actual = self._peek()
++        if actual != ch:
++            raise ArtifactError(f"{self._name}：預期 {ch!r}，實際 {actual!r}")
++        self._pos += 1
++
++    def _value(self) -> Any:
++        self._skip_ws()
++        while True:
++            try:
++                obj, end = self._decoder.raw_decode(self._buf, self._pos)
++            except json.JSONDecodeError as exc:
++                if self._fill():
++                    continue
++                raise ArtifactError(f"{self._name} 不是合法 JSON：{exc}") from exc
++            # ⚠️ 剛好解到 buffer 尾端：數字可能只讀到一半（`12` 其實是 `123`），要多讀再重試。
++            if end >= len(self._buf) and self._fill():
++                continue
++            self._pos = end
++            return obj
++
++    @staticmethod
++    def _encode(value: Any) -> bytes:
++        try:
++            return canonical_json_bytes(value)
++        except CanonicalError as exc:
++            raise ArtifactError(f"內容無法 canonical 編碼：{exc}") from exc
++
++    def parse(self, *, stream_field: str, on_row: Callable[[Any, bytes], None],
++              kind: str, canon) -> tuple[dict[str, Any], int]:
++        top: dict[str, Any] = {}
++        keys: list[str] = []
++        row_count = None
++        self._expect("{")
++        canon.update(b"{")
++        self._skip_ws()
++        if self._peek() == "}":
++            self._pos += 1
++        else:
++            while True:
++                key = self._value()
++                if not isinstance(key, str):
++                    raise ArtifactError(f"{self._name}：頂層的 key 必須是字串：{key!r}")
++                # ⚠️ canonical 要求 key 排序且不重複——⛔ 只靠重新編碼抓不到，因為這裡是
++                # 依檔案裡的順序重新組回去的。
++                if keys and key <= keys[-1]:
++                    raise ArtifactError(
++                        f"{self._name}：頂層 key 未排序或重複（{keys[-1]!r} 之後是 {key!r}）"
++                        "——⛔ 不是 canonical JSON"
++                    )
++                canon.update((b"," if keys else b"") + self._encode(key) + b":")
++                keys.append(key)
++                self._expect(":")
++                if key == stream_field:
++                    row_count = self._array(on_row, canon)
++                else:
++                    value = self._value()
++                    if key == "kind" and value != kind:
++                        # ⚠️ 提早擋：`kind` 排在 `rows` 前面，⛔ 不必讀完整份才發現讀錯檔。
++                        raise ArtifactError(f"{self._name} 的 kind={value!r}，預期 {kind!r}")
++                    top[key] = value
++                    canon.update(self._encode(value))
++                self._skip_ws()
++                ch = self._peek()
++                if ch == ",":
++                    self._pos += 1
++                    continue
++                if ch == "}":
++                    self._pos += 1
++                    break
++                raise ArtifactError(f"{self._name}：頂層 object 之後預期 ',' 或 '}}'，實際 {ch!r}")
++        canon.update(b"}")
++        # ⚠️ 結尾⛔ 不得有任何多餘內容（含空白與換行——canonical 沒有結尾換行）。
++        if self._peek():
++            raise ArtifactError(f"{self._name}：頂層 object 之後還有多餘內容——⛔ 不是 canonical JSON")
++        if row_count is None:
++            raise ArtifactError(f"{self._name} 缺少要串流的欄位 {stream_field!r}")
++        return top, row_count
++
++    def _array(self, on_row, canon) -> int:
++        self._expect("[")
++        canon.update(b"[")
++        count = 0
++        self._skip_ws()
++        if self._peek() == "]":
++            self._pos += 1
++        else:
++            while True:
++                row = self._value()
++                row_bytes = self._encode(row)
++                canon.update((b"," if count else b"") + row_bytes)
++                on_row(row, row_bytes)
++                count += 1
++                self._skip_ws()
++                ch = self._peek()
++                if ch == ",":
++                    self._pos += 1
++                    continue
++                if ch == "]":
++                    self._pos += 1
++                    break
++                raise ArtifactError(f"{self._name}：陣列元素之後預期 ',' 或 ']'，實際 {ch!r}")
++        canon.update(b"]")
++        return count
++
++
++def stream_canonical_artifact(
++    path: str | Path,
++    kind: str,
++    *,
++    on_row: Callable[[Any, bytes], None],
++    stream_field: str = "rows",
++    copy_to: str | Path | None = None,
++) -> StreamLoad:
++    """串流讀 `.json` 或 `.json.gz`，逐列呼叫 `on_row(row, row_canonical_bytes)`。
++
++    `copy_to`：⚠️ 在**同一趟**把 payload 寫成 canonical gzip 副本（封存用）。檔案由呼叫端
++    決定路徑；⚠️ 失敗時由本函式刪掉寫到一半的副本。
++    """
++    path = Path(path)
++    name = path.name
++    if name.endswith(".json.gz"):
++        gz = True
++    elif name.endswith(".json"):
++        gz = False
++    else:
++        raise ArtifactError(f"evidence 只接受 .json 或 .json.gz：{name}")
++
++    copy_path = Path(copy_to) if copy_to is not None else None
++    copy_fh = None
++    try:
++        try:
++            fh = open(path, "rb")
++        except OSError as exc:
++            raise ArtifactError(f"讀不到 artifact {path}：{exc}") from exc
++        with fh:
++            if copy_path is not None:
++                copy_fh = open(copy_path, "xb")
++            source = _Source(fh, gz=gz, name=name, copy_fh=copy_fh)
++            canon = hashlib.sha256()
++            top, row_count = _Parser(source, name).parse(
++                stream_field=stream_field, on_row=on_row, kind=kind, canon=canon,
++            )
++            payload_sha, stored_sha, stored_bytes, copy_sha, copy_bytes = source.finish()
++        if copy_fh is not None:
++            copy_fh.flush()
++            os.fsync(copy_fh.fileno())
++            copy_fh.close()
++    except BaseException:
++        if copy_fh is not None:
++            copy_fh.close()
++            copy_path.unlink(missing_ok=True)
++        raise
++
++    if canon.hexdigest() != payload_sha:
++        if copy_path is not None:
++            copy_path.unlink(missing_ok=True)
++        raise ArtifactError(f"{name} 的內容不是 canonical JSON——⛔ 語意相同但編碼不同也不接受")
++    version = top.get("schema_version")
++    if type(version) is not int or version != ARTIFACT_SCHEMA_VERSION:
++        if copy_path is not None:
++            copy_path.unlink(missing_ok=True)
++        raise ArtifactError(
++            f"未知的 {name} schema_version={version!r}（本實作只支援 {ARTIFACT_SCHEMA_VERSION}）"
++        )
++    if top.get("kind") != kind:
++        if copy_path is not None:
++            copy_path.unlink(missing_ok=True)
++        raise ArtifactError(f"{name} 的 kind={top.get('kind')!r}，預期 {kind!r}")
++    return StreamLoad(
++        top=top, artifact_sha256=payload_sha, stored_sha256=stored_sha,
++        stored_bytes=stored_bytes, row_count=row_count,
++        copy_sha256=copy_sha, copy_bytes=copy_bytes,
++    )
++
++
++@dataclass(frozen=True)
++class AfterStream:
++    """一份 after artifact 的串流摘要。⚠️ 只常駐 keys、每列 digest 與指定要留的完整列。"""
++
++    load: StreamLoad
++    keys: list[tuple[str, str, str]]            # 依檔案順序
++    candidate_keys: list[tuple[str, str, str]]  # 依檔案順序
++    row_digests: dict[tuple[str, str, str], bytes]  # key → sha256(canonical row bytes)
++    kept_rows: dict[tuple[str, str, str], dict[str, Any]]
++
++
++def stream_after_artifact(
++    path: str | Path,
++    *,
++    label: str,
++    side: str = "after",
++    keep_keys=frozenset(),
++    copy_to: str | Path | None = None,
++) -> AfterStream:
++    """串流讀一份 after artifact，套用整批 validator 的**全部** row-level 規則。
++
++    等同於整份載入後依序呼叫 `validate_after_artifact()`、`validate_replay_errors()`、
++    `validate_diagnostics(side=)`——⚠️ 三者的每一道都由 `StreamRowValidator` 以**同一組原語**
++    逐列套用（見 `artifacts.py`）。⛔ provenance 的 role 由呼叫端決定，這裡不驗。
++    """
++    validator = StreamRowValidator(label, side=side)
++    digests: dict[tuple[str, str, str], bytes] = {}
++    kept: dict[tuple[str, str, str], dict[str, Any]] = {}
++    keep = frozenset(keep_keys)
++
++    def on_row(row: Any, row_bytes: bytes) -> None:
++        key = validator.feed(row)
++        digests[key] = hashlib.sha256(row_bytes).digest()
++        if key in keep:
++            kept[key] = row
++
++    load = stream_canonical_artifact(path, AFTER_KIND, on_row=on_row, copy_to=copy_to)
++    try:
++        validator.finish()
++        # ⚠️ 封閉欄位集合要看到 `rows`——它是被串流的欄位，這裡補一個佔位。
++        validate_after_envelope(load.top | {"rows": []})
++    except BaseException:
++        if copy_to is not None:
++            Path(copy_to).unlink(missing_ok=True)
++        raise
++    return AfterStream(
++        load=load, keys=validator.keys, candidate_keys=validator.candidate_keys,
++        row_digests=digests, kept_rows=kept,
++    )

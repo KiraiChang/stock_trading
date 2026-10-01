@@ -13,7 +13,7 @@
 #   CPUS       CPU 上限（預設 1）
 #   PY_IMAGE   測試用 image tag（預設 stock-trading-python-test:latest）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
-#   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh（預設會先跑）
+#   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh 與 scripts/test-i074-stage2.sh（預設會先跑）
 #   REPLAY_SMOKE=1      另外跑 scripts/smoke-replay-offline.sh（真的跑完 Stage 1／2；預設不跑）
 #   PY_ENV     以空白分隔的 NAME=VALUE，原樣傳進 container。給「預設 skip、明確要求
 #              才跑」的測試用（例如成本量測 SR_EXCURSION_BENCH=1）——這類測試不該
@@ -83,6 +83,8 @@ docker build -t "$IMAGE" "$PYTHON_DIR"
 if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
   # ⚠️ `IMAGE_REQUIRED=1`：image 剛建好，需要它的那幾段⛔ 不得靜默 skip。
   IMAGE_REQUIRED=1 PY_IMAGE="$IMAGE" "$REPO_ROOT/scripts/test-replay-args.sh"
+  # I-074 Stage 2 ⑦b：supervisor／orchestrator／label shim 的整合測試 ＋ host unittest（⛔ 不碰 /run/lock、⛔ 真實容器）。
+  "$REPO_ROOT/scripts/test-i074-stage2.sh"
 fi
 
 

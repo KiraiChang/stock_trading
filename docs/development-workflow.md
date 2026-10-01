@@ -1300,7 +1300,7 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 **記憶體與耗時**（真實規模，2026-09-24，Stage 2 image，mem-guard 527m）：`--finalize` 約 42 秒、峰值
 299 MiB；`--recover-durability` 約 33 秒、314 MiB；`--check-failed-record` 約 24 秒、274 MiB——都 < 450 MiB。
 
-### I-074 Stage 2 的 tooling patch（⑦a；2026-09-30 實作，⚠️ 待 review）
+### I-074 Stage 2 的 tooling patch（⑦a；2026-09-30 實作、✅ review 通過）
 
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」；本節只寫**操作程序**。
 
@@ -1332,7 +1332,63 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
 的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過）
+### I-074 Stage 2 的正式執行程序（⑦b；2026-09-30 實作，⚠️ 待 review）
+
+⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」與 v29「八之一」～「八之二」；本節只寫**操作程序**。⑦b 的晉升是
+**stub**（固定回 9，⛔ 不把任何證據搬進真正 repo）——⑦c 才換成「八之三」的晉升；⑩ 在 ⑨-2 產出 freeze record 之後才可執行。
+
+```text id="i074_stage2_formal_run_usage_001"
+# ⚠️ 一律**直接執行**（shebang 是 #!/bin/bash -p）；bash <script> 會被拒絕
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --freeze-record <⑨-2 的 freeze_record.json> --work-dir <repo 外、尚不存在的目錄>
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --resume  --work-dir <dir>   # 只在 finalize／publish 回 1 之後
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --promote --work-dir <dir>   # ⑦b：stub，一律 9
+```
+
+| 階段 | 做什麼（⛔ 前一步不通過就⛔ 不做後一步） |
+|---|---|
+| 入口（真正 repo） | 只用 bash 內建：驗 `$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定成 `/usr/bin:/bin` → `REPLAY_IMAGE_ID` 必須是 `sha256:`＋64 位小寫 hex → 公開 argv（⛔ 沒有 `--repo-head`、⛔ 沒有路徑覆寫）→ **入口清單的投影 ＝ HEAD**（`run-i074-stage2.sh`、supervisor、freeze record 與 preflight 模組、`_i074_bootstrap.py`、`replay_bundle/canonical.py`；清單以外的檔案 dirty 不影響）→ work 目錄規則 → `exec /usr/bin/python3 -I` supervisor |
+| supervisor（`scripts/lib/i074-stage2-supervisor.py`） | 初始 user namespace（`/proc/self/uid_map` ＝ `0 0 4294967295`）、`/usr/bin/git`／`docker`／`python3` 與 `/bin/bash` 及其上層目錄 root 擁有、別人不可寫 → 自身 ＝ HEAD → 環境⛔ 帶 `I074_STAGE2_*` → uid ＝ 1001 → 取 `/run/lock/i074-stage2.lock`（屬性與 inode 比對、非阻塞 `flock`）→ `/run/lock/i074-stage2.active` ⛔ 存在 → image 的 labels ⛔ 含 `i074.stage2.run` → 沒有帶這個鍵的殘留容器 → 建 sentinel → child subreaper → 以 `/bin/bash -p` 啟動持鎖階段（parent-death TERM；環境以**清單刪除**——`GIT_*`、`DOCKER_*`、`MEM*`、`SIZING_*`、`LD_*`、`PYTHON*`、`I074_STAGE2_*`、`BASH_ENV`、`ENV`、兩份 patch 與 replay 相關的變數等——再加上協定 v1、`PYTHONDONTWRITEBYTECODE=1` 與 `PATH=<work>/bin:/usr/bin:/bin`；`HOME`、`XDG_DATA_HOME`、`REPLAY_IMAGE_ID` 與其他不在清單上的變數照傳） |
+| 持鎖階段（真正 repo 的 HEAD 版） | 再驗入口清單 → `mkdir <work>` → freeze record 與同目錄的 `sizing_report.json` **先複製**進 `<work>/freeze/` 再驗副本 → `repo_head` 存在 → `git clone --no-hardlinks`、detached checkout `repo_head`（`--resume`／`--promote`：沿用既有複本，freeze record 副本與 `state/run.json` 的記錄值一致）→ **exec 之前**驗複本 HEAD ＝ `repo_head`、要執行的 `scripts/run-i074-stage2.sh` ＝ 真正 repo 物件裡 `repo_head` 的 blob（⛔ 讓複本的程式自己驗自己；不符 → 1，`--promote` 9）→ `exec` 複本內的同一支腳本 |
+| 複本內 orchestrator（`repo_head` 版） | `/proc/locks` 持鎖驗證 → preflight 0（只用 git／shell：位置、無 alternates、HEAD、tracked 無修改、`i074_stage2/` 以外無未追蹤／ignored、自身內容）→ `state/run.json` → 安裝 label shim → 1 凍結兩份 patch（tooling ⛔ 不得為空）→ 2 合成 ＋ freeze record 完整驗證 → 3 `anchors`（Stage 2 image 內，以**目前 XDG 的** identity 走信任錨第 1～10 道）→ 4 真正 repo 的兩條檢查 ＋ `--check-failed-record` → 6 磁碟（`f_bavail × f_frsize ≥ 1,241,513,984`，相關位置與 Docker Root Dir 同一個裝置）→ replay（兩份 patch 的環境變數只給這一次）→ 輸出形狀 → 檢查點 → finalize（rc 0）／publish-failed-record（rc 6）→ **依磁碟事實**判終態 → 晉升 stub（9） |
+
+**執行目錄 `<work>`**（preflight 2 的暫時 worktree 不論成功或失敗都移除，移除失敗即 1）：`repo/`（複本）、`freeze/`（freeze record 與報告的副本）、`run/patches/`（凍結副本）、`run/stage2/`（runner 的輸出）、
+`tmp/`（`TMPDIR`；runner、finalizer 的 worktree 都在這裡）、`bin/docker`（label shim）、`logs/`（每一步的 stdout／stderr）、`state/`。
+⚠️ replay 開始之後 orchestrator ⛔ 不做任何 worktree 清理：殘留（實體目錄與登記）只在**複本的** `.git` 與 `<work>/tmp`，保留到晉升結果
+commit 之後整個 `<work>` 被刪除（`git worktree prune` 收不掉實體目錄仍在的登記）。
+
+**`state/` 與 `--resume`**：五份封閉 schema 的 canonical JSON，以前一份的檔案 SHA 串成鏈——`run.json`（preflight 0 之後）、
+`preflight.json`（preflight 6 之後）、`replay_started.json`（replay 之前）、`replay_done.json`（輸出形狀通過）、`attempt.json`（finalize／publish 回 1
+且磁碟上沒有終態）。**`--resume` 只在五份都在時可用**：重新驗鏈與交叉條件、**目前的** `REPLAY_IMAGE_ID` 與 XDG identity 檔的 SHA ＝
+`preflight.json`（只改 `created_at` 也不行）、凍結 patch 與輸出檔的 SHA 不變，才重跑 finalize／publish；⛔ replay 一律不再跑。replay 中斷、
+replay 之後的檢查點不符、收到訊號 → ⛔ 不能 resume（⑦c 之後改用 `--promote` 依磁碟事實裁決）。
+
+**端到端結束碼（⑦b）**：`1` ＝ 還沒有任何終態（`--resume` 只適用 finalize／publish 回 1 的那一種）；`2` ＝ failed-record lookup 命中；
+`8` ＝ `--promote` 在取得 sentinel 之前失敗（排除原因後可重跑）；`9` ＝ `--promote` 遇到 sentinel、或已有終態而晉升尚未實作；
+`128＋N` ＝ 被訊號 N 中斷（supervisor 清空本趟之後回傳）；`137` ＝ supervisor 被 SIGKILL。完整的「模式 × 失敗點」表見 issue.md「二之十」。
+
+⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
+
+⚠️ **sentinel 留下 ＝ 需要重開機**（v29 決策 9）：supervisor 被 SIGKILL（含 OOM killer）、或收回／釋放時發現 sentinel 的路徑被換掉、
+本趟的容器或後代清不掉 → sentinel 留在 `/run/lock`（tmpfs），新的 supervisor 一律 1／9，**直到重開機**。⛔ 不得手動刪除 sentinel；
+重開機之後若仍有帶 `i074.stage2.run` 的容器，先 `docker rm -f` 再重跑（⛔ 不需要再重開機）。正常釋放清不空時 supervisor ⛔ 不結束、
+持鎖並每 30 秒回報，等人工處理。
+
+⚠️ **label shim 與 sizing shim 互斥**：⑩ 裡所有以名字呼叫的 `docker` 都經 `<work>/bin/docker`（複本的
+`scripts/lib/i074-stage2-docker-label-shim.sh`），在 `run`／`create`（含 `container run`／`container create`）的子指令之後插入恰好一個
+`--label i074.stage2.run=<token>`；子指令之前的全域選項、`--label-file`、自帶的鍵、與 sentinel 不符的 token、非固定的 `/usr/bin/docker`
+一律 125。環境帶 `I074_STAGE2_*` 時 sizing shim 與 sizing harness 拒絕執行；label shim 遇到 `SIZING_*` 或 sizing shim 同樣拒絕。
+⚠️ 已知限制：直接呼叫 `/usr/bin/docker` 攔不到——⑩ 呼叫圖的腳本由靜態測試禁止這樣做。
+
+⚠️ **保證範圍（照實）**：無特權的流程⛔ 防不了惡意的呼叫者以 `LD_PRELOAD` 污染第一個程序；這些守門防的是 PATH 被遮蔽之類的
+**誤用**，並保證呼叫者環境裡的 PATH、`BASH_ENV`、`LD_*`、`PYTHON*` ⛔ 傳進 supervisor 與之後的 workload。
+
+⚠️ **測試**（`scripts/test-i074-stage2.sh`，由 `python/scripts/test.sh` 在 `SKIP_SHELL_TESTS` 那一段呼叫）：正式腳本複製到**合成的
+最小 repo**、以 sed 改掉常數區塊（鎖檔、sentinel、uid、label 鍵、信任根、base OID），並斷言與正式檔案**只差那幾行**——正式檔案
+⛔ 沒有執行期覆寫口；docker、runner、finalizer 都是 fake，git 是轉交真 git 的包裝。⛔ **絕不碰 `/run/lock`**、⛔ 絕不建立帶正式鍵的
+真實容器；結束時斷言 `/run/lock` 的 i074-stage2 項目與真正 repo 的 worktree 登記數都沒有變化。supervisor 的內部函式（sentinel 的
+schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python3 -m unittest`（`scripts/tests/test_i074_stage2_host.py`，Python 3.9）。
+
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⚠️ ⑦b 改動待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
@@ -1357,6 +1413,18 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work
 | 輸出 | `<work>/sizing_report.json`（canonical）與 `sizing_report.txt`：三條路徑各自的目錄取樣峰值、檔案系統取樣峰值、會計上界與 `P_path`，`P_B`，每個程序的 cgroup 峰值（含 page cache；⚠️ 旁邊的結束碼是**容器內 Python 段**的，例如 check 的 Python 段回 0、shell 段才依命中回 2），`status`（`ok`／`assumption_violated`） |
 | 失敗 | 結束碼 1、⛔ 不產報告；`<work>/failure_summary.json` 記失敗的階段與結束碼（⛔ 不宣稱 `P_B`） |
 | 演練用的故障注入 | `I074_SIZING_FAULT=twins`（在 metadata twin 那一步中止）／`copy`（中止時讓複製 S 失敗）／`summary`（中止時讓失敗摘要寫不出來）／`cleanup`（放一份假 cidfile 後中止，搭配移除不了的 docker 驗證 S 會被保留）／`stuck`（放一個忽略 `TERM` 的步驟後中止，驗證升級 `KILL`）／`group-alive`（讓 group 在 `KILL` 之後仍被視為存活，驗證 S 會被保留）／`final-check`（直接跑成功路徑結束前的容器檢查，搭配 `docker ps` 失敗驗證 fail-closed）／`orphan-ok`、`orphan-bad`（步驟的 leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡，驗證一律收尾並中止）——⚠️ 只給 ④ 的中止點演練，`--formal` 一律拒絕 |
+
+⚠️ **⑦b（2026-09-30）改動**：
+- 一律用**真實的兩份 patch**（sizing 複本常數路徑的 counterfactual ＋ tooling；tooling ⛔ 不得為空）。patched worktree 以唯一的合成函式
+  `replay_args_compose()` 建立；量測窗口之外先合成一次、斷言兩份的 raw SHA 各自 ＝ 增量 canonical SHA，之後每次都必須得到同一個結果。
+  fixture 的 provenance 改收 host 算好的合成 SHA（`--composed-sha256`）。⑤ 的 `P_B`（空 tooling）因此是歷史值，正式值由 ⑨-2 重量。
+- `meta` 多記 `tooling_sha256`（raw）、`counterfactual_canonical_sha256`、`tooling_canonical_sha256`、`composed_sha256`、`counterfactual_semantic_sha256`。
+- **freeze record**（v29「八之二」）：`--formal` 時在報告產出之後、任何檔案複製到 `<work>` 之前，以
+  `python/scripts/i074_stage2_freeze_record.py build` 在 S 裡建好並自我驗證；只有 `mode = formal`、`status = ok`、`P_B ≤ P_B_BUDGET`
+  才寫 `<work>/freeze_record.json`（否則印原因、⛔ 不寫、結束碼仍 0——缺 freeze record 本身就擋住 ⑩）；複製之後對副本再驗一次。
+  三個腳本 SHA 是 `repo_head` 中的**檔案內容** SHA-256（⛔ 不是 blob OID）。`--formal` 另要求 Stage 2 identity 存在，「檔案 ＝ HEAD」清單
+  加入 freeze record 與 preflight 兩個模組。
+- 與 ⑩ 的 label shim 互斥：環境帶 `I074_STAGE2_*`、或 PATH 上的 docker 是 label shim → 中止；sizing shim 同樣拒絕。
 
 ⚠️ **`status = "assumption_violated"`**（failure 路徑的峰值大於 success 路徑）時報告照樣產出，⛔ 但不得進入 ⑤ 的
 正式裁定，要回頭 review 計畫。⚠️ ⑦ 的正式流程若量到比 ⑤ 裁定的 `P_B` 更大的實際峰值：⛔ 不得進入 ⑩，更新
@@ -1404,6 +1472,7 @@ python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得�
 |---|---|---|
 | `scripts/test-replay-args.sh` | 參數所有權（含**縮寫**與**重複**）、TOCTOU、tooling patch hash、以及**實際組出來的 `docker run` argv**（stage↔版本、bundle／artifact 掛載、`--network none`、無 DB 環境變數） | `python/scripts/test.sh` 在 pytest **之前**自動跑（`SKIP_SHELL_TESTS=1` 可跳過） |
 | `scripts/smoke-replay-offline.sh` | **真的**用官方腳本把 Stage 1／2 跑完一次（小型 fixture，秒級） | 預設不跑；`REPLAY_SMOKE=1 python/scripts/test.sh` 或直接執行 |
+| `scripts/test-i074-stage2.sh` | I-074 Stage 2 ⑩ 的入口、supervisor、持鎖階段、複本內 orchestrator、label shim（合成 repo ＋ sed 過常數的正式腳本 ＋ fake docker／runner／finalizer；⛔ 不碰 `/run/lock`）＋ host unittest | 同 `test-replay-args.sh`（`SKIP_SHELL_TESTS=1` 可跳過） |
 
 ⚠️ **兩層都需要，少了任一層都有洞**：argv 斷言攔得住「Stage 1 跑成 before」「bundle 沒掛
 進去」這類錯誤，但證明不了 CLI 在 worktree 裡啟動得起來、bundle 在容器內載入得了、

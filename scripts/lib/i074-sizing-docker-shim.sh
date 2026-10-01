@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# I074-SIZING-DOCKER-SHIM
 # I-074 Stage 2 步驟 ④：sizing harness 的 docker shim（issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」
 # 的「三、docker shim」表）。harness 把它以 `docker` 的名字放在 PATH 最前面；⛔ 不是正式入口。
 #
@@ -16,6 +17,19 @@
 set -uo pipefail
 
 REAL="${SIZING_REAL_DOCKER:?}"
+# ⚠️ I-074 ⑦b：與 ⑩ 的 label shim **互斥**（「Stage 2 步驟 ⑦b 細部計畫 v1」「二之五」）——在 ⑩ 的流程裡（環境帶
+#   `I074_STAGE2_*`）、或「真正的 docker」其實是 label shim，一律 125、⛔ 不執行；錯誤只寫 S（I/O 透明）。
+_shim_reject() {
+  [ -n "${SIZING_STATE:-}" ] && printf 'shim：%s\n' "$1" >>"$SIZING_STATE/shim-errors.log" 2>/dev/null
+  exit 125
+}
+for _v in $(compgen -e); do
+  case "$_v" in I074_STAGE2_*) _shim_reject "環境帶 $_v（與 label shim 互斥）" ;; esac
+done
+if [ "$(head -c 2 -- "$REAL" 2>/dev/null)" = '#!' ] \
+   && grep -q 'I074-STAGE2-LABEL-SHIM' <<< "$(head -n 5 -- "$REAL")"; then
+  _shim_reject "SIZING_REAL_DOCKER 是 label shim：$REAL（兩個 shim 互斥）"
+fi
 if [ "${1:-}" != "run" ]; then
   exec "$REAL" "$@"
 fi

@@ -16,6 +16,13 @@
 # 模式：預設是 ④ 的**可用性驗證**（允許未 commit，報告記錄實際執行的腳本 SHA-256）；
 #       `--formal` 是 ⑤ 的**正式量測**（scripts/、python/、.gitattributes 必須 clean，harness 檔案必須等於 HEAD）。
 #
+# ⚠️ I-074 ⑦b（「Stage 2 步驟 ⑦b 細部計畫 v1」「二之九」）：
+#   - 一律用**真實的兩份 patch**（複本常數路徑的 counterfactual ＋ tooling），patched worktree 以唯一的合成函式
+#     `replay_args_compose()` 建立，並斷言兩份的 raw SHA 各自 ＝ 增量 canonical SHA；
+#   - `--formal` 且報告 `status = ok`、`P_B ≤ P_B_BUDGET` 時寫出 `<work>/freeze_record.json`（v29「八之二」）——
+#     validation 模式、`assumption_violated`、`P_B` 超過預算、任何失敗路徑都⛔ 不寫；
+#   - 與 ⑩ 的 label shim **互斥**：環境帶 `I074_STAGE2_*`、或 PATH 上的 docker 是 label shim → 中止。
+#
 # 做法重點（細節見計畫書）：
 #   - 全部在 <work>/repo（`git clone --no-hardlinks` 的 HEAD）裡執行正式入口——路徑常數由腳本位置推導，
 #     ⛔ 不會寫到真正的 repo；
@@ -54,8 +61,16 @@ done
 IMAGE="${REPLAY_IMAGE_ID:-}"
 [ -n "$IMAGE" ] || die "⛔ 一律要求 REPLAY_IMAGE_ID（Stage 2 identity 的 image）。"
 [ -z "${PY_IMAGE:-}" ] || die "REPLAY_IMAGE_ID 與 PY_IMAGE ⛔ 不可同時設定。"
+for _v in $(compgen -e); do
+  case "$_v" in I074_STAGE2_*) die "環境帶 $_v——sizing harness 與 ⑩ 的 label shim 互斥（⛔ 在 ⑩ 的流程裡執行）" ;; esac
+done
 REAL_DOCKER="$(command -v docker)" || die "找不到 docker。"
 case "$REAL_DOCKER" in /dev/shm/*) die "PATH 裡的 docker 已經是 shim：$REAL_DOCKER" ;; esac
+# ⚠️ here-string（⛔ `head | grep -q`：pipefail 下會因 SIGPIPE 誤判）。
+if [ "$(head -c 2 -- "$REAL_DOCKER" 2>/dev/null)" = '#!' ] \
+   && grep -q 'I074-STAGE2-LABEL-SHIM' <<< "$(head -n 5 -- "$REAL_DOCKER")"; then
+  die "PATH 上的 docker 是 ⑩ 的 label shim：$REAL_DOCKER（兩個 shim 互斥）"
+fi
 "$REAL_DOCKER" image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE 不在本機。"
 
 # ── work 目錄防護：canonical path（含 parent symlink 指回 repo）、⛔ 不得已存在 ──────────────
@@ -81,7 +96,9 @@ if [ "$FORMAL" = "1" ]; then
   dirty="$(git -C "$REPO_ROOT" status --porcelain -- scripts python .gitattributes)"
   [ -z "$dirty" ] || die "--formal：scripts/、python/、.gitattributes 有未 commit 的變更：
 $dirty"
-  for f in scripts/i074-stage2-sizing.sh scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py; do
+  # ⚠️ ⑦b：freeze record 的寫入端（與它 import 的常數）也在清單內——其餘被載入的檔案已在上一行的 clean 之內。
+  for f in scripts/i074-stage2-sizing.sh scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py \
+           python/scripts/i074_stage2_freeze_record.py python/scripts/i074_stage2_preflight.py; do
     git -C "$REPO_ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || die "--formal：$f 尚未進版控"
     [ "$(git -C "$REPO_ROOT" show "HEAD:$f" | sha256sum | cut -d' ' -f1)" = "$(sha256sum < "$REPO_ROOT/$f" | cut -d' ' -f1)" ] \
       || die "--formal：$f 與 HEAD 的內容不同"
@@ -241,7 +258,11 @@ meta harness_sha256 "$(sha_of "$REPO_ROOT/scripts/i074-stage2-sizing.sh")"
 meta shim_sha256 "$(sha_of "$SHIM")"
 meta helper_sha256 "$(sha_of "$HELPER")"
 IDENTITY="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
-[ -f "$IDENTITY" ] && meta identity_sha256 "$(sha_of "$IDENTITY")"
+if [ -f "$IDENTITY" ]; then
+  meta identity_sha256 "$(sha_of "$IDENTITY")"
+elif [ "$FORMAL" = "1" ]; then
+  on_failure "--formal 需要 Stage 2 的 run identity（freeze record 要綁它）：$IDENTITY" 1
+fi
 
 # ── 0. 準備 ────────────────────────────────────────────────────────────────────
 mkdir "$WORK"
@@ -288,20 +309,33 @@ rm -rf "$L2/envcheck"
 BASE="$(helper anchor-base --python-root "$CLONE/python")" || on_failure "取不到 Stage 1 after 的 base" 1
 meta base_commit "$BASE"
 CF_PATCH="$L2/counterfactual_e1cbbbd.patch"
+TOOL_PATCH="$L2/tooling_e1cbbbd.patch"          # ⚠️ ⑦b：真實的 tooling（⑩ 的 tooling ⛔ 不得為空）
+[ -s "$TOOL_PATCH" ] || on_failure "tooling patch 不存在或是空的：$TOOL_PATCH" 1
 meta counterfactual_sha256 "$(sha_of "$CF_PATCH")"
+meta tooling_sha256 "$(sha_of "$TOOL_PATCH")"
 . "$CLONE/scripts/lib/replay-args.sh"
 
 new_worktree() {  # $1＝ref；$2＝patched（0／1）→ 印出 worktree 路徑（在 L3）
   local wt
-  wt="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"; rmdir "$wt"
-  replay_args_prepare_worktree "$CLONE" "$1" "$wt" >/dev/null
+  wt="$(mktemp -d "$L3/tmp.XXXXXXXXXX")" && rmdir "$wt" || return 1
+  replay_args_prepare_worktree "$CLONE" "$1" "$wt" >/dev/null || return 1
   if [ "$2" = 1 ]; then
-    git -C "$wt" apply --index "$CF_PATCH"
-    git -C "$wt" add -A -N >/dev/null 2>&1 || true
-    git -C "$wt" write-tree >/dev/null
+    # ⚠️ ⑦b：與 runner 同一個合成函式（counterfactual → tooling）；結果必須 ＝ 步驟 0 之前記下的那一次。
+    [ "$(replay_args_compose "$wt" "$1" "$CF_PATCH" "$TOOL_PATCH")" = "$COMPOSE" ] \
+      || { echo "ERROR: 合成結果與第一次不同（或合成失敗）" >&2; return 1; }
   fi
   printf '%s\n' "$wt"
 }
+# ⚠️ ⑦b：先以唯一的合成函式算一次兩份**真實** patch 的增量 canonical SHA（量測窗口之外），並斷言 raw ＝ canonical。
+cwt="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"; rmdir "$cwt"
+replay_args_prepare_worktree "$CLONE" "$BASE" "$cwt" >/dev/null || on_failure "合成用的 worktree" 1
+COMPOSE="$(replay_args_compose "$cwt" "$BASE" "$CF_PATCH" "$TOOL_PATCH")" || on_failure "兩份 patch 的合成失敗" 1
+git -C "$CLONE" worktree remove --force "$cwt" || on_failure "移除合成用的 worktree" 1
+read -r _T1 _T2 C_CF C_TOOL C_COMP C_SEM <<< "$COMPOSE"
+[ "$C_CF" = "$(sha_of "$CF_PATCH")" ] || on_failure "counterfactual 的 raw SHA ≠ 增量 canonical SHA" 1
+[ "$C_TOOL" = "$(sha_of "$TOOL_PATCH")" ] || on_failure "tooling 的 raw SHA ≠ 增量 canonical SHA" 1
+meta counterfactual_canonical_sha256 "$C_CF"; meta tooling_canonical_sha256 "$C_TOOL"
+meta composed_sha256 "$C_COMP"; meta counterfactual_semantic_sha256 "$C_SEM"
 say "==> 步驟 0：實建三種 worktree、快照與 probe 結構量 allocated bytes"
 for spec in head:HEAD:0 base:$BASE:0 base_patched:$BASE:1; do
   IFS=: read -r kind ref patched <<< "$spec"
@@ -313,7 +347,7 @@ for spec in head:HEAD:0 base:$BASE:0 base_patched:$BASE:1; do
   git -C "$CLONE" worktree remove --force "$wt"
 done
 snap="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"
-cp -- "$CF_PATCH" "$snap/counterfactual.patch"; : > "$snap/tooling.patch"
+cp -- "$CF_PATCH" "$snap/counterfactual.patch"; cp -- "$TOOL_PATCH" "$snap/tooling.patch"
 comp snapshot "$(alloc "$snap")"; rm -rf "$snap"
 probe="$(mktemp -d "$L2/.sizing-probe.XXXXXXXX")"
 mkdir "$probe/a" "$probe/b-src" "$probe/b-dst"
@@ -343,13 +377,13 @@ fixture() {  # $1＝phase
   step "fixture_$1" 0 fixture docker run --rm --network none --user "$(id -u):$(id -g)" --cpus=1 \
     --memory="$MEM" --memory-swap="$MEM" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONPATH=/app \
     -v "$CLONE/python":/app:ro -v "$HELPER":/sizing/i074_stage2_sizing.py:ro -v "$CACHE":/cache:ro \
-    -v "$CF_PATCH":/patches/counterfactual.patch:ro -v "$L1/$1":/out -w /app "$IMAGE" \
+    -v "$L1/$1":/out -w /app "$IMAGE" \
     python /sizing/i074_stage2_sizing.py fixture --phase "$1" --python-root /app --cache /cache --out /out \
-    --patch /patches/counterfactual.patch
+    --composed-sha256 "$C_COMP"
 }
 freeze_patches() {  # $1＝run 目錄
   mkdir -p "$1/patches"
-  cp -- "$CF_PATCH" "$1/patches/counterfactual.patch"; : > "$1/patches/tooling.patch"
+  cp -- "$CF_PATCH" "$1/patches/counterfactual.patch"; cp -- "$TOOL_PATCH" "$1/patches/tooling.patch"
 }
 begin_phase() {  # $1＝phase
   PHASE="$1"
@@ -418,12 +452,27 @@ helper twins --state "$S" --docker "$REAL_DOCKER" --run-id "$RUN_ID" --fs-path "
 say "==> 步驟 6：報告"
 helper report --state "$S" --json-out "$S/sizing_report.json" --text-out "$S/sizing_report.txt" \
   || on_failure "report" 1
+# ⚠️ ⑦b：freeze record 在**任何檔案複製到 <work> 之前**於 S 建好並自我驗證；只有 formal ＋ ok ＋ P_B ≤ 預算才寫。
+FREEZE="$REPO_ROOT/python/scripts/i074_stage2_freeze_record.py"
+if [ "$FORMAL" = "1" ]; then
+  python3 "$FREEZE" build --report "$S/sizing_report.json" --repo "$REPO_ROOT" --identity "$IDENTITY" \
+    --out "$S/freeze_record.json" || on_failure "freeze record" 1
+fi
 for wt in "$L3"/tmp.*; do
   [ -d "$wt" ] && git -C "$CLONE" worktree remove --force "$wt" >/dev/null 2>&1 || true
 done
 # ⚠️ 本次 run id 的容器必須一個都不剩——在寫出任何報告**之前**檢查（⛔ 不留下「有報告卻失敗」的矛盾狀態）。
 ensure_no_run_containers "結束前的容器檢查"
 cp "$S/sizing_report.json" "$S/sizing_report.txt" "$WORK/"
+if [ -f "$S/freeze_record.json" ]; then
+  cp "$S/freeze_record.json" "$WORK/"
+  # 複製之後對兩個副本再驗一次；不符就刪掉 freeze record（⛔ 不留下可以進 ⑩ 的錯誤紀錄）。
+  if ! python3 "$FREEZE" check-pair --record "$WORK/freeze_record.json" --report "$WORK/sizing_report.json"; then
+    rm -f -- "$WORK/freeze_record.json"
+    on_failure "freeze record 的副本驗證" 1
+  fi
+  say "==> freeze record：$WORK/freeze_record.json"
+fi
 cp -a "$S" "$WORK/raw" || { echo "⚠️ 複製原始量測失敗，保留 S：$S" >&2; DONE=1; exit 1; }
 DONE=1
 rm -rf "$S"

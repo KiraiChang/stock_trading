@@ -2290,6 +2290,9 @@ if [ -n "$S2_IMG" ]; then
   mkdir -p "$SZ_REPO/scripts/lib" "$SZ_REPO/python/scripts"
   cp "$SZ_H" "$SZ_REPO/scripts/"; cp "$SZ_SHIM" "$REPO_ROOT/scripts/lib/mem-guard.sh" "$SZ_REPO/scripts/lib/"
   cp "$SZ_HELPER" "$SZ_REPO/python/scripts/"
+  # ⚠️ ⑦b：freeze record 的寫入端與它 import 的常數也在 `--formal` 的「檔案 ＝ HEAD」清單裡（n10）。
+  cp "$REPO_ROOT/python/scripts/i074_stage2_freeze_record.py" "$REPO_ROOT/python/scripts/i074_stage2_preflight.py" \
+     "$SZ_REPO/python/scripts/"
   git -C "$SZ_REPO" init -q
   git -C "$SZ_REPO" add -A
   git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
@@ -2306,6 +2309,16 @@ if [ -n "$S2_IMG" ]; then
   printf 'dirty\n' >> "$SZ_REPO/python/scripts/i074_stage2_sizing.py"
   sz_formal "b：--formal 時 python/ 有未 commit 的變更 → 拒絕" "未 commit"
   git -C "$SZ_REPO" checkout -q -- python/scripts/i074_stage2_sizing.py
+  printf 'dirty\n' >> "$SZ_REPO/python/scripts/i074_stage2_freeze_record.py"
+  sz_formal "n10：--formal 時 freeze record 的寫入端有未 commit 的變更 → 拒絕" "未 commit"
+  git -C "$SZ_REPO" checkout -q -- python/scripts/i074_stage2_freeze_record.py
+  git -C "$SZ_REPO" rm -q --cached python/scripts/i074_stage2_preflight.py
+  git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm untrack-preflight
+  printf 'python/scripts/i074_stage2_preflight.py\n' > "$SZ_REPO/.git/info/exclude"
+  sz_formal "n10：--formal 時 freeze record 依賴的 preflight 常數模組未進版控 → 拒絕" "尚未進版控"
+  : > "$SZ_REPO/.git/info/exclude"
+  git -C "$SZ_REPO" add python/scripts/i074_stage2_preflight.py
+  git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm retrack-preflight
   git -C "$SZ_REPO" rm -q --cached scripts/lib/i074-sizing-docker-shim.sh
   git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm untrack
   printf 'scripts/lib/i074-sizing-docker-shim.sh\n' > "$SZ_REPO/.git/info/exclude"

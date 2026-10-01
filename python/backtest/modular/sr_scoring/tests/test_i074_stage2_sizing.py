@@ -61,7 +61,8 @@ def test_c_success_fixture_passes_the_official_finalizer(fixture_env, tmp_path):
     env, cache, patch = fixture_env
     run = tmp_path / "runs" / "success"
     run.mkdir(parents=True)
-    result = sz.fixture_success(env.root, cache, run, patch)
+    # ⚠️ ⑦b：合成 SHA 由 host 傳入；本測試的 tooling 是空的，所以合成 SHA ＝ counterfactual 的 SHA。
+    result = sz.fixture_success(env.root, cache, run, hashlib.sha256(patch.read_bytes()).hexdigest())
     assert result["cohort_rows"] == len(t2.COHORT)
     before = run / "stage2" / "before_source_artifact.json"
     assert before.read_bytes() == canonical_json_bytes(json.loads(before.read_bytes()))
@@ -75,7 +76,8 @@ def test_c_failure_fixture_passes_the_official_publisher(fixture_env, tmp_path):
     env, cache, patch = fixture_env
     run = tmp_path / "runs" / "failure"
     run.mkdir(parents=True)
-    assert sz.fixture_failure(env.root, cache, run, patch)["failure_reason"] == sa.FAILURE_RR_NOT_RESTORED
+    composed = hashlib.sha256(patch.read_bytes()).hexdigest()
+    assert sz.fixture_failure(env.root, cache, run, composed)["failure_reason"] == sa.FAILURE_RR_NOT_RESTORED
     (run / "patches").mkdir()
     (run / "patches" / "counterfactual.patch").write_bytes(patch.read_bytes())
     (run / "patches" / "tooling.patch").write_bytes(b"")

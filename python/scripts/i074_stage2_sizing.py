@@ -529,13 +529,20 @@ def stream_write_canonical(directory: Path, name: str, top: Mapping[str, Any], r
 
 # ── fixture（容器內） ──────────────────────────────────────────────────────────
 
-def _fixture_prov(cache: Path, patch: Path) -> dict[str, Any]:
-    """before 側的 provenance：沿用見證趟 after' 的（新 image、`e1cbbbd`），tooling ＝ 合成 hash。"""
+def _fixture_prov(cache: Path, composed_sha256: str) -> dict[str, Any]:
+    """before 側的 provenance：沿用見證趟 after' 的（新 image、`e1cbbbd`），tooling ＝ 合成 hash。
+
+    ⚠️ ⑦b：合成 hash 由 host 以唯一的合成函式算好傳進來（真實 tooling 非空之後，它⛔ 不再等於
+    `sha256(counterfactual patch)`，否則 finalize 的合成守門會擋下）。
+    """
+    if not (isinstance(composed_sha256, str) and len(composed_sha256) == 64
+            and all(c in "0123456789abcdef" for c in composed_sha256)):
+        raise SizingError(f"--composed-sha256 必須是 64 位小寫 hex：{composed_sha256!r}")
     from backtest.modular.sr_scoring.replay_bundle.stream import stream_canonical_artifact
 
     load = stream_canonical_artifact(cache / "envcheck" / "witness" / "after_artifact.json.gz",
                                      "sr_zone_replay_after", on_row=lambda r, b: None)
-    return dict(load.top["provenance"], tooling_patch_sha256=hashlib.sha256(patch.read_bytes()).hexdigest(),
+    return dict(load.top["provenance"], tooling_patch_sha256=composed_sha256,
                 argv=["--i074-counterfactual", "--output-dir", "/out/stage2"])
 
 
@@ -592,13 +599,13 @@ def fixture_witness(cache: Path, out: Path) -> dict[str, Any]:
     return {"after_sha256": sha}
 
 
-def fixture_success(python_root: Path, cache: Path, out: Path, patch: Path) -> dict[str, Any]:
+def fixture_success(python_root: Path, cache: Path, out: Path, composed_sha256: str) -> dict[str, Any]:
     from backtest.modular.sr_scoring.replay_bundle import stage2_archive as sa
     from backtest.modular.sr_scoring.replay_bundle import stage2_evidence as s2
     from backtest.modular.sr_scoring.replay_bundle.artifacts import (
         build_comparison_artifact, build_report, compare_rows, prepare_output_dir, publish_artifacts, row_key)
     anchor = s2.load_stage1_anchor(python_root)
-    prov = _fixture_prov(cache, patch)
+    prov = _fixture_prov(cache, composed_sha256)
     target = prepare_output_dir(out / "stage2")
     cohort = set(anchor.cohort_keys)
     kept: dict[tuple, dict] = {}
@@ -633,7 +640,7 @@ def fixture_success(python_root: Path, cache: Path, out: Path, patch: Path) -> d
     return {"before_sha256": before_sha, "cohort_rows": len(kept)}
 
 
-def fixture_failure(python_root: Path, cache: Path, out: Path, patch: Path) -> dict[str, Any]:
+def fixture_failure(python_root: Path, cache: Path, out: Path, composed_sha256: str) -> dict[str, Any]:
     from backtest.modular.sr_scoring.replay_bundle import stage2_archive as sa
     from backtest.modular.sr_scoring.replay_bundle import stage2_evidence as s2
     from backtest.modular.sr_scoring.replay_bundle.artifacts import prepare_output_dir, publish_artifacts
@@ -643,7 +650,7 @@ def fixture_failure(python_root: Path, cache: Path, out: Path, patch: Path) -> d
     for key in anchor.cohort_keys:            # RR 沒加回去：156 列候選原封不動 → rr_not_restored
         check.feed(anchor.cohort_rows[key])
     payload = sa.build_counterfactual_failure(bundle_id=anchor.bundle_id, generated_at="2026-09-24T13:00:00+08:00",
-                                              provenance=_fixture_prov(cache, patch), effect=check.result())
+                                              provenance=_fixture_prov(cache, composed_sha256), effect=check.result())
     sa.validate_counterfactual_failure(payload)
     target = prepare_output_dir(out / "stage2")
     publish_artifacts(target, [("bounded_diagnostics.json", payload)])
@@ -903,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--python-root", required=True)
     p.add_argument("--cache", required=True)
     p.add_argument("--out", required=True)
-    p.add_argument("--patch")
+    p.add_argument("--composed-sha256")
 
     p = sub.add_parser("anchor-base")
     p.add_argument("--python-root", required=True)
@@ -973,9 +980,9 @@ def _dispatch(args) -> int:
         if args.phase == "witness":
             result = fixture_witness(cache, out)
         elif args.phase == "success":
-            result = fixture_success(py, cache, out, Path(args.patch))
+            result = fixture_success(py, cache, out, args.composed_sha256)
         else:
-            result = fixture_failure(py, cache, out, Path(args.patch))
+            result = fixture_failure(py, cache, out, args.composed_sha256)
         print(json.dumps({"phase": args.phase, **result}, sort_keys=True))
         return 0
     if cmd == "anchor-base":

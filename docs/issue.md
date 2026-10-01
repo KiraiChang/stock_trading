@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作完成、⚠️ 待 review（已 stage、未 commit）**（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1（第一～七輪 review 已修正）⚠️ 待確認**（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -2138,7 +2138,7 @@ host 模組在 3.9 可 import）；**shell**（`scripts/test-i074-stage2.sh`：�
   （真實 tooling、freeze record、`--formal` 清單）。
 - `issue.md`：⑦b 實作結果（與計畫的差異、反向驗證、sizing 實跑的觀察值）。
 
-#### Stage 2 步驟 ⑦b 實作結果（2026-09-30，⚠️ **待 review**）
+#### Stage 2 步驟 ⑦b 實作結果（2026-09-30，✅ **review 通過**（兩輪修正後）並 commit `ce17ab2`）
 
 ✅ 依「Stage 2 步驟 ⑦b 細部計畫 v1」（三輪 review 後確認）完成「二」的全部設計。⛔ **沒有在真正的 `/run/lock` 執行任何東西、沒有跑正式 replay、
 沒有 commit**；程式與文件已 stage，停在 review。⚠️ ⑦b 沒有動 tooling 路徑（`evaluation.py`、`replay_bundle/`）：stage 之後
@@ -2225,11 +2225,343 @@ V2「持鎖階段 exec 之前不比 blob」、V3「preflight 2 只在成功時�
 | 9 | ⚠️ 附帶紀錄（⛔ 不在 ⑦b 處理）：計畫第二輪 review 記下的「八之三」`git worktree prune` 前提問題，⑦c 的細部計畫要處理 | 同上一輪紀錄 |
 
 **review 之後**（commit 由使用者決定）：commit 後再跑一次 `scripts/make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"`
-（⑦b 沒有動 tooling 路徑，預期仍通過）；「六」第 6 步的 `--formal` sizing（約 6 分鐘，確認寫出的 freeze record 通過 `check-basic`）
+（⑦b 沒有動 tooling 路徑，預期仍通過）——✅ **2026-10-01 已執行**（commit `ce17ab2` 之後）：`HEAD^{tree}` ＝ `a817ec516ec559916d746a2b9df5b86a3671e3cf`
+（＝ stage 時的 tree），`--verify` 通過（tooling patch 仍是 `353c69a0…`），`evaluation.py`（`6eefa111…`）與 `replay_bundle/`（`ae99cd3d…`）的 OID 與 ⑦a 相同；「六」第 6 步的 `--formal` sizing（約 6 分鐘，確認寫出的 freeze record 通過 `check-basic`）
 在使用者同意時才跑——⚠️ 它只是開發驗證，⑩ 用的 freeze record 一律來自 ⑨-2。
 
 **歸檔**（⚠️ 依 CLAUDE.md，本筆的計畫與結果保留到 review 確認後才收斂）：操作程序寫進
 [`development-workflow.md`](./development-workflow.md) 新增的「I-074 Stage 2 的正式執行程序」，sizing 一節補 ⑦b 的改動，腳本層測試表加一列。
+
+#### Stage 2 步驟 ⑦c 細部計畫 v1（2026-10-01，⚠️ **待確認**）
+
+⚠️ 依「Stage 2 步驟 ⑦ 總綱 v1」（✅ 2026-09-30 確認）拆出的第三包「`--promote`＋B／C 判讀器」。範圍、驗收 id 與已裁定的機制以總綱「三」「四」、
+v29「八之三」與「六、9」為準；本細部計畫只補**程式設計、呼叫順序、介面、結束碼與測試落點**，以及總綱沒寫到、實作時必須決定的細節（列在「三」，⚠️ 待確認）。
+⚠️ ⑦c **會動 tooling 路徑**（`replay_bundle/` 的 `publish.py`、`stage2_archive.py` 與新增的 `stage2_verdict.py`），所以照總綱「二」的版控流程重產 tooling patch。
+
+**現況（2026-10-01 實查）**：
+
+- ⑦b 已 commit（`ce17ab2`）：晉升是固定回 9 的 stub；supervisor 與 orchestrator 各自**鏡像** 1／2／8／9 的字面值，`replay_bundle/publish.py`
+  只有 1、3、4、5、6、7（總綱把 8、9 留給 ⑦c）。
+- ③ 的完整 verifier：`verify_stage2_graph()`（十六道、封閉檔案集合、每個成員重算）——⛔ **沒有**驗 `finalizer_provenance.base_commit` 的
+  信任根綁定（「八之三」第九輪已指出）；`verify_failed_record(…, dir_name=)` 已支援以**另一個名稱**驗 F4 的 Python 層。兩者都以
+  `_load_trust_anchors(python_root, …)` 從某個 python root 取錨點。
+- `finalize-stage2-evidence.sh` 的七種模式全部從**自己 repo 內的常數路徑**取證據，⛔ 沒有能驗「真正 repo 裡某個 staging」的入口——
+  「八之三」的「驗證用的錨點」列預告了要補一個唯讀入口。
+- `replay_bundle/publish.py` 是 dependency-light（`_i074_bootstrap` 的模組清單內），host 可以直接載入它的 `rename_noreplace()`
+  （`renameat2(RENAME_NOREPLACE)`）、`fsync_dir()`、`fsync_file()`、`remove_tree()`。③ 的 writer 以 `.<目的地名>.staging-<16 hex>` 建
+  staging、`probe_no_clobber()` 以 `.probe-<16 hex>-{a,b}-{src,dst}` 建 probe——這兩種是「可辨識的 ③ orphan」。
+- comparison 的每一列是 `{symbol, timeframe, as_of, differences, before, after}`（`compare_rows()` 全欄位比較）。
+- 真正 repo 的 `python/baselines/i074_stage2/` 目前只有兩份 patch、`envcheck/` 與三個 log；⛔ 沒有 `evidence/`、⛔ 沒有 `failed/`。
+- ⑦b 第二輪 review 記下：「八之三」寫的「崩潰留下的 worktree 登記由下一次 `--promote` 的 `git worktree prune` 清掉」前提不成立
+  （prune 只清實體目錄已消失的登記），留給本包處理。
+
+**執行步驟**：
+
+- **步驟 A（本次，只動文件）**：本細部計畫寫進本筆；⑦b 實作結果、狀態列與 v29「八」的標記改成 ✅。⛔ 不改程式，停下等 review／commit。
+- **步驟 B（本計畫 review 通過並 commit 之後）**：依「二」實作 → 「六」驗證 → 歸檔 → 依總綱「二」的版控流程 stage（程式 → `git write-tree`
+  → 產生 tooling patch → stage patch）→ ⛔ 不 commit，停下等 review。
+
+**⑦c 細部計畫 v1 第七輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 中低 | ⛔ 第 5b 步失敗時宣稱「6a ⛔ 不 fsync」，但第 4 步（來源的 durability）在第 5b 步**之前**就已完成——recovery 測試若以 spy 斷言整趟零 fsync，必然與流程衝突；第六輪的修正表、第 5b 步、「五」的測試列都有同樣的敘述 | ✅ 統一改成：第 4 步的來源 fsync 照常執行；第 5b 步失敗之後，6a ⛔ 不呼叫驗證模式、⛔ 不 fsync **目的地**；測試的 spy 以 `fstat` 的 (`st_dev`, `st_ino`) 對照來源與目的地的 inventory，分辨被 fsync 的 fd 屬於哪一邊，斷言**目的地**沒有被 fsync（⛔ 不斷言整趟零 fsync）。⚠️ 自己再掃全節的「⛔ 不 fsync」：第四輪的 6a 收尾重算 barrier 有同一個問題，一併改；n11 的 3b（第 4 步之前就失敗）整趟確實沒有 fsync，改成明寫理由 |
+
+**⑦c 細部計畫 v1 第六輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 中 | ⛔ **ignore 守門只在 6b，6a 的既有目的地仍可能被忽略**：6b 已 rename、parent fsync 失敗回 3 → 兩次 `--promote` 之間 `.gitignore` 被改成過廣規則 → 重跑走 6a，驗證與 fsync 都成功、回 0／6，目的地卻被 git 忽略、進不了版控；文件卻宣稱啟動前失效的規則都會被擋下 | ✅ 守門拆兩組：**目的地那組**（成員路徑全部不被忽略）提升為第 **5b** 步、在 6a／6b 分支**之前**共用；**staging 那組**（全部被忽略）維持 6b 專屬、建 staging 之前。⚠️ 目的地那組同樣用 `--no-index`：目的地已被追蹤時，過廣規則照樣回 9——刻意從嚴（過廣規則會讓之後的 failed record 進不了版控，交人工修規則）。操作契約③、決策 #21、風險表同步。補 recovery 測試：pytest 走完整序列（6b rename 之後注入 parent fsync 失敗 → 3 → 規則變成過廣 → 重跑走 6a → 9、⛔ 不呼叫驗證模式、⛔ 不 fsync 目的地（第 4 步的來源 fsync 照常；⚠️ 第七輪 review 訂正）→ 規則修好 → 0／6）；host 真 git 以「目的地已與來源逐位元相同」的 recovery 狀態做同一件事 |
+
+**⑦c 細部計畫 v1 第五輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 中 | ⛔ **staging 的 ignore 規則只有靜態測試、沒有執行期守門**：入口清單（⑦b「二之六」）⛔ 不含 `.gitignore`，⑩ 開始之前就刪掉或改壞規則照樣能進入晉升；操作契約只禁止「執行期間」修改；6b 直接建 staging 並假設它會被忽略 | ✅ 6b 在建 staging **之前**加 **ignore 守門**（⚠️ 第六輪 review：目的地那組提升為 6a／6b 共用的第 5b 步）：以受信任的 `git check-ignore --no-index -z --stdin` 查兩組 probe——staging 之下每個成員的路徑必須**全部**被忽略、目的地之下同一組路徑必須**全部不**被忽略；不符、git 失敗、逾時 → **9** 且⛔ 不建 staging。⚠️ 先以 git 2.30.2 實測決定兩個細節：①⛔ 不加 `-v`——`-v` 連否定規則（`!.promote-staging-*`）的命中也回 0；②probe 用**成員路徑**而⛔ 不只用 staging 目錄本身——只對目錄生效的規則（`….promote-staging-*/`）對還不存在的目錄查不到，對成員路徑才查得到（`git add -A` 看的也是成員）。補測試：啟動前刪除規則、改成過廣規則（兩種）、子目錄的否定規則 → 9 且沒有 staging；只對目錄生效的規則 → 照常晉升（對照組）；git 回 128、逾時、輸出集合不符 → 9。⚠️ 測試 image ⛔ 沒有 git，真 git 的案例放在 host 的 `scripts/test-i074-stage2.sh` |
+| 低 | ⛔ dirfd 的「非負整數」驗證若用 `isinstance(fd, int)`，`True`／`False` 會被當成 fd 1／0 | ✅ 契約明寫 `type(fd) is int and fd >= 0`；測試補兩個 fd 參數各自傳 `True`／`False` → 在 syscall 之前拋 `ValueError` |
+
+**⑦c 細部計畫 v1 第四輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 高 | ⛔ **操作契約仍允許破壞 active staging 與目的地**：契約只禁止搬移、刪除、替換目錄，並明說目錄內其他檔案可以修改——外部程序在驗證通過之後、rename 之前**原地改寫** staging 的成員時，inode 與父目錄鏈都不變，鏈檢查照樣通過，晉升回 0／6 但目的地已不是剛驗過的內容；6a 的既有目的地有同一個窗口。另外契約字面上也禁止了晉升自己對 `.promote-staging-*` 的清理與 rename | ✅ 契約重寫（「二之三」）：**對象**是晉升程序以外的所有程序——晉升依流程建立、寫入、清理與 rename staging 是唯一例外；**禁止**：①搬移、刪除或替換那幾個目錄本身；②修改、刪除、搬移或替換 active staging 與本次 target 目的地的**任何成員**；③移除或改寫 `.gitignore` 的 staging 規則、以 `git add -f` 把 staging 加進 index；其他一般編輯、`git add -A` 與 commit 照常。⚠️ 另加偵測（契約之外）：**收尾重算**——6b 在 rename 之前、6a 在驗證之後，經持有的 fd 重算每檔 SHA，與比對時的值不同 → **9**（6b 不發布、清掉 staging），把「原地改寫」從「偵測不到」變成 9；重算之後的修改照實寫成晉升之後的編輯。補 barrier 測試（6b、6a 各一支）與 `.gitignore` 規則的 `git check-ignore` 測試 |
+| 中 | ⛔ **`rename_noreplace_at()` 的名稱規則與舊 wrapper 衝突**：計畫寫「`_at()` 只接受單一 component」又寫「舊的 `rename_noreplace()` 改成以 `AT_FDCWD` 呼叫它」，但五個正式呼叫點（`bundle.py`、`evidence.py`、`run_identity.py`、`stage2_evidence.py`、`publish.py` 的 probe）都傳多層路徑——舊 API 會壞掉 | ✅ 查證屬實。拆三層：私有 `_renameat2(src_dir_fd, src_path, dst_dir_fd, dst_path)` 只負責 syscall 與 errno 對應；`rename_noreplace_at()` 驗兩個名稱都是單一 component、兩個 fd 都是非負整數之後呼叫它；`rename_noreplace()` 以 `AT_FDCWD` 與既有的完整路徑**直接**呼叫它。⚠️ 附帶：`ctypes.c_char_p` 會在 NUL 截斷路徑（2026-10-01 實測：`a\x00ignored` 會把 `a` rename 掉），私有函式對含 NUL 的路徑拋 `ValueError`——這是舊 API 唯一的行為差異，只影響本來就會被誤處理的輸入。測試保留既有的絕對／多層路徑案例，另驗 `_at()` 拒絕 `/`、`.`、`..`、空字串、NUL、負數 fd（且⛔ 不呼叫 syscall） |
+
+**⑦c 細部計畫 v1 第三輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 高 | ⛔ **「不會寫到樹外」的宣稱不成立**：父目錄在持有 fd 之後被搬走（例如 `mv failed <repo 外> && ln -s <marker> failed`）時，rename ⛔ 不跟隨新的 symlink，但會寫進持有的 fd 指向的舊目錄——它被搬到 repo 外，record 就落在 repo 外；事後的鏈檢查只能回 9，⛔ 無法撤銷已發生的寫入 | ✅ 改成照實的邊界：fd-anchored 保證的是「⛔ 不跟隨替換後的 symlink」；已持有的父目錄被搬走時，record 可能寫進該 inode 的新位置（可能在 repo 外），事後偵測 → **9**。新增**操作契約**（「二之三」）：⑩ 的任何一趟（完整流程、`--resume`、`--promote`）執行期間，⛔ 不得搬移、刪除或替換真正 repo 的 `python/`、`python/baselines/`、`i074_stage2/`、`failed/` 與 `.promote-staging-*`；其他編輯與 commit 照常——同步「二之六」（v29「八之一」的「真正 repo」列）、決策 #15 與新增的 #18、風險表、「八」的歸檔。barrier 測試拆開斷言：symlink 指向的 marker 完全不變；被搬走的舊目錄（repo 內、repo 外各一支）照實斷言會收到 record；`rm -rf` 之後換成 symlink 的那一支 rename 失敗、staging 已清 |
+| 中 | ⛔ 決策 #12（「建立失敗 → 8」）與 n11（「複製 I/O 錯誤 → 8」、`rename_noreplace`）仍是 v1 的規則，與第二輪的分類相反 | ✅ 兩處改成依「結束碼的分類」：目的端的建立與寫入只有 `ENOSPC`／`EDQUOT`／`EIO` → 8；來源錯誤、完整性漂移與其他 errno → 9；名稱改成 `rename_noreplace_at()`（風險表同步） |
+| 低 | ⛔ 修正摘要寫「十個」reason code，表中實際是十一個；`ROW_SHAPE_INVALID` 只寫「缺下列任一欄位」 | ✅ 改成十一個；`ROW_SHAPE_INVALID` 直接列出 before／after 的必備欄位與型別（`null` 也算不符） |
+
+**⑦c 細部計畫 v1 第二輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 高 | ⛔ **`O_NOFOLLOW` 只保護最後一層**：第 4 步與 6b 用完整路徑；⑩ 期間真正 repo 明定可以照常編輯（v29「八之一」），`failed/` 若被換成指向樹外的 symlink，`rename_noreplace(staging, failed/<name>)` 會跟隨中間層，把正式 record 寫到 repo 外 | ✅ 先重現（2026-10-01，scratchpad）：`failed/` 換成指向樹外的 symlink 之後，完整路徑的 `O_CREAT \| O_NOFOLLOW` 與 `renameat2` 都落在樹外；對照組（逐層持有 fd 之後才被換掉）symlink 指向的目錄不變、record 落在被搬走的原目錄、rename 之後重開得到 `ELOOP`。修正：晉升的所有走訪與寫入改成 **fd-anchored**（「二之三」的「路徑錨定」）——真正 repo 根與複本根各開一次 fd，之下逐層 `openat(…, O_DIRECTORY \| O_NOFOLLOW)` 並持有；stat、mkdir、開檔、複製、刪除、`statvfs`、rename 全部用 `dir_fd`；`publish.py` 新增 `rename_noreplace_at()`（來源與目的各帶 dirfd 與單一名稱）；`failed/` 開一次、之後只用它的 fd；**rename 前後各做一次鏈檢查**（從根路徑重走，每層的裝置與 inode ＝ 持有的 fd；rename 之後目的地名稱必須解析到 staging 的 inode）；一般檔案另要求 `st_nlink` ＝ 1。⚠️ 驗證模式（docker 唯讀掛載）只能吃路徑，改以「輸出的 `manifest_sha256`／`record_sha256` ＝ 本程序經 fd 寫入或讀到的那份 bytes 的 SHA」綁定（封閉 layout ＋ 逐項 SHA 讓兩者等價）。⚠️ 照實的界線寫在「二之三」：rename 只能以名稱指定來源、父目錄被搬走時 record 落在原目錄（→ 9，交人工）、repo 根以上不在保證內。測試補 `failed/` 與中間層指向樹外、驗證之後 rename 之前替換 parent 的 barrier、hardlink——symlink 指向的 marker 與 inode 都完全不變（⚠️ 第三輪 review 訂正：被搬走的舊目錄可能收到 record，「不會寫到樹外」撤回） |
+| 中 | ⛔ **漂移與 durability 失敗的結束碼沒拆開**：第 4 步把所有 `OSError` 映成 3，但 inventory 之後被刪、換成 symlink、替換 parent 會回 `ENOENT`／`ELOOP`／`ENOTDIR`——那是完整性漂移，⛔ 不是 durability 未確認 | ✅ 「二之三」新增結束碼分類：inventory 之後任何 open／`fstat` 錯誤或不符、鏈檢查不符、SHA 綁定不符 → **9**；只有在已核對的 fd 上 `fsync()` 本身失敗 → **3**；**8** 只留給目的端的容量與寫入 I/O（空間預檢、在已核對的 staging fd 上的 `ENOSPC`／`EDQUOT`／`EIO`、rename 的 `EEXIST`／`ENOTEMPTY`）；6b 的來源側錯誤 → 9。⚠️ 附帶收緊：rename 的 `EXDEV`／`EINVAL`／`ENOSYS` 改成 9（v1 籠統寫「`rename_noreplace` 失敗 → 8」，但重跑解決不了它們）。每一類各補測試 |
+| 低 | ⛔ argv fixture 仍寫「兩組」 | ✅ 改成三組：evidence 驗證、failed 驗證、evidence ＋ `--judge` |
+| 低 | ⛔ 判讀輸出沒有封閉 schema（`c_rows` 是數量還是陣列、逐列欄位、`class` 值域、reason code、排序都沒定） | ✅ 「二之四」釘死完整 key set、型別、列的順序（＝ comparison 已驗的排序）、`class` 值域與十一個穩定的 reason code（⚠️ 第三輪 review 訂正：原本寫十個）；`c_rows` 改名 `c_row_count`；0 列 → 拒絕判讀；驗證模式輸出的 JSON 也一併封閉（「二之二」） |
+
+**⑦c 細部計畫 v1 第一輪 review 的修正（2026-10-01）**：
+
+| # | 問題 | 修正 |
+|---|---|---|
+| 高 | ⛔ **驗證與判讀之間有 TOCTOU**：步驟 3 完整驗證、步驟 4 只重驗 manifest、base 與 comparison 的 SHA——兩步之間改的若是 comparison 以外的成員，判讀仍會成功，違反 m 的「任一成員 bytes 被改都拒絕」，決策 #9 的「綁定到剛驗過的那一份」也不成立（容器的唯讀掛載擋不住 host 同時修改來源） | ✅ 改成**驗證與判讀在同一個 Python 程序、用同一份讀進記憶體的資料**：驗證模式加 `--judge`（只限 `--target evidence`），`verify_stage2_graph()` 本來就「每個成員只讀一次」，它回傳的 `Stage2Verified` 加上已驗過的 comparison 物件，判讀直接吃這個物件——驗與判之間⛔ 沒有第二次讀取。⚠️ ⛔ 不採 review 建議的私有 snapshot：snapshot 之後仍是「先驗、再由另一個程序讀」，同一帳號的程序照樣能在兩步之間改它；同程序判讀連那個窗口都沒有。殘餘的跨程序交接只剩 shell 合成守門 → Python 段，由既有的 `check_verified_composition()`（Python 以自己讀到的 patch bytes 比對 shell 驗過的 SHA）與 `verify_stage2_graph()` 的全成員重算綁住。`stage2_verdict.py` 因此只剩純函式（⛔ 沒有自己的 CLI）。測試補：判讀路徑中 comparison 只被讀一次、判讀的物件就是驗證回傳的那一個（spy）；shell 段之後、Python 段之前改掉 comparison 以外的成員 → 拒絕、⛔ 不輸出 B／C |
+| 中 | ⛔ **晉升的 staging 會被真正 repo 的 `git add -A` 看見**：6b 的 staging 建在真正工作樹內，`.gitignore` 沒有排除它，而 ⑩ 期間真正 repo 照常編輯與 commit——複製途中執行 `git add -A` 可能把半成品放進 index；n9 只斷言最終 bytes 抓不到 | ✅ `.gitignore` 精準加 `python/baselines/i074_stage2/.promote-staging-*`（正式目的地 `evidence/`、`failed/` ⛔ 不 ignore——發布之後要進版控）；補 barrier 測試：staging 已建好、rename 之前（fake 驗證模式那一刻）在真正 repo 執行 `git add -A`、`git status`，staging ⛔ 不進入 index、⛔ 不出現在未追蹤清單。⚠️ ⑦b 的 preflight 以 `--ignored` 檢查真正 repo 的 `i074_stage2/`，所以留下的 orphan staging 照樣擋住下一次 ⑩，直到 `--promote` 的第 2 步清掉 |
+| 中 | ⛔ **第 4 步在完整驗證之前就遞迴 fsync 來源，而且會跟隨 symlink**：既有的 `_fsync_tree()` 用 `Path.is_file()`／`is_dir()`；複本的終態若被換成指向樹外的 symlink，會在 verifier 拒絕之前就開啟並 fsync 樹外的檔案 | ✅ 新增「**封閉 inventory**」（第 3 步之後、identity 的綁定與第 4 步之前——讀 identity 也只走它）：以 `os.scandir(…)`／`os.lstat()` 逐層列舉、⛔ 不跟隨 symlink，**只接受一般檔案與目錄**——symlink、FIFO、socket、device 一律 **9**，且⛔ 不開啟、⛔ 不 fsync 它的目標；fsync 以 `O_RDONLY \| O_NOFOLLOW`（目錄另加 `O_DIRECTORY`）開啟，`fstat` 必須與 inventory 的裝置、inode、型別相同。6b 的複製與 6a 的比對都用同一套 inventory（目的地同樣規則）。⛔ 不重用 `_fsync_tree()`。測試補 symlink 指向樹外（樹外的檔案⛔ 不被開啟——spy）、FIFO、socket、目的地含 symlink。⚠️ 第二輪 review 改成 fd-anchored（完整路徑的 `O_NOFOLLOW` 只保護最後一層） |
+| 中低 | ⛔ **判讀矩陣把兩個欄位混寫**：「`action_state` `TESTING`：…、`CONFIRMED`：…」——`TESTING`／`CONFIRMED` 是 `lifecycle_phase`；另有「⛔ 可達 → 拒絕」應為「不可達」 | ✅ 改成依 `before.lifecycle_phase` 分寫兩側的 `action_state`；AVOID 類同樣分寫。⚠️ 自己再掃全節：還有約二十處「⛔ ＋ 動詞」省略了「不」（例如「⛔ 覆寫」「⛔ 多數決」「⛔ 用 `git archive`」「判讀器⛔ 取鎖」），照字面會讀成相反的意思——全部補成「⛔ 不…」 |
+
+##### 一、目標與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | 總綱「三」⑦c 列：晉升（「八之三」的七步判定順序、8／9、信任根綁定）、`finalize-stage2-evidence.sh` 的唯讀模式 `--verify-promotion-staging`（同步 ③「七之四」的 CLI matrix 與 `stage2_finalizer_argv.json`）、把 stub 換成真正的晉升並完成端到端結束碼、`replay_bundle/stage2_verdict.py` ＋ `scripts/judge-i074-stage2.sh`；`publish.py` 加 8、9 並由測試斷言 supervisor 與 orchestrator 的鏡像相等（⑦b「三」#2）。驗收：n9、n11、n12（晉升那一層）、「六、9」a～m |
+| ⛔ 不做 | memory harness（⑦d）；⑧～⑪；**任何真正的晉升或判讀**（真正 repo 還沒有任何 Stage 2 終態；⑦c 的驗證全部在合成環境）；③ 既有七種模式的行為（只加一種模式） |
+| ⚠️ 過渡狀態 | ⑦c commit 之後，⑩ 的程式端到端完整（入口 → … → 晉升 → 判讀）；還差 ⑦d、⑧ 的稽核與 ⑨ 的封存。tooling patch 隨本包重產（⑨ 之前還會再變） |
+
+##### 二、設計
+
+###### 二之一、檔案與角色
+
+| 檔案 | 改動 |
+|---|---|
+| `replay_bundle/publish.py` | 加 `EXIT_PROMOTION_FAILED = 8`、`EXIT_PROMOTION_BLOCKED = 9`（唯一定義；supervisor、`run-i074-stage2.sh`、晉升模組的值由測試斷言相等）；⚠️ 第二輪 review 新增、第四輪拆成三層：私有 `_renameat2(src_dir_fd, src_path, dst_dir_fd, dst_path)`（syscall 與 errno 對應，原本在 `rename_noreplace()` 內；路徑含 NUL → `ValueError`）；`rename_noreplace_at(src_dir_fd, src_name, dst_dir_fd, dst_name)`（兩個名稱都必須是單一 component、兩個 fd 都必須 `type(fd) is int and fd >= 0`——`bool` ⛔ 不算，否則 `True`／`False` 會被當成 fd 1／0（第五輪 review）——才呼叫私有函式）；既有的 `rename_noreplace(src, dst)` 以 `AT_FDCWD` 與完整路徑**直接**呼叫私有函式（多層路徑照舊；唯一的行為差異是含 NUL 的路徑改成拋錯）。`_load_renameat2()` 回傳的 callable 改成帶兩個 dirfd |
+| `replay_bundle/stage2_archive.py` | 新增 `verify_promotion_target()` 與 CLI 模式 `--verify-promotion-staging`（含 `--judge`）；`Stage2Verified` 加上已驗過的 comparison 物件；`patch_claims()` 新增 `promotion` 模式 |
+| `python/scripts/i074-stage2-patch-claims.py` | 新增 `--promotion <path> --target <t>`（evidence 印 4 個 token、failed 印 5 個） |
+| `scripts/finalize-stage2-evidence.sh` | 新增唯讀模式 `--verify-promotion-staging <path> --target <t> [--judge]`（「二之二」） |
+| `python/scripts/i074_stage2_promote.py`（新增） | 晉升的 host 邏輯（「八之三」步驟 2～7；Python 3.9、標準庫 ＋ `_i074_bootstrap` 載入的 `publish`／`canonical`）；fd-anchored 的走訪、inventory、複製、刪除（`remove_tree_at()`）與鏈檢查（「二之三」的「路徑錨定」） |
+| `scripts/run-i074-stage2.sh` | stub 換成晉升；`--promote`／`--resume` 與完整流程都經同一個 `promote()` |
+| `replay_bundle/stage2_verdict.py`（新增） | B／C 判讀規則（純函式；⛔ 沒有自己的 CLI——由驗證模式的 `--judge` 在同一個程序呼叫，「二之四」） |
+| `.gitignore` | 加 `python/baselines/i074_stage2/.promote-staging-*`（第一輪 review） |
+| `scripts/judge-i074-stage2.sh`（新增） | 判讀器的入口（「二之四」） |
+| `python/scripts/fixtures/stage2_finalizer_argv.json` | 新增三組：`verify_promotion_staging_evidence_argv`、`verify_promotion_staging_failed_argv`、`verify_promotion_staging_evidence_judge_argv`（第二輪 review 訂正：原本寫兩組） |
+| `python/baselines/i074_stage2/tooling_e1cbbbd.patch` | 依版控流程重產 |
+| 測試 | 見「五」 |
+
+###### 二之二、唯讀的驗證入口 `--verify-promotion-staging`
+
+| 項目 | 規則 |
+|---|---|
+| 用法 | `REPLAY_IMAGE_ID=… <某個複本>/scripts/finalize-stage2-evidence.sh --verify-promotion-staging <path> --target <evidence\|failed/<bundle_id>-<語意 SHA>> [--judge]`；⛔ 沒有其他參數、⛔ 不接受 `--run-dir`／`--source-ref`；`--judge` 只限 `--target evidence`（第一輪 review） |
+| 真正 repo | 由**本腳本所在 repo 的 `origin`** 推導（`git -C <REPO_ROOT> remote get-url origin` 的 canonical path；⛔ 沒有路徑參數）。⑩ 的複本與判讀器的暫存複本都是 clone 出來的，`origin` 就是真正 repo |
+| `path` 的規則 | canonical、⛔ 不得是 symlink、是目錄，而且**只接受兩種**：① staging ＝ `<真正 repo>/python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）；② 目的地本身 ＝ `<真正 repo>/python/baselines/i074_stage2/<target>`（6a 與判讀器用）。其他一律回 1（含複本內的路徑） |
+| `target` | 封閉：`evidence`，或 `failed/<name>`（`name` 符合 `_FAILED_DIR_RE`） |
+| 錨點 | **一律取自本腳本所在的 repo**（⑩：複本、釘在 `repo_head`；判讀器：暫存複本、釘在 `base_commit`）：Stage 1 錨點、`envcheck/`；identity 用 `path` 內封存的那一份（比照 recovery 模式） |
+| 掛載 | `path` 與兩個錨點目錄**唯讀**；⛔ 沒有任何可寫的證據目錄；⛔ 不 fsync、⛔ 不寫入 |
+| 合成守門（shell 層） | `i074-stage2-patch-claims.py --promotion <path> --target <t>` 取宣告值 → 私有副本 → 新 worktree（本 repo、`TMPDIR`）→ `replay_args_compose()` → 三個增量 SHA 與宣告值逐一相等；failed record 另驗重算的語意 SHA ＝ 宣告值 **＝ `target` 名稱裡的 SHA**（以目的地名稱驗 F4 的 shell 層）。⛔ 不符 → 1、⛔ 不呼叫 Python |
+| Python 段 | `verify_promotion_target(python_root, path, target, verified)`：evidence → `_load_trust_anchors(python_root, None)` → `verify_stage2_graph(path, …)` → `check_verified_composition()` → ⚠️ **信任根的綁定**：`finalizer_provenance.base_commit` ＝ 注入的 `--base-commit`（本腳本由 `--source-ref HEAD` 算出，就是本 repo 的 HEAD）；failed → `verify_failed_record(path, …, dir_name=<target 的末段>)`（以目的地名稱驗 F4 的 Python 層）→ `check_verified_composition(semantic=…)`。identity 的 `expected_image_id` ＝ `--image-digest`。⚠️ **`--judge`（第一輪 review）**：驗證通過之後，在**同一個程序**以 `Stage2Verified` 帶回的、`verify_stage2_graph()` 剛驗過的 comparison 物件呼叫 `stage2_verdict.judge_comparison()`——驗與判之間⛔ 沒有第二次讀取 |
+| 輸出、結束碼 | **0** ＝ 有效，stdout 只印一行 canonical JSON，⚠️ **封閉 key set**（第二輪 review）：evidence 恰好 `kind`（＝ `"evidence"`）、`target`、`manifest_sha256`、`base_commit`、`identity_sha256`，帶 `--judge` 時再加 `verdict`（「二之四」的封閉 schema）；failed 恰好 `kind`（＝ `"failed_record"`）、`target`、`record_sha256`、`base_commit`、`identity_sha256`；兩個 SHA 都是**該檔案 bytes** 的 SHA-256（晉升據此綁定，「二之三」）；**1** ＝ 無效或用法錯誤（⛔ 沒有 3：它不寫任何東西） |
+| 同步 | `STAGE2_MODES`、`build_stage2_parser()`、`run_stage2()`（本模式必須帶四個 `--verified-*`；failed 另帶語意 SHA、evidence 帶了就拒；`--judge` 只接受 evidence）、③「七之四」的 CLI matrix（加註）、argv fixture 三組（evidence、failed、evidence ＋ `--judge`；第二輪 review 訂正）、`s2_normalize` 的 placeholder |
+
+###### 二之三、晉升（`--promote`；「八之三」的判定順序）
+
+`run-i074-stage2.sh` 的 `promote()`：`/proc/locks` → preflight 0（⑦b 既有）→ `state-check --require run,preflight` → 背景執行
+`python3 -B <複本>/python/scripts/i074_stage2_promote.py --work-dir <work> --real-repo <I074_STAGE2_REAL_REPO>` → 結束碼原樣成為端到端結束碼
+（不是 0／3／6／8／9 → 9）。完整流程（終態已在磁碟）、`--resume`（終態已在磁碟）與 `--promote` 三處都走它。
+
+**路徑錨定（⚠️ 第二輪 review）**：完整路徑的 `O_NOFOLLOW` 只保護最後一層，中間的 `python/`、`baselines/`、`i074_stage2/`、`failed/` 被換成
+symlink 時照樣會被跟隨（2026-10-01 實測），而 ⑩ 期間真正 repo 可以照常編輯。所以晉升的每一個檔案系統操作都**錨定在持有的 fd 上**：
+
+| 項目 | 規則 |
+|---|---|
+| 根 | 真正 repo 根（supervisor 已驗的 canonical 路徑）與複本根，各以 `os.open(<路徑>, O_RDONLY \| O_DIRECTORY \| O_NOFOLLOW \| O_CLOEXEC)` 開**一次**。⚠️ 根以上的路徑⛔ 不在保證內（⑦b 的入口與 supervisor 已驗 canonical 與 owner；⑩ 期間「照常編輯」的範圍是 repo 之內） |
+| 逐層 | 根之下 `python`、`baselines`、`i074_stage2`、`failed`、終態目錄、staging 都以 `os.open(<單一名稱>, O_RDONLY \| O_DIRECTORY \| O_NOFOLLOW \| O_CLOEXEC, dir_fd=<上一層>)` 開啟並**持有**；名稱必須是單一 component（含 `/`、等於 `.` 或 `..` → **9**） |
+| 操作 | stat（`follow_symlinks=False`）、`mkdir`、開檔、`scandir`、刪除（`remove_tree_at()`：`unlinkat`／`rmdir` 加 `dir_fd`、⛔ 不跟隨 symlink）、`statvfs`、rename（`rename_noreplace_at()`）**全部用 `dir_fd`**；⛔ 不以完整路徑做任何寫入或 fsync |
+| inventory | 每一項記相對路徑、型別、`st_dev`／`st_ino`，一般檔案另記 `st_size`；一般檔案的 `st_nlink` 必須 ＝ 1（hardlink 會把讀取與 fsync 帶到樹外的 inode）。之後每次開啟都以 `fstat` 核對 |
+| 鏈檢查 | 從根路徑重走一遍：根與每一層的 (`st_dev`, `st_ino`) ＝ 持有的 fd；rename **之前**另驗 staging 名稱解析到 staging fd 的 inode，rename **之後**另驗目的地名稱解析到同一個 inode。不符 → **9** |
+| 驗證模式的綁定 | 驗證模式在 docker 內以唯讀掛載執行，只能吃路徑——所以它輸出的 `manifest_sha256`（evidence）／`record_sha256`（failed）必須 ＝ 本程序**經 fd** 寫入（6b）或讀到（6a）的那份 manifest／record bytes 的 SHA。evidence 是封閉 7 檔、manifest 逐項記 SHA；failed record 有 F9 的封閉檔案集合與 F8 的逐項 SHA——「同一份 manifest／record 且驗證通過」因此等於成員逐位元相同。不符 → **9** |
+| ⚠️ 照實的界線 | ①Linux 沒有「以 fd 指定 rename 來源」的呼叫，來源只能以名稱指定——rename 前後的鏈檢查把被換掉的情況變成 **9**，⛔ 不能預防。②父目錄在持有 fd 之後被**搬走**（例如 `mv failed <別處> && ln -s <X> failed`）時，rename ⛔ 不跟隨新的 symlink（`X` 不變），但會寫進持有的 fd 指向的那個目錄——它現在在哪裡，record 就落在哪裡；⚠️ **被搬到 repo 外，就是寫到 repo 外**（第三輪 review 訂正）。rename 之後的鏈檢查只能**事後**發現 → **9**、交人工，⛔ 無法撤銷已發生的寫入（2026-10-01 實測：重開得到 `ELOOP`）；所以由下一列的操作契約禁止這類操作。③staging（6b）與既有目的地（6a）的成員在驗證之後被**原地改寫**時，inode 與父目錄鏈都不變，鏈檢查抓不到——由下一列的操作契約禁止，並由**收尾重算**偵測（6b：rename 之前；6a：驗證之後；經持有的 fd 重算每檔 SHA，與比對時的值不同 → **9**，6b 不發布、清掉 staging；⚠️ 第四輪 review）。重算之後到 rename（6b）或結束碼回傳之間、以及晉升之後的修改，⛔ 不在晉升的保證內——判讀器與再跑 `--promote`（6a）都會做完整驗證，commit 前的 review 也看得到 |
+| ⚠️ 操作契約（第三輪 review；第四輪重寫） | **對象**：晉升程序（`i074_stage2_promote.py`）以外的**所有程序**——含操作者自己的 shell、編輯器、IDE 與 git；晉升依「二之三」建立、寫入、清理與 rename staging、寫入目的地，是唯一例外。**期間**：⑩ 的任何一趟（完整流程、`--resume`、`--promote`——前兩者在終態落地之後會自動晉升）執行期間。**禁止**：①搬移、刪除或替換真正 repo 的 `python/`、`python/baselines/`、`python/baselines/i074_stage2/`、`…/i074_stage2/failed/` 這幾個目錄本身（含 `mv`、`rm -rf` 之後重建、換成 symlink、會刪掉它們的 `git clean`／`git stash -u`）；②修改、刪除、搬移或替換 active staging（`.promote-staging-*`）與本次 target 目的地（`evidence/` 或 `failed/<本次的名稱>/`）的**任何成員**，含目錄本身；③移除或改寫 `.gitignore` 的 `python/baselines/i074_stage2/.promote-staging-*` 規則、以 `git add -f` 把 staging 加進 index。**照常**：其他檔案的一般編輯、`git add -A` 與 commit（含上述目錄之內、不屬於②的其他檔案）。**違反時（照實）**：①symlink 指向的目標⛔ 不會被寫入，record 可能落在被搬走的目錄（可能在 repo 外），鏈檢查 → **9**；②收尾重算之前的改寫 → **9**，之後的改寫晉升⛔ 無法偵測（見上一列③）；③在守門之前就已失效的規則由 ignore 守門擋下 → **9**：目的地那組 6a／6b 都查（第 5b 步，第六輪 review），staging 那組只在 6b 建 staging 之前查（第五輪 review）；守門之後才改壞規則或 `git add -f` staging，晉升⛔ 無法偵測，staging 可能被 commit——commit 前的 review 看得到 |
+
+**結束碼的分類（⚠️ 第二輪 review）**——下表的「不通過」欄都依這個分類：
+
+| 結束碼 | 只用在 |
+|---|---|
+| **9** | inventory 之後的任何完整性漂移：open／`openat`／`fstat` 的錯誤（`ENOENT`、`ELOOP`、`ENOTDIR`…）、型別或 `st_dev`／`st_ino`／`st_nlink` 不符、鏈檢查不符、收尾重算不符（第四輪 review）、ignore 守門不通過（第五輪 review）、驗證不通過、驗證模式輸出的 SHA 不符、6b 的來源側任何錯誤（開檔、`fstat`、讀到的 SHA ≠ inventory）、目的端不在 8 的 errno 清單內的錯誤、`rename_noreplace_at` 的 `EEXIST`／`ENOTEMPTY` 以外的錯誤（含 `EXDEV`、`EINVAL`、`ENOSYS`——重跑解決不了） |
+| **3** | 只有在已核對的 fd 上 `fsync()` 本身失敗：第 4 步（來源）、6a（目的地）、6b 在 rename **之後**的 parent |
+| **8** | 只有目的端的容量與寫入 I/O：`statvfs` 空間不足；staging 與 `failed/` 的建立、寫入、rename 之前的 fsync 在已核對的 fd 上回 `ENOSPC`／`EDQUOT`／`EIO`；`rename_noreplace_at` 的 `EEXIST`／`ENOTEMPTY`（重跑時走 6a） |
+
+| 步 | 實作（`i074_stage2_promote.py`，除第 1 步） | 不通過 |
+|---|---|---|
+| 1 | （shell）`/proc/locks`、preflight 0、`state-check --require run,preflight`——沿用 ⑦b 已實作、只用 git、shell 與內嵌標準庫的那一段（⛔ 不重寫） | **9** |
+| 2 | 複本 `git worktree prune`；真正 repo 的 `i074_stage2/` **直屬**下符合 `^\.promote-staging-[0-9a-f]{16}$` 的目錄以 fd-anchored 的 `remove_tree_at(<i074_stage2 fd>, <名稱>)` 刪除（⛔ 不用路徑版的 `remove_tree()`；第二輪 review）（⛔ 其他一律不動）。⚠️ 實體目錄還在的 worktree 登記 prune 收不掉，保留到 `<work>` 刪除（「三」#5） | **9** |
+| 3 | **解析本次的唯一終態**：複本 `git status --porcelain=v1 -z --untracked-files=all --ignored -- python/baselines/i074_stage2/`，先排除可辨識的 ③ orphan（`i074_stage2/` 或 `failed/` 直屬下的 `.<name>.staging-<16 hex>`、`.probe-<16 hex>-…`），再依頂層分組：`evidence/…` → evidence；`failed/<name>/…` → failed/<name>；其他 → 不認得。必須**恰好一組**；failed 的 `name` 必須 ＝ `<preflight.bundle_id>-<preflight.counterfactual_semantic_sha256>`；`replay_done.json` 存在時，evidence 對應 rc 0、failed 對應 rc 6 | 零組、多組、不認得、名稱不符、讀取錯誤 → **9** |
+| 3b | ⚠️ **封閉 inventory**（第一輪 review；第二輪改成 fd-anchored）：從複本根的 fd 逐層開到終態目錄，再以 `os.scandir(<目錄 fd>)` 與 `os.stat(<名稱>, dir_fd=<目錄 fd>, follow_symlinks=False)` 遞迴列舉、⛔ 不跟隨 symlink，**只接受一般檔案（`st_nlink` ＝ 1）與目錄**；symlink、FIFO、socket、device、hardlink 一律拒絕，且⛔ 不開啟、⛔ 不 fsync 它的目標。之後的 identity 讀取、fsync、複製與比對**都只用這份 inventory 與持有的 fd**（⛔ 不重用會跟隨 symlink 的 `_fsync_tree()`） | **9** |
+| 3c | **identity 的綁定**（「八之三」的「驗證用的錨點」列）：依 inventory 以 `os.open(<名稱>, O_RDONLY \| O_NOFOLLOW, dir_fd=<目錄 fd>)` 開啟、`fstat` 與 inventory 相同（不符 → 9），讀終態封存的 identity（evidence 的 `identity/run_identity.json.gz` 解壓後的 bytes；failed record 的 `run_identity` 以 canonical JSON 序列化）的 SHA-256 ＝ `preflight.identity_sha256` | **9** |
+| 4 | **來源的 durability**：依 inventory 以 `os.open(<名稱>, O_RDONLY \| O_NOFOLLOW [\| O_DIRECTORY], dir_fd=<目錄 fd>)` 開啟每個檔案與目錄，`fstat` 的型別、`st_dev`／`st_ino`（一般檔案另驗 `st_nlink` ＝ 1）必須與 inventory 相同 → `fsync()`；最後 fsync 持有的 `i074_stage2/`（failed 另加 `failed/`）的 fd | open／`fstat` 的任何錯誤（`ENOENT`、`ELOOP`、`ENOTDIR`…）或不符 → **9**（完整性漂移）；只有 `fsync()` 本身失敗 → **3** |
+| 5 | 從真正 repo 根的 fd 逐層開到 `i074_stage2/` 並持有；failed 另開 `failed/` 並持有（不存在 → 6b 時建立；存在但是 symlink 或不是目錄 → 9）；`os.stat(<target 名稱>, dir_fd=<parent fd>, follow_symlinks=False)`：不存在 → 6b；是目錄 → 6a | 其他型別或任何錯誤 → **9** |
+| 5b | ⚠️ **目的地的 ignore 守門**（第六輪 review；6a／6b 共用，在分支**之前**）：以 `/usr/bin/git -C <真正 repo> check-ignore --no-index -z --stdin` 查 `<target 相對路徑>/<inventory 每個一般檔案的相對路徑>`，必須**全部不**被忽略（git 回 1，且輸出為空）。⛔ 不加 `-v`、以成員路徑查（理由同 6b）。⚠️ `--no-index`：目的地已被追蹤時，過廣規則照樣不通過——刻意從嚴（過廣規則會讓之後的 failed record 進不了版控） | 有任何一筆被忽略、git 的其他結束碼（例如 128）、逾時、輸出無法解析 → **9**；6a ⛔ 不呼叫驗證模式、⛔ 不 fsync 目的地，6b ⛔ 不建 staging（第 4 步的來源 fsync 在這之前已照常完成；⚠️ 第七輪 review 訂正） |
+| 6a | 目的地從 parent fd 以同一套規則建 inventory（symlink、特殊檔案、`st_nlink` ≠ 1 → **9**）→ 與來源逐位元比對（相對路徑集合、型別、每檔 SHA-256，兩邊都經 fd 讀）→ `--verify-promotion-staging <目的地> --target <t>`，輸出的 `manifest_sha256`／`record_sha256` ＝ 本程序經 fd 讀到的 bytes 的 SHA → **收尾重算**（經 inventory 的 fd 重算每檔 SHA ＝ 比對時的值；第四輪 review）→ 鏈檢查 → 依 inventory 的 fd fsync 目的地的每個檔案、每個目錄與 parent | 比對、驗證、SHA 綁定、收尾重算、鏈檢查不符或任何開檔錯誤 → **9**（⛔ 不覆寫）；只有 `fsync()` 本身失敗 → **3** |
+| 6b | ⚠️ **staging 的 ignore 守門**（第五輪 review；建 staging **之前**；目的地那組在第 5b 步）：先產生本次的 staging 名稱 → 以同一個命令查 `<staging 相對路徑>/<inventory 每個一般檔案的相對路徑>`，必須**全部**被忽略（git 回 0，且 NUL 分隔的輸出集合 ＝ 輸入集合）；不符、git 的其他結束碼（例如 128）、逾時、輸出無法解析 → **9**，⛔ 不建 staging。⛔ 不加 `-v`（`-v` 連否定規則的命中也回 0）；⛔ 不只查 staging 目錄本身（只對目錄生效的規則對還不存在的目錄查不到；2026-10-01 以 git 2.30.2 實測兩者）→ 空間：`os.statvfs(<i074_stage2 fd>)` 的 `f_bavail × f_frsize` ≥ 來源 allocated bytes（`st_blocks × 512`，含目錄）的 **2 倍** → `os.mkdir(.promote-staging-<16 hex>, dir_fd=<i074_stage2 fd>)`（⚠️ 這個名稱由 `.gitignore` 排除，第一輪 review）並持有它的 fd → 依 inventory 逐項：來源以 `O_RDONLY \| O_NOFOLLOW` 經 fd 開啟並以 `fstat` 核對，目的以 `mkdir(…, dir_fd=)`／`os.open(…, O_WRONLY \| O_CREAT \| O_EXCL \| O_NOFOLLOW, dir_fd=)` 建立 → 逐位元複製、比對（每檔 SHA ＝ 來源經 fd 讀到的值）→ `--verify-promotion-staging <staging> --target <t>`，輸出的 SHA ＝ 本程序寫入的 manifest／record bytes 的 SHA → fsync staging 的每個檔案與目錄 → failed 時 `failed/` 不存在就 `mkdir(…, dir_fd=<i074_stage2 fd>)`、開啟並持有、fsync `i074_stage2/` → **收尾重算**（經 staging 的 fd 重算每檔 SHA ＝ 複製時的值；第四輪 review）→ 鏈檢查（含 staging 名稱 → staging 的 inode）→ `rename_noreplace_at(<i074_stage2 fd>, <staging 名稱>, <parent fd>, <target 名稱>)` → 鏈檢查（含目的地名稱 → staging 的 inode）→ fsync parent 的 fd | 依上方「結束碼的分類」：**8** ＝ 空間不足、目的端在已核對的 fd 上回 `ENOSPC`／`EDQUOT`／`EIO`、rename 的 `EEXIST`／`ENOTEMPTY`（重跑時走 6a）；**9** ＝ 來源側的任何錯誤或不符、目的端的其他 errno、staging 與來源逐位元相同卻驗不過、SHA 綁定、收尾重算或鏈檢查不符、rename 的其他錯誤；**3** ＝ rename 之後 parent 的 `fsync()` 失敗。⚠️ rename 之前的任何失敗都以 `remove_tree_at()` 清掉本次的 staging；rename 之後鏈檢查不符時 staging 已不在原名稱下，⛔ 不追著刪 |
+| 7 | 成功 | evidence **0**、failed record **6** |
+
+未列出的任何例外一律 **9**（⛔ 不猜）。⚠️ `--promote` ⛔ 不呼叫 ③ 的 recovery、replay、finalize、publish（spy 斷言）。
+⚠️ 會寫到哪裡（照實）：真正 repo 的 `i074_stage2/` 下的 staging、目的地與（必要時）`failed/`；複本的 `.git`（驗證模式的合成守門 worktree 與 object）；
+`<work>/tmp`。⛔ 不寫真正 repo 的 `.git`；⛔ 不改複本內的終態（只 fsync）。
+
+###### 二之四、B／C 判讀器
+
+**`replay_bundle/stage2_verdict.py`**（規則唯一的定義處；「關閉條件」的判讀矩陣 ＋ v26 補充的差異表）：
+
+| 檢查（逐列，任一不符 → 該列 **C**，理由逐條記下） | 對應 |
+|---|---|
+| `differences` ⊆ 允許清單 {`lifecycle_phase`、`market_bias`、`action_state`、`position_action_condition`、`rr_decoupling_candidate`}；含 top-level `position_action` → C；含清單以外的任何欄位 → C | j、k |
+| `position_action_condition` 在 `differences` 裡時，兩側物件**只有 `state` 不同** | j |
+| `rr_decoupling_candidate`：after ＝ `true`、before ＝ `false` | 共同必要條件 |
+| 分類只看 **after 的 `action_state`**：`AVOID` → AVOID 類；`HOLD` → 非 AVOID 類；其他 → C | 判讀矩陣的分類依據 |
+| 兩側各自 `position_action_condition.state` ＝ `action_state` | i |
+| `lifecycle_phase`：before ∈ {`TESTING`, `CONFIRMED`}、after ＝ `CONTINUATION` | e |
+| 非 AVOID：`market_bias` `BULLISH_BIAS` → `BULLISH_CONTINUATION`；`before.lifecycle_phase` ＝ `TESTING` 時 `before.action_state` `CONDITIONAL_HOLD` → `after.action_state` `HOLD`；`before.lifecycle_phase` ＝ `CONFIRMED` 時 `before.action_state` `HOLD` → `after.action_state` `HOLD`（⚠️ 第一輪 review 訂正：原本把兩個欄位混寫） | f、a～b |
+| AVOID：`market_bias` `BEARISH_BIAS` → `BEARISH_BIAS`；`before.lifecycle_phase` 是 `TESTING` 或 `CONFIRMED` 都一樣：`before.action_state` `AVOID` → `after.action_state` `AVOID` | g、c～d |
+| `final_entry_state`：兩側都是 `BLOCKED` | h |
+
+整體：**任一列是 C → 整體 C**（⛔ 不以多數決；l）；全部是 B → B。
+
+**輸出的封閉 schema（⚠️ 第二輪 review）**——`judge_comparison()` 回傳、驗證模式 `--judge` 放進 `verdict` 欄位，以 canonical JSON 輸出；多欄、缺欄、型別或值域不符都是缺陷（測試逐鍵斷言）：
+
+| 欄位 | 型別與值域 |
+|---|---|
+| 頂層 | 恰好五個欄位：`schema`、`verdict`、`row_count`、`c_row_count`、`rows` |
+| `schema` | 固定字串 `"i074_stage2_verdict/v1"` |
+| `verdict` | `"B"` 或 `"C"` |
+| `row_count` | 整數 ≥ 1，＝ `rows` 的長度。comparison 為 0 列 → **拒絕判讀**（驗證模式回 1），⛔ 不以空集合判 B |
+| `c_row_count` | 整數，＝ `rows` 中 `verdict` 為 `"C"` 的列數（⚠️ 取代 v1 含糊的 `c_rows`） |
+| `rows` | 陣列，順序 ＝ comparison 的列順序（`validate_comparison_artifact()` 已驗依 (`symbol`, `timeframe`, `as_of`) 排序且唯一）；⛔ 不重排 |
+| `rows[]` | 恰好六個欄位：`symbol`、`timeframe`、`as_of`（字串，照抄 comparison）；`class`（`"NON_AVOID"`／`"AVOID"`／`"UNCLASSIFIED"`，只看 after 的 `action_state`：`HOLD`／`AVOID`／其他）；`verdict`（`"B"`／`"C"`）；`reasons`（reason code 的陣列，字典序、去重；`verdict` ＝ `"B"` ⇔ 空陣列） |
+
+reason code（封閉集合；每項檢查固定對應一個 code，⛔ 不輸出自由文字）：
+
+| code | 觸發 |
+|---|---|
+| `ROW_SHAPE_INVALID` | before 與 after **各自**必須有：`lifecycle_phase`、`market_bias`、`action_state`、`final_entry_state`（`str`）、`rr_decoupling_candidate`（`bool`）、`position_action_condition`（`dict`，含 `str` 欄位 `state`）——任一缺欄、`null` 或型別不符（以 `type(x) is …` 判斷，`bool` ⛔ 不算 `int`）即命中；出現時 `reasons` **只有**這一個 code、⛔ 不再做其他檢查。⛔ 不要求 `position_action` 存在（它只經 `differences` 檢查）；`differences`、key 欄位與兩側 key set 相同已由 `validate_comparison_artifact()` 驗過（第三輪 review 補列） |
+| `POSITION_ACTION_CHANGED` | `differences` 含 top-level `position_action` |
+| `DIFF_FIELD_NOT_ALLOWED` | `differences` 含允許清單與 `position_action` 以外的欄位 |
+| `POSITION_ACTION_CONDITION_NON_STATE_DIFF` | `position_action_condition` 兩側除了 `state` 還有其他差異 |
+| `RR_DECOUPLING_NOT_FALSE_TO_TRUE` | `rr_decoupling_candidate` 不是 before `false`、after `true` |
+| `ACTION_STATE_UNCLASSIFIED` | after 的 `action_state` 不是 `HOLD`／`AVOID`（`class` ＝ `"UNCLASSIFIED"`；⛔ 不再做下面兩項依分類的檢查） |
+| `CONDITION_STATE_MISMATCH` | 任一側的 `position_action_condition.state` ≠ 該側的 `action_state` |
+| `LIFECYCLE_PHASE_UNEXPECTED` | before ∉ {`TESTING`, `CONFIRMED`} 或 after ≠ `CONTINUATION` |
+| `MARKET_BIAS_UNEXPECTED` | `market_bias` 的轉換不符該分類 |
+| `ACTION_STATE_TRANSITION_UNEXPECTED` | `action_state` 的轉換不符該分類與 `before.lifecycle_phase`（before 不是 `TESTING`／`CONFIRMED` 時只記上一項、⛔ 不重複記這一項） |
+| `FINAL_ENTRY_STATE_NOT_BLOCKED` | 任一側的 `final_entry_state` ≠ `BLOCKED` |
+
+除了 `ROW_SHAPE_INVALID` 與 `ACTION_STATE_UNCLASSIFIED` 註明的略過，每一列的檢查**全部執行**、命中的 code 全部記下（⛔ 不在第一個不符就停）。
+⚠️ 第一輪 review：`stage2_verdict.py` 只有純函式 `judge_row()`／`judge_comparison()`；⛔ 沒有自己的 CLI、⛔ 不自己讀檔——一律由驗證模式的 `--judge`
+在**同一個程序**、以剛驗過的 comparison 物件呼叫（「三」#9）。
+
+**`scripts/judge-i074-stage2.sh`**（`REPLAY_IMAGE_ID=… scripts/judge-i074-stage2.sh`；⛔ 沒有參數）：
+
+| 序 | 動作 | 不通過 |
+|---|---|---|
+| 0 | 與 ⑩ 的入口同一套 bootstrap：`#!/bin/bash -p`、bash 內建的守門（`$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、`PATH=/usr/bin:/bin`）、`REPLAY_IMAGE_ID` 格式；本腳本的內容 ＝ HEAD | 1 |
+| 1 | 讀真正 repo 的 `python/baselines/i074_stage2/evidence/evidence_manifest.json`（內嵌標準庫）取 `finalizer_provenance.base_commit`（oid40） | 1 |
+| 2 | `git cat-file -e <base>^{commit}`（不可達 → 拒絕，m）→ `git clone --no-hardlinks --no-checkout --template=` 到暫存目錄 → detached checkout `<base>`；HEAD ＝ base（「三」#1） | 1 |
+| 3 | 暫存複本的 `finalize-stage2-evidence.sh --verify-promotion-staging <真正 repo>/…/evidence --target evidence --judge`——錨點取自 `base_commit` 的樹（⛔ 不讀真正 repo 的工作樹或目前的 HEAD）；信任根的綁定（manifest 的 `base_commit` ＝ 暫存複本的 HEAD ＝ 第 1 步讀到的值，第 1、3 步之間 manifest 若被換掉就在這裡擋下）；⚠️ 驗證與判讀在**同一個 Python 程序**（第一輪 review） | 1（⛔ 不輸出 B／C） |
+| 4 | stdout：驗證模式的 JSON（含 `verdict`、`base_commit`、manifest SHA）；清掉暫存複本。**結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀**（「三」#8） | — |
+
+###### 二之五、端到端結束碼（⑩ 完整）
+
+⑦b「二之十」的表沿用；**O8** 改成「已有終態 → 晉升 → 晉升的結束碼」：**0**（成功 archive 已在真正 repo durable）、**6**（failed record 已在真正
+repo durable）、**3**（某一層 durability 未確認 → 重跑 `--promote`）、**8**（可以安全重跑 `--promote`）、**9**（需要人工判斷）。其餘列不變。
+
+###### 二之六、對已確認章節的修改（⚠️ 都加註「⑦c 細部計畫 v1」）
+
+| 位置 | 修改 |
+|---|---|
+| v29「八之三」的「會寫到哪裡」列與 n11 的最後一句 | 「崩潰留下的 worktree 登記由下一次 `--promote` 的 `git worktree prune` 清掉」改成照實：prune 只清實體目錄已消失的登記；實體目錄還在的保留到 `<work>` 刪除，⛔ 不影響冪等（n11 改成「下一次 `--promote` 照樣成功」） |
+| v29「八之三」的「驗證用的錨點」列 | 補「唯讀入口 ＝ `--verify-promotion-staging`」與 identity 綁定的做法（「二之三」第 3c 步） |
+| v29「八之三」判定順序的第 3、4 步之間（⚠️ 第一輪 review） | 插入「封閉 inventory」（「二之三」第 3b 步：`lstat`、⛔ 不跟隨 symlink，只接受一般檔案與目錄；不符 → **9**）；第 4 步與 6a／6b 的 fsync、複製、比對都依它；⚠️ 第二輪 review：所有操作錨定在持有的 fd 上、rename 前後做鏈檢查（「二之三」的「路徑錨定」） |
+| v29「八之三」判定順序第 4、6a、6b 列的「不通過」（⚠️ 第二輪 review） | 依「二之三」的「結束碼的分類」細分：第 4 步的開檔與 `fstat` 錯誤由 3 改成 **9**、只有 `fsync()` 失敗是 3；6b 的 8 限縮為目的端的容量與寫入 I/O 及 rename 的 `EEXIST`／`ENOTEMPTY`，rename 的其他錯誤（含 `EXDEV`、`EINVAL`、`ENOSYS`）與來源側錯誤改成 **9** |
+| v29「八之三」判定順序的 6a、6b 與第 5 步之後（⚠️ 第四～六輪 review） | 6a 在驗證之後、6b 在 rename 之前加「收尾重算」（第四輪）；第 5 步之後插入 6a／6b 共用的第 5b 步「目的地的 ignore 守門」（第六輪）；6b 開頭加「staging 的 ignore 守門」（第五輪）；不通過一律 **9** |
+| v29「八之一」的「真正 repo」列（⚠️ 第三輪 review；第四輪重寫） | 補例外：⑩ 的任何一趟執行期間，晉升程序以外的程序⛔ 不得搬移、刪除或替換 `python/`、`python/baselines/`、`i074_stage2/`、`failed/` 本身，⛔ 不得修改、刪除、搬移或替換 active staging 與本次目的地的任何成員，⛔ 不得移除或改寫 `.gitignore` 的 staging 規則、⛔ 不得 `git add -f` staging（「二之三」的操作契約）；其他編輯、`git add -A` 與 commit 照常 |
+| ⑦ 總綱「三」的 ⑦c 列、v29「八之三」的「真正 repo 的錨點」列 | 「以 `git archive` 取出」改成「`git clone --no-hardlinks` ＋ detached checkout」（「三」#1）；判讀與驗證在同一個程序（「三」#9） |
+| ③「七之四」的 CLI matrix | 加第八種模式 |
+| ⑦b「二之十」的 O8 列 | 同「二之五」 |
+
+##### 三、總綱沒寫到、本計畫補上的決定（⚠️ 待確認）
+
+| # | 決定 | 理由 |
+|---|---|---|
+| 1 | 判讀器從 `base_commit` 取程式碼與錨點的方式改成「`git clone --no-hardlinks` ＋ detached checkout `base_commit`」，⛔ 不用 `git archive` | 內容與 `git archive` 相同（同一個 tree），但多了 git 物件——③ 的完整 verifier 含 shell 的合成守門，需要在 repo 裡套 patch；也讓判讀器與晉升呼叫**同一個**驗證入口（「二之二」），⛔ 不再寫一份 |
+| 2 | `--verify-promotion-staging` 由本腳本所在 repo 的 `origin` 推導真正 repo，`path` 只接受 staging 與目的地兩種；只讀、結束碼只有 0／1 | 總綱「路徑限在真正 repo 的 `i074_stage2/` 直屬下」；開路徑參數就等於開覆寫口（⛔ 不開） |
+| 3 | 信任根綁定的三者相等拆兩處：「複本 HEAD ＝ freeze record 的 `repo_head`」由 preflight 0（⑦b）驗；「`finalizer_provenance.base_commit` ＝ 複本 HEAD」由驗證模式驗（注入的 `--base-commit` 就是本 repo 的 HEAD） | 每一處都只用自己手上可信的值；判讀器的暫存複本同理（HEAD ＝ base_commit） |
+| 4 | identity 的綁定以「終態封存的 identity 的 canonical bytes 的 SHA ＝ `preflight.identity_sha256`」實作（第 3c 步） | XDG 的 identity 檔本身就是 canonical JSON；比 SHA ⛔ 不需要再讀 XDG |
+| 5 | 第 2 步只做 `git worktree prune`；實體目錄還在的登記保留到 `<work>` 刪除；同步訂正「八之三」與 n11 的文字（「二之六」） | ⑦b 第二輪 review 重現：prune 收不掉實體目錄還在的登記；它們⛔ 不影響冪等（每次都新建 `mktemp` 路徑） |
+| 6 | 晉升自己的 staging 名稱 `.promote-staging-<16 hex>`，直屬真正 repo 的 `i074_stage2/`；第 2 步只清這一種；第 3 步只**忽略**（⛔ 不刪除）複本內 ③ 的 orphan | 「⛔ 不動其他東西」「⛔ 不改複本內的終態」；兩種 orphan 位在不同的 repo、名稱可辨識 |
+| 7 | 8、9 搬進 `publish.py`；晉升模組經 `_i074_bootstrap` 載入它；supervisor 與 orchestrator 維持鏡像（它們不 import repo 模組），由測試斷言相等 | ⑦b「三」#2 的後半 |
+| 8 | 判讀器的結束碼：0 ＝ 已判讀（B 或 C 寫在 JSON）、1 ＝ 拒絕判讀；⛔ 不把 B／C 編進結束碼 | B 與 C 都是合法的判讀結果，⛔ 不是錯誤 |
+| 9 | ⚠️ 第一輪 review 改寫：**驗證與判讀在同一個 Python 程序**——判讀直接吃 `verify_stage2_graph()` 剛驗過、留在記憶體的 comparison 物件（驗證模式的 `--judge`）；⛔ 不採「兩個程序以 manifest SHA 綁定」、⛔ 不採私有 snapshot | 兩個程序之間（即使 snapshot）仍有「驗完、再讀」的窗口；同程序判讀沒有第二次讀取 |
+| 10 | 判讀器⛔ 不取鎖（它唯讀、在晉升之後由人執行），但用 ⑩ 入口同一套 bootstrap 與「本腳本 ＝ HEAD」 | ⛔ 不讓遮蔽的 PATH 或改過的腳本偽造判讀；⛔ 不為唯讀步驟引入 sentinel |
+| 11 | 判讀規則比矩陣多驗三件（before 的 `rr_decoupling_candidate` 為 `false`、after 的 `action_state` 必須在分類裡、兩側 `position_action_condition.state` ＝ `action_state`），任一不符 → C | 矩陣的共同必要條件與交叉斷言；⛔ 不讓矩陣外的形狀默默落到 B |
+| 12 | 6b 在 `failed/` 不存在時建立它並 fsync `i074_stage2/`；建立或這次 fsync 在已核對的 fd 上回 `ENOSPC`／`EDQUOT`／`EIO` → 8，其他錯誤（含 `failed` 已存在但是 symlink 或不是目錄）→ 9（⚠️ 第三輪 review：同步「二之三」的結束碼分類） | 真正 repo 目前沒有 `failed/`；它是目的地 parent 的一部分 |
+| 13 | ⚠️ 第一輪 review：`.gitignore` 精準排除 `python/baselines/i074_stage2/.promote-staging-*`；正式目的地⛔ 不排除 | ⑩ 期間真正 repo 照常 commit，`git add -A` ⛔ 不得收進半成品；發布之後的終態要進版控 |
+| 14 | ⚠️ 第一輪 review：晉升的 fsync、複製、比對全部基於 `lstat` 的封閉 inventory 與 `O_NOFOLLOW`，只接受一般檔案與目錄（第 3b 步；第二輪改成 fd-anchored，#15） | 完整驗證在第 6 步才執行，第 3c 步的 identity 讀取與第 4 步的 fsync 之前⛔ 不能讓被竄改成 symlink 的終態把晉升帶到樹外 |
+| 15 | ⚠️ 第二輪 review：晉升的所有檔案系統操作錨定在持有的 fd 上（`openat` 逐層 `O_DIRECTORY \| O_NOFOLLOW`、`dir_fd`、`rename_noreplace_at()`），rename 前後各做一次鏈檢查，一般檔案 `st_nlink` ＝ 1；驗證模式（只能吃路徑）以輸出的 manifest／record SHA 綁定到經 fd 寫入或讀到的 bytes；照實的界線見「二之三」 | 完整路徑的 `O_NOFOLLOW` 只保護最後一層（2026-10-01 重現）；⑩ 期間真正 repo 照常編輯。保證的只有「⛔ 不跟隨替換後的 symlink」；rename 來源被換掉、父目錄被搬走（可能搬到 repo 外，record 跟著落在那裡）⛔ 無法預防，只能事後以鏈檢查變成 9——所以另訂操作契約（#18；⚠️ 第三輪 review 撤回「不會寫到樹外」） |
+| 16 | ⚠️ 第二輪 review：結束碼依「二之三」的分類——漂移一律 9、只有已核對 fd 上的 `fsync()` 失敗才是 3、8 只留給目的端的容量與寫入 I/O；rename 的 `EXDEV`／`EINVAL`／`ENOSYS` 改成 9 | 3 與 8 的語意是「重跑 `--promote` 就好」；漂移與不支援的檔案系統重跑解決不了，必須交人工 |
+| 17 | ⚠️ 第二輪 review：判讀輸出（「二之四」）與驗證模式的輸出（「二之二」）都是封閉 schema、穩定的 reason code、列順序 ＝ comparison 的順序 | 判讀結果是正式紀錄；⛔ 不讓它的形狀隨實作細節漂移 |
+| 18 | ⚠️ 第三輪 review、第四輪重寫：操作契約——對象是晉升程序以外的所有程序（晉升自己的建立、清理與 rename 是唯一例外）；⑩ 的任何一趟執行期間⛔ 不得搬移、刪除或替換那幾個目錄本身、⛔ 不得改動 active staging 與本次目的地的任何成員、⛔ 不得動 `.gitignore` 的 staging 規則或 `git add -f` staging；其他編輯、`git add -A` 與 commit 照常（「二之三」） | fd-anchored 擋得住 symlink 替換、擋不住「已持有的目錄被搬走」與「成員被原地改寫」；這些對象在 ⑩ 期間本來就沒有被外部改動的理由，禁止的代價小；違反時由鏈檢查與收尾重算回 9（照實寫明偵測不到的部分） |
+| 19 | ⚠️ 第四輪 review：收尾重算——6b 在 rename 之前、6a 在驗證之後，經持有的 fd 重算每檔 SHA，與比對時的值不同 → 9 | 驗證模式在 docker 內以路徑讀取，它通過之後的原地改寫鏈檢查抓不到；多讀一次終態的代價遠小於把未驗過的內容發布成 0／6 |
+| 20 | ⚠️ 第四輪 review：`publish.py` 的 rename 拆三層（私有 `_renameat2()`、`rename_noreplace_at()`、`rename_noreplace()`）；路徑含 NUL 一律拋錯；`_at()` 的 fd 以 `type(fd) is int and fd >= 0` 檢查（第五輪 review：`bool` 是 `int` 的子類） | 單一 component 的規則只屬於 `_at()`；既有的五個呼叫點傳多層路徑、⛔ 不能被新規則打壞；`c_char_p` 在 NUL 截斷是既有的潛在誤 rename（實測） |
+| 21 | ⚠️ 第五輪 review、第六輪拆組：ignore 守門分兩組——**目的地那組**（全部不被忽略）是 6a／6b 共用的第 5b 步，**staging 那組**（全部被忽略）只在 6b 建 staging 之前；兩組都用 `check-ignore --no-index -z --stdin`、⛔ 不加 `-v`、以成員路徑查；不通過 → 9。⛔ 不另外加進 ⑦b 的 preflight | 入口清單⛔ 不含 `.gitignore`，啟動前就失效的規則只有執行期才擋得到；6a 是 3 之後的 recovery 路徑——兩次 `--promote` 之間規則被改壞時，只查 6b 會讓 6a 回 0／6 而目的地進不了版控（第六輪 review）。晉升時才失敗的代價是終態留在複本、修好規則之後重跑 `--promote` 即可（冪等），⛔ 不需要為了提早幾小時發現而改動已確認的 ⑦b preflight |
+
+##### 四、受影響檔案
+
+見「二之一」；另有 `docs/issue.md`、`docs/development-workflow.md`（⑩ 程序：晉升與判讀）、`docs/sr-zone-scoring.md`（判讀器的規則與晉升契約）。
+⛔ 不改：`evaluation.py`、`run-replay-offline.sh`、supervisor、label shim、sizing。
+
+##### 五、測試（id → 落點）
+
+| id | 內容 | 落點 |
+|---|---|---|
+| 「六、9」a～d | 四格（before `TESTING`／`CONFIRMED` × 非 AVOID／AVOID）各一列合成 row → B | pytest（`test_i074_stage2_verdict.py`） |
+| e～k | 各一支（lifecycle 沒翻轉、非 AVOID 的 `market_bias` 沒翻、AVOID 的 `market_bias` 變了、`final_entry_state` 變了、`action_state` 與 `position_action_condition.state` 不一致、允許清單以外的差異、top-level `position_action` 有變）→ C；k 另驗 `position_action` 相同時不影響 B；另加 `position_action_condition` 的非 `state` 欄位不同、before 的 `rr_decoupling_candidate` 為 `true`、after 的 `action_state` 不在分類裡 → C | pytest |
+| l | 多列中一列 C → 整體 C | pytest |
+| 判讀輸出的 schema（第二輪 review） | 頂層與 `rows[]` 的 key set 逐鍵相等、型別與值域；e～k 每一支斷言**完整的** `reasons` 陣列（⛔ 不只斷言含某個 code）；多項不符同時命中時 code 全部記下且字典序；`ROW_SHAPE_INVALID` 只有它一個；`UNCLASSIFIED` 不再記依分類的 code；列順序 ＝ comparison；`c_row_count`；0 列 → 拒絕；固定 fixture 的 canonical bytes 與 golden 逐位元相同 | pytest |
+| m | 驗證模式：成員 bytes 被改、manifest 驗不過、`finalizer_provenance.base_commit` ≠ 本 repo HEAD → 拒絕（pytest，`verify_promotion_target()`）；判讀器：`base_commit` 不可達、該 commit 裡缺錨點、驗證模式不通過 → 1 且⛔ 不輸出 B／C；⚠️ 第一輪 review：判讀路徑中 comparison 只被讀一次、判讀的物件就是 `verify_stage2_graph()` 回傳的那一個（spy），shell 段之後、Python 段之前改掉 comparison 以外的成員 → 拒絕；對照組：真正 repo 工作樹或目前 HEAD 的錨點被改 → 照樣判讀（shell） | pytest ＋ shell |
+| 驗證模式 | 路徑規則（真正 repo 外、複本內、symlink、非直屬、名稱不符、target 不符）→ 1；`--verified-*` 由外部傳入、缺、模式不符 → 1；唯讀掛載；argv 與 fixture 逐 token 相同；failed 的 `target` 名稱裡的 SHA ≠ 重算的語意 SHA → 1；⚠️ `--judge`（第一輪 review）：搭 failed target → 1、重複 → 1、驗證不通過時⛔ 不呼叫判讀函式（spy）、帶 `--judge` 的 argv 與 fixture 逐 token 相同；輸出 JSON 的 key set 封閉（evidence、failed、evidence ＋ `--judge` 各一支，第二輪 review） | `test-replay-args.sh`（dry-run 與 fake docker）＋ pytest |
+| n11 | 「八之三」每一步至少一支：1 → 9（⑦b 既有）；3 的零組／多組（`evidence/` 與本次的 failed record 同時存在）／不認得／名稱不符 → 9；3b 終態含 symlink（指向樹外的檔案：該檔案⛔ 不被開啟——spy；identity 檔本身換成這種 symlink 也一樣）、FIFO、socket → 9、整趟⛔ 沒有任何 fsync（在第 4 步之前就失敗）；3c identity 不符 → 9；4 fsync 失敗 → 3 且⛔ 不建 staging；6a 相同 → 0／6 只補 fsync、不同 → 9 ⛔ 不覆寫、目的地含 symlink → 9；6b 空間不足 → 8（釋出後重跑成功）、目的端寫入注入 `ENOSPC`／`EDQUOT`／`EIO` → 8、來源側讀取錯誤 → 9（其餘 errno 見下方「結束碼的分類」列；⚠️ 第三輪 review 同步）、`rename_noreplace_at()` 遇到 `EEXIST` → 8 而重跑走 6a、parent fsync 失敗 → 3 而重跑成功、staging 驗不過（終態發布之後才竄改來源，evidence 與 failed 各一支）→ 9 且目的地不存在、staging 已清；只竄改 `finalizer_provenance.base_commit` → 9；6a 的來源與目的地都改成同一份錯誤的 `base_commit` → 只有信任根綁定讓它 9；可辨識的 orphan staging 被清、其他檔案未被動；③ 的 recovery、replay、finalize、publish 在 `--promote` 中都⛔ 不被呼叫；真正 repo 的 `.git` 與複本內終態的 inventory 不變（除 fsync）；finalize 回 3 之後直接 `--promote` → 0；兩個執行目錄同時 `--promote` → 後到的 8（⑦b 的鎖測試沿用） | pytest（`test_i074_stage2_promote.py`，以注入的驗證函式與故障）＋ shell（整合，fake finalizer 的驗證模式） |
+| 路徑錨定（第二輪 review；第三輪拆開斷言） | 以 symlink 指向的「marker 目錄」做對照，每支都斷言 marker 的 inventory（路徑、bytes、inode、mtime）前後完全相同：`failed/` 是指向 marker 的 symlink → 9；中間層（`python/baselines`、`i074_stage2`）換成指向 marker 的 symlink → 9；**barrier**（驗證之後、rename 之前）分三支：(i) 把 `failed/` 搬到 repo 內的別名、(ii) 搬到 repo 外（同一個檔案系統）、(iii) `rm -rf`——之後都換成指向 marker 的 symlink：三支都 → 9、marker 不變；(i)(ii) **照實斷言 record 落在被搬走的舊目錄**（(ii) 就是 repo 外，即操作契約禁止的情況）；(iii) 的 rename 失敗（`ENOENT`）、⛔ 沒有 record、staging 已清；`i074_stage2/` 另做一支 (i)；barrier：rename 之前把 staging 換成另一個目錄 → 9、被換進來的目錄⛔ 沒有被 rename；終態有 `st_nlink` ＝ 2 的檔案（另一個 link 在 marker 裡）→ 9，且 marker 的 inode ⛔ 不曾被開啟或 fsync（spy 記下每個被 fsync 的 fd 的 `fstat`）；名稱含 `/` 或 `..` → 9 | pytest（`test_i074_stage2_promote.py`） |
+| rename 的三層（第四輪 review） | 既有 `test_replay_bundle_publish.py` 的絕對／多層路徑案例（probe A／B、既有目錄 → `FileExistsError`、`EXDEV` fail-closed）全部保留並通過——`test_exdev_is_fail_closed` 的 fake loader 只改成新的四參數簽章；`rename_noreplace_at()`：相對於 dirfd 成功（cwd 在別處）、`EEXIST` → `FileExistsError`、`EXDEV` 與舊 API 同一套對應；名稱是 `/` 開頭或含 `/`、`.`、`..`、空字串、含 NUL、fd 為負數（含 `AT_FDCWD`）、`src_dir_fd` 與 `dst_dir_fd` 各自傳 `True`／`False`（第五輪 review）→ `ValueError` 且⛔ 不呼叫 syscall（spy）；`rename_noreplace()` 的路徑含 NUL → `ValueError`、⛔ 不呼叫 syscall | pytest（`test_replay_bundle_publish.py`） |
+| ignore 守門（第五輪 review） | host、真 git（`scripts/test-i074-stage2.sh`，fake finalizer 的驗證模式）：⑩ 開始之前把真正 repo 的 staging 規則刪掉 → `--promote` 回 9、`i074_stage2/` 下⛔ 沒有任何 `.promote-staging-*`、目的地不存在；改成過廣規則（`python/baselines/i074_stage2/*`、`python/baselines/`）→ 9、⛔ 沒有 staging；`i074_stage2/.gitignore` 加否定規則 `!.promote-staging-*` → 9；對照組：只對目錄生效的 `python/baselines/i074_stage2/.promote-staging-*/` → 照常晉升；修好規則之後重跑 `--promote` → 0／6。⚠️ 第六輪 review 的 recovery（host、真 git）：目的地已與來源逐位元相同（6b rename 之後、parent fsync 之前的狀態）＋過廣規則 → `--promote` 走 6a 回 9、目的地未被動；修好規則 → 0／6。pytest（注入 git runner；⚠️ 測試 image ⛔ 沒有 git）：git 回 128、逾時、輸出多一筆／少一筆／不在輸入集合 → 9 且⛔ 不呼叫 `mkdir`（spy）；第 5b 步有任何一筆被忽略 → 9，6b ⛔ 不呼叫 `mkdir`、6a ⛔ 不呼叫驗證模式、⛔ 不 fsync 目的地（spy 以 `fstat` 的 (`st_dev`, `st_ino`) 對照兩邊的 inventory，分辨被 fsync 的 fd 屬於來源或目的地；第 4 步的來源 fsync 照常；⚠️ 第七輪 review）；⚠️ 第六輪 review 的完整序列：6b 在 rename 之後注入 parent `fsync()` 失敗 → 3 → runner 改成回報目的地被忽略 → 重跑走 6a → 9（來源照常 fsync、目的地⛔ 沒有被 fsync）→ runner 恢復 → 重跑 → 0／6；argv 恰好是 `check-ignore --no-index -z --stdin`、⛔ 沒有 `-v`；probe 是成員路徑 | shell ＋ pytest |
+| 操作契約與收尾重算（第四輪 review） | barrier：6b 的驗證模式通過之後、rename 之前原地改寫 staging 的一個非 manifest 成員（inode 不變）→ 9、目的地不存在、staging 已清；barrier：6a 的驗證模式通過之後原地改寫目的地的一個成員 → 9、⛔ 不 fsync 目的地（同一個 spy 分辨來源與目的地；⚠️ 第七輪 review）也⛔ 不回 0／6；對照組：同樣的改寫發生在收尾重算之後（fake 在重算之後才動）→ 照實斷言晉升回 0／6 而判讀器拒絕；`git check-ignore` 對 `python/baselines/i074_stage2/.promote-staging-0123456789abcdef` 命中、對 `…/evidence/x` 與 `…/failed/x` ⛔ 不命中 | pytest ＋ shell（`test-replay-args.sh`） |
+| 結束碼的分類（第二輪 review） | 第 4 步：inventory 之後檔案被刪（`ENOENT`）、換成 symlink（`ELOOP`）、parent 換成檔案（`ENOTDIR`）、inode 被換 → 9；只注入 `fsync()` 失敗 → 3。6a：開檔錯誤 → 9、只有 `fsync()` 失敗 → 3。6b：複製途中來源被換或內容變了 → 9；staging 寫入注入 `ENOSPC`／`EDQUOT`／`EIO` → 8、注入 `EACCES` → 9；rename 注入 `EXDEV`／`EINVAL` → 9、`EEXIST` → 8；驗證模式輸出的 SHA 與本程序寫入的不同（fake）→ 9；rename 之後 parent 的 `fsync()` 失敗 → 3 | pytest |
+| n9 | fake ⑩ 執行期間在真正 repo：(i) commit 一般檔案、(ii) 工作樹改錨點、(iii) commit 改錨點——晉升的證據與對照組逐位元相同；(ii)(iii) 的判讀器照樣判讀 | shell |
+| staging 與 `git add -A`（第一輪 review） | staging 已建好、rename 之前（fake 驗證模式那一刻）在真正 repo 執行 `git add -A` 與 `git status`：staging ⛔ 不進 index、⛔ 不出現在未追蹤清單；發布之後的目的地照常出現在未追蹤清單 | shell |
+| n12（晉升那一層） | failed record 晉升之後還沒 commit → 下一次 ⑩ 的 preflight 中止（⑦b 的 preflight 檢查 ＋ 本包真正的晉升）；commit 之後換新的 freeze record → 通過 | shell |
+| 結束碼常數 | `publish.py` 的 8、9 ＝ supervisor 與 `run-i074-stage2.sh` 的鏡像 ＝ 晉升模組使用的值 | shell（`mirror_constants`）＋ pytest |
+| 判讀器的 bootstrap | `bash <script>` → 1、`REPLAY_IMAGE_ID` 格式錯 → 1、腳本 ≠ HEAD → 1、呼叫者 PATH 前置的 fake 從未被執行 | shell |
+| `patch_claims` 的 promotion 模式 | evidence 4 個 token、failed 5 個 token；路徑規則 | pytest |
+
+##### 六、驗證
+
+1. `python/scripts/test.sh` 完整執行（依序）。
+2. 反向驗證（逐項注回 → 對應測試變紅 → 還原）：拿掉信任根綁定；驗證模式改成接受任意路徑；6a 比對不符改成覆寫；6b 失敗時不清 staging；
+   第 3 步改成取第一組（不驗唯一）；判讀器改成多數決；判讀器拿掉允許清單；判讀器改讀真正 repo 工作樹的錨點；⚠️ 第一輪 review 追加：判讀改成驗證之後重新讀 comparison（read-once 的 spy 必須變紅）；第 4 步改用會跟隨 symlink 的 `_fsync_tree()`（symlink 那一支必須變紅）；拿掉 `.gitignore` 的 staging 規則（barrier 那一支必須變紅）；⚠️ 第二輪 review 追加：6b 改回完整路徑的 rename（`failed/` 換成 symlink 的那一支必須變紅）；拿掉 rename 之後的鏈檢查（搬走 parent 的 barrier 必須變紅）；拿掉 `st_nlink` 檢查（hardlink 那一支必須變紅）；第 4 步把開檔錯誤改回 3（`ENOENT` 那一支必須變紅）；拿掉驗證模式輸出的 SHA 綁定（fake 回不同 SHA 的那一支必須變紅）；`reasons` 改成第一個不符就停（多項命中的那一支必須變紅）；⚠️ 第四輪 review 追加：拿掉收尾重算（原地改寫的兩支 barrier 必須變紅）；`rename_noreplace_at()` 拿掉名稱檢查（拒絕 `/` 與 `..` 的那幾支必須變紅）；`rename_noreplace()` 改成經 `_at()`（既有多層路徑的測試必須變紅）；⚠️ 第五輪 review 追加：拿掉 ignore 守門（刪除規則的那一支必須變紅）；守門改成加 `-v` 只看結束碼（否定規則的那一支必須變紅）；守門改成只查 staging 目錄本身（只對目錄生效的對照組必須變紅）；fd 檢查改成 `isinstance(fd, int)`（`True`／`False` 那幾支必須變紅）；⚠️ 第六輪 review 追加：目的地那組守門改回只在 6b 查（recovery 序列與 host 的 recovery 那兩支必須變紅）。
+3. 版控流程：stage 程式 → `git write-tree` → `scripts/make-i074-tooling-patch.sh --source-tree <T>` → stage patch → `--verify "$(git write-tree)"` ＝ 0；
+   `e1cbbbd` ＋ counterfactual ＋ 新 tooling 的 worktree 跑它自己的 `python/scripts/test.sh`（`SKIP_SHELL_TESTS=1`），記錄 tree 與結果（比照 ⑦a）；
+   `REPLAY_SMOKE=1` 的 smoke（含反事實段）跑一次。
+4. 隔離：`/run/lock`、真正 repo 的 worktree 登記數與 `python/baselines/` 前後不變。
+
+##### 七、風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 晉升寫錯地方或覆寫既有證據 | 只寫 `i074_stage2/` 下的 staging 與目的地；`rename_noreplace_at()`；6a ⛔ 不覆寫；路徑規則由驗證模式再擋一次；封閉 inventory；fd-anchored 的走訪與 `rename_noreplace_at()`、rename 前後的鏈檢查（第二輪 review）；staging 由 `.gitignore` 排除；測試斷言真正 repo 的 `.git` 與其他檔案不變 |
+| rename 只能以名稱指定來源；父目錄在持有 fd 之後被搬走 | fd-anchored 只保證⛔ 不跟隨替換後的 symlink；父目錄被搬到 repo 外時 record 會跟著落在那裡（⛔ 無法撤銷）——操作契約（「三」#18）禁止這類操作，rename 前後的鏈檢查把違反變成 **9**、交人工；照實寫在「二之三」的界線，⛔ 不宣稱能預防（⚠️ 第三輪 review 訂正） |
+| staging 或目的地的成員在驗證之後被原地改寫 | 操作契約禁止；收尾重算在 rename（6b）之前、驗證（6a）之後偵測 → **9**；重算之後的改寫照實寫成晉升⛔ 無法偵測，由判讀器、再跑 `--promote` 與 commit 前的 review 把關（⚠️ 第四輪 review） |
+| `.gitignore` 的規則在 ⑩ 開始之前、或兩次 `--promote` 之間失效 | 目的地守門（第 5b 步，6a／6b 共用）與 staging 守門（6b）回 **9**；終態仍在複本或目的地，修好規則之後重跑 `--promote`（⚠️ 第五、六輪 review） |
+| 改 `publish.py` 的 rename 打壞既有發布路徑 | 三層拆分、既有呼叫點與測試不動；唯一的行為差異（含 NUL 的路徑拋錯）有專屬測試 |
+| 判讀規則寫錯（判準在看到結果之前就寫死） | 「六、9」a～m ＋ 本包補的三件；規則只有一份（`stage2_verdict.py`）；判讀器在結構上只能執行 `base_commit` 那一版 |
+| tooling patch 因 `replay_bundle/` 的新增而變大 | 版控流程 ＋ 漂移測試；`e1cbbbd` ＋ 新 tooling 的既有測試全綠；smoke；⑨ 的 tooling 非語意 guard 仍會再驗 |
+| 回滾 | ⑦c 之後依總綱「六」的反向順序（⑦d → ⑦c → ⑦b → ⑦a）；單獨 revert ⑦c 會回到 stub（9），tooling patch 要跟著重產 |
+
+##### 八、歸檔（實作後；review 前保留本筆的計畫內容）
+
+- `development-workflow.md`：「I-074 Stage 2 的正式執行程序」補晉升（步驟與結束碼、會寫到哪裡、重跑的判斷、⚠️ 執行期間的操作契約）與判讀器的操作程序。
+- `sr-zone-scoring.md`：B／C 判讀器的規則（與判讀矩陣寫在一起，v29「七」的歸檔列）與晉升契約的現況。
+- `issue.md`：⑦c 實作結果（與計畫的差異、反向驗證、新的 tooling patch SHA 與 `e1cbbbd` 的測試結果）。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -3782,7 +4114,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（2026-09-29，✅ 2026-09-30 確認）**：⑦ 分四包依序實作——⑦a replay 側 → ⑦b supervisor＋orchestrator＋freeze record
    → ⑦c `--promote`＋B／C 判讀器 → ⑦d memory harness，每包「細部計畫 → 實作 → review → commit」；
    ⚠️ `evaluation.py` 與 `replay_bundle/` 的改動**經 tooling patch 進入 replay**（⑩ 的 replay 執行的是 `e1cbbbd` worktree）；
-   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；⚠️ 現在在這裡：⑦b 實作完成、待 review（見「Stage 2 步驟 ⑦b 實作結果」）
+   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；⚠️ 現在在這裡：⑦c 細部計畫 v1（第一～七輪 review 已修正）待確認（見「Stage 2 步驟 ⑦c 細部計畫 v1」）
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次

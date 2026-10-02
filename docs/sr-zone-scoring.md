@@ -3185,7 +3185,7 @@ comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有
 反事實側 6 筆全數翻轉、其餘 159 列逐列相同。⚠️ 這份衍生 bundle ⛔ 不是證據（佔位 provenance 只標示身分，
 `load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
 
-#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；⚠️ 待 review）
+#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`）
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
 `issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見

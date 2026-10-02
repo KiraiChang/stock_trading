@@ -1260,7 +1260,7 @@ I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作�
 | `--publish-failed-record --run-dir <dir>` | `stage2/bounded_diagnostics.json`（replay 回 6 時寫出的中繼檔）＋ 凍結 patch | ⚠️ **1**（完整發布——那一次執行本來就是失敗的）／3／1 |
 | `--check-failed-record --counterfactual-patch <patch>` | ⚠️ **只吃 patch 路徑、⛔ 不吃 SHA** | **0** 無命中／**2** 命中／**1** 損壞、套用失敗或非 canonical |
 | `--recover-failed-record <record 目錄>` | `failed/` 的**直接子目錄** | ⚠️ **1**（成功也是 1）／3 |
-| `--verify-promotion-staging <path> --target <evidence\|failed/<name>> [--judge]`（⑦c，⚠️ 待 review） | ⚠️ **唯讀**：真正 repo（＝ 本 repo 的 `origin`）的 `python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）或目的地本身；錨點取自本 repo；`<path>` 與兩個錨點全部 `:ro`、⛔ 不 fsync、⛔ 不寫入；⛔ 不接受 `--run-dir`、`--source-ref`、`TOOLING_PATCH`；`--judge` 只限 evidence | **0** 有效（stdout 一行 canonical JSON，封閉 key set）／**1** 無效或用法錯誤（⛔ 沒有 3） |
+| `--verify-promotion-staging <path> --target <evidence\|failed/<name>> [--judge]`（⑦c，✅ review 通過） | ⚠️ **唯讀**：真正 repo（＝ 本 repo 的 `origin`）的 `python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）或目的地本身；錨點取自本 repo；`<path>` 與兩個錨點全部 `:ro`、⛔ 不 fsync、⛔ 不寫入；⛔ 不接受 `--run-dir`、`--source-ref`、`TOOLING_PATCH`；`--judge` 只限 evidence | **0** 有效（stdout 一行 canonical JSON，封閉 key set）／**1** 無效或用法錯誤（⛔ 沒有 3） |
 
 **合成守門在 host、Docker 之前**：`--finalize`／`--recover-durability`／`--publish-failed-record`／
 `--recover-failed-record` 先由 `python/scripts/i074-stage2-patch-claims.py` 取出宣告值（只讀小檔），
@@ -1333,7 +1333,7 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
 的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
-### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，⚠️ 待 review）
+### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
 ⑩ 在 ⑨-2 產出 freeze record 之後才可執行。

@@ -1,7 +1,7 @@
 {
   "_comment": [
     "I-074 Stage 2：finalize-stage2-evidence.sh 實際組出的 python argv（issue.md I-074 ③ evidence contract「七之四：CLI matrix」）。",
-    "七種模式各一組（③b：envcheck／recover-envcheck；③d：其餘五種）：",
+    "八種模式（③b：envcheck／recover-envcheck；③d：其餘五種；⑦c：verify-promotion-staging）各一組，⑦c 另加 failed 與 --judge 兩組：",
     "  envcheck               — --run-dir ＋ 腳本注入的 --run-identity（Stage 2 identity）；⛔ 禁 --recover-envcheck",
     "  recover-envcheck       — ⛔ 禁 --run-dir 與 --run-identity：它只依賴既有的 envcheck/",
     "  finalize               — --run-dir ＋ 注入的 --run-identity；run 目錄的 stage2/ 與 patches/ 以 same-path 唯讀掛載",
@@ -9,6 +9,7 @@
     "  publish-failed-record  — --run-dir ＋ 注入的 --run-identity；⚠️ 成功發布也回 1",
     "  check-failed-record    — ⛔ 使用者的 --counterfactual-patch 只在 host 端用（合成比對鍵），⛔ 不進容器；i074_stage2 唯讀",
     "  recover-failed-record  — record 目錄必須是 failed/ 的直接子目錄",
+    "  verify-promotion-staging — ⑦c 唯讀：<path> 只接受真正 repo（本 repo 的 origin）的 staging 或目的地；Stage 1、envcheck 與 <path> 全部 :ro；⛔ 不接受 --run-dir 與 --source-ref；evidence ⛔ 不帶語意 SHA、failed 必須帶；--judge 只限 evidence",
     "⚠️ 合成守門（「四之二」、F8-a）在 host 端、Docker 之前執行；除了 check，其餘四種模式把驗過的四個值以 --verified-* 交給 Python，Python 以實際要封存的內容比對後才允許 commit point／fsync（2026-09-24 review：兩段之間的 TOCTOU）。⚠️ ⑦a：publish／recover-failed-record 另外帶 shell 由實際 patch 重算的語意 SHA（--verified-counterfactual-semantic-sha256，failed record 的目錄鍵），其餘模式⛔ 不帶。",
     "⛔ 存的是參數 token 序列（⛔ 非 eval 字串）；動態值用 placeholder。"
   ],
@@ -25,7 +26,9 @@
     "<VERIFIED_COUNTERFACTUAL_SHA256>": "64 hex：合成守門驗過的反事實 patch SHA",
     "<VERIFIED_TOOLING_SHA256>": "64 hex：合成守門驗過的 tooling patch SHA",
     "<VERIFIED_COMPOSED_SHA256>": "64 hex：合成守門重建出的 composed SHA",
-    "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "64 hex：shell 由實際 counterfactual patch 重算的語意 SHA（只涵蓋兩個產品檔；⑦a）"
+    "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "64 hex：shell 由實際 counterfactual patch 重算的語意 SHA（只涵蓋兩個產品檔；⑦a）",
+    "<PROMOTION_PATH>": "⑦c：真正 repo 的 python/baselines/i074_stage2/.promote-staging-<16 hex> 或目的地本身（host 絕對路徑，same-path 唯讀掛載）",
+    "<FAILED_TARGET>": "⑦c：failed/<bundle_id>-<counterfactual_semantic_sha256>"
   },
   "envcheck_argv": [
     "python", "-m", "backtest.modular.sr_scoring.replay_bundle.envcheck",
@@ -120,5 +123,48 @@
     "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
     "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>",
     "--verified-counterfactual-semantic-sha256", "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>"
+  ],
+  "verify_promotion_staging_evidence_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive",
+    "--verify-promotion-staging", "<PROMOTION_PATH>", "--target", "evidence",
+    "--python-root", "<PYTHON_ROOT>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>",
+    "--verified-patch-base", "<VERIFIED_PATCH_BASE>",
+    "--verified-counterfactual-sha256", "<VERIFIED_COUNTERFACTUAL_SHA256>",
+    "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
+    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>"
+  ],
+  "verify_promotion_staging_failed_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive",
+    "--verify-promotion-staging", "<PROMOTION_PATH>", "--target", "<FAILED_TARGET>",
+    "--python-root", "<PYTHON_ROOT>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>",
+    "--verified-patch-base", "<VERIFIED_PATCH_BASE>",
+    "--verified-counterfactual-sha256", "<VERIFIED_COUNTERFACTUAL_SHA256>",
+    "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
+    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>",
+    "--verified-counterfactual-semantic-sha256", "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>"
+  ],
+  "verify_promotion_staging_evidence_judge_argv": [
+    "python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive",
+    "--verify-promotion-staging", "<PROMOTION_PATH>", "--target", "evidence", "--judge",
+    "--python-root", "<PYTHON_ROOT>",
+    "--image-digest", "<IMAGE_ID>",
+    "--base-commit", "<BASE_COMMIT>",
+    "--tooling-patch-sha256", "<TOOLING_PATCH_SHA256>",
+    "--source-root", "/app",
+    "--runner-sha256", "<RUNNER_SHA256>",
+    "--verified-patch-base", "<VERIFIED_PATCH_BASE>",
+    "--verified-counterfactual-sha256", "<VERIFIED_COUNTERFACTUAL_SHA256>",
+    "--verified-tooling-sha256", "<VERIFIED_TOOLING_SHA256>",
+    "--verified-composed-sha256", "<VERIFIED_COMPOSED_SHA256>"
   ]
 }

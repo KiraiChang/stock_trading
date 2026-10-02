@@ -1246,7 +1246,7 @@ manifest 為信任錨，單獨搬走會斷鏈。
 
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」與 `issue.md`
 I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）
-由 ⑦ 的 orchestrator 串起來，⚠️ ⑦ 尚未實作——下列入口是它要呼叫的**唯一**一套（⛔ 不得另寫 lookup）。
+由 ⑦b／⑦c 的 orchestrator 串起來——下列入口是它呼叫的**唯一**一套（⛔ 不得另寫 lookup）。
 
 **CLI matrix**（`scripts/finalize-stage2-evidence.sh`；一律要求 `REPLAY_IMAGE_ID` 是 Stage 2 identity 的 image；
 模式互斥、參數重複即中止；路徑一律寫死常數或由 `--run-dir` 固定推導，⛔ 沒有逐檔覆寫）：
@@ -1260,6 +1260,7 @@ I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作�
 | `--publish-failed-record --run-dir <dir>` | `stage2/bounded_diagnostics.json`（replay 回 6 時寫出的中繼檔）＋ 凍結 patch | ⚠️ **1**（完整發布——那一次執行本來就是失敗的）／3／1 |
 | `--check-failed-record --counterfactual-patch <patch>` | ⚠️ **只吃 patch 路徑、⛔ 不吃 SHA** | **0** 無命中／**2** 命中／**1** 損壞、套用失敗或非 canonical |
 | `--recover-failed-record <record 目錄>` | `failed/` 的**直接子目錄** | ⚠️ **1**（成功也是 1）／3 |
+| `--verify-promotion-staging <path> --target <evidence\|failed/<name>> [--judge]`（⑦c，⚠️ 待 review） | ⚠️ **唯讀**：真正 repo（＝ 本 repo 的 `origin`）的 `python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）或目的地本身；錨點取自本 repo；`<path>` 與兩個錨點全部 `:ro`、⛔ 不 fsync、⛔ 不寫入；⛔ 不接受 `--run-dir`、`--source-ref`、`TOOLING_PATCH`；`--judge` 只限 evidence | **0** 有效（stdout 一行 canonical JSON，封閉 key set）／**1** 無效或用法錯誤（⛔ 沒有 3） |
 
 **合成守門在 host、Docker 之前**：`--finalize`／`--recover-durability`／`--publish-failed-record`／
 `--recover-failed-record` 先由 `python/scripts/i074-stage2-patch-claims.py` 取出宣告值（只讀小檔），
@@ -1332,16 +1333,16 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
 的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
-### I-074 Stage 2 的正式執行程序（⑦b；2026-09-30 實作，⚠️ 待 review）
+### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，⚠️ 待 review）
 
-⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」與 v29「八之一」～「八之二」；本節只寫**操作程序**。⑦b 的晉升是
-**stub**（固定回 9，⛔ 不把任何證據搬進真正 repo）——⑦c 才換成「八之三」的晉升；⑩ 在 ⑨-2 產出 freeze record 之後才可執行。
+⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
+⑩ 在 ⑨-2 產出 freeze record 之後才可執行。
 
 ```text id="i074_stage2_formal_run_usage_001"
 # ⚠️ 一律**直接執行**（shebang 是 #!/bin/bash -p）；bash <script> 會被拒絕
 REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --freeze-record <⑨-2 的 freeze_record.json> --work-dir <repo 外、尚不存在的目錄>
 REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --resume  --work-dir <dir>   # 只在 finalize／publish 回 1 之後
-REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --promote --work-dir <dir>   # ⑦b：stub，一律 9
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --promote --work-dir <dir>   # 依磁碟事實晉升（冪等）；3／8 之後重跑它
 ```
 
 | 階段 | 做什麼（⛔ 前一步不通過就⛔ 不做後一步） |
@@ -1349,7 +1350,7 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/run-i074-stage2.sh --promote --work-d
 | 入口（真正 repo） | 只用 bash 內建：驗 `$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定成 `/usr/bin:/bin` → `REPLAY_IMAGE_ID` 必須是 `sha256:`＋64 位小寫 hex → 公開 argv（⛔ 沒有 `--repo-head`、⛔ 沒有路徑覆寫）→ **入口清單的投影 ＝ HEAD**（`run-i074-stage2.sh`、supervisor、freeze record 與 preflight 模組、`_i074_bootstrap.py`、`replay_bundle/canonical.py`；清單以外的檔案 dirty 不影響）→ work 目錄規則 → `exec /usr/bin/python3 -I` supervisor |
 | supervisor（`scripts/lib/i074-stage2-supervisor.py`） | 初始 user namespace（`/proc/self/uid_map` ＝ `0 0 4294967295`）、`/usr/bin/git`／`docker`／`python3` 與 `/bin/bash` 及其上層目錄 root 擁有、別人不可寫 → 自身 ＝ HEAD → 環境⛔ 帶 `I074_STAGE2_*` → uid ＝ 1001 → 取 `/run/lock/i074-stage2.lock`（屬性與 inode 比對、非阻塞 `flock`）→ `/run/lock/i074-stage2.active` ⛔ 存在 → image 的 labels ⛔ 含 `i074.stage2.run` → 沒有帶這個鍵的殘留容器 → 建 sentinel → child subreaper → 以 `/bin/bash -p` 啟動持鎖階段（parent-death TERM；環境以**清單刪除**——`GIT_*`、`DOCKER_*`、`MEM*`、`SIZING_*`、`LD_*`、`PYTHON*`、`I074_STAGE2_*`、`BASH_ENV`、`ENV`、兩份 patch 與 replay 相關的變數等——再加上協定 v1、`PYTHONDONTWRITEBYTECODE=1` 與 `PATH=<work>/bin:/usr/bin:/bin`；`HOME`、`XDG_DATA_HOME`、`REPLAY_IMAGE_ID` 與其他不在清單上的變數照傳） |
 | 持鎖階段（真正 repo 的 HEAD 版） | 再驗入口清單 → `mkdir <work>` → freeze record 與同目錄的 `sizing_report.json` **先複製**進 `<work>/freeze/` 再驗副本 → `repo_head` 存在 → `git clone --no-hardlinks`、detached checkout `repo_head`（`--resume`／`--promote`：沿用既有複本，freeze record 副本與 `state/run.json` 的記錄值一致）→ **exec 之前**驗複本 HEAD ＝ `repo_head`、要執行的 `scripts/run-i074-stage2.sh` ＝ 真正 repo 物件裡 `repo_head` 的 blob（⛔ 讓複本的程式自己驗自己；不符 → 1，`--promote` 9）→ `exec` 複本內的同一支腳本 |
-| 複本內 orchestrator（`repo_head` 版） | `/proc/locks` 持鎖驗證 → preflight 0（只用 git／shell：位置、無 alternates、HEAD、tracked 無修改、`i074_stage2/` 以外無未追蹤／ignored、自身內容）→ `state/run.json` → 安裝 label shim → 1 凍結兩份 patch（tooling ⛔ 不得為空）→ 2 合成 ＋ freeze record 完整驗證 → 3 `anchors`（Stage 2 image 內，以**目前 XDG 的** identity 走信任錨第 1～10 道）→ 4 真正 repo 的兩條檢查 ＋ `--check-failed-record` → 6 磁碟（`f_bavail × f_frsize ≥ 1,241,513,984`，相關位置與 Docker Root Dir 同一個裝置）→ replay（兩份 patch 的環境變數只給這一次）→ 輸出形狀 → 檢查點 → finalize（rc 0）／publish-failed-record（rc 6）→ **依磁碟事實**判終態 → 晉升 stub（9） |
+| 複本內 orchestrator（`repo_head` 版） | `/proc/locks` 持鎖驗證 → preflight 0（只用 git／shell：位置、無 alternates、HEAD、tracked 無修改、`i074_stage2/` 以外無未追蹤／ignored、自身內容）→ `state/run.json` → 安裝 label shim → 1 凍結兩份 patch（tooling ⛔ 不得為空）→ 2 合成 ＋ freeze record 完整驗證 → 3 `anchors`（Stage 2 image 內，以**目前 XDG 的** identity 走信任錨第 1～10 道）→ 4 真正 repo 的兩條檢查 ＋ `--check-failed-record` → 6 磁碟（`f_bavail × f_frsize ≥ 1,241,513,984`，相關位置與 Docker Root Dir 同一個裝置）→ replay（兩份 patch 的環境變數只給這一次）→ 輸出形狀 → 檢查點 → finalize（rc 0）／publish-failed-record（rc 6）→ **依磁碟事實**判終態 → 晉升（下方「晉升」） |
 
 **執行目錄 `<work>`**（preflight 2 的暫時 worktree 不論成功或失敗都移除，移除失敗即 1）：`repo/`（複本）、`freeze/`（freeze record 與報告的副本）、`run/patches/`（凍結副本）、`run/stage2/`（runner 的輸出）、
 `tmp/`（`TMPDIR`；runner、finalizer 的 worktree 都在這裡）、`bin/docker`（label shim）、`logs/`（每一步的 stdout／stderr）、`state/`。
@@ -1362,9 +1363,54 @@ commit 之後整個 `<work>` 被刪除（`git worktree prune` 收不掉實體目
 `preflight.json`（只改 `created_at` 也不行）、凍結 patch 與輸出檔的 SHA 不變，才重跑 finalize／publish；⛔ replay 一律不再跑。replay 中斷、
 replay 之後的檢查點不符、收到訊號 → ⛔ 不能 resume（⑦c 之後改用 `--promote` 依磁碟事實裁決）。
 
-**端到端結束碼（⑦b）**：`1` ＝ 還沒有任何終態（`--resume` 只適用 finalize／publish 回 1 的那一種）；`2` ＝ failed-record lookup 命中；
-`8` ＝ `--promote` 在取得 sentinel 之前失敗（排除原因後可重跑）；`9` ＝ `--promote` 遇到 sentinel、或已有終態而晉升尚未實作；
-`128＋N` ＝ 被訊號 N 中斷（supervisor 清空本趟之後回傳）；`137` ＝ supervisor 被 SIGKILL。完整的「模式 × 失敗點」表見 issue.md「二之十」。
+**端到端結束碼**：`0` ＝ 成功 archive 已在真正 repo durable；`6` ＝ failed record 已在真正 repo durable；`1` ＝ 還沒有任何終態
+（`--resume` 只適用 finalize／publish 回 1 的那一種）；`2` ＝ failed-record lookup 命中；`3` ＝ 某一層的 durability 未確認 → 重跑 `--promote`；
+`8` ＝ 本次沒有確認晉升完成、可以安全重跑 `--promote`（含 `--promote` 在取得 sentinel 之前失敗；⛔ 不承諾目的地不存在）；`9` ＝ 需要人工判斷
+（`--promote` 遇到 sentinel、複本完整性、晉升的完整性漂移……）；`128＋N` ＝ 被訊號 N 中斷（supervisor 清空本趟之後回傳）；`137` ＝ supervisor
+被 SIGKILL。完整的「模式 × 失敗點」表見 issue.md ⑦b「二之十」與 ⑦c「二之五」。
+
+**晉升（⑦c；`python/scripts/i074_stage2_promote.py`——完整流程、`--resume` 與 `--promote` 都經同一個 `promote()`）**：終態已在複本的磁碟上時執行。
+
+| 步 | 做什麼 | 不通過 |
+|---|---|---|
+| 1 | （shell）`/proc/locks`、preflight 0、`state-check --require run,preflight` | 9 |
+| 2 | 複本 `git worktree prune`；清掉真正 repo `i074_stage2/` **直屬**的 `.promote-staging-<16 hex>`（fd 錨定、⛔ 不跟隨 symlink；其他一律不動） | 9 |
+| 3 | 以複本的 `git status --ignored` 解析本次的**唯一**終態（`evidence/` 或 `failed/<bundle>-<語意 SHA>/`；③ 的 orphan staging／probe 只忽略、⛔ 不刪除）；名稱與 replay 的 rc 對得上 | 9 |
+| 3b | 終態的封閉 inventory：只接受一般檔案（`st_nlink` ＝ 1）與目錄；symlink、FIFO、socket、device、hardlink 一律拒絕，⛔ 不開啟它的目標 | 9 |
+| 3c | 終態封存的 identity（canonical bytes）的 SHA ＝ `preflight.identity_sha256` | 9 |
+| 4 | 來源的 durability：依 inventory 以 fd 開啟（核對裝置與 inode）、算 SHA、fsync | 開檔或核對不符 9；只有 fsync 本身失敗 3 |
+| 5、5b | 真正 repo 的目的地（不存在 → 6b、是目錄 → 6a）；**目的地的 ignore 守門**：成員路徑⛔ 不得被 git 忽略 | 9 |
+| 6a | 目的地已存在：逐位元比對 → 驗證模式 → 收尾重算 → 鏈檢查 → fsync（目的地、parent；failed record 另加 `i074_stage2/`——`failed/` 自己的目錄項目在那裡） | 不符 9（⛔ 不覆寫）；只有 fsync 失敗 3 |
+| 6b | **staging 的 ignore 守門** → 空間預檢（來源 allocated bytes 的 2 倍）→ 建 `.promote-staging-<16 hex>`、逐位元複製 → 驗證模式 → fsync → （failed）`failed/` 不存在就建立，**不論新建或既有都 fsync `i074_stage2/`** → 收尾重算 → 鏈檢查 → `renameat2(RENAME_NOREPLACE)` → 鏈檢查 → fsync 目的地的 parent（failed record 另加 `i074_stage2/`：跨目錄 rename 的兩個 parent） | 空間不足、目的端寫入的 `ENOSPC`／`EDQUOT`／`EIO`、rename 的 `EEXIST` → 8；其他 9；rename 之後任一個 parent 的 fsync 失敗 → 3。rename 之前失敗時只清**本次建立的那一個** staging（清理途中任何時點——清理之前、開啟、rmdir 之前與 rmdir 本身——名稱已被換掉（含換成 symlink 或一般檔案）或已不存在（被搬走或刪掉）→ ⛔ 不刪換進來的東西、9） |
+| 7 | 成功 | evidence 0、failed record 6 |
+
+**照結束碼決定下一步**：`3`、`8` → 排除原因（釋出空間、等另一個 `--promote` 結束……）之後重跑 `--promote`（冪等：目的地已存在就走 6a、
+只補 fsync）；`9` → 看 `<work>/logs/promote.err`、⛔ 不要手動搬檔，修好原因之後再跑 `--promote`。
+⚠️ **會寫到哪裡**：真正 repo 的 `python/baselines/i074_stage2/` 下的 staging、目的地與（必要時）`failed/`；複本的 `.git`（驗證模式的合成守門）；
+`<work>/tmp`。⛔ 不寫真正 repo 的 `.git`、⛔ 不改複本內的終態（只 fsync）。staging 由 `.gitignore` 的
+`python/baselines/i074_stage2/.promote-staging-*` 排除——⛔ 不要改掉這條規則（晉升以真 git 守門，規則失效就回 9）。
+⚠️ **⑩ 執行期間的操作契約**（從開始到 `--promote` 回 0／6 為止；對象是晉升程序以外的**所有**程序，含操作者自己的 shell、編輯器與 git）：
+⛔ 不得搬移、刪除或替換真正 repo 的 `python/`、`python/baselines/`、`python/baselines/i074_stage2/`、`…/i074_stage2/failed/` 本身（含 `mv`、
+`rm -rf` 之後重建、換成 symlink、會刪掉它們的 `git clean`／`git stash -u`）；⛔ 不得修改、刪除、搬移或替換 `.promote-staging-*` 與本次目的地的
+任何成員；⛔ 不得移除或改寫上述 `.gitignore` 規則、⛔ 不得 `git add -f` staging。其他檔案照常編輯、`git add -A` 與 commit。
+⚠️ 違反時晉升只能以鏈檢查與收尾重算**事後**回 9（⛔ 無法撤銷：已持有的父目錄被搬到 repo 外時，record 會落在那裡）。
+⚠️ **failed record 晉升之後（6）**：開始下一次 ⑩ 之前**必須先 commit** 它，並以包含它的 commit 重產 freeze record——preflight 會擋下
+未追蹤的項目與舊的 freeze record。
+
+**B／C 判讀器（⑦c；成功 archive 晉升並 commit 之後，由人執行）**：
+
+```text id="i074_stage2_judge_usage_001"
+# ⚠️ 一律直接執行（#!/bin/bash -p）；⛔ 沒有參數
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/judge-i074-stage2.sh
+```
+
+與 ⑩ 的入口同一套 bootstrap（`$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定、本腳本 ＝ HEAD）→ 讀
+`evidence/evidence_manifest.json` 的 `finalizer_provenance.base_commit` → 確認可達 → 暫存複本（`git clone --no-hardlinks` ＋ detached checkout）→
+暫存複本的 `finalize-stage2-evidence.sh --verify-promotion-staging <真正 repo>/…/evidence --target evidence --judge`（錨點與判讀規則都是
+`base_commit` 那一版；驗證與判讀在同一個 Python 程序）→ stdout 印那一行 JSON（`verdict.verdict` 是 `B` 或 `C`）。結束碼 `0` ＝ 已判讀
+（B 與 C 都是 0）、`1` ＝ 拒絕判讀（⛔ 不輸出 B／C）。⛔ 不取鎖、⛔ 不寫真正 repo，可以重跑。規則見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
+
 
 ⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
 
@@ -1384,11 +1430,15 @@ replay 之後的檢查點不符、收到訊號 → ⛔ 不能 resume（⑦c 之�
 
 ⚠️ **測試**（`scripts/test-i074-stage2.sh`，由 `python/scripts/test.sh` 在 `SKIP_SHELL_TESTS` 那一段呼叫）：正式腳本複製到**合成的
 最小 repo**、以 sed 改掉常數區塊（鎖檔、sentinel、uid、label 鍵、信任根、base OID），並斷言與正式檔案**只差那幾行**——正式檔案
-⛔ 沒有執行期覆寫口；docker、runner、finalizer 都是 fake，git 是轉交真 git 的包裝。⛔ **絕不碰 `/run/lock`**、⛔ 絕不建立帶正式鍵的
+⛔ 沒有執行期覆寫口；docker、runner、finalizer 都是 fake（⑦c：fake finalizer 的終態帶真的 identity、驗證模式回報它讀到的 SHA），
+git 是轉交真 git 的包裝；晉升的 ignore 守門以**真 git** 查合成 repo 的 `.gitignore`。⛔ **絕不碰 `/run/lock`**、⛔ 絕不建立帶正式鍵的
 真實容器；結束時斷言 `/run/lock` 的 i074-stage2 項目與真正 repo 的 worktree 登記數都沒有變化。supervisor 的內部函式（sentinel 的
 schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python3 -m unittest`（`scripts/tests/test_i074_stage2_host.py`，Python 3.9）。
+⑦c 的晉升模組在 pytest 的 `test_i074_stage2_promote.py`（注入 git runner 與驗證模式——測試 image ⛔ 沒有 git），驗證模式的 Python 段與
+`--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
+在 `scripts/test-replay-args.sh`。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⚠️ ⑦b 改動待 review）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，

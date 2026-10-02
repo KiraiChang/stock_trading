@@ -1,9 +1,9 @@
 #!/bin/bash -p
-# I-074 Stage 2 ⑦b：⑩ 的正式入口（issue.md I-074 v29「八之一」～「八之二」＋「Stage 2 步驟 ⑦b 細部計畫 v1」）。
+# I-074 Stage 2 ⑦b／⑦c：⑩ 的正式入口（issue.md I-074 v29「八之一」～「八之三」＋「Stage 2 步驟 ⑦b／⑦c 細部計畫 v1」）。
 #
 #   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --freeze-record <path> --work-dir <repo 外、尚不存在的目錄>
 #   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --resume  --work-dir <dir>   # 只在 finalize／publish 回 1 之後
-#   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --promote --work-dir <dir>   # ⚠️ ⑦b：晉升是 stub，一律回 9
+#   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --promote --work-dir <dir>   # 依磁碟事實晉升（冪等）
 #
 # ⚠️ **正式命令一律直接執行本檔**（shebang 是 `#!/bin/bash -p`：⛔ 處理 BASH_ENV／ENV、⛔ 匯入環境裡的函式）；
 #    以 `bash <本檔>` 啟動會被拒絕（`$-` 不含 `p`）。
@@ -12,12 +12,14 @@
 #   入口（公開 argv）→ `exec /usr/bin/python3 -I scripts/lib/i074-stage2-supervisor.py`（取鎖、sentinel、subreaper）
 #   → 持鎖階段（`--internal-locked-stage`；真正 repo 的 HEAD 版）：建立執行目錄、複製 freeze record、clone 複本
 #   → 複本內 orchestrator（`--internal-in-clone`；複本 `repo_head` 版）：preflight 0～7 → replay → 分流 → finalize／publish
-#   → 依磁碟事實判終態 → 晉升（⑦b：stub，回 9）。
+#   → 依磁碟事實判終態 → 晉升（⑦c：python/scripts/i074_stage2_promote.py）。
 #
-# 端到端結束碼（⑦b 的範圍；完整的表見計畫書「二之十」）：
+# 端到端結束碼（完整的表見 ⑦b 計畫書「二之十」與 ⑦c 計畫書「二之五」）：
+#   0 ＝ 成功 archive 已在真正 repo durable；6 ＝ failed record 已在真正 repo durable（⚠️ 下一次 ⑩ 之前必須 commit）；
 #   1 ＝ 還沒有任何終態（含 preflight、replay 失敗；finalize／publish 回 1 時可以 --resume）；
-#   2 ＝ preflight 的 failed-record lookup 命中；8 ＝ --promote 模式在取得 sentinel 之前失敗（排除原因後可重跑）；
-#   9 ＝ --promote 模式遇到 sentinel，或已有終態而晉升尚未實作（stub）；128＋N ＝ 被訊號 N 中斷；
+#   2 ＝ preflight 的 failed-record lookup 命中；3 ＝ 某一層的 durability 未確認（重跑 --promote）；
+#   8 ＝ 本次沒有確認晉升完成、可以安全重跑 --promote（含 --promote 模式在取得 sentinel 之前失敗）；
+#   9 ＝ 需要人工判斷（--promote 模式遇到 sentinel、複本完整性、晉升的完整性漂移……）；128＋N ＝ 被訊號 N 中斷；
 #   137 ＝ supervisor 被 SIGKILL（sentinel 留下，**需要重開機**）。
 #
 # ⚠️ 測試**⛔ 不碰 `/run/lock`**：scripts/test-i074-stage2.sh 把本檔複製到隔離的 repo、以 sed 改掉下方「常數」區塊，
@@ -34,7 +36,7 @@ I074_PYTHON=/usr/bin/python3
 I074_BASH=/bin/bash
 # ── 常數結束 ────────────────────────────────────────────────────────────────────────
 
-# 結束碼（鏡像 supervisor；⑦c 才把 8、9 放進 replay_bundle/publish.py——「三」#2）
+# 結束碼（鏡像 supervisor 與 replay_bundle/publish.py 的唯一定義；本檔與 supervisor ⛔ 不 import repo 模組，由測試斷言相等）
 readonly EXIT_ABORT=1 EXIT_LOOKUP_HIT=2 EXIT_PROMOTION_FAILED=8 EXIT_PROMOTION_BLOCKED=9
 
 readonly SELF_REL=scripts/run-i074-stage2.sh
@@ -520,9 +522,23 @@ terminal_exists() {
   [ -d "$d" ] && [ ! -L "$d" ]
 }
 
-promote_stub() {
-  say "==> ⚠️ 晉升尚未實作（⑦c）：終態留在複本 $CLONE 內，⛔ 沒有搬進真正 repo"
-  exit "$EXIT_PROMOTION_BLOCKED"
+# 晉升（⑦c「二之三」）：第 1 步（/proc/locks、preflight 0、state-check）在這裡，第 2～7 步在 i074_stage2_promote.py
+# （背景執行 ＋ wait）。它的結束碼原樣成為端到端結束碼；⛔ 不是 0／3／6／8／9 一律視為 9（⛔ 不猜）。
+promote() {
+  local rc=0
+  checkpoint run,preflight || abort "晉升之前的檢查點不符"
+  say "==> 晉升：複本內的終態 → 真正 repo（log：$WORK/logs/promote.{out,err}）"
+  run_step promote "$I074_PYTHON" -B "$CLONE/python/scripts/i074_stage2_promote.py" --work-dir "$WORK" \
+    --real-repo "$I074_STAGE2_REAL_REPO" || rc=$?
+  case "$rc" in
+    0) say "==> 晉升完成：成功 archive 已在真正 repo durable" ;;
+    6) say "==> 晉升完成：failed record 已在真正 repo durable（⚠️ 開始下一次 ⑩ 之前必須先 commit）" ;;
+    3) err "晉升：某一層的 durability 未確認——重跑 --promote（log：$WORK/logs/promote.err）" ;;
+    8) err "晉升：本次沒有確認完成，排除原因之後可以安全重跑 --promote：$(tail -3 "$WORK/logs/promote.err")" ;;
+    9) err "晉升：需要人工判斷：$(tail -3 "$WORK/logs/promote.err")" ;;
+    *) err "晉升回了未定義的結束碼 $rc——⛔ 不猜，視為 9：$(tail -3 "$WORK/logs/promote.err")"; rc=$EXIT_PROMOTION_BLOCKED ;;
+  esac
+  exit "$rc"
 }
 
 finalize_or_publish() {  # 依 replay 的 rc；之後依磁碟事實判終態
@@ -538,7 +554,7 @@ finalize_or_publish() {  # 依 replay 的 rc；之後依磁碟事實判終態
   say "    $name 結束（rc=$rc）——⚠️ 終態依磁碟事實判定，⛔ 不看結束碼"
   if terminal_exists; then
     checkpoint run,preflight,replay_started,replay_done || abort "晉升之前的檢查點不符"
-    promote_stub
+    promote
   fi
   if [ "$rc" = 1 ]; then
     pf state-write-attempt --state-dir "$STATE" --work-dir "$WORK" --real-repo "$I074_STAGE2_REAL_REPO" --kind "$kind" \
@@ -568,12 +584,11 @@ clone_main() {
 
   case "$MODE" in
     promote)
-      checkpoint run || abort "晉升之前的檢查點不符"
-      promote_stub ;;
+      promote ;;
     resume)
       checkpoint run,preflight,replay_started,replay_done,attempt \
         || abort "--resume 的 state 不符（缺少、被改、或 image／identity 變了）——⛔ 不呼叫 finalizer；請改用 --promote"
-      if terminal_exists; then promote_stub; fi
+      if terminal_exists; then promote; fi
       say "==> --resume：沿用同一份凍結 patch 與 operational 輸出（⛔ 不 replay）"
       finalize_or_publish ;;
   esac

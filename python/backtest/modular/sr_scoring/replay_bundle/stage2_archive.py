@@ -41,7 +41,7 @@ from .artifacts import (
     validate_comparison_artifact,
     validate_report,
 )
-from .canonical import sha256_hex
+from .canonical import canonical_json_bytes, sha256_hex
 from .envcheck import (
     ENVCHECK_IDENTITY,
     ENVCHECK_LAYOUT,
@@ -530,6 +530,10 @@ class Stage2Verified:
     identity: dict[str, Any]
     terminal_outcome: int
     before_base_commit: str   # before source 的 provenance.base_commit（道 8 已綁到 Stage 1 after 的 base）
+    # ⚠️ ⑦c：已驗過、留在記憶體的 comparison 物件——`--judge` 直接判讀它，驗與判之間⛔ 沒有第二次讀取。
+    comparison: dict[str, Any]
+    # ⚠️ ⑦c：manifest 檔案 bytes 的 SHA（同一次讀取）——晉升以它綁定「驗過的」就是「經 fd 寫入／讀到的」那一份。
+    manifest_sha256: str
 
 
 def _check_canonical_entry(rel: str, entry: Mapping[str, Any], load) -> None:
@@ -698,7 +702,8 @@ def verify_stage2_graph(
             "patches.composed_sha256 ≠ before source 的 provenance.tooling_patch_sha256——⛔ 合成關係對不上"
         )
     return Stage2Verified(manifest=manifest, identity=identity, terminal_outcome=manifest["terminal_outcome"],
-                          before_base_commit=before_prov["base_commit"])
+                          before_base_commit=before_prov["base_commit"], comparison=comparison,
+                          manifest_sha256=manifest_load.stored_sha256)
 
 
 # ── shell 合成守門的交接（2026-09-24 review 高 1） ───────────────────────────
@@ -992,8 +997,16 @@ def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[s
                          dir_name: str | None = None) -> dict[str, Any]:
     """F1～F10 中⛔ 不需要 git 的各項（⚠️ F8-a 的合成守門在 shell）。回傳已驗證的 record。
 
-    ⚠️ 發布（對 staging，`dir_name` 給正式目錄名）、lookup 與 recovery 三處都呼叫這一支。
+    ⚠️ 發布（對 staging，`dir_name` 給正式目錄名）、lookup、recovery 與 ⑦c 的驗證模式四處都呼叫這一支。
     """
+    return _verify_failed_record_load(record_dir, envcheck_identity=envcheck_identity, base_commit=base_commit,
+                                      dir_name=dir_name)[0]
+
+
+def _verify_failed_record_load(record_dir: str | Path, *, envcheck_identity: Mapping[str, Any], base_commit: str,
+                               dir_name: str | None = None) -> tuple[dict[str, Any], str]:
+    """同 `verify_failed_record()`，另回傳 `failure_record.json` **檔案 bytes** 的 SHA——取自**同一次讀取**
+    （⑦c 的晉升以它綁定「驗過的」就是「經 fd 寫入／讀到的」那一份）。"""
     record_dir = Path(record_dir)
     actual = archive_file_set(record_dir)                                                    # F9
     expected = set(FAILED_LAYOUT) | {FAILED_RECORD_NAME}
@@ -1001,7 +1014,8 @@ def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[s
         raise ArtifactError(
             f"F9：failed record {record_dir.name} 的檔案集合不符：多={sorted(actual - expected)}、缺={sorted(expected - actual)}"
         )
-    record = load_canonical_evidence_artifact(record_dir / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
+    record_load = load_canonical_evidence_artifact(record_dir / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND)
+    record = record_load.parsed
     validate_failed_record(record)
     if record["run_identity"] != dict(envcheck_identity):                                    # F2-a
         raise ArtifactError(
@@ -1019,7 +1033,7 @@ def verify_failed_record(record_dir: str | Path, *, envcheck_identity: Mapping[s
         raise ArtifactError(f"F4：目錄名 {name} 與 record 內容不符——⛔ 改目錄名不能繞過 lookup")
     for rel in FAILED_LAYOUT:                                                                # F8
         _read_raw_member(record_dir, rel, record["files"][rel])
-    return record
+    return record, record_load.stored_sha256
 
 
 def publish_failed_record(*, python_root: str | Path, run_dir: str | Path,
@@ -1140,6 +1154,78 @@ def recover_failed_record(*, python_root: str | Path, record_dir: str | Path,
     return _record_summary(record_dir, record)
 
 
+# ── ⑦c：晉升與判讀器共用的唯讀驗證入口（「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」） ──────
+
+PROMOTION_EVIDENCE_TARGET = "evidence"
+_PROMOTION_FAILED_TARGET_RE = re.compile(r"^failed/(?P<name>[^/]+)$")
+PROMOTION_KIND_EVIDENCE = "evidence"
+PROMOTION_KIND_FAILED = "failed_record"
+
+
+def parse_promotion_target(target: object) -> str | None:
+    """封閉：`evidence` → `None`；`failed/<bundle_id>-<語意 SHA>` → record 目錄名。其他一律 `ArtifactError`。"""
+    if target == PROMOTION_EVIDENCE_TARGET:
+        return None
+    m = _PROMOTION_FAILED_TARGET_RE.match(target) if isinstance(target, str) else None
+    if m is None or not _FAILED_DIR_RE.match(m.group("name")):
+        raise ArtifactError(f"--target 只接受 evidence 或 failed/<bundle_id>-<語意 SHA>：{target!r}")
+    return m.group("name")
+
+
+def _identity_sha256(identity: Mapping[str, Any]) -> str:
+    """⑦b preflight 的 `identity_sha256` 是 XDG identity 檔的 SHA，而那個檔就是 canonical JSON——同一個定義。"""
+    return sha256_hex(canonical_json_bytes(dict(identity)))
+
+
+def verify_promotion_target(*, python_root: str | Path, path: str | Path, target: str,
+                            verified: VerifiedComposition, image_digest: str, base_commit: str,
+                            judge: bool = False) -> dict[str, Any]:
+    """⚠️ **唯讀**：對晉升的 staging 或目的地做與 recovery 同強度的完整驗證；⛔ 不 fsync、⛔ 不寫入。
+
+    錨點一律取自 `python_root`（本腳本所在的 repo：⑩ 的複本、判讀器的暫存複本）；identity 用 `path` 內
+    封存的那一份（evidence）或 envcheck 的那一份（failed record，F2-a）。
+    成功 archive 另驗**信任根的綁定**：`finalizer_provenance.base_commit` ＝ `base_commit`（本 repo 的 HEAD）。
+    `judge=True`（只限 evidence）：驗證通過之後，在**同一個程序**判讀 `verify_stage2_graph()` 剛驗過的
+    comparison 物件——⛔ 沒有第二次讀取（「三」#9）。
+    回傳**封閉 key set** 的結果（「二之二」）；兩個 SHA 都是該檔案 bytes 的 SHA。
+    """
+    path = Path(path)
+    name = parse_promotion_target(target)
+    if judge and name is not None:
+        raise ArtifactError("--judge 只限 --target evidence")
+    if path.is_symlink() or not path.is_dir():
+        raise ArtifactError(f"--verify-promotion-staging 的路徑必須是目錄（⛔ 不得是 symlink）：{path}")
+    anchor, envcheck = _load_trust_anchors(python_root, None)
+    if name is None:
+        graph = verify_stage2_graph(path, anchor=anchor, envcheck=envcheck)
+        check_verified_composition(verified, base_commit=graph.before_base_commit,
+                                   patches=graph.manifest["patches"], label="verify-promotion-staging")
+        trust_root = graph.manifest["finalizer_provenance"]["base_commit"]
+        if trust_root != base_commit:
+            raise ArtifactError(
+                f"信任根的綁定：finalizer_provenance.base_commit {trust_root} ≠ 驗證程式碼的 HEAD {base_commit}"
+                "——⛔ 不放行（判讀器取錨點的信任根）"
+            )
+        if graph.identity["expected_image_id"] != image_digest:
+            raise ArtifactError(f"封存的 identity 記的 image ≠ 本次執行的 {image_digest}")
+        out = {"kind": PROMOTION_KIND_EVIDENCE, "target": target, "manifest_sha256": graph.manifest_sha256,
+               "base_commit": base_commit, "identity_sha256": _identity_sha256(graph.identity)}
+        if judge:
+            from .stage2_verdict import judge_comparison
+
+            out["verdict"] = judge_comparison(graph.comparison)
+        return out
+    record, record_sha256 = _verify_failed_record_load(path, envcheck_identity=envcheck.identity,
+                                                       base_commit=anchor.after_base_commit, dir_name=name)
+    check_verified_composition(verified, base_commit=record["provenance"]["base_commit"], patches=record["patches"],
+                               label="verify-promotion-staging",
+                               semantic_sha256=record["counterfactual_semantic_sha256"])
+    if record["run_identity"]["expected_image_id"] != image_digest:
+        raise ArtifactError(f"failed record 的 run_identity 記的 image ≠ 本次執行的 {image_digest}")
+    return {"kind": PROMOTION_KIND_FAILED, "target": target, "record_sha256": record_sha256,
+            "base_commit": base_commit, "identity_sha256": _identity_sha256(record["run_identity"])}
+
+
 # ── 合成守門的宣告值（給 shell，⛔ 不是 validator） ──────────────────────────
 
 def _claims(base_commit: object, counterfactual: object, tooling: object, composed: object) -> dict[str, str]:
@@ -1153,13 +1239,41 @@ def _claims(base_commit: object, counterfactual: object, tooling: object, compos
             "tooling_patch_sha256": tooling, "composed_sha256": composed}
 
 
+def _archive_claims(root: Path) -> dict[str, str]:
+    patches = load_canonical_evidence_artifact(root / STAGE2_MANIFEST_NAME, STAGE2_MANIFEST_KIND).parsed["patches"]
+    prov = load_canonical_evidence_artifact(root / COMPARISON, COMPARISON_KIND).parsed["provenance"]
+    return _claims(prov.get("base_commit"), patches.get("counterfactual_patch_sha256"),
+                   patches.get("tooling_patch_sha256"), patches.get("composed_sha256"))
+
+
+def _failed_record_claims(record_dir: Path) -> dict[str, str]:
+    record = load_canonical_evidence_artifact(record_dir / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
+    patches = record.get("patches") or {}
+    claims = _claims((record.get("provenance") or {}).get("base_commit"),
+                     patches.get("counterfactual_patch_sha256"), patches.get("tooling_patch_sha256"),
+                     patches.get("composed_sha256"))
+    # ⚠️ ⑦a：record **宣告的**語意 SHA——shell 從 record 內的實際 patch 重算並比對它，相等才注入。
+    semantic = record.get("counterfactual_semantic_sha256")
+    validate_semantic_sha256(semantic, "record 宣告的 counterfactual_semantic_sha256")
+    return {**claims, "counterfactual_semantic_sha256": semantic}
+
+
 def patch_claims(*, mode: str, python_root: str | Path, run_dir: str | Path | None = None,
-                 record_dir: str | Path | None = None) -> dict[str, str]:
+                 record_dir: str | Path | None = None, promotion_path: str | Path | None = None,
+                 target: str | None = None) -> dict[str, str]:
     """shell 合成守門要比對的**宣告值**：`{base_commit, counterfactual／tooling／composed 的 SHA}`。
 
     ⚠️ 這裡只「取出宣告」，⛔ 不是驗證——shell 用它們在隔離 worktree 重建並比對，之後 Python 段
     仍會完整驗證全部內容。只讀小檔（comparison、中繼檔、manifest、record），⛔ 不讀全量 before source。
+    ⚠️ ⑦c 的 `promotion` 模式：`promotion_path`（staging 或目的地）＋ `target`——evidence 同 `archive`、
+    failed 同 `failed-record`（多回宣告的語意 SHA）；路徑規則由 shell 守門，這裡只拒絕 symlink 與非目錄。
     """
+    if mode == "promotion":
+        name = parse_promotion_target(target)
+        root = Path(promotion_path) if promotion_path is not None else None
+        if root is None or root.is_symlink() or not root.is_dir():
+            raise ArtifactError(f"promotion 的路徑必須是目錄（⛔ 不得是 symlink）：{promotion_path}")
+        return _archive_claims(root) if name is None else _failed_record_claims(root)
     if mode == "finalize":
         run_dir = Path(run_dir)
         prov = load_canonical_evidence_artifact(run_dir / OPERATIONAL_COMPARISON, COMPARISON_KIND).parsed["provenance"]
@@ -1175,25 +1289,13 @@ def patch_claims(*, mode: str, python_root: str | Path, run_dir: str | Path | No
                        sha256_hex(_read_frozen_patch(run_dir, FROZEN_TOOLING_PATCH)),
                        prov.get("tooling_patch_sha256"))
     if mode == "archive":
-        root = resolve_repo_path(python_root, STAGE2_EVIDENCE_ROOT_PATH)
-        patches = load_canonical_evidence_artifact(root / STAGE2_MANIFEST_NAME, STAGE2_MANIFEST_KIND).parsed["patches"]
-        prov = load_canonical_evidence_artifact(root / COMPARISON, COMPARISON_KIND).parsed["provenance"]
-        return _claims(prov.get("base_commit"), patches.get("counterfactual_patch_sha256"),
-                       patches.get("tooling_patch_sha256"), patches.get("composed_sha256"))
+        return _archive_claims(resolve_repo_path(python_root, STAGE2_EVIDENCE_ROOT_PATH))
     if mode == "failed-record":
-        record = load_canonical_evidence_artifact(Path(record_dir) / FAILED_RECORD_NAME, FAILED_ATTEMPT_KIND).parsed
-        patches = record.get("patches") or {}
-        claims = _claims((record.get("provenance") or {}).get("base_commit"),
-                         patches.get("counterfactual_patch_sha256"), patches.get("tooling_patch_sha256"),
-                         patches.get("composed_sha256"))
-        # ⚠️ ⑦a：record **宣告的**語意 SHA——shell 從 record 內的實際 patch 重算並比對它，相等才注入。
-        semantic = record.get("counterfactual_semantic_sha256")
-        validate_semantic_sha256(semantic, "record 宣告的 counterfactual_semantic_sha256")
-        return {**claims, "counterfactual_semantic_sha256": semantic}
+        return _failed_record_claims(Path(record_dir))
     raise ArtifactError(f"未知的 claims 模式：{mode!r}")
 
 
-# ── CLI（`scripts/finalize-stage2-evidence.sh` 的 ③d 五種模式） ─────────────
+# ── CLI（`scripts/finalize-stage2-evidence.sh` 的 ③d 五種模式 ＋ ⑦c 的驗證模式） ─────────────
 
 class Stage2UsageError(ValueError):
     """CLI 用法錯誤。"""
@@ -1210,12 +1312,20 @@ STAGE2_INJECTED_ARGS = (
 # Python 段之後由 shell 做，⛔ 不接受。
 VERIFIED_COMPOSITION_ARGS = ("verified_patch_base", "verified_counterfactual_sha256",
                              "verified_tooling_sha256", "verified_composed_sha256")
-MODES_WITH_COMPOSITION = ("finalize", "recover_durability", "publish_failed_record", "recover_failed_record")
+MODES_WITH_COMPOSITION = ("finalize", "recover_durability", "publish_failed_record", "recover_failed_record",
+                          "verify_promotion_staging")
 # ⚠️ ⑦a：shell 由實際 patch 重算的語意 SHA。⚠️ **只有**這兩種模式必須帶（failed record 以它為目錄鍵）；
 # 成功 archive ⛔ 不存語意 SHA，check 的命中判定在 shell——其餘模式帶了就拒。
+# ⚠️ ⑦c 的驗證模式依 `--target`：failed 必須帶、evidence 帶了就拒（`run_stage2()` 另外處理）。
 MODES_WITH_SEMANTIC = ("publish_failed_record", "recover_failed_record")
 STAGE2_MODES = ("finalize", "recover_durability", "publish_failed_record", "check_failed_record",
-                "recover_failed_record")
+                "recover_failed_record", "verify_promotion_staging")
+# ⚠️ ⑦c：⛔ 不靜默採用最後一個（argparse 的預設）——它們決定驗哪一份、怎麼判讀。
+_SINGLE_USE_ARGS = ("--verify-promotion-staging", "--target", "--judge")
+
+
+class _CanonicalOutput(dict):
+    """⑦c 的驗證模式：stdout 印**一行 canonical JSON**（封閉 key set，晉升與判讀器據此綁定）。"""
 
 
 def assert_stage2_arg_ownership(argv: Sequence[str]) -> None:
@@ -1223,6 +1333,10 @@ def assert_stage2_arg_ownership(argv: Sequence[str]) -> None:
         count = sum(1 for a in argv if a == injected or a.startswith(injected + "="))
         if count > 1:
             raise Stage2UsageError(f"{injected} 出現 {count} 次——它只能由官方腳本注入。⛔ 不靜默採用最後一個。")
+    for single in _SINGLE_USE_ARGS:
+        count = sum(1 for a in argv if a == single or a.startswith(single + "="))
+        if count > 1:
+            raise Stage2UsageError(f"{single} 出現 {count} 次——⛔ 不靜默採用最後一個。")
 
 
 def build_stage2_parser():
@@ -1234,6 +1348,9 @@ def build_stage2_parser():
     parser.add_argument("--publish-failed-record", action="store_true")
     parser.add_argument("--check-failed-record", action="store_true")
     parser.add_argument("--recover-failed-record", default=None, metavar="RECORD_DIR")
+    parser.add_argument("--verify-promotion-staging", default=None, metavar="PATH")
+    parser.add_argument("--target", default=None)
+    parser.add_argument("--judge", action="store_true")
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--run-identity", default=None)
     parser.add_argument("--python-root", required=True)
@@ -1263,10 +1380,23 @@ def run_stage2(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
         ("finalize", args.finalize), ("recover_durability", args.recover_durability),
         ("publish_failed_record", args.publish_failed_record), ("check_failed_record", args.check_failed_record),
         ("recover_failed_record", args.recover_failed_record is not None),
+        ("verify_promotion_staging", args.verify_promotion_staging is not None),
     ) if on]
     if len(chosen) != 1:
         raise Stage2UsageError(f"模式旗標必須恰好給一個，實際 {chosen}")
     mode = chosen[0]
+    promotion_failed = False
+    if mode == "verify_promotion_staging":
+        if args.target is None:
+            raise Stage2UsageError("--verify-promotion-staging 需要 --target")
+        try:
+            promotion_failed = parse_promotion_target(args.target) is not None
+        except ArtifactError as exc:
+            raise Stage2UsageError(str(exc)) from exc
+        if args.judge and promotion_failed:
+            raise Stage2UsageError("--judge 只限 --target evidence")
+    elif args.target is not None or args.judge:
+        raise Stage2UsageError("--target／--judge 只屬於 --verify-promotion-staging")
     needs_run = mode in ("finalize", "publish_failed_record")
     if needs_run and (not args.run_dir or not args.run_identity):
         raise Stage2UsageError(f"--{mode.replace('_', '-')} 需要 --run-dir 與 --run-identity")
@@ -1295,11 +1425,12 @@ def run_stage2(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
     elif given:
         raise Stage2UsageError(f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-*（F8-a 在 Python 段之後由 shell 做）")
     semantic = args.verified_counterfactual_semantic_sha256
-    if mode in MODES_WITH_SEMANTIC and semantic is None:
+    needs_semantic = mode in MODES_WITH_SEMANTIC or promotion_failed
+    if needs_semantic and semantic is None:
         raise Stage2UsageError(
             f"--{mode.replace('_', '-')} 需要 shell 注入的 --verified-counterfactual-semantic-sha256（failed record 的目錄鍵）"
         )
-    if mode not in MODES_WITH_SEMANTIC and semantic is not None:
+    if not needs_semantic and semantic is not None:
         raise Stage2UsageError(
             f"--{mode.replace('_', '-')} ⛔ 不接受 --verified-counterfactual-semantic-sha256（只屬於 failed record 的發布與 recovery）"
         )
@@ -1339,6 +1470,12 @@ def run_stage2(argv: Sequence[str]) -> tuple[int, dict[str, Any]]:
     if mode == "check_failed_record":
         result = check_failed_records(python_root=args.python_root)
         return 0, {"mode": mode, **result}
+    if mode == "verify_promotion_staging":
+        # ⚠️ 唯讀：⛔ 不建 provenance、⛔ 不 fsync、⛔ 不寫入；結束碼只有 0（有效）與 1（無效或用法錯誤）。
+        out = verify_promotion_target(python_root=args.python_root, path=args.verify_promotion_staging,
+                                      target=args.target, verified=verified, image_digest=args.image_digest,
+                                      base_commit=args.base_commit, judge=args.judge)
+        return 0, _CanonicalOutput(out)
     summary = recover_failed_record(python_root=args.python_root, record_dir=args.recover_failed_record,
                                     verified=verified)
     return 1, {"mode": mode, "recovered": summary}
@@ -1359,7 +1496,10 @@ def main(argv=None) -> int:
     except (Stage2UsageError, ValueError, OSError) as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ABORT
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    if isinstance(result, _CanonicalOutput):
+        print(canonical_json_bytes(dict(result)).decode("utf-8"))
+    else:
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return rc
 
 

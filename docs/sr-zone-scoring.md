@@ -3137,7 +3137,7 @@ sample 依 key 排序取前 `min(20, count)` 個、⛔ 不重複，每項恰好
 （2026-09-24，Stage 2 image，13,417 列、156 列 cohort）：finalize 峰值 **299 MiB**、recovery **314 MiB**、
 lookup **274 MiB**，都在 450 MiB 以內。
 
-#### I-074 Stage 2 的反事實 replay 路徑與 tooling patch（2026-09-30 實作 ⑦a；⚠️ 待 review）
+#### I-074 Stage 2 的反事實 replay 路徑與 tooling patch（2026-09-30 實作 ⑦a；✅ review 通過）
 
 ⚠️ **範圍**：⑩ 的 before 正式趟在 replay 程序內做的事（Stage 2 計畫書 v3 比較模型的執行期那一半）；證據層見上一節。
 計畫與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑦ 總綱 v1」與「Stage 2 步驟 ⑦a 細部計畫 v1」。
@@ -3184,6 +3184,78 @@ bundle_id 由內容決定：`b1_20260901_1d_de3ab843_a7c9ffb4`），在 `e1cbbbd
 comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有 6 筆候選（與 D+1 cohort 在該期間的 6 筆逐 key 相同），
 反事實側 6 筆全數翻轉、其餘 159 列逐列相同。⚠️ 這份衍生 bundle ⛔ 不是證據（佔位 provenance 只標示身分，
 `load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
+
+#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；⚠️ 待 review）
+
+⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
+`issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
+[`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的正式執行程序」。
+
+**唯讀的驗證入口**（`finalize-stage2-evidence.sh --verify-promotion-staging <path> --target <t> [--judge]`，Python 段
+`stage2_archive.verify_promotion_target()`）：真正 repo 由本腳本所在 repo 的 `origin` 推導（⛔ 沒有路徑參數）；`<path>` 只接受真正
+repo 的 `python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）或目的地本身（canonical、⛔ 不得是 symlink、⛔ 不接受本 repo
+內的路徑）；錨點（Stage 1、`envcheck/`）一律取自本 repo；`<path>` 與兩個錨點唯讀掛載、⛔ 不 fsync、⛔ 不寫入。強度與 recovery 相同：
+shell 的合成守門（failed 另驗「重算的語意 SHA ＝ record 宣告值 ＝ target 名稱裡的 SHA」）→ evidence 的十六道全圖／failed record 的
+F1～F10（F4 以**目的地名稱**驗）→ `--verified-*` 交接 → ⚠️ **信任根的綁定**：`finalizer_provenance.base_commit` ＝ 本 repo 的 HEAD
+（判讀器取錨點的信任根）。輸出是一行 canonical JSON、封閉 key set（evidence：`kind`、`target`、`manifest_sha256`、`base_commit`、
+`identity_sha256`，`--judge` 另加 `verdict`；failed：以 `record_sha256` 取代 `manifest_sha256`），兩個 SHA 都是**該檔案 bytes** 的 SHA；
+結束碼只有 0／1。`--judge` 只限 evidence：判讀直接吃 `verify_stage2_graph()` 剛驗過、留在記憶體的 comparison 物件
+（`Stage2Verified.comparison`）——驗與判之間⛔ 沒有第二次讀取。
+
+**晉升的契約**（`python/scripts/i074_stage2_promote.py`；判定順序見 development-workflow）：
+
+- **路徑錨定**：完整路徑的 `O_NOFOLLOW` 只保護最後一層，所以每一個檔案系統操作都錨定在持有的 fd 上——兩個 repo 根各開一次，
+  之下逐層 `openat(…, O_DIRECTORY | O_NOFOLLOW)`；stat、mkdir、開檔、刪除、statvfs、rename（`publish.rename_noreplace_at()`）
+  全部用 `dir_fd`。rename 前後各做一次**鏈檢查**（從根路徑重走，每層的裝置與 inode ＝ 持有的 fd；rename 之後目的地名稱必須解析到
+  staging 的 inode）。
+- **封閉 inventory**：只接受一般檔案（`st_nlink` ＝ 1）與目錄；之後每次開啟都以 `fstat` 核對裝置、inode 與型別。
+- **兩組 ignore 守門**（`git check-ignore --no-index -z --stdin`；⛔ 不加 `-v`——它連否定規則的命中也回 0；以**成員路徑**查——只對目錄
+  生效的規則對還不存在的目錄查不到）：目的地的成員⛔ 不得被忽略（6a／6b 共用的第 5b 步；目的地已被追蹤時過廣規則照樣擋，刻意從嚴）；
+  staging 的成員必須**全部**被忽略（6b，建 staging 之前）。
+- **驗證模式的綁定**：驗證模式在 docker 內只能吃路徑，所以它輸出的 manifest／record SHA 必須 ＝ 晉升**經 fd** 寫入（6b）或讀到（6a）的
+  那一份——封閉 layout ＋ 逐項 SHA 讓「同一份 manifest／record 且驗證通過」等於成員逐位元相同。
+- **收尾重算**：6b 在 rename 之前、6a 在驗證之後，經持有的 fd 重算每檔 SHA，與比對時的值不同 → 9。
+- **目錄項目的 durability**（⑦c 實作第一輪 review）：failed record 的 `failed/` 不論新建或既有，rename 之前都 fsync `i074_stage2/`（上一次可能建了 `failed/` 卻在 fsync 失敗後回 8）；跨目錄 rename 之後兩個 parent（`failed/` 與 `i074_stage2/`）都 fsync，任一失敗 → 3；6a 的 failed record 同樣另 fsync `i074_stage2/`。
+- **錯誤清理只刪自己的 inode**（⑦c 實作第一～三輪 review）：rename 之前失敗時，清理途中的每個時點——清理之前、stat 與開啟之間、遞迴刪完子項目之後的 rmdir 之前、rmdir 本身——staging 名稱解析到的⛔ 不是建立時的 inode（含換成 symlink 或一般檔案）、或名稱已不存在（staging 被搬走或刪掉——⛔ 不等於已清除）就⛔ 不刪換進來的東西、保留現場、回 9（⛔ 不沿用代表「可安全重跑」的 8）。第 2 步清孤兒 staging 時名稱不存在仍是冪等的 no-op。
+- **結束碼的分類**：inventory 之後的任何漂移、驗證不過、綁定或鏈檢查不符、ignore 守門不通過、rename 的 `EEXIST`／`ENOTEMPTY` 以外的
+  錯誤（含 `EXDEV`、`EINVAL`、`ENOSYS`）→ **9**；只有在已核對的 fd 上 `fsync()` 本身失敗 → **3**；只有目的端的容量與寫入 I/O
+  （空間預檢、`ENOSPC`／`EDQUOT`／`EIO`）與 rename 的 `EEXIST`／`ENOTEMPTY` → **8**。未列出的例外一律 9。
+- ⚠️ **照實的界線**：rename 只能以名稱指定來源；已持有的父目錄被搬走時 record 會落在它的新位置（可能在 repo 外）——兩者只能由鏈檢查
+  **事後**變成 9、⛔ 無法撤銷；錯誤清理的 rmdir 同樣只能以名稱指定——最後一次核對之後才換成**空**目錄時會刪掉那個空目錄（沒有內容遺失），之後以仍開著的 fd 的 `st_nlink` ≠ 0 事後變成 9（ext4／overlayfs 實測：刪掉的是自己時為 0）；收尾重算之後的原地改寫晉升偵測不到（判讀器與再跑 `--promote` 都會做完整驗證）；repo 根以上的路徑不在
+  保證內。所以 ⑩ 期間另有**操作契約**（development-workflow）。
+- `replay_bundle/publish.py` 的 rename 分三層：共用的私有 `_encode_rename_paths()`（路徑含 NUL 一律 `ValueError`——`c_char_p` 會在 NUL 截斷）與
+  `_raise_for_rename()`（errno 對應）；`_load_renameat2()` **維持兩參數**（`AT_FDCWD`、完整路徑——`e1cbbbd` 的測試以兩參數的 fake 替換它），
+  dirfd 版是 `_load_renameat2_at()`；公開的兩個函式：`rename_noreplace_at()`（兩個名稱都必須是單一 component、兩個 fd 都必須 `type(fd) is int and fd >= 0`）、
+  `rename_noreplace()`（完整路徑，既有呼叫點不變）。晉升的 8、9 也定義在這裡（唯一定義；supervisor 與 orchestrator 鏡像，測試斷言相等）。
+
+**B／C 判讀規則**（`replay_bundle/stage2_verdict.py`，唯一的定義處；只有純函式 `judge_row()`／`judge_comparison()`）——
+「關閉條件」的唯一 artifact 判讀矩陣（2026-09-22 實測後定案）。分類只看 **after 的 `action_state`**（`market_action` ⛔ 不在 replay row
+裡、⛔ 不得當 classifier）：`HOLD` → 非 AVOID；`AVOID` → AVOID；其他 → C。
+
+| 欄位（before → after） | 非 AVOID | AVOID |
+|---|---|---|
+| `lifecycle_phase` | `TESTING`／`CONFIRMED` → `CONTINUATION` | 同左 |
+| `market_bias` | `BULLISH_BIAS` → `BULLISH_CONTINUATION` | `BEARISH_BIAS` → `BEARISH_BIAS`（不變；`_market_bias()` 在 AVOID 時短路） |
+| `action_state`（＝ 兩側各自的 `position_action_condition.state`） | before `TESTING`：`CONDITIONAL_HOLD` → `HOLD`；before `CONFIRMED`：`HOLD` → `HOLD` | `AVOID` → `AVOID` |
+| `final_entry_state` | `BLOCKED` → `BLOCKED` | 同左 |
+| `rr_decoupling_candidate` | `false` → `true` | 同左 |
+
+另外 `differences` ⊆ {`lifecycle_phase`、`market_bias`、`action_state`、`position_action_condition`、`rr_decoupling_candidate`}（top-level
+`position_action` 有變 → C），`position_action_condition` 兩側只有 `state` 不同。**任一列 C → 整體 C**（⛔ 不以多數決）；comparison
+0 列 → 拒絕判讀（⛔ 不以空集合判 B）。⚠️ `entry_permission_state` 與 `market_state` ⛔ 不在 artifact 裡、⛔ 不是判讀條件。
+
+輸出是封閉 schema：頂層恰好 `schema`（`i074_stage2_verdict/v1`）、`verdict`、`row_count`、`c_row_count`、`rows`；每列恰好 `symbol`、
+`timeframe`、`as_of`、`class`（`NON_AVOID`／`AVOID`／`UNCLASSIFIED`）、`verdict`、`reasons`（字典序、去重；B ⇔ 空陣列）；列順序 ＝
+comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（before／after 各自必備的 `lifecycle_phase`、`market_bias`、`action_state`、
+`final_entry_state`（`str`）、`rr_decoupling_candidate`（`bool`）、`position_action_condition`（含 `str` 的 `state`）缺欄、`null` 或型別不符——
+出現時只有它）、`POSITION_ACTION_CHANGED`、`DIFF_FIELD_NOT_ALLOWED`、`POSITION_ACTION_CONDITION_NON_STATE_DIFF`、
+`RR_DECOUPLING_NOT_FALSE_TO_TRUE`、`ACTION_STATE_UNCLASSIFIED`（⛔ 不再做依分類的兩項）、`CONDITION_STATE_MISMATCH`、
+`LIFECYCLE_PHASE_UNEXPECTED`、`MARKET_BIAS_UNEXPECTED`、`ACTION_STATE_TRANSITION_UNEXPECTED`（before 不在兩格時只記上一項）、
+`FINAL_ENTRY_STATE_NOT_BLOCKED`；除了這兩個略過，每一列的檢查全部執行、命中的全部記下。
+
+**判讀器**（`scripts/judge-i074-stage2.sh`，⛔ 沒有參數）：以 archive 的 `finalizer_provenance.base_commit` 建暫存複本，在複本裡執行驗證
+模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
+`base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 

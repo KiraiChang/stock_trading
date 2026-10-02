@@ -1340,6 +1340,9 @@ def test_before_source_envelope():
     ("publish_failed_record_argv", "publish_failed_record", 1),
     ("check_failed_record_argv", "check_failed_record", 0),
     ("recover_failed_record_argv", "recover_failed_record", 1),
+    ("verify_promotion_staging_evidence_argv", "verify_promotion_staging", 0),
+    ("verify_promotion_staging_failed_argv", "verify_promotion_staging", 0),
+    ("verify_promotion_staging_evidence_judge_argv", "verify_promotion_staging", 0),
 ])
 def test_bg_fixture_argv_is_accepted_by_the_python_cli(monkeypatch, key, mode, rc):
     fixture = Path(__file__).resolve().parents[4] / "scripts" / "fixtures" / "stage2_finalizer_argv.json"
@@ -1348,7 +1351,9 @@ def test_bg_fixture_argv_is_accepted_by_the_python_cli(monkeypatch, key, mode, r
              "<BASE_COMMIT>": "a" * 40, "<TOOLING_PATCH_SHA256>": "b" * 64, "<RUNNER_SHA256>": "c" * 64,
              "<RECORD_DIR>": "/d", "<VERIFIED_PATCH_BASE>": BASE,
              "<VERIFIED_COUNTERFACTUAL_SHA256>": "1" * 64, "<VERIFIED_TOOLING_SHA256>": "2" * 64,
-             "<VERIFIED_COMPOSED_SHA256>": "3" * 64, "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "4" * 64}
+             "<VERIFIED_COMPOSED_SHA256>": "3" * 64, "<VERIFIED_COUNTERFACTUAL_SEMANTIC_SHA256>": "4" * 64,
+             "<PROMOTION_PATH>": "/real/python/baselines/i074_stage2/.promote-staging-0123456789abcdef",
+             "<FAILED_TARGET>": f"failed/{BUNDLE}-{'4' * 64}"}
     argv = [subst.get(t, t) for t in doc[key]]
     assert argv[:3] == ["python", "-m", "backtest.modular.sr_scoring.replay_bundle.stage2_archive"]
     called = []
@@ -1359,7 +1364,13 @@ def test_bg_fixture_argv_is_accepted_by_the_python_cli(monkeypatch, key, mode, r
     monkeypatch.setattr(sa, "check_failed_records",
                         lambda **kw: called.append("check_failed_record") or {"base_commit": BASE, "records": []})
     monkeypatch.setattr(sa, "recover_failed_record", lambda **kw: called.append("recover_failed_record") or {})
+    seen = {}
+    monkeypatch.setattr(sa, "verify_promotion_target",
+                        lambda **kw: seen.update(kw) or called.append("verify_promotion_staging") or {})
     got_rc, _ = sa.run_stage2(argv[3:])
+    if mode == "verify_promotion_staging":
+        assert seen["judge"] == ("judge" in key)
+        assert (seen["verified"].counterfactual_semantic_sha256 is None) == ("failed" not in key)
     assert (called, got_rc) == ([mode], rc)
     # ⚠️ 除了 check，四種模式的 fixture 都必須帶交接值（⛔ 漏了就等於沒有交接）。
     assert ("--verified-composed-sha256" in argv) == (mode != "check_failed_record")
@@ -1479,3 +1490,212 @@ def test_bounded_sample_matches_full_sort_on_shuffled_input():
         assert len(sample) <= 7
     assert sample.count == 500
     assert [s["k"] for s in sample.samples()] == sorted(keys)[:7]
+
+
+# ── ⑦c：唯讀的驗證入口 `verify_promotion_target()` 與 `--judge`（「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」） ──
+#
+# 路徑規則（只接受真正 repo 的 staging 或目的地）在 shell；這裡驗 Python 段：與 recovery 同強度的完整驗證、
+# 信任根的綁定、封閉的輸出 key set、`--judge` 在同一個程序判讀**剛驗過的那一個** comparison 物件。
+
+import shutil  # noqa: E402
+
+from ..replay_bundle import stage2_verdict as sv  # noqa: E402
+
+_STAGING_NAME = ".promote-staging-0123456789abcdef"
+
+
+def _promo_verified(env, path, target):
+    """比照 shell：`--promotion` 取宣告值（shell 驗過之後以 `--verified-*` 交給 Python）。"""
+    claims = sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=path, target=target)
+    semantic = claims.pop("counterfactual_semantic_sha256", None)
+    return sa.VerifiedComposition(**claims, counterfactual_semantic_sha256=semantic)
+
+
+def _verify_target(env, path, target, **overrides):
+    kwargs = {"python_root": env.root, "path": path, "target": target, "image_digest": NEW_IMG,
+              "base_commit": BASE, "judge": False}
+    kwargs.update(overrides)
+    if "verified" not in kwargs:
+        kwargs["verified"] = _promo_verified(env, path, target)
+    return sa.verify_promotion_target(**kwargs)
+
+
+def _identity_sha():
+    return sha256_hex(canonical_json_bytes(tec._identity()))
+
+
+def test_promotion_evidence_destination_and_staging_copy(published):
+    env = published
+    dest = _archive(env)
+    staging = env.tmp / _STAGING_NAME
+    shutil.copytree(dest, staging)
+    want = {"kind": "evidence", "target": "evidence",
+            "manifest_sha256": sha256_hex((dest / sa.STAGE2_MANIFEST_NAME).read_bytes()),
+            "base_commit": BASE, "identity_sha256": _identity_sha()}
+    assert _verify_target(env, dest, "evidence") == want
+    assert _verify_target(env, staging, "evidence") == want          # 逐位元相同的 staging：同一份結果
+
+
+def test_promotion_failed_record_uses_the_target_name_for_f4(recorded):
+    env, root = recorded
+    target = f"failed/{root.name}"
+    staging = env.tmp / _STAGING_NAME
+    shutil.copytree(root, staging)
+    want = {"kind": "failed_record", "target": target,
+            "record_sha256": sha256_hex((root / sa.FAILED_RECORD_NAME).read_bytes()),
+            "base_commit": BASE, "identity_sha256": _identity_sha()}
+    assert _verify_target(env, root, target) == want
+    assert _verify_target(env, staging, target) == want              # staging 的目錄名不同：F4 以目的地名稱驗
+    other = f"failed/{BUNDLE}-{'5' * 64}"
+    with pytest.raises(ArtifactError):
+        _verify_target(env, staging, other, verified=_promo_verified(env, staging, target))
+
+
+@pytest.mark.parametrize("case", ["member_bytes", "manifest", "trust_root", "image", "symlink", "not_dir"])
+def test_m_promotion_verification_rejects(published, case):
+    env = published
+    dest = _archive(env)
+    kwargs = {}
+    verified = _promo_verified(env, dest, "evidence")
+    path = dest
+    if case == "member_bytes":
+        (dest / sa.REPORT).write_bytes((dest / sa.REPORT).read_bytes() + b"x")
+    elif case == "manifest":
+        manifest = _manifest(env)
+        manifest["extra"] = 1
+        _write_manifest(env, manifest)
+    elif case == "trust_root":
+        kwargs["base_commit"] = "f" * 40                     # ≠ finalizer_provenance.base_commit
+    elif case == "image":
+        kwargs["image_digest"] = OLD_IMG
+    elif case == "symlink":
+        path = env.tmp / "link"
+        path.symlink_to(dest)
+    else:
+        path = dest / sa.STAGE2_MANIFEST_NAME
+    with pytest.raises(ArtifactError, match="信任根" if case == "trust_root" else None):
+        _verify_target(env, path, "evidence", verified=verified, **kwargs)
+
+
+def test_judge_reads_the_comparison_once_and_judges_the_verified_object(published, monkeypatch):
+    env = published
+    dest = _archive(env)
+    verified = _promo_verified(env, dest, "evidence")             # shell 段（另一個程序）的宣告值：先取
+    reads = []
+    real_load = sa.load_canonical_evidence_artifact
+
+    def counting(path, kind, *a, **k):
+        if Path(path) == dest / sa.COMPARISON:
+            reads.append(kind)
+        return real_load(path, kind, *a, **k)
+
+    graphs, judged = [], []
+    real_graph = sa.verify_stage2_graph
+    real_judge = sv.judge_comparison
+    monkeypatch.setattr(sa, "load_canonical_evidence_artifact", counting)
+    monkeypatch.setattr(sa, "verify_stage2_graph", lambda *a, **k: graphs.append(real_graph(*a, **k)) or graphs[-1])
+    monkeypatch.setattr(sv, "judge_comparison", lambda c: judged.append(c) or real_judge(c))
+    out = _verify_target(env, dest, "evidence", judge=True, verified=verified)
+    assert reads == [sa.COMPARISON_KIND]                           # ⚠️ 驗與判之間⛔ 沒有第二次讀取
+    assert len(graphs) == 1 and len(judged) == 1 and judged[0] is graphs[0].comparison
+    assert set(out) == {"kind", "target", "manifest_sha256", "base_commit", "identity_sha256", "verdict"}
+    verdict = out["verdict"]
+    assert set(verdict) == set(sv.TOP_FIELDS) and verdict["row_count"] == len(COHORT)
+    # fixture 的 row 沒有 market_bias／final_entry_state → 每一列都是 ROW_SHAPE_INVALID（判讀規則照常執行）
+    assert verdict["verdict"] == "C" and all(r["reasons"] == ["ROW_SHAPE_INVALID"] for r in verdict["rows"])
+
+
+def test_judge_is_refused_when_verification_fails_and_never_judges(published, monkeypatch):
+    env = published
+    dest = _archive(env)
+    verified = _promo_verified(env, dest, "evidence")             # shell 段已經驗過 A
+    # shell 段之後、Python 段之前改掉 comparison **以外**的成員（report）→ 驗證拒絕、⛔ 不輸出 B／C。
+    (dest / sa.REPORT).write_bytes((dest / sa.REPORT).read_bytes() + b"\n")
+    judged = []
+    monkeypatch.setattr(sv, "judge_comparison", lambda c: judged.append(c))
+    with pytest.raises(ArtifactError):
+        _verify_target(env, dest, "evidence", verified=verified, judge=True)
+    assert judged == []
+
+
+def test_judge_only_for_evidence(recorded):
+    env, root = recorded
+    with pytest.raises(ArtifactError, match="--judge"):
+        _verify_target(env, root, f"failed/{root.name}", judge=True)
+
+
+@pytest.mark.parametrize("target", ["", "evidence/", "failed", "failed/", "failed/a/b", "failed/x-1", "../evidence", None])
+def test_promotion_target_is_closed(target):
+    with pytest.raises(ArtifactError, match="--target"):
+        sa.parse_promotion_target(target)
+
+
+def test_patch_claims_promotion_mode(published, recorded):
+    env, root = recorded
+    dest = _archive(env)
+    claims = sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=dest, target="evidence")
+    assert claims == sa.patch_claims(mode="archive", python_root=env.root) and len(claims) == 4
+    failed = sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=root, target=f"failed/{root.name}")
+    assert failed == sa.patch_claims(mode="failed-record", python_root=env.root, record_dir=root) and len(failed) == 5
+    link = env.tmp / "claims-link"
+    link.symlink_to(dest)
+    for path, target in ((link, "evidence"), (dest / sa.STAGE2_MANIFEST_NAME, "evidence"), (dest, "bogus"), (None, "evidence")):
+        with pytest.raises(ArtifactError):
+            sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=path, target=target)
+
+
+_FAILED_TARGET = f"failed/{BUNDLE}-{'4' * 64}"
+
+
+@pytest.mark.parametrize("argv,match", [
+    (["--verify-promotion-staging", "/x", *_verified_argv()], "--target"),
+    (["--verify-promotion-staging", "/x", "--target", "bogus", *_verified_argv()], "--target"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence", "--target", "evidence", *_verified_argv()], "出現 2 次"),
+    (["--verify-promotion-staging", "/x", "--verify-promotion-staging", "/y", "--target", "evidence", *_verified_argv()],
+     "出現 2 次"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence", "--judge", "--judge", *_verified_argv()], "出現 2 次"),
+    (["--verify-promotion-staging", "/x", "--target", _FAILED_TARGET, "--judge", *_verified_argv(), *_semantic_argv()],
+     "--judge"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence"], "--verified"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence", *_verified_argv(), *_semantic_argv()], "不接受"),
+    (["--verify-promotion-staging", "/x", "--target", _FAILED_TARGET, *_verified_argv()],
+     "--verified-counterfactual-semantic-sha256"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence", "--run-dir", "/r", *_verified_argv()], "不接受"),
+    (["--verify-promotion-staging", "/x", "--target", "evidence", "--finalize", *_verified_argv()], "恰好給一個"),
+    (["--recover-durability", "--target", "evidence", *_verified_argv()], "只屬於"),
+    (["--recover-durability", "--judge", *_verified_argv()], "只屬於"),
+])
+def test_cli_verify_promotion_usage_errors(argv, match):
+    with pytest.raises(sa.Stage2UsageError, match=match):
+        sa.run_stage2(argv + _INJECTED)
+
+
+@pytest.mark.parametrize("judge", [False, True])
+def test_cli_verify_promotion_end_to_end_prints_one_canonical_line(published, capsys, judge):
+    env = published
+    dest = _archive(env)
+    claims = sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=dest, target="evidence")
+    argv = ["--verify-promotion-staging", str(dest), "--target", "evidence", *(["--judge"] if judge else []),
+            "--python-root", str(env.root), "--image-digest", NEW_IMG, "--base-commit", BASE,
+            "--tooling-patch-sha256", "b" * 64, "--source-root", "/app", "--runner-sha256", "c" * 64,
+            *_verified_argv(claims)]
+    assert sa.main(argv) == 0
+    out = capsys.readouterr().out
+    assert out.count("\n") == 1
+    doc = json.loads(out)
+    assert out == canonical_json_bytes(doc).decode() + "\n"         # ⚠️ canonical（晉升與判讀器據此綁定）
+    assert ("verdict" in doc) == judge and doc["manifest_sha256"] == sha256_hex((dest / sa.STAGE2_MANIFEST_NAME).read_bytes())
+    # 唯讀：⛔ 不留下任何檔案（archive 的檔案集合與 bytes 不變）
+    assert sa.archive_file_set(dest) == set(sa.STAGE2_LAYOUT) | {sa.STAGE2_MANIFEST_NAME}
+
+
+def test_cli_verify_promotion_failure_is_rc1_and_prints_nothing(published, capsys):
+    env = published
+    dest = _archive(env)
+    claims = sa.patch_claims(mode="promotion", python_root=env.root, promotion_path=dest, target="evidence")
+    argv = ["--verify-promotion-staging", str(dest), "--target", "evidence",
+            "--python-root", str(env.root), "--image-digest", NEW_IMG, "--base-commit", "f" * 40,
+            "--tooling-patch-sha256", "b" * 64, "--source-root", "/app", "--runner-sha256", "c" * 64,
+            *_verified_argv(claims)]
+    assert sa.main(argv) == EXIT_ABORT
+    assert capsys.readouterr().out == ""

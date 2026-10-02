@@ -7,10 +7,12 @@
     i074-stage2-patch-claims.py --failure-run-dir <run 目錄>    # --publish-failed-record：中繼檔的 provenance ＋ 凍結 patch
     i074-stage2-patch-claims.py --archive                       # --recover-durability：成功 archive 的 manifest
     i074-stage2-patch-claims.py --failed-record <record 目錄>   # --recover-failed-record：該份 record
+    i074-stage2-patch-claims.py --promotion <path> --target <t> # ⑦c --verify-promotion-staging：staging 或目的地
 
 stdout **只印一行**：`<base_commit> <counterfactual_sha256> <tooling_sha256> <composed_sha256>`；
-⚠️ `--failed-record` 另外在尾端加第 5 個 token：record **宣告的** `counterfactual_semantic_sha256`
-（shell 從 record 內的實際 patch 重算並比對它，相等才以 `--verified-counterfactual-semantic-sha256` 注入）。
+⚠️ `--failed-record` 與 `--promotion … --target failed/<name>` 另外在尾端加第 5 個 token：record **宣告的**
+`counterfactual_semantic_sha256`（shell 從 record 內的實際 patch 重算並比對它，相等才以
+`--verified-counterfactual-semantic-sha256` 注入）。
 失敗時 stdout ⛔ 無輸出、結束碼 1。
 
 ⚠️ **這只是「取出宣告」，⛔ 不是驗證**（見 `stage2_archive.patch_claims()`）：shell 拿它們在隔離
@@ -35,12 +37,20 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--failure-run-dir")
     mode.add_argument("--archive", action="store_true")
     mode.add_argument("--failed-record")
+    mode.add_argument("--promotion")
+    parser.add_argument("--target")
     args = parser.parse_args(argv)
+    if (args.promotion is None) != (args.target is None):
+        print("ERROR: --promotion 與 --target 必須同時出現（--target 只屬於 --promotion）", file=sys.stderr)
+        return 1
 
     repo_python = Path(__file__).resolve().parent.parent
     try:
         s2a = load_replay_bundle(repo_python, STAGE2_ARCHIVE_MODULES)["stage2_archive"]
-        if args.finalize_run_dir:
+        if args.promotion is not None:
+            claims = s2a.patch_claims(mode="promotion", python_root=repo_python, promotion_path=args.promotion,
+                                      target=args.target)
+        elif args.finalize_run_dir:
             claims = s2a.patch_claims(mode="finalize", python_root=repo_python, run_dir=args.finalize_run_dir)
         elif args.failure_run_dir:
             claims = s2a.patch_claims(mode="failure", python_root=repo_python, run_dir=args.failure_run_dir)
@@ -52,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: 取不到合成守門的宣告值：{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     fields = ["base_commit", "counterfactual_patch_sha256", "tooling_patch_sha256", "composed_sha256"]
-    if args.failed_record:
+    if "counterfactual_semantic_sha256" in claims:
         fields.append("counterfactual_semantic_sha256")
     print(" ".join(claims[f] for f in fields))
     return 0

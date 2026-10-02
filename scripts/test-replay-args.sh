@@ -1086,6 +1086,18 @@ rm -rf "$ORC_TD"
 # 正式 `envcheck/` 一進版控，recover 的 argv 測試就會**永久 skip**——shell 的 mount、注入參數與
 # fixture 就沒人守了。現在把**工作樹現行的**腳本與模組複製進一個 `git init` 的暫存 repo，
 # 所有斷言都對它做，⛔ 完全不碰真正的 repo，也⛔ 不因正式證據存在而略過。
+echo "==> i074 Stage 2（⑦c）：.gitignore 的 staging 規則（靜態；執行期的守門在晉升的第 5b 步與 6b）"
+# ⚠️ 只排除晉升的 staging；正式目的地（evidence/、failed/）⛔ 不排除——發布之後要進版控。
+gi_ignored() { git -C "$REPO_ROOT" check-ignore --no-index -q -- "$1"; }
+gi_ignored python/baselines/i074_stage2/.promote-staging-0123456789abcdef \
+  && gi_ignored python/baselines/i074_stage2/.promote-staging-0123456789abcdef/evidence_manifest.json \
+  && pass "staging（.promote-staging-<16 hex> 與它的成員）被 .gitignore 排除" || fail ".gitignore 沒有排除晉升的 staging"
+if gi_ignored python/baselines/i074_stage2/evidence/x || gi_ignored "python/baselines/i074_stage2/failed/x/failure_record.json"; then
+  fail ".gitignore 竟然排除了正式目的地（evidence/ 或 failed/）"
+else
+  pass "正式目的地（evidence/、failed/）⛔ 不被排除"
+fi
+
 echo "==> i074 Stage 2：finalize-stage2-evidence.sh 的 argv、mount 與模式（隔離 repo）"
 S2_TD="$(mktemp -d)"
 S2_FIXTURE="$REPO_ROOT/python/scripts/fixtures/stage2_finalizer_argv.json"
@@ -1119,6 +1131,8 @@ s2_normalize() {
   sed -n '/^python$/,$p' <<< "$1" \
     | sed -e "s|^$S2_TD/[a-z0-9_]*run\$|<RUN_DIR>|" -e "s|^$S2_ID\$|<IDENTITY>|" \
           -e "s|^$S2_PYROOT/baselines/i074_stage2/failed/[^/]*\$|<RECORD_DIR>|" \
+          -e "s|^${S2_REAL:-/nonexistent}/python/baselines/i074_stage2/.*\$|<PROMOTION_PATH>|" \
+          -e "s|^failed/[^/]*-[0-9a-f]\{64\}\$|<FAILED_TARGET>|" \
           -e "s|^$S2_PYROOT\$|<PYTHON_ROOT>|" \
           -e "s|^sha256:[0-9a-f]\{64\}\$|<IMAGE_ID>|" -e "s|^[0-9a-f]\{40\}\$|<BASE_COMMIT>|" \
     | awk '
@@ -1632,6 +1646,126 @@ PY
   fi
   s2_check_rc "Python 段回報 failed root 外的 record → rc=1" 1 ck_out "$S2_TD/outside.json" "$S2_P/counterfactual.patch"
   grep -qx run "$S2_TD/ck_hit.log" && pass "check：Python 段在容器內執行（fake docker 收到 run）" || fail "check：沒有執行 Python 段"
+
+
+  # ── ⑦c：唯讀的驗證入口 --verify-promotion-staging（「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」） ──────────
+  #
+  # 真正 repo 由**本 repo 的 origin** 推導：隔離 repo 加一個指向合成「真正 repo」的 origin。⚠️ 全部 dry-run（⛔ 不真的
+  # 跑 docker）；Python 段（完整驗證、信任根、--judge 的同程序判讀）在 pytest 的 test_replay_stage2_archive.py。
+  echo "==> i074 Stage 2（⑦c）：--verify-promotion-staging 的路徑規則、掛載與合成守門（隔離 repo）"
+  mkdir -p "$S2_TD/realrepo/python/baselines/i074_stage2"
+  S2_REAL="$(cd "$S2_TD/realrepo" && pwd -P)"
+  S2_RI="$S2_REAL/python/baselines/i074_stage2"
+  git -C "$S2_REPO" remote add origin "$S2_REAL"
+  s2_evidence_at() {  # $1＝目錄；$2＝patch 目錄（manifest／comparison 只放 claims 要讀的欄位）
+    local comp; comp="$(cat "$2/composed.sha256")"
+    mkdir -p "$1/patch" "$1/identity"
+    cp "$2/counterfactual.patch" "$2/tooling.patch" "$1/patch/"
+    cp "$S2_ENVCHECK/identity/run_identity.json.gz" "$1/identity/"
+    s2_json "$1/evidence_manifest.json" \
+      "{\"schema_version\":1,\"kind\":\"sr_zone_stage2_evidence_manifest\",\"patches\":$(s2_patches_json "$(s2_sha "$2/counterfactual.patch")" "$(s2_sha "$2/tooling.patch")" "$comp")}"
+    s2_json "$1/comparison/comparison_artifact.json.gz" \
+      "{\"schema_version\":1,\"kind\":\"sr_zone_replay_comparison\",\"provenance\":$(s2_prov_json "$comp")}"
+  }
+  s2_evidence_at "$S2_RI/evidence" "$S2_PT"
+  S2_VSTG="$S2_RI/.promote-staging-0123456789abcdef"
+  cp -r "$S2_RI/evidence" "$S2_VSTG"
+  S2_VFAIL="failed/b1_fixture-$S2_SEM"
+  s2_record "$S2_RI/$S2_VFAIL" "$S2_P"
+  s2_vp() {  # $1＝輸出檔前綴；其餘＝參數（⚠️ 一律加 --verify-promotion-staging 由呼叫端給）
+    local tag="$1"; shift
+    s2_dry "$tag" "$@"
+  }
+  s2_vp_rejects() {  # $1＝說明；$2＝輸出檔前綴；其餘＝參數 → 結束碼必須是 1、⛔ 不印出 docker 指令
+    local label="$1" tag="$2" rc=0
+    shift 2
+    s2_dry "$tag" "$@" || rc=$?
+    if [ "$rc" = 1 ] && [ ! -s "$S2_TD/$tag.out" ]; then pass "$label"; else fail "$label（rc=$rc）"; cat "$S2_TD/$tag.err" >&2; fi
+  }
+  s2_vp_ro() {  # $1＝輸出檔前綴 → 每一個 -v 都是 :ro，而且⛔ 不掛整個 i074_stage2（⛔ 沒有任何可寫的證據目錄）
+    awk 'prev=="-v"{print} {prev=$0}' "$S2_TD/$1.out" > "$S2_TD/$1.mounts"
+    [ -s "$S2_TD/$1.mounts" ] && ! grep -qv ':ro$' "$S2_TD/$1.mounts" \
+      && ! grep -q -- "^$S2_PYROOT/baselines/i074_stage2:" "$S2_TD/$1.mounts"
+  }
+
+  s2_real_snapshot() { find "$S2_REAL" -printf '%p %y %s %T@\n' | sort; }
+  S2_REAL_BEFORE="$(s2_real_snapshot)"
+  s2_vp vp_ev --verify-promotion-staging "$S2_RI/evidence" --target evidence || true
+  s2_argv_ok "verify-promotion-staging（evidence 目的地）" verify_promotion_staging_evidence_argv vp_ev
+  s2_mount_ok "verify：Stage 1 錨點 same-path :ro" vp_ev "$S2_PYROOT/baselines/i074_stage1:$S2_PYROOT/baselines/i074_stage1:ro"
+  s2_mount_ok "verify：envcheck 錨點 same-path :ro" vp_ev "$S2_ENVCHECK:$S2_ENVCHECK:ro"
+  s2_mount_ok "verify：<path> same-path :ro" vp_ev "$S2_RI/evidence:$S2_RI/evidence:ro"
+  s2_vp_ro vp_ev && pass "verify：全部掛載唯讀、⛔ 不掛整個 i074_stage2" || fail "verify：出現可寫的掛載"
+  [ "$(s2_after_flag "$S2_TD/vp_ev.out" --verified-composed-sha256)" = "$S2_COMP_T" ] \
+    && ! grep -qx -- --verified-counterfactual-semantic-sha256 "$S2_TD/vp_ev.out" \
+    && pass "verify（evidence）：交接合成守門驗過的值、⛔ 不帶語意 SHA" || fail "verify（evidence）：交接值不符"
+  s2_vp vp_judge --verify-promotion-staging "$S2_RI/evidence" --target evidence --judge || true
+  s2_argv_ok "verify-promotion-staging（evidence ＋ --judge）" verify_promotion_staging_evidence_judge_argv vp_judge
+  s2_vp vp_stg --verify-promotion-staging "$S2_VSTG" --target evidence || true
+  s2_argv_ok "verify-promotion-staging（staging，直屬 i074_stage2）" verify_promotion_staging_evidence_argv vp_stg
+  s2_vp vp_fail --verify-promotion-staging "$S2_RI/$S2_VFAIL" --target "$S2_VFAIL" || true
+  s2_argv_ok "verify-promotion-staging（failed record 目的地）" verify_promotion_staging_failed_argv vp_fail
+  [ "$(s2_after_flag "$S2_TD/vp_fail.out" --verified-counterfactual-semantic-sha256)" = "$S2_SEM" ] \
+    && pass "verify（failed）：重算的語意 SHA ＝ 宣告值 ＝ target 名稱 → 才注入" || fail "verify（failed）：語意 SHA 的交接值不符"
+  s2_mount_ok "verify（failed）：<path> same-path :ro" vp_fail "$S2_RI/$S2_VFAIL:$S2_RI/$S2_VFAIL:ro"
+  s2_vp_ro vp_fail && pass "verify（failed）：全部掛載唯讀" || fail "verify（failed）：出現可寫的掛載"
+  [ "$(s2_real_snapshot)" = "$S2_REAL_BEFORE" ] && pass "verify：四次執行之後真正 repo ⛔ 不被寫入（檔案集合、大小、mtime 都不變）" \
+    || fail "verify：真正 repo 被寫入了"
+
+  # 路徑規則：只接受真正 repo（本 repo 的 origin）的 staging（直屬）或目的地本身。
+  cp -r "$S2_RI/evidence" "$S2_TD/elsewhere-evidence"
+  s2_vp_rejects "verify：真正 repo 外的路徑 → 1" vp_out --verify-promotion-staging "$S2_TD/elsewhere-evidence" --target evidence
+  # ⚠️ 本 repo 內放一份**合法**、名稱也對的 staging（⛔ 不借用前面測試改過的 $S2_EVID：它的合成守門本來就過不了，
+  #    擋下它的會是合成守門而⛔ 不是路徑規則——反向驗證抓到的）。
+  S2_VCLONE="$S2_PYROOT/baselines/i074_stage2/.promote-staging-0123456789abcdef"
+  s2_evidence_at "$S2_VCLONE" "$S2_PT"
+  s2_vp_rejects "verify：本 repo（複本）內的路徑（合法的內容、名稱也對）→ 1" vp_clone --verify-promotion-staging "$S2_VCLONE" --target evidence
+  ln -s "$S2_RI/evidence" "$S2_TD/evlink"
+  s2_vp_rejects "verify：路徑本身是 symlink → 1" vp_ln --verify-promotion-staging "$S2_TD/evlink" --target evidence
+  ln -s "$S2_REAL" "$S2_TD/reallink"
+  s2_vp_rejects "verify：路徑有 symlink 成分（⛔ 不是 canonical）→ 1" vp_lnc \
+    --verify-promotion-staging "$S2_TD/reallink/python/baselines/i074_stage2/evidence" --target evidence
+  mkdir -p "$S2_RI/sub"; cp -r "$S2_VSTG" "$S2_RI/sub/"
+  s2_vp_rejects "verify：staging 不是 i074_stage2 的直屬 → 1" vp_deep \
+    --verify-promotion-staging "$S2_RI/sub/.promote-staging-0123456789abcdef" --target evidence
+  cp -r "$S2_RI/evidence" "$S2_RI/.promote-staging-xyz"; cp -r "$S2_RI/evidence" "$S2_RI/evidence2"
+  s2_vp_rejects "verify：staging 名稱不符 → 1" vp_name --verify-promotion-staging "$S2_RI/.promote-staging-xyz" --target evidence
+  s2_vp_rejects "verify：目的地名稱 ≠ target → 1" vp_name2 --verify-promotion-staging "$S2_RI/evidence2" --target evidence
+  s2_vp_rejects "verify：target 與目的地不符（evidence 路徑 ＋ failed target）→ 1" vp_tgt \
+    --verify-promotion-staging "$S2_RI/evidence" --target "$S2_VFAIL"
+  s2_vp_rejects "verify：target 不在封閉集合 → 1" vp_tgt2 --verify-promotion-staging "$S2_RI/evidence" --target failed
+  s2_vp_rejects "verify：缺 --target → 1" vp_not --verify-promotion-staging "$S2_RI/evidence"
+  s2_vp_rejects "verify：--target 重複 → 1" vp_tt --verify-promotion-staging "$S2_RI/evidence" --target evidence --target evidence
+  s2_vp_rejects "verify：--judge 搭 failed target → 1" vp_jf --verify-promotion-staging "$S2_RI/$S2_VFAIL" --target "$S2_VFAIL" --judge
+  s2_vp_rejects "verify：--judge 重複 → 1" vp_jj --verify-promotion-staging "$S2_RI/evidence" --target evidence --judge --judge
+  s2_vp_rejects "verify：--target 只屬於驗證模式 → 1" vp_tonly --recover-durability --target evidence
+  s2_vp_rejects "verify：⛔ 不接受 --run-dir → 1" vp_rd --verify-promotion-staging "$S2_RI/evidence" --target evidence --run-dir "$S2_FRUN"
+  s2_vp_rejects "verify：⛔ 不接受 --source-ref → 1" vp_sr --verify-promotion-staging "$S2_RI/evidence" --target evidence --source-ref HEAD
+  set +e
+  env -u PY_IMAGE REPLAY_DRY_RUN=1 REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" TOOLING_PATCH="$S2_PT/tooling.patch" \
+    "$S2_FIN" --verify-promotion-staging "$S2_RI/evidence" --target evidence > "$S2_TD/vp_tp.out" 2> "$S2_TD/vp_tp.err"
+  rc=$?
+  set -e
+  [ "$rc" = 1 ] && [ ! -s "$S2_TD/vp_tp.out" ] && pass "verify：TOOLING_PATCH 有值 → 1（驗的必須是 HEAD 本身）" \
+    || fail "verify：TOOLING_PATCH 竟被接受（rc=$rc）"
+  s2_vp_rejects "verify：使用者自帶 --verified-composed-sha256 → 1" vp_inj \
+    --verify-promotion-staging "$S2_RI/evidence" --target evidence --verified-composed-sha256 "$S2_COMP_T"
+  # 合成守門：failed 的 target 名稱裡的 SHA ≠ 重算的語意 SHA（record 宣告值本身正確）→ ⛔ 不呼叫 Python。
+  S2_VBADNAME="failed/b1_fixture-$(printf 'e%.0s' {1..64})"
+  s2_record "$S2_RI/$S2_VBADNAME" "$S2_P"
+  s2_vp vp_badname --verify-promotion-staging "$S2_RI/$S2_VBADNAME" --target "$S2_VBADNAME" && fail "target 名稱的 SHA 不符竟通過" || \
+    s2_blocked "verify：failed 的 target 名稱裡的 SHA ≠ 重算的語意 SHA → 1、⛔ 不呼叫 Python" vp_badname "target 名稱"
+  # 合成守門：換掉 tooling patch（manifest 不動）→ 合成 SHA 不符。
+  cp "$S2_PX/tooling.patch" "$S2_VSTG/patch/tooling.patch"
+  s2_vp vp_swap --verify-promotion-staging "$S2_VSTG" --target evidence && fail "換過 tooling 的 staging 竟通過" || \
+    s2_blocked "verify：staging 的 tooling patch 被換 → 合成守門中止、⛔ 不呼叫 Python" vp_swap "SHA"
+  cp "$S2_PT/tooling.patch" "$S2_VSTG/patch/tooling.patch"
+  # 真正 repo 的推導：origin 不是本機絕對路徑、或指向本 repo 自己 → 1。
+  git -C "$S2_REPO" remote set-url origin "relative/real"
+  s2_vp_rejects "verify：origin 不是本機絕對路徑 → 1" vp_orig --verify-promotion-staging "$S2_RI/evidence" --target evidence
+  git -C "$S2_REPO" remote set-url origin "$S2_REPO"
+  s2_vp_rejects "verify：origin 是本 repo 自己 → 1" vp_self --verify-promotion-staging "$S2_VCLONE" --target evidence
+  git -C "$S2_REPO" remote set-url origin "$S2_REAL"
 
   # ── ⑦a：runner 的反事實模式（Stage 2 計畫書「六、2」的 s～x、ba 的 runner 層；隔離 repo） ──────
   #

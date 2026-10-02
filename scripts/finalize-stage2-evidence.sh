@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # I-074 Stage 2：證據的發布與修復入口（issue.md I-074 ③ evidence contract「七之四：CLI matrix」）。
 #
-# 七種模式（互斥、必選其一；路徑一律寫死常數或由 --run-dir 固定推導，⛔ 不開逐檔覆寫）：
+# 八種模式（互斥、必選其一；路徑一律寫死常數或由 --run-dir 固定推導，⛔ 不開逐檔覆寫；⑦c 的驗證模式只接受兩種路徑）：
 #
 #   # ③b 環境見證：見證趟的 operational 輸出 → python/baselines/i074_stage2/envcheck/
 #   #   ⚠️ EQUIVALENT（0）與 NOT_EQUIVALENT（7）**都會發布證據**
@@ -16,6 +16,13 @@
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --publish-failed-record --run-dir <run 目錄>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --check-failed-record --counterfactual-patch <patch>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --recover-failed-record <record 目錄>
+#
+#   # ⑦c 晉升與判讀器共用的**唯讀**驗證入口（issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」）
+#   REPLAY_IMAGE_ID=sha256:… <某個複本>/scripts/finalize-stage2-evidence.sh --verify-promotion-staging <path> \
+#       --target <evidence|failed/<bundle_id>-<語意 SHA>> [--judge]
+#   ⚠️ 真正 repo 由**本腳本所在 repo 的 origin** 推導（⛔ 沒有路徑參數）；<path> 只接受兩種：真正 repo 的
+#      `python/baselines/i074_stage2/.promote-staging-<16 hex>`（直屬）或目的地本身；錨點一律取自本腳本所在的 repo；
+#      全部唯讀掛載、⛔ 不 fsync、⛔ 不寫入；`--judge` 只限 evidence，驗證與判讀在同一個 Python 程序。
 #
 # run 目錄的固定佈局（⚠️ 由 ⑦ 的 orchestrator 產出）：
 #   witness/after_artifact.json、witness/cohort_manifest.json              ← --envcheck
@@ -33,6 +40,7 @@
 #   --check-failed-record：0＝無命中、放行；**2＝命中**（同一個語意 SHA 的已記錄壞 patch）；1＝record 損壞、
 #                          驗證失敗、patch 套用失敗、改動檔案⛔ 不是固定的四個，或輸入⛔ 不是 canonical diff
 #   --recover-failed-record：⚠️ **1**（成功也是 1）；3
+#   --verify-promotion-staging：0＝有效（stdout 只印一行 canonical JSON，封閉 key set）；1＝無效或用法錯誤（⛔ 沒有 3）
 #
 # 設計重點：
 #   - ⚠️ Python 段在 **Stage 2 identity 的 image** 內執行（`REPLAY_IMAGE_ID` 必須與它相符）；
@@ -71,6 +79,7 @@ for _arg in "$@"; do
 done
 
 MODE=""; RUN_DIR=""; RECORD_DIR=""; CF_PATCH=""; SOURCE_REF="HEAD"; SOURCE_REF_SEEN=0
+VP_PATH=""; VP_TARGET=""; VP_TARGET_SEEN=0; VP_JUDGE=0
 set_mode() {
   [ -z "$MODE" ] || { echo "ERROR: 模式旗標互斥：已有 --$MODE，又給了 --$1。" >&2; exit 1; }
   MODE="$1"
@@ -82,6 +91,16 @@ while [ "$#" -gt 0 ]; do
     --recover-failed-record)
       [ "$#" -ge 2 ] || { echo "ERROR: --recover-failed-record 需要 record 目錄。" >&2; exit 1; }
       set_mode recover-failed-record; RECORD_DIR="$2"; shift 2 ;;
+    --verify-promotion-staging)
+      [ "$#" -ge 2 ] || { echo "ERROR: --verify-promotion-staging 需要路徑。" >&2; exit 1; }
+      set_mode verify-promotion-staging; VP_PATH="$2"; shift 2 ;;
+    --target)
+      [ "$#" -ge 2 ] || { echo "ERROR: --target 需要值。" >&2; exit 1; }
+      [ "$VP_TARGET_SEEN" = 0 ] || { echo "ERROR: --target 重複出現——⛔ 不靜默採用最後一個。" >&2; exit 1; }
+      VP_TARGET_SEEN=1; VP_TARGET="$2"; shift 2 ;;
+    --judge)
+      [ "$VP_JUDGE" = 0 ] || { echo "ERROR: --judge 重複出現。" >&2; exit 1; }
+      VP_JUDGE=1; shift ;;
     --run-dir)
       [ "$#" -ge 2 ] || { echo "ERROR: --run-dir 需要值。" >&2; exit 1; }
       [ -z "$RUN_DIR" ] || { echo "ERROR: --run-dir 重複出現——⛔ 不靜默採用最後一個。" >&2; exit 1; }
@@ -101,14 +120,29 @@ done
 case "$MODE" in
   envcheck|finalize|publish-failed-record)
     [ -n "$RUN_DIR" ] || { echo "ERROR: --$MODE 需要 --run-dir。" >&2; exit 1; } ;;
-  recover-envcheck|recover-durability|recover-failed-record|check-failed-record)
+  recover-envcheck|recover-durability|recover-failed-record|check-failed-record|verify-promotion-staging)
     [ -z "$RUN_DIR" ] || { echo "ERROR: --$MODE ⛔ 不接受 --run-dir：它只依賴既有的證據與寫死常數。" >&2; exit 1; } ;;
   *)
     echo "用法: $0 --envcheck --run-dir <dir> | --recover-envcheck | --finalize --run-dir <dir> |" \
          "--recover-durability | --publish-failed-record --run-dir <dir> |" \
-         "--check-failed-record --counterfactual-patch <patch> | --recover-failed-record <dir>" >&2
+         "--check-failed-record --counterfactual-patch <patch> | --recover-failed-record <dir> |" \
+         "--verify-promotion-staging <path> --target <evidence|failed/<name>> [--judge]" >&2
     exit 1 ;;
 esac
+if [ "$MODE" = "verify-promotion-staging" ]; then
+  # ⚠️ 驗的一律是**本 repo 的 HEAD**：⛔ 不接受 --source-ref 與 TOOLING_PATCH（後者會被套進 /app 的程式碼）。
+  [ "$SOURCE_REF_SEEN" = 0 ] || { echo "ERROR: --verify-promotion-staging ⛔ 不接受 --source-ref（錨點與程式碼都是本 repo 的 HEAD）。" >&2; exit 1; }
+  [ -z "${TOOLING_PATCH:-}" ] || { echo "ERROR: --verify-promotion-staging ⛔ 不接受 TOOLING_PATCH（驗證的程式碼必須是 HEAD 本身）。" >&2; exit 1; }
+  [ "$VP_TARGET_SEEN" = 1 ] || { echo "ERROR: --verify-promotion-staging 需要 --target。" >&2; exit 1; }
+  if ! [[ "$VP_TARGET" =~ ^(evidence|failed/[^/]+-[0-9a-f]{64})$ ]]; then
+    echo "ERROR: --target 只接受 evidence 或 failed/<bundle_id>-<語意 SHA>：$VP_TARGET" >&2; exit 1
+  fi
+  if [ "$VP_JUDGE" = 1 ] && [ "$VP_TARGET" != evidence ]; then
+    echo "ERROR: --judge 只限 --target evidence。" >&2; exit 1
+  fi
+elif [ "$VP_TARGET_SEEN" = 1 ] || [ "$VP_JUDGE" = 1 ]; then
+  echo "ERROR: --target／--judge 只屬於 --verify-promotion-staging。" >&2; exit 1
+fi
 if [ "$MODE" = "check-failed-record" ]; then
   # ⚠️ **只吃 patch 路徑，⛔ 不吃 SHA**——從介面層杜絕 spoof（「七之一」）。
   [ -n "$CF_PATCH" ] || { echo "ERROR: --check-failed-record 需要 --counterfactual-patch <patch 路徑>。" >&2; exit 1; }
@@ -130,12 +164,18 @@ ENVCHECK_ARCHIVE="$STAGE2_BASE/envcheck"
 EVIDENCE_ARCHIVE="$STAGE2_BASE/evidence"
 FAILED_ROOT="$STAGE2_BASE/failed"
 [ -d "$STAGE1_BASE" ] || { echo "ERROR: 找不到 Stage 1 證據：$STAGE1_BASE（⚠️ 必須與 Stage 2 一起保存）" >&2; exit 1; }
-mkdir -p "$STAGE2_BASE"
-if [ "$MODE" = "check-failed-record" ]; then
-  # ⚠️ lookup 是唯讀的——⛔ 連 i074_stage2 也不給寫。
-  MOUNTS=(-v "$STAGE1_BASE":"$STAGE1_BASE":ro -v "$STAGE2_BASE":"$STAGE2_BASE":ro)
+if [ "$MODE" = "verify-promotion-staging" ]; then
+  # ⚠️ 唯讀：只掛兩個錨點目錄（＋ 下面 case 補的 <path>），全部 :ro；⛔ 不建 i074_stage2、⛔ 沒有任何可寫的證據目錄。
+  [ -d "$ENVCHECK_ARCHIVE" ] || { echo "ERROR: 找不到環境見證錨：$ENVCHECK_ARCHIVE" >&2; exit 1; }
+  MOUNTS=(-v "$STAGE1_BASE":"$STAGE1_BASE":ro -v "$ENVCHECK_ARCHIVE":"$ENVCHECK_ARCHIVE":ro)
 else
-  MOUNTS=(-v "$STAGE1_BASE":"$STAGE1_BASE":ro -v "$STAGE2_BASE":"$STAGE2_BASE")
+  mkdir -p "$STAGE2_BASE"
+  if [ "$MODE" = "check-failed-record" ]; then
+    # ⚠️ lookup 是唯讀的——⛔ 連 i074_stage2 也不給寫。
+    MOUNTS=(-v "$STAGE1_BASE":"$STAGE1_BASE":ro -v "$STAGE2_BASE":"$STAGE2_BASE":ro)
+  else
+    MOUNTS=(-v "$STAGE1_BASE":"$STAGE1_BASE":ro -v "$STAGE2_BASE":"$STAGE2_BASE")
+  fi
 fi
 
 validate_identity() {  # $1＝identity 檔（.json 或 .json.gz）
@@ -212,17 +252,58 @@ case "$MODE" in
     CF_FILE="$RECORD_ABS/patch/counterfactual.patch"; TOOL_FILE="$RECORD_ABS/patch/tooling.patch"
     CLAIM_ARGS=(--failed-record "$RECORD_ABS")
     CMD_EXTRA=(--recover-failed-record "$RECORD_ABS") ;;
+  verify-promotion-staging)
+    # ⚠️ 真正 repo 由**本腳本所在 repo 的 origin** 推導（⛔ 沒有路徑參數）：⑩ 的複本與判讀器的暫存複本都是
+    #    clone 出來的。必須是 canonical、存在的目錄，⛔ 不得是本 repo 自己。
+    REAL_REPO="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null)" || {
+      echo "ERROR: 讀不到本 repo 的 origin——⛔ 推導不出真正 repo。" >&2; exit 1; }
+    case "$REAL_REPO" in /*) ;; *) echo "ERROR: 本 repo 的 origin 不是本機絕對路徑：$REAL_REPO" >&2; exit 1 ;; esac
+    if [ ! -d "$REAL_REPO" ] || [ "$(realpath -e -- "$REAL_REPO" 2>/dev/null)" != "$REAL_REPO" ]; then
+      echo "ERROR: 真正 repo（origin）不是 canonical 的目錄：$REAL_REPO" >&2; exit 1
+    fi
+    SELF_CANON="$(cd "$REPO_ROOT" && pwd -P)"
+    [ "$REAL_REPO" != "$SELF_CANON" ] || { echo "ERROR: 真正 repo ⛔ 不得是本腳本所在的 repo。" >&2; exit 1; }
+    # ⚠️ <path>：canonical（絕對、⛔ 不得有 symlink 成分）、本身⛔ 不得是 symlink、是目錄；只接受兩種（「三」#2：開路徑參數就等於開覆寫口）。
+    if [ -L "$VP_PATH" ] || [ ! -d "$VP_PATH" ]; then
+      echo "ERROR: --verify-promotion-staging 的路徑不存在、不是目錄或是 symlink：$VP_PATH" >&2; exit 1
+    fi
+    VP_ABS="$(realpath -e -- "$VP_PATH" 2>/dev/null)" || VP_ABS=""
+    [ "$VP_ABS" = "$VP_PATH" ] || {
+      echo "ERROR: --verify-promotion-staging 的路徑必須是 canonical 的絕對路徑（⛔ 不得有 symlink 成分）：$VP_PATH" >&2; exit 1; }
+    case "$VP_ABS/" in "$SELF_CANON"/*)
+      echo "ERROR: 路徑在本腳本所在的 repo 內——⛔ 不接受（只驗真正 repo 裡的 staging 或目的地）：$VP_ABS" >&2; exit 1 ;;
+    esac
+    REAL_STAGE2="$REAL_REPO/python/baselines/i074_stage2"
+    if [ "$VP_ABS" != "$REAL_STAGE2/$VP_TARGET" ]; then
+      if [ "${VP_ABS%/*}" != "$REAL_STAGE2" ] || ! [[ "${VP_ABS##*/}" =~ ^\.promote-staging-[0-9a-f]{16}$ ]]; then
+        echo "ERROR: 路徑只接受 $REAL_STAGE2/.promote-staging-<16 hex>（直屬）或目的地 $REAL_STAGE2/$VP_TARGET：$VP_ABS" >&2
+        exit 1
+      fi
+    fi
+    # identity：evidence 用 <path> 內封存的那一份（比照 recover-durability）；failed 用本 repo 的 envcheck（F2-a）。
+    if [ "$VP_TARGET" = evidence ]; then
+      use_archived_identity "$VP_ABS/identity/run_identity.json.gz"
+    else
+      use_archived_identity "$ENVCHECK_ARCHIVE/identity/run_identity.json.gz"
+    fi
+    MOUNTS+=(-v "$VP_ABS":"$VP_ABS":ro)
+    CF_FILE="$VP_ABS/patch/counterfactual.patch"; TOOL_FILE="$VP_ABS/patch/tooling.patch"
+    CLAIM_ARGS=(--promotion "$VP_ABS" --target "$VP_TARGET")
+    CMD_EXTRA=(--verify-promotion-staging "$VP_ABS" --target "$VP_TARGET")
+    [ "$VP_JUDGE" = 0 ] || CMD_EXTRA+=(--judge) ;;
 esac
 
 WORKTREE=""
 COMPOSE_TREES=()
 cleanup() {
-  local wt
+  local rc=$? wt
   for wt in "$WORKTREE" "${COMPOSE_TREES[@]}"; do
     [ -n "$wt" ] || continue
     git -C "$REPO_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
     rm -rf "$wt"
   done
+  # ⚠️ 驗證模式的結束碼只有 0／1：`set -e` 下 git 之類的失敗碼（128…）⛔ 不得漏出去。
+  if [ "$MODE" = "verify-promotion-staging" ] && [ "$rc" != 0 ] && [ "$rc" != 1 ]; then exit 1; fi
 }
 trap cleanup EXIT
 
@@ -300,6 +381,18 @@ if [ "${#CLAIM_ARGS[@]}" -gt 0 ]; then
         exit 1
       fi
       VERIFY_ARGS+=(--verified-counterfactual-semantic-sha256 "$COMPOSE_SEM") ;;
+    verify-promotion-staging)
+      if [ "$VP_TARGET" = evidence ]; then
+        [ -z "$C_SEM" ] || { echo "ERROR: 成功 archive 的宣告值⛔ 不應帶語意 SHA。" >&2; exit 1; }
+      else
+        # F4 的 shell 層（以**目的地名稱**驗）：由 record 內實際 patch 重算的語意 SHA ＝ record 宣告值 ＝ target 名稱裡的 SHA。
+        if [ "$COMPOSE_SEM" != "$C_SEM" ] || [ "$COMPOSE_SEM" != "${VP_TARGET##*-}" ]; then
+          echo "ERROR: 語意 SHA 不一致：重算 $COMPOSE_SEM、record 宣告 $C_SEM、target 名稱 ${VP_TARGET##*-}" \
+               "——⛔ 不呼叫 Python。" >&2
+          exit 1
+        fi
+        VERIFY_ARGS+=(--verified-counterfactual-semantic-sha256 "$COMPOSE_SEM")
+      fi ;;
   esac
 fi
 
@@ -339,6 +432,8 @@ if [ "$MODE" != "check-failed-record" ]; then
   docker run "${DOCKER_ARGS[@]}" "$IMAGE_ID" "${CMD[@]}"
   RC=$?
   set -e
+  # ⚠️ 驗證模式的結束碼只有 0／1（⛔ 不讓 docker 的 125 之類漏成晉升的結束碼）。
+  if [ "$MODE" = "verify-promotion-staging" ] && [ "$RC" != 0 ]; then RC=1; fi
   exit "$RC"
 fi
 

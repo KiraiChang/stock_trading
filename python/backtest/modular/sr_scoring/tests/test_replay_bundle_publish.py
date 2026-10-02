@@ -101,6 +101,116 @@ def test_exdev_is_fail_closed(tmp_path, monkeypatch):
     assert "不改用 copy" in str(exc.value)
 
 
+def _errno_loader_at(err):
+    """fake `_load_renameat2_at()`（⑦c 的 dirfd 版）：每次呼叫都回 -1 並設定 errno。
+
+    ⚠️ `_load_renameat2()` 維持兩參數（上面那一支、`e1cbbbd` 的同名測試都用它），⛔ 不改成帶 dirfd。
+    """
+    def fake_loader():
+        def call(src_dir_fd: int, src: bytes, dst_dir_fd: int, dst: bytes) -> int:
+            import ctypes
+
+            ctypes.set_errno(err)
+            return -1
+
+        return call
+
+    return fake_loader
+
+
+def _no_syscall(monkeypatch):
+    called = []
+    monkeypatch.setattr(publish_module, "_load_renameat2", lambda: called.append("full"))
+    monkeypatch.setattr(publish_module, "_load_renameat2_at", lambda: called.append("at"))
+    return called
+
+
+# ── ⑦c：rename 的三層（私有 `_renameat2()`、`rename_noreplace_at()`、`rename_noreplace()`） ────────
+
+def _dirfd(path: Path) -> int:
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+
+
+def test_rename_noreplace_keeps_full_multi_level_paths(tmp_path):
+    """既有的五個呼叫點都傳多層路徑——⛔ 不得被 `_at()` 的單一 component 規則打壞。"""
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "src").mkdir()
+    rename_noreplace(tmp_path / "a" / "b" / "src", tmp_path / "a" / "b" / "dst")
+    assert (tmp_path / "a" / "b" / "dst").is_dir() and not (tmp_path / "a" / "b" / "src").exists()
+
+
+def test_rename_noreplace_at_is_relative_to_the_dir_fds(tmp_path, monkeypatch):
+    (tmp_path / "s").mkdir()
+    (tmp_path / "d").mkdir()
+    (tmp_path / "s" / "item").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "elsewhere")           # ⚠️ cwd 在別處：證明用的是 dirfd、⛔ 不是 cwd
+    src_fd, dst_fd = _dirfd(tmp_path / "s"), _dirfd(tmp_path / "d")
+    try:
+        publish_module.rename_noreplace_at(src_fd, "item", dst_fd, "moved")
+        assert (tmp_path / "d" / "moved").is_dir() and not (tmp_path / "s" / "item").exists()
+        (tmp_path / "s" / "again").mkdir()
+        (tmp_path / "d" / "moved" / "keep").write_text("k", encoding="utf-8")
+        with pytest.raises(FileExistsError):
+            publish_module.rename_noreplace_at(src_fd, "again", dst_fd, "moved")
+        assert (tmp_path / "s" / "again").is_dir() and (tmp_path / "d" / "moved" / "keep").read_text() == "k"
+    finally:
+        os.close(src_fd)
+        os.close(dst_fd)
+
+
+def test_rename_noreplace_at_maps_errno_like_the_full_path_api(tmp_path, monkeypatch):
+    monkeypatch.setattr(publish_module, "_load_renameat2_at", _errno_loader_at(errno.EXDEV))
+    fd = _dirfd(tmp_path)
+    try:
+        with pytest.raises(NoClobberUnsupported, match="EXDEV"):
+            publish_module.rename_noreplace_at(fd, "a", fd, "b")
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("name", ["/abs", "a/b", ".", "..", "", "a\x00b", None, b"bytes"])
+@pytest.mark.parametrize("side", ["src", "dst"])
+def test_rename_noreplace_at_rejects_non_component_names_before_the_syscall(tmp_path, monkeypatch, name, side):
+    called = _no_syscall(monkeypatch)
+    fd = _dirfd(tmp_path)
+    try:
+        args = (fd, name, fd, "ok") if side == "src" else (fd, "ok", fd, name)
+        with pytest.raises(ValueError, match="單一 component"):
+            publish_module.rename_noreplace_at(*args)
+    finally:
+        os.close(fd)
+    assert called == []                                   # ⛔ 不呼叫 syscall
+
+
+@pytest.mark.parametrize("bad_fd", [-1, publish_module.AT_FDCWD, True, False, "3", 3.0, None])
+@pytest.mark.parametrize("side", ["src", "dst"])
+def test_rename_noreplace_at_rejects_bad_fds_before_the_syscall(tmp_path, monkeypatch, bad_fd, side):
+    """`type(fd) is int and fd >= 0`：⛔ 不接受 bool（`True`／`False` 會被當成 fd 1／0）、AT_FDCWD 與負數。"""
+    called = _no_syscall(monkeypatch)
+    fd = _dirfd(tmp_path)
+    try:
+        args = (bad_fd, "a", fd, "b") if side == "src" else (fd, "a", bad_fd, "b")
+        with pytest.raises(ValueError, match="fd"):
+            publish_module.rename_noreplace_at(*args)
+    finally:
+        os.close(fd)
+    assert called == []
+
+
+@pytest.mark.parametrize("side", ["src", "dst"])
+def test_rename_noreplace_rejects_nul_in_paths_before_the_syscall(tmp_path, monkeypatch, side):
+    """`c_char_p` 會在 NUL 截斷：`a\x00ignored` 會把 `a` rename 掉——⛔ 不讓它到達 syscall。"""
+    called = _no_syscall(monkeypatch)
+    (tmp_path / "a").mkdir()
+    src, dst = tmp_path / "a\x00ignored", tmp_path / "b"
+    if side == "dst":
+        src, dst = tmp_path / "a", tmp_path / "b\x00x"
+    with pytest.raises(ValueError, match="NUL"):
+        rename_noreplace(src, dst)
+    assert called == [] and (tmp_path / "a").is_dir()
+
+
 # ── 發布 ────────────────────────────────────────────────────────────────────
 
 def test_publish_creates_final_path_once_and_leaves_no_staging(tmp_path):

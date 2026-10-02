@@ -45,3 +45,7 @@ python/models/
 
 # Runtime logs
 logs/
+
+# I-074 Stage 2 ⑦c：晉升的 staging（只有晉升程序會建立；⛔ 不讓 `git add -A` 收進半成品）。
+# ⚠️ 只排除這個名稱——正式目的地（evidence/、failed/）⛔ 不排除，發布之後要進版控。
+python/baselines/i074_stage2/.promote-staging-*

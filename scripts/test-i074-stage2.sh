@@ -151,7 +151,10 @@ printf 'sizing shim\n' > "$SR/scripts/lib/i074-sizing-docker-shim.sh"
 printf 'sizing helper\n' > "$SR/python/scripts/i074_stage2_sizing.py"
 cp "$REPO_ROOT/scripts/lib/replay-args.sh" "$REPO_ROOT/scripts/lib/mem-guard.sh" "$SR/scripts/lib/"
 cp "$REPO_ROOT/python/scripts/_i074_bootstrap.py" "$REPO_ROOT/python/scripts/i074_stage2_preflight.py" "$SR/python/scripts/"
-cp "$REPO_ROOT/$SRCDIR/replay_bundle/canonical.py" "$SR/$SRCDIR/replay_bundle/"
+cp "$REPO_ROOT/$SRCDIR/replay_bundle/canonical.py" "$REPO_ROOT/$SRCDIR/replay_bundle/publish.py" "$SR/$SRCDIR/replay_bundle/"
+cp "$REPO_ROOT/python/scripts/i074_stage2_promote.py" "$SR/python/scripts/"
+# ⑦c：晉升的 staging 規則（與正式 repo 的 .gitignore 同一行）——晉升的 ignore 守門以真 git 查它。
+grep -x 'python/baselines/i074_stage2/.promote-staging-\*' "$REPO_ROOT/.gitignore" > "$SR/.gitignore"
 
 # 正式腳本 → sed 改常數（⚠️ 只改這些行；下方斷言 diff 只落在這些行）
 sedcopy() {  # $1＝正式檔（repo 相對）；$2＝目的地；其餘＝sed 表達式
@@ -182,6 +185,8 @@ sedcopy scripts/run-i074-stage2.sh "$SR/scripts/run-i074-stage2.sh" "${SED_ORCH[
 sedcopy scripts/lib/i074-stage2-supervisor.py "$SR/scripts/lib/i074-stage2-supervisor.py" "${SED_SUP[@]}"
 sedcopy scripts/lib/i074-stage2-docker-label-shim.sh "$SR/scripts/lib/i074-stage2-docker-label-shim.sh" "${SED_SHIM[@]}"
 sedcopy python/scripts/i074_stage2_freeze_record.py "$SR/python/scripts/i074_stage2_freeze_record.py" "${SED_FR[@]}"
+SED_JUDGE=(-e "s|^I074_TRUSTED_PATH=.*|I074_TRUSTED_PATH=$TEST_PATH|" -e "s|^I074_GIT=.*|I074_GIT=$TRUSTED/git|")
+sedcopy scripts/judge-i074-stage2.sh "$SR/scripts/judge-i074-stage2.sh" "${SED_JUDGE[@]}"
 
 # fake runner（記錄 argv 與環境；依情境產出 operational 輸出、停在 barrier、改動複本）
 cat > "$SR/scripts/run-replay-offline.sh" <<'FAKERUNNER'
@@ -221,13 +226,17 @@ esac
 exit "$rc"
 FAKERUNNER
 
-# fake finalizer（check／finalize／publish 的結果依情境；終態建在複本裡）
+# fake finalizer（check／finalize／publish 的結果依情境；終態建在複本裡）。
+# ⚠️ ⑦c：終態帶**真的** identity（evidence：XDG identity 的 gzip；failed：record 內嵌它）——晉升的第 3c 步以它綁定；
+#    `--verify-promotion-staging` 回報**它讀到的** manifest／record 的 SHA（晉升以它綁定經 fd 寫入的那一份）。
 cat > "$SR/scripts/finalize-stage2-evidence.sh" <<'FAKEFIN'
 #!/usr/bin/env bash
 S="${I074_TEST_SCENARIO:?}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mkdir -p "$S/spy"
 { printf 'ARGV'; printf ' %s' "$@"; echo; env | sort | sed 's/^/ENV /'; } >> "$S/spy/finalizer.log"
+IDF="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+B="$REPO_ROOT/python/baselines/i074_stage2"
 case "$1" in
   --check-failed-record) exit "$(cat "$S/check_rc" 2>/dev/null || echo 0)" ;;
   --finalize|--publish-failed-record)
@@ -236,14 +245,33 @@ case "$1" in
     rc="${plan% *}"; term="${plan#* }"
     if [ "$term" = yes ]; then
       if [ "$1" = --finalize ]; then
-        mkdir -p "$REPO_ROOT/python/baselines/i074_stage2/evidence"; echo m > "$REPO_ROOT/python/baselines/i074_stage2/evidence/m"
+        d="$B/evidence"; mkdir -p "$d/identity" "$d/patch"
+        printf '{"finalizer_provenance":{"base_commit":"%s"},"n":%s}\n' "$(git -C "$REPO_ROOT" rev-parse HEAD)" "$n" > "$d/evidence_manifest.json"
+        gzip -n -c "$IDF" > "$d/identity/run_identity.json.gz"
+        cp "$B/counterfactual_e1cbbbd.patch" "$d/patch/counterfactual.patch"
       else
         work="$(cd "$2/.." 2>/dev/null && pwd)"; [ -n "$work" ] || work="$(cd "$3/.." && pwd)"
         name="$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print(p["bundle_id"]+"-"+p["counterfactual_semantic_sha256"])' "$work/state/preflight.json")"
-        mkdir -p "$REPO_ROOT/python/baselines/i074_stage2/failed/$name"; echo r > "$REPO_ROOT/python/baselines/i074_stage2/failed/$name/r"
+        d="$B/failed/$name"; mkdir -p "$d/patch"
+        python3 -c 'import json,sys; json.dump({"run_identity": json.load(open(sys.argv[1])), "x": 1}, open(sys.argv[2], "w"))' "$IDF" "$d/failure_record.json"
+        cp "$B/counterfactual_e1cbbbd.patch" "$d/patch/counterfactual.patch"
       fi
     fi
     exit "$rc" ;;
+  --verify-promotion-staging)
+    path="$2"; target="$4"; judge="${5:-}"
+    printf 'VERIFY %s %s %s\n' "$path" "$target" "$judge" >> "$S/spy/verify.log"
+    [ ! -f "$S/verify_hook" ] || bash "$S/verify_hook" "$path" || exit 1
+    rc="$(cat "$S/verify_rc" 2>/dev/null || echo 0)"; [ "$rc" = 0 ] || exit "$rc"
+    [ ! -f "$S/verify_needs" ] || [ -e "$REPO_ROOT/$(cat "$S/verify_needs")" ] || { echo "fake verify：缺錨點" >&2; exit 1; }
+    if [ "$target" = evidence ]; then kind=evidence; key=manifest_sha256; f="$path/evidence_manifest.json"
+    else kind=failed_record; key=record_sha256; f="$path/failure_record.json"; fi
+    extra=""
+    [ "$judge" != --judge ] || extra=',"verdict":{"schema":"i074_stage2_verdict/v1","verdict":"B"}'
+    printf '{"base_commit":"%s","identity_sha256":"%s","kind":"%s","%s":"%s","target":"%s"%s}\n' \
+      "$(git -C "$REPO_ROOT" rev-parse HEAD)" "$(sha256sum < "$IDF" | cut -d' ' -f1)" "$kind" "$key" \
+      "$(sha256sum < "$f" | cut -d' ' -f1)" "$target" "$extra"
+    exit 0 ;;
 esac
 exit 99
 FAKEFIN
@@ -294,7 +322,12 @@ if [ -f "$FR" ]; then pass "寫入端：formal ＋ ok ＋ P_B ≤ 預算 → bui
 
 # ── 情境 ─────────────────────────────────────────────────────────────────────────
 NS=0
-new_scenario() {  # → 設 S；預設：anchors 回合成的 bundle／base、docker root 在同一個檔案系統
+clean_real() {  # 清掉晉升進真正 repo 的終態與 orphan staging（⛔ 不動已追蹤的檔）
+  rm -rf "$SR/python/baselines/i074_stage2/evidence" "$SR/python/baselines/i074_stage2"/.promote-staging-*
+  git -C "$SR" clean -fdq -- python/baselines/i074_stage2/failed/ >/dev/null 2>&1 || true
+}
+new_scenario() {  # → 設 S；預設：anchors 回合成的 bundle／base、docker root 在同一個檔案系統（KEEP_REAL=1：⛔ 不清真正 repo）
+  [ "${KEEP_REAL:-0}" = 1 ] || clean_real
   NS=$((NS + 1))
   S="$TD/sc$NS"
   mkdir -p "$S/docker/containers" "$S/spy"
@@ -321,6 +354,11 @@ docker_ran() { ls "$S/docker" | grep -q '^run\.'; }
 expect_rc() { [ "$RC" = "$1" ] || { echo "    （rc=$RC，預期 $1）" >&2; tail -5 "$S/err" >&2; return 1; }; }
 wait_for() { local i; for i in $(seq 1 200); do [ -e "$1" ] && return 0; sleep 0.1; done; return 1; }
 reset_sentinel() { rm -f "$LOCKDIR/i074-stage2.active"; }   # 模擬重開機（隔離的鎖目錄）
+promoted_ok() {  # $1＝執行目錄；$2＝evidence 或 failed/<name> → 真正 repo 的目的地 ≡ 複本的終態、⛔ 沒有 staging
+  diff -r "$1/repo/python/baselines/i074_stage2/$2" "$SR/python/baselines/i074_stage2/$2" >/dev/null \
+    && ! ls -d "$SR/python/baselines/i074_stage2"/.promote-staging-* >/dev/null 2>&1
+}
+failed_name() { python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); print("failed/"+p["bundle_id"]+"-"+p["counterfactual_semantic_sha256"])' "$1/state/preflight.json"; }
 
 echo "==> i074 Stage 2 ⑦b：靜態檢查"
 only_const_diff() {  # $1＝正式檔；$2＝副本；$3＝允許差異的行首正規式；$4＝預期差異行數
@@ -337,15 +375,19 @@ check "sed 副本只差常數行：label shim" only_const_diff scripts/lib/i074-
   'I074_(LABEL_KEY|SENTINEL_PATH|DOCKER|TRUSTED_OWNER_UID)=' 8
 check "sed 副本只差常數行：freeze record 的 base OID" only_const_diff python/scripts/i074_stage2_freeze_record.py \
   "$SR/python/scripts/i074_stage2_freeze_record.py" 'BASE_COMMIT = ' 2
-check "shebang：run-i074-stage2.sh 與 label shim 的第一行恰好是 #!/bin/bash -p" \
-  bash -c '[ "$(head -n1 "$1")" = "#!/bin/bash -p" ] && [ "$(head -n1 "$2")" = "#!/bin/bash -p" ]' _ \
-  "$REPO_ROOT/scripts/run-i074-stage2.sh" "$REPO_ROOT/scripts/lib/i074-stage2-docker-label-shim.sh"
+check "sed 副本只差常數行：判讀器（⑦c）" only_const_diff scripts/judge-i074-stage2.sh "$SR/scripts/judge-i074-stage2.sh" \
+  'I074_(TRUSTED_PATH|GIT)=' 4
+check "shebang：run-i074-stage2.sh、label shim 與判讀器的第一行恰好是 #!/bin/bash -p" \
+  bash -c 'for f in "$@"; do [ "$(head -n1 "$f")" = "#!/bin/bash -p" ] || exit 1; done' _ \
+  "$REPO_ROOT/scripts/run-i074-stage2.sh" "$REPO_ROOT/scripts/lib/i074-stage2-docker-label-shim.sh" \
+  "$REPO_ROOT/scripts/judge-i074-stage2.sh"
 static_rules() {
   python3 - "$REPO_ROOT" <<'PY'
 import re, sys
 root = sys.argv[1]
 files = ["scripts/run-i074-stage2.sh", "scripts/run-replay-offline.sh", "scripts/finalize-stage2-evidence.sh",
-         "scripts/lib/replay-args.sh", "scripts/lib/mem-guard.sh"]
+         "scripts/lib/replay-args.sh", "scripts/lib/mem-guard.sh", "scripts/judge-i074-stage2.sh"]
+entries = ("scripts/run-i074-stage2.sh", "scripts/judge-i074-stage2.sh")   # 只有這兩個入口可以（恰好一次）指派 PATH
 cmd_docker = re.compile(r'(^|[;&|(]|\b(?:then|do|else|exec|!)\s)\s*("?\$\{?\w*DOCKER\w*\}?"?|\S*/docker)(\s|$)')
 bad = []
 path_assign = []
@@ -363,18 +405,19 @@ for rel in files:
         if re.search(r'\bexport\s+PATH\b', code):
             path_assign.append((rel, n, "export"))
 allowed = {("scripts/lib/replay-args.sh", '"$PATH"')}
-orch = [(r, n, v) for r, n, v in path_assign if r == "scripts/run-i074-stage2.sh"]
-if sorted(v for _r, _n, v in orch) != sorted(['"$I074_TRUSTED_PATH"', "export"]):
-    bad.append(f"run-i074-stage2.sh 的 PATH 指派不是恰好一處常數：{orch}")
+for entry in entries:
+    mine = [(r, n, v) for r, n, v in path_assign if r == entry]
+    if sorted(v for _r, _n, v in mine) != sorted(['"$I074_TRUSTED_PATH"', "export"]):
+        bad.append(f"{entry} 的 PATH 指派不是恰好一處常數：{mine}")
 for r, n, v in path_assign:
-    if r != "scripts/run-i074-stage2.sh" and (r, v) not in allowed:
+    if r not in entries and (r, v) not in allowed:
         bad.append(f"{r}:{n} 改寫 PATH：{v}")
 for b in bad:
     print(b, file=sys.stderr)
 sys.exit(1 if bad else 0)
 PY
 }
-check "⑩ 呼叫圖：⛔ 絕對路徑／變數呼叫 docker、⛔ command -p、PATH 只在入口指派一次常數" static_rules
+check "⑩ 呼叫圖：⛔ 不以絕對路徑／變數呼叫 docker、⛔ 沒有 command -p、PATH 只在兩個入口各指派一次常數" static_rules
 mirror_constants() {
   python3 - "$REPO_ROOT" <<'PY'
 import re, sys
@@ -389,7 +432,10 @@ sup = open(f"{root}/scripts/lib/i074-stage2-supervisor.py", encoding="utf-8").re
 shim = open(f"{root}/scripts/lib/i074-stage2-docker-label-shim.sh", encoding="utf-8").read()
 tp = open(f"{root}/scripts/make-i074-tooling-patch.sh", encoding="utf-8").read()
 fr = open(f"{root}/python/scripts/i074_stage2_freeze_record.py", encoding="utf-8").read()
+judge = open(f"{root}/scripts/judge-i074-stage2.sh", encoding="utf-8").read()
 import i074_stage2_preflight as pf
+import i074_stage2_promote as pm
+pub = mods["publish"]
 def sh(name, text=orch): return re.search(rf"^{name}=(\S+)", text, re.M).group(1)
 def py(name): return re.search(rf'^{name} = "?([^"\n]+)"?', sup, re.M).group(1)
 problems = []
@@ -398,6 +444,14 @@ want = {"EXIT_ABORT": "1", "EXIT_LOOKUP_HIT": "2", "EXIT_PROMOTION_FAILED": "8",
 if codes != want: problems.append(f"orchestrator 結束碼 {codes}")
 for k, v in want.items():
     if py(k) != v: problems.append(f"supervisor {k}={py(k)}")
+# ⑦c：8、9 的唯一定義在 replay_bundle/publish.py；晉升模組取自它，orchestrator 與 supervisor 鏡像。
+if (pub.EXIT_PROMOTION_FAILED, pub.EXIT_PROMOTION_BLOCKED) != (8, 9):
+    problems.append("publish.py 的 8／9 不是 8、9")
+if (pm.EXIT_PROMOTION_FAILED, pm.EXIT_PROMOTION_BLOCKED, pm.EXIT_DURABILITY_UNCONFIRMED, pm.EXIT_FAILED_RECORD) != (8, 9, 3, 6):
+    problems.append("晉升模組的結束碼 ≠ publish.py")
+for s in ("I074_TRUSTED_PATH", "I074_GIT", "I074_PYTHON"):
+    if sh(s, judge) != sh(s): problems.append(f"判讀器 {s} ≠ orchestrator")
+if pm.GIT != sh("I074_GIT"): problems.append("晉升模組的 GIT ≠ orchestrator 的 I074_GIT")
 for s, p in (("I074_LOCK_PATH", "LOCK_PATH"), ("I074_SENTINEL_PATH", "SENTINEL_PATH"), ("I074_LABEL_KEY", "LABEL_KEY"),
              ("I074_TRUSTED_PATH", "TRUSTED_PATH"), ("I074_GIT", "GIT"), ("I074_PYTHON", "PYTHON"), ("I074_BASH", "BASH")):
     if sh(s) != py(p): problems.append(f"{s} ≠ supervisor {p}")
@@ -418,7 +472,7 @@ for p in problems:
 sys.exit(1 if problems else 0)
 PY
 }
-check "鏡像常數：結束碼（1／2／8／9）、信任根、鎖與 label、FROZEN_*／OPERATIONAL_*、base OID 各處相等" mirror_constants
+check "鏡像常數：結束碼（1／2／8／9；⑦c 的 8、9 ＝ publish.py ＝ 晉升模組）、信任根（含判讀器與晉升模組）、鎖與 label、FROZEN_*／OPERATIONAL_*、base OID 各處相等" mirror_constants
 
 echo "==> i074 Stage 2 ⑦b：label shim（單元）"
 SHIM_T="$TD/shimtest"
@@ -563,8 +617,13 @@ EXTRA_ENV="GIT_DIR=/nonexistent DOCKER_HOST=tcp://evil TOOLING_PATCH=/evil COUNT
   run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 git -C "$SR" checkout -q -- python/baselines/b1_test/manifest.json
 W="$S/work"; SUCCESS_S="$S"
-check "成功路徑：終態（evidence/）→ 晉升 stub → 9" expect_rc 9
-check "成功路徑：清單以外的檔案 dirty ⛔ 不擋（入口只驗清單的投影）" bash -c 'grep -q "晉升尚未實作" "$1"' _ "$S/err"
+check "成功路徑：終態（evidence/）→ 晉升 → 0（⑦c）" expect_rc 0
+check "成功路徑：清單以外的檔案 dirty ⛔ 不擋（入口只驗清單的投影）、晉升完成" bash -c 'grep -q "晉升完成" "$1"' _ "$S/err"
+check "⑦c 成功路徑：真正 repo 的 evidence/ 逐位元等於複本的終態、⛔ 沒有留下 staging" promoted_ok "$W" evidence
+check "⑦c 成功路徑：驗證模式驗的是真正 repo 裡的 staging（直屬 i074_stage2）" bash -c '
+  grep -qE "^VERIFY $2/python/baselines/i074_stage2/\.promote-staging-[0-9a-f]{16} evidence $" "$1/spy/verify.log"' _ "$S" "$SR"
+check "⑦c 成功路徑：發布之後的目的地照常出現在真正 repo 的未追蹤清單（⛔ 不被忽略）" bash -c '
+  git -C "$1" status --porcelain --untracked-files=all | grep -qF "?? python/baselines/i074_stage2/evidence/evidence_manifest.json"' _ "$SR"
 check "信任根：呼叫者 PATH 前置的 fake git／docker／python3 ⛔ 從未被執行" bash -c '! ls "$1"/evil_*_ran >/dev/null 2>&1' _ "$TD"
 check "LD_PRELOAD 只影響第一個程序（入口的 bash）：supervisor 與之後的程序⛔ 再載入" \
   test "$(grep -c "evil.so.*cannot be preloaded" "$S/err" || true)" = 1
@@ -573,7 +632,7 @@ env -i HOME="$HOME" PATH="$TD/evil:$TEST_PATH" XDG_DATA_HOME="$XDG" REPLAY_IMAGE
   /usr/bin/python3 -I "$SR/scripts/lib/i074-stage2-supervisor.py" run --work-dir "$S/work" --freeze-record "$FR" \
   > "$S/out" 2> "$S/err" || RC=$?
 check "信任根（supervisor 那一層）：繞過入口、以呼叫者的 PATH 直接啟動 supervisor → fake git／docker／python3 仍⛔ 被執行" \
-  bash -c '[ "$1" = 9 ] && ! ls "$2"/evil_*_ran >/dev/null 2>&1' _ "$RC" "$TD"
+  bash -c '[ "$1" = 0 ] && ! ls "$2"/evil_*_ran >/dev/null 2>&1' _ "$RC" "$TD"
 S="$SUCCESS_S"
 check "正式命令直接執行：BASH_ENV／ENV ⛔ 沒有執行、PYTHONPATH 的 sitecustomize ⛔ 沒有執行（整條流程）" \
   bash -c '[ ! -e "$1/bash_env_ran" ] && [ ! -e "$1/sitecustomize_ran" ]' _ "$S"
@@ -621,10 +680,12 @@ check "ae：finalize 回 1 且沒有終態 → 1 ＋ state/attempt.json" bash -c
 printf '1 no\n0 yes\n' > "$S/fin_plan"
 : > "$S/spy/runner.log"
 run_entry "$SR" --resume --work-dir "$W"
-check "ae：--resume → runner ⛔ 未被呼叫、finalize 以同一個 --run-dir 呼叫 → 終態 → 9" bash -c '
-  [ "$1" = 9 ] && [ ! -s "$2/spy/runner.log" ] && [ "$(grep -c -- "--finalize --run-dir $3/run" "$2/spy/finalizer.log")" = 2 ]' _ "$RC" "$S" "$W"
+check "ae：--resume → runner ⛔ 未被呼叫、finalize 以同一個 --run-dir 呼叫 → 終態 → 晉升 → 0" bash -c '
+  [ "$1" = 0 ] && [ ! -s "$2/spy/runner.log" ] && [ "$(grep -c -- "--finalize --run-dir $3/run" "$2/spy/finalizer.log")" = 2 ]' _ "$RC" "$S" "$W"
+INODE_BEFORE="$(stat -c %i "$SR/python/baselines/i074_stage2/evidence")"
 run_entry "$SR" --promote --work-dir "$W"
-check "--promote（⑦b）：完整性通過 → stub → 9" bash -c '[ "$1" = 9 ] && grep -q "晉升尚未實作" "$2"' _ "$RC" "$S/err"
+check "⑦c --promote：已晉升 → 6a（冪等，只補 fsync）→ 0、目的地沒有被重建" bash -c '
+  [ "$1" = 0 ] && [ "$(stat -c %i "$2/python/baselines/i074_stage2/evidence")" = "$3" ]' _ "$RC" "$SR" "$INODE_BEFORE"
 
 resume_case() {  # $1＝說明；$2＝在 resume 之前執行的 shell（可用 $W）；預期 1 且 finalizer ⛔ 未被再呼叫
   local label="$1" mutate="$2" before after
@@ -667,16 +728,20 @@ cp "$TD/identity.saved" "$IDENTITY"
 
 new_scenario; echo 6 > "$S/runner_rc"; echo "1 yes" > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
-check "ad／z：replay 回 6 → publish-failed-record；它回 1 但 record 已在磁碟 → 9（依磁碟事實、⛔ 不寫 attempt）" bash -c '
-  [ "$1" = 9 ] && grep -q -- "--publish-failed-record --run-dir" "$2/spy/finalizer.log" && [ ! -e "$2/work/state/attempt.json" ]' _ "$RC" "$S"
+check "ad／z：replay 回 6 → publish-failed-record；它回 1 但 record 已在磁碟 → 晉升 → 6（依磁碟事實、⛔ 不寫 attempt）" bash -c '
+  [ "$1" = 6 ] && grep -q -- "--publish-failed-record --run-dir" "$2/spy/finalizer.log" && [ ! -e "$2/work/state/attempt.json" ]' _ "$RC" "$S"
+check "⑦c：failed record 晉升到真正 repo 的 failed/<bundle>-<語意 SHA>（failed/ 由晉升建立）" promoted_ok "$S/work" "$(failed_name "$S/work")"
 new_scenario; echo 6 > "$S/runner_rc"; printf '1 no\n1 yes\n' > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 rc1="$RC"
 run_entry "$SR" --resume --work-dir "$S/work"
-check "publish 回 1 且沒有 record → attempt → --resume 再 publish → 9" test "$rc1:$RC" = "1:9"
+check "publish 回 1 且沒有 record → attempt → --resume 再 publish → 晉升 → 6" test "$rc1:$RC" = "1:6"
 new_scenario; echo "3 yes" > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
-check "finalize 回 3 ＋ evidence/ 存在 → 9" expect_rc 9
+check "finalize 回 3 ＋ evidence/ 存在 → 依磁碟事實晉升 → 0（⛔ 不呼叫 ③ 的 recovery）" bash -c '
+  [ "$1" = 0 ] && ! grep -q -- "--recover-durability" "$2/spy/finalizer.log"' _ "$RC" "$S"
+run_entry "$SR" --promote --work-dir "$S/work"
+check "n11：finalize 回 3 之後直接 --promote → 0" expect_rc 0
 new_scenario; echo "3 no" > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 check "finalize 回 3 但沒有終態（矛盾）→ 1、⛔ 不寫 attempt" bash -c '[ "$1" = 1 ] && [ ! -e "$2/work/state/attempt.json" ]' _ "$RC" "$S"
@@ -755,7 +820,7 @@ NEW_HEAD="$(git -C "$SR" rev-parse HEAD)"
 make_freeze "$TD/freeze2" "$NEW_HEAD"
 new_scenario
 run_entry "$SR" --freeze-record "$TD/freeze2/freeze_record.json" --work-dir "$S/work"
-check "n12：commit 之後用新的 freeze record → 通過 preflight（進 replay）" bash -c '[ "$1" = 9 ] && [ -s "$2/spy/runner.log" ]' _ "$RC" "$S"
+check "n12：commit 之後用新的 freeze record → 通過 preflight（進 replay）" bash -c '[ "$1" = 0 ] && [ -s "$2/spy/runner.log" ]' _ "$RC" "$S"
 git -C "$SR" reset -q --hard "$HEAD_OID"
 # ba（orchestrator 層）：repo_head 的 tooling patch 是 0 bytes
 : > "$SR/python/baselines/i074_stage2/tooling_e1cbbbd.patch"
@@ -794,7 +859,173 @@ new_scenario; echo "1 no" > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 echo x >> "$S/work/repo/python/scripts/i074_stage2_preflight.py"
 run_entry "$SR" --promote --work-dir "$S/work"
-check "n8：--promote 之前改動複本 → 9、stub ⛔ 未到達" bash -c '[ "$1" = 9 ] && ! grep -q "晉升尚未實作" "$2"' _ "$RC" "$S/err"
+check "n8：--promote 之前改動複本 → 9、晉升⛔ 未開始" bash -c '[ "$1" = 9 ] && ! grep -q "==> 晉升" "$2"' _ "$RC" "$S/err"
+
+echo "==> i074 Stage 2 ⑦c：晉升（真 git 的 ignore 守門、staging 與 git add -A、n9、n12 的晉升那一層）"
+GI="$SR/.gitignore"
+cp "$GI" "$TD/gitignore.saved"
+restore_gi() { cp "$TD/gitignore.saved" "$GI"; rm -f "$SR/python/baselines/i074_stage2/.gitignore"; }
+no_staging() { ! ls -d "$SR/python/baselines/i074_stage2"/.promote-staging-* >/dev/null 2>&1; }
+verify_count() { grep -c . "$S/spy/verify.log" 2>/dev/null || true; }
+
+# ⑩ 開始之前就把 staging 規則刪掉（工作樹；入口清單⛔ 不含 .gitignore）→ 晉升的 staging 守門 → 9、⛔ 不建 staging。
+new_scenario
+: > "$GI"
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+check "ignore 守門：⑩ 開始之前刪掉 staging 規則 → 晉升 9、目的地不存在" bash -c '
+  [ "$1" = 9 ] && [ ! -e "$2/python/baselines/i074_stage2/evidence" ] && grep -q "staging 的 ignore 守門" "$3/work/logs/promote.err"' _ "$RC" "$SR" "$S"
+check "ignore 守門：⛔ 沒有建立任何 .promote-staging-*" no_staging
+restore_gi
+run_entry "$SR" --promote --work-dir "$S/work"
+check "ignore 守門：修好規則之後重跑 --promote → 0" expect_rc 0
+
+# 以 --promote 重跑同一個執行目錄（⛔ 不再跑 preflight）：先讓第一次的晉升在驗證模式失敗，終態留在複本、真正 repo 沒有東西。
+new_scenario; echo 1 > "$S/verify_rc"
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+GW="$S/work"; GS="$S"
+check "ignore 守門（準備）：驗證模式失敗 → 9、目的地不存在、staging 已清" bash -c '
+  [ "$1" = 9 ] && [ ! -e "$2/python/baselines/i074_stage2/evidence" ]' _ "$RC" "$SR"
+rm -f "$GS/verify_rc"
+guard_case() {  # $1＝說明；$2＝在真正 repo 執行的改動（shell）
+  clean_real          # ⚠️ 每一支都從「目的地不存在」開始（⛔ 不讓前一支的結果改走 6a——反向驗證抓到的遮蔽）
+  restore_gi
+  (cd "$SR" && eval "$2")
+  run_entry "$SR" --promote --work-dir "$GW"
+  check "$1 → 9、⛔ 沒有 staging、目的地不存在" bash -c '
+    [ "$1" = 9 ] && [ ! -e "$2/python/baselines/i074_stage2/evidence" ]' _ "$RC" "$SR"
+  check "$1：⛔ 沒有建立任何 .promote-staging-*" no_staging
+}
+guard_case "ignore 守門：過廣規則 python/baselines/i074_stage2/*" 'printf "python/baselines/i074_stage2/*\n" >> .gitignore'
+guard_case "ignore 守門：過廣規則 python/baselines/" 'printf "python/baselines/\n" >> .gitignore'
+guard_case "ignore 守門：i074_stage2/.gitignore 的否定規則 !.promote-staging-*" \
+  'printf "!.promote-staging-*\n" > python/baselines/i074_stage2/.gitignore'
+clean_real
+restore_gi
+printf 'python/baselines/i074_stage2/.promote-staging-*/\n' > "$GI"
+run_entry "$SR" --promote --work-dir "$GW"
+check "ignore 守門（對照組）：只對目錄生效的規則 …/.promote-staging-*/ → 照常晉升 0" bash -c '
+  [ "$1" = 0 ] && diff -r "$2/repo/python/baselines/i074_stage2/evidence" "$3/python/baselines/i074_stage2/evidence" >/dev/null' \
+  _ "$RC" "$GW" "$SR"
+# 第六輪 review 的 recovery：目的地已與來源逐位元相同（6b rename 之後、parent fsync 之前的狀態）＋ 過廣規則 → 6a → 9、目的地未被動。
+restore_gi
+printf 'python/baselines/\n' >> "$GI"
+INODE_R="$(stat -c %i "$SR/python/baselines/i074_stage2/evidence")"
+N_VERIFY="$(verify_count)"
+run_entry "$SR" --promote --work-dir "$GW"
+N_VERIFY_AFTER="$(verify_count)"
+check "ignore 守門（recovery）：目的地已存在 ＋ 過廣規則 → 6a → 9、⛔ 不呼叫驗證模式、目的地未被動" bash -c '
+  [ "$1" = 9 ] && [ "$2" = "$3" ] && [ "$(stat -c %i "$4/python/baselines/i074_stage2/evidence")" = "$5" ]' \
+  _ "$RC" "$N_VERIFY" "$N_VERIFY_AFTER" "$SR" "$INODE_R"
+restore_gi
+run_entry "$SR" --promote --work-dir "$GW"
+check "ignore 守門（recovery）：修好規則之後 → 0" expect_rc 0
+
+# staging 與 git add -A（第一輪 review）：staging 已建好、rename 之前（fake 驗證模式那一刻）在真正 repo 執行 git add -A。
+new_scenario
+cat > "$S/verify_hook" <<EOF
+case "\$1" in
+  */.promote-staging-*)
+    git -C "$SR" add -A >/dev/null 2>&1
+    git -C "$SR" diff --cached --name-only > "$S/index_names"
+    git -C "$SR" status --porcelain --untracked-files=all > "$S/status_at_barrier" ;;
+esac
+EOF
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+check "staging 與 git add -A：barrier 有執行、晉升照常 0" bash -c '[ "$1" = 0 ] && [ -f "$2/index_names" ]' _ "$RC" "$S"
+check "staging 與 git add -A：staging ⛔ 不進 index、⛔ 不出現在未追蹤清單" bash -c '
+  ! grep -q promote-staging "$1/index_names" && ! grep -q promote-staging "$1/status_at_barrier"' _ "$S"
+check "staging 與 git add -A：發布之後的目的地照常出現在未追蹤清單" bash -c '
+  git -C "$1" status --porcelain --untracked-files=all | grep -qF "?? python/baselines/i074_stage2/evidence/"' _ "$SR"
+git -C "$SR" reset -q
+
+# n9：⑩ 執行期間在真正 repo (i) commit 一般檔案、(ii) 工作樹改錨點、(iii) commit 改錨點（連驗證入口一起改壞）——
+#     晉升的證據與複本的終態逐位元相同；判讀器（之後）照樣判讀 base_commit 那一版。
+new_scenario
+cat > "$S/runner_hook" <<EOF
+git -C "$SR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m "n9 (i)"
+printf 'n9\n' > "$SR/python/notes.txt"; git -C "$SR" add python/notes.txt
+git -C "$SR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q -m "n9 (i) file"
+printf 'tampered anchor\n' >> "$SR/python/baselines/i074_stage2/tooling_e1cbbbd.patch"
+printf 'exit 1\n' > "$SR/scripts/finalize-stage2-evidence.sh"
+git -C "$SR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qam "n9 (iii)"
+printf 'tampered again\n' >> "$SR/python/baselines/i074_stage2/counterfactual_e1cbbbd.patch"
+EOF
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+N9_S="$S"; N9_W="$S/work"
+check "n9：⑩ 期間真正 repo 照常 commit 與編輯 → 晉升 0、證據 ≡ 複本的終態" bash -c '[ "$1" = 0 ]' _ "$RC"
+check "n9：晉升的證據逐位元等於複本的終態（對照組）" promoted_ok "$N9_W" evidence
+
+echo "==> i074 Stage 2 ⑦c：判讀器（bootstrap 與流程；接在 n9 之後：真正 repo 的 HEAD 與工作樹都已改掉錨點與驗證入口）"
+judge_run() {  # 其餘＝參數
+  RC=0
+  env -i HOME="$HOME" PATH="${CALLER_PATH:-$TEST_PATH}" XDG_DATA_HOME="$XDG" REPLAY_IMAGE_ID="${IMAGE_OVERRIDE-$IMG}" \
+    I074_TEST_SCENARIO="$S" ${EXTRA_ENV:-} "$SR/scripts/judge-i074-stage2.sh" "$@" > "$S/out" 2> "$S/err" || RC=$?
+}
+judge_ok() { [ "$RC" = 0 ] && [ "$(grep -c . "$S/out")" = 1 ] && grep -q '"verdict":{' "$S/out"; }
+judge_refused() { [ "$RC" = 1 ] && [ ! -s "$S/out" ]; }
+S="$N9_S"
+CALLER_PATH="$TD/evil:$TEST_PATH" judge_run
+check "判讀器 n9 (ii)(iii)：真正 repo 的工作樹與 HEAD 都改了錨點、HEAD 的驗證入口已壞 → 照樣判讀（base_commit 那一版）" judge_ok
+check "判讀器：驗證模式在 base_commit 的暫存複本裡、以 --judge 驗真正 repo 的 evidence/" bash -c '
+  grep -qxF "VERIFY $2/python/baselines/i074_stage2/evidence evidence --judge" "$1/spy/verify.log"' _ "$S" "$SR"
+check "判讀器：呼叫者 PATH 前置的 fake git／docker／python3 ⛔ 從未被執行" bash -c '! ls "$1"/evil_*_ran >/dev/null 2>&1' _ "$TD"
+RC=0
+env -i HOME="$HOME" PATH="$TEST_PATH" XDG_DATA_HOME="$XDG" REPLAY_IMAGE_ID="$IMG" I074_TEST_SCENARIO="$S" \
+  bash "$SR/scripts/judge-i074-stage2.sh" > "$S/out" 2> "$S/err" || RC=$?
+check "判讀器：bash <script> → 1、⛔ 不輸出 B／C" judge_refused
+judge_run --target evidence
+check "判讀器：⛔ 沒有參數（帶了 → 1）" judge_refused
+IMAGE_OVERRIDE="sha256:$(printf x | sha256sum | cut -c1-63)" judge_run
+check "判讀器：REPLAY_IMAGE_ID 格式錯 → 1" judge_refused
+cp "$SR/scripts/judge-i074-stage2.sh" "$TD/judge.saved"
+printf '\n# dirty\n' >> "$SR/scripts/judge-i074-stage2.sh"
+judge_run
+check "判讀器：腳本的內容 ≠ HEAD → 1" judge_refused
+cp "$TD/judge.saved" "$SR/scripts/judge-i074-stage2.sh"
+MANIFEST="$SR/python/baselines/i074_stage2/evidence/evidence_manifest.json"
+cp "$MANIFEST" "$TD/manifest.saved"
+set_judge_base() { python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); p["finalizer_provenance"]["base_commit"]=sys.argv[2]; open(sys.argv[1],"w").write(json.dumps(p))' "$MANIFEST" "$1"; }
+set_judge_base "$(printf 'f%.0s' {1..40})"
+judge_run
+check "判讀器 m：base_commit 不可達 → 1、⛔ 不輸出 B／C" judge_refused
+LACK_IDX="$TD/lack.index"
+GIT_INDEX_FILE="$LACK_IDX" git -C "$SR" read-tree "$HEAD_OID"
+GIT_INDEX_FILE="$LACK_IDX" git -C "$SR" rm -q --cached python/baselines/i074_stage2/counterfactual_e1cbbbd.patch
+LACK="$(git -C "$SR" -c user.name=t -c user.email=t@t commit-tree -p "$HEAD_OID" -m "lack anchor" "$(GIT_INDEX_FILE="$LACK_IDX" git -C "$SR" write-tree)")"
+git -C "$SR" update-ref refs/heads/lack-anchor "$LACK"
+set_judge_base "$LACK"
+echo "python/baselines/i074_stage2/counterfactual_e1cbbbd.patch" > "$S/verify_needs"
+judge_run
+check "判讀器 m：base_commit 的樹裡缺錨點 → 驗證模式不通過 → 1、⛔ 不輸出 B／C" judge_refused
+rm -f "$S/verify_needs"
+cp "$TD/manifest.saved" "$MANIFEST"
+echo 1 > "$S/verify_rc"
+judge_run
+check "判讀器：驗證模式不通過 → 1、⛔ 不輸出 B／C" judge_refused
+rm -f "$S/verify_rc"
+judge_run
+check "判讀器：同一份 evidence 再判一次 → 0（唯讀、可重跑）" judge_ok
+git -C "$SR" update-ref -d refs/heads/lack-anchor
+git -C "$SR" reset -q --hard "$HEAD_OID"
+
+# n12（晉升那一層）：failed record 晉升之後還沒 commit → 下一次 ⑩ 的 preflight 中止；commit 之後換新的 freeze record → 通過。
+new_scenario; echo 6 > "$S/runner_rc"; echo "1 yes" > "$S/fin_plan"
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+N12_NAME="$(failed_name "$S/work")"
+check "n12：replay 回 6 → failed record 晉升到真正 repo → 6" bash -c '[ "$1" = 6 ] && [ -d "$2/python/baselines/i074_stage2/$3" ]' \
+  _ "$RC" "$SR" "$N12_NAME"
+KEEP_REAL=1 new_scenario
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+check "n12：晉升的 failed record 還沒 commit → 下一次 ⑩ 在 preflight 中止（1）、runner 未被呼叫" bash -c '
+  [ "$1" = 1 ] && [ ! -s "$2/spy/runner.log" ] && grep -q "先 commit 已晉升的 failed record" "$2/err"' _ "$RC" "$S"
+git -C "$SR" add -A "python/baselines/i074_stage2/$N12_NAME"
+git -C "$SR" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm "n12 promoted failed record"
+make_freeze "$TD/freeze_n12" "$(git -C "$SR" rev-parse HEAD)"
+KEEP_REAL=1 new_scenario
+run_entry "$SR" --freeze-record "$TD/freeze_n12/freeze_record.json" --work-dir "$S/work"
+check "n12：commit 之後換新的 freeze record → 通過 preflight、進 replay、晉升 0" bash -c '
+  [ "$1" = 0 ] && [ -s "$2/spy/runner.log" ]' _ "$RC" "$S"
+git -C "$SR" reset -q --hard "$HEAD_OID"
 
 echo "==> i074 Stage 2 ⑦b：supervisor（並行、sentinel、訊號、殘留）"
 start_bg() {  # 背景執行正式命令（setsid：收尾以 process group 為準）；$1＝repo；其餘＝參數 → BG_PID
@@ -825,7 +1056,7 @@ env -i PATH="$S1/work/bin:$TEST_PATH" HOME="$HOME" REPLAY_IMAGE_ID="$IMG" "${PRO
 check "O1：協定變數完全正確、supervisor 活著且持鎖，但呼叫者不是它的後代 → 1（ppid 鏈）" \
   bash -c '[ "$1" = 1 ] && [ "$2" = 6 ] && grep -q "ppid 鏈" "$3"' _ "$RC" "${#PROTO[@]}" "$S/err"
 S="$S1"; echo go > "$S1/barrier"; RC=0; wait "$BG_PID" || RC=$?
-check "n7b：先到的照常完成（9）" expect_rc 9
+check "n7b：先到的照常完成（晉升 → 0）" expect_rc 0
 check "n7b：正常結束之後 sentinel 已刪" bash -c '[ ! -e "$1/i074-stage2.active" ]' _ "$LOCKDIR"
 check "n7b：鎖檔從未被 unlink（仍在）" test -f "$LOCKDIR/i074-stage2.lock"
 check "n7b：鎖在正常結束後可取得" lock_free
@@ -834,7 +1065,7 @@ check "n7b：鎖在正常結束後可取得" lock_free
 python3 -c 'import os,sys,time; fd=os.open(sys.argv[1], os.O_RDWR); time.sleep(30)' "$LOCKDIR/i074-stage2.lock" & HELPER_PID=$!; PIDS+=("$HELPER_PID")
 new_scenario
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
-check "n7b：外部 helper 開著鎖檔也⛔ 延長鎖（結束後立刻拿得到）" bash -c '[ "$1" = 9 ]' _ "$RC"
+check "n7b：外部 helper 開著鎖檔也⛔ 不延長鎖（結束後立刻拿得到）" bash -c '[ "$1" = 0 ]' _ "$RC"
 check "n7b：外部 helper 仍在時鎖已可取得" lock_free
 kill "$HELPER_PID" 2>/dev/null || true
 lock_free || fail "外部 helper 之後鎖沒放"
@@ -843,7 +1074,7 @@ lock_free || fail "外部 helper 之後鎖沒放"
 new_scenario; touch "$S/runner_orphan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 ORPHAN="$(cat "$S/orphan.pid" 2>/dev/null || echo 0)"
-check "n7b：setsid 的孤兒在 supervisor 結束之前已被收掉" bash -c '[ "$1" = 9 ] && ! kill -0 "$2" 2>/dev/null' _ "$RC" "$ORPHAN"
+check "n7b：setsid 的孤兒在 supervisor 結束之前已被收掉" bash -c '[ "$1" = 0 ] && ! kill -0 "$2" 2>/dev/null' _ "$RC" "$ORPHAN"
 
 # TERM：移除容器 → TERM／KILL → 都消失之前拿不到鎖 → 128＋15。
 new_scenario; mkfifo "$S/barrier"; touch "$S/runner_create_container"
@@ -908,7 +1139,7 @@ run_entry "$SR" --promote --work-dir "$SK/work"
 check "n7b：殘留容器時 --promote → 8" expect_rc 8
 new_scenario
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
-check "n7b：移除殘留容器之後直接重跑成功（⛔ 需要重開機）" expect_rc 9
+check "n7b：移除殘留容器之後直接重跑成功（⛔ 不需要重開機）" expect_rc 0
 new_scenario; touch "$S/docker_ps_fail"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 check "S7：docker ps 失敗 → 1、⛔ 留下 sentinel" bash -c '[ "$1" = 1 ] && [ ! -e "$2/i074-stage2.active" ]' _ "$RC" "$LOCKDIR"

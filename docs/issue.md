@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作 ⚠️ 待 review（第一輪 review 的三項已修正）**（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定；十輪 review 已修正，增補另立 commit）⚠️ 待確認**（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -3158,8 +3158,8 @@ tooling 路徑（`evaluation.py`、`replay_bundle/`）：tooling patch 仍是 `5
 | acceptance（stub） | ✅ 2026-10-02 08:48～08:55Z，`~/i074_stage2_acceptance/dev5-r1-20261002T084817Z/`；結束碼 0、`status: ok`；`repo_head` ＝ `clone_head` ＝ 兩層複本的 HEAD ＝ `9af7942`（detached）；success `P_path` 153.5、failure 69.0 MiB；晉升 59.9／53.1 MiB；十二個容器的上限**各自不同**（402～532 MiB，argv ＝ inspect、swap ＝ memory 全部通過）；host 最大單一 48.7～51.8 MiB、群組取樣 71.4～98.4 MiB；`MemAvailable` 低點 285.3 MiB。⚠️ 報告是改 notes 之前的版本產的（只差 notes 那兩則）——以本輪最終的 helper 對同一份 `raw/` 重產：頂層只有 `notes` 不同（原本一則概括全部，重產後兩則恰好列出 #1 與 #2～#12），其餘欄位全部相同 |
 | sizing | ✅ 2026-10-02 08:56～09:02Z，`~/i074_stage2_sizing/validation-7d-r1-20261002T085639Z/`；`status: ok`、**`P_B` ＝ 160,960,512 bytes（153.5 MiB）**（⑦d 初版的實跑 160,956,416，＋4 KiB）；`repo_head` ＝ `clone_head` ＝ `9af7942`、工作複本 detached；十個 sidecar 都記下上限（458～508 MiB） |
 
-⚠️ **本輪實跑的新發現（本輪⛔ 沒有處置，待裁決）**：mem-guard 每一次都依當下的 `MemAvailable` 下修 `--memory`，**同一趟裡各容器的上限就差到 130 MiB**；
-而門檻比的是**含 page cache** 的 cgroup 峰值（v29「六、1」、與 ④⑤ 相同），page cache 要逼近上限才被回收，所以**峰值會隨上限上升**：
+⚠️ **本輪實跑的新發現**（✅ 2026-10-05 裁決：方向 (b)，另記 `total_rss` 並以它判定，再加一道精確的單一程序 RSS 閘——計畫見下方「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」）：mem-guard 每一次都依當下的 `MemAvailable` 下修 `--memory`，**同一趟裡各容器的上限就差到 130 MiB**；
+而門檻比的是**含 page cache** 的 cgroup 峰值（⚠️ 更正：這個量法是 ⑦d 細部計畫「二之五」沿用 ④⑤ 定的，v29「六、1」只寫門檻 < 450 MiB），page cache 要逼近上限才被回收，所以**峰值會隨上限上升**：
 同一個 stub replay（success）在 ⑦d 初版的實跑是上限 444m → 峰值 413.8 MiB，本輪是上限 466 MiB → **峰值 449.4 MiB（471,228,416 bytes；距門檻
 471,859,200 只剩 630,784 bytes）**。也就是說，⑨-1 的正式驗收（full）可能只因為當次 mem-guard 給的上限較高、page cache 累積較多而得到
 `threshold_exceeded`（偏保守的方向，⛔ 不會誤判通過；但結果與當下的 host 狀態有關）；反過來，上限不高於門檻的容器，門檻判定本身是空的
@@ -3197,6 +3197,306 @@ tooling 路徑（`evaluation.py`、`replay_bundle/`）：tooling patch 仍是 `5
 **歸檔**（⚠️ 依 CLAUDE.md，本筆的計畫與結果保留到 review 確認後才收斂）：操作程序寫進 [`development-workflow.md`](./development-workflow.md)
 （sizing 一節的 ⑦d 改動、新增「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」），現況規格寫進
 [`sr-zone-scoring.md`](./sr-zone-scoring.md) 新增的「I-074 Stage 2 的容量驗收」。
+
+#### Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定（2026-10-05，v11，⚠️ **待確認**）
+
+⚠️ 來源：⑦d 實作第一輪 review 之後的實跑發現（見上方「⑦d 實作結果」的「本輪實跑的新發現」）——容器的 cgroup 峰值含 page cache，
+page cache 要逼近上限才被回收，所以**峰值會隨 mem-guard 當次給的上限上升**（同一個 stub replay：上限 444m → 413.8 MiB、466 MiB → 449.4 MiB）。
+使用者 2026-10-05 的裁決：
+
+1. **另記 `memory.stat` 的 `total_rss`（不含 page cache）並以它判定**；cgroup v1 沒有 `total_rss` 的 high-water mark、只能取樣（下界），所以再加一道
+   精確的閘（`getrusage`），兩道都 < 450 MiB 才算通過。
+2. **契約縮小**（計畫第三輪 review 之後）：驗收的對象改成「**經正常 wait 鏈保存 resource usage 的每一個程序**各自 < 450 MiB」——被 kernel 自動回收的子孫
+   （parent 把 `SIGCHLD` 設成 `SIG_IGN` 或用 `SA_NOCLDWAIT`）**在契約外**；v29「六、1」、報告 `status` 的定義與歸檔文件同步修改（「二」⑨）。
+3. **commit 邊界**：在 `f20ce3c`（⑦d 實作，已 commit）之上**另立增補 commit**——本計畫確認後一個（只動文件）、實作 review 後一個；⛔ 不 amend `f20ce3c`。
+
+**驗收語意**（v11）：
+
+- **契約**：經正常 wait 鏈保存 resource usage 的每一個程序——wrapper（或 `host-run`）自己、leader，以及被收掉的子孫（含被 PID 1／subreaper 收養、再由它收掉的孤兒）——
+  各自的 RSS high-water < 450 MiB。**通過的證明**是精確的閘 `max(RUSAGE_SELF, RUSAGE_CHILDREN)`，前提是 leader 結束後收到 `ECHILD`。
+- **契約外**：被自動回收的子孫（`getrusage(2)`、`wait(2)`：resource usage 被丟棄，最上層照樣收到 `ECHILD`）。⚠️ 契約外⛔ 不等於放任：`SIGCHLD=SIG_IGN`
+  在執行期取樣偵測、偵測到即 fail-closed；本 repo 的程式靜態禁止設定它與 `SA_NOCLDWAIT`（「二」⑧）。報告明列這個範圍。
+- **單向偵測器**：取樣的 `total_rss` 觀察到 ≥ 450 MiB 就判超標；沒觀察到⛔ 不是通過的證據。
+- **`status = ok`** ＝ 能力檢查與每一步的逐步檢查都通過、契約內每一個程序的精確閘都 < 450 MiB、偵測器沒有觸發（以及既有的磁碟門檻與單向警報）。
+- **⛔ 不在 host 留下程序**（v5，結構性的保證）：harness 自己是 subreaper（「二」④），任何步驟留下的程序——含 `host-run` 被 KILL、或在 TERM 的寬限期間才 fork、
+  才 `setsid()` 的——都會被 harness 收養、隨時可列舉並清掉；清不掉 → 保留 S、列出 PID。⚠️ 前提是 **harness 自己沒有被 KILL**（host 當機或
+  harness 被 `kill -9` 時沒有任何程式能收尾）；另有一個極短的 PID 重用競態（「二」④），兩者照實標示。
+
+⚠️ 確認之前⛔ 不改任何程式。
+
+##### 一、目標與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | acceptance profile 的**容器程序**改以 RSS 判定（上方「驗收語意」）；原本含 page cache 的 cgroup 峰值照樣記錄，改成**資訊值**（⛔ 不再產生違反）。host 端的 `host-run` 補上同一個缺口；harness 自己成為 subreaper，`host-run` 以任何方式結束（正常、逾時、被 TERM、被 KILL）留下的子孫都由 harness 收養並清掉（「二」④；前提與殘餘見上方「驗收語意」）。**提早失敗**：量測開始之前先驗一次 cgroup v1 的能力，每一步結束後立刻檢查這一步的量測（「二」⑦）。⑩ 的 observer 另記 `total_rss` 的取樣峰值（下界）。報告升成 `i074_stage2_acceptance_report_v2` |
+| ⛔ 不做 | ⛔ 不新增「整個容器 aggregate RSS < 450 MiB」的契約；⛔ 不宣稱涵蓋被自動回收的子孫；⛔ 不改 sizing profile（wrapper、sidecar 的既有欄位、報告與 ④⑤ 的數字都不變）；⛔ 不改 ⑩ 的任何程式、docker argv、`run-replay-offline.sh` 的 `MEASURE_PEAK`；⛔ 不改門檻 450 MiB、`P_B` 與磁碟的量法；⛔ 不支援 cgroup v2 的判定；⛔ 不 amend `f20ce3c`。第一輪 review 的上限驗證（argv ＝ inspect、`MemorySwap ＝ Memory`）照舊——被換出的匿名頁同樣不在 `total_rss` 裡 |
+
+##### 二、設計
+
+**① 容器內的 wrapper**（新檔 `python/scripts/i074_stage2_rss_wrapper.py`，只給 acceptance profile；⚠️ 3.9 相容，host 的測試用 python3——host 的 `python` 是 2.7）：
+
+| 項目 | 規則 |
+|---|---|
+| 掛載與指令 | shim 以唯讀掛載 `<S>/harness/python/scripts/i074_stage2_rss_wrapper.py:/acceptance/rss_wrapper.py:ro`（**快照**的路徑，由 S 推導、⛔ 不接受其他來源），容器指令改成 `python -I /acceptance/rss_wrapper.py <原指令逐 token>`（取代 sizing 的 `sh -c "$PEAK_WRAPPER"`）；replay 的 launcher 改寫照舊，外面再包這一層。wrapper 是容器的 **PID 1** |
+| 收養 | 是 PID 1 → 孤兒本來就由它收養；⛔ 不是 PID 1（host 上的測試）→ 先以 `prctl(PR_SET_CHILD_SUBREAPER)` 設成 subreaper，失敗 → 記錯誤（fail-closed）。記下 `reaper`（`pid1`／`subreaper`） |
+| 執行 | `subprocess.Popen(原指令)`（stdin／stdout／stderr 原樣繼承：**I/O 透明**，wrapper 自己⛔ 不寫 stdout／stderr，錯誤只寫 `/peak/rss.json`）；等 leader 結束 → 以 `waitpid(-1, WNOHANG)` 收掉其餘子孫，直到 `ECHILD`；寬限 **10 秒**內收斂不了 → 記錯誤（fail-closed）、⛔ 不殺它們（wrapper 結束時 docker 會清掉整個容器，⛔ 不會留在 host） |
+| 精確的閘 | 收斂到 `ECHILD` 之後才讀：`self_max_rss_bytes` ＝ `RUSAGE_SELF.ru_maxrss`、`children_max_rss_bytes` ＝ `RUSAGE_CHILDREN.ru_maxrss`、`max_single_rss_bytes` ＝ 兩者取大。⚠️ `ru_maxrss` 含 file-backed 的常駐頁（共用函式庫、mmap）——比匿名記憶體偏保守 |
+| 單向偵測器 | 背景 thread 每 **50 ms** 讀 `/sys/fs/cgroup/memory/memory.stat` 的 `total_rss`（v1；容器內看到的就是自己的 cgroup，與既有 wrapper 讀 `max_usage_in_bytes` 同一個位置；v1 的 `total_rss` ＝ 匿名頁 ＋ swap cache，⛔ 不是一般意義的完整 RSS）；保留最大值與次數；收斂之後再讀最後一次。讀不到 → 記錯誤（⛔ 不改讀 v2） |
+| 自動回收的偵測 | 同一個 thread 每次取樣也掃容器的 `/proc/[0-9]*/status`（容器有自己的 PID namespace，看到的只有容器內的程序），任一程序的 `SigIgn` 含 `SIGCHLD` → `auto_reap_detected=true`（fail-closed）。⚠️ 取樣：存活不到 50 ms 的 parent 可能漏掉；`SA_NOCLDWAIT` 看不到——兩者都屬契約外（上方「驗收語意」） |
+| cgroup 峰值（資訊值） | 收斂之後照舊讀 v1 `memory.max_usage_in_bytes` → v2 `memory.peak`，寫進 `/peak/peak`（格式與 sizing 相同） |
+| 結束碼 | leader 的結束碼原樣傳回；leader 被訊號結束 → `128 + 訊號編號`（與 `sh` 相同，例如 OOM 的 137）；量測失敗⛔ 不改結束碼（由「二」⑦ 的逐步檢查立刻 fail-closed） |
+| 覆寫 | 沿用 `SIZING_CGROUP_ROOT`／`SIZING_PEAK_DIR`（只給 host 上的測試）；寬限、間隔與 `/proc` 的位置是函式參數，測試以參數覆寫（⛔ 不開環境變數） |
+
+**② `rss.json` 的封閉 schema**（canonical；sidecar 逐條驗，任一不符 → 量測失敗、⛔ 不寫 0）：
+
+| 鍵 | 規則 |
+|---|---|
+| （整體） | 鍵集合**恰好**是下列十二個（⛔ 不得缺欄、⛔ 不得多欄）；整數欄位必須是 `int` 且⛔ 不是 `bool`；布林欄位必須是 `bool` |
+| `schema` | ＝ `i074_stage2_rss_v1` |
+| `rss_source` | 封閉 enum：只有 `v1:total_rss` |
+| `rss_interval_ms` | ＝ 50（整數，⛔ 不用浮點比較） |
+| `rss_samples` | 整數 > 0 |
+| `rss_peak_sampled_bytes` | 整數 > 0 |
+| `self_max_rss_bytes`、`children_max_rss_bytes` | 整數 > 0 |
+| `max_single_rss_bytes` | 整數 ＝ `max(self_max_rss_bytes, children_max_rss_bytes)` |
+| `reaper` | 封閉 enum `pid1`／`subreaper`；容器內必須是 `pid1`（sidecar 驗） |
+| `all_descendants_reaped` | 必須是 `true` |
+| `auto_reap_detected` | 必須是 `false` |
+| `errors` | 必須是**空的**字串陣列（wrapper 有錯誤時照樣寫出、非空 → 量測失敗） |
+
+**③ sidecar 與報告**：
+
+| 項目 | 規則 |
+|---|---|
+| sidecar | 依 index 的 `profile`：acceptance 才讀 `rss.json`、依 ② 驗；sizing ⛔ 不讀也⛔ 不要求 |
+| 門檻 | 每一個容器：**`max_single_rss_bytes` ≥ 450 MiB 或 `rss_peak_sampled_bytes` ≥ 450 MiB → `threshold_exceeded`**（前者是精確閘、後者是單向偵測器；兩者都 < 450 MiB 才通過）。含 page cache 的 cgroup 峰值⛔ 不再產生違反 |
+| 報告 schema | 升成 **`i074_stage2_acceptance_report_v2`**；頂層新增三個**封閉**的欄位：`contract`（字串，＝ `per_process_rss_within_wait_chain`）、`out_of_contract`（陣列，恰好 ＝ `["descendants_auto_reaped_by_kernel"]`）、`auto_reap_detection`（物件，恰好 ＝ `{"sigchld_sig_ign": "sampled_fail_closed", "sa_nocldwait": "unobservable"}`）。`violations` 改成**結構化**的陣列（每筆恰好 `kind`、`subject`、`value`、`limit`；`kind` 是封閉 enum：`container_max_single_rss`、`container_rss_sampled`、`host_max_single_rss`、`host_group_rss_sampled`、`disk_p_path`）。寫出之前以 `validate_acceptance_report_v2()` 驗證整份報告，不符 → ⛔ 不寫報告（harness 失敗）：① 頂層與重要巢狀列（`limits`、`paths.*`、`promotion.*`、`memory[]`、`host[]`、`violations[]`）的**封閉鍵集合與型別**（整數排除 `bool`）、三個固定值、`status` 的 enum；② **衍生欄位的內部一致性**：`memory[]` 與 `host[]` 的 `max_single_rss_bytes` ＝ `max(self_max_rss_bytes, children_max_rss_bytes)`；`paths.*` 的 `accounted` ＝ `accounted_parts` 的總和、`P_path` ＝ `max(peaks.dirs_peak, peaks.fs_peak, accounted)`；`promotion.*` 的 `P_promotion` ＝ `max(peaks.dirs_peak, peaks.fs_peak, accounted)`、`P_path_plus_promotion` ＝ 對應路徑的 `P_path` ＋ `P_promotion`；`memory[].below_limit` ＝（精確閘與取樣都 < 門檻）、`host[].group_alarm` ＝（群組取樣 ≥ 門檻）；`limits.memory_bytes` ＝ `ACCEPTANCE_MEMORY_LIMIT`、**`limits.P_B_BUDGET` ＝ 正式常數**（validator 的參數 `p_b_budget`，呼叫端一律傳 `i074_stage2_preflight.P_B_BUDGET`——與產出端相同的來源；⛔ 不接受報告自己的值當基準）、`limits.container_memory_limit_bytes` ＝ 記憶體列上限的排序相異值；③ **由列重新推導門檻結果**——產出端與 validator **共用唯一的** `derive_acceptance_violations(report)`（⛔ 不寫兩份門檻邏輯）：`memory[]` 的精確閘與偵測器、`host[]` 的最大單一與群組取樣、`paths.*` 的 `P_path` 對 `limits.P_B_BUDGET`——推導出的違反必須與 `violations` **逐筆相等**（順序依列的順序）；④ `status = ok` ⟺ `violations` 為空。⚠️ 它驗的是**報告本身的一致性**；⛔ 不能驗證數字與原始量測（`raw/`）相符——那由產出端的流程保證。⚠️ v1 是 ⑦d 開發驗證的舊語意（dev4、dev5 兩份，判定量是含 page cache 的 cgroup 峰值），⛔ 不得當成 v2 的證據；現在⛔ 沒有任何程式讀 acceptance 報告，日後若有（例如 ⑨-1 的判讀），只接受 v2（以同一個驗證函式） |
+| 記憶體列 | `max_single_rss_bytes`（`exact_within_wait_chain`）、`self_max_rss_bytes`、`children_max_rss_bytes`、`rss_peak_sampled_bytes`（`sampled_lower_bound`）與次數、`cgroup_peak_bytes`（`informational_includes_page_cache`）、`memory_limit_bytes`、`reaper` |
+| notes | ① 契約與範圍（上方「驗收語意」）；② `ru_maxrss` 含 file-backed 的常駐頁、wrapper 自己（約 10 MiB）也計入——偏保守；③ 上限**嚴格低於**門檻的容器（逐一列出）：匿名頁受上限限制，`total_rss` 偵測器不可能觸發；⚠️ 精確的閘仍逐一比較（file-backed 頁可能記在別的 cgroup，⛔ 不受這個上限限制）；④ cgroup 峰值含 page cache、會隨當次上限上升，只列資訊值。取代第一輪 review 加的兩則 notes |
+| 文字版 | 開頭印契約與範圍；每個容器一列：最大單一程序（精確）、RSS 取樣峰值（次數）、cgroup（資訊值）、上限 |
+
+**④ host 端：`host-run` 與 harness 的收養**：
+
+| 項目 | 規則 |
+|---|---|
+| `host-run` 的收養與精確閘 | spawn 之前先以 `prctl(PR_SET_CHILD_SUBREAPER)` 設成 subreaper（失敗 → fail-closed）；leader 結束後以 `waitpid(-1, WNOHANG)` 收到 `ECHILD`（寬限 10 秒）；`max_single_rss_bytes` ＝ `RUSAGE_SELF` 與 `RUSAGE_CHILDREN` 取大（`host-run` 自己是 Python、約 20 MiB，偏保守） |
+| 取樣 | 每 **100 ms** 掃 `/proc`，以 ppid 鏈追到 `host-run` 的全部子孫（⛔ 不再只看原本的 process group——`setsid` 的子孫會逃出 group，但仍是 subreaper 的後代）：RSS 總和（單向警報）、`SigIgn` 含 `SIGCHLD` → `auto_reap_detected` |
+| `host-run` 自己的清理 | **逾時**（寬限內收斂不了）或**收到 TERM／INT／HUP**：先記量測失敗（`all_descendants_reaped=false` 或 `errors` 記中斷），再進清理階段——**只對 ppid ＝ `host-run` 的直接子程序**送訊號（⚠️ 只有 `host-run` 能收它們，收之前 PID ⛔ 不會被重用，所以這一段沒有 PID 重用的競態）：TERM → 等 5 秒 → KILL → 收；孫程序在 parent 死後被收養成直接子程序，下一輪再處理；直到 `ECHILD`，整段上限 **15 秒**（< `stop_step_group` 升級 KILL 之前的 20 秒，所以 harness 的 TERM 通常等得到它清完）。記 `cleanup_complete` 與 `leftover_pids`；清不乾淨 → 結束碼 **70**。被 TERM／INT／HUP 時清理完各以 **143／130／129** 結束 |
+| **harness 是 subreaper**（結構性的收養） | bootstrap 的 snapshot pass 以 `exec python3 -c <設 PR_SET_CHILD_SUBREAPER，再 execv /bin/bash>` 進入快照裡的主腳本（subreaper 屬性跨 `execve` 保留；bootstrap 區塊在兩個入口照舊逐字相同）。共用原語新增 `measure_subreaper_guard`，在六步清理的 trap 裝好之後**以行為驗證**：
+① **啟動**：`GUARD_SHELL_PID="$( ( python3 -c … </dev/null >/dev/null 2>&1 & echo "$!" ) )"`——子 shell **直接**背景啟動 Python（⛔ 不經外部的 `setsid` 指令：util-linux 的 `setsid` 在呼叫者是 process group leader 時會自己 fork，`$!` 就成了短命的 parent），以 command substitution 回報 `$!` 後立刻結束（**封閉的通道**：恰好一行十進位整數，否則視為沒有）；測試程序的 stdio 全部導走（⛔ 不會撐住 command substitution 的 pipe）。所以 `$!` 在結構上就是測試程序本身的 PID。
+② **測試程序自己回報身分**：一啟動先 `os.setsid()`（脫離 harness 的 process group，模擬逃出 group 的子孫）——**失敗就立刻結束**（它⛔ 沒有任何子程序，⛔ 不留後代、⛔ 不寫身分的 JSON）；成功才讀自己的 `/proc/self/stat`，把 PID 與 starttime 以暫存檔 ＋ rename 寫進 `<S>/guard-probe.json`（鍵恰好 `pid`、`starttime`，整數），然後睡 5 秒結束（本身有時限）；讀不到自己的 stat → ⛔ 不寫身分的 JSON、立刻結束。**失敗的狀態檔**：上面兩個失敗出口在結束之前，以暫存檔 ＋ rename 寫 `<S>/guard-probe-status.json`（canonical，鍵恰好 `schema`（＝ `i074_stage2_guard_probe_status_v1`）、`pid`（`os.getpid()`）、`stage`（封閉 enum：`setsid`、`self_stat`）、`errno`（`errno.errorcode` 的名稱，例如 `EPERM`））；寫不了就照樣結束。⚠️ 它**只供診斷與測試**：⛔ 不是身分來源（③ ⛔ 不讀它、⛔ 不依它送任何訊號），guard 中止時只把它的內容原樣印進訊息。
+③ **信任身分的條件**（三者都成立）：`guard-probe.json` 在 2 秒內出現且格式正確；它的 `pid` ＝ `GUARD_SHELL_PID`；`/proc/<pid>/stat` 的 starttime ＝ 它的 `starttime`。成立 → 記成 `GUARD_PROBE`，驗它的 ppid ＝ harness 的 PID，不符 → 中止（⛔ 不能以手動 re-exec 跳過）。
+④ **收尾**（所有出口）：身分可信 → `helper kill-pinned`（通過、ppid 不符、guard 期間收到訊號——`on_failure` 看到 `GUARD_PROBE` 就處理）；**身分不可信**（沒有 JSON、格式不符、兩個 PID 不相等、starttime 不符）→ ⛔ 不呼叫 `kill-pinned`、⛔ 不送任何訊號，只以 `GUARD_SHELL_PID` 等最多 6 秒、確認 `/proc/<pid>` 已消失或是 zombie，然後**中止**（subreaper 沒有被驗證）；`GUARD_SHELL_PID` 也沒有、或 6 秒後仍在 → 保留 S、列出能列的 PID。`kill-pinned` 結束碼 ≠ 0 → 保留 S、列出 PID |
+| 收養的程序怎麼清（`helper reap-adopted`） | **先釘住 harness 自己的身分**：參數帶 harness 的 PID 與 starttime（bash 以 `/proc/$$/stat` 取得），helper 啟動時驗 `/proc/<parent>/stat` 的 starttime 相符、而且 `os.getppid()` ＝ parent（helper 由 harness 同步呼叫，是它的直接子程序）——不符 → 結束碼 2、⛔ 不送任何訊號；**每一輪列舉之前、每一個訊號之前**都再驗 `os.getppid()` ＝ parent（harness 一死，helper 立刻被別的程序收養、`getppid()` 跟著變；只要它還等於 parent，那個 PID 就仍是原本的 harness、⛔ 不可能已被重用），不符 → 立刻停止送訊號、結束碼 2。之後列舉 ppid ＝ harness 的程序（排除 helper 自己與 `--exclude` 列的已知子程序，例如取樣器）；每一筆以 `/proc/<pid>/stat` 的 starttime 釘住，**送每一個訊號之前**都再確認一次：TERM → 5 秒 → KILL → 5 秒；孫程序被收養上來就下一輪處理，整段上限 30 秒。⚠️ harness 是 bash，會在 `SIGCHLD` 時自行收掉死去的子程序——確認 starttime 與送訊號之間仍有極短的 PID 重用競態（kernel 4.19 ⛔ 沒有 pidfd：`pidfd_open` 回 ENOSYS，已實測），照實標示 |
+| 什麼時候清 | ① 每一步結束後（共用的 `run_in_group`，在既有的「group 已無成員」檢查之後）：`reap-adopted --check-only`——有任何被收養的程序 ＝ 這一步把程序留在 host → `on_failure`；② `on_failure` 的步驟收尾（`stop_step_group`）之後、第二次容器清理之前：`reap-adopted`；③ 正常結束之前再 `--check-only` 一次 |
+| `reap-adopted` 的封閉契約 | 參數 `--state <S> --parent <pid> --parent-starttime <整數> [--exclude <pid> …] [--check-only]`；結束碼：**0** ＝ 沒有被收養的程序（或全部清掉）、**1** ＝ 有（`--check-only`）或清完仍有殘留、**2** ＝ helper 自己失敗（任何例外、`/proc` 讀不到、檔案寫不了、parent 的身分不符或在執行期間改變）。殘留時寫 `<S>/leftover-pids.json`（canonical、write 到暫存檔再 rename；鍵恰好 `schema`（＝ `i074_stage2_leftover_pids_v1`）、`parent`（整數）、`processes`（依 pid 排序、pid 不重複的陣列，每筆恰好 `pid`、`starttime`（整數）與 `cmdline`（字串）））——只給操作者看，⛔ 沒有程式讀回它。`on_failure`：`reap-adopted` 的結束碼 ≠ 0（含 2）→ **保留 S**、印出 `leftover-pids.json` 或「helper 失敗」（與「步驟的 process group 沒有確實結束」同一個處置） |
+| `kill-pinned` 的封閉契約 | 參數 `--pid <整數> --starttime <整數>`；只送訊號給**同時符合 PID 與 starttime** 的程序，**送每一個訊號之前**都再讀一次 `/proc/<pid>/stat`：`/proc/<pid>` 不在、starttime 不符（已不是它）、或 state 是 `Z`／`X`（已死、只等收屍）→ 視為已消失、⛔ 不送訊號；否則 TERM → 最多 2 秒 → KILL → 最多 2 秒。結束碼：**0** ＝ 已消失（含一開始就不在、身分不符）、**1** ＝ KILL 之後仍存活（同一個 starttime、⛔ 不是 zombie）、**2** ＝ helper 自己失敗（參數不合法、`/proc` 讀取發生 ENOENT 以外的錯誤）——**第一個訊號之前**失敗 → ⛔ 不送任何訊號；**TERM 之後**才失敗 → ⛔ 不再送後續的訊號（⛔ 不升級 KILL）、回 2。**輸出契約**：參數合法時，stdout 恰好一行 canonical JSON，鍵恰好 `schema`（＝ `i074_stage2_kill_pinned_v1`）、`pid`、`starttime`（整數）、`result`（封閉 enum：`already_gone`、`identity_mismatch`、`terminated_by_term`、`terminated_by_kill`、`alive_after_kill`、`error_before_signal`、`error_after_term`）、`signals_sent`（依序、只會是 `[]`、`["TERM"]`、`["TERM","KILL"]`）、`error`（字串或 `null`）；`result` 與結束碼一一對應（前四個 → 0、`alive_after_kill` → 1、兩個 `error_*` → 2）。參數不合法 → 結束碼 2、stdout ⛔ 沒有任何輸出（錯誤在 stderr）。呼叫端（guard 與 `on_failure`）把這一行原樣附加到 `<S>/kill-pinned.jsonl`，隨 S 複製進 `raw/`／`raw-failed/`；`on_failure` 的失敗摘要另列這個檔的路徑。⚠️ `reap-adopted` 判斷「仍存活」也同樣把 `Z`／`X` 視為已死 |
+| 紀錄的封閉 schema | `<S>/host/<step>.json`（canonical），鍵集合**恰好**是下列十七個（⛔ 不得缺欄、⛔ 不得多欄）；整數排除 `bool`、布林必須是 `bool`：`schema`（＝ `i074_stage2_host_run_v1`）；`step`（字串，＝ 檔名、而且是報告預期的步驟）；`rc`（整數 0～255，＝ `rc.tsv` 記的實際結束碼）；`self_max_rss_bytes`、`children_max_rss_bytes`（整數 > 0）；`max_single_rss_bytes`（＝ 兩者取大）；`group_rss_peak_sampled_bytes`（整數 > 0，含 `host-run` 自己）；`group_samples`（整數 > 0）；`group_interval_ms`（＝ 100）；`reaper`（＝ `subreaper`）；`all_descendants_reaped`、`auto_reap_detected`、`cleanup_complete`（布林）；`leftover_pids`（整數陣列）；`errors`（字串陣列）；`env_keys`（排序、不重複的字串陣列）；`cmd`（非空的字串陣列）。**有效的量測**另要求 `all_descendants_reaped=true`、`auto_reap_detected=false`、`cleanup_complete=true`、`leftover_pids=[]`、`errors=[]`——任一不符 → 逐步檢查與報告都 fail-closed |
+
+**⑤ observer**（⑩，外部唯讀）：每 0.5 秒讀 cgroup high-water 的同一個迴圈，另讀 v1 `memory/docker/<id>/memory.stat` 的 `total_rss`（⛔ 不讀 v2），每個容器另記 `rss_peak_bytes`（下界）與讀取次數；讀不到 → 列進 `rss_unavailable_containers`，`observation_complete` 另要求它是空的。
+
+**⑥ 快照清單**：新 wrapper 加進 acceptance 的「清單 ①」（`I074_BOOT_FILES` 與 helper 的 `SNAPSHOT_FILES["acceptance"]`；既有的 host unittest 釘住兩者一致），報告的 `harness_manifest` 因此也綁住它。sizing 的清單⛔ 不變。
+
+**⑦ 提早失敗**：
+
+| 項目 | 規則 |
+|---|---|
+| 能力檢查 | 建 work 目錄**之後**、clone 之前（六步清理的 trap 已裝好）：以**真正的** docker（⛔ 不經 shim、⛔ 不進 invocation 索引）、**同一個 image**、同一種掛載跑一次 `python -I /acceptance/rss_wrapper.py python -c pass`（`--rm --network none --user <uid:gid> --cidfile <S>/cid/probe.cid --name i074sz-<run id>-probe`）——cidfile 與名稱都在既有 `cleanup_containers` 的範圍內；docker client 以 `setsid timeout -s KILL 120` 在背景執行、harness `wait` 它並把它記成 `STEP_PID`（被中斷時 `on_failure` 照常結束它的 process group、再以 cidfile／名稱清容器）。`rss.json` 依 ② 驗（含 `rss_source = v1:total_rss`、`reaper = pid1`）；不符、逾時、docker 失敗 → `on_failure`（容器清理、`raw-failed`、摘要），⛔ 不 clone、⛔ 不開始任何量測。結果記進 meta（`rss_capability`）。演練用的故障注入 `probe-timeout`（把逾時縮成 2 秒；`--formal` 照舊拒絕所有故障注入） |
+| 逐步檢查 | `step()` 在比對完結束碼之後立刻 `helper check-step --state "$S" --step <名>`：驗**這一步**的 host 紀錄（④ 的封閉 schema 與有效條件，含 `rc` ＝ `rc.tsv`）與目前為止所有 sidecar（status 與 ② 的 schema）；任一不符 → `on_failure`，⛔ 不再執行之後的步驟（⑨-1 的量測趟排在最後，前面任何一步的量測失敗都⛔ 不會讓它開跑） |
+
+**⑧ 自動回收的前提怎麼守**：
+
+| 層 | 做法 |
+|---|---|
+| 執行期（容器與 host） | ① 的 wrapper 與 ④ 的 `host-run` 每次取樣都看每一個子孫的 `SigIgn`；含 `SIGCHLD` → fail-closed |
+| 靜態（本 repo 的程式） | 測試以**語意**掃 `python/`、`scripts/`（測試除外）。Python（AST）：先解析每個檔的 `signal` 名稱來源——`import signal`、`import signal as X`、`from signal import signal／SIGCHLD／SIGCLD／SIG_IGN／Signals [as Y]`——再找呼叫目標解析成 `signal.signal`、第一個參數解析成 `SIGCHLD`／`SIGCLD`（含 `Signals.SIGCHLD` 與整數字面值 17）、處理函式（位置或 `handler=`）解析成 `SIG_IGN`（含 `Handlers.SIG_IGN`）的呼叫；任何名為 `SA_NOCLDWAIT` 的識別字或字串。Shell：`trap ''`／`trap ""`／`trap -- ''` 的對象含 `CHLD`／`SIGCHLD`。⛔ 不禁止「提到 `SIGCHLD`」（偵測器要用它算 `SigIgn` 的位元）。⚠️ 動態寫法（`getattr`、`exec`、以 ctypes 直接呼叫 `sigaction`）⛔ 不在靜態檢查內——由執行期偵測涵蓋 `SIG_IGN`。現況 0 處（2026-10-05 實查） |
+| 契約外（照實標示） | `SA_NOCLDWAIT` 與存活不到一個取樣間隔的 `SIG_IGN` parent：報告的 `out_of_contract` |
+
+**⑨ 對已確認章節的修改**（本計畫確認後、隨計畫書 commit 加註；⚠️ 都標「⑦d 增補（2026-10-05 確認）」）：
+
+| 章節 | 修改 |
+|---|---|
+| v29「六、1」 | 「replay 程序（涵蓋 a～c）及 d～i 各獨立程序，皆各自 < 450 MiB」與「acceptance 門檻：< 450 MiB」兩處加註：判定量是 RSS（精確閘 ＋ 單向偵測器），契約限於經正常 wait 鏈保存 resource usage 的程序，被自動回收的子孫在契約外；含 page cache 的 cgroup 峰值只列資訊值 |
+| ⑦d 細部計畫「二之三」 | 流程加能力檢查（建 work 目錄之後、clone 之前）與每一步之後的逐步檢查 |
+| ⑦d 細部計畫「二之四」 | acceptance 的改寫：容器指令改用 wrapper（⛔ 不再是 `sh -c` 的 cgroup 峰值 wrapper） |
+| ⑦d 細部計畫「二之五」 | 記憶體、門檻、`status`、報告內容四列改成本增補；報告 schema 改 v2 |
+| ⑦d 細部計畫「二之六」 | observer 另記 `total_rss` |
+| ⑦d 細部計畫「五」 | 加 ac20～ac27、ac24b、ac24c；**既有的 ac6 改寫**：容器那一半改成精確閘與偵測器的邊界（各自 ＝ 471,859,200 → 超標、−1 → 通過），cgroup 峰值 ＝ 471,859,200 → ⛔ 不影響 status（資訊值）；host 那一半、磁碟與其餘照舊。**既有的 ac16 改寫**：「取樣只算同一個 process group」改成「以 ppid 鏈追到的全部子孫（含 `setsid` 的）」，其餘照舊；兩者的測試（`test_ac6_container_and_host_boundaries`、`test_host_run_*`）同步改，⛔ 不留過期的斷言 |
+| ⑦d 細部計畫「二之三」（bootstrap） | snapshot pass 以 python3 啟動器設 subreaper 再 exec 快照裡的主腳本；共用原語加 `measure_subreaper_guard` 與 `reap-adopted` 的三個時機 |
+| ⑦d 實作結果 | 「本輪實跑的新發現」那一段的「v29「六、1」」出處已更正（本計畫 v1 起） |
+
+##### 三、本增補補上的決定（⚠️ 待確認）
+
+| # | 決定 | 理由 |
+|---|---|---|
+| 1 | wrapper 是獨立的 Python 檔、以快照路徑唯讀掛載（⛔ 不寫成 shim 裡的 inline 字串） | pytest 能直接測；綁進 `harness_manifest`；與 replay launcher 同一個做法 |
+| 2 | 取樣間隔：容器 50 ms、host 100 ms | 它們只是偵測器，間隔⛔ 不影響通過的證明；host 要掃整個 `/proc`，間隔放寬 |
+| 3 | 通過的證明 ＝ `max(RUSAGE_SELF, RUSAGE_CHILDREN)`，前提是 PID 1／subreaper 收到 `ECHILD` | 契約（縮小後）的直接量法 |
+| 4 | 容器內：leader 結束後 10 秒內收斂不到 `ECHILD` → fail-closed、⛔ 不殺 | 存活的子孫的 high-water 讀不到；wrapper 結束時 docker 會清掉整個容器 |
+| 5 | 只接受 cgroup v1 的 `total_rss`（v2 的 `anon` ⛔ 不讀；`rss_source` 封閉 enum） | v2 的 `anon` 與 v1 的 `total_rss` 不同義，而且只有 fake 測試；本 host 是 v1。移到 v2 host 時再以實機驗證另行裁決 |
+| 6 | 含 page cache 的 cgroup 峰值降為資訊值 | 使用者的裁決；保留它才看得到與 ④⑤ 的對照 |
+| 7 | observer 也另記 `total_rss` 的取樣峰值 | 與 acceptance 的偵測器同一種量；⑩ 只額外記錄，⛔ 不作為前置（v29「八」） |
+| 8 | sizing 的**量法**完全不變（wrapper、sidecar 的既有欄位、報告與數字）；⚠️ 共用的 bootstrap（subreaper）、`run_in_group` 的收養檢查與 `on_failure` 的 `reap-adopted` 也套用到 sizing（「三」#15、#16） | ⑤ 的數字與 ⑨-2 的正式 sizing 以同一種量法比較；清理的強化對 sizing 同樣成立 |
+| 9 | `host-run` 補上 subreaper、收到 `ECHILD`、計入 `RUSAGE_SELF`、以 ppid 鏈取樣 | 與容器的精確閘是同一個缺口 |
+| 10 | 契約縮小（使用者的裁決）；`SIGCHLD=SIG_IGN` 執行期偵測、本 repo 語意靜態禁止 | 要涵蓋任意子孫需要觀察每一個 process exit（ptrace／taskstats），⛔ 不在本增補 |
+| 11 | 能力檢查在建 work 目錄之後、clone 之前；生命週期交給既有的六步清理（cidfile、名稱、`STEP_PID`） | 失敗時沿用 `raw-failed` 與摘要的既有處置；⛔ 不另寫一套清理 |
+| 12 | `host-run` 的程序內清理只對直接子程序送訊號；harness 的 `reap-adopted` 以 starttime 釘住 PID | 前者沒有 PID 重用的競態；kernel 4.19 ⛔ 沒有 pidfd，後者是能做到的最小競態 |
+| 13 | 報告 schema 升成 v2、頂層記 `contract` 與 `out_of_contract` | 判定語意變了；dev4、dev5 的 v1 報告是舊語意的開發紀錄 |
+| 14 | 另立增補 commit（使用者的裁決）：計畫書 commit（只動文件）→ 實作 commit | ⛔ 不 amend 已 commit 的 `f20ce3c` |
+| 15 | **harness 自己是 subreaper**（bootstrap 以 python3 啟動器設定、以行為驗證），取代 v4 的 `.live` 快照 | 快照有漏失窗口（最後一次快照之後、TERM 寬限期間才 fork 的程序）；收養是結構性的，隨時可列舉。⚠️ 動到已 commit 的 bootstrap 區塊（兩個入口照舊逐字相同） |
+| 16 | 每一步之後檢查「harness 有沒有被收養的程序」，有就 `on_failure`（sizing 也套用——共用原語） | 步驟把程序留在 host 本身就是 harness 的失敗；sizing 的步驟本來就⛔ 不該留程序 |
+| 17 | 報告 v2 的三個新欄位是封閉的固定值；`violations` 結構化；驗證函式驗封閉 schema 並由列重新推導門檻結果 | 日後的讀取端（例如 ⑨-1 的判讀）用同一個函式；它保證報告本身一致，⛔ 不保證數字與原始量測相符 |
+| 18 | `reap-adopted` 以 `getppid()` 確認 parent 仍是原本的 harness（每一輪、每一個訊號之前） | helper 是 harness 的直接子程序：`getppid()` 等於 parent 的期間，那個 PID ⛔ 不可能已被重用；不必等 pidfd |
+| 19 | guard 的測試程序由子 shell 直接背景啟動、自己 `os.setsid()` 並回報 PID 與 starttime，而且必須 ＝ 子 shell 以封閉通道回報的 `$!`；身分不可信 → ⛔ 不送訊號、等它自己結束、中止 | `$!` 在結構上就是測試程序；沒有可信的身分就沒有安全的訊號；兩個獨立來源一致才信；測試程序本身最多活 5 秒 |
+| 20 | 被訊號中斷時 harness 的外部結束碼維持 **1**（既有契約），原始訊號的結束碼記在 `failure_summary.json` | 不遷移既有的操作契約（`development-workflow.md` 的「1 ＝ harness 失敗」）；`host-run` 自己的 143／130／129 是步驟層的結束碼，與此無關 |
+
+##### 四、受影響檔案與資料流
+
+| 檔案 | 改動 |
+|---|---|
+| `python/scripts/i074_stage2_rss_wrapper.py`（新增） | 「二」① |
+| `scripts/lib/i074-sizing-docker-shim.sh` | acceptance profile：掛載 wrapper、容器指令改用它；sizing 照舊 |
+| `scripts/i074-stage2-acceptance.sh`、`scripts/i074-stage2-sizing.sh` | bootstrap 區塊的 exec 改經 python3 啟動器（subreaper；兩個入口逐字相同）；acceptance：`I074_BOOT_FILES` 加新檔、能力檢查、`step()` 的逐步檢查、故障注入 `probe-timeout`；sizing：故障注入 `orphan-setsid`（步驟留下一個 `setsid` 的程序）；兩個入口都接受故障注入 `subreaper-stall`（guard 記下測試程序之後停住）、`guard-noident`（測試程序⛔ 不回報身分）、`guard-badident`（回報錯的 PID）與 `guard-pgleader`（測試程序先自成 process group leader，讓 `os.setsid()` 失敗）；`--formal` 照舊拒絕所有故障注入 |
+| `scripts/lib/i074-stage2-measure.sh` | `measure_subreaper_guard`（含 `GUARD_PROBE` 在所有出口的收尾）；`run_in_group` 之後的收養檢查；`on_failure` 的 `reap-adopted` 與「結束碼 ≠ 0 → 保留 S」；正常結束前的收養檢查 |
+| `python/scripts/i074_stage2_sizing.py` | `SNAPSHOT_FILES["acceptance"]`、兩份 schema 的驗證、sidecar、報告 v2（門檻、記憶體列、三個封閉欄位、`validate_acceptance_report_v2()`、notes、文字版）、`derive_acceptance_violations()`、`host-run`（④）、`reap-adopted`、`kill-pinned`、`check-step`、能力檢查的驗證、observer（⑤） |
+| 測試 | pytest：wrapper、兩份 schema、sidecar、報告 v2、observer、靜態掃描、既有的 ac6 改寫；shell：`test-replay-args.sh` 的 ac4、能力檢查、逐步檢查、harness 的收養（ac28）；host unittest：`host-run`（含既有的 ac16 改寫）與 `reap-adopted` |
+| 文件 | 本筆（「二」⑨）、`sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」、`development-workflow.md` 的 acceptance 一節 |
+
+資料流：容器內 wrapper → `<S>/peak/<ID>/{peak,rss.json}` → shim 結束時的 sidecar（`<S>/containers/<ID>.json`）→ 逐步檢查 → `acceptance-report`（v2）；host 端：`host-run` → `<S>/host/<step>.json` → 逐步檢查 → 報告；收養：harness（subreaper）→ 每一步之後與 `on_failure` 的 `reap-adopted`（殘留時 `<S>/leftover-pids.json`）。
+
+##### 五、測試（id → 落點）
+
+| id | 內容 | 落點 |
+|---|---|---|
+| ac20 | wrapper：fake `memory.stat` 在執行期間變化 → 取樣峰值 ＝ 其中的最大值、次數 > 0；leader 配置 N MiB → `children_max_rss_bytes` ≥ N MiB；**wrapper 自己膨脹**（在 wrapper 的程序裡先配置 N MiB 再執行）→ `self_max_rss_bytes`、`max_single_rss_bytes` ≥ N MiB；**未被 wait 的子孫**（leader 啟動一個配置 N MiB 的孫程序、⛔ 不 wait 就結束）→ 仍計入；**存活的孤兒**（孫程序活過寬限）→ `all_descendants_reaped=false` 與錯誤、結束碼照傳；孤兒在寬限內結束 → 收掉並計入；**反例：parent 把 `SIGCHLD` 設成 `SIG_IGN`、它的子程序配置 N MiB** → `children_max_rss_bytes` < N MiB（被自動回收、確實⛔ 不在精確閘裡）**而且** `auto_reap_detected=true`（⛔ 不會被當成通過）；結束碼原樣（0、3）與訊號（KILL → 137）；stdout／stderr 逐 byte 透明；`memory.stat` 讀不到 → 錯誤、結束碼照傳；只有 v2 的 `memory.stat` → 錯誤（⛔ 不改讀 `anon`）；⛔ 不是 PID 1 → `reaper=subreaper` | pytest（3.9 相容另在 host unittest 跑一支） |
+| ac21 | `rss.json` 的封閉 schema：逐欄竄改各一支——缺欄、多欄、`bool` 當整數、整數當布林、0、`rss_interval_ms` ≠ 50、未知的 `rss_source`、`reaper=subreaper`、`errors` 非空、`max_single_rss_bytes` ≠ 兩者取大、`all_descendants_reaped=false`、`auto_reap_detected=true` → 量測失敗；acceptance 讀、sizing ⛔ 不讀 | pytest |
+| ac22 | 報告 v2：精確閘的邊界（＝ 450 MiB → 超標、−1 → 通過）；偵測器的邊界（取樣 ＝ 450 MiB → 超標、−1 → 通過）；cgroup 峰值 ≥ 450 MiB、RSS 都低 → `ok`；schema 名稱；`violations` 是結構化的；`validate_acceptance_report_v2()` 的竄改——頂層與巢狀列（`memory[]`、`host[]`、`paths.*`、`promotion.*`、`limits`、`violations[]`）的缺欄、多欄、型別錯誤（含 `bool` 冒充整數）、三個固定欄位的未知值、`status` 不在 enum；**語意交叉**：`status = ok` 但 `violations` 非空、`threshold_exceeded` 但 `violations` 為空、把某一列的 `max_single_rss_bytes` 改成 ≥ 門檻而 `violations` 沒有對應的一筆、刪掉一筆 `violations`、`P_path` 改成 > `P_B_BUDGET` → 全部拒絕；**把 `limits.P_B_BUDGET` 調高、移除磁碟的那一筆違反、其餘欄位保持一致** → 拒絕（它必須等於正式常數）；**衍生欄位的竄改**：`self_max_rss_bytes` 改成 500 MiB 同時把 `max_single_rss_bytes` 壓低（容器與 host 各一支）、`accounted` ≠ `accounted_parts` 的總和、`P_path` ≠ 三者取大、`P_promotion` 或 `P_path_plus_promotion` 不符、`below_limit`／`group_alarm` 翻轉、`container_memory_limit_bytes` 與列不符 → 全部拒絕；產出端與 validator 呼叫的是同一個 `derive_acceptance_violations()`（以 monkeypatch 改它，兩邊一起變）；notes 只列上限**嚴格低於**門檻的容器（上限 ＝ 門檻的容器⛔ 不列） | pytest |
+| ac23 | observer：`total_rss` 取樣峰值、讀不到 → `rss_unavailable_containers` 且⛔ 不完整 | pytest |
+| ac24 | `host-run`：未被 wait 的孫程序配置 N MiB → 計入；`RUSAGE_SELF` 計入；`setsid` 的子孫計入取樣；**存活、而且會 `setsid()` 的子孫**活過寬限 → `all_descendants_reaped=false`、清理階段收掉它、`cleanup_complete=true`；**忽略 TERM 的子孫** → 升級 KILL；**`host-run` 收到 TERM／INT／HUP**（參數化三支；有 `setsid` 的子孫在跑）→ 清理後各以 143／130／129 結束、子孫已不在；**`host-run` 自己膨脹**（以一個先配置 N MiB、再在自己的程序裡呼叫 `host_run()` 的 driver 執行）→ `self_max_rss_bytes` 與 `group_rss_peak_sampled_bytes` 都 ≥ N MiB（群組取樣含 `host-run` 自己）；`SIGCHLD=SIG_IGN` 的子孫 → `auto_reap_detected=true`；清理收不乾淨（把送訊號換成 no-op）→ 結束碼 70 | host unittest |
+| ac24b | 收養（測試以一個設成 subreaper 的 Python 程序扮演 harness）：**`host-run` 被 KILL**、留下 `setsid` 的子孫 → 被收養、`reap-adopted` 收掉它；**TERM 寬限期間才 fork**（子程序收到 TERM 時 fork 一個 `setsid` 的程序再結束、`host-run` 隨後被 KILL）→ 新程序同樣被收養並收掉；**PID 重用的守門**：列舉之後、送訊號之前 starttime 變了（monkeypatch）→ ⛔ 不送訊號；**parent 的身分**：`--parent-starttime` 不符 → 2、⛔ 不送任何訊號；**helper 執行期間 parent 消失**（扮演 harness 的程序在第一輪 TERM 之後被 KILL）→ helper 偵測到 `getppid()` 改變、立刻停止（剩下的目標⛔ 沒有再收到訊號、仍存活，由測試自己收掉）、2；`--check-only` 有收養的程序 → 1；清完仍有殘留（把送訊號換成 no-op）→ 1、`leftover-pids.json` 符合封閉格式；`/proc` 讀不到 → 2 | host unittest |
+| ac28b | `kill-pinned`（每一支都斷言 stdout 那一行 JSON 的封閉鍵集合、`result`、`signals_sent` 與結束碼的對應）：一開始就不在 → 0；身分不符（PID 屬於另一個存活的無關程序、starttime 不同）→ 0 而且⛔ 不送訊號（該程序仍存活）；忽略 TERM 的程序 → 升級 KILL → 0；KILL 之後已成 zombie（扮演 parent 的程序故意不收）→ 視為已消失 → 0；KILL 之後仍存活（把送訊號換成 no-op）→ 1；第一次讀 `/proc` 就發生 EACCES 等錯誤（monkeypatch）→ 2 而且⛔ 不送訊號；**TERM 之後、KILL 之前**讀 `/proc` 失敗（monkeypatch 第二次讀取）→ 2、`result=error_after_term`、`signals_sent=["TERM"]`、⛔ 沒有升級 KILL；參數不合法 → 2、stdout 是空的；guard 與 `on_failure` 把那一行附加到 `<S>/kill-pinned.jsonl`（shell 測試斷言內容） | host unittest |
+| ac24c | host 紀錄的封閉 schema：逐欄竄改（缺欄、多欄、`bool` 當整數、整數當布林、`step` ≠ 檔名、`rc` ≠ `rc.tsv`、`max_single_rss_bytes` ≠ 取大、`group_interval_ms` ≠ 100、`env_keys` 未排序、`cmd` 為空、各有效條件不符）→ 逐步檢查與報告 fail-closed | pytest |
+| ac25 | 能力檢查：fake docker 產出只有 v2 的 `rss.json`、`reaper=subreaper`、或 schema 不符 → `on_failure`、⛔ 沒有 clone；**卡住的 docker client**（`probe-timeout`）→ 被 KILL、以 cidfile 清掉容器；**被 TERM**（卡住期間）→ harness 結束碼 **1**（既有契約）、`failure_summary.json` 記原始訊號的結束碼 143、容器已清；容器清不掉 → 保留 S、列出 CID | shell（隔離的最小 repo） |
+| ac26 | 逐步檢查：第一步之後放一份量測失敗的 sidecar（或 host 紀錄的有效條件不符）→ 立刻 `on_failure`、之後的步驟⛔ 沒有執行 | shell（隔離的最小 repo）＋ pytest（`check-step` 本身） |
+| ac28 | harness 的收養：經 bootstrap 啟動 → `measure_subreaper_guard` 通過、**測試程序已不在**；手動 re-exec（⛔ 不經 python3 啟動器、快照合法）→ 在 guard 中止、**測試程序已不在**（guard 的錯誤訊息印出它的 PID 與 starttime，測試據此確認）；guard 期間收到 TERM（故障注入 `subreaper-stall`：記下測試程序之後停住）→ `on_failure` 收掉它、harness 結束碼 **1**、`failure_summary.json` 記 143；**測試程序回報不了身分**（故障注入 `guard-noident`：測試程序⛔ 不寫 `guard-probe.json`）→ ⛔ 不送訊號、等它自己結束（5 秒內）、確認消失 → 中止；**JSON 的 PID ≠ `$!`**（故障注入 `guard-badident`：測試程序寫入自己的 PID ＋ 1）→ ⛔ 沒有呼叫 `kill-pinned`（`kill-pinned.jsonl` ⛔ 不存在）、只以 `$!` 等它自己結束、確認消失 → 中止；**正常情況下 `$!` ＝ JSON 的 `pid`**（正面的一支）；**process group leader 的情境**（故障注入 `guard-pgleader`：測試程序先 `os.setpgid(0, 0)` 自成 process group leader，再呼叫 `os.setsid()`——確定以 EPERM 失敗；⛔ 不靠 `set -m`，那要在實際執行 `python3 … &` 的內層子 shell 才生效、容易打不到）→ 測試程序立刻結束、⛔ 沒有任何後代、⛔ 不寫身分的 JSON → 走身分不可信的路徑 → 中止、⛔ 沒有殘留；另斷言故障注入**真的走到 EPERM**：`guard-probe-status.json` 存在且恰好是 `stage=setsid`、`errno=EPERM`、`pid` ＝ `$!`（guard 的訊息印出 `$!` 與狀態檔的內容），而且⛔ 沒有呼叫 `kill-pinned`（`kill-pinned.jsonl` ⛔ 不存在）；**狀態檔⛔ 不是身分來源**：故障注入 `guard-badident` 的情境另放一份偽造的狀態檔 → guard 的判斷與收尾⛔ 不變；sizing 的故障注入 `orphan-setsid`（步驟留下一個 `setsid` 的 `sleep`）→ 收養檢查觸發 `on_failure`、`sleep` 已不在；`reap-adopted` 結束碼 ≠ 0（以 fake 的 helper）→ `on_failure` 保留 S、印出殘留；兩個入口的 bootstrap 區塊照舊逐字相同 | shell（隔離的最小 repo）＋ host unittest（既有的一致性） |
+| ac27 | 靜態（語意）：`python/`、`scripts/`（測試除外）⛔ 沒有把 `SIGCHLD`／`SIGCLD` 設成 `SIG_IGN`、⛔ 沒有 `SA_NOCLDWAIT`、⛔ 沒有 `trap '' … CHLD`。對照組（暫存檔，逐一植入 → 必須被抓到）：`signal.signal(signal.SIGCHLD, signal.SIG_IGN)`、`import signal as sig; sig.signal(sig.SIGCHLD, sig.SIG_IGN)`、`from signal import signal, SIGCHLD, SIG_IGN; signal(SIGCHLD, SIG_IGN)`、`from signal import signal as s, SIGCHLD as C, SIG_IGN as I; s(C, I)`、`signal.signal(17, signal.SIG_IGN)`、`signal.signal(signal.Signals.SIGCHLD, handler=signal.SIG_IGN)`、`SA_NOCLDWAIT`、`trap '' CHLD`、`trap -- "" SIGCHLD`；⛔ 不該抓的：只提到 `SIGCHLD`、`signal.signal(signal.SIGCHLD, signal.SIG_DFL)` | pytest |
+| ac4（擴充） | acceptance 每個 role 的指令都是 `python -I /acceptance/rss_wrapper.py <原指令>`、掛載的是快照裡的檔；sizing 照舊是 `sh -c`（⛔ 不掛 wrapper） | shell |
+| ac19（既有） | 快照清單與 `SNAPSHOT_FILES` 一致、`harness_manifest` 涵蓋新檔 | host unittest、pytest |
+
+反向驗證（逐項注回、確認變紅、還原）：門檻改回 cgroup 峰值；拿掉精確的閘；拿掉偵測器；門檻的邏輯寫反；精確閘不含 `RUSAGE_SELF`；不收孤兒（leader 結束就讀）；存活的子孫不視為錯誤；拿掉 `SigIgn` 的偵測；取樣讀不到時寫 0；改讀 v2 的 `anon`；兩份 schema 放寬（多欄、`bool`、交叉值）；notes 用「不高於」；報告 schema 留在 v1；結束碼不傳回訊號；wrapper 寫 stdout；shim 改從工作複本掛載 wrapper；observer 讀不到 `total_rss` 仍標完整；`host-run` 不收孤兒、只看 process group、逾時不清理、被 TERM 不清理、清不乾淨卻回 0；bootstrap 不設 subreaper；拿掉 `measure_subreaper_guard`；拿掉每一步之後的收養檢查；`reap-adopted` 不驗 starttime；`reap-adopted` 不驗 parent 的身分（或只在開頭驗一次）；guard 的測試程序在失敗路徑⛔ 沒有收掉；拿不到身分或兩個 PID 不相等時仍送訊號；guard 改回外部的 `setsid` 指令；`kill-pinned` 的 `result` 與結束碼不對應；validator 以報告自己的 `P_B_BUDGET` 當基準；`kill-pinned` 在 TERM 之後讀取失敗仍升級 KILL；`kill-pinned` 不驗 starttime、把 zombie 當成存活；validator 不重新推導門檻結果、不驗衍生欄位、產出端另寫一份門檻邏輯；`reap-adopted` 失敗（結束碼 2）仍刪 S；報告不經 `validate_acceptance_report_v2()`；靜態掃描不解析 alias；拿掉能力檢查；能力檢查逾時不清容器；拿掉逐步檢查；靜態掃描漏掉 `SIG_IGN`。
+
+##### 六、驗證
+
+1. `python/scripts/test.sh` 完整執行（依序）全綠。
+2. 反向驗證（上表）。
+3. acceptance 開發驗證的實跑（stub）一次：subreaper 的 guard 通過；每一步之後的收養檢查都是 0；能力檢查通過（`rss_capability`）；每個容器的最大單一程序、wrapper 自己、RSS 取樣峰值與次數、cgroup（資訊值）、上限、`reaper=pid1` 都有數字；每一步的 host 紀錄有效（`all_descendants_reaped=true`、`cleanup_complete=true`）；報告是 v2；與 dev5 的 cgroup 峰值對照。
+4. sizing 的 validation 實跑一次（bootstrap、`run_in_group`、`on_failure` 是共用原語；量法與數字預期不變）。
+5. stage 之後 `--verify "$(git write-tree)"`（tooling 路徑⛔ 不動）、`git diff --cached --check`、`check-doc-refs.py`，以及「⛔ 不…」用語的掃描。
+
+##### 七、風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 取樣的 `total_rss` 漏掉尖峰 | 它只是偵測器；通過由精確的閘證明 |
+| 契約外的自動回收 | 契約已縮小（使用者的裁決）；`SIG_IGN` 執行期偵測、本 repo 靜態禁止；報告的 `out_of_contract` 照實列出 |
+| wrapper 改變被量的程序（多一層 Python、約 10 MiB、50 ms 一次的讀檔與 `/proc` 掃描、PID 1 的收養職責） | 方向偏保守；結束碼與 I/O 由測試釘住 |
+| 清理殺到不該殺的程序 | `host-run` 只對直接子程序送訊號（PID ⛔ 不會被重用）；`reap-adopted` 先釘住 harness 自己（starttime ＋ 每一步的 `getppid()`），只動 ppid ＝ harness 的程序、以 starttime 釘住，⛔ 不以名稱或指令比對（⛔ 不用 `pkill -f`）；確認與送訊號之間仍有極短的競態（⛔ 沒有 pidfd），照實標示；guard 的測試程序以 PID ＋ starttime 釘住、最多活 5 秒 |
+| harness 自己被 KILL、或 host 當機 | 照實標示的前提（「驗收語意」）：沒有任何程式能收尾；`on_failure` 本身也是 harness 的一部分 |
+| 改到已 commit 的 bootstrap | 兩個入口逐字相同的測試照跑；subreaper 以行為驗證；bootstrap 的既有測試（快照、re-exec、⛔ 不刪）全部重跑 |
+| 換到 cgroup v2 的 host | 能力檢查在 clone 之前就中止，需另行裁決 |
+| 判定量改了，⑨-1 的意義跟著改 | 「二」⑨ 逐一加註；報告升 v2；sizing 的量法不變 |
+| 回滾 | 增補的實作是一個獨立的 commit（`f20ce3c` 之上）：`git revert` 它即回到 ⑦d 已 commit 的狀態；計畫書 commit 只動文件 |
+
+##### 八、歸檔（實作後；review 前保留本計畫）
+
+`sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」改寫「對象與門檻」與「容器的記憶體上限」兩點並加契約與範圍；`development-workflow.md` acceptance 一節的「門檻」「容器的記憶體上限」兩列、能力檢查與 `host-run` 的清理；本筆的 ⑦d 實作結果另加「增補的實作結果」。
+
+##### 增補計畫第一輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v2） |
+|---|---|---|---|
+| 高 | 兩道 RSS 閘仍無法證明「每個程序／整個容器都低於 450 MiB」：`RUSAGE_CHILDREN` 只涵蓋已結束且已 wait 的子孫、是最大的那一個而⛔ 不是整棵樹，wrapper 自己⛔ 不在內；計畫又允許結束時仍存活的孤兒只靠 50 ms 的下界涵蓋 → 可能假通過 | ✅ 成立（`getrusage(2)`）。另查到 host 端 `host-run` 有同一個缺口 | 語意釘死為 v29 的「每一個程序各自」：通過的證明 ＝ `max(RUSAGE_SELF, RUSAGE_CHILDREN)`，前提是 wrapper 是 PID 1（或 subreaper）並收到 `ECHILD`，收斂不了 → fail-closed；取樣的 `total_rss` 改成單向偵測器；⛔ 不新增容器總和的契約；`host-run` 一併補上（「三」#9）；測試補 wrapper 自身膨脹、存活的孤兒、未被 wait 的子孫、收斂不到 `ECHILD` |
+| 中 | cgroup v2 的 `anon` 只有 fake 測試，卻能產生正式的通過結果 | ✅ 成立（v1 `total_rss` 是匿名頁 ＋ swap cache，v2 `anon` 是匿名映射，⛔ 不同義） | 只接受 `v1:total_rss`（封閉 enum），wrapper ⛔ 不改讀 v2；移到 v2 host 時以實機驗證另行裁決（「三」#5） |
+| 低 | `rss.json` 的「格式不符」沒有定義成封閉 schema | ✅ 成立 | 「二」② 的封閉 schema（恰好十一個鍵、整數排除 `bool`、峰值與次數 > 0、`rss_interval_ms` ＝ 50、`rss_source` 封閉 enum、`errors` 為空、`max_single_rss_bytes` ＝ 兩者取大、`all_descendants_reaped=true`），ac21 逐欄竄改 |
+| 低 | 上限等於門檻時，⛔ 不能宣稱兩道閘必然通過（判定是嚴格 <） | ✅ 成立；另查到更廣的一層：`ru_maxrss` 含 file-backed 頁，可能記在別的 cgroup，**即使上限嚴格低於門檻，精確的閘也⛔ 不受上限保證** | notes 改成只列上限**嚴格低於**門檻的容器，而且只宣稱 `total_rss` 偵測器不可能觸發；精確的閘仍逐一比較 |
+
+##### 增補計畫第二輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v3） |
+|---|---|---|---|
+| 高 | 收到 `ECHILD` ⛔ 不等於所有子孫的 RSS 都已納入：中間的 parent 把 `SIGCHLD` 設成 `SIG_IGN` 或用 `SA_NOCLDWAIT` 時，子程序被 kernel 自動回收、resource usage 被丟棄，最上層照樣收到 `ECHILD` | ✅ 成立（`getrusage(2)`） | 採 review 的第一個選項：精確閘的範圍**明訂**為「wrapper、leader 與經正常 wait 鏈保存 resource usage 的子孫」；`SIGCHLD=SIG_IGN` 在容器與 host 都以取樣偵測（`SigIgn`）、偵測到即 fail-closed（`auto_reap_detected` 進兩份 schema）；本 repo 的程式以靜態測試禁止（ac27，現況 0 處）；`SA_NOCLDWAIT` 列為殘餘（「二」⑧）；ac20 加反例：`SIG_IGN` 的 parent 底下的配置確實⛔ 不在精確閘裡，而且被偵測、⛔ 不會被當成完整的證明 |
+| 中 | `host-run` 逾時之後可能留下存活的 host 程序：容器的 wrapper ⛔ 不殺是安全的（docker 會清），host 上沒有這個保證；`setsid` 的子孫會逃出原本的 process group，外層的 TERM／KILL 只看那個 group | ✅ 成立（`scripts/lib/i074-stage2-measure.sh` 的 `stop_step_group` 只對原 group） | 「二」④：先標 `all_descendants_reaped=false`（量測必然失敗）→ 獨立的清理階段（ppid 鏈追到的全部子孫：TERM → 5 秒 → KILL → 收）→ 記 `cleanup_complete`、`leftover_pids`；清不乾淨 → 結束碼 70、`<S>/host-leftover-pids`，`on_failure` 保留 S 並列出 PID；群組取樣也改成 ppid 鏈；ac24 加會 `setsid()` 的存活子孫與忽略 TERM 的子孫 |
+| 中 | v1-only 的不相容太晚才被發現：wrapper 讀不到 v1 只記錯誤、結束碼照傳，要到最後的報告才中止——v2 host 上可能白跑完整套（含約 3 小時的量測趟） | ✅ 成立 | 「二」⑦：建 work 目錄之前以同一個 image、同一種掛載跑一次能力檢查（⛔ 不經 shim、⛔ 不進索引）；每一步之後立刻 `check-step`（這一步的 host 紀錄 ＋ 目前為止的 sidecar），第一個不符就 `on_failure`；ac25、ac26 |
+| 低 | `host-run` 的紀錄缺少封閉 schema | ✅ 成立 | 「二」④ 的封閉 schema（完整鍵集合、整數排除 `bool`、`max_single_rss_bytes` ＝ 兩者取大、`reaper=subreaper` 與各有效條件）；ac24 的逐欄竄改 |
+
+##### 增補計畫第三輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v4） |
+|---|---|---|---|
+| 高 | 正式的 `ok` 仍無法證明「每一個程序」都 < 450 MiB：精確閘只涵蓋正常 wait 鏈，`SIG_IGN` 是取樣偵測、`SA_NOCLDWAIT` 看不到——只在 notes 標殘餘⛔ 不能把可能的假通過變成有效驗收；必須在「縮小契約」與「證明不了就⛔ 不給 ok」二選一 | ✅ 成立 | **使用者裁決：縮小契約**——「經正常 wait 鏈保存 resource usage 的每一個程序」；被自動回收的子孫在契約外；v29「六、1」、報告 `status`、歸檔文件同步修改（「二」⑨）；報告頂層記 `contract` 與 `out_of_contract` |
+| 中 | `host-run` 的清理只處理正常逾時，被 TERM、KILL 或異常結束時來不及清；外層只清原 process group；以裸 PID 送訊號有 PID 重用的競態 | ✅ 成立；kernel 4.19 ⛔ 沒有 pidfd（`pidfd_open` 回 ENOSYS，實測） | 程序內：逾時與 TERM／INT／HUP 都進清理階段，**只對直接子程序**送訊號（收之前 PID ⛔ 不會被重用）、一輪一輪收；外層：`host-run` 每次取樣寫 `<S>/host/<step>.live`（`pid, starttime`），`on_failure` 以 `host-reap` 先比 starttime 再送訊號；收不掉 → 保留 S、列出 PID；ac24（TERM）、ac24b（KILL、PID 重用的守門） |
+| 中 | 能力檢查的容器生命週期沒有納管（cidfile、唯一名稱、逾時、中斷清理） | ✅ 成立（既有清理只認 `<S>/cid/*.cid` 與 `i074sz-<run id>-*`） | 能力檢查改在建 work 目錄之後、clone 之前，六步清理的 trap 已裝好；`--cidfile <S>/cid/probe.cid`、`--name i074sz-<run id>-probe`（都在既有清理的範圍內）、`setsid timeout -s KILL 120` 背景執行並記成 `STEP_PID`；故障注入 `probe-timeout`；ac25 補卡住、被 TERM、清不掉 |
+| 中 | commit 與回滾的邊界與事實不符：文件寫「併進尚未 commit 的 ⑦d」，但 HEAD 已是 `f20ce3c`（⑦d 實作） | ✅ 成立 | **使用者裁決：另立增補 commit**（計畫書 → 實作）、⛔ 不 amend；回滾單位 ＝ 增補的實作 commit（`git revert`）；狀態列與「現在在這裡」同步 |
+| 低 | host 紀錄還⛔ 不是真正的封閉 schema（`step`、`rc`、三個布林、`env_keys`、`cmd` 的型別與交叉條件；`step` ＝ 檔名、`rc` ＝ 實際結果） | ✅ 成立 | 「二」④ 逐欄定義（十七個鍵、型別、交叉條件、有效條件）；ac24c 逐欄竄改 |
+| 低 | 門檻的文字邏輯寫反（寫成「`max_single` < 450 或 `sampled` ≥ 450 → 超標」） | ✅ 成立 | 改成「`max_single_rss_bytes` ≥ 450 MiB 或 `rss_peak_sampled_bytes` ≥ 450 MiB → `threshold_exceeded`」；反向驗證加「邏輯寫反」 |
+| 低 | ac27 的字面掃描與偵測器本身衝突（偵測器要用 `SIGCHLD` 算 `SigIgn` 的位元） | ✅ 成立 | 改成語意檢查（AST 找「設成 `SIG_IGN`」與 `SA_NOCLDWAIT`、shell 找 `trap ''`）；對照組：只提到 `SIGCHLD` → 通過 |
+| 低 | 改了報告結構與判定語意卻沿用 v1 schema；已經有一份舊語意的開發報告 | ✅ 成立（dev4、dev5 兩份） | 升成 `i074_stage2_acceptance_report_v2`；v1 明定為舊語意的開發紀錄；現在沒有任何程式讀它，日後的讀取端只接受 v2 |
+
+##### 增補計畫第四輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v5） |
+|---|---|---|---|
+| 高 | 宣稱「被 KILL 也⛔ 不留下子孫」與設計本身矛盾：`.live` 快照之後才產生、或在 TERM 的 5 秒寬限期間才 fork／`setsid()` 的程序不在快照裡，parent 被 KILL 後改由 init 收養，`host-reap` 找不到 | ✅ 成立 | 採 review 的第二個選項（結構性的收養）：**harness 自己是 subreaper**——bootstrap 以 python3 啟動器設 `PR_SET_CHILD_SUBREAPER` 再 exec bash（跨 `execve` 保留），以行為驗證；`host-run` 以任何方式結束留下的程序都被 harness 收養、隨時可列舉；`.live` 與 `host-reap` 移除，改成 `reap-adopted`（每一步之後檢查、`on_failure` 清理、正常結束前再檢查）。前提照實寫明：harness 自己沒有被 KILL；殘餘：極短的 PID 重用競態（無 pidfd）。ac24b 補「`host-run` 被 KILL」「TERM 寬限期間才 fork」兩個反例；`host-run` 的清理上限 15 秒 < `stop_step_group` 的 20 秒 |
+| 中 | `.live`／`host-reap` 是會送訊號的控制介面，卻沒有封閉契約（格式、atomic write 失敗、正常結束後的處置、malformed、helper 自身失敗時 `on_failure` 怎麼 fail-closed、`host-leftover-pids` 的格式） | ✅ 成立 | `.live` 與 `host-leftover-pids` 隨 v5 的設計移除；新的 `reap-adopted` 定義封閉契約：參數、結束碼 0／1／2、`leftover-pids.json` 的封閉格式（只給操作者看、⛔ 沒有程式讀回）、`on_failure` 對任何 ≠ 0 的結束碼都保留 S |
+| 中 | 既有的 ac6（cgroup 峰值達門檻即失敗）與 ac16（取樣只算同一個 process group）沒有列進修改清單，會與 v4 直接衝突 | ✅ 成立（`test_ac6_container_and_host_boundaries`、`test_host_run_*`） | 「二」⑨ 明列 ac6、ac16 的改寫與對應測試的同步修改，⛔ 不留過期的斷言 |
+| 低 | 報告 v2 的新欄位沒有明確 schema（`out_of_contract` 的型別與值集合） | ✅ 成立 | 三個封閉的固定值（`contract` 字串、`out_of_contract` 陣列、`auto_reap_detection` 物件）；寫出前以 `validate_acceptance_report_v2()` 自我驗證；ac22 補缺欄、多欄、型別錯誤、未知值 |
+| 低 | ac27 的 AST 規則會漏掉 alias（`import signal as sig`、`from signal import …`） | ✅ 成立 | 靜態檢查先解析 `signal` 名稱的來源（含 `as`、from-import、`Signals.SIGCHLD`、整數 17、`handler=`）；ac27 補對照組；動態寫法照實列為⛔ 不在靜態檢查內 |
+
+##### 增補計畫第五輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v6） |
+|---|---|---|---|
+| 中高 | `reap-adopted` 沒有釘住 harness 自己的身分：`--parent` 是裸 PID；harness 在 helper 執行的 30 秒內被 KILL、PID 又被重用時，可能列舉並殺掉新程序的子程序——⛔ 不只是「無法收尾」，而是可能誤殺 | ✅ 成立 | 參數加 `--parent-starttime`，啟動時驗；每一輪列舉與每一個訊號之前驗 `os.getppid()` ＝ parent（helper 是 harness 的直接子程序，`getppid()` 還等於 parent 的期間，那個 PID ⛔ 不可能已被重用），不符立刻停止、結束碼 2；ac24b 補「starttime 不符」「執行期間 parent 消失」 |
+| 中 | `measure_subreaper_guard` 的失敗路徑可能留下測試用的 `setsid sleep`：手動 re-exec 的反例正是「⛔ 不是 subreaper」，那時它已被 init 收養，`reap-adopted` 找不到 | ✅ 成立 | 測試程序改成 `sleep 5`（本身有時限），記下 PID 與 starttime；通過、不符、讀不到、guard 期間的訊號——所有出口都以 `kill-pinned`（比對 starttime）收掉；ac28 斷言兩條路徑之後測試程序都已不在，另加 guard 期間收到 TERM（故障注入 `subreaper-stall`） |
+| 中 | report v2 的 validator 還⛔ 不足以當日後讀取端的共同守門：`status = ok` 搭配非空的 `violations`、或記憶體列已達門檻的竄改報告仍可能被接受 | ✅ 成立 | `violations` 結構化（封閉的 `kind`）；validator 驗頂層與重要巢狀列的封閉鍵集合與型別，**由列重新推導**門檻結果、要求與 `violations` 逐筆相等，並驗 `status` ⟺ `violations` 是否為空；照實寫明它驗報告本身的一致性、⛔ 不驗與原始量測相符；ac22 補語意交叉的竄改 |
+| 低 | `host-run` 承諾 TERM／INT／HUP 都清理，ac24 只測 TERM | ✅ 成立 | ac24 參數化三種訊號，結束碼 143／130／129 |
+| 低 | 章節內仍標「驗收語意（v4）」 | ✅ 成立 | 改成 v6 |
+
+##### 增補計畫第六輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v7） |
+|---|---|---|---|
+| 中 | guard 在「讀不到 `/proc`」時無法安全執行 `kill-pinned`（手上沒有可信的 starttime）；`kill-pinned` 也沒有封閉契約 | ✅ 成立；另查到一層：被 KILL、還沒被收的程序 `/proc/<pid>` 仍在、starttime 相同（state `Z`），⛔ 不能當成「仍存活」 | 測試程序**自己回報** PID 與 starttime（`guard-probe.json`）；拿不到身分 → ⛔ 不送訊號、等最多 6 秒確認消失，確認不了 → 保留 S；`kill-pinned` 的封閉契約（參數、0／1／2、已消失、身分不符、`Z`／`X` 視為已死、忽略 TERM、KILL 後仍存活、`/proc` 失敗），`reap-adopted` 同樣把 `Z`／`X` 視為已死；ac28b 逐一測，ac28 補故障注入 `guard-noident` |
+| 中 | report validator 沒有明訂衍生欄位的內部一致性：把 `self_max_rss_bytes` 改成 500 MiB、同時壓低 `max_single_rss_bytes`，仍可能「`violations` 與 `status` 相符」卻內部矛盾 | ✅ 成立 | validator 驗衍生欄位（`max_single` ＝ 兩者取大〔容器與 host〕、`accounted` ＝ 組成總和、`P_path` ＝ 三者取大、晉升兩欄、`below_limit`、`group_alarm`、`limits` 的兩個值）；產出端與 validator 共用唯一的 `derive_acceptance_violations()`；ac22 補衍生欄位的竄改 |
+| 中 | ac28 寫 TERM 之後回 143，與既有契約衝突（`on_failure` 固定 `exit 1`、操作文件定義 1 ＝ harness 失敗） | ✅ 成立；ac25 也有同一個寫法 | 維持外部結束碼 1（「三」#20），ac25、ac28 改成斷言 `failure_summary.json` 記原始訊號的 143 |
+| 低 | host 紀錄宣稱群組取樣含 `host-run` 自己，ac24 卻沒有測 | ✅ 成立 | ac24 補「`host-run` 自己膨脹」：driver 先配置 N MiB 再在自己的程序裡呼叫 `host_run()`，`self_max_rss_bytes` 與群組取樣都必須反映 |
+
+##### 增補計畫第七輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v8） |
+|---|---|---|---|
+| 中 | validator 沒有釘死固定的 `P_B_BUDGET`：同時調高報告裡的預算並移除磁碟的違反，整份報告仍可能自洽 | ✅ 成立 | `limits.P_B_BUDGET` ＝ 正式常數（validator 的參數，呼叫端傳 `i074_stage2_preflight.P_B_BUDGET`）；ac22 補「預算調高、其餘一致」→ 拒絕 |
+| 中 | guard 的兩個 PID 來源（測試程序寫的 JSON、子 shell 的 `$!`）沒有相等契約，`$!` 怎麼傳回 harness 也沒定義；JSON 合法但 PID 錯時可能對錯的目標 `kill-pinned` | ✅ 成立 | `$!` 以 command substitution 回報（恰好一行整數；測試程序的 stdio 導走）；身分可信 ⟺ JSON 出現且格式正確、`pid` ＝ `$!`、starttime 相符；否則⛔ 不呼叫 `kill-pinned`、只以 `$!` 限時等待、中止；ac28 補故障注入 `guard-badident` |
+| 低 | `kill-pinned` 的「rc=2 ⛔ 不送訊號」說得太強：`/proc` 錯誤可能發生在 TERM 已送出之後 | ✅ 成立 | 改成「第一個訊號之前失敗 → ⛔ 不送任何訊號；TERM 之後才失敗 → ⛔ 不再送後續的訊號、回 2」；ac28b 補「TERM 之後、KILL 之前 `/proc` 失敗」 |
+
+##### 增補計畫第八輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v9） |
+|---|---|---|---|
+| 中 | guard 的 `$!` ⛔ 不保證是實際的 Python 測試程序：外部的 `setsid python3 … &` 在呼叫者是 process group leader 時，util-linux 的 `setsid` 會自己 fork，`$!` 是短命的 parent、JSON 是 Python 子程序——只等 `$!` 消失就可能在測試程序還活著時判定收尾完成；`guard-badident` 只是人工寫入 PID ＋ 1，沒有涵蓋真實的 fork | ✅ 成立（util-linux `setsid(1)`：呼叫者已是 process group leader 時 fork） | 子 shell 直接背景啟動 Python、由它自己 `os.setsid()`（失敗就立刻結束、⛔ 不留後代、⛔ 不寫 JSON）——`$!` 在結構上就是測試程序；ac28 補「正常情況下 `$!` ＝ JSON 的 `pid`」與 process group leader 的情境（`set -m`） |
+| 低 | `kill-pinned` 晚期失敗的紀錄沒有輸出契約（「結果記成…」沒有說記在哪裡） | ✅ 成立 | stdout 恰好一行 canonical JSON（封閉鍵集合、`result` 封閉 enum 並與結束碼一一對應、`signals_sent`）；參數不合法 → stdout 空；呼叫端附加到 `<S>/kill-pinned.jsonl`、隨 S 複製、失敗摘要列出路徑；ac28b 每一支都斷言這一行 |
+
+##### 增補計畫第九輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v10） |
+|---|---|---|---|
+| 低 | ac28 的 `set -m` 測試位置不夠明確：只在外層 shell 開 job control 時，command substitution 內會關掉它，背景的 Python ⛔ 不會成為 process group leader、`os.setsid()` 照樣成功，打不到 EPERM 的分支 | ✅ 成立（`set -m` 必須在實際執行 `python3 … &` 的內層子 shell 啟用才有作用） | 改用確定的故障注入 `guard-pgleader`：測試程序先 `os.setpgid(0, 0)` 再 `os.setsid()`，必然 EPERM；另斷言真的走到這個分支（專用的結束碼）、⛔ 沒有 JSON、⛔ 沒有殘留 |
+
+##### 增補計畫第十輪 review 的修正（2026-10-05）
+
+| 嚴重度 | 發現 | 查證 | 修正（v11） |
+|---|---|---|---|
+| 低 | 「專用結束碼」沒有可觀察的傳遞通道：測試程序的 stdio 導走、`os.setsid()` 失敗時⛔ 不寫 JSON，資料流只有 `$!` 與 `/proc` 的存活輪詢；測試程序被收養之後它的結束碼也⛔ 不屬於 harness 的工作 | ✅ 成立 | 改成**只供診斷與測試**的失敗狀態檔 `<S>/guard-probe-status.json`（atomic、封閉：`schema`、`pid`、`stage`（`setsid`／`self_stat`）、`errno` 的名稱）；⛔ 不是身分來源（③ ⛔ 不讀它、⛔ 不依它送訊號）；ac28 以它斷言真的走到 EPERM，另以偽造的狀態檔證明它⛔ 不會影響 guard 的判斷 |
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -4751,7 +5051,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（2026-09-29，✅ 2026-09-30 確認）**：⑦ 分四包依序實作——⑦a replay 側 → ⑦b supervisor＋orchestrator＋freeze record
    → ⑦c `--promote`＋B／C 判讀器 → ⑦d memory harness，每包「細部計畫 → 實作 → review → commit」；
    ⚠️ `evaluation.py` 與 `replay_bundle/` 的改動**經 tooling patch 進入 replay**（⑩ 的 replay 執行的是 `e1cbbbd` worktree）；
-   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⚠️ 現在在這裡：⑦d 實作待 review（第一輪 review 的三項已修正；見「Stage 2 步驟 ⑦d 實作結果」）
+   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；⚠️ 現在在這裡：⑦d 增補計畫 v11 待確認（見「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」）
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次

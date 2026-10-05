@@ -3257,6 +3257,50 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
+#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；⚠️ 待 review）
+
+⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」與「Stage 2 步驟 ⑦d 實作結果」；操作程序見
+[`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
+本節記錄**現況規格**。
+
+- **對象與門檻**（v29「六、1」）：replay 程序（a～c）與 d～i 各程序、以及晉升（promoter 與驗證模式）——每一個**容器程序**的 cgroup
+  峰值（容器內、退出前讀 `memory.max_usage_in_bytes`／`memory.peak`，含 page cache）與每一步 **host 端**的最大單一程序 RSS
+  （`RUSAGE_CHILDREN`，⛔ 不含 page cache）都 **< 450 MiB**；success、failure 兩條實際流程的磁碟峰值 `P_path` **≤ `P_B_BUDGET`**
+  （量法與 `P_B` 相同：目錄取樣、檔案系統取樣、會計上界取大者）。host 端程序群組的 RSS 總和只是取樣值（下界），⛔ 不能證明通過，
+  只作**單向警報**（≥ 450 MiB 才算超標）；host 端⛔ 沒有可寫的 cgroup，程序群組的精確峰值量不到、也⛔ 不在契約內。
+- **容器的記憶體上限**（實作第一輪 review）：每一個容器都記下 daemon 實際套用的上限（`docker inspect` 的 `HostConfig.Memory`／
+  `MemorySwap`，即 mem-guard 當次下修後的 `--memory`），報告逐 invocation 列出；它必須 ＝ 封存的 argv 裡恰好一個 `--memory`／
+  `--memory-swap`，而且 swap ＝ memory（可以用 swap 時 cgroup v1 的峰值不含被換出的部分、會低估）——任一不成立 → ⛔ 不產報告。
+  mem-guard 每一次都依當下的 MemAvailable 下修，**上限因容器而異**（實測 402～532 MiB）。上限不高於門檻的容器，含 page cache 的
+  cgroup 峰值本來就不會超過上限，判定實質是「在這個上限內、⛔ 不用 swap、以預期的結束碼跑完」；上限高於門檻的容器，page cache
+  要逼近上限才被回收，**峰值會隨當次的上限上升**（同一個 stub replay：上限 444m 時 413.8 MiB、466 MiB 時 449.4 MiB）——報告的
+  notes 逐一列出兩類各是哪些容器。
+- **replay 的兩種計算**：`stub`——launcher 只替換 `_decision_replay_rows()`，改成讀錨定的 D+1 after（逐列以 `sys.intern` 共用鍵與字串值：
+  逐列解析而⛔ 不共用時 13,417 列實測 ＋324 MiB、共用 ＋141 MiB，後者與 ③c 見證趟的完整計算（峰值約 315 MiB）相符）；
+  ⚠️ ⛔ 不涵蓋計算工作集，只用於開發驗證與兩條磁碟路徑。`full`——⑨-1 唯一的量測趟：真的計算（`e1cbbbd` ＋ tooling、⛔ 不套
+  counterfactual，算出的列與錨定的 D+1 相同，⛔ 不會提前得到 B／C 資訊），之後才套 success 的合成；正式驗收（`--formal`）必須帶它。
+  兩份 patch 任一份的 bytes 或 SHA 再變，⑨-1 一律整個重跑（量測趟的額度另行裁決）。
+- **其餘全是真的**：runner（凍結、worktree、合成、注入、mem-guard）、`evaluation.py` 的反事實路徑、finalizer、晉升的第 2～7 步
+  （git 與驗證模式；state 由 harness 注入、⛔ 不寫 state 檔），環境與 ⑩ 相同（supervisor 的 `clean_env()` ＋ 固定 PATH），⛔ 不加
+  `--read-only`（`SizeRw` 照實計入，報告另列 `read_only_gap`）。
+- **兩個代量**：preflight 的 `anchors`（只做 `_load_trust_anchors()`）以 `--check-failed-record` 代量；晉升的第 1 步（`/proc/locks`、
+  state 檔的驗證）屬 orchestrator、⛔ 不在 acceptance 內。
+- **i（環境等價比對程序）**：封存的 `envcheck/` 是 ③c 當時的 HEAD 發布的，`--recover-envcheck` 要求執行身分相同——acceptance 先把它
+  搬開、以封存的見證輸出重新發布（`--envcheck`，就是 ③c 執行過的比對 ＋ 發布）、再量 `--recover-envcheck`，最後搬回原本的。
+- **晉升的磁碟**只列資訊值（`P_promotion` 與 `P_path ＋ P_promotion`）：`P_B` 的起訖仍是「replay 開始 → 複本內發布完成」，晉升另有
+  自己的空間預檢（來源的 2 倍）、失敗可重試。
+- **runner 的凍結副本**：runner 以 `exec docker run` 結束、EXIT trap ⛔ 不執行，兩份 patch 的凍結副本留在 `TMPDIR`——acceptance 與
+  sizing 的 accounted 都計入（`runner_frozen_patches`）。
+- **harness 自己的程式**在啟動時凍結成 tmpfs 裡的快照（`MANIFEST`），之後一律從快照執行；報告綁住完整的 `harness_manifest`。
+  ⑩ 的正式程式一律取自工作複本。bootstrap 失敗時⛔ 不刪任何東西（只印出 S 的位置）；re-exec 在取得刪除權之前封閉驗證**整個 S
+  的形狀**（恰好 `harness/`、清單裡的檔案與它們的目錄、`MANIFEST`——多任何檔案、目錄、symlink 或特殊檔案都拒絕、⛔ 不刪）。
+- **同一個 commit**（實作第一輪 review）：bootstrap 只解析一次 HEAD 的 commit OID——快照（`--formal` 驗它的 blob）、兩層工作複本
+  （clone 之後 checkout 它，detached，與 ⑩ 的工作複本相同）、報告的 `repo_head` 與 sizing 的 freeze record 都綁它，acceptance 與
+  sizing 的報告都驗 `clone_head ＝ repo_head`；`--formal` 另要求啟動 repo 的 HEAD 仍是它。之後⛔ 不再讀會移動的 HEAD。
+- **⑩ 的實際峰值**由外部唯讀的 observer 記錄：容器記憶體是 cgroup high-water mark 的**下界**（最後一次讀取之後、容器結束之前的
+  尾段峰值可能漏記）、磁碟是取樣值；報告標明完整度（`observation_complete`、`replay_seen`、`missing_expected_containers`）。
+  ⛔ 不作為 ⑩ 的前置、⛔ 不為量測而重跑。
+
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 
 | 候選集合檢查 | 產出 | 結束碼 |

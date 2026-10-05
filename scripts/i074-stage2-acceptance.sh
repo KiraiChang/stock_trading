@@ -1,54 +1,29 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 步驟 ④：sizing harness（issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」v7 ＋ 差異 1）。
+# I-074 Stage 2 ⑦d：memory／disk acceptance harness（issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）。
 #
-#   REPLAY_IMAGE_ID=sha256:… scripts/i074-stage2-sizing.sh --work-dir <repo 外、尚不存在的目錄> [--formal]
+#   REPLAY_IMAGE_ID=sha256:… scripts/i074-stage2-acceptance.sh --work-dir <repo 外、尚不存在的目錄> \
+#       [--replay-compute stub|full] [--formal]
 #
-# 量出 P_B = max(P_witness, P_success, P_failure) 與階段二每個程序的記憶體峰值。
-# ⛔ 不是正式的證據入口；⛔ 不含可用空間檢查（preflight 屬 ⑦，M_safety 在 ⑤ 裁定）。
+# 在 repo 外的兩層隔離複本（原始 repo → <work>/real（模擬的真正 repo）→ <work>/repo（工作複本，origin ＝ <work>/real））
+# 以**真實的** runner、`evaluation.py`（launcher 只替換 `_decision_replay_rows`）、finalizer 與晉升跑 success／failure 兩條實際流程：
+#   - 每一個容器程序的 cgroup 峰值、每一步 host 端的最大單一程序 RSS 都 < 450 MiB（取樣的程序群組總和只作單向警報）；
+#   - success、failure 的磁碟峰值 P_path ≤ P_B_BUDGET（量法與 P_B 相同；P_B 的起訖⛔ 不變）；兩次晉升的磁碟只列資訊值。
+# 結束碼：0＝報告已寫且 ok；2＝報告已寫但 threshold_exceeded；1＝harness 失敗（⛔ 不產報告）。
 #
-# 演練用的故障注入（⚠️ 只給 ④ 的中止點演練，`--formal` 一律拒絕）：I074_SIZING_FAULT=twins（在 metadata twin
-#   那一步中止）、copy（中止時讓「複製 S」失敗）、summary（中止時讓失敗摘要寫不出來），或 cleanup（在 work 目錄建好後
-#   放一份假 cidfile 並中止——搭配移除不了的 docker 驗證容器清理失敗時 S 與 cidfile 都保留）、stuck（放一個忽略
-#   TERM 的步驟再中止——驗證升級 KILL）、group-alive（模擬 KILL 之後仍有成員——驗證保留 S），或 final-check
-#   （直接執行成功路徑結束前的容器檢查——搭配 ps 失敗的 docker 驗證「查不到不能當作沒有」），或 orphan-ok／
-#   orphan-bad（leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡——驗證一律收尾並中止）。
-#
-# 模式：預設是 ④ 的**可用性驗證**（允許未 commit，報告記錄實際執行的腳本 SHA-256）；
-#       `--formal` 是 ⑤ 的**正式量測**（scripts/、python/、.gitattributes 必須 clean，harness 檔案必須等於 HEAD）。
-#
-# ⚠️ I-074 ⑦b（「Stage 2 步驟 ⑦b 細部計畫 v1」「二之九」）：
-#   - 一律用**真實的兩份 patch**（複本常數路徑的 counterfactual ＋ tooling），patched worktree 以唯一的合成函式
-#     `replay_args_compose()` 建立，並斷言兩份的 raw SHA 各自 ＝ 增量 canonical SHA；
-#   - `--formal` 且報告 `status = ok`、`P_B ≤ P_B_BUDGET` 時寫出 `<work>/freeze_record.json`（v29「八之二」）——
-#     validation 模式、`assumption_violated`、`P_B` 超過預算、任何失敗路徑都⛔ 不寫；
-#   - 與 ⑩ 的 label shim **互斥**：環境帶 `I074_STAGE2_*`、或 PATH 上的 docker 是 label shim → 中止。
-#
-# ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」）：
-#   - 開頭的 bootstrap 先把 harness 自己的檔案（「快照與來源的清單」①）凍結成 S 裡的快照、再 `exec` 快照版本；共用原語
-#     （scripts/lib/i074-stage2-measure.sh）、shim、helper、mem-guard 一律從快照載入；
-#   - ⑩ 的正式程式從工作複本（HEAD）執行——freeze record 的 `build`／`check-pair` 也是（`--repo <工作複本>`）；
-#   - 啟動 harness 的 repo（SIZING_ORIGIN_REPO）只用於 git clone 的來源、--formal 的檢查與 inventory 自我檢查；
-#   - 第一輪 review：bootstrap 只解析一次 HEAD 的 commit OID（BOOT_HEAD）——快照、工作複本（clone 後 checkout 它）、報告的
-#     repo_head 與 freeze record 都綁它，報告驗 clone_head ＝ repo_head；--formal 另要求啟動 repo 的 HEAD 仍是它；
-#   - accounted 多一項 runner_frozen_patches（runner 以 exec docker run 結束，凍結副本留在 L3）；報告綁住完整的 harness_manifest。
-#
-# 做法重點（細節見計畫書）：
-#   - 全部在 <work>/repo（`git clone --no-hardlinks` 的 HEAD）裡執行正式入口——路徑常數由腳本位置推導，
-#     ⛔ 不會寫到真正的 repo；
-#   - harness 自己的狀態全部放 host tmpfs 的 S＝/dev/shm/i074-sizing-<run id>/，⛔ 不落在量測的檔案系統；
-#   - 正式入口經 docker shim（唯讀 rootfs、⛔ 無可寫 /tmp、cgroup 峰值、容器足跡），
-#     以 TMPDIR=<work>/tmp、PYTHONDONTWRITEBYTECODE=1 執行；
-#   - 每條路徑前後各記一份完整 inventory 自我檢查；metadata twin 在所有量測窗口結束後才建；
-#   - 任何一步失敗：停取樣 → 以 CID 移除容器 → 結束步驟的 process group（TERM → KILL）→ 再移除一次容器 →
-#     窗口標 aborted → S 複製到 <work>/raw-failed/ → failure_summary.json（⛔ 不宣稱 P_B）→
-#     group 確實結束、容器清光、複製與摘要都成功才清 S。
+# ⚠️ ⛔ 不是正式的證據入口。正式驗收是 ⑨-1（`--formal --replay-compute full`，用 ⑨ 封存的兩份 patch）；
+#   `--replay-compute full` 是 ⑨-1 唯一的量測趟（約 3 小時，⛔ 不套 counterfactual）——⑦d 的開發驗證只用 stub。
+# ⚠️ 做法（細節見計畫書）：開頭的 bootstrap 解析一次 HEAD 的 commit OID、把 harness 自己的檔案凍結成 S 裡的快照、`exec`
+#   快照版本；⑩ 的正式程式一律從工作複本（checkout 那個 OID）執行，報告的 repo_head／clone_head 也是它；每一步以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH 經 `host-run` 執行，容器經 sizing 的
+#   shim（profile acceptance：⛔ 不加 --read-only）；兩份 patch 的環境變數只給 replay 那一步；失敗清理沿用共用原語的六步。
+#   演練用的故障注入：I074_SIZING_FAULT＝prepare（work 目錄建好之後立刻中止）／twins／copy／summary／bootstrap-*
+#   （--formal 一律拒絕）。
 set -euo pipefail
 
-I074_BOOT_PROFILE=sizing
-I074_BOOT_SPREFIX=i074-sizing
-I074_BOOT_SELF=scripts/i074-stage2-sizing.sh
-I074_BOOT_FILES=(scripts/i074-stage2-sizing.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh
-                 scripts/lib/mem-guard.sh python/scripts/i074_stage2_sizing.py)
+I074_BOOT_PROFILE=acceptance
+I074_BOOT_SPREFIX=i074-accept
+I074_BOOT_SELF=scripts/i074-stage2-acceptance.sh
+I074_BOOT_FILES=(scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh
+                 python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py)
 # >>> I074-STAGE2-BOOTSTRAP ────────────────────────────────────────────────────────────────────────────
 # ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」的「harness 的快照」「bootstrap 的失敗與中斷」與「快照與來源的清單」）：
 #   harness 自己的檔案先凍結成 S 裡的快照，主腳本再 `exec` 快照裡的自己——之後每一行都從快照執行（⛔ 不讀活路徑；bash 是
@@ -156,36 +131,49 @@ REPO_ROOT="$BOOT_ORIGIN"                                    # ⚠️ 只用於 g
 HELPER="$S/harness/python/scripts/i074_stage2_sizing.py"
 SHIM="$S/harness/scripts/lib/i074-sizing-docker-shim.sh"
 export PYTHONDONTWRITEBYTECODE=1
-. "$S/harness/scripts/lib/mem-guard.sh"
 # shellcheck source=lib/i074-stage2-measure.sh
 . "$S/harness/scripts/lib/i074-stage2-measure.sh"           # ⚠️ 共用原語：從快照載入（只定義函式）
 
 die() { echo "ERROR: $*" >&2; exit 1; }
-WORK_ARG=""; FORMAL=0
+
+WORK_ARG=""; FORMAL=0; COMPUTE=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --work-dir)
       [ "$#" -ge 2 ] || die "--work-dir 需要值。"
       [ -z "$WORK_ARG" ] || die "--work-dir 重複出現——⛔ 不靜默採用最後一個。"
       WORK_ARG="$2"; shift 2 ;;
+    --replay-compute)
+      [ "$#" -ge 2 ] || die "--replay-compute 需要值。"
+      [ -z "$COMPUTE" ] || die "--replay-compute 重複出現。"
+      case "$2" in stub|full) COMPUTE="$2" ;; *) die "--replay-compute 只接受 stub／full：$2" ;; esac
+      shift 2 ;;
     --formal)
       [ "$FORMAL" = "0" ] || die "--formal 重複出現。"
       FORMAL=1; shift ;;
     *) die "未知參數 $1" ;;
   esac
 done
-[ -n "$WORK_ARG" ] || die "用法：$0 --work-dir <repo 外、尚不存在的目錄> [--formal]"
+[ -n "$WORK_ARG" ] || die "用法：$0 --work-dir <repo 外、尚不存在的目錄> [--replay-compute stub|full] [--formal]"
+COMPUTE="${COMPUTE:-stub}"
 
-measure_start_guards "sizing harness"   # 設 IMAGE、REAL_DOCKER（與 ⑩ 的 label shim 互斥）
-measure_work_dir_guard "$WORK_ARG"      # 設 REPO_CANON、WORK、L0_DEV
+measure_start_guards "acceptance harness"   # 設 IMAGE、REAL_DOCKER（與 ⑩ 的 label shim 互斥）
+measure_work_dir_guard "$WORK_ARG"          # 設 REPO_CANON、WORK、L0_DEV
 
 case "${I074_SIZING_FAULT:-}" in
-  ""|twins|copy|summary|cleanup|stuck|group-alive|final-check|orphan-ok|orphan-bad) ;;
-  bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;   # ⑦d：只在 snapshot pass 生效
-  *) die "I074_SIZING_FAULT 只接受 twins／copy／summary／cleanup／stuck／group-alive／final-check／orphan-ok／orphan-bad／bootstrap-*：${I074_SIZING_FAULT}" ;;
+  ""|prepare|twins|copy|summary|bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;
+  *) die "I074_SIZING_FAULT 只接受 prepare／twins／copy／summary／bootstrap-*：${I074_SIZING_FAULT}" ;;
 esac
+# ⚠️ 「快照與來源的清單」②：⑩ 的正式程式從工作複本（BOOT_HEAD）執行——BOOT_HEAD 裡必須有它們。
+PROD_FILES=(scripts/run-replay-offline.sh scripts/finalize-stage2-evidence.sh scripts/lib/replay-args.sh
+            scripts/lib/i074-stage2-supervisor.py python/scripts/i074_stage2_preflight.py python/scripts/i074_stage2_promote.py
+            python/scripts/_i074_bootstrap.py)
+for f in "${PROD_FILES[@]}"; do
+  git -C "$REPO_ROOT" cat-file -e "$BOOT_HEAD:$f" 2>/dev/null || die "$f 不在 HEAD $BOOT_HEAD 裡（⑩ 的正式程式由工作複本執行）"
+done
 if [ "$FORMAL" = "1" ]; then
   [ -z "${I074_SIZING_FAULT:-}" ] || die "--formal ⛔ 不接受 I074_SIZING_FAULT（那是演練用的故障注入）"
+  [ "$COMPUTE" = full ] || die "--formal 必須帶 --replay-compute full（stub ⛔ 不涵蓋計算工作集，⛔ 不得當成 ⑨-1 的正式驗收）"
   measure_formal_fd_guard
   dirty="$(git -C "$REPO_ROOT" status --porcelain -- scripts python .gitattributes)"
   [ -z "$dirty" ] || die "--formal：scripts/、python/、.gitattributes 有未 commit 的變更：
@@ -193,69 +181,43 @@ $dirty"
   # ⚠️ 第一輪 review：上面的 clean 檢查是相對於「現在的」HEAD——它必須仍是 bootstrap 解析的那一個。
   [ "$(git -C "$REPO_ROOT" rev-parse HEAD)" = "$BOOT_HEAD" ] \
     || die "--formal：HEAD 在 bootstrap 之後移動了（bootstrap 解析的是 $BOOT_HEAD）——快照、工作複本與報告要綁同一個 commit"
-  # ⚠️ ⑦d：harness 自己的檔案（清單 ①）已由 bootstrap 在快照前後驗過 ＝ BOOT_HEAD；freeze record 的寫入端與它 import 的常數
-  #   改從工作複本（BOOT_HEAD）執行（清單 ②），所以這裡驗它們在 BOOT_HEAD 裡（⛔ 不讀原始 repo 的工作樹版本）。
-  for f in python/scripts/i074_stage2_freeze_record.py python/scripts/i074_stage2_preflight.py; do
-    git -C "$REPO_ROOT" cat-file -e "$BOOT_HEAD:$f" 2>/dev/null || die "--formal：$f 尚未進版控（freeze record 由工作複本執行）"
-  done
 fi
+IDENTITY="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+[ -f "$IDENTITY" ] && [ ! -L "$IDENTITY" ] || die "找不到 Stage 2 的 run identity：$IDENTITY"
 
-RUN_ID="$BOOT_RUN_ID"                                         # S 由 bootstrap 建好（/dev/shm/i074-sizing-<run id>）
-mkdir -p "$S/out" "$S/bin" "$S/phases"
+RUN_ID="$BOOT_RUN_ID"                                         # S 由 bootstrap 建好（/dev/shm/i074-accept-<run id>）
+mkdir -p "$S/out" "$S/bin" "$S/phases" "$S/host"
 LOG="$S/console.log"
 measure_install_traps
 
-say "==> sizing harness：run id $RUN_ID、模式 $([ "$FORMAL" = 1 ] && echo formal || echo validation)、S=$S"
-meta run_id "$RUN_ID"; meta mode "$([ "$FORMAL" = 1 ] && echo formal || echo validation)"
+say "==> acceptance harness：run id $RUN_ID、模式 $([ "$FORMAL" = 1 ] && echo formal || echo validation)、replay_compute $COMPUTE、S=$S"
+meta run_id "$RUN_ID"; meta mode "$([ "$FORMAL" = 1 ] && echo formal || echo validation)"; meta replay_compute "$COMPUTE"
 meta work "$WORK"; meta repo "$REPO_CANON"; meta image "$IMAGE"; meta state_fstype tmpfs
-meta repo_head "$BOOT_HEAD"                                  # ⚠️ 第一輪 review：bootstrap 解析的那一個（⛔ 不再讀 HEAD）
+REPO_HEAD="$BOOT_HEAD"                                      # ⚠️ 第一輪 review：bootstrap 解析的那一個（⛔ 不再讀 HEAD）
+meta repo_head "$REPO_HEAD"
 meta repo_dirty "$([ -n "$(git -C "$REPO_ROOT" status --porcelain)" ] && echo true || echo false)"
-meta harness_sha256 "$(sha_of "$S/harness/scripts/i074-stage2-sizing.sh")"   # ⑦d：快照裡的（＝ 實際執行的）
-meta shim_sha256 "$(sha_of "$SHIM")"
-meta helper_sha256 "$(sha_of "$HELPER")"
-IDENTITY="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
-if [ -f "$IDENTITY" ]; then
-  meta identity_sha256 "$(sha_of "$IDENTITY")"
-elif [ "$FORMAL" = "1" ]; then
-  on_failure "--formal 需要 Stage 2 的 run identity（freeze record 要綁它）：$IDENTITY" 1
-fi
+IDENTITY_SHA0="$(sha_of "$IDENTITY")"
+meta identity_sha256 "$IDENTITY_SHA0"
 
 # ── 0. 準備 ────────────────────────────────────────────────────────────────────
 mkdir "$WORK"
-case "${I074_SIZING_FAULT:-}" in
-  cleanup)
-    mkdir -p "$S/cid"; printf 'fault-injected-cid' > "$S/cid/o0000.cid"
-    on_failure "容器清理（注入的故障）" 1 ;;
-  stuck|group-alive)
-    # 一個忽略 TERM 的「步驟」（⚠️ exec 之後 TERM 仍是忽略狀態）
-    setsid sh -c 'trap "" TERM; exec sleep 60' &
-    STEP_PID=$!
-    sleep 0.5
-    on_failure "步驟收不掉（注入的故障：$I074_SIZING_FAULT）" 1 ;;
-  final-check)
-    ensure_no_run_containers "結束前的容器檢查（注入）"
-    DONE=1; rm -rf "$S"; exit 0 ;;
-  orphan-ok|orphan-bad)
-    # leader 自己退出（預期碼 0／非預期碼 7），背景的 sleep 留在同一個 group 裡繼續活著
-    run_in_group fault_orphan 0 sh -c "sleep 60 & exit $([ "$I074_SIZING_FAULT" = orphan-ok ] && echo 0 || echo 7)"
-    DONE=1; rm -rf "$S"; exit 0 ;;   # ⛔ 走到這裡＝殘留的成員沒有被擋下
-esac
-# ⚠️ **⛔ 不用 `--shared`**（差異 2，2026-09-24 第一次實跑被自我檢查擋下）：`--shared` 以 alternates 共用真正 repo 的
-#   物件，而 `git write-tree`／`git apply --index` 寫到**已存在**的物件時會 freshen（touch）含有它的 pack——
-#   改到的是真正 repo 的 pack 的 mtime。`--no-hardlinks` 完整複製物件（⛔ 也不共用 inode），git 的寫入全落在 L5。
-# ⚠️ 第一輪 review：工作複本 checkout bootstrap 解析的 OID（⑩ 的工作複本同樣是 detached 在 repo_head）——clone 期間原始 repo
-#   的 HEAD 移動也⛔ 不影響本次；本機 clone 複製整個物件庫，所以這個 OID 一定在。報告與 freeze record 都驗 clone_head ＝ repo_head。
-git clone -q --no-hardlinks "$REPO_ROOT" "$WORK/repo"
-CLONE="$WORK/repo"
-git -C "$CLONE" checkout -q --detach "$BOOT_HEAD" || on_failure "工作複本 checkout 不了 $BOOT_HEAD" 1
-L1="$WORK/runs"; L2="$CLONE/python/baselines/i074_stage2"; L3="$WORK/tmp"; L5="$CLONE/.git"
-CACHE="$WORK/cache"
-mkdir -p "$L1" "$L3" "$CACHE"
+[ "${I074_SIZING_FAULT:-}" != prepare ] || on_failure "準備（注入的故障）" 1
+# 兩層複本（「三」#18）：原始 repo → <work>/real（模擬的真正 repo；晉升的目的地）→ <work>/repo（工作複本，origin ＝ <work>/real）。
+# ⚠️ ⛔ 不用 --shared（④ 差異 2：會 freshen 原始 repo 的 pack）。
+# ⚠️ 第一輪 review：兩層都 checkout bootstrap 解析的 OID（⑩ 的工作複本同樣是 detached 在 repo_head）——clone 期間原始 repo 的
+#   HEAD 移動也⛔ 不影響本次；本機 clone 複製整個物件庫，所以這個 OID 一定在。
+REAL="$WORK/real"; CLONE="$WORK/repo"
+git clone -q --no-hardlinks "$REPO_ROOT" "$REAL"
+git -C "$REAL" checkout -q --detach "$REPO_HEAD" || on_failure "模擬的真正 repo checkout 不了 $REPO_HEAD" 1
+git clone -q --no-hardlinks "$REAL" "$CLONE"
+git -C "$CLONE" checkout -q --detach "$REPO_HEAD" || on_failure "工作複本 checkout 不了 $REPO_HEAD" 1
 CLONE_HEAD="$(git -C "$CLONE" rev-parse HEAD)"
 meta clone_head "$CLONE_HEAD"
-[ "$CLONE_HEAD" = "$BOOT_HEAD" ] || on_failure "工作複本的 HEAD $CLONE_HEAD ≠ 記下的 repo_head $BOOT_HEAD" 1
-meta finalizer_sha256 "$(sha_of "$CLONE/scripts/finalize-stage2-evidence.sh")"
-meta claims_sha256 "$(sha_of "$CLONE/python/scripts/i074-stage2-patch-claims.py")"
+[ "$CLONE_HEAD" = "$REPO_HEAD" ] && [ "$(git -C "$REAL" rev-parse HEAD)" = "$REPO_HEAD" ] \
+  || on_failure "工作複本的 HEAD $CLONE_HEAD（或模擬的真正 repo）≠ 記下的 repo_head $REPO_HEAD" 1
+L1="$WORK/runs"; L2="$CLONE/python/baselines/i074_stage2"; L3="$WORK/tmp"; L5="$CLONE/.git"
+L6="$REAL/python/baselines/i074_stage2"
+mkdir -p "$L1" "$L3" "$WORK/aside"
 meta l0_dev "$L0_DEV"
 meta repo_dev "$(stat -c %d "$REPO_CANON")"
 DROOT="$("$REAL_DOCKER" info --format '{{.DockerRootDir}}')"
@@ -263,31 +225,29 @@ DROOT_C="$(realpath -- "$DROOT")"
 meta docker_root "$DROOT_C"; meta docker_root_dev "$(stat -c %d "$DROOT_C")"
 [ "$(stat -c %d "$DROOT_C")" = "$L0_DEV" ] || on_failure "L4：Docker Root Dir 不在同一個檔案系統" 1
 meta logging_default "$("$REAL_DOCKER" info --format '{{.LoggingDriver}}')"
-MEM="$(mem_guard_clamp "${MEM:-700m}" 2>/dev/null)"; meta fixture_mem "$MEM"
+meta runner_sha256 "$(sha_of "$CLONE/scripts/run-replay-offline.sh")"
+meta finalizer_sha256 "$(sha_of "$CLONE/scripts/finalize-stage2-evidence.sh")"
+meta promote_sha256 "$(sha_of "$CLONE/python/scripts/i074_stage2_promote.py")"
 
-cp -a "$L2/envcheck" "$CACHE/envcheck"      # 見證路徑要從「還沒有 envcheck/」開始
-rm -rf "$L2/envcheck"
-BASE="$(helper anchor-base --python-root "$CLONE/python")" || on_failure "取不到 Stage 1 after 的 base" 1
-meta base_commit "$BASE"
+helper acceptance-anchors --python-root "$CLONE/python" > "$S/anchors.json" || on_failure "取不到 Stage 1 的信任錨" 1
+read -r BUNDLE_ID BASE < <(python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); print(a["bundle_id"], a["after_base_commit"])' "$S/anchors.json")
+meta bundle_id "$BUNDLE_ID"; meta base_commit "$BASE"
 CF_PATCH="$L2/counterfactual_e1cbbbd.patch"
-TOOL_PATCH="$L2/tooling_e1cbbbd.patch"          # ⚠️ ⑦b：真實的 tooling（⑩ 的 tooling ⛔ 不得為空）
-[ -s "$TOOL_PATCH" ] || on_failure "tooling patch 不存在或是空的：$TOOL_PATCH" 1
-meta counterfactual_sha256 "$(sha_of "$CF_PATCH")"
-meta tooling_sha256 "$(sha_of "$TOOL_PATCH")"
-. "$CLONE/scripts/lib/replay-args.sh"
-
+TOOL_PATCH="$L2/tooling_e1cbbbd.patch"
+[ -s "$CF_PATCH" ] && [ -s "$TOOL_PATCH" ] || on_failure "兩份 patch 不存在或是空的（⑩ 的 tooling ⛔ 不得為空）" 1
+meta counterfactual_sha256 "$(sha_of "$CF_PATCH")"; meta tooling_sha256 "$(sha_of "$TOOL_PATCH")"
+# shellcheck source=lib/replay-args.sh
+. "$CLONE/scripts/lib/replay-args.sh"                       # ⚠️ 正式程式：從工作複本
 new_worktree() {  # $1＝ref；$2＝patched（0／1）→ 印出 worktree 路徑（在 L3）
   local wt
   wt="$(mktemp -d "$L3/tmp.XXXXXXXXXX")" && rmdir "$wt" || return 1
   replay_args_prepare_worktree "$CLONE" "$1" "$wt" >/dev/null || return 1
   if [ "$2" = 1 ]; then
-    # ⚠️ ⑦b：與 runner 同一個合成函式（counterfactual → tooling）；結果必須 ＝ 步驟 0 之前記下的那一次。
     [ "$(replay_args_compose "$wt" "$1" "$CF_PATCH" "$TOOL_PATCH")" = "$COMPOSE" ] \
       || { echo "ERROR: 合成結果與第一次不同（或合成失敗）" >&2; return 1; }
   fi
   printf '%s\n' "$wt"
 }
-# ⚠️ ⑦b：先以唯一的合成函式算一次兩份**真實** patch 的增量 canonical SHA（量測窗口之外），並斷言 raw ＝ canonical。
 cwt="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"; rmdir "$cwt"
 replay_args_prepare_worktree "$CLONE" "$BASE" "$cwt" >/dev/null || on_failure "合成用的 worktree" 1
 COMPOSE="$(replay_args_compose "$cwt" "$BASE" "$CF_PATCH" "$TOOL_PATCH")" || on_failure "兩份 patch 的合成失敗" 1
@@ -297,8 +257,8 @@ read -r _T1 _T2 C_CF C_TOOL C_COMP C_SEM <<< "$COMPOSE"
 [ "$C_TOOL" = "$(sha_of "$TOOL_PATCH")" ] || on_failure "tooling 的 raw SHA ≠ 增量 canonical SHA" 1
 meta counterfactual_canonical_sha256 "$C_CF"; meta tooling_canonical_sha256 "$C_TOOL"
 meta composed_sha256 "$C_COMP"; meta counterfactual_semantic_sha256 "$C_SEM"
-say "==> 步驟 0：實建三種 worktree、快照與 probe 結構量 allocated bytes"
-for spec in head:HEAD:0 base:$BASE:0 base_patched:$BASE:1; do
+say "==> 步驟 0：實建 worktree、快照、runner 的凍結副本與 probe 結構量 allocated bytes"
+for spec in head:HEAD:0 base_patched:$BASE:1; do
   IFS=: read -r kind ref patched <<< "$spec"
   g0="$(alloc "$L5")"
   wt="$(new_worktree "$ref" "$patched")"
@@ -310,11 +270,6 @@ done
 snap="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"
 cp -- "$CF_PATCH" "$snap/counterfactual.patch"; cp -- "$TOOL_PATCH" "$snap/tooling.patch"
 comp snapshot "$(alloc "$snap")"; rm -rf "$snap"
-# ⚠️ ⑦d（「三」#15）：runner 把兩份 patch 凍結在私有的 mktemp -d，但它以 exec docker run 結束、EXIT trap ⛔ 不執行——
-#   凍結副本留在 L3。以同形狀的目錄量：witness（③c 的見證趟：⛔ 沒有 counterfactual、tooling 是 0-byte）與兩份 patch。
-frz="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"
-: > "$frz/tooling.patch"
-comp frozen_witness "$(alloc "$frz")"; rm -rf "$frz"
 frz="$(mktemp -d "$L3/tmp.XXXXXXXXXX")"
 cp -- "$CF_PATCH" "$frz/counterfactual.patch"; cp -- "$TOOL_PATCH" "$frz/tooling.patch"
 comp frozen_patched "$(alloc "$frz")"; rm -rf "$frz"
@@ -323,120 +278,156 @@ mkdir "$probe/a" "$probe/b-src" "$probe/b-dst"
 printf a > "$probe/a/marker"; printf src > "$probe/b-src/marker"; printf dst > "$probe/b-dst/marker"
 comp probe "$(( $(alloc "$probe/a") + $(alloc "$probe/b-src") + $(alloc "$probe/b-dst") ))"
 rm -rf "$probe"
+NOCF=""
+if [ "$COMPUTE" = full ]; then
+  # ⚠️ 量測趟的程式碼（「二之二」）：e1cbbbd ＋ tooling、⛔ 不套 counterfactual；在任何 baseline 之前建好，⛔ 不計入 P_path。
+  NOCF="$WORK/nocf"
+  replay_args_prepare_worktree "$CLONE" "$BASE" "$NOCF" >/dev/null || on_failure "量測趟的 worktree" 1
+  line="$(replay_args_compose "$NOCF" "$BASE" "" "$TOOL_PATCH")" || on_failure "量測趟的合成（⛔ 不套 counterfactual）" 1
+  read -r _ _ _ nocf_tool _ _ <<< "$line"
+  [ "$nocf_tool" = "$C_TOOL" ] || on_failure "量測趟的 tooling 增量 SHA ≠ 正式合成的" 1
+fi
+helper clean-env --clone "$CLONE" > "$S/clean.env" || on_failure "clean-env" 1
+mapfile -d '' CLEAN < "$S/clean.env"
 
-# shim
+# shim（profile acceptance）
 ln -s "$SHIM" "$S/bin/docker"
-export SIZING_REAL_DOCKER="$REAL_DOCKER" SIZING_STATE="$S" SIZING_RUN_ID="$RUN_ID" SIZING_IMAGE="$IMAGE" \
-       SIZING_HELPER="$HELPER"
-SHIM_PATH="$S/bin:$PATH"
 LOC_JSON="$(python3 -c 'import json,sys; print(json.dumps(dict(zip(["L1","L2","L3","L5"], sys.argv[1:]))))' "$L1" "$L2" "$L3" "$L5")"
+PROMO_LOC_JSON="$(python3 -c 'import json,sys; print(json.dumps(dict(zip(["L3","L5","L6"], sys.argv[1:]))))' "$L3" "$L5" "$L6")"
 INV_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$WORK" "$REPO_CANON")"
-SRC_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$CLONE")"
+SRC_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$CLONE" "$REAL")"
 
-# 執行一個步驟並比對結束碼。$1＝步驟名、$2＝預期結束碼、$3＝role、其餘＝指令（經 shim）。
+# 執行一個步驟並比對結束碼。$1＝步驟名、$2＝預期結束碼、$3＝role、其餘＝指令。⚠️ `env -i` ＋ `clean_env()` ＋ 固定 PATH，
+# 經 `host-run`（host 端程序樹的記憶體）；容器經 shim。
 step() {
-  local name="$1" want="$2" role="$3"
+  local name="$1" want="$2" role="$3" included=false
   shift 3
+  case "$PHASE" in success|failure|promote_success|promote_failure) included=true ;; esac
   say "    $name（預期 $want）"
-  run_in_group "$name" "$want" env SIZING_PHASE="$PHASE" SIZING_ROLE="$role" \
-      SIZING_INCLUDED="$([ "$PHASE" = memory_only ] && echo false || echo true)" \
-      TMPDIR="$L3" PATH="$SHIM_PATH" REPLAY_IMAGE_ID="$IMAGE" "$@"
+  run_in_group "$name" "$want" env -i "${CLEAN[@]}" PATH="$S/bin:/usr/bin:/bin" PYTHONDONTWRITEBYTECODE=1 TMPDIR="$L3" \
+      REPLAY_IMAGE_ID="$IMAGE" SIZING_REAL_DOCKER="$REAL_DOCKER" SIZING_STATE="$S" SIZING_RUN_ID="$RUN_ID" \
+      SIZING_IMAGE="$IMAGE" SIZING_HELPER="$HELPER" SIZING_PROFILE=acceptance SIZING_PHASE="$PHASE" SIZING_ROLE="$role" \
+      SIZING_INCLUDED="$included" python3 "$HELPER" host-run --state "$S" --step "$name" -- "$@"
 }
-fixture() {  # $1＝phase
-  step "fixture_$1" 0 fixture docker run --rm --network none --user "$(id -u):$(id -g)" --cpus=1 \
-    --memory="$MEM" --memory-swap="$MEM" -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONPATH=/app \
-    -v "$CLONE/python":/app:ro -v "$HELPER":/sizing/i074_stage2_sizing.py:ro -v "$CACHE":/cache:ro \
-    -v "$L1/$1":/out -w /app "$IMAGE" \
-    python /sizing/i074_stage2_sizing.py fixture --phase "$1" --python-root /app --cache /cache --out /out \
-    --composed-sha256 "$C_COMP"
+# replay：⚠️ 兩份 patch 的環境變數**只**在這一步（總綱「四」）。$1＝步驟名、$2＝預期、$3＝run 目錄、$4＝模式、$5＝計算
+replay() {
+  local name="$1" want="$2" run="$3" mode="$4" compute="$5" argv
+  helper replay-argv --clone "$CLONE" --run-dir "$run" --anchors "$S/anchors.json" > "$S/argv.$name" \
+    || on_failure "replay-argv（$name）" 1
+  mapfile -d '' argv < "$S/argv.$name"
+  # ⚠️ replay_argv() 的第一個 token 就是 runner 本身（⑩ 照原樣執行）——⛔ 不再另外加。
+  [ "${#argv[@]}" -gt 1 ] && [ "${argv[0]}" = "$CLONE/scripts/run-replay-offline.sh" ] \
+    || on_failure "replay-argv（$name）的第一個 token 不是工作複本的 runner" 1
+  step "$name" "$want" replay env I074_STAGE=2 COUNTERFACTUAL_PATCH="$L1/${PATCH_RUN:-$(basename "$run")}/patches/counterfactual.patch" \
+    TOOLING_PATCH="$L1/${PATCH_RUN:-$(basename "$run")}/patches/tooling.patch" SIZING_REPLAY_MODE="$mode" \
+    SIZING_REPLAY_COMPUTE="$compute" ${NOCF:+SIZING_NOCF_PYTHON="$NOCF/python"} "${argv[@]}"
 }
-freeze_patches() {  # $1＝run 目錄
+promote() {  # $1＝步驟名、$2＝預期、$3＝replay 的結束碼（0／6）
+  step "$1" "$2" promotion python3 "$HELPER" promote-measure --clone "$CLONE" --work "$WORK" --real "$REAL" \
+    --identity "$IDENTITY" --bundle-id "$BUNDLE_ID" --semantic "$C_SEM" --repo-head "$REPO_HEAD" --rc "$3"
+}
+freeze_patches() {  # $1＝run 目錄（⑩ 的 layout：<run>/patches/{counterfactual,tooling}.patch）
   mkdir -p "$1/patches"
   cp -- "$CF_PATCH" "$1/patches/counterfactual.patch"; cp -- "$TOOL_PATCH" "$1/patches/tooling.patch"
 }
-begin_phase() {  # $1＝phase
-  mkdir -p "$L1/$1"                           # ⚠️ 允許位置的根目錄先建好，再記 inventory
-  measure_begin_phase "$1" "$LOC_JSON" "$WORK" "$DROOT_C" "$INV_JSON"
-}
-end_phase() {  # $1＝archive 路徑
+begin_disk() { mkdir -p "$L1/$1"; measure_begin_phase "$1" "$LOC_JSON" "$WORK" "$DROOT_C" "$INV_JSON"; }
+end_disk() {  # $1＝archive
   local allow
-  # ⚠️ L1 只放行**本路徑自己的** run 根目錄（⛔ 不是整個 <work>/runs——那會放過改到別條路徑的 run）。
   allow="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$L1/$PHASE" "$L2" "$L3" "$L5")"
   measure_end_phase "$L1/$PHASE" "$1" "$INV_JSON" "$allow" "$SRC_JSON"
 }
+begin_promo() { measure_begin_phase "$1" "$PROMO_LOC_JSON" "$WORK" "$DROOT_C" "$INV_JSON"; }
+end_promo() {  # $1＝晉升的目的地
+  local allow
+  allow="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "$L3" "$L5" "$L6")"
+  measure_end_phase "$L6" "$1" "$INV_JSON" "$allow" "$SRC_JSON"
+}
 FIN="$CLONE/scripts/finalize-stage2-evidence.sh"
 
-# ── 1. witness ───────────────────────────────────────────────────────────────
-begin_phase witness
-new_worktree "$BASE" 0 >/dev/null
-fixture witness
-step envcheck 0 finalizer "$FIN" --envcheck --run-dir "$L1/witness"
-end_phase "$L2/envcheck"
+# ── 1. preflight（只量記憶體） ──────────────────────────────────────────────────
+PHASE=preflight
+say "==> preflight"
+step check_failed_record_preflight 0 check "$FIN" --check-failed-record --counterfactual-patch "$CF_PATCH"
 
 # ── 2. success ───────────────────────────────────────────────────────────────
-begin_phase success
-new_worktree "$BASE" 1 >/dev/null
-fixture success
+begin_disk success
 freeze_patches "$L1/success"
+replay replay_success 0 "$L1/success" success stub
 step finalize 0 finalizer "$FIN" --finalize --run-dir "$L1/success"
-end_phase "$L2/evidence"
+end_disk "$L2/evidence"
 
-# ── 3. failure ───────────────────────────────────────────────────────────────
+# ── 3. 晉升 success（資訊值的窗口） ──────────────────────────────────────────────
+begin_promo promote_success
+promote promote_success 0 0
+end_promo "$L6/evidence"
+
+# ── 4. failure ───────────────────────────────────────────────────────────────
 mkdir -p "$L2/failed"
 ls -A "$L2/failed" > "$S/failed-before.txt"
-begin_phase failure
-new_worktree "$BASE" 1 >/dev/null
-fixture failure
+begin_disk failure
 freeze_patches "$L1/failure"
+replay replay_failure 6 "$L1/failure" failure stub
 step publish_failed_record 1 finalizer "$FIN" --publish-failed-record --run-dir "$L1/failure"
 ls -A "$L2/failed" > "$S/failed-after.txt"
 PUBLISHED="$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().strip().splitlines()[-1])["published"])' \
   "$S/out/publish_failed_record.stdout")" || on_failure "讀不到 published" 1
 RECORD="$(helper record-diff --before "$S/failed-before.txt" --after "$S/failed-after.txt" \
   --published "$PUBLISHED" --failed-root "$L2/failed")" || on_failure "record 目錄的集合差" 1
-end_phase "$RECORD"
+end_disk "$RECORD"
 
-# ── 4. 其餘程序（只量記憶體與耗時；⛔ 不在任何 P_path 的窗口內） ───────────────────
+# ── 5～6. 晉升 failure：晉升的第 3 步要求終態恰好一組，evidence/ 暫時搬開（同一個檔案系統的 rename） ────────────
+PHASE=""
+mv -- "$L2/evidence" "$WORK/aside/evidence" || on_failure "evidence/ 搬不開" 1
+begin_promo promote_failure
+promote promote_failure 6 6
+end_promo "$L6/failed/$(basename "$RECORD")"
+PHASE=""
+mv -- "$WORK/aside/evidence" "$L2/evidence" || on_failure "evidence/ 搬不回來" 1
+
+# ── 7. 其餘程序（只量記憶體） ───────────────────────────────────────────────────
 PHASE=memory_only
 say "==> memory_only"
-step recover_envcheck 0 recovery "$FIN" --recover-envcheck
-step recover_durability 0 recovery "$FIN" --recover-durability
 step check_failed_record 2 check "$FIN" --check-failed-record --counterfactual-patch "$L1/failure/patches/counterfactual.patch"
+step recover_durability 0 recovery "$FIN" --recover-durability
 step recover_failed_record 1 recovery "$FIN" --recover-failed-record "$RECORD"
+# i（環境等價比對程序）：⚠️ 封存的 envcheck/ 是 ③c 當時的 HEAD 發布的，--recover-envcheck 要求執行身分 ＝ 封存的
+#   finalizer_provenance.base_commit——所以先把它搬開，以封存的見證輸出（after'／cohort'；gzip 解壓即原本的 canonical bytes）
+#   重新發布一份（--envcheck：E3a 全量比對 ＋ 發布，就是 ③c 執行過的程式），再量 --recover-envcheck，最後把原本的 envcheck/ 搬回來。
+WIT="$L1/witness"
+mkdir -p "$WIT/witness"
+for f in after_artifact cohort_manifest; do
+  gzip -dc "$L2/envcheck/witness/$f.json.gz" > "$WIT/witness/$f.json" || on_failure "解壓封存的 $f" 1
+done
+mv -- "$L2/envcheck" "$WORK/aside/envcheck" || on_failure "envcheck/ 搬不開" 1
+step envcheck 0 finalizer "$FIN" --envcheck --run-dir "$WIT"
+step recover_envcheck 0 recovery "$FIN" --recover-envcheck
+rm -rf -- "$L2/envcheck" && mv -- "$WORK/aside/envcheck" "$L2/envcheck" || on_failure "envcheck/ 搬不回來" 1
+if [ "$COMPUTE" = full ]; then
+  say "==> ⑨-1 的量測趟：完整計算（⛔ 不套 counterfactual；約 3 小時）"
+  mkdir -p "$L1/full"
+  PATCH_RUN=success replay replay_full 0 "$L1/full" success full
+fi
 
-# ── 5. metadata twin（所有量測窗口結束之後） ───────────────────────────────────
-say "==> 步驟 5：metadata twin"
+# ── 8. metadata twin（所有量測窗口結束之後） ───────────────────────────────────
+PHASE=""
+say "==> metadata twin"
 [ "${I074_SIZING_FAULT:-}" != twins ] || on_failure "metadata twin（注入的故障）" 1
 helper twins --state "$S" --docker "$REAL_DOCKER" --run-id "$RUN_ID" --fs-path "$WORK" || on_failure "metadata twin" 1
 
-# ── 6. 報告 ────────────────────────────────────────────────────────────────────
-say "==> 步驟 6：報告"
-helper report --state "$S" --json-out "$S/sizing_report.json" --text-out "$S/sizing_report.txt" \
-  || on_failure "report" 1
-# ⚠️ ⑦b：freeze record 在**任何檔案複製到 <work> 之前**於 S 建好並自我驗證；只有 formal ＋ ok ＋ P_B ≤ 預算才寫。
-# ⚠️ ⑦d：freeze record 的寫入端從**工作複本**（HEAD）執行（「快照與來源的清單」②；⛔ 不從原始 repo 的活路徑）——它只以
-#   git 物件讀 repo_head 中的檔案內容，工作複本有同一份物件；它 import 的 i074_stage2_preflight.py 也是工作複本的。
-FREEZE="$CLONE/python/scripts/i074_stage2_freeze_record.py"
-if [ "$FORMAL" = "1" ]; then
-  python3 "$FREEZE" build --report "$S/sizing_report.json" --repo "$CLONE" --identity "$IDENTITY" \
-    --out "$S/freeze_record.json" || on_failure "freeze record" 1
-fi
-for wt in "$L3"/tmp.*; do
+# ── 9. 報告 ────────────────────────────────────────────────────────────────────
+say "==> 報告"
+REPORT_RC=0
+helper acceptance-report --state "$S" --clone "$CLONE" --json-out "$S/acceptance_report.json" \
+  --text-out "$S/acceptance_report.txt" || REPORT_RC=$?
+case "$REPORT_RC" in 0|2) ;; *) on_failure "report" 1 ;; esac
+for wt in "$L3"/tmp.* ${NOCF:+"$NOCF"}; do
   [ -d "$wt" ] && git -C "$CLONE" worktree remove --force "$wt" >/dev/null 2>&1 || true
 done
-# ⚠️ 本次 run id 的容器必須一個都不剩——在寫出任何報告**之前**檢查（⛔ 不留下「有報告卻失敗」的矛盾狀態）。
 ensure_no_run_containers "結束前的容器檢查"
-cp "$S/sizing_report.json" "$S/sizing_report.txt" "$WORK/"
-if [ -f "$S/freeze_record.json" ]; then
-  cp "$S/freeze_record.json" "$WORK/"
-  # 複製之後對兩個副本再驗一次；不符就刪掉 freeze record（⛔ 不留下可以進 ⑩ 的錯誤紀錄）。
-  if ! python3 "$FREEZE" check-pair --record "$WORK/freeze_record.json" --report "$WORK/sizing_report.json"; then
-    rm -f -- "$WORK/freeze_record.json"
-    on_failure "freeze record 的副本驗證" 1
-  fi
-  say "==> freeze record：$WORK/freeze_record.json"
-fi
+[ "$(sha_of "$IDENTITY")" = "$IDENTITY_SHA0" ] || on_failure "Stage 2 identity 檔在執行期間被改了" 1
+cp "$S/acceptance_report.json" "$S/acceptance_report.txt" "$WORK/"
 cp -a "$S" "$WORK/raw" || { echo "⚠️ 複製原始量測失敗，保留 S：$S" >&2; DONE=1; exit 1; }
 DONE=1
 rm -rf "$S"
-echo "報告：$WORK/sizing_report.json（原始量測：$WORK/raw/）" >&2
+echo "報告：$WORK/acceptance_report.json（原始量測：$WORK/raw/；status：$([ "$REPORT_RC" = 0 ] && echo ok || echo threshold_exceeded)）" >&2
+exit "$REPORT_RC"

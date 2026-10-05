@@ -1438,7 +1438,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ⚠️ 待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
@@ -1479,6 +1479,65 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work
 ⚠️ **`status = "assumption_violated"`**（failure 路徑的峰值大於 success 路徑）時報告照樣產出，⛔ 但不得進入 ⑤ 的
 正式裁定，要回頭 review 計畫。⚠️ ⑦ 的正式流程若量到比 ⑤ 裁定的 `P_B` 更大的實際峰值：⛔ 不得進入 ⑩，更新
 `P_B`／`M_safety`、重跑 ⑤、回到 ⑥ 確認。
+
+⚠️ **⑦d（2026-10-02）改動**（規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）：
+- **快照與 re-exec**：主腳本開頭的 minimal bootstrap 把 harness 自己的檔案（主腳本、`scripts/lib/i074-stage2-measure.sh`、shim、
+  `mem-guard.sh`、`python/scripts/i074_stage2_sizing.py`）複製到 `<S>/harness/`、寫 `MANIFEST`，再 `exec` 快照裡的主腳本——之後每一行都
+  從快照執行，量測期間改動 repo 裡的這些檔案⛔ 不影響本次。`--formal` 在複製**之前**驗原檔 ＝ HEAD、複製**之後**再驗快照 ＝ HEAD。
+  ⚠️ bootstrap 失敗或收到訊號時⛔ 不刪任何東西（只印出 S 的位置；請自行刪除）；快照驗證通過之後的失敗照常清 S。
+  ⚠️ 實作第一輪 review：「HEAD」一律是 bootstrap **只解析一次**的 commit OID（`SIZING_BOOT_HEAD` 交給快照裡的主腳本）——工作複本
+  clone 之後 checkout 它（detached）、報告的 `repo_head` 與 freeze record 都是它，報告驗 `clone_head ＝ repo_head`；`--formal` 時
+  啟動 repo 的 HEAD 在 bootstrap 之後移動 → 拒絕。re-exec 在取得刪除權之前封閉驗證**整個 S 的形狀**（恰好 `harness/`、清單裡的
+  檔案與它們的目錄、`MANIFEST`），多任何東西都拒絕、⛔ 不刪。
+- shim 的 sidecar 另記容器實際的記憶體上限（`docker inspect` 的 `HostConfig.Memory`／`MemorySwap`；兩個 profile 都記，讀不到 →
+  量測失敗）；acceptance 的報告以它逐 invocation 列出並驗證（實作第一輪 review）。
+- 共用的 shell 原語（S 之後的六步清理、process group、CID 清理、量測窗口、啟動守門）抽成 `scripts/lib/i074-stage2-measure.sh`，與 acceptance harness 共用。
+- **freeze record 改從工作複本執行**（`<clone>/python/scripts/i074_stage2_freeze_record.py build --repo <clone>`），⛔ 不從原始 repo 的活路徑；
+  `--formal` 的「檔案 ＝ HEAD」改成驗快照清單，freeze record 與 preflight 兩個模組只驗「HEAD 裡有它」。
+- accounted 多一項 **`runner_frozen_patches`**：runner 以 `exec docker run` 結束、EXIT trap ⛔ 不執行，兩份 patch 的凍結副本留在 `<work>/tmp`
+  （⑤ 的數字沒有這一項，保留為歷史紀錄）。報告另加 `harness_manifest`／`harness_manifest_sha256`（實際執行的完整檔案集合）。
+- 演練用的故障注入另加 `bootstrap-copy`／`bootstrap-manifest`／`bootstrap-stall`（只在 snapshot pass 生效）。
+
+### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作，⚠️ 待 review）
+
+⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+「I-074 Stage 2 的容量驗收」。本節只寫**操作程序**。⛔ 不是正式的證據入口；**正式驗收是 ⑨-1**。
+
+```text id="i074_stage2_acceptance_usage_001"
+# ⑦d 的開發驗證（允許未 commit；stub：數分鐘，⛔ 不涵蓋 replay 的計算工作集）
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --work-dir ~/i074_stage2_acceptance/<名稱>
+
+# ⑨-1 的正式驗收（⑨ 封存之後；clean、harness 檔案 ＝ HEAD；--replay-compute full 是唯一的量測趟，約 3 小時；
+#   stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案）
+REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --formal --replay-compute full --work-dir ~/i074_stage2_acceptance/<名稱>
+```
+
+| 項目 | 規則 |
+|---|---|
+| 做什麼 | 兩層複本（原始 repo → `<work>/real`（模擬的真正 repo）→ `<work>/repo`（工作複本，origin ＝ `<work>/real`））裡以**真實的** runner、`evaluation.py`、finalizer 與晉升跑：preflight 的 `--check-failed-record` → success（replay → `--finalize`）→ 晉升 → failure（replay → `--publish-failed-record`）→ 晉升 → `--check-failed-record`（命中）、`--recover-durability`、`--recover-failed-record`、`--envcheck`（以封存的見證輸出重新發布）、`--recover-envcheck` →（full）量測趟 |
+| replay 的計算 | `stub`（預設）：launcher 只把 `_decision_replay_rows()` 換成「讀錨定的 D+1 after」；`full`（只在 ⑨-1）：真的計算（`e1cbbbd` ＋ tooling、⛔ 不套 counterfactual，算出的列與錨定的 D+1 相同），之後才套 success 的合成。`--formal` 必須帶 `full` |
+| 門檻 | 每一個容器程序的 cgroup 峰值、每一步 host 端的最大單一程序 RSS 都 **< 450 MiB**；success、failure 的 `P_path` **≤ `P_B_BUDGET`**；取樣的 host 程序群組 RSS 總和只作**單向警報**（≥ 450 MiB 才算超標）；晉升的磁碟只列資訊值 |
+| 容器的記憶體上限 | 報告逐 invocation 列出 daemon 實際套用的上限（mem-guard 當次下修後的 `--memory`，因容器而異）；它 ≠ 封存的 argv、讀不到、0（沒有上限）、或 `MemorySwap` ≠ `Memory`（可以用 swap）→ ⛔ 不產報告（結束碼 1） |
+| 結束碼 | **0** ＝ 報告已寫且 `ok`；**2** ＝ 報告已寫但 `threshold_exceeded`（⛔ 不得進入 ⑩，依 v29「六、1」的回退順序）；**1** ＝ harness 失敗（⛔ 不產報告） |
+| 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的完整複本，含 `harness/MANIFEST`）；失敗時 `<work>/raw-failed/` 與 `failure_summary.json` |
+| 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree），用完可整個刪除 |
+| ⚠️ 量測期間 | ⛔ 不要動真正的 repo（每條路徑前後比對它的完整 inventory）；⛔ 不要在 `<work>` 裡建檔。量測的是 bootstrap 解析的那一個 commit（`repo_head`）：`--formal` 啟動時 HEAD 已在 bootstrap 之後移動 → 在建 work 目錄之前拒絕；之後 HEAD 再移動⛔ 不影響本次 |
+| 環境 | 每一步都以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH（`<S>/bin:/usr/bin:/bin`）經 `host-run` 執行；兩份 patch 的環境變數只給 replay 那一步（報告逐步驗，違反即 fail-closed） |
+| 故障注入 | `I074_SIZING_FAULT=prepare`（work 目錄建好之後立刻中止）／`twins`／`copy`／`summary`／`bootstrap-*`；`--formal` 一律拒絕 |
+
+⑩ 期間的 **observer**（⛔ 不是 ⑩ 的一部分、⛔ 不作為前置；結果只額外記錄進 `issue.md`）：
+
+```text id="i074_stage2_observe_usage_001"
+# ⑩ 開始之前，在另一個終端機啟動；⑩ 結束之後按 Ctrl-C 停止
+python3 python/scripts/i074_stage2_sizing.py observe --work-dir <⑩ 的 --work-dir> --out ~/i074_stage2_observe/<名稱>
+```
+
+| 項目 | 規則 |
+|---|---|
+| 唯讀 | ⛔ 不寫 `--work-dir`、⛔ 不寫任何 repo；docker 只用 `ps`、`inspect`；狀態在 `/dev/shm/i074-observe-<run id>/`，停止時才寫 `--out`（必須尚不存在、⛔ 不得在 repo 或 `--work-dir` 內） |
+| 量什麼 | 每 0.5 秒讀帶 `i074.stage2.run` 鍵的容器的 cgroup high-water mark（**下界**——最後一次讀取之後的尾段峰值可能漏記）；L0 與 `--work-dir` 的取樣（⛔ 不是 `P_B` 的量法） |
+| 完整度 | 報告的 `observation_complete`、`replay_seen`、`missing_expected_containers`、`unavailable_containers`——⛔ 不完整的報告⛔ 不得當成完整觀測 |
+| 守門 | 環境帶 `I074_STAGE2_*`／`SIZING_*`、或 PATH 上的 docker 是 label shim／sizing shim → 拒絕 |
 
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 

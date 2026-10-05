@@ -14,6 +14,15 @@
 #
 # 由 harness 設定的環境：SIZING_REAL_DOCKER、SIZING_STATE（S）、SIZING_RUN_ID、SIZING_IMAGE、SIZING_PHASE、
 #   SIZING_ROLE、SIZING_INCLUDED（true／false）、SIZING_HELPER（python/scripts/i074_stage2_sizing.py）。
+#
+# ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」「二之四」）：`SIZING_PROFILE`——未設定 ＝ sizing（上面的行為⛔ 不變）；
+#   `acceptance`：⛔ 不加 `--read-only`（⑩ 不加；SizeRw 由報告照實計入）；role `replay` 的容器指令開頭必須恰好是
+#   `python -m backtest.modular.sr_scoring.evaluation`，換成 `python /acceptance/replay_stub.py`（其後的參數逐 token 不變），
+#   並加唯讀掛載 `<S>/harness/python/scripts/i074_stage2_replay_stub.py`（**快照**的路徑，由 S 推導、⛔ 不接受其他來源）與
+#   兩個模式變數（SIZING_REPLAY_MODE、SIZING_REPLAY_COMPUTE）；`full` 另把恰好一個 `-v <x>:/app:ro` 的來源換成
+#   SIZING_NOCF_PYTHON（`e1cbbbd` ＋ tooling、⛔ 不套 counterfactual 的 worktree）。其他值 → 125、⛔ 不執行。
+# ⚠️ ⑦d 實作第一輪 review：兩個 profile 的 sidecar 都另記 daemon 實際套用的記憶體上限（`docker inspect` 的
+#   `HostConfig.Memory`／`MemorySwap`；mem-guard 下修後的 --memory），由 acceptance 的報告逐 invocation 比對封存的 argv。
 set -uo pipefail
 
 REAL="${SIZING_REAL_DOCKER:?}"
@@ -39,6 +48,11 @@ S="${SIZING_STATE:?}"
 IMAGE="${SIZING_IMAGE:?}"
 ERRLOG="$S/shim-errors.log"
 py() { PYTHONDONTWRITEBYTECODE=1 python3 "$SIZING_HELPER" "$@" 2>>"$ERRLOG"; }
+PROFILE="${SIZING_PROFILE:-sizing}"
+case "$PROFILE" in
+  sizing|acceptance) ;;
+  *) printf 'shim：未知的 SIZING_PROFILE %s\n' "$PROFILE" >>"$ERRLOG"; exit 125 ;;
+esac
 
 # ⚠️ 與 `run-replay-offline.sh` 的 MEASURE_PEAK **同一套**候選路徑與順序：v1 → v2；讀不到時 peak 檔為空
 #   （report 會 fail-closed）；⚠️ 保留原指令的結束碼。`SIZING_CGROUP_ROOT`／`SIZING_PEAK_DIR` 只給 host 上的測試覆寫。
@@ -61,18 +75,49 @@ for tok in "${args[@]:0:pos}"; do
   [ "$tok" = "--rm" ] || opts+=("$tok")
 done
 cmd=("${args[@]:pos+1}")
+READ_ONLY=(--read-only)
+if [ "$PROFILE" = acceptance ]; then
+  READ_ONLY=()
+  if [ "${SIZING_ROLE:-}" = replay ]; then
+    STUB="$S/harness/python/scripts/i074_stage2_replay_stub.py"
+    if [ "${#cmd[@]}" -lt 3 ] || [ "${cmd[0]}" != python ] || [ "${cmd[1]}" != -m ] \
+       || [ "${cmd[2]}" != backtest.modular.sr_scoring.evaluation ]; then
+      printf 'shim：replay 的容器指令開頭不是 python -m backtest.modular.sr_scoring.evaluation：%s\n' "${cmd[*]:0:3}" >>"$ERRLOG"
+      exit 125
+    fi
+    case "${SIZING_REPLAY_MODE:-}:${SIZING_REPLAY_COMPUTE:-}" in
+      success:stub|failure:stub|success:full) ;;
+      *) printf 'shim：SIZING_REPLAY_MODE／SIZING_REPLAY_COMPUTE 不符：%s\n' "${SIZING_REPLAY_MODE:-}:${SIZING_REPLAY_COMPUTE:-}" >>"$ERRLOG"
+         exit 125 ;;
+    esac
+    [ -f "$STUB" ] || { printf 'shim：快照裡沒有 launcher：%s\n' "$STUB" >>"$ERRLOG"; exit 125; }
+    if [ "$SIZING_REPLAY_COMPUTE" = full ]; then
+      [ -n "${SIZING_NOCF_PYTHON:-}" ] || { printf 'shim：full 沒有 SIZING_NOCF_PYTHON\n' >>"$ERRLOG"; exit 125; }
+      n=0
+      for i in "${!opts[@]}"; do
+        if [ "${opts[$i]}" = -v ] && [[ "${opts[$((i + 1))]:-}" == *:/app:ro ]]; then
+          opts[$((i + 1))]="$SIZING_NOCF_PYTHON:/app:ro"; n=$((n + 1))
+        fi
+      done
+      [ "$n" = 1 ] || { printf 'shim：full 要恰好一個 /app 的掛載，實際 %s 個\n' "$n" >>"$ERRLOG"; exit 125; }
+    fi
+    opts+=(-v "$STUB:/acceptance/replay_stub.py:ro" -e "I074_ACCEPTANCE_REPLAY=$SIZING_REPLAY_MODE"
+           -e "I074_ACCEPTANCE_COMPUTE=$SIZING_REPLAY_COMPUTE")
+    cmd=(python /acceptance/replay_stub.py "${cmd[@]:3}")
+  fi
+fi
 
 SEQ="$(py seq --state "$S")" || exit 125
 ID="$(printf 'o%03d0' "$SEQ")"
 CIDFILE="$S/cid/$ID.cid"
 PEAKDIR="$S/peak/$ID"
 mkdir -p "$S/cid" "$PEAKDIR" "$S/logs" 2>>"$ERRLOG" || exit 125
-spec=("${opts[@]}" --cidfile "$CIDFILE" --name "i074sz-${SIZING_RUN_ID:?}-$ID" --read-only
+spec=("${opts[@]}" --cidfile "$CIDFILE" --name "i074sz-${SIZING_RUN_ID:?}-$ID" "${READ_ONLY[@]}"
       -v "$PEAKDIR:/peak" "$IMAGE" sh -c "$PEAK_WRAPPER" _ "${cmd[@]}")
 
 # ⚠️ 不可變索引在**執行前**寫（exclusive create）；寫不了就⛔ 不執行。
 py index --state "$S" --sequence "$SEQ" --phase "${SIZING_PHASE:?}" --role "${SIZING_ROLE:?}" \
-  --included "${SIZING_INCLUDED:?}" --image "$IMAGE" -- "${spec[@]}" >/dev/null || exit 125
+  --included "${SIZING_INCLUDED:?}" --image "$IMAGE" --profile "$PROFILE" -- "${spec[@]}" >/dev/null || exit 125
 
 CHILD=""
 on_signal() {  # $1＝訊號名、$2＝結束碼。⚠️ 以 cidfile 記錄的 CID 強制移除（⛔ 不以名稱猜）。
@@ -80,7 +125,7 @@ on_signal() {  # $1＝訊號名、$2＝結束碼。⚠️ 以 cidfile 記錄的 
   [ -n "$CHILD" ] && kill "$CHILD" 2>/dev/null || true
   py sidecar --state "$S" --sequence "$SEQ" --rc "$2" --container "$(cat "$CIDFILE" 2>/dev/null)" \
     --size-rw "" --log-config "" --stdout-log /dev/null --stderr-log /dev/null \
-    --peak-file "$PEAKDIR/peak" --failure "被 $1 中斷" >/dev/null || true
+    --peak-file "$PEAKDIR/peak" --memory-limit "" --memory-swap-limit "" --failure "被 $1 中斷" >/dev/null || true
   exit "$2"
 }
 trap 'on_signal INT 130' INT
@@ -97,13 +142,17 @@ CHILD=""
 
 failures=()
 CID="$(cat "$CIDFILE" 2>/dev/null || true)"
-SIZE_RW=""; LOG_CONFIG=""
+SIZE_RW=""; LOG_CONFIG=""; MEM_LIMIT=""; SWAP_LIMIT=""
 if [ -z "$CID" ]; then
   failures+=(--failure "cidfile 讀不到（容器可能沒有建立）")
 else
   SIZE_RW="$("$REAL" inspect --size -f '{{.SizeRw}}' "$CID" 2>>"$ERRLOG")" || failures+=(--failure "inspect --size 失敗")
   LOG_CONFIG="$("$REAL" inspect -f '{{json .HostConfig.LogConfig}}' "$CID" 2>>"$ERRLOG")" \
     || failures+=(--failure "inspect LogConfig 失敗")
+  # ⚠️ 兩個值以一個空白分隔；多出的 token 會落進 SWAP_LIMIT、讓它不是整數 → sidecar 記成量測失敗。
+  MEM_LIMITS="$("$REAL" inspect -f '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}}' "$CID" 2>>"$ERRLOG")" \
+    || failures+=(--failure "inspect HostConfig.Memory 失敗")
+  read -r MEM_LIMIT SWAP_LIMIT <<< "${MEM_LIMITS:-}"
   # ⚠️ docker logs 只導進 S 的檔案給 sidecar 計數，⛔ 不重新輸出。
   "$REAL" logs "$CID" >"$S/logs/$ID.stdout" 2>"$S/logs/$ID.stderr" || failures+=(--failure "docker logs 失敗")
   if "$REAL" rm "$CID" >/dev/null 2>>"$ERRLOG"; then
@@ -115,6 +164,6 @@ fi
 touch "$S/logs/$ID.stdout" "$S/logs/$ID.stderr" 2>>"$ERRLOG" || true
 py sidecar --state "$S" --sequence "$SEQ" --rc "$RC" --container "$CID" --size-rw "$SIZE_RW" \
   --log-config "$LOG_CONFIG" --stdout-log "$S/logs/$ID.stdout" --stderr-log "$S/logs/$ID.stderr" \
-  --peak-file "$PEAKDIR/peak" "${failures[@]}" >/dev/null || true
+  --peak-file "$PEAKDIR/peak" --memory-limit "$MEM_LIMIT" --memory-swap-limit "$SWAP_LIMIT" "${failures[@]}" >/dev/null || true
 # ⚠️ 傳回原指令的結束碼——量測失敗由 report fail-closed，⛔ 不改寫結束碼。
 exit "$RC"

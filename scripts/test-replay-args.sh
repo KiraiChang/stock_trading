@@ -2230,6 +2230,7 @@ case "$1" in
     case "$*" in
       *SizeRw*) echo "${FAKE_SIZE_RW:-0}" ;;
       *LogConfig*) echo "${FAKE_LOGCONFIG:-{\"Type\":\"json-file\",\"Config\":{}}}" ;;
+      *HostConfig.Memory*) echo "${FAKE_MEMORY-465567744 465567744}" ;;   # ⚠️ `-`：空字串也照給（測「讀到空的」）
       *) echo '[{}]' ;;
     esac ;;
   logs) printf 'out\n'; printf 'err\n' >&2 ;;
@@ -2335,6 +2336,16 @@ rc=0; FAKE_LOGCONFIG='{"Type":"json-file","Config":{"max-size":"10m"}}' sz_run "
 rc=0; FAKE_SIZE_RW=4096 sz_run "$SZ_TD/srw" run "$SZ_IMG" true || rc=$?
 [ "$(sz_sidecar "$SZ_TD/srw" 's["size_rw"]')" = 4096 ] && pass "a4：SizeRw 原樣記錄（report 對非 0 fail-closed）" \
   || fail "a4：SizeRw 沒有記錄"
+# ⑦d 實作第一輪 review #2：daemon 實際套用的記憶體上限（HostConfig.Memory／MemorySwap）照實記錄；讀不懂 → 量測失敗
+[ "$(sz_sidecar "$SZ_TD/srw" '(s["status"], s["memory_limit_bytes"], s["memory_swap_limit_bytes"])')" = "('ok', 465567744, 465567744)" ] \
+  && pass "a4：sidecar 記下容器實際的記憶體上限（inspect 的 Memory／MemorySwap）" || fail "a4：sidecar 沒有記下記憶體上限"
+rc=0; FAKE_MEMORY="465567744 465567744 1" sz_run "$SZ_TD/smem3" run "$SZ_IMG" true || rc=$?
+[ "$rc" = 0 ] && [ "$(sz_sidecar "$SZ_TD/smem3" 's["status"]')" = measure_failed ] \
+  && grep -q 上限讀不到 <<< "$(sz_sidecar "$SZ_TD/smem3" 's["failures"]')" \
+  && pass "a4：記憶體上限讀不懂（多出 token）→ 量測失敗、結束碼照傳" || fail "a4：讀不懂的記憶體上限竟被接受（rc=$rc）"
+rc=0; FAKE_MEMORY="" sz_run "$SZ_TD/smem0" run "$SZ_IMG" true || rc=$?
+[ "$rc" = 0 ] && [ "$(sz_sidecar "$SZ_TD/smem0" 's["status"]')" = measure_failed ] \
+  && pass "a4：記憶體上限是空的 → 量測失敗（⛔ 不寫成 0）" || fail "a4：空的記憶體上限竟被接受（rc=$rc）"
 
 # a5：中斷——容器還在跑時送 SIGTERM，shim 以 cidfile 記錄的 CID docker rm -f
 # ⚠️ 以 setsid 放進自己的 process group：shim 就是 group leader（$sz_pid），收尾時只對這個 group 送 KILL，
@@ -2423,6 +2434,7 @@ if [ -n "$S2_IMG" ]; then
   SZ_REPO="$SZ_TD/frepo"
   mkdir -p "$SZ_REPO/scripts/lib" "$SZ_REPO/python/scripts"
   cp "$SZ_H" "$SZ_REPO/scripts/"; cp "$SZ_SHIM" "$REPO_ROOT/scripts/lib/mem-guard.sh" "$SZ_REPO/scripts/lib/"
+  cp "$REPO_ROOT/scripts/lib/i074-stage2-measure.sh" "$SZ_REPO/scripts/lib/"      # ⑦d：共用原語（快照清單 ①）
   cp "$SZ_HELPER" "$SZ_REPO/python/scripts/"
   # ⚠️ ⑦b：freeze record 的寫入端與它 import 的常數也在 `--formal` 的「檔案 ＝ HEAD」清單裡（n10）。
   cp "$REPO_ROOT/python/scripts/i074_stage2_freeze_record.py" "$REPO_ROOT/python/scripts/i074_stage2_preflight.py" \
@@ -2441,7 +2453,8 @@ if [ -n "$S2_IMG" ]; then
     rm -f "$err"
   }
   printf 'dirty\n' >> "$SZ_REPO/python/scripts/i074_stage2_sizing.py"
-  sz_formal "b：--formal 時 python/ 有未 commit 的變更 → 拒絕" "未 commit"
+  # ⚠️ ⑦d：helper 在快照清單 ① 內——bootstrap 在建 S 之前就以「與 HEAD 的內容不同」拒絕（n10 的下一支驗 python/ 的 clean 檢查）
+  sz_formal "b：--formal 時 harness 的檔案有未 commit 的變更 → 在建 S 之前拒絕" "與 HEAD 的內容不同"
   git -C "$SZ_REPO" checkout -q -- python/scripts/i074_stage2_sizing.py
   printf 'dirty\n' >> "$SZ_REPO/python/scripts/i074_stage2_freeze_record.py"
   sz_formal "n10：--formal 時 freeze record 的寫入端有未 commit 的變更 → 拒絕" "未 commit"
@@ -2458,12 +2471,18 @@ if [ -n "$S2_IMG" ]; then
   printf 'scripts/lib/i074-sizing-docker-shim.sh\n' > "$SZ_REPO/.git/info/exclude"
   sz_formal "b：--formal 時 harness 檔案未進版控 → 拒絕" "尚未進版控"
   I074_SIZING_FAULT=twins sz_formal "b：--formal ⛔ 不接受演練用的故障注入" "故障注入"
+  # ⚠️ ⑦d：下一支要打到 fd 的守門——先把 shim 重新納入版控（否則 bootstrap 的「清單 ① 未進版控」會先擋下、遮蔽它）。
+  : > "$SZ_REPO/.git/info/exclude"
+  git -C "$SZ_REPO" add scripts/lib/i074-sizing-docker-shim.sh
+  git -C "$SZ_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm retrack-shim
   set +e
   env -u PY_IMAGE REPLAY_IMAGE_ID="$S2_IMG" "$SZ_REPO/scripts/i074-stage2-sizing.sh" --formal \
-    --work-dir "$SZ_TD/fw2" > "$SZ_TD/formal.out" 2>/dev/null; rc=$?
+    --work-dir "$SZ_TD/fw2" > "$SZ_TD/formal.out" 2> "/dev/shm/sz-fd-$$.err"; rc=$?
   set -e
-  [ "$rc" -ne 0 ] && [ ! -e "$SZ_TD/fw2" ] && pass "b：--formal 時 stdout 導到量測中的檔案系統 → 拒絕" \
-    || fail "b：--formal 沒有擋下導到 L0 的輸出（rc=$rc）"
+  [ "$rc" -ne 0 ] && [ ! -e "$SZ_TD/fw2" ] && grep -q "fd 1 被導到" "/dev/shm/sz-fd-$$.err" \
+    && pass "b：--formal 時 stdout 導到量測中的檔案系統 → 拒絕（打到 fd 的守門）" \
+    || { fail "b：--formal 沒有擋下導到 L0 的輸出（rc=$rc）"; cat "/dev/shm/sz-fd-$$.err" >&2; }
+  rm -f "/dev/shm/sz-fd-$$.err"
 fi
 # 容器清理失敗（review）：helper 與 fallback 的 rm -f 都失敗 → S 與 cidfile 保留，摘要與 stderr 列出 CID。
 # ⚠️ fake docker：image inspect 成功（⛔ 不需要真的 image）、rm 一律失敗、inspect 顯示容器仍在、ps 沒有具名容器。
@@ -2582,6 +2601,399 @@ for k in $(ls /dev/shm | grep '^i074-sizing-' || true); do
 done
 
 rm -rf "$SZ_TD"
+
+# ── I-074 Stage 2 ⑦d：acceptance harness（shim 的 profile、守門、互斥、快照與 bootstrap） ─────────────────────
+#
+# 對應 issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac4、ac7、ac8、ac11、ac17、ac18。
+# ⚠️ 任何一條都⛔ 不得真的開始量測（⛔ 不建 clone、⛔ 不跑容器）：harness 只測「在動手之前就拒絕」、bootstrap 與注入的中止點；
+#   需要 git HEAD 的情境在隔離的最小 repo 裡跑（⛔ 不改真正的 repo）。測試自己建的 S（/dev/shm/i074-*）由測試自己收拾。
+echo "==> i074 Stage 2 ⑦d：sizing shim 的 acceptance profile"
+AC_TD="$(mktemp -d)"
+AC_SHIM="$REPO_ROOT/scripts/lib/i074-sizing-docker-shim.sh"
+AC_HELPER="$REPO_ROOT/python/scripts/i074_stage2_sizing.py"
+AC_IMG="sha256:$(printf '%064d' 5)"
+mkdir -p "$AC_TD/real"
+# fake 的「真正 docker」：run 只錄下參數（NUL 分隔）、寫 CID 與 /peak，⛔ 不執行容器指令；inspect／logs／rm 都成功。
+cat > "$AC_TD/real/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  run)
+    shift; printf '%s\0' "$@" > "$AC_RUNARGS"; args=("$@")
+    for i in "${!args[@]}"; do
+      case "${args[$i]}" in
+        --cidfile) printf 'cid-x' > "${args[$((i + 1))]}" ;;
+        -v) case "${args[$((i + 1))]}" in *:/peak) echo 123456789 > "${args[$((i + 1))]%:/peak}/peak" ;; esac ;;
+      esac
+    done
+    exit 0 ;;
+  inspect) case "$*" in *SizeRw*) echo 4096 ;; *LogConfig*) echo '{"Type":"json-file","Config":{}}' ;;
+                        *HostConfig.Memory*) echo '465567744 465567744' ;; *) echo '[{}]' ;; esac ;;
+esac
+exit 0
+FAKE
+chmod +x "$AC_TD/real/docker"
+ac_shim() {  # $1＝S；其餘＝docker 參數。回傳 shim 的結束碼；runargs 在 $1.runargs
+  local st="$1" rc=0; shift
+  mkdir -p "$st/harness/python/scripts"
+  : > "$st/harness/python/scripts/i074_stage2_replay_stub.py"
+  set +e
+  env SIZING_REAL_DOCKER="$AC_TD/real/docker" SIZING_STATE="$st" SIZING_RUN_ID=t SIZING_IMAGE="$AC_IMG" \
+      SIZING_PHASE="${AC_PHASE:-success}" SIZING_ROLE="${AC_ROLE:-replay}" SIZING_INCLUDED="${AC_INCLUDED:-true}" \
+      SIZING_HELPER="$AC_HELPER" SIZING_PROFILE="${AC_PROFILE-acceptance}" SIZING_REPLAY_MODE="${AC_MODE-success}" \
+      SIZING_REPLAY_COMPUTE="${AC_COMPUTE-stub}" ${AC_NOCF:+SIZING_NOCF_PYTHON="$AC_NOCF"} AC_RUNARGS="$st.runargs" \
+      "$AC_SHIM" "$@" > /dev/null 2>&1
+  rc=$?
+  set -e
+  return "$rc"
+}
+AC_EVAL=(python -m backtest.modular.sr_scoring.evaluation --x 1 --y)
+rc=0; ac_shim "$AC_TD/s1" run --rm --network none -v /wt/python:/app:ro -w /app "$AC_IMG" "${AC_EVAL[@]}" || rc=$?
+if [ "$rc" = 0 ] && python3 - "$AC_TD/s1" "$AC_IMG" <<'PY'
+import json, sys
+st, img = sys.argv[1], sys.argv[2]
+args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
+pos = args.index(img)
+want = ["--network", "none", "-v", "/wt/python:/app:ro", "-w", "/app",
+        "-v", f"{st}/harness/python/scripts/i074_stage2_replay_stub.py:/acceptance/replay_stub.py:ro",
+        "-e", "I074_ACCEPTANCE_REPLAY=success", "-e", "I074_ACCEPTANCE_COMPUTE=stub",
+        "--cidfile", f"{st}/cid/o0010.cid", "--name", "i074sz-t-o0010", "-v", f"{st}/peak/o0010:/peak"]
+assert args[:pos] == want, args[:pos]
+assert args[pos + 1:pos + 3] == ["sh", "-c"] and args[pos + 4:] == ["_", "python", "/acceptance/replay_stub.py", "--x", "1", "--y"], args[pos:]
+assert json.load(open(st + "/index/0001.json"))["profile"] == "acceptance"
+PY
+then
+  pass "ac4：acceptance 的 replay → ⛔ 沒有 --read-only、指令換成快照裡的 launcher（加唯讀掛載與兩個模式變數）、其餘逐 token 不變"
+else
+  fail "ac4：acceptance 的 replay 改寫不符（rc=$rc）"
+fi
+rc=0; AC_ROLE=finalizer ac_shim "$AC_TD/s2" run --rm -v /wt/python:/app:ro "$AC_IMG" python -m x --finalize || rc=$?
+if [ "$rc" = 0 ] && python3 - "$AC_TD/s2" "$AC_IMG" <<'PY'
+import sys
+st, img = sys.argv[1], sys.argv[2]
+args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
+pos = args.index(img)
+assert "--read-only" not in args[:pos] and args[pos + 4:] == ["_", "python", "-m", "x", "--finalize"], args
+PY
+then pass "ac4：acceptance 的其他 role → ⛔ 沒有 --read-only、容器指令逐 token 不變"; else fail "ac4：acceptance 的 finalizer 改寫不符（rc=$rc）"; fi
+rc=0; AC_COMPUTE=full AC_NOCF=/nocf/python ac_shim "$AC_TD/s3" run -v /wt/python:/app:ro "$AC_IMG" "${AC_EVAL[@]}" || rc=$?
+if [ "$rc" = 0 ] && python3 - "$AC_TD/s3" "$AC_IMG" <<'PY'
+import sys
+st, img = sys.argv[1], sys.argv[2]
+args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
+opts = args[:args.index(img)]
+assert "/nocf/python:/app:ro" in opts and "/wt/python:/app:ro" not in opts and "I074_ACCEPTANCE_COMPUTE=full" in opts, opts
+PY
+then pass "ac4：full → 恰好換掉 /app 的來源（不套 counterfactual 的 worktree）"; else fail "ac4：full 的 /app 換錯（rc=$rc）"; fi
+ac_rejects() {  # $1＝說明；其餘＝docker 參數；預期 125、⛔ 沒有執行 docker run
+  local label="$1" st rc=0; shift
+  st="$AC_TD/r$RANDOM"
+  ac_shim "$st" "$@" || rc=$?
+  if [ "$rc" = 125 ] && [ ! -e "$st.runargs" ]; then pass "$label"; else fail "$label（rc=$rc）"; fi
+}
+AC_COMPUTE=full AC_NOCF=/nocf/python ac_rejects "ac4：full 但沒有 /app 的掛載 → 125" run "$AC_IMG" "${AC_EVAL[@]}"
+AC_COMPUTE=full AC_NOCF=/nocf/python ac_rejects "ac4：full 但有兩個 /app 的掛載 → 125" run -v /a:/app:ro -v /b:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
+AC_COMPUTE=full ac_rejects "ac4：full 但沒有 SIZING_NOCF_PYTHON → 125" run -v /a:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
+ac_rejects "ac4：replay 的指令開頭不是 evaluation → 125" run "$AC_IMG" python -m backtest.modular.sr_scoring.other
+AC_MODE=bogus ac_rejects "ac4：SIZING_REPLAY_MODE 非法 → 125" run "$AC_IMG" "${AC_EVAL[@]}"
+AC_MODE=failure AC_COMPUTE=full AC_NOCF=/n ac_rejects "ac4：full 只限 success → 125" run -v /a:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
+AC_PROFILE=bogus ac_rejects "ac4：未知的 SIZING_PROFILE → 125" run "$AC_IMG" "${AC_EVAL[@]}"
+AC_PROFILE="" AC_ROLE=finalizer AC_INCLUDED=true ac_shim "$AC_TD/s4" run -v /x:/y "$AC_IMG" python -m x || true
+python3 - "$AC_TD/s4" "$AC_IMG" <<'PY' && pass "ac4：profile 未設定 ＝ sizing（照舊加 --read-only）" || fail "ac4：未設定 profile 的行為變了"
+import sys
+st, img = sys.argv[1], sys.argv[2]
+args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
+assert "--read-only" in args[:args.index(img)], args
+PY
+
+# ac7、ac8：harness 在動手之前就拒絕（fake docker：image inspect 成功；identity 放在測試自己的 XDG）
+echo "==> i074 Stage 2 ⑦d：acceptance harness 的參數、守門與互斥"
+ACC_H="$REPO_ROOT/scripts/i074-stage2-acceptance.sh"
+mkdir -p "$AC_TD/okd" "$AC_TD/xdg/stock_trading/i074_stage2" "$AC_TD/empty-xdg"
+printf '{}\n' > "$AC_TD/xdg/stock_trading/i074_stage2/run_identity.json"
+cat > "$AC_TD/okd/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in image|rm) exit 0 ;; inspect) exit 1 ;; ps) exit 0 ;; info) echo /var/lib/docker ;; esac
+exit 0
+FAKE
+chmod +x "$AC_TD/okd/docker"
+ac_shm_count() { ls /dev/shm | grep -c '^i074-accept-' || true; }
+acc_rejects() {  # $1＝說明；$2＝stderr 必須含的字串；其餘＝參數
+  local label="$1" want="$2" rc=0 before after; shift 2
+  before="$(ac_shm_count)"
+  set +e
+  env -u PY_IMAGE PATH="${AC_PATH:-$AC_TD/okd:$PATH}" XDG_DATA_HOME="${AC_XDG:-$AC_TD/xdg}" \
+    REPLAY_IMAGE_ID="${AC_IMAGE_OVERRIDE-$AC_IMG}" ${AC_ENV:-} "$ACC_H" "$@" > /dev/null 2> "$AC_TD/acc.err"; rc=$?
+  set -e
+  after="$(ac_shm_count)"
+  if [ "$rc" -ne 0 ] && grep -q -- "$want" "$AC_TD/acc.err" && [ "$before" = "$after" ]; then pass "$label"
+  else fail "$label（rc=$rc、S $before→$after）"; cat "$AC_TD/acc.err" >&2; fi
+}
+ln -s "$REPO_ROOT" "$AC_TD/repo-link"
+mkdir "$AC_TD/exists"
+AC_IMAGE_OVERRIDE="" acc_rejects "ac7：沒有 REPLAY_IMAGE_ID → 拒絕" "REPLAY_IMAGE_ID" --work-dir "$AC_TD/w1"
+acc_rejects "ac7：work 目錄在 repo 內 → 拒絕" "repo 內" --work-dir "$REPO_ROOT/acceptance-should-not-exist"
+acc_rejects "ac7：parent symlink 指回 repo → 拒絕" "repo 內" --work-dir "$AC_TD/repo-link/acc-x"
+acc_rejects "ac7：work 目錄已存在 → 拒絕（⛔ 不覆蓋）" "已存在" --work-dir "$AC_TD/exists"
+acc_rejects "ac7：--work-dir 重複 → 拒絕" "重複" --work-dir "$AC_TD/w2" --work-dir "$AC_TD/w3"
+acc_rejects "ac7：未知參數 → 拒絕" "未知參數" --work-dir "$AC_TD/w4" --bogus
+acc_rejects "ac7：--replay-compute 非法 → 拒絕" "只接受 stub" --work-dir "$AC_TD/w5" --replay-compute fast
+acc_rejects "ac7：--replay-compute 重複 → 拒絕" "重複" --work-dir "$AC_TD/w6" --replay-compute stub --replay-compute full
+I074_SIZING_FAULT=bogus acc_rejects "ac7：I074_SIZING_FAULT 不認得的值 → 拒絕" "只接受" --work-dir "$AC_TD/w7"
+AC_XDG="$AC_TD/empty-xdg" acc_rejects "ac7：找不到 Stage 2 的 run identity → 拒絕" "run identity" --work-dir "$AC_TD/w8"
+AC_ENV="I074_STAGE2_TOKEN=x" acc_rejects "ac8：環境帶 I074_STAGE2_* → 中止（與 ⑩ 的 label shim 互斥）" "互斥" --work-dir "$AC_TD/w9"
+mkdir -p "$AC_TD/lsbin"
+printf '#!/bin/bash -p\n# I074-STAGE2-LABEL-SHIM\nexit 0\n' > "$AC_TD/lsbin/docker"; chmod +x "$AC_TD/lsbin/docker"
+AC_PATH="$AC_TD/lsbin:$PATH" acc_rejects "ac8：PATH 上的 docker 是 label shim → 中止" "label shim" --work-dir "$AC_TD/w10"
+[ ! -e "$REPO_ROOT/acceptance-should-not-exist" ] && ! ls -d "$AC_TD"/w[0-9]* >/dev/null 2>&1 \
+  && pass "ac7：被拒絕時⛔ 沒有建立任何 work 目錄" || fail "ac7：被拒絕後仍留下 work 目錄"
+rc=0
+env SIZING_REAL_DOCKER="$AC_TD/real/docker" SIZING_STATE="$AC_TD/s5" SIZING_PROFILE=acceptance I074_STAGE2_TOKEN=x \
+  "$AC_SHIM" ps > /dev/null 2>&1 || rc=$?
+[ "$rc" = 125 ] && pass "ac8：acceptance profile 的 shim 在環境帶 I074_STAGE2_* 時 125" || fail "ac8：shim 沒有拒絕（rc=$rc）"
+
+# ac11、ac17、ac18：隔離的最小 repo（HEAD 有 harness 與 ⑩ 的正式程式）；⛔ 不碰真正的 repo
+echo "==> i074 Stage 2 ⑦d：快照、bootstrap 與注入的中止點（隔離的最小 repo）"
+AC_REPO="$AC_TD/arepo"
+for f in scripts/i074-stage2-acceptance.sh scripts/i074-stage2-sizing.sh scripts/lib/i074-stage2-measure.sh \
+         scripts/lib/i074-sizing-docker-shim.sh scripts/lib/mem-guard.sh python/scripts/i074_stage2_sizing.py \
+         python/scripts/i074_stage2_replay_stub.py scripts/run-replay-offline.sh scripts/finalize-stage2-evidence.sh \
+         scripts/lib/replay-args.sh scripts/lib/i074-stage2-supervisor.py python/scripts/i074_stage2_preflight.py \
+         python/scripts/i074_stage2_promote.py python/scripts/_i074_bootstrap.py python/scripts/i074_stage2_freeze_record.py; do
+  mkdir -p "$AC_REPO/$(dirname "$f")"; cp -p "$REPO_ROOT/$f" "$AC_REPO/$f"
+done
+git -C "$AC_REPO" init -q && git -C "$AC_REPO" add -A
+git -C "$AC_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm fixture
+AC_FIX="$(git -C "$AC_REPO" rev-parse HEAD)"
+# PATH 上包裝的 cp：$AC_CP_MODE＝after（複製之後改掉／刪掉原檔）、before（複製之前改掉原檔，給 --formal 的後驗）或
+# commit（複製之前在隔離 repo 加一個空 commit——bootstrap 解析完 HEAD 之後 HEAD 才移動；內容⛔ 不變）。
+# ⚠️ after 的改法是「會讓程式壞掉」的（python 與被 source 的 shell 都在第二行插入 raise SystemExit(99)／return 99）——
+#   harness 只要有一處用到活路徑的檔案就會失敗，測試因此證明得了「用的是快照」。
+mkdir -p "$AC_TD/cpw"
+cat > "$AC_TD/cpw/cp" <<'WRAP'
+#!/usr/bin/env bash
+src="${@: -2:1}"
+case "$src" in
+  */python/scripts/i074_stage2_replay_stub.py|*/python/scripts/i074_stage2_sizing.py|*/scripts/lib/i074-sizing-docker-shim.sh|*/scripts/lib/mem-guard.sh)
+    case "$src" in "$AC_CP_REPO"/*) ;; *) exec /bin/cp "$@" ;; esac
+    if [ "$AC_CP_MODE" = before ]; then printf '\n# tampered\n' >> "$src"; exec /bin/cp "$@"; fi
+    if [ "$AC_CP_MODE" = commit ]; then
+      git -C "$AC_CP_REPO" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m moved || exit 98
+      exec /bin/cp "$@"
+    fi
+    /bin/cp "$@" || exit $?
+    case "$src" in
+      *replay_stub.py) rm -f -- "$src" ;;
+      *.py) sed -i '2i raise SystemExit(99)  # tampered' "$src" ;;   # ⚠️ 放在開頭：結尾的 raise SystemExit(main()) 之後永遠執行不到
+      *) sed -i '2i return 99 2>/dev/null || exit 99  # tampered' "$src" ;;
+    esac
+    exit 0 ;;
+esac
+exec /bin/cp "$@"
+WRAP
+chmod +x "$AC_TD/cpw/cp"
+ac_isolated() {  # $1＝入口（相對 AC_REPO）；$2＝work 目錄名；其餘＝參數。stderr → $AC_TD/<名>.err
+  local entry="$1" name="$2" rc=0; shift 2
+  set +e
+  env -u PY_IMAGE PATH="${AC_ISO_PATH:-$AC_TD/okd:$PATH}" XDG_DATA_HOME="$AC_TD/xdg" REPLAY_IMAGE_ID="$AC_IMG" \
+    AC_CP_REPO="$AC_REPO" AC_CP_MODE="${AC_CP_MODE:-after}" "$AC_REPO/$entry" --work-dir "$AC_TD/$name" "$@" \
+    > /dev/null 2> "/dev/shm/ac-$$-$name.err"; rc=$?
+  set -e
+  mv "/dev/shm/ac-$$-$name.err" "$AC_TD/$name.err"
+  return "$rc"
+}
+ac_kept() { grep '保留' "$1" | grep -o '/dev/shm/i074-[a-z]*-[0-9TZ-]*' | tail -1 || true; }   # 只認「保留」的訊息
+ac_started() { grep -o 'S=/dev/shm/i074-[a-z]*-[0-9TZ-]*' "$1" | head -1 | cut -d= -f2 || true; }
+ac_head_sha() { git -C "$AC_REPO" show "HEAD:$1" | sha256sum | cut -d' ' -f1; }
+# ac11 ＋ ac18：快照建立之後改掉／刪掉原始的 launcher、helper、shim → 中止點的清理、原始量測與 MANIFEST 都是快照的
+rc=0; I074_SIZING_FAULT=prepare AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated scripts/i074-stage2-acceptance.sh wprep || rc=$?
+raw="$AC_TD/wprep/raw-failed/harness"
+s_path="$(ac_started "$AC_TD/wprep.err")"
+if [ "$rc" = 1 ] && [ -f "$AC_TD/wprep/failure_summary.json" ] && [ -z "$(ac_kept "$AC_TD/wprep.err")" ] \
+   && [ -n "$s_path" ] && [ ! -e "$s_path" ] \
+   && [ ! -e "$AC_REPO/python/scripts/i074_stage2_replay_stub.py" ] \
+   && grep -q tampered "$AC_REPO/python/scripts/i074_stage2_sizing.py" \
+   && [ "$(sha256sum < "$raw/python/scripts/i074_stage2_replay_stub.py" | cut -d' ' -f1)" = "$(ac_head_sha python/scripts/i074_stage2_replay_stub.py)" ] \
+   && [ "$(sha256sum < "$raw/python/scripts/i074_stage2_sizing.py" | cut -d' ' -f1)" = "$(ac_head_sha python/scripts/i074_stage2_sizing.py)" ] \
+   && grep -q "$(ac_head_sha scripts/lib/i074-sizing-docker-shim.sh)  scripts/lib/i074-sizing-docker-shim.sh" "$raw/MANIFEST"; then
+  pass "ac11／ac18：注入的中止點 → raw-failed 與 failure_summary、S 已清；快照之後改掉或刪掉原檔⛔ 不影響本次（用的是快照）"
+else
+  fail "ac11／ac18：中止點或快照不符（rc=$rc）"; cat "$AC_TD/wprep.err" >&2
+fi
+git -C "$AC_REPO" checkout -q -- . && git -C "$AC_REPO" status --porcelain | grep -q . && fail "隔離 repo 沒還原" || true
+# sizing：同一支（另驗 mem-guard 的快照）；`cleanup` 中止點在 work 目錄建好之後
+rc=0; I074_SIZING_FAULT=cleanup AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated scripts/i074-stage2-sizing.sh szprep || rc=$?
+raw="$AC_TD/szprep/raw-failed/harness"
+if [ "$rc" = 1 ] && [ -f "$AC_TD/szprep/failure_summary.json" ] && grep -q tampered "$AC_REPO/scripts/lib/mem-guard.sh" \
+   && [ "$(sha256sum < "$raw/scripts/lib/mem-guard.sh" | cut -d' ' -f1)" = "$(ac_head_sha scripts/lib/mem-guard.sh)" ]; then
+  pass "ac18：sizing 的快照（含 mem-guard）——快照之後改掉原檔⛔ 不影響本次"
+else
+  fail "ac18：sizing 的快照不符（rc=$rc）"; cat "$AC_TD/szprep.err" >&2
+fi
+git -C "$AC_REPO" checkout -q -- .
+if grep -q 'FREEZE="\$CLONE/python/scripts/i074_stage2_freeze_record.py"' "$REPO_ROOT/scripts/i074-stage2-sizing.sh" \
+   && grep -q -- '--repo "\$CLONE"' "$REPO_ROOT/scripts/i074-stage2-sizing.sh" \
+   && ! grep -q 'REPO_ROOT/python/scripts/i074_stage2_freeze_record' "$REPO_ROOT/scripts/i074-stage2-sizing.sh"; then
+  pass "ac18：sizing 的 freeze record 由工作複本執行（⛔ 不從原始 repo 的活路徑）"
+else
+  fail "ac18：sizing 的 freeze record 仍取自活路徑"
+fi
+# ⑦d 實作第一輪 review #1：bootstrap 解析完 HEAD 之後 HEAD 才移動 → 快照、兩層工作複本與 repo_head 全部綁 bootstrap 的 OID
+for entry in acceptance sizing; do
+  rc=0; AC_CP_MODE=commit AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated "scripts/i074-stage2-$entry.sh" "whead-$entry" || rc=$?
+  meta_f="$AC_TD/whead-$entry/raw-failed/meta.tsv"
+  real_ok=1
+  [ "$entry" = sizing ] || [ "$(git -C "$AC_TD/whead-$entry/real" rev-parse HEAD 2>/dev/null)" = "$AC_FIX" ] || real_ok=0
+  if [ "$rc" = 1 ] && [ "$(git -C "$AC_REPO" rev-parse HEAD)" != "$AC_FIX" ] && [ -f "$meta_f" ] \
+     && grep -qx "repo_head	$AC_FIX" "$meta_f" && grep -qx "clone_head	$AC_FIX" "$meta_f" \
+     && [ "$(git -C "$AC_TD/whead-$entry/repo" rev-parse HEAD 2>/dev/null)" = "$AC_FIX" ] && [ "$real_ok" = 1 ]; then
+    pass "review1：$entry——bootstrap 之後 HEAD 移動 → repo_head、clone_head 與工作複本都是 bootstrap 解析的 OID（⛔ 不是移動後的 HEAD）"
+  else
+    fail "review1：$entry 沒有綁住 bootstrap 的 OID（rc=$rc）"; cat "$AC_TD/whead-$entry.err" >&2; cat "$meta_f" >&2 2>/dev/null || true
+  fi
+  git -C "$AC_REPO" reset -q --hard "$AC_FIX"
+done
+shm0="$(ac_shm_count)"
+rc=0; AC_CP_MODE=commit AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated scripts/i074-stage2-acceptance.sh wfh1 --formal --replay-compute full || rc=$?
+if [ "$rc" = 1 ] && grep -q "HEAD 在 bootstrap 之後移動了" "$AC_TD/wfh1.err" && [ -z "$(ac_kept "$AC_TD/wfh1.err")" ] \
+   && [ "$(ac_shm_count)" = "$shm0" ] && [ ! -e "$AC_TD/wfh1" ]; then
+  pass "review1：--formal 時 HEAD 在 bootstrap 之後移動 → 拒絕（建 work 目錄之前；S 已確認是本次的快照、已清）"
+else
+  fail "review1：--formal 沒擋下 bootstrap 之後移動的 HEAD（rc=$rc）"; cat "$AC_TD/wfh1.err" >&2
+fi
+git -C "$AC_REPO" reset -q --hard "$AC_FIX"
+rc=0; AC_CP_MODE=commit AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated scripts/i074-stage2-sizing.sh wfh2 --formal || rc=$?
+[ "$rc" = 1 ] && grep -q "HEAD 在 bootstrap 之後移動了" "$AC_TD/wfh2.err" && [ ! -e "$AC_TD/wfh2" ] \
+  && pass "review1：sizing --formal 時 HEAD 在 bootstrap 之後移動 → 拒絕" \
+  || { fail "review1：sizing --formal 沒擋下移動的 HEAD（rc=$rc）"; cat "$AC_TD/wfh2.err" >&2; }
+git -C "$AC_REPO" reset -q --hard "$AC_FIX"
+# 對照組：HEAD 沒有移動的 --formal 通過這一道（之後在隔離 repo 缺的東西上失敗），repo_head ＝ 原本的 HEAD
+rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wfh3 --formal --replay-compute full || rc=$?
+[ "$rc" = 1 ] && ! grep -q "HEAD 在 bootstrap 之後移動了" "$AC_TD/wfh3.err" \
+  && grep -qx "mode	formal" "$AC_TD/wfh3/raw-failed/meta.tsv" && grep -qx "repo_head	$AC_FIX" "$AC_TD/wfh3/raw-failed/meta.tsv" \
+  && pass "review1：對照組——HEAD 沒有移動的 --formal 通過這一道" \
+  || { fail "review1：對照組不符（rc=$rc）"; cat "$AC_TD/wfh3.err" >&2; }
+# --formal：清單 ① 在快照前後都驗 ＝ HEAD；必須帶 full；⛔ 不接受故障注入
+rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf1 --formal || rc=$?
+[ "$rc" = 1 ] && grep -q "必須帶 --replay-compute full" "$AC_TD/wf1.err" && [ -z "$(ac_kept "$AC_TD/wf1.err")" ] \
+  && pass "ac7：--formal 沒帶 --replay-compute full → 拒絕" || { fail "ac7：--formal 沒帶 full 卻沒拒絕（rc=$rc）"; cat "$AC_TD/wf1.err" >&2; }
+rc=0; I074_SIZING_FAULT=twins ac_isolated scripts/i074-stage2-acceptance.sh wf2 --formal --replay-compute full || rc=$?
+[ "$rc" = 1 ] && grep -q "故障注入" "$AC_TD/wf2.err" && [ -z "$(ac_kept "$AC_TD/wf2.err")" ] \
+  && pass "ac7：--formal ⛔ 不接受故障注入（在建 S 之前就拒絕）" || fail "ac7：--formal 接受了故障注入（rc=$rc）"
+printf '\n# dirty\n' >> "$AC_REPO/python/scripts/i074_stage2_replay_stub.py"
+rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf3 --formal --replay-compute full || rc=$?
+[ "$rc" = 1 ] && grep -q "與 HEAD 的內容不同" "$AC_TD/wf3.err" && [ -z "$(ac_kept "$AC_TD/wf3.err")" ] \
+  && pass "ac7：--formal 時清單內的檔案 ≠ HEAD → 在建 S 之前就拒絕" || fail "ac7：--formal 沒擋下 ≠ HEAD 的檔案（rc=$rc）"
+git -C "$AC_REPO" checkout -q -- .
+rc=0; AC_CP_MODE=before AC_ISO_PATH="$AC_TD/cpw:$AC_TD/okd:$PATH" ac_isolated scripts/i074-stage2-acceptance.sh wf4 --formal --replay-compute full || rc=$?
+kept="$(ac_kept "$AC_TD/wf4.err")"
+if [ "$rc" = 1 ] && grep -q "複製前後被改過" "$AC_TD/wf4.err" && [ -n "$kept" ] && [ -f "$kept/harness/python/scripts/i074_stage2_sizing.py" ]; then
+  pass "ac18：--formal 的後驗（複製前後被改過）→ 1、bootstrap ⛔ 不刪任何東西（S 保留並印出位置）"
+else
+  fail "ac18：--formal 的後驗不符（rc=$rc）"; cat "$AC_TD/wf4.err" >&2
+fi
+[ -n "$kept" ] && rm -rf -- "$kept"
+git -C "$AC_REPO" checkout -q -- .
+# bootstrap 的失敗：複製、MANIFEST（validation 的故障注入）→ 1、S 與已寫的檔案保留、印出位置
+for fault in bootstrap-copy bootstrap-manifest; do
+  rc=0; I074_SIZING_FAULT="$fault" ac_isolated scripts/i074-stage2-acceptance.sh "wb-$fault" || rc=$?
+  kept="$(ac_kept "$AC_TD/wb-$fault.err")"
+  if [ "$rc" = 1 ] && [ -n "$kept" ] && [ -d "$kept/harness" ] && grep -q "不刪任何東西" "$AC_TD/wb-$fault.err"; then
+    pass "ac18：bootstrap 失敗（$fault）→ 1、⛔ 不刪任何東西（S 保留並印出位置）"
+  else
+    fail "ac18：bootstrap 失敗（$fault）的處置不符（rc=$rc）"; cat "$AC_TD/wb-$fault.err" >&2
+  fi
+  [ -n "$kept" ] && rm -rf -- "$kept"
+done
+# bootstrap 期間收到 INT／TERM（故障注入讓 bootstrap 停在建好 S 之後）→ 130／143、S 保留
+for sig in INT TERM; do
+  want=$([ "$sig" = INT ] && echo 130 || echo 143)
+  before="$(ls /dev/shm | grep '^i074-accept-' || true)"
+  # ⚠️ 非互動的 shell 裡，背景工作的 SIGINT 一開始就是 ignore（bash 也無法 trap 進場時被 ignore 的訊號）——以 python 把 SIGINT
+  #   還原成預設、setsid 之後再 exec harness，訊號才送得到（⑩ 的操作者在終端機按 Ctrl-C 時本來就是預設）。
+  python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    env -u PY_IMAGE PATH="$AC_TD/okd:$PATH" XDG_DATA_HOME="$AC_TD/xdg" REPLAY_IMAGE_ID="$AC_IMG" I074_SIZING_FAULT=bootstrap-stall \
+    "$AC_REPO/scripts/i074-stage2-acceptance.sh" --work-dir "$AC_TD/wsig$sig" > /dev/null 2> "$AC_TD/wsig$sig.err" &
+  bpid=$!
+  new=""
+  for _ in $(seq 1 100); do
+    new="$(comm -13 <(printf '%s\n' $before | sort) <(ls /dev/shm | grep '^i074-accept-' | sort) | head -1)"
+    [ -n "$new" ] && break
+    sleep 0.1
+  done
+  sleep 0.3
+  kill "-$sig" -- "-$bpid" 2>/dev/null || true
+  rc=0; wait "$bpid" || rc=$?
+  if [ "$rc" = "$want" ] && [ -n "$new" ] && [ -d "/dev/shm/$new" ] && grep -q "不刪任何東西" "$AC_TD/wsig$sig.err"; then
+    pass "ac18：bootstrap 期間收到 $sig → $want、S 保留並印出位置"
+  else
+    fail "ac18：bootstrap 期間收到 $sig 的處置不符（rc=$rc、S=$new）"; cat "$AC_TD/wsig$sig.err" >&2
+  fi
+  [ -n "$new" ] && rm -rf -- "/dev/shm/$new"
+done
+# 手動設定 SIZING_SNAPSHOT：①指向既有目錄（主腳本不在它底下）；②內容完整合法的快照、之後的驗證才失敗；③MANIFEST 的 SHA 不符
+mkdir -p "$AC_TD/manual"; printf keep > "$AC_TD/manual/f"; ino="$(stat -c %i "$AC_TD/manual/f")"
+rc=0; env SIZING_SNAPSHOT="$AC_TD/manual" "$ACC_H" --work-dir "$AC_TD/wm1" > /dev/null 2> "$AC_TD/wm1.err" || rc=$?
+[ "$rc" = 1 ] && [ "$(cat "$AC_TD/manual/f")" = keep ] && [ "$(stat -c %i "$AC_TD/manual/f")" = "$ino" ] \
+  && pass "ac18：手動設定 SIZING_SNAPSHOT 指向既有目錄 → 1、該目錄⛔ 不變（⛔ 不能以環境變數跳過快照）" \
+  || fail "ac18：手動設定的 SIZING_SNAPSHOT 沒有被擋下或被改了（rc=$rc）"
+ac_manual_snapshot() {  # $1＝毀損（見下面的 case；ok／head ＝ 不毀損）→ 印出 S 與 run id
+  local id s f
+  id="$(date -u +%Y%m%dT%H%M%SZ)-9$RANDOM"
+  s="/dev/shm/i074-accept-$id"
+  mkdir -m 700 "$s"
+  for f in scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh \
+           python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py; do
+    mkdir -p "$s/harness/$(dirname "$f")"; cp "$REPO_ROOT/$f" "$s/harness/$f"
+  done
+  (cd "$s/harness" && sha256sum -- scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh \
+     scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py) \
+    > "$s/harness/MANIFEST"
+  case "$1" in
+    extra) printf x > "$s/harness/scripts/extra.sh" ;;
+    sha) local c; c="$(head -c 1 "$s/harness/MANIFEST")"; sed -i "1s/^./$([ "$c" = a ] && echo b || echo a)/" "$s/harness/MANIFEST" ;;
+    # ⑦d 實作第一輪 review #3：S 的形狀——根目錄的兄弟檔案、額外的空目錄（根目錄與 harness 底下）、FIFO、symlink
+    sibling) printf x > "$s/sibling.txt" ;;
+    rootdir) mkdir "$s/other" ;;
+    emptydir) mkdir "$s/harness/python/extra.d" ;;
+    fifo) mkfifo "$s/harness/scripts/pipe" ;;
+    symlink) ln -s "$REPO_ROOT/CLAUDE.md" "$s/harness/scripts/link" ;;
+    # 形狀檢查必須在讀任何檔案內容之前：MANIFEST 換成 FIFO——先讀它的話會卡住（由 timeout 收掉、結束碼 137）
+    manifest-fifo) rm -f "$s/harness/MANIFEST"; mkfifo "$s/harness/MANIFEST" ;;
+  esac
+  printf '%s %s\n' "$s" "$id"
+}
+AC_REAL_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+for spec in "extra:S 的形狀" "sha:與 MANIFEST 不符" "sibling:S 的形狀" "rootdir:S 的形狀" "emptydir:S 的形狀" \
+            "fifo:S 的形狀" "symlink:S 的形狀" "manifest-fifo:S 的形狀" "head:SIZING_BOOT_HEAD"; do
+  dmg="${spec%%:*}"; want="${spec#*:}"
+  read -r s id < <(ac_manual_snapshot "$dmg")
+  before="$(find "$s" -printf '%y %i %s %p\n' | sort)"
+  rc=0
+  env -u REPLAY_IMAGE_ID SIZING_SNAPSHOT="$s" SIZING_ORIGIN_REPO="$REPO_ROOT" SIZING_BOOT_RUN_ID="$id" \
+    SIZING_BOOT_HEAD="$([ "$dmg" = head ] && printf '%040d' 0 || echo "$AC_REAL_HEAD")" \
+    timeout -s KILL 30 /bin/bash "$s/harness/scripts/i074-stage2-acceptance.sh" \
+    --work-dir "$AC_TD/wm-$dmg" > /dev/null 2> "$AC_TD/wm-$dmg.err" || rc=$?
+  if [ "$rc" = 1 ] && [ "$(find "$s" -printf '%y %i %s %p\n' | sort)" = "$before" ] && grep -q "不刪任何東西" "$AC_TD/wm-$dmg.err" \
+     && grep -q -- "$want" "$AC_TD/wm-$dmg.err"; then
+    pass "ac18：手動準備的快照（$dmg）→ re-exec 的驗證失敗（$want）、⛔ 不刪任何東西（S 的每一項、inode 不變）"
+  else
+    fail "ac18：手動準備的快照（$dmg）的處置不符（rc=$rc）"; cat "$AC_TD/wm-$dmg.err" >&2
+  fi
+  rm -rf -- "$s"
+done
+# 對照組：形狀與內容都合法的手動快照通過 bootstrap 的驗證（之後在 REPLAY_IMAGE_ID 失敗）→ S 由 trap 清掉（已裁決的界線）
+read -r s id < <(ac_manual_snapshot ok)
+rc=0
+env -u REPLAY_IMAGE_ID SIZING_SNAPSHOT="$s" SIZING_ORIGIN_REPO="$REPO_ROOT" SIZING_BOOT_RUN_ID="$id" SIZING_BOOT_HEAD="$AC_REAL_HEAD" \
+  timeout -s KILL 60 /bin/bash "$s/harness/scripts/i074-stage2-acceptance.sh" \
+  --work-dir "$AC_TD/wm-ok" > /dev/null 2> "$AC_TD/wm-ok.err" || rc=$?
+if [ "$rc" = 1 ] && [ ! -e "$s" ] && grep -q REPLAY_IMAGE_ID "$AC_TD/wm-ok.err" && ! grep -q "不刪任何東西" "$AC_TD/wm-ok.err"; then
+  pass "ac18：對照組——合法的手動快照通過形狀與內容的驗證（之後的失敗才清掉 S）"
+else
+  fail "ac18：合法的手動快照竟沒通過 bootstrap 的驗證（rc=$rc）"; cat "$AC_TD/wm-ok.err" >&2
+fi
+rm -rf -- "$s"
+rm -rf "$AC_TD"
 
 # ── I-074 Stage 2 ⑦a：Stage 2 反事實 argv（真正 repo、真正的兩份 patch、dry-run） ─────────────
 #

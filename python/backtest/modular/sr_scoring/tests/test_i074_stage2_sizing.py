@@ -510,11 +510,12 @@ def _full_state(tmp_path, *, failure_extra=0, dev="42", docker_dev="42", rc_over
     s = _state(tmp_path)
     (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in {
         "run_id": "r", "mode": "validation", "image": IMG, "l0_dev": "42", "docker_root_dev": docker_dev,
-        "repo_dev": "42", "state_fstype": "tmpfs"}.items()))
+        "repo_dev": "42", "state_fstype": "tmpfs", "repo_head": "a" * 40, "clone_head": "a" * 40}.items()))
     (s / "components.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in {
         "wt_head": 30 << 20, "wt_base": 15 << 20, "wt_base_patched": 15 << 20, "git_head": 131072,
         "git_base": 131072, "git_base_patched": 131072, "index_head": 98304, "index_base": 98304,
-        "index_base_patched": 98304, "snapshot": 24576, "probe": 24576}.items()))
+        "index_base_patched": 98304, "snapshot": 24576, "probe": 24576,
+        "frozen_witness": 8192, "frozen_patched": 266240}.items()))
     steps = ("fixture_witness", "envcheck", "fixture_success", "finalize", "fixture_failure",
              "publish_failed_record", "recover_envcheck", "recover_durability", "check_failed_record",
              "recover_failed_record")
@@ -535,7 +536,19 @@ def _full_state(tmp_path, *, failure_extra=0, dev="42", docker_dev="42", rc_over
         (pdir / "end.json").write_bytes(sz.canonical_dumps({
             "run_dir": {"allocated": run_mb << 20, "dirs": 3}, "archive": {"allocated": 7 << 20, "dirs": 4},
             "inventory_violations": []}))
+    _manifest(s, "sizing")
     return s
+
+
+def _manifest(s, profile):
+    """⑦d：快照與 MANIFEST（報告綁住完整的清單 ①）。"""
+    lines = []
+    for rel in sz.SNAPSHOT_FILES[profile]:
+        path = s / "harness" / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"content of {rel}".encode())
+        lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {rel}")
+    (s / "harness" / "MANIFEST").write_text("\n".join(lines) + "\n")
 
 
 def test_d_report_ok(tmp_path):
@@ -566,6 +579,19 @@ def test_d_assumption_violated_still_reports(tmp_path):
 def test_d_report_fails_closed(tmp_path, kwargs, match):
     with pytest.raises(sz.SizingError, match=match):
         sz.build_report(_full_state(tmp_path, **kwargs))
+
+
+@pytest.mark.parametrize("key,value,match", [
+    ("clone_head", "b" * 40, "工作複本的 HEAD"), ("repo_head", "", "meta 缺少 repo_head"), ("clone_head", "", "meta 缺少 clone_head"),
+])
+def test_d_report_binds_clone_head_to_repo_head(tmp_path, key, value, match):
+    """⑦d 實作第一輪 review #1：sizing 的報告也要驗 clone_head ＝ repo_head（兩者都必須存在）。"""
+    s = _full_state(tmp_path)
+    meta = sz._read_tsv(s / "meta.tsv")
+    meta[key] = value
+    (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in meta.items()))
+    with pytest.raises(sz.SizingError, match=match):
+        sz.build_report(s)
 
 
 def test_d_report_fails_closed_on_missing_component_and_aborted_window(tmp_path):

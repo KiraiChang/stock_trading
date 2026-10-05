@@ -1,4 +1,5 @@
-"""I-074 Stage 2 ⑦b：host 端的單元測試（Python 3.9；issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」）。
+"""I-074 Stage 2 ⑦b／⑦d：host 端的單元測試（Python 3.9；issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」與
+「Stage 2 步驟 ⑦d 細部計畫 v1」「五」）。
 
 由 `scripts/test-i074-stage2.sh` 以 host 的 `python3 -m unittest` 執行（host 沒有 pytest；測試 image 裡沒有 git 與 docker）。
 涵蓋 supervisor 的內部函式（sentinel 的封閉 schema、鎖檔與 sentinel 的屬性、收回與正常釋放的 inode 比對、故障注入）、
@@ -555,6 +556,166 @@ class HostImports(unittest.TestCase):
         self.assertEqual(fr.P_B_BUDGET, pf.P_B_BUDGET)
         self.assertEqual(sys.version_info[:2] >= (3, 9), True)
         load_supervisor()
+
+
+# ── ⑦d：acceptance 的 host 端（issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac9、ac12b、ac13、ac16） ──────────
+
+SIZING = ROOT / "python" / "scripts" / "i074_stage2_sizing.py"
+MIB = 1024 * 1024
+
+
+def load_sizing():
+    spec = importlib.util.spec_from_file_location("i074_stage2_sizing_under_test", SIZING)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class AcceptanceHost(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sz = load_sizing()
+        self.tmp = Path(tempfile.mkdtemp(prefix="i074-acc-host-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_clean_env_is_the_supervisors(self) -> None:
+        """ac9：clean-env 就是 supervisor 的 clean_env()（唯一定義），⛔ 不另抄清單。"""
+        env = {"HOME": "/h", "PATH": "/x", "GIT_DIR": "g", "SIZING_X": "1", "TOOLING_PATCH": "t", "XDG_DATA_HOME": "/d",
+               "PYTHONPATH": "p", "MEASURE_PEAK": "1", "LANG": "C"}
+        self.assertEqual(self.sz.clone_clean_env(ROOT, env), load_supervisor().clean_env(env))
+        self.assertEqual(set(self.sz.clone_clean_env(ROOT, env)), {"HOME", "XDG_DATA_HOME", "LANG"})
+
+    def test_promotion_states_use_the_preflight_algorithm(self) -> None:
+        """ac13：晉升讀的五個欄位；identity_sha256 ＝ orchestrator 寫 preflight.json 時的算法。"""
+        identity = self.tmp / "run_identity.json"
+        identity.write_text('{"x": 1}\n')
+        states = self.sz.promotion_states(ROOT, identity=identity, bundle_id="b1", semantic="s" * 64, repo_head="a" * 40, rc=6)
+        spec = importlib.util.spec_from_file_location("pf_under_test", ROOT / "python" / "scripts" / "i074_stage2_preflight.py")
+        pf = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pf)
+        self.assertEqual(states, {
+            "preflight": {"bundle_id": "b1", "counterfactual_semantic_sha256": "s" * 64,
+                          "identity_sha256": pf._sha256_file(identity)},
+            "replay_done": {"rc": 6}, "run": {"repo_head": "a" * 40}})
+        self.assertEqual(states["preflight"]["identity_sha256"], hashlib.sha256(identity.read_bytes()).hexdigest())
+        with self.assertRaises(self.sz.SizingError):
+            self.sz.promotion_states(ROOT, identity=identity, bundle_id="b1", semantic="s" * 64, repo_head="a" * 40, rc=7)
+
+    def _host_run(self, code: str, step: str = "s") -> tuple[int, dict]:
+        """在自己的 session 裡跑 host-run（它是 process group 的 leader，與 harness 的 run_in_group 相同）。"""
+        state = self.tmp / "S"
+        proc = subprocess.run([sys.executable, str(SIZING), "host-run", "--state", str(state), "--step", step, "--",
+                               sys.executable, "-c", code], start_new_session=True,
+                              env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"), timeout=120)
+        return proc.returncode, json.loads((state / "host" / f"{step}.json").read_text())
+
+    def test_host_run_max_single_is_the_largest_descendant(self) -> None:
+        """ac16：最大單一 RSS 取自 RUSAGE_CHILDREN——孫程序較大時取到孫程序；結束碼原樣傳回。"""
+        code = textwrap.dedent("""
+            import subprocess, sys
+            small = bytearray(24 * 1024 * 1024)
+            rc = subprocess.run([sys.executable, "-c", "x = bytearray(64 * 1024 * 1024); import time; time.sleep(0.5)"]).returncode
+            sys.exit(3 if rc == 0 else 9)
+        """)
+        rc, rec = self._host_run(code)
+        self.assertEqual((rc, rec["rc"]), (3, 3))
+        self.assertGreaterEqual(rec["max_single_rss_bytes"], 64 * MIB)
+        self.assertLess(rec["max_single_rss_bytes"], 64 * MIB + 40 * MIB)
+        self.assertIn("PATH", rec["env_keys"])
+        self.assertEqual(rec["cmd"][0], sys.executable)
+
+    def test_host_run_group_sum_adds_concurrent_processes(self) -> None:
+        """ac16：兩個同時存活的子程序 → 群組的取樣總和 ≥ 兩者之和、最大單一 ＝ 較大的那一個。"""
+        code = textwrap.dedent("""
+            import subprocess, sys, time
+            a = subprocess.Popen([sys.executable, "-c", "x = bytearray(40 * 1024 * 1024); import time; time.sleep(1.5)"])
+            b = subprocess.Popen([sys.executable, "-c", "x = bytearray(56 * 1024 * 1024); import time; time.sleep(1.5)"])
+            sys.exit(a.wait() | b.wait())
+        """)
+        rc, rec = self._host_run(code)
+        self.assertEqual(rc, 0)
+        self.assertGreaterEqual(rec["group_rss_peak_sampled_bytes"], (40 + 56) * MIB)
+        self.assertGreaterEqual(rec["max_single_rss_bytes"], 56 * MIB)
+        self.assertLess(rec["max_single_rss_bytes"], (40 + 56) * MIB)
+
+    def test_host_run_ends_with_its_group(self) -> None:
+        """ac16：harness 對整個 process group 送 TERM → host-run 與它的子程序一起結束。"""
+        state = self.tmp / "S2"
+        proc = subprocess.Popen([sys.executable, str(SIZING), "host-run", "--state", str(state), "--step", "t", "--",
+                                 "sleep", "30"], start_new_session=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        child = None
+        for _ in range(100):
+            kids = [p for p in Path("/proc").iterdir() if p.name.isdigit()
+                    and (p / "stat").exists() and self._ppid(p) == proc.pid]
+            if kids:
+                child = int(kids[0].name)
+                break
+            subprocess.run(["sleep", "0.05"])
+        self.assertIsNotNone(child)
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=10)
+        for _ in range(100):
+            if not Path(f"/proc/{child}").exists():
+                break
+            subprocess.run(["sleep", "0.05"])
+        self.assertFalse(Path(f"/proc/{child}").exists())
+
+    @staticmethod
+    def _ppid(p: Path) -> int:
+        try:
+            return int((p / "stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            return -1
+
+    def test_observer_runs_on_host_python(self) -> None:
+        """ac12：observer 的核心在 host 3.9 可用（fake docker ＋ 可覆寫的 cgroup 根目錄）。"""
+        d = self.tmp / "d"
+        d.mkdir()
+        cid = "a" * 64
+        docker = d / "docker"
+        docker.write_text(textwrap.dedent(f"""\
+            #!/bin/sh
+            case "$1" in
+              ps) n=$(cat {d}/n 2>/dev/null || echo 0); echo $((n + 1)) > {d}/n; [ "$n" = 1 ] && echo {cid}; exit 0 ;;
+              inspect) echo '["python", "-m", "backtest.modular.sr_scoring.evaluation"]' ;;
+            esac
+        """))
+        docker.chmod(0o755)
+        cg = self.tmp / "cg" / "memory" / "docker" / cid
+        cg.mkdir(parents=True)
+        (cg / "memory.max_usage_in_bytes").write_text("123456789")
+        obs = self.sz.Observer(self.tmp / "work", docker=str(docker), cgroup_root=self.tmp / "cg", fs_path=str(self.tmp))
+        for t in (1.0, 2.0):
+            obs.poll_containers(t)
+        obs.read_peaks(2.5)
+        obs.poll_containers(3.0)
+        report = obs.report()
+        self.assertEqual(report["containers"][0]["peak_bytes"], 123456789)
+        self.assertTrue(report["replay_seen"])
+        self.assertFalse(report["observation_complete"])          # 只看到 replay：其他預期的角色缺席
+        self.assertEqual(report["missing_expected_containers"], ["anchors", "lookup", "terminal", "promotion_verify"])
+
+    def test_label_key_is_the_single_constant(self) -> None:
+        """ac12b：observer 的鍵 ＝ label shim ＝ orchestrator ＝ supervisor 的常數（鍵的漂移）。"""
+        import re
+        shim = (ROOT / "scripts" / "lib" / "i074-stage2-docker-label-shim.sh").read_text()
+        orch = (ROOT / "scripts" / "run-i074-stage2.sh").read_text()
+        keys = {self.sz.OBSERVE_LABEL_KEY, load_supervisor().LABEL_KEY,
+                re.search(r"^I074_LABEL_KEY=(\S+)$", shim, re.M).group(1),
+                re.search(r"^I074_LABEL_KEY=(\S+)$", orch, re.M).group(1)}
+        self.assertEqual(keys, {"i074.stage2.run"})
+
+    def test_snapshot_lists_match_the_entry_scripts(self) -> None:
+        """ac19：兩個入口的 I074_BOOT_FILES ＝ helper 的 SNAPSHOT_FILES；兩份 bootstrap 除了常數之外逐字相同。"""
+        import re
+        blocks = {}
+        for profile, rel in (("sizing", "scripts/i074-stage2-sizing.sh"), ("acceptance", "scripts/i074-stage2-acceptance.sh")):
+            text = (ROOT / rel).read_text()
+            files = re.search(r"^I074_BOOT_FILES=\((.*?)\)$", text, re.M | re.S).group(1).split()
+            self.assertEqual(tuple(files), self.sz.SNAPSHOT_FILES[profile])
+            self.assertEqual(re.search(r"^I074_BOOT_SELF=(\S+)$", text, re.M).group(1), rel)
+            self.assertIn(rel, files)
+            blocks[profile] = text[text.index("# >>> I074-STAGE2-BOOTSTRAP"):text.index("# <<< I074-STAGE2-BOOTSTRAP")]
+        self.assertEqual(blocks["sizing"], blocks["acceptance"])
 
 
 if __name__ == "__main__":

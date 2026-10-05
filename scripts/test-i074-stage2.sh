@@ -519,6 +519,7 @@ cp "$REPO_ROOT/scripts/lib/i074-sizing-docker-shim.sh" "$SHIM_T/sizing-shim"; ch
 SHIM_REAL="$SHIM_T/sizing-shim" shim_case "shim：real docker 是 sizing shim → 125" 125 ps
 SHIM_REAL="relative/docker" shim_case "shim：real docker 不是絕對路徑 → 125" 125 ps
 SHIM_ENV="SIZING_STATE=/x" shim_case "shim：環境帶 SIZING_* → 125" 125 ps
+SHIM_ENV="SIZING_PROFILE=acceptance" shim_case "shim：環境帶 SIZING_PROFILE=acceptance（⑦d 的 acceptance harness）→ 125" 125 ps
 chmod g+w "$TRUSTED/docker"
 shim_case "shim：real docker 不符合信任條件（group 可寫）→ 125" 125 ps
 chmod 755 "$TRUSTED/docker"

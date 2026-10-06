@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ⚠️ 待 review**（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8（第七輪 review 修正後）⚠️ 待確認**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -3500,7 +3500,7 @@ page cache 要逼近上限才被回收，所以**峰值會隨 mem-guard 當次�
 |---|---|---|---|
 | 低 | 「專用結束碼」沒有可觀察的傳遞通道：測試程序的 stdio 導走、`os.setsid()` 失敗時⛔ 不寫 JSON，資料流只有 `$!` 與 `/proc` 的存活輪詢；測試程序被收養之後它的結束碼也⛔ 不屬於 harness 的工作 | ✅ 成立 | 改成**只供診斷與測試**的失敗狀態檔 `<S>/guard-probe-status.json`（atomic、封閉：`schema`、`pid`、`stage`（`setsid`／`self_stat`）、`errno` 的名稱）；⛔ 不是身分來源（③ ⛔ 不讀它、⛔ 不依它送訊號）；ac28 以它斷言真的走到 EPERM，另以偽造的狀態檔證明它⛔ 不會影響 guard 的判斷 |
 
-#### Stage 2 步驟 ⑦d 增補的實作結果（2026-10-05，⚠️ **待 review**）
+#### Stage 2 步驟 ⑦d 增補的實作結果（2026-10-05，✅ **review 通過**（三輪，2026-10-06）並 commit `576a8f7`）
 
 ✅ 依「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」（v11，review 十輪後確認並 commit `d1267bb`）完成「二」的設計。⛔ **沒有跑 `--formal`、
 沒有跑完整計算、沒有 commit**；程式與文件已 stage，停在 review。⚠️ 增補⛔ 沒有動 tooling 路徑（`evaluation.py`、`replay_bundle/`）。
@@ -3551,6 +3551,7 @@ page cache 要逼近上限才被回收，所以**峰值會隨 mem-guard 當次�
 **量測窗口期間 host 上任何其他寫入都會算進來**——第一次 sizing 在使用者剛清完磁碟之後跑，`fs_peak` 被墊高了 7 MiB，`P_B` 只差 196,608 bytes 就超過
 `P_B_BUDGET`；重跑一次就回到正常。換句話說，⑨-2 的正式 sizing（`--formal`）可能只因為當下 host 的背景寫入就超過預算、走 v29「六、1」的回退順序。
 `P_B` 的量法是 v29 確認過的，本增補⛔ 不改；是否要在正式 sizing 之前另外約束 host 的狀態（例如量測期間停掉其他寫入）、或接受重跑，需另行裁決。
+⚠️ **2026-10-06 查證與裁決**：成因⛔ 不是「剛清完磁碟」，而是 live 的 `sr_analysis` 排程（平日台北時間 17:00，與量測窗口重疊）；同樣的雜訊也會影響 ⑨-1。使用者裁決方案 B（有效性條件 ＋ ⑨-1 的 fail-fast ＋ 作業規則），見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」。
 
 **本輪的驗證**：`python/scripts/test.sh` 完整執行（依序）✅——pytest **2150 passed、1 skipped**（本輪 ＋119）；`test-replay-args.sh` **452 項**（本輪 ＋18）、`test-i074-stage2.sh` **223 項**（含 host unittest 56 項，本輪 ＋19：`RssAddendumHost` 19 項）全部通過；doc-refs 45／45、文件引用 0 個問題。⚠️ 第一次完整執行在 `test-i074-stage2.sh` 的 ⑩ 完整流程失敗——**根檔案系統只剩約 556 MiB**，preflight 6 的磁碟檢查（需要 1,241,513,984 bytes）照設計擋下（環境，⛔ 不是程式）；使用者清出空間之後重跑全綠。真正 repo 的 worktree 登記數 ＋4（[I-118](#i-118replay-相關腳本會洩漏-git-worktree註冊與-tmp-目錄都會累積) 既有的增量）；`/dev/shm/i074-*`、`/run/lock` 的 `i074-stage2.*`、帶 `i074.stage2.run` 的容器都沒有殘留。tooling 路徑⛔ 沒有動：stage 之後 `--verify "$(git write-tree)"` 通過。
 
@@ -3595,12 +3596,176 @@ page cache 要逼近上限才被回收，所以**峰值會隨 mem-guard 當次�
 
 本輪的驗證：`python/scripts/test.sh` 完整執行（stage 之後；545 秒）全綠——`test-replay-args.sh` 452 項、`test-i074-stage2.sh` 223 項（含 host unittest **60** 項：本輪 ＋1）、doc-refs 45／45、文件引用 0 個問題；pytest 這一次⛔ 沒有被 OOM killer 收掉，一次跑完 **2165 passed、1 skipped**（本輪⛔ 沒有改 pytest）。
 
-**review 之後**（commit 由使用者決定）：增補⛔ 沒有動 tooling 路徑——commit 後再跑一次 `scripts/make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"`。
+**review 之後**（commit 由使用者決定）：增補⛔ 沒有動 tooling 路徑——commit 後再跑一次 `scripts/make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"`。✅ 2026-10-06 已跑（`576a8f7`）：通過，tooling 路徑與 `d1267bb` 無差異。
 ⚠️ ⑨-1 的正式驗收必須以包含本增補的 commit 為 `repo_head`；`--formal` 的報告是 v2。
 
 **歸檔**（⚠️ 依 CLAUDE.md，本筆的計畫與結果保留到 review 確認後才收斂）：現況規格寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」
 （對象與門檻、契約與範圍、容器的記憶體上限、報告 v2、⛔ 不在 host 留下程序、observer 的 `total_rss`），操作程序寫進
 [`development-workflow.md`](./development-workflow.md)（acceptance 一節的門檻、能力檢查、逐步檢查與收養、故障注入、observer 的 `total_rss`；sizing 一節的共用原語）。
+
+#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫（v8，2026-10-06，⚠️ **待確認**）
+
+⚠️ **緣起**：「⑦d 增補的實作結果」記下的 `fs_peak` 觀察（第一次 sizing 的 `P_B` 只差 196,608 bytes 就超過 `P_B_BUDGET`）。2026-10-06 查證：
+⛔ **不是**原本推測的「剛清完磁碟」，而是 **live 的排程工作**——live（postgres、backend、worker…）與量測共用同一個根檔案系統，backend 的
+`SR_ANALYSIS_CRON=0 17 * * 1-5`（`TZ=Asia/Taipei`）在 2026-10-05 09:00:00Z 啟動、09:02:02Z 記下 `sr analysis done`；量測窗口換算成
+UTC：witness 08:59:25–09:00:41（未解釋的用量從約 08:59:56 起上升）、success 09:00:42–09:02:27（整段以約 60 KiB/s 上升，工作結束後變平）、
+failure 09:02:28 之後（平的）；重跑在 09:07 之後，乾淨。盤中、沒有批次工作時實測根檔案系統 2 分鐘的漂移只有 0.7 KiB/s。
+歷次實跑 24 個磁碟窗口（sizing 6 次 × 3、acceptance 3 次 × 2）逐一對照：21 個 `fs_peak − accounted` 在 −4.3～−0.06 MiB（會計上界成立，
+`P_path` ＝ `accounted`），只有那一次的 witness、success（＋3.4、＋6.0 MiB）與重跑的 success（＋684,032 bytes：t＝15.5 秒時一次約 1 MiB 的外部寫入）超出
+（review 另行重算 9 份報告、24 個窗口，結果相同）。
+⚠️ 影響 ⑨-1 **也**影響 ⑨-2：兩者的磁碟路徑都用 `P_B` 的量法，餘裕只有 5.6 MiB（sizing）／6.2 MiB（acceptance 的 success）；而 ⑨-1 的磁碟窗口在前、
+約 3 小時的量測趟在後、門檻到最後才判定——雜訊造成的超標要等量測趟跑完才知道（rc＝2、唯一的額度已用掉）。
+✅ **使用者裁決（2026-10-06）：方案 B**（⛔ 不採「只靠作業規則」的 A、⛔ 不採改 `P_path` 定義的 C、⛔ 不採「超標時允許重跑」）。
+
+##### 一、目標與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | ① **有效性條件**（含第一輪 review 補的**模糊區**）：量測無效就⛔ 沒有判定、可以重跑；sizing 與 acceptance 共用；② **⑨-1 的 fail-fast**：`--replay-compute full` 時，量測趟**之前**以共用的 collector 判定已量到的全部門檻與有效性，結果寫成封閉契約的 `precheck.json`（第一輪 review），讀取端以**受信任 repo** 在 `repo_head` 的程式與常數、從原始量測重算（第二、三輪 review），不過就⛔ 不跑量測趟（額度⛔ 不消耗）；跑完以封閉的 **raw manifest** 為原始量測留下事後比對的錨（第五輪 review）；③ **作業規則**：正式量測避開 live 的批次時段、量測期間⛔ 不做其他會寫根檔案系統的事 |
+| ⛔ 不做 | ⛔ 不改 `P_path = max(dirs_peak, fs_peak, accounted)`、`P_B`、`P_B_BUDGET`、`M_safety` 的定義與值；⛔ 不改 sizing 報告（v1）與 acceptance 報告 v2 的 schema 與語意——`derive_acceptance_violations()` 的輸出⛔ 不變、v2 只在沒有任何有效性問題時寫出（第三輪 review）；⛔ 不改 freeze record（`check-pair`）、preflight、⑩ 的 observer；⛔ 不碰 live（⛔ 不停排程，只避開時段）；晉升的窗口（資訊值）⛔ 不套有效性條件；⛔ 不動 tooling 路徑 |
+
+##### 二、設計
+
+| 項目 | 規則 |
+|---|---|
+| 判定的基準 `P_basis` | 每條磁碟路徑另算 `P_basis = max(dirs_peak, accounted)`：`dirs_peak` 只量流程自己的位置（L1、L2、L3、L5），`accounted` 是已知寫入的會計上界——兩者都⛔ 不受 host 其他程序影響。`fs_peak` 是**整個檔案系統已用量的淨變化**（`statvfs`），其他程序的寫入會墊高它、刪除會壓低它 |
+| 有效性條件 ①：未解釋的淨成長 | `fs_unexplained = fs_peak − P_basis` 必須 **≤ 1 MiB**（`FS_UNEXPLAINED_TOLERANCE = 1,048,576`）。⚠️ 它偵測的是**淨的**未解釋正成長（第一輪 review 訂正）：外部的刪除可能抵銷外部的寫入或流程漏算的寫入，所以⛔ 不能證明量測期間沒有外部 I/O、也⛔ 不保證抓得到每一筆漏算——作業規則用來降低抵銷的機會 |
+| 有效性條件 ②：模糊區（第一輪 review） | **容差⛔ 不得決定結果**：`P_path > P_B_BUDGET` 但 `P_basis ≤ P_B_BUDGET`——超標完全由容許範圍內的 `fs_unexplained` 造成——→ **無效**（`ambiguous_disk_exceed`），可以重跑。只有 `P_basis` 本身超過預算，才可能形成不可重跑的正式超標。sizing（witness、success、failure）與 acceptance（success、failure）都套；sizing 的 `build_report()` 因此多一個參數 `p_b_budget`（呼叫端一律傳 `i074_stage2_preflight.P_B_BUDGET`，與 acceptance 相同）。⚠️ **模糊區只是有效性問題，⛔ 不是違反**（第二輪 review）。⚠️ 報告 v2 的 `derive_acceptance_violations()` ⛔ 不改，磁碟仍是 `P_path > P_B_BUDGET`（第三輪 review）：v2 只在沒有任何有效性問題時寫出，而沒有有效性問題時 `P_path > 預算` ⟺ `P_basis > 預算`（否則就落在模糊區）。以 `P_basis` 判、記 `P_basis` 的只有 `precheck.json` 的 `disk_p_basis`（見下）。freeze record 的「`P_B > P_B_BUDGET` ⛔ 不寫」照舊（見下一列 sizing 的部分） |
+| 確定的違反優先（第二輪 review；取代 v2 的「有效性優先」） | **確定的違反**＝與磁碟雜訊無關的違反：記憶體的每一類（容器的精確閘與偵測器、host 的最大單一與群組取樣），以及 `P_basis > P_B_BUDGET` 的磁碟超標。判定的優先序：① 有確定的違反 → **threshold_exceeded**（⛔ 不得重跑），同一次的有效性問題照樣記錄；② 沒有確定的違反、但有有效性問題（① 或 ②）→ **invalid**（可以重跑）；③ 都沒有 → ok。**報告維持既有語意**（第三輪 review；⛔ 不升 v3）：acceptance 報告 v2 **只在沒有任何有效性問題時**寫出——有有效性問題（不論有沒有確定的違反）→ `SizingError`、⛔ 不產報告（fail-closed，原始量測保存到 `raw-failed/`）；**混合狀態**（確定的違反 ＋ 有效性問題）的判定**只由 `precheck.json` 表達**。full 模式的最後報告結構上⛔ 不會遇到有效性問題（磁碟窗口在 precheck 之前就結束，precheck 不是 ok 就⛔ 不跑量測趟）——最後報告若出現有效性問題就是 harness 的缺陷 → fail-closed；stub 模式只供開發驗證（⛔ 不是判定），遇到混合狀態同樣⛔ 不產報告。`validate_acceptance_report_v2()` 多驗「沒有任何有效性問題」（由 `paths` 與程式的容差推導）——只是**收窄**：既有的有效報告（dev6）照樣通過，舊版 validator 對新報告的結論不變。sizing 報告 v1 沒有逐項的違反清單、判定是 freeze record 的 `P_B ≤ P_B_BUDGET`，所以混合狀態照常寫出：確定的違反必然 `P_B` ＞ 預算，v1 讀取端的結論就是超標，語意不變；只有「沒有確定的違反、但有有效性問題」才拋 `SizingError`；文字版與 stderr 列出 `P_basis` 與有效性問題 |
+| 判定與重跑的紀律 | 只有 **invalid** 可以重跑；**第一個不是 invalid 的結果就是判定**——threshold_exceeded（sizing：寫出的報告 `P_B > P_B_BUDGET`；acceptance：報告 rc＝2、或 `precheck-verdict` 判讀為 `threshold_exceeded`）⛔ 不得重跑，照 v29「六、1」的回退順序。每一次嘗試（含 invalid 的）都記進本筆 |
+| 為什麼是 1 MiB | 正常的 21 個窗口最高 −0.06 MiB；重跑那一次的外部寫入 684,032 bytes；兩邊的預算餘裕 ≥ 5.6 MiB；模糊區規則讓這 1 MiB ⛔ 不會單獨造成不可重跑的超標 |
+| 共用的 collector（第一輪 review） | 把 `build_acceptance_report()` 的蒐集部分抽成 `collect_acceptance_measurements(state, *, stage, p_b_budget, …)`，`stage` ∈ {`before_full`, `complete`}，回傳**內部的量測快照**（meta、manifest、limits、paths、promotion、memory、host）——⛔ **不是** `i074_stage2_acceptance_report_v2`：沒有 schema、contract、status、violations 等頂層鍵，v2 的 validator 一定拒絕它。`before_full` 的預期步驟與 invocation 是 full 模式正式集合的**精確前綴**（＝ 少了最後的 `replay_full`；程式內以「正式集合[:len(前綴)] ＝ 前綴」斷言，不符即拋錯）。⚠️ collector 讀的每一個集合（`rc.tsv` 的步驟、`index/`、`containers/`、`twins/`、lifecycle event、`host/`、`phases/`）都必須**恰好**等於預期的集合——⛔ 不靜默忽略多出的資料（第二輪 review）；唯一的例外是下面「讀取端」經過驗證、明確列舉的量測趟 suffix。`build_acceptance_report()` ＝ collector（`complete`）＋ 有效性 ＋ v2 包裝（輸出⛔ 不變）；precheck ＝ collector（`before_full`）＋ 有效性 ＋ `derive_acceptance_violations()`（同一個函式，吃快照的 limits／memory／host／paths） |
+| `precheck.json` 的契約（第一輪 review） | schema `i074_stage2_acceptance_precheck_v1`（canonical JSON），**封閉**的頂層鍵：`schema`、`status`、`full_trip`、`identity`（`run_id`、`mode`、`replay_compute`、`image`、`repo_head`、`clone_head`、`harness_manifest_sha256`）、`limits`（`memory_bytes`、`P_B_BUDGET`、`fs_unexplained_tolerance_bytes`）、`steps`（涵蓋的步驟名，＝ 前綴）、`sequences`（涵蓋的 invocation，＝ 1..n）、`disk`（success、failure 各恰好 `P_path`、`dirs_peak`、`fs_peak`、`accounted`、`P_basis`、`fs_unexplained`）、`validity_problems`（每筆恰好 `kind` ∈ {`fs_unexplained`, `ambiguous_disk_exceed`}、`subject`、`value`、`limit`）、`violations`（每筆恰好 `kind`、`subject`、`value`、`limit`；記憶體那幾類與報告 v2 的 enum 與推導相同——共用 `derive_acceptance_violations()` 拆出的記憶體段；磁碟一律是 **`disk_p_basis`**：`P_basis > P_B_BUDGET`、`value` 記 `P_basis`，裁決值就是證據值（第三輪 review），⛔ 不出現 `disk_p_path`）。**優先序**（第二輪 review；取代 v2 的完全互斥）：`violations`（只含確定的違反）非空 ⟺ `status = threshold_exceeded`，此時 `validity_problems` **可以**非空；否則 `validity_problems` 非空 ⟺ `status = invalid`；否則 `ok`。`full_trip` ＝ `allowed`（ok）／`not_started`（其他）。**寫入**：`<S>/precheck.json`，`write_exclusive`（`O_CREAT \| O_EXCL`，⛔ 不覆寫）；三種結果都寫，隨 S 複製到 `raw/`（繼續）或 `raw-failed/`（中止） |
+| `precheck.json` 的讀取端（第三輪 review 重寫） | `helper precheck-verdict --raw <raw 或 raw-failed 目錄> --repo <受信任的 repo> --expected-repo-head <40 碼 OID>`（三個參數都必填；第四輪 review）。⚠️ **offline 的讀取端⛔ 不執行、⛔ 不 import 原始量測目錄裡的任何程式**——快照只當成要比對的 bytes（同一個 artifact 裡的模組、`MANIFEST`、`identity` 與 `precheck.json` 只能證明彼此一致，⛔ 不是信任根）：⓪ **外部的 commit 錨點**（第四輪 review）：`--expected-repo-head` 由呼叫端提供、⛔ 不取自 artifact——必須是 40 碼小寫 hex，且 `git -C <repo> rev-parse --verify <expected>^{commit}` ＝ 它自己（⛔ 不接受 ref、縮寫或 tag）；① `precheck.json` 只當資料解析，`identity.repo_head` 必須 ＝ `expected_repo_head`——**不符就在取出或執行任何程式之前拒絕**；② 快照的每一個檔案（`MANIFEST` 列出的相對路徑，⛔ 不接受 `..`、絕對路徑或重複）逐位元 ＝ `git show <expected_repo_head>:<路徑>`，`MANIFEST` 的 canonical SHA ＝ `identity.harness_manifest_sha256`；③ 一律從 **`expected_repo_head` 的 git object** 取出到私有的暫存目錄（⛔ 不由 artifact 的任何欄位選擇 commit），以 `python3 -I` 執行取出來的 helper 的 `precheck-recompute`（工作樹版本**只執行固定的驗錨與取出 frontend**，⛔ 不得呼叫工作樹的 `precheck-recompute`／collector（第七輪 review）；取出的是受信任的程式；它驗 `MANIFEST` 的路徑集合 ＝ 自己的 `SNAPSHOT_FILES`、從取出來的 preflight／supervisor 載入常數）；④ **形狀**：A＝狀態恰好是前綴（precheck 之後中止，`raw-failed/`）→ collector（`before_full`）直接重算（它本身就驗前綴每一項的內容）；B＝前綴 ＋ 量測趟的 suffix（成功的 `raw/`）→ **先以 collector（`complete`）驗完整狀態的全部內容**（`rc.tsv` 的預期與實際、sidecar 的狀態與 RSS 欄位、twin 的狀態與 spec hash、host 紀錄的 schema／清理／RSS、lifecycle event 的完整與先後、invocation 的 spec hash——與最後報告用的是同一套檢查），再驗 suffix 恰好是唯一合法的那一組（`rc.tsv` 在前綴之後恰好一行 `replay_full`、`index/`／`containers/`／`twins/` 恰好多出 sequence n＋1 且它是 full 模式正式集合的最後一個 invocation、lifecycle event 恰好多出它的 `create_begin` 與 `rm_done`、`host/` 恰好多出 `replay_full.json`）且 `precheck.json` 的 `status` 是 ok，**最後**才明確投影掉 suffix、以 collector（`before_full`）重算；多出、缺少、重排或內容不合法 → 拒絕；⑤ 重算的結果與檔案**逐位元相同**（canonical）——記憶體列的違反由這一步證明。全部通過才印出 `status`、rc＝0；任何一項不符、缺檔、空檔、截斷、⛔ 不是 canonical、`expected_repo_head` 不是受信任 repo 的 commit、`identity.repo_head` ≠ 它、快照 ≠ 它的內容 → rc＝1「無法判讀」。⚠️ 照實的界線：它證明**程式與常數**來自受信任 repo 中由呼叫端指定的 `expected_repo_head`、`precheck.json` 是原始量測在那份程式下的確定結果；⛔ **不證明原始量測本身沒被竄改**（量測資料沒有外部的錨）——所以 ⑨-1 的程序在跑完當下以下一列的 **raw manifest** 為原始量測建立事後比對的錨，記進本筆（之後 commit）。⚠️ **`expected_repo_head` 的來源**（第四輪 review）：⑨-1 開跑之前在真正 repo 以 `git rev-parse HEAD` 取得（`--formal` 已守 `scripts/`、`python/`、`.gitattributes` 與 HEAD 相同、HEAD ⛔ 沒有在 bootstrap 之後移動，而快照清單的檔案都在這些路徑內，所以快照 ＝ 錨點；`docs/` 等其他路徑的未 commit 變更⛔ 不影響判讀——第五輪 review 訂正，⛔ 不另加「整棵工作樹 clean」的前置條件），開跑前就記下並回報（量測期間⛔ 不改真正 repo，跑完才寫進本筆）——⛔ 不從跑完的 artifact 讀回；歸檔時一併記錄這個值與它的來源（freeze record 在 ⑨-2 才產生，⑨-1 用不到它）。判讀不了的只有**快照清單裡的檔案**與錨點不同的執行（例如快照清單內有未 commit 變更的開發執行），照實；其他路徑的未 commit 變更⛔ 不影響（第五輪 review）。⚠️ ⑨-1 的程序**只認 `precheck-verdict` 的輸出**；無法判讀⛔ 不得當成可重跑，交人工查明（原始量測照樣保存）。量測趟途中失敗（狀態介於 A、B 之間）是量測趟的崩潰，依計次政策的「崩潰重試 1 次」處理，⛔ 不經 precheck 的判讀 |
+| raw manifest（事後比對的錨；第五輪 review） | **對外**：`helper raw-manifest --raw <raw 或 raw-failed 目錄> --repo <受信任的 repo> --expected-repo-head <40 碼 OID> (--out <raw 目錄之外的新路徑> | --check-sha256 <記下的值> [--out <新路徑>])`。⚠️ **雙層、與 `precheck-verdict` 同一個信任模型**（第六輪 review）：對外的命令只做錨點的驗證（40 碼小寫 hex、`rev-parse --verify <expected>^{commit}` ＝ 它自己）、從 **`expected_repo_head` 的 git object** 取出 helper 到私有的暫存目錄、以 `python3 -I` 執行取出那一版的內部命令 `raw-manifest-recompute`；工作樹版本**只執行固定的驗錨與取出 frontend**，⛔ 不得呼叫工作樹的 `raw-manifest-recompute`／manifest 產生演算法（第七輪 review）、⛔ 不從原始量測目錄載入或執行任何程式。產生（⑨-1 跑完當下）與日後的檢查都走這一個入口，所以兩次用的一定是同一個 commit 的演算法。兩個對外命令共用同一個「驗錨點 → 取出受信任的 helper → `python3 -I` 執行」的前端函式。**產出**：canonical JSON（`canonical_dumps()`：鍵排序、`separators=(",", ":")`、UTF-8、`ensure_ascii=False`、結尾⛔ 不加換行）的 `i074_stage2_raw_manifest_v1`，封閉的頂層鍵恰好是 `schema`、`expected_repo_head`、`root_name`（`raw` 或 `raw-failed`）、`file_count`、`dir_count`、`files`、`dirs`。**走訪**：`--raw` 本身必須是目錄（`lstat`，⛔ 不是 symlink）；往下逐項 `lstat`、⛔ 不跟隨 symlink：一般檔案 → `files` 一列，恰好 `path`、`size`（`st_size`）、`sha256`（內容）；目錄 → `dirs` 一列（**含空目錄**；根目錄本身⛔ 不列）；symlink、FIFO、socket、裝置檔 → 拒絕、⛔ 不產 manifest。**路徑**：相對於 `--raw` 的 POSIX 路徑（`/` 分隔），每一段必須是合法 UTF-8（無法解碼 → 拒絕），⛔ 不得是空字串、`.` 或 `..`；`files` 與 `dirs` 各自依路徑的 UTF-8 bytes 遞增排序（與 code point 的順序相同）、⛔ 不得重複；`file_count`／`dir_count` ＝ 兩個陣列的長度。**輸出**（第六輪 review）：`--out` 以 exclusive create 寫（`O_CREAT \| O_EXCL`；路徑已存在——含一般檔案、symlink、懸空的 symlink——→ 拒絕、⛔ 不覆寫、原檔⛔ 不變）；父目錄必須已存在，解析之後落在 `--raw` 之內 → 拒絕（避免自我雜湊）；寫入途中失敗 → 刪掉本次建立的那個檔案。產生模式必須帶 `--out`。**檢查**：帶 `--check-sha256` 時先在記憶體重建、比對 SHA-256：相同 → rc＝0，有 `--out` 才以同樣的 exclusive 規則寫出；⛔ 不同 → rc＝1、⛔ 不寫任何檔案——新增、刪除、改名、改一個 byte、多或少一個空目錄都會讓重新產生的 bytes 不同，換成 symlink 或特殊檔案則直接拒絕。⚠️ **錨是記進本筆的 SHA-256**，manifest 檔本身只方便查看。**產生與日後重建**都經上述的雙層入口（工作樹版本只執行驗錨與取出的 frontend，⛔ 不呼叫工作樹的產生演算法）；schema 名稱固定演算法，演算法要改就換 schema 名。**本筆記錄**：manifest 的 SHA-256、`file_count`、`dir_count`、`expected_repo_head` 與它的來源、產生與檢查用的完整指令；work 目錄頂層在 raw 目錄之外的檔案（`acceptance_report.json`／`.txt` 或 `failure_summary.json`）另記各自的 SHA-256 |
+| 權威常數的來源（第二輪 review） | collector、validator、precheck 與 verdict 需要的 `P_B_BUDGET`（唯一定義在 `i074_stage2_preflight.py`）與 `ENV_DROP_NAMES`／`ENV_DROP_PREFIXES`（`scripts/lib/i074-stage2-supervisor.py`）**live 一律取自 harness 的快照**（offline 的讀取端見上一列，⛔ 不從原始量測目錄載入）：sizing 的快照清單（`SNAPSHOT_FILES["sizing"]` 與 `scripts/i074-stage2-sizing.sh` 的 `I074_BOOT_FILES`）加入 `python/scripts/i074_stage2_preflight.py`；acceptance 的（`SNAPSHOT_FILES["acceptance"]` 與 `scripts/i074-stage2-acceptance.sh` 的 `I074_BOOT_FILES`）加入它與 `scripts/lib/i074-stage2-supervisor.py`。新增 `_load_frozen(<S 的快照目錄>, <相對路徑>)`：先驗該檔的 SHA-256 ＝ `MANIFEST` 的那一行，才以 `importlib` 載入（兩個模組在模組層級只 import 標準函式庫，載入⛔ 沒有副作用）——只給 live 用：S 的快照由 bootstrap 從受信任的 repo 建立並驗證過。live 的 `report`（sizing）、`acceptance-precheck`、`acceptance-report` 另外斷言快照裡的這兩個檔案與工作複本的**逐位元相同**（步驟實際執行的是工作複本的 `clean_env()`，freeze record 也從工作複本 import `P_B_BUDGET`）——不同即 fail-closed。⛔ 不讀活路徑、⛔ 不複製常數。函式層一律以參數接收常數（測試直接傳），只有 CLI 層載入快照。`--formal` 既有的「清單內的檔案 ＝ HEAD」與 S 的形狀檢查依清單運作，自動涵蓋新加的兩個檔案 |
+| ⑨-1 的 fail-fast | acceptance 的 full 模式流程：…`recover_envcheck` → **metadata twin（量測趟之前的 invocation）** → **`helper acceptance-precheck`**（寫 `precheck.json`；結束碼 0 ok／2 threshold_exceeded／3 invalid／其他 ＝ 錯誤）→ 0 才跑量測趟（`replay_full`）→ **metadata twin（只有量測趟那一個）** → 報告。2、3 與錯誤都走 `on_failure`（harness rc＝1；訊息寫明「量測趟未執行、額度未消耗」與哪一種）；判讀一律經 `precheck-verdict`。stub 模式⛔ 不跑 precheck（流程與結束碼照舊：0／2／1） |
+| metadata twin 分兩次 | twin 本來在「所有量測窗口結束之後」才建；量測趟本身⛔ 沒有磁碟窗口，所以把 twin 提到量測趟之前⛔ 不影響任何窗口。`run_twins()` 改成**只處理還沒有 twin 結果的 invocation**（已有的跳過；每一份仍以 `write_exclusive` 寫；`load_invocations()` 的完整性檢查照舊要求每個 sequence 恰好一份）；sizing 只呼叫一次，行為不變 |
+| 作業規則（歸檔到 `development-workflow.md`） | 正式量測（⑨-1、⑨-2）開始之前，以 `docker inspect` **只看排程鍵**（`*_CRON`，⛔ 不印其他環境變數）確認 live 的批次時段（現行：台北時間平日 06:30、16:00、17:00、22:00，每日 07:00），讓磁碟窗口（⑨-1 約前 15 分鐘、⑨-2 約 6 分鐘）避開它們與它們的執行期間；量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這是降低無效與抵銷機率的作業規則，⛔ 不是保證 |
+
+##### 三、待確認的決定
+
+| # | 決定 | 理由 |
+|---|---|---|
+| 1 | 容差 1 MiB，以常數寫死（⛔ 不開參數）；搭配模糊區規則 | 可調就可以事後挑；模糊區讓容差⛔ 不會單獨決定結果（第一輪 review：補上之後可接受） |
+| 2 | precheck 的超標、無效與錯誤都讓 harness 以 rc＝1 結束，由封閉契約的 `precheck.json` 經 `precheck-verdict`（`--repo` ＋ `--expected-repo-head`）區分 | 結束碼 2 一直代表「報告已寫」（第一輪 review：補上封閉契約之後可接受；第三輪 review：讀取端改成受信任 repo、形狀 B 先驗全部內容） |
+| 3 | 有效性條件只套磁碟路徑；晉升的窗口只列資訊值 | 晉升的磁碟⛔ 不與預算比較（v29「八之一」容量列）（第一輪 review：同意） |
+| 4 | 歷史紀錄⛔ 不追溯改寫；只在本筆照實記下「以新條件重算，只有 10/05 第一次 sizing 會被判無效」 | ⑤ 的正式量測三條路徑都是負值（第一輪 review：同意，並已重算確認） |
+| 5 | ~~有效性優先~~ → **確定的違反優先，其次有效性問題**（第二輪 review 不同意 v2 的做法，改成這樣）；模糊區只是有效性問題 | 磁碟窗口無效⛔ 不會讓同一次量到的精確 RSS 或 `P_basis` 失效；v2 的做法等於用無關的磁碟雜訊取得重跑資格（第三輪 review：同意） |
+| 6 | acceptance 報告 v2 **維持原語意**：只在沒有任何有效性問題時寫出，混合狀態只由 `precheck.json` 表達（第三輪 review 的兩個選項之二；⛔ 不升 v3） | full 模式的最後報告結構上不會遇到混合狀態；stub 只供開發驗證；⛔ 不需要第二份 schema。sizing 報告 v1 的判定是 `P_B ≤ 預算`，混合狀態照寫⛔ 不改變它的語意 |
+| 7 | offline 的 `precheck-verdict` 需要受信任的 repo（`--repo`）與**外部的 commit 錨點**（`--expected-repo-head`，第四輪 review），只支援快照 ＝ 該 commit 的執行 | ⛔ 不執行原始量測目錄裡的程式，也⛔ 不讓 artifact 選擇要執行哪個 commit；⑨-1 是 `--formal`（快照 ＝ HEAD），錨點是開跑前記下的 HEAD |
+| 8 | 原始量測的事後錨點是封閉的 raw manifest（`i074_stage2_raw_manifest_v1`）的 SHA-256，記進本筆並 commit（第五輪 review） | 演算法封閉在 schema 裡、產生與日後重建都經 `--repo` ＋ `--expected-repo-head` 從 git object 取出的同一個 helper 執行（第六輪 review），算出的值才確定與當時同義；它只能偵測**之後**的改動，⛔ 不證明跑完當下之前的狀態 |
+
+##### 四、受影響檔案與資料流
+
+| 檔案 | 改動 |
+|---|---|
+| `python/scripts/i074_stage2_sizing.py` | `FS_UNEXPLAINED_TOLERANCE`、`disk_validity_problems(paths, p_b_budget)`（① 與 ②）、判定的優先序；`build_report()` 加 `p_b_budget`；`derive_acceptance_violations()` 拆出記憶體段共用（輸出⛔ 不變）、precheck 的 `disk_p_basis`；`collect_acceptance_measurements()`（從 `build_acceptance_report()` 抽出；每個集合恰好等於預期）；`build_acceptance_report()` 改用它；`validate_acceptance_report_v2()` 多驗「沒有任何有效性問題」；precheck 的 builder、`validate_acceptance_precheck_v1()`、形狀 B 的完整驗證與 suffix 投影；`run_twins()` 跳過已有結果；`SNAPSHOT_FILES` 兩個 profile 各加檔案、`_load_frozen()`；子指令 `acceptance-precheck`、`precheck-verdict`（外部 commit 錨點、git 比對與取出、⛔ 不 import 原始量測裡的程式）、`raw-manifest`（對外：驗錨點、從 git object 取出 helper）與 `raw-manifest-recompute`（內部）——`precheck-verdict` 與 `raw-manifest` 共用「驗錨點 → 取出受信任的 helper → `python3 -I` 執行」的前端函式、`precheck-recompute`（由 `precheck-verdict` 以取出的受信任版本執行）；`report`、`acceptance-report` 改從快照載入常數（並與工作複本比對）；兩份文字版列出 `P_basis`、`fs_unexplained` 與有效性問題 |
+| `scripts/i074-stage2-acceptance.sh` | `I074_BOOT_FILES` 加 preflight 與 supervisor；full 模式的順序（twin → precheck → 量測趟 → twin）；precheck 結束碼對應 `on_failure` 的訊息 |
+| `scripts/i074-stage2-sizing.sh` | `I074_BOOT_FILES` 加 preflight（第二輪 review：v2 寫的「⛔ 不改」不成立——快照裡沒有 preflight，就無法安全取得唯一真相源） |
+| 測試 | `test_i074_stage2_sizing.py`、`test_i074_stage2_acceptance.py`、`scripts/test-replay-args.sh`（見「六」；隔離的最小 repo 與快照清單相關的既有測試依新清單更新） |
+| 文件 | `docs/sr-zone-scoring.md`（容量驗收：有效性條件、模糊區、確定的違反優先、判定與重跑的紀律、`precheck.json` 與 raw manifest 的 schema 與不變條件、offline 讀取端的信任模型、權威常數取自快照）、`docs/development-workflow.md`（sizing 與 acceptance 兩節：有效性條件、full 模式的順序、`precheck-verdict` 的判讀、作業規則）、本筆 |
+
+資料流：取樣（不變）→ `phase_peaks()`（不變）→ `paths`（`P_path` 不變）→ **有效性條件 ① ②**（新）→ 門檻推導（不變）→ 報告。full 模式另在量測趟之前多一次「twin → collector（`before_full`）→ 有效性 → 同一個門檻推導 → `precheck.json`」。
+
+##### 五、風險與回滾
+
+| 風險 | 對策 |
+|---|---|
+| 1 MiB 太緊，正常量測也被判無效 | 歷史 24 個窗口只有雜訊那一次超出；無效只花重跑的時間（sizing 約 6 分鐘、acceptance 量測趟之前約 15 分鐘），⛔ 不消耗量測趟 |
+| 外部刪除抵銷了外部寫入或漏算 | 照實寫明有效性條件只偵測**淨**成長；作業規則降低機會；會計上界與目錄取樣仍是 `P_path` 的主要來源 |
+| 流程真的有漏算的寫入，之後每次都無效 | 那正是要查明的缺陷（會計模型宣稱是上界）；照實回報，⛔ 不放寬容差 |
+| precheck 與最後的報告推導不一致 | 共用 collector 與 `derive_acceptance_violations()` 的記憶體段；測試證明同一份沒有有效性問題的狀態加上通過的量測趟之後，既有的違反逐筆對應保留，量測趟自己超標只會**新增**違反 |
+| `precheck.json` 損壞或被改 | 封閉契約 ＋ 身分綁定 ＋ 從原始量測重算逐位元比對；無法判讀⛔ 不得當成可重跑 |
+| offline 判讀需要受信任的 repo 與外部的 commit 錨點 | ⑨-1 用的 commit 一定在 repo 裡、開跑前就記下；只有快照清單內的檔案與錨點不同的執行判讀不了（照實，決定 #7） |
+| 原始量測本身被一致竄改 | 照實⛔ 不在 verdict 的保證內；⑨-1 跑完當下以 raw manifest 建立錨：manifest 的 SHA-256、檔案數、目錄數、`expected_repo_head` 與它的來源、指令記進本筆並 commit（決定 #8）——只偵測**之後**的改動 |
+| 快照多了兩個檔案 | `--formal` 的「清單內的檔案 ＝ HEAD」與 S 的形狀檢查依清單自動涵蓋；開發時改了 preflight／supervisor 卻沒 commit，live 的「快照 ＝ 工作複本」檢查會中止（照實；正式量測一律 clean） |
+| twin 分兩次出錯（重複或漏建） | `run_twins()` 只補缺的；完整性檢查照舊 |
+| 回滾 | `git revert` 本計畫的實作 commit 即可；`P_path` 與兩份報告的 schema 都沒變，既有紀錄與 freeze record 不受影響 |
+
+##### 六、測試與驗證
+
+| 層 | 內容 |
+|---|---|
+| pytest：有效性 | ① 的邊界（＝ 1 MiB 有效、＋1 byte 無效、負值有效）；② 的邊界：`P_basis` ＝ 預算且 `fs_peak` ＝ 預算 ＋1（容差內）→ 無效（`ambiguous_disk_exceed`）、`P_basis` ＝ 預算 ＋1 → 有效且超標（acceptance 報告 rc＝2；sizing 報告寫出、freeze record 照舊拒寫）、`P_path` ＝ 預算 → 有效且⛔ 沒有超標；sizing 與 acceptance 的 builder 各自拋錯、訊息含路徑與 bytes；晉升的窗口超出⛔ 不影響；**優先序**（第二輪 review）：記憶體超標 ＋ 磁碟無效 → precheck 是 threshold_exceeded、stub 的報告⛔ 不產（rc＝1）；`P_basis` 超標 ＋ `fs_unexplained` 超限 → precheck 是 threshold_exceeded（`disk_p_basis`、`value` ＝ `P_basis`）、acceptance 報告⛔ 不產、sizing 報告寫出且 freeze record 拒寫；只有模糊區 → invalid（模糊區⛔ 不出現在 `violations`）；**v2 語意不變**（第三輪 review）：`derive_acceptance_violations()` 的輸出對既有報告逐位元不變、`validate_acceptance_report_v2()` 抓到有任何有效性問題的報告、dev6 照樣通過（封閉型別的 fuzz 測試照舊通過） |
+| pytest：collector 與 precheck | 快照⛔ 不能通過 v2 的 validator；`before_full` 的步驟與 invocation 是精確前綴（多一步、少一步、量測趟已存在 → 拋錯）；每一個集合恰好等於預期（多一個 phase 目錄、多一份 host 紀錄、多一份 twin、不認得的 lifecycle event → 拋錯）；**保留性**：同一份沒有有效性問題的狀態，precheck 的違反與加上通過的量測趟之後報告的違反**逐筆對應**（記憶體逐筆相同；磁碟的 `disk_p_basis` ⟺ `disk_p_path`、`subject` 相同——沒有有效性問題時兩個條件等價），量測趟超標時報告只多出它自己的那幾筆；四種結果（ok、記憶體超標、磁碟超標、無效）寫出的 `precheck.json` 通過讀取端 |
+| pytest：`precheck.json` 的讀取端 | 封閉 schema 對每一個節點逐一換成錯的型別 → 一律回問題、⛔ 不拋例外；優先序的每一種錯配（例如 `invalid` 但有違反、`invalid` 但 `validity_problems` 空、`ok` 但有違反或有效性問題、`full_trip` 不符）；**形狀**（第二輪 review）：完整成功的狀態經合法 suffix 投影後可重算、且 `status` 必須是 ok，suffix 多出、缺少或重排任何一項（多一個 invocation、少了 twin、`replay_full` 不在最後、多一個 host 紀錄、多一個 phase 目錄）→ 一律拒絕；**形狀 B 的內容**（第三輪 review）：集合都對、但 `replay_full` 的預期／實際結束碼不符、sidecar 是 `measure_failed` 或缺 RSS 欄位、twin 是 `measure_failed` 或 spec hash 不符、host 紀錄 schema 不符或 `cleanup_complete` 為 false、lifecycle event 少了 `rm_done` 或先後顛倒 → 各自無法判讀；**信任根**（第三輪 review）：在原始量測的快照裡放一份**與 `MANIFEST`、`identity` 一致**、但 import 時會寫出標記檔的 preflight → 無法判讀（≠ `expected_repo_head` 的內容），且標記檔⛔ 沒有出現（⛔ 沒有被執行）；`expected_repo_head` 不在受信任的 repo、快照與它差一個 byte → 無法判讀；**外部錨點**（第四輪 review）：受信任的 repo 同時有正常的 commit C1 與另一個 commit C2（C2 的 `precheck-recompute` 入口一被呼叫就寫標記檔），artifact 與 C2 完全一致（快照 ＝ C2、`identity.repo_head` ＝ C2）、`--expected-repo-head` ＝ C1 → 在取出或執行任何程式之前拒絕、標記檔⛔ 沒有出現；另外讓**目前工作樹**的 `precheck-recompute` 入口也寫標記檔，`--expected-repo-head` ＝ C1 的正常判讀⛔ 不得觸發它（第七輪 review：標記一律放在 recompute／collector 的入口，⛔ 不放在模組載入或對外的 frontend——工作樹的 frontend 本來就會執行）；`--expected-repo-head` 是 ref（`HEAD`）、縮寫、tag 或不存在的 OID → 拒絕；缺少它 → 用法錯誤；live 的快照與工作複本不同 → fail-closed；身分綁定（`run_id`、`repo_head`、`harness_manifest_sha256` 各改一個）；重算不符（改檔案裡的一個數字、或改原始量測的一個樣本）；缺檔、空檔、截斷、⛔ 不是 canonical → 無法判讀；第二次寫入 → 失敗（exclusive） |
+| pytest：raw manifest（第五輪 review） | 同一份目錄產生兩次逐位元相同；新增、刪除、改名、改一個 byte、多一個或少一個空目錄 → `--check-sha256` 不符（rc＝1）；symlink（指向檔案、指向目錄、懸空）、FIFO → 拒絕、⛔ 不產 manifest；`--raw` 本身是 symlink → 拒絕；非 UTF-8 的檔名 → 拒絕；`--out` 在 `--raw` 之內（含經 symlink 解析之後）→ 拒絕；手改 manifest 的 `files` 順序或多一個空白 → 與重新產生的 bytes 不同；含非 ASCII 檔名的固定案例釘住排序與 canonical bytes；缺參數 → 用法錯誤；**信任的執行路徑**（第六輪 review）：目前工作樹與另一個 commit C2 的 `raw-manifest-recompute`／manifest 產生演算法的入口都會寫標記檔（第七輪 review：標記放在演算法的入口，⛔ 不放在模組載入或對外的 frontend——工作樹的 frontend 本來就會執行），`--expected-repo-head` ＝ C1 → 只執行從 C1 取出的版本、兩個標記檔都⛔ 沒有出現，產出 ＝ C1 的演算法；缺 `--repo` → 用法錯誤；錨點是 ref、縮寫或不存在 → 拒絕；**輸出**（第六輪 review）：`--out` 已存在（一般檔案、指向檔案或目錄的 symlink、懸空的 symlink）→ 拒絕且原檔與 symlink 的目標都⛔ 沒有被改動；`--check-sha256` 不符 → rc＝1、`--out` 的路徑⛔ 沒有被建立；相符且帶 `--out` → exclusive 寫出、內容 ＝ 產生模式的輸出；產生模式缺 `--out` → 用法錯誤 |
+| pytest：twin | `run_twins()` 第二次呼叫只建新的 invocation、已有的⛔ 不重建 |
+| shell（fake docker） | full 模式：twin 與 precheck 的順序（fake docker 的紀錄：量測趟之前的 twin 都在 `replay_full` 之前、量測趟的 twin 在它之後）、成功的 `raw/` 經 `precheck-verdict --raw raw --repo <隔離的 repo> --expected-repo-head <隔離 repo 的 HEAD>`（形狀 B）判讀為 `ok`；⚠️ 本列每一個 `precheck-verdict` 的呼叫都帶齊三個參數（第四輪 review：⛔ 不寫只有 `--raw` 的範例，免得測試變成 fail-open）；兩個 harness 的快照含新加的檔案、`--formal` 時它們與 HEAD 不同 → 拒絕；precheck 判定超標（fake docker 讓 success 的 replay 回報超標的 RSS）→ rc＝1、`precheck-verdict --raw raw-failed --repo <隔離的 repo> --expected-repo-head <隔離 repo 的 HEAD>` 印 `threshold_exceeded`、**`replay_full` 沒有被執行**；precheck 判定無效（新的故障注入 `fs-noise`：success 窗口期間在量測範圍外寫 2 MiB、窗口結束後刪除）→ rc＝1、同一個指令（三個參數）印 `invalid`、量測趟沒有執行；改掉 `raw-failed/precheck.json` 的一個 byte → 同一個指令無法判讀；sizing 的 `fs-noise` → rc＝1、訊息含 `fs_unexplained`；`--formal` ⛔ 不接受 `fs-noise`（既有的「formal ⛔ 不接受故障注入」） |
+| 反向驗證 | 拿掉 ①（sizing／acceptance／validator 各一）、`≤` 改 `<`、拿掉 ②（模糊區）、優先序反過來（有效性問題蓋過確定的違反）、模糊區算成違反、磁碟條件改回 `P_path`、晉升也套條件、precheck 不擋量測趟、precheck 放到量測趟之後、`precheck-verdict` 不重算、投影接受多出的項目、形狀 B 不先驗完整內容、offline 改從原始量測目錄 import、不比對快照與 `expected_repo_head`、改用 artifact 的 `identity.repo_head` 選擇要取出的 commit、錨點接受 ref 或縮寫、raw manifest 跟隨 symlink、漏列空目錄、`--out` 可以落在 raw 之內、`--check-sha256` ⛔ 不比對、對外的 frontend（`raw-manifest`、`precheck-verdict`）直接呼叫本地的 recompute、⛔ 沒有切換到 expected commit、`--out` 覆寫既有檔案、檢查不符仍寫出、precheck 的磁碟改記 `P_path`、v2 允許有效性問題、不驗身分綁定、不驗凍結模組與 `MANIFEST`、常數改讀工作複本、優先序拿掉一條、collector 忽略多出的集合成員、`run_twins()` 不跳過已有的——各自紅在預期的那幾支，逐位元還原 |
+| 歷史資料的重算（唯讀） | 以新條件重算現有 9 份報告：預期只有 `validation-7d-rss-20261005T085906Z` 被判無效（① 超出；② ⛔ 沒有任何一份落入） |
+| 實跑（dev，避開 live 批次時段） | acceptance stub 一趟、sizing validation 一趟；⛔ 不跑 full、⛔ 不跑 `--formal` |
+| 完整測試 | `python/scripts/test.sh`（依序；pytest 若被 OOM 收掉就分段）、tooling patch `--verify`、`check-doc-refs`、禁止標記的否定詞掃描 |
+
+##### 七、歸檔（實作後；review 前保留本計畫）
+
+- `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」：有效性條件（① 淨成長、② 模糊區）、確定的違反優先、判定與重跑的紀律、⑨-1 的 fail-fast、權威常數取自快照，以及兩份耐久的契約——`i074_stage2_acceptance_precheck_v1` 與 **`i074_stage2_raw_manifest_v1`** 的 schema 與不變條件、offline 讀取端的信任模型（外部 commit 錨點、⛔ 不執行原始量測裡的程式；第六輪 review：契約歸這裡，移除本筆的計畫之後才不會只剩操作描述）。
+- `development-workflow.md`：sizing 一節（有效性條件、作業規則）、acceptance 一節（full 模式的順序、`precheck-verdict` 的判讀與三個參數、外部 commit 錨點的來源、raw manifest 的產生與檢查的**操作指令**）。
+- 本筆：實作結果、歷史資料重算、實跑、與計畫的差異；「⑦d 增補的實作結果」的觀察段落改指本計畫。
+
+##### 第一輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 中 | **1 MiB 容差可能形成不可重跑的假超標**：`P_basis` ＝ 預算、`fs_peak` ＝ 預算 ＋1 時量測有效，但門檻推導（`derive_acceptance_violations()` 以 `P_path > 預算` 判違反）會產生 `disk_p_path`，而「第一個有效的結果⛔ 不得重跑」 | ✅ 成立（讀碼：`P_path` 含 `fs_peak`） | 「二」新增**模糊區**：`P_path > 預算` 但 `P_basis ≤ 預算` → 無效、可以重跑；只有 `P_basis` 本身超過預算才可能是正式超標。`P_path`、`P_B_BUDGET` 與門檻推導都⛔ 不改（寫出的報告裡兩者必然一致）（⚠️ 第二輪 review 之後：門檻推導的磁碟條件改成 `P_basis`，見第二輪的表）；sizing 的 builder 因此帶 `p_b_budget` |
+| 中 | **`precheck.json` 是唯一的裁決證據，契約卻沒封閉**：schema、互斥規則、身分綁定、寫入方式、讀取端與損壞／竄改測試都沒定義 | ✅ 成立 | 「二」新增 `i074_stage2_acceptance_precheck_v1` 的封閉契約（鍵、型別、互斥、身分、exclusive 寫入）與讀取端 `precheck-verdict`（封閉驗證 ＋ 身分綁定 ＋ 從原始量測重算逐位元比對）；⑨-1 只認它的輸出，無法判讀⛔ 不得當成可重跑；「六」補對應測試 |
+| 中 | **`before_full=True` ⛔ 不應產生可被當成完整 v2 報告的物件**；現行 builder 在 full 模式要求量測趟的步驟與紀錄全部存在 | ✅ 成立（讀碼） | 改成抽出共用的 collector：precheck 拿到的是**內部的量測快照**，⛔ 不是 v2 報告（v2 的 validator 一定拒絕）；`before_full` 的集合是正式集合的精確前綴（程式內斷言）；測試證明加上通過的量測趟之後既有違反完整保留、量測趟超標只新增違反 |
+| 補充 | 「漏算超過 1 MiB 保證會被擋」說得太滿：`fs_peak` 是整個檔案系統的淨變化，外部刪除可能抵銷 | ✅ 成立 | 改成「偵測**淨**未解釋的正成長」，照實寫明⛔ 不能證明沒有外部 I/O；作業規則用來降低抵銷的機會 |
+
+另外新增決定 #5（有效性優先）：補模糊區之後，「無效」與「超標」可能出現在同一次，需要明定先後。⚠️ 第二輪 review 不同意，改成「確定的違反優先」（見下表）。
+
+##### 第二輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **決定 #5「有效性優先」會丟棄已證實的獨立超標**：磁碟窗口無效⛔ 不會讓同一次量到的精確 RSS 失效；允許重跑等於用無關的磁碟雜訊取得重跑資格。`P_basis` ＞ 預算同理，⛔ 不受外部雜訊影響 | ✅ 成立 | 改成**確定的違反優先**：記憶體的每一類與 `P_basis` 超標 → threshold_exceeded（⛔ 不得重跑），否則有效性問題 → invalid；模糊區只是有效性問題。`precheck.json` 的完全互斥改成優先序（`threshold_exceeded` 可以帶非空的 `validity_problems`）；門檻推導的磁碟條件改成 `P_basis`；報告 v2 在確定的違反時照寫（有效性問題由 `paths` 推得），validator 要求「有有效性問題 ⟹ threshold_exceeded」 |
+| 中 | **成功後的 `raw/` 無法依設計重算 precheck**：collector 的 `before_full` 只接受精確前綴，成功的 `raw/` 一定含 `replay_full` | ✅ 成立 | 讀取端明定兩種形狀：A（恰好前綴）直接重算；B（前綴 ＋ 唯一合法的量測趟 suffix）先逐項驗 suffix、`status` 必須是 ok，再明確投影掉。collector 的每一個集合都必須恰好等於預期，⛔ 不靜默忽略多出的資料 |
+| 中 | **重算缺少兩個權威來源，「sizing 的 shell ⛔ 不改」不可行**：`P_B_BUDGET` 在 preflight、`ENV_DROP_*` 在 supervisor，兩個 harness 的快照清單都沒有它們；`precheck-verdict` 只收 `--raw` | ✅ 成立（讀碼：現行 `acceptance-report` 從 `--clone` 載入；`I074_BOOT_FILES` 與 `SNAPSHOT_FILES` 都沒有這兩個檔案） | 兩個 profile 的快照清單加入它們（sizing：preflight；acceptance：preflight 與 supervisor），`scripts/i074-stage2-sizing.sh` 因此要改；`_load_frozen()` 先驗 `MANIFEST` 才載入；live 另外斷言快照與工作複本逐位元相同；`precheck-verdict` 只用 `--raw` 裡凍結的版本並驗 `MANIFEST` 與 `identity`；⛔ 不讀活路徑、⛔ 不複製常數 |
+
+裁決：#1（1 MiB ＋ 模糊區）、#2（rc＝1 ＋ `precheck-verdict`）方向可接受；#3、#4 同意；#5 改成「確定的違反優先，其次有效性問題」。
+⚠️ 上表第一列「門檻推導的磁碟條件改成 `P_basis`；報告 v2 在確定的違反時照寫」與第三列「`precheck-verdict` 只用 `--raw` 裡凍結的版本」已被第三輪 review 推翻，見下表。
+
+##### 第三輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **offline 的 verdict ⛔ 不應從 `raw/` 執行 Python 模組**：模組、`MANIFEST`、`identity` 與 `precheck.json` 在同一個 artifact 裡，只能證明彼此一致，⛔ 不是外部信任根；一致地竄改整組仍可能通過，而且 verifier 會直接執行其中的任意程式 | ✅ 成立 | `precheck-verdict` 加 `--repo <受信任的 repo>`：快照只當 bytes，逐位元比對 `git show <repo_head>:<路徑>`，再從 **git object** 取出受信任的 helper 與常數模組、以 `python3 -I` 執行它的 `precheck-recompute`；offline ⛔ 不 import 原始量測目錄裡的任何程式。live 照舊載入 S 的快照（bootstrap 從受信任的 repo 建立並驗證過）。照實寫明它⛔ 不證明原始量測本身沒被竄改，⑨-1 跑完當下把 `precheck.json` 的 SHA-256 與原始量測的檔案摘要記進本筆並 commit（決定 #7） |
+| 中 | **形狀 B 只驗 suffix 的集合，⛔ 沒有驗內容**：檔名都在但內容損壞的 suffix 可能被投影掉，最後仍得到 ok | ✅ 成立 | 形狀 B 先以 collector（`complete`）驗完整狀態的全部內容（與最後報告同一套檢查），才驗 suffix 集合、`status` 是 ok，最後才投影；「六」補 rc、sidecar、twin、host、event 各自內容損壞的測試 |
+| 中 | **同名報告 v2 的門檻語意被改變**：`disk_p_path` 的條件改成 `P_basis`、v2 又能在有有效性問題時寫出——新舊 validator 結論可能不同、JSON 沒有結構化的有效性欄位、裁決值（`P_basis`）與記錄值（`P_path`）不一致 | ✅ 成立 | 採 review 的第二個選項（決定 #6）：**v2 維持原語意**——`derive_acceptance_violations()` 的輸出⛔ 不變，v2 只在沒有任何有效性問題時寫出（validator 的新檢查只是收窄），混合狀態只由 `precheck.json` 表達；`precheck.json` 的磁碟違反是 `disk_p_basis`、`value` 記 `P_basis`。sizing 報告 v1 的判定本來就是 `P_B ≤ 預算`，混合狀態照寫⛔ 不改變語意 |
+
+裁決：#1、#3、#4、#5 同意；#2 方向同意，須修正前兩項（已修正）。
+⚠️ 上表第一列的「從 git object 取出」仍由 artifact 的 `identity.repo_head` 決定 commit——第四輪 review 補上外部錨點，見下表。
+
+##### 第四輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **`--repo` 仍⛔ 不是完整的 commit 信任根**：`identity.repo_head` 取自待驗證的 artifact，讀取端只要求它是受信任 repo 裡的 commit——artifact 改指物件庫裡的另一個 commit、同步換掉快照與量測資料，verifier 仍會從那個 commit 取出 helper 並執行；`python3 -I` 只隔離環境，⛔ 不讓腳本本身變可信 | ✅ 成立 | 新增必填的 `--expected-repo-head <40 碼 OID>`（呼叫端提供、⛔ 不取自 artifact）：先驗它是受信任 repo 的 commit 且 `rev-parse` ＝ 它自己，再要求 `identity.repo_head` ＝ 它，**不符就在取出或執行任何程式之前拒絕**；取出一律從它（⛔ 不由 artifact 的欄位選 commit）。⑨-1 的錨點是開跑前在真正 repo 記下的 HEAD，歸檔時一併記錄值與來源。測試補 C1／C2（C2 一執行就寫標記檔）：artifact 指向 C2、錨點是 C1 → 執行前拒絕、標記檔⛔ 沒有出現 |
+| 低 | **測試矩陣的 CLI 範例漏掉必要參數**：前段帶 `--repo`，threshold／invalid 的案例卻只有 `--raw raw-failed` | ✅ 成立 | 「六」的 shell 列每一個呼叫都帶齊 `--raw`、`--repo`、`--expected-repo-head`，並加註⛔ 不寫只有 `--raw` 的範例 |
+
+裁決：#1～#6 可以接受；#7 補上外部 commit 綁定（已補）。
+
+##### 第五輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 中 | **原始量測的事後錨點沒有形成可重現的契約**：「每個檔案的 SHA-256 清單摘要」沒有定義涵蓋範圍（空目錄、symlink、特殊檔案）、路徑的編碼與排序、清單格式與摘要演算法、新增／刪除／改名如何被偵測、日後用哪個固定指令重建——它是補足「verdict ⛔ 不證明原始量測未遭竄改」唯一的外部錨點 | ✅ 成立 | 「二」新增 **raw manifest**（`i074_stage2_raw_manifest_v1`）：封閉的鍵、canonical JSON、`lstat` 走訪⛔ 不跟隨 symlink、含空目錄、symlink／特殊檔案／非 UTF-8／非法路徑一律拒絕、依 UTF-8 bytes 排序、輸出必須在 raw 之外；`--check-sha256` 重建比對；日後以 `expected_repo_head` 的 helper 重建；本筆記錄 SHA-256、檔案數、目錄數、錨點與來源、完整指令（決定 #8）。「六」補新增、刪除、改名、改一個 byte、空目錄、symlink、FIFO、排序的測試 |
+| 低 | **dirty 的描述比現行守門更廣**：計畫寫「工作樹 clean」、dirty 的開發執行判讀不了，但 `--formal` 只守 `scripts/`、`python/`、`.gitattributes`（`scripts/i074-stage2-acceptance.sh` 的 `--formal` 守門：`git status --porcelain -- scripts python .gitattributes`）；只有快照相關的檔案與錨點不同才真的判讀不了 | ✅ 成立（讀碼） | 改成精確的描述：快照清單的檔案都在 `--formal` 守的路徑內，所以快照 ＝ 錨點；判讀不了的只有快照清單內的檔案與錨點不同的執行，`docs/` 等其他路徑的未 commit 變更⛔ 不影響；⛔ 不另加「整棵工作樹 clean」的人工前置條件 |
+
+##### 第六輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 中 | **日後重建「執行 expected commit 的 helper」只有文字要求，CLI 沒有可信的執行路徑**：`raw-manifest` 沒有 `--repo`、也沒有從 git object 取出並啟動那一版的機制；HEAD 移動之後直接執行目前工作樹的 helper，證明不了用的是 expected commit 的演算法 | ✅ 成立 | 改成與 `precheck-verdict` 相同的雙層設計：對外的 `raw-manifest` 加必填的 `--repo`，驗完整的錨點 OID、從它的 git object 取出 helper、以 `python3 -I` 執行內部的 `raw-manifest-recompute`；工作樹版本只執行驗錨與取出的 frontend、⛔ 不呼叫工作樹的 `raw-manifest-recompute`（第七輪 review 訂正措辭）、⛔ 不從原始量測目錄載入程式；產生與檢查走同一個入口；兩個對外命令共用前端函式。「六」補 C1／C2（工作樹與 C2 的演算法都會寫標記檔，指定 C1 時只執行 C1） |
+| 低 | **`--out` 的寫入與檢查模式的行為沒定義**：是否覆寫、是否 atomic／exclusive、檢查不符時是否仍寫出 | ✅ 成立 | exclusive create（已存在、含 symlink → 拒絕、⛔ 不覆寫）、父目錄必須已存在、寫入失敗刪掉本次建立的檔案；檢查模式先在記憶體重建比對，⛔ 不符 → rc＝1、⛔ 不寫任何檔案，相符且帶 `--out` 才以同樣規則寫出。「六」補既有輸出、輸出是 symlink、檢查失敗⛔ 不建檔的測試 |
+| 低 | **耐久文件的歸檔清單漏列 raw manifest 的契約** | ✅ 成立 | 「七」：`i074_stage2_raw_manifest_v1`（與 `precheck.json`）的 schema、不變條件與 offline 讀取端的信任模型歸到 `sr-zone-scoring.md`；操作指令留在 `development-workflow.md`；「四」的文件列同步 |
+
+##### 第七輪 review 的修正（2026-10-06）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 低 | **文字矛盾**：raw manifest 列正確寫「⛔ 不執行目前工作樹的 helper 演算法」，第六輪的表卻寫「⛔ 不執行工作樹的 helper」——對外命令本身就由工作樹的 helper 提供 frontend，後者字面上不可能成立；測試的標記若放在模組載入或 frontend，工作樹的版本一定會觸發；反向驗證的描述也不精確 | ✅ 成立 | 統一成「工作樹版本只執行固定的驗錨與取出 frontend，⛔ 不得呼叫工作樹的 recompute／產生演算法」——`precheck-verdict`（`precheck-recompute`／collector）與 `raw-manifest`（`raw-manifest-recompute`／manifest 產生演算法）兩處、第六輪的表一併訂正；「六」的標記一律放在 recompute／演算法的入口，`precheck-verdict` 也補「工作樹的 recompute 入口寫標記檔、正常判讀⛔ 不得觸發」；反向驗證改成「對外的 frontend 直接呼叫本地的 recompute、⛔ 沒有切換到 expected commit」 |
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -5156,7 +5321,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（2026-09-29，✅ 2026-09-30 確認）**：⑦ 分四包依序實作——⑦a replay 側 → ⑦b supervisor＋orchestrator＋freeze record
    → ⑦c `--promote`＋B／C 判讀器 → ⑦d memory harness，每包「細部計畫 → 實作 → review → commit」；
    ⚠️ `evaluation.py` 與 `replay_bundle/` 的改動**經 tooling patch 進入 replay**（⑩ 的 replay 執行的是 `e1cbbbd` worktree）；
-   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；⚠️ 現在在這裡：⑦d 增補實作待 review（見「Stage 2 步驟 ⑦d 增補的實作結果」）
+   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；✅ ⑦d 增補實作 review 通過並 commit（2026-10-06，`576a8f7`；見「Stage 2 步驟 ⑦d 增補的實作結果」）；⚠️ 現在在這裡：量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 待確認（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；之後 ⑧ → ⑨ → ⑨-1）
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次

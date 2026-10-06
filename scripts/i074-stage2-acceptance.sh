@@ -23,7 +23,8 @@ I074_BOOT_PROFILE=acceptance
 I074_BOOT_SPREFIX=i074-accept
 I074_BOOT_SELF=scripts/i074-stage2-acceptance.sh
 I074_BOOT_FILES=(scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh
-                 python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py)
+                 python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py
+                 python/scripts/i074_stage2_rss_wrapper.py)
 # >>> I074-STAGE2-BOOTSTRAP ────────────────────────────────────────────────────────────────────────────
 # ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」的「harness 的快照」「bootstrap 的失敗與中斷」與「快照與來源的清單」）：
 #   harness 自己的檔案先凍結成 S 裡的快照，主腳本再 `exec` 快照裡的自己——之後每一行都從快照執行（⛔ 不讀活路徑；bash 是
@@ -35,6 +36,7 @@ I074_BOOT_FILES=(scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measu
 #     commit／**整個 S 的形狀**（恰好 harness/、清單 ① 的檔案與它們的目錄、MANIFEST——⛔ 沒有其他檔案、目錄、symlink 或
 #     特殊檔案）／MANIFEST（每個 SHA 相符；--formal 再驗一次 ＝ BOOT_HEAD）；全部通過之後的失敗才會刪 S。
 #   ⚠️ bootstrap 階段（以上兩個 pass 的驗證完成之前）⛔ 不刪任何東西：失敗或訊號只印出 S 的位置（第六輪 review 的保守方案）。
+#   ⚠️ ⑦d 增補：snapshot pass 經 python3 啟動器設 subreaper 之後才 exec 快照裡的主腳本（harness 自己收養步驟留下的程序）。
 #   ⚠️ ⑦d 實作第一輪 review：快照、工作複本（clone 之後 checkout 這個 OID）、報告的 repo_head 與 freeze record 全部綁
 #     BOOT_HEAD——之後⛔ 不再讀會移動的 HEAD（--formal 另要求啟動 repo 的 HEAD 仍是它）。
 #   ⚠️ 本段在 sizing 與 acceptance 兩個入口各一份，除了開頭的四個常數之外**逐字相同**（測試釘住）；⛔ 不 source 任何檔案。
@@ -77,8 +79,14 @@ if [ -z "${SIZING_SNAPSHOT:-}" ]; then
     done
   fi
   find "$S/harness" -type f -exec chmod a-w {} + || boot_die "快照設不了唯讀"
+  # ⚠️ ⑦d 增補（「二」④）：經 python3 啟動器設 PR_SET_CHILD_SUBREAPER 再 execv bash——harness 自己成為 subreaper（屬性跨
+  #   execve 保留），步驟以任何方式結束留下的程序都由它收養；之後由 measure_subreaper_guard 以行為驗證。
   exec env SIZING_SNAPSHOT="$S" SIZING_ORIGIN_REPO="$BOOT_ORIGIN" SIZING_BOOT_RUN_ID="$BOOT_RUN_ID" SIZING_BOOT_HEAD="$BOOT_HEAD" \
-    /bin/bash "$S/harness/$I074_BOOT_SELF" "$@"
+    python3 -c 'import ctypes, os, sys
+if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+    sys.exit("ERROR: 設不了 PR_SET_CHILD_SUBREAPER（errno %d）——⛔ 不刪任何東西，S 保留在：%s"
+             % (ctypes.get_errno(), os.environ["SIZING_SNAPSHOT"]))
+os.execv("/bin/bash", ["/bin/bash"] + sys.argv[1:])' "$S/harness/$I074_BOOT_SELF" "$@"
 fi
 S="$SIZING_SNAPSHOT"
 trap 'echo "⚠️ 快照的驗證沒有完成——⛔ 不刪任何東西，S 保留在：$S" >&2' EXIT
@@ -162,7 +170,8 @@ measure_work_dir_guard "$WORK_ARG"          # 設 REPO_CANON、WORK、L0_DEV
 
 case "${I074_SIZING_FAULT:-}" in
   ""|prepare|twins|copy|summary|bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;
-  *) die "I074_SIZING_FAULT 只接受 prepare／twins／copy／summary／bootstrap-*：${I074_SIZING_FAULT}" ;;
+  probe-timeout|subreaper-stall|guard-noident|guard-badident|guard-pgleader) ;;   # ⑦d 增補
+  *) die "I074_SIZING_FAULT 只接受 prepare／twins／copy／summary／bootstrap-*／probe-timeout／subreaper-stall／guard-*：${I074_SIZING_FAULT}" ;;
 esac
 # ⚠️ 「快照與來源的清單」②：⑩ 的正式程式從工作複本（BOOT_HEAD）執行——BOOT_HEAD 裡必須有它們。
 PROD_FILES=(scripts/run-replay-offline.sh scripts/finalize-stage2-evidence.sh scripts/lib/replay-args.sh
@@ -202,6 +211,31 @@ meta identity_sha256 "$IDENTITY_SHA0"
 # ── 0. 準備 ────────────────────────────────────────────────────────────────────
 mkdir "$WORK"
 [ "${I074_SIZING_FAULT:-}" != prepare ] || on_failure "準備（注入的故障）" 1
+measure_subreaper_guard                                     # ⑦d 增補：harness 自己是 subreaper（行為驗證）
+# ⑦d 增補（「二」⑦）：能力檢查——clone 之前、任何量測之前。真正的 docker（⛔ 不經 shim、⛔ 不進索引）、同一個 image、
+#   同一種掛載；cidfile 與名稱都在 cleanup_containers 的範圍內，docker client 記成 STEP_PID（被中斷時由六步清理收尾）。
+probe_capability() {
+  local pdir="$S/probe" rc=0 tmo=120 cid
+  [ "${I074_SIZING_FAULT:-}" != probe-timeout ] || tmo=2
+  mkdir -p "$pdir/peak" "$S/cid"
+  setsid timeout -s KILL "$tmo" "$REAL_DOCKER" run --rm --network none --user "$(id -u):$(id -g)" \
+    --cidfile "$S/cid/probe.cid" --name "i074sz-$RUN_ID-probe" \
+    -v "$S/harness/python/scripts/i074_stage2_rss_wrapper.py:/acceptance/rss_wrapper.py:ro" -v "$pdir/peak:/peak" \
+    "$IMAGE" python -I /acceptance/rss_wrapper.py python -c pass >"$pdir/stdout" 2>"$pdir/stderr" &
+  STEP_PID=$!
+  wait "$STEP_PID" || rc=$?
+  STEP_PID=""
+  [ "$rc" = 0 ] || on_failure "能力檢查：docker run 失敗或逾時（結束碼 $rc）" 1
+  helper rss-capability --file "$pdir/peak/rss.json" 2>>"$pdir/stderr" \
+    || on_failure "能力檢查：rss.json 不符（cgroup v1 的 total_rss、reaper＝pid1；見 $pdir/stderr）" 1
+  cid="$(cat "$S/cid/probe.cid" 2>/dev/null)" || cid=""
+  if [ -n "$cid" ] && "$REAL_DOCKER" inspect "$cid" >/dev/null 2>&1; then
+    on_failure "能力檢查：--rm 之後容器仍在（$cid）" 1
+  fi
+  rm -f "$S/cid/probe.cid"
+  meta rss_capability "v1:total_rss"
+}
+probe_capability
 # 兩層複本（「三」#18）：原始 repo → <work>/real（模擬的真正 repo；晉升的目的地）→ <work>/repo（工作複本，origin ＝ <work>/real）。
 # ⚠️ ⛔ 不用 --shared（④ 差異 2：會 freshen 原始 repo 的 pack）。
 # ⚠️ 第一輪 review：兩層都 checkout bootstrap 解析的 OID（⑩ 的工作複本同樣是 detached 在 repo_head）——clone 期間原始 repo 的
@@ -308,6 +342,9 @@ step() {
       REPLAY_IMAGE_ID="$IMAGE" SIZING_REAL_DOCKER="$REAL_DOCKER" SIZING_STATE="$S" SIZING_RUN_ID="$RUN_ID" \
       SIZING_IMAGE="$IMAGE" SIZING_HELPER="$HELPER" SIZING_PROFILE=acceptance SIZING_PHASE="$PHASE" SIZING_ROLE="$role" \
       SIZING_INCLUDED="$included" python3 "$HELPER" host-run --state "$S" --step "$name" -- "$@"
+  # ⑦d 增補（「二」⑦）：逐步檢查——這一步的 host 紀錄與目前為止的每一份 sidecar；不符就立刻中止（⛔ 不拖到最後的報告）。
+  helper check-step --state "$S" --step "$name" 2>>"$S/check-step.err" \
+    || { tail -5 "$S/check-step.err" >&2; on_failure "量測檢查（$name）" 1; }
 }
 # replay：⚠️ 兩份 patch 的環境變數**只**在這一步（總綱「四」）。$1＝步驟名、$2＝預期、$3＝run 目錄、$4＝模式、$5＝計算
 replay() {
@@ -424,6 +461,7 @@ for wt in "$L3"/tmp.* ${NOCF:+"$NOCF"}; do
   [ -d "$wt" ] && git -C "$CLONE" worktree remove --force "$wt" >/dev/null 2>&1 || true
 done
 ensure_no_run_containers "結束前的容器檢查"
+measure_check_adopted "結束前的收養檢查"                       # ⑦d 增補
 [ "$(sha_of "$IDENTITY")" = "$IDENTITY_SHA0" ] || on_failure "Stage 2 identity 檔在執行期間被改了" 1
 cp "$S/acceptance_report.json" "$S/acceptance_report.txt" "$WORK/"
 cp -a "$S" "$WORK/raw" || { echo "⚠️ 複製原始量測失敗，保留 S：$S" >&2; DONE=1; exit 1; }

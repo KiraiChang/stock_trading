@@ -3257,24 +3257,42 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；⚠️ 待 review）
+#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作，⚠️ 待 review）
 
-⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」與「Stage 2 步驟 ⑦d 實作結果」；操作程序見
+⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」與「Stage 2 步驟 ⑦d 增補的實作結果」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
 本節記錄**現況規格**。
 
-- **對象與門檻**（v29「六、1」）：replay 程序（a～c）與 d～i 各程序、以及晉升（promoter 與驗證模式）——每一個**容器程序**的 cgroup
-  峰值（容器內、退出前讀 `memory.max_usage_in_bytes`／`memory.peak`，含 page cache）與每一步 **host 端**的最大單一程序 RSS
-  （`RUSAGE_CHILDREN`，⛔ 不含 page cache）都 **< 450 MiB**；success、failure 兩條實際流程的磁碟峰值 `P_path` **≤ `P_B_BUDGET`**
-  （量法與 `P_B` 相同：目錄取樣、檔案系統取樣、會計上界取大者）。host 端程序群組的 RSS 總和只是取樣值（下界），⛔ 不能證明通過，
-  只作**單向警報**（≥ 450 MiB 才算超標）；host 端⛔ 沒有可寫的 cgroup，程序群組的精確峰值量不到、也⛔ 不在契約內。
+- **對象與門檻**（v29「六、1」；⑦d 增補改成 RSS）：replay 程序（a～c）與 d～i 各程序、以及晉升（promoter 與驗證模式）。契約是
+  **經正常 wait 鏈保存 resource usage 的每一個程序各自 < 450 MiB**：
+  - **容器**：每一個容器以快照裡的 wrapper 當 PID 1（`python -I /acceptance/rss_wrapper.py <原指令>`）。**精確閘**＝ leader 結束、收到
+    `ECHILD` 之後的 `max(RUSAGE_SELF, RUSAGE_CHILDREN).ru_maxrss`（wrapper 自己、leader 與被收掉的子孫，含它收養的孤兒）；
+    **單向偵測器**＝ 每 50 ms 取樣的 cgroup v1 `total_rss`（下界）。兩者任一 ≥ 450 MiB → 超標；通過由精確閘證明。
+    `ru_maxrss` 含 file-backed 的常駐頁與 fork 之後、exec 之前和 parent 共用的頁，wrapper 自己（約 10 MiB）也計入——都偏保守。
+    含 page cache 的 cgroup 峰值（`memory.max_usage_in_bytes`）**只列資訊值**（它會隨當次的上限上升）。
+  - **契約外**：被 kernel 自動回收的子孫（parent 把 `SIGCHLD` 設成 `SIG_IGN` 或用 `SA_NOCLDWAIT`）——resource usage 被丟棄。
+    `SIG_IGN` 在容器與 host 都以取樣偵測、偵測到即 fail-closed；本 repo 的程式以語意的靜態檢查禁止兩者；`SA_NOCLDWAIT` 從 `/proc`
+    看不到，是照實標示的殘餘（報告頂層的 `out_of_contract`）。
+  - **host 端**：每一步經 `host-run`（subreaper、收到 `ECHILD`、`max(RUSAGE_SELF, RUSAGE_CHILDREN)`）；程序群組的 RSS 總和改以
+    ppid 鏈追到的全部子孫取樣（含 `setsid` 的），只作**單向警報**（≥ 450 MiB 才算超標）。結束碼的優先序：子程序清不乾淨 70 ＞
+    訊號 128 ＋ N ＞ leader 的結束碼。收到 TERM／INT／HUP 的結束碼由一個 **linearization point** 決定：之前送達的反映到錯誤、
+    紀錄的 `rc` 與回傳碼（143／130／129）；紀錄寫入期間才送達的⛔ 不能改紀錄——清不乾淨時結束碼照優先序維持 70（與紀錄一致），
+    否則回傳碼改成 128 ＋ N、紀錄與實際結束碼不符 → 逐步檢查與報告擋下（⛔ 不會宣稱成功）；兩種情況 stderr 都記下晚到的訊號。
+  - **磁碟**：success、failure 兩條實際流程的 `P_path` **≤ `P_B_BUDGET`**（量法與 `P_B` 相同：目錄取樣、檔案系統取樣、會計上界取大者）。
+  - **只認 cgroup v1**：wrapper ⛔ 不讀 v2 的 `anon`；量測開始之前的**能力檢查**（同一個 image、同一種掛載、真正的 docker）不符就中止。
 - **容器的記憶體上限**（實作第一輪 review）：每一個容器都記下 daemon 實際套用的上限（`docker inspect` 的 `HostConfig.Memory`／
   `MemorySwap`，即 mem-guard 當次下修後的 `--memory`），報告逐 invocation 列出；它必須 ＝ 封存的 argv 裡恰好一個 `--memory`／
-  `--memory-swap`，而且 swap ＝ memory（可以用 swap 時 cgroup v1 的峰值不含被換出的部分、會低估）——任一不成立 → ⛔ 不產報告。
-  mem-guard 每一次都依當下的 MemAvailable 下修，**上限因容器而異**（實測 402～532 MiB）。上限不高於門檻的容器，含 page cache 的
-  cgroup 峰值本來就不會超過上限，判定實質是「在這個上限內、⛔ 不用 swap、以預期的結束碼跑完」；上限高於門檻的容器，page cache
-  要逼近上限才被回收，**峰值會隨當次的上限上升**（同一個 stub replay：上限 444m 時 413.8 MiB、466 MiB 時 449.4 MiB）——報告的
-  notes 逐一列出兩類各是哪些容器。
+  `--memory-swap`，而且 swap ＝ memory（被換出的匿名頁⛔ 不在 `total_rss` 裡、也⛔ 不在 cgroup 峰值裡）——任一不成立 → ⛔ 不產報告。
+  mem-guard 每一次都依當下的 MemAvailable 下修，**上限因容器而異**（實測 402～532 MiB）。上限**嚴格低於**門檻的容器，匿名頁受上限
+  限制、`total_rss` 偵測器不可能觸發，但精確閘仍逐一比較（file-backed 頁可能記在別的 cgroup）——報告的 notes 列出這些容器。
+- **報告**（`i074_stage2_acceptance_report_v2`）：頂層有四個封閉的固定欄位（`contract`、`out_of_contract`、`auto_reap_detection`、
+  `memory_measures`）、結構化的 `violations`；寫出之前以 `validate_acceptance_report_v2()` 驗封閉 schema、衍生欄位的一致性、由列
+  重新推導的門檻結果（與產出端共用唯一的 `derive_acceptance_violations()`）與 `status`——它驗報告本身的一致性，⛔ 不驗與原始量測
+  相符。v1（⑦d 開發驗證的舊語意：判定量是含 page cache 的 cgroup 峰值）⛔ 不得當成 v2 的證據。
+- **⛔ 不在 host 留下程序**：harness 自己是 subreaper（bootstrap 以 python3 啟動器設定、`measure_subreaper_guard` 以行為驗證），
+  任何步驟留下的程序（含 `host-run` 被 KILL、或在 TERM 的寬限期間才 fork 的）都被它收養；每一步之後與正常結束之前檢查、
+  `on_failure` 以 `reap-adopted` 清掉（先釘住 harness 自己的身分，以 starttime 釘住目標），清不掉 → 保留 S、列出 PID。⚠️ 前提是
+  harness 自己沒有被 KILL；確認與送訊號之間仍有極短的 PID 重用競態（這台 kernel ⛔ 沒有 pidfd）。
 - **replay 的兩種計算**：`stub`——launcher 只替換 `_decision_replay_rows()`，改成讀錨定的 D+1 after（逐列以 `sys.intern` 共用鍵與字串值：
   逐列解析而⛔ 不共用時 13,417 列實測 ＋324 MiB、共用 ＋141 MiB，後者與 ③c 見證趟的完整計算（峰值約 315 MiB）相符）；
   ⚠️ ⛔ 不涵蓋計算工作集，只用於開發驗證與兩條磁碟路徑。`full`——⑨-1 唯一的量測趟：真的計算（`e1cbbbd` ＋ tooling、⛔ 不套
@@ -3298,7 +3316,8 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   （clone 之後 checkout 它，detached，與 ⑩ 的工作複本相同）、報告的 `repo_head` 與 sizing 的 freeze record 都綁它，acceptance 與
   sizing 的報告都驗 `clone_head ＝ repo_head`；`--formal` 另要求啟動 repo 的 HEAD 仍是它。之後⛔ 不再讀會移動的 HEAD。
 - **⑩ 的實際峰值**由外部唯讀的 observer 記錄：容器記憶體是 cgroup high-water mark 的**下界**（最後一次讀取之後、容器結束之前的
-  尾段峰值可能漏記）、磁碟是取樣值；報告標明完整度（`observation_complete`、`replay_seen`、`missing_expected_containers`）。
+  尾段峰值可能漏記）、磁碟是取樣值；⑦d 增補：另記 v1 `memory.stat` 的 `total_rss` 取樣最大值（與 acceptance 的單向偵測器同一種量）；
+  報告標明完整度（`observation_complete`、`replay_seen`、`missing_expected_containers`、`rss_unavailable_containers`）。
   ⛔ 不作為 ⑩ 的前置、⛔ 不為量測而重跑。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome

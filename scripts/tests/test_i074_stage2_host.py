@@ -718,5 +718,481 @@ class AcceptanceHost(unittest.TestCase):
         self.assertEqual(blocks["sizing"], blocks["acceptance"])
 
 
+
+# ── ⑦d 增補（issue.md I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac24、ac24b、ac28b ──────────
+
+def _starttime(pid: int) -> int:
+    return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
+
+
+def _alive(pid: int) -> bool:
+    """存活 ＝ /proc 還在、而且⛔ 不是 zombie。"""
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+    except (OSError, IndexError):
+        return False
+
+
+def _wait_until(pred, timeout: float = 10.0) -> bool:
+    end = __import__("time").monotonic() + timeout
+    while __import__("time").monotonic() < end:
+        if pred():
+            return True
+        __import__("time").sleep(0.05)
+    return pred()
+
+
+def _kill_quietly(pid: int) -> None:
+    """測試自己啟動、記下 PID 的程序：以 PID 收掉（⛔ 不用 pkill -f）。"""
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+MARKER_LOOP = "while :; do date +%s%N > \"$0\"; sleep 0.1; done"           # 存活的子孫：持續寫標記檔
+
+
+class RssAddendumHost(unittest.TestCase):
+    """⑦d 增補的 host 端：`host-run` 的收養與清理、`reap-adopted`、`kill-pinned`（3.9）。"""
+
+    def setUp(self) -> None:
+        self.sz = load_sizing()
+        self.tmp = Path(tempfile.mkdtemp(prefix="i074-rss-host-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.pids: list[int] = []
+        self.addCleanup(lambda: [_kill_quietly(p) for p in self.pids])
+
+    def _driver(self, code: str, timeout: float = 120) -> subprocess.CompletedProcess:
+        """以 driver 在自己的 session 裡執行（sz ＝ 本 repo 的 helper）。"""
+        prelude = textwrap.dedent(f"""\
+            import importlib.util, json, os, signal, subprocess, sys, time
+            from pathlib import Path
+            spec = importlib.util.spec_from_file_location("sz", {str(SIZING)!r})
+            sz = importlib.util.module_from_spec(spec); spec.loader.exec_module(sz)
+        """)
+        return subprocess.run([sys.executable, "-c", prelude + textwrap.dedent(code)], capture_output=True, text=True,
+                              timeout=timeout, start_new_session=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+
+    def _record(self, step: str = "s") -> dict:
+        return json.loads((self.tmp / "S" / "host" / f"{step}.json").read_text())
+
+    def _marker_stopped(self, marker: Path) -> bool:
+        if not marker.exists():
+            return True
+        before = marker.read_text()
+        __import__("time").sleep(0.4)
+        return marker.read_text() == before
+
+    # ── ac24：host-run ──────────────────────────────────────────────────────
+
+    def test_ac24_unwaited_grandchild_is_adopted_and_counted(self) -> None:
+        leader = ("import subprocess, sys, os; subprocess.Popen([sys.executable, '-c', "
+                  "'import time; x = bytearray(64 * 1024 * 1024); time.sleep(0.5)']); os._exit(0)")
+        proc = self._driver(f"sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}]))")
+        rec = self._record()
+        self.assertEqual((proc.returncode, rec["rc"]), (0, 0), proc.stderr)
+        self.assertGreaterEqual(rec["children_max_rss_bytes"], 64 * MIB)
+        self.assertTrue(rec["all_descendants_reaped"])
+        self.assertEqual(self.sz.host_record_problems(rec, step="s", rc=0), [])
+
+    def test_ac24_host_run_itself_is_in_the_exact_gate_and_the_group_sample(self) -> None:
+        proc = self._driver(f"""
+            keep = bytearray(96 * 1024 * 1024)
+            sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', ['sleep', '0.6']))
+        """)
+        rec = self._record()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertGreaterEqual(rec["self_max_rss_bytes"], 96 * MIB)
+        self.assertGreaterEqual(rec["group_rss_peak_sampled_bytes"], 96 * MIB)
+        self.assertEqual(rec["max_single_rss_bytes"], max(rec["self_max_rss_bytes"], rec["children_max_rss_bytes"]))
+
+    def test_ac24_group_sample_follows_the_ppid_tree_including_setsid(self) -> None:
+        """ac16 改寫：取樣以 ppid 鏈追到的全部子孫（含 setsid 的），⛔ 不只看 process group；無關的程序⛔ 不算。"""
+        outsider = subprocess.Popen([sys.executable, "-c", "import time; x = bytearray(128 * 1024 * 1024); time.sleep(5)"])
+        self.pids.append(outsider.pid)
+        leader = ("import subprocess, sys; subprocess.run(['setsid', sys.executable, '-c', "
+                  "'import time; x = bytearray(64 * 1024 * 1024); time.sleep(1.0)'])")
+        proc = self._driver(f"sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}]))")
+        rec = self._record()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertGreaterEqual(rec["group_rss_peak_sampled_bytes"], 64 * MIB + 20 * MIB)
+        self.assertLess(rec["group_rss_peak_sampled_bytes"], 128 * MIB + 64 * MIB)
+        outsider.kill()
+        outsider.wait()
+
+    def _orphan_case(self, script: str, **kwargs) -> tuple[subprocess.CompletedProcess, dict, Path]:
+        marker = self.tmp / "marker"
+        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {script!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                  f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); os._exit(0)")
+        args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        proc = self._driver(f"sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}], {args}))")
+        pid_file = self.tmp / "orphan.pid"
+        if pid_file.exists():
+            self.pids.append(int(pid_file.read_text()))
+        return proc, self._record(), marker
+
+    def test_ac24_live_setsid_descendant_beyond_the_grace_is_cleaned(self) -> None:
+        proc, rec, marker = self._orphan_case(MARKER_LOOP, grace_s=1.0, term_wait_s=2.0, cleanup_total_s=8.0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(rec["all_descendants_reaped"])
+        self.assertTrue(rec["cleanup_complete"])
+        self.assertEqual(rec["leftover_pids"], [])
+        self.assertTrue(self._marker_stopped(marker))
+        self.assertTrue(self.sz.host_record_problems(rec, step="s", rc=0))          # 量測必然失敗
+
+    def test_ac24_term_ignoring_descendant_is_escalated_to_kill(self) -> None:
+        proc, rec, marker = self._orphan_case("trap '' TERM; " + MARKER_LOOP, grace_s=1.0, term_wait_s=1.0,
+                                              cleanup_total_s=8.0)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(rec["cleanup_complete"])
+        self.assertTrue(self._marker_stopped(marker))
+
+    def test_ac24_cleanup_that_cannot_finish_exits_70(self) -> None:
+        marker = self.tmp / "marker"
+        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                  f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); os._exit(0)")
+        proc = self._driver(f"""
+            os.kill = lambda pid, sig: None                     # 送訊號換成 no-op
+            sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}],
+                                 grace_s=0.5, term_wait_s=0.5, cleanup_total_s=2.0))
+        """)
+        self.pids.append(int((self.tmp / "orphan.pid").read_text()))
+        rec = self._record()
+        self.assertEqual(proc.returncode, 70, proc.stderr)
+        self.assertFalse(rec["cleanup_complete"])
+        self.assertEqual(rec["leftover_pids"], [self.pids[-1]])
+        # 實作第一輪 review：紀錄的 rc ＝ 實際的結束碼（70），rc 那一條⛔ 沒有問題（量測仍因清不乾淨而無效）
+        self.assertEqual(rec["rc"], 70)
+        problems = self.sz.host_record_problems(rec, step="s", rc=70)
+        self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
+        self.assertTrue(problems)
+
+    def test_ac24_sigchld_ignored_descendant_is_detected(self) -> None:
+        leader = "import signal, time; signal.signal(signal.SIGCHLD, signal.SIG_IGN); time.sleep(0.8)"
+        proc = self._driver(f"sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}]))")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(self._record()["auto_reap_detected"])
+
+    def test_ac24_signals_to_host_run_clean_up_and_set_the_exit_code(self) -> None:
+        for sig, want in ((signal.SIGTERM, 143), (signal.SIGINT, 130), (signal.SIGHUP, 129)):
+            with self.subTest(sig=sig):
+                tmp = self.tmp / sig.name
+                marker = tmp / "marker"
+                tmp.mkdir()
+                leader = (f"import subprocess, time; subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                          "time.sleep(60)")
+                host = subprocess.Popen([sys.executable, str(SIZING), "host-run", "--state", str(tmp / "S"), "--step", "s",
+                                         "--", sys.executable, "-c", leader], start_new_session=True,
+                                        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                self.pids.append(host.pid)
+                self.assertTrue(_wait_until(marker.exists))
+                os.kill(host.pid, sig)                               # 只送給 host-run 自己（⛔ 不送給整個 group）
+                self.assertEqual(host.wait(timeout=30), want)
+                self.assertTrue(self._marker_stopped(marker))
+                rec = json.loads((tmp / "S" / "host" / "s.json").read_text())
+                self.assertTrue(rec["errors"] and rec["cleanup_complete"])
+                # 實作第一輪 review：紀錄的 rc ＝ 實際的結束碼（143／130／129）
+                self.assertEqual(rec["rc"], want)
+                problems = self.sz.host_record_problems(rec, step="s", rc=want)
+                self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
+                self.assertTrue(problems)                                   # 量測仍因中斷而無效
+
+    # ── 增補實作第二輪 review：訊號的 linearization point（在紀錄寫入邊界注入訊號） ─────────────────
+
+    def _linearization_case(self, inject: str) -> tuple[subprocess.CompletedProcess, dict, dict]:
+        proc = self._driver(inject + f"""
+        rc = sz.host_run(Path({str(self.tmp / 'S')!r}), "s", ["true"])
+        print(json.dumps({{"return_rc": rc}}), flush=True)
+        """)
+        return proc, json.loads(proc.stdout or "{}"), self._record()
+
+    def test_ac24_signal_before_the_linearization_point_is_reflected(self) -> None:
+        """L 之前送達（handler 還在）→ 錯誤、紀錄的 rc 與回傳碼都反映它。"""
+        proc, out, rec = self._linearization_case("""
+        orig = sz._signal_linearization_point
+        def wrapped(received):
+            os.kill(os.getpid(), signal.SIGTERM)
+            return orig(received)
+        sz._signal_linearization_point = wrapped
+        """)
+        self.assertEqual(out.get("return_rc"), 143, proc.stderr)
+        self.assertEqual(rec["rc"], 143)
+        self.assertTrue(any("SIGTERM" in e for e in rec["errors"]), rec["errors"])
+        problems = self.sz.host_record_problems(rec, step="s", rc=143)
+        self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
+
+    def test_ac24_signal_pending_at_the_linearization_point_is_reflected(self) -> None:
+        """已經被擋住、還在 pending 的訊號 → L 把它收進來，同樣反映。"""
+        proc, out, rec = self._linearization_case("""
+        orig = sz._signal_linearization_point
+        def wrapped(received):
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGHUP})
+            os.kill(os.getpid(), signal.SIGHUP)
+            return orig(received)
+        sz._signal_linearization_point = wrapped
+        """)
+        self.assertEqual(out.get("return_rc"), 129, proc.stderr)
+        self.assertEqual(rec["rc"], 129)
+        self.assertTrue(any("SIGHUP" in e for e in rec["errors"]), rec["errors"])
+
+    def test_ac24_signal_during_the_record_write_is_not_swallowed(self) -> None:
+        """review 的注入：寫紀錄的入口才收到 TERM（L 之後）→ 紀錄已定案、⛔ 不能改，但回傳碼是 143、stderr 照實說明，
+        紀錄的 rc 與實際結束碼不符 → host_record_problems 擋下（fail-closed，⛔ 不會宣稱成功）。"""
+        proc, out, rec = self._linearization_case("""
+        orig = sz.write_exclusive
+        def inject(path, payload):
+            if path.parent.name == "host":
+                os.kill(os.getpid(), signal.SIGTERM)
+            return orig(path, payload)
+        sz.write_exclusive = inject
+        """)
+        self.assertEqual(out.get("return_rc"), 143, proc.stderr)
+        self.assertIn("紀錄寫出之後才收到訊號", proc.stderr)
+        self.assertEqual(rec["rc"], 0)
+        problems = self.sz.host_record_problems(rec, step="s", rc=143)
+        self.assertTrue([p for p in problems if p.startswith("rc=")], problems)
+
+    def test_ac24_late_signal_keeps_the_cleanup_failure_priority(self) -> None:
+        """增補實作第三輪 review：清不乾淨（70）＋ 寫紀錄期間才收到 TERM → 仍是 70（優先序：清不乾淨 ＞ 訊號），
+        紀錄與實際結束碼一致；stderr 照樣說明晚到的訊號。"""
+        proc = self._driver(f"""
+        sz._reap_nohang = lambda: False                              # 收不到 ECHILD → 進清理
+        sz._cleanup_direct_children = lambda me, **kw: [999999]      # 清理失敗（殘留一個 PID）
+        orig = sz.write_exclusive
+        def inject(path, payload):
+            if path.parent.name == "host":
+                os.kill(os.getpid(), signal.SIGTERM)                 # L 之後、寫紀錄的入口
+            return orig(path, payload)
+        sz.write_exclusive = inject
+        rc = sz.host_run(Path({str(self.tmp / 'S')!r}), "s", ["true"], grace_s=0.2)
+        print(json.dumps({{"return_rc": rc}}), flush=True)
+        """)
+        out = json.loads(proc.stdout or "{}")
+        rec = self._record()
+        self.assertEqual(out.get("return_rc"), 70, proc.stderr)
+        self.assertEqual(rec["rc"], 70)
+        self.assertEqual((rec["cleanup_complete"], rec["leftover_pids"]), (False, [999999]))
+        self.assertIn("紀錄寫出之後才收到訊號", proc.stderr)
+        problems = self.sz.host_record_problems(rec, step="s", rc=70)
+        self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
+
+    # ── ac24b：harness 的收養（測試以一個 subreaper 的 driver 扮演 harness） ─────────────────────
+
+    FAKE_HARNESS = """
+        import ctypes
+        if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+            sys.exit(99)
+    """
+
+    def _reap_child(self, extra: str = "", **kwargs) -> str:
+        args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
+        return f"""
+        rp = os.fork()
+        if rp == 0:
+            pp = os.getppid(); st = sz.read_proc_stat(pp)[1]          # 先記下 parent 的身分，再套用注入
+            {extra}
+            os._exit(sz.reap_adopted(Path({str(self.tmp / 'S')!r}), parent=pp, parent_starttime=st, exclude=[], {args}))
+        reap_rc = os.waitstatus_to_exitcode(os.waitpid(rp, 0)[1])
+        """
+
+    def test_ac24b_descendants_left_by_a_killed_host_run_are_adopted_and_reaped(self) -> None:
+        marker = self.tmp / "marker"
+        leader = (f"import subprocess, time; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                  f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); time.sleep(60)")
+        proc = self._driver(self.FAKE_HARNESS + f"""
+        (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
+        host = subprocess.Popen([sys.executable, {str(SIZING)!r}, "host-run", "--state", {str(self.tmp / 'S')!r},
+                                 "--step", "s", "--", sys.executable, "-c", {leader!r}])
+        while not Path({str(marker)!r}).exists():
+            time.sleep(0.05)
+        host.kill(); host.wait()                                     # host-run 被 KILL：清理來不及跑
+        """ + self._reap_child(term_wait_s=2.0, kill_wait_s=2.0, total_s=20.0) + """
+        print(json.dumps({"reap_rc": reap_rc}), flush=True)
+        """)
+        self.pids.append(int((self.tmp / "orphan.pid").read_text()))
+        self.assertEqual(json.loads(proc.stdout)["reap_rc"], 0, proc.stderr)
+        self.assertFalse(_alive(self.pids[-1]))
+        self.assertTrue(self._marker_stopped(marker))
+
+    def test_ac24b_process_forked_during_the_term_grace_is_adopted_and_reaped(self) -> None:
+        marker = self.tmp / "marker"
+        leader = textwrap.dedent(f"""\
+            import os, signal, subprocess, time
+            def on_term(*_):
+                p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                open({str(self.tmp / 'late.pid')!r}, 'w').write(str(p.pid))
+                os._exit(0)
+            signal.signal(signal.SIGTERM, on_term)
+            open({str(self.tmp / 'ready')!r}, 'w').write('1')
+            time.sleep(60)
+        """)
+        proc = self._driver(self.FAKE_HARNESS + f"""
+        (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
+        host = subprocess.Popen([sys.executable, {str(SIZING)!r}, "host-run", "--state", {str(self.tmp / 'S')!r},
+                                 "--step", "s", "--", sys.executable, "-c", {leader!r}])
+        while not Path({str(self.tmp / 'ready')!r}).exists():
+            time.sleep(0.05)
+        host.terminate()                                             # host-run 開始清理 → leader 在 TERM 時才 fork
+        while not Path({str(marker)!r}).exists():
+            time.sleep(0.02)
+        host.kill(); host.wait()                                     # 清理途中被 KILL
+        """ + self._reap_child(term_wait_s=2.0, kill_wait_s=2.0, total_s=20.0) + """
+        print(json.dumps({"reap_rc": reap_rc}), flush=True)
+        """)
+        self.pids.append(int((self.tmp / "late.pid").read_text()))
+        self.assertEqual(json.loads(proc.stdout)["reap_rc"], 0, proc.stderr)
+        self.assertFalse(_alive(self.pids[-1]))
+        self.assertTrue(self._marker_stopped(marker))
+
+    def _target_case(self, reap_extra: str, script: str = "trap '' TERM; sleep 30", **kwargs) -> tuple[int, int]:
+        """driver（subreaper）啟動一個目標程序（預設忽略 TERM），再以 fork 出的子程序呼叫 reap_adopted。回傳 (rc, 目標 PID)。"""
+        proc = self._driver(self.FAKE_HARNESS + f"""
+        (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
+        target = subprocess.Popen(["sh", "-c", {script!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.2)
+        """ + self._reap_child(reap_extra, **kwargs) + """
+        print(json.dumps({"reap_rc": reap_rc, "target": target.pid}), flush=True)
+        os._exit(0)                                                  # ⛔ 不收目標（讓測試確認它是否還活著）
+        """)
+        out = json.loads(proc.stdout)
+        self.pids.append(out["target"])
+        return out["reap_rc"], out["target"]
+
+    def test_ac24b_starttime_changing_before_the_signal_means_no_signal(self) -> None:
+        extra = """counter = iter(range(10 ** 9))
+            real = sz.read_proc_stat
+            sz.read_proc_stat = lambda pid: (real(pid)[0], real(pid)[1] + next(counter)) if pid != os.getppid() else real(pid)"""
+        # ⚠️ 目標⛔ 不忽略 TERM（反向驗證抓到：忽略 TERM 的目標在「不驗 starttime」時也活得下來，測不出差別）
+        rc, target = self._target_case(extra, script="sleep 30", term_wait_s=0.3, kill_wait_s=0.3, total_s=1.5)
+        self.assertEqual(rc, 1)
+        self.assertTrue(_alive(target))                              # ⛔ 沒有送任何訊號（一個 TERM 就會讓它結束）
+        self.assertTrue((self.tmp / "S" / "leftover-pids.json").exists())
+
+    def test_ac24b_parent_identity_mismatch_is_2_without_signals(self) -> None:
+        proc = self._driver(self.FAKE_HARNESS + f"""
+        (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
+        target = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        rp = os.fork()
+        if rp == 0:
+            os._exit(sz.reap_adopted(Path({str(self.tmp / 'S')!r}), parent=os.getppid(), parent_starttime=1, exclude=[]))
+        print(json.dumps({{"reap_rc": os.waitstatus_to_exitcode(os.waitpid(rp, 0)[1]), "target": target.pid}}), flush=True)
+        os._exit(0)
+        """)
+        out = json.loads(proc.stdout)
+        self.pids.append(out["target"])
+        self.assertEqual(out["reap_rc"], 2)
+        self.assertTrue(_alive(out["target"]))
+
+    def test_ac24b_parent_changing_during_the_run_stops_the_signals(self) -> None:
+        extra = """calls = iter(range(10 ** 9))
+            real_ppid = os.getppid
+            os.getppid = lambda: real_ppid() if next(calls) < 3 else 1        # 第一輪 TERM 之後 parent 就「消失」"""
+        rc, target = self._target_case(extra, term_wait_s=0.5, kill_wait_s=0.5, total_s=5.0)
+        self.assertEqual(rc, 2)
+        self.assertTrue(_alive(target))                              # 目標忽略 TERM；⛔ 沒有升級到 KILL
+
+    def test_ac24b_check_only_and_leftovers_and_proc_failures(self) -> None:
+        rc, _ = self._target_case("", check_only=True)
+        self.assertEqual(rc, 1)
+        rc, target = self._target_case("os.kill = lambda pid, sig: None", term_wait_s=0.3, kill_wait_s=0.3, total_s=1.0)
+        self.assertEqual(rc, 1)
+        doc = json.loads((self.tmp / "S" / "leftover-pids.json").read_text())
+        self.assertEqual(set(doc), {"schema", "parent", "processes"})
+        self.assertEqual(doc["schema"], "i074_stage2_leftover_pids_v1")
+        self.assertEqual([p["pid"] for p in doc["processes"]], [target])
+        self.assertEqual(set(doc["processes"][0]), {"pid", "starttime", "cmdline"})
+        rc, _ = self._target_case("sz.PROC_ROOT = Path('/nonexistent-proc')")
+        self.assertEqual(rc, 2)
+
+    # ── ac27（scripts/ 那一半）與 ac20（3.9 相容） ─────────────────────────────────────
+
+    def test_ac27_repo_never_sets_auto_reaping(self) -> None:
+        """測試容器只掛 python/——scripts/ 在 host 以同一個語意掃描涵蓋（python/ 也再掃一次）。"""
+        self.assertTrue((ROOT / "scripts" / "lib" / "i074-stage2-measure.sh").is_file())     # ⛔ 不是空掃描
+        self.assertEqual(self.sz.scan_auto_reaping([ROOT / "scripts", ROOT / "python"], ROOT), [])
+
+    def test_ac20_wrapper_runs_on_host_python(self) -> None:
+        cg = self.tmp / "cg" / "memory"
+        cg.mkdir(parents=True)
+        (cg / "memory.stat").write_text("total_rss 4096\n")
+        (cg / "memory.max_usage_in_bytes").write_text("8192\n")
+        peak = self.tmp / "peak"
+        peak.mkdir()
+        proc = subprocess.run([sys.executable, str(ROOT / "python" / "scripts" / "i074_stage2_rss_wrapper.py"),
+                               sys.executable, "-c", "import sys; sys.exit(3)"], capture_output=True, timeout=60,
+                              env=dict(os.environ, SIZING_CGROUP_ROOT=str(self.tmp / "cg"), SIZING_PEAK_DIR=str(peak),
+                                       PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual((proc.returncode, proc.stdout, proc.stderr), (3, b"", b""))
+        rec = json.loads((peak / "rss.json").read_text())
+        self.assertEqual(self.sz.rss_record_problems(rec, require_pid1=False), [])
+        self.assertEqual(rec["reaper"], "subreaper")
+
+    # ── ac28b：kill-pinned ──────────────────────────────────────────────────
+
+    def _child(self, script: str) -> int:
+        proc = subprocess.Popen(["sh", "-c", script])
+        self.pids.append(proc.pid)
+        self.addCleanup(lambda: (_kill_quietly(proc.pid), proc.wait()))   # 測試結束時才殺、才收
+        __import__("time").sleep(0.2)
+        return proc.pid                                               # ⚠️ 測試⛔ 不收它：被殺之後是 zombie
+
+    def _check_record(self, rec: dict, rc: int) -> None:
+        self.assertEqual(set(rec), {"schema", "pid", "starttime", "result", "signals_sent", "error"})
+        self.assertEqual(rec["schema"], "i074_stage2_kill_pinned_v1")
+        want = {"already_gone": 0, "identity_mismatch": 0, "terminated_by_term": 0, "terminated_by_kill": 0,
+                "alive_after_kill": 1, "error_before_signal": 2, "error_after_term": 2}
+        self.assertEqual(want[rec["result"]], rc)
+        self.assertIn(rec["signals_sent"], ([], ["TERM"], ["TERM", "KILL"]))
+
+    def test_ac28b_already_gone_and_identity_mismatch(self) -> None:
+        done = subprocess.Popen(["true"])
+        done.wait()
+        rc, rec = self.sz.kill_pinned(done.pid, 1, term_wait_s=0.5, kill_wait_s=0.5)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "already_gone", []))
+        pid = self._child("sleep 30")
+        rc, rec = self.sz.kill_pinned(pid, _starttime(pid) + 1, term_wait_s=0.5, kill_wait_s=0.5)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "identity_mismatch", []))
+        self.assertTrue(_alive(pid))
+
+    def test_ac28b_term_kill_and_zombies_count_as_gone(self) -> None:
+        pid = self._child("sleep 30")
+        rc, rec = self.sz.kill_pinned(pid, _starttime(pid), term_wait_s=2.0, kill_wait_s=2.0)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"]), (0, "terminated_by_term"))          # 成了 zombie（測試⛔ 不收）→ 已消失
+        pid = self._child("trap '' TERM; sleep 30")
+        rc, rec = self.sz.kill_pinned(pid, _starttime(pid), term_wait_s=0.5, kill_wait_s=2.0)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "terminated_by_kill", ["TERM", "KILL"]))
+
+    def test_ac28b_alive_after_kill_and_errors(self) -> None:
+        pid = self._child("trap '' TERM; sleep 30")
+        st = _starttime(pid)
+        with mock.patch.object(self.sz.os, "kill", lambda p, s: None):
+            rc, rec = self.sz.kill_pinned(pid, st, term_wait_s=0.3, kill_wait_s=0.3)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"]), (1, "alive_after_kill"))
+        with mock.patch.object(self.sz, "read_proc_stat", side_effect=PermissionError("denied")):
+            rc, rec = self.sz.kill_pinned(pid, st)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"], rec["signals_sent"]), (2, "error_before_signal", []))
+        real = self.sz.read_proc_stat
+        calls = iter(range(10 ** 6))
+        def flaky(p):
+            if next(calls) >= 2:
+                raise PermissionError("denied")
+            return real(p)
+        with mock.patch.object(self.sz, "read_proc_stat", side_effect=flaky):
+            rc, rec = self.sz.kill_pinned(pid, st, term_wait_s=0.3, kill_wait_s=0.3)
+        self._check_record(rec, rc)
+        self.assertEqual((rc, rec["result"], rec["signals_sent"]), (2, "error_after_term", ["TERM"]))
+        self.assertTrue(_alive(pid))                                  # 忽略 TERM、⛔ 沒有升級 KILL
+        cli = subprocess.run([sys.executable, str(SIZING), "kill-pinned", "--pid", "x", "--starttime", "1"],
+                             capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual((cli.returncode, cli.stdout), (2, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

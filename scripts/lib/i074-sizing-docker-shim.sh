@@ -23,6 +23,10 @@
 #   SIZING_NOCF_PYTHON（`e1cbbbd` ＋ tooling、⛔ 不套 counterfactual 的 worktree）。其他值 → 125、⛔ 不執行。
 # ⚠️ ⑦d 實作第一輪 review：兩個 profile 的 sidecar 都另記 daemon 實際套用的記憶體上限（`docker inspect` 的
 #   `HostConfig.Memory`／`MemorySwap`；mem-guard 下修後的 --memory），由 acceptance 的報告逐 invocation 比對封存的 argv。
+# ⚠️ ⑦d 增補（「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」①）：acceptance 的**每一個** role 都以唯讀掛載
+#   `<S>/harness/python/scripts/i074_stage2_rss_wrapper.py`（**快照**的路徑，由 S 推導）並把容器指令包成
+#   `python -I /acceptance/rss_wrapper.py <原指令>`（取代 sizing 的 `sh -c "$PEAK_WRAPPER"`）；快照裡沒有它 → 125。
+#   sizing 照舊（⛔ 不掛 wrapper）。
 set -uo pipefail
 
 REAL="${SIZING_REAL_DOCKER:?}"
@@ -107,13 +111,21 @@ if [ "$PROFILE" = acceptance ]; then
   fi
 fi
 
+WRAP=(sh -c "$PEAK_WRAPPER" _)
+if [ "$PROFILE" = acceptance ]; then
+  RSS_WRAPPER="$S/harness/python/scripts/i074_stage2_rss_wrapper.py"
+  [ -f "$RSS_WRAPPER" ] || { printf 'shim：快照裡沒有 RSS wrapper：%s\n' "$RSS_WRAPPER" >>"$ERRLOG"; exit 125; }
+  opts+=(-v "$RSS_WRAPPER:/acceptance/rss_wrapper.py:ro")
+  WRAP=(python -I /acceptance/rss_wrapper.py)
+fi
+
 SEQ="$(py seq --state "$S")" || exit 125
 ID="$(printf 'o%03d0' "$SEQ")"
 CIDFILE="$S/cid/$ID.cid"
 PEAKDIR="$S/peak/$ID"
 mkdir -p "$S/cid" "$PEAKDIR" "$S/logs" 2>>"$ERRLOG" || exit 125
 spec=("${opts[@]}" --cidfile "$CIDFILE" --name "i074sz-${SIZING_RUN_ID:?}-$ID" "${READ_ONLY[@]}"
-      -v "$PEAKDIR:/peak" "$IMAGE" sh -c "$PEAK_WRAPPER" _ "${cmd[@]}")
+      -v "$PEAKDIR:/peak" "$IMAGE" "${WRAP[@]}" "${cmd[@]}")
 
 # ⚠️ 不可變索引在**執行前**寫（exclusive create）；寫不了就⛔ 不執行。
 py index --state "$S" --sequence "$SEQ" --phase "${SIZING_PHASE:?}" --role "${SIZING_ROLE:?}" \

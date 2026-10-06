@@ -95,7 +95,7 @@ SNAPSHOT_FILES = {
                "scripts/lib/i074-sizing-docker-shim.sh", "scripts/lib/mem-guard.sh", "python/scripts/i074_stage2_sizing.py"),
     "acceptance": ("scripts/i074-stage2-acceptance.sh", "scripts/lib/i074-stage2-measure.sh",
                    "scripts/lib/i074-sizing-docker-shim.sh", "python/scripts/i074_stage2_sizing.py",
-                   "python/scripts/i074_stage2_replay_stub.py"),
+                   "python/scripts/i074_stage2_replay_stub.py", "python/scripts/i074_stage2_rss_wrapper.py"),
 }
 # ⚠️ v29「六、1」：每一個程序的峰值 < 450 MiB（嚴格小於）——唯一定義（⑦d「三」#14）。
 ACCEPTANCE_MEMORY_LIMIT = 450 * 1024 * 1024
@@ -352,6 +352,53 @@ def log_config_problems(log_config: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+# ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」②）：容器內 wrapper 的 `rss.json`。
+#   ⚠️ 與 `i074_stage2_rss_wrapper.py` 的常數相同（測試釘住；sizing 的快照⛔ 沒有 wrapper，所以⛔ 不 import 它）。
+RSS_RECORD_SCHEMA = "i074_stage2_rss_v1"
+RSS_SOURCE = "v1:total_rss"
+RSS_INTERVAL_MS = 50
+RSS_RECORD_KEYS = ("schema", "rss_source", "rss_interval_ms", "rss_samples", "rss_peak_sampled_bytes", "self_max_rss_bytes",
+                   "children_max_rss_bytes", "max_single_rss_bytes", "reaper", "all_descendants_reaped",
+                   "auto_reap_detected", "errors")
+
+
+def _is_int(value: Any) -> bool:
+    return type(value) is int                 # ⚠️ ⛔ 不接受 bool（bool 是 int 的子類別）
+
+
+def rss_record_problems(rec: Any, *, require_pid1: bool) -> list[str]:
+    """`rss.json` 的封閉 schema（「二」②）：鍵集合恰好、型別、固定值、交叉條件與有效條件。回傳問題清單（空 ＝ 有效）。"""
+    if not isinstance(rec, dict):
+        return ["不是 JSON object"]
+    if set(rec) != set(RSS_RECORD_KEYS):
+        return [f"鍵集合不符：缺 {sorted(set(RSS_RECORD_KEYS) - set(rec))}、多 {sorted(set(rec) - set(RSS_RECORD_KEYS))}"]
+    problems = []
+    for key, want in (("schema", RSS_RECORD_SCHEMA), ("rss_source", RSS_SOURCE)):
+        if rec[key] != want:
+            problems.append(f"{key}={rec[key]!r}（必須是 {want!r}）")
+    if not _is_int(rec["rss_interval_ms"]) or rec["rss_interval_ms"] != RSS_INTERVAL_MS:
+        problems.append(f"rss_interval_ms={rec['rss_interval_ms']!r}（必須是整數 {RSS_INTERVAL_MS}）")
+    for key in ("rss_samples", "rss_peak_sampled_bytes", "self_max_rss_bytes", "children_max_rss_bytes",
+                "max_single_rss_bytes"):
+        if not _is_int(rec[key]) or rec[key] <= 0:
+            problems.append(f"{key}={rec[key]!r}（必須是 > 0 的整數）")
+    if not problems and rec["max_single_rss_bytes"] != max(rec["self_max_rss_bytes"], rec["children_max_rss_bytes"]):
+        problems.append("max_single_rss_bytes ≠ max(self_max_rss_bytes, children_max_rss_bytes)")
+    if rec["reaper"] not in ("pid1", "subreaper"):
+        problems.append(f"reaper={rec['reaper']!r}（只能是 pid1／subreaper）")
+    elif require_pid1 and rec["reaper"] != "pid1":
+        problems.append(f"reaper={rec['reaper']!r}（容器內必須是 pid1）")
+    for key, want in (("all_descendants_reaped", True), ("auto_reap_detected", False)):
+        if type(rec[key]) is not bool or rec[key] is not want:
+            problems.append(f"{key}={rec[key]!r}（有效的量測必須是 {want}）")
+    errors = rec["errors"]
+    if not isinstance(errors, list) or not all(isinstance(e, str) for e in errors):
+        problems.append("errors 必須是字串陣列")
+    elif errors:
+        problems.append(f"wrapper 記錄了錯誤：{errors}")
+    return problems
+
+
 def write_sidecar(state: Path, *, cid: str, sequence: int, rc: int, container: str, size_rw: str,
                   log_config_json: str, stdout_log: Path, stderr_log: Path, peak_file: Path,
                   failures: list[str], memory_limit: str, memory_swap_limit: str) -> dict[str, Any]:
@@ -386,10 +433,23 @@ def write_sidecar(state: Path, *, cid: str, sequence: int, rc: int, container: s
         limits[key] = int(text) if text.isdigit() else None
         if limits[key] is None:
             problems.append(f"容器的記憶體上限讀不到（{key}）：{text!r}")
+    rss: dict[str, Any] = {}
+    if index.get("profile") == "acceptance":
+        # ⑦d 增補：acceptance 的 wrapper 在同一個 peak 目錄寫 rss.json；依封閉 schema 驗（容器內必須是 pid1）。
+        try:
+            record = json.loads((peak_file.parent / "rss.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            problems.append(f"rss.json 讀不到：{type(exc).__name__}: {exc}")
+        else:
+            rss_problems = rss_record_problems(record, require_pid1=True)
+            problems += [f"rss.json：{p}" for p in rss_problems]
+            if not rss_problems:
+                rss = {k: record[k] for k in ("rss_peak_sampled_bytes", "rss_samples", "self_max_rss_bytes",
+                                              "children_max_rss_bytes", "max_single_rss_bytes", "reaper")}
     entry = {
         "id": cid, "sequence": sequence, "container_spec_sha256": index["container_spec_sha256"],
         "rc": rc, "container": container, "size_rw": size_rw_value, "log_config": log_config,
-        "log_bound": bound, "peak_bytes": peak, **limits,
+        "log_bound": bound, "peak_bytes": peak, **limits, **rss,
         "status": "ok" if not problems else "measure_failed", "failures": problems,
     }
     write_exclusive(state / "containers" / f"{cid}.json", canonical_dumps(entry))
@@ -1101,49 +1161,525 @@ def promote_measure(clone: str | Path, *, work: str | Path, real: str | Path, st
 
 # ── ⑦d：host 端的程序樹（每一步都經 host-run） ─────────────────────────────────
 
-def group_rss(pgid: int, proc: Path = Path("/proc")) -> int:
-    """同一個 process group 目前的 RSS 總和（`VmRSS`；zombie 與讀不到的程序略過）。⚠️ 取樣值，⛔ 不是峰值的證明。"""
-    total = 0
-    for entry in proc.iterdir():
+# ⚠️ ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：程序的身分與收養。
+#   `/proc` 的位置是模組常數（測試可以換掉）；PID 一律以 starttime（`/proc/<pid>/stat` 第 22 欄）釘住。
+PROC_ROOT = Path("/proc")
+# `host-run` 紀錄的封閉 schema（十七個鍵；驗證在 host_record_problems()）
+HOST_RECORD_SCHEMA = "i074_stage2_host_run_v1"
+HOST_INTERVAL_MS = 100
+HOST_RECORD_KEYS = ("schema", "step", "rc", "self_max_rss_bytes", "children_max_rss_bytes", "max_single_rss_bytes",
+                    "group_rss_peak_sampled_bytes", "group_samples", "group_interval_ms", "reaper",
+                    "all_descendants_reaped", "auto_reap_detected", "cleanup_complete", "leftover_pids", "errors",
+                    "env_keys", "cmd")
+PR_SET_CHILD_SUBREAPER = 36
+SIGCHLD_MASK = 1 << (int(signal.SIGCHLD) - 1)      # /proc/<pid>/status 的 SigIgn：第 (signum − 1) 個位元
+
+
+class ParentChanged(Exception):
+    """`reap-adopted` 的 parent（harness）已經不是原本的那一個——立刻停止送訊號。"""
+
+
+def read_proc_stat(pid: int) -> tuple[str, int] | None:
+    """(state, starttime)；程序不在 → None。⚠️ ENOENT 以外的讀取錯誤照樣拋出（呼叫端 fail-closed）。"""
+    try:
+        text = (PROC_ROOT / str(pid) / "stat").read_text()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    fields = text.rsplit(")", 1)[1].split()
+    return fields[0], int(fields[19])
+
+
+def _gone(stat: tuple[str, int] | None, starttime: int) -> bool:
+    """已消失 ＝ 不在、身分不符（PID 已被重用）、或已死只等收屍（Z／X）。"""
+    return stat is None or stat[1] != starttime or stat[0] in ("Z", "X")
+
+
+def proc_parents() -> dict[int, int]:
+    """pid → ppid（讀不到、程序已消失的略過）。⚠️ `/proc` 本身讀不到 → 拋出。"""
+    parents: dict[int, int] = {}
+    for entry in PROC_ROOT.iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
-            if int(fields[2]) != pgid:
-                continue
-            for line in (entry / "status").read_text().splitlines():
-                if line.startswith("VmRSS:"):
-                    total += int(line.split()[1]) * 1024
-                    break
+            parents[int(entry.name)] = int((entry / "stat").read_text().rsplit(")", 1)[1].split()[1])
         except (OSError, IndexError, ValueError):
             continue
-    return total
+    return parents
 
 
-def host_run(state: Path, step: str, cmd: list[str], *, interval: float = 0.1) -> int:
-    """執行一步並記 host 端程序樹的記憶體（⑦d「二之三」）：
+def proc_descendants(root_pid: int, parents: Mapping[int, int]) -> set[int]:
+    children: dict[int, list[int]] = {}
+    for pid, ppid in parents.items():
+        children.setdefault(ppid, []).append(pid)
+    found, stack = set(), [root_pid]
+    while stack:
+        for child in children.get(stack.pop(), []):
+            if child not in found:
+                found.add(child)
+                stack.append(child)
+    return found
 
-    * `max_single_rss_bytes`：`RUSAGE_CHILDREN` 的 `ru_maxrss`——所有已 wait 的子孫裡最大的**單一**程序（各自的高水位，
-      **精確**；v26 的契約是每一個程序各自，所以它是門檻）；
-    * `group_rss_peak_sampled_bytes`：每 `interval` 秒把同一個 process group 的 `VmRSS` 加總、取最大（**下界**，只作單向警報）。
-    ⚠️ RSS ⛔ 不含 page cache，與容器的 cgroup 峰值是不同的量法；容器裡的程序屬於 docker daemon，⛔ 不在這棵樹裡。
+
+def _proc_status_value(pid: int, key: str) -> str | None:
+    try:
+        for line in (PROC_ROOT / str(pid) / "status").read_text().splitlines():
+            if line.startswith(key):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def _vmrss(pid: int) -> int:
+    value = _proc_status_value(pid, "VmRSS:")
+    return int(value.split()[0]) * 1024 if value else 0
+
+
+def _sigchld_ignored(pid: int) -> bool:
+    value = _proc_status_value(pid, "SigIgn:")
+    return bool(value and int(value, 16) & SIGCHLD_MASK)
+
+
+def become_subreaper() -> str | None:
+    """設成 subreaper；失敗 → 回傳錯誤（呼叫端 fail-closed）。"""
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        return f"prctl(PR_SET_CHILD_SUBREAPER) 失敗：errno {ctypes.get_errno()}"
+    return None
+
+
+def _direct_children(me: int) -> dict[int, int]:
+    """ppid ＝ me、仍存活（⛔ 不是 zombie）的程序 → starttime。"""
+    alive = {}
+    for pid, ppid in proc_parents().items():
+        if ppid == me:
+            stat = read_proc_stat(pid)
+            if stat is not None and stat[0] not in ("Z", "X"):
+                alive[pid] = stat[1]
+    return alive
+
+
+def _reap_nohang() -> bool:
+    """收掉所有已結束的子程序；回傳 True ＝ 已經沒有任何子程序（ECHILD）。"""
+    while True:
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return True
+        if pid == 0:
+            return False
+
+
+MANAGED_SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+
+
+def _drain_managed_signals() -> list[int]:
+    """取走所有 pending 的 TERM／INT／HUP（它們已被擋住，⛔ 不會再交給 handler）。"""
+    got = []
+    while True:
+        info = signal.sigtimedwait(MANAGED_SIGNALS, 0)
+        if info is None:
+            return got
+        got.append(info.si_signo)
+
+
+def _signal_linearization_point(received: list[int]) -> None:
+    """增補實作第二輪 review：訊號的 linearization point（L）。先擋住 TERM／INT／HUP——CPython 的 `pthread_sigmask` 在回傳
+    之前會先跑完已送達的 handler（`PyErr_CheckSignals`），所以 L 之前送達的都已在 `received`——再取走已經 pending 的。
+    L 之後送達的留在 pending，直到紀錄寫完才處理（⛔ 不會被靜默吞掉）。"""
+    signal.pthread_sigmask(signal.SIG_BLOCK, MANAGED_SIGNALS)
+    received.extend(_drain_managed_signals())
+
+
+def host_run(state: Path, step: str, cmd: list[str], *, interval_ms: int = HOST_INTERVAL_MS, grace_s: float = 10.0,
+             term_wait_s: float = 5.0, cleanup_total_s: float = 15.0) -> int:
+    """執行一步並記 host 端程序樹的記憶體（⑦d「二之三」；⑦d 增補「二」④）：
+
+    * **精確閘**：`host-run` 是 subreaper；leader 結束後收到 `ECHILD`（寬限 `grace_s`），`max_single_rss_bytes` ＝
+      `max(RUSAGE_SELF, RUSAGE_CHILDREN)`——涵蓋 `host-run` 自己、leader 與經正常 wait 鏈保存 resource usage 的子孫；
+    * **單向警報**：每 `interval_ms` 以 ppid 鏈追到的全部子孫（含 `setsid` 的）加上自己的 `VmRSS` 總和；同一次掃描驗 `SigIgn`；
+    * **清理**：逾時、或收到 TERM／INT／HUP → 先記量測失敗，再**只對直接子程序**送 TERM → KILL（只有本程序能收它們，
+      收之前 PID ⛔ 不會被重用），一輪一輪收到 `ECHILD`（上限 `cleanup_total_s`）；清不乾淨 → 結束碼 70。
+    ⚠️ RSS ⛔ 不含 page cache；容器裡的程序屬於 docker daemon，⛔ 不在這棵樹裡。
     """
     if not cmd:
         raise SizingError("host-run 沒有指令")
-    pgid = os.getpgrp()
-    proc = subprocess.Popen(cmd)
+    me = os.getpid()
+    errors: list[str] = []
+    error = become_subreaper()
+    if error:
+        errors.append(error)
+    received: list[int] = []
+    previous = {sig: signal.signal(sig, lambda signum, _frame: received.append(signum)) for sig in MANAGED_SIGNALS}
+    late: list[int] = []
     peak = samples = 0
-    while proc.poll() is None:
-        peak = max(peak, group_rss(pgid))
+    auto_reap = False
+
+    def sample() -> None:
+        nonlocal peak, samples, auto_reap
+        tree = proc_descendants(me, proc_parents())
+        peak = max(peak, _vmrss(me) + sum(_vmrss(pid) for pid in tree))
         samples += 1
-        time.sleep(interval)
-    rc = proc.returncode if proc.returncode >= 0 else 128 - proc.returncode
-    maxrss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
-    # ⚠️ 環境只記**名稱**（⛔ 不記值）：報告以它驗「clean_env() ＋ 固定 PATH ＋ 量測變數」與兩份 patch 只給 replay（「三」#12）。
-    write_exclusive(state / "host" / f"{step}.json", canonical_dumps({
-        "step": step, "rc": rc, "max_single_rss_bytes": maxrss, "group_rss_peak_sampled_bytes": peak,
-        "samples": samples, "interval_s": interval, "env_keys": sorted(os.environ), "cmd": list(cmd)}))
-    return rc
+        auto_reap = auto_reap or any(_sigchld_ignored(pid) for pid in tree)
+
+    interval = interval_ms / 1000
+    rc = 0
+    reaped = False
+    leftover: list[int] = []
+    try:
+        leader = subprocess.Popen(cmd)
+        while leader.poll() is None and not received:
+            sample()
+            time.sleep(interval)
+        if not received:
+            rc = leader.returncode if leader.returncode >= 0 else 128 - leader.returncode
+            deadline = time.monotonic() + grace_s
+            while not received:
+                sample()
+                if _reap_nohang():
+                    reaped = True
+                    break
+                if time.monotonic() >= deadline:
+                    errors.append(f"leader 結束後 {grace_s:g} 秒內仍有存活的子孫（high-water 讀不到）")
+                    break
+                time.sleep(interval)
+        if not reaped:
+            leftover = _cleanup_direct_children(me, term_wait_s=term_wait_s, total_s=cleanup_total_s)
+        sample()
+        # ── L：之前送達的訊號都反映到錯誤、紀錄的 rc 與回傳碼；之後送達的見下方「紀錄寫出之後」 ──
+        _signal_linearization_point(received)
+        if received:
+            errors.append(f"收到訊號 {signal.Signals(received[0]).name}（量測中斷）")
+        self_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+        children_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss * 1024
+        # ⚠️ 實作第一輪 review：先決定**唯一的**結束碼，紀錄與回傳用同一個值（清不乾淨 70 ＞ 訊號 128 ＋ N ＞ leader 的結束碼）。
+        final_rc = 70 if leftover else 128 + received[0] if received else rc
+        # ⚠️ 環境只記**名稱**（⛔ 不記值）：報告以它驗「clean_env() ＋ 固定 PATH ＋ 量測變數」與兩份 patch 只給 replay（「三」#12）。
+        write_exclusive(state / "host" / f"{step}.json", canonical_dumps({
+            "schema": HOST_RECORD_SCHEMA, "step": step, "rc": final_rc, "self_max_rss_bytes": self_rss,
+            "children_max_rss_bytes": children_rss, "max_single_rss_bytes": max(self_rss, children_rss),
+            "group_rss_peak_sampled_bytes": peak, "group_samples": samples, "group_interval_ms": interval_ms,
+            "reaper": "subreaper", "all_descendants_reaped": reaped, "auto_reap_detected": auto_reap,
+            "cleanup_complete": not leftover, "leftover_pids": leftover, "errors": errors,
+            "env_keys": sorted(os.environ), "cmd": list(cmd)}))
+        # L 之後（序列化與寫入期間）送達的：紀錄是 exclusive create、已經定案，⛔ 不能改。回傳碼套**同一個優先序**
+        #   （實作第三輪 review）：清不乾淨 → 維持 70（紀錄與實際一致）；否則改成 128 ＋ N，紀錄的 rc 與實際結束碼
+        #   因此不符，check-step 與報告會擋下（fail-closed，⛔ 不宣稱成功）。兩種情況 stderr 都說明晚到的訊號。
+        late = _drain_managed_signals()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, MANAGED_SIGNALS)
+    if leftover:
+        print(f"ERROR: host-run 清不乾淨，仍存活的子程序：{leftover}", file=sys.stderr)
+    if late and leftover:
+        print(f"ERROR: host-run：紀錄寫出之後才收到訊號 {signal.Signals(late[0]).name}——清不乾淨優先，結束碼維持 "
+              f"{final_rc}（與紀錄一致）", file=sys.stderr)
+    elif late:
+        print(f"ERROR: host-run：紀錄寫出之後才收到訊號 {signal.Signals(late[0]).name}——結束碼改成 {128 + late[0]}，"
+              f"紀錄的 rc（{final_rc}）與實際結束碼不符，這一步的量測無效", file=sys.stderr)
+        return 128 + late[0]
+    return final_rc
+
+
+def _cleanup_direct_children(me: int, *, term_wait_s: float, total_s: float) -> list[int]:
+    """只對直接子程序送訊號（它們只有本程序能收，收之前 PID ⛔ 不會被重用）；孫程序被收養上來就下一輪處理。回傳殘留的 PID。"""
+    deadline = time.monotonic() + total_s
+    while time.monotonic() < deadline:
+        if _reap_nohang():
+            return []
+        children = _direct_children(me)
+        for pid in children:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        end = min(deadline, time.monotonic() + term_wait_s)
+        while time.monotonic() < end and set(children) & set(_direct_children(me)):
+            _reap_nohang()
+            time.sleep(0.05)
+        for pid in set(children) & set(_direct_children(me)):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        end = min(deadline, time.monotonic() + term_wait_s)
+        while time.monotonic() < end and set(children) & set(_direct_children(me)):
+            _reap_nohang()
+            time.sleep(0.05)
+    _reap_nohang()
+    return sorted(_direct_children(me))
+
+
+LEFTOVER_SCHEMA = "i074_stage2_leftover_pids_v1"
+
+
+def reap_adopted(state: Path, *, parent: int, parent_starttime: int, exclude: Iterable[int] = (), check_only: bool = False,
+                 term_wait_s: float = 5.0, kill_wait_s: float = 5.0, total_s: float = 30.0) -> int:
+    """⑦d 增補「二」④：清掉 harness（subreaper）收養的程序。結束碼 0 ＝ 沒有／全部清掉、1 ＝ 有（`check_only`）或清完仍有殘留、
+    2 ＝ helper 自己失敗（含 parent 的身分不符或在執行期間改變——立刻停止送訊號）。"""
+    me, skip = os.getpid(), set(exclude)
+
+    def ensure_parent() -> None:
+        if os.getppid() != parent:
+            raise ParentChanged(f"getppid()={os.getppid()} ≠ parent {parent}")
+
+    def adopted() -> dict[int, int]:
+        ensure_parent()
+        found = {}
+        for pid, ppid in proc_parents().items():
+            if ppid != parent or pid == me or pid in skip:
+                continue
+            stat = read_proc_stat(pid)
+            if stat is not None and stat[0] not in ("Z", "X"):
+                found[pid] = stat[1]
+        return found
+
+    def signal_pinned(pid: int, starttime: int, sig: int) -> None:
+        ensure_parent()
+        if not _gone(read_proc_stat(pid), starttime):
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+
+    def wait_gone(targets: Mapping[int, int], wait_s: float) -> dict[int, int]:
+        end = time.monotonic() + wait_s
+        while True:
+            alive = {pid: st for pid, st in targets.items() if not _gone(read_proc_stat(pid), st)}
+            if not alive or time.monotonic() >= end:
+                return alive
+            time.sleep(0.05)
+
+    try:
+        ensure_parent()
+        stat = read_proc_stat(parent)
+        if stat is None or stat[1] != parent_starttime:
+            raise ParentChanged(f"parent {parent} 的 starttime ≠ {parent_starttime}")
+        found = adopted()
+        if check_only:
+            if found:
+                print(f"harness 收養了程序（步驟把程序留在 host）：{sorted(found)}", file=sys.stderr)
+            return 1 if found else 0
+        deadline = time.monotonic() + total_s
+        while found and time.monotonic() < deadline:
+            for pid, st in found.items():
+                signal_pinned(pid, st, signal.SIGTERM)
+            alive = wait_gone(found, term_wait_s)
+            for pid, st in alive.items():
+                signal_pinned(pid, st, signal.SIGKILL)
+            wait_gone(alive, kill_wait_s)
+            found = adopted()
+        if not found:
+            return 0
+        processes = []
+        for pid, st in sorted(found.items()):
+            try:
+                cmdline = (PROC_ROOT / str(pid) / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+            except OSError:
+                cmdline = ""
+            processes.append({"pid": pid, "starttime": st, "cmdline": cmdline.strip()})
+        out = state / "leftover-pids.json"
+        tmp = out.with_name(".leftover-pids.json.tmp")
+        tmp.write_bytes(canonical_dumps({"schema": LEFTOVER_SCHEMA, "parent": parent, "processes": processes}))
+        os.replace(tmp, out)
+        print(f"清不掉 harness 收養的程序：{[p['pid'] for p in processes]}（見 {out}）", file=sys.stderr)
+        return 1
+    except ParentChanged as exc:
+        print(f"ERROR: reap-adopted：parent 的身分不符或已改變——停止送訊號：{exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001 - helper 自己的任何失敗一律 2（呼叫端保留 S）
+        print(f"ERROR: reap-adopted：{type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
+
+
+KILL_PINNED_SCHEMA = "i074_stage2_kill_pinned_v1"
+
+
+def kill_pinned(pid: int, starttime: int, *, term_wait_s: float = 2.0, kill_wait_s: float = 2.0) -> tuple[int, dict[str, Any]]:
+    """⑦d 增補「二」④：只送訊號給**同時符合 PID 與 starttime** 的程序；送每一個訊號之前都再讀一次。回傳 (結束碼, 紀錄)。"""
+    sent: list[str] = []
+
+    def done(result: str, rc: int, error: str | None = None) -> tuple[int, dict[str, Any]]:
+        return rc, {"schema": KILL_PINNED_SCHEMA, "pid": pid, "starttime": starttime, "result": result,
+                    "signals_sent": list(sent), "error": error}
+
+    try:
+        stat = read_proc_stat(pid)
+    except OSError as exc:
+        return done("error_before_signal", 2, f"{type(exc).__name__}: {exc}")
+    if stat is None or stat[0] in ("Z", "X"):
+        return done("already_gone", 0)
+    if stat[1] != starttime:
+        return done("identity_mismatch", 0)
+    for sig, name, wait_s, gone_result in ((signal.SIGTERM, "TERM", term_wait_s, "terminated_by_term"),
+                                           (signal.SIGKILL, "KILL", kill_wait_s, "terminated_by_kill")):
+        try:
+            stat = read_proc_stat(pid)                    # 送這個訊號之前再確認一次身分
+        except OSError as exc:
+            return done("error_after_term" if sent else "error_before_signal", 2, f"{type(exc).__name__}: {exc}")
+        if _gone(stat, starttime):
+            # 第一個訊號之前就不在 → already_gone；TERM 之後、KILL 之前才消失 → 是 TERM 收掉的
+            return done("terminated_by_term" if sent else "already_gone", 0)
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+        sent.append(name)
+        end = time.monotonic() + wait_s
+        while True:
+            try:
+                stat = read_proc_stat(pid)
+            except OSError as exc:
+                return done("error_after_term", 2, f"{type(exc).__name__}: {exc}")
+            if _gone(stat, starttime):
+                return done(gone_result, 0)
+            if time.monotonic() >= end:
+                break
+            time.sleep(0.05)
+    return done("alive_after_kill", 1)
+
+
+def guard_identity(state: Path, shell_pid: int) -> tuple[int, int]:
+    """⑦d 增補「二」④③：guard 的測試程序的身分可信 ⟺ `guard-probe.json` 格式正確（恰好 pid、starttime，整數）、
+    `pid` ＝ 子 shell 回報的 `$!`、`/proc/<pid>/stat` 的 starttime 相符。不可信 → SizingError（呼叫端⛔ 不送任何訊號）。"""
+    try:
+        doc = json.loads((state / "guard-probe.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise SizingError(f"guard-probe.json 讀不到：{type(exc).__name__}: {exc}") from None
+    if not isinstance(doc, dict) or set(doc) != {"pid", "starttime"} or not all(_is_int(v) for v in doc.values()):
+        raise SizingError(f"guard-probe.json 的格式不符：{doc!r}")
+    if doc["pid"] != shell_pid:
+        raise SizingError(f"guard-probe.json 的 pid {doc['pid']} ≠ 子 shell 回報的 $! {shell_pid}")
+    stat = read_proc_stat(doc["pid"])
+    if stat is None or stat[1] != doc["starttime"]:
+        raise SizingError(f"/proc/{doc['pid']}/stat 的 starttime ≠ 回報的 {doc['starttime']}")
+    return doc["pid"], doc["starttime"]
+
+
+def check_step(state: Path, step: str) -> list[str]:
+    """⑦d 增補「二」⑦：每一步之後立刻檢查——這一步的 host 紀錄（封閉 schema 與有效條件）與目前為止的每一份 sidecar。"""
+    problems: list[str] = []
+    rcs = _read_tsv(state / "rc.tsv")
+    if step not in rcs:
+        return [f"rc.tsv 沒有 {step}"]
+    host = state / "host" / f"{step}.json"
+    if not host.is_file():
+        problems.append(f"缺少 {step} 的 host 紀錄")
+    else:
+        try:
+            rec = read_json(host)
+        except ValueError as exc:
+            problems.append(f"{step} 的 host 紀錄讀不懂：{exc}")
+        else:
+            problems += [f"host：{p}" for p in host_record_problems(rec, step=step, rc=int(rcs[step].partition("\t")[2]))]
+    for index_path in sorted((state / "index").glob("*.json")) if (state / "index").is_dir() else []:
+        index = read_json(index_path)
+        side_path = state / "containers" / f"{index['id']}.json"
+        if not side_path.is_file():
+            problems.append(f"sequence {index['sequence']} 缺 sidecar")
+            continue
+        side = read_json(side_path)
+        if side.get("status") != "ok":
+            problems.append(f"sequence {index['sequence']} 量測失敗：{side.get('failures')}")
+        elif index.get("profile") == "acceptance" and "max_single_rss_bytes" not in side:
+            problems.append(f"sequence {index['sequence']} 的 sidecar 缺 RSS 欄位")
+    return problems
+
+
+# ── ⑦d 增補「二」⑧：靜態（語意）檢查——本 repo 的程式⛔ 不把 SIGCHLD 設成 SIG_IGN、⛔ 沒有 SA_NOCLDWAIT ─────────────
+#   ⚠️ ⛔ 不禁止「提到 SIGCHLD」（偵測器要用它算 SigIgn 的位元）；動態寫法（getattr、exec、ctypes 直接呼叫 sigaction）
+#   ⛔ 不在靜態檢查內——由執行期的 SigIgn 偵測涵蓋 SIG_IGN。
+
+_CHLD_NAMES = {"SIGCHLD", "SIGCLD"}
+SHELL_TRAP_CHLD = re.compile(r"\btrap\s+(?:--\s+)?(?:''|\"\")\s+[^#\n]*\b(?:SIG)?CHLD\b")
+
+
+def auto_reap_violations(source: str) -> list[int]:
+    """回傳違規的行號：先解析每個檔的 `signal` 名稱來源（import ／ import as ／ from-import [as]），再找「呼叫目標解析成
+    signal.signal、訊號解析成 SIGCHLD／SIGCLD（含 Signals.* 與整數 17）、處理函式（位置或 handler=）解析成 SIG_IGN
+    （含 Handlers.SIG_IGN）」，以及任何名為 SA_NOCLDWAIT 的識別字。⚠️ 字串⛔ 不算——說明文字與報告的 notes 會提到它
+    （契約外的殘餘），字串本身也設不了任何旗標。"""
+    import ast  # noqa: PLC0415
+    tree = ast.parse(source)
+    mods: set[str] = set()
+    funcs: set[str] = set()
+    chld: set[str] = set()
+    ign: set[str] = set()
+    signals_enum: set[str] = set()
+    handlers_enum: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            mods |= {a.asname or a.name for a in node.names if a.name == "signal"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "signal":
+            for a in node.names:
+                name = a.asname or a.name
+                if a.name == "signal":
+                    funcs.add(name)
+                elif a.name == "SIG_IGN":
+                    ign.add(name)
+                elif a.name == "Signals":
+                    signals_enum.add(name)
+                elif a.name == "Handlers":
+                    handlers_enum.add(name)
+                elif a.name in _CHLD_NAMES:
+                    chld.add(name)
+
+    def is_mod(n: Any) -> bool:
+        return isinstance(n, ast.Name) and n.id in mods
+
+    def is_chld(n: Any) -> bool:
+        if isinstance(n, ast.Constant) and type(n.value) is int and n.value == 17:
+            return True
+        if isinstance(n, ast.Name):
+            return n.id in chld
+        if isinstance(n, ast.Attribute) and n.attr in _CHLD_NAMES:
+            v = n.value
+            return is_mod(v) or (isinstance(v, ast.Name) and v.id in signals_enum) \
+                or (isinstance(v, ast.Attribute) and v.attr == "Signals" and is_mod(v.value))
+        return False
+
+    def is_ign(n: Any) -> bool:
+        if isinstance(n, ast.Name):
+            return n.id in ign
+        if isinstance(n, ast.Attribute) and n.attr == "SIG_IGN":
+            v = n.value
+            return is_mod(v) or (isinstance(v, ast.Name) and v.id in handlers_enum) \
+                or (isinstance(v, ast.Attribute) and v.attr == "Handlers" and is_mod(v.value))
+        return False
+
+    bad = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == "SA_NOCLDWAIT" \
+                or isinstance(node, ast.Attribute) and node.attr == "SA_NOCLDWAIT":
+            bad.append(node.lineno)
+        elif isinstance(node, ast.Call):
+            f = node.func
+            if (isinstance(f, ast.Attribute) and f.attr == "signal" and is_mod(f.value)) \
+                    or (isinstance(f, ast.Name) and f.id in funcs):
+                kw = {k.arg: k.value for k in node.keywords}
+                sig = node.args[0] if node.args else kw.get("signalnum")
+                handler = node.args[1] if len(node.args) > 1 else kw.get("handler")
+                if sig is not None and handler is not None and is_chld(sig) and is_ign(handler):
+                    bad.append(node.lineno)
+    return bad
+
+
+def scan_auto_reaping(roots: Iterable[Path], repo_root: Path) -> list[str]:
+    """掃 roots 底下（測試除外）的 .py（AST）與 .sh（`trap '' … CHLD`）。回傳「路徑:行號」。"""
+    found = []
+    for root in roots:
+        for path in sorted(Path(root).rglob("*")):
+            rel = path.relative_to(repo_root)
+            if not path.is_file() or "tests" in rel.parts or path.name.startswith(("test_", "test-")):
+                continue
+            if path.suffix == ".py":
+                found += [f"{rel}:{n}" for n in auto_reap_violations(path.read_text(encoding="utf-8"))]
+            elif path.suffix == ".sh":
+                found += [f"{rel}:{i}" for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                          if SHELL_TRAP_CHLD.search(line)]
+    return found
 
 
 # ── ⑦d：acceptance 的報告 ──────────────────────────────────────────────────────
@@ -1302,7 +1838,6 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         "wt_head", "wt_base_patched", "git_head", "git_base_patched", "index_head", "index_base_patched",
         "snapshot", "probe", "frozen_patched")}
     manifest, manifest_sha = load_harness_manifest(state, "acceptance")
-    violations: list[str] = []
     paths: dict[str, Any] = {}
     for phase in PROFILES["acceptance"]["disk_phases"]:
         baseline, end, peaks = _phase_window(state, phase, meta)
@@ -1322,11 +1857,9 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
             "containers": footprint,
         }
         accounted = sum(parts.values())
-        p_path = max(peaks["dirs_peak"], peaks["fs_peak"], accounted)
-        if p_path > p_b_budget:
-            violations.append(f"磁碟：{phase} 的 P_path={p_path} > P_B_BUDGET={p_b_budget}")
         paths[phase] = {"peaks": peaks, "accounted": accounted, "accounted_parts": parts, "container_rule": rule,
-                        "P_path": p_path, "read_only_gap": sum(c["sidecar"]["size_rw"] for c in containers)}
+                        "P_path": max(peaks["dirs_peak"], peaks["fs_peak"], accounted),
+                        "read_only_gap": sum(c["sidecar"]["size_rw"] for c in containers)}
     promotion: dict[str, Any] = {}
     for phase, path in (("promote_success", "success"), ("promote_failure", "failure")):
         baseline, end, peaks = _phase_window(state, phase, meta)
@@ -1335,17 +1868,23 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         accounted = end["archive"]["allocated"] + end["archive"]["dirs"] * BLOCK + footprint
         p_prom = max(peaks["dirs_peak"], peaks["fs_peak"], accounted)
         promotion[phase] = {"peaks": peaks, "accounted": accounted, "P_promotion": p_prom,
-                            "P_path_plus_promotion": paths[path]["P_path"] + p_prom,
-                            "kind": "informational（⛔ 不與 P_B_BUDGET 比較；v29「八之一」容量列）"}
+                            "P_path_plus_promotion": paths[path]["P_path"] + p_prom, "kind": PROMOTION_KIND}
     memory = []
     for inv in invocations:
-        peak = inv["sidecar"]["peak_bytes"]
+        side = inv["sidecar"]
+        missing = [k for k in ("max_single_rss_bytes", "self_max_rss_bytes", "children_max_rss_bytes",
+                               "rss_peak_sampled_bytes", "rss_samples", "reaper") if k not in side]
+        if missing:
+            raise SizingError(f"sequence {inv['sequence']} 的 sidecar 缺 RSS 欄位（⑦d 增補）：{missing}")
         limit = container_memory_limit(inv)
-        ok = peak < ACCEPTANCE_MEMORY_LIMIT
-        if not ok:
-            violations.append(f"記憶體：#{inv['sequence']} {inv['phase']}/{inv['role']} 的 cgroup 峰值 {peak} ≥ {ACCEPTANCE_MEMORY_LIMIT}")
-        memory.append({"sequence": inv["sequence"], "phase": inv["phase"], "role": inv["role"], "rc": inv["sidecar"]["rc"],
-                       "cgroup_peak_bytes": peak, "memory_limit_bytes": limit, "below_limit": ok})
+        memory.append({"sequence": inv["sequence"], "phase": inv["phase"], "role": inv["role"], "rc": side["rc"],
+                       "max_single_rss_bytes": side["max_single_rss_bytes"],
+                       "self_max_rss_bytes": side["self_max_rss_bytes"],
+                       "children_max_rss_bytes": side["children_max_rss_bytes"],
+                       "rss_peak_sampled_bytes": side["rss_peak_sampled_bytes"], "rss_samples": side["rss_samples"],
+                       "reaper": side["reaper"], "cgroup_peak_bytes": side["peak_bytes"], "memory_limit_bytes": limit,
+                       "below_limit": side["max_single_rss_bytes"] < ACCEPTANCE_MEMORY_LIMIT
+                       and side["rss_peak_sampled_bytes"] < ACCEPTANCE_MEMORY_LIMIT})
     container_limits = sorted({row["memory_limit_bytes"] for row in memory})
     host = []
     for step, phase in steps:
@@ -1353,42 +1892,43 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         if not path.is_file():
             raise SizingError(f"缺少 {step} 的 host 端量測")
         rec = read_json(path)
+        problems = host_record_problems(rec, step=step, rc=int(rc[step].partition("\t")[2]))
+        if problems:
+            raise SizingError(f"{step} 的 host 紀錄不符（⑦d 增補「二」④）：{problems}")
         env_problems = check_step_environment(rec, drop_names=drop_names, drop_prefixes=drop_prefixes)
         if env_problems:
             raise SizingError(f"環境的契約不符（harness 的缺陷，⛔ 不產報告）：{env_problems}")
-        single, sampled = rec["max_single_rss_bytes"], rec["group_rss_peak_sampled_bytes"]
-        if not single or not isinstance(single, int):
-            raise SizingError(f"{step} 的最大單一程序 RSS 讀不到或為 0")
-        if single >= ACCEPTANCE_MEMORY_LIMIT:
-            violations.append(f"記憶體：{step} 的 host 最大單一程序 RSS {single} ≥ {ACCEPTANCE_MEMORY_LIMIT}")
-        alarm = sampled >= ACCEPTANCE_MEMORY_LIMIT
-        if alarm:
-            violations.append(f"單向警報：{step} 的 host 程序群組 RSS 取樣總和 {sampled} ≥ {ACCEPTANCE_MEMORY_LIMIT}")
-        host.append({"step": step, "phase": phase, "rc": rec["rc"], "max_single_rss_bytes": single,
-                     "group_rss_peak_sampled_bytes": sampled, "group_alarm": alarm,
-                     "group_note": "觀察到超標" if alarm else "未觀察到超標（⛔ 不是通過的證據）"})
+        alarm = rec["group_rss_peak_sampled_bytes"] >= ACCEPTANCE_MEMORY_LIMIT
+        host.append({"step": step, "phase": phase, "rc": rec["rc"], "self_max_rss_bytes": rec["self_max_rss_bytes"],
+                     "children_max_rss_bytes": rec["children_max_rss_bytes"],
+                     "max_single_rss_bytes": rec["max_single_rss_bytes"],
+                     "group_rss_peak_sampled_bytes": rec["group_rss_peak_sampled_bytes"], "group_alarm": alarm,
+                     "group_note": GROUP_NOTES[alarm]})
     memavail = [int(line.split("\t")[1]) for line in (state / "memavail.tsv").read_text().splitlines() if line.strip()] \
         if (state / "memavail.tsv").is_file() else []
-    notes = ["anchors 以 preflight 的 --check-failed-record 代量（⑦d「三」#6）",
+    notes = ["契約（⑦d 增補）：經正常 wait 鏈保存 resource usage 的每一個程序各自 < 450 MiB——通過由精確的閘證明"
+             "（max(RUSAGE_SELF, RUSAGE_CHILDREN)：wrapper／host-run 自己、leader 與被收掉的子孫）；被 kernel 自動回收的子孫"
+             "在契約外（SIGCHLD=SIG_IGN 以取樣偵測、偵測到即 fail-closed；SA_NOCLDWAIT 看不到）；取樣的 total_rss 只作單向偵測"
+             "（間隔 50 ms 的下界，沒觀察到超標⛔ 不是通過的證據）",
+             "ru_maxrss 含 file-backed 的常駐頁（共用函式庫、mmap）與 fork 之後、exec 之前和 parent 共用的頁；wrapper 自己"
+             "（約 10 MiB）也計入——都偏保守",
+             "含 page cache 的 cgroup 峰值只列資訊值：它會隨當次的上限上升（page cache 要逼近上限才被回收）",
+             "anchors 以 preflight 的 --check-failed-record 代量（⑦d「三」#6）",
              "host 端是 RSS（⛔ 不含 page cache）：最大單一程序是門檻、程序群組的取樣總和只作單向警報",
              "晉升的磁碟只列資訊值（P_B 的起訖⛔ 不變）"]
-    # ⚠️ mem-guard 每一次都依當下的 MemAvailable 下修，上限因容器而異（實測 402～532 MiB）——兩則說明各自只列它涵蓋的容器。
-    seqs = lambda rows: "、".join(f"#{row['sequence']}" for row in rows)  # noqa: E731
-    bounded = [row for row in memory if row["memory_limit_bytes"] <= ACCEPTANCE_MEMORY_LIMIT]
-    rising = [row for row in memory if row["memory_limit_bytes"] > ACCEPTANCE_MEMORY_LIMIT]
+    bounded = [row for row in memory if row["memory_limit_bytes"] < ACCEPTANCE_MEMORY_LIMIT]
     if bounded:
-        notes.append(f"容器 {seqs(bounded)} 的 cgroup 上限（當次 mem-guard 下修後的 --memory）不高於門檻：含 page cache 的峰值"
-                     "不會超過上限（逼近上限時 page cache 先被回收），這幾個容器的門檻判定實質是「在這個上限內、⛔ 不用 swap、"
-                     "以預期的結束碼跑完」")
-    if rising:
-        notes.append(f"容器 {seqs(rising)} 的上限高於門檻：cgroup 峰值含 page cache，而 page cache 要逼近上限才被回收——"
-                     "峰值會隨當次的上限上升（同一個程序在較高的上限下可能量到較高的峰值；偏保守的方向）")
+        listed = "、".join(f"#{row['sequence']}" for row in bounded)
+        notes.append(f"容器 {listed} 的上限嚴格低於門檻：匿名頁受上限限制，total_rss 偵測器不可能觸發；⚠️ 精確的閘仍逐一比較"
+                     "（file-backed 頁可能記在別的 cgroup，⛔ 不受這個上限限制）")
     if compute == "stub":
         notes.insert(0, "⚠️ replay_compute=stub：計算工作集⛔ 未涵蓋——⛔ 不得當成 ⑨-1 的正式驗收")
-    return {
-        "schema": "i074_stage2_acceptance_report_v1",
-        "status": "ok" if not violations else "threshold_exceeded",
-        "violations": violations,
+    report: dict[str, Any] = {
+        "schema": REPORT_V2_SCHEMA,
+        "contract": REPORT_CONTRACT,
+        "out_of_contract": list(REPORT_OUT_OF_CONTRACT),
+        "auto_reap_detection": dict(REPORT_AUTO_REAP_DETECTION),
+        "memory_measures": dict(REPORT_MEMORY_MEASURES),
         "mode": meta["mode"],
         "replay_compute": compute,
         "meta": meta,
@@ -1404,12 +1944,310 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         "host_memavailable_low": min(memavail) if memavail else None,
         "notes": notes,
     }
+    report["violations"] = derive_acceptance_violations(report)
+    report["status"] = "ok" if not report["violations"] else "threshold_exceeded"
+    problems = validate_acceptance_report_v2(report, p_b_budget=p_b_budget)
+    if problems:
+        raise SizingError(f"報告的自我驗證不通過（⛔ 不寫報告）：{problems[:5]}")
+    return report
+
+
+# ── ⑦d 增補：報告 v2 的封閉 schema、唯一的門檻推導與驗證 ─────────────────────────────
+
+REPORT_V2_SCHEMA = "i074_stage2_acceptance_report_v2"
+REPORT_CONTRACT = "per_process_rss_within_wait_chain"
+REPORT_OUT_OF_CONTRACT = ("descendants_auto_reaped_by_kernel",)
+REPORT_AUTO_REAP_DETECTION = {"sigchld_sig_ign": "sampled_fail_closed", "sa_nocldwait": "unobservable"}
+REPORT_MEMORY_MEASURES = {"max_single_rss_bytes": "exact_within_wait_chain", "rss_peak_sampled_bytes": "sampled_lower_bound",
+                          "cgroup_peak_bytes": "informational_includes_page_cache"}
+REPORT_KEYS = frozenset({"schema", "status", "violations", "contract", "out_of_contract", "auto_reap_detection",
+                         "memory_measures", "mode", "replay_compute", "meta", "components", "harness_manifest",
+                         "harness_manifest_sha256", "limits", "paths", "promotion", "memory", "host",
+                         "host_memavailable_low", "notes"})
+PROMOTION_KIND = "informational（⛔ 不與 P_B_BUDGET 比較；v29「八之一」容量列）"
+GROUP_NOTES = {True: "觀察到超標", False: "未觀察到超標（⛔ 不是通過的證據）"}
+VIOLATION_KINDS = ("container_max_single_rss", "container_rss_sampled", "host_max_single_rss", "host_group_rss_sampled",
+                   "disk_p_path")
+_MEMORY_ROW_KEYS = frozenset({"sequence", "phase", "role", "rc", "max_single_rss_bytes", "self_max_rss_bytes",
+                              "children_max_rss_bytes", "rss_peak_sampled_bytes", "rss_samples", "reaper",
+                              "cgroup_peak_bytes", "memory_limit_bytes", "below_limit"})
+_HOST_ROW_KEYS = frozenset({"step", "phase", "rc", "self_max_rss_bytes", "children_max_rss_bytes", "max_single_rss_bytes",
+                            "group_rss_peak_sampled_bytes", "group_alarm", "group_note"})
+_PATH_KEYS = frozenset({"peaks", "accounted", "accounted_parts", "container_rule", "P_path", "read_only_gap"})
+_PROMOTION_KEYS = frozenset({"peaks", "accounted", "P_promotion", "P_path_plus_promotion", "kind"})
+_PEAKS_KEYS = frozenset({"dirs_peak", "dirs_peak_by_location", "fs_peak", "samples"})
+_LIMITS_KEYS = frozenset({"memory_bytes", "P_B_BUDGET", "container_memory_limit_bytes"})
+_VIOLATION_KEYS = frozenset({"kind", "subject", "value", "limit"})
+
+
+def _str_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def host_record_problems(rec: Any, *, step: str, rc: int) -> list[str]:
+    """⑦d 增補「二」④：`host-run` 紀錄的封閉 schema（十七個鍵）、交叉條件與有效條件。回傳問題清單（空 ＝ 有效）。"""
+    if not isinstance(rec, dict):
+        return ["不是 JSON object"]
+    if set(rec) != set(HOST_RECORD_KEYS):
+        return [f"鍵集合不符：缺 {sorted(set(HOST_RECORD_KEYS) - set(rec))}、多 {sorted(set(rec) - set(HOST_RECORD_KEYS))}"]
+    problems = []
+    if rec["schema"] != HOST_RECORD_SCHEMA:
+        problems.append(f"schema={rec['schema']!r}")
+    if rec["step"] != step:
+        problems.append(f"step={rec['step']!r} ≠ 檔名 {step!r}")
+    if not _is_int(rec["rc"]) or not 0 <= rec["rc"] <= 255 or rec["rc"] != rc:
+        problems.append(f"rc={rec['rc']!r}（必須是 0～255 的整數、＝ rc.tsv 的 {rc}）")
+    for key in ("self_max_rss_bytes", "children_max_rss_bytes", "max_single_rss_bytes", "group_rss_peak_sampled_bytes",
+                "group_samples"):
+        if not _is_int(rec[key]) or rec[key] <= 0:
+            problems.append(f"{key}={rec[key]!r}（必須是 > 0 的整數）")
+    if not problems and rec["max_single_rss_bytes"] != max(rec["self_max_rss_bytes"], rec["children_max_rss_bytes"]):
+        problems.append("max_single_rss_bytes ≠ max(self_max_rss_bytes, children_max_rss_bytes)")
+    if not _is_int(rec["group_interval_ms"]) or rec["group_interval_ms"] != HOST_INTERVAL_MS:
+        problems.append(f"group_interval_ms={rec['group_interval_ms']!r}（必須是 {HOST_INTERVAL_MS}）")
+    if rec["reaper"] != "subreaper":
+        problems.append(f"reaper={rec['reaper']!r}（必須是 subreaper）")
+    for key, want in (("all_descendants_reaped", True), ("auto_reap_detected", False), ("cleanup_complete", True)):
+        if type(rec[key]) is not bool or rec[key] is not want:
+            problems.append(f"{key}={rec[key]!r}（有效的量測必須是 {want}）")
+    if not isinstance(rec["leftover_pids"], list) or not all(_is_int(v) for v in rec["leftover_pids"]):
+        problems.append("leftover_pids 必須是整數陣列")
+    elif rec["leftover_pids"]:
+        problems.append(f"leftover_pids={rec['leftover_pids']}（有效的量測必須是空的）")
+    if not _str_list(rec["errors"]):
+        problems.append("errors 必須是字串陣列")
+    elif rec["errors"]:
+        problems.append(f"errors={rec['errors']}")
+    if not _str_list(rec["env_keys"]) or rec["env_keys"] != sorted(set(rec["env_keys"])):
+        problems.append("env_keys 必須是排序、不重複的字串陣列")
+    if not _str_list(rec["cmd"]) or not rec["cmd"]:
+        problems.append("cmd 必須是非空的字串陣列")
+    return problems
+
+
+def derive_acceptance_violations(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """⑦d 增補：**唯一的**門檻推導（產出端與 validator 共用）。順序：容器列、host 列、磁碟（success、failure）。"""
+    limit, budget = report["limits"]["memory_bytes"], report["limits"]["P_B_BUDGET"]
+    out: list[dict[str, Any]] = []
+    for row in report["memory"]:
+        subject = f"#{row['sequence']} {row['phase']}/{row['role']}"
+        if row["max_single_rss_bytes"] >= limit:
+            out.append({"kind": "container_max_single_rss", "subject": subject, "value": row["max_single_rss_bytes"],
+                        "limit": limit})
+        if row["rss_peak_sampled_bytes"] >= limit:
+            out.append({"kind": "container_rss_sampled", "subject": subject, "value": row["rss_peak_sampled_bytes"],
+                        "limit": limit})
+    for row in report["host"]:
+        if row["max_single_rss_bytes"] >= limit:
+            out.append({"kind": "host_max_single_rss", "subject": row["step"], "value": row["max_single_rss_bytes"],
+                        "limit": limit})
+        if row["group_rss_peak_sampled_bytes"] >= limit:
+            out.append({"kind": "host_group_rss_sampled", "subject": row["step"],
+                        "value": row["group_rss_peak_sampled_bytes"], "limit": limit})
+    for phase in ("success", "failure"):
+        if report["paths"][phase]["P_path"] > budget:
+            out.append({"kind": "disk_p_path", "subject": phase, "value": report["paths"][phase]["P_path"],
+                        "limit": budget})
+    return out
+
+
+def _closed(problems: list[str], where: str, value: Any, keys: frozenset) -> bool:
+    if not isinstance(value, dict) or set(value) != keys:
+        got = sorted(value) if isinstance(value, dict) else type(value).__name__
+        problems.append(f"{where} 的鍵集合不符：{got}")
+        return False
+    return True
+
+
+def _typed(problems: list[str], where: str, row: Mapping[str, Any], spec: Mapping[str, str]) -> bool:
+    """逐欄驗型別：int（⛔ 不接受 bool）、pos（> 0 的 int）、nonneg（≥ 0 的 int）、bool、str。全部符合才回傳 True。"""
+    ok = True
+    for key, kind in spec.items():
+        value = row[key]
+        good = {"int": _is_int(value), "pos": _is_int(value) and value > 0, "nonneg": _is_int(value) and value >= 0,
+                "bool": type(value) is bool, "str": isinstance(value, str)}[kind]
+        if not good:
+            problems.append(f"{where}.{key}={value!r}（型別必須是 {kind}）")
+            ok = False
+    return ok
+
+
+def _peaks_ok(problems: list[str], where: str, peaks: Any) -> bool:
+    if not _closed(problems, where, peaks, _PEAKS_KEYS):
+        return False
+    ok = _typed(problems, where, peaks, {"dirs_peak": "nonneg", "fs_peak": "int", "samples": "pos"})
+    by_loc = peaks["dirs_peak_by_location"]
+    if not isinstance(by_loc, dict) or not all(isinstance(k, str) and _is_int(v) for k, v in by_loc.items()):
+        problems.append(f"{where}.dirs_peak_by_location 必須是位置對整數的 object")
+        ok = False
+    return ok
+
+
+def validate_acceptance_report_v2(report: Any, *, p_b_budget: int) -> list[str]:
+    """⑦d 增補：報告 v2 的封閉 schema、衍生欄位的內部一致性、由列重新推導的門檻結果與 `status`。
+
+    ⚠️ 每一節**先**驗完型別，型別不符就跳過那一節的交叉運算（實作第一輪 review）；任何未預期的例外也轉成問題——
+    ⛔ 不拋例外、⛔ 不放行。⚠️ 驗的是**報告本身的一致性**；⛔ 不能驗證數字與原始量測（`raw/`）相符。`p_b_budget` 一律由
+    呼叫端傳正式常數（`i074_stage2_preflight.P_B_BUDGET`），⛔ 不拿報告自己的值當基準。回傳問題清單（空 ＝ 有效）。
+    """
+    problems: list[str] = []
+    try:
+        _validate_report_v2(report, p_b_budget, problems)
+    except Exception as exc:  # noqa: BLE001 - 後援：任何未預期的結構都是「不符」，⛔ 不是例外
+        problems.append(f"驗證時發生例外（結構不符）：{type(exc).__name__}: {exc}")
+    return problems
+
+
+def _validate_report_v2(report: Any, p_b_budget: int, problems: list[str]) -> None:
+    if not _closed(problems, "報告", report, REPORT_KEYS):
+        return
+    fixed = (("schema", REPORT_V2_SCHEMA), ("contract", REPORT_CONTRACT), ("out_of_contract", list(REPORT_OUT_OF_CONTRACT)),
+             ("auto_reap_detection", REPORT_AUTO_REAP_DETECTION), ("memory_measures", REPORT_MEMORY_MEASURES))
+    for key, want in fixed:
+        if type(report[key]) is not type(want) or report[key] != want:
+            problems.append(f"{key}={report[key]!r}（必須是固定值）")
+    for key, allowed in (("status", ("ok", "threshold_exceeded")), ("mode", ("validation", "formal")),
+                         ("replay_compute", ("stub", "full"))):
+        if not isinstance(report[key], str) or report[key] not in allowed:
+            problems.append(f"{key}={report[key]!r}（只能是 {allowed}）")
+    for key in ("meta", "components"):
+        if not isinstance(report[key], dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                                        for k, v in report[key].items()):
+            problems.append(f"{key} 必須是字串對字串的 object")
+    manifest = report["harness_manifest"]
+    if not isinstance(manifest, dict) or not all(isinstance(v, str) and len(v) == 64 for v in manifest.values()):
+        problems.append("harness_manifest 必須是路徑對 SHA-256 的 object")
+    if not isinstance(report["harness_manifest_sha256"], str) or len(report["harness_manifest_sha256"]) != 64:
+        problems.append("harness_manifest_sha256 必須是 SHA-256")
+    if report["host_memavailable_low"] is not None and not _is_int(report["host_memavailable_low"]):
+        problems.append("host_memavailable_low 必須是整數或 null")
+    if not _str_list(report["notes"]):
+        problems.append("notes 必須是字串陣列")
+    # limits
+    limits = report["limits"]
+    limits_ok = _closed(problems, "limits", limits, _LIMITS_KEYS)
+    if limits_ok:
+        if not _is_int(limits["memory_bytes"]) or limits["memory_bytes"] != ACCEPTANCE_MEMORY_LIMIT:
+            problems.append(f"limits.memory_bytes={limits['memory_bytes']!r} ≠ {ACCEPTANCE_MEMORY_LIMIT}")
+        if not _is_int(limits["P_B_BUDGET"]) or limits["P_B_BUDGET"] != p_b_budget:
+            problems.append(f"limits.P_B_BUDGET={limits['P_B_BUDGET']!r} ≠ 正式常數 {p_b_budget}")
+        cml = limits["container_memory_limit_bytes"]
+        if not isinstance(cml, list) or not all(_is_int(v) and v > 0 for v in cml):
+            problems.append(f"limits.container_memory_limit_bytes={cml!r}（必須是正整數陣列）")
+            limits_ok = False
+    # paths
+    paths, path_ok = report["paths"], {}
+    if not isinstance(paths, dict) or set(paths) != {"success", "failure"}:
+        problems.append("paths 必須恰好是 success、failure")
+        paths = {}
+    for phase, info in paths.items():
+        where = f"paths.{phase}"
+        if not _closed(problems, where, info, _PATH_KEYS):
+            continue
+        ok = _peaks_ok(problems, f"{where}.peaks", info["peaks"])
+        ok = _typed(problems, where, info, {"accounted": "nonneg", "P_path": "nonneg", "read_only_gap": "nonneg",
+                                            "container_rule": "str"}) and ok
+        parts = info["accounted_parts"]
+        if not isinstance(parts, dict) or not all(isinstance(k, str) and _is_int(v) for k, v in parts.items()):
+            problems.append(f"{where}.accounted_parts 必須是名稱對整數的 object")
+            ok = False
+        if not ok:
+            continue
+        path_ok[phase] = True
+        if info["accounted"] != sum(parts.values()):
+            problems.append(f"{where}.accounted ≠ accounted_parts 的總和")
+        if info["P_path"] != max(info["peaks"]["dirs_peak"], info["peaks"]["fs_peak"], info["accounted"]):
+            problems.append(f"{where}.P_path ≠ max(dirs_peak, fs_peak, accounted)")
+    # promotion
+    promotion = report["promotion"]
+    if not isinstance(promotion, dict) or set(promotion) != {"promote_success", "promote_failure"}:
+        problems.append("promotion 必須恰好是 promote_success、promote_failure")
+        promotion = {}
+    for phase, info in promotion.items():
+        where = f"promotion.{phase}"
+        if not _closed(problems, where, info, _PROMOTION_KEYS):
+            continue
+        ok = _peaks_ok(problems, f"{where}.peaks", info["peaks"])
+        ok = _typed(problems, where, info, {"accounted": "nonneg", "P_promotion": "nonneg",
+                                            "P_path_plus_promotion": "nonneg", "kind": "str"}) and ok
+        if isinstance(info["kind"], str) and info["kind"] != PROMOTION_KIND:
+            problems.append(f"{where}.kind={info['kind']!r}")
+        if not ok:
+            continue
+        if info["P_promotion"] != max(info["peaks"]["dirs_peak"], info["peaks"]["fs_peak"], info["accounted"]):
+            problems.append(f"{where}.P_promotion ≠ max(dirs_peak, fs_peak, accounted)")
+        base_phase = "success" if phase == "promote_success" else "failure"
+        if path_ok.get(base_phase) and info["P_path_plus_promotion"] != paths[base_phase]["P_path"] + info["P_promotion"]:
+            problems.append(f"{where}.P_path_plus_promotion ≠ 對應路徑的 P_path ＋ P_promotion")
+    # memory 與 host 列
+    memory, host = report["memory"], report["host"]
+    rows_ok = True
+    if not isinstance(memory, list) or not isinstance(host, list):
+        problems.append("memory 與 host 必須是陣列")
+        memory, host, rows_ok = [], [], False
+    for i, row in enumerate(memory):
+        where = f"memory[{i}]"
+        if not _closed(problems, where, row, _MEMORY_ROW_KEYS):
+            rows_ok = False
+            continue
+        if not _typed(problems, where, row, {
+                "sequence": "pos", "phase": "str", "role": "str", "rc": "int", "max_single_rss_bytes": "pos",
+                "self_max_rss_bytes": "pos", "children_max_rss_bytes": "pos", "rss_peak_sampled_bytes": "pos",
+                "rss_samples": "pos", "reaper": "str", "cgroup_peak_bytes": "pos", "memory_limit_bytes": "pos",
+                "below_limit": "bool"}):
+            rows_ok = False
+            continue
+        if row["reaper"] != "pid1":
+            problems.append(f"{where}.reaper={row['reaper']!r}（容器內必須是 pid1）")
+        if row["max_single_rss_bytes"] != max(row["self_max_rss_bytes"], row["children_max_rss_bytes"]):
+            problems.append(f"{where}.max_single_rss_bytes ≠ max(self, children)")
+        if row["below_limit"] != (row["max_single_rss_bytes"] < ACCEPTANCE_MEMORY_LIMIT
+                                  and row["rss_peak_sampled_bytes"] < ACCEPTANCE_MEMORY_LIMIT):
+            problems.append(f"{where}.below_limit 與數值不符")
+    for i, row in enumerate(host):
+        where = f"host[{i}]"
+        if not _closed(problems, where, row, _HOST_ROW_KEYS):
+            continue
+        if not _typed(problems, where, row, {
+                "step": "str", "phase": "str", "rc": "int", "self_max_rss_bytes": "pos", "children_max_rss_bytes": "pos",
+                "max_single_rss_bytes": "pos", "group_rss_peak_sampled_bytes": "pos", "group_alarm": "bool",
+                "group_note": "str"}):
+            continue
+        if row["max_single_rss_bytes"] != max(row["self_max_rss_bytes"], row["children_max_rss_bytes"]):
+            problems.append(f"{where}.max_single_rss_bytes ≠ max(self, children)")
+        if row["group_alarm"] != (row["group_rss_peak_sampled_bytes"] >= ACCEPTANCE_MEMORY_LIMIT):
+            problems.append(f"{where}.group_alarm 與數值不符")
+        if row["group_note"] != GROUP_NOTES[row["group_alarm"]]:
+            problems.append(f"{where}.group_note 與 group_alarm 不符")
+    if limits_ok and rows_ok and limits["container_memory_limit_bytes"] != sorted({r["memory_limit_bytes"] for r in memory}):
+        problems.append("limits.container_memory_limit_bytes 與記憶體列不符")
+    # violations
+    violations = report["violations"]
+    if not isinstance(violations, list):
+        problems.append("violations 必須是陣列")
+    else:
+        for i, v in enumerate(violations):
+            where = f"violations[{i}]"
+            if not _closed(problems, where, v, _VIOLATION_KEYS):
+                continue
+            if _typed(problems, where, v, {"kind": "str", "subject": "str", "value": "int", "limit": "int"}) \
+                    and v["kind"] not in VIOLATION_KINDS:
+                problems.append(f"{where}.kind={v['kind']!r}（不在封閉的 enum 裡）")
+    if problems:
+        return
+    if violations != derive_acceptance_violations(report):
+        problems.append("violations 與由列重新推導的結果不符")
+    if (report["status"] == "ok") != (not violations):
+        problems.append(f"status={report['status']!r} 與 violations 是否為空不一致")
 
 
 def acceptance_report_text(report: Mapping[str, Any]) -> str:
     mib = lambda b: f"{b / 1048576:.1f} MiB" if b is not None else "—"  # noqa: E731
-    lines = [f"status: {report['status']}（mode={report['mode']}、replay_compute={report['replay_compute']}）"]
-    lines += [f"  ⚠️ {v}" for v in report["violations"]]
+    lines = [f"status: {report['status']}（mode={report['mode']}、replay_compute={report['replay_compute']}）",
+             f"契約：{report['contract']}（契約外：{'、'.join(report['out_of_contract'])}）"]
+    for v in report["violations"]:
+        sign = "＞" if v["kind"] == "disk_p_path" else "≥"
+        lines.append(f"  ⚠️ {v['kind']}：{v['subject']} {mib(v['value'])} {sign} {mib(v['limit'])}")
     lines += [f"門檻：記憶體 < {mib(report['limits']['memory_bytes'])}、磁碟 ≤ P_B_BUDGET {mib(report['limits']['P_B_BUDGET'])}", ""]
     for phase, info in report["paths"].items():
         pk = info["peaks"]
@@ -1419,10 +2257,11 @@ def acceptance_report_text(report: Mapping[str, Any]) -> str:
             lines.append(f"    {part:<22} {mib(value)}")
     for phase, info in report["promotion"].items():
         lines.append(f"[{phase}]（資訊值）P_promotion={mib(info['P_promotion'])}  P_path＋晉升={mib(info['P_path_plus_promotion'])}")
-    lines += ["", "容器（cgroup 峰值，含 page cache；上限 ＝ 當次 mem-guard 下修後的 --memory）："]
+    lines += ["", "容器（最大單一程序 RSS ＝ 精確閘；RSS 取樣 ＝ 單向偵測；cgroup ＝ 含 page cache 的資訊值；上限 ＝ 當次的 --memory）："]
     for row in report["memory"]:
         lines.append(f"  #{row['sequence']:<3} {row['phase']:<16} {row['role']:<10} rc={row['rc']}  "
-                     f"{mib(row['cgroup_peak_bytes'])}／上限 {mib(row['memory_limit_bytes'])}")
+                     f"最大單一 {mib(row['max_single_rss_bytes'])}  RSS 取樣 {mib(row['rss_peak_sampled_bytes'])}"
+                     f"（{row['rss_samples']} 次）  cgroup {mib(row['cgroup_peak_bytes'])}／上限 {mib(row['memory_limit_bytes'])}")
     lines.append("host 端程序樹（RSS，⛔ 不含 page cache）：")
     for row in report["host"]:
         lines.append(f"  {row['step']:<30} 最大單一 {mib(row['max_single_rss_bytes'])}  群組取樣 "
@@ -1494,7 +2333,8 @@ class Observer:
             except json.JSONDecodeError:
                 cmd = []
             self.containers[cid] = {"id": cid, "role": classify_container(cmd or []), "cmd_head": (cmd or [])[:6],
-                                    "first_seen": now, "gone_at": None, "peak_bytes": None, "reads": 0, "last_read": None}
+                                    "first_seen": now, "gone_at": None, "peak_bytes": None, "reads": 0, "last_read": None,
+                                    "rss_peak_bytes": None, "rss_reads": 0}
         for cid in set(self.containers) - ids:
             if self.containers[cid]["gone_at"] is None:
                 self.containers[cid]["gone_at"] = now
@@ -1513,6 +2353,14 @@ class Observer:
                 info["reads"] += 1
                 info["last_read"] = now
                 break
+            # ⑦d 增補「二」⑤：v1 memory.stat 的 total_rss（取樣的下界；⛔ 不讀 v2 的 anon）
+            try:
+                stat = (Path(self.cgroup_root) / "memory" / "docker" / info["id"] / "memory.stat").read_text()
+                rss = next(int(line.split()[1]) for line in stat.splitlines() if line.startswith("total_rss "))
+            except (OSError, ValueError, IndexError, StopIteration):
+                continue
+            info["rss_peak_bytes"] = rss if info["rss_peak_bytes"] is None else max(info["rss_peak_bytes"], rss)
+            info["rss_reads"] += 1
 
     def sample_fs(self) -> None:
         self.fs_peak_delta = max(self.fs_peak_delta, fs_used(self.fs_path) - self.fs_baseline)
@@ -1533,8 +2381,9 @@ class Observer:
                 "terminal": bool(roles & {"finalize", "publish"}), "promotion_verify": "promotion_verify" in roles}
         missing = [r for r in OBSERVE_EXPECTED if not seen[r]]
         unavailable = sorted(c["id"] for c in self.containers.values() if c["peak_bytes"] is None)
-        complete = (seen["replay"] and not missing and not unavailable and bool(self.first_poll_empty)
-                    and not self.last_poll_ids)
+        rss_unavailable = sorted(c["id"] for c in self.containers.values() if c["rss_peak_bytes"] is None)
+        complete = (seen["replay"] and not missing and not unavailable and not rss_unavailable
+                    and bool(self.first_poll_empty) and not self.last_poll_ids)
         return {
             "schema": "i074_stage2_observation_v1",
             "label_key": OBSERVE_LABEL_KEY,
@@ -1542,6 +2391,7 @@ class Observer:
             "replay_seen": seen["replay"],
             "missing_expected_containers": missing,
             "unavailable_containers": unavailable,
+            "rss_unavailable_containers": rss_unavailable,
             "started_before_first_container": bool(self.first_poll_empty),
             "stopped_after_last_container": not self.last_poll_ids,
             "containers": [dict(c, peak_kind="observed_lower_bound") for c in
@@ -1551,6 +2401,8 @@ class Observer:
             "host_memavailable_low": {"value": self.memavail_low, "kind": "sampled"},
             "polls": self.polls,
             "notes": ["記憶體是 cgroup high-water mark 的**下界**：最後一次讀取之後、容器結束之前的尾段峰值可能漏記（run-evaluation.sh 的教訓）",
+                      "⑦d 增補：rss_peak_bytes 是 cgroup v1 memory.stat 的 total_rss 的取樣最大值（不含 page cache；"
+                      "與 acceptance 的單向偵測器同一種量，⛔ 不是證明）；讀不到 → rss_unavailable_containers、⛔ 不完整",
                       "磁碟是取樣值（live 服務的寫入會墊高或壓低 L0）——⛔ 不是 P_B 的量法、⛔ 不與 P_B_BUDGET 比較",
                       "只額外記錄（v29「八」）：⛔ 不作為 ⑩ 的前置、⛔ 不為量測而重跑"],
         }
@@ -1603,10 +2455,12 @@ def run_observer(observer: Observer, state: Path, stop: Callable[[], bool], *, t
 def observation_text(report: Mapping[str, Any]) -> str:
     mib = lambda b: f"{b / 1048576:.1f} MiB" if b is not None else "—"  # noqa: E731
     lines = [f"observation_complete: {report['observation_complete']}（replay_seen={report['replay_seen']}、"
-             f"missing={report['missing_expected_containers']}、unavailable={report['unavailable_containers']}）",
-             "記憶體（cgroup high-water mark 的下界）："]
+             f"missing={report['missing_expected_containers']}、unavailable={report['unavailable_containers']}、"
+             f"rss_unavailable={report['rss_unavailable_containers']}）",
+             "記憶體（cgroup high-water mark 的下界；total_rss 是取樣的最大值）："]
     for c in report["containers"]:
-        lines.append(f"  {c['role']:<18} {c['id'][:12]}  {mib(c['peak_bytes'])}（讀 {c['reads']} 次）")
+        lines.append(f"  {c['role']:<18} {c['id'][:12]}  {mib(c['peak_bytes'])}（讀 {c['reads']} 次）  "
+                     f"total_rss {mib(c['rss_peak_bytes'])}（讀 {c['rss_reads']} 次）")
     lines.append(f"L0 增量（取樣）：{mib(report['fs_peak_delta_bytes']['value'])}；--work-dir（取樣）："
                  f"{mib(report['work_dir_peak_allocated_bytes']['value'])}")
     lines += [f"註：{n}" for n in report["notes"]]
@@ -1694,6 +2548,23 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("--state", "--step"):
         p.add_argument(name, required=True)
     p.add_argument("argv", nargs=argparse.REMAINDER)
+    p = sub.add_parser("reap-adopted")
+    p.add_argument("--state", required=True)
+    p.add_argument("--parent", required=True, type=int)
+    p.add_argument("--parent-starttime", required=True, type=int)
+    p.add_argument("--exclude", action="append", type=int, default=[])
+    p.add_argument("--check-only", action="store_true")
+    p = sub.add_parser("kill-pinned")
+    p.add_argument("--pid", required=True, type=int)
+    p.add_argument("--starttime", required=True, type=int)
+    p = sub.add_parser("guard-identity")
+    p.add_argument("--state", required=True)
+    p.add_argument("--shell-pid", required=True, type=int)
+    p = sub.add_parser("rss-capability")
+    p.add_argument("--file", required=True)
+    p = sub.add_parser("check-step")
+    for name in ("--state", "--step"):
+        p.add_argument(name, required=True)
     p = sub.add_parser("acceptance-report")
     for name in ("--state", "--clone", "--json-out", "--text-out"):
         p.add_argument(name, required=True)
@@ -1745,6 +2616,32 @@ def _dispatch(args) -> int:
         return promote_measure(args.clone, work=args.work, real=args.real, states=states)
     if cmd == "host-run":
         return host_run(Path(args.state), args.step, args.argv[1:] if args.argv[:1] == ["--"] else args.argv)
+    if cmd == "reap-adopted":
+        return reap_adopted(Path(args.state), parent=args.parent, parent_starttime=args.parent_starttime,
+                            exclude=args.exclude, check_only=args.check_only)
+    if cmd == "kill-pinned":
+        rc, record = kill_pinned(args.pid, args.starttime)
+        sys.stdout.write(canonical_dumps(record).decode("utf-8") + "\n")     # 恰好一行（呼叫端附加到 kill-pinned.jsonl）
+        return rc
+    if cmd == "guard-identity":
+        pid, starttime = guard_identity(Path(args.state), args.shell_pid)
+        print(f"{pid} {starttime}")
+        return 0
+    if cmd == "rss-capability":
+        try:
+            record = json.loads(Path(args.file).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"ERROR: 能力檢查的 rss.json 讀不到：{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        problems = rss_record_problems(record, require_pid1=True)
+        for problem in problems:
+            print(f"ERROR: 能力檢查：{problem}", file=sys.stderr)
+        return 1 if problems else 0
+    if cmd == "check-step":
+        problems = check_step(Path(args.state), args.step)
+        for problem in problems:
+            print(f"ERROR: {args.step}：{problem}", file=sys.stderr)
+        return 1 if problems else 0
     if cmd == "acceptance-report":
         pf = _load_module("i074_stage2_preflight", Path(args.clone) / "python" / "scripts" / "i074_stage2_preflight.py")
         sup = _load_module("i074_stage2_supervisor", Path(args.clone) / "scripts" / "lib" / "i074-stage2-supervisor.py")
@@ -1850,6 +2747,9 @@ def _dispatch(args) -> int:
             if args.leftover_cids and Path(args.leftover_cids).is_file() else []
         summary = {"schema": "i074_stage2_sizing_failure_v1", "failed_stage": args.stage, "rc": int(args.rc),
                    "phases": phases, "P_B": None, "leftover_containers": leftovers,
+                   # ⑦d 增補：guard 的 kill-pinned 紀錄與收不掉的 host 程序（有才列）
+                   "kill_pinned_log": "raw-failed/kill-pinned.jsonl" if (state / "kill-pinned.jsonl").is_file() else None,
+                   "leftover_pids": "raw-failed/leftover-pids.json" if (state / "leftover-pids.json").is_file() else None,
                    "note": "⛔ 本檔不宣稱 P_B；原始量測見 raw-failed/"}
         Path(args.out).write_bytes(canonical_dumps(summary))
         return 0

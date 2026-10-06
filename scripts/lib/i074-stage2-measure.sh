@@ -8,6 +8,9 @@
 # ⚠️ 本檔只定義函式與狀態變數的初值，⛔ 不執行任何動作。呼叫端在 source 之前要設好 S、HELPER、REAL_DOCKER、RUN_ID、LOG；
 #   之後再設 WORK（失敗清理要複製 S 到 <work>/raw-failed/）。
 # ⚠️ 內容自 ④ 的 sizing harness 原樣抽出（共用原語，⛔ 不另寫一份）；演練用的故障注入仍是 `I074_SIZING_FAULT`。
+# ⚠️ ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：harness 自己是 subreaper（bootstrap 以
+#   python3 啟動器設定）——`measure_subreaper_guard` 以行為驗證；每一步之後、正常結束之前以 `reap-adopted --check-only` 確認
+#   沒有被收養的程序；`on_failure` 以 `reap-adopted` 清掉它們（結束碼 ≠ 0 → 保留 S）。
 
 # ── 啟動守門（⚠️ 自 ④ 的 sizing harness 抽出；呼叫端要先定義 die、設 REPO_ROOT） ─────────────────────────
 # REPLAY_IMAGE_ID、與 ⑩ 的 label shim 互斥（環境帶 I074_STAGE2_*、或 PATH 上的 docker 是 label shim → 中止）。設 IMAGE、REAL_DOCKER。
@@ -56,6 +59,107 @@ sha_of() { sha256sum < "$1" | cut -d' ' -f1; }
 alloc() { helper allocated "$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["allocated"])'; }
 
 PHASE=""; SAMPLER_PID=""; STEP_PID=""; DONE=0
+HARNESS_STARTTIME=""; GUARD_PROBE=""; GUARD_SHELL_PID=""; GUARD_LEFTOVER=0
+# 本程序（$$）在 /proc/<pid>/stat 的 starttime（第 22 欄）。$1＝pid（預設 $$）。
+proc_starttime() {
+  local s
+  s="$(< "/proc/${1:-$$}/stat")" || return 1
+  s="${s##*) }"
+  set -- $s
+  printf '%s\n' "${20}"
+}
+# harness 收養的程序：`--check-only`（$1＝說明）。⚠️ helper 必須是本 shell 的直接子程序（⛔ 不在 $( ) 裡呼叫）——
+#   它以 getppid() 確認 harness 的身分。有收養的程序 ＝ 步驟把程序留在 host → on_failure（它會清掉它們）。
+measure_check_adopted() {
+  local rc=0
+  helper reap-adopted --state "$S" --parent "$$" --parent-starttime "$HARNESS_STARTTIME" \
+    ${SAMPLER_PID:+--exclude "$SAMPLER_PID"} --check-only 2>>"$S/adopted.err" || rc=$?
+  [ "$rc" = 0 ] || on_failure "$1：harness 收養了程序（步驟把程序留在 host）或檢查失敗（reap-adopted 結束碼 $rc）" 1
+}
+# guard 的測試程序以 kill-pinned 收掉（身分可信時）；結果附加到 <S>/kill-pinned.jsonl。回傳 kill-pinned 的結束碼。
+measure_kill_guard_probe() {
+  local rc=0 out
+  [ -n "$GUARD_PROBE" ] || return 0
+  set -- $GUARD_PROBE
+  out="$(helper kill-pinned --pid "$1" --starttime "$2")" || rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out" >> "$S/kill-pinned.jsonl"
+  GUARD_PROBE=""
+  [ "$rc" = 0 ] || GUARD_LEFTOVER=1
+  return "$rc"
+}
+# 測試程序：自己 os.setsid()（失敗就立刻結束、⛔ 不寫身分）→ 讀自己的 starttime → 寫 <S>/guard-probe.json → 睡 5 秒。
+#   失敗出口另寫只供診斷的 <S>/guard-probe-status.json（⛔ 不是身分來源）。$1＝S、$2＝故障注入。
+GUARD_PROBE_CODE='import errno, json, os, sys, time
+S, fault = sys.argv[1], sys.argv[2]
+def write(name, obj):
+    tmp = os.path.join(S, "." + name + ".tmp")
+    with open(tmp, "w") as fh:
+        fh.write(json.dumps(obj, sort_keys=True, separators=(",", ":")))
+    os.replace(tmp, os.path.join(S, name))
+def fail(stage, code):
+    try:
+        write("guard-probe-status.json", {"schema": "i074_stage2_guard_probe_status_v1", "pid": os.getpid(),
+                                          "stage": stage, "errno": errno.errorcode.get(code, "EINVAL")})
+    except OSError:
+        pass
+    sys.exit(3)
+try:
+    if fault == "guard-pgleader":
+        os.setpgid(0, 0)
+    os.setsid()
+except OSError as exc:
+    fail("setsid", exc.errno)
+try:
+    with open("/proc/self/stat") as fh:
+        starttime = int(fh.read().rsplit(")", 1)[1].split()[19])
+except (OSError, ValueError, IndexError) as exc:
+    fail("self_stat", getattr(exc, "errno", None) or errno.EINVAL)
+if fault != "guard-noident":
+    write("guard-probe.json", {"pid": os.getpid() + (1 if fault == "guard-badident" else 0), "starttime": starttime})
+time.sleep(5)
+'
+# ⑦d 增補：以行為驗證 harness 是 subreaper。⚠️ 在六步清理的 trap 裝好、建好 work 目錄之後呼叫；所有出口都收掉測試程序。
+measure_subreaper_guard() {
+  local ident ppid s
+  rm -f "$S/guard-probe.json" "$S/guard-probe-status.json"
+  # ① 子 shell **直接**背景啟動 Python（⛔ 不經外部的 setsid 指令），以 command substitution 回報 $!（恰好一行整數）。
+  GUARD_SHELL_PID="$( ( python3 -c "$GUARD_PROBE_CODE" "$S" "${I074_SIZING_FAULT:-}" </dev/null >/dev/null 2>&1 & echo "$!" ) )"
+  [[ "$GUARD_SHELL_PID" =~ ^[0-9]+$ ]] || GUARD_SHELL_PID=""
+  for _ in $(seq 1 40); do
+    [ -s "$S/guard-probe.json" ] && break
+    sleep 0.05
+  done
+  # ③ 身分可信 ⟺ JSON 格式正確、pid ＝ $!、starttime 與 /proc 相符（helper 驗；不符 → 結束碼 1）。
+  if [ -n "$GUARD_SHELL_PID" ] && ident="$(helper guard-identity --state "$S" --shell-pid "$GUARD_SHELL_PID" 2>>"$S/guard.err")"; then
+    GUARD_PROBE="$ident"
+    [ "${I074_SIZING_FAULT:-}" != subreaper-stall ] || { sleep 60 & wait "$!"; }
+    s="$(< "/proc/${GUARD_PROBE%% *}/stat")" && s="${s##*) }" && set -- $s && ppid="$2" || ppid=""
+    if [ "$ppid" != "$$" ]; then
+      on_failure "harness ⛔ 不是 subreaper（測試程序 ${GUARD_PROBE% *} 的 ppid＝${ppid:-讀不到}、harness＝$$）" 1
+    fi
+    measure_kill_guard_probe || on_failure "收不掉 guard 的測試程序（見 kill-pinned.jsonl）" 1
+    say "==> harness 是 subreaper（guard 通過）"
+    return 0
+  fi
+  # ④ 身分不可信：⛔ 不送任何訊號，只以 $! 等最多 6 秒、確認它已消失或是 zombie；之後中止（subreaper 沒有被驗證）。
+  local status=""
+  [ -s "$S/guard-probe-status.json" ] && status="$(< "$S/guard-probe-status.json")"
+  if [ -n "$GUARD_SHELL_PID" ]; then
+    for _ in $(seq 1 120); do
+      s="$(cat "/proc/$GUARD_SHELL_PID/stat" 2>/dev/null)" || break
+      s="${s##*) }"; set -- $s
+      case "$1" in Z|X) break ;; esac
+      sleep 0.05
+    done
+    if s="$(cat "/proc/$GUARD_SHELL_PID/stat" 2>/dev/null)"; then
+      s="${s##*) }"; set -- $s
+      case "$1" in Z|X) ;; *) GUARD_LEFTOVER=1 ;; esac
+    fi
+  else
+    GUARD_LEFTOVER=1
+  fi
+  on_failure "guard 無法確認測試程序的身分（\$!＝${GUARD_SHELL_PID:-沒有}；狀態檔：${status:-沒有}）——⛔ 不送訊號，subreaper 沒有被驗證" 1
+}
 stop_sampler() {
   if [ -n "$SAMPLER_PID" ]; then
     touch "$S/phases/$PHASE/sampler.stop" 2>/dev/null || true
@@ -136,6 +240,7 @@ run_in_group() {
     on_failure "$name：leader 已結束（結束碼 $rc）但 process group $STEP_PID 仍有成員" 1
   fi
   STEP_PID=""
+  measure_check_adopted "$name"                                      # ⑦d 增補：逃出 group 的程序也⛔ 不得留下
 }
 # 成功路徑用：本次 run id 的容器必須一個都不剩。⚠️ `docker ps` 本身失敗 ⇒ 查不到就⛔ 不能當作沒有。
 ensure_no_run_containers() {  # $1＝說明
@@ -146,7 +251,7 @@ ensure_no_run_containers() {  # $1＝說明
   [ -z "$out" ] || on_failure "$1：仍有本次的容器 $(printf '%s ' $out)" 1
 }
 on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在量測窗口終止之後。
-  local stage="$1" rc="$2" cleaned=0 copied=0 summarized=0 group_stopped=1
+  local stage="$1" rc="$2" cleaned=0 copied=0 summarized=0 group_stopped=1 adopted_ok=1 rrc=0
   trap - EXIT INT TERM
   stop_sampler                                                       # 1
   cleanup_containers || true                                         # 2：先停掉還在跑的容器
@@ -155,6 +260,13 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
   if [ -n "$STEP_PID" ]; then
     stop_step_group "$STEP_PID" || group_stopped=0
     STEP_PID=""
+  fi
+  # 2b'（⑦d 增補）：guard 的測試程序（kill-pinned）與 harness 收養的程序（reap-adopted；含 host-run 被 KILL 留下的）
+  measure_kill_guard_probe || adopted_ok=0
+  [ "$GUARD_LEFTOVER" = 0 ] || adopted_ok=0
+  if [ -n "$HARNESS_STARTTIME" ]; then
+    helper reap-adopted --state "$S" --parent "$$" --parent-starttime "$HARNESS_STARTTIME" 2>>"$S/adopted.err" || rrc=$?
+    [ "$rrc" = 0 ] || adopted_ok=0
   fi
   cleanup_containers && cleaned=1                                    # 2c：group 結束後再清一次——這一次才算數
   [ -n "$PHASE" ] && [ -d "$S/phases/$PHASE" ] && touch "$S/phases/$PHASE/aborted"   # 3
@@ -171,18 +283,23 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
     echo "⚠️ 有容器移除不了（CID 如下），請手動 docker rm -f：" >&2
     sort -u "$S/leftover-cids" >&2
   fi
-  # 6：四者都成功才清 S——⚠️ 步驟的 process group 沒有確實結束時，仍存活的程序可能還在寫 S。
-  if [ "$group_stopped" = 1 ] && [ "$cleaned" = 1 ] && [ "$copied" = 1 ] && [ "$summarized" = 1 ]; then
+  if [ "$adopted_ok" = 0 ]; then
+    echo "⚠️ 收不掉的 host 程序（reap-adopted 結束碼 $rrc；guard 的測試程序：$GUARD_LEFTOVER）：" >&2
+    cat "$S/leftover-pids.json" "$S/kill-pinned.jsonl" "$S/adopted.err" 2>/dev/null >&2 || true
+  fi
+  # 6：五者都成功才清 S——⚠️ 步驟的 process group 沒有確實結束、或還有收不掉的程序時，它們可能還在寫 S。
+  if [ "$group_stopped" = 1 ] && [ "$adopted_ok" = 1 ] && [ "$cleaned" = 1 ] && [ "$copied" = 1 ] && [ "$summarized" = 1 ]; then
     rm -rf "$S"
     echo "原始量測：$WORK/raw-failed/；摘要：$WORK/failure_summary.json（⛔ 不宣稱 P_B）" >&2
   else
-    echo "⚠️ 步驟結束（$group_stopped）、容器清理（$cleaned）、原始量測的複製（$copied）或失敗摘要（$summarized）" \
-         "沒有全部成功——保留 S：$S" >&2
+    echo "⚠️ 步驟結束（$group_stopped）、收養的程序（$adopted_ok）、容器清理（$cleaned）、原始量測的複製（$copied）" \
+         "或失敗摘要（$summarized）沒有全部成功——保留 S：$S" >&2
   fi
   exit 1
 }
 # 正式流程的 trap（六步清理）。⚠️ 呼叫之前，入口的 bootstrap trap 仍有效。
 measure_install_traps() {
+  HARNESS_STARTTIME="$(proc_starttime)" || HARNESS_STARTTIME=""
   trap 'on_failure signal-INT 130' INT
   trap 'on_failure signal-TERM 143' TERM
   trap '[ "$DONE" = 1 ] || on_failure "未預期的結束" "$?"' EXIT

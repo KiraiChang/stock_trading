@@ -2636,6 +2636,7 @@ ac_shim() {  # $1＝S；其餘＝docker 參數。回傳 shim 的結束碼；runa
   local st="$1" rc=0; shift
   mkdir -p "$st/harness/python/scripts"
   : > "$st/harness/python/scripts/i074_stage2_replay_stub.py"
+  [ -n "${AC_NO_WRAPPER:-}" ] || : > "$st/harness/python/scripts/i074_stage2_rss_wrapper.py"
   set +e
   env SIZING_REAL_DOCKER="$AC_TD/real/docker" SIZING_STATE="$st" SIZING_RUN_ID=t SIZING_IMAGE="$AC_IMG" \
       SIZING_PHASE="${AC_PHASE:-success}" SIZING_ROLE="${AC_ROLE:-replay}" SIZING_INCLUDED="${AC_INCLUDED:-true}" \
@@ -2656,13 +2657,15 @@ pos = args.index(img)
 want = ["--network", "none", "-v", "/wt/python:/app:ro", "-w", "/app",
         "-v", f"{st}/harness/python/scripts/i074_stage2_replay_stub.py:/acceptance/replay_stub.py:ro",
         "-e", "I074_ACCEPTANCE_REPLAY=success", "-e", "I074_ACCEPTANCE_COMPUTE=stub",
+        "-v", f"{st}/harness/python/scripts/i074_stage2_rss_wrapper.py:/acceptance/rss_wrapper.py:ro",
         "--cidfile", f"{st}/cid/o0010.cid", "--name", "i074sz-t-o0010", "-v", f"{st}/peak/o0010:/peak"]
 assert args[:pos] == want, args[:pos]
-assert args[pos + 1:pos + 3] == ["sh", "-c"] and args[pos + 4:] == ["_", "python", "/acceptance/replay_stub.py", "--x", "1", "--y"], args[pos:]
+# ⑦d 增補：容器指令包進快照裡的 RSS wrapper（⛔ 不再是 sh -c 的 cgroup 峰值 wrapper）
+assert args[pos + 1:] == ["python", "-I", "/acceptance/rss_wrapper.py", "python", "/acceptance/replay_stub.py", "--x", "1", "--y"], args[pos:]
 assert json.load(open(st + "/index/0001.json"))["profile"] == "acceptance"
 PY
 then
-  pass "ac4：acceptance 的 replay → ⛔ 沒有 --read-only、指令換成快照裡的 launcher（加唯讀掛載與兩個模式變數）、其餘逐 token 不變"
+  pass "ac4：acceptance 的 replay → ⛔ 沒有 --read-only、指令換成快照裡的 launcher（加唯讀掛載與兩個模式變數）、外面包快照裡的 RSS wrapper、其餘逐 token 不變"
 else
   fail "ac4：acceptance 的 replay 改寫不符（rc=$rc）"
 fi
@@ -2672,9 +2675,10 @@ import sys
 st, img = sys.argv[1], sys.argv[2]
 args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
 pos = args.index(img)
-assert "--read-only" not in args[:pos] and args[pos + 4:] == ["_", "python", "-m", "x", "--finalize"], args
+assert "--read-only" not in args[:pos] and args[pos + 1:] == ["python", "-I", "/acceptance/rss_wrapper.py", "python", "-m", "x", "--finalize"], args
+assert f"{st}/harness/python/scripts/i074_stage2_rss_wrapper.py:/acceptance/rss_wrapper.py:ro" in args[:pos], args[:pos]
 PY
-then pass "ac4：acceptance 的其他 role → ⛔ 沒有 --read-only、容器指令逐 token 不變"; else fail "ac4：acceptance 的 finalizer 改寫不符（rc=$rc）"; fi
+then pass "ac4：acceptance 的其他 role → ⛔ 沒有 --read-only、包快照裡的 RSS wrapper、原指令逐 token 不變"; else fail "ac4：acceptance 的 finalizer 改寫不符（rc=$rc）"; fi
 rc=0; AC_COMPUTE=full AC_NOCF=/nocf/python ac_shim "$AC_TD/s3" run -v /wt/python:/app:ro "$AC_IMG" "${AC_EVAL[@]}" || rc=$?
 if [ "$rc" = 0 ] && python3 - "$AC_TD/s3" "$AC_IMG" <<'PY'
 import sys
@@ -2694,6 +2698,7 @@ AC_COMPUTE=full AC_NOCF=/nocf/python ac_rejects "ac4：full 但沒有 /app 的�
 AC_COMPUTE=full AC_NOCF=/nocf/python ac_rejects "ac4：full 但有兩個 /app 的掛載 → 125" run -v /a:/app:ro -v /b:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
 AC_COMPUTE=full ac_rejects "ac4：full 但沒有 SIZING_NOCF_PYTHON → 125" run -v /a:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
 ac_rejects "ac4：replay 的指令開頭不是 evaluation → 125" run "$AC_IMG" python -m backtest.modular.sr_scoring.other
+AC_ROLE=finalizer AC_NO_WRAPPER=1 ac_rejects "ac4（增補）：快照裡沒有 RSS wrapper → 125" run -v /wt/python:/app:ro "$AC_IMG" python -m x
 AC_MODE=bogus ac_rejects "ac4：SIZING_REPLAY_MODE 非法 → 125" run "$AC_IMG" "${AC_EVAL[@]}"
 AC_MODE=failure AC_COMPUTE=full AC_NOCF=/n ac_rejects "ac4：full 只限 success → 125" run -v /a:/app:ro "$AC_IMG" "${AC_EVAL[@]}"
 AC_PROFILE=bogus ac_rejects "ac4：未知的 SIZING_PROFILE → 125" run "$AC_IMG" "${AC_EVAL[@]}"
@@ -2702,7 +2707,9 @@ python3 - "$AC_TD/s4" "$AC_IMG" <<'PY' && pass "ac4：profile 未設定 ＝ sizi
 import sys
 st, img = sys.argv[1], sys.argv[2]
 args = open(st + ".runargs", "rb").read().decode().split("\0")[:-1]
-assert "--read-only" in args[:args.index(img)], args
+pos = args.index(img)
+assert "--read-only" in args[:pos], args
+assert args[pos + 1:pos + 3] == ["sh", "-c"] and not any("rss_wrapper" in a for a in args), args   # sizing ⛔ 不掛 wrapper
 PY
 
 # ac7、ac8：harness 在動手之前就拒絕（fake docker：image inspect 成功；identity 放在測試自己的 XDG）
@@ -2712,7 +2719,30 @@ mkdir -p "$AC_TD/okd" "$AC_TD/xdg/stock_trading/i074_stage2" "$AC_TD/empty-xdg"
 printf '{}\n' > "$AC_TD/xdg/stock_trading/i074_stage2/run_identity.json"
 cat > "$AC_TD/okd/docker" <<'FAKE'
 #!/usr/bin/env bash
-case "$1" in image|rm) exit 0 ;; inspect) exit 1 ;; ps) exit 0 ;; info) echo /var/lib/docker ;; esac
+# ⑦d 增補：`run` 扮演能力檢查的容器——在 /peak 的掛載寫 rss.json（FAKE_PROBE：ok（預設）／v2／subreaper／bad／hang）、
+#   寫 cidfile；`rm` 記進 FAKE_LOG（有設的話）；FAKE_RM_FAIL＝1 → rm 失敗、inspect 顯示容器仍在。
+[ -z "${FAKE_LOG:-}" ] || printf '%s\n' "$*" >> "$FAKE_LOG"
+case "$1" in
+  image) exit 0 ;;
+  rm) [ -z "${FAKE_RM_FAIL:-}" ] || exit 1; exit 0 ;;
+  inspect) [ -n "${FAKE_RM_FAIL:-}" ] && exit 0; exit 1 ;;
+  ps) exit 0 ;;
+  info) echo /var/lib/docker; exit 0 ;;
+  run)
+    shift; args=("$@"); peak=""
+    for i in "${!args[@]}"; do
+      case "${args[$i]}" in
+        --cidfile) printf 'cid-probe' > "${args[$((i + 1))]}" ;;
+        -v) case "${args[$((i + 1))]}" in *:/peak) peak="${args[$((i + 1))]%:/peak}" ;; esac ;;
+      esac
+    done
+    [ "${FAKE_PROBE:-ok}" != hang ] || exec sleep 60
+    src="v1:total_rss"; reaper="pid1"; extra=""
+    case "${FAKE_PROBE:-ok}" in v2) src="v2:anon" ;; subreaper) reaper="subreaper" ;; bad) extra=',"extra":1' ;; esac
+    [ -z "$peak" ] || printf '{"all_descendants_reaped":true,"auto_reap_detected":false,"children_max_rss_bytes":10485760,"errors":[],"max_single_rss_bytes":12582912,"reaper":"%s","rss_interval_ms":50,"rss_peak_sampled_bytes":8388608,"rss_samples":3,"rss_source":"%s","schema":"i074_stage2_rss_v1","self_max_rss_bytes":12582912%s}' \
+      "$reaper" "$src" "$extra" > "$peak/rss.json"
+    exit 0 ;;
+esac
 exit 0
 FAKE
 chmod +x "$AC_TD/okd/docker"
@@ -2758,7 +2788,8 @@ for f in scripts/i074-stage2-acceptance.sh scripts/i074-stage2-sizing.sh scripts
          scripts/lib/i074-sizing-docker-shim.sh scripts/lib/mem-guard.sh python/scripts/i074_stage2_sizing.py \
          python/scripts/i074_stage2_replay_stub.py scripts/run-replay-offline.sh scripts/finalize-stage2-evidence.sh \
          scripts/lib/replay-args.sh scripts/lib/i074-stage2-supervisor.py python/scripts/i074_stage2_preflight.py \
-         python/scripts/i074_stage2_promote.py python/scripts/_i074_bootstrap.py python/scripts/i074_stage2_freeze_record.py; do
+         python/scripts/i074_stage2_promote.py python/scripts/_i074_bootstrap.py python/scripts/i074_stage2_freeze_record.py \
+         python/scripts/i074_stage2_rss_wrapper.py; do
   mkdir -p "$AC_REPO/$(dirname "$f")"; cp -p "$REPO_ROOT/$f" "$AC_REPO/$f"
 done
 git -C "$AC_REPO" init -q && git -C "$AC_REPO" add -A
@@ -2872,6 +2903,119 @@ rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wfh3 --formal --replay-compu
   && grep -qx "mode	formal" "$AC_TD/wfh3/raw-failed/meta.tsv" && grep -qx "repo_head	$AC_FIX" "$AC_TD/wfh3/raw-failed/meta.tsv" \
   && pass "review1：對照組——HEAD 沒有移動的 --formal 通過這一道" \
   || { fail "review1：對照組不符（rc=$rc）"; cat "$AC_TD/wfh3.err" >&2; }
+# ── ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac25、ac26、ac28 ──────────
+ac_gone() {  # $1＝pid：已消失或是 zombie
+  local s
+  s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0
+  s="${s##*) }"; set -- $s
+  case "$1" in Z|X) return 0 ;; esac
+  return 1
+}
+# ac28：經 bootstrap 啟動 → guard 通過、測試程序已不在；能力檢查通過（之後在隔離 repo 缺的東西上失敗）
+rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wguard || rc=$?
+gpid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AC_TD/wguard/raw-failed/guard-probe.json" 2>/dev/null || true)"
+if [ "$rc" = 1 ] && grep -q "harness 是 subreaper（guard 通過）" "$AC_TD/wguard.err" && [ -n "$gpid" ] && ac_gone "$gpid" \
+   && grep -qx "rss_capability	v1:total_rss" "$AC_TD/wguard/raw-failed/meta.tsv" && [ -d "$AC_TD/wguard/real" ]; then
+  pass "ac28：經 bootstrap 啟動 → guard 通過、測試程序已收掉；ac25：能力檢查通過才 clone"
+else
+  fail "ac28／ac25：guard 或能力檢查不符（rc=$rc）"; cat "$AC_TD/wguard.err" >&2
+fi
+# ac28：故障注入——身分不可信的三種情境 → ⛔ 不送訊號、等它自己結束、中止
+for fault in guard-noident guard-badident guard-pgleader; do
+  rc=0; I074_SIZING_FAULT="$fault" ac_isolated scripts/i074-stage2-acceptance.sh "w$fault" || rc=$?
+  raw="$AC_TD/w$fault/raw-failed"
+  spid="$(grep -o '\$!＝[0-9]*' "$AC_TD/w$fault.err" | head -1 | sed 's/.*＝//' || true)"
+  ok=1
+  [ "$rc" = 1 ] && grep -q "guard 無法確認測試程序的身分" "$AC_TD/w$fault.err" && [ -n "$spid" ] && ac_gone "$spid" \
+    && [ ! -e "$raw/kill-pinned.jsonl" ] || ok=0
+  if [ "$fault" = guard-pgleader ]; then
+    python3 - "$raw/guard-probe-status.json" "$spid" <<'PY' && [ ! -e "$raw/guard-probe.json" ] || ok=0
+import json, sys
+doc = json.load(open(sys.argv[1]))
+assert set(doc) == {"schema", "pid", "stage", "errno"}, doc
+assert (doc["schema"], doc["stage"], doc["errno"], doc["pid"]) == ("i074_stage2_guard_probe_status_v1", "setsid", "EPERM", int(sys.argv[2])), doc
+PY
+  fi
+  if [ "$ok" = 1 ]; then
+    pass "ac28：$fault → ⛔ 沒有呼叫 kill-pinned、測試程序自己結束、中止"
+  else
+    fail "ac28：$fault 的處置不符（rc=$rc、\$!=$spid）"; cat "$AC_TD/w$fault.err" >&2
+  fi
+done
+# ac25：能力檢查不符 → on_failure、⛔ 沒有 clone
+for probe in v2 subreaper bad; do
+  rc=0; FAKE_PROBE="$probe" ac_isolated scripts/i074-stage2-acceptance.sh "wprobe-$probe" || rc=$?
+  if [ "$rc" = 1 ] && grep -q "能力檢查：rss.json 不符" "$AC_TD/wprobe-$probe.err" && [ ! -e "$AC_TD/wprobe-$probe/real" ] \
+     && [ -f "$AC_TD/wprobe-$probe/failure_summary.json" ]; then
+    pass "ac25：能力檢查的 rss.json（$probe）不符 → 中止、⛔ 沒有 clone"
+  else
+    fail "ac25：能力檢查（$probe）沒有擋下（rc=$rc）"; cat "$AC_TD/wprobe-$probe.err" >&2
+  fi
+done
+rc=0; FAKE_PROBE=hang FAKE_LOG="$AC_TD/probe-hang.log" I074_SIZING_FAULT=probe-timeout \
+  ac_isolated scripts/i074-stage2-acceptance.sh wprobe-hang || rc=$?
+[ "$rc" = 1 ] && grep -q "能力檢查：docker run 失敗或逾時" "$AC_TD/wprobe-hang.err" && grep -qx "rm -f cid-probe" "$AC_TD/probe-hang.log" \
+  && pass "ac25：卡住的 docker client（probe-timeout）→ 被 KILL、以 cidfile 清掉容器、中止" \
+  || { fail "ac25：卡住的能力檢查的處置不符（rc=$rc）"; cat "$AC_TD/wprobe-hang.err" >&2; }
+rc=0; FAKE_PROBE=hang FAKE_RM_FAIL=1 I074_SIZING_FAULT=probe-timeout ac_isolated scripts/i074-stage2-acceptance.sh wprobe-rmfail || rc=$?
+kept="$(ac_kept "$AC_TD/wprobe-rmfail.err")"
+if [ "$rc" = 1 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "cid-probe" "$AC_TD/wprobe-rmfail.err"; then
+  pass "ac25：能力檢查的容器清不掉 → 保留 S、列出 CID"
+else
+  fail "ac25：清不掉的能力檢查容器的處置不符（rc=$rc）"; cat "$AC_TD/wprobe-rmfail.err" >&2
+fi
+[ -n "$kept" ] && rm -rf -- "$kept"
+# ac25、ac28：被 TERM（能力檢查卡住期間、guard 停住期間）→ harness 結束碼 1、failure_summary 記 143、收尾完整
+for case in probe guard; do
+  if [ "$case" = probe ]; then extra=(FAKE_PROBE=hang "FAKE_LOG=$AC_TD/term-probe.log"); fault=""; else extra=(); fault=subreaper-stall; fi
+  python3 -c 'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    env -u PY_IMAGE PATH="$AC_TD/okd:$PATH" XDG_DATA_HOME="$AC_TD/xdg" REPLAY_IMAGE_ID="$AC_IMG" I074_SIZING_FAULT="$fault" "${extra[@]}" \
+    "$AC_REPO/scripts/i074-stage2-acceptance.sh" --work-dir "$AC_TD/wterm-$case" > /dev/null 2> "$AC_TD/wterm-$case.err" &
+  bpid=$!
+  s_path=""
+  for _ in $(seq 1 200); do s_path="$(ac_started "$AC_TD/wterm-$case.err")"; [ -n "$s_path" ] && break; sleep 0.05; done
+  want_file="$s_path/cid/probe.cid"; [ "$case" = guard ] && want_file="$s_path/guard-probe.json"
+  for _ in $(seq 1 200); do [ -s "$want_file" ] && break; sleep 0.05; done
+  gpid=""; [ "$case" = guard ] && gpid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$want_file" 2>/dev/null || true)"
+  sleep 0.3
+  kill -TERM "$bpid" 2>/dev/null || true
+  rc=0; wait "$bpid" || rc=$?
+  summary="$AC_TD/wterm-$case/failure_summary.json"
+  ok=1
+  [ "$rc" = 1 ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert (d["rc"], d["failed_stage"]) == (143, "signal-TERM"), d' "$summary" || ok=0
+  if [ "$case" = probe ]; then grep -qx "rm -f cid-probe" "$AC_TD/term-probe.log" || ok=0
+  else [ -n "$gpid" ] && ac_gone "$gpid" && grep -q '"terminated_by_' "$AC_TD/wterm-$case/raw-failed/kill-pinned.jsonl" || ok=0
+  fi
+  if [ "$ok" = 1 ]; then pass "ac25／ac28：$case 期間收到 TERM → 結束碼 1、failure_summary 記 143、收尾完整"
+  else fail "ac25／ac28：$case 期間收到 TERM 的處置不符（rc=$rc）"; cat "$AC_TD/wterm-$case.err" >&2; fi
+done
+# ac28：sizing 的故障注入 orphan-setsid——步驟留下逃出 group 的程序 → 收養的檢查擋下、清掉它
+rc=0; I074_SIZING_FAULT=orphan-setsid ac_isolated scripts/i074-stage2-sizing.sh worph || rc=$?
+opid="$(cat "$AC_TD/worph/raw-failed/orphan.pid" 2>/dev/null || true)"
+if [ "$rc" = 1 ] && grep -q "harness 收養了程序" "$AC_TD/worph.err" && [ -n "$opid" ] && ac_gone "$opid"; then
+  pass "ac28：步驟留下 setsid 的程序 → 收養的檢查觸發 on_failure、它已被清掉"
+else
+  fail "ac28：orphan-setsid 沒有被擋下或沒有清掉（rc=$rc、pid=$opid）"; cat "$AC_TD/worph.err" >&2
+fi
+# ac26：acceptance 的 step() 本身（自檔案抽出實際執行；stub 的 run_in_group／helper／on_failure）
+step_src="$(sed -n '/^step() {/,/^}/p' "$REPO_ROOT/scripts/i074-stage2-acceptance.sh")"
+for verdict in 1 0; do
+  out="$(bash -c "$step_src"'
+say() { :; }; run_in_group() { :; }
+helper() { [ "$1" = check-step ] && return '"$verdict"'; return 0; }
+on_failure() { echo "ON_FAILURE $1"; exit 7; }
+PHASE=success; S="$(mktemp -d)"; L3=/x; CLEAN=(); IMAGE=i; REAL_DOCKER=d; RUN_ID=r; HELPER=h
+trap "rm -rf -- \"\$S\"" EXIT
+step finalize 0 finalizer true
+echo AFTER' 2>/dev/null)" || true
+  if [ "$verdict" = 1 ]; then
+    grep -q "ON_FAILURE 量測檢查（finalize）" <<< "$out" && ! grep -q AFTER <<< "$out" \
+      && pass "ac26：check-step 不通過 → 立刻 on_failure、之後⛔ 沒有繼續" || fail "ac26：check-step 不通過卻繼續了：$out"
+  else
+    grep -q AFTER <<< "$out" && pass "ac26：check-step 通過 → 繼續（對照組）" || fail "ac26：check-step 通過卻中止：$out"
+  fi
+done
+
 # --formal：清單 ① 在快照前後都驗 ＝ HEAD；必須帶 full；⛔ 不接受故障注入
 rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf1 --formal || rc=$?
 [ "$rc" = 1 ] && grep -q "必須帶 --replay-compute full" "$AC_TD/wf1.err" && [ -z "$(ac_kept "$AC_TD/wf1.err")" ] \
@@ -2942,11 +3086,12 @@ ac_manual_snapshot() {  # $1＝毀損（見下面的 case；ok／head ＝ 不毀
   s="/dev/shm/i074-accept-$id"
   mkdir -m 700 "$s"
   for f in scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh \
-           python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py; do
+           python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py python/scripts/i074_stage2_rss_wrapper.py; do
     mkdir -p "$s/harness/$(dirname "$f")"; cp "$REPO_ROOT/$f" "$s/harness/$f"
   done
   (cd "$s/harness" && sha256sum -- scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh \
-     scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py) \
+     scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py \
+     python/scripts/i074_stage2_rss_wrapper.py) \
     > "$s/harness/MANIFEST"
   case "$1" in
     extra) printf x > "$s/harness/scripts/extra.sh" ;;
@@ -2993,6 +3138,37 @@ else
   fail "ac18：合法的手動快照竟沒通過 bootstrap 的驗證（rc=$rc）"; cat "$AC_TD/wm-ok.err" >&2
 fi
 rm -rf -- "$s"
+# ac28：手動 re-exec（⛔ 不經 python3 啟動器、快照合法）→ 在 guard 中止、測試程序已不在
+read -r s id < <(ac_manual_snapshot ok)
+rc=0
+env -u PY_IMAGE PATH="$AC_TD/okd:$PATH" XDG_DATA_HOME="$AC_TD/xdg" REPLAY_IMAGE_ID="$AC_IMG" \
+  SIZING_SNAPSHOT="$s" SIZING_ORIGIN_REPO="$REPO_ROOT" SIZING_BOOT_RUN_ID="$id" SIZING_BOOT_HEAD="$AC_REAL_HEAD" \
+  timeout -s KILL 60 /bin/bash "$s/harness/scripts/i074-stage2-acceptance.sh" \
+  --work-dir "$AC_TD/wm-noreaper" > /dev/null 2> "$AC_TD/wm-noreaper.err" || rc=$?
+gpid="$(grep -o '測試程序 [0-9]*' "$AC_TD/wm-noreaper.err" | head -1 | cut -d' ' -f2 || true)"
+if [ "$rc" = 1 ] && grep -q "harness ⛔ 不是 subreaper" "$AC_TD/wm-noreaper.err" && [ -n "$gpid" ] && ac_gone "$gpid"; then
+  pass "ac28：手動 re-exec（⛔ 沒有 subreaper）→ 在 guard 中止、測試程序已收掉"
+else
+  fail "ac28：手動 re-exec 沒有在 guard 擋下或留下測試程序（rc=$rc、pid=$gpid）"; cat "$AC_TD/wm-noreaper.err" >&2
+fi
+rm -rf -- "$s"
+# ac28：on_failure 看到 reap-adopted 的結束碼 ≠ 0 → 保留 S、印出殘留（stub 的 helper；對照組：0 → 照常清 S）
+for rrc in 2 0; do
+  OF_TD="$(mktemp -d)"; mkdir -p "$OF_TD/S" "$OF_TD/W"
+  out="$(bash -c '
+    S="$1"; WORK="$2"; RUN_ID=r; LOG=/dev/null; REAL_DOCKER=true; HELPER=x
+    . "$3"
+    HARNESS_STARTTIME=1                     # ⚠️ source 會把它重設成空字串——之後才設
+    helper() { case "$1" in reap-adopted) return '"$rrc"' ;; failure-summary) shift; while [ "$#" -gt 1 ]; do [ "$1" = --out ] && echo "{}" > "$2"; shift; done; return 0 ;; esac; return 0; }
+    on_failure x 1' _ "$OF_TD/S" "$OF_TD/W" "$REPO_ROOT/scripts/lib/i074-stage2-measure.sh" 2>&1)" || true
+  if [ "$rrc" = 2 ]; then
+    [ -d "$OF_TD/S" ] && grep -q "收不掉的 host 程序（reap-adopted 結束碼 2" <<< "$out" && grep -q "保留 S" <<< "$out" \
+      && pass "ac28：reap-adopted ≠ 0 → on_failure 保留 S、印出殘留" || fail "ac28：reap-adopted 失敗卻沒有保留 S：$out"
+  else
+    [ ! -d "$OF_TD/S" ] && pass "ac28：reap-adopted ＝ 0 → 照常清 S（對照組）" || fail "ac28：對照組沒有清 S：$out"
+  fi
+  rm -rf -- "$OF_TD"
+done
 rm -rf "$AC_TD"
 
 # ── I-074 Stage 2 ⑦a：Stage 2 反事實 argv（真正 repo、真正的兩份 patch、dry-run） ─────────────

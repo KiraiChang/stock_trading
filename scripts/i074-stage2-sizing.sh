@@ -60,6 +60,7 @@ I074_BOOT_FILES=(scripts/i074-stage2-sizing.sh scripts/lib/i074-stage2-measure.s
 #     commit／**整個 S 的形狀**（恰好 harness/、清單 ① 的檔案與它們的目錄、MANIFEST——⛔ 沒有其他檔案、目錄、symlink 或
 #     特殊檔案）／MANIFEST（每個 SHA 相符；--formal 再驗一次 ＝ BOOT_HEAD）；全部通過之後的失敗才會刪 S。
 #   ⚠️ bootstrap 階段（以上兩個 pass 的驗證完成之前）⛔ 不刪任何東西：失敗或訊號只印出 S 的位置（第六輪 review 的保守方案）。
+#   ⚠️ ⑦d 增補：snapshot pass 經 python3 啟動器設 subreaper 之後才 exec 快照裡的主腳本（harness 自己收養步驟留下的程序）。
 #   ⚠️ ⑦d 實作第一輪 review：快照、工作複本（clone 之後 checkout 這個 OID）、報告的 repo_head 與 freeze record 全部綁
 #     BOOT_HEAD——之後⛔ 不再讀會移動的 HEAD（--formal 另要求啟動 repo 的 HEAD 仍是它）。
 #   ⚠️ 本段在 sizing 與 acceptance 兩個入口各一份，除了開頭的四個常數之外**逐字相同**（測試釘住）；⛔ 不 source 任何檔案。
@@ -102,8 +103,14 @@ if [ -z "${SIZING_SNAPSHOT:-}" ]; then
     done
   fi
   find "$S/harness" -type f -exec chmod a-w {} + || boot_die "快照設不了唯讀"
+  # ⚠️ ⑦d 增補（「二」④）：經 python3 啟動器設 PR_SET_CHILD_SUBREAPER 再 execv bash——harness 自己成為 subreaper（屬性跨
+  #   execve 保留），步驟以任何方式結束留下的程序都由它收養；之後由 measure_subreaper_guard 以行為驗證。
   exec env SIZING_SNAPSHOT="$S" SIZING_ORIGIN_REPO="$BOOT_ORIGIN" SIZING_BOOT_RUN_ID="$BOOT_RUN_ID" SIZING_BOOT_HEAD="$BOOT_HEAD" \
-    /bin/bash "$S/harness/$I074_BOOT_SELF" "$@"
+    python3 -c 'import ctypes, os, sys
+if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+    sys.exit("ERROR: 設不了 PR_SET_CHILD_SUBREAPER（errno %d）——⛔ 不刪任何東西，S 保留在：%s"
+             % (ctypes.get_errno(), os.environ["SIZING_SNAPSHOT"]))
+os.execv("/bin/bash", ["/bin/bash"] + sys.argv[1:])' "$S/harness/$I074_BOOT_SELF" "$@"
 fi
 S="$SIZING_SNAPSHOT"
 trap 'echo "⚠️ 快照的驗證沒有完成——⛔ 不刪任何東西，S 保留在：$S" >&2' EXIT
@@ -182,7 +189,8 @@ measure_work_dir_guard "$WORK_ARG"      # 設 REPO_CANON、WORK、L0_DEV
 case "${I074_SIZING_FAULT:-}" in
   ""|twins|copy|summary|cleanup|stuck|group-alive|final-check|orphan-ok|orphan-bad) ;;
   bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;   # ⑦d：只在 snapshot pass 生效
-  *) die "I074_SIZING_FAULT 只接受 twins／copy／summary／cleanup／stuck／group-alive／final-check／orphan-ok／orphan-bad／bootstrap-*：${I074_SIZING_FAULT}" ;;
+  orphan-setsid|subreaper-stall|guard-noident|guard-badident|guard-pgleader) ;;   # ⑦d 增補
+  *) die "I074_SIZING_FAULT 只接受 twins／copy／summary／cleanup／stuck／group-alive／final-check／orphan-ok／orphan-bad／orphan-setsid／bootstrap-*／subreaper-stall／guard-*：${I074_SIZING_FAULT}" ;;
 esac
 if [ "$FORMAL" = "1" ]; then
   [ -z "${I074_SIZING_FAULT:-}" ] || die "--formal ⛔ 不接受 I074_SIZING_FAULT（那是演練用的故障注入）"
@@ -222,6 +230,7 @@ fi
 
 # ── 0. 準備 ────────────────────────────────────────────────────────────────────
 mkdir "$WORK"
+measure_subreaper_guard                 # ⑦d 增補：harness 自己是 subreaper（行為驗證）
 case "${I074_SIZING_FAULT:-}" in
   cleanup)
     mkdir -p "$S/cid"; printf 'fault-injected-cid' > "$S/cid/o0000.cid"
@@ -239,6 +248,10 @@ case "${I074_SIZING_FAULT:-}" in
     # leader 自己退出（預期碼 0／非預期碼 7），背景的 sleep 留在同一個 group 裡繼續活著
     run_in_group fault_orphan 0 sh -c "sleep 60 & exit $([ "$I074_SIZING_FAULT" = orphan-ok ] && echo 0 || echo 7)"
     DONE=1; rm -rf "$S"; exit 0 ;;   # ⛔ 走到這裡＝殘留的成員沒有被擋下
+  orphan-setsid)
+    # ⑦d 增補：步驟留下一個逃出 group 的程序（setsid）——group 的檢查看不到它，收養的檢查必須擋下並清掉
+    run_in_group fault_orphan_setsid 0 sh -c 'setsid sleep 60 </dev/null >/dev/null 2>&1 & echo "$!" > "$0/orphan.pid"; exit 0' "$S"
+    DONE=1; rm -rf "$S"; exit 0 ;;   # ⚠️ 走到這裡＝收養的程序⛔ 沒有被擋下
 esac
 # ⚠️ **⛔ 不用 `--shared`**（差異 2，2026-09-24 第一次實跑被自我檢查擋下）：`--shared` 以 alternates 共用真正 repo 的
 #   物件，而 `git write-tree`／`git apply --index` 寫到**已存在**的物件時會 freshen（touch）含有它的 pack——
@@ -426,6 +439,7 @@ for wt in "$L3"/tmp.*; do
 done
 # ⚠️ 本次 run id 的容器必須一個都不剩——在寫出任何報告**之前**檢查（⛔ 不留下「有報告卻失敗」的矛盾狀態）。
 ensure_no_run_containers "結束前的容器檢查"
+measure_check_adopted "結束前的收養檢查"     # ⑦d 增補
 cp "$S/sizing_report.json" "$S/sizing_report.txt" "$WORK/"
 if [ -f "$S/freeze_record.json" ]; then
   cp "$S/freeze_record.json" "$WORK/"

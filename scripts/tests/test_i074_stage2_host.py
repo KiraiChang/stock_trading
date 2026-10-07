@@ -1194,5 +1194,340 @@ class RssAddendumHost(unittest.TestCase):
         self.assertEqual((cli.returncode, cli.stdout), (2, ""))
 
 
+# ── 有效性條件計畫：offline 的讀取端（`precheck-verdict`、`raw-manifest`）的信任模型 ─────────────────────────────
+#   issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：外部的 commit 錨點、C1／C2 的標記、原始量測裡的程式
+#   ⛔ 不被執行。需要 git，所以在 host（測試 image 裡沒有 git）；原始量測以 helper 自己的 writer 建（與 pytest 的 fixture 同形）。
+
+IMG = "sha256:" + "f" * 64
+GIT = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"]
+RECOMPUTE_ANCHOR = '    raw = Path(raw)\n    _require_dir(raw, "--raw")\n    data = (raw / "precheck.json").read_bytes()\n'
+MANIFEST_ANCHOR = '    raw = Path(raw)\n    _require_dir(raw, "--raw")\n    if raw.name not in RAW_ROOT_NAMES:\n'
+
+
+def _marked(source: str, anchor: str, marker: Path) -> str:
+    """在 recompute／產生演算法的**入口**插入寫標記檔的一行（第七輪 review：⛔ 不放在模組載入或對外的 frontend）。"""
+    assert source.count(anchor) == 1, anchor
+    return source.replace(anchor, f"    Path({str(marker)!r}).write_text('x')\n" + anchor)
+
+
+class OfflineReadersHost(unittest.TestCase):
+    def setUp(self) -> None:
+        self.sz = load_sizing()
+        self.tmp = Path(tempfile.mkdtemp(prefix="i074-offline-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.pf = importlib.util.module_from_spec(importlib.util.spec_from_file_location(
+            "pf_offline", ROOT / "python" / "scripts" / "i074_stage2_preflight.py"))
+        self.pf.__spec__.loader.exec_module(self.pf)
+        self.sup = load_supervisor()
+        self.repo = self.tmp / "repo"
+        for rel in self.sz.SNAPSHOT_FILES["acceptance"]:
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / rel, self.repo / rel)
+        self._git("init", "-q")
+        self.c1 = self._commit("c1")
+
+    def _git(self, *args: str) -> str:
+        return subprocess.run([*GIT, "-C", str(self.repo), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+    def _commit(self, message: str) -> str:
+        self._git("add", "-A")
+        self._git("commit", "-q", "--allow-empty", "-m", message)
+        return self._git("rev-parse", "HEAD")
+
+    def _raw(self, name: str, commit: str, *, harness_patch=None) -> Path:
+        """量測趟之前中止的原始量測（形狀 A；目錄名 raw-failed），快照 ＝ `commit` 的檔案（`harness_patch` 可以改掉其中一個）。"""
+        sz = self.sz
+        s = self.tmp / name / "raw-failed"
+        meta = {"run_id": name, "mode": "validation", "image": IMG, "l0_dev": "42", "docker_root_dev": "42",
+                "repo_dev": "42", "state_fstype": "tmpfs", "replay_compute": "full", "repo_head": commit,
+                "clone_head": commit}
+        s.mkdir(parents=True)
+        (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in meta.items()))
+        (s / "components.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in {
+            "wt_head": 30 * MIB, "wt_base_patched": 15 * MIB, "git_head": 131072, "git_base_patched": 131072,
+            "index_head": 98304, "index_base_patched": 98304, "snapshot": 262144, "probe": 24576,
+            "frozen_patched": 266240}.items()))
+        steps, invocations = sz.acceptance_expected("full", "before_full")
+        want = {"replay_failure": 6, "publish_failed_record": 1, "promote_failure": 6, "check_failed_record": 2,
+                "recover_failed_record": 1}
+        (s / "rc.tsv").write_text("".join(f"{n}\t{want.get(n, 0)}\t{want.get(n, 0)}\n" for n, _ in steps))
+        for seq, (phase, role) in enumerate(invocations, start=1):
+            cid = sz.container_id(seq)
+            argv = ["--memory=444m", "--memory-swap=444m", "--cidfile", f"/s/{cid}", "--name", f"n-{cid}", IMG, "run"]
+            index = sz.write_index(s, sequence=seq, cid=cid, phase=phase, role=role,
+                                   included=phase in sz.measured_phases("acceptance"), image=IMG, argv=argv,
+                                   profile="acceptance")
+            sz.write_exclusive(s / "containers" / f"{cid}.json", sz.canonical_dumps({
+                "id": cid, "sequence": seq, "container_spec_sha256": index["container_spec_sha256"], "rc": 0,
+                "container": "c", "size_rw": 4096, "log_config": {"Type": "json-file", "Config": {}}, "log_bound": 4096,
+                "peak_bytes": 100 * MIB, "memory_limit_bytes": 444 * MIB, "memory_swap_limit_bytes": 444 * MIB,
+                "rss_peak_sampled_bytes": 150 * MIB, "rss_samples": 20, "self_max_rss_bytes": 12 * MIB,
+                "children_max_rss_bytes": 200 * MIB, "max_single_rss_bytes": 200 * MIB, "reaper": "pid1",
+                "status": "ok", "failures": []}))
+            sz.write_exclusive(s / "twins" / f"{cid}.json", sz.canonical_dumps({
+                "id": cid, "sequence": seq, "container_spec_sha256": index["container_spec_sha256"],
+                "raw_bytes": [8192] * 3, "inspect_lengths": [5000] * 3, "adopted_bytes": 131072, "status": "ok",
+                "failures": []}))
+            sz.record_event(s, cid, "create_begin")
+            sz.record_event(s, cid, "rm_done")
+        for step, _phase in steps:
+            cmd = ["env", "COUNTERFACTUAL_PATCH=/p/c", "TOOLING_PATCH=/p/t", "/repo/scripts/run-replay-offline.sh"] \
+                if step.startswith("replay_") else ["/repo/scripts/finalize-stage2-evidence.sh"]
+            sz.write_exclusive(s / "host" / f"{step}.json", sz.canonical_dumps({
+                "schema": sz.HOST_RECORD_SCHEMA, "step": step, "rc": want.get(step, 0), "self_max_rss_bytes": 20 * MIB,
+                "children_max_rss_bytes": 50 * MIB, "max_single_rss_bytes": 50 * MIB,
+                "group_rss_peak_sampled_bytes": 60 * MIB, "group_samples": 3, "group_interval_ms": sz.HOST_INTERVAL_MS,
+                "reaper": "subreaper", "all_descendants_reaped": True, "auto_reap_detected": False,
+                "cleanup_complete": True, "leftover_pids": [], "errors": [],
+                "env_keys": ["HOME", "PATH", "PYTHONDONTWRITEBYTECODE", "REPLAY_IMAGE_ID", "SIZING_STATE", "TMPDIR"],
+                "cmd": cmd}))
+        for phase, run_mb in (("success", 85), ("failure", 1), ("promote_success", 3), ("promote_failure", 3)):
+            pdir = s / "phases" / phase
+            pdir.mkdir(parents=True)
+            locs = ["L1", "L2", "L3", "L5"] if phase in ("success", "failure") else ["L3", "L5", "L6"]
+            sz.write_exclusive(pdir / "baseline.json", sz.canonical_dumps({
+                "locations": dict.fromkeys(locs, 0), "L0_used": 10 << 30, "devices": dict.fromkeys(locs + ["L0", "L4"], "42")}))
+            sample = {"t_ns": 1, "L0": (10 << 30) + run_mb * MIB, **dict.fromkeys(locs, 0)}
+            sample[locs[0]] = run_mb * MIB
+            (pdir / "samples.jsonl").write_text(json.dumps(sample) + "\n")
+            sz.write_exclusive(pdir / "end.json", sz.canonical_dumps({
+                "run_dir": {"allocated": run_mb * MIB, "dirs": 3}, "archive": {"allocated": 7 * MIB, "dirs": 4},
+                "inventory_violations": []}))
+        lines = []
+        for rel in sz.SNAPSHOT_FILES["acceptance"]:
+            data = subprocess.run([*GIT, "-C", str(self.repo), "cat-file", "blob", f"{commit}:{rel}"], check=True,
+                                  capture_output=True).stdout
+            if harness_patch and rel in harness_patch:
+                data = harness_patch[rel]
+            (s / "harness" / rel).parent.mkdir(parents=True, exist_ok=True)
+            (s / "harness" / rel).write_bytes(data)
+            lines.append(f"{hashlib.sha256(data).hexdigest()}  {rel}")
+        (s / "harness" / "MANIFEST").write_text("\n".join(lines) + "\n")
+        doc = sz.build_acceptance_precheck(s, p_b_budget=self.pf.P_B_BUDGET, drop_names=tuple(self.sup.ENV_DROP_NAMES),
+                                           drop_prefixes=tuple(self.sup.ENV_DROP_PREFIXES))
+        sz.write_exclusive(s / "precheck.json", sz.canonical_dumps(doc))
+        return s
+
+    def _cli(self, *args: str, helper: Path = SIZING) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(helper), *args], capture_output=True, text=True,
+                              env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"), timeout=300)
+
+    def _verdict(self, raw: Path, expected: str, helper: Path = SIZING) -> subprocess.CompletedProcess:
+        return self._cli("precheck-verdict", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", expected,
+                         helper=helper)
+
+    def _front(self, *markers: tuple[str, Path]) -> Path:
+        """目前工作樹的 helper，但 recompute／產生演算法的入口會寫標記檔（frontend 本身照常）。"""
+        source = SIZING.read_text(encoding="utf-8")
+        for anchor, marker in markers:
+            source = _marked(source, anchor, marker)
+        root = self.tmp / "front"
+        for rel in (self.sz.FROZEN_PREFLIGHT, self.sz.FROZEN_SUPERVISOR):      # 對照組（直接呼叫本地 recompute）要用
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / rel, root / rel)
+        front = root / self.sz.HELPER_REL
+        front.parent.mkdir(parents=True, exist_ok=True)
+        front.write_text(source, encoding="utf-8")
+        return front
+
+    def test_verdict_reads_shape_a_with_the_external_anchor(self) -> None:
+        raw = self._raw("ok", self.c1)
+        out = self._verdict(raw, self.c1)
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, "ok"), out.stderr)
+
+    def test_anchor_must_be_a_full_commit_oid(self) -> None:
+        raw = self._raw("ok", self.c1)
+        self._git("tag", "-a", "v1", "-m", "t")
+        tag = self._git("rev-parse", "v1")
+        self.assertNotEqual(tag, self.c1)
+        for bad in ("HEAD", self.c1[:12], tag, "0" * 40, self.c1.upper()):
+            out = self._verdict(raw, bad)
+            self.assertEqual(out.returncode, 1, bad)
+            self.assertIn("無法判讀", out.stderr, bad)
+        missing = self._cli("precheck-verdict", "--raw", str(raw), "--repo", str(self.repo))
+        self.assertEqual(missing.returncode, 2)                         # 缺 --expected-repo-head → 用法錯誤
+
+    def test_the_artifact_cannot_choose_the_commit(self) -> None:
+        """第四輪 review：受信任 repo 同時有 C1 與 C2（C2 的 precheck-recompute 入口一被呼叫就寫標記檔）；artifact 與 C2
+        完全一致、錨點是 C1 → 在取出或執行任何程式之前拒絕，標記檔⛔ 沒有出現。對照組：錨點是 C2 → 標記檔出現。"""
+        marker = self.tmp / "c2-ran"
+        helper = self.repo / self.sz.HELPER_REL
+        helper.write_text(_marked(helper.read_text(encoding="utf-8"), RECOMPUTE_ANCHOR, marker), encoding="utf-8")
+        c2 = self._commit("c2")
+        raw = self._raw("c2", c2)
+        out = self._verdict(raw, self.c1)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("identity.repo_head", out.stderr)
+        self.assertFalse(marker.exists())
+        control = self._verdict(raw, c2)                                 # 對照組：證明標記檔測得到執行
+        self.assertEqual(control.returncode, 0, control.stderr)
+        self.assertTrue(marker.exists())
+
+    def test_the_working_tree_recompute_is_never_called(self) -> None:
+        """第七輪 review：frontend 本來就由工作樹的 helper 執行；它的 recompute 入口寫標記檔——正常判讀⛔ 不得觸發它。"""
+        raw = self._raw("ok", self.c1)
+        marker = self.tmp / "front-ran"
+        front = self._front((RECOMPUTE_ANCHOR, marker))
+        out = self._verdict(raw, self.c1, helper=front)
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, "ok"), out.stderr)
+        self.assertFalse(marker.exists())
+        direct = self._cli("precheck-recompute", "--raw", str(raw), "--trusted-root", str(self.tmp / "front"), helper=front)
+        self.assertEqual(direct.returncode, 0, direct.stderr)                # 對照組：直接呼叫才會執行本地的 recompute
+        self.assertTrue(marker.exists())
+        refused = self._cli("precheck-recompute", "--raw", str(raw), "--trusted-root", str(self.tmp))
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("內部命令只能由", refused.stderr)
+
+    def test_code_in_the_raw_snapshot_is_never_imported(self) -> None:
+        """第三輪 review：原始量測的快照放一份與 MANIFEST、identity 一致、但 import 就寫標記檔的 preflight → 無法判讀、⛔ 沒有執行。"""
+        marker = self.tmp / "raw-imported"
+        evil = (ROOT / self.sz.FROZEN_PREFLIGHT).read_bytes() + f"\nopen({str(marker)!r}, 'w').write('x')\n".encode()
+        raw = self._raw("evil", self.c1, harness_patch={self.sz.FROZEN_PREFLIGHT: evil})
+        out = self._verdict(raw, self.c1)
+        self.assertEqual(out.returncode, 1)
+        self.assertIn(self.sz.FROZEN_PREFLIGHT, out.stderr)
+        self.assertFalse(marker.exists())
+        one_byte = self._raw("byte", self.c1, harness_patch={
+            self.sz.HELPER_REL: (ROOT / self.sz.HELPER_REL).read_bytes() + b"#"})
+        self.assertEqual(self._verdict(one_byte, self.c1).returncode, 1)
+
+    def test_raw_manifest_runs_only_the_anchored_algorithm(self) -> None:
+        """第六、七輪 review：工作樹與 C2 的 manifest 產生演算法入口都會寫標記檔；錨點 ＝ C1 → 只執行 C1 取出的版本。"""
+        raw = self._raw("m", self.c1)
+        front_marker, c2_marker = self.tmp / "front-manifest", self.tmp / "c2-manifest"
+        helper = self.repo / self.sz.HELPER_REL
+        helper.write_text(_marked(helper.read_text(encoding="utf-8"), MANIFEST_ANCHOR, c2_marker), encoding="utf-8")
+        c2 = self._commit("c2")
+        front = self._front((MANIFEST_ANCHOR, front_marker))
+        out_path = self.tmp / "m.json"
+        out = self._cli("raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", self.c1,
+                        "--out", str(out_path), helper=front)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(front_marker.exists() or c2_marker.exists())
+        data = out_path.read_bytes()
+        self.assertEqual(data, self.sz.build_raw_manifest(raw, self.c1))     # ＝ C1 的演算法
+        summary = json.loads(out.stdout)
+        self.assertEqual(summary["sha256"], hashlib.sha256(data).hexdigest())
+        check = self._cli("raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", self.c1,
+                          "--check-sha256", summary["sha256"], helper=front)
+        self.assertEqual(check.returncode, 0, check.stderr)
+        (raw / "extra").write_text("x")
+        again = self.tmp / "again.json"
+        bad = self._cli("raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", self.c1,
+                        "--check-sha256", summary["sha256"], "--out", str(again), helper=front)
+        self.assertEqual(bad.returncode, 1)
+        self.assertFalse(again.exists())                                     # 不符 → ⛔ 不寫任何檔案
+        control = self._cli("raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", c2,
+                            "--out", str(self.tmp / "c2.json"), helper=front)
+        self.assertEqual(control.returncode, 0, control.stderr)             # 對照組：錨點 ＝ C2 才會執行 C2 的演算法
+        self.assertTrue(c2_marker.exists() and not front_marker.exists())
+        no_repo = self._cli("raw-manifest", "--raw", str(raw), "--expected-repo-head", self.c1, "--out", str(self.tmp / "x"))
+        self.assertEqual(no_repo.returncode, 2)
+        self._git("tag", "-a", "v1", "-m", "t")
+        for bad_anchor in ("HEAD", self.c1[:12], "0" * 40, self._git("rev-parse", "v1")):     # 最後一個是 tag object
+            res = self._cli("raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", bad_anchor,
+                            "--out", str(self.tmp / "y"))
+            self.assertEqual(res.returncode, 1, bad_anchor)
+            self.assertFalse((self.tmp / "y").exists())
+
+    def _env_cli(self, extra: dict, *args: str) -> subprocess.CompletedProcess:
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", **extra)
+        return subprocess.run([sys.executable, str(SIZING), *args], capture_output=True, text=True, env=env, timeout=300)
+
+    def test_git_ignores_the_callers_path_and_git_environment(self) -> None:
+        """實作第一輪 review（高）：offline 讀取端的 git 固定是 /usr/bin/git、子程序一律是最小化的環境——PATH 上的假 git
+        ⛔ 不被執行；GIT_DIR／GIT_OBJECT_DIRECTORY ⛔ 不能把查詢導向別的 repo，也⛔ 不能替不是 repo 的 --repo 撐腰；
+        --repo 是子目錄時⛔ 不往上找到別的 repo。"""
+        raw = self._raw("ok", self.c1)
+        marker = self.tmp / "fake-git-ran"
+        fakebin = self.tmp / "fakebin"
+        fakebin.mkdir()
+        (fakebin / "git").write_text(f"#!/bin/sh\necho x > {marker}\necho {self.c1}\nexit 0\n")
+        (fakebin / "git").chmod(0o755)
+        other = self.tmp / "other"
+        subprocess.run([*GIT, "init", "-q", str(other)], check=True)
+        verdict = ("precheck-verdict", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head", self.c1)
+        fake_path = {"PATH": f"{fakebin}:{os.environ['PATH']}"}
+        out = self._env_cli(fake_path, *verdict)
+        self.assertEqual((out.returncode, out.stdout.strip()), (0, "ok"), out.stderr)
+        out = self._env_cli(fake_path, "raw-manifest", "--raw", str(raw), "--repo", str(self.repo), "--expected-repo-head",
+                            self.c1, "--out", str(self.tmp / "m.json"))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertFalse(marker.exists())                                    # 假 git ⛔ 沒有被執行
+        for var, value in (("GIT_DIR", str(other / ".git")), ("GIT_OBJECT_DIRECTORY", str(other / ".git" / "objects")),
+                           ("GIT_ALTERNATE_OBJECT_DIRECTORIES", str(other / ".git" / "objects"))):
+            out = self._env_cli({var: value}, *verdict)
+            self.assertEqual((out.returncode, out.stdout.strip()), (0, "ok"), (var, out.stderr))
+        plain = self.tmp / "plain"
+        plain.mkdir()
+        out = self._env_cli({"GIT_DIR": str(self.repo / ".git")}, "precheck-verdict", "--raw", str(raw), "--repo", str(plain),
+                            "--expected-repo-head", self.c1)
+        self.assertEqual(out.returncode, 1, out.stdout)                     # ⛔ 不是 repo 的 --repo：GIT_DIR ⛔ 不能撐腰
+        out = self._env_cli({}, "precheck-verdict", "--raw", str(raw), "--repo", str(self.repo / "scripts"),
+                            "--expected-repo-head", self.c1)
+        self.assertEqual(out.returncode, 1, out.stdout)                     # 子目錄：⛔ 不往上找
+
+    def test_offline_children_get_a_minimal_environment(self) -> None:
+        """實作第一輪 review（高）：git 與取出的 helper 這兩種子程序都⛔ 不繼承呼叫端的 GIT_*、LD_*、PYTHON*、PATH。"""
+        raw = self._raw("ok", self.c1)
+        calls = []
+        real_run = subprocess.run
+
+        def spy(argv, *args, **kwargs):
+            calls.append((list(argv), kwargs.get("env")))
+            return real_run(argv, *args, **kwargs)
+
+        polluted = {"GIT_DIR": "/nowhere", "GIT_TRACE": "1", "LD_I074_PROBE": "1", "PYTHONPATH": "/evil", "PATH": "/evil:/usr/bin:/bin"}
+        with mock.patch.dict(os.environ, polluted), mock.patch.object(self.sz.subprocess, "run", spy):
+            self.assertEqual(self.sz.precheck_verdict(raw, self.repo, self.c1), 0)
+        self.assertTrue(any(argv[0] == "/usr/bin/git" for argv, _ in calls))
+        self.assertTrue(any("-I" in argv for argv, _ in calls))
+        allowed_git = {"GIT_CONFIG_NOSYSTEM", "GIT_NO_REPLACE_OBJECTS", "GIT_TERMINAL_PROMPT", "GIT_CEILING_DIRECTORIES"}
+        for argv, env in calls:
+            self.assertIsNotNone(env, argv)
+            self.assertNotEqual(argv[0], "git", argv)                        # ⛔ 不從 PATH 找 git
+            self.assertEqual(env["PATH"], "/usr/bin:/bin")
+            self.assertFalse({k for k in env if k.startswith(("LD_", "PYTHON"))}, argv)
+            self.assertFalse({k for k in env if k.startswith("GIT_")} - allowed_git, argv)
+
+    def _live_state(self, profile: str) -> tuple[Path, Path]:
+        """live 的 S（快照 ＋ MANIFEST）與工作複本，兩者的檔案都取自目前的 repo。"""
+        s, clone = self.tmp / "S", self.tmp / "clone"
+        lines = []
+        for rel in self.sz.SNAPSHOT_FILES[profile]:
+            for root in (s / "harness", clone):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / rel, root / rel)
+            lines.append(f"{hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()}  {rel}")
+        (s / "harness" / "MANIFEST").write_text("\n".join(lines) + "\n")
+        return s, clone
+
+    def test_live_constants_come_from_the_snapshot(self) -> None:
+        """「權威常數的來源」：live 一律取自 S 的快照（先驗 MANIFEST），並斷言與工作複本逐位元相同。"""
+        for profile in ("sizing", "acceptance"):
+            with self.subTest(profile=profile):
+                shutil.rmtree(self.tmp / "S", True)
+                shutil.rmtree(self.tmp / "clone", True)
+                s, clone = self._live_state(profile)
+                consts = self.sz.live_constants(s, clone, profile)
+                self.assertEqual(consts["p_b_budget"], self.pf.P_B_BUDGET)
+                if profile == "acceptance":
+                    self.assertEqual(set(consts["drop_names"]), set(self.sup.ENV_DROP_NAMES))
+                    self.assertEqual(consts["drop_prefixes"], tuple(self.sup.ENV_DROP_PREFIXES))
+                else:
+                    self.assertEqual(set(consts), {"p_b_budget"})
+                rel = self.sz.FROZEN_SUPERVISOR if profile == "acceptance" else self.sz.FROZEN_PREFLIGHT
+                with open(clone / rel, "a") as fh:                       # 工作複本與快照不同 → fail-closed
+                    fh.write("\n# drift\n")
+                with self.assertRaisesRegex(self.sz.SizingError, "工作複本"):
+                    self.sz.live_constants(s, clone, profile)
+                shutil.copyfile(s / "harness" / rel, clone / rel)
+                with open(s / "harness" / rel, "a") as fh:               # 快照與 MANIFEST 不符 → fail-closed
+                    fh.write("\n# tampered\n")
+                shutil.copyfile(s / "harness" / rel, clone / rel)
+                with self.assertRaisesRegex(self.sz.SizingError, "MANIFEST"):
+                    self.sz.live_constants(s, clone, profile)
+
+
 if __name__ == "__main__":
     unittest.main()

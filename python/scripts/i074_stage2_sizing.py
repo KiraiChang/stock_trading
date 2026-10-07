@@ -15,6 +15,10 @@
 * ⑦d（acceptance，host）：`acceptance-report`、`acceptance-anchors`、`replay-argv`、`clean-env`、`promote-measure`、
   `host-run`，與 ⑩ 期間由操作者另外啟動的 `observe`。⚠️ ⑩ 的正式程式（`i074_stage2_preflight.py`、
   `i074_stage2_promote.py`、supervisor 的 `clean_env()`）一律以明確的 `--clone <工作複本>` 載入（⛔ 不從活路徑）。
+* 有效性條件與 ⑨-1 的 fail-fast（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`acceptance-precheck`
+  （live）；offline 的 `precheck-verdict` 與 `raw-manifest`——對外的命令只執行驗錨與取出的 frontend，內部的
+  `precheck-recompute`／`raw-manifest-recompute` 只由從錨點 commit 取出的受信任版本執行。`report`、`acceptance-report`、
+  `acceptance-precheck` 的權威常數（`P_B_BUDGET`、`ENV_DROP_*`）取自 S 的快照（`live_constants()`）。
 
 ⚠️ **單位**：落在檔案系統上的一律是 **allocated bytes**（`st_blocks × 512`，目錄一併計入，hard link 只算一次）；
 內容長度只用在讀不到的 docker log 與容器 metadata 的保守推導，且以 block 上捨。
@@ -90,13 +94,21 @@ ROLES = PROFILES["sizing"]["roles"]
 EXPECTED_ROLES = PROFILES["sizing"]["expected"]
 LOCATIONS = ("L1", "L2", "L3", "L5")
 # ⚠️ ⑦d「快照與來源的清單」①——與兩個入口的 `I074_BOOT_FILES` 必須相同（測試釘住）。
+#   ⚠️ issue.md「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」的「權威常數的來源」：`P_B_BUDGET`（preflight）與
+#   `ENV_DROP_*`（supervisor）的唯一定義也進快照——live 一律從快照載入（`_load_frozen()`），⛔ 不讀活路徑、⛔ 不複製常數。
+FROZEN_PREFLIGHT = "python/scripts/i074_stage2_preflight.py"
+FROZEN_SUPERVISOR = "scripts/lib/i074-stage2-supervisor.py"
+HELPER_REL = "python/scripts/i074_stage2_sizing.py"
 SNAPSHOT_FILES = {
     "sizing": ("scripts/i074-stage2-sizing.sh", "scripts/lib/i074-stage2-measure.sh",
-               "scripts/lib/i074-sizing-docker-shim.sh", "scripts/lib/mem-guard.sh", "python/scripts/i074_stage2_sizing.py"),
+               "scripts/lib/i074-sizing-docker-shim.sh", "scripts/lib/mem-guard.sh", HELPER_REL, FROZEN_PREFLIGHT),
     "acceptance": ("scripts/i074-stage2-acceptance.sh", "scripts/lib/i074-stage2-measure.sh",
-                   "scripts/lib/i074-sizing-docker-shim.sh", "python/scripts/i074_stage2_sizing.py",
-                   "python/scripts/i074_stage2_replay_stub.py", "python/scripts/i074_stage2_rss_wrapper.py"),
+                   "scripts/lib/i074-sizing-docker-shim.sh", HELPER_REL,
+                   "python/scripts/i074_stage2_replay_stub.py", "python/scripts/i074_stage2_rss_wrapper.py",
+                   FROZEN_PREFLIGHT, FROZEN_SUPERVISOR),
 }
+# ⚠️ 有效性條件 ①：未解釋的**淨**成長的容差（1 MiB，以常數寫死、⛔ 不開參數；計畫「三」#1）。
+FS_UNEXPLAINED_TOLERANCE = 1 << 20
 # ⚠️ v29「六、1」：每一個程序的峰值 < 450 MiB（嚴格小於）——唯一定義（⑦d「三」#14）。
 ACCEPTANCE_MEMORY_LIMIT = 450 * 1024 * 1024
 ROTATION_OPTIONS = ("max-size", "max-file")
@@ -486,10 +498,14 @@ def run_twins(state: Path, *, docker: str, run_id: str, fs_path: str) -> None:
 
     ⚠️ `docker create` ⛔ 不會建立不存在的 bind 來源（2026-09-24 實查；那是 `start` 才做的事），所以正式
     worktree 刪掉之後照樣能以完全相同的 spec 建 twin。
+    ⚠️ 有效性條件計畫「二」的「metadata twin 分兩次」：**只處理還沒有 twin 結果的 invocation**——acceptance 的 full 模式在
+    量測趟之前先建一次、量測趟之後再補它那一個；已有的⛔ 不重建（每一份仍以 `write_exclusive` 寫）。
     """
     (state / "cid").mkdir(parents=True, exist_ok=True)
     for index_path in sorted((state / "index").glob("*.json")):
         index = read_json(index_path)
+        if (state / "twins" / f"{index['id']}.json").exists():
+            continue
         sequence = index["sequence"]
         raws, lengths, problems, cids = [], [], [], []
         for k in range(1, TWIN_COUNT + 1):
@@ -849,15 +865,20 @@ def expected_invocations(profile: str, replay_compute: str | None = None) -> lis
     return expected
 
 
-def load_invocations(state: Path, profile: str = "sizing", replay_compute: str | None = None) -> list[dict[str, Any]]:
-    """索引、sidecar、twin 三者的完整性（計畫書「二」的 invocation 索引；⑦d：依 profile 的封閉列舉）。"""
+def load_invocations(state: Path, profile: str = "sizing", replay_compute: str | None = None, *,
+                     expected: list[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
+    """索引、sidecar、twin 三者的完整性（計畫書「二」的 invocation 索引；⑦d：依 profile 的封閉列舉）。
+
+    `expected` 只給 acceptance 的 collector 傳「量測趟之前的精確前綴」（`acceptance_expected()` 斷言過）；未傳 ＝ 正式集合。
+    """
     spec = profile_spec(profile)
     indexes = sorted((state / "index").glob("*.json"))
     entries = [read_json(p) for p in indexes]
     sequences = [e["sequence"] for e in entries]
     if sequences != list(range(1, len(entries) + 1)):
         raise SizingError(f"invocation 的 sequence 不連續或重複：{sequences}")
-    expected = expected_invocations(profile, replay_compute)
+    if expected is None:
+        expected = expected_invocations(profile, replay_compute)
     got = [(e["phase"], e["role"]) for e in entries]
     if got != expected:
         raise SizingError(f"invocation 的 phase／role 與預期不符：預期 {expected}，實際 {got}")
@@ -940,7 +961,51 @@ def phase_peaks(baseline: Mapping[str, Any], samples: list[Mapping[str, Any]]) -
     return {"dirs_peak": dirs_peak, "dirs_peak_by_location": at_peak, "fs_peak": fs_peak, "samples": len(samples)}
 
 
-def build_report(state: Path) -> dict[str, Any]:
+# ── 有效性條件（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」） ──────────────────────
+
+VALIDITY_KINDS = ("fs_unexplained", "ambiguous_disk_exceed")
+
+
+def disk_numbers(info: Mapping[str, Any]) -> dict[str, int]:
+    """報告的一條磁碟路徑 → 判定用的數字。`P_basis = max(dirs_peak, accounted)`：兩者都⛔ 不受 host 其他程序影響；
+    `fs_unexplained = fs_peak − P_basis`：`fs_peak` 是整個檔案系統已用量的**淨**變化（別人的寫入墊高它、刪除壓低它）。"""
+    peaks = info["peaks"]
+    basis = max(peaks["dirs_peak"], info["accounted"])
+    return {"P_path": info["P_path"], "dirs_peak": peaks["dirs_peak"], "fs_peak": peaks["fs_peak"],
+            "accounted": info["accounted"], "P_basis": basis, "fs_unexplained": peaks["fs_peak"] - basis}
+
+
+def disk_validity_problems(disk: Mapping[str, Mapping[str, int]], p_b_budget: int) -> list[dict[str, Any]]:
+    """有效性條件：① `fs_unexplained` ≤ 容差；② 模糊區——`P_path` ＞ 預算、`P_basis` ≤ 預算且 `fs_unexplained` ≤ 容差（超標完全由
+    **容許範圍內**的未解釋成長造成；**容差⛔ 不得決定結果**；超過容差時只是 ①，⛔ 不重複記成模糊區——實作第一輪 review）。依路徑的順序、每條先 ① 後 ②。⚠️ 只偵測**淨**的未解釋正成長：外部的刪除可能
+    抵銷外部的寫入或流程漏算的寫入，⛔ 不能證明量測期間沒有外部 I/O。模糊區只是有效性問題、⛔ 不是違反。"""
+    out: list[dict[str, Any]] = []
+    for phase, d in disk.items():
+        if d["fs_unexplained"] > FS_UNEXPLAINED_TOLERANCE:
+            out.append({"kind": "fs_unexplained", "subject": phase, "value": d["fs_unexplained"],
+                        "limit": FS_UNEXPLAINED_TOLERANCE})
+        if d["P_path"] > p_b_budget and d["P_basis"] <= p_b_budget and d["fs_unexplained"] <= FS_UNEXPLAINED_TOLERANCE:
+            out.append({"kind": "ambiguous_disk_exceed", "subject": phase, "value": d["P_path"], "limit": p_b_budget})
+    return out
+
+
+def disk_basis_violations(disk: Mapping[str, Mapping[str, int]], p_b_budget: int) -> list[dict[str, Any]]:
+    """**確定的**磁碟超標：`P_basis` ＞ 預算（與磁碟雜訊無關）；`value` 記 `P_basis`——裁決值就是證據值。
+    ⚠️ 只有 `precheck.json` 用它（`disk_p_basis`）；報告 v2 照舊以 `P_path` 判（v2 只在沒有有效性問題時寫出，兩者等價）。"""
+    return [{"kind": "disk_p_basis", "subject": phase, "value": d["P_basis"], "limit": p_b_budget}
+            for phase, d in disk.items() if d["P_basis"] > p_b_budget]
+
+
+def validity_text(problems: Iterable[Mapping[str, Any]]) -> str:
+    names = {"fs_unexplained": "fs_unexplained（未解釋的淨成長）", "ambiguous_disk_exceed": "模糊區（P_path 超標、P_basis 沒有）"}
+    return "；".join(f"{p['subject']}：{names[p['kind']]} {p['value']} bytes ＞ {p['limit']}" for p in problems)
+
+
+def sizing_validity_problems(report: Mapping[str, Any], p_b_budget: int) -> list[dict[str, Any]]:
+    return disk_validity_problems({phase: disk_numbers(report["paths"][phase]) for phase in DISK_PHASES}, p_b_budget)
+
+
+def build_report(state: Path, *, p_b_budget: int) -> dict[str, Any]:
     meta = _read_tsv(state / "meta.tsv")
     comp = _read_tsv(state / "components.tsv")
     rc = _read_tsv(state / "rc.tsv")
@@ -1028,6 +1093,12 @@ def build_report(state: Path) -> dict[str, Any]:
     for phase in DISK_PHASES:
         if paths[phase]["P_path"] > p_b:
             raise SizingError("報告自我檢查失敗：P_path > P_B")
+    # ⚠️ 有效性條件（計畫「二」）：確定的違反（某條路徑的 P_basis ＞ 預算）優先——照常寫報告（P_B ＞ 預算，freeze record
+    #   照舊拒寫 → 回退順序；v1 的語意⛔ 不變）；沒有確定的違反、但有有效性問題 → 量測無效（⛔ 不是判定，可以重跑）。
+    disk = {phase: disk_numbers(paths[phase]) for phase in DISK_PHASES}
+    validity = disk_validity_problems(disk, p_b_budget)
+    if validity and not disk_basis_violations(disk, p_b_budget):
+        raise SizingError(f"量測無效（有效性條件；⛔ 不是判定，可以重跑）：{validity_text(validity)}")
     status = "ok" if paths["failure"]["P_path"] <= paths["success"]["P_path"] else "assumption_violated"
     mem_rows = sorted(({"sequence": i["sequence"], "phase": i["phase"], "role": i["role"],
                         "peak_bytes": i["sidecar"]["peak_bytes"], "rc": i["sidecar"]["rc"]}
@@ -1053,13 +1124,18 @@ def build_report(state: Path) -> dict[str, Any]:
     }
 
 
-def report_text(report: Mapping[str, Any]) -> str:
+def report_text(report: Mapping[str, Any], *, validity_problems: Iterable[Mapping[str, Any]] = ()) -> str:
     mib = lambda b: f"{b / 1048576:.1f} MiB" if b is not None else "—"  # noqa: E731
-    lines = [f"status: {report['status']}（mode={report['mode']}）", f"P_B = {report['P_B']} bytes（{mib(report['P_B'])}）", ""]
+    lines = [f"status: {report['status']}（mode={report['mode']}）", f"P_B = {report['P_B']} bytes（{mib(report['P_B'])}）"]
+    validity_problems = list(validity_problems)
+    if validity_problems:
+        lines.append(f"⚠️ 有效性問題（同一次有確定的超標，照常寫報告）：{validity_text(validity_problems)}")
+    lines.append("")
     for phase, info in report["paths"].items():
-        pk = info["peaks"]
+        pk, d = info["peaks"], disk_numbers(info)
         lines.append(f"[{phase}] P_path={mib(info['P_path'])}  dirs_peak={mib(pk['dirs_peak'])}  "
                      f"fs_peak={mib(pk['fs_peak'])}  accounted={mib(info['accounted'])}  samples={pk['samples']}")
+        lines.append(f"    P_basis={d['P_basis']}  fs_unexplained={d['fs_unexplained']} bytes（容差 {FS_UNEXPLAINED_TOLERANCE}）")
         for part, value in info["accounted_parts"].items():
             lines.append(f"    {part:<18} {mib(value)}")
         lines.append(f"    containers 合併規則：{info['container_rule']}")
@@ -1082,6 +1158,34 @@ def _load_module(name: str, path: Path):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _load_frozen(harness: Path, rel: str, mapping: Mapping[str, str], name: str):
+    """**live 專用**：從 S 的快照載入權威常數的模組（S 由 bootstrap 從受信任的 repo 建立並驗證過）——先驗該檔的 SHA-256 ＝
+    `MANIFEST` 的那一行才載入。⚠️ offline 的讀取端⛔ 不用它：原始量測目錄裡的程式⛔ 不執行、⛔ 不 import（見 `precheck_verdict()`）。"""
+    if rel not in mapping:
+        raise SizingError(f"快照的 MANIFEST 沒有 {rel}")
+    path = harness / rel
+    if hashlib.sha256(path.read_bytes()).hexdigest() != mapping[rel]:
+        raise SizingError(f"快照的 {rel} 與 MANIFEST 不符")
+    return _load_module(name, path)
+
+
+def live_constants(state: Path, clone: str | Path, profile: str) -> dict[str, Any]:
+    """live 的 `report`（sizing）、`acceptance-precheck`、`acceptance-report` 用的權威常數：`P_B_BUDGET`（preflight）與 acceptance 的
+    `ENV_DROP_NAMES`／`ENV_DROP_PREFIXES`（supervisor），**一律取自 S 的快照**；另外斷言快照裡的這幾個檔案與工作複本**逐位元相同**
+    （步驟實際執行的是工作複本的 `clean_env()`，freeze record 也從工作複本 import `P_B_BUDGET`）——不同即 fail-closed。"""
+    mapping, _sha = load_harness_manifest(state, profile)
+    rels = (FROZEN_PREFLIGHT,) if profile == "sizing" else (FROZEN_PREFLIGHT, FROZEN_SUPERVISOR)
+    for rel in rels:
+        if (state / "harness" / rel).read_bytes() != (Path(clone) / rel).read_bytes():
+            raise SizingError(f"快照的 {rel} 與工作複本的不同（⛔ 不得混用兩個版本的權威常數）")
+    pf = _load_frozen(state / "harness", FROZEN_PREFLIGHT, mapping, "i074_stage2_preflight_frozen")
+    out: dict[str, Any] = {"p_b_budget": pf.P_B_BUDGET}
+    if profile == "acceptance":
+        sup = _load_frozen(state / "harness", FROZEN_SUPERVISOR, mapping, "i074_stage2_supervisor_frozen")
+        out.update(drop_names=tuple(sup.ENV_DROP_NAMES), drop_prefixes=tuple(sup.ENV_DROP_PREFIXES))
+    return out
 
 
 def clone_bootstrap(python_root: str | Path):
@@ -1699,6 +1803,9 @@ def _check_events(invocations: list[dict[str, Any]], events: Mapping[tuple[str, 
     unknown = sorted({cid for cid, _kind in events} - known_ids)
     if unknown:
         raise SizingError(f"lifecycle event 裡有不屬於 invocation 索引的容器 ID：{unknown}")
+    kinds = sorted({kind for _cid, kind in events} - {"create_begin", "rm_done"})
+    if kinds:
+        raise SizingError(f"lifecycle event 有不認得的種類：{kinds}")
     numbers = [n for key in events for n in events[key]]
     duplicated = sorted({n for n in numbers if numbers.count(n) > 1})
     if duplicated:
@@ -1802,9 +1909,45 @@ def container_memory_limit(inv: Mapping[str, Any]) -> int:
     return mem
 
 
-def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterable[str] = (),
-                            drop_prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
-    """⑦d「二之五」：兩條磁碟路徑（門檻）、兩次晉升（資訊值）、每個容器與每一步 host 程序樹的記憶體（門檻與單向警報）。"""
+ACCEPTANCE_PHASE_DIRS = ("failure", "promote_failure", "promote_success", "success")   # phases/ 恰好這四個量測窗口
+COLLECT_STAGES = ("before_full", "complete")
+ACCEPTANCE_DISK_PHASES = PROFILES["acceptance"]["disk_phases"]
+
+
+def acceptance_expected(compute: str, stage: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """（預期的步驟, 預期的 invocation）。`before_full` ＝ full 模式正式集合的**精確前綴**（少了最後的量測趟）——以
+    「正式集合[:len(前綴)] ＝ 前綴、且恰好少一個」斷言（有效性條件計畫「二」的「共用的 collector」）。"""
+    if stage not in COLLECT_STAGES:
+        raise SizingError(f"stage 只接受 {COLLECT_STAGES}：{stage!r}")
+    steps = list(ACCEPTANCE_STEPS) + ([ACCEPTANCE_FULL_STEP] if compute == "full" else [])
+    invocations = expected_invocations("acceptance", compute)
+    if stage == "complete":
+        return steps, invocations
+    if compute != "full":
+        raise SizingError(f"before_full 只用在 replay_compute=full（本次 {compute!r}）")
+    pre_steps, pre_invocations = list(ACCEPTANCE_STEPS), invocations[:-1]
+    if steps[:len(pre_steps)] != pre_steps or len(steps) != len(pre_steps) + 1 \
+            or invocations[:len(pre_invocations)] != pre_invocations or len(invocations) != len(pre_invocations) + 1:
+        raise SizingError("before_full 的預期集合⛔ 不是正式集合的精確前綴")
+    return pre_steps, pre_invocations
+
+
+def _exact_names(directory: Path, want: Iterable[str], label: str) -> None:
+    """目錄的成員必須**恰好**是預期的集合——⛔ 不靜默忽略多出的資料（第二輪 review）。"""
+    got = sorted(p.name for p in directory.iterdir()) if directory.is_dir() else []
+    if got != sorted(want):
+        raise SizingError(f"{label} 的成員與預期不符：預期 {sorted(want)}，實際 {got}")
+
+
+def collect_acceptance_measurements(state: Path, *, stage: str, drop_names: Iterable[str] = (),
+                                    drop_prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
+    """⑦d「二之五」的量測蒐集（有效性條件計畫「二」的**共用 collector**）。回傳**內部的量測快照**——⛔ 不是
+    `i074_stage2_acceptance_report_v2`（沒有 schema、contract、status、violations 等頂層鍵，v2 的 validator 一定拒絕它）。
+
+    `stage="complete"`：本次 `replay_compute` 的正式集合（最後的報告）；`stage="before_full"`：full 模式在量測趟之前的精確前綴
+    （precheck）。讀的每一個集合（`rc.tsv`、`index/`、`containers/`、`twins/`、lifecycle event、`host/`、`phases/`）都必須
+    **恰好**等於預期——⛔ 不靜默忽略多出的資料。
+    """
     meta = _read_tsv(state / "meta.tsv")
     comp = _read_tsv(state / "components.tsv")
     rc = _read_tsv(state / "rc.tsv")
@@ -1820,17 +1963,18 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
     if meta["clone_head"] != meta["repo_head"]:
         raise SizingError(f"工作複本的 HEAD {meta['clone_head']} ≠ 記下的 repo_head {meta['repo_head']}")
     compute = meta["replay_compute"]
-    steps = list(ACCEPTANCE_STEPS) + ([ACCEPTANCE_FULL_STEP] if compute == "full" else [])
+    steps, expected = acceptance_expected(compute, stage)
     for step, value in rc.items():
-        expected, _, actual = value.partition("\t")
-        if expected != actual:
-            raise SizingError(f"{step} 的結束碼 {actual} ≠ 預期 {expected}")
+        want, _, actual = value.partition("\t")
+        if want != actual:
+            raise SizingError(f"{step} 的結束碼 {actual} ≠ 預期 {want}")
     if list(rc) != [s for s, _ in steps]:
         raise SizingError(f"步驟與預期不符：預期 {[s for s, _ in steps]}，實際 {list(rc)}")
 
-    invocations = load_invocations(state, "acceptance", compute)
+    invocations = load_invocations(state, "acceptance", compute, expected=expected)
     events = load_events(state)
     _check_events(invocations, events)
+    _exact_names(state / "phases", ACCEPTANCE_PHASE_DIRS, "phases/")
     for inv in invocations:
         inv["footprint"] = inv["sidecar"]["log_bound"] + inv["twin"]["adopted_bytes"] + inv["sidecar"]["size_rw"]
 
@@ -1839,7 +1983,7 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         "snapshot", "probe", "frozen_patched")}
     manifest, manifest_sha = load_harness_manifest(state, "acceptance")
     paths: dict[str, Any] = {}
-    for phase in PROFILES["acceptance"]["disk_phases"]:
+    for phase in ACCEPTANCE_DISK_PHASES:
         baseline, end, peaks = _phase_window(state, phase, meta)
         containers = [i for i in invocations if i["phase"] == phase]
         ids = {c["id"] for c in containers}
@@ -1885,7 +2029,6 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
                        "reaper": side["reaper"], "cgroup_peak_bytes": side["peak_bytes"], "memory_limit_bytes": limit,
                        "below_limit": side["max_single_rss_bytes"] < ACCEPTANCE_MEMORY_LIMIT
                        and side["rss_peak_sampled_bytes"] < ACCEPTANCE_MEMORY_LIMIT})
-    container_limits = sorted({row["memory_limit_bytes"] for row in memory})
     host = []
     for step, phase in steps:
         path = state / "host" / f"{step}.json"
@@ -1904,8 +2047,33 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
                      "max_single_rss_bytes": rec["max_single_rss_bytes"],
                      "group_rss_peak_sampled_bytes": rec["group_rss_peak_sampled_bytes"], "group_alarm": alarm,
                      "group_note": GROUP_NOTES[alarm]})
+    _exact_names(state / "host", [f"{s}.json" for s, _ in steps], "host/")      # 多出的 host 紀錄
     memavail = [int(line.split("\t")[1]) for line in (state / "memavail.tsv").read_text().splitlines() if line.strip()] \
         if (state / "memavail.tsv").is_file() else []
+    return {"stage": stage, "meta": meta, "components": comp, "compute": compute, "steps": [s for s, _ in steps],
+            "sequences": [inv["sequence"] for inv in invocations], "harness_manifest": manifest,
+            "harness_manifest_sha256": manifest_sha, "paths": paths, "promotion": promotion, "memory": memory,
+            "host": host, "host_memavailable_low": min(memavail) if memavail else None}
+
+
+def acceptance_disk(paths: Mapping[str, Any]) -> dict[str, dict[str, int]]:
+    """兩條磁碟路徑的判定數字，**依 success、failure 的順序**（有效性問題與違反的順序以它為準）。"""
+    return {phase: disk_numbers(paths[phase]) for phase in ACCEPTANCE_DISK_PHASES}
+
+
+def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterable[str] = (),
+                            drop_prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
+    """⑦d「二之五」：兩條磁碟路徑（門檻）、兩次晉升（資訊值）、每個容器與每一步 host 程序樹的記憶體（門檻與單向警報）。
+
+    ⚠️ 有效性條件計畫「二」（第三輪 review：v2 **維持原語意**）：報告 v2 **只在沒有任何有效性問題時**寫出——有有效性問題
+    （不論有沒有確定的違反）→ `SizingError`、⛔ 不產報告；混合狀態的判定只由 `precheck.json` 表達。full 模式的磁碟窗口在
+    precheck 之前就結束、precheck 不是 ok 就⛔ 不跑量測趟，所以這裡出現有效性問題就是 harness 的缺陷。
+    """
+    snap = collect_acceptance_measurements(state, stage="complete", drop_names=drop_names, drop_prefixes=drop_prefixes)
+    validity = disk_validity_problems(acceptance_disk(snap["paths"]), p_b_budget)
+    if validity:
+        raise SizingError(f"有效性問題（報告 v2 只在沒有任何有效性問題時寫出；⛔ 不產報告）：{validity_text(validity)}")
+    compute, memory = snap["compute"], snap["memory"]
     notes = ["契約（⑦d 增補）：經正常 wait 鏈保存 resource usage 的每一個程序各自 < 450 MiB——通過由精確的閘證明"
              "（max(RUSAGE_SELF, RUSAGE_CHILDREN)：wrapper／host-run 自己、leader 與被收掉的子孫）；被 kernel 自動回收的子孫"
              "在契約外（SIGCHLD=SIG_IGN 以取樣偵測、偵測到即 fail-closed；SA_NOCLDWAIT 看不到）；取樣的 total_rss 只作單向偵測"
@@ -1929,19 +2097,19 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
         "out_of_contract": list(REPORT_OUT_OF_CONTRACT),
         "auto_reap_detection": dict(REPORT_AUTO_REAP_DETECTION),
         "memory_measures": dict(REPORT_MEMORY_MEASURES),
-        "mode": meta["mode"],
+        "mode": snap["meta"]["mode"],
         "replay_compute": compute,
-        "meta": meta,
-        "components": comp,
-        "harness_manifest": manifest,
-        "harness_manifest_sha256": manifest_sha,
+        "meta": snap["meta"],
+        "components": snap["components"],
+        "harness_manifest": snap["harness_manifest"],
+        "harness_manifest_sha256": snap["harness_manifest_sha256"],
         "limits": {"memory_bytes": ACCEPTANCE_MEMORY_LIMIT, "P_B_BUDGET": p_b_budget,
-                   "container_memory_limit_bytes": container_limits},
-        "paths": paths,
-        "promotion": promotion,
+                   "container_memory_limit_bytes": sorted({row["memory_limit_bytes"] for row in memory})},
+        "paths": snap["paths"],
+        "promotion": snap["promotion"],
         "memory": memory,
-        "host": host,
-        "host_memavailable_low": min(memavail) if memavail else None,
+        "host": snap["host"],
+        "host_memavailable_low": snap["host_memavailable_low"],
         "notes": notes,
     }
     report["violations"] = derive_acceptance_violations(report)
@@ -1950,6 +2118,176 @@ def build_acceptance_report(state: Path, *, p_b_budget: int, drop_names: Iterabl
     if problems:
         raise SizingError(f"報告的自我驗證不通過（⛔ 不寫報告）：{problems[:5]}")
     return report
+
+
+# ── ⑨-1 的 fail-fast：precheck（有效性條件計畫「二」的「`precheck.json` 的契約」） ─────────────────────────────
+
+PRECHECK_SCHEMA = "i074_stage2_acceptance_precheck_v1"
+PRECHECK_STATUSES = ("ok", "threshold_exceeded", "invalid")
+PRECHECK_EXIT = {"ok": 0, "threshold_exceeded": 2, "invalid": 3}
+PRECHECK_KEYS = frozenset({"schema", "status", "full_trip", "identity", "limits", "steps", "sequences", "disk",
+                           "validity_problems", "violations"})
+PRECHECK_IDENTITY_KEYS = ("run_id", "mode", "replay_compute", "image", "repo_head", "clone_head", "harness_manifest_sha256")
+_PRECHECK_LIMITS_KEYS = frozenset({"memory_bytes", "P_B_BUDGET", "fs_unexplained_tolerance_bytes"})
+_DISK_KEYS = frozenset({"P_path", "dirs_peak", "fs_peak", "accounted", "P_basis", "fs_unexplained"})
+MEMORY_VIOLATION_KINDS = ("container_max_single_rss", "container_rss_sampled", "host_max_single_rss",
+                          "host_group_rss_sampled")
+PRECHECK_VIOLATION_KINDS = MEMORY_VIOLATION_KINDS + ("disk_p_basis",)
+_HEX40 = re.compile(r"[0-9a-f]{40}")
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+
+
+def precheck_from_snapshot(snap: Mapping[str, Any], *, p_b_budget: int) -> dict[str, Any]:
+    """量測趟之前的判定。優先序（第二輪 review）：① **確定的違反**（記憶體的每一類、`P_basis` ＞ 預算）→ threshold_exceeded，
+    同一次的有效性問題照樣記錄；② 沒有確定的違反、但有有效性問題 → invalid；③ 都沒有 → ok。"""
+    if snap["stage"] != "before_full":
+        raise SizingError("precheck 只吃 before_full 的量測快照")
+    disk = acceptance_disk(snap["paths"])
+    validity = disk_validity_problems(disk, p_b_budget)
+    violations = derive_memory_violations(snap["memory"], snap["host"], ACCEPTANCE_MEMORY_LIMIT) \
+        + disk_basis_violations(disk, p_b_budget)
+    status = "threshold_exceeded" if violations else "invalid" if validity else "ok"
+    meta = snap["meta"]
+    identity = {key: meta[key] for key in PRECHECK_IDENTITY_KEYS if key != "harness_manifest_sha256"}
+    identity["harness_manifest_sha256"] = snap["harness_manifest_sha256"]
+    return {"schema": PRECHECK_SCHEMA, "status": status, "full_trip": "allowed" if status == "ok" else "not_started",
+            "identity": identity,
+            "limits": {"memory_bytes": ACCEPTANCE_MEMORY_LIMIT, "P_B_BUDGET": p_b_budget,
+                       "fs_unexplained_tolerance_bytes": FS_UNEXPLAINED_TOLERANCE},
+            "steps": list(snap["steps"]), "sequences": list(snap["sequences"]), "disk": disk,
+            "validity_problems": validity, "violations": violations}
+
+
+def build_acceptance_precheck(state: Path, *, p_b_budget: int, drop_names: Iterable[str] = (),
+                              drop_prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
+    snap = collect_acceptance_measurements(state, stage="before_full", drop_names=drop_names, drop_prefixes=drop_prefixes)
+    doc = precheck_from_snapshot(snap, p_b_budget=p_b_budget)
+    problems = validate_acceptance_precheck_v1(doc, p_b_budget=p_b_budget)
+    if problems:
+        raise SizingError(f"precheck 的自我驗證不通過（⛔ 不寫）：{problems[:5]}")
+    return doc
+
+
+def validate_acceptance_precheck_v1(doc: Any, *, p_b_budget: int) -> list[str]:
+    """`precheck.json` 的封閉 schema、衍生欄位、由 `disk` 重新推導的有效性問題與磁碟違反、優先序。
+
+    ⚠️ 與報告 v2 的 validator 同一套紀律：每一節先驗完型別、任何未預期的例外都轉成問題（⛔ 不拋、⛔ 不放行）。記憶體列的違反
+    ⛔ 不在這裡推導（`precheck.json` 沒有記憶體列）——由讀取端從原始量測**重算逐位元比對**證明。回傳問題清單（空 ＝ 有效）。
+    """
+    problems: list[str] = []
+    try:
+        _validate_precheck(doc, p_b_budget, problems)
+    except Exception as exc:  # noqa: BLE001 - 後援：任何未預期的結構都是「不符」
+        problems.append(f"驗證時發生例外（結構不符）：{type(exc).__name__}: {exc}")
+    return problems
+
+
+def _rows_ok(problems: list[str], where: str, rows: Any, kinds: tuple[str, ...]) -> bool:
+    if not isinstance(rows, list):
+        problems.append(f"{where} 必須是陣列")
+        return False
+    ok = True
+    for i, row in enumerate(rows):
+        w = f"{where}[{i}]"
+        if not _closed(problems, w, row, _VIOLATION_KEYS):
+            ok = False
+            continue
+        if not _typed(problems, w, row, {"kind": "str", "subject": "str", "value": "int", "limit": "int"}):
+            ok = False
+            continue
+        if row["kind"] not in kinds:
+            problems.append(f"{w}.kind={row['kind']!r}（不在封閉的 enum 裡）")
+            ok = False
+    return ok
+
+
+def _validate_precheck(doc: Any, p_b_budget: int, problems: list[str]) -> None:
+    if not _closed(problems, "precheck", doc, PRECHECK_KEYS):
+        return
+    if not isinstance(doc["schema"], str) or doc["schema"] != PRECHECK_SCHEMA:
+        problems.append(f"schema={doc['schema']!r}")
+    for key, allowed in (("status", PRECHECK_STATUSES), ("full_trip", ("allowed", "not_started"))):
+        if not isinstance(doc[key], str) or doc[key] not in allowed:
+            problems.append(f"{key}={doc[key]!r}（只能是 {allowed}）")
+    identity = doc["identity"]
+    if _closed(problems, "identity", identity, frozenset(PRECHECK_IDENTITY_KEYS)):
+        if _typed(problems, "identity", identity, dict.fromkeys(PRECHECK_IDENTITY_KEYS, "str")):
+            if identity["mode"] not in ("validation", "formal"):
+                problems.append(f"identity.mode={identity['mode']!r}")
+            if identity["replay_compute"] != "full":
+                problems.append(f"identity.replay_compute={identity['replay_compute']!r}（precheck 只在 full）")
+            for key in ("repo_head", "clone_head"):
+                if not _HEX40.fullmatch(identity[key]):
+                    problems.append(f"identity.{key} 必須是 40 碼小寫 hex")
+            if identity["repo_head"] != identity["clone_head"]:
+                problems.append("identity.clone_head ≠ repo_head")
+            if not _HEX64.fullmatch(identity["harness_manifest_sha256"]):
+                problems.append("identity.harness_manifest_sha256 必須是 64 碼小寫 hex")
+    limits = doc["limits"]
+    if _closed(problems, "limits", limits, _PRECHECK_LIMITS_KEYS):
+        for key, want in (("memory_bytes", ACCEPTANCE_MEMORY_LIMIT), ("P_B_BUDGET", p_b_budget),
+                          ("fs_unexplained_tolerance_bytes", FS_UNEXPLAINED_TOLERANCE)):
+            if not _is_int(limits[key]) or limits[key] != want:
+                problems.append(f"limits.{key}={limits[key]!r} ≠ {want}")
+    want_steps, want_invocations = acceptance_expected("full", "before_full")
+    if doc["steps"] != [s for s, _ in want_steps]:
+        problems.append("steps ≠ 量測趟之前的步驟（精確前綴）")
+    sequences = doc["sequences"]
+    if not isinstance(sequences, list) or not all(_is_int(v) for v in sequences) \
+            or sequences != list(range(1, len(want_invocations) + 1)):
+        problems.append("sequences ≠ 量測趟之前的 invocation（1..n）")
+    disk = doc["disk"]
+    disk_ok = isinstance(disk, dict) and set(disk) == set(ACCEPTANCE_DISK_PHASES)
+    if not disk_ok:
+        problems.append(f"disk 必須恰好是 {ACCEPTANCE_DISK_PHASES}")
+    else:
+        for phase in ACCEPTANCE_DISK_PHASES:
+            where, d = f"disk.{phase}", disk[phase]
+            if not _closed(problems, where, d, _DISK_KEYS) or not _typed(problems, where, d, {
+                    "P_path": "nonneg", "dirs_peak": "nonneg", "fs_peak": "int", "accounted": "nonneg",
+                    "P_basis": "nonneg", "fs_unexplained": "int"}):
+                disk_ok = False
+                continue
+            if d["P_basis"] != max(d["dirs_peak"], d["accounted"]):
+                problems.append(f"{where}.P_basis ≠ max(dirs_peak, accounted)")
+            if d["fs_unexplained"] != d["fs_peak"] - d["P_basis"]:
+                problems.append(f"{where}.fs_unexplained ≠ fs_peak − P_basis")
+            if d["P_path"] != max(d["dirs_peak"], d["fs_peak"], d["accounted"]):
+                problems.append(f"{where}.P_path ≠ max(dirs_peak, fs_peak, accounted)")
+    rows_ok = _rows_ok(problems, "validity_problems", doc["validity_problems"], VALIDITY_KINDS)
+    rows_ok = _rows_ok(problems, "violations", doc["violations"], PRECHECK_VIOLATION_KINDS) and rows_ok
+    if problems or not disk_ok or not rows_ok:
+        return
+    ordered = {phase: disk[phase] for phase in ACCEPTANCE_DISK_PHASES}     # ⚠️ canonical JSON 會把鍵排序——順序以這裡為準
+    if doc["validity_problems"] != disk_validity_problems(ordered, p_b_budget):
+        problems.append("validity_problems 與由 disk 重新推導的結果不符")
+    memory_part = [v for v in doc["violations"] if v["kind"] != "disk_p_basis"]
+    if doc["violations"] != memory_part + disk_basis_violations(ordered, p_b_budget):
+        problems.append("violations 的磁碟部分與由 disk 重新推導的結果不符（或⛔ 不在記憶體之後）")
+    for v in memory_part:
+        if v["limit"] != ACCEPTANCE_MEMORY_LIMIT or v["value"] < v["limit"]:
+            problems.append(f"記憶體的違反 {v} 與門檻不符")
+    want_status = "threshold_exceeded" if doc["violations"] else "invalid" if doc["validity_problems"] else "ok"
+    if doc["status"] != want_status:
+        problems.append(f"status={doc['status']!r} ≠ 優先序推導的 {want_status!r}")
+    if doc["full_trip"] != ("allowed" if doc["status"] == "ok" else "not_started"):
+        problems.append(f"full_trip={doc['full_trip']!r} 與 status 不符")
+
+
+def precheck_text(doc: Mapping[str, Any]) -> str:
+    mib = lambda b: f"{b / 1048576:.1f} MiB"  # noqa: E731
+    head = {"ok": "ok——量測趟可以執行", "threshold_exceeded": "threshold_exceeded——**確定的違反**，⛔ 不得重跑（回退順序）；量測趟未執行、額度未消耗",
+            "invalid": "invalid——量測無效（⛔ 不是判定，可以重跑）；量測趟未執行、額度未消耗"}[doc["status"]]
+    lines = [f"precheck：{head}"]
+    for v in doc["violations"]:
+        lines.append(f"  ⚠️ {v['kind']}：{v['subject']} {mib(v['value'])}（門檻 {mib(v['limit'])}）")
+    if doc["validity_problems"]:
+        lines.append(f"  有效性問題：{validity_text(doc['validity_problems'])}")
+    for phase in ACCEPTANCE_DISK_PHASES:
+        d = doc["disk"][phase]
+        lines.append(f"  [{phase}] P_path={d['P_path']}  P_basis={d['P_basis']}  fs_unexplained={d['fs_unexplained']}  "
+                     f"（預算 {doc['limits']['P_B_BUDGET']}、容差 {doc['limits']['fs_unexplained_tolerance_bytes']}）")
+    return "\n".join(lines) + "\n"
 
 
 # ── ⑦d 增補：報告 v2 的封閉 schema、唯一的門檻推導與驗證 ─────────────────────────────
@@ -2025,11 +2363,11 @@ def host_record_problems(rec: Any, *, step: str, rc: int) -> list[str]:
     return problems
 
 
-def derive_acceptance_violations(report: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """⑦d 增補：**唯一的**門檻推導（產出端與 validator 共用）。順序：容器列、host 列、磁碟（success、failure）。"""
-    limit, budget = report["limits"]["memory_bytes"], report["limits"]["P_B_BUDGET"]
+def derive_memory_violations(memory: Iterable[Mapping[str, Any]], host: Iterable[Mapping[str, Any]],
+                             limit: int) -> list[dict[str, Any]]:
+    """記憶體的門檻推導（報告 v2 與 precheck 共用的唯一定義）。順序：容器列、host 列。"""
     out: list[dict[str, Any]] = []
-    for row in report["memory"]:
+    for row in memory:
         subject = f"#{row['sequence']} {row['phase']}/{row['role']}"
         if row["max_single_rss_bytes"] >= limit:
             out.append({"kind": "container_max_single_rss", "subject": subject, "value": row["max_single_rss_bytes"],
@@ -2037,13 +2375,21 @@ def derive_acceptance_violations(report: Mapping[str, Any]) -> list[dict[str, An
         if row["rss_peak_sampled_bytes"] >= limit:
             out.append({"kind": "container_rss_sampled", "subject": subject, "value": row["rss_peak_sampled_bytes"],
                         "limit": limit})
-    for row in report["host"]:
+    for row in host:
         if row["max_single_rss_bytes"] >= limit:
             out.append({"kind": "host_max_single_rss", "subject": row["step"], "value": row["max_single_rss_bytes"],
                         "limit": limit})
         if row["group_rss_peak_sampled_bytes"] >= limit:
             out.append({"kind": "host_group_rss_sampled", "subject": row["step"],
                         "value": row["group_rss_peak_sampled_bytes"], "limit": limit})
+    return out
+
+
+def derive_acceptance_violations(report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """⑦d 增補：報告 v2 **唯一的**門檻推導（產出端與 validator 共用）。順序：容器列、host 列、磁碟（success、failure）。
+    ⚠️ 有效性條件計畫（第三輪 review）：輸出⛔ 不變——磁碟仍以 `P_path` 判（v2 只在沒有有效性問題時寫出）。"""
+    limit, budget = report["limits"]["memory_bytes"], report["limits"]["P_B_BUDGET"]
+    out = derive_memory_violations(report["memory"], report["host"], limit)
     for phase in ("success", "failure"):
         if report["paths"][phase]["P_path"] > budget:
             out.append({"kind": "disk_p_path", "subject": phase, "value": report["paths"][phase]["P_path"],
@@ -2235,6 +2581,10 @@ def _validate_report_v2(report: Any, p_b_budget: int, problems: list[str]) -> No
                 problems.append(f"{where}.kind={v['kind']!r}（不在封閉的 enum 裡）")
     if problems:
         return
+    # ⚠️ 有效性條件計畫（第三輪 review）：v2 只在沒有任何有效性問題時寫出——只是收窄（既有的有效報告照樣通過）。
+    validity = disk_validity_problems(acceptance_disk(paths), p_b_budget)
+    if validity:
+        problems.append(f"報告有有效性問題（v2 只在沒有任何有效性問題時寫出）：{validity_text(validity)}")
     if violations != derive_acceptance_violations(report):
         problems.append("violations 與由列重新推導的結果不符")
     if (report["status"] == "ok") != (not violations):
@@ -2250,9 +2600,10 @@ def acceptance_report_text(report: Mapping[str, Any]) -> str:
         lines.append(f"  ⚠️ {v['kind']}：{v['subject']} {mib(v['value'])} {sign} {mib(v['limit'])}")
     lines += [f"門檻：記憶體 < {mib(report['limits']['memory_bytes'])}、磁碟 ≤ P_B_BUDGET {mib(report['limits']['P_B_BUDGET'])}", ""]
     for phase, info in report["paths"].items():
-        pk = info["peaks"]
+        pk, d = info["peaks"], disk_numbers(info)
         lines.append(f"[{phase}] P_path={mib(info['P_path'])}  dirs_peak={mib(pk['dirs_peak'])}  fs_peak={mib(pk['fs_peak'])}  "
                      f"accounted={mib(info['accounted'])}  read_only_gap={mib(info['read_only_gap'])}")
+        lines.append(f"    P_basis={d['P_basis']}  fs_unexplained={d['fs_unexplained']} bytes（容差 {FS_UNEXPLAINED_TOLERANCE}）")
         for part, value in info["accounted_parts"].items():
             lines.append(f"    {part:<22} {mib(value)}")
     for phase, info in report["promotion"].items():
@@ -2269,6 +2620,314 @@ def acceptance_report_text(report: Mapping[str, Any]) -> str:
     lines.append(f"host MemAvailable 低點：{mib(report['host_memavailable_low'])}")
     lines += [""] + [f"註：{n}" for n in report["notes"]]
     return "\n".join(lines) + "\n"
+
+
+# ── offline 的讀取端：`precheck-verdict` 與 raw manifest（有效性條件計畫「二」的兩列） ───────────────────────────
+#
+# ⚠️ 信任模型（第三～七輪 review）：原始量測目錄（`raw/`、`raw-failed/`）裡的模組、`MANIFEST`、`identity` 與 `precheck.json`
+#   只能證明彼此一致，⛔ 不是信任根。對外的命令（`precheck-verdict`、`raw-manifest`）只執行**固定的驗錨與取出 frontend**：
+#   驗呼叫端給的 `--expected-repo-head`（外部的 commit 錨點，⛔ 不取自 artifact）→ 從受信任 repo 中**它的 git object** 取出
+#   helper 與兩個常數模組 → 以 `python3 -I` 執行取出那一版的內部命令（`precheck-recompute`、`raw-manifest-recompute`）。
+#   ⛔ 不呼叫工作樹的 recompute／產生演算法、⛔ 不執行或 import 原始量測目錄裡的任何程式。
+
+def _require_dir(path: Path, label: str) -> None:
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        raise SizingError(f"{label} 讀不到：{exc}") from exc
+    if not stat.S_ISDIR(st.st_mode):
+        raise SizingError(f"{label} 必須是目錄（⛔ 不接受 symlink）：{path}")
+
+
+def verify_full_suffix(raw: Path) -> dict[str, Any]:
+    """形狀 B 的量測趟 suffix 必須**恰好**是唯一合法的那一組（呼叫端已先以 collector（`complete`）驗過完整狀態的全部內容）：
+    `rc.tsv` 最後一行 `replay_full`、sequence n＋1 是 full 模式正式集合的最後一個 invocation（索引、sidecar、twin 都在）、
+    它的 lifecycle event 恰好 `create_begin`、`rm_done` 各一筆且先後正確、`host/replay_full.json` 存在。"""
+    full = expected_invocations("acceptance", "full")
+    sequence = len(full)
+    cid = container_id(sequence)
+    if list(_read_tsv(raw / "rc.tsv"))[-1:] != [ACCEPTANCE_FULL_STEP[0]]:
+        raise SizingError("形狀 B：rc.tsv 的最後一行⛔ 不是 replay_full")
+    index = read_json(raw / "index" / f"{sequence:04d}.json")
+    if (index["phase"], index["role"]) != full[-1] or index["id"] != cid:
+        raise SizingError(f"形狀 B：sequence {sequence} ⛔ 不是量測趟的 invocation")
+    for folder in ("containers", "twins"):
+        if not (raw / folder / f"{cid}.json").is_file():
+            raise SizingError(f"形狀 B：缺量測趟的 {folder}/{cid}.json")
+    created = load_events(raw).get((cid, "create_begin"), [])
+    removed = load_events(raw).get((cid, "rm_done"), [])
+    if len(created) != 1 or len(removed) != 1 or not created[0] < removed[0]:
+        raise SizingError(f"形狀 B：量測趟的 lifecycle event 不完整或先後顛倒（create_begin {created}、rm_done {removed}）")
+    if not (raw / "host" / f"{ACCEPTANCE_FULL_STEP[0]}.json").is_file():
+        raise SizingError("形狀 B：缺 host/replay_full.json")
+    return {"sequence": sequence, "id": cid, "step": ACCEPTANCE_FULL_STEP[0]}
+
+
+def project_before_full(raw: Path, dest: Path, suffix: Mapping[str, Any]) -> None:
+    """**明確地**投影掉驗過的 suffix：只複製 collector 讀的檔案，並且只拿掉 suffix 列舉的那幾項（每一項都必須恰好拿掉一次）。"""
+    import shutil  # noqa: PLC0415
+
+    cid, step, sequence = suffix["id"], suffix["step"], suffix["sequence"]
+    for name in ("meta.tsv", "components.tsv", "memavail.tsv"):
+        if (raw / name).is_file():
+            shutil.copyfile(raw / name, dest / name)
+    for folder in ("harness", "phases"):
+        shutil.copytree(raw / folder, dest / folder, symlinks=True)
+    removed: list[str] = []
+    rc_lines = [line for line in (raw / "rc.tsv").read_text(encoding="utf-8").splitlines() if line.strip()]
+    kept = [line for line in rc_lines if line.partition("\t")[0] != step]
+    removed += ["rc"] * (len(rc_lines) - len(kept))
+    (dest / "rc.tsv").write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+    for folder, skip in (("index", f"{sequence:04d}.json"), ("containers", f"{cid}.json"), ("twins", f"{cid}.json"),
+                         ("host", f"{step}.json")):
+        (dest / folder).mkdir()
+        for path in sorted((raw / folder).iterdir()):
+            if path.name == skip:
+                removed.append(folder)
+                continue
+            shutil.copyfile(path, dest / folder / path.name)
+    (dest / "events").mkdir()
+    lines = [line for line in (raw / "events" / "events.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    kept = [line for line in lines if json.loads(line)["id"] != cid]
+    removed += ["event"] * (len(lines) - len(kept))
+    (dest / "events" / "events.jsonl").write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+    if sorted(removed) != sorted(["rc", "index", "containers", "twins", "host", "event", "event"]):
+        raise SizingError(f"投影拿掉的項目⛔ 不恰好是 suffix：{sorted(removed)}")
+
+
+def precheck_recompute(raw: Path, *, p_b_budget: int, drop_names: Iterable[str],
+                       drop_prefixes: tuple[str, ...]) -> str:
+    """`precheck.json` 的完整判讀（由受信任的版本執行）：封閉契約 → 身分綁定 → 形狀 A／B → 以 collector 重算、逐位元比對。
+    回傳 `status`；任何一項不符 → `SizingError`（無法判讀）。"""
+    import tempfile  # noqa: PLC0415
+
+    raw = Path(raw)
+    _require_dir(raw, "--raw")
+    data = (raw / "precheck.json").read_bytes()
+    doc = json.loads(data.decode("utf-8"))
+    if canonical_dumps(doc) != data:
+        raise SizingError("precheck.json ⛔ 不是 canonical JSON")
+    problems = validate_acceptance_precheck_v1(doc, p_b_budget=p_b_budget)
+    if problems:
+        raise SizingError(f"precheck.json 的契約不符：{problems[:5]}")
+    meta = _read_tsv(raw / "meta.tsv")
+    for key in PRECHECK_IDENTITY_KEYS[:-1]:
+        if doc["identity"][key] != meta.get(key):
+            raise SizingError(f"身分綁定：identity.{key} ≠ 同一個目錄的 meta.tsv")
+    _mapping, manifest_sha = load_harness_manifest(raw, "acceptance")
+    if doc["identity"]["harness_manifest_sha256"] != manifest_sha:
+        raise SizingError("身分綁定：identity.harness_manifest_sha256 ≠ 同一個目錄的 MANIFEST")
+    prefix = [s for s, _ in ACCEPTANCE_STEPS]
+    steps = list(_read_tsv(raw / "rc.tsv"))
+    kwargs = {"p_b_budget": p_b_budget, "drop_names": drop_names, "drop_prefixes": drop_prefixes}
+    if steps == prefix:                                              # 形狀 A：precheck 之後中止
+        recomputed = build_acceptance_precheck(raw, **kwargs)
+    elif steps == prefix + [ACCEPTANCE_FULL_STEP[0]]:                # 形狀 B：量測趟已執行（成功的 raw/）
+        if doc["status"] != "ok":
+            raise SizingError(f"形狀 B（量測趟已執行）但 precheck 的 status 是 {doc['status']!r}")
+        collect_acceptance_measurements(raw, stage="complete", drop_names=drop_names, drop_prefixes=drop_prefixes)
+        suffix = verify_full_suffix(raw)
+        with tempfile.TemporaryDirectory(prefix="i074-precheck-") as tmp:
+            project_before_full(raw, Path(tmp), suffix)
+            recomputed = build_acceptance_precheck(Path(tmp), **kwargs)
+    else:
+        raise SizingError(f"形狀⛔ 不是 A（恰好前綴）也⛔ 不是 B（前綴 ＋ 量測趟）：{steps}")
+    if canonical_dumps(recomputed) != data:
+        raise SizingError("由原始量測重算的 precheck 與 precheck.json 不同（⛔ 不是逐位元相同）")
+    return doc["status"]
+
+
+GIT_BIN = "/usr/bin/git"          # ⚠️ 固定路徑——⛔ 不從 PATH 找（實作第一輪 review：PATH 上的假 git 能偽造錨點並回傳任意程式）
+_EMPTY_HOME: list[str] = []
+
+
+def _empty_home() -> str:
+    """offline 子程序的空 `HOME`／`XDG_CONFIG_HOME`（⛔ 不讀使用者的 git 設定）；程序結束時刪除。"""
+    if not _EMPTY_HOME:
+        import atexit  # noqa: PLC0415
+        import shutil  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
+
+        path = tempfile.mkdtemp(prefix="i074-offline-home-")
+        atexit.register(shutil.rmtree, path, True)
+        _EMPTY_HOME.append(path)
+    return _EMPTY_HOME[0]
+
+
+def offline_child_env(repo: str | Path | None = None) -> dict[str, str]:
+    """offline 讀取端的子程序（git 與取出的 helper）的**最小化** allowlist 環境——⛔ 不繼承呼叫端的 `GIT_*`、`LD_*`、`PYTHON*`、
+    `PATH` 等（實作第一輪 review：`GIT_DIR`／`GIT_OBJECT_DIRECTORY` 能讓 `--repo` 被忽略）。`GIT_NO_REPLACE_OBJECTS`：⛔ 不讓
+    replace refs 換掉 object；`GIT_CEILING_DIRECTORIES`：`--repo` 必須是 repo 的根目錄，⛔ 不往上找到別的 repo。"""
+    home = _empty_home()
+    env = {"PATH": "/usr/bin:/bin", "HOME": home, "XDG_CONFIG_HOME": home, "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_TERMINAL_PROMPT": "0"}
+    if repo is not None:
+        env["GIT_CEILING_DIRECTORIES"] = str(Path(repo).resolve().parent)
+    return env
+
+
+def _git(repo: str | Path, *args: str, text: bool = False) -> subprocess.CompletedProcess:
+    if not (os.path.isfile(GIT_BIN) and os.access(GIT_BIN, os.X_OK)):
+        raise SizingError(f"找不到 {GIT_BIN}（offline 讀取端⛔ 不從 PATH 找 git）")
+    return subprocess.run([GIT_BIN, "-C", str(repo), *args], capture_output=True, text=text, env=offline_child_env(repo))
+
+
+def verify_anchor(repo: str | Path, expected: str) -> str:
+    """外部的 commit 錨點（第四輪 review）：40 碼小寫 hex，且 `rev-parse --verify <expected>^{commit}` ＝ 它自己——⛔ 不接受
+    ref、縮寫、tag 或不存在的 OID。"""
+    if not isinstance(expected, str) or not _HEX40.fullmatch(expected):
+        raise SizingError(f"--expected-repo-head 必須是 40 碼小寫 hex 的 commit OID（⛔ 不接受 ref、縮寫、tag）：{expected!r}")
+    proc = _git(repo, "rev-parse", "--verify", "--quiet", f"{expected}^{{commit}}", text=True)
+    if proc.returncode != 0 or proc.stdout.strip() != expected:
+        raise SizingError(f"--expected-repo-head {expected} ⛔ 不是受信任 repo 裡的 commit")
+    return expected
+
+
+def git_blob(repo: str | Path, commit: str, rel: str) -> bytes:
+    proc = _git(repo, "cat-file", "blob", f"{commit}:{rel}")
+    if proc.returncode != 0:
+        raise SizingError(f"受信任 repo 的 {commit} 沒有 {rel}")
+    return proc.stdout
+
+
+def run_trusted(repo: str | Path, expected: str, argv: list[str]) -> int:
+    """兩個對外命令共用的 frontend：驗錨點 → 從**錨點的 git object** 取出 helper 與兩個常數模組到私有的暫存目錄 → 以
+    `python3 -I` 執行取出那一版的內部命令。stdout／stderr 直接交給呼叫端。⛔ 不呼叫本地（工作樹）的 recompute。"""
+    import tempfile  # noqa: PLC0415
+
+    verify_anchor(repo, expected)
+    with tempfile.TemporaryDirectory(prefix="i074-trusted-") as tmp:
+        root = Path(tmp)
+        for rel in (HELPER_REL, FROZEN_PREFLIGHT, FROZEN_SUPERVISOR):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_bytes(git_blob(repo, expected, rel))
+        return subprocess.run([sys.executable, "-I", str(root / HELPER_REL), *argv, "--trusted-root", str(root)],
+                              env=offline_child_env()).returncode
+
+
+def _manifest_rel(rel: str) -> str:
+    parts = rel.split("/")
+    if not rel or rel.startswith("/") or any(p in ("", ".", "..") for p in parts):
+        raise SizingError(f"MANIFEST 的路徑不合法：{rel!r}")
+    return rel
+
+
+def precheck_verdict(raw: str | Path, repo: str | Path, expected: str) -> int:
+    """`precheck-verdict` 的 frontend。⚠️ 原始量測目錄裡的東西**只當資料與 bytes**：`identity.repo_head` 必須 ＝ 外部錨點
+    （**不符就在取出或執行任何程式之前拒絕**）、快照的每一個檔案逐位元 ＝ 錨點 commit 裡的同一路徑；之後才交給受信任的版本。"""
+    verify_anchor(repo, expected)
+    raw = Path(raw)
+    _require_dir(raw, "--raw")
+    doc = json.loads((raw / "precheck.json").read_bytes().decode("utf-8"))
+    identity = doc.get("identity") if isinstance(doc, dict) else None
+    head = identity.get("repo_head") if isinstance(identity, dict) else None
+    if head != expected:
+        raise SizingError(f"identity.repo_head {head!r} ≠ --expected-repo-head {expected}（在取出或執行任何程式之前拒絕）")
+    seen: set[str] = set()
+    for line in (raw / "harness" / "MANIFEST").read_text(encoding="utf-8").splitlines():
+        _sha, sep, rel = line.partition("  ")
+        if not sep or _manifest_rel(rel) in seen:
+            raise SizingError(f"MANIFEST 的格式不符：{line!r}")
+        seen.add(rel)
+        path = raw / "harness" / rel
+        if not stat.S_ISREG(os.lstat(path).st_mode) or path.read_bytes() != git_blob(repo, expected, rel):
+            raise SizingError(f"快照的 {rel} ≠ {expected} 的內容（⛔ 不執行原始量測裡的程式）")
+    return run_trusted(repo, expected, ["precheck-recompute", "--raw", str(raw)])
+
+
+# raw manifest（`i074_stage2_raw_manifest_v1`）：原始量測的事後錨點（第五、六輪 review）。
+
+RAW_MANIFEST_SCHEMA = "i074_stage2_raw_manifest_v1"
+RAW_ROOT_NAMES = ("raw", "raw-failed")
+
+
+def build_raw_manifest(raw: str | Path, expected_repo_head: str) -> bytes:
+    """封閉的 canonical manifest：`lstat` 走訪、⛔ 不跟隨 symlink；一般檔案記 `path`、`size`、`sha256`，目錄（含空目錄、⛔ 不含
+    根目錄）記路徑；symlink／FIFO／socket／裝置檔、非 UTF-8 的名稱 → 拒絕。兩個陣列各自依路徑的 UTF-8 bytes 排序。"""
+    if not isinstance(expected_repo_head, str) or not _HEX40.fullmatch(expected_repo_head):
+        raise SizingError(f"--expected-repo-head 必須是 40 碼小寫 hex：{expected_repo_head!r}")
+    raw = Path(raw)
+    _require_dir(raw, "--raw")
+    if raw.name not in RAW_ROOT_NAMES:
+        raise SizingError(f"--raw 的名稱只能是 {RAW_ROOT_NAMES}：{raw.name!r}")
+    files: list[dict[str, Any]] = []
+    dirs: list[str] = []
+
+    def walk(directory: bytes, parts: list[str]) -> None:
+        with os.scandir(directory) as it:
+            entries = sorted(it, key=lambda e: e.name)
+        for entry in entries:
+            try:
+                name = entry.name.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise SizingError(f"名稱⛔ 不是合法的 UTF-8：{entry.path!r}") from exc
+            if name in ("", ".", "..") or "/" in name:
+                raise SizingError(f"名稱不合法：{name!r}")
+            rel = "/".join([*parts, name])
+            st = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(st.st_mode):
+                dirs.append(rel)
+                walk(entry.path, [*parts, name])
+            elif stat.S_ISREG(st.st_mode):
+                digest = hashlib.sha256()
+                fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        digest.update(chunk)
+                files.append({"path": rel, "size": st.st_size, "sha256": digest.hexdigest()})
+            else:
+                raise SizingError(f"{rel}：symlink 或特殊檔案（⛔ 不產 manifest）")
+
+    walk(os.fsencode(str(raw)), [])
+    files.sort(key=lambda f: f["path"].encode("utf-8"))
+    dirs.sort(key=lambda p: p.encode("utf-8"))
+    if len({f["path"] for f in files}) != len(files) or len(set(dirs)) != len(dirs):
+        raise SizingError("路徑重複")
+    return canonical_dumps({"schema": RAW_MANIFEST_SCHEMA, "expected_repo_head": expected_repo_head, "root_name": raw.name,
+                            "file_count": len(files), "dir_count": len(dirs), "files": files, "dirs": dirs})
+
+
+def write_new_file(out: str | Path, data: bytes, *, outside: str | Path) -> None:
+    """exclusive create（`O_CREAT | O_EXCL`：路徑已存在——含 symlink、懸空的 symlink——即失敗、⛔ 不覆寫）；父目錄必須已存在；
+    解析之後落在 `outside` 之內 → 拒絕（避免自我雜湊）；寫入途中失敗 → 刪掉本次建立的那個檔案。"""
+    out = Path(out)
+    parent = os.path.realpath(out.parent)
+    if not os.path.isdir(parent):
+        raise SizingError(f"--out 的父目錄不存在：{out.parent}")
+    target = os.path.join(parent, out.name)
+    guard = os.path.realpath(outside)
+    if os.path.commonpath([target, guard]) == guard:
+        raise SizingError(f"--out 落在 --raw 之內（避免自我雜湊、⛔ 不覆寫原始量測）：{out}")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        os.unlink(target)
+        raise
+
+
+def raw_manifest_main(raw: str, expected: str, out: str | None, check: str | None) -> int:
+    """`raw-manifest-recompute`（受信任的版本執行）：產生模式必須帶 `--out`；檢查模式先在記憶體重建、比對 SHA-256——
+    ⛔ 不同 → rc＝1、⛔ 不寫任何檔案；相同且帶 `--out` 才以同樣的 exclusive 規則寫出。"""
+    if check is None and out is None:
+        raise SizingError("產生模式必須帶 --out")
+    if check is not None and not _HEX64.fullmatch(check):
+        raise SizingError(f"--check-sha256 必須是 64 碼小寫 hex：{check!r}")
+    data = build_raw_manifest(raw, expected)
+    digest = hashlib.sha256(data).hexdigest()
+    doc = json.loads(data)
+    summary = {"sha256": digest, "file_count": doc["file_count"], "dir_count": doc["dir_count"],
+               "expected_repo_head": expected, "root_name": doc["root_name"]}
+    if check is not None and digest != check:
+        print(f"ERROR: raw manifest 的 SHA-256 {digest} ≠ 記下的 {check}（⛔ 不寫任何檔案）", file=sys.stderr)
+        return 1
+    if out is not None:
+        write_new_file(out, data, outside=raw)
+    print(json.dumps(summary, sort_keys=True))
+    return 0
 
 
 # ── ⑦d：⑩ 期間的 observer（外部、唯讀；⛔ 不是 ⑩ 的一部分） ───────────────────────────
@@ -2527,7 +3186,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("--before", "--after", "--published", "--failed-root"):
         p.add_argument(name, required=True)
     p = sub.add_parser("report")
-    for name in ("--state", "--json-out", "--text-out"):
+    for name in ("--state", "--clone", "--json-out", "--text-out"):
         p.add_argument(name, required=True)
     p = sub.add_parser("failure-summary")
     for name in ("--state", "--stage", "--rc", "--out"):
@@ -2568,6 +3227,26 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("acceptance-report")
     for name in ("--state", "--clone", "--json-out", "--text-out"):
         p.add_argument(name, required=True)
+    # ── 有效性條件計畫：⑨-1 的 fail-fast 與 offline 的讀取端 ──
+    p = sub.add_parser("acceptance-precheck")
+    for name in ("--state", "--clone"):
+        p.add_argument(name, required=True)
+    p = sub.add_parser("precheck-verdict")                 # 對外：只執行驗錨與取出的 frontend
+    for name in ("--raw", "--repo", "--expected-repo-head"):
+        p.add_argument(name, required=True)
+    p = sub.add_parser("precheck-recompute")               # 內部：只由取出的受信任版本執行
+    for name in ("--raw", "--trusted-root"):
+        p.add_argument(name, required=True)
+    p = sub.add_parser("raw-manifest")                     # 對外：只執行驗錨與取出的 frontend
+    for name in ("--raw", "--repo", "--expected-repo-head"):
+        p.add_argument(name, required=True)
+    p.add_argument("--out")
+    p.add_argument("--check-sha256")
+    p = sub.add_parser("raw-manifest-recompute")           # 內部：只由取出的受信任版本執行
+    for name in ("--raw", "--expected-repo-head", "--trusted-root"):
+        p.add_argument(name, required=True)
+    p.add_argument("--out")
+    p.add_argument("--check-sha256")
     p = sub.add_parser("observe")
     for name in ("--work-dir", "--out"):
         p.add_argument(name, required=True)
@@ -2643,14 +3322,46 @@ def _dispatch(args) -> int:
             print(f"ERROR: {args.step}：{problem}", file=sys.stderr)
         return 1 if problems else 0
     if cmd == "acceptance-report":
-        pf = _load_module("i074_stage2_preflight", Path(args.clone) / "python" / "scripts" / "i074_stage2_preflight.py")
-        sup = _load_module("i074_stage2_supervisor", Path(args.clone) / "scripts" / "lib" / "i074-stage2-supervisor.py")
-        report = build_acceptance_report(Path(args.state), p_b_budget=pf.P_B_BUDGET, drop_names=sup.ENV_DROP_NAMES,
-                                         drop_prefixes=tuple(sup.ENV_DROP_PREFIXES))
+        # ⚠️ 有效性條件計畫「二」：權威常數取自 S 的快照（並斷言與工作複本逐位元相同）。
+        report = build_acceptance_report(Path(args.state), **live_constants(Path(args.state), args.clone, "acceptance"))
         Path(args.json_out).write_bytes(canonical_dumps(report))
         Path(args.text_out).write_text(acceptance_report_text(report), encoding="utf-8")
         print(acceptance_report_text(report), end="", file=sys.stderr)
         return 0 if report["status"] == "ok" else 2
+    if cmd == "acceptance-precheck":
+        state = Path(args.state)
+        doc = build_acceptance_precheck(state, **live_constants(state, args.clone, "acceptance"))
+        write_exclusive(state / "precheck.json", canonical_dumps(doc))
+        print(precheck_text(doc), end="", file=sys.stderr)
+        return PRECHECK_EXIT[doc["status"]]
+    if cmd == "precheck-verdict":
+        try:
+            return precheck_verdict(args.raw, args.repo, args.expected_repo_head)
+        except (SizingError, OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"ERROR: 無法判讀：{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+    if cmd == "precheck-recompute":
+        root = _trusted_root(args.trusted_root)
+        pf = _load_module("i074_stage2_preflight_trusted", root / FROZEN_PREFLIGHT)
+        sup = _load_module("i074_stage2_supervisor_trusted", root / FROZEN_SUPERVISOR)
+        try:
+            status = precheck_recompute(Path(args.raw), p_b_budget=pf.P_B_BUDGET, drop_names=tuple(sup.ENV_DROP_NAMES),
+                                        drop_prefixes=tuple(sup.ENV_DROP_PREFIXES))
+        except (SizingError, OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"ERROR: 無法判讀：{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 1
+        print(status)
+        return 0
+    if cmd == "raw-manifest":
+        if args.check_sha256 is None and args.out is None:
+            raise SizingError("產生模式必須帶 --out")
+        argv = ["raw-manifest-recompute", "--raw", args.raw, "--expected-repo-head", args.expected_repo_head]
+        argv += ["--out", args.out] if args.out is not None else []
+        argv += ["--check-sha256", args.check_sha256] if args.check_sha256 is not None else []
+        return run_trusted(args.repo, args.expected_repo_head, argv)
+    if cmd == "raw-manifest-recompute":
+        _trusted_root(args.trusted_root)
+        return raw_manifest_main(args.raw, args.expected_repo_head, args.out, args.check_sha256)
     if cmd == "observe":
         return _observe_main(args.work_dir, args.out)
     if cmd == "allocated":
@@ -2733,10 +3444,13 @@ def _dispatch(args) -> int:
         print(record_diff(before, after, published=args.published, failed_root=args.failed_root))
         return 0
     if cmd == "report":
-        report = build_report(state)
+        # ⚠️ 有效性條件計畫「二」：P_B_BUDGET 取自 S 的快照（並斷言與工作複本逐位元相同）。
+        budget = live_constants(state, args.clone, "sizing")["p_b_budget"]
+        report = build_report(state, p_b_budget=budget)
+        text = report_text(report, validity_problems=sizing_validity_problems(report, budget))
         Path(args.json_out).write_bytes(canonical_dumps(report))
-        Path(args.text_out).write_text(report_text(report), encoding="utf-8")
-        print(report_text(report), end="", file=sys.stderr)
+        Path(args.text_out).write_text(text, encoding="utf-8")
+        print(text, end="", file=sys.stderr)
         return 0
     if cmd == "failure-summary":
         phases = {}
@@ -2750,10 +3464,20 @@ def _dispatch(args) -> int:
                    # ⑦d 增補：guard 的 kill-pinned 紀錄與收不掉的 host 程序（有才列）
                    "kill_pinned_log": "raw-failed/kill-pinned.jsonl" if (state / "kill-pinned.jsonl").is_file() else None,
                    "leftover_pids": "raw-failed/leftover-pids.json" if (state / "leftover-pids.json").is_file() else None,
+                   # 有效性條件計畫：⑨-1 的 precheck（判讀一律經 precheck-verdict，⛔ 不憑這個欄位）
+                   "precheck": "raw-failed/precheck.json" if (state / "precheck.json").is_file() else None,
                    "note": "⛔ 本檔不宣稱 P_B；原始量測見 raw-failed/"}
         Path(args.out).write_bytes(canonical_dumps(summary))
         return 0
     raise SizingError(f"未知的子指令：{cmd}")
+
+
+def _trusted_root(root: str) -> Path:
+    """內部命令（`precheck-recompute`、`raw-manifest-recompute`）只能由 frontend 從錨點 commit 取出的那一版執行。"""
+    path = Path(root).resolve()
+    if Path(__file__).resolve() != (path / HELPER_REL).resolve():
+        raise SizingError("內部命令只能由 frontend 取出的受信任版本執行（⛔ 不得直接呼叫本地的 recompute）")
+    return path
 
 
 def _observe_main(work_dir: str, out: str) -> int:

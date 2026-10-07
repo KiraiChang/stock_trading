@@ -506,7 +506,10 @@ def test_b3_record_diff():
 
 # ── d／b2：報告 ──────────────────────────────────────────────────────────────
 
-def _full_state(tmp_path, *, failure_extra=0, dev="42", docker_dev="42", rc_override=None, drop_sample=False):
+BUDGET = 1 << 40    # 有效性條件計畫：build_report() 的 p_b_budget（夠大 ＝ 沒有預算相關的判定）
+
+def _full_state(tmp_path, *, failure_extra=0, dev="42", docker_dev="42", rc_override=None, drop_sample=False, fs_extra=None):
+    """`fs_extra`：phase → L0 的已用量另外多出的 bytes（量測範圍外的寫入；有效性條件的測試用）。"""
     s = _state(tmp_path)
     (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in {
         "run_id": "r", "mode": "validation", "image": IMG, "l0_dev": "42", "docker_root_dev": docker_dev,
@@ -530,8 +533,8 @@ def _full_state(tmp_path, *, failure_extra=0, dev="42", docker_dev="42", rc_over
             "locations": base, "L0_used": 10 << 30,
             "devices": {"L0": dev, "L1": "42", "L2": "42", "L3": "42", "L5": "42", "L4": "42"}}))
         samples = [] if drop_sample else [
-            {"t_ns": 1, "L0": (10 << 30) + (run_mb << 20), "L1": run_mb << 20, "L2": 7 << 20, "L3": 15 << 20,
-             "L5": 1 << 20}]
+            {"t_ns": 1, "L0": (10 << 30) + (run_mb << 20) + (fs_extra or {}).get(phase, 0), "L1": run_mb << 20,
+             "L2": 7 << 20, "L3": 15 << 20, "L5": 1 << 20}]
         (pdir / "samples.jsonl").write_text("".join(json.dumps(x) + "\n" for x in samples))
         (pdir / "end.json").write_bytes(sz.canonical_dumps({
             "run_dir": {"allocated": run_mb << 20, "dirs": 3}, "archive": {"allocated": 7 << 20, "dirs": 4},
@@ -552,7 +555,7 @@ def _manifest(s, profile):
 
 
 def test_d_report_ok(tmp_path):
-    report = sz.build_report(_full_state(tmp_path))
+    report = sz.build_report(_full_state(tmp_path), p_b_budget=BUDGET)
     assert report["status"] == "ok"
     assert report["P_B"] == max(p["P_path"] for p in report["paths"].values())
     success = report["paths"]["success"]
@@ -565,7 +568,7 @@ def test_d_report_ok(tmp_path):
 
 
 def test_d_assumption_violated_still_reports(tmp_path):
-    report = sz.build_report(_full_state(tmp_path, failure_extra=200))
+    report = sz.build_report(_full_state(tmp_path, failure_extra=200), p_b_budget=BUDGET)
     assert report["status"] == "assumption_violated"
     assert report["P_B"] == report["paths"]["failure"]["P_path"]       # P_B 仍取三者最大
 
@@ -578,7 +581,7 @@ def test_d_assumption_violated_still_reports(tmp_path):
 ])
 def test_d_report_fails_closed(tmp_path, kwargs, match):
     with pytest.raises(sz.SizingError, match=match):
-        sz.build_report(_full_state(tmp_path, **kwargs))
+        sz.build_report(_full_state(tmp_path, **kwargs), p_b_budget=BUDGET)
 
 
 @pytest.mark.parametrize("key,value,match", [
@@ -591,7 +594,7 @@ def test_d_report_binds_clone_head_to_repo_head(tmp_path, key, value, match):
     meta[key] = value
     (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in meta.items()))
     with pytest.raises(sz.SizingError, match=match):
-        sz.build_report(s)
+        sz.build_report(s, p_b_budget=BUDGET)
 
 
 def test_d_report_fails_closed_on_missing_component_and_aborted_window(tmp_path):
@@ -599,11 +602,11 @@ def test_d_report_fails_closed_on_missing_component_and_aborted_window(tmp_path)
     lines = [l for l in (s / "components.tsv").read_text().splitlines() if not l.startswith("probe")]
     (s / "components.tsv").write_text("\n".join(lines) + "\n")
     with pytest.raises(sz.SizingError, match="probe"):
-        sz.build_report(s)
+        sz.build_report(s, p_b_budget=BUDGET)
     s2 = _full_state(tmp_path / "again")
     (s2 / "phases" / "success" / "aborted").touch()
     with pytest.raises(sz.SizingError, match="aborted"):
-        sz.build_report(s2)
+        sz.build_report(s2, p_b_budget=BUDGET)
 
 
 def test_d_report_rejects_events_of_unknown_containers(tmp_path):
@@ -611,7 +614,7 @@ def test_d_report_rejects_events_of_unknown_containers(tmp_path):
     s = _full_state(tmp_path)
     sz.record_event(s, "o9990", "create_begin")
     with pytest.raises(sz.SizingError, match="不屬於 invocation 索引"):
-        sz.build_report(s)
+        sz.build_report(s, p_b_budget=BUDGET)
 
 
 def test_d_report_rejects_duplicate_event_numbers_across_phases(tmp_path):
@@ -624,12 +627,84 @@ def test_d_report_rejects_duplicate_event_numbers_across_phases(tmp_path):
     lines[4] = json.dumps(success_line)
     (s / "events" / "events.jsonl").write_text("\n".join(lines) + "\n")
     with pytest.raises(sz.SizingError, match="事件號重複"):
-        sz.build_report(s)
+        sz.build_report(s, p_b_budget=BUDGET)
 
 
 def test_d_events_are_filtered_per_phase_before_combining(tmp_path):
-    report = sz.build_report(_full_state(tmp_path))
+    report = sz.build_report(_full_state(tmp_path), p_b_budget=BUDGET)
     assert {p["container_rule"] for p in report["paths"].values()} == {"max_non_overlapping"}
+
+
+# ── 有效性條件（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」的 pytest：有效性） ─────────────
+
+T = sz.FS_UNEXPLAINED_TOLERANCE
+
+
+def _basis(tmp_path):
+    """每條路徑的 P_basis 與 fs_peak（基準狀態，⛔ 沒有量測範圍外的寫入）。"""
+    report = sz.build_report(_full_state(tmp_path / "base"), p_b_budget=BUDGET)
+    return {ph: sz.disk_numbers(report["paths"][ph]) for ph in sz.DISK_PHASES}
+
+
+def _fs_for(base, phase, unexplained):
+    """讓 phase 的 fs_unexplained 恰好 ＝ unexplained 的 fs_extra。"""
+    return {phase: base[phase]["P_basis"] - base[phase]["fs_peak"] + unexplained}
+
+
+def test_validity_fs_unexplained_boundary(tmp_path):
+    base = _basis(tmp_path)
+    assert all(d["fs_unexplained"] < 0 for d in base.values())             # 基準：會計上界成立（負值有效）
+    report = sz.build_report(_full_state(tmp_path / "eq", fs_extra=_fs_for(base, "success", T)), p_b_budget=BUDGET)
+    assert sz.disk_numbers(report["paths"]["success"])["fs_unexplained"] == T  # ＝ 容差：有效
+    with pytest.raises(sz.SizingError, match=r"量測無效.*success.*fs_unexplained.*1048577"):
+        sz.build_report(_full_state(tmp_path / "over", fs_extra=_fs_for(base, "success", T + 1)), p_b_budget=BUDGET)
+
+
+def test_validity_ambiguous_exceed_is_invalid_not_a_verdict(tmp_path):
+    """模糊區：P_path ＞ 預算但 P_basis ≤ 預算——容差⛔ 不得決定結果 → 無效（可以重跑），⛔ 不是超標的判定。"""
+    base = _basis(tmp_path)
+    budget = base["success"]["P_basis"]                                     # P_basis ＝ 預算（⛔ 沒有超標）
+    state = _full_state(tmp_path / "amb", fs_extra=_fs_for(base, "success", 1))   # fs_peak ＝ 預算 ＋ 1（容差內）
+    with pytest.raises(sz.SizingError, match="模糊區"):
+        sz.build_report(state, p_b_budget=budget)
+    report = sz.build_report(_full_state(tmp_path / "at"), p_b_budget=budget)    # P_path ＝ 預算 → 有效、沒有超標
+    assert report["P_B"] == budget and sz.sizing_validity_problems(report, budget) == []
+
+
+def test_validity_ambiguous_requires_the_unexplained_within_tolerance(tmp_path):
+    """實作第一輪 review：模糊區 ＝「超標**完全由容許範圍內**的 fs_unexplained 造成」——fs_unexplained 已超過容差時只是 ①，
+    ⛔ 不同時記成模糊區（原因分類要精確）。"""
+    budget = 160 << 20
+    def disk(unexplained):
+        return {"success": {"P_path": budget + unexplained, "dirs_peak": 1, "fs_peak": budget + unexplained,
+                            "accounted": budget, "P_basis": budget, "fs_unexplained": unexplained}}
+    assert [p["kind"] for p in sz.disk_validity_problems(disk(T), budget)] == ["ambiguous_disk_exceed"]
+    assert [p["kind"] for p in sz.disk_validity_problems(disk(T + 1), budget)] == ["fs_unexplained"]
+    base = _basis(tmp_path)
+    state = _full_state(tmp_path / "overlap", fs_extra=_fs_for(base, "success", T + 1))
+    with pytest.raises(sz.SizingError) as err:
+        sz.build_report(state, p_b_budget=base["success"]["P_basis"])
+    assert "fs_unexplained" in str(err.value) and "模糊區" not in str(err.value)
+
+
+def test_validity_firm_exceed_wins_and_the_report_is_still_written(tmp_path):
+    """確定的違反優先：P_basis ＞ 預算 → 照常寫報告（P_B ＞ 預算，freeze record 照舊拒寫），同一次的有效性問題列在文字版。"""
+    base = _basis(tmp_path)
+    budget = base["success"]["P_basis"] - 1
+    state = _full_state(tmp_path / "mixed", fs_extra=_fs_for(base, "witness", 3 * T))
+    report = sz.build_report(state, p_b_budget=budget)
+    assert report["P_B"] > budget
+    problems = sz.sizing_validity_problems(report, budget)
+    assert [(p["subject"], p["kind"]) for p in problems] == [("witness", "fs_unexplained")]
+    text = sz.report_text(report, validity_problems=problems)
+    assert "有效性問題" in text and "P_basis=" in text and "fs_unexplained=" in text
+    report2 = sz.build_report(_full_state(tmp_path / "firm"), p_b_budget=budget)   # 只有確定的超標
+    assert report2["P_B"] > budget and sz.sizing_validity_problems(report2, budget) == []
+
+
+def test_validity_build_report_requires_the_budget(tmp_path):
+    with pytest.raises(TypeError):
+        sz.build_report(_full_state(tmp_path))                              # ⛔ 沒有預設值：呼叫端一律傳正式常數
 
 
 def test_failure_summary_lists_leftover_containers(tmp_path):
@@ -688,6 +763,24 @@ def test_twin_rm_failure_keeps_the_cid_for_forced_cleanup(tmp_path):
     assert sz.cleanup_cids(s, docker=str(docker)) == []                  # 外層的失敗清理
     assert "rm -f cid-t0011" in log.read_text().splitlines()
     assert not (s / "cid" / "t0011.cid").exists()
+
+
+def test_twins_only_fill_in_missing_invocations(tmp_path):
+    """有效性條件計畫「二」：full 模式在量測趟之前先建一次 twin、量測趟之後再補它那一個——已有的⛔ 不重建。"""
+    s = tmp_path / "S"
+    argv = ["--cidfile", "/x", "--name", "n", IMG, "true"]
+    sz.write_index(s, sequence=1, cid="o0010", phase="witness", role="fixture", included=True, image=IMG, argv=argv)
+    docker, log = _fake_docker(tmp_path)
+    sz.run_twins(s, docker=str(docker), run_id="r", fs_path=str(tmp_path))
+    first = (s / "twins" / "o0010.json").read_bytes()
+    creates = [line for line in log.read_text().splitlines() if line.startswith("create")]
+    assert len(creates) == sz.TWIN_COUNT
+    sz.write_index(s, sequence=2, cid="o0020", phase="witness", role="finalizer", included=True, image=IMG, argv=argv)
+    sz.run_twins(s, docker=str(docker), run_id="r", fs_path=str(tmp_path))
+    creates = [line for line in log.read_text().splitlines() if line.startswith("create")]
+    assert len(creates) == 2 * sz.TWIN_COUNT and all("t002" in line for line in creates[sz.TWIN_COUNT:])
+    assert (s / "twins" / "o0010.json").read_bytes() == first                # 已有的⛔ 不重建
+    assert json.loads((s / "twins" / "o0020.json").read_text())["status"] == "ok"
 
 
 def test_cleanup_reports_containers_it_could_not_remove(tmp_path):

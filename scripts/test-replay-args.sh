@@ -2770,6 +2770,9 @@ acc_rejects "ac7：--replay-compute 非法 → 拒絕" "只接受 stub" --work-d
 acc_rejects "ac7：--replay-compute 重複 → 拒絕" "重複" --work-dir "$AC_TD/w6" --replay-compute stub --replay-compute full
 I074_SIZING_FAULT=bogus acc_rejects "ac7：I074_SIZING_FAULT 不認得的值 → 拒絕" "只接受" --work-dir "$AC_TD/w7"
 AC_XDG="$AC_TD/empty-xdg" acc_rejects "ac7：找不到 Stage 2 的 run identity → 拒絕" "run identity" --work-dir "$AC_TD/w8"
+# 有效性條件計畫：fs-noise 是認得的故障（過了故障清單，才在之後的 identity 中止——⛔ 不是「只接受」的拒絕）
+AC_XDG="$AC_TD/empty-xdg" I074_SIZING_FAULT=fs-noise acc_rejects "有效性條件：fs-noise 是認得的故障注入" "run identity" \
+  --work-dir "$AC_TD/wfn0"
 AC_ENV="I074_STAGE2_TOKEN=x" acc_rejects "ac8：環境帶 I074_STAGE2_* → 中止（與 ⑩ 的 label shim 互斥）" "互斥" --work-dir "$AC_TD/w9"
 mkdir -p "$AC_TD/lsbin"
 printf '#!/bin/bash -p\n# I074-STAGE2-LABEL-SHIM\nexit 0\n' > "$AC_TD/lsbin/docker"; chmod +x "$AC_TD/lsbin/docker"
@@ -3016,6 +3019,40 @@ echo AFTER' 2>/dev/null)" || true
   fi
 done
 
+# 有效性條件計畫「六」（shell）：full 模式的順序——量測趟之前的 twin → precheck → 量測趟 → 只補量測趟的 twin；precheck
+#   ⛔ 不是 ok 就⛔ 不跑量測趟（額度⛔ 不消耗）。以 acceptance.sh 的實際片段（從 full 模式的 if 到第 8 步的 twins）搭 stub
+#   執行（與 ac26 同一種做法：要驗的是流程的順序與擋法，⛔ 不需要真的容器）。
+#   ⚠️ acceptance.sh 有兩個 `if [ "$COMPUTE" = full ]`（前一個建量測趟的 worktree）——以 fail-fast 的註解定位、連同它前一行的 if。
+full_src="$(awk '/^  # ⚠️ 有效性條件計畫「二」的「⑨-1 的 fail-fast」/ { print prev; on = 1 } on { print } on && /^helper twins --state/ { exit }
+                 { prev = $0 }' "$REPO_ROOT/scripts/i074-stage2-acceptance.sh")"
+{ [ "$(head -1 <<< "$full_src")" = 'if [ "$COMPUTE" = full ]; then' ] && grep -q "acceptance-precheck" <<< "$full_src" \
+    && grep -q "replay replay_full" <<< "$full_src" && [ "$(grep -c '' <<< "$full_src")" -lt 40 ]; } \
+  || fail "fail-fast：抽不到 full 模式的片段"
+for fcase in "full 0" "full 2" "full 3" "full 5" "stub 0"; do
+  set -- $fcase
+  fout="$(env -u I074_SIZING_FAULT COMPUTE="$1" PRE="$2" bash -c '
+say() { :; }
+helper() { echo "helper $1"; [ "$1" = acceptance-precheck ] && return "$PRE"; return 0; }
+replay() { echo "replay $1 $5"; }
+on_failure() { echo "ON_FAILURE $1"; exit 7; }
+S=/s; REAL_DOCKER=d; RUN_ID=r; WORK=/w; CLONE=/c; L1="$(mktemp -d)"; trap "rm -rf -- \"\$L1\"" EXIT
+'"$full_src"'
+echo END' 2>/dev/null)" || true
+  fseq="$(grep -v '^ON_FAILURE' <<< "$fout" | tr '\n' '|' || true)"
+  case "$fcase" in
+    "full 0") want="helper twins|helper acceptance-precheck|replay replay_full full|helper twins|END|" ;;
+    "stub 0") want="helper twins|END|" ;;
+    *) want="helper twins|helper acceptance-precheck|" ;;
+  esac
+  case "$2" in 2) fmsg="threshold_exceeded" ;; 3) fmsg="invalid" ;; 5) fmsg="失敗（rc=5）" ;; *) fmsg="" ;; esac
+  if [ "$fseq" = "$want" ] && { [ -z "$fmsg" ] || [ "$1" = stub ] \
+       || { grep -q "^ON_FAILURE precheck.*$fmsg" <<< "$fout" && grep -q "量測趟未執行、額度未消耗" <<< "$fout"; }; }; then
+    pass "fail-fast：$fcase → 順序 $want"
+  else
+    fail "fail-fast：$fcase 的順序或擋法不符：$fout"
+  fi
+done
+
 # --formal：清單 ① 在快照前後都驗 ＝ HEAD；必須帶 full；⛔ 不接受故障注入
 rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf1 --formal || rc=$?
 [ "$rc" = 1 ] && grep -q "必須帶 --replay-compute full" "$AC_TD/wf1.err" && [ -z "$(ac_kept "$AC_TD/wf1.err")" ] \
@@ -3023,6 +3060,12 @@ rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf1 --formal || rc=$?
 rc=0; I074_SIZING_FAULT=twins ac_isolated scripts/i074-stage2-acceptance.sh wf2 --formal --replay-compute full || rc=$?
 [ "$rc" = 1 ] && grep -q "故障注入" "$AC_TD/wf2.err" && [ -z "$(ac_kept "$AC_TD/wf2.err")" ] \
   && pass "ac7：--formal ⛔ 不接受故障注入（在建 S 之前就拒絕）" || fail "ac7：--formal 接受了故障注入（rc=$rc）"
+for fentry in acceptance sizing; do                                  # 有效性條件計畫：fs-noise 同樣⛔ 不得用在 --formal
+  rc=0; I074_SIZING_FAULT=fs-noise ac_isolated "scripts/i074-stage2-$fentry.sh" "wfn-$fentry" --formal \
+    $([ "$fentry" = acceptance ] && echo --replay-compute full) || rc=$?
+  [ "$rc" = 1 ] && grep -q "故障注入" "$AC_TD/wfn-$fentry.err" && [ ! -e "$AC_TD/wfn-$fentry" ] \
+    && pass "有效性條件：$fentry --formal ⛔ 不接受 fs-noise" || fail "有效性條件：$fentry --formal 接受了 fs-noise（rc=$rc）"
+done
 printf '\n# dirty\n' >> "$AC_REPO/python/scripts/i074_stage2_replay_stub.py"
 rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wf3 --formal --replay-compute full || rc=$?
 [ "$rc" = 1 ] && grep -q "與 HEAD 的內容不同" "$AC_TD/wf3.err" && [ -z "$(ac_kept "$AC_TD/wf3.err")" ] \
@@ -3086,12 +3129,13 @@ ac_manual_snapshot() {  # $1＝毀損（見下面的 case；ok／head ＝ 不毀
   s="/dev/shm/i074-accept-$id"
   mkdir -m 700 "$s"
   for f in scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh \
-           python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py python/scripts/i074_stage2_rss_wrapper.py; do
+           python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py python/scripts/i074_stage2_rss_wrapper.py \
+           python/scripts/i074_stage2_preflight.py scripts/lib/i074-stage2-supervisor.py; do
     mkdir -p "$s/harness/$(dirname "$f")"; cp "$REPO_ROOT/$f" "$s/harness/$f"
   done
   (cd "$s/harness" && sha256sum -- scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh \
      scripts/lib/i074-sizing-docker-shim.sh python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py \
-     python/scripts/i074_stage2_rss_wrapper.py) \
+     python/scripts/i074_stage2_rss_wrapper.py python/scripts/i074_stage2_preflight.py scripts/lib/i074-stage2-supervisor.py) \
     > "$s/harness/MANIFEST"
   case "$1" in
     extra) printf x > "$s/harness/scripts/extra.sh" ;;

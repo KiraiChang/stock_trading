@@ -1438,7 +1438,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ⚠️ 待 review）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ⚠️ 待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
@@ -1492,6 +1492,12 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work
 - shim 的 sidecar 另記容器實際的記憶體上限（`docker inspect` 的 `HostConfig.Memory`／`MemorySwap`；兩個 profile 都記，讀不到 →
   量測失敗）；acceptance 的報告以它逐 invocation 列出並驗證（實作第一輪 review）。
 - 共用的 shell 原語（S 之後的六步清理、process group、CID 清理、量測窗口、啟動守門）抽成 `scripts/lib/i074-stage2-measure.sh`，與 acceptance harness 共用。
+- **有效性條件**（2026-10-06；`issue.md` I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`report` 帶 `--clone`，`P_B_BUDGET`
+  取自 S 的快照（快照清單多了 `python/scripts/i074_stage2_preflight.py`，並斷言與工作複本逐位元相同）。某條路徑
+  `max(dirs_peak, accounted)` ＞ 預算（確定的超標）→ 照常寫報告（`P_B` ＞ 預算，freeze record 照舊拒寫、走回退順序；同一次的
+  有效性問題列在文字版與 stderr）；沒有確定的超標、但有有效性問題（`fs_unexplained` ＞ 1 MiB 或模糊區）→ 量測**無效**、結束碼 1、
+  ⛔ 不產報告，**可以重跑**（⑨-2 的判定是第一個不是無效的結果）。文字版逐路徑列出 `P_basis` 與 `fs_unexplained`。演練用的故障注入
+  另加 `fs-noise`（`--formal` 一律拒絕）；正式量測的作業規則與 acceptance 一節相同（避開 live 的批次時段）。
 - **freeze record 改從工作複本執行**（`<clone>/python/scripts/i074_stage2_freeze_record.py build --repo <clone>`），⛔ 不從原始 repo 的活路徑；
   `--formal` 的「檔案 ＝ HEAD」改成驗快照清單，freeze record 與 preflight 兩個模組只驗「HEAD 裡有它」。
 - accounted 多一項 **`runner_frozen_patches`**：runner 以 `exec docker run` 結束、EXIT trap ⛔ 不執行，兩份 patch 的凍結副本留在 `<work>/tmp`
@@ -1502,7 +1508,7 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work
   `on_failure` 以 `reap-adopted` 清掉它們，結束碼 ≠ 0 → 保留 S。sizing 另有故障注入 `orphan-setsid`（步驟留下一個 `setsid` 的程序）；
   sizing 的**量法**（cgroup 峰值的 wrapper、sidecar 的既有欄位、報告與數字）⛔ 不變。
 
-### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定），⚠️ 待 review）
+### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定，✅ 2026-10-06 commit `576a8f7`）；2026-10-06 有效性條件與 ⑨-1 fail-fast，⚠️ 待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
 「I-074 Stage 2 的容量驗收」。本節只寫**操作程序**。⛔ 不是正式的證據入口；**正式驗收是 ⑨-1**。
@@ -1513,23 +1519,37 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --work-dir 
 
 # ⑨-1 的正式驗收（⑨ 封存之後；clean、harness 檔案 ＝ HEAD；--replay-compute full 是唯一的量測趟，約 3 小時；
 #   stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案）
+#   ① 開跑之前：記下外部的 commit 錨點（⛔ 不從跑完的 artifact 讀回），並確認 live 的批次時段（見下表「作業規則」）
+git rev-parse HEAD                                   # → <EXPECTED>，開跑前就記下並回報
 REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --formal --replay-compute full --work-dir ~/i074_stage2_acceptance/<名稱>
+#   ② 判讀 precheck（成功的 raw/ 或中止的 raw-failed/ 都一樣；三個參數都必填）
+python3 python/scripts/i074_stage2_sizing.py precheck-verdict --raw ~/i074_stage2_acceptance/<名稱>/raw \
+  --repo . --expected-repo-head <EXPECTED>
+#   ③ 原始量測的事後錨點：產生 raw manifest（--out 必須在 raw 目錄之外、尚不存在），把印出的 sha256、file_count、dir_count 與
+#      這兩行指令記進 issue.md 並 commit；日後以同一個指令加 --check-sha256 <記下的值> 檢查
+python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw ~/i074_stage2_acceptance/<名稱>/raw \
+  --repo . --expected-repo-head <EXPECTED> --out ~/i074_stage2_acceptance/<名稱>.raw-manifest.json
 ```
 
 | 項目 | 規則 |
 |---|---|
-| 做什麼 | 兩層複本（原始 repo → `<work>/real`（模擬的真正 repo）→ `<work>/repo`（工作複本，origin ＝ `<work>/real`））裡以**真實的** runner、`evaluation.py`、finalizer 與晉升跑：preflight 的 `--check-failed-record` → success（replay → `--finalize`）→ 晉升 → failure（replay → `--publish-failed-record`）→ 晉升 → `--check-failed-record`（命中）、`--recover-durability`、`--recover-failed-record`、`--envcheck`（以封存的見證輸出重新發布）、`--recover-envcheck` →（full）量測趟 |
+| 做什麼 | 兩層複本（原始 repo → `<work>/real`（模擬的真正 repo）→ `<work>/repo`（工作複本，origin ＝ `<work>/real`））裡以**真實的** runner、`evaluation.py`、finalizer 與晉升跑：preflight 的 `--check-failed-record` → success（replay → `--finalize`）→ 晉升 → failure（replay → `--publish-failed-record`）→ 晉升 → `--check-failed-record`（命中）、`--recover-durability`、`--recover-failed-record`、`--envcheck`（以封存的見證輸出重新發布）、`--recover-envcheck` →（full）metadata twin → **precheck** → 量測趟 → 補量測趟的 twin |
 | replay 的計算 | `stub`（預設）：launcher 只把 `_decision_replay_rows()` 換成「讀錨定的 D+1 after」；`full`（只在 ⑨-1）：真的計算（`e1cbbbd` ＋ tooling、⛔ 不套 counterfactual，算出的列與錨定的 D+1 相同），之後才套 success 的合成。`--formal` 必須帶 `full` |
 | 門檻 | ⑦d 增補（RSS 判定）：每一個容器的**精確閘**（容器內 wrapper 的 `max(RUSAGE_SELF, RUSAGE_CHILDREN)`，leader 結束、收到 `ECHILD` 之後讀）與**單向偵測器**（每 50 ms 取樣的 cgroup v1 `total_rss`）都 **< 450 MiB**；每一步 host 端的最大單一程序 RSS（`host-run`：subreaper、同一種量法）**< 450 MiB**；success、failure 的 `P_path` **≤ `P_B_BUDGET`**；取樣的 host 程序群組 RSS 總和（ppid 鏈）只作**單向警報**；含 page cache 的 cgroup 峰值與晉升的磁碟只列資訊值。契約：經正常 wait 鏈保存 resource usage 的每一個程序（被 kernel 自動回收的子孫在契約外，`SIGCHLD=SIG_IGN` 偵測到即 fail-closed） |
 | 容器的記憶體上限 | 報告逐 invocation 列出 daemon 實際套用的上限（mem-guard 當次下修後的 `--memory`，因容器而異）；它 ≠ 封存的 argv、讀不到、0（沒有上限）、或 `MemorySwap` ≠ `Memory`（可以用 swap）→ ⛔ 不產報告（結束碼 1）；上限**嚴格低於**門檻的容器另在 notes 列出（`total_rss` 偵測器不可能觸發，精確閘仍逐一比較） |
-| 結束碼 | **0** ＝ 報告已寫且 `ok`；**2** ＝ 報告已寫但 `threshold_exceeded`（⛔ 不得進入 ⑩，依 v29「六、1」的回退順序）；**1** ＝ harness 失敗（⛔ 不產報告） |
+| 結束碼 | **0** ＝ 報告已寫且 `ok`；**2** ＝ 報告已寫但 `threshold_exceeded`（⛔ 不得進入 ⑩，依 v29「六、1」的回退順序）；**1** ＝ harness 失敗、量測無效或 precheck 擋下（⛔ 不產報告）——full 模式的 1 一律先以 `precheck-verdict` 判讀 |
+| 有效性條件（2026-10-06） | 每條磁碟路徑 `fs_unexplained = fs_peak − max(dirs_peak, accounted)` ≤ 1 MiB，且 `P_path` ＞ 預算但 `max(dirs_peak, accounted)` ≤ 預算的模糊區也算無效；**確定的違反**（記憶體、`max(dirs_peak, accounted)` ＞ 預算）優先於有效性問題。只有 **invalid** 可以重跑；**第一個不是 invalid 的結果就是判定**，每一次嘗試（含 invalid 的）都記進 `issue.md`。報告 v2 只在沒有任何有效性問題時寫出（規格見 `sr-zone-scoring.md`） |
+| ⑨-1 的 fail-fast | full 模式在量測趟之前寫 `<S>/precheck.json`（隨 S 複製到 `raw/`／`raw-failed/`）：`ok` → 跑量測趟；`threshold_exceeded`（確定的違反，⛔ 不得重跑）、`invalid`（可以重跑）或錯誤 → ⛔ 不跑量測趟、**額度⛔ 不消耗**，harness 結束碼 1、訊息寫明哪一種。`failure_summary.json` 的 `precheck` 欄位只是位置——判讀一律經 `precheck-verdict` |
+| precheck 的判讀（offline） | `precheck-verdict --raw <raw 或 raw-failed> --repo <受信任的 repo> --expected-repo-head <開跑前記下的 HEAD>`：rc＝0 並印出 `ok`／`threshold_exceeded`／`invalid`；rc＝1 ＝ **無法判讀**（⛔ 不得當成可以重跑，交人工查明）。工作樹的版本只做驗錨與取出：錨點 ≠ `precheck.json` 的 `identity.repo_head`、快照 ≠ 錨點 commit 的內容 → 在執行任何程式之前拒絕；之後從錨點 commit 的 git object 取出受信任的 helper 執行重算（⛔ 不執行原始量測目錄裡的程式）。git 固定是 `/usr/bin/git`，子程序一律是最小化的環境——呼叫端的 `GIT_DIR`、PATH 上的其他 git 都⛔ 不影響判讀；`--repo` 必須是 repo 的根目錄。快照清單內有未 commit 變更的開發執行判讀不了（照實；`docs/` 等其他路徑的變更⛔ 不影響） |
+| raw manifest（事後錨點） | `raw-manifest --raw <dir> --repo <受信任的 repo> --expected-repo-head <EXPECTED> --out <raw 之外的新路徑>` 印出 `sha256`、`file_count`、`dir_count`——把它們、錨點與它的來源、產生與檢查的完整指令記進 `issue.md` 並 commit；日後以 `--check-sha256 <記下的值>` 檢查（不符 → rc＝1、⛔ 不寫任何檔案）。`--out` 已存在（含 symlink）或落在 raw 之內 → 拒絕。⚠️ 它只能偵測**之後**的改動 |
+| 作業規則（正式量測） | 開跑之前以 `docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep _CRON=` **只看排程鍵**（⛔ 不印其他環境變數）確認 live 的批次時段（2026-10-06：台北時間平日 06:30、16:00、17:00、22:00，每日 07:00），讓磁碟窗口（⑨-1 約前 15 分鐘、⑨-2 約 6 分鐘）避開它們與它們的執行期間；量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
 | 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的完整複本，含 `harness/MANIFEST`）；失敗時 `<work>/raw-failed/` 與 `failure_summary.json` |
 | 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree），用完可整個刪除 |
 | ⚠️ 量測期間 | ⛔ 不要動真正的 repo（每條路徑前後比對它的完整 inventory）；⛔ 不要在 `<work>` 裡建檔。量測的是 bootstrap 解析的那一個 commit（`repo_head`）：`--formal` 啟動時 HEAD 已在 bootstrap 之後移動 → 在建 work 目錄之前拒絕；之後 HEAD 再移動⛔ 不影響本次 |
 | 環境 | 每一步都以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH（`<S>/bin:/usr/bin:/bin`）經 `host-run` 執行；兩份 patch 的環境變數只給 replay 那一步（報告逐步驗，違反即 fail-closed） |
 | 能力檢查（⑦d 增補） | 建 work 目錄之後、clone 之前：以真正的 docker、同一個 image 跑一次 wrapper（`python -c pass`），`rss.json` 必須是 cgroup v1 的 `total_rss`、`reaper=pid1`；不符、逾時（120 秒）、docker 失敗 → 中止（結束碼 1、⛔ 不 clone）。換到 cgroup v2 的 host 會在這一步停下，需另行裁決 |
 | 逐步檢查與收養（⑦d 增補） | 每一步之後立刻 `check-step`（這一步的 host 紀錄與目前為止的 sidecar）與收養檢查；不符就中止，⛔ 不拖到最後的報告。harness 自己是 subreaper（bootstrap 以 python3 啟動器設定、啟動時以行為驗證）：步驟以任何方式結束留下的程序都被它收養，`on_failure` 以 `reap-adopted` 清掉；清不掉 → 保留 S、列出 PID（`<S>/leftover-pids.json`）。⚠️ 前提是 harness 自己沒有被 `kill -9` |
-| 故障注入 | `I074_SIZING_FAULT=prepare`（work 目錄建好之後立刻中止）／`twins`／`copy`／`summary`／`bootstrap-*`；`--formal` 一律拒絕；⑦d 增補另加 `probe-timeout`（能力檢查的逾時縮成 2 秒）、`subreaper-stall`、`guard-noident`、`guard-badident`、`guard-pgleader`（guard 的各種情境） |
+| 故障注入 | `I074_SIZING_FAULT=prepare`（work 目錄建好之後立刻中止）／`twins`／`copy`／`summary`／`bootstrap-*`；`--formal` 一律拒絕；⑦d 增補另加 `probe-timeout`（能力檢查的逾時縮成 2 秒）、`subreaper-stall`、`guard-noident`、`guard-badident`、`guard-pgleader`（guard 的各種情境）；有效性條件另加 `fs-noise`（success 窗口期間在 work 目錄的父目錄寫 2 MiB、窗口結束後刪除——量測必須被判成無效） |
 
 ⑩ 期間的 **observer**（⛔ 不是 ⑩ 的一部分、⛔ 不作為前置；結果只額外記錄進 `issue.md`）：
 

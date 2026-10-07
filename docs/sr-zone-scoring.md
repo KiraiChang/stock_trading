@@ -3257,9 +3257,9 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作，⚠️ 待 review）
+#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，⚠️ 待 review）
 
-⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」與「Stage 2 步驟 ⑦d 增補的實作結果」；操作程序見
+⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
 本節記錄**現況規格**。
 
@@ -3278,8 +3278,58 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
     訊號 128 ＋ N ＞ leader 的結束碼。收到 TERM／INT／HUP 的結束碼由一個 **linearization point** 決定：之前送達的反映到錯誤、
     紀錄的 `rc` 與回傳碼（143／130／129）；紀錄寫入期間才送達的⛔ 不能改紀錄——清不乾淨時結束碼照優先序維持 70（與紀錄一致），
     否則回傳碼改成 128 ＋ N、紀錄與實際結束碼不符 → 逐步檢查與報告擋下（⛔ 不會宣稱成功）；兩種情況 stderr 都記下晚到的訊號。
-  - **磁碟**：success、failure 兩條實際流程的 `P_path` **≤ `P_B_BUDGET`**（量法與 `P_B` 相同：目錄取樣、檔案系統取樣、會計上界取大者）。
+  - **磁碟**：success、failure 兩條實際流程的 `P_path` **≤ `P_B_BUDGET`**（量法與 `P_B` 相同：目錄取樣、檔案系統取樣、會計上界取大者）；
+    判定的基準與有效性條件見下面「量測的有效性條件」。
   - **只認 cgroup v1**：wrapper ⛔ 不讀 v2 的 `anon`；量測開始之前的**能力檢查**（同一個 image、同一種掛載、真正的 docker）不符就中止。
+- **量測的有效性條件**（2026-10-06；sizing 與 acceptance 共用，`P_path` 的定義⛔ 不變）：`fs_peak` 是**整個根檔案系統已用量的淨變化**，
+  host 上任何其他寫入（例如 live 的排程工作——它們與量測共用同一個檔案系統）都會算進來。每條磁碟路徑另算
+  `P_basis = max(dirs_peak, accounted)`（只看流程自己的位置與會計上界，⛔ 不受其他程序影響）與 `fs_unexplained = fs_peak − P_basis`：
+  ① `fs_unexplained` 必須 **≤ 1 MiB**（`FS_UNEXPLAINED_TOLERANCE`，常數、⛔ 不開參數）；② **模糊區**——`P_path` ＞ 預算、
+  `P_basis` ≤ 預算且 `fs_unexplained` ≤ 容差（超標完全由**容許範圍內**的未解釋成長造成；超過容差時只是 ①，⛔ 不重複記成模糊區）
+  也是有效性問題，⛔ 不是違反（**容差⛔ 不得決定結果**）。判定的優先序：
+  **確定的違反**（記憶體的每一類、`P_basis` ＞ 預算——與磁碟雜訊無關）→ `threshold_exceeded`，⛔ 不得重跑；沒有確定的違反、但有
+  有效性問題 → `invalid`，**可以重跑**；都沒有 → ok。**第一個不是 invalid 的結果就是判定**。⚠️ 它只偵測**淨**的未解釋正成長
+  （外部的刪除可能抵銷外部的寫入或流程漏算的寫入），⛔ 不能證明量測期間沒有外部 I/O——正式量測另以作業規則避開 live 的批次時段。
+  報告的語意⛔ 不變：acceptance 報告 v2 **只在沒有任何有效性問題時**寫出（`derive_acceptance_violations()` 照舊以 `P_path` 判，
+  `validate_acceptance_report_v2()` 另驗「沒有任何有效性問題」——只是收窄）；sizing 報告 v1 沒有逐項的違反清單、判定是 freeze record
+  的 `P_B ≤ P_B_BUDGET`，所以有確定的超標時照常寫出（v1 讀取端的結論就是超標），只有「沒有確定的違反、但有有效性問題」才⛔ 不產報告。
+  混合狀態（確定的違反 ＋ 有效性問題）的判定只由 `precheck.json` 表達。
+- **⑨-1 的 fail-fast**（full 模式）：所有磁碟窗口在量測趟之前就結束（量測趟本身⛔ 沒有磁碟窗口），所以先建 metadata twin（`run_twins()`
+  只補還沒有結果的 invocation，量測趟之後再補它那一個）、再以 `acceptance-precheck` 判定已量到的全部門檻與有效性——⛔ 不是 ok 就
+  ⛔ 不跑量測趟（額度⛔ 不消耗），harness 以 rc＝1 結束；判讀一律經下一項的 `precheck-verdict`。stub 模式⛔ 不跑 precheck。
+  precheck 與最後的報告共用同一個 collector（`collect_acceptance_measurements()`，`stage` ＝ `before_full`／`complete`；它回傳內部的量測
+  快照，⛔ 不是 v2 報告），`before_full` 的步驟與 invocation 是正式集合的**精確前綴**，讀的每一個集合（`rc.tsv`、`index/`、
+  `containers/`、`twins/`、lifecycle event、`host/`、`phases/`）都必須恰好等於預期。
+- **`precheck.json`**（`i074_stage2_acceptance_precheck_v1`，canonical JSON，`write_exclusive`、隨 S 複製到 `raw/` 或 `raw-failed/`）：
+  封閉的頂層鍵 `schema`、`status`、`full_trip`、`identity`（`run_id`、`mode`、`replay_compute`、`image`、`repo_head`、`clone_head`、
+  `harness_manifest_sha256`）、`limits`（`memory_bytes`、`P_B_BUDGET`、`fs_unexplained_tolerance_bytes`）、`steps`（前綴）、`sequences`
+  （1..n）、`disk`（success、failure 各恰好 `P_path`、`dirs_peak`、`fs_peak`、`accounted`、`P_basis`、`fs_unexplained`）、
+  `validity_problems`（`fs_unexplained`／`ambiguous_disk_exceed`）、`violations`（記憶體那幾類與報告 v2 的推導相同；磁碟一律是
+  `disk_p_basis`，`value` 記 `P_basis`——裁決值就是證據值）。`violations` 非空 ⟺ `threshold_exceeded`（此時 `validity_problems` 可以
+  非空）；否則 `validity_problems` 非空 ⟺ `invalid`；否則 `ok`；`full_trip` ＝ `allowed`（ok）／`not_started`。
+- **offline 的讀取端與信任模型**：原始量測目錄裡的模組、`MANIFEST`、`identity` 與 `precheck.json` 只能證明彼此一致，⛔ 不是信任根。
+  `precheck-verdict --raw <dir> --repo <受信任的 repo> --expected-repo-head <40 碼 OID>`（三個參數都必填）的工作樹版本**只執行固定的
+  驗錨與取出 frontend**：錨點由呼叫端提供、⛔ 不取自 artifact，必須是受信任 repo 裡的 commit 且 `rev-parse` ＝ 它自己（⛔ 不接受
+  ref、縮寫、tag）；`identity.repo_head` ≠ 錨點 → 在取出或執行任何程式之前拒絕；快照的每一個檔案逐位元 ＝ 錨點 commit 的同一路徑；之後
+  從**錨點的 git object**（`GIT_NO_REPLACE_OBJECTS=1`）取出 helper 與兩個常數模組、以 `python3 -I` 執行取出那一版的
+  `precheck-recompute`——⛔ 不呼叫工作樹的 recompute、⛔ 不執行或 import 原始量測目錄裡的任何程式。git 固定是 `/usr/bin/git`
+  （⛔ 不從 PATH 找），git 與取出的 helper 都以**最小化的 allowlist 環境**執行（⛔ 不繼承呼叫端的 `GIT_*`、`LD_*`、`PYTHON*`、`PATH`；
+  空的 `HOME`；`GIT_CEILING_DIRECTORIES` 讓 `--repo` 必須是 repo 的根目錄）——`GIT_DIR`／`GIT_OBJECT_DIRECTORY` ⛔ 不能讓 `--repo`
+  被忽略、PATH 上的假 git ⛔ 不會被執行。重算：形狀 A（恰好前綴，precheck
+  之後中止）直接重算；形狀 B（前綴 ＋ 量測趟，成功的 `raw/`）先以 collector（`complete`）驗完整狀態的全部內容、再驗 suffix 恰好是唯一
+  合法的那一組（含量測趟容器的 lifecycle event 完整且先後正確）且 `status` 是 ok，最後才明確投影掉 suffix 重算；重算的結果必須與檔案
+  逐位元相同。任何一項不符 → rc＝1「無法判讀」——⛔ 不得當成可以重跑，交人工查明；量測趟途中失敗是量測趟的崩潰，依計次政策處理。
+  照實的界線：它證明程式與常數來自錨點 commit、`precheck.json` 是原始量測在那份程式下的確定結果，⛔ 不證明原始量測本身沒被竄改。
+- **raw manifest**（`i074_stage2_raw_manifest_v1`；原始量測的事後錨點）：canonical JSON，封閉的頂層鍵 `schema`、`expected_repo_head`、
+  `root_name`（`raw`／`raw-failed`）、`file_count`、`dir_count`、`files`（每列恰好 `path`、`size`、`sha256`）、`dirs`（含空目錄、
+  ⛔ 不含根目錄）；`lstat` 走訪、⛔ 不跟隨 symlink，symlink／FIFO／socket／裝置檔、非 UTF-8 或不合法的名稱一律拒絕；兩個陣列各自依
+  路徑的 UTF-8 bytes 排序。產生與日後的檢查都經 `raw-manifest --raw --repo --expected-repo-head (--out | --check-sha256 [--out])`
+  ——與 `precheck-verdict` 同一個雙層的信任模型（內部是 `raw-manifest-recompute`）；`--out` 以 exclusive create 寫（已存在、含 symlink
+  → 拒絕、⛔ 不覆寫），落在 `--raw` 之內 → 拒絕；檢查不符 → rc＝1、⛔ 不寫任何檔案。**錨是記進 `issue.md` 並 commit 的 SHA-256**；
+  schema 名稱固定演算法。它只能偵測**之後**的改動。
+- **權威常數取自快照**：`P_B_BUDGET`（preflight）與 `ENV_DROP_*`（supervisor）在兩個 harness 的快照清單裡（sizing：preflight；
+  acceptance：兩者），live 的 `report`、`acceptance-precheck`、`acceptance-report` 以 `live_constants()` 從 S 的快照載入（先驗
+  `MANIFEST`），並斷言它們與工作複本逐位元相同——⛔ 不讀活路徑、⛔ 不複製常數。函式層一律以參數接收常數。
 - **容器的記憶體上限**（實作第一輪 review）：每一個容器都記下 daemon 實際套用的上限（`docker inspect` 的 `HostConfig.Memory`／
   `MemorySwap`，即 mem-guard 當次下修後的 `--memory`），報告逐 invocation 列出；它必須 ＝ 封存的 argv 裡恰好一個 `--memory`／
   `--memory-swap`，而且 swap ＝ memory（被換出的匿名頁⛔ 不在 `total_rss` 裡、也⛔ 不在 cgroup 峰值裡）——任一不成立 → ⛔ 不產報告。

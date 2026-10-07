@@ -15,8 +15,10 @@
 # ⚠️ 做法（細節見計畫書）：開頭的 bootstrap 解析一次 HEAD 的 commit OID、把 harness 自己的檔案凍結成 S 裡的快照、`exec`
 #   快照版本；⑩ 的正式程式一律從工作複本（checkout 那個 OID）執行，報告的 repo_head／clone_head 也是它；每一步以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH 經 `host-run` 執行，容器經 sizing 的
 #   shim（profile acceptance：⛔ 不加 --read-only）；兩份 patch 的環境變數只給 replay 那一步；失敗清理沿用共用原語的六步。
-#   演練用的故障注入：I074_SIZING_FAULT＝prepare（work 目錄建好之後立刻中止）／twins／copy／summary／bootstrap-*
-#   （--formal 一律拒絕）。
+#   演練用的故障注入：I074_SIZING_FAULT＝prepare（work 目錄建好之後立刻中止）／twins／copy／summary／bootstrap-*／
+#   fs-noise（success 窗口期間在量測範圍外寫 2 MiB——有效性條件必須判成無效）（--formal 一律拒絕）。
+#   ⚠️ full 模式（⑨-1）：量測趟之前先建 twin、以 `acceptance-precheck` 判定已量到的全部門檻與有效性——不是 ok 就⛔ 不跑量測趟
+#   （額度⛔ 不消耗）；判讀一律經 `precheck-verdict`（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）。
 set -euo pipefail
 
 I074_BOOT_PROFILE=acceptance
@@ -24,7 +26,8 @@ I074_BOOT_SPREFIX=i074-accept
 I074_BOOT_SELF=scripts/i074-stage2-acceptance.sh
 I074_BOOT_FILES=(scripts/i074-stage2-acceptance.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh
                  python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_replay_stub.py
-                 python/scripts/i074_stage2_rss_wrapper.py)
+                 python/scripts/i074_stage2_rss_wrapper.py python/scripts/i074_stage2_preflight.py
+                 scripts/lib/i074-stage2-supervisor.py)
 # >>> I074-STAGE2-BOOTSTRAP ────────────────────────────────────────────────────────────────────────────
 # ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」的「harness 的快照」「bootstrap 的失敗與中斷」與「快照與來源的清單」）：
 #   harness 自己的檔案先凍結成 S 裡的快照，主腳本再 `exec` 快照裡的自己——之後每一行都從快照執行（⛔ 不讀活路徑；bash 是
@@ -171,7 +174,8 @@ measure_work_dir_guard "$WORK_ARG"          # 設 REPO_CANON、WORK、L0_DEV
 case "${I074_SIZING_FAULT:-}" in
   ""|prepare|twins|copy|summary|bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;
   probe-timeout|subreaper-stall|guard-noident|guard-badident|guard-pgleader) ;;   # ⑦d 增補
-  *) die "I074_SIZING_FAULT 只接受 prepare／twins／copy／summary／bootstrap-*／probe-timeout／subreaper-stall／guard-*：${I074_SIZING_FAULT}" ;;
+  fs-noise) ;;                                                                     # 有效性條件計畫
+  *) die "I074_SIZING_FAULT 只接受 prepare／twins／copy／summary／bootstrap-*／probe-timeout／subreaper-stall／guard-*／fs-noise：${I074_SIZING_FAULT}" ;;
 esac
 # ⚠️ 「快照與來源的清單」②：⑩ 的正式程式從工作複本（BOOT_HEAD）執行——BOOT_HEAD 裡必須有它們。
 PROD_FILES=(scripts/run-replay-offline.sh scripts/finalize-stage2-evidence.sh scripts/lib/replay-args.sh
@@ -440,12 +444,27 @@ step envcheck 0 finalizer "$FIN" --envcheck --run-dir "$WIT"
 step recover_envcheck 0 recovery "$FIN" --recover-envcheck
 rm -rf -- "$L2/envcheck" && mv -- "$WORK/aside/envcheck" "$L2/envcheck" || on_failure "envcheck/ 搬不回來" 1
 if [ "$COMPUTE" = full ]; then
+  # ⚠️ 有效性條件計畫「二」的「⑨-1 的 fail-fast」：所有磁碟窗口都已結束（量測趟本身⛔ 沒有磁碟窗口），先建 twin、
+  #   再以 precheck 判定已量到的全部門檻與有效性——⛔ 不是 ok 就⛔ 不跑量測趟（額度⛔ 不消耗）。precheck.json 隨 S 保存；
+  #   判讀一律經 `precheck-verdict --raw <dir> --repo <受信任的 repo> --expected-repo-head <開跑前記下的 HEAD>`。
+  say "==> metadata twin（量測趟之前的 invocation）"
+  [ "${I074_SIZING_FAULT:-}" != twins ] || on_failure "metadata twin（注入的故障）" 1
+  helper twins --state "$S" --docker "$REAL_DOCKER" --run-id "$RUN_ID" --fs-path "$WORK" || on_failure "metadata twin" 1
+  say "==> precheck（量測趟之前的判定）"
+  PRE_RC=0
+  helper acceptance-precheck --state "$S" --clone "$CLONE" || PRE_RC=$?
+  case "$PRE_RC" in
+    0) ;;
+    2) on_failure "precheck：threshold_exceeded（確定的違反，⛔ 不得重跑）——量測趟未執行、額度未消耗；判讀見 precheck-verdict" 1 ;;
+    3) on_failure "precheck：invalid（量測無效，可以重跑）——量測趟未執行、額度未消耗；判讀見 precheck-verdict" 1 ;;
+    *) on_failure "precheck 失敗（rc=$PRE_RC）——量測趟未執行、額度未消耗" 1 ;;
+  esac
   say "==> ⑨-1 的量測趟：完整計算（⛔ 不套 counterfactual；約 3 小時）"
   mkdir -p "$L1/full"
   PATCH_RUN=success replay replay_full 0 "$L1/full" success full
 fi
 
-# ── 8. metadata twin（所有量測窗口結束之後） ───────────────────────────────────
+# ── 8. metadata twin（所有量測窗口結束之後；full 模式只補量測趟那一個——run_twins 跳過已有的） ─────────────────
 PHASE=""
 say "==> metadata twin"
 [ "${I074_SIZING_FAULT:-}" != twins ] || on_failure "metadata twin（注入的故障）" 1

@@ -288,7 +288,8 @@ def _host_rec(name, rc, *, children, sampled, cmd, self_rss=20 << 20, **override
     return rec
 
 
-def _acc_full_state(tmp_path, *, compute="stub", peaks=None, host=None, sampled=None, promo_mb=3, limits=None, rss=None):
+def _acc_full_state(tmp_path, *, compute="stub", peaks=None, host=None, sampled=None, promo_mb=3, limits=None, rss=None,
+                    fs_extra=None):
     s = _acc_state(tmp_path, compute=compute, peaks=peaks, limits=limits, rss=rss)
     (s / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in {
         "run_id": "r", "mode": "validation", "image": tsz.IMG, "l0_dev": "42", "docker_root_dev": "42", "repo_dev": "42",
@@ -308,7 +309,8 @@ def _acc_full_state(tmp_path, *, compute="stub", peaks=None, host=None, sampled=
         base = dict.fromkeys(locs, 0)
         (pdir / "baseline.json").write_bytes(sz.canonical_dumps({
             "locations": base, "L0_used": 10 << 30, "devices": dict.fromkeys(locs + ["L0", "L4"], "42")}))
-        sample = {"t_ns": 1, "L0": (10 << 30) + ((run_mb or promo_mb) << 20), **dict.fromkeys(locs, 0)}
+        sample = {"t_ns": 1, "L0": (10 << 30) + ((run_mb or promo_mb) << 20) + (fs_extra or {}).get(phase, 0),
+                  **dict.fromkeys(locs, 0)}
         sample[locs[0]] = (run_mb or promo_mb) << 20
         (pdir / "samples.jsonl").write_text(json.dumps(sample) + "\n")
         (pdir / "end.json").write_bytes(sz.canonical_dumps({
@@ -715,7 +717,7 @@ def test_ac12_observe_guards(tmp_path, case):
 # ── ac14：sizing 的 runner_frozen_patches ─────────────────────────────────────────
 
 def test_ac14_sizing_accounts_the_runner_frozen_patches(tmp_path):
-    report = sz.build_report(tsz._full_state(tmp_path))
+    report = sz.build_report(tsz._full_state(tmp_path), p_b_budget=tsz.BUDGET)
     comp = report["components"]
     assert report["paths"]["witness"]["accounted_parts"]["runner_frozen_patches"] == int(comp["frozen_witness"])
     for phase in ("success", "failure"):
@@ -1305,3 +1307,596 @@ def test_ac27_repo_never_sets_auto_reaping():
     """⚠️ 測試容器只掛了 python/——scripts/ 由 host unittest 的同一個掃描（sz.scan_auto_reaping）涵蓋。"""
     assert sz.scan_auto_reaping([PYTHON_ROOT], PYTHON_ROOT.parent) == []
     assert (PYTHON_ROOT / "scripts" / "i074_stage2_sizing.py").is_file()               # ⛔ 不是空掃描
+
+
+# ── 有效性條件與 ⑨-1 的 fail-fast（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」） ──────────────
+
+import shutil  # noqa: E402
+
+T = sz.FS_UNEXPLAINED_TOLERANCE
+FULL_N = len(sz.expected_invocations("acceptance", "full"))
+FULL_CID = sz.container_id(FULL_N)
+PREFIX_STEPS = [s for s, _ in sz.ACCEPTANCE_STEPS]
+KW = {"drop_names": DROP_NAMES, "drop_prefixes": DROP_PREFIXES}
+
+
+def _strip_suffix(s):
+    """測試自己的投影（⛔ 不用產品的 project_before_full）：full 的完整狀態 → 量測趟之前的精確前綴。"""
+    lines = [line for line in (s / "rc.tsv").read_text().splitlines() if line]
+    assert lines[-1].startswith("replay_full\t")
+    (s / "rc.tsv").write_text("".join(f"{line}\n" for line in lines[:-1]))
+    for path in (s / "index" / f"{FULL_N:04d}.json", s / "containers" / f"{FULL_CID}.json",
+                 s / "twins" / f"{FULL_CID}.json", s / "host" / "replay_full.json"):
+        path.unlink()
+    events = [line for line in (s / "events" / "events.jsonl").read_text().splitlines()
+              if line and json.loads(line)["id"] != FULL_CID]
+    (s / "events" / "events.jsonl").write_text("".join(f"{line}\n" for line in events))
+    return s
+
+
+def _prefix_state(tmp_path, **kw):
+    return _strip_suffix(_acc_full_state(tmp_path, compute="full", **kw))
+
+
+def _precheck(s, budget=BIG_BUDGET):
+    return sz.build_acceptance_precheck(s, p_b_budget=budget, **KW)
+
+
+def _base_disk(tmp_path):
+    snap = sz.collect_acceptance_measurements(_prefix_state(tmp_path / "base"), stage="before_full", **KW)
+    return sz.acceptance_disk(snap["paths"])
+
+
+def _fs(base, phase, unexplained):
+    """讓 phase 的 fs_unexplained 恰好 ＝ unexplained 的 fs_extra。"""
+    return {phase: base[phase]["P_basis"] - base[phase]["fs_peak"] + unexplained}
+
+
+# 有效性條件與報告 v2（第三輪 review：v2 維持原語意）
+
+def test_validity_report_v2_is_written_only_without_validity_problems(tmp_path):
+    base = _base_disk(tmp_path)
+    assert all(d["fs_unexplained"] < 0 for d in base.values())
+    assert _report(_acc_full_state(tmp_path / "eq", fs_extra=_fs(base, "success", T)))["status"] == "ok"   # ＝ 容差：有效
+    # ⚠️ 釘住 builder 自己的訊息（⛔ 不是 validator 的「報告有有效性問題」——那一道另有測試，兩道重疊時才看得出各自拿掉）
+    with pytest.raises(sz.SizingError, match=r"^有效性問題（報告 v2.*success.*fs_unexplained"):
+        _report(_acc_full_state(tmp_path / "noise", fs_extra=_fs(base, "success", T + 1)))
+    with pytest.raises(sz.SizingError, match=r"^有效性問題（報告 v2.*模糊區"):  # P_path ＝ 預算 ＋1、P_basis ＝ 預算
+        _report(_acc_full_state(tmp_path / "amb", fs_extra=_fs(base, "success", 1)), budget=base["success"]["P_basis"])
+    with pytest.raises(sz.SizingError, match=r"^有效性問題（報告 v2"):          # 混合狀態（記憶體超標 ＋ 磁碟無效）：stub ⛔ 不產
+        _report(_acc_full_state(tmp_path / "mixed", rss={2: {"children_max_rss_bytes": LIMIT}},
+                                fs_extra=_fs(base, "failure", 2 * T)))
+    r = _report(_acc_full_state(tmp_path / "at"), budget=base["success"]["P_basis"])    # P_path ＝ 預算 → ok
+    assert r["status"] == "ok"
+
+
+def _old_derive(report):
+    """有效性條件計畫之前的 `derive_acceptance_violations()`（逐字照抄）——新版的輸出必須逐位元相同。"""
+    limit, budget = report["limits"]["memory_bytes"], report["limits"]["P_B_BUDGET"]
+    out = []
+    for row in report["memory"]:
+        subject = f"#{row['sequence']} {row['phase']}/{row['role']}"
+        if row["max_single_rss_bytes"] >= limit:
+            out.append({"kind": "container_max_single_rss", "subject": subject, "value": row["max_single_rss_bytes"],
+                        "limit": limit})
+        if row["rss_peak_sampled_bytes"] >= limit:
+            out.append({"kind": "container_rss_sampled", "subject": subject, "value": row["rss_peak_sampled_bytes"],
+                        "limit": limit})
+    for row in report["host"]:
+        if row["max_single_rss_bytes"] >= limit:
+            out.append({"kind": "host_max_single_rss", "subject": row["step"], "value": row["max_single_rss_bytes"],
+                        "limit": limit})
+        if row["group_rss_peak_sampled_bytes"] >= limit:
+            out.append({"kind": "host_group_rss_sampled", "subject": row["step"],
+                        "value": row["group_rss_peak_sampled_bytes"], "limit": limit})
+    for phase in ("success", "failure"):
+        if report["paths"][phase]["P_path"] > budget:
+            out.append({"kind": "disk_p_path", "subject": phase, "value": report["paths"][phase]["P_path"], "limit": budget})
+    return out
+
+
+def test_validity_v2_derivation_is_unchanged(tmp_path):
+    base = _base_disk(tmp_path)
+    cases = [(_acc_full_state(tmp_path / "ok"), BIG_BUDGET),
+             (_acc_full_state(tmp_path / "mem", rss={2: {"children_max_rss_bytes": LIMIT}}, host={"finalize": LIMIT}),
+              BIG_BUDGET),
+             (_acc_full_state(tmp_path / "disk"), base["success"]["P_basis"] - 1),
+             (_acc_full_state(tmp_path / "full", compute="full", rss={FULL_N: {"rss_peak_sampled_bytes": LIMIT}}), BIG_BUDGET)]
+    kinds = set()
+    for state, budget in cases:
+        r = _report(state, budget=budget)
+        assert r["violations"] == _old_derive(r) == sz.derive_acceptance_violations(r)
+        kinds |= {v["kind"] for v in r["violations"]}
+    assert {"container_max_single_rss", "host_max_single_rss", "disk_p_path", "container_rss_sampled"} <= kinds
+
+
+def test_validity_v2_validator_rejects_a_report_with_validity_problems(tmp_path):
+    r = _report(_acc_full_state(tmp_path))
+    assert sz.validate_acceptance_report_v2(r, p_b_budget=BIG_BUDGET) == []
+    info = r["paths"]["success"]
+    d = sz.disk_numbers(info)
+    info["peaks"]["fs_peak"] = d["P_basis"] + T + 1                       # 其餘衍生欄位照樣一致
+    info["P_path"] = max(info["peaks"]["dirs_peak"], info["peaks"]["fs_peak"], info["accounted"])
+    promo = r["promotion"]["promote_success"]
+    promo["P_path_plus_promotion"] = info["P_path"] + promo["P_promotion"]
+    problems = sz.validate_acceptance_report_v2(r, p_b_budget=BIG_BUDGET)
+    assert len(problems) == 1 and "有效性問題" in problems[0], problems
+
+
+def test_validity_ignores_the_promotion_windows(tmp_path):
+    """決定 #3：晉升的磁碟只列資訊值——晉升窗口的未解釋成長再大，報告與 precheck 都⛔ 不受影響。"""
+    noise = {"promote_success": 50 << 20, "promote_failure": 50 << 20}
+    assert _report(_acc_full_state(tmp_path / "r", fs_extra=noise))["status"] == "ok"
+    doc = _precheck(_prefix_state(tmp_path / "p", fs_extra=noise))
+    assert (doc["status"], doc["validity_problems"]) == ("ok", [])
+
+
+# precheck：共用的 collector 與判定
+
+def test_precheck_ok_and_the_snapshot_is_not_a_v2_report(tmp_path):
+    s = _prefix_state(tmp_path)
+    doc = _precheck(s)
+    assert (doc["status"], doc["full_trip"], doc["validity_problems"], doc["violations"]) == ("ok", "allowed", [], [])
+    assert doc["steps"] == PREFIX_STEPS and doc["sequences"] == list(range(1, FULL_N))
+    assert doc["identity"]["replay_compute"] == "full" and set(doc["disk"]) == {"success", "failure"}
+    assert sz.validate_acceptance_precheck_v1(doc, p_b_budget=BIG_BUDGET) == []
+    snap = sz.collect_acceptance_measurements(s, stage="before_full", **KW)
+    assert sz.validate_acceptance_report_v2(snap, p_b_budget=BIG_BUDGET)    # 內部快照⛔ 不是 v2 報告
+    assert "precheck：ok" in sz.precheck_text(doc)
+
+
+def _status_case(tmp_path, name, base):
+    budget = BIG_BUDGET
+    kw = {}
+    if name == "memory":
+        kw = {"rss": {2: {"children_max_rss_bytes": LIMIT}}}
+    elif name == "host":
+        kw = {"host": {"finalize": LIMIT}}
+    elif name == "disk":
+        budget = base["success"]["P_basis"] - 1
+    elif name == "noise":
+        kw = {"fs_extra": _fs(base, "success", T + 1)}
+    elif name == "ambiguous":
+        kw, budget = {"fs_extra": _fs(base, "success", 1)}, base["success"]["P_basis"]
+    elif name == "memory+noise":
+        kw = {"rss": {2: {"children_max_rss_bytes": LIMIT}}, "fs_extra": _fs(base, "failure", 2 * T)}
+    elif name == "basis+noise":
+        kw, budget = {"fs_extra": _fs(base, "success", 2 * T)}, base["success"]["P_basis"] - 1
+    elif name == "overlap":                       # 實作第一輪 review：P_basis ＝ 預算、fs_unexplained ＝ 容差 ＋1
+        kw, budget = {"fs_extra": _fs(base, "success", T + 1)}, base["success"]["P_basis"]
+    return _precheck(_prefix_state(tmp_path / name, **kw), budget), budget
+
+
+@pytest.mark.parametrize("name,status,kinds,validity", [
+    ("memory", "threshold_exceeded", ["container_max_single_rss"], []),
+    ("host", "threshold_exceeded", ["host_max_single_rss"], []),
+    ("disk", "threshold_exceeded", ["disk_p_basis"], []),
+    ("noise", "invalid", [], ["fs_unexplained"]),
+    ("ambiguous", "invalid", [], ["ambiguous_disk_exceed"]),                     # 模糊區⛔ 不是違反
+    ("memory+noise", "threshold_exceeded", ["container_max_single_rss"], ["fs_unexplained"]),   # 確定的違反優先
+    ("basis+noise", "threshold_exceeded", ["disk_p_basis"], ["fs_unexplained"]),
+    ("overlap", "invalid", [], ["fs_unexplained"]),                               # 超過容差 → 只是 ①，⛔ 不再記成模糊區
+])
+def test_precheck_priority(tmp_path, name, status, kinds, validity):
+    base = _base_disk(tmp_path)
+    doc, budget = _status_case(tmp_path, name, base)
+    assert doc["status"] == status and doc["full_trip"] == ("allowed" if status == "ok" else "not_started")
+    assert [v["kind"] for v in doc["violations"]] == kinds
+    assert [p["kind"] for p in doc["validity_problems"]] == validity
+    for v in doc["violations"]:
+        if v["kind"] == "disk_p_basis":
+            assert v["value"] == doc["disk"][v["subject"]]["P_basis"] > budget        # 裁決值就是證據值
+    assert sz.validate_acceptance_precheck_v1(doc, p_b_budget=budget) == []
+    assert sz.PRECHECK_EXIT[doc["status"]] == {"ok": 0, "threshold_exceeded": 2, "invalid": 3}[status]
+
+
+@pytest.mark.parametrize("damage,match", [
+    ("complete", "步驟與預期不符"),            # 量測趟已經在（⛔ 不是前綴）
+    ("stub", "before_full 只用在"),
+    ("missing_step", "步驟與預期不符"),
+    ("extra_phase", "phases/"),
+    ("extra_host", "host/"),
+    ("extra_twin", "沒有索引的"),
+    ("unknown_event", "不認得的種類"),
+])
+def test_precheck_requires_the_exact_prefix(tmp_path, damage, match):
+    if damage == "complete":
+        s = _acc_full_state(tmp_path, compute="full")
+    elif damage == "stub":
+        s = _acc_full_state(tmp_path)
+    else:
+        s = _prefix_state(tmp_path)
+    if damage == "missing_step":
+        lines = (s / "rc.tsv").read_text().splitlines()
+        (s / "rc.tsv").write_text("".join(f"{line}\n" for line in lines[:-1]))
+    elif damage == "extra_phase":
+        (s / "phases" / "extra").mkdir()
+    elif damage == "extra_host":
+        shutil.copyfile(s / "host" / "finalize.json", s / "host" / "extra.json")
+    elif damage == "extra_twin":
+        shutil.copyfile(s / "twins" / f"{sz.container_id(1)}.json", s / "twins" / "o9990.json")
+    elif damage == "unknown_event":
+        with open(s / "events" / "events.jsonl", "a") as fh:
+            fh.write(json.dumps({"event": 999, "id": sz.container_id(1), "kind": "other", "monotonic_ns": 1}) + "\n")
+    with pytest.raises(sz.SizingError, match=match):
+        _precheck(s)
+
+
+def _pair(tmp_path, **kw):
+    """同一份資料的完整狀態（含量測趟）與它的前綴（測試自己的投影）。"""
+    full = _acc_full_state(tmp_path / "full", compute="full", **kw)
+    prefix = tmp_path / "prefix"
+    shutil.copytree(full, prefix)
+    return full, _strip_suffix(prefix)
+
+
+def test_precheck_violations_are_preserved_by_the_final_report(tmp_path):
+    """保留性：沒有有效性問題時，precheck 的違反與加上通過的量測趟之後報告的違反逐筆對應；量測趟超標只**新增**。"""
+    base = _base_disk(tmp_path)
+    budget = base["success"]["P_basis"] - 1
+    full, prefix = _pair(tmp_path / "a", rss={2: {"children_max_rss_bytes": LIMIT}}, host={"finalize": LIMIT})
+    doc, report = _precheck(prefix, budget), _report(full, budget=budget)
+    mapped = [dict(v, kind="disk_p_path", value=report["paths"][v["subject"]]["P_path"]) if v["kind"] == "disk_p_basis"
+              else v for v in doc["violations"]]
+    assert sorted(map(json.dumps, mapped)) == sorted(map(json.dumps, report["violations"]))
+    full2, prefix2 = _pair(tmp_path / "b", rss={2: {"children_max_rss_bytes": LIMIT},
+                                                FULL_N: {"children_max_rss_bytes": LIMIT}})
+    doc2, report2 = _precheck(prefix2), _report(full2)
+    extra = [v for v in report2["violations"] if v not in doc2["violations"]]
+    assert doc2["violations"] and all(v in report2["violations"] for v in doc2["violations"])
+    assert extra and all(v["subject"].startswith(f"#{FULL_N} ") for v in extra)
+
+
+@pytest.mark.parametrize("which", ["ok", "threshold_exceeded", "invalid"])
+def test_precheck_validator_is_closed_over_every_node(tmp_path, which):
+    base_disk = _base_disk(tmp_path)
+    name = {"ok": None, "threshold_exceeded": "memory+noise", "invalid": "noise"}[which]
+    doc, budget = (_precheck(_prefix_state(tmp_path / "ok")), BIG_BUDGET) if name is None \
+        else _status_case(tmp_path, name, base_disk)
+    checked = 0
+    for path in list(_leaf_paths(doc)):
+        if not path:
+            continue
+        node = doc
+        for key in path[:-1]:
+            node = node[key]
+        for wrong in _wrong_types(node[path[-1]]):
+            d = copy.deepcopy(doc)
+            target = d
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = wrong
+            assert sz.validate_acceptance_precheck_v1(d, p_b_budget=budget), (path, wrong)
+            checked += 1
+    assert checked > 100
+
+
+def _setp(path, value):
+    def mutate(doc):
+        node = doc
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+    return mutate
+
+
+@pytest.mark.parametrize("which,mutate", [
+    ("threshold", _setp(["status"], "invalid")),                          # 有確定的違反卻是 invalid
+    ("ok", lambda d: d.update(status="invalid", full_trip="not_started")),  # invalid 但 validity_problems 是空的
+    ("threshold", lambda d: d.update(status="ok", full_trip="allowed")),  # ok 但有違反
+    ("invalid", lambda d: d.update(status="ok", full_trip="allowed")),    # ok 但有有效性問題
+    ("ok", _setp(["full_trip"], "not_started")),
+    ("ok", _setp(["disk", "success", "P_basis"], 1)),
+    ("ok", _setp(["disk", "success", "fs_unexplained"], 0)),
+    ("invalid", _setp(["validity_problems"], [])),
+    ("invalid", lambda d: d["validity_problems"][0].update(value=d["validity_problems"][0]["value"] + 1)),
+    ("basis", lambda d: d["violations"][0].update(value=d["disk"]["success"]["P_path"])),     # 磁碟改記 P_path
+    ("basis", lambda d: d["violations"][0].update(kind="disk_p_path")),
+    ("ok", _setp(["limits", "P_B_BUDGET"], 5)),
+    ("ok", _setp(["limits", "fs_unexplained_tolerance_bytes"], 2 << 20)),
+    ("ok", _setp(["identity", "replay_compute"], "stub")),
+    ("ok", _setp(["identity", "repo_head"], "a" * 12)),
+    ("ok", _setp(["steps"], PREFIX_STEPS + ["replay_full"])),
+    ("ok", _setp(["sequences"], list(range(1, FULL_N + 1)))),
+    ("ok", _setp(["schema"], "i074_stage2_acceptance_precheck_v2")),
+    ("overlap", lambda d: d.update(validity_problems=[                         # 超過容差的同一條路徑又記成模糊區（冪等）
+        p for p in d["validity_problems"] if p["kind"] != "ambiguous_disk_exceed"] + [
+        {"kind": "ambiguous_disk_exceed", "subject": "success", "value": d["disk"]["success"]["P_path"],
+         "limit": d["limits"]["P_B_BUDGET"]}])),
+])
+def test_precheck_validator_rejects_mismatches(tmp_path, which, mutate):
+    base = _base_disk(tmp_path)
+    name = {"ok": None, "threshold": "memory", "invalid": "noise", "basis": "basis+noise",
+            "overlap": "overlap"}[which]   # basis：P_path ≠ P_basis
+    doc, budget = (_precheck(_prefix_state(tmp_path / "ok")), BIG_BUDGET) if name is None \
+        else _status_case(tmp_path, name, base)
+    assert sz.validate_acceptance_precheck_v1(doc, p_b_budget=budget) == []
+    mutate(doc)
+    assert sz.validate_acceptance_precheck_v1(doc, p_b_budget=budget)
+
+
+# precheck 的讀取端（受信任的版本執行的 precheck_recompute；frontend 與 git 錨點在 host unittest）
+
+def _recompute(raw, budget=BIG_BUDGET):
+    return sz.precheck_recompute(raw, p_b_budget=budget, **KW)
+
+
+def _write(s, doc):
+    sz.write_exclusive(s / "precheck.json", sz.canonical_dumps(doc))
+
+
+def _shape_b(tmp_path, **kw):
+    full, prefix = _pair(tmp_path, **kw)
+    _write(full, _precheck(prefix))
+    return full
+
+
+@pytest.mark.parametrize("name", [None, "memory", "noise"])
+def test_recompute_shape_a(tmp_path, name):
+    base = _base_disk(tmp_path)
+    doc, budget = (_precheck(_prefix_state(tmp_path / "ok")), BIG_BUDGET) if name is None \
+        else _status_case(tmp_path, name, base)
+    raw = tmp_path / (name or "ok") / "S"                                   # _acc_state 的 S 在 <tmp>/S
+    _write(raw, doc)
+    assert _recompute(raw, budget) == doc["status"]
+    with pytest.raises(OSError):
+        _write(raw, doc)                                                  # exclusive：⛔ 不覆寫
+
+
+def test_recompute_shape_b(tmp_path):
+    assert _recompute(_shape_b(tmp_path)) == "ok"
+
+
+def _damage_raw(raw, damage):
+    if damage == "byte":
+        data = (raw / "precheck.json").read_bytes()
+        (raw / "precheck.json").write_bytes(data.replace(b'"ok"', b'"ox"', 1))
+    elif damage == "pretty":
+        (raw / "precheck.json").write_text(json.dumps(json.loads((raw / "precheck.json").read_text()), indent=1))
+    elif damage == "empty":
+        (raw / "precheck.json").write_bytes(b"")
+    elif damage == "truncated":
+        (raw / "precheck.json").write_bytes((raw / "precheck.json").read_bytes()[:-5])
+    elif damage == "missing":
+        (raw / "precheck.json").unlink()
+    elif damage == "run_id":
+        meta = sz._read_tsv(raw / "meta.tsv")
+        meta["run_id"] = "other"
+        (raw / "meta.tsv").write_text("".join(f"{k}\t{v}\n" for k, v in meta.items()))
+    elif damage == "manifest":
+        path = raw / "harness" / sz.HELPER_REL
+        path.write_bytes(path.read_bytes() + b"x")
+    elif damage == "sample":
+        path = raw / "phases" / "success" / "samples.jsonl"
+        sample = json.loads(path.read_text())
+        sample["L0"] += 3 * T                                             # 原始量測被改：重算的 precheck 不同
+        path.write_text(json.dumps(sample) + "\n")
+
+
+@pytest.mark.parametrize("damage", ["byte", "pretty", "empty", "truncated", "missing", "run_id", "manifest", "sample"])
+@pytest.mark.parametrize("shape", ["A", "B"])
+def test_recompute_rejects_damage(tmp_path, damage, shape):
+    if shape == "A":
+        raw = _prefix_state(tmp_path)
+        _write(raw, _precheck(raw))
+    else:
+        raw = _shape_b(tmp_path)
+    _damage_raw(raw, damage)
+    with pytest.raises((sz.SizingError, OSError, ValueError)):
+        _recompute(raw)
+
+
+def _corrupt_suffix(raw, damage):
+    side = raw / "containers" / f"{FULL_CID}.json"
+    twin = raw / "twins" / f"{FULL_CID}.json"
+    events = raw / "events" / "events.jsonl"
+    if damage == "rc":
+        lines = (raw / "rc.tsv").read_text().splitlines()
+        lines[-1] = "replay_full\t0\t1"
+        (raw / "rc.tsv").write_text("".join(f"{line}\n" for line in lines))
+    elif damage in ("sidecar_failed", "sidecar_rss", "twin_failed", "twin_hash"):
+        path = side if damage.startswith("sidecar") else twin
+        doc = json.loads(path.read_text())
+        if damage.endswith("failed"):
+            doc.update(status="measure_failed", failures=["x"])
+        elif damage == "sidecar_rss":
+            del doc["rss_samples"]
+        else:
+            doc["container_spec_sha256"] = "0" * 64
+        path.write_bytes(sz.canonical_dumps(doc))
+    elif damage == "host_cleanup":
+        rec = json.loads((raw / "host" / "replay_full.json").read_text())
+        rec["cleanup_complete"] = False
+        (raw / "host" / "replay_full.json").write_bytes(sz.canonical_dumps(rec))
+    elif damage in ("event_missing", "event_reversed"):
+        lines = [json.loads(line) for line in events.read_text().splitlines() if line]
+        mine = [e for e in lines if e["id"] == FULL_CID]
+        if damage == "event_missing":
+            lines = [e for e in lines if not (e["id"] == FULL_CID and e["kind"] == "rm_done")]
+        else:
+            a, b = mine
+            a["event"], b["event"] = b["event"], a["event"]
+        events.write_text("".join(json.dumps(e) + "\n" for e in lines))
+    elif damage == "extra_invocation":
+        shutil.copyfile(raw / "index" / f"{FULL_N:04d}.json", raw / "index" / f"{FULL_N + 1:04d}.json")
+    elif damage == "missing_twin":
+        twin.unlink()
+    elif damage == "reordered":
+        lines = (raw / "rc.tsv").read_text().splitlines()
+        lines[-1], lines[-2] = lines[-2], lines[-1]
+        (raw / "rc.tsv").write_text("".join(f"{line}\n" for line in lines))
+    elif damage == "extra_host":
+        shutil.copyfile(raw / "host" / "replay_full.json", raw / "host" / "replay_full2.json")
+    elif damage == "extra_phase":
+        (raw / "phases" / "full").mkdir()
+
+
+@pytest.mark.parametrize("damage", ["rc", "sidecar_failed", "sidecar_rss", "twin_failed", "twin_hash", "host_cleanup",
+                                    "event_missing", "event_reversed", "extra_invocation", "missing_twin", "reordered",
+                                    "extra_host", "extra_phase"])
+def test_recompute_shape_b_validates_the_suffix_content(tmp_path, damage):
+    """第三輪 review：集合都對、但 suffix 的內容不合法 → 無法判讀（形狀 B 先以 collector（complete）驗完整內容）。"""
+    raw = _shape_b(tmp_path)
+    assert _recompute(raw) == "ok"
+    _corrupt_suffix(raw, damage)
+    with pytest.raises((sz.SizingError, OSError, ValueError, KeyError)):
+        _recompute(raw)
+
+
+def test_recompute_shape_b_requires_an_ok_precheck(tmp_path):
+    full, prefix = _pair(tmp_path, rss={2: {"children_max_rss_bytes": LIMIT}})
+    _write(full, _precheck(prefix))
+    with pytest.raises(sz.SizingError, match="形狀 B"):
+        _recompute(full)
+
+
+def test_recompute_rejects_other_shapes(tmp_path):
+    raw = _prefix_state(tmp_path)
+    _write(raw, _precheck(raw))
+    lines = (raw / "rc.tsv").read_text().splitlines()
+    (raw / "rc.tsv").write_text("".join(f"{line}\n" for line in lines[:-1]))
+    with pytest.raises(sz.SizingError, match="形狀"):
+        _recompute(raw)
+
+
+def test_projection_removes_exactly_the_suffix(tmp_path):
+    full, prefix = _pair(tmp_path)
+    dest = tmp_path / "proj"
+    dest.mkdir()
+    sz.project_before_full(full, dest, sz.verify_full_suffix(full))
+    for rel in ("rc.tsv", "events/events.jsonl"):
+        assert (dest / rel).read_text() == (prefix / rel).read_text()
+    for folder in ("index", "containers", "twins", "host"):
+        assert sorted(p.name for p in (dest / folder).iterdir()) == sorted(p.name for p in (prefix / folder).iterdir())
+    with pytest.raises(sz.SizingError, match="恰好是 suffix"):         # 列舉的項目缺一項 → 拒絕
+        (full / "host" / "replay_full.json").unlink()
+        dest2 = tmp_path / "proj2"
+        dest2.mkdir()
+        sz.project_before_full(full, dest2, {"sequence": FULL_N, "id": FULL_CID, "step": "replay_full"})
+
+
+# raw manifest（第五、六輪 review；frontend 與 git 錨點在 host unittest）
+
+HEAD40 = "c" * 40
+
+
+def _raw_tree(tmp_path, name="raw"):
+    raw = tmp_path / name
+    (raw / "sub" / "deep").mkdir(parents=True)
+    (raw / "empty").mkdir()
+    (raw / "a.txt").write_bytes(b"alpha")
+    (raw / "sub" / "b.bin").write_bytes(bytes(range(256)))
+    (raw / "資料.txt").write_bytes("中文".encode())
+    return raw
+
+
+def test_raw_manifest_is_canonical_and_pinned(tmp_path):
+    raw = _raw_tree(tmp_path)
+    data = sz.build_raw_manifest(raw, HEAD40)
+    assert data == sz.build_raw_manifest(raw, HEAD40)
+    doc = json.loads(data)
+    assert set(doc) == {"schema", "expected_repo_head", "root_name", "file_count", "dir_count", "files", "dirs"}
+    assert [f["path"] for f in doc["files"]] == ["a.txt", "sub/b.bin", "資料.txt"]          # UTF-8 bytes 的順序
+    assert doc["dirs"] == ["empty", "sub", "sub/deep"] and (doc["file_count"], doc["dir_count"]) == (3, 3)
+    assert data == sz.canonical_dumps(doc) and not data.endswith(b"\n")
+    assert hashlib.sha256(data).hexdigest() == hashlib.sha256(json.dumps({
+        "dir_count": 3, "dirs": ["empty", "sub", "sub/deep"], "expected_repo_head": HEAD40, "file_count": 3,
+        "files": [{"path": "a.txt", "sha256": hashlib.sha256(b"alpha").hexdigest(), "size": 5},
+                  {"path": "sub/b.bin", "sha256": hashlib.sha256(bytes(range(256))).hexdigest(), "size": 256},
+                  {"path": "資料.txt", "sha256": hashlib.sha256("中文".encode()).hexdigest(), "size": 6}],
+        "root_name": "raw", "schema": "i074_stage2_raw_manifest_v1"},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    reordered = dict(doc, files=list(reversed(doc["files"])))
+    assert sz.canonical_dumps(reordered) != data                           # 手改順序 → 與重新產生的不同
+
+
+@pytest.mark.parametrize("change", ["add", "delete", "rename", "byte", "add_empty_dir", "remove_empty_dir"])
+def test_raw_manifest_check_detects_changes(tmp_path, change, capsys):
+    raw = _raw_tree(tmp_path)
+    out = tmp_path / "m.json"
+    assert sz.raw_manifest_main(str(raw), HEAD40, str(out), None) == 0
+    digest = hashlib.sha256(out.read_bytes()).hexdigest()
+    assert sz.raw_manifest_main(str(raw), HEAD40, None, digest) == 0
+    if change == "add":
+        (raw / "new.txt").write_bytes(b"x")
+    elif change == "delete":
+        (raw / "a.txt").unlink()
+    elif change == "rename":
+        (raw / "a.txt").rename(raw / "a2.txt")
+    elif change == "byte":
+        (raw / "a.txt").write_bytes(b"alphb")
+    elif change == "add_empty_dir":
+        (raw / "empty2").mkdir()
+    else:
+        (raw / "empty").rmdir()
+    out2 = tmp_path / "m2.json"
+    assert sz.raw_manifest_main(str(raw), HEAD40, str(out2), digest) == 1
+    assert not out2.exists()                                               # 不符 → ⛔ 不寫任何檔案
+
+
+@pytest.mark.parametrize("kind", ["link_file", "link_dir", "dangling", "fifo", "root_link", "root_name", "non_utf8"])
+def test_raw_manifest_rejects_links_special_files_and_bad_names(tmp_path, kind):
+    raw = _raw_tree(tmp_path)
+    target = raw
+    if kind == "link_file":
+        (raw / "l").symlink_to(raw / "a.txt")
+    elif kind == "link_dir":
+        (raw / "sub" / "l").symlink_to(raw / "empty")
+    elif kind == "dangling":
+        (raw / "l").symlink_to(tmp_path / "nowhere")
+    elif kind == "fifo":
+        os.mkfifo(raw / "f")
+    elif kind == "root_link":
+        target = tmp_path / "raw-failed"
+        target.symlink_to(raw)
+    elif kind == "root_name":
+        target = tmp_path / "other"
+        raw.rename(target)
+    else:
+        fd = os.open(os.fsencode(str(raw)) + b"/\xff.bin", os.O_WRONLY | os.O_CREAT, 0o644)
+        os.close(fd)
+    with pytest.raises(sz.SizingError):
+        sz.build_raw_manifest(target, HEAD40)
+
+
+@pytest.mark.parametrize("kind", ["exists", "link_file", "link_dir", "dangling"])
+def test_raw_manifest_out_is_exclusive(tmp_path, kind):
+    raw = _raw_tree(tmp_path)
+    keep = tmp_path / "keep.txt"
+    keep.write_text("keep")
+    out = tmp_path / "out.json"
+    if kind == "exists":
+        out.write_text("old")
+    elif kind == "link_file":
+        out.symlink_to(keep)
+    elif kind == "link_dir":
+        out.symlink_to(tmp_path / "raw" / "empty")
+    else:
+        out.symlink_to(tmp_path / "nowhere")
+    with pytest.raises(FileExistsError):
+        sz.raw_manifest_main(str(raw), HEAD40, str(out), None)
+    assert keep.read_text() == "keep" and not (tmp_path / "nowhere").exists()
+    assert not list((tmp_path / "raw" / "empty").iterdir())
+    if kind == "exists":
+        assert out.read_text() == "old"
+
+
+def test_raw_manifest_out_must_be_outside_raw_and_modes(tmp_path):
+    raw = _raw_tree(tmp_path)
+    with pytest.raises(sz.SizingError, match="之內"):
+        sz.raw_manifest_main(str(raw), HEAD40, str(raw / "m.json"), None)
+    (tmp_path / "alias").symlink_to(raw / "sub")
+    with pytest.raises(sz.SizingError, match="之內"):                      # 經 symlink 解析之後落在 raw 之內
+        sz.raw_manifest_main(str(raw), HEAD40, str(tmp_path / "alias" / "m.json"), None)
+    with pytest.raises(sz.SizingError, match="必須帶 --out"):
+        sz.raw_manifest_main(str(raw), HEAD40, None, None)
+    with pytest.raises(sz.SizingError, match="64 碼"):
+        sz.raw_manifest_main(str(raw), HEAD40, None, "abc")
+    with pytest.raises(sz.SizingError, match="40 碼"):
+        sz.build_raw_manifest(raw, "HEAD")
+    gen = tmp_path / "gen.json"
+    assert sz.raw_manifest_main(str(raw), HEAD40, str(gen), None) == 0
+    digest = hashlib.sha256(gen.read_bytes()).hexdigest()
+    again = tmp_path / "again.json"
+    assert sz.raw_manifest_main(str(raw), HEAD40, str(again), digest) == 0  # 相符且帶 --out → exclusive 寫出
+    assert again.read_bytes() == gen.read_bytes()

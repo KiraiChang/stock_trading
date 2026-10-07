@@ -11,7 +11,9 @@
 #   放一份假 cidfile 並中止——搭配移除不了的 docker 驗證容器清理失敗時 S 與 cidfile 都保留）、stuck（放一個忽略
 #   TERM 的步驟再中止——驗證升級 KILL）、group-alive（模擬 KILL 之後仍有成員——驗證保留 S），或 final-check
 #   （直接執行成功路徑結束前的容器檢查——搭配 ps 失敗的 docker 驗證「查不到不能當作沒有」），或 orphan-ok／
-#   orphan-bad（leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡——驗證一律收尾並中止）。
+#   orphan-bad（leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡——驗證一律收尾並中止），或 fs-noise
+#   （success 窗口期間在量測範圍外寫 2 MiB——有效性條件必須把量測判成無效；issue.md I-074「Stage 2 量測的有效性條件與
+#   ⑨-1 fail-fast 計畫」）。
 #
 # 模式：預設是 ④ 的**可用性驗證**（允許未 commit，報告記錄實際執行的腳本 SHA-256）；
 #       `--formal` 是 ⑤ 的**正式量測**（scripts/、python/、.gitattributes 必須 clean，harness 檔案必須等於 HEAD）。
@@ -48,7 +50,7 @@ I074_BOOT_PROFILE=sizing
 I074_BOOT_SPREFIX=i074-sizing
 I074_BOOT_SELF=scripts/i074-stage2-sizing.sh
 I074_BOOT_FILES=(scripts/i074-stage2-sizing.sh scripts/lib/i074-stage2-measure.sh scripts/lib/i074-sizing-docker-shim.sh
-                 scripts/lib/mem-guard.sh python/scripts/i074_stage2_sizing.py)
+                 scripts/lib/mem-guard.sh python/scripts/i074_stage2_sizing.py python/scripts/i074_stage2_preflight.py)
 # >>> I074-STAGE2-BOOTSTRAP ────────────────────────────────────────────────────────────────────────────
 # ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」的「harness 的快照」「bootstrap 的失敗與中斷」與「快照與來源的清單」）：
 #   harness 自己的檔案先凍結成 S 裡的快照，主腳本再 `exec` 快照裡的自己——之後每一行都從快照執行（⛔ 不讀活路徑；bash 是
@@ -190,7 +192,8 @@ case "${I074_SIZING_FAULT:-}" in
   ""|twins|copy|summary|cleanup|stuck|group-alive|final-check|orphan-ok|orphan-bad) ;;
   bootstrap-copy|bootstrap-manifest|bootstrap-stall) ;;   # ⑦d：只在 snapshot pass 生效
   orphan-setsid|subreaper-stall|guard-noident|guard-badident|guard-pgleader) ;;   # ⑦d 增補
-  *) die "I074_SIZING_FAULT 只接受 twins／copy／summary／cleanup／stuck／group-alive／final-check／orphan-ok／orphan-bad／orphan-setsid／bootstrap-*／subreaper-stall／guard-*：${I074_SIZING_FAULT}" ;;
+  fs-noise) ;;                                                                     # 有效性條件計畫
+  *) die "I074_SIZING_FAULT 只接受 twins／copy／summary／cleanup／stuck／group-alive／final-check／orphan-ok／orphan-bad／orphan-setsid／bootstrap-*／subreaper-stall／guard-*／fs-noise：${I074_SIZING_FAULT}" ;;
 esac
 if [ "$FORMAL" = "1" ]; then
   [ -z "${I074_SIZING_FAULT:-}" ] || die "--formal ⛔ 不接受 I074_SIZING_FAULT（那是演練用的故障注入）"
@@ -424,7 +427,9 @@ helper twins --state "$S" --docker "$REAL_DOCKER" --run-id "$RUN_ID" --fs-path "
 
 # ── 6. 報告 ────────────────────────────────────────────────────────────────────
 say "==> 步驟 6：報告"
-helper report --state "$S" --json-out "$S/sizing_report.json" --text-out "$S/sizing_report.txt" \
+# ⚠️ 有效性條件計畫「二」：P_B_BUDGET 取自 S 的快照（並斷言與工作複本逐位元相同）；沒有確定的超標、但有有效性問題
+#   → 量測無效（rc＝1，⛔ 不是判定，可以重跑）。
+helper report --state "$S" --clone "$CLONE" --json-out "$S/sizing_report.json" --text-out "$S/sizing_report.txt" \
   || on_failure "report" 1
 # ⚠️ ⑦b：freeze record 在**任何檔案複製到 <work> 之前**於 S 建好並自我驗證；只有 formal ＋ ok ＋ P_B ≤ 預算才寫。
 # ⚠️ ⑦d：freeze record 的寫入端從**工作複本**（HEAD）執行（「快照與來源的清單」②；⛔ 不從原始 repo 的活路徑）——它只以

@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8（第七輪 review 修正後）⚠️ 待確認**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ⚠️ 待 review**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -3603,7 +3603,7 @@ page cache 要逼近上限才被回收，所以**峰值會隨 mem-guard 當次�
 （對象與門檻、契約與範圍、容器的記憶體上限、報告 v2、⛔ 不在 host 留下程序、observer 的 `total_rss`），操作程序寫進
 [`development-workflow.md`](./development-workflow.md)（acceptance 一節的門檻、能力檢查、逐步檢查與收養、故障注入、observer 的 `total_rss`；sizing 一節的共用原語）。
 
-#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫（v8，2026-10-06，⚠️ **待確認**）
+#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫（v8，2026-10-06，✅ **已確認**（review 七輪後 commit `0a92d95`））
 
 ⚠️ **緣起**：「⑦d 增補的實作結果」記下的 `fs_peak` 觀察（第一次 sizing 的 `P_B` 只差 196,608 bytes 就超過 `P_B_BUDGET`）。2026-10-06 查證：
 ⛔ **不是**原本推測的「剛清完磁碟」，而是 **live 的排程工作**——live（postgres、backend、worker…）與量測共用同一個根檔案系統，backend 的
@@ -3766,6 +3766,84 @@ failure 09:02:28 之後（平的）；重跑在 09:07 之後，乾淨。盤中�
 | 嚴重度 | review 的發現 | 查證 | 修正 |
 |---|---|---|---|
 | 低 | **文字矛盾**：raw manifest 列正確寫「⛔ 不執行目前工作樹的 helper 演算法」，第六輪的表卻寫「⛔ 不執行工作樹的 helper」——對外命令本身就由工作樹的 helper 提供 frontend，後者字面上不可能成立；測試的標記若放在模組載入或 frontend，工作樹的版本一定會觸發；反向驗證的描述也不精確 | ✅ 成立 | 統一成「工作樹版本只執行固定的驗錨與取出 frontend，⛔ 不得呼叫工作樹的 recompute／產生演算法」——`precheck-verdict`（`precheck-recompute`／collector）與 `raw-manifest`（`raw-manifest-recompute`／manifest 產生演算法）兩處、第六輪的表一併訂正；「六」的標記一律放在 recompute／演算法的入口，`precheck-verdict` 也補「工作樹的 recompute 入口寫標記檔、正常判讀⛔ 不得觸發」；反向驗證改成「對外的 frontend 直接呼叫本地的 recompute、⛔ 沒有切換到 expected commit」 |
+
+#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果（2026-10-06，⚠️ **待 review**）
+
+✅ 依「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」（v8，review 七輪後確認並 commit `0a92d95`）完成「二」的設計。⛔ **沒有跑 `--formal`、
+沒有跑完整計算、沒有 commit**；程式與文件已 stage，停在 review。⚠️ ⛔ 沒有動 tooling 路徑（`evaluation.py`、`replay_bundle/`）。
+
+| 項目 | 結果 |
+|---|---|
+| 有效性條件 | `disk_numbers()`（`P_basis`、`fs_unexplained`）、`disk_validity_problems()`（① ②）、`disk_basis_violations()`（`disk_p_basis`）。sizing：`build_report(state, *, p_b_budget)`——確定的超標照常寫報告、只有有效性問題 → `SizingError`（量測無效）；文字版逐路徑列出 `P_basis`、`fs_unexplained` 與有效性問題。acceptance：任何有效性問題 → `SizingError`（v2 只在沒有有效性問題時寫出）；`validate_acceptance_report_v2()` 多驗「沒有任何有效性問題」；`derive_acceptance_violations()` 拆出 `derive_memory_violations()`，輸出⛔ 不變 |
+| 共用的 collector | `collect_acceptance_measurements(state, *, stage)` ＋ `acceptance_expected()`（`before_full` ＝ 正式集合的精確前綴，程式內斷言）；`phases/`、`host/` 的成員與 lifecycle event 的種類都必須恰好等於預期；`build_acceptance_report()` 以它重寫——**以 dev6 的原始量測重建的報告 v2 與當時的報告逐位元相同**（13,343 bytes），新的 validator 對它也⛔ 沒有問題 |
+| precheck | `precheck_from_snapshot()`、`build_acceptance_precheck()`（寫出之前自我驗證）、`validate_acceptance_precheck_v1()`、`precheck_text()`；CLI `acceptance-precheck --state --clone`（`write_exclusive` `<S>/precheck.json`；結束碼 0／2／3） |
+| full 模式的順序 | `scripts/i074-stage2-acceptance.sh`：…`recover_envcheck` → twin → `acceptance-precheck`（2、3、其他 → `on_failure`，訊息寫明「量測趟未執行、額度未消耗」）→ 量測趟 → twin（`run_twins()` 只補還沒有結果的）→ 報告 |
+| offline 的讀取端 | 共用的 frontend `verify_anchor()`／`git_blob()`／`run_trusted()`（`GIT_NO_REPLACE_OBJECTS=1`；只取出 helper、preflight、supervisor 三個檔案到私有的暫存目錄，以 `python3 -I` 執行）；`precheck_verdict()`（`identity.repo_head` ＝ 錨點、快照逐位元 ＝ 錨點 commit，之後才執行）；內部的 `precheck_recompute()`（形狀 A／B）、`verify_full_suffix()`、`project_before_full()`；CLI `precheck-verdict`、`precheck-recompute` |
+| raw manifest | `build_raw_manifest()`、`write_new_file()`、`raw_manifest_main()`；CLI `raw-manifest`（對外）、`raw-manifest-recompute`（內部） |
+| 權威常數 | `SNAPSHOT_FILES` 與兩個 `I074_BOOT_FILES` 加檔（sizing：preflight；acceptance：preflight、supervisor）；`_load_frozen()`、`live_constants()`；`report`（多了 `--clone`）、`acceptance-report`、`acceptance-precheck` 改用它 |
+| 故障注入 `fs-noise` | 共用原語 `measure_fs_noise_begin`／`measure_fs_noise_end`（success 窗口：work 目錄的父目錄寫 2 MiB、窗口結束後刪除；`on_failure` 也清掉）；兩個入口的封閉清單加入它；`--formal` 照舊拒絕任何故障注入 |
+| failure summary | 多一個 `precheck` 欄位（`raw-failed/precheck.json` 的位置；判讀一律經 `precheck-verdict`） |
+
+**與計畫的差異**（⚠️ 待 review 確認）：
+
+| # | 計畫 | 實作 | 理由 |
+|---|---|---|---|
+| 1 | 「六」的 shell 列以 fake docker 跑 full 模式的端到端（順序、precheck 擋下量測趟、`raw/`／`raw-failed/` 經 `precheck-verdict` 判讀、`fs-noise`） | 順序與擋法改成**抽出 `acceptance.sh` 的實際片段 ＋ stub** 執行（與 ac26 同一種做法：full 0／2／3／5 與 stub 五種情境）；形狀 A／B 的判讀改在 pytest（`precheck_recompute()`）與 host unittest（真的 git、隔離的 repo、C1／C2）驗；`fs-noise` 的端到端改由 dev 實跑驗（見下方「實跑」） | 現有的 fake docker 沒有任何一支能把 acceptance 或 sizing 跑完整個流程（全部在中途的故障點中止）；為了這幾項另寫一套能扮演 runner、finalizer、晉升的 fake docker，成本與風險都高，而上述三層合起來涵蓋同樣的性質 |
+| 2 | —— | 內部命令（`precheck-recompute`、`raw-manifest-recompute`）多了 `--trusted-root`，並要求自己的檔案路徑 ＝ 取出的那一份（否則拒絕） | 讓「⛔ 不得直接呼叫本地的 recompute」在程式內也成立 |
+| 3 | —— | git 呼叫一律帶 `GIT_NO_REPLACE_OBJECTS=1` | replace refs 可以換掉錨點 commit 的內容 |
+| 4 | —— | failure summary 多一個 `precheck` 欄位 | 只是位置，方便找到；判讀照樣只認 `precheck-verdict` |
+| 5 | collector 的 `host/` 完整性 | 逐步讀取時照舊先報「缺少 … 的 host 端量測」，多出的成員在讀完之後才以集合比對 | 保留既有的錯誤訊息（既有測試釘住它） |
+| 6 | 實跑：acceptance stub 一趟、sizing validation 一趟 | 另加 sizing ＋ `fs-noise` 一趟（取代 #1 的 fake docker 端到端）；⛔ 沒有跑 acceptance ＋ `fs-noise` | 根檔案系統只剩 2.9 GB（四趟約需 1.6 GB）；acceptance 與 sizing 共用同一套量測原語與 `disk_validity_problems()`，acceptance 的 builder 那一道由 pytest 與反向驗證 V2 涵蓋 |
+
+**歷史資料的重算**（唯讀；以新條件重算現有 9 份報告、24 個窗口）：只有 `validation-7d-rss-20261005T085906Z` 被判無效（witness ＋3,584,000、success ＋6,311,936 bytes，都是 ①）；
+其餘 23 個窗口的 `fs_unexplained` 最大 ＋684,032 bytes（`validation-7d-rss2-20261005T090642Z` 的 success）；⛔ 沒有任何一份落入模糊區、⛔ 沒有確定的超標。
+⑤ 的正式量測（`formal-20260929T020903Z`）三條路徑都是負值，不受影響（決定 #4：歷史紀錄⛔ 不追溯改寫）。
+
+**反向驗證**（逐項注回、確認變紅、逐位元還原；產品檔的 SHA 前後相同）：32 項中 30 項紅在預期的那幾支、2 項是照實的重疊——
+
+| # | 注回的缺陷 | 結果 |
+|---|---|---|
+| V1～V3 | 拿掉有效性條件（sizing builder／acceptance builder／validator 各一） | 紅：sizing 的邊界與模糊區、acceptance 的「v2 只在沒有有效性問題時寫出」、validator 的那一支（acceptance builder 那一支的測試改成釘住 builder 自己的訊息——否則 validator 的訊息也含同一段文字，兩道重疊看不出來） |
+| V4、V5 | 容差的 `≤` 改成 `<`；拿掉模糊區 | 紅：sizing 與 acceptance 的邊界／模糊區、precheck 的 ambiguous |
+| V6、V6b | 優先序反過來（precheck／sizing） | 紅：precheck 的 memory＋noise、basis＋noise；sizing 的「確定的超標照寫報告」 |
+| V7、V8 | 模糊區算成違反；precheck 的磁碟違反改記 `P_path` | 紅：precheck 的 ambiguous；basis＋noise（`value` ≠ `P_basis`） |
+| V9 | 晉升的窗口也套有效性條件 | 紅：`test_validity_ignores_the_promotion_windows` |
+| V10、V11 | precheck ⛔ 不擋量測趟；precheck 放到量測趟之後 | 紅：shell 片段的 full 2／3／5；full 0／2／3／5 |
+| V12～V14 | 讀取端⛔ 不比對重算的結果；投影⛔ 不驗拿掉的恰好是 suffix；形狀 B ⛔ 不先驗完整內容 | 紅：A／B 的原始量測被改；投影；suffix 的 rc、sidecar（失敗、缺 RSS 欄位）、twin（失敗、spec hash）、host 紀錄 |
+| V16～V18、V23 | ⛔ 不比對快照與錨點；改用 artifact 的 `repo_head` 選 commit；錨點接受 ref／縮寫／tag；對外的 frontend 直接呼叫本地的 recompute | 紅：原始量測裡的 preflight 被執行、C1／C2、raw manifest 接受 tag、工作樹的標記檔出現 |
+| V19～V22、V24、V25 | raw manifest 跟隨 symlink、漏列空目錄、`--out` 可以落在 raw 之內、⛔ 不比對 `--check-sha256`、覆寫既有檔案、檢查不符仍寫出 | 紅：各自的那幾支 |
+| V27～V31 | live ⛔ 不比對快照與工作複本；validator 拿掉優先序；collector 忽略多出的成員；`run_twins()` ⛔ 不跳過已有的；⛔ 不驗 event 的種類 | 紅：各自的那幾支 |
+| V15（照實的重疊） | offline 改從原始量測目錄執行 recompute | ⛔ 沒有紅：在這之前已驗快照逐位元 ＝ 錨點 commit，從原始量測目錄執行與從 git object 執行的 bytes 相同——由 V16 那一道保證 |
+| V26（照實的重疊） | ⛔ 不驗身分綁定（`identity` ＝ 同一個目錄的 `meta.tsv`／`MANIFEST`） | ⛔ 沒有紅：重算的 `precheck.json` 的 `identity` 也取自 `meta.tsv` 與 `MANIFEST`，改動任一個都會讓逐位元比對失敗——身分綁定只是更早、更清楚的失敗訊息 |
+
+本輪的驗證：`python/scripts/test.sh` 完整執行（stage 之後；依序）全綠——doc-refs 45／45、文件引用 0 個問題；`test-replay-args.sh` **460 項**（本輪 ＋8：fail-fast 的五種情境、兩個 harness 的 `--formal` ⛔ 不接受 `fs-noise`、`fs-noise` 是認得的故障）；`test-i074-stage2.sh` **223 項**（含 host unittest **67** 項：本輪 ＋7——offline 讀取端的信任模型 6 支、`live_constants()` 1 支）；pytest **2266 passed、1 skipped**（本輪 ＋101；這一次⛔ 沒有被 OOM killer 收掉）。tooling 路徑⛔ 沒有動：漂移測試（index 的 tree）通過。
+
+**實跑**（dev；⛔ 不跑 `--formal`、⛔ 不跑 full；2026-10-06 08:30～08:50Z ＝ 台北 16:30～16:50，在 16:00 backfill（16:00～16:25）與 17:00 `sr_analysis` 之間；
+`repo_head` ＝ `clone_head` ＝ `0a92d95`，harness 由工作樹的快照執行）：
+
+| 實跑 | 結果 |
+|---|---|
+| acceptance stub（`~/i074_stage2_acceptance/dev7-validity-20261006T080114Z/`） | ✅ 結束碼 0、`status: ok`、報告 v2；快照 8 個檔案（含 preflight、supervisor，`live_constants()` 與工作複本逐位元相同）；success `P_path` 161,513,472 bytes（`P_basis` 同值、`fs_unexplained` −225,280、預算餘裕 6,258,688）、failure 72,867,840（`fs_unexplained` −49,152）；十二個容器的精確閘 260.6～352.8 MiB；`MemAvailable` 低點 194.3 MiB |
+| sizing validation（`~/i074_stage2_sizing/validation-validity-20261006T080114Z/`） | ✅ 結束碼 0、`status: ok`；快照 6 個檔案（含 preflight）；`P_B` ＝ 161,501,184 bytes（預算餘裕 6,270,976）；三條路徑的 `fs_unexplained` −110,592／−458,752／−548,864，⛔ 沒有有效性問題；文字版列出 `P_basis` 與 `fs_unexplained` |
+| sizing ＋ `fs-noise`（`~/i074_stage2_sizing/validation-validity-noise-20261006T080114Z/`） | ✅ 照預期被判**無效**：結束碼 1、在 report 階段中止、⛔ 不產報告，`量測無效（有效性條件；⛔ 不是判定，可以重跑）：success：fs_unexplained（未解釋的淨成長） 1613824 bytes ＞ 1048576`（寫入的 2 MiB 減去會計上界原本的餘裕）；量測範圍外的暫存檔已刪除；`failure_summary.json` 的 `failed_stage` ＝ report |
+
+三趟之後 `/dev/shm/i074-*`、帶 `i074sz-` 名稱的容器都⛔ 沒有殘留。⚠️ 根檔案系統剩 1.8 GB（96%）：三個實跑目錄共約 1.2 GB，⛔ 沒有刪除
+（是否清理既有的 dev 實跑目錄由使用者決定）。
+
+**實作第一輪 review 的修正**（2026-10-06；先寫測試、確認紅之後才修）：
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **offline verifier 的 git 信任根可以被環境變數／PATH 繞過**：`_git_env()` 完整繼承 `os.environ`，`verify_anchor()`、`git_blob()` 呼叫 PATH 上的 `git`——`GIT_DIR`、`GIT_OBJECT_DIRECTORY` 能讓 `--repo` 被忽略，PATH 上的假 git 能偽造錨點並回傳任意的 Python，接著在 `run_trusted()` 被執行；`GIT_NO_REPLACE_OBJECTS=1` 只防 replace refs | ✅ 成立（讀碼；實測 `GIT_DIR=<真正 repo> /usr/bin/git -C /tmp rev-parse HEAD` 成功、拿掉 `GIT_DIR` 則 rc 128）；另外發現取出的 helper 那個 python 子程序也繼承整個環境（含 `LD_*`） | git 固定是 **`/usr/bin/git`**（不存在就拒絕、⛔ 不從 PATH 找）；新增 `offline_child_env()`——git 與取出的 helper 都以最小化的 allowlist 環境執行（`PATH=/usr/bin:/bin`、空的 `HOME`／`XDG_CONFIG_HOME`、`LANG`／`LC_ALL=C.UTF-8`、`GIT_CONFIG_NOSYSTEM`、`GIT_NO_REPLACE_OBJECTS`、`GIT_TERMINAL_PROMPT=0`；git 另加 `GIT_CEILING_DIRECTORIES` ＝ `--repo` 的上一層，讓 `--repo` 必須是 repo 的根目錄），⛔ 不繼承呼叫端的 `GIT_*`、`LD_*`、`PYTHON*`、`PATH`。host unittest 補兩支（修正前一紅一錯）：PATH 上的假 git（一執行就寫標記檔）⛔ 沒有被執行、`precheck-verdict` 與 `raw-manifest` 照常；`GIT_DIR`／`GIT_OBJECT_DIRECTORY`／`GIT_ALTERNATE_OBJECT_DIRECTORIES` 指向另一個空的 repo 時照常判讀 `ok`；`--repo` 不是 repo 而 `GIT_DIR` 指向受信任的 repo → 拒絕；`--repo` 是 repo 的子目錄 → 拒絕（⛔ 不往上找）；以 spy 證明每一個子程序的 argv 與環境（`/usr/bin/git`、`PATH` 固定、⛔ 沒有 `LD_*`／`PYTHON*`、`GIT_*` 只有 allowlist） |
+| 低 | **`ambiguous_disk_exceed` 的定義與實作不一致**：計畫與耐久文件寫「超標由**容許範圍內**的 `fs_unexplained` 造成」，但實作⛔ 沒有限制 `fs_unexplained` ≤ 1 MiB——`P_basis` ＝ 預算、`P_path` ＝ 預算 ＋1 MiB ＋1 時同時記下 ① 與模糊區 | ✅ 成立（讀碼；最終判定都是 invalid，但原因分類不精確） | 依計畫補上限：模糊區另要求 `fs_unexplained` ≤ 容差，超過時只記 ①。補重疊邊界的測試（修正前紅）：`disk_validity_problems()` 在 `fs_unexplained` ＝ 容差／容差 ＋1 的兩個邊界、sizing builder 的訊息⛔ 沒有「模糊區」、precheck 的 overlap 只有 `fs_unexplained`，以及 validator 拒絕「同一條路徑又記成模糊區」的 `precheck.json`；耐久文件同步補「且 `fs_unexplained` ≤ 容差」 |
+
+本輪的反向驗證：R1（模糊區⛔ 不限容差——原缺陷）→ 紅在 sizing 的重疊邊界、precheck 的 overlap、validator 的 overlap；R3（子程序改回繼承呼叫端的環境）→ 紅在兩支 host；R4（拿掉 `GIT_CEILING_DIRECTORIES`）→ 紅在子目錄那一段；R5（取出的 helper ⛔ 不帶最小化的環境）→ 紅在 spy 那一支。⚠️ R2（git 改回從 PATH 找）只紅在 spy 那一支（argv 是 `git`），假 git 的行為測試⛔ 沒有紅——子程序的 `PATH` 已經是最小化的 `/usr/bin:/bin`，Python 以子程序環境的 `PATH` 找執行檔，兩道防護重疊；R2b（兩道同時拿掉）→ 兩支都紅。檔案都逐位元還原。
+
+本輪的驗證：`python/scripts/test.sh` 完整執行（stage 之後）——shell 那幾層全部通過（doc-refs 45／45、文件引用 0 個問題、`test-replay-args.sh` 460 項、`test-i074-stage2.sh` 223 項（含 host unittest **69** 項：本輪 ＋2））；pytest 那一層在 `test_replay_envcheck`（67%）被 OOM killer 收掉（mem-guard 這次只給 390m；與 ⑦d 增補時的情況相同），依專案的做法（⛔ 不調高 `MEM`）把同一組 pytest 分三段依序跑完：539 ＋ 767 ＋ 963 ＝ **2269 passed、1 skipped**（本輪 ＋3）。
+
+**歸檔**（⚠️ 依 CLAUDE.md，本筆的計畫與結果保留到 review 確認後才收斂）：現況規格寫進 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」
+（量測的有效性條件、⑨-1 的 fail-fast、`precheck.json`、offline 的讀取端與信任模型、raw manifest、權威常數取自快照），操作程序寫進
+[`development-workflow.md`](./development-workflow.md)（acceptance 一節的 ⑨-1 指令、有效性條件、fail-fast、precheck 的判讀、raw manifest、作業規則、故障注入；sizing 一節的有效性條件）。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -5321,7 +5399,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（2026-09-29，✅ 2026-09-30 確認）**：⑦ 分四包依序實作——⑦a replay 側 → ⑦b supervisor＋orchestrator＋freeze record
    → ⑦c `--promote`＋B／C 判讀器 → ⑦d memory harness，每包「細部計畫 → 實作 → review → commit」；
    ⚠️ `evaluation.py` 與 `replay_bundle/` 的改動**經 tooling patch 進入 replay**（⑩ 的 replay 執行的是 `e1cbbbd` worktree）；
-   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；✅ ⑦d 增補實作 review 通過並 commit（2026-10-06，`576a8f7`；見「Stage 2 步驟 ⑦d 增補的實作結果」）；⚠️ 現在在這裡：量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 待確認（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；之後 ⑧ → ⑨ → ⑨-1）
+   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；✅ ⑦d 增補實作 review 通過並 commit（2026-10-06，`576a8f7`；見「Stage 2 步驟 ⑦d 增補的實作結果」）；✅ 量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 已確認（2026-10-06，`0a92d95`）；⚠️ 現在在這裡：它的實作待 review（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果」）（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；之後 ⑧ → ⑨ → ⑨-1）
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次

@@ -254,6 +254,7 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
   local stage="$1" rc="$2" cleaned=0 copied=0 summarized=0 group_stopped=1 adopted_ok=1 rrc=0
   trap - EXIT INT TERM
   stop_sampler                                                       # 1
+  [ -z "${FS_NOISE:-}" ] || rm -f -- "$FS_NOISE"                     # 演練的 fs-noise（量測範圍外的暫存檔）
   cleanup_containers || true                                         # 2：先停掉還在跑的容器
   # 2b：進行中的步驟在自己的 session 裡（setsid），整個 process group 一起結束，並**等它真的結束**
   #     （shim 的中斷處理會補寫 sidecar——⛔ 不能在它寫完之前就複製 S）。
@@ -312,6 +313,25 @@ measure_begin_phase() {
   helper sample --state "$S" --phase "$PHASE" --locations "$2" --fs-path "$3" &
   SAMPLER_PID=$!
   say "==> 路徑 $PHASE：baseline 已記錄，取樣中"
+  measure_fs_noise_begin "$PHASE"
+}
+# ⚠️ issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：故障注入 fs-noise（⛔ 不用在正式量測、只在演練；--formal 一律拒絕
+#   故障注入）——success 窗口期間在量測範圍外（work 目錄的父目錄，同一個檔案系統；⛔ 不在 inventory 的根目錄內）寫 2 MiB、
+#   窗口結束之後刪除。有效性條件 ①（未解釋的淨成長 ≤ 1 MiB）必須把這次量測判成無效。
+FS_NOISE=""
+measure_fs_noise_begin() {
+  [ "${I074_SIZING_FAULT:-}" = fs-noise ] && [ "$1" = success ] || return 0
+  local parent
+  parent="$(dirname "$WORK")"
+  [ "$(stat -c %d "$parent")" = "$(stat -c %d "$WORK")" ] || on_failure "fs-noise：work 目錄的父目錄⛔ 不在同一個檔案系統" 1
+  FS_NOISE="$parent/.i074-fs-noise-$RUN_ID"
+  { head -c 2097152 /dev/urandom > "$FS_NOISE" && sync -- "$FS_NOISE"; } || on_failure "fs-noise：寫不了 $FS_NOISE" 1
+  say "==> 故障注入 fs-noise：量測範圍外寫了 2 MiB（$FS_NOISE）"
+}
+measure_fs_noise_end() {
+  [ -n "$FS_NOISE" ] || return 0
+  rm -f -- "$FS_NOISE"
+  FS_NOISE=""
 }
 # 關一個量測窗口：$1＝run 目錄、$2＝archive 路徑、$3＝inventory roots（JSON）、$4＝允許位置（JSON）、$5＝source roots（JSON）。
 measure_end_phase() {
@@ -319,4 +339,5 @@ measure_end_phase() {
   helper phase-end --state "$S" --phase "$PHASE" --run-dir "$1" --archive "$2" \
     --inventory-roots "$3" --allowed "$4" --source-roots "$5" \
     || on_failure "自我檢查（$PHASE）" 1
+  measure_fs_noise_end
 }

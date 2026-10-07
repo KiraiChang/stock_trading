@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ⚠️ 待 review**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4（第三輪 review 修正後）⚠️ 待確認**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -3767,7 +3767,7 @@ failure 09:02:28 之後（平的）；重跑在 09:07 之後，乾淨。盤中�
 |---|---|---|---|
 | 低 | **文字矛盾**：raw manifest 列正確寫「⛔ 不執行目前工作樹的 helper 演算法」，第六輪的表卻寫「⛔ 不執行工作樹的 helper」——對外命令本身就由工作樹的 helper 提供 frontend，後者字面上不可能成立；測試的標記若放在模組載入或 frontend，工作樹的版本一定會觸發；反向驗證的描述也不精確 | ✅ 成立 | 統一成「工作樹版本只執行固定的驗錨與取出 frontend，⛔ 不得呼叫工作樹的 recompute／產生演算法」——`precheck-verdict`（`precheck-recompute`／collector）與 `raw-manifest`（`raw-manifest-recompute`／manifest 產生演算法）兩處、第六輪的表一併訂正；「六」的標記一律放在 recompute／演算法的入口，`precheck-verdict` 也補「工作樹的 recompute 入口寫標記檔、正常判讀⛔ 不得觸發」；反向驗證改成「對外的 frontend 直接呼叫本地的 recompute、⛔ 沒有切換到 expected commit」 |
 
-#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果（2026-10-06，⚠️ **待 review**）
+#### Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果（2026-10-06，✅ **review 通過**（兩輪）並 commit `c49fde1`）
 
 ✅ 依「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」（v8，review 七輪後確認並 commit `0a92d95`）完成「二」的設計。⛔ **沒有跑 `--formal`、
 沒有跑完整計算、沒有 commit**；程式與文件已 stage，停在 review。⚠️ ⛔ 沒有動 tooling 路徑（`evaluation.py`、`replay_bundle/`）。
@@ -3845,6 +3845,235 @@ failure 09:02:28 之後（平的）；重跑在 09:07 之後，乾淨。盤中�
 （量測的有效性條件、⑨-1 的 fail-fast、`precheck.json`、offline 的讀取端與信任模型、raw manifest、權威常數取自快照），操作程序寫進
 [`development-workflow.md`](./development-workflow.md)（acceptance 一節的 ⑨-1 指令、有效性條件、fail-fast、precheck 的判讀、raw manifest、作業規則、故障注入；sizing 一節的有效性條件）。
 
+#### Stage 2 步驟 ⑧ 計畫 v4（2026-10-07，⚠️ **待確認**）
+
+⚠️ **緣起**：v29「八」的 ⑧ 原本是「測試矩陣」；⑦ 總綱 v1 改成**矩陣完整性稽核 ＋ 全量執行**——⑦ 各包已各自附上它負責的測試，
+⑧ 逐 id 對照 a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次。本計畫補**稽核的範圍、方法、判準、
+確認點、全量執行的命令與殘留的驗收條件**。v2～v4 依第一～三輪 review 改寫（修正對照見本節最後）。
+
+##### 一、目標與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | ① **稽核**：「二」的每一個 id 展開成原子案例（subcase），各自對到實際的測試並判定；② **補齊**：部分與缺漏補測試；③ **測試衛生**：補上 2026-10-07 發現的程序洩漏（「四」）；④ **全量執行**一次（「五」） |
+| ⛔ 不做 | ⑨ 的 differential guard、tooling 非語意 guard、兩份 patch 的封存、`e1cbbbd` ＋ 兩份 patch 的既有測試；⑨-1、⑨-2、⑩；⛔ 不改產品程式——稽核或補測試時發現產品與規格不符，記進本筆、回報裁決（照 CLAUDE.md 先查規格），需要改產品才補得起來的缺漏同樣先回報；⛔ 不動 tooling 路徑（`evaluation.py`、`replay_bundle/`）；⛔ 不動測試的入口與框架（`python/scripts/test.sh`、`scripts/test-replay-args.sh`／`scripts/test-i074-stage2.sh` 的框架部分）——發現測試沒有被入口執行、而修正需要動它們時，停在確認點 ② 另行確認是否擴大範圍；⛔ 不清理、⛔ 不 prune 開跑之前既有的 worktree 登記（I-118 的範圍） |
+
+##### 二、稽核的範圍與粒度
+
+| namespace | id | 規格來源 |
+|---|---|---|
+| v29「六、2」 | a～n、o～z、aa～ai（含 ac2）、n1～n12、n7b | 「I-074 Stage 2 計畫書 v29」「六、2」（含後續各計畫的加註） |
+| v29「六、9」 | a～m（B／C 判讀器） | 「六、9」與「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」 |
+| ③「十」 | a～z、aa～az、ba～bk，含 k2、o2、ag2、ag3、ah2～ah5、bd2～bd4、be2、bj0 | 「③ Stage 2 evidence contract 計畫書」「十」（v12 為準，含 ⑦ 總綱 v1 的加註） |
+| ⛔ 不在範圍 | v29「六、1」a～i（容量；開發驗證在 ⑦d、正式驗收是 ⑨-1）、「六、3」（differential guard，⑨）、⑦a～⑦d 與有效性條件計畫各自補的測試列——稽核表只在它們剛好承接上述 id 時引用 | —— |
+
+**粒度**（第一輪 review）：稽核表的一列是 **namespace ＋ id ＋ subcase**——規格寫「各一支」「每一列至少一支」「逐條」或以頓號列舉多個情境的
+id（例如 v29 的 n7、n7b、n11，③ 的 w、ah、bd），每一個情境展開成一個 subcase；單一性質的 id 只有一個 subcase。彙總同時列**頂層 id 數**
+（約 140）與**展開後的 subcase 數**。跨 namespace 同名的 id（例如 n、z、ad～ai）一律帶 namespace。以每個 id 的**最新**規格為準：
+後續計畫的改寫照實引用；**移交到 ⑦ 的案例**（例如 ③ 的 ax、ba，n／ai／ay 的「在 replay 之前」那一層）⛔ 不是「不適用」——照樣稽核現在的
+測試、判定涵蓋／部分／缺漏；「➖ 不適用」只留給**真正撤回、已不存在**的契約（寫明出處）。
+
+##### 三、稽核的方法
+
+1. **起點**：各包的「五、測試（id → 落點）」與 ③b、③d 實作結果的落點表——逐 subcase 找到**現在**實際存在的測試：pytest 寫成
+   `檔案::測試名[參數]`、shell 寫成 `scripts/…sh` 的 pass 標籤、host unittest 寫成 `類別.方法`。
+2. **讀測試本體、判定**（⛔ 不能只看名稱）——每一列記：規格來源、落點、**具體的斷言**、判定：
+   - ✅ **涵蓋**：斷言驗到規格寫的性質。例如「replay ⛔ 未被呼叫」要有 spy 的斷言（只驗結束碼不算）；「串流、只讀一次」要有計數或 spy。
+   - ⚠️ **部分**：測試存在，但少驗某個性質——寫明少什麼。
+   - ❌ **缺漏**：找不到測試。
+   - ➖ **不適用**：規格已撤回或已不存在——寫明出處。
+3. **確認測試真的會跑**：在 `python/scripts/test.sh` 的執行範圍內、⛔ 沒有被 skip——查明 pytest 的「1 skipped」是哪一支、為什麼；
+   shell 需要 image 的段落在 `IMAGE_REQUIRED=1` 下⛔ 不得靜默 skip。
+4. **抽樣反向驗證**：總綱點名的 o、v、w、y、z、ab（v29「六、2」）各注回一次缺陷，確認既有測試仍然紅在預期的那幾支；其餘以各包當時的
+   反向驗證紀錄為準（稽核表列出出處）。⚠️ **一律在隔離環境注回**（第一輪 review）——正式工作樹與 index 全程只讀：
+   - **隔離環境（共用的建法，「五」的 smoke 也用它）**：綁定**當時 staged 的 tree**、**保留歷史物件**（既有的 shell 測試會在 `e1cbbbd`
+     建 worktree）的 clone。以下面的 bash 腳本建立（第三輪 review：固定的 author／committer、⛔ 不執行任何 hook、以 `commit-tree` 建暫存
+     commit、⛔ 不依賴 host 的全域 git 設定）；它斷言 clone 的 tree ＝ staged tree、工作樹乾淨、`e1cbbbd` 在。⛔ 不用 `git worktree add`
+     （會增加 I-118 的登記）；之後在 clone 裡建的 worktree 都登記在 clone 自己的 `.git`。2026-10-07 實際執行過：tree 相符、正式 repo 的
+     index、status 與 worktree 登記都沒變、目錄已存在時拒絕、約 158 MB。
+
+```bash
+#!/usr/bin/env bash
+# 綁定 staged tree 的隔離 clone（「三」第 4 步）。用法：bash mk_clone.sh <scratchpad 裡尚不存在的目錄>
+set -euo pipefail
+REPO=/home/dev/workspace/stock_trading            # 真正 repo：只讀（write-tree 只把 index 寫成 tree 物件）
+DEST="$1"
+[ ! -e "$DEST" ] || { echo "目錄已存在：$DEST" >&2; exit 1; }
+T=$(git -C "$REPO" write-tree)
+git -c core.hooksPath=/dev/null clone -q --no-hardlinks --template= "$REPO" "$DEST"
+git -C "$DEST" ls-files -z | (cd "$DEST" && xargs -0 -r rm -f --)
+git -C "$REPO" archive "$T" | tar -x -C "$DEST"
+git -C "$DEST" -c core.hooksPath=/dev/null add -A
+T2=$(git -C "$DEST" write-tree)
+[ "$T2" = "$T" ] || { echo "隔離 clone 的 tree $T2 ≠ staged tree $T" >&2; exit 1; }
+C=$(GIT_AUTHOR_NAME=i074-step8 GIT_AUTHOR_EMAIL=i074-step8@invalid GIT_COMMITTER_NAME=i074-step8 \
+    GIT_COMMITTER_EMAIL=i074-step8@invalid git -C "$DEST" commit-tree "$T2" -p HEAD -m "i074 step8: staged tree $T")
+git -C "$DEST" update-ref HEAD "$C"
+[ "$(git -C "$DEST" rev-parse 'HEAD^{tree}')" = "$T" ] || { echo "HEAD 的 tree ≠ $T" >&2; exit 1; }
+[ -z "$(git -C "$DEST" status --porcelain=v1 --untracked-files=all)" ] || { echo "隔離 clone 不乾淨" >&2; exit 1; }
+git -C "$DEST" cat-file -e e1cbbbdab44f8cf2d152e6ade9235d844f590d7f^{commit}
+echo "$T"
+```
+
+   - **執行**：注回與測試都在 clone 裡。pytest 寫出**精確的 node id**、以 `SKIP_SHELL_TESTS=1 PY_IMAGE=<專屬 tag> python/scripts/test.sh -q <node id …>`
+     執行（⛔ 不覆寫共用的測試 image）；shell 的 id **沒有依 id 執行單一段落的公開入口**——一律在 clone 裡跑**完整的官方腳本**
+     （`IMAGE_REQUIRED=1 PY_IMAGE=<專屬 tag> scripts/test-replay-args.sh`、`scripts/test-i074-stage2.sh`），再看預期的那幾支有沒有紅；
+     若必須新增 selector，屬測試框架的改動，停在確認點 ② 裁決。
+   - **正式工作樹的守門**：開始前與結束後各記一次 `git write-tree`（index 的 tree）、`git status --porcelain=v2 --untracked-files=all`、
+     工作樹每個檔案的 mode 與 SHA-256（含未追蹤檔、symlink 記目標）——三者必須完全相同；中斷或 OOM 時也一樣（注回從來⛔ 不在正式工作樹）。
+   - **收尾**：專屬的 `PY_IMAGE` tag 在成功、失敗、中斷三條路徑都以 trap 刪除（刪除前記下它的 image ID），結束後驗證 tag 已不存在；
+     刪掉 scratchpad 裡 clone 自己的目錄。
+5. **稽核表**寫進本筆的「⑧ 稽核結果」：彙總各判定的數量（頂層 id 與 subcase 各一份）與缺漏清單。
+
+##### 四、補齊與測試衛生（稽核之後）
+
+| 項目 | 規則 |
+|---|---|
+| 部分與缺漏 | 先寫測試，再在隔離環境注回對應的缺陷確認它會紅（「三」第 4 步的做法）；只動測試檔與測試 fixture |
+| 補的時候發現產品不符規格 | ⛔ 不修；記進本筆、回報裁決 |
+| 發現測試沒被入口執行 | 修正若要動 `python/scripts/test.sh` 或 shell 的框架 → 停在確認點 ②，另行確認是否擴大範圍 |
+| ⚠️ 測試衛生（2026-10-07 發現） | `scripts/tests/test_i074_stage2_host.py` 的 `RssAddendumHost` 以 `setsid sh -c` 起「存活的子孫」（`MARKER_LOOP`），清理只靠產品（`host-run`）與 `self.pids`（只記到 `host-run` 自己）——產品的清理失效時（例如反向驗證注入的缺陷）就洩漏：2026-10-07 收掉 6 個（10/05 兩次反向驗證留下、存活約 41 小時）。補法（第一輪 review）：① 每支測試一個**唯一的 cleanup token**，測試起的**每一個**長存程序的 argv 都明確帶它；② 獨立的、冪等的 helper（⛔ 不呼叫被測的產品函式）：只看同一個 UID、排除測試程序自己與它的祖先，掃 `/proc` 找 argv 含 token 的程序、以 PID ＋ starttime 釘住 → TERM → 等待 → KILL → **重新掃描**，直到固定點（掃不到任何候選）或逾時；送任何訊號之前都重新比對 PID ＋ starttime（⛔ 不對已被重用的 PID 送訊號）；③ **`/proc` 的正常競爭**（第二輪 review）：列舉之後、讀 `stat`／`cmdline` 之前程序就結束（`ENOENT`，且 `/proc/<pid>` 已不存在）→ 視為該候選已消失；只有 **PID 仍存在**但身分讀不到、解析失敗或確認不了 starttime，以及逾時、候選仍存活 → **測試失敗**（⛔ 不吞掉）；④ 測試本體在斷言之後**手動呼叫**一次並斷言「⛔ 沒有存活的候選」，`addCleanup` 再呼叫一次當保險；⑤ 另補一支：以 driver 讓產品的清理失效（monkeypatch 成 no-op）→ helper 仍收得掉、測試斷言收掉之後⛔ 沒有存活 |
+| ⚠️ 確認點 ② | 稽核表與補法（預計新增或修改的測試清單）寫好之後**先停下來確認**，確認之後才開始補 |
+
+##### 五、全量執行（命令封閉）
+
+| 步驟 | 命令與規則 |
+|---|---|
+| 1 | 全部 stage 之後：`python/scripts/test.sh`（doc-refs、`check-doc-refs`、`test-replay-args.sh`（`IMAGE_REQUIRED=1`）、`test-i074-stage2.sh`、pytest） |
+| 2：OOM 的退路 | ⚠️ **⛔ 不自動啟用**（第三輪 review）：目前的入口（`python/scripts/test.sh` 以不具名的 `docker run --rm` 跑 pytest）取不到 container 的身分，這台 kernel 的 OOM 訊息也⛔ 不帶 memcg——下面的條件只是**推論**、⛔ 不是身分綁定。所以 pytest 那一層以 rc＝137 結束時：**中止並回報**（附游標之後新增的 kernel 訊息與步驟 1 的完整輸出），由你裁決是否以分段補跑；要讓入口提供 container 身分（例如 `--cidfile`）屬測試入口的改動，⛔ 不在本計畫——要做就在確認點 ② 另行提出。一般的測試失敗⛔ 不得以分段掩蓋。回報時附上的證據：證據（第二輪 review）：步驟 1 開跑之前記下 kernel log 的游標（`dmesg` 最後一行的單調時間戳 `[秒.微秒]`；⛔ 不用 `dmesg -T`——它換算的時間⛔ 不可信）；pytest 那一層以 rc＝137 結束之後，只看游標之後新增的行：必須至少一行 `OOM killed process`／`Out of memory`，它的程序名稱是 Python 的程序（`pytest`、`python*`；⛔ 不寫死某一個名稱——既有的紀錄是 `(python)`、本機近期是 `(pytest)`），且 `anon-rss` 落在 `test.sh` 印出的 `mem=` 上限的 80%～100%（對上那一個容器）。游標那一行已不在 ring buffer（被沖掉）、`dmesg` 讀不到、或找不到符合的行，都照實寫明。**經你同意之後**才分段：⛔ 不調高 `MEM`，以 `SKIP_SHELL_TESTS=1 python/scripts/test.sh -q -ra $s1`（`$s2`、`$s3` 同理）依序跑三段（shell 那幾層已在步驟 1 跑完；glob 在 `python/` 底下展開、＝ 容器的 `/app`，見下方的命令）——**shard 1** ＝ `backtest/modular/tests tests backtest/modular/sr_scoring/tests/test_[a-h]*.py`、**shard 2** ＝ `backtest/modular/sr_scoring/tests/test_i*.py`、**shard 3** ＝ `backtest/modular/sr_scoring/tests/test_[j-z]*.py`；每段記 passed、failed、errors、skipped、xfailed、xpassed、deselected（⛔ 不能只加總 passed）。**shard 的證明**（跑之前）：見下方「收集的比對」 |
+| 3：smoke（決定 #4） | ⚠️ **在「三」第 4 步的 staged-tree 隔離 clone 裡**執行（第二輪 review：`git diff --quiet` 抓不到未追蹤與 ignored 的檔案，而 smoke 以 `COPY . .` 建 image、以暫存 index `git add -A python` 組 tooling patch——clone 只有 staged 的內容）：`PY_IMAGE=<smoke 專屬 tag> scripts/smoke-replay-offline.sh`（⛔ 不經 `REPLAY_SMOKE=1 python/scripts/test.sh`——那會把整套重跑）。⚠️ smoke 會以 clone 的內容**重新 build** 這個 tag：記下它的 image ID，照實寫成「同一個 staged tree、另一個 tag 重新 build」（⛔ 不宣稱與步驟 1 是同一個 image）；tag 依「三」第 4 步的收尾刪除。跑之前確認磁碟空間 |
+| 4 | `scripts/make-i074-tooling-patch.sh --verify "$(git write-tree)"`（以 **staged tree** 驗；⛔ 不是 HEAD 或工作樹）——預期⛔ 沒有變化 |
+| 5：最後一次文件修改之後 | `python3 -B scripts/check-doc-refs.py` 必須是「問題 0」（步驟 1 已跑過一次；這一次是文件改完之後的最終守門）；`git diff --cached --check` 乾淨 |
+| 6：禁止標記的否定詞掃描 | 見下方「否定詞掃描」的完整程式；成功條件：結束碼 0 |
+
+**shard 的證明**（分段之前；存成檔案、⚠️ **以 bash 執行**——zsh 沒有 `shopt`；`set -euo pipefail`、暫存檔在 `mktemp -d` 且由 trap 清除、⛔ 不在 repo 留檔；入口失敗或抽不到 node id 都失敗）。2026-10-07 實際執行過：完整入口 2270 個 node id、三段 540／767／963，兩兩互斥、聯集成立；入口失敗（不存在的路徑）與 glob 沒有符合都以結束碼 1 失敗：
+
+```bash
+#!/usr/bin/env bash
+# shard 的證明（「五」步驟 2）：三段兩兩互斥、聯集 ＝ 完整入口。⚠️ 以 bash 執行。用法：bash shard_proof.sh <repo 或隔離 clone>
+set -euo pipefail
+cd "$1"
+W=$(mktemp -d); trap 'rm -rf -- "$W"' EXIT
+collect() {  # $1＝輸出檔；其餘＝pytest 的路徑。入口失敗或抽不到任何 node id → 失敗（⛔ 不放行）
+  local out="$1"; shift
+  if ! SKIP_SHELL_TESTS=1 python/scripts/test.sh --collect-only -q "$@" > "$W/raw" 2> "$W/err"; then
+    tail -20 "$W/err" >&2; echo "收集失敗：$*" >&2; return 1
+  fi
+  grep -E '^(backtest|tests)/[^[:space:]]*::' "$W/raw" | LC_ALL=C sort > "$out"
+}
+# glob 在 python/ 底下展開（＝ 容器的 /app）；沒有符合 → failglob 讓它失敗。路徑⛔ 不含空白，展開後不加引號傳入
+s1=$(cd python && shopt -s failglob && echo backtest/modular/tests tests backtest/modular/sr_scoring/tests/test_[a-h]*.py)
+s2=$(cd python && shopt -s failglob && echo backtest/modular/sr_scoring/tests/test_i*.py)
+s3=$(cd python && shopt -s failglob && echo backtest/modular/sr_scoring/tests/test_[j-z]*.py)
+collect "$W/full" backtest/ tests/
+collect "$W/s1" $s1
+collect "$W/s2" $s2
+collect "$W/s3" $s3
+wc -l < "$W/full" | xargs echo "完整入口："; for s in s1 s2 s3; do wc -l < "$W/$s" | xargs echo "$s："; done
+[ -z "$(LC_ALL=C comm -12 "$W/s1" "$W/s2")$(LC_ALL=C comm -12 "$W/s1" "$W/s3")$(LC_ALL=C comm -12 "$W/s2" "$W/s3")" ] \
+  || { echo "shard 之間有重疊" >&2; exit 1; }
+LC_ALL=C sort -m "$W/s1" "$W/s2" "$W/s3" | cmp -s - "$W/full" || { echo "shard 的聯集 ≠ 完整入口" >&2; exit 1; }
+echo "shard 證明：成立"
+```
+
+**否定詞掃描**（第三輪 review：由 Python 自己呼叫 `git diff --cached -U0` 並檢查結束碼——⛔ 不會在 git 失敗時讀到空輸入而放行；存成檔案，在 repo 根目錄以 `python3 <檔案>` 執行；結束碼 0 ＝ 沒有命中、1 ＝ 有命中、2 ＝ git 失敗）。2026-10-07 實際執行過三種情況：
+
+```python
+"""禁止標記（U+26D4）的否定詞掃描：只看 `git diff --cached -U0` 的新增行。結束碼：0 ＝ 沒有命中、1 ＝ 有命中、2 ＝ git 失敗。"""
+import re
+import subprocess
+import sys
+
+proc = subprocess.run(["git", "diff", "--cached", "-U0"], capture_output=True)
+if proc.returncode != 0:
+    sys.stderr.write(proc.stderr.decode("utf-8", "replace"))
+    sys.exit(2)
+text = proc.stdout.decode("utf-8")
+neg = re.compile(r"(?:\*\*)?(?:不|沒|無|非|別|未|勿|禁|排除分支)")
+hits = [line for line in text.splitlines() if line.startswith("+") and not line.startswith("+++")
+        for m in re.finditer(r"\u26d4\s*(\S{0,4})", line) if not neg.match(m.group(1))]
+for line in hits:
+    print(line)
+sys.exit(1 if hits else 0)
+```
+
+##### 六、殘留的驗收條件（第一輪 review 改寫）
+
+| 對象 | 條件 |
+|---|---|
+| git worktree | 全量執行前後各存一份完整的 `git worktree list --porcelain`（⛔ 不能只記數量）；**本輪新增的測試⛔ 不得增加** I-118 既有以外的登記；既知的增量照實記錄（步驟 1 的 `test-replay-args.sh` 跑一次 ＋4）；smoke 與反向驗證都在隔離 clone 裡，它們的 worktree 登記在 clone 自己的 `.git`，真正 repo 預期⛔ 沒有增量；⛔ 不清理、⛔ 不 prune 開跑之前既有的登記 |
+| `/run/lock` | 固定的鎖檔 `/run/lock/i074-stage2.lock` 依契約永久保留（⛔ 不 unlink）——若存在，前後的 owner、mode、inode 不變，且以 `/proc/locks` 確認⛔ 沒有人持有它（⛔ 不對它 `flock`）；sentinel `/run/lock/i074-stage2.active` 必須**不存在** |
+| 本輪零新增 | `/dev/shm/i074-*`；本 session 的測試程序（含「四」的 token 掃描）；**容器**：前後各存一份完整的 `docker ps -aq --no-trunc`（含已停止的），結束後逐一審核新增的 ID——smoke 有不具名、⛔ 沒有那個 label 的 `docker run --rm` 容器，所以⛔ 不能只看 `i074.stage2.run` 與 `i074sz-` 兩種命名（第二輪 review）；**image tag**：反向驗證與 smoke 的專屬 tag 結束後必須不存在（刪除前記下 image ID）——前後比對，⛔ 不得新增任何一個 |
+| smoke | ⛔ 不宣稱「腳本自己全部清理」；它在隔離 clone 裡跑，殘留以 clone 為範圍檢查後連同 clone 刪除 |
+
+##### 七、受影響檔案
+
+| 檔案 | 改動 |
+|---|---|
+| `scripts/tests/test_i074_stage2_host.py` | 「四」的 cleanup helper、token 與它的測試 |
+| 其他測試檔 | 依稽核結果補齊——清單在確認點 ② 列出、確認之後才動 |
+| `docs/issue.md` | 本計畫、「⑧ 稽核結果」、補齊與反向驗證、全量執行的結果 |
+| `docs/development-workflow.md` | I-074 Stage 2 一節加**測試類別與入口的索引**（哪一類 id 在哪個測試檔或 shell 段落、由哪個入口執行；⛔ 不放易漂移的完整方法名清單） |
+| ⛔ 不動 | 產品程式、tooling 路徑、測試的入口與框架（需要時停在確認點 ②） |
+
+##### 八、確認點
+
+① 本計畫；② 稽核結果與補法（「四」）；③ 補齊與全量執行完成後 stage、⛔ 不 commit，停下來 review。
+
+##### 九、風險
+
+| 風險 | 對策 |
+|---|---|
+| 稽核量大（約 140 個 id、展開後更多），判定失準 | 每一列寫斷言的依據；「三」第 4 步的抽樣反向驗證；review 可以逐列抽查 |
+| 「部分」的判準過寬或過嚴 | 以規格寫明的性質為準（⛔ 不自行加碼）；判定為部分時寫明少驗的那一點，由確認點 ② 一起裁決 |
+| 反向驗證污染正式工作樹 | 一律在綁定 staged tree 的隔離 clone 注回；正式工作樹與 index 前後三項比對 |
+| 隔離 clone 與正式 repo 的差異（例如 ignored 的本機檔案） | clone 只有 staged tree 的內容，正是要驗的；需要本機狀態的測試（若有）在稽核時照實標出 |
+| 補測試需要改產品或測試框架 | ⛔ 不在 ⑧ 改；停在確認點 ② 回報 |
+| 全量執行 OOM | 分段⛔ 不自動啟用：中止並回報證據，由你裁決；同意之後先跑 shard 的證明 |
+| smoke 佔磁碟 | 跑之前確認空間；在隔離 clone 裡跑，結束後連同 clone 與專屬 tag 刪除 |
+
+##### 十、決定（第一輪 review 的裁決）
+
+| # | 決定 |
+|---|---|
+| 1 | 稽核範圍是「二」的三個 namespace；**移交到 ⑦ 的案例照樣稽核實際的涵蓋**，⛔ 不標不適用 |
+| 2 | 以「性質是否被斷言」判定，並**展開成原子 subcase** |
+| 3 | 稽核結果與補法先停下確認（確認點 ②） |
+| 4 | 加跑 smoke：在 staged-tree 隔離 clone 裡直接執行 `scripts/smoke-replay-offline.sh`（專屬 tag、照實記錄重新 build 的 image ID） |
+| 5 | `development-workflow.md` 只放穩定的測試類別與入口的索引 |
+| 6 | 測試衛生納入 ⑧：獨立 helper、固定點重掃、失敗即紅 |
+
+##### 第一輪 review 的修正（2026-10-07）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **殘留的驗收條件與 I-118 的已知現況矛盾**：v1 要求全量執行前後⛔ 沒有 worktree 殘留、smoke「腳本自己清理」，但 I-118 已確認 `test-replay-args.sh` 每跑一次 ＋4、smoke 的一般路徑 ＋2，repo 目前已有 377 筆登記；鎖檔依契約永久保留、只有 sentinel 應該消失 | ✅ 成立（`git worktree list` 377 筆；I-118 的事實段；supervisor 只 unlink sentinel） | 「六」改寫：worktree 存完整 inventory、本輪新增的測試⛔ 不得增加既有以外的增量、既知增量照實記錄、⛔ 不清理或 prune 既有登記；鎖檔若存在只驗屬性與⛔ 沒有人持有（`/proc/locks`）、sentinel 必須不存在；`/dev/shm`、測試程序與容器才要求零新增；smoke ⛔ 不再宣稱自己全部清理 |
+| 高 | **反向驗證⛔ 不得直接在 staged 的工作樹注回缺陷**：單檔 SHA 相同證明不了 index、mode、symlink、未追蹤檔沒有漂移，中斷或 OOM 時也可能沒還原 | ✅ 成立 | 「三」第 4 步：一律在綁定 `git write-tree` 的隔離環境（`git archive` ＋ `git init`，驗 tree ＝ staged tree；⛔ 不用 `git worktree add`）注回；專屬的 `PY_IMAGE` tag；正式工作樹與 index 全程只讀，前後比對 index tree、`git status --porcelain=v2`、每個檔案的 mode 與 SHA |
+| 中 | **一個 id 一列的粒度不足**：n7b、n7、n11、③ 的 w／ah／bd 等一個 id 內含大量「各一支」，部分存在就可能誤標涵蓋；「移交到 ⑦」⛔ 不等於不適用 | ✅ 成立 | 「二」：稽核表以 namespace ＋ id ＋ subcase 為一列，同時統計頂層 id 與 subcase；移交到 ⑦ 的案例照樣稽核；「➖」只留給真正撤回的契約 |
+| 中 | **程序洩漏的 teardown 描述仍可能漏抓**：掃描期間仍可能 fork、子孫不一定帶暫存路徑、cleanup 失敗被吞掉仍會假綠、teardown 之後原測試難以斷言效果 | ✅ 成立（現行 cleanup 只殺 `self.pids`） | 「四」：唯一 token 帶在每一個長存程序的 argv、同 UID、PID ＋ starttime、排除自身與祖先、TERM → KILL → 重掃到固定點、逾時或讀不到身分即測試失敗、獨立於產品函式、冪等 helper 在測試內手動呼叫並斷言、teardown 再呼叫一次 |
+| 中 | **OOM 的退路與 smoke 的命令沒有封閉**：`REPLAY_SMOKE=1 python/scripts/test.sh` 會把整套重跑；分段沒寫死、可能掩蓋一般失敗、只加總 passed | ✅ 成立（讀 `python/scripts/test.sh`） | 「五」：smoke 直接執行 `scripts/smoke-replay-offline.sh`（同一個 image；之前斷言工作樹 ＝ index）；分段只在 rc＝137 ＋ OOM 證據時使用、三段寫死且以 `--collect-only` 證明互斥與聯集、`SKIP_SHELL_TESTS=1`、記錄 skipped／xfailed／xpassed／deselected |
+| 中 | **命令與受影響檔案沒有封閉**：tooling `--verify` 要以 staged tree；否定詞掃描沒寫工具、pattern、範圍與成功條件；`check-doc-refs` 的最後一次要說明用途；要動測試入口時的範圍 | ✅ 成立 | 「五」寫死每一個命令；「七」新增受影響檔案表；「一」「四」：要動 `python/scripts/test.sh` 或 shell 框架時停在確認點 ② |
+
+裁決：#1～#6 依 review 的意見修正後同意（見「十」）。
+
+##### 第二輪 review 的修正（2026-10-07）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **反向驗證的隔離 repo 無法保證既有 shell 測試可執行**：`git archive` ＋ `git init` 沒有歷史，而 `scripts/test-replay-args.sh` 的 ⑦a 段會在 `e1cbbbd` 建 worktree；兩支 shell 腳本也沒有依 id 執行單一段落的公開入口 | ✅ 成立（讀碼） | 「三」第 4 步：`git clone --no-hardlinks`（保留歷史）→ 刪掉已追蹤檔 → `git archive "$T"` 覆蓋 → `git add -A` → 暫存 commit → 斷言 `HEAD^{tree}` ＝ `T`；pytest 寫精確 node id；shell 在 clone 裡跑完整的官方腳本，要新增 selector 時停在確認點 ② |
+| 高 | **smoke 的前置條件證明不了「工作樹 ＝ index」**：`git diff --quiet` 抓不到未追蹤與 ignored 的檔案，smoke 卻以 `COPY . .` 建 image、以暫存 index `git add -A python` 組 tooling patch；smoke 自己會重新 build tag，「同一個 image」的說法不精確 | ✅ 成立（`python/Dockerfile` 的 `COPY . .`、`.dockerignore` 只排除少數樣式；smoke 第 66 行 `docker build`） | 「五」步驟 3：smoke 改在 staged-tree 隔離 clone 裡跑（只有 staged 的內容）、專屬 tag，照實寫成「同一個 staged tree、另一個 tag 重新 build」並記下 image ID |
+| 中 | **OOM 退路的證據條件可能同時誤判**：寫死 `(pytest)`，但既有紀錄是 `(python)`；沒限定本次新增，舊訊息可能被誤認；`dmesg -T` 的時間不可信、ring buffer 可能沖掉 | ✅ 成立（本筆既有的紀錄是 `(python)`） | 「五」步驟 2：開跑前記 kernel log 游標（單調時間戳）、只看之後新增的行、程序名稱是 Python 的程序（⛔ 不寫死某一個）、`anon-rss` 對上 `mem=` 上限；游標被沖掉或證據不足 → 中止回報、⛔ 不分段 |
+| 中 | **殘留的驗收漏掉 smoke 的容器與專屬 image tag**：smoke 有不具名、沒有 label 的 `docker run --rm` 容器；專屬 `PY_IMAGE` tag 沒有規定刪除 | ✅ 成立（smoke 第 72 行起） | 「六」：容器改成前後完整的 `docker ps -aq --no-trunc` 並審核每個新增 ID；專屬 tag 在成功、失敗、中斷都以 trap 刪除、記下 image ID、結束後驗證不存在 |
+| 中 | **cleanup helper 把 `/proc` 的正常消失競爭當成失敗** | ✅ 成立 | 「四」：讀取失敗且 `/proc/<pid>` 已不存在 → 視為已消失；只有 PID 仍存在而身分讀不到、解析失敗、確認不了 starttime 才失敗；送訊號之前重新比對 PID ＋ starttime |
+| 中 | **命令仍未完全封閉**：否定詞掃描只寫「與前幾包相同的那段 Python」，pattern 用了全形 `｜`、`(**)?` 也⛔ 不是可執行的 regex；collect-only 沒寫如何透過同一個 image 執行與比對 | ✅ 成立 | 「五」：寫出可直接複製的完整命令——否定詞掃描（禁止標記 ＝ U+26D4、UTF-8、真正的 regex、結束碼 0／1）與收集的比對（官方入口 `SKIP_SHELL_TESTS=1 python/scripts/test.sh --collect-only -q`、抽 node id、`LC_ALL=C sort`、兩兩 `comm -12` 為空、`sort -m` 的聯集 `cmp` 完整入口） |
+
+##### 第三輪 review 的修正（2026-10-07）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 中 | **兩段「封閉命令」仍可能 fail-open**：`collect()` 是 pipeline 卻沒有 `pipefail`、又丟掉 stderr，入口失敗時可能只回傳最後一個 `sort` 的成功；否定詞掃描在 `git diff` 失敗時讀到空輸入也回 0；收集命令用了 bash 專屬的 `shopt` 卻沒有明定以 bash 執行（zsh 實測 `command not found: shopt`）；輸出檔留在 repo 根目錄 | ✅ 成立 | 兩段都改成完整的程式並實際執行過：shard 的證明是 bash 腳本（`set -euo pipefail`、`mktemp -d` ＋ trap、入口失敗時印出 stderr 並失敗、抽不到 node id 也失敗；正常、入口失敗、glob 沒有符合三種情況都驗過）；否定詞掃描由 Python 自己呼叫 `git diff` 並檢查結束碼（0／1／2 三種情況都驗過） |
+| 中 | **OOM 證據仍無法決定性地綁定失敗的 pytest container**：`anon-rss` 是被殺程序的、⛔ 不是 container 的總用量；live 上另一個 Python 程序同時 OOM 也可能碰巧符合——「對上那一個容器」仍是推論 | ✅ 成立（入口以不具名的 `docker run --rm` 執行；這台 kernel 的 OOM 訊息⛔ 不帶 memcg） | 「五」步驟 2：分段⛔ 不自動啟用——pytest 以 137 結束時中止並回報證據，由你裁決；擴充入口取得 container 身分屬入口的改動，要做就在確認點 ② 另行提出 |
+| 低 | **隔離 clone 的暫存 commit 依賴 host 的全域 git 設定**：沒有指定 `user.email`，global／template 的 hook 也可能介入；刪除已追蹤檔沒有處理空輸入與 `-` 開頭的路徑 | ✅ 成立 | 「三」第 4 步改成完整的 bash 腳本：`clone --template=` ＋ `core.hooksPath=/dev/null`、以環境變數固定 author／committer、`commit-tree` ＋ `update-ref` 建暫存 commit、`xargs -0 -r rm -f --`；實際執行過 |
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
 ⚠️ **v29 是執行順序的 ⑥「更新計畫並再次確認」**：併入 ⑤ 的裁定（`P_B` 與 `M_safety`），並把計畫書與 ③b～⑤ 之後的
@@ -5399,10 +5628,11 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（2026-09-29，✅ 2026-09-30 確認）**：⑦ 分四包依序實作——⑦a replay 側 → ⑦b supervisor＋orchestrator＋freeze record
    → ⑦c `--promote`＋B／C 判讀器 → ⑦d memory harness，每包「細部計畫 → 實作 → review → commit」；
    ⚠️ `evaluation.py` 與 `replay_bundle/` 的改動**經 tooling patch 進入 replay**（⑩ 的 replay 執行的是 `e1cbbbd` worktree）；
-   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；✅ ⑦d 增補實作 review 通過並 commit（2026-10-06，`576a8f7`；見「Stage 2 步驟 ⑦d 增補的實作結果」）；✅ 量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 已確認（2026-10-06，`0a92d95`）；⚠️ 現在在這裡：它的實作待 review（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果」）（見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；之後 ⑧ → ⑨ → ⑨-1）
+   各包範圍、跨包介面與測試落點見「Stage 2 步驟 ⑦ 總綱 v1」   ← ✅ ⑦ 總綱 v1 已確認（2026-09-30）；✅ ⑦a 細部計畫 v1 已確認（2026-09-30）；✅ ⑦a 實作 review 通過並 commit（2026-09-30）；✅ ⑦b 細部計畫 v1 已確認（2026-09-30）；✅ ⑦b 實作 review 通過並 commit（2026-10-01）；✅ ⑦c 細部計畫 v1 已確認（2026-10-01）；✅ ⑦c 實作 review 通過並 commit（2026-10-02）；✅ ⑦d 細部計畫 v1 已確認（2026-10-02，commit `9af7942`）；⑦d 實作已 commit（`f20ce3c`，含第一輪 review 的三項修正；見「Stage 2 步驟 ⑦d 實作結果」）；✅ ⑦d 增補計畫 v11 已確認（2026-10-05，commit `d1267bb`）；✅ ⑦d 增補實作 review 通過並 commit（2026-10-06，`576a8f7`；見「Stage 2 步驟 ⑦d 增補的實作結果」）；✅ 量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 已確認（2026-10-06，`0a92d95`）；✅ 它的實作 review 通過並 commit（2026-10-07，`c49fde1`；見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 的實作結果」）
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次
+   ← ⚠️ 現在在這裡：⑧ 計畫 v4 待確認（見「Stage 2 步驟 ⑧ 計畫」）
 ⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA
    （＋ **`e1cbbbd`** 既有測試套用 patch 前後全綠）
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑨ 改成**兩份 patch 一起封存**（counterfactual ＋ tooling）；「既有測試全綠」改成

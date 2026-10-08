@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from ..replay_bundle import stage2_archive as sa
+from ..replay_bundle.artifacts import ArtifactError
 from ..replay_bundle.canonical import canonical_json_bytes
 from . import test_replay_envcheck as tec
 from . import test_replay_stage2_archive as t2
@@ -333,7 +334,8 @@ def test_anchors_uses_the_current_identity(anchor_env, monkeypatch):
 def test_ai_identity_differing_only_in_created_at_is_rejected(anchor_env):
     env, identity = anchor_env
     identity.write_bytes(canonical_json_bytes(tec._identity(created_at="2026-09-25T09:00:00+08:00")))
-    with pytest.raises(Exception):
+    # ⚠️ ⑧ 補齊：具體的例外與訊息——`pytest.raises(Exception)` 連不相干的程式錯誤也會變綠
+    with pytest.raises(ArtifactError, match="不完全相同"):
         pf.run_anchors(str(env.root), str(identity), tec.NEW_IMG)
 
 
@@ -353,5 +355,29 @@ def test_ay_tampered_cohort_is_rejected(anchor_env):
     tampered = raw.replace(b"2026-08-21", b"2026-08-22")
     assert tampered != raw
     cohort.write_bytes(gzip.compress(tampered, mtime=0))
-    with pytest.raises(Exception):
+    # ⚠️ ⑧ 補齊：縮窄斷言之後才看出——這種竄改是被「⛔ 不是 canonical gzip」擋下，⛔ 不是第 8／9 道（下一支才是）。
+    with pytest.raises(ArtifactError, match="canonical gzip"):
+        pf.run_anchors(str(env.root), str(identity), tec.NEW_IMG)
+
+
+def test_ay_cohort_rules_are_enforced_before_replay(anchor_env):
+    """ay（⑧ 補齊）：cohort 的 keys ≠ 錨定 after 的候選、而且 Stage 1 manifest 已同步（成員 SHA 那一層擋不下）→
+    `anchors` 在 replay 之前以 Stage 1 信任錨拒絕。⚠️ 照實：這一層是 `envcheck/` 記下的 Stage 1 錨點（`stage1_evidence`）
+    先擋下，第 8／9 道本身在 helper 層由 `test_replay_stage2_archive.py::test_ad_ay_*` 驗。"""
+    env, identity = anchor_env
+    cohort = t2._stage1_member(env, t2.s2.STAGE1_ANCHOR_COHORT)
+    cohort["keys"] = cohort["keys"][:1]
+    t2._resync_stage1(env, t2.s2.STAGE1_ANCHOR_COHORT, cohort)
+    with pytest.raises(ArtifactError, match="Stage 1 信任錨"):
+        pf.run_anchors(str(env.root), str(identity), tec.NEW_IMG)
+
+
+def test_bd2_not_equivalent_envcheck_blocks_the_anchors_step(tmp_path, monkeypatch):
+    """bd2（⑧ 補齊）：合法的 NOT_EQUIVALENT `envcheck/` → preflight 的 `anchors` 也被 E3b 擋下（⛔ 不只測 finalize）。"""
+    rows = t2._d1_rows()
+    rows[0]["event_signal"] = "DIFFERENT"
+    env = t2._build_env(tmp_path, monkeypatch, witness_rows=rows)
+    identity = tmp_path / "run_identity.json"
+    identity.write_bytes(canonical_json_bytes(tec._identity()))
+    with pytest.raises(ArtifactError, match="E3b"):
         pf.run_anchors(str(env.root), str(identity), tec.NEW_IMG)

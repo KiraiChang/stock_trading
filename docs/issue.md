@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4（第三輪 review 修正後）⚠️ 待確認**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行（第二輪 review 修正後）⚠️ 待 review**（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -3845,7 +3845,7 @@ failure 09:02:28 之後（平的）；重跑在 09:07 之後，乾淨。盤中�
 （量測的有效性條件、⑨-1 的 fail-fast、`precheck.json`、offline 的讀取端與信任模型、raw manifest、權威常數取自快照），操作程序寫進
 [`development-workflow.md`](./development-workflow.md)（acceptance 一節的 ⑨-1 指令、有效性條件、fail-fast、precheck 的判讀、raw manifest、作業規則、故障注入；sizing 一節的有效性條件）。
 
-#### Stage 2 步驟 ⑧ 計畫 v4（2026-10-07，⚠️ **待確認**）
+#### Stage 2 步驟 ⑧ 計畫 v4（2026-10-07，✅ **已確認**（review 三輪後 commit `5e2d84f`））
 
 ⚠️ **緣起**：v29「八」的 ⑧ 原本是「測試矩陣」；⑦ 總綱 v1 改成**矩陣完整性稽核 ＋ 全量執行**——⑦ 各包已各自附上它負責的測試，
 ⑧ 逐 id 對照 a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次。本計畫補**稽核的範圍、方法、判準、
@@ -4074,6 +4074,565 @@ sys.exit(1 if hits else 0)
 | 中 | **兩段「封閉命令」仍可能 fail-open**：`collect()` 是 pipeline 卻沒有 `pipefail`、又丟掉 stderr，入口失敗時可能只回傳最後一個 `sort` 的成功；否定詞掃描在 `git diff` 失敗時讀到空輸入也回 0；收集命令用了 bash 專屬的 `shopt` 卻沒有明定以 bash 執行（zsh 實測 `command not found: shopt`）；輸出檔留在 repo 根目錄 | ✅ 成立 | 兩段都改成完整的程式並實際執行過：shard 的證明是 bash 腳本（`set -euo pipefail`、`mktemp -d` ＋ trap、入口失敗時印出 stderr 並失敗、抽不到 node id 也失敗；正常、入口失敗、glob 沒有符合三種情況都驗過）；否定詞掃描由 Python 自己呼叫 `git diff` 並檢查結束碼（0／1／2 三種情況都驗過） |
 | 中 | **OOM 證據仍無法決定性地綁定失敗的 pytest container**：`anon-rss` 是被殺程序的、⛔ 不是 container 的總用量；live 上另一個 Python 程序同時 OOM 也可能碰巧符合——「對上那一個容器」仍是推論 | ✅ 成立（入口以不具名的 `docker run --rm` 執行；這台 kernel 的 OOM 訊息⛔ 不帶 memcg） | 「五」步驟 2：分段⛔ 不自動啟用——pytest 以 137 結束時中止並回報證據，由你裁決；擴充入口取得 container 身分屬入口的改動，要做就在確認點 ② 另行提出 |
 | 低 | **隔離 clone 的暫存 commit 依賴 host 的全域 git 設定**：沒有指定 `user.email`，global／template 的 hook 也可能介入；刪除已追蹤檔沒有處理空輸入與 `-` 開頭的路徑 | ✅ 成立 | 「三」第 4 步改成完整的 bash 腳本：`clone --template=` ＋ `core.hooksPath=/dev/null`、以環境變數固定 author／committer、`commit-tree` ＋ `update-ref` 建暫存 commit、`xargs -0 -r rm -f --`；實際執行過 |
+#### Stage 2 步驟 ⑧ 稽核結果（2026-10-07，✅ **確認點 ② 通過**（2026-10-07））
+
+⚠️ 依「Stage 2 步驟 ⑧ 計畫 v4」（✅ `5e2d84f`）的「三」做完稽核、確認測試真的會跑、抽樣反向驗證；**⛔ 未補任何測試**——補法（「四」）
+與讀碼疑點（「五」）等確認點 ② 裁決。本輪⛔ 沒有改任何程式或測試；正式工作樹與 index 前後的守門見「三」。
+
+##### 一、彙總
+
+| namespace | 頂層 id | ✅ | ⚠️ 部分 | ❌ 缺漏 | ➖ | subcase | ✅ | ⚠️ 部分 | ❌ 缺漏 |
+|---|---|---|---|---|---|---|---|---|---|
+| v29「六、9」 | 13 | 12 | 1 | 0 | 0 | 20 | 19 | 1 | 0 |
+| v29「六、2」 | 49 | 35 | 12 | 2 | 0 | 126 | 103 | 21 | 2 |
+| ③「十」 | 76 | 69 | 6 | 1 | 0 | 111 | 101 | 9 | 1 |
+| **合計** | **138** | **116** | **19** | **3** | **0** | **257** | **223** | **31** | **3** |
+
+⚠️ n8-1、n8-4 兩列是補齊時才發現、事後改判（原判 ✅；頂層 id 數不變）。頂層 id 的判定取它的 subcase 中最差的一個（❌ > ⚠️ > ✅）；彙總由稽核表機械計數（scratchpad 的 `tally.py`），⛔ 不是手算。⚠️ 沒有任何一列判「➖ 不適用」：
+v4～v15 的舊矩陣 a～p 已由 v18 取代、不在「二」的範圍；移交到 ⑦ 的案例（③ 的 ax、ba，n／ai／ay 的「在 replay 之前」那一層）照樣稽核、
+已列在表中。
+
+**非 ✅ 的頂層 id**：v29「六、9」m；v29「六、2」f、j、**l（❌）**、m、n7b、n8、n9、n10、n11、x、y、z、ad、**ag（❌）**；③ i、**w（❌）**、ai、aq、ay、bd2、bk。
+
+##### 二、測試會不會真的跑（「三」第 3 步）
+
+| 項目 | 結果 |
+|---|---|
+| pytest 的「1 skipped」 | ⚠️ 2026-10-07 以 `SKIP_SHELL_TESTS=1 python/scripts/test.sh -q -rs` 對所有帶條件 skip 的檔案實跑（375 passed、1 skipped）：唯一的 skip 是 `test_excursion_cost.py`（成本量測，模組層 `skipif`，`SR_EXCURSION_BENCH=1` 才跑；⛔ 不在「二」的範圍）。其餘五處條件 skip（`test_counterfactual_smoke_fixture.py` 的正式 bundle、`test_i074_diagnostics.py` 的 zone、`test_replay_envcheck.py` 的真 Stage 1 evidence、`test_evidence.py` 的 `shap`、`test_replay_stage2_archive.py::test_bj_*` 的正式 bundle）都有執行 |
+| shell 的 `IMAGE_REQUIRED=1` | `scripts/test-replay-args.sh` 需要外部前提（image、正式 bundle、Stage 2 identity、Stage 1 的環境指紋）的 10 處分支在 `IMAGE_REQUIRED=1` 下一律 `fail`；`scripts/test-i074-stage2.sh` 沒有 skip 分支。⚠️ 唯一的例外是 `test-replay-args.sh` 第 579 行的「host 端 run identity validator」段（只需要正式 bundle）：找不到時印 `skip`、⛔ 沒有 fail——正式 bundle 是已追蹤檔，在任何 checkout 都存在，所以實際上走不到；它屬 Stage 1、⛔ 不在「二」的範圍，**只記錄**（要對齊另見「六」#3） |
+| 隔離 clone 與正式工作樹的差異 | 隔離 clone 以 staged tree 建 image 得到 `sha256:7af6dad0…`，正式工作樹建的共用 tag 是 `98a087aa…`：差在正式工作樹 `python/` 底下 71 個 ignored 檔（`.pytest_cache/`、`__pycache__/`）——`python/.dockerignore` 沒有排除 `.pytest_cache`，`COPY . .` 把它們帶進 image。pytest 以掛載的 `python/` 執行，⛔ 不影響測試結果；「五」的 smoke 本來就規定在 clone 裡跑 |
+
+##### 三、抽樣反向驗證（「三」第 4 步：v29「六、2」的 o、v、w、y、z、ab）
+
+**環境**：scratchpad 的 `8/revv8.sh`（bash）以 `7d/mk_clone.sh` 建隔離 clone，綁定 staged tree `abcd810b…`（＝ `5e2d84f` 的 tree），暫存 commit
+`4d359e96…`；專屬 tag `stock-trading-i074-step8:revv`。每一項注回只改 clone 裡的一個檔（`8/inj.py` 的字串替換，恰好命中一次）；跑完以
+`git checkout` 還原、比對原始 SHA、確認 clone 乾淨，才注回下一項。shell 一律跑**完整**的 `IMAGE_REQUIRED=1 scripts/test-replay-args.sh`；
+pytest 以 `SKIP_SHELL_TESTS=1 python/scripts/test.sh -q -rf <node id …>`。2026-10-07 06:41～06:55Z 執行。
+
+| id | 注回的缺陷（clone 內） | 結果 | 紅的測試 |
+|---|---|---|---|
+| 對照組 | ⛔ 不注回 | shell：rc 0、0 FAIL；pytest：147 passed、0 failed | —— |
+| o | `evaluation.py`：一般 Stage 2 的「兩側候選集合必須相同」改成永不成立（⛔ 不產 `candidate_mismatch.json`、⛔ 不回 4） | 4 failed、93 passed | CF `test_without_the_flag_…`；`test_replay_bundle_stages.py` 的 `test_before_has_extra_candidate_publishes_mismatch`、`test_before_missing_candidate_also_publishes_mismatch`、`test_mismatch_validator_failure_leaves_no_artifact` |
+| v | `run-replay-offline.sh`：flag 開著但 `COUNTERFACTUAL_PATCH` 空 → 靜默退回一般路徑 | rc 1、1 FAIL | RA:1822～1823「v：flag 開啟但沒有 patch 竟通過」 |
+| w | `run-replay-offline.sh`：拿掉「沒有 flag 卻給了 `COUNTERFACTUAL_PATCH`」那一支（patch 被默默忽略） | rc 1、1 FAIL | RA:1824～1825「w：沒帶 flag 卻帶語意 patch 竟通過」 |
+| y | `evaluation.py`：成對守門拿掉「SHA 無 flag」 | 2 failed、43 passed | CF `test_pairing_guard_runs_before_loading_anything[sha-without-flag]`、`test_main_rejects_bad_combinations[sha-without-flag]`（`run_bundle_stage()` 與 `main()` 兩條路徑各一） |
+| z | `finalize-stage2-evidence.sh`：`--check-failed-record` 永不命中（同語意 SHA 的重跑被放行） | rc 1、4 FAIL | RA「am／n」「o2／am」「ab：recover 之後…」「as／av」——ak、al、o、au、at、ap 等不靠命中的各支照常綠 |
+| ab | `stage2_archive.py`：生效檢查只看「flag 為 true 卻不該是」那一半（flag 恆 false 的 CONTINUATION 列假綠） | 3 failed、48 passed | CF `test_flag_always_false_but_continuation_without_rr_is_inconsistent`；A `test_counterfactual_effect_is_enforced[bb_flag_false_but_continuation]`、`test_effect_check_order_and_sample_cap` |
+
+六項都只紅在預期的那幾支、還原之後的 SHA 與原始相同。⚠️ v 的注回刻意寫成「退回一般路徑」：若只拿掉 truth table 的那一行，後面的凍結步驟
+（`freeze_patch` 對空路徑報 `COUNTERFACTUAL_PATCH 必須是一般檔案`）同樣會在 docker 之前中止，而 v 的斷言只要求 stderr 含
+`COUNTERFACTUAL_PATCH`——那樣注回是縱深防禦擋下、⛔ 無法證明測試的敏感度（讀碼推論，⛔ 沒有實跑那個版本）。
+
+**正式工作樹與殘留**（driver 前後各記一次）：`git write-tree`、`status --porcelain=v2 --untracked-files=all --ignored` 與 9,517 個項目的 mode／SHA-256
+（含 ignored、symlink 記目標）**完全相同**；`docker ps -aq --no-trunc`、真正 repo 的 `git worktree list --porcelain`（377 筆）相同；專屬 tag 由 trap 刪除、
+之後確認不存在。⚠️ 本次執行留下的殘留與處理：(1) 2 個未掛 tag 的 image（`7af6dad0…` 是 clone 的對照組 build；`5ab3d2e3…` 是 pytest 對照組的
+build：`COPY . .` 那一層與開頭不同，可見 shell 段落之後 clone 的 `python/` 多了 ignored 檔（`git status` 照樣乾淨）——tag 移走之後兩者都變成 dangling）——確認沒有容器使用、沒有 tag 之後以 ID 刪除，image 清單
+回到與開始前相同；(2) 8 個 `/tmp/tmp.*`（I-118 的既有洩漏，每跑一次 `test-replay-args.sh` 留 1 個 worktree 目錄 ＋ 1 個只有 `tooling.patch`
+的目錄）——逐一確認建立時間在本次執行窗口內、worktree 的 `.git` 指向本次 clone 或內容恰好是 `tooling.patch` 之後刪除（⛔ 沒有碰開跑之前就在的
+131 個）；(3) clone 目錄已刪。`/dev/shm/i074-*`、`/run/lock` 的 `i074-stage2.*` 都不存在。
+
+##### 四、⚠️ 部分與 ❌ 缺漏的補法（確認點 ②：預計新增或修改的測試）
+
+⚠️ 全部只動測試檔與測試 fixture；⛔ 不改產品程式、tooling 路徑、`python/scripts/test.sh` 與兩支 shell 腳本的框架部分。每一支補上之後都在隔離 clone
+注回對應的缺陷、確認它會紅（「三」第 4 步的做法）。
+
+| # | 對應的 subcase | 缺什麼 | 補法（檔案 → 測試） |
+|---|---|---|---|
+| F1 | v29 l（❌） | durable 之後輔助清理失敗仍回 0 | `scripts/test-replay-args.sh` 的 ③d 段：fake docker 回 0 的 `--finalize`，PATH 前置一支只讓 `worktree remove` 失敗的 git 包裝 → 結束碼 0；之後在隔離 repo `git worktree prune`，讓段尾「worktree 歸零」的既有斷言照常成立 |
+| F2 | ③ w-3（❌） | Stage 1 manifest 本身不合法 | `test_replay_stage2_archive.py`：改壞 Stage 1 `evidence_manifest.json` 的 schema（多一欄、`kind` 錯）並同步 Stage 2 manifest 的 `manifest_sha256` → `load_stage1_anchor()` 與 recovery 都拒絕 |
+| F3 | v29 ag-1、ag-2（⚠️／❌） | 專用 tag 與各 build 腳本預設 tag 的比對 | `scripts/test-replay-args.sh`：靜態列出 repo 內所有 `PY_IMAGE:-…` 與 `build -t …` 的預設 tag，斷言都 ≠ `stock-trading-python-replay:i074-stage2`（ag-2 由此承接：`test.sh` 只 build 自己的 tag） |
+| F4 | v29 f | 反事實路徑的 comparison ⛔ 不被 report 的上限截斷 | `test_replay_counterfactual.py`：4 筆候選 ＋ bundle 的 `report_max_rows` ＝ 2 → comparison 4 列、report 2 列 |
+| F5 | v29 j-3、③ i-3 | staging 寫入失敗 | `test_replay_stage2_archive.py`：staging 的寫入注入 `OSError(ENOSPC)` → 無 archive、無 staging，`main()` 的對應結束碼 1 |
+| F6 | v29 m-3 | recovery ⛔ 不重建 | `test_replay_stage2_archive.py`：recovery 前後 archive 的路徑、bytes、inode、mtime 完全相同 |
+| F7 | v29 y-3 | 直接 CLI 的兩條 | `test_replay_counterfactual.py`：`main()` 帶 Stage 1 ＋ SHA、大寫 SHA、63 位 SHA → 1 |
+| F8 | v29 z-2 | `candidate_flag_inconsistent` 的 record | `test_replay_stage2_archive.py`：`test_m_*` 依兩種原因參數化（發布、可辨識、診斷欄位） |
+| F9 | v29 x | `I074_MODE` 的原因與「⛔ 不自動 pin」 | `scripts/test-replay-args.sh`：`s7_x` 改看 stderr 的 `⛔ 不自動 pin` 訊息（只有 `I074_MODE` 那一支會印，印完立即結束、走不到 `pin-replay-image.sh`） |
+| F10 | v29 ad-2 | 137 | `scripts/test-i074-stage2.sh`：`for rc in 1 2 4` → `1 2 4 137` |
+| F11 | v29 n8-2 | publish 之前的複本不符 | `scripts/test-i074-stage2.sh`：`post_case` 加一支 replay 回 6 的版本 |
+| F12 | v29 n9 | 三種情境各自歸因、錨點、對照組 | `scripts/test-i074-stage2.sh`：(i)(ii)(iii) 拆成三個情境；合成 repo 加入 `python/baselines/i074_stage1/` 與 `envcheck/` 的佔位錨點（(ii)(iii) 改它們）；每一支斷言晉升的 `evidence/` 與成功路徑（對照組）的**逐位元相同**、runner spy 的兩個 patch SHA 與對照組相同；判讀器照樣判讀 |
+| F13 | v29 n11-8 | 來源側讀取錯誤 → 9 | `test_i074_stage2_promote.py`：複製時只讓**來源** fd 的 `os.read` 注入 `EIO` → 9、無 staging、目的地不存在 |
+| F14 | v29 n11-9 | failed record 的那一支 | `test_i074_stage2_promote.py`：`failed_world` 的驗證模式失敗 → 9、目的地不存在、staging 已清 |
+| F15 | v29 n11-13 | 兩個 `--promote` 同時執行 | `scripts/test-i074-stage2.sh`：第一個 `--promote` 以 fake 驗證模式的 `verify_hook` 停在 barrier → 第二個（以 symlink 別名寫真正 repo 的路徑）→ 8；放開之後第一個 0、它的 staging ⛔ 沒有被第二個清掉 |
+| F16 | v29 n11-15 | 6a 的信任根綁定 | `test_i074_stage2_promote.py`：已晉升 ＋ 驗證輸出的 `base_commit` 不符 → 9、目的地不變、⛔ 不 fsync 目的地 |
+| F17 | v29 n11-18 | 真正 repo 的 `.git` inventory | `test_i074_stage2_promote.py`：晉升前後 `world.real/.git` 的完整 inventory 相同 |
+| F18 | v29 n11-19 | 殘留登記之下重跑 | `scripts/test-i074-stage2.sh`：複本裡留一筆實體目錄已刪的 worktree 登記 → `--promote` 照樣 0 |
+| F19 | v29 n7b-7 | sentinel 的屬性 | `scripts/tests/test_i074_stage2_host.py`：sentinel 預先是 dangling symlink、指向檔案的 symlink、目錄、FIFO → `check_no_sentinel()` 以 `sentinel` 拒絕、該項目⛔ 沒有被動 |
+| F20 | v29 n7b-15 | sentinel 讀不懂的三種 | 同上：空檔、截斷的 canonical JSON、schema 不符的合法 JSON → 同樣拒絕、內容不變 |
+| F21 | 六、9 m-4 | 真正的驗證入口缺錨點 | `test_replay_stage2_archive.py`：`test_m_promotion_verification_rejects` 加 `anchor_missing`（刪掉 Stage 1 after）→ `一起保存` |
+| F22 | ③ w-4、w-5 | members 多一個；三份任一的兩個 SHA | `test_replay_envcheck.py`：`members` 多一個 key → 拒絕；`test_replay_stage2_archive.py`：`test_w_*` 依 after／cohort／identity × `artifact_sha256`／`stored_sha256` 參數化 |
+| F23 | ③ aq | Stage 1 identity 成員被竄改 | `test_replay_stage2_archive.py`：改 identity 成員的 bytes（⛔ 不同步 manifest）→ `check_failed_records()` 拒絕 |
+| F24 | ③ ai-2、ay-2 | `pytest.raises(Exception)` | `test_i074_stage2_preflight.py`：兩支改成具體的例外型別 ＋ 訊息（`不完全相同`／cohort 的訊息） |
+| F25 | ③ bd2-3、bd2-4 | recover-durability 與 preflight 的 E3b | `test_replay_stage2_archive.py`：先在 EQUIVALENT 下發布、再換成 NOT_EQUIVALENT 的 `envcheck/` → recovery 被 E3b 擋；`test_i074_stage2_preflight.py`：NOT_EQUIVALENT 的 python root → `run_anchors()` 被 E3b 擋 |
+| F26 | ③ bk-4 | envcheck 的 row mismatch 計數與 sample | `test_replay_envcheck.py`：25 列 bytes 不同 → `row_mismatch_count` ＝ 25、`mismatch_sample_keys` 20 列 |
+| H1 | 「四」測試衛生 | `RssAddendumHost` 的存活子孫只靠產品清理 | `scripts/tests/test_i074_stage2_host.py`：「四」的 token ＋ 獨立 helper（同 UID、排除自身與祖先、PID ＋ starttime、TERM → KILL → 重掃到固定點、`/proc` 的正常消失競爭、逾時與讀不到身分即失敗）；起長存程序的每一支在 argv 帶 token、斷言之後手動呼叫並斷言⛔ 沒有存活、`addCleanup` 再呼叫一次；另一支以 driver 把產品的清理換成 no-op → helper 仍收得掉 |
+
+##### 五、讀碼疑點（⛔ 未重現；⛔ 不在 ⑧ 改產品——需要裁決）
+
+| # | 疑點 | 依據 | 影響與可能的處置 |
+|---|---|---|---|
+| 1 | ⚠️ **`--formal` 在 freeze record 寫好之後才失敗，`<work>/raw-failed/` 會留下一對合法的 freeze record ＋ 報告**（v29 n10「任何失敗路徑 → ⛔ 不寫」） | `scripts/i074-stage2-sizing.sh`：步驟 6 先 `build --out "$S/freeze_record.json"`（第 437～441 行），之後才 `ensure_no_run_containers`、`measure_check_adopted` 與副本的 `check-pair`（第 446～455 行）；這三者失敗都走 `on_failure`，而 `on_failure` 以 `cp -a "$S" "$WORK/raw-failed"` 複製整個 S（`scripts/lib/i074-stage2-measure.sh` 第 275 行）——S 裡已有 `freeze_record.json` 與 `sizing_report.json`（`status = ok`）。orchestrator 只要求 freeze record 與同目錄的 `sizing_report.json` 成對且交叉一致（`scripts/run-i074-stage2.sh` 第 274～278 行），⛔ 不看同層有沒有 `failure_summary.json` | `<work>/freeze_record.json` 確實⛔ 不會出現，但 `--freeze-record <work>/raw-failed/freeze_record.json` 會被 ⑩ 接受——一趟**失敗**的量測（例如殘留容器、收養到程序）的 `P_B` 可以進 ⑩。⚠️ 只是讀碼推論：`--formal` ⛔ 不接受故障注入，要重現得在 build 之後真的留下容器或程序，⛔ 沒有便宜的重現路徑。處置選項：(a) 列為已知限制、寫進操作程序（⛔ 不得以 `raw-failed/` 的 freeze record 進 ⑩）；(b) 另立計畫改產品（例如 `on_failure` 複製之前把 S 的 freeze record 改名作廢，或把 build 移到所有收尾檢查之後；orchestrator 拒絕同層有 `failure_summary.json` 的 freeze record）。建議 (b)，⛔ 不在 ⑧ 做 |
+
+##### 六、確認點 ② 待確認的決定
+
+| # | 決定 | 建議 |
+|---|---|---|
+| 1 | 「四」的補法（F1～F26、H1）全部做，或只做其中一部分 | 全部做：每一支都只動測試檔或測試 fixture，各自有對應的注回驗證 |
+| 2 | 「五」#1 的處置 | (b)：另立計畫改產品；⑧ 之內只記錄（或依你的裁決改成 (a)） |
+| 3 | `test-replay-args.sh` 第 579 行的 skip 分支（⛔ 不在「二」的範圍） | 不動（實際走不到）；要對齊 `IMAGE_REQUIRED=1` 的話是測試檔一行的改動，可以併入補齊 |
+| 4 | F12（n9）要在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 的佔位錨點——屬測試 fixture 的擴充 | 做；⛔ 不動 shell 的框架部分，只改 setup 的內容與 n9 那一段 |
+
+##### 七、稽核表（全表）
+
+###### 稽核表 1：v29「六、9」（B／C 判讀器）
+
+落點縮寫：**V** ＝ `python/backtest/modular/sr_scoring/tests/test_i074_stage2_verdict.py`；**A** ＝ `…/tests/test_replay_stage2_archive.py`；
+**S2** ＝ `scripts/test-i074-stage2.sh`（行號是 `check`／`pass` 那一行）。
+
+| id | subcase | 落點 | 具體的斷言 | 判定 |
+|---|---|---|---|---|
+| a～d | 四格各一列 → B | V `test_a_to_d_the_four_cells_are_b[4 個 cell]` | `judge_row()` 的輸出**整列相等**（`class`、`verdict` ＝ B、`reasons` ＝ `[]`） | ✅ |
+| e | lifecycle 沒翻轉 → C | V `test_e_to_k_…[e_lifecycle_not_flipped]` | 完整 `reasons` ＝ `["LIFECYCLE_PHASE_UNEXPECTED"]`；另 `[before_lifecycle_other]` | ✅ |
+| f | 非 AVOID 的 bias 沒翻 → C | V `…[f_non_avoid_bias_not_flipped]` | 完整 `reasons` ＝ `["MARKET_BIAS_UNEXPECTED"]` | ✅ |
+| g | AVOID 的 bias 有變 → C | V `…[g_avoid_bias_changed]` | 同上 | ✅ |
+| h | `final_entry_state` 有變 → C | V `…[h_final_entry_changed]` | `["DIFF_FIELD_NOT_ALLOWED","FINAL_ENTRY_STATE_NOT_BLOCKED"]` | ✅ |
+| i | `action_state` ≠ condition 的 `state` → C | V `…[i_condition_state_mismatch]` | `["CONDITION_STATE_MISMATCH"]` | ✅ |
+| j | 判讀欄位以外的差異 → C | V `…[j_field_outside_allowlist]`、`…[condition_non_state_field_differs]` | `DIFF_FIELD_NOT_ALLOWED`／`POSITION_ACTION_CONDITION_NON_STATE_DIFF` | ✅ |
+| k-1 | top-level `position_action` 有變 → C | V `…[k_position_action_changed]` | `["POSITION_ACTION_CHANGED"]` | ✅ |
+| k-2 | 相同時⛔ 不影響 B | V `test_k_identical_position_action_does_not_affect_b` | 兩側都是 `AVOID` → B | ✅ |
+| l | 任一列 C → 整體 C、⛔ 不以多數決 | V `test_l_one_c_row_…`、`test_all_b_and_no_majority_vote` | 3 列 1 C → C、`c_row_count` ＝ 1；四 B 一 C → C | ✅ |
+| m-1 | 成員 bytes 被改 → 拒絕 | A `test_m_promotion_verification_rejects[member_bytes]` | `ArtifactError` | ✅ |
+| m-2 | manifest 驗不過 → 拒絕 | A `…[manifest]` | 同上 | ✅ |
+| m-3 | `base_commit` 不可達 → 拒絕、⛔ 不輸出 B／C | S2:991 | rc 1、stdout 空 | ✅ |
+| m-4 | 該 commit 裡缺錨點 → 拒絕 | S2:1000 | rc 1、stdout 空——但拒絕來自 **fake 驗證模式**（`verify_needs` 指定的檔案不存在就回 1） | ⚠️ 部分：**真正的** `verify_promotion_target()` 在 python root 缺錨點時拒絕，沒有直接的測試（同一個 `_load_trust_anchors()` 只在 recovery 那條路徑由 A `test_h_stage1_after_missing` 驗過） |
+| m-5 | 拒絕時⛔ 不判讀 | A `test_judge_is_refused_when_verification_fails_and_never_judges`；S2 的 `judge_refused` | spy：`judge_comparison` 未被呼叫；shell：stdout 空 | ✅ |
+| m-6 | 對照組：工作樹的錨點被改 → 照樣接受 | S2:969（n9 (ii)） | rc 0、一行含 `"verdict":{` | ✅ |
+| m-7 | 對照組：HEAD 的錨點被改 → 照樣接受 | S2:969（n9 (iii)，HEAD 的驗證入口也已改壞） | 同上 | ✅ |
+
+###### 稽核表 2：v29「六、2」
+
+落點縮寫另加：**CF** ＝ `…/tests/test_replay_counterfactual.py`；**PF** ＝ `…/tests/test_i074_stage2_preflight.py`；**FR** ＝ `…/tests/test_i074_stage2_freeze_record.py`；
+**PM** ＝ `…/tests/test_i074_stage2_promote.py`；**EC** ＝ `…/tests/test_replay_envcheck.py`；**RA** ＝ `scripts/test-replay-args.sh`；**H** ＝ `scripts/tests/test_i074_stage2_host.py`。
+
+| id | subcase | 落點 | 具體的斷言 | 判定 |
+|---|---|---|---|---|
+| a | 全量 keys 一致 → 進入逐列比較 | CF `test_success_writes_exactly_three_operational_files_report_last` | 三檔、comparison 的 keys ＝ cohort、逐列翻轉 | ✅ |
+| b-1／b-2／b-3 | before 少一個／多一個／換序 → fail-closed | CF `test_key_guard_runs_before_the_effect_check[drop／extra／reorder]` | `ArtifactError`（⛔ 不是 `CounterfactualIneffective`）、輸出目錄空 | ✅ |
+| c | `before_candidates == ∅` → 正常路徑 | CF 同 a | rc 0 路徑、三檔 | ✅ |
+| d | 非空 → 中止 ＋ 有界診斷、⛔ 不產 `candidate_mismatch.json`、⛔ 不回 4 | CF `test_rr_not_restored_is_exit_6_…`、`test_main_maps_ineffective_to_exit_6` | 只有中繼檔、通過 `validate_counterfactual_failure()`、無 mismatch 檔；`main()` 回 6 | ✅ |
+| e | cohort key 在 before 缺席、守門先於逐列比較 | CF `…[drop]`（拿掉的是候選 key，before 同時仍有候選） | `ArtifactError` 而⛔ 不是 6、輸出目錄空 | ✅ |
+| f | cohort 列**全部**出現在 comparison（⛔ 不截斷、⛔ 不抽樣） | CF 同 a | comparison 的 keys ＝ `sorted(candidates)`——**3 列、`report_max_rows` ＝ 200** | ⚠️ 部分：列數小於唯一的截斷機制（`report_max_rows`），「comparison 被誤套 report 的上限」這類回歸抓不到；一般路徑有 `test_report_max_rows_truncates_only_the_human_report`，反事實路徑沒有 |
+| g-1 | 串流逐列驗證與整批同強度、在 replay 之前 | CF `test_after_artifact_defects_abort_before_replay[6 類]` | spy：`_replay_from_bundle` 未被呼叫 | ✅ |
+| g-2 | 既有 `validate_after_artifact`／`validate_diagnostics` 的測試全部續跑 | 既有測試檔（在 `test.sh` 的範圍內） | 依「三」第 3 步以 `-rs` 實跑：唯一的 skip 是 `test_excursion_cost.py`（見「二」） | ✅ |
+| h | raw SHA 與 cohort 不符 → fail-closed | CF `test_cohort_sha_mismatch_aborts_before_replay` | `ArtifactError`、replay spy 為空 | ✅ |
+| i | iterator 重複消費⛔ 不少驗一道 | CF `test_after_artifact_is_read_exactly_once` | 串流 spy 恰好一次、`load_artifact` 被禁用 | ✅ |
+| j-1 | staging 驗證失敗 → 1、無 archive | A `test_i_verify_failure_leaves_no_archive` | 無 archive、無 staging；例外 → 1 由 A `test_main_maps_durability_and_errors` | ✅ |
+| j-2 | staging fsync 失敗 → 同上 | A `test_i_staging_fsync_failure_leaves_no_archive` | 同上 | ✅ |
+| j-3 | staging **寫入**失敗 → 同上 | —— | `test_i_bad_source_leaves_no_archive` 是來源驗證失敗、⛔ 不是寫入的 I/O 失敗 | ⚠️ 部分：沒有注入 staging 寫入錯誤（`OSError`／`ENOSPC`）的測試 |
+| k | rename 成功、parent fsync 失敗 → 3、保留 archive | A `test_j_parent_fsync_failure_keeps_archive` | `DurabilityUnconfirmed`、archive 在、之後 recovery 回 0 | ✅ |
+| l | archive 已 durable、輔助 temp 清理失敗 → **仍回 0** | —— | 找不到測試（finalizer 的 EXIT trap 以 `|| true` 吞掉 worktree 清理的失敗，但沒有測試釘住「結束碼仍是 0」） | ❌ 缺漏 |
+| m-1 | recovery 以 archive 內容、manifest SHA、Stage 1 after 重驗 | A `test_k_*`、`test_g_*`、`test_h_*`、`test_j_*` | 各自 fail-closed／回 0 | ✅ |
+| m-2 | ⛔ 不 replay | 結構上：`recover_stage2_durability()` 的參數沒有 bundle，也⛔ 不 import `evaluation` | —— | ✅（結構） |
+| m-3 | ⛔ 不重建 | —— | 沒有測試斷言 recovery 前後 archive 的檔案集合、bytes 與 inode 不變 | ⚠️ 部分 |
+| m-4 | 回 manifest 記的 outcome | A `test_l_recovery_returns_the_manifest_outcome` | 改成 4 → 回 4 | ✅ |
+| n | ENOSPC 擋下、orphan ⛔ 不當成證據 | PF n1～n4；A `test_aa_an_damaged_records_fail_closed[stray_dir]`；PM `test_step2_cleans_only_recognizable_orphan_staging` | 見各列 | ✅ |
+| n1 | `== required` 通過、`−1` 拒絕 | PF `test_n1_boundary` | 精確邊界 | ✅ |
+| n2 | `f_bavail` 不足、`f_bfree` 足 → 拒絕 | PF `test_n2_f_bfree_does_not_count` | `PreflightError` | ✅ |
+| n3 | 五個位置任一 `st_dev` 不同 → 拒絕 | PF `test_n3_…[run／tmp／baselines／git／docker_root]`；S2:780 | 各一支 | ✅ |
+| n4 | Docker Root Dir 取不到、stat／statvfs 失敗 → fail-closed | PF `test_n4_failures_are_rejections`；S2:778、779 | 四種 | ✅ |
+| n5 | 任一拒絕 → replay ⛔ 未被呼叫、1 | S2:778～780 的 `pre_case` | rc 1、runner spy 空、`state/preflight.json` 不存在（n1／n2 的拒絕走同一個 `PreflightError` 出口） | ✅ |
+| n6 | 三個常數與算術 | PF `test_n6_constants_and_arithmetic` | 字面值與 `P_B_BUDGET + M_SAFETY`；freeze record 模組⛔ 不另寫一份 | ✅ |
+| n7-1 | 真正 repo 的 orchestrator 檔案 dirty | S2:600、604（入口清單逐檔：改內容、`git rm --cached`） | 1／8、沒有取鎖、沒有建複本 | ✅ |
+| n7-2 | freeze record 違反「八之二」任一條 | FR `test_each_rule_of_the_closed_schema`（20 條）、`test_extra_and_missing_keys`、`test_load_requires_canonical`、`test_cross_check_report_each_pair`；S2:839、842 | 各自拒絕 | ✅ |
+| n7-3 | 複本 HEAD ≠ `repo_head` | S2:707、709（resume 時） | 1、finalizer 未被再呼叫 | ✅ |
+| n7-4～n7-6 | 已追蹤檔被改／`i074_stage2/` 以外有未追蹤（含 ignored）／有 alternates | S2:805～808 `first_run_integrity` | 1；anchors、check、runner **三者的 spy** 都空 | ✅ |
+| n7-7 | orchestrator 內容 ≠ `repo_head`、⛔ 不在複本內執行 | S2:809、811、1165、1172 | 被改的副本⛔ 沒有被執行；直接執行／沒有持鎖 → 1 | ✅ |
+| n7-8 | 真正 repo 的 `i074_stage2/` 有未追蹤項目 | S2:815 | 1、runner spy 空 | ✅ |
+| n7-9 | ⛔ 沒有接受裸 `repo_head` 的入口 | S2:583 | `--repo-head` → 1 | ✅ |
+| n7b-1 | 執行期間獨立 fd 拿不到鎖 | S2:1044 | `lock_free`（非阻塞 `flock`）失敗 | ✅ |
+| n7b-2 | 正常結束 → 刪 sentinel、放鎖、立刻拿得到 | S2:1060～1063 | 依序斷言 | ✅ |
+| n7b-3／n7b-4 | 不同 `XDG_DATA_HOME`／不同 repo → 1 | S2:1046、1049 | 1、沒有建 work | ✅ |
+| n7b-5 | 非固定帳號 → 1／8 | H `Locking.test_uid_mismatch_and_env_and_image` | run 1、promote 8、取鎖之前中止 | ✅ |
+| n7b-6 | **鎖檔**的屬性（symlink、非 regular、mode、link count、開啟後 inode 被換） | H `Locking.test_attribute_failures`（4 種）、`test_inode_swapped_after_open` | 各自 `Abort`、鎖檔⛔ 沒有被 unlink | ✅ |
+| n7b-7 | **sentinel** 的屬性（預先建成 symlink、非 regular 等） | —— | 只有內容是 `garbage` 的一般檔案（H `test_existing_sentinel_blocks`、S2:1156）；dangling symlink、目錄、FIFO 都沒有 | ⚠️ 部分 |
+| n7b-8 | 鎖檔從未被 unlink | S2:1062、H `test_inode_swapped_after_open` | 檔案仍在 | ✅ |
+| n7b-9 | 外部 helper ⛔ 不延長鎖 | S2:1069、1070 | 結束後立刻拿得到 | ✅ |
+| n7b-10 | `setsid` 的孤兒消失之前⛔ 不放鎖 | S2:1078；H `ForkedPaths.test_descendants_include_setsid_orphans` | 結束時孤兒已不在；後代列舉含 setsid | ✅ |
+| n7b-11 | TERM → 移除容器 → TERM／KILL → 都消失才放鎖 | S2:1086、1087 | 143、容器與 runner 都不在、sentinel 已刪、鎖已放 | ✅ |
+| n7b-12 | 清不空 → ⛔ 不刪 sentinel、⛔ 不放鎖 | S2:1098～1100；H `test_release_keeps_everything_when_docker_ps_fails` | supervisor 不結束、sentinel 在、鎖不放、持續回報 | ✅ |
+| n7b-13 | SIGKILL → 137、sentinel 留下；新 supervisor 1、`--promote` 9、提示重開機、⛔ 沒有建立複本 | S2:1115、1123、1126 | 依序斷言 | ✅ |
+| n7b-14 | deterministic barrier | S2:1120、1129～1132 | 舊流程的下一個檢查點 `/proc/locks` 驗證失敗、finalize 未被呼叫 | ✅ |
+| n7b-15 | sentinel 讀不懂：空檔、部分寫入、schema 不符 | S2:1156；H `test_existing_sentinel_blocks` | 只有 `garbage` 一種 | ⚠️ 部分：空檔、部分寫入（截斷的 canonical JSON）、合法 JSON 但 schema 不符，三種各缺一支 |
+| n7b-16 | ⛔ 沒有解除入口 | S2:1159；H `Misc.test_parse_args_has_no_unlock_entry` | `unlock` → 1、sentinel 不動 | ✅ |
+| n7b-17 | sentinel schema 每欄各一支 | H `SentinelSchema.test_each_field_rejected` | 14 個 subTest ＋ 多欄、缺欄、非 object | ✅ |
+| n7b-18 | 模擬重開機：無殘留 → 放行；有殘留 → 1／8 | S2:1137、1140、1143 | 依序斷言 | ✅ |
+| n7b-19 | 啟動檢查失敗⛔ 不留 sentinel、排除後直接重跑成功 | S2:1137、1146、1143 | 有殘留／`docker ps` 失敗 → 1、無 sentinel；移除後 0 | ✅ |
+| n7b-20 | sentinel 建立之後、workload 啟動之前失敗（fsync、`fork` 成功而 `exec` 失敗）→ 收回 | H `test_rollback_after_fsync_failure`、`test_rollback_after_spawn_failure`、`ForkedPaths.test_fork_succeeds_but_exec_fails` | sentinel 已刪、鎖已放 | ✅ |
+| n7b-21 | 刪除前 inode 被換（收回、正常釋放各一支） | H `test_rollback_refuses_when_inode_swapped`、`test_release_keeps_lock_when_inode_swapped` | ⛔ 不 unlink、⛔ 不放鎖、被換上的檔案還在 | ✅ |
+| n7b-22 | 直接執行複本 orchestrator／沒有持鎖的 fd | S2:1165、1172 | 1、在完整性檢查之前 | ✅ |
+| n7b-23 | label：每個 run／create 恰好一個；自帶鍵拒絕；`docker ps` 失敗 fail-closed | S2:666（`label_ok`）、502～514、1146 | 各自斷言 | ✅ |
+| n7b-24 | supervisor 自身 dirty／≠ HEAD | S2:600、604（清單含 supervisor） | 1／8、沒有取鎖 | ✅ |
+| n7b-25 | 結束碼：鎖衝突 1／8、sentinel 1／9、訊號 128＋N | S2:1046、1051、1123、1126、1086 | 依序 | ✅ |
+| n8-1 | finalize 之前複本不符（含 freeze record 副本被換）→ 不發布 | S2:852～855 `post_case`（replay 回 0） | 1、finalize／publish 未被呼叫、沒有 attempt | ⚠️ 部分（**補齊時才發現**：「已追蹤檔」那一支改的是 orchestrator 自己會執行的 `i074_stage2_preflight.py`，它在檢查點之前就因語法錯誤失敗——檢查點的完整性比對被拿掉時照樣綠，見「⑧ 補齊與全量執行的結果」「二」#3） |
+| n8-2 | **publish** 之前複本不符 | —— | `post_case` 只走 replay 回 0（finalize）那條路；replay 回 6（publish）沒有對應的一支 | ⚠️ 部分 |
+| n8-3 | resume（recovery）之前 | S2:707、709、715 | 1、finalizer 未被再呼叫 | ✅ |
+| n8-4 | 晉升之前 | S2:863、718 | 9、晉升未開始 | ⚠️ 部分（**補齊時才發現**：S2:863 同樣是改 helper；S2:718 驗的是持鎖階段 exec 之前的 orchestrator 比對，⛔ 不是檢查點的完整性） |
+| n9 | ⑩ 期間真正 repo：(i) commit 一般檔案、(ii) 工作樹改錨點、(iii) commit 改錨點 | S2:956、957（三者**合在同一趟**）、969 | 晉升 0、真正 repo 的 `evidence/` ≡ **複本的終態**；判讀器照樣判讀 | ⚠️ 部分：① 三種情境合成一趟，無法各自歸因；② 改的是 `i074_stage2/` 的兩份 patch 與 finalizer，⛔ 不是規格寫的 Stage 1 錨點與 `envcheck/`；③「與不動真正 repo 的對照組逐位元相同」改成「＝ 複本的終態」，⛔ 沒有和對照組（成功路徑）的晉升結果、執行到的程式碼比對 |
+| n10-1 | formal ＋ ok ＋ ≤ 預算 → 寫出、通過封閉 schema 與交叉條件 | FR `test_n10_build_writes_only_formal_ok_within_budget`；S2:320 | `validate_record()` 通過 | ✅ |
+| n10-2 | `counterfactual_patch_raw_sha256` ＝ canonical | FR `test_each_rule_…[counterfactual_patch_sha256 ＝ 6…]` | 拒絕 | ✅ |
+| n10-3 | 腳本 SHA ＝ 內容 SHA、⛔ 不是 blob OID | H `FreezeRecordGit.test_head_file_sha256_is_content_not_blob_oid` | 兩者不同、取內容 | ✅ |
+| n10-4 | validation、`assumption_violated`、超預算 → ⛔ 不寫 | FR 同 n10-1 | 三種都不寫、結束碼 0 | ✅ |
+| n10-5 | 任何失敗路徑 → ⛔ 不寫 | 讀碼（`scripts/i074-stage2-sizing.sh` 第 437～455 行） | 在 build **之前**的失敗都⛔ 不到 build | ⚠️ 部分（另見「讀碼疑點 1」） |
+| n11-1 | 步驟 1 複本不符 → 9、後面各步與 verifier 未被呼叫 | S2:863、718 | 9、`==> 晉升` 未出現 | ✅ |
+| n11-2 | 步驟 3：零個終態／兩組／不認得的未追蹤／名稱不符 → 9 | PM `test_step3_*`（6 支） | 各自 9 | ✅ |
+| n11-3 | 步驟 4 來源 fsync 失敗 → 3、⛔ 不建 staging | PM `test_step4_fsync_failure_is_3_and_no_staging` | 3、無 staging | ✅ |
+| n11-4 | rename ＋ parent fsync 成功後被殺 → 重跑走 6a → 0／6 | PM `test_evidence_6b_then_6a_is_idempotent`、`test_impl_r1_6a_of_a_failed_record_fsyncs_i074_too` | 第二次 0、inode 不變、只補 fsync | ✅ |
+| n11-5 | 6a 目的地不同 → 9、⛔ 不覆寫 | PM `test_6a_destination_differs_is_9_and_untouched[4 種]` | 9、目的地不變、verifier 未被呼叫 | ✅ |
+| n11-6 | 6b 空間不足 → 8、釋出後重跑成功 | PM `test_6b_space_shortage_is_8_then_rerun_succeeds` | 8 → 0 | ✅ |
+| n11-7 | 複製的 I/O：目的端 `ENOSPC`／`EDQUOT`／`EIO` → 8、其他 errno → 9 | PM `test_6b_staging_write_errors`、`test_6b_staging_mkdir_errors`、`test_6b_rename_errors` | 各自 8／9 | ✅ |
+| n11-8 | 複製的 I/O：**來源側**讀取錯誤 → 9 | —— | 產品在 `_copy_bytes()` 把來源的 `os.read` 失敗分類成 9，但沒有測試注入它（`EIO` 在目的端是 8、在來源端必須是 9，正是容易弄反的地方） | ⚠️ 部分 |
+| n11-9 | 終態發布之後竄改來源 → staging 驗不過 → 9（evidence、failed 各一支） | PM `test_6b_verification_failure_is_9_and_cleans_staging`（evidence） | 9、目的地不存在、staging 已清 | ⚠️ 部分：failed record 那一支缺 |
+| n11-10 | `EEXIST` → 8、重跑走 6a | PM `test_6b_eexist_then_rerun_takes_6a` | 8 → 0 | ✅ |
+| n11-11 | parent fsync 失敗 → 3、重跑成功 | PM `test_6b_parent_fsync_failure_after_rename_is_3` | 3 → 0 | ✅ |
+| n11-12 | finalize 回 3 之後直接 `--promote` → 成功 | S2:745 | 0 | ✅ |
+| n11-13 | 兩個執行目錄同時 `--promote` → 後到的 8、先到的⛔ 不受影響、它的 staging ⛔ 沒有被清；symlink 路徑寫法同樣互斥 | S2:1051（`--promote` 撞上執行中的**完整** orchestrator） | 8 | ⚠️ 部分：⛔ 沒有「兩個 `--promote`」的組合；「先到的照常完成、staging 未被清」與 symlink 路徑寫法都沒有斷言 |
+| n11-14 | 只竄改來源的 `base_commit` → 6b 的 9 | PM `test_verification_output_must_bind[base_commit]`；A `test_m_promotion_verification_rejects[trust_root]` | 9、目的地不存在 | ✅ |
+| n11-15 | 6a：來源與目的地改成同一份錯誤的 `base_commit` → 只有信任根綁定讓它 9 | —— | `test_verification_output_must_bind` 只走 6b（目的地不存在） | ⚠️ 部分：6a 那一支缺 |
+| n11-16 | 可辨識的 orphan staging 被清、其他⛔ 沒有被動 | PM `test_step2_cleans_only_recognizable_orphan_staging` | 只剩名稱不合格式的那一個；marker 不變 | ✅ |
+| n11-17 | ③ 的 recovery、replay、finalize、publish 都⛔ 沒有被呼叫 | PM `test_only_verification_and_trusted_git_are_called` | 外部呼叫恰好是驗證模式 ＋ 三種 git 子指令 | ✅ |
+| n11-18 | 真正 repo 的 `.git` 與複本終態的 inventory 不變 | PM `test_evidence_6b_then_6a_is_idempotent`（終態 bytes ＋ inode）、`test_only_…`（只看 `.git/HEAD`） | —— | ⚠️ 部分：`.git` 只比 `HEAD` 一個檔，⛔ 不是 inventory |
+| n11-19 | 合成守門中途被殺 → 下一次 `--promote` 照樣成功（⑦c 改寫） | PM `test_step2_prune_failure_is_9`（prune 失敗 → 9）；成功路徑都先 prune | 「殘留登記之下重跑成功」沒有直接的一支 | ⚠️ 部分 |
+| n12-1 | 晉升之後還沒 commit → 下一次 ⑩ 的 preflight 中止 | S2:815、1020 | 1、runner 未被呼叫 | ✅ |
+| n12-2 | commit 之後新的 freeze record → 同語意 SHA 被擋（rc 2） | S2:771（fake check 回 2）；RA ③ 的 am（真的 check） | 分層：orchestrator 的分流 ＋ check 的命中 | ✅ |
+| n12-3 | 只改測試檔的 counterfactual 同樣被擋 | RA ③ o2；A `test_only_tests_changed_maps_to_the_same_record` | 2／已存在 | ✅ |
+| n12-4 | 舊的 freeze record → preflight 中止 | S2:819 | 1、`freeze record 太舊` | ✅ |
+| n12-5 | 不同語意 SHA ＋ 夠新 → 進 replay | S2:824、1027 | runner 被呼叫、0 | ✅ |
+| o | 未帶 flag：集合相等、`candidate_mismatch.json`、rc 4 都在 | CF `test_without_the_flag_…`；`test_i074_mismatch.py` 既有案例 | `CandidateMismatch`、檔案存在 | ✅（「三」第 4 步抽樣反向驗證） |
+| p | flag 帶在 Stage 1 → 中止 | CF `test_pairing_guard_…[stage1-with-flag]`、`test_main_rejects_the_flag_on_stage1`、`test_assert_i074_flags_…`；RA:1828 | 各層各一 | ✅ |
+| q | flag 重複 → 中止 | CF `test_main_rejects_bad_combinations[duplicate-flag]` | 1 | ✅ |
+| r | 使用者注入 script-injected 參數 → 中止 | RA:1839（`--counterfactual-patch-sha256`）、RA 第 19 行起的一般注入參數段；CF `…[duplicate-sha]` | 拒絕 | ✅ |
+| s | 宣稱的 SHA ≠ 實際套用結果 → fail-closed | RA:1839、1842、1845（spoof 與 raw ≠ canonical 在 docker 之前） | 沒有 `run` | ✅ |
+| t | 兩份增量 SHA ＝ ordered components（⛔ 不斷言合成必然不同） | RA:1803；A `test_manifest_schema[e_reversed／e_extra_component]` | 三個 SHA 各自等於獨立推導值 | ✅ |
+| u | 空 `TOOLING_PATCH`：兩個 SHA 都有明確值 | RA:1818 | tooling ＝ 空字串 SHA、composed ＝ 反事實 | ✅ |
+| v | flag 開、`COUNTERFACTUAL_PATCH` 空 → 中止 | RA:1823 | 沒有 `run`、stderr 含 `COUNTERFACTUAL_PATCH` | ✅（抽樣反向驗證） |
+| w | flag 關、`COUNTERFACTUAL_PATCH` 非空 → 中止 | RA:1825 | 沒有 `run`、stderr 含 `一般路徑` | ✅（抽樣反向驗證） |
+| x | flag → `I074_MODE`：必須要求 `REPLAY_IMAGE_ID`／identity、⛔ 不自動 pin | RA:1836 | `s7_blocked … s7_x ""`：**⛔ 不看訊息**，只要沒有 `run` 就算過 | ⚠️ 部分：任何原因的失敗都會讓它變綠；「⛔ 不自動 pin」沒有斷言（pin 腳本／`docker build` 未被呼叫） |
+| y-1 | 官方 runner：五條 | RA:1823、1825、1828、1839（runner 自己算 SHA，非 hex 的 SHA 無從傳入） | 各自擋下 | ✅（抽樣反向驗證） |
+| y-2 | 直接 CLI：flag 無 SHA、SHA 無 flag、Stage 1 帶 flag | CF `test_main_rejects_bad_combinations`、`test_main_rejects_the_flag_on_stage1` | `main()` 回 1 | ✅ |
+| y-3 | 直接 CLI：Stage 1 帶 SHA、SHA 非 64 位小寫 hex | CF `test_pairing_guard_…[stage1-with-sha／uppercase-sha／short-sha]`（**只經 `run_bundle_stage()`**） | `CliUsageError` | ⚠️ 部分：規格要求官方 runner 與**直接 CLI** 兩條路徑都測，這兩條沒有經過 `main()` |
+| z-1 | `rr_not_restored` 的 record：可辨識、綁兩份 patch SHA 與 identity、無正式 archive | A `test_m_failed_record_is_published_and_identifiable`、`test_check_lists_valid_records` | 目錄名 ＝ 語意 SHA、kind、診斷、identity、兩份 SHA、`evidence/` 不存在 | ✅ |
+| z-2 | `candidate_flag_inconsistent` 的 record | —— | 發布層只有 `rr_not_restored`（`candidate_flag_inconsistent` 只在 validator 與 replay 端出現） | ⚠️ 部分 |
+| z-3 | 同語意 SHA 重跑被拒 | A `test_same_sha_cannot_be_recorded_twice`、`test_only_tests_changed_…`；RA ③ am | 拒絕／2 | ✅（抽樣反向驗證） |
+| aa | flag 一致、候選非空 → 6、`rr_not_restored`、中繼檔 | CF `test_rr_not_restored_…`、`test_main_maps_ineffective_to_exit_6` | 6、reason、中繼檔通過 validator | ✅ |
+| ab | flag 恆 false、但有 CONTINUATION 且 RR 不合格 → 6、`candidate_flag_inconsistent` | CF `test_flag_always_false_but_continuation_without_rr_is_inconsistent` | reason、計數 | ✅（抽樣反向驗證） |
+| ac | flag 為 true 但不是 CONTINUATION | CF `test_flag_true_on_a_non_continuation_row_is_inconsistent` | reason、計數 1 | ✅ |
+| ac2 | 兩種同時 → 一律 `candidate_flag_inconsistent` | CF `test_both_shapes_at_once_are_always_flag_inconsistent` | reason、sample 只有不一致那列 | ✅ |
+| ad-1 | 0 → finalize；6 → publish | S2:621、732 | 依序 | ✅ |
+| ad-2 | 其他結束碼 → 停 | S2:753（迴圈 1、2、4） | 1、finalize／publish 未被呼叫、沒有 `replay_done` | ⚠️ 部分：⑦b 計畫的清單含 **137**（OOM 的結束碼），迴圈沒有 |
+| ad-3 | rc 與輸出形狀不符 → 1 | S2:759（`0 extra`、`0 missing`、`6 both`） | 1、未發布 | ✅ |
+| ad-4 | 以其他路徑覆寫階段一的輸出 → replay 之前拒絕 | S2:589（五個參數） | 1、沒有建複本 | ✅ |
+| ae | finalize 回 1 之後重跑：沿用凍結 patch 與輸出、replay ⛔ 未被呼叫 | S2:680、684；`resume_case`（S2:703、704：輸出或 patch 被改 → 1） | runner spy 空、同一個 `--run-dir`；改過就拒絕 | ✅ |
+| af | Stage 2 identity 路徑依 stage 推導；Stage 1 的 identity 與 pin 逐項不變 | RA:2138；RA:795～837；EC `test_identity_path_is_derived_per_stage` | 依序 | ✅ |
+| ag-1 | pin 的 tag ⛔ 不等於任何 build 腳本的預設 tag | RA:1927（斷言 tag 的字面值）、1970（⛔ 不接受 `PY_IMAGE`） | —— | ⚠️ 部分：沒有和各 build 腳本的預設 tag（例如 `python/scripts/test.sh` 的 `stock-trading-python-test:latest`）逐一比對 |
+| ag-2 | `test.sh` 跑完之後，釘住的 image 仍帶專用 tag | —— | 找不到測試 | ❌ 缺漏（可由 ag-1 的靜態比對承接：`test.sh` 只 build 自己的預設 tag 或 `PY_IMAGE`） |
+| ah | 全相同 → 0；判定表第 1～3 條各一支 → 7；第 4 條⛔ 不翻轉 | EC `test_be2_*`（第 1 條三種）、`test_cohort_difference_is_not_equivalent`（第 2 條）、`test_be_required_provenance_difference_is_not_equivalent`（第 3 條；`base_commit`／tooling 改由 E7 回 1，③b 差異 1 已同意）、`test_be_allowed_differences_do_not_flip_the_outcome` | 依序 | ✅ |
+| ai | 串流、⛔ 不同時整份載入兩份 rows | EC `test_bf_full_artifacts_are_streamed_once` | after 類型的整份載入被禁用、串流次數固定 | ✅ |
+
+
+
+###### 稽核表 3：③「十」
+
+| id | subcase | 落點 | 具體的斷言 | 判定 |
+|---|---|---|---|---|
+| a-1／a-2 | layout 多檔／缺檔 | A `test_a_extra_and_missing_files` | recovery 各自 `ArtifactError` | ✅ |
+| b | `.json.gz` 被宣告成 `raw_blob` | A `test_manifest_schema[b_json_gz_as_raw_blob]` | `欄位集合` | ✅ |
+| c | patch 的 `stored_sha256` ≠ `patches.*` | A `test_manifest_schema[c_patch_sha_mismatch]`、`test_c_archived_patch_bytes_changed` | 宣告值與實際 bytes 兩層 | ✅ |
+| d | composed ≠ before 的 `provenance.tooling_patch_sha256` | A `test_d_composed_must_bind_to_the_before_provenance` | `合成關係` | ✅ |
+| e-1／e-2 | `ordered_components` 相反／多一項 | A `test_manifest_schema[e_reversed／e_extra_component]` | 拒絕 | ✅ |
+| f | tooling 0 bytes → 通過、SHA ＝ 空字串、composed ＝ cf | A `test_f_empty_tooling_patch` | 三個等式 | ✅ |
+| g | Stage 1 after 被換掉 | A `test_g_stage1_after_replaced` | `一起保存` | ✅ |
+| h | Stage 1 after 不存在、訊息指出一起保存 | A `test_h_stage1_after_missing` | `一起保存` | ✅ |
+| i-1／i-2 | staging 驗證／fsync 失敗 → 1、無 archive | A `test_i_verify_failure_…`、`test_i_staging_fsync_failure_…` | 無 archive、無 staging | ✅ |
+| i-3 | staging **寫入**失敗 | —— | 同 v29 j-3 | ⚠️ 部分 |
+| j | rename 成功、parent fsync 失敗 → 3、保留 | A `test_j_parent_fsync_failure_keeps_archive` | `DurabilityUnconfirmed`、archive 在 | ✅ |
+| k-1～k-4 | recovery 的檔案集合、metadata、SHA、執行身分 | A `test_a_*`、`test_k_metadata_mismatch`、`test_k_member_bytes_changed`、`test_k_recovery_rejects_execution_identity_drift[6 欄]` | 各自 fail-closed | ✅ |
+| k2 | metadata 全對、跨檔矛盾 → graph 抓到 | A `test_k2_graph_catches_…` | `道 3` | ✅ |
+| l | recovery 回 manifest 的 outcome | A `test_l_recovery_returns_the_manifest_outcome` | 4 → 4 | ✅ |
+| m | failed record 的位置、kind、診斷、兩份 patch | A `test_m_failed_record_is_published_and_identifiable` | 目錄、檔案集合（含兩份 patch）、kind、計數 | ✅ |
+| n | 同語意 SHA → `--check-failed-record` 回 2；runner 之前呼叫 | RA:1619；S2:771 | 2；runner spy 空 | ✅ |
+| o | 白名單產品檔改變、語意 SHA 不同 → 放行 | RA:1622 | 0 | ✅ |
+| o2 | 只改測試檔 → 2 | RA:1620；A `test_only_tests_changed_…` | 2／已存在 | ✅ |
+| p | 三種發布結果對上重跑資格表 | A `test_p_publish_outcomes`、`test_m_*` | rename 前失敗無紀錄；fsync 失敗紀錄保留且 lookup 讀得到；完整發布 | ✅ |
+| q | Stage 1 既有 evidence 測試全部續跑、⛔ 不改斷言 | `test_replay_evidence.py` 等 | `git log --since=2026-09-22`：Stage 0／1 的測試檔只有 `test_replay_bundle_publish.py` 在 `5a03777` **純新增** 110 行，其餘⛔ 沒有被改 | ✅ |
+| r | before 的 `candidate_keys` 非空 → 中止 | A `test_counterfactual_effect_is_enforced[r_candidates_nonempty]` | `rr_not_restored`、無 archive | ✅ |
+| s-1／s-2 | comparison 的 `before`／`after` ≠ 來源 row | A `test_s_comparison_before_differs_from_source`、`test_k2_*`（after 側） | `道 3` | ✅ |
+| t | `differences` 被竄改 → 重算抓到 | A `test_t_differences_tampered` | `重算` | ✅ |
+| u-1～u-3 | keys ≠ cohort：多、少、換序 | A `test_u_comparison_keys_must_equal_the_cohort[3 種]` | `道 4`／`排序` | ✅ |
+| v | report 截斷順序錯／統計由截斷後算 | A `test_v_report_validator` | 排序、`difference_field_counts`、`candidate_rows`、`rows_shown` | ✅ |
+| w-1 | `manifest_path` ≠ 常數 | EC `test_stage1_evidence_ref_schema` | 拒絕 | ✅ |
+| w-2 | Stage 1 manifest SHA 不符 | A `test_manifest_stage1_evidence_must_match_the_anchor` | `Stage 1 信任錨` | ✅ |
+| w-3 | Stage 1 manifest **本身不合法**（`validate_evidence_manifest()`） | —— | 找不到「SHA 一致、但 manifest 的 schema 壞掉」的測試 | ❌ 缺漏 |
+| w-4 | `members` 的 key 集合被增減 | EC `test_stage1_evidence_ref_schema`（拿掉 identity） | 只有「減」 | ⚠️ 部分：「增」（多一個 member）缺 |
+| w-5 | **三份**任一的 SHA ≠ Stage 1 entry | A `test_w_stage1_manifest_sha_and_members_in_the_stage2_manifest` | 只改 cohort 的 `stored_sha256` | ⚠️ 部分：after、identity 與 `artifact_sha256` 那一欄都沒有 |
+| w-6 | 重算不符 | EC `test_anchor_rejects_tampered_member`；A `test_g_*` | `一起保存` | ✅ |
+| w-7 | `bundle_id` 不符 | EC `test_anchor_graph_rules`；A `test_az_*[bundle_id]` | `bundle_id` | ✅ |
+| w-8～w-10 | cohort validator 不過／`after_artifact_sha256` 不符／keys 不符 | A `test_ad_ay_cohort_rules_…[3 種]` | 各自的訊息 | ✅ |
+| x-1～x-3 | `manifest_path` 絕對路徑／含 `..`／symlink 逃出 | EC `test_resolve_repo_path_rejects_unsafe[5 種]`、`…_symlink_component` | 拒絕 | ✅ |
+| y-1 | 成功 archive：換掉 patch → 中止、⛔ 不呼叫 Python | RA:1376 | stdout 空（沒有 docker 指令）、訊息 `合成 SHA` | ✅ |
+| y-2 | failed record：同上 | RA:1501 | 同上 | ✅ |
+| z | cf 0 bytes → 中止；tooling 0 bytes → 通過 | A `test_manifest_schema[z_empty_counterfactual]`、`test_z_empty_counterfactual_patch_is_not_published`、`test_failed_record_rejects_empty_counterfactual`、`test_f_*` | 依序 | ✅ |
+| aa | 損壞／缺檔的 record → fail-closed | A `test_aa_an_damaged_records_fail_closed[5 種]` | `ArtifactError` | ✅ |
+| ab | recover 成功 → 1、同語意 SHA 仍⛔ 不可重跑 | A `test_bg_fixture_argv_…[recover_failed_record → 1]`、`test_ab_*`；RA:1624 | 1；之後 check 2 | ✅ |
+| ac-1／ac-2 | 錨定的 after／cohort 只比 SHA → 中止 | A `test_ac_anchored_after_must_pass_the_full_validator`、`test_ad_ay_…[cohort_invalid]` | validator 的訊息 | ✅ |
+| ad | cohort 信任錨三道 | A `test_ad_ay_…[3 種]` | 各自的訊息、三個呼叫端經 `_load_trust_anchors()` | ✅ |
+| ae | `manifest_path` ≠ 常數 | EC `test_stage1_evidence_ref_schema`；A `test_manifest_schema[witness_path]` | 拒絕 | ✅ |
+| af | before keys ≠ 錨定 after：多／少／換序／重複 | A `test_af_before_keys_must_equal_the_anchored_after[4 種]` | 各自的訊息 | ✅ |
+| ag | 第 8～13 道各一支、含 `rows_shown = 0` | A `test_ag_graph_rules`（`道 8`×2、`道 9`、`道 10`、report 的 `before_ref`、空報告、未排序） | 各自 fail-closed、無 archive | ✅ |
+| ag2 | 第 6 道 | A `test_ag_graph_rules[bundle_chain]` | `道 6` | ✅ |
+| ag3 | 第 7 道：位置缺漏／role 錯／image ≠ | A `…[before_without_provenance／stage0_role_null_base／image_differs]`、`test_ag3_finalizer_provenance_image_must_match` | 各一支 | ✅ |
+| ah | F1～F10（含 F6-a／b／c、F8-a） | A `test_ah_invariants_fail_closed[11 種]`、`test_f3_*`、`test_f4_*`、`test_f8_*`、`test_aa_an_*`（F9）、`test_ah5_*`（F10）；RA:1535、1638（F8-a） | 各自 fail-closed | ✅ |
+| ah2 | 只有 `created_at` 不同的 record | A `test_ah2_*`（兩支） | `F2-a` | ✅ |
+| ah3 | check 的兩段任一失敗 | RA:1638、1643 | 1；Python 段失敗時 shell 段⛔ 不執行 | ✅ |
+| ah4 | union 的合法形狀與五種不相配 | A `test_ah4_union_shapes` | 2 合法、7 個不合法 | ✅ |
+| ah5 | F10（兩種原因各一支） | A `test_ah5_sample_must_violate_its_claimed_rule[2]` | `F10` | ✅ |
+| ai-1 | identity 與 envcheck 不完全相同（含只差 `created_at`）→ 中止 | A `test_ai_*`、`test_16_*`；EC `test_anchor_graph_rules` | `不完全相同` | ✅ |
+| ai-2 | 「在 replay 之前」那一層 | PF `test_anchors_uses_the_current_identity`（spy）、`test_ai_identity_differing_only_in_created_at_is_rejected`；S2:773 | ⚠️ PF 的拒絕斷言是 `pytest.raises(Exception)`——**任何例外**（含不相干的程式錯誤）都會讓它變綠 | ⚠️ 部分 |
+| aj | `.gitattributes` 對巢狀路徑 | RA:1878、1885 | `text` 是 unset | ✅ |
+| ak | failed root 不存在／為空 → 0 | A `test_ak_*`；RA:1617 | 0 | ✅ |
+| al | 語意 SHA 都不同 → 0 | A `test_al_*`；RA:1618 | 0 | ✅ |
+| am-1／am-2 | 命中：完整 SHA 也相同／只改測試 | RA:1619、1620 | 2 | ✅ |
+| an | 任一 record 損壞 → 1 | A `test_aa_an_*`；RA:1640 | 1 | ✅ |
+| ao | Python 段失敗 → shell 段⛔ 不執行 | RA:1643 | 失敗點唯一 | ✅ |
+| ap | F8-a 失敗 → 1 | RA:1638、1639 | 1、失敗點是合成守門 | ✅ |
+| aq | Stage 1 **identity** 錨定失敗 → 1、⛔ 不改讀 identity 檔 | RA:1640（**fake** 的 Python 段回 1）；A `test_aw_anchor_reads_each_member_once`（每份只讀一次） | —— | ⚠️ 部分：Python 層沒有竄改 Stage 1 **identity 成員**的測試（只有 after 與 cohort） |
+| ar | 只吃路徑、⛔ 不吃 SHA | RA:1547、1548 | 拒絕 | ✅ |
+| as／av | bytes 不同但 T1 相同 → 仍命中 2 | RA:1632 | 2 | ✅ |
+| at | 套用失敗 → 1 | RA:1637 | 1 | ✅ |
+| au | 非 canonical 且未命中 → 1 | RA:1634、1636 | 1、訊息 | ✅ |
+| aw | 單次讀取 | A `test_aw_anchor_reads_each_member_once` | 四份各讀一次 | ✅ |
+| ax | 凍結之後換掉原始 patch → replay 用凍結版 | S2:793、796 | runner 收到凍結副本的路徑與 SHA；之後的檢查點中止 | ✅ |
+| ay-1 | 兩支 helper 合起來擋第 8、9 道 | A `test_ad_ay_*` | 各自的訊息 | ✅ |
+| ay-2 | 「在 replay 之前」那一層 | PF `test_ay_tampered_cohort_is_rejected`；S2:773 | ⚠️ 同 ai-2：`pytest.raises(Exception)` | ⚠️ 部分 |
+| az-1／az-2 | 另一個合法 `bundle_id`／image，SHA 同步重算 | A `test_az_*[2]` | `等式鏈` | ✅ |
+| ba-1 | runner 層：空 tooling → 0-byte 凍結 | RA:1818 | 兩個 SHA 都有明確值 | ✅ |
+| ba-2 | orchestrator 層：tooling 必須非空 | S2:832 | 1、runner 未被呼叫、`不得為空` | ✅ |
+| bb | CONTINUATION 且 RR false、flag false → 中止 | A `test_counterfactual_effect_is_enforced[bb_*]` | `candidate_flag_inconsistent` | ✅ |
+| bc | flag 與等價式不符 → 中止 | A `…[bc_flag_mismatch]` | 同上 | ✅ |
+| bd | E1～E7 各一支 | EC `test_bd_e1_*`（2）、`e2`、`e3a`、`e4`、`e5`（2）、`e6`、`test_bd_stage1_evidence_ref_*`、`test_e7_*`（2）；RA:2182、2186 | 各自 fail-closed | ✅ |
+| bd2-1 | `--envcheck` 回 7 且已發布、`--recover-envcheck` 回 7 | EC `test_be2_*` | 7、archive 在、recovery 7 | ✅ |
+| bd2-2 | Stage 2 的 `--finalize` 被 E3b 擋 | A `test_bd2_not_equivalent_envcheck_blocks_stage2` | `E3b`（另含 check 與 publish） | ✅ |
+| bd2-3 | Stage 2 的 `--recover-durability` 被 E3b 擋 | —— | 缺 | ⚠️ 部分 |
+| bd2-4 | Stage 2 的 preflight（`anchors`）被 E3b 擋 | —— | `test_bd2` 有 `check_failed_records`；`pf.run_anchors()` 沒有 | ⚠️ 部分 |
+| bd3 | outcome 三者任兩者不符 | EC `test_bd_e3a_*`、`test_bd3_manifest_terminal_outcome_disagrees`、`test_bd3_stored_outcome_disagrees_with_its_own_fields` | 三組配對各被違反一次、recovery fail-closed | ✅ |
+| bd4 | envcheck manifest 的封閉 schema | EC `test_bd4_manifest_schema[10 種]` | 規格列的六類全在 | ✅ |
+| be2 | 三種 key 形狀 | EC `test_be2_key_and_row_mismatch_shapes[3]` | 7、`side`、⛔ 不計入 `row_mismatch_count`、`rows_compared` | ✅ |
+| be | 全相同／第 1～3 條／第 4 條 | 同 v29 ah | —— | ✅ |
+| bf | 串流：finalizer、recovery、preflight、環境等價 | A `test_bf_*`（finalize 4 次、recover 3 次、整份載入被禁用）、`test_aw_*`（preflight 的 anchors）；EC `test_bf_*` | 計數 ＋ 禁用整份載入 | ✅ |
+| bg | CLI matrix | A `test_cli_matrix_usage_errors`、`test_bg_fixture_argv_…[8]`、`test_cli_rejects_duplicated_injected_args`；RA:1551～1559 與各模式的 `s2_argv_ok` | 逐 token、互斥、重複、`--source` | ✅ |
+| bh | F8-a 不過⛔ 不發布；完整 → 1；fsync 失敗 → 3 | RA:1501；A `test_publish_failed_record_cli_returns_one_even_when_published`、`test_p_publish_outcomes`、`test_main_maps_durability_and_errors` | 依序 | ✅ |
+| bi | recover-durability 重做合成守門 | RA:1462 | stdout 空、⛔ 不呼叫 Python | ✅ |
+| bj0-1 | 同一組壞列餵整批與串流 → 判定相同 | `test_replay_row_primitives.py::test_same_bad_rows_same_verdict` | 依 kind × side | ✅ |
+| bj0-2 | Stage 0／1 既有 validator 測試⛔ 不改斷言、全數續跑 | 同 q | —— | ✅ |
+| bj | report 的 200 ＝ bundle 的 `report_max_rows` | A `test_bj_report_cap_equals_the_bundle_value` | 正式 bundle 存在、⛔ 沒有被 skip（2026-10-07 以 `-rs` 實跑確認） | ✅ |
+| bk-1 | N ＝ 20、三種 sample 共用常數 | A `test_effect_check_order_and_sample_cap`；EC `test_bk_*`（`is` 同一個物件） | —— | ✅ |
+| bk-2 | failed record 的計數⛔ 不被 N 截斷 | A `test_effect_check_order_and_sample_cap`、`test_sample_buffer_stays_bounded_…[2]` | 25／1000 | ✅ |
+| bk-3 | envcheck 的 `key_mismatch_count` ⛔ 不被截斷 | EC `test_bk_*` | 25、sample 20 | ✅ |
+| bk-4 | envcheck 的 `row_mismatch_count` ⛔ 不被截斷、`mismatch_sample_keys` ≤ 20 | —— | 缺（`test_bk_*` 只造 key 的差異） | ⚠️ 部分 |
+
+#### Stage 2 步驟 ⑧ 補齊與全量執行的結果（2026-10-07～08，第二輪 review 修正後，⚠️ **待 review**）
+
+**確認點 ② 的裁決**（2026-10-07，使用者：「繼續，跑完把結果寫進 issue.md」——依「⑧ 稽核結果」「六」的建議執行）：
+#1 「四」的 F1～F26 與 H1 全部做；#2 讀碼疑點 1 ⛔ 不在 ⑧ 改產品、只記錄（建議另立計畫，見「五」）；#3 `test-replay-args.sh` 第 579 行的
+skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 的佔位錨點。本輪⛔ 沒有改任何產品程式、tooling 路徑或兩支 shell
+腳本的框架部分；`python/scripts/test.sh` 未動。
+
+##### 一、補上的測試
+
+| # | subcase | 測試（新增，除非註明修改） |
+|---|---|---|
+| F1 | v29 l | `scripts/test-replay-args.sh` ③d 段：「l：durable 之後只剩輔助清理（worktree remove）失敗 → 結束碼仍是 0」（fake docker 回 0、PATH 前置只讓 `worktree remove` 失敗的 git；以 fake git 的紀錄與 worktree 登記數確認清理真的失敗過，之後 `git worktree prune`） |
+| F2 | ③ w-3 | `test_replay_stage2_archive.py::test_w_stage1_manifest_itself_must_be_valid` |
+| F3 | v29 ag-1、ag-2 | `scripts/test-replay-args.sh`：「ag：專用 tag 只在 pin／restore，⛔ 不等於任何 build 腳本的預設 tag」＋「ag（反向案例）：另一支 test-*.sh 寫死專用 tag → 被抓到」（第一、二輪 review 改寫：`ag_scan()` 掃 `scripts/`、`scripts/lib/`、`python/scripts/` 的全部 `.sh`，只排除會自我比對的 `scripts/test-replay-args.sh`；抽非空的 `${PY_IMAGE:-<tag>}`、字面值的 `IMAGE="<tag>"` 與 `build … -t <tag>`；每個值都必須像 image reference；專用 tag 只准在 `pin-replay-image.sh`、`restore-replay-image.sh`；這一段是靜態檢查，放在需要正式 bundle 的段落之外） |
+| F4 | v29 f | `test_replay_counterfactual.py::test_report_max_rows_truncates_only_the_report_in_the_counterfactual_path` |
+| F5 | v29 j-3、③ i-3 | `test_replay_stage2_archive.py::test_i_staging_write_failure_leaves_no_archive` |
+| F6 | v29 m-3 | `test_replay_stage2_archive.py::test_m_recovery_never_rebuilds_the_archive` |
+| F7 | v29 y-3 | `test_replay_counterfactual.py::test_main_rejects_the_remaining_pairing_rules[stage1-with-sha／uppercase-sha／short-sha]` |
+| F8 | v29 z-2 | `test_replay_stage2_archive.py::test_z_candidate_flag_inconsistent_record_is_published_and_identifiable` |
+| F9 | v29 x | **修改** `scripts/test-replay-args.sh` 的 x：stderr 必須含 run identity 驗證的訊息（見「二」#2） |
+| F10 | v29 ad-2 | **修改** `scripts/test-i074-stage2.sh` 的 ad 迴圈：`1 2 4` → `1 2 4 137` |
+| F11 | v29 n8-1、n8-2、n8-4 | `scripts/test-i074-stage2.sh`：`post_case` 加可選的 replay 結束碼；新增三支改「⛔ 不會被執行的已追蹤檔」（`python/baselines/b1_test/manifest.json`）的情境——replay 回 0（finalize 之前）、replay 回 6（publish 之前）、`--promote` 之前（見「二」#3）；原本改 helper 的兩支照舊 |
+| F12 | v29 n9 | `scripts/test-i074-stage2.sh`：合成 repo 加 `python/baselines/i074_stage1/evidence_manifest.json` 與 `python/baselines/i074_stage2/envcheck/evidence_manifest.json` 兩個佔位錨點；新增對照組與 (i)(ii)(iii) 三個情境（`n9_case`），各自斷言晉升 0、`evidence/` 與對照組 `diff -r` 相同、runner 收到的兩份 patch SHA 與對照組相同；原本的合併情境與其後的判讀器段落照舊 |
+| F13 | v29 n11-8 | `test_i074_stage2_promote.py::test_6b_source_side_read_error_is_9_not_8`（`pm.os` 換成只讓來源 fd 的 `read` 在複製時失敗的替身） |
+| F14 | v29 n11-9 | `test_i074_stage2_promote.py::test_6b_failed_record_verification_failure_is_9_and_cleans_staging` |
+| F15 | v29 n11-13 | `scripts/test-i074-stage2.sh`：兩個執行目錄各留一份待晉升的終態；第一個 `--promote` 停在驗證模式的 barrier（持鎖）→ 第二個以 symlink 別名的真正 repo 路徑執行 → 8 且訊息是鎖衝突；先到的 staging 沒有被清；放開之後先到的 0、⛔ 沒有殘留 staging |
+| F16 | v29 n11-15 | `test_i074_stage2_promote.py::test_6a_trust_root_binding_is_9_and_untouched` |
+| F17 | v29 n11-18 | `test_i074_stage2_promote.py::test_real_git_dir_inventory_is_unchanged` |
+| F18 | v29 n11-19 | `scripts/test-i074-stage2.sh`：第二個執行目錄的複本留兩筆 worktree 登記（實體目錄已刪／仍在）→ `--promote` 走 6a 回 0；已刪的那一筆被 prune、仍在的保留 |
+| F19 | v29 n7b-7 | `test_i074_stage2_host.py::SentinelLifecycle.test_existing_sentinel_of_any_type_blocks`（dangling symlink、指向檔案的 symlink、目錄、FIFO） |
+| F20 | v29 n7b-15 | `SentinelLifecycle.test_unreadable_sentinel_contents_block`（空檔、截斷的 canonical JSON、schema 不符的合法 JSON） |
+| F21 | 六、9 m-4 | `test_replay_stage2_archive.py::test_m_promotion_verification_rejects_a_missing_anchor` |
+| F22 | ③ w-4、w-5 | `test_replay_envcheck.py::test_w_members_with_an_extra_key_are_rejected`；`test_replay_stage2_archive.py::test_w_each_member_sha_in_the_stage2_manifest[3 個成員 × 2 個 SHA]` |
+| F23 | ③ aq | `test_replay_stage2_archive.py::test_aq_stage1_identity_member_tampered_is_rejected` |
+| F24 | ③ ai-2、ay-2 | **修改** `test_i074_stage2_preflight.py` 的 `test_ai_*`（`ArtifactError` ＋ `不完全相同`）與 `test_ay_tampered_cohort_is_rejected`（照實改成 `canonical gzip`，見「二」#1）；新增 `test_ay_cohort_rules_are_enforced_before_replay` |
+| F25 | ③ bd2-3、bd2-4 | `test_replay_stage2_archive.py::test_bd2_recover_durability_is_blocked_by_e3b`；`test_i074_stage2_preflight.py::test_bd2_not_equivalent_envcheck_blocks_the_anchors_step` |
+| F26 | ③ bk-4 | `test_replay_envcheck.py::test_bk_row_mismatch_count_is_not_capped`（新 helper `_python_root_with()`：25 列的 Stage 1 D+1） |
+| H1 | 「四」測試衛生 | `scripts/tests/test_i074_stage2_host.py`：模組層 `reap_token_processes()`（＋ `_proc_entry()`、`_same_uid_processes()`、`_self_and_ancestors()`）；`RssAddendumHost.setUp` 產生 `self.token` 並以 `addCleanup` 再收一次；MARKER_LOOP 與各 `sh -c` 包裝程序、outsider 的 argv 帶 token；產品應該收乾淨的五支（live setsid、TERM 升級 KILL、訊號三種、ac24b 兩支）在斷言之後手動呼叫並斷言 `[]`；`exits_70` 改成由 helper 收掉產品刻意收不掉的那一個；新增 `test_h1_helper_reaps_what_a_broken_product_cleanup_leaves`；第一輪 review 之後：所有 `sleep 30` 改成 argv 帶 token 的 Python sleeper（`_sleeper()`、`SH_SLEEP30`／`SH_SLEEP30_IGNORE_TERM`），`SupervisorCase` 與 `AcceptanceHost` 也加 token 與 teardown 的收尾 |
+
+##### 二、補齊時的發現（⚠️ 縮窄斷言之後，兩支既有測試其實被別的守門擋下）
+
+| # | 測試 | 實況 | 處置 |
+|---|---|---|---|
+| 1 | preflight 的 `test_ay_tampered_cohort_is_rejected`（原本 `pytest.raises(Exception)`） | 它以 `gzip.compress` 寫回竄改後的 cohort——擋下它的是「⛔ 不是 canonical gzip」，⛔ 不是 cohort 的信任錨（第 8／9 道） | 斷言照實改成 `canonical gzip`；另補 `test_ay_cohort_rules_are_enforced_before_replay`：同步 Stage 1 manifest、只讓 keys 不符。⚠️ 在 `anchors` 這一層，先擋下的是 `envcheck/` 記錄的 Stage 1 錨點（`stage1_evidence 的宣告值與本次重算的 Stage 1 信任錨不符`）——第 8／9 道本身只在 helper 層由 `test_replay_stage2_archive.py::test_ad_ay_*` 驗（docstring 照實寫明） |
+| 2 | runner 的 x（`s7_blocked … s7_x ""`，⛔ 不看訊息） | 擋下它的是 run identity 的驗證（identity 記的 `expected_image_id` ≠ 空的 `REPLAY_IMAGE_ID`：`三趟必須用同一個 image`），⛔ 不是「⛔ 不自動 pin」那一行——後者在 identity 驗證之後，`REPLAY_IMAGE_ID` 為空時其實走不到 | 斷言改看 `三趟必須用同一個 image`：identity 驗證**只在 `I074_MODE`** 執行、而且在自動 pin 的分支之前就結束，所以這個訊息同時證明 flag 納入了 `I074_MODE`、也⛔ 沒有走到自動 pin |
+| 3 | n8 的「改掉複本的已追蹤檔」（replay 之後）與「`--promote` 之前改動複本」 | 兩支都往 `python/scripts/i074_stage2_preflight.py` 尾端寫 `x`——那是 orchestrator 在檢查點之前就會執行的 helper（`pf state-write-replay-done`、`pf state-check`），語法錯誤讓它先失敗。反向驗證實測：把檢查點裡的 `integrity` 拿掉（F11int），這兩支照樣綠 | 原本兩支保留（helper 被改照樣要擋）；另補三支改**⛔ 不會被執行**的已追蹤檔，F11int 之下三支都紅。稽核表的 n8-1、n8-4 事後改判 ⚠️ |
+
+##### 三、補齊之後的反向驗證（每一項注回對應的缺陷，確認新測試會紅）
+
+**環境**：與「⑧ 稽核結果」「三」相同的做法（scratchpad 的 `8/cloneenv.sh`）：隔離 clone 綁定 staged tree `061810a7…`、專屬 tag、每一項只改 clone 裡的
+一個檔（`8/inj8.py`，恰好命中一次）、跑完以 `git checkout` 還原並比對原始 SHA；pytest 跑整個相關測試檔，host 測試以精確的 unittest id
+（`python3 -m unittest test_i074_stage2_host.<類別>`，與 pytest 的 node id 同等級），shell 跑完整的官方腳本。
+
+| # | 注回的缺陷（clone 內） | 紅的測試 |
+|---|---|---|
+| 對照組 | ⛔ 不注回 | pytest 504 passed；host 34 tests OK；`test-replay-args.sh` 462 ok、0 FAIL；`test-i074-stage2.sh` 236 ok、0 FAIL（revv6，最後的 staged tree `621fe19b…`） |
+| F4 | 反事實路徑的 comparison 以 `report_max_rows` 截斷 | `test_report_max_rows_truncates_only_the_report_in_the_counterfactual_path` |
+| F7 | 成對守門拿掉 hex 檢查 | `test_main_rejects_the_remaining_pairing_rules[uppercase-sha／short-sha]` ＋ 既有 `test_pairing_guard_…[uppercase-sha／short-sha]`（`stage1-with-sha` 另有「SHA 無 flag」那一條擋，屬縱深防禦） |
+| F5 | `ClosedArchiveWriter` 失敗時⛔ 不清 staging | `test_i_staging_write_failure_leaves_no_archive` ＋ 既有的 i 三支、TOCTOU 三支、`test_publish_rejects_a_record_whose_semantic_differs_from_the_handoff` |
+| F6 | recovery 動到 archive（`utime` manifest） | `test_m_recovery_never_rebuilds_the_archive`（唯一一支） |
+| F2 | 拿掉 Stage 1 manifest 的 `validate_evidence_manifest()`（第 2 道） | `test_w_stage1_manifest_itself_must_be_valid`（唯一一支） |
+| F8 | failed record 的 `failure_reason` 寫死成 `rr_not_restored` | `test_z_candidate_flag_inconsistent_record_is_published_and_identifiable`（唯一一支） |
+| F21 | 驗證入口在錨點缺了的時候跳過驗證 | `test_m_promotion_verification_rejects_a_missing_anchor`（唯一一支） |
+| F22a | `members` 的 key 集合只要求「包含」 | `test_w_members_with_an_extra_key_are_rejected`（唯一一支） |
+| F22b | Stage 2 manifest 的 `stage1_evidence` 只比 manifest SHA 與 cohort | `test_w_each_member_sha_in_the_stage2_manifest` 的 after 與 identity 四個參數（cohort 那兩個照常綠——正是 v29 稽核前唯一有的那一種） |
+| F23 | identity 成員信 manifest 記的值、⛔ 不重算 | `test_aq_stage1_identity_member_tampered_is_rejected`（唯一一支） |
+| F25a | E3b 只在帶目前 identity 時檢查（recovery 與 lookup 不檢查） | `test_bd2_recover_durability_is_blocked_by_e3b` ＋ 既有 `test_bd2_not_equivalent_envcheck_blocks_stage2` |
+| F25b | E3b 只在⛔ 不帶 identity 時檢查（preflight 與 finalize 不檢查） | `test_bd2_not_equivalent_envcheck_blocks_the_anchors_step` ＋ 既有 `test_bd2_*` |
+| F24 | `run_anchors()` 在信任錨之前丟出不相干的 `TypeError` | 縮窄之後的 `test_ai_*`、`test_ay_tampered_*`，新的 `test_ay_cohort_rules_*`、`test_bd2_*_anchors_step`，與 `test_anchors_uses_the_current_identity`（舊寫法 `pytest.raises(Exception)` 在這種注回下會照樣綠） |
+| F26 | `row_mismatch_count` 被截到 sample 上限 | `test_bk_row_mismatch_count_is_not_capped`（唯一一支） |
+| F13 | 來源側讀取錯誤分類成目的端的 8 | `test_6b_source_side_read_error_is_9_not_8`（唯一一支） |
+| F14 | failed record 驗證失敗時忘了本次的 staging | `test_6b_failed_record_verification_failure_is_9_and_cleans_staging` ＋ 既有三支 failed 路徑的清理測試 |
+| F16 | 6a 的驗證輸出⛔ 不比 `base_commit` | `test_6a_trust_root_binding_is_9_and_untouched`（唯一一支） |
+| F17 | 晉升在真正 repo 的 `.git` 寫一個檔 | `test_real_git_dir_inventory_is_unchanged`（唯一一支） |
+| F18（pytest） | 第 2 步⛔ 不 prune | 既有 `test_only_verification_and_trusted_git_are_called`、`test_step2_prune_failure_is_9`（shell 那一半見 revv3） |
+| F19 | `check_no_sentinel()` 改用跟隨 symlink 的 `stat` | `test_existing_sentinel_of_any_type_blocks[dangling symlink]` |
+| F20 | 0 bytes 的 sentinel 當成不存在 | `test_unreadable_sentinel_contents_block[空檔]`（FIFO 的 `st_size` 也是 0，連帶紅） |
+| H1 | 測試 helper 自己⛔ 不送訊號 | 5 支：`test_h1_helper_reaps_what_a_broken_product_cleanup_leaves`、`exits_70`、ac24b 的三支（helper 收不掉 → 逾時即紅，teardown 再以 PID 收）；之後⛔ 沒有帶 token 的殘留程序 |
+| H1p | **產品** `host-run` 的清理失效（2026-10-05 洩漏的情境） | 5 支（7 個 FAIL／ERROR，含訊號的三個 subTest）：live setsid、TERM 升級 KILL、訊號、`exits_70`、ac24b 的 TERM 期間 fork；之後⛔ 沒有帶 token 的殘留程序（helper 與 teardown 收掉了） |
+| F1 | finalizer 的清理在 `worktree remove` 失敗時 `exit 1` | 「l：durable 之後只剩輔助清理…」＋ ③d 段其餘 10 支（這個注回讓每一次 finalizer 都回 1） |
+| F3 | `python/scripts/test.sh` 的預設 tag 改成專用 tag | 「ag：專用 tag ⛔ 不等於任何 build 腳本的預設 tag」（唯一一支） |
+| F3a（第一輪 review） | `python/scripts/test.sh` **寫死** `IMAGE="<專用 tag>"`（舊版只看 `PY_IMAGE:-…`，會假綠） | 改寫後的「ag：…」（唯一一支；revv9，staged tree `e954cc38…`） |
+| F3b（第一輪 review） | smoke 以字面值 `docker build -t <專用 tag>` | 同上（唯一一支） |
+| F3c（第二輪 review） | `ag_scan()` 改回「依名稱整批排除 `test-*.sh`」 | 「ag（反向案例）：…」（唯一一支；revv10，staged tree `06d6ac7a…`，同一個 clone 的 RA 對照組 463 ok、0 FAIL） |
+| smoke（第二輪 review） | ⛔ 不注回——最終程式 tree 的 smoke | revv10 的同一個 clone：rc 0、17 ok、0 FAIL（含反事實段）；smoke 以 clone 的內容重新 build 專屬 tag：`sha256:ab7ef586…`，收尾已刪 |
+| H1x（第一輪 review） | `test_ac24b_parent_identity_mismatch_is_2_without_signals` 在 driver 回傳之後、登記 PID 之前故意失敗 | 那一支紅；之後⛔ 沒有帶 token 的殘留程序、⛔ 沒有 sleeper 殘留（舊版的 `sleep 30` 在這種失敗下會留下孤兒） |
+| F9 | `I074_MODE` 下⛔ 不做 run identity 驗證（之後仍被「⛔ 不自動 pin」那一行擋下——舊斷言照樣綠） | 縮窄之後的「x：flag 納入 I074_MODE …」（唯一一支） |
+| F10 | orchestrator 在 replay 回 137 時仍呼叫 finalize | 「ad：replay 回 137 → 1、finalize／publish 都未被呼叫」（唯一一支） |
+| F11 | 只對 replay 回 6 跳過 replay 之後的檢查點 | 新的「n8（⑧ 補齊）：replay 回 6 …」＋ 回 6 路徑的既有 4 支（檢查點同時解析 `REPLAY_RC`，連帶失效） |
+| F11int | 檢查點⛔ 不驗複本完整性（`integrity`） | 新的兩支 bundle manifest（回 0、回 6）＋ 既有 ax、n8 的 `<work>/bin` 兩支；**原本改 helper 的「已追蹤檔」那一支照樣綠**（「二」#3 的實證） |
+| F11both | 檢查點與 preflight 0 都⛔ 不驗複本完整性 | 新的「`--promote` 之前改動複本裡⛔ 不會被執行的已追蹤檔」＋ F11int 的那幾支；**原本「`--promote` 之前改動複本」（改 helper）照樣綠** |
+| F18（shell） | 晉升第 2 步⛔ 不 prune | 「n11：實體目錄已消失的登記被 prune、仍在的保留」（唯一一支） |
+| F12b | replay 之後從真正 repo 同步 Stage 1 錨點到複本（⑩ 期間讀了真正 repo） | 新的 n9 (ii)、(iii)；(i) 與原本的合併情境照樣綠——合併情境改的是 `i074_stage2/` 的兩份 patch，抓不到這一類 |
+| F15b | 晉升模式把鎖衝突當成沒事 | 新的「n11：兩個執行目錄同時 --promote …→ 後到的 8、原因是鎖衝突」＋ 既有「n7b：鎖衝突時 --promote → 8」 |
+
+⚠️ 作廢的兩項：第一版的 F12（finalizer 改從真正 repo 執行）與 F15（晉升模式⛔ 不取鎖）影響太廣——整條晉升流程失效，`test-i074-stage2.sh`
+在 n9 與「兩個 `--promote`」那兩段之前就中止，⛔ 無法證明新測試的敏感度，改以 F12b、F15b 重做。所有輪次之後：正式工作樹（index tree、
+`status`、全部檔案的 mode 與 SHA）、`docker ps -aq`、image 清單、真正 repo 的 worktree 登記、`/tmp/tmp.*` 前後都相同（revv2 的 F1 殘留見
+「六」#2）；⛔ 沒有帶 token 的殘留程序。
+
+##### 四、全量執行（計畫「五」「六」；scratchpad 的 `8/fullrun.sh`、`8/smoke8.sh`）
+
+**第一次：步驟 1 的 pytest 那一層以 137 結束**（2026-10-07 08:50:49～09:00:14Z，staged tree `ae830806…`）：
+
+| 項目 | 結果 |
+|---|---|
+| doc-refs、`check-doc-refs` | 問題 0 |
+| `test-replay-args.sh`（`IMAGE_REQUIRED=1`） | 全部通過 |
+| `test-i074-stage2.sh`（含 host unittest 72 支） | 全部通過 |
+| pytest（`mem=399m`——`mem-guard` 依開跑當下的 host 可用記憶體下修；同一天早上同一個入口是 455m） | ⚠️ 跑到約 67%（`test_replay_envcheck.py`）時容器被收掉、`test.sh` 回 **137**；進度列在約 26%（`test_i074_stage2_acceptance.py` 一帶）有兩個 `F`——pytest 沒能印出失敗摘要，⛔ 無法確認是哪兩支 |
+| kernel 訊息（游標 `[7880456.881243]` 之後、只看新增的行） | `OOM killed process 1 (pytest) … anon-rss:375836kB`（＝ `mem=399m` 上限的 92%，落在計畫要求的 80%～100%）；在它之前還有 4 筆 `python3.11`（anon-rss 99,708／6,412／4,948／90,928 kB）——PID 是小數字（容器的 PID namespace），與 pytest 子程序的形狀一致，但這台 kernel 的 OOM 訊息⛔ 不帶 memcg，⛔ 無法決定性地綁定到這個容器（計畫第三輪 review 的已知限制）。live 容器唯讀檢查：⛔ 沒有任何一個在本次重啟（`StartedAt` 都是 2026-09-18） |
+| 時段 | pytest 跑在 08:57～09:00Z ＝ 台北 16:57～17:00，正是 live 的 17:00 排程；09:01Z 量到 host 可用記憶體只剩 489 MB |
+| 處置 | ⛔ 沒有自動分段（計畫「五」步驟 2）；第一輪 review 之後以**同一個官方入口**重跑（見「第二次」），⛔ 沒有分段 |
+| 參考 | 前兩輪（⑦d 增補、有效性條件的實作）的全量執行同樣在 `test_replay_envcheck`（67%）被收掉（`mem=390m`），當時分三段補跑全綠——這台 host 反覆出現的狀況，⛔ 不是 ⑧ 的新測試造成的 |
+| 兩個 `F` | ⚠️ **身分未知、因果未證實**（第一輪 review 訂正：原本寫成「記憶體逼近上限所連累」，判定過強）——pytest 在印出失敗摘要之前就被收掉。單獨跑 `test_i074_stage2_acceptance.py` 是 315 passed（`mem=343m`），只證明它們在那個條件下會過；第二次的完整入口裡 `test_i074_stage2_acceptance.py` 也全部通過（見下） |
+| ⑧ 改動的五個 pytest 檔 | 正式工作樹單獨跑（`SKIP_SHELL_TESTS=1`）：502 passed、1 failed（ay——縮窄斷言時發現，見「二」#1）；修正後 preflight 47 passed；最後的 staged tree 上，反向驗證的對照組 504 passed（「三」） |
+
+**第二次：完整入口全過**（第一輪 review 之後，2026-10-07 11:41:30～11:52:27Z，staged tree `e954cc38…`——含第一輪 review 的修正；
+`python/scripts/test.sh -v backtest/ tests/`，與預設參數相同、只多 `-v`，被收掉時進度也會留下失敗的測試名稱）：結束碼 **0**；doc-refs
+與 `check-doc-refs` 問題 0；`test-replay-args.sh` 全部通過；`test-i074-stage2.sh` 全部通過（含 host unittest）；pytest **2294 passed、
+1 skipped**（`test_excursion_cost.py`）、1 warning，`mem=471m`，⛔ 沒有任何 FAILED／ERROR。步驟 4（tooling `--verify`，staged tree）rc 0。
+殘留：`docker ps -aq`、image 清單、`/dev/shm`、`/run/lock`、staged tree 前後相同；⛔ 沒有帶 token 的程序；worktree 登記 385 → 389
+（＋4：這一次 `test-replay-args.sh` 的已知增量）。⚠️ 開跑前的 385 比第一次結束時的 381 多 4 筆：建立於 09:38:48～09:39:00Z、是
+`5e2d84f` 的完整 checkout（`test-replay-args.sh` 在正式 repo 跑一次的形狀），但那段時間本 session ⛔ 沒有在正式 repo 跑任何測試——
+推測是同一台機器上另一個 session 所為；⛔ 沒有清理、⛔ 沒有 prune。
+
+**第三次：第二輪 review 之後、最終的程式 tree 上**（2026-10-08 01:56:16～02:06:10Z，staged tree `06d6ac7a…`；同一個入口）：
+結束碼 **0**；doc-refs 與 `check-doc-refs` 問題 0；`test-replay-args.sh` 全部通過（含改寫後的 ag 與它的反向案例）；`test-i074-stage2.sh`
+全部通過；pytest **2294 passed、1 skipped**、1 warning，`mem=474m`。步驟 4 rc 0。殘留同第二次（worktree 登記 393 → 397，＋4 是這一次的
+已知增量）。⚠️ 開跑前的 393 比第二次結束時的 389 多 4 筆：建立於 10/08 01:33:39～01:33:48Z，同樣是 `test-replay-args.sh` 的形狀，
+本 session 那段時間只跑了純 Python 的抽取原型，⛔ 不建 worktree——同樣照實記錄、⛔ 沒有清理。同一個 tree 的 smoke 見「三」的 revv10。
+
+**其餘步驟**：
+
+| 步驟 | 結果 |
+|---|---|
+| 3：smoke（隔離 clone、staged tree `ae830806…`、專屬 tag `stock-trading-i074-step8:smoke`） | rc 0、17 ok、0 FAIL（含反事實段：after 有候選 → before 消掉 → 恰好三檔、comparison 非空且逐列翻轉）。smoke 以 clone 的內容**重新 build** 這個 tag：`sha256:be21ba1e…`（與 clone 開頭 build 的相同；⛔ 不是共用 tag 的那一個）；收尾已刪 tag 與它的 image |
+| 4：`scripts/make-i074-tooling-patch.sh --verify "$(git write-tree)"`（staged tree） | rc 0：tooling patch 與重新產生的逐位元相同（⑧ 沒有動 tooling 路徑） |
+| 5：`check-doc-refs`、`git diff --cached --check` | 最後一次文件修改之後執行：「問題 0」、乾淨 |
+| 6：否定詞掃描（scratchpad 的 `7d/forbid_scan.py`） | 最後一次 stage 之後執行：結束碼 0 |
+| 各 staged tree 的關係 | ⚠️ 第二輪 review 訂正：原本這一列寫「與全量執行、smoke 測的 `ae830806…` 只差文件與註解」，⛔ 不正確——見「第二輪 review 的修正」的 tree 對照 |
+
+**「六」殘留的驗收**（第一次全量執行前後）：真正 repo 的 worktree 登記 377 → **381**（＋4：步驟 1 的 `test-replay-args.sh` 跑一次的已知增量，I-118；新增的四筆都在 `/tmp/tmp.*`；⛔ 沒有清理、⛔ 沒有 prune 既有的）；`/run/lock` 沒有任何 `i074-stage2.*`（鎖檔與 sentinel 都不存在，前後相同）；`/dev/shm/i074-*` 前後都沒有；`docker ps -aq --no-trunc` 與 image 清單前後相同；⛔ 沒有帶 cleanup token 的程序存活；staged tree 前後相同。反向驗證與 smoke 的 clone、專屬 tag、它們的 image 與 `/tmp` 殘留都已收掉（各輪 driver 的前後比對全部相同）。
+
+##### 五、與計畫的差異
+
+| # | 差異 | 理由 |
+|---|---|---|
+| 1 | H1 的 helper 除了 argv 帶 token 的程序，也收它們在**掃描當時**的子孫（以 ppid 遞移），並釘住之後持續追到固定點 | `sh -c` 包裝程序底下的 `sleep 30` 之類有界子程序 argv 帶不了 token；父程序被收掉之後它們會被收養、失去關聯——掃描當時先釘住才收得到。⛔ 沒有放寬「同 UID、排除自身與祖先、PID ＋ starttime」任何一條 |
+| 2 | host 測試的反向驗證以精確的 unittest id 執行（⛔ 不是整支 `test-i074-stage2.sh`） | 與 pytest 的 node id 同等級的公開入口（`python3 -m unittest <模組>.<類別>`）；整支 S2 要 4 分鐘以上，只為了 host 的那一段 |
+| 3 | 第一批反向驗證（revv2）的 S2 六輪作廢、重跑（revv3、revv4） | 見「六」#1：host 可用空間低於合成流程 preflight 6 的門檻；重跑前先檢查可用空間 ≥ 1.3 GB |
+| 4 | F9 的注回改寫 | 第一版（`validate-i074-run-identity.py … || true`）不會讓 x 變紅：validator 照樣把訊息印到 stderr；改成「`I074_MODE` 下⛔ 不做 identity 驗證」 |
+| 5 | ay 在 preflight 的 `anchors` 那一層隔離不出第 8／9 道 | 見「二」#1；第 8／9 道由 helper 層的既有測試承接 |
+| 6 | 第二次全量執行以 `python/scripts/test.sh -v backtest/ tests/` 執行 | 與預設參數相同、只多 `-v`：萬一再被收掉，進度也會留下失敗的測試名稱（第一輪 review 的高 1） |
+
+##### 六、觀察（⛔ 不在 ⑧ 處理）
+
+| # | 觀察 | 影響 |
+|---|---|---|
+| 1 | ⚠️ `scripts/test-i074-stage2.sh` 的合成流程會跑**真正的** preflight 6（`statvfs`）：host 可用空間 < 1,241,513,984 bytes 時，完整流程那一段整片失敗（2026-10-07 revv2 實測：可用 1,235,075,072 → 13 行 FAIL、腳本中途結束）。⚠️ 失敗訊息是 `PreflightError: 可用空間 …`，⛔ 不是測試本身的缺陷 | 這台 host 只剩約 1.6 GB；隔離 clone（約 160 MB）、`/tmp` 的 I-118 洩漏與 dangling image 都會吃掉餘裕。要讓測試與 host 的空間脫鉤，屬測試框架的改動（例如以 fake `docker info` 指向空間足夠的位置），另議 |
+| 2 | I-118 的 `/tmp` 洩漏在注回「清理失敗」類的缺陷時會放大：F1 那一輪留下 84 個目錄（③d 隔離 repo 的合成用 worktree 與凍結的 patch） | 已逐一確認是那一輪建立的之後刪除；其他輪次以 `cloneenv.sh` 的收尾刪掉本次 clone 的 worktree 與只有 `tooling.patch` 的目錄 |
+
+##### 七、歸檔與待辦
+
+* [`development-workflow.md`](./development-workflow.md) 新增「I-074 Stage 2 的測試落點（⑧ 稽核，2026-10-07）」：測試類別、落點與入口的索引
+  （⛔ 不搬逐 id 的全表），以及寫這一區測試的四條規則（斷言性質、cleanup token、⛔ 不碰 `/run/lock`、反向驗證在隔離 clone）。
+* 逐 id 的稽核表、補法與反向驗證留在本筆（「⑧ 稽核結果」與本節）；依 CLAUDE.md，review 確認之後再收斂。
+* ⚠️ 讀碼疑點 1（失敗量測在 `raw-failed/` 留下合法的 freeze record ＋ 報告）⛔ 不在 ⑧ 處理——建議另立計畫（「⑧ 稽核結果」「五」）。
+* ⚠️ 「六」#1（S2 的合成流程依賴 host 可用空間）與 #2（I-118 在注回清理失敗時放大）只記錄，⛔ 不在 ⑧ 處理。
+* 下一步：review 本節；之後依 v29 的順序進 ⑨（differential guard 與兩份 patch 的封存）。
+
+##### 第一輪 review 的修正（2026-10-07）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **全量 pytest 尚未完成**，中止前的兩個 `F` 無法識別；「四」把它們判成記憶體壓力所連累，因果判定過強——單獨跑 acceptance 的 315 passed 證明不了全量那一次的原因 | ✅ 成立 | 「四」那一列改寫成「身分未知、因果未證實」；以完整入口加 `-v` 重跑（被收掉時，進度也會留下失敗的測試名稱），結果見「四」的「第二次」 |
+| 中 | **H1 的 token 沒有覆蓋所有長存程序**：`test_ac24b_parent_identity_mismatch_is_2_without_signals` 起的 `sleep 30` 不帶 token，PID 又要等 driver 成功回傳才登記——driver 逾時、JSON 解析或中間的斷言失敗時，teardown 收不到那個孤兒 | ✅ 成立；另外 `_target_case`／`_child` 的 `sh -c` 雖然帶 token，底下的 `sleep 30` 不帶（sh 被收掉之後就失去關聯），`ForkedPaths`（`setsid sleep 30`）與 `AcceptanceHost`（`host-run` 底下的 `sleep 30`）也一樣 | 一律改成 argv 明確帶 token 的 Python sleeper（`_sleeper()`；sh 的寫法以 `exec` 換成它——`$0` ＝ token、`$1` ＝ python，忽略 TERM 的版本先 `trap` 再 `exec`，SIG_IGN、PID 與 starttime 都保留）；`SupervisorCase` 與 `AcceptanceHost` 也加上 token 與 teardown 的收尾。反向驗證 H1x：在 driver 回傳之後、登記 PID 之前故意失敗 → 那支測試紅、⛔ 沒有殘留 |
+| 中 | **F3 沒有完整驗證「所有 build 預設 tag」**：只抽 `PY_IMAGE:-…`、⛔ 沒有檢查 `build -t …`；掃描包含測試腳本自己，抽出假值，「至少一個預設值」可以被自身文字滿足；寫死 `IMAGE=<專用 tag>` 的 build 腳本會假綠 | ✅ 成立（實測抽出 `'`、`//' \| LC_ALL=C sort -u)`、`[^`） | 改寫：排除 `test-*.sh`；抽三種寫法（非空的 `${PY_IMAGE:-<tag>}`、字面值的 `IMAGE="<tag>"`、字面值的 `build … -t <tag>`）；抽到的每一個值都必須像 image reference；專用 tag 只准出現在 `pin-replay-image.sh` 與 `restore-replay-image.sh`；`python/scripts/test.sh` 與 pin 必須各抽得到。反向驗證 F3a（`test.sh` 寫死專用 tag）、F3b（smoke 以字面值 `build -t` 專用 tag）都紅 |
+
+##### 第二輪 review 的修正（2026-10-08）
+
+| 嚴重度 | review 的發現 | 查證 | 修正 |
+|---|---|---|---|
+| 中 | **驗證紀錄的 staged tree 關係不正確**：「其餘步驟」那一列把完整測試與 smoke 都寫成 `ae830806…`、只差文件與註解；實際上完整測試（第二次）跑在 `e954cc38…`，而 `ae830806… → e954cc38…` 還改了 H1、F3 的 shell 測試與四個 pytest 檔。smoke 也沒有用修正後的 staged tree | ✅ 成立（那一列寫於第一輪 review 之前，之後沒有更新） | 改寫成下面的 tree 對照；第二輪的修正之後，以**同一個 staged tree** 重跑 RA、smoke（隔離 clone）與完整入口（正式 repo） |
+| 中 | **F3 依名稱排除全部 `test-*.sh`，仍可 fail-open**：未來的 `scripts/test-foo.sh` 若以 `docker build -t <專用 tag>`，會被整批略過 | ✅ 成立；另查：只排除本腳本時，其他 `test-*.sh` 抽不出任何值（⛔ 不會產生假值） | 只排除會自我比對的 `scripts/test-replay-args.sh`；抽取包成 `ag_scan()`；新增**永久的反向案例**：複本裡多一支以字面值 build 專用 tag 的 `scripts/test-foo.sh` → 必須抓到。順便把這一段移出需要正式 bundle 的 `if` 區塊（它是靜態檢查）。反向驗證 F3c：把排除條件改回「依名稱整批排除」→ 反向案例變紅 |
+
+**各 staged tree 與在它上面跑過的驗證**（第二輪 review 改寫；⛔ 不再以一句「只差文件」帶過）：
+
+| tree | 內容 | 跑過的驗證 |
+|---|---|---|
+| `ae830806…` | 補齊 F1～F26、H1 之後 | 第一次全量執行（pytest 137）、第一次 smoke（全過） |
+| `e954cc38…` | ＝ `ae830806…` ＋ 第一輪 review 的修正（`test_i074_stage2_host.py` 的 sleeper、`test-replay-args.sh` 的 ag 段、四個 pytest 檔的 docstring 與 `test-i074-stage2.sh` 一行註解的否定詞、`docs/issue.md`） | revv9（F3a、F3b、H1x）、第二次全量執行（全過） |
+| `06d6ac7a…` | ＝ `e954cc38…` ＋ 第二輪 review 的修正（只有 `test-replay-args.sh` 的 ag 段）＋ `docs/issue.md`、`docs/development-workflow.md` | revv10（RA 對照組、F3c、smoke）、第三次全量執行 |
+| 最終 staged tree | ＝ `06d6ac7a…` ＋ `docs/issue.md`（記錄本節） | 文件檢查（`check-doc-refs`、`git diff --cached --check`、否定詞掃描）、tooling `--verify` |
+
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
 ⚠️ **v29 是執行順序的 ⑥「更新計畫並再次確認」**：併入 ⑤ 的裁定（`P_B` 與 `M_safety`），並把計畫書與 ③b～⑤ 之後的
@@ -5632,7 +6191,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
 ⑧ 測試矩陣 a～z ＋ aa～ai（⚠️ 含 **o：未帶 flag 時一般路徑逐項不變**、**v／w：truth table**、**y：Python 成對守門**、**z：failed-attempt record**、**ab：flag 假綠**）＋ B／C 判讀器的 a～m
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次
-   ← ⚠️ 現在在這裡：⑧ 計畫 v4 待確認（見「Stage 2 步驟 ⑧ 計畫」）
+   ← ✅ ⑧ 計畫 v4 已確認（2026-10-07，`5e2d84f`）；✅ ⑧ 稽核結果與補法已確認（2026-10-07）；⚠️ 現在在這裡：⑧ 的補齊與全量執行（第二輪 review 修正後）待 review（見「Stage 2 步驟 ⑧ 補齊與全量執行的結果」）
 ⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA
    （＋ **`e1cbbbd`** 既有測試套用 patch 前後全綠）
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑨ 改成**兩份 patch 一起封存**（counterfactual ＋ tooling）；「既有測試全綠」改成

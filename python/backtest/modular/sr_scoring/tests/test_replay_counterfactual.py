@@ -149,6 +149,33 @@ def test_success_writes_exactly_three_operational_files_report_last(tmp_path, st
     assert before.load.top["before_ref"] == comparison["before_ref"] == BASE
 
 
+def test_report_max_rows_truncates_only_the_report_in_the_counterfactual_path(tmp_path, stub_replay, monkeypatch):
+    """f（⑧ 補齊）：候選數多於 bundle 的 `report_max_rows` → comparison 照樣全量、只有 report 被截斷。
+
+    ⚠️ 成功路徑那一支只有 3 列、上限 200，「comparison 被誤套 report 的上限」抓不到。
+    """
+    bundle, stage1_out, _keys, candidates = _stage1(tmp_path, stub_replay, count=4)
+    _restore_rr(stub_replay)
+    from ..replay_bundle import bundle as bundle_module
+
+    real_load = bundle_module.load_bundle
+
+    def load_with_small_report(path):
+        loaded = real_load(path)
+        object.__setattr__(loaded, "manifest", {**loaded.manifest, "report_max_rows": 2})
+        return loaded
+
+    monkeypatch.setattr(evaluation_module, "load_bundle", load_with_small_report, raising=False)
+    monkeypatch.setattr(replay_bundle_pkg, "load_bundle", load_with_small_report)
+    out = tmp_path / "stage2"
+    run_bundle_stage(_cf_args(bundle, out, stage1_out), stage=2, argv=CF_ARGV)
+    comparison = json.loads((out / OPERATIONAL_COMPARISON.split("/")[-1]).read_text(encoding="utf-8"))
+    report = json.loads((out / OPERATIONAL_REPORT.split("/")[-1]).read_text(encoding="utf-8"))
+    assert len(candidates) == 4
+    assert [(r["symbol"], r["timeframe"], r["as_of"]) for r in comparison["rows"]] == sorted(candidates)
+    assert (report["candidate_rows"], report["rows_shown"], len(report["rows"])) == (4, 2, 2)
+
+
 def test_the_effect_check_is_fed_the_before_rows(tmp_path, stub_replay, monkeypatch):
     """決策 4：餵進 `CounterfactualEffectCheck` 的**一定是本次 replay 的 before rows**。
 
@@ -441,6 +468,25 @@ def test_main_rejects_bad_combinations(tmp_path, stub_replay, monkeypatch, capsy
     """y（直接 CLI 這條路徑）＋ q／r：重複的 flag 與重複的注入參數。"""
     bundle, stage1_out, _keys, _c = _stage1(tmp_path, stub_replay)
     assert _main(monkeypatch, _cli_argv(bundle, tmp_path / "stage2", stage1_out, *extra)) == expected
+
+
+@pytest.mark.parametrize("stage,sha", [
+    pytest.param(1, CF_SHA, id="stage1-with-sha"),
+    pytest.param(2, "F" * 64, id="uppercase-sha"),
+    pytest.param(2, "f" * 63, id="short-sha"),
+])
+def test_main_rejects_the_remaining_pairing_rules(tmp_path, stub_replay, monkeypatch, stage, sha):
+    """y（⑧ 補齊）：成對守門的另外兩條也經過**直接 CLI**（`main()`）——⛔ 不只經 `run_bundle_stage()`。"""
+    bundle, stage1_out, _keys, _c = _stage1(tmp_path, stub_replay)
+    if stage == 1:
+        argv = ["--bundle", str(bundle), "--output-dir", str(tmp_path / "s1"), "--before-ref", BASE,
+                "--image-digest", "sha256:" + "a" * 64, "--source-root", "/app", "--base-commit", BASE,
+                "--tooling-patch-sha256", "1" * 64, "--runner-sha256", "c" * 64, "--counterfactual-patch-sha256", sha]
+    else:
+        argv = _cli_argv(bundle, tmp_path / "stage2", stage1_out, "--counterfactual-patch-sha256", sha,
+                         "--i074-counterfactual")
+    assert _main(monkeypatch, argv) == 1
+    assert not (tmp_path / ("s1" if stage == 1 else "stage2")).exists()
 
 
 def test_main_rejects_the_flag_on_stage1(tmp_path, stub_replay, monkeypatch):

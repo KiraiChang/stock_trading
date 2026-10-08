@@ -15,6 +15,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import secrets
 import shutil
 import signal
 import stat
@@ -22,6 +23,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -60,6 +62,8 @@ class SupervisorCase(unittest.TestCase):
         # ⚠️ `release()` 會把 TERM／INT／HUP 設成 SIG_IGN（釋放途中不被打斷）——在本程序裡呼叫它的測試結束後要還原，
         #    否則之後 fork 的子程序會繼承「忽略 TERM」（這正是第一次出現 20 秒 TERM→KILL 升級的原因）。
         self.saved_signals = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
+        self.token = "i074h1-" + secrets.token_hex(8)                   # ⑧「四」：起長存程序的測試都帶它
+        self.addCleanup(lambda: reap_token_processes(self.token))
 
     def restore_signals(self) -> None:
         for s, handler in self.saved_signals.items():
@@ -229,6 +233,53 @@ class SentinelLifecycle(SupervisorCase):
         self.assertEqual(cm.exception.kind, "sentinel")
         self.assertIn("需要重開機", str(cm.exception))
         self.assertEqual(Path(self.sup.SENTINEL_PATH).read_text(), "garbage")
+
+    def _blocked_and_untouched(self, label: str) -> None:
+        """sentinel 已存在（任何型別、任何內容）→ `check_no_sentinel()` 以 `sentinel` 拒絕、⛔ 不動那個項目。"""
+        path = self.sup.SENTINEL_PATH
+        before = os.lstat(path)
+        content = None if not stat.S_ISREG(before.st_mode) else Path(path).read_bytes()
+        with self.assertRaises(self.sup.Abort, msg=label) as cm:
+            self.make().check_no_sentinel()
+        self.assertEqual(cm.exception.kind, "sentinel", label)
+        after = os.lstat(path)
+        self.assertEqual((after.st_ino, after.st_mode), (before.st_ino, before.st_mode), label)
+        if content is not None:
+            self.assertEqual(Path(path).read_bytes(), content, label)
+
+    def _clear_sentinel(self) -> None:
+        path = self.sup.SENTINEL_PATH
+        if os.path.isdir(path) and not os.path.islink(path):
+            os.rmdir(path)
+        elif os.path.lexists(path):
+            os.unlink(path)
+
+    def test_existing_sentinel_of_any_type_blocks(self) -> None:
+        """n7b（⑧ 補齊）：sentinel 的屬性——預先建成 dangling symlink、指向檔案的 symlink、目錄、FIFO → 一律拒絕。"""
+        other = Path(self.tmp) / "other"
+        other.write_text("x")
+        for label, setup in (("dangling symlink", lambda p: os.symlink(f"{self.tmp}/missing", p)),
+                             ("symlink 指向檔案", lambda p: os.symlink(other, p)),
+                             ("目錄", lambda p: os.mkdir(p)),
+                             ("FIFO", lambda p: os.mkfifo(p))):
+            with self.subTest(label):
+                self._clear_sentinel()
+                setup(self.sup.SENTINEL_PATH)
+                self._blocked_and_untouched(label)
+        self._clear_sentinel()
+
+    def test_unreadable_sentinel_contents_block(self) -> None:
+        """n7b（⑧ 補齊）：sentinel 讀不懂——空檔、部分寫入（截斷的 canonical JSON）、schema 不符的合法 JSON → 照樣拒絕、內容不變。"""
+        payload = {"schema": self.sup.SENTINEL_SCHEMA, "token": "a" * 64, "boot_id": self.sup.boot_id(), "uid": os.getuid(),
+                   "supervisor_pid": os.getpid(), "supervisor_start_time": 12345, "mode": "orchestrator"}
+        raw = self.sup.canonical(payload)
+        for label, data in (("空檔", b""), ("部分寫入", raw[: len(raw) // 2]),
+                            ("schema 不符", self.sup.canonical(dict(payload, schema="x/v1")))):
+            with self.subTest(label):
+                self._clear_sentinel()
+                Path(self.sup.SENTINEL_PATH).write_bytes(data)
+                self._blocked_and_untouched(label)
+        self._clear_sentinel()
 
     def test_create_is_canonical_and_removal_checks_inode(self) -> None:
         s = self.prepared()
@@ -463,6 +514,7 @@ class ForkedPaths(SupervisorCase):
             sup = importlib.util.module_from_spec(spec); spec.loader.exec_module(sup)
             sup.LOCK_PATH = {self.sup.LOCK_PATH!r}; sup.SENTINEL_PATH = {self.sup.SENTINEL_PATH!r}
             sup.RUN_UID = os.getuid()
+            TOKEN = {self.token!r}
             s = sup.Supervisor("run", {self.tmp + "/work"!r}, "/x", {{"REPLAY_IMAGE_ID": "sha256:" + "a" * 64}})
             s.real = {{"docker": "/usr/bin/docker"}}
         """) + textwrap.dedent(body)
@@ -487,7 +539,7 @@ class ForkedPaths(SupervisorCase):
             import ctypes, subprocess, time
             libc = ctypes.CDLL(None, use_errno=True)
             assert libc.prctl(sup.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0
-            p = subprocess.Popen(["/bin/sh", "-c", "setsid sleep 30 & exit 0"])
+            p = subprocess.Popen(["/bin/sh", "-c", 'setsid "$1" -c "import time; time.sleep(30)" "$0" & exit 0', TOKEN, sys.executable])
             p.wait()
             time.sleep(0.3)
             live = s.live_descendants()
@@ -576,6 +628,8 @@ class AcceptanceHost(unittest.TestCase):
         self.sz = load_sizing()
         self.tmp = Path(tempfile.mkdtemp(prefix="i074-acc-host-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.token = "i074h1-" + secrets.token_hex(8)                   # ⑧「四」
+        self.addCleanup(lambda: reap_token_processes(self.token))
 
     def test_clean_env_is_the_supervisors(self) -> None:
         """ac9：clean-env 就是 supervisor 的 clean_env()（唯一定義），⛔ 不另抄清單。"""
@@ -641,7 +695,7 @@ class AcceptanceHost(unittest.TestCase):
         """ac16：harness 對整個 process group 送 TERM → host-run 與它的子程序一起結束。"""
         state = self.tmp / "S2"
         proc = subprocess.Popen([sys.executable, str(SIZING), "host-run", "--state", str(state), "--step", "t", "--",
-                                 "sleep", "30"], start_new_session=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+                                 *_sleeper(self.token)], start_new_session=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         child = None
         for _ in range(100):
             kids = [p for p in Path("/proc").iterdir() if p.name.isdigit()
@@ -750,6 +804,124 @@ def _kill_quietly(pid: int) -> None:
         pass
 
 
+
+# ── 測試衛生（issue.md I-074「Stage 2 步驟 ⑧ 計畫 v4」「四」）：收掉帶 cleanup token 的程序 ─────────────────────
+#   ⚠️ 獨立於被測的產品函式（⛔ 不呼叫 host-run、reap_adopted、kill_pinned）；只看同一個 UID；排除本程序與它的祖先；
+#   以 PID ＋ starttime 釘住，送任何訊號之前都重新比對（⛔ 不對被重用的 PID 送訊號）；TERM → 等待 → KILL → 重新掃描到
+#   固定點。列舉之後才消失（`/proc/<pid>` 已不存在）是正常的競爭；PID 仍在卻讀不到或解析失敗、逾時仍有存活 → 失敗。
+
+
+def _proc_entry(pid: int):
+    """(ppid, starttime, argv)；已消失或是 zombie → None；PID 仍在卻讀不到 → AssertionError。"""
+    base = f"/proc/{pid}"
+    try:
+        stat_text = Path(base, "stat").read_text()
+        argv = Path(base, "cmdline").read_bytes().split(b"\0")
+    except (FileNotFoundError, ProcessLookupError):
+        if os.path.exists(base):
+            raise AssertionError(f"{base} 仍在、卻讀不到身分")
+        return None
+    except OSError as exc:
+        if not os.path.exists(base):
+            return None
+        raise AssertionError(f"讀不到 {base}：{exc}") from exc
+    try:
+        rest = stat_text.rsplit(")", 1)[1].split()
+        state, ppid, start = rest[0], int(rest[1]), int(rest[19])
+    except (IndexError, ValueError) as exc:
+        if not os.path.exists(base):
+            return None
+        raise AssertionError(f"{base}/stat 解析失敗：{stat_text!r}") from exc
+    if state in ("Z", "X"):
+        return None
+    return ppid, start, argv
+
+
+def _same_uid_processes() -> dict:
+    uid, out = os.getuid(), {}
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        try:
+            if os.stat(f"/proc/{pid}").st_uid != uid:
+                continue
+        except FileNotFoundError:
+            continue
+        entry = _proc_entry(pid)
+        if entry is not None:
+            out[pid] = entry
+    return out
+
+
+def _self_and_ancestors() -> set:
+    pids, pid = set(), os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        entry = _proc_entry(pid)
+        if entry is None:
+            break
+        pid = entry[0]
+    return pids
+
+
+def reap_token_processes(token: str, *, term_wait: float = 3.0, total: float = 20.0) -> list:
+    """收掉 argv 帶 `token` 的程序與它們（掃描當時）的子孫；冪等。回傳本次送過訊號的 (pid, argv[0])。"""
+    tok, exclude = token.encode(), _self_and_ancestors()
+    pinned, reaped, deadline = {}, [], time.monotonic() + total
+    while True:
+        snap = _same_uid_processes()
+        marked = {pid for pid, (_ppid, _start, argv) in snap.items() if any(tok in a for a in argv)}
+        children: dict = {}
+        for pid, (ppid, _start, _argv) in snap.items():
+            children.setdefault(ppid, []).append(pid)
+        stack = list(marked)
+        while stack:
+            for child in children.get(stack.pop(), []):
+                if child not in marked:
+                    marked.add(child)
+                    stack.append(child)
+        marked |= {pid for pid, (start, _t, _s) in pinned.items() if pid in snap and snap[pid][1] == start}
+        marked -= exclude
+        if not marked:
+            return reaped
+        if time.monotonic() > deadline:
+            raise AssertionError(f"測試衛生：逾時仍存活 {sorted((p, snap[p][2][0]) for p in marked if p in snap)}")
+        now = time.monotonic()
+        for pid in sorted(marked):
+            start = snap[pid][1]
+            entry = pinned.get(pid)
+            if entry is None or entry[0] != start:
+                pinned[pid] = [start, now, signal.SIGTERM]
+                reaped.append((pid, snap[pid][2][0].decode("utf-8", "replace")))
+                sig = signal.SIGTERM
+            elif entry[2] == signal.SIGTERM and now - entry[1] >= term_wait:
+                entry[1], entry[2] = now, signal.SIGKILL
+                sig = signal.SIGKILL
+            else:
+                continue
+            current = _proc_entry(pid)
+            if current is None or current[1] != start:
+                continue                                    # 已消失或 PID 已被重用：⛔ 不送
+            try:
+                os.kill(pid, sig)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.05)
+
+
+# ⑧ 第一輪 review：長存的測試程序一律是 argv 明確帶 token 的 Python sleeper（⛔ 不用不帶 token 的 `sleep 30`——
+# 它被收養之後與 token 失去關聯，driver 中途失敗時 teardown 收不到）。sh 的寫法以 exec 換成它（$0＝token、$1＝python；
+# 忽略 TERM 的版本先 trap 再 exec，SIG_IGN 跨 exec 保留，PID 與 starttime 都不變）。
+SLEEPER_CODE = "import time; time.sleep(30)"
+SH_SLEEP30 = 'exec "$1" -c "import time; time.sleep(30)" "$0"'
+SH_SLEEP30_IGNORE_TERM = "trap '' TERM; " + SH_SLEEP30
+
+
+def _sleeper(token: str) -> list:
+    return [sys.executable, "-c", SLEEPER_CODE, token]
+
+
 MARKER_LOOP = "while :; do date +%s%N > \"$0\"; sleep 0.1; done"           # 存活的子孫：持續寫標記檔
 
 
@@ -762,6 +934,9 @@ class RssAddendumHost(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.pids: list[int] = []
         self.addCleanup(lambda: [_kill_quietly(p) for p in self.pids])
+        # ⑧「四」：每支測試一個 cleanup token，起的長存程序都在 argv 帶它；teardown 再收一次當保險（失敗即紅）。
+        self.token = "i074h1-" + secrets.token_hex(8)
+        self.addCleanup(lambda: reap_token_processes(self.token))
 
     def _driver(self, code: str, timeout: float = 120) -> subprocess.CompletedProcess:
         """以 driver 在自己的 session 裡執行（sz ＝ 本 repo 的 helper）。"""
@@ -809,7 +984,8 @@ class RssAddendumHost(unittest.TestCase):
 
     def test_ac24_group_sample_follows_the_ppid_tree_including_setsid(self) -> None:
         """ac16 改寫：取樣以 ppid 鏈追到的全部子孫（含 setsid 的），⛔ 不只看 process group；無關的程序⛔ 不算。"""
-        outsider = subprocess.Popen([sys.executable, "-c", "import time; x = bytearray(128 * 1024 * 1024); time.sleep(5)"])
+        outsider = subprocess.Popen([sys.executable, "-c", "import time; x = bytearray(128 * 1024 * 1024); time.sleep(5)",
+                                     self.token])
         self.pids.append(outsider.pid)
         leader = ("import subprocess, sys; subprocess.run(['setsid', sys.executable, '-c', "
                   "'import time; x = bytearray(64 * 1024 * 1024); time.sleep(1.0)'])")
@@ -823,7 +999,7 @@ class RssAddendumHost(unittest.TestCase):
 
     def _orphan_case(self, script: str, **kwargs) -> tuple[subprocess.CompletedProcess, dict, Path]:
         marker = self.tmp / "marker"
-        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {script!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {script!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
                   f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); os._exit(0)")
         args = ", ".join(f"{k}={v!r}" for k, v in kwargs.items())
         proc = self._driver(f"sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}], {args}))")
@@ -840,6 +1016,7 @@ class RssAddendumHost(unittest.TestCase):
         self.assertEqual(rec["leftover_pids"], [])
         self.assertTrue(self._marker_stopped(marker))
         self.assertTrue(self.sz.host_record_problems(rec, step="s", rc=0))          # 量測必然失敗
+        self.assertEqual(reap_token_processes(self.token), [])      # ⑧「四」：產品已收乾淨，helper 沒有東西可收
 
     def test_ac24_term_ignoring_descendant_is_escalated_to_kill(self) -> None:
         proc, rec, marker = self._orphan_case("trap '' TERM; " + MARKER_LOOP, grace_s=1.0, term_wait_s=1.0,
@@ -847,10 +1024,11 @@ class RssAddendumHost(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(rec["cleanup_complete"])
         self.assertTrue(self._marker_stopped(marker))
+        self.assertEqual(reap_token_processes(self.token), [])      # ⑧「四」：產品已收乾淨，helper 沒有東西可收
 
     def test_ac24_cleanup_that_cannot_finish_exits_70(self) -> None:
         marker = self.tmp / "marker"
-        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
                   f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); os._exit(0)")
         proc = self._driver(f"""
             os.kill = lambda pid, sig: None                     # 送訊號換成 no-op
@@ -867,6 +1045,28 @@ class RssAddendumHost(unittest.TestCase):
         problems = self.sz.host_record_problems(rec, step="s", rc=70)
         self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
         self.assertTrue(problems)
+        # ⑧「四」：產品刻意收不掉的那一個，由 helper 收（⛔ 不留到 teardown 才以 PID 殺）
+        self.assertIn(self.pids[-1], [pid for pid, _ in reap_token_processes(self.token)])
+        self.assertTrue(self._marker_stopped(marker))
+
+    def test_h1_helper_reaps_what_a_broken_product_cleanup_leaves(self) -> None:
+        """⑧「四」⑤：以 driver 把產品的清理換成 no-op（送訊號全部失效）→ 存活的子孫留下；獨立的 helper 仍收得掉、
+        收掉之後⛔ 沒有存活，而且冪等（第二次沒有候選）。"""
+        marker = self.tmp / "marker"
+        leader = (f"import subprocess, os; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                  f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); os._exit(0)")
+        self._driver(f"""
+            os.kill = lambda pid, sig: None                     # 產品的清理失效
+            sys.exit(sz.host_run(Path({str(self.tmp / 'S')!r}), 's', [sys.executable, '-c', {leader!r}],
+                                 grace_s=0.3, term_wait_s=0.3, cleanup_total_s=1.0))
+        """)
+        orphan = int((self.tmp / "orphan.pid").read_text())
+        self.pids.append(orphan)                                # 最後一道保險（helper 若壞掉，teardown 仍以 PID 收）
+        self.assertTrue(_alive(orphan))                          # 產品確實沒收（⛔ 不是自己結束的）
+        self.assertIn(orphan, [pid for pid, _ in reap_token_processes(self.token)])
+        self.assertFalse(_alive(orphan))
+        self.assertTrue(self._marker_stopped(marker))
+        self.assertEqual(reap_token_processes(self.token), [])
 
     def test_ac24_sigchld_ignored_descendant_is_detected(self) -> None:
         leader = "import signal, time; signal.signal(signal.SIGCHLD, signal.SIG_IGN); time.sleep(0.8)"
@@ -880,7 +1080,7 @@ class RssAddendumHost(unittest.TestCase):
                 tmp = self.tmp / sig.name
                 marker = tmp / "marker"
                 tmp.mkdir()
-                leader = (f"import subprocess, time; subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+                leader = (f"import subprocess, time; subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
                           "time.sleep(60)")
                 host = subprocess.Popen([sys.executable, str(SIZING), "host-run", "--state", str(tmp / "S"), "--step", "s",
                                          "--", sys.executable, "-c", leader], start_new_session=True,
@@ -897,6 +1097,7 @@ class RssAddendumHost(unittest.TestCase):
                 problems = self.sz.host_record_problems(rec, step="s", rc=want)
                 self.assertFalse([p for p in problems if p.startswith("rc=")], problems)
                 self.assertTrue(problems)                                   # 量測仍因中斷而無效
+                self.assertEqual(reap_token_processes(self.token), [])      # ⑧「四」：產品已收乾淨，helper 沒有東西可收
 
     # ── 增補實作第二輪 review：訊號的 linearization point（在紀錄寫入邊界注入訊號） ─────────────────
 
@@ -998,7 +1199,7 @@ class RssAddendumHost(unittest.TestCase):
 
     def test_ac24b_descendants_left_by_a_killed_host_run_are_adopted_and_reaped(self) -> None:
         marker = self.tmp / "marker"
-        leader = (f"import subprocess, time; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+        leader = (f"import subprocess, time; p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
                   f"open({str(self.tmp / 'orphan.pid')!r}, 'w').write(str(p.pid)); time.sleep(60)")
         proc = self._driver(self.FAKE_HARNESS + f"""
         (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
@@ -1014,13 +1215,14 @@ class RssAddendumHost(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout)["reap_rc"], 0, proc.stderr)
         self.assertFalse(_alive(self.pids[-1]))
         self.assertTrue(self._marker_stopped(marker))
+        self.assertEqual(reap_token_processes(self.token), [])      # ⑧「四」：reap_adopted 已收乾淨
 
     def test_ac24b_process_forked_during_the_term_grace_is_adopted_and_reaped(self) -> None:
         marker = self.tmp / "marker"
         leader = textwrap.dedent(f"""\
             import os, signal, subprocess, time
             def on_term(*_):
-                p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                p = subprocess.Popen(['setsid', 'sh', '-c', {MARKER_LOOP!r}, {str(marker)!r}, {self.token!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 open({str(self.tmp / 'late.pid')!r}, 'w').write(str(p.pid))
                 os._exit(0)
             signal.signal(signal.SIGTERM, on_term)
@@ -1044,12 +1246,13 @@ class RssAddendumHost(unittest.TestCase):
         self.assertEqual(json.loads(proc.stdout)["reap_rc"], 0, proc.stderr)
         self.assertFalse(_alive(self.pids[-1]))
         self.assertTrue(self._marker_stopped(marker))
+        self.assertEqual(reap_token_processes(self.token), [])      # ⑧「四」：reap_adopted 已收乾淨
 
-    def _target_case(self, reap_extra: str, script: str = "trap '' TERM; sleep 30", **kwargs) -> tuple[int, int]:
+    def _target_case(self, reap_extra: str, script: str = SH_SLEEP30_IGNORE_TERM, **kwargs) -> tuple[int, int]:
         """driver（subreaper）啟動一個目標程序（預設忽略 TERM），再以 fork 出的子程序呼叫 reap_adopted。回傳 (rc, 目標 PID)。"""
         proc = self._driver(self.FAKE_HARNESS + f"""
         (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
-        target = subprocess.Popen(["sh", "-c", {script!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        target = subprocess.Popen(["sh", "-c", {script!r}, {self.token!r}, {sys.executable!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(0.2)
         """ + self._reap_child(reap_extra, **kwargs) + """
         print(json.dumps({"reap_rc": reap_rc, "target": target.pid}), flush=True)
@@ -1064,7 +1267,7 @@ class RssAddendumHost(unittest.TestCase):
             real = sz.read_proc_stat
             sz.read_proc_stat = lambda pid: (real(pid)[0], real(pid)[1] + next(counter)) if pid != os.getppid() else real(pid)"""
         # ⚠️ 目標⛔ 不忽略 TERM（反向驗證抓到：忽略 TERM 的目標在「不驗 starttime」時也活得下來，測不出差別）
-        rc, target = self._target_case(extra, script="sleep 30", term_wait_s=0.3, kill_wait_s=0.3, total_s=1.5)
+        rc, target = self._target_case(extra, script=SH_SLEEP30, term_wait_s=0.3, kill_wait_s=0.3, total_s=1.5)
         self.assertEqual(rc, 1)
         self.assertTrue(_alive(target))                              # ⛔ 沒有送任何訊號（一個 TERM 就會讓它結束）
         self.assertTrue((self.tmp / "S" / "leftover-pids.json").exists())
@@ -1072,7 +1275,7 @@ class RssAddendumHost(unittest.TestCase):
     def test_ac24b_parent_identity_mismatch_is_2_without_signals(self) -> None:
         proc = self._driver(self.FAKE_HARNESS + f"""
         (Path({str(self.tmp)!r}) / "S").mkdir(exist_ok=True)
-        target = subprocess.Popen(["sleep", "30"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        target = subprocess.Popen({_sleeper(self.token)!r}, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         rp = os.fork()
         if rp == 0:
             os._exit(sz.reap_adopted(Path({str(self.tmp / 'S')!r}), parent=os.getppid(), parent_starttime=1, exclude=[]))
@@ -1131,7 +1334,7 @@ class RssAddendumHost(unittest.TestCase):
     # ── ac28b：kill-pinned ──────────────────────────────────────────────────
 
     def _child(self, script: str) -> int:
-        proc = subprocess.Popen(["sh", "-c", script])
+        proc = subprocess.Popen(["sh", "-c", script, self.token, sys.executable])
         self.pids.append(proc.pid)
         self.addCleanup(lambda: (_kill_quietly(proc.pid), proc.wait()))   # 測試結束時才殺、才收
         __import__("time").sleep(0.2)
@@ -1151,24 +1354,24 @@ class RssAddendumHost(unittest.TestCase):
         rc, rec = self.sz.kill_pinned(done.pid, 1, term_wait_s=0.5, kill_wait_s=0.5)
         self._check_record(rec, rc)
         self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "already_gone", []))
-        pid = self._child("sleep 30")
+        pid = self._child(SH_SLEEP30)
         rc, rec = self.sz.kill_pinned(pid, _starttime(pid) + 1, term_wait_s=0.5, kill_wait_s=0.5)
         self._check_record(rec, rc)
         self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "identity_mismatch", []))
         self.assertTrue(_alive(pid))
 
     def test_ac28b_term_kill_and_zombies_count_as_gone(self) -> None:
-        pid = self._child("sleep 30")
+        pid = self._child(SH_SLEEP30)
         rc, rec = self.sz.kill_pinned(pid, _starttime(pid), term_wait_s=2.0, kill_wait_s=2.0)
         self._check_record(rec, rc)
         self.assertEqual((rc, rec["result"]), (0, "terminated_by_term"))          # 成了 zombie（測試⛔ 不收）→ 已消失
-        pid = self._child("trap '' TERM; sleep 30")
+        pid = self._child(SH_SLEEP30_IGNORE_TERM)
         rc, rec = self.sz.kill_pinned(pid, _starttime(pid), term_wait_s=0.5, kill_wait_s=2.0)
         self._check_record(rec, rc)
         self.assertEqual((rc, rec["result"], rec["signals_sent"]), (0, "terminated_by_kill", ["TERM", "KILL"]))
 
     def test_ac28b_alive_after_kill_and_errors(self) -> None:
-        pid = self._child("trap '' TERM; sleep 30")
+        pid = self._child(SH_SLEEP30_IGNORE_TERM)
         st = _starttime(pid)
         with mock.patch.object(self.sz.os, "kill", lambda p, s: None):
             rc, rec = self.sz.kill_pinned(pid, st, term_wait_s=0.3, kill_wait_s=0.3)

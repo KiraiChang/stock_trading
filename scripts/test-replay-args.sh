@@ -1438,6 +1438,43 @@ FAKE
   fi
   cp "$S2_PT/tooling.patch" "$S2_FRUN/patches/tooling.patch"
 
+  # ── v29 l（⑧ 補齊）：archive 已 durable（fake docker 的 Python 段回 0）之後，只剩輔助清理（暫時 worktree 的
+  #    `worktree remove`）失敗 → ⚠️ 結束碼仍是 0（⛔ 不得降成一般失敗）。之後 prune 掉那筆登記，段尾「worktree 歸零」照常成立。
+  mkdir -p "$S2_TD/lbin"
+  cat > "$S2_TD/lbin/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  image) printf '%s\n' "$3"; exit 0 ;;
+  run) exit 0 ;;
+esac
+exit 0
+FAKE
+  S2_REAL_GIT="$(command -v git)"
+  cat > "$S2_TD/lbin/git" <<FAKE
+#!/usr/bin/env bash
+prev=""
+for a in "\$@"; do
+  if [ "\$prev" = worktree ] && [ "\$a" = remove ]; then echo remove >> "$S2_TD/fin_l.git"; exit 1; fi
+  prev="\$a"
+done
+exec "$S2_REAL_GIT" "\$@"
+FAKE
+  chmod +x "$S2_TD/lbin/docker" "$S2_TD/lbin/git"
+  S2_L_WT0="$(git -C "$S2_REPO" worktree list --porcelain | grep -c '^worktree ' || true)"
+  set +e
+  env -u PY_IMAGE PATH="$S2_TD/lbin:$PATH" REPLAY_IMAGE_ID="$S2_IMG" XDG_DATA_HOME="$S2_TD/xdg" \
+    "$S2_FIN" --finalize --run-dir "$S2_FRUN" > /dev/null 2> "$S2_TD/fin_l.err"
+  rc=$?
+  set -e
+  S2_L_WT1="$(git -C "$S2_REPO" worktree list --porcelain | grep -c '^worktree ' || true)"
+  # ⚠️ finalizer 的清理把 git 的 stderr 導到 /dev/null——以 fake git 自己的紀錄確認 remove 真的失敗過。
+  if [ "$rc" -eq 0 ] && [ -s "$S2_TD/fin_l.git" ] && [ "$S2_L_WT1" -gt "$S2_L_WT0" ]; then
+    pass "l：durable 之後只剩輔助清理（worktree remove）失敗 → 結束碼仍是 0"
+  else
+    fail "l：輔助清理失敗竟改變了結束碼（rc=$rc、worktree 登記 $S2_L_WT0 → $S2_L_WT1）"; cat "$S2_TD/fin_l.err" >&2
+  fi
+  git -C "$S2_REPO" worktree prune
+
   # ── recover-durability ──
   S2_EVID="$S2_PYROOT/baselines/i074_stage2/evidence"
   mkdir -p "$S2_EVID/patch" "$S2_EVID/identity"
@@ -1831,9 +1868,11 @@ PY
     s7_blocked "flag 必須搭 I074_STAGE=2（Stage 2 identity）→ 否則中止" s7_id1 "I074_STAGE=2"
   s7_run s7_eq "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual=1 \
     && fail "--i074-counterfactual=1 竟被接受" || s7_blocked "--i074-counterfactual=value → 中止" s7_eq "=value"
+  # ⚠️ ⑧ 補齊：看訊息。擋下它的是 run identity 的驗證（identity 記的 image ≠ 空的 REPLAY_IMAGE_ID）——那一步**只在 I074_MODE**
+  #   執行、而且在自動 pin 的分支之前就結束，所以這個訊息同時證明 flag 納入了 I074_MODE、也⛔ 沒有走到自動 pin。
   S7_IMG="" s7_run s7_x "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
     && fail "x：缺 REPLAY_IMAGE_ID 竟通過（⛔ 不得自動 pin）" || \
-    s7_blocked "x：flag 納入 I074_MODE → 缺 REPLAY_IMAGE_ID 即拒絕、⛔ 不自動 pin" s7_x ""
+    s7_blocked "x：flag 納入 I074_MODE → 缺 REPLAY_IMAGE_ID 即拒絕、⛔ 不自動 pin" s7_x "三趟必須用同一個 image"
   s7_run s7_spoof "$S2_P/counterfactual.patch" "" "${S7_ARGS[@]}" --i074-counterfactual \
     --counterfactual-patch-sha256 "$S2_CF" && fail "s：使用者自帶反事實 SHA 竟通過" || \
     s7_blocked "s：使用者自帶 --counterfactual-patch-sha256 → 拒絕（只能由 runner 注入）" s7_spoof "只能由官方腳本注入"
@@ -1888,6 +1927,70 @@ else
 fi
 
 # ── pin --stage 2：專用 tag、tarball、Stage 1 行為不變 ─────────────────────
+# ── v29 ag（⑧ 補齊；第一、二輪 review 改寫）：pin 的專用 tag ⛔ 不等於任何 build 腳本的預設 tag——`python/scripts/test.sh`
+#    等腳本只 build 自己的預設 tag（或 PY_IMAGE），而 `pin --stage 2` ⛔ 不接受 PY_IMAGE（下方），所以 test.sh 跑完之後釘住的 image
+#    仍帶專用 tag。掃描 scripts/、scripts/lib/、python/scripts/ 的全部 .sh，**只**排除會自我比對的本腳本（它的文字會被抽成假值）；
+#    第二輪 review：⛔ 不以名稱整批排除 test-*.sh——否則 test-foo.sh 寫死專用 tag 會 fail-open。抽三種寫法：非空的
+#    `${PY_IMAGE:-<tag>}`、字面值的 `IMAGE="<tag>"`、字面值的 `build … -t <tag>`；抽到的每一個值都必須像 image reference，
+#    專用 tag 只准出現在 pin 與 restore 兩支。⚠️ 靜態檢查，⛔ 不放在需要正式 bundle 的段落裡。
+echo "==> i074 Stage 2（⑧）：pin 的專用 tag 與 build 腳本的預設 tag（ag）"
+ag_scan() {  # $1＝repo root → 印出 FOUND 一行與每個 PROBLEM 一行
+  local root="$1" dedicated f
+  local -a files=()
+  dedicated="$(sed -n 's/^[[:space:]]*IMAGE="\(stock-trading-python-replay:[^"]*\)"$/\1/p' "$root/scripts/pin-replay-image.sh")"
+  for f in "$root"/scripts/*.sh "$root"/scripts/lib/*.sh "$root"/python/scripts/*.sh; do
+    [ "$f" = "$root/scripts/test-replay-args.sh" ] || files+=("$f")
+  done
+  python3 - "$root" "$dedicated" "${files[@]}" <<'PY' || echo "PROBLEM 抽取程式失敗"
+import re, sys
+root, dedicated, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+pats = [re.compile(r'\$\{PY_IMAGE:-([^}]+)\}'), re.compile(r'^\s*(?:local\s+)?IMAGE="([^"$]*)"', re.M),
+        re.compile(r'\bbuild\b[^\n]*?\s-t\s+"?([^"\s$]+)"?')]
+ref = re.compile(r'[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]+)?')
+allowed = {"scripts/pin-replay-image.sh", "scripts/restore-replay-image.sh"}
+found, problems = [], []
+if dedicated != "stock-trading-python-replay:i074-stage2":
+    problems.append(f"pin-replay-image.sh 的專用 tag 抽不到或不符：{dedicated!r}")
+for f in files:
+    rel = f[len(root) + 1:]
+    text = open(f, encoding="utf-8").read()
+    for pat in pats:
+        for m in pat.finditer(text):
+            tag = m.group(1)
+            found.append((rel, tag))
+            if not ref.fullmatch(tag):
+                problems.append(f"不像 image reference：{rel}：{tag!r}")
+            elif tag == dedicated and rel not in allowed:
+                problems.append(f"專用 tag 出現在 build 腳本：{rel}")
+if not any(rel == "python/scripts/test.sh" for rel, _ in found):
+    problems.append("python/scripts/test.sh 抽不到預設 tag")
+print("FOUND " + " ".join(sorted({f"{rel}={tag}" for rel, tag in found})))
+for problem in problems:
+    print("PROBLEM " + problem)
+PY
+}
+AG_OUT="$(ag_scan "$REPO_ROOT")"
+if ! grep -q '^PROBLEM ' <<< "$AG_OUT" \
+   && grep -qF 'scripts/pin-replay-image.sh=stock-trading-python-replay:i074-stage2' <<< "$AG_OUT"; then
+  pass "ag：專用 tag 只在 pin／restore，⛔ 不等於任何 build 腳本的預設 tag"
+else
+  fail "ag：專用 tag 與 build 腳本的預設 tag 撞名、抽到假值或抽不到"; printf '%s\n' "$AG_OUT" >&2
+fi
+# 反向案例（第二輪 review）：複本裡多一支 test-*.sh 以字面值 build 專用 tag → 必須被抓到（⛔ 不因名稱被略過）
+AG_NEG="$S2_TD/ag_neg"
+mkdir -p "$AG_NEG/scripts/lib" "$AG_NEG/python/scripts"
+cp "$REPO_ROOT"/scripts/*.sh "$AG_NEG/scripts/"
+cp "$REPO_ROOT"/scripts/lib/*.sh "$AG_NEG/scripts/lib/"
+cp "$REPO_ROOT"/python/scripts/*.sh "$AG_NEG/python/scripts/"
+printf '#!/usr/bin/env bash\ndocker build -q -t stock-trading-python-replay:i074-stage2 "$1"\n' > "$AG_NEG/scripts/test-foo.sh"
+AG_NEG_OUT="$(ag_scan "$AG_NEG")"
+if grep -qxF "PROBLEM 專用 tag 出現在 build 腳本：scripts/test-foo.sh" <<< "$AG_NEG_OUT"; then
+  pass "ag（反向案例）：另一支 test-*.sh 寫死專用 tag → 被抓到"
+else
+  fail "ag（反向案例）：test-*.sh 寫死專用 tag 竟沒被抓到"; printf '%s\n' "$AG_NEG_OUT" >&2
+fi
+rm -rf -- "$AG_NEG"
+
 echo "==> i074 Stage 2：pin-replay-image.sh --stage 2"
 mkdir -p "$S2_TD/bin" "$S2_TD/state"
 cat > "$S2_TD/bin/docker" <<'FAKE'

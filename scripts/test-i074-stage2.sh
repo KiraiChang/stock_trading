@@ -146,6 +146,10 @@ mkdir -p "$SR/python/baselines/i074_stage2" "$SR/python/baselines/b1_test" "$SR/
 replay_args_canonical_diff "$SR" "$BASE_TREE" "$T1" > "$SR/python/baselines/i074_stage2/counterfactual_e1cbbbd.patch"
 replay_args_canonical_diff "$SR" "$T1" "$T2" > "$SR/python/baselines/i074_stage2/tooling_e1cbbbd.patch"
 printf 'bundle\n' > "$SR/python/baselines/b1_test/manifest.json"
+# ⑧ 補齊（v29 n9）：Stage 1 錨點與 envcheck/ 的佔位——fake 流程⛔ 不讀它們；n9 的 (ii)(iii) 改它們，證明⛔ 不影響 ⑩。
+mkdir -p "$SR/python/baselines/i074_stage1" "$SR/python/baselines/i074_stage2/envcheck"
+printf '{"placeholder":"stage1"}\n' > "$SR/python/baselines/i074_stage1/evidence_manifest.json"
+printf '{"placeholder":"envcheck"}\n' > "$SR/python/baselines/i074_stage2/envcheck/evidence_manifest.json"
 printf 'sizing harness\n' > "$SR/scripts/i074-stage2-sizing.sh"
 printf 'sizing shim\n' > "$SR/scripts/lib/i074-sizing-docker-shim.sh"
 printf 'sizing helper\n' > "$SR/python/scripts/i074_stage2_sizing.py"
@@ -747,7 +751,7 @@ new_scenario; echo "3 no" > "$S/fin_plan"
 run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 check "finalize 回 3 但沒有終態（矛盾）→ 1、⛔ 不寫 attempt" bash -c '[ "$1" = 1 ] && [ ! -e "$2/work/state/attempt.json" ]' _ "$RC" "$S"
 
-for rc in 1 2 4; do
+for rc in 1 2 4 137; do                       # ⑧ 補齊：137（OOM）
   new_scenario; echo "$rc" > "$S/runner_rc"
   run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
   check "ad：replay 回 $rc → 1、finalize／publish 都未被呼叫、⛔ 沒有 replay_done" bash -c '
@@ -842,8 +846,9 @@ run_entry "$SR" --freeze-record "$TD/frbad2/freeze_record.json" --work-dir "$S/w
 check "n7：報告與 freeze record 的 report_sha256 不符 → 1、runner 未被呼叫" bash -c '[ "$1" = 1 ] && [ ! -s "$2/spy/runner.log" ]' _ "$RC" "$S"
 
 echo "==> i074 Stage 2 ⑦b：replay 之後的檢查點（n8）"
-post_case() {  # $1＝說明；$2＝runner_hook 的內容（$W 可用）
+post_case() {  # $1＝說明；$2＝runner_hook 的內容（$W 可用）；$3（可選）＝replay 的結束碼
   new_scenario
+  [ -z "${3:-}" ] || echo "$3" > "$S/runner_rc"
   printf 'W=%s\n%s\n' "$S/work" "$2" > "$S/runner_hook"
   run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
   check "$1 → 1、finalize／publish 未被呼叫、⛔ 沒有 attempt" bash -c '
@@ -853,6 +858,10 @@ post_case "n8：replay 期間改掉複本的已追蹤檔" 'echo x >> "$W/repo/py
 post_case "n8：replay 期間換掉 freeze record 副本" 'echo " " >> "$W/freeze/freeze_record.json"'
 post_case "n8：replay 期間改掉 <work>/bin/docker" 'chmod u+w "$W/bin/docker"; echo "#" >> "$W/bin/docker"'
 post_case "n8：replay 期間在 <work>/bin 多放一個檔" 'touch "$W/bin/git"'
+# ⚠️ ⑧ 補齊：上面「改掉複本的已追蹤檔」改的是 orchestrator 自己會執行的 helper——它在檢查點之前就因語法錯誤失敗，
+#   證明不了檢查點本身。下面兩支改**⛔ 不會被執行**的已追蹤檔（bundle 的 manifest），finalize 與 publish 兩條路徑各一支。
+post_case "n8（⑧ 補齊）：replay 期間改掉複本裡⛔ 不會被執行的已追蹤檔（bundle manifest）" 'echo x >> "$W/repo/python/baselines/b1_test/manifest.json"'
+post_case "n8（⑧ 補齊）：replay 回 6（publish 之前）時改掉同一個已追蹤檔" 'echo x >> "$W/repo/python/baselines/b1_test/manifest.json"' 6
 post_case "state：第一次執行時 replay 期間 XDG identity 被改（只改 created_at）" \
   "cp \"$IDENTITY\" \"$TD/identity.saved2\"; python3 -c 'import sys; p=open(sys.argv[1]).read().replace(\"00:00:00+00:00\",\"00:00:02+00:00\"); open(sys.argv[1],\"w\").write(p)' \"$IDENTITY\""
 cp "$TD/identity.saved2" "$IDENTITY"
@@ -861,6 +870,11 @@ run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
 echo x >> "$S/work/repo/python/scripts/i074_stage2_preflight.py"
 run_entry "$SR" --promote --work-dir "$S/work"
 check "n8：--promote 之前改動複本 → 9、晉升⛔ 未開始" bash -c '[ "$1" = 9 ] && ! grep -q "==> 晉升" "$2"' _ "$RC" "$S/err"
+new_scenario; echo "1 no" > "$S/fin_plan"                  # ⑧ 補齊：同上，但改⛔ 不會被執行的已追蹤檔
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+echo x >> "$S/work/repo/python/baselines/b1_test/manifest.json"
+run_entry "$SR" --promote --work-dir "$S/work"
+check "n8（⑧ 補齊）：--promote 之前改動複本裡⛔ 不會被執行的已追蹤檔 → 9、晉升⛔ 未開始" bash -c '[ "$1" = 9 ] && ! grep -q "==> 晉升" "$2"' _ "$RC" "$S/err"
 
 echo "==> i074 Stage 2 ⑦c：晉升（真 git 的 ignore 守門、staging 與 git add -A、n9、n12 的晉升那一層）"
 GI="$SR/.gitignore"
@@ -938,6 +952,34 @@ check "staging 與 git add -A：staging ⛔ 不進 index、⛔ 不出現在未�
 check "staging 與 git add -A：發布之後的目的地照常出現在未追蹤清單" bash -c '
   git -C "$1" status --porcelain --untracked-files=all | grep -qF "?? python/baselines/i074_stage2/evidence/"' _ "$SR"
 git -C "$SR" reset -q
+
+# ⑧ 補齊（v29 n9）：(i)(ii)(iii) 各自一個情境；晉升的 evidence/ 與 runner 收到的兩份 patch，都與「⛔ 不動真正 repo」的
+#   對照組逐位元相同。錨點改的是 Stage 1 錨點與 envcheck/（規格寫的那兩處）。下面原本的合併情境照舊（判讀器接在它之後）。
+new_scenario
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+check "n9 對照組：⛔ 不動真正 repo → 晉升 0" expect_rc 0
+rm -rf "$TD/n9_control"; cp -a "$SR/python/baselines/i074_stage2/evidence" "$TD/n9_control"
+grep '^SHA ' "$S/spy/runner.log" > "$TD/n9_control.sha"
+n9_case() {  # $1＝說明；$2＝runner_hook（⑩ 期間在真正 repo 做的事）
+  new_scenario
+  printf '%s\n' "$2" > "$S/runner_hook"
+  run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+  check "$1 → 晉升 0；evidence/ 與 runner 收到的兩份 patch 都與對照組逐位元相同" bash -c '
+    [ "$1" = 0 ] && [ -s "$2/n9_control.sha" ] && diff -r "$2/n9_control" "$3/python/baselines/i074_stage2/evidence" >/dev/null \
+    && diff <(grep "^SHA " "$4/spy/runner.log") "$2/n9_control.sha" >/dev/null' _ "$RC" "$TD" "$SR" "$S"
+  git -C "$SR" reset -q --hard "$HEAD_OID"
+}
+n9_case "n9 (i)：⑩ 期間在真正 repo commit 一般的檔案" "
+git -C '$SR' commit -q --allow-empty -m 'n9 (i)'
+printf 'n9\n' > '$SR/python/notes.txt'; git -C '$SR' add python/notes.txt; git -C '$SR' commit -qm 'n9 (i) file'"
+n9_case "n9 (ii)：⑩ 期間在真正 repo 的工作樹改 Stage 1 錨點與 envcheck/" "
+printf 'tampered\n' >> '$SR/python/baselines/i074_stage1/evidence_manifest.json'
+printf 'tampered\n' >> '$SR/python/baselines/i074_stage2/envcheck/evidence_manifest.json'"
+n9_case "n9 (iii)：⑩ 期間在真正 repo commit 改 Stage 1 錨點與 envcheck/（連驗證入口一起改壞）" "
+printf 'tampered\n' >> '$SR/python/baselines/i074_stage1/evidence_manifest.json'
+printf 'tampered\n' >> '$SR/python/baselines/i074_stage2/envcheck/evidence_manifest.json'
+printf 'exit 1\n' > '$SR/scripts/finalize-stage2-evidence.sh'
+git -C '$SR' commit -qam 'n9 (iii)'"
 
 # n9：⑩ 執行期間在真正 repo (i) commit 一般檔案、(ii) 工作樹改錨點、(iii) commit 改錨點（連驗證入口一起改壞）——
 #     晉升的證據與複本的終態逐位元相同；判讀器（之後）照樣判讀 base_commit 那一版。
@@ -1185,6 +1227,44 @@ chmod g+w "$TRUSTED"
 new_scenario; run_entry "$SR" --promote --work-dir "$SK/work"
 check "S0：信任根的上層目錄群組可寫 → 8（promote）、沒有取鎖" bash -c '[ "$1" = 8 ] && [ ! -e "$2/i074-stage2.lock" ]' _ "$RC" "$LOCKDIR"
 chmod 755 "$TRUSTED"
+
+echo "==> i074 Stage 2（⑧ 補齊）：兩個執行目錄同時 --promote、殘留的 worktree 登記之下重跑"
+pending_work() {  # 走完 ⑩、第一次晉升時驗證模式失敗（9）→ 終態留在複本裡等晉升；→ 設 PW_S、PW_W
+  KEEP_REAL=1 new_scenario; echo 1 > "$S/verify_rc"
+  run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+  [ "$RC" = 9 ] || fail "準備待晉升的終態：rc=$RC（預期 9）"
+  rm -f "$S/verify_rc"; PW_S="$S"; PW_W="$S/work"
+}
+new_scenario                                                    # 清掉真正 repo 先前晉升的終態
+pending_work; P1_S="$PW_S"; P1_W="$PW_W"
+pending_work; P2_W="$PW_W"
+S="$P1_S"; mkfifo "$S/vbarrier"
+cat > "$S/verify_hook" <<EOF
+case "\$1" in */.promote-staging-*) touch "$S/at_vbarrier"; cat "$S/vbarrier" > /dev/null ;; esac
+EOF
+start_bg "$SR" --promote --work-dir "$P1_W"
+wait_for "$P1_S/at_vbarrier" || fail "第一個 --promote 沒有走到驗證模式的 barrier"
+P1_STAGING="$(ls -d "$SR/python/baselines/i074_stage2"/.promote-staging-* 2>/dev/null || true)"
+ln -sfn "$SR" "$TD/real_alias"
+KEEP_REAL=1 new_scenario
+run_entry "$TD/real_alias" --promote --work-dir "$P2_W"
+check "n11：兩個執行目錄同時 --promote（後到的以 symlink 別名寫真正 repo）→ 後到的 8、原因是鎖衝突" bash -c '
+  [ "$1" = 8 ] && grep -q "鎖已被另一個 supervisor 持有" "$2/err"' _ "$RC" "$S"
+check "n11：後到的⛔ 沒有清掉先到的 staging" bash -c '[ -n "$1" ] && [ -d "$1" ]' _ "$P1_STAGING"
+S="$P1_S"; echo go > "$P1_S/vbarrier"; RC=0; wait "$BG_PID" || RC=$?
+check "n11：先到的照常完成（晉升 → 0）、⛔ 沒有留下 staging" bash -c '
+  [ "$1" = 0 ] && ! ls -d "$2"/.promote-staging-* >/dev/null 2>&1' _ "$RC" "$SR/python/baselines/i074_stage2"
+# 合成守門中途被殺留下的 worktree 登記（實體目錄已刪／仍在）→ 下一次 --promote 照樣成功（這一次走 6a）；
+# prune 只清實體目錄已消失的那一筆（⑦c 細部計畫 v1 的改寫）。
+git -C "$P2_W/repo" worktree add -q --detach "$P2_W/tmp/killed-gone" HEAD
+git -C "$P2_W/repo" worktree add -q --detach "$P2_W/tmp/killed-kept" HEAD
+rm -rf "$P2_W/tmp/killed-gone"
+KEEP_REAL=1 new_scenario
+run_entry "$SR" --promote --work-dir "$P2_W"
+check "n11：殘留的 worktree 登記之下重跑 --promote → 0（6a）" expect_rc 0
+check "n11：實體目錄已消失的登記被 prune、仍在的保留" bash -c '
+  l="$(git -C "$1/repo" worktree list --porcelain)"
+  ! grep -qxF "worktree $1/tmp/killed-gone" <<< "$l" && grep -qxF "worktree $1/tmp/killed-kept" <<< "$l"' _ "$P2_W"
 
 echo "==> i074 Stage 2 ⑦b：host unittest（Python $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')）"
 if PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$REPO_ROOT/scripts/tests" -p 'test_i074_stage2_host.py' \

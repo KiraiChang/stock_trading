@@ -833,6 +833,19 @@ def test_6a_in_place_rewrite_after_verification_is_9_and_not_fsynced(world, fsyn
     assert not (set(fsyncs) & dest_idents)                            # ⛔ 不 fsync 目的地、⛔ 不回 0／6
 
 
+def test_6a_trust_root_binding_is_9_and_untouched(world, fsyncs):
+    """n11（⑧ 補齊）：6a——來源與既有目的地逐位元相同、但驗證模式回報的 `base_commit` ≠ `repo_head`（兩邊都是同一份
+    錯誤的 base）→ 只有信任根的綁定讓它 9；目的地不變、⛔ 不 fsync 目的地。"""
+    _promoted(world)
+    world.verify_override = {"base_commit": "b" * 40}
+    snapshot = _tree(world.dest)
+    dest_idents = _idents(world.dest)
+    fsyncs.clear()
+    assert world.run() == 9
+    assert _tree(world.dest) == snapshot and not (set(fsyncs) & dest_idents)
+    assert len(world.verify_calls) == 1
+
+
 def test_6a_rewrite_after_the_final_rehash_is_not_detected(world):
     """照實：收尾重算之後的改寫，晉升⛔ 無法偵測（由判讀器、再跑 --promote 與 commit 前的 review 把關）。"""
     _promoted(world)
@@ -899,6 +912,52 @@ def test_6b_eexist_then_rerun_takes_6a(world, monkeypatch):
 def test_6b_verification_failure_is_9_and_cleans_staging(world):
     world.verify_rc = 1
     assert world.run() == 9 and world.stagings() == [] and not world.dest.exists()
+
+
+def test_6b_failed_record_verification_failure_is_9_and_cleans_staging(failed_world):
+    """n11（⑧ 補齊）：failed record 那一支——終態發布之後才竄改來源（驗證模式不通過）→ 9、目的地不存在、staging 已清。"""
+    w = failed_world
+    w.verify_rc = 1
+    assert w.run() == 9 and w.stagings() == [] and not w.dest.exists()
+
+
+class _ReadFailsOn:
+    """`pm.os` 的替身：只讓「來源檔案」的 fd 在複製時 `read` 失敗（以 (st_dev, st_ino) 認出來源）。"""
+
+    def __init__(self, idents, err):
+        self.idents, self.err, self.armed, self.hits = idents, err, False, 0
+
+    def __getattr__(self, name):
+        return getattr(os, name)
+
+    def read(self, fd, n):
+        if self.armed:
+            st = os.fstat(fd)
+            if (st.st_dev, st.st_ino) in self.idents:
+                self.hits += 1
+                raise OSError(self.err, "injected")
+        return os.read(fd, n)
+
+
+def test_6b_source_side_read_error_is_9_not_8(world, monkeypatch):
+    """n11（⑧ 補齊）：複製時**來源側**讀取 `EIO` → 9（⛔ 不是目的端 I/O 的 8——同一個 errno 在兩邊的分類相反）。"""
+    proxy = _ReadFailsOn({(p.lstat().st_dev, p.lstat().st_ino) for p in world.terminal.rglob("*") if p.is_file()},
+                         errno.EIO)
+    monkeypatch.setattr(pm, "os", proxy)
+    world.hooks["before_copy"] = lambda: setattr(proxy, "armed", True)
+    assert world.run() == 9 and world.stagings() == [] and not world.dest.exists()
+    assert proxy.hits >= 1
+
+
+def test_real_git_dir_inventory_is_unchanged(world):
+    """n11（⑧ 補齊）：晉升前後真正 repo 的 `.git` 完整 inventory 相同（⛔ 不只看 `HEAD` 一個檔）。"""
+    git = world.real / ".git"
+    (git / "objects" / "ab").mkdir(parents=True)
+    (git / "objects" / "ab" / "cdef").write_bytes(b"object")
+    (git / "index").write_bytes(b"index")
+    before = _tree(git)
+    assert world.run() == 0
+    assert _tree(git) == before
 
 
 def test_6b_source_changed_during_copy_is_9(world):

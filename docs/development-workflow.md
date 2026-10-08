@@ -1566,6 +1566,35 @@ python3 python/scripts/i074_stage2_sizing.py observe --work-dir <⑩ 的 --work-
 | 完整度 | 報告的 `observation_complete`、`replay_seen`、`missing_expected_containers`、`unavailable_containers`——⛔ 不完整的報告⛔ 不得當成完整觀測 |
 | 守門 | 環境帶 `I074_STAGE2_*`／`SIZING_*`、或 PATH 上的 docker 是 label shim／sizing shim → 拒絕 |
 
+### I-074 Stage 2 的測試落點（⑧ 稽核，2026-10-07）
+
+I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 ③ evidence contract「十」）分散在下面幾個落點；逐 id 的稽核表在
+[`issue.md`](./issue.md) I-074「Stage 2 步驟 ⑧ 稽核結果」。這裡只列**穩定的類別與入口**（⛔ 不搬會隨改名漂移的方法清單）。
+
+| 類別 | 落點 | 入口 |
+|---|---|---|
+| 反事實路徑的邏輯與順序（守門、終態、結束碼；`stub_replay`，⛔ 不經產品資料流） | `python/backtest/modular/sr_scoring/tests/test_replay_counterfactual.py` | pytest（`python/scripts/test.sh`） |
+| 一般 Stage 2 路徑（⛔ 沒有 flag 時逐項不變） | `test_replay_bundle_stages.py`、`test_i074_mismatch.py` | pytest |
+| 成功 archive、failed record、Stage 1 信任錨、全圖十六道、recovery、CLI matrix、驗證模式與 `--judge` 的 Python 段 | `test_replay_stage2_archive.py` | pytest |
+| 環境見證（E1～E7、等價判定、envcheck 的串流與 sample） | `test_replay_envcheck.py`；row-level 原語在 `test_replay_row_primitives.py` | pytest |
+| B／C 判讀規則 | `test_i074_stage2_verdict.py` | pytest |
+| preflight（磁碟檢查、state、`anchors` 在 replay 之前那一層）、freeze record、晉升的判定順序與結束碼（注入的 git／驗證模式／故障） | `test_i074_stage2_preflight.py`、`test_i074_stage2_freeze_record.py`、`test_i074_stage2_promote.py` | pytest |
+| runner／finalizer 的 argv、mount、合成守門、`--check-failed-record` 的決策、canonical diff 與 tooling patch 產生器、sizing／acceptance harness | `scripts/test-replay-args.sh`（隔離的最小 repo ＋ fake docker） | `python/scripts/test.sh`（`IMAGE_REQUIRED=1`） |
+| orchestrator、supervisor、晉升的整合、判讀器的 bootstrap | `scripts/test-i074-stage2.sh`（合成 repo ＋ sed 過常數的正式腳本） | 同上 |
+| supervisor 的屬性與故障注入、host-run／reap-adopted／kill-pinned、需要 git 的 helper、離線讀取端 | `scripts/tests/test_i074_stage2_host.py`（host 的 Python 3.9 unittest） | 由 `scripts/test-i074-stage2.sh` 呼叫 |
+| 真實產品資料流的非空翻轉 | `scripts/smoke-replay-offline.sh` | `REPLAY_SMOKE=1`（預設不跑） |
+
+寫這一區的測試時：
+
+* 斷言**性質**，⛔ 不能只靠結束碼、`pytest.raises(Exception)` 或不看訊息的 shell 守門——⑧ 稽核把這類斷言縮窄之後，抓到三組其實被
+  別的守門擋下的測試（preflight 的 ay 被「⛔ 不是 canonical gzip」擋下；runner 的 x 被 run identity 的驗證擋下；n8 的「改掉複本的已追蹤檔」
+  改的是 orchestrator 自己會執行的 helper，在檢查點之前就失敗），見 issue.md。竄改的對象要選**⛔ 不會被執行**的檔案，才證明得了守門本身。
+* host 測試起長存的子孫程序時，每支測試一個 cleanup token、帶在那些程序的 argv（長存的等待一律用 `_sleeper()` 這種帶 token 的
+  Python sleeper，⛔ 不用不帶 token 的 `sleep 30`——它被收養之後就與 token 失去關聯），斷言之後以 `reap_token_processes()` 收掉並斷言
+  ⛔ 沒有存活（它獨立於被測的產品函式；teardown 再收一次當保險）——產品的清理失效或測試中途失敗時才不會洩漏程序。
+* ⛔ 不碰 `/run/lock`、⛔ 不建帶正式 label 的容器；shell 段落一律在隔離 repo 或合成 repo 裡跑。
+* 注回缺陷的反向驗證與 smoke 在綁定 staged tree 的隔離 clone 裡做（⛔ 不在正式工作樹注回；也避開正式 repo 的 I-118 worktree 累積）。
+
 ### PostgreSQL／MySQL 的一致性快照要**手動**驗
 
 python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得宣稱 CI 已涵蓋這兩者的實機快照**。

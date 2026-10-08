@@ -274,6 +274,23 @@ def test_non_empty_tooling_patch(env):
     assert _recover(env) == 0
 
 
+def _inventory(root: Path) -> dict:
+    """archive 的 inventory：相對路徑 → (inode, mtime_ns, mode, bytes)；含根目錄本身。"""
+    out = {}
+    for path in [root, *sorted(root.rglob("*"))]:
+        st = path.lstat()
+        out[str(path.relative_to(root))] = (st.st_ino, st.st_mtime_ns, st.st_mode,
+                                            path.read_bytes() if path.is_file() else None)
+    return out
+
+
+def test_m_recovery_never_rebuilds_the_archive(published):
+    """v29 m（⑧ 補齊）：recovery 只重新驗證與 fsync——archive 的檔案集合、bytes、inode、mtime 前後完全相同。"""
+    before = _inventory(_archive(published))
+    assert _recover(published) == 0
+    assert _inventory(_archive(published)) == before
+
+
 def test_l_recovery_returns_the_manifest_outcome(published, monkeypatch):
     assert _recover(published) == 0
     # ⚠️ ⛔ 不得寫死 0：把合法值集合擴大、改寫 manifest，recovery 要回讀到的那個值。
@@ -386,6 +403,25 @@ def test_i_staging_fsync_failure_leaves_no_archive(env, monkeypatch):
     with pytest.raises(OSError):
         _finalize(env, _write_run(env))
     assert not _archive(env).exists() and _no_staging(env)
+
+
+def test_i_staging_write_failure_leaves_no_archive(env, monkeypatch):
+    """i／v29 j（⑧ 補齊）：staging 的**寫入**注入 ENOSPC → 無 archive、無 staging；`main()` 把 OSError 對到 1。"""
+    import errno
+
+    def boom(self, rel, blob):
+        raise OSError(errno.ENOSPC, "No space left on device（注入）")
+
+    monkeypatch.setattr(s2.ClosedArchiveWriter, "add_raw", boom)
+    with pytest.raises(OSError):
+        _finalize(env, _write_run(env))
+    assert not _archive(env).exists() and _no_staging(env)
+
+    def failing(argv):
+        raise OSError(errno.ENOSPC, "No space left on device（注入）")
+
+    monkeypatch.setattr(sa, "run_stage2", failing)
+    assert sa.main([]) == EXIT_ABORT
 
 
 def test_i_bad_source_leaves_no_archive(env):
@@ -695,6 +731,30 @@ def test_bd2_not_equivalent_envcheck_blocks_stage2(tmp_path, monkeypatch):
         _publish_failure(env, _write_failure_run(env))
 
 
+def _writable(root: Path) -> None:
+    for path in [root, *root.rglob("*")]:
+        if not path.is_symlink():
+            path.chmod(path.stat().st_mode | 0o200)
+
+
+def test_bd2_recover_durability_is_blocked_by_e3b(tmp_path, monkeypatch):
+    """bd2（⑧ 補齊）：成功 archive 發布之後，`envcheck/` 換成一份合法的 NOT_EQUIVALENT → recovery 也被 E3b 擋下。"""
+    (tmp_path / "ok").mkdir()
+    (tmp_path / "bad").mkdir()
+    env = _build_env(tmp_path / "ok", monkeypatch)
+    assert _finalize(env, _write_run(env)) == 0
+    assert _recover(env) == 0
+    rows = _d1_rows()
+    rows[0]["event_signal"] = "DIFFERENT"
+    bad = _build_env(tmp_path / "bad", monkeypatch, witness_rows=rows)
+    target = env.root / "baselines" / "i074_stage2" / "envcheck"
+    _writable(target)
+    shutil.rmtree(target)
+    shutil.copytree(bad.root / "baselines" / "i074_stage2" / "envcheck", target)
+    with pytest.raises(ArtifactError, match="E3b"):
+        _recover(env)
+
+
 # ── Stage 1 信任錨的補充（w／ac／ad／ay／az／aw） ──────────────────────────────
 
 def _resync_stage1(env, rel, payload):
@@ -773,6 +833,34 @@ def test_w_stage1_manifest_sha_and_members_in_the_stage2_manifest(published):
     manifest["stage1_evidence"]["members"][s2.STAGE1_ANCHOR_COHORT]["stored_sha256"] = "0" * 64
     _write_manifest(published, manifest)
     with pytest.raises(ArtifactError, match="Stage 1 信任錨"):
+        _recover(published)
+
+
+@pytest.mark.parametrize("member", [s2.STAGE1_ANCHOR_AFTER, s2.STAGE1_ANCHOR_COHORT, s2.STAGE1_ANCHOR_IDENTITY])
+@pytest.mark.parametrize("field", ["artifact_sha256", "stored_sha256"])
+def test_w_each_member_sha_in_the_stage2_manifest(published, member, field):
+    """w（⑧ 補齊）：**三份**任一的兩個 SHA ≠ Stage 1 entry → recovery 拒絕（⛔ 不只 cohort 的 stored SHA）。"""
+    manifest = _manifest(published)
+    manifest["stage1_evidence"]["members"][member][field] = "0" * 64
+    _write_manifest(published, manifest)
+    with pytest.raises(ArtifactError, match="Stage 1 信任錨"):
+        _recover(published)
+
+
+def test_w_stage1_manifest_itself_must_be_valid(published):
+    """w（⑧ 補齊）：Stage 1 manifest 的 schema 壞掉、SHA 卻一致 → 單檔 validator（「三之一」第 2 道）擋下。"""
+    path = published.root / "baselines" / "i074_stage1" / ev.EVIDENCE_MANIFEST_NAME
+    manifest = json.loads(path.read_bytes())
+    manifest["extra"] = 1
+    raw = canonical_json_bytes(manifest)
+    path.chmod(0o644)
+    path.write_bytes(raw)
+    with pytest.raises(ArtifactError, match="evidence manifest 欄位集合"):
+        s2.load_stage1_anchor(published.root)
+    stage2 = _manifest(published)
+    stage2["stage1_evidence"]["manifest_sha256"] = sha256_hex(raw)    # ⚠️ 同步宣告值：只剩 validator 擋得下
+    _write_manifest(published, stage2)
+    with pytest.raises(ArtifactError, match="evidence manifest 欄位集合"):
         _recover(published)
 
 
@@ -918,6 +1006,34 @@ def test_m_failed_record_is_published_and_identifiable(recorded):
     assert record["patches"]["counterfactual_patch_sha256"] == sha256_hex(CF)    # 完整 SHA 照舊保存
     assert (root / sa.COUNTERFACTUAL_PATCH).read_bytes() == CF
     assert not _archive(env).exists()                                  # ⛔ 不是成功 archive
+
+
+def test_z_candidate_flag_inconsistent_record_is_published_and_identifiable(env):
+    """v29 z（⑧ 補齊）：兩種原因各一支——`candidate_flag_inconsistent` 也發布成可辨識的 record。"""
+    effect = _effect(_rows_with(**{"2026-08-21": {"lifecycle_phase": "CONTINUATION", "rr_decoupling_candidate": False}}))
+    assert effect["failure_reason"] == sa.FAILURE_CANDIDATE_FLAG_INCONSISTENT
+    root = _publish_failure(env, _write_failure_run(env, effect=effect))
+    assert (root.parent, root.name) == (_failed_root(env), f"{BUNDLE}-{_sem()}")
+    assert s2.archive_file_set(root) == {sa.FAILED_RECORD_NAME, sa.COUNTERFACTUAL_PATCH, sa.TOOLING_PATCH}
+    record = _record(root)
+    assert record["kind"] == sa.FAILED_ATTEMPT_KIND
+    assert record["failure_reason"] == sa.FAILURE_CANDIDATE_FLAG_INCONSISTENT
+    assert record["bounded_diagnostics"]["inconsistent_row_count"] == 1
+    assert record["run_identity"] == tec._identity() and record["counterfactual_semantic_sha256"] == _sem()
+    assert not _archive(env).exists()
+    assert [r["counterfactual_semantic_sha256"] for r in sa.check_failed_records(python_root=env.root)["records"]] == [_sem()]
+
+
+def test_aq_stage1_identity_member_tampered_is_rejected(recorded):
+    """aq（⑧ 補齊）：Stage 1 的 identity 成員被換（內容合法、manifest 沒同步）→ lookup 拒絕、⛔ 不改讀那份檔案。"""
+    env, _root = recorded
+    path = env.root / "baselines" / "i074_stage1" / s2.STAGE1_ANCHOR_IDENTITY
+    identity = _stage1_member(env, s2.STAGE1_ANCHOR_IDENTITY)
+    identity["created_at"] = "2026-09-30T09:00:00+08:00"
+    path.chmod(0o644)
+    path.write_bytes(canonical_gzip_bytes(canonical_json_bytes(identity)))
+    with pytest.raises(ArtifactError, match="Stage 1 信任錨"):
+        sa.check_failed_records(python_root=env.root)
 
 
 def test_check_lists_valid_records(recorded):
@@ -1575,6 +1691,16 @@ def test_m_promotion_verification_rejects(published, case):
         path = dest / sa.STAGE2_MANIFEST_NAME
     with pytest.raises(ArtifactError, match="信任根" if case == "trust_root" else None):
         _verify_target(env, path, "evidence", verified=verified, **kwargs)
+
+
+def test_m_promotion_verification_rejects_a_missing_anchor(published):
+    """六、9 m（⑧ 補齊）：判讀前的完整驗證在 python root 缺錨點（Stage 1 after）時拒絕——⛔ 不只靠 fake 的驗證模式。"""
+    env = published
+    dest = _archive(env)
+    verified = _promo_verified(env, dest, "evidence")
+    (env.root / "baselines" / "i074_stage1" / s2.STAGE1_ANCHOR_AFTER).unlink()
+    with pytest.raises(ArtifactError, match="一起保存"):
+        _verify_target(env, dest, "evidence", verified=verified)
 
 
 def test_judge_reads_the_comparison_once_and_judges_the_verified_object(published, monkeypatch):

@@ -261,6 +261,34 @@ def test_bk_sample_is_capped_at_the_shared_limit(python_root, tmp_path):
     assert len(eq["key_mismatch_sample_keys"]) == 20
 
 
+def _python_root_with(tmp_path, monkeypatch, rows):
+    """與 `python_root` fixture 相同，但 Stage 1 D+1 用指定的列（⑧ 補齊：要造出超過 sample 上限的 row 差異）。"""
+    monkeypatch.setattr(tre, "_prov", _stage1_prov)
+    monkeypatch.setattr(tip, "_prov", _stage1_prov)
+    sources = tre._write_sources(tmp_path, d1_rows=rows)
+    root = tmp_path / "python"
+    ev.finalize_evidence(
+        evidence_root=root / "baselines" / "i074_stage1", sources=_same_d_rows(sources, rows),
+        expected_image_id=OLD_IMG,
+        provenance_factory=lambda: _stage1_prov() | {"argv": ["--output-dir", "/tmp/fin"]},
+        generated_at="2026-09-18T12:00:00+08:00",
+    )
+    return root
+
+
+def test_bk_row_mismatch_count_is_not_capped(tmp_path, monkeypatch):
+    """bk（⑧ 補齊）：25 列 key 相同、bytes 不同 → `row_mismatch_count` ＝ 25（⛔ 不受 N 截斷）、`mismatch_sample_keys` 20 列。"""
+    days = [f"2026-07-{d:02d}" for d in range(1, 26)]
+    python_root = _python_root_with(tmp_path, monkeypatch, [tre._row(d) for d in days])
+    witness = [tre._row(d, event_signal="DIFFERENT") for d in days]
+    assert _publish(python_root, _write_witness(tmp_path / "w", rows=witness)) == EXIT_ENV_NOT_EQUIVALENT
+    eq = ev.load_canonical_evidence_artifact(
+        _envcheck_root(python_root) / ec.EQUIVALENCE, ec.ENV_EQUIVALENCE_KIND).parsed
+    assert (eq["key_mismatch_count"], eq["row_mismatch_count"], eq["rows_compared"]) == (0, 25, 25)
+    assert len(eq["mismatch_sample_keys"]) == s2.DIAGNOSTIC_SAMPLE_LIMIT == 20
+    assert [k["as_of"] for k in eq["mismatch_sample_keys"]] == days[:20]
+
+
 # ── bd：E1～E7 在 recovery 時各自 fail-closed ────────────────────────────────
 
 def _rewrite_member(root: Path, rel: str, payload: dict) -> None:
@@ -555,6 +583,16 @@ def test_stage1_evidence_ref_schema(python_root):
     ):
         with pytest.raises(ArtifactError):
             s2.validate_stage1_evidence_ref(bad)
+
+
+def test_w_members_with_an_extra_key_are_rejected(python_root):
+    """w（⑧ 補齊）：`members` 的 key 集合「增」也要拒絕（⛔ 不只測「減」）。"""
+    anchor = s2.load_stage1_anchor(python_root)
+    ref = s2.build_stage1_evidence_ref(anchor)
+    extra = ref | {"members": ref["members"] | {"d/after_artifact.json.gz": ref["members"][s2.STAGE1_ANCHOR_AFTER]}}
+    for kwargs in ({}, {"anchor": anchor}):
+        with pytest.raises(ArtifactError, match="members"):
+            s2.validate_stage1_evidence_ref(extra, **kwargs)
 
 
 @pytest.mark.parametrize("rel", [

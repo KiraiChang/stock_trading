@@ -23,6 +23,8 @@
 #     `replay_args_compose()` 建立，並斷言兩份的 raw SHA 各自 ＝ 增量 canonical SHA；
 #   - `--formal` 且報告 `status = ok`、`P_B ≤ P_B_BUDGET` 時寫出 `<work>/freeze_record.json`（v29「八之二」）——
 #     validation 模式、`assumption_violated`、`P_B` 超過預算、任何失敗路徑都⛔ 不寫；
+#     ⚠️ raw-failed freeze record 修正計畫：頂層的紀錄只由步驟 6 最後的 commit point（staging 的同目錄 rename）產生；之前的任何
+#     失敗都作廢 S、staging、raw/ 裡的 freeze record 與頂層的報告（MEASURE_VOID_PATHS），之後只有警告、結束碼一律 0；
 #   - 與 ⑩ 的 label shim **互斥**：環境帶 `I074_STAGE2_*`、或 PATH 上的 docker 是 label shim → 中止。
 #
 # ⚠️ I-074 ⑦d（「Stage 2 步驟 ⑦d 細部計畫 v1」）：
@@ -41,9 +43,9 @@
 #   - 正式入口經 docker shim（唯讀 rootfs、⛔ 無可寫 /tmp、cgroup 峰值、容器足跡），
 #     以 TMPDIR=<work>/tmp、PYTHONDONTWRITEBYTECODE=1 執行；
 #   - 每條路徑前後各記一份完整 inventory 自我檢查；metadata twin 在所有量測窗口結束後才建；
-#   - 任何一步失敗：停取樣 → 以 CID 移除容器 → 結束步驟的 process group（TERM → KILL）→ 再移除一次容器 →
-#     窗口標 aborted → S 複製到 <work>/raw-failed/ → failure_summary.json（⛔ 不宣稱 P_B）→
-#     group 確實結束、容器清光、複製與摘要都成功才清 S。
+#   - 任何一步失敗：（作廢 freeze record 與頂層報告）→ 停取樣 → 以 CID 移除容器 → 結束步驟的 process group（TERM → KILL）→
+#     再移除一次容器 → 窗口標 aborted → S 複製到 <work>/raw-failed/ → failure_summary.json（⛔ 不宣稱 P_B）→
+#     作廢成功、group 確實結束、容器清光、複製與摘要都成功才清 S。
 set -euo pipefail
 
 I074_BOOT_PROFILE=sizing
@@ -187,6 +189,10 @@ done
 
 measure_start_guards "sizing harness"   # 設 IMAGE、REAL_DOCKER（與 ⑩ 的 label shim 互斥）
 measure_work_dir_guard "$WORK_ARG"      # 設 REPO_CANON、WORK、L0_DEV
+# ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單——on_failure（複製 S 之前）與 raw 複製失敗的分支
+#   移除它們，⛔ 不留下可以進 ⑩ 的 freeze record，頂層也⛔ 不發布報告。頂層的 freeze_record.json 只由 commit point 的 rename 產生。
+MEASURE_VOID_PATHS=("$S/freeze_record.json" "$WORK/.freeze_record.json.staging" "$WORK/freeze_record.json"
+                    "$WORK/raw/freeze_record.json" "$WORK/sizing_report.json" "$WORK/sizing_report.txt")
 
 case "${I074_SIZING_FAULT:-}" in
   ""|twins|copy|summary|cleanup|stuck|group-alive|final-check|orphan-ok|orphan-bad) ;;
@@ -431,6 +437,13 @@ say "==> 步驟 6：報告"
 #   → 量測無效（rc＝1，⛔ 不是判定，可以重跑）。
 helper report --state "$S" --clone "$CLONE" --json-out "$S/sizing_report.json" --text-out "$S/sizing_report.txt" \
   || on_failure "report" 1
+for wt in "$L3"/tmp.*; do
+  [ -d "$wt" ] && git -C "$CLONE" worktree remove --force "$wt" >/dev/null 2>&1 || true
+done
+# ⚠️ 本次 run id 的容器必須一個都不剩、harness 也⛔ 不得收養任何程序——在 build 與複製任何檔案到 <work> **之前**檢查（⛔ 不留下
+#   「有報告卻失敗」的矛盾狀態）。⚠️ raw-failed freeze record 修正計畫「三」：收尾檢查移到 build 之前——失敗時 S 裡還沒有 freeze record。
+ensure_no_run_containers "結束前的容器檢查"
+measure_check_adopted "結束前的收養檢查"     # ⑦d 增補
 # ⚠️ ⑦b：freeze record 在**任何檔案複製到 <work> 之前**於 S 建好並自我驗證；只有 formal ＋ ok ＋ P_B ≤ 預算才寫。
 # ⚠️ ⑦d：freeze record 的寫入端從**工作複本**（HEAD）執行（「快照與來源的清單」②；⛔ 不從原始 repo 的活路徑）——它只以
 #   git 物件讀 repo_head 中的檔案內容，工作複本有同一份物件；它 import 的 i074_stage2_preflight.py 也是工作複本的。
@@ -439,23 +452,37 @@ if [ "$FORMAL" = "1" ]; then
   python3 "$FREEZE" build --report "$S/sizing_report.json" --repo "$CLONE" --identity "$IDENTITY" \
     --out "$S/freeze_record.json" || on_failure "freeze record" 1
 fi
-for wt in "$L3"/tmp.*; do
-  [ -d "$wt" ] && git -C "$CLONE" worktree remove --force "$wt" >/dev/null 2>&1 || true
-done
-# ⚠️ 本次 run id 的容器必須一個都不剩——在寫出任何報告**之前**檢查（⛔ 不留下「有報告卻失敗」的矛盾狀態）。
-ensure_no_run_containers "結束前的容器檢查"
-measure_check_adopted "結束前的收養檢查"     # ⑦d 增補
-cp "$S/sizing_report.json" "$S/sizing_report.txt" "$WORK/"
-if [ -f "$S/freeze_record.json" ]; then
-  cp "$S/freeze_record.json" "$WORK/"
-  # 複製之後對兩個副本再驗一次；不符就刪掉 freeze record（⛔ 不留下可以進 ⑩ 的錯誤紀錄）。
-  if ! python3 "$FREEZE" check-pair --record "$WORK/freeze_record.json" --report "$WORK/sizing_report.json"; then
-    rm -f -- "$WORK/freeze_record.json"
-    on_failure "freeze record 的副本驗證" 1
-  fi
-  say "==> freeze record：$WORK/freeze_record.json"
+measure_check_adopted "build 之後的收養檢查"
+# ⚠️ raw-failed freeze record 修正計畫「三」：pre-commit——raw → 報告 → staging → check-pair，任何失敗都經 on_failure 作廢
+#   MEASURE_VOID_PATHS（⛔ 不留下可以進 ⑩ 的紀錄，頂層⛔ 不發布報告）。
+if ! cp -a "$S" "$WORK/raw"; then
+  # D4：⛔ 不經 on_failure（⛔ 不建 raw-failed/、⛔ 不寫摘要）、保留 S、結束碼 1。先忽略 INT／TERM 並設 DONE=1——之後任何失敗都⛔ 不會
+  #   經 EXIT trap 改走 on_failure；作廢以 guarded 呼叫（移除不了的路徑由它印到 stderr）。
+  trap '' INT TERM
+  DONE=1
+  MEASURE_VOIDED=1
+  measure_void_outputs || MEASURE_VOIDED=0
+  { echo "⚠️ 複製原始量測失敗，保留 S：$S"
+    [ "$MEASURE_VOIDED" = 1 ] || echo "⚠️ 作廢沒有全部成功（移除不了的路徑如上）"; } >&2 || true
+  exit 1
 fi
-cp -a "$S" "$WORK/raw" || { echo "⚠️ 複製原始量測失敗，保留 S：$S" >&2; DONE=1; exit 1; }
+cp -- "$S/sizing_report.json" "$S/sizing_report.txt" "$WORK/"
+if [ -f "$S/freeze_record.json" ]; then
+  cp -- "$S/freeze_record.json" "$WORK/.freeze_record.json.staging"
+  # 複製之後對 staging 與頂層報告再驗一次；不符 → on_failure（作廢——⛔ 不留下可以進 ⑩ 的錯誤紀錄）。
+  python3 "$FREEZE" check-pair --record "$WORK/.freeze_record.json.staging" --report "$WORK/sizing_report.json" \
+    || on_failure "freeze record 的副本驗證" 1
+fi
+# ── commit point：之後收到的 INT／TERM 一律忽略（要中止只能 KILL）；頂層的 freeze_record.json 只由這一次同目錄的 rename 產生，
+#   它存在就是「全部成功」的標記（commit marker：⛔ 不得盲目重跑或丟棄，先以 check-pair、raw/ 與 ⑩ 的來源規則判讀）。
+trap '' INT TERM
+if [ -f "$WORK/.freeze_record.json.staging" ]; then
+  mv -T -- "$WORK/.freeze_record.json.staging" "$WORK/freeze_record.json" || on_failure "freeze record 的發布（rename）" 1
+fi
 DONE=1
-rm -rf "$S"
+# ── post-commit：只有警告、⛔ 沒有失敗出口（D6：rename 之後回 1 反而重新製造「結束碼 1 ＋ 合法紀錄」的矛盾）。
+set +e
+[ ! -f "$WORK/freeze_record.json" ] || say "==> freeze record：$WORK/freeze_record.json"
+rm -rf -- "$S" || echo "⚠️ 清不掉 S：$S（請依這個位置手動刪除；<work> 的結果照常有效）" >&2
 echo "報告：$WORK/sizing_report.json（原始量測：$WORK/raw/）" >&2
+exit 0

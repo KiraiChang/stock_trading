@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），下一步：另立 raw-failed freeze record 的產品修正計畫**（⚠️ **2026-10-14**：計畫 v1 已寫好、待確認，見「Stage 2 raw-failed freeze record 修正計畫 v1」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ 完成、已實作／待 review（⛔ 尚未 commit），下一步：review 通過並 commit 之後進 ⑨-1**（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -1984,6 +1984,8 @@ supervisor（同上）
   `mode = formal`、`status = ok` 且 `P_B ≤ P_B_BUDGET` 才在 S 寫 `freeze_record.json`（先以驗證端的同一組函式驗自己的輸出），否則印出原因、⛔ 不寫（「三」#9）；
   三個腳本 SHA 以 `git show <repo_head>:<path>` 的**內容**計算（⛔ 不是 blob OID）並比對 `meta`；`base_commit` 必須 ＝ 常數（`e1cbbbd` 的完整 OID）。
   複製到 `<work>` 之後對兩個副本再驗一次，不符就刪掉 freeze record 並中止。validation 模式、`assumption_violated`、任何失敗路徑都⛔ 不寫（n10）。
+  ⚠️ **2026-10-14**：「任何失敗路徑都⛔ 不寫」在修正前並不成立（⑧「五」#1）；步驟 6 改成收尾檢查在 build 之前、staging ＋ rename 的 commit point
+  與失敗時的作廢，見「Stage 2 raw-failed freeze record 修正計畫 v1」（⛔ 不改寫本節的歷史計畫）。
 
 **驗證端（`i074_stage2_freeze_record.py`）**：
 
@@ -2013,7 +2015,7 @@ supervisor（同上）
 | S7 | 有殘留容器或 `docker ps` 失敗 | supervisor | 1 | 8 | 不建立 |
 | S8 | sentinel 建立之後、workload child 成功啟動之前的可控失敗 → 收回成功 | supervisor | 1 | 8 | 刪除 |
 | S9 | 同上但收回不成立（inode 被換、後代或容器清不掉） | supervisor | 1 | 9 | 留下；需要重開機 |
-| L1 | 持鎖階段：重驗檔案、freeze record 基本欄位、`repo_head` 不在真正 repo、`mkdir`／clone／checkout 失敗、resume／promote 的 layout 不符 | 持鎖階段 | 1 | 8 | 正常釋放 |
+| L1 | 持鎖階段：重驗檔案、freeze record 基本欄位、`repo_head` 不在真正 repo、`mkdir`／clone／checkout 失敗、resume／promote 的 layout 不符（⚠️ **2026-10-14**：run 模式另加 freeze record 的來源檢查——成功結束的 sizing `<work>`、原位置的頂層、`check-pair`、`meta.work`、與 `raw/` 逐位元相同，見「Stage 2 raw-failed freeze record 修正計畫 v1」「三」讀取端） | 持鎖階段 | 1 | 8 | 正常釋放 |
 | L2 | ⚠️ ⑦b 實作第一輪 review：持鎖階段在 exec 之前驗複本——HEAD ≠ `repo_head`、orchestrator ≠ 真正 repo 物件裡的 blob、resume／promote 的 freeze record 副本與 `run.json` 不符 | 持鎖階段 | 1 | 9 | 正常釋放 |
 | O1 | 協定變數或 `/proc/locks` 驗證失敗 | 複本 | 1 | 9 | 正常釋放 |
 | O2 | preflight 0（完整性） | 複本 | 1 | 9 | 正常釋放 |
@@ -4171,7 +4173,7 @@ build：`COPY . .` 那一層與開頭不同，可見 shell 段落之後 clone �
 
 | # | 疑點 | 依據 | 影響與可能的處置 |
 |---|---|---|---|
-| 1 | ⚠️ **`--formal` 在 freeze record 寫好之後才失敗，`<work>/raw-failed/` 會留下一對合法的 freeze record ＋ 報告**（v29 n10「任何失敗路徑 → ⛔ 不寫」） | `scripts/i074-stage2-sizing.sh`：步驟 6 先 `build --out "$S/freeze_record.json"`（第 437～441 行），之後才 `ensure_no_run_containers`、`measure_check_adopted` 與副本的 `check-pair`（第 446～455 行）；這三者失敗都走 `on_failure`，而 `on_failure` 以 `cp -a "$S" "$WORK/raw-failed"` 複製整個 S（`scripts/lib/i074-stage2-measure.sh` 第 275 行）——S 裡已有 `freeze_record.json` 與 `sizing_report.json`（`status = ok`）。orchestrator 只要求 freeze record 與同目錄的 `sizing_report.json` 成對且交叉一致（`scripts/run-i074-stage2.sh` 第 274～278 行），⛔ 不看同層有沒有 `failure_summary.json` | `<work>/freeze_record.json` 確實⛔ 不會出現，但 `--freeze-record <work>/raw-failed/freeze_record.json` 會被 ⑩ 接受——一趟**失敗**的量測（例如殘留容器、收養到程序）的 `P_B` 可以進 ⑩。⚠️ 只是讀碼推論：`--formal` ⛔ 不接受故障注入，要重現得在 build 之後真的留下容器或程序，⛔ 沒有便宜的重現路徑。處置選項：(a) 列為已知限制、寫進操作程序（⛔ 不得以 `raw-failed/` 的 freeze record 進 ⑩）；(b) 另立計畫改產品（例如 `on_failure` 複製之前把 S 的 freeze record 改名作廢，或把 build 移到所有收尾檢查之後；orchestrator 拒絕同層有 `failure_summary.json` 的 freeze record）。建議 (b)，⛔ 不在 ⑧ 做；⚠️ **2026-10-08**：時序 gate 見「Stage 2 步驟 ⑨ 細部計畫 v1」「九」（⑨ commit 之後另立計畫、修正完成才進 ⑨-1，最晚不得晚於 ⑨-2）；⚠️ **2026-10-14**：採 (b)，寫入端＋讀取端兩道防線，見「Stage 2 raw-failed freeze record 修正計畫 v1」（待確認） |
+| 1 | ⚠️ **`--formal` 在 freeze record 寫好之後才失敗，`<work>/raw-failed/` 會留下一對合法的 freeze record ＋ 報告**（v29 n10「任何失敗路徑 → ⛔ 不寫」） | `scripts/i074-stage2-sizing.sh`：步驟 6 先 `build --out "$S/freeze_record.json"`（第 437～441 行），之後才 `ensure_no_run_containers`、`measure_check_adopted` 與副本的 `check-pair`（第 446～455 行）；這三者失敗都走 `on_failure`，而 `on_failure` 以 `cp -a "$S" "$WORK/raw-failed"` 複製整個 S（`scripts/lib/i074-stage2-measure.sh` 第 275 行）——S 裡已有 `freeze_record.json` 與 `sizing_report.json`（`status = ok`）。orchestrator 只要求 freeze record 與同目錄的 `sizing_report.json` 成對且交叉一致（`scripts/run-i074-stage2.sh` 第 274～278 行），⛔ 不看同層有沒有 `failure_summary.json` | `<work>/freeze_record.json` 確實⛔ 不會出現，但 `--freeze-record <work>/raw-failed/freeze_record.json` 會被 ⑩ 接受——一趟**失敗**的量測（例如殘留容器、收養到程序）的 `P_B` 可以進 ⑩。⚠️ 只是讀碼推論：`--formal` ⛔ 不接受故障注入，要重現得在 build 之後真的留下容器或程序，⛔ 沒有便宜的重現路徑。處置選項：(a) 列為已知限制、寫進操作程序（⛔ 不得以 `raw-failed/` 的 freeze record 進 ⑩）；(b) 另立計畫改產品（例如 `on_failure` 複製之前把 S 的 freeze record 改名作廢，或把 build 移到所有收尾檢查之後；orchestrator 拒絕同層有 `failure_summary.json` 的 freeze record）。建議 (b)，⛔ 不在 ⑧ 做；⚠️ **2026-10-08**：時序 gate 見「Stage 2 步驟 ⑨ 細部計畫 v1」「九」（⑨ commit 之後另立計畫、修正完成才進 ⑨-1，最晚不得晚於 ⑨-2）；⚠️ **2026-10-14**：採 (b)，寫入端＋讀取端兩道防線，見「Stage 2 raw-failed freeze record 修正計畫 v1」（✅ 確認、commit `6a4776c`）；**已實作／待 review**（R0 重現成立、修正後 w0～w15、r0～r10 全綠），見「Stage 2 raw-failed freeze record 修正的實作結果」 |
 
 ##### 六、確認點 ② 待確認的決定
 
@@ -4282,7 +4284,7 @@ build：`COPY . .` 那一層與開頭不同，可見 shell 段落之後 clone �
 | n10-2 | `counterfactual_patch_raw_sha256` ＝ canonical | FR `test_each_rule_…[counterfactual_patch_sha256 ＝ 6…]` | 拒絕 | ✅ |
 | n10-3 | 腳本 SHA ＝ 內容 SHA、⛔ 不是 blob OID | H `FreezeRecordGit.test_head_file_sha256_is_content_not_blob_oid` | 兩者不同、取內容 | ✅ |
 | n10-4 | validation、`assumption_violated`、超預算 → ⛔ 不寫 | FR 同 n10-1 | 三種都不寫、結束碼 0 | ✅ |
-| n10-5 | 任何失敗路徑 → ⛔ 不寫 | 讀碼（`scripts/i074-stage2-sizing.sh` 第 437～455 行） | 在 build **之前**的失敗都⛔ 不到 build | ⚠️ 部分（另見「讀碼疑點 1」） |
+| n10-5 | 任何失敗路徑 → ⛔ 不寫 | 讀碼（`scripts/i074-stage2-sizing.sh` 第 437～455 行） | 在 build **之前**的失敗都⛔ 不到 build | ⚠️ 部分（另見「讀碼疑點 1」）；⚠️ **2026-10-14**：已實作／待 review——RA 的 w0～w15（寫入端）與 S2 的 r0～r10（讀取端），見「Stage 2 raw-failed freeze record 修正的實作結果」 |
 | n11-1 | 步驟 1 複本不符 → 9、後面各步與 verifier 未被呼叫 | S2:863、718 | 9、`==> 晉升` 未出現 | ✅ |
 | n11-2 | 步驟 3：零個終態／兩組／不認得的未追蹤／名稱不符 → 9 | PM `test_step3_*`（6 支） | 各自 9 | ✅ |
 | n11-3 | 步驟 4 來源 fsync 失敗 → 3、⛔ 不建 staging | PM `test_step4_fsync_failure_is_3_and_no_staging` | 3、無 staging | ✅ |
@@ -4925,7 +4927,7 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 順序 | 內容 |
 |---|---|
 | 1 | ⑨ 完成並經 review、commit |
-| 2 | 接著**另立**「raw-failed freeze record」產品修正計畫（對象：「Stage 2 步驟 ⑧ 稽核結果」「五」#1——`--formal` 在 freeze record 寫好之後才失敗時，`<work>/raw-failed/` 會留下一對合法的 freeze record ＋ 報告），經確認 ← ⚠️ **2026-10-14**：「Stage 2 raw-failed freeze record 修正計畫 v1」已寫好、待確認 |
+| 2 | 接著**另立**「raw-failed freeze record」產品修正計畫（對象：「Stage 2 步驟 ⑧ 稽核結果」「五」#1——`--formal` 在 freeze record 寫好之後才失敗時，`<work>/raw-failed/` 會留下一對合法的 freeze record ＋ 報告），經確認 ← ⚠️ **2026-10-14**：「Stage 2 raw-failed freeze record 修正計畫 v1」 ✅ 確認（commit `6a4776c`）；實作已完成、待 review（⛔ 尚未 commit），見「Stage 2 raw-failed freeze record 修正的實作結果」 |
 | 3 | **修正完成之後才進 ⑨-1；最晚不得晚於 ⑨-2**——⑨-2 是產出 freeze record 的那一次 `--formal` sizing，⛔ 不得在修正 commit 之前執行 |
 | 4 | 本次只記錄 gate：⛔ 不提前設計、⛔ 不修改那項產品修正 |
 | ⚠️ 連帶 | 該修正若動到兩份 patch 或 tooling 路徑，⑨ 的封存即失效、⑨ 要重做；動到 acceptance／sizing 的 harness 檔案時，⑨-1、⑨-2 量到的必須是修正之後的版本（順序本來就保證） |
@@ -5259,9 +5261,9 @@ id／失敗標籤寫錯；R23 是 driver 的注回寫錯（`[ … ] && verify ||
   S9 兩項都成立：與 `T_src` 的差異只有 `docs/development-workflow.md`、`docs/issue.md`、`docs/sr-zone-scoring.md`；`--verify` 回 0（重新產生的 tooling patch
   與 commit 內的逐位元相同）。commit 內兩份 patch 的 SHA-256 與封存值相同（tooling `5ff9a90f…`、cf `fa7f5ba8…`）；正式 repo 的 worktree 登記數前後都是 401。
 * ⚠️ **下一步**——依計畫「九」的 gate：另立「raw-failed freeze record」產品修正計畫，修正完成才進 ⑨-1，最晚不得晚於 ⑨-2。
-  ⚠️ **2026-10-14**：計畫 v1 見下一節「Stage 2 raw-failed freeze record 修正計畫 v1」（待確認）。
+  ⚠️ **2026-10-14**：計畫 v1 見下一節「Stage 2 raw-failed freeze record 修正計畫 v1」（✅ 確認、commit `6a4776c`）；實作已完成、待 review，見「Stage 2 raw-failed freeze record 修正的實作結果」。
 
-#### Stage 2 raw-failed freeze record 修正計畫 v1（2026-10-14，第二輪 review 修正後待確認）
+#### Stage 2 raw-failed freeze record 修正計畫 v1（2026-10-14，✅ 確認（兩輪 review）、commit `6a4776c`；已實作／待 review，見下一節「Stage 2 raw-failed freeze record 修正的實作結果」）
 
 ⚠️ 依據：「Stage 2 步驟 ⑧ 稽核結果」「五」#1（讀碼疑點）、⑧ 矩陣 n10-5（⚠️ 部分）、v29 n10（任何失敗路徑都⛔ 不寫 freeze record）、
 「Stage 2 步驟 ⑨ 細部計畫 v1」「九」的硬性時序 gate（⑨ 已 commit `53538a3`、S9 通過；**本修正 commit 之後才進 ⑨-1，最晚不晚於 ⑨-2**）。
@@ -5528,6 +5530,129 @@ D1～D5 的裁決見「六」；D6、D7 是本輪新增的決定（第二輪 rev
 | 低 | **R0 的 w6e 在舊程式沒有注入點**，可能因根本沒送出 TERM 而假綠 | ✅ 成立：舊程式第 458～460 行⛔ 沒有 `mv` | w6e 的舊版替代點：`cp -a S raw` 成功之後、`DONE=1` 之前；每一支有注入的測試都斷言 hook 命中；R0 的預期把 w15 列為對照組 |
 
 D1～D7 的裁決見「六」（第二輪 review：D1～D5 維持、D6 同意、D7 方向同意並依上表修正）。
+
+#### Stage 2 raw-failed freeze record 修正的實作結果（2026-10-14，已實作／待 review）
+
+⚠️ 計畫見上一節「Stage 2 raw-failed freeze record 修正計畫 v1」（✅ 確認、commit `6a4776c`）。⛔ 尚未 commit：review 通過、使用者 commit 之後，
+「Stage 2 步驟 ⑨ 細部計畫 v1」「九」的 gate 才放行 ⑨-1（最晚不晚於 ⑨-2）。review 確認之前本節與上一節都保留。
+
+##### 一、R0 重現（實作之前；`--no-hardlinks` 的隔離 clone @ `4c7b2a8`，只動測試）
+
+做法：w／r 測試先寫進隔離 clone 的兩支測試檔。寫入端那一段從 clone 的 `scripts/test-replay-args.sh` 抽出、單獨執行（同一段文字；其餘段落與本修正無關、
+需要 docker image）；讀取端執行整支 `scripts/test-i074-stage2.sh`。w6e 依計畫在 clone 內改用替代點（`cp -a S raw` 成功之後、`DONE=1` 之前）。
+每一支有注入的測試都記下 hook 是否命中。
+
+結果與「四」的預期**完全一致**（⛔ 沒有上游提前 return、⛔ 沒有走不到的注入點）。紅的原因：
+
+| id | 修正前的結果 |
+|---|---|
+| w0、w10、w15 | ✅ 綠（對照組） |
+| w1、w2 | build 已被呼叫；`raw-failed/` 留下通過 `check-pair` 的一對（舊程式只有 build 之後的一次收養檢查，w2 與 w3 打到同一點） |
+| w3、w6a | `raw-failed/` 留下通過 `check-pair` 的一對；console.log ⛔ 沒有作廢紀錄 |
+| w4 | `raw-failed/` 留下成對的紀錄、頂層發布了報告（頂層的 freeze record 已被既有的 `rm` 刪掉） |
+| w5 | 頂層、`raw/` 與保留的 S 各有一對通過 `check-pair` 的紀錄（結束碼 1、⛔ 沒有摘要）——「〇」第 3 條成立 |
+| w5b | 同 w5；作廢的 `rm` hook 未命中（舊程式沒有作廢） |
+| w6b | 頂層、`raw/`、`raw-failed/` 各一對 |
+| w6c | `raw-failed/` 一對、頂層有報告 |
+| w6d | 頂層與 `raw-failed/` 各一對 |
+| w6e（替代點）、w6f、w7 | **結束碼 1 ＋ 頂層的合法 freeze record**（第一輪 review 的第 1 點、「〇」第 5 條；w7 是 `rm -rf S` 失敗 → `set -e` 回 1、EXIT trap 因 `DONE=1` ⛔ 不動作） |
+| w8 | 產生了 `raw-failed/`（含那個目錄）、S 已清、stderr ⛔ 沒有列出路徑 |
+| w9 | `measure_void_outputs: command not found`（結束碼 127） |
+| w11 | 呼叫序 `build ps adopt cp-report cp-final check-pair:freeze_record.json cp-raw` |
+| w12 | `say` 失敗讓 `on_failure` 中止在複製之前：S 保留、裡面仍有成對的紀錄 |
+| w13 | 作廢的 `rm` hook 未命中；`raw-failed/` 一對 |
+| w14 | `on_failure` 的 trap 記錄只有 `trap - EXIT INT TERM` |
+| 片段的關鍵行 | 紅（舊片段沒有 staging、`mv -T`、`trap '' INT TERM` 等；預期之中） |
+| r0 | ✅ 綠 |
+| r1～r9 | 持鎖階段照常放行：結束碼 0、runner 被呼叫、建了複本、一路晉升 |
+| r10 | 結束碼 1，但複本已建立（到複本內的 preflight 才被擋下：「state run 的交叉條件不符」） |
+| r7 的「FIFO ⛔ 沒有被打開」 | 綠（舊程式⛔ 不讀 `raw/`） |
+
+既有的測試在 clone 內照常全過（`test-i074-stage2.sh` 只有上列 14 支 r 失敗）。
+
+##### 二、實作內容
+
+| 檔案 | 改動 |
+|---|---|
+| `scripts/lib/i074-stage2-measure.sh` | `MEASURE_VOID_PATHS=()` 與 `MEASURE_VOIDED=1`（狀態變數）；`measure_void_outputs()`（「三」的型別表；console.log 的紀錄是 `作廢 <路徑>：一般檔案 sha256=…`、`作廢 <路徑>：symlink（⛔ 不跟隨）` 或 `作廢 <路徑>：<型別>（⛔ 不讀內容）`，移除不了的印到 stderr：`⚠️ 作廢失敗，仍存在：<路徑>（<型別>）`）；`on_failure` 開頭的臨界區（D7）；第 4 步（複製 S）與第 6 步（清 S）加上「作廢成功」；保留 S 的訊息多列「作廢」 |
+| `scripts/i074-stage2-sizing.sh` | `measure_work_dir_guard` 之後登記六個路徑；步驟 6 改成「三」的順序（收尾檢查 → build → 第二次收養檢查 → raw → 報告 → staging → `check-pair` → commit point → post-commit）；raw 複製失敗的分支（D4）；開頭說明 |
+| `scripts/run-i074-stage2.sh` | `locked_main` 的 run 模式：讀取端 1～4（失敗一律 `exit "$code"`，屬 L1） |
+| `scripts/test-replay-args.sh` | 寫入端 w0～w15 ＋ 片段的關鍵行檢查 |
+| `scripts/test-i074-stage2.sh` | `make_freeze()`（`meta.work`、`raw/`）、讀取端 r0～r10、n7 兩支既有 fixture 補 `raw/`、`run_entry` 可選的 `RUN_TIMEOUT` |
+| `docs/development-workflow.md` | 「七」的歸檔（見本節「六」） |
+
+##### 三、與計畫的差異（都是實作細節、⛔ 沒有改變設計；review 時確認）
+
+1. `on_failure` 實際的第一個指令是「作廢清單是否為空」的判斷（`[ "${#MEASURE_VOID_PATHS[@]}" -gt 0 ]`），之後才是 `trap '' INT TERM`——空清單（acceptance）
+   時⛔ 不進臨界區，必須先判斷。這一個 `[` 落在「handler 開始執行到第一個指令」那段本來就消除不了的窗口裡。
+2. 作廢在 `local` 之前，所以結果放在 lib 的狀態變數 `MEASURE_VOIDED`（初值 1；acceptance 永遠是 1）。raw 分支也用它。
+3. 第二次收養檢查在 validation 模式也做（⛔ 不只限 `--formal`；便宜、順序單純）。
+4. w13 的第一個 TERM 改在 w6d 的注入點（staging 的 `check-pair` 通過之後）送出；計畫寫的是「build 之後的注入點」。這個時點登記的五個路徑都已存在，
+   看得出第二個 TERM 有沒有被忽略（RV19 時，每一條作廢紀錄都出現兩次）。
+5. w5、w5b 另斷言 stderr 印出「保留 S：<位置>」：raw 分支先 `DONE=1` 才作廢，所以作廢⛔ 沒有 guarded 時（RV14）⛔ 不會掉進 `on_failure`，而是直接以 1 結束、
+   跳過印出結果。只看 `raw-failed/` 與摘要抓不到這個差別。
+6. r6、r7、r8 各有多支：r6 分 freeze record 與報告；r7 分缺少、symlink（指向內容相同的頂層報告）、FIFO；r8 分 `cp -a` 複製與搬移。FIFO（w9、r7）除了
+   `timeout` 兜底，另由測試開著寫端等待——被打開就留下 marker，⛔ 不會讓讀端卡住；r7 因此多兩支（寫端已就緒、「FIFO ⛔ 沒有被打開」）。
+   ⚠️ 第一次完整驗證時發現寫端（另一個 Python 程序）有時在 harness 刪掉 FIFO 之後才打開它（`FileNotFoundError`），偵測因此落空——改成
+   先確認寫端已經阻塞在打開 FIFO（`/proc/<pid>/wchan` ＝ `pipe_wait`）才執行，沒有就緒就判紅；另以「作廢會讀非一般檔案」的變體確認 w9 會變紅。
+7. n7 的兩支既有 fixture（`p_b_bytes` 是 bool、報告是 `{}`）補上 `raw/`，讓它們照舊打到內容檢查、⛔ 不被來源檢查先擋下；前者另斷言「基本驗證不過」的訊息。
+8. 寫入端多一支「片段與作廢清單的登記含所有關鍵行」（對應「四」的「斷言片段的關鍵行都在」）。
+
+##### 四、測試結果（修正後）
+
+- 寫入端：w0～w15 與關鍵行共 23 支全綠（連跑三次一致）。讀取端：r0～r10（共 17 支）全綠；整支 `scripts/test-i074-stage2.sh` 全過。
+- **反向驗證**（`--no-hardlinks` 的隔離 clone，一次注回一項 → 執行 → 還原）：22 項全部抓到。
+
+| # | 計畫預期變紅 | 實際變紅 |
+|---|---|---|
+| RV1 | w3、w4、w6a～w6d | 同左 ＋ w8、w12～w14 |
+| RV2 | w1、w2、w11 | 同左 |
+| RV3 | w5 | 同左 ＋ 關鍵行、w5b |
+| RV4 | w11 | 同左 ＋ 關鍵行、w6e、w13 |
+| RV5 | w8 | 同左 |
+| RV6 | w3、w4 | 同左 ＋ 關鍵行、w5、w5b、w6a～w6d、w8、w12～w14 |
+| RV7 | r1、r4、r5 | 同左（r5 被接受；r1、r4 改被 `raw/` 子檔的檢查擋下、訊息不符） |
+| RV8 | r2、r3 | 同左 |
+| RV9 | r6 | 同左（兩支） |
+| RV10 | w6e | 同左 ＋ w6f |
+| RV11 | w7 | 同左 ＋ 關鍵行 |
+| RV12 | w12 | 同左 ＋ w13、w14 |
+| RV13 | w9 | 同左 |
+| RV14 | w5b | 同左 |
+| RV15 | r8 | 同左（兩支） |
+| RV16 | r7 | 同左（symlink 被接受、FIFO 被打開；缺少改被逐位元比對擋下、訊息不符） |
+| RV17 | r9 | 同左 |
+| RV18 | r10 | 同左（建了複本，到複本內才被擋下） |
+| RV19 | w13 | 同左 ＋ w14 |
+| RV20 | w14 | 同左 |
+| RV21 | w15 | 同左 |
+| RV22 | w14 | 同左 |
+
+##### 五、完整驗證
+
+- 開跑前可用磁碟 4.4 GB（≥ 1.3 GB，T-072）；⛔ 沒有調大 MEM（repo 腳本的預設、經 mem-guard 下修）。
+- `python/scripts/test.sh -v backtest/ tests/` → **結束碼 0**：doc-refs 通過、`scripts/test-replay-args.sh` 全部通過（含 w0～w15）、
+  `scripts/test-i074-stage2.sh` 全部通過（含 r0～r10）、pytest `2404 passed, 1 skipped`（11 分 50 秒）。
+  ⚠️ 這一次執行期間發現 w9／r7 的 FIFO 寫端競爭（「三」第 6 點）並修正測試；修正之後兩支 shell 測試以 `test.sh` 相同的環境
+  （`IMAGE_REQUIRED=1 PY_IMAGE=stock-trading-python-test:latest`）各自整支重跑一次 → 都是結束碼 0；寫入端那一段另連跑三次一致。
+  pytest 的範圍（`python/`）沒有改動，⛔ 沒有重跑。doc-refs 在文件定稿後重跑 → 0（引用 176 個、問題 0）。
+- **⑨ 的封存不受影響**：兩份 patch 的 SHA-256 仍是 tooling `5ff9a90f…`、cf `fa7f5ba8…`；`git diff --name-only 53538a3` 限定在
+  `python/baselines/i074_stage2/`、`evaluation.py`、`replay_bundle/` 時為空；在 `--no-hardlinks` 的隔離 clone 裡把本次改動 stage 之後的 tree
+  （`c5b583f0…`）以 `make-i074-tooling-patch.sh --verify` → 0（⛔ 沒有動正式 repo 的 index）。
+- **殘留**：`/dev/shm/i074-*` 前後都是 0 個；`docker ps -aq` 前後相同。正式 repo 的 worktree 登記 401 → 409、`/tmp` 多 4 個目錄：
+  全部出現在 `scripts/test-replay-args.sh` 開頭「結束碼 6」那一段的時刻（每跑一次 ＋4 個登記、＋2 個目錄——一個 HEAD 的 worktree、一個只有
+  0-byte `tooling.patch` 的凍結目錄），與 I-118 記錄的既有洩漏相同；新測試自己的暫存目錄都在結束時刪除，⛔ 沒有增加。
+  R0 期間另有一個我自己的暫存目錄（以 `| head` 截斷輸出、測試被 SIGPIPE 中止而沒有清掉），已確認內容後刪除。
+
+##### 六、歸檔（「七」）
+
+* `docs/development-workflow.md`：sizing harness 表的「harness 的狀態」（作廢失敗時⛔ 不產生 `raw-failed/`；commit 之後 S 清不掉只警告、依位置手動刪除）、
+  「失敗」（⛔ 不發布頂層報告、freeze record 一律作廢、raw 複製失敗的形狀、commit marker 的判讀）、「⑦b 改動」的 freeze record 條目（新順序、staging ＋ rename、
+  作廢與臨界區）；⑩ 正式執行程序的用法（`--freeze-record` 一律指向 ⑨-2 原位置，⛔ 不搬移、⛔ 不複製、⛔ 不改上層目錄的名字）與「持鎖階段」列（讀取端 1～4）。
+* 本筆的交叉指標：I-074 狀態列、⑧「五」#1（已實作／待 review）、⑧ 矩陣 n10-5（指向 w0～w15、r0～r10）、⑦b「二之九」與「二之十」L1 的 ⚠️ 註記
+  （⛔ 不改寫歷史計畫）、⑨「九」gate 第 2 列、⑨ 實作結果「九」的下一步、roadmap 的「現在在這裡」——都寫成「已實作、待 review」，review 通過並 commit 之後
+  才改成「下一步 ⑨-1」。
+* I-074 欄位表的「已知限制（open）」①（acceptance 的同類現象，D5）維持 open，⛔ 不隨本節收斂。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -7088,7 +7213,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次
    ← ✅ ⑧ 計畫 v4 已確認（2026-10-07，`5e2d84f`）；✅ ⑧ 稽核結果與補法已確認（2026-10-07）；✅ ⑧ 的補齊與全量執行 review 通過（commit `be0e337`；見「Stage 2 步驟 ⑧ 補齊與全量執行的結果」）
-⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ✅ ⑨ 細部計畫 v1 已確認（`1bec699`）；✅ 實作前的可行性實驗與計畫修正已確認（`42dcd2a`；D1 確認、D2 採 (a)、D3 確認）；✅ ⑨ 實作 review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點），S9 ✅ 2026-10-14 通過（見「Stage 2 步驟 ⑨ 實作結果」）；⚠️ 現在在這裡：依該計畫「九」的 gate 另立的「Stage 2 raw-failed freeze record 修正計畫 v1」（2026-10-14）待確認（修正完成才進 ⑨-1，最晚不得晚於 ⑨-2）
+⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ✅ ⑨ 細部計畫 v1 已確認（`1bec699`）；✅ 實作前的可行性實驗與計畫修正已確認（`42dcd2a`；D1 確認、D2 採 (a)、D3 確認）；✅ ⑨ 實作 review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點），S9 ✅ 2026-10-14 通過（見「Stage 2 步驟 ⑨ 實作結果」）；⚠️ 現在在這裡：依該計畫「九」的 gate 另立的「Stage 2 raw-failed freeze record 修正計畫 v1」（2026-10-14）✅ 確認（commit `6a4776c`），實作已完成、待 review（見「Stage 2 raw-failed freeze record 修正的實作結果」）——review 通過並 commit 之後才進 ⑨-1，最晚不得晚於 ⑨-2
    （＋ **`e1cbbbd`** 既有測試套用 patch 前後全綠）
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑨ 改成**兩份 patch 一起封存**（counterfactual ＋ tooling）；「既有測試全綠」改成
    「套 counterfactual ＋ tooling 之後全綠」；differential guard 的 patched 側含 tooling；另加 **tooling 非語意 guard**

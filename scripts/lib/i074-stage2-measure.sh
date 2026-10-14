@@ -60,6 +60,9 @@ alloc() { helper allocated "$1" | python3 -c 'import json,sys; print(json.load(s
 
 PHASE=""; SAMPLER_PID=""; STEP_PID=""; DONE=0
 HARNESS_STARTTIME=""; GUARD_PROBE=""; GUARD_SHELL_PID=""; GUARD_LEFTOVER=0
+# ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單由入口登記（sizing 登記 freeze record 與報告的
+#   所有位置；acceptance ⛔ 不登記——on_failure ⛔ 不進臨界區、⛔ 不呼叫作廢，行為與修正前相同）。MEASURE_VOIDED＝最近一次作廢的結果。
+MEASURE_VOID_PATHS=(); MEASURE_VOIDED=1
 # 本程序（$$）在 /proc/<pid>/stat 的 starttime（第 22 欄）。$1＝pid（預設 $$）。
 proc_starttime() {
   local s
@@ -250,9 +253,48 @@ ensure_no_run_containers() {  # $1＝說明
   fi
   [ -z "$out" ] || on_failure "$1：仍有本次的容器 $(printf '%s ' $out)" 1
 }
+# 作廢 MEASURE_VOID_PATHS（raw-failed freeze record 修正計畫「三」、D1；no-follow）：symlink 只移除 link（⛔ 不跟隨）；一般檔案先把
+#   SHA-256 記進 console.log 再刪；其他型別（目錄、FIFO……）只記型別、⛔ 不讀內容，嘗試刪除。最後逐一確認都不存在 → 0；
+#   否則 1，並把仍存在的路徑與型別印到 stderr。⚠️ 每個指令都容許失敗（⛔ 不會在作廢到一半時中止；呼叫端一律 guarded）。
+measure_void_outputs() {
+  local p sha kind left=0
+  for p in "${MEASURE_VOID_PATHS[@]}"; do
+    if [ -L "$p" ]; then
+      say "作廢 $p：symlink（⛔ 不跟隨）" || true
+      rm -f -- "$p" || true
+    elif [ -f "$p" ]; then
+      sha="$(sha256sum < "$p" | cut -d' ' -f1)" || sha="讀不到"
+      say "作廢 $p：一般檔案 sha256=$sha" || true
+      rm -f -- "$p" || true
+    elif [ -e "$p" ]; then
+      kind="$(stat -c %F -- "$p" 2>/dev/null)" || kind="型別不明"
+      say "作廢 $p：$kind（⛔ 不讀內容）" || true
+      rm -f -- "$p" || true
+    fi
+  done
+  for p in "${MEASURE_VOID_PATHS[@]}"; do
+    if [ -e "$p" ] || [ -L "$p" ]; then
+      kind="$(stat -c %F -- "$p" 2>/dev/null)" || kind="型別不明"
+      echo "⚠️ 作廢失敗，仍存在：$p（$kind）" >&2 || true
+      left=1
+    fi
+  done
+  return "$left"
+}
 on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在量測窗口終止之後。
+  # ⚠️ raw-failed freeze record 修正計畫「三」（D7）：作廢清單非空時，一開始就忽略 INT／TERM（在 trap - EXIT 之前——⛔ 不在兩個
+  #   builtin 之間留下原本的 handler），作廢完才恢復預設（之後與修正前相同：清理期間再收到訊號就中止）。作廢放在最前面：
+  #   之後的 say、touch 等在 set -e 下失敗會讓 on_failure 提早中止，⛔ 不得擋在作廢之前。清單為空（acceptance）時⛔ 不進臨界區。
+  if [ "${#MEASURE_VOID_PATHS[@]}" -gt 0 ]; then
+    trap '' INT TERM
+    trap - EXIT
+    MEASURE_VOIDED=1
+    measure_void_outputs || MEASURE_VOIDED=0
+    trap - INT TERM
+  else
+    trap - EXIT INT TERM
+  fi
   local stage="$1" rc="$2" cleaned=0 copied=0 summarized=0 group_stopped=1 adopted_ok=1 rrc=0
-  trap - EXIT INT TERM
   stop_sampler                                                       # 1
   [ -z "${FS_NOISE:-}" ] || rm -f -- "$FS_NOISE"                     # 演練的 fs-noise（量測範圍外的暫存檔）
   cleanup_containers || true                                         # 2：先停掉還在跑的容器
@@ -272,7 +314,9 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
   cleanup_containers && cleaned=1                                    # 2c：group 結束後再清一次——這一次才算數
   [ -n "$PHASE" ] && [ -d "$S/phases/$PHASE" ] && touch "$S/phases/$PHASE/aborted"   # 3
   say "中止：階段 $stage、結束碼 $rc"
-  if [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != copy ] && cp -a "$S" "$WORK/raw-failed" 2>/dev/null; then  # 4
+  # 4：⚠️ 作廢沒有全部成功 → ⛔ 不複製（raw-failed/ ⛔ 不得含移除不了的 freeze record）、保留 S（第 6 步）。
+  if [ "$MEASURE_VOIDED" = 1 ] && [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != copy ] \
+     && cp -a "$S" "$WORK/raw-failed" 2>/dev/null; then                 # 4
     copied=1
   fi
   if [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != summary ] \
@@ -288,12 +332,13 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
     echo "⚠️ 收不掉的 host 程序（reap-adopted 結束碼 $rrc；guard 的測試程序：$GUARD_LEFTOVER）：" >&2
     cat "$S/leftover-pids.json" "$S/kill-pinned.jsonl" "$S/adopted.err" 2>/dev/null >&2 || true
   fi
-  # 6：五者都成功才清 S——⚠️ 步驟的 process group 沒有確實結束、或還有收不掉的程序時，它們可能還在寫 S。
-  if [ "$group_stopped" = 1 ] && [ "$adopted_ok" = 1 ] && [ "$cleaned" = 1 ] && [ "$copied" = 1 ] && [ "$summarized" = 1 ]; then
+  # 6：作廢與五者都成功才清 S——⚠️ 步驟的 process group 沒有確實結束、或還有收不掉的程序時，它們可能還在寫 S。
+  if [ "$MEASURE_VOIDED" = 1 ] && [ "$group_stopped" = 1 ] && [ "$adopted_ok" = 1 ] && [ "$cleaned" = 1 ] && [ "$copied" = 1 ] \
+     && [ "$summarized" = 1 ]; then
     rm -rf "$S"
     echo "原始量測：$WORK/raw-failed/；摘要：$WORK/failure_summary.json（⛔ 不宣稱 P_B）" >&2
   else
-    echo "⚠️ 步驟結束（$group_stopped）、收養的程序（$adopted_ok）、容器清理（$cleaned）、原始量測的複製（$copied）" \
+    echo "⚠️ 作廢（$MEASURE_VOIDED）、步驟結束（$group_stopped）、收養的程序（$adopted_ok）、容器清理（$cleaned）、原始量測的複製（$copied）" \
          "或失敗摘要（$summarized）沒有全部成功——保留 S：$S" >&2
   fi
   exit 1

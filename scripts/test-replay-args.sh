@@ -2705,6 +2705,442 @@ done
 
 rm -rf "$SZ_TD"
 
+# ── I-074 Stage 2 raw-failed freeze record 修正計畫：sizing 步驟 6 的寫入端（w0～w15） ─────────────────────────────
+#
+# 對應 issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 w0～w15。`--formal` ⛔ 不接受故障注入，所以以 sizing 的
+# **實際片段**（「# ── 6. 報告」到檔尾，以及作廢清單的登記）＋ source 實際的 measure lib ＋ stub 執行（與 ac26 同一種做法）：
+#   - helper 是 stub（report／reap-adopted／cleanup-cids；failure-summary 交給真正的 helper），REAL_DOCKER 是 fake（控制 ps）；
+#   - FREEZE 是合成 clone 裡的 wrapper：記下呼叫序、轉呼叫真正的 i074_stage2_freeze_record.py，可注入 check-pair 失敗或送 TERM；
+#   - 注入點以同名的 shell 函式包住 cp／mv／rm／trap：只在參數符合指定的那一次才動作，其餘照常轉呼叫；
+#   - ⚠️ 每一支有注入的測試都斷言 hook 確實命中（⛔ 不讓「根本沒有送出 TERM」被當成綠）。
+echo "==> i074 Stage 2 raw-failed freeze record：sizing 步驟 6 的寫入端（w0～w15）"
+RF_TD="$(mktemp -d)"
+RF_SIZING="$REPO_ROOT/scripts/i074-stage2-sizing.sh"
+RF_REAL_FREEZE="$REPO_ROOT/python/scripts/i074_stage2_freeze_record.py"
+RF_PIDS=()
+awk '/^# ── 6\. 報告/ { on = 1 } on' "$RF_SIZING" > "$RF_TD/step6.sh"
+awk '/^MEASURE_VOID_PATHS=\(/ { on = 1 } on { print } on && /\)$/ { exit }' "$RF_SIZING" > "$RF_TD/register.sh"
+rf_keys_ok() {  # 片段與登記的關鍵行都在（⚠️ 抽錯片段時整組測試失去意義）
+  local frag reg k
+  frag="$(cat "$RF_TD/step6.sh")"; reg="$(cat "$RF_TD/register.sh")"
+  [[ "$(head -1 <<< "$frag")" == "# ── 6. 報告 "* ]] || return 1
+  for k in 'helper report --state "$S"' 'build --report "$S/sizing_report.json"' 'cp -a "$S" "$WORK/raw"' \
+           '"$WORK/.freeze_record.json.staging"' 'check-pair --record "$WORK/.freeze_record.json.staging"' \
+           "trap '' INT TERM" 'mv -T -- "$WORK/.freeze_record.json.staging" "$WORK/freeze_record.json"' \
+           'measure_void_outputs' 'set +e'; do
+    grep -qF -- "$k" <<< "$frag" || { echo "    片段缺：$k" >&2; return 1; }
+  done
+  for k in '"$S/freeze_record.json"' '"$WORK/.freeze_record.json.staging"' '"$WORK/freeze_record.json"' \
+           '"$WORK/raw/freeze_record.json"' '"$WORK/sizing_report.json"' '"$WORK/sizing_report.txt"'; do
+    grep -qF -- "$k" <<< "$reg" || { echo "    登記缺：$k" >&2; return 1; }
+  done
+}
+if rf_keys_ok; then pass "w：抽出的步驟 6 片段與作廢清單的登記含所有關鍵行"; else fail "w：抽不到步驟 6 的片段或作廢清單的登記"; fi
+
+# 合成的工作複本：build 以 git 物件讀三個 sizing 腳本（內容任意）；FREEZE wrapper 放在同一個位置（未追蹤）。
+RF_CLONE="$RF_TD/clone"
+git init -q "$RF_CLONE"
+mkdir -p "$RF_CLONE/scripts/lib" "$RF_CLONE/python/scripts"
+printf 'rf harness\n' > "$RF_CLONE/scripts/i074-stage2-sizing.sh"
+printf 'rf shim\n' > "$RF_CLONE/scripts/lib/i074-sizing-docker-shim.sh"
+printf 'rf helper\n' > "$RF_CLONE/python/scripts/i074_stage2_sizing.py"
+git -C "$RF_CLONE" add -A
+git -C "$RF_CLONE" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm rf
+RF_IMG="sha256:$(printf 'rf-image' | sha256sum | cut -d' ' -f1)"
+printf '{"expected_image_id":"%s","kind":"sr_zone_run_identity"}' "$RF_IMG" > "$RF_TD/identity.json"
+python3 -B - "$RF_REAL_FREEZE" "$RF_CLONE" "$RF_IMG" "$RF_TD/identity.json" "$RF_TD/report.tmpl.json" <<'PY'
+import hashlib, json, subprocess, sys
+sys.path.insert(0, sys.argv[1].rsplit("/", 1)[0])
+import i074_stage2_freeze_record as fr
+_real, clone, image, identity, out = sys.argv[1:6]
+head = subprocess.run(["git", "-C", clone, "rev-parse", "HEAD"], stdout=-1, check=True, text=True).stdout.strip()
+def fsha(rel): return hashlib.sha256(open(f"{clone}/{rel}", "rb").read()).hexdigest()
+cf, tool = hashlib.sha256(b"rf-cf").hexdigest(), hashlib.sha256(b"rf-tool").hexdigest()
+meta = {"run_id": "20261014T000000Z-1", "mode": "formal", "repo_head": head, "clone_head": head, "base_commit": fr.BASE_COMMIT,
+        "harness_sha256": fsha("scripts/i074-stage2-sizing.sh"), "shim_sha256": fsha("scripts/lib/i074-sizing-docker-shim.sh"),
+        "helper_sha256": fsha("python/scripts/i074_stage2_sizing.py"), "image": image,
+        "identity_sha256": hashlib.sha256(open(identity, "rb").read()).hexdigest(),
+        "counterfactual_sha256": cf, "counterfactual_canonical_sha256": cf, "tooling_sha256": tool, "tooling_canonical_sha256": tool}
+json.dump({"schema": "i074_stage2_sizing_report_v1", "mode": "formal", "status": "ok", "P_B": 1000, "meta": meta}, open(out, "w"))
+PY
+cat > "$RF_TD/mkreport.py" <<'PY'
+import json, sys
+tmpl, work, formal, jout, tout = sys.argv[1:6]
+rep = json.load(open(tmpl))
+rep["meta"]["work"] = work
+if formal != "1":
+    rep["mode"] = rep["meta"]["mode"] = "validation"
+open(jout, "w").write(json.dumps(rep, sort_keys=True, separators=(",", ":")))
+open(tout, "w").write("rf sizing report\n")
+PY
+cat > "$RF_CLONE/python/scripts/i074_stage2_freeze_record.py" <<'PY'
+import os, signal, subprocess, sys
+sc, hook = os.environ["RF_SC"], " %s " % os.environ.get("RF_HOOK", "")
+def seq(s):
+    with open(os.path.join(sc, "seq"), "a") as fh:
+        fh.write(s + "\n")
+def once(name):
+    p = os.path.join(sc, "fired." + name)
+    if os.path.exists(p):
+        return False
+    open(p, "w").close()
+    return True
+def hit(name):
+    with open(os.path.join(sc, "hit"), "a") as fh:
+        fh.write(name + "\n")
+    seq("HOOK " + name)
+cmd = sys.argv[1]
+rec = sys.argv[sys.argv.index("--record") + 1] if "--record" in sys.argv else ""
+seq(cmd if cmd != "check-pair" else "check-pair:" + os.path.basename(rec))
+if cmd == "check-pair" and " checkpair-fail " in hook:
+    hit("checkpair-fail")
+    sys.exit(1)
+rc = subprocess.run([sys.executable, "-B", os.environ["RF_REAL_FREEZE"]] + sys.argv[1:]).returncode
+if cmd == "check-pair" and rc == 0 and " term-after-checkpair " in hook and once("term-after-checkpair"):
+    hit("term-after-checkpair")
+    os.kill(os.getppid(), signal.SIGTERM)       # harness 是直接的父程序：wrapper 結束之後才處理 trap
+sys.exit(rc)
+PY
+mkdir -p "$RF_TD/bin"
+cat > "$RF_TD/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  ps)
+    printf 'ps\n' >> "$RF_SC/seq"
+    case " ${RF_HOOK:-} " in *" ps-list "*)
+      if [ ! -e "$RF_SC/fired.ps-list" ]; then
+        : > "$RF_SC/fired.ps-list"; printf 'ps-list\n' >> "$RF_SC/hit"; printf 'HOOK ps-list\n' >> "$RF_SC/seq"; echo cid-rf-left
+      fi ;;
+    esac ;;
+esac
+exit 0
+FAKE
+chmod +x "$RF_TD/bin/docker"
+cat > "$RF_TD/harness.sh" <<'RFH'
+#!/usr/bin/env bash
+# raw-failed freeze record 測試的 harness：source 實際的 measure lib，執行 sizing 步驟 6 的實際片段，或直接呼叫 on_failure／作廢。
+set -euo pipefail
+export PYTHONDONTWRITEBYTECODE=1
+SC="$RF_SC"; S="$SC/S"; WORK="$SC/work"; CLONE="$RF_CLONE"; L3="$WORK/tmp"
+FORMAL="$RF_FORMAL"; IDENTITY="$RF_IDENTITY"; HELPER="$RF_REAL_HELPER"; REAL_DOCKER="$RF_DOCKER"; RUN_ID=20261014T000000Z-1
+RF_INT0="$(builtin trap -p INT)"            # 進入時的 INT（背景啟動時是忽略；作廢之後要恢復成這個）
+mkdir -p "$S/out" "$S/bin" "$S/phases"
+mkdir "$WORK"
+LOG="$S/console.log"
+. "$RF_LIB"
+PHASE=memory_only
+rf_seq() { printf '%s\n' "$*" >> "$SC/seq"; }
+rf_on() { case " ${RF_HOOK:-} " in *" $1 "*) return 0 ;; esac; return 1; }
+rf_once() { [ ! -e "$SC/fired.$1" ] || return 1; : > "$SC/fired.$1"; }
+rf_hit() { printf '%s\n' "$1" >> "$SC/hit"; rf_seq "HOOK $1"; }
+RF_ADOPT=0
+helper() {
+  case "$1" in
+    report) rf_seq report; python3 "$RF_MKREPORT" "$RF_TMPL" "$WORK" "$FORMAL" "$S/sizing_report.json" "$S/sizing_report.txt" ;;
+    cleanup-cids) return 0 ;;
+    reap-adopted)
+      case " $* " in *" --check-only "*) ;; *) return 0 ;; esac
+      RF_ADOPT=$((RF_ADOPT + 1)); rf_seq adopt
+      if rf_on adopt1-fail && [ "$RF_ADOPT" = 1 ]; then rf_hit adopt1-fail; return 1; fi
+      if [ -e "$S/freeze_record.json" ]; then
+        if rf_on adopt-fr-fail; then rf_hit adopt-fr-fail; return 1; fi
+        if rf_on adopt-fr-logdir && rf_once adopt-fr-logdir; then
+          rf_hit adopt-fr-logdir; command rm -f -- "$LOG"; mkdir -- "$LOG"; kill -TERM $$
+        fi
+        if rf_on adopt-fr-term && rf_once adopt-fr-term; then rf_hit adopt-fr-term; kill -TERM $$; fi
+      fi
+      return 0 ;;
+    *) python3 "$HELPER" "$@" ;;
+  esac
+}
+cp() {
+  local rc=0 dst="${!#}" kind=""
+  case "$dst" in
+    "$WORK/raw") kind=cp-raw ;;
+    "$WORK/raw-failed") kind=cp-rawfailed ;;
+    "$WORK/.freeze_record.json.staging") kind=cp-staging ;;
+    "$WORK/freeze_record.json") kind=cp-final ;;
+    "$WORK"|"$WORK/") case " $* " in *"/freeze_record.json "*) kind=cp-final ;; *"/sizing_report.json "*) kind=cp-report ;; esac ;;
+  esac
+  [ -z "$kind" ] || rf_seq "$kind"
+  if [ "$kind" = cp-raw ] && rf_on raw-fail; then command cp "$@" || true; rf_hit raw-fail; return 1; fi
+  command cp "$@" || rc=$?
+  if [ "$rc" = 0 ] && [ "$kind" = cp-raw ] && rf_on term-after-raw && rf_once term-after-raw; then rf_hit term-after-raw; kill -TERM $$; fi
+  if [ "$rc" = 0 ] && [ "$kind" = cp-report ] && rf_on term-after-report && rf_once term-after-report; then
+    rf_hit term-after-report; kill -TERM $$
+  fi
+  return "$rc"
+}
+mv() {
+  if [ "${!#}" = "$WORK/freeze_record.json" ]; then
+    rf_seq mv
+    if rf_on term-before-mv && rf_once term-before-mv; then rf_hit term-before-mv; kill -TERM $$; fi
+  fi
+  command mv "$@"
+}
+rm() {
+  local a has_s=0 has_fr=0
+  for a in "$@"; do
+    [ "$a" != "$S" ] || has_s=1
+    [ "$a" != "$S/freeze_record.json" ] || has_fr=1
+    case "$a" in
+      "$S/freeze_record.json"|"$WORK/.freeze_record.json.staging"|"$WORK/freeze_record.json"|"$WORK/raw/freeze_record.json"|\
+      "$WORK/sizing_report.json"|"$WORK/sizing_report.txt") rf_seq "rm $a" ;;
+    esac
+  done
+  [ "$has_s" = 0 ] || rf_seq rm-S
+  if [ "$has_s" = 1 ] && rf_on rmS-fail; then rf_hit rmS-fail; return 1; fi
+  if [ "$has_s" = 1 ] && rf_on rmS-term && rf_once rmS-term; then rf_hit rmS-term; kill -TERM $$; fi
+  if [ "$has_fr" = 1 ] && rf_on void-rm-fail; then rf_hit void-rm-fail; return 1; fi
+  if [ "$has_fr" = 1 ] && rf_on void-rm-term && rf_once void-rm-term; then rf_hit void-rm-term; kill -TERM $$; fi
+  command rm "$@"
+}
+trap() { rf_seq "trap$(printf ' %q' "$@")"; builtin trap "$@"; }
+case " ${RF_STUBS:-} " in *" stop-sampler "*)
+  stop_sampler() { rf_seq "stop_sampler TERM=[$(builtin trap -p TERM)] INT=[$(builtin trap -p INT)] INT0=[$RF_INT0]"; } ;;
+esac
+case " ${RF_STUBS:-} " in *" void "*) measure_void_outputs() { rf_seq void-called; return 0; } ;; esac
+[ "${RF_REG:-1}" = 0 ] || . "$RF_REGFILE"
+[ -z "${RF_SETUP:-}" ] || eval "$RF_SETUP"
+case "$RF_MODE" in
+  step6) measure_install_traps; . "$RF_FRAG" ;;
+  on_failure) measure_install_traps; rf_seq CALL; on_failure "rf-direct" 1 ;;
+  void) rc=0; measure_void_outputs || rc=$?; rf_seq "void-rc $rc"; exit "$rc" ;;
+esac
+RFH
+RF_RC=0; SC=""
+rf_run() {  # $1＝案例；$2＝hook（空白分隔）。RF_MODE／RF_FORMAL／RF_REG／RF_SETUP／RF_STUBS 以前綴帶入。
+  SC="$RF_TD/$1"
+  mkdir -p "$SC"; : > "$SC/seq"; : > "$SC/hit"
+  RF_RC=0
+  env RF_SC="$SC" RF_HOOK="$2" RF_MODE="${RF_MODE:-step6}" RF_FORMAL="${RF_FORMAL:-1}" RF_REG="${RF_REG:-1}" \
+    RF_SETUP="${RF_SETUP:-}" RF_STUBS="${RF_STUBS:-}" RF_CLONE="$RF_CLONE" RF_IDENTITY="$RF_TD/identity.json" \
+    RF_REAL_HELPER="$REPO_ROOT/python/scripts/i074_stage2_sizing.py" RF_REAL_FREEZE="$RF_REAL_FREEZE" RF_DOCKER="$RF_TD/bin/docker" \
+    RF_LIB="$REPO_ROOT/scripts/lib/i074-stage2-measure.sh" RF_FRAG="$RF_TD/step6.sh" RF_REGFILE="$RF_TD/register.sh" \
+    RF_MKREPORT="$RF_TD/mkreport.py" RF_TMPL="$RF_TD/report.tmpl.json" \
+    timeout -s KILL 60 bash "$RF_TD/harness.sh" > "$SC/out" 2> "$SC/err" || RF_RC=$?
+}
+RF_WHY=""
+rf_need() { local why="$1"; shift; "$@" || RF_WHY="$RF_WHY；$why"; }
+rf_hook() { grep -qx -- "$1" <<< "$(cat "$SC/hit")"; }
+rf_absent() { local p; for p in "$@"; do [ ! -e "$p" ] && [ ! -L "$p" ] || return 1; done; }
+rf_no_fr() {  # <work>（含 raw/、raw-failed/）與保留的 S 都⛔ 沒有 freeze record（含 staging）
+  [ -z "$(find "$SC/work" "$SC/S" \( -name freeze_record.json -o -name .freeze_record.json.staging \) -print 2>/dev/null)" ]
+}
+rf_pair_ok() { [ -f "$1" ] && python3 -B "$RF_REAL_FREEZE" check-pair --record "$1" --report "${1%/*}/sizing_report.json" 2>/dev/null; }
+rf_seq_lacks() { ! grep -qx -- "$1" <<< "$(cat "$SC/seq")"; }
+rf_err_has() { grep -qF -- "$1" <<< "$(cat "$SC/err")"; }
+rf_diag() {
+  local f
+  echo "    hook：$(tr '\n' ' ' < "$SC/hit")" >&2
+  echo "    呼叫序：$(grep -vE '^(trap|report)' "$SC/seq" | tr '\n' ' ')" >&2
+  while IFS= read -r f; do
+    if rf_pair_ok "$f"; then echo "    殘留、通過 check-pair：${f#"$SC"/}" >&2; else echo "    殘留：${f#"$SC"/}" >&2; fi
+  done < <(find "$SC/work" "$SC/S" \( -name freeze_record.json -o -name .freeze_record.json.staging \) 2>/dev/null)
+  tail -4 "$SC/err" | sed 's/^/    stderr：/' >&2
+}
+rf_report() {
+  if [ -z "$RF_WHY" ]; then pass "$1"; else fail "$1（rc=$RF_RC$RF_WHY）"; rf_diag; fi
+  RF_WHY=""
+}
+rf_top_clean() {  # 頂層⛔ 沒有發布任何產物
+  rf_absent "$SC/work/freeze_record.json" "$SC/work/.freeze_record.json.staging" "$SC/work/sizing_report.json" "$SC/work/sizing_report.txt"
+}
+
+rf_run w0 ""
+rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "頂層沒有成對的 freeze record" rf_pair_ok "$SC/work/freeze_record.json"
+rf_need "raw/ 的 freeze record 與頂層不同" cmp -s -- "$SC/work/freeze_record.json" "$SC/work/raw/freeze_record.json"
+rf_need "raw/ 的報告與頂層不同" cmp -s -- "$SC/work/sizing_report.json" "$SC/work/raw/sizing_report.json"
+rf_need "有 staging、raw-failed/ 或摘要" rf_absent "$SC/work/.freeze_record.json.staging" "$SC/work/raw-failed" "$SC/work/failure_summary.json"
+rf_need "S 沒有清掉" rf_absent "$SC/S"
+rf_report "w0：對照組（formal、無注入）→ 0、頂層與 raw/ 各有同一份成對的紀錄、S 已清"
+
+for c in "w1 ps-list 結束前的容器檢查失敗" "w2 adopt1-fail 第一次收養檢查失敗"; do
+  set -- $c
+  rf_run "$1" "$2"
+  rf_need "結束碼不是 1" test "$RF_RC" = 1
+  rf_need "hook 未命中" rf_hook "$2"
+  rf_need "build 被呼叫了" rf_seq_lacks build
+  rf_need "留下 freeze record" rf_no_fr
+  rf_need "沒有失敗摘要" test -f "$SC/work/failure_summary.json"
+  rf_report "$1：$3 → 1、build ⛔ 沒有被呼叫、⛔ 沒有任何 freeze record、有摘要"
+done
+
+rf_run w3 adopt-fr-fail
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中" rf_hook adopt-fr-fail
+rf_need "留下 freeze record" rf_no_fr
+rf_need "raw-failed/console.log 沒有作廢那一行（含 SHA）" \
+  grep -sqE "作廢 .*/S/freeze_record\.json：一般檔案 sha256=[0-9a-f]{64}$" "$SC/work/raw-failed/console.log"
+rf_report "w3：build 之後的收養檢查失敗 → 1、作廢記進 console.log（含 SHA）、⛔ 沒有任何 freeze record"
+
+rf_run w4 checkpair-fail
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中" rf_hook checkpair-fail
+rf_need "留下 freeze record" rf_no_fr
+rf_need "頂層發布了報告" rf_absent "$SC/work/sizing_report.json" "$SC/work/sizing_report.txt"
+rf_report "w4：staging 的 check-pair 失敗 → 1、頂層／staging／raw/／raw-failed/ 都⛔ 沒有 freeze record、⛔ 不發布報告"
+
+rf_run w5 raw-fail
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中" rf_hook raw-fail
+rf_need "走了 on_failure（有 raw-failed/ 或摘要）" rf_absent "$SC/work/raw-failed" "$SC/work/failure_summary.json"
+rf_need "S 沒有保留" test -d "$SC/S"
+rf_need "留下 freeze record" rf_no_fr
+rf_need "頂層有產物" rf_top_clean
+rf_need "stderr 沒有印出 S 的位置" rf_err_has "⚠️ 複製原始量測失敗，保留 S：$SC/S"
+rf_report "w5：raw 複製失敗 → 1、⛔ 不經 on_failure、S 保留且⛔ 沒有 freeze record、頂層⛔ 沒有產物"
+
+rf_run w5b "raw-fail void-rm-fail"
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中（raw）" rf_hook raw-fail
+rf_need "hook 未命中（作廢的 rm）" rf_hook void-rm-fail
+rf_need "走了 on_failure（有 raw-failed/ 或摘要）" rf_absent "$SC/work/raw-failed" "$SC/work/failure_summary.json"
+rf_need "S 沒有保留" test -d "$SC/S"
+rf_need "stderr 沒有列出移除不了的路徑" rf_err_has "作廢失敗，仍存在：$SC/S/freeze_record.json"
+rf_need "作廢失敗之後沒有印出結果與 S 的位置（作廢⛔ 沒有 guarded？）" rf_err_has "⚠️ 複製原始量測失敗，保留 S：$SC/S"
+rf_report "w5b：raw 複製失敗 ＋ 作廢也失敗 → 1、⛔ 沒有走 on_failure、S 保留、stderr 列出移除不了的路徑"
+
+for c in "w6a adopt-fr-term build_之後（第二次收養檢查）" "w6b term-after-raw raw_複製完成之後" \
+         "w6c term-after-report 頂層報告複製之後" "w6d term-after-checkpair staging_的_check-pair_通過之後"; do
+  set -- $c
+  rf_run "$1" "$2"
+  rf_need "結束碼不是 1" test "$RF_RC" = 1
+  rf_need "hook 未命中" rf_hook "$2"
+  rf_need "留下 freeze record" rf_no_fr
+  rf_need "頂層有產物" rf_top_clean
+  rf_report "$1：${3//_/ }收到 TERM → 1、⛔ 沒有任何 freeze record、頂層⛔ 沒有產物"
+done
+
+for c in "w6e term-before-mv commit_區間（mv_之前）" "w6f rmS-term commit_之後（清_S_時）"; do
+  set -- $c
+  rf_run "$1" "$2"
+  rf_need "結束碼不是 0" test "$RF_RC" = 0
+  rf_need "hook 未命中" rf_hook "$2"
+  rf_need "頂層沒有成對的 freeze record" rf_pair_ok "$SC/work/freeze_record.json"
+  rf_need "S 沒有清掉" rf_absent "$SC/S"
+  rf_report "$1：${3//_/ }收到 TERM → 被忽略、0、頂層的紀錄已發布、S 已清"
+done
+
+rf_run w7 rmS-fail
+rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "hook 未命中" rf_hook rmS-fail
+rf_need "頂層沒有成對的 freeze record" rf_pair_ok "$SC/work/freeze_record.json"
+rf_need "stderr 沒有 S 的位置與警告" rf_err_has "⚠️ 清不掉 S：$SC/S"
+rf_report "w7：commit 之後 S 清不掉 → 0（D6）、頂層的紀錄通過 check-pair、stderr 有 S 的位置"
+
+RF_MODE=on_failure RF_SETUP='mkdir -p "$S/freeze_record.json/x"; : > "$S/freeze_record.json/x/f"' rf_run w8 ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "產生了 raw-failed/" rf_absent "$SC/work/raw-failed"
+rf_need "S 沒有保留" test -d "$SC/S"
+rf_need "沒有失敗摘要" test -f "$SC/work/failure_summary.json"
+rf_need "stderr 沒有列出路徑與型別" rf_err_has "作廢失敗，仍存在：$SC/S/freeze_record.json（directory）"
+rf_report "w8：on_failure 中作廢失敗 → 1、⛔ 沒有 raw-failed/、S 保留、摘要照寫、stderr 列出路徑與型別"
+
+# w9：登記的路徑是指向 S 外檔案的 symlink、FIFO 與一般檔案。FIFO 的另一端由測試開著寫端等待——作廢若打開它讀，寫端就會解除阻塞、留下 marker。
+#   ⚠️ 寫端必須**已經阻塞在打開 FIFO**（wchan）才啟動 harness：否則 harness 可能先刪掉 FIFO，偵測就落空。
+rf_fifo_writer_blocked() {  # $1＝寫端的 pid
+  local i w
+  for i in $(seq 1 100); do
+    w="$(cat "/proc/$1/wchan" 2>/dev/null || true)"
+    case "$w" in pipe_wait|wait_for_partner|fifo_open) return 0 ;; esac
+    sleep 0.05
+  done
+  return 1
+}
+mkdir -p "$RF_TD/w9/S"
+printf 'outside\n' > "$RF_TD/w9/outside"
+ln -s "$RF_TD/w9/outside" "$RF_TD/w9/S/link"
+mkfifo "$RF_TD/w9/S/fifo"
+printf 'plain\n' > "$RF_TD/w9/S/plain"
+python3 -c 'import os,sys; fd=os.open(sys.argv[1], os.O_WRONLY); open(sys.argv[2], "w").write("opened"); os.close(fd)' \
+  "$RF_TD/w9/S/fifo" "$RF_TD/w9/fifo-opened" &
+RF_PIDS+=("$!")
+RF_W9_READY=0; rf_fifo_writer_blocked "$!" && RF_W9_READY=1
+RF_MODE=void RF_SETUP='MEASURE_VOID_PATHS=("$S/link" "$S/fifo" "$S/plain" "$S/missing")' rf_run w9 ""
+rf_need "FIFO 的寫端沒有就緒（偵測不到 FIFO 是否被打開）" test "$RF_W9_READY" = 1
+rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "symlink、FIFO 或一般檔案沒有被移除" rf_absent "$SC/S/link" "$SC/S/fifo" "$SC/S/plain"
+rf_need "symlink 的目標受影響" test "$(cat "$SC/outside" 2>/dev/null)" = outside
+rf_need "FIFO 被打開了" rf_absent "$SC/fifo-opened"
+rf_need "symlink 沒有記成 symlink（或讀了目標）" grep -sqF "作廢 $SC/S/link：symlink（⛔ 不跟隨）" "$SC/S/console.log"
+rf_need "FIFO 沒有只記型別" grep -sqF "作廢 $SC/S/fifo：fifo（⛔ 不讀內容）" "$SC/S/console.log"
+rf_need "一般檔案的 SHA 不符" \
+  grep -sqF "作廢 $SC/S/plain：一般檔案 sha256=$(printf 'plain\n' | sha256sum | cut -d' ' -f1)" "$SC/S/console.log"
+rf_report "w9：作廢是 no-follow：symlink 只移除 link、FIFO 只記型別⛔ 不讀、一般檔案記 SHA"
+for p in "${RF_PIDS[@]}"; do { kill -KILL "$p" && wait "$p"; } 2>/dev/null || true; done
+
+RF_FORMAL=0 rf_run w10 ""
+rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "build 被呼叫了" rf_seq_lacks build
+rf_need "有 freeze record" rf_no_fr
+rf_need "頂層沒有報告或 raw/" test -f "$SC/work/sizing_report.json" -a -d "$SC/work/raw"
+rf_need "S 沒有清掉" rf_absent "$SC/S"
+rf_report "w10：對照組（validation 模式）→ 0、⛔ 沒有 freeze record（既有行為）"
+
+rf_run w11 ""
+RF_ORDER="$(grep -xE 'ps|adopt|build|cp-raw|cp-report|cp-staging|cp-final|check-pair:.*|mv' "$SC/seq" | tr '\n' ' ' || true)"
+rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "呼叫序是 $RF_ORDER" test "$RF_ORDER" = "ps adopt build adopt cp-raw cp-report cp-staging check-pair:.freeze_record.json.staging mv "
+rf_report "w11：呼叫序 ＝ 容器檢查 → 收養 → build → 收養 → raw → 報告 → staging → check-pair → rename"
+
+rf_run w12 adopt-fr-logdir
+rf_need "結束碼是 0" test "$RF_RC" != 0
+rf_need "hook 未命中" rf_hook adopt-fr-logdir
+rf_need "留下 freeze record" rf_no_fr
+rf_report "w12：on_failure 中作廢之後的 say 失敗（console.log 是目錄）→ 作廢已完成、⛔ 沒有任何 freeze record"
+
+rf_run w13 "term-after-checkpair void-rm-term"
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中（第一個 TERM）" rf_hook term-after-checkpair
+rf_need "hook 未命中（作廢中的 TERM）" rf_hook void-rm-term
+rf_need "留下 freeze record" rf_no_fr
+rf_need "頂層有產物" rf_top_clean
+rf_need "沒有 raw-failed/ 或摘要" test -d "$SC/work/raw-failed" -a -f "$SC/work/failure_summary.json"
+for p in "S/freeze_record.json" "work/.freeze_record.json.staging" "work/raw/freeze_record.json" "work/sizing_report.json" \
+         "work/sizing_report.txt"; do
+  rf_need "$p 的作廢紀錄不是恰好一行（第二個 TERM 沒有被忽略）" \
+    test "$(grep -cF "作廢 $SC/$p：" "$SC/work/raw-failed/console.log" 2>/dev/null)" = 1
+done
+rf_report "w13：作廢中再收到 TERM → 被忽略、登記的路徑全部作廢（各恰好一次）、之後照常清理（raw-failed/、摘要）、1"
+
+RF_STUBS=stop-sampler rf_run w14 adopt-fr-term
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中" rf_hook adopt-fr-term
+rf_need "臨界區的順序或恢復不符（見呼叫序）" python3 -B - "$SC/seq" "$SC/S/freeze_record.json" <<'PY'
+import re, sys
+def check():
+    lines = open(sys.argv[1]).read().splitlines()
+    tail = lines[lines.index("HOOK adopt-fr-term") + 1:]
+    traps = [i for i, l in enumerate(tail) if l.startswith("trap")]
+    void = [i for i, l in enumerate(tail) if l == "rm " + sys.argv[2]]
+    stop = [l for l in tail if l.startswith("stop_sampler ")]
+    if [tail[i] for i in traps] != ["trap '' INT TERM", "trap - EXIT", "trap - INT TERM"]:
+        return f"trap 的記錄：{[tail[i] for i in traps]}"
+    if traps[0] != 0:
+        return "on_failure 的第一個指令不是 trap '' INT TERM"
+    if not (void and traps[1] < void[0] < traps[2]):
+        return "作廢不在臨界區裡"
+    m = re.fullmatch(r"stop_sampler TERM=\[(.*)\] INT=\[(.*)\] INT0=\[(.*)\]", stop[0] if stop else "")
+    if not (m and m.group(1) == "" and m.group(2) == m.group(3)):
+        return f"作廢之後沒有恢復：{stop}"
+    return ""
+why = check()
+if why:
+    sys.exit("    w14：" + why)
+PY
+rf_report "w14：on_failure 的第一個指令是 trap '' INT TERM、其次 trap - EXIT，作廢之後 trap - INT TERM（stop_sampler 看到的是預設）"
+
+RF_MODE=on_failure RF_REG=0 RF_STUBS=void rf_run w15 ""
+RF_TRAPS="$(sed -n '/^CALL$/,$p' "$SC/seq" | grep '^trap' | tr '\n' '|' || true)"
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "measure_void_outputs 被呼叫了" rf_seq_lacks void-called
+rf_need "trap 的記錄是 $RF_TRAPS" test "$RF_TRAPS" = "trap - EXIT INT TERM|"
+rf_report "w15：對照組（作廢清單為空＝acceptance）→ ⛔ 不進臨界區、⛔ 不呼叫作廢、只有 trap - EXIT INT TERM"
+
+rm -rf "$RF_TD"
+
 # ── I-074 Stage 2 ⑦d：acceptance harness（shim 的 profile、守門、互斥、快照與 bootstrap） ─────────────────────
 #
 # 對應 issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac4、ac7、ac8、ac11、ac17、ac18。

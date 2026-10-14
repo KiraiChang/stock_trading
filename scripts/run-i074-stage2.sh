@@ -254,7 +254,7 @@ verify_head_files() {  # $1＝repo；其餘＝檔案（相對路徑）→ 每一
 # 持鎖階段（真正 repo 的 HEAD 版）
 # ═════════════════════════════════════════════════════════════════════════════════
 locked_main() {
-  local code=$EXIT_ABORT icode=$EXIT_ABORT repo work_canon repo_head freeze_dir report run_head run_freeze
+  local code=$EXIT_ABORT icode=$EXIT_ABORT repo work_canon repo_head freeze_dir report run_head run_freeze p
   case " $* " in *" promote "*) code=$EXIT_PROMOTION_FAILED ;; esac
   case "$-" in *p*) ;; *) err "持鎖階段必須以 /bin/bash -p 執行"; exit "$code" ;; esac
   parse_internal locked "$@" || { err "持鎖階段的參數不符"; exit "$code"; }
@@ -275,10 +275,34 @@ locked_main() {
     report="$freeze_dir/sizing_report.json"
     [ -f "$FREEZE_ARG" ] && [ ! -L "$FREEZE_ARG" ] && [ -f "$report" ] && [ ! -L "$report" ] \
       || { err "freeze record 或同目錄的 sizing_report.json 不存在"; exit "$code"; }
+    # ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」讀取端 1：只接受「成功結束的 sizing <work>、在原位置的
+    #   頂層」——檔名（staging 名⛔ 不收）、raw/ 是目錄且⛔ 不是 symlink、⛔ 沒有 failure_summary.json 與 raw-failed（symlink 也算）、
+    #   raw/ 裡的兩個檔都是一般檔案且⛔ 不是 symlink（缺少、FIFO 等一律拒絕，⛔ 不打開它們）。這是「放錯位置」的防線，⛔ 不是成功的證明。
+    [ "${FREEZE_ARG##*/}" = freeze_record.json ] || { err "freeze record 的檔名必須是 freeze_record.json：$FREEZE_ARG"; exit "$code"; }
+    [ -d "$freeze_dir/raw" ] && [ ! -L "$freeze_dir/raw" ] \
+      || { err "來源目錄沒有 raw/（或 raw 是 symlink）——⑩ 只接受成功結束的 sizing <work> 頂層的 freeze record：$freeze_dir"; exit "$code"; }
+    for p in "$freeze_dir/failure_summary.json" "$freeze_dir/raw-failed"; do
+      [ ! -e "$p" ] && [ ! -L "$p" ] || { err "來源目錄有 failure_summary.json 或 raw-failed/（失敗的 sizing）：$p"; exit "$code"; }
+    done
+    for p in "$freeze_dir/raw/freeze_record.json" "$freeze_dir/raw/sizing_report.json"; do
+      [ -f "$p" ] && [ ! -L "$p" ] \
+        || { err "raw/ 裡的 freeze_record.json 或 sizing_report.json 不是一般檔案（缺少、symlink 或特殊檔案）：$p"; exit "$code"; }
+    done
     cp -- "$FREEZE_ARG" "$WORK/freeze/freeze_record.json" && cp -- "$report" "$WORK/freeze/sizing_report.json" \
       || { err "複製 freeze record／報告失敗"; exit "$code"; }
     repo_head="$("$I074_PYTHON" -B "$repo/python/scripts/i074_stage2_freeze_record.py" check-basic \
                  --record "$WORK/freeze/freeze_record.json")" || { err "freeze record 的基本驗證不過"; exit "$code"; }
+    # 讀取端 2～4（一律驗副本）：成對、報告記錄的 meta.work ＝ 來源目錄（入口已 realpath -e；sizing 記的是 realpath -m——兩者都是
+    #   canonical；以 python 直接比較，⛔ 不經 $( ) 取值）、與 raw/ 裡的同名檔逐位元相同。
+    "$I074_PYTHON" -B "$repo/python/scripts/i074_stage2_freeze_record.py" check-pair --record "$WORK/freeze/freeze_record.json" \
+      --report "$WORK/freeze/sizing_report.json" || { err "freeze record 與同目錄的報告不成對（check-pair）"; exit "$code"; }
+    "$I074_PYTHON" -I -B -c 'import json, sys
+sys.exit(0 if json.load(open(sys.argv[1], encoding="utf-8"))["meta"].get("work") == sys.argv[2] else 1)' \
+      "$WORK/freeze/sizing_report.json" "$freeze_dir" 2>/dev/null \
+      || { err "報告記錄的 meta.work ≠ 來源目錄（整個 <work> 被複製或搬移過；⛔ 不搬移、⛔ 不複製）：$freeze_dir"; exit "$code"; }
+    cmp -s -- "$WORK/freeze/freeze_record.json" "$freeze_dir/raw/freeze_record.json" \
+      && cmp -s -- "$WORK/freeze/sizing_report.json" "$freeze_dir/raw/sizing_report.json" \
+      || { err "freeze record 或報告與 raw/ 裡的同名檔不同"; exit "$code"; }
     git -C "$repo" cat-file -e "${repo_head}^{commit}" 2>/dev/null \
       || { err "repo_head $repo_head 不在真正 repo 裡"; exit "$code"; }
     say "==> 建立隔離複本：$WORK/repo（detached @ $repo_head）"

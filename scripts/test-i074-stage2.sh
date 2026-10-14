@@ -295,9 +295,12 @@ payload = {"schema_version": 1, "kind": "sr_zone_run_identity", "bundle_id": "b1
 open(sys.argv[2], "wb").write(c.canonical_json_bytes(payload))' "$SR" "$IDENTITY" "$1" "$2"
 }
 write_identity "2026-09-30T00:00:00+00:00" "$IMG"
+# ⚠️ raw-failed freeze record 修正計畫：輸出成功結束的 sizing <work> 頂層的形狀——報告的 meta.work ＝ 輸出目錄的 canonical path、
+#   raw/ 裡有同一份 freeze record 與報告（持鎖階段的來源檢查要求它們；「三」讀取端 1～4）。
 make_freeze() {  # $1＝輸出目錄；$2＝repo_head；$3（可選）＝tooling raw SHA 的覆寫
   local out="$1" head="$2" cf tool
   mkdir -p "$out"
+  out="$(realpath -e -- "$out")"
   cf="$(sha256sum < "$SR/python/baselines/i074_stage2/counterfactual_e1cbbbd.patch" | cut -d' ' -f1)"
   tool="${3:-$(sha256sum < "$SR/python/baselines/i074_stage2/tooling_e1cbbbd.patch" | cut -d' ' -f1)}"
   python3 -c '
@@ -312,11 +315,13 @@ meta = {"run_id": "20260930T000000Z-1", "mode": "formal", "repo_head": head, "cl
         "harness_sha256": fsha("scripts/i074-stage2-sizing.sh"), "shim_sha256": fsha("scripts/lib/i074-sizing-docker-shim.sh"),
         "helper_sha256": fsha("python/scripts/i074_stage2_sizing.py"), "image": image,
         "identity_sha256": hashlib.sha256(open(identity, "rb").read()).hexdigest(),
-        "counterfactual_sha256": cf, "counterfactual_canonical_sha256": cf, "tooling_sha256": tool, "tooling_canonical_sha256": tool}
+        "counterfactual_sha256": cf, "counterfactual_canonical_sha256": cf, "tooling_sha256": tool, "tooling_canonical_sha256": tool,
+        "work": out}
 report = {"schema": "i074_stage2_sizing_report_v1", "mode": "formal", "status": "ok", "P_B": 1000, "meta": meta}
 open(out + "/sizing_report.json", "wb").write(c.canonical_json_bytes(report))' "$SR" "$out" "$head" "$BASE_OID" "$IMG" "$IDENTITY" "$cf" "$tool"
   python3 "$SR/python/scripts/i074_stage2_freeze_record.py" build --report "$out/sizing_report.json" --repo "$SR" \
     --identity "$IDENTITY" --out "$out/freeze_record.json" 2>"$out/build.err"
+  mkdir "$out/raw" && cp -- "$out/freeze_record.json" "$out/sizing_report.json" "$out/raw/"
 }
 FR_DIR="$TD/freeze"
 make_freeze "$FR_DIR" "$HEAD_OID"
@@ -340,14 +345,15 @@ new_scenario() {  # → 設 S；預設：anchors 回合成的 bundle／base、do
     "$BASE_OID" > "$S/anchors.json"
   : > "$S/git.log"
 }
-# 以正式命令（直接執行）跑一次。$1＝repo；其餘＝參數。環境只帶這幾個（外加 EXTRA_ENV）。
+# 以正式命令（直接執行）跑一次。$1＝repo；其餘＝參數。環境只帶這幾個（外加 EXTRA_ENV）；RUN_TIMEOUT（秒）設了才以 timeout 兜底。
 RC=0
 run_entry() {
   local repo="$1"
   shift
   RC=0
-  env -i HOME="$HOME" PATH="${CALLER_PATH:-$TEST_PATH}" XDG_DATA_HOME="$XDG" REPLAY_IMAGE_ID="${IMAGE_OVERRIDE-$IMG}" \
-    I074_TEST_SCENARIO="$S" ${EXTRA_ENV:-} "$repo/scripts/run-i074-stage2.sh" "$@" > "$S/out" 2> "$S/err" || RC=$?
+  ${RUN_TIMEOUT:+timeout -s KILL "$RUN_TIMEOUT"} env -i HOME="$HOME" PATH="${CALLER_PATH:-$TEST_PATH}" XDG_DATA_HOME="$XDG" \
+    REPLAY_IMAGE_ID="${IMAGE_OVERRIDE-$IMG}" I074_TEST_SCENARIO="$S" ${EXTRA_ENV:-} "$repo/scripts/run-i074-stage2.sh" "$@" \
+    > "$S/out" 2> "$S/err" || RC=$?
 }
 lock_free() { python3 -c 'import fcntl,os,sys; fd=os.open(sys.argv[1], os.O_RDWR); fcntl.flock(fd, fcntl.LOCK_EX|fcntl.LOCK_NB)' \
                 "$LOCKDIR/i074-stage2.lock" 2>/dev/null; }
@@ -836,14 +842,96 @@ run_entry "$SR" --freeze-record "$TD/freeze3/freeze_record.json" --work-dir "$S/
 check "ba：repo_head 的 tooling patch 是 0 bytes → 1、runner 未被呼叫" bash -c '[ "$1" = 1 ] && [ ! -s "$2/spy/runner.log" ] && grep -q "不得為空" "$2/err"' _ "$RC" "$S"
 git -C "$SR" reset -q --hard "$HEAD_OID"
 # freeze record 的違反（shell 兩支；逐條在 pytest）
+# ⚠️ raw-failed freeze record 修正計畫：兩支都放好 raw/（同一份）——內容的違反要打到內容檢查，⛔ 不被來源 layout 的檢查先擋下。
 new_scenario; cp "$FR_DIR/sizing_report.json" "$TD/fr-bad-dir.json" 2>/dev/null || true
-mkdir -p "$TD/frbad"; cp "$FR_DIR/sizing_report.json" "$TD/frbad/"
+mkdir -p "$TD/frbad/raw"; cp "$FR_DIR/sizing_report.json" "$TD/frbad/"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); p["p_b_bytes"]=True; open(sys.argv[2],"w").write(json.dumps(p,sort_keys=True,separators=(",",":")))' "$FR" "$TD/frbad/freeze_record.json"
+cp "$TD/frbad/freeze_record.json" "$TD/frbad/sizing_report.json" "$TD/frbad/raw/"
 run_entry "$SR" --freeze-record "$TD/frbad/freeze_record.json" --work-dir "$S/work"
-check "n7：freeze record 的 p_b_bytes 是 bool → 1、⛔ 沒有建複本" bash -c '[ "$1" = 1 ] && [ ! -e "$2/work/repo" ]' _ "$RC" "$S"
-new_scenario; mkdir -p "$TD/frbad2"; cp "$FR" "$TD/frbad2/"; printf '{}' > "$TD/frbad2/sizing_report.json"
+check "n7：freeze record 的 p_b_bytes 是 bool → 1、⛔ 沒有建複本" bash -c '[ "$1" = 1 ] && [ ! -e "$2/work/repo" ] && grep -q "基本驗證不過" "$2/err"' _ "$RC" "$S"
+new_scenario; mkdir -p "$TD/frbad2/raw"; cp "$FR" "$TD/frbad2/"; printf '{}' > "$TD/frbad2/sizing_report.json"
+cp "$TD/frbad2/freeze_record.json" "$TD/frbad2/sizing_report.json" "$TD/frbad2/raw/"
 run_entry "$SR" --freeze-record "$TD/frbad2/freeze_record.json" --work-dir "$S/work"
 check "n7：報告與 freeze record 的 report_sha256 不符 → 1、runner 未被呼叫" bash -c '[ "$1" = 1 ] && [ ! -s "$2/spy/runner.log" ]' _ "$RC" "$S"
+
+echo "==> i074 Stage 2 raw-failed freeze record：持鎖階段的來源檢查（r0～r10）"
+# 對應 issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 r0～r10：⑩ 只接受「成功結束的 sizing <work>、在原位置的
+#   頂層」freeze record（「三」讀取端 1～4）。r1～r10 一律斷言：結束碼 1、runner 未被呼叫、⛔ 沒有建複本、錯誤訊息指明原因。
+r_case() {  # $1＝說明；$2＝freeze record；$3＝錯誤訊息必須含的字串
+  new_scenario
+  run_entry "$SR" --freeze-record "$2" --work-dir "$S/work"
+  if [ "$RC" = 1 ] && [ ! -s "$S/spy/runner.log" ] && [ ! -e "$S/work/repo" ] && grep -qF -- "$3" "$S/err"; then
+    pass "$1 → 1、runner 未被呼叫、⛔ 沒有建複本、訊息指明原因"
+  else
+    fail "$1 → 1、runner 未被呼叫、⛔ 沒有建複本、訊息指明原因（rc=$RC、runner $([ -s "$S/spy/runner.log" ] && echo 有 || echo 沒有)被呼叫、複本$([ -e "$S/work/repo" ] && echo 已 || echo 未)建立）"
+    tail -2 "$S/err" | sed 's/^/    stderr：/' >&2
+  fi
+}
+new_scenario
+run_entry "$SR" --freeze-record "$FR" --work-dir "$S/work"
+check "r0：對照組（成功形狀：raw/ 內有同一份、meta.work ＝ 來源目錄）→ 照常進 preflight、replay、0" \
+  bash -c '[ "$1" = 0 ] && [ -s "$2/spy/runner.log" ]' _ "$RC" "$S"
+# r1：sizing 失敗時的形狀——<work>/failure_summary.json ＋ <work>/raw-failed/（S 的複本：⛔ 沒有 raw/）
+make_freeze "$TD/r1" "$HEAD_OID"
+mkdir "$TD/r1/raw-failed"; mv "$TD/r1/freeze_record.json" "$TD/r1/sizing_report.json" "$TD/r1/raw-failed/"; rm -rf "$TD/r1/raw"
+printf '{}' > "$TD/r1/failure_summary.json"
+r_case "r1：raw-failed/ 裡的 freeze record（上一層有 failure_summary.json）" "$TD/r1/raw-failed/freeze_record.json" "沒有 raw/"
+make_freeze "$TD/r2" "$HEAD_OID"; printf '{}' > "$TD/r2/failure_summary.json"
+r_case "r2：同目錄有 failure_summary.json" "$TD/r2/freeze_record.json" "failure_summary.json 或 raw-failed/"
+make_freeze "$TD/r3" "$HEAD_OID"; mkdir "$TD/r3/raw-failed"
+r_case "r3：同目錄有 raw-failed/" "$TD/r3/freeze_record.json" "failure_summary.json 或 raw-failed/"
+make_freeze "$TD/r4" "$HEAD_OID"; rm -rf "$TD/r4/raw"
+r_case "r4：同目錄沒有 raw/（S 的形狀）" "$TD/r4/freeze_record.json" "沒有 raw/"
+make_freeze "$TD/r5" "$HEAD_OID"; mv "$TD/r5/raw" "$TD/r5-raw"; ln -s "$TD/r5-raw" "$TD/r5/raw"
+r_case "r5：raw 是 symlink（指向內容相同的目錄）" "$TD/r5/freeze_record.json" "沒有 raw/"
+for f in freeze_record.json sizing_report.json; do
+  make_freeze "$TD/r6-$f" "$HEAD_OID"; printf ' ' >> "$TD/r6-$f/raw/$f"
+  r_case "r6：raw/ 內的 $f 與頂層不同" "$TD/r6-$f/freeze_record.json" "與 raw/ 裡的同名檔不同"
+done
+make_freeze "$TD/r7a" "$HEAD_OID"; rm -f "$TD/r7a/raw/freeze_record.json"
+r_case "r7：raw/ 內缺 freeze_record.json" "$TD/r7a/freeze_record.json" "不是一般檔案（缺少、symlink 或特殊檔案）"
+make_freeze "$TD/r7b" "$HEAD_OID"; rm -f "$TD/r7b/raw/sizing_report.json"; ln -s ../sizing_report.json "$TD/r7b/raw/sizing_report.json"
+r_case "r7：raw/ 內的 sizing_report.json 是 symlink（指向內容相同的頂層報告）" "$TD/r7b/freeze_record.json" "不是一般檔案（缺少、symlink 或特殊檔案）"
+# FIFO：測試一直開著寫端等待——持鎖階段若打開它讀，寫端就解除阻塞並留下 marker（每次打開都留，⛔ 不會讓讀端卡住）；再以 timeout 兜底。
+make_freeze "$TD/r7c" "$HEAD_OID"; rm -f "$TD/r7c/raw/freeze_record.json"; mkfifo "$TD/r7c/raw/freeze_record.json"
+python3 -c '
+import os, sys
+while True:
+    try:
+        fd = os.open(sys.argv[1], os.O_WRONLY)
+    except OSError:
+        break
+    open(sys.argv[2], "a").write("opened\n")
+    os.close(fd)' "$TD/r7c/raw/freeze_record.json" "$TD/r7c-opened" &
+R7C_WRITER=$!
+mkdir -p "$TD/r7c-writer"; echo "$R7C_WRITER" > "$TD/r7c-writer/orphan.pid"    # 測試中途結束時由 cleanup 收掉
+# ⚠️ 寫端必須已經阻塞在打開 FIFO（wchan）才執行——否則偵測可能落空。
+fifo_writer_blocked() {  # $1＝寫端的 pid
+  local i w
+  for i in $(seq 1 100); do
+    w="$(cat "/proc/$1/wchan" 2>/dev/null || true)"
+    case "$w" in pipe_wait|wait_for_partner|fifo_open) return 0 ;; esac
+    sleep 0.05
+  done
+  return 1
+}
+check "r7：FIFO 的寫端已就緒（阻塞在打開 FIFO）" fifo_writer_blocked "$R7C_WRITER"
+RUN_TIMEOUT=120 r_case "r7：raw/ 內的 freeze_record.json 是 FIFO" "$TD/r7c/freeze_record.json" "不是一般檔案（缺少、symlink 或特殊檔案）"
+check "r7：FIFO ⛔ 沒有被打開（⛔ 不讀 raw/ 裡的特殊檔案）" test ! -e "$TD/r7c-opened"
+{ kill -KILL "$R7C_WRITER" && wait "$R7C_WRITER"; } 2>/dev/null || true
+rm -f "$TD/r7c-writer/orphan.pid"
+cp -a "$FR_DIR" "$TD/r8-copy"
+r_case "r8：整個成功的 <work> 以 cp -a 複製到另一處" "$TD/r8-copy/freeze_record.json" "meta.work ≠ 來源目錄"
+make_freeze "$TD/r8-src" "$HEAD_OID"; mv "$TD/r8-src" "$TD/r8-moved"
+r_case "r8：整個成功的 <work> 搬到另一處" "$TD/r8-moved/freeze_record.json" "meta.work ≠ 來源目錄"
+make_freeze "$TD/r9" "$HEAD_OID"; cp "$TD/r9/freeze_record.json" "$TD/r9/.freeze_record.json.staging"
+r_case "r9：檔名不是 freeze_record.json（staging 名）" "$TD/r9/.freeze_record.json.staging" "檔名必須是 freeze_record.json"
+# r10：報告多一個鍵（meta.work 照舊 ＝ 來源目錄、raw/ 內是同一份）→ report_sha256 不符；check-basic 通過、check-pair 不過。
+make_freeze "$TD/r10" "$HEAD_OID"
+python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); p["extra"]=1; open(sys.argv[1],"w").write(json.dumps(p,sort_keys=True,separators=(",",":")))' \
+  "$TD/r10/sizing_report.json"
+cp "$TD/r10/sizing_report.json" "$TD/r10/raw/sizing_report.json"
+r_case "r10：freeze record 與報告不成對（check-pair 不過）" "$TD/r10/freeze_record.json" "不成對"
 
 echo "==> i074 Stage 2 ⑦b：replay 之後的檢查點（n8）"
 post_case() {  # $1＝說明；$2＝runner_hook 的內容（$W 可用）；$3（可選）＝replay 的結束碼

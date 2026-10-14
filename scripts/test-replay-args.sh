@@ -3682,6 +3682,15 @@ fi
   && pass "漂移測試沒有在真正 repo 留下 worktree" || fail "漂移測試在真正 repo 留下了 worktree"
 rm -rf "$GEN_TD"
 
+# ── I-074 Stage 2 步驟 ⑨：入口的信任邊界、image 契約、--s7 兩個模式（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」
+#    「八」#5～#5c）。獨立成一支腳本，反向驗證可以單獨執行它；標籤一律以 `step9：` 開頭。
+echo "==> i074 Stage 2（⑨）：scripts/test-i074-step9.sh"
+if bash "$REPO_ROOT/scripts/test-i074-step9.sh"; then
+  pass "step9：scripts/test-i074-step9.sh 全部通過"
+else
+  fail "step9：scripts/test-i074-step9.sh 有失敗"
+fi
+
 
 # ⚠️ **結尾要再檢查一次**：`$fails` 的第一次檢查在上面的 I-100 段落結束處，
 # ⛔ 之後新增的 I-074 測試若呼叫 `fail`，沒有這一段就會照樣印「全部通過」並回 0，

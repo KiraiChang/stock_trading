@@ -1333,6 +1333,41 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
 的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
+#### ⑨：兩道 guard、封存與重新封存（2026-10-12 實作，⚠️ 待 review）
+
+契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的兩道 guard 與兩份 patch 的封存」；本節只寫**操作程序**。
+
+```text
+S0  git add <⑨ 的實作>；T_src=$(git write-tree)；正式工作樹 ＝ index（⛔ 沒有 unstaged、⛔ 沒有 untracked）
+S1～S6  scripts/i074-step9-guards.sh --source-tree "$T_src" --out <repo 外的新目錄>
+        （S2 合成與三方 SHA、S3 e1cbbbd ＋ 兩份 patch 的既有測試、S4 differential guard、S5 tooling 非語意 guard）
+S7  scripts/i074-step9-guards.sh --source-tree "$T_src" --out <新目錄> --s7 smoke
+    scripts/i074-step9-guards.sh --source-tree "$T_src" --out <新目錄> --s7 full     ← 與 ⑧ baseline 的逐項比對
+    反向驗證（綁定 T_src 的隔離 clone，一次注回一項）
+S8  把結果與封存值寫進 issue.md、歸檔 → stage（相對 T_src 只多出文件）→ review → commit（＝ 封存點）
+S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"
+```
+
+* ⚠️ **入口會先驗自己 ＝ `T_src` 的 blob**，再在綁定 `T_src` 的隔離 clone 裡執行其餘全部——所以要先 stage、取 tree，
+  ⛔ 不能拿工作樹裡還沒 stage 的版本跑。執行期間⛔ 不要動正式 repo 的 index 與工作樹，也⛔ 不要在正式 repo 跑會寫物件的
+  指令（`add`、`write-tree`——遇到已存在的物件也會改它的 mtime）：入口結束時比對正式 repo 的唯讀 inventory（HEAD、
+  index 的 digest、status、worktree 清單、容器、`/run/lock`、`/dev/shm`，以及物件庫每個檔的 inode／大小／mtime／link 數），
+  不同即失敗。
+* `/tmp` 是 host 共用的：入口把前後的差異寫進 `tmp_diff.txt`，⛔ 不自動判失敗——結果裡要逐一歸因（本輪的程式一律跟隨
+  `TMPDIR`，應為零）。
+* 可用空間：建 clone 之前要 ≥ 1.5 GB ＋ clone 本身（正式 repo 物件庫的大小 ＋ `T_src` 工作樹的大小，2026-10 約 0.18 GB），
+  clone 建好之後要 ≥ 1.5 GB（＝ preflight 6 的 1.24 GB ＋ 完整驗證到 `test-i074-stage2.sh` 結束為止實測耗用的 0.20 GB ＋ 餘裕），否則入口在執行任何步驟之前就停（[`todo.md`](./todo.md) T-072）。clone 一律 `--no-hardlinks`：
+  本地 clone 預設以 hardlink 共用物件檔，clone 裡的 git 寫入會 freshen（改 mtime）到正式 repo 的同一個 inode——空間不夠就停，⛔ 不改回 hardlink。
+* image：會 build 的步驟各用本次執行唯一的 `stock-trading-i074-step9:<run_id>-<步驟>`；收尾後 `cleanup_status.json` 的每一筆
+  都必須是 `release: ok`、`verify: ok`。allowance 非空（cache 命中原本的 dangling image）時照實記錄，⛔ 不自行刪除那個 image。
+* Stage 2 pinned image 只唯讀讀取 identity（`$XDG_DATA_HOME/stock_trading/i074_stage2/run_identity.json`）；本機沒有那個 image
+  就停，⛔ 不自行 build、⛔ 不呼叫 pin／restore。
+* **⑨-1 的比對**：`git diff --quiet <封存 commit> HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch
+  python/baselines/i074_stage2/tooling_e1cbbbd.patch`，並逐一比對 acceptance 報告 `meta` 的 `counterfactual_sha256`、
+  `counterfactual_canonical_sha256`、`tooling_sha256`、`tooling_canonical_sha256`、`composed_sha256`、
+  `counterfactual_semantic_sha256` ＝ 封存值（`sr-zone-scoring.md` 的封存值表）。
+* **重新封存**：之後只要兩份 patch 任一份的 bytes 或 SHA 改變，⑨（S0～S9）、⑨-1、⑨-2 全部重做。
+
 ### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
@@ -1583,6 +1618,8 @@ I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 
 | orchestrator、supervisor、晉升的整合、判讀器的 bootstrap | `scripts/test-i074-stage2.sh`（合成 repo ＋ sed 過常數的正式腳本） | 同上 |
 | supervisor 的屬性與故障注入、host-run／reap-adopted／kill-pinned、需要 git 的 helper、離線讀取端 | `scripts/tests/test_i074_stage2_host.py`（host 的 Python 3.9 unittest） | 由 `scripts/test-i074-stage2.sh` 呼叫 |
 | 真實產品資料流的非空翻轉 | `scripts/smoke-replay-offline.sh` | `REPLAY_SMOKE=1`（預設不跑） |
+| ⑨ 的兩道 guard（comparator 的檢查、allowlist、tamper、正規化規則）與完整驗證的逐項比對 | `test_i074_differential_guard.py`、`test_i074_tooling_guard.py`、`test_i074_step9_runs.py` | pytest |
+| ⑨ 的入口（bootstrap 自證、隔離 clone、正式 repo 物件庫的 inventory、可用空間、`--s7` 模式、結束碼仲裁）與 image 契約 | `scripts/test-i074-step9.sh`（隔離 repo ＋ 以狀態檔模擬 image 庫的 fake docker；標籤以 `step9：` 開頭） | 由 `scripts/test-replay-args.sh` 呼叫，也可單獨執行 |
 
 寫這一區的測試時：
 

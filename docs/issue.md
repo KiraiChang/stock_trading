@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗發現三項差異（第七輪 review 修正後；review 建議 D1 確認、D2 採 (a)、D3 確認）⚠️ 待確認**（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ⚠️ 待 review（第一輪 review 的三項已修正並重跑）**（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -4757,12 +4757,12 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | `…semantic_pipeline.market_state` | `BULLISH_RECOVERY` → `BULLISH_CONTINUATION` | 同左 |
 | `…semantic_pipeline.action_state` | `CONDITIONAL_HOLD`／`HOLD` → `HOLD` | 兩側都是 `AVOID` |
 | `…semantic_pipeline.bias_state`、`decision_derived_view.bias_state`、頂層 `market_bias` | `BULLISH_BIAS` → `BULLISH_CONTINUATION` | 兩側都是 `BEARISH_BIAS` |
-| `decision_derived_view.bias_label`、頂層 `market_bias_label` | `偏多觀察` → `多頭延續`（`e1cbbbd` 的 `_market_bias_label()` 對上一列兩個 state 的值，寫成常數） | 相同 |
+| `decision_derived_view.bias_label`、頂層 `market_bias_label` | `偏多觀察` → `多頭延續`（`e1cbbbd` 的 `_market_bias_label()` 對上一列兩個 state 的值，寫成常數） | 相同（⚠️ **⑨ 實作第一輪 review**：兩側都必須是 `偏空觀察`——同一個函式對 `BEARISH_BIAS` 的值） |
 | `…semantic_pipeline.reason_codes` | 兩側各自移除 `PRICE_UPSIDE_FOLLOW_THROUGH` 之後**逐項相同（含順序）**；before 無、after 有 | 同左 |
 | `…semantic_pipeline.rr_decoupling_candidate` | `false` → `true` | 同左 |
 | `decision_derived_view.bias_reason_codes` | `SEMANTIC_BULLISH_RECOVERY` → `SEMANTIC_BULLISH_CONTINUATION` | 相同 |
 | `decision_derived_view.authority_reason_codes` | 兩側各自以 `_unique_reason_codes([*bias, *daily, *final_entry, *path, *position])` 重算必須 ＝ 實際值；daily／final_entry／path／position 四項兩側相同——**只剩 bias 那一項的差異** | 相同 |
-| `decision_derived_view.position_gate_state`、`position_action_condition.state` | 各自 ＝ 該側的 semantic `action_state` | 相同 |
+| `decision_derived_view.position_gate_state`、`position_action_condition.state` | 各自 ＝ 該側的 semantic `action_state` | 相同（⚠️ **⑨ 實作第一輪 review**：同左的逐側規則，⛔ 不只是兩側相同） |
 | `position_action_condition.reason_codes` | ⛔ **不在** allowlist——任何差異都 fail | 同左 |
 
 **九格 ＋ 強制補充格 8b**（fixture 宣告的形狀 ＝ G3 要核對的見證）：
@@ -4776,7 +4776,7 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 5 | 對照 | RR 合格的 `CONTINUATION` | 兩側 lifecycle ＝ `CONTINUATION`、`setup_rr_qualified` ＝ `true`、candidate ＝ `false` |
 | 6 | 對照 | 價格證據成立 ＋ RR 不合格，`event_signal ≠ CLOSE_RECLAIM` | **兩側**：`continuation_price_evidence_met` ＝ `true`、`setup_rr_qualified` ＝ `false`、`event_signal ≠ CLOSE_RECLAIM`、candidate ＝ `false` |
 | 7 | 對照 | `active_bearish_states` 命中 | **兩側**：`continuation_price_evidence_met` ＝ `true`、`setup_rr_qualified` ＝ `false`、`event_state_summary.active_bearish_events` 非空、structure_state ∉ {`SUPPORT_RECLAIM_INVALIDATED`, `BREAKDOWN`}、lifecycle ＝ `BREAKDOWN`、candidate ＝ `false` |
-| 8 | 對照 | `structure_state == SUPPORT_RECLAIM_INVALIDATED` | **兩側**：`continuation_price_evidence_met` ＝ `true`、`setup_rr_qualified` ＝ `false`、該 structure_state、lifecycle ＝ `INVALIDATED`、candidate ＝ `false`。⚠️ 只能以 `current_price` ≠ `candle_close` 構造（函式層的輸入，⛔ 不在 replay 的資料域，fixture 標 `outside_replay_domain: true`；D2：第七輪 review 建議採 (a)、待確認，見「實作前的可行性實驗與計畫修正」） |
+| 8 | 對照 | `structure_state == SUPPORT_RECLAIM_INVALIDATED` | **兩側**：`continuation_price_evidence_met` ＝ `true`、`setup_rr_qualified` ＝ `false`、該 structure_state、lifecycle ＝ `INVALIDATED`、candidate ＝ `false`。⚠️ 只能以 `current_price` ≠ `candle_close` 構造（函式層的輸入，⛔ 不在 replay 的資料域，fixture 標 `outside_replay_domain: true`；D2 採 (a)，見「實作前的可行性實驗與計畫修正」） |
 | 8b | 對照（**九格之外的強制補充格**，D2(a)） | `structure_state == SUPPORT_RECLAIM_INVALIDATED`、`current_price ＝ candle_close`（replay 的資料域） | **兩側**：`continuation_price_evidence_met` ＝ `false`、`setup_rr_qualified` ＝ `false`、該 structure_state、lifecycle ＝ `INVALIDATED`、candidate ＝ `false`——⛔ 不取代第 8 格；缺少 8b 或它的見證不成立，⑨ 一樣判失敗 |
 | 9 | 對照 | `structure_state == BREAKDOWN` | **兩側**：`continuation_price_evidence_met` ＝ `true`、`setup_rr_qualified` ＝ `false`、該 structure_state、lifecycle ＝ `BREAKDOWN`、candidate ＝ `false` |
 
@@ -4837,8 +4837,8 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 
 | 層 | 規則 |
 |---|---|
-| bootstrap | 入口整支包在函式裡、最後一行才呼叫並 `exit`（bash 逐行讀檔，避免執行途中被改到）。從正式工作樹啟動時，⛔ 不 source 任何 helper，只用 git 與 coreutils：① `--source-tree` 必須是 40 碼且 `cat-file -t` ＝ `tree`；② **自身的 bytes 必須 ＝ `T_src:scripts/i074-step9-guards.sh` 的 blob**，否則拒絕；③ 量可用空間（< 1.3 GB 即拒絕，T-072）；④ 建隔離 clone（下一列）；⑤ 以**子程序**執行 clone 裡的同一支入口（⛔ 不 exec——要保留 EXIT trap 收掉 clone），只傳明確的參數 |
-| 隔離 clone | `git clone --no-hardlinks --template=`（hooks 關閉）→ 刪除已追蹤檔 → `git archive T_src` 展開 → `add -A` → `write-tree` 必須 ＝ `T_src` → `commit-tree`（父 ＝ clone 的 HEAD，即啟動當下的正式 HEAD）→ `update-ref HEAD` → `HEAD^{tree}` ＝ `T_src`、`status --porcelain=v1 --untracked-files=all` 為空、`e1cbbbd` 存在（比照 ⑧ 的隔離 clone） |
+| bootstrap | 入口整支包在函式裡、最後一行才呼叫並 `exit`（bash 逐行讀檔，避免執行途中被改到）。從正式工作樹啟動時，⛔ 不 source 任何 helper，只用 git 與 coreutils：① `--source-tree` 必須是 40 碼且 `cat-file -t` ＝ `tree`；② **自身的 bytes 必須 ＝ `T_src:scripts/i074-step9-guards.sh` 的 blob**，否則拒絕；③ 量可用空間（< 1.3 GB 即拒絕，T-072；⚠️ **⑨ 實作第一輪 review**：改成 < 1.5 GB ＋ 隔離 clone 本身（正式 repo 物件庫的大小 ＋ `T_src` 工作樹的大小）即拒絕，clone 建好之後在 clone 內再量一次 ≥ 1.5 GB——1.5 GB ＝ preflight 6 的 1.24 GB ＋ 完整驗證到 `test-i074-stage2.sh` 結束為止實測耗用的 0.20 GB ＋ 餘裕；另在建 clone 之前、收掉 clone 之後各記一份正式 repo 物件庫的 inventory，不同即失敗）；④ 建隔離 clone（下一列）；⑤ 以**子程序**執行 clone 裡的同一支入口（⛔ 不 exec——要保留 EXIT trap 收掉 clone），只傳明確的參數 |
+| 隔離 clone | `git clone --no-hardlinks --template=`（hooks 關閉；⚠️ **⑨ 實作第一輪 review**：實作曾改用預設的 hardlink，已撤回——clone 之後、任何 git 寫入之前驗物件檔的 link 數都是 1、沒有 alternates）→ 刪除已追蹤檔 → `git archive T_src` 展開 → `add -A` → `write-tree` 必須 ＝ `T_src` → `commit-tree`（父 ＝ clone 的 HEAD，即啟動當下的正式 HEAD）→ `update-ref HEAD` → `HEAD^{tree}` ＝ `T_src`、`status --porcelain=v1 --untracked-files=all` 為空、`e1cbbbd` 存在（比照 ⑧ 的隔離 clone） |
 | clone 內 | 入口以內部參數執行時，先驗：自己的路徑在 clone 之內、clone 的 `HEAD^{tree}` ＝ `T_src`、工作樹乾淨；之後 `REPO_ROOT` ＝ clone——`lib/replay-args.sh`、`lib/mem-guard.sh`、產生器、runner 與它呼叫的 `python/scripts/*.py`、切片產生器與它 import 的 `replay_bundle/`、producer、兩支 comparator、fixture、image helper（`scripts/i074-step9-image.sh`，第四輪 review）、smoke 腳本與 `i074_step9_runs.py`（`--s7` 模式，第五輪 review）**全部是 `T_src` 的內容**；（第六輪 review：原本 `--s7 full` 要直接執行正式工作樹的 `python/scripts/test.sh`，只做前後比對，抓不到「執行途中被改、結束前又恢復」——改成**也在 clone 裡執行**，⛔ 沒有任何例外；正式 repo 只是被觀察的對象）；worktree 登記只落在 clone 的 `.git`。內部參數在 clone 以外出現 → 拒絕 |
 | 封閉 manifest | **結構上的封閉**：clone 的工作樹就是 `T_src` 的完整 tree；正式工作樹的檔案⛔ 不被執行、也⛔ 不當成任何測試或比對的輸入——正式 repo 只做明列的唯讀 inventory（`write-tree`、`status --porcelain=v1 --untracked-files=all`、`worktree list --porcelain`，第七輪 review）。**明列的紀錄**：入口把「會執行或讀取的 repo 檔案」（上一列的清單）的路徑 → blob OID 寫進 `--out` 的 `step9_manifest.json`，並記錄 repo 外的輸入：image ID、Stage 2 identity 檔的 SHA-256、git／python3／docker 的版本；`--s7 full` 另記錄 baseline 的 SHA-256、來源 tree、產生指令與解析出的項目數（第六輪 review） |
 | commit ＝ 受測 | S9：`git diff --name-only "$T_src" 'HEAD^{tree}'` 只能列出 ⑨ 結果寫入的三份文件（`docs/issue.md`、`docs/sr-zone-scoring.md`、`docs/development-workflow.md`）——其他**任何**檔案不同 → 受測的不是 commit 的內容；並逐項比對 `step9_manifest.json` 的 blob ＝ HEAD 的 blob |
@@ -4910,13 +4910,13 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 2 | **tamper**（v29 的六類，a、c、e 各拆開：a1、a2、a3、b、c1、c2、c3、d、e1、e2、f） | ⑨ 實跑的 tamper 自我檢查（真實輸出為基底）；pytest 對合成資料各一支，斷言**原因碼**而⛔ 不只看 fail |
 | 3 | guard 自身的其他負向 | pytest：fixture／producer SHA 兩側不同、case 缺漏／重複／換序、未知 schema 鍵、NaN、差異落在兩個產品檔與 tooling 路徑以外（含只在一側載入的非 tooling 模組；⚠️ D1 改寫）、兩個產品檔沒有被載入、宣告形狀與實際不符（含 6～9 只少「價格證據成立」一項、8b 的價格證據成立）、宣告類別與分類不符；資料域標註（第 8 格沒有標註或 `current_price ＝ candle_close`、其他格有標註或 `current_price ≠ candle_close`、缺少 8b） |
 | 4 | tooling guard | pytest：規則表 ＝ 程式常數；每一份檔案的可移除鍵恰好如表；表外的頂層鍵、`rows`／`keys` 的任一列、`difference_field_counts`、`run_id`、`pipeline_version` 的差異都 fail；兩個 hash 不自洽 → fail；provenance 的每一條期望值各一支反例（A 非空 tooling、B 的 SHA ≠ 封存值、`base_commit` 不同、非 tooling 模組的 hash 不同、argv 在允許位置以外不同、欄位多一個或少一個） |
-| 5 | 執行入口與信任邊界 | `scripts/test-replay-args.sh`（隔離 repo ＋ fake docker）：只接受 40 碼 tree；**n1** 正式工作樹的入口 ≠ `T_src` 的 blob → bootstrap 在建 clone 之前拒絕；**n2～n4** 正式工作樹的 `lib/replay-args.sh`、產生器、runner 被改成「一被執行就寫 sentinel」→ 跑完 sentinel ⛔ 不存在、結果與未改時相同；**n5** 正式工作樹的 producer、comparator、fixture 被改 → 同上；**n9** 正式工作樹的 `scripts/i074-step9-image.sh` 被改成「一被執行就寫 sentinel」→ 入口跑完（含 S3 的 reserve／release／verify）sentinel ⛔ 不存在（第四輪 review）；**n6** `T_src` 裡的 helper 帶一個可觀察的標記 → 標記出現（證明跑的是 `T_src`）；**n7** 內部參數在 clone 以外出現 → 拒絕；**n8** clone 的 tree ≠ `T_src`（模擬 checkout 不完整）→ 拒絕（入口的常數依前例以「複製 ＋ sed 常數、斷言只差常數行」換成隔離 repo 的值）；磁碟不足即在建 clone 之前失敗；comparator 失敗原樣傳出非零；隔離 repo 的 worktree 登記與 `/tmp` 前後不變；fake docker 的紀錄裡⛔ 沒有 `i074.stage2.run` label |
+| 5 | 執行入口與信任邊界 | `scripts/test-replay-args.sh`（隔離 repo ＋ fake docker）：只接受 40 碼 tree；**n1** 正式工作樹的入口 ≠ `T_src` 的 blob → bootstrap 在建 clone 之前拒絕；**n2～n4** 正式工作樹的 `lib/replay-args.sh`、產生器、runner 被改成「一被執行就寫 sentinel」→ 跑完 sentinel ⛔ 不存在、結果與未改時相同；**n5** 正式工作樹的 producer、comparator、fixture 被改 → 同上；**n9** 正式工作樹的 `scripts/i074-step9-image.sh` 被改成「一被執行就寫 sentinel」→ 入口跑完（含 S3 的 reserve／release／verify）sentinel ⛔ 不存在（第四輪 review）；**n6** `T_src` 裡的 helper 帶一個可觀察的標記 → 標記出現（證明跑的是 `T_src`）；**n7** 內部參數在 clone 以外出現 → 拒絕；**n8** clone 的 tree ≠ `T_src`（模擬 checkout 不完整）→ 拒絕（入口的常數依前例以「複製 ＋ sed 常數、斷言只差常數行」換成隔離 repo 的值）；磁碟不足即在建 clone 之前失敗；comparator 失敗原樣傳出非零；隔離 repo 的 worktree 登記與 `/tmp` 前後不變；fake docker 的紀錄裡⛔ 沒有 `i074.stage2.run` label；⚠️ **⑨ 實作第一輪 review** 追加 **n10**～**n14**（正式 repo 物件庫前後相同、hardlink 的 clone 被拒、物件庫被改 → 1／保留原碼、clone 建好之後空間不足、只夠執行期間的下限而不夠 clone 本身），見「Stage 2 步驟 ⑨ 實作結果」「八」 |
 | 5b | image helper（第四輪 review） | `scripts/test-replay-args.sh`，fake docker 以狀態檔模擬 image 庫（ID → tags；`image rm <tag>` 依 docker 的語意：還有別的 tag 時只解除、只剩這個 tag 時刪除 image），⛔ 不靠正式執行才第一次驗刪除邏輯：**h1** tag 已存在 → `reserve` 拒絕、⛔ 沒有寫 inventory；**h2** 命名空間外的 tag（`stock-trading-python-test:latest`、缺 run id、步驟不在列舉內）→ `reserve`、`release` 都拒絕，fake docker ⛔ 沒有收到 `image rm`；**h3** 新 image → `release` 刪除 tag 與 image、`verify` 通過；**h4** cache 命中既有、帶別的 tag 的 image → 只解除專屬 tag，原 tag 與 image 都在、`verify` 通過；**h5** cache 命中既有的 dangling image → ⛔ 沒有呼叫 `image rm`、allowance 一筆、`verify` 通過；**h6** build 之前就失敗（tag 不存在）→ `release` 不做事、`verify` 通過；**h7** 清理失敗（`image rm` 回非零）→ `release` 非零、⛔ 沒有寫 allowance、`verify` 失敗（多一個 ID）；**h8** inventory 在 `reserve` 之後被改（例如把新 ID 加進去冒充既有）→ `release`、`verify` 以 SHA 拒絕；**h9** allowance 被竄改，各一支：多一筆、兩筆；tag 不是本次 `reserve` 的那一個（**格式正確、同樣指向既有 dangling image** 的另一個 ⑨ tag）；本次的 tag 但指向帶 tag 的 ID；命名空間外的 tag；另以 `verify` 收到的 tag ≠ inventory 記錄的 tag 一支 → 全部失敗（第五輪 review）；**h10** 重複 `release`（h3～h6 各一次）→ 結果與一次相同、allowance ⛔ 沒有重複；**h11** 成功之後再次執行（第一次留下 h5 的 allowance tag）→ 第二次 `reserve` 成功、把前次的 tag 列到 stderr、第二次 `verify` 通過；**h12** `verify` 的差異各一支：多一個 ID、少一個原本存在的 ID、別的 tag 被移動或刪除 → 失敗；**h13** 入口在 S3 build 之後、測試之前失敗或收到 TERM → trap 照樣 `release`（與 #5 的入口測試一起） |
-| 5c | `--s7` 兩個模式（第五輪 review） | `scripts/test-replay-args.sh`（隔離 repo、fake docker 的 image 庫、以 stub 取代 smoke 腳本與 `python/scripts/test.sh`——stub 依參數決定結束碼、睡眠、建 worktree 或建 image；fake docker 可指定 `image rm` 失敗）：**s1** 成功 → `release`、`verify` 都執行、rc 0、image 庫回到建立前；**s2** 被執行的腳本失敗 → `release`、`verify` 照樣執行、rc 原樣傳出；**s3**、**s4** 執行途中送 INT、TERM → trap 執行 `release`、`verify`，rc 130、143，fake docker 的 image 庫回到建立前、⛔ 沒有存活的 stub；**s5** build 之前就失敗（tag 不存在）→ `release` 不做事；**s6** `--s7 full` 開始之前，正式工作樹的 `python/scripts/test.sh` 被改成寫 sentinel → sentinel ⛔ 不存在（執行的是 clone 裡的 `T_src`）；**s7** `--s7 full` **執行途中**把正式工作樹的 `python/scripts/test.sh` 改成寫 sentinel、結束前再恢復 → sentinel ⛔ 不存在、結果不受影響（第六輪 review）；**s8** stub 在 clone 的專屬 `TMPDIR` 下建恰好 4 個 worktree → 歸因通過、正式 repo 的登記⛔ 不變；建 5 個、或其中一個在 `TMPDIR` 以外 → 失敗；**s9** 正式工作樹的 `scripts/i074-step9-image.sh`、smoke 腳本被改成寫 sentinel（`--s7 smoke`）→ sentinel ⛔ 不存在；**s10** stub 成功（0）但 `release` 失敗（fake docker 的 `image rm` 回非零）→ 入口回 1、`verify` **仍有執行**（`cleanup_status.json` 兩項都有紀錄）；**s11** stub 成功但 `verify` 失敗（stub 另建一個未登記的 image）→ 回 1；**s12** stub 失敗（rc 3）且 `release` 失敗 → 保留 3、清理失敗有紀錄；**s13** TERM 且 `release` 失敗 → 保留 143、`verify` 仍有執行（s10～s13 第六輪 review）；**s14** stub 成功、清理成功但 `cleanup_status.json` 寫不進去（`--out` 改成唯讀）→ 回 1、stderr 有訊息；同樣情況但 stub 失敗（rc 3）→ 保留 3、stderr 有訊息（第七輪 review） |
+| 5c | `--s7` 兩個模式（第五輪 review） | `scripts/test-replay-args.sh`（隔離 repo、fake docker 的 image 庫、以 stub 取代 smoke 腳本與 `python/scripts/test.sh`——stub 依參數決定結束碼、睡眠、建 worktree 或建 image；fake docker 可指定 `image rm` 失敗）：**s1** 成功 → `release`、`verify` 都執行、rc 0、image 庫回到建立前；**s2** 被執行的腳本失敗 → `release`、`verify` 照樣執行、rc 原樣傳出；**s3**、**s4** 執行途中送 INT、TERM → trap 執行 `release`、`verify`，rc 130、143，fake docker 的 image 庫回到建立前、⛔ 沒有存活的 stub；**s5** build 之前就失敗（tag 不存在）→ `release` 不做事；**s6** `--s7 full` 開始之前，正式工作樹的 `python/scripts/test.sh` 被改成寫 sentinel → sentinel ⛔ 不存在（執行的是 clone 裡的 `T_src`）；**s7** `--s7 full` **執行途中**把正式工作樹的 `python/scripts/test.sh` 改成寫 sentinel、結束前再恢復 → sentinel ⛔ 不存在、結果不受影響（第六輪 review）；**s8** stub 在 clone 的專屬 `TMPDIR` 下建恰好 4 個 worktree → 歸因通過、正式 repo 的登記⛔ 不變；建 5 個、或其中一個在 `TMPDIR` 以外 → 失敗；**s9** 正式工作樹的 `scripts/i074-step9-image.sh`、smoke 腳本被改成寫 sentinel（`--s7 smoke`）→ sentinel ⛔ 不存在；**s10** stub 成功（0）但 `release` 失敗（fake docker 的 `image rm` 回非零）→ 入口回 1、`verify` **仍有執行**（`cleanup_status.json` 兩項都有紀錄）；**s11** stub 成功但 `verify` 失敗（stub 另建一個未登記的 image）→ 回 1；**s12** stub 失敗（rc 3）且 `release` 失敗 → 保留 3、清理失敗有紀錄；**s13** TERM 且 `release` 失敗 → 保留 143、`verify` 仍有執行（s10～s13 第六輪 review）；**s14** stub 成功、清理成功但 `cleanup_status.json` 寫不進去（`--out` 改成唯讀）→ 回 1、stderr 有訊息；同樣情況但 stub 失敗（rc 3）→ 保留 3、stderr 有訊息（第七輪 review）；⚠️ **⑨ 實作第一輪 review** 追加 **s15**：smoke 成功但 worktree 清理失敗 → 1、smoke 失敗（3）且清理失敗 → 保留 3 |
 | 6 | `e1cbbbd` 既有測試 | 入口在 clone 內以 `replay_args_compose()` 建 T2 的 worktree，跑它**自己的** `python/scripts/test.sh`（`SKIP_SHELL_TESTS=1`、`PY_IMAGE` ＝ `stock-trading-i074-step9:<run_id>-e1cbbbd-test`，依「六」的 image 契約 reserve／release／verify；⚠️ D3：原本沿用 `stock-trading-python-e1cbbbd:test`）；預期與 ⑦a～⑦c 相同（1223 passed、1 skipped），記錄 tree、image ID、結果；未套 patch 的基準沿用 ② 的 `tests_baseline.log`（⛔ 不重跑） |
 | 7 | smoke | 由 `i074-step9-guards.sh --s7 smoke` 執行（第五輪 review）：`REPLAY_SMOKE=1` 在另一個綁定 `T_src` 的隔離 clone 跑（`PY_IMAGE` ＝ `stock-trading-i074-step9:<run_id>-smoke`，依 image 契約；專屬 `TMPDIR`；收尾刪 clone），含反事實段 |
 | 8 | 完整驗證 | 由 `i074-step9-guards.sh --s7 full` 執行（第五輪 review；逐項比對由 `i074_step9_runs.py` 做、＋4 的歸因由入口做）：**在綁定 `T_src` 的隔離 clone 裡**跑完整 `python/scripts/test.sh -v backtest/ tests/`（含 `test-replay-args.sh`、`test-i074-stage2.sh`、doc-refs）——第六輪 review：⛔ 不執行正式工作樹的任何檔案，正式 repo 只觀察（worktree 清單、`write-tree`、status 前後⛔ 不變）；以本次專屬、新建的 `TMPDIR`（`/tmp` 底下、與 `/tmp` 同一個 `st_dev`）執行，供「#10」的歸因；`PY_IMAGE` ＝ `stock-trading-i074-step9:<run_id>-full`（依 image 契約，D3）；開跑前確認 host 可用磁碟 ≥ 1.3 GB（T-072）；pytest 以 137 結束時⛔ 不自動分段，附證據回報。**與 ⑧ 的比對**（第二輪 review 改寫、第六輪 review 綁定基準）：**基準** ＝ ⑧ 第三次全量執行的 `-v` log——SHA-256 `901843273ad3ab6209777adcc2f5001ddb9be5e833980befef512de8a59488bb`（353,982 bytes）、來源 staged tree `06d6ac7adad22eff41f7804aff4061d9e118eb59`（測試程式與 `be0e337` 相同）、指令 `python/scripts/test.sh -v backtest/ tests/`（正式 repo、預設 `TMPDIR` 與 `PY_IMAGE`、mem-guard 474m）、結束碼 0；解析出的項目數：pytest 2295 個 node（2294 passed、1 skipped，摘要行 `2294 passed, 1 skipped, 1 warning`）、shell `ok` 標籤 744 個、`FAIL` 0 個（其中 host unittest 是單一標籤 `Ran 72 tests`）。它**已隨本計畫**逐位元保存在 `python/scripts/fixtures/i074_step9/step8_full_run3.log`（第七輪 review：stage 之後從 index 讀回重算 SHA-256 與大小，都相符），`step8_full_run3.meta.json` 記上列全部的值（項目數由 log 解析而來），`i074_step9_runs.py` 把 SHA、tree 與項目數寫成常數——三者任一不符（檔案被換、截斷、空白、tree 錯）→ fail-closed；⛔ 不以別的 log 替代（例如 `tests_patched_run2.log` 只有 `e1cbbbd` 的 1223 個）。**本次的 log** 同樣要完整（有摘要行、`collected N items` ＝ node 結果的行數），否則 fail。比對單位 ＝ pytest 的 node id、shell 段的 `ok`／`FAIL` 標籤（唯一的正規化：host unittest 標籤去掉 ` in <秒數>s`——⑧ 第二、三次全量執行的標籤比對：除了 ⑧ 第二輪 review 刻意改的 ag 標籤（新增 2 個、移除 1 個）之外，只有它會變；第七輪 review 訂正）；**只比兩邊都有的既有項目**：基準是 pass 的，⑨ ⛔ 不得變成 fail／error／skip（基準是 skip 的維持 skip 或變 pass）；⑧ 有、⑨ 沒有的項目——⑨ ⛔ 不刪改既有測試，應為零，出現就逐一查證（例如標籤含暫存路徑）並記錄，確實少了就停；**⑨ 新增的項目只接受明列的範圍**：node 的檔案 ∈ {`test_i074_differential_guard.py`、`test_i074_tooling_guard.py`、`test_i074_step9_runs.py`}、shell 標籤以 `step9：` 開頭（⑨ 在 `test-replay-args.sh` 新增的段落一律用這個前綴）——必須**全數通過**；範圍外出現的新項目 → fail-closed（例如既有測試改名，會同時出現「少一個」與「多一個」）；整體結束碼 0；⛔ 不比總測試數、⛔ 不逐位元比完整輸出 |
-| 9 | 反向驗證（綁定 `T_src` ＋ 注回的隔離 clone、逐項注回 → **指定的測試**變紅 → 還原） | R1 拿掉 G2 → a1；R2 把 `position_action_condition.reason_codes` 放進 allowlist → d；R3 allowlist 改成字串前綴比對 → c3；R4 semantic `reason_codes` 改成集合比較 → e2；R5 拿掉上游輸入的專屬檢查 → c1（斷言專屬原因碼）；R6 分類改看 patched 側 → 九格的 1～4；R7 拿掉 G3 → 「宣告形狀與實際不符」與 6～9 少「價格證據成立」的那幾支；R8 tooling 的正規化多拿掉 `rows` → 列差異那一支；R9 拿掉 report 的 hash 自洽 → hash 不自洽那一支；R10 after 的正規化多拿掉 `run_id` → `run_id` 差異那一支；R11 bootstrap 拿掉自身比對 → n1；R12 clone 內改用正式工作樹的 `REPO_ROOT` → n2～n6、n9；R13 `release` 拿掉「建立前是 dangling 就⛔ 不刪」→ h5；R14 拿掉命名空間檢查 → h2；R15 `verify` 不比 image ID 集合 → h12 的「多一個 ID」；R16 拿掉 inventory 的 SHA 檢查 → h8；R17 `verify` 直接信任 allowance 檔 → h9；R18 `verify` ⛔ 不比傳入的 tag 與 allowance 的筆數 → h9 的「格式正確的另一個 tag」；R19 `--s7` 拿掉 trap → s3、s4；R20 `--s7 full` 改成執行正式工作樹的 `test.sh` → s6、s7；R21 `i074_step9_runs.py` 改成連新增項目的失敗也放過 → 它的 pytest（新增項目失敗那一支）；R22 trap 改成一律保留主流程的結束碼 → s10、s11；R23 `release` 失敗就跳過 `verify` → s10、s13；R24 `i074_step9_runs.py` 拿掉 baseline 的 SHA／項目數檢查 → 它的 pytest（截斷、空白、換檔各一支）；R25 新增項目改成不限範圍 → 它的 pytest（範圍外的新項目那一支）；R26 狀態檔寫入失敗時照樣回 0 → s14 |
+| 9 | 反向驗證（綁定 `T_src` ＋ 注回的隔離 clone、逐項注回 → **指定的測試**變紅 → 還原） | R1 拿掉 G2 → a1；R2 把 `position_action_condition.reason_codes` 放進 allowlist → d；R3 allowlist 改成字串前綴比對 → c3；R4 semantic `reason_codes` 改成集合比較 → e2；R5 拿掉上游輸入的專屬檢查 → c1（斷言專屬原因碼）；R6 分類改看 patched 側 → 九格的 1～4；R7 拿掉 G3 → 「宣告形狀與實際不符」與 6～9 少「價格證據成立」的那幾支；R8 tooling 的正規化多拿掉 `rows` → 列差異那一支；R9 拿掉 report 的 hash 自洽 → hash 不自洽那一支；R10 after 的正規化多拿掉 `run_id` → `run_id` 差異那一支；R11 bootstrap 拿掉自身比對 → n1；R12 clone 內改用正式工作樹的 `REPO_ROOT` → n2～n6、n9；R13 `release` 拿掉「建立前是 dangling 就⛔ 不刪」→ h5；R14 拿掉命名空間檢查 → h2；R15 `verify` 不比 image ID 集合 → h12 的「多一個 ID」；R16 拿掉 inventory 的 SHA 檢查 → h8；R17 `verify` 直接信任 allowance 檔 → h9；R18 `verify` ⛔ 不比傳入的 tag 與 allowance 的筆數 → h9 的「格式正確的另一個 tag」；R19 `--s7` 拿掉 trap → s3、s4；R20 `--s7 full` 改成執行正式工作樹的 `test.sh` → s6、s7；R21 `i074_step9_runs.py` 改成連新增項目的失敗也放過 → 它的 pytest（新增項目失敗那一支）；R22 trap 改成一律保留主流程的結束碼 → s10、s11；R23 `release` 失敗就跳過 `verify` → s10、s13；R24 `i074_step9_runs.py` 拿掉 baseline 的 SHA／項目數檢查 → 它的 pytest（截斷、空白、換檔各一支）；R25 新增項目改成不限範圍 → 它的 pytest（範圍外的新項目那一支）；R26 狀態檔寫入失敗時照樣回 0 → s14；⚠️ **⑨ 實作第一輪 review** 追加 R27～R36（見「Stage 2 步驟 ⑨ 實作結果」「五」） |
 | 10 | 殘留檢查 | **嚴格為零**（image 以外；入口、`e1cbbbd` 既有測試、smoke、反向驗證——全部在隔離 clone 與專屬 `TMPDIR` 內）：真正 repo 的 worktree 清單、`/tmp` 的新項目、`docker ps -aq`、`/run/lock` 的 `i074-stage2.*`、`/dev/shm/i074-*`、帶 cleanup token 的程序、staged tree，前後**完全相同**（刻意保留的 `--out` 除外）。**image**（每一個步驟、含完整驗證）一律依「六」的 image 契約驗收：image ID 集合完全相同，tag 集合只允許 allowance 記錄的增量（⚠️ D3，第三輪 review 改寫：⛔ 不再宣稱 image 嚴格為零，也⛔ 不為了歸零刪掉原本存在的 dangling image）。**完整驗證（#8）**（第六輪 review 改寫）：它也在隔離 clone 裡執行，所以**正式 repo 同樣嚴格為零**；I-118 的 ＋4 落在 clone 自己的 `.git`，入口照樣做**歸因**當一致性檢查——clone 的新增登記恰好 4 筆、路徑全部在專屬 `TMPDIR` 之下（目錄已刪的 prunable 登記也算在內），否則判失敗——之後連同 clone 與 `TMPDIR` 一起收掉；⛔ 不 prune 正式 repo 既有的登記 |
 
 ##### 九、⚠️ 硬性時序 gate：raw-failed freeze record 的產品修正
@@ -4998,7 +4998,7 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 中 | **完整驗證不可能與 ⑧ 完全相同**：⑨ 會新增兩支 pytest 檔與 `test-replay-args.sh` 的段落，「任何一支的結果與 ⑧ 不同就停」若包含測試集合或數量就必然失敗 | ✅ 成立；另查 ⑧ 第三次全量執行（`06d6ac7a…`）的 log 以 `-v` 執行、有逐 node 的結果，可以當基準 | 「八」#8 改成逐項比對：只比兩邊都有的既有項目（pass ⛔ 不得變 fail／error／skip），⑨ 新增的項目明確允許且必須全數通過，⛔ 不比總數、⛔ 不逐位元比輸出；基準 log 不可得時的替代做法；「十」「十三」#12 同步 |
 | 中 | **e2 必須指定交換「移除目標 code 之後仍存在」的兩個 code**：換到 `PRICE_UPSIDE_FOLLOW_THROUGH` 的話，移除之後順序可能沒變，R4 證明不了集合比較的錯誤 | ✅ 成立 | e2 改成只交換兩個**都不是** `PRICE_UPSIDE_FOLLOW_THROUGH` 的不同 code，並由 tamper 先斷言前提（移除之後成員集合相同、順序不同）；四個目標格都剩不到兩個不同 code 就停下回報；c3 同樣補上前提斷言 |
 
-##### 實作前的可行性實驗與計畫修正（2026-10-08，第七輪 review 修正後，⚠️ **待確認**）
+##### 實作前的可行性實驗與計畫修正（2026-10-08，✅ **review 通過**（七輪）並 commit `42dcd2a`；D1 確認、D2 採 (a)、D3 確認）
 
 計畫確認（commit `1bec699`）之後、寫任何程式之前，先驗「九格能不能只用公開輸入構造」。做法：在 scratchpad 以 `git archive e1cbbbd python/`
 （排除 `baselines/`）展開兩份樹，以 `git apply` 分別做出「套 counterfactual」與「套 counterfactual ＋ tooling（＝ T2 的 `python/`）」，
@@ -5018,7 +5018,7 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | # | 差異 | 證據 | 修正（建議） |
 |---|---|---|---|
 | D1 | 「〇」推斷 decision summary 的 import 閉包⛔ 不含 tooling——**錯了**：`sr_scoring/__init__.py` import `.evaluation`，`evaluation.py` 再載入 `replay_bundle/`；照原本的 G2（「兩側集合相同、恰好只差兩個產品檔」），真實的 T2 必然失敗 | 原始側 40 個 `/app` 模組、T2 44 個；差異 ＝ 兩個產品檔 ＋ tooling 的 `evaluation.py`、`replay_bundle/` 的 `__init__`、`artifacts`、`provenance`、`publish`、`run_identity`（內容不同）與 `envcheck`、`stage2_archive`、`stage2_evidence`、`stream`（只在 T2） | G2 改成：兩側各自 ＝ 自己 tree 的 git 物件（身分，不變）；差異 ⊆ 兩個產品檔 ∪ tooling 路徑，兩個產品檔都必須在兩側載入且不同；tooling 模組的差異逐一列出。「〇」「七」「八」#3、「十三」#2 已同步改寫（標 D1）：differential guard 只驗到 tooling 的 import 期，執行路徑的語意中立仍由 tooling guard 證明 |
-| D2 | 第 8 格（`SUPPORT_RECLAIM_INVALIDATED` ＋ 價格證據成立）**只能**以 `current_price` ≠ `candle_close` 構造：`SUPPORT_RECLAIM_INVALIDATED` 要收盤跌破帶底（`candle_close < price_low`），`clear_zone_breakout` 要現價 ≥ 帶頂 ×1.03。replay 的呼叫端（`evaluation.py` 的 `_decision_replay_rows()`）兩者都取同一根 K 棒的 `close`——這組輸入**⛔ 不會出現在 replay 的資料裡**（live 的 `decide()` 現價取自 `features.data.current_price`，⛔ 未查證是否必然等於收盤） | `current_price` 104、`candle_close` 97 → 價格證據成立、`INVALIDATED`、兩側相同；`current_price` ＝ 97 → 價格證據⛔ 不成立 | ⚠️ **需要裁決**（第七輪 review 建議採 (a)，待使用者以 commit 確認）：(a) **建議**：第 8 格照用這組函式層的輸入——它仍是公開參數、見證完整成立，證明的是「即使價格證據成立，`INVALIDATED` 分支仍優先於 `CONTINUATION`」與「近似 predicate 在函式層會誤判」；fixture 明確標註「⛔ 不在 replay 的資料域」，另加一格 **8b**（`current_price` ＝ `candle_close`、價格證據⛔ 不成立）當**九格之外的強制補充格**，⛔ 不取代第 8 格——（第三輪 review）已併入 fixture、G1 的資料域標註、G3、九格表、「八」#1／#3、「十」「十一」，缺 8b 一樣判失敗。(b) 修改 v29「六、3」：第 8 格的見證拿掉「價格證據成立」（較弱，要重新確認上層契約）；若裁決 (b)，第 8 格改用 `current_price ＝ candle_close` 的輸入、8b 與資料域標註一併刪除 |
+| D2 | 第 8 格（`SUPPORT_RECLAIM_INVALIDATED` ＋ 價格證據成立）**只能**以 `current_price` ≠ `candle_close` 構造：`SUPPORT_RECLAIM_INVALIDATED` 要收盤跌破帶底（`candle_close < price_low`），`clear_zone_breakout` 要現價 ≥ 帶頂 ×1.03。replay 的呼叫端（`evaluation.py` 的 `_decision_replay_rows()`）兩者都取同一根 K 棒的 `close`——這組輸入**⛔ 不會出現在 replay 的資料裡**（live 的 `decide()` 現價取自 `features.data.current_price`，⛔ 未查證是否必然等於收盤） | `current_price` 104、`candle_close` 97 → 價格證據成立、`INVALIDATED`、兩側相同；`current_price` ＝ 97 → 價格證據⛔ 不成立 | ✅ **裁決：採 (a)**（第七輪 review 建議、使用者 review 通過並 commit `42dcd2a`）：(a) **建議**：第 8 格照用這組函式層的輸入——它仍是公開參數、見證完整成立，證明的是「即使價格證據成立，`INVALIDATED` 分支仍優先於 `CONTINUATION`」與「近似 predicate 在函式層會誤判」；fixture 明確標註「⛔ 不在 replay 的資料域」，另加一格 **8b**（`current_price` ＝ `candle_close`、價格證據⛔ 不成立）當**九格之外的強制補充格**，⛔ 不取代第 8 格——（第三輪 review）已併入 fixture、G1 的資料域標註、G3、九格表、「八」#1／#3、「十」「十一」，缺 8b 一樣判失敗。(b) 修改 v29「六、3」：第 8 格的見證拿掉「價格證據成立」（較弱，要重新確認上層契約）；若裁決 (b)，第 8 格改用 `current_price ＝ candle_close` 的輸入、8b 與資料域標註一併刪除 |
 | D3 | `e1cbbbd` 既有測試的 image：「八」#6／#10 沿用 `stock-trading-python-e1cbbbd:test` 並假設它已存在（重建後 image ID 必須相同）；本機現在⛔ 沒有這個 tag，重建會新增一個帶 tag 的 image | `docker images`；另查 `python/Dockerfile` 會 `COPY . .`——⑨ 新增程式檔之後，smoke 與完整驗證重建共用的 `stock-trading-python-test:latest` 也會留下 dangling image | （第三輪 review 改寫）「六」新增 **image 契約**：三次 build 各用本次執行唯一的 ⑨ 專屬 tag（第四輪 review），`reserve`（命名空間外或 tag 已存在即拒絕、建立前盤點、inventory 以 SHA 鎖定）→ `release`（成功、失敗、中斷都執行；本輪新建的 image 刪除，原本就存在的只解除 tag，原本是 dangling 的⛔ 不刪、記成允許的 tag 增量）→ `verify`（image ID 集合完全相同、tag 只允許記錄的增量）；「二」「八」#6～#8、#10、「十」「十一」「十三」#7 同步 |
 
 ##### 第三輪 review 的修正（2026-10-08，實作前的計畫修正）
@@ -5062,6 +5062,198 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 小 | 沒有定義 `cleanup_status.json` 寫入失敗 | ✅ 成立 | 主流程成功而狀態檔寫入失敗 → 回 1；主流程已非零 → 保留原碼、印到 stderr；測試 s14；反向驗證 R26 |
 | 建議 | baseline 無法逐位元重建，現在就隨計畫保存，比把 B0 留到下一個 session 穩妥；`.gitattributes` 用精確路徑，stage 之後從 index 讀回重算 SHA | ✅ 採納 | 已 stage `python/scripts/fixtures/i074_step9/step8_full_run3.log`、`step8_full_run3.meta.json` 與 `.gitattributes` 的一條精確路徑規則；從 index 讀回：SHA-256 `901843273ad3…`、353,982 bytes、`text` 為 unset；metadata 的項目數（2295 個 node、2294 passed、1 skipped、744 個 `ok`、0 個 `FAIL`、host unittest 72）由 log 解析而來；「二」「八」#8、「十四」的步驟 A 與 B0 同步。⚠️ 這份 log 是 ⑧ 測試輸出的逐字紀錄，裡面的舊測試標籤有缺少否定詞的禁止標記——否定詞掃描（以及之後任何「掃新增行」的檢查）一律**排除這一個檔**，⛔ 不改它的內容 |
 | 裁決建議 | D1 確認；D2 採 (a)；D3 確認 | — | 記在狀態列與 D2 列，待使用者以 commit 確認 |
+
+#### Stage 2 步驟 ⑨ 實作結果（2026-10-12，⚠️ **待 review**）
+
+依「Stage 2 步驟 ⑨ 細部計畫 v1」（commit `1bec699`、實作前修正 commit `42dcd2a`；D1 確認、D2 採 (a)、D3 確認）實作與執行。
+本輪⛔ 沒有改任何產品程式、tooling 路徑或兩份 patch；⛔ 不 commit，停在 staged 等 review。⚠️ **第一輪 review 的三項（1 高、2 中）
+已修正**，並在新的 `T_src` 上把 S1～S7 與反向驗證全部重跑，見「八」。
+
+##### 一、新增的檔案
+
+| 檔案 | 內容 |
+|---|---|
+| `python/scripts/fixtures/i074_differential_guard_cases.json` | 九格 ＋ 強制補充格 8b 的輸入（純資料、封閉 schema；第 8 格標 `outside_replay_domain: true`） |
+| `python/scripts/i074_decision_summary_producer.py` | 容器內的 producer：只以 `/app` 為 import 根，輸出 summary 與實際載入的模組 SHA |
+| `python/scripts/i074_differential_guard.py` | 第三方 comparator：G1～G6、14 條精確 allowlist、11 種 tamper 的自我檢查（只用標準庫、相容 Python 3.9） |
+| `python/scripts/i074_tooling_guard.py` | tooling 非語意 guard 的 comparator：逐檔的封閉正規化、hash 自洽、provenance 期望值 |
+| `python/scripts/i074_step9_runs.py` | 完整驗證與 ⑧ baseline 的逐項比對（baseline 的 SHA、大小、tree、項目數寫成常數） |
+| `scripts/i074-step9-image.sh` | image 契約：`reserve`／`release`／`verify` |
+| `scripts/i074-step9-guards.sh` | 入口：bootstrap 自證、可用空間、正式 repo 物件庫的 inventory、隔離 clone（`--no-hardlinks`）、S2～S6，以及 `--s7 smoke`／`--s7 full` |
+| `scripts/test-i074-step9.sh` | shell 測試 h1～h12、n1～n14、s1～s15（由 `scripts/test-replay-args.sh` 呼叫，也可單獨執行） |
+| `python/backtest/modular/sr_scoring/tests/test_i074_differential_guard.py`、`test_i074_tooling_guard.py`、`test_i074_step9_runs.py` | pytest（110 個） |
+| `scripts/test-replay-args.sh`（修改） | 結尾前呼叫 `scripts/test-i074-step9.sh` |
+
+##### 二、執行結果（`T_src` ＝ `c40162551af926df12d5a6d28fe16adc5a4372ff`）
+
+⚠️ **經過**：
+
+1. 第一次送 review 之前：第一趟在 `T_src` ＝ `89e88356…` 上 S1～S7 全部通過，但反向驗證抓到 **s7 偵測不到 R20**（stub 改的正是它
+   自己正在執行的那份 test.sh，bash 讀到檔尾就停，sentinel 永遠不會出現）；同時發現 `test_i074_step9_runs.py` 的 helper 在 list
+   comprehension 裡每一行都重新解析整份 baseline。修正這兩支測試檔（「七」#8）之後以 `466eb247…` 全部重跑通過——第一次送 review 的版本。
+2. 第一輪 review 之後（「八」）修正三項，以 `9be3da64…` 重跑（review 之後的第 1 趟）：S1～S6 與 smoke 通過，**完整驗證失敗**——clone 改成 `--no-hardlinks`
+   之後多佔約 185 MB，完整驗證期間 `/tmp` 的可用空間跌到 1,235,910,656 bytes，低於 `test-i074-stage2.sh` 裡 preflight 6 的
+   1,241,513,984（[`todo.md`](./todo.md) T-072）：orchestrator 在進 replay 之前就回 1，⑦b「state」那一支的 `cp` 因此找不到檔案、整支腳本中止。
+   入口照規則收尾（回 1、image 契約 ok、正式 repo 與物件庫前後相同）。之後依實測調高門檻，經使用者同意清出空間（「六」）。
+3. 第 2 趟 `72ce85ba…`（門檻 1.45 GB）：S1～S7 通過，但反向驗證的 **R27 沒有讓指定的 n10 變紅**——注回之後每一次入口都在 link 數檢查就結束，
+   s3 的 stub 沒有啟動，測試腳本的 `kill` 在 `set -e` 下讓整支腳本中止、沒有跑到 n10。修正 `scripts/test-i074-step9.sh`（kill 失敗⛔ 不中止，
+   交給斷言回報 FAIL），以 `69386d71…` 重跑（第 3 趟）：全部通過（含 R1～R36）。
+4. 第 2、3 趟的完整驗證都跑完，量到「clone 建好之後到 `test-i074-stage2.sh` 結束」最多吃掉 194～197 MB（第 1 趟的 147 MB 只是中止點的值），
+   1.45 GB 的餘裕只剩約 11 MB → 門檻改成 **1.5 GB**，以 `c4016255…` 從 S1 起全部重跑（第 4 趟）：**下表與「三」～「六」都是這一趟的結果**；封存值與前面
+   每一趟逐項相同。
+
+| 步驟 | 結果 |
+|---|---|
+| S0 | ⑨ 的 12 個檔 stage 之後 `git write-tree` ＝ `c4016255…`；正式工作樹 ＝ index；兩份 patch 與 HEAD 相同 |
+| S1～S6（`--source-tree c4016255…`，run id `20261012t095907z-3810d750`） | 結束碼 **0**。bootstrap 自證通過；可用空間 4,233,064,448 bytes ≥ 1,680,629,746（1.5 GB ＋ clone 本身），clone 建好之後 4,047,994,880；隔離 clone 的 `HEAD^{tree}` ＝ `T_src`、物件檔的 link 數都是 1；S2：兩份 patch 沒有被 ⑨ 改動、產生器 `--verify "$T_src"` ＝ 0、合成與「六」的全部斷言成立（下表）；S3：`e1cbbbd` ＋ 兩份 patch 的既有測試 **1223 passed、1 skipped**（與 ⑦a～⑦c 相同；image `sha256:4d627cc879bf…`，以 `stock-trading-i074-step9:20261012t095907z-3810d750-e1cbbbd-test` 建、收尾刪除）；S4、S5 見「三」「四」 |
+| S7 smoke（`--s7 smoke`，run id `20261012t100943z-06854abd`） | 結束碼 **0**：17 個 ok、0 個 FAIL（與 ⑧ 相同；反事實段：恰好三檔、cohort ≥ 1、comparison 非空且逐列翻轉） |
+| S7 完整驗證（`--s7 full`，run id `20261012t101432z-ecddeef3`） | 結束碼 **0**：`python/scripts/test.sh -v backtest/ tests/` 在隔離 clone 內 **2404 passed、1 skipped**（2295 ＋ 110 個 node）、shell 0 個 FAIL；與 ⑧ baseline 逐項比對通過——既有 2295 個 node 與 744 個標籤⛔ 沒有任何一項變差或缺少，新增 167 項（110 個 pytest node、57 個 `step9：` 標籤）全部在明列範圍內而且全數通過；I-118 的 ＋4 恰好 4 筆、全部在 clone 的專屬 `TMPDIR` 之下（歸因通過，之後連同 clone 收掉） |
+
+**封存值**（S2 實測；欄位名稱沿用 acceptance 報告 `meta`）：
+
+| 值 | 封存值 | 斷言 |
+|---|---|---|
+| `T1` | `a1649733b910ae90f08efc5f215f31f898619f52` | ＝ ⑦a 起的值 |
+| `T2` | `d7288222600d5637a457359b71991d5457ca7a3d` | （與 ⑦c 記錄的 T2 相同：⑦d 之後 tooling 沒有再變） |
+| `counterfactual_sha256`（raw）＝ `counterfactual_canonical_sha256` | `fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14` | raw ＝ canonical ＝ ⑦a 的值 |
+| `tooling_sha256`（raw）＝ `tooling_canonical_sha256` | `5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98` | raw ＝ canonical；只套 tooling 重算 `(base_tree, base＋tool)` 也相同 |
+| `composed_sha256` | `ac49d36ff07a998448cb4b5706470eedce61ef6369cd9deca784d7d5923b670f` | ＝ ⑩ before artifact 的 `tooling_patch_sha256` |
+| `counterfactual_semantic_sha256` | `5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8` | ＝ ⑦a 的值；改動檔案恰好 ＝ `I074_CF_FILES` |
+| Stage 2 pinned image | `sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027` | identity 檔 SHA-256 `a02bf3bd…`（唯讀讀取） |
+
+`step9_manifest.json`（25 個明列的路徑 → git 物件 OID）與 `results.json` 保存在本 session 的 scratchpad（`9fix/rerun/out_s1s6/`）；
+環境：git 2.30.2、host Python 3.9.2、docker server 20.10.5。
+
+##### 三、differential guard（S4）
+
+兩個獨立的容器（Stage 2 pinned image）各跑一次 producer：原始側載入 40 個 `/app` 模組、patched 側 44 個；差異 ＝ 兩個產品檔 ＋ 10 個
+tooling 模組（`evaluation.py`、`replay_bundle/` 的 `__init__`、`artifacts`、`provenance`、`publish`、`run_identity`、`envcheck`、
+`stage2_archive`、`stage2_evidence`、`stream`），全部在 G2 允許的範圍內，兩側都 ＝ 自己 tree 的 git 物件。
+
+| 格 | 結果 | 差異的路徑數 |
+|---|---|---|
+| 1 目標（TESTING、非 AVOID） | ✅ | 14（全部 ∈ allowlist） |
+| 2 目標（CONFIRMED、非 AVOID） | ✅ | 11 |
+| 3 目標（TESTING、AVOID） | ✅（第一輪 review 之後另驗值域：三個 bias state 兩側都是 `BEARISH_BIAS`、兩個 label 兩側都是 `偏空觀察`、兩個 position state ＝ 各側的 `AVOID`） | 4 |
+| 4 目標（CONFIRMED、AVOID） | ✅（同上） | 4 |
+| 5～9、8b 對照 | ✅ 兩側完全相同（6～9 兩側都是「價格證據成立 ＋ RR 不合格」；8b 價格證據⛔ 不成立） | 0 |
+
+tamper 自我檢查：11 種（a1、a2、a3、b、c1、c2、c3、d、e1、e2、f）**全部失敗**，每一種都出現它專屬的原因碼。
+
+##### 四、tooling 非語意 guard（S5）
+
+切片 bundle `b1_20260901_1d_de3ab843_a7c9ffb4`（由 `T_src` 的程式在 pinned image 內產生）；四趟 runner 都回 0，每個輸出目錄恰好兩個檔。
+正規化之後 `after_artifact.json`（**165 列**）、`cohort_manifest.json`、`comparison_artifact.json`（6 列）、`report.json` 的 A／B
+**逐位元相同**；兩個 hash 自洽；provenance：A 的 tooling SHA ＝ 空字串的 SHA、B 的 ＝ `5ff9a90f…`，`base_commit`、`image_digest`、
+`python_version`、`pip_freeze_sha256`、`runner_sha256`、`source_root`、`runtime_settings` 兩側相同，`project_modules_sha256` 的差異
+只在 tooling 模組，argv 只有 `--tooling-patch-sha256` 與 `--output-dir` 的值不同。
+
+##### 五、反向驗證（S7；綁定 `T_src` 的隔離 clone——第一輪 review 之後同樣用 `--no-hardlinks`——一次注回一項）
+
+對照組（三支 pytest、`scripts/test-i074-step9.sh`）綠；之後每一項都讓**指名的測試**變紅、還原之後 clone 回到乾淨：
+
+| R | 注回 | 變紅的測試 |
+|---|---|---|
+| R1 | 拿掉 G2 | tamper `a1_swap_documents` |
+| R2 | allowlist 加入 `position_action_condition.reason_codes` | tamper `d_position_reason_codes` |
+| R3 | allowlist 改成字串前綴比對 | tamper `c3_prefix_collision` |
+| R4 | semantic `reason_codes` 改成集合比較 | tamper `e2_reason_code_order` |
+| R5 | 拿掉上游輸入的專屬檢查 | tamper `c1_upstream_structure` |
+| R6 | 分類改看 patched 側 | `test_positive_matrix_all_ten_cells_pass` |
+| R7 | 拿掉 G3 | `test_g3_controls_6_to_9_need_price_evidence_on_both_sides[8]` 等 |
+| R8 | tooling 的正規化多拿掉 `rows` | `test_any_difference_outside_the_removable_keys_fails`（rows 那一格） |
+| R9 | 拿掉 report 的 hash 自洽 | `test_hashes_must_be_self_consistent_before_removal`（report 那一格） |
+| R10 | after 的正規化多拿掉 `run_id` | `test_any_difference_outside_the_removable_keys_fails`（`run_id` 那一格） |
+| R11 | bootstrap 拿掉自身比對 | n1 |
+| R12 | clone 內改用正式工作樹的路徑 | n2～n5、n6、s9／n9 |
+| R13 | release 拿掉「建立前是 dangling 就⛔ 不刪」 | h5 |
+| R14 | 拿掉命名空間檢查 | h2 |
+| R15 | verify ⛔ 不比 image ID 集合 | h12「多一個 image ID」 |
+| R16 | 拿掉 inventory 的 SHA 檢查 | h8 |
+| R17 | verify 直接信任 allowance 檔 | h9「命名空間外的 tag」 |
+| R18 | verify ⛔ 不比傳入的 tag | h9「格式正確、同樣指向既有 dangling image 的另一個 ⑨ tag」 |
+| R19 | 拿掉 `--s7` 的 trap | s3、s4 |
+| R20 | `--s7 full` 改成執行正式工作樹的 test.sh | s6、s7（第一次送 review 之前的第一趟 s7 沒有變紅，見「二」的經過 1） |
+| R21 | 新增項目的失敗也放過 | `test_new_items_in_scope_must_all_pass` |
+| R22 | 清理失敗一律保留主流程的結束碼 | s10、s11 |
+| R23 | release 失敗就跳過 verify | s10、s13 |
+| R24 | 拿掉 baseline 的 SHA／項目數檢查 | `test_baseline_that_is_not_the_recorded_file_is_rejected[byte]` |
+| R25 | 新增項目改成不限範圍 | `test_new_items_out_of_scope_fail` |
+| R26 | 狀態檔寫入失敗時照樣回 0 | s14 |
+| R27 | 隔離 clone 拿掉 `--no-hardlinks` | n10（入口在 link 數檢查就拒絕；第一次跑時腳本中止、沒有跑到 n10，見「二」的經過 3） |
+| R28 | 拿掉 `--no-hardlinks`、link 數檢查與物件庫比對三者 | n10「正式 repo 的物件庫前後改變了（rc=0）」——入口回 0，**只靠測試自己的 inventory** 抓到 freshen |
+| R29 | 拿掉 link 數檢查 | n11 |
+| R30 | 物件庫的比對一律通過 | n12（兩支） |
+| R31 | 拿掉 clone 建好之後的空間檢查 | n13 |
+| R32 | bootstrap 的門檻⛔ 不加 clone 本身 | n14 |
+| R33 | smoke 的 worktree 清理改回 `\|\| rc=${rc:-1}` | s15（smoke 成功那一支） |
+| R34 | AVOID 拿掉 `BEARISH_BIAS` 的值域 | `test_avoid_cell_both_sides_changed_to_the_same_wrong_value[3-market_bias]` |
+| R35 | position state 的逐側規則改成只在非 AVOID 檢查 | `test_avoid_cell_both_sides_changed_to_the_same_wrong_value[3-position_action_condition.state]` |
+| R36 | AVOID 拿掉 label 的值域 | `test_avoid_cell_both_sides_changed_to_the_same_wrong_value[3-market_bias_label]` |
+
+⚠️ 第一次送 review 之前的第一趟反向驗證另有 R8～R10、R23、R26 回報「沒有變紅」：R8～R10、R26 其實都紅了，是 driver 比對的 pytest 參數
+id／失敗標籤寫錯；R23 是 driver 的注回寫錯（`[ … ] && verify || {…}` 仍會把狀態記成 failed）。修正 driver（scratchpad，⛔ 不在 repo）之後
+重跑，26 項全部變紅。
+
+##### 六、殘留檢查
+
+| 項目 | S1～S6 | smoke | 完整驗證 | 反向驗證 |
+|---|---|---|---|---|
+| 正式 repo 的 worktree 登記（401 筆） | 前後相同 | 前後相同 | 前後相同 | 前後相同 |
+| 正式 repo 的 HEAD、index、status | 前後相同（入口的 inventory） | 同左 | 同左 | index 前後相同（driver） |
+| 正式 repo 的物件庫（941 個檔的 inode／大小／mtime／link 數） | 前後相同（入口的 bootstrap ＋ driver 各自比對） | 同左 | 同左 | 前後相同（driver） |
+| image 清單（`docker image ls -a`） | 前後相同；`cleanup_status.json` release／verify 都 ok、allowance 空 | 同左 | 同左 | 前後相同（每一項的專屬 tag 跑完即刪） |
+| 容器、`/run/lock`、`/dev/shm` | 前後相同 | 同左 | 同左 | — |
+| `/tmp` 頂層（`tmp_diff.txt`） | 空 | 空 | 空 | — |
+| 工作目錄 `/tmp/i074-step9.*` | 已收掉 | 已收掉 | 已收掉 | — |
+| 執行期間 `/tmp` 可用空間的最低值（driver 每 2 秒一次） | 3,972,542,464 | 3,889,557,504 | 3,715,989,504 | 3,937,972,224 |
+
+⚠️ **磁碟清理**（2026-10-12，使用者指示，在第一輪 review 之後的第 2 趟之前、⑨ 入口之外執行）：`docker image prune` 刪掉 56 個 dangling image
+（回收 2.578 GB；其中包括下一段的 `acff26fc…`）——⑨ 計畫 D3「⛔ 不為了歸零刪掉原本存在的 dangling image」的原則由使用者明示放行；
+執行中的容器用的都是帶 tag 的 image，不受影響。另兩個 2026-08 session 的 Go 快取 scratchpad（約 1.38 GB）多數檔案的擁有者是 root，dev
+刪不掉——⛔ 沒有繞過權限，留給使用者處理。之後每一趟入口前後的 image 清單都相同。
+
+⚠️ **入口之外的一筆 image 變動**（照實記錄）：第一次送 review 之前的開發途中，以預設 `PY_IMAGE` 跑過一次 `python/scripts/test.sh`
+（只跑三支新的 pytest），共用 tag `stock-trading-python-test:latest` 由 `acff26fc…` 移到 `270a1c03…`，前者變成 dangling，已在上述清理中刪除。
+第一輪 review 之後開發期間的 pytest 一律用專用 tag、跑完移除（前後 image 清單相同）。
+
+⚠️ **第一次送 review 之前以 hardlink clone 執行的各趟**：可能已更新正式 repo 物件檔的 mtime（內容⛔ 不會變——git 物件以 hash 定址，freshen
+只改 mtime，影響只有 gc 對 unreachable 物件的保留期限）；當時的 inventory 沒有涵蓋物件庫，無法回溯確認。
+
+⚠️ **T-072 的觀察**（⛔ 不在 ⑨ 處理）：可用空間不足時，`test-i074-stage2.sh` 裡「期待 rc=1」的檢查（例如 n8 的各支）可能因 preflight 6
+先失敗而空洞地通過——這次是靠「state」那一支的 `cp` 失敗才中止。T-072 規劃時一併處理（[`todo.md`](./todo.md) T-072 本輪⛔ 沒有改：⑨ 的 S9
+限定 commit 相對 `T_src` 只差三份文件）。
+
+##### 七、與計畫的差異
+
+| # | 差異 | 理由 |
+|---|---|---|
+| 1 | ⚠️ **撤回**（第一輪 review）：原本改用本地 clone 的預設 hardlink，已恢復計畫的 `--no-hardlinks`；保留 `--no-checkout` ＋ `git archive` 展開（計畫寫「刪除已追蹤檔 → 展開」，結果相同、少寫一次工作樹） | 見「八」 |
+| 2 | shell 測試獨立成 `scripts/test-i074-step9.sh`，由 `scripts/test-replay-args.sh` 呼叫（計畫寫「`test-replay-args.sh` 新增一段」） | 反向驗證要能單獨執行它；標籤照樣以 `step9：` 開頭，完整驗證的逐項比對以前綴辨認 |
+| 3 | `/tmp` 的頂層清單⛔ 不列進入口「不符即失敗」的 inventory，改成前後各記一份、差異寫進 `tmp_diff.txt`、由結果逐一歸因 | `/tmp` 是 host 共用的（同一個 uid 的其他代理程式也會寫，例如 `codex-daemon-1001`）；開發時 s1 因此出現過一次不穩定的失敗 |
+| 4 | 正式 repo 的 inventory 以 `ls-files --stage` 的 digest 取代 `write-tree`、`status` 加 `--no-optional-locks` | `write-tree` 會寫 tree 物件（遇到已存在的物件也會 freshen）、`status` 可能更新 index 的 stat 快取——兩者都⛔ 不是唯讀 |
+| 5 | 入口的工作目錄跟隨 `TMPDIR`（計畫沒有指定） | 測試與完整驗證把它關在專屬目錄裡 |
+| 6 | h13 與 n9 以 `--s7` 模式驗（計畫寫在 S3） | 隔離 repo 的 harness 到不了預設模式的 S3（S2 需要真正的 patch 與產生器）；S3 與 `--s7` 共用同一段 reserve／trap／release 程式。同理，n2～n5 在 harness 裡實際走到的是 replay-args、mem-guard、產生器；runner、producer、comparator、fixture 的工作樹改動只斷言「⛔ 沒有被執行」，它們真正被執行的路徑（S4、S5）由實跑時的 clone 保證 |
+| 7 | `step9_manifest.json` 的明列清單多了 `test-replay-args.sh`、`test-i074-stage2.sh`、`test-i074-step9.sh` | `--s7 full` 會執行它們 |
+| 8 | 第一次送 review 之前改了兩支測試、重取 `T_src` 並重跑 S1～S7 | 見「二」的經過 1。⛔ 沒有改任何產品程式或 guard 的判定邏輯 |
+| 9 | （第一輪 review）可用空間的門檻：bootstrap 要求 1.5 GB ＋ clone 本身、clone 建好之後在 clone 內再量 ≥ 1.5 GB（計畫寫「< 1.3 GB 即拒絕」） | 1.5 GB ＝ preflight 6 的 1,241,513,984 ＋ 完整驗證到 `test-i074-stage2.sh` 結束為止實測耗用的 197,275,648 ＋ 約 60 MB 餘裕；clone 本身以 `du -sb` 物件庫 ＋ `git archive` 的大小計（本輪 180,629,746 bytes）。最終這一趟到 `test-i074-stage2.sh` 結束為止實測 203,722,752 bytes，餘裕仍有 54,763,264 bytes；入口註解寫的是前兩趟的 194～197 MB——只為了註解改入口會讓 `T_src` 變動，⛔ 沒有改 |
+| 10 | （第一輪 review）正式 repo 物件庫的 inventory、clone 的 link 數與 alternates 檢查（計畫沒有） | 讓「clone ⛔ 不 freshen 正式 repo」成為可驗證、fail-closed 的條件，⛔ 不只靠 `--no-hardlinks` 這個旗標 |
+| 11 | （第一輪 review）AVOID 兩格另驗 label 的值域（review 點名的是 bias state 與 position state） | 同一類缺口 |
+| 12 | （第一輪 review）`scripts/test-i074-step9.sh` 的 `s7_signal`：kill 失敗⛔ 不中止 | 見「二」的經過 3 |
+
+##### 八、第一輪 review 的修正（2026-10-12）
+
+| 嚴重度 | 發現 | 查證 | 修正 |
+|---|---|---|---|
+| 高 | **隔離 clone 偏離計畫**：入口用本地 clone 的預設 hardlink，⛔ 不是計畫寫的 `--no-hardlinks`——clone 裡的 git 寫入會 freshen 到正式 repo 的物件檔，削弱「正式 repo ⛔ 不受影響」的保證 | ✅ 成立。scratchpad 的最小重現（附對照組）：hardlink 的 clone 裡做 `add -A` ＋ `write-tree` 之後，來源 repo 的兩個 loose 物件與 pack 的 mtime 都變了；`--no-hardlinks` 的前後 inventory（inode／大小／mtime／link 數）完全相同。harness 裡也重現：修正前的入口跑一趟 `--s7 smoke`，隔離 repo 的物件庫前後不同（n10 的第一支紅） | 恢復 `git clone --no-hardlinks`（仍是 `--no-checkout` ＋ `git archive` 展開）；clone 之後、任何 git 寫入之前驗物件檔的 link 數都是 1、沒有 `objects/info/alternates`；bootstrap 在建 clone 之前、收掉 clone 之後各記一份**正式 repo 物件庫的 inventory**（每個檔的 inode／大小／mtime／link 數，`formal_objects_before.txt`／`formal_objects_after.txt`），不同 → 主流程 0 時回 1、非零時保留原碼。**磁碟門檻**：bootstrap 要求「1.5 GB ＋ 正式 repo 物件庫的大小 ＋ `T_src` 工作樹的大小」（本輪 ≈ 1.63 GB），clone 建好之後在 clone 內再量一次 ≥ 1.5 GB——不足即停（T-072），⛔ 不以降低隔離換取空間；1.5 GB 依兩趟完整驗證的實測而定（「七」#9）。實際重跑時 host 的空間不夠，經使用者同意清掉 dangling image 之後才完成（「二」的經過 2、「六」）。「七」#1 撤回。測試 n10～n14；反向驗證 R27～R32（反向驗證自己的 clone 也改用 `--no-hardlinks`）；S1～S7 與反向驗證在新的 `T_src` 全部重跑 |
+| 中 | **smoke 的 worktree 清理失敗會被吞掉**：`… \|\| rc=${rc:-1}`——`rc` 已初始化為 0，`${rc:-1}` 仍得到 0 | ✅ 成立（新測試 s15 的第一支在修正前回 0） | 改成 `[ "$rc" -ne 0 ] \|\| rc=1` 並印出訊息；s15：smoke 成功 ＋ 清理失敗 → 1（image 的 release、verify 照樣執行）、smoke 失敗（3）＋ 清理失敗 → 保留 3；R33。其他步驟的 worktree 清理都是失敗即 `die`，沒有同樣的寫法 |
+| 中 | **AVOID 格的 G6 值域驗證不完整**：只驗欄位「兩側相同」，兩側一起被改成相同的錯值仍會通過 | ✅ 成立（新的 14 支 pytest 在修正前全紅） | AVOID：三個 bias state 兩側都必須是 `BEARISH_BIAS`；兩個 label 兩側都必須是 `偏空觀察`（`e1cbbbd` 的 `_market_bias_label()` 對 `BEARISH_BIAS` 的值——review 沒有點名，屬同一類缺口，一併補上）；`position_gate_state`、`position_action_condition.state` 各自 ＝ 該側的 semantic `action_state`（改成 AVOID 與否都檢查）。pytest：兩格 × 七個欄位「兩側一起改成相同的錯值」→ `G6_UNEXPECTED_VALUE`；R34～R36。上一趟真實的 producer 輸出在修正後的 comparator 上照樣通過（第 3、4 格兩側的值正是 `BEARISH_BIAS`、`偏空觀察`、`AVOID`） |
+
+##### 九、下一步
+
+* review 本節；通過之後使用者 commit（＝ 兩份 patch 的**封存點**），再做 S9：`git diff --name-only c40162551af926df12d5a6d28fe16adc5a4372ff 'HEAD^{tree}'` 只能列出三份文件、
+  `make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"` ＝ 0。
+* 之後依計畫「九」的 gate：另立「raw-failed freeze record」產品修正計畫，修正完成才進 ⑨-1，最晚不得晚於 ⑨-2。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -6622,7 +6814,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次
    ← ✅ ⑧ 計畫 v4 已確認（2026-10-07，`5e2d84f`）；✅ ⑧ 稽核結果與補法已確認（2026-10-07）；✅ ⑧ 的補齊與全量執行 review 通過（commit `be0e337`；見「Stage 2 步驟 ⑧ 補齊與全量執行的結果」）
-⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ⚠️ 現在在這裡：⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`）；實作前的可行性實驗發現三項差異（第七輪 review 修正後；review 建議 D1 確認、D2 採 (a)、D3 確認）⚠️ 待確認（見該計畫「實作前的可行性實驗與計畫修正」），確認之後才進 ⑨ 實作（見「Stage 2 步驟 ⑨ 細部計畫 v1」；⑨ commit 之後、⑨-1 之前另有 raw-failed freeze record 產品修正的 gate，見該計畫「九」）
+⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ✅ ⑨ 細部計畫 v1 已確認（`1bec699`）；✅ 實作前的可行性實驗與計畫修正已確認（`42dcd2a`；D1 確認、D2 採 (a)、D3 確認）；⚠️ 現在在這裡：⑨ 實作待 review（第一輪 review 的三項已修正並重跑；見「Stage 2 步驟 ⑨ 實作結果」；commit ＝ 兩份 patch 的封存點，之後做 S9，再依該計畫「九」的 gate 另立 raw-failed freeze record 產品修正計畫）
    （＋ **`e1cbbbd`** 既有測試套用 patch 前後全綠）
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑨ 改成**兩份 patch 一起封存**（counterfactual ＋ tooling）；「既有測試全綠」改成
    「套 counterfactual ＋ tooling 之後全綠」；differential guard 的 patched 側含 tooling；另加 **tooling 非語意 guard**

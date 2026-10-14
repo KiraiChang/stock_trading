@@ -3175,7 +3175,7 @@ SHA。dry-run 另印 `==> patches: counterfactual=… tooling=… composed=…`�
 四條不變條件：① counterfactual 與 tooling 路徑不相交；② `T2` 在 tooling 路徑上 ＝ 來源；③ `T1..T2` 只動 tooling 路徑；
 ④ **產品碼不變**——`python/` 扣掉 `baselines/`、`scripts/`、`sr_scoring/tests/`、`replay_bundle/`、`evaluation.py`
 之後，`e1cbbbd` → 來源 tree 沒有差異（⛔ 否則 ⑩ 會靜默跑到舊版）；最後以唯一的合成函式重建自我驗證。
-⚠️ tooling patch **⛔ 不得含判定變更**——由 ⑨ 的 tooling 非語意 guard 與 differential guard 驗（⑦a 不做）。
+⚠️ tooling patch **⛔ 不得含判定變更**——由 ⑨ 的 tooling 非語意 guard 與 differential guard 驗（見下一節「I-074 Stage 2 的兩道 guard 與兩份 patch 的封存」）。
 版控流程與漂移測試見 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 tooling patch」。
 
 ⚠️ **非空翻轉的端到端證據**：pytest 以 stub 取代 replay，只驗路徑的邏輯與順序；`REPLAY_SMOKE=1` 的
@@ -3184,6 +3184,69 @@ bundle_id 由內容決定：`b1_20260901_1d_de3ab843_a7c9ffb4`），在 `e1cbbbd
 comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有 6 筆候選（與 D+1 cohort 在該期間的 6 筆逐 key 相同），
 反事實側 6 筆全數翻轉、其餘 159 列逐列相同。⚠️ 這份衍生 bundle ⛔ 不是證據（佔位 provenance 只標示身分，
 `load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
+
+#### I-074 Stage 2 的兩道 guard 與兩份 patch 的封存（步驟 ⑨；2026-10-12 實作，⚠️ 待 review）
+
+⚠️ **範圍**：⑩ 之前證明「counterfactual 是唯一的產品語意變因、tooling ⛔ 不帶判定變更」，並封存兩份 patch。
+計畫、實驗與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑨ 細部計畫 v1」與「Stage 2 步驟 ⑨ 實作結果」。
+
+**differential guard**（`python/scripts/i074_differential_guard.py`；fixture `python/scripts/fixtures/i074_differential_guard_cases.json`、
+producer `python/scripts/i074_decision_summary_producer.py`）：
+
+* 同一份 fixture 由**兩個獨立的容器**各跑一次 `build_decision_summary()`——原始側掛 `e1cbbbd` 的 `python/`、patched 側掛
+  T2（`e1cbbbd` ＋ counterfactual ＋ tooling）的 `python/`；comparator 是 host 上的**第三個程序**（只用標準庫、⛔ 不 import 產品模組）。
+* ⚠️ **方向寫死**：formal before ＝ patched、formal after ＝ 原始；參數一律以角色命名（`--before-patched`、`--after-original`）。
+* fixture 是**純資料**、封閉 schema：九格 ＋ **強制補充格 8b**，全部只用公開參數。第 8 格（`SUPPORT_RECLAIM_INVALIDATED` ＋
+  價格證據成立）只能以 `current_price ≠ candle_close` 構造——函式層的輸入、⛔ 不在 replay 的資料域（replay 的兩者都取同一根
+  K 棒的 `close`），fixture 標 `outside_replay_domain: true`；8b 是同一組 K 棒但 `current_price ＝ candle_close`、價格證據⛔ 不成立。
+  其餘九個 case 一律 `current_price ＝ candle_close`。
+* 檢查：G1 身分（schema、fixture／producer SHA、Python 版本、case id）；G2 兩側載入的模組各自 ＝ 自己 tree 的 git 物件，差異
+  **只能**落在兩個產品檔與 tooling 路徑（`sr_scoring/__init__.py` 在 import 時就載入 `evaluation.py` 與 `replay_bundle/`——
+  differential guard 驗到的是 tooling 的 **import 期**；tooling 在 replay 路徑上的中立由 tooling guard 證明）；G3 每一格的形狀
+  自證（6～9 兩側都要「價格證據成立 ＋ RR 不合格」）；G4 分類**只看原始側**的 `rr_decoupling_candidate`；G5 對照格完全相同；
+  G6 目標格的上游輸入完全相同、每一條不同的葉節點路徑 ∈ **14 條精確 allowlist**（完整字串相等、⛔ 不用前綴）且符合逐欄規則
+  （reason_codes 移除 `PRICE_UPSIDE_FOLLOW_THROUGH` 之後逐項含順序相同、`authority_reason_codes` 以重算驗證、
+  `position_action_condition.reason_codes` ⛔ 不在 allowlist；AVOID 兩格⛔ 不只驗兩側相同，也驗值域：三個 bias state 兩側都是
+  `BEARISH_BIAS`、兩個 label 兩側都是 `偏空觀察`、`position_gate_state` 與 `position_action_condition.state` 各自 ＝ 該側的
+  `action_state`）。
+* tamper 自我檢查：同一份真實輸出做 11 種竄改（v29 的六類，a 拆 a1／a2／a3、c 拆 c1／c2／c3、e 拆 e1／e2），每一種都必須以
+  **它專屬的原因碼**失敗。要增列 allowlist 必須先證明該欄位依賴 `lifecycle_phase`、更新計畫並經確認。
+
+**tooling 非語意 guard**（`python/scripts/i074_tooling_guard.py`）：切片 bundle（`b1_20260901_1d_de3ab843_a7c9ffb4`）跑四趟——
+Stage 1 A（`e1cbbbd`、⛔ 不套 tooling）、一般 Stage 2 A 與 B（B ＝ `e1cbbbd` ＋ tooling；兩者都讀 Stage 1 A 的 after ＋ cohort）、
+Stage 1 B（`e1cbbbd` ＋ tooling）；**成對**比較同一個 stage 的 A 與 B：
+
+| 檔案 | 唯一可移除的頂層鍵 | 其餘逐位元相同 |
+|---|---|---|
+| `after_artifact.json` | `generated_at`、`provenance` | 含 `run_id`、`pipeline_version`、**全部 `rows`** |
+| `cohort_manifest.json` | `generated_at`、`provenance`、`after_artifact_sha256`（先驗自洽） | 含 **`keys`** |
+| `comparison_artifact.json` | `generated_at`、`provenance` | 含 `after_artifact_sha256`、**`rows`** |
+| `report.json` | `generated_at`、`comparison_artifact_sha256`（先驗自洽） | 含 `difference_field_counts`、**`rows`** |
+
+provenance ⛔ 不參與 bytes 比對，但逐欄驗：A 的 `tooling_patch_sha256` ＝ 空字串的 SHA、B 的 ＝ 封存的 tooling canonical SHA；
+`base_commit` ＝ `e1cbbbd`；`image_digest`、`python_version`、`pip_freeze_sha256`、`runner_sha256`、`source_root`、`runtime_settings`
+兩側相同；`project_modules_sha256` 的差異只能是 tooling 模組；argv 只允許 `--tooling-patch-sha256` 與 `--output-dir` 的值不同。
+
+**執行邊界**（`scripts/i074-step9-guards.sh`）：bootstrap 驗自身 ＝ `<tree>` 的 blob，建綁定 `<tree>` 的隔離 clone（`--no-hardlinks`：
+⛔ 不與正式 repo 共用物件檔——hardlink 會讓 clone 裡的 git 寫入 freshen 到正式 repo；建好之後驗 link 數 ＝ 1、沒有 alternates），
+之後執行的每一支程式都是 `<tree>` 的內容；正式 repo 只做明列的唯讀 inventory（含物件庫每個檔的 inode／大小／mtime／link 數，
+前後不同即失敗）。可用空間：建 clone 之前 ≥ 1.5 GB ＋ clone 本身、建好之後 ≥ 1.5 GB（T-072 ＋ 完整驗證的實測耗用 0.20 GB ＋ 餘裕），不足即停。`--s7 smoke`／`--s7 full` 也在隔離 clone 裡執行。
+會 build 的步驟各用**本次執行唯一**的 tag，以 `scripts/i074-step9-image.sh` reserve／release／verify（image ID 集合前後完全相同；
+tag 只允許 allowance 記錄的增量）。
+
+**封存值**（兩份 patch 在同一個 commit 一起封存；合成順序 counterfactual → tooling）：
+
+| 值 | 封存值 |
+|---|---|
+| `T1`（`e1cbbbd` ＋ counterfactual） | `a1649733b910ae90f08efc5f215f31f898619f52` |
+| `T2`（再 ＋ tooling） | `d7288222600d5637a457359b71991d5457ca7a3d` |
+| `counterfactual_sha256`（raw）＝ `counterfactual_canonical_sha256` | `fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14` |
+| `tooling_sha256`（raw）＝ `tooling_canonical_sha256` | `5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98` |
+| `composed_sha256`（＝ ⑩ before artifact 的 `tooling_patch_sha256`） | `ac49d36ff07a998448cb4b5706470eedce61ef6369cd9deca784d7d5923b670f` |
+| `counterfactual_semantic_sha256` | `5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8` |
+| 驗證時的 source tree | `c40162551af926df12d5a6d28fe16adc5a4372ff`（封存點 ＝ 包含它的那個 commit，見 `issue.md`） |
+
+⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。
 
 #### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`）
 

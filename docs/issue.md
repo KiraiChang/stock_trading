@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ⚠️ 待 review（第一輪 review 的三項已修正並重跑）**（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），下一步：另立 raw-failed freeze record 的產品修正計畫**（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -5063,11 +5063,12 @@ skip 分支不動；#4 F12 在合成 repo 加入 `i074_stage1/` 與 `envcheck/` 
 | 建議 | baseline 無法逐位元重建，現在就隨計畫保存，比把 B0 留到下一個 session 穩妥；`.gitattributes` 用精確路徑，stage 之後從 index 讀回重算 SHA | ✅ 採納 | 已 stage `python/scripts/fixtures/i074_step9/step8_full_run3.log`、`step8_full_run3.meta.json` 與 `.gitattributes` 的一條精確路徑規則；從 index 讀回：SHA-256 `901843273ad3…`、353,982 bytes、`text` 為 unset；metadata 的項目數（2295 個 node、2294 passed、1 skipped、744 個 `ok`、0 個 `FAIL`、host unittest 72）由 log 解析而來；「二」「八」#8、「十四」的步驟 A 與 B0 同步。⚠️ 這份 log 是 ⑧ 測試輸出的逐字紀錄，裡面的舊測試標籤有缺少否定詞的禁止標記——否定詞掃描（以及之後任何「掃新增行」的檢查）一律**排除這一個檔**，⛔ 不改它的內容 |
 | 裁決建議 | D1 確認；D2 採 (a)；D3 確認 | — | 記在狀態列與 D2 列，待使用者以 commit 確認 |
 
-#### Stage 2 步驟 ⑨ 實作結果（2026-10-12，⚠️ **待 review**）
+#### Stage 2 步驟 ⑨ 實作結果（2026-10-12，✅ **review 通過**（兩輪）並 commit `53538a3`）
 
 依「Stage 2 步驟 ⑨ 細部計畫 v1」（commit `1bec699`、實作前修正 commit `42dcd2a`；D1 確認、D2 採 (a)、D3 確認）實作與執行。
-本輪⛔ 沒有改任何產品程式、tooling 路徑或兩份 patch；⛔ 不 commit，停在 staged 等 review。⚠️ **第一輪 review 的三項（1 高、2 中）
-已修正**，並在新的 `T_src` 上把 S1～S7 與反向驗證全部重跑，見「八」。
+本輪⛔ 沒有改任何產品程式、tooling 路徑或兩份 patch；送審時依流程先停在 staged 等 review。⚠️ **第一輪 review 的三項（1 高、2 中）
+已修正**，並在新的 `T_src` 上把 S1～S7 與反向驗證全部重跑，見「八」。✅ **2026-10-14**：第二輪 review 通過後由使用者 commit
+`53538a3`（＝ 兩份 patch 的封存點），S9 通過，見「九」。
 
 ##### 一、新增的檔案
 
@@ -5253,7 +5254,10 @@ id／失敗標籤寫錯；R23 是 driver 的注回寫錯（`[ … ] && verify ||
 
 * review 本節；通過之後使用者 commit（＝ 兩份 patch 的**封存點**），再做 S9：`git diff --name-only c40162551af926df12d5a6d28fe16adc5a4372ff 'HEAD^{tree}'` 只能列出三份文件、
   `make-i074-tooling-patch.sh --verify "$(git rev-parse 'HEAD^{tree}')"` ＝ 0。
-* 之後依計畫「九」的 gate：另立「raw-failed freeze record」產品修正計畫，修正完成才進 ⑨-1，最晚不得晚於 ⑨-2。
+  ✅ **2026-10-14 完成**：第二輪 review 通過，使用者 commit `53538a3`，`HEAD^{tree}` ＝ `2948e8dfc61fbcdf7c8faedb3f98d2c244123763`（＝ review 時 staged 的 tree）。
+  S9 兩項都成立：與 `T_src` 的差異只有 `docs/development-workflow.md`、`docs/issue.md`、`docs/sr-zone-scoring.md`；`--verify` 回 0（重新產生的 tooling patch
+  與 commit 內的逐位元相同）。commit 內兩份 patch 的 SHA-256 與封存值相同（tooling `5ff9a90f…`、cf `fa7f5ba8…`）；正式 repo 的 worktree 登記數前後都是 401。
+* ⚠️ **下一步**——依計畫「九」的 gate：另立「raw-failed freeze record」產品修正計畫，修正完成才進 ⑨-1，最晚不得晚於 ⑨-2。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -6814,7 +6818,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑦ 各包已各自附上它負責的測試；⑧ 改成**矩陣完整性稽核 ＋ 全量執行**——逐 id 對照
    a～z、aa～ai、n1～n12、n7b、B／C 的 a～m 與 ③ 的測試表，補齊缺漏後全量執行一次
    ← ✅ ⑧ 計畫 v4 已確認（2026-10-07，`5e2d84f`）；✅ ⑧ 稽核結果與補法已確認（2026-10-07）；✅ ⑧ 的補齊與全量執行 review 通過（commit `be0e337`；見「Stage 2 步驟 ⑧ 補齊與全量執行的結果」）
-⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ✅ ⑨ 細部計畫 v1 已確認（`1bec699`）；✅ 實作前的可行性實驗與計畫修正已確認（`42dcd2a`；D1 確認、D2 採 (a)、D3 確認）；⚠️ 現在在這裡：⑨ 實作待 review（第一輪 review 的三項已修正並重跑；見「Stage 2 步驟 ⑨ 實作結果」；commit ＝ 兩份 patch 的封存點，之後做 S9，再依該計畫「九」的 gate 另立 raw-failed freeze record 產品修正計畫）
+⑨ **differential guard**（「六、3」）→ 產生並封存 exact counterfactual patch，驗三方 SHA   ← ✅ ⑨ 細部計畫 v1 已確認（`1bec699`）；✅ 實作前的可行性實驗與計畫修正已確認（`42dcd2a`；D1 確認、D2 採 (a)、D3 確認）；✅ ⑨ 實作 review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點），S9 ✅ 2026-10-14 通過（見「Stage 2 步驟 ⑨ 實作結果」）；⚠️ 現在在這裡：依該計畫「九」的 gate 另立 raw-failed freeze record 產品修正計畫（修正完成才進 ⑨-1，最晚不得晚於 ⑨-2）
    （＋ **`e1cbbbd`** 既有測試套用 patch 前後全綠）
    ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：⑨ 改成**兩份 patch 一起封存**（counterfactual ＋ tooling）；「既有測試全綠」改成
    「套 counterfactual ＋ tooling 之後全綠」；differential guard 的 patched 側含 tooling；另加 **tooling 非語意 guard**

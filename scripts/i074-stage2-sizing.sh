@@ -455,6 +455,8 @@ fi
 measure_check_adopted "build 之後的收養檢查"
 # ⚠️ raw-failed freeze record 修正計畫「三」：pre-commit——raw → 報告 → staging → check-pair，任何失敗都經 on_failure 作廢
 #   MEASURE_VOID_PATHS（⛔ 不留下可以進 ⑩ 的紀錄，頂層⛔ 不發布報告）。
+# ⚠️ ⑨-1 細部計畫「十」：raw/ ⛔ 不帶 shim 的入口 S/bin/docker（容器與收養的檢查都已通過；之後只用 REAL_DOCKER）。
+measure_drop_shim_link || on_failure "移除 shim 的入口（S/bin/docker）" 1
 if ! cp -a "$S" "$WORK/raw"; then
   # D4：⛔ 不經 on_failure（⛔ 不建 raw-failed/、⛔ 不寫摘要）、保留 S、結束碼 1。先忽略 INT／TERM 並設 DONE=1——之後任何失敗都⛔ 不會
   #   經 EXIT trap 改走 on_failure；作廢以 guarded 呼叫（移除不了的路徑由它印到 stderr）。

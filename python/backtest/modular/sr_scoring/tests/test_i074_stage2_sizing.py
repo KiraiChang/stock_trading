@@ -719,6 +719,103 @@ def test_failure_summary_lists_leftover_containers(tmp_path):
     summary = json.loads(out.read_text())
     assert summary["leftover_containers"] == ["cid-a", "cid-b"] and summary["P_B"] is None
     assert summary["phases"] == {"success": "aborted"}
+    assert out.read_bytes() == sz.canonical_dumps(summary)                   # 「十」(6)：正式檔是完整的 canonical bytes
+
+
+# ── ⑨-1 細部計畫「十」：摘要的原子發布（第五輪 review；比照 c2 系列） ────────────────────────────
+
+SUMMARY = {"schema": "i074_stage2_sizing_failure_v1", "rc": 1, "pad": "x" * 1000}
+
+
+def _no_summary(work):
+    return not (work / "failure_summary.json").exists() and not list(work.glob(".failure_summary.json.*.tmp"))
+
+
+def test_summary_publish_write_failure_leaves_nothing(tmp_path, monkeypatch):
+    """(1) 寫入途中失敗（ENOSPC）→ 例外往外拋、正式檔⛔ 不存在、⛔ 沒有暫存檔。"""
+    real_open = open
+
+    class Broken:
+        def __init__(self, fh):
+            self.fh = fh
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.fh.close()
+
+        def write(self, data):
+            self.fh.write(data[: len(data) // 2])                            # 先寫一半，再失敗
+            raise OSError("ENOSPC（注入）")
+
+        def flush(self):
+            self.fh.flush()
+
+        def fileno(self):
+            return self.fh.fileno()
+
+    monkeypatch.setattr(sz, "open", lambda path, mode="r", *a, **k: Broken(real_open(path, mode, *a, **k)),
+                        raising=False)
+    with pytest.raises(OSError, match="注入"):
+        sz.publish_canonical_json(tmp_path / "failure_summary.json", SUMMARY)
+    assert _no_summary(tmp_path)
+
+
+@pytest.mark.parametrize("seam", ["_fsync_fd", "_replace"])
+def test_summary_publish_failure_before_replace_leaves_nothing(tmp_path, monkeypatch, seam):
+    """(2) 暫存檔的 fsync 失敗、(3) os.replace 失敗 → 例外往外拋、正式檔⛔ 不存在、⛔ 沒有暫存檔。"""
+    def boom(*args):
+        raise OSError(f"{seam}（注入）")
+
+    monkeypatch.setattr(sz, seam, boom)
+    with pytest.raises(OSError, match="注入"):
+        sz.publish_canonical_json(tmp_path / "failure_summary.json", SUMMARY)
+    assert _no_summary(tmp_path)
+
+
+def test_summary_publish_directory_fsync_failure_after_replace(tmp_path, monkeypatch):
+    """(4) replace 之後的目錄 fsync 失敗 → 例外往外拋；正式檔存在而且 ＝ 完整的 canonical bytes、⛔ 沒有暫存檔。"""
+    def boom(directory):
+        raise OSError("dir fsync（注入）")
+
+    monkeypatch.setattr(sz, "_fsync_dir", boom)
+    with pytest.raises(OSError, match="注入"):
+        sz.publish_canonical_json(tmp_path / "failure_summary.json", SUMMARY)
+    assert (tmp_path / "failure_summary.json").read_bytes() == sz.canonical_dumps(SUMMARY)
+    assert not list(tmp_path.glob(".failure_summary.json.*.tmp"))
+
+
+def test_failure_summary_under_file_size_limit_leaves_no_partial_file(tmp_path):
+    """(5) 真實的部分寫入：子程序以 RLIMIT_FSIZE（小於摘要）執行 failure-summary → rc ≠ 0、正式檔⛔ 不存在、⛔ 沒有暫存檔。
+
+    對照組⛔ 不設限制 → rc 0、正式檔 ＝ canonical bytes。⚠️ CPython 啟動時忽略 SIGXFSZ，超過上限的 write 回 EFBIG。
+    """
+    import resource
+    import subprocess
+    import sys
+
+    s = tmp_path / "S"
+    (s / "phases" / "success").mkdir(parents=True)
+    (s / "phases" / "success" / "aborted").touch()
+
+    def run(work, limit):
+        work.mkdir()
+
+        def pre():
+            if limit:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+
+        res = subprocess.run([sys.executable, str(_SCRIPT), "failure-summary", "--state", str(s), "--stage", "x",
+                              "--rc", "1", "--out", str(work / "failure_summary.json")],
+                             preexec_fn=pre, capture_output=True, text=True)
+        return res.returncode
+
+    assert run(tmp_path / "ok", None) == 0                                                   # 對照組
+    full = (tmp_path / "ok" / "failure_summary.json").read_bytes()
+    assert full == sz.canonical_dumps(json.loads(full)) and len(full) > 100
+    assert run(tmp_path / "cut", len(full) // 2) != 0
+    assert _no_summary(tmp_path / "cut")
 
 
 def test_d_delta_is_clamped_per_location(tmp_path):

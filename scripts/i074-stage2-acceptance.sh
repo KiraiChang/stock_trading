@@ -483,6 +483,8 @@ ensure_no_run_containers "結束前的容器檢查"
 measure_check_adopted "結束前的收養檢查"                       # ⑦d 增補
 [ "$(sha_of "$IDENTITY")" = "$IDENTITY_SHA0" ] || on_failure "Stage 2 identity 檔在執行期間被改了" 1
 cp "$S/acceptance_report.json" "$S/acceptance_report.txt" "$WORK/"
+# ⚠️ ⑨-1 細部計畫「十」：raw/ ⛔ 不帶 shim 的入口 S/bin/docker（容器與收養的檢查都已通過；之後只用 REAL_DOCKER）。
+measure_drop_shim_link || on_failure "移除 shim 的入口（S/bin/docker）" 1
 cp -a "$S" "$WORK/raw" || { echo "⚠️ 複製原始量測失敗，保留 S：$S" >&2; DONE=1; exit 1; }
 DONE=1
 rm -rf "$S"

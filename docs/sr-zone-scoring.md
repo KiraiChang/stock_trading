@@ -3390,6 +3390,15 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   ——與 `precheck-verdict` 同一個雙層的信任模型（內部是 `raw-manifest-recompute`）；`--out` 以 exclusive create 寫（已存在、含 symlink
   → 拒絕、⛔ 不覆寫），落在 `--raw` 之內 → 拒絕；檢查不符 → rc＝1、⛔ 不寫任何檔案。**錨是記進 `issue.md` 並 commit 的 SHA-256**；
   schema 名稱固定演算法。它只能偵測**之後**的改動。
+- **正式的原始量測與失敗摘要**（2026-10-15，`issue.md` I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」）：正式的原始量測只有兩種——成功的
+  `<work>/raw/`，以及兩個 harness 共用的 `on_failure`（`scripts/lib/i074-stage2-measure.sh`）在作廢與三項清理（步驟的 process group、
+  收養的程序、容器）**都成功**之後發布的 `<work>/raw-failed/`；任一清理失敗 → 只保留 S（寫入者可能還在改它，只當診斷資料）。
+  `raw-failed/` 以原子的方式發布：`raw-failed` 與 `.raw-failed.staging` 兩個名稱都⛔ 不存在 → 完整複製到 staging → 同目錄的 `mv -T`；
+  **rename 是唯一的分界**（之前被中止只會留下 staging，⛔ 不是證據；之後才被終止的 `raw-failed/` 仍是正式的，⛔ 不受結束碼影響）。
+  兩者複製之前都只移除 shim 在 PATH 上的入口 `bin/docker`（指向 `harness/` 裡本體的 symlink；`readlink` 的結果記進 `console.log`，
+  ⛔ 不跟隨），所以真實的原始量測產得出 raw manifest。`failure_summary.json` 只跟著正式的 `raw-failed/` 出現（欄位固定指向它），
+  以原子的方式寫（同目錄的暫存檔 → fsync → `os.replace` → fsync 目錄）：正式路徑只會是「不存在」或「完整的 canonical JSON」，
+  寫入失敗時 `raw-failed/` 仍是正式的原始量測、S 保留。
 - **權威常數取自快照**：`P_B_BUDGET`（preflight）與 `ENV_DROP_*`（supervisor）在兩個 harness 的快照清單裡（sizing：preflight；
   acceptance：兩者），live 的 `report`、`acceptance-precheck`、`acceptance-report` 以 `live_constants()` 從 S 的快照載入（先驗
   `MANIFEST`），並斷言它們與工作複本逐位元相同——⛔ 不讀活路徑、⛔ 不複製常數。函式層一律以參數接收常數。

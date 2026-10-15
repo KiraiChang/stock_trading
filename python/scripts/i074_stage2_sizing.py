@@ -620,6 +620,32 @@ def _replace(src: Path, dst: Path) -> None:
     os.replace(src, dst)
 
 
+def publish_canonical_json(out: str | Path, obj: Any) -> None:
+    """把 `obj` 的 canonical bytes 原子發布成 `out`（host 端；⛔ 不 import `backtest.*`）。
+
+    ⚠️ issue.md I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」（D10，第五輪 review）：磁碟語意與 `stream_write_canonical()` 相同——
+    先在記憶體算好 bytes（序列化失敗 → 什麼都⛔ 不寫）→ 同目錄 temp `.{name}.{12 hex}.tmp`（exclusive）→ flush ＋ fsync →
+    `os.replace` → fsync 目錄。`os.replace` **之前**的任何失敗（ENOSPC、EIO、`RLIMIT_FSIZE`、fsync、replace 本身）在 `finally`
+    刪除 temp、⛔ 不留正式檔，例外往外拋；**之後**的目錄 fsync 失敗時正式檔已存在而且完整（內容在 replace 之前已 fsync，耐久
+    未確認），例外照樣往外拋。正式路徑因此只會是「不存在」或「完整的 canonical JSON」。
+    """
+    out = Path(out)
+    payload = canonical_dumps(obj)
+    tmp = out.parent / f".{out.name}.{secrets.token_hex(6)}.tmp"
+    replaced = False
+    try:
+        with open(tmp, "xb") as fh:
+            fh.write(payload)
+            fh.flush()
+            _fsync_fd(fh.fileno())
+        _replace(tmp, out)
+        replaced = True
+        _fsync_dir(out.parent)    # ⚠️ 這一步失敗時正式檔已存在（完整）——例外往外拋，⛔ 不刪
+    finally:
+        if not replaced and (tmp.exists() or tmp.is_symlink()):
+            tmp.unlink()
+
+
 def stream_write_canonical(directory: Path, name: str, top: Mapping[str, Any], rows: Iterator[Any]) -> str:
     """把 `top ∪ {"rows": rows}` 以 canonical bytes **逐列**寫出，回傳 SHA-256。
 
@@ -3467,7 +3493,8 @@ def _dispatch(args) -> int:
                    # 有效性條件計畫：⑨-1 的 precheck（判讀一律經 precheck-verdict，⛔ 不憑這個欄位）
                    "precheck": "raw-failed/precheck.json" if (state / "precheck.json").is_file() else None,
                    "note": "⛔ 本檔不宣稱 P_B；原始量測見 raw-failed/"}
-        Path(args.out).write_bytes(canonical_dumps(summary))
+        # ⚠️ ⑨-1 細部計畫「十」（D10）：原子發布——⛔ 不直接寫正式檔（寫到一半失敗會留下半份摘要）
+        publish_canonical_json(args.out, summary)
         return 0
     raise SizingError(f"未知的子指令：{cmd}")
 

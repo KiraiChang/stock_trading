@@ -281,6 +281,26 @@ measure_void_outputs() {
   done
   return "$left"
 }
+# ⚠️ ⑨-1 細部計畫「十」（「〇之一」(i)）：S/bin/docker 是 shim 在 PATH 上的入口（指向 S/harness 裡本體的 symlink）。raw/、raw-failed/
+#   是整個 S 的複本，帶著它就產不出 raw manifest（契約遇到 symlink 一律拒絕）——複製之前只移除這一個 symlink：先把 readlink 的結果
+#   記進 console.log，⛔ 不跟隨、⛔ 不動其他檔案（本體在 harness/、有 MANIFEST 的 SHA）。不存在 → 0；存在但不是 symlink、或移除
+#   之後仍存在 → 1（呼叫端⛔ 不複製）。之後的收尾只用 REAL_DOCKER（⛔ 不再經 PATH 找 docker）。
+measure_drop_shim_link() {
+  local link="$S/bin/docker" target kind
+  if [ -L "$link" ]; then
+    target="$(readlink -- "$link")" || target="（readlink 失敗）"
+    say "shim 的入口：bin/docker → $target（移除這個 symlink，⛔ 不跟隨）" || true
+    rm -f -- "$link" || true
+  elif [ -e "$link" ]; then
+    kind="$(stat -c %F -- "$link" 2>/dev/null)" || kind="型別不明"
+    echo "⚠️ shim 的入口 $link 存在但不是 symlink（$kind）——⛔ 不移除、⛔ 不複製" >&2 || true
+    return 1
+  fi
+  if [ -e "$link" ] || [ -L "$link" ]; then
+    echo "⚠️ 移除不了 shim 的入口：$link" >&2 || true
+    return 1
+  fi
+}
 on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在量測窗口終止之後。
   # ⚠️ raw-failed freeze record 修正計畫「三」（D7）：作廢清單非空時，一開始就忽略 INT／TERM（在 trap - EXIT 之前——⛔ 不在兩個
   #   builtin 之間留下原本的 handler），作廢完才恢復預設（之後與修正前相同：清理期間再收到訊號就中止）。作廢放在最前面：
@@ -315,11 +335,29 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
   [ -n "$PHASE" ] && [ -d "$S/phases/$PHASE" ] && touch "$S/phases/$PHASE/aborted"   # 3
   say "中止：階段 $stage、結束碼 $rc"
   # 4：⚠️ 作廢沒有全部成功 → ⛔ 不複製（raw-failed/ ⛔ 不得含移除不了的 freeze record）、保留 S（第 6 步）。
-  if [ "$MEASURE_VOIDED" = 1 ] && [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != copy ] \
-     && cp -a "$S" "$WORK/raw-failed" 2>/dev/null; then                 # 4
+  #   ⚠️ ⑨-1 細部計畫「十」：三項清理（步驟的 group、收養的程序、容器）也要都成功——任一失敗時寫入者可能還在改 S，複本會是混合
+  #   時間點的內容（只保留 S、只當診斷資料）。發布是原子的：raw-failed 與 staging 兩個名稱都⛔ 不存在（symlink 也算：mv -T 會直接
+  #   取代空目錄、cp -a 會複製到既有目錄的裡面）→ 移除 shim 的入口 → 完整複製到 staging → 同目錄的 mv -T（rename(2)）。任何一段
+  #   失敗或中途被終止 → ⛔ 沒有 raw-failed/（最多留下 staging，⛔ 不刪、⛔ 不是證據）；rename 之後 raw-failed/ 就是正式的原始量測
+  #   （之後才被終止、摘要缺失也一樣——rename 是唯一的分界）。
+  if [ "$MEASURE_VOIDED" = 1 ] && [ "$group_stopped" = 1 ] && [ "$adopted_ok" = 1 ] && [ "$cleaned" = 1 ] \
+     && [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != copy ] \
+     && [ ! -e "$WORK/raw-failed" ] && [ ! -L "$WORK/raw-failed" ] \
+     && [ ! -e "$WORK/.raw-failed.staging" ] && [ ! -L "$WORK/.raw-failed.staging" ] \
+     && measure_drop_shim_link \
+     && cp -a "$S" "$WORK/.raw-failed.staging" 2>/dev/null \
+     && mv -T -- "$WORK/.raw-failed.staging" "$WORK/raw-failed"; then  # 4
     copied=1
+  elif [ -d "${WORK:-/nonexistent}" ]; then
+    { echo "⚠️ raw-failed/ 沒有發布（作廢、三項清理、名稱檢查、shim 的入口、複製或 rename 有一項沒有成功）"
+      if [ -e "$WORK/.raw-failed.staging" ] || [ -L "$WORK/.raw-failed.staging" ]; then
+        echo "   留下的 staging（⛔ 不是證據）：$WORK/.raw-failed.staging"
+      fi; } >&2 || true
   fi
-  if [ -d "${WORK:-/nonexistent}" ] && [ "${I074_SIZING_FAULT:-}" != summary ] \
+  # 5：⑨-1 細部計畫「十」（D9）：摘要的欄位與 note 固定指向 raw-failed/——只在它確實發布（copied ＝ 1）之後才寫。寫入失敗（含 summary
+  #   注入）時 raw-failed/ 仍是正式的原始量測（D10），⛔ 不刪、⛔ 不回滾，S 照舊保留；helper 以原子發布寫（正式檔只會是不存在或完整的
+  #   canonical JSON）。
+  if [ "$copied" = 1 ] && [ "${I074_SIZING_FAULT:-}" != summary ] \
      && helper failure-summary --state "$S" --stage "$stage" --rc "$rc" --out "$WORK/failure_summary.json" \
           --leftover-cids "$S/leftover-cids"; then                     # 5
     summarized=1
@@ -340,6 +378,7 @@ on_failure() {  # $1＝失敗的階段、$2＝結束碼。⚠️ 全部發生在
   else
     echo "⚠️ 作廢（$MEASURE_VOIDED）、步驟結束（$group_stopped）、收養的程序（$adopted_ok）、容器清理（$cleaned）、原始量測的複製（$copied）" \
          "或失敗摘要（$summarized）沒有全部成功——保留 S：$S" >&2
+    [ "$copied" = 0 ] || echo "   raw-failed/ 已發布（正式的原始量測；摘要缺失）：$WORK/raw-failed/" >&2
   fi
   exit 1
 }

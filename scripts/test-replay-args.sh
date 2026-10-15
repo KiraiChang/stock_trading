@@ -2587,7 +2587,35 @@ if [ -n "$S2_IMG" ]; then
     || { fail "b：--formal 沒有擋下導到 L0 的輸出（rc=$rc）"; cat "/dev/shm/sz-fd-$$.err" >&2; }
   rm -f "/dev/shm/sz-fd-$$.err"
 fi
-# 容器清理失敗（review）：helper 與 fallback 的 rm -f 都失敗 → S 與 cidfile 保留，摘要與 stderr 列出 CID。
+# ⑨-1 細部計畫「十」：清理失敗 → 只保留 S、⛔ 沒有 raw-failed/（含 staging）與摘要（只當診斷資料）。
+sz_no_formal() {  # $1＝work 目錄：⛔ 沒有 raw-failed/、staging、摘要（含暫存檔；懸空的 symlink 也算存在）
+  local n
+  for n in raw-failed .raw-failed.staging failure_summary.json; do
+    [ ! -e "$1/$n" ] && [ ! -L "$1/$n" ] || return 1
+  done
+  [ -z "$(find "$1" -maxdepth 1 -name '.failure_summary.json.*.tmp' -print -quit 2>/dev/null)" ]
+}
+probe_ok=1; mkdir -p "$SZ_TD/noformal-probe"
+{ sz_no_formal "$SZ_TD/noformal-probe" || probe_ok=0; }                                      # 空目錄 → 符合
+for n in raw-failed .raw-failed.staging failure_summary.json; do
+  ln -s /nonexistent/x "$SZ_TD/noformal-probe/$n"
+  ! sz_no_formal "$SZ_TD/noformal-probe" || { probe_ok=0; echo "    懸空的 $n 被當成不存在" >&2; }
+  rm -f -- "$SZ_TD/noformal-probe/$n"
+done
+[ "$probe_ok" = 1 ] && pass "sz_no_formal 的對照組：三個名稱各自是懸空的 symlink 都算存在、空目錄符合" || fail "sz_no_formal 的對照組不符"
+# 「十」(i)：正式的 raw/、raw-failed/ ⛔ 不帶 bin/docker，raw manifest 產得出來、當場 --check-sha256 ＝ 0（受信任的版本＝HEAD）。
+#   ⚠️ 本段的注入都在 shim 的 symlink 建立（S/bin/docker）之前就中止、final-check 在 raw/ 之前就結束——帶著入口的情形由 rf 的 c5、
+#   csum（on_failure）與 w0（步驟 6 的成功片段）測。
+sz_manifest_ok() {  # $1＝raw/ 或 raw-failed/；$2＝manifest 的輸出路徑（在它之外）
+  local head sha
+  head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  [ ! -e "$1/bin/docker" ] && [ ! -L "$1/bin/docker" ] || return 1
+  python3 "$SZ_HELPER" raw-manifest --raw "$1" --repo "$REPO_ROOT" --expected-repo-head "$head" --out "$2" > /dev/null 2>&1 || return 1
+  sha="$(sha256sum < "$2" | cut -d' ' -f1)"
+  python3 "$SZ_HELPER" raw-manifest --raw "$1" --repo "$REPO_ROOT" --expected-repo-head "$head" --check-sha256 "$sha" \
+    > /dev/null 2>&1
+}
+# 容器清理失敗（review）：helper 與 fallback 的 rm -f 都失敗 → S 與 cidfile 保留，stderr 列出 CID。
 # ⚠️ fake docker：image inspect 成功（⛔ 不需要真的 image）、rm 一律失敗、inspect 顯示容器仍在、ps 沒有具名容器。
 mkdir -p "$SZ_TD/nodel"
 cat > "$SZ_TD/nodel/docker" <<'FAKE'
@@ -2609,9 +2637,8 @@ kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/clean.err" | tail -1)"
 if [ "$rc" -ne 0 ] && [ -n "$kept" ] && [ "$(cat "$kept/cid/o0000.cid" 2>/dev/null)" = "fault-injected-cid" ] \
    && grep -qx 'fault-injected-cid' "$SZ_TD/clean.err" \
    && [ "$(grep -c '^rm -f fault-injected-cid$' "$SZ_TD/nodel.log")" -ge 2 ] \
-   && python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["leftover_containers"]==["fault-injected-cid"]' \
-        "$SZ_TD/wclean/failure_summary.json"; then
-  pass "a12：容器移除不了 → S 與 cidfile 保留、摘要與 stderr 列出 CID（helper 與 fallback 都試過 rm -f）"
+   && sz_no_formal "$SZ_TD/wclean"; then
+  pass "a12：容器移除不了 → S 與 cidfile 保留、stderr 列出 CID（helper 與 fallback 都試過 rm -f）；⛔ 沒有 raw-failed/ 與摘要（「十」）"
 else
   fail "a12：容器清理失敗時沒有保留 S（rc=$rc）"; cat "$SZ_TD/clean.err" >&2
 fi
@@ -2652,12 +2679,20 @@ if [ "$rc" = 1 ] && [ -n "$pg" ] && [ "$el" -lt 30 ] && grep -q "升級 KILL" "$
 else
   fail "a12：忽略 TERM 的步驟沒有被收掉（rc=$rc、${el} 秒）"; cat "$SZ_TD/wstuck.err" >&2
 fi
+# ⚠️ stuck／orphan-* 在 shim 的 symlink 建立（S/bin/docker）之前就中止：這兩組是「⛔ 沒有入口時照常發布」的對照組。
+if [ -d "$SZ_TD/wstuck/raw-failed" ] && [ ! -e "$SZ_TD/wstuck/.raw-failed.staging" ] \
+   && sz_manifest_ok "$SZ_TD/wstuck/raw-failed" "$SZ_TD/wstuck.manifest.json"; then
+  pass "「十」(i) 對照組：shim 入口建立之前中止 → raw-failed/ ⛔ 沒有 staging、raw manifest 產出且 --check-sha256 ＝ 0"
+else
+  fail "「十」(i) 對照組：shim 入口建立之前中止的 raw-failed/ 產不出 raw manifest 或留下 staging"
+fi
 [ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
 t0=$SECONDS; rc=0; sz_fault group-alive walive || rc=$?; el=$((SECONDS - t0))
 pg="$(sz_pgid "$SZ_TD/walive.err")"
 kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/walive.err" | tail -1)"
-if [ "$rc" = 1 ] && [ "$el" -lt 30 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/walive.err"; then
-  pass "a12：KILL 之後 group 仍有成員 → 保留 S（仍存活的程序可能還在寫它）"
+if [ "$rc" = 1 ] && [ "$el" -lt 30 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/walive.err" \
+   && sz_no_formal "$SZ_TD/walive"; then
+  pass "a12：KILL 之後 group 仍有成員 → 保留 S（仍存活的程序可能還在寫它）；⛔ 沒有 raw-failed/ 與摘要（「十」）"
 else
   fail "a12：group 沒結束卻清掉了 S（rc=$rc）"; cat "$SZ_TD/walive.err" >&2
 fi
@@ -2668,8 +2703,8 @@ mkdir -p "$SZ_TD/psfail"; printf '#!/bin/sh\nexit 1\n' > "$SZ_TD/psfail/ps"; chm
 rc=0; SZ_FAULT_PATH="$SZ_TD/psfail" sz_fault stuck wpsx || rc=$?
 pg="$(sz_pgid "$SZ_TD/wpsx.err")"
 kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/wpsx.err" | tail -1)"
-if [ "$rc" = 1 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/wpsx.err"; then
-  pass "a12：host 的 ps 失敗 → 不當作 group 已結束、保留 S"
+if [ "$rc" = 1 ] && [ -n "$kept" ] && [ -d "$kept" ] && grep -q "步驟結束（0）" "$SZ_TD/wpsx.err" && sz_no_formal "$SZ_TD/wpsx"; then
+  pass "a12：host 的 ps 失敗 → 不當作 group 已結束、保留 S；⛔ 沒有 raw-failed/ 與摘要（「十」）"
 else
   fail "a12：ps 失敗竟被當成 group 已結束（rc=$rc）"; cat "$SZ_TD/wpsx.err" >&2
 fi
@@ -2686,14 +2721,19 @@ for kind in ok bad; do
      && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["failed_stage"].startswith(sys.argv[2]) and d["rc"]==int(sys.argv[3]), d' \
           "$SZ_TD/worph$kind/failure_summary.json" "$want_stage" "$want_rc"; then
     pass "a12：leader 以$([ "$kind" = ok ] && echo 預期 || echo 非預期)的結束碼退出、背景子程序仍存活 → 以同一個 PGID 收尾並中止"
+    sz_manifest_ok "$SZ_TD/worph$kind/raw-failed" "$SZ_TD/worph$kind.manifest.json" \
+      && pass "「十」(i) 對照組：orphan-$kind 的 raw-failed/ raw manifest 產出且 --check-sha256 ＝ 0" \
+      || fail "「十」(i) 對照組：orphan-$kind 的 raw-failed/ 產不出 raw manifest"
   else
     fail "a12：leader 退出後殘留的 group 成員沒有被收尾（orphan-$kind，rc=$rc）"; cat "$SZ_TD/worph$kind.err" >&2
   fi
   [ -n "$pg" ] && kill -KILL -- "-$pg" 2>/dev/null || true
 done
 rc=0; FAKE_PS_RC=1 sz_fault final-check wps || rc=$?
-if [ "$rc" = 1 ] && grep -q "docker ps 失敗" "$SZ_TD/wps/failure_summary.json" && [ ! -e "$SZ_TD/wps/sizing_report.json" ]; then
-  pass "成功路徑：docker ps 失敗 → fail-closed（⛔ 查不到不能當作沒有殘留）"
+kept="$(grep -o '/dev/shm/i074-sizing-[^ ）]*' "$SZ_TD/wps.err" | tail -1)"
+if [ "$rc" = 1 ] && grep -q "docker ps 失敗" "$SZ_TD/wps.err" && [ ! -e "$SZ_TD/wps/sizing_report.json" ] \
+   && [ -n "$kept" ] && [ -d "$kept" ] && sz_no_formal "$SZ_TD/wps"; then
+  pass "成功路徑：docker ps 失敗 → fail-closed（⛔ 不能把查不到當作沒有殘留）；清理也失敗 → 保留 S、⛔ 沒有 raw-failed/ 與摘要（「十」）"
 else
   fail "成功路徑：docker ps 失敗竟被當成沒有殘留（rc=$rc）"; cat "$SZ_TD/wps.err" >&2
 fi
@@ -2824,7 +2864,11 @@ export PYTHONDONTWRITEBYTECODE=1
 SC="$RF_SC"; S="$SC/S"; WORK="$SC/work"; CLONE="$RF_CLONE"; L3="$WORK/tmp"
 FORMAL="$RF_FORMAL"; IDENTITY="$RF_IDENTITY"; HELPER="$RF_REAL_HELPER"; REAL_DOCKER="$RF_DOCKER"; RUN_ID=20261014T000000Z-1
 RF_INT0="$(builtin trap -p INT)"            # 進入時的 INT（背景啟動時是忽略；作廢之後要恢復成這個）
-mkdir -p "$S/out" "$S/bin" "$S/phases"
+mkdir -p "$S/out" "$S/bin" "$S/phases" "$S/harness/scripts/lib"
+# ⑨-1「十」：與兩支 harness 相同的布局——shim 本體在 S 的快照裡（SHIM＝$S/harness/scripts/lib/…），PATH 上的入口 S/bin/docker 是指向它的
+#   絕對路徑 symlink（ln -s "$SHIM" "$S/bin/docker"）。本體在 S 內，所以「跟隨入口刪掉目標」會讓 raw-failed/ 少掉本體——rf_no_shim 驗得到。
+cp -- "$RF_REAL_SHIM" "$S/harness/scripts/lib/i074-sizing-docker-shim.sh"
+ln -s "$S/harness/scripts/lib/i074-sizing-docker-shim.sh" "$S/bin/docker"
 mkdir "$WORK"
 LOG="$S/console.log"
 . "$RF_LIB"
@@ -2858,12 +2902,18 @@ cp() {
   case "$dst" in
     "$WORK/raw") kind=cp-raw ;;
     "$WORK/raw-failed") kind=cp-rawfailed ;;
+    "$WORK/.raw-failed.staging") kind=cp-rfstaging ;;
     "$WORK/.freeze_record.json.staging") kind=cp-staging ;;
     "$WORK/freeze_record.json") kind=cp-final ;;
     "$WORK"|"$WORK/") case " $* " in *"/freeze_record.json "*) kind=cp-final ;; *"/sizing_report.json "*) kind=cp-report ;; esac ;;
   esac
   [ -z "$kind" ] || rf_seq "$kind"
   if [ "$kind" = cp-raw ] && rf_on raw-fail; then command cp "$@" || true; rf_hit raw-fail; return 1; fi
+  # ⑨-1「十」c2／c3：來源是 S 的複製（正式名稱或 staging 都攔）→ 建立目標、只複製一個檔案，之後失敗或 KILL harness 自己
+  if [ "$kind" = cp-rawfailed ] || [ "$kind" = cp-rfstaging ]; then
+    if rf_on cp-partial-fail; then rf_hit cp-partial-fail; mkdir -p -- "$dst"; command cp -- "$S/a.txt" "$dst/"; return 1; fi
+    if rf_on cp-partial-kill; then rf_hit cp-partial-kill; mkdir -p -- "$dst"; command cp -- "$S/a.txt" "$dst/"; kill -KILL $$; fi
+  fi
   command cp "$@" || rc=$?
   if [ "$rc" = 0 ] && [ "$kind" = cp-raw ] && rf_on term-after-raw && rf_once term-after-raw; then rf_hit term-after-raw; kill -TERM $$; fi
   if [ "$rc" = 0 ] && [ "$kind" = cp-report ] && rf_on term-after-report && rf_once term-after-report; then
@@ -2872,6 +2922,13 @@ cp() {
   return "$rc"
 }
 mv() {
+  if [ "${!#}" = "$WORK/raw-failed" ]; then        # ⑨-1「十」c6：rename 成功之後、摘要之前終止 harness 自己
+    rf_seq mv-rawfailed
+    command mv "$@" || return $?
+    if rf_on mv-then-kill; then rf_hit mv-then-kill; kill -KILL $$; fi
+    if rf_on mv-then-term; then rf_hit mv-then-term; kill -TERM $$; fi
+    return 0
+  fi
   if [ "${!#}" = "$WORK/freeze_record.json" ]; then
     rf_seq mv
     if rf_on term-before-mv && rf_once term-before-mv; then rf_hit term-before-mv; kill -TERM $$; fi
@@ -2916,6 +2973,7 @@ rf_run() {  # $1＝案例；$2＝hook（空白分隔）。RF_MODE／RF_FORMAL／
   env RF_SC="$SC" RF_HOOK="$2" RF_MODE="${RF_MODE:-step6}" RF_FORMAL="${RF_FORMAL:-1}" RF_REG="${RF_REG:-1}" \
     RF_SETUP="${RF_SETUP:-}" RF_STUBS="${RF_STUBS:-}" RF_CLONE="$RF_CLONE" RF_IDENTITY="$RF_TD/identity.json" \
     RF_REAL_HELPER="$REPO_ROOT/python/scripts/i074_stage2_sizing.py" RF_REAL_FREEZE="$RF_REAL_FREEZE" RF_DOCKER="$RF_TD/bin/docker" \
+    RF_REAL_SHIM="$REPO_ROOT/scripts/lib/i074-sizing-docker-shim.sh" \
     RF_LIB="$REPO_ROOT/scripts/lib/i074-stage2-measure.sh" RF_FRAG="$RF_TD/step6.sh" RF_REGFILE="$RF_TD/register.sh" \
     RF_MKREPORT="$RF_TD/mkreport.py" RF_TMPL="$RF_TD/report.tmpl.json" \
     timeout -s KILL 60 bash "$RF_TD/harness.sh" > "$SC/out" 2> "$SC/err" || RF_RC=$?
@@ -2947,14 +3005,33 @@ rf_top_clean() {  # 頂層⛔ 沒有發布任何產物
   rf_absent "$SC/work/freeze_record.json" "$SC/work/.freeze_record.json.staging" "$SC/work/sizing_report.json" "$SC/work/sizing_report.txt"
 }
 
+rf_head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+rf_manifest_ok() {  # $1＝raw/ 或 raw-failed/：raw manifest 產出、當場 --check-sha256 ＝ 0（受信任的版本＝HEAD）
+  local sha
+  python3 "$REPO_ROOT/python/scripts/i074_stage2_sizing.py" raw-manifest --raw "$1" --repo "$REPO_ROOT" \
+    --expected-repo-head "$rf_head" --out "$SC/manifest.json" > /dev/null 2>&1 || return 1
+  sha="$(sha256sum < "$SC/manifest.json" | cut -d' ' -f1)"
+  python3 "$REPO_ROOT/python/scripts/i074_stage2_sizing.py" raw-manifest --raw "$1" --repo "$REPO_ROOT" \
+    --expected-repo-head "$rf_head" --check-sha256 "$sha" > /dev/null 2>&1
+}
+rf_no_shim() {  # $1＝raw/、raw-failed/ 或保留的 S：⛔ 沒有入口 bin/docker、shim 本體（＝ repo 的 shim）照樣在——⛔ 沒有跟隨入口刪掉它
+  [ ! -e "$1/bin/docker" ] && [ ! -L "$1/bin/docker" ] \
+    && cmp -s -- "$1/harness/scripts/lib/i074-sizing-docker-shim.sh" "$REPO_ROOT/scripts/lib/i074-sizing-docker-shim.sh"
+}
+RF_SHIM_LOG='shim 的入口：bin/docker → $SC/S/harness/scripts/lib/i074-sizing-docker-shim.sh'   # 以 eval 展開（SC 隨案例變）
+rf_shim_logged() { local want; eval "want=\"$RF_SHIM_LOG\""; grep -sqF -- "$want" "$1/console.log"; }
+
 rf_run w0 ""
 rf_need "結束碼不是 0" test "$RF_RC" = 0
+rf_need "raw/ 帶著 bin/docker（或跟隨刪掉了目標；⑨-1「十」(i)）" rf_no_shim "$SC/work/raw"
+rf_need "raw/console.log 沒有移除 shim 入口的紀錄" rf_shim_logged "$SC/work/raw"
+rf_need "raw/ 產不出 raw manifest" rf_manifest_ok "$SC/work/raw"
 rf_need "頂層沒有成對的 freeze record" rf_pair_ok "$SC/work/freeze_record.json"
 rf_need "raw/ 的 freeze record 與頂層不同" cmp -s -- "$SC/work/freeze_record.json" "$SC/work/raw/freeze_record.json"
 rf_need "raw/ 的報告與頂層不同" cmp -s -- "$SC/work/sizing_report.json" "$SC/work/raw/sizing_report.json"
 rf_need "有 staging、raw-failed/ 或摘要" rf_absent "$SC/work/.freeze_record.json.staging" "$SC/work/raw-failed" "$SC/work/failure_summary.json"
 rf_need "S 沒有清掉" rf_absent "$SC/S"
-rf_report "w0：對照組（formal、無注入）→ 0、頂層與 raw/ 各有同一份成對的紀錄、S 已清"
+rf_report "w0：對照組（formal、無注入）→ 0、頂層與 raw/ 各有同一份成對的紀錄、S 已清；raw/ ⛔ 沒有 bin/docker、raw manifest 產出（⑨-1「十」）"
 
 for c in "w1 ps-list 結束前的容器檢查失敗" "w2 adopt1-fail 第一次收養檢查失敗"; do
   set -- $c
@@ -3034,9 +3111,9 @@ RF_MODE=on_failure RF_SETUP='mkdir -p "$S/freeze_record.json/x"; : > "$S/freeze_
 rf_need "結束碼不是 1" test "$RF_RC" = 1
 rf_need "產生了 raw-failed/" rf_absent "$SC/work/raw-failed"
 rf_need "S 沒有保留" test -d "$SC/S"
-rf_need "沒有失敗摘要" test -f "$SC/work/failure_summary.json"
+rf_need "有失敗摘要（⑨-1「十」D9：沒有 raw-failed/ 就⛔ 不發布）" rf_absent "$SC/work/failure_summary.json"
 rf_need "stderr 沒有列出路徑與型別" rf_err_has "作廢失敗，仍存在：$SC/S/freeze_record.json（directory）"
-rf_report "w8：on_failure 中作廢失敗 → 1、⛔ 沒有 raw-failed/、S 保留、摘要照寫、stderr 列出路徑與型別"
+rf_report "w8：on_failure 中作廢失敗 → 1、⛔ 沒有 raw-failed/、S 保留、⛔ 沒有摘要、stderr 列出路徑與型別"
 
 # w9：登記的路徑是指向 S 外檔案的 symlink、FIFO 與一般檔案。FIFO 的另一端由測試開著寫端等待——作廢若打開它讀，寫端就會解除阻塞、留下 marker。
 #   ⚠️ 寫端必須**已經阻塞在打開 FIFO**（wchan）才啟動 harness：否則 harness 可能先刪掉 FIFO，偵測就落空。
@@ -3138,6 +3215,109 @@ rf_need "結束碼不是 1" test "$RF_RC" = 1
 rf_need "measure_void_outputs 被呼叫了" rf_seq_lacks void-called
 rf_need "trap 的記錄是 $RF_TRAPS" test "$RF_TRAPS" = "trap - EXIT INT TERM|"
 rf_report "w15：對照組（作廢清單為空＝acceptance）→ ⛔ 不進臨界區、⛔ 不呼叫作廢、只有 trap - EXIT INT TERM"
+
+# ── ⑨-1 細部計畫「十」：raw-failed/ 只在三項清理都成功、完整複製到 staging 之後以 mv -T 發布（c1～c6）；摘要只跟著它（D9）──
+#   直接呼叫 on_failure（比照 w8）；rf harness 的三項清理都成功（STEP_PID 空、reap-adopted 的 stub 回 0、fake docker 的 ps 沒有容器）。
+#   S 事先放 a.txt 與 200 KB 的 big.bin，SHA-256 記在 $SC/pre.sha（S 的相對路徑）。RF_REG＝0 是 acceptance 的形狀（作廢清單為空）。
+RF_PRE='head -c 200000 /dev/urandom > "$S/big.bin"; echo a > "$S/a.txt"
+        (cd "$S" && sha256sum big.bin a.txt harness/scripts/lib/i074-sizing-docker-shim.sh) > "$SC/pre.sha"'
+rf_complete() { [ -d "$1" ] && (cd "$1" && sha256sum -c --quiet "$SC/pre.sha" > /dev/null 2>&1); }   # 事先放的檔案逐一相同
+rf_no_summary() { rf_absent "$SC/work/failure_summary.json" && [ -z "$(find "$SC/work" -maxdepth 1 -name '.failure_summary.json.*.tmp' -print -quit)" ]; }
+rf_not_published() {  # ⛔ 沒有正式的 raw-failed/、⛔ 沒有摘要、S 保留
+  rf_need "產生了正式的 raw-failed/" rf_absent "$SC/work/raw-failed"
+  rf_need "有失敗摘要" rf_no_summary
+  rf_need "S 沒有保留" test -d "$SC/S"
+}
+
+for reg in 1 0; do
+  RF_MODE=on_failure RF_REG="$reg" RF_SETUP="$RF_PRE" rf_run "c5r$reg" ""
+  rf_need "結束碼不是 1" test "$RF_RC" = 1
+  rf_need "raw-failed/ 不完整" rf_complete "$SC/work/raw-failed"
+  rf_need "raw-failed/ 帶著 bin/docker（或跟隨刪掉了目標）" rf_no_shim "$SC/work/raw-failed"
+  rf_need "留下 staging" rf_absent "$SC/work/.raw-failed.staging"
+  rf_need "沒有失敗摘要" test -f "$SC/work/failure_summary.json"
+  rf_need "S 沒有清掉" rf_absent "$SC/S"
+  rf_need "產不出 raw manifest" rf_manifest_ok "$SC/work/raw-failed"
+  rf_need "console.log 沒有移除 shim 入口的紀錄" rf_shim_logged "$SC/work/raw-failed"
+  rf_report "c5（RF_REG=$reg）：對照組 → raw-failed/ 完整、⛔ 沒有 bin/docker 與 staging、有摘要、S 已清、raw manifest 產出且 --check-sha256 ＝ 0"
+done
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE; ulimit -f 128" rf_run c1 ""       # bash 的 ulimit -f 以 1024 bytes 計：128 KiB < 200 KB
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_not_published
+rf_need "沒有 staging" test -d "$SC/work/.raw-failed.staging"
+rf_need "staging 的 big.bin 竟然完整" test "$(stat -c %s "$SC/work/.raw-failed.staging/big.bin" 2>/dev/null || echo 0)" -lt 200000
+rf_need "S 的 big.bin 不完整" test "$(stat -c %s "$SC/S/big.bin" 2>/dev/null || echo 0)" = 200000
+rf_report "c1：真實的 cp 在檔案大小上限下被 SIGXFSZ 終止 → 1、⛔ 沒有 raw-failed/（只有部分的 staging）、⛔ 沒有摘要、S 保留"
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE" rf_run c2 cp-partial-fail
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "hook 未命中" rf_hook cp-partial-fail
+rf_not_published
+rf_need "沒有部分的 staging" test -f "$SC/work/.raw-failed.staging/a.txt"
+rf_need "stderr 沒有說 raw-failed/ 沒有發布" rf_err_has "raw-failed/ 沒有發布"
+rf_report "c2：先建立部分 staging、再讓複製失敗 → 1、⛔ 沒有 raw-failed/、⛔ 沒有摘要、S 保留、stderr 說明"
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE" rf_run c3 cp-partial-kill
+rf_need "結束碼不是 137" test "$RF_RC" = 137
+rf_need "hook 未命中" rf_hook cp-partial-kill
+rf_not_published
+rf_need "沒有部分的 staging" test -f "$SC/work/.raw-failed.staging/a.txt"
+rf_report "c3：複製期間 harness 被 SIGKILL → ⛔ 沒有 raw-failed/（只有部分的 staging）、⛔ 沒有摘要、S 保留"
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE; mkdir \"\$WORK/raw-failed\"" rf_run c4a ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "事先放的空 raw-failed/ 被寫入或取代" test -z "$(ls -A "$SC/work/raw-failed" 2>/dev/null || echo gone)"
+rf_need "建立了 staging" rf_absent "$SC/work/.raw-failed.staging"
+rf_need "有失敗摘要" rf_no_summary
+rf_need "S 沒有保留" test -d "$SC/S"
+rf_report "c4a：raw-failed/ 已存在（空目錄）→ 1、⛔ 不複製、⛔ 不取代、⛔ 沒有摘要、S 保留"
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE; mkdir \"\$WORK/.raw-failed.staging\"" rf_run c4b ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_not_published
+rf_need "事先放的空 staging 被寫入" test -z "$(ls -A "$SC/work/.raw-failed.staging" 2>/dev/null || echo gone)"
+rf_report "c4b：staging 已存在 → 1、⛔ 不複製（⛔ 不複製到它的裡面）、⛔ 沒有 raw-failed/ 與摘要、S 保留"
+
+for c in "c6k mv-then-kill 137 1" "c6t mv-then-term 143 1" "c6t0 mv-then-term 143 0"; do
+  set -- $c
+  RF_MODE=on_failure RF_REG="$4" RF_SETUP="$RF_PRE" rf_run "$1" "$2"
+  rf_need "結束碼不是 $3" test "$RF_RC" = "$3"
+  rf_need "hook 未命中" rf_hook "$2"
+  rf_need "raw-failed/ 不完整" rf_complete "$SC/work/raw-failed"
+  rf_need "raw-failed/ 帶著 bin/docker" rf_no_shim "$SC/work/raw-failed"
+  rf_need "留下 staging" rf_absent "$SC/work/.raw-failed.staging"
+  rf_need "有失敗摘要（或暫存檔）" rf_no_summary
+  rf_need "S 沒有保留" test -d "$SC/S"
+  rf_need "保留的 S 裡 shim 的本體被動過（或入口還在）" rf_no_shim "$SC/S"
+  rf_need "產不出 raw manifest" rf_manifest_ok "$SC/work/raw-failed"
+  rf_report "$1：rename 之後、摘要之前被 $([ "$3" = 137 ] && echo KILL || echo TERM)（RF_REG=$4）→ $3、正式的 raw-failed/ 完整、⛔ 沒有 staging 與摘要、S 保留、raw manifest 照樣產出"
+done
+
+RF_MODE=on_failure RF_SETUP="$RF_PRE"'; command rm -f -- "$S/bin/docker"; echo x > "$S/bin/docker"' rf_run cshim ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_not_published
+rf_need "建立了 staging" rf_absent "$SC/work/.raw-failed.staging"
+rf_need "S 的 bin/docker 被動過" test "$(cat "$SC/S/bin/docker" 2>/dev/null)" = x
+rf_need "stderr 沒有說明 bin/docker" rf_err_has "bin/docker"
+rf_report "cshim：S/bin/docker 存在但不是 symlink → 1、⛔ 不複製、⛔ 沒有 raw-failed/ 與摘要、S（含那個檔案）保留"
+
+I074_SIZING_FAULT=summary RF_MODE=on_failure RF_SETUP="$RF_PRE" rf_run csum ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_need "raw-failed/ 不完整" rf_complete "$SC/work/raw-failed"
+rf_need "raw-failed/ 帶著 bin/docker" rf_no_shim "$SC/work/raw-failed"
+rf_need "留下 staging" rf_absent "$SC/work/.raw-failed.staging"
+rf_need "有失敗摘要" rf_no_summary
+rf_need "S 沒有保留" test -d "$SC/S"
+rf_need "保留的 S 裡 shim 的本體被動過（或入口還在）" rf_no_shim "$SC/S"
+rf_need "產不出 raw manifest" rf_manifest_ok "$SC/work/raw-failed"
+rf_report "csum：summary 注入（D10）→ 1、正式的 raw-failed/ 完整且⛔ 沒有 bin/docker、raw manifest 產出、⛔ 沒有摘要、S 保留"
+
+I074_SIZING_FAULT=copy RF_MODE=on_failure RF_SETUP="$RF_PRE" rf_run ccopy ""
+rf_need "結束碼不是 1" test "$RF_RC" = 1
+rf_not_published
+rf_need "建立了 staging" rf_absent "$SC/work/.raw-failed.staging"
+rf_report "ccopy：copy 注入 → 1、⛔ 沒有 raw-failed/ 與 staging、⛔ 沒有摘要（D9）、S 保留"
 
 rm -rf "$RF_TD"
 
@@ -3391,6 +3571,18 @@ if [ "$rc" = 1 ] && [ -f "$AC_TD/wprep/failure_summary.json" ] && [ -z "$(ac_kep
   pass "ac11／ac18：注入的中止點 → raw-failed 與 failure_summary、S 已清；快照之後改掉或刪掉原檔⛔ 不影響本次（用的是快照）"
 else
   fail "ac11／ac18：中止點或快照不符（rc=$rc）"; cat "$AC_TD/wprep.err" >&2
+fi
+# ⑨-1「十」對照組：prepare 在 shim 的 symlink 建立之前中止——raw-failed/ ⛔ 沒有 staging、raw manifest 照樣產得出來（受信任的版本＝AC_FIX）
+ac_msha=""
+if [ -d "$AC_TD/wprep/raw-failed" ] && [ ! -e "$AC_TD/wprep/.raw-failed.staging" ] \
+   && python3 "$AC_HELPER" raw-manifest --raw "$AC_TD/wprep/raw-failed" --repo "$AC_REPO" --expected-repo-head "$AC_FIX" \
+        --out "$AC_TD/wprep.manifest.json" > /dev/null 2>&1 \
+   && ac_msha="$(sha256sum < "$AC_TD/wprep.manifest.json" | cut -d' ' -f1)" \
+   && python3 "$AC_HELPER" raw-manifest --raw "$AC_TD/wprep/raw-failed" --repo "$AC_REPO" --expected-repo-head "$AC_FIX" \
+        --check-sha256 "$ac_msha" > /dev/null 2>&1; then
+  pass "ac11（⑨-1「十」對照組）：prepare 的 raw-failed/ ⛔ 沒有 staging、raw manifest 產出且 --check-sha256 ＝ 0"
+else
+  fail "ac11（⑨-1「十」對照組）：prepare 的 raw-failed/ 產不出 raw manifest"
 fi
 git -C "$AC_REPO" checkout -q -- . && git -C "$AC_REPO" status --porcelain | grep -q . && fail "隔離 repo 沒還原" || true
 # sizing：同一支（另驗 mem-guard 的快照）；`cleanup` 中止點在 work 目錄建好之後
@@ -3735,6 +3927,64 @@ else
   fail "ac28：手動 re-exec 沒有在 guard 擋下或留下測試程序（rc=$rc、pid=$gpid）"; cat "$AC_TD/wm-noreaper.err" >&2
 fi
 rm -rf -- "$s"
+# ⑨-1「十」(i)：兩支 harness 的成功路徑在 cp -a "$S" "$WORK/raw" 之前移除 shim 的入口（acceptance 的成功路徑要真的 image
+#   才跑得到 → 靜態檢查；行為由 rf 的 w0（步驟 6 的成功片段）與 c5 測）。規則：把檔案切成**非註解的邏輯行**（略過空行與
+#   以 # 開頭的行、以 \ 結尾的續行併成一行），`cp -a "$S" "$WORK/raw"` 的**前一個邏輯行**必須是**直接呼叫** measure_drop_shim_link
+#   （行首就是這個命令，之後只能是 `||`、`;` 或行尾），而且與複製那一行同一層縮排（同一個區塊）。
+ac_drop_before_raw() {  # $1＝檔案；0＝符合規則
+  awk '
+    function flush() { if (buf != "") { n++; L[n] = buf; buf = "" } }
+    buf == "" && /^[[:space:]]*(#|$)/ { next }
+    { line = $0; if (buf != "") sub(/^[[:space:]]+/, " ", line); buf = buf line
+      if (buf ~ /\\$/) { sub(/\\$/, "", buf); next }
+      flush() }
+    END {
+      flush()
+      for (i = 1; i <= n; i++) if (L[i] ~ /cp -a "\$S" "\$WORK\/raw"/) { c = i; break }
+      if (c < 2) exit 1
+      p = L[c - 1]
+      match(L[c], /^[[:space:]]*/); ci = substr(L[c], 1, RLENGTH)
+      match(p, /^[[:space:]]*/); pi = substr(p, 1, RLENGTH)
+      exit !(pi == ci && p ~ /^[[:space:]]*measure_drop_shim_link([[:space:]]*(\|\||;)|[[:space:]]*$)/)
+    }' "$1"
+}
+# 規則本身的對照組（合成的片段）：符合的兩種、⛔ 不符合的六種
+AC_PROBE="$(mktemp -d)"
+printf 'measure_drop_shim_link || on_failure x 1\n\n# 註解\ncp -a "$S" "$WORK/raw" || exit 1\n' > "$AC_PROBE/ok1"
+printf 'if true; then\n  measure_drop_shim_link\n  cp -a "$S" "$WORK/raw" \\\n    || exit 1\nfi\n' > "$AC_PROBE/ok2"
+printf '# measure_drop_shim_link\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-comment"
+printf ': measure_drop_shim_link\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-noop"
+printf 'echo measure_drop_shim_link\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-echo"
+printf 'measure_drop_shim_link\nsay x\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-gap"
+printf 'if false; then\n  measure_drop_shim_link\nfi\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-block"
+printf 'measure_drop_shim_link_x\ncp -a "$S" "$WORK/raw"\n' > "$AC_PROBE/bad-name"
+probe_ok=1
+for f in ok1 ok2; do ac_drop_before_raw "$AC_PROBE/$f" || { probe_ok=0; echo "    靜態規則誤擋：$f" >&2; }; done
+for f in bad-comment bad-noop bad-echo bad-gap bad-block bad-name; do
+  ! ac_drop_before_raw "$AC_PROBE/$f" || { probe_ok=0; echo "    靜態規則誤放：$f" >&2; }
+done
+rm -rf -- "$AC_PROBE"
+[ "$probe_ok" = 1 ] && pass "「十」(i) 靜態規則的對照組：直接呼叫（含續行、中間隔註解與空行）通過；註解、:、echo、隔一行、另一個區塊、相似名稱都擋下" \
+  || fail "「十」(i) 靜態規則的對照組不符"
+for h in scripts/i074-stage2-acceptance.sh scripts/i074-stage2-sizing.sh; do
+  if ac_drop_before_raw "$REPO_ROOT/$h"; then
+    pass "「十」(i)：$h 的成功路徑在 cp -a \"\$S\" \"\$WORK/raw\" 的前一個邏輯行直接呼叫 measure_drop_shim_link"
+  else
+    fail "「十」(i)：$h 的成功路徑沒有在複製 raw/ 的前一個邏輯行直接呼叫 measure_drop_shim_link"
+  fi
+done
+ac_no_formal() {  # $1＝work 目錄：⛔ 沒有 raw-failed/、staging、摘要（懸空的 symlink 也算存在）
+  local n
+  for n in raw-failed .raw-failed.staging failure_summary.json; do [ ! -e "$1/$n" ] && [ ! -L "$1/$n" ] || return 1; done
+}
+probe_ok=1; mkdir -p "$AC_TD/noformal-probe"
+{ ac_no_formal "$AC_TD/noformal-probe" || probe_ok=0; }                                      # 空目錄 → 符合
+for n in raw-failed .raw-failed.staging failure_summary.json; do
+  ln -s /nonexistent/x "$AC_TD/noformal-probe/$n"
+  ! ac_no_formal "$AC_TD/noformal-probe" || { probe_ok=0; echo "    懸空的 $n 被當成不存在" >&2; }
+  rm -f -- "$AC_TD/noformal-probe/$n"
+done
+[ "$probe_ok" = 1 ] && pass "ac_no_formal 的對照組：三個名稱各自是懸空的 symlink 都算存在、空目錄符合" || fail "ac_no_formal 的對照組不符"
 # ac28：on_failure 看到 reap-adopted 的結束碼 ≠ 0 → 保留 S、印出殘留（stub 的 helper；對照組：0 → 照常清 S）
 for rrc in 2 0; do
   OF_TD="$(mktemp -d)"; mkdir -p "$OF_TD/S" "$OF_TD/W"
@@ -3746,9 +3996,12 @@ for rrc in 2 0; do
     on_failure x 1' _ "$OF_TD/S" "$OF_TD/W" "$REPO_ROOT/scripts/lib/i074-stage2-measure.sh" 2>&1)" || true
   if [ "$rrc" = 2 ]; then
     [ -d "$OF_TD/S" ] && grep -q "收不掉的 host 程序（reap-adopted 結束碼 2" <<< "$out" && grep -q "保留 S" <<< "$out" \
-      && pass "ac28：reap-adopted ≠ 0 → on_failure 保留 S、印出殘留" || fail "ac28：reap-adopted 失敗卻沒有保留 S：$out"
+      && ac_no_formal "$OF_TD/W" \
+      && pass "ac28：reap-adopted ≠ 0 → on_failure 保留 S、印出殘留；⛔ 沒有 raw-failed/ 與摘要（⑨-1「十」）" \
+      || fail "ac28：reap-adopted 失敗卻沒有只保留 S：$out"
   else
-    [ ! -d "$OF_TD/S" ] && pass "ac28：reap-adopted ＝ 0 → 照常清 S（對照組）" || fail "ac28：對照組沒有清 S：$out"
+    [ ! -d "$OF_TD/S" ] && [ -d "$OF_TD/W/raw-failed" ] && [ -f "$OF_TD/W/failure_summary.json" ] \
+      && pass "ac28：reap-adopted ＝ 0 → raw-failed/ 與摘要、照常清 S（對照組）" || fail "ac28：對照組沒有清 S：$out"
   fi
   rm -rf -- "$OF_TD"
 done

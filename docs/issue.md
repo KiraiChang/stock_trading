@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，下一步：⑨-1 的正式驗收（使用者在選定的時段執行計畫「二」「三」）；⑨-2 細部計畫 v4（第三輪 review 修正）待確認（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，下一步：⑨-1 的正式驗收（使用者在選定的時段執行計畫「二」「三」）——「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、已實作、第三輪 review 的修正／⚠️ 待 review（⑨-1 的 precheck 換成 `_002`、⑨-2 的 P1、P4 的 `read`、P7 改成 fail-closed；commit 之後才執行 ⑨-1）；⑨-2 細部計畫 v4 ✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -5708,36 +5708,72 @@ D1～D7 的裁決見「六」（第二輪 review：D1～D5 維持、D6 同意、
 
 | # | 條件 | 怎麼確認 |
 |---|---|---|
-| P1 | HEAD 包含 `53538a3`、`c0cf0de` 與「十」的修正 commit `ec23e4a`（2026-10-15 review 通過）；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更 | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空 |
+| P1 | HEAD 包含 `53538a3`、`c0cf0de` 與「十」的修正 commit `ec23e4a`（2026-10-15 review 通過）；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更 | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空；以「P1 祖先 ok」「P1 clean ok」判定（`git status` 的結束碼 0 才判空）（2026-10-16，執行紀錄格式 v2） |
 | P2 | 兩份 patch 與封存點相同 | `git diff --quiet 53538a3 HEAD -- <兩份 patch>`；兩者的 SHA-256 ＝ 封存值 |
-| P3 | image 在本機、identity 的 `expected_image_id` ＝ `REPLAY_IMAGE_ID` | `docker image inspect`；只讀 identity 的那一個欄位 |
-| P4 | **整段執行**（約 3.5 小時）⛔ 不重疊任何批次（「〇」的完整清單）：上一個批次**已實際結束**（⚠️ 2026-10-15 訂正，⑨-2 計畫第一輪 review：⛔ 不只上一個——當天所有排程時間已過的工作都要是終態；週末即 D2 的 06:30 與 07:00 兩個）——以 `/scheduler/status`（或前端的排程狀態頁）確認它當天那一筆已是終態；有整輪硬上限的才可以依上限推定——而且預計結束時距離下一個批次的開始 ≥ 30 分鐘 | `docker inspect` 只看排程鍵（`*_CRON`、`*_ENABLED`，⛔ 不印其他環境變數）＋ `/scheduler/status`。⚠️ 比既有的作業規則嚴：量測趟期間的批次⛔ 不影響量測的有效性，但會吃掉 host 的記憶體 |
-| P5 | 開跑當下 **MemAvailable ≥ 950 MiB**（`/proc/meminfo` 的 kB ÷ 1024）：扣掉 100 MiB 的漂移之後，量測趟啟動當下仍 ≥ 850 MiB → 上限 ＝ min(700, 850 − 150) ＝ 完整的 700m | 不成立 → 結束 Claude、Codex 等非必要的程序（⛔ 不動 live），仍不成立就⛔ 不開跑 |
+| P3 | image 在本機、identity 的 `expected_image_id` ＝ `REPLAY_IMAGE_ID` | `docker image inspect`；只讀 identity 的那一個欄位；以「P3 image ok」「P3 identity ok」判定（結束碼；另印 identity 檔的 SHA-256）（2026-10-16，執行紀錄格式 v2） |
+| P4 | **整段執行**（約 3.5 小時）⛔ 不重疊任何批次（「〇」的完整清單）：上一個批次**已實際結束**（⚠️ 2026-10-15 訂正，⑨-2 計畫第一輪 review：⛔ 不只上一個——當天所有排程時間已過的工作都要是終態；週末即 D2 的 06:30 與 07:00 兩個）——以 `/scheduler/status`（或前端的排程狀態頁）確認它當天那一筆已是終態；有整輪硬上限的才可以依上限推定——而且預計結束時距離下一個批次的開始 ≥ 30 分鐘 | `docker inspect` 只看排程鍵（`*_CRON`、`*_ENABLED`，⛔ 不印其他環境變數）＋ `/scheduler/status`（區塊裡的查詢：每一列的狀態與「P4 running 的數量」；JWT 以 `read -rs` 讀入、先打一個空白再貼（2026-10-16，執行紀錄格式 v2））。⚠️ 比既有的作業規則嚴：量測趟期間的批次⛔ 不影響量測的有效性，但會吃掉 host 的記憶體 |
+| P5 | 開跑當下 **MemAvailable ≥ 950 MiB**（`/proc/meminfo` 的 kB ÷ 1024）：扣掉 100 MiB 的漂移之後，量測趟啟動當下仍 ≥ 850 MiB → 上限 ＝ min(700, 850 − 150) ＝ 完整的 700m | 以「P5 ok」判定（結束碼）（2026-10-16，執行紀錄格式 v2）；不成立 → 結束 Claude、Codex 等非必要的程序（⛔ 不動 live），仍不成立就⛔ 不開跑 |
 | P6 | 根檔案系統可用 ≥ 1.5 GB、`/dev/shm` 可用 ≥ 512 MB | `df`。⚠️ D5 保存每一次嘗試，重跑前要重新確認；不夠時由使用者決定是否清掉既有的開發產物（⛔ 不自行刪除） |
-| P7 | 沒有殘留：`/dev/shm/i074-*` 為空、`docker ps -a --filter name=i074sz-` 為空、⛔ 沒有 acceptance／sizing 的程序 | `ls`、`docker ps`、`ps -eo pid,args`。⚠️ 它只認名稱與 argv，抓不到逃出 session、argv 只是一般 `python`／`sleep` 的後代——所以「只有診斷資料」之後的重跑⛔ 不得只憑 P7（「四」，第四輪 review） |
-| P8 | 外部的 commit 錨點：`EXPECTED=$(git rev-parse HEAD)`，開跑之前就記下（寫進控制目錄，⛔ 不從跑完的 artifact 讀回） | — |
-| P9 | work 目錄 `~/i074_stage2_acceptance/formal-91-<UTC 時間>`、控制目錄 `/dev/shm/s91-<同一個名稱>/`（tmpfs；名稱⛔ 不是 `i074-*`，避免與 S 和 P7 混淆）都尚不存在 | harness 自己也會拒絕已存在的 work 目錄 |
+| P7 | 沒有殘留：`/dev/shm/i074-*` 為空、`docker ps -a --filter name=i074sz-` 為空、⛔ 沒有 acceptance／sizing 的程序 | `find`、`docker ps`、`ps -eo pid,args`，以「P7 ok」判定（`find`、`docker ps`、`ps`、`awk` 的結束碼都是 0、三項都是空的；`ls` 改成 `find`——zsh 的 glob（2026-10-16，執行紀錄格式 v2））。⚠️ 它只認名稱與 argv，抓不到逃出 session、argv 只是一般 `python`／`sleep` 的後代——所以「只有診斷資料」之後的重跑⛔ 不得只憑 P7（「四」，第四輪 review） |
+| P8 | 外部的 commit 錨點：`EXPECTED=$(git rev-parse HEAD)`，開跑之前就記下（寫進控制目錄，⛔ 不從跑完的 artifact 讀回） | 區塊的「P8 <OID>」（`git rev-parse --verify` 成功才印），與 `run.tsv` 的 `expected` 比對（2026-10-16，執行紀錄格式 v2） |
+| P9 | work 目錄 `~/i074_stage2_acceptance/formal-91-<UTC 時間>`、控制目錄 `/dev/shm/s91-<同一個名稱>/`（tmpfs；名稱⛔ 不是 `i074-*`，避免與 S 和 P7 混淆）都尚不存在 | ① 的 `mkdir -m 700 "$CTL"` 成功（`run.tsv` 的前四行各恰好一行）；harness 自己也會拒絕已存在的 work 目錄（`--work-dir 已存在`、結束碼 1）——`NAME` 在 ① 才決定，precheck 時無從查起（2026-10-16，執行紀錄格式 v2） |
 
-```text id="i074_stage2_step91_precheck_001"
-# P1～P8 的確認（使用者在自己的終端機執行；輸出貼進紀錄）
+⚠️ 2026-10-16 修改（「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」，兩輪 review）：區塊換成 `i074_stage2_step91_precheck_002`——整段的輸出存進 tmpfs 並驗證保存成功、每一項以 ok 那一行判定（指令本身失敗⛔ 不能落成 ok）、P4 的 `/scheduler/status` 查詢、D1 的證據與「五」7 的基準。原本的區塊（`_001`）見 `496a5f7`。
+
+```text id="i074_stage2_step91_precheck_002"
+# P1～P8 的確認、D1 的證據與「五」7 的基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT）：
+#   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt（2026-10-16 修改）
 cd /home/dev/workspace/stock_trading
+PRE="$(mktemp "/dev/shm/s91-pre-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.txt")"; RM=$?
+{
+echo "PRE $PRE"; date -u +'precheck 開始 %FT%TZ'; BT="$(awk '$1 == "btime" { print $2 }' /proc/stat)"; RBT=$?; echo "btime $BT"   # 判斷之後有沒有重開機
 IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
 git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
   && git merge-base --is-ancestor ec23e4a HEAD && echo "P1 祖先 ok"   # ec23e4a ＝「十」的修正（2026-10-15 review 通過）
-[ -z "$(git status --porcelain -- scripts python .gitattributes)" ] && echo "P1 clean ok"
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
 git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
   python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
 sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
 docker image inspect "$IMG" > /dev/null && echo "P3 image ok"
-python3 -c 'import json,sys; print("P3 identity", json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2])' \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json" "$IMG"
+ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+  && echo "P3 identity ok"                                                                                   # 以結束碼判定（同 ⑨-2）
+sha256sum "$ID"                                                                                              # P3：a02bf3bd…
 docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
-awk '/^MemAvailable:/ { printf "P5 MemAvailable %d MiB（門檻 950）\n", $2 / 1024 }' /proc/meminfo
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
+curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for j in sorted(jobs, key=lambda j: j["job_name"]):
+    print("P4", j["job_name"], j["status"], j.get("started_at", "-"), j.get("finished_at", "-"), "⚠️ 仍在執行" if j["status"] == "running" else "")
+print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; unset TOKEN
+awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' \
+  /proc/meminfo && echo "P5 ok"                                                                              # 以結束碼判定（同 ⑨-2）
+PD="$(ps -eo pid,rss,comm)"; RD=$?                                                                           # D1：ps 先完整取值，再交給 awk
+DL="$(awk '$3 ~ /^(claude|codex)/ { print "D1", $0 }' <<< "$PD")"; RA=$?; NC="$(awk '$3 == "claude" { n++ } END { print n + 0 }' <<< "$PD")"; RN=$?
+printf '%s\nD1 rc：ps %s、awk %s／%s；claude 的程序數 %s\n' "${DL:-D1 （⛔ 沒有 claude／codex 的程序）}" "$RD" "$RA" "$RN" "${NC:-無}"   # codex 只記錄（可以存在、⛔ 不使用）
+[ "$RD" = 0 ] && [ "$RA" = 0 ] && [ "$RN" = 0 ] && [ -n "$PD" ] && [ "$NC" = 0 ] && echo "D1 Claude 已結束 ok"  # 任一個指令失敗 ⛔ 不能當作已結束
 df -h / /dev/shm                                                                                             # P6
-ls -d /dev/shm/i074-* 2>/dev/null; docker ps -a --filter name=i074sz- -q                                     # P7：兩行都必須沒有輸出
-ps -eo pid,args | awk '/i074-stage2-(acceptance|sizing)\.sh/ && !/awk/'                                       # P7：必須沒有輸出
-git rev-parse HEAD                                                                                           # P8
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?; C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?  # P7：find ⛔ 不受 zsh 的 glob 影響
+PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?         # ps 先完整取值，再交給 awk
+printf 'P7 S：%s\nP7 容器：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s、ps %s、awk %s\n' "${S7:-無}" "${C7:-無}" "${P7:-無}" "$RS" "$RC" "$RP" "$RA7"
+[ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$P7" ] \
+  && echo "P7 ok"                                                                                            # 任一個指令失敗 ⛔ 不能當作沒有殘留
+H8="$(git rev-parse --verify HEAD)" && echo "P8 $H8"
+WL="$(git worktree list --porcelain)"; RW=$?; NW="$(grep -c '^worktree ' <<< "$WL")"; RG=$?                   # 「五」7 的基準
+TL="$(ls -A /tmp)"; RL=$?; TB="$(sed 's|^|基準 /tmp：|' <<< "$TL")"; RE=$?
+printf '基準 worktree 登記數 %s\n%s\n基準 rc：git %s、grep %s、ls %s、sed %s、btime 的 awk %s\n' "${NW:-無}" "$TB" "$RW" "$RG" "$RL" "$RE" "$RBT"
+[ "$RW" = 0 ] && [ "$RG" = 0 ] && [ "$RL" = 0 ] && [ "$RE" = 0 ] && [ "$RBT" = 0 ] && [[ "$NW" =~ ^[1-9][0-9]*$ ]] && [[ "$BT" =~ ^[1-9][0-9]*$ ]] \
+  && [ -n "$TB" ] && echo "基準 ok"                                                                          # 任一個指令失敗 ⛔ 不能當作有基準
+date -u +'precheck 結束 %FT%TZ'
+} 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
+  && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"   # ⛔ 沒有這一行就⛔ 不開跑
 ```
+
+**開跑的條件**（全部成立才進「三」①；缺任何一項就⛔ 不開跑）：`P1 祖先 ok`、`P1 clean ok`、`P2 ok`、`P3 image ok`、`P3 identity ok`、`P4 running 的數量： 0` 而且當天應確認的每一個工作都是終態（P4 的規則）、`P5 ok`、`D1 Claude 已結束 ok`、P6 的 `df` 達到門檻（目視）、`P7 ok`、`P8 <40 碼>`、`基準 ok`、`PRE 保存 ok：<路徑>`。
+⚠️ 判讀的是**實際輸出**的那一行（行首就是該文字），⛔ 不是貼上時回顯的指令文字。
+
+⚠️ **只貼這一個區塊**：整段是一個指令，`read` 等的是你接著貼上的 JWT——看到「P4：先打一個空白、再貼上 JWT，按 Enter（…）」這一行的**實際輸出**（前面已經有 `P3 identity ok` 等輸出）之後，先打一個空白、再貼上 JWT、按 Enter。同時多貼的文字會被 `read` 讀走。P4 查詢失敗（401、backend 沒有回應）時⛔ 沒有「P4 running 的數量」那一行 → P4 ⛔ 不成立：⛔ 不開跑，或依 P4 的規則改用前端的排程狀態頁，把每一列（job、status、開始、結束）抄進紀錄。
 
 ##### 三、啟動、程序身分、狀態、安全中止與完成判定（D1：由使用者在 tmux／自己的終端機執行，Claude 先結束）
 
@@ -5857,7 +5893,7 @@ if alive "$hp" "$hs" && grep -qa 'i074-stage2-acceptance.sh' "/proc/$hp/cmdline"
 
 ##### 六、歸檔與 commit
 
-* 本筆：新節「Stage 2 步驟 ⑨-1 正式驗收結果」（每一次嘗試、「二」的前置條件結果、「五」的全部數字與錨點）；I-074 狀態列、roadmap（⑨-1 → 結果、⑨-2 →「現在在這裡」）。
+* 本筆：新節「Stage 2 步驟 ⑨-1 正式驗收結果」（每一次嘗試、「二」的前置條件結果、「五」的全部數字與錨點；結構依「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」「四」的樣板（2026-10-16，執行紀錄格式 v2））；I-074 狀態列、roadmap（⑨-1 → 結果、⑨-2 →「現在在這裡」）。
 * `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」：補 ⑨-1 的正式結果（判定、主要數字、raw manifest 的錨）；標題裡已過時的「⚠️ 待 review」
   （有效性條件與 fail-fast 已 review 通過並 commit `c49fde1`）一併訂正。
 * `development-workflow.md`：acceptance 一節的標題同樣訂正；⑨-1 的指令改成「二」「三」的版本（P1～P9、wrapper、狀態、安全中止、完成判定）。
@@ -5867,7 +5903,7 @@ if alive "$hp" "$hs" && grep -qa 'i074-stage2-acceptance.sh' "/proc/$hp/cmdline"
 
 | 風險 | 處置 |
 |---|---|
-| host 的記憶體不夠：量測趟的容器上限偏低而被 OOM 砍掉，或 host 的 OOM killer 出手 | P5（950 MiB）、D1（Claude 與 Codex 都結束）；P4 讓整段執行避開批次。被砍時依「四」的崩潰處理 |
+| host 的記憶體不夠：量測趟的容器上限偏低而被 OOM 砍掉，或 host 的 OOM killer 出手 | P5（950 MiB）、D1（Claude ⛔ 沒有程序；Codex ⛔ 不使用，P5 不成立時才結束——2026-10-16 訂正，執行紀錄格式 v2 第一輪 review）；P4 讓整段執行避開批次。被砍時依「四」的崩潰處理 |
 | 磁碟的餘裕只剩約 4.9 MiB | 照實判定：`P_basis` 超過預算就是 threshold_exceeded（回退順序由使用者裁決）；外部雜訊由有效性條件處理（invalid 可以重跑）。⚠️ HEAD 的 tree 每長一點，`code_worktree` 就跟著長——⑨-1 到 ⑨-2 之間只 commit 文件 |
 | 原始量測在寫入者還活著時被複製（混合時間點） | 「十」：清理全部成功才產生 `raw-failed/`；其他情形的 S 只當診斷資料、⛔ 不救援、⛔ 不產 manifest（D8）；量測趟是否啟動以 harness 的進度行保守劃界（「四」） |
 | `raw-failed/` 複製到一半（ENOSPC、EIO、SIGKILL）被當成正式的原始量測 | 「十」：完整複製到 staging 之後才以 `mv -T` 發布；部分內容只會出現在 `.raw-failed.staging/`（⛔ 不是證據）；host 當機另見「四」的重開機一列（第六輪 review） |
@@ -6110,7 +6146,408 @@ c4 拆成 c4a（空的 `raw-failed/`）、c4b（staging），c6 拆成 c6k、c6t
 
 ⚠️ 磁碟的餘裕（計畫「〇」的估法、同一種量法：`git archive` 解開之後以 helper 的 `allocated` 量；對照組 `6054c65` ＝ 40,488,960，與計畫相同）：`ec23e4a` 的 `code_worktree` ＝ 40,624,128 bytes（＋135,168）→ success 的 `P_path` 預估約 162,742,272、**餘裕約 4.80 MiB**（原估 4.9 MiB）。計畫「七」：⑨-1 到 ⑨-2 之間只 commit 文件。
 
-#### Stage 2 步驟 ⑨-2 細部計畫 v4（2026-10-16，第三輪 review 修正後待確認）
+#### Stage 2 步驟 ⑨-1 執行紀錄格式 v2（2026-10-16，✅ 確認（兩輪 review）；已實作、第三輪 review 的修正／⚠️ 待 review）
+
+⚠️ 依據：「Stage 2 步驟 ⑨-1 細部計畫 v8」（`496a5f7`）的「二」（前置條件）、「四」（判讀）、「五」（驗證與保存）、「六」（新節「Stage 2 步驟 ⑨-1 正式驗收結果」）；
+「Stage 2 步驟 ⑨-2 細部計畫 v4」（`4f7e7f0`）的 P1、P10（要從 ⑨-1 的結果一節取 `E91`、`R91` 與「通過」）。
+需求確認（2026-10-16）：週末執行 ⑨-1 之前先定好執行紀錄的格式——執行期間 Claude ⛔ 沒有程序、Codex 可以存在但⛔ 不使用（⑨-1 的 D1；P5 不成立時才結束 Codex），
+只有使用者看得到的輸出要當場保存；其餘由 Claude 事後依「四」「五」判讀與計算。只動文件；⛔ 不改程式、⛔ 不執行量測；⑨-2 的紀錄格式⛔ 不在範圍內。
+⚠️ 本計畫確認之前⛔ 不改 ⑨-1 的指令。v2 ＝ 第一輪 review（2026-10-16）的修正，見本節最後的「第一輪 review 的修正」。
+
+##### 〇、唯讀盤點（2026-10-16，HEAD `4f7e7f0`）
+
+| 項目 | 現況 |
+|---|---|
+| 結果一節的結構 | ⑨-1「六」只寫「每一次嘗試、「二」的前置條件結果、「五」的全部數字與錨點」，⛔ 沒有固定的結構；⑨-2 要從那一節取 `E91`（⑨-1 的 `EXPECTED`）、`R91`（結果的 commit）與「rc 0 且「五」全部成立」（P10），⛔ 沒有固定的位置 |
+| 只有開跑當下才拿得到的證據 | ⑨-1「二」的 precheck 只印在終端機（⛔ 沒有保存）；P4 的規則要求以 `/scheduler/status` 確認所有已到時的工作都是終態，但區塊裡只有 `docker inspect`（查詢指令只在 ⑨-2 的區塊）；「五」7 要求「worktree 登記數不變」「`/tmp` 的新項目逐一歸因」，但⛔ 沒有開跑之前的基準；D1（Claude 已結束）⛔ 沒有客觀的證據 |
+| precheck 的判讀方式 | P3 的 identity 比對印 `True`／`False`、P5 只印數字（rc 都是 0）——⑨-2 第二輪 review 已在 ⑨-2 改成以結束碼判定，⑨-1 的區塊還是舊的。⚠️ 第一輪 review 之後的盤點：凡是以 `$(…)` 或管線取值再判空的 ok（P1 clean、D1、P7），指令本身失敗時輸出是空的 → 照樣印 ok；P8 只印 `git rev-parse` 的輸出（失敗時是空的 `P8`）——✅ 都以假指令重現（「第一輪 review 的修正」） |
+| ⚠️ zsh（使用者的 shell，`$SHELL` ＝ `/usr/bin/zsh`、tmux ⛔ 沒有另設） | P7 的 `ls -d /dev/shm/i074-* 2>/dev/null` 在**乾淨時**印出 `no matches found: /dev/shm/i074-*`（glob 沒有匹配是 zsh 的錯誤、⛔ 不受 `2>/dev/null` 影響）——與「兩行都必須沒有輸出」矛盾。✅ 重現（以 zsh 實跑 ⑨-1 的整段 precheck，附 bash 的對照：bash 沒有輸出）；同一行的 `docker ps` 照樣執行（實測），所以只會誤導、⛔ 不會漏查。同一行出現在 ⑨-1、⑨-2 的 precheck 與 `development-workflow.md` 的 ⑨-1 副本，共三處 |
+| 互動 shell 的設定（實測） | 使用者的 zsh（oh-my-zsh）：`interactive_comments`、bracketed paste、`hist_ignore_space`、`share_history` 都開；`~/.bashrc`：`HISTCONTROL=ignoreboth`、bracketed paste 開。⚠️ 區塊裡有 `#` 註解：`interactive_comments` 關閉時（`zsh -f -i`）整段解析錯亂、⛔ 沒跑到 `read`——之後貼上的 JWT 被當成指令執行、記進 history（pty 實測重現；新區塊在這種情形⛔ 不印「PRE 保存 ok」） |
+| worktree 的登記數 | 401：真正的 repo 1 ＋ I-118 遺留的 400 個 `/tmp/tmp.*` worktree 登記（2026-09-29～10-08）——其中 384 個的目錄已不存在、16 個的目錄還在但⛔ 沒有 `.git`（2026-10-16 實測；git 2.30.2 的 `worktree list` ⛔ 不標 prunable）。本計畫⛔ 不清理、⛔ 不 prune；「五」7 只比對前後的登記數與 `/tmp` 的名稱清單（第二輪 review） |
+| 數字的權威來源 | `acceptance_report.txt` 由 helper 的 `acceptance_report_text()`（`python/scripts/i074_stage2_sizing.py:2620`）產生；`P_basis`、`fs_unexplained` 由 `disk_numbers()`（`python/scripts/i074_stage2_sizing.py:995`）推導，⛔ 不在 JSON 裡——紀錄⛔ 不得手算。full 模式比 dev7 多一個容器：`memory_only` 的 `replay` ＝ 量測趟（`FULL_COMPUTE_EXTRA`（`python/scripts/i074_stage2_sizing.py:89`））；它的耗時可由 `raw/events/events.jsonl` 的 `create_begin`／`rm_done`（`monotonic_ns`）算出 |
+| 「五」5 的封存值比對 | ⛔ 沒有指令（只寫「逐一 ＝ 封存值」）；封存值見 `sr-zone-scoring.md` 的封存值表 |
+| 現在的記憶體 | MemAvailable 575～592 MiB（Claude 約 360 MiB、Codex 的幾個程序約 240 MiB 都在執行）；P5 的門檻是 950 MiB |
+
+##### 一、目標、範圍與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | ① 「Stage 2 步驟 ⑨-1 正式驗收結果」一節有固定的結構（「四」的樣板），⑨-2 要用的值有固定的位置；② 每一個欄位都有來源——誰、何時、存在哪（「二」）；③ 只有開跑當下才拿得到的證據當場保存，而且保存成功也要驗證（「三」）；④ 數字與封存值以指令取得、結束碼判定（「五」）；⑤ 每一個 ok 都 fail-closed：指令本身失敗⛔ 不能落成 ok |
+| 範圍 | 紀錄的樣板；⑨-1「二」precheck 區塊的保存方式、判定方式與基準（與 `development-workflow.md` 的副本同步）；⑨-2「二」的 P7（同類的 zsh 問題）、P1（D7，同類的 fail-open）與 P4 的 `read`（第三輪 review：提示行與 `{ }`）；摘錄與封存值檢查的指令；⑨-1「六」的指標；Claude／Codex 說法的統一（第一輪 review 的第 2 點） |
+| ⛔ 不做 | ⛔ 不改 ⑨-1 的判讀規則（「四」）、門檻、wrapper、啟動、狀態、安全中止（「三」）；⛔ 不改程式；⛔ 不執行量測；⛔ 不改 ⑨-2 的紀錄格式與 P1、P4 的 `read`、P7 以外的指令；⛔ 不改 P1～P10 的條件本身（只改確認的方式） |
+
+##### 二、資料來源（誰、何時、存在哪）
+
+| 資料 | 由誰 | 何時 | 存放 | 用在樣板的 |
+|---|---|---|---|---|
+| precheck 的完整輸出（P1～P8、D1、`btime`、「五」7 的基準） | 使用者 | 開跑之前（「三」① 之前，接著直接啟動——P5 是開跑當下的值） | `mktemp` 建立的 `/dev/shm/s91-pre-<UTC>-XXXXXX.txt`（名稱⛔ 不碰撞、mode 600；tmpfs、名稱⛔ 不是 `i074-*`，⛔ 不影響 P6、P7、P9）；區塊最後驗證保存成功才印「PRE 保存 ok」→ 跑完由 Claude 複製進 `<NAME>.ctl/precheck.txt` 並重驗（第一行 ＝ `PRE <路徑>`、`precheck 開始` 恰好一行、`precheck 結束` 恰好一行且是最後一行），再刪掉 `/dev/shm` 的那一份（重跑時每一次嘗試各一份，以檔名的時間與 `launched_utc` 對應） | 三之 1 |
+| P9（`<work>`、`$CTL` 都尚不存在） | ① 的 `mkdir`、harness | 啟動時（`NAME` 在 ① 才決定，precheck 時還⛔ 沒有路徑可查） | ① 的 `mkdir -m 700 "$CTL"` 成功才寫 `run.tsv` 的前四行（`expected`、`name`、`work`、`launched_utc`；失敗時終端機有 `mkdir` 的錯誤、這四行⛔ 不存在）；harness 的 `measure_work_dir_guard()`（`scripts/lib/i074-stage2-measure.sh:35`）拒絕既存的 `<work>`：`ERROR: --work-dir 已存在：…（⛔ 不覆蓋）`、結束碼 1，訊息在 `$CTL/log` | 三之 1 |
+| `run.tsv`、`rc`、`log` | wrapper、harness | 自動 | `$CTL`（tmpfs）→ `<NAME>.ctl/`（⑨-1「五」7） | 三之 2、3 |
+| 等待期間的觀察（② 的輸出、異常、是否中止、P5 不成立時先結束了哪些程序） | 使用者 | 重新啟動 Claude 時 | 對話中告知，Claude 原文記成「使用者回報」 | 三之 1、2 |
+| `<work>` 的報告、`raw/`／`raw-failed/`、摘要 | harness | 自動 | `<work>` | 三之 3～5 |
+| 跑完之後的 `btime`、`precheck-verdict`、manifest、摘錄指令、殘留、S 的刪除程序 | Claude | 跑完之後 | 紀錄 | 三之 2～5 |
+
+⚠️ token：P4 的 JWT 以 `read -rs` 讀入，⛔ 不回顯、⛔ 不在 `tee` 的輸出裡、⛔ 不進 shell 的 history（實測）、⛔ 不寫進任何紀錄。
+
+##### 三、precheck 的修改（D1～D4）
+
+把 ⑨-1「二」的區塊換成下面這一段（`development-workflow.md` 的 ⑨-1 副本同步）。與現行區塊的差異：
+
+| # | 差異 | 理由 |
+|---|---|---|
+| 1 | `PRE` 以 `mktemp` 建立（名稱⛔ 不碰撞、mode 600）；整段包在 `{ … } 2>&1 \| tee "$PRE"`，第一行印 `PRE`、開始時間、`btime`，最後一行印結束時間；`tee` 之後立刻保存結束碼——`mktemp`、`tee` 的結束碼都是 0、檔案非空、第一行 ＝ `PRE <路徑>`、`precheck 開始` 恰好一行、`precheck 結束` 恰好一行且是最後一行，才印 `PRE 保存 ok`。這個檢查與 `}` 是同一個指令（續行），`read` 執行時終端機的輸入佇列裡⛔ 沒有下一行可以被讀走 | 現行的輸出只在終端機、⛔ 沒有保存（D1）；保存失敗⛔ 不能當作已保存（第一輪 review 的第 3 點）。⛔ 不用 `pipefail`／`set -e`：每一項檢查都要跑完，依各自的 ok 判讀；`btime` 讓「四」的重開機一列有直接的證據（跑完之後再讀一次比對） |
+| 2 | P1 clean：`git status` 先取值、結束碼 0 才判空；P3 的 identity 以結束碼判定（成立才印 `P3 identity ok`），另印 identity 檔的 SHA-256；P8：`git rev-parse --verify` 成功才印 `P8 <OID>` | P3 同 ⑨-2 第二輪 review（D2）；P1 clean、P8：git 失敗時輸出是空的，⛔ 不能當作 clean／有 OID（第一輪 review 之後盤點的同類） |
+| 3 | P4 加上 `/scheduler/status` 的查詢（與 ⑨-2 相同的程式）；`read` 之前先印提示：「先打一個空白、再貼上 JWT」 | ⑨-1 的 P4 規則本來就要求確認所有已到時的工作，區塊裡⛔ 沒有查詢（D2）。空白：萬一區塊沒跑到 `read`，以空白開頭的那一行⛔ 不進 history（zsh 的 `hist_ignore_space`、bash 的 `HISTCONTROL=ignoreboth`）；`read` 會去掉前後的空白——都實測 |
+| 4 | P5 以結束碼判定（門檻 950，成立才印 `P5 ok`） | 同 ⑨-2 第二輪 review（D2） |
+| 5 | D1：`ps` 先完整取值，再交給 `awk`（列出程序、數 `claude` 的程序數），印出各自的結束碼；`ps` 與兩個 `awk` 的結束碼都是 0、`ps` 的輸出非空、`claude` 的程序數印出 `0`（正向的值），才印 `D1 Claude 已結束 ok`；`codex` 的程序只記錄 | `ps` 失敗⛔ 不能當作「Claude 已結束」（第一輪 review 的第 1 點）、`awk` 失敗也一樣（第三輪 review 的第 1 點）；Codex 依第一輪 review 的第 2 點：可以存在、量測期間⛔ 不使用，P5 仍須通過（D4） |
+| 6 | P7：`find`、`docker ps`、`ps` 各自先取值並保存結束碼（`ps` ⛔ 不再接管線），`awk` 的結束碼也保存，四者都是 0、`ps` 的輸出非空、三項都是空的，才印 `P7 ok`；⑨-2 的 P7 換成同樣的 5 行 | zsh 的 glob（「〇」）；任一個指令失敗⛔ 不能當作沒有殘留（第一輪 review 的第 1 點，D3；`awk`：第三輪 review 的第 1 點） |
+| 7 | 開頭讀 `btime` 存進變數；最後印 worktree 登記數與 `/tmp` 的清單；`git worktree list`、`grep`、`ls`、`sed` 與讀 `btime` 的 `awk` 的結束碼都是 0、登記數與 `btime` 都是正整數，才印 `基準 ok`；保存的檢查另要求 `precheck 開始` 恰好一行 | 「五」7 的基準與重開機的基準（D4；`grep`、`sed`、`awk` 失敗⛔ 不能當作有基準——第三輪 review 的第 1 點） |
+| 8 | ⑨-2 的區塊：整段包在 `{ … }` 裡；`read` 之前加上與 ⑨-1 相同的提示行與「只貼這一個區塊」的說明；P7 與 ⑨-1 相同 | ⑨-2 的 `read` 是獨立的一行、後面還有十幾行：⛔ 沒有 bracketed paste 時 `read` 會讀走下一行（`curl …`），之後貼上的 JWT 被當成指令執行並顯示在終端機（✅ pty 重現，zsh、bash；`bash --norc` 還記進 history）；提示行讓「看到實際輸出才貼」做得到（第三輪 review 的第 2 點） |
+
+```text id="i074_stage2_step91_precheck_002"
+# P1～P8 的確認、D1 的證據與「五」7 的基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT）：
+#   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt（2026-10-16 修改）
+cd /home/dev/workspace/stock_trading
+PRE="$(mktemp "/dev/shm/s91-pre-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.txt")"; RM=$?
+{
+echo "PRE $PRE"; date -u +'precheck 開始 %FT%TZ'; BT="$(awk '$1 == "btime" { print $2 }' /proc/stat)"; RBT=$?; echo "btime $BT"   # 判斷之後有沒有重開機
+IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
+git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
+  && git merge-base --is-ancestor ec23e4a HEAD && echo "P1 祖先 ok"   # ec23e4a ＝「十」的修正（2026-10-15 review 通過）
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
+git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
+  python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
+sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
+docker image inspect "$IMG" > /dev/null && echo "P3 image ok"
+ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+  && echo "P3 identity ok"                                                                                   # 以結束碼判定（同 ⑨-2）
+sha256sum "$ID"                                                                                              # P3：a02bf3bd…
+docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
+curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for j in sorted(jobs, key=lambda j: j["job_name"]):
+    print("P4", j["job_name"], j["status"], j.get("started_at", "-"), j.get("finished_at", "-"), "⚠️ 仍在執行" if j["status"] == "running" else "")
+print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; unset TOKEN
+awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' \
+  /proc/meminfo && echo "P5 ok"                                                                              # 以結束碼判定（同 ⑨-2）
+PD="$(ps -eo pid,rss,comm)"; RD=$?                                                                           # D1：ps 先完整取值，再交給 awk
+DL="$(awk '$3 ~ /^(claude|codex)/ { print "D1", $0 }' <<< "$PD")"; RA=$?; NC="$(awk '$3 == "claude" { n++ } END { print n + 0 }' <<< "$PD")"; RN=$?
+printf '%s\nD1 rc：ps %s、awk %s／%s；claude 的程序數 %s\n' "${DL:-D1 （⛔ 沒有 claude／codex 的程序）}" "$RD" "$RA" "$RN" "${NC:-無}"   # codex 只記錄（可以存在、⛔ 不使用）
+[ "$RD" = 0 ] && [ "$RA" = 0 ] && [ "$RN" = 0 ] && [ -n "$PD" ] && [ "$NC" = 0 ] && echo "D1 Claude 已結束 ok"  # 任一個指令失敗 ⛔ 不能當作已結束
+df -h / /dev/shm                                                                                             # P6
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?; C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?  # P7：find ⛔ 不受 zsh 的 glob 影響
+PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?         # ps 先完整取值，再交給 awk
+printf 'P7 S：%s\nP7 容器：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s、ps %s、awk %s\n' "${S7:-無}" "${C7:-無}" "${P7:-無}" "$RS" "$RC" "$RP" "$RA7"
+[ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$P7" ] \
+  && echo "P7 ok"                                                                                            # 任一個指令失敗 ⛔ 不能當作沒有殘留
+H8="$(git rev-parse --verify HEAD)" && echo "P8 $H8"
+WL="$(git worktree list --porcelain)"; RW=$?; NW="$(grep -c '^worktree ' <<< "$WL")"; RG=$?                   # 「五」7 的基準
+TL="$(ls -A /tmp)"; RL=$?; TB="$(sed 's|^|基準 /tmp：|' <<< "$TL")"; RE=$?
+printf '基準 worktree 登記數 %s\n%s\n基準 rc：git %s、grep %s、ls %s、sed %s、btime 的 awk %s\n' "${NW:-無}" "$TB" "$RW" "$RG" "$RL" "$RE" "$RBT"
+[ "$RW" = 0 ] && [ "$RG" = 0 ] && [ "$RL" = 0 ] && [ "$RE" = 0 ] && [ "$RBT" = 0 ] && [[ "$NW" =~ ^[1-9][0-9]*$ ]] && [[ "$BT" =~ ^[1-9][0-9]*$ ]] \
+  && [ -n "$TB" ] && echo "基準 ok"                                                                          # 任一個指令失敗 ⛔ 不能當作有基準
+date -u +'precheck 結束 %FT%TZ'
+} 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
+  && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"   # ⛔ 沒有這一行就⛔ 不開跑
+```
+
+**開跑的條件**（全部成立才進「三」①；缺任何一項就⛔ 不開跑）：`P1 祖先 ok`、`P1 clean ok`、`P2 ok`、`P3 image ok`、`P3 identity ok`、`P4 running 的數量： 0` 而且當天應確認的每一個工作都是終態（P4 的規則）、`P5 ok`、`D1 Claude 已結束 ok`、P6 的 `df` 達到門檻（目視）、`P7 ok`、`P8 <40 碼>`、`基準 ok`、`PRE 保存 ok：<路徑>`。
+⚠️ 判讀的是**實際輸出**的那一行（行首就是該文字），⛔ 不是貼上時回顯的指令文字。
+
+⚠️ **只貼這一個區塊**：整段是一個指令，`read` 等的是你接著貼上的 JWT——看到「P4：先打一個空白、再貼上 JWT，按 Enter（…）」這一行的**實際輸出**（前面已經有 `P3 identity ok` 等輸出）之後，先打一個空白、再貼上 JWT、按 Enter。同時多貼的文字會被 `read` 讀走。P4 查詢失敗（401、backend 沒有回應）時⛔ 沒有「P4 running 的數量」那一行 → P4 ⛔ 不成立：⛔ 不開跑，或依 P4 的規則改用前端的排程狀態頁，把每一列（job、status、開始、結束）抄進紀錄。
+
+實測（2026-10-16，scratchpad 的副本；Claude 與 Codex 都在執行、⛔ 沒有 JWT；pty 的測試把 `HISTFILE` 指到 scratchpad）：
+* 互動 shell（pty）：使用者的 zsh（`zsh -i`，載入 `~/.zshrc`）與 `bash --norc -i`，各以 bracketed paste 與逐行輸入（⛔ 沒有 bracketed paste）貼上整段，看到提示行的實際輸出之後才送「空白 ＋ 假 token ＋ 空白」：4 種都是 `read` 真的在等、印出「PRE 保存 ok」、假 curl 收到的 header 與 token 完全相同（前後的空白已去掉）、token 在 pty 輸出、`$PRE` 與 history 裡都是 0 次（v3、v4 各跑一輪）。對照：`zsh -f -i`（`interactive_comments` 關閉）整段解析錯亂、假 token 被當成指令執行並記進 history，而且⛔ 沒有「PRE 保存 ok」；以空白開頭的指令在 `zsh -i`、`bash -i` ⛔ 不進 history（`bash --norc` 不讀 `~/.bashrc`，會記錄——這個保護依賴使用者現在的設定）。
+* 非互動（stdin 餵假的 token）：zsh（真的 curl）、bash（假的 curl）各一次：結束碼 0；`$PRE` 與終端機的輸出（最後一行「PRE 保存 ok」除外）逐位元相同、mode 600、token 0 次；P1、P2、P3、P7、P8、基準、PRE 保存都有 ok，各 rc 行都是 0（`D1 rc：ps 0、awk 0／0`、`P7 rc：find 0、docker ps 0、ps 0、awk 0`、`基準 rc：git 0、grep 0、ls 0、sed 0、btime 的 awk 0`）；P4 回 401（⛔ 沒有 running 那一行）、P5 印 592 MiB 而⛔ 沒有 ok、Claude 在執行（`claude 的程序數 1`）所以⛔ 沒有 D1 的 ok——都符合預期；zsh ⛔ 不再出現 `no matches found`。
+* 反例（PATH 前面放假指令，zsh、bash 各一次，共 56 次全部符合；每一案只少了該有的那一個 ok，其餘的 ok 都在、token 都是 0 次）：對照組（假的 `ps` 去掉 `claude`）全部 ok；Claude 在執行 → ⛔ 沒有 D1 的 ok；`mktemp` 失敗、`tee` 失敗、檔案被截斷、多一行結束標記（不在最後／在最後）、開始標記重複或缺少、第一行不符 → ⛔ 沒有「PRE 保存 ok」；`find` 失敗、`docker ps` 失敗、`ps` 失敗（沒有輸出／只有表頭）、P7 的 `awk` 失敗（127）、有 harness 的程序、`/dev/shm` 有 `i074-*` → ⛔ 沒有「P7 ok」；D1 的 `ps` 失敗（沒有輸出／只有表頭）、列出程序的 `awk` 失敗、數程序的 `awk` 失敗 → ⛔ 沒有 D1 的 ok；`git status` 失敗 → ⛔ 沒有「P1 clean ok」；`git rev-parse` 失敗 → ⛔ 沒有 P8 那一行；`git worktree list`、`grep`、`ls`、`sed`、讀 `btime` 的 `awk` 失敗 → ⛔ 沒有「基準 ok」。
+* 舊區塊的對照（同樣的假指令）：v1——`find` 失敗、`ps` 失敗 → 照樣印「P7 ok」；`ps` 失敗 → 照樣印「D1 Claude 已結束 ok」；`git status` 失敗 → 照樣印「P1 clean ok」；`git rev-parse` 失敗 → 印出空的「P8 」；`tee` 只寫進 5 行 → 結束碼 0、⛔ 沒有任何提示。v3（第二輪 review 時的版本）——D1、P7 的 `awk` 失敗 → 照樣印 D1、P7 的 ok；`grep`、`sed`、讀 `btime` 的 `awk` 失敗 → 照樣印「基準 ok」；開始標記缺少或重複 → 照樣印「PRE 保存 ok」（第三輪 review 的第 1 點與同類，✅ 重現）。
+* ⑨-2 的新區塊（`R91`、`E91` 代入 HEAD，假的 curl）：zsh、bash 的非互動各 7 案——正確 → P1 三項、P2、P3、P7 都有 ok；`E91` 打錯 → ⛔ 沒有祖先與「只動 docs/」的 ok；`R91` 空白 → ⛔ 沒有祖先的 ok；有程式變更的 commit → ⛔ 沒有「只動 docs/」的 ok；P7 的 `awk`、`find`、`ps` 失敗 → ⛔ 沒有「P7 ok」；佔位沒換 → 整段解析失敗、0 個 ok。pty 4 種（zsh -i、bash --norc -i × bracketed paste、逐行輸入）：`read` 都真的在等、curl 收到的 header 與 token 完全相同、token 在輸出與 history 都是 0 次、P1、P7 都有 ok。現行的 ⑨-2 區塊（`{ }` 之前）在逐行輸入時：`read` 讀走 `curl` 那一行、token 被當成指令執行（zsh、bash 都重現）。
+* 測試留下的 `/dev/shm/s91-pre-*.txt` 都已移出 `/dev/shm`；`/dev/shm` 只剩既有的 `libpod_lock`。
+
+##### 四、紀錄的樣板（「Stage 2 步驟 ⑨-1 正式驗收結果」一節）
+
+規則：只寫 artifact 的權威欄位與指令的原樣輸出；數字一律經摘錄指令（「五」）或 helper（⛔ 不手算、⛔ 不重新推導）；每一次嘗試都一節（含⛔ 沒有 `<work>` 的）；
+每一個判定都附依據（指令與輸出、檔案的位置）；token ⛔ 不出現；引用本節時一律以 commit 引用（本節收斂之後仍可 `git show` 取得，見 D6）。
+
+```text id="i074_stage2_step91_record_001"
+#### Stage 2 步驟 ⑨-1 正式驗收結果（<YYYY-MM-DD>，<結論>；⚠️ 待 review）
+
+依據：「Stage 2 步驟 ⑨-1 細部計畫 v8」（`496a5f7`）「二」～「六」、前置修正「十」（`ec23e4a`）；紀錄格式、precheck 與摘錄指令：
+`<C>` 的 `docs/issue.md`「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」（`<C>` ＝ 該格式實作的 commit）。
+
+##### 一、結論與交給 ⑨-2 的值
+| 項目 | 值 |
+|---|---|
+| 結論 | ⑨-1 通過｜判定：threshold_exceeded（記憶體／磁碟）｜停下回報（原因）｜待重跑 |
+| 依據的嘗試 | 嘗試 <k>（`<NAME>`） |
+| `E91`（⑨-2 的 P1） | `<40 碼>`：該次 `run.tsv` 的 `expected` ＝ precheck 的 P8 ＝ 報告的 `meta.repo_head`（三者都要相同） |
+| `R91`（⑨-2 的 P1、P10） | 本節 commit 之後才有：Claude 再把它補進本節標題、I-074 狀態列與 roadmap（只動 docs） |
+| P10 的條件 | rc 0、`status` ok、⑨-1「五」1～8 全部成立：<是｜否（第 x 項）> |
+| 額度 | invalid 連續 <n>／2；量測趟的崩潰 <m>（可重試 1 次）；只有診斷資料：<無｜嘗試 k> |
+| 正式原始量測的錨 | `<NAME>/<raw｜raw-failed>`：manifest `sha256` `<64 碼>`、`file_count` <n>、`dir_count` <n> |
+
+##### 二、嘗試一覽（每一次嘗試一列）
+| # | `NAME` | 開跑（`launched_utc`） | 結束（rc marker） | rc | 留下的形狀 | ⑨-1「四」的列 | 額度 | 處置 |
+|---|---|---|---|---|---|---|---|---|
+
+##### 三、嘗試 <k>：`<NAME>`
+
+1. 前置條件（⑨-1「二」；原始輸出：`<NAME>.ctl/precheck.txt`）
+| # | 結果 | 依據 |
+|---|---|---|
+| P1 | ✅／⛔ 不成立 | 「P1 祖先 ok」「P1 clean ok」 |
+| P2 | | 「P2 ok」；兩份 SHA ＝ 封存值 |
+| P3 | | 「P3 image ok」「P3 identity ok」；identity 檔的 SHA ＝ `a02bf3bd…` |
+| P4 | | 時段（⑨-1 的 D2）；當天應確認的每一個工作 → `/scheduler/status` 的對應列（job、status、started_at、finished_at）；running 的數量 |
+| P5 | | 「P5 MemAvailable <n> MiB」「P5 ok」；不成立時先結束了哪些程序（使用者回報） |
+| D1 | | 「D1 Claude 已結束 ok」（`ps`、`awk` 的 rc 0、`claude 的程序數 0`）；Codex 的程序（記錄：可以存在、等待期間⛔ 不使用） |
+| P6 | | `df` 的可用量（`/`、`/dev/shm`） |
+| P7 | | 「P7 ok」（`find`、`docker ps`、`ps`、`awk` 的 rc 都是 0） |
+| P8 | | 「P8 <OID>」＝ `run.tsv` 的 `expected` |
+| P9 | | ① 的 `mkdir` 成功：`run.tsv` 的 `expected`、`name`、`work`、`launched_utc` 各恰好一行，`name` ＝ `.ctl` 的目錄名，使用者回報 ① ⛔ 沒有錯誤；harness ⛔ 沒有拒絕：`log` ⛔ 沒有「--work-dir 已存在」 |
+| 基準 | | 「基準 ok」（`git`、`grep`、`ls`、`sed`、讀 `btime` 的 `awk` 的 rc 都是 0）；worktree 登記數與 `btime`（`/tmp` 的清單留在 `.ctl/`） |
+| 保存 | | 「PRE 保存 ok」；Claude 複製時重驗：第一行 ＝ `PRE <路徑>`、`precheck 開始` 恰好一行、`precheck 結束` 恰好一行且是最後一行 |
+| 間隔 | | precheck 結束 → `launched_utc` |
+（precheck.txt 原樣，「基準 /tmp」那幾行除外——留在 `.ctl/`）
+
+2. 執行
+| 項目 | 值 |
+|---|---|
+| `run.tsv` | 全部欄位原樣 |
+| rc marker | `<rc>`、`<UTC>`；⛔ 沒有 → ⑨-1「四」的「結束碼不明」 |
+| 耗時 | `launched_utc` → rc marker；量測趟：摘錄指令的「容器 o<n+1>0，create_begin → rm_done」 |
+| 重開機 | precheck 的 `btime` ＝ 跑完之後 `/proc/stat` 的 `btime`：是｜否（⛔ 不同 → ⑨-1「四」的重開機一列） |
+| `log` | M1、M2 有無；`precheck：` 那幾行、`ERROR:` 與保留 S 的行原樣 |
+| 使用者回報 | 等待期間的觀察、② 的輸出、是否中止（原文） |
+
+3. 判讀（⑨-1「四」）
+| 輸入 | 值 |
+|---|---|
+| rc | |
+| `<work>` 的頂層 | `acceptance_report.{json,txt}`、`failure_summary.json`、`raw/`、`raw-failed/`、`.raw-failed.staging/`、`.failure_summary.json.*.tmp` 各自有無 |
+| `precheck-verdict` | 完整指令、輸出與 rc（只對正式的 `raw/`、`raw-failed/`） |
+| 量測趟 | 容器 `o<n+1>0` 的 `create_begin` 有無 |
+| → ⑨-1「四」的列 | 引用該列的「結果」欄原文 |
+| 判讀、處置 | 依該列 |
+
+4. 驗證與錨點（⑨-1「五」1～8；每一項附完整指令與原樣輸出）
+| # | 項目 | 結果 |
+|---|---|---|
+| 1 | 形狀：正式的 `raw/`／`raw-failed/`，或只有診斷資料 | |
+| 2 | manifest：產生的完整指令、`sha256`、`file_count`、`dir_count`；`--check-sha256` 的 rc | |
+| 3 | 頂層檔案的 SHA-256（摘要另做 canonical 檢查） | |
+| 4 | `precheck-verdict` | |
+| 5 | 封存值與身分：摘錄指令的第一張表與 rc（0 ＝ `meta` 的 14 個欄位 ＝ 封存值與 `EXPECTED`、`schema`／`mode`／`replay_compute`、兩份報告與 `raw/` 裡的逐位元相同、有量測趟） | |
+| 6 | 數字：下面的 5. | |
+| 7 | 殘留：`/dev/shm/i074-*`、`docker ps -a`、worktree 登記數（基準 → 之後）、`/tmp` 的新項目（對照基準）與歸因 | |
+| 8 | 保存：`.ctl/`、`<work>`、manifest 檔的位置；保留的 S 與刪除程序的輸出（⑨-2「五」的「保留的 S 的刪除程序」） | |
+
+5. 數字（有報告時：摘錄指令的輸出原樣 ＋ `acceptance_report.txt` 全文；只有 `raw-failed/` 時：`failure_summary.json` 的階段與結束碼、`log` 裡 precheck 的文字）
+＋ 與預估的對照：success 的 `P_path`（⑨-1「〇」：約 162.6 MB、餘裕約 4.9 MiB）
+
+##### 四、判定與下一步
+理由；下一步（⑨-2 的 P10｜重跑：重新確認 P1～P9｜交使用者裁決）；要更新的交叉指標（⑨-1「六」：I-074 狀態列、roadmap、`sr-zone-scoring.md`、`development-workflow.md`）。
+```
+
+##### 五、摘錄與封存值檢查的指令（D5）
+
+在 repo 的根目錄執行（`P_basis`、`fs_unexplained` 由 repo 的 helper `disk_numbers()` 推導；⑨-2 的 P1 保證 `E91` 之後只動 `docs/`，helper 與量測時相同）。
+印出可以直接貼進紀錄的表格；**以結束碼判定**：0 ＝ 封存值與身分全部成立（`meta` 的 14 個欄位、報告的 `schema`／`mode`／`replay_compute`、
+`raw/` 裡的兩份報告（JSON、TXT）與頂層逐位元相同、full 模式有量測趟），1 ＝ ⛔ 不成立（任一份報告缺失或不同、欄位缺失、量測趟的 event 缺失時是例外，同樣 1）。
+`status` 與數字⛔ 不影響結束碼——判定依 ⑨-1「四」的結束碼。
+
+```text id="i074_stage2_step91_extract_001"
+python3 - <work> <EXPECTED> <<'PY'
+import json, sys
+sys.path.insert(0, "python/scripts")                       # 受信任的 repo（cwd ＝ repo 根目錄）：P_basis 等只由 helper 推導
+from i074_stage2_sizing import disk_numbers
+w, expected = sys.argv[1].rstrip("/"), sys.argv[2]
+SEAL = {"base_commit": "e1cbbbdab44f8cf2d152e6ade9235d844f590d7f",
+        "image": "sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027",
+        "identity_sha256": "a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d",
+        "counterfactual_sha256": "fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14",
+        "counterfactual_canonical_sha256": "fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14",
+        "tooling_sha256": "5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98",
+        "tooling_canonical_sha256": "5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98",
+        "composed_sha256": "ac49d36ff07a998448cb4b5706470eedce61ef6369cd9deca784d7d5923b670f",
+        "counterfactual_semantic_sha256": "5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8",
+        "mode": "formal", "replay_compute": "full", "repo_head": expected, "clone_head": expected, "work": w}
+data = open(f"{w}/acceptance_report.json", "rb").read()
+r = json.loads(data); m = r["meta"]; bad = []
+for k, want in SEAL.items():
+    ok = m.get(k) == want; bad += [] if ok else [f"meta.{k}"]
+    print(f"| `meta.{k}` | `{m.get(k)}` | {'＝' if ok else '⛔ 不符'} |")
+for k in ("schema", "mode", "replay_compute"):
+    want = {"schema": "i074_stage2_acceptance_report_v2", "mode": "formal", "replay_compute": "full"}[k]
+    ok = r.get(k) == want; bad += [] if ok else [k]
+    print(f"| `{k}` | `{r.get(k)}` | {'＝' if ok else '⛔ 不符'} |")
+for f in ("acceptance_report.json", "acceptance_report.txt"):     # 兩份報告都要與 raw/ 裡的逐位元相同（任一缺失 → 不成立）
+    try:
+        same = open(f"{w}/raw/{f}", "rb").read() == open(f"{w}/{f}", "rb").read()
+    except OSError:
+        same = False
+    bad += [] if same else [f"raw/{f}"]
+    print(f"| `raw/{f}` ＝ 頂層 | {'逐位元相同' if same else '⛔ 不同或不存在'} | {'＝' if same else '⛔ 不符'} |")
+mib = lambda b: f"{b / 1048576:.1f} MiB"                     # noqa: E731
+lim = r["limits"]; budget, mem = lim["P_B_BUDGET"], lim["memory_bytes"]
+print(f"\nstatus：{r['status']}；violations：{r['violations'] or '無'}；門檻：記憶體 < {mib(mem)}、磁碟 ≤ {budget:,} bytes")
+print("\n| 路徑 | `P_path` | `P_basis` | 預算 − `P_basis` | `fs_unexplained` | `read_only_gap` |\n|---|---|---|---|---|---|")
+for ph, info in r["paths"].items():
+    d = disk_numbers(info)
+    print(f"| {ph} | {info['P_path']:,}（{mib(info['P_path'])}） | {d['P_basis']:,} | {budget - d['P_basis']:,}（{mib(budget - d['P_basis'])}） "
+          f"| {d['fs_unexplained']:,} | {info['read_only_gap']:,} |")
+for ph, info in r["promotion"].items():
+    print(f"| {ph}（資訊值） | `P_promotion` {mib(info['P_promotion'])} | `P_path`＋晉升 {mib(info['P_path_plus_promotion'])} | — | — | — |")
+print("\n| # | phase | role | rc | 最大單一（閘） | RSS 取樣 | cgroup（資訊） | 上限 | 上限 < 門檻 |\n|---|---|---|---|---|---|---|---|---|")
+for x in r["memory"]:
+    print(f"| {x['sequence']} | {x['phase']} | {x['role']} | {x['rc']} | {mib(x['max_single_rss_bytes'])} | {mib(x['rss_peak_sampled_bytes'])}"
+          f"（{x['rss_samples']} 次） | {mib(x['cgroup_peak_bytes'])} | {mib(x['memory_limit_bytes'])} | {'是' if x['memory_limit_bytes'] < mem else '否'} |")
+print("\n| host 端的步驟 | 最大單一（閘） | 群組取樣 | 警報 |\n|---|---|---|---|")
+for x in r["host"]:
+    print(f"| {x['step']} | {mib(x['max_single_rss_bytes'])} | {mib(x['group_rss_peak_sampled_bytes'])} | {x['group_note']} |")
+trip = [x for x in r["memory"] if (x["phase"], x["role"]) == ("memory_only", "replay")]
+if trip:
+    cid = f"o{trip[-1]['sequence']:03d}0"
+    ev = [json.loads(l) for l in open(f"{w}/raw/events/events.jsonl", encoding="utf-8") if l.strip()]
+    t = {e["kind"]: e["monotonic_ns"] for e in ev if e["id"] == cid}
+    print(f"\n量測趟：容器 {cid}，create_begin → rm_done ＝ {(t['rm_done'] - t['create_begin']) / 6e10:.1f} 分鐘")
+else:
+    bad.append("量測趟")
+    print("\n量測趟：⛔ 沒有（報告裡沒有 memory_only 的 replay）")
+print(f"host MemAvailable 低點：{mib(r['host_memavailable_low'])}")
+print(f"\n封存值與身分：{'全部成立' if not bad else '⛔ 不成立：' + '、'.join(bad)}")
+raise SystemExit(0 if not bad else 1)
+PY
+```
+
+實測（2026-10-16）：
+* dev7（`dev7-validity-20261006T080114Z`，validation、stub）→ 結束碼 1，⛔ 不成立的只有 `meta.mode`、`meta.replay_compute`、`mode`、`replay_compute`（它本來就⛔ 不是 formal／full）與量測趟（stub ⛔ 沒有）；其餘 15 項（`meta` 的 12 個欄位、`schema`、`raw/` 的兩份報告）都成立；印出的數字與它的 `acceptance_report.txt` 相同（success `P_path` 154.0 MiB、`fs_unexplained` −225,280 bytes 等）；與 v1 的輸出相比只多了 TXT 那一列。
+* 對照組（scratchpad 的合成副本：dev7 的報告改成 formal／full、補一個 `memory_only` 的 `replay` 列與 181 分鐘的 event，兩份報告在 `raw/` 與頂層逐位元相同，`EXPECTED` ＝ dev7 的 `repo_head`）→ 0，量測趟印「容器 o0130，181.0 分鐘」。
+* 反例都是 1：`composed_sha256` 改掉、`meta` 少 `identity_sha256`、`raw/` 的 JSON 與頂層差一個 byte、TXT 差一個 byte、`raw/` 缺 TXT、頂層缺 TXT、⛔ 沒有量測趟的列、量測趟的 event 缺失（例外）、`EXPECTED` 給錯。
+
+##### 六、受影響的檔案與歸檔（實作時，計畫確認之後）
+
+| 檔案 | 改動 |
+|---|---|
+| `docs/issue.md` ⑨-1 計畫「二」 | 區塊換成「三」的 `i074_stage2_step91_precheck_002`（加一行 2026-10-16 的註記，⛔ 不改寫其他歷史內容）；表格 P1、P3、P4、P5、P7、P8 的「怎麼確認」一欄改成以 ok 那一行判定；P9 的「怎麼確認」改成「① 的 `mkdir -m 700 "$CTL"` 成功（`run.tsv` 的前四行各恰好一行）；harness 也會拒絕已存在的 work 目錄（`--work-dir 已存在`、結束碼 1）」 |
+| `docs/issue.md` ⑨-1 計畫「七」 | 風險表的「D1（Claude 與 Codex 都結束）」改成「D1（Claude ⛔ 沒有程序；Codex ⛔ 不使用，P5 不成立時才結束）」（第一輪 review 的第 2 點；加註記） |
+| `docs/issue.md` ⑨-1 計畫「六」 | 結果一節依本節的樣板（指標；收斂時移除） |
+| `docs/issue.md` ⑨-2 計畫「二」 | 區塊 id 改成 `i074_stage2_step92_precheck_002`（加一行註記）：P7 的兩行換成「三」區塊的 P7 那 5 行（逐位元相同；D3）；P1 的 5 行換成下面的 7 行（D7）；整段包在 `{ … }` 裡、`read` 之前加上與 ⑨-1 相同的提示行、區塊之後加「只貼這一個區塊」的說明（「三」差異 8，第三輪 review）；其他指令⛔ 不動 |
+| `docs/issue.md` ⑨-2 計畫「七」 | 風險表的「D1（Claude 與 Codex 都結束）」改成同樣的語意（⑨-2 的 D1 ＝ 與 ⑨-1 相同） |
+| `docs/development-workflow.md` ⑨-1 的副本 | 與 ⑨-1「二」的新區塊逐位元相同；上方註解的「Claude 與 Codex 先結束」改成「Claude 先結束（Codex ⛔ 不使用）」 |
+| `docs/issue.md` 本節 | 保留到 ⑨-1 的結果 review 通過；之後隨 ⑨-1 的計畫一起收斂（D6）：結果一節指向本節的引用只以 commit 引用（樣板的「依據」一行已是這個寫法），⑨-1「六」的指標、I-074 狀態列與 roadmap 的指標一併移除；`grep -rn '執行紀錄格式' docs/` 只剩結果一節裡附 commit 的那一行；樣板⛔ 不搬進主題文件（它只服務這一次的紀錄）。precheck 區塊的註解⛔ 不引用本節（`development-workflow.md` 的副本才⛔ 不會留下死引用） |
+
+⑨-2 的 P1（D7；與「三」區塊同樣的 fail-closed 寫法，另把 `E91` 加進祖先的檢查）：
+
+```text id="i074_stage2_step92_precheck_p1_draft"
+git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
+  && git merge-base --is-ancestor ec23e4a HEAD && git merge-base --is-ancestor "$R91" HEAD \
+  && git merge-base --is-ancestor "$E91" HEAD && echo "P1 祖先 ok"                                      # E91 也必須是 HEAD 的祖先
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
+DD="$(git diff --name-only "$E91" HEAD -- . ':(exclude)docs')"; RDD=$?
+printf 'P1 ⑨-1 之後 docs/ 以外的變更：%s（git diff 的 rc %s）\n' "${DD:-無}" "$RDD"
+[ "$RDD" = 0 ] && [ -z "$DD" ] && echo "P1 ⑨-1 之後只動 docs/ ok"                                           # E91 錯 ⛔ 不能當作只動 docs/
+```
+
+##### 七、風險
+
+| 風險 | 處置 |
+|---|---|
+| 改了已確認的 ⑨-1 指令，週末之前來不及 review | 只改確認的方式、⛔ 不改條件與判讀；實作之後在 zsh 與 bash 各實跑一次新區塊（唯讀）、`development-workflow.md` 的副本以 `cmp` 比對；review 與 commit 都在執行之前 |
+| `read` 讀走多貼的文字、或使用者看不出在等 token | 區塊前的註解與 `read` 之前的提示行；「只貼這一個區塊」寫進「三」；保存的檢查與 `}` 同一個指令（⛔ 沒有下一行留在輸入佇列） |
+| 區塊沒跑到 `read`（貼上時遺失、shell 的設定不同），或 `read` 讀走了下一行，JWT 被當成指令執行（⑨-1、⑨-2 都適用） | 看到提示行的**實際輸出**之後才貼；先打一個空白（history ⛔ 不記，實測）；萬一發生：該次⛔ 不開跑、告知 Claude，確認 history 裡⛔ 沒有留下 |
+| `interactive_comments` 關閉的 shell | 區塊解析錯亂 → ⛔ 沒有「PRE 保存 ok」（fail-closed，pty 實測）；使用者的 zsh 是開的（實測） |
+| 保存失敗（`/dev/shm` 滿、`tee` 失敗、檔案被截斷） | ⛔ 沒有「PRE 保存 ok」→ ⛔ 不開跑：先查原因（P6 的 `/dev/shm`），再重跑整段 precheck |
+| 某個檢查的指令本身失敗 | 每一個 ok 都要求所有參與判定的指令——含 `awk`、`grep`、`sed` 這類輔助指令——的結束碼 0，計數要求正向的值（輸出是空的⛔ 不能當作成立）；缺任何一個 ok 就⛔ 不開跑 |
+| P4 查詢失敗 | ⛔ 沒有 running 的數量那一行 → P4 ⛔ 不成立（⛔ 不開跑，或改用前端的排程狀態頁並抄進紀錄） |
+| 摘錄指令與量測時的 helper 不同 | 以 repo 的 helper 推導；⑨-2 的 P1 保證 `E91` 之後只動 `docs/`；結果以結束碼判定 |
+| 紀錄太長 | precheck 的 `/tmp` 清單只留在 `.ctl/`，紀錄只寫新項目與歸因 |
+| token 外洩 | `read -rs`、⛔ 不在 `tee` 的輸出與 history（實測 0 次）；紀錄⛔ 不寫 |
+
+##### 八、決定
+
+| # | 決定 | 建議／裁決 |
+|---|---|---|
+| D1 | precheck 的輸出怎麼保存 | ✅ 2026-10-16 第一輪 review：採 **(a) 整段 `tee` 到 tmpfs**，但須補唯一檔名與保存成功的守門 → `mktemp`（mode 600）、`tee` 的結束碼、非空、第一行、唯一而且在最後的結束標記（「三」差異 1）。(b) 終端機的捲動區手動貼上：tmux 的捲動區有上限、手動貼上可能漏行 |
+| D2 | ⑨-1 的 precheck 比照 ⑨-2（P3、P5 以結束碼判定；P4 加 `/scheduler/status` 的查詢；P3 加 identity 檔的 SHA） | ✅ 第一輪 review：採第一選項 |
+| D3 | P7 改用 `find`（⑨-1、⑨-2、`development-workflow.md` 三處） | ✅ 第一輪 review：採第一選項，但 `find`、`docker ps`、`ps` 都必須 fail-closed，三處同步（「三」差異 6）；第三輪 review：`awk` 的結束碼也要納入 |
+| D4 | D1 的證據與「五」7 的基準（worktree 登記數、`/tmp` 的清單）加進 precheck | ✅ 第一輪 review：採第一選項；Claude 必須⛔ 沒有程序，Codex 只記錄而且⛔ 不使用，補 `ps` 的結束碼（「三」差異 5）；第三輪 review：`awk`、`grep`、`sed` 的結束碼也要納入，計數要求正向的值（差異 5、7） |
+| D5 | 數字與封存值以「五」的指令取得（結束碼判定；`P_basis` 等由 helper 推導） | ✅ 第一輪 review：採第一選項；JSON、TXT 兩份報告都與 `raw/` 逐位元比對（「五」） |
+| D6 | 樣板放在本節、⑨-1「六」加指標；⑨-1 結果 review 通過之後隨 ⑨-1 的計畫收斂 | ✅ 第一輪 review：採第一選項；收斂時清理結果裡的引用（「六」最後一列） |
+| D7 | ⑨-2 precheck 的同類 fail-open（第一輪 review 之後盤點）：P1 的 `git diff --name-only "$E91" HEAD` 在 `E91` 打錯或空白時失敗、輸出是空的 → 照樣印「P1 ⑨-1 之後只動 docs/ ok」（✅ 重現，zsh、bash；對照組：有程式變更的 commit ⛔ 沒有 ok）；P1 clean 同 ⑨-1 | **建議 (a) 併進本次實作**：P1 換成「六」的 7 行（`E91` 也要是 HEAD 的祖先；`git diff`、`git status` 先取值、結束碼 0 才判空），⑨-2 的其他指令⛔ 不動。(b) 另立 ⑨-2 的修正，⑨-2 執行之前再處理 |
+
+##### 九、測試與驗證
+
+* 已做（本節「三」「五」「六」）：新 precheck 在 zsh 與 bash 的非互動實跑、4 種互動貼上（pty）、40 個反例與 v1 的對照；摘錄指令的 dev7、對照組與 9 個反例；⑨-2 的 P1、P7 新行在 zsh、bash 各 11 案（`E91` 正確／打錯／空白、`R91` 空白、有程式變更的 commit、`git status`／`find`／`ps`／`docker ps` 失敗、有 harness 的程序）都符合預期。
+* 實作之後：從文件抽出 ⑨-1 的新區塊與 `development-workflow.md` 的副本 → 與測過的檔案 `cmp` 相同、`bash -n`／`zsh -n`，在 zsh 實跑一次（唯讀）與一次 pty 貼上（`HISTFILE` 指到 scratchpad）；⑨-2 的新區塊抽出 → P1、P7 的行與測過的相同、`bash -n`／`zsh -n`；摘錄指令從文件抽出 → 與測過的檔案逐位元相同；`grep` 確認「Claude 與 Codex 都結束」「先結束」的四處都已改；doc-refs、表格欄數、`git diff --check`、禁止符號的否定詞掃描。
+
+##### 十、執行步驟
+
+1. 本計畫 review → 確認（含 D7）。
+2. 實作（只動文件：「六」的各處）→ 「九」的驗證 → ⛔ 不 commit，停下等 review → 使用者 commit（連同 ⑨-2 v4 review 通過的紀錄）。
+3. 週末依 ⑨-1 計畫執行（「二」換成新區塊）；跑完重新啟動 Claude，依本節的樣板記錄 → review → commit → 補 `R91` → ⑨-2。
+
+##### 第一輪 review 的修正（2026-10-16）
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | （中）P7 仍可能 fail-open：只保存 `docker ps` 的結束碼，`find` 失敗、`ps \| awk` 的 `ps` 失敗都可能印「P7 ok」；D1 也沒保存 `ps` 的結束碼 | `find`、`docker ps`、`ps` 各自先取值、保存結束碼，全部 0 才 ok；`ps` 先完整取值再交給 `awk`；D1 同樣（「三」差異 5、6）；⑨-2 的 P7 同步。同類（盤點）：P1 clean、P8、基準（差異 2、7）；⑨-2 的 P1（D7） | ✅ v1 重現：`find`／`ps` 失敗 → 「P7 ok」、`ps` 失敗 → D1 的 ok、`git status` 失敗 → 「P1 clean ok」；v2 的反例全部⛔ 沒有 ok |
+| 2 | （中）D1 的 Claude／Codex 契約互相矛盾 | 沿用既定 D1：Claude ⛔ 沒有程序；Codex 可以存在、量測期間⛔ 不使用；P5 仍須通過，Codex 造成 P5 不成立時才結束它。本節開頭與差異 5 已改；⑨-1「七」、⑨-2「七」的風險表與 `development-workflow.md` 的註解在實作時改（「六」） | `grep` 全部的 docs：同樣說法共 4 處（本節 1 處已改，其餘 3 處列在「六」）；P5 的「結束 Claude、Codex 等非必要的程序」與裁決一致，⛔ 不改 |
+| 3 | （中）`tee` 尚未 fail-closed 證明證據真的保存 | `mktemp`（不碰撞、mode 600）；`tee` 之後立刻保存結束碼；結束碼 0、非空、第一行、唯一而且在最後的結束標記 → 才印「PRE 保存 ok」；⛔ 不用 `pipefail`／`set -e`（「三」差異 1） | ✅ 反例 6 種都⛔ 沒有「PRE 保存 ok」；v1 被截斷時結束碼 0、⛔ 沒有任何提示 |
+| 4 | （低）D5 宣告的範圍與實作不同（只比 JSON） | JSON、TXT 都比，任一缺失或不同 → 1（「五」） | ✅ TXT 差一個 byte、`raw/` 缺、頂層缺 → 1；dev7 與對照組的結果不變（只多一列） |
+| 5 | （低）P9 的來源、D6 的收斂 | P9 的來源寫進「二」與樣板（① 的 `mkdir`、harness 的拒絕）；precheck ⛔ 不再宣稱涵蓋 P9；樣板的「依據」只以 commit 引用本節、precheck 的註解⛔ 不引用本節，收斂時移除所有指標（「六」） | — |
+| 盤點 | 修正時另外發現 | ① 互動 shell：`interactive_comments` 關閉時區塊沒跑到 `read`、JWT 會被當成指令記進 history → 提示行改成先打一個空白（「三」差異 3、「七」）；② ⑨-2 的 P1（D7）；③ worktree 的登記數 401（I-118 的既有洩漏；「〇」） | ✅ pty 實測 |
+
+##### 第二輪 review（2026-10-16）
+
+* 結論：沒有新的功能性阻擋；**D1～D7 都通過**。D7 採 (a)，併入本次實作（`E91`、`R91` 都必須是 HEAD 的祖先；`git status`、`git diff` 的結束碼 0 才判空）。
+  JWT 的處置接受：「看到提示行的實際輸出之後才貼」是第一層守門，先打一個空白依賴已確認的 shell 設定。
+* Finding 1（低）：400 筆⛔ 不宜稱為「過期／可 prune 的登記」→「〇」改成「I-118 遺留的 worktree 登記」、⛔ 不清理、⛔ 不 prune；401 作為本次的基準。
+  ⚠️ 查證（2026-10-16，這台 host）：review 的前提「對應的 `/tmp` 目錄仍存在，所以⛔ 沒有標成 prunable」⛔ 不成立——384 個目錄已不存在、16 個目錄還在但⛔ 沒有 `.git`，
+  而 git 2.30.2 的 `worktree list` 本來就⛔ 不輸出 prunable 的標記（`worktree list -v` 是 unknown switch）。查證時 Claude 跑了 `git worktree prune -n`（dry-run：400 個都列為可刪、⛔ 沒有刪除，
+  登記數前後都是 401、`.git/worktrees/` 400 個）——違反作業規則「⛔ 不用 `git worktree prune`」，之後⛔ 不再使用。用詞照 review 的意圖改成⛔ 不暗示要 prune 的寫法。
+* Finding 2（提交前阻擋）：暫存區仍是 v1（`MM docs/issue.md`）→ 使用者 commit 之前要重新 stage `docs/issue.md` 與 `docs/development-workflow.md`（Claude ⛔ 不 stage、⛔ 不 commit）。
+
+##### 實作結果（2026-10-16，⚠️ 待 review）
+
+⚠️ 第三輪 review 之後兩個區塊又改了一次（見下一節「第三輪 review（實作）的修正」）；本節的驗證是第一次實作時的結果。
+
+| 檔案 | 改動 |
+|---|---|
+| `docs/issue.md` ⑨-1 計畫「二」 | 表格 P1、P3、P4、P5、P7、P8、P9 的「怎麼確認」改成以 ok 那一行判定（各加「2026-10-16，執行紀錄格式 v2」的註記）；區塊換成 `i074_stage2_step91_precheck_002`（前面加一行註記，原本的 `_001` 見 `496a5f7`）；「開跑的條件」與「只貼這一個區塊」兩段接在區塊之後 |
+| `docs/issue.md` ⑨-1 計畫「六」「七」 | 「六」：結果一節依本節「四」的樣板；「七」：D1 的說法改成「Claude ⛔ 沒有程序；Codex ⛔ 不使用，P5 不成立時才結束」 |
+| `docs/issue.md` ⑨-2 計畫「二」「七」 | 「二」：P1 列的「怎麼確認」補以 ok 判定；區塊 id 改成 `i074_stage2_step92_precheck_002`（前面加一行註記，原本的 `_001` 見 `4f7e7f0`）、P1 的 5 行換成「六」的 7 行、P7 的 2 行換成 ⑨-1 的 5 行；「七」：D1 的說法同 ⑨-1 |
+| `docs/development-workflow.md` | ⑨-1 的 precheck（18 行）換成新區塊；註解的「Claude 與 Codex 先結束」改成「Claude 先結束（Codex ⛔ 不使用）」 |
+| `docs/issue.md` 狀態列、roadmap、本節的標題 | ✅ 確認（兩輪 review）、已實作／⚠️ 待 review；commit 之後才執行 ⑨-1 |
+
+與計畫的差異（都只多了文字、⛔ 沒有改指令）：
+1. 「開跑的條件」與「只貼這一個區塊」兩段也複製進 ⑨-1「二」（計畫只寫換區塊）：執行時看的是 ⑨-1「二」，⛔ 不必跳到本節；兩份逐位元相同。
+2. ⑨-2「二」P1 列的「怎麼確認」補一句以 ok 判定（計畫只寫換指令）：與 ⑨-1 的表格一致。
+3. ⑨-1 的新區塊在 ⑨-1「二」與本節「三」各有一份、id 相同（`_002`；兩份逐位元相同）——本節收斂時只剩 ⑨-1「二」那一份（隨 ⑨-1 的計畫一起收斂之後，只剩 `development-workflow.md` 的副本）。
+
+驗證（2026-10-16）：
+* 抽出比對：⑨-1「二」與本節「三」的區塊、`development-workflow.md` 的副本都與測過的 `pre91-v3.sh` 逐位元相同；`_001`（⑨-1、⑨-2）都已不在；`development-workflow.md` ⛔ 沒有 `ls -d /dev/shm/i074-*`；⑨-2 的新區塊含測過的 P1 7 行與 P7 5 行、⛔ 沒有舊的 `ls -d` 與 `[ -z "$(git …)" ]`；兩段文字在兩處相同。
+* 語法：⑨-1 的區塊 `bash -n`／`zsh -n` 通過；⑨-2 的區塊（`R91`、`E91` 的佔位代入 HEAD）`bash -n`／`zsh -n` 通過。
+* 實跑：⑨-1「二」抽出的區塊在 zsh 執行一次（真的 curl → 401）：結束碼 0、`$PRE` ＝ 終端機的輸出、token 0 次；P1、P2、P3、P7、P8、基準、PRE 保存都有 ok（P5、D1 因為 Claude 在執行而⛔ 沒有，符合預期）。同一個區塊以 bracketed paste 貼進使用者的 zsh（pty、`HISTFILE` 指到 scratchpad）：`read` 真的在等、header 與 token 完全相同、token 在輸出與 history 都是 0 次。⑨-2 的區塊（代入 HEAD、假的 curl）在 zsh、bash：P1 三項、P2、P3、P7 都有 ok、⛔ 沒有 `no matches found`。
+* 「Claude 與 Codex 都結束／先結束」：本節開頭、⑨-1「七」、⑨-2「七」、`development-workflow.md` 四處都已改；其餘出現的是測試環境的描述（「都在執行」）與 ⑨-2 D1 的「都停止使用」（與裁決一致）。
+* 殘留：`/dev/shm` 只剩 `libpod_lock`；`/tmp` 與 08:11 的基準相比只多一個 `i074-v2-extract-review.out`（0 byte、2026-10-16 08:33 UTC 建立；⛔ 不是 Claude 的測試產生——名稱與時間對應 review 時的摘錄指令檢查，⛔ 不刪、交使用者確認）；worktree 登記數 401（不變）；`i074sz-` 的容器 0 個；使用者的 `~/.zsh_history`、`~/.bash_history` 裡測試的 token 0 筆。
+
+##### 第三輪 review（實作）的修正（2026-10-16，⚠️ 待 review）
+
+裁決：D1、D2、D5、D6、D7 的方向通過；D3、D4 要補輔助指令的結束碼；⑨-2 的 JWT 缺口要修正（或另列為執行前的阻擋）→ 本次修正。
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | （中）D1、P7 與基準在輔助指令失敗時仍會 fail-open：只檢查 `ps` 的結束碼、⛔ 沒有檢查之後的 `awk`；`grep`／`sed` 失敗時照樣印「基準 ok」；⑨-2 的 P7 同樣 | D1：兩個 `awk` 的結束碼都納入，`claude` 的程序數要印出 `0`；P7：`awk` 的結束碼納入；基準：`grep`、`sed` 的結束碼納入、登記數必須是正整數。同類（盤點）：開頭讀 `btime` 的 `awk`（重開機的基準）納入「基準 ok」、`btime` 必須是正整數；保存的檢查另要求 `precheck 開始` 恰好一行。⑨-1 的三份與 ⑨-2 的 P7 同步（「三」差異 5～7） | ✅ v3 重現：假的 `awk`（127）→ 照樣印 D1、P7 的 ok；假的 `grep`、`sed` → 照樣印「基準 ok」；讀 `btime` 的 `awk` 失敗、開始標記缺少或重複也都漏掉。v4 的反例 56 次全部⛔ 沒有該有的 ok |
+| 2 | （中／安全性）⑨-2 尚未套用 JWT 的提示與 history 的防護 | ⑨-2 的 `read` 之前加上與 ⑨-1 相同的提示行、區塊之後加「只貼這一個區塊」的說明；另把整段包在 `{ … }` 裡（「三」差異 8） | ✅ 現行的 ⑨-2 在逐行輸入時 `read` 讀走 `curl` 那一行、token 被當成指令執行（pty 重現）；新區塊在 4 種貼上方式都正常 |
+| 3 | 提交前阻擋：staged 仍不是 review 的版本（` M docs/development-workflow.md`、`MM docs/issue.md`） | 使用者 commit 之前重新 stage 兩份文件（Claude ⛔ 不 stage、⛔ 不 commit） | — |
+
+驗證（2026-10-16）：⑨-1 的新區塊三份（⑨-1「二」、本節「三」、`development-workflow.md`）與測過的 `pre91-v4.sh` 逐位元相同；⑨-2 的區塊與測過的 `p92-v2.sh` 逐位元相同；⑨-1、⑨-2 的 P7 5 行逐位元相同；`bash -n`／`zsh -n` 都通過（⑨-2 代入 `R91`、`E91`）。實跑與反例見「三」的實測。
+
+#### Stage 2 步驟 ⑨-2 細部計畫 v4（2026-10-16，✅ 確認（四輪 review）並 commit `4f7e7f0`）
 
 ⚠️ 依據：v29「八」的 ⑨-2（**⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing，產出 freeze record；
 `status = "ok"` 且 `P_B ≤ P_B_BUDGET` 才進 ⑩，⛔ 不符就走「六、1」的回退順序；⑦ 總綱 v1：用真實的兩份 patch）、「六、1」（回退順序：更新
@@ -6122,6 +6559,7 @@ c4 拆成 c4a（空的 `raw-failed/`）、c4b（staging），c6 拆成 c6k、c6t
 第一輪 review（2026-10-15）：⛔ 不通過、3 項阻擋 ＋ 1 項驗證缺口（容器的實際上限、所有已到時的批次、D8 的分界、P1 的「只動文件」）；D1、D4～D7 同意，D2、D3、D8 有條件同意。修正見本節最後的表。
 第二輪 review（2026-10-16）：⛔ 不通過（暫不確認執行）、1 項高風險 ＋ 3 項待補（`MEM` 本身低於下限時 clamp 原樣回傳、記憶體驗證失敗仍回 0、正式 `raw-failed/` 保留的 S 沒有清除程序、風險表缺重開機的例外）；D1、D2、D4～D7 通過，D3 未通過，D8 原則通過。修正見本節最後的第二張表。
 第三輪 review（2026-10-16）：待 2 項修正後通過（作業文件仍指示依 stderr 的位置手動刪 S、S 的刪除程序⛔ 沒有 fail-closed 檢查 wrapper 的欄位）；D1～D7 通過，D8 的分支與重開機的裁決通過、S 的刪除程序待補 wrapper 的守門。修正見本節最後的第三張表。
+第四輪 review（2026-10-16）：✅ 通過——D1～D8 全部通過，計畫確認，使用者 commit `4f7e7f0`；執行條件仍含「⑨-1 通過並 commit」。
 ⚠️ 本計畫確認之前⛔ 不執行任何量測、⛔ 不改程式。
 
 ##### 〇、唯讀盤點（2026-10-15，HEAD `ec23e4a`）
@@ -6155,7 +6593,7 @@ c4 拆成 c4a（空的 `raw-failed/`）、c4b（staging），c6 拆成 c6k、c6t
 
 | # | 條件 | 怎麼確認 |
 |---|---|---|
-| P1 | HEAD 包含 `53538a3`、`c0cf0de`、`ec23e4a` 與 ⑨-1 結果的 commit；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更；**⑨-1 實際量測的 commit（它的 `EXPECTED`）到 HEAD 之間只動了 `docs/`**（⑨-1 量到的程式 ＝ ⑩ 要跑的程式；第一輪 review：直接檢查**全部**變更的路徑，⛔ 不只三個範圍） | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空；`git diff --name-only <⑨-1 的 EXPECTED> HEAD -- . ':(exclude)docs'` 為空（有任何路徑 → ⛔ 不開跑，交使用者裁決） |
+| P1 | HEAD 包含 `53538a3`、`c0cf0de`、`ec23e4a` 與 ⑨-1 結果的 commit；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更；**⑨-1 實際量測的 commit（它的 `EXPECTED`）到 HEAD 之間只動了 `docs/`**（⑨-1 量到的程式 ＝ ⑩ 要跑的程式；第一輪 review：直接檢查**全部**變更的路徑，⛔ 不只三個範圍） | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空；`git diff --name-only <⑨-1 的 EXPECTED> HEAD -- . ':(exclude)docs'` 為空（有任何路徑 → ⛔ 不開跑，交使用者裁決）；以「P1 祖先 ok」（含 `E91`）「P1 clean ok」「P1 ⑨-1 之後只動 docs/ ok」判定，`git` 失敗⛔ 不能當作成立（2026-10-16，執行紀錄格式 v2） |
 | P2 | 兩份 patch 與封存點相同 | `git diff --quiet 53538a3 HEAD -- <兩份 patch>`；SHA-256 ＝ `fa7f5ba8…`、`5ff9a90f…` |
 | P3 | image 在本機、identity 的 `expected_image_id` ＝ `REPLAY_IMAGE_ID`、identity 檔的 SHA-256 ＝ `a02bf3bd…`（與 ⑨-1 相同） | `docker image inspect`；只讀 identity 的那一個欄位與檔案的 SHA |
 | P4 | 整段執行（約 10 分鐘，含前後的檢查）⛔ 不重疊任何批次：**當天所有排程時間已過的工作**（⛔ 不只上一個——同時或更早啟動的也可能還在跑；各時段的名單見 D2）都已有當天那一筆、而且是終態（⛔ 不是 `running`；有整輪硬上限的才可以依上限推定），預計結束時距離下一個批次 ≥ 30 分鐘（`development-workflow.md` 的作業規則） | `docker inspect` 只看排程鍵 ＋ `/scheduler/status` 的每一列（job、status、started_at、finished_at）——**輸出原樣記進本次紀錄**（第一輪 review） |
@@ -6166,16 +6604,22 @@ c4 拆成 c4a（空的 `raw-failed/`）、c4b（staging），c6 拆成 c6k、c6t
 | P9 | work 目錄 `~/i074_stage2_sizing/formal-92-<UTC 時間>`、控制目錄 `/dev/shm/s92-<同一個名稱>/` 都尚不存在 | harness 自己也會拒絕已存在的 work 目錄 |
 | P10 | **⑨-1 已通過**：結果一節記為 rc 0 且「五」的驗證全部成立，並已 commit。⑨-1 是 threshold_exceeded、停下回報或尚未執行 → ⛔ 不開跑 | 讀 ⑨-1 的結果一節 |
 
-```text id="i074_stage2_step92_precheck_001"
-# P1～P10 的確認（使用者在自己的終端機執行；輸出貼進紀錄）
+⚠️ 2026-10-16 修改（「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」的 D3、D7 與第三輪 review）：id 改成 `_002`；整段包在 `{ … }` 裡（shell 先讀完整段才執行，`read` ⛔ 不會讀走下一行）；P1 改成 fail-closed（`E91` 也必須是 HEAD 的祖先；`git status`、`git diff` 的結束碼 0 才判空）；P4 的 `read` 之前加上與 ⑨-1 相同的提示行（先打一個空白再貼 JWT）；P7 換成與 ⑨-1 相同的 5 行（`find`、`docker ps`、`ps`、`awk` 的結束碼）；其他指令⛔ 不動。原本的區塊（`_001`）見 `4f7e7f0`。
+
+```text id="i074_stage2_step92_precheck_002"
+# P1～P10 的確認（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT（前端登入後取得，或 POST /api/v1/auth/login）；輸出貼進紀錄）：
+#   整段包在 { } 裡——shell 先讀完整段才執行，read 執行時輸入佇列裡⛔ 沒有下一行可以被讀走（2026-10-16 修改）
+{
 cd /home/dev/workspace/stock_trading
 IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
 R91=<⑨-1 結果的 commit>; E91=<⑨-1 的 EXPECTED>                    # 都取自「⑨-1 正式驗收結果」一節（P1、P10）
 git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
-  && git merge-base --is-ancestor ec23e4a HEAD && git merge-base --is-ancestor "$R91" HEAD && echo "P1 祖先 ok"
-[ -z "$(git status --porcelain -- scripts python .gitattributes)" ] && echo "P1 clean ok"
-git diff --name-only "$E91" HEAD -- . ':(exclude)docs'                                                  # P1：必須沒有輸出
-[ -z "$(git diff --name-only "$E91" HEAD -- . ':(exclude)docs')" ] && echo "P1 ⑨-1 之後只動 docs/ ok"
+  && git merge-base --is-ancestor ec23e4a HEAD && git merge-base --is-ancestor "$R91" HEAD \
+  && git merge-base --is-ancestor "$E91" HEAD && echo "P1 祖先 ok"                                      # E91 也必須是 HEAD 的祖先
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
+DD="$(git diff --name-only "$E91" HEAD -- . ':(exclude)docs')"; RDD=$?
+printf 'P1 ⑨-1 之後 docs/ 以外的變更：%s（git diff 的 rc %s）\n' "${DD:-無}" "$RDD"
+[ "$RDD" = 0 ] && [ -z "$DD" ] && echo "P1 ⑨-1 之後只動 docs/ ok"                                           # E91 錯 ⛔ 不能當作只動 docs/
 git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
   python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
 sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
@@ -6186,7 +6630,7 @@ python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expecte
 sha256sum "$ID"                                                                                              # P3：a02bf3bd…
 docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
 BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
-read -rs TOKEN     # P4：JWT（前端登入後取得，或 POST /api/v1/auth/login）；⛔ 不回顯、⛔ 不寫進檔案或紀錄
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
 curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
 jobs = json.load(sys.stdin)["jobs"]
 for j in sorted(jobs, key=lambda j: j["job_name"]):
@@ -6195,10 +6639,16 @@ print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; 
 awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 700）\n", m; exit !(f && m >= 700) }' \
   /proc/meminfo && echo "P5 ok"                                                                              # 第二輪 review：以結束碼判定
 df -h / /dev/shm                                                                                             # P6
-ls -d /dev/shm/i074-* 2>/dev/null; docker ps -a --filter name=i074sz- -q                                     # P7：兩行都必須沒有輸出
-ps -eo pid,args | awk '/i074-stage2-(acceptance|sizing)\.sh/ && !/awk/'                                       # P7：必須沒有輸出
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?; C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?  # P7：find ⛔ 不受 zsh 的 glob 影響
+PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?         # ps 先完整取值，再交給 awk
+printf 'P7 S：%s\nP7 容器：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s、ps %s、awk %s\n' "${S7:-無}" "${C7:-無}" "${P7:-無}" "$RS" "$RC" "$RP" "$RA7"
+[ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$P7" ] \
+  && echo "P7 ok"                                                                                            # 任一個指令失敗 ⛔ 不能當作沒有殘留
 git rev-parse HEAD                                                                                           # P8
+}
 ```
+
+⚠️ **只貼這一個區塊**（2026-10-16，執行紀錄格式 v2 的第三輪 review）：`read` 等的是你接著貼上的 JWT——看到「P4：先打一個空白、再貼上 JWT，按 Enter（…）」這一行的**實際輸出**之後，先打一個空白、再貼上 JWT、按 Enter；⛔ 沒有看到那一行就⛔ 不貼（例如 `R91`／`E91` 的佔位沒換：整段解析失敗、什麼都不執行）。同時多貼的文字會被 `read` 讀走。判讀的是實際輸出的那一行（行首就是該文字），⛔ 不是貼上時回顯的指令文字。
 
 ##### 三、啟動、程序身分、狀態、安全中止與完成判定（D1：沿用 ⑨-1 的 wrapper，由使用者在 tmux／自己的終端機執行）
 
@@ -6377,7 +6827,7 @@ SH
 | 風險 | 處置 |
 |---|---|
 | 磁碟的餘裕只剩約 4.81 MiB（預估） | 照實判定：`P_B` ＞ 預算就是超標（回退順序由使用者裁決）；外部雜訊由有效性條件處理（無效可以重跑）。⑨-1 到 ⑨-2 之間只 commit 文件 |
-| 根檔案系統上的其他寫入讓量測無效（⑦d 增補時的 `sr_analysis` 事件） | P4（整段避開批次）、D1（Claude 與 Codex 都結束）；無效可以重跑，連續 2 次就停 |
+| 根檔案系統上的其他寫入讓量測無效（⑦d 增補時的 `sr_analysis` 事件） | P4（整段避開批次）、D1（Claude ⛔ 沒有程序；Codex ⛔ 不使用，P5 不成立時才結束——2026-10-16 訂正，執行紀錄格式 v2 第一輪 review）；無效可以重跑，連續 2 次就停 |
 | host 的記憶體不夠：容器被 OOM 砍掉，或在偏低的上限下照樣完成 | P5（700 MiB）＋「三」固定的 `MEM*` 環境（`env -u MEM`、`MEM_MIN_MB=447` 等；低於下限的那一步⛔ 不建容器、harness 在 build 之前失敗、⛔ 不會發布 freeze record）＋「五」3 的事後驗證（fail-closed）；被砍或被下限擋下都是 harness 失敗（⛔ 不是判定），依「四」重跑 |
 | `c0cf0de`、`ec23e4a` 的新步驟 6 與 `on_failure` 第一次端到端執行 | 失敗⛔ 不是判定、⛔ 不佔任何上限；缺陷 → 停下、另立計畫（D5：⛔ 不另跑 validation 演練） |
 | commit point 之後被 KILL、結束碼非 0 | 頂層的 freeze record 是 commit marker：host ⛔ 沒有在「五」完成之前重開過時，一律以「五」驗證判讀（「四」第一列），⛔ 不得盲目重跑或丟棄；重開過 → 只有診斷資料、⛔ 不交給 ⑩、⛔ 不產 manifest、⛔ 不自動重跑（「四」的重開機一列；第二輪 review） |
@@ -6398,7 +6848,7 @@ SH
 | D5 | 是否另跑 validation 演練 | ✅ 同意（第三輪 review 通過） **⛔ 不另跑**：正式執行失敗（⛔ 沒有報告）⛔ 不是判定、⛔ 不佔上限，可以照「四」重跑；validation ⛔ 不走 freeze record 的路徑，涵蓋不到 ⑨-2 最重要的那一段；多一次 10 分鐘與約 330 MB |
 | D6 | `raw/` 的 raw manifest | ✅ 同意（第三輪 review 通過）**做**（「五」4；第一輪 review 之後也涵蓋正式的 `raw-failed/`）：與 ⑨-1 相同的事後錨點；`ec23e4a` 之後 `raw/` ⛔ 不含 `bin/docker`，產得出來 |
 | D7 | ⑨-2 之後到 ⑩ 之前的 commit | ✅ 同意（第三輪 review 通過）**只 commit 文件**；程式改了就重跑 ⑨-2（「六」）；P1 的「只動文件」改成直接檢查全部變更的路徑（第一輪 review） |
-| D8 | 只有診斷資料時 | ✅ 原則同意（第一輪 review），補齊與 ⑨-1 相同的分界（「四」）：`raw-failed/` 的 rename 之後才被終止 → 仍是正式的原始量測、⛔ 不受結束碼（1、137、143、不明）影響、manifest 照做；bootstrap 階段保留了 S、⛔ 沒有 `<work>` → 只有診斷資料；host 在「五」完成之前重開過 → 一律只有診斷資料（**含頂層已有 freeze record 的情形**）、⛔ 不產 manifest、⛔ 不自動重跑。只有診斷資料時：停下回報，⛔ 不得憑 P7 重跑；重跑由使用者裁決（重開機或可證明清空的恢復機制）。第二輪 review 原則通過，補：正式的 `raw-failed/` 與頂層有 freeze record 的 `raw/` 被保留的 S，在 manifest 之後以身分綁定的「保留的 S 的刪除程序」刪除（「五」；只有診斷資料時⛔ 不用）。第三輪 review：分支與重開機的裁決通過；刪除程序補上 `run.tsv` 四個欄位的 fail-closed 檢查（缺失、重複或不是正整數 → ⛔ 不刪）之後待確認；`development-workflow.md` 的「依 stderr 的位置手動刪除」同步改成只能用這個程序 |
+| D8 | 只有診斷資料時 | ✅ 原則同意（第一輪 review），補齊與 ⑨-1 相同的分界（「四」）：`raw-failed/` 的 rename 之後才被終止 → 仍是正式的原始量測、⛔ 不受結束碼（1、137、143、不明）影響、manifest 照做；bootstrap 階段保留了 S、⛔ 沒有 `<work>` → 只有診斷資料；host 在「五」完成之前重開過 → 一律只有診斷資料（**含頂層已有 freeze record 的情形**）、⛔ 不產 manifest、⛔ 不自動重跑。只有診斷資料時：停下回報，⛔ 不得憑 P7 重跑；重跑由使用者裁決（重開機或可證明清空的恢復機制）。第二輪 review 原則通過，補：正式的 `raw-failed/` 與頂層有 freeze record 的 `raw/` 被保留的 S，在 manifest 之後以身分綁定的「保留的 S 的刪除程序」刪除（「五」；只有診斷資料時⛔ 不用）。第三輪 review：分支與重開機的裁決通過；刪除程序補上 `run.tsv` 四個欄位的 fail-closed 檢查（缺失、重複或不是正整數 → ⛔ 不刪）之後待確認；`development-workflow.md` 的「依 stderr 的位置手動刪除」同步改成只能用這個程序。✅ 第四輪 review 通過 |
 
 ##### 十、執行步驟
 
@@ -6437,7 +6887,7 @@ D1、D2、D4～D7 通過（第二輪 review）；D3、D8 依上面的修正待�
 | 中 | **持久文件仍指示直接手動刪 S**：本計畫規定 S 只能經身分綁定的程序刪除（「五」6），`development-workflow.md` sizing 一節的「harness 的狀態」列卻寫「請依 stderr 印出的位置手動刪除殘留的 S」，會繞過程序，也與「只有診斷資料時⛔ 不刪」衝突；同一節「失敗」列的 commit marker 判讀也缺「驗證完成之前 host 重開過 → 一律降級」 | ✅ 成立。另查：這句話的來源是 raw-failed freeze record 修正計畫的 D6（「依警告手動刪除殘留的 S」）；本筆另外兩處（該計畫的歸檔清單與實作結果）只記錄當時寫進 `development-workflow.md` 的內容，`development-workflow.md` 其他地方⛔ 沒有指示手動刪 S 的文字 | `development-workflow.md`：「harness 的狀態」列改成「有正式的 `raw/`（頂層有報告）或 `raw-failed/` 時，manifest 與適用的驗證完成之後只能以身分綁定的刪除程序刪除；只有診斷資料時⛔ 不刪、停下回報」，並指向本計畫「五」；「失敗」列的 commit marker 判讀補上重開機的降級（⛔ 不交給 ⑩、⛔ 不產 manifest、⛔ 不自動重跑）。raw-failed freeze record 修正計畫的 D6 加一行訂正的註記（⛔ 不改寫歷史裁決）。「七」：程序在 ⑨-2 歸檔時搬進 `development-workflow.md` |
 | 低 | **S 的刪除程序⛔ 沒有 fail-closed 檢查 wrapper 的欄位**：只要求 harness 的欄位存在；`wrapper_pid`／`wrapper_start` 缺失時 `alive` 回傳「不是同一個程序」，被當成「已結束」而繼續 | ✅ 成立（以模擬的 S 重現：wrapper 其實仍在執行，`run.tsv` 缺 `wrapper_pid`、缺 `wrapper_start`、`wrapper_pid` 帶尾隨空白、`wrapper_pid` 重複時，修正前的程序 4 例都刪除、結束碼 0） | 程序一開始逐一檢查 `harness_pid`、`harness_start`、`wrapper_pid`、`wrapper_start` 恰好一個而且是正整數（`^[1-9][0-9]*$`；重複的鍵會印出兩行而不符）——任一不成立 → ⛔ 不刪、結束碼 1，之後才做 `alive` 的判斷。實測 20 例（原本 15 例 ＋ 上述 4 例 ＋ `harness_pid` 帶前導 0 的對照）全部符合；文件裡的程序本體與測過的檔案逐位元相同。同類的檢查：「三」② 的狀態顯示（與 ⑨-1 相同）在欄位缺失時也顯示「已結束」，但它只是顯示，① 啟動之後當場確認 `run.tsv` 已有 `wrapper_*` 與 `harness_*`（`harness_start` 非空）；③ 的安全中止在身分不符時⛔ 不送訊號——⛔ 不會因此做出破壞性的動作，維持不改 |
 
-D1～D7 通過（第三輪 review）；D8 的 S 刪除程序依上面的修正待確認。
+D1～D7 通過（第三輪 review）；D8 的 S 刪除程序依上面的修正，第四輪 review 通過。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -8007,11 +8457,11 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⑨-1 **正式 memory／disk acceptance**：⑦ 實作的 memory harness，用⑨ **封存的 exact counterfactual patch SHA**、在 repo 外的
         隔離複本執行：replay 程序及 d～i 各程序各自 < 450 MiB，success／failure 兩條實際流程磁碟峰值各自 ≤ `P_B_BUDGET`。
         ⚠️ exact patch 的 bytes 或 SHA **之後只要再變，⑨-1 就要重跑**（容量與 failed-record 組合驗到的必須是正式 SHA）；
-        結果記進本筆並 commit（⑨-2 之後就不能 commit 了）   ← ⚠️ 現在在這裡（2026-10-14：raw-failed freeze record 修正 ✅ commit `c0cf0de`，gate 放行；「Stage 2 步驟 ⑨-1 細部計畫 v8」✅ 確認並 commit `496a5f7`；其中「十」的前置修正 ✅ review 通過並 commit `ec23e4a`，下一步是在選定的時段執行 ⑨-1；「Stage 2 步驟 ⑨-2 細部計畫 v4」待確認，見「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」）
+        結果記進本筆並 commit（⑨-2 之後就不能 commit 了）   ← ⚠️ 現在在這裡（2026-10-14：raw-failed freeze record 修正 ✅ commit `c0cf0de`，gate 放行；「Stage 2 步驟 ⑨-1 細部計畫 v8」✅ 確認並 commit `496a5f7`；其中「十」的前置修正 ✅ review 通過並 commit `ec23e4a`，下一步是在選定的時段執行 ⑨-1（之前：「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、2026-10-16 已實作（含第三輪 review 的修正）／⚠️ 待 review，commit 之後才執行）；「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`，見「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」）
         ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：「exact patch」指**兩份封存 patch**（counterfactual ＋ tooling），任一份的 bytes 或 SHA 再變都要重跑
         ⚠️ **⑦d 細部計畫 v1（✅ 2026-10-02 確認）**：入口 `scripts/i074-stage2-acceptance.sh --formal --replay-compute full`（結束碼 0 ok／2 threshold_exceeded／1 harness 失敗）；
         `full` 是唯一的量測趟（「正式 scan 的計次裁決」的新格）；報告的兩份 patch SHA 由 ⑨-1 的程序與 ⑨ 的封存值比對
-   ⑨-2 **⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing（約 6 分鐘），   ← ⚠️ 2026-10-16：「Stage 2 步驟 ⑨-2 細部計畫 v4」待確認（執行條件含 ⑨-1 通過並 commit）
+   ⑨-2 **⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing（約 6 分鐘），   ← ⚠️ 2026-10-16：「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）
         產出 **freeze record**；`status = "ok"` 且 `P_B ≤ P_B_BUDGET` 才進 ⑩；⛔ 不符就走「六、1」的回退順序。
         ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：這一次 sizing 用**真實的兩份 patch**（⑤ 量的 `P_B` 是空 tooling，差距由這一次實測驗證）
         ⚠️ ⑩ 的隔離複本就釘在這一次的 OID（freeze record 的 `repo_head`）；之後真正 repo 可以照常 commit（見「八之一」）

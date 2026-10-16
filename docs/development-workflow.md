@@ -1561,25 +1561,54 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --work-dir 
 
 # ⑨-1 的正式驗收（⑨ 封存之後；clean、harness 檔案 ＝ HEAD；--replay-compute full 是唯一的量測趟，約 3 小時）
 #   ⚠️ 完整的程序（P1～P9、判讀與各分支、保存）見 issue.md I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的「二」～「五」：由使用者在
-#   tmux／自己的終端機執行，Claude 與 Codex 先結束；stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案（wrapper 導到 tmpfs）。
-# P1～P8 的確認（使用者在自己的終端機執行；輸出貼進紀錄）
+#   tmux／自己的終端機執行，Claude 先結束（Codex ⛔ 不使用）；stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案（wrapper 導到 tmpfs）。
+# P1～P8 的確認、D1 的證據與「五」7 的基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT）：
+#   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt（2026-10-16 修改）
 cd /home/dev/workspace/stock_trading
+PRE="$(mktemp "/dev/shm/s91-pre-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.txt")"; RM=$?
+{
+echo "PRE $PRE"; date -u +'precheck 開始 %FT%TZ'; BT="$(awk '$1 == "btime" { print $2 }' /proc/stat)"; RBT=$?; echo "btime $BT"   # 判斷之後有沒有重開機
 IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
 git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
   && git merge-base --is-ancestor ec23e4a HEAD && echo "P1 祖先 ok"   # ec23e4a ＝「十」的修正（2026-10-15 review 通過）
-[ -z "$(git status --porcelain -- scripts python .gitattributes)" ] && echo "P1 clean ok"
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
 git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
   python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
 sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
 docker image inspect "$IMG" > /dev/null && echo "P3 image ok"
-python3 -c 'import json,sys; print("P3 identity", json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2])' \
-  "${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json" "$IMG"
+ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+  && echo "P3 identity ok"                                                                                   # 以結束碼判定（同 ⑨-2）
+sha256sum "$ID"                                                                                              # P3：a02bf3bd…
 docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
-awk '/^MemAvailable:/ { printf "P5 MemAvailable %d MiB（門檻 950）\n", $2 / 1024 }' /proc/meminfo
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
+curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for j in sorted(jobs, key=lambda j: j["job_name"]):
+    print("P4", j["job_name"], j["status"], j.get("started_at", "-"), j.get("finished_at", "-"), "⚠️ 仍在執行" if j["status"] == "running" else "")
+print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; unset TOKEN
+awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' \
+  /proc/meminfo && echo "P5 ok"                                                                              # 以結束碼判定（同 ⑨-2）
+PD="$(ps -eo pid,rss,comm)"; RD=$?                                                                           # D1：ps 先完整取值，再交給 awk
+DL="$(awk '$3 ~ /^(claude|codex)/ { print "D1", $0 }' <<< "$PD")"; RA=$?; NC="$(awk '$3 == "claude" { n++ } END { print n + 0 }' <<< "$PD")"; RN=$?
+printf '%s\nD1 rc：ps %s、awk %s／%s；claude 的程序數 %s\n' "${DL:-D1 （⛔ 沒有 claude／codex 的程序）}" "$RD" "$RA" "$RN" "${NC:-無}"   # codex 只記錄（可以存在、⛔ 不使用）
+[ "$RD" = 0 ] && [ "$RA" = 0 ] && [ "$RN" = 0 ] && [ -n "$PD" ] && [ "$NC" = 0 ] && echo "D1 Claude 已結束 ok"  # 任一個指令失敗 ⛔ 不能當作已結束
 df -h / /dev/shm                                                                                             # P6
-ls -d /dev/shm/i074-* 2>/dev/null; docker ps -a --filter name=i074sz- -q                                     # P7：兩行都必須沒有輸出
-ps -eo pid,args | awk '/i074-stage2-(acceptance|sizing)\.sh/ && !/awk/'                                       # P7：必須沒有輸出
-git rev-parse HEAD                                                                                           # P8
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?; C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?  # P7：find ⛔ 不受 zsh 的 glob 影響
+PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?         # ps 先完整取值，再交給 awk
+printf 'P7 S：%s\nP7 容器：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s、ps %s、awk %s\n' "${S7:-無}" "${C7:-無}" "${P7:-無}" "$RS" "$RC" "$RP" "$RA7"
+[ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$P7" ] \
+  && echo "P7 ok"                                                                                            # 任一個指令失敗 ⛔ 不能當作沒有殘留
+H8="$(git rev-parse --verify HEAD)" && echo "P8 $H8"
+WL="$(git worktree list --porcelain)"; RW=$?; NW="$(grep -c '^worktree ' <<< "$WL")"; RG=$?                   # 「五」7 的基準
+TL="$(ls -A /tmp)"; RL=$?; TB="$(sed 's|^|基準 /tmp：|' <<< "$TL")"; RE=$?
+printf '基準 worktree 登記數 %s\n%s\n基準 rc：git %s、grep %s、ls %s、sed %s、btime 的 awk %s\n' "${NW:-無}" "$TB" "$RW" "$RG" "$RL" "$RE" "$RBT"
+[ "$RW" = 0 ] && [ "$RG" = 0 ] && [ "$RL" = 0 ] && [ "$RE" = 0 ] && [ "$RBT" = 0 ] && [[ "$NW" =~ ^[1-9][0-9]*$ ]] && [[ "$BT" =~ ^[1-9][0-9]*$ ]] \
+  && [ -n "$TB" ] && echo "基準 ok"                                                                          # 任一個指令失敗 ⛔ 不能當作有基準
+date -u +'precheck 結束 %FT%TZ'
+} 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
+  && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"   # ⛔ 沒有這一行就⛔ 不開跑
 
 # ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄
 cd /home/dev/workspace/stock_trading

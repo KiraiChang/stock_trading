@@ -1610,12 +1610,18 @@ date -u +'precheck 結束 %FT%TZ'
 } 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
   && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"   # ⛔ 沒有這一行就⛔ 不開跑
 
-# ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄
-cd /home/dev/workspace/stock_trading
-EXPECTED="$(git rev-parse HEAD)"; NAME="formal-91-$(date -u +%Y%m%dT%H%M%SZ)"
+# ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄——每一步失敗即停（2026-10-16 修改：整段是兩個函式（啟動與收尾），貼上之後立刻執行、執行完就移除）
+s91_launch() {
+local i k f
+cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動"; return 1; }
+EXPECTED="$(git rev-parse --verify HEAD)" && [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || { echo "git rev-parse 失敗：⛔ 不啟動"; return 1; }
+NAME="formal-91-$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$NAME" =~ ^formal-91-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "NAME 不對（「$NAME」）：⛔ 不啟動"; return 1; }
 WORK="$HOME/i074_stage2_acceptance/$NAME"; CTL="/dev/shm/s91-$NAME"
-mkdir -m 700 "$CTL" && printf 'expected\t%s\nname\t%s\nwork\t%s\nlaunched_utc\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$(date -u +%FT%TZ)" > "$CTL/run.tsv"
-cat > "$CTL/wrapper.sh" <<'WRAP'
+[ ! -e "$WORK" ] && [ ! -L "$WORK" ] || { echo "work 目錄已存在：$WORK：⛔ 不啟動"; return 1; }
+mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動"; return 1; }                    # 原子的排他：同一秒的第二次啟動停在這裡
+printf 'expected\t%s\nname\t%s\nwork\t%s\nlaunched_utc\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$(date -u +%FT%TZ)" > "$CTL/run.tsv" \
+  || { echo "寫 run.tsv 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
 ctl="$1"; work="$2"
 st() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
 printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
@@ -1627,7 +1633,26 @@ wait "$hp"; rc=$?
 printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
 WRAP
 setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" > "$CTL/log" 2>&1 < /dev/null &
-sleep 2; cat "$CTL/run.tsv"                                   # 必須已有 wrapper_* 與 harness_*（harness_start 非空）
+for i in $(seq 1 15); do                                  # 啟動之後的驗證（最多 15 秒）：5 個身分欄位各恰好一行、都是正整數
+  sleep 1
+  [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "harness 已經結束（rc $(cut -f1 "$CTL/rc")）：開跑失敗——交給 Claude 判讀，⛔ 不要再啟動"; return 1; }
+  f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start; do
+    [ "$(awk -F'\t' -v k="$k" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ] \
+      && [[ "$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$CTL/run.tsv")" =~ ^[1-9][0-9]*$ ]] || f=1
+  done
+  [ "$f" = 0 ] && break
+done
+cat "$CTL/run.tsv"
+[ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：可能仍有程序在跑——⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+for k in wrapper harness; do                               # PID ＋ starttime 都相符：wrapper 與 harness 都還在
+  [ "$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$(awk -F'\t' -v k="${k}_pid" '$1 == k { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" \
+    = "$(awk -F'\t' -v k="${k}_start" '$1 == k { print $2 }' "$CTL/run.tsv")" ] \
+    || { echo "$k 的身分無法確認（或已結束）：⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+done
+echo "已啟動：NAME＝$NAME（CTL＝$CTL；之後用 ② 查看）"
+}
+s91_done() { unset -f s91_launch s91_done; echo "① 的結束碼：$1（0 以外：照上一行的訊息處理）"; return "$1"; }   # 收尾：移除兩個函式、印出並回傳結束碼（⛔ 不存進變數）
+s91_launch; s91_done "$?"                                 # $? ＝ ① 的結束碼（⛔ 不被 unset 遮蔽）
 
 # ② 狀態（任何時候都可以執行；CTL 換成實際的目錄）
 CTL=/dev/shm/s91-<NAME>

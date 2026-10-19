@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，下一步：⑨-1 的正式驗收（使用者在選定的時段執行計畫「二」「三」）——「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、實作 ✅ review 通過（兩輪）並 commit `f027cb2`（⑨-1 的 precheck 換成 `_002`、⑨-2 的 P1、P4 的 `read`、P7 改成 fail-closed；已可執行 ⑨-1）；⑨-2 細部計畫 v4 ✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，下一步：⑨-1 的正式驗收（使用者在選定的時段執行計畫「二」「三」）——「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、實作 ✅ review 通過（兩輪）並 commit `f027cb2`（⑨-1 的 precheck 換成 `_002`、⑨-2 的 P1、P4 的 `read`、P7 改成 fail-closed；已可執行 ⑨-1）；「Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5」待確認（可選；含 ⑨-1、⑨-2 貼上版 ① 的修正（D7 (b)、D8 (a)），確認之前照舊貼區塊）；⑨-2 細部計畫 v4 ✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -6549,6 +6549,467 @@ printf 'P1 ⑨-1 之後 docs/ 以外的變更：%s（git diff 的 rc %s）\n' "$
 
 驗證（2026-10-16）：⑨-1 的新區塊三份（⑨-1「二」、本節「三」、`development-workflow.md`）與測過的 `pre91-v4.sh` 逐位元相同；⑨-2 的區塊與測過的 `p92-v2.sh` 逐位元相同；⑨-1、⑨-2 的 P7 5 行逐位元相同；`bash -n`／`zsh -n` 都通過（⑨-2 代入 `R91`、`E91`）。實跑與反例見「三」的實測。
 
+#### Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5（2026-10-19，待確認；含 ⑨-1、⑨-2 貼上版的 ①）
+
+需求確認（2026-10-16）：把 ⑨-1 要貼的長區塊（「二」的 precheck、「三」的 ①②③）包成 **repo 外**的子指令腳本 `s91`（`pre`／`go`／`st`／`stop`）；
+開不開跑仍由使用者看輸出決定（⛔ 不把「開跑的條件」改成程式判斷）。只動文件與 `~/.local/bin/s91`；⛔ 不改 repo 的程式、⛔ 不執行量測。確認之前照舊貼區塊（`s91` 是可選的）。
+v2 ＝ 第一輪 review（2026-10-16）的修正（本節最後的「第一輪 review 的修正」）：`go`、`stop` ⛔ 不再是「逐字的 ①、③」，改成每一步失敗即停、加上鎖與 claim；
+**逐字保留**的是 precheck（整段）、② 的函式與顯示、wrapper 的內容（`run.tsv` 的欄位與 rc marker 的寫法）與 ③ 的身分條件。
+v3 ＝ 第二輪 review（2026-10-16）的修正：`stop` 的 `stop_sent` 寫入失敗回 1、`go` 驗證 `s91_sha256`；**D7 裁決採 (b)**：貼上版的 ① 也改成每一步失敗即停（「三之三」）；⑨-2 的 ① 有同樣的問題（D8，待裁定，「三之三」已備好）。
+v4 ＝ 第三輪 review（2026-10-19）的修正：貼上版 ① 的最後一行先記下函式的結束碼、再 `unset`，印出「① 的結束碼」並以 `(exit "$LRC")` 還原 `$?`（v3 的 `$?` 被 `unset` 遮蔽成 0）；**D8 裁決採 (a)**；`s91` 的腳本⛔ 沒有變（仍是 `_003`）。
+v5 ＝ 第四輪 review（2026-10-19）的修正：v4 的 `LRC` 會留在使用者的 shell（覆寫原值，原本是 exported 的仍是 exported）→ 收尾改成會自行移除的函式 `s91_done`（⑨-2 是 `s92_done`），以 `return` 回傳結束碼、⛔ 不存進變數；「一」的 `development-workflow.md` 範圍矛盾一併修正；`s91` 的腳本仍⛔ 沒有變。
+
+##### 〇、唯讀盤點（2026-10-16，HEAD `f027cb2`）
+
+| 項目 | 現況 |
+|---|---|
+| 現行的操作 | 使用者在終端機貼 4 段：precheck 47 行、① 19 行、② 8 行、③ 2 行；有超過 120 個字的長行，終端機顯示時折行，複製下來可能多出換行 |
+| 安裝的位置 | `~/.local/bin` 已存在、是 `PATH` 的第一個（目前只有 `claude`）；`s91` 尚未存在；`/usr/bin/flock`（util-linux 2.36.1）可用 |
+| 為什麼⛔ 不放進 repo | P1 要求 `scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更；HEAD 的 tree 變大會讓量到的 `code_worktree` 變大，而 ⑨-1 的磁碟餘裕約 4.9 MiB |
+| ② 的佔位 | `CTL=/dev/shm/s91-<NAME>` 沒有替換時，zsh 是 parse error（實測）；換了終端機就要手動替換 |
+| ⚠️ ① 的 `mkdir` 失敗之後仍繼續（✅ 重現） | 控制目錄已存在（同一秒啟動兩次）時，貼上的 ① 印出 `mkdir: cannot create directory`，但仍**覆寫 `wrapper.sh`、啟動 wrapper、把欄位接在舊的 `run.tsv` 後面**，結束碼 0（假的 date 讓 NAME 相同、假 repo；D7）。背景指令被 shell 接受就回 0（review 也確認） |
+| ⚠️ ⑨-2 的 ① 也一樣（✅ 重現，第二輪 review 之後盤點） | ⑨-2「三」的 ① 是同一套寫法（「與 ⑨-1 同一套」）：控制目錄已存在時同樣覆寫 `wrapper.sh`、啟動 wrapper、結束碼 0（假的 date、假 repo 的 sizing 腳本；D8） |
+| ⚠️ v4 的 `LRC` 留在使用者的 shell（✅ 重現，第四輪 review） | ⑨-1、⑨-2 × zsh、bash（`mkdir` 失敗）：原本沒有 `LRC` → 留下 `LRC=1`；原本 `export LRC=orig` → 變成 `LRC=1`，而且仍是 exported（`env` 看得到） |
+| ⚠️ v3 貼上版 ① 的結束碼被 `unset` 遮蔽（✅ 重現，第三輪 review） | ⑨-1、⑨-2 × zsh、bash：`mkdir` 失敗時函式本身回 1，但 `s91_launch; unset -f s91_launch` 那一行之後的 `$?` 是 0（`unset` 的結束碼）；對照組（同一個函式、最後一行換成 `echo $?`）是 1 |
+| ⚠️ v2 的兩個缺口（✅ 重現，第二輪 review） | `stop_sent` 寫入失敗（預先放一個同名的目錄）時 `stop` 仍回 0；`run.tsv` 多一行錯的 `s91_sha256`（假的 `setsid` 先附加）時 `go` 仍回 0、印「已啟動」 |
+| ⚠️ v1 的 `stop` 不能保證只送一次（✅ 重現） | 兩個 `stop` 都停在 `yes` 提示時，先檢查「還沒送過」、之後才寫紀錄：收到 TERM 仍繼續執行的假 harness 被兩邊各送一次（`bash -x` 的追蹤） |
+| ⚠️ v1 的控制目錄驗證太鬆（✅ 重現） | 名稱是 `s91-formal-91-bogus`、mode 755、`run.tsv` 是 symlink 的目錄被自動選中並顯示狀態 |
+
+##### 一、目標、範圍與⛔ 不做
+
+| 項目 | 內容 |
+|---|---|
+| 目標 | 四個短指令取代貼區塊：`s91 pre`、`s91 go`、`s91 st`、`s91 stop`；從檔案執行，⛔ 不再有貼上的風險（折行、`read` 讀走下一行、JWT 被當成指令）；`go`、`stop` 的每一步都 fail-closed，並行的兩個也⛔ 不會雙啟動、⛔ 不會送兩次；執行之前可以獨立核對腳本與 HEAD 的文件相同 |
+| 範圍 | `~/.local/bin/s91`（新檔，mode 755）；本節（腳本、核對指令與測試）；⑨-1「三」的 ① 與 `development-workflow.md` 的副本換成「三之三」的版本（D7 (b)）；⑨-2「三」的 ①（D8）；⑨-1「二」「三」的指標；I-074 狀態列與 roadmap 的指標 |
+| ⛔ 不做 | ⛔ 不改 precheck、wrapper 的內容、②③ 與開跑的條件、判讀；⛔ 不自動判斷開跑的條件；⛔ 不改 repo 的程式；`development-workflow.md` 只同步 ⑨-1 的 ①，其他內容⛔ 不動；⛔ 不做 ⑨-2 的 `s91`（⑨-2 執行之前另議）；⛔ 不在真正的 repo 跑 `s91 go`（測試用只把 `cd` 換成假 repo 的副本） |
+
+##### 二、設計
+
+| 子指令 | 內容 |
+|---|---|
+| `s91 pre` | ⑨-1「二」的 precheck（**逐字**） |
+| `s91 go` | ① **全域的啟動鎖**：`/dev/shm/s91.lock` 以 `flock -n` 取得，持有到啟動後的驗證完成；⛔ 不傳給 wrapper（`9>&-`）。另一個 `go` 持有時 → 拒絕、⛔ 不問。② 與 P7 相同的程序檢查（`ps`、`awk` 的結束碼都要 0）→ 有 acceptance／sizing 的程序就拒絕、⛔ 不問。③ 輸入 `yes`；回答之後**再檢查一次**程序。④ 「三」的 ①，**每一步失敗即停**：`cd`、`git rev-parse --verify`（40 碼）、NAME 的格式、work 目錄⛔ 不存在、`mkdir`（失敗 → ⛔ 不碰既有的控制目錄）、寫 `run.tsv`（多一欄 `s91_sha256` ＝ 這支腳本的 SHA-256）、寫 `wrapper.sh`（內容**逐字**）；之後 `setsid nohup` 啟動 wrapper。⑤ **啟動之後的驗證**（最多 15 秒）：`wrapper_pid`、`wrapper_start`、`wrapper_pgid`、`harness_pid`、`harness_start` 各恰好一行、都是正整數；`wrapper_pid` ＝ 這次啟動的 PID；控制目錄通過下面的來源驗證；`s91_sha256` 恰好一行而且 ＝ 這支腳本的 SHA-256（第二輪 review）；wrapper 與 harness 的 PID ＋ starttime 都還在。15 秒內已有 rc marker（harness 立刻失敗）、欄位⛔ 沒有寫齊、身分無法確認 → 回 1，並提示「可能仍有程序、⛔ 不要再啟動、用 `s91 st` 查看、交給 Claude」 |
+| `s91 st [NAME]` | 控制目錄的解析與**來源驗證**（下一列）→ 「三」的 ② 的函式與顯示（**逐字**）；另顯示中止的紀錄（有的話） |
+| 控制目錄 | 給了 NAME 就檢查格式（`^formal-91-[0-9]{8}T[0-9]{6}Z$`）；省略時 `/dev/shm` 的 `s91-formal-91-*`（任何型別）必須**恰好一個**，0 個或多個 → 列出、要求指定（⛔ 不猜）。之後一律驗證：名稱符合同一個 regex、是目錄而且⛔ 不是 symlink、owner ＝ 目前的 uid、mode 700、`run.tsv` 是一般檔而且⛔ 不是 symlink、`name`／`expected`／`work`／`launched_utc` 各恰好一行，`name` ＝ 目錄名、`expected` 是 40 碼、`work` ＝ `$HOME/i074_stage2_acceptance/<name>`、`launched_utc` 是 `YYYY-MM-DDTHH:MM:SSZ` |
+| `s91 stop [NAME]` | 控制目錄的來源驗證 → 已有 rc marker、已經嘗試過（`stop_attempt` 存在）→ 拒絕；`harness_pid`、`harness_start` 各恰好一行、正整數，**只取一次**；輸入 `yes`；以 `set -C`（noclobber，原子的建立、⛔ 不覆寫）建立 **`stop_attempt`**（UTC、PID、starttime）——取不到（另一個 `stop` 已經在做、或寫入失敗）→ ⛔ 不送；與 ③ 相同的身分條件（PID ＋ starttime ＋ cmdline 含 `i074-stage2-acceptance.sh`）不成立 → 寫 **`stop_failed`**、回 1；`kill -TERM` 的結束碼 ≠ 0 → 寫 `stop_failed`、回 1；成功 → 寫 **`stop_sent`**、回 0；`stop_sent` 寫入失敗 → 回 1（TERM 已送出、`stop_attempt` 擋下重送；第二輪 review）。每個控制目錄**只能嘗試一次**（之後的 `stop` 一律拒絕） |
+| 參數 | `pre`、`go` ⛔ 不接受參數；`st`、`stop` 最多一個（NAME）；其他 → 說明、結束碼 2 |
+| 核對（獨立） | 下面「三之二」的一行指令：從 `git show HEAD:docs/issue.md` 抽出本節「三之一」的腳本，與 `~/.local/bin/s91` `cmp`，相同才印 SHA-256 與 ok。執行之前（`s91 pre` 之前）由使用者執行；腳本自己⛔ 不做 self-check（證明不了未被整體替換）。跑完之後 Claude 再以 `run.tsv` 的 `s91_sha256` 對照 HEAD 的文件 |
+
+執行方式：`#!/usr/bin/env bash`；⛔ 不用 `set -e`／`pipefail`（precheck 要每一項都跑完）。從檔案執行，`read` 讀的是終端機、⛔ 不會讀走腳本的下一行；
+指令列只有 `s91 pre`，JWT ⛔ 不會被當成指令、也⛔ 不進 history。啟動鎖留下一個空檔 `/dev/shm/s91.lock`（名稱⛔ 不是 `i074-*`、⛔ 不是控制目錄的形狀，⛔ 不影響 P6、P7）。
+
+##### 三之一、腳本（`~/.local/bin/s91`）
+
+```text id="i074_stage2_s91_script_003"
+#!/usr/bin/env bash
+# s91：I-074 Stage 2 ⑨-1 的簡易指令（docs/issue.md「Stage 2 步驟 ⑨-1 的簡易指令 s91」）
+#   s91 pre          precheck（＝ ⑨-1「二」的區塊，逐字）：P4 的提示出現之後，先打一個空白、再貼上 JWT
+#   s91 go           啟動（＝「三」的 ①，每一步失敗即停、啟動後驗證）：precheck 剛跑完、開跑的條件都成立才用
+#   s91 st [NAME]    狀態（＝「三」的 ②，逐字）：/dev/shm 只有一個控制目錄時可以省略 NAME
+#   s91 stop [NAME]  安全中止（與「三」的 ③ 相同的身分條件）：只在必要時；每個控制目錄只能嘗試一次
+# ⛔ 不放進 repo（P1 的 clean、HEAD 的 tree 大小）；執行之前先用文件裡的核對指令確認與 HEAD 的文件相同。
+
+usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; }
+NAME_RE='^formal-91-[0-9]{8}T[0-9]{6}Z$'
+LOCK=/dev/shm/s91.lock                                    # 啟動鎖（空檔；名稱⛔ 不是 i074-*、⛔ 不是控制目錄的形狀）
+
+# ── ② 的函式（逐字）
+v()     { awk -F'\t' -v k="$1" '$1 == k { print $2 }' "$CTL/run.tsv"; }
+st()    { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }
+alive() { [ -n "$1" ] && [ -n "$2" ] && [ "$(st "$1")" = "$2" ]; }      # pid ＋ starttime 都相符才算同一個程序
+one() { [ "$(awk -F'\t' -v k="$1" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ]; }   # run.tsv 的欄位恰好一行
+
+# 控制目錄：給了 NAME 就用它，否則 /dev/shm 必須恰好一個 s91-formal-91-*（⛔ 不猜）；再驗證來源
+s91_ctl() {
+  local d n b k
+  if [ -n "${1:-}" ]; then
+    [[ "$1" =~ $NAME_RE ]] || { echo "NAME 的格式不對：「$1」（formal-91-YYYYMMDDTHHMMSSZ）" >&2; return 1; }
+    CTL="/dev/shm/s91-$1"
+  else
+    d="$(find /dev/shm -maxdepth 1 -name 's91-formal-91-*')" || { echo "find 失敗：⛔ 不猜控制目錄" >&2; return 1; }
+    n="$(grep -c . <<< "$d")"
+    [ "$n" = 1 ] || { echo "/dev/shm 的控制目錄有 $n 個：請指定 NAME" >&2; [ -n "$d" ] && sed 's|^/dev/shm/s91-|  |' <<< "$d" >&2; return 1; }
+    CTL="$d"
+  fi
+  b="${CTL#/dev/shm/s91-}"
+  [[ "$b" =~ $NAME_RE ]] || { echo "控制目錄的名稱不對：$CTL" >&2; return 1; }
+  [ -d "$CTL" ] && [ ! -L "$CTL" ] || { echo "控制目錄不存在或是 symlink：$CTL" >&2; return 1; }
+  [ "$(stat -c '%u %a' "$CTL")" = "$(id -u) 700" ] || { echo "控制目錄的 owner／mode 不對（$(stat -c '%U %a' "$CTL")，要 $(id -un) 700）：$CTL" >&2; return 1; }
+  [ -f "$CTL/run.tsv" ] && [ ! -L "$CTL/run.tsv" ] || { echo "run.tsv 不存在、不是一般檔或是 symlink：$CTL" >&2; return 1; }
+  for k in name expected work launched_utc; do one "$k" || { echo "run.tsv 的 $k 缺失或重複：$CTL" >&2; return 1; }; done
+  [ "$(v name)" = "$b" ] && [[ "$(v expected)" =~ ^[0-9a-f]{40}$ ]] && [ "$(v work)" = "$HOME/i074_stage2_acceptance/$b" ] \
+    && [[ "$(v launched_utc)" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+    || { echo "run.tsv 的 name／expected／work／launched_utc 與控制目錄不符或格式不對：$CTL" >&2; return 1; }
+}
+
+s91_pre() {
+# P1～P8 的確認、D1 的證據與「五」7 的基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT）：
+#   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt（2026-10-16 修改）
+cd /home/dev/workspace/stock_trading
+PRE="$(mktemp "/dev/shm/s91-pre-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.txt")"; RM=$?
+{
+echo "PRE $PRE"; date -u +'precheck 開始 %FT%TZ'; BT="$(awk '$1 == "btime" { print $2 }' /proc/stat)"; RBT=$?; echo "btime $BT"   # 判斷之後有沒有重開機
+IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
+git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0de HEAD \
+  && git merge-base --is-ancestor ec23e4a HEAD && echo "P1 祖先 ok"   # ec23e4a ＝「十」的修正（2026-10-15 review 通過）
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
+git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
+  python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
+sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
+docker image inspect "$IMG" > /dev/null && echo "P3 image ok"
+ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+  && echo "P3 identity ok"                                                                                   # 以結束碼判定（同 ⑨-2）
+sha256sum "$ID"                                                                                              # P3：a02bf3bd…
+docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
+curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for j in sorted(jobs, key=lambda j: j["job_name"]):
+    print("P4", j["job_name"], j["status"], j.get("started_at", "-"), j.get("finished_at", "-"), "⚠️ 仍在執行" if j["status"] == "running" else "")
+print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; unset TOKEN
+awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' \
+  /proc/meminfo && echo "P5 ok"                                                                              # 以結束碼判定（同 ⑨-2）
+PD="$(ps -eo pid,rss,comm)"; RD=$?                                                                           # D1：ps 先完整取值，再交給 awk
+DL="$(awk '$3 ~ /^(claude|codex)/ { print "D1", $0 }' <<< "$PD")"; RA=$?; NC="$(awk '$3 == "claude" { n++ } END { print n + 0 }' <<< "$PD")"; RN=$?
+printf '%s\nD1 rc：ps %s、awk %s／%s；claude 的程序數 %s\n' "${DL:-D1 （⛔ 沒有 claude／codex 的程序）}" "$RD" "$RA" "$RN" "${NC:-無}"   # codex 只記錄（可以存在、⛔ 不使用）
+[ "$RD" = 0 ] && [ "$RA" = 0 ] && [ "$RN" = 0 ] && [ -n "$PD" ] && [ "$NC" = 0 ] && echo "D1 Claude 已結束 ok"  # 任一個指令失敗 ⛔ 不能當作已結束
+df -h / /dev/shm                                                                                             # P6
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?; C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?  # P7：find ⛔ 不受 zsh 的 glob 影響
+PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?         # ps 先完整取值，再交給 awk
+printf 'P7 S：%s\nP7 容器：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s、ps %s、awk %s\n' "${S7:-無}" "${C7:-無}" "${P7:-無}" "$RS" "$RC" "$RP" "$RA7"
+[ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$P7" ] \
+  && echo "P7 ok"                                                                                            # 任一個指令失敗 ⛔ 不能當作沒有殘留
+H8="$(git rev-parse --verify HEAD)" && echo "P8 $H8"
+WL="$(git worktree list --porcelain)"; RW=$?; NW="$(grep -c '^worktree ' <<< "$WL")"; RG=$?                   # 「五」7 的基準
+TL="$(ls -A /tmp)"; RL=$?; TB="$(sed 's|^|基準 /tmp：|' <<< "$TL")"; RE=$?
+printf '基準 worktree 登記數 %s\n%s\n基準 rc：git %s、grep %s、ls %s、sed %s、btime 的 awk %s\n' "${NW:-無}" "$TB" "$RW" "$RG" "$RL" "$RE" "$RBT"
+[ "$RW" = 0 ] && [ "$RG" = 0 ] && [ "$RL" = 0 ] && [ "$RE" = 0 ] && [ "$RBT" = 0 ] && [[ "$NW" =~ ^[1-9][0-9]*$ ]] && [[ "$BT" =~ ^[1-9][0-9]*$ ]] \
+  && [ -n "$TB" ] && echo "基準 ok"                                                                          # 任一個指令失敗 ⛔ 不能當作有基準
+date -u +'precheck 結束 %FT%TZ'
+} 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
+  && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"   # ⛔ 沒有這一行就⛔ 不開跑
+}
+
+# 與 P7 相同的程序檢查：⛔ 沒有 acceptance／sizing 的程序、而且 ps 與 awk 都成功，才回 0
+s91_procs() {
+  local PP RP P7 RA7
+  PP="$(ps -eo pid,args)"; RP=$?; P7="$(awk '/i074-stage2-(acceptance|sizing)\.sh/' <<< "$PP")"; RA7=$?
+  [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] && [ -z "$P7" ] && return 0
+  echo "已經有 acceptance／sizing 的程序，或檢查本身失敗（ps $RP、awk $RA7）：⛔ 不啟動" >&2; [ -n "$P7" ] && printf '%s\n' "$P7" >&2; return 1
+}
+
+s91_go() {
+  local ans SELF SHA wp i k f
+  exec 9>> "$LOCK" && /usr/bin/flock -n 9 || { echo "另一個 s91 go 正在執行（$LOCK）：⛔ 不啟動" >&2; return 1; }   # 持有到驗證完成；⛔ 不傳給 wrapper
+  s91_procs || return 1
+  read -r -p "precheck 剛跑完、開跑的條件都成立了嗎（每一個 ok、P4 的每一列、P6 的 df 都看過）？輸入 yes 開跑：" ans
+  [ "$ans" = yes ] || { echo "⛔ 沒有開跑" >&2; return 1; }
+  s91_procs || return 1                                                                # 回答之前可能有人另外啟動
+  SELF="$(readlink -f -- "$0")" && SHA="$(sha256sum < "$SELF" | cut -d' ' -f1)" && [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] \
+    || { echo "算不出 s91 的 SHA-256：⛔ 不啟動" >&2; return 1; }
+  # ── 「三」的 ①：每一步失敗即停；wrapper 的內容逐字
+  cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動" >&2; return 1; }
+  EXPECTED="$(git rev-parse --verify HEAD)" && [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || { echo "git rev-parse 失敗：⛔ 不啟動" >&2; return 1; }
+  NAME="formal-91-$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$NAME" =~ $NAME_RE ]] || { echo "NAME 不對（「$NAME」）：⛔ 不啟動" >&2; return 1; }
+  WORK="$HOME/i074_stage2_acceptance/$NAME"; CTL="/dev/shm/s91-$NAME"
+  [ ! -e "$WORK" ] && [ ! -L "$WORK" ] || { echo "work 目錄已存在：$WORK：⛔ 不啟動" >&2; return 1; }
+  mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動" >&2; return 1; }
+  printf 'expected\t%s\nname\t%s\nwork\t%s\nlaunched_utc\t%s\ns91_sha256\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$(date -u +%FT%TZ)" "$SHA" > "$CTL/run.tsv" \
+    || { echo "寫 run.tsv 失敗：$CTL 只建了一半、⛔ 沒有啟動" >&2; return 1; }
+  cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動" >&2; return 1; }
+ctl="$1"; work="$2"
+st() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
+printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
+REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/i074-stage2-acceptance.sh --formal --replay-compute full --work-dir "$work" < /dev/null &
+hp=$!
+printf 'harness_pid\t%s\nharness_start\t%s\n' "$hp" "$(st "$hp" || true)" >> "$ctl/run.tsv"
+wait "$hp"; rc=$?
+printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
+WRAP
+  setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" > "$CTL/log" 2>&1 < /dev/null 9>&- &
+  wp=$!
+  # ── 啟動之後的驗證（最多 15 秒）：5 個身分欄位各恰好一行、都是正整數；wrapper_pid ＝ 這次啟動的 PID；wrapper 與 harness 都還在
+  for i in $(seq 1 15); do
+    sleep 1
+    [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "harness 已經結束（rc $(cut -f1 "$CTL/rc")）：開跑失敗——交給 Claude 判讀，⛔ 不要再啟動" >&2; return 1; }
+    f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start; do one "$k" && [[ "$(v "$k")" =~ ^[1-9][0-9]*$ ]] || f=1; done
+    [ "$f" = 0 ] && break
+  done
+  cat "$CTL/run.tsv"
+  [ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：可能仍有程序在跑——⛔ 不要再啟動，用 s91 st 查看、交給 Claude" >&2; return 1; }
+  s91_ctl "$NAME" && one s91_sha256 && [ "$(v s91_sha256)" = "$SHA" ] \
+    && [ "$(v wrapper_pid)" = "$wp" ] && alive "$(v wrapper_pid)" "$(v wrapper_start)" && alive "$(v harness_pid)" "$(v harness_start)" \
+    || { echo "控制目錄、s91_sha256 或 wrapper／harness 的身分無法確認：⛔ 不要再啟動，用 s91 st 查看、交給 Claude" >&2; return 1; }
+  echo "已啟動：NAME＝$NAME（之後用 s91 st 查看）" >&2
+}
+
+s91_st() {
+  s91_ctl "${1:-}" || return 1
+  echo "CTL：$CTL"
+echo "harness：$(alive "$(v harness_pid)" "$(v harness_start)" && echo 執行中 || echo 已結束)" \
+     "wrapper：$(alive "$(v wrapper_pid)" "$(v wrapper_start)" && echo 執行中 || echo 已結束)" \
+     "rc：$(cut -f1 "$CTL/rc" 2>/dev/null || echo 無)"
+tail -3 "$CTL/log"
+  if [ -e "$CTL/stop_attempt" ]; then
+    echo "中止：嘗試 $(cut -f1 "$CTL/stop_attempt")；$( [ -e "$CTL/stop_sent" ] && echo "已送出 $(cat "$CTL/stop_sent")" || echo "未送出（$(cut -f2 "$CTL/stop_failed" 2>/dev/null || echo 結果不明)）")"
+  fi
+}
+
+s91_stop() {
+  local k hp hs ans kr now
+  s91_ctl "${1:-}" || return 1
+  echo "CTL：$CTL"
+  [ -e "$CTL/rc" ] && { echo "已有 rc marker（$(cut -f1 "$CTL/rc")）：harness 已結束，⛔ 不送訊號" >&2; return 1; }
+  [ -e "$CTL/stop_attempt" ] && { echo "這個控制目錄已經嘗試過一次（$(cut -f1 "$CTL/stop_attempt")）：⛔ 不再送" >&2; return 1; }
+  for k in harness_pid harness_start; do
+    one "$k" && [[ "$(v "$k")" =~ ^[1-9][0-9]*$ ]] || { echo "run.tsv 的 $k 缺失、重複或不是正整數：⛔ 不送訊號" >&2; return 1; }
+  done
+  hp="$(v harness_pid)"; hs="$(v harness_start)"                                      # 只取一次，之後都用這兩個值
+  read -r -p "確定要對 harness（PID $hp）送一次 TERM 嗎（量測趟開始之後＝一次崩潰）？輸入 yes：" ans
+  [ "$ans" = yes ] || { echo "⛔ 沒有送訊號" >&2; return 1; }
+  ( set -C; printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$hp" "$hs" > "$CTL/stop_attempt" ) 2> /dev/null \
+    || { echo "取不到這次中止的 claim（另一個 s91 stop 已經在做，或寫入失敗）：⛔ 不送訊號" >&2; return 1; }   # set -C：原子的建立、⛔ 不覆寫
+  if ! { alive "$hp" "$hs" && grep -qa 'i074-stage2-acceptance.sh' "/proc/$hp/cmdline"; }; then                # 與 ③ 相同的身分條件
+    printf '%s\t身分不符或已結束\n' "$(date -u +%FT%TZ)" > "$CTL/stop_failed"; echo "身分不符或已結束：⛔ 不送訊號" >&2; return 1
+  fi
+  kill -TERM "$hp"; kr=$?; now="$(date -u +%FT%TZ)"
+  if [ "$kr" != 0 ]; then
+    printf '%s\tkill 的結束碼 %s\n' "$now" "$kr" > "$CTL/stop_failed"; echo "kill 失敗（結束碼 $kr）：交給 Claude，⛔ 不要再送" >&2; return 1
+  fi
+  printf '%s\n' "$now" > "$CTL/stop_sent" \
+    || { echo "TERM 已送出（$now），但 stop_sent 寫入失敗：交給 Claude；stop_attempt 已擋下重送，⛔ 不要再送" >&2; return 1; }
+  echo "已送出一次 TERM（$now）；之後用 s91 st 查看，等 harness 結束（最多約 5 分鐘）；⛔ 不要再送" >&2
+}
+
+case "${1:-}" in
+  pre)  [ "$#" = 1 ] || { usage; exit 2; }; s91_pre ;;
+  go)   [ "$#" = 1 ] || { usage; exit 2; }; s91_go ;;
+  st)   [ "$#" -le 2 ] || { usage; exit 2; }; s91_st "${2:-}" ;;
+  stop) [ "$#" -le 2 ] || { usage; exit 2; }; s91_stop "${2:-}" ;;
+  *)    usage; exit 2 ;;
+esac
+```
+
+##### 三之二、核對指令（`s91 pre` 之前，使用者執行；一行）
+
+```text id="i074_stage2_s91_check_001"
+cd /home/dev/workspace/stock_trading && git show HEAD:docs/issue.md | sed -n '/^```text id="i074_stage2_s91_script_003"$/,/^```$/p' | sed '1d;$d' | cmp - ~/.local/bin/s91 && sha256sum ~/.local/bin/s91 && echo "s91 ＝ HEAD 的 docs/issue.md ok"
+```
+
+⛔ 沒有印出最後的 ok → ⛔ 不用 `s91`（照舊貼區塊，或交給 Claude 重新安裝）。
+
+##### 三之三、貼上版的 ①（D7 (b)；⑨-2 的版本是 D8）
+
+⑨-1「三」的 ① 換成下面這一段（②③ ⛔ 不動；`development-workflow.md` 的副本同步）。整段是兩個函式（啟動 `s91_launch` 與收尾 `s91_done`），貼上之後立刻執行、執行完兩個都移除（`return` 只離開函式，⛔ 不會關掉終端機）；收尾印出「① 的結束碼」並以 `return` 回傳，之後的 `$?` 就是它（⛔ 不被 `unset` 遮蔽；結束碼⛔ 不存進變數，使用者 shell 原有的變數⛔ 不受影響——`NAME`、`CTL` 等是 ① 本來就留給 ② 用的）；每一步失敗即停，`mkdir` 的原子排他讓同一秒的第二次啟動停在 `mkdir`（第二輪 review：不另加鎖）。與 `s91 go` 的差別：⛔ 沒有啟動鎖、程序檢查與 `yes`（precheck 的 P7 已確認），⛔ 不比對 `wrapper_pid` ＝ `$!`（互動 shell 有 job control，背景工作是 process group 的 leader，`setsid` 會再 fork 一次）、⛔ 沒有 `s91_sha256`。bash 會印出 `[1] <PID>` 之類背景工作的通知——⛔ 不代表 harness 結束，以「已啟動」「① 的結束碼」兩行與 ② 為準。
+
+```text id="i074_stage2_step91_launch1_005"
+# ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄——每一步失敗即停（2026-10-16 修改：整段是兩個函式（啟動與收尾），貼上之後立刻執行、執行完就移除）
+s91_launch() {
+local i k f
+cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動"; return 1; }
+EXPECTED="$(git rev-parse --verify HEAD)" && [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || { echo "git rev-parse 失敗：⛔ 不啟動"; return 1; }
+NAME="formal-91-$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$NAME" =~ ^formal-91-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "NAME 不對（「$NAME」）：⛔ 不啟動"; return 1; }
+WORK="$HOME/i074_stage2_acceptance/$NAME"; CTL="/dev/shm/s91-$NAME"
+[ ! -e "$WORK" ] && [ ! -L "$WORK" ] || { echo "work 目錄已存在：$WORK：⛔ 不啟動"; return 1; }
+mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動"; return 1; }                    # 原子的排他：同一秒的第二次啟動停在這裡
+printf 'expected\t%s\nname\t%s\nwork\t%s\nlaunched_utc\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$(date -u +%FT%TZ)" > "$CTL/run.tsv" \
+  || { echo "寫 run.tsv 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+ctl="$1"; work="$2"
+st() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
+printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
+REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/i074-stage2-acceptance.sh --formal --replay-compute full --work-dir "$work" < /dev/null &
+hp=$!
+printf 'harness_pid\t%s\nharness_start\t%s\n' "$hp" "$(st "$hp" || true)" >> "$ctl/run.tsv"
+wait "$hp"; rc=$?
+printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
+WRAP
+setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" > "$CTL/log" 2>&1 < /dev/null &
+for i in $(seq 1 15); do                                  # 啟動之後的驗證（最多 15 秒）：5 個身分欄位各恰好一行、都是正整數
+  sleep 1
+  [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "harness 已經結束（rc $(cut -f1 "$CTL/rc")）：開跑失敗——交給 Claude 判讀，⛔ 不要再啟動"; return 1; }
+  f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start; do
+    [ "$(awk -F'\t' -v k="$k" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ] \
+      && [[ "$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$CTL/run.tsv")" =~ ^[1-9][0-9]*$ ]] || f=1
+  done
+  [ "$f" = 0 ] && break
+done
+cat "$CTL/run.tsv"
+[ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：可能仍有程序在跑——⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+for k in wrapper harness; do                               # PID ＋ starttime 都相符：wrapper 與 harness 都還在
+  [ "$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$(awk -F'\t' -v k="${k}_pid" '$1 == k { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" \
+    = "$(awk -F'\t' -v k="${k}_start" '$1 == k { print $2 }' "$CTL/run.tsv")" ] \
+    || { echo "$k 的身分無法確認（或已結束）：⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+done
+echo "已啟動：NAME＝$NAME（CTL＝$CTL；之後用 ② 查看）"
+}
+s91_done() { unset -f s91_launch s91_done; echo "① 的結束碼：$1（0 以外：照上一行的訊息處理）"; return "$1"; }   # 收尾：移除兩個函式、印出並回傳結束碼（⛔ 不存進變數）
+s91_launch; s91_done "$?"                                 # $? ＝ ① 的結束碼（⛔ 不被 unset 遮蔽）
+```
+
+⑨-2「三」的 ①（D8；只換函式名、NAME 的前綴、work 與控制目錄的位置與 wrapper 的內容——wrapper 逐字取自 ⑨-2 的區塊）：
+
+```text id="i074_stage2_step92_launch1_004"
+# ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄——與 ⑨-1 同一套，只換入口、work 與控制目錄的名稱——每一步失敗即停（2026-10-16 修改：整段是兩個函式（啟動與收尾），貼上之後立刻執行、執行完就移除）
+s92_launch() {
+local i k f
+cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動"; return 1; }
+EXPECTED="$(git rev-parse --verify HEAD)" && [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || { echo "git rev-parse 失敗：⛔ 不啟動"; return 1; }
+NAME="formal-92-$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$NAME" =~ ^formal-92-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "NAME 不對（「$NAME」）：⛔ 不啟動"; return 1; }
+WORK="$HOME/i074_stage2_sizing/$NAME"; CTL="/dev/shm/s92-$NAME"
+[ ! -e "$WORK" ] && [ ! -L "$WORK" ] || { echo "work 目錄已存在：$WORK：⛔ 不啟動"; return 1; }
+mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動"; return 1; }                    # 原子的排他：同一秒的第二次啟動停在這裡
+printf 'expected\t%s\nname\t%s\nwork\t%s\nlaunched_utc\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$(date -u +%FT%TZ)" > "$CTL/run.tsv" \
+  || { echo "寫 run.tsv 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+ctl="$1"; work="$2"
+st() { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
+printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
+env -u MEM -u CPUS -u TOOLING_PATCH -u REPLAY_DRY_RUN -u PY_IMAGE -u I074_SIZING_FAULT \
+    -u SIZING_SNAPSHOT -u SIZING_PROFILE -u SIZING_REPLAY_MODE -u SIZING_REPLAY_COMPUTE \
+    MEM_MIN_MB=447 MEM_RESERVE_MB=150 MEM_FORCE=0 MEM_STRICT=0 \
+    REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/i074-stage2-sizing.sh --formal --work-dir "$work" < /dev/null &      # 固定的環境（D3；下表「啟動的環境」）
+hp=$!
+printf 'harness_pid\t%s\nharness_start\t%s\n' "$hp" "$(st "$hp" || true)" >> "$ctl/run.tsv"
+wait "$hp"; rc=$?
+printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
+WRAP
+setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" > "$CTL/log" 2>&1 < /dev/null &
+for i in $(seq 1 15); do                                  # 啟動之後的驗證（最多 15 秒）：5 個身分欄位各恰好一行、都是正整數
+  sleep 1
+  [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "harness 已經結束（rc $(cut -f1 "$CTL/rc")）：開跑失敗——交給 Claude 判讀，⛔ 不要再啟動"; return 1; }
+  f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start; do
+    [ "$(awk -F'\t' -v k="$k" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ] \
+      && [[ "$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$CTL/run.tsv")" =~ ^[1-9][0-9]*$ ]] || f=1
+  done
+  [ "$f" = 0 ] && break
+done
+cat "$CTL/run.tsv"
+[ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：可能仍有程序在跑——⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+for k in wrapper harness; do                               # PID ＋ starttime 都相符：wrapper 與 harness 都還在
+  [ "$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$(awk -F'\t' -v k="${k}_pid" '$1 == k { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" \
+    = "$(awk -F'\t' -v k="${k}_start" '$1 == k { print $2 }' "$CTL/run.tsv")" ] \
+    || { echo "$k 的身分無法確認（或已結束）：⛔ 不要再啟動，用 ② 查看、交給 Claude"; return 1; }
+done
+echo "已啟動：NAME＝$NAME（CTL＝$CTL；之後用 ② 查看）"
+}
+s92_done() { unset -f s92_launch s92_done; echo "① 的結束碼：$1（0 以外：照上一行的訊息處理）"; return "$1"; }   # 收尾：移除兩個函式、印出並回傳結束碼（⛔ 不存進變數）
+s92_launch; s92_done "$?"                                 # $? ＝ ① 的結束碼（⛔ 不被 unset 遮蔽）
+```
+
+##### 四、決定
+
+| # | 決定 | 建議／裁決 |
+|---|---|---|
+| D1 | 形式 | ✅ 2026-10-16 使用者選：子指令腳本（`pre`／`go`／`st`／`stop`）；✅ 第一輪 review 通過 |
+| D2 | 位置與完整性 | ✅ 第二輪 review 通過。使用者選 repo 外（`~/.local/bin/s91`）；第一輪 review：補完整性的錨點後通過 → 「三之二」的獨立核對（對 HEAD 的文件）＋ `run.tsv` 的 `s91_sha256`；實作時把安裝的 SHA-256 記進本節 |
+| D3 | `go` 的守門 | ✅ 第二輪 review：補 `s91_sha256` 的驗證後通過（v3 已補）。第一輪 review 未通過 → v2：全域的啟動鎖（`flock`，持有到驗證完成）、回答前後各一次程序檢查、每一步失敗即停（`mkdir` 失敗 ⛔ 不碰既有的控制目錄）、啟動之後驗證欄位與身分，任一項不成立 → 回 1 並提示 |
+| D4 | `stop` 的守門 | ✅ 第二輪 review：補「`stop_sent` 寫入失敗回 1」後通過（v3 已補）。第一輪 review 未通過 → v2：以 `set -C` 原子建立 `stop_attempt`（claim；取不到 ⛔ 不送）、PID／starttime 只取一次、檢查 `kill` 的結束碼、`stop_attempt`／`stop_sent`／`stop_failed` 分開記錄、失敗一律回 1；每個控制目錄只嘗試一次 |
+| D5 | `st`、`stop` 自動找控制目錄 | ✅ 第二輪 review 通過。第一輪 review：補來源驗證後通過 → v2：名稱的 regex、owner、mode 700、⛔ 不是 symlink、`run.tsv` 的四個欄位與目錄一致；指定 NAME 時也一樣 |
+| D6 | 移除的時機 | ✅ 第一輪 review 通過：⑨-1 的結果 review 通過之後，由使用者決定是否 `rm ~/.local/bin/s91`（與 `/dev/shm/s91.lock`）；⑨-2 要不要做同樣的工具另議 |
+| D7 | 貼上的 ① 有同樣的 `mkdir` 問題（「〇」，✅ 重現） | ✅ 2026-10-16 第二輪 review **裁決採 (b)**：⛔ 不保留會在 `mkdir` 失敗之後繼續的貼上版——它仍是核對失敗時的備用途徑，看到錯誤後才人工停止⛔ 不夠安全；⑨-1「三」的 ① 換成「三之三」的版本（每一步失敗即停，`mkdir` 的原子排他避免同一秒的雙啟動）；第三輪 review：最後一行的結束碼⛔ 不能被 `unset` 遮蔽（v4 已修）；第四輪 review：⛔ 不能在使用者的 shell 留下變數（v5 改用會自行移除的收尾函式） |
+| D8 | ⑨-2「三」的 ① 也有同樣的問題（「〇」，✅ 重現） | ✅ 2026-10-19 第三輪 review **裁決採 (a)**：原則通過，待結束碼遮蔽的修正後正式通過（v4 已修）；第四輪 review：方向正確，待 `LRC` 的修正（v5 已修）。換成「三之三」的 ⑨-2 版本（與 ⑨-1 同一個寫法，只換名稱、位置與 wrapper；②③ ⛔ 不動）。理由：⑨-2 已重現與 D7 相同的缺陷，⛔ 不宜保留已知不安全的正式操作指令；候選版本的 sizing wrapper 與固定環境與原版逐字相同（`env -u MEM …`、`MEM_MIN_MB=447`、image）；只換啟動外殼，②③ 與判讀的契約⛔ 不變；一併修可共用同一套 review 與測試，⛔ 不必在 ⑨-2 之前再插入一輪修正、review、commit |
+
+##### 五、受影響的檔案與歸檔
+
+| 檔案 | 改動 |
+|---|---|
+| `~/.local/bin/s91`（repo 外） | 新檔、mode 755；內容 ＝ 本節「三之一」的區塊（逐位元相同） |
+| `/dev/shm/s91.lock`（repo 外、tmpfs） | 第一次 `s91 go` 時建立的空檔（啟動鎖）；重開機就消失 |
+| `docs/issue.md` ⑨-1 計畫「二」「三」 | 各加一行指標：「也可以用 `s91 pre`／`s91 go`、`s91 st`、`s91 stop`（先執行「Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5」的核對指令）」；「二」的區塊⛔ 不動 |
+| `docs/issue.md` ⑨-1 計畫「三」的區塊 | id 改成 `i074_stage2_step91_launch_003`：① 換成「三之三」的 `launch1_005`（逐位元相同），②③ ⛔ 不動；前面加一行 2026-10-19 的註記（原本的 `_002` 見 `f027cb2`） |
+| `docs/development-workflow.md` ⑨-1 的副本 | ① 換成同一段（逐位元相同），②③ ⛔ 不動 |
+| `docs/issue.md` ⑨-2 計畫「三」的區塊（D8 (a)） | id 改成 `i074_stage2_step92_launch_002`：① 換成「三之三」的 `launch1_004`（逐位元相同），②③ ⛔ 不動；加註記（原本的 `_001` 見 `f027cb2`） |
+| `docs/issue.md` 本節、I-074 狀態列、roadmap | 計畫、結果（含安裝的 SHA-256）與指標；本節隨 ⑨-1 的計畫一起收斂（工具只服務這一次，⛔ 不搬進主題文件） |
+
+⚠️ 用 `s91 go` 啟動時 `run.tsv` 多一欄 `s91_sha256`（第 5 行，在 wrapper 的欄位之前）；P9 的依據（前四行各恰好一行）與紀錄的樣板（`run.tsv` 全部欄位原樣）都⛔ 不受影響。
+
+##### 六、風險與回滾
+
+| 風險 | 處置 |
+|---|---|
+| 貼上版的 ① 與 `s91 go` 是兩份實作 | 步驟相同（失敗即停、啟動之後的驗證）、wrapper 的內容都逐字取自同一個區塊；兩份都各自測過（「七」） |
+| 腳本與文件的區塊不同步 | 腳本由文件的區塊組成；安裝前後都確認 precheck、② 的函式與顯示、wrapper 的內容都逐字包含在腳本裡；之後改這些區塊時要一起改腳本（本節列為檢查項目） |
+| 安裝之後、執行之前腳本被改動 | 「三之二」的獨立核對（對 HEAD 的文件，`cmp`）；`run.tsv` 的 `s91_sha256` 讓 Claude 事後再對一次 |
+| `go` 雙啟動或半途失敗 | 啟動鎖、兩次程序檢查、每一步失敗即停、啟動之後的驗證（D3） |
+| `stop` 送兩次、或宣稱送了卻沒送 | claim、只取一次的身分、`kill` 的結束碼、分開的紀錄（D4） |
+| 選錯控制目錄 | 來源驗證（D5）；`stop` 另驗 ③ 的身分條件 |
+| 以 bash 執行，而使用者的 shell 是 zsh | 區塊在 bash 都測過（非互動、pty）；`s91` 在 zsh 的終端機裡照樣以 bash 執行 |
+| 安裝的檔案寫在根檔案系統 | 約 16 KB，在量測之前安裝、量測期間⛔ 不改 |
+| 回滾 | 刪掉 `~/.local/bin/s91`（與 `/dev/shm/s91.lock`），照舊貼區塊；⛔ 不影響 repo |
+
+##### 七、測試與驗證
+
+* 已做（2026-10-16，scratchpad 的草稿；`go` 用只把 `cd` 換成假 git repo 的測試副本，假 harness 依環境變數立刻失敗或等 20～25 秒；`HOME` 指到 scratchpad）：
+  * 逐字：precheck、② 的函式與顯示、wrapper 的內容都以完整的子字串出現在腳本裡；`bash -n` 通過。
+  * `s91 pre`：pty（真的終端機）裡 `read` 真的在等、header 與 token 完全相同、token 在輸出與 `$PRE` 都是 0 次；非互動：結束碼 0、`$PRE` ＝ 終端機的輸出（最後一行除外）。
+  * `s91 go`（14 案）：已有 harness 程序 → 拒絕、⛔ 不問；回答 `no` → ⛔ 沒有開跑；回答之後才出現 harness 程序 → 第二次檢查拒絕；啟動鎖被持有 → 拒絕、⛔ 不問；兩個同時 → 後到的被鎖擋下；`git rev-parse` 失敗、`cd` 失敗 → 停、⛔ 不建控制目錄；**`mkdir` 失敗 → 停、既有的 `run.tsv`、`wrapper.sh` 都⛔ 沒有被改、⛔ 沒有 wrapper**；work 目錄已存在 → 停；wrapper 沒有起來（假的 `setsid` 失敗）→ 15 秒後回 1、提示可能仍有程序；harness 立刻失敗 → 回 1；正常 → 回 0、10 個欄位各一行、`s91_sha256` ＝ 腳本、wrapper 與 harness 都在；啟動鎖⛔ 沒有傳給 wrapper／harness（`/proc/<pid>/fd`）；第一次的 harness 還在時再 `go` → 程序檢查擋下。
+  * `s91 st`（7 案）與來源驗證（10 案，`st`、`stop` 各跑一次）：恰好一個時省略 NAME、指定 NAME、格式錯、不存在、兩個時列出並回 1、harness 結束之後顯示 `rc：0`、沒有控制目錄 → 1；名稱不合格式、控制目錄是 symlink、mode 755、`run.tsv` 是 symlink、沒有 `run.tsv`、`name` 不符、`name` 重複、`expected`／`work`／`launched_utc` 不對 → 都拒絕。
+  * `s91 stop`（14 案）：回答 `no`、缺 `harness_pid`、`harness_pid` 重複／不是數字、缺 `harness_start`、已有 rc marker → 拒絕、⛔ 沒有 claim；`harness_start` 不符 → 身分不符、留下 `stop_attempt` 與 `stop_failed`、回 1，之後再 `stop` → 拒絕，`st` 顯示「未送出（身分不符或已結束）」；正確 → 送一次 TERM、`stop_attempt` 與 `stop_sent`、回 0，之後再 `stop` → 拒絕；cmdline 不是 harness → ⛔ 不送；`kill` 失敗（關掉內建的 `kill`、換成回 1 的假指令）→ 回 1、`stop_failed` 記下結束碼、⛔ 沒有 `stop_sent`；**兩個同時（都停在 `yes` 提示、假 harness 收到 TERM 仍繼續）→ 只有一個執行了 `kill -TERM`，另一個印「取不到這次中止的 claim」**。
+  * 參數（6 案）：`pre x`、`go x`、`st a b`、`stop a b`、沒有子指令、未知的子指令 → 說明、結束碼 2。
+  * v3（第二輪 review）另加 2 案：`stop_sent` 寫入失敗 → 回 1、TERM 已送出、之後拒絕重送；`run.tsv` 多一行錯的 `s91_sha256` → `go` 回 1。
+  * 合計 53 案全部符合（加上 `pre` 的 2 案，`pre` 的內容 v2 → v3 ⛔ 沒有變）。測試建的控制目錄與鎖檔都已移出 `/dev/shm`（只剩 `libpod_lock`）；⛔ 沒有殘留的假程序。
+  * 核對指令：以工作樹的文件代替 `git show HEAD:…` 實跑（見本節最後）。
+* 貼上版的 ①（三之三，測試副本只把 `cd` 換成假 repo）：
+  * 收尾函式的最小實驗（v5；zsh、bash × 啟動函式的結束碼 0、1、7、255）：`$?` ＝ 那個結束碼、印出「① 的結束碼」、兩個函式都移除、原有的 `export LRC=orig` 與其他變數、位置參數⛔ 沒有被動。合計 8 案全部符合。
+  * 非互動（zsh、bash；⑨-1、⑨-2 各跑；v5 的每一案都在已經 `export LRC=orig` 的 shell 裡 source，另驗那一行之後的 `$?`、「① 的結束碼」那一行、兩個函式都移除、`LRC` 仍是 `orig` 而且仍是 exported）：正常 → 「已啟動」、`$?` ＝ 0、9 個欄位各一行、假 harness 結束後 rc 0；**`mkdir` 失敗 → 停、既有的 `run.tsv`、`wrapper.sh` 都⛔ 沒有被改、⛔ 沒有 log 與 rc**；harness 立刻失敗 → 停。⑨-1 另測：`git rev-parse` 失敗、`cd` 失敗、work 目錄已存在 → 停、⛔ 不建控制目錄；wrapper 沒有起來（假的 `setsid` 失敗）→ 15 秒後停、提示可能仍有程序；失敗的案例 `$?` 都是 1、「① 的結束碼：1」。合計 24 案全部符合（v5；同一套測試打在 v4 上有 20 案不符——都是 `LRC` 被改成結束碼，其餘 4 案是假 harness 結束後的 rc marker；v4 版的測試打在 v3 上同樣是 20 案不符——`$?` 被遮蔽成 0 或缺少結束碼那一行）。
+  * 互動 shell（pty，`HISTFILE` 指到 scratchpad；v5 在貼上之前先 `export LRC=orig`）：使用者的 zsh（`zsh -i`）與 `bash --norc -i`，各以 bracketed paste 與逐行輸入貼上：都印「已啟動」與「① 的結束碼：0」、接著輸入的 `echo $?` 是 0、`LRC` 仍是 `orig` 而且仍是 exported、⛔ 沒有 parse error、兩個函式都移除、shell 還活著；`mkdir` 失敗（zsh、bash）→ 印「mkdir 失敗」與「① 的結束碼：1」、`$?` 是 1、shell 還活著、既有的控制目錄⛔ 沒有被動；⑨-2 的版本（zsh、bash，bracketed paste）→ 同 ⑨-1 的正常案例。合計 8 案全部符合（v5）。使用者的 history 行數前後相同、測試的指令 0 筆。
+* 安裝之後：核對指令（對 commit 之後的 HEAD）印 ok；`~/.local/bin/s91` 與「三之一」`cmp` 相同、mode 755；逐字的部分仍包含；`s91`（說明）；`s91 pre` 在 pty 跑一次（假 token、唯讀）；`s91 st` 在沒有控制目錄時回 1；doc-refs、`git diff --check`、禁止符號的否定詞掃描。
+
+##### 八、執行步驟
+
+1. 本計畫 review → 確認（D8 ✅ 採 (a)，待 v5 的修正通過）。
+2. 安裝（Claude 寫 `~/.local/bin/s91`，mode 755）、⑨-1「三」（與 `development-workflow.md`）、⑨-2「三」（D8）的 ① 換成「三之三」、文件的指標 → 「七」的驗證 → ⛔ 不 commit，停下等 review → 使用者 commit 文件 → 核對指令對 HEAD 印 ok（Claude 確認）。
+3. 週末：結束 Claude → **核對指令** → `s91 pre`（看到 P4 的提示之後先打一個空白、再貼上 JWT）→ 確認開跑的條件 → `s91 go`（輸入 `yes`）→ 等待期間偶爾 `s91 st` → 必要時 `s91 stop`（只一次）→ 完成之後重新啟動 Claude。
+
+##### 第一輪 review 的修正（2026-10-16）
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | （高）`go` 不能防止雙啟動（檢查與啟動之間⛔ 沒有互斥）；`mkdir` 失敗之後仍覆寫 `wrapper.sh`、啟動、讀既有的 `run.tsv`；背景指令被接受就回 0 | 全域的啟動鎖（`flock -n`，持有到驗證完成、⛔ 不傳給 wrapper）；每一步 `\|\| return 1`；`mkdir` 失敗 ⛔ 不碰既有的控制目錄；啟動之後驗證 5 個身分欄位、`wrapper_pid` ＝ `$!`、PID ＋ starttime；不完整 → 回 1、提示可能仍有程序 | ✅ 貼上的 ① 重現（「〇」，D7）；v2 的 `go` 14 案 |
+| 2 | （高）`stop_sent` 先檢查後寫入，兩個並行的 `stop` 都會送；寫入失敗仍送；⛔ 沒檢查 `kill`；失敗也回 0 | `set -C` 原子建立 `stop_attempt`（claim）；PID／starttime 只取一次；檢查 `kill` 的結束碼；`stop_attempt`／`stop_sent`／`stop_failed` 分開；失敗一律回 1 | ✅ v1 重現（兩邊都 `kill -TERM`）；v2 的並行案例只有一個送出 |
+| 3 | （中）repo 外的腳本⛔ 沒有執行當下的完整性錨點 | 「三之二」的獨立核對（對 `git show HEAD:docs/issue.md`）；`run.tsv` 記 `s91_sha256`；實作時把安裝的 SHA-256 記進本節 | 核對指令的正反例（本節最後） |
+| 4 | （中）自動選擇的控制目錄驗證不足（寬鬆的 glob、`-f` 會跟隨 symlink） | 名稱的 regex、⛔ 不是 symlink、owner、mode 700、`run.tsv` 是一般檔而且⛔ 不是 symlink、四個欄位與目錄一致；指定 NAME 時也一樣 | ✅ v1 重現（`bogus`、755、symlink 都被選中）；v2 的來源驗證 10 案 × 2 |
+| 其他 | 多餘的參數被忽略 | 每個子指令檢查參數數量（「二」的參數） | 6 案 |
+
+核對指令的實測（2026-10-16，zsh 與 bash；v3 的腳本 id `_003` 重跑一次，結果相同）：照原樣執行（HEAD 的文件還⛔ 沒有這個區塊、`s91` 也還沒安裝）→ 結束碼 2、⛔ 沒有 ok；已安裝但 HEAD 的文件⛔ 沒有這個區塊 → 1、⛔ 沒有 ok；
+正例（`git show HEAD:docs/issue.md` 換成工作樹的文件、目標換成 scratchpad 的副本）→ 0、印出的 SHA-256 ＝ 草稿、最後一行是 ok；副本多一個 byte → 1、⛔ 沒有 ok；副本不存在 → 2、⛔ 沒有 ok；`git show` 失敗（路徑不存在）→ 2、⛔ 沒有 ok。
+
+##### 第二輪 review 的修正（2026-10-16）
+
+裁決：D1、D2、D5、D6 通過；D3 補 `s91_sha256` 的驗證後通過；D4 補「`stop_sent` 寫入失敗回 1」後通過；D7 採 (b)。
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | （中）`stop_sent` 寫入失敗只印警告、仍回 0，與 D4 的「失敗一律回 1」矛盾 | 寫入失敗 → 回 1，並說明 TERM 已送出、`stop_attempt` 已擋下重送 | ✅ v2 重現（rc 0）；v3 → 1、之後的 `stop` 拒絕 |
+| 2 | （中）`go` ⛔ 沒有驗證 `s91_sha256`（只在 `s91_go` 的啟動後驗證補，⛔ 不放進共用的 `s91_ctl`） | `s91_go` 的最後驗證加上 `s91_sha256` 恰好一行、＝ `$SHA`；`s91_ctl` ⛔ 不動（手動啟動的控制目錄⛔ 沒有這一欄） | ✅ v2 重現（多一行錯的 SHA 仍回 0）；v3 → 1 |
+| 3 | D7 採 (b)：⛔ 不保留會在 `mkdir` 失敗之後繼續的貼上版 ① | 「三之三」：整段是一個函式、每一步失敗即停、啟動之後驗證；⑨-1「三」與 `development-workflow.md` 的副本換掉 | ✅ 非互動 24 案、pty 6 案 |
+| 盤點 | ⑨-2「三」的 ① 是同一套寫法 | D8（建議併進本次實作；「三之三」已備好 ⑨-2 的版本） | ✅ 重現；⑨-2 版本的非互動測試（zsh、bash：正常、`mkdir` 失敗、harness 立刻失敗） |
+
+##### 第三輪 review 的修正（2026-10-19）
+
+裁決：D8 採 (a)——原則通過，待結束碼遮蔽的修正後正式通過。其他檢查都通過：`stop_sent` 寫入失敗回 1、`s91_sha256` 恰好一行而且 ＝ 實際的 SHA、⑨-1／⑨-2 候選版本的 wrapper 與原版逐字相同、bash／zsh 的語法檢查、doc-refs 195 筆 0 個問題、staged 與 unstaged 的 `git diff --check`、未安裝 `s91`、⛔ 沒有 `s91-*`／`s92-*` 的 tmpfs 殘留。
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | 貼上版 ① 的最後一行 `s91_launch; unset -f s91_launch`（⑨-2 是 `s92_launch`）：之後的 `$?` 是 `unset` 的 0，函式的失敗被遮蔽 | 最後一行改成先 `LRC=$?`、再 `unset -f`，印出「① 的結束碼：$LRC」，最後 `(exit "$LRC")` 讓 `$?` ＝ 函式的結束碼；區塊 id 改成 `launch1_004`（⑨-1）、`launch1_003`（⑨-2）。結束碼那一行⛔ 不含「已啟動」三個字，以免失敗時的輸出被誤讀成啟動成功 | ✅ v3 重現（「〇」）；v4：非互動 24 案每一案驗 `$?`、pty 8 案驗接著輸入的 `echo $?` |
+| 2 | D8 | 裁決採 (a)（「四」） | — |
+
+##### 第四輪 review 的修正（2026-10-19）
+
+裁決：D8 採 (a) 的方向正確；v4 還有 2 項要修，暫不通過。
+
+| # | review 的意見 | 處置 | 驗證 |
+|---|---|---|---|
+| 1 | （中）`LRC` 污染使用者的 shell：⑨-1、⑨-2 的貼上版都會永久留下 `LRC`、覆寫原值；原本是 exported 的，改過的值仍是 exported（bash、zsh 都重現） | 收尾改成會自行移除的函式：`s91_done() { unset -f s91_launch s91_done; echo "① 的結束碼：$1（…）"; return "$1"; }`，接著 `s91_launch; s91_done "$?"`（⑨-2 是 `s92_*`）；結束碼只經過位置參數與 `return`，⛔ 不存進變數；區塊 id 改成 `launch1_005`（⑨-1）、`launch1_004`（⑨-2） | ✅ v4 重現（「〇」）；最小實驗 8 案；非互動 24 案、pty 8 案都驗 `LRC` |
+| 2 | （低）「一」的範圍說要同步 `development-workflow.md` 的副本，「⛔ 不做」卻寫「⛔ 不改 `development-workflow.md`」 | 「⛔ 不做」改成「`development-workflow.md` 只同步 ⑨-1 的 ①，其他內容⛔ 不動」 | 本節其他提到 `development-workflow.md` 的地方（「三之三」、「五」、「八」）都是「只換 ①」，一致 |
+
+
 #### Stage 2 步驟 ⑨-2 細部計畫 v4（2026-10-16，✅ 確認（四輪 review）並 commit `4f7e7f0`）
 
 ⚠️ 依據：v29「八」的 ⑨-2（**⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing，產出 freeze record；
@@ -8459,7 +8920,7 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
    ⑨-1 **正式 memory／disk acceptance**：⑦ 實作的 memory harness，用⑨ **封存的 exact counterfactual patch SHA**、在 repo 外的
         隔離複本執行：replay 程序及 d～i 各程序各自 < 450 MiB，success／failure 兩條實際流程磁碟峰值各自 ≤ `P_B_BUDGET`。
         ⚠️ exact patch 的 bytes 或 SHA **之後只要再變，⑨-1 就要重跑**（容量與 failed-record 組合驗到的必須是正式 SHA）；
-        結果記進本筆並 commit（⑨-2 之後就不能 commit 了）   ← ⚠️ 現在在這裡（2026-10-14：raw-failed freeze record 修正 ✅ commit `c0cf0de`，gate 放行；「Stage 2 步驟 ⑨-1 細部計畫 v8」✅ 確認並 commit `496a5f7`；其中「十」的前置修正 ✅ review 通過並 commit `ec23e4a`，下一步是在選定的時段執行 ⑨-1（之前：「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、2026-10-16 實作 ✅ review 通過（兩輪）並 commit `f027cb2`）；「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`，見「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」）
+        結果記進本筆並 commit（⑨-2 之後就不能 commit 了）   ← ⚠️ 現在在這裡（2026-10-14：raw-failed freeze record 修正 ✅ commit `c0cf0de`，gate 放行；「Stage 2 步驟 ⑨-1 細部計畫 v8」✅ 確認並 commit `496a5f7`；其中「十」的前置修正 ✅ review 通過並 commit `ec23e4a`，下一步是在選定的時段執行 ⑨-1（之前：「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、2026-10-16 實作 ✅ review 通過（兩輪）並 commit `f027cb2`；簡易指令 `s91` v5 待確認，含 ⑨-1、⑨-2 貼上版 ① 的修正）；「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`，見「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」）
         ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：「exact patch」指**兩份封存 patch**（counterfactual ＋ tooling），任一份的 bytes 或 SHA 再變都要重跑
         ⚠️ **⑦d 細部計畫 v1（✅ 2026-10-02 確認）**：入口 `scripts/i074-stage2-acceptance.sh --formal --replay-compute full`（結束碼 0 ok／2 threshold_exceeded／1 harness 失敗）；
         `full` 是唯一的量測趟（「正式 scan 的計次裁決」的新格）；報告的兩份 patch SHA 由 ⑨-1 的程序與 ⑨ 的封存值比對

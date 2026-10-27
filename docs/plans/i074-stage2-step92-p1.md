@@ -1,10 +1,10 @@
-# Stage 2 步驟 ⑨-2 P1 修正計畫 v1（2026-10-27，⚠️ 待確認）
+# Stage 2 步驟 ⑨-2 P1 修正計畫 v1（2026-10-27，✅ 確認（D1 (a)）；實作已完成／待 review）
 
 ⚠️ 2026-10-27 自 `docs/issue.md` I-074 搬入（`30d48ab` 的 `docs/plans/claude-md-rules-only.md`「五」）；內容原樣，只改標題層級。文中的「⑨-2「二」」「⑨-1 結果一節」等都指 `docs/issue.md` I-074 的章節。
 
 需求確認（2026-10-27）：⑨-1 結果的 commit `cbde340`（＝ `R91`，已 push 到 `origin/init`）同時含 `CLAUDE.md` 協作流程的新規則（Claude 一律不 commit），
 ⑨-2 的 P1（`git diff --name-only "$E91" HEAD -- . ':(exclude)docs'` 必須沒有輸出）因此⛔ 不成立。使用者選擇**修改 P1**——⛔ 不改寫已 push 的歷史、⛔ 不補還原 `CLAUDE.md` 的 commit。
-⚠️ 本計畫確認之前⛔ 不改 ⑨-2 的區塊、⛔ 不執行 ⑨-2。
+✅ 2026-10-27 使用者裁決 D1 (a)，確認本計畫。⚠️ 本計畫 review 通過、commit 之前⛔ 不執行 ⑨-2。
 
 ## 〇、唯讀盤點（2026-10-27，HEAD `cbde340`）
 
@@ -63,10 +63,50 @@ printf 'P1 ⑨-1 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變�
 |---|---|---|
 | D1 | 允許的範圍 | **建議 (a)**：根目錄的 `CLAUDE.md` 任何內容都允許（它是文件，之後再改協作守則也⛔ 不會再擋下 ⑨-2）。(b) 只允許已 review 的那一版：另加 `git diff --quiet cbde340 HEAD -- CLAUDE.md`——更嚴，但 `CLAUDE.md` 之後再改就又擋下 |
 
-⚠️ 2026-10-27 註記（`30d48ab` 的 `docs/plans/claude-md-rules-only.md`「五」）：`30d48ab` 又改了一次 `CLAUDE.md`（只留開發規則），(b) 因此⛔ 不成立——D1 實際上只剩 (a) 可行；裁決仍由使用者做。
+⚠️ 2026-10-27 註記（`30d48ab` 的 `docs/plans/claude-md-rules-only.md`「五」）：`30d48ab` 又改了一次 `CLAUDE.md`（只留開發規則），(b) 因此⛔ 不成立——D1 實際上只剩 (a) 可行；裁決仍由使用者做。✅ 2026-10-27 使用者裁決 **(a)**。
 
 ## 六、歸檔與執行步驟
 
 1. 本計畫確認（含 D1）。
 2. 實作（只動 `docs/issue.md`：「一」的範圍）→「三」的驗證 → ⛔ 不 commit、停下等 review → 使用者 commit → ⑨-2（P1 用新的 3 行）。
 3. 收斂：⑨-2 的計畫收斂時，P1 的現況規格（「文件」的定義）隨 ⑨-2 的程序搬進 `development-workflow.md` 的 acceptance／sizing 一節；本節隨 ⑨-2 的計畫一起移除。
+
+## 七、實作結果（2026-10-27，待 review）
+
+| 項目 | 結果 |
+|---|---|
+| ⑨-2「二」的區塊 | `i074_stage2_step92_precheck_002` → `_003`：只換 P1 的 3 行（＝「二」的草稿，`cmp` 相同）；其他 36 行與 `_002` 逐位元相同（`diff` 只有第 11～13 行）；區塊前加一行 2026-10-27 的註記（原本的 `_002` 見 `f027cb2`） |
+| ⑨-2「二」P1 的表格列 | 「只動了 `docs/`」→「只動了文件（`docs/` 與根目錄的 `CLAUDE.md`）」；pathspec 加 `':(exclude)CLAUDE.md'`；ok 的文字改成「P1 ⑨-1 之後只動文件 ok」 |
+| 「六」與 D7 | 「只 commit 文件」加註：文件 ＝ `docs/` 與根目錄的 `CLAUDE.md`（原裁決⛔ 不改寫） |
+| I-119 | 「處置方向」的「只動 `docs/`」→「只動文件（`docs/` 與根目錄的 `CLAUDE.md`）」 |
+| 指標 | `issue.md` 指向本檔的那一行改成「✅ 確認（D1 (a)）；實作已完成／待 review」 |
+| ⛔ 沒有動 | 執行紀錄格式 v2 的 P1 草稿與測試紀錄（歷史）；P1 的祖先與 clean 檢查、P2～P10；程式 |
+
+驗證（「三」）：
+
+* 區塊：佔位換成 `R91` ＝ `cbde340…`、`E91` ＝ `d3df284…` 之後，`bash -n`、`zsh -n` 都通過。
+* 真正的 repo（HEAD `10898aa`；唯讀），zsh、bash 各一次，從文件抽出的 P1 3 行：
+
+| 案例 | 結果（zsh、bash 相同） |
+|---|---|
+| R1 新的 3 行、`E91` ＝ `d3df284` | 「以外的變更：無（git diff 的 rc 0）」、**有** ok |
+| R2 對照組：`_002` 的 3 行 | 「docs/ 以外的變更：CLAUDE.md（rc 0）」、⛔ 沒有 ok（重現「〇」） |
+| R3 `E91` 打錯 | rc 128、⛔ 沒有 ok |
+| R4 `E91` 空白 | rc 128、⛔ 沒有 ok |
+
+* 隔離 clone（`git clone --no-hardlinks` 到 scratchpad，208 MB；`E91` ＝ `d3df284`；每一案都從 `10898aa` 建一個 commit），zsh、bash 各一次：
+
+| 案例 | 結果（zsh、bash 相同） |
+|---|---|
+| C0 基準（`10898aa`） | 無、**有** ok |
+| C1 只改 `docs/todo.md` | 無、**有** ok |
+| C2 只改 `CLAUDE.md` | 無、**有** ok |
+| C3 新增 `python/CLAUDE.md` | 列出 `python/CLAUDE.md`、⛔ 沒有 ok |
+| C4 改 `docker-compose.yml` | 列出 `docker-compose.yml`、⛔ 沒有 ok |
+| C5 改 `scripts/check-doc-refs.py` | 列出該檔、⛔ 沒有 ok |
+| C6 新增 `docs/CLAUDE.md`（加測） | 無、**有** ok（落在 `docs/` 底下，本來就允許） |
+
+* clone 跑完已刪除（刪除前確認路徑在 scratchpad、`--show-toplevel` 就是它自己）；真正 repo 的 worktree 登記數 401 ⛔ 沒有變；真正 repo ⛔ 沒有建任何 commit。
+* 文件：doc-refs、表格欄數、`git diff --check`、新增的行掃禁止符號後面的否定詞——見下一步的檢查結果。
+
+與計畫的差異：「三」列了 5 個 clone 案例，另加 C6（`docs/CLAUDE.md`），確認 `':(exclude)CLAUDE.md'` ⛔ 不會誤擋 `docs/` 底下的同名檔。

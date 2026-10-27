@@ -7414,7 +7414,7 @@ worktree，含 `docs/`）。⚠️ `host MemAvailable 低點` 只涵蓋四個磁
 
 | # | 條件 | 怎麼確認 |
 |---|---|---|
-| P1 | HEAD 包含 `53538a3`、`c0cf0de`、`ec23e4a` 與 ⑨-1 結果的 commit；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更；**⑨-1 實際量測的 commit（它的 `EXPECTED`）到 HEAD 之間只動了 `docs/`**（⑨-1 量到的程式 ＝ ⑩ 要跑的程式；第一輪 review：直接檢查**全部**變更的路徑，⛔ 不只三個範圍） | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空；`git diff --name-only <⑨-1 的 EXPECTED> HEAD -- . ':(exclude)docs'` 為空（有任何路徑 → ⛔ 不開跑，交使用者裁決）；以「P1 祖先 ok」（含 `E91`）「P1 clean ok」「P1 ⑨-1 之後只動 docs/ ok」判定，`git` 失敗⛔ 不能當作成立（2026-10-16，執行紀錄格式 v2） |
+| P1 | HEAD 包含 `53538a3`、`c0cf0de`、`ec23e4a` 與 ⑨-1 結果的 commit；`scripts/`、`python/`、`.gitattributes` 沒有未 commit 的變更；**⑨-1 實際量測的 commit（它的 `EXPECTED`）到 HEAD 之間只動了文件（`docs/` 與根目錄的 `CLAUDE.md`；2026-10-27，[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md) D1 (a)）**（⑨-1 量到的程式 ＝ ⑩ 要跑的程式；第一輪 review：直接檢查**全部**變更的路徑，⛔ 不只三個範圍） | `git merge-base --is-ancestor`；`git status --porcelain -- scripts python .gitattributes` 為空；`git diff --name-only <⑨-1 的 EXPECTED> HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md'` 為空（有任何路徑 → ⛔ 不開跑，交使用者裁決）；以「P1 祖先 ok」（含 `E91`）「P1 clean ok」「P1 ⑨-1 之後只動文件 ok」判定，`git` 失敗⛔ 不能當作成立（2026-10-16，執行紀錄格式 v2） |
 | P2 | 兩份 patch 與封存點相同 | `git diff --quiet 53538a3 HEAD -- <兩份 patch>`；SHA-256 ＝ `fa7f5ba8…`、`5ff9a90f…` |
 | P3 | image 在本機、identity 的 `expected_image_id` ＝ `REPLAY_IMAGE_ID`、identity 檔的 SHA-256 ＝ `a02bf3bd…`（與 ⑨-1 相同） | `docker image inspect`；只讀 identity 的那一個欄位與檔案的 SHA |
 | P4 | 整段執行（約 10 分鐘，含前後的檢查）⛔ 不重疊任何批次：**當天所有排程時間已過的工作**（⛔ 不只上一個——同時或更早啟動的也可能還在跑；各時段的名單見 D2）都已有當天那一筆、而且是終態（⛔ 不是 `running`；有整輪硬上限的才可以依上限推定），預計結束時距離下一個批次 ≥ 30 分鐘（`development-workflow.md` 的作業規則） | `docker inspect` 只看排程鍵 ＋ `/scheduler/status` 的每一列（job、status、started_at、finished_at）——**輸出原樣記進本次紀錄**（第一輪 review） |
@@ -7427,7 +7427,9 @@ worktree，含 `docs/`）。⚠️ `host MemAvailable 低點` 只涵蓋四個磁
 
 ⚠️ 2026-10-16 修改（「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」的 D3、D7 與第三輪 review）：id 改成 `_002`；整段包在 `{ … }` 裡（shell 先讀完整段才執行，`read` ⛔ 不會讀走下一行）；P1 改成 fail-closed（`E91` 也必須是 HEAD 的祖先；`git status`、`git diff` 的結束碼 0 才判空）；P4 的 `read` 之前加上與 ⑨-1 相同的提示行（先打一個空白再貼 JWT）；P7 換成與 ⑨-1 相同的 5 行（`find`、`docker ps`、`ps`、`awk` 的結束碼）；其他指令⛔ 不動。原本的區塊（`_001`）見 `4f7e7f0`。
 
-```text id="i074_stage2_step92_precheck_002"
+⚠️ 2026-10-27 修改（[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)，D1 (a)）：id 改成 `_003`；只換 P1 的 3 行——`E91` 之後的變更另排除根目錄的 `CLAUDE.md`（`cbde340` 起含協作規則，它的內容⛔ 沒有程式讀取），ok 那一行改成「P1 ⑨-1 之後只動文件 ok」；其他行⛔ 不動。原本的區塊（`_002`）見 `f027cb2`。
+
+```text id="i074_stage2_step92_precheck_003"
 # P1～P10 的確認（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT（前端登入後取得，或 POST /api/v1/auth/login）；輸出貼進紀錄）：
 #   整段包在 { } 裡——shell 先讀完整段才執行，read 執行時輸入佇列裡⛔ 沒有下一行可以被讀走（2026-10-16 修改）
 {
@@ -7438,9 +7440,9 @@ git merge-base --is-ancestor 53538a3 HEAD && git merge-base --is-ancestor c0cf0d
   && git merge-base --is-ancestor ec23e4a HEAD && git merge-base --is-ancestor "$R91" HEAD \
   && git merge-base --is-ancestor "$E91" HEAD && echo "P1 祖先 ok"                                      # E91 也必須是 HEAD 的祖先
 GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
-DD="$(git diff --name-only "$E91" HEAD -- . ':(exclude)docs')"; RDD=$?
-printf 'P1 ⑨-1 之後 docs/ 以外的變更：%s（git diff 的 rc %s）\n' "${DD:-無}" "$RDD"
-[ "$RDD" = 0 ] && [ -z "$DD" ] && echo "P1 ⑨-1 之後只動 docs/ ok"                                           # E91 錯 ⛔ 不能當作只動 docs/
+DD="$(git diff --name-only "$E91" HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md')"; RDD=$?
+printf 'P1 ⑨-1 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變更：%s（git diff 的 rc %s）\n' "${DD:-無}" "$RDD"
+[ "$RDD" = 0 ] && [ -z "$DD" ] && echo "P1 ⑨-1 之後只動文件 ok"                                              # E91 錯 ⛔ 不能當作只動文件
 git diff --quiet 53538a3 HEAD -- python/baselines/i074_stage2/counterfactual_e1cbbbd.patch \
   python/baselines/i074_stage2/tooling_e1cbbbd.patch && echo "P2 ok"
 sha256sum python/baselines/i074_stage2/counterfactual_e1cbbbd.patch python/baselines/i074_stage2/tooling_e1cbbbd.patch
@@ -7657,7 +7659,7 @@ SH
 ##### 六、交給 ⑩ 的規則
 
 * ⑩ 的 `--freeze-record` 一律指向 ⑨-2 通過那一次的 `<work>/freeze_record.json`（絕對路徑、原位置）。
-* ⑨-2 之後到 ⑩ 之前，真正 repo **只 commit 文件**（⑨-2 的結果、⑩ 的計畫）。⑩ 會執行的程式（`scripts/`、`python/`、`.gitattributes`）任何一處改了 →
+* ⑨-2 之後到 ⑩ 之前，真正 repo **只 commit 文件**（⑨-2 的結果、⑩ 的計畫；文件 ＝ `docs/` 與根目錄的 `CLAUDE.md`——2026-10-27 加註）。⑩ 會執行的程式（`scripts/`、`python/`、`.gitattributes`）任何一處改了 →
   **⑨-2 重跑**（新的 `repo_head` 才含有那個改動）；兩份 patch 的 bytes 或 SHA 改了 → ⑨、⑨-1、⑨-2 全部重做。
 * ⑩ 自己的前置檢查（可用空間、image、identity、freeze record 的 `check-basic`／`check-full`）照它的程序做；本計畫⛔ 不代替它們。
 
@@ -7695,7 +7697,7 @@ SH
 | D4 | 重跑的上限 | ✅ 同意（第三輪 review 通過）。無效：連續 2 次就停下回報（同 ⑨-1 的 D4，「連續」以同一個 `EXPECTED`、image、兩份封存 patch 計算）；其他 harness 失敗（⛔ 不需要改程式的）：同一個原因連續 2 次就停下回報。每次重跑都重新確認 P1～P10 |
 | D5 | 是否另跑 validation 演練 | ✅ 同意（第三輪 review 通過） **⛔ 不另跑**：正式執行失敗（⛔ 沒有報告）⛔ 不是判定、⛔ 不佔上限，可以照「四」重跑；validation ⛔ 不走 freeze record 的路徑，涵蓋不到 ⑨-2 最重要的那一段；多一次 10 分鐘與約 330 MB |
 | D6 | `raw/` 的 raw manifest | ✅ 同意（第三輪 review 通過）**做**（「五」4；第一輪 review 之後也涵蓋正式的 `raw-failed/`）：與 ⑨-1 相同的事後錨點；`ec23e4a` 之後 `raw/` ⛔ 不含 `bin/docker`，產得出來 |
-| D7 | ⑨-2 之後到 ⑩ 之前的 commit | ✅ 同意（第三輪 review 通過）**只 commit 文件**；程式改了就重跑 ⑨-2（「六」）；P1 的「只動文件」改成直接檢查全部變更的路徑（第一輪 review） |
+| D7 | ⑨-2 之後到 ⑩ 之前的 commit | ✅ 同意（第三輪 review 通過）**只 commit 文件**（2026-10-27 加註：文件 ＝ `docs/` 與根目錄的 `CLAUDE.md`，[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)）；程式改了就重跑 ⑨-2（「六」）；P1 的「只動文件」改成直接檢查全部變更的路徑（第一輪 review） |
 | D8 | 只有診斷資料時 | ✅ 原則同意（第一輪 review），補齊與 ⑨-1 相同的分界（「四」）：`raw-failed/` 的 rename 之後才被終止 → 仍是正式的原始量測、⛔ 不受結束碼（1、137、143、不明）影響、manifest 照做；bootstrap 階段保留了 S、⛔ 沒有 `<work>` → 只有診斷資料；host 在「五」完成之前重開過 → 一律只有診斷資料（**含頂層已有 freeze record 的情形**）、⛔ 不產 manifest、⛔ 不自動重跑。只有診斷資料時：停下回報，⛔ 不得憑 P7 重跑；重跑由使用者裁決（重開機或可證明清空的恢復機制）。第二輪 review 原則通過，補：正式的 `raw-failed/` 與頂層有 freeze record 的 `raw/` 被保留的 S，在 manifest 之後以身分綁定的「保留的 S 的刪除程序」刪除（「五」；只有診斷資料時⛔ 不用）。第三輪 review：分支與重開機的裁決通過；刪除程序補上 `run.tsv` 四個欄位的 fail-closed 檢查（缺失、重複或不是正整數 → ⛔ 不刪）之後待確認；`development-workflow.md` 的「依 stderr 的位置手動刪除」同步改成只能用這個程序。✅ 第四輪 review 通過 |
 
 ##### 十、執行步驟
@@ -7737,7 +7739,7 @@ D1、D2、D4～D7 通過（第二輪 review）；D3、D8 依上面的修正待�
 
 D1～D7 通過（第三輪 review）；D8 的 S 刪除程序依上面的修正，第四輪 review 通過。
 
-⚠️ ⑨-2 P1 修正計畫 v1（2026-10-27，⚠️ 待確認）：見 [`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)（2026-10-27 自本處搬出）。
+⚠️ ⑨-2 P1 修正計畫 v1（2026-10-27，✅ 確認（D1 (a)）；實作已完成／待 review）：見 [`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)（2026-10-27 自本處搬出）。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -14694,4 +14696,4 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 * (a) 只改說明：報告的文字與文件標明「磁碟取樣階段的低點」；(b) 另加涵蓋整段執行（含量測趟）的 MemAvailable 取樣。
   ⚠️ 兩者都會碰到報告的文字或 `i074_stage2_acceptance_report_v2` 的欄位語意，要另立計畫；⑨-1 的正式結果⛔ 不需要重跑。
-* ⑨-2 的 P1 要求 ⑨-1 的 `E91` 之後只動 `docs/`（⑨-1 量到的程式 ＝ ⑩ 要跑的程式）——程式的修改⛔ 不得排在 ⑩ 之前；在那之前只能先改文件的說明。
+* ⑨-2 的 P1 要求 ⑨-1 的 `E91` 之後只動文件（`docs/` 與根目錄的 `CLAUDE.md`；⑨-1 量到的程式 ＝ ⑩ 要跑的程式）——程式的修改⛔ 不得排在 ⑩ 之前；在那之前只能先改文件的說明。

@@ -3320,7 +3320,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，⚠️ 待 review）
+#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，結果⚠️ 待 review）
 
 ⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
@@ -3441,6 +3441,12 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   尾段峰值可能漏記）、磁碟是取樣值；⑦d 增補：另記 v1 `memory.stat` 的 `total_rss` 取樣最大值（與 acceptance 的單向偵測器同一種量）；
   報告標明完整度（`observation_complete`、`replay_seen`、`missing_expected_containers`、`rss_unavailable_containers`）。
   ⛔ 不作為 ⑩ 的前置、⛔ 不為量測而重跑。
+- **⑨-1 的正式結果**（2026-10-24，`formal-91-20261024T040236Z`、`repo_head` `d3df284`；⚠️ 待 review，過程與完整數字見 `issue.md` I-074「Stage 2 步驟 ⑨-1 正式驗收結果」）：
+  rc 0、`status` ok、`violations` 無 → ⑨-1 通過。記憶體：每一個程序的最大單一 RSS 都 < 450 MiB——最高是 success 的 replay 394.3 MiB，
+  量測趟（`memory_only` 的 `replay`，185.8 分鐘）336.3 MiB；每一個容器的上限都是 700m。磁碟：success 的 `P_basis` 162,926,592 bytes
+  （預算 167,772,160，餘裕 4,845,568 bytes ≈ 4.6 MiB）、failure 74,321,920 bytes；`fs_unexplained` −348,160／−376,832 bytes（容差 1,048,576）。
+  raw manifest 的錨：`sha256` `cfe94e0a067411a10919ab6a19ce6523736150192f05f0023c659f60fb128033`（203 個檔案、36 個目錄）。
+  ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟（`issue.md` I-119）。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 

@@ -1550,7 +1550,7 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work
   `on_failure` 以 `reap-adopted` 清掉它們，結束碼 ≠ 0 → 保留 S。sizing 另有故障注入 `orphan-setsid`（步驟留下一個 `setsid` 的程序）；
   sizing 的**量法**（cgroup 峰值的 wrapper、sidecar 的既有欄位、報告與數字）⛔ 不變。
 
-### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定，✅ 2026-10-06 commit `576a8f7`）；2026-10-06 有效性條件與 ⑨-1 fail-fast，⚠️ 待 review）
+### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定，✅ 2026-10-06 commit `576a8f7`）；2026-10-06 有效性條件與 ⑨-1 fail-fast，✅ review 通過並 commit `c49fde1`）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
 「I-074 Stage 2 的容量驗收」。本節只寫**操作程序**。⛔ 不是正式的證據入口；**正式驗收是 ⑨-1**。

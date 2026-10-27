@@ -1,5 +1,145 @@
 # 系統架構
 
+## 系統定位
+
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+
+### Trading
+
+台股即時技術分析與交易輔助系統
+
+目標：
+
+* 即時監控台股
+* 計算技術指標（MA / RSI / MACD / VWAP / ATR）
+* 偵測突破、跌破、爆量
+* 產生交易訊號（人工決策）
+* 不執行自動交易
+
+### Architecture Principles
+
+系統定位：
+
+* Market Data Processing System
+* Technical Analysis Engine
+* Trading Signal Generator
+* Human-in-the-loop Trading Assistant
+
+非：
+
+* HFT 系統
+* Fully Automated Trading Bot
+* Low-latency matching engine
+
+### System Philosophy
+
+This system does NOT predict price.
+
+It only evaluates:
+
+* Trend state
+* Breakout validity
+* Support/Resistance integrity
+* Volume confirmation
+* Risk condition
+
+### Non Goals
+
+* High Frequency Trading
+* Fully automated execution
+* Market making
+* Microsecond latency systems
+
+### Key Design Shift
+
+✔ PostgreSQL is the system of record（sqlite 供測試、mysql 保留 migration 但未部署）
+✔ Redis is only for hot cache
+✔ Indicators computed from stored candles
+✔ System is batch + streaming hybrid
+
+### Design Notes
+
+* PostgreSQL 已作為主要歷史資料庫
+* 所有技術指標皆基於 candles 計算
+* 不再依賴外部即時計算資料
+* Redis 僅作為熱資料 cache
+
+### Core Insight
+
+> This system is a data-driven decision support engine, not a trading robot.
+
+### 長期方向（規劃；各項的現況以 [todo.md](./todo.md) 為準）
+
+#### Roadmap
+
+##### Phase 1 (Current)
+
+* PostgreSQL-based market data storage
+* Indicator engine
+* Basic breakout detection
+
+##### Phase 2
+
+* Real-time Shioaji integration
+* Signal refinement (false breakout filter)
+* Dashboard upgrade
+
+##### Phase 3
+
+* Portfolio tracking
+* Position management
+* Strategy templates
+
+##### Phase 4
+
+* Semi-auto execution (optional)
+* Risk engine enhancement
+
+#### Scanner Scope
+
+##### Phase 1
+
+* Watchlist 50~200 stocks
+
+##### Phase 2
+
+Full Market Scan:
+
+* TWSE ~1000 stocks
+* TPEx ~900 stocks
+* Total ~1900 stocks
+
+#### Notification System
+
+⚠️ 規劃：程式⛔ 沒有 LINE／Telegram／Email 的實作（2026-10-27 確認）。
+
+Channels:
+
+* LINE Notify
+* Telegram
+* Email
+
+Format:
+
+```text id="notify_001"
+[BREAKOUT ALERT]
+
+Symbol: 8088
+Price: 70.5
+
+Volume: 2.3x
+
+Signal: BUY
+```
+
+#### Market Data Source
+
+##### Phase 2
+
+* Shioaji（即時行情 / Tick / 委買委賣）
+
+---
+
 ## Pipeline 架構
 
 系統升級後的文件邊界以四條 pipeline 描述；本檔保留整體架構總覽，細節放在
@@ -121,6 +261,17 @@ register → inactive ──→（管理員 PATCH /users/:id/status）──→ 
 ---
 
 ## 前端頁面
+
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+
+* Svelte 4 + TypeScript
+* Vite 5（dev server / build）
+* Tailwind CSS 3
+* Vitest 2 + @testing-library/svelte（單元測試）
+
+原始碼在 `frontend/src`：`routes/` 是頁面、`components/` 是元件、`lib/api/` 是 API 層、
+`lib/stores/` 是狀態。路由是 `lib/stores/router.ts` 的一個 store，由 `App.svelte`
+以條件渲染切換，**沒有使用 router 套件**。
 
 Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 
@@ -947,6 +1098,53 @@ cron 相隔五小時撞不到，但**手動端點可以讓兩輪真的並行**�
 
 ## Python 服務
 
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+
+`python/` 是**第二個 runtime**：統計、機率模型與回測留在 Python，Go 不重做。
+Go 端透過 `PYTHON_SERVICE_URL` 以 HTTP 呼叫，兩者共用同一個資料庫——
+`python/config.yaml` 的 `database` 區段要與 `backend/config.yaml` 保持同步。
+
+技術：
+
+* Python 3.11（`python/Dockerfile`，基於 `python:3.11-slim`；lightgbm 需要 `libgomp1`）
+* FastAPI + uvicorn（`http_server.py`，預設 port 8001）
+* pandas / numpy（K 棒與特徵計算）
+* scikit-learn + LightGBM + joblib（SR Zone bounce / break 機率模型）
+* SHAP（zone evidence；**可降級的展示層**，缺套件或關閉時 `/sr-zones` 照樣回應）
+* backtrader（`backtest/` 的策略回測）
+* SQLAlchemy（以唯讀查詢為主，engine 支援 sqlite / postgres / mysql）
+* pytest（**一律用 `python/scripts/test.sh`**，在 docker 內跑，記憶體經 mem-guard 下修）
+
+兩個進入點：
+
+* `http_server.py`——Method B，Go 主動 POST 觸發。端點：`/analyze`、`/sr-zones`、
+  `/sr-scoring/train`、`/sr-scoring/evaluate`、`/sr-scoring/model-status`、
+  `/zone-identity/match`、`/backtest`、`/health`。
+* `worker.py`——Method A，輪詢 `backtest_jobs` 裡 `status='pending'` 的任務。
+
+主要模組：
+
+* `backtest/modular/sr_scoring/`——SR Zone 評分核心，本專案最大的 Python 子系統。
+  資料流由 `pipeline.py` 串起：`load_data` → `extract_features` → `calculate_scores`
+  → `build_evidence` → `decide`；各階段實作分散在 `zone_builder.py`、`features.py`、
+  `scoring.py`、`evidence.py`、`decision_engine.py`、`event_engine.py`、
+  `lifecycle_engine.py`、`zone_matcher.py`。
+* `train.py` / `evaluation.py`——模型訓練，以及 walk-forward evaluation 與 decision replay。
+* `backtest/modular/`——一般交易策略回測（`entries` / `exits` / `strategy` / `backtester`）。
+* `db.py`——**Python 端唯一的 candles 進入點**，預設回傳還原價（`adjusted=True`）。
+
+設計慣例：
+
+* **模組 import 不得有連線等副作用**——DB 連線檢查放在 FastAPI lifespan，不放 import 期。
+* 模型與 SHAP background 以 lazy singleton 快取（`model.py` 的 `_MODEL_CACHE`）。
+* 記憶體特性：`python-server` 穩態 RSS 約 254MB，其中 253MB 是直譯器＋套件＋模型，
+  單次分析的資料只有 KB 等級（實測見 `docs/todo.md` T-054；批次路徑的上限見 T-047 與
+  `docs/sr-zone-scoring.md`「規模上限」）。
+  ⚠️ 量測條件（2026-10-27 補）：上面的數字是 T-054（2026-08-21）在 **dev stack** 的量測（`/sr-zones` 連續 75 次、
+  postgres、`limit=400`、4 檔輪流）；同一筆記錄 live 的 `python-server` 啟動 2 分鐘就到 323MB——⛔ 不能拿 dev 的數字外推到 live。
+
+現況規格與已知限制寫在 `docs/sr-zone-scoring.md`。
+
 Python 負責回測，獨立運行，透過共用 DB 與 Go 溝通。
 
 ```
@@ -1184,10 +1382,10 @@ Go 的 `database/sql.NullFloat64` / `NullString` / `NullTime` 直接拿去
 
 | 元件 | 選擇 | 理由 |
 |------|------|------|
-| Backend | Go | goroutine 適合多股票並行監控 |
+| Backend | Go | goroutine 適合即時行情流與多股票並行監控（1000~2000 檔）；WebSocket／streaming 處理強；工程效率高、維護成本低 |
 | HTTP Router | Gin | 高效能、中介軟體齊全 |
-| Database | SQLite / MySQL / PostgreSQL | 三種環境皆支援，goose 自動 migration |
-| Cache | Redis（選填） | 低延遲熱資料；addr 留空則停用。若誤連到 read-only replica，Redis 寫入會短暫降級為 no-op，DB 主流程仍正常 |
+| Database | PostgreSQL（dev 與 live 實際使用，system of record）；SQLite（單元測試）；MySQL（保留完整 migration，但從未在任何環境部署過，見 `issue.md` I-054） | 三份 migration 同步維護，goose 自動 migration |
+| Cache | Redis（選填） | 低延遲熱資料（即時行情快取、最新指標值、Breakout／Signal queue）；addr 留空則停用。若誤連到 read-only replica，Redis 寫入會短暫降級為 no-op，DB 主流程仍正常 |
 | WebSocket | gorilla/websocket | 穩定、廣泛使用 |
 | Frontend | Vite + Svelte | 輕量、無 VDOM；build 後 embed 進 Go binary |
 | K 線圖 | lightweight-charts | < 50KB、原生 Candlestick |

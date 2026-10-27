@@ -30,17 +30,24 @@ contract 修改、排程或資料同步修改、大型重構、驗證流程修�
 * 測試與驗證策略。
 * 完成後要歸檔修改原因、方向與現況規格的既有主題文件位置。
 
+新建的計畫書一律獨立成檔，放在 `docs/plans/`，一份計畫一個檔；檔名不帶版本（版本寫在標題，每一輪的修正記在同一個檔裡）。
+`docs/issue.md` / `docs/todo.md` 的對應項目只留一行指向計畫書。`docs/plans/` 的計畫書不寫 `檔名:行號` 形式的程式引用
+（`scripts/check-doc-refs.py` 不掃這個目錄）。2026-10-27 之前已寫在 `docs/issue.md` / `docs/todo.md` 裡的計畫
+不追溯搬移，照原規則保留到 review 確認後收斂。
+
 計畫書需等待使用者確認後才能實作。若實作過程偏離已確認計畫，必須先回報差異並更新計畫，再繼續。
 實作完成後，要把修改原因、方向與現況規格歸檔到適合的既有主題文件；不能只留在對話、
-`docs/todo.md` 或 `docs/issue.md`。但實作完成後先不要刪除 `docs/todo.md` / `docs/issue.md`
-內的修改計畫書或計畫內容；需先保留給 review，等 review 確認修改方向無誤後才移除。
+計畫書、`docs/todo.md` 或 `docs/issue.md`。但實作完成後先不要刪除計畫書（`docs/plans/` 的檔，以及既有寫在
+`docs/todo.md` / `docs/issue.md` 內的計畫內容）；需先保留給 review，等 review 確認修改方向無誤、現況規格歸檔到
+主題文件之後，才刪除計畫書並移除指向它的引用。刪除之前計畫書必須已經 commit 過——尚未進版控的先 commit
+保存、下一次收斂的 commit 再刪除，歷史才留在 git。
 
 整理發現或規劃事項時，不要預設新增獨立文件。依性質分流：
 
 * bug、矛盾結果、誤導行為、文件與實作不一致、已知限制，記錄到 `docs/issue.md`。
 * 未來優化、功能擴充、重構、待規劃工作，記錄到 `docs/todo.md`。
 * 需要長期保存的設計、操作或架構說明，補到 `docs/` 內既有相對應主題文件。
-* 只有在使用者明確要求新增獨立文件，或沒有任何既有主題文件適合承接時，才建立新的 docs 文件。
+* 只有在使用者明確要求新增獨立文件，或沒有任何既有主題文件適合承接時，才建立新的 docs 文件（`docs/plans/` 的計畫書不受此限）。
 
 項目完成並 review 確認後才收斂清單，不要讓 `docs/issue.md` / `docs/todo.md` 長期累積已結案項目：
 
@@ -49,491 +56,35 @@ contract 修改、排程或資料同步修改、大型重構、驗證流程修�
 * 移除前，先把需要長期保留的行為、設計或限制說明，更新到 `docs/` 內對應主題文件（例如 `stock-analysis.md`、`sr-zone-scoring.md`）成為「現況說明」；沒有對應文件時才補在最合適的既有文件。移除後同步修掉其他文件指向該筆的交叉引用，避免斷鏈。
 * 兩份清單只保留仍待處理或待 review 的項目（`issue.md`：待修復／修復中／已實作待 review，或刻意保留且尚未文件化的已知限制；`todo.md`：待規劃／規劃中／進行中／已實作待 review）。若一筆分類錯置（例如功能擴充被寫進 issue.md），移到正確的清單而不是留著。
 
----
-
-## Trading
-
-台股即時技術分析與交易輔助系統
-
-目標：
-
-* 即時監控台股
-* 計算技術指標（MA / RSI / MACD / VWAP / ATR）
-* 偵測突破、跌破、爆量
-* 產生交易訊號（人工決策）
-* 不執行自動交易
 
 ---
 
-# Architecture Principles
+## 專案概要
 
-系統定位：
+台股即時技術分析與交易輔助系統：計算技術指標、偵測突破／跌破／爆量、產生交易訊號，由人決策；不實作自動下單。
+系統定位、設計理念、非目標（Non-HFT、Not low-latency 等）與長期方向見 `docs/architecture.md`「系統定位」。
 
-* Market Data Processing System
-* Technical Analysis Engine
-* Trading Signal Generator
-* Human-in-the-loop Trading Assistant
+文件索引：
 
-非：
-
-* HFT 系統
-* Fully Automated Trading Bot
-* Low-latency matching engine
-
----
-
-# Technology Stack
-
-## Backend
-
-Language:
-
-* Go
-
-理由：
-
-* goroutine 適合即時行情流
-* WebSocket / streaming 處理強
-* 適合多股票並行監控（1000~2000檔）
-* 工程效率高、維護成本低
+* 系統架構、資料流、技術選型、Python 服務、前端：`docs/architecture.md`（四條 pipeline 的細節在 `docs/architecture/`）
+* 技術指標：`docs/indicator-spec.md`
+* 訊號（趨勢、支撐壓力、突破、跌破、爆量）：`docs/signal-spec.md`
+* 結構停損（Structure Broken／HL 失效）：`docs/backtest-modular-strategy.md`「StructuralStopLoss」
+* 資料表：`docs/database-schema.md`
+* SR Zone 評分（Python 的現況規格與已知限制）：`docs/sr-zone-scoring.md`
+* 開發與 Docker 驗收流程：`docs/development-workflow.md`
+* 計畫書：`docs/plans/`
 
 ---
 
-## Analytics Runtime（Python，已實作）
-
-`python/` 是**第二個 runtime**：統計、機率模型與回測留在 Python，Go 不重做。
-Go 端透過 `PYTHON_SERVICE_URL` 以 HTTP 呼叫，兩者共用同一個資料庫——
-`python/config.yaml` 的 `database` 區段要與 `backend/config.yaml` 保持同步。
-
-技術：
-
-* Python 3.11（`python/Dockerfile`，基於 `python:3.11-slim`；lightgbm 需要 `libgomp1`）
-* FastAPI + uvicorn（`http_server.py`，預設 port 8001）
-* pandas / numpy（K 棒與特徵計算）
-* scikit-learn + LightGBM + joblib（SR Zone bounce / break 機率模型）
-* SHAP（zone evidence；**可降級的展示層**，缺套件或關閉時 `/sr-zones` 照樣回應）
-* backtrader（`backtest/` 的策略回測）
-* SQLAlchemy（以唯讀查詢為主，engine 支援 sqlite / postgres / mysql）
-* pytest（**一律用 `python/scripts/test.sh`**，在 docker 內跑，記憶體經 mem-guard 下修）
-
-兩個進入點：
-
-* `http_server.py`——Method B，Go 主動 POST 觸發。端點：`/analyze`、`/sr-zones`、
-  `/sr-scoring/train`、`/sr-scoring/evaluate`、`/sr-scoring/model-status`、
-  `/zone-identity/match`、`/backtest`、`/health`。
-* `worker.py`——Method A，輪詢 `backtest_jobs` 裡 `status='pending'` 的任務。
-
-主要模組：
-
-* `backtest/modular/sr_scoring/`——SR Zone 評分核心，本專案最大的 Python 子系統。
-  資料流由 `pipeline.py` 串起：`load_data` → `extract_features` → `calculate_scores`
-  → `build_evidence` → `decide`；各階段實作分散在 `zone_builder.py`、`features.py`、
-  `scoring.py`、`evidence.py`、`decision_engine.py`、`event_engine.py`、
-  `lifecycle_engine.py`、`zone_matcher.py`。
-* `train.py` / `evaluation.py`——模型訓練，以及 walk-forward evaluation 與 decision replay。
-* `backtest/modular/`——一般交易策略回測（`entries` / `exits` / `strategy` / `backtester`）。
-* `db.py`——**Python 端唯一的 candles 進入點**，預設回傳還原價（`adjusted=True`）。
-
-設計慣例：
-
-* **模組 import 不得有連線等副作用**——DB 連線檢查放在 FastAPI lifespan，不放 import 期。
-* 模型與 SHAP background 以 lazy singleton 快取（`model.py` 的 `_MODEL_CACHE`）。
-* 記憶體特性：`python-server` 穩態 RSS 約 254MB，其中 253MB 是直譯器＋套件＋模型，
-  單次分析的資料只有 KB 等級（實測見 `docs/todo.md` T-054；批次路徑的上限見 T-047 與
-  `docs/sr-zone-scoring.md`「規模上限」）。
-
-現況規格與已知限制寫在 `docs/sr-zone-scoring.md`。
-
----
-
-## Database (已實作)
-
-### Primary Storage
-
-* **PostgreSQL**——dev 與 live 實際使用的資料庫，system of record
-
-支援但非部署目標的 engine（三份 migration 都要同步維護）：
-
-* **SQLite**：單元測試用，`backend/scripts/test.sh` 每次都跑
-* **MySQL**：保留完整 migration，但**從未在任何環境部署過**。只能靠
-  `scripts/test-mysql-migrations.sh` 驗證，且驗證只涵蓋 DDL 不涵蓋 repo 層 CRUD，
-  詳見 `docs/issue.md` I-054。要用它之前先讀那一筆
-
-用途：
-
-* Market Data（OHLCV）
-* Technical Indicators Cache
-* Signal History
-* Watchlist Data
-
----
-
-## Cache Layer
-
-* Redis
-
-用途：
-
-* 即時行情快取
-* 最新指標值
-* Breakout / Signal queue
-
----
-
-## Frontend
-
-* Svelte 4 + TypeScript
-* Vite 5（dev server / build）
-* Tailwind CSS 3
-* Vitest 2 + @testing-library/svelte（單元測試）
-
-原始碼在 `frontend/src`：`routes/` 是頁面、`components/` 是元件、`lib/api/` 是 API 層、
-`lib/stores/` 是狀態。路由是 `lib/stores/router.ts` 的一個 store，由 `App.svelte`
-以條件渲染切換，**沒有使用 router 套件**。
-
-用途：
-
-* 即時行情 dashboard
-* Watchlist
-* Signal alert panel
-* K-line chart
-
----
-
-## Market Data Source
-
-### Phase 1 (已使用或可用)
-
-* FinMind（歷史 / 分K / 日K）
-
-### Phase 2
-
-* Shioaji（即時行情 / Tick / 委買委賣）
-
----
-
-# Market Data Model
-
-## Table: candles
-
-Go 側的模型是 engine 無關的；欄位型別差異由三份 migration 各自處理
-（`backend/internal/database/migrations/{postgres,sqlite,mysql}/`）。
-
-```go id="mysql_model_001"
-type Candle struct {
-    ID        uint64
-    Symbol    string
-
-    Timeframe string  // 1m / 5m / 1d
-
-    Open      float64
-    High      float64
-    Low       float64
-    Close     float64
-
-    Volume    int64
-    Amount    float64
-
-    Timestamp time.Time
-}
-```
-
----
-
-## Design Notes
-
-* PostgreSQL 已作為主要歷史資料庫
-* 所有技術指標皆基於 candles 計算
-* 不再依賴外部即時計算資料
-* Redis 僅作為熱資料 cache
-
----
-
-# Data Flow Architecture
-
-```text id="flow_001"
-Market Data Source
-        ↓
-Go Market Data Service
-        ↓
-PostgreSQL (candles storage)
-        ↓
-Indicator Engine (Go)
-        ↓
-Redis (latest state cache)
-        ↓
-Signal Engine
-        ↓
-Notification / Dashboard
-```
-
----
-
-# Core Modules
-
-## 1. Market Data Service
-
-職責：
-
-* 接收 FinMind / Shioaji data
-* 轉換成 OHLCV candle
-* 寫入 PostgreSQL
-* 更新 Redis 最新 K 線
-
----
-
-## 2. Indicator Engine
-
-所有指標皆基於 candles 計算：
-
-### Trend
-
-* MA5 / MA10 / MA20 / MA60
-
-### Momentum
-
-* RSI
-* MACD
-
-### Volatility
-
-* ATR
-* Bollinger Bands
-
-### Volume
-
-* Volume MA
-* Volume Spike
-
-### Cost Proxy
-
-* VWAP
-
----
-
-## MA Calculation Rule
-
-資料來源：
-
-```text id="ma_source_001"
-Close (from candles)
-```
-
----
-
-Rolling Optimization：
-
-```text id="ma_opt_001"
-MA = (PreviousSum - OldClose + NewClose) / N
-```
-
-避免 full scan query。
-
----
-
-# Support & Resistance Engine
-
-資料來源：
-
-* PostgreSQL OHLCV
-* Volume distribution
-* VWAP approximation
-
----
-
-Outputs:
-
-```go id="sr_model_001"
-type Level struct {
-    Price     float64
-    Strength  float64
-    Type      string // Support / Resistance
-}
-```
-
----
-
-# Trend Detection
-
-Market Structure:
-
-* HH (Higher High)
-* HL (Higher Low)
-* LH (Lower High)
-* LL (Lower Low)
-
----
-
-Bullish:
-
-* HH + HL
-
-Bearish:
-
-* LH + LL
-
----
-
-# Breakout Detection
-
-## Conditions
-
-```text id="breakout_001"
-1. Close > Resistance
-2. Volume > AvgVolume(20)
-3. Trend == Bullish
-```
-
----
-
-## Signal
-
-```go id="signal_001"
-if breakoutConfirmed {
-    Signal = BUY
-}
-```
-
----
-
-# Stop Loss Logic
-
-## Conditions
-
-```text id="stop_001"
-1. Close < Support
-2. Structure Broken (HL失效)
-3. No recovery within 1~2 candles
-```
-
----
-
-Signal:
-
-```go id="exit_001"
-Signal = SELL
-```
-
----
-
-# Volume Spike
-
-Definition:
-
-```text id="volume_001"
-Volume > 2 * MA(Volume, 20)
-```
-
----
-
-# Notification System
-
-Channels:
-
-* LINE Notify
-* Telegram
-* Email
-
----
-
-Format:
-
-```text id="notify_001"
-[BREAKOUT ALERT]
-
-Symbol: 8088
-Price: 70.5
-
-Volume: 2.3x
-
-Signal: BUY
-```
-
----
-
-# Scanner Scope
-
-## Phase 1
-
-* Watchlist 50~200 stocks
-
----
-
-## Phase 2
-
-Full Market Scan:
-
-* TWSE ~1000 stocks
-* TPEx ~900 stocks
-* Total ~1900 stocks
-
----
-
-# System Philosophy
-
-This system does NOT predict price.
-
-It only evaluates:
-
-* Trend state
-* Breakout validity
-* Support/Resistance integrity
-* Volume confirmation
-* Risk condition
-
----
-
-# Non Goals
-
-* High Frequency Trading
-* Fully automated execution
-* Market making
-* Microsecond latency systems
-
----
-
-# Roadmap
-
-## Phase 1 (Current)
-
-* PostgreSQL-based market data storage
-* Indicator engine
-* Basic breakout detection
-
----
-
-## Phase 2
-
-* Real-time Shioaji integration
-* Signal refinement (false breakout filter)
-* Dashboard upgrade
-
----
-
-## Phase 3
-
-* Portfolio tracking
-* Position management
-* Strategy templates
-
----
-
-## Phase 4
-
-* Semi-auto execution (optional)
-* Risk engine enhancement
-
----
-
-# Key Design Shift
-
-✔ PostgreSQL is the system of record（sqlite 供測試、mysql 保留 migration 但未部署）
-✔ Redis is only for hot cache
-✔ Indicators computed from stored candles
-✔ System is batch + streaming hybrid
-
----
-
-# Core Insight
-
-> This system is a data-driven decision support engine, not a trading robot.
+## 開發規則
+
+* `python/config.yaml` 的 `database` 區段要與 `backend/config.yaml` 保持同步（Go 與 Python 共用同一個資料庫）。
+* pytest 一律用 `python/scripts/test.sh`（在 docker 內跑，記憶體經 mem-guard 下修）；Go 的單元測試用
+  `backend/scripts/test.sh`（每次都跑 SQLite）。
+* `python/db.py` 是 **Python 端唯一的 candles 進入點**，預設回傳還原價（`adjusted=True`）。
+* **Python 模組 import 不得有連線等副作用**——DB 連線檢查放在 FastAPI lifespan，不放 import 期。
+* 三份 migration（`backend/internal/database/migrations/{postgres,sqlite,mysql}/`）都要同步維護。
+  PostgreSQL 是 dev 與 live 實際使用的資料庫（system of record）；SQLite 供單元測試；MySQL 保留完整 migration，
+  但**從未在任何環境部署過**，只能靠 `scripts/test-mysql-migrations.sh` 驗證，且驗證只涵蓋 DDL 不涵蓋 repo 層 CRUD——
+  要用它之前先讀 `docs/issue.md` I-054。

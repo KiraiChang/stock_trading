@@ -1751,7 +1751,7 @@ evaluation report 不產生 governance verdict，因此不會被誤選中）。
 當時的判斷是「預設 `replay_max_rows: 200` 搭配 watchlist（50～200 檔）時，股票覆蓋率必然遠低於
 `MIN_REPLAY_SYMBOL_COVERAGE = 0.9`，每次排程都會產出 `DEGRADED`」。
 
-**2026-08-06 更正：這個前提是錯的。** 那個「50～200 檔」是 CLAUDE.md 的 Scanner Scope
+**2026-08-06 更正：這個前提是錯的。** 那個「50～200 檔」是 Scanner Scope（原在 CLAUDE.md，2026-10-27 起在 `architecture.md`「系統定位」）
 **Phase 1 規劃值**，不是現況。查 live DB 的實際數字：
 
 | 項目 | 當時假設 | 實際 |
@@ -2304,9 +2304,9 @@ Fugle 連線失敗或資料異常時，尚未實作自動切換回 FinMind 補�
 | 優先度 | 低 |
 | 分類 | Go / 即時行情 / Phase 2 |
 | 建立日期 | 2026-07-07 |
-| 來源 | `docs/architecture.md`、`CLAUDE.md` Phase 2 Roadmap |
+| 來源 | `docs/architecture.md`、Roadmap Phase 2（原在 `CLAUDE.md`，2026-10-27 起在 `architecture.md`「系統定位」） |
 
-目前量能計算是批次（K棒收盤後）而非 tick-level 即時累加，`CLAUDE.md`
+目前量能計算是批次（K棒收盤後）而非 tick-level 即時累加，`architecture.md`「系統定位」的
 Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 ---
@@ -2342,7 +2342,7 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 
 ---
 
-### T-013：CLAUDE.md Roadmap 長期項目彙整
+### T-013：Roadmap 長期項目彙整
 
 | 欄位 | 內容 |
 |---|---|
@@ -2350,9 +2350,9 @@ Roadmap 中列為 Phase 2（Shioaji 整合）項目，非近期規劃。
 | 優先度 | 低 |
 | 分類 | 架構 / 長期規劃 |
 | 建立日期 | 2026-07-07 |
-| 來源 | `CLAUDE.md` Roadmap Phase 2~4 |
+| 來源 | Roadmap Phase 2~4（原在 `CLAUDE.md`，2026-10-27 起在 `architecture.md`「系統定位」的「長期方向」） |
 
-`CLAUDE.md` 定義的長期方向，目前都還沒排入近期工作：
+`architecture.md`「系統定位」的長期方向（原在 `CLAUDE.md`），目前都還沒排入近期工作：
 
 - Phase 2：Dashboard 升級
 - Phase 3：Portfolio tracking、Position management、Strategy templates
@@ -2708,7 +2708,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 
 #### 不做的範圍
 
-- **不做全市場 2,298 檔**。那是 CLAUDE.md Roadmap Phase 2 的方向，需要先改造 evaluation
+- **不做全市場 2,298 檔**。那是 Roadmap Phase 2（`architecture.md`「系統定位」）的方向，需要先改造 evaluation
   pipeline 的記憶體與時間（實測外推：2,298 檔單次 evaluation 約 4 小時、記憶體遠超這台
   2GiB host），屬另一個量級的工程，另案處理。
 - **不讓新標的進入盤中掃描、籌碼同步、SR 分析、signal 掃描**（理由見下節）。
@@ -3583,7 +3583,7 @@ live 實證：0050 跨 2025-06-18 分割的價格落差由 **−74.8% 降到 +0.
    發布，曾在 14:00 拉到 `count=0` 且**靜默成功**（空陣列 BulkInsert 視為成功、`job_runs`
    顯示 success，沒有任何錯誤訊號）。Yahoo 盤後聚合可以在 13:30 收盤後立刻拿到當日價格，
    用來提前偵測「FinMind 這批是空的」並交叉檢核價格——這是 FinMind 給不了的。
-2. **未來全市場的價格層級掃描**（CLAUDE.md Roadmap Phase 2 的 1,900 檔）。日常維護在
+2. **未來全市場的價格層級掃描**（Roadmap Phase 2 的 1,900 檔，`architecture.md`「系統定位」）。日常維護在
    FinMind 5/min 下要 6.3 小時／天不可行，Yahoo 約 2 分鐘。但**僅在可接受無量能確認的
    用途上成立**——突破偵測的三個條件裡有一項就是 `Volume > AvgVolume(20)`。
 
@@ -3955,7 +3955,7 @@ Lifecycle Engine 若要吃 `chain[]`，必須把 chain contract 傳進 Python sc
 「規模上限：`sources` 與 `dataset` 必須同時常駐記憶體」。
 **150 檔以內不需要做這一項**——2026-08-17 實測 131 檔峰值 382MB，跑得完。
 
-要往 CLAUDE.md Roadmap 的全市場（2,298 檔）方向走才需要：
+要往 Roadmap（`architecture.md`「系統定位」）的全市場（2,298 檔）方向走才需要：
 
 1. **串流化**：逐檔建完 dataset 後立刻釋放該檔的原始 frame。前提是把
    `_volatility_profiles` 改成**逐檔算好 profile 再丟掉 frame**，而不是最後才一次算。

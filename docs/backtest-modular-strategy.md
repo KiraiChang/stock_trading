@@ -137,7 +137,8 @@ SHORT: stop = entry_price + atr_multiplier * ATR(atr_period)_at_entry
 ```
 LONG:  初始 stop = 進場前最近一個 confirmed swing low
        之後每根K棒：若出現「更高」的新 swing low，stop 上移至該價位
-       （對應 CLAUDE.md「Structure Broken（HL失效）」：只要不斷創出更高的
+       （即「Structure Broken（HL失效）」，本節是它的規格；原寫在 CLAUDE.md 的
+       Stop Loss Logic，2026-10-27 移除：只要不斷創出更高的
        低點，多頭結構還在；收盤跌破 stop 代表 HL 失守，出場）
 SHORT: 對稱邏輯，改用 swing high，只下移不上移
 ```

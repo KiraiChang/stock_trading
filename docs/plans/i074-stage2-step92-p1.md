@@ -1,6 +1,6 @@
 # Stage 2 步驟 ⑨-2 P1 修正計畫 v1（2026-10-27，⚠️ 待確認）
 
-⚠️ 2026-10-27 自 `docs/issue.md` I-074 搬入（[`claude-md-rules-only.md`](./claude-md-rules-only.md)「五」）；內容原樣，只改標題層級。文中的「⑨-2「二」」「⑨-1 結果一節」等都指 `docs/issue.md` I-074 的章節。
+⚠️ 2026-10-27 自 `docs/issue.md` I-074 搬入（`30d48ab` 的 `docs/plans/claude-md-rules-only.md`「五」）；內容原樣，只改標題層級。文中的「⑨-2「二」」「⑨-1 結果一節」等都指 `docs/issue.md` I-074 的章節。
 
 需求確認（2026-10-27）：⑨-1 結果的 commit `cbde340`（＝ `R91`，已 push 到 `origin/init`）同時含 `CLAUDE.md` 協作流程的新規則（Claude 一律不 commit），
 ⑨-2 的 P1（`git diff --name-only "$E91" HEAD -- . ':(exclude)docs'` 必須沒有輸出）因此⛔ 不成立。使用者選擇**修改 P1**——⛔ 不改寫已 push 的歷史、⛔ 不補還原 `CLAUDE.md` 的 commit。
@@ -63,7 +63,7 @@ printf 'P1 ⑨-1 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變�
 |---|---|---|
 | D1 | 允許的範圍 | **建議 (a)**：根目錄的 `CLAUDE.md` 任何內容都允許（它是文件，之後再改協作守則也⛔ 不會再擋下 ⑨-2）。(b) 只允許已 review 的那一版：另加 `git diff --quiet cbde340 HEAD -- CLAUDE.md`——更嚴，但 `CLAUDE.md` 之後再改就又擋下 |
 
-⚠️ 2026-10-27 註記（[`claude-md-rules-only.md`](./claude-md-rules-only.md)「五」）：該計畫會再改一次 `CLAUDE.md`（只留開發規則），實作之後 (b) 就⛔ 不成立——D1 實際上只剩 (a) 可行；裁決仍由使用者做。
+⚠️ 2026-10-27 註記（`30d48ab` 的 `docs/plans/claude-md-rules-only.md`「五」）：`30d48ab` 又改了一次 `CLAUDE.md`（只留開發規則），(b) 因此⛔ 不成立——D1 實際上只剩 (a) 可行；裁決仍由使用者做。
 
 ## 六、歸檔與執行步驟
 

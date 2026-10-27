@@ -2,7 +2,7 @@
 
 ## 系統定位
 
-⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（`30d48ab`）；照原文，只改標題層級、拿掉分隔線。
 
 ### Trading
 
@@ -262,7 +262,7 @@ register → inactive ──→（管理員 PATCH /users/:id/status）──→ 
 
 ## 前端頁面
 
-⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（`30d48ab`）；照原文，只改標題層級、拿掉分隔線。
 
 * Svelte 4 + TypeScript
 * Vite 5（dev server / build）
@@ -1098,7 +1098,7 @@ cron 相隔五小時撞不到，但**手動端點可以讓兩輪真的並行**�
 
 ## Python 服務
 
-⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（[`plans/claude-md-rules-only.md`](./plans/claude-md-rules-only.md)）；照原文，只改標題層級、拿掉分隔線。
+⚠️ 2026-10-27 自 `CLAUDE.md` 搬入（`30d48ab`）；照原文，只改標題層級、拿掉分隔線。
 
 `python/` 是**第二個 runtime**：統計、機率模型與回測留在 Python，Go 不重做。
 Go 端透過 `PYTHON_SERVICE_URL` 以 HTTP 呼叫，兩者共用同一個資料庫——

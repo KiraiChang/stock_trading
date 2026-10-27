@@ -3320,7 +3320,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`）
+#### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，⚠️ 待 review）
 
 ⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
@@ -3447,6 +3447,14 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   （預算 167,772,160，餘裕 4,845,568 bytes ≈ 4.6 MiB）、failure 74,321,920 bytes；`fs_unexplained` −348,160／−376,832 bytes（容差 1,048,576）。
   raw manifest 的錨：`sha256` `cfe94e0a067411a10919ab6a19ce6523736150192f05f0023c659f60fb128033`（203 個檔案、36 個目錄）。
   ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟（`issue.md` I-119）。
+- **⑨-2 的正式結果**（2026-10-27，sizing `formal-92-20261027T090656Z`、`repo_head` `832f678`；⚠️ 待 review，過程與完整數字見 `issue.md` I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」）：
+  rc 0、`status` ok、頂層有 freeze record → ⑨-2 通過。磁碟：`P_B` ＝ success 的 `P_path` 163,024,896 bytes（預算 167,772,160，餘裕 4,747,264 bytes
+  ≈ 4.53 MiB；比 ⑨-1 的 success 多 98,304 bytes，全部是 `code_worktree`——HEAD 的 tree 隨文件 commit 長大）、failure 74,391,552、witness 141,955,072；
+  `fs_unexplained` −204,800／−626,688／−622,592 bytes（容差 1,048,576）。freeze record：`<work>/freeze_record.json`（SHA-256
+  `098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3`）＝ ⑩ 的 `--freeze-record`。raw manifest 的錨：`sha256`
+  `e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765`（133 個檔案、29 個目錄）。容器：10 個的上限都是 700m；含 page cache 的
+  cgroup 峰值最高 462.3 MiB（success 的 finalizer）——依上面「對象與門檻」只列資訊值、⛔ 不是閘。⚠️ 報告的「host MemAvailable 低點」只涵蓋
+  三個磁碟窗口、⛔ 不涵蓋 `memory_only` 的 4 個容器（`issue.md` I-119）。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 

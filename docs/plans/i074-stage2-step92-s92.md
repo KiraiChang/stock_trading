@@ -1,4 +1,4 @@
-# Stage 2 步驟 ⑨-2 的簡易指令 `s92` v1（2026-10-27，✅ 確認（D1～D4 照建議）；實作已完成／待 review）
+# Stage 2 步驟 ⑨-2 的簡易指令 `s92` v1（2026-10-27，✅ 確認（D1～D4 照建議）；實作 ✅ review 通過並 commit `832f678`；2026-10-27 用於 ⑨-2）
 
 需求確認（2026-10-27）：比照 ⑨-1 的 `s91`，把 ⑨-2 要貼的長區塊（`docs/issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫 v4」的「二」precheck、「三」的 ①②③）
 包成 **repo 外**的子指令腳本 `s92`（`pre`／`go`／`st`／`stop`）。開不開跑仍由使用者看輸出決定（⛔ 不把開跑的條件改成程式判斷）。`s92` 是可選的：照舊貼區塊也可以。
@@ -330,3 +330,14 @@ cd /home/dev/workspace/stock_trading && git show HEAD:docs/plans/i074-stage2-ste
 |---|---|---|---|
 | 1 | （P3）補「等待回答期間 freeze record 才發布」的測試：此時仍會送 TERM 並寫 `stop_sent`（D2 已揭露的窗口），要以假 harness 驗證 TERM 被忽略、freeze record 保留，並明確區分「已送訊號」與「已中止」 | ✅ 成立：原本只測「執行 `stop` 之前已發布」；D2 已寫明這個窗口、⛔ 不改腳本 | 測試 B 加 X2（3 案）：假 harness 的 `commitwait` 模式在旗標出現時發布 `<work>/freeze_record.json`、之後忽略 TERM；`stop` 停在提示時才發布 → `stop` 回 0、`stop_sent` 存在，harness 在 TERM 之後仍在、以 rc 0 結束、freeze record 保留，`st` 同時顯示三者。整份 B 重跑：54 案全部符合。D2 補「`stop_sent` ＝ 已送出訊號、⛔ 不代表已中止；是否中止看 rc marker 與 `<work>`」。腳本⛔ 沒有變（SHA 仍是 `f9004a96…98b94`） |
 | 2 | （P3）wrapper 的行數應是 12 行 | ✅ 成立：⑨-2 的 wrapper 是 12 行（`env -u …` 折成 5 行），9 行是 ⑨-1 的 | 「七」與「九」改成 12 行 |
+
+## 十、實際使用（2026-10-27，⑨-2；⚠️ 待 review）
+
+| 項目 | 結果 |
+|---|---|
+| 使用的子指令 | 使用者回報：核對指令（「三之二」）印出 ok → `s92 pre`（「PRE 保存 ok」）→ `s92 go`（輸入 `yes`，印出「已啟動」）→ 等待期間只用 `s92 st`；⛔ 沒有 `s92 stop`（控制目錄⛔ 沒有 `stop_attempt`／`stop_sent`／`stop_failed`） |
+| 事後對照（D3） | `run.tsv` 的 `s92_sha256` `f9004a96efd518399bfa790df5d4d69a35d13d2f50460c12018449b754d98b94` ＝ 從 HEAD（`832f678`）的本檔抽出的「三之一」＝ `~/.local/bin/s92`（`cmp` 相同） |
+| 啟動之後的驗證 | `run.tsv` 的 10 個欄位各恰好一行；`wrapper_pid` 1514982、`harness_pid` 1514990（＝ 報告的 run id 結尾） |
+| 保存 | `s92 pre` 的 `$PRE`（`/dev/shm/s92-pre-20261027T090423Z-S3pHMR.txt`）與控制目錄的 4 個檔已由 Claude 複製進 `~/i074_stage2_sizing/formal-92-20261027T090656Z.ctl/`（`precheck.txt` mode 600）、`cmp` 相同、重驗之後才從 `/dev/shm` 刪除 |
+| 結果 | ⑨-2 通過——見 `docs/issue.md` I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」 |
+| D4（移除的時機） | 待使用者決定：⑨-2 的結果 review 通過之後，是否 `rm ~/.local/bin/s92 /dev/shm/s92.lock`（`/dev/shm/s92.lock` 仍在） |

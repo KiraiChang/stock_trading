@@ -333,7 +333,7 @@ up 到最新並 down 回 0。用法、測試清單與命名限制見
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，⑨-1 的正式驗收 ✅ 2026-10-24 以 `s91` 執行、結果 **⑨-1 通過**（✅ review 通過並 commit `cbde340` ＝ `R91`；見「Stage 2 步驟 ⑨-1 正式驗收結果」，`E91` ＝ `d3df284`；⚠️ `cbde340` 同時含 `CLAUDE.md`，⑨-2 的 P1 修正已 commit `eb855b0`（[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)），下一步：⑨-2（可用簡易指令 `s92`：[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md)，⚠️ 待 review））——之前：「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、實作 ✅ review 通過（兩輪）並 commit `f027cb2`（⑨-1 的 precheck 換成 `_002`、⑨-2 的 P1、P4 的 `read`、P7 改成 fail-closed；已可執行 ⑨-1）；「Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5」✅ 確認（五輪 review）並 commit `e3e44be`，實作已完成／待 review（`~/.local/bin/s91` 已安裝；⑨-1、⑨-2「三」的 ① 已換成失敗即停的版本（D7 (b)、D8 (a)）；`s91` 是可選的，也可以照舊貼區塊；2026-10-24 的 ⑨-1 以 `s91 pre`／`s91 go` 啟動，`run.tsv` 的 `s91_sha256` ＝ HEAD 的文件——D2 的事後對照 ok）；⑨-2 細部計畫 v4 ✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-27**：⑨-1 的結果見「Stage 2 步驟 ⑨-1 正式驗收結果」；報告的「host MemAvailable 低點」只涵蓋磁碟取樣的階段，另立 [I-119](#i-119acceptance-報告的-host-memavailable-低點只涵蓋磁碟取樣的階段不含量測趟)）（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
+| 狀態 | **Stage 1 已完成／Stage 2 進行中：步驟 ④（sizing harness）✅ review 通過並 commit，步驟 ⑤（`--formal` 正式量測、裁定 `M_safety`）✅ review 通過並 commit，步驟 ⑥（Stage 2 計畫書 v29）✅ review 通過並 commit，步驟 ⑦ 的總綱 v1 ✅ review 通過並 commit，⑦a 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦a 實作 ✅ review 通過（兩輪）並 commit，⑦b 細部計畫 v1 ✅ review 通過（三輪）並 commit，⑦b 實作 ✅ review 通過（兩輪）並 commit，⑦c 細部計畫 v1 ✅ review 通過（七輪）並 commit，⑦c 實作 ✅ review 通過（四輪）並 commit，⑦d 細部計畫 v1 ✅ review 通過（六輪）並 commit，⑦d 實作（含第一輪 review 的三項修正）已 commit `f20ce3c`，⑦d 增補計畫 v11（容器記憶體改以 RSS 判定）✅ review 通過（十輪）並 commit `d1267bb`，⑦d 增補實作 ✅ review 通過（三輪）並 commit `576a8f7`，量測的有效性條件與 ⑨-1 fail-fast 計畫 v8 ✅ review 通過（七輪）並 commit `0a92d95`，實作 ✅ review 通過（兩輪）並 commit `c49fde1`，步驟 ⑧ 計畫 v4 ✅ review 通過（三輪）並 commit `5e2d84f`，⑧ 稽核結果與補法 ✅ 確認點 ② 通過（2026-10-07），補齊與全量執行 ✅ review 通過（commit `be0e337`），步驟 ⑨ 細部計畫 v1 ✅ review 通過（兩輪）並確認（commit `1bec699`），實作前的可行性實驗與計畫修正 ✅ review 通過（七輪）並 commit `42dcd2a`（D1 確認、D2 採 (a)、D3 確認），⑨ 實作 ✅ review 通過（兩輪）並 commit `53538a3`（＝ 兩份 patch 的封存點；S9 ✅ 2026-10-14 通過），另立的 raw-failed freeze record 修正計畫 v1 ✅ 確認（兩輪 review）並 commit `6a4776c`，R0 重現與實作 ✅ review 通過並 commit `c0cf0de`（gate 放行），⑨-1 細部計畫 v8 ✅ 確認（七輪 review）並 commit `496a5f7`，⑨-1 的前置修正「十」✅ review 通過並 commit `ec23e4a`，⑨-1 的正式驗收 ✅ 2026-10-24 以 `s91` 執行、結果 **⑨-1 通過**（✅ review 通過並 commit `cbde340` ＝ `R91`；見「Stage 2 步驟 ⑨-1 正式驗收結果」，`E91` ＝ `d3df284`；⚠️ `cbde340` 同時含 `CLAUDE.md`，⑨-2 的 P1 修正已 commit `eb855b0`（[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)）；簡易指令 `s92` ✅ review 通過並 commit `832f678`（[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md)）），⑨-2 的正式確認重跑 ✅ 2026-10-27 以 `s92` 執行、結果 **⑨-2 通過**（⚠️ 待 review；見「Stage 2 步驟 ⑨-2 正式確認重跑結果」；freeze record 的 `repo_head` ＝ `832f678`、`P_B` 163,024,896 bytes），下一步：⑩ 的計畫——之前：「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」✅ 確認（兩輪 review）、實作 ✅ review 通過（兩輪）並 commit `f027cb2`（⑨-1 的 precheck 換成 `_002`、⑨-2 的 P1、P4 的 `read`、P7 改成 fail-closed；已可執行 ⑨-1）；「Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5」✅ 確認（五輪 review）並 commit `e3e44be`，實作已完成／待 review（`~/.local/bin/s91` 已安裝；⑨-1、⑨-2「三」的 ① 已換成失敗即停的版本（D7 (b)、D8 (a)）；`s91` 是可選的，也可以照舊貼區塊；2026-10-24 的 ⑨-1 以 `s91 pre`／`s91 go` 啟動，`run.tsv` 的 `s91_sha256` ＝ HEAD 的文件——D2 的事後對照 ok）；⑨-2 細部計畫 v4 ✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）**（⚠️ **2026-10-27**：⑨-1 的結果見「Stage 2 步驟 ⑨-1 正式驗收結果」；報告的「host MemAvailable 低點」只涵蓋磁碟取樣的階段，另立 [I-119](#i-119acceptance-報告的-host-memavailable-低點只涵蓋磁碟取樣的階段不含量測趟)）（⚠️ **2026-10-15**：見「Stage 2 步驟 ⑨-1 細部計畫 v8」與「Stage 2 步驟 ⑨-1 前置修正（「十」）的 R0 與實作結果」；查證時另外發現 raw manifest 對真實的原始量測一律失敗、作業規則的批次清單不完整，⑨-1 之前先修）（⚠️ **2026-10-14**：見「Stage 2 raw-failed freeze record 修正計畫 v1」與「Stage 2 raw-failed freeze record 修正的實作結果」）（⚠️ **2026-10-12**：見「Stage 2 步驟 ⑨ 實作結果」；2026-10-14 的 S9 結果見該節「九」）（⚠️ **2026-10-08**：⑨ 見「Stage 2 步驟 ⑨ 細部計畫 v1」；raw-failed freeze record 的產品修正排在 ⑨ commit 之後、⑨-1 之前，最晚不得晚於 ⑨-2，見該計畫「九」）（⚠️ **2026-10-06**：之後依 v29 的順序 ⑧ → ⑨ → ⑨-1；`fs_peak` 的雜訊經查是 live 的排程工作，使用者裁決方案 B，見「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）（⚠️ **2026-10-02**：⑦d 見「Stage 2 步驟 ⑦d 細部計畫 v1」）（⚠️ **2026-10-01**：⑦c 見「Stage 2 步驟 ⑦c 細部計畫 v1」與「Stage 2 步驟 ⑦c 實作結果」）（⚠️ **2026-09-30**：⑦b 見「Stage 2 步驟 ⑦b 細部計畫 v1」與「Stage 2 步驟 ⑦b 實作結果」；⑦a 見「Stage 2 步驟 ⑦a 細部計畫 v1」與「Stage 2 步驟 ⑦a 實作結果」）（⚠️ **2026-09-29**：⑦ 分四包 ⑦a～⑦d 依序實作，跨包介面與新裁決見「Stage 2 步驟 ⑦ 總綱 v1」；⚠️ 其中發現 ⑩ 的 replay 執行的是 `e1cbbbd` worktree 的程式碼，⑦a 的改動改以 **tooling patch** 送進 replay）（⚠️ **2026-09-23**：開工前盤點發現 **Stage 1 釘住的 image `sha256:d66030dca485…` 已不在本機**，Stage 2 計畫書改採「兩側都在新 image 重跑」，**Stage 2 計畫書 v28 與 ③ evidence contract v12 已於 2026-09-23 確認**；**③b 已實作並 commit**；**③c 環境閘門 2026-09-23 判定 EQUIVALENT**（`envcheck/` 已發布並於 `5bae980` 進版控）；**③d（Stage 2 archive、failed record、check／recover）已於 2026-09-24 實作、✅ review 通過並 commit**（見「③d 實作結果」）；**步驟 ④ sizing harness 已於 2026-09-24 實作、2026-09-29 ✅ review 通過（四輪）並 commit**（見「Stage 2 步驟 ④ 實作結果」；可用性驗證 `P_B` 150.5～150.7 MiB，⛔ 不是 ⑤ 的正式量測）；②已於 2026-09-23 review 通過，見「I-074 Stage 2 計畫書」（⚠️ 現行版）的「二、⑤」）（⚠️ **2026-09-18**：D／D+1／仲裁**全部跑完，`outcome = MATCH`（rc=0）**，證據已封存到 `python/baselines/i074_stage1/`。**候選數 156 > 0 → ⛔ 排除分支 A**，必須跑 Stage 2 才分得出 B／C。見下方「Stage 1 正式執行結果」）。處置＝**只執行一次有界定向驗證，零命中即收斂成已知限制**，步驟與判準見下方「處置（2026-09-01 定案）」與「關閉條件（2026-09-01 改為單一決策樹）」。**在決策樹的某一個分支被走完之前不得移除本筆** |
 | 嚴重度 | 中（行為已改變且已上線，但驗證深度不足） |
 | 分類 | Python / SR Zone / Lifecycle |
 | 發現日期 | 2026-08-13（2026-08-18 確認缺口仍未關閉） |
@@ -7428,7 +7428,7 @@ worktree，含 `docs/`）。⚠️ `host MemAvailable 低點` 只涵蓋四個磁
 ⚠️ 2026-10-16 修改（「Stage 2 步驟 ⑨-1 執行紀錄格式 v2」的 D3、D7 與第三輪 review）：id 改成 `_002`；整段包在 `{ … }` 裡（shell 先讀完整段才執行，`read` ⛔ 不會讀走下一行）；P1 改成 fail-closed（`E91` 也必須是 HEAD 的祖先；`git status`、`git diff` 的結束碼 0 才判空）；P4 的 `read` 之前加上與 ⑨-1 相同的提示行（先打一個空白再貼 JWT）；P7 換成與 ⑨-1 相同的 5 行（`find`、`docker ps`、`ps`、`awk` 的結束碼）；其他指令⛔ 不動。原本的區塊（`_001`）見 `4f7e7f0`。
 
 ⚠️ 2026-10-27 修改（[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)，D1 (a)）：id 改成 `_003`；只換 P1 的 3 行——`E91` 之後的變更另排除根目錄的 `CLAUDE.md`（`cbde340` 起含協作規則，它的內容⛔ 沒有程式讀取），ok 那一行改成「P1 ⑨-1 之後只動文件 ok」；其他行⛔ 不動。原本的區塊（`_002`）見 `f027cb2`。
-⚠️ 2026-10-27：也可以用 `s92 pre`／`s92 go`、`s92 st`、`s92 stop`（先執行 [`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md) 的核對指令；⚠️ 待 review）。
+⚠️ 2026-10-27：也可以用 `s92 pre`／`s92 go`、`s92 st`、`s92 stop`（先執行 [`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md) 的核對指令；工具 ✅ review 通過並 commit `832f678`）。2026-10-27 的 ⑨-2 以它執行，結果見「Stage 2 步驟 ⑨-2 正式確認重跑結果」（⚠️ 結果待 review）。
 
 ```text id="i074_stage2_step92_precheck_003"
 # P1～P10 的確認（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT（前端登入後取得，或 POST /api/v1/auth/login）；輸出貼進紀錄）：
@@ -7477,7 +7477,7 @@ git rev-parse HEAD                                                              
 ##### 三、啟動、程序身分、狀態、安全中止與完成判定（D1：沿用 ⑨-1 的 wrapper，由使用者在 tmux／自己的終端機執行）
 
 ⚠️ 2026-10-19 修改（「Stage 2 步驟 ⑨-1 的簡易指令 `s91` v5」的 D8 (a)，五輪 review）：區塊換成 `i074_stage2_step92_launch_002`——① 換成與 ⑨-1 相同的失敗即停的版本（wrapper 的內容與固定的環境逐字不變），②③ ⛔ 不動；判讀同 ⑨-1「三」（「已啟動」與「① 的結束碼：0」）。原本的區塊（`_001`）見 `4f7e7f0`。
-⚠️ 2026-10-27：也可以用 `s92 pre`／`s92 go`、`s92 st`、`s92 stop`（先執行 [`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md) 的核對指令；⚠️ 待 review）。
+⚠️ 2026-10-27：也可以用 `s92 pre`／`s92 go`、`s92 st`、`s92 stop`（先執行 [`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md) 的核對指令；工具 ✅ review 通過並 commit `832f678`）。2026-10-27 的 ⑨-2 以它執行，結果見「Stage 2 步驟 ⑨-2 正式確認重跑結果」（⚠️ 結果待 review）。
 
 ```text id="i074_stage2_step92_launch_002"
 # ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄——與 ⑨-1 同一套，只換入口、work 與控制目錄的名稱——每一步失敗即停（2026-10-16 修改：整段是兩個函式（啟動與收尾），貼上之後立刻執行、執行完就移除）
@@ -7742,6 +7742,274 @@ D1、D2、D4～D7 通過（第二輪 review）；D3、D8 依上面的修正待�
 D1～D7 通過（第三輪 review）；D8 的 S 刪除程序依上面的修正，第四輪 review 通過。
 
 ⚠️ ⑨-2 P1 修正計畫 v1（2026-10-27，✅ 確認（D1 (a)）；實作已完成／待 review）：見 [`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)（2026-10-27 自本處搬出）。
+
+#### Stage 2 步驟 ⑨-2 正式確認重跑結果（2026-10-27，⑨-2 通過；⚠️ 待 review）
+
+依據：「Stage 2 步驟 ⑨-2 細部計畫 v4」（`4f7e7f0`）「二」～「七」；precheck 是「二」的 `_003`（[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)，`eb855b0`）；
+啟動：[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md) 的 `s92 pre`／`s92 go`（`832f678`）。執行：使用者，2026-10-27（二）17:04～17:12（+08:00）；「四」「五」：Claude，同日。
+結構比照「Stage 2 步驟 ⑨-1 正式驗收結果」。
+
+##### 一、結論與交給 ⑩ 的值
+
+| 項目 | 值 |
+|---|---|
+| 結論 | **⑨-2 通過** |
+| 依據的嘗試 | 嘗試 1（`formal-92-20261027T090656Z`） |
+| ⑩ 的 `--freeze-record` | `/home/dev/i074_stage2_sizing/formal-92-20261027T090656Z/freeze_record.json`（原位置；⛔ 不搬移、⛔ 不複製、⛔ 不改上層目錄的名字——「六」）；SHA-256 `098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3` |
+| `repo_head`（⑩ 的複本釘在這裡） | `832f678acfa429f8e4fdba2c82eb77eae826def8`：`run.tsv` 的 `expected` ＝ precheck 的 P8 ＝ freeze record 的 `repo_head` ＝ `clone_head`（四者相同） |
+| `P_B` | 163,024,896 bytes（155.5 MiB）≤ `P_B_BUDGET` 167,772,160，餘裕 4,747,264 bytes（≈ 4.53 MiB） |
+| 額度 | invalid 連續 0／2；harness 失敗 0；只有診斷資料：無 |
+| 正式原始量測的錨 | `formal-92-20261027T090656Z/raw`：manifest `sha256` `e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765`、`file_count` 133、`dir_count` 29 |
+| ⑨-2 之後的 commit | 只限文件（`docs/` 與根目錄的 `CLAUDE.md`）；`scripts/`、`python/`、`.gitattributes` 任何一處改了 → ⑨-2 重跑（「六」） |
+
+##### 二、嘗試一覽（每一次嘗試一列）
+
+| # | `NAME` | 開跑（`launched_utc`） | 結束（rc marker） | rc | 留下的形狀 | 「四」的列 | 額度 | 處置 |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `formal-92-20261027T090656Z` | 2026-10-27T09:06:56Z | 2026-10-27T09:12:16Z | 0 | 頂層有 `freeze_record.json` 與兩份報告、正式的 `raw/` | 第一列（頂層有 freeze record、⛔ 沒有重開機） | ⛔ 不消耗 | 「五」1～7 全做、全部成立 → 記錄 → review |
+
+##### 三、嘗試 1：`formal-92-20261027T090656Z`
+
+1. 前置條件（「二」；原始輸出：`formal-92-20261027T090656Z.ctl/precheck.txt`）
+
+| # | 結果 | 依據 |
+|---|---|---|
+| P1 | ✅ | 「P1 祖先 ok」（含 `R91` `cbde340`、`E91` `d3df284`）「P1 clean ok」「P1 ⑨-1 之後只動文件 ok」（文件以外的變更：無、`git diff` 的 rc 0） |
+| P2 | ✅ | 「P2 ok」；兩份 SHA ＝ 封存值（`fa7f5ba8…`、`5ff9a90f…`） |
+| P3 | ✅ | 「P3 image ok」「P3 identity ok」；identity 檔的 SHA ＝ `a02bf3bd…` |
+| P4 | ✅ | 時段：平日 17:00 之後（D2）。應確認的 10 個工作都有 10-27 那一筆、而且是終態：06:30 `stock_symbol_sync` success、`corporate_action_sync` partial；07:00 `delisting_reconcile` success；`pre_market`、`intraday`、`daily_close`、`sr_zone_verify`、`evaluation_universe_sync` success，`candle_gap_detection` partial；17:00 `sr_analysis` success（17:01:42 結束）；「P4 running 的數量： 0」。整段執行 17:04～17:12（+08:00），下一個批次是 21:00 `chip_daily_sync`（≥ 30 分鐘） |
+| P5 | ✅ | 「P5 MemAvailable 1177 MiB（門檻 700）」「P5 ok」；⛔ 不需要先結束任何程序 |
+| D1 | ✅ | 「D1 Claude 已結束 ok」（`D1 rc：ps 0、awk 0／0；claude 的程序數 0`）；Codex 的程序 3 個（`86149`、`1287012` `codex-code-mode`、`2917443`；記錄。使用者回報等待期間⛔ 沒有使用） |
+| P6 | ✅ | `/` 可用 5.3G（≥ 1.5 GB）、`/dev/shm` 可用 1.0G（≥ 256 MB）；跑完、`<work>`（384M）保留之後 `/` 可用 4.9G——⑩ 的 ≥ 1.5 GB ＋ clone 仍成立 |
+| P7 | ✅ | 「P7 ok」（`P7 rc：find 0、docker ps 0、ps 0、awk 0`） |
+| P8 | ✅ | `832f678acfa429f8e4fdba2c82eb77eae826def8`（`_003` 的 P8 只印 OID）＝ `run.tsv` 的 `expected` |
+| P9 | ✅ | `run.tsv` 的 `expected`、`name`、`work`、`launched_utc` 各恰好一行，`name` ＝ `.ctl` 的目錄名；使用者回報 `s92 go` 印出「已啟動」；`log` ⛔ 沒有「--work-dir 已存在」 |
+| P10 | ✅ | 「Stage 2 步驟 ⑨-1 正式驗收結果」：⑨-1 通過、✅ review 通過並 commit `cbde340`（＝ `R91`，P1 的祖先檢查成立） |
+| 基準 | ✅ | 「基準 ok」（`基準 rc：git 0、grep 0、ls 0、sed 0、btime 的 awk 0`）；worktree 登記數 401、`btime` 1783304445（`/tmp` 的清單 14 項留在 `.ctl/precheck.txt`） |
+| 保存 | ✅ | 「PRE 保存 ok」只印在終端機（`tee` 之後、⛔ 不在檔案裡）——依使用者回報「照流程」；Claude 複製時重驗：第一行 ＝ `PRE /dev/shm/s92-pre-20261027T090423Z-S3pHMR.txt`、`precheck 開始` 恰好一行、`precheck 結束` 恰好一行且是最後一行 |
+| 間隔 | ✅ | precheck 結束 09:05:36Z → `launched_utc` 09:06:56Z（80 秒） |
+
+（precheck.txt 原樣，「基準 /tmp」那幾行除外——留在 `.ctl/`；P4 各列行尾的一個空白已去掉（`git diff --check`），原檔見 `.ctl/precheck.txt`）
+
+```text
+PRE /dev/shm/s92-pre-20261027T090423Z-S3pHMR.txt
+precheck 開始 2026-10-27T09:04:23Z
+btime 1783304445
+P1 祖先 ok
+P1 clean ok
+P1 ⑨-1 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變更：無（git diff 的 rc 0）
+P1 ⑨-1 之後只動文件 ok
+P2 ok
+fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14  python/baselines/i074_stage2/counterfactual_e1cbbbd.patch
+5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98  python/baselines/i074_stage2/tooling_e1cbbbd.patch
+P3 image ok
+P3 identity ok
+a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d  /home/dev/.local/share/stock_trading/i074_stage2/run_identity.json
+CANDLE_GAP_DETECTION_ENABLED=true
+EVALUATION_UNIVERSE_ENABLED=true
+SR_ANALYSIS_CHIP_CRON=0 22 * * 1-5
+DELISTING_ENABLED=true
+FUGLE_ENABLED=false
+EVALUATION_UNIVERSE_CRON=0 16 * * 1-5
+CORPORATE_ACTION_CRON=30 6 * * 1-5
+SR_ANALYSIS_CRON=0 17 * * 1-5
+FINMIND_INTRADAY_ENABLED=false
+SR_ANALYSIS_ENABLED=true
+DELISTING_CRON=0 7 * * *
+YAHOO_ENABLED=true
+P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）
+P4 candle_gap_detection partial 2026-10-27T16:24:54.480113+08:00 2026-10-27T16:24:59.488985+08:00
+P4 chip_daily_sync success 2026-10-26T21:00:00.042959+08:00 2026-10-26T21:04:12.228487+08:00
+P4 corporate_action_sync partial 2026-10-27T06:30:00.034896+08:00 2026-10-27T07:09:28.088659+08:00
+P4 daily_close success 2026-10-27T15:00:00.004709+08:00 2026-10-27T15:02:00.255602+08:00
+P4 delisting_reconcile success 2026-10-27T07:00:00.035744+08:00 2026-10-27T07:00:07.418051+08:00
+P4 evaluation_universe_sync success 2026-10-27T16:00:00.122012+08:00 2026-10-27T16:24:54.478992+08:00
+P4 intraday success 2026-10-27T13:30:00.00085+08:00 2026-10-27T13:30:04.638593+08:00
+P4 pre_market success 2026-10-27T08:50:00.10604+08:00 2026-10-27T08:52:18.728396+08:00
+P4 sr_analysis success 2026-10-27T17:00:00.105061+08:00 2026-10-27T17:01:42.726879+08:00
+P4 sr_analysis_chip success 2026-10-26T22:00:00.042855+08:00 2026-10-26T22:00:00.046032+08:00
+P4 sr_evaluation disabled - -
+P4 sr_zone_verify success 2026-10-27T15:02:00.256059+08:00 2026-10-27T15:02:11.03881+08:00
+P4 stock_symbol_sync success 2026-10-27T06:30:00.037918+08:00 2026-10-27T06:31:27.395002+08:00
+P4 running 的數量： 0
+P5 MemAvailable 1177 MiB（門檻 700）
+P5 ok
+Filesystem         Size  Used Avail Use% Mounted on
+/dev/ploop11163p1   40G   34G  5.3G  87% /
+tmpfs              1.0G   88K  1.0G   1% /dev/shm
+P7 S：無
+P7 容器：無
+P7 程序：無
+P7 rc：find 0、docker ps 0、ps 0、awk 0
+P7 ok
+832f678acfa429f8e4fdba2c82eb77eae826def8
+D1   86149 16152 codex
+D1 1287012  5512 codex-code-mode
+D1 2917443 97844 codex
+D1 rc：ps 0、awk 0／0；claude 的程序數 0
+D1 Claude 已結束 ok
+基準 worktree 登記數 401
+基準 rc：git 0、grep 0、ls 0、sed 0、btime 的 awk 0
+基準 ok
+precheck 結束 2026-10-27T09:05:36Z
+```
+
+2. 執行
+
+| 項目 | 值 |
+|---|---|
+| `run.tsv` | 下面的區塊（全部欄位原樣；10 個欄位各恰好一行；`s92_sha256` ＝ 從 HEAD（`832f678`）的 `plans/i074-stage2-step92-s92.md` 抽出的「三之一」＝ `~/.local/bin/s92`，事後對照 ok） |
+| rc marker | `0`、`2026-10-27T09:12:16Z` |
+| 耗時 | `launched_utc` → rc marker：5 分 20 秒（`log` 09:06:57 → 09:12:16）；10 個容器的 `create_begin` → `rm_done` 21.3～40.6 秒 |
+| 重開機 | precheck 的 `btime` 1783304445 ＝ 跑完之後（「五」完成時）`/proc/stat` 的 `btime` 1783304445：否 |
+| `log` | 步驟 0 → witness → success → failure → `memory_only` → 步驟 5（metadata twin）→ 步驟 6（報告）；`ERROR:` 0 行；⛔ 沒有保留 S 的行（成功路徑由 harness 清除 S）；shim 入口 `bin/docker` 的移除記在 `console.log`；`raw/rc.tsv` 的 10 步結束碼都 ＝ 預期（`publish_failed_record` 1、`check_failed_record` 2、`recover_failed_record` 1，其餘 0） |
+| 使用者回報 | （2026-10-27）「照流程、無異常」——所選的選項內容：「核對指令印出 ok → s92 pre（有「PRE 保存 ok」）→ s92 go 印出「已啟動」→ 等待期間只用 s92 st，沒有 stop，也沒用 Claude／Codex」。佐證：控制目錄（`.ctl/`）⛔ 沒有 `stop_attempt`／`stop_sent`／`stop_failed`；`run.tsv` 有 `s92_sha256`（＝ 以 `s92 go` 啟動） |
+
+```text
+expected	832f678acfa429f8e4fdba2c82eb77eae826def8
+name	formal-92-20261027T090656Z
+work	/home/dev/i074_stage2_sizing/formal-92-20261027T090656Z
+launched_utc	2026-10-27T09:06:56Z
+s92_sha256	f9004a96efd518399bfa790df5d4d69a35d13d2f50460c12018449b754d98b94
+wrapper_pid	1514982
+wrapper_start	978757098
+wrapper_pgid	1514982
+harness_pid	1514990
+harness_start	978757100
+```
+
+3. 判讀（「四」）
+
+| 輸入 | 值 |
+|---|---|
+| rc | 0 |
+| `<work>` 的頂層 | `freeze_record.json`、`sizing_report.json`、`sizing_report.txt`、`raw/` 有；`failure_summary.json`、`raw-failed`、`.raw-failed.staging`、`.freeze_record.json.staging` 都⛔ 沒有（其餘是 harness 的工作目錄 `cache/`、`repo/`、`runs/`、`tmp/`） |
+| 重開機 | 否（上面 2.） |
+| → 「四」的列 | 第一列：頂層有 `freeze_record.json`（結束碼 0），host ⛔ 沒有在「五」完成之前重開過 |
+| 判讀、處置 | 做「五」的驗證，全部成立 → **⑨-2 通過** → 記錄 → review → commit → ⑩ 的計畫 |
+
+4. 驗證與保存（「五」1～7）
+
+| # | 項目 | 結果 |
+|---|---|---|
+| 1 | 形狀 | 頂層的四項都在、`raw` 是目錄（⛔ 不是 symlink）；`raw/freeze_record.json`、`raw/sizing_report.json`（與 `raw/sizing_report.txt`）都是一般檔案，與頂層的同名檔 `cmp` 相同；`raw/bin/` 是空的（⛔ 沒有 `bin/docker`） |
+| 2 | 成對 | `python3 python/scripts/i074_stage2_freeze_record.py check-pair --record <work>/freeze_record.json --report <work>/sizing_report.json` → rc 0；`check-basic --record <work>/freeze_record.json` → rc 0、印出 `832f678acfa429f8e4fdba2c82eb77eae826def8` ＝ `EXPECTED` |
+| 3 | 欄位 | 下面的對照表，全部 ＝ 外部的值；**容器的記憶體上限**：文件的指令（`i074_stage2_step92_memlimit_001`）rc 0——`fixture_mem 700m 容器數 10 → ok`，10 份 sidecar 的 `memory_limit_bytes` ＝ `memory_swap_limit_bytes` ＝ 734,003,200（700 MiB ≥ 468,713,472）；每份的 `status` ok、`failures` 空 |
+| 4 | manifest | 產生：`python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw ~/i074_stage2_sizing/formal-92-20261027T090656Z/raw --repo . --expected-repo-head 832f678acfa429f8e4fdba2c82eb77eae826def8 --out ~/i074_stage2_sizing/formal-92-20261027T090656Z.raw-manifest.json` → rc 0，`{"dir_count": 29, "expected_repo_head": "832f678acfa429f8e4fdba2c82eb77eae826def8", "file_count": 133, "root_name": "raw", "sha256": "e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765"}`；同一個指令改帶 `--check-sha256 e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765`（⛔ 不帶 `--out`）→ 同樣的輸出、rc 0。manifest 檔 16,332 bytes，`sha256sum` ＝ `e4b1ead7…6765` |
+| 5 | SHA 與數字 | `freeze_record.json` `098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3`；`sizing_report.json` `33341c8690dbf1cc280b2e2f377a43fe676ea0f62a78a28e1fc2bc7f3204f26d`（＝ freeze record 的 `report_sha256`）；`sizing_report.txt` `8601ca88eec4721ac1d4eab63b93ccfc96a12080880c2b38f5092ddbde98c065`；數字見下面的 5. |
+| 6 | 殘留 | `/dev/shm/i074-*`、`docker ps -a --filter name=i074sz-`、acceptance／sizing 的程序都是空的（`find`、`docker ps`、`ps`、`awk` 的 rc 都是 0）；worktree 登記數 401 → 401；`/tmp` 與基準的 14 項完全相同（manifest 之前、之後各比對一次）；控制目錄 `/dev/shm/s92-formal-92-20261027T090656Z/` 的 4 個檔與 `/dev/shm/s92-pre-20261027T090423Z-S3pHMR.txt` 已複製進 `.ctl/`、`cmp` 相同之後才刪除；`/dev/shm` 剩 `libpod_lock`、`s91.lock`、`s92.lock`（後兩者依 `s91`／`s92` 的 D6／D4 由使用者決定）；保留的 S：⛔ 沒有（成功路徑由 harness 清除）→「保留的 S 的刪除程序」⛔ 不適用 |
+| 7 | 保存 | `~/i074_stage2_sizing/formal-92-20261027T090656Z.ctl/`（mode 700）：`run.tsv` `54b78086…`、`rc` `eaf5a60d…`、`log` `e1430756…`、`wrapper.sh` `874815df…`（`cp -a`）、`precheck.txt` `c10dc52a…`（mode 600）；`<work>`：`~/i074_stage2_sizing/formal-92-20261027T090656Z/`（384M，**原位置保存到 ⑩ 晉升結果的 commit 之後**，⛔ 不搬移、⛔ 不複製、⛔ 不改名）；manifest：`~/i074_stage2_sizing/formal-92-20261027T090656Z.raw-manifest.json` |
+
+| 欄位（freeze record／報告） | 值 | 外部的值 | 判定 |
+|---|---|---|---|
+| `repo_head`／`clone_head`（兩邊） | `832f678acfa429f8e4fdba2c82eb77eae826def8` | `EXPECTED`（`run.tsv`、precheck 的 P8） | ＝ |
+| `base_commit`（兩邊） | `e1cbbbdab44f8cf2d152e6ade9235d844f590d7f` | `git rev-parse e1cbbbd` | ＝ |
+| `p_b_bytes`／報告的 `P_B` | 163,024,896 | ≤ 167,772,160 | ＝、成立 |
+| `counterfactual_patch_raw_sha256`／`counterfactual_patch_sha256`／`meta.counterfactual_canonical_sha256` | `fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14` | 封存值 | ＝ |
+| `tooling_patch_raw_sha256`／`tooling_patch_sha256`／`meta.tooling_canonical_sha256` | `5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98` | 封存值 | ＝ |
+| `meta.composed_sha256` | `ac49d36ff07a998448cb4b5706470eedce61ef6369cd9deca784d7d5923b670f` | 封存值 | ＝ |
+| `meta.counterfactual_semantic_sha256` | `5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8` | 封存值 | ＝ |
+| `image_id`／`meta.image` | `sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027` | 「三」的 `REPLAY_IMAGE_ID` | ＝ |
+| `identity_sha256` | `a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d` | identity 檔的 SHA（P3） | ＝ |
+| `harness_sha256` | `6720c414b5203b1383401e06ded8c5fec1eacf5b26d3d92da40673a481446c6c` | `git show 832f678:scripts/i074-stage2-sizing.sh \| sha256sum` | ＝ |
+| `shim_sha256` | `f02005f003b4faed432ed94a92e4540bb3bd58f99b6f3eae23eaf581cb4c023f` | `git show 832f678:scripts/lib/i074-sizing-docker-shim.sh \| sha256sum` | ＝ |
+| `helper_sha256` | `4cad1b1efcbf97b47236658030696cdf9759fd9b752828db27ab04f7c66dad6a` | `git show 832f678:python/scripts/i074_stage2_sizing.py \| sha256sum` | ＝ |
+| `report_sha256` | `33341c8690dbf1cc280b2e2f377a43fe676ea0f62a78a28e1fc2bc7f3204f26d` | `sha256sum <work>/sizing_report.json` | ＝ |
+| `mode`／`status`／`schema` | `formal`／`ok`／`i074_stage2_freeze_record/v1` | — | ＝ |
+| `run_id`／`meta.work` | `20261027T090656Z-1514990`（PID ＝ `harness_pid`）／`/home/dev/i074_stage2_sizing/formal-92-20261027T090656Z` | `run.tsv` 的 `harness_pid`、`work` | ＝ |
+| `meta.fixture_mem`／`meta.repo_dirty` | `700m`／`false` | ≥ 447m／— | ＝、成立 |
+
+5. 數字（`sizing_report.json` ＋ `sizing_report.txt` 全文）
+
+status：ok（mode=formal）；`P_B` ＝ success 的 `P_path`；預算 167,772,160 bytes
+
+| 路徑 | `P_path`（＝ `P_basis` ＝ accounted） | `dirs_peak` | `fs_peak` | 預算 − `P_basis` | `fs_unexplained` | 樣本數 |
+|---|---|---|---|---|---|---|
+| witness | 141,955,072（135.4 MiB） | 141,496,320 | 141,750,272 | 25,817,088 | −204,800 | 256 |
+| success | 163,024,896（155.5 MiB） | 162,123,776 | 162,398,208 | 4,747,264（4.53 MiB） | −626,688 | 312 |
+| failure | 74,391,552（70.9 MiB） | 73,502,720 | 73,768,960 | 93,380,608 | −622,592 | 176 |
+
+| # | phase | role | rc | cgroup 峰值（含 page cache；資訊值） | 上限（sidecar） |
+|---|---|---|---|---|---|
+| 1 | witness | fixture | 0 | 350.6 MiB | 700.0 MiB |
+| 2 | witness | finalizer | 0 | 375.4 MiB | 700.0 MiB |
+| 3 | success | fixture | 0 | 432.1 MiB | 700.0 MiB |
+| 4 | success | finalizer | 0 | 462.3 MiB | 700.0 MiB |
+| 5 | failure | fixture | 0 | 393.5 MiB | 700.0 MiB |
+| 6 | failure | finalizer | 1 | 376.7 MiB | 700.0 MiB |
+| 7 | memory_only | recovery | 0 | 331.9 MiB | 700.0 MiB |
+| 8 | memory_only | recovery | 0 | 322.9 MiB | 700.0 MiB |
+| 9 | memory_only | check | 0 | 313.9 MiB | 700.0 MiB |
+| 10 | memory_only | recovery | 1 | 311.4 MiB | 700.0 MiB |
+
+host MemAvailable 低點：861.9 MiB（903,729,152 bytes；⚠️ 只涵蓋三個磁碟窗口——見下面的觀察 ②）
+
+```text
+status: ok（mode=formal）
+P_B = 163024896 bytes（155.5 MiB）
+
+[witness] P_path=135.4 MiB  dirs_peak=134.9 MiB  fs_peak=135.2 MiB  accounted=135.4 MiB  samples=256
+    P_basis=141955072  fs_unexplained=-204800 bytes（容差 1048576）
+    replay_worktree    15.0 MiB
+    run_dir            74.3 MiB
+    code_worktree      39.3 MiB
+    archive            6.6 MiB
+    probe              0.0 MiB
+    containers         0.2 MiB
+    runner_frozen_patches 0.0 MiB
+    containers 合併規則：max_non_overlapping
+[success] P_path=155.5 MiB  dirs_peak=154.6 MiB  fs_peak=154.9 MiB  accounted=155.5 MiB  samples=312
+    P_basis=163024896  fs_unexplained=-626688 bytes（容差 1048576）
+    replay_worktree    15.2 MiB
+    run_dir            78.0 MiB
+    code_worktree      39.3 MiB
+    archive            7.1 MiB
+    probe              0.0 MiB
+    containers         0.3 MiB
+    runner_frozen_patches 0.3 MiB
+    compose_worktree   15.2 MiB
+    snapshot           0.3 MiB
+    containers 合併規則：max_non_overlapping
+[failure] P_path=70.9 MiB  dirs_peak=70.1 MiB  fs_peak=70.4 MiB  accounted=70.9 MiB  samples=176
+    P_basis=74391552  fs_unexplained=-622592 bytes（容差 1048576）
+    replay_worktree    15.2 MiB
+    run_dir            0.3 MiB
+    code_worktree      39.3 MiB
+    archive            0.3 MiB
+    probe              0.0 MiB
+    containers         0.3 MiB
+    runner_frozen_patches 0.3 MiB
+    compose_worktree   15.2 MiB
+    snapshot           0.3 MiB
+    containers 合併規則：max_non_overlapping
+
+記憶體（cgroup 峰值，含 page cache）：
+  #1   witness      fixture    rc=0  350.6 MiB
+  #2   witness      finalizer  rc=0  375.4 MiB
+  #3   success      fixture    rc=0  432.1 MiB
+  #4   success      finalizer  rc=0  462.3 MiB
+  #5   failure      fixture    rc=0  393.5 MiB
+  #6   failure      finalizer  rc=1  376.7 MiB
+  #7   memory_only  recovery   rc=0  331.9 MiB
+  #8   memory_only  recovery   rc=0  322.9 MiB
+  #9   memory_only  check      rc=0  313.9 MiB
+  #10  memory_only  recovery   rc=1  311.4 MiB
+host MemAvailable 低點：861.9 MiB
+```
+
+與預估、⑨-1、⑤ 的對照：success 的 `P_path` 163,024,896 比 ⑨-1 acceptance 的 success（162,926,592）多 98,304 bytes，**全部來自 `code_worktree`**（41,070,592 → 41,168,896：`d3df284` 之後的文件 commit），其他八項逐位元相同；比本計畫「〇」的預估（約 162,729,984）多 294,912 bytes。
+⑤（`formal-20260929T020903Z`，空 tooling、fixture 447m）的 `P_B` 是 158,101,504、cgroup 峰值最高 342.0 MiB——⑦b 之後改用真實的兩份 patch，⑤ 的 `P_B` 只是歷史值。
+
+##### 四、判定與下一步
+
+理由：rc 0、`status` ok、`P_B` ≤ `P_B_BUDGET`、頂層有 freeze record 而且 host ⛔ 沒有重開機；「五」1～7 全部成立（`check-pair`、`check-basic`、容器上限、manifest 都是 rc 0），身分與封存值全部成立 → **⑨-2 通過**。
+下一步：本節 review → 使用者 commit（只動文件）→ ⑩ 的計畫（另行規劃與確認；`--freeze-record` 用上面一、的路徑）。
+已更新的交叉指標：I-074 狀態列、roadmap、I-119（sizing 的涵蓋範圍）、`sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」、`development-workflow.md` sizing 一節（「七」）、[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md)。
+觀察（⛔ 不影響判定）：
+① **cgroup 峰值有兩個 ≥ 430 MiB**：#4 success finalizer 462.3 MiB、#3 success fixture 432.1 MiB——「五」5 的「對照 < 450 MiB」只記錄、⛔ 不是閘（使用者 2026-10-27 裁決）：`sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」規定含 page cache 的 cgroup 峰值只列資訊值、會隨當次的上限上升；記憶體的閘是 ⑨-1 的每一個程序的 RSS（已通過）。這次 10 個容器的上限都是 700m（⑤ 是 447m、2026-10-06 的 validation 是 433～468 MiB），與 ⑨-1 觀察 ① 是同一個現象（⛔ 沒有另外驗證）。
+② **host MemAvailable 低點的涵蓋範圍**（回答 [I-119](#i-119acceptance-報告的-host-memavailable-低點只涵蓋磁碟取樣的階段不含量測趟) 的待查）：`raw/memavail.tsv` 90 筆、涵蓋 190.7 秒，以 `raw/events/events.jsonl` 的 `create_begin`／`rm_done` 對照：容器 #1～#6 期間 13／15／17／19／10／11 筆，`memory_only` 的 #7～#10 期間都是 **0 筆**——只涵蓋 witness、success、failure 三個磁碟窗口。
+③ D1 記到 3 個 Codex 程序（比 ⑨-1 多一個 `codex-code-mode`）；使用者回報等待期間⛔ 沒有使用，`fs_unexplained` 也都 ≤ 0。
+④ 耗時 5 分 20 秒、`<work>` 384M，都比 `development-workflow.md` sizing 一節的估計（約 6～7 分鐘、約 450 MB）小。
 
 #### I-074 Stage 2 計畫書 v29（2026-09-29，步驟 ⑥，✅ **已確認**（2026-09-29，review 通過並 commit））
 
@@ -9315,11 +9583,11 @@ hash，那個值**只能驗證、⛔ 不能重建內容**。patch 一旦遺失�
         ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：「exact patch」指**兩份封存 patch**（counterfactual ＋ tooling），任一份的 bytes 或 SHA 再變都要重跑
         ⚠️ **⑦d 細部計畫 v1（✅ 2026-10-02 確認）**：入口 `scripts/i074-stage2-acceptance.sh --formal --replay-compute full`（結束碼 0 ok／2 threshold_exceeded／1 harness 失敗）；
         `full` 是唯一的量測趟（「正式 scan 的計次裁決」的新格）；報告的兩份 patch SHA 由 ⑨-1 的程序與 ⑨ 的封存值比對
-   ⑨-2 **⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing（約 6 分鐘），   ← ⚠️ 現在在這裡（`R91` ＝ `cbde340`；P1 的修正已 commit `eb855b0`：[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)；簡易指令 `s92`：[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md)，⚠️ 待 review）；2026-10-16：「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）
+   ⑨-2 **⑤ 的確認重跑**：⑨-1 之後的最後一次 commit 之後，以 ⑩ 要用的 HEAD 跑一次 `--formal` sizing（約 6 分鐘），   ← ✅ 2026-10-27 以 `s92` 執行、**⑨-2 通過**（⚠️ 待 review；見「Stage 2 步驟 ⑨-2 正式確認重跑結果」：`repo_head` `832f678`、`P_B` 163,024,896 bytes、餘裕約 4.53 MiB）（之前：`R91` ＝ `cbde340`；P1 的修正已 commit `eb855b0`：[`plans/i074-stage2-step92-p1.md`](./plans/i074-stage2-step92-p1.md)；簡易指令 `s92` ✅ review 通過並 commit `832f678`：[`plans/i074-stage2-step92-s92.md`](./plans/i074-stage2-step92-s92.md)）；2026-10-16：「Stage 2 步驟 ⑨-2 細部計畫 v4」✅ 確認（四輪 review）並 commit `4f7e7f0`（執行條件含 ⑨-1 通過並 commit）
         產出 **freeze record**；`status = "ok"` 且 `P_B ≤ P_B_BUDGET` 才進 ⑩；⛔ 不符就走「六、1」的回退順序。
         ⚠️ **⑦ 總綱 v1（✅ 2026-09-30 確認）**：這一次 sizing 用**真實的兩份 patch**（⑤ 量的 `P_B` 是空 tooling，差距由這一次實測驗證）
         ⚠️ ⑩ 的隔離複本就釘在這一次的 OID（freeze record 的 `repo_head`）；之後真正 repo 可以照常 commit（見「八之一」）
-⑩ **唯一一次**正式 Stage 2：before 全量 replay（約 180 分鐘）＋ finalize ＋ **晉升**（⚠️ v29：在隔離複本執行，見「八之一」）   ← ⚠️ 凍結窗口 B（v29：約束對象是複本）
+⑩ **唯一一次**正式 Stage 2：before 全量 replay（約 180 分鐘）＋ finalize ＋ **晉升**（⚠️ v29：在隔離複本執行，見「八之一」）   ← ⚠️ 凍結窗口 B（v29：約束對象是複本）；⚠️ 現在在這裡（2026-10-27：下一步是 ⑩ 的計畫，`--freeze-record` 指向 ⑨-2 的 `formal-92-20261027T090656Z/freeze_record.json`）
    ⚠️ **⑦d 細部計畫 v1（✅ 2026-10-02 確認）**：⑩ 期間由外部唯讀的 observer 額外記錄實際峰值（記憶體是 cgroup high-water mark 的下界、磁碟是取樣值；⛔ 不作為前置）
 ⑪ B／C 判讀器判定 ＋ 歸檔
 ```
@@ -14687,12 +14955,13 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 | 讀取端 | acceptance 的 `collect_acceptance_measurements()`（`python/scripts/i074_stage2_sizing.py:1968`）把 `host_memavailable_low` 設成 `memavail.tsv` 的最小值；`acceptance_report_text()`（`python/scripts/i074_stage2_sizing.py:2620`）印成「host MemAvailable 低點：…」，⛔ 沒有標明涵蓋的範圍 |
 | 實測 | `formal-91-20261024T040236Z/raw/memavail.tsv` 94 筆、涵蓋 195.7 秒：93 筆落在四個階段的取樣區間內（success 39、promote_success 17、failure 25、promote_failure 12），1 筆在最後一個階段收尾時；量測趟 `o0130`（`create_begin` → `rm_done` 185.8 分鐘）期間 **0 筆**——整段執行是 3 小時 12 分 |
 | 文件 | I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的「〇」寫「dev7 的 `memavail.tsv` 在執行期間最低到 194 MiB」、「四」的崩潰處理要記「`memavail.tsv` 的低點」、「五」6 要摘錄它——都會被讀成涵蓋整段執行；`sr-zone-scoring.md`、`development-workflow.md` ⛔ 沒有說明它的範圍 |
+| sizing 的實測（2026-10-27 補） | ⑨-2 的正式確認重跑（`formal-92-20261027T090656Z/raw/memavail.tsv`）：90 筆、涵蓋 190.7 秒；以 `raw/events/events.jsonl` 的 `create_begin`／`rm_done` 對照，容器 #1～#6（witness、success、failure 三個磁碟窗口）期間 13／15／17／19／10／11 筆，`memory_only` 的 #7～#10 期間都是 **0 筆**；步驟 0、步驟 5、6 也⛔ 不在範圍內。報告印的「host MemAvailable 低點：861.9 MiB」只是三個磁碟窗口的低點（見 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」的觀察 ②） |
 
 #### 影響
 
 * ⑨-1 的判定⛔ 不受影響：記憶體的閘是每一個程序的 RSS；容器的上限另外逐一記在報告裡（2026-10-24 的正式驗收都是 700m）。
 * 量測趟若崩潰（容器或 host 的 OOM），⑨-1「四」要求記下的 `memavail.tsv` 低點⛔ 沒有量測趟期間的資料——事故紀錄可能把磁碟階段的值當成崩潰當下的值。
-* sizing 的報告也印同一個「host MemAvailable 低點」、也由同一個取樣器寫入；它⛔ 沒有量測趟，涵蓋範圍是否足夠待查。
+* sizing 的報告也印同一個「host MemAvailable 低點」、也由同一個取樣器寫入；它⛔ 沒有量測趟，但 `memory_only` 的 4 個容器（recovery ×3、check）同樣⛔ 不在範圍內（2026-10-27，⑨-2 的實測；上表「sizing 的實測」）。freeze record 的條件只有 `mode`、`status` 與 `P_B ≤ P_B_BUDGET`，⑨-2 的判定⛔ 不受影響；處置方向（a）（b）要一併涵蓋 sizing 的文字。
 
 #### 處置方向（⚠️ 待規劃）
 

@@ -1474,7 +1474,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ⚠️ 待 review）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，⚠️ 待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
@@ -1484,21 +1484,82 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 # ④ 可用性驗證（允許未 commit；報告記錄實際執行的腳本 SHA-256）
 REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --work-dir ~/i074_stage2_sizing/<名稱>
 
-# ⑤ 正式量測（scripts/、python/、.gitattributes 必須 clean；harness 檔案必須等於 HEAD；
-#   stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案——要保存請導到 /dev/shm 或留在終端機）
-REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --formal --work-dir ~/i074_stage2_sizing/<名稱>
+# ⑨-2 的正式確認重跑（＝ ⑤ 的 --formal 量測、以 ⑩ 要用的 HEAD 產出 freeze record；scripts/、python/、.gitattributes 必須 clean；
+#   harness 檔案必須等於 HEAD；stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案——wrapper 導到 tmpfs）
+#   ⚠️ 完整的程序（P1～P10 的 precheck、啟動與程序身分、狀態、安全中止、判讀與各分支、驗證與保存）見 issue.md I-074
+#   「Stage 2 步驟 ⑨-2 細部計畫 v4」的「二」～「五」：由使用者在 tmux／自己的終端機執行，Claude 先結束（Codex ⛔ 不使用）。
+#   2026-10-27 的 ⑨-2 以簡易指令 s92（docs/plans/i074-stage2-step92-s92.md）執行，結果見 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」。
+#   固定的環境（「三」）：env -u 移除 sizing 鏈會讀的設定，每個容器以預設的 700m 各自 clamp、clamp 之後 ＜ 447m 的那一步⛔ 不建容器
+env -u MEM -u CPUS -u TOOLING_PATCH -u REPLAY_DRY_RUN -u PY_IMAGE -u I074_SIZING_FAULT \
+    -u SIZING_SNAPSHOT -u SIZING_PROFILE -u SIZING_REPLAY_MODE -u SIZING_REPLAY_COMPUTE \
+    MEM_MIN_MB=447 MEM_RESERVE_MB=150 MEM_FORCE=0 MEM_STRICT=0 \
+    REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/i074-stage2-sizing.sh --formal --work-dir ~/i074_stage2_sizing/formal-92-<UTC 時間> < /dev/null
+
+# ⑨-2 跑完之後（頂層有 freeze_record.json 時）：成對、repo_head、容器上限（issue.md 的「五」3）與 raw manifest
+python3 python/scripts/i074_stage2_freeze_record.py check-pair --record <work>/freeze_record.json --report <work>/sizing_report.json
+python3 python/scripts/i074_stage2_freeze_record.py check-basic --record <work>/freeze_record.json     # 印出的 repo_head ＝ 開跑前記下的 HEAD
+python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
+  --repo . --expected-repo-head <EXPECTED> --out ~/i074_stage2_sizing/<NAME>.raw-manifest.json
 ```
+
+⚠️ ⑤ 原本的範例（`REPLAY_IMAGE_ID=… scripts/i074-stage2-sizing.sh --formal --work-dir …`，⛔ 沒有固定的 `MEM*` 環境）在 2026-10-27 改成上面 ⑨-2 的版本：
+呼叫端 export 的 `MEM` 會讓七個 finalizer 改以 fixture 的 clamp 值為請求值，`MEM_MIN_MB` 的預設下限也只有 256m（⑨-2 細部計畫「〇」與第一、二輪 review）。
 
 | 項目 | 規則 |
 |---|---|
 | `--work-dir` | ⚠️ 必須在 repo **外**（以 canonical path 判斷，parent symlink 指回 repo 也拒絕）、⛔ 不得已存在；harness 在裡面建 `git clone --no-hardlinks` 的複本並從**複本**執行正式入口——正式腳本的路徑常數由腳本位置推導，⛔ 不會寫到真正的 repo |
-| 耗時與空間 | 約 6～7 分鐘；`<work>` 約 450 MB（複本 ＋ 三條路徑的 run 目錄與 worktree），用完可整個刪除 |
+| 耗時與空間 | 約 6～7 分鐘（⑨-2 實測 5 分 20 秒）；`<work>` 約 450 MB（複本 ＋ 三條路徑的 run 目錄與 worktree；⑨-2 實測 384M）。只有 ④ 的可用性驗證與開發用的目錄可以用完整個刪除。⚠️ **正式的 `<work>` ⛔ 不刪**（2026-10-27，⑨-2 細部計畫「五」7）：⑨-2 通過的那一次（頂層有 freeze record）是 ⑩ 的 `--freeze-record` 來源，**在原位置保存到 ⑩ 晉升結果的 commit 之後**——⛔ 不搬移、⛔ 不複製、⛔ 不改上層目錄的名字（⑩ 的來源規則：`meta.work` ≠ 來源目錄就拒絕）；其他正式嘗試的 `<work>`、`<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂 |
 | ⚠️ 量測期間 | ⛔ **不要動真正的 repo**（含 commit、編輯檔案）——harness 每條路徑前後比對它的完整 inventory，任何變化都會 fail-closed；也⛔ 不要在 `<work>` 裡建檔 |
-| harness 的狀態 | 全在 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S），⛔ 不落在量測的檔案系統；成功時複製到 `<work>/raw/`、失敗時發布成 `<work>/raw-failed/`——⚠️ 兩者都⛔ 不含 shim 的入口 `bin/docker`（複製之前只移除這一個 symlink，`readlink` 的結果記進 `console.log`；本體在 `harness/`、有 `MANIFEST` 的 SHA），raw manifest 因此產得出來。⚠️ **步驟的 process group 確實結束（`TERM` 等 20 秒、仍有成員就升級 `KILL` 再等 5 秒）、收養的程序與容器全部清掉**之後才產生 `raw-failed/`（2026-10-15 ⑨-1 前置修正；任一沒成功 → **只保留 S**、⛔ 沒有 `raw-failed/` 與摘要，S 只當診斷資料——仍存活的程序可能還在寫它；stderr 印出 S 的位置、移除不了的容器 CID（請手動 `docker rm -f`）與收不掉的 PID）。`raw-failed/` 以原子的方式發布：先完整複製到 `<work>/.raw-failed.staging`，成功才以同目錄的 `mv -T` 改名（發布前兩個名稱都必須⛔ 不存在）；複製失敗或中途被終止只會留下 staging（⛔ 不是證據、⛔ 不產 manifest）。**rename 是唯一的分界**：rename 之後才被終止（SIGKILL、`on_failure` 期間的 TERM）的 `raw-failed/` 仍是正式的原始量測，⛔ 不受結束碼影響。發布與摘要都成功才清 S。⚠️ raw-failed freeze record 修正（2026-10-14）：失敗時先**作廢** freeze record 與頂層報告（見「失敗」列），作廢沒有全部成功 → ⛔ 不產生 `raw-failed/`、保留 S、stderr 列出移除不了的路徑與型別；成功時 commit point 之後 S 清不掉**只警告、結束碼仍 0**（`<work>` 的結果照常有效）。⚠️ **保留的 S 的刪除**（2026-10-16 訂正，⑨-2 細部計畫第三輪 review：原本寫「依 stderr 印出的位置手動刪除」，會繞過身分檢查）：有正式的 `raw/`（頂層有報告）或 `raw-failed/` 時，保留的 S 只能在 manifest 與適用的驗證都完成之後，以身分綁定的刪除程序刪除（`run.tsv` 的四個 PID／starttime 欄位齊全而且 harness 與 wrapper 都已結束、run id 相符、恰好一個自己擁有的目錄、⛔ 沒有本次的容器與 argv 含 S 的程序；指令見 `docs/issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫」「五」的「保留的 S 的刪除程序」，⑨-1 與 ⑨-2 共用）——⛔ 不依 stderr 的位置手動刪除；**只有診斷資料**（只保留 S、只留下 staging、host 在驗證完成之前重開過）時⛔ 不刪，停下回報 |
+| harness 的狀態 | 全在 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S），⛔ 不落在量測的檔案系統；成功時複製到 `<work>/raw/`、失敗時發布成 `<work>/raw-failed/`——⚠️ 兩者都⛔ 不含 shim 的入口 `bin/docker`（複製之前只移除這一個 symlink，`readlink` 的結果記進 `console.log`；本體在 `harness/`、有 `MANIFEST` 的 SHA），raw manifest 因此產得出來。⚠️ **步驟的 process group 確實結束（`TERM` 等 20 秒、仍有成員就升級 `KILL` 再等 5 秒）、收養的程序與容器全部清掉**之後才產生 `raw-failed/`（2026-10-15 ⑨-1 前置修正；任一沒成功 → **只保留 S**、⛔ 沒有 `raw-failed/` 與摘要，S 只當診斷資料——仍存活的程序可能還在寫它；stderr 印出 S 的位置、移除不了的容器 CID（請手動 `docker rm -f`）與收不掉的 PID）。`raw-failed/` 以原子的方式發布：先完整複製到 `<work>/.raw-failed.staging`，成功才以同目錄的 `mv -T` 改名（發布前兩個名稱都必須⛔ 不存在）；複製失敗或中途被終止只會留下 staging（⛔ 不是證據、⛔ 不產 manifest）。**rename 是唯一的分界**：rename 之後才被終止（SIGKILL、`on_failure` 期間的 TERM）的 `raw-failed/` 仍是正式的原始量測，⛔ 不受結束碼影響。發布與摘要都成功才清 S。⚠️ raw-failed freeze record 修正（2026-10-14）：失敗時先**作廢** freeze record 與頂層報告（見「失敗」列），作廢沒有全部成功 → ⛔ 不產生 `raw-failed/`、保留 S、stderr 列出移除不了的路徑與型別；成功時 commit point 之後 S 清不掉**只警告、結束碼仍 0**（`<work>` 的結果照常有效）。⚠️ **保留的 S 的刪除**（2026-10-16 訂正，⑨-2 細部計畫第三輪 review：原本寫「依 stderr 印出的位置手動刪除」，會繞過身分檢查）：有正式的 `raw/`（頂層有報告）或 `raw-failed/` 時，保留的 S 只能在 manifest 與適用的驗證都完成之後，以身分綁定的刪除程序刪除（`run.tsv` 的四個 PID／starttime 欄位齊全而且 harness 與 wrapper 都已結束、run id 相符、恰好一個自己擁有的目錄、⛔ 沒有本次的容器與 argv 含 S 的程序；指令見本節表格下方的「保留的 S 的刪除程序」，⑨-1 與 ⑨-2 共用；2026-10-27 自 `docs/issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫」「五」複製）——⛔ 不依 stderr 的位置手動刪除；**只有診斷資料**（只保留 S、只留下 staging、host 在驗證完成之前重開過）時⛔ 不刪，停下回報 |
 | 容器 | 經 docker shim 以**唯讀 rootfs、⛔ 無可寫 `/tmp`** 執行，具名 `i074sz-<run id>-<ID>`；中斷時以 cidfile 記錄的 CID `docker rm -f`。每個步驟在自己的 process group 執行，⚠️ leader 結束後 group 裡**仍有活著的成員**（背景子程序）也算失敗並收尾。成功路徑在寫出報告之前以 `docker ps` 確認本次的容器一個都不剩——⚠️ `docker ps` 本身失敗也算失敗（⛔ 查不到不能當作沒有殘留）。殘留時可用 `docker ps -a --filter name=i074sz-` 檢查 |
 | 輸出 | `<work>/sizing_report.json`（canonical）與 `sizing_report.txt`：三條路徑各自的目錄取樣峰值、檔案系統取樣峰值、會計上界與 `P_path`，`P_B`，每個程序的 cgroup 峰值（含 page cache；⚠️ 旁邊的結束碼是**容器內 Python 段**的，例如 check 的 Python 段回 0、shell 段才依命中回 2），`status`（`ok`／`assumption_violated`） |
 | 失敗 | 結束碼 1、⛔ 不發布頂層報告（`<work>/sizing_report.*` 與 `<work>/freeze_record.json` 都⛔ 不存在）；`<work>/failure_summary.json` 記失敗的階段與結束碼（⛔ 不宣稱 `P_B`）——⚠️ 2026-10-15 起**只與正式的 `raw-failed/` 一起出現**（它的欄位固定指向 `raw-failed/`），而且以原子的方式寫（同目錄的暫存檔 → fsync → `os.replace`：正式路徑只會是「不存在」或「完整的 canonical JSON」）；摘要寫入失敗時 `raw-failed/` 仍是正式的原始量測、S 保留。`raw-failed/` 或保留的 S 仍可能含診斷用的報告，但 freeze record 一律作廢（刪除；一般檔案的 SHA-256 記在 `console.log`）。`cp -a S <work>/raw` 本身失敗時⛔ 不經失敗清理：⛔ 沒有 `raw-failed/` 與摘要、S 保留並印出位置。⚠️ **頂層的 `freeze_record.json` 是 commit marker**（只由步驟 6 最後的同目錄 rename 產生）：它存在時⛔ 不得盲目重跑或丟棄——SIGKILL、host 的 OOM killer、HUP 等⛔ 未攔截的終止若發生在 rename 之後，結束碼可能非 0 而頂層已有紀錄；先以 `check-pair`、`raw/` 與 ⑩ 持鎖階段的來源規則判讀。⚠️ 例外（2026-10-16，⑨-2 細部計畫第三輪 review）：host 在判讀與驗證完成之前重開過（`/proc/stat` 的 `btime` 晚於開跑的時間）→ 這次**一律降級成只有診斷資料**，即使頂層有 freeze record（S 在 tmpfs 上、一起消失；`cp` 與 `mv -T` 都⛔ 沒有 fsync，當機之後的完整性無從確認）：⛔ 不交給 ⑩、⛔ 不產 manifest、⛔ 不自動重跑，停下回報 |
 | 演練用的故障注入 | `I074_SIZING_FAULT=twins`（在 metadata twin 那一步中止）／`copy`（中止時略過 `raw-failed/` 的發布：⛔ 沒有 `raw-failed/` 與摘要、S 保留）／`summary`（中止時略過失敗摘要：`raw-failed/` 照常發布、⛔ 沒有摘要、S 保留）／`cleanup`（放一份假 cidfile 後中止，搭配移除不了的 docker 驗證 S 會被保留）／`stuck`（放一個忽略 `TERM` 的步驟後中止，驗證升級 `KILL`）／`group-alive`（讓 group 在 `KILL` 之後仍被視為存活，驗證 S 會被保留）／`final-check`（直接跑成功路徑結束前的容器檢查，搭配 `docker ps` 失敗驗證 fail-closed）／`orphan-ok`、`orphan-bad`（步驟的 leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡，驗證一律收尾並中止）——⚠️ 只給 ④ 的中止點演練，`--formal` 一律拒絕 |
+
+**保留的 S 的刪除程序**（⑨-1、⑨-2 共用；2026-10-27 自 `issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫 v4」「五」複製——條件與程序本體逐位元相同，只換了區塊 id；
+⑨-1 把兩個參數換成 `/dev/shm/s91-<NAME>/run.tsv` 與 `~/i074_stage2_acceptance/<NAME>/raw` 或 `raw-failed`）：
+
+* **只用於**有正式原始量測、而且 manifest 與適用的驗證都已完成的那一次：正式的 `raw-failed/`（rename 之後才被終止、摘要缺失或清 S 失敗）；頂層有 freeze record 的 `raw/`（commit point 之後才被 KILL，或成功之後清 S 失敗的警告）；結束碼 0 的判定（清 S 失敗的警告）。**只有診斷資料**（含 host 在「五」完成之前重開過）⛔ 不用——依 D8 停下回報。
+* 以身分綁定 S，下面每一項都成立才刪；任一項不成立 → ⛔ 不刪、印出原因、結束碼 1、停下回報：`run.tsv` 的 `harness_pid`、`harness_start`、`wrapper_pid`、`wrapper_start` 都恰好一個、而且是正整數（缺失、重複或不是數字都⛔ 不能當作「已結束」；第三輪 review），harness 與 wrapper 都已結束（PID ＋ starttime，同「三」②）；raw 目錄是目錄、⛔ 不是 symlink，`raw/` 旁邊有頂層報告、`raw-failed/` 旁邊⛔ 沒有 staging；raw 目錄 `meta.tsv` 的 run id 以 `harness_pid` 結尾；恰好一個 `/dev/shm/i074-*-<run id>`，是自己擁有的目錄、⛔ 不是 symlink，它的 `meta.tsv` 是同一個 run id；`docker ps` 查得到而且⛔ 沒有本次 run id 的容器；⛔ 沒有任何程序的 argv 含 S 的路徑（harness 被 KILL 之後，`on_failure` 的摘要 helper 可能還在讀 S）。
+
+```text id="i074_stage2_sclean_001"
+# 使用者在自己的終端機執行；<NAME> 換成實際的名稱；輸出記進紀錄。成功形狀把第二個參數換成 <work>/raw；控制目錄已刪時改用 <NAME>.ctl/run.tsv
+bash -s -- /dev/shm/s92-<NAME>/run.tsv ~/i074_stage2_sizing/<NAME>/raw-failed <<'SH'
+set -u
+tsv="$1"; R="${2%/}"; W="${R%/*}"
+v()     { awk -F'\t' -v k="$1" '$1 == k { print $2 }' "$tsv"; }
+st()    { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }
+alive() { [ -n "$1" ] && [ -n "$2" ] && [ "$(st "$1")" = "$2" ]; }
+no()    { echo "⛔ 不刪：$*"; exit 1; }
+for k in harness_pid harness_start wrapper_pid wrapper_start; do   # 缺失、重複或不是正整數 → ⛔ 不能當作「已結束」
+  [[ "$(v "$k")" =~ ^[1-9][0-9]*$ ]] || no "run.tsv 的 $k 缺失、重複或不是正整數：「$(v "$k")」"
+done
+hp="$(v harness_pid)"
+! alive "$hp" "$(v harness_start)" || no "harness 仍在執行"
+! alive "$(v wrapper_pid)" "$(v wrapper_start)" || no "wrapper 仍在執行"
+[ -d "$R" ] && [ ! -L "$R" ] || no "$R 不是目錄（或是 symlink）"
+case "${R##*/}" in
+  raw)        [ -f "$W/sizing_report.json" ] || [ -f "$W/acceptance_report.json" ] || no "raw/ 旁邊沒有頂層報告" ;;
+  raw-failed) [ ! -e "$W/.raw-failed.staging" ] && [ ! -L "$W/.raw-failed.staging" ] || no ".raw-failed.staging 存在" ;;
+  *)          no "第二個參數必須是 <work>/raw 或 <work>/raw-failed" ;;
+esac
+rid="$(awk -F'\t' '$1 == "run_id" { print $2 }' "$R/meta.tsv")"
+[[ "$rid" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+$ ]] && [ "${rid##*-}" = "$hp" ] || no "run id（$rid）的 PID ≠ harness_pid（$hp）"
+shopt -s nullglob; c=(/dev/shm/i074-*-"$rid"); [ "${#c[@]}" = 1 ] || no "符合 run id 的 S 有 ${#c[@]} 個"
+SP="${c[0]}"
+[ -d "$SP" ] && [ ! -L "$SP" ] && [ -O "$SP" ] || no "$SP 不是自己擁有的目錄（或是 symlink）"
+[ "$(awk -F'\t' '$1 == "run_id" { print $2 }' "$SP/meta.tsv")" = "$rid" ] || no "S 的 meta.tsv 的 run id ≠ $rid"
+out="$(docker ps -aq --filter "name=i074sz-$rid-")" || no "docker ps 失敗（查不到就⛔ 不能當作沒有）"
+[ -z "$out" ] || no "本次 run id 的容器還在：$out"
+procs="$(ps -ww -eo pid,args)" || no "ps 失敗"
+[ -z "$(awk -v s="$SP" 'index($0, s)' <<< "$procs")" ] || no "還有 argv 含 S 的程序"
+echo "身分相符：run id $rid、harness $hp 與 wrapper 都已結束、⛔ 沒有本次的容器與程序 → 刪除 $SP"
+rm -rf -- "$SP"
+[ ! -e "$SP" ] && [ ! -L "$SP" ] || no "刪不乾淨：$SP"
+echo "已刪除：$SP"
+SH
+```
 
 ⚠️ **⑦b（2026-09-30）改動**：
 - 一律用**真實的兩份 patch**（sizing 複本常數路徑的 counterfactual ＋ tooling；tooling ⛔ 不得為空）。patched worktree 以唯一的合成函式
@@ -1688,7 +1749,7 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | raw manifest（事後錨點） | `raw-manifest --raw <dir> --repo <受信任的 repo> --expected-repo-head <EXPECTED> --out <raw 之外的新路徑>` 印出 `sha256`、`file_count`、`dir_count`——把它們、錨點與它的來源、產生與檢查的完整指令記進 `issue.md` 並 commit；日後以 `--check-sha256 <記下的值>` 檢查（不符 → rc＝1、⛔ 不寫任何檔案）。`--out` 已存在（含 symlink）或落在 raw 之內 → 拒絕。⚠️ 它只能偵測**之後**的改動。⚠️ 只對**正式的** `raw/`、`raw-failed/` 產生（⛔ 不對 `.raw-failed.staging/`、保留的 S 或診斷副本）；2026-10-15 之前的 `raw/`、`raw-failed/` 帶著 `bin/docker` 這個 symlink，一律產不出 manifest |
 | 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（`job_runs` 只留數天、⛔ 沒有 info log）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
 | 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的複本，含 `harness/MANIFEST`；⛔ 不含 shim 的入口 `bin/docker`）；失敗時：三項清理（步驟的 group、收養的程序、容器）都成功才有 `<work>/raw-failed/`（同樣⛔ 不含 `bin/docker`；完整複製到 `.raw-failed.staging` 之後以 `mv -T` 原子發布）與 `failure_summary.json`（只跟著正式的 `raw-failed/`、原子發布）；任一清理失敗 → 只保留 S（診斷資料，⛔ 不救援、⛔ 不產 manifest）。rename 之後才被終止的 `raw-failed/` 仍是正式的原始量測（結束碼可能是 137／143，摘要可能缺失）。規則與 sizing 一節的「harness 的狀態」相同（共用 `scripts/lib/i074-stage2-measure.sh` 的 `on_failure`） |
-| 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree），用完可整個刪除 |
+| 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree）。只有 ⑦d 的開發驗證（stub）可以用完整個刪除。⚠️ **⑨-1 正式驗收的 `<work>` ⛔ 不刪**（`issue.md` I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的 D5）：每一次嘗試都連同 `<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂——正式原始量測的錨（manifest 的 `sha256`）要能回頭對照 |
 | ⚠️ 量測期間 | ⛔ 不要動真正的 repo（每條路徑前後比對它的完整 inventory）；⛔ 不要在 `<work>` 裡建檔。量測的是 bootstrap 解析的那一個 commit（`repo_head`）：`--formal` 啟動時 HEAD 已在 bootstrap 之後移動 → 在建 work 目錄之前拒絕；之後 HEAD 再移動⛔ 不影響本次 |
 | 環境 | 每一步都以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH（`<S>/bin:/usr/bin:/bin`）經 `host-run` 執行；兩份 patch 的環境變數只給 replay 那一步（報告逐步驗，違反即 fail-closed） |
 | 能力檢查（⑦d 增補） | 建 work 目錄之後、clone 之前：以真正的 docker、同一個 image 跑一次 wrapper（`python -c pass`），`rss.json` 必須是 cgroup v1 的 `total_rss`、`reaper=pid1`；不符、逾時（120 秒）、docker 失敗 → 中止（結束碼 1、⛔ 不 clone）。換到 cgroup v2 的 host 會在這一步停下，需另行裁決 |

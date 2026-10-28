@@ -24,10 +24,10 @@
 
 | 項目 | 內容 |
 |---|---|
-| 目標 | live 的平日 `chip_daily_sync` 22:00、`sr_analysis_chip` 23:00，永久生效；⛔ 不重新部署程式 |
+| 目標 | live 的平日 `chip_daily_sync` 22:00、`sr_analysis_chip` 23:00，永久生效；範圍 A ⛔ 不重新部署程式 |
 | 範圍 A（⑩ 之前） | 使用者修改 live 的 compose（加 `CHIP_SYNC_CRON` 鍵）與 live 的 `deploy.sh`（兩個新值，讓之後的部署保留）→ **只重建 backend 容器**（同一個 image）→ 驗證 → 觀察一個平日晚上；文件同步現況（只動 `docs/`） |
-| 範圍 B（⑩ 的晉升結果 commit 之後） | repo 的 `docker-compose.yml` 加 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本加 export 與新值、`backend/config.yaml` 與 `config.go` 的預設值與註解（D3）；另行實作與 review |
-| ⛔ 不做 | ⛔ 不跑 live 的 `deploy.sh`；⛔ 不 build image；⛔ 不動 backend 以外的服務；⛔ 不改其他排程；Claude ⛔ 不讀 live `deploy.sh` 的內容（含金鑰）、⛔ 不碰 live 的檔案（帳號也⛔ 沒有權限）——由使用者執行，Claude 提供指令與判讀 |
+| 範圍 B（⑩ 的晉升結果 commit 之後） | repo 的 `docker-compose.yml` 加 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本加 export 與新值、`backend/config.yaml` 與 `config.go` 的預設值與註解（D3）；另行實作與 review。⚠️ 與 `todo.md` T-076 合併之後要新增 backend 程式與設定接線、**必須 build 新 image**——範圍 B ＋ T-076 另寫計畫書、依那份計畫部署，⛔ 不沿用 A4 的同 image 操作，下一列的限制也⛔ 不適用 |
+| ⛔ 不做（範圍 A） | ⛔ 不跑 live 的 `deploy.sh`；⛔ 不 build image；⛔ 不動 backend 以外的服務；⛔ 不改其他排程；Claude ⛔ 不讀 live `deploy.sh` 的內容（含金鑰）、⛔ 不碰 live 的檔案（帳號也⛔ 沒有權限）——由使用者執行，Claude 提供指令與判讀 |
 
 ## 二、資料流與順序
 
@@ -118,7 +118,7 @@ printf 'A5 API 回應（⛔ 沒帶 JWT，預期 401）：%s\n' "$(curl -s -o /de
 2. ✅ 使用者執行 A1～A5（2026-10-28；A4 在 14:13，⚠️ 不在 D4 的時段，見「九」），A5 全部 ok、⛔ 不需要 A6。
 3. 當晚與隔天確認實際執行時間 → Claude 同步文件（只動 `docs/`）：`development-workflow.md` 的 live 批次表、`architecture.md`、`chip-analysis-design.md`、`api-reference.md`、`sr-zone-scoring.md` 等提到 21:00／22:00 的地方，寫成「live 以 env 覆寫為 22:00／23:00；repo 預設待範圍 B」→ ⛔ 不 commit，停下等 review。
 4. review 通過 → 使用者 commit（只動 `docs/`）→ ⑩ 才可以用平日 17:00 時段。（⚠️ 2026-10-28 使用者裁決的例外：⑩ 當天 17:00 執行，3、4 改到 ⑩ 結束、Claude 重新啟動之後，「九」）
-5. ⑩ 的晉升結果 commit 之後：範圍 B 另行實作、review、commit；完成後收斂 `todo.md` T-075 與本計畫。
+5. ⑩ 的晉升結果 commit 之後：範圍 B 另行實作（與 `todo.md` T-076 一起：`pre_market`、`intraday`、`daily_close` 的時間改成可設定，動的檔案相同；合併後另寫計畫書，含 build 新 image 與部署程序）、review、commit；完成後收斂 `todo.md` T-075 與本計畫。
 
 ## 八、歸檔
 

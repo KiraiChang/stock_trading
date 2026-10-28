@@ -1474,7 +1474,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
 
-### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，⚠️ 待 review）
+### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，

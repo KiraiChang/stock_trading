@@ -331,7 +331,7 @@ cd /home/dev/workspace/stock_trading && git show HEAD:docs/plans/i074-stage2-ste
 | 1 | （P3）補「等待回答期間 freeze record 才發布」的測試：此時仍會送 TERM 並寫 `stop_sent`（D2 已揭露的窗口），要以假 harness 驗證 TERM 被忽略、freeze record 保留，並明確區分「已送訊號」與「已中止」 | ✅ 成立：原本只測「執行 `stop` 之前已發布」；D2 已寫明這個窗口、⛔ 不改腳本 | 測試 B 加 X2（3 案）：假 harness 的 `commitwait` 模式在旗標出現時發布 `<work>/freeze_record.json`、之後忽略 TERM；`stop` 停在提示時才發布 → `stop` 回 0、`stop_sent` 存在，harness 在 TERM 之後仍在、以 rc 0 結束、freeze record 保留，`st` 同時顯示三者。整份 B 重跑：54 案全部符合。D2 補「`stop_sent` ＝ 已送出訊號、⛔ 不代表已中止；是否中止看 rc marker 與 `<work>`」。腳本⛔ 沒有變（SHA 仍是 `f9004a96…98b94`） |
 | 2 | （P3）wrapper 的行數應是 12 行 | ✅ 成立：⑨-2 的 wrapper 是 12 行（`env -u …` 折成 5 行），9 行是 ⑨-1 的 | 「七」與「九」改成 12 行 |
 
-## 十、實際使用（2026-10-27，⑨-2；⚠️ 待 review）
+## 十、實際使用（2026-10-27，⑨-2；✅ review 通過並 commit `62e1773`）
 
 | 項目 | 結果 |
 |---|---|

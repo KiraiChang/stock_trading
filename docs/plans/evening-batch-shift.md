@@ -1,4 +1,4 @@
-# 晚間批次後移一小時 計畫 v1（2026-10-28，✅ 決定 D1～D5 已定案（2026-10-28）、⚠️ 待執行）
+# 晚間批次後移一小時 計畫 v1（2026-10-28，✅ 決定 D1～D5 已定案（2026-10-28）；A1～A5 已執行（2026-10-28 14:13，A5 全部 ok，「九」）、⚠️ 待觀察當晚 22:00／23:00）
 
 需求（✅ 使用者裁決 2026-10-28）：為了讓 I-074 Stage 2 的 ⑩ 能在平日 17:00 開跑、18:00 之後⛔ 不需要人力介入
 （[`i074-stage2-step10.md`](./i074-stage2-step10.md) 的 D2），把 live 的兩個晚間批次**永久**往後移一小時：
@@ -68,10 +68,17 @@ docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println 
 docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -vE '^(CHIP_SYNC_CRON|SR_ANALYSIS_CHIP_CRON)=' | sort | sha256sum \
   | diff /dev/shm/shift-rest-before.sha - && echo "A5 其餘 env（含金鑰）與重建前完全相同 ok"   # ⛔ 不同 → A6（例如金鑰變空、開關被 deploy.sh 的新值改掉）
 docker logs --since 10m stock_trading-backend-1 2>&1 | grep -i 'cron register failed' || echo "A5 cron 註冊 ok"
-#   另外：前端登入一次、/scheduler/status（同 ⑩ precheck 的 P4 方式）的 chip_daily_sync 與 sr_analysis_chip 都是已註冊
-rm -f /dev/shm/shift-sched-before.txt /dev/shm/shift-rest-before.sha
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+printf 'A5 API 回應（⛔ 沒帶 JWT，預期 401）：%s\n' "$(curl -s -o /dev/null -w '%{http_code}' "http://$BIP:8080/api/v1/scheduler/status")"
+#   另外前端登入一次。⚠️ /scheduler/status 只在 job 從未執行時才顯示有沒有註冊（有紀錄就顯示上一輪的結果），
+#   所以註冊以「cron register failed ⛔ 沒有出現」與當晚 22:00、23:00 的實際執行為準（實作時修正，2026-10-28）
+#   全部 ok 之後才刪基準檔（⛔ 不 ok → A6，基準留著給回滾之後的比對）：
+#   rm -f /dev/shm/shift-sched-before.txt /dev/shm/shift-rest-before.sha
 
 # A6 回滾（A5 任一項不符）：還原兩個備份檔，同 A4 重建；CHIP_SYNC_CRON 鍵消失 → 回到 image 內的 21:00
+#   2026-10-28 的 A2、A3 由使用者直接編輯、⛔ 沒有備份 → 改用 sed 改回原值，再同 A4 重建：
+#   sed -i '/^      CHIP_SYNC_CRON: /d' compose.yml && LC_ALL=C sed -i -e '/^export CHIP_SYNC_CRON=/d' \
+#     -e 's|^export SR_ANALYSIS_CHIP_CRON="0 23 \* \* 1-5"|export SR_ANALYSIS_CHIP_CRON="0 22 * * 1-5"|' deploy.sh
 ```
 
 當晚與隔天：`/scheduler/status` 的 `chip_daily_sync` 在 22:00、`sr_analysis_chip` 在 23:00 開始而且是終態；隔天 08:50 `pre_market` 照常。
@@ -108,7 +115,7 @@ rm -f /dev/shm/shift-sched-before.txt /dev/shm/shift-rest-before.sha
 ## 七、執行步驟
 
 1. ✅ 本計畫 review → 決定 D1～D5 定案（2026-10-28，D1 使用者指定、D2～D5 照建議）。
-2. 使用者在 D4 的時段執行 A1～A5（不符就 A6）。
+2. ✅ 使用者執行 A1～A5（2026-10-28；A4 在 14:13，⚠️ 不在 D4 的時段，見「九」），A5 全部 ok、⛔ 不需要 A6。
 3. 當晚與隔天確認實際執行時間 → Claude 同步文件（只動 `docs/`）：`development-workflow.md` 的 live 批次表、`architecture.md`、`chip-analysis-design.md`、`api-reference.md`、`sr-zone-scoring.md` 等提到 21:00／22:00 的地方，寫成「live 以 env 覆寫為 22:00／23:00；repo 預設待範圍 B」→ ⛔ 不 commit，停下等 review。
 4. review 通過 → 使用者 commit（只動 `docs/`）→ ⑩ 才可以用平日 17:00 時段。
 5. ⑩ 的晉升結果 commit 之後：範圍 B 另行實作、review、commit；完成後收斂 `todo.md` T-075 與本計畫。
@@ -118,3 +125,14 @@ rm -f /dev/shm/shift-sched-before.txt /dev/shm/shift-rest-before.sha
 * `development-workflow.md`：live 批次表（作業規則）、「只重建 backend、⛔ 不跑 live `deploy.sh`」的程序。
 * `chip-analysis-design.md`（籌碼採集的時間）、`architecture.md`（排程表）。
 * 收斂：範圍 B 完成並 review 之後，刪除本計畫與 T-075（刪除之前本檔必須已經 commit 過）。
+
+## 九、執行紀錄（2026-10-28，週三）
+
+| 步驟 | 結果 |
+|---|---|
+| A1 | 11:48 執行：image 一致 ok（`ba964c44…`）；排程鍵 12 個（`SR_ANALYSIS_CHIP_CRON=0 22 * * 1-5`、⛔ 沒有 `CHIP_SYNC_CRON`）；其餘 env 的雜湊 `9aa96f53…`。⚠️ A4 之前⛔ 沒有重跑（基準檔的時間仍是 11:48）——A5 比對的是 11:48 的基準，差異只有預期的兩個鍵、其餘 env 雜湊相同、image 相同，已涵蓋 11:48 到重建之間的變化 |
+| A2、A3 | 11:08～11:09 使用者直接編輯 live 的兩個檔、⛔ 沒有備份（回滾改用 A6 的 sed）；Claude 事後以大小、`bash -n`、compose 的 dry-run 驗證（dry-run 的 env 45 個鍵，與容器只差兩個排程鍵） |
+| A4 | **14:13:08（+08:00）重建**（容器的 `StartedAt` `2026-10-28T06:13:08Z`）。⚠️ **偏離 D4**（平日 18:00～20:30）：使用者 11:55 詢問能否在盤中執行，Claude 建議 18:00～20:30，另列 14:05～14:50 為技術上可行、但⛔ 不是 D4 的時段（最後一次 `intraday` 13:55、下一個排程 15:00，距離 18 分鐘與 47 分鐘，符合「⛔ 不在任何排程前後 10 分鐘內」）；使用者在 14:13 執行。A4 的輸出⛔ 沒有貼上，以 A5 判定成功 |
+| A5 | 使用者貼上的輸出（原樣）：<br>`1a2`<br>`> CHIP_SYNC_CRON=0 22 * * 1-5`<br>`9c10`<br>`< SR_ANALYSIS_CHIP_CRON=0 22 * * 1-5`<br>`---`<br>`> SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5`<br>`A5 其餘 env（含金鑰）與重建前完全相同 ok`<br>`A5 cron 註冊 ok`<br>`A5 API 回應（⛔ 沒帶 JWT，預期 401）：401`<br>第一行（image、狀態、啟動時間）⛔ 沒有貼上，Claude 14:15 自行唯讀核對：image `ba964c44…`（＝ A1）、`running`、啟動 `06:13:08Z`、重啟次數 0；排程鍵 `CHIP_SYNC_CRON=0 22 * * 1-5`、`SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5`、`SR_ANALYSIS_CRON=0 17 * * 1-5` |
+| 判定 | ✅ A5 全部 ok、⛔ 不需要 A6；基準檔（`/dev/shm/shift-*`）由使用者刪除 |
+| 當晚觀察 | ⚠️ 待確認：`chip_daily_sync` 22:00、`sr_analysis_chip` 23:00 的實際執行時間與結果（`docker logs` 只取 `chip daily sync job completed`、`sr analysis done` 兩種行，或 `/scheduler/status`）→ 「七」3 |

@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待執行（計畫 v1：[`plans/evening-batch-shift.md`](./plans/evening-batch-shift.md)，決定 D1～D5 ✅ 2026-10-28 定案；由使用者在 D4 的時段執行 A1～A5） |
+| 狀態 | 進行中（計畫 v1：[`plans/evening-batch-shift.md`](./plans/evening-batch-shift.md)，決定 D1～D5 ✅ 2026-10-28 定案；A1～A5 已於 2026-10-28 14:13 執行、A5 全部 ok；⚠️ 待觀察當晚 22:00／23:00，之後同步文件） |
 | 優先度 | 中（I-074 ⑩ 的平日 17:00 時段以它為前提） |
 | 分類 | 排程／live 維運 |
 | 建立日期 | 2026-10-28 |

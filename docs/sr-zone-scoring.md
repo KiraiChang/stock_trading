@@ -1330,7 +1330,7 @@ after 的 `lifecycle_phase` 一律是 `CONTINUATION`、`rr_decoupling_candidate`
 | comparison artifact（解壓後的 canonical bytes） | `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e` |
 | before artifact（同上） | `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354` |
 | after artifact（Stage 1 的 D+1；comparison 的 `after_artifact_sha256`） | `33a6b1666487abcfc88353020afbd1e35a8cbab71b40c9ef17ea1194a8cc8b8c` |
-| 判讀器輸出 `verdict.json`（`~/i074_stage2_formal/judge-20261029T061203Z/`） | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
+| 判讀器輸出 `verdict.json`（repo 外的輸出已於 2026-10-29 I-074 收斂時依使用者確認刪除；判讀器可以從已 commit 的 evidence 重跑，以本列核對） | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
 
 判讀規則、執行方式與正式值見下方「I-074 Stage 2 的晉升與 B／C 判讀器」；執行紀錄（歷史）見
 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」。下一節（2026-09-01）是自然樣本上的結果，保留作為對照。
@@ -3434,7 +3434,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | `verdict.verdict` | **B**（`row_count` 156、`c_row_count` 0；`class`：`NON_AVOID` 140、`AVOID` 16、`UNCLASSIFIED` 0；`reasons` 全部是空的） |
 | 輸出的錨（`manifest_sha256`／`base_commit`／`identity_sha256`） | `d5cf0629…`／`832f678…`／`a02bf3bd…`（與 ⑩ 相同） |
 | `verdict.json`（一行、18,714 bytes）的 SHA-256 | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
-| 輸出的保存位置（⛔ 不進 repo；判讀器可以從已 commit 的 evidence 重跑） | `~/i074_stage2_formal/judge-20261029T061203Z/`（`status.txt`、`precheck.txt`、`verdict.json`、`judge.err`、`rc`） |
+| 輸出的保存位置（⛔ 不進 repo；判讀器可以從已 commit 的 evidence 重跑） | 原本在 `~/i074_stage2_formal/judge-20261029T061203Z/`（`status.txt`、`precheck.txt`、`verdict.json`、`judge.err`、`rc`），已於 2026-10-29 I-074 收斂時依使用者確認刪除；內容摘要與各檔 SHA 見 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」 |
 | 耗時 | 判讀器 37 秒（mem-guard 700m） |
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）

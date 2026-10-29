@@ -3143,11 +3143,12 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復（⚠️ 處置方向待規劃；⑩ 之前⛔ 不改程式） |
+| 狀態 | 待修復（⚠️ 處置方向待規劃；原本的「⑩ 之前⛔ 不改程式」已於 2026-10-28 ⑩ 結束而解除——要改的 `python/scripts/` 與 `scripts/` ⛔ 不在 T-077 的凍結範圍） |
 | 嚴重度 | 中（誤導：會被讀成整段執行的低點；⛔ 不影響任何門檻與判定） |
 | 分類 | Python / I-074 Stage 2 容量驗收 |
 | 建立日期 | 2026-10-27 |
 | 來源 | I-074「Stage 2 步驟 ⑨-1 正式驗收結果」的分析（`formal-91-20261024T040236Z`；歷史：`git show 20eacb2:docs/issue.md` 的 I-074） |
+| 證據的保存 | ⚠️ 下方引用的 repo 外原始量測（`formal-91-…`、`formal-92-…` 的 `raw/`）已於 2026-10-29 I-074 收斂時依使用者確認刪除；表中的數字是刪除前的實測，⛔ 無法再重讀原檔 |
 
 #### 事實（2026-10-27，正式驗收的 artifact ＋ 讀碼）
 
@@ -3180,6 +3181,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 | 分類 | Python / I-074 Stage 2 的容器入口 |
 | 建立日期 | 2026-10-29 |
 | 來源 | I-074 ⑩ 正式執行結果的分析（`formal-10-20261028T090959Z`；歷史：`git show 20eacb2:docs/plans/i074-stage2-step10.md` 的「十四」） |
+| 證據的保存 | ⚠️ 下方引用的 repo 外 log（⑤ sizing、⑨-1、⑨-2、⑩ 的 `<work>`、⑪ 的 `judge.err`）已於 2026-10-29 I-074 收斂時依使用者確認刪除；出現範圍是刪除前的統計 |
 
 #### 事實（2026-10-29，log ＋ 讀碼）
 
@@ -3257,8 +3259,8 @@ stock_symbol_sync success 2026-10-28T06:30:00.111129+08:00 2026-10-28T06:31:31.0
 * `delisting_reconcile` 從開始到結束約 8 毫秒（前一天約 10 秒）；`stock_symbol_sync` 10 秒（前一天約 91 秒）。
 * 同一份狀態裡的其他工作：`candle_gap_detection` 是 partial（2026-10-28 那一筆；⑩ 的 precheck 時也是 partial），`sr_evaluation` 是 disabled，其餘（`pre_market`、`daily_close`、`sr_zone_verify`、`evaluation_universe_sync`、`sr_analysis`、`chip_daily_sync`、`sr_analysis_chip`）是 success；running 0。
 * 證據來源：I-074 ⑪ 的狀態檔（repo 外 `~/i074_stage2_formal/judge-20261029T061203Z/status.txt`，SHA-256
-  `6406855de7ef50ea8c860237a49bc19b0887c6938d11f1236f1cd3fd9a3f58ad`）與 ⑩ 的 `precheck.txt`；兩者都在 I-074 收斂時依使用者逐項確認處置，
-  上面兩段已原樣保存。
+  `6406855de7ef50ea8c860237a49bc19b0887c6938d11f1236f1cd3fd9a3f58ad`）與 ⑩ 的 `precheck.txt`；兩者都已於 2026-10-29 I-074 收斂時依使用者確認刪除，
+  上面兩段是刪除前原樣抄錄的。
 
 #### 待查（⚠️ 調查計畫另立）
 

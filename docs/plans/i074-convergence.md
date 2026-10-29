@@ -1,4 +1,4 @@
-# I-074 收斂計畫 v3（2026-10-29；✅ 確認（兩輪 review；D1～D4 採 (a)），commit `c35d4bf`；階段 1 ✅ review 通過，commit `d6f923c`；**階段 2 完成（「十三」，⚠️ 待 review；repo 外的處置在 review 之後）**；歷次修正見「十」）
+# I-074 收斂計畫 v3（2026-10-29；✅ 確認（兩輪 review；D1～D4 採 (a)），commit `c35d4bf`；階段 1 ✅ review 通過，commit `d6f923c`；階段 2 ✅ review 通過，commit `e5ff5c2`；**repo 外的處置完成（「十三」五，⚠️ 待 review）**；歷次修正見「十」）
 
 需求確認（2026-10-29）：依 ⑪ 計畫 D3，另立本計畫，把 I-074 從 `docs/issue.md` 整筆收斂。使用者已裁決：
 
@@ -503,7 +503,38 @@
 2. **中：一處歷史引用找不到指定章節**——`test_i074_diagnostics.py` 指向 `20eacb2` 的 Stage 0「十、測試與驗證策略」，但 Stage 0、Stage 1 的計畫書已在 `7b8952d`（2026-09-16）先行收斂，`20eacb2` 只剩索引（那一版的「十、測試與驗證策略」是 ③ evidence contract 的「十」）。改指 `git show 86241a8:docs/issue.md` 的 I-074「Stage 0 計畫書 v17」「十、測試與驗證策略」（`86241a8` ＝ `7b8952d` 的前一版，第 1138 行）；例外規則補進 sr 的對照段與本計畫的 R2。
    另外以腳本把所有 `20eacb2` 歷史引用（97 處）的章節名對 `20eacb2` 的 I-074 比對：只有這一處真的找不到；另外 6 處是比對方式的問題（標題帶粗體標記，或「二、⑤」是小節編號），原文都在。
 
-### 五、尚未做的（review 通過之後）
+### 五、repo 外的處置（2026-10-29，階段 2 review 通過並 commit `e5ff5c2` 之後）
 
-* 「四」repo 外的處置：先做刪除前的全面確認，每一項都先經使用者確認；結果寫進本節，主題文件裡提到這些路徑的地方改成實際的處置結果
-  （例如 wf「⑨-1 正式驗收的 `<work>` ⛔ 不刪……保存到 I-074 收斂」、sr「⑪ 的正式值」的輸出保存位置）。
+刪除前的全面確認（17:25，唯讀；兩次都成立，第二次緊接在刪除之前）：
+
+* 容器 8 個（`stock_trading-backend-1`、`stock_trading-python-worker-1`、`stock_trading-python-server-1`、`fin-api-fin-api-1`、`redis-redis-1`、
+  `postgres-postgres-1`、`caddy-caddy-1` 執行中，`akatengu` 已結束）：⛔ 沒有任何一個帶 `i074.stage2.run` label、名稱以 `i074sz-` 開頭、
+  或指令列含 `--verify-promotion-staging`、replay／finalize 的模組。
+* sentinel `/run/lock/i074-stage2.active` ⛔ 不存在；`/dev/shm/i074-*`、`/dev/shm/s10-*` 都沒有。
+* 程序：依腳本檔名比對，⛔ 沒有符合的。四個鎖都以 `flock -n` 拿得到。
+* 六個目錄的檔案都是 `dev` 擁有、目錄都可寫；`git worktree list` ⛔ 沒有指向它們的登記。
+
+使用者的決定與結果：
+
+| 項目 | 大小 | 決定 | 結果 |
+|---|---:|---|---|
+| `~/i074_stage2_sizing/` | 3.0G | 刪 | 已刪、確認不存在 |
+| `~/i074_stage2_acceptance/` | 2.5G | 刪 | 已刪、確認不存在 |
+| `~/i074_stage2_formal/` | 317M | 刪 | 已刪、確認不存在（I-122 的證據行已先原樣抄進條目） |
+| `~/i074_stage2_observe/` | 16K | 刪 | 已刪、確認不存在 |
+| `~/i074_stage1_run/` | 152M | 刪 | 已刪、確認不存在 |
+| `~/i074_stage2_run/` | 75M | 刪 | 已刪、確認不存在 |
+| `~/.local/bin/s11`、`s91`、`s92` | 44K | 刪 | 已刪、確認不存在 |
+| `/dev/shm/s11.lock`、`s91.lock`、`s92.lock`、`/run/lock/i074-stage2.lock` | 0 | 刪 | 持有 `flock` 期間 unlink；確認不存在 |
+| `~/.local/share/stock_trading/i074_stage2/`、`…/i074_stage1/` | 795M、8K | **保留** | 判讀器重跑需要 image `2a90ad1c…` |
+| docker image `2a90ad1c…` | 816MB | ⛔ 不刪（計畫） | 保留 |
+
+`/` 的可用空間：5,439,246,336 → 11,824,820,224 bytes（多出約 5.95 GiB）。刪除只用字面的絕對路徑，⛔ 沒有用變數或 glob。
+
+文件同步：sr 的判讀器輸出（「I-074 定向驗證」的錨表、「⑪ 的正式值」的保存位置）、wf 的 ⑩ 原樣區塊（加註引用的 repo 外路徑已刪、⛔ 不能再照貼執行）、
+wf sizing／acceptance 表的「保存到 I-074 收斂」兩列、wf ⑪ 那一行（`s11`、`s91`、`s92` 已刪）、I-122 的證據來源、I-119 與 I-120 的「證據的保存」列
+都改成實際結果；I-119 的「⑩ 之前⛔ 不改程式」標成已解除。
+
+### 六、尚未做的
+
+* 本計畫書的刪除：本次 commit 之後、review 確認，在下一次收斂的 commit 刪除（可以併入其他工作的 commit）。issue.md 裡已⛔ 沒有指向本檔的行。

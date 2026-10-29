@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2：從 repo 外的 tarball 還原釘住的 image（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+# I-074 Stage 2：從 repo 外的 tarball 還原釘住的 image（docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。
 #
 # 用法：
 #   scripts/restore-replay-image.sh --stage 2 <bundle 絕對路徑>

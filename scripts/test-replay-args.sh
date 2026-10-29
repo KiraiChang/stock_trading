@@ -583,7 +583,7 @@ rm -rf "$I074_TD"
 # ⚠️ **建立 run identity 的失敗⛔ 不得被吞掉**。
 # 這一步失敗（例如剛 docker build 完、host 記憶體吃緊）而 rc 沒被檢查時，identity
 # 不會存在，後續被測腳本整支 exit 非零，於是**下游出現一整排看似隨機的斷言失敗**
-# ——真正的原因卻因為 `2>&1 >/dev/null` 完全看不到。實例見 docs/issue.md I-074。
+# ——真正的原因卻因為 `2>&1 >/dev/null` 完全看不到。實例見 git show 20eacb2:docs/issue.md 的 I-074「✅ 根因已定位並修正（2026-09-18）」。
 ensure_identity() {
   local xdg="$1" bundle="$2" image="$3" label="$4" err rc
   err="$(XDG_DATA_HOME="$xdg" python3 "$REPO_ROOT/python/scripts/ensure-i074-run-identity.py" \
@@ -1079,7 +1079,7 @@ rm -rf "$ORC_TD"
 
 # ── I-074 Stage 2（③b）：環境見證的 finalizer argv／mount／模式、pin --stage 2、restore、I074_STAGE ──
 #
-# 對應 issue.md I-074 ③ evidence contract「七之四」與測試 bg；Stage 2 計畫書「二、⑤」。
+# 對應 git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「七之四」與測試 bg；Stage 2 計畫書「二、⑤」。
 #
 # ⚠️ **finalizer 的測試一律在隔離的最小 repo 裡跑**（2026-09-23 review）：它的路徑是寫死常數
 # （`python/baselines/i074_stage2/envcheck/`），⛔ 沒有覆寫參數。先前在真正的 repo 裡暫放 fixture，
@@ -2296,7 +2296,7 @@ elif [ "${IMAGE_REQUIRED:-0}" = "1" ]; then
 fi
 # ── I-074 Stage 2 步驟 ④：sizing harness 的 shim、wrapper 與參數檢查 ─────────────────
 #
-# 對應 issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異）的測試 a、a2～a7、b。
+# 對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異）的測試 a、a2～a7、b。
 # ⚠️ ⛔ 任何一條都不得真的啟動 harness 的量測（那要跑數分鐘並建 clone）——harness 只測「在動手之前就拒絕」。
 echo "==> i074 Stage 2 步驟 ④：sizing harness 的 docker shim"
 SZ_TD="$(mktemp -d)"
@@ -2747,7 +2747,7 @@ rm -rf "$SZ_TD"
 
 # ── I-074 Stage 2 raw-failed freeze record 修正計畫：sizing 步驟 6 的寫入端（w0～w15） ─────────────────────────────
 #
-# 對應 issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 w0～w15。`--formal` ⛔ 不接受故障注入，所以以 sizing 的
+# 對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 w0～w15。`--formal` ⛔ 不接受故障注入，所以以 sizing 的
 # **實際片段**（「# ── 6. 報告」到檔尾，以及作廢清單的登記）＋ source 實際的 measure lib ＋ stub 執行（與 ac26 同一種做法）：
 #   - helper 是 stub（report／reap-adopted／cleanup-cids；failure-summary 交給真正的 helper），REAL_DOCKER 是 fake（控制 ps）；
 #   - FREEZE 是合成 clone 裡的 wrapper：記下呼叫序、轉呼叫真正的 i074_stage2_freeze_record.py，可注入 check-pair 失敗或送 TERM；
@@ -3323,7 +3323,7 @@ rm -rf "$RF_TD"
 
 # ── I-074 Stage 2 ⑦d：acceptance harness（shim 的 profile、守門、互斥、快照與 bootstrap） ─────────────────────
 #
-# 對應 issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac4、ac7、ac8、ac11、ac17、ac18。
+# 對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac4、ac7、ac8、ac11、ac17、ac18。
 # ⚠️ 任何一條都⛔ 不得真的開始量測（⛔ 不建 clone、⛔ 不跑容器）：harness 只測「在動手之前就拒絕」、bootstrap 與注入的中止點；
 #   需要 git HEAD 的情境在隔離的最小 repo 裡跑（⛔ 不改真正的 repo）。測試自己建的 S（/dev/shm/i074-*）由測試自己收拾。
 echo "==> i074 Stage 2 ⑦d：sizing shim 的 acceptance profile"
@@ -3637,7 +3637,7 @@ rc=0; ac_isolated scripts/i074-stage2-acceptance.sh wfh3 --formal --replay-compu
   && grep -qx "mode	formal" "$AC_TD/wfh3/raw-failed/meta.tsv" && grep -qx "repo_head	$AC_FIX" "$AC_TD/wfh3/raw-failed/meta.tsv" \
   && pass "review1：對照組——HEAD 沒有移動的 --formal 通過這一道" \
   || { fail "review1：對照組不符（rc=$rc）"; cat "$AC_TD/wfh3.err" >&2; }
-# ── ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac25、ac26、ac28 ──────────
+# ── ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac25、ac26、ac28 ──────────
 ac_gone() {  # $1＝pid：已消失或是 zombie
   local s
   s="$(cat "/proc/$1/stat" 2>/dev/null)" || return 0
@@ -4371,7 +4371,7 @@ fi
   && pass "漂移測試沒有在真正 repo 留下 worktree" || fail "漂移測試在真正 repo 留下了 worktree"
 rm -rf "$GEN_TD"
 
-# ── I-074 Stage 2 步驟 ⑨：入口的信任邊界、image 契約、--s7 兩個模式（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」
+# ── I-074 Stage 2 步驟 ⑨：入口的信任邊界、image 契約、--s7 兩個模式（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」
 #    「八」#5～#5c）。獨立成一支腳本，反向驗證可以單獨執行它；標籤一律以 `step9：` 開頭。
 echo "==> i074 Stage 2（⑨）：scripts/test-i074-step9.sh"
 if bash "$REPO_ROOT/scripts/test-i074-step9.sh"; then

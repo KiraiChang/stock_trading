@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 步驟 ⑨ 的 shell 測試（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#5、#5b、#5c）。
+# I-074 Stage 2 步驟 ⑨ 的 shell 測試（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#5、#5b、#5c）。
 #
 # 由 `scripts/test-replay-args.sh` 呼叫（也可以單獨執行——反向驗證就是這樣跑的）。標籤一律以 `step9：` 開頭
 # （`python/scripts/i074_step9_runs.py` 據此辨認 ⑨ 新增的項目）。

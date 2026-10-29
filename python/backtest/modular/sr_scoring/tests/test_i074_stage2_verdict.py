@@ -1,6 +1,6 @@
 """I-074 Stage 2 ⑦c：B／C 判讀規則（`replay_bundle/stage2_verdict.py`）。
 
-對應 issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「五」的「六、9」a～l 與「判讀輸出的 schema」：
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「五」的「六、9」a～l 與「判讀輸出的 schema」：
 四格 → B；每一項 C 條件各一支，⚠️ 每一支斷言**完整的** `reasons` 陣列（⛔ 不只斷言含某個 code）；
 多項同時命中全部記下、字典序；`ROW_SHAPE_INVALID` 只有它一個；`UNCLASSIFIED` 不再記依分類的 code；
 列順序 ＝ comparison；0 列拒絕判讀；固定 fixture 的 canonical bytes 與 golden 逐位元相同。

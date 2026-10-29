@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 步驟 ⑨：differential guard 的 producer（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「四」）。
+"""I-074 Stage 2 步驟 ⑨：differential guard 的 producer（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「四」）。
 
 在**容器內**、以 `--source-root`（某一側 worktree 的 `python/`，唯讀掛在 `/app`）為**唯一**的產品程式來源，
 對 fixture 的每一格呼叫 `build_decision_summary()`，輸出 canonical JSON（schema `i074_decision_summary_set_v1`）：

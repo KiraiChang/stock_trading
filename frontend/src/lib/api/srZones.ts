@@ -734,7 +734,7 @@ export interface SRSemanticPipeline {
   reason_codes?: string[]
   source_order?: string[]
   /**
-   * 以下四個是 **validation-only 的診斷欄位**（見 docs/issue.md I-074 Stage 0）。
+   * 以下四個是 **validation-only 的診斷欄位**（見 docs/sr-zone-scoring.md「Decision Replay 的診斷欄位（I-074 Stage 0）」）。
    *
    * ⛔ **本次刻意不接線**：它們是驗證 RR 解耦用的證據，不是給使用者判讀的資訊，
    * 渲染出來只會增加畫面噪音。

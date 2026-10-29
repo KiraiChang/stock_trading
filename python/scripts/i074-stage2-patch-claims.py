@@ -16,7 +16,7 @@ stdout **只印一行**：`<base_commit> <counterfactual_sha256> <tooling_sha256
 失敗時 stdout ⛔ 無輸出、結束碼 1。
 
 ⚠️ **這只是「取出宣告」，⛔ 不是驗證**（見 `stage2_archive.patch_claims()`）：shell 拿它們在隔離
-worktree 重建三個 SHA（issue.md I-074 ③ evidence contract「四之二」、F8-a），⛔ 任一不符即中止、
+worktree 重建三個 SHA（git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「四之二」、F8-a），⛔ 任一不符即中止、
 ⛔ 不呼叫 Python finalizer；之後容器內的 Python 段仍會完整驗證全部內容。
 ⚠️ 只讀小檔（comparison、中繼檔、manifest、record），⛔ 不讀全量 before source。
 """

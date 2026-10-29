@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 步驟 ⑨：differential guard 的第三方 comparator（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「四」）。
+"""I-074 Stage 2 步驟 ⑨：differential guard 的第三方 comparator（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「四」）。
 
 兩個獨立的容器程序各自以 `i074_decision_summary_producer.py` 在**原始 `e1cbbbd`** 與 **T2（`e1cbbbd` ＋ counterfactual
 ＋ tooling）** 上產出 decision summary；本程式是**第三個程序**，依 v29「六、3」的 allowlist 比對兩份輸出。

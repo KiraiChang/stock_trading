@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 步驟 ⑨：image 契約（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「六」的 image 契約）。
+# I-074 Stage 2 步驟 ⑨：image 契約（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「六」的 image 契約）。
 #
 # ⑨ 會 `docker build` 的三個步驟（S3 的 `e1cbbbd` 既有測試、S7 的 smoke 與完整驗證）各用一個**本次執行唯一**的
 # 專屬 tag，由入口（`scripts/i074-step9-guards.sh`）在 build 之前 `reserve`、之後（成功、失敗、中斷都一樣）

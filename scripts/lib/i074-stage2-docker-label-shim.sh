@@ -1,6 +1,6 @@
 #!/bin/bash -p
 # I074-STAGE2-LABEL-SHIM
-# I-074 Stage 2 ⑦b：⑩ 的容器 label 的**唯一注入點**（issue.md I-074 ⑦ 總綱 v1「四」的 label 列＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之五」）。
+# I-074 Stage 2 ⑦b：⑩ 的容器 label 的**唯一注入點**（git show 20eacb2:docs/issue.md 的 I-074 ⑦ 總綱 v1「四」的 label 列＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之五」）。
 #
 # 複本內的 orchestrator 把**複本的**這個檔案複製成 `<work>/bin/docker`；supervisor 把 workload 的 PATH 設成
 # `<work>/bin:/usr/bin:/bin`，所以 ⑩ 呼叫圖裡以名字呼叫的 `docker` 都經過這裡。⛔ 不是給人直接用的入口。

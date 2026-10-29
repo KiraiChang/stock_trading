@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 ⑦d 增補：acceptance profile 的容器內 wrapper（issue.md I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」①②）。
+"""I-074 Stage 2 ⑦d 增補：acceptance profile 的容器內 wrapper（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」①②）。
 
     python -I /acceptance/rss_wrapper.py <原指令逐 token>        # 容器的 PID 1（shim 掛載快照裡的本檔）
 

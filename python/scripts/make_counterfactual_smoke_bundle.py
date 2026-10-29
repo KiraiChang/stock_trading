@@ -4,7 +4,7 @@
 幾乎不可能產生 candidate——反事實 smoke 會以空 cohort 過關，驗不到「after 有候選 → before 消掉 →
 comparison 非空」。⚠️ 2026-09-30 實測：本切片在 after 側產生 6 筆候選（與 D+1 cohort 中 6243 在這段期間的
 6 筆逐 key 相同），反事實程式碼跑同一份切片 → 候選 0、6 筆全數翻轉、其餘 159 列逐列相同
-（issue.md I-074「Stage 2 步驟 ⑦a 細部計畫」B7）。
+（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦a 細部計畫」B7）。
 
 用法（在 smoke 的容器裡；`/app` 唯讀、只有輸出目錄可寫）：
 

@@ -1,5 +1,5 @@
 #!/bin/bash -p
-# I-074 Stage 2 ⑦c：B／C 判讀器的入口（issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」）。
+# I-074 Stage 2 ⑦c：B／C 判讀器的入口（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」）。
 #
 #   REPLAY_IMAGE_ID=sha256:… scripts/judge-i074-stage2.sh        # ⛔ 沒有參數
 #

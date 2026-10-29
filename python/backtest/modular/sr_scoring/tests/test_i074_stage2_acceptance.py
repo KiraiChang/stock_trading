@@ -1,6 +1,6 @@
 """I-074 Stage 2 ⑦d：memory／disk acceptance harness 的 Python 段（launcher 與 `i074_stage2_sizing.py` 的 ⑦d 部分）。
 
-對應 issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac1～ac3b（launcher）、ac5（profile）、ac6（門檻）、ac9（環境的契約）、
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac1～ac3b（launcher）、ac5（profile）、ac6（門檻）、ac9（環境的契約）、
 ac10（replay argv）、ac12／ac12b（observer 的核心）、ac14（sizing 的 runner_frozen_patches）、ac19（harness_manifest）。
 shim、harness 的守門、互斥、快照與 bootstrap 在 `scripts/test-replay-args.sh`／`scripts/test-i074-stage2.sh`；需要 `scripts/` 的
 `clean-env`、晉升的 state、`host-run` 與 3.9 相容性在 host unittest（`scripts/tests/test_i074_stage2_host.py`）。
@@ -725,7 +725,7 @@ def test_ac14_sizing_accounts_the_runner_frozen_patches(tmp_path):
     assert set(report["harness_manifest"]) == set(sz.SNAPSHOT_FILES["sizing"])
 
 
-# ── ⑦d 增補（issue.md I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac20 容器內的 wrapper ─────────
+# ── ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac20 容器內的 wrapper ─────────
 
 import signal as _signal  # noqa: E402
 import subprocess  # noqa: E402
@@ -1309,7 +1309,7 @@ def test_ac27_repo_never_sets_auto_reaping():
     assert (PYTHON_ROOT / "scripts" / "i074_stage2_sizing.py").is_file()               # ⛔ 不是空掃描
 
 
-# ── 有效性條件與 ⑨-1 的 fail-fast（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」） ──────────────
+# ── 有效性條件與 ⑨-1 的 fail-fast（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」） ──────────────
 
 import shutil  # noqa: E402
 

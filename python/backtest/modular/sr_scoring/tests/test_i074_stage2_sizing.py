@@ -1,6 +1,6 @@
 """I-074 Stage 2 步驟 ④：sizing harness 的 Python 段（`python/scripts/i074_stage2_sizing.py`）。
 
-對應 issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1）的測試 a8、a11、a11b、a11c、a13、
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1）的測試 a8、a11、a11b、a11c、a13、
 b2、b3、c、c2、d0、d。shim、wrapper、I/O 透明、中斷、封閉寫入、metadata twin 與 harness 的參數檢查在
 `scripts/test-replay-args.sh`。
 """
@@ -635,7 +635,7 @@ def test_d_events_are_filtered_per_phase_before_combining(tmp_path):
     assert {p["container_rule"] for p in report["paths"].values()} == {"max_non_overlapping"}
 
 
-# ── 有效性條件（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」的 pytest：有效性） ─────────────
+# ── 有效性條件（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」的 pytest：有效性） ─────────────
 
 T = sz.FS_UNEXPLAINED_TOLERANCE
 

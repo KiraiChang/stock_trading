@@ -1,14 +1,14 @@
 # shellcheck shell=bash
 # I074-STAGE2-MEASURE-LIB
 # I-074 Stage 2 ⑦d：sizing harness（scripts/i074-stage2-sizing.sh）與 memory／disk acceptance harness
-# （scripts/i074-stage2-acceptance.sh）共用的 shell 原語（issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「二之一」）。
+# （scripts/i074-stage2-acceptance.sh）共用的 shell 原語（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「二之一」）。
 #
 # ⚠️ 只負責 **re-exec 之後**的正式流程：由**快照裡**的主腳本、在快照的完整驗證通過之後 source（⛔ 不從活路徑 source）。
 #   建 S、快照與 re-exec 是兩個入口各自的 minimal bootstrap（「二之三」的「bootstrap 的失敗與中斷」列）。
 # ⚠️ 本檔只定義函式與狀態變數的初值，⛔ 不執行任何動作。呼叫端在 source 之前要設好 S、HELPER、REAL_DOCKER、RUN_ID、LOG；
 #   之後再設 WORK（失敗清理要複製 S 到 <work>/raw-failed/）。
 # ⚠️ 內容自 ④ 的 sizing harness 原樣抽出（共用原語，⛔ 不另寫一份）；演練用的故障注入仍是 `I074_SIZING_FAULT`。
-# ⚠️ ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：harness 自己是 subreaper（bootstrap 以
+# ⚠️ ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：harness 自己是 subreaper（bootstrap 以
 #   python3 啟動器設定）——`measure_subreaper_guard` 以行為驗證；每一步之後、正常結束之前以 `reap-adopted --check-only` 確認
 #   沒有被收養的程序；`on_failure` 以 `reap-adopted` 清掉它們（結束碼 ≠ 0 → 保留 S）。
 
@@ -60,7 +60,7 @@ alloc() { helper allocated "$1" | python3 -c 'import json,sys; print(json.load(s
 
 PHASE=""; SAMPLER_PID=""; STEP_PID=""; DONE=0
 HARNESS_STARTTIME=""; GUARD_PROBE=""; GUARD_SHELL_PID=""; GUARD_LEFTOVER=0
-# ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單由入口登記（sizing 登記 freeze record 與報告的
+# ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單由入口登記（sizing 登記 freeze record 與報告的
 #   所有位置；acceptance ⛔ 不登記——on_failure ⛔ 不進臨界區、⛔ 不呼叫作廢，行為與修正前相同）。MEASURE_VOIDED＝最近一次作廢的結果。
 MEASURE_VOID_PATHS=(); MEASURE_VOIDED=1
 # 本程序（$$）在 /proc/<pid>/stat 的 starttime（第 22 欄）。$1＝pid（預設 $$）。
@@ -399,7 +399,7 @@ measure_begin_phase() {
   say "==> 路徑 $PHASE：baseline 已記錄，取樣中"
   measure_fs_noise_begin "$PHASE"
 }
-# ⚠️ issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：故障注入 fs-noise（⛔ 不用在正式量測、只在演練；--formal 一律拒絕
+# ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：故障注入 fs-noise（⛔ 不用在正式量測、只在演練；--formal 一律拒絕
 #   故障注入）——success 窗口期間在量測範圍外（work 目錄的父目錄，同一個檔案系統；⛔ 不在 inventory 的根目錄內）寫 2 MiB、
 #   窗口結束之後刪除。有效性條件 ①（未解釋的淨成長 ≤ 1 MiB）必須把這次量測判成無效。
 FS_NOISE=""

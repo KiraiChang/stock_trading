@@ -32,7 +32,7 @@
 #   REPLAY_DRY_RUN=1  只印出最終的 docker argv，不真的執行（給測試與人工核對用）
 #   I074_STAGE     I-074 正式流程要用哪一份 run identity（封閉列舉 1／2，預設 1）。
 #                  ⚠️ 只在 I-074 正式流程有意義；Stage 2 的環境見證趟（after'）用 2——
-#                  見 issue.md I-074 Stage 2 計畫書「二、⑤」。⛔ 它不是路徑，⛔ 不開放任意覆寫。
+#                  見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」。⛔ 它不是路徑，⛔ 不開放任意覆寫。
 #   MEM / CPUS / PY_IMAGE  同 python/scripts/test.sh
 #
 # 設計重點：

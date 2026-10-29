@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 ⑦b：freeze record 的寫入與驗證（issue.md I-074 v29「八之二」＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之九」）。
+"""I-074 Stage 2 ⑦b：freeze record 的寫入與驗證（git show 20eacb2:docs/issue.md 的 I-074 v29「八之二」＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之九」）。
 
 host 端（Python 3.9 相容）：只用標準庫、`_i074_bootstrap` 載入的 `replay_bundle/canonical.py`（canonical JSON 的唯一定義），
 以及需要時的 `git`。⛔ 不 import `backtest.*`（host 沒有 pandas）。

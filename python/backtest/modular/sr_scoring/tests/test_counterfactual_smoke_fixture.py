@@ -1,7 +1,7 @@
 """I-074 Stage 2 反事實 smoke 的切片 fixture（`python/scripts/make_counterfactual_smoke_bundle.py`）。
 
 ⚠️ 正向測試讀的是**真正已進版控的** bundle（唯讀使用）；負向測試用它的**暫存複本**，⛔ 不碰真正的 bundle。
-對照 issue.md I-074「Stage 2 步驟 ⑦a 細部計畫」B7 的「切片 fixture 的契約」與「守門」。
+對照 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦a 細部計畫」B7 的「切片 fixture 的契約」與「守門」。
 """
 from __future__ import annotations
 

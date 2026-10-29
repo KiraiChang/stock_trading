@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 步驟 ⑨：tooling 非語意 guard 的 comparator（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「五」）。
+"""I-074 Stage 2 步驟 ⑨：tooling 非語意 guard 的 comparator（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「五」）。
 
 同一份切片 bundle、一般 Stage 1／2（⛔ 不帶 `--i074-counterfactual`），A ＝ `e1cbbbd`、B ＝ `e1cbbbd` ＋ tooling：
 **成對**比較 Stage 1 A／B 與 Stage 2 A／B 的輸出——依**逐檔的封閉規則**只移除列在表裡的鍵（`rows`／`keys` 永遠

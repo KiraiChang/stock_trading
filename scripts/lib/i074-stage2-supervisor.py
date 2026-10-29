@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""I-074 Stage 2 ⑦b：⑩ 的 supervisor（issue.md I-074 v29「八之一之二」＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之四」）。
+"""I-074 Stage 2 ⑦b：⑩ 的 supervisor（git show 20eacb2:docs/issue.md 的 I-074 v29「八之一之二」＋「Stage 2 步驟 ⑦b 細部計畫 v1」「二之四」）。
 
 由 `scripts/run-i074-stage2.sh` 的入口以 `exec /usr/bin/python3 -I <本檔> {run|resume|promote} --work-dir <dir>
 [--freeze-record <path>]` 啟動；⛔ 不是給人直接用的入口。host 端、**只用標準庫、相容 Python 3.9**（host 是 3.9.2）。

@@ -25,13 +25,6 @@ issue.md|baseline_check.py:91
 issue.md|db.py:166
 issue.md|db.py:20
 issue.md|db.py:94
-issue.md|decision_engine.py:1079
-issue.md|decision_engine.py:1086
-issue.md|decision_engine.py:1098
-issue.md|decision_engine.py:205
-issue.md|decision_engine.py:2678
-issue.md|decision_engine.py:2982
-issue.md|evaluation.py:1505
 issue.md|evaluation.py:2298
 issue.md|evaluation.py:2467 x2
 issue.md|evaluation.py:287
@@ -43,10 +36,6 @@ issue.md|exchange_reference.go:357
 issue.md|fetcher.go:245
 issue.md|internal/scheduler/scheduler.go:1193
 issue.md|internal/scheduler/scheduler.go:1215
-issue.md|lifecycle_engine.py:136
-issue.md|lifecycle_engine.py:172
-issue.md|lifecycle_engine.py:175
-issue.md|lifecycle_engine.py:187
 issue.md|migrations/postgres/001_create_candles.sql:9
 issue.md|migrations/postgres/066_evaluation_universe.sql:29
 issue.md|migrations/postgres/067_zone_identity.sql:31

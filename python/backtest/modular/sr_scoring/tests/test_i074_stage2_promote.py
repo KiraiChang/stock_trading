@@ -1,6 +1,6 @@
 """I-074 Stage 2 ⑦c：晉升（`python/scripts/i074_stage2_promote.py`）。
 
-對應 issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「五」的 n11、路徑錨定、結束碼的分類、ignore 守門（注入的 git
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「五」的 n11、路徑錨定、結束碼的分類、ignore 守門（注入的 git
 runner——⚠️ 測試 image 沒有 git；真 git 的案例在 `scripts/test-i074-stage2.sh`）、操作契約與收尾重算、結束碼常數。
 ⚠️ 驗證模式由 fake 代替（它讀 staging／目的地的 manifest 或 record，回報**它讀到的** SHA）；驗證模式本身的
 Python 段在 `test_replay_stage2_archive.py`，shell 段在 `scripts/test-replay-args.sh`。

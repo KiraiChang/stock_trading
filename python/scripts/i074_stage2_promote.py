@@ -3,7 +3,7 @@
 
     python3 -B <複本>/python/scripts/i074_stage2_promote.py --work-dir <work> --real-repo <真正 repo>
 
-規格：issue.md I-074 v29「八之三」與「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」。只由 `scripts/run-i074-stage2.sh`
+規格：docs/sr-zone-scoring.md「I-074 Stage 2 的晉升與 B／C 判讀器」（原文：git show 20eacb2:docs/issue.md 的 I-074 v29「八之三」與「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」）。只由 `scripts/run-i074-stage2.sh`
 的 `promote()` 呼叫——第 1 步（`/proc/locks`、preflight 0、`state-check --require run,preflight`）已在 shell 做完。
 
 結束碼（「結束碼的分類」）：

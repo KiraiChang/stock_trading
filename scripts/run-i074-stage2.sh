@@ -1,5 +1,5 @@
 #!/bin/bash -p
-# I-074 Stage 2 ⑦b／⑦c：⑩ 的正式入口（issue.md I-074 v29「八之一」～「八之三」＋「Stage 2 步驟 ⑦b／⑦c 細部計畫 v1」）。
+# I-074 Stage 2 ⑦b／⑦c：⑩ 的正式入口（git show 20eacb2:docs/issue.md 的 I-074 v29「八之一」～「八之三」＋「Stage 2 步驟 ⑦b／⑦c 細部計畫 v1」）。
 #
 #   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --freeze-record <path> --work-dir <repo 外、尚不存在的目錄>
 #   REPLAY_IMAGE_ID=sha256:… scripts/run-i074-stage2.sh --resume  --work-dir <dir>   # 只在 finalize／publish 回 1 之後
@@ -275,7 +275,7 @@ locked_main() {
     report="$freeze_dir/sizing_report.json"
     [ -f "$FREEZE_ARG" ] && [ ! -L "$FREEZE_ARG" ] && [ -f "$report" ] && [ ! -L "$report" ] \
       || { err "freeze record 或同目錄的 sizing_report.json 不存在"; exit "$code"; }
-    # ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」讀取端 1：只接受「成功結束的 sizing <work>、在原位置的
+    # ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」讀取端 1：只接受「成功結束的 sizing <work>、在原位置的
     #   頂層」——檔名（staging 名⛔ 不收）、raw/ 是目錄且⛔ 不是 symlink、⛔ 沒有 failure_summary.json 與 raw-failed（symlink 也算）、
     #   raw/ 裡的兩個檔都是一般檔案且⛔ 不是 symlink（缺少、FIFO 等一律拒絕，⛔ 不打開它們）。這是「放錯位置」的防線，⛔ 不是成功的證明。
     [ "${FREEZE_ARG##*/}" = freeze_record.json ] || { err "freeze record 的檔名必須是 freeze_record.json：$FREEZE_ARG"; exit "$code"; }

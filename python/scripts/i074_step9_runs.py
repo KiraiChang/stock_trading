@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 步驟 ⑨：完整驗證與 ⑧ baseline 的逐項比對（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#8）。
+"""I-074 Stage 2 步驟 ⑨：完整驗證與 ⑧ baseline 的逐項比對（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#8）。
 
 baseline ＝ ⑧ 第三次全量執行的 `-v` log（版控在 `fixtures/i074_step9/step8_full_run3.log`）；它的 SHA-256、大小、
 來源 tree 與項目數寫成下面的常數——檔案被換、截斷、空白、tree 錯，一律 fail-closed。

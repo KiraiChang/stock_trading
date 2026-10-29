@@ -32,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--print-path", action="store_true",
                         help="只印出 identity 的絕對路徑（給 shell 掛載用）")
     # ⚠️ **stage 是封閉列舉**，⛔ 不是路徑：只決定推導出哪一份 identity（Stage 2 用自己的，
-    # 見 issue.md I-074 Stage 2 計畫書「二、⑤」）。預設 1，Stage 1 的既有用法逐字不變。
+    # 見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。預設 1，Stage 1 的既有用法逐字不變。
     parser.add_argument("--stage", type=int, choices=(1, 2), default=1)
     parser.add_argument("--peek", action="store_true",
                         help="⚠️ 既有才沿用：存在→印既有 ID 並**重新 fsync**（durability 的修復路徑）；"

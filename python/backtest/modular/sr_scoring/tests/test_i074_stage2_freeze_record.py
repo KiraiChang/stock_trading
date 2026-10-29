@@ -1,6 +1,6 @@
 """I-074 Stage 2 ⑦b：`python/scripts/i074_stage2_freeze_record.py`（v29「八之二」的封閉 schema、交叉條件、寫入端）。
 
-對應 issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」的 n7（freeze record 違反「八之二」的每一條）與 n10（寫入端）。
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」的 n7（freeze record 違反「八之二」的每一條）與 n10（寫入端）。
 需要 git 的 `head_file_sha256()` 在 host 的 unittest（`scripts/tests/test_i074_stage2_host.py`）。
 """
 from __future__ import annotations

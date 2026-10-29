@@ -1,6 +1,6 @@
 """I-074 Stage 2 步驟 ⑨：完整驗證與 ⑧ baseline 的逐項比對（`python/scripts/i074_step9_runs.py`）。
 
-baseline 是版控的 ⑧ 第三次全量執行 log；「本次」的 log 由它改寫而來（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」
+baseline 是版控的 ⑧ 第三次全量執行 log；「本次」的 log 由它改寫而來（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」
 「八」#8 的規則）。
 """
 from __future__ import annotations

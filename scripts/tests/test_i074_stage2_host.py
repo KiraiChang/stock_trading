@@ -1,4 +1,4 @@
-"""I-074 Stage 2 ⑦b／⑦d：host 端的單元測試（Python 3.9；issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」與
+"""I-074 Stage 2 ⑦b／⑦d：host 端的單元測試（Python 3.9；git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」與
 「Stage 2 步驟 ⑦d 細部計畫 v1」「五」）。
 
 由 `scripts/test-i074-stage2.sh` 以 host 的 `python3 -m unittest` 執行（host 沒有 pytest；測試 image 裡沒有 git 與 docker）。
@@ -610,7 +610,7 @@ class HostImports(unittest.TestCase):
         load_supervisor()
 
 
-# ── ⑦d：acceptance 的 host 端（issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac9、ac12b、ac13、ac16） ──────────
+# ── ⑦d：acceptance 的 host 端（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「五」的 ac9、ac12b、ac13、ac16） ──────────
 
 SIZING = ROOT / "python" / "scripts" / "i074_stage2_sizing.py"
 MIB = 1024 * 1024
@@ -773,7 +773,7 @@ class AcceptanceHost(unittest.TestCase):
 
 
 
-# ── ⑦d 增補（issue.md I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac24、ac24b、ac28b ──────────
+# ── ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「五」）：ac24、ac24b、ac28b ──────────
 
 def _starttime(pid: int) -> int:
     return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
@@ -805,7 +805,7 @@ def _kill_quietly(pid: int) -> None:
 
 
 
-# ── 測試衛生（issue.md I-074「Stage 2 步驟 ⑧ 計畫 v4」「四」）：收掉帶 cleanup token 的程序 ─────────────────────
+# ── 測試衛生（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑧ 計畫 v4」「四」）：收掉帶 cleanup token 的程序 ─────────────────────
 #   ⚠️ 獨立於被測的產品函式（⛔ 不呼叫 host-run、reap_adopted、kill_pinned）；只看同一個 UID；排除本程序與它的祖先；
 #   以 PID ＋ starttime 釘住，送任何訊號之前都重新比對（⛔ 不對被重用的 PID 送訊號）；TERM → 等待 → KILL → 重新掃描到
 #   固定點。列舉之後才消失（`/proc/<pid>` 已不存在）是正常的競爭；PID 仍在卻讀不到或解析失敗、逾時仍有存活 → 失敗。
@@ -1398,7 +1398,7 @@ class RssAddendumHost(unittest.TestCase):
 
 
 # ── 有效性條件計畫：offline 的讀取端（`precheck-verdict`、`raw-manifest`）的信任模型 ─────────────────────────────
-#   issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：外部的 commit 錨點、C1／C2 的標記、原始量測裡的程式
+#   git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「六」：外部的 commit 錨點、C1／C2 的標記、原始量測裡的程式
 #   ⛔ 不被執行。需要 git，所以在 host（測試 image 裡沒有 git）；原始量測以 helper 自己的 writer 建（與 pytest 的 fixture 同形）。
 
 IMG = "sha256:" + "f" * 64

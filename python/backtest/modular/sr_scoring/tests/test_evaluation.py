@@ -109,7 +109,7 @@ def test_decision_fields_from_summary_carries_lifecycle_phase():
 
     **為什麼要釘住它**：decision replay 是唯一能對真實資料比較「事件演進階段有沒有被改掉」
     的工具。這個欄位沒帶出來時，A/B 兩版的分佈會長得一模一樣，而那**分不出**是那條路徑
-    沒被觸發，還是改動真的沒有影響——2026-09-01 跑 issue.md I-074 的 replay 就踩到這件事。
+    沒被觸發，還是改動真的沒有影響——2026-09-01 跑 I-074 的 replay 就踩到這件事。
     """
     summary = {
         "market_bias": "BULLISH_BIAS",
@@ -962,7 +962,7 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     assert report["outcome_summary"]["decision_error_counts"] == {}
     assert report["outcome_summary"]["final_entry_state_counts"]
     # lifecycle 聚合與 final_entry_state 同級：沒有它，replay 的驗收就得回頭
-    # 自己撈原始 JSON 重算（見 docs/issue.md I-074 的 2026-09-01 實測）。
+    # 自己撈原始 JSON 重算（見 docs/sr-zone-scoring.md「decision replay 實測（2026-09-01）」）。
     assert report["outcome_summary"]["lifecycle_phase_counts"]
     assert sum(report["outcome_summary"]["lifecycle_phase_counts"].values()) == len(
         [row for row in report["replay_rows"] if row.get("lifecycle_phase")]

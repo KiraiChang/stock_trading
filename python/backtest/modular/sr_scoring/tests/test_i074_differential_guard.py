@@ -1,6 +1,6 @@
 """I-074 Stage 2 步驟 ⑨：differential guard 的 comparator（`python/scripts/i074_differential_guard.py`）。
 
-以**合成**的 decision summary 對組出九格 ＋ 8b（真實輸出的驗證在 ⑨ 的實跑；見 docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」
+以**合成**的 decision summary 對組出九格 ＋ 8b（真實輸出的驗證在 ⑨ 的實跑；見 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」
 「八」#1～#3）。每一支 tamper 都斷言**它專屬的原因碼**，⛔ 不只看 fail。
 """
 from __future__ import annotations

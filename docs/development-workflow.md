@@ -931,7 +931,7 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
    ⚠️ **Stage 2 有兩種終止狀態**：before／after 的候選集合不一致時**不會有 comparison
    artifact**，而是 `candidate_mismatch.json` ＋ **結束碼 4**（`EXIT_CANDIDATE_MISMATCH`）
    ——那一份就是該次的證據（含完整差集與兩側逐列 row），且該結果**直接判為分支 C**
-   （見 `issue.md` I-074）。⛔ 此時不產出 comparison／report 是**預期的**，不是失敗殘骸；
+   （I-074 的舊比較模型；⚠️ I-074 的正式判讀已改用 v3 比較模型、⛔ 不走這條路徑，見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」；歷史：`git show 20eacb2:docs/issue.md` 的 I-074「關閉條件」）。⛔ 此時不產出 comparison／report 是**預期的**，不是失敗殘骸；
 4. **跨日證據**：⛔ **D 日跑、D+1 日載入同一份再跑**，輸入指紋與逐列結果相同。
    ⚠️ **同一天跑兩次證明不了任何事**——當日資料本來就沒變。
    ⚠️ **⛔ 不是「D 日產 bundle」**（2026-09-15 更正）：bundle 是 2026-09-11 就凍結並進版控的
@@ -976,7 +976,7 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
 ⚠️ **要測「竄改 manifest」時目錄名必須保持正確**，否則先撞到「三方相等」那道，
 ⛔ 驗不到 manifest 自己的 hash 檢查。
 
-⚠️ **preflight 與指紋檢查失敗不計入「一次正式 scan」**（`issue.md` I-074 的停止條件）：
+⚠️ **preflight 與指紋檢查失敗不計入「一次正式 scan」**（「正式 scan 的計次裁決」；歷史：`git show 20eacb2:docs/issue.md` 的 I-074）：
 那是輸入還沒就位，不是驗證跑過了。
 
 ### I-074 Stage 1 的正式執行程序
@@ -1032,7 +1032,7 @@ fsync**。no-op 路徑的 fsync 失敗回同一個碼，且⛔ 完全不修改�
 證據封存在 `python/baselines/i074_stage1/`。⚠️ 候選數 **156 > 0**，⛔ 分支 A 已排除。
 ⚠️ **⑤ 的 comparator 要同時載入兩份 78 MB artifact（實測約 730 MiB），常態的 531m ⛔ 不夠**
 ——這次是停掉全部常駐 container 再以 `MEM=900m` 跑過的，⛔ **那是權宜之計**，
-Stage 2 會撞上同一道牆。詳見 `issue.md` I-074。
+Stage 2 會撞上同一道牆。見 [I-117](./issue.md#i-117stage-1-的-comparatorfinalizerrecovery-整份載入兩份-after-artifact超過-mem-guard)。
 
 ⚠️ **2026-09-17：③ 的 OOM 已修**——第一次實跑被 cgroup OOM 殺掉（結束碼 137、
 ⛔ 沒有產出任何 artifact、燒掉 183 分鐘）。⛔ **成因⛔ 不是 replay 過程累積**
@@ -1040,7 +1040,7 @@ Stage 2 會撞上同一道牆。詳見 `issue.md` I-074。
 序列化增量實測 **+351 MiB**，基礎 195 ＋ 351 ＝ 546 MiB 超過上限 504m。
 改成串流寫出後降到 **+2 MiB**。⚠️ `--i074-capacity-probe` 的 quota 固定 200，
 **量不到尾段的峰值**——⛔ 那個缺陷仍在，⛔ 不要再拿 probe 的結果當「全量跑得動」的依據。
-詳見 `issue.md` I-074。
+調查與修正的經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「③ 第一次執行：OOM 失敗」與「修正（2026-09-17）」。
 
 ⚠️ **③ 開跑之後、⑤ 仲裁通過之前，這個 repo ⛔ 不得再有新 commit**（2026-09-17 查證）：
 
@@ -1128,7 +1128,7 @@ for r in cand[:20]:
 | **0** | **A** | ⚠️ 記錄實際掃描的標的、日期範圍、載入根數、eligible rows、模型 bundle 與設定 → 轉為**已知限制**歸檔 → **本筆關閉**。⛔ **不必再跑 Stage 2**（省下 before 那趟約 3.7 小時） |
 | **> 0** | **B 或 C** | 需要 Stage 2（before 全掃）才分得出來。⚠️ 先核對 `candidate_mismatch.json` 是否存在——**before／after 的候選集合不一致直接是 C**，⛔ 此時沒有 comparison artifact |
 
-⚠️ **B 的「如預期」有明確定義**（見 `issue.md` I-074），⛔ 不是判定當下的主觀認定；
+⚠️ **B 的「如預期」有明確定義**（見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」的「B／C 判讀規則」），⛔ 不是判定當下的主觀認定；
 ⚠️ **before 有兩種合法形狀**（`CONDITIONAL_HOLD → HOLD` 與 `CONFIRMED`／`CONTINUATION` → `HOLD`），
 ⛔ 只認一種會把另一種合法命中誤判成 C。
 
@@ -1190,8 +1190,8 @@ image 存在」四項**一律在 `docker run` 之前**，差別只在 `bundle_id
 ⚠️ **為什麼有這一段**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機——當時 pin 用的
 tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。使用者裁決 **兩側都在新 image 重跑**：
 先在新 image 上以原始 `e1cbbbd` 跑一趟 **after' 見證**，逐列與已封存的 Stage 1 D+1 比對，
-**逐位元相同**才證明新舊 image 對這份 bundle 等價。完整契約見 `issue.md` I-074 的 Stage 2 計畫書
-「二、⑤」與 ③ evidence contract「三之三」（現行版）；本節只寫**操作程序**。
+**逐位元相同**才證明新舊 image 對這份 bundle 等價。完整契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的環境見證契約」（原文：`git show 20eacb2:docs/issue.md` 的 I-074 Stage 2 計畫書
+「二、⑤」與 ③ evidence contract「三之三」）；本節只寫**操作程序**。
 
 ```text id="i074_stage2_envcheck_flow_001"
 ① pin      ⚠️ 與 Stage 1 相同的 guarded 寫法（⛔ 不可寫成 `export VAR="$(…)"`，理由見上一節）：
@@ -1244,8 +1244,8 @@ manifest 為信任錨，單獨搬走會斷鏈。
 
 ### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；✅ review 通過）
 
-⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」與 `issue.md`
-I-074「③ Stage 2 evidence contract」（現行版）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）
+⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」（原文：`git show 20eacb2:docs/issue.md`
+的 I-074「③ Stage 2 evidence contract」）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）
 由 ⑦b／⑦c 的 orchestrator 串起來——下列入口是它呼叫的**唯一**一套（⛔ 不得另寫 lookup）。
 
 **CLI matrix**（`scripts/finalize-stage2-evidence.sh`；一律要求 `REPLAY_IMAGE_ID` 是 Stage 2 identity 的 image；
@@ -1370,7 +1370,7 @@ S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074
 
 ### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過；⑩ 2026-10-28 正式執行，✅ review 通過，commit `078ec72`）
 
-⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
+⚠️ 規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
 ⑩ 在 ⑨-2 產出 freeze record 之後才可執行。⚠️ 2026-10-28 已執行（rc 0）：使用者執行的貼上版程序（precheck、wrapper、狀態、安全中止、
 `--resume`／`--promote` 與判讀表）見本節末的「⑩ 的正式執行程序」。
 
@@ -1407,7 +1407,7 @@ replay 之後的檢查點不符、收到訊號 → ⛔ 不能 resume（⑦c 之�
 持鎖階段的**子程序**被 SIGKILL（常見是 host 的 OOM killer）——supervisor 照常清空本趟、刪 sentinel、放鎖之後才回 137，⛔ 不需要重開機；
 **supervisor 自己**被 SIGKILL——sentinel 留下、只能重開機（見下方「sentinel 留下 ＝ 需要重開機」）。⚠️ workload 啟動之前的收回失敗也會留下
 sentinel（回 1；`--promote` 回 9）。所以**判讀一律先看 sentinel**（`/run/lock/i074-stage2.active` 是否存在），⛔ 不能只憑結束碼判斷要不要重開機
-（⑩ 的判讀表見本節末的「⑩ 的正式執行程序」）。完整的「模式 × 失敗點」表見 issue.md ⑦b「二之十」與 ⑦c「二之五」。
+（⑩ 的判讀表見本節末的「⑩ 的正式執行程序」）。完整的「模式 × 失敗點」表（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074 ⑦b「二之十」與 ⑦c「二之五」。
 
 **晉升（⑦c；`python/scripts/i074_stage2_promote.py`——完整流程、`--resume` 與 `--promote` 都經同一個 `promote()`）**：終態已在複本的磁碟上時執行。
 
@@ -1452,7 +1452,7 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/judge-i074-stage2.sh
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
 
 ⑪（2026-10-29）以簡易指令 `s11`（`s11 status` 由使用者查排程狀態、`s11 judge` 逐項判定前置條件之後呼叫判讀器一次）執行，判讀 **B**；
-執行紀錄見 [`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」（✅ review 通過，commit `20eacb2`）。
+執行紀錄（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」（✅ review 通過）。
 
 
 ⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
@@ -1483,9 +1483,9 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 
 #### ⑩ 的正式執行程序（2026-10-28 由使用者執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`）
 
-⚠️ 計畫、決定（D1～D9）與修訂經過見 [`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)，執行結果見同檔「十四」。
+⚠️ 計畫、決定（D1～D9）與修訂經過（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step10.md`，執行結果見同檔「十四」。
 下面的區塊與判讀表是該計畫 v3（「十」2 實作，commit `a9cb41d`）**原樣**的內容——⑩ 實際執行的就是這一版。文中的「二」～「五」
-指計畫書的章節（計畫書收斂刪除之後見 git 歷史）；「v29」「八之一」～「八之三」「正式 scan 的計次裁決」指 `issue.md` I-074 的章節。
+指該計畫書的章節（`git show 20eacb2:docs/plans/i074-stage2-step10.md`）；「v29」「八之一」～「八之三」「正式 scan 的計次裁決」指 `git show 20eacb2:docs/issue.md` 的 I-074 的章節。
 要點：由使用者在 tmux／自己的終端機執行，Claude 先結束（D1；Codex ⛔ 不使用）；時段避開所有批次（D2：平日 17:00 的 `sr_analysis`
 已是終態之後、最晚 17:30 開跑，前提是晚間兩個批次已後移）；開跑當下 MemAvailable ≥ 950 MiB（D3）；位置 `~/i074_stage2_formal/<NAME>`、
 `~/i074_stage2_observe/<NAME>`、`/dev/shm/s10-<NAME>/`（D7）；observer 由 wrapper 啟動與停止（D4）。
@@ -1806,7 +1806,7 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
 
 ### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
-⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2，✅ 已確認）；本節只寫**操作程序**。
+⚠️ 規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」與本節；計畫（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
 供步驟 ⑤ 裁定 `M_safety`。⛔ 它**不是**正式的證據入口，⛔ 也⛔ 不做可用空間檢查（preflight 屬 ⑦）。
 
@@ -1816,9 +1816,9 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-sizing.sh --work-dir ~/i0
 
 # ⑨-2 的正式確認重跑（＝ ⑤ 的 --formal 量測、以 ⑩ 要用的 HEAD 產出 freeze record；scripts/、python/、.gitattributes 必須 clean；
 #   harness 檔案必須等於 HEAD；stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案——wrapper 導到 tmpfs）
-#   ⚠️ 完整的程序（P1～P10 的 precheck、啟動與程序身分、狀態、安全中止、判讀與各分支、驗證與保存）見 issue.md I-074
+#   ⚠️ 完整的程序（P1～P10 的 precheck、啟動與程序身分、狀態、安全中止、判讀與各分支、驗證與保存）見 git show 20eacb2:docs/issue.md 的 I-074
 #   「Stage 2 步驟 ⑨-2 細部計畫 v4」的「二」～「五」：由使用者在 tmux／自己的終端機執行，Claude 先結束（Codex ⛔ 不使用）。
-#   2026-10-27 的 ⑨-2 以簡易指令 s92（docs/plans/i074-stage2-step92-s92.md）執行，結果見 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」。
+#   2026-10-27 的 ⑨-2 以簡易指令 s92（git show 20eacb2:docs/plans/i074-stage2-step92-s92.md）執行，結果見 sr-zone-scoring.md「I-074 Stage 2 的容量驗收」的「⑨-2 的正式結果」。
 #   固定的環境（「三」）：env -u 移除 sizing 鏈會讀的設定，每個容器以預設的 700m 各自 clamp、clamp 之後 ＜ 447m 的那一步⛔ 不建容器
 env -u MEM -u CPUS -u TOOLING_PATCH -u REPLAY_DRY_RUN -u PY_IMAGE -u I074_SIZING_FAULT \
     -u SIZING_SNAPSHOT -u SIZING_PROFILE -u SIZING_REPLAY_MODE -u SIZING_REPLAY_COMPUTE \
@@ -1826,7 +1826,7 @@ env -u MEM -u CPUS -u TOOLING_PATCH -u REPLAY_DRY_RUN -u PY_IMAGE -u I074_SIZING
     REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
   scripts/i074-stage2-sizing.sh --formal --work-dir ~/i074_stage2_sizing/formal-92-<UTC 時間> < /dev/null
 
-# ⑨-2 跑完之後（頂層有 freeze_record.json 時）：成對、repo_head、容器上限（issue.md 的「五」3）與 raw manifest
+# ⑨-2 跑完之後（頂層有 freeze_record.json 時）：成對、repo_head、容器上限（⑨-2 細部計畫「五」3；歷史：git show 20eacb2:docs/issue.md）與 raw manifest
 python3 python/scripts/i074_stage2_freeze_record.py check-pair --record <work>/freeze_record.json --report <work>/sizing_report.json
 python3 python/scripts/i074_stage2_freeze_record.py check-basic --record <work>/freeze_record.json     # 印出的 repo_head ＝ 開跑前記下的 HEAD
 python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
@@ -1841,13 +1841,13 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | `--work-dir` | ⚠️ 必須在 repo **外**（以 canonical path 判斷，parent symlink 指回 repo 也拒絕）、⛔ 不得已存在；harness 在裡面建 `git clone --no-hardlinks` 的複本並從**複本**執行正式入口——正式腳本的路徑常數由腳本位置推導，⛔ 不會寫到真正的 repo |
 | 耗時與空間 | 約 6～7 分鐘（⑨-2 實測 5 分 20 秒）；`<work>` 約 450 MB（複本 ＋ 三條路徑的 run 目錄與 worktree；⑨-2 實測 384M）。只有 ④ 的可用性驗證與開發用的目錄可以用完整個刪除。⚠️ **正式的 `<work>` ⛔ 不刪**（2026-10-27，⑨-2 細部計畫「五」7）：⑨-2 通過的那一次（頂層有 freeze record）是 ⑩ 的 `--freeze-record` 來源，**在原位置保存到 ⑩ 晉升結果的 commit 之後**——⛔ 不搬移、⛔ 不複製、⛔ 不改上層目錄的名字（⑩ 的來源規則：`meta.work` ≠ 來源目錄就拒絕）；其他正式嘗試的 `<work>`、`<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂 |
 | ⚠️ 量測期間 | ⛔ **不要動真正的 repo**（含 commit、編輯檔案）——harness 每條路徑前後比對它的完整 inventory，任何變化都會 fail-closed；也⛔ 不要在 `<work>` 裡建檔 |
-| harness 的狀態 | 全在 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S），⛔ 不落在量測的檔案系統；成功時複製到 `<work>/raw/`、失敗時發布成 `<work>/raw-failed/`——⚠️ 兩者都⛔ 不含 shim 的入口 `bin/docker`（複製之前只移除這一個 symlink，`readlink` 的結果記進 `console.log`；本體在 `harness/`、有 `MANIFEST` 的 SHA），raw manifest 因此產得出來。⚠️ **步驟的 process group 確實結束（`TERM` 等 20 秒、仍有成員就升級 `KILL` 再等 5 秒）、收養的程序與容器全部清掉**之後才產生 `raw-failed/`（2026-10-15 ⑨-1 前置修正；任一沒成功 → **只保留 S**、⛔ 沒有 `raw-failed/` 與摘要，S 只當診斷資料——仍存活的程序可能還在寫它；stderr 印出 S 的位置、移除不了的容器 CID（請手動 `docker rm -f`）與收不掉的 PID）。`raw-failed/` 以原子的方式發布：先完整複製到 `<work>/.raw-failed.staging`，成功才以同目錄的 `mv -T` 改名（發布前兩個名稱都必須⛔ 不存在）；複製失敗或中途被終止只會留下 staging（⛔ 不是證據、⛔ 不產 manifest）。**rename 是唯一的分界**：rename 之後才被終止（SIGKILL、`on_failure` 期間的 TERM）的 `raw-failed/` 仍是正式的原始量測，⛔ 不受結束碼影響。發布與摘要都成功才清 S。⚠️ raw-failed freeze record 修正（2026-10-14）：失敗時先**作廢** freeze record 與頂層報告（見「失敗」列），作廢沒有全部成功 → ⛔ 不產生 `raw-failed/`、保留 S、stderr 列出移除不了的路徑與型別；成功時 commit point 之後 S 清不掉**只警告、結束碼仍 0**（`<work>` 的結果照常有效）。⚠️ **保留的 S 的刪除**（2026-10-16 訂正，⑨-2 細部計畫第三輪 review：原本寫「依 stderr 印出的位置手動刪除」，會繞過身分檢查）：有正式的 `raw/`（頂層有報告）或 `raw-failed/` 時，保留的 S 只能在 manifest 與適用的驗證都完成之後，以身分綁定的刪除程序刪除（`run.tsv` 的四個 PID／starttime 欄位齊全而且 harness 與 wrapper 都已結束、run id 相符、恰好一個自己擁有的目錄、⛔ 沒有本次的容器與 argv 含 S 的程序；指令見本節表格下方的「保留的 S 的刪除程序」，⑨-1 與 ⑨-2 共用；2026-10-27 自 `docs/issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫」「五」複製）——⛔ 不依 stderr 的位置手動刪除；**只有診斷資料**（只保留 S、只留下 staging、host 在驗證完成之前重開過）時⛔ 不刪，停下回報 |
+| harness 的狀態 | 全在 host tmpfs `/dev/shm/i074-sizing-<run id>/`（S），⛔ 不落在量測的檔案系統；成功時複製到 `<work>/raw/`、失敗時發布成 `<work>/raw-failed/`——⚠️ 兩者都⛔ 不含 shim 的入口 `bin/docker`（複製之前只移除這一個 symlink，`readlink` 的結果記進 `console.log`；本體在 `harness/`、有 `MANIFEST` 的 SHA），raw manifest 因此產得出來。⚠️ **步驟的 process group 確實結束（`TERM` 等 20 秒、仍有成員就升級 `KILL` 再等 5 秒）、收養的程序與容器全部清掉**之後才產生 `raw-failed/`（2026-10-15 ⑨-1 前置修正；任一沒成功 → **只保留 S**、⛔ 沒有 `raw-failed/` 與摘要，S 只當診斷資料——仍存活的程序可能還在寫它；stderr 印出 S 的位置、移除不了的容器 CID（請手動 `docker rm -f`）與收不掉的 PID）。`raw-failed/` 以原子的方式發布：先完整複製到 `<work>/.raw-failed.staging`，成功才以同目錄的 `mv -T` 改名（發布前兩個名稱都必須⛔ 不存在）；複製失敗或中途被終止只會留下 staging（⛔ 不是證據、⛔ 不產 manifest）。**rename 是唯一的分界**：rename 之後才被終止（SIGKILL、`on_failure` 期間的 TERM）的 `raw-failed/` 仍是正式的原始量測，⛔ 不受結束碼影響。發布與摘要都成功才清 S。⚠️ raw-failed freeze record 修正（2026-10-14）：失敗時先**作廢** freeze record 與頂層報告（見「失敗」列），作廢沒有全部成功 → ⛔ 不產生 `raw-failed/`、保留 S、stderr 列出移除不了的路徑與型別；成功時 commit point 之後 S 清不掉**只警告、結束碼仍 0**（`<work>` 的結果照常有效）。⚠️ **保留的 S 的刪除**（2026-10-16 訂正，⑨-2 細部計畫第三輪 review：原本寫「依 stderr 印出的位置手動刪除」，會繞過身分檢查）：有正式的 `raw/`（頂層有報告）或 `raw-failed/` 時，保留的 S 只能在 manifest 與適用的驗證都完成之後，以身分綁定的刪除程序刪除（`run.tsv` 的四個 PID／starttime 欄位齊全而且 harness 與 wrapper 都已結束、run id 相符、恰好一個自己擁有的目錄、⛔ 沒有本次的容器與 argv 含 S 的程序；指令見本節表格下方的「保留的 S 的刪除程序」，⑨-1 與 ⑨-2 共用；2026-10-27 自 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 細部計畫」「五」複製）——⛔ 不依 stderr 的位置手動刪除；**只有診斷資料**（只保留 S、只留下 staging、host 在驗證完成之前重開過）時⛔ 不刪，停下回報 |
 | 容器 | 經 docker shim 以**唯讀 rootfs、⛔ 無可寫 `/tmp`** 執行，具名 `i074sz-<run id>-<ID>`；中斷時以 cidfile 記錄的 CID `docker rm -f`。每個步驟在自己的 process group 執行，⚠️ leader 結束後 group 裡**仍有活著的成員**（背景子程序）也算失敗並收尾。成功路徑在寫出報告之前以 `docker ps` 確認本次的容器一個都不剩——⚠️ `docker ps` 本身失敗也算失敗（⛔ 查不到不能當作沒有殘留）。殘留時可用 `docker ps -a --filter name=i074sz-` 檢查 |
 | 輸出 | `<work>/sizing_report.json`（canonical）與 `sizing_report.txt`：三條路徑各自的目錄取樣峰值、檔案系統取樣峰值、會計上界與 `P_path`，`P_B`，每個程序的 cgroup 峰值（含 page cache；⚠️ 旁邊的結束碼是**容器內 Python 段**的，例如 check 的 Python 段回 0、shell 段才依命中回 2），`status`（`ok`／`assumption_violated`） |
 | 失敗 | 結束碼 1、⛔ 不發布頂層報告（`<work>/sizing_report.*` 與 `<work>/freeze_record.json` 都⛔ 不存在）；`<work>/failure_summary.json` 記失敗的階段與結束碼（⛔ 不宣稱 `P_B`）——⚠️ 2026-10-15 起**只與正式的 `raw-failed/` 一起出現**（它的欄位固定指向 `raw-failed/`），而且以原子的方式寫（同目錄的暫存檔 → fsync → `os.replace`：正式路徑只會是「不存在」或「完整的 canonical JSON」）；摘要寫入失敗時 `raw-failed/` 仍是正式的原始量測、S 保留。`raw-failed/` 或保留的 S 仍可能含診斷用的報告，但 freeze record 一律作廢（刪除；一般檔案的 SHA-256 記在 `console.log`）。`cp -a S <work>/raw` 本身失敗時⛔ 不經失敗清理：⛔ 沒有 `raw-failed/` 與摘要、S 保留並印出位置。⚠️ **頂層的 `freeze_record.json` 是 commit marker**（只由步驟 6 最後的同目錄 rename 產生）：它存在時⛔ 不得盲目重跑或丟棄——SIGKILL、host 的 OOM killer、HUP 等⛔ 未攔截的終止若發生在 rename 之後，結束碼可能非 0 而頂層已有紀錄；先以 `check-pair`、`raw/` 與 ⑩ 持鎖階段的來源規則判讀。⚠️ 例外（2026-10-16，⑨-2 細部計畫第三輪 review）：host 在判讀與驗證完成之前重開過（`/proc/stat` 的 `btime` 晚於開跑的時間）→ 這次**一律降級成只有診斷資料**，即使頂層有 freeze record（S 在 tmpfs 上、一起消失；`cp` 與 `mv -T` 都⛔ 沒有 fsync，當機之後的完整性無從確認）：⛔ 不交給 ⑩、⛔ 不產 manifest、⛔ 不自動重跑，停下回報 |
 | 演練用的故障注入 | `I074_SIZING_FAULT=twins`（在 metadata twin 那一步中止）／`copy`（中止時略過 `raw-failed/` 的發布：⛔ 沒有 `raw-failed/` 與摘要、S 保留）／`summary`（中止時略過失敗摘要：`raw-failed/` 照常發布、⛔ 沒有摘要、S 保留）／`cleanup`（放一份假 cidfile 後中止，搭配移除不了的 docker 驗證 S 會被保留）／`stuck`（放一個忽略 `TERM` 的步驟後中止，驗證升級 `KILL`）／`group-alive`（讓 group 在 `KILL` 之後仍被視為存活，驗證 S 會被保留）／`final-check`（直接跑成功路徑結束前的容器檢查，搭配 `docker ps` 失敗驗證 fail-closed）／`orphan-ok`、`orphan-bad`（步驟的 leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡，驗證一律收尾並中止）——⚠️ 只給 ④ 的中止點演練，`--formal` 一律拒絕 |
 
-**保留的 S 的刪除程序**（⑨-1、⑨-2 共用；2026-10-27 自 `issue.md` I-074「Stage 2 步驟 ⑨-2 細部計畫 v4」「五」複製——條件與程序本體逐位元相同，只換了區塊 id；
+**保留的 S 的刪除程序**（⑨-1、⑨-2 共用；2026-10-27 自 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 細部計畫 v4」「五」複製——條件與程序本體逐位元相同，只換了區塊 id；
 ⑨-1 把兩個參數換成 `/dev/shm/s91-<NAME>/run.tsv` 與 `~/i074_stage2_acceptance/<NAME>/raw` 或 `raw-failed`）：
 
 * **只用於**有正式原始量測、而且 manifest 與適用的驗證都已完成的那一次：正式的 `raw-failed/`（rename 之後才被終止、摘要缺失或清 S 失敗）；頂層有 freeze record 的 `raw/`（commit point 之後才被 KILL，或成功之後清 S 失敗的警告）；結束碼 0 的判定（清 S 失敗的警告）。**只有診斷資料**（含 host 在「五」完成之前重開過）⛔ 不用——依 D8 停下回報。
@@ -1901,7 +1901,7 @@ SH
   才寫 `<work>/freeze_record.json`（否則印原因、⛔ 不寫、結束碼仍 0——缺 freeze record 本身就擋住 ⑩）；複製之後對副本再驗一次。
   三個腳本 SHA 是 `repo_head` 中的**檔案內容** SHA-256（⛔ 不是 blob OID）。`--formal` 另要求 Stage 2 identity 存在，「檔案 ＝ HEAD」清單
   加入 freeze record 與 preflight 兩個模組。
-  ⚠️ **raw-failed freeze record 修正**（2026-10-14；`issue.md` I-074「Stage 2 raw-failed freeze record 修正計畫 v1」）：步驟 6 的順序改成
+  ⚠️ **raw-failed freeze record 修正**（2026-10-14；`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」）：步驟 6 的順序改成
   收尾檢查（容器、收養）→ build（寫在 S）→ 第二次收養檢查 → `cp -a S <work>/raw` → 報告 → `<work>/.freeze_record.json.staging` →
   `check-pair`（staging ＋ 頂層報告）→ **commit point**（忽略 INT／TERM → 同目錄 `mv -T` 成 `freeze_record.json` → `DONE=1`）→ post-commit
   （只有警告、結束碼 0）。commit 之前的任何失敗（含 INT／TERM）都**作廢** S、staging、`raw/` 裡的 freeze record 與頂層的報告
@@ -1913,7 +1913,7 @@ SH
 正式裁定，要回頭 review 計畫。⚠️ ⑦ 的正式流程若量到比 ⑤ 裁定的 `P_B` 更大的實際峰值：⛔ 不得進入 ⑩，更新
 `P_B`／`M_safety`、重跑 ⑤、回到 ⑥ 確認。
 
-⚠️ **⑦d（2026-10-02）改動**（規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）：
+⚠️ **⑦d（2026-10-02）改動**（規格見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）：
 - **快照與 re-exec**：主腳本開頭的 minimal bootstrap 把 harness 自己的檔案（主腳本、`scripts/lib/i074-stage2-measure.sh`、shim、
   `mem-guard.sh`、`python/scripts/i074_stage2_sizing.py`）複製到 `<S>/harness/`、寫 `MANIFEST`，再 `exec` 快照裡的主腳本——之後每一行都
   從快照執行，量測期間改動 repo 裡的這些檔案⛔ 不影響本次。`--formal` 在複製**之前**驗原檔 ＝ HEAD、複製**之後**再驗快照 ＝ HEAD。
@@ -1925,7 +1925,7 @@ SH
 - shim 的 sidecar 另記容器實際的記憶體上限（`docker inspect` 的 `HostConfig.Memory`／`MemorySwap`；兩個 profile 都記，讀不到 →
   量測失敗）；acceptance 的報告以它逐 invocation 列出並驗證（實作第一輪 review）。
 - 共用的 shell 原語（S 之後的六步清理、process group、CID 清理、量測窗口、啟動守門）抽成 `scripts/lib/i074-stage2-measure.sh`，與 acceptance harness 共用。
-- **有效性條件**（2026-10-06；`issue.md` I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`report` 帶 `--clone`，`P_B_BUDGET`
+- **有效性條件**（2026-10-06；`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`report` 帶 `--clone`，`P_B_BUDGET`
   取自 S 的快照（快照清單多了 `python/scripts/i074_stage2_preflight.py`，並斷言與工作複本逐位元相同）。某條路徑
   `max(dirs_peak, accounted)` ＞ 預算（確定的超標）→ 照常寫報告（`P_B` ＞ 預算，freeze record 照舊拒寫、走回退順序；同一次的
   有效性問題列在文字版與 stderr）；沒有確定的超標、但有有效性問題（`fs_unexplained` ＞ 1 MiB 或模糊區）→ 量測**無效**、結束碼 1、
@@ -1943,7 +1943,7 @@ SH
 
 ### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定，✅ 2026-10-06 commit `576a8f7`）；2026-10-06 有效性條件與 ⑨-1 fail-fast，✅ review 通過並 commit `c49fde1`）
 
-⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
+⚠️ 規格見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
 「I-074 Stage 2 的容量驗收」。本節只寫**操作程序**。⛔ 不是正式的證據入口；**正式驗收是 ⑨-1**。
 
 ```text id="i074_stage2_acceptance_usage_001"
@@ -1951,7 +1951,7 @@ SH
 REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/i074-stage2-acceptance.sh --work-dir ~/i074_stage2_acceptance/<名稱>
 
 # ⑨-1 的正式驗收（⑨ 封存之後；clean、harness 檔案 ＝ HEAD；--replay-compute full 是唯一的量測趟，約 3 小時）
-#   ⚠️ 完整的程序（P1～P9、判讀與各分支、保存）見 issue.md I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的「二」～「五」：由使用者在
+#   ⚠️ 完整的程序（P1～P9、判讀與各分支、保存）見 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的「二」～「五」：由使用者在
 #   tmux／自己的終端機執行，Claude 先結束（Codex ⛔ 不使用）；stdout／stderr ⛔ 不得導到量測中的檔案系統上的一般檔案（wrapper 導到 tmpfs）。
 # P1～P8 的確認、D1 的證據與「五」7 的基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT）：
 #   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt（2026-10-16 修改）
@@ -2080,7 +2080,7 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（⛔ 沒有 info log；`job_runs` 的保留期是程式常數 30 天（`jobRunRetentionDays`），live 部署的版本⛔ 未查證——2026-10-29 訂正原本的「只留數天」）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
 | 正式量測之間「只動文件」的定義（2026-10-27，⑨-2 的 P1 修正） | ⑨-1 之後到 ⑨-2、⑨-2 之後到 ⑩，repo 只允許改**文件**：`docs/` 與**根目錄**的 `CLAUDE.md`；其他任何路徑（含 `backend/`、`frontend/`、根目錄的其他檔案、子目錄裡同名的 `CLAUDE.md`）都算程式變更——量到的程式必須 ＝ 下一步要跑的程式。判定方式：`git diff --name-only <前一步的 repo_head> HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md'` 為空，而且 `git diff` 本身成功（⑩ 的 precheck P1 即此寫法）。原本只允許 `docs/`，根目錄 `CLAUDE.md` 的修改會被誤擋 |
 | 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的複本，含 `harness/MANIFEST`；⛔ 不含 shim 的入口 `bin/docker`）；失敗時：三項清理（步驟的 group、收養的程序、容器）都成功才有 `<work>/raw-failed/`（同樣⛔ 不含 `bin/docker`；完整複製到 `.raw-failed.staging` 之後以 `mv -T` 原子發布）與 `failure_summary.json`（只跟著正式的 `raw-failed/`、原子發布）；任一清理失敗 → 只保留 S（診斷資料，⛔ 不救援、⛔ 不產 manifest）。rename 之後才被終止的 `raw-failed/` 仍是正式的原始量測（結束碼可能是 137／143，摘要可能缺失）。規則與 sizing 一節的「harness 的狀態」相同（共用 `scripts/lib/i074-stage2-measure.sh` 的 `on_failure`） |
-| 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree）。只有 ⑦d 的開發驗證（stub）可以用完整個刪除。⚠️ **⑨-1 正式驗收的 `<work>` ⛔ 不刪**（`issue.md` I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的 D5）：每一次嘗試都連同 `<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂——正式原始量測的錨（manifest 的 `sha256`）要能回頭對照 |
+| 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree）。只有 ⑦d 的開發驗證（stub）可以用完整個刪除。⚠️ **⑨-1 正式驗收的 `<work>` ⛔ 不刪**（`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的 D5）：每一次嘗試都連同 `<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂——正式原始量測的錨（manifest 的 `sha256`）要能回頭對照 |
 | ⚠️ 量測期間 | ⛔ 不要動真正的 repo（每條路徑前後比對它的完整 inventory）；⛔ 不要在 `<work>` 裡建檔。量測的是 bootstrap 解析的那一個 commit（`repo_head`）：`--formal` 啟動時 HEAD 已在 bootstrap 之後移動 → 在建 work 目錄之前拒絕；之後 HEAD 再移動⛔ 不影響本次 |
 | 環境 | 每一步都以 `env -i` ＋ supervisor 的 `clean_env()` ＋ 固定 PATH（`<S>/bin:/usr/bin:/bin`）經 `host-run` 執行；兩份 patch 的環境變數只給 replay 那一步（報告逐步驗，違反即 fail-closed） |
 | 能力檢查（⑦d 增補） | 建 work 目錄之後、clone 之前：以真正的 docker、同一個 image 跑一次 wrapper（`python -c pass`），`rss.json` 必須是 cgroup v1 的 `total_rss`、`reaper=pid1`；不符、逾時（120 秒）、docker 失敗 → 中止（結束碼 1、⛔ 不 clone）。換到 cgroup v2 的 host 會在這一步停下，需另行裁決 |
@@ -2090,7 +2090,7 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 ⑩ 期間的 **observer**（⛔ 不是 ⑩ 的一部分、⛔ 不作為前置；結果只額外記錄）。⚠️ 2026-10-28 的 ⑩ 正式執行**由 wrapper 啟動與停止**
 （⑩ 之前以背景啟動、記下 PID ＋ starttime；⑩ 結束之後 PID ＋ starttime 相符才送 TERM、最多等 120 秒、記下結束碼；它失敗或沒有結束都⛔ 不影響 ⑩
 與 rc marker）——見「I-074 Stage 2 的正式執行程序」末段的「⑩ 的正式執行程序」①；觀測結果記在
-[`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)「十四」。下面是單獨手動執行的用法：
+`git show 20eacb2:docs/plans/i074-stage2-step10.md` 的「十四」。下面是單獨手動執行的用法：
 
 ```text id="i074_stage2_observe_usage_001"
 # ⑩ 開始之前，在另一個終端機啟動；⑩ 結束之後按 Ctrl-C 停止
@@ -2107,8 +2107,8 @@ python3 python/scripts/i074_stage2_sizing.py observe --work-dir <⑩ 的 --work-
 
 ### I-074 Stage 2 的測試落點（⑧ 稽核，2026-10-07）
 
-I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 ③ evidence contract「十」）分散在下面幾個落點；逐 id 的稽核表在
-[`issue.md`](./issue.md) I-074「Stage 2 步驟 ⑧ 稽核結果」。這裡只列**穩定的類別與入口**（⛔ 不搬會隨改名漂移的方法清單）。
+I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 ③ evidence contract「十」）分散在下面幾個落點；逐 id 的稽核表（歷史）在
+`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑧ 稽核結果」。這裡只列**穩定的類別與入口**（⛔ 不搬會隨改名漂移的方法清單）。
 
 | 類別 | 落點 | 入口 |
 |---|---|---|
@@ -2129,7 +2129,7 @@ I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 
 
 * 斷言**性質**，⛔ 不能只靠結束碼、`pytest.raises(Exception)` 或不看訊息的 shell 守門——⑧ 稽核把這類斷言縮窄之後，抓到三組其實被
   別的守門擋下的測試（preflight 的 ay 被「⛔ 不是 canonical gzip」擋下；runner 的 x 被 run identity 的驗證擋下；n8 的「改掉複本的已追蹤檔」
-  改的是 orchestrator 自己會執行的 helper，在檢查點之前就失敗），見 issue.md。竄改的對象要選**⛔ 不會被執行**的檔案，才證明得了守門本身。
+  改的是 orchestrator 自己會執行的 helper，在檢查點之前就失敗），見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑧ 稽核結果」。竄改的對象要選**⛔ 不會被執行**的檔案，才證明得了守門本身。
 * host 測試起長存的子孫程序時，每支測試一個 cleanup token、帶在那些程序的 argv（長存的等待一律用 `_sleeper()` 這種帶 token 的
   Python sleeper，⛔ 不用不帶 token 的 `sleep 30`——它被收養之後就與 token 失去關聯），斷言之後以 `reap_token_processes()` 收掉並斷言
   ⛔ 沒有存活（它獨立於被測的產品函式；teardown 再收一次當保險）——產品的清理失效或測試中途失敗時才不會洩漏程序。

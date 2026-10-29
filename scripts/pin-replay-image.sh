@@ -20,7 +20,7 @@
 #
 # 結束碼：0 ＝ 成功；3 ＝ durability 未確認（檔案有效，重跑會走 no-op 並重新 fsync）；1 ＝ 其他。
 #
-# ⚠️ **`--stage 2`（I-074 Stage 2，issue.md I-074 Stage 2 計畫書「二、⑤」）**：Stage 1 釘住的
+# ⚠️ **`--stage 2`（I-074 Stage 2，docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）**：Stage 1 釘住的
 # image 已不在本機（2026-09-23 查證）。可能成因是 pin 用的 tag 與 `python/scripts/test.sh`
 # 等腳本**共用**——任何一次重新 build 都會讓釘住的 ID 失去 tag、之後被 prune 清掉。所以 Stage 2：
 #

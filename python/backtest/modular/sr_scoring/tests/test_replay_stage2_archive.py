@@ -1,6 +1,6 @@
 """I-074 Stage 2 的正式證據（③d）：成功 archive、failed-attempt record、check／recover 的 Python 段。
 
-對應 issue.md I-074 ③ evidence contract（⚠️ 現行版）的「三」～「七之四」與測試矩陣 `a`～`aw`、
+對應 git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract（⚠️ 現行版）的「三」～「七之四」與測試矩陣 `a`～`aw`、
 `ay`、`az`、`ah4`／`ah5`、`bb`～`bk`（⚠️ `ax`、`ba` 與 `n`／`ai`／`ay` 的「在 replay 之前」那一層屬
 Stage 2 步驟 ⑦；shell 端的合成守門、argv 與 check 的決策在 `scripts/test-replay-args.sh`）。
 

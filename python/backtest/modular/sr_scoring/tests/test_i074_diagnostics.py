@@ -1,6 +1,6 @@
 """I-074 Stage 0 的診斷欄位：產出、透傳、fallback 與 validator。
 
-對應 `docs/issue.md` I-074 Stage 0 的十、測試與驗證策略
+對應 `git show 86241a8:docs/issue.md` 的 I-074「Stage 0 計畫書 v17」「十、測試與驗證策略」
 （v16 定的原始策略 ＋ v17 的 review 修正）。
 ⚠️ **護欄的非回歸由既有測試負責**（`test_lifecycle_engine.py` 的 15 條逐鍵斷言、
 `test_decision_engine.py` 的既有斷言全部不修改），這一檔只加新增行為。

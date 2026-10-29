@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2：證據的發布與修復入口（issue.md I-074 ③ evidence contract「七之四：CLI matrix」）。
+# I-074 Stage 2：證據的發布與修復入口（CLI matrix 見 docs/development-workflow.md「finalizer 的 CLI matrix」；原文：git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「七之四」）。
 #
 # 八種模式（互斥、必選其一；路徑一律寫死常數或由 --run-dir 固定推導，⛔ 不開逐檔覆寫；⑦c 的驗證模式只接受兩種路徑）：
 #
@@ -17,7 +17,7 @@
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --check-failed-record --counterfactual-patch <patch>
 #   REPLAY_IMAGE_ID=sha256:… scripts/finalize-stage2-evidence.sh --recover-failed-record <record 目錄>
 #
-#   # ⑦c 晉升與判讀器共用的**唯讀**驗證入口（issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」）
+#   # ⑦c 晉升與判讀器共用的**唯讀**驗證入口（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之二」）
 #   REPLAY_IMAGE_ID=sha256:… <某個複本>/scripts/finalize-stage2-evidence.sh --verify-promotion-staging <path> \
 #       --target <evidence|failed/<bundle_id>-<語意 SHA>> [--judge]
 #   ⚠️ 真正 repo 由**本腳本所在 repo 的 origin** 推導（⛔ 沒有路徑參數）；<path> 只接受兩種：真正 repo 的

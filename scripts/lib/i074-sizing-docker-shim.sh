@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # I074-SIZING-DOCKER-SHIM
-# I-074 Stage 2 步驟 ④：sizing harness 的 docker shim（issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」
+# I-074 Stage 2 步驟 ④：sizing harness 的 docker shim（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」
 # 的「三、docker shim」表）。harness 把它以 `docker` 的名字放在 PATH 最前面；⛔ 不是正式入口。
 #
 # 只改寫 `docker run`，其餘子指令原樣 exec 真正的 docker。改寫內容：

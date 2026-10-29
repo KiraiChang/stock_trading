@@ -8,7 +8,7 @@
 
 stdout **只印一行 canonical JSON**：`{"pip_freeze_sha256": …, "python_version": …}`；失敗時 stdout ⛔ 無輸出。
 
-⚠️ **為什麼要比這兩欄**：Stage 1 釘住的 image 已不在本機（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+⚠️ **為什麼要比這兩欄**：Stage 1 釘住的 image 已不在本機（docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。
 2026-09-23 實測 `stock_trading-python-server:latest`（與遺失的 image 同一份 Dockerfile、只晚 16 分鐘
 build）的 `pip_freeze_sha256` 與 Stage 1 **完全相同**，而今天重新 build 的會裝到不同版本——所以
 Stage 2 **採用既有 image**，⛔ 不重新 build。採用前必須證明它的環境確實等於 Stage 1 當時的環境。

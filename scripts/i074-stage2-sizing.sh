@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 步驟 ④：sizing harness（issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」v7 ＋ 差異 1）。
+# I-074 Stage 2 步驟 ④：sizing harness（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」v7 ＋ 差異 1）。
 #
 #   REPLAY_IMAGE_ID=sha256:… scripts/i074-stage2-sizing.sh --work-dir <repo 外、尚不存在的目錄> [--formal]
 #
@@ -12,7 +12,7 @@
 #   TERM 的步驟再中止——驗證升級 KILL）、group-alive（模擬 KILL 之後仍有成員——驗證保留 S），或 final-check
 #   （直接執行成功路徑結束前的容器檢查——搭配 ps 失敗的 docker 驗證「查不到不能當作沒有」），或 orphan-ok／
 #   orphan-bad（leader 以預期／非預期的結束碼退出、背景子程序仍留在 group 裡——驗證一律收尾並中止），或 fs-noise
-#   （success 窗口期間在量測範圍外寫 2 MiB——有效性條件必須把量測判成無效；issue.md I-074「Stage 2 量測的有效性條件與
+#   （success 窗口期間在量測範圍外寫 2 MiB——有效性條件必須把量測判成無效；git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與
 #   ⑨-1 fail-fast 計畫」）。
 #
 # 模式：預設是 ④ 的**可用性驗證**（允許未 commit，報告記錄實際執行的腳本 SHA-256）；
@@ -189,7 +189,7 @@ done
 
 measure_start_guards "sizing harness"   # 設 IMAGE、REAL_DOCKER（與 ⑩ 的 label shim 互斥）
 measure_work_dir_guard "$WORK_ARG"      # 設 REPO_CANON、WORK、L0_DEV
-# ⚠️ issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單——on_failure（複製 S 之前）與 raw 複製失敗的分支
+# ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「三」：作廢清單——on_failure（複製 S 之前）與 raw 複製失敗的分支
 #   移除它們，⛔ 不留下可以進 ⑩ 的 freeze record，頂層也⛔ 不發布報告。頂層的 freeze_record.json 只由 commit point 的 rename 產生。
 MEASURE_VOID_PATHS=("$S/freeze_record.json" "$WORK/.freeze_record.json.staging" "$WORK/freeze_record.json"
                     "$WORK/raw/freeze_record.json" "$WORK/sizing_report.json" "$WORK/sizing_report.txt")

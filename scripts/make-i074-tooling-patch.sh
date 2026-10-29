@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # I-074 Stage 2：產生 tooling patch（`python/baselines/i074_stage2/tooling_e1cbbbd.patch`）。
 #
-# 為什麼需要它（issue.md I-074「Stage 2 步驟 ⑦ 總綱 v1」的「一之一」「二」）：⑩ 的 replay 容器掛的是
+# 為什麼需要它（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦ 總綱 v1」的「一之一」「二」）：⑩ 的 replay 容器掛的是
 # **`e1cbbbd` worktree** 的 `python/`，⛔ 不是 HEAD——HEAD 對 `evaluation.py` 與 `replay_bundle/` 的改動
 # （反事實路徑、串流 loader、`CounterfactualEffectCheck`…）只能經由 tooling patch 進入 replay。
 # tooling patch ＝ `T1..T2` 的 canonical diff：

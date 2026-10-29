@@ -1332,8 +1332,8 @@ after 的 `lifecycle_phase` 一律是 `CONTINUATION`、`rr_decoupling_candidate`
 | after artifact（Stage 1 的 D+1；comparison 的 `after_artifact_sha256`） | `33a6b1666487abcfc88353020afbd1e35a8cbab71b40c9ef17ea1194a8cc8b8c` |
 | 判讀器輸出 `verdict.json`（`~/i074_stage2_formal/judge-20261029T061203Z/`） | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
 
-判讀規則、執行方式與正式值見下方「I-074 Stage 2 的晉升與 B／C 判讀器」；執行紀錄見
-[`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」。下一節（2026-09-01）是自然樣本上的結果，保留作為對照。
+判讀規則、執行方式與正式值見下方「I-074 Stage 2 的晉升與 B／C 判讀器」；執行紀錄（歷史）見
+`git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」。下一節（2026-09-01）是自然樣本上的結果，保留作為對照。
 
 ##### decision replay 實測（2026-09-01）
 
@@ -2711,7 +2711,7 @@ isolation**，落在 `READ COMMITTED` 時每次 consistent read 都會取新快�
 ⚠️ ①② 不能省：before 少算／多算一列時比較就不完整，而只看 after 與 manifest 完全看不到。
 ⛔ Stage 2 **不得重算 predicate**——③ 依 after artifact 既有的欄位。
 
-**候選欄位 `rr_decoupling_candidate` 的守門**：它是 `issue.md` I-074 Stage 0 才補上的診斷
+**候選欄位 `rr_decoupling_candidate` 的守門**：它是 I-074 Stage 0 才補上的診斷
 欄位，本工具**只消費、⛔ 不重算也不用近似欄位反推**。Stage 1 對每一列驗**嚴格 boolean**
 （⛔ 不收 `0`／`1`／`"true"`／`None`），缺欄位就**在發布 after artifact 與 cohort manifest
 之前**中止。⚠️ **欄位完整而全列為 `false` 時，空 cohort 是合法結果**——⛔ 不得與欄位缺失
@@ -2786,7 +2786,7 @@ replay row 原本取 `_sort_zone_scores()[0]`（排序第一筆），現在取
 
 #### 九個診斷欄位的完整 schema
 
-⚠️ **這張表是永久 contract**：`issue.md` 的 I-074 收斂後會被移除，規格必須留在這裡。
+⚠️ **這張表是永久 contract**：I-074 已於 2026-10-29 自 `issue.md` 收斂移除，規格只在這裡。
 
 | JSON path（replay row） | 型別 | nullable | 來源 | no-zone fallback 值 |
 |---|---|---|---|---|
@@ -2885,9 +2885,34 @@ boolean，這裡只消費它來重建集合與計數。
 artifact，所以 `artifact["rows"][i]["before"]` **就是** `before_by_key[key]` 那個物件。
 竄改 artifact 時會一併改到來源，來源對照就變成「自己跟自己比」而永遠通過。
 
+#### 程式註解裡的 I-074 舊引用（凍結集合；2026-10-29 I-074 收斂）
+
+I-074 已於 2026-10-29 自 `issue.md` 收斂移除。程式與腳本的註解原本寫「見 issue.md I-074「…」」，凍結集合以外的都已改成指向本文件或
+`git show 20eacb2:docs/issue.md`（I-074 的最後完整版本）。⚠️ **凍結集合裡的註解⛔ 沒有改**：`python/` 底下扣掉 `python/baselines`、
+`python/scripts`、`sr_scoring/tests` 的檔案（`decision_engine.py`、`lifecycle_engine.py`、`evaluation.py`、`replay_bundle/` 等）。
+原因是 `scripts/test-replay-args.sh` 的漂移測試：它要求以目前的 tree 重新產生的 tooling patch 與已封存的
+`python/baselines/i074_stage2/tooling_e1cbbbd.patch` 逐位元相同，而產生器另外要求這些產品碼與 `e1cbbbd` 完全相同——
+改一個位元組測試就失敗，重新產生 patch 又會觸發「⑨、⑨-1、⑨-2 全部重做」的封存規則。這個凍結的退役見 `todo.md` T-077；
+在那之前，凍結集合裡的舊引用照下表讀：
+
+| 註解裡寫的 | 現在的位置 |
+|---|---|
+| issue.md I-074、I-074 Stage 0、「candidate 的精確定義」、「責任層」、「replay 原本取的是…」 | 本文件「Decision Replay 的診斷欄位（I-074 Stage 0）」；兩顆 primary zone 的落差與 `lifecycle_phase` 補進 replay 的原因見「已知並接受的行為改變」的「decision replay 實測（2026-09-01）」 |
+| 「不相同本身就是分支 C」 | ⚠️ 已被 Stage 2 計畫書 v18 取代：before 的候選集合預期恆為空，⛔ 不是分支 C；現行模型見下方「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」 |
+| Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一：記憶體模型」 | 下方「I-074 Stage 2 的環境見證契約」（含記憶體模型） |
+| Stage 2 計畫書「二、①」、③ evidence contract「三」～「七之四」「三之二」（現行版） | 下方「I-074 Stage 2 的正式證據契約」；CLI matrix 見 `development-workflow.md`「finalizer 的 CLI matrix」 |
+| v29「八之三」、「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」、⑦c 實作結果「與計畫的差異」 | 下方「I-074 Stage 2 的晉升與 B／C 判讀器」的晉升契約 |
+| 「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」 | 下方「I-074 Stage 2 的晉升與 B／C 判讀器」的「B／C 判讀規則」 |
+
+這些章節的原文都在 `git show 20eacb2:docs/issue.md` 的 I-074。
+
+⚠️ **例外：Stage 0、Stage 1 的計畫書**（Stage 0 v17、Stage 1 v25）在 2026-09-16 已先行收斂（`7b8952d`），`20eacb2` 只剩收斂索引；它們的原文（例如 Stage 0 的「十、測試與驗證策略」）要看 `git show 86241a8:docs/issue.md`（`7b8952d` 的前一版）。⛔ 不要在 `20eacb2` 裡找——那一版的「十、測試與驗證策略」是 ③ evidence contract 的「十」。
+
+程式、腳本與 `.gitattributes` 的註解（凍結集合內外都有），以及少數輸出字串裡，還有只寫章節名、⛔ 沒寫出處的簡寫——例如「v29「六、1」」「⑦ 總綱 v1「二」」「③ evidence contract「七之四」」「Stage 2 計畫書「二、④」」「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」、「關閉條件」。它們都是 I-074 的章節，原文同樣在 `git show 20eacb2:docs/issue.md` 的 I-074；字串（例如 sizing 報告的說明文字）屬程式行為，⛔ 不為了引用而改。
+
 #### I-074 Stage 1 的四個永久契約
 
-⚠️ **這一節是永久 contract**：`issue.md` 的 I-074 收斂後會被移除，規格必須留在這裡。
+⚠️ **這一節是永久 contract**：I-074 已於 2026-10-29 自 `issue.md` 收斂移除，規格只在這裡。
 
 ##### 一、Stage 1 專屬 preflight
 
@@ -3024,8 +3049,8 @@ raw bytes ⛔ 不會傳出——再讀一次可能已不是同一版本。用 **
 #### I-074 Stage 2 的環境見證契約（2026-09-23 實作 ③b；✅ review 通過）
 
 ⚠️ **背景**：Stage 1 釘住的 image 已不在本機，Stage 2 改在新 image 上跑。要繼續拿已封存的 D+1
-當 after 側，先要證明新舊 image 對這份 bundle **等價**。完整計畫與修訂經過見 `issue.md` I-074
-（Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一」「七之四」）；操作程序見
+當 after 側，先要證明新舊 image 對這份 bundle **等價**。完整計畫與修訂經過（歷史）見
+`git show 20eacb2:docs/issue.md` 的 I-074（Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一」「七之四」）；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的環境見證程序」。
 實作在 `replay_bundle/` 的 `envcheck.py`、`stage2_evidence.py`、`stream.py`。
 
@@ -3083,7 +3108,7 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 #### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；✅ review 通過）
 
 ⚠️ **範圍**：Stage 2（counterfactual）正式執行的**證據層**——成功 archive、反事實沒有生效時的
-failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過見 `issue.md` I-074
+failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074
 「③ Stage 2 evidence contract」（現行版）與「③d 實作結果」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的正式證據與 failed record 程序」。
 實作在 `replay_bundle/stage2_archive.py`（⚠️ ⛔ 不在 `stage2_evidence.py`：`envcheck.py` import 後者，
@@ -3206,7 +3231,7 @@ lookup **274 MiB**，都在 450 MiB 以內。
 #### I-074 Stage 2 的反事實 replay 路徑與 tooling patch（2026-09-30 實作 ⑦a；✅ review 通過）
 
 ⚠️ **範圍**：⑩ 的 before 正式趟在 replay 程序內做的事（Stage 2 計畫書 v3 比較模型的執行期那一半）；證據層見上一節。
-計畫與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑦ 總綱 v1」與「Stage 2 步驟 ⑦a 細部計畫 v1」。
+計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦ 總綱 v1」與「Stage 2 步驟 ⑦a 細部計畫 v1」。
 
 **啟用**：⚠️ 只有明示的 `--i074-counterfactual` 會走反事實路徑（⛔ 預設關閉、⛔ 不從 ref／hash／cohort 推斷），
 **只限 Stage 2**。它的 SHA `--counterfactual-patch-sha256` **只能由 runner 注入**（使用者傳入、縮寫、`=value`
@@ -3254,7 +3279,7 @@ comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有
 #### I-074 Stage 2 的兩道 guard 與兩份 patch 的封存（步驟 ⑨；2026-10-12 實作，✅ review 通過（兩輪），commit `53538a3`）
 
 ⚠️ **範圍**：⑩ 之前證明「counterfactual 是唯一的產品語意變因、tooling ⛔ 不帶判定變更」，並封存兩份 patch。
-計畫、實驗與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑨ 細部計畫 v1」與「Stage 2 步驟 ⑨ 實作結果」。
+計畫、實驗與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」與「Stage 2 步驟 ⑨ 實作結果」。
 
 **differential guard**（`python/scripts/i074_differential_guard.py`；fixture `python/scripts/fixtures/i074_differential_guard_cases.json`、
 producer `python/scripts/i074_decision_summary_producer.py`）：
@@ -3316,8 +3341,8 @@ tag 只允許 allowance 記錄的增量）。
 
 #### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，✅ review 通過，commit `078ec72`；2026-10-29 ⑪ 判讀 B，✅ review 通過，commit `20eacb2`）
 
-⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
-`issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
+⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過（歷史）見
+`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的正式執行程序」。
 
 **唯讀的驗證入口**（`finalize-stage2-evidence.sh --verify-promotion-staging <path> --target <t> [--judge]`，Python 段
@@ -3386,8 +3411,8 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-**⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`；紀錄見
-[`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)「十四」；判讀器在 evidence commit 之後才執行，屬 ⑪）：
+**⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`；紀錄（歷史）見
+`git show 20eacb2:docs/plans/i074-stage2-step10.md` 的「十四」；判讀器在 evidence commit 之後才執行，屬 ⑪）：
 
 | 值 | ⑩ |
 |---|---|
@@ -3401,8 +3426,8 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | 嘗試 | 1 次、首次就成功（⛔ 沒有 `--resume`／`--promote`、⛔ 沒有崩潰重試） |
 | 正式 scan 的計次（最終） | 上限 ①（跑完並留下 artifact 的 replay，最多 5）：**4／5**（Stage 1 的 D、D+1，③c 的 after'，⑩ 的 before）。before 正式趟 **1／1**；它的崩潰重試 0／1；before 重跑 0／1（不適用：rc 0）。上限 ②（物理啟動，最多 8）有兩種算法，差別只在 **2026-09-17 第一次 D 的 OOM**（容器已執行 183 分鐘、被 SIGKILL、⛔ 沒有任何產出）：① **4／8**：⑩ 計畫（四輪 review）的帳，⛔ 不計入那次 OOM——v27 把 8 趟定義成「D、D+1、after'、before、before 重跑 5 趟 ＋ 後三格各 1 次崩潰重試」，D、D+1 只各佔一格、⛔ 沒有崩潰重試的格子，而那次 OOM 發生在上限制定（2026-09-23）之前；② **5／8**：照「沒有產出的崩潰⛔ 不佔上限 ①、但佔上限 ②」的字面計入那次 OOM。兩種算法都⛔ 沒有到頂；I-074 已結案，之後⛔ 沒有任何正式 scan，兩者的差別⛔ 不影響任何判讀。上限的定法見「正式 scan 的計次裁決」v27（歷史：`git show 20eacb2:docs/issue.md` 的 I-074） |
 
-**⑪ 的正式值**（2026-10-29 以簡易指令 `s11` 執行一次、判讀器 rc 0；✅ review 通過，commit `20eacb2`；紀錄見
-[`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」；結論與下游影響見上方「已知並接受的行為改變」的「I-074 定向驗證」）：
+**⑪ 的正式值**（2026-10-29 以簡易指令 `s11` 執行一次、判讀器 rc 0；✅ review 通過，commit `20eacb2`；紀錄（歷史）見
+`git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」；結論與下游影響見上方「已知並接受的行為改變」的「I-074 定向驗證」）：
 
 | 值 | ⑪ |
 |---|---|
@@ -3414,7 +3439,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
-⚠️ 規格與決策過程見 `issue.md` I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
+⚠️ 規格的決策過程（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
 本節記錄**現況規格**。
 
@@ -3482,7 +3507,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   ——與 `precheck-verdict` 同一個雙層的信任模型（內部是 `raw-manifest-recompute`）；`--out` 以 exclusive create 寫（已存在、含 symlink
   → 拒絕、⛔ 不覆寫），落在 `--raw` 之內 → 拒絕；檢查不符 → rc＝1、⛔ 不寫任何檔案。**錨是記進 `issue.md` 並 commit 的 SHA-256**；
   schema 名稱固定演算法。它只能偵測**之後**的改動。
-- **正式的原始量測與失敗摘要**（2026-10-15，`issue.md` I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」）：正式的原始量測只有兩種——成功的
+- **正式的原始量測與失敗摘要**（2026-10-15；歷史：`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」）：正式的原始量測只有兩種——成功的
   `<work>/raw/`，以及兩個 harness 共用的 `on_failure`（`scripts/lib/i074-stage2-measure.sh`）在作廢與三項清理（步驟的 process group、
   收養的程序、容器）**都成功**之後發布的 `<work>/raw-failed/`；任一清理失敗 → 只保留 S（寫入者可能還在改它，只當診斷資料）。
   `raw-failed/` 以原子的方式發布：`raw-failed` 與 `.raw-failed.staging` 兩個名稱都⛔ 不存在 → 完整複製到 staging → 同目錄的 `mv -T`；
@@ -3540,13 +3565,13 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   `P_B_BUDGET` ＋ `M_safety` ＝ 1,241,513,984 bytes。
 - **⑤ 的正式量測**（2026-09-29，`--formal`，第一次 `status = "ok"` 即為正式紀錄，⛔ 不為數字重跑）：`P_B` 158,101,504 bytes（150.8 MiB；
   success 150.8、witness 132.1、failure 66.2 MiB）。⑦ 之後 HEAD 的 worktree 變大，`P_B` 由 ⑨-2 的確認重跑更新（見下）。
-- **⑨-1 的正式結果**（2026-10-24，`formal-91-20261024T040236Z`、`repo_head` `d3df284`；✅ review 通過並 commit `cbde340`，過程與完整數字見 `issue.md` I-074「Stage 2 步驟 ⑨-1 正式驗收結果」）：
+- **⑨-1 的正式結果**（2026-10-24，`formal-91-20261024T040236Z`、`repo_head` `d3df284`；✅ review 通過並 commit `cbde340`，過程與完整數字（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-1 正式驗收結果」）：
   rc 0、`status` ok、`violations` 無 → ⑨-1 通過。記憶體：每一個程序的最大單一 RSS 都 < 450 MiB——最高是 success 的 replay 394.3 MiB，
   量測趟（`memory_only` 的 `replay`，185.8 分鐘）336.3 MiB；每一個容器的上限都是 700m。磁碟：success 的 `P_basis` 162,926,592 bytes
   （預算 167,772,160，餘裕 4,845,568 bytes ≈ 4.6 MiB）、failure 74,321,920 bytes；`fs_unexplained` −348,160／−376,832 bytes（容差 1,048,576）。
   raw manifest 的錨：`sha256` `cfe94e0a067411a10919ab6a19ce6523736150192f05f0023c659f60fb128033`（203 個檔案、36 個目錄）。
   ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟（`issue.md` I-119）。
-- **⑨-2 的正式結果**（2026-10-27，sizing `formal-92-20261027T090656Z`、`repo_head` `832f678`；✅ review 通過並 commit `62e1773`，過程與完整數字見 `issue.md` I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」）：
+- **⑨-2 的正式結果**（2026-10-27，sizing `formal-92-20261027T090656Z`、`repo_head` `832f678`；✅ review 通過並 commit `62e1773`，過程與完整數字（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」）：
   rc 0、`status` ok、頂層有 freeze record → ⑨-2 通過。磁碟：`P_B` ＝ success 的 `P_path` 163,024,896 bytes（預算 167,772,160，餘裕 4,747,264 bytes
   ≈ 4.53 MiB；比 ⑨-1 的 success 多 98,304 bytes，全部是 `code_worktree`——HEAD 的 tree 隨文件 commit 長大）、failure 74,391,552、witness 141,955,072；
   `fs_unexplained` −204,800／−626,688／−622,592 bytes（容差 1,048,576）。freeze record：`<work>/freeze_record.json`（SHA-256

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 步驟 ⑨ 的執行入口（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「六」）。
+# I-074 Stage 2 步驟 ⑨ 的執行入口（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「六」）。
 #
 #   scripts/i074-step9-guards.sh --source-tree <40 碼 tree> --out <repo 外的新目錄>              # S2～S6
 #   scripts/i074-step9-guards.sh --source-tree <40 碼 tree> --out <repo 外的新目錄> --s7 smoke   # S7 的 smoke

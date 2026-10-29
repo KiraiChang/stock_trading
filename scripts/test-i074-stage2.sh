@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 ⑦b：supervisor／orchestrator／label shim 的整合測試（host 端；issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」）。
+# I-074 Stage 2 ⑦b：supervisor／orchestrator／label shim 的整合測試（host 端；git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」）。
 #
 #   scripts/test-i074-stage2.sh        # 由 python/scripts/test.sh 在 SKIP_SHELL_TESTS 那一段呼叫
 #
@@ -855,7 +855,7 @@ run_entry "$SR" --freeze-record "$TD/frbad2/freeze_record.json" --work-dir "$S/w
 check "n7：報告與 freeze record 的 report_sha256 不符 → 1、runner 未被呼叫" bash -c '[ "$1" = 1 ] && [ ! -s "$2/spy/runner.log" ]' _ "$RC" "$S"
 
 echo "==> i074 Stage 2 raw-failed freeze record：持鎖階段的來源檢查（r0～r10）"
-# 對應 issue.md I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 r0～r10：⑩ 只接受「成功結束的 sizing <work>、在原位置的
+# 對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 raw-failed freeze record 修正計畫 v1」「四」的 r0～r10：⑩ 只接受「成功結束的 sizing <work>、在原位置的
 #   頂層」freeze record（「三」讀取端 1～4）。r1～r10 一律斷言：結束碼 1、runner 未被呼叫、⛔ 沒有建複本、錯誤訊息指明原因。
 r_case() {  # $1＝說明；$2＝freeze record；$3＝錯誤訊息必須含的字串
   new_scenario

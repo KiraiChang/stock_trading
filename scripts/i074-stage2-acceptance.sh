@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# I-074 Stage 2 ⑦d：memory／disk acceptance harness（issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）。
+# I-074 Stage 2 ⑦d：memory／disk acceptance harness（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」）。
 #
 #   REPLAY_IMAGE_ID=sha256:… scripts/i074-stage2-acceptance.sh --work-dir <repo 外、尚不存在的目錄> \
 #       [--replay-compute stub|full] [--formal]
@@ -18,7 +18,7 @@
 #   演練用的故障注入：I074_SIZING_FAULT＝prepare（work 目錄建好之後立刻中止）／twins／copy／summary／bootstrap-*／
 #   fs-noise（success 窗口期間在量測範圍外寫 2 MiB——有效性條件必須判成無效）（--formal 一律拒絕）。
 #   ⚠️ full 模式（⑨-1）：量測趟之前先建 twin、以 `acceptance-precheck` 判定已量到的全部門檻與有效性——不是 ok 就⛔ 不跑量測趟
-#   （額度⛔ 不消耗）；判讀一律經 `precheck-verdict`（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）。
+#   （額度⛔ 不消耗）；判讀一律經 `precheck-verdict`（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）。
 set -euo pipefail
 
 I074_BOOT_PROFILE=acceptance

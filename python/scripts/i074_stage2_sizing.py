@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """I-074 Stage 2 步驟 ④：sizing harness 的 Python 段；⑦d 起也是 memory／disk acceptance harness 的量測原語。
 
-規格見 issue.md I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1，✅ 已確認）與「Stage 2 步驟 ⑦d 細部計畫 v1」。
+規格見 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1，✅ 已確認）與「Stage 2 步驟 ⑦d 細部計畫 v1」。
 由 `scripts/i074-stage2-sizing.sh`、`scripts/i074-stage2-acceptance.sh` 與 `scripts/lib/i074-sizing-docker-shim.sh` 呼叫；
 ⛔ 不是正式的證據入口。⚠️ ⑦d：harness 執行的是 S 裡的**快照**（`<S>/harness/…`），⛔ 不是活路徑的這個檔案。
 
@@ -15,7 +15,7 @@
 * ⑦d（acceptance，host）：`acceptance-report`、`acceptance-anchors`、`replay-argv`、`clean-env`、`promote-measure`、
   `host-run`，與 ⑩ 期間由操作者另外啟動的 `observe`。⚠️ ⑩ 的正式程式（`i074_stage2_preflight.py`、
   `i074_stage2_promote.py`、supervisor 的 `clean_env()`）一律以明確的 `--clone <工作複本>` 載入（⛔ 不從活路徑）。
-* 有效性條件與 ⑨-1 的 fail-fast（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`acceptance-precheck`
+* 有效性條件與 ⑨-1 的 fail-fast（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」）：`acceptance-precheck`
   （live）；offline 的 `precheck-verdict` 與 `raw-manifest`——對外的命令只執行驗錨與取出的 frontend，內部的
   `precheck-recompute`／`raw-manifest-recompute` 只由從錨點 commit 取出的受信任版本執行。`report`、`acceptance-report`、
   `acceptance-precheck` 的權威常數（`P_B_BUDGET`、`ENV_DROP_*`）取自 S 的快照（`live_constants()`）。
@@ -94,7 +94,7 @@ ROLES = PROFILES["sizing"]["roles"]
 EXPECTED_ROLES = PROFILES["sizing"]["expected"]
 LOCATIONS = ("L1", "L2", "L3", "L5")
 # ⚠️ ⑦d「快照與來源的清單」①——與兩個入口的 `I074_BOOT_FILES` 必須相同（測試釘住）。
-#   ⚠️ issue.md「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」的「權威常數的來源」：`P_B_BUDGET`（preflight）與
+#   ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」的「權威常數的來源」：`P_B_BUDGET`（preflight）與
 #   `ENV_DROP_*`（supervisor）的唯一定義也進快照——live 一律從快照載入（`_load_frozen()`），⛔ 不讀活路徑、⛔ 不複製常數。
 FROZEN_PREFLIGHT = "python/scripts/i074_stage2_preflight.py"
 FROZEN_SUPERVISOR = "scripts/lib/i074-stage2-supervisor.py"
@@ -364,7 +364,7 @@ def log_config_problems(log_config: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-# ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」②）：容器內 wrapper 的 `rss.json`。
+# ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」②）：容器內 wrapper 的 `rss.json`。
 #   ⚠️ 與 `i074_stage2_rss_wrapper.py` 的常數相同（測試釘住；sizing 的快照⛔ 沒有 wrapper，所以⛔ 不 import 它）。
 RSS_RECORD_SCHEMA = "i074_stage2_rss_v1"
 RSS_SOURCE = "v1:total_rss"
@@ -623,7 +623,7 @@ def _replace(src: Path, dst: Path) -> None:
 def publish_canonical_json(out: str | Path, obj: Any) -> None:
     """把 `obj` 的 canonical bytes 原子發布成 `out`（host 端；⛔ 不 import `backtest.*`）。
 
-    ⚠️ issue.md I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」（D10，第五輪 review）：磁碟語意與 `stream_write_canonical()` 相同——
+    ⚠️ git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」「十」（D10，第五輪 review）：磁碟語意與 `stream_write_canonical()` 相同——
     先在記憶體算好 bytes（序列化失敗 → 什麼都⛔ 不寫）→ 同目錄 temp `.{name}.{12 hex}.tmp`（exclusive）→ flush ＋ fsync →
     `os.replace` → fsync 目錄。`os.replace` **之前**的任何失敗（ENOSPC、EIO、`RLIMIT_FSIZE`、fsync、replace 本身）在 `finally`
     刪除 temp、⛔ 不留正式檔，例外往外拋；**之後**的目錄 fsync 失敗時正式檔已存在而且完整（內容在 replace 之前已 fsync，耐久
@@ -987,7 +987,7 @@ def phase_peaks(baseline: Mapping[str, Any], samples: list[Mapping[str, Any]]) -
     return {"dirs_peak": dirs_peak, "dirs_peak_by_location": at_peak, "fs_peak": fs_peak, "samples": len(samples)}
 
 
-# ── 有效性條件（issue.md I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」） ──────────────────────
+# ── 有效性條件（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」「二」） ──────────────────────
 
 VALIDITY_KINDS = ("fs_unexplained", "ambiguous_disk_exceed")
 
@@ -1291,7 +1291,7 @@ def promote_measure(clone: str | Path, *, work: str | Path, real: str | Path, st
 
 # ── ⑦d：host 端的程序樹（每一步都經 host-run） ─────────────────────────────────
 
-# ⚠️ ⑦d 增補（issue.md「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：程序的身分與收養。
+# ⚠️ ⑦d 增補（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「二」④）：程序的身分與收養。
 #   `/proc` 的位置是模組常數（測試可以換掉）；PID 一律以 starttime（`/proc/<pid>/stat` 第 22 欄）釘住。
 PROC_ROOT = Path("/proc")
 # `host-run` 紀錄的封閉 schema（十七個鍵；驗證在 host_record_problems()）

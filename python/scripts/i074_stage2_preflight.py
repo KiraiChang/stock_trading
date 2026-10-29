@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""I-074 Stage 2 ⑦b：複本內 orchestrator 的 preflight helper（issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」）。
+"""I-074 Stage 2 ⑦b：複本內 orchestrator 的 preflight helper（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」）。
 
 由 `scripts/run-i074-stage2.sh` 的**複本內** orchestrator 呼叫；⛔ 不是給人直接用的入口。
 

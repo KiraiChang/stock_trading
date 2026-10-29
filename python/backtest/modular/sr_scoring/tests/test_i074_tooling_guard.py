@@ -1,7 +1,7 @@
 """I-074 Stage 2 步驟 ⑨：tooling 非語意 guard 的 comparator（`python/scripts/i074_tooling_guard.py`）。
 
 以合成的四個輸出目錄（Stage 1 A／B、Stage 2 A／B）驗「五」的逐檔封閉規則、hash 自洽與 provenance 期望值
-（docs/issue.md「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#4）。
+（git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」「八」#4）。
 """
 from __future__ import annotations
 

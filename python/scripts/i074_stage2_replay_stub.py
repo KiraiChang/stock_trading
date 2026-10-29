@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """I-074 Stage 2 ⑦d：memory／disk acceptance 的 replay launcher（容器內，Stage 2 image）。
 
-規格見 issue.md I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「二之二」。⛔ 不是正式入口：只有 acceptance harness 的 shim 在 role
+規格見 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「二之二」。⛔ 不是正式入口：只有 acceptance harness 的 shim 在 role
 `replay` 時把容器指令 `python -m backtest.modular.sr_scoring.evaluation <參數>` 換成 `python /acceptance/replay_stub.py <參數>`。
 
 做的事只有一件：**只替換** `evaluation._decision_replay_rows`（約 180 分鐘的計算），其餘全部是 ⑩ 會執行的真實程式碼與資料，

@@ -1,4 +1,4 @@
-# I-074 收斂計畫 v3（2026-10-29；✅ 確認（兩輪 review；D1～D4 採 (a)），commit `c35d4bf`；**階段 1 完成（「十二」，⚠️ 待 review；第一輪 review 的 3 項已修正；一項待使用者決定，見「十二」六）**；歷次修正見「十」）
+# I-074 收斂計畫 v3（2026-10-29；✅ 確認（兩輪 review；D1～D4 採 (a)），commit `c35d4bf`；階段 1 ✅ review 通過，commit `d6f923c`；**階段 2 完成（「十三」，⚠️ 待 review；repo 外的處置在 review 之後）**；歷次修正見「十」）
 
 需求確認（2026-10-29）：依 ⑪ 計畫 D3，另立本計畫，把 I-074 從 `docs/issue.md` 整筆收斂。使用者已裁決：
 
@@ -73,7 +73,7 @@
 | 規則 | 對象 | 寫法 |
 |---|---|---|
 | R1 規格指標 | 指向契約、行為、作業程序的引用 | 改指向主題文件的節，例如「見 `sr-zone-scoring.md`「I-074 Stage 2 的正式證據契約」」 |
-| R2 歷史指標 | 指向計畫書、review、實作經過、執行紀錄、測試 id 出處的引用 | 改成「（歷史：`git show 20eacb2:docs/issue.md` 的 I-074「…」）」；計畫書寫 `git show 20eacb2:docs/plans/<檔名>`（D2） |
+| R2 歷史指標 | 指向計畫書、review、實作經過、執行紀錄、測試 id 出處的引用 | 改成「（歷史：`git show 20eacb2:docs/issue.md` 的 I-074「…」）」；計畫書寫 `git show 20eacb2:docs/plans/<檔名>`（D2）。⚠️ 例外（階段 2 review 補）：Stage 0、Stage 1 的計畫書在 `7b8952d` 已先行收斂，原文要指 `git show 86241a8:docs/issue.md` |
 | R3 名稱 | 「I-074 Stage 2」這類名稱、`i074_*` 檔名、「I-074 的 OOM」這類沿革 | ⛔ 不改（編號只增不重用，⛔ 不會混淆） |
 | R4 凍結 | 凍結集合（「〇」5）與「〇」7 的檔案 | ⛔ 不改（D1） |
 | R5 字串 | 程式裡的字串與訊息（⛔ 不是註解或 docstring） | ⛔ 不改；執行時列出有哪些 |
@@ -152,7 +152,7 @@
 * 階段 2：
   * 殘留掃描：
     * issue.md 檔頭的 `rg` 檢查：輸出裡的 I-074 只剩 R2、R3 與檔頭的收斂紀錄。
-    * 指向 issue.md I-074、`#i-074` 錨點、`plans/i074-stage2-step*` 的引用：凍結集合與「〇」7 以外，每一處都帶 `20eacb2`（R2），其他為 0。
+    * 指向 issue.md I-074、`#i-074` 錨點、`plans/i074-stage2-step*` 的引用：凍結集合與「〇」7 以外，每一處都是 R2 的歷史引用（`git show 20eacb2:…`；Stage 0、Stage 1 計畫書的例外是 `git show 86241a8:…`），其他為 0（階段 2 第二輪 review：原本寫「都帶 `20eacb2`」，與 `86241a8` 的例外矛盾）。
     * 沒有寫 I-074、只寫 `issue.md「Stage 2 …」`、`issue.md「③ …」` 這類的引用：凍結集合以外為 0。
   * 只改註解：
     * `git diff --name-only` 與凍結集合沒有交集。
@@ -191,6 +191,8 @@
 | v3 | 2026-10-29 | v2 第二輪 review 的 1 項（低）：**刪除程序的判定方式前後矛盾**——總則寫「下列任一項成立就停下」，但下方的 sentinel ⛔ 不存在、狀態目錄是空的、鎖拿得到都是**允許刪除**的條件。改成「沒有符合辨認條件的容器與程序、sentinel 與狀態目錄都不存在、四個鎖都拿得到，三者同時成立才可以刪；任一條件不符或查詢失敗就停下回報」；容器與程序兩項補上「⛔ 不得有任何一個符合」（「四」） |
 | v3（確認） | 2026-10-29 | 第二輪的修正 review 通過；使用者裁決 D1～D4 全部採 (a)（「八」）；commit `c35d4bf` |
 | 階段 1（第一輪 review） | 2026-10-29 | 暫不通過，3 項（都是「十二」與主題文件的內容；計畫本身⛔ 沒有改）：<br>1. **中：C7 的前提不成立**——wf 的 `i074_stage2_acceptance_usage_001` 已有 ⑨-1 precheck 的完整副本（47 行、逐位元相同）；初稿只以區塊 id 搜尋而誤判。C7 改成已滿足，出處改成「⑨-1 執行紀錄格式 v2」的實作結果；6305 那一列補註樣板標題切開了格式 v2 的一節。<br>2. **中：最終的物理啟動次數沒有對帳**——4／8 沒有交代 2026-09-17 第一次 D 的 OOM，而計次政策寫明沒有產出的崩潰仍佔上限 ②。sr 改成兩種算法並列（4／8：⑩ 計畫的帳、依 v27 的格子定義；5／8：照字面計入），寫明依據與「⛔ 不影響判讀」。<br>3. **中：「`job_runs` 只留數天」不符現行程式**——程式常數 `jobRunRetentionDays` 是 30 天（自 `8051fe7`，2026-08-25）。訂正「十二」六與 wf「作業規則（正式量測）」；live 部署的版本未查證 |
+| 階段 2（第一輪 review） | 2026-10-29 | 註解的修改範圍驗證通過；2 項收斂缺口：① live 批次異常補登 I-122；② Stage 0、Stage 1 計畫書的歷史引用改指 `86241a8`，例外規則寫進 R2 與 sr（「十三」四） |
+| 階段 2（第二輪 review） | 2026-10-29 | 上一輪兩項確認修正；1 項（低）：「六」的驗證規則與「十三」二的殘留掃描仍寫「每一處都帶 `20eacb2`」，與 `86241a8` 的例外矛盾。改成依 R2 判定，並以 R2 的判定重跑掃描 1、3（結果不變） |
 
 ## 十二、階段 1 的結果（2026-10-29，⚠️ 待 review）
 
@@ -434,7 +436,7 @@
 * 階段 1 第一輪 review 的修正：sr「⑩ 的正式值」的計次改寫成兩種算法並寫明依據（上限 ② 是 4／8 或 5／8，差在 2026-09-17 的 OOM）；wf「作業規則（正式量測）」的「`job_runs` 只留數天」訂正為程式常數 30 天（live 部署的版本未查證）。
 * ⛔ 沒有改 I-074、⛔ 沒有改程式；文件裡仍指向 issue.md I-074 的引用都留到階段 2。
 
-### 六、待使用者決定（⚠️ 決定之前⛔ 不進階段 2）
+### 六、待使用者決定（✅ 2026-10-29 使用者裁決：採 (a)，另立 issue；已登記 I-122，見「十三」四）
 
 1. **⑪ 計畫「十三」八、觀察 1**：2026-10-29 當天 live 的 `delisting_reconcile` failed、`intraday` 13:30 failed、`stock_symbol_sync` 與 `corporate_action_sync` partial（前一天都是 success）。這不屬於 I-074，計畫書刪除之後只剩 git 歷史。
    * (a)（階段 1 第一輪 review 建議）：另立 issue 調查。先保存當天 `job_runs` 的錯誤、時間與失敗數，再判斷原因；partial 本身⛔ 不等於程式缺陷，`delisting_reconcile` 的失敗也可能是上游 `stock_symbol_sync` 沒有成功所致。
@@ -449,3 +451,59 @@
 * 關鍵值 35 個都在主題文件裡找得到（「四」）。
 * C7 的重驗：從 issue.md 抽出兩份 `i074_stage2_step91_precheck_002`（各 47 行、逐位元相同），確認它是 wf `i074_stage2_acceptance_usage_001` 區塊的逐位元子字串。
 * `git status`：只改 `docs/sr-zone-scoring.md`、`docs/development-workflow.md`、本檔與 `docs/issue.md`（I-074 狀態列裡指向本檔的那一行）。
+
+## 十三、階段 2 的結果（2026-10-29，⚠️ 待 review；repo 外的處置在 review 通過之後）
+
+### 一、變更
+
+| 檔案 | 變更 |
+|---|---|
+| `docs/issue.md` | 刪除 I-074 整筆（11,803 行）。檔頭：現存最大編號改成 I-121、補「I-074 於 2026-10-29 收斂」、殘留檢查的預期 ID 補上 I-074（已收斂）、I-120、I-121 與下一個可用的 I-122，加上 D1 的凍結集合例外。I-100 的 8 個 `#i-074…` 錨點連結改成「I-074（已收斂；原文見 `20eacb2`）」；I-100、I-116、I-119、I-120、I-121 裡的章節引用改成 R1／R2；I-120 的處置方向改指 T-077；I-100 的「理由見 I-074 Stage 0」改指 sr |
+| `docs/sr-zone-scoring.md` | 12 處引用改成 R2（`git show 20eacb2:…`）、1 處改成名稱，兩處「收斂後會被移除」改成「已收斂移除」；新增「程式註解裡的 I-074 舊引用（凍結集合）」：凍結的原因、對照表、只寫章節名的簡寫怎麼讀（D1） |
+| `docs/development-workflow.md` | 約 30 處引用改成 R1／R2；Stage 2 的 `candidate_mismatch.json` 那段補註「I-074 的正式判讀已改用 v3 比較模型、⛔ 不走這條路徑」；comparator 的容量改指 I-117 |
+| `docs/todo.md` | 3 處引用改寫；新增 **T-077**（I-074 之後 Stage 2 工具與漂移測試的退役；D3），下一個編號改成 T-078；T-073（兩個 Python 註解）的狀態改成「⚠️ 先做 T-077」；T-074（`scripts/`）的「⑩ 之前⛔ 不改」標成已解除 |
+| `docs/plans/evening-batch-shift.md` | 指向 ⑩ 計畫書的連結改成 R2 |
+| `docs/plans/i074-stage2-step{10,11,92-p1,92-s92}.md` | `git rm`（四份都已在 `20eacb2` 之前 commit） |
+| 程式註解（凍結集合以外） | 51 個檔、81 行：`scripts/`、`python/scripts/`、`sr_scoring/tests/`、`scripts/tests/` 的註解與 docstring 78 行，`frontend/src/lib/api/srZones.ts` 1 行，`.gitattributes` 2 行。規格指標改成主題文件（例如 CLI matrix、晉升的契約、環境見證契約、診斷欄位），其餘改成 `git show 20eacb2:docs/issue.md` 的 I-074「…」 |
+| `scripts/doc-refs-legacy.txt` | 遞減 11 筆（`issue.md` 對 `decision_engine.py`、`lifecycle_engine.py`、`evaluation.py` 的 line-only 份額；I-074 移除之後已不存在） |
+
+⛔ 沒有改的（照計畫）：凍結集合（約 28 行舊引用，D1）、`python/baselines/**`、`python/scripts/fixtures/**`、`deploy.sh`、兩份 compose、
+`backend/config.yaml`、`backend/internal/api/handler/scheduler.go`、程式裡的字串（R5：例如 sizing 報告的說明文字裡的「v29「八之一」」）。
+只寫章節名、⛔ 沒寫 issue.md 的簡寫（例如「v29「六、1」」「⑦ 總綱 v1「二」」）也⛔ 沒有逐行改：由 sr 的對照段統一說明它們都在 `20eacb2` 的 I-074。
+
+### 二、驗證
+
+| 項目 | 結果 |
+|---|---|
+| `python3 scripts/check-doc-refs.py` | 問題 0（引用共 136 個） |
+| `git diff --check` | 通過 |
+| 凍結集合與「〇」7 的檔案 | `git diff --name-only` 與它們⛔ 沒有交集 |
+| 只改註解 | 程式 51 個檔：`.py` 與 HEAD 比對 AST（去掉 docstring）完全相同；`.sh`、`.ts`、`.gitattributes` 的每一個變更行新舊兩側都是整行註解（唯一的例外是 `doc-refs-legacy.txt`，它是基準線資料、刻意遞減） |
+| `bash -n` | 改過的 shell 全部通過 |
+| 殘留掃描 1：指向 issue.md I-074、`#i-074` 錨點、I-074 計畫書，而⛔ 不是 R2 的歷史引用（`git show 20eacb2:…`；Stage 0、Stage 1 計畫書的例外是 `git show 86241a8:…`） | 凍結集合以外只剩預期的：「〇」7 的歷史註記（記載 2026-09-01 曾移除引用）、說明凍結例外的文字本身 |
+| 殘留掃描 2：`issue.md「…」` 型 | 凍結集合以外只剩 `python/scripts/fixtures/` 的 fixture（「〇」7，⛔ 不動） |
+| 殘留掃描 3：「見／對應／規格見 … I-074」，而⛔ 不是 R2 的歷史引用（`20eacb2` 或例外的 `86241a8`） | 只剩指向主題文件裡帶 I-074 名稱的節（例如「I-074 定向驗證」）與說明文字 |
+| 依 R2 重跑掃描 1、3（階段 2 第二輪 review 之後；`20eacb2` 與 `86241a8` 都視為歷史引用） | 結果與上兩列相同；`86241a8` 只出現在 sr 的例外規則與 `test_i074_diagnostics.py` 那一處 |
+| C5：`grep -rn '執行紀錄格式' docs/` | 本計畫書以外 0 筆 |
+| C7：⑨-1 precheck 的副本 | wf 的 `i074_stage2_acceptance_usage_001` 仍含逐位元相同的副本（改寫之後重驗） |
+| issue.md 檔頭的 `rg` 檢查 | 輸出的 I-074 屬名稱與歷史引用；I-122 是「下一個可用」 |
+| `python/scripts/test.sh`（含漂移測試、`test-i074-stage2.sh`、`test-i074-step9.sh`） | 結束碼 0：shell 測試（doc-refs 45 通過、replay-args 與 step9 全部通過、`test-i074-stage2` 全部通過；`ok` 共 863 行）＋ pytest **2409 passed、1 skipped**。漂移測試 `ok`（「index 的 tree 重新產生的結果 ＝ index 中的 patch」）——它驗的是 index；凍結集合在工作樹與 HEAD 相同（⛔ 沒有交集），所以結論對工作樹也成立 |
+| frontend（`srZones.ts` 只改註解） | `frontend/scripts/test.sh`：svelte-check 0 errors／0 warnings、vitest 21 個檔 155 passed、vite build 成功、job-names 一致；另以 `VITEST_ARGS` 單獨跑 `srZones.test.ts` 10 passed |
+
+### 三、觀察（⛔ 不影響本階段的結論）
+
+1. **測試留下 4 筆 worktree 登記**（`.git/worktrees/tmp.*`，2026-10-29 16:15；登記數 401 → 405；對應的 `/tmp` 目錄 1 個仍在、3 個已不存在）。
+   這是 I-118 已記載的既有洩漏（`scripts/test-replay-args.sh` 以 fake docker 跑到 `exec docker run`，EXIT trap 不執行；「每跑一次常態測試就多一個」），
+   ⛔ 不是本次改動造成；依「一」⛔ 不做 I-118 的清理，留給 I-118。
+2. 測試順帶更新了 dev 的 image：`python/scripts/test.sh` 重建測試 image 時拉了新的 `python:3.11-slim`，`frontend/scripts/test.sh` 拉了 `node:20-alpine`（⛔ 不是 live 的 image）。
+
+### 四、階段 2 第一輪 review 的修正（2026-10-29）
+
+1. **中：live 批次異常還沒有獨立立案**——使用者已裁決採 (a)，計畫書刪除之後就會失去追蹤。已登記 **I-122**：已知症狀、日期、當天與前一天的狀態原樣（證據檔在 repo 外、之後會依「四」處置，所以把相關行原樣抄進條目）、證據來源與 SHA、待查事項；根因另行調查。issue.md 檔頭的下一個編號改成 I-123。
+2. **中：一處歷史引用找不到指定章節**——`test_i074_diagnostics.py` 指向 `20eacb2` 的 Stage 0「十、測試與驗證策略」，但 Stage 0、Stage 1 的計畫書已在 `7b8952d`（2026-09-16）先行收斂，`20eacb2` 只剩索引（那一版的「十、測試與驗證策略」是 ③ evidence contract 的「十」）。改指 `git show 86241a8:docs/issue.md` 的 I-074「Stage 0 計畫書 v17」「十、測試與驗證策略」（`86241a8` ＝ `7b8952d` 的前一版，第 1138 行）；例外規則補進 sr 的對照段與本計畫的 R2。
+   另外以腳本把所有 `20eacb2` 歷史引用（97 處）的章節名對 `20eacb2` 的 I-074 比對：只有這一處真的找不到；另外 6 處是比對方式的問題（標題帶粗體標記，或「二、⑤」是小節編號），原文都在。
+
+### 五、尚未做的（review 通過之後）
+
+* 「四」repo 外的處置：先做刪除前的全面確認，每一項都先經使用者確認；結果寫進本節，主題文件裡提到這些路徑的地方改成實際的處置結果
+  （例如 wf「⑨-1 正式驗收的 `<work>` ⛔ 不刪……保存到 I-074 收斂」、sr「⑪ 的正式值」的輸出保存位置）。

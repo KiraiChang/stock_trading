@@ -5,7 +5,7 @@
 「①之三」（`CounterfactualEffectCheck`）、終態與結束碼。真實產品資料流的非空翻轉由
 `scripts/smoke-replay-offline.sh`（`REPLAY_SMOKE=1`）的正式 bundle 切片負責。
 
-測試 id 對照 issue.md I-074「Stage 2 計畫書」「六、2」的 a～i、aa～ac2、o、p～r、y。
+測試 id 對照 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 計畫書」「六、2」的 a～i、aa～ac2、o、p～r、y。
 """
 from __future__ import annotations
 

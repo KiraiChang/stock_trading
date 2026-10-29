@@ -1,6 +1,6 @@
 """I-074 Stage 2 ⑦b：`python/scripts/i074_stage2_preflight.py`（磁碟檢查、state 的封閉 schema、anchors）。
 
-對應 issue.md I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」的 n1～n4、n6、state、ai／ay 的「在 replay 之前」那一層。
+對應 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「五」的 n1～n4、n6、state、ai／ay 的「在 replay 之前」那一層。
 orchestrator 以 shell 串起這些子指令的整合測試在 `scripts/test-i074-stage2.sh`。
 """
 from __future__ import annotations

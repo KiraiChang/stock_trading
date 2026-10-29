@@ -1,4 +1,4 @@
-"""串流讀 canonical artifact（I-074 Stage 2 ③b，issue.md I-074 ③ evidence contract「五之一」）。
+"""串流讀 canonical artifact（I-074 Stage 2 ③b，git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「五之一」）。
 
 ⚠️ 核心斷言是**與整份載入版同強度**：同一份檔案，串流版與 `load_canonical_evidence_artifact()`
 得到的 SHA／bytes／內容必須相同，而整份載入版會拒絕的檔案，串流版也必須拒絕。

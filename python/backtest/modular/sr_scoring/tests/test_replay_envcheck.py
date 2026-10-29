@@ -1,6 +1,6 @@
 """I-074 Stage 2 的環境見證（③b）：Stage 1 信任錨、環境等價判定、`envcheck/` 的發布與 recovery。
 
-對應 issue.md I-074 ③ evidence contract（⚠️ 現行版）的「三之一」「三之三」「五之一」「七之四」，
+對應 git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract（⚠️ 現行版）的「三之一」「三之三」「五之一」「七之四」，
 測試編號 bd～bd4、be／be2、bf、bk，以及 Stage 2 計畫書「二、⑤」。
 
 ⚠️ fixture 用**真的 Stage 1 finalizer** 產出一份合法的 Stage 1 evidence（⛔ 不手捏 manifest）：

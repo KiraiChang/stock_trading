@@ -1451,6 +1451,9 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/judge-i074-stage2.sh
 （B 與 C 都是 0）、`1` ＝ 拒絕判讀（⛔ 不輸出 B／C）。⛔ 不取鎖、⛔ 不寫真正 repo，可以重跑。規則見
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
 
+⑪（2026-10-29）以簡易指令 `s11`（`s11 status` 由使用者查排程狀態、`s11 judge` 逐項判定前置條件之後呼叫判讀器一次）執行，判讀 **B**；
+執行紀錄見 [`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」（⚠️ 待 review）。
+
 
 ⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
 

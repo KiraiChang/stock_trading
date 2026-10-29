@@ -1,4 +1,4 @@
-# Stage 2 步驟 ⑪ 細部計畫 v4（2026-10-29；v3 ✅ 確認（第二輪 review 通過；D1～D5 全部採 (a)）；v4 的簡易指令 `s11`：✅ 確認（review 通過；D6、D7 採 (a)）；「十」2、3 ✅ 測試與安裝完成（⚠️ 待 review，「十二」）；歷次修正見「十一」）：B／C 判讀與關閉條件
+# Stage 2 步驟 ⑪ 細部計畫 v4（2026-10-29；v3 ✅ 確認（第二輪 review 通過；D1～D5 全部採 (a)）；v4 的簡易指令 `s11`：✅ 確認（review 通過；D6、D7 採 (a)）；「十」2、3 ✅ 測試與安裝完成（⚠️ 待 review，「十二」）；**⑪ 已執行：判讀 B（⚠️ 待 review，「十三」）**；歷次修正見「十一」）：B／C 判讀與關閉條件
 
 需求確認（2026-10-29）：規劃 I-074 Stage 2 的 ⑪——以 ⑩ 晉升並已 commit（`078ec72`）的成功 archive 執行 B／C 判讀器，
 依 I-074「關閉條件（2026-09-01 改為單一決策樹）」處置判讀結果並歸檔。範圍是**判讀 ＋ 關閉條件**（使用者裁決）；
@@ -342,3 +342,175 @@ v4（`s11`）新增的決定（✅ 使用者裁決 2026-10-29：D6、D7 採 (a)�
 | 測試腳本的問題（照實） | 第一次：替換的斷言擋下（`/dev/shm/s11.lock` 寫成 2 次，實際 1 次）；第二次：8 個 FAIL 都是測試腳本的錯（核對的情境名稱含空白而未加引號，「預期」被拆成別的字；`git rm` 把空的 `docs/plans` 刪掉、之後的 `cp` 失敗）。⛔ 沒有改 `s11` 與核對指令 |
 | 安裝 | 從本檔（工作樹）抽出「三之一」（開頭那一行恰好一次、非空、與測試用的原檔 `cmp` 相同）→ `install -m 755`：`~/.local/bin/s11`，10,440 bytes、mode 755、owner `dev`；**SHA-256 `2b7b9e7316568c3562c57c1cee873f739af7e357aa697f8dfee4bb98c8312e5b`**；`command -v s11` ＝ `~/.local/bin/s11` |
 | 核對 | 「三之二」以工作樹的本檔代替 `git show HEAD:…`（`cat`）執行：bash、zsh 都印出上面的 SHA-256 與「s11 ＝ HEAD 的計畫書 ok」；`s11`（沒有參數）印說明、rc 2。⚠️ 使用者 commit 本檔之後，再以 HEAD 原樣執行「三之二」一次（「十」3） |
+
+## 十三、執行結果（2026-10-29，判讀 **B**；⚠️ 已執行／待 review）
+
+### 一、結論
+
+* 判讀器 rc 0，`verdict.verdict` ＝ **B**（156 列全部是 B、C 0 列）。「四」V0～V5 全部成立；「五」B 的交叉核對成立。
+* 依「關閉條件」的決策樹走到分支 **B：驗證完成**。I-074 的移除依 D3 另立「I-074 收斂計畫」（⛔ 不在本步驟）。
+* 嘗試：**1 次，第一次就成功**（⛔ 沒有停止、⛔ 沒有重跑）。
+
+| 值 | ⑪ |
+|---|---|
+| 判讀器輸出 `verdict.json` 的 SHA-256（一行、18,714 bytes） | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
+| `manifest_sha256` | `d5cf06298b4de0875bb00614352e5cf8b6b98450d0b72d6dec8e63458cda5e0e` |
+| `base_commit`（信任根） | `832f678acfa429f8e4fdba2c82eb77eae826def8` |
+| `identity_sha256` | `a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d` |
+| 輸出的保存位置（D2；⛔ 不進 repo） | `~/i074_stage2_formal/judge-20261029T061203Z/` |
+
+### 二、經過
+
+| 步驟 | 結果 |
+|---|---|
+| 「三之二」的核對 | 使用者第一次貼上時，終端機在自動換行的位置把那一行切成數段：`sed: -e expression #1, char 9: unterminated address regex`；另一段變成單獨執行、沒有參數的 `s11`（只印說明，⛔ 沒有查排程、⛔ 沒有判讀）。Claude 以 HEAD `303912c` 的本檔原樣執行核對（zsh、bash）：印出 SHA-256 `2b7b9e73…` 與 ok。之後改給使用者短行版：從 HEAD 的本檔取出 `i074_stage2_s11_check_002` 那一行，寫成 tmpfs 的暫存檔、以 `bash` 執行、再刪除，執行的仍是同一行。使用者之後有沒有以短行版重跑，⛔ 沒有回報（照實記錄；D6 的事後對照見下方） |
+| 第一段 `s11 status`（使用者） | 2026-10-29 06:09:59Z～06:11:06Z（14:09:59～14:11:06 +08:00；在平日 14:01～14:35 的時段內）；ST ＝ `/dev/shm/s11-status-20261029T060959Z-1fANnV.txt` |
+| 第二段 `s11 judge <ST>`（Claude，背景） | 06:12:03Z 開始（狀態檔結束之後 57 秒）；判讀器 06:12:04Z～06:12:41Z（37 秒）；`s11 judge` 的結束碼 0 |
+| 保存與清理 | tmpfs 的 ST 與 `$J/status.txt` 以 `cmp` 確認相同，之後刪除 ST（字面路徑）。`/dev/shm` 剩 `libpod_lock`、`s11.lock`、`s91.lock`、`s92.lock`（`s11.lock` 照設計留著）。`$J/tmp` 是空目錄（mode 700，保留）。帶 `i074.stage2.run` 鍵的容器、指令列含 `--verify-promotion-staging` 的容器都是 0 個 |
+| D6 的事後對照 | 狀態檔第二行與 `precheck.txt` 第一行的 `s11_sha256` ＝ `2b7b9e7316568c3562c57c1cee873f739af7e357aa697f8dfee4bb98c8312e5b` ＝ HEAD（`303912c`）本檔「三之一」的 SHA ＝ `~/.local/bin/s11` 的 SHA |
+
+### 三、狀態檔（`$J/status.txt`，原樣）
+
+```text
+ST /dev/shm/s11-status-20261029T060959Z-1fANnV.txt
+s11_sha256 2b7b9e7316568c3562c57c1cee873f739af7e357aa697f8dfee4bb98c8312e5b
+status 開始 2026-10-29T06:09:59Z
+DELISTING_ENABLED=true
+CORPORATE_ACTION_CRON=30 6 * * 1-5
+DELISTING_CRON=0 7 * * *
+CHIP_SYNC_CRON=0 22 * * 1-5
+SR_ANALYSIS_CRON=0 17 * * 1-5
+EVALUATION_UNIVERSE_ENABLED=true
+EVALUATION_UNIVERSE_CRON=0 16 * * 1-5
+YAHOO_ENABLED=true
+FUGLE_ENABLED=false
+CANDLE_GAP_DETECTION_ENABLED=true
+SR_ANALYSIS_ENABLED=true
+FINMIND_INTRADAY_ENABLED=false
+SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5
+J7 排程鍵 ok
+J7：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）
+J7 candle_gap_detection partial 2026-10-28T16:25:16.330948+08:00 2026-10-28T16:25:26.354087+08:00
+J7 chip_daily_sync success 2026-10-28T22:00:00.025787+08:00 2026-10-28T22:04:12.20977+08:00
+J7 corporate_action_sync partial 2026-10-29T06:30:00.199952+08:00 2026-10-29T07:05:50.925467+08:00
+J7 daily_close success 2026-10-28T15:00:00.004213+08:00 2026-10-28T15:02:12.192933+08:00
+J7 delisting_reconcile failed 2026-10-29T07:00:00.109684+08:00 2026-10-29T07:00:00.11823+08:00
+J7 evaluation_universe_sync success 2026-10-28T16:00:00.025071+08:00 2026-10-28T16:25:16.328945+08:00
+J7 intraday failed 2026-10-29T13:30:00.004216+08:00 2026-10-29T13:30:10.03156+08:00
+J7 pre_market success 2026-10-29T08:50:00.016083+08:00 2026-10-29T08:52:08.70997+08:00
+J7 sr_analysis success 2026-10-28T17:00:00.048167+08:00 2026-10-28T17:01:52.611783+08:00
+J7 sr_analysis_chip success 2026-10-28T23:00:00.100608+08:00 2026-10-28T23:01:51.627775+08:00
+J7 sr_evaluation disabled - -
+J7 sr_zone_verify success 2026-10-28T15:02:12.193326+08:00 2026-10-28T15:02:34.045522+08:00
+J7 stock_symbol_sync partial 2026-10-29T06:30:00.203341+08:00 2026-10-29T06:30:10.208657+08:00
+J7 running 的數量： 0
+status 結束 2026-10-29T06:11:06Z
+```
+
+J7a：`*_CRON` 的整組恰好是預期的六行，`SR_EVALUATION_ENABLED` 沒有設 → 「J7 排程鍵 ok」。
+
+### 四、前置條件與判讀器的輸出（原樣）
+
+`$J/precheck.txt`：
+
+```text
+J 開始 2026-10-29T06:12:03Z；J=/home/dev/i074_stage2_formal/judge-20261029T061203Z；ST=/dev/shm/s11-status-20261029T060959Z-1fANnV.txt；s11_sha256=2b7b9e7316568c3562c57c1cee873f739af7e357aa697f8dfee4bb98c8312e5b
+J7b stock_symbol_sync 06:30 partial 2026-10-29T06:30:00.203341+08:00 ok
+J7b delisting_reconcile 07:00 failed 2026-10-29T07:00:00.109684+08:00 ok
+J7b corporate_action_sync 06:30 partial 2026-10-29T06:30:00.199952+08:00 ok
+J7b pre_market 08:50 success 2026-10-29T08:50:00.016083+08:00 ok
+J7b intraday 09:00 failed 2026-10-29T13:30:00.004216+08:00 ok
+J7b ok（狀態檔 57 秒前）
+J7c ok
+J5 MemAvailable 911 MiB（門檻 650）
+J1～J6 ok
+判讀器開始 2026-10-29T06:12:04Z
+判讀器結束 rc 0；暫存目錄：0 項
+```
+
+`$J/judge.err`：
+
+```text
+==> [mem-guard] MEM=700m（host available=949MB、上限 799MB）
+<frozen runpy>:128: RuntimeWarning: 'backtest.modular.sr_scoring.replay_bundle.stage2_archive' found in sys.modules after import of package 'backtest.modular.sr_scoring.replay_bundle', but prior to execution of 'backtest.modular.sr_scoring.replay_bundle.stage2_archive'; this may result in unpredictable behaviour
+```
+
+`$J/rc`：`0`（tab）`2026-10-29T06:12:41Z`。
+
+| `$J` 的檔 | SHA-256 |
+|---|---|
+| `status.txt`（mode 600） | `6406855de7ef50ea8c860237a49bc19b0887c6938d11f1236f1cd3fd9a3f58ad` |
+| `precheck.txt` | `9cd87040436d20baa517e95426ac2be1cf49b7df3a165aba72300df0f96a0665` |
+| `verdict.json` | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
+| `judge.err` | `6a4016b27330284cdbde67d2efed63babe78547edb6a189ec0719e8276045992` |
+| `rc` | `b33f2cbf54705d497cc38f189e3201db2de183c23ca5f142a8f03a85f38749af` |
+
+### 五、「四」的驗證
+
+| # | 結果 |
+|---|---|
+| V0 | `s11 judge` 以 0 結束；`$J/rc` 存在、值 0 → 成立 |
+| V1 | rc ＝ 0 → 成立 |
+| V2 | `verdict.json` 恰好一行、是 JSON；頂層 key set ＝ `base_commit`、`identity_sha256`、`kind`、`manifest_sha256`、`target`、`verdict`；`kind` ＝ `target` ＝ `evidence` → 成立 |
+| V3 | `manifest_sha256` ＝ `d5cf0629…`（＝ 已 commit 的 `evidence_manifest.json` 檔的 SHA）、`base_commit` ＝ `832f678…`、`identity_sha256` ＝ `a02bf3bd…`（＝ `run_identity.json.gz` 解壓後的 SHA）→ 成立 |
+| V4 | `schema` ＝ `i074_stage2_verdict/v1`；`row_count` 156 ＝ `rows` 的長度 156；`c_row_count` 0 ＝ C 的列數 0；`verdict` ＝ B 而 `c_row_count` ＝ 0 → 成立。每列的 key set ＝ `as_of`、`class`、`reasons`、`symbol`、`timeframe`、`verdict`（156 列都相同） |
+| V5 | `class`：`NON_AVOID` 140、`AVOID` 16、`UNCLASSIFIED` 0 → 成立 |
+
+### 六、「五」下游影響的摘要（只描述，⛔ 不參與判定）
+
+唯讀的一次性腳本（scratchpad 的 `s11-summary.py`，SHA-256 `ab26ed1097e67d18a787025f90884a7ad5290d31c795dbc60a9abb6977caee41`）讀已 commit 的
+`comparison/comparison_artifact.json.gz` 與 `$J/verdict.json`；輸出的 JSON SHA-256 `7fb294ca57f2d0afa3092b9fac26ed083a0d707155e3e35c22c8fe56f3a22a2a`。
+分類依 after 的 `action_state`（`HOLD` → 非 AVOID、`AVOID` → AVOID）。
+
+1. 類別 × before 的 `lifecycle_phase`（after 一律 `CONTINUATION`）：
+
+| 類別 | before `TESTING` | before `CONFIRMED` | 合計 |
+|---|---:|---:|---:|
+| 非 AVOID | 71 | 69 | 140 |
+| AVOID | 6 | 10 | 16 |
+
+2. `action_state`（before → after）；`action_state` ＝ `position_action_condition.state` 在 before、after 兩側都是 156／156 列：
+
+| 類別 | before lifecycle | before → after | 列數 |
+|---|---|---|---:|
+| 非 AVOID | `TESTING` | **`CONDITIONAL_HOLD` → `HOLD`**（持倉建議實際改變的列） | **71** |
+| 非 AVOID | `CONFIRMED` | `HOLD` → `HOLD` | 69 |
+| AVOID | `TESTING` | `AVOID` → `AVOID` | 6 |
+| AVOID | `CONFIRMED` | `AVOID` → `AVOID` | 10 |
+
+3. 其他欄位（before → after）：
+
+| 欄位 | 非 AVOID（140） | AVOID（16） |
+|---|---|---|
+| `market_bias` | `BULLISH_BIAS` → `BULLISH_CONTINUATION` 140 | `BEARISH_BIAS` → `BEARISH_BIAS` 16 |
+| `final_entry_state` | `BLOCKED` → `BLOCKED` 140 | `BLOCKED` → `BLOCKED` 16 |
+| `rr_decoupling_candidate` | `false` → `true` 140 | `false` → `true` 16 |
+
+4. top-level `position_action` 有差異的列數：**0**（`HOLD` → `HOLD` 140，全是非 AVOID；`REDUCE` → `REDUCE` 16，全是 AVOID）。
+5. 標的與 as_of：8 檔、timeframe 全是 `1d`；每檔列數 `6243` 32、`2478` 27、`2399` 25、`2454` 24、`5490` 21、`3630` 17、`2330` 8、`00947` 2；
+   as_of 最早 `2020-11-15T16:00:00+00:00`、最晚 `2026-07-28T16:00:00+00:00`。comparison 的 `differences` 欄位組合（附）：非 AVOID 而 before `TESTING` 的 71 列
+   ＝ `action_state`、`lifecycle_phase`、`market_bias`、`position_action_condition`、`rr_decoupling_candidate`；非 AVOID 而 before `CONFIRMED` 的 69 列
+   ＝ `lifecycle_phase`、`market_bias`、`rr_decoupling_candidate`；AVOID 的 16 列 ＝ `lifecycle_phase`、`rr_decoupling_candidate`。
+6. 判讀器每列的 `verdict`：非 AVOID B 140、AVOID B 16；`reasons` 全部是空的（C 0 列，⛔ 沒有「前 20 列 C」）。判讀器的列與 comparison 的列逐列對應
+   （`symbol`、`timeframe`、`as_of`、`class` 相同）。
+
+**B 的交叉核對**：第 4 項 ＝ 0；第 2、3 項⛔ 沒有任何轉換落在「關閉條件」B 矩陣以外；兩側的 `action_state` 與 `position_action_condition.state` 都⛔ 沒有不一致 → 成立。
+
+### 七、「六」的分支處置（B）
+
+* `sr-zone-scoring.md`「已知並接受的行為改變」：標題補上定向驗證的結論；新增「I-074 定向驗證」小節（預先寫定的收斂措辭原樣、數字、「五」的表、證據的錨）；
+  2026-09-01 那一節的「推論」補註「已完成定向驗證」。「I-074 Stage 2 的晉升與 B／C 判讀器」補 ⑪ 的正式值。
+* `issue.md` I-074：狀態列改成「Stage 2 完成、判讀 B：驗證完成（⚠️ 待 review；本筆的移除依 D3 另立收斂計畫）」；roadmap 的 ⑪ → 結果。
+  「已知限制（open）①」依 D4 (a) 移到新的 I-121，I-074 只留指標（「下一個新編號」改成 I-122）。I-120 的出現範圍補上 ⑪ 的 `judge.err`。
+* `development-workflow.md` 判讀器一節：補一行「⑪ 的執行紀錄見本檔」。
+* ⛔ 沒有改判讀規則、⛔ 沒有改程式；⛔ 沒有 commit（停下等 review）。
+
+### 八、觀察（⛔ 不影響判讀）
+
+1. **當天的批次有失敗與 partial**：`stock_symbol_sync` partial（10 秒）、`corporate_action_sync` partial（約 36 分鐘）、`delisting_reconcile` failed（開始到結束約 8 毫秒）、
+   `intraday` 最近一次（13:30）failed。前一天（⑩ 的 P4，2026-10-28）這四個都是 success。J7b 只要求終態，這些都是終態，所以成立。
+   原因⛔ 沒有查（live 的批次，⑪ 的範圍以外）；要不要另查由使用者決定。
+2. runpy 警告（`stage2_archive`）在 `judge.err` 也出現：判讀器的驗證容器也以 `python -m` 執行同一個模組，屬 I-120，⛔ 不是新問題。
+3. 記憶體：mem-guard 拿到完整的 700m（host available 949MB）；J5 的 MemAvailable 911 MiB。
+4. 「三之二」的核對指令約 470 字一行，從 Claude Code 的畫面複製時會在自動換行處被切斷；以後交給使用者貼上的指令都拆成短行。
+   本檔的區塊⛔ 不改（review 過的原樣）；`s11` 與本檔的收斂依 D3 一起處理。

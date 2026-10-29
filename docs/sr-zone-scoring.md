@@ -1287,7 +1287,7 @@ Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 | `zone_health_state` | `decision_engine.py` | **zone 本身**的健康度（舊鍵 `lifecycle` 已 deprecated） |
 | `_zone_state` | `scenario_engine.py` | **場景判定**（`SUPPORT_RETEST`/`RETEST_REQUIRED`…） |
 
-#### 已知並接受的行為改變（2026-09-01 replay 實測：**在真實資料上一次都沒觸發**）
+#### 已知並接受的行為改變（2026-09-01 replay 實測：**在真實資料上一次都沒觸發**；2026-10-28 I-074 定向驗證：**156 列命中、全部符合預期（判讀 B）**）
 
 RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持有建議**：
 
@@ -1298,6 +1298,42 @@ RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持�
 
 第二列的 `action_state` 會被 `_position_action_condition` 原樣採用，
 所以 `position_action_condition.state` 由「條件性續抱」變成「續抱」。
+
+##### I-074 定向驗證（Stage 2：2026-10-28 執行、2026-10-29 判讀 **B**；⚠️ 待 review）
+
+> 此行為改變有單元測試保護，並經一次預先界定的有界定向驗證（I-074 Stage 2，2026-10-28 執行）確認：
+> 凍結 bundle 的 13,417 列中有 156 列符合完整 predicate，before（RR 條件仍在的 counterfactual）→ after 的逐列變化
+> 全部符合預先定義的判讀矩陣（判讀器 B）。這只證明該路徑在真實資料上**可達、且下游行為符合設計**；
+> ⛔ 不能據此推論自然母體的發生率或整體績效影響。
+
+before ＝ `e1cbbbd` ＋ counterfactual patch（把 RR 條件放回 lifecycle）、after ＝ Stage 1 已封存的 D+1 artifact，同一個凍結 bundle
+`b1_20260901_1d_74350966_5d7ecb10`。156 列分佈在 8 檔（`6243` 32、`2478` 27、`2399` 25、`2454` 24、`5490` 21、`3630` 17、`2330` 8、`00947` 2），
+timeframe 全是 `1d`，as_of `2020-11-15T16:00:00+00:00`～`2026-07-28T16:00:00+00:00`。分類只看 after 的 `action_state`（`HOLD` → 非 AVOID、`AVOID` → AVOID）。
+after 的 `lifecycle_phase` 一律是 `CONTINUATION`、`rr_decoupling_candidate` 一律 `false` → `true`：
+
+| 類別 | before lifecycle | 列數 | `action_state`（＝ `position_action_condition.state`） | `market_bias` | `final_entry_state` | top-level `position_action` |
+|---|---|---:|---|---|---|---|
+| 非 AVOID | `TESTING` | 71 | **`CONDITIONAL_HOLD` → `HOLD`** | `BULLISH_BIAS` → `BULLISH_CONTINUATION` | `BLOCKED` → `BLOCKED` | `HOLD` → `HOLD` |
+| 非 AVOID | `CONFIRMED` | 69 | `HOLD` → `HOLD` | `BULLISH_BIAS` → `BULLISH_CONTINUATION` | `BLOCKED` → `BLOCKED` | `HOLD` → `HOLD` |
+| AVOID | `TESTING` | 6 | `AVOID` → `AVOID` | `BEARISH_BIAS` → `BEARISH_BIAS` | `BLOCKED` → `BLOCKED` | `REDUCE` → `REDUCE` |
+| AVOID | `CONFIRMED` | 10 | `AVOID` → `AVOID` | `BEARISH_BIAS` → `BEARISH_BIAS` | `BLOCKED` → `BLOCKED` | `REDUCE` → `REDUCE` |
+
+* **持倉建議實際改變的是第一列的 71 列**（上方情境表的第二列在真實資料上的實例）：條件性續抱 → 續抱。
+* **進場⛔ 沒有放寬**：`final_entry_state` 156 列都維持 `BLOCKED`；top-level `position_action` 有差異的列數是 0。
+* AVOID 類只有 `lifecycle_phase` 改變：`market_action == "AVOID"` 的短路蓋掉了 lifecycle 對照。
+
+證據的錨（evidence 在 `python/baselines/i074_stage2/evidence/`，判讀器的輸出在 repo 外）：
+
+| 項目 | SHA-256 |
+|---|---|
+| evidence 檔案清單的錨 | `2da23d3aa83c73afee582b1f24e39653648783062dcb6d0f88d73d35cfdf6f9c` |
+| comparison artifact（解壓後的 canonical bytes） | `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e` |
+| before artifact（同上） | `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354` |
+| after artifact（Stage 1 的 D+1；comparison 的 `after_artifact_sha256`） | `33a6b1666487abcfc88353020afbd1e35a8cbab71b40c9ef17ea1194a8cc8b8c` |
+| 判讀器輸出 `verdict.json`（`~/i074_stage2_formal/judge-20261029T061203Z/`） | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
+
+判讀規則、執行方式與正式值見下方「I-074 Stage 2 的晉升與 B／C 判讀器」；執行紀錄見
+[`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」。下一節（2026-09-01）是自然樣本上的結果，保留作為對照。
 
 ##### decision replay 實測（2026-09-01）
 
@@ -1373,6 +1409,7 @@ cohort 一致性 10 / 10 核對通過（項目同「分佈影響：decision repl
 **隨機加大列數的效益很低**。要真正驗到 T-044 的行為改變，必須用**定向 cohort**——
 刻意挑選含「收復 ＋ 上行跟隨 ＋ 動能確認 ＋ 明確突破」形態的標的與期間。
 在那之前，上表兩列的差異仍是**結構上可證明、實測未觸發**。
+（⚠️ 2026-10-29：定向驗證已完成，156 列命中、判讀 B，見上方「I-074 定向驗證」。）
 
 （`lifecycle_phase` 原本不在 replay 報告裡，是這次為了讓上面這個判斷可觀測才補進
 `_decision_fields_from_summary()` 的；沒有它時分佈會全同，而「未觸發」與「無影響」
@@ -3248,7 +3285,7 @@ tag 只允許 allowance 記錄的增量）。
 
 ⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。
 
-#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，⚠️ 待 review）
+#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，⚠️ 待 review；2026-10-29 ⑪ 判讀 B，⚠️ 待 review）
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
 `issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
@@ -3332,6 +3369,17 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | artifact SHA（解壓後的 canonical bytes） | before `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354`；comparison `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e`；report `d00ab7cf76933b19dea2615483601a326cc2d6b994c9199de112918c37e6803c` |
 | replay 的規模 | 13,417 列、候選 156（comparison 156 列） |
 | 耗時 | 全程 2 小時 56 分 47 秒：replay 174.6 分鐘、finalize 43 秒、晉升 32 秒 |
+
+**⑪ 的正式值**（2026-10-29 以簡易指令 `s11` 執行一次、判讀器 rc 0；⚠️ 已執行／待 review，紀錄見
+[`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」；結論與下游影響見上方「已知並接受的行為改變」的「I-074 定向驗證」）：
+
+| 值 | ⑪ |
+|---|---|
+| `verdict.verdict` | **B**（`row_count` 156、`c_row_count` 0；`class`：`NON_AVOID` 140、`AVOID` 16、`UNCLASSIFIED` 0；`reasons` 全部是空的） |
+| 輸出的錨（`manifest_sha256`／`base_commit`／`identity_sha256`） | `d5cf0629…`／`832f678…`／`a02bf3bd…`（與 ⑩ 相同） |
+| `verdict.json`（一行、18,714 bytes）的 SHA-256 | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
+| 輸出的保存位置（⛔ 不進 repo；判讀器可以從已 commit 的 evidence 重跑） | `~/i074_stage2_formal/judge-20261029T061203Z/`（`status.txt`、`precheck.txt`、`verdict.json`、`judge.err`、`rc`） |
+| 耗時 | 判讀器 37 秒（mem-guard 700m） |
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 

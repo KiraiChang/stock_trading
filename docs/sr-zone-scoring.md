@@ -1299,7 +1299,7 @@ RR 解耦讓 `CONTINUATION` 的涵蓋範圍變寬，**其中一條會放寬持�
 第二列的 `action_state` 會被 `_position_action_condition` 原樣採用，
 所以 `position_action_condition.state` 由「條件性續抱」變成「續抱」。
 
-##### I-074 定向驗證（Stage 2：2026-10-28 執行、2026-10-29 判讀 **B**；⚠️ 待 review）
+##### I-074 定向驗證（Stage 2：2026-10-28 執行、2026-10-29 判讀 **B**；✅ review 通過，commit `20eacb2`）
 
 > 此行為改變有單元測試保護，並經一次預先界定的有界定向驗證（I-074 Stage 2，2026-10-28 執行）確認：
 > 凍結 bundle 的 13,417 列中有 156 列符合完整 predicate，before（RR 條件仍在的 counterfactual）→ after 的逐列變化
@@ -3004,6 +3004,23 @@ raw bytes ⛔ 不會傳出——再讀一次可能已不是同一版本。用 **
 回傳 `EvidenceLoad`（`parsed`／`artifact_sha256`／`stored_sha256`／`stored_bytes`）——
 ⚠️ 四個值**都來自同一次讀取**，finalizer 才不必為了 `stored_*` 再讀一遍。
 
+#### I-074 Stage 1 的正式結果（2026-09-17～18）
+
+| 項目 | 值 |
+|---|---|
+| image | `sha256:d66030dca485…`（Stage 1 identity 釘住；⚠️ 之後已不在本機，Stage 2 改以環境見證證明新 image 等價，見下一節） |
+| D | 2026-09-17 16:42→19:42（180 分鐘）：13,417 列、候選 156。第一次執行被 cgroup OOM 殺掉（成因與修正見 `development-workflow.md`「I-074 Stage 1 的正式執行程序」） |
+| D+1 | 2026-09-18 09:16→12:18（182 分鐘）：13,417 列、候選 156 |
+| 跨日仲裁 | rc 0、**`MATCH`**：`d_only` 0、`d1_only` 0、`provenance_differences` 0；候選集合逐 key 相同 |
+| 「provenance 相同」的精確意思 | 頂層 `generated_at` ⛔ 不是 provenance 的欄位；`argv` 的 `--output-dir` 兩趟本來就不同，**正規化之後** 10 個 provenance 欄位逐欄無差異——⛔ 不能說「provenance 完全相同」 |
+| 證據 | `python/baselines/i074_stage1/`（10 檔，約 14 MB：9 個 `.json.gz` ＋ `evidence_manifest.json`），整包一次 rename 發布 |
+| `evidence_manifest.json` 檔的 SHA-256 | `485fb6019d7731271a43a477e2f01a49c90ff158371187f2b624f2b82093ae00` |
+| D+1 after artifact（解壓後的 canonical bytes；Stage 2 的 after 側） | `33a6b1666487abcfc88353020afbd1e35a8cbab71b40c9ef17ea1194a8cc8b8c`（封存的 `.json.gz` 本身：`8cab461c0fe28e603a1ca3b4f49cf753f3a8bc1579ff5deb25f58cedb9ded373`） |
+| 決策樹 | 候選 156 > 0 → 分支 A（零命中即收斂成已知限制）排除，進 Stage 2；結果見上方「已知並接受的行為改變」的「I-074 定向驗證」 |
+
+⚠️ comparator 要同時載入兩份全量 artifact（實測約 730 MiB），超過常態的 mem-guard；Stage 1 是暫停常駐容器、以 `MEM=900m` 跑完的
+權宜做法，⛔ 不是常態程序（[I-117](./issue.md#i-117stage-1-的-comparatorfinalizerrecovery-整份載入兩份-after-artifact超過-mem-guard)）。
+
 #### I-074 Stage 2 的環境見證契約（2026-09-23 實作 ③b；✅ review 通過）
 
 ⚠️ **背景**：Stage 1 釘住的 image 已不在本機，Stage 2 改在新 image 上跑。要繼續拿已封存的 D+1
@@ -3050,6 +3067,18 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 **row-level 共用原語**（整批 validator 與 `StreamRowValidator` 呼叫同一套，公開 contract 不變）。
 實測（2026-09-23，host）：串流驗證真實的 D+1 artifact 峰值 RSS **135 MiB**、8.7 秒；
 整份載入是約 449 MiB。
+
+**③c 的正式結果**（2026-09-23，**`EQUIVALENT`**；`python/baselines/i074_stage2/envcheck/` 於 `5bae980` 進版控，⚠️ 必須與
+`python/baselines/i074_stage1/` 一起保存）：
+
+| 項目 | 值 |
+|---|---|
+| 採用的 image | `sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027`（`pin-replay-image.sh --stage 2 --adopt-image`）：在該 image 內比對 `pip_freeze_sha256` `7a39573ee05177fa75408ae3266ed34eecf30c7abbc701f12982aecd669e3205` 與 `python_version` 3.11.16，**逐字等於** Stage 1 |
+| 見證趟 | 178 分鐘；程式碼 `e1cbbbd`、⛔ 沒有 patch；13,417 列、候選 156 |
+| 等價判定 | key 集合 13,417 ＝ 13,417、`key_mismatch_count` 0；`row_mismatch_count` 0（**13,417 列的 canonical row bytes 全部逐位元相同**）；`cohort_equal` true（156 keys）；必須相同的四欄全部相同；允許不同的欄位是 `image_digest`（`d66030dc…` → `2a90ad1c…`）、`runner_sha256` 與 `argv` |
+| 信任錨 | reference after `33a6b166…`（Stage 1 的 D+1）、Stage 1 manifest `485fb601…`；witness after `f5d6d9eaf2caa2cef1f005a59ef04fbc673e0104446c78403e5ed60435e3693f`、cohort' `d5768e8fe184dce4ff7c0ee91e4f76a434828cf5a0aae1c6216d53c744d840cc` |
+| 獨立複核 | host 以 `verify_envcheck_for_stage2()` 對已發布的 `envcheck/` 重跑 E1～E7 ＋ E3b，通過 |
+| 含意 | 新 image 對這份 bundle 的每一列輸出與遺失的 Stage 1 image 逐位元相同——封存的 D+1 可以繼續當 after 側，⑩ 的 before 與 D+1 之間的差異只能來自 counterfactual patch |
 
 #### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；✅ review 通過）
 
@@ -3222,7 +3251,7 @@ comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有
 反事實側 6 筆全數翻轉、其餘 159 列逐列相同。⚠️ 這份衍生 bundle ⛔ 不是證據（佔位 provenance 只標示身分，
 `load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
 
-#### I-074 Stage 2 的兩道 guard 與兩份 patch 的封存（步驟 ⑨；2026-10-12 實作，⚠️ 待 review）
+#### I-074 Stage 2 的兩道 guard 與兩份 patch 的封存（步驟 ⑨；2026-10-12 實作，✅ review 通過（兩輪），commit `53538a3`）
 
 ⚠️ **範圍**：⑩ 之前證明「counterfactual 是唯一的產品語意變因、tooling ⛔ 不帶判定變更」，並封存兩份 patch。
 計畫、實驗與修訂經過見 `issue.md` I-074「Stage 2 步驟 ⑨ 細部計畫 v1」與「Stage 2 步驟 ⑨ 實作結果」。
@@ -3285,7 +3314,7 @@ tag 只允許 allowance 記錄的增量）。
 
 ⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。
 
-#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，⚠️ 待 review；2026-10-29 ⑪ 判讀 B，⚠️ 待 review）
+#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，✅ review 通過，commit `078ec72`；2026-10-29 ⑪ 判讀 B，✅ review 通過，commit `20eacb2`）
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
 `issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
@@ -3357,7 +3386,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
-**⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；⚠️ 已執行／待 review，紀錄見
+**⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`；紀錄見
 [`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)「十四」；判讀器在 evidence commit 之後才執行，屬 ⑪）：
 
 | 值 | ⑩ |
@@ -3369,8 +3398,10 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | artifact SHA（解壓後的 canonical bytes） | before `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354`；comparison `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e`；report `d00ab7cf76933b19dea2615483601a326cc2d6b994c9199de112918c37e6803c` |
 | replay 的規模 | 13,417 列、候選 156（comparison 156 列） |
 | 耗時 | 全程 2 小時 56 分 47 秒：replay 174.6 分鐘、finalize 43 秒、晉升 32 秒 |
+| 嘗試 | 1 次、首次就成功（⛔ 沒有 `--resume`／`--promote`、⛔ 沒有崩潰重試） |
+| 正式 scan 的計次（最終） | 上限 ①（跑完並留下 artifact 的 replay，最多 5）：**4／5**（Stage 1 的 D、D+1，③c 的 after'，⑩ 的 before）。before 正式趟 **1／1**；它的崩潰重試 0／1；before 重跑 0／1（不適用：rc 0）。上限 ②（物理啟動，最多 8）有兩種算法，差別只在 **2026-09-17 第一次 D 的 OOM**（容器已執行 183 分鐘、被 SIGKILL、⛔ 沒有任何產出）：① **4／8**：⑩ 計畫（四輪 review）的帳，⛔ 不計入那次 OOM——v27 把 8 趟定義成「D、D+1、after'、before、before 重跑 5 趟 ＋ 後三格各 1 次崩潰重試」，D、D+1 只各佔一格、⛔ 沒有崩潰重試的格子，而那次 OOM 發生在上限制定（2026-09-23）之前；② **5／8**：照「沒有產出的崩潰⛔ 不佔上限 ①、但佔上限 ②」的字面計入那次 OOM。兩種算法都⛔ 沒有到頂；I-074 已結案，之後⛔ 沒有任何正式 scan，兩者的差別⛔ 不影響任何判讀。上限的定法見「正式 scan 的計次裁決」v27（歷史：`git show 20eacb2:docs/issue.md` 的 I-074） |
 
-**⑪ 的正式值**（2026-10-29 以簡易指令 `s11` 執行一次、判讀器 rc 0；⚠️ 已執行／待 review，紀錄見
+**⑪ 的正式值**（2026-10-29 以簡易指令 `s11` 執行一次、判讀器 rc 0；✅ review 通過，commit `20eacb2`；紀錄見
 [`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」；結論與下游影響見上方「已知並接受的行為改變」的「I-074 定向驗證」）：
 
 | 值 | ⑪ |
@@ -3502,6 +3533,13 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   尾段峰值可能漏記）、磁碟是取樣值；⑦d 增補：另記 v1 `memory.stat` 的 `total_rss` 取樣最大值（與 acceptance 的單向偵測器同一種量）；
   報告標明完整度（`observation_complete`、`replay_seen`、`missing_expected_containers`、`rss_unavailable_containers`）。
   ⛔ 不作為 ⑩ 的前置、⛔ 不為量測而重跑。
+- **磁碟預算與可用空間門檻**（唯一定義在 `python/scripts/i074_stage2_preflight.py`：`P_B_BUDGET`、`M_SAFETY`、`REQUIRED_BYTES`；⛔ 不開放執行期覆寫）：
+  `P_B_BUDGET` 167,772,160 bytes（160 MiB）；`M_safety` **固定 1 GiB（1,073,741,824 bytes）**——⑤ 在看到正式數字之前裁定，
+  ⛔ 不隨 `P_B` 縮放。理由是 ⑩ 約 180 分鐘期間，同一個檔案系統上的 live 服務（postgres、backend、worker、docker log）持續寫入，
+  另有 `--read-only` 的落差與合成 before source 的尺寸差，都⛔ 不在 `P_B` 裡；preflight 要求可用空間 ≥ `REQUIRED_BYTES` ＝
+  `P_B_BUDGET` ＋ `M_safety` ＝ 1,241,513,984 bytes。
+- **⑤ 的正式量測**（2026-09-29，`--formal`，第一次 `status = "ok"` 即為正式紀錄，⛔ 不為數字重跑）：`P_B` 158,101,504 bytes（150.8 MiB；
+  success 150.8、witness 132.1、failure 66.2 MiB）。⑦ 之後 HEAD 的 worktree 變大，`P_B` 由 ⑨-2 的確認重跑更新（見下）。
 - **⑨-1 的正式結果**（2026-10-24，`formal-91-20261024T040236Z`、`repo_head` `d3df284`；✅ review 通過並 commit `cbde340`，過程與完整數字見 `issue.md` I-074「Stage 2 步驟 ⑨-1 正式驗收結果」）：
   rc 0、`status` ok、`violations` 無 → ⑨-1 通過。記憶體：每一個程序的最大單一 RSS 都 < 450 MiB——最高是 success 的 replay 394.3 MiB，
   量測趟（`memory_only` 的 `replay`，185.8 分鐘）336.3 MiB；每一個容器的上限都是 700m。磁碟：success 的 `P_basis` 162,926,592 bytes

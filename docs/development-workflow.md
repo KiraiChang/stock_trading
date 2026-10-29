@@ -1333,7 +1333,7 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 「`git status` 失敗」（2）與「有改動」（1）分開，兩者都⛔ 不當成乾淨——smoke 在 `docker build` 之前就用它驗反事實段
 的來源 bundle，不通過即中止、⛔ 不啟動任何 replay。
 
-#### ⑨：兩道 guard、封存與重新封存（2026-10-12 實作，⚠️ 待 review）
+#### ⑨：兩道 guard、封存與重新封存（2026-10-12 實作，✅ review 通過（兩輪），commit `53538a3`）
 
 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的兩道 guard 與兩份 patch 的封存」；本節只寫**操作程序**。
 
@@ -1368,7 +1368,7 @@ S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074
   `counterfactual_semantic_sha256` ＝ 封存值（`sr-zone-scoring.md` 的封存值表）。
 * **重新封存**：之後只要兩份 patch 任一份的 bytes 或 SHA 改變，⑨（S0～S9）、⑨-1、⑨-2 全部重做。
 
-### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過；⑩ 2026-10-28 正式執行，⚠️ 待 review）
+### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過；⑩ 2026-10-28 正式執行，✅ review 通過，commit `078ec72`）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
 ⑩ 在 ⑨-2 產出 freeze record 之後才可執行。⚠️ 2026-10-28 已執行（rc 0）：使用者執行的貼上版程序（precheck、wrapper、狀態、安全中止、
@@ -1452,7 +1452,7 @@ REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/judge-i074-stage2.sh
 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
 
 ⑪（2026-10-29）以簡易指令 `s11`（`s11 status` 由使用者查排程狀態、`s11 judge` 逐項判定前置條件之後呼叫判讀器一次）執行，判讀 **B**；
-執行紀錄見 [`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」（⚠️ 待 review）。
+執行紀錄見 [`plans/i074-stage2-step11.md`](./plans/i074-stage2-step11.md)「十三」（✅ review 通過，commit `20eacb2`）。
 
 
 ⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
@@ -1481,7 +1481,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
 
-#### ⑩ 的正式執行程序（2026-10-28 由使用者執行 `formal-10-20261028T090959Z`、rc 0；⚠️ 已執行／待 review）
+#### ⑩ 的正式執行程序（2026-10-28 由使用者執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`）
 
 ⚠️ 計畫、決定（D1～D9）與修訂經過見 [`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)，執行結果見同檔「十四」。
 下面的區塊與判讀表是該計畫 v3（「十」2 實作，commit `a9cb41d`）**原樣**的內容——⑩ 實際執行的就是這一版。文中的「二」～「五」
@@ -2077,7 +2077,8 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | ⑨-1 的 fail-fast | full 模式在量測趟之前寫 `<S>/precheck.json`（隨 S 複製到 `raw/`／`raw-failed/`）：`ok` → 跑量測趟；`threshold_exceeded`（確定的違反，⛔ 不得重跑）、`invalid`（可以重跑）或錯誤 → ⛔ 不跑量測趟、**額度⛔ 不消耗**，harness 結束碼 1、訊息寫明哪一種。`failure_summary.json` 的 `precheck` 欄位只是位置——判讀一律經 `precheck-verdict` |
 | precheck 的判讀（offline） | `precheck-verdict --raw <raw 或 raw-failed> --repo <受信任的 repo> --expected-repo-head <開跑前記下的 HEAD>`：rc＝0 並印出 `ok`／`threshold_exceeded`／`invalid`；rc＝1 ＝ **無法判讀**（⛔ 不得當成可以重跑，交人工查明）。工作樹的版本只做驗錨與取出：錨點 ≠ `precheck.json` 的 `identity.repo_head`、快照 ≠ 錨點 commit 的內容 → 在執行任何程式之前拒絕；之後從錨點 commit 的 git object 取出受信任的 helper 執行重算（⛔ 不執行原始量測目錄裡的程式）。git 固定是 `/usr/bin/git`，子程序一律是最小化的環境——呼叫端的 `GIT_DIR`、PATH 上的其他 git 都⛔ 不影響判讀；`--repo` 必須是 repo 的根目錄。快照清單內有未 commit 變更的開發執行判讀不了（照實；`docs/` 等其他路徑的變更⛔ 不影響） |
 | raw manifest（事後錨點） | `raw-manifest --raw <dir> --repo <受信任的 repo> --expected-repo-head <EXPECTED> --out <raw 之外的新路徑>` 印出 `sha256`、`file_count`、`dir_count`——把它們、錨點與它的來源、產生與檢查的完整指令記進 `issue.md` 並 commit；日後以 `--check-sha256 <記下的值>` 檢查（不符 → rc＝1、⛔ 不寫任何檔案）。`--out` 已存在（含 symlink）或落在 raw 之內 → 拒絕。⚠️ 它只能偵測**之後**的改動。⚠️ 只對**正式的** `raw/`、`raw-failed/` 產生（⛔ 不對 `.raw-failed.staging/`、保留的 S 或診斷副本）；2026-10-15 之前的 `raw/`、`raw-failed/` 帶著 `bin/docker` 這個 symlink，一律產不出 manifest |
-| 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（`job_runs` 只留數天、⛔ 沒有 info log）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
+| 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（⛔ 沒有 info log；`job_runs` 的保留期是程式常數 30 天（`jobRunRetentionDays`），live 部署的版本⛔ 未查證——2026-10-29 訂正原本的「只留數天」）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
+| 正式量測之間「只動文件」的定義（2026-10-27，⑨-2 的 P1 修正） | ⑨-1 之後到 ⑨-2、⑨-2 之後到 ⑩，repo 只允許改**文件**：`docs/` 與**根目錄**的 `CLAUDE.md`；其他任何路徑（含 `backend/`、`frontend/`、根目錄的其他檔案、子目錄裡同名的 `CLAUDE.md`）都算程式變更——量到的程式必須 ＝ 下一步要跑的程式。判定方式：`git diff --name-only <前一步的 repo_head> HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md'` 為空，而且 `git diff` 本身成功（⑩ 的 precheck P1 即此寫法）。原本只允許 `docs/`，根目錄 `CLAUDE.md` 的修改會被誤擋 |
 | 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的複本，含 `harness/MANIFEST`；⛔ 不含 shim 的入口 `bin/docker`）；失敗時：三項清理（步驟的 group、收養的程序、容器）都成功才有 `<work>/raw-failed/`（同樣⛔ 不含 `bin/docker`；完整複製到 `.raw-failed.staging` 之後以 `mv -T` 原子發布）與 `failure_summary.json`（只跟著正式的 `raw-failed/`、原子發布）；任一清理失敗 → 只保留 S（診斷資料，⛔ 不救援、⛔ 不產 manifest）。rename 之後才被終止的 `raw-failed/` 仍是正式的原始量測（結束碼可能是 137／143，摘要可能缺失）。規則與 sizing 一節的「harness 的狀態」相同（共用 `scripts/lib/i074-stage2-measure.sh` 的 `on_failure`） |
 | 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree）。只有 ⑦d 的開發驗證（stub）可以用完整個刪除。⚠️ **⑨-1 正式驗收的 `<work>` ⛔ 不刪**（`issue.md` I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的 D5）：每一次嘗試都連同 `<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂——正式原始量測的錨（manifest 的 `sha256`）要能回頭對照 |
 | ⚠️ 量測期間 | ⛔ 不要動真正的 repo（每條路徑前後比對它的完整 inventory）；⛔ 不要在 `<work>` 裡建檔。量測的是 bootstrap 解析的那一個 commit（`repo_head`）：`--formal` 啟動時 HEAD 已在 bootstrap 之後移動 → 在建 work 目錄之前拒絕；之後 HEAD 再移動⛔ 不影響本次 |

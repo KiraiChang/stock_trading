@@ -1368,10 +1368,11 @@ S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074
   `counterfactual_semantic_sha256` ＝ 封存值（`sr-zone-scoring.md` 的封存值表）。
 * **重新封存**：之後只要兩份 patch 任一份的 bytes 或 SHA 改變，⑨（S0～S9）、⑨-1、⑨-2 全部重做。
 
-### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過）
+### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過；⑩ 2026-10-28 正式執行，⚠️ 待 review）
 
 ⚠️ 規格見 `issue.md` I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
-⑩ 在 ⑨-2 產出 freeze record 之後才可執行。
+⑩ 在 ⑨-2 產出 freeze record 之後才可執行。⚠️ 2026-10-28 已執行（rc 0）：使用者執行的貼上版程序（precheck、wrapper、狀態、安全中止、
+`--resume`／`--promote` 與判讀表）見本節末的「⑩ 的正式執行程序」。
 
 ```text id="i074_stage2_formal_run_usage_001"
 # ⚠️ 一律**直接執行**（shebang 是 #!/bin/bash -p）；bash <script> 會被拒絕
@@ -1402,8 +1403,11 @@ replay 之後的檢查點不符、收到訊號 → ⛔ 不能 resume（⑦c 之�
 **端到端結束碼**：`0` ＝ 成功 archive 已在真正 repo durable；`6` ＝ failed record 已在真正 repo durable；`1` ＝ 還沒有任何終態
 （`--resume` 只適用 finalize／publish 回 1 的那一種）；`2` ＝ failed-record lookup 命中；`3` ＝ 某一層的 durability 未確認 → 重跑 `--promote`；
 `8` ＝ 本次沒有確認晉升完成、可以安全重跑 `--promote`（含 `--promote` 在取得 sentinel 之前失敗；⛔ 不承諾目的地不存在）；`9` ＝ 需要人工判斷
-（`--promote` 遇到 sentinel、複本完整性、晉升的完整性漂移……）；`128＋N` ＝ 被訊號 N 中斷（supervisor 清空本趟之後回傳）；`137` ＝ supervisor
-被 SIGKILL。完整的「模式 × 失敗點」表見 issue.md ⑦b「二之十」與 ⑦c「二之五」。
+（`--promote` 遇到 sentinel、複本完整性、晉升的完整性漂移……）；`128＋N` ＝ 被訊號 N 中斷（supervisor 清空本趟之後回傳）；`137` 有兩種：
+持鎖階段的**子程序**被 SIGKILL（常見是 host 的 OOM killer）——supervisor 照常清空本趟、刪 sentinel、放鎖之後才回 137，⛔ 不需要重開機；
+**supervisor 自己**被 SIGKILL——sentinel 留下、只能重開機（見下方「sentinel 留下 ＝ 需要重開機」）。⚠️ workload 啟動之前的收回失敗也會留下
+sentinel（回 1；`--promote` 回 9）。所以**判讀一律先看 sentinel**（`/run/lock/i074-stage2.active` 是否存在），⛔ 不能只憑結束碼判斷要不要重開機
+（⑩ 的判讀表見本節末的「⑩ 的正式執行程序」）。完整的「模式 × 失敗點」表見 issue.md ⑦b「二之十」與 ⑦c「二之五」。
 
 **晉升（⑦c；`python/scripts/i074_stage2_promote.py`——完整流程、`--resume` 與 `--promote` 都經同一個 `promote()`）**：終態已在複本的磁碟上時執行。
 
@@ -1473,6 +1477,329 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 ⑦c 的晉升模組在 pytest 的 `test_i074_stage2_promote.py`（注入 git runner 與驗證模式——測試 image ⛔ 沒有 git），驗證模式的 Python 段與
 `--judge` 在 `test_replay_stage2_archive.py`、判讀規則在 `test_i074_stage2_verdict.py`，驗證模式的 shell 段（路徑規則、唯讀掛載、argv fixture）
 在 `scripts/test-replay-args.sh`。
+
+#### ⑩ 的正式執行程序（2026-10-28 由使用者執行 `formal-10-20261028T090959Z`、rc 0；⚠️ 已執行／待 review）
+
+⚠️ 計畫、決定（D1～D9）與修訂經過見 [`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)，執行結果見同檔「十四」。
+下面的區塊與判讀表是該計畫 v3（「十」2 實作，commit `a9cb41d`）**原樣**的內容——⑩ 實際執行的就是這一版。文中的「二」～「五」
+指計畫書的章節（計畫書收斂刪除之後見 git 歷史）；「v29」「八之一」～「八之三」「正式 scan 的計次裁決」指 `issue.md` I-074 的章節。
+要點：由使用者在 tmux／自己的終端機執行，Claude 先結束（D1；Codex ⛔ 不使用）；時段避開所有批次（D2：平日 17:00 的 `sr_analysis`
+已是終態之後、最晚 17:30 開跑，前提是晚間兩個批次已後移）；開跑當下 MemAvailable ≥ 950 MiB（D3）；位置 `~/i074_stage2_formal/<NAME>`、
+`~/i074_stage2_observe/<NAME>`、`/dev/shm/s10-<NAME>/`（D7）；observer 由 wrapper 啟動與停止（D4）。
+
+##### 前置條件（precheck）
+
+```text id="i074_stage2_step10_precheck_001"
+# P1～P10、D1 與基準（使用者在自己的終端機執行；**只貼這一個區塊**——P4 的 read 會等你貼上 JWT（前端登入後取得，或 POST /api/v1/auth/login））：
+#   整段的輸出同時存進 tmpfs 的 $PRE（mktemp：名稱不碰撞、mode 600），跑完由 Claude 複製進 <NAME>.ctl/precheck.txt；⛔ 沒有「PRE 保存 ok」就⛔ 不開跑
+cd /home/dev/workspace/stock_trading
+PRE="$(mktemp "/dev/shm/s10-pre-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX.txt")"; RM=$?
+{
+echo "PRE $PRE"; date -u +'precheck 開始 %FT%TZ'; BT="$(awk '$1 == "btime" { print $2 }' /proc/stat)"; RBT=$?; echo "btime $BT"   # 判斷之後有沒有重開機
+IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
+E92=832f678acfa429f8e4fdba2c82eb77eae826def8; R92=62e17739e7ed6e5df8e8a9ee1cf48f4704be1e4d   # ⑨-2 的 EXPECTED 與結果的 commit
+F92=/home/dev/i074_stage2_sizing/formal-92-20261027T090656Z                                     # ⑨-2 的 <work>（原位置）
+git merge-base --is-ancestor "$E92" HEAD && git merge-base --is-ancestor "$R92" HEAD && echo "P1 祖先 ok"
+GS="$(git status --porcelain -- scripts python .gitattributes)" && [ -z "$GS" ] && echo "P1 clean ok"        # git 失敗 ⛔ 不能當作 clean
+DD="$(git diff --name-only "$E92" HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md')"; RDD=$?
+printf 'P1 ⑨-2 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變更：%s（git diff 的 rc %s）\n' "${DD:-無}" "$RDD"
+[ "$RDD" = 0 ] && [ -z "$DD" ] && echo "P1 ⑨-2 之後只動文件 ok"
+[ -f "$F92/freeze_record.json" ] && [ ! -L "$F92/freeze_record.json" ] && [ -d "$F92/raw" ] && [ ! -L "$F92/raw" ] \
+  && [ ! -e "$F92/failure_summary.json" ] && [ ! -e "$F92/raw-failed" ] && [ ! -L "$F92/raw-failed" ] && echo "P2 來源形狀 ok"
+FS="$(sha256sum < "$F92/freeze_record.json" | cut -d' ' -f1)"; echo "P2 freeze record 的 SHA $FS"
+[ "$FS" = 098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3 ] && echo "P2 freeze record 的 SHA ok"
+H2="$(python3 -B python/scripts/i074_stage2_freeze_record.py check-basic --record "$F92/freeze_record.json")" \
+  && [ "$H2" = "$E92" ] && echo "P2 check-basic ok（repo_head $H2）"
+python3 -B python/scripts/i074_stage2_freeze_record.py check-pair --record "$F92/freeze_record.json" \
+  --report "$F92/sizing_report.json" && echo "P2 check-pair ok"
+python3 -B python/scripts/i074_stage2_sizing.py raw-manifest --raw "$F92/raw" --repo . --expected-repo-head "$E92" \
+  --check-sha256 e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765 && echo "P2 raw manifest ok"
+docker image inspect "$IMG" > /dev/null && echo "P3 image ok"
+ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+  && echo "P3 identity ok"
+IS="$(sha256sum < "$ID" | cut -d' ' -f1)"; echo "P3 identity 的 SHA ${IS:-讀不到}"
+[ "$IS" = a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d ] && echo "P3 identity SHA ok"   # 與 ⑨-1、⑨-2 相同
+docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -E '^[A-Z_]+_(CRON|ENABLED)='   # P4
+EV="$(docker inspect stock_trading-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}')" && grep -qxF 'CHIP_SYNC_CRON=0 22 * * 1-5' <<< "$EV" \
+  && grep -qxF 'SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5' <<< "$EV" && echo "P4 晚間批次已後移 ok（D2 的平日 17:00 時段可用）"; unset EV   # EV ⛔ 不印（含金鑰）
+BIP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' stock_trading-backend-1 | cut -d' ' -f1)"
+echo "P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）"; read -rs TOKEN   # 空白：萬一沒跑到 read，那一行⛔ 不進 history
+curl -fsS -H "Authorization: Bearer $TOKEN" "http://$BIP:8080/api/v1/scheduler/status" | python3 -c 'import json, sys
+jobs = json.load(sys.stdin)["jobs"]
+for j in sorted(jobs, key=lambda j: j["job_name"]):
+    print("P4", j["job_name"], j["status"], j.get("started_at", "-"), j.get("finished_at", "-"), "⚠️ 仍在執行" if j["status"] == "running" else "")
+print("P4 running 的數量：", sum(j["status"] == "running" for j in jobs))'; unset TOKEN
+awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' \
+  /proc/meminfo && echo "P5 ok"
+df -h / /dev/shm                                                                                             # P6
+df -B1 --output=avail / /dev/shm | awk 'NR == 2 { r = $1 } NR == 3 { s = $1 } END { printf "P6 / 可用 %d bytes（門檻 2000000000）、/dev/shm 可用 %d bytes（門檻 268435456）\n", r, s; exit !(r >= 2000000000 && s >= 268435456) }' \
+  && echo "P6 ok"
+A7=/run/lock/i074-stage2.active; [ ! -e "$A7" ] && [ ! -L "$A7" ]; RA0=$?                                     # P7：sentinel ⛔ 不得存在
+S7="$(find /dev/shm -maxdepth 1 -name 'i074-*')"; RS=$?
+C7="$(docker ps -a --filter name=i074sz- -q)"; RC=$?; L7="$(docker ps -a --filter label=i074.stage2.run -q)"; RL7=$?
+PP="$(ps -eo pid,args)"; RP=$?
+P7="$(awk '/run-i074-stage2\.sh|i074-stage2-supervisor\.py|i074-stage2-(acceptance|sizing)\.sh|i074_stage2_sizing\.py observe/' <<< "$PP")"; RA7=$?
+printf 'P7 sentinel：%s\nP7 S：%s\nP7 容器（i074sz-）：%s\nP7 容器（label）：%s\nP7 程序：%s\nP7 rc：find %s、docker ps %s／%s、ps %s、awk %s\n' \
+  "$([ "$RA0" = 0 ] && echo 無 || echo "⚠️ 存在（需要重開機，⛔ 不得手動刪除）")" "${S7:-無}" "${C7:-無}" "${L7:-無}" "${P7:-無}" "$RS" "$RC" "$RL7" "$RP" "$RA7"
+[ "$RA0" = 0 ] && [ "$RS" = 0 ] && [ "$RC" = 0 ] && [ "$RL7" = 0 ] && [ "$RP" = 0 ] && [ "$RA7" = 0 ] && [ -n "$PP" ] \
+  && [ -z "$S7" ] && [ -z "$C7" ] && [ -z "$L7" ] && [ -z "$P7" ] && echo "P7 ok"                         # 任一個指令失敗 ⛔ 不能當作沒有殘留
+U8="$(git status --porcelain --untracked-files=all --ignored -- python/baselines/i074_stage2/)" && [ -z "$U8" ] && echo "P8 ok"
+printf 'P8 HEAD 的 failed record 檔數：%s\n' "$(git ls-tree -r HEAD -- python/baselines/i074_stage2/failed/ | wc -l)"
+H9="$(git rev-parse --verify HEAD)" && echo "P9 $H9"
+PD="$(ps -eo pid,rss,comm)"; RD=$?                                                                           # D1：ps 先完整取值，再交給 awk
+DL="$(awk '$3 ~ /^(claude|codex)/ { print "D1", $0 }' <<< "$PD")"; RA=$?; NC="$(awk '$3 == "claude" { n++ } END { print n + 0 }' <<< "$PD")"; RN=$?
+printf '%s\nD1 rc：ps %s、awk %s／%s；claude 的程序數 %s\n' "${DL:-D1 （⛔ 沒有 claude／codex 的程序）}" "$RD" "$RA" "$RN" "${NC:-無}"   # codex 只記錄（可以存在、⛔ 不使用）
+[ "$RD" = 0 ] && [ "$RA" = 0 ] && [ "$RN" = 0 ] && [ -n "$PD" ] && [ "$NC" = 0 ] && echo "D1 Claude 已結束 ok"  # 任一個指令失敗 ⛔ 不能當作已結束
+WL="$(git worktree list --porcelain)"; RW=$?; NW="$(grep -c '^worktree ' <<< "$WL")"; RG=$?                   # 「五」6 的基準
+TL="$(ls -A /tmp)"; RL=$?; TB="$(sed 's|^|基準 /tmp：|' <<< "$TL")"; RE=$?
+printf '基準 worktree 登記數 %s\n%s\n基準 rc：git %s、grep %s、ls %s、sed %s、btime 的 awk %s\n' "${NW:-無}" "$TB" "$RW" "$RG" "$RL" "$RE" "$RBT"
+[ "$RW" = 0 ] && [ "$RG" = 0 ] && [ "$RL" = 0 ] && [ "$RE" = 0 ] && [ "$RBT" = 0 ] && [[ "$NW" =~ ^[1-9][0-9]*$ ]] && [[ "$BT" =~ ^[1-9][0-9]*$ ]] \
+  && [ -n "$TB" ] && echo "基準 ok"                                                                          # 任一個指令失敗 ⛔ 不能當作有基準
+date -u +'precheck 結束 %FT%TZ'
+} 2>&1 | tee "$PRE"; RT=$?; [ "$RM" = 0 ] && [ "$RT" = 0 ] && [ -s "$PRE" ] && [ "$(head -n 1 "$PRE")" = "PRE $PRE" ] \
+  && [ "$(grep -c '^precheck 開始 ' "$PRE")" = 1 ] && [ "$(grep -c '^precheck 結束 ' "$PRE")" = 1 ] && grep -q '^precheck 結束 ' <<< "$(tail -n 1 "$PRE")" && echo "PRE 保存 ok：$PRE"
+```
+
+⚠️ **開跑的條件**：P1～P9（P1 三行、P2 五行、P3 三行、P5、P6、P7、P8）、D1、基準都印出 ok，P4 的每一列都看過（當天應確認的工作都是終態、running 0；平日 17:00 時段另要「P4 晚間批次已後移 ok」），
+最後一行是「PRE 保存 ok」；而且 precheck 結束之後**立刻**接「三」①（間隔越短越好，⑨-1 是 55 秒、⑨-2 是 80 秒）。
+⚠️ 只貼這一個區塊；看到「P4：先打一個空白、再貼上 JWT…」這一行的**實際輸出**之後，先打一個空白、再貼上 JWT、按 Enter（與 ⑨-1、⑨-2 相同）。
+
+##### 啟動、狀態與安全中止
+
+| 項目 | 規則 |
+|---|---|
+| 控制目錄 | `/dev/shm/s10-<NAME>/`（tmpfs、mode 700；名稱⛔ 不是 `i074-*`）：`run.tsv`（身分）、`wrapper.sh`、`log`（⑩ 入口的 stdout／stderr——每一步的輸出在 `<work>/logs/`，這裡只有幾 KB）、`observe.log`、`rc`（rc marker，原子寫入） |
+| 啟動的環境 | `REPLAY_IMAGE_ID` 固定成封存的 image；其他都由入口與 supervisor 清理（入口清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定；supervisor 以清單刪除 `MEM*`、`SIZING_*`、`DOCKER_*`、`I074_STAGE2_*` 等）。⚠️ 呼叫端帶 `I074_STAGE2_*` 時入口直接拒絕；`HOME`、`XDG_DATA_HOME`（identity 的位置）照傳 |
+| observer（D4） | wrapper **在 ⑩ 之前**以背景啟動 observer（`--work-dir` ＝ 本次的 work、`--out` ＝ `~/i074_stage2_observe/<NAME>`，輸出到 `observe.log`）、記下它的 PID ＋ starttime；⑩ 結束之後以 TERM 停止（PID ＋ starttime 相符才送），最多等 120 秒、記下結束碼——**observer 啟動失敗或沒有結束都⛔ 不影響 ⑩ 與 rc marker**。它在 supervisor 之外啟動，不屬於「本趟」（「八之一之二」第 5 列）。⚠️ **啟動驗證只看主流程**（v2）：observer 的 starttime 讀不到（例如它立刻結束）就記成 `-`，⛔ 不算啟動失敗；observer 的狀態另印一行。報告缺失時的處理見「五」6、7 |
+| 程序身分 | `harness_pid` ＝ ⑩ 入口的 PID；入口 `exec` 成 supervisor 之後 PID 與 starttime 都不變，所以 `/proc/<pid>/cmdline` 會從 `run-i074-stage2.sh` 變成 `i074-stage2-supervisor.py`。判斷存活一律用 PID ＋ starttime |
+| 完成 | **rc marker 存在 ⟺ ⑩ 已結束**（wrapper 在 `wait` 之後、停止 observer 之後才寫）；② 的最後一行是判斷（v3，依序）：查詢失敗 → 等待；⑩ 的程序或帶 `i074.stage2.run` 的容器仍在 → 等待（容器停了卻不消失 → 人工判讀）；有 rc marker → 可以啟動 Claude；⛔ 沒有 rc marker 而 wrapper 與 ⑩ 都確定已結束、程序、容器、sentinel 都不在 →「四」的「不明」列（wrapper 被殺或 host 重開），可以啟動 Claude；⛔ 沒有 rc marker 而 sentinel 仍在或身分不明 → 人工判讀（⛔ 不自動放行） |
+| ⚠️ 等待期間 | ⛔ 不啟動 Claude（D1：直到 rc marker 出現——finalize 與晉升的容器在最後才依當下的 MemAvailable 決定上限）、⛔ 不使用 Codex、⛔ 不跑測試、⛔ 不 build image；真正 repo 遵守操作契約（⛔ 不搬移、刪除或替換 `python/`、`python/baselines/`、`i074_stage2/`、`failed/` 本身，⛔ 不動 `.promote-staging-*` 與 `.gitignore` 的 staging 規則；其他編輯與 commit 照常——但 Claude 結束時本來就⛔ 不會有）。只用「②」查看；① 的驗證沒有通過時也一樣（⑩ 可能仍在執行）：**依 ② 最後一行的判斷，判斷是「可以啟動 Claude」之前⛔ 不啟動 Claude** |
+
+```text id="i074_stage2_step10_launch_001"
+# ① 啟動：控制目錄（tmpfs）、wrapper 腳本、身分紀錄——每一步失敗即停（整段是兩個函式（啟動與收尾），貼上之後立刻執行、執行完就移除）
+s10_launch() {
+local i k f o
+cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動"; return 1; }
+EXPECTED="$(git rev-parse --verify HEAD)" && [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]] || { echo "git rev-parse 失敗：⛔ 不啟動"; return 1; }
+NAME="formal-10-$(date -u +%Y%m%dT%H%M%SZ)" && [[ "$NAME" =~ ^formal-10-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "NAME 不對（「$NAME」）：⛔ 不啟動"; return 1; }
+WORK="$HOME/i074_stage2_formal/$NAME"; OBS="$HOME/i074_stage2_observe/$NAME"; CTL="/dev/shm/s10-$NAME"
+mkdir -p "$HOME/i074_stage2_formal" "$HOME/i074_stage2_observe" || { echo "建上層目錄失敗：⛔ 不啟動"; return 1; }
+[ ! -e "$WORK" ] && [ ! -L "$WORK" ] && [ ! -e "$OBS" ] && [ ! -L "$OBS" ] || { echo "work 或 observer 的目錄已存在：⛔ 不啟動"; return 1; }
+mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動"; return 1; }                    # 原子的排他：同一秒的第二次啟動停在這裡
+printf 'expected\t%s\nname\t%s\nwork\t%s\nobserve\t%s\nlaunched_utc\t%s\n' "$EXPECTED" "$NAME" "$WORK" "$OBS" "$(date -u +%FT%TZ)" > "$CTL/run.tsv" \
+  || { echo "寫 run.tsv 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+ctl="$1"; work="$2"; obs="$3"
+st()  { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
+run() { local s; s="$(awk '{ sub(/.*\) /, ""); print $1 }' "/proc/$1/stat" 2>/dev/null)"; [ -n "$s" ] && [ "$s" != Z ]; }   # 存在而且⛔ 不是 zombie
+printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
+python3 -B python/scripts/i074_stage2_sizing.py observe --work-dir "$work" --out "$obs" < /dev/null > "$ctl/observe.log" 2>&1 &
+op=$!; os="$(st "$op")"; [ -n "$os" ] || os=-                                  # 讀不到（例如它立刻結束）記成 -：⛔ 不算 ⑩ 的啟動失敗
+printf 'observer_pid\t%s\nobserver_start\t%s\n' "$op" "$os" >> "$ctl/run.tsv"
+sleep 2                                                                       # observer 先開始取樣；它失敗⛔ 不影響 ⑩
+REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/run-i074-stage2.sh --freeze-record /home/dev/i074_stage2_sizing/formal-92-20261027T090656Z/freeze_record.json \
+  --work-dir "$work" < /dev/null &
+hp=$!
+printf 'harness_pid\t%s\nharness_start\t%s\n' "$hp" "$(st "$hp" || true)" >> "$ctl/run.tsv"
+wait "$hp"; rc=$?
+if [ "$os" != - ] && [ "$(st "$op")" = "$os" ]; then kill -TERM "$op" 2>/dev/null; fi   # PID ＋ starttime 相符才送
+for i in $(seq 1 120); do run "$op" || break; sleep 1; done                  # observer 寫報告最多等 120 秒
+if run "$op"; then orc=未結束; else wait "$op" 2>/dev/null; orc=$?; fi
+printf 'observer_rc\t%s\n' "$orc" >> "$ctl/run.tsv"
+printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
+WRAP
+setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" "$OBS" > "$CTL/log" 2>&1 < /dev/null &
+for i in $(seq 1 15); do                                  # 啟動之後的驗證（最多 15 秒）：7 個身分欄位各恰好一行；主流程的 5 個必須是正整數
+  sleep 1
+  [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "⑩ 已經結束（rc $(cut -f1 "$CTL/rc")）：開跑失敗——⛔ 不要再啟動；先執行 ②，照它最後一行的判斷"; return 1; }
+  f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start observer_pid observer_start; do
+    [ "$(awk -F'\t' -v k="$k" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ] || f=1
+    case "$k" in
+      observer_*) ;;                                      # observer ⛔ 不是前置：⛔ 不驗值（可以是 -）
+      *) [[ "$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$CTL/run.tsv")" =~ ^[1-9][0-9]*$ ]] || f=1 ;;
+    esac
+  done
+  [ "$f" = 0 ] && break
+done
+cat "$CTL/run.tsv"
+[ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：⑩ 可能仍在執行——⛔ 不要再啟動、⛔ 不啟動 Claude；用 ② 查看，依它最後一行的判斷"; return 1; }
+for k in wrapper harness; do                               # PID ＋ starttime 都相符：wrapper 與 ⑩ 都還在
+  [ "$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$(awk -F'\t' -v k="${k}_pid" '$1 == k { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" \
+    = "$(awk -F'\t' -v k="${k}_start" '$1 == k { print $2 }' "$CTL/run.tsv")" ] \
+    || { echo "$k 的身分無法確認（或已結束）：⛔ 不要再啟動、⛔ 不啟動 Claude；用 ② 查看，依它最後一行的判斷"; return 1; }
+done
+o="$(awk -F'\t' '$1 == "observer_start" { print $2 }' "$CTL/run.tsv")"     # observer 只報告、⛔ 不擋 ⑩
+if [ "$o" != - ] && [ "$(awk '{ sub(/.*\) /, ""); if ($1 != "Z") print $20 }' "/proc/$(awk -F'\t' '$1 == "observer_pid" { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" = "$o" ]; then
+  echo "observer：執行中"
+else
+  echo "observer：⚠️ 沒有在執行——⑩ 照常（只影響觀測；看 $CTL/observe.log，結果照實記錄）"
+fi
+echo "已啟動：NAME＝$NAME（CTL＝$CTL；之後用 ② 查看）"
+}
+s10_done() { unset -f s10_launch s10_done; echo "① 的結束碼：$1（0 以外：照上一行的訊息處理）"; return "$1"; }   # 收尾：移除兩個函式、印出並回傳結束碼
+s10_launch; s10_done "$?"
+
+# ② 狀態（任何時候都可以執行；CTL 換成實際的目錄）——最後一行是判斷：「可以啟動 Claude」之前⛔ 不啟動 Claude
+CTL=/dev/shm/s10-<NAME>
+v()     { awk -F'\t' -v k="$1" '$1 == k { print $2 }' "$CTL/run.tsv" 2>/dev/null; }
+st()    { awk '{ sub(/.*\) /, ""); if ($1 != "Z") print $20 }' "/proc/$1/stat" 2>/dev/null; }   # 存在而且⛔ 不是 zombie 才印 starttime
+alive() { [ -n "$1" ] && [ -n "$2" ] && [ "$2" != - ] && [ "$(st "$1")" = "$2" ]; }    # pid ＋ starttime 都相符才算同一個程序
+idn()   { local p s; p="$(v "${1}_pid")"; s="$(v "${1}_start")"                       # 欄位缺失 → 不明（⛔ 不能當作已結束）
+          if [ -z "$p" ] || [ -z "$s" ] || [ "$s" = - ]; then echo 不明; elif alive "$p" "$s"; then echo 執行中; else echo 已結束; fi; }
+RC="$(cut -f1 "$CTL/rc" 2>/dev/null)"; A=/run/lock/i074-stage2.active; SE="$({ [ -e "$A" ] || [ -L "$A" ]; } && echo 有 || echo 無)"
+PL="$(ps -eo pid,lstart,args)"; RPL=$?                                        # ps 先完整取值，再交給 awk
+SP="$(awk -v w="$CTL/wrapper.sh" 'index($0, w) || /run-i074-stage2\.sh|i074-stage2-supervisor\.py/' <<< "$PL")"; RSP=$?
+CN="$(docker ps -a --filter label=i074.stage2.run --format '{{.ID}} {{.Status}} {{.Names}}')"; RCN=$?   # 帶 ⑩ 標籤的容器（含已停止的）
+echo "⑩：$(idn harness)；wrapper：$(idn wrapper)；observer：$(idn observer)；rc：${RC:-無}；sentinel：$SE"
+printf 'wrapper／⑩ 的入口、supervisor、orchestrator 的程序：%s\n帶 i074.stage2.run 的容器：%s\n（rc：ps %s、awk %s、docker ps %s）\n' "${SP:-無}" "${CN:-無}" "$RPL" "$RSP" "$RCN"
+echo "state：$(ls "$(v work)/state" 2>/dev/null | tr '\n' ' ')"
+tail -3 "$CTL/log"
+if [ "$RPL" != 0 ] || [ "$RSP" != 0 ] || [ -z "$PL" ] || [ "$RCN" != 0 ]; then    # 判斷依序（v3）：查詢失敗 → 程序或容器 → rc marker → 不明
+  echo "判斷：查詢失敗——繼續等待、稍後再執行 ②（⛔ 不啟動 Claude）"
+elif [ -n "$SP" ] || [ -n "$CN" ]; then
+  echo "判斷：⑩ 的程序或容器仍在——繼續等待（⛔ 不啟動 Claude、⛔ 不要再啟動；容器已停止卻一直不消失 → 人工判讀）"
+elif [ -n "$RC" ]; then
+  echo "判斷：⑩ 已結束（rc $RC；sentinel：$SE），程序與容器都不在——可以啟動 Claude，依「四」判讀"
+elif [ "$SE" = 無 ] && [ "$(idn wrapper)" = 已結束 ] && [ "$(idn harness)" = 已結束 ]; then
+  echo "判斷：⛔ 沒有 rc marker，而 wrapper 與 ⑩ 都已結束，程序、容器、sentinel 都不在——「四」的「不明」列：可以啟動 Claude"
+else
+  echo "判斷：⛔ 沒有 rc marker，而 sentinel 仍在、或身分不明——人工判讀（⛔ 不自動放行；看上面各行，再依「四」的「sentinel 仍存在」或「不明」列）"
+fi
+
+# ③ 安全中止（只在必要時——replay 的容器啟動之後中止會佔物理啟動的額度，見「四」；延用 ② 的函式）：身分相符才對 supervisor 送一次 TERM
+hp="$(v harness_pid)"; hs="$(v harness_start)"
+if alive "$hp" "$hs" && grep -qa 'i074-stage2-supervisor.py' "/proc/$hp/cmdline"; then kill -TERM "$hp"; else echo "身分不符或已結束：⛔ 不送訊號"; fi
+```
+
+⚠️ ③ 之後 supervisor 依「八之一之二」第 8 列正常釋放（後代 TERM 20 秒 → KILL 5 秒、移除本趟的容器、刪 sentinel、放鎖），回 143；
+⛔ 不要再送第二次、⛔ 不要對其他程序送訊號。之後依「四」判讀。
+
+##### `--resume`／`--promote`
+
+④ `--resume`／`--promote`（**只在「四」指示時**才用；同樣由使用者在自己的終端機執行、Claude 結束）：先把第二行的兩個值改成實際的，再整段貼上。
+前置條件（P3 的 image、identity 與它的 SHA，P5，P7 的 sentinel、容器與程序）的輸出存進控制目錄的 `precheck.txt`；之後的狀態一樣用 ②（CTL 換成 ④ 印出的目錄）。
+
+```text id="i074_stage2_step10_resume_001"
+# ④ --resume／--promote：MODE 是 resume 或 promote；N 是 ① 印出的 NAME（⛔ 不改就會被拒絕）
+MODE="resume"; N="formal-10-<UTC>"
+s10_rp() {
+local mode="$1" name="$2" i k f WORK CTL PCO RPC
+cd /home/dev/workspace/stock_trading || { echo "cd 失敗：⛔ 不啟動"; return 1; }
+case "$mode" in resume|promote) ;; *) echo "MODE 只能是 resume 或 promote（「$mode」）：⛔ 不啟動"; return 1 ;; esac
+[[ "$name" =~ ^formal-10-[0-9]{8}T[0-9]{6}Z$ ]] || { echo "N 不對（「$name」）：⛔ 不啟動"; return 1; }
+WORK="$HOME/i074_stage2_formal/$name"
+[ -d "$WORK" ] && [ ! -L "$WORK" ] || { echo "work 不存在或是 symlink（$WORK）：⛔ 不啟動"; return 1; }
+# 前置條件（「四」末段）：任一項⛔ 不成立就⛔ 不啟動；在子 shell 裡跑，輸出之後存進控制目錄
+PCO="$(
+  date -u +'④ precheck %FT%TZ'
+  IMG=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027
+  ID="${XDG_DATA_HOME:-$HOME/.local/share}/stock_trading/i074_stage2/run_identity.json"
+  docker image inspect "$IMG" > /dev/null || { echo "P3 image ⛔ 不在本機"; exit 1; }; echo "P3 image ok"
+  python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["expected_image_id"] == sys.argv[2] else 1)' "$ID" "$IMG" \
+    || { echo "P3 identity ⛔ 不符"; exit 1; }; echo "P3 identity ok"
+  IS="$(sha256sum < "$ID" | cut -d' ' -f1)"
+  [ "$IS" = a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d ] || { echo "P3 identity 的 SHA ⛔ 不符（${IS:-讀不到}）"; exit 1; }; echo "P3 identity SHA ok"
+  awk '/^MemAvailable:/ { m = int($2 / 1024); f = 1 } END { printf "P5 MemAvailable %d MiB（門檻 950）\n", m; exit !(f && m >= 950) }' /proc/meminfo \
+    || { echo "P5 ⛔ 不成立"; exit 1; }; echo "P5 ok"
+  A7=/run/lock/i074-stage2.active; [ ! -e "$A7" ] && [ ! -L "$A7" ] || { echo "P7 sentinel 存在（只能重開機解除，⛔ 不得手動刪除）"; exit 1; }
+  L7="$(docker ps -a --filter label=i074.stage2.run -q)" || { echo "P7 docker ps 失敗"; exit 1; }
+  [ -z "$L7" ] || { echo "P7 帶 i074.stage2.run 的容器：$L7"; exit 1; }
+  PP="$(ps -eo pid,args)" && [ -n "$PP" ] || { echo "P7 ps 失敗"; exit 1; }
+  P7="$(awk '/run-i074-stage2\.sh|i074-stage2-supervisor\.py|i074-stage2-(acceptance|sizing)\.sh|i074_stage2_sizing\.py observe/' <<< "$PP")" \
+    || { echo "P7 awk 失敗"; exit 1; }
+  [ -z "$P7" ] || { echo "P7 程序：$P7"; exit 1; }
+  echo "P7 ok（sentinel、容器、程序）"
+)"; RPC=$?
+printf '%s\n' "$PCO"
+[ "$RPC" = 0 ] || { echo "④ 的前置條件⛔ 不成立：⛔ 不啟動"; return 1; }
+CTL="/dev/shm/s10-$name-$mode-$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -m 700 "$CTL" || { echo "mkdir 失敗：⛔ 不碰既有的 $CTL、⛔ 不啟動"; return 1; }
+printf '%s\n' "$PCO" > "$CTL/precheck.txt" \
+  && printf 'expected\t%s\nname\t%s\nwork\t%s\nmode\t%s\nlaunched_utc\t%s\n' "$(git rev-parse --verify HEAD)" "$name" "$WORK" "$mode" "$(date -u +%FT%TZ)" > "$CTL/run.tsv" \
+  || { echo "寫控制目錄失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+cat > "$CTL/wrapper.sh" <<'WRAP' || { echo "寫 wrapper.sh 失敗：$CTL 只建了一半、⛔ 沒有啟動"; return 1; }
+ctl="$1"; work="$2"; mode="$3"
+st()  { awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$1/stat" 2>/dev/null; }   # /proc/<pid>/stat 的 starttime（第 22 欄）
+printf 'wrapper_pid\t%s\nwrapper_start\t%s\nwrapper_pgid\t%s\n' "$$" "$(st $$)" "$(ps -o pgid= -p $$ | tr -d ' ')" >> "$ctl/run.tsv"
+REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 \
+  scripts/run-i074-stage2.sh "--$mode" --work-dir "$work" < /dev/null &
+hp=$!
+printf 'harness_pid\t%s\nharness_start\t%s\n' "$hp" "$(st "$hp" || true)" >> "$ctl/run.tsv"
+wait "$hp"; rc=$?
+printf '%s\t%s\n' "$rc" "$(date -u +%FT%TZ)" > "$ctl/rc.tmp" && mv "$ctl/rc.tmp" "$ctl/rc"   # rc marker（原子寫入）
+WRAP
+setsid nohup bash "$CTL/wrapper.sh" "$CTL" "$WORK" "$mode" > "$CTL/log" 2>&1 < /dev/null &
+for i in $(seq 1 15); do                                  # 啟動之後的驗證（最多 15 秒）：5 個身分欄位各恰好一行、都是正整數
+  sleep 1
+  [ -e "$CTL/rc" ] && { cat "$CTL/run.tsv"; echo "已經結束（rc $(cut -f1 "$CTL/rc")）：⛔ 不要再啟動；先執行 ②（CTL＝$CTL），照它最後一行的判斷"; return 1; }
+  f=0; for k in wrapper_pid wrapper_start wrapper_pgid harness_pid harness_start; do
+    [ "$(awk -F'\t' -v k="$k" '$1 == k' "$CTL/run.tsv" | wc -l)" = 1 ] \
+      && [[ "$(awk -F'\t' -v k="$k" '$1 == k { print $2 }' "$CTL/run.tsv")" =~ ^[1-9][0-9]*$ ]] || f=1
+  done
+  [ "$f" = 0 ] && break
+done
+cat "$CTL/run.tsv"
+[ "$f" = 0 ] || { echo "run.tsv 在 15 秒內⛔ 沒有寫齊：可能仍在執行——⛔ 不要再啟動、⛔ 不啟動 Claude；用 ②（CTL＝$CTL）查看，依它最後一行的判斷"; return 1; }
+for k in wrapper harness; do                               # PID ＋ starttime 都相符：wrapper 與 supervisor 都還在
+  [ "$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$(awk -F'\t' -v k="${k}_pid" '$1 == k { print $2 }' "$CTL/run.tsv")/stat" 2>/dev/null)" \
+    = "$(awk -F'\t' -v k="${k}_start" '$1 == k { print $2 }' "$CTL/run.tsv")" ] \
+    || { echo "$k 的身分無法確認（或已結束）：⛔ 不要再啟動、⛔ 不啟動 Claude；用 ②（CTL＝$CTL）查看，依它最後一行的判斷"; return 1; }
+done
+echo "已啟動：CTL＝$CTL（之後用 ② 查看，把 ② 的 CTL 換成這個目錄）"
+}
+s10_rp_done() { unset -f s10_rp s10_rp_done; echo "④ 的結束碼：$1（0 以外：照上一行的訊息處理）"; return "$1"; }   # 收尾：移除兩個函式、印出並回傳結束碼
+s10_rp "$MODE" "$N"; s10_rp_done "$?"
+```
+
+##### 判讀與分支（一律依 rc ＋ `<work>/state/` ＋ 真正 repo 的磁碟事實；每一次嘗試都記進結果）
+
+**先看 sentinel**（v2）：rc marker 出現之後，⛔ 不論 rc，`/run/lock/i074-stage2.active` 仍存在（`-e` 或 `-L`）→ 一律走下表的「sentinel 仍存在」列；
+sentinel ⛔ 不存在才依 rc 對照其他列。
+
+**計次的分界**（v2）：留下 artifact（成功 archive 或 failed record）才佔上限 ①。`state/replay_started.json` 寫在呼叫 runner **之前**，只代表「準備啟動」，
+⛔ 不能單獨當作物理啟動。它不存在 → ⛔ 不計入任何上限（「正式 scan 的計次裁決」：preflight 與指紋檢查失敗⛔ 不計入）。它存在而
+`replay_done.json` ⛔ 不存在時，依 `<work>/logs/replay.{out,err}`、observer 的報告與 `btime` **依序**分成三種（v3：只認容器啟動的直接證據）：
+
+| 分類（依序判斷） | 證據 | 計次 |
+|---|---|---|
+| **已啟動** | 有**容器內程序的直接證據**，任一：observer 報告的 `replay_seen` 是 `true`；`logs/replay.err` 有只有容器內的 Python 才會印的路徑——`/usr/local/lib/python3.11/` 或 `File "/app/`（host 是 Python 3.9.2，兩個路徑都不存在。⑨-1 實測：量測趟與 failure 趟的 `replay.err` 都在 mem-guard 那一行之後、開跑約 1 分鐘內出現 3 個 sklearn 的 `InconsistentVersionWarning`，是容器載入模型時印的）。⚠️ ⛔ 不用 replay 的 rc 推論：runner 印完 `==> offline replay：`、還沒 `exec docker run` 就被訊號終止，也會留下 137／143 | 佔上限 ② 一格、⛔ 不佔 ① |
+| **沒有進到 Docker** | 全部成立：`logs/replay.out` 是一般檔（⛔ 不是 symlink）而且⛔ 沒有以 `==> offline replay：` 開頭的行（runner 在 `docker run` 之前的檢查——mem-guard 下限、run identity、artifact、patch canonical、image——就結束了）；host 自 `<NAME>` 的 UTC 時間之後⛔ 沒有重開機（`/proc/stat` 的 `btime` 早於它——重開機可能讓還沒寫回磁碟的 log 缺行，缺行⛔ 不能證明沒有啟動）；也⛔ 沒有上一列的直接證據 | ⛔ 不計入（同 preflight 與指紋檢查失敗） |
+| **無法確認** | 其他全部，例如：有 `==> offline replay：` 的行但沒有直接證據（⛔ 不論 rc）；重開機過；`replay.out` 不存在或不是一般檔 | **停下、由使用者裁決**是否計入 ② |
+
+⚠️ observer 的 `replay_seen` 是 `false` 或沒有報告，⛔ 不能當作「沒有啟動」（observer ⛔ 不是前置，可能沒在跑）。分類與依據（引用的那幾行原樣）記進結果。
+**降級**：host 在「五」完成之前重開過（`btime` 晚於 `<NAME>` 的 UTC 時間）→ 控制目錄與 observer 的狀態消失、sentinel 也隨 `/run/lock` 消失；
+`<work>` 與真正 repo 的檔案仍在（durability 由 ⑩ 自己的 fsync 與 `--promote` 處理）——先停下回報，由「三」的 ② 改看 `<work>/state/` 與真正 repo，再依下表。
+
+| rc ／ 狀態 | 判讀 | 處置 |
+|---|---|---|
+| **0** | 成功 archive 已在真正 repo durable（佔上限 ① 與 ② 各一格） | 「五」的驗證全做 → **⑩ 成功** → 記錄 → review → 使用者 commit（`python/baselines/i074_stage2/evidence/` ＋ 文件）→ ⑪ |
+| **6** | 反事實失效：failed record 已在真正 repo durable（佔 ① 與 ② 各一格） | 「五」適用的部分 → 記錄 → **使用者必須先 commit 這筆 failed record**（下一次 ⑩ 的 lookup 才看得到）→ ⛔ 不得重跑同一個語意 SHA；before 重跑的資格（不同的 counterfactual 語意 SHA、只有白名單產品檔的 diff 改變）牽涉新的 patch → ⑨、⑨-1、⑨-2 全部重做——**停下回報、另立計畫** |
+| **2** | preflight 的 lookup 命中（⛔ 不計入） | 停下回報（目前 HEAD ⛔ 沒有任何 failed record，⛔ 不應發生） |
+| **1**，`replay_started.json` ⛔ 不存在 | preflight 或之前的步驟失敗、還沒有終態（⛔ 不計入） | 依 `log` 的 `ERROR:` 與 `<work>/logs/` 查明：⛔ 不需要改程式（暫時性的 docker 錯誤、批次撞期、磁碟、記憶體、殘留）→ 重新確認 P1～P10 之後以**新的** work 與控制目錄重跑；**同一個原因連續 2 次就停下回報**；需要改程式 → 停下、另立計畫（改了 `scripts/`、`python/` → ⑨-2 重跑） |
+| **1**，`replay_started.json` 存在、`replay_done.json` ⛔ 不存在 | runner 在 Docker 之前就結束、replay 回 0／6 以外的值、或輸出形狀不符——⛔ 沒有 artifact、⛔ 不佔 ①；⛔ 不能 `--resume`。依上面的三分 | **沒有進到 Docker** → 同上一列（⛔ 不計入；原因多半是記憶體下限或環境，看 `<work>/logs/replay.err`）。**已啟動**或**無法確認** → **停下回報**（D5）：記事故紀錄（`<work>/logs/replay.{out,err}`、observer 的峰值與 MemAvailable、容器上限、dmesg 的 OOM）；已啟動 → 是否用掉 before 正式趟**唯一一次的崩潰重試**由使用者裁決；無法確認 → 是否計入 ② 也由使用者裁決；⛔ 不自動重跑 |
+| **1**，`replay_done.json` 與 `attempt.json` 都存在 | finalize／publish 回 1 而且沒有終態（⛔ 不佔任何上限：finalize 失敗只重跑 finalize） | 查明原因 → `scripts/run-i074-stage2.sh --resume --work-dir <work>`（同一個控制目錄的「三」④ 指令）；⛔ 不 replay。同一個原因連續 2 次就停下回報 |
+| **1**，`replay_done.json` 存在、`attempt.json` ⛔ 不存在、⛔ 沒有終態 | replay 之後的檢查點不符 | 停下回報、另立 issue（⛔ 不發布、⛔ 不能 `--resume`） |
+| **3** | 某一層的 durability 未確認 | `--promote`（冪等）；直到 0／6；同一個原因連續 2 次就停下回報 |
+| **8** | 晉升沒有確認完成、可以安全重跑 | 排除原因（空間、另一個 `--promote`）之後 `--promote` |
+| **9** | 需要人工判斷 | 停下回報：看 `<work>/logs/promote.err`；⛔ 不手動搬檔、⛔ 不自動重跑 |
+| **128＋N**（例如 ③ 之後的 143；137 見下一列） | 被訊號中斷、supervisor 已清空本趟並刪 sentinel | 先依 `state/` 與上面的三分判斷 replay 有沒有啟動（無法確認 → 由使用者裁決）→ `--promote`，由它依磁碟事實裁決（有終態 → 0／6；沒有 → 9，交人工依計次政策處理） |
+| **137**，sentinel ⛔ 不存在 | 持鎖階段的子程序被 SIGKILL（常見是 host 的 OOM killer）；supervisor 已清空本趟、刪 sentinel 之後才回傳——**⛔ 不需要重開機** | 先確認沒有殘留（帶 `i074.stage2.run` 鍵的容器、⑩ 的程序——P7 的那兩項；任一個指令失敗⛔ 不能當作沒有）、記下 `dmesg` 的 OOM 紀錄 → 同「128＋N」列。⚠️ sentinel ⛔ 不存在卻有殘留 ＝ 異常：**停下回報**（⛔ 不重開機、⛔ 不自己清） |
+| **sentinel 仍存在**（⛔ 不論 rc；常見是 137——supervisor 自己被 SIGKILL；收回失敗時是 1） | supervisor 的清理沒有完成 | **停下回報**：sentinel 只能靠**重開機**解除（⛔ 不得手動刪除；重開機會中斷 live 服務——v29 決策 9，使用者已知並接受）。重開機由使用者決定時機；之後先查 `docker ps -a --filter label=i074.stage2.run`，有殘留就 `docker rm -f`，再 `--promote` 依磁碟事實裁決 |
+| ⛔ 沒有 rc marker（wrapper 被殺或 host 重開；② 的判斷是「不明」列） | 不明 | 停下回報：以 ② 與 `state/`、真正 repo 的 `evidence/`／`failed/`、sentinel 判斷，再對照上面各列 |
+
+⚠️ `--resume`／`--promote` 也要經 supervisor 取同一把鎖、同一套 sentinel；同樣由使用者在自己的終端機執行（Claude 結束），前置條件只需 P3、P5、P7 的
+sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分鐘，但仍避開批次的開始時刻；容器是實作時加上的：supervisor 本來就拒絕殘留的 label 容器，提早在 precheck 擋下），
+指令在「三」④（與 ① 同一套 wrapper、⛔ 沒有 observer；控制目錄 `/dev/shm/s10-<NAME>-<resume|promote>-<UTC>/`；狀態一樣用 ②，把 CTL 換成這個目錄）。
+
+##### 跑完之後
+
+* rc 0：真正 repo 的 `git status` 只有 `?? python/baselines/i074_stage2/evidence/…`；晉升 ＝ 複本的來源（逐檔 SHA）；信任根（`base_commit` ＝ freeze record 的
+  `repo_head`）；複本內的 `i074_stage2_preflight.py state-check --require run,preflight,replay_started,replay_done`（唯讀）；殘留；數字與 observer 的報告（只記錄）。
+* 保存：控制目錄（含 `observe.log`）與 `$PRE` 複製進 `~/i074_stage2_formal/<NAME>.ctl/`（`precheck.txt` mode 600），`cmp` 相同、重驗 `$PRE` 的三項之後才刪 tmpfs 的原檔；
+  observer 的 `--out` 原位置保存；⑩ 與 ⑨-2 的 `<work>` 保存到 evidence 的 commit 之後。
+* ⑪（B／C 判讀器）只在 rc 0、上述驗證全部成立、使用者 commit `python/baselines/i074_stage2/evidence/` 之後進行。
 
 ### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
@@ -1756,7 +2083,10 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | 逐步檢查與收養（⑦d 增補） | 每一步之後立刻 `check-step`（這一步的 host 紀錄與目前為止的 sidecar）與收養檢查；不符就中止，⛔ 不拖到最後的報告。harness 自己是 subreaper（bootstrap 以 python3 啟動器設定、啟動時以行為驗證）：步驟以任何方式結束留下的程序都被它收養，`on_failure` 以 `reap-adopted` 清掉；清不掉 → 保留 S、列出 PID（`<S>/leftover-pids.json`）。⚠️ 前提是 harness 自己沒有被 `kill -9` |
 | 故障注入 | `I074_SIZING_FAULT=prepare`（work 目錄建好之後立刻中止）／`twins`／`copy`／`summary`／`bootstrap-*`；`--formal` 一律拒絕；⑦d 增補另加 `probe-timeout`（能力檢查的逾時縮成 2 秒）、`subreaper-stall`、`guard-noident`、`guard-badident`、`guard-pgleader`（guard 的各種情境）；有效性條件另加 `fs-noise`（success 窗口期間在 work 目錄的父目錄寫 2 MiB、窗口結束後刪除——量測必須被判成無效） |
 
-⑩ 期間的 **observer**（⛔ 不是 ⑩ 的一部分、⛔ 不作為前置；結果只額外記錄進 `issue.md`）：
+⑩ 期間的 **observer**（⛔ 不是 ⑩ 的一部分、⛔ 不作為前置；結果只額外記錄）。⚠️ 2026-10-28 的 ⑩ 正式執行**由 wrapper 啟動與停止**
+（⑩ 之前以背景啟動、記下 PID ＋ starttime；⑩ 結束之後 PID ＋ starttime 相符才送 TERM、最多等 120 秒、記下結束碼；它失敗或沒有結束都⛔ 不影響 ⑩
+與 rc marker）——見「I-074 Stage 2 的正式執行程序」末段的「⑩ 的正式執行程序」①；觀測結果記在
+[`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)「十四」。下面是單獨手動執行的用法：
 
 ```text id="i074_stage2_observe_usage_001"
 # ⑩ 開始之前，在另一個終端機啟動；⑩ 結束之後按 Ctrl-C 停止

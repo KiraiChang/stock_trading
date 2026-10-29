@@ -1,4 +1,4 @@
-# Stage 2 步驟 ⑩ 細部計畫 v3（2026-10-28，✅ 確認（第三輪 review 通過、D1～D9 已定案）；「十」2 實作 ✅ review 通過並 commit `a9cb41d`（「十三」）；⚠️ 2026-10-28 17:00 執行（使用者裁決，「十」4）；歷次 review 的修正見「十一」，review 的收斂條件見「十二」）
+# Stage 2 步驟 ⑩ 細部計畫 v3（2026-10-28，✅ 確認（第三輪 review 通過、D1～D9 已定案）；「十」2 實作 ✅ review 通過並 commit `a9cb41d`（「十三」）；✅ 2026-10-28 17:09～20:06 執行、**⑩ 成功**（rc 0；⚠️ 已執行／待 review，結果見「十四」）；歷次 review 的修正見「十一」，review 的收斂條件見「十二」）
 
 需求確認（2026-10-27）：規劃 I-074 Stage 2 的 ⑩——**唯一一次**正式 Stage 2（before 全量 replay ＋ finalize ＋ 晉升，在隔離複本執行）。
 範圍：⑩ 從前置條件一直到晉升、驗證與保存，加上交給 ⑪ 的規則；⑪ 的 B／C 判讀另立計畫。像 `s91`／`s92` 那樣的簡易指令
@@ -385,7 +385,9 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
 
 ## 七、歸檔與 commit
 
-* `docs/issue.md` I-074：新節「Stage 2 步驟 ⑩ 正式執行結果」（結構比照 ⑨-1、⑨-2 的結果一節：結論與交給 ⑪ 的值、嘗試一覽、前置條件與 precheck 原樣、`run.tsv`、判讀、「五」的驗證與數字、observer 的摘要、計次的更新）；狀態列、roadmap（⑩ → 結果、⑪ →「現在在這裡」）；「正式 scan 的計次裁決」的計數只在結果一節記錄（⛔ 不改政策本身）。
+* ⚠️ **結果寫在本檔「十四」**（使用者裁決 2026-10-29；原本寫進 `docs/issue.md` I-074 的新節）：結構比照 ⑨-1、⑨-2 的結果一節（結論與交給 ⑪ 的值、嘗試一覽、前置條件與 precheck 原樣、`run.tsv`、判讀、「五」的驗證與數字、observer 的摘要、計次的更新）；「正式 scan 的計次裁決」的計數只在結果一節記錄（⛔ 不改政策本身）。
+* `docs/issue.md` I-074：狀態列與 roadmap 只留指向「十四」的一行（⑩ → 已執行、⑪ →「現在在這裡」）；分析時發現的問題另立 issue（I-120）。
+* ⚠️ **收斂時**：本檔刪除之前，「十四」裡要長期保留的內容——交給 ⑪ 的錨（evidence 清單、manifest SHA、`base_commit`）、計次的更新、嘗試的結論——必須已經歸檔到主題文件或 `issue.md` I-074（`sr-zone-scoring.md` 已有 ⑩ 的正式值），並修掉指向「十四」的引用。
 * `sr-zone-scoring.md`「I-074 Stage 2 的晉升與 B／C 判讀器」：補 ⑩ 的正式值（evidence 的錨、`base_commit`、耗時）。
 * `development-workflow.md`「I-074 Stage 2 的正式執行程序」：補 ⑩ 的 precheck、啟動（含 observer 由 wrapper 管理）、狀態、安全中止與 `--resume`／`--promote` 的區塊，以及「四」的判讀表（現況規格，⛔ 不只留在計畫書）；observer 一節補「由 wrapper 啟動與停止」。
 * 本檔：結果之後標成「已執行／待 review」；review 確認、現況歸檔之後連同 I-074 的對應指標一起收斂（刪除之前必須已經 commit 過）。
@@ -442,7 +444,9 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
    殘餘風險：後移⛔ 沒有實際生效（缺 22:00 實際執行的直接證據）→ 21:00 的 `chip_daily_sync` 碰到 ⑩ 的尾段。耗時都是估計：17:08 開跑 ＋ 保守估計 3 小時 52 分 ＝ 21:00，對舊排程**沒有緩衝**（一般約 20:20～20:40 結束）；
    若排程仍在 21:00，或執行超出估計，仍可能重疊。依新排程 22:00 計算，17:30 開跑的保守估計 21:22 結束、緩衝 38 分鐘，符合 P4（≥ 30 分鐘）。
    開跑仍依 D2：最晚 17:30、盡量靠近 17:00（盡量在 17:08 之前）。
+   ✅ **已執行**：precheck 17:07:29～17:07:48、① 17:09:59 開跑、rc 0 於 20:06:46（「十四」）。
 5. 重新啟動 Claude：依「四」判讀 → 「五」的驗證與保存 → 「七」的紀錄與歸檔 → ⛔ 不 commit，停下等 review。
+   ✅ **2026-10-29 完成**（⚠️ 待 review）：判讀、「五」1～7（含 tmpfs 的保存與刪除）、紀錄（「十四」）、`issue.md`（I-074 的指標、I-120）、`sr-zone-scoring.md`、`development-workflow.md`。
 6. review 通過、使用者 commit（evidence ＋ 文件）之後，才規劃 ⑪（另行規劃與確認）。
 
 ## 十一、修訂紀錄
@@ -455,6 +459,7 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
 | v3（確認） | 2026-10-28 | 第三輪 review 通過（⛔ 沒有新的阻擋項目；review 以 bash、zsh 驗證 ② 的 16 個狀態分支案例——身分不明、sentinel 殘留、容器仍在、查詢失敗等——結果都符合預期）。使用者定奪 D1、D3～D9 全部採 (a)；D2 補上「開跑盡量靠近 17:00」（review 的建議）；D9 的文件修改已完成（⑨-2 結果在 `issue.md`、`sr-zone-scoring.md`、`development-workflow.md`、`plans/i074-stage2-step92-s92.md` 的「⚠️ 待 review」改成「✅ review 通過並 commit `62e1773`」） |
 | v3（第四輪 review） | 2026-10-28 | 「十」2 實作的 review（暫不通過）1 項：④ 的 P3 只比對 `expected_image_id`、漏驗 identity 檔的完整 SHA（P3 要求 ＝ `a02bf3bd…`），只改 `created_at` 的 identity 會被誤報成 ok（後面的 checkpoint 仍會拒絕）。修正：④ 補驗 SHA、⛔ 不符就在建控制目錄與呼叫入口之前停下；使用者裁決一併修「二」的主 precheck（SHA 由人眼比對改成自動判定、開跑條件改成「P3 三行」）；補測 R13（bash、zsh 都拒絕）與主 precheck 的正反兩次實跑（「十三」） |
 | v3（執行時段） | 2026-10-28 | 第四輪的修正 review 通過（使用者確認），「十」2 ＝ commit `a9cb41d`；使用者裁決當天 17:00 執行，「後移完成並驗證」以 T-075 的 A5 為準、⛔ 不等觀察一個平日晚上（「十」4、D2）；review 的非阻擋文字建議：殘餘風險改寫成「對舊排程沒有緩衝、仍可能重疊」，並補上新排程下的緩衝（「十」4） |
+| v3（執行結果） | 2026-10-29 | ⑩ 已執行（2026-10-28，rc 0）；「四」「五」與紀錄完成（「十四」，⚠️ 待 review）。**與「七」的差異**（使用者裁決 2026-10-29）：結果寫在本檔「十四」、⛔ 不在 `issue.md` I-074 另開新節，`issue.md` 只留指標；「七」補上收斂時要先歸檔「十四」的長期內容。分析時發現的 runpy 警告另立 `issue.md` I-120。review（2026-10-29，結論「⑩ 成功」有證據支持）的 1 項低嚴重度文件問題：`development-workflow.md`「端到端結束碼」的摘要仍把 137 寫成「supervisor 被 SIGKILL」，與搬進去的判讀表不一致 → 摘要改成兩種情況、「判讀一律先看 sentinel」（以 supervisor 的程式確認：子程序被殺時 `release()` 之後才回 `128 ＋ WTERMSIG`；收回失敗回 1、`--promote` 回 9 而留下 sentinel） |
 
 ## 十二、review 的收斂條件（v3，✅ 使用者裁決 2026-10-28）
 
@@ -478,3 +483,246 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
 | 觀察 | 入口立刻失敗時，① 的驗證可能早於 rc marker：依時序印「⑩ 已經結束（rc 1）」或「harness／wrapper 的身分無法確認」——三種都是「⛔ 不啟動 Claude、用 ②」，接著的 ② 判斷「已結束（rc 1）、可以啟動 Claude」（已測）。照現行設計，⛔ 不改 |
 | 互動 shell | 靜態檢查四個區塊的 `!`：只有 `! `、`!=`、`$!` 與單引號內的 awk——bash、zsh 的歷史展開都⛔ 不會觸發 |
 | 真的 precheck | zsh、唯讀、stdin 接 `/dev/null`（2026-10-28T03:21:57Z；第四輪 review 之後 03:38:16Z 再跑一次）：P1 三行、P2 五行、P3 三行（含「P3 identity SHA ok」，SHA `a02bf3bd…`）、P6、P7、P8、基準、「PRE 保存 ok」都成立；另以 `XDG_DATA_HOME` 指向 scratchpad 的 identity 複本（image 相同、只多一個欄位）再跑一次：「P3 identity ok」照常印出、SHA `dd3ba447…`、「P3 identity SHA ok」⛔ 沒有印出（判斷正確）；預期不成立的：P4（⛔ 沒有 JWT → 401；「P4 晚間批次已後移 ok」⛔ 沒有印出——後移還沒做，判斷正確）、P5（767 MiB，Claude 執行中）、D1（claude 的程序）。測試產生的 PRE 檔（三個）都已刪除 |
+
+## 十四、執行結果（⑩，2026-10-28，⑩ 成功；⚠️ 已執行／待 review）
+
+依據：本計畫 v3（「十」2 實作 `a9cb41d`）的「二」～「五」。執行：使用者，2026-10-28（三）17:07～20:06（+08:00）；「四」「五」：Claude，2026-10-29。
+⚠️ **紀錄的位置**：「七」原本規定寫進 `issue.md` I-074 的新節；使用者裁決（2026-10-29）改寫在本節，`issue.md` 的 I-074 狀態列與 roadmap
+只留指向本節的一行（「七」「十一」）。結構比照 `issue.md` I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」。
+
+### 一、結論與交給 ⑪ 的值
+
+| 項目 | 值 |
+|---|---|
+| 結論 | **⑩ 成功**：rc 0（成功 archive 已在真正 repo durable）；「五」1～7 全部成立 |
+| 依據的嘗試 | 嘗試 1（`formal-10-20261028T090959Z`） |
+| evidence | 真正 repo 的 `python/baselines/i074_stage2/evidence/`：7 檔、未追蹤（由使用者 commit，D8 (a)） |
+| 檔案清單的錨 | `2da23d3aa83c73afee582b1f24e39653648783062dcb6d0f88d73d35cfdf6f9c`（evidence 目錄內逐檔 `sha256sum`、依檔名排序的清單本身的 SHA-256；清單與指令見「五」2） |
+| `evidence_manifest.json` | 檔的 SHA-256 `d5cf06298b4de0875bb00614352e5cf8b6b98450d0b72d6dec8e63458cda5e0e`；`terminal_outcome` 0；`generated_at` `2026-10-28T12:05:35.417827+00:00` |
+| 判讀器的信任根 | `finalizer_provenance.base_commit` ＝ `832f678acfa429f8e4fdba2c82eb77eae826def8`（⛔ 不得讓它不可達，「六」） |
+| artifact（解壓後的 SHA-256） | before `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354`；comparison `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e`；report `d00ab7cf76933b19dea2615483601a326cc2d6b994c9199de112918c37e6803c`（＝ manifest 的 `artifact_sha256` ＝ `state/replay_done.json` 的 `outputs`） |
+| 規模 | replay 13,417 列、候選 156（comparison 156 列） |
+| 下一步 | review → 使用者 commit（evidence ＋ 文件）→ 另行規劃 ⑪（「六」）；⛔ 不需要 `--resume`／`--promote`、⛔ 不需要重跑 |
+
+### 二、嘗試一覽
+
+| # | `NAME` | 開跑（`launched_utc`） | 結束（rc marker） | rc | 「四」的列 | 計次 | 處置 |
+|---|---|---|---|---|---|---|---|
+| 1 | `formal-10-20261028T090959Z` | 2026-10-28T09:09:59Z | 2026-10-28T12:06:46Z | 0 | 「0」（sentinel ⛔ 不存在） | ① 與 ② 各一格 | 「五」1～7 全做、全部成立 → 記錄 → review |
+
+### 三、嘗試 1：`formal-10-20261028T090959Z`
+
+1. 前置條件（「二」；原始輸出：`formal-10-20261028T090959Z.ctl/precheck.txt`）
+
+| # | 結果 | 依據 |
+|---|---|---|
+| P1 | ✅ | 「P1 祖先 ok」「P1 clean ok」「P1 ⑨-2 之後只動文件 ok」（文件以外的變更：無、`git diff` 的 rc 0）。HEAD ＝ `39ee348`：`62e1773` 之後的 `a9cb41d`、`45e5b9e`、`b7081c6`、`39ee348` 都只動 `docs/`（Claude 事後以 `git diff --name-only 832f678 39ee348` 排除 `docs`、`CLAUDE.md` 重驗：無） |
+| P2 | ✅ | 五行都 ok：freeze record 的 SHA `098a3936…`、`check-basic` 的 `repo_head` `832f678…`、`check-pair`、raw manifest `e4b1ead7…`（`file_count` 133、`dir_count` 29） |
+| P3 | ✅ | 三行都 ok：「P3 image ok」「P3 identity ok」「P3 identity SHA ok」（`a02bf3bd…`） |
+| P4 | ✅ | 「P4 晚間批次已後移 ok」（`CHIP_SYNC_CRON=0 22 * * 1-5`、`SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5`）。應確認的 10 個工作都有 10-28 那一筆、而且是終態：06:30 `stock_symbol_sync`、`corporate_action_sync` success；07:00 `delisting_reconcile` success；`pre_market`、`intraday`、`daily_close`、`sr_zone_verify`、`evaluation_universe_sync` success，`candle_gap_detection` partial（終態，⑨-2 時相同）；17:00 `sr_analysis` success（17:01:52 結束）；`chip_daily_sync`、`sr_analysis_chip` 是 10-27 那一筆（當天的時間還沒到）；「P4 running 的數量： 0」。保守估計：17:09:59 ＋ 3 小時 52 分 ＝ 21:01:59，距後移後的下一個批次（22:00 `chip_daily_sync`）58 分鐘 ≥ 30 分鐘 |
+| P5 | ✅ | 「P5 MemAvailable 1034 MiB（門檻 950）」「P5 ok」 |
+| P6 | ✅ | `/` 可用 7,114,833,920 bytes、`/dev/shm` 可用 1,073,651,712 bytes；「P6 ok」 |
+| P7 | ✅ | 「P7 ok」（`P7 rc：find 0、docker ps 0／0、ps 0、awk 0`） |
+| P8 | ✅ | 「P8 ok」；HEAD 的 failed record 檔數 0 |
+| P9 | ✅ | 「P9 39ee348…」＝ `run.tsv` 的 `expected`；`log` ⛔ 沒有 work 目錄已存在的拒絕 |
+| P10 | ✅ | ⑨-2 通過、review 通過並 commit `62e1773`（P1 的祖先檢查成立） |
+| D1 | ✅ | 「D1 Claude 已結束 ok」（`D1 rc：ps 0、awk 0／0；claude 的程序數 0`）；Codex 的程序 3 個（`86149`、`1842663`、`1992872` `codex-code-mode`；記錄。使用者回報等待期間⛔ 沒有使用） |
+| 基準 | ✅ | 「基準 ok」（`基準 rc：git 0、grep 0、ls 0、sed 0、btime 的 awk 0`）；worktree 登記數 401、`btime` 1783304445（`/tmp` 的清單 16 項留在 `.ctl/precheck.txt`） |
+| 保存 | ✅ | 「PRE 保存 ok」只印在終端機（`tee` 之後、⛔ 不在檔案裡）；Claude 複製時重驗：第一行 ＝ `PRE /dev/shm/s10-pre-20261028T090729Z-9cDvnj.txt`、`precheck 開始` 恰好一行、`precheck 結束` 恰好一行且是最後一行 |
+| 間隔 | ⚠️ | precheck 結束 09:07:48Z → `launched_utc` 09:09:59Z（**131 秒**；⑨-1 55 秒、⑨-2 80 秒）。開跑 17:09:59 晚於「十」4 的「盡量在 17:08 之前」，仍在 D2 的「最晚 17:30」之內（兩者都是軟性目標；這段時間⛔ 沒有任何批次的開始時刻） |
+
+（precheck.txt 原樣，「基準 /tmp」那幾行除外——留在 `.ctl/`；P4 各列行尾的一個空白已去掉，原檔見 `.ctl/precheck.txt`）
+
+```text
+PRE /dev/shm/s10-pre-20261028T090729Z-9cDvnj.txt
+precheck 開始 2026-10-28T09:07:29Z
+btime 1783304445
+P1 祖先 ok
+P1 clean ok
+P1 ⑨-2 之後文件（docs/ 與根目錄的 CLAUDE.md）以外的變更：無（git diff 的 rc 0）
+P1 ⑨-2 之後只動文件 ok
+P2 來源形狀 ok
+P2 freeze record 的 SHA 098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3
+P2 freeze record 的 SHA ok
+P2 check-basic ok（repo_head 832f678acfa429f8e4fdba2c82eb77eae826def8）
+P2 check-pair ok
+{"dir_count": 29, "expected_repo_head": "832f678acfa429f8e4fdba2c82eb77eae826def8", "file_count": 133, "root_name": "raw", "sha256": "e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765"}
+P2 raw manifest ok
+P3 image ok
+P3 identity ok
+P3 identity 的 SHA a02bf3bd3f44cadb8d9df2e5e9d7d6b89d92cca2130e2e85526cdc8b139d9f4d
+P3 identity SHA ok
+DELISTING_ENABLED=true
+CORPORATE_ACTION_CRON=30 6 * * 1-5
+DELISTING_CRON=0 7 * * *
+CHIP_SYNC_CRON=0 22 * * 1-5
+SR_ANALYSIS_CRON=0 17 * * 1-5
+EVALUATION_UNIVERSE_ENABLED=true
+EVALUATION_UNIVERSE_CRON=0 16 * * 1-5
+YAHOO_ENABLED=true
+FUGLE_ENABLED=false
+CANDLE_GAP_DETECTION_ENABLED=true
+SR_ANALYSIS_ENABLED=true
+FINMIND_INTRADAY_ENABLED=false
+SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5
+P4 晚間批次已後移 ok（D2 的平日 17:00 時段可用）
+P4：先打一個空白、再貼上 JWT，按 Enter（⛔ 不回顯、⛔ 不寫進檔案或紀錄）
+P4 candle_gap_detection partial 2026-10-28T16:25:16.330948+08:00 2026-10-28T16:25:26.354087+08:00
+P4 chip_daily_sync success 2026-10-27T21:00:00.016537+08:00 2026-10-27T21:04:24.208652+08:00
+P4 corporate_action_sync success 2026-10-28T06:30:00.10813+08:00 2026-10-28T07:06:03.684043+08:00
+P4 daily_close success 2026-10-28T15:00:00.004213+08:00 2026-10-28T15:02:12.192933+08:00
+P4 delisting_reconcile success 2026-10-28T07:00:00.102385+08:00 2026-10-28T07:00:09.845211+08:00
+P4 evaluation_universe_sync success 2026-10-28T16:00:00.025071+08:00 2026-10-28T16:25:16.328945+08:00
+P4 intraday success 2026-10-28T13:30:00.00064+08:00 2026-10-28T13:30:09.594616+08:00
+P4 pre_market success 2026-10-28T08:50:00.028315+08:00 2026-10-28T08:52:06.51279+08:00
+P4 sr_analysis success 2026-10-28T17:00:00.048167+08:00 2026-10-28T17:01:52.611783+08:00
+P4 sr_analysis_chip success 2026-10-27T22:00:00.003965+08:00 2026-10-27T22:01:40.372843+08:00
+P4 sr_evaluation disabled - -
+P4 sr_zone_verify success 2026-10-28T15:02:12.193326+08:00 2026-10-28T15:02:34.045522+08:00
+P4 stock_symbol_sync success 2026-10-28T06:30:00.111129+08:00 2026-10-28T06:31:31.03089+08:00
+P4 running 的數量： 0
+P5 MemAvailable 1034 MiB（門檻 950）
+P5 ok
+Filesystem         Size  Used Avail Use% Mounted on
+/dev/ploop11163p1   40G   32G  6.7G  83% /
+tmpfs              1.0G   88K  1.0G   1% /dev/shm
+P6 / 可用 7114833920 bytes（門檻 2000000000）、/dev/shm 可用 1073651712 bytes（門檻 268435456）
+P6 ok
+P7 sentinel：無
+P7 S：無
+P7 容器（i074sz-）：無
+P7 容器（label）：無
+P7 程序：無
+P7 rc：find 0、docker ps 0／0、ps 0、awk 0
+P7 ok
+P8 ok
+P8 HEAD 的 failed record 檔數：0
+P9 39ee348cf4c07058dcc704a6903f9338cfc4b67d
+D1   86149 22396 codex
+D1 1842663 121668 codex
+D1 1992872 12096 codex-code-mode
+D1 rc：ps 0、awk 0／0；claude 的程序數 0
+D1 Claude 已結束 ok
+基準 worktree 登記數 401
+基準 rc：git 0、grep 0、ls 0、sed 0、btime 的 awk 0
+基準 ok
+precheck 結束 2026-10-28T09:07:48Z
+```
+
+2. 執行
+
+| 項目 | 值 |
+|---|---|
+| `run.tsv` | 下面的區塊（全部欄位原樣；13 個欄位各恰好一行） |
+| rc marker | `0`、`2026-10-28T12:06:46Z` |
+| 耗時 | `launched_utc` → rc marker：**2 小時 56 分 47 秒**。`log`：複本 09:10:02、preflight 1～6 09:10:07～09:10:53、replay 09:10:55 → 12:05:28（**174.6 分鐘**；observer 的 replay 容器 `first_seen` → `gone_at` 10,473.1 秒，相符；⑨-1 量測趟 185.8 分鐘）、finalize → 12:06:11（43 秒）、晉升 12:06:12 → 12:06:44（32 秒）。+08:00：17:09:59 → 20:06:46 |
+| 重開機 | precheck 的 `btime` 1783304445 ＝ 2026-10-29「五」時的 `btime`：否 |
+| `log` | 下面的區塊；`ERROR:` 0 行 |
+| 容器的記憶體上限 | 每一個容器都是完整的 700m：mem-guard 的 host available 1046（anchors）、1045（lookup）、1033（replay）、1041（finalize）、1034（晉升的驗證）MB |
+
+```text
+expected	39ee348cf4c07058dcc704a6903f9338cfc4b67d
+name	formal-10-20261028T090959Z
+work	/home/dev/i074_stage2_formal/formal-10-20261028T090959Z
+observe	/home/dev/i074_stage2_observe/formal-10-20261028T090959Z
+launched_utc	2026-10-28T09:09:59Z
+wrapper_pid	2198026
+wrapper_start	987415417
+wrapper_pgid	2198026
+observer_pid	2198033
+observer_start	987415419
+harness_pid	2198107
+harness_start	987415619
+observer_rc	0
+```
+
+```text
+09:10:02 ==> 建立隔離複本：/home/dev/i074_stage2_formal/formal-10-20261028T090959Z/repo（detached @ 832f678acfa429f8e4fdba2c82eb77eae826def8）
+09:10:07 ==> preflight 1：凍結兩份 patch
+09:10:07 ==> preflight 2：freeze record 完整驗證（合成兩份凍結 patch）
+09:10:08 ==> preflight 3：信任錨（目前的 Stage 2 identity）
+==> [mem-guard] MEM=700m（host available=1046MB、上限 896MB）
+09:10:30 ==> preflight 4：真正 repo 的 failed record ＋ lookup
+09:10:53 ==> preflight 6：磁碟
+09:10:55 ==> replay（log：/home/dev/i074_stage2_formal/formal-10-20261028T090959Z/logs/replay.{out,err}）
+12:05:28     replay 結束（rc=0）
+12:06:11     finalize 結束（rc=0）——⚠️ 終態依磁碟事實判定，⛔ 不看結束碼
+12:06:12 ==> 晉升：複本內的終態 → 真正 repo（log：/home/dev/i074_stage2_formal/formal-10-20261028T090959Z/logs/promote.{out,err}）
+12:06:44 ==> 晉升完成：成功 archive 已在真正 repo durable
+```
+
+### 四、判讀（「四」）
+
+* **sentinel**：rc marker 出現之後 `/run/lock/i074-stage2.active` ⛔ 不存在（2026-10-29 確認；鎖檔 `/run/lock/i074-stage2.lock` 照設計留著）→ 依 rc 判讀。
+* **rc 0 →「0」列**：成功 archive 已在真正 repo durable。`log` 的「晉升完成：成功 archive 已在真正 repo durable」；`logs/promote.err` 的「晉升完成（rc=0）：終態已在真正 repo durable」；`logs/finalize.out` 是 `{"mode": "finalize", "terminal_outcome": 0}`。
+* **計次**：`state/replay_done.json` 存在（`rc` 0）、留下成功 archive → 佔上限 ① 與 ② 各一格。容器內程序的直接證據（照實記錄）：observer 的 `replay_seen` 是 `true`；`logs/replay.err` 在 mem-guard 那一行之後有 3 個 `/usr/local/lib/python3.11/site-packages/sklearn/base.py` 的 `InconsistentVersionWarning`（與 ⑨-1 的量測趟相同）。
+* ⛔ 沒有用到「三」③、④。
+
+### 五、驗證與保存（「五」1～7，2026-10-29）
+
+1. **真正 repo**：`git status --porcelain --untracked-files=all --ignored -- python/baselines/i074_stage2/` rc 0、7 行、每一行都以 `?? python/baselines/i074_stage2/evidence/` 開頭，⛔ 沒有 `!!`（含 `.promote-staging-*`）；行數 ＝ 2 的 7 檔。`git status --porcelain --untracked-files=all -- python scripts .gitattributes` 去掉那 7 行之後為空（rc 0）；`git diff --cached --name-only` 為空（rc 0）。
+2. **晉升 ＝ 來源**：真正 repo 的 `evidence/` 與 `<work>/repo/python/baselines/i074_stage2/evidence/` 的清單逐位元相同（7 檔；兩邊都只有一般檔案與目錄）；清單本身的 SHA-256 ＝ `2da23d3aa83c73afee582b1f24e39653648783062dcb6d0f88d73d35cfdf6f9c`（兩邊相同）。
+
+```text
+# 在 evidence 目錄內：find . -type f -print0 | sort -z | xargs -0 sha256sum
+a0513709533b84805608201a0b1651b26d890c0a9f718a436642e85b7e74e854  ./before/before_source_artifact.json.gz
+f66dc0601780e2eec134a9e2395837f5378a026e9acd1f9fb8648f299544bc1b  ./comparison/comparison_artifact.json.gz
+89bd4c4bd088a1b3cbe8e2a79d1d2f44dbf3fce80f465760071d28d39db8e3cd  ./comparison/report.json.gz
+d5cf06298b4de0875bb00614352e5cf8b6b98450d0b72d6dec8e63458cda5e0e  ./evidence_manifest.json
+e40cd0da4b2e8f9ce07bccc508e1179ae41ba80b37f0fc3e897d5151fa53e34f  ./identity/run_identity.json.gz
+fa7f5ba840a3106978ad1ea1661eae7c97cb77710db2a7e042bb6f1b3a6fea14  ./patch/counterfactual.patch
+5ff9a90fe33113ee0dcece3d121910daeadc3a3d5eeb6135f4b7939eeccf0b98  ./patch/tooling.patch
+```
+
+3. **信任根**（從檔案再讀一次）：
+
+| 項目 | 值 | 對照 |
+|---|---|---|
+| `finalizer_provenance.base_commit` | `832f678…` | ＝ freeze record 的 `repo_head` ＝ 複本的 `HEAD` ＝ `E92` |
+| `patches` | counterfactual `fa7f5ba8…`、tooling `5ff9a90f…`、`composed_sha256` `ac49d36f…`、順序 counterfactual → tooling | ＝ 封存值（`sr-zone-scoring.md` 的「封存值」）；凍結的 `patch/` 兩檔 SHA 也相同 |
+| 語意 SHA | `5b851e1e…`（`state/preflight.json`、`logs/check_failed_record.out` 的語意鍵） | ＝ 封存值 |
+| identity | `identity/run_identity.json.gz` 解壓後 `a02bf3bd…` | ＝ P3（XDG 的 identity 檔相同） |
+| image | `expected_image_id`、`finalizer_provenance.image_digest` ＝ `sha256:2a90ad1c…` | ＝ P3 |
+| before artifact 的 provenance | `tooling_patch_sha256` ＝ `ac49d36f…`、`base_commit` `e1cbbbd…`、`pip_freeze_sha256` `7a39573e…` | ＝ composed（`sr-zone-scoring.md` 的封存值表）；pip freeze ＝ Stage 1 |
+| finalizer 的 `tooling_patch_sha256` | `e3b0c442…`（空字串的 SHA） | 與已 commit 的 `envcheck/evidence_manifest.json` 相同：finalizer 在 `base_commit` 上乾淨執行、⛔ 不套 tooling（既有慣例） |
+
+4. **`state/`**：複本內的 `state-check`（唯讀）rc 0，`present` 恰好是四份 →「首次就成功」（⛔ 沒有 `attempt.json`）；四份原樣保存。
+
+```text
+present=run,preflight,replay_started,replay_done
+bundle_id=b1_20260901_1d_74350966_5d7ecb10
+semantic=5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8
+rc=0
+```
+
+5. **殘留**：sentinel ⛔ 不存在；帶 `i074.stage2.run` 鍵的容器、`i074sz-` 容器都沒有（`docker ps` rc 0）；⑩ 與 observer 的程序都沒有（`run.tsv` 的三個 PID 都已不存在；`ps` 的 awk 只比對到 Claude 自己的查詢指令）；`/dev/shm/i074-*` 為空（observer 正常結束、自己刪了狀態目錄）；真正 repo 的 worktree 登記數 401 ＝ 基準；`/tmp` 的 16 項 ＝ 基準（⛔ 沒有新項目）。
+6. **數字與 observer**（只記錄、⛔ 不判定）：`observer_rc` 0；`observation.json` 的 `observation_complete` `true`、`replay_seen` `true`、`missing_expected_containers`／`unavailable_containers`／`rss_unavailable_containers` 都是空的、`started_before_first_container`／`stopped_after_last_container` 都是 `true`、`polls` 5110。
+
+| 容器 | cgroup 峰值（下界） | `total_rss` 取樣最大值 | 讀取次數 |
+|---|---|---|---|
+| anchors | 301.7 MiB | 190.0 MiB | 41 |
+| lookup（`--check-failed-record`） | 271.7 MiB | 211.1 MiB | 40 |
+| **replay** | **444.2 MiB** | 299.9 MiB | 20,181 |
+| finalize | 353.7 MiB | 234.4 MiB | 75 |
+| promotion_verify | 328.0 MiB | 217.4 MiB | 54 |
+
+   上限都是 700m；host MemAvailable 的取樣低點 715.4 MiB（750,104,576 bytes）；L0 增量（取樣）389.2 MiB、`--work-dir`（取樣）371.0 MiB。`<work>` 317M；根檔案系統可用 6.7G（precheck）→ 6.4G（2026-10-29）。
+7. **保存**：`~/i074_stage2_formal/formal-10-20261028T090959Z.ctl/`（mode 700）：`log`、`observe.log`、`rc`、`run.tsv`、`wrapper.sh`（`cp -p`）與 `precheck.txt`（mode 600）；6 檔都 `cmp` 相同、`$PRE` 的三項重驗成立之後，才刪 tmpfs 的控制目錄與 `$PRE`（2026-10-29；`/dev/shm` 只剩 `libpod_lock`、`s91.lock`、`s92.lock`）。observer 的 `--out`（`~/i074_stage2_observe/formal-10-20261028T090959Z/`：`observation.json`、`observation.txt`）原位置保存；⛔ 不需要 `observe-state/`。⑩ 的 `<work>` 與 ⑨-2 的 `<work>` 保存到 evidence 的 commit 之後；`.ctl/`、observer 的報告保存到 I-074 收斂。
+
+### 六、計次的更新（「正式 scan 的計次裁決」v27 的表；⛔ 不改政策本身）
+
+| 項目 | ⑩ 之前 | ⑩ 之後 |
+|---|---|---|
+| 上限 ①（跑完並留下 artifact 的 replay，最多 5） | 3（D、D+1、after'） | **4**（＋ ⑩ 的 before 正式趟） |
+| 上限 ②（物理啟動，最多 8） | 3 | **4** |
+| before 正式趟 | 0／1 | **1／1** |
+| before 正式趟的崩潰重試 | 0／1 | 0／1（未用） |
+| before 重跑（只限 rc 6 之後、語意 SHA 不同） | 0／1 | 0／1（不適用：rc 0） |
+
+### 七、觀察（⛔ 不影響判定）
+
+1. **runpy 的 RuntimeWarning**：`logs/` 的 `check_failed_record.err`、`finalize.err`、`promote.err` 有 `'…replay_bundle.stage2_archive' found in sys.modules after import of package…`，`replay.err` 有 `'backtest.modular.sr_scoring.evaluation'` 的同一種警告。`docs/` 原本⛔ 沒有記載；2026-09-29 的 ⑤ 起每一次 sizing／acceptance 都有。另立 `issue.md` **I-120**（成因、範圍、影響評估）。
+2. **sklearn 的 `InconsistentVersionWarning`**（1.9.0 → 1.9.1）：已知（`issue.md` I-116），⑨-1 的量測趟也是 3 個。
+3. **與 ⑨-1 量測趟的 artifact 不同——設計內**：⑨-1 的量測趟（`formal-91-20261024T040236Z/runs/full/stage2`）與 ⑩ 的 rows（13,417）、候選（156）、兩份 patch 的 SHA 都相同，但 artifact SHA 不同（before `bf9699d3…`、comparison `e03e9569…`）；comparison 的結構差異 719 處：`generated_at`、argv 的路徑，以及 `decision_engine`、`lifecycle_engine` 的 `project_modules_sha256` 與 140 列 before 的 `market_bias`／`lifecycle_phase`／`action_state`。原因是量測趟**依設計⛔ 不套 counterfactual**（acceptance harness 開頭的說明、`issue.md` I-074 的 ⑦d 裁決）。Claude 把 counterfactual patch 套到 `e1cbbbd` 的兩個原檔上（scratchpad）重算：`decision_engine` `040715df…`、`lifecycle_engine` `c70adb3c…` ＝ ⑩ 記下的值（也 ＝ ⑨-1 success 趟的值）；未套時的 `2c110973…`／`fc6104b3…` ＝ 量測趟的值。⑩ 跑的是正確的 before 端。
+4. **時段**：⑩ 在 20:06:46 結束，距舊排程的 21:00 還有 53 分鐘——「十」4 的殘餘風險（後移若沒有生效，21:00 的 `chip_daily_sync` 會碰到 ⑩ 的尾段）⛔ 沒有發生。後移在 10-28 晚上是否實際生效，屬 T-075 的觀察項目，本節⛔ 沒有查（⛔ 不碰 live）。
+5. **記憶體**：replay 容器的 cgroup 峰值下界 444.2 MiB（上限 700m）；⑨-1 量測趟（⛔ 不套 counterfactual）的 cgroup 是 476.1 MiB。兩者的量法與計算內容不同，只記錄、⛔ 不比較。

@@ -3248,7 +3248,7 @@ tag 只允許 allowance 記錄的增量）。
 
 ⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。
 
-#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`）
+#### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，⚠️ 待 review）
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過見
 `issue.md` I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
@@ -3319,6 +3319,19 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 **判讀器**（`scripts/judge-i074-stage2.sh`，⛔ 沒有參數）：以 archive 的 `finalizer_provenance.base_commit` 建暫存複本，在複本裡執行驗證
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
+
+**⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；⚠️ 已執行／待 review，紀錄見
+[`plans/i074-stage2-step10.md`](./plans/i074-stage2-step10.md)「十四」；判讀器在 evidence commit 之後才執行，屬 ⑪）：
+
+| 值 | ⑩ |
+|---|---|
+| 位置 | `python/baselines/i074_stage2/evidence/`：7 檔（`evidence_manifest.json`、`before/`、`comparison/` 兩份、`identity/`、`patch/` 兩份） |
+| 檔案清單的錨（evidence 目錄內 `find . -type f` 排序、逐檔 `sha256sum`，這份清單本身的 SHA-256） | `2da23d3aa83c73afee582b1f24e39653648783062dcb6d0f88d73d35cfdf6f9c` |
+| `evidence_manifest.json` 檔的 SHA-256 | `d5cf06298b4de0875bb00614352e5cf8b6b98450d0b72d6dec8e63458cda5e0e` |
+| `finalizer_provenance.base_commit`（判讀器的信任根；⛔ 不得讓它不可達） | `832f678acfa429f8e4fdba2c82eb77eae826def8`（＝ freeze record 的 `repo_head`） |
+| artifact SHA（解壓後的 canonical bytes） | before `6f25b2d8fa85d4a8e2f7b995eb07b3ca60cd125c8f15699ef3775ff94654b354`；comparison `a39cfbc8050dfc3f586f289e2486cb1c2b3832990b5641f6df8444a5dda7215e`；report `d00ab7cf76933b19dea2615483601a326cc2d6b994c9199de112918c37e6803c` |
+| replay 的規模 | 13,417 列、候選 156（comparison 156 列） |
+| 耗時 | 全程 2 小時 56 分 47 秒：replay 174.6 分鐘、finalize 43 秒、晉升 32 秒 |
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 

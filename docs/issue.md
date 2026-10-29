@@ -74,7 +74,7 @@
   已跳號的 I-114，以及下一個可用的 I-123），
   那是預期的，不是殘留。
 
-  ⚠️ **I-074 的例外**（2026-10-29 收斂，收斂計畫 D1）：凍結集合——`python/` 底下扣掉 `python/baselines`、`python/scripts`、
+  ⚠️ **I-074 的例外**（2026-10-29 收斂，收斂計畫 D1；原文見 `git show caf1442:docs/plans/i074-convergence.md`）：凍結集合——`python/` 底下扣掉 `python/baselines`、`python/scripts`、
   `sr_scoring/tests` 的檔案——裡仍有約 28 行寫「見 issue.md I-074「…」」的註解，**刻意⛔ 沒有改**：`scripts/test-replay-args.sh` 的漂移測試
   要求這些檔案與已封存的 tooling patch 一致，改一個位元組測試就失敗。它們照 `sr-zone-scoring.md`「程式註解裡的 I-074 舊引用」的對照讀，
   退役見 `todo.md` T-077。其餘的 I-074 引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。

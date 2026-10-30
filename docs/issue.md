@@ -3180,7 +3180,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（調查計畫 v3：[`plans/i122-live-batch-failures.md`](./plans/i122-live-batch-failures.md)；D1～D3 已定案；⚠️ 待使用者確認。**證據期限：2026-11-03（台北）結束之前完成保全**——最早的容器 log 檔從 11-04 08:00 起就可能被清除；`job_runs` 約 11-21 起逐日到期） |
+| 狀態 | 進行中（調查計畫 v3：[`plans/i122-live-batch-failures.md`](./plans/i122-live-batch-failures.md)；擷取工具已寫好、⚠️ 待 review，之後才執行 E0～E3。**證據期限：2026-11-03（台北）結束之前完成保全**——最早的容器 log 檔從 11-04 08:00 起就可能被清除；`job_runs` 約 11-21 起逐日到期） |
 | 嚴重度 | 待評估（看過錯誤內容之後再定） |
 | 分類 | Backend / 排程（live） |
 | 建立日期 | 2026-10-29 |

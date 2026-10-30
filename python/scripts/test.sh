@@ -13,7 +13,8 @@
 #   CPUS       CPU 上限（預設 1）
 #   PY_IMAGE   測試用 image tag（預設 stock-trading-python-test:latest）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
-#   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh 與 scripts/test-judge-i074-stage2.sh（預設會先跑）
+#   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh、scripts/test-judge-i074-stage2.sh 與
+#                       scripts/test-extract-job-logs.sh（預設會先跑）
 #   REPLAY_SMOKE=1      另外跑 scripts/smoke-replay-offline.sh（真的跑完 Stage 1／2；預設不跑）
 #   PY_ENV     以空白分隔的 NAME=VALUE，原樣傳進 container。給「預設 skip、明確要求
 #              才跑」的測試用（例如成本量測 SR_EXCURSION_BENCH=1）——這類測試不該
@@ -85,6 +86,8 @@ if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
   IMAGE_REQUIRED=1 PY_IMAGE="$IMAGE" "$REPO_ROOT/scripts/test-replay-args.sh"
   # I-074 Stage 2 的 B／C 判讀器：bootstrap 測試（合成 repo；⛔ 不需要 docker 與 image）。
   "$REPO_ROOT/scripts/test-judge-i074-stage2.sh"
+  # I-122 的 log 擷取與遮罩工具（fake docker；⛔ 不碰 live、⛔ 不需要 image）。
+  "$REPO_ROOT/scripts/test-extract-job-logs.sh"
 fi
 
 

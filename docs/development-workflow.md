@@ -1185,7 +1185,64 @@ image 存在」四項**一律在 `docker run` 之前**，差別只在 `bundle_id
 ⚠️ 另有一條與此相關的**增補式修訂**風險：插入點若落在**表格內部**，會把後面的列切出表外
 （Markdown 不會把它算進那張表）。這個錯在 I-100 與 I-074 各發生過一次。
 
+### I-074 Stage 2 的 B／C 判讀與 image 還原（現行，可以照著執行；2026-10-30 T-077 整理）
+
+I-074 已於 2026-10-29 收斂（判讀 **B**）。T-077 刪除 Stage 2 的執行工具之後（下面各節標了「已退役」的入口），**仍然可以執行的只有兩件事**：
+從已 commit 的 evidence 重跑 B／C 判讀，以及還原判讀要用的 image。判讀器的依賴與規則見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
+
+| 前置條件 | 內容 |
+|---|---|
+| evidence | `python/baselines/i074_stage2/evidence/` 已 commit。`scripts/test-replay-args.sh` 的「封存證據的固定值」驗兩份 patch 與 `evidence_manifest.json` 的 SHA-256；⛔ 不驗 manifest 列出的 artifact 內容（那由判讀器的驗證模式驗） |
+| `base_commit` | manifest 的 `finalizer_provenance.base_commit`（`832f678…`）在 repo 裡可達。判讀器在它的暫存複本裡執行驗證，不可達就拒絕判讀 |
+| image | `sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027` 在本機。它目前也是 live `stock_trading-python-server:latest` 的 image：重新 build 上版之後會失去 tag、可能被清掉，那時先還原（下面） |
+| 可用空間 | 暫存複本是 `git clone --no-hardlinks`；空間不夠就停，⛔ 不改回 hardlink |
+
+**還原 image**（只在 image 不在本機時）：
+
+```text id="i074_stage2_restore_usage_001"
+docker image inspect sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 >/dev/null 2>&1 && echo "已在本機，⛔ 不需要還原"
+scripts/restore-replay-image.sh --stage 2 "$PWD/python/baselines/b1_20260901_1d_74350966_5d7ecb10"
+```
+
+stdout 只印 `sha256:…` 一行（非零時 stdout ⛔ 無輸出）。它讀 repo 外的 identity：
+`${XDG_DATA_HOME:-~/.local/share}/stock_trading/i074_stage2/run_identity.json`。tarball 的規則如下表。
+
+**tarball 的保存與還原**（review 要求寫死位置與驗 SHA 的步驟）：
+
+| 項目 | 規則 |
+|---|---|
+| 位置 | `${XDG_DATA_HOME:-~/.local/share}/stock_trading/i074_stage2/images/<image hex>.tar`，旁邊一份 `<image hex>.tar.sha256`（⛔ 不放 repo、⛔ 不放 `/tmp`） |
+| 建立 | `pin-replay-image.sh --stage 2` 在建立 identity 之後 `docker save`（temp → sha256 → rename）；既有 tarball **先驗 SHA**、⛔ 不覆寫 |
+| 還原 | `scripts/restore-replay-image.sh --stage 2 <bundle>`：① 讀 identity 的 image ID ② **先驗 tarball 的 SHA-256** ③ `docker load` ④ **再驗 image ID 等於 identity 的 `expected_image_id`** ⑤ 重新掛上專用 tag——任一步不符即中止，⛔ 不改為重建 |
+| 驗 SHA 的規則 | ⚠️ **⛔ 不用 `sha256sum -c`**：它驗的是 sidecar 裡寫的檔名，sidecar 改指向同目錄的合法 decoy 就能繞過。改由 `scripts/lib/image-tarball.sh` 驗：sidecar **恰好一行**、檔名**恰好是 `<hex>.tar`**、讀出 digest 後**對 tar 本身重算** |
+
+**B／C 判讀器**（由人執行；唯讀、可以重跑）：
+
+```text id="i074_stage2_judge_usage_001"
+# ⚠️ 一律直接執行（#!/bin/bash -p）；⛔ 沒有參數
+REPLAY_IMAGE_ID=sha256:2a90ad1c1dd801d59373988a4d84afe1437cbee62ccab3709b06cfa8f7da5027 scripts/judge-i074-stage2.sh
+```
+
+與 ⑩ 的入口同一套 bootstrap（`$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定、本腳本 ＝ HEAD）→ 讀
+`evidence/evidence_manifest.json` 的 `finalizer_provenance.base_commit` → 確認可達 → 暫存複本（`git clone --no-hardlinks` ＋ detached checkout）→
+暫存複本的 `finalize-stage2-evidence.sh --verify-promotion-staging <真正 repo>/…/evidence --target evidence --judge`（錨點與判讀規則都是
+`base_commit` 那一版；驗證與判讀在同一個 Python 程序）→ stdout 印那一行 JSON（`verdict.verdict` 是 `B` 或 `C`）。結束碼 `0` ＝ 已判讀
+（B 與 C 都是 0）、`1` ＝ 拒絕判讀（⛔ 不輸出 B／C）。⛔ 不取鎖、⛔ 不寫真正 repo，可以重跑。規則見
+[`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
+
+預期的輸出就是 ⑪ 的正式值（sr 的同一節）：`verdict.verdict` **B**、`base_commit` `832f678…`、`manifest_sha256` `d5cf0629…`、
+`identity_sha256` `a02bf3bd…`。
+
+**測試**：`scripts/test-judge-i074-stage2.sh`（由 `python/scripts/test.sh` 呼叫；合成 repo，⛔ 不需要 docker 與 image）。
+判讀器的程式⛔ 不再修改；要改得先補測試。
+
+⑪（2026-10-29）以簡易指令 `s11`（`s11 status` 由使用者查排程狀態、`s11 judge` 逐項判定前置條件之後呼叫判讀器一次）執行，判讀 **B**；
+執行紀錄（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」（✅ review 通過）。`~/.local/bin/s11`（以及 ⑨-1、⑨-2 的 `s91`、`s92`）已於 2026-10-29 I-074 收斂時依使用者確認刪除；腳本原文見同一份計畫書的「三之一」。
+
 ### I-074 Stage 2 的環境見證程序（2026-09-23 實作 ③b；✅ review 通過）
+
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`finalize-stage2-evidence.sh --envcheck`／`--recover-envcheck`）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/finalize-stage2-evidence.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。`pin-replay-image.sh --stage 2` 仍在，但 Stage 2 的 identity 與 tarball 都已建立，⛔ 不需要再 pin。
 
 ⚠️ **為什麼有這一段**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機——當時 pin 用的
 tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。使用者裁決 **兩側都在新 image 重跑**：
@@ -1227,14 +1284,7 @@ tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。�
 | **3** | 已發布但 durability 未確認 | `--recover-envcheck`（⛔ 不刪除、不重跑 replay） |
 | **1** | 其他失敗（含 E7：見證趟跑錯版本或套了 patch——那⛔ 不是環境見證，⛔ 不發布） | 依錯誤訊息處理 |
 
-**tarball 的保存與還原**（review 要求寫死位置與驗 SHA 的步驟）：
-
-| 項目 | 規則 |
-|---|---|
-| 位置 | `${XDG_DATA_HOME:-~/.local/share}/stock_trading/i074_stage2/images/<image hex>.tar`，旁邊一份 `<image hex>.tar.sha256`（⛔ 不放 repo、⛔ 不放 `/tmp`） |
-| 建立 | `pin-replay-image.sh --stage 2` 在建立 identity 之後 `docker save`（temp → sha256 → rename）；既有 tarball **先驗 SHA**、⛔ 不覆寫 |
-| 還原 | `scripts/restore-replay-image.sh --stage 2 <bundle>`：① 讀 identity 的 image ID ② **先驗 tarball 的 SHA-256** ③ `docker load` ④ **再驗 image ID 等於 identity 的 `expected_image_id`** ⑤ 重新掛上專用 tag——任一步不符即中止，⛔ 不改為重建 |
-| 驗 SHA 的規則 | ⚠️ **⛔ 不用 `sha256sum -c`**：它驗的是 sidecar 裡寫的檔名，sidecar 改指向同目錄的合法 decoy 就能繞過。改由 `scripts/lib/image-tarball.sh` 驗：sidecar **恰好一行**、檔名**恰好是 `<hex>.tar`**、讀出 digest 後**對 tar 本身重算** |
+**tarball 的保存與還原**：已搬到「I-074 Stage 2 的 B／C 判讀與 image 還原」（T-077）。
 
 **凍結窗口 A**：從 ② 開跑到 `envcheck/` 已 durable 且結束碼是 0 或 7 為止（若先回 3，延續到
 `--recover-envcheck` 完成），⛔ 不得 commit 動到 `python/`、`scripts/`、`.gitattributes` 的變更。
@@ -1243,6 +1293,8 @@ tag 與 `python/scripts/test.sh` 等腳本共用，也⛔ 沒有任何備份。�
 manifest 為信任錨，單獨搬走會斷鏈。
 
 ### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；✅ review 通過）
+
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`finalize-stage2-evidence.sh` 的各模式）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/finalize-stage2-evidence.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo，但⛔ 沒有入口。
 
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」（原文：`git show 20eacb2:docs/issue.md`
 的 I-074「③ Stage 2 evidence contract」）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）
@@ -1303,6 +1355,17 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 
 ### I-074 Stage 2 的 tooling patch（⑦a；2026-09-30 實作、✅ review 通過）
 
+**現況（2026-10-30 T-077 之後）**：
+
+* 兩份 patch（`python/baselines/i074_stage2/counterfactual_e1cbbbd.patch`、`tooling_e1cbbbd.patch`）是 I-074 的封存證據：⛔ 不改、⛔ 不重新產生。
+* 產生器 `scripts/make-i074-tooling-patch.sh` 與漂移測試已刪除（最後版本見 `c6c2481`）。Python 產品碼（含 `evaluation.py`、`replay_bundle/`）
+  照一般流程修改，⛔ 不再需要重新產生 patch。
+* 取代的保護：`scripts/test-replay-args.sh` 的「封存證據的固定值」驗兩份 patch 與 `evidence_manifest.json` 的 SHA-256 等於封存值；
+  ⛔ 不讀產品碼，也⛔ 不驗 manifest 列出的 artifact 內容（那由判讀器的驗證模式驗）。
+* `run-replay-offline.sh` 的反事實模式仍在：它讀傳進去的 patch 檔，⛔ 不讀 HEAD 的產品碼；測試見「I-074 Stage 2 的測試落點」。
+
+⚠️ **已退役（T-077，2026-10-30）**：本節以下的版控流程與漂移測試是 ⑦a～⑩ 期間的程序，保留作為紀錄，⛔ 不能再照著執行。
+
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」；本節只寫**操作程序**。
 
 ⑩ 的 replay 跑在 **`e1cbbbd` worktree**，所以 HEAD 對 `evaluation.py` 與 `replay_bundle/` 的任何改動都要經
@@ -1335,6 +1398,8 @@ base 以合成函式套用輸入 patch 得 `T1`，取得完整的 canonical SHA 
 
 #### ⑨：兩道 guard、封存與重新封存（2026-10-12 實作，✅ review 通過（兩輪），commit `53538a3`）
 
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`i074-step9-guards.sh`、`i074-step9-image.sh` 與兩道 guard 的 Python helper）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/i074-step9-guards.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。
+
 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的兩道 guard 與兩份 patch 的封存」；本節只寫**操作程序**。
 
 ```text
@@ -1366,9 +1431,11 @@ S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074
   python/baselines/i074_stage2/tooling_e1cbbbd.patch`，並逐一比對 acceptance 報告 `meta` 的 `counterfactual_sha256`、
   `counterfactual_canonical_sha256`、`tooling_sha256`、`tooling_canonical_sha256`、`composed_sha256`、
   `counterfactual_semantic_sha256` ＝ 封存值（`sr-zone-scoring.md` 的封存值表）。
-* **重新封存**：之後只要兩份 patch 任一份的 bytes 或 SHA 改變，⑨（S0～S9）、⑨-1、⑨-2 全部重做。
+* **重新封存**：之後只要兩份 patch 任一份的 bytes 或 SHA 改變，⑨（S0～S9）、⑨-1、⑨-2 全部重做。（I-074 收斂、T-077 刪除產生器與 ⑨ 的工具之後⛔ 不再適用：兩份 patch 是封存的證據，⛔ 不改、⛔ 不重新產生）
 
 ### I-074 Stage 2 的正式執行程序（⑦b 2026-09-30 實作、✅ review 通過；⑦c 2026-10-01 補晉升與判讀器，✅ review 通過；⑩ 2026-10-28 正式執行，✅ review 通過，commit `078ec72`）
+
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`run-i074-stage2.sh`、supervisor、label shim、晉升 `i074_stage2_promote.py`，以及 `test-i074-stage2.sh`）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/run-i074-stage2.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；判讀器⛔ 不在退役之列，已搬出本節；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。
 
 ⚠️ 規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦b 細部計畫 v1」「Stage 2 步驟 ⑦c 細部計畫 v1」與 v29「八之一」～「八之三」；本節只寫**操作程序**。
 ⑩ 在 ⑨-2 產出 freeze record 之後才可執行。⚠️ 2026-10-28 已執行（rc 0）：使用者執行的貼上版程序（precheck、wrapper、狀態、安全中止、
@@ -1437,23 +1504,7 @@ sentinel（回 1；`--promote` 回 9）。所以**判讀一律先看 sentinel**�
 ⚠️ **failed record 晉升之後（6）**：開始下一次 ⑩ 之前**必須先 commit** 它，並以包含它的 commit 重產 freeze record——preflight 會擋下
 未追蹤的項目與舊的 freeze record。
 
-**B／C 判讀器（⑦c；成功 archive 晉升並 commit 之後，由人執行）**：
-
-```text id="i074_stage2_judge_usage_001"
-# ⚠️ 一律直接執行（#!/bin/bash -p）；⛔ 沒有參數
-REPLAY_IMAGE_ID=sha256:2a90ad1c… scripts/judge-i074-stage2.sh
-```
-
-與 ⑩ 的入口同一套 bootstrap（`$-` 含 `p`、清 `BASH_ENV`／`ENV`／`LD_*`／`PYTHON*`／`GIT_*`、PATH 固定、本腳本 ＝ HEAD）→ 讀
-`evidence/evidence_manifest.json` 的 `finalizer_provenance.base_commit` → 確認可達 → 暫存複本（`git clone --no-hardlinks` ＋ detached checkout）→
-暫存複本的 `finalize-stage2-evidence.sh --verify-promotion-staging <真正 repo>/…/evidence --target evidence --judge`（錨點與判讀規則都是
-`base_commit` 那一版；驗證與判讀在同一個 Python 程序）→ stdout 印那一行 JSON（`verdict.verdict` 是 `B` 或 `C`）。結束碼 `0` ＝ 已判讀
-（B 與 C 都是 0）、`1` ＝ 拒絕判讀（⛔ 不輸出 B／C）。⛔ 不取鎖、⛔ 不寫真正 repo，可以重跑。規則見
-[`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」。
-
-⑪（2026-10-29）以簡易指令 `s11`（`s11 status` 由使用者查排程狀態、`s11 judge` 逐項判定前置條件之後呼叫判讀器一次）執行，判讀 **B**；
-執行紀錄（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」（✅ review 通過）。`~/.local/bin/s11`（以及 ⑨-1、⑨-2 的 `s91`、`s92`）已於 2026-10-29 I-074 收斂時依使用者確認刪除；腳本原文見同一份計畫書的「三之一」。
-
+**B／C 判讀器**：仍然可以執行，已搬到「I-074 Stage 2 的 B／C 判讀與 image 還原」（T-077）。
 
 ⚠️ **放鎖的時機**：sentinel unlink 之後、目錄 fsync 成功之前⛔ 放鎖（fsync 失敗就持鎖、每 30 秒重試並回報）；清理途中的任何例外也等同「清不空」——supervisor ⛔ 因例外結束而連帶放鎖。
 
@@ -1482,6 +1533,8 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 在 `scripts/test-replay-args.sh`。
 
 #### ⑩ 的正式執行程序（2026-10-28 由使用者執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`）
+
+⚠️ **已退役（T-077，2026-10-30）**：同上一層「I-074 Stage 2 的正式執行程序」；下面的區塊⛔ 不能再照著貼上執行。
 
 ⚠️ 計畫、決定（D1～D9）與修訂經過（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step10.md`，執行結果見同檔「十四」。
 下面的區塊與判讀表是該計畫 v3（「十」2 實作，commit `a9cb41d`）**原樣**的內容——⑩ 實際執行的就是這一版。文中的「二」～「五」
@@ -1807,6 +1860,8 @@ sentinel、容器與程序（⛔ 不需要 P4 的時段——晉升只要幾分�
 
 ### I-074 Stage 2 的 sizing harness（步驟 ④；2026-09-24 實作、2026-09-29 review 通過；⑦b 改動 ✅ review 通過；⑦d 改動 ✅ review 通過；有效性條件 ✅ review 通過並 commit `c49fde1`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`i074-stage2-sizing.sh`、`lib/i074-sizing-docker-shim.sh`、`i074_stage2_sizing.py`）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/i074-stage2-sizing.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。
+
 ⚠️ 規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」與本節；計畫（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ④：sizing harness 計畫書」（v7 ＋ 差異 1、2）；本節只寫**操作程序**。
 它量的是 **`P_B`**（Stage 2 從 replay 開始到發布完成，磁碟上新增用量的峰值）與證據層每個程序的記憶體峰值，
 供步驟 ⑤ 裁定 `M_safety`。⛔ 它**不是**正式的證據入口，⛔ 也⛔ 不做可用空間檢查（preflight 屬 ⑦）。
@@ -1943,6 +1998,8 @@ SH
   sizing 的**量法**（cgroup 峰值的 wrapper、sidecar 的既有欄位、報告與數字）⛔ 不變。
 
 ### I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer（⑦d；2026-10-02 實作、2026-10-05 增補（RSS 判定，✅ 2026-10-06 commit `576a8f7`）；2026-10-06 有效性條件與 ⑨-1 fail-fast，✅ review 通過並 commit `c49fde1`）
+
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`i074-stage2-acceptance.sh`、`lib/i074-stage2-measure.sh`、observer（`i074_stage2_sizing.py` 的子指令））已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/i074-stage2-acceptance.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。
 
 ⚠️ 規格見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」；容量驗收的現況規格見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)
 「I-074 Stage 2 的容量驗收」。本節只寫**操作程序**。⛔ 不是正式的證據入口；**正式驗收是 ⑨-1**。
@@ -2110,6 +2167,7 @@ python3 python/scripts/i074_stage2_sizing.py observe --work-dir <⑩ 的 --work-
 
 I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 ③ evidence contract「十」）分散在下面幾個落點；逐 id 的稽核表（歷史）在
 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑧ 稽核結果」。這裡只列**穩定的類別與入口**（⛔ 不搬會隨改名漂移的方法清單）。
+⚠️ 2026-10-30 T-077 刪除了 ⑦～⑩ 的執行工具與只測它們的測試（最後版本見 `c6c2481`）；下表只列刪除之後剩下的落點。
 
 | 類別 | 落點 | 入口 |
 |---|---|---|
@@ -2118,13 +2176,9 @@ I-074 Stage 2 的驗收 id（Stage 2 計畫書 v29「六、2」「六、9」與 
 | 成功 archive、failed record、Stage 1 信任錨、全圖十六道、recovery、CLI matrix、驗證模式與 `--judge` 的 Python 段 | `test_replay_stage2_archive.py` | pytest |
 | 環境見證（E1～E7、等價判定、envcheck 的串流與 sample） | `test_replay_envcheck.py`；row-level 原語在 `test_replay_row_primitives.py` | pytest |
 | B／C 判讀規則 | `test_i074_stage2_verdict.py` | pytest |
-| preflight（磁碟檢查、state、`anchors` 在 replay 之前那一層）、freeze record、晉升的判定順序與結束碼（注入的 git／驗證模式／故障） | `test_i074_stage2_preflight.py`、`test_i074_stage2_freeze_record.py`、`test_i074_stage2_promote.py` | pytest |
-| runner／finalizer 的 argv、mount、合成守門、`--check-failed-record` 的決策、canonical diff 與 tooling patch 產生器、sizing／acceptance harness | `scripts/test-replay-args.sh`（隔離的最小 repo ＋ fake docker） | `python/scripts/test.sh`（`IMAGE_REQUIRED=1`） |
-| orchestrator、supervisor、晉升的整合、判讀器的 bootstrap | `scripts/test-i074-stage2.sh`（合成 repo ＋ sed 過常數的正式腳本） | 同上 |
-| supervisor 的屬性與故障注入、host-run／reap-adopted／kill-pinned、需要 git 的 helper、離線讀取端 | `scripts/tests/test_i074_stage2_host.py`（host 的 Python 3.9 unittest） | 由 `scripts/test-i074-stage2.sh` 呼叫 |
-| 真實產品資料流的非空翻轉 | `scripts/smoke-replay-offline.sh` | `REPLAY_SMOKE=1`（預設不跑） |
-| ⑨ 的兩道 guard（comparator 的檢查、allowlist、tamper、正規化規則）與完整驗證的逐項比對 | `test_i074_differential_guard.py`、`test_i074_tooling_guard.py`、`test_i074_step9_runs.py` | pytest |
-| ⑨ 的入口（bootstrap 自證、隔離 clone、正式 repo 物件庫的 inventory、可用空間、`--s7` 模式、結束碼仲裁）與 image 契約 | `scripts/test-i074-step9.sh`（隔離 repo ＋ 以狀態檔模擬 image 庫的 fake docker；標籤以 `step9：` 開頭） | 由 `scripts/test-replay-args.sh` 呼叫，也可單獨執行 |
+| runner（`run-replay-offline.sh`）的反事實模式與 argv、canonical diff、`lib/replay-args.sh` 的語意鍵與錯誤處理、封存證據的固定值 | `scripts/test-replay-args.sh`（隔離的最小 repo ＋ fake docker；反事實 argv 那一段在真正 repo 以 dry-run） | `python/scripts/test.sh`（`IMAGE_REQUIRED=1`） |
+| B／C 判讀器的 bootstrap（信任根、PATH、腳本 ＝ HEAD、`base_commit` 的暫存複本、拒絕判讀的各種情況） | `scripts/test-judge-i074-stage2.sh`（合成 repo ＋ sed 過兩行常數的正式腳本；⛔ 不需要 docker 與 image） | 同上 |
+| 真實產品資料流的非空翻轉 | ⛔ 沒有替代：原本是 `scripts/smoke-replay-offline.sh` 的反事實段，已隨 T-077 移除（最後版本見 `c6c2481`）；pytest 用 `stub_replay`，dry-run 只驗 argv | — |
 
 寫這一區的測試時：
 
@@ -2179,7 +2233,7 @@ python 測試容器不連 PG／MySQL，⛔ **文件與驗收報告一律不得�
 |---|---|---|
 | `scripts/test-replay-args.sh` | 參數所有權（含**縮寫**與**重複**）、TOCTOU、tooling patch hash、以及**實際組出來的 `docker run` argv**（stage↔版本、bundle／artifact 掛載、`--network none`、無 DB 環境變數） | `python/scripts/test.sh` 在 pytest **之前**自動跑（`SKIP_SHELL_TESTS=1` 可跳過） |
 | `scripts/smoke-replay-offline.sh` | **真的**用官方腳本把 Stage 1／2 跑完一次（小型 fixture，秒級） | 預設不跑；`REPLAY_SMOKE=1 python/scripts/test.sh` 或直接執行 |
-| `scripts/test-i074-stage2.sh` | I-074 Stage 2 ⑩ 的入口、supervisor、持鎖階段、複本內 orchestrator、label shim（合成 repo ＋ sed 過常數的正式腳本 ＋ fake docker／runner／finalizer；⛔ 不碰 `/run/lock`）＋ host unittest | 同 `test-replay-args.sh`（`SKIP_SHELL_TESTS=1` 可跳過） |
+| `scripts/test-judge-i074-stage2.sh` | I-074 Stage 2 的 B／C 判讀器的 bootstrap（合成 repo ＋ sed 過兩行常數的正式腳本；⛔ 不需要 docker 與 image）。T-077 之前這一列是 `scripts/test-i074-stage2.sh`（⑩ 的入口、supervisor 等；已刪除，最後版本見 `c6c2481`） | 同 `test-replay-args.sh`（`SKIP_SHELL_TESTS=1` 可跳過） |
 
 ⚠️ **兩層都需要，少了任一層都有洞**：argv 斷言攔得住「Stage 1 跑成 before」「bundle 沒掛
 進去」這類錯誤，但證明不了 CLI 在 worktree 裡啟動得起來、bundle 在容器內載入得了、

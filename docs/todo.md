@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v4：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)；D1～D6 已定案；⚠️ 待使用者確認） |
+| 狀態 | 進行中（計畫 v4：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)，✅ 2026-10-30 確認；**階段 A（刪除工具與測試、新增判讀器的測試、文件）已實作／待 review**；階段 B（凍結集合的註解、T-073、D1 的真跑）尚未開始） |
 | 優先度 | 中（任何 Python 產品碼的修改都要先處理它） |
 | 分類 | Scripts／測試／Python |
 | 建立日期 | 2026-10-29 |
@@ -155,7 +155,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃 |
+| 狀態 | 已解除／待 review（2026-10-30 T-077 階段 A 刪除了 `scripts/test-i074-stage2.sh`，連同它要跑真正 preflight 6 的合成流程；這個磁碟門檻的依賴隨之消失，最後版本見 `c6c2481`） |
 | 優先度 | 低 |
 | 分類 | Scripts／測試環境 |
 | 建立日期 | 2026-10-08 |

@@ -2,8 +2,9 @@
 
 ⚠️ 與 `test_replay_bundle_stages.py` 相同，replay 本身用 `stub_replay` 取代（⛔ 不經過產品資料流）——
 這裡驗的是反事實路徑的**邏輯與順序**：成對守門、replay 之前的讀取與版本守門、全量 key 守門、
-「①之三」（`CounterfactualEffectCheck`）、終態與結束碼。真實產品資料流的非空翻轉由
-`scripts/smoke-replay-offline.sh`（`REPLAY_SMOKE=1`）的正式 bundle 切片負責。
+「①之三」（`CounterfactualEffectCheck`）、終態與結束碼。真實產品資料流的非空翻轉原本由
+`scripts/smoke-replay-offline.sh` 的反事實段（正式 bundle 的切片）負責；該段已於 T-077 移除，這一層覆蓋⛔ 沒有替代
+（最後版本見 `c6c2481`）。`scripts/test-replay-args.sh` 的 dry-run 只驗 runner 組出的 argv。
 
 測試 id 對照 git show 20eacb2:docs/issue.md 的 I-074「Stage 2 計畫書」「六、2」的 a～i、aa～ac2、o、p～r、y。
 """

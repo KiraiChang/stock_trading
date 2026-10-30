@@ -16,8 +16,3 @@
 # `**/` 也涵蓋第一層（② 的產物留在原處）。
 python/baselines/i074_stage2/**/*.patch -text -whitespace
 python/baselines/i074_stage2/**/*.log   -text -whitespace conflict-marker-size=200
-
-# ⚠️ I-074 ⑨ 完整驗證的 baseline（⑧ 第三次全量執行的 `-v` log）：逐位元保存，SHA-256 記在
-# 同目錄的 metadata 與 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」。只指定這一個檔（精確路徑），
-# ⛔ 不擴大到整個 fixtures 目錄——同目錄的 metadata JSON 照常接受 whitespace 檢查。
-python/scripts/fixtures/i074_step9/step8_full_run3.log -text -whitespace conflict-marker-size=200

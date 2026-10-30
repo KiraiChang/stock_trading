@@ -168,7 +168,7 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 | `.gitattributes` 的巢狀規則 | 保留（保護證據的 bytes） |
 | pin 的專用 tag、`pin-replay-image.sh --stage 2`、`run-replay-offline.sh` 的 `I074_STAGE`、見證趟的 E7 前置守門 | 保留 |
 | sizing 的 shim、參數、raw-failed freeze record；acceptance 的 profile、參數、快照 | 刪 |
-| Stage 2 反事實的 argv（`run-replay-offline.sh` 的 dry-run）、canonical diff、`replay_args_path_clean`／`replay_args_remove_worktrees_under` | 保留（測的是保留的 `run-replay-offline.sh` 與 `lib/replay-args.sh`）；把錯誤訊息裡指向產生器的提示改掉 |
+| Stage 2 反事實的 argv（`run-replay-offline.sh` 的 dry-run）、canonical diff、`replay_args_path_clean`／`replay_args_remove_worktrees_under` | 保留（測的是保留的 `run-replay-offline.sh` 與 `lib/replay-args.sh`）；把錯誤訊息裡指向產生器的提示改掉。⚠️ 實作時發現 path_clean 那一段裡另有 2 項在測 smoke 的「來源 bundle 必須乾淨」前置檢查——D6 刪了那個檢查，這 2 項隨之刪除（見「十二」的實作備註） |
 | 產生器的四條不變條件、漂移測試、`test-i074-step9.sh` 的呼叫 | 刪 |
 | 新增：封存證據的固定值檢查（D5） | 加 |
 
@@ -359,3 +359,64 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 | v2 | 2026-10-30 | 依 v1 的 review 修正。#1：I-119、I-121 的 5 處 `檔名:行號` 在階段 A 就改成 `c6c2481` 的歷史引用（「六」）。#2：刪除的驗收改成「HEAD 上⛔ 沒有未處理的執行依賴」，並列出 E1～E5 五類例外（「三」）。#3：D6 寫明 smoke 的完整刪除範圍、移除的覆蓋與 `test_replay_counterfactual.py` 的檔頭；驗證加上實跑保留的 smoke（「七」「九」）。D1～D6 定案：D1 改採 (b)，新增 `scripts/test-judge-i074-stage2.sh`，真跑改為額外驗收；D3 補界線；D5 補「⛔ 不驗 artifact 內容」 |
 | v3 | 2026-10-30 | 依 v2 的 review 修正兩處驗收描述。#1：PATH 的反向驗證改以「惡意 PATH 下照樣判讀成功」的案例與 PATH 的靜態檢查變紅為判定；「fake ⛔ 沒有被執行」在這個變異下仍是綠的（信任根檢查會先擋下）（「七」D1）。#2：階段 A 的驗收只含「九」的基準、階段 A 之後、舊版失敗的對照組；解凍的正向驗證移到階段 B（「九」「十」）。實作方向不變 |
 | v4 | 2026-10-30 | 階段 A 實作前記基準時發現：「四」要刪的 finalizer 範圍裡夾著三樣在測保留程式的項目（`ensure --stage 2` 1 項、`run-replay-offline.sh` 的反事實模式 17 項、`lib/replay-args.sh` 的語意鍵與 fixture 2 項）。v3 只寫了共用變數要搬；v4 改成連這 20 項與它們的建置一起搬到保留的前置段（「四」），驗證改以標籤逐項比對（「四」），風險表補一列（「八」）。這也是 D2 的前提——反事實路徑仍經 `run-replay-offline.sh` 使用，它的測試就⛔ 不能刪 |
+| v4 實作備註 | 2026-10-30 | ⚠️ 待 review：階段 A 第一次全量測試，`test-replay-args.sh` 的 path_clean 段有 2 項失敗——它們測的是 smoke 的「來源 bundle 必須乾淨」前置檢查（在 docker build 之前擋下），而 D6 已把這個檢查連同反事實段刪除。這 2 項是 D6 的連帶刪除，⛔ 不是新的方向；原處留一行註解（「四」）。 |
+
+## 十三、階段 A 的實作結果（2026-10-30；⚠️ 待 review）
+
+### 一、結論
+
+階段 A 已實作、未 commit。凍結機制（產生器、漂移測試）與 ⑦～⑩ 的執行層已刪除；保留的程式與測試全部通過；
+產品碼與 `python/baselines/` 0 變更。解凍的正向驗證屬階段 B（「九」4）。
+
+### 二、變更
+
+| 類 | 內容 |
+|---|---|
+| 刪除 | 38 個檔：`scripts/` 14、`python/scripts/` 15（含 fixture 3）、`sr_scoring/tests` 9 |
+| 新增 | `scripts/test-judge-i074-stage2.sh`（218 行、19 項） |
+| 修改 | `scripts/test-replay-args.sh`（4391 → 1927 行）、`scripts/smoke-replay-offline.sh`（360 → 226 行）、`python/scripts/test.sh`、`scripts/lib/replay-args.sh`（只改註解）、`scripts/judge-i074-stage2.sh`（只改常數區塊的一行註解）、`python/scripts/_i074_bootstrap.py`（刪 `STAGE2_ARCHIVE_MODULES`）、`sr_scoring/tests/test_replay_counterfactual.py`（只改檔頭 docstring）、`.gitignore`、`.gitattributes`、`docs/` 的 wf、sr、issue、todo 與本計畫書 |
+| 行數 | ＋407／−26,505（含新增的測試與文件） |
+
+### 三、驗證
+
+| 項目 | 結果 |
+|---|---|
+| 基準（`cf65eb2`，實作之前） | `python/scripts/test.sh` rc 0；pytest 2409 passed、1 skipped；shell 的 ok 863（`test-doc-refs.sh` 45、`test-replay-args.sh` 565（含 `test-i074-step9.sh` 的 57）、`test-i074-stage2.sh` 253）、FAIL 0；可用空間 11.4 GB；worktree 登記 405 |
+| 最終（第二次全量） | rc 0；pytest **1711** passed、1 skipped；shell 的 ok 265（`test-doc-refs.sh` 45、`test-replay-args.sh` 201、`test-judge-i074-stage2.sh` 19）、FAIL 0；`check-doc-refs.py` 引用 131 個、問題 0（136 → 131：I-119、I-121 的 5 處改成 `c6c2481` 的歷史引用）。第一次全量的 2 項失敗見「十二」的實作備註 |
+| pytest 的減少 | −698 ＝ 刪掉的 9 個測試檔在 HEAD 上 `--collect-only` 的 698 項（逐檔取出 HEAD 的版本、在測試 image 裡收集） |
+| 全量之後的改動 | 只有新測試檔的兩處禁止標記改寫（見「四」）；改完重跑 `test-judge-i074-stage2.sh`：rc 0、19 項 ok |
+| `test-replay-args.sh` 逐項對照 | 基準 565 → 201。消失 367 項：365 項屬於被刪的段落、2 項是 D6 的連帶（smoke 的來源 bundle 前置檢查）；新增 3 項（D5）。保留的段 ok 數除 path_clean（11 → 9，即那 2 項）之外全部相同 |
+| 搬移的 20 項（v4） | 全部還在、全部 ok：`ensure --stage 2` 1 項（原 finalizer 段 → 「共用的暫存目錄與 run identity」）；語意鍵 1 項、patch fixture 1 項（原 ③d 段 → 「runner 反事實模式的 patch fixture 與語意鍵」）；runner 的反事實模式 17 項（段名不變，17 → 17，含「③d 的每一條路徑都清掉了暫時 worktree」） |
+| 判讀器測試（D1 (b)） | 19 項 ＝ 原本的 11 個執行期案例 ＋ 4 項靜態檢查 ＋ 4 項新增（輸出的 `base_commit`、暫存複本清空、真正 repo 的 HEAD 不變、worktree 隔離）。拒絕判讀的 7 個案例另外比對 stderr 的訊息（wf「寫這一區的測試時」：斷言性質） |
+| 判讀器測試的反向驗證 | 在 scratchpad 的小 repo 裡對「正式」判讀器做兩種變異（⛔ 不碰真正 repo）：(a) 拿掉「內容 ＝ HEAD」的檢查 → 只有「腳本的內容 ≠ HEAD → 1」變紅；(b) 拿掉 PATH 的重設 → PATH 的靜態檢查、惡意 PATH 下的成功案例（與依賴它的兩項）變紅，「fake ⛔ 沒有被執行」維持綠的（v3 的預期）。還原之後全部通過 |
+| D5 的反向驗證 | 以 scratch 目錄當 `REPO_ROOT`：manifest 多一個位元組 → FAIL；缺 tooling patch → FAIL；真正 repo（唯讀）→ 3 項 ok。三個封存值與 sr、wf 的紀錄相同 |
+| smoke（D6） | 舊版在 `c6c2481` 的 `--no-hardlinks` 隔離 clone：rc 0（⓪ 1 項、一般段 9 項、反事實段 7 項）。新版在套用階段 A 的隔離 clone（`scripts`、`python`、`.gitattributes`、`.gitignore` 與工作樹逐檔相同）：rc 0，一般段 9 項逐項相同（bundle `b1_20260901_1d_0aef7080_9efb5fc7`、35 列、cohort 0），少的正是 ⓪ 與反事實段的 8 項。repo 外兩份 `run_identity.json` 的 SHA-256 前後相同 |
+| 舊版失敗的對照組（「九」3） | 在同一個 `c6c2481` clone：未改動的 tree → `make-i074-tooling-patch.sh --verify` rc 0；`decision_engine.py` 只加一行註解 → rc 1（④，訊息點名該檔）。clone 的 worktree 登記數不變 |
+| 執行依賴（「三」的驗收條件） | 保留檔裡被刪檔名的命中 19 筆，全部歸類：E1 6（判讀器 3、新測試合成 repo 裡的 fake 驗證入口 3）、E3 4、E4 5、E5 4；⛔ 沒有未處理的依賴 |
+| 文件的殘留 | `docs/` 裡提到被刪檔案的每一處都在帶退役標記的節、帶 `c6c2481` 的引用或 E4 的說明裡；唯一的例外是 I-120 的 `~/i074_stage2_sizing/…`——repo 外量測目錄的名稱，⛔ 不是被刪的檔 |
+| 只改註解 | `judge-i074-stage2.sh`、`lib/replay-args.sh` 的每一個變更行都是整行註解；`test_replay_counterfactual.py` 去掉 docstring 的 AST 與 HEAD 相同 |
+| 格式 | `git diff --check`（已暫存、未暫存）通過；新增的行裡每個禁止標記後面都帶否定詞 |
+
+**worktree 登記的增量**（真正 repo；I-118 的既有成因：runner 走到 `exec docker run` 時 EXIT trap 不會執行；⛔ 沒有清理）：
+
+| 時間（2026-10-30） | 登記數 | 來源 |
+|---|---|---|
+| 開始之前 | 405 | 含 2026-10-29 16:15 I-074 收斂時那次測試留下的 4 筆 |
+| 10:03 | 405 → 409 | 基準的 `python/scripts/test.sh` |
+| 10:27～10:28 | 409 → 413 | 階段 A 第一次全量 |
+| 10:30 | 413 → 417 | 階段 A 第二次全量 |
+| 10:46 | 417 → 421 | ⛔ 不是本輪的執行（在本輪所有測試結束之後；型態與 `test-replay-args.sh` 的洩漏相同） |
+
+刪除前後每跑一次 `test.sh` 都多 4 筆，所以洩漏來自保留的 runner 測試，⛔ 不是被刪的測試。smoke 與對照組都在隔離 clone 裡跑，⛔ 沒有加到真正 repo。
+
+### 四、與計畫的差異（照實記錄）
+
+* 「十二」的 v4 實作備註：path_clean 段裡測 smoke 前置檢查的 2 項，隨 D6 刪除。
+* smoke 的基準⛔ 沒有在實作之前跑（漏了「九」1 的這一項）：改在 `c6c2481` 的隔離 clone 補跑。`c6c2481` 與實作之前的 HEAD（`766c48d`）在 `scripts`、`python`、`.gitattributes`、`.gitignore` 完全相同（`git diff --quiet`）。
+* 判讀器測試比「七」D1 (b) 多 4 項，拒絕案例另外比對 stderr；兩處禁止標記改成直接接否定詞「不」「沒有」（原本的標籤是禁止標記接「從未被執行」，原本的註解是禁止標記接「只看結束碼…」）。
+* wf 的判讀命令改用完整的 image ID（原本是截短的 `2a90ad1c…`，⛔ 不能直接貼上執行）。
+
+### 五、留給階段 B
+
+「五」的註解改寫與 T-073；sr「程式註解裡的 I-074 舊引用（凍結集合）」與 issue.md 檔頭的 D1 例外段；I-120 的處置方向；
+解凍的正向驗證；D1 的真跑（使用者執行）；T-077、T-073 的狀態。

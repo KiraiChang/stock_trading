@@ -3111,13 +3111,13 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 | 最後一步是 `exec docker run` | `scripts/run-replay-offline.sh`、`scripts/finalize-evidence.sh`、`scripts/compare-replay-crossday.sh` 等 | `exec` 取代了 shell，**EXIT trap 不會執行**——worktree 目錄與註冊都留下。⚠️ 正式執行時容器還在用這個 worktree，⛔ 不能在 `exec` 之前清；但執行完也沒有人清 |
 | 測試以 fake docker 跑到 `exec docker run` | `scripts/test-replay-args.sh`（例如「結束碼 4 原樣傳出」） | 每跑一次常態測試就多一個 |
 
-⚠️ **I-074 ③b 新增的部分已避開**：`finalize-stage2-evidence.sh` 用 `git worktree remove --force` ＋ 前景執行
+⚠️ **I-074 ③b 新增的部分已避開**：`finalize-stage2-evidence.sh`（已於 T-077 刪除；最後版本見 `c6c2481`）用 `git worktree remove --force` ＋ 前景執行
 （⛔ 不 `exec`）；它的 shell 測試在隔離的暫存 repo 裡跑；見證趟 E7 守門的放行案例改用 dry-run。
 
 #### 處置方向（⚠️ 待規劃）
 
 * cleanup 一律 `git worktree remove --force` ＋ `rm -rf`（比照 `run-replay-offline.sh` 既有的 `cleanup()`）；
-* `exec docker run` 改為前景執行並保留 trap，原樣傳出結束碼（比照 `finalize-stage2-evidence.sh`）；
+* `exec docker run` 改為前景執行並保留 trap，原樣傳出結束碼（比照 `c6c2481` 的 `finalize-stage2-evidence.sh`）；
   ⚠️ 要確認不影響即時串流與結束碼的既有契約（Stage 1 的 exit 4／5 傳遞測試）；
 * 測試結束時斷言 worktree 數量**沒有增加**，⛔ 不靠人工 `git worktree prune`。
 
@@ -3127,7 +3127,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 |---|---|
 | 放大 | 反向驗證把產品或測試的清理故意做壞時，那一輪建立的**每一個** worktree 與暫存目錄都會留下：⑧ 的 F1（③d 隔離 repo 的合成用 worktree 與凍結的 patch）一輪就在 `/tmp` 留下 84 個目錄（逐一確認是那一輪建立的之後才刪除） |
 | 既有增量 | 真正 repo 的 worktree 登記：⑦a 計畫時 177 筆，⑧ 全量執行前後 377 → 381（完整入口每跑一次 ＋4，來自 `test-replay-args.sh` 走到 `exec docker run` 的案例）；⑧ 期間另有兩次 ＋4 來自本輪以外的執行——**前後差集分不出是誰建立的** |
-| 餘裕 | `/tmp` 的累積會吃掉 host 有限的可用空間，而 `scripts/test-i074-stage2.sh` 的合成流程需要 ≥ 1,241,513,984 bytes（[`todo.md`](./todo.md) T-072） |
+| 餘裕 | `/tmp` 的累積會吃掉 host 有限的可用空間，而 `scripts/test-i074-stage2.sh` 的合成流程需要 ≥ 1,241,513,984 bytes（[`todo.md`](./todo.md) T-072；這支測試已於 T-077 刪除，這個需求隨之消失） |
 
 ⚠️ **之後的反向驗證**（尤其注回清理失敗時）一律：
 
@@ -3135,7 +3135,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 * 每一輪用本輪專屬、新建的 `TMPDIR`，只清那個目錄底下的東西；
 * 前後做**完整 inventory**：真正 repo 與 clone 的 worktree 清單、`/tmp` 的新項目（名稱與建立時間）、`docker ps -a`、image 清單、`/run/lock`、`/dev/shm`、帶 cleanup token 的程序；
   只刪**確認是本輪建立**的項目——⛔ 不依「前後差集」直接刪（同時段別人建立的也在差集裡）、⛔ 不 prune 既有的登記；
-* S2 的合成流程開跑前先確認可用空間（≥ 1.3 GB）。
+* S2 的合成流程開跑前先確認可用空間（≥ 1.3 GB）。（2026-10-30：S2 的合成流程在 `scripts/test-i074-stage2.sh`，已於 T-077 刪除。）
 
 ---
 
@@ -3143,7 +3143,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復（⚠️ 處置方向待規劃；原本的「⑩ 之前⛔ 不改程式」已於 2026-10-28 ⑩ 結束而解除——要改的 `python/scripts/` 與 `scripts/` ⛔ 不在 T-077 的凍結範圍） |
+| 狀態 | 已解除／待 review（2026-10-30 T-077 階段 A：產生這份報告的 acceptance／sizing harness 已刪除，⛔ 不再有程式會寫出這個欄位；已寫成的 ⑨-1、⑨-2 報告怎麼讀，歸檔在 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」的兩個正式結果。下方程式的位置都指 `c6c2481` 的版本） |
 | 嚴重度 | 中（誤導：會被讀成整段執行的低點；⛔ 不影響任何門檻與判定） |
 | 分類 | Python / I-074 Stage 2 容量驗收 |
 | 建立日期 | 2026-10-27 |
@@ -3154,8 +3154,8 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 事實 | 值 |
 |---|---|
-| 寫入者 | `memavail.tsv` 只由磁碟取樣器 `run_sampler()`（`python/scripts/i074_stage2_sizing.py:579`）寫入：它只在 success、promote_success、failure、promote_failure 四個路徑階段執行，每 2 秒一筆 |
-| 讀取端 | acceptance 的 `collect_acceptance_measurements()`（`python/scripts/i074_stage2_sizing.py:1968`）把 `host_memavailable_low` 設成 `memavail.tsv` 的最小值；`acceptance_report_text()`（`python/scripts/i074_stage2_sizing.py:2620`）印成「host MemAvailable 低點：…」，⛔ 沒有標明涵蓋的範圍 |
+| 寫入者 | `memavail.tsv` 只由磁碟取樣器 `run_sampler()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 579 行）寫入：它只在 success、promote_success、failure、promote_failure 四個路徑階段執行，每 2 秒一筆 |
+| 讀取端 | acceptance 的 `collect_acceptance_measurements()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 1968 行）把 `host_memavailable_low` 設成 `memavail.tsv` 的最小值；`acceptance_report_text()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 2620 行）印成「host MemAvailable 低點：…」，⛔ 沒有標明涵蓋的範圍 |
 | 實測 | `formal-91-20261024T040236Z/raw/memavail.tsv` 94 筆、涵蓋 195.7 秒：93 筆落在四個階段的取樣區間內（success 39、promote_success 17、failure 25、promote_failure 12），1 筆在最後一個階段收尾時；量測趟 `o0130`（`create_begin` → `rm_done` 185.8 分鐘）期間 **0 筆**——整段執行是 3 小時 12 分 |
 | 文件 | I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）的「〇」寫「dev7 的 `memavail.tsv` 在執行期間最低到 194 MiB」、「四」的崩潰處理要記「`memavail.tsv` 的低點」、「五」6 要摘錄它——都會被讀成涵蓋整段執行；`sr-zone-scoring.md`、`development-workflow.md` ⛔ 沒有說明它的範圍 |
 | sizing 的實測（2026-10-27 補） | ⑨-2 的正式確認重跑（`formal-92-20261027T090656Z/raw/memavail.tsv`）：90 筆、涵蓋 190.7 秒；以 `raw/events/events.jsonl` 的 `create_begin`／`rm_done` 對照，容器 #1～#6（witness、success、failure 三個磁碟窗口）期間 13／15／17／19／10／11 筆，`memory_only` 的 #7～#10 期間都是 **0 筆**；步驟 0、步驟 5、6 也⛔ 不在範圍內。報告印的「host MemAvailable 低點：861.9 MiB」只是三個磁碟窗口的低點（見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」的觀察 ②） |
@@ -3208,7 +3208,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復（已知限制；處置方向待規劃） |
+| 狀態 | 已解除／待 review（2026-10-30 T-077 階段 A：acceptance harness 已刪除，⛔ 不再執行；⑨-1 的正式結果以結束碼判讀，⛔ 沒有受影響。下方程式的位置都指 `c6c2481` 的版本） |
 | 嚴重度 | 低（只在 raw 複製失敗時發生；結束碼 1 仍然正確，⑨-1 以結束碼判讀，⛔ 沒有造成誤判） |
 | 分類 | 腳本 / I-074 Stage 2 的 memory／disk acceptance harness |
 | 建立日期 | 2026-10-29（內容在 2026-10-14 記錄於 I-074 欄位表的「已知限制（open）①」） |
@@ -3216,7 +3216,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 #### 事實（2026-10-14 讀碼記錄；2026-10-29 對照目前的程式，⛔ 沒有實際重現）
 
-* 先以 `scripts/i074-stage2-acceptance.sh:485` 的 `cp` 把 `acceptance_report.{json,txt}` 複製到 `<work>/`，之後才以 `scripts/i074-stage2-acceptance.sh:488` 的 `cp` 執行 `cp -a "$S" "$WORK/raw"`。
+* 先以 `c6c2481` 的 `scripts/i074-stage2-acceptance.sh` 第 485 行 的 `cp` 把 `acceptance_report.{json,txt}` 複製到 `<work>/`，之後才以 `c6c2481` 的 `scripts/i074-stage2-acceptance.sh` 第 488 行 的 `cp` 執行 `cp -a "$S" "$WORK/raw"`。
 * 後者失敗時：結束碼 1、S 保留、⛔ 沒有 `failure_summary.json`，但頂層的報告照樣在——只看 `<work>/acceptance_report.json` 的人會以為成功。
 * 它⛔ 不產 freeze record、⛔ 不直接放行 ⑩（⑨-1 以結束碼判讀：1 ＝ harness 失敗）。
 * ⛔ 不在「Stage 2 raw-failed freeze record 修正計畫 v1」處理（該計畫 D5；歷史：`git show 20eacb2:docs/issue.md` 的 I-074）。

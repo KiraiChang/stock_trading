@@ -228,9 +228,9 @@ replay_args_path_clean() {
 
 # ── canonical diff 與唯一的合成函式（I-074 Stage 2 ⑦ 總綱 v1「二」、⑦a 細部計畫 B1） ────────
 #
-# ⚠️ **這裡是全 repo 唯一的定義**：runner、`finalize-stage2-evidence.sh` 的合成守門與
-# `--check-failed-record`、tooling patch 產生器、Stage 1 的 finalizer／comparator 自己的 provenance
-# 都呼叫這幾支，⛔ 不各寫一份（兩套推導＝兩套語意）。
+# ⚠️ **這裡是全 repo 唯一的定義**：runner、Stage 1 的 finalizer／comparator 自己的 provenance
+# 都呼叫這幾支，⛔ 不各寫一份（兩套推導＝兩套語意）。T-077 之前另有 `finalize-stage2-evidence.sh` 的合成守門與
+# `--check-failed-record`、tooling patch 產生器也呼叫它們（兩者已刪除；最後版本見 c6c2481）。
 
 # 反事實 patch 的**語意鍵**只涵蓋這兩個產品檔（正向白名單，⛔ 不用排除式 pathspec）。
 I074_CF_PRODUCT_PATHS=(

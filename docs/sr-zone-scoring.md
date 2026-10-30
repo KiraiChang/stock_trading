@@ -3107,6 +3107,8 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 
 #### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；✅ review 通過）
 
+⚠️ **T-077（2026-10-30）**：本節描述的finalizer 的 shell 入口（`scripts/finalize-stage2-evidence.sh`）已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo、⛔ 沒有入口；它與 `envcheck.py` 裡提到 `finalize-stage2-evidence.sh` 的註解與修復提示字串（`RECOVER_*_HINT`），指的都是 `c6c2481` 的版本。
+
 ⚠️ **範圍**：Stage 2（counterfactual）正式執行的**證據層**——成功 archive、反事實沒有生效時的
 failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074
 「③ Stage 2 evidence contract」（現行版）與「③d 實作結果」；操作程序見
@@ -3230,6 +3232,8 @@ lookup **274 MiB**，都在 450 MiB 以內。
 
 #### I-074 Stage 2 的反事實 replay 路徑與 tooling patch（2026-09-30 實作 ⑦a；✅ review 通過）
 
+⚠️ **T-077（2026-10-30）**：本節描述的tooling patch 產生器（`scripts/make-i074-tooling-patch.sh`）與漂移測試已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。反事實路徑本身（`--i074-counterfactual`、`run-replay-offline.sh` 的反事實模式）仍在。兩份 patch 是封存的證據：⛔ 不改、⛔ 不重新產生；`scripts/test-replay-args.sh` 的「封存證據的固定值」驗它們與 `evidence_manifest.json` 的 SHA-256（⛔ 不驗 manifest 列出的 artifact 內容——那由判讀器的驗證模式驗）。
+
 ⚠️ **範圍**：⑩ 的 before 正式趟在 replay 程序內做的事（Stage 2 計畫書 v3 比較模型的執行期那一半）；證據層見上一節。
 計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦ 總綱 v1」與「Stage 2 步驟 ⑦a 細部計畫 v1」。
 
@@ -3277,6 +3281,8 @@ comparison 非空且逐列翻轉。2026-09-30 實測這份切片在 after 側有
 `load_bundle()` 不讀它；界線是暫存目錄、⛔ 進版控、⛔ 進 finalize）。
 
 #### I-074 Stage 2 的兩道 guard 與兩份 patch 的封存（步驟 ⑨；2026-10-12 實作，✅ review 通過（兩輪），commit `53538a3`）
+
+⚠️ **T-077（2026-10-30）**：本節描述的兩道 guard（`i074_differential_guard.py`、`i074_tooling_guard.py`）、producer 與 ⑨ 的入口（`i074-step9-guards.sh`、`i074-step9-image.sh`）已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。
 
 ⚠️ **範圍**：⑩ 之前證明「counterfactual 是唯一的產品語意變因、tooling ⛔ 不帶判定變更」，並封存兩份 patch。
 計畫、實驗與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨ 細部計畫 v1」與「Stage 2 步驟 ⑨ 實作結果」。
@@ -3337,9 +3343,11 @@ tag 只允許 allowance 記錄的增量）。
 | `counterfactual_semantic_sha256` | `5b851e1eef4081af5ba6d4ad6d5ffcfaa3344b051d9594f6d2578853404ec9e8` |
 | 驗證時的 source tree | `c40162551af926df12d5a6d28fe16adc5a4372ff`（封存點 ＝ 包含它的那個 commit，見 `issue.md`） |
 
-⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。
+⚠️ 封存之後任一份 patch 的 bytes 或 SHA 再變：⑨（兩道 guard ＋ 封存）、⑨-1、⑨-2 全部重做。這條規則在 I-074 收斂、T-077 刪除產生器與 ⑨ 的工具之後⛔ 不再適用：兩份 patch 是封存的證據，⛔ 不改、⛔ 不重新產生；改了會讓 `scripts/test-replay-args.sh` 的「封存證據的固定值」失敗。
 
 #### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，✅ review 通過，commit `078ec72`；2026-10-29 ⑪ 判讀 B，✅ review 通過，commit `20eacb2`）
+
+⚠️ **T-077（2026-10-30）**：本節描述的晉升（`python/scripts/i074_stage2_promote.py`）、驗證入口的 shell 段（`finalize-stage2-evidence.sh`）與 ⑩ 的入口已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。**判讀器仍在、可以重跑**（依賴與測試見本節的「判讀器」）。
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過（歷史）見
 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見
@@ -3411,6 +3419,16 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 模式的 `--judge`——判讀規則與錨點在結構上一定是 ⑩ 之前寫好的那一版，真正 repo 的工作樹與目前的 HEAD 怎麼改都影響不了（前提：
 `base_commit` 一直可達；不可達就拒絕判讀）。結束碼 0 ＝ 已判讀（B 與 C 都是 0）、1 ＝ 拒絕判讀。
 
+**判讀器的依賴與測試**（2026-10-30 T-077 之後的現況）：
+
+* HEAD 這一側只用到判讀器本身（它驗自己的內容 ＝ HEAD）、`/usr/bin/git`、`/usr/bin/python3` 與 image；驗證入口、錨點與判讀規則都取自
+  `base_commit`（`832f678`）的暫存複本——HEAD 的 finalizer 與 `replay_bundle/` 刪除或修改都⛔ 不影響判讀。
+* 前提：`base_commit` 可達；image 在本機，不在就以 `scripts/restore-replay-image.sh --stage 2` 從 tarball 還原（程序見
+  [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 B／C 判讀與 image 還原」）。
+* 測試：`scripts/test-judge-i074-stage2.sh`（由 `python/scripts/test.sh` 呼叫；合成 repo，⛔ 不需要 docker 與 image）——bootstrap、
+  信任根、PATH、腳本 ＝ HEAD、`base_commit` 的暫存複本與各種拒絕判讀的情況。
+* ⚠️ 判讀器的程式⛔ 不再修改：它的價值是「以 ⑩ 之前寫好的規則重跑判讀」；要改得先補測試。
+
 **⑩ 的正式值**（2026-10-28 執行 `formal-10-20261028T090959Z`、rc 0；✅ review 通過，commit `078ec72`；紀錄（歷史）見
 `git show 20eacb2:docs/plans/i074-stage2-step10.md` 的「十四」；判讀器在 evidence commit 之後才執行，屬 ⑪）：
 
@@ -3438,6 +3456,8 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | 耗時 | 判讀器 37 秒（mem-guard 700m） |
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
+
+⚠️ **T-077（2026-10-30）**：本節描述的sizing／acceptance harness（`i074-stage2-sizing.sh`、`i074-stage2-acceptance.sh`、`lib/i074-stage2-measure.sh`、`python/scripts/i074_stage2_sizing.py`）已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。下方的正式值是刪除之前量到的結果。
 
 ⚠️ 規格的決策過程（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦d 細部計畫 v1」「Stage 2 步驟 ⑦d 實作結果」「Stage 2 步驟 ⑦d 增補計畫：容器記憶體改以 RSS 判定」「Stage 2 步驟 ⑦d 增補的實作結果」與「Stage 2 量測的有效性條件與 ⑨-1 fail-fast 計畫」；操作程序見
 [`development-workflow.md`](./development-workflow.md)「I-074 Stage 2 的 memory／disk acceptance harness 與 ⑩ 的 observer」。
@@ -3570,7 +3590,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   量測趟（`memory_only` 的 `replay`，185.8 分鐘）336.3 MiB；每一個容器的上限都是 700m。磁碟：success 的 `P_basis` 162,926,592 bytes
   （預算 167,772,160，餘裕 4,845,568 bytes ≈ 4.6 MiB）、failure 74,321,920 bytes；`fs_unexplained` −348,160／−376,832 bytes（容差 1,048,576）。
   raw manifest 的錨：`sha256` `cfe94e0a067411a10919ab6a19ce6523736150192f05f0023c659f60fb128033`（203 個檔案、36 個目錄）。
-  ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟（`issue.md` I-119）。
+  ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟：寫入 `memavail.tsv` 的只有磁碟取樣器（每 2 秒一筆，只在 success、promote_success、failure、promote_failure 四個階段執行）；這一輪 94 筆裡，量測趟（185.8 分鐘）期間 0 筆。⛔ 不能讀成整段執行的低點（原記於 `issue.md` I-119）。
 - **⑨-2 的正式結果**（2026-10-27，sizing `formal-92-20261027T090656Z`、`repo_head` `832f678`；✅ review 通過並 commit `62e1773`，過程與完整數字（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」）：
   rc 0、`status` ok、頂層有 freeze record → ⑨-2 通過。磁碟：`P_B` ＝ success 的 `P_path` 163,024,896 bytes（預算 167,772,160，餘裕 4,747,264 bytes
   ≈ 4.53 MiB；比 ⑨-1 的 success 多 98,304 bytes，全部是 `code_worktree`——HEAD 的 tree 隨文件 commit 長大）、failure 74,391,552、witness 141,955,072；
@@ -3578,7 +3598,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   `098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3`）＝ ⑩ 的 `--freeze-record`。raw manifest 的錨：`sha256`
   `e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765`（133 個檔案、29 個目錄）。容器：10 個的上限都是 700m；含 page cache 的
   cgroup 峰值最高 462.3 MiB（success 的 finalizer）——依上面「對象與門檻」只列資訊值、⛔ 不是閘。⚠️ 報告的「host MemAvailable 低點」只涵蓋
-  三個磁碟窗口、⛔ 不涵蓋 `memory_only` 的 4 個容器（`issue.md` I-119）。
+  三個磁碟窗口、⛔ 不涵蓋 `memory_only` 的 4 個容器（recovery ×3、check）：同一個取樣器，只在磁碟窗口執行（原記於 `issue.md` I-119）。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 

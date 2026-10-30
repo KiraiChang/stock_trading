@@ -15,7 +15,7 @@
 #    正式命令一律直接執行本檔（`#!/bin/bash -p`）；以 `bash <本檔>` 啟動會被拒絕。
 set -euo pipefail
 
-# ── 常數（⚠️ 測試以 sed 改的只有這一段：scripts/test-i074-stage2.sh） ──────────────────
+# ── 常數（⚠️ 測試以 sed 改的只有這一段：scripts/test-judge-i074-stage2.sh） ────────────
 I074_TRUSTED_PATH=/usr/bin:/bin
 I074_GIT=/usr/bin/git
 I074_PYTHON=/usr/bin/python3

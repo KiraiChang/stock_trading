@@ -3316,7 +3316,7 @@ provenance ⛔ 不參與 bytes 比對，但逐欄驗：A 的 `tooling_patch_sha2
 **執行邊界**（`scripts/i074-step9-guards.sh`）：bootstrap 驗自身 ＝ `<tree>` 的 blob，建綁定 `<tree>` 的隔離 clone（`--no-hardlinks`：
 ⛔ 不與正式 repo 共用物件檔——hardlink 會讓 clone 裡的 git 寫入 freshen 到正式 repo；建好之後驗 link 數 ＝ 1、沒有 alternates），
 之後執行的每一支程式都是 `<tree>` 的內容；正式 repo 只做明列的唯讀 inventory（含物件庫每個檔的 inode／大小／mtime／link 數，
-前後不同即失敗）。可用空間：建 clone 之前 ≥ 1.5 GB ＋ clone 本身、建好之後 ≥ 1.5 GB（T-072 ＋ 完整驗證的實測耗用 0.20 GB ＋ 餘裕），不足即停。`--s7 smoke`／`--s7 full` 也在隔離 clone 裡執行。
+前後不同即失敗）。可用空間：建 clone 之前 ≥ 1.5 GB ＋ clone 本身、建好之後 ≥ 1.5 GB（preflight 6 的 1.24 GB——原記於 `todo.md` T-072，已收斂——＋ 完整驗證的實測耗用 0.20 GB ＋ 餘裕），不足即停。`--s7 smoke`／`--s7 full` 也在隔離 clone 裡執行。
 會 build 的步驟各用**本次執行唯一**的 tag，以 `scripts/i074-step9-image.sh` reserve／release／verify（image ID 集合前後完全相同；
 tag 只允許 allowance 記錄的增量）。
 
@@ -3443,6 +3443,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
 | `verdict.json`（一行、18,714 bytes）的 SHA-256 | `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da` |
 | 輸出的保存位置（⛔ 不進 repo；判讀器可以從已 commit 的 evidence 重跑） | 原本在 `~/i074_stage2_formal/judge-20261029T061203Z/`（`status.txt`、`precheck.txt`、`verdict.json`、`judge.err`、`rc`），已於 2026-10-29 I-074 收斂時依使用者確認刪除；內容摘要與各檔 SHA 見 `git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「十三」 |
 | 耗時 | 判讀器 37 秒（mem-guard 700m） |
+| T-077 之後的重跑（2026-10-30，使用者執行） | rc 0、判讀 **B**；`verdict.json` 與 ⑪ **逐位元相同**（SHA-256 `ac2f393c…`、18,714 bytes）——刪除 Stage 2 的執行工具之後，判讀器仍能從已 commit 的 evidence 重現 ⑪（mem-guard 依當下可用量下修為 600m） |
 
 #### I-074 Stage 2 的容量驗收（2026-10-02 實作 ⑦d；2026-10-05 ⑦d 增補（RSS 判定）實作、✅ 2026-10-06 commit `576a8f7`；2026-10-06 有效性條件與 ⑨-1 fail-fast 實作，✅ review 通過並 commit `c49fde1`；2026-10-24 ⑨-1 正式執行，✅ review 通過並 commit `cbde340`；2026-10-27 ⑨-2 正式確認重跑，✅ review 通過並 commit `62e1773`）
 
@@ -3579,7 +3580,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   量測趟（`memory_only` 的 `replay`，185.8 分鐘）336.3 MiB；每一個容器的上限都是 700m。磁碟：success 的 `P_basis` 162,926,592 bytes
   （預算 167,772,160，餘裕 4,845,568 bytes ≈ 4.6 MiB）、failure 74,321,920 bytes；`fs_unexplained` −348,160／−376,832 bytes（容差 1,048,576）。
   raw manifest 的錨：`sha256` `cfe94e0a067411a10919ab6a19ce6523736150192f05f0023c659f60fb128033`（203 個檔案、36 個目錄）。
-  ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟：寫入 `memavail.tsv` 的只有磁碟取樣器（每 2 秒一筆，只在 success、promote_success、failure、promote_failure 四個階段執行）；這一輪 94 筆裡，量測趟（185.8 分鐘）期間 0 筆。⛔ 不能讀成整段執行的低點（原記於 `issue.md` I-119）。
+  ⚠️ 報告的「host MemAvailable 低點」只涵蓋四個磁碟取樣階段、⛔ 不涵蓋量測趟：寫入 `memavail.tsv` 的只有磁碟取樣器（每 2 秒一筆，只在 success、promote_success、failure、promote_failure 四個階段執行）；這一輪 94 筆裡，量測趟（185.8 分鐘）期間 0 筆。⛔ 不能讀成整段執行的低點（原記於 `issue.md` I-119，已收斂）。
 - **⑨-2 的正式結果**（2026-10-27，sizing `formal-92-20261027T090656Z`、`repo_head` `832f678`；✅ review 通過並 commit `62e1773`，過程與完整數字（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」）：
   rc 0、`status` ok、頂層有 freeze record → ⑨-2 通過。磁碟：`P_B` ＝ success 的 `P_path` 163,024,896 bytes（預算 167,772,160，餘裕 4,747,264 bytes
   ≈ 4.53 MiB；比 ⑨-1 的 success 多 98,304 bytes，全部是 `code_worktree`——HEAD 的 tree 隨文件 commit 長大）、failure 74,391,552、witness 141,955,072；
@@ -3587,7 +3588,7 @@ comparison 的順序。reason code 是封閉集合：`ROW_SHAPE_INVALID`（befor
   `098a39363d7bf40507d137fee43e70fe39dc7966ed38651beaadbbfc8cb4bed3`）＝ ⑩ 的 `--freeze-record`。raw manifest 的錨：`sha256`
   `e4b1ead7a653c68677877d3263e22fb2728d0ba2e98b943f648fadc6f56b6765`（133 個檔案、29 個目錄）。容器：10 個的上限都是 700m；含 page cache 的
   cgroup 峰值最高 462.3 MiB（success 的 finalizer）——依上面「對象與門檻」只列資訊值、⛔ 不是閘。⚠️ 報告的「host MemAvailable 低點」只涵蓋
-  三個磁碟窗口、⛔ 不涵蓋 `memory_only` 的 4 個容器（recovery ×3、check）：同一個取樣器，只在磁碟窗口執行（原記於 `issue.md` I-119）。
+  三個磁碟窗口、⛔ 不涵蓋 `memory_only` 的 4 個容器（recovery ×3、check）：同一個取樣器，只在磁碟窗口執行（原記於 `issue.md` I-119，已收斂）。
 
 #### Stage 2（一般路徑，⛔ 不帶 `--i074-counterfactual`）有**兩種** terminal outcome
 

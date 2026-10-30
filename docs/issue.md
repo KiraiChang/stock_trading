@@ -29,7 +29,7 @@
 - **下一個新編號從 `I-123` 起算。**（**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-122（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），**下一個可用的是 I-123**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-122（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），**下一個可用的是 I-123**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,7 +70,7 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-122、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112、
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121、
   已跳號的 I-114，以及下一個可用的 I-123），
   那是預期的，不是殘留。
 
@@ -3126,7 +3126,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 |---|---|
 | 放大 | 反向驗證把產品或測試的清理故意做壞時，那一輪建立的**每一個** worktree 與暫存目錄都會留下：⑧ 的 F1（③d 隔離 repo 的合成用 worktree 與凍結的 patch）一輪就在 `/tmp` 留下 84 個目錄（逐一確認是那一輪建立的之後才刪除） |
 | 既有增量 | 真正 repo 的 worktree 登記：⑦a 計畫時 177 筆，⑧ 全量執行前後 377 → 381（完整入口每跑一次 ＋4，來自 `test-replay-args.sh` 走到 `exec docker run` 的案例）；⑧ 期間另有兩次 ＋4 來自本輪以外的執行——**前後差集分不出是誰建立的** |
-| 餘裕 | `/tmp` 的累積會吃掉 host 有限的可用空間，而 `scripts/test-i074-stage2.sh` 的合成流程需要 ≥ 1,241,513,984 bytes（[`todo.md`](./todo.md) T-072；這支測試已於 T-077 刪除，這個需求隨之消失） |
+| 餘裕 | `/tmp` 的累積會吃掉 host 有限的可用空間，而 `scripts/test-i074-stage2.sh` 的合成流程需要 ≥ 1,241,513,984 bytes（原記於 `todo.md` T-072，已收斂；這支測試已於 T-077 刪除，這個需求隨之消失） |
 
 ⚠️ **之後的反向驗證**（尤其注回清理失敗時）一律：
 
@@ -3138,38 +3138,11 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 ---
 
-### I-119：acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段，不含量測趟
+#### 補充：每跑一次常態測試就多 4 筆（2026-10-30，T-077 期間的實測）
 
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已解除／待 review（2026-10-30 T-077 階段 A：產生這份報告的 acceptance／sizing harness 已刪除，⛔ 不再有程式會寫出這個欄位；已寫成的 ⑨-1、⑨-2 報告怎麼讀，歸檔在 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的容量驗收」的兩個正式結果。下方程式的位置都指 `c6c2481` 的版本） |
-| 嚴重度 | 中（誤導：會被讀成整段執行的低點；⛔ 不影響任何門檻與判定） |
-| 分類 | Python / I-074 Stage 2 容量驗收 |
-| 建立日期 | 2026-10-27 |
-| 來源 | I-074「Stage 2 步驟 ⑨-1 正式驗收結果」的分析（`formal-91-20261024T040236Z`；歷史：`git show 20eacb2:docs/issue.md` 的 I-074） |
-| 證據的保存 | ⚠️ 下方引用的 repo 外原始量測（`formal-91-…`、`formal-92-…` 的 `raw/`）已於 2026-10-29 I-074 收斂時依使用者確認刪除；表中的數字是刪除前的實測，⛔ 無法再重讀原檔 |
-
-#### 事實（2026-10-27，正式驗收的 artifact ＋ 讀碼）
-
-| 事實 | 值 |
-|---|---|
-| 寫入者 | `memavail.tsv` 只由磁碟取樣器 `run_sampler()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 579 行）寫入：它只在 success、promote_success、failure、promote_failure 四個路徑階段執行，每 2 秒一筆 |
-| 讀取端 | acceptance 的 `collect_acceptance_measurements()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 1968 行）把 `host_memavailable_low` 設成 `memavail.tsv` 的最小值；`acceptance_report_text()`（`c6c2481` 的 `python/scripts/i074_stage2_sizing.py` 第 2620 行）印成「host MemAvailable 低點：…」，⛔ 沒有標明涵蓋的範圍 |
-| 實測 | `formal-91-20261024T040236Z/raw/memavail.tsv` 94 筆、涵蓋 195.7 秒：93 筆落在四個階段的取樣區間內（success 39、promote_success 17、failure 25、promote_failure 12），1 筆在最後一個階段收尾時；量測趟 `o0130`（`create_begin` → `rm_done` 185.8 分鐘）期間 **0 筆**——整段執行是 3 小時 12 分 |
-| 文件 | I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）的「〇」寫「dev7 的 `memavail.tsv` 在執行期間最低到 194 MiB」、「四」的崩潰處理要記「`memavail.tsv` 的低點」、「五」6 要摘錄它——都會被讀成涵蓋整段執行；`sr-zone-scoring.md`、`development-workflow.md` ⛔ 沒有說明它的範圍 |
-| sizing 的實測（2026-10-27 補） | ⑨-2 的正式確認重跑（`formal-92-20261027T090656Z/raw/memavail.tsv`）：90 筆、涵蓋 190.7 秒；以 `raw/events/events.jsonl` 的 `create_begin`／`rm_done` 對照，容器 #1～#6（witness、success、failure 三個磁碟窗口）期間 13／15／17／19／10／11 筆，`memory_only` 的 #7～#10 期間都是 **0 筆**；步驟 0、步驟 5、6 也⛔ 不在範圍內。報告印的「host MemAvailable 低點：861.9 MiB」只是三個磁碟窗口的低點（見 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-2 正式確認重跑結果」的觀察 ②） |
-
-#### 影響
-
-* ⑨-1 的判定⛔ 不受影響：記憶體的閘是每一個程序的 RSS；容器的上限另外逐一記在報告裡（2026-10-24 的正式驗收都是 700m）。
-* 量測趟若崩潰（容器或 host 的 OOM），⑨-1「四」要求記下的 `memavail.tsv` 低點⛔ 沒有量測趟期間的資料——事故紀錄可能把磁碟階段的值當成崩潰當下的值。
-* sizing 的報告也印同一個「host MemAvailable 低點」、也由同一個取樣器寫入；它⛔ 沒有量測趟，但 `memory_only` 的 4 個容器（recovery ×3、check）同樣⛔ 不在範圍內（2026-10-27，⑨-2 的實測；上表「sizing 的實測」）。freeze record 的條件只有 `mode`、`status` 與 `P_B ≤ P_B_BUDGET`，⑨-2 的判定⛔ 不受影響；處置方向（a）（b）要一併涵蓋 sizing 的文字。
-
-#### 處置方向（⚠️ 待規劃）
-
-* (a) 只改說明：報告的文字與文件標明「磁碟取樣階段的低點」；(b) 另加涵蓋整段執行（含量測趟）的 MemAvailable 取樣。
-  ⚠️ 兩者都會碰到報告的文字或 `i074_stage2_acceptance_report_v2` 的欄位語意，要另立計畫；⑨-1 的正式結果⛔ 不需要重跑。
-* ⑨-2 的 P1 要求 ⑨-1 的 `E91` 之後只動文件（`docs/` 與根目錄的 `CLAUDE.md`；⑨-1 量到的程式 ＝ ⑩ 要跑的程式）——程式的修改⛔ 不得排在 ⑩ 之前；在那之前只能先改文件的說明。
+真正 repo 每跑一次 `python/scripts/test.sh`，`git worktree list` 就多 **4** 筆（都在 `/tmp/tmp.*`，型態與 `scripts/test-replay-args.sh` 讓 runner
+走到 `exec docker run` 的案例相同）：2026-10-30 的五次全量（含一次 review）共 405 → 425。T-077 刪除 Stage 2 的測試前後速度相同——
+來源是保留的 runner 測試，⛔ 不是被刪的那些。這一輪⛔ 沒有清理（清理依 `development-workflow.md` 的規則：只 `git worktree remove` 存在的、⛔ 不 prune）。
 
 ### I-120：`python -m` 執行的模組已被 package 的 `__init__` import，runpy 警告模組會執行兩次
 
@@ -3202,28 +3175,6 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 * (a) 維持現狀，只記成已知限制；(b) 讓 `python -m` 的目標⛔ 不被 package 的 `__init__` import（例如另設薄的入口模組），或改容器的入口指令。
   ⚠️ (b) 的 `evaluation` 那一種原本在 replay 側（`e1cbbbd` 的 worktree），只能經 tooling patch 進入、會牽動封存值。2026-10-30 T-077 刪除了產生器與漂移測試，`evaluation.py` 與 `replay_bundle/` ⛔ 不再凍結——要修就照一般流程另立計畫；`stage2_archive` 那一種：HEAD 的入口（`finalize-stage2-evidence.sh`）已於 T-077 刪除，但 B／C 判讀器仍會在 `base_commit`（`832f678`）的暫存複本裡執行**封存版本**的 finalizer——2026-10-30 的判讀器真跑，`judge.err` 照樣有 `stage2_archive` 的 runpy 警告。這條路徑跑的是 `832f678` 的程式，修改 HEAD 的 `__init__` 或入口⛔ 不會消除它（判讀器⛔ 不再修改，見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」）。HEAD 這一側會以 `python -m` 執行 `evaluation` 的是保留的 `run-evaluation.sh`，以及經 `lib/replay-args.sh` 組出命令的 `run-replay-offline.sh`。
-
-### I-121：acceptance harness 的 raw 複製失敗時，頂層留下看似成功的報告
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已解除／待 review（2026-10-30 T-077 階段 A：acceptance harness 已刪除，⛔ 不再執行；⑨-1 的正式結果以結束碼判讀，⛔ 沒有受影響。下方程式的位置都指 `c6c2481` 的版本） |
-| 嚴重度 | 低（只在 raw 複製失敗時發生；結束碼 1 仍然正確，⑨-1 以結束碼判讀，⛔ 沒有造成誤判） |
-| 分類 | 腳本 / I-074 Stage 2 的 memory／disk acceptance harness |
-| 建立日期 | 2026-10-29（內容在 2026-10-14 記錄於 I-074 欄位表的「已知限制（open）①」） |
-| 來源 | I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 從 I-074 移出（歷史：`git show 20eacb2:docs/plans/i074-stage2-step11.md` 的「九」D4、「十三」） |
-
-#### 事實（2026-10-14 讀碼記錄；2026-10-29 對照目前的程式，⛔ 沒有實際重現）
-
-* 先以 `c6c2481` 的 `scripts/i074-stage2-acceptance.sh` 第 485 行 的 `cp` 把 `acceptance_report.{json,txt}` 複製到 `<work>/`，之後才以 `c6c2481` 的 `scripts/i074-stage2-acceptance.sh` 第 488 行 的 `cp` 執行 `cp -a "$S" "$WORK/raw"`。
-* 後者失敗時：結束碼 1、S 保留、⛔ 沒有 `failure_summary.json`，但頂層的報告照樣在——只看 `<work>/acceptance_report.json` 的人會以為成功。
-* 它⛔ 不產 freeze record、⛔ 不直接放行 ⑩（⑨-1 以結束碼判讀：1 ＝ harness 失敗）。
-* ⛔ 不在「Stage 2 raw-failed freeze record 修正計畫 v1」處理（該計畫 D5；歷史：`git show 20eacb2:docs/issue.md` 的 I-074）。
-
-#### 處置方向（⚠️ 待規劃）
-
-* (a) 先複製 raw、成功之後才把報告放到頂層；(b) raw 複製失敗時移走頂層的報告或另寫失敗摘要。
-  兩者都會改到正式的 acceptance harness，要另立計畫；⑨-1 的正式結果⛔ 不需要重跑。
 
 ### I-122：2026-10-29 live 的四個批次失敗或 partial（`delisting_reconcile`、`intraday`、`stock_symbol_sync`、`corporate_action_sync`）
 

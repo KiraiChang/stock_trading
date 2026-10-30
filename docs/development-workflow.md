@@ -1421,7 +1421,7 @@ S9  git diff --name-only "$T_src" 'HEAD^{tree}' 只列文件；scripts/make-i074
 * `/tmp` 是 host 共用的：入口把前後的差異寫進 `tmp_diff.txt`，⛔ 不自動判失敗——結果裡要逐一歸因（本輪的程式一律跟隨
   `TMPDIR`，應為零）。
 * 可用空間：建 clone 之前要 ≥ 1.5 GB ＋ clone 本身（正式 repo 物件庫的大小 ＋ `T_src` 工作樹的大小，2026-10 約 0.18 GB），
-  clone 建好之後要 ≥ 1.5 GB（＝ preflight 6 的 1.24 GB ＋ 完整驗證到 `test-i074-stage2.sh` 結束為止實測耗用的 0.20 GB ＋ 餘裕），否則入口在執行任何步驟之前就停（[`todo.md`](./todo.md) T-072）。clone 一律 `--no-hardlinks`：
+  clone 建好之後要 ≥ 1.5 GB（＝ preflight 6 的 1.24 GB ＋ 完整驗證到 `test-i074-stage2.sh` 結束為止實測耗用的 0.20 GB ＋ 餘裕），否則入口在執行任何步驟之前就停（原記於 `todo.md` T-072，已收斂）。clone 一律 `--no-hardlinks`：
   本地 clone 預設以 hardlink 共用物件檔，clone 裡的 git 寫入會 freshen（改 mtime）到正式 repo 的同一個 inode——空間不夠就停，⛔ 不改回 hardlink。
 * image：會 build 的步驟各用本次執行唯一的 `stock-trading-i074-step9:<run_id>-<步驟>`；收尾後 `cleanup_status.json` 的每一筆
   都必須是 `release: ok`、`verify: ok`。allowance 非空（cache 命中原本的 dangling image）時照實記錄，⛔ 不自行刪除那個 image。
@@ -1539,7 +1539,7 @@ schema、屬性與 inode、收回與釋放的故障注入）在 host 的 `python
 ⚠️ 計畫、決定（D1～D9）與修訂經過（歷史）見 `git show 20eacb2:docs/plans/i074-stage2-step10.md`，執行結果見同檔「十四」。
 下面的區塊與判讀表是該計畫 v3（「十」2 實作，commit `a9cb41d`）**原樣**的內容——⑩ 實際執行的就是這一版。文中的「二」～「五」
 指該計畫書的章節（`git show 20eacb2:docs/plans/i074-stage2-step10.md`）；「v29」「八之一」～「八之三」「正式 scan 的計次裁決」指 `git show 20eacb2:docs/issue.md` 的 I-074 的章節。
-⚠️ 區塊引用的 repo 外路徑（⑨-2 的 `<work>` 與 freeze record、`~/i074_stage2_formal/`、`~/i074_stage2_observe/`）都已於 2026-10-29 I-074 收斂時依使用者確認刪除，區塊照原樣保留作為紀錄、⛔ 不能再照貼執行；要再跑全量 replay 須另立計畫（並先處理 `todo.md` T-077）。
+⚠️ 區塊引用的 repo 外路徑（⑨-2 的 `<work>` 與 freeze record、`~/i074_stage2_formal/`、`~/i074_stage2_observe/`）都已於 2026-10-29 I-074 收斂時依使用者確認刪除，區塊照原樣保留作為紀錄、⛔ 不能再照貼執行；要再跑全量 replay 須另立計畫（Stage 2 的執行工具已於 T-077 刪除，最後版本見 `c6c2481`）。
 要點：由使用者在 tmux／自己的終端機執行，Claude 先結束（D1；Codex ⛔ 不使用）；時段避開所有批次（D2：平日 17:00 的 `sr_analysis`
 已是終態之後、最晚 17:30 開跑，前提是晚間兩個批次已後移）；開跑當下 MemAvailable ≥ 950 MiB（D3）；位置 `~/i074_stage2_formal/<NAME>`、
 `~/i074_stage2_observe/<NAME>`、`/dev/shm/s10-<NAME>/`（D7）；observer 由 wrapper 啟動與停止（D4）。

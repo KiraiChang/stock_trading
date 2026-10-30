@@ -1,4 +1,4 @@
-"""I-074 Stage 2：B／C 判讀規則——**唯一的定義處**（issue.md I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」）。
+"""I-074 Stage 2：B／C 判讀規則——**唯一的定義處**（docs/sr-zone-scoring.md「I-074 Stage 2 的晉升與 B／C 判讀器」的「B／C 判讀規則」；原文：git show 20eacb2:docs/issue.md 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」）。
 
 規則來自「關閉條件」的**唯一 artifact 判讀矩陣**（2026-09-22 實測後定案）＋ v26 補充的差異表：
 逐列判 B／C，**任一列是 C → 整體 C**（⛔ 不以多數決）。

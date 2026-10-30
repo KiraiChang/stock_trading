@@ -802,7 +802,7 @@ def _historical_zone_score_summary(
     sorted_scores = _sort_zone_scores(zone_scores)
     # ⚠️ 這一顆是**排序第一筆**，⛔ **不是決策用的 primary zone**。
     # decision 用的是 `_pick_primary_zone()` 的結果，會出現在
-    # `decision_summary["primary_zone"]`——兩者可能不同顆（見 issue.md I-074）。
+    # `decision_summary["primary_zone"]`——兩者可能不同顆（見 docs/sr-zone-scoring.md「primary zone 的取值來源已切換」）。
     # 這裡保留排序第一筆只為了 `zone_count`／`global_metrics` 這類彙總；
     # replay row 的 `primary_zone` 由呼叫端改用 decision primary 覆蓋。
     primary = sorted_scores[0] if sorted_scores else None
@@ -838,7 +838,7 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
     rr_gate = summary.get("rr_gate") or {}
     # `lifecycle_phase` 是 replay 唯一看得見事件演進階段的欄位。原本沒帶出來，於是
     # 「RR 解耦有沒有改變 lifecycle 判定」在 replay 報告上不可觀測——分佈全同時，
-    # 分不出是那條路徑沒被觸發，還是真的沒影響（見 docs/issue.md I-074）。
+    # 分不出是那條路徑沒被觸發，還是真的沒影響（見 docs/sr-zone-scoring.md「已知並接受的行為改變」的「decision replay 實測（2026-09-01）」）。
     semantic_pipeline = (summary.get("decision_derived_view") or {}).get("semantic_pipeline") or {}
     return {
         "market_bias": summary.get("market_bias"),
@@ -852,7 +852,7 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "event_market_state": event_state_summary.get("market_state"),
         "daily_price_action": summary.get("daily_price_action") or {},
         # ── I-074 Stage 0 的診斷欄位：**只匯出，⛔ 不自行重算** ────────────────
-        # 任何在 replay 端重算的版本都會重蹈偽陽性（見 issue.md I-074「責任層」）。
+        # 任何在 replay 端重算的版本都會重蹈偽陽性（見 docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」的「責任層」）。
         "clear_zone_breakout": semantic_pipeline.get("clear_zone_breakout"),
         "continuation_price_evidence_met": semantic_pipeline.get("continuation_price_evidence_met"),
         # ⚠️ `setup_rr_qualified` ⛔ 不是上面那個 `rr_gate.qualified`——後者已被
@@ -1582,9 +1582,9 @@ def _decision_replay_rows(
                         rr_gate = fields["rr_gate"]
                         decision_field_context = fields
                         decision_fields_available = True
-                        # **只匯出**（issue.md I-074「責任層」：evaluation 不自行重算）。
+                        # **只匯出**（docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」的「責任層」：evaluation 不自行重算）。
                         diagnostics = {name: fields[name] for name in DIAGNOSTIC_FIELDS}
-                        # ⚠️ **改用 decision primary zone**（issue.md I-074：replay 原本取的是
+                        # ⚠️ **改用 decision primary zone**（docs/sr-zone-scoring.md「primary zone 的取值來源已切換」：replay 原本取的是
                         # `_sort_zone_scores()[0]`，而決策看的是 `_pick_primary_zone()`）。
                         # ⛔ **三個 consumer 必須一起切**——replay row、daily_confirmation_context
                         # 與 daily_confirmation_outcome 共用這個變數，只切一處會讓同一列混用兩顆 zone。
@@ -3409,7 +3409,7 @@ def run_bundle_stage(args, *, stage: int, argv: list[str]) -> dict[str, Any]:
     before_by_key = {row_key(row): row for row in rows}
     after_by_key = {key: row for key, row in zip(after_keys, after_rows)}
 
-    # ⑤ **兩邊的候選集合必須相同**（issue.md I-074：「不相同本身就是分支 C」）。
+    # ⑤ **兩邊的候選集合必須相同**（docs/sr-zone-scoring.md「Stage 2 的第五道集合檢查」：「不相同本身就是分支 C」）。
     # ⛔ 只用 after 的 cohort 過濾會讓 before 多出來的候選被**靜默漏掉**。
     before_candidates = candidate_keys(rows)
     after_candidates = candidate_keys(after_rows)

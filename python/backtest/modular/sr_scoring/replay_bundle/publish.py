@@ -45,13 +45,13 @@ EXIT_CROSSDAY_MISMATCH = 5
 # I-074 Stage 2 的反事實 replay：counterfactual patch **沒有生效**（「①之三」的檢查順序得出
 # `candidate_flag_inconsistent` 或 `rr_not_restored`）。⚠️ 與 4 不同：它是 **tooling 缺陷信號**，
 # ⛔ 不是產品發現；replay 已在 operational 目錄留下 `bounded_diagnostics.json`，由 orchestrator
-# 發布 failed-attempt record（issue.md I-074 Stage 2 計畫書「二、①」）。
+# 發布 failed-attempt record（docs/sr-zone-scoring.md「I-074 Stage 2 的正式證據契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、①」）。
 EXIT_COUNTERFACTUAL_INEFFECTIVE = 6
 # I-074 Stage 2 的環境見證：新 image 上的 after' 與 Stage 1 D+1 **不等價**。
 # ⚠️ 與 5 同樣是**終止狀態**（見證證據已完整發布），⛔ 不是一般失敗；
-# 它讓 Stage 2 停在 before 之前（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+# 它讓 Stage 2 停在 before 之前（docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。
 EXIT_ENV_NOT_EQUIVALENT = 7
-# I-074 Stage 2 ⑩ 的晉升（issue.md I-074 v29「八之三」、「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」）。
+# I-074 Stage 2 ⑩ 的晉升（docs/sr-zone-scoring.md「I-074 Stage 2 的晉升與 B／C 判讀器」的晉升契約；原文：git show 20eacb2:docs/issue.md 的 I-074 v29「八之三」、「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」）。
 # ⚠️ **唯一定義處**：supervisor 與 orchestrator ⛔ 不 import repo 模組，各自鏡像這兩個值，由測試斷言相等。
 # 8 ＝ 本次呼叫沒有確認晉升完成，但可以安全重跑 `--promote`（只用在目的端的容量與寫入 I/O、
 #     no-clobber rename 的 EEXIST、取不到鎖）；⛔ 不承諾目的地不存在。

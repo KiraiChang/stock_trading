@@ -3,7 +3,7 @@
 ⚠️ **為什麼需要它**：Stage 1 釘住的 image（`sha256:d66030dca485…`）已不在本機。使用者裁決
 **兩側都在新 image 重跑**：先在新 image 上以原始 `e1cbbbd` 跑一趟 after'，逐列與已封存的 D+1
 比對——**逐位元相同**才證明兩個 image 對這份 bundle 等價，才能繼續拿封存的 D+1 當 after 側。
-規格見 issue.md I-074 Stage 2 計畫書「二、⑤」與 ③ evidence contract「三之三」（⚠️ 現行版）。
+規格見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」（原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」與 ③ evidence contract「三之三」）。
 
 ⚠️ **after' 只是見證**：⛔ 不是新的正式 Stage 1 scan，⛔ 結果不得取代 D+1。
 

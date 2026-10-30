@@ -97,7 +97,7 @@ def check_candidate_flag(row: dict[str, Any], label: str) -> None:
     """**row-level 原語**：這一列必須有嚴格 boolean 的 `rr_decoupling_candidate`。
 
     ⚠️ 整批的 `validate_candidate_flags()` 與串流的 `StreamRowValidator` 都呼叫這一支
-    ——⛔ 不各寫一份規則（兩套實作＝兩套語意，見 issue.md I-074 ③ evidence contract「五之一」）。
+    ——⛔ 不各寫一份規則（兩套實作＝兩套語意，見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」的記憶體模型；原文：git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「五之一」）。
     """
     if CANDIDATE_FIELD not in row:
         raise ArtifactError(f"{label}：{_I074_HINT}")
@@ -453,7 +453,7 @@ class StreamRowValidator:
 
     ⚠️ **為什麼需要它**：I-074 Stage 2 的 finalizer／recovery／preflight 讀的是全量 artifact
     （13,417 列，整份載入實測約 +365～449 MiB），⛔ 不能整份進記憶體；而既有的整批 validator
-    各自讀一遍 rows，⛔ 串流的 iterator 不能重複消費。見 issue.md I-074 ③ evidence contract「五之一」。
+    各自讀一遍 rows，串流的 iterator ⛔ 不能重複消費。見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」的記憶體模型（原文：git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「五之一」）。
 
     ⚠️ **驗證強度⛔ 不得下降**：每一列套用的就是整批 validator 呼叫的**同一組原語**——
     `check_row_object()`、`row_key()`、`check_candidate_flag()`、`replay_error_messages()`、
@@ -576,7 +576,7 @@ def build_report(*, bundle_id: str, before_ref: str, comparison_sha256: str,
 # ── comparison／report 的 validator（I-074 Stage 2 的 ③d） ────────────────────
 #
 # ⚠️ 原本只有 builder、⛔ 沒有 validator——Stage 2 的正式證據要能**獨立複核**，只驗「檔案與
-# hash 沒變」證明不了內容一開始就是對的（issue.md I-074 ③ evidence contract「三之二」）。
+# hash 沒變」證明不了內容一開始就是對的（docs/sr-zone-scoring.md「I-074 Stage 2 的正式證據契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「三之二」）。
 # 這兩支只驗**單檔**能驗的部分；跨檔的「`before`／`after` 等於來源 row」「keys 等於 cohort」
 # 由 `stage2_archive.verify_stage2_graph()` 負責。
 

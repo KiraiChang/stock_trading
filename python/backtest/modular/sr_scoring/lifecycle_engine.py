@@ -148,7 +148,7 @@ def resolve_lifecycle(
     回傳 `{"event_signal", "lifecycle_phase", "reason_codes", "clear_zone_breakout",
     "continuation_price_evidence_met"}`。
 
-    **後兩個是 validation-only 的診斷欄位**（issue.md I-074 Stage 0）：
+    **後兩個是 validation-only 的診斷欄位**（docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」）：
 
     * `clear_zone_breakout` 原本只是這個函式內的區域變數、從不回傳，而它是
       `CONTINUATION` 分支唯一「只有 lifecycle 算得出來」的證據；
@@ -210,7 +210,7 @@ def resolve_lifecycle(
         "event_signal": event_signal,
         "lifecycle_phase": lifecycle_phase,
         "reason_codes": reason_codes,
-        # ── validation-only 診斷欄位（issue.md I-074 Stage 0）────────────────
+        # ── validation-only 診斷欄位（docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」）────────────────
         # ⛔ 只是把上面已經算好的中間結果帶出來，⛔ 不參與任何判定。
         "clear_zone_breakout": bool(clear_zone_breakout),
         "continuation_price_evidence_met": bool(

@@ -1,6 +1,6 @@
 """I-074 Stage 2 的證據契約：共用的信任錨與封閉 layout 的 archive 核心。
 
-規格見 issue.md I-074「③ Stage 2 evidence contract 計畫書」（⚠️ 現行版）。本檔目前只有
+規格見 docs/sr-zone-scoring.md「I-074 Stage 2 的正式證據契約」（原文：git show 20eacb2:docs/issue.md 的 I-074「③ Stage 2 evidence contract 計畫書」）。本檔目前只有
 **③b 第一包**要用的部分：
 
 * **Stage 1 信任錨**（「三之一」）的串流版：`load_stage1_anchor()` ＋ `validate_stage1_anchor_graph()`

@@ -1124,7 +1124,7 @@ def _decision_semantic_pipeline(
         "entry_permission_state": entry_permission_state,
         "reason_codes": _unique_reason_codes(reason_codes),
         "source_order": ["Event", "Lifecycle", "Market State", "Bias", "Action", "Entry"],
-        # ── validation-only 診斷欄位（issue.md I-074 Stage 0）────────────────
+        # ── validation-only 診斷欄位（docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」）────────────────
         # ⚠️ 前兩個是**逐鍵透傳** lifecycle 的輸出，⛔ 不在這裡重算——不透傳的話，
         # 它們會在 lifecycle → decision summary 之間直接消失，replay 端就只能重算，
         # 而任何在 replay 端重算的版本都會重蹈偽陽性。
@@ -1135,7 +1135,7 @@ def _decision_semantic_pipeline(
         # 稍後會被 `_execution_rr_gate()` 覆寫。candidate 要驗的是**歷史上被移除的那個
         # 條件**，而它用的正是 setup gate，所以明確把這一顆匯出，⛔ 不讓人拿錯。
         "setup_rr_qualified": bool(rr_qualified),
-        # candidate 的精確定義（issue.md I-074「candidate 的精確定義」）：
+        # candidate 的精確定義（docs/sr-zone-scoring.md「九個診斷欄位的完整 schema」；原文：git show 20eacb2:docs/issue.md 的 I-074「candidate 的精確定義」）：
         # ⛔ 只有這兩個條件，不得有第三個。
         "rr_decoupling_candidate": bool(
             lifecycle_phase == "CONTINUATION" and not rr_qualified

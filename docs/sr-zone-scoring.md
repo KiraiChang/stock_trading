@@ -2885,30 +2885,19 @@ boolean，這裡只消費它來重建集合與計數。
 artifact，所以 `artifact["rows"][i]["before"]` **就是** `before_by_key[key]` 那個物件。
 竄改 artifact 時會一併改到來源，來源對照就變成「自己跟自己比」而永遠通過。
 
-#### 程式註解裡的 I-074 舊引用（凍結集合；2026-10-29 I-074 收斂）
+#### 程式註解裡的 I-074 舊引用（2026-10-29 I-074 收斂；2026-10-30 T-077 改完凍結集合）
 
-I-074 已於 2026-10-29 自 `issue.md` 收斂移除。程式與腳本的註解原本寫「見 issue.md I-074「…」」，凍結集合以外的都已改成指向本文件或
-`git show 20eacb2:docs/issue.md`（I-074 的最後完整版本）。⚠️ **凍結集合裡的註解⛔ 沒有改**：`python/` 底下扣掉 `python/baselines`、
-`python/scripts`、`sr_scoring/tests` 的檔案（`decision_engine.py`、`lifecycle_engine.py`、`evaluation.py`、`replay_bundle/` 等）。
-原因是 `scripts/test-replay-args.sh` 的漂移測試：它要求以目前的 tree 重新產生的 tooling patch 與已封存的
-`python/baselines/i074_stage2/tooling_e1cbbbd.patch` 逐位元相同，而產生器另外要求這些產品碼與 `e1cbbbd` 完全相同——
-改一個位元組測試就失敗，重新產生 patch 又會觸發「⑨、⑨-1、⑨-2 全部重做」的封存規則。這個凍結的退役見 `todo.md` T-077；
-在那之前，凍結集合裡的舊引用照下表讀：
+I-074 已於 2026-10-29 自 `issue.md` 收斂移除。程式與腳本的註解原本寫「見 issue.md I-074「…」」，都已改成指向本文件（規格）或
+`git show 20eacb2:docs/issue.md`（I-074 的最後完整版本，當成原文出處）。凍結集合——`python/` 扣掉 `python/baselines`、`python/scripts`、
+`sr_scoring/tests` 的檔案——裡的 23 行（收斂時估約 28 行），收斂時受漂移測試限制⛔ 沒有改，2026-10-30 T-077 刪除漂移測試之後改完（只改註解與
+docstring，去掉 docstring 的 AST 與改之前相同）。
 
-| 註解裡寫的 | 現在的位置 |
-|---|---|
-| issue.md I-074、I-074 Stage 0、「candidate 的精確定義」、「責任層」、「replay 原本取的是…」 | 本文件「Decision Replay 的診斷欄位（I-074 Stage 0）」；兩顆 primary zone 的落差與 `lifecycle_phase` 補進 replay 的原因見「已知並接受的行為改變」的「decision replay 實測（2026-09-01）」 |
-| 「不相同本身就是分支 C」 | ⚠️ 已被 Stage 2 計畫書 v18 取代：before 的候選集合預期恆為空，⛔ 不是分支 C；現行模型見下方「I-074 Stage 2 的反事實 replay 路徑與 tooling patch」 |
-| Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一：記憶體模型」 | 下方「I-074 Stage 2 的環境見證契約」（含記憶體模型） |
-| Stage 2 計畫書「二、①」、③ evidence contract「三」～「七之四」「三之二」（現行版） | 下方「I-074 Stage 2 的正式證據契約」；CLI matrix 見 `development-workflow.md`「finalizer 的 CLI matrix」 |
-| v29「八之三」、「Stage 2 步驟 ⑦c 細部計畫 v1」「二之三」、⑦c 實作結果「與計畫的差異」 | 下方「I-074 Stage 2 的晉升與 B／C 判讀器」的晉升契約 |
-| 「Stage 2 步驟 ⑦c 細部計畫 v1」「二之四」 | 下方「I-074 Stage 2 的晉升與 B／C 判讀器」的「B／C 判讀規則」 |
-
-這些章節的原文都在 `git show 20eacb2:docs/issue.md` 的 I-074。
+唯一刻意保留的是程式裡的字串：`replay_bundle/artifacts.py` 的 `_I074_HINT`（錯誤訊息，屬程式行為，⛔ 不為了引用而改）寫的
+「issue.md I-074 Stage 0 的診斷欄位」，指本文件「Decision Replay 的診斷欄位（I-074 Stage 0）」。
 
 ⚠️ **例外：Stage 0、Stage 1 的計畫書**（Stage 0 v17、Stage 1 v25）在 2026-09-16 已先行收斂（`7b8952d`），`20eacb2` 只剩收斂索引；它們的原文（例如 Stage 0 的「十、測試與驗證策略」）要看 `git show 86241a8:docs/issue.md`（`7b8952d` 的前一版）。⛔ 不要在 `20eacb2` 裡找——那一版的「十、測試與驗證策略」是 ③ evidence contract 的「十」。
 
-程式、腳本與 `.gitattributes` 的註解（凍結集合內外都有），以及少數輸出字串裡，還有只寫章節名、⛔ 沒寫出處的簡寫——例如「v29「六、1」」「⑦ 總綱 v1「二」」「③ evidence contract「七之四」」「Stage 2 計畫書「二、④」」「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」、「關閉條件」。它們都是 I-074 的章節，原文同樣在 `git show 20eacb2:docs/issue.md` 的 I-074；字串（例如 sizing 報告的說明文字）屬程式行為，⛔ 不為了引用而改。
+程式、腳本與 `.gitattributes` 的註解，以及少數輸出字串裡，還有只寫章節名、⛔ 沒寫出處的簡寫——例如「v29「六、1」」「⑦ 總綱 v1「二」」「③ evidence contract「七之四」」「Stage 2 計畫書「二、④」」「Stage 2 步驟 ⑦d 細部計畫 v1」「二之三」、「關閉條件」。它們都是 I-074 的章節，原文同樣在 `git show 20eacb2:docs/issue.md` 的 I-074；字串（例如 sizing 報告的說明文字）屬程式行為，⛔ 不為了引用而改。
 
 #### I-074 Stage 1 的四個永久契約
 
@@ -3107,7 +3096,7 @@ tooling patch；envcheck 發布與 recovery 的 E7 照舊保留。
 
 #### I-074 Stage 2 的正式證據契約（2026-09-24 實作 ③d；✅ review 通過）
 
-⚠️ **T-077（2026-10-30）**：本節描述的finalizer 的 shell 入口（`scripts/finalize-stage2-evidence.sh`）已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo、⛔ 沒有入口；它與 `envcheck.py` 裡提到 `finalize-stage2-evidence.sh` 的註解與修復提示字串（`RECOVER_*_HINT`），指的都是 `c6c2481` 的版本。
+⚠️ **T-077（2026-10-30）**：本節描述的finalizer 的 shell 入口（`scripts/finalize-stage2-evidence.sh`）已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo，但 HEAD 上⛔ 沒有入口——B／C 判讀器執行的是 `base_commit`（`832f678`）暫存複本裡的封存版本；它與 `envcheck.py` 裡提到 `finalize-stage2-evidence.sh` 的註解與修復提示字串（`RECOVER_*_HINT`），指的都是 `c6c2481` 的版本。
 
 ⚠️ **範圍**：Stage 2（counterfactual）正式執行的**證據層**——成功 archive、反事實沒有生效時的
 failed-attempt record，以及兩者的 check／recover。完整計畫與修訂經過（歷史）見 `git show 20eacb2:docs/issue.md` 的 I-074
@@ -3347,7 +3336,7 @@ tag 只允許 allowance 記錄的增量）。
 
 #### I-074 Stage 2 的晉升與 B／C 判讀器（2026-10-01 實作 ⑦c；✅ review 通過（四輪），commit `5a03777`；2026-10-28 ⑩ 正式執行、晉升成功，✅ review 通過，commit `078ec72`；2026-10-29 ⑪ 判讀 B，✅ review 通過，commit `20eacb2`）
 
-⚠️ **T-077（2026-10-30）**：本節描述的晉升（`python/scripts/i074_stage2_promote.py`）、驗證入口的 shell 段（`finalize-stage2-evidence.sh`）與 ⑩ 的入口已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。**判讀器仍在、可以重跑**（依賴與測試見本節的「判讀器」）。
+⚠️ **T-077（2026-10-30）**：本節描述的晉升（`python/scripts/i074_stage2_promote.py`）、驗證入口的 shell 段（HEAD 的 `finalize-stage2-evidence.sh`）與 ⑩ 的入口已自 repo 刪除，最後版本見 `c6c2481`；本節保留作為 I-074 證據的契約紀錄。**判讀器仍在、可以重跑**：它執行的驗證入口是 `832f678` 暫存複本裡的封存版本，⛔ 不受 HEAD 刪除影響（依賴與測試見本節的「判讀器」）。
 
 ⚠️ **範圍**：⑩ 的終態從隔離複本搬進真正 repo（晉升），以及晉升之後對成功 archive 的 B／C 判讀。計畫與修訂經過（歷史）見
 `git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑦c 細部計畫 v1」（七輪 review）；操作程序見

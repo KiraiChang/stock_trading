@@ -126,7 +126,7 @@ def installed_distributions(distributions: Iterable[tuple[str, str]] | None = No
     """已安裝套件的**完整清單**：`[[name, version], …]`，去重、排序。
 
     ⚠️ `pip_freeze_sha256()` 就是這份清單的 canonical SHA——兩者⛔ 不得各自推導
-    （I-074 Stage 2 的環境見證要同時封存清單與 hash，並交叉驗證，見 issue.md I-074「二、⑤」）。
+    （I-074 Stage 2 的環境見證要同時封存清單與 hash，並交叉驗證，見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。
     """
     if distributions is None:
         from importlib import metadata

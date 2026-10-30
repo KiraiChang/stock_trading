@@ -13,7 +13,7 @@
        改用開盤價成交，避免產生不切實際的成交價）。
     3. 進場當根K棒不做停損檢查（下一根才開始），避免「同一根K棒內先進場
        又立刻出場」的模糊情況；這與本系統「非高頻」的定位一致
-       （見專案 CLAUDE.md：Non-HFT / Not low-latency）。
+       （見 docs/architecture.md「系統定位」的 Architecture Principles、Non Goals：Non-HFT / Not low-latency）。
     4. 全額資金單一部位（同一時間只持有 0 或 1 個部位），不做加碼/分批。
 """
 from __future__ import annotations

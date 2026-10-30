@@ -3,7 +3,7 @@
 ⚠️ **為什麼需要它**：Stage 2 的 finalizer／recovery／preflight 與環境等價比對都要讀**全量**
 artifact（13,417 列；整份載入實測約 +365～449 MiB），而 mem-guard 常態只給得出 531m。
 Stage 1 的 comparator 就是整份載入兩份才撞到約 730 MiB（issue.md I-117）。
-規格見 issue.md I-074 ③ evidence contract「五之一：記憶體模型」。
+規格見 docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」的記憶體模型（原文：git show 20eacb2:docs/issue.md 的 I-074 ③ evidence contract「五之一：記憶體模型」）。
 
 **與 `load_canonical_evidence_artifact()` 同強度**（⛔ 驗證強度不得下降）：
 

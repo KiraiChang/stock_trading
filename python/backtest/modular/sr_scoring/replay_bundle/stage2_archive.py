@@ -1,6 +1,6 @@
 """I-074 Stage 2 的正式證據（③d）：成功 archive、failed-attempt record 與 check／recover。
 
-規格見 issue.md I-074「③ Stage 2 evidence contract 計畫書」（⚠️ 現行版）的「三」～「七之四」。
+規格見 docs/sr-zone-scoring.md「I-074 Stage 2 的正式證據契約」（原文：git show 20eacb2:docs/issue.md 的 I-074「③ Stage 2 evidence contract 計畫書」的「三」～「七之四」）。
 
 * **成功 archive**（`python/baselines/i074_stage2/evidence/`，封閉 7 檔）：before source 全量、
   comparison、report、兩份 raw patch、Stage 2 identity ＋ manifest；`verify_stage2_graph()` 的

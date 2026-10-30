@@ -5,7 +5,7 @@
 數學定義：
     LONG:  stop = 進場前（或持倉期間）最近一個 confirmed swing low
            若持倉期間出現「更高」的新 swing low，停損上移至該價位
-           （對應 CLAUDE.md 的「Structure Broken（HL失效）」概念：
+           （對應 docs/backtest-modular-strategy.md「StructuralStopLoss」的「Structure Broken（HL失效）」概念：
             只要不斷創出更高的低點，代表多頭結構還在，停損就跟著上移；
             一旦收盤跌破目前的停損價，代表 HL 失守，出場）
     SHORT: 對稱邏輯，改用 swing high，只會下移不會上移

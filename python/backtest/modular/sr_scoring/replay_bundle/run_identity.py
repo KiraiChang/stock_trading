@@ -36,7 +36,7 @@ RUN_IDENTITY_FIELDS = frozenset(
 
 
 # identity 的 stage（⚠️ 封閉列舉）。Stage 2 用自己的一份：Stage 1 釘住的 image 已不在本機，
-# Stage 2 改在新 image 上跑（issue.md I-074 Stage 2 計畫書「二、⑤」）。
+# Stage 2 改在新 image 上跑（docs/sr-zone-scoring.md「I-074 Stage 2 的環境見證契約」；原文：git show 20eacb2:docs/issue.md 的 I-074 Stage 2 計畫書「二、⑤」）。
 RUN_IDENTITY_STAGES = (1, 2)
 
 

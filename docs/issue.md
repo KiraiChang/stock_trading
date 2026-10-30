@@ -74,10 +74,9 @@
   已跳號的 I-114，以及下一個可用的 I-123），
   那是預期的，不是殘留。
 
-  ⚠️ **I-074 的例外**（2026-10-29 收斂，收斂計畫 D1；原文見 `git show caf1442:docs/plans/i074-convergence.md`）：凍結集合——`python/` 底下扣掉 `python/baselines`、`python/scripts`、
-  `sr_scoring/tests` 的檔案——裡仍有約 28 行寫「見 issue.md I-074「…」」的註解，**刻意⛔ 沒有改**：`scripts/test-replay-args.sh` 的漂移測試
-  要求這些檔案與已封存的 tooling patch 一致，改一個位元組測試就失敗。它們照 `sr-zone-scoring.md`「程式註解裡的 I-074 舊引用」的對照讀，
-  退役見 `todo.md` T-077。其餘的 I-074 引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。
+  ⚠️ **I-074**（2026-10-29 收斂）的引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。
+  收斂時刻意留下的凍結集合例外（收斂計畫 D1；實際是 23 行註解與 docstring）已於 2026-10-30 由 T-077 改完；程式裡唯一保留的是字串
+  （`replay_bundle/artifacts.py` 的 `_I074_HINT`，屬程式行為），讀法見 `sr-zone-scoring.md`「程式註解裡的 I-074 舊引用」。
 
 ---
 
@@ -3202,7 +3201,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 #### 處置方向（⚠️ 待規劃）
 
 * (a) 維持現狀，只記成已知限制；(b) 讓 `python -m` 的目標⛔ 不被 package 的 `__init__` import（例如另設薄的入口模組），或改容器的入口指令。
-  ⚠️ (b) 的 `evaluation` 那一種在 replay 側（`e1cbbbd` 的 worktree），只能經 tooling patch 進入、會牽動封存值；`evaluation.py` 與 `replay_bundle/` 也在漂移測試的凍結範圍——要等 `todo.md` T-077 處理之後再另立計畫。
+  ⚠️ (b) 的 `evaluation` 那一種原本在 replay 側（`e1cbbbd` 的 worktree），只能經 tooling patch 進入、會牽動封存值。2026-10-30 T-077 刪除了產生器與漂移測試，`evaluation.py` 與 `replay_bundle/` ⛔ 不再凍結——要修就照一般流程另立計畫；`stage2_archive` 那一種：HEAD 的入口（`finalize-stage2-evidence.sh`）已於 T-077 刪除，但 B／C 判讀器仍會在 `base_commit`（`832f678`）的暫存複本裡執行**封存版本**的 finalizer——2026-10-30 的判讀器真跑，`judge.err` 照樣有 `stage2_archive` 的 runpy 警告。這條路徑跑的是 `832f678` 的程式，修改 HEAD 的 `__init__` 或入口⛔ 不會消除它（判讀器⛔ 不再修改，見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的晉升與 B／C 判讀器」）。HEAD 這一側會以 `python -m` 執行 `evaluation` 的是保留的 `run-evaluation.sh`，以及經 `lib/replay-args.sh` 組出命令的 `run-replay-offline.sh`。
 
 ### I-121：acceptance harness 的 raw 複製失敗時，頂層留下看似成功的報告
 

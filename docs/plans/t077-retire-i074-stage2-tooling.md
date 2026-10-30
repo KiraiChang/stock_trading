@@ -420,3 +420,49 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 
 「五」的註解改寫與 T-073；sr「程式註解裡的 I-074 舊引用（凍結集合）」與 issue.md 檔頭的 D1 例外段；I-120 的處置方向；
 解凍的正向驗證；D1 的真跑（使用者執行）；T-077、T-073 的狀態。
+
+## 十四、階段 B 的實作結果（2026-10-30；⚠️ 待 review；D1 的真跑 ✅ 與 ⑪ 逐位元相同）
+
+### 一、變更
+
+| 類 | 內容 |
+|---|---|
+| 凍結集合的舊引用（「五」） | 23 行、12 個檔（`decision_engine.py` 2、`lifecycle_engine.py` 2、`evaluation.py` 6、`replay_bundle/` 的 `artifacts.py` 3、`publish.py` 3、`envcheck.py`、`provenance.py`、`run_identity.py`、`stage2_archive.py`、`stage2_evidence.py`、`stage2_verdict.py`、`stream.py` 各 1）。R1 改指 sr 的對應節，原文出處照 R2 附 `git show 20eacb2:docs/issue.md` 的 I-074 |
+| T-073 | 2 行：`backtester.py` 改指 architecture.md「系統定位」的 Architecture Principles、Non Goals；`exits/structural_stop.py` 改指 backtest-modular-strategy.md「StructuralStopLoss」 |
+| R5 保留 | `replay_bundle/artifacts.py` 的 `_I074_HINT`（錯誤訊息字串）⛔ 不改；sr 寫明它的讀法 |
+| 文件 | sr「程式註解裡的 I-074 舊引用」：拿掉凍結的說明與對照表，保留簡寫與 `86241a8` 例外的說明，標題改成「（2026-10-29 I-074 收斂；2026-10-30 T-077 改完凍結集合）」。issue.md：檔頭的 D1 例外段改寫成現況；I-120 的處置方向改寫成現況。todo.md：T-077、T-073 改成「已實作／待 review」 |
+
+R1 的對應（實作時依 sr 現有的節決定）：
+
+| 註解裡寫的 | 改指 |
+|---|---|
+| I-074 Stage 0（診斷欄位） | sr「Decision Replay 的診斷欄位」 |
+| 「candidate 的精確定義」 | sr「九個診斷欄位的完整 schema」（等價式在這裡） |
+| 「責任層」 | sr「Decision Replay 的診斷欄位」的「責任層」 |
+| 兩顆 primary zone、「replay 原本取的是…」 | sr「primary zone 的取值來源已切換」 |
+| `lifecycle_phase` 補進 replay 的原因 | sr「已知並接受的行為改變」的「decision replay 實測（2026-09-01）」 |
+| 「不相同本身就是分支 C」 | sr「Stage 2 的第五道集合檢查」 |
+| Stage 2 計畫書「二、⑤」、③ evidence contract「三之三」「五之一」 | sr「I-074 Stage 2 的環境見證契約」（含記憶體模型） |
+| Stage 2 計畫書「二、①」、③ evidence contract「三之二」「三」～「七之四」 | sr「I-074 Stage 2 的正式證據契約」 |
+| v29「八之三」、⑦c「二之三」 | sr「I-074 Stage 2 的晉升與 B／C 判讀器」的晉升契約 |
+| ⑦c「二之四」 | sr「I-074 Stage 2 的晉升與 B／C 判讀器」的「B／C 判讀規則」 |
+
+### 二、驗證
+
+| 項目 | 結果 |
+|---|---|
+| 只改註解（「五」） | 改過的 14 個 `.py`，去掉 docstring 之後的 AST 與 HEAD 完全相同；`git diff --stat` 為 25 行增、25 行刪 |
+| 殘留 | 凍結集合裡寫「issue.md I-074」而⛔ 沒帶 `20eacb2` 的只剩 `_I074_HINT`（R5）；兩個檔裡⛔ 沒有 `CLAUDE.md` 的指標 |
+| 解凍的正向驗證（「九」4） | 產品碼（扣掉 baselines、scripts、tests）改了 14 個檔，`python/scripts/test.sh` rc 0：pytest 1711 passed、1 skipped（與階段 A 相同）；shell 的 ok 265、FAIL 0；`check-doc-refs.py` 引用 131 個、問題 0；D5 的固定值檢查 3 項 ok（`python/baselines/` 0 變更）。⚠️ 同樣的改動在 `c6c2481` 會讓產生器因 ④ 失敗（「十三」的對照組） |
+| worktree 登記 | 421 → 425（這次全量測試；I-118 的既有成因；⛔ 沒有清理） |
+| 全量之後的改動 | 只有 `artifacts.py` 一行 docstring：禁止標記移到否定詞之前（「串流的 iterator ⛔ 不能重複消費」）；去掉 docstring 的 AST 仍與 HEAD 相同，⛔ 沒有重跑全量 |
+| 前端 | ⛔ 不受影響，⛔ 沒有跑 |
+| D1 的真跑（額外驗收） | ✅ 2026-10-30 11:11 由使用者在自己的終端機執行（輸出在 repo 外的 `~/t077_judge/20261030T111122/`，⛔ 不進 repo）：rc 0；`verdict.verdict` **B**（`row_count` 156、`c_row_count` 0；`class`：`NON_AVOID` 140、`AVOID` 16）；`base_commit` `832f678acfa4…`、`manifest_sha256` `d5cf06298b4d…`、`identity_sha256` `a02bf3bd3f44…`；`verdict.json` 一行、18,714 bytes、SHA-256 `ac2f393c025ae085d5840c951b98b3d608f212b4303fe6a094b4c4a03969e9da`——與 ⑪ **逐位元相同**。`judge.err` 只有 mem-guard 的下修訊息（700m → 600m；⑪ 是 700m，差在當下 host 的可用量）與 I-120 的 runpy 警告（`stage2_archive`），⛔ 不影響判讀 |
+
+### 三、與計畫的差異（照實記錄）
+
+* 「五」寫「2026-10-30 數到 24 行」：其中 1 行是 `_I074_HINT` 字串（R5），實際改的是 23 行註解與 docstring。收斂時 issue.md 檔頭寫的「約 28 行」是估計值，sr 與 issue.md 都改寫成實際的 23 行。
+* `envcheck.py`、`stage2_archive.py`、`stage2_evidence.py` 的 docstring 原本在出處後面寫「（⚠️ 現行版）」：改成指向 sr（現況規格）之後，這個限定詞拿掉。
+* `artifacts.py` 有一行原本就把禁止標記放在主詞前面；這一行本來就要改出處，順手把標記移到否定詞之前。
+* review 指正（2026-10-30）：I-120 的處置方向原本寫「`stage2_archive` 那一種⛔ 不再執行」，⛔ 沒有區分 HEAD 與封存版本。改寫成：HEAD 的入口已退役，但判讀器仍在 `832f678` 的暫存複本裡執行封存版本，該路徑的警告仍在（D1 真跑的 `judge.err` 有），修改 HEAD ⛔ 不會消除它。
+  同一類的說法另有三處一併改清楚：wf 與 sr 的 ③d 退役說明（「Python 那一半⛔ 沒有入口」→ HEAD 上沒有、判讀器執行封存版本）、sr ⑦c 的退役說明（刪除的是 HEAD 的驗證入口 shell 段；判讀器執行的是封存版本）。

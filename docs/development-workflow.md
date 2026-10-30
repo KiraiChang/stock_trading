@@ -1294,7 +1294,7 @@ manifest 為信任錨，單獨搬走會斷鏈。
 
 ### I-074 Stage 2 的正式證據與 failed record 程序（2026-09-24 實作 ③d；✅ review 通過）
 
-⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`finalize-stage2-evidence.sh` 的各模式）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/finalize-stage2-evidence.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo，但⛔ 沒有入口。
+⚠️ **已退役（T-077，2026-10-30）**：本節的入口（`finalize-stage2-evidence.sh` 的各模式）已自 repo 刪除，最後版本見 `c6c2481`（例如 `git show c6c2481:scripts/finalize-stage2-evidence.sh`）。本節保留作為紀錄，⛔ 不能再照著貼上執行；仍然可以執行的判讀與 image 還原見「I-074 Stage 2 的 B／C 判讀與 image 還原」。Python 那一半（`replay_bundle/stage2_archive.py`）仍在 repo，但 HEAD 上⛔ 沒有入口；B／C 判讀器執行的是 `base_commit`（`832f678`）暫存複本裡的**封存版本**（shell 與 Python 兩段都是）。
 
 ⚠️ 契約見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「I-074 Stage 2 的正式證據契約」（原文：`git show 20eacb2:docs/issue.md`
 的 I-074「③ Stage 2 evidence contract」）；本節只寫**操作程序**。正式執行（Stage 2 計畫書 ⑩）

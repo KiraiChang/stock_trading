@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v4：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)，✅ 2026-10-30 確認；**階段 A（刪除工具與測試、新增判讀器的測試、文件）已實作／待 review**；階段 B（凍結集合的註解、T-073、D1 的真跑）尚未開始） |
+| 狀態 | 已實作／待 review（計畫 v4：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)，✅ 2026-10-30 確認；階段 A ✅ review 通過、commit `6e29d08`；階段 B（凍結集合的 23 行舊引用、T-073、文件）已實作；D1 的真跑 ✅ 2026-10-30（判讀 B，輸出與 ⑪ 逐位元相同）；結果見計畫書「十三」「十四」） |
 | 優先度 | 中（任何 Python 產品碼的修改都要先處理它） |
 | 分類 | Scripts／測試／Python |
 | 建立日期 | 2026-10-29 |
@@ -129,7 +129,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃（⚠️ ⑩ 已結束，但要先做 T-077：`python/` 的產品碼仍被漂移測試凍結） |
+| 狀態 | 已實作／待 review（2026-10-30 併入 T-077 階段 B：兩個註解改指下表的「現在的位置」，只改 docstring——去掉 docstring 的 AST 與改之前相同；見 [`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)「十四」） |
 | 優先度 | 低 |
 | 分類 | Python／註解 |
 | 建立日期 | 2026-10-27 |

@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v3：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)；D1～D6 已定案；⚠️ 待使用者確認） |
+| 狀態 | 規劃中（計畫 v4：[`plans/t077-retire-i074-stage2-tooling.md`](./plans/t077-retire-i074-stage2-tooling.md)；D1～D6 已定案；⚠️ 待使用者確認） |
 | 優先度 | 中（任何 Python 產品碼的修改都要先處理它） |
 | 分類 | Scripts／測試／Python |
 | 建立日期 | 2026-10-29 |

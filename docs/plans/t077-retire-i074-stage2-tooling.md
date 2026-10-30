@@ -1,6 +1,6 @@
-# T-077 計畫 v3：I-074 Stage 2 工具與漂移測試的退役
+# T-077 計畫 v4：I-074 Stage 2 工具與漂移測試的退役
 
-> 狀態：⚠️ 待使用者確認（v3，2026-10-30；D1～D6 已依 v1 的 review 定案，見「七」）。確認之前⛔ 不實作。
+> 狀態：⚠️ 待使用者確認（v4，2026-10-30；D1～D6 已依 v1 的 review 定案，見「七」）。確認之前⛔ 不實作。
 > 對應：[`todo.md`](../todo.md) T-077。
 
 ## 一、目標與不做的範圍
@@ -164,7 +164,7 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 | I-100 的各段、`run-evaluation.sh`、`run-replay-offline.sh`（含 Stage 2 的結束碼 6） | 保留 |
 | host 端 run identity validator、comparator、Stage 1 argv、`pin-replay-image.sh` 的三條分支、Stage 1 的 finalizer、Stage 1 的 orchestrator | 保留 |
 | `.gitignore` 的 staging 規則 | 刪（規則本身也一起刪） |
-| `finalize-stage2-evidence.sh` 的 argv、mount 與模式 | 刪。⚠️ `S2_TD`、`S2_IMG`、`S2_BUNDLE`、`S2_ID` 這幾個共用變數定義在這一段，後面保留的段也會用到，要移到保留的位置 |
+| `finalize-stage2-evidence.sh` 的 argv、mount 與模式（含 ③d 的其餘五種模式、⑦c 的 `--verify-promotion-staging`） | 刪。⚠️ 例外（v4，實作前的基準發現）：這個範圍裡夾著三樣在測**保留的程式**，搬到保留的前置段、期望值不變——① `ensure-i074-run-identity.py --stage 2`（1 項）；② `run-replay-offline.sh` 的反事實模式（隔離 repo，17 項，含「暫時 worktree 都清掉」的斷言）；③ `lib/replay-args.sh` 的語意鍵與 patch fixture 的檢查（2 項）。一起搬的還有它們用到的建置：隔離 repo、`s2_make_patches` 與它產生的 patch fixture、`s2_after_flag`、`S2_TD`／`S2_IMG`／`S2_BUNDLE`／`S2_ID` 等共用變數。隔離 repo ⛔ 不再複製被刪的 finalizer 與 `i074-stage2-patch-claims.py` |
 | `.gitattributes` 的巢狀規則 | 保留（保護證據的 bytes） |
 | pin 的專用 tag、`pin-replay-image.sh --stage 2`、`run-replay-offline.sh` 的 `I074_STAGE`、見證趟的 E7 前置守門 | 保留 |
 | sizing 的 shim、參數、raw-failed freeze record；acceptance 的 profile、參數、快照 | 刪 |
@@ -176,6 +176,7 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 
 * 跑 `bash -n`，再把整支跑完。
 * 保留的每一段，印出的 `ok` 數要和刪除之前相同。實作前先記下每一段的基準。
+  從 finalizer 範圍搬出來的 20 項換了段名，改以標籤逐項比對：搬移前的每一個標籤，搬移之後都要還在、仍是 ok。
 * 在 `IMAGE_REQUIRED=1` 下，需要 image 的段⛔ 不得 skip。
 
 ## 五、解凍之後的註解改寫
@@ -292,6 +293,7 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 |---|---|
 | 刪到保留的工具還在用的 helper | 「三」的驗收條件：每一筆命中都要歸類；跑全量測試與 smoke |
 | `test-replay-args.sh` 的共用變數或函式被一起刪掉，保留的段靜默 skip | 先記下每一段 `ok` 數的基準，刪完逐段比對；`IMAGE_REQUIRED=1` |
+| 要刪的段落裡夾著在測保留程式的項目（v4：finalizer 範圍裡的 runner 反事實模式就是這樣） | 刪之前把要刪範圍裡每一項的標籤列出來，逐項判斷測的對象是被刪的工具還是保留的程式；測保留程式的一律搬移、⛔ 不刪 |
 | 判讀器的覆蓋在搬移時變少 | 新測試的案例逐項對照「二」的清單；做反向驗證 |
 | 改註解時改到程式 | AST 比對；shell 檔逐行確認只改了整行註解 |
 | 證據被動到 | `git diff --stat python/baselines` 必須為空；D5 的檢查 |
@@ -356,3 +358,4 @@ HEAD 這一側只用到四樣東西：判讀器本身（它會驗自己的內容
 | v1 | 2026-10-30 | 初版 |
 | v2 | 2026-10-30 | 依 v1 的 review 修正。#1：I-119、I-121 的 5 處 `檔名:行號` 在階段 A 就改成 `c6c2481` 的歷史引用（「六」）。#2：刪除的驗收改成「HEAD 上⛔ 沒有未處理的執行依賴」，並列出 E1～E5 五類例外（「三」）。#3：D6 寫明 smoke 的完整刪除範圍、移除的覆蓋與 `test_replay_counterfactual.py` 的檔頭；驗證加上實跑保留的 smoke（「七」「九」）。D1～D6 定案：D1 改採 (b)，新增 `scripts/test-judge-i074-stage2.sh`，真跑改為額外驗收；D3 補界線；D5 補「⛔ 不驗 artifact 內容」 |
 | v3 | 2026-10-30 | 依 v2 的 review 修正兩處驗收描述。#1：PATH 的反向驗證改以「惡意 PATH 下照樣判讀成功」的案例與 PATH 的靜態檢查變紅為判定；「fake ⛔ 沒有被執行」在這個變異下仍是綠的（信任根檢查會先擋下）（「七」D1）。#2：階段 A 的驗收只含「九」的基準、階段 A 之後、舊版失敗的對照組；解凍的正向驗證移到階段 B（「九」「十」）。實作方向不變 |
+| v4 | 2026-10-30 | 階段 A 實作前記基準時發現：「四」要刪的 finalizer 範圍裡夾著三樣在測保留程式的項目（`ensure --stage 2` 1 項、`run-replay-offline.sh` 的反事實模式 17 項、`lib/replay-args.sh` 的語意鍵與 fixture 2 項）。v3 只寫了共用變數要搬；v4 改成連這 20 項與它們的建置一起搬到保留的前置段（「四」），驗證改以標籤逐項比對（「四」），風險表補一列（「八」）。這也是 D2 的前提——反事實路徑仍經 `run-replay-offline.sh` 使用，它的測試就⛔ 不能刪 |

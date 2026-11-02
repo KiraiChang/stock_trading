@@ -273,7 +273,7 @@ func TestDelistingReconcileQueuesOnSinglePoolConnection(t *testing.T) {
 	// ③業務流程等不到 connection，走 context 逾時。
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	s.runDelistingReconcileOwned(ctx, false)
+	s.runDelistingReconcileOwned(ctx, false, triggerCron)
 	<-released // ④競爭者釋放
 
 	// ⑤finishRunStatus 用獨立的 writer timeout 把那筆既有 run 寫成 failed。

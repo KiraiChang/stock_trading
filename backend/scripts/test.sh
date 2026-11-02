@@ -10,6 +10,7 @@
 # 可覆寫的環境變數：
 #   TEST_FLAGS  傳給 go test 的旗標（預設空）
 #   RACE=1      開 race detector。**預設關閉**，原因見下方設計重點。
+#   RACE_MIN_MB race 模式的 MEM 下限（預設 700）：mem-guard 下修到它以下就直接中止
 #   MEM         container 記憶體上限（預設 700m；會再經 mem-guard 依 host 實況下修）
 #   MEMSWAP     memory+swap 上限（預設等於 MEM，即關掉 container swap）
 #   CPUS        CPU 上限（預設 1）
@@ -86,6 +87,19 @@ CPUS="${CPUS:-1}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
+
+# race 的前置檢查（docs/plans/oom-mitigation.md 的 A4）：race 版 modernc.org/sqlite/lib 的 compile
+# 要 700m 才跑得完（檔頭「race 模式的記憶體」）。mem-guard 下修到它以下就**直接中止**——
+# ⛔ 不讓它編十分鐘才被 cgroup 砍。
+if [ "$RACE" = "1" ]; then
+  RACE_MIN_MB="${RACE_MIN_MB:-700}"
+  mem_mb="$(mem_guard_to_mb "$MEM")"
+  if [ -n "$mem_mb" ] && [ "$mem_mb" -lt "$RACE_MIN_MB" ]; then
+    echo "ERROR: [race] MEM 被下修到 ${mem_mb}m，低於 race 需要的 ${RACE_MIN_MB}m（還差 $((RACE_MIN_MB - mem_mb))MB）。" >&2
+    echo "       先騰出記憶體再跑（例如結束 Claude、停掉 dev stack），見 docs/development-workflow.md「Race detector」。" >&2
+    exit 1
+  fi
+fi
 
 PKGS="$*"
 [ -n "$PKGS" ] || PKGS="./..."

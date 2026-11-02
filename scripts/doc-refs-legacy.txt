@@ -85,7 +85,6 @@ todo.md|internal/scheduler/scheduler.go:116
 todo.md|internal/scheduler/scheduler.go:1436 x2
 todo.md|internal/scheduler/scheduler.go:370
 todo.md|internal/scheduler/scheduler.go:409
-todo.md|internal/scheduler/scheduler.go:429
 todo.md|internal/scheduler/scheduler.go:82
 todo.md|job_error.go:26
 todo.md|job_run_repo.go:112

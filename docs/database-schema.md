@@ -215,8 +215,8 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
 清單同步有價證券資料；本次清單有出現的 symbol 會 upsert 並設 `is_listed=true`，原本
 已上市但本次沒出現的 symbol 會以 `last_seen_at` 浮水印設 `is_listed=false`，用來簡化
 watchlist 維護與下架標的判斷。任一來源抓取失敗、或快照涵蓋數明顯少於現有上市數（疑似
-來源截斷）時整體略過本次同步，避免誤將大量個股標記下市。抓取失敗時不自動重試，改由人工
-觸發手動同步；timeout、來源間隔與這個決策的理由見
+來源截斷）時整體略過本次同步，避免誤將大量個股標記下市。抓取遇到暫時性失敗時由排程整輪
+重跑（`job_retry`，預設關閉），其餘由人工觸發手動同步；timeout、來源間隔與重跑的規則見
 [data-pipeline.md 的 TWSE ISIN 同步策略](./architecture/data-pipeline.md#twse-isin-同步策略)。
 
 | 欄位 | 說明 |

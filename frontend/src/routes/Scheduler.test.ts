@@ -4,6 +4,7 @@ import Scheduler from './Scheduler.svelte'
 import {
   fetchSchedulerStatus,
   triggerSREvaluationRun,
+  triggerStockSymbolSyncRun,
   triggerCorporateActionSyncRun,
   triggerDelistingReconcileRun,
   type SchedulerJob,
@@ -184,6 +185,70 @@ describe('Scheduler 頁面的 corporate_action_sync 區塊', () => {
 
     expect(await screen.findByText('觸發失敗，請稍後再試')).toBeTruthy()
     expect(screen.getByRole('button', { name: '手動執行還原同步' })).toBeTruthy()
+  })
+
+  // cron、手動與自動重跑共用一個執行所有權：409 是「已有一輪在跑」，⛔ 不是觸發失敗。
+  it('409 顯示「已在執行中」而不是通用的觸發失敗', async () => {
+    vi.mocked(triggerCorporateActionSyncRun).mockRejectedValue(
+      new ApiError(409, 'corporate action sync already running')
+    )
+    render(Scheduler)
+    const btn = await screen.findByRole('button', { name: '手動執行還原同步' })
+
+    await fireEvent.click(btn)
+
+    expect(await screen.findByText('已有一輪還原同步在執行中，請稍後再試')).toBeInTheDocument()
+    expect(screen.queryByText('觸發失敗，請稍後再試')).not.toBeInTheDocument()
+  })
+})
+
+describe('Scheduler 頁面的 stock_symbol_sync 區塊', () => {
+  const job: SchedulerJob = {
+    job_name: 'stock_symbol_sync',
+    status: 'failed',
+    symbols_total: 0,
+    symbols_failed: 0,
+    error: 'symbol_sync:timeout; 自動重跑 1/3（06:40）',
+    stale: false,
+    started_at: '2026-11-02T22:30:00Z',
+    finished_at: '2026-11-02T22:30:12Z',
+  }
+
+  beforeEach(() => {
+    vi.mocked(triggerStockSymbolSyncRun).mockReset()
+    vi.mocked(fetchSchedulerStatus).mockResolvedValue([job])
+  })
+
+  // 等待重跑的期間，最新一筆是 failed ＋ 幾點重跑；那段文字要看得到。
+  it('顯示失敗原因與自動重跑的時刻', async () => {
+    render(Scheduler)
+    expect(await screen.findByText(/自動重跑 1\/3（06:40）/)).toBeInTheDocument()
+  })
+
+  it('409 顯示「已在執行中」而不是通用的觸發失敗', async () => {
+    vi.mocked(triggerStockSymbolSyncRun).mockRejectedValue(
+      new ApiError(409, 'stock symbol sync already running')
+    )
+    render(Scheduler)
+    const btn = await screen.findByRole('button', { name: '手動同步股票主檔' })
+
+    await fireEvent.click(btn)
+
+    expect(await screen.findByText('已有一輪主檔同步在執行中，請稍後再試')).toBeInTheDocument()
+    expect(screen.queryByText('觸發失敗，請稍後再試')).not.toBeInTheDocument()
+  })
+
+  it('其他錯誤仍顯示觸發失敗且不留在觸發中狀態', async () => {
+    vi.mocked(triggerStockSymbolSyncRun).mockRejectedValue(new Error('boom'))
+    render(Scheduler)
+    const btn = await screen.findByRole('button', { name: '手動同步股票主檔' })
+
+    await fireEvent.click(btn)
+
+    expect(await screen.findByText('觸發失敗，請稍後再試')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '手動同步股票主檔' })).toBeEnabled()
+    )
   })
 })
 

@@ -182,6 +182,13 @@ type Scheduler struct {
 	// 而單一 transaction 只保證「單輪完整」、不保證「兩輪的先後」
 	// （較舊的一輪可能較晚 commit，反過來把新事件標記成消失）。
 	delistingRunning atomic.Bool
+	// stockSyncRunning / corporateActionRunning 是 **cron、手動、自動重跑共用**的執行所有權
+	// （I-123～I-126 計畫書 D5，比照 delistingRunning）：兩輪 stock_symbol_sync 並行時，
+	// 較舊的快照可能較晚寫入；手動撞上回 409、cron 撞上記 Warn、重跑撞上取消。
+	stockSyncRunning       atomic.Bool
+	corporateActionRunning atomic.Bool
+	// retry 是暫時性失敗的自動重跑（job_retry.go）。nil（沒呼叫 SetJobRetry）或關閉時三層都不動作。
+	retry *jobRetry
 	// registeredJobs 記錄 Start() 實際註冊了哪些 cron job。
 	// **為什麼要記而不是讓呼叫端自己判斷**：註冊條件散在 Start() 各處
 	// （config 開關、adjuster 是否注入、repo 是否注入），複製一份到 API 層
@@ -388,11 +395,14 @@ func (s *Scheduler) Start() {
 	}
 
 	s.cron.Start()
+	s.retry.logStartup(s.log)
 	s.log.Info("scheduler started")
 }
 
 func (s *Scheduler) Stop() {
 	s.cron.Stop()
+	// 待跑的自動重跑一併取消（重跑鏈只在記憶體裡，重啟後⛔ 不保留）。
+	s.retry.stop()
 }
 
 // startRunWriteTimeout 是「寫開始紀錄」的上限，比照 finishRunWriteTimeout。
@@ -431,8 +441,9 @@ const finishRunWriteTimeout = 10 * time.Second
 //
 // total / failed 的單位是**標的數**（欄位就叫 `symbols_total` / `symbols_failed`），
 // 呼叫端不要傳事件筆數——單位混用會讓下面的 `failed >= total` 判定失準。
-func (s *Scheduler) finishRun(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string) {
-	s.finishRunDegraded(ctx, runID, jobName, total, failed, lastErr, false)
+// 回傳值同 finishRunStatus。
+func (s *Scheduler) finishRun(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string) bool {
+	return s.finishRunDegraded(ctx, runID, jobName, total, failed, lastErr, false)
 }
 
 // finishRunDegraded 與 finishRun 相同，但多一個 degraded 旗標：**這輪跑完了、名單內的標的
@@ -442,7 +453,12 @@ func (s *Scheduler) finishRun(ctx context.Context, runID uint64, jobName string,
 // 沒進名單的標的不在分母裡，所以再怎麼算都不會失敗。degraded 為真時至少記 `partial`，
 // 讓「跑得不完整」在 job_runs 上看得見（corporate_action_sync 讀不到 watchlist 時就是這樣）。
 // 已經是 failed 的不會被降級——degraded 只補強，不會讓狀態變樂觀。
-func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string, degraded bool) {
+func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName string, total, failed int, lastErr string, degraded bool) bool {
+	return s.finishRunStatus(ctx, runID, jobName, deriveRunStatus(total, failed, degraded), total, failed, lastErr)
+}
+
+// deriveRunStatus 是 finishRunDegraded 的狀態推導；自動重跑要在寫入之前知道這一輪算不算成功。
+func deriveRunStatus(total, failed int, degraded bool) string {
 	status := "success"
 	switch {
 	case total > 0 && failed >= total:
@@ -453,7 +469,7 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 	if degraded && status == "success" {
 		status = "partial"
 	}
-	s.finishRunStatus(ctx, runID, jobName, status, total, failed, lastErr)
+	return status
 }
 
 // finishRunStatus 用**明確指定的 status** 寫回執行紀錄。
@@ -672,6 +688,9 @@ func (s *Scheduler) runIntradayJob() {
 // 分批、每批一次請求拉多檔 1 分K 並寫入 candles，再逐檔跑 signal 掃描。
 func (s *Scheduler) runIntradayBatch() {
 	ctx := context.Background()
+	// 層二的重試預算從一輪開始時起算（retryIntradayBatch）。
+	retryCtx, cancelRetry := s.intradayRetryContext(ctx)
+	defer cancelRetry()
 	runID := s.startRun(ctx, "intraday")
 
 	symbols, err := s.watchlist.Symbols(ctx)
@@ -693,7 +712,11 @@ func (s *Scheduler) runIntradayBatch() {
 			end = len(symbols)
 		}
 		batch := symbols[start:end]
+		// 每一批的**第一次**抓取⛔ 不受重試預算限制（與導入重試之前相同）。
 		if _, err := s.fetcher.FetchAndStoreIntradayBatch(ctx, batch); err != nil {
+			if s.retryIntradayBatch(retryCtx, start, batch, err) {
+				continue
+			}
 			// 批次請求失敗（例如 Yahoo 被限流/封鎖）：記錄後續跑其他批次。
 			// 未來的 Yahoo→FinMind fallback（T-008/T-031）會在此改為回退補資料。
 			s.log.Warn("intraday batch fetch failed", zap.Int("from", start), zap.Int("size", len(batch)), zap.Error(err))
@@ -707,6 +730,61 @@ func (s *Scheduler) runIntradayBatch() {
 		s.evaluateSymbol(ctx, tally, sym, "1m")
 	}
 	s.finishRunWithTally(ctx, runID, "intraday", len(symbols), tally)
+}
+
+// 層二的常數（I-123～I-126 計畫書「3.3」）：每批最多重試 2 次（等 10 秒、再等 20 秒），
+// 整輪的重試共用 120 秒的預算。
+var intradayRetryWaits = []time.Duration{10 * time.Second, 20 * time.Second}
+
+const intradayRetryBudget = 120 * time.Second
+
+// intradayRetryContext 建這一輪的重試 context：「一輪開始 ＋ intradayRetryBudget」到期。
+// **重試的等待、Yahoo 節流器的等待、HTTP 請求與寫 K 棒都用它**，所以重試最晚在一輪開始後
+// 120 秒結束——⛔ 不是只檢查「要不要開始重試」。重試關閉時回傳原本的 ctx（⛔ 不會用到）。
+func (s *Scheduler) intradayRetryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if !s.retry.enabled() {
+		return ctx, func() {}
+	}
+	return s.retry.budgetContext(ctx, intradayRetryBudget, errIntradayRetryBudget)
+}
+
+// retryIntradayBatch 是層二：批次抓取的暫時性失敗在同一輪內重試。回傳 true 代表重試成功，
+// 這一批⛔ 不計入失敗；永久錯誤（4xx、解析錯誤）⛔ 不重試。
+//
+// ⚠️ ⛔ 不保證兩輪⛔ 不重疊：批次多、第一次抓取、評估與結束寫入都還要時間（與導入前相同），
+// 重試只讓一輪最多晚約 120 秒結束重試的部分。
+func (s *Scheduler) retryIntradayBatch(retryCtx context.Context, from int, batch []string, err error) bool {
+	if !s.retry.enabled() {
+		return false
+	}
+	for attempt, wait := range intradayRetryWaits {
+		if !market.IsTransient(err) {
+			return false
+		}
+		if s.retry.wait(retryCtx, wait) != nil {
+			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
+				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt))
+			return false
+		}
+		_, err = s.fetcher.FetchAndStoreIntradayBatch(retryCtx, batch)
+		// **成功要同時滿足兩件事**：回傳 nil，而且重試 context 還沒到期。
+		// FetchAndStoreIntradayBatch 遇到逐檔寫入失敗只記 log、最後仍回 nil，只看回傳值會把
+		// 「HTTP 成功、寫 K 棒途中預算到期」誤當成成功。到期就保留這一批的失敗計數
+		//（其他原因的逐檔寫入失敗是 issue.md I-103 的範圍，這裡⛔ 不擴大）。
+		if retryCtx.Err() != nil {
+			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
+				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1), zap.Error(err))
+			return false
+		}
+		if err == nil {
+			s.log.Info("intraday batch fetch succeeded after retry",
+				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1))
+			return true
+		}
+		s.log.Warn("intraday batch retry failed",
+			zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1), zap.Error(err))
+	}
+	return false
 }
 
 // RunDailyClose 執行「收盤後拉日K + 完整掃描」的邏輯，供 cron 排程與
@@ -771,16 +849,55 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 	s.finishRun(ctx, runID, "chip_daily_sync", len(symbols), failed, lastErr)
 }
 
-func (s *Scheduler) RunStockSymbolSync() {
-	s.runStockSymbolSync(context.Background())
+// ── stock_symbol_sync 的執行所有權（D5，比照 delisting_reconcile 的三個方法）──────────
+
+func (s *Scheduler) acquireStockSymbolSync() bool {
+	return s.stockSyncRunning.CompareAndSwap(false, true)
 }
 
-func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
-	runID := s.startRun(ctx, "stock_symbol_sync")
+// releaseStockSymbolSync 釋放所有權，再讓重跑鏈排上計時器（順序⛔ 不能反：重跑要取得所有權）。
+func (s *Scheduler) releaseStockSymbolSync() {
+	s.stockSyncRunning.Store(false)
+	s.retry.afterRelease(stockSymbolSyncJob)
+}
+
+// RunStockSymbolSync 是 **cron 的入口**：自己取得所有權、自己釋放。
+// 取不到時只記 Warn、⛔ 不寫 job_run（比照 RunDelistingReconcile：cron 與手動共用同一個 job_name，
+// 寫一筆 failed 會把進行中那輪的結果蓋掉）。
+func (s *Scheduler) RunStockSymbolSync() {
+	if !s.acquireStockSymbolSync() {
+		s.log.Warn("stock symbol sync 已在執行中，本輪跳過（不寫 job_run，避免蓋掉進行中那輪的結果）")
+		return
+	}
+	s.runStockSymbolSyncAndRelease(triggerCron)
+}
+
+// TryStartStockSymbolSync 是 **API 手動觸發的入口**：同步取得所有權，成功才丟到背景；
+// 回傳 false 時呼叫端回 409。釋放由這裡 spawn 的 goroutine 負責。
+func (s *Scheduler) TryStartStockSymbolSync() bool {
+	if !s.acquireStockSymbolSync() {
+		return false
+	}
+	go s.runStockSymbolSyncAndRelease(triggerManual)
+	return true
+}
+
+// runStockSymbolSyncAndRelease：呼叫者已持有所有權，跑完由這裡釋放。
+func (s *Scheduler) runStockSymbolSyncAndRelease(trigger runTrigger) {
+	defer s.releaseStockSymbolSync()
+	s.runStockSymbolSync(context.Background(), trigger)
+}
+
+func (s *Scheduler) runStockSymbolSync(ctx context.Context, trigger runTrigger) {
+	// 起跑時刻：自動重跑判斷「這一輪算哪一天」用（job_retry.go 的 startedBeforeToday）。
+	started := s.retry.now()
+	// 這一輪開始之後，job_runs 的最新一筆就⛔ 不是 success 了（連帶重跑的旗標，job_retry.go）。
+	s.retry.onStockStart()
+	runID := s.startRun(ctx, stockSymbolSyncJob)
 	if s.stockSyncer == nil {
 		errMsg := "stock symbol syncer is not configured"
 		s.log.Warn(errMsg)
-		s.finishRunStatus(ctx, runID, "stock_symbol_sync", "failed", 0, 0, errMsg)
+		s.finishRunStatus(ctx, runID, stockSymbolSyncJob, "failed", 0, 0, errMsg)
 		return
 	}
 
@@ -796,10 +913,17 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 		// `total > 0` 時才推得出 failed，於是一筆主檔都沒更新卻顯示 partial。
 		// 改成明確的狀態（比照 delisting_reconcile）；⚠️ `0/0` 只表示**沒有回報計數**，
 		// ⛔ 不代表已證實沒有處理任何資料。
-		s.finishRunStatus(ctx, runID, "stock_symbol_sync", "failed", 0, 0, safeJobErrorSummary("symbol_sync", err))
+		// 層一：原因是暫時性、而且⛔ 不是自己的 20 分鐘預算用完，才排重跑（TWSE 的兩個來源整批重抓，
+		// all-or-nothing 不變）。
+		note := s.retry.planRerun(stockSymbolSyncJob, trigger, syncCtx.Err() == nil && market.IsTransient(err), started)
+		s.finishRunStatus(ctx, runID, stockSymbolSyncJob, "failed", 0, 0, safeJobErrorSummary("symbol_sync", err)+note)
 		return
 	}
-	s.finishRun(ctx, runID, "stock_symbol_sync", result.Seen, 0, "")
+	s.retry.onSuccess(stockSymbolSyncJob, started)
+	// 連帶重跑要的是「success **已落盤**」：前置條件讀的是 job_runs，寫不進去就⛔ 不算。
+	if s.finishRun(ctx, runID, stockSymbolSyncJob, result.Seen, 0, "") {
+		s.retry.onStockWritten(started)
+	}
 }
 
 // runSRZoneVerification 對**最近 N 天**的 SR zone 分析重新驗證 zone 有沒有被突破
@@ -1405,14 +1529,53 @@ func (s *Scheduler) dropSymbolsSyncedToday(ctx context.Context, symbols []string
 // 抓取區間刻意從 2015 年起整段重抓，而不是只抓增量：全市場只有數十筆分割，
 // 一次請求就抓得完，而「增量」需要維護游標、漏一次就永久缺一筆。
 // 事件表是 upsert、重算是冪等的，所以整段重抓沒有副作用。
+//
+// 這是 **cron 的入口**：自己取得所有權、自己釋放；取不到時只記 Warn、⛔ 不寫 job_run
+// （D5，比照 RunStockSymbolSync）。
 func (s *Scheduler) RunCorporateActionSync() {
+	if !s.acquireCorporateActionSync() {
+		s.log.Warn("corporate action sync 已在執行中，本輪跳過（不寫 job_run，避免蓋掉進行中那輪的結果）")
+		return
+	}
+	s.runCorporateActionSyncAndRelease(triggerCron)
+}
+
+// TryStartCorporateActionSync 是 **API 手動觸發的入口**：同步取得所有權，成功才丟到背景；
+// 回傳 false 時呼叫端回 409。
+//
+// adjuster 沒注入時照樣回 true（背景那輪直接返回，與導入所有權之前相同）——
+// ⛔ 不能讓「沒設定」與「被擋住」在回傳值上長得一樣（runSRAnalysisOwned 記過同一個教訓）。
+func (s *Scheduler) TryStartCorporateActionSync() bool {
+	if !s.acquireCorporateActionSync() {
+		return false
+	}
+	go s.runCorporateActionSyncAndRelease(triggerManual)
+	return true
+}
+
+func (s *Scheduler) acquireCorporateActionSync() bool {
+	return s.corporateActionRunning.CompareAndSwap(false, true)
+}
+
+func (s *Scheduler) releaseCorporateActionSync() {
+	s.corporateActionRunning.Store(false)
+	s.retry.afterRelease(corporateActionSyncJob)
+}
+
+func (s *Scheduler) runCorporateActionSyncAndRelease(trigger runTrigger) {
+	defer s.releaseCorporateActionSync()
+	s.runCorporateActionSync(trigger)
+}
+
+func (s *Scheduler) runCorporateActionSync(trigger runTrigger) {
 	if s.adjuster == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.corporateActionTimeout())
 	defer cancel()
 
-	runID := s.startRun(ctx, "corporate_action_sync")
+	started := s.retry.now() // 起跑時刻（自動重跑判斷這一輪算哪一天）
+	runID := s.startRun(ctx, corporateActionSyncJob)
 	start := time.Date(2015, 1, 1, 0, 0, 0, 0, timeutil.TaipeiTZ)
 	end := timeutil.TodayTaipei()
 
@@ -1421,7 +1584,9 @@ func (s *Scheduler) RunCorporateActionSync() {
 		s.log.Error("corporate action sync failed", zap.Error(err))
 		// total 傳 1 而不是 0：total=0 會落到 finishRun 的 `failed > 0` 分支被記成
 		// partial，但分割批次失敗時整輪根本沒開始跑，那是 failed 不是 partial。
-		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, safeJobErrorSummary("corporate_action", err))
+		// 層一**只管這種整輪早退**（2026-10-22 的 DB recovery 就是這裡）；⛔ 不是自己的預算用完才算。
+		note := s.retry.planRerun(corporateActionSyncJob, trigger, ctx.Err() == nil && market.IsTransient(err), started)
+		s.finishRun(ctx, runID, corporateActionSyncJob, 1, 1, safeJobErrorSummary("corporate_action", err)+note)
 		return
 	}
 
@@ -1433,7 +1598,8 @@ func (s *Scheduler) RunCorporateActionSync() {
 	all, err := s.adjuster.SymbolsWithCandles(ctx)
 	if err != nil {
 		s.log.Error("列出有 K 棒的標的失敗", zap.Error(err))
-		s.finishRun(ctx, runID, "corporate_action_sync", 1, 1, safeJobErrorSummary("corporate_action", err))
+		note := s.retry.planRerun(corporateActionSyncJob, trigger, ctx.Err() == nil && market.IsTransient(err), started)
+		s.finishRun(ctx, runID, corporateActionSyncJob, 1, 1, safeJobErrorSummary("corporate_action", err)+note)
 		return
 	}
 
@@ -1447,6 +1613,10 @@ func (s *Scheduler) RunCorporateActionSync() {
 	// **失敗檔數 ＋ 因逾時沒輪到的檔數**。少了後面那一項，逾時被 break 掉的那輪會因為
 	// 「零失敗」被記成 success——跑了 50 檔就停掉卻顯示成功，正是修改前的主要症狀。
 	processed, failed, symbolFailures, syncErr := s.adjuster.SyncPerSymbolEvents(ctx, symbols)
+	if syncErr == nil {
+		// 層三：暫時性失敗的標的在同一個預算內再試一次。第一輪就逾時（syncErr）時已經沒有預算。
+		failed, symbolFailures = s.retryTransientSymbols(ctx, failed, symbolFailures)
+	}
 	skipped := len(symbols) - processed
 	if skipped < 0 {
 		skipped = 0
@@ -1486,8 +1656,99 @@ func (s *Scheduler) RunCorporateActionSync() {
 		zap.Bool("watchlist_degraded", watchlistErr != nil))
 	// degraded 傳 watchlistErr != nil：watchlist 那批沒進名單，所以它們不可能算進
 	// failed，零失敗也不該記 success。
-	s.finishRunDegraded(ctx, runID, "corporate_action_sync", len(symbols), failed+skipped,
-		strings.Join(errParts, "; "), watchlistErr != nil)
+	status := deriveRunStatus(len(symbols), failed+skipped, watchlistErr != nil)
+	if status != "failed" {
+		// 整輪有跑完（success 或 partial）：舊的重跑鏈失效——整輪重跑救不了個別標的，那是層三的事。
+		s.retry.onSuccess(corporateActionSyncJob, started)
+	}
+	s.finishRunStatus(ctx, runID, corporateActionSyncJob, status, len(symbols), failed+skipped,
+		strings.Join(errParts, "; "))
+}
+
+// corporateRetryWait 是層三的等待（I-123～I-126 計畫書「3.4」）：剩餘預算超過它才跑第二輪。
+const corporateRetryWait = 60 * time.Second
+
+// retryTransientSymbols 是層三：挑出**所有失敗階段都是暫時性**的標的，先等 corporateRetryWait，
+// 再對它們跑一次 SyncPerSymbolEvents（仍在同一個整輪預算內）。回傳合併後的失敗檔數與失敗清單。
+//
+// 合併：第二輪成功的標的從失敗清單移除；第二輪**有任何失敗**（含做到一半預算用完）的，改記第二輪的失敗；
+// 第二輪沒跑到（預算用完）的保留第一輪的失敗。404 之類的永久失敗⛔ 不重試；重算是冪等的，重試⛔ 不會累積誤差。
+func (s *Scheduler) retryTransientSymbols(
+	ctx context.Context, failed int, failures []market.SyncFailure,
+) (int, []market.SyncFailure) {
+	if !s.retry.enabled() {
+		return failed, failures
+	}
+	retry := transientOnlySymbols(failures)
+	if len(retry) == 0 {
+		return failed, failures
+	}
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) <= corporateRetryWait {
+		s.log.Warn("公司行動同步：剩餘預算不足，暫時性失敗的標的不跑第二輪", zap.Int("symbols", len(retry)))
+		return failed, failures
+	}
+	if err := s.retry.wait(ctx, corporateRetryWait); err != nil {
+		return failed, failures
+	}
+	processed, _, second, _ := s.adjuster.SyncPerSymbolEvents(ctx, retry)
+
+	// 第二輪處理完、而且⛔ 沒有任何失敗的才算救回。第二輪**仍失敗**（含做到一半預算用完）的，記**第二輪**的失敗：
+	// 它反映資料現在的狀態——例如第一輪配息抓取逾時、第二輪事件寫入成功但重算失敗，事件與係數已經不同步，
+	// 只留第一輪的 dividends 就看不出來（review R2）。第二輪**沒跑到**的，保留第一輪的失敗。
+	againBySymbol := map[string][]market.SyncFailure{}
+	for _, f := range second {
+		againBySymbol[f.Symbol] = append(againBySymbol[f.Symbol], f)
+	}
+	recovered := map[string]bool{}
+	for _, symbol := range retry[:processed] {
+		if len(againBySymbol[symbol]) == 0 {
+			recovered[symbol] = true
+		}
+	}
+	// 順序沿用第一輪清單裡該檔第一次出現的位置；第二輪仍失敗的那一檔，它的各階段在那個位置一次換掉。
+	merged := make([]market.SyncFailure, 0, len(failures))
+	stillFailed := map[string]bool{}
+	for _, f := range failures {
+		if recovered[f.Symbol] {
+			continue
+		}
+		again, ranAgain := againBySymbol[f.Symbol]
+		if !ranAgain {
+			merged = append(merged, f)
+			stillFailed[f.Symbol] = true
+			continue
+		}
+		if !stillFailed[f.Symbol] {
+			merged = append(merged, again...)
+			stillFailed[f.Symbol] = true
+		}
+	}
+	s.log.Info("公司行動同步：暫時性失敗的標的跑完第二輪",
+		zap.Int("retried", len(retry)), zap.Int("processed", processed),
+		zap.Int("recovered", len(recovered)), zap.Int("failed", len(stillFailed)))
+	return len(stillFailed), merged
+}
+
+// transientOnlySymbols 依第一次出現的順序，回傳所有失敗階段都是暫時性的標的。
+func transientOnlySymbols(failures []market.SyncFailure) []string {
+	allTransient := map[string]bool{}
+	var order []string
+	for _, f := range failures {
+		ok, seen := allTransient[f.Symbol]
+		if !seen {
+			order = append(order, f.Symbol)
+			allTransient[f.Symbol] = f.Transient
+			continue
+		}
+		allTransient[f.Symbol] = ok && f.Transient
+	}
+	out := make([]string, 0, len(order))
+	for _, symbol := range order {
+		if allTransient[symbol] {
+			out = append(out, symbol)
+		}
+	}
+	return out
 }
 
 // SetSRAnalysis 注入 SR 分析 runner 與其排程設定（現況見 docs/architecture.md「SR 分析的兩個時段共用一個執行所有權」）。

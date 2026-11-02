@@ -123,6 +123,8 @@
     }
   }
 
+  // 主檔同步與還原同步的手動入口也是**同步取得所有權**（cron、手動與自動重跑共用一個），
+  // 已有一輪在跑時後端回 409——與對帳相同，要與觸發失敗分開顯示。
   async function runStockSymbolSync() {
     triggering = { ...triggering, stock_symbol_sync: true }
     triggerError = { ...triggerError, stock_symbol_sync: '' }
@@ -131,8 +133,14 @@
       const res = await triggerStockSymbolSyncRun()
       triggerMessage = { ...triggerMessage, stock_symbol_sync: res.message ?? '已在背景重新觸發' }
       setTimeout(load, 1500)
-    } catch {
-      triggerError = { ...triggerError, stock_symbol_sync: '觸發失敗，請稍後再試' }
+    } catch (e) {
+      triggerError = {
+        ...triggerError,
+        stock_symbol_sync:
+          e instanceof ApiError && e.status === 409
+            ? '已有一輪主檔同步在執行中，請稍後再試'
+            : '觸發失敗，請稍後再試',
+      }
     } finally {
       triggering = { ...triggering, stock_symbol_sync: false }
     }
@@ -161,8 +169,14 @@
       const res = await triggerCorporateActionSyncRun()
       triggerMessage = { ...triggerMessage, corporate_action_sync: res.message ?? '已在背景重新觸發' }
       setTimeout(load, 1500)
-    } catch {
-      triggerError = { ...triggerError, corporate_action_sync: '觸發失敗，請稍後再試' }
+    } catch (e) {
+      triggerError = {
+        ...triggerError,
+        corporate_action_sync:
+          e instanceof ApiError && e.status === 409
+            ? '已有一輪還原同步在執行中，請稍後再試'
+            : '觸發失敗，請稍後再試',
+      }
     } finally {
       triggering = { ...triggering, corporate_action_sync: false }
     }

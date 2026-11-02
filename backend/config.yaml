@@ -97,6 +97,20 @@ delisting:
                                               # 正確性由「當日 stock_symbol_sync 必須已成功」那條依賴保證。
   timeout_sec: 0                              # 環境變數：DELISTING_TIMEOUT_SEC，0 代表沿用程式預設（60 秒）
 
+# 暫時性失敗的自動重跑（I-123～I-126 計畫書 docs/plans/i123-i126-job-retry.md；現況規格見
+# docs/architecture/data-pipeline.md「失敗後的自動重跑」）。只認型別判得出的暫時性錯誤
+# （DNS 逾時、連線層錯誤、HTTP 5xx、DB 連線類），4xx／429／解析錯誤／預算用完⛔ 不重跑。
+# ⚠️ 只控制三層：stock_symbol_sync／corporate_action_sync（整輪早退）／delisting_reconcile 的整輪重跑
+# （含主檔成功後連帶觸發對帳）、intraday 的批次重試、公司行動失敗標的的第二輪。
+# 結束寫入的重試與狀態修正一律生效，⛔ 不受這個開關控制。
+job_retry:
+  enabled: false                              # 環境變數：JOB_RETRY_ENABLED；回滾只要改回 false
+  interval_min: 10                            # 環境變數：JOB_RETRY_INTERVAL_MIN，整輪失敗後隔幾分鐘重跑（≤ 0 退回 10）
+  max_reruns: 3                               # 環境變數：JOB_RETRY_MAX_RERUNS，每個工作每天最多幾次（≤ 0 退回 3）
+  cutoff: "08:45"                             # 環境變數：JOB_RETRY_CUTOFF，台北 HH:MM。重跑的**整輪**（含紀錄寫入）
+                                              # 在它之前結束、⛔ 不壓到 08:50 的盤前；最晚起跑 ＝ 截止 − 業務預算 − 3 分鐘
+                                              # （預設 07:57／08:22／08:37）。格式錯誤時退回 08:45 並記 Error
+
 # ── 認證設定 ──────────────────────────────────────────────────
 # 生產環境請務必更換為隨機長字串，例如：
 #   openssl rand -hex 32

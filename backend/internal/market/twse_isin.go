@@ -82,9 +82,10 @@ type TWSEISINClientOptions struct {
 // FetchStockSymbols 會全部抓取並合併，任一來源失敗即整體失敗（避免只拿到半個市場就把
 // 另一半誤判為下市）。
 //
-// 刻意不做自動重試：股票主檔異動頻率低（新上市／下市），漏同步一天不影響既有標的的
-// 分析與訊號，而重試會拉長連打 TWSE 的時間、增加被限流與「半套資料」的風險。失敗時
-// 由人工按前端的手動同步按鈕（POST /api/v1/scheduler/stock-symbol-sync/run）補即可。
+// **這一層⛔ 不做請求重試**：重試的單位是整輪（scheduler 的自動重跑，`job_retry.enabled`）——
+// 暫時性失敗時隔 10 分鐘把兩個來源整批重抓、一天最多 3 次、盤前截止，all-or-nothing 不變，
+// ⛔ 不會只拿到半個市場（理由見 docs/architecture/data-pipeline.md「失敗後的自動重跑」）。
+// 開關關閉時，失敗由人工按前端的手動同步按鈕（POST /api/v1/scheduler/stock-symbol-sync/run）補。
 func NewTWSEISINClient(urls []string, opts TWSEISINClientOptions, log *zap.Logger) *TWSEISINClient {
 	timeout := opts.Timeout
 	if timeout <= 0 {

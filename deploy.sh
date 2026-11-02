@@ -72,6 +72,17 @@ export DELISTING_ENABLED="false"       # dev 驗收通過後改為 "true"
 export DELISTING_CRON="0 7 * * *"      # 台北時區，每天（不限平日）；stale 門檻寫死 26 小時
 export DELISTING_TIMEOUT_SEC="0"       # 0 = 沿用程式預設 60 秒（單一 CSV 請求，實測 8KB）
 
+# 暫時性失敗的自動重跑（I-123～I-126；規格見 docs/architecture/data-pipeline.md「失敗後的自動重跑」）：
+# 主檔同步、公司行動同步（整輪早退）、終止上市對帳遇到 DNS 逾時／連線錯誤／5xx／DB 連線類錯誤時，
+# 隔 10 分鐘重跑、每天最多 3 次、整輪在 08:45 之前結束；主檔成功後連帶重跑被它擋下的對帳。
+# intraday 的批次與公司行動的失敗標的也在同一輪內再試。4xx／429／解析錯誤⛔ 不重跑。
+# ⛔ **不能只加 export**：compose 的 backend environment 區塊也要有對應的四個鍵。
+# 回滾：改回 "false" 重新部署，確認 backend 啟動 log 的 `job retry config` 顯示 enabled=false。
+export JOB_RETRY_ENABLED="false"        # dev 驗收通過後改為 "true"
+export JOB_RETRY_INTERVAL_MIN="10"
+export JOB_RETRY_MAX_RERUNS="3"
+export JOB_RETRY_CUTOFF="08:45"         # 台北 HH:MM，重跑整輪（含紀錄寫入）的截止；⛔ 不壓到 08:50 的盤前
+
 docker compose \
   -f "$PROJECT_DIR/docker-compose.yml" \
   --project-directory "$PROJECT_DIR" \

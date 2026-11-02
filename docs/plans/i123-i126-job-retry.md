@@ -1,6 +1,6 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
-> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A 已實作、⚠️ 待 review（實作備註見「十二」）；階段 B 尚未開始。
+> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B 已實作；review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（2026-11-02，⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；⚠️ 階段 B 待補跑 `RACE=1` 才能結案；`RACE=1` 依 [`oom-mitigation.md`](./oom-mitigation.md) 補跑。
 > 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
@@ -90,6 +90,7 @@
 **重跑鏈的規則**：
 
 1. **同一天、同一個工作只有一條鏈**：計數（已排幾次）與至多一個待跑的計時器。換日就重置。
+   **一輪算哪一天看它的起跑時刻**（階段 B 的 review 修正 R1）：前一天起跑、今天才結束的一輪⛔ 不動今天的鏈與連帶狀態——成功⛔ 不讓今天的舊鏈失效、失敗⛔ 不排重跑（重跑時刻跨到起跑的隔天）、主檔的 success ⛔ 不算「最新一輪已成功落盤」（對帳的前置也看起跑日）。
 2. **任一入口成功，舊鏈就失效**：cron、手動、重跑、連帶觸發，只要這個工作當天成功一次，就取消待跑的計時器，當天⛔ 不再重跑。
    例：06:30 失敗、06:35 手動成功 → 06:40 的重跑⛔ 不會執行（最新狀態⛔ 不會被一次舊的重跑改回 failed）。
 3. **計時器到期時**先確認：還是同一天、還沒成功、還沒超過最晚起跑時刻；再取得執行所有權（D5）。取不到 → 這次重跑取消、記 Warn，**這條鏈結束**
@@ -138,7 +139,7 @@
 
 * `SyncFailure` 多一個欄位 `Transient`（在記錄失敗的當下用 `IsTransient(cause)` 判斷；⛔ 不寫進 `job_runs`，只供重試決策）。
 * 第一輪跑完之後，挑出**所有失敗階段都是暫時性**的標的；剩餘預算超過 60 秒時先等 60 秒，再對它們跑一次 `SyncPerSymbolEvents`（仍在同一個 45 分鐘的預算內）。
-* 合併：第二輪成功的標的從失敗清單移除；第二輪沒跑到（預算用完）的保留第一輪的失敗；`symbols_failed` 與 `error` 依合併後的結果寫。
+* 合併：第二輪成功的標的從失敗清單移除；第二輪**仍失敗**（含做到一半預算用完）的記**第二輪**的失敗（階段 B 的 review 修正 R2：它反映資料現在的狀態）；第二輪沒跑到（預算用完）的保留第一輪的失敗；`symbols_failed` 與 `error` 依合併後的結果寫。
 * 404 之類的永久失敗⛔ 不重試（例如 00847B，I-122）。重算是冪等的，重試⛔ 不會累積誤差。
 
 ### 3.5 層四：結束寫入的重試與回收訊息（I-125）
@@ -284,7 +285,8 @@
 * `scripts/check-doc-refs.py` 問題 0。
 * dev 的實測（`docker-compose.dev.yml` 的 dev project；只為驗收用的設定放在 scratchpad 的 override 檔，⛔ 不進 repo）：
   * 設定：`JOB_RETRY_ENABLED=true`、`JOB_RETRY_INTERVAL_MIN=1`、`JOB_RETRY_CUTOFF` 設成**當天晚於驗收結束的時刻**（例如 23:30——這樣任何時段都能驗，
-    ⛔ 不受 08:45 的預設擋住）；`STOCK_SYMBOLS_SYNC_URLS` 指向會拒絕連線的位址；`STOCK_SYMBOLS_CRON` 設在啟動後幾分鐘。
+    ⛔ 不受 08:45 的預設擋住）；`STOCK_SYMBOLS_SYNC_URLS` 指向會拒絕連線或不回應的位址（要驗執行途中的 409 時用不回應的位址加短的
+    `STOCK_SYMBOLS_TIMEOUT_SEC`，讓每輪持續夠久）；`STOCK_SYMBOLS_CRON` 設在**容器啟動之後**幾分鐘（⛔ 不在 build 之前推算——build 可能要 7 分鐘以上）。
   * 看到：失敗 → 每分鐘重跑 → 3 次後用完的 `job_runs` 與 log；途中按手動同步得到 409；啟動 log 的開關與最晚起跑時刻。
   * 截止的行為由單元測試（注入的時鐘）驗；dev 只驗「開關、傳遞與實際排程」。驗完 `down`（⛔ 不帶 `-v`）。
 * live（使用者部署並開啟之後）：「3.7」的三項確認；觀察 5 個交易日，看 `job_runs` 有沒有「失敗 → 重跑成功」、`intraday` 的失敗輪數有沒有下降、⛔ 沒有重疊執行。
@@ -292,8 +294,8 @@
 ## 九、執行順序
 
 1. 使用者確認本計畫（含 D1～D6）。
-2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（⚠️ 已實作、待 review：「十二」）
-3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。
+2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（✅ `7a9f0cb`）
+3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。（已實作；dev 實測與 review 修正 R1、R2 ✅ 通過；⚠️ 待補跑 `RACE=1`：「十二」）
 4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。
 5. 收斂：歸檔（「十」）、I-123～I-126 與 I-122 一起收斂（I-122 的證據到這時才刪）。
 
@@ -318,7 +320,7 @@
 
 ## 十二、實作備註
 
-### 階段 A（2026-10-30，前兩輪 review 各 1 項已修正，⚠️ 待 review）
+### 階段 A（2026-10-30；兩輪 review 各修正 1 項，✅ review 通過、`7a9f0cb`）
 
 改了什麼（依「3.1」「3.5」「3.6」）：
 
@@ -353,3 +355,118 @@
   第一輪的 3 項：store 的 `Finish` ⛔ 不檢查筆數、拿掉 `runID` 0 的判斷、紀錄不存在也重試；其餘 17 項：拿掉 `IsTransient` 的各類（`HTTPStatusError`、SQLState、`OpError`、`url.Error` 逾時、
   `ErrUnexpectedEOF`）、5xx 門檻改成 ≥ 400、DNS 一律算暫時性、Yahoo 配息與 FinMind 改回一般錯誤、TWSE ISIN 的文字被改、結束寫入⛔ 不重試、
   結束寫入改用呼叫端的 ctx、`startRun` 拿掉上限、預設等待改短、主檔整輪失敗改回 `0/1`、對帳改回分類器、回收訊息改回舊文字——都讓指定的測試變紅。
+
+### 階段 B（2026-11-02，⚠️ 待 review）
+
+改了什麼（依「3.2」～「3.4」「3.7」與 D5）：
+
+* **層一**（`scheduler/job_retry.go`，新）：重跑鏈、截止時刻、連帶重跑、啟動 log；時鐘與計時器可注入（`retryClock`），連帶觸發的那一輪由 `spawn` 另起。
+  掛點：`stock_symbol_sync`、`corporate_action_sync`（只在分割批次、列標的兩個整輪早退）、`delisting_reconcile` 失敗時，寫結束紀錄**之前**呼叫
+  `planRerun` 決定重跑時刻（`error` 才寫得出幾點重跑）；判斷 eligible 是「`IsTransient` ＆ 這一輪自己的 ctx 還沒到期」。
+* **執行所有權（D5 (b)）**：主檔、公司行動各一個 `atomic.Bool`，比照對帳的三個方法；cron 入口取不到只記 Warn、⛔ 不寫 `job_runs`；
+  手動入口 `TryStart…`，handler 取不到回 409。前端兩個按鈕遇到 409 顯示「已有一輪…在執行中」。
+* **層二**（`runIntradayBatch`）：重試 context 用注入的計時器在 120 秒後取消（`budgetContext`，⛔ 不是 `context.WithTimeout`——測試才控制得了
+  「寫 K 棒途中到期」）；成功要「回傳 `nil` ＆ 重試 context 未到期」。
+* **層三**（`retryTransientSymbols`）：`SyncFailure.Transient` 在記失敗的當下以「ctx 未到期 ＆ `IsTransient`」判斷。
+* 設定 `job_retry.*`（`config.go`、`config.yaml`、`main.go` 在 `Start()` 之前注入）；四個環境變數加到 `docker-compose.yml`、`docker-compose.dev.yml`、`deploy.sh` 範本。
+* 文件（描述的是階段 B 之後的現況，⛔ 不等到收斂才改）：`data-pipeline.md` 新增「失敗後的自動重跑（`job_retry`）」、改寫「為什麼不自動重試」；
+  `api-reference.md` 的 `error` 結尾文字與兩個端點的 409；`yahoo-intraday-integration.md` 的「批次失敗的同一輪重試」與補回的結論；
+  `database-schema.md` 一句；`twse_isin.go` 的「不重試」說明。另把兩處因 `scheduler.go` 改動而漂掉的行號引用（`issue.md`、`todo.md`）改寫成不帶行號，
+  `scripts/doc-refs-legacy.txt` 減一筆。
+
+計畫沒寫死、實作時定下的細節（⚠️ review 時請確認）：
+
+1. **「成功」的定義**：一輪⛔ 不是 `failed` 就算成功（success，或整輪跑完的 partial）。partial 代表整輪有跑完，整輪重跑救不了個別標的
+   （公司行動的個別標的由層三處理；對帳的降級項目重跑也一樣）。
+2. **計時器在釋放所有權之後才排**（`afterRelease`）：重跑時刻在失敗當下決定、`error` 照寫，計時器等這一輪釋放所有權才掛上，到期時刻⛔ 不變。
+   否則結束寫入重試得久一點（最多 133 秒）時，重跑會撞上自己還沒釋放的那一輪而被取消（間隔設 1 分鐘的 dev 最容易遇到）。
+3. **同一天已有待跑的重跑時又失敗**（例如公司行動設了兩個 cron 時段）：沿用已排的那一個、⛔ 不再排第二個，`error` 註明同一個時刻。
+4. ~~**層三的合併**：第二輪仍失敗（含做到一半預算用完）的標的與沒跑到的一樣，保留**第一輪**的原因；第二輪的原因只進 log。~~（⛔ 不再適用：review R2 撤回，改成第二輪仍失敗的記第二輪的失敗，見下方「階段 B 的 review 修正」）
+5. **重跑被取消也算一次**：排了就計入 `count`，被取消（撞上手動、超過最晚起跑、換日）⛔ 不退回。
+6. **連帶觸發被擋的處置**：主檔旗標已經不成立或代號用過 → 回到「等待」，等下一次主檔成功；額度用完或過了最晚起跑 → 放棄。
+
+驗證：
+
+* `go vet ./...`：rc 0。`go build ./...`：通過。改到的 Go 檔 `gofmt` 乾淨。
+* `go test -vet=off -count=1 ./...`：12 個套件通過，**唯一失敗**仍是 store 既有的時間炸彈（`TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst`，與階段 A 相同）。
+* 新增的測試 38 項（`scheduler/job_retry_test.go`、`scheduler/intraday_retry_test.go`、`api/handler/scheduler_ownership_test.go`、
+  `market/intraday_refill_test.go`、`market/transient_test.go` 一項），對應「八」：層一的排／跑／用完／最晚起跑（三個工作、可設定的截止、公司行動可調的預算、跨日）、
+  紀錄寫入放得進 3 分鐘、成功讓舊鏈失效、換日重置、到期時已換日或已過最晚起跑、`Stop()`；所有權的兩種起跑順序（主檔）與公司行動、兩個端點的 409；
+  連帶重跑的基本流程、額度與最晚起跑、時序 (i)(ii)(iv)(v)（(iii)「⛔ 不會觸發兩次」併在各條的筆數斷言裡），以及「success 沒落盤⛔ 不觸發」；
+  公司行動的整輪早退重跑、自己的預算用完⛔ 不排、partial 讓舊鏈失效；層二的成功／兩次都失敗／永久錯誤與關閉／120 秒預算／寫入途中到期；
+  層三的救回與 404、預算不足、第二輪途中到期、`transientOnlySymbols`、`Transient` 排除預算用完；盤中的補回（Yahoo client → fetcher → SQLite）。
+  這批測試以 `-count=20` 重跑全綠。
+* 前端 `frontend/scripts/test.sh`：svelte-check 0、vitest 159 項全過、build 通過；dist 檢查照設計失敗（新的 bundle 要一起 `git add`）。`scripts/check-job-names.sh` 通過。
+* 反向驗證 32 項（隔離 clone、`go test -vet=off`，對照組全綠）全部變紅：成功讓舊鏈失效、最晚起跑（排的時候、到期時、連帶觸發）、跨日、每日上限（重跑、連帶觸發）、
+  手動失敗也排、`Stop()`、換日重置、兩個工作的所有權、兩個端點改回一律 202、登記等待時重新確認、釋放後補觸發、主檔開始時設假、代號檢查、
+  success 寫不進去也設真、對帳前置不成立⛔ 不登記等待、公司行動自己的預算用完也排、公司行動只有 success 才讓舊鏈失效、`Transient` ⛔ 不看 ctx、
+  層三⛔ 不只挑暫時性／預算不足也跑／仍失敗或沒跑到也算救回、層二成功⛔ 不看預算、重試請求⛔ 不用重試預算、第一次抓取也受預算限制、永久錯誤也重試、關閉時也重試。
+* ⚠️ **`RACE=1` 沒有跑**：這台 host 目前的 MemAvailable 約 600 MB（live 的 stack 在跑），mem-guard 會把上限壓到約 450m，而 race 版的
+  `modernc.org/sqlite/lib` 實測要 700m（`backend/scripts/test.sh` 的說明：582m 就會被砍）；race 用的 debian 版 golang image 也不在本機。
+  ⛔ 沒有為了它去停 live 的服務。並發的部分改以「狀態全在一把鎖下、取得所有權用 CAS」的設計與上面 `-count=20` 的重跑支撐，**⛔ 不等於 race detector 的保證**。
+* **dev 實測**（2026-11-02，`docker-compose.dev.yml` 的 dev project；只為驗收用的設定放在 scratchpad 的 override，⛔ 不進 repo）：
+  * 設定：`JOB_RETRY_ENABLED=true`、間隔 1 分鐘、上限 3、截止 23:30；主檔來源指向不回應的位址（`10.255.255.1:9`）、`STOCK_SYMBOLS_TIMEOUT_SEC=20`，
+    每輪約 20 秒以 `Client.Timeout` 失敗（`url.Error` 逾時，算暫時性；job 自己的 20 分鐘預算還沒到）。
+  * 啟動 log 的 `job retry config`：enabled、60 秒、3 次、截止 23:30，最晚起跑：公司行動 22:42、主檔 23:07、對帳 23:22。✅
+  * `job_runs`：cron 10:40 一輪 → 10:41、10:42、10:44 各重跑一輪，4 筆都是 `failed`；前三筆的 `error` 結尾是「自動重跑 n/3（時刻）」，
+    第四筆是「自動重跑已用完（3/3）」；用完後再等 90 秒⛔ 沒有第五筆。log 依序有「自動重跑已排定」（trigger 為 cron／rerun）、「自動重跑開始」、「自動重跑已用完」。✅
+  * ⚠️ **執行途中手動觸發的 409 ⛔ 沒有在 dev 驗到**：`docs/todo.md` 記的 dev 帳號密碼在目前的 dev DB 登不進去（401，I-127），手動請求停在驗證那一層、
+    ⛔ 沒有碰到執行所有權。使用者裁決⛔ 不補驗；409 由 `scheduler_ownership_test.go` 與反向驗證 B11、B12 涵蓋。
+  * 第一次實測把主檔 cron 在 build 之前推算成「+4 分鐘」，build 花了約 7 分鐘，啟動時已經錯過、當天⛔ 不會觸發；
+    第二次改成 `--no-build --no-deps` 只重建 backend、cron 設在重建之後 2 分鐘（dev 的 python-server 先停掉，騰出記憶體）。
+  * 驗完 `down`（⛔ 不帶 `-v`），volume 保留；live 的容器⛔ 沒有變動（前後 `docker ps` 對照）。
+
+### 階段 B 的 review 修正（2026-11-02，✅ R1、R2 review 通過；⚠️ 階段 B 待補跑 `RACE=1` 才能結案）
+
+review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` 仍未完成，⛔ 不能拿一般測試的重跑代替。
+第二輪 review（2026-11-02）：R1、R2 的修正通過，⛔ 沒有發現新的程式缺陷；正式的 `RACE=1` 仍待補跑，階段 B ⛔ 不能完整結案。
+`RACE=1` 依 [`oom-mitigation.md`](./oom-mitigation.md) 在修正之後補跑。
+
+**R1（P2）跨日完成會壓掉隔天的重跑**
+
+* 現況：`onSuccess` 以**完成當下**的日期取鏈並設「今天已成功」。前一天 23:55 開始、隔天 00:05 成功 → 隔天的鏈被標成已成功，
+  06:30 的暫時性失敗就⛔ 不再排重跑。
+* 同一類的另外三處（review 只指出 `onSuccess`；使用者 2026-11-02 裁決四處一起修）：
+  * `planRerun`：前一天起跑、隔天才失敗 → 重跑排進隔天的鏈、佔掉隔天的額度。照「3.2」「重跑時刻跨到隔天就⛔ 不排」，應該⛔ 不排。
+  * `onStockWritten`：對帳的前置（`StockSymbolSyncSucceededToday`）要求最新一筆 success **而且起跑於今天**；跨日完成的主檔 success 對今天的前置不成立，
+    旗標卻設成真 → 多觸發一次注定被擋的對帳、耗掉一次額度。
+  * `onDelistingNotReady`：前一天起跑的對帳隔天才結束時，「在等」登記到隔天的狀態。
+* 修正：三個工作取得所有權之後、`startRun` 之前，用重跑的時鐘記下這一輪的**起跑時刻**，傳給上面四個方法；
+  **起跑那天 ≠ 今天**時，四個方法都⛔ 不動今天的狀態——`planRerun` 回既有的 `; 自動重跑已停止（最晚起跑 HH:MM）`（起跑那天的最晚起跑時刻，
+  ⛔ 不新增 `error` 的固定文字）。起跑那天 ＝ 今天時行為不變。
+* 測試（注入的時鐘，在假的同步裡把時鐘推過午夜）：review 的案例（23:55 開始、00:05 成功 → 06:30 的暫時性失敗仍排重跑）；
+  前一天起跑、隔天失敗 → ⛔ 不排、`error` 是「已停止」、隔天的計數仍是 0；跨日完成的主檔 success → ⛔ 不觸發對帳；跨日的前置不成立 → 隔天⛔ 沒有「在等」。
+* 反向驗證：四個方法各自改回用「現在」→ 對應的測試變紅。
+
+**R2（P2）層三合併遺失第二輪的新失敗階段**
+
+* 現況：第二輪仍失敗的標的一律保留**第一輪**的原因（「十二」實作細節 4）。review 重現：第一輪配息抓取逾時；第二輪抓取與事件寫入成功、
+  還原係數重算失敗 → 紀錄只剩 `dividends_failed`，看不出事件與係數已經不同步。
+* 修正（取代實作細節 4）：重試的標的裡——
+  * 第二輪**有任何失敗**（含做到一半預算用完）→ 用第二輪的失敗（該檔的全部階段）取代第一輪的；
+  * 第二輪處理完而且⛔ 沒有失敗 → 從失敗清單移除（不變）；
+  * 第二輪**沒跑到** → 保留第一輪的失敗（不變）。
+  合併後的順序沿用第一輪清單裡該檔第一次出現的位置。`symbols_failed` 仍是標的數。
+* 測試：review 的案例（以假的 repo 讓重算失敗）→ 合併後是 `recompute` 的失敗、⛔ 沒有 `dividends`；
+  既有的 `TestCorporateActionRetryKeepsFirstFailuresWhenBudgetRunsOut` 改成：做到一半的 2330 記第二輪的失敗、沒跑到的 2454 保留第一輪（測試改名）。
+* 反向驗證：改回一律保留第一輪 → review 的案例變紅；沒跑到的也丟掉第一輪 → 預算用完的案例變紅。
+* 規格同步：「3.4」的合併那句、`data-pipeline.md`「層二、層三」的同一句、`retryTransientSymbols` 的註解。
+
+**R1 的規格同步**：「3.2」規則 1 補「一輪算哪一天看它的**起跑時刻**」；`data-pipeline.md` 的「同一天、同一個工作只有一條重跑鏈」同一句。
+
+**驗證**：`go vet ./...`；`go test -vet=off -count=1 ./...`（store 的既有時間炸彈除外）；新測試 `-count=20`；
+反向驗證在隔離 clone（`--no-hardlinks`）；`check-doc-refs.py` 問題 0；新增的行掃一次禁止標記有沒有接否定詞。之後依 `oom-mitigation.md` 跑 `RACE=1`。
+
+實作結果（2026-11-02）：
+
+* R1：`job_retry.go` 新增 `now()`（對 nil 安全）與 `startedBeforeToday()`；`planRerun`、`onSuccess`、`onStockWritten`、`onDelistingNotReady`
+  多一個參數 `started`。三個工作在取得所有權之後、`startRun` 之前記下起跑時刻（`stock_symbol_sync` 在 `onStockStart` 之前）。
+* R2：`retryTransientSymbols` 依上面的規則合併；註解同步。
+* 規格同步：「3.2」規則 1、「3.4」的合併、實作細節 4（撤回）、`data-pipeline.md` 的對應兩句。
+* 新測試 6 項（`job_retry_test.go`）：跨日成功⛔ 不壓掉隔天的重跑（review 的案例）、跨日失敗⛔ 不排也⛔ 不佔額度、跨日落盤的主檔 success ⛔ 不觸發對帳、
+  跨日的前置不成立⛔ 不在隔天登記等待、第二輪重算失敗記 `recompute`（review 的案例）；既有的預算用完測試改名並改成「做到一半的記第二輪、沒跑到的保留第一輪」。
+  測試輔助：主檔來源加 `onCall`（在一輪中途推進時鐘）、配息來源成功時可回事件、重算一律失敗的 candle stub。
+* 驗證：`go vet ./...` rc 0；`go test -vet=off -count=1 ./...` 12 個套件通過、唯一失敗仍是 store 既有的時間炸彈；相關測試 `-count=20` 全綠；
+  反向驗證 6 項（scratchpad 的 backend 複本）全部變紅：四個方法各自改回看「現在」、第二輪仍失敗改回保留第一輪、沒跑到的也丟掉第一輪。
+* ⚠️ `RACE=1` 還沒跑：依 [`oom-mitigation.md`](./oom-mitigation.md) 的 D1（使用者在 Claude 結束後執行）補跑，結果寫回這裡。
+* 附帶發現（⛔ 沒有改）：HEAD 的 `scheduler_test.go` 有一處多的空行，`go fmt` 會改它；不在本次範圍，已還原。

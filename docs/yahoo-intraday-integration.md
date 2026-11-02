@@ -219,6 +219,26 @@ FinMind 逐檔在同樣速率要 **95 分鐘**。
 
 冪等性由 `candles` 表 `UNIQUE(symbol, timeframe, ts)` 保證，重覆抓取只會 UPSERT 不會重複。
 
+### 批次失敗的同一輪重試
+
+2026-11-02 起（原記於 `issue.md` I-123～I-126；`job_retry.enabled` 開啟時才生效，**預設關閉**）。
+I-122 在 live 看到 31 輪批次失敗，多半是 DNS 逾時這類暫時性錯誤：
+
+* 批次抓取失敗、原因是暫時性（`market.IsTransient`，規則見 [`data-pipeline.md`](./architecture/data-pipeline.md)「什麼算暫時性」）
+  → 等 10 秒重試，再失敗等 20 秒再試一次（每批最多 2 次）；仍失敗才計入失敗數，接著照原本的流程評估。
+  4xx（含 429 限流）、解析錯誤⛔ 不重試。
+* **整輪的重試預算 120 秒**：每一輪開始時建一個「開始時刻 ＋ 120 秒」到期的重試 context，重試的等待、Yahoo 節流器的等待、
+  HTTP 請求與寫 K 棒**都用它**，到期就中止（不論有幾批）。每一批的**第一次**抓取⛔ 不受它限制。
+* **重試成功**要同時滿足：`FetchAndStoreIntradayBatch` 回傳 `nil`，**而且**返回時重試 context 還沒到期——
+  它遇到逐檔寫入失敗只記 log、最後仍回 `nil`，只看回傳值會把「HTTP 成功、寫入途中預算到期」誤當成成功。
+  其他原因的逐檔寫入失敗仍給不出逐檔資訊（`issue.md` I-103 的範圍）。
+* ⚠️ ⛔ 不保證兩輪⛔ 不重疊：批次多、第一次抓取、評估與結束寫入都還要時間（與導入前相同），重試只讓一輪最多晚約 120 秒結束重試的部分。
+
+**某一輪失敗時缺的棒，下一輪成功時就補回來**（回答 I-122「缺的 K 棒會不會補回」）：批次端點一次回傳**當日全部**的 1 分 K，
+寫入是 `ON CONFLICT … DO UPDATE`，還在走的那一根也會被下一輪覆蓋。由 `market/intraday_refill_test.go` 走正式的抓取流程
+（Yahoo client → `FetchAndStoreIntradayBatch` → SQLite）驗證。⚠️ **13:30 是最後一輪**，那一輪失敗就沒有下一輪可以補
+（日 K 由 15:00 的 `daily_close` 另外抓，不受影響）。
+
 **已擱置的後續工作**：批次請求失敗（Yahoo 被限流/封鎖）時的 Yahoo→FinMind fallback
-目前未實作，`runIntradayBatch` 只記 log 續跑其他批次。這筆與 Fugle→FinMind fallback
+目前未實作，`runIntradayBatch` 在上面的重試之後只記 log 續跑其他批次。這筆與 Fugle→FinMind fallback
 一併擱置（見 [todo.md](./todo.md) T-031、T-008）；盤中源相關工作暫不列入近期處理。

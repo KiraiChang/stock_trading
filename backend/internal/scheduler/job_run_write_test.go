@@ -223,7 +223,7 @@ func TestStockSymbolSyncWholeFailureIsFailed(t *testing.T) {
 		s := newWatchlistFailScheduler(jobRuns)
 		s.stockSyncer = market.NewStockSymbolSyncer(failingSymbolSource{}, nil, zap.NewNop())
 
-		s.runStockSymbolSync(context.Background())
+		s.runStockSymbolSync(context.Background(), triggerCron)
 
 		got := jobRuns.snapshotFinished()
 		if len(got) != 1 {
@@ -240,7 +240,7 @@ func TestStockSymbolSyncWholeFailureIsFailed(t *testing.T) {
 		jobRuns := &schedulerJobRunRepoStub{}
 		s := newWatchlistFailScheduler(jobRuns)
 
-		s.runStockSymbolSync(context.Background())
+		s.runStockSymbolSync(context.Background(), triggerCron)
 
 		got := jobRuns.snapshotFinished()
 		if len(got) != 1 || got[0].status != "failed" || got[0].symbolsTotal != 0 || got[0].symbolsFailed != 0 {

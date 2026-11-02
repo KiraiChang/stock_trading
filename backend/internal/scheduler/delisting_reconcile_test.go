@@ -311,7 +311,7 @@ func TestDelistingReconcileWritesFailedWithCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	s.runDelistingReconcileOwned(ctx, false)
+	s.runDelistingReconcileOwned(ctx, false, triggerCron)
 
 	_, finished := jobRuns.snapshot()
 	if len(finished) != 1 || finished[0].status != "failed" {

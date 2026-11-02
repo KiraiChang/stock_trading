@@ -32,8 +32,14 @@ func (h *SchedulerHandler) RunDailyClose(c *gin.Context) {
 
 // POST /api/v1/scheduler/stock-symbol-sync/run
 // 手動重跑 TWSE ISIN 股票主檔同步，與每日 stock_symbol_sync cron 共用同一份邏輯。
+//
+// **同步取得所有權**（I-123～I-126 計畫書 D5）：cron、手動與自動重跑共用一個執行所有權，
+// 已有一輪在跑時回 409——兩輪並行時較舊的快照可能較晚寫入（與對帳的 single-flight 同一個理由）。
 func (h *SchedulerHandler) RunStockSymbolSync(c *gin.Context) {
-	go h.sched.RunStockSymbolSync()
+	if !h.sched.TryStartStockSymbolSync() {
+		c.JSON(http.StatusConflict, gin.H{"error": "stock symbol sync already running"})
+		return
+	}
 	c.JSON(http.StatusAccepted, gin.H{"message": "stock_symbol_sync 已在背景重新觸發"})
 }
 
@@ -50,8 +56,13 @@ func (h *SchedulerHandler) RunSREvaluation(c *gin.Context) {
 // **部署後的驗證需要它**：cron 是平日 06:30，若部署發生在那之後，
 // 沒有這個入口就得等到隔天才驗得了還原是否正確（見 scripts/verify-adjustment.sh）。
 // 重算是冪等的，重複觸發不會累積誤差。
+//
+// **同步取得所有權**（同 RunStockSymbolSync）：已有一輪在跑時回 409。
 func (h *SchedulerHandler) RunCorporateActionSync(c *gin.Context) {
-	go h.sched.RunCorporateActionSync()
+	if !h.sched.TryStartCorporateActionSync() {
+		c.JSON(http.StatusConflict, gin.H{"error": "corporate action sync already running"})
+		return
+	}
 	c.JSON(http.StatusAccepted, gin.H{"message": "corporate_action_sync 已在背景重新觸發"})
 }
 

@@ -25,6 +25,23 @@ type Config struct {
 	CorporateAction    CorporateActionConfig    `mapstructure:"corporate_action"`
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 	Delisting          DelistingConfig          `mapstructure:"delisting"`
+	JobRetry           JobRetryConfig           `mapstructure:"job_retry"`
+}
+
+// JobRetryConfig 是暫時性失敗的自動重跑（I-123～I-126 計畫書 docs/plans/i123-i126-job-retry.md「3.7」）。
+//
+// ⚠️ **只控制層一～三**（每日工作的整輪重跑、intraday 的批次重試、公司行動失敗標的的第二輪）；
+// 結束寫入的重試與 I-126 的狀態修正是缺陷修正，⛔ 不受這個開關控制。
+type JobRetryConfig struct {
+	// Enabled 預設關閉；回滾只要改環境變數 JOB_RETRY_ENABLED。
+	Enabled bool `mapstructure:"enabled"`
+	// IntervalMin 是整輪失敗之後隔幾分鐘重跑，≤ 0 時退回 10。
+	IntervalMin int `mapstructure:"interval_min"`
+	// MaxReruns 是每個工作每天最多重跑幾次（對帳的連帶觸發也算），≤ 0 時退回 3。
+	MaxReruns int `mapstructure:"max_reruns"`
+	// Cutoff 是重跑**整輪**（含紀錄寫入）的截止時刻（台北，HH:MM），預設 08:45——
+	// ⛔ 不壓到 08:50 的盤前。最晚起跑 ＝ 截止 − 業務預算 − 3 分鐘。格式錯誤時退回預設並記 Error。
+	Cutoff string `mapstructure:"cutoff"`
 }
 
 type PositionAnalysisConfig struct {
@@ -416,6 +433,11 @@ func Load() (*Config, error) {
 	viper.SetDefault("delisting.url", "https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv")
 	viper.SetDefault("delisting.cron", "0 7 * * *")
 	viper.SetDefault("delisting.timeout_sec", 0)
+	// 自動重跑（I-123～I-126）。**預設關閉**；四個鍵都要 SetDefault，AutomaticEnv 才讀得到環境變數。
+	viper.SetDefault("job_retry.enabled", false)
+	viper.SetDefault("job_retry.interval_min", 10)
+	viper.SetDefault("job_retry.max_reruns", 3)
+	viper.SetDefault("job_retry.cutoff", "08:45")
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viper.AutomaticEnv()

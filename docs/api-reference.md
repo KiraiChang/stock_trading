@@ -965,6 +965,25 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 `TestSRAnalysisSucceedsWhenWatchlistEmpty` 兩條對照組釘住這個分界；變異測試實測：
 把判定改成「`total=0` 一律 `failed`」時**恰好只有那兩條 fail**。
 
+#### 自動重跑：`error` 結尾的固定文字
+
+2026-11-02 起（原記於 `issue.md` I-123～I-126；開關 `job_retry.enabled`，**預設關閉**；規則見
+[`data-pipeline.md`](./architecture/data-pipeline.md)「失敗後的自動重跑」）：`stock_symbol_sync`、`corporate_action_sync`
+（只限整輪早退）、`delisting_reconcile` 因暫時性錯誤整輪 `failed` 時，會隔一段時間自動重跑。
+每次重跑都是**新的一筆** `job_runs`（⛔ 不改寫前一筆）；失敗的那一筆在 `error` 結尾附固定的安全文字（`m` 是 `job_retry.max_reruns`，預設 3）：
+
+| `error` 的結尾 | 意思 |
+|---|---|
+| `; 自動重跑 n/m（HH:MM）` | 已排第 n 次重跑，台北 HH:MM 起跑 |
+| `; 自動重跑已用完（m/m）` | 今天的額度用完，⛔ 不再排 |
+| `; 自動重跑已停止（最晚起跑 HH:MM）` | 重跑時刻會晚於這個工作的最晚起跑時刻（整輪要在盤前的截止時刻之前結束），⛔ 不排 |
+
+所以等待期間本端點看得到「`failed`、幾點重跑」，重跑成功後最新一筆變成 `success`；同一天同一個工作最多多 `m` 筆
+（每個 job 取最新一筆，⛔ 不受影響）。⚠️ 結尾**沒有**這段文字的 `failed` 代表⛔ 不會自動重跑：原因不是暫時性
+（4xx、解析錯誤、縮水防護）、是那一輪自己的預算用完、是手動觸發的，或當天已經成功過。
+對帳的前置不成立（`delisting_reconcile:stock_symbol_sync_not_ready`）也⛔ 不附文字——它⛔ 不排自己的重跑，
+而是等主檔成功落盤後連帶觸發一次。重跑鏈只在記憶體裡：寫著幾點重跑、卻在那之前重啟過 backend 的，那次重跑⛔ 不會發生。
+
 #### 逾時的 job 不會卡在 `running`
 
 `finishRun` **不沿用 job 自己的 ctx**，而是用 `context.WithoutCancel` 切斷取消訊號、
@@ -998,11 +1017,20 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 整輪失敗時 `job_runs` 記 **`failed`、`0/0`**（2026-10-30 起；原本寫 `0/1` 而被推導成 `partial`，原記於 `issue.md` I-126）——
 ⚠️ `0/0` 只表示沒有回報計數，⛔ 不代表已證實沒有處理任何資料。
 此端點會立即回應，實際同步在背景執行；進度與結果可透過 `GET /scheduler/status`
-查看 `stock_symbol_sync` 這個 job。
+查看 `stock_symbol_sync` 這個 job。手動觸發的失敗⛔ 不排自動重跑（「自動重跑：`error` 結尾的固定文字」）。
+
+**所有權是同步取得的**（2026-11-02 起，原記於 `issue.md` I-123～I-126）：cron、手動與自動重跑共用一個執行所有權，
+已有一輪在跑時回 409——兩輪並行時較舊的快照可能較晚寫入（與 `delisting-reconcile` 的 single-flight 同一個理由）。
+被擋掉的請求與 cron 輪次都**不寫 `job_runs`**（理由同 `delisting-reconcile`）。
 
 **Response（202 Accepted）：**
 ```json
 { "message": "stock_symbol_sync 已在背景重新觸發" }
+```
+
+**Response（409 Conflict）**——cron、自動重跑或另一次手動觸發仍在執行：
+```json
+{ "error": "stock symbol sync already running" }
 ```
 
 ### POST `/scheduler/corporate-action-sync/run`
@@ -1027,6 +1055,13 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 不會多涵蓋任何標的——同一天算出來的片號一樣。要臨時全量補跑，把
 `corporate_action.shard_count` 設成 1 再觸發。分片規則見
 [`architecture.md`](./architecture.md)「公司行動同步是唯一『watchlist 優先、其餘輪替』的排程」。
+
+**所有權是同步取得的**（同 `stock-symbol-sync`，2026-11-02 起）：已有一輪在跑時回 409，被擋掉的請求⛔ 不寫 `job_runs`。
+
+**Response（409 Conflict）**：
+```json
+{ "error": "corporate action sync already running" }
+```
 
 **Response（202 Accepted）：**
 ```json

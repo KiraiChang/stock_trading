@@ -229,6 +229,9 @@ type SyncFailure struct {
 	// Stage 是封閉值域：dividends／capital_reductions／upsert／recompute／deadline。
 	Stage  string
 	Reason joberr.Reason
+	// Transient：失敗的當下原因是暫時性（IsTransient），而且⛔ 不是整輪預算用完。
+	// ⛔ 不寫進 job_runs，只供公司行動同步的第二輪決定要不要重試（I-123～I-126 計畫書「3.4」）。
+	Transient bool
 }
 
 // 逐檔同步的失敗階段（寫進 job_runs.error 的 stage token，⛔ 不要自由字串）。
@@ -323,6 +326,9 @@ func (a *Adjuster) SyncPerSymbolEvents(
 				seenFailure[key] = struct{}{}
 				failures = append(failures, SyncFailure{
 					Symbol: symbol, Stage: stage, Reason: joberr.Classify(cause),
+					// ctx 到期之後的失敗一律⛔ 不算暫時性：http client 被取消時回的 url.Error
+					// 也帶 Timeout()，只看錯誤會把「預算用完」誤當成值得重試。
+					Transient: ctx.Err() == nil && IsTransient(cause),
 				})
 			}
 			symbolFailed = true

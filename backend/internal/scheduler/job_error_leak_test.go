@@ -77,7 +77,7 @@ func TestJobEarlyReturnsDoNotLeakCause(t *testing.T) {
 			s.stockSyncer = market.NewStockSymbolSyncer(
 				failingSymbolSource{}, nil, zap.NewNop())
 			return s
-		}, func(s *Scheduler) { s.runStockSymbolSync(context.Background()) }},
+		}, func(s *Scheduler) { s.runStockSymbolSync(context.Background(), triggerCron) }},
 	}
 
 	for _, tt := range tests {

@@ -59,7 +59,12 @@ func (s *Scheduler) acquireDelistingReconcile() bool {
 	return s.delistingRunning.CompareAndSwap(false, true)
 }
 
-func (s *Scheduler) releaseDelistingReconcile() { s.delistingRunning.Store(false) }
+// releaseDelistingReconcile 釋放所有權，再讓重跑鏈排上計時器、補觸發「待觸發」的連帶重跑
+// （所有權釋放後補觸發，I-123～I-126 計畫書「3.2」規則 4）。順序⛔ 不能反：兩者都要取得所有權。
+func (s *Scheduler) releaseDelistingReconcile() {
+	s.delistingRunning.Store(false)
+	s.retry.afterRelease(delistingReconcileJobName)
+}
 
 // RunDelistingReconcile 是 **cron 的入口**：自己取得所有權、自己釋放。
 //
@@ -79,7 +84,7 @@ func (s *Scheduler) RunDelistingReconcile() {
 		return
 	}
 	defer s.releaseDelistingReconcile()
-	s.runDelistingReconcileOwned(context.Background(), false)
+	s.runDelistingReconcileOwned(context.Background(), false, triggerCron)
 }
 
 // TryStartDelistingReconcile 是 **API 手動觸發的入口**：同步取得所有權，成功才把工作丟到背景。
@@ -96,20 +101,28 @@ func (s *Scheduler) TryStartDelistingReconcile(acceptShrink bool) bool {
 	}
 	go func() {
 		defer s.releaseDelistingReconcile()
-		s.runDelistingReconcileOwned(context.Background(), acceptShrink)
+		s.runDelistingReconcileOwned(context.Background(), acceptShrink, triggerManual)
 	}()
 	return true
+}
+
+// runDelistingReconcileAndRelease 是自動重跑與連帶觸發的入口：呼叫者已持有所有權，跑完由這裡釋放。
+// ⛔ 不收 acceptShrink（比照 cron：自動發起的那幾輪結構上拿不到 override）。
+func (s *Scheduler) runDelistingReconcileAndRelease(trigger runTrigger) {
+	defer s.releaseDelistingReconcile()
+	s.runDelistingReconcileOwned(context.Background(), false, trigger)
 }
 
 // runDelistingReconcileOwned 是核心：⛔ **不再取鎖**，鎖由入口的 defer 負責。
 //
 // ⚠️ **早退路徑也不得自行釋放鎖**——抓取失敗、解析失敗、縮水防護、依賴不成立
 // 都在這裡 return，全部靠入口的 defer。
-func (s *Scheduler) runDelistingReconcileOwned(ctx context.Context, acceptShrink bool) {
+func (s *Scheduler) runDelistingReconcileOwned(ctx context.Context, acceptShrink bool, trigger runTrigger) {
 	if s.delistingReconciler == nil {
 		return
 	}
 
+	started := s.retry.now() // 起跑時刻（自動重跑判斷這一輪算哪一天）
 	runID := s.startRun(ctx, delistingReconcileJobName)
 	// ⛔ **startRun 失敗（runID = 0）時必須中止。**
 	// 那代表這一輪**沒有任何 audit record**——繼續做下去會寫入一整輪資料，
@@ -132,10 +145,20 @@ func (s *Scheduler) runDelistingReconcileOwned(ctx context.Context, acceptShrink
 		// 而那兩個欄位的單位是**標的數**。⛔ 不得用假的 1/1 去湊。
 		s.log.Error("delisting reconcile failed",
 			zap.Bool("accept_shrink", acceptShrink), zap.Error(err))
+		var note string
+		if errors.Is(err, market.ErrStockSymbolSyncNotReady) {
+			// 前置不成立⛔ 不是暫時性、⛔ 不排自己的計時器：登記等主檔，主檔成功落盤後連帶觸發。
+			s.retry.onDelistingNotReady(trigger, started)
+		} else {
+			note = s.retry.planRerun(delistingReconcileJobName, trigger,
+				runCtx.Err() == nil && market.IsTransient(err), started)
+		}
 		s.finishRunStatus(ctx, runID, delistingReconcileJobName, "failed",
-			out.DistinctSymbols, 0, delistingFailureSummary(err))
+			out.DistinctSymbols, 0, delistingFailureSummary(err)+note)
 		return
 	}
+	// partial（有降級）也算今天成功：整輪有跑完，重跑救不了降級的項目。
+	s.retry.onSuccess(delistingReconcileJobName, started)
 
 	// 完整計數只進結構化 log——job_runs 沒有自由欄位。
 	s.log.Info("delisting reconcile completed",

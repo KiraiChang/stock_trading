@@ -148,6 +148,45 @@ func TestFinMind5xxStaysTransientAfterRetries(t *testing.T) {
 	}
 }
 
+// deadlineDividendSource 等到 ctx 結束，再回 http client 被取消時的錯誤（url.Error 包住 ctx 的錯誤，帶 Timeout()）。
+type deadlineDividendSource struct{}
+
+func (deadlineDividendSource) FetchDividends(ctx context.Context, _ string) ([]store.CorporateAction, error) {
+	<-ctx.Done()
+	return nil, &url.Error{Op: "Get", URL: "https://tw.stock.yahoo.com/x", Err: ctx.Err()}
+}
+
+type transientDividendSource struct{}
+
+func (transientDividendSource) FetchDividends(context.Context, string) ([]store.CorporateAction, error) {
+	return nil, dialErr(&net.DNSError{Err: "i/o timeout", Name: "tw.stock.yahoo.com", IsTimeout: true})
+}
+
+// SyncFailure.Transient：失敗的當下整輪預算已用完，就⛔ 不算暫時性——http client 被取消時回的 url.Error
+// 也帶 Timeout()，只看錯誤會讓公司行動的第二輪去重試「其實是預算用完」的標的。對照組：預算內的 DNS 逾時算暫時性。
+func TestSyncFailureTransientExcludesOwnDeadline(t *testing.T) {
+	a := NewAdjuster(nil, nil, nil, zap.NewNop())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	a.SetDividendSource(deadlineDividendSource{})
+	_, _, failures, _ := a.SyncPerSymbolEvents(ctx, []string{"2330"})
+	if len(failures) == 0 {
+		t.Fatal("應記下 2330 的失敗")
+	}
+	for _, f := range failures {
+		if f.Transient {
+			t.Fatalf("預算用完之後的失敗⛔ 不算暫時性，得到 %+v", f)
+		}
+	}
+
+	a.SetDividendSource(transientDividendSource{})
+	_, _, failures, _ = a.SyncPerSymbolEvents(context.Background(), []string{"2330"})
+	if len(failures) != 1 || !failures[0].Transient {
+		t.Fatalf("預算內的 DNS 逾時應算暫時性，得到 %+v", failures)
+	}
+}
+
 func assertStatusErr(t *testing.T, err error, want string, code int) {
 	t.Helper()
 	if err == nil || err.Error() != want {

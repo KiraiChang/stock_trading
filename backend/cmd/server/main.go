@@ -264,6 +264,10 @@ func main() {
 		cfg.Delisting,
 	)
 
+	// 暫時性失敗的自動重跑（I-123～I-126 計畫書）。同樣要在 Start() 之前：Start() 會記一行設定與
+	// 最晚起跑時刻，供部署後確認開關真的進了容器。預設關閉，由 JOB_RETRY_ENABLED 開。
+	sched.SetJobRetry(cfg.JobRetry)
+
 	// 回收上一個 process 留下的孤兒執行紀錄。語意與「為什麼不在 shutdown 收尾」見
 	// docs/api-reference.md 的「`running` 不套 stale 門檻，孤兒紀錄由啟動時回收」。
 	//

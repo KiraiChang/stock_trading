@@ -133,6 +133,13 @@ services:
       DELISTING_URL: ${DELISTING_URL:-https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv}
       DELISTING_CRON: ${DELISTING_CRON:-0 7 * * *}
       DELISTING_TIMEOUT_SEC: ${DELISTING_TIMEOUT_SEC:-0}
+      # 暫時性失敗的自動重跑（I-123～I-126）。**預設關閉**。dev 驗收時開啟，並把截止時刻調晚
+      # （例如 JOB_RETRY_CUTOFF=23:30），任何時段都驗得到、⛔ 不受 08:45 的預設擋住；
+      # 只為驗收用的設定放在 scratchpad 的 override 檔，⛔ 不進 repo。
+      JOB_RETRY_ENABLED: ${JOB_RETRY_ENABLED:-false}
+      JOB_RETRY_INTERVAL_MIN: ${JOB_RETRY_INTERVAL_MIN:-10}
+      JOB_RETRY_MAX_RERUNS: ${JOB_RETRY_MAX_RERUNS:-3}
+      JOB_RETRY_CUTOFF: ${JOB_RETRY_CUTOFF:-08:45}
       # 留白（預設）時 main.go 會把 gin 設成 release。要看啟動時的路由表就設 debug：
       #   GIN_MODE=debug scripts/smoke-dev.sh
       # debug 模式會多印 76 行 [GIN-debug]，且 panic 時 recovery 會連整包 request header

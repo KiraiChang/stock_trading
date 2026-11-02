@@ -43,7 +43,7 @@
 5. **套件**：照 I-123～I-126 計畫書「八」，先跑 `./internal/scheduler/...`；`./internal/api/handler/`（409 的所有權測試）另跑一次。
    一次只跑一個套件（race 的 compile 結果會留在 repo 外的 `GOCACHE`，第二次會便宜很多）。
 6. **detector 真的有效**（D3）：`development-workflow.md`「Race detector」要求先在有 race 的版本確認會報 `WARNING: DATA RACE`。
-   做法：在 backend 的複本裡故意做出一個 race（實際的改法見「十」：單純拿掉一把鎖多半抓不到），跑同一個指令，確認報出 race；之後才跑正式版。多一次 race 執行。
+   做法：在 backend 的複本裡故意做出一個 race（實際的改法見「十」：單純拿掉一把鎖多半抓不到，只把寫入移到鎖外也不夠），跑同一個指令，確認報出 race；之後才跑正式版。多一次 race 執行。
 
 ### B. dev 驗收流程（G2）
 
@@ -166,9 +166,24 @@
   本機有 `golang:1.25`，任一不成立就中止。三步依序跑：① detector 有效性確認（在複本裡做出一個 race）；② `./internal/scheduler/...`；
   ③ `./internal/api/handler/`。每步的 rc 與 `DATA RACE`／`FAIL`／`signal: killed` 的筆數寫進同目錄的 `summary.txt`。
 * **D3 的做法與一個發現**：重跑相關的既有測試幾乎都用 channel、atomic 或 WaitGroup 把 goroutine 串起來，**單純拿掉一把鎖多半⛔ 不會被 race detector 抓到**
-  （存取之間已經有 happens-before）。真正會同時存取的是連帶觸發 `spawn` 出來的那一輪對帳，所以改壞的方式是：在 `tryTriggerDelisting` 把
-  「記下用掉的代號」移到解鎖、`spawn` 之後才寫；測試 (v)（`TestDelistingLinkUsesEachStockSuccessOnce`）的那一輪會在鎖內讀它。
-  改壞的程式在一般模式下編得過（已驗）。⚠️ 這代表正式版的 race 綠燈主要涵蓋連帶觸發這條路徑，⛔ 不等於所有交錯都驗過。
+  （存取之間已經有 happens-before）。初版的改壞方式是：在 `tryTriggerDelisting` 把「記下用掉的代號」（`usedGen`）移到解鎖、`spawn` 之後才寫，
+  期望測試 (v)（`TestDelistingLinkUsesEachStockSuccessOnce`）spawn 出來的那一輪對帳在鎖內讀它時報 race。
+* **第一次執行（2026-11-02 14:12～14:16，⚠️ 不在 D2 時段）**：記憶體沒問題（MemAvailable 約 930 MB、killed=0、中止=0）。
+  ① 有效性確認 DATA RACE=0、rc=0、測試 PASS；② ③ rc=0、全 0。**① 不成立，② ③ 照 D3 ⛔ 不能採計。** log 保存在同目錄的 `run1-1412/`。
+  * 讀碼確認 `-race` 有生效（log 印的是 `go test -race`、debian image、`CGO_ENABLED=1`、掛載的是複本），複本的修改也有套上。
+  * 原因（讀碼推論）：race detector 只看這次實際執行裡兩次存取之間有沒有 happens-before。父 goroutine 在鎖外寫完之後，還會經過
+    `releaseStockSymbolSync` 的 atomic store 與 `afterRelease` 的 `r.mu` 上鎖／解鎖；子 goroutine 讀 `usedGen` 的地方全都在 `r.mu` 內，
+    所以寫 → 解鎖 → 上鎖 → 讀有先後關係，⛔ 不算 race。`GOMAXPROCS=1` 也讓子 goroutine 幾乎一定等父 goroutine 卡在 `h.wg.Wait()` 才跑；
+    測試 PASS 也吻合這個順序（讀的時候已經寫好）。初版「真正會同時存取的是 spawn 出來的那一輪」這個前提⛔ 不成立。
+* **改壞方式的修正（2026-11-02）**：保留鎖外的寫入，另外讓 spawn 出來的 closure **一開頭、還沒碰任何鎖**就在鎖外讀 `usedGen`
+  （讀到的值拿去做條件判斷，避免被編譯器省掉）。兩次存取之間只有 `go` 這個起點，⛔ 沒有其他同步，不論誰先跑都會報 race。
+  規則：**改壞的方式要讓兩次存取之間⛔ 沒有任何同步（鎖、atomic、channel、WaitGroup）**；只把寫入移到鎖外，後面還經過同一把鎖就抓不到。
+  驗證：`bash -n` 通過；隔離複本套用後與 repo 只差預期的兩處；一般模式下編得過、測試 (v) PASS。⚠️ 那次 rc=1，原因是 Claude 在跑、
+  mem-guard 把上限下修到 550m，`go test` 內建 vet 跑 `modernc.org/sqlite/lib` 時被砍；之前的 `go vet` 有通過（腳本 `set -e`，測試能跑代表它結束碼是 0）。
+  `RACE=1` 的效果要等使用者在 D2 時段重跑才知道；① 若仍是 0，就停下來重查，⛔ 不採計 ② ③。
+* **涵蓋範圍的修正**：連帶觸發這條路徑在既有測試裡同樣有 happens-before，初版的改壞方式在這些測試下就抓不到。所以正式版的 race 綠燈只代表
+  「這些測試實際產生的交錯裡沒有 race」，⛔ 不代表連帶觸發的路徑已經驗過，也⛔ 不等於所有交錯都驗過。
+  「八」歸檔到 `development-workflow.md`「Race detector」時，要補上上面那條改壞方式的規則。
 * **A3 已完成**（使用者同意後，2026-11-02）：`golang:1.25`（linux/amd64，image id `sha256:9bae33b0…`，約 848 MB）；磁碟剩 7.2 GB。
 
 ## 九、修訂紀錄

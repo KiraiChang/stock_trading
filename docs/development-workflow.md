@@ -2462,7 +2462,7 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 - **dev stack 只在驗收時開，驗完就 `down`**（⛔ 不帶 `-v`）。dev 常駐約 145 MiB，跑測試、build 或 `RACE=1`
   時這些都是會被搶走的量。
 
-**`mem_limit` 做得到與做不到的事**（2026-11-02 T-078 的結論）：它是單一 container 的**硬上限**，
+**`mem_limit` 做得到與做不到的事**（2026-11-02 T-078 的結論；T-078 已收斂）：它是單一 container 的**硬上限**，
 用量撞到它時由那個 container 的 cgroup 處理（在 container 裡挑行程砍），所以確實能限制單一 container、
 **降低**整機 OOM 的風險（[Docker 官方說明](https://docs.docker.com/engine/containers/resource_constraints/)）。
 但它⛔ 不保證整機的總量夠用（上面那次就是大家都還沒撞到自己的上限、整機先見底），也⛔ 不涵蓋
@@ -2504,6 +2504,10 @@ host 記憶體真的見底時，OOM killer 挑 `oom_score` 最高的行程。Cla
 只記錄、由使用者決定的事：`RACE=1` 那段時間要不要暫停其他常駐程序（fin-api、codex，都是使用者的其他工作）；
 長期容量的選項——升級主機的 RAM、把 dev／測試搬到別台、或用 GitHub Actions 跑 race（runner 記憶體充足，
 但要 push 到 GitHub、新增 workflow，屬於對外的動作）。
+
+⛔ 不在這台改 kernel 參數、⛔ 不加 swap：host 是 OpenVZ／Virtuozzo 容器（ploop 磁碟、kernel 4.19），
+swap 512 MB 是虛擬的（`/proc/swaps` 顯示 `/dev/null`），`overcommit_memory=1`、`swappiness=10`。
+推測容器裡改不了這些——2026-11-02 盤點時⛔ 沒有實測，也⛔ 沒有去試。
 
 ### frontend 三步的記憶體實測（2026-08-06）
 
@@ -2660,7 +2664,7 @@ dev image build（Dockerfile 的 node stage `npm ci` ＋ Go 編譯）期間 Clau
 
 #### 交給使用者執行的腳本怎麼寫
 
-2026-11-02 的 `RACE=1` 補跑與 smoke 實跑（T-078）都是 Claude 寫好腳本、使用者在 Claude 結束後執行；
+2026-11-02 的 `RACE=1` 補跑與 smoke 實跑（T-078，已收斂）都是 Claude 寫好腳本、使用者在 Claude 結束後執行；
 交接腳本經多輪 review 累積出下面的規則：
 
 * 放在 repo 外的日期目錄（例如 `~/.cache/stock_trading/smoke-logs/<日期>/`），使用者只執行一行；各步的輸出、
@@ -2703,7 +2707,7 @@ scripts/smoke-dev.sh
 build 是**一次一個**（`compose build backend` 之後才 `compose build python-server`）：compose 預設會並行
 build，兩個 image 的峰值會疊在一起。
 
-只改環境變數、只要部分服務、或要疊驗收用的設定時（2026-11-02 T-078 加入）：
+只改環境變數、只要部分服務、或要疊驗收用的設定時（2026-11-02 由 T-078 加入，已收斂）：
 
 | 變數 | 作用 |
 |---|---|
@@ -2737,6 +2741,9 @@ NO_BUILD=1 SERVICES=backend OVERRIDE=/path/to/override.yml scripts/smoke-dev.sh
   `go build ./cmd/server`（181 秒）；`npm ci`、`go mod download` 與 python 的 `pip install` 都命中 cache，
   python-server 1 秒就 build 完，所以「並行 build 時兩個峰值會不會疊加」**還沒量到**。python 的依賴改變
   （`pip install` ⛔ 不命中 cache）時再量一次：build 期間每 2 秒記一次 MemAvailable，對照兩個 build 的起訖。
+* **Dockerfile 的前端 stage ⛔ 不改用 repo 裡的 dist**（省掉 build 時的 `npm ci`；2026-11-02 決定不做）：
+  那會改到 live 的 image 建置，屬於另一件高影響異動；而且上面的實測低點落在 `go build`，前端的 `npm run build`
+  那 16 秒的低點是 592 MB，⛔ 不是瓶頸。
 
 可用環境變數覆寫等待時間、log 行數或 health URL：
 

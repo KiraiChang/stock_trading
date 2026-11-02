@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v5：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案；A3、A4、A1／A6（`RACE=1` 補跑通過）已完成；B1～B4 已實作、程式 review 通過（2026-11-02），⚠️ 待實跑驗收（`~/.cache/stock_trading/smoke-logs/20261102/run-smoke.sh`）；「二 D」1（OOM 的犧牲順序）已實作、⚠️ 待 review 與實跑驗收（同一支腳本）；文件歸檔待做） |
+| 狀態 | 進行中（計畫 v5：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案；A3、A4、A1／A6（`RACE=1` 補跑通過）、B1～B4、「二 D」1（OOM 的犧牲順序）✅ 已完成（實跑 2026-11-02 通過）；⚠️ 文件歸檔待做） |
 
 ### T-076：`pre_market`、`intraday`、`daily_close` 的排程時間改成可設定（live 由 compose 與 `deploy.sh` 帶入）
 

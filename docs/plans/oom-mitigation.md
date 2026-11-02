@@ -172,7 +172,7 @@
 2. I-123～I-126 階段 B 的 review 修正先做（另一份計畫：[`i123-i126-job-retry.md`](./i123-i126-job-retry.md)「十二」）——race 要跑在修正後的程式上。
 3. A3：拉 debian image（先問使用者）；A4：race 的前置檢查。
 4. A1／A6：Claude 寫好暫存腳本、交給使用者在 D2 的時段執行（先 D3 的有效性確認，再正式版）；新 session 讀 log、寫回結果。（✅ 2026-11-02：第二次執行通過，見「十」）
-5. B1～B4、「二 D」1：腳本與 dev compose 的修改 → 驗證（「六」）。
+5. B1～B4、「二 D」1：腳本與 dev compose 的修改 → 驗證（「六」）。（✅ 2026-11-02：實跑通過，見「十」）
 6. 文件（B5、C、D）→ review → 使用者 commit。
 
 ## 八、完成後的歸檔位置
@@ -230,7 +230,7 @@
   * 涵蓋範圍照上面「涵蓋範圍的修正」：② ③ 的綠燈只代表這些測試實際產生的交錯裡沒有 race，⛔ 不等於所有交錯都驗過。
   * 結果已寫回 [`i123-i126-job-retry.md`](./i123-i126-job-retry.md)「十二」。log 在 repo 外的 `~/.cache/stock_trading/race-logs/20261102/`
     （`summary.txt`、三步各一份 log、① 用的複本 `detector-copy/`、第一次執行的 `run1-1412/`），保存到本計畫與 I-123～I-126 階段 B 的 review 完成。
-* **B1～B4 已實作、✅ 程式 review 通過**（2026-11-02，`scripts/smoke-dev.sh`，依「二 B」1～4 與 6；review 含下面交接腳本的修正；⚠️ 待實跑驗收）：
+* **B1～B4 已實作、✅ 程式 review 通過**（2026-11-02，`scripts/smoke-dev.sh`，依「二 B」1～4 與 6；review 含下面交接腳本的修正；✅ 實跑通過（2026-11-02，見下方「實跑」））：
   * 依序 build，只 build 選了的服務；`NO_BUILD` 跳過 down 與 build，`up` 加 `--no-build`；`SERVICES` 只選一個時先用 `--wait` 等依賴 healthy，再用 `--no-deps` 起它，
     健康檢查與診斷只看選了的服務，只選 backend 時印提醒；`OVERRIDE` 的相對路徑以呼叫時的目錄解析，檔案不存在就中止。檔頭的 usage 補上新變數，既有變數的行為不變。
   * 輕量驗證（⛔ 沒有碰真的 docker）：`bash -n` 通過（這台 host ⛔ 沒有 shellcheck）。PATH 前面放假的 `docker`、`curl`，記下每次呼叫的參數，20 個情境全部符合預期——
@@ -253,12 +253,12 @@
     新版所有 compose 呼叫都帶 dev compose，也都看不到 `COMPOSE_PROJECT_NAME`；`DOCKER_HOST`、`DOCKER_CONTEXT`、project 名稱不符、`config` 失敗、
     執行前 `ps` 或 `inspect` 失敗 → 中止、⛔ 沒有 down；執行後查詢失敗 → 標「查詢失敗」、rc 1；正常路徑 rc 0，環境變數只數那一個鍵、⛔ 沒有寫進任何輸出檔。
     對照組：review 時的版本在同樣設定下重現了兩項（down 帶著 `COMPOSE_PROJECT_NAME`、`smoke-dev.sh` 的 `-f` 指向別份檔；「0 個」「前後相同＝是」、rc 0）。
-  * ⚠️ **實跑尚未執行**（「六」的依序 build 低點與部分服務模式 ①～④）：腳本在 repo 外的 `~/.cache/stock_trading/smoke-logs/20261102/run-smoke.sh`，
+  * **實跑**（「六」的依序 build 低點與部分服務模式 ①～④；✅ 2026-11-02 執行，結果見下方「實跑」）：腳本在 repo 外的 `~/.cache/stock_trading/smoke-logs/20261102/run-smoke.sh`，
     由使用者在 Claude 結束後執行（C1），建議平日 17:05～22:00。四步：
     S1 預設（涵蓋 ④；每 2 秒記 MemAvailable，對照兩個 build 的起訖找低點，記 `CACHED` 行數——cache 熱的低點⛔ 不能代表冷 build）；
     S2 情境 ①；S3 情境 ② 加 `OVERRIDE`（只設 `LOG_RETENTION_DAYS=13`，驗 postgres、redis ⛔ 沒有重啟、只重建 backend、值有進 container，只數那一個鍵、⛔ 不印環境變數）；
     S4 情境 ③；收尾 down（⛔ 不帶 `-v`），非 dev 的 container 前後對照。腳本先用假的 `docker` 空跑過一次，流程與摘要行正常。新 session 讀 `summary.txt` 寫回這裡。
-* **「二 D」1 已實作**（2026-11-02，依「二 D」1 的 v5 實作細節；⚠️ 待 review、待實跑驗收）：
+* **「二 D」1 已實作**（2026-11-02，依「二 D」1 的 v5 實作細節；✅ review 通過、✅ 實跑通過（2026-11-02，見下方「實跑」））：
   * `scripts/lib/mem-guard.sh` 新增 `mem_guard_oom_arg`：回傳 `--oom-score-adj=<TEST_OOM_SCORE_ADJ，預設 1000>`；空字串回傳空字串（⛔ 不帶參數）；
     其他值（非數字、負值、超過 1000）印錯誤並回 1。前導零先去掉再看位數，`0999` 視為 999。
   * 三支 `test.sh` 在 mem-guard 之後、任何 docker 指令之前取得參數（不合法就中止），加進 `docker run` 的參數；檔頭各補一行說明。
@@ -294,7 +294,7 @@
     驗證（假的 `docker` 在寫 cidfile 之後先停在 `created` 一段時間）：對照組——修正前的版本在有空窗時判成「查詢失敗」、rc 1，dev 的 Pid 0 也標成「查詢失敗」；
     新版有空窗時等到啟動後讀到 1000/1000、rc 0（等待期間查了 10 次）；空窗後啟動被拒絕 → 「查詢失敗」、rc 1；一直停在 `created` 而測試結束 → 「沒有啟動」、rc 1；
     逾時（把等待上限縮短的複本）→ 「等不到」、rc 1；dev 的 Pid 0 → 「沒有在跑（restarting）」、rc 1；沒有空窗與建立時被拒絕的路徑結果不變。
-  * **review 修正：逾時後仍會無限等待測試子程序**（2026-11-02）：輪詢結束後無條件 `wait`，docker 卡在啟動時永遠不會結束，走不到「等不到」的判定。
+  * **review 修正：逾時後仍會無限等待測試子程序**（2026-11-02；✅ review 通過；「沒有啟動」也清 container 經使用者確認保留）：輪詢結束後無條件 `wait`，docker 卡在啟動時永遠不會結束，走不到「等不到」的判定。
     修正：S5 的測試改由 `timeout -k 10s 900s` 啟動（它自成 process group，逾時或收到 TERM 時轉給整個測試，10 秒後補 KILL），任何路徑的 `wait` 最多 910 秒；
     等 cidfile 與等啟動共用 600 秒的期限；逾時時先記錄「等不到」（分「沒有 cidfile」與「停在 created」），再對 `timeout` 送 TERM、最多等 20 秒（仍在就 KILL 它並註記「可能殘留」）、回收。
     另外清掉這次的 container（✅ 使用者確認）：`timeout 30s docker rm -f <cid>`，只對 cidfile 讀到、驗過格式的 64 碼 ID；「沒有啟動」（測試結束時 container 仍停在 `created`）
@@ -303,6 +303,30 @@
     新版卡在啟動 → 3 秒走到「等不到」、測試 rc 143、清掉這次的 container；卡在建立之前 → 「等不到建立」、⛔ 沒有呼叫 `rm`；忽略 TERM → 13 秒（10 秒後補 KILL）、測試 rc 137；
     「沒有啟動」→ 清掉 container；正常路徑結果不變；每條路徑之後都⛔ 沒有殘留的假行程。「`timeout` 本身 20 秒內⛔ 沒有結束」的後備路徑⛔ 沒有實測（`timeout` 送完 KILL 就會結束，模擬不出來）。
     同類掃過：S1～S4 在前景呼叫 `smoke-dev.sh`，它的健康檢查有 `WAIT_SECONDS` 上限，build 與 up 則沒有（build 本來就可能很久）——屬於 `smoke-dev.sh` 本身的行為，這次⛔ 不動。
+* **實跑（2026-11-02 16:20～16:25，使用者在 Claude 結束後執行；⚠️ 不在 D2 時段）**：B1～B4 與「二 D」1 ✅ 通過。新 session 讀 log 判讀（唯讀）。
+  * 前置：MemAvailable 899 MB；非 dev 的 container 7 個。summary ⛔ 沒有「有查詢失敗」那行（腳本 rc 0）。
+  * S1 預設：rc 0、passed 1，16:20:27～16:24:28。依序 build：backend 16:20:27 開始、python-server 16:24:10、up 16:24:11。
+    四個 dev container（postgres、redis、backend、python-server）的 `HostConfig.OomScoreAdj` 與實際行程的值都是 500/500。
+  * S2 情境 ①（dev 已經 down → `NO_BUILD=1 SERVICES=backend`）：down rc 0、rc 0、passed 1、提醒 1 次、⛔ 沒有檢查 python、⛔ 沒有 build；
+    `compose ps` 只有 backend running、postgres 與 redis running healthy，⛔ 沒有 python-server。
+  * S3 情境 ② 加 `OVERRIDE`：rc 0、passed 1、⛔ 沒有 build、等依賴 0 秒；postgres、redis ⛔ 沒有重啟，只重建 backend；backend 有 `LOG_RETENTION_DAYS=13`（1 筆）。
+  * S4 情境 ③（`SERVICES=python-worker`）：rc 2、錯誤訊息 1 行、`compose ps` 前後相同。收尾 down（⛔ 不帶 `-v`）rc 0。
+  * S5 測試 container：測試 rc 0；cidfile 對到的 container `746197e122ec`，`HostConfig.OomScoreAdj` 與實際行程的值都是 1000/1000。
+    `./pkg/timeutil` 回報 `[no test files]`，但 `go vet` 與 `go build` 有跑、container 有起來——S5 只用來起測試 container，⛔ 不影響判讀。
+  * 非 dev 的 container 7 個：名稱、ID、啟動時間、重啟次數前後相同——未觀察到 container 重建或重啟；⛔ 未驗證 OOM 事件及批次影響。結束時 MemAvailable 898 MB。
+  * **「二 D」1 的結論**：這台 Virtuozzo 的 docker 接受 `--oom-score-adj`，dev 與測試 container 都起得來、值也套上了。
+    ⚠️ OOM 真的發生時 kernel 是否照這個值挑對象，仍⛔ 沒有實測（「二 D」1 的限制 ②）。
+  * **B1 只驗了一半**：
+    * 確認了：兩個 image 依序 build。整段的 MemAvailable 低點 242 MB @16:23:02，落在 backend 的 `go build ./cmd/server`（181 秒；
+      期間 91 次取樣有 25 次低於 400 MB）；`npm run build` 那 16 秒的低點是 592 MB。
+    * 沒量到：`npm ci`、`go mod download` 與 python 的 `pip install` 都命中 cache（`CACHED` 13 行：backend 9、python-server 4），python-server 1 秒就 build 完（低點 858 MB），
+      所以「平行 build 時兩個峰值會不會疊加」這次量不出來。之後 python 的依賴改變（`pip install` ⛔ 不命中 cache）時，照同一支腳本的 S1 再量一次；
+      歸檔到 `development-workflow.md` 時列為已知限制，⛔ 不另立 todo。
+    * 這次 Claude ⛔ 沒在跑，242 MB ⛔ 不能直接和舊紀錄的冷 build 低點（74 MiB）比。反過來說，Claude 在跑時（280～400 MB），這一步會把 MemAvailable 壓到接近 0——
+      印證 C1「重的步驟⛔ 不跟長 session 疊在一起」。
+  * 時段：⚠️ 不在 D2（17:05～22:00）。16:00 的 `evaluation_universe_sync` 若 live 有開（dev compose 的註解：約 27 分鐘），可能和這次重疊——⛔ 沒有查 live 的開關；
+    前後對照只確認未觀察到 container 重建或重啟，⛔ 未驗證 OOM 事件及批次影響。
+  * log 在 repo 外的 `~/.cache/stock_trading/smoke-logs/20261102/`（`summary.txt`、各步的 log、`S1-mem.log`、`s5.cid`、`s5-shim/`），保存到本計畫 review 完成。
 
 ## 九、修訂紀錄
 

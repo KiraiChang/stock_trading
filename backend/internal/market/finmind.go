@@ -145,7 +145,7 @@ func (c *FinMindClient) doFetch(ctx context.Context, reqURL string) ([]json.RawM
 	}
 
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests {
-		return nil, true, fmt.Errorf("finmind http error: status=%d body=%s", resp.StatusCode, truncateBody(body))
+		return nil, true, newHTTPStatusError(resp.StatusCode, "finmind http error: status=%d body=%s", resp.StatusCode, truncateBody(body))
 	}
 
 	var result finmindResp

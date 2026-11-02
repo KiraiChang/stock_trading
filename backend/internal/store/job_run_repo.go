@@ -2,13 +2,22 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 )
 
+// ErrJobRunNotFound 代表 Finish 要寫的那一筆**不存在**——runID 是 0（startRun 沒拿到紀錄）或查無此 id。
+//
+// ⚠️ **為什麼要回錯誤**（I-125 階段 A 的 review）：UPDATE 零筆在 SQL 上不是錯誤，
+// 舊版因此一律回 nil，呼叫端會以為「結束狀態已寫入」。自動重跑要靠「主檔最新一輪已成功落盤」
+// 判斷連帶重跑，那個判斷⛔ 不能建立在一筆不存在的紀錄上。
+var ErrJobRunNotFound = errors.New("job run not found")
+
 type JobRunRepo interface {
 	Start(ctx context.Context, jobName string) (uint64, error)
+	// Finish 寫回結束狀態。紀錄不存在時回 ErrJobRunNotFound。
 	Finish(ctx context.Context, runID uint64, status string, symbolsTotal, symbolsFailed int, errMsg string) error
 	GetRecent(ctx context.Context, limit int) ([]JobRun, error)
 	// GetLatestPerJob 回傳每個 job_name 的最新一筆執行紀錄。
@@ -76,7 +85,12 @@ const jobRunAbortedStatus = "aborted"
 
 // jobRunAbortedError 寫進 `error` 欄位，讓排程頁看得出這筆為什麼結束。
 // `error` 是 TEXT，沒有長度限制。
-const jobRunAbortedError = "process 在此 job 完成前結束，該輪未跑完（啟動時回收）"
+//
+// ⚠️ **刻意寫成中性**（I-125，2026-10-30 改）：停在 `running` 不只是「process 被中斷」，
+// 也可能是**結束狀態寫不進去**——2026-10-22 那筆 `corporate_action_sync` 是 DB 進入 recovery mode
+// 時失敗、連結束紀錄都寫不進去，舊訊息「process 在此 job 完成前結束」與事實不符。
+// 回收時分不出是哪一種，所以只說「沒有寫入結束狀態」。
+const jobRunAbortedError = "沒有寫入結束狀態（process 中斷，或結束狀態寫入失敗），結果未知（啟動時回收）"
 
 type jobRunRepo struct {
 	db     *sqlx.DB
@@ -111,12 +125,39 @@ func (r *jobRunRepo) Start(ctx context.Context, jobName string) (uint64, error) 
 }
 
 func (r *jobRunRepo) Finish(ctx context.Context, runID uint64, status string, symbolsTotal, symbolsFailed int, errMsg string) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE job_runs
 		SET status=?, symbols_total=?, symbols_failed=?, error=?, finished_at=CURRENT_TIMESTAMP
 		WHERE id=?
 	`), status, symbolsTotal, symbolsFailed, errMsg, runID)
-	return err
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	return r.confirmExists(ctx, runID)
+}
+
+// confirmExists 在 UPDATE 回報零筆時，確認那一筆到底存不存在。
+//
+// ⚠️ **零筆⛔ 不等於不存在**：mysql 的 RowsAffected 預設計的是「值有變的列」，同一秒內以完全相同的值
+// 重寫一筆已完成的紀錄會得到 0——紀錄存在，內容也正確（值相同才會是 0），⛔ 不能回報失敗。
+// sqlite／postgres 計的是符合條件的列，0 就是不存在；多查這一次只發生在零筆的時候。
+// （mysql 從未部署過、repo 層也沒有 mysql 的測試，見 issue.md I-054；這裡照它的語意寫。）
+func (r *jobRunRepo) confirmExists(ctx context.Context, runID uint64) error {
+	var n int
+	if err := r.db.GetContext(ctx, &n, r.db.Rebind(`SELECT COUNT(*) FROM job_runs WHERE id=?`), runID); err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrJobRunNotFound
+	}
+	return nil
 }
 
 func (r *jobRunRepo) GetRecent(ctx context.Context, limit int) ([]JobRun, error) {

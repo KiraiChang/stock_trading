@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -249,6 +251,10 @@ func TestAbortRunningOnlyTouchesUnfinishedRuns(t *testing.T) {
 	if orphan.Error.String == "" {
 		t.Error("孤兒紀錄應寫入結束原因，那是排程頁唯一看得到的地方")
 	}
+	// ⚠️ 訊息要中性（I-125）：停在 running 也可能是結束狀態寫不進去，⛔ 不能斷言是「process 中斷」。
+	if orphan.Error.String != jobRunAbortedError || !strings.Contains(orphan.Error.String, "結束狀態寫入失敗") {
+		t.Errorf("孤兒紀錄的 error = %q，應是涵蓋「結束狀態寫入失敗」的中性訊息", orphan.Error.String)
+	}
 	// symbols_total / symbols_failed 維持 0：那正確表達「沒有回報過」，
 	// 猜一個數字會讓「跑完但零標的」與「沒跑完」分不開。
 	if orphan.SymbolsTotal != 0 || orphan.SymbolsFailed != 0 {
@@ -320,6 +326,56 @@ func TestJobRunStatusValuesFitColumnWidth(t *testing.T) {
 			t.Errorf("status %q 有 %d 字元，超過 job_runs.status 的 %d 字元上限"+
 				"（postgres / mysql 是 VARCHAR(%d)；sqlite 是 TEXT 不會擋）",
 				status, len(status), jobRunStatusMaxLen, jobRunStatusMaxLen)
+		}
+	}
+}
+
+// Finish 一筆都沒更新到時要回 ErrJobRunNotFound（I-125 階段 A 的 review）：
+// UPDATE 零筆在 SQL 上不是錯誤，舊版一律回 nil，呼叫端會以為結束狀態已寫入。
+func TestFinishReportsMissingRun(t *testing.T) {
+	repo, ctx := newJobRunRepoForTest(t)
+
+	for _, id := range []uint64{0, 999999} {
+		if err := repo.Finish(ctx, id, "success", 1, 0, ""); !errors.Is(err, ErrJobRunNotFound) {
+			t.Errorf("Finish(id=%d) = %v，期望 ErrJobRunNotFound", id, err)
+		}
+	}
+	if rows, err := repo.GetRecent(ctx, 10); err != nil || len(rows) != 0 {
+		t.Fatalf("表裡應該沒有任何紀錄，得到 %d 筆（err=%v）", len(rows), err)
+	}
+
+	id, err := repo.Start(ctx, "stock_symbol_sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Finish(ctx, id, "success", 53401, 0, ""); err != nil {
+		t.Fatalf("存在的紀錄應寫入成功，得到 %v", err)
+	}
+}
+
+// 零筆變更⛔ 不等於紀錄不存在（mysql 的 RowsAffected 計「值有變的列」）。
+// sqlite 的 RowsAffected 計符合條件的列、碰不到零筆變更，所以直接驗 confirmExists 這一段，
+// 外加「相同的值重寫」的回歸案例。
+func TestFinishZeroChangedRowsConfirmsExistence(t *testing.T) {
+	repo, ctx := newJobRunRepoForTest(t)
+	r := repo.(*jobRunRepo)
+
+	id, err := repo.Start(ctx, "stock_symbol_sync")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		// 同一秒內以完全相同的值重寫：mysql 這時 RowsAffected 會是 0，紀錄仍存在。
+		if err := repo.Finish(ctx, id, "success", 53401, 0, ""); err != nil {
+			t.Fatalf("第 %d 次以相同的值寫入，期望成功，得到 %v", i+1, err)
+		}
+	}
+	if err := r.confirmExists(ctx, id); err != nil {
+		t.Errorf("紀錄存在，confirmExists 應回 nil，得到 %v", err)
+	}
+	for _, missing := range []uint64{0, 999999} {
+		if err := r.confirmExists(ctx, missing); !errors.Is(err, ErrJobRunNotFound) {
+			t.Errorf("confirmExists(%d) = %v，期望 ErrJobRunNotFound", missing, err)
 		}
 	}
 }

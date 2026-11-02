@@ -191,7 +191,7 @@ func (c *TWSEISINClient) fetchOne(ctx context.Context, url string) ([]store.Stoc
 	meta.StatusCode = resp.StatusCode
 	meta.ContentType = resp.Header.Get("Content-Type")
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, meta, fmt.Errorf("twse isin: unexpected status %d", resp.StatusCode)
+		return nil, meta, newHTTPStatusError(resp.StatusCode, "twse isin: unexpected status %d", resp.StatusCode)
 	}
 
 	// 多讀 1 byte 用來判斷是否真的超過上限（而不是剛好等於上限）。

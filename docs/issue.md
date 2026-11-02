@@ -1475,7 +1475,7 @@ artifact 及其 SHA-256」寫進
 **`job_runs` 完全看不到**。
 
 ⚠️ **live 走的就是這條路**：`YAHOO_ENABLED=true`、`FINMIND_INTRADAY_ENABLED=false`，
-`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`internal/scheduler/scheduler.go:558-561`）。
+`runIntradayJob` 在 `HasIntradaySource()` 為真時轉給 `runIntradayBatch`（`internal/scheduler/scheduler.go` 的 `runIntradayJob()`）。
 FinMind 的 `runIntradayJob` 路徑是逐檔呼叫，反而有逐檔粒度——**但那條在 live 沒有啟用**。
 
 #### 影響
@@ -3290,7 +3290,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（⛔ 不追查原因——使用者 2026-10-30 裁決：視為網路波動或第三方維修，改由自動重跑吸收；計畫 v4：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)，⚠️ 待使用者確認） |
+| 狀態 | 進行中（⛔ 不追查原因——使用者 2026-10-30 裁決：視為網路波動或第三方維修，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑在階段 B） |
 | 嚴重度 | 中～高：每個交易日都有批次失敗，而且在增加；影響盤中報價（`intraday`）、股票主檔同步與終止上市對帳、公司行動同步 |
 | 分類 | 基礎設施 / live 主機的 Docker 網路 |
 | 建立日期 | 2026-10-30 |
@@ -3333,7 +3333,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（⛔ 不追查原因、下方「待查」的 log ⛔ 不再收集——使用者 2026-10-30 裁決：視為暫時性狀況，改由自動重跑吸收；計畫 v4：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)，⚠️ 待使用者確認） |
+| 狀態 | 進行中（⛔ 不追查原因、下方「待查」的 log ⛔ 不再收集——使用者 2026-10-30 裁決：視為暫時性狀況，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑在階段 B） |
 | 嚴重度 | 中：DB 重啟期間所有讀寫都失敗；這次讓 `corporate_action_sync` 整輪中止，結束狀態也寫不進去（I-125） |
 | 分類 | 基礎設施 / live 的 postgres（`postgres-postgres-1`） |
 | 建立日期 | 2026-10-30 |
@@ -3358,7 +3358,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v4：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)，⚠️ 待使用者確認） |
+| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 已實作結束寫入的重試與中性的回收訊息、⚠️ 待 review） |
 | 嚴重度 | 中：**本次觀察到的影響**只在紀錄與狀態頁（「這輪是失敗還是被中斷」判斷錯、狀態頁顯示假的「執行中」）；但結束寫入是**所有工作共用的路徑**，依賴 `job_runs` 狀態的下游會被擋住（見「潛在影響」，⚠️ 讀碼推論、尚未實際發生） |
 | 分類 | Backend / 排程（`job_runs`） |
 | 建立日期 | 2026-10-30 |
@@ -3390,7 +3390,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v4：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)，⚠️ 待使用者確認） |
+| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 已實作兩項、⚠️ 待 review） |
 | 嚴重度 | 低～中：誤導判讀，⛔ 不影響執行——要看 log 才知道真正的情況 |
 | 分類 | Backend / 排程（`job_runs` 的狀態推導與原因） |
 | 建立日期 | 2026-10-30 |

@@ -110,7 +110,7 @@ func (c *TWSESuspendListingClient) FetchDelistings(ctx context.Context) (Delisti
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return out, fmt.Errorf("twse suspend listing: unexpected status %d", resp.StatusCode)
+		return out, newHTTPStatusError(resp.StatusCode, "twse suspend listing: unexpected status %d", resp.StatusCode)
 	}
 
 	// 多讀 1 byte 用來判斷是否真的超過上限（而不是剛好等於上限）。

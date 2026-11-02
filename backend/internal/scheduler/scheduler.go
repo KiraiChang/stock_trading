@@ -193,8 +193,11 @@ type Scheduler struct {
 	// 不可 recover，整個行程死掉。
 	registeredJobsMu sync.RWMutex
 	registeredJobs   map[string]bool
-	log              *zap.Logger
-	cron             *cron.Cron
+	// finishRetryBackoffs 是結束寫入失敗後的等待序列；nil 時用 defaultFinishRetryBackoffs。
+	// 只有測試會改它（避免真的等上一分鐘）。
+	finishRetryBackoffs []time.Duration
+	log                 *zap.Logger
+	cron                *cron.Cron
 }
 
 // SRAnalysisRunner 是「跑一次帶身分追蹤的 SR zone 分析」。實作是
@@ -392,9 +395,22 @@ func (s *Scheduler) Stop() {
 	s.cron.Stop()
 }
 
-// startRun 記錄一筆排程執行紀錄，失敗時只記 log（不影響排程本身執行）
+// startRunWriteTimeout 是「寫開始紀錄」的上限，比照 finishRunWriteTimeout。
+//
+// **為什麼要有上限**（I-123～I-126 計畫書「3.5」）：`stock_symbol_sync`、`delisting_reconcile`
+// 傳進來的是沒有期限的 `context.Background()`，DB 卡住時這一步會無限等；
+// 自動重跑的整輪截止時刻要算得出來，每一段都得有上限。
+// 用 context.WithoutCancel 切斷呼叫端的取消（比照 finishRunStatus）：
+// `corporate_action_sync` 傳的是整輪預算的 ctx，⛔ 不讓它影響這一步的上限。
+const startRunWriteTimeout = 10 * time.Second
+
+// startRun 記錄一筆排程執行紀錄，失敗時只記 log（不影響排程本身執行）。
+// 寫不進去（含超過 startRunWriteTimeout）時回傳 0，由各工作沿用既有的處理
+// （`delisting_reconcile` 中止；其他工作照跑，只是沒有紀錄）。
 func (s *Scheduler) startRun(ctx context.Context, jobName string) uint64 {
-	runID, err := s.jobRuns.Start(ctx, jobName)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), startRunWriteTimeout)
+	defer cancel()
+	runID, err := s.jobRuns.Start(writeCtx, jobName)
 	if err != nil {
 		s.log.Error("job_runs start failed", zap.String("job", jobName), zap.Error(err))
 	}
@@ -454,14 +470,69 @@ func (s *Scheduler) finishRunDegraded(ctx context.Context, runID uint64, jobName
 // job_runs 一定失敗，那筆紀錄會**永遠卡在 `running`**（2026-08-24，原 I-084）。
 // ⚠️ delisting_reconcile 特別容易踩到——CSV 抓取逾時正是走這條 explicit-failed 路徑，
 // 而那時 ctx 已經被取消。
+//
+// **回傳值**：true 只代表結束狀態**確實寫進了一筆存在的紀錄**。runID 為 0（startRun 沒拿到紀錄）、
+// 紀錄不存在（store.ErrJobRunNotFound）、或重試用完仍寫不進去，都回 false。
 func (s *Scheduler) finishRunStatus(
 	ctx context.Context, runID uint64, jobName, status string, total, failed int, lastErr string,
-) {
+) bool {
+	// startRun 沒拿到紀錄（它已記 Error）：⛔ 沒有可以寫的那一筆，回報失敗——
+	// 「結束狀態已落盤」⛔ 不能建立在一筆不存在的紀錄上（I-125 階段 A 的 review）。
+	if runID == 0 {
+		s.log.Warn("job_runs finish skipped: no run record", zap.String("job", jobName), zap.String("status", status))
+		return false
+	}
+	backoffs := s.finishRetryBackoffs
+	if backoffs == nil {
+		backoffs = defaultFinishRetryBackoffs
+	}
+	var err error
+	for attempt := 0; ; attempt++ {
+		err = s.finishOnce(ctx, runID, status, total, failed, lastErr)
+		if err == nil {
+			if attempt > 0 {
+				s.log.Info("job_runs finish succeeded after retry",
+					zap.String("job", jobName), zap.Int("retries", attempt))
+			}
+			return true
+		}
+		// 紀錄不存在：重試也⛔ 不會讓它出現。
+		if errors.Is(err, store.ErrJobRunNotFound) {
+			s.log.Error("job_runs finish failed: run record not found",
+				zap.String("job", jobName), zap.Uint64("run_id", runID))
+			return false
+		}
+		if attempt >= len(backoffs) {
+			break
+		}
+		s.log.Warn("job_runs finish failed, will retry",
+			zap.String("job", jobName), zap.Int("attempt", attempt+1), zap.Error(err))
+		time.Sleep(backoffs[attempt])
+	}
+	// ⚠️ **剩餘限制**（I-125）：重試全部失敗時這一筆仍停在 `running`，直到下次啟動由
+	// AbortRunning 回收；期間狀態頁顯示「執行中」，依賴它的前置條件也會被擋下。
+	s.log.Error("job_runs finish failed", zap.String("job", jobName),
+		zap.Int("retries", len(backoffs)), zap.Error(err))
+	return false
+}
+
+// finishOnce 寫一次結束紀錄，每次都有自己的 finishRunWriteTimeout。
+func (s *Scheduler) finishOnce(
+	ctx context.Context, runID uint64, status string, total, failed int, lastErr string,
+) error {
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishRunWriteTimeout)
 	defer cancel()
-	if err := s.jobRuns.Finish(writeCtx, runID, status, total, failed, lastErr); err != nil {
-		s.log.Error("job_runs finish failed", zap.String("job", jobName), zap.Error(err))
-	}
+	return s.jobRuns.Finish(writeCtx, runID, status, total, failed, lastErr)
+}
+
+// defaultFinishRetryBackoffs 是結束寫入失敗後的等待（I-125；I-123～I-126 計畫書「3.5」）。
+//
+// **為什麼要重試**：2026-10-22 06:31 live 的 postgres 進入 recovery mode（I-124），
+// 那一刻 `corporate_action_sync` 的結束紀錄寫不進去，那一筆停在 `running` 6 天，
+// 直到 backend 重啟才被回收成 `aborted`。DB 的復原通常在一分鐘內。
+// 最壞 7 次 × 10 秒 ＋ 等待 63 秒 = 133 秒——自動重跑的整輪截止時刻依這個數字留餘裕。
+var defaultFinishRetryBackoffs = []time.Duration{
+	1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second,
 }
 
 // evaluateSymbol 跑一檔的訊號評估，並把硬失敗記進 tally。
@@ -585,10 +656,8 @@ func (s *Scheduler) runIntradayJob() {
 				// 帳號等級不足是整個 token 的限制，對其他 symbol 重試也一定會失敗，
 				// 記一次 log 後整輪跳過，避免每 5 分鐘對 watchlist 每檔股票都打一次注定失敗的請求
 				s.log.Warn("intraday job skipped: finmind token tier insufficient", zap.Error(err))
-				if ferr := s.jobRuns.Finish(ctx, runID, "skipped", len(symbols), len(symbols)-i,
-					safeJobErrorSummary("finmind_tier", err)); ferr != nil {
-					s.log.Error("job_runs finish failed", zap.String("job", "intraday"), zap.Error(ferr))
-				}
+				s.finishRunStatus(ctx, runID, "intraday", "skipped", len(symbols), len(symbols)-i,
+					safeJobErrorSummary("finmind_tier", err))
 				return
 			}
 			s.log.Warn("intraday fetch failed", zap.String("symbol", sym), zap.Error(err))
@@ -711,7 +780,7 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 	if s.stockSyncer == nil {
 		errMsg := "stock symbol syncer is not configured"
 		s.log.Warn(errMsg)
-		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, errMsg)
+		s.finishRunStatus(ctx, runID, "stock_symbol_sync", "failed", 0, 0, errMsg)
 		return
 	}
 
@@ -723,7 +792,11 @@ func (s *Scheduler) runStockSymbolSync(ctx context.Context) {
 	result, err := s.stockSyncer.Sync(syncCtx, time.Now().In(timeutil.TaipeiTZ))
 	if err != nil {
 		s.log.Error("stock symbol sync failed", zap.Error(err))
-		s.finishRun(ctx, runID, "stock_symbol_sync", 0, 1, safeJobErrorSummary("symbol_sync", err))
+		// **整輪失敗要記 failed**（I-126）：舊版寫 `(0, 1)`，而 finishRunDegraded 只在
+		// `total > 0` 時才推得出 failed，於是一筆主檔都沒更新卻顯示 partial。
+		// 改成明確的狀態（比照 delisting_reconcile）；⚠️ `0/0` 只表示**沒有回報計數**，
+		// ⛔ 不代表已證實沒有處理任何資料。
+		s.finishRunStatus(ctx, runID, "stock_symbol_sync", "failed", 0, 0, safeJobErrorSummary("symbol_sync", err))
 		return
 	}
 	s.finishRun(ctx, runID, "stock_symbol_sync", result.Seen, 0, "")

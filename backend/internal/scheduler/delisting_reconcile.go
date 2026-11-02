@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.uber.org/zap"
@@ -132,7 +133,7 @@ func (s *Scheduler) runDelistingReconcileOwned(ctx context.Context, acceptShrink
 		s.log.Error("delisting reconcile failed",
 			zap.Bool("accept_shrink", acceptShrink), zap.Error(err))
 		s.finishRunStatus(ctx, runID, delistingReconcileJobName, "failed",
-			out.DistinctSymbols, 0, safeJobErrorSummary("delisting_reconcile", err))
+			out.DistinctSymbols, 0, delistingFailureSummary(err))
 		return
 	}
 
@@ -149,6 +150,22 @@ func (s *Scheduler) runDelistingReconcileOwned(ctx context.Context, acceptShrink
 	}
 	s.finishRunDegraded(ctx, runID, delistingReconcileJobName,
 		out.DistinctSymbols, 0, reason, out.Degraded())
+}
+
+// delistingNotReadySummary 是「當日 stock_symbol_sync 還沒成功」時寫進 job_runs.error 的固定安全文字。
+//
+// **為什麼要專屬文字**（I-126）：ErrStockSymbolSyncNotReady 的文字⛔ 不含 joberr 的分類關鍵字，
+// 經 Classify 會被壓成 `internal_error`，`job_runs` 上就分不出「前置不成立的連帶失敗」與真正的內部錯誤
+// （2026-10-24、10-29、10-30 的 live 都是前者）。這是本專案自己組的固定文字，符合
+// docs/architecture.md「寫入失敗的一致性契約」的合法形式。
+const delistingNotReadySummary = "delisting_reconcile:stock_symbol_sync_not_ready"
+
+// delistingFailureSummary 決定對帳失敗時寫進 job_runs.error 的字串。
+func delistingFailureSummary(err error) string {
+	if errors.Is(err, market.ErrStockSymbolSyncNotReady) {
+		return delistingNotReadySummary
+	}
+	return safeJobErrorSummary("delisting_reconcile", err)
 }
 
 // delistingDegradedError 讓 partial 的原因原樣寫進 job_runs.error。

@@ -135,7 +135,7 @@ func (c *YahooQuoteClient) fetch(ctx context.Context, symbols []string) ([]yahoo
 		return nil, fmt.Errorf("yahoo read body error: http_status=%d: %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("yahoo http error: status=%d msg=%s", resp.StatusCode, truncateBody(body))
+		return nil, newHTTPStatusError(resp.StatusCode, "yahoo http error: status=%d msg=%s", resp.StatusCode, truncateBody(body))
 	}
 
 	var entries []yahooChartEntry

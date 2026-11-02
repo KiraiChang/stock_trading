@@ -146,7 +146,7 @@ func (c *YahooDividendClient) FetchDividends(ctx context.Context, symbol string)
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("yahoo dividends %s: HTTP %d", symbol, resp.StatusCode)
+		return nil, newHTTPStatusError(resp.StatusCode, "yahoo dividends %s: HTTP %d", symbol, resp.StatusCode)
 	}
 
 	var parsed yahooDividendResponse

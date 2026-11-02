@@ -797,9 +797,10 @@ stale := registered && r.Status != "running" && time.Since(r.StartedAt) > jobSta
 > 並繼續啟動**（`cmd/server/main.go`）——DB 當下不通或那句 UPDATE 逾時的話，孤兒會
 > 原封不動留在 `running`，而它**永遠不會被標成 stale**（見上），排程頁照樣顯示「執行中」。
 >
-> 所以「畫面上是 `running`」只能推出「**要嘛真的在跑，要嘛上次回收失敗過**」。
-> 要斷定是哪一種，去看啟動 log：
+> 所以「畫面上是 `running`」只能推出「**要嘛真的在跑、要嘛結束狀態寫不進去（重試用完，見下）、要嘛上次回收失敗過**」。
+> 要斷定是哪一種，去看 log：
 >
+> * `job_runs finish failed`（**Error**，帶 `retries`）＝ 那一輪的結束狀態重試用完仍寫不進去，它會停在 `running` 到下次啟動回收。
 > * `回收上次未跑完的排程紀錄`（Warn，帶 `aborted` 筆數）＝ 有回收到東西，正常。
 > * `回收孤兒 job_runs 失敗，被中斷的排程可能仍顯示為執行中`（**Error**）＝ 這次沒收成功，
 >   畫面上的 `running` 不可信。
@@ -807,6 +808,14 @@ stale := registered && r.Status != "running" && time.Since(r.StartedAt) > jobSta
 >
 > **刻意不讓回收失敗中止啟動**：它只影響狀態頁的顯示，不影響任何排程執行，
 > 為了一個顯示問題而讓整個 backend 起不來是更糟的交換。代價就是上面這條判讀規則。
+
+**結束寫入會重試**（2026-10-30 起，原記於 `issue.md` I-125）：寫結束紀錄失敗時，`finishRunStatus` 退避 1／2／4／8／16／32 秒重試，
+每次各有 10 秒上限，最壞 133 秒；寫開始紀錄（`startRun`）也有 10 秒上限。開始紀錄寫不進去（沒有 run id）或紀錄不存在時，
+結束寫入⛔ 不會補建紀錄、⛔ 不重試，只記 log（`JobRunRepo.Finish` 在紀錄不存在時回 `ErrJobRunNotFound`；
+UPDATE 零筆時會再確認一次紀錄存不存在，因為 mysql 以相同的值重寫時也回零筆）。起因是 2026-10-22 06:31 live 的 postgres 進入 recovery mode，
+那一輪 `corporate_action_sync` 連結束紀錄都寫不進去，停在 `running` 6 天，直到 backend 重啟才被回收。
+⚠️ **剩餘限制**：重試全部失敗時仍停在 `running`，直到下次啟動回收；期間依賴它的前置條件也會被擋下
+（例如終止上市對帳要求當日最新一筆 `stock_symbol_sync` 是 success）。
 
 實例：2026-08-25 16:00 的 `evaluation_universe_sync` 跑到 135 檔中的第 54 檔時
 遇到重新部署，那筆紀錄停在 `running`、`finished_at` 為空，狀態頁一路顯示「執行中」
@@ -830,7 +839,7 @@ SIGTERM 升級成 SIGKILL，一輪 27 分鐘的 job 等不到自己收尾。**�
 | 狀態 | 語意 | 該怎麼辦 |
 |---|---|---|
 | `failed` | 跑了，但名單內全軍覆沒（`failed >= total`） | 查資料源或上游 |
-| `aborted` | **沒跑完**——process 在結束前就被中斷 | 看該 job 是否需要補跑 |
+| `aborted` | **沒有寫入結束狀態**——process 在結束前被中斷，或結束狀態寫入失敗（重試用完）；`error` 是中性的「沒有寫入結束狀態（…），結果未知（啟動時回收）」 | 看該 job 是否需要補跑 |
 
 `aborted` 刻意不併進 `failed`：已完成的部分仍然有效（前述那次是 135 檔中的 54 檔），
 混用會讓「要不要重跑」失去判斷依據。
@@ -986,6 +995,8 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 ### POST `/scheduler/stock-symbol-sync/run`
 
 手動觸發 TWSE ISIN 股票主檔同步，與每日 `stock_symbol_sync` 排程共用同一份邏輯。
+整輪失敗時 `job_runs` 記 **`failed`、`0/0`**（2026-10-30 起；原本寫 `0/1` 而被推導成 `partial`，原記於 `issue.md` I-126）——
+⚠️ `0/0` 只表示沒有回報計數，⛔ 不代表已證實沒有處理任何資料。
 此端點會立即回應，實際同步在背景執行；進度與結果可透過 `GET /scheduler/status`
 查看 `stock_symbol_sync` 這個 job。
 
@@ -1113,7 +1124,8 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 拿它驅動 `is_listed` 會弄壞正在交易的股票。
 
 **前置是依賴而不是時間錯開**：當日的 `stock_symbol_sync` 必須已經成功，否則整輪
-`failed`（fail-closed）。sync 沒跑成功時 `is_listed` 是舊的或不完整的，拿它當投影
+`failed`（fail-closed），`error` 是專屬的 `delisting_reconcile:stock_symbol_sync_not_ready`
+（2026-10-30 起；原本被壓成 `internal_error`，分不出是連帶失敗，原記於 `issue.md` I-126）。sync 沒跑成功時 `is_listed` 是舊的或不完整的，拿它當投影
 前置沒有意義；cron 排在 06:30 之後只是常態安排，不構成保證。
 
 **為什麼需要這個入口**：cron **預設關閉**（`delisting.enabled`），dev stack 的驗收

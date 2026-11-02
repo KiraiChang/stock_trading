@@ -1,6 +1,6 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
-> 狀態：⚠️ 待使用者確認（v4，2026-10-30；依 v1～v3 的 review 修正，見「十一」；決定 D1～D6 見「六」）。確認之前⛔ 不改任何程式。
+> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A 已實作、⚠️ 待 review（實作備註見「十二」）；階段 B 尚未開始。
 > 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
@@ -221,7 +221,7 @@
 | `startRun` | 加 10 秒的寫入上限（所有工作） | 超過時 `runID` 為 0，沿用既有處理（「3.5」） |
 | `POST /scheduler/stock-symbol-sync/run`、`/corporate-action-sync/run` | 已有一輪在跑時回 **409**（原本一律 202）；cron 撞上時只記 Warn、⛔ 不寫 `job_runs`（比照對帳） | 前端改兩個按鈕的錯誤訊息；`api-reference.md` 同步 |
 
-## 六、決定（⚠️ 待使用者確認）
+## 六、決定（✅ 2026-10-30 定案：全部採建議，D5 採 (b)）
 
 | | 選項 | 建議 |
 |---|---|---|
@@ -292,7 +292,7 @@
 ## 九、執行順序
 
 1. 使用者確認本計畫（含 D1～D6）。
-2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。
+2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（⚠️ 已實作、待 review：「十二」）
 3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。
 4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。
 5. 收斂：歸檔（「十」）、I-123～I-126 與 I-122 一起收斂（I-122 的證據到這時才刪）。
@@ -315,3 +315,41 @@
 | v2 | 2026-10-30 | 依 v1 的 review 修正：#1 層一改成每個工作的最晚起跑時刻（08:45 − 預算），撤掉「07:45 前結束」的推算；層二改成整輪 120 秒的重試預算，撤掉「⛔ 不會和下一輪重疊」的保證（「3.2」「3.3」）；#2 D5 改建議四個入口共用執行所有權，測試涵蓋兩種起跑順序與 `RACE=1`（「3.2」「六」「八」）；#3 補上重跑鏈的規則——同日單一鏈、任一入口成功讓舊鏈失效、連帶重跑計入對帳的上限（「3.2」）；#4 FinMind 的 5xx 也回 `HTTPStatusError`、請求層政策不變（「3.1」）；#5 補上 live 的四處設定、部署後的確認與回滾（「3.7」）；#6 層四的剩餘限制照實寫、列入 I-125 收斂後的文件（「一」「3.5」「十」）；#7 補回的驗證改成走正式抓取流程，保留 13:30 的限制（「八」）。D6 補「`0/0` 只表示沒有回報計數」 |
 | v3 | 2026-10-30 | 依 v2 的 review 修正：#1 截止改成**整輪**的截止時刻（預設 08:45、可設定），最晚起跑 ＝ 截止 − 業務預算 − 3 分鐘（涵蓋 `startRun` 10 秒與結束寫入最多 133 秒），`startRun` 加寫入上限（「3.2」「3.5」）；#2 層二的 120 秒改用到期的 context，涵蓋等待、節流、請求與寫入（「3.3」）；#3 連帶重跑改成三個旗標同一把鎖、登記等待時重新確認、所有權釋放後補觸發，並加時序測試（「3.2」「八」）；#4 dev 驗收明列 `JOB_RETRY_ENABLED=true` 與調晚的 `JOB_RETRY_CUTOFF`，`docker-compose.dev.yml` 也加鍵（「3.7」「八」） |
 | v4 | 2026-10-30 | 依 v3 的 review 修正：#1 連帶重跑的旗標改成「主檔最新一輪已成功落盤」（任一輪開始時設假、success 落盤後才設真），加「成功代號」讓同一次成功最多觸發一次對帳，補 06:55 手動失敗與同代號的時序測試（「3.2」「八」）；#2 層二的重試成功要同時滿足回傳 `nil` 與重試 context 未到期，到期就保留該批失敗計數，補「HTTP 成功、DB 寫入逾時」的測試，⛔ 不擴大處理 I-103（「3.3」「八」） |
+
+## 十二、實作備註
+
+### 階段 A（2026-10-30，前兩輪 review 各 1 項已修正，⚠️ 待 review）
+
+改了什麼（依「3.1」「3.5」「3.6」）：
+
+* `market.IsTransient` 與 `HTTPStatusError`（`transient.go`）；五個 client 的非 2xx 分支改回 `HTTPStatusError`，文字逐字不變。
+* `startRun` 加 10 秒的寫入上限；`finishRunStatus` 退避重試（最壞 133 秒），**回傳寫入是否成功**——階段 B 判斷「主檔最新一輪已成功落盤」要用；
+  重試的等待序列放在 `Scheduler.finishRetryBackoffs`（nil 時用預設），只有測試會改它。`intraday` 的 `skipped` 改走 `finishRunStatus`。
+* **review 修正**：「寫入成功」必須是**確實寫進一筆存在的紀錄**。初版只看 `err == nil`，而 UPDATE 零筆在 SQL 上不是錯誤——
+  `startRun` 失敗拿到 0、之後 DB 恢復時，`finishRunStatus` 會在表裡一筆都沒有的情況下回報成功，誤導階段 B 的「主檔最新一輪已成功落盤」。
+  改成：`store.JobRunRepo.Finish` 一筆都沒更新到時回 `store.ErrJobRunNotFound`；`finishRunStatus` 在 `runID` 為 0 時⛔ 不送 UPDATE、回 false，
+  遇到 `ErrJobRunNotFound` ⛔ 不重試、回 false。
+* **第二輪 review 修正**：UPDATE 零筆⛔ 不等於紀錄不存在——mysql 的 `RowsAffected` 預設計「值有變的列」，同一秒內以相同的值重寫已完成的紀錄會得到 0。
+  零筆時改成再查一次紀錄存不存在（`confirmExists`）：存在 → 成功；不存在才回 `ErrJobRunNotFound`。
+* I-126：`stock_symbol_sync` 整輪失敗記 `failed`、`0/0`；對帳前置不成立記 `delisting_reconcile:stock_symbol_sync_not_ready`。
+* `AbortRunning` 的訊息改成中性。
+* 文件：`api-reference.md` 依「3.5」補上 `running` 的判讀規則（結束狀態寫不進去這條路徑與剩餘限制）、`aborted` 的語意，
+  以及主檔整輪失敗與對帳前置不成立的新字串（這幾句描述的是階段 A 之後的現況，⛔ 不等到收斂才改）；`issue.md` 一處 `scheduler.go` 的行號引用
+  改寫成不帶行號的「`scheduler.go` 的 `runIntradayJob()`」（階段 B 還會再改這個檔，帶行號會一直漂）。
+
+驗證：
+
+* `go vet ./...`：rc 0。`go build ./cmd/...`：通過。改到的檔 `gofmt` 乾淨。
+* `go test -vet=off -count=1 ./...`：13 個套件 12 個通過；**唯一失敗**是 store 的 `TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst`——
+  ⚠️ **既有的時間炸彈**：測試資料寫死 2026-08-14～08-18，查詢只回看「今天 − 30 天」，2026-09-13 之後必然失敗；在 HEAD（`7fd3962`）的隔離 clone 上同樣失敗。⛔ 不在本計畫修。
+* ⚠️ `backend/scripts/test.sh` 在這台 host 目前的可用記憶體下（mem-guard 下修到約 460m）**一定印 `FAIL`**：`go vet` 本身會過，
+  但 `go test` 內建的那一輪 vet 分析 `modernc.org/sqlite/lib` 時被 OOM 砍掉，各套件的測試仍是 `ok`。所以本階段的測試結果以 `-vet=off` 為準（`go vet` 另外跑）。
+* 新增的測試：`market/transient_test.go`（判定的正反案例、五個 client 的文字與型別；FinMind 的 5xx／429 因退避常數要等約 7 秒）、
+  `scheduler/job_run_write_test.go`（結束寫入的重試與每次的期限、全部失敗仍未寫入、133 秒的上界、`startRun` 的上限、I-126 的兩項）、
+  `store/job_run_repo_test.go` 補回收訊息的斷言。review 修正補上：**真實 SQLite repo** 的 id 0／不存在的 id（store 與 scheduler 各一，
+  後者重現「表裡 0 筆卻回報成功」）、`runID` 0 時⛔ 不送 UPDATE、紀錄不存在時⛔ 不重試；第二輪補「相同的值重寫」與 `confirmExists` 的存在／不存在。
+  ⚠️ sqlite 的 `RowsAffected` 計符合條件的列、碰不到零筆變更，所以 mysql 那條路徑是直接驗 `confirmExists`；repo 層沒有 mysql 的測試（I-054）。
+* 反向驗證 22 項（在隔離 clone 逐一改壞、`go test -vet=off`；對照組全綠）——第二輪的 2 項：`confirmExists` 一律回不存在、一律回存在；
+  第一輪的 3 項：store 的 `Finish` ⛔ 不檢查筆數、拿掉 `runID` 0 的判斷、紀錄不存在也重試；其餘 17 項：拿掉 `IsTransient` 的各類（`HTTPStatusError`、SQLState、`OpError`、`url.Error` 逾時、
+  `ErrUnexpectedEOF`）、5xx 門檻改成 ≥ 400、DNS 一律算暫時性、Yahoo 配息與 FinMind 改回一般錯誤、TWSE ISIN 的文字被改、結束寫入⛔ 不重試、
+  結束寫入改用呼叫端的 ctx、`startRun` 拿掉上限、預設等待改短、主檔整輪失敗改回 `0/1`、對帳改回分類器、回收訊息改回舊文字——都讓指定的測試變紅。

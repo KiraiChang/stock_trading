@@ -13,6 +13,7 @@
 #   CPUS       CPU 上限（預設 1）
 #   PY_IMAGE   測試用 image tag（預設 stock-trading-python-test:latest）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
+#   TEST_OOM_SCORE_ADJ  測試 container 的 --oom-score-adj（預設 1000；空字串＝不設），見 scripts/lib/mem-guard.sh
 #   SKIP_SHELL_TESTS=1  跳過 scripts/test-replay-args.sh、scripts/test-judge-i074-stage2.sh 與
 #                       scripts/test-extract-job-logs.sh（預設會先跑）
 #   REPLAY_SMOKE=1      另外跑 scripts/smoke-replay-offline.sh（真的跑完 Stage 1／2；預設不跑）
@@ -41,6 +42,8 @@ CPUS="${CPUS:-1}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
+# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
 # 參數原樣轉交 pytest：用 "$@" 而不是把參數併成字串，否則帶空白的參數
 # （例如 -k "a or b"）會被 word splitting 拆開，pytest 會把 "or" 當成路徑。
@@ -98,6 +101,7 @@ exec docker run --rm \
   --memory="$MEM" \
   --memory-swap="$MEMSWAP" \
   --pids-limit=200 \
+  ${OOM_ARG:+"$OOM_ARG"} \
   -e HOME=/tmp \
   -e PYTHONDONTWRITEBYTECODE=1 \
   "${ENV_ARGS[@]+"${ENV_ARGS[@]}"}" \

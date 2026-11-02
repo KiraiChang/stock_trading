@@ -26,6 +26,15 @@
 #   MEM_MIN_MB      clamp 後的下限，低於此值直接 abort，預設 256
 #   MEM_STRICT=1    超過上限時不 clamp，直接 abort（CI 或想明確發現設定錯誤時用）
 #   MEM_FORCE=1     完全略過護欄（明確知道自己在做什麼時才用）
+#
+# 測試 container 的 OOM 犧牲順序（docs/plans/oom-mitigation.md「二 D」1）：
+#   OOM_ARG="$(mem_guard_oom_arg)" || exit 1
+#   DOCKER_ARGS+=(${OOM_ARG:+"$OOM_ARG"})
+#   TEST_OOM_SCORE_ADJ  測試 container 的 --oom-score-adj，預設 1000：host 記憶體見底時，
+#                   讓 kernel 先砍可以重來的測試 container，而不是 claude 或 live（兩者維持 0）。
+#                   設成空字串就不帶這個參數（docker 拒絕它時先繞過用）；只收 0～1000 的整數，
+#                   負值不收（那是反過來保護測試 container）。與 MEM_FORCE 無關。
+#                   限制：BuildKit 的 build 步驟設不到；Virtuozzo 的 OOM 是否照它挑對象沒有實測。
 
 # 把 docker 記憶體字串（512m / 2g / 1024 / 1g）換算成 MB。無法解析時回傳空字串。
 mem_guard_to_mb() {
@@ -116,4 +125,30 @@ EOF
     若這步真的塞不進 ${max_mb}MB，要降的是實際用量（拆步驟、限制 runtime heap），不是上限。
 EOF
   printf '%sm\n' "$max_mb"
+}
+
+# 回傳測試 container 該帶的 --oom-score-adj 參數（docker 格式）；TEST_OOM_SCORE_ADJ 是空字串時
+# 回傳空字串。值不合法時印錯誤並回 1——呼叫端要在任何 docker 指令之前就中止。
+# 所有訊息都印到 stderr，stdout 只留回傳值。
+mem_guard_oom_arg() {
+  local value="${TEST_OOM_SCORE_ADJ-1000}"
+
+  if [ -z "$value" ]; then
+    echo >&2 "==> [mem-guard] TEST_OOM_SCORE_ADJ 是空字串，⛔ 不設 --oom-score-adj"
+    return 0
+  fi
+  case "$value" in
+    *[!0-9]*)
+      echo >&2 "==> [mem-guard] TEST_OOM_SCORE_ADJ=$value 不合法：只收 0～1000 的整數（空字串＝不設），中止。"
+      return 1
+      ;;
+  esac
+  # 先去掉前導零再看位數（避免超長的數字在算術比較時溢位）。
+  local digits="${value#"${value%%[!0]*}"}"
+  [ -n "$digits" ] || digits=0
+  if [ "${#digits}" -gt 4 ] || [ "$digits" -gt 1000 ]; then
+    echo >&2 "==> [mem-guard] TEST_OOM_SCORE_ADJ=$value 不合法：只收 0～1000 的整數（空字串＝不設），中止。"
+    return 1
+  fi
+  printf -- '--oom-score-adj=%s\n' "$digits"
 }

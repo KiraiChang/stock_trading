@@ -1,4 +1,4 @@
-# 2 GiB host 的 OOM 改善 計畫 v4（2026-11-02，✅ 決定 D1～D6 依建議定案（2026-11-02）；v2 依 review 修正「二 B」2、3 與「二 D」3；v3 補「二 B」6 的實作細節；v4 補 `COMPOSE_PROJECT_NAME` 的守門；v3、v4 ✅ 使用者 2026-11-02 確認）
+# 2 GiB host 的 OOM 改善 計畫 v4（2026-11-02，✅ 決定 D1～D6 依建議定案（2026-11-02）；v2 依 review 修正「二 B」2、3 與「二 D」3；v3 補「二 B」6 的實作細節；v4 補 `COMPOSE_PROJECT_NAME` 的守門；v5 補「二 D」1 的實作細節；v3～v5 ✅ 使用者 2026-11-02 確認）
 
 需求（使用者 2026-11-02）：Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill；同一階段的 review 也要求補跑 `RACE=1`，
 而這台 host 的可用記憶體不夠跑。範圍（使用者確認）四塊都要涵蓋：讓 `RACE=1` 跑得動、dev 驗收流程、Claude session 本身、host 整體配置。
@@ -99,6 +99,16 @@
    dev compose 的每個服務加 `oom_score_adj: 500`。live、Claude 維持 0。效果：host 記憶體見底時，先砍可以重來的東西。
    ⚠️ 兩個限制要照實寫：① BuildKit 的 build 步驟設不到 adj，所以 build 仍要靠 B1／C1；② Virtuozzo 的 OOM 是否照 `oom_score_adj` 挑對象
    ⛔ 沒有實測，而且⛔ 不能安全地實測（逼出 OOM 會波及 live），只能驗證值有沒有套上去。
+   **實作細節**（v5 補充；✅ 使用者 2026-11-02 確認）：
+   * 共用參數放在 `scripts/lib/mem-guard.sh`（三支 `test.sh` 本來就 source 它）：一個函式把 `--oom-score-adj=<值>` 加進呼叫端的 docker 參數陣列。
+     另外 8 支 source 它的腳本（migration、replay 系列）⛔ 不呼叫這個函式，行為不變。
+   * `TEST_OOM_SCORE_ADJ`（預設 1000）：設成空字串就⛔ 不帶參數——萬一這台 Virtuozzo 的 docker 拒絕它，三支測試會全部起不來，這個開關讓人⛔ 不必改程式就能先繞過。
+     值只收 0～1000 的整數，其他值在任何 docker 指令之前就中止；負值⛔ 不收（那是反過來保護測試 container，違背 D4）。
+   * dev compose 加在共用的資源限制 anchor，5 個服務（含 profile 的 python-worker）一次套上。
+   * 範圍只有三支 `test.sh`：其他會起測試 container 的腳本（migration 測試、replay 系列、`test-redis-emission.sh`、python `test.sh` 內部呼叫的 `test-replay-args.sh`）⛔ 不在這次範圍。
+   * 實跑併進交接腳本 `run-smoke.sh`：S1 之後查四個 dev container 的 `HostConfig.OomScoreAdj` 與實際行程的值（從 host 讀 `/proc/<State.Pid>/oom_score_adj`，
+     與 container 內的 PID 1 是同一個行程，⛔ 不依賴 image 裡有沒有 `cat`）；收尾 down 之後新增 S5，背景跑一次很小的 `backend/scripts/test.sh`，
+     抓到新出現的測試 container 就查同樣兩個值。
 2. **dev stack 只在驗收時開**，驗完 `down`（既有做法，寫成規則）。
 3. **`mem_limit` 這次⛔ 不調整數值**（v2 修正理由）：
    * 它做得到的：`mem_limit` 是單一 container 的**硬上限**，用量撞到它時由那個 container 的 cgroup 處理（在 container 裡面挑行程砍），
@@ -170,6 +180,9 @@
 * `docs/development-workflow.md`：「Race detector」（執行方式、前置檢查、時段）、「`MEM` 是上限，不是預留」（犧牲順序、`mem_limit` 做得到與做不到的事）、
   「2. 啟動 dev stack 做 smoke test」（新選項、cron 的推算時機、被砍之後的接手程序）。
 * `backend/scripts/test.sh` 檔頭：race 的前置檢查。
+* `scripts/lib/mem-guard.sh` 檔頭：`TEST_OOM_SCORE_ADJ`（已隨「二 D」1 寫入）。
+* ⚠️ 程式註解裡指向本計畫書的引用（`backend/scripts/test.sh` 的 A4；三支 `test.sh`、`mem-guard.sh`、`docker-compose.dev.yml` 的「二 D」1），
+  收斂、刪除計畫書時要改指 `development-workflow.md` 的對應節，⛔ 不能留下斷鏈。
 
 ## 十、實作紀錄
 
@@ -245,6 +258,51 @@
     S1 預設（涵蓋 ④；每 2 秒記 MemAvailable，對照兩個 build 的起訖找低點，記 `CACHED` 行數——cache 熱的低點⛔ 不能代表冷 build）；
     S2 情境 ①；S3 情境 ② 加 `OVERRIDE`（只設 `LOG_RETENTION_DAYS=13`，驗 postgres、redis ⛔ 沒有重啟、只重建 backend、值有進 container，只數那一個鍵、⛔ 不印環境變數）；
     S4 情境 ③；收尾 down（⛔ 不帶 `-v`），非 dev 的 container 前後對照。腳本先用假的 `docker` 空跑過一次，流程與摘要行正常。新 session 讀 `summary.txt` 寫回這裡。
+* **「二 D」1 已實作**（2026-11-02，依「二 D」1 的 v5 實作細節；⚠️ 待 review、待實跑驗收）：
+  * `scripts/lib/mem-guard.sh` 新增 `mem_guard_oom_arg`：回傳 `--oom-score-adj=<TEST_OOM_SCORE_ADJ，預設 1000>`；空字串回傳空字串（⛔ 不帶參數）；
+    其他值（非數字、負值、超過 1000）印錯誤並回 1。前導零先去掉再看位數，`0999` 視為 999。
+  * 三支 `test.sh` 在 mem-guard 之後、任何 docker 指令之前取得參數（不合法就中止），加進 `docker run` 的參數；檔頭各補一行說明。
+  * `docker-compose.dev.yml` 的 `x-dev-resource-limits` 加 `oom_score_adj: 500`（附註解寫明兩個限制）。
+  * 輕量驗證（⛔ 沒有起真的 container）：
+    * 四支腳本 `bash -n` 通過。
+    * 假的 `docker`（逐字記錄參數），在 scratchpad 的新舊兩棵目錄樹跑（doc-refs 等非 docker 步驟以 stub 代替，`MEM_FORCE=1` 排除 mem-guard 的差異）：
+      backend 一般與 `RACE=1`、frontend（`VITEST_ARGS`，npm ci＋vitest 兩次 run）、python（`SKIP_SHELL_TESTS=1`）——
+      新版的每個 `docker run` 都帶 `--oom-score-adj=1000`，拿掉它之後與 HEAD 的舊版逐字相同；`TEST_OOM_SCORE_ADJ=` 時與舊版逐字相同；
+      python 的 `docker build` ⛔ 沒有帶（BuildKit 的限制，照預期）。
+    * 不合法的值（`abc`、`1001`、`-5`、`10000`、`' 5'`、`5x`、`00000001001`）：三支都 rc 1、⛔ 沒有任何 docker 呼叫；
+      `0`、`00100`、`1000`、`0999`、`0000` 收下，分別帶 0、100、1000、999、0。
+    * `docker compose -f docker-compose.dev.yml --profile worker config --no-interpolate`：5 個服務都是 `oom_score_adj: 500`。
+  * 實跑併進 `run-smoke.sh`（✅ 使用者選擇）：S1 之後查 postgres、redis、backend、python-server 的 `HostConfig.OomScoreAdj` 與 `/proc/<State.Pid>/oom_score_adj`（預期 500/500）；
+    收尾 down 之後的 S5 背景跑 `backend/scripts/test.sh ./pkg/timeutil/`，每 0.5 秒找新出現的 `golang:1.25-alpine` container（排除執行前就在的），查同樣兩個值（預期 1000/1000）。
+    查詢失敗照 P2 的規則標「查詢失敗」、最後 rc 非 0；docker 拒絕參數時會顯示「沒抓到測試 container」與測試的 rc。
+    假的 `docker` 空跑 7 條路徑都符合預期：正常（S5 讀的是真的行程，值由參數設定）、docker 拒絕參數、`inspect` 失敗、`ps` 失敗、
+    使用者 shell 設了 `TEST_OOM_SCORE_ADJ`（⛔ 不影響 S5）、沒有 dev container、dev 的值不符。⚠️ 這支腳本已改，要再 review。
+  * ⛔ 不在範圍：三支 `test.sh` 以外會起測試 container 的腳本（migration 測試、replay 系列、`test-redis-emission.sh`、python `test.sh` 內部呼叫的 `test-replay-args.sh`）。
+  * **review 修正（P2）：S5 沒有確認讀到的是這次的 container**（2026-11-02；repo 的參數接入、數值邊界、三支腳本的預設／停用／非法值、dev 的 500 都 ✅ review 通過）：
+    原本取「同一個 image 新出現的第一個 ID」，別的同 image container 同時出現時會讀到它的值——這次的測試被拒絕、對方剛好是 1000 時，還會顯示 1000/1000。
+    修正：用 `--cidfile` 精準配對、⛔ 不再用 image 篩選。`backend/scripts/test.sh` 的參數是寫死的，所以只在這次測試的子行程裡於 PATH 最前面放一個轉接用的 `docker`，
+    只對 `docker run` 加 `--cidfile`、其他參數原樣交給真的 docker（`--oom-score-adj` 仍來自 `test.sh`；⛔ 不改 repo）。沒有 cidfile → 「這次的測試 container 沒有建立」；
+    有 cidfile 但查不到 → 「查詢失敗」（docker 在啟動時拒絕參數也是這樣）；兩者都讓最後的 rc 非 0。
+    驗證（假的 `docker` 會寫 cidfile、模擬建立時與啟動時的拒絕，以及同 image 的別的 container）：對照組——修正前的版本在「這次被拒絕、別的是 1000」時顯示 1000/1000，
+    在「同時有別的是 777」時讀到 777；新版前者顯示「沒有建立」、rc 1，後者讀到這次的 1000/1000（摘要的 container ID 與 cidfile 一致、與別的不同）；
+    啟動時被拒絕 → 「查詢失敗」、rc 1；`inspect` 失敗 → rc 1；正常 → rc 0；使用者 shell 設了 `TEST_OOM_SCORE_ADJ` 也⛔ 不影響。轉接的 `docker` 只加了 `--cidfile`，其餘參數與 `test.sh` 給的相同。
+  * **review 修正（P2）：cidfile 一出現就只查一次，會把還在啟動的 container 判成查詢失敗**（2026-11-02）：docker 先建立 container、寫 cidfile，之後才啟動，
+    這段空窗的 `State.Pid` 是 0，原本的檢查把 Pid 0 當成查詢失敗。
+    修正：檢查函式分三種結果——讀到值；查詢失敗；container 存在但還沒有行程（印 `State.Status`）。S5 遇到「還沒有行程」就每 0.2 秒再查，直到啟動、查不到、
+    測試結束或 600 秒，後三者分別標「查詢失敗」「沒有啟動」「等不到」，都讓最後的 rc 非 0。同一類的 dev container 檢查：Pid 0 改標「沒有在跑（狀態）」，
+    ⛔ 不等待（健康檢查通過後本來就該在跑），判讀算無法判定。
+    驗證（假的 `docker` 在寫 cidfile 之後先停在 `created` 一段時間）：對照組——修正前的版本在有空窗時判成「查詢失敗」、rc 1，dev 的 Pid 0 也標成「查詢失敗」；
+    新版有空窗時等到啟動後讀到 1000/1000、rc 0（等待期間查了 10 次）；空窗後啟動被拒絕 → 「查詢失敗」、rc 1；一直停在 `created` 而測試結束 → 「沒有啟動」、rc 1；
+    逾時（把等待上限縮短的複本）→ 「等不到」、rc 1；dev 的 Pid 0 → 「沒有在跑（restarting）」、rc 1；沒有空窗與建立時被拒絕的路徑結果不變。
+  * **review 修正：逾時後仍會無限等待測試子程序**（2026-11-02）：輪詢結束後無條件 `wait`，docker 卡在啟動時永遠不會結束，走不到「等不到」的判定。
+    修正：S5 的測試改由 `timeout -k 10s 900s` 啟動（它自成 process group，逾時或收到 TERM 時轉給整個測試，10 秒後補 KILL），任何路徑的 `wait` 最多 910 秒；
+    等 cidfile 與等啟動共用 600 秒的期限；逾時時先記錄「等不到」（分「沒有 cidfile」與「停在 created」），再對 `timeout` 送 TERM、最多等 20 秒（仍在就 KILL 它並註記「可能殘留」）、回收。
+    另外清掉這次的 container（✅ 使用者確認）：`timeout 30s docker rm -f <cid>`，只對 cidfile 讀到、驗過格式的 64 碼 ID；「沒有啟動」（測試結束時 container 仍停在 `created`）
+    也一併清，因為同樣是 `--rm` 處理不到的狀態。
+    驗證（假的 `docker` 可卡在建立之前或啟動、可忽略 TERM；期限縮短的隔離複本）：對照組——修正前的版本卡在 `wait`，被外層在 25 秒時 KILL（rc 137）；
+    新版卡在啟動 → 3 秒走到「等不到」、測試 rc 143、清掉這次的 container；卡在建立之前 → 「等不到建立」、⛔ 沒有呼叫 `rm`；忽略 TERM → 13 秒（10 秒後補 KILL）、測試 rc 137；
+    「沒有啟動」→ 清掉 container；正常路徑結果不變；每條路徑之後都⛔ 沒有殘留的假行程。「`timeout` 本身 20 秒內⛔ 沒有結束」的後備路徑⛔ 沒有實測（`timeout` 送完 KILL 就會結束，模擬不出來）。
+    同類掃過：S1～S4 在前景呼叫 `smoke-dev.sh`，它的健康檢查有 `WAIT_SECONDS` 上限，build 與 up 則沒有（build 本來就可能很久）——屬於 `smoke-dev.sh` 本身的行為，這次⛔ 不動。
 
 ## 九、修訂紀錄
 
@@ -254,3 +312,4 @@
 | v2 | 2026-11-02 | 依 review 修正：#1「二 B」3 補部分服務模式的規則——依賴的啟動順序（`--wait` 等到 healthy 才 `--no-deps`）、dev 已經 down 時也成立、健康檢查只看選了的服務、⛔ 不需要 python 的限制；「二 B」2 改成 `NO_BUILD` 只跳過 down 與 build；「六」補四個情境。#2「二 D」3 改寫 `mem_limit` 的理由：硬上限能降低風險，但⛔ 不保證整機總量、⛔ 不涵蓋 BuildKit 與 host 上的程序；維持本次⛔ 不調整數值；「八」同步。另把 A6 的描述對齊「十」的實際做法 |
 | v3 | 2026-11-02 | 實作 B1～B4 前補「二 B」6 的實作細節（✅ 使用者確認）：部分服務模式只 build 選了的服務；`NO_BUILD` 時 `up` 加 `--no-build`；`OVERRIDE` 的路徑解析、存在檢查與單一檔；`SERVICES` 的分隔與空值；診斷印哪些 log；模式摘要。「六」補假 `docker` 的模式驗證 |
 | v4 | 2026-11-02 | 依 review（交接腳本 `run-smoke.sh` 的 P1：沒有固定 dev 的檔案與 project）查出 `smoke-dev.sh` 本身也會被 `COMPOSE_PROJECT_NAME` 導到別的 project（改版前就有）；「二 B」6 補「有設定就中止」（✅ 使用者確認） |
+| v5 | 2026-11-02 | 實作「二 D」1 前補實作細節（✅ 使用者確認）：共用參數放在 `mem-guard.sh`；`TEST_OOM_SCORE_ADJ` 的預設、關閉與合法範圍；dev compose 加在 anchor；範圍只有三支 `test.sh`；實跑併進 `run-smoke.sh`（S1 之後與新的 S5） |

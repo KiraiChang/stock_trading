@@ -5,6 +5,10 @@ x-dev-resource-limits: &dev-resource-limits
   mem_limit: 512m
   memswap_limit: 768m
   pids_limit: 200
+  # host 記憶體見底時讓 kernel 先砍 dev（可以重來），而不是 claude 或 live（兩者維持 0）；
+  # 測試 container 是 1000，比 dev 更先犧牲。見 docs/plans/oom-mitigation.md「二 D」1。
+  # 限制：BuildKit 的 build 步驟設不到；Virtuozzo 的 OOM 是否照它挑對象沒有實測。
+  oom_score_adj: 500
 
 services:
   postgres:

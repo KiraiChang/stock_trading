@@ -18,6 +18,7 @@
 #   CACHE_DIR   build/module 快取根目錄（預設 ~/.cache/stock_trading）
 #   GO_MEMLIMIT 單一 go 子行程的 heap 軟上限（預設 250MiB，見下方設計重點）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
+#   TEST_OOM_SCORE_ADJ  測試 container 的 --oom-score-adj（預設 1000；空字串＝不設），見 scripts/lib/mem-guard.sh
 #
 # 設計重點：
 #   - GOMAXPROCS=1 + GOFLAGS=-p=1：本機只有 2GiB RAM，平行編譯會 OOM，必須序列化。
@@ -87,6 +88,8 @@ CPUS="${CPUS:-1}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
+# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
 # race 的前置檢查（docs/plans/oom-mitigation.md 的 A4）：race 版 modernc.org/sqlite/lib 的 compile
 # 要 700m 才跑得完（檔頭「race 模式的記憶體」）。mem-guard 下修到它以下就**直接中止**——
@@ -127,6 +130,7 @@ DOCKER_ARGS=(
   --memory="$MEM"
   --memory-swap="$MEMSWAP"
   --pids-limit=200
+  ${OOM_ARG:+"$OOM_ARG"}
   -e HOME=/tmp
   -e GOMAXPROCS=1
   -e GOFLAGS=-p=1

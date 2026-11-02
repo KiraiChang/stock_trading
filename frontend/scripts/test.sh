@@ -18,6 +18,7 @@
 #   DIST_AUTOSTAGE=1  build 後把 dist 的未追蹤檔案自動 git add（預設 0＝只檢查，
 #                     有未納入版控的檔案就失敗）
 #   MEM_RESERVE_MB / MEM_STRICT / MEM_FORCE  見 scripts/lib/mem-guard.sh
+#   TEST_OOM_SCORE_ADJ  測試 container 的 --oom-score-adj（預設 1000；空字串＝不設），見 scripts/lib/mem-guard.sh
 #
 # 設計重點：
 #   - 掛載 repo root 而非 frontend/：vite.config.ts 的 outDir 是
@@ -53,6 +54,8 @@ SVELTE_CHECK_MIN_HEAP_MB="${SVELTE_CHECK_MIN_HEAP_MB:-225}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
+# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
 # node heap 要留空間給 container 內的其他用量（node 自身的 RSS 開銷、esbuild／svelte-check
 # 子行程、page cache）。護欄把 MEM 下修後若沒跟著調，heap 上限會逼近甚至超過 container
@@ -76,6 +79,7 @@ DOCKER_ARGS=(
   --memory="$MEM"
   --memory-swap="$MEMSWAP"
   --pids-limit=200
+  ${OOM_ARG:+"$OOM_ARG"}
   # node 撞到 heap 上限時是 SIGABRT，預設會把 1.3GB 的 core dump 丟進 repo（掛載的 workdir）。
   # 記憶體吃緊時 svelte-check 本來就可能 OOM，不該每次都附贈一顆巨大的垃圾檔。
   --ulimit core=0

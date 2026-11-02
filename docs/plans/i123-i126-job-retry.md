@@ -1,6 +1,6 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
-> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B ✅ review 通過（2026-11-02）、commit `a1e6075`——review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` 依 T-078（已收斂；現行做法見 [`development-workflow.md`](../development-workflow.md)「Race detector」）補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」）。下一步是「九」第 4 步：使用者部署 live。
+> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B ✅ review 通過（2026-11-02）、commit `a1e6075`——review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` 依 T-078（已收斂；現行做法見 [`development-workflow.md`](../development-workflow.md)「Race detector」）補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」）。「九」第 4 步：✅ 2026-11-02 17:39 上 live、三項確認通過（「十二」的「live 部署」）；⚠️ 觀察 11-03 起的 5 個交易日。
 > 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
@@ -296,7 +296,7 @@
 1. 使用者確認本計畫（含 D1～D6）。
 2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（✅ `7a9f0cb`）
 3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。（✅ 2026-11-02 review 通過、commit `a1e6075`；dev 實測、review 修正 R1、R2、`RACE=1` 都通過：「十二」）
-4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。
+4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。（✅ 2026-11-02 部署、三項確認通過；⚠️ 觀察 11-03 起：「十二」）
 5. 收斂：歸檔（「十」）、I-123～I-126 與 I-122 一起收斂（I-122 的證據到這時才刪）。
 
 ## 十、完成後的歸檔位置
@@ -306,7 +306,7 @@
 * `docs/api-reference.md`：`/scheduler/status` 的狀態語意（整輪失敗記 failed 與 `0/0` 的意思、`error` 的重跑文字、`aborted` 的新訊息、
   `running` 的判讀規則與**結束寫入重試全部失敗時的剩餘限制**）；兩個手動端點的 409。
 * `docs/yahoo-intraday-integration.md`：同一輪內的批次重試與整輪預算，以及「之後成功的一輪會補回漏掉的棒、13:30 那輪例外」的結論。
-* `docs/development-workflow.md`：「新增排程開關要改三個地方」補上 `JOB_RETRY_*` 這個實例（若部署時又踩到差異）。
+* `docs/development-workflow.md`：「新增排程開關要改三個地方」補上 `JOB_RETRY_*` 這個實例（2026-11-02 部署時確實踩到：live 的 `compose.yml` 漏了四個鍵，開關靜默失效；見「十二」的「live 部署」）。
 * `issue.md`：I-123、I-124 收斂時把「⛔ 不追查原因、由重跑吸收」與 I-122 的觀察數字歸到 `data-pipeline.md` 的重跑段。
 
 ## 十一、修訂紀錄
@@ -474,3 +474,21 @@ review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` �
   * ⚠️ 涵蓋範圍：綠燈只代表這些測試實際產生的交錯裡沒有 race，⛔ 不等於所有交錯都驗過（原因見 [`development-workflow.md`](../development-workflow.md)「Race detector」的「綠燈的涵蓋範圍」）。
   * 判讀的證據、記憶體與時段見 `git show 60576e1:docs/plans/oom-mitigation.md` 的「十」「第二次執行」；repo 外的 log（`~/.cache/stock_trading/race-logs/20261102/`）已於 2026-11-02 T-078 收斂時刪除（使用者同意）。
 * 附帶發現（⛔ 沒有改）：HEAD 的 `scheduler_test.go` 有一處多的空行，`go fmt` 會改它；不在本次範圍，已還原。
+
+### live 部署（2026-11-02，使用者執行；Claude 唯讀確認）
+
+* **第一次部署（container 17:30:31 啟動）**：新程式已上 live（啟動 log 有 `job retry config`，那行是階段 B 才加的），但 live 的 `compose.yml`
+  ⛔ 沒有四個 `JOB_RETRY_*` 鍵（`grep -c` 各 0），container 裡的 `JOB_RETRY_ENABLED` 是空的、啟動 log 是 `enabled: false`——
+  就是「3.7」說的「漏一處，開關就會靜默失效」。層四與 I-126 不受開關控制，這時已經生效。
+* **補設定後重新部署**：建置在取得 token 時 DNS 逾時（`lookup auth.docker.io: i/o timeout`，解析 `FROM alpine:3.20` 時），build 失敗
+  （查詢的程序與解析路徑⛔ 未確認；記進 `issue.md` I-123「之後的案例」）；稍後重跑成功。
+* **第二次部署（container 17:39:35 啟動）＝現況**，「3.7」的三項確認都通過：
+  1. `docker exec stock_trading-backend-1 sh -c 'echo $JOB_RETRY_ENABLED'` → `true`。
+  2. 啟動 log：`enabled: true`、`interval: 600`（10 分鐘）、`max_reruns: 3`、`cutoff: 08:45`、最晚起跑 公司行動 07:57、主檔 08:22、對帳 08:37。
+  3. live 的 `compose.yml` 四個鍵各 1 次；`deploy.sh` 的 `JOB_RETRY_ENABLED` 1 次——後者由使用者在自己的終端機執行 `grep -c`
+     （Claude 的執行環境裡同一個指令什麼都沒印、也⛔ 沒有錯誤訊息，使用者推測是沒有讀取權限，⛔ 沒有查）。
+  * container running、重啟 0 次。image 的建立時間是 16:24:10，與同一天 dev smoke 實跑的 backend build 完成時刻相同——看起來 live 的 build
+    完全命中 cache、產出同一個 image，所以**建立時間⛔ 不能拿來判斷 image 新舊**；新程式的證據是第 2 項那行 log。backend 的 Go 程式在 `a1e6075` 之後⛔ 沒有變更。
+  * 查詢一律唯讀：container 只看 `JOB_RETRY_ENABLED` 這一個變數；live 的兩份設定只數鍵名，⛔ 沒有印任何一行內容。
+* **觀察**：11-02 的早上批次在部署之前就跑完了，5 個交易日的觀察從 **11-03 06:30** 的批次起算。看的是「八」的三件事：
+  `job_runs` 有沒有「失敗 → 重跑成功」、`intraday` 的失敗輪數有沒有下降、⛔ 沒有重疊執行。觀察完才進「九」第 5 步（I-122～I-126 一起收斂）。

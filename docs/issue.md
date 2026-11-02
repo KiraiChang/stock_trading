@@ -3290,7 +3290,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（⛔ 不追查原因——使用者 2026-10-30 裁決：視為網路波動或第三方維修，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑（階段 B）✅ review 通過（2026-11-02，commit `a1e6075`）；live 的部署與觀察由使用者執行） |
+| 狀態 | 進行中（⛔ 不追查原因——使用者 2026-10-30 裁決：視為網路波動或第三方維修，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑（階段 B）✅ review 通過（2026-11-02，commit `a1e6075`）；✅ 2026-11-02 17:39 上 live（重跑已開，三項確認通過）；⚠️ 觀察 11-03 起的 5 個交易日（使用者執行）） |
 | 嚴重度 | 中～高：每個交易日都有批次失敗，而且在增加；影響盤中報價（`intraday`）、股票主檔同步與終止上市對帳、公司行動同步 |
 | 分類 | 基礎設施 / live 主機的 Docker 網路 |
 | 建立日期 | 2026-10-30 |
@@ -3313,6 +3313,16 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 * DNS 逾時出現在兩個不同的網域——⛔ 不是單一上游。10-28 06:13Z backend 容器重建之後兩種都仍然發生。
 * 10-22 06:30～10-28 14:13 log 完整的期間，其他工作的 log ⛔ 沒有這兩種錯誤。
 
+#### 之後的案例（I-122 的證據以外）
+
+* **2026-11-02 17:30～17:39 之間，部署時的 docker build**：I-123～I-126 補 live 設定後重新部署時，建置在取得 token 時 DNS 逾時
+  （`failed to fetch anonymous token: … dial tcp: lookup auth.docker.io: i/o timeout`，解析 `FROM alpine:3.20` 時），build 失敗；
+  稍後重跑成功（17:39 部署完成，見計畫書「十二」的「live 部署」）。同一天 16:20 的 dev build，同一步「load metadata for alpine:3.20」花了 22.7 秒
+  （其他 metadata 都是 0 秒；原因⛔ 未確認；那份 log 已隨 T-078 收斂刪除）。
+  * 查詢由哪個程序發出、走哪條解析路徑（dockerd、BuildKit 的 client session、上游 DNS），光憑這段錯誤⛔ 無法確認——列為**未確認**；
+    依 2026-10-30 的裁決⛔ 不另行追查。
+  * 對處置的影響：自動重跑只涵蓋 backend 程式裡的工作；**部署時的 docker build ⛔ 不在重跑範圍**，遇到時等一下再重跑部署。
+
 #### 判讀（⚠️ 推論）
 
 * **DNS 查詢逾時**：容器經 Docker 內建 DNS（`127.0.0.11:53`）查詢時，間歇在 10 秒內沒有回應（直接證據）。問題可能在 host 的上游 DNS
@@ -3333,7 +3343,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（⛔ 不追查原因、下方「待查」的 log ⛔ 不再收集——使用者 2026-10-30 裁決：視為暫時性狀況，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑（階段 B）✅ review 通過（2026-11-02，commit `a1e6075`）；live 的部署與觀察由使用者執行） |
+| 狀態 | 進行中（⛔ 不追查原因、下方「待查」的 log ⛔ 不再收集——使用者 2026-10-30 裁決：視為暫時性狀況，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑（階段 B）✅ review 通過（2026-11-02，commit `a1e6075`）；✅ 2026-11-02 17:39 上 live（重跑已開，三項確認通過）；⚠️ 觀察 11-03 起的 5 個交易日（使用者執行）） |
 | 嚴重度 | 中：DB 重啟期間所有讀寫都失敗；這次讓 `corporate_action_sync` 整輪中止，結束狀態也寫不進去（I-125） |
 | 分類 | 基礎設施 / live 的 postgres（`postgres-postgres-1`） |
 | 建立日期 | 2026-10-30 |
@@ -3358,7 +3368,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的結束寫入重試與中性的回收訊息已 review、commit `7a9f0cb`；待 live 部署後與 I-122～I-126 一起收斂） |
+| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的結束寫入重試與中性的回收訊息已 review、commit `7a9f0cb`；✅ 2026-11-02 已上 live；待觀察 5 個交易日後與 I-122～I-126 一起收斂） |
 | 嚴重度 | 中：**本次觀察到的影響**只在紀錄與狀態頁（「這輪是失敗還是被中斷」判斷錯、狀態頁顯示假的「執行中」）；但結束寫入是**所有工作共用的路徑**，依賴 `job_runs` 狀態的下游會被擋住（見「潛在影響」，⚠️ 讀碼推論、尚未實際發生） |
 | 分類 | Backend / 排程（`job_runs`） |
 | 建立日期 | 2026-10-30 |
@@ -3390,7 +3400,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的兩項已 review、commit `7a9f0cb`；待 live 部署後與 I-122～I-126 一起收斂） |
+| 狀態 | 進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的兩項已 review、commit `7a9f0cb`；✅ 2026-11-02 已上 live；待觀察 5 個交易日後與 I-122～I-126 一起收斂） |
 | 嚴重度 | 低～中：誤導判讀，⛔ 不影響執行——要看 log 才知道真正的情況 |
 | 分類 | Backend / 排程（`job_runs` 的狀態推導與原因） |
 | 建立日期 | 2026-10-30 |

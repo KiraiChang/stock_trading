@@ -1,4 +1,4 @@
-# 2 GiB host 的 OOM 改善 計畫 v2（2026-11-02，✅ 決定 D1～D6 依建議定案（2026-11-02）；v2 依 review 修正「二 B」2、3 與「二 D」3）
+# 2 GiB host 的 OOM 改善 計畫 v4（2026-11-02，✅ 決定 D1～D6 依建議定案（2026-11-02）；v2 依 review 修正「二 B」2、3 與「二 D」3；v3 補「二 B」6 的實作細節；v4 補 `COMPOSE_PROJECT_NAME` 的守門；v3、v4 ✅ 使用者 2026-11-02 確認）
 
 需求（使用者 2026-11-02）：Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill；同一階段的 review 也要求補跑 `RACE=1`，
 而這台 host 的可用記憶體不夠跑。範圍（使用者確認）四塊都要涵蓋：讓 `RACE=1` 跑得動、dev 驗收流程、Claude session 本身、host 整體配置。
@@ -70,6 +70,19 @@
 5. **文件**：`development-workflow.md`「2. 啟動 dev stack 做 smoke test」補上兩件事：
    * cron 要在**容器起來之後**才推算（這次在 build 之前算「+4 分鐘」，build 花了約 7 分鐘就錯過了）。
    * 判斷「image 是否已是現行程式碼」的做法（該文件已有 backend 比對建置時間的段落，沿用）。
+6. **實作細節**（v3 補充；✅ 使用者 2026-11-02 確認）：
+   * 部分服務模式**只 build 選了的服務**（只起 backend 就⛔ 不 build python-server）；兩個都選或預設時，依序 build 兩個。
+   * `NO_BUILD=1` 時 `up` 一律加 `--no-build`：image 不存在就直接失敗。compose 遇到缺 image 的 build 服務會在 `up` 時自己 build，⛔ 不能讓它這樣補。
+     `NO_BUILD=1` 也一併跳過 down，`SKIP_DOWN` 的值⛔ 不影響。
+   * `OVERRIDE`：相對路徑以**呼叫時的目錄**解析成絕對路徑（腳本會 `cd` 到 repo 根目錄）；檔案不存在就在任何 docker 指令之前中止；只收一個檔。
+     override 檔裡的相對路徑照 compose 的規則，以第一個 `-f`（repo 根目錄的 dev compose）為基準。
+   * `SERVICES`：以空白或逗號分隔；重複的名稱忽略；空字串（或只有分隔符號）等於預設。
+   * 診斷：等依賴逾時，印 postgres、redis 的 log；其他失敗印選了的服務的 log（現在固定印 backend 與 python-server）。
+   * 開頭印一行模式摘要：選了的服務、`NO_BUILD`、override 檔。
+   * **`COMPOSE_PROJECT_NAME` 有設定（含空字串）就中止**（v4；✅ 使用者 2026-11-02 確認）：compose 讓這個環境變數優先於 compose 檔的 `name:`
+     （2026-11-02 以 `config --no-interpolate` 驗證：設成 `zz_probe` 時，dev compose 的 project 就變成 `zz_probe`），
+     腳本的 `down --remove-orphans` 會被導到別的 project。改版前就有這個缺口，⛔ 不是 B1～B4 造成的。中止而⛔ 不是默默清掉：設了它通常代表 shell 正在操作別的 project。
+     `COMPOSE_FILE` 是腳本文件寫明的覆寫，維持不變。
 
 ### C. Claude session（G3）
 
@@ -132,6 +145,9 @@
 ## 六、測試與驗證
 
 * 腳本：`bash -n`；`smoke-dev.sh` 實跑一次（依序 build），build 期間每 2 秒記 MemAvailable，記下低點。
+* `smoke-dev.sh` 的各模式（v3）：在 PATH 前面放假的 `docker`、`curl`，記下每次呼叫的參數，驗呼叫順序——預設（除了 build 拆成兩次，與現在相同）、
+  `NO_BUILD`、只選 backend、只選 python-server、兩個都選（含逗號分隔）、⛔ 不合法的值（中止、⛔ 沒有任何 docker 呼叫）、`OVERRIDE` 的相對路徑與不存在的檔、
+  `--wait` 失敗（印診斷、⛔ 不接著 `--no-deps`）、`SKIP_DOWN=1`。實跑（上一條與下一條）由使用者在 Claude 結束後執行（C1）。
 * 部分服務模式（「二 B」3）：① dev 已經 down 時 `NO_BUILD=1 SERVICES=backend` → postgres、redis 由 `--wait` 起到 healthy、backend 健康檢查通過，
   ⛔ 沒有起 python-server、⛔ 沒有檢查 `PYTHON_URL`；② 依賴已經在跑時再跑一次 → `--wait` 立刻返回、只重建 backend；
   ③ `SERVICES=python-worker` 之類的值 → 直接中止；④ 預設（⛔ 不帶 `SERVICES`）→ 與現在相同，兩個健康檢查都跑。
@@ -201,6 +217,34 @@
   * 涵蓋範圍照上面「涵蓋範圍的修正」：② ③ 的綠燈只代表這些測試實際產生的交錯裡沒有 race，⛔ 不等於所有交錯都驗過。
   * 結果已寫回 [`i123-i126-job-retry.md`](./i123-i126-job-retry.md)「十二」。log 在 repo 外的 `~/.cache/stock_trading/race-logs/20261102/`
     （`summary.txt`、三步各一份 log、① 用的複本 `detector-copy/`、第一次執行的 `run1-1412/`），保存到本計畫與 I-123～I-126 階段 B 的 review 完成。
+* **B1～B4 已實作、✅ 程式 review 通過**（2026-11-02，`scripts/smoke-dev.sh`，依「二 B」1～4 與 6；review 含下面交接腳本的修正；⚠️ 待實跑驗收）：
+  * 依序 build，只 build 選了的服務；`NO_BUILD` 跳過 down 與 build，`up` 加 `--no-build`；`SERVICES` 只選一個時先用 `--wait` 等依賴 healthy，再用 `--no-deps` 起它，
+    健康檢查與診斷只看選了的服務，只選 backend 時印提醒；`OVERRIDE` 的相對路徑以呼叫時的目錄解析，檔案不存在就中止。檔頭的 usage 補上新變數，既有變數的行為不變。
+  * 輕量驗證（⛔ 沒有碰真的 docker）：`bash -n` 通過（這台 host ⛔ 沒有 shellcheck）。PATH 前面放假的 `docker`、`curl`，記下每次呼叫的參數，20 個情境全部符合預期——
+    預設、`NO_BUILD`、只選 backend、只選 python-server、兩個都選（逗號、重複、空字串、只有分隔符號）、⛔ 不合法的值 3 種（rc 2、⛔ 沒有任何 docker 呼叫）、
+    `OVERRIDE` 的相對路徑與絕對路徑、不存在的檔與目錄（rc 2）、`--wait` 失敗（印 postgres、redis 的 log，⛔ 沒有接著 `--no-deps`）、`SKIP_DOWN=1`、
+    部分與全部模式的健康檢查失敗、build 失敗（停在第一個 build）。
+  * 與 HEAD 的舊版對照：預設與健康檢查失敗兩條路徑，除了 build 拆成 `build backend`、`build python-server` 兩次，其餘呼叫相同。
+    對照組：拿掉 `--no-deps` 的複本跑「只選 backend」→ 比對抓到差異，比對本身有效。
+  * v4 的 `COMPOSE_PROJECT_NAME` 守門：設成 `stock_trading`、空字串、搭配部分服務模式三種，都是 rc 2、⛔ 沒有任何 docker 呼叫；
+    HEAD 的舊版在同樣設定下照常 down、build、up（對照組）。連同上面共 27 項全部符合預期。
+* **交接腳本 `run-smoke.sh` 的 review 修正**（2026-11-02，review 發現 2 項，都已用假的 `docker` 重現；腳本在 repo 外）：
+  * P1 沒有固定 dev 的檔案與 project：繼承了 `COMPOSE_FILE`、`COMPOSE_PROJECT_NAME`，S1 的 `down --remove-orphans` 會被導到別份 compose 或別的 project。
+    修正：開頭清掉所有 `COMPOSE_*` 環境變數；compose 一律帶 `-p stock_trading_dev -f <dev compose>`；呼叫 `smoke-dev.sh` 時把 `COMPOSE_FILE` 明確設成 dev compose；
+    前置檢查用 `config --no-interpolate` 確認 dev compose 解析出的 project 是 `stock_trading_dev`（查詢失敗或名稱不符就中止）；`DOCKER_HOST`、`DOCKER_CONTEXT` 有設定就中止。
+    這項也查出 `smoke-dev.sh` 本身的缺口，見「二 B」6 的 v4。
+  * P2 查詢失敗被當成「沒有 container」：`docker ps`／`inspect` 前後都失敗時，摘要顯示「0 個」「前後相同＝是」、rc 0。
+    修正：查詢函式一律檢查結束碼，「查詢失敗」與「確實沒有」分開。執行前失敗就中止；之後失敗照常收尾 down，摘要標「查詢失敗」，最後 rc 非 0。
+    同一類的另外三處一起改：S2 與 S4 的 `compose ps`、S3 的啟動時間（原本兩次都查不到時都是 `none`，會顯示「未重啟＝是」）、S3 的 backend 環境變數。
+  * 驗證（假的 `docker` 照真實的優先順序回 project 名稱、可指定第幾次查詢失敗）：設了 `COMPOSE_FILE`、`COMPOSE_PROJECT_NAME`、`COMPOSE_PROFILES` 時，
+    新版所有 compose 呼叫都帶 dev compose，也都看不到 `COMPOSE_PROJECT_NAME`；`DOCKER_HOST`、`DOCKER_CONTEXT`、project 名稱不符、`config` 失敗、
+    執行前 `ps` 或 `inspect` 失敗 → 中止、⛔ 沒有 down；執行後查詢失敗 → 標「查詢失敗」、rc 1；正常路徑 rc 0，環境變數只數那一個鍵、⛔ 沒有寫進任何輸出檔。
+    對照組：review 時的版本在同樣設定下重現了兩項（down 帶著 `COMPOSE_PROJECT_NAME`、`smoke-dev.sh` 的 `-f` 指向別份檔；「0 個」「前後相同＝是」、rc 0）。
+  * ⚠️ **實跑尚未執行**（「六」的依序 build 低點與部分服務模式 ①～④）：腳本在 repo 外的 `~/.cache/stock_trading/smoke-logs/20261102/run-smoke.sh`，
+    由使用者在 Claude 結束後執行（C1），建議平日 17:05～22:00。四步：
+    S1 預設（涵蓋 ④；每 2 秒記 MemAvailable，對照兩個 build 的起訖找低點，記 `CACHED` 行數——cache 熱的低點⛔ 不能代表冷 build）；
+    S2 情境 ①；S3 情境 ② 加 `OVERRIDE`（只設 `LOG_RETENTION_DAYS=13`，驗 postgres、redis ⛔ 沒有重啟、只重建 backend、值有進 container，只數那一個鍵、⛔ 不印環境變數）；
+    S4 情境 ③；收尾 down（⛔ 不帶 `-v`），非 dev 的 container 前後對照。腳本先用假的 `docker` 空跑過一次，流程與摘要行正常。新 session 讀 `summary.txt` 寫回這裡。
 
 ## 九、修訂紀錄
 
@@ -208,3 +252,5 @@
 |---|---|---|
 | v1 | 2026-11-02 | 初版 |
 | v2 | 2026-11-02 | 依 review 修正：#1「二 B」3 補部分服務模式的規則——依賴的啟動順序（`--wait` 等到 healthy 才 `--no-deps`）、dev 已經 down 時也成立、健康檢查只看選了的服務、⛔ 不需要 python 的限制；「二 B」2 改成 `NO_BUILD` 只跳過 down 與 build；「六」補四個情境。#2「二 D」3 改寫 `mem_limit` 的理由：硬上限能降低風險，但⛔ 不保證整機總量、⛔ 不涵蓋 BuildKit 與 host 上的程序；維持本次⛔ 不調整數值；「八」同步。另把 A6 的描述對齊「十」的實際做法 |
+| v3 | 2026-11-02 | 實作 B1～B4 前補「二 B」6 的實作細節（✅ 使用者確認）：部分服務模式只 build 選了的服務；`NO_BUILD` 時 `up` 加 `--no-build`；`OVERRIDE` 的路徑解析、存在檢查與單一檔；`SERVICES` 的分隔與空值；診斷印哪些 log；模式摘要。「六」補假 `docker` 的模式驗證 |
+| v4 | 2026-11-02 | 依 review（交接腳本 `run-smoke.sh` 的 P1：沒有固定 dev 的檔案與 project）查出 `smoke-dev.sh` 本身也會被 `COMPOSE_PROJECT_NAME` 導到別的 project（改版前就有）；「二 B」6 補「有設定就中止」（✅ 使用者確認） |

@@ -88,10 +88,10 @@ CPUS="${CPUS:-1}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
-# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+# OOM 時先犧牲測試 container（docs/development-workflow.md「OOM 的犧牲順序」）；值不合法就在任何 docker 指令之前中止。
 OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
-# race 的前置檢查（docs/plans/oom-mitigation.md 的 A4）：race 版 modernc.org/sqlite/lib 的 compile
+# race 的前置檢查（docs/development-workflow.md「Race detector」）：race 版 modernc.org/sqlite/lib 的 compile
 # 要 700m 才跑得完（檔頭「race 模式的記憶體」）。mem-guard 下修到它以下就**直接中止**——
 # ⛔ 不讓它編十分鐘才被 cgroup 砍。
 if [ "$RACE" = "1" ]; then

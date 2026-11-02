@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v5：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案；A3、A4、A1／A6（`RACE=1` 補跑通過）、B1～B4、「二 D」1（OOM 的犧牲順序）✅ 已完成（實跑 2026-11-02 通過）；⚠️ 文件歸檔待做） |
+| 狀態 | 已實作／⚠️ 待 review（計畫 v5：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案；A3、A4、A1／A6（`RACE=1` 補跑通過）、B1～B4、「二 D」1（OOM 的犧牲順序）✅ 已完成（實跑 2026-11-02 通過）；文件已歸檔到 `development-workflow.md`（2026-11-02）。review 確認之後收斂：刪計畫書、移除本筆、改 `plans/i123-i126-job-retry.md` 裡指向計畫書的連結、清 repo 外的 `race-logs/`、`smoke-logs/`） |
 
 ### T-076：`pre_market`、`intraday`、`daily_close` 的排程時間改成可設定（live 由 compose 與 `deploy.sh` 帶入）
 

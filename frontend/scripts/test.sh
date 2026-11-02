@@ -54,7 +54,7 @@ SVELTE_CHECK_MIN_HEAP_MB="${SVELTE_CHECK_MIN_HEAP_MB:-225}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
-# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+# OOM 時先犧牲測試 container（docs/development-workflow.md「OOM 的犧牲順序」）；值不合法就在任何 docker 指令之前中止。
 OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
 # node heap 要留空間給 container 內的其他用量（node 自身的 RSS 開銷、esbuild／svelte-check

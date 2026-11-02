@@ -27,7 +27,7 @@
 #   MEM_STRICT=1    超過上限時不 clamp，直接 abort（CI 或想明確發現設定錯誤時用）
 #   MEM_FORCE=1     完全略過護欄（明確知道自己在做什麼時才用）
 #
-# 測試 container 的 OOM 犧牲順序（docs/plans/oom-mitigation.md「二 D」1）：
+# 測試 container 的 OOM 犧牲順序（docs/development-workflow.md「OOM 的犧牲順序」）：
 #   OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 #   DOCKER_ARGS+=(${OOM_ARG:+"$OOM_ARG"})
 #   TEST_OOM_SCORE_ADJ  測試 container 的 --oom-score-adj，預設 1000：host 記憶體見底時，

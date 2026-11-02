@@ -173,7 +173,7 @@
 3. A3：拉 debian image（先問使用者）；A4：race 的前置檢查。
 4. A1／A6：Claude 寫好暫存腳本、交給使用者在 D2 的時段執行（先 D3 的有效性確認，再正式版）；新 session 讀 log、寫回結果。（✅ 2026-11-02：第二次執行通過，見「十」）
 5. B1～B4、「二 D」1：腳本與 dev compose 的修改 → 驗證（「六」）。（✅ 2026-11-02：實跑通過，見「十」）
-6. 文件（B5、C、D）→ review → 使用者 commit。
+6. 文件（B5、C、D）→ review → 使用者 commit。（✅ 2026-11-02 已歸檔、⚠️ 待 review，見「十」）
 
 ## 八、完成後的歸檔位置
 
@@ -327,6 +327,33 @@
   * 時段：⚠️ 不在 D2（17:05～22:00）。16:00 的 `evaluation_universe_sync` 若 live 有開（dev compose 的註解：約 27 分鐘），可能和這次重疊——⛔ 沒有查 live 的開關；
     前後對照只確認未觀察到 container 重建或重啟，⛔ 未驗證 OOM 事件及批次影響。
   * log 在 repo 外的 `~/.cache/stock_trading/smoke-logs/20261102/`（`summary.txt`、各步的 log、`S1-mem.log`、`s5.cid`、`s5-shim/`），保存到本計畫 review 完成。
+* **文件歸檔**（2026-11-02，依「八」；⚠️ 待 review）：`docs/development-workflow.md`——
+  * 「Race detector」：前置檢查（`RACE_MIN_MB`）、debian image 要事先拉、誰跑與什麼時候跑（使用者在 Claude 結束後、平日 17:05～22:00 或週末、
+    交接腳本與新 session 判讀）、一次一個套件；detector 有效性確認補上「沒有未修復版本時在複本裡改壞」與**改壞方式的規則**（兩次存取之間⛔ 沒有任何同步；
+    第一次報 0 的原因與改法；判讀要看落點）；綠燈的涵蓋範圍。原本的「實務上得先停掉 dev stack 的 python 兩支」改成上面的做法。
+  * 「container 上限的總和」：規則補「dev stack 只在驗收時開，驗完就 `down`」；新增「`mem_limit` 做得到與做不到的事」（「二 D」3）。
+  * 新小節「OOM 的犧牲順序」（「二 D」1）：對象與值、`TEST_OOM_SCORE_ADJ`、2026-11-02 的實測、兩個限制、範圍只有三支 `test.sh`、
+    只記錄由使用者決定的事（其他常駐程序、長期容量，即「二 D」4、5）。護欄開關表補 `TEST_OOM_SCORE_ADJ`。
+  * 新小節「重的步驟與 Claude session」（C，✅ 使用者選擇另開一節）：C1～C3、被砍之後的接手程序，以及「交給使用者執行的腳本怎麼寫」
+    （✅ 使用者要求一併歸檔：操作目標固定在 dev、查詢失敗⛔ 不等於沒有、cidfile 配對與啟動空窗、等待上限與回收、⛔ 不印環境變數、前後對照的意義、假 `docker` 與對照組）。
+  * 「2. 啟動 dev stack 做 smoke test」：流程改成「依序 build」；`NO_BUILD`、`SERVICES`、`OVERRIDE` 的表；只選 backend 的限制；`COMPOSE_PROJECT_NAME` 的守門；
+    cron 要在 container 起來之後才推算（B5）；依序 build 的實測與已知限制（疊加還沒量到）。as-of 階梯一節的「不要為了這件事重建 image」補指向 `NO_BUILD`。
+  * 程式註解改指主題文件（「八」的 ⚠️）：`backend/scripts/test.sh` 的 race 前置檢查改指「Race detector」；三支 `test.sh`、`mem-guard.sh`、`docker-compose.dev.yml` 改指「OOM 的犧牲順序」。
+    repo 裡剩下指向本計畫書的只有 `docs/todo.md` T-078 與 `plans/i123-i126-job-retry.md`，收斂時一起改。
+  * **review 修正（2 項 P2，2026-11-02）**：
+    * cron 的步驟缺「重建 backend」：cron 只在 backend 啟動時讀（`Scheduler.Start` 註冊），改設定⛔ 不會影響正在跑的 backend。
+      改成四步——image 先是現行程式碼 → 重建之前一刻才算時刻（台北時間）並寫進 override → `NO_BUILD=1 SERVICES=backend OVERRIDE=…` 重建 →
+      確認註冊（成功⛔ 沒有逐筆 log，看 `scheduler started` 與⛔ 沒有 `register failed`、只 grep 那一個鍵；最後的證明是時間到時的 `job_runs`；
+      `/scheduler/status` 的 `disabled` 只在⛔ 沒有任何紀錄時才出現）。時區與 log 都先讀程式確認。
+    * 「一律落地」的範例只把結束碼印到終端機：`> log 2>&1; echo $?` 改成在子 shell 裡把 rc 寫進檔案、再以原本的 rc 結束。
+      驗證（bash、zsh 各一次）：對照組——舊寫法在命令以 7 失敗時整段回 0、rc 只出現在終端機、⛔ 沒有 rc 檔；新寫法 `wait` 拿到 7、rc 檔是 `rc=7`、
+      log 同時收到 stdout 與 stderr，⛔ 沒有輸出時 rc 檔照樣寫入。文件裡⛔ 沒有其他同樣的寫法；本計畫「二 C」2 的同一句是歷史原文，收斂時隨計畫書刪除。
+  * **review 修正（第二輪，2 項 P2，2026-11-02；cron 的修正 ✅ 通過）**：「一律落地」的範例——
+    * `set -e` 底下來不及保存失敗碼：子 shell 繼承 errexit，命令一失敗就退出、`test.rc` ⛔ 沒有寫。改成 `if 命令; then rc=0; else rc=$?; fi` 再寫檔；
+      同類一起改：外層開了 `set -e` 時 `wait` 也會被 errexit 中止，範例補 `if wait "$pid"; then rc=0; else rc=$?; fi`。
+    * 舊狀態檔冒充本輪結果：沿用固定目錄時，這一輪在寫入之前被砍，前一輪的 `rc=0` 還留著。改成每輪 `mktemp -d` 一個新目錄；一定要沿用固定目錄就先刪掉舊的 `test.rc`。
+    * 驗證（bash、zsh 各一次）：對照組——舊寫法在 `set -e` 底下命令回 7 時⛔ 沒有 `test.rc`；固定目錄被 KILL（137）時讀到前一輪的 `rc=0`。
+      新寫法在有、沒有 `set -e` 時都寫出 `rc=7`；外層 `if wait` 拿到 7、腳本⛔ 沒有中止；成功時是 `rc=0`；被 KILL 時新目錄裡⛔ 沒有 `test.rc`；⛔ 沒有殘留行程。
 
 ## 九、修訂紀錄
 

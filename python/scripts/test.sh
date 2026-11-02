@@ -42,7 +42,7 @@ CPUS="${CPUS:-1}"
 . "$REPO_ROOT/scripts/lib/mem-guard.sh"
 MEM="$(mem_guard_clamp "$MEM")"
 MEMSWAP="${MEMSWAP:-$MEM}"
-# OOM 時先犧牲測試 container（docs/plans/oom-mitigation.md「二 D」1）；值不合法就在任何 docker 指令之前中止。
+# OOM 時先犧牲測試 container（docs/development-workflow.md「OOM 的犧牲順序」）；值不合法就在任何 docker 指令之前中止。
 OOM_ARG="$(mem_guard_oom_arg)" || exit 1
 
 # 參數原樣轉交 pytest：用 "$@" 而不是把參數併成字串，否則帶空白的參數

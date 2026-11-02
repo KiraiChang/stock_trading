@@ -47,9 +47,21 @@ RACE=1 TEST_FLAGS="-run TestFoo -count=1 -v" backend/scripts/test.sh ./internal/
 瓶頸是 `modernc.org/sqlite/lib`（`internal/store/sqlite.go` 的 blank import 把它拖進
 幾乎每個套件的相依樹），race 版的它單一 compile 峰值約 **510MB**，`MEM` 被下修到 582m
 就會 `compile: signal: killed`，**要 700m 才跑得完**。所以開跑前 `MemAvailable`
-要有 **850MB 以上**（700m ＋ mem-guard 的 150MB 保留），實務上得先停掉 dev stack 的
-python 兩支。完整實測數字與「為什麼 `GO_MEMLIMIT` 不能設 600MiB」記在
-`backend/scripts/test.sh` 檔頭。
+要有 **850MB 以上**（700m ＋ mem-guard 的 150MB 保留）。完整實測數字與「為什麼
+`GO_MEMLIMIT` 不能設 600MiB」記在 `backend/scripts/test.sh` 檔頭。
+
+**前置檢查**：`RACE=1` 時，mem-guard 把 `MEM` 下修到 `RACE_MIN_MB`（預設 700）以下就**直接中止**，
+印出還差多少——⛔ 不讓它編十分鐘才被 cgroup 砍。debian 版 `golang:1.25` 要事先
+`docker pull`（本機平常只有 alpine 版；拉 image 要連外，先問使用者）。
+
+**誰跑、什麼時候跑**（2026-11-02 起的做法）：Claude 在跑、live 也在跑時，白天的 MemAvailable
+約 530～680 MB（2026-11-02 盤點），到不了 850MB。所以 `RACE=1` 由**使用者在結束 Claude 之後**自己的終端機執行——Claude 的
+280～400 MB 空出來、dev stack 停著，MemAvailable 約 900 MB（2026-11-02 實測 940 MB，三個步驟都沒被砍）。
+時段避開 live 的批次：平日 17:05～22:00 或週末。Claude 先把指令寫成 repo 外的暫存腳本
+（輸出與 exit code 寫進 `~/.cache/stock_trading/race-logs/<日期>/`），使用者執行完再開新的 session
+讀 log 判讀。腳本的寫法見下方「重的步驟與 Claude session」。一次只跑一個套件，例如
+`./internal/scheduler/...` 跑完再跑 `./internal/api/handler/`（race 的 compile 結果留在 repo 外的
+`GOCACHE`，第二次便宜很多）。
 
 **什麼時候該用**：改到跨 goroutine 共用的狀態時。一般測試抓不到這類 bug——
 2026-08-18 曾把 `Scheduler.registeredJobs` 的 map 並發讀寫（`Start()` 寫、
@@ -58,7 +70,20 @@ python 兩支。完整實測數字與「為什麼 `GO_MEMLIMIT` 不能設 600MiB
 
 用法上要先確認 detector 對這個案例真的有效：**先在未修復的版本跑一次、確認報出
 `WARNING: DATA RACE`**，再套修復重跑。少了這一步，「跑完是綠的」也可能只代表測試沒壓到
-那條路徑。
+那條路徑。沒有「未修復的版本」時（例如驗新寫的程式），就在 **backend 的複本**裡故意做出一個
+race，跑同一個指令確認報出來，再跑正式版（⛔ 不在 repo 裡改壞）。
+
+**改壞的方式要讓兩次存取之間⛔ 沒有任何同步**（鎖、atomic、channel、WaitGroup）。race detector
+只看這次實際執行裡兩次存取之間有沒有 happens-before，所以「拿掉一把鎖」或「把寫入移到鎖外」
+多半抓不到——2026-11-02 第一次就是這樣報 0：父 goroutine 在鎖外寫完之後，還會經過
+atomic store 與同一把 `r.mu` 的上鎖／解鎖，而子 goroutine 是在 `r.mu` 內才讀，寫 → 解鎖 → 上鎖 → 讀
+有先後關係。改成**讓 spawn 出來的 closure 一開頭、還沒碰任何鎖就讀**，父 goroutine 在 spawn 之後
+鎖外寫（讀到的值拿去做條件判斷，避免被編譯器省掉），兩次存取之間只有 `go` 這個起點，就報出來了。
+判讀時也要看報出的讀寫位置**就是注入的那兩處**，並確認複本與 repo 只差注入的部分。
+
+**綠燈的涵蓋範圍**：只代表「這些測試實際產生的交錯裡沒有 race」，⛔ 不等於所有交錯都驗過——
+既有測試多半用 channel、atomic 或 WaitGroup 把 goroutine 串起來，某些路徑在測試裡本來就有
+happens-before。
 
 ### MySQL migration 驗證：`scripts/test-mysql-migrations.sh`
 
@@ -259,9 +284,10 @@ docker exec stock_trading_dev-postgres-1 psql -U trading -d trading \
   -c "update users set status='active' where email='dev@example.com';"
 ```
 
-**不要為了這件事重建 image。** `scripts/smoke-dev.sh` 會先 `down` 再 build，
+**不要為了這件事重建 image。** `scripts/smoke-dev.sh` 預設會先 `down` 再 build，
 Go compile 峰值 RSS 約 420 MiB，而這台 host 只有 2 GiB。先確認跑著的 image 已經是
-現行程式碼再決定——backend 比對 image 建置時間與 commit 時間，python-server 直接比 md5：
+現行程式碼再決定（是的話，只改環境變數時用 `NO_BUILD=1`，見下方「2. 啟動 dev stack 做 smoke test」）——
+backend 比對 image 建置時間與 commit 時間，python-server 直接比 md5：
 
 ```bash
 docker image inspect stock_trading_dev-backend -f '{{.Created}}'
@@ -2433,6 +2459,51 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
   container 不受總和約束，會直接侵蝕 `MemAvailable`。gitea 曾是唯一沒設的一個
   （實測佔 154 MB），常駐時 available 只剩 398MB，mem-guard 直接擋下 SR evaluation、
   連 10 檔都跑不起來。2026-08-18 確認已補上 `0.5` CPU / `512m` / `768m`，與其他 stack 一致。
+- **dev stack 只在驗收時開，驗完就 `down`**（⛔ 不帶 `-v`）。dev 常駐約 145 MiB，跑測試、build 或 `RACE=1`
+  時這些都是會被搶走的量。
+
+**`mem_limit` 做得到與做不到的事**（2026-11-02 T-078 的結論）：它是單一 container 的**硬上限**，
+用量撞到它時由那個 container 的 cgroup 處理（在 container 裡挑行程砍），所以確實能限制單一 container、
+**降低**整機 OOM 的風險（[Docker 官方說明](https://docs.docker.com/engine/containers/resource_constraints/)）。
+但它⛔ 不保證整機的總量夠用（上面那次就是大家都還沒撞到自己的上限、整機先見底），也⛔ 不涵蓋
+BuildKit 的 build 步驟與 host 上的程序（Claude、dockerd、codex）。目前的數值⛔ 沒有調整：live 的上限屬於
+live 的設定；要調得先量每個服務的峰值（設太低會讓正常的峰值被砍）；而最大的兩個風險來源（build 與
+Claude）本來就⛔ 不受它控制，改由下面的犧牲順序與「重的步驟與 Claude session」處理。
+
+### OOM 的犧牲順序：測試 container 1000、dev 500，Claude 與 live 維持 0
+
+host 記憶體真的見底時，OOM killer 挑 `oom_score` 最高的行程。Claude 的 `oom_score_adj` 是 0、
+`oom_score` 約 127（2026-11-02 盤點時全機最高），所以第一順位就是它。調高可以重來的東西的
+`oom_score_adj`，讓 kernel 先砍它們：
+
+| 對象 | 值 | 設定方式 |
+|---|---|---|
+| 三支 `scripts/test.sh` 的測試 container | 1000 | `scripts/lib/mem-guard.sh` 的 `mem_guard_oom_arg` 回傳 `--oom-score-adj=<值>`，三支腳本在 mem-guard 之後、任何 docker 指令之前取得它，加進 `docker run` |
+| `docker-compose.dev.yml` 的每個服務（含 profile 的 python-worker） | 500 | 共用的資源限制 anchor 裡的 `oom_score_adj` |
+| Claude、live 的 container | 0 | ⛔ 不動（live 的 compose 與 `deploy.sh` 不在 repo 的範圍） |
+
+`TEST_OOM_SCORE_ADJ` 可以覆寫測試 container 的值：預設 1000；**設成空字串就不帶這個參數**
+（萬一 docker 拒絕它，三支測試會全部起不來，這個開關讓人⛔ 不必改程式就能先繞過）；只收 0～1000 的
+整數（前導零會去掉），其他值在任何 docker 指令之前就中止；負值⛔ 不收（那是反過來保護測試 container）。
+它與 `MEM_FORCE` 無關。
+
+2026-11-02 實測：這台 Virtuozzo 的 docker 接受 `--oom-score-adj`；dev 的四個 container 與一個測試 container
+起來之後，`docker inspect` 的 `HostConfig.OomScoreAdj` 與實際行程的 `/proc/<State.Pid>/oom_score_adj`
+都是預期的 500 與 1000。
+
+⚠️ 兩個限制：
+
+* **BuildKit 的 build 步驟設不到**這個值（例如 python `test.sh` 的 `docker build`、`smoke-dev.sh` 的 image build），
+  build 仍要靠「依序 build」與「重的步驟⛔ 不跟長 session 疊在一起」。
+* **OOM 真的發生時，kernel 是否照它挑對象⛔ 沒有實測**，而且⛔ 不能安全地實測（逼出 OOM 會波及 live）——
+  只驗得到「值有沒有套上去」。
+
+範圍只有三支 `scripts/test.sh`：其他會起測試 container 的腳本（migration 測試、replay 系列、
+`scripts/test-redis-emission.sh`、python `test.sh` 內部呼叫的 `scripts/test-replay-args.sh`）⛔ 沒有加。
+
+只記錄、由使用者決定的事：`RACE=1` 那段時間要不要暫停其他常駐程序（fin-api、codex，都是使用者的其他工作）；
+長期容量的選項——升級主機的 RAM、把 dev／測試搬到別台、或用 GitHub Actions 跑 race（runner 記憶體充足，
+但要 push 到 GitHub、新增 workflow，屬於對外的動作）。
 
 ### frontend 三步的記憶體實測（2026-08-06）
 
@@ -2478,6 +2549,7 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 | `MEM_MIN_MB` | `256` | 下修後低於此值直接中止，並提示先關掉常駐 container |
 | `MEM_STRICT` | `0` | 設 `1` 時不下修，直接中止（想明確發現設定錯誤時用） |
 | `MEM_FORCE` | `0` | 設 `1` 時完全略過護欄 |
+| `TEST_OOM_SCORE_ADJ` | `1000` | 測試 container 的 `--oom-score-adj`；空字串＝不帶；只收 0～1000（見上方「OOM 的犧牲順序」） |
 
 `MEMSWAP`（`--memory-swap`）預設等於 `MEM`，即**關掉 container 的 swap**。這台 host 的 512MB
 swap 常態 100% 用滿，放任 container 換頁只會拖垮整台機器，不如讓它乾脆撞 cgroup 上限。
@@ -2548,6 +2620,71 @@ Backend image build 的記憶體約束：`backend/Dockerfile` 的 builder stage 
 OOM killer 砍掉（`signal: killed`）；實測光是序列化還不夠，`GOMEMLIMIT=500MiB` 仍失敗，
 壓到 250MiB 才能在冷 cache 下編完（約 3 分鐘）。這些只影響編譯過程，不影響產出的執行檔。
 
+### 重的步驟與 Claude session：⛔ 不讓 Claude 跟它們搶記憶體
+
+Claude 的 session 本身佔 280～400 MB（隨對話成長），`oom_score` 又是全機最高。2026-11-02 上午，
+dev image build（Dockerfile 的 node stage `npm ci` ＋ Go 編譯）期間 Claude 被 OOM kill，背景的 build 照樣跑完；
+同一天下午在 Claude ⛔ 沒在跑時實跑 `scripts/smoke-dev.sh`，backend 的 `go build ./cmd/server`（181 秒）
+仍把 MemAvailable 壓到 242 MB——Claude 在跑時，這一步會壓到接近 0。之前的實例：08-03、08-05、08-18、09-07、09-14。
+
+1. **重的步驟⛔ 不跟長 session 疊在一起**：image build（`scripts/smoke-dev.sh` ⛔ 不帶 `NO_BUILD`）、`RACE=1`、
+   `backend/scripts/test.sh ./...` 之前二選一——交給使用者在 Claude 結束後執行，或先把進度寫進計畫書／scratchpad
+   再開新的 session 執行。
+2. **一律落地**：重的步驟的**輸出與結束碼都寫進檔案**、放背景執行，⛔ 不靠前景的長等待拿結果。
+   ⛔ 不要只寫 `> log 2>&1; echo $?`——那只把結束碼印到終端機（Claude 被砍時跟著消失），整段的結束碼也變成
+   `echo` 的 0（2026-11-02 驗證：命令以 7 失敗、⛔ 沒有輸出時，log 是空的、整段回 0）。要寫成：
+
+   ```bash
+   D=$(mktemp -d "<scratchpad 或交接目錄>/run.XXXXXX")   # 每輪一個新目錄
+   ( if backend/scripts/test.sh ./internal/scheduler/... > "$D/test.log" 2>&1; then rc=0; else rc=$?; fi
+     echo "rc=$rc" > "$D/test.rc"; exit "$rc" ) &
+   pid=$!
+   # …之後要等它時（外層開了 set -e 也⛔ 不會被 errexit 中止）：
+   if wait "$pid"; then rc=0; else rc=$?; fi
+   ```
+
+   * 命令要放在 `if` 的條件裡：子 shell 會繼承 `set -e`，寫成「命令; rc=$?」時，命令一失敗子 shell 就退出、
+     `test.rc` 來不及寫。`else` 裡的 `$?` 就是命令本身的結束碼。外層的 `wait` 同理。
+   * **每輪一個新目錄**：沿用固定目錄時，這一輪若在寫入之前就被砍，前一輪留下的 `rc=0` 會冒充本輪的結果。
+     一定要沿用固定目錄，就在啟動前先刪掉舊的 `test.rc`。
+   * 在新目錄裡，`test.rc` ⛔ 不存在就代表還沒跑完（或在寫入之前就被砍）；`wait` 拿到的是原命令的結束碼。
+
+   2026-11-02 在 bash、zsh 各驗一次：舊寫法在 `set -e` 底下命令回 7 時⛔ 沒有寫出 `test.rc`，固定目錄被 KILL（137）時讀到前一輪的 `rc=0`；
+   上面的寫法在有、沒有 `set -e` 時都寫出 `rc=7`，外層 `if wait` 拿到 7 且⛔ 沒有中止，被 KILL 時新目錄裡⛔ 沒有 `test.rc`。
+3. **被砍之後的接手程序**：先看留下的 log（scratchpad 或交接目錄）、`docker ps`、
+   `docker compose -f docker-compose.dev.yml ps`，確認背景的工作還在跑還是已經跑完，⛔ 不直接重跑——
+   重跑會在同樣的記憶體壓力下再被砍一次，也可能和還在跑的那份撞在一起（同上方「`MEM` 是上限」的
+   「被 kill 後先去撈 log」）。2026-11-02 就是靠前一個 session 留下的 log 接回來的。
+4. **長任務分段**：一個 session 只做一個階段（例如「review 修正」與「`RACE=1`」分兩個 session），
+   transcript 小，RSS 就小。
+
+#### 交給使用者執行的腳本怎麼寫
+
+2026-11-02 的 `RACE=1` 補跑與 smoke 實跑（T-078）都是 Claude 寫好腳本、使用者在 Claude 結束後執行；
+交接腳本經多輪 review 累積出下面的規則：
+
+* 放在 repo 外的日期目錄（例如 `~/.cache/stock_trading/smoke-logs/<日期>/`），使用者只執行一行；各步的輸出、
+  rc 與摘要寫進同目錄的 `summary.txt`，最後印出每一步的判讀標準。⛔ 不改 repo 的任何檔案。
+* 前置檢查任一項⛔ 不成立就中止：⛔ 沒有 `claude` 程序（`pgrep -x claude`）、需要的 image 在本機、
+  dev stack 的狀態符合預期。
+* **操作目標固定在 dev**：開頭清掉所有 `COMPOSE_*` 環境變數；compose 一律明確帶
+  `-p stock_trading_dev -f <repo>/docker-compose.dev.yml`；呼叫 `scripts/smoke-dev.sh` 時明確給 `COMPOSE_FILE`；
+  用 `docker compose -f <dev compose> config --no-interpolate` 確認解析出的 project 名稱（⛔ 不代入環境變數的值）；
+  `DOCKER_HOST`、`DOCKER_CONTEXT` 有設定就中止。⚠️ `COMPOSE_PROJECT_NAME` 優先於 compose 檔的 `name:`，
+  設了它，`down --remove-orphans` 就會打到別的 project（2026-11-02 以 `config --no-interpolate` 驗證）。
+* **查詢失敗⛔ 不等於「沒有」**：每個 `docker ps`／`inspect` 都檢查結束碼；執行前失敗就中止，之後失敗標「查詢失敗」、
+  最後 rc 非 0。`State.Pid` 是 0 代表 container 存在但還沒有行程（剛建立、重啟中），既⛔ 不是查詢失敗、也⛔ 不是通過。
+* **要對到「這一次」的 container**：用 `--cidfile`（或唯一的 label、名稱），⛔ 不用 image 篩選——同 image 的別的
+  container 會被誤認，甚至在這次根本沒起來時顯示通過。被呼叫的腳本把 `docker run` 參數寫死時，只在那個子行程的
+  PATH 最前面放一個轉接用的 `docker`，只加 `--cidfile`、其他參數原樣轉交。docker 是**先建立 container、寫 cidfile，
+  之後才啟動**，所以 cidfile 出現之後要等到啟動（`State.Pid` ⛔ 不是 0）才讀值。
+* **等待一律有上限**：背景的子程序用 `timeout -k <寬限> <上限>` 啟動（它自成 process group，逾時或收到 TERM 時
+  轉給整個子程序）；輪詢有期限；逾時先記錄失敗，再有上限地終止、回收子程序，並清掉這次留下的 container
+  （只對 cidfile 讀到、驗過格式的 ID）。
+* **⛔ 不印環境變數**：要驗 override 有沒有進 container，只數那一個鍵。非 dev 的 container 只記名稱、ID、啟動時間、
+  重啟次數；前後相同只代表**沒有重建或重啟**，⛔ 不代表沒有發生 OOM、也⛔ 不代表批次沒受影響。
+* 寫好之後先用假的 `docker` 空跑正常路徑與每一條失敗路徑；每個修正都附對照組——修正前的版本要能重現問題。
+
 ### 2. 啟動 dev stack 做 smoke test
 
 `docker-compose.dev.yml` 已對 dev stack 服務套用同樣的資源限制：
@@ -2558,11 +2695,48 @@ process/thread。
 scripts/smoke-dev.sh
 ```
 
-腳本流程是 **先停 → 再 build → 再啟動**：build 之前會對 dev project 執行
+腳本流程是 **先停 → 依序 build → 再啟動**：build 之前會對 dev project 執行
 `compose down --remove-orphans`（**不帶 `-v`，named volume 保留**）。原因是這台 host 只有
 2GiB RAM，實測冷 cache build 的低點只剩 74 MiB available（Go compile 峰值 RSS 約 420 MiB），
 而上一輪留著的 dev stack 約占 145 MiB（postgres 26＋redis 9＋backend 9＋python-server 99），
 不先停就會在 build 階段被 OOM killer 砍掉。確定記憶體充裕時可用 `SKIP_DOWN=1` 略過這一步。
+build 是**一次一個**（`compose build backend` 之後才 `compose build python-server`）：compose 預設會並行
+build，兩個 image 的峰值會疊在一起。
+
+只改環境變數、只要部分服務、或要疊驗收用的設定時（2026-11-02 T-078 加入）：
+
+| 變數 | 作用 |
+|---|---|
+| `NO_BUILD=1` | image 已經是現行程式碼、只改環境變數時用：**只跳過 down 與 build**，依賴的啟動照下面 `SERVICES` 的規則（⛔ 不因為跳過 build 就省掉）。`up` 一律加 `--no-build`，image 不存在就直接失敗——⛔ 不讓 compose 在 `up` 時自己補 build。image 新不新的判斷見上方 as-of 階梯一節的「不要為了這件事重建 image」 |
+| `SERVICES` | 只起需要的服務：`backend`、`python-server`，空白或逗號分隔，預設兩個都起（行為與以前相同）。只選一個時，先 `up -d --wait --wait-timeout $WAIT_SECONDS` 把它的依賴起到 healthy（backend：postgres、redis；python-server：postgres；dev 已經 down 時也會把它們起來，已經在跑時立刻返回），確認之後才 `up -d --no-deps` 起選了的服務；也只 build、只做健康檢查與診斷選了的服務。其他值（含 `python-worker`、`postgres`）在任何 docker 指令之前就中止 |
+| `OVERRIDE=<檔案>` | 多帶一個 `-f`，讓只為驗收用的設定留在 repo 外（例如 scratchpad）。相對路徑以**呼叫時的目錄**解析（腳本會 `cd` 到 repo 根目錄）；只收一個檔；檔案不存在就中止。檔裡的相對路徑照 compose 的規則，以第一個 `-f`（repo 根目錄）為基準 |
+
+```bash
+NO_BUILD=1 SERVICES=backend OVERRIDE=/path/to/override.yml scripts/smoke-dev.sh
+```
+
+* **只選 backend 的限制**：backend 的 `/health` ⛔ 不需要 python-server，但需要 python 的工作（例如 SR 分析）會失敗——
+  只適合驗⛔ 不需要 python 的路徑；腳本會印一行提醒。
+* **`COMPOSE_PROJECT_NAME` 有設定（含空字串）就中止**：compose 讓它優先於 compose 檔的 `name:`，`down --remove-orphans`
+  就會打到別的 project；設了它通常代表這個 shell 正在操作別的 project，所以中止而⛔ 不默默清掉。
+* **排程的驗收：cron 只在 backend 啟動時讀**（`Scheduler.Start` 註冊；改設定⛔ 不會影響正在跑的 backend），
+  所以改 cron 一定要重建 backend，而且時刻要在**重建之前一刻**才推算：
+  1. 先讓 image 是現行程式碼——需要 build 就先跑完一次 `scripts/smoke-dev.sh`（⛔ 不在這一步之前算時刻）。
+  2. 算「現在＋幾分鐘」（留給重建的時間；cron 以**台北時間**解讀，`cron.WithLocation(timeutil.TaipeiTZ)`），
+     寫進 override 檔，例如 `STOCK_SYMBOLS_CRON: "37 15 * * *"`；工作本身的開關也要開（見上方「在 dev stack 上驗排程類功能」的巢狀開關）。
+  3. `NO_BUILD=1 SERVICES=backend OVERRIDE=<override 檔> scripts/smoke-dev.sh`：幾秒內重建 backend，⛔ 不 build。
+  4. 確認註冊結果：註冊成功⛔ 沒有逐筆的 log，失敗才記 `<job> cron register failed`——所以看啟動 log **有 `scheduler started`、
+     ⛔ 沒有 `register failed`**，再只 grep container 裡那一個鍵確認值有進去（⛔ 不印其他環境變數）。最後的證明是時間到時
+     `job_runs` 出現一筆 cron 觸發的紀錄；`/scheduler/status` 只在⛔ 沒有任何執行紀錄時才用 `disabled` 表示沒註冊，
+     有舊紀錄的 job 從這裡看不出註冊與否。
+
+  2026-11-02（I-123～I-126 的 dev 實測）：第一次在 build 之前把 cron 算成「+4 分鐘」，build 花了約 7 分鐘，啟動時已經錯過、
+  當天⛔ 不會觸發；第二次改成只重建 backend（當時直接用 compose 的 `--no-build --no-deps`，現在就是第 3 步）、
+  cron 設在重建之後 2 分鐘，才驗到。
+* **依序 build 的實測與已知限制**（2026-11-02，Claude ⛔ 沒在跑）：整段的低點 242 MB，落在 backend 的
+  `go build ./cmd/server`（181 秒）；`npm ci`、`go mod download` 與 python 的 `pip install` 都命中 cache，
+  python-server 1 秒就 build 完，所以「並行 build 時兩個峰值會不會疊加」**還沒量到**。python 的依賴改變
+  （`pip install` ⛔ 不命中 cache）時再量一次：build 期間每 2 秒記一次 MemAvailable，對照兩個 build 的起訖。
 
 可用環境變數覆寫等待時間、log 行數或 health URL：
 

@@ -145,7 +145,7 @@
 1. 使用者確認本計畫（D1～D6）。
 2. I-123～I-126 階段 B 的 review 修正先做（另一份計畫：[`i123-i126-job-retry.md`](./i123-i126-job-retry.md)「十二」）——race 要跑在修正後的程式上。
 3. A3：拉 debian image（先問使用者）；A4：race 的前置檢查。
-4. A1／A6：Claude 寫好暫存腳本、交給使用者在 D2 的時段執行（先 D3 的有效性確認，再正式版）；新 session 讀 log、寫回結果。
+4. A1／A6：Claude 寫好暫存腳本、交給使用者在 D2 的時段執行（先 D3 的有效性確認，再正式版）；新 session 讀 log、寫回結果。（✅ 2026-11-02：第二次執行通過，見「十」）
 5. B1～B4、「二 D」1：腳本與 dev compose 的修改 → 驗證（「六」）。
 6. 文件（B5、C、D）→ review → 使用者 commit。
 
@@ -185,6 +185,22 @@
   「這些測試實際產生的交錯裡沒有 race」，⛔ 不代表連帶觸發的路徑已經驗過，也⛔ 不等於所有交錯都驗過。
   「八」歸檔到 `development-workflow.md`「Race detector」時，要補上上面那條改壞方式的規則。
 * **A3 已完成**（使用者同意後，2026-11-02）：`golang:1.25`（linux/amd64，image id `sha256:9bae33b0…`，約 848 MB）；磁碟剩 7.2 GB。
+* **第二次執行（2026-11-02 14:28～14:29，使用者在 Claude 結束後執行；⚠️ 不在 D2 時段）**：程式是 HEAD `389f652`（改壞方式的修正，14:27:54 commit；
+  工作樹乾淨）。**① 對照組成立、② ③ 通過 → 依 D3 採計 ② ③，G1 達成。** 新 session 讀 log 判讀（唯讀）。
+  * 三步的結果（`summary.txt`）：① detector（複本、測試 (v)）rc 1、DATA RACE 1、FAIL 1（抓到 race 時預期如此）；
+    ② `./internal/scheduler/...` 與 ③ `./internal/api/handler/` 都是 rc 0、DATA RACE 0、FAIL 0；三步的 killed 與中止都是 0。
+  * ① 的 race 落在注入的兩處：讀取是 spawn 出來的 closure（`tryTriggerDelisting.func1`）開頭的鎖外讀，先前的寫入是 `tryTriggerDelisting` 在 spawn 之後的鎖外寫，
+    讀取端的 goroutine 由 `r.spawn` 建立。FAIL 只來自 `race detected during execution of test`，⛔ 沒有其他斷言失敗。
+    複本與 repo 全目錄比對只差 `job_retry.go` 注入的兩處，`scripts/lib` 相同——① 與 ② 測的是同一份程式，只差注入。
+  * ② ③ 確實有跑：都是 `ok`，`go test` 報 44.280s、18.494s；`internal/scheduler` ⛔ 沒有子套件，正式版⛔ 沒有帶 `-run`；handler 套件有 18 個測試檔；
+    兩份 log 都⛔ 沒有 `[no tests to run]` 或 `[no test files]`。
+  * 記憶體：MemAvailable 940 → 935 MB（三步開始時 939／936／936 MB）；mem-guard 三步都給 `MEM=700m`（上限 787／785／784 MB），A4 的前置檢查⛔ 沒有擋下。
+  * 時段：⚠️ 不在 D2（17:05～22:00）。執行時間在 13:30 收盤之後、15:00 `daily_close` 之前（`intraday` 的 cron 到 13:55 仍會觸發，
+    但 `IsMarketOpen` 在 13:30 之後就跳過）；⛔ 沒有查 `/scheduler/status`，⛔ 未確認當時是否仍有批次在跑。
+  * 印證了上面「改壞方式的修正」那條規則：只把寫入移到鎖外（第一次）報 0；兩次存取之間⛔ 沒有任何同步（第二次）報 1。
+  * 涵蓋範圍照上面「涵蓋範圍的修正」：② ③ 的綠燈只代表這些測試實際產生的交錯裡沒有 race，⛔ 不等於所有交錯都驗過。
+  * 結果已寫回 [`i123-i126-job-retry.md`](./i123-i126-job-retry.md)「十二」。log 在 repo 外的 `~/.cache/stock_trading/race-logs/20261102/`
+    （`summary.txt`、三步各一份 log、① 用的複本 `detector-copy/`、第一次執行的 `run1-1412/`），保存到本計畫與 I-123～I-126 階段 B 的 review 完成。
 
 ## 九、修訂紀錄
 

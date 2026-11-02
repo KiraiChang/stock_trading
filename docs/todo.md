@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v1：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案） |
+| 狀態 | 進行中（計畫 v2：[`plans/oom-mitigation.md`](./plans/oom-mitigation.md)，決定 D1～D6 ✅ 2026-11-02 依建議定案；A3、A4、A1／A6（`RACE=1` 補跑通過）已完成；B1～B4、「二 D」1、文件待做） |
 
 ### T-076：`pre_market`、`intraday`、`daily_close` 的排程時間改成可設定（live 由 compose 與 `deploy.sh` 帶入）
 

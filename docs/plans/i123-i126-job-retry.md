@@ -1,6 +1,6 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
-> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B 已實作；review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（2026-11-02，⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；⚠️ 階段 B 待補跑 `RACE=1` 才能結案；`RACE=1` 依 [`oom-mitigation.md`](./oom-mitigation.md) 補跑。
+> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B 已實作；review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（2026-11-02，⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` ✅ 2026-11-02 依 [`oom-mitigation.md`](./oom-mitigation.md) 補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」），⚠️ 待 review。
 > 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
@@ -295,7 +295,7 @@
 
 1. 使用者確認本計畫（含 D1～D6）。
 2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（✅ `7a9f0cb`）
-3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。（已實作；dev 實測與 review 修正 R1、R2 ✅ 通過；⚠️ 待補跑 `RACE=1`：「十二」）
+3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。（已實作；dev 實測與 review 修正 R1、R2 ✅ 通過；`RACE=1` ✅ 2026-11-02 補跑通過、⚠️ 待 review：「十二」）
 4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。
 5. 收斂：歸檔（「十」）、I-123～I-126 與 I-122 一起收斂（I-122 的證據到這時才刪）。
 
@@ -416,7 +416,7 @@
     第二次改成 `--no-build --no-deps` 只重建 backend、cron 設在重建之後 2 分鐘（dev 的 python-server 先停掉，騰出記憶體）。
   * 驗完 `down`（⛔ 不帶 `-v`），volume 保留；live 的容器⛔ 沒有變動（前後 `docker ps` 對照）。
 
-### 階段 B 的 review 修正（2026-11-02，✅ R1、R2 review 通過；⚠️ 階段 B 待補跑 `RACE=1` 才能結案）
+### 階段 B 的 review 修正（2026-11-02，✅ R1、R2 review 通過；`RACE=1` ✅ 2026-11-02 補跑通過、⚠️ 待 review）
 
 review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` 仍未完成，⛔ 不能拿一般測試的重跑代替。
 第二輪 review（2026-11-02）：R1、R2 的修正通過，⛔ 沒有發現新的程式缺陷；正式的 `RACE=1` 仍待補跑，階段 B ⛔ 不能完整結案。
@@ -468,5 +468,9 @@ review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` �
   測試輔助：主檔來源加 `onCall`（在一輪中途推進時鐘）、配息來源成功時可回事件、重算一律失敗的 candle stub。
 * 驗證：`go vet ./...` rc 0；`go test -vet=off -count=1 ./...` 12 個套件通過、唯一失敗仍是 store 既有的時間炸彈；相關測試 `-count=20` 全綠；
   反向驗證 6 項（scratchpad 的 backend 複本）全部變紅：四個方法各自改回看「現在」、第二輪仍失敗改回保留第一輪、沒跑到的也丟掉第一輪。
-* ⚠️ `RACE=1` 還沒跑：依 [`oom-mitigation.md`](./oom-mitigation.md) 的 D1（使用者在 Claude 結束後執行）補跑，結果寫回這裡。
+* `RACE=1` ✅ 補跑通過（2026-11-02 14:28～14:29，依 [`oom-mitigation.md`](./oom-mitigation.md) 的 D1 由使用者在 Claude 結束後執行；程式是 HEAD `389f652`）：
+  * 對照組（D3）成立：在 backend 複本裡故意做出的 race 報出 `WARNING: DATA RACE` 1 次，落點就是注入的兩處；複本與 repo 只差注入。
+  * `RACE=1 backend/scripts/test.sh ./internal/scheduler/...` 與 `./internal/api/handler/`：rc 0、`DATA RACE` 0、`--- FAIL` 0、⛔ 沒有被砍（`ok`，44.280s、18.494s）。
+  * ⚠️ 涵蓋範圍：綠燈只代表這些測試實際產生的交錯裡沒有 race，⛔ 不等於所有交錯都驗過（原因見 `oom-mitigation.md`「十」的「涵蓋範圍的修正」）。
+  * 判讀的證據、記憶體與時段見 `oom-mitigation.md`「十」的「第二次執行」；log 在 repo 外的 `~/.cache/stock_trading/race-logs/20261102/`。
 * 附帶發現（⛔ 沒有改）：HEAD 的 `scheduler_test.go` 有一處多的空行，`go fmt` 會改它；不在本次範圍，已還原。

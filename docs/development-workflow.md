@@ -648,7 +648,7 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 
 ### 只改 live 的環境變數：只重建 backend，⛔ 不跑 live 的 `deploy.sh`
 
-2026-10-28 晚間兩輪後移時用過的做法（原記於 `todo.md` T-075；現況見 `architecture.md`「晚間兩輪的時間」）。
+2026-10-28 晚間兩輪後移時用過的做法（原記於 `todo.md` T-075，已於 2026-11-03 收斂；現況見 `architecture.md`「晚間兩輪的時間」）。
 適用於 **image 不變、只改環境變數**（例如排程時間）；要改程式就要 build 新 image，⛔ 不適用。
 
 - ⛔ **不跑 live 的 `deploy.sh`**：它會 `git pull`、`down`、`up --build -d`，等於整套停下、拉最新程式重新 build。

@@ -26,7 +26,7 @@
 
 ### live 跑的是哪一版
 
-* live backend 容器 `stock_trading-backend-1`：2026-10-28 06:13 UTC 建立（T-075 重建容器），image `ba964c44…` 建於 2026-09-17 10:08（+08:00）。
+* live backend 容器 `stock_trading-backend-1`：2026-10-28 06:13 UTC 建立（T-075 重建容器；T-075 已於 2026-11-03 收斂），image `ba964c44…` 建於 2026-09-17 10:08（+08:00）。
 * backend 最後一次 commit 是 2026-09-09 的 `5b1260e`，之後 backend ⛔ 沒有任何變更 → HEAD 的 backend 程式就是 live 的版本。
   ⚠️ 前提：build 當時工作樹的 backend 沒有未 commit 的修改——⛔ 無法從 image 查證，判讀時若程式與 log 對不上，先懷疑這一點。
 * 設定檔：image 把 `backend/config.yaml` 複製到工作目錄 `/app`；compose 只掛載 `./logs/backend`。E0 只取它的 SHA-256 與 git 的版本比對

@@ -2723,6 +2723,17 @@ OOM killer。沒有這兩項時，`modernc.org/sqlite/lib`（C 轉譯的巨大 g
 vet／compile 會出現 `vet: signal: killed`，`set -e` 讓整條 vet → test → build 直接中止。
 這些只影響編譯過程，不影響測試結果與產出的執行檔。
 
+⚠️ **Claude 在跑時，這兩項也不夠**（2026-11-03 實測）：mem-guard 只給得到 450～560m，`go test` 開跑前**自己做的那輪 vet**
+（`go vet` 的子集，同樣會分析 `modernc.org/sqlite/lib`）仍會被砍。症狀是開頭一行
+`modernc.org/sqlite/lib: …/vet: signal: killed`，接著每個套件照樣印 `ok`，最後卻是一行**單獨的 `FAIL`**、rc＝1、build ⛔ 沒有跑——
+**⛔ 不是測試失敗，是 go test 的內建 vet 記憶體不夠**。它是 fail-closed（rc＝1），⛔ 不會在 vet 沒跑完時回 0。
+
+* **確認方法**：同一組套件加 `TEST_FLAGS=-vet=off` 重跑。那行與單獨的 `FAIL` 都消失、rc＝0，就是這個情況
+  （實測：`MEM=450m` 對 `./internal/joberr/...`，不加是 rc＝1、加了是 rc＝0）。前面的 `go vet` 步驟跑的是完整的 vet，
+  go test 的內建 vet 是它的子集。
+* ⚠️ **`go vet` 步驟自己被砍時的結束碼⛔ 沒有實測**（這次它對 sqlite 的分析結果有快取，⛔ 沒有被砍）。要完整的結果，
+  結束 Claude、讓 `MEM` 回到 700m 再跑一次。讓腳本預設關掉這輪多餘的 vet 列在 `todo.md` T-079。
+
 Frontend 注意事項：`vite.config.ts` 的 `outDir` 是 `backend/internal/ui/dist`
 （Go embed 使用、且有進版控），所以腳本掛載的是 **repo root** 而非 `frontend/`。
 跑完 `git status` 出現 dist 差異屬正常，要不要保留該次產物由當次工作決定。

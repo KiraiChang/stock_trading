@@ -170,7 +170,7 @@ type Scheduler struct {
 	// mutex 只保護這個字串，臨界區不涵蓋整輪分析。
 	srAnalysisMu         sync.Mutex
 	srAnalysisRunningJob string
-	// delistingReconciler 為選填（見 docs/todo.md T-071）：未注入或未啟用時不註冊排程，
+	// delistingReconciler 為選填（見 docs/architecture.md「終止上市對帳」）：未注入或未啟用時不註冊排程，
 	// 行為與導入前完全相同（比照 adjuster / evaluationUniverse / srAnalysis）。
 	//
 	// ⚠️ **它不寫 `is_listed`**：只補官方的終止上市日期並對帳，判定「還在不在交易」

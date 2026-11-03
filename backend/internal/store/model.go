@@ -686,7 +686,7 @@ type StockSymbol struct {
 	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
 	UpdatedAt    time.Time `db:"updated_at"    json:"updated_at"`
 
-	// DelistedDate / DelistedEventID 是**一組**（migration 076，計畫書 docs/todo.md T-071）。
+	// DelistedDate / DelistedEventID 是**一組**（migration 076，規格見 docs/database-schema.md 的 delisting_events）。
 	//
 	// ⛔ **`is_listed` 不由這兩欄決定**——判定權責只屬於 stock_symbol_sync 的
 	// ISIN 缺席邏輯。這裡記的是「官方說它哪一天終止上市」，純屬補充資訊。

@@ -83,7 +83,7 @@ export SR_ANALYSIS_LIMIT="400"               # 抓取的歷史 K 棒根數
 # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
 export CORPORATE_ACTION_CRON="30 6 * * 1-5"  # 台北時區
 
-# TWSE 終止上市名單對帳（T-071）：每天 07:00 抓官方「終止上市公司」CSV，補
+# TWSE 終止上市名單對帳（規格見 docs/architecture.md「終止上市對帳」）：每天 07:00 抓官方「終止上市公司」CSV，補
 # stock_symbols.delisted_date 並與主檔對帳。⚠️ **不驅動 is_listed**——那份 CSV 含歷史
 # 紀錄且代號會被重用（2002 年的光寶電子(2301) 與今天的光寶科(2301) 是兩家公司），
 # 判定「還在不在交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。

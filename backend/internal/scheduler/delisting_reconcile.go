@@ -14,7 +14,7 @@ import (
 	"github.com/trading/backend/pkg/timeutil"
 )
 
-// 終止上市名單對帳排程（計畫書 docs/todo.md T-071）。
+// 終止上市名單對帳排程（規格見 docs/architecture.md「終止上市對帳」）。
 //
 // ⚠️ **這個 job 不決定 is_listed**——那是 stock_symbol_sync 的權責。
 // 它只補官方的終止上市日期，並在主檔與官方名單對不上時告警。

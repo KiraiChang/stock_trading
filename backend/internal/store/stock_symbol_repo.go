@@ -207,7 +207,7 @@ func (r *stockSymbolRepo) countListed(ctx context.Context, tx *sqlx.Tx) (int, er
 // **只約束它自己**，不約束這裡。ISIN 清冊是 is_listed 的權威來源，它確認重新上市時
 // current-state 不變量優先；而事件層的歷史仍留在 delisting_events。
 //
-// 現況規格見 docs/architecture.md 的下市過濾段（計畫書 docs/todo.md T-071）。
+// 現況規格見 docs/architecture.md「終止上市對帳」。
 func (r *stockSymbolRepo) upsert(ctx context.Context, tx *sqlx.Tx, symbol StockSymbol, seenAt time.Time) error {
 	listedDate := sql.NullTime(symbol.ListedDate.NullTime)
 	if r.driver == "mysql" {

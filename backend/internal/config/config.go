@@ -297,7 +297,7 @@ type CandleGapDetectionConfig struct {
 // 與 stock symbol／sr evaluation 那種 config 開關不同。多一個 enabled 會出現
 // 「adjuster 有注入但 enabled=false」這種要另外解釋的組合，而目前沒有關掉它的需求——
 // 漏跑一次就會讓該檔整段歷史出現假跳空。
-// DelistingConfig 是「終止上市名單對帳」的設定（計畫書 docs/todo.md T-071）。
+// DelistingConfig 是「終止上市名單對帳」的設定（規格見 docs/architecture.md「終止上市對帳」）。
 //
 // ⚠️ **這個 job 不決定 `is_listed`**——判定「還在不在交易」的權責只屬於
 // stock_symbol_sync 的 ISIN 缺席邏輯。它只補官方的終止上市日期，並在主檔與
@@ -427,7 +427,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("position_analysis.breakout_target_risk_reward_ratio", 2.0)
 	viper.SetDefault("position_analysis.take_profit_reduction_ratio", 0.5)
 	viper.SetDefault("position_analysis.sr_reuse_max_age_hours", 24)
-	// 終止上市名單對帳（T-071）。**預設關閉**，比照其他選填排程。
+	// 終止上市名單對帳（docs/architecture.md「終止上市對帳」）。**預設關閉**，比照其他選填排程。
 	// timeout_sec 給 0 代表沿用 market.NewTWSESuspendListingClient 的預設。
 	viper.SetDefault("delisting.enabled", false)
 	viper.SetDefault("delisting.url", "https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv")

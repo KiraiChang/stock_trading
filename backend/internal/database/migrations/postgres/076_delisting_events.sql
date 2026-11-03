@@ -1,5 +1,5 @@
 -- 終止上市名單的事件層與投影 provenance（現況見 docs/database-schema.md 與
--- docs/architecture.md 的下市過濾段；計畫書見 docs/todo.md T-071）。
+-- docs/architecture.md「終止上市對帳」；原計畫 docs/todo.md T-071 已收斂）。
 --
 -- **兩層設計的理由**：`delisting_events` 記錄的是**歷史事實**——「來源 S 說代號 X 在
 -- 日期 D 終止上市」，同一代號可以有多代紀錄；`stock_symbols` 是 **current-state 主檔**，

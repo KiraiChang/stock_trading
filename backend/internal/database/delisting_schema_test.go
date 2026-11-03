@@ -20,7 +20,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// migration 076 的**跨引擎行為**驗證（計畫書 docs/todo.md T-071 的 #19／#19b／#19d／#20d）。
+// migration 076 的**跨引擎行為**驗證（測試編號 #19／#19b／#19d／#20d 出自原 docs/todo.md T-071 的測試表，已收斂；原文見 git show b9cf198:docs/todo.md；規格見 docs/database-schema.md 的 delisting_events）。
 //
 // ⚠️ **為什麼三個引擎都要跑，而不是只驗 DDL**：`ON DELETE RESTRICT` / `SET NULL`、
 // nullable FK、整數型別相容性與 `CHECK` 的實際 enforcement **正是三者會分歧的地方**——

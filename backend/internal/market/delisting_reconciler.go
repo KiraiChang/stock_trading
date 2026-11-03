@@ -14,7 +14,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 終止上市名單的對帳與投影（計畫書 docs/todo.md T-071）。
+// 終止上市名單的對帳與投影（規格見 docs/architecture.md「終止上市對帳」 與 docs/database-schema.md 的 delisting_events）。
 //
 // **單向、全程唯讀 is_listed**：
 //
@@ -601,7 +601,8 @@ func (r *DelistingReconciler) reconcileMaster(
 
 		// 非 job-owned（空值或人工值）且 CSV 查無 candidate → A。
 		//
-		// ⚠️ 這是最有價值的一類：代表「**不是下市，而是清冊抓取異常／證券類型變更**」。
+		// ⚠️ A 只表示「主檔標示已下市，但官方名單沒有可投影的候選」，**原因待查**：可能是清冊抓取異常、
+		// 證券類型變更，也可能是名稱不符或缺 listed_date（兩者都讓 candidate 數為 0）——⛔ 不能據此斷言「不是下市」。
 		// ⚠️ 順序讓 R 與 A 不會重複：已投影的事件從 CSV 消失時，**首輪是 R**；
 		// 撤銷之後該列才變成非 job-owned，**下一輪**才會落到 A。
 		// 兩者是同一件事的兩個階段，靠的是「三者都基於撤銷前的同一份 snapshot」。

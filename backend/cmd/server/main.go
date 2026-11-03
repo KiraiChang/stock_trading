@@ -242,7 +242,7 @@ func main() {
 	// config 的調整，所以與其他注入放在一起、同樣在 Start() 之前。
 	sched.SetSRZoneVerify(cfg.SRZoneVerify)
 
-	// 終止上市名單對帳（計畫書 docs/todo.md T-071）。⚠️ **全程唯讀 is_listed**：
+	// 終止上市名單對帳（規格見 docs/architecture.md「終止上市對帳」）。⚠️ **全程唯讀 is_listed**：
 	// 只把官方的終止上市日期補進 stock_symbols.delisted_date 並對帳告警，
 	// 判定「還在不在交易」的權責仍只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。
 	//

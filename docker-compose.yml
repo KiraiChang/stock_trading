@@ -84,7 +84,7 @@ services:
       # 預算算法與調參時機見 backend/config.yaml 的 corporate_action 註解。
       CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
       CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
-      # TWSE 終止上市名單對帳（T-071）。**預設關閉**。
+      # TWSE 終止上市名單對帳（規格見 docs/architecture.md「終止上市對帳」）。**預設關閉**。
       # ⚠️ 它**不驅動 is_listed**——只補官方的終止上市日期並對帳告警；判定「還在不在
       # 交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯（見 docs/architecture.md）。
       # 前置是**依賴不是時間**：當日的 stock_symbol_sync 必須已成功，否則整輪 failed。

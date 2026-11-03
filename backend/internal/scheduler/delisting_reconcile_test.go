@@ -17,7 +17,7 @@ import (
 	"github.com/trading/backend/pkg/timeutil"
 )
 
-// 這一組驗的是**排程層**的契約（計畫書 docs/todo.md T-071 的 #17～#18、#20f4）：
+// 這一組驗的是**排程層**的契約（測試編號 #17～#18、#20f4 出自原 docs/todo.md T-071 的測試表，已收斂；原文見 git show b9cf198:docs/todo.md；規格見 docs/architecture.md「終止上市對帳」）：
 // single-flight、早退時的鎖釋放、job_runs 的寫入與 partial 原因。
 // 對帳邏輯本身在 internal/market 有自己的測試，這裡刻意不重複。
 

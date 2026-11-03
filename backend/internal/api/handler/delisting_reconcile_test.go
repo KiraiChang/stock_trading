@@ -18,7 +18,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// 終止上市名單對帳的 API 契約（計畫書 docs/todo.md T-071 的 #14／#15）。
+// 終止上市名單對帳的 API 契約（測試編號 #14／#15 出自原 docs/todo.md T-071 的測試表，已收斂；原文見 git show b9cf198:docs/todo.md；規格見 docs/api-reference.md 的手動端點）。
 //
 // ⛔ **這條端點同步取鎖**：202 代表真的啟動了、409 代表真的被擋住。
 // 不沿用既有 evaluation_universe_sync 的「先回 202 再由背景 goroutine 靜默跳過」。

@@ -521,7 +521,33 @@ cron 入口不收這個參數，不是靠呼叫端記得傳 `false`。
 DSN 範例會帶 `loc=Asia/Taipei`，`2026-09-01 00:00 +08` 轉 UTC 後是 **2026-08-31**，
 身分鍵、事件 id 查找與「同一天」比對會整批差一天而且不報錯。
 
-**逐項 log 的等級**（分類表）：N 不告警、B／C／M 是 Info、**U／D／X／R／RX／A 是 Warn**，
+**對帳分類**（兩個方向，各自計數；括號裡是 log 的欄位名）。
+
+方向一：CSV → 主檔。母體是本輪解析出的每一筆事件，**依序判定、先命中先歸類、每筆恰好一類**（總和＝`event_rows`）：
+
+| 序 | 類 | 條件 | 等級 | 處置 |
+|---|---|---|---|---|
+| 1 | N（`no_master`） | 主檔查無此代號 | — | 正常（2026-09-04 實測 261/265） |
+| 2 | B（`still_listed`） | `is_listed = true` | Info | 代號重用或轉櫃，不動作 |
+| 3 | U（`unresolvable`） | `market`／`security_type` 不符，或 `listed_date IS NULL` | **Warn** | 缺身分依據，等人工 |
+| 4 | C（`generation_gap`） | 終止日早於 `listed_date` | Info | 明確的代號重用 |
+| 5 | D（`identity_doubt`） | 名稱不符／多筆歧義／**人工值且日期不同** | **Warn** | 保留事件、⛔ 不寫主檔，等人工 |
+| 6 | M（`manual_matched`） | 通過投影規則 1～6，但主檔是人工值且日期相同 | Info | ⛔ 不寫主檔、⛔ 不補 provenance |
+| 7 | X（`concurrency_conflict`） | 通過投影規則 1～6，但寫入時 CAS 落空 | **Warn** | 安全跳過、⛔ 不重試 |
+| 8 | P（`projected`） | 通過投影規則 1～6，ownership 是空值或 job-owned | — | 寫入／維持 `delisted_date` ＋ `delisted_event_id` |
+
+投影規則見 [`database-schema.md`](./database-schema.md) 的 `delisting_events`。⚠️ 順序有意義：`2432` 在第 2 步就歸 B，⛔ 不會再算進 C。
+job-owned 的不同日期⛔ 不是 D——那是合法的來源更正，走 P 替換。
+
+方向二：主檔 → CSV。母體是主檔裡已下市的上市股票，**只計需要處置或需要人看的結果**——⛔ 不是窮盡分割（穩定的 job-owned 投影⛔ 不屬於任何一類），R、RX、A 彼此不重複：
+
+| 類 | 條件 | 等級 | 處置 |
+|---|---|---|---|
+| R（`projection_revoked`） | job-owned 且 candidate 數 ≠ 1，撤銷成功 | **Warn** | 兩欄清成 `NULL` |
+| RX（`revocation_conflict`） | 同上，但撤銷的 CAS 落空 | **Warn** | 安全跳過、⛔ 不重試 |
+| A（`source_missing`） | `is_listed = false` 的上市股票、非 job-owned、CSV 查無 candidate | **Warn** | 只告警：主檔標示已下市，但官方名單沒有可投影的候選，**原因待查**——可能是清冊抓取異常、證券類型變更，也可能是名稱不符或缺 `listed_date`（這兩種都會讓 candidate 數為 0，規則見 `database-schema.md`）；A 本身⛔ 無法分辨是哪一種 |
+
+**`partial` 的條件**：U、D、X、R、RX、A 或來源更正任一 > 0（M ⛔ 不算——人工值與來源一致是好事）。`job_runs.error` 寫 `delisting_reconcile: source_missing=… unresolvable=… …`（只有類別名與數字），完整計數（含 N／B／C／M／P 與 `event_rows`）只在 log 的 `delisting reconcile completed`。
 來源更正的三態（改名／重現／首次缺席）**各自 Warn 一次**且是**邊緣觸發**
 （持續缺席不重複告警）。⛔ 只留 aggregate 數字不夠——upsert 之後舊名稱與缺席時間
 就消失了，`identity_doubt=2` 這種數字無從查起。
@@ -548,8 +574,20 @@ dev 補跑要把 `STOCK_SYMBOLS_TIMEOUT_SEC` 調大（實測 900 秒可過），
 **live 啟用（2026-09-08 10:57）**：`DELISTING_ENABLED=true` 確認已進容器，
 migration 76 已套用，兩張新表與 `stock_symbols` 的兩個新欄位、FK／CHECK／UNIQUE 全部就位，
 新端點回 401（存在且受保護），排程頁顯示 `尚未執行`（＝**已註冊**、未跑過）。
-**首輪是 2026-09-09 07:00**，20 個交易日的觀察期由那一輪起算（觀察什麼見 `todo.md` T-071）。
+**首輪是 2026-09-09 07:00**。
 ⚠️ 首輪之前那列會標「已延遲未執行」——stale 門檻 26 小時而它從未執行過，是正常的。
+
+**live 觀察（2026-09-09～11-03；原記於 `todo.md` T-071 的驗收條件 7，2026-11-03 收斂）**：要看的是 A 類每天幾筆、是不是真陽性，據此決定 A 類維持 Warn 還是升級。2026-11-03 唯讀查 live：
+
+| 項目 | 結果 |
+|---|---|
+| `job_runs`（保留期內 10-04～11-03，31 輪） | success 19、failed 12、**⛔ 沒有 partial** → 能確認的 19 輪 A 類都是 0（A > 0 一定收成 partial、`error` 帶 `source_missing`） |
+| failed 的 12 輪 | 全部⛔ 不是對帳邏輯的問題：`timeout` 4 輪（10-06、10-08、10-13、10-14，取 CSV 逾時，與 `issue.md` I-123 同類）；`internal_error` 8 輪**全部是前置不成立**——那 8 天的 `stock_symbol_sync` 都是 `partial`（`symbol_sync:timeout`）。當時整輪失敗記成 partial、對帳的前置不成立記成 `internal_error`；I-126 之後分別是 `failed` 與 `delisting_reconcile:stock_symbol_sync_not_ready`，2026-11-02 起由自動重跑吸收（[`data-pipeline.md`](./architecture/data-pipeline.md)「失敗後的自動重跑」） |
+| 快照 | 09-09～11-03 共 40 筆、全部 accepted、分佈在 40 天；`row_count` 一直是 265 |
+| 事件與投影 | 事件 265 筆 active、0 筆 missing；投影 1 筆 job-owned（`2867`）、人工值 0 |
+
+⚠️ **證據有缺口**：觀察期間每天該記的 A 類筆數⛔ 沒有記下來，09-09～10-03 的 `job_runs` 已過 30 天保留期——那段 21 輪成功的 A 類查不到；能確認的只有 19 輪（其中 12 輪是交易日）。
+**決定（2026-11-03 使用者確認）：A 類維持 Warn。** 能確認的觀察⛔ 沒有任何陽性可評估，升級⛔ 沒有依據；A 只代表「沒有可投影的候選」，原因要人工查，job 自己判斷不了、也修不了，升級成整輪失敗也沒有幫助。
 
 **已知限制：上櫃沒有第二來源可對帳。** 這份 CSV 只涵蓋上市，
 上櫃的終止日期沒有官方名單可補，也就沒有對帳的第二意見——

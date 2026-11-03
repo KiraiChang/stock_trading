@@ -12,7 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
-// 終止上市事件層與投影 provenance 的存取（計畫書 docs/todo.md T-071，migration 076）。
+// 終止上市事件層與投影 provenance 的存取（規格見 docs/database-schema.md 的 delisting_events，migration 076）。
 //
 // **兩層設計**：delisting_events 記歷史事實（同一代號可有多代），
 // stock_symbols 是 current-state 主檔（一代號一列）。分層的理由見 migration 076 的註解。

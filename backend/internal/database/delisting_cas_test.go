@@ -21,7 +21,7 @@ import (
 )
 
 // migration 076 的**跨連線 CAS 與計數一致性**驗證
-//（計畫書 docs/todo.md T-071 的 #4c／#10j／#20g）。
+//（測試編號 #4c／#10j／#20g 出自原 docs/todo.md T-071 的測試表，已收斂；原文見 git show b9cf198:docs/todo.md；規格見 docs/database-schema.md 的 delisting_events）。
 //
 // ⚠️ **為什麼不能用 mock，也不能「在 UPDATE 前改 fixture」**：那驗不到 MySQL 的
 // transaction snapshot 問題。本專案沒有覆寫 isolation，MySQL 預設 REPEATABLE READ——

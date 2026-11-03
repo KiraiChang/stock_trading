@@ -57,10 +57,6 @@ sr-zone-scoring.md|decision_engine.py:516
 todo.md|SRZones.svelte:2154
 todo.md|SRZones.svelte:596
 todo.md|SRZones.svelte:598
-todo.md|api/handler/scheduler.go:108
-todo.md|cmd/server/main.go:160
-todo.md|cmd/server/main.go:72
-todo.md|config.go:332
 todo.md|decision_engine.py:1042
 todo.md|decision_engine.py:1826
 todo.md|decision_engine.py:305
@@ -77,31 +73,13 @@ todo.md|evaluation.py:624 x2
 todo.md|evaluation.py:635
 todo.md|evaluation.py:92
 todo.md|handler/market.go:27
-todo.md|handler/scheduler.go:64
 todo.md|handler/sr_zones.go:524
 todo.md|internal/market/yahoo_dividend.go:21
-todo.md|internal/scheduler/scheduler.go:1063
 todo.md|internal/scheduler/scheduler.go:116
-todo.md|internal/scheduler/scheduler.go:1436 x2
-todo.md|internal/scheduler/scheduler.go:370
 todo.md|internal/scheduler/scheduler.go:409
-todo.md|internal/scheduler/scheduler.go:82
-todo.md|job_error.go:26
-todo.md|job_run_repo.go:112
-todo.md|job_run_repo.go:132
-todo.md|migrations/mysql/048_create_stock_symbols.sql:16
-todo.md|migrations/mysql/048_create_stock_symbols.sql:20
-todo.md|migrations/postgres/048_create_stock_symbols.sql:12
 todo.md|python/backtest/modular/sr_scoring/zone_builder.py:43
 todo.md|python/db.py:361
 todo.md|selection_report.py:647
-todo.md|server.go:129
 todo.md|server.go:163
-todo.md|sqlite.go:17
-todo.md|sqlite.go:18
-todo.md|sqlite.go:9
 todo.md|sr_zone_repo.go:558
-todo.md|stock_symbol_repo.go:219
-todo.md|store/sqlite.go:20 x2
-todo.md|twse_isin.go:233
 todo.md|zone_builder.py:43

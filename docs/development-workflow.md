@@ -650,6 +650,47 @@ docker exec stock_trading-backend-1 sh -c \
 ℹ️ **`job_runs` 沒有這個問題**：那是 DB 欄位（UTC 存、查詢時 `+ interval '8 hours'`），
 與 log 檔名無關。混用時要記得兩者的「日界線」不同。
 
+### 在 dev stack 上驗終止上市對帳（`delisting_reconcile`）
+
+2026-09-08 照這個做過一次（原記於 `todo.md` T-071 的「dev 驗收操作清單」，2026-11-03 收斂；原文見 `git show b9cf198:docs/todo.md`）。
+規格見 `architecture.md`「終止上市對帳」與 `database-schema.md` 的 `delisting_events`。⛔ 不需要停 live——只起 backend 要的服務：
+
+1. **起 dev**：
+
+   ```bash
+   DELISTING_ENABLED=true STOCK_SYMBOLS_TIMEOUT_SEC=900 SERVICES=backend scripts/smoke-dev.sh
+   ```
+
+   * image 已經是現行程式時再加 `NO_BUILD=1`（見下方「2. 啟動 dev stack 做 smoke test」）。
+   * `DELISTING_ENABLED` 只決定 **cron 要不要註冊**，手動端點一律可用；環境變數只在建立容器時帶入，改了要重建容器。
+   * `STOCK_SYMBOLS_TIMEOUT_SEC=900`：盤中連續請求時 ISIN 端點會被節流（`architecture.md`「終止上市對帳」）。
+2. **確認 migration 夠新**（migration embed 在 binary 裡，image 舊了就驗不到）：
+   `docker exec stock_trading_dev-postgres-1 psql -U trading -d trading -tAc "SELECT max(version_id) FROM goose_db_version;"` 要 ≥ 76。
+3. **取得 token**：上方「dev 取得 JWT：每次用新的驗收帳號」的 `dev_token`，成功才往下做。
+4. **前置**：`POST /api/v1/scheduler/stock-symbol-sync/run`，等 `job_runs` 最新一筆 `stock_symbol_sync` 是 `success`
+   （ISIN ⛔ 不吃 FinMind，dev 沒有金鑰也跑得動）。⛔ 沒有它，對帳整輪 `failed`（`delisting_reconcile:stock_symbol_sync_not_ready`）。
+5. **觸發對帳**：`POST /api/v1/scheduler/delisting-reconcile/run` → `202`、`accept_shrink:false`；立刻再打一次要 `409`，而且⛔ 不寫 `job_runs`。
+6. **判讀**：
+
+   | 項目 | 標準 |
+   |---|---|
+   | 事件 | `missing_from_source_at IS NULL` 的筆數＝log 的 `event_rows`（⛔ 不是全表 `COUNT(*)`——missing 事件永久保留；⛔ 不寫死 265，官方名單會成長） |
+   | 快照 | `delisting_source_snapshots` 最新一筆 `accepted` |
+   | `job_runs` | `symbols_total`＝當日 CSV 的 distinct 代號數（⛔ 不是事件筆數）、`symbols_failed = 0`；狀態依 `architecture.md`「對帳分類」的 `partial` 條件 |
+   | log | `docker compose -p stock_trading_dev -f docker-compose.dev.yml logs backend \| grep "delisting reconcile completed"` 有方向一與方向二的完整計數，方向一總和＝`event_rows` |
+   | 預期案例（2026-09 的名單與主檔；名單或主檔變了要重新推導） | `2867` 的 `delisted_date = 2026-09-01`、`delisted_event_id` 指向同代號同日期且仍 active 的事件；`2301`／`2432`／`6423` 兩欄都是 `NULL`，`2432` 記 B ⛔ 不是 C |
+   | 排程頁 | `GET /scheduler/status` 的 `delisting_reconcile` ⛔ 不是 `never_run`；沒帶 `DELISTING_ENABLED=true` 時 `stale=false`（未註冊不套門檻）是正確的 |
+
+   預期案例用這段查（provenance 要連事件一起看；只驗日期⛔ 不能證明）：
+
+   ```sql
+   SELECT s.symbol, s.is_listed, s.delisted_date, s.delisted_event_id,
+          e.delisted_date AS ev_date, e.missing_from_source_at
+     FROM stock_symbols s LEFT JOIN delisting_events e ON e.id = s.delisted_event_id
+    WHERE s.symbol IN ('2867','2301','2432','6423') ORDER BY s.symbol;
+   ```
+7. 驗完 `down`（⛔ 不帶 `-v`）。
+
 ### 新增排程開關要改**三個**地方，只加 `export` 會靜默失效
 
 ⛔ **live 用的 compose 檔不是 repo 的 `docker-compose.yml`**：`deploy.sh` 跑的是

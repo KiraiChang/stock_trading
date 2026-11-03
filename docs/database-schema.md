@@ -290,6 +290,11 @@ predicate 自己保證了只有真的發生轉換的列才會被更新。
 每次**通過驗證並寫入**時記一列（`row_count` 是去重後的 canonical event 數，
 ⛔ 不是 CSV 原始列數，否則去重會被誤判成縮水）。下一輪比的就是上一筆 `accepted`。
 
+**同一批 CSV 內的重複 key 在解析階段就處理完**，⛔ 不丟給 DB——postgres 的批次 upsert 在同一批內重複命中同一個
+conflict target 會整批失敗（`ON CONFLICT DO UPDATE command cannot affect row a second time`）：
+同 `(symbol, delisted_date)`、名稱相同 → 去重保留一筆（Info，來源重複列）；名稱不同 → 來源自相矛盾，**整輪解析失敗**
+（名稱是投影的輸入，猜錯就是誤投影）。2026-09-04 實測 265 筆⛔ 沒有重複代號，但那是觀察、⛔ 不是保證。
+
 ⛔ **「上一筆」一律 `ORDER BY id DESC LIMIT 1`**：兩次連續執行可能落在同一個
 `fetched_at`（秒級精度），只靠時間戳排序就變成未定義，基準會不確定。
 
@@ -397,6 +402,10 @@ predicate 自己保證了只有真的發生轉換的列才會被更新。
   由 `TestWithImmediateTx*`（四條：等待成功／逾時失敗／rollback 後連線可重用／
   ctx 已取消）與排程層的 `TestDelistingReconcileWaitsOutShortExternalWriter`、
   `TestDelistingReconcileExternalWriterBeyondBusyTimeoutWritesFailed` 釘住。
+* ⚠️ **`busy_timeout` 與 `foreign_keys` 是 connection-local 的 pragma，一律由 DSN 帶**（`store/sqlite.go` 的 `enforcedSQLitePragmas`）：
+  用一次 `Exec` 設定只對 pool 裡的那一條連線有效，其他連線照樣是預設值（FK 預設是關的）。
+  兩個都是強制政策——DSN 裡原本同名的 `_pragma` 先移除、再加入唯一一份固定值，⛔ 不能被外部設定覆寫成 0；其他 `_pragma` 照留。
+  `journal_mode=WAL` 是寫進 DB 檔的持久設定，⛔ 不是 connection-local，可以用 `Exec` 設。
 * ⛔ **nullable 欄位要 null-safe**：以 `(col IS NULL AND ? IS NULL) OR col = ?`
   的形式組出，不用 engine 專屬的 `IS NOT DISTINCT FROM` / `<=>`。
   寫成 `col = NULL` 永遠不為真，那些列就永遠撤銷不掉。

@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// TWSE「終止上市公司」名單的抓取與解析（計畫書 docs/todo.md T-071）。
+// TWSE「終止上市公司」名單的抓取與解析（規格見 docs/architecture.md「終止上市對帳」）。
 //
 // ⚠️ **這份名單只補日期、不驅動 is_listed**：判定「還在不在交易」的權責只屬於
 // stock_symbol_sync 的 ISIN 缺席邏輯。理由是這份 CSV 含**歷史**紀錄，

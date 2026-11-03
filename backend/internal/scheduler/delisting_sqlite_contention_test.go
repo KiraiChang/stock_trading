@@ -15,7 +15,7 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
-// SQLite 的兩種 busy 情境（計畫書 docs/todo.md T-071 的 #20f②③ 與 #20f2）。
+// SQLite 的兩種 busy 情境（測試編號 #20f②③ 與 #20f2 出自原 docs/todo.md T-071 的測試表，已收斂；原文見 git show b9cf198:docs/todo.md；規格見 docs/database-schema.md 的 delisting_events）。
 //
 // ⚠️ **這兩種要分開**：
 //   - **#20f｜外部 writer**（另一個 handle 持有 write lock）→ 我們在 `busy_timeout`
@@ -244,7 +244,7 @@ func TestDelistingReconcileExternalWriterBeforeStartRunAborts(t *testing.T) {
 //
 // ⛔ **不會拿到 SQLITE_BUSY**：第二個呼叫是在 `database/sql` 層等一條空閒 connection，
 // 等到的是 context 逾時。⚠️ 競爭者要模擬成 **ISIN-like 的 DB consumer**，
-// ⛔ 不是第二個 T-071 入口——後者會先被 single-flight 擋掉，根本到不了 pool 排隊。
+// ⛔ 不是第二個對帳入口——後者會先被 single-flight 擋掉，根本到不了 pool 排隊。
 func TestDelistingReconcileQueuesOnSinglePoolConnection(t *testing.T) {
 	source := &contentionSourceStub{}
 	s, db, _ := newSQLiteContentionFixture(t, source)

@@ -45,11 +45,16 @@ live 的檔案是 `/opt/stacks/scripts/redis/docker-compose.redis.yml`，範本�
   ⛔ 不模仿 compose 的解析：它的 `.env` 語法很多（Compose v5.1.3 實測：同一個鍵寫兩次取後面那行、`KEY: value` 也算賦值、
   會去掉引號、`\r` 與行尾的 ` # 註解`、會展開 `$`），只認得其中幾種就會漏掉其他寫法，讓 backend 帶的密碼和 Redis 的不同。
   白名單只接受一種 compose 照字面讀的寫法，其他任何一行都擋下。
+  ⛔ 沒有改用「讓 compose 解析、再取它的結果」（`config` 的輸出）：`deploy.sh` 要另外知道 Redis compose 檔的路徑、解析 JSON、
+  排除 shell 裡已 export 的 `REDIS_PASSWORD`（compose 讓 shell 環境優先於 `.env`），密碼也會經過整份 `config` 的輸出——每一處都是新的出錯點。
   ⚠️ backend **只在啟動時連一次**：失敗就記 `redis connect failed, cache disabled` 並**整個停用 Redis**——
   之後訊號⛔ 不再標 degraded，queue 與 cache 卻都⛔ 不用，`job_runs` 看起來可能一切正常。所以改了 Redis 的密碼，一定要重新部署 backend。
   Redis 只是重建（密碼沒變）時，backend 的 client 會自己重連，⛔ 不需要重新部署。
 - **redis-server 要以 redis（uid 999）執行**：範本的 `command` 經 `docker-entrypoint.sh` 啟動。image 的 entrypoint 只在第一個參數是
   `redis-server`、身分是 root 時才降權；直接 `sh -c "exec redis-server …"` 會繞過它、以 root 執行。
+- **改範本時⛔ 不在 host 上起一個 Redis 來測**：範本的 network 就是 live 的 `trading-net`；從 repo 目錄起的話，
+  project 名稱預設是目錄名 `stock_trading`，和 live app 的 project 同名。改完用 `docker compose -f docker-compose.redis.yml config` 驗
+  （沒設 `REDIS_PASSWORD` 時要報錯、有設時⛔ 沒有 port），再去掉註解、和 live 的檔比對；live 要跟著改時由使用者處理。
 - 確認方法（密碼一律⛔ 不印出來）：
 
   ```bash

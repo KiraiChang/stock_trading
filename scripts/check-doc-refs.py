@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""docs/*.md 裡的原始碼引用是否仍指向正確位置。
+"""docs/ 底下所有 .md（含子目錄）裡的原始碼引用是否仍指向正確位置。
 
 ⚠️ **要解的問題**：這是**每次改動原始碼就會再發生一次**的漂移。2026-09-17 一次掃描
 就在 144 個引用裡找到 **16 處**已經指錯，其中 `evaluation.py` 的 `_atr_pct()` 是
@@ -36,6 +36,16 @@
 
 ⚠️ **要在文件裡「引述一個寫錯的引用」時，⛔ 不要寫成上面的合法形式**——
 工具分不出「這是引用」與「這是在講某個引用曾經寫錯」。把行號與識別符拆開敘述即可。
+
+**掃描範圍**（2026-11-03，`todo.md` T-074）：`docs/` 底下所有子目錄的 `.md`（`plans/`、`architecture/`
+與之後新增的）。原本只掃 `docs/` 這一層，子目錄裡的漂移⛔ 不會被抓到。走訪規則與找來源檔的 walker 相同：
+⛔ 不跟隨 symlink（目錄與檔案都是，`docs/` 本身也是）、剪掉 `_PRUNE_DIRS`、只容忍走訪中消失；
+`docs/` 是 symlink／不存在、讀不到目錄或檔案都 rc＝2——⛔ 不能當成「沒有引用」。
+基準線的 key 與回報位置用 **`docs/` 底下的相對路徑**（`plans/x.md`）；頂層文件的相對路徑就是檔名，既有的 key 不變。
+
+**計畫書（`docs/plans/`）⛔ 不寫 `檔名:行號`**：出現就報錯，⛔ 不論行號對不對（`CLAUDE.md`「協作流程」）。
+計畫書寫的是「要改的」程式，實作期間行號一直動——寫了會在實作中途變紅，或逼人回頭追計畫書的行號。
+改寫成不帶行號的「`檔名` 的 `函式()`」；歷史 commit 用「`<commit>` 的 `檔名` 第 N 行」。
 
 用法：
     python3 scripts/check-doc-refs.py            # 檢查，有問題回非零
@@ -247,11 +257,59 @@ def load_baseline() -> "Counter[str]":
     return counter
 
 
+def _doc_files() -> list[pathlib.Path]:
+    """`docs/` 底下所有的 `.md`（含子目錄），依相對路徑排序。
+
+    ⚠️ 走訪規則與 `_find_by_basename` 相同（同一套威脅模型）：
+    * **symlink 一律跳過**（目錄與檔案都是，⛔ 不跟隨）——可能指到 repo 外，或形成 cycle；
+    * **只容忍走訪中消失**（`FileNotFoundError`／`NotADirectoryError`）；`PermissionError` 等其他
+      `OSError` **往上拋**——讀不到目錄＝可能漏掉文件，⛔ 不能當成「沒有引用」而通過（fail-open）；
+    * **剪枝名單與 `_find_by_basename` 共用**（`_PRUNE_DIRS`，在遞迴之前剪掉）——`docs/` 底下一樣可能出現
+      `.git/worktrees`、`node_modules`（2026-11-03 review：初版沒剪，掃進了 `docs/.git/worktrees/…`）。
+
+    **起點也要驗**（2026-11-03 review，⛔ 不能只驗底下的項目）：`docs/` 本身是 symlink 時，只檢查底下的項目擋不住——外部文件會被當成
+    `docs/…` 掃進來。`docs/` 是 symlink、不存在或不是目錄都丟 `ValueError`（rc＝2）：⛔ 不能跳過，
+    跳過等於什麼都沒掃卻回 0。
+    """
+    docs = ROOT / "docs"
+    if docs.is_symlink():
+        raise ValueError(f"{docs} 是 symlink——⛔ 不跟隨（可能指到 repo 外）；⛔ 不能當成「沒有引用」")
+    if not docs.is_dir():
+        raise ValueError(f"找不到文件目錄 {docs}——⛔ 不能當成「沒有引用」而通過")
+    found: list[pathlib.Path] = []
+    stack = [docs]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except (FileNotFoundError, NotADirectoryError):
+            continue            # ⚠️ 走訪期間消失——只有這一種可以跳過
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue    # ⛔ 不跟隨
+                if entry.is_dir():
+                    if entry.name not in _PRUNE_DIRS:
+                        stack.append(entry)
+                elif entry.suffix == ".md" and entry.is_file():
+                    found.append(entry)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+    return sorted(found, key=lambda f: f.relative_to(docs).as_posix())
+
+
+PLAN_RULE = ("計畫書（`docs/plans/`）⛔ 不寫 `檔名:行號`——實作期間行號一直動；"
+             "改寫成不帶行號的「`檔名` 的 `函式()`」（`CLAUDE.md`「協作流程」）")
+
+
 def check():
     problems, stats, passed = [], {"checked": 0, "line-only": 0, "external": 0}, []
     baseline = load_baseline()
     used: Counter[str] = Counter()
-    for md in sorted((ROOT / "docs").glob("*.md")):
+    for md in _doc_files():
+        # ⚠️ key 與回報位置用 docs/ 底下的**相對路徑**：只用檔名的話，子目錄的同名檔會和頂層共用額度。
+        rel = md.relative_to(ROOT / "docs").as_posix()
+        is_plan = rel.startswith("plans/")
         for lineno, text in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
             # ⚠️ **識別符要綁在「這一個 match 的文字位置」上，⛔ 不是綁在座標上**
             # （2026-09-17 review 兩輪）：
@@ -276,8 +334,12 @@ def check():
             for m in ANY_REF.finditer(text):
                 name, want = m.group("file"), int(m.group("line"))
                 end_line = int(m.group("end")) if m.group("end") else None
+                where = f"docs/{rel}:{lineno}"
+                if is_plan:
+                    # ⚠️ 先於 resolve()：計畫書的規則是「⛔ 不寫」，⛔ 不論引用對不對、是不是外部套件。
+                    problems.append((where, name, want, "", PLAN_RULE))
+                    continue
                 status, payload = resolve(name)
-                where = f"docs/{md.name}:{lineno}"
                 if status == "external":
                     stats["external"] += 1
                     continue
@@ -314,7 +376,7 @@ def check():
                         del near_spans[idx]      # ⚠️ 用掉就移除——⛔ 不讓下一筆重複配到
                         break
                 if ident is None:
-                    key = f"{md.name}|{name}:{want}"
+                    key = f"{rel}|{name}:{want}"
                     used[key] += 1
                     if used[key] <= baseline[key]:
                         stats["line-only"] += 1
@@ -382,6 +444,10 @@ def main(argv: list[str]) -> int:
         problems, stats, passed, stale = check()
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        # ⚠️ 讀不到目錄或檔案＝可能漏掉引用，⛔ 不能當成通過（fail-closed）。
+        print(f"ERROR: 讀不到 {exc.filename or exc}（{exc.strerror or exc}）——⛔ 不能當成「沒有引用」", file=sys.stderr)
         return 2
     total = stats["checked"] + stats["line-only"] + stats["external"] + len(problems)
     summary = (f"引用共 {total} 個："

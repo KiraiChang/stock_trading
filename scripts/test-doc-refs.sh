@@ -413,6 +413,101 @@ python3 "$CHECK" --root >/dev/null 2>&1; rc=$?
 set -e
 [ "$rc" -eq 2 ] && pass "--root 缺值 → rc=2" || fail "--root 缺值 rc=$rc"
 
+# ⑮ `docs/` 的子目錄（T-074，2026-11-03）：舊版只掃 `docs/` 這一層，`docs/plans/`、`docs/architecture/` 裡的漂移⛔ 不會被抓到。
+#   ⚠️ ⑮-a～d、f 對舊版跑都會失敗（實作前實測過）；⑮-e、g 是新 walker 的防線，舊版不遞迴、本來就⛔ 不會踩到。
+#   頂層放一個正確的引用當對照：子目錄的引用若被略過，「識別符已驗」會停在 1。
+: > "$TD/scripts/doc-refs-legacy.txt"
+printf '`pkg/a/sample.py:4` `alpha`\n' > "$TD/docs/x.md"
+mkdir -p "$TD/docs/architecture" "$TD/docs/plans"
+
+# ⑮-a 子目錄裡漂移的引用 → rc=1，回報位置是子目錄的路徑
+printf '`pkg/a/sample.py:51` `alpha`\n' > "$TD/docs/architecture/a.md"
+run
+{ [ "$RC" -eq 1 ] && grep -q "docs/architecture/a.md:1" <<< "$OUT"; } \
+  && pass "子目錄的漂移 → rc=1、位置是 docs/architecture/a.md" || fail "⑮-a 子目錄漂移：rc=$RC $OUT"
+
+# ⑮-b 子目錄裡正確的引用 → rc=0，而且**有計入**（⛔ 不是被略過才通過）
+printf '`pkg/a/sample.py:4` `alpha`\n' > "$TD/docs/architecture/a.md"
+run
+{ [ "$RC" -eq 0 ] && grep -q "識別符已驗 2" <<< "$OUT"; } \
+  && pass "子目錄的正確引用 → rc=0 且計入（識別符已驗 2）" || fail "⑮-b 子目錄未計入：rc=$RC $OUT"
+rm -f "$TD/docs/architecture/a.md"
+
+# ⑮-c 子目錄的 line-only：基準線的 key 是 docs/ 底下的相對路徑
+#     頂層同名檔（x.md）的額度⛔ 不能抵用 architecture/x.md 的引用
+printf '只提 `pkg/a/sample.py:4` 沒有緊鄰識別符\n' > "$TD/docs/architecture/x.md"
+printf 'x.md|pkg/a/sample.py:4\n' > "$TD/scripts/doc-refs-legacy.txt"
+run
+{ [ "$RC" -eq 1 ] && grep -q "docs/architecture/x.md:1" <<< "$OUT" && grep -q "新的 line-only" <<< "$OUT"; } \
+  && pass "子目錄的 line-only ⛔ 不能用頂層同名檔的額度" || fail "⑮-c 額度被共用：rc=$RC $OUT"
+printf 'architecture/x.md|pkg/a/sample.py:4\n' > "$TD/scripts/doc-refs-legacy.txt"
+run
+[ "$RC" -eq 0 ] && pass "子目錄的 line-only 用 architecture/x.md 的 key → rc=0" || fail "⑮-c 相對路徑 key：rc=$RC $OUT"
+: > "$TD/scripts/doc-refs-legacy.txt"; rm -f "$TD/docs/architecture/x.md"
+
+# ⑮-d 計畫書（docs/plans/）⛔ 不寫 `檔名:行號`：就算行號是對的也報錯
+printf '要改 `pkg/a/sample.py:4` `alpha`\n' > "$TD/docs/plans/p.md"
+run
+{ [ "$RC" -eq 1 ] && grep -q "docs/plans/p.md:1" <<< "$OUT" && grep -q "計畫書" <<< "$OUT"; } \
+  && pass "計畫書的 檔名:行號（行號正確）→ rc=1、訊息寫明規則" || fail "⑮-d 計畫書規則：rc=$RC $OUT"
+
+# ⑮-g 計畫書不帶行號的寫法 → ⛔ 不誤擋
+printf '要改 `pkg/a/sample.py` 的 `alpha()`；歷史：`abc1234` 的 `pkg/a/sample.py` 第 4 行\n' > "$TD/docs/plans/p.md"
+run
+[ "$RC" -eq 0 ] && pass "計畫書不帶行號的寫法 → rc=0（⛔ 不誤擋）" || fail "⑮-g 誤擋：rc=$RC $OUT"
+rm -f "$TD/docs/plans/p.md"
+
+# ⑮-e docs/ 底下指到 repo 外的目錄 symlink → ⛔ 不跟隨
+OUTSIDE4="$(mktemp -d)"
+printf '`pkg/a/sample.py:51` `alpha`\n' > "$OUTSIDE4/drift.md"
+ln -s "$OUTSIDE4" "$TD/docs/linked"
+run
+{ [ "$RC" -eq 0 ] && ! grep -q "drift.md" <<< "$OUT"; } \
+  && pass "docs/ 底下的目錄 symlink ⛔ 不跟隨" || fail "⑮-e symlink 被跟隨：rc=$RC $OUT"
+rm -f "$TD/docs/linked"; rm -rf "$OUTSIDE4"
+
+# ⑮-f docs/ 的子目錄讀不到 → 非零結束（⛔ 不能當成「沒有引用」而通過）
+#     ⚠️ root 讀得到 000 的目錄，這個 case 只在非 root 有意義
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir -p "$TD/docs/locked"; printf '`pkg/a/sample.py:51` `alpha`\n' > "$TD/docs/locked/l.md"
+  chmod 000 "$TD/docs/locked"
+  run
+  chmod 755 "$TD/docs/locked"
+  { [ "$RC" -ne 0 ] && grep -q "docs/locked" <<< "$OUT"; } \
+    && pass "子目錄讀不到 → rc=$RC（⛔ 不當成通過）" || fail "⑮-f 讀不到卻通過：rc=$RC $OUT"
+  rm -rf "$TD/docs/locked"
+else
+  echo "  skip ⑮-f（root 讀得到 000 的目錄）"
+fi
+
+# ⑮-h docs/ 本身是指到 repo 外的 symlink → rc=2、⛔ 不跟隨（review 2026-11-03：起點沒檢查時外部文件被當成 docs/ 掃）
+#     ⚠️ 跳過也不行：那等於什麼都沒掃卻回 0（fail-open），所以要報錯
+OUTSIDE5="$(mktemp -d)"
+printf '`pkg/a/sample.py:51` `alpha`\n' > "$OUTSIDE5/outside.md"
+mv "$TD/docs" "$TD/docs.real"; ln -s "$OUTSIDE5" "$TD/docs"
+run
+rm -f "$TD/docs"; mv "$TD/docs.real" "$TD/docs"; rm -rf "$OUTSIDE5"
+{ [ "$RC" -eq 2 ] && grep -q "symlink" <<< "$OUT" && ! grep -q "outside.md" <<< "$OUT"; } \
+  && pass "docs/ 本身是 symlink → rc=2、⛔ 不跟隨" || fail "⑮-h docs/ 是 symlink：rc=$RC $OUT"
+
+# ⑮-i docs/ 底下也要套 _PRUNE_DIRS（review 2026-11-03：曾掃進 docs/.git/worktrees/…）
+mkdir -p "$TD/docs/.git/worktrees/w" "$TD/docs/node_modules/pkg"
+printf '`pkg/a/sample.py:51` `alpha`\n' > "$TD/docs/.git/worktrees/w/w.md"
+printf '`pkg/a/sample.py:51` `alpha`\n' > "$TD/docs/node_modules/pkg/n.md"
+run
+rm -rf "$TD/docs/.git" "$TD/docs/node_modules"
+{ [ "$RC" -eq 0 ] && ! grep -qE "w\.md|n\.md" <<< "$OUT"; } \
+  && pass "docs/ 底下的 .git、node_modules 被剪掉" || fail "⑮-i 剪枝：rc=$RC $OUT"
+
+# ⑮-j docs/ 不存在 → rc=2（⛔ 不是「引用共 0 個」就通過）
+mv "$TD/docs" "$TD/docs.real"
+run
+mv "$TD/docs.real" "$TD/docs"
+{ [ "$RC" -eq 2 ] && grep -q "docs" <<< "$OUT"; } \
+  && pass "docs/ 不存在 → rc=2（⛔ 不當成通過）" || fail "⑮-j docs/ 不存在：rc=$RC $OUT"
+
+rmdir "$TD/docs/architecture" "$TD/docs/plans"
+
 echo
 echo "==> doc-refs 測試：$PASS 通過、$FAIL 失敗"
 [ "$FAIL" -eq 0 ]

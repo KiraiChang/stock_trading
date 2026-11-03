@@ -32,7 +32,7 @@ contract 修改、排程或資料同步修改、大型重構、驗證流程修�
 
 新建的計畫書一律獨立成檔，放在 `docs/plans/`，一份計畫一個檔；檔名不帶版本（版本寫在標題，每一輪的修正記在同一個檔裡）。
 `docs/issue.md` / `docs/todo.md` 的對應項目只留一行指向計畫書。`docs/plans/` 的計畫書不寫 `檔名:行號` 形式的程式引用
-（`scripts/check-doc-refs.py` 不掃這個目錄）。2026-10-27 之前已寫在 `docs/issue.md` / `docs/todo.md` 裡的計畫
+（`scripts/check-doc-refs.py` 會擋：計畫書裡出現就報錯）。2026-10-27 之前已寫在 `docs/issue.md` / `docs/todo.md` 裡的計畫
 不追溯搬移，照原規則保留到 review 確認後收斂。
 
 計畫書需等待使用者確認後才能實作。若實作過程偏離已確認計畫，必須先回報差異並更新計畫，再繼續。

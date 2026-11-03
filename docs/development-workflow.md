@@ -3193,6 +3193,10 @@ key 集合斷言**（`assert set(row["primary_zone"]) == {...}`），註解指�
 | **函式內某一段邏輯** | `` `檔名.py:123` `func` ``（⚠️ **識別符要緊鄰行號**） | 這種確實需要行號定位，但要讓檢查工具認得出來 |
 
 `scripts/check-doc-refs.py` 擋住第二類的漂移，由 `python/scripts/test.sh` 自動執行。
+**掃描範圍是 `docs/` 底下所有子目錄的 `.md`**（2026-11-03 起；原本只掃 `docs/` 這一層，`plans/`、`architecture/` 裡的漂移⛔ 不會被抓到）。
+⛔ 不跟隨 symlink（`docs/` 本身也是）、剪掉 `.git`／`node_modules` 等目錄；`docs/` 是 symlink 或不存在、讀不到目錄或檔案都 rc＝2（⛔ 不能當成「沒有引用」）。基準線的 key 用 `docs/` 底下的相對路徑（`architecture/x.md|…`）。
+**計畫書（`docs/plans/`）⛔ 不寫 `檔名:行號`**，工具會擋——⛔ 不論行號對不對：計畫書寫的是「要改的」程式，實作期間行號一直動。
+改寫成不帶行號的「`檔名` 的 `函式()`」；歷史 commit 用「`<commit>` 的 `檔名` 第 N 行」。
 它**只認「識別符與行號緊鄰」的四種寫法**：
 
 ```text id="doc_ref_forms_001"

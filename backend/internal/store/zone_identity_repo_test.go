@@ -444,13 +444,22 @@ func TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst(t *testing.T
 	repo, ctx := newZoneIdentityRepoForTest(t)
 	db := repo.(*zoneIdentityRepo).db
 
-	// 同一天兩筆（不同 symbol）只算一個交易日；週末沒有 K 棒所以自然不在清單裡。
+	// ⚠️ **日期一律相對於「今天」，⛔ 不寫死**（issue.md I-128）：ListTradingDays 只查
+	// time.Now() 往回 limit×3 個日曆天（這裡 limit=10 → 30 天）。原本寫死 2026-08 的日期，
+	// 過了窗口之後這個測試就必定失敗。每個日期都離窗口兩端與今天 ≥ 3 天，⛔ 不會碰到跨日
+	// 或 UTC／台北時差的邊界。
+	base := time.Now().UTC().AddDate(0, 0, -7)
+	day := func(offset int) string { return base.AddDate(0, 0, offset).Format("2006-01-02") }
+	outside := day(-30) // 37 天前：在 30 天的窗口外，⛔ 不能出現在結果裡
+
+	// 同一天兩筆（不同 symbol）只算一個交易日；只看 candles 裡實際有的日期。
 	for _, row := range []struct {
 		symbol string
 		ts     string
 	}{
-		{"0050", "2026-08-14"}, {"2330", "2026-08-14"},
-		{"0050", "2026-08-17"}, {"0050", "2026-08-18"},
+		{"0050", day(0)}, {"2330", day(0)},
+		{"0050", day(3)}, {"0050", day(4)},
+		{"0050", outside},
 	} {
 		if _, err := db.ExecContext(ctx,
 			`INSERT INTO candles (symbol, timeframe, open, high, low, close, volume, amount, ts)
@@ -468,7 +477,12 @@ func TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst(t *testing.T
 	}
 	// 由新到舊——與 Python 端 fetch_market_trading_days 同一個順序約定。
 	// matcher 端的 TradingCalendar.from_iterable 會負責排成升冪。
-	if days[0] != "2026-08-18" {
-		t.Errorf("應由新到舊，得到 %v", days)
+	if days[0] != day(4) || days[2] != day(0) {
+		t.Errorf("應由新到舊（%s 起），得到 %v", day(4), days)
+	}
+	for _, d := range days {
+		if d == outside {
+			t.Errorf("窗口外的 %s ⛔ 不該出現：%v", outside, days)
+		}
 	}
 }

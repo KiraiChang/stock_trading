@@ -3424,7 +3424,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | 已實作／待 review（2026-11-03：只改測試，日期改成相對於今天；見下方「修正」） |
 | 嚴重度 | 低：測試本身的缺陷，⛔ 不影響 runtime；但 `backend/scripts/test.sh` 全量跑一定紅，真正的失敗會被它蓋掉 |
 | 分類 | 測試 / Go store |
 | 建立日期 | 2026-11-03 |
@@ -3437,7 +3437,16 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 3. 對照組（2026-11-03）：把 store 套件還原成 HEAD 版本、只跑這一項，同樣失敗——與當時的註解修改無關。
 4. 推算：最後一筆測試資料 08-18 加 30 天，約 **2026-09-17 起**必定失敗。⛔ 沒有查證實際從哪一天開始失敗（`job_runs` 之類的紀錄⛔ 不涵蓋單元測試）。
 
-#### 處置方向（⚠️ 待規劃）
+#### 處置方向（✅ 2026-11-03 使用者確認：只改測試、日期相對於今天）
 
 * 測試資料改成相對於「今天」的日期，或讓 repo 的時鐘可以注入（固定 now）。⛔ 不改 `ListTradingDays` 的查詢窗口——那是 runtime 的行為。
 * 順便掃同類：其他測試有沒有「寫死日期、又依賴 `time.Now` 窗口」的寫法。
+
+#### 修正（2026-11-03，⚠️ 待 review）
+
+* 只改測試：日期改成「今天往回 7 天」為基準的相對日期（基準日兩檔、+3、+4 各一檔 → 3 個交易日），每個日期都離窗口兩端與今天 ≥ 3 天；另加一筆 37 天前、在 30 天窗口外的 K 棒，要求它⛔ 不出現。⛔ 沒有改 `ListTradingDays()` 的查詢窗口；⛔ 沒有加可注入的時鐘（那要改正式程式碼，相對日期就夠，也與 `sr_zone_repo_test.go` 既有的寫法一致）。測試裡已⛔ 沒有寫死的日期，所以⛔ 不會再過期。
+* 驗證（Claude 在跑、mem-guard 下修 MEM，所以都帶 `TEST_FLAGS=-vet=off`，見 `development-workflow.md` 的 Go 記憶體那段；`go vet` 步驟與 build 照跑）：
+  * 舊版：2026-11-03 失敗（want 3 got 0），見上方事實 3；新版：這一項通過、store 套件通過、全部套件 rc＝0。
+  * mutation：把窗口外那筆改成 17 天前（窗口內）→ 失敗（want 3 got 4），還原後通過——新加的窗口斷言抓得到。
+  * `gofmt -l` 無輸出。⚠️ 含 go test 內建 vet 的完整一輪要等 Claude 結束、`MEM` 回到 700m 再跑。
+* **掃同類（2026-11-03）**：非測試程式裡用 `time.Now()` 當窗口的還有 `sr_zone_verify` 的 `ListRefsSince` 起點、`listed_years` 的 `ListedBefore`、SR evaluation 的上界——它們的測試都用相對日期或直接傳入固定參數，⛔ 不受時間影響；寫死 2026-09 之後日期的 5 個測試檔（終止上市系列、`exchange_reference`、`gap_unavailable_log`），日期是業務資料、⛔ 不經 `time.Now` 窗口。⚠️ 掃法是啟發式（只找 `time.Now()` 搭配 `AddDate`／`Add`／`Sub`／`Since`／`Truncate`），⛔ 不是窮盡。

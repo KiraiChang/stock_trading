@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-128` 起算。**（**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-128` 起算。**（**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-127（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測），**下一個可用的是 I-128**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-126（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，**下一個可用的是 I-128**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,7 +70,7 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-127、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121、
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127、
   已跳號的 I-114，以及下一個可用的 I-128），
   那是預期的，不是殘留。
 
@@ -3419,55 +3419,3 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 (1) 整輪失敗記成 failed；(2) 前置條件不成立寫成專屬的安全文字（例如 `delisting_reconcile:stock_symbol_sync_not_ready`）。
 ⚠️ 動到狀態推導與 `job_runs` 的 contract，要先立計畫書。
-
-### I-127：dev 驗收清單的登入步驟在既有的 dev DB 拿不到 token（`dev@example.com` 照文件的密碼回 401）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | 已實作／待 review（2026-11-03：原因查明——帳號早就存在、密碼不同，register 對既有 email 只回 409；文件改成每次用新的驗收帳號，dev 實測通過，見下方「查明」「修正」） |
-| 嚴重度 | 低：文件落後，⛔ 不影響 runtime；照文件做 dev 驗收的人拿不到 JWT，需要 token 的步驟都做不了 |
-| 分類 | 文件 / dev 驗收流程 |
-| 建立日期 | 2026-11-02 |
-| 來源 | I-123～I-126 階段 B 的 dev 實測（執行途中手動觸發的 409 因此沒在 dev 驗到，見 [`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)「十二」） |
-
-#### 事實
-
-1. `todo.md` T-071「dev 驗收操作清單」的步驟 3（該節標明「保留步驟供日後補跑／複驗」）：
-   以 `dev@example.com` 和文件寫的密碼 register → psql 改成 `active` → login 取 token。
-2. 2026-11-02 在 dev project（`stock_trading_dev`）用那組 email 與密碼打 `POST /api/v1/auth/login`：回 **401**。
-3. 同一天 dev DB 的 `users` 裡，`dev@example.com` 是 id 1、狀態 `active`。
-4. `development-workflow.md`「四個會讓這件事做錯的細節」也用 `dev@example.com` 示範啟用帳號（沒寫密碼）。
-
-#### 待查（原因未查——使用者 2026-11-02 裁決照實記錄）
-
-* 只有 401 這個結果，⛔ 無法分辨是「密碼與文件不符」還是「登入端點本身的問題」。
-  對照組：同一個 dev stack 用新註冊並啟用的帳號登入，成功就排除後者；另看 401 的回應內容。
-* 待驗的推測：帳號在步驟 3 之前就存在，而 register ⛔ 不會改既有帳號的密碼——
-  若成立，這個步驟只在全新的 dev DB 有效。
-
-#### 處置方向（⚠️ 待規劃）
-
-查清原因後再定：例如步驟改成「先試 login、失敗才 register」、改用驗收專用的帳號，
-或在 `development-workflow.md` 寫明 dev 帳密的來源。
-
-#### 查明（2026-11-03，dev 實測；⛔ 沒有碰 live）
-
-用 `NO_BUILD=1 SERVICES=backend scripts/smoke-dev.sh` 起 dev（沿用既有 volume；11-02 之後 backend 程式沒改）：
-
-| 項目 | 結果 |
-|---|---|
-| 重現：`dev@example.com`／`devdevdev` login | **401** `invalid email or password` |
-| dev DB 的 `users`（唯讀；只看 id、狀態、建立時間、雜湊的前綴與長度） | `dev@example.com` 是 id 1、`active`、**2026-08-19** 建（`$2a$`、60 字元）——早於 T-071 的 dev 驗收（09-08）；09-08 建的是 `t071@example.com`（id 13） |
-| register 既有的 `dev@example.com` | **409** `email already exists`（程式：`Create` 失敗就回 409、⛔ 不更新密碼） |
-| 對照：新註冊 `accept-<時間>@example.com` → 啟用 → login | 201 → `UPDATE 1` → **200**、token 204 字元；帶 token 打 `GET /scheduler/status` 回 200、不帶回 401 |
-
-結論：「帳號在步驟 3 之前就存在，而 register ⛔ 不會改既有帳號的密碼」成立；登入端點本身沒有問題（對照組通過）。程式的回應碼：401 ＝ 找不到帳號或密碼不符（`FindByEmail` 出錯也是 401）、403 ＝ 密碼對但不是 `active`。
-
-#### 修正（2026-11-03，⚠️ 待 review）
-
-* `development-workflow.md` 新增「dev 取得 JWT：每次用新的驗收帳號」：帶時間戳的 email、register 要 201、psql 啟用、login 拿不到 token 就印「停下來查」；bash 與 zsh 各實測一次都拿到 token，失敗路徑（打錯 port）兩個警告都有印、`TOKEN` 是空的。
-* `todo.md` T-071 的步驟 3、`development-workflow.md`「四個會讓這件事做錯的細節」改成指向它（as-of 階梯那段的 `$JWT` 統一成 `$TOKEN`）。
-* `api-reference.md` 的 `POST /auth/register` 補錯誤回應（400、409，409 ⛔ 不改密碼）；`development-guide.md`「建立第一個使用者」補同一句並指向新段落。
-* dev 驗完 `down`（⛔ 沒有帶 `-v`），volume 保留；dev DB 多了幾個 `accept-…@example.com`。
-* **review 第 1 輪（2026-11-03）**：失敗提示只是 `|| echo`，整段貼上之後仍會啟用、login，最後回傳 0（review 以假 curl／docker 在 bash、zsh 重現）。改成 `dev_token` 函式：register ⛔ 不是 201、啟用⛔ 不是 `UPDATE 1`、login 拿不到 token 都 `return 1`、後面⛔ 不執行；開頭 `unset TOKEN`，失敗時⛔ 不殘留上一次的 token。驗證：假 `curl`／`docker` 7 種情況 × bash、zsh 都照預期（失敗後的呼叫⛔ 沒有發生、`TOKEN` 是空的、`dev_token && …` 只在成功時執行下一步）；dev stack 實跑 bash、zsh 都拿到 token、`GET /scheduler/status` 回 200；驗完 `down`（⛔ 沒有帶 `-v`）。⚠️ 待 review
-* review 通過後收斂本筆；現況已在 `development-workflow.md`。

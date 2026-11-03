@@ -410,7 +410,7 @@
   * 啟動 log 的 `job retry config`：enabled、60 秒、3 次、截止 23:30，最晚起跑：公司行動 22:42、主檔 23:07、對帳 23:22。✅
   * `job_runs`：cron 10:40 一輪 → 10:41、10:42、10:44 各重跑一輪，4 筆都是 `failed`；前三筆的 `error` 結尾是「自動重跑 n/3（時刻）」，
     第四筆是「自動重跑已用完（3/3）」；用完後再等 90 秒⛔ 沒有第五筆。log 依序有「自動重跑已排定」（trigger 為 cron／rerun）、「自動重跑開始」、「自動重跑已用完」。✅
-  * ⚠️ **執行途中手動觸發的 409 ⛔ 沒有在 dev 驗到**：`docs/todo.md` 記的 dev 帳號密碼在目前的 dev DB 登不進去（401，I-127），手動請求停在驗證那一層、
+  * ⚠️ **執行途中手動觸發的 409 ⛔ 沒有在 dev 驗到**：`docs/todo.md` 記的 dev 帳號密碼在目前的 dev DB 登不進去（401；原記於 `issue.md` I-127，2026-11-03 已修正並收斂，取得 token 的做法見 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」），手動請求停在驗證那一層、
     ⛔ 沒有碰到執行所有權。使用者裁決⛔ 不補驗；409 由 `scheduler_ownership_test.go` 與反向驗證 B11、B12 涵蓋。
   * 第一次實測把主檔 cron 在 build 之前推算成「+4 分鐘」，build 花了約 7 分鐘，啟動時已經錯過、當天⛔ 不會觸發；
     第二次改成 `--no-build --no-deps` 只重建 backend、cron 設在重建之後 2 分鐘（dev 的 python-server 先停掉，騰出記憶體）。

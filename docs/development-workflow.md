@@ -271,7 +271,7 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 
 ### dev 取得 JWT：每次用新的驗收帳號
 
-需要 JWT 的 dev 驗收步驟一律用這段取得 `TOKEN`（`issue.md` I-127，2026-11-03 起）。
+需要 JWT 的 dev 驗收步驟一律用這段取得 `TOKEN`（2026-11-03 起；原記於 `issue.md` I-127，已收斂）。
 
 ⛔ **不要沿用 dev DB 裡既有的帳號**（例如 `dev@example.com`）：dev 的 volume 會一直沿用，既有帳號的密碼不一定是文件寫的那個——
 `dev@example.com` 是 2026-08-19 建的，用 `devdevdev` 登入回 401。而 `POST /auth/register` 對已經存在的 email 只回 **409**、

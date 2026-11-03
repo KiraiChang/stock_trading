@@ -3188,6 +3188,12 @@ key 集合斷言**（`assert set(row["primary_zone"]) == {...}`），註解指�
     `TestCandleGapDetectionQueriesEveryMonthInWindow` 就是正解：直接呼叫
     `verifyCandidates` 並給 `2026-07-31` / `2026-08-03` / `2026-08-04`，
     註解寫明「跨月的判斷不依賴『今天是哪一天』才穩定」。
+  - ⚠️ **反方向：被測程式自己讀 `time.Now()` 當窗口（⛔ 不是純函式）時，⛔ 不能寫死日期**——過了窗口就**永久**失敗，⛔ 不會自己好。
+    2026-11-03 的實例（原記於 `issue.md` I-128，已收斂）：`ListTradingDays()` 只查 `time.Now()` 往回 `limit × 3` 天，
+    `TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst` 寫死 2026-08 的日期，約 09-17 起必定失敗。
+    修法：日期相對於今天，離窗口兩端與今天都留 ≥ 3 天（避開跨日與 UTC／台北時差）；再放一筆窗口外的資料、斷言它⛔ 不出現，
+    順便釘住窗口。**受真實時鐘窗口影響的 fixture**（被測程式自己用 `time.Now()` 決定範圍）要用相對日期或注入時鐘；
+    查詢範圍由呼叫端傳入固定參數的測試（例如直接傳固定的 `since`、`ListedBefore`），包括 DB 測試，都可以穩定使用固定日期。
   - **非測日期本身時，讓斷言與日曆無關。** 上述兩支的修法是讓受斷言的標的
     **只缺一天**——單一日期必然只落在一個月份，`(symbol, month)` 恆為一組。
   - **警訊**：測試裡出現 `time.Now()`／`today` 衍生的 fixture，而斷言又是精確的

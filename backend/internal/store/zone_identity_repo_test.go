@@ -444,7 +444,7 @@ func TestZoneIdentityListTradingDaysReturnsDistinctDatesNewestFirst(t *testing.T
 	repo, ctx := newZoneIdentityRepoForTest(t)
 	db := repo.(*zoneIdentityRepo).db
 
-	// ⚠️ **日期一律相對於「今天」，⛔ 不寫死**（issue.md I-128）：ListTradingDays 只查
+	// ⚠️ **日期一律相對於「今天」，⛔ 不寫死**（原記於 issue.md I-128，已收斂；規則見 docs/development-workflow.md「測試不要依賴『真實今天』」）：ListTradingDays 只查
 	// time.Now() 往回 limit×3 個日曆天（這裡 limit=10 → 30 天）。原本寫死 2026-08 的日期，
 	// 過了窗口之後這個測試就必定失敗。每個日期都離窗口兩端與今天 ≥ 3 天，⛔ 不會碰到跨日
 	// 或 UTC／台北時差的邊界。

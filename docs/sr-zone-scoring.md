@@ -596,8 +596,8 @@ Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重�
 **它不一定等於分析站的那根 K 棒的交易日**——FinMind 的法人／融資券要晚間才發布，
 所以收盤後跑的分析拿到的必然是前一日籌碼。
 
-這件事在分析排程（平日 17:00／22:00 各一輪，見
-[`architecture.md`](./architecture.md)「兩個標的清單」）上線後變得必須講清楚，因為
+這件事在分析排程（平日 17:00／23:00 各一輪，見
+[`architecture.md`](./architecture.md)「兩個標的清單」；23:00 是 live 的時間，見同節「晚間兩輪的時間」）上線後變得必須講清楚，因為
 **同一個交易日的兩輪分析在多數欄位上完全相同**：
 
 | 欄位 | 兩輪是否相同 | 原因 |
@@ -605,7 +605,7 @@ Trend 15% / Volume 15% / Confidence 10%。後續若要調整 production 權重�
 | `analyzed_at` | **相同** | 它是 **K 棒時間**，兩輪站在同一根 K 棒上 |
 | `current_price` | **相同** | 該根 K 棒的收盤價 |
 | `created_at` | **不同** | 實際執行的 wall clock——**唯一能區分兩輪的欄位** |
-| `chip_summary.trade_date` | 通常不同 | 17:00 是前一日、22:00 是當日（籌碼採集 21:00） |
+| `chip_summary.trade_date` | 通常不同 | 17:00 是前一日、23:00 是當日（籌碼採集 22:00） |
 | `trading_score` | 通常不同 | Chip 佔 15%，籌碼換了分數就會變 |
 
 所以判讀清單時：**只看 `analyzed_at` 會以為是重複紀錄**，要看 `created_at` 才知道是兩次
@@ -4539,7 +4539,7 @@ ScoreZonesWithPreviousEvents → result.ToStore()
    分析的目的就是不重算，把它算成觀測會讓「我們看了幾次」失真。那條路徑寫出來的
    `stock_sr_zones` 列因此也沒有 `zone_uid`（三種 `NULL` 語意的第三種）。
 
-   **入口有兩個，但實作只有一份**：`POST /sr-zones` 與 SR 分析排程（平日 17:00／22:00，
+   **入口有兩個，但實作只有一份**：`POST /sr-zones` 與 SR 分析排程（平日 17:00／23:00，
    見 [`architecture.md`](./architecture.md)「兩個標的清單」）都呼叫
    `SRZoneHandler.RunAnalysis`。排程**不可以**改走 `SRAnalysisProvider`——那條不寫
    `zone_uid` 也不追身分，換過去之後分析照樣產生、身分層卻完全沒有紀錄，而且不會報錯。

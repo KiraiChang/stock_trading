@@ -250,7 +250,7 @@ curl -X POST http://localhost:8080/api/v1/chips/sync \
 
 `mode=manual` 且未指定日期時只同步今天；`mode=backfill` 且未指定 `from` 時，會用
 `chip.sync.history_trading_days` 往回推。日結籌碼採集（`job_runs.job_name=chip_daily_sync`）
-不與 15:00 `daily_close` 綁在一起，改由傍晚獨立 cron 觸發（設定 `chip.sync.cron`，預設 21:00），
+不與 15:00 `daily_close` 綁在一起，改由傍晚獨立 cron 觸發（設定 `chip.sync.cron`，預設 21:00；live 覆寫為 22:00，見 `docs/architecture.md`「晚間兩輪的時間」），
 因為 FinMind 法人／融資融券資料比日 K 晚發布，詳見 `docs/chip-analysis-design.md` §8。
 
 ---

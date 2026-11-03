@@ -372,7 +372,7 @@ UI 原則：
 
 FinMind 的法人資料在收盤（13:30）後傍晚才發布、融資融券更要晚間才由 TWSE 更新，比日 K 晚。若沿用 15:00 日 K 那批的時間點採集當日籌碼，多半會抓到空陣列，而空資料被視為成功、只能靠隔天 lookback 區間回補「昨天」，導致資料庫永遠落後一天。因此現況為：
 
-- **獨立傍晚排程**：日結籌碼採集（`runChipDailySync`）由 `Scheduler.Start()` 用獨立 cron 觸發，時間由設定 `chip.sync.cron` 控制，**預設 `0 21 * * 1-5`**（台北時區）。需要自動重試時可設多時段，例如 `0 18,20,22 * * 1-5`；upsert 天生冪等，重跑安全。
+- **獨立傍晚排程**：日結籌碼採集（`runChipDailySync`）由 `Scheduler.Start()` 用獨立 cron 觸發，時間由設定 `chip.sync.cron` 控制，**預設 `0 21 * * 1-5`**（台北時區）；live 自 2026-10-28 起以 `CHIP_SYNC_CRON` 覆寫為 `0 22 * * 1-5`，repo 的預設待 `todo.md` T-076 同步（見 [`architecture.md`](./architecture.md)「晚間兩輪的時間」）。需要自動重試時可設多時段，例如 `0 18,20,22 * * 1-5`；upsert 天生冪等，重跑安全。
 - **空資料不再靜默成功**：當目標日確認是交易日（該日已有日 K）卻抓不到當日法人／融資融券時，`Syncer.SyncRange` 會回報 `ErrChipDataNotPublished`，讓 `chip_daily_sync`（`job_runs`）或 `chip_sync_jobs` 記為失敗、留下可見訊號，而非誤判成功。非交易日（該日無日 K，如週末／國定假日）不會被誤判為失敗。
 - **`chip_scores` 自我修復回算**：`daily` 單日模式除了計算目標日，另會向前回算最近數個交易日（`scoreRecomputeWindow`，預設 5 個日曆天）。當某天的原始籌碼在自己排程當下尚未發布、隔天才被 lookback 補進 DB 時，回算窗口會替那天重算分數，消除分數落後一天。`computeAndStoreScore` 具冪等性且會跳過無原始資料的非交易日。
 
@@ -386,7 +386,7 @@ Calculate technical indicators and evaluate signals
   ↓
 Run SR zone verification
 
-[傍晚 chip.sync.cron，預設 21:00]
+[傍晚 chip.sync.cron，預設 21:00；live 22:00]
 Sync raw chip data (含 lookback 區間回補)
   ↓
 Calculate / 回算 chip_scores（目標日 + 近 scoreRecomputeWindow 天）

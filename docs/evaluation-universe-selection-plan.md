@@ -475,11 +475,11 @@ scripts/run-evaluation.sh --symbols <active>  → 階段 5／6
 | 09:00–13:30 每 5 分 | `intraday` | 11/次 |
 | 15:00 | `daily_close` | 11 |
 | **16:00** | **`evaluation_universe_sync`（新）** | **131 → 約 26 分鐘** |
-| 21:00 | `chip_daily_sync` | 22 |
-| 22:30 | `sr_evaluation` | 0（Python，吃 CPU/記憶體） |
+| 22:00（2026-10-28 起 live；原 21:00） | `chip_daily_sync` | 22 |
+| 22:30 | `sr_evaluation`（live 停用） | 0（Python，吃 CPU/記憶體） |
 
 **選 16:00 的理由**：晚於 `daily_close`（15:00 已確認 FinMind 當日日 K 已發布——14:00 曾抓到
-`count=0`），且與 21:00 的籌碼採集有近 5 小時緩衝，26 分鐘的執行窗絕不會重疊。
+`count=0`），且與 21:00 的籌碼採集有近 5 小時緩衝，26 分鐘的執行窗絕不會重疊（2026-10-28 起籌碼採集在 live 改到 22:00，緩衝更大；見 `architecture.md`「晚間兩輪的時間」）。
 `cron: "0 16 * * 1-5"`，可由 `EVALUATION_UNIVERSE_CRON` 覆寫。
 
 `days=10`（而非 5）：容忍連假與國定假日，成本與 `days=5` 相同（1 request/檔）。

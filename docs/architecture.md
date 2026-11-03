@@ -325,7 +325,7 @@ api-reference.md）。
 | `runIntradayJob` | 盤中**每 5 分鐘** | 1 request |
 | `runPreMarket` | 每日 08:50 | `BackfillHistory(5 天)` |
 | `RunDailyClose` | 每日 15:00 | 1 request ＋ signal 評估 |
-| `runChipDailySync` | 每日 21:00 | **2 requests**（法人＋融資券） |
+| `runChipDailySync` | 每日 22:00（live；時間見下方「晚間兩輪的時間」） | **2 requests**（法人＋融資券） |
 | `runSRZoneVerification` | 每日盤後 | SR zone 驗證計算 |
 | SR evaluation 排程 | `symbols: []` 時 | replay 母體 |
 
@@ -343,20 +343,27 @@ api-reference.md）。
 | 盤前補缺口 08:50 | ✅ | ❌ |
 | 收盤日 K ＋ signal 15:00 | ✅ | ❌ |
 | **日 K 維護 16:00** | ❌ | ✅ **唯一職能** |
-| 籌碼同步 21:00 | ✅ | ❌ |
+| 籌碼同步 22:00 | ✅ | ❌ |
 | SR zone 驗證 | ✅ 每日盤後 | ❌ |
-| **SR zone production 分析** | ✅ **平日 17:00 ＋ 22:00** | ❌ |
+| **SR zone production 分析** | ✅ **平日 17:00 ＋ 23:00** | ❌ |
 | 排程版 SR evaluation 的母體 | ✅ | ❌ |
 | **公司行動同步 06:30** | ✅ **每個排程日全量** | ⏳ 分片輪替（見下） |
 
 **production 分析排程（2026-08-20 起）**：`watchlists` 每檔每交易日跑**兩輪**帶身分追蹤的
-SR zone 分析——17:00 那輪拿到的是前一日籌碼，22:00 那輪（晚於 21:00 的籌碼採集）才有當日的。
+SR zone 分析——17:00 那輪拿到的是前一日籌碼，23:00 那輪（`sr_analysis_chip`，晚於 22:00 的籌碼採集）才有當日的。
 它是 `stock_sr_zone_analyses` 的 production 母體來源，也是 [`todo.md`](./todo.md) T-049 前置①
 （新舊兩套 active 事件集合逐日並行比對）的前提。
 ⚠️ **它不是 decision replay 的前提**（2026-09-01 更正）——replay 讀的是 `candles`
 （`run_decision_replay()` → `_load_db_sources()`），不讀 `stock_sr_zone_analyses`。
 預設關閉，細節見 [`api-reference.md`](./api-reference.md) 的
 `POST /scheduler/sr-analysis/run`。
+
+**晚間兩輪的時間**（2026-10-28 起）：live 用環境變數覆寫成 `chip_daily_sync` 平日 22:00（`CHIP_SYNC_CRON`）、
+`sr_analysis_chip` 平日 23:00（`SR_ANALYSIS_CHIP_CRON`），讓平日 17:05～22:00 沒有任何批次；**本專案文件寫的都是 live 的時間**。
+兩輪的先後不變：含籌碼那輪必須晚於籌碼採集（約 4 分鐘），兩者隔 1 小時。
+⚠️ repo 的預設值還沒跟上：`backend/config.yaml` 與 `config.go` 仍是 21:00／22:00（`sr_evaluation` 22:30，live 停用），
+repo 的 compose ⛔ 沒有 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本仍是 22:00——dev 與照範本新部署的環境跑的是舊時間。
+同步列在 [`todo.md`](./todo.md) T-076（要 build 新 image）。
 
 ### 日 K 維護（`evaluation_universe_sync`，平日 16:00）會跳過「今天已有日 K」的標的
 
@@ -1001,7 +1008,7 @@ limiter 是共用的——調高會同時放大籌碼同步的請求速率，而
 
 ### SR 分析的兩個時段共用一個執行所有權
 
-`sr_analysis`（17:00）與 `sr_analysis_chip`（22:00）是兩支獨立的 cron，
+`sr_analysis`（17:00）與 `sr_analysis_chip`（23:00）是兩支獨立的 cron，
 但**執行層只有一個所有權**：任一輪在跑時，另一輪不論由 cron 或手動端點觸發都不會執行。
 
 ⚠️ **資料層的時段冪等與執行層的併發是兩件事，混在一起就會改錯。**
@@ -1009,7 +1016,7 @@ limiter 是共用的——調高會同時放大籌碼同步的請求速率，而
 | | 資料層（`srAnalysisSkipReason`） | 執行層（所有權） |
 |---|---|---|
 | 問的問題 | 這一輪對這檔還有沒有事情要做 | 現在能不能開始跑 |
-| 兩輪的規則 | **刻意不同**（17:00 看今日 K 棒分析過沒；22:00 看當日籌碼入庫沒） | **共用一個** |
+| 兩輪的規則 | **刻意不同**（17:00 看今日 K 棒分析過沒；23:00 看當日籌碼入庫沒） | **共用一個** |
 | 粒度 | 逐檔 | 整輪 |
 
 **為什麼執行層必須共用**：這台 host 只有 2GiB，逐檔的峰值等同使用者手動點一次分析。
@@ -1205,7 +1212,7 @@ Go 讀 candles，純 Go 比對每個 zone 是否被突破
 而是更早的分析裡那些 `PENDING` 的 zone 永遠停在 `PENDING`，再也不會被驗到**。
 換成天數之後，覆蓋窗口與 watchlist 大小、與每日輪數都脫鉤。
 
-**用 `created_at` 而不是 `analyzed_at`**：後者是日期粒度（同一交易日 17:00 與 22:00
+**用 `created_at` 而不是 `analyzed_at`**：後者是日期粒度（同一交易日 17:00 與 23:00
 兩輪都寫成當日 00:00，它是「今天這根 K 棒分析過沒」的判定依據），取不出「最近 N 天
 實際跑過的分析」。查詢由 `idx_stock_sr_zone_analyses_created_at` 支撐（migration 073）
 ——既有的 `(symbol, created_at DESC)` leading column 是 symbol，這條不帶 symbol 的

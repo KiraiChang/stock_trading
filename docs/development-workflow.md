@@ -646,6 +646,37 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 再看 `GET /scheduler/status` 該 job **不是 `disabled`**——是的話就是變數沒進容器。
 現況也記在 memory 的「排程狀態看容器 env」。
 
+### 只改 live 的環境變數：只重建 backend，⛔ 不跑 live 的 `deploy.sh`
+
+2026-10-28 晚間兩輪後移時用過的做法（原記於 `todo.md` T-075；現況見 `architecture.md`「晚間兩輪的時間」）。
+適用於 **image 不變、只改環境變數**（例如排程時間）；要改程式就要 build 新 image，⛔ 不適用。
+
+- ⛔ **不跑 live 的 `deploy.sh`**：它會 `git pull`、`down`、`up --build -d`，等於整套停下、拉最新程式重新 build。
+- **改法**：使用者改 live 的 `compose.yml`（要有那個鍵，見上一節）與 `deploy.sh`（讓之後的部署保留新值），
+  再從 live 的 `deploy.sh` 載入環境變數，只重建 backend：
+  `docker compose -f ./compose.yml --project-directory <PROJECT_DIR> up -d --no-build --no-deps backend`。
+- **重建前**（唯讀）：
+  - 容器的 image（`docker inspect` 的 `.Image`）要等於 `stock_trading-backend` 這個 tag 的 image（`docker image inspect` 的 `.Id`）。
+    不同時 `--no-build` 會順便換程式，⛔ 不做。
+  - 記下排程鍵（`*_CRON`／`*_ENABLED`），以及「其餘整份 env」的 sha256（⛔ 不印其他 env 的值）。
+- **重建後**：image 不變；排程鍵只差預期的那幾個；其餘 env 的 sha256 與重建前相同（金鑰沒變空、開關沒被改掉）；
+  log ⛔ 沒有 `cron register failed`。任一項不符就還原兩個檔，用同樣方式重建。
+- **時段**：任何排程前後 10 分鐘內⛔ 不重建（cron ⛔ 不補跑錯過的觸發）。
+- **沒有正在跑、也沒有排定要跑的工作**：重建會中斷正在跑的 job；自動重跑的計時器只在記憶體裡，重建之後就沒了，cron 也⛔ 不補跑。所以重建前還要確認：
+  - `job_runs` ⛔ 沒有 `status = 'running'` 的列（唯讀查詢；手動觸發的也在裡面）。只看時間差⛔ 不夠：公司行動同步整輪最多 45 分鐘、
+    `evaluation_universe_sync` 約 27 分鐘，晚間的 SR 分析也會跑一段時間。
+  - ⛔ 不在當天主檔同步、公司行動同步、終止上市對帳的排程時刻（live 06:30、07:00；主檔與終止上市對帳每天都跑，含週末）
+    到 `JOB_RETRY_CUTOFF`（live 08:45）之間重建。自動重跑只由排程觸發的失敗排定（手動觸發的失敗⛔ 不排），
+    最晚起跑時刻＝截止時刻－該 job 的整輪預算－保留時間，所以過了截止時刻就⛔ 不會有待跑的重跑。
+  - 這段時間內⛔ 不能用 log 判斷還有沒有待跑的重跑：排定之後同一個 job 先成功（例如手動補跑），計時器會被靜默取消、⛔ 不記 log，
+    最後一則重跑訊息仍是 `自動重跑已排定`。
+- ⚠️ **2026-10-28 的載入指令⛔ 不能照抄**：當時用 `eval "$(LC_ALL=C grep -aE '^(export [A-Z_]+|PROJECT_DIR)=' deploy.sh)"`，
+  只抓 `export X=` 開頭的行。2026-11-03 起 `REDIS_PASSWORD` 改由 `deploy.sh` 裡的檢查區塊從 Redis 的 `.env` 讀
+  （見上方「live 的 Redis」），⛔ 不是 `export X=` 的寫法——照抄會讓 `REDIS_PASSWORD` 變成空的、backend 整個停用 Redis
+  （重建後的 sha256 比對會抓到）。下次要用時重新設計載入方式，先 review 再用。
+- 另一個坑（2026-10-28 當時）：live 的 `deploy.sh` ⛔ 不是有效的 UTF-8，GNU grep 預設把它當成二進位檔、⛔ 不輸出任何行，
+  要 `LC_ALL=C grep -a`。
+
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 
 後端的 `knownSchedulerJobs`（`api/handler/scheduler.go`）與前端有兩份對應資料，
@@ -695,7 +726,7 @@ docker exec stock_trading-python-server-1 sh -c \
 **2026-09-10 實測**：live 的 108 個 `.py` 與 `0c2fd75` **逐檔完全相同**（image 建於
 2026-09-08 07:13 UTC）。中間的 commit 只動 docs，所以一路對到 `cdf29b5`（09-03）都一致。
 
-⚠️ **哪些 job 依賴 python-server**：`sr_analysis`（17:00／22:00 兩輪）經
+⚠️ **哪些 job 依賴 python-server**：`sr_analysis`（17:00／23:00 兩輪）經
 `SRZoneHandler.RunAnalysis` → `analysis.Client` → `POST /sr-zones`；`sr_evaluation` 經
 `analysisClient.RunSREvaluation`。python-worker 另外輪詢 `backtest_jobs`。
 **重啟 python 服務會讓這幾條在窗口內失敗**，重啟後第一個 `/sr-zones` 還要付一次
@@ -2210,7 +2241,7 @@ python3 python/scripts/i074_stage2_sizing.py raw-manifest --raw <work>/raw \
 | ⑨-1 的 fail-fast | full 模式在量測趟之前寫 `<S>/precheck.json`（隨 S 複製到 `raw/`／`raw-failed/`）：`ok` → 跑量測趟；`threshold_exceeded`（確定的違反，⛔ 不得重跑）、`invalid`（可以重跑）或錯誤 → ⛔ 不跑量測趟、**額度⛔ 不消耗**，harness 結束碼 1、訊息寫明哪一種。`failure_summary.json` 的 `precheck` 欄位只是位置——判讀一律經 `precheck-verdict` |
 | precheck 的判讀（offline） | `precheck-verdict --raw <raw 或 raw-failed> --repo <受信任的 repo> --expected-repo-head <開跑前記下的 HEAD>`：rc＝0 並印出 `ok`／`threshold_exceeded`／`invalid`；rc＝1 ＝ **無法判讀**（⛔ 不得當成可以重跑，交人工查明）。工作樹的版本只做驗錨與取出：錨點 ≠ `precheck.json` 的 `identity.repo_head`、快照 ≠ 錨點 commit 的內容 → 在執行任何程式之前拒絕；之後從錨點 commit 的 git object 取出受信任的 helper 執行重算（⛔ 不執行原始量測目錄裡的程式）。git 固定是 `/usr/bin/git`，子程序一律是最小化的環境——呼叫端的 `GIT_DIR`、PATH 上的其他 git 都⛔ 不影響判讀；`--repo` 必須是 repo 的根目錄。快照清單內有未 commit 變更的開發執行判讀不了（照實；`docs/` 等其他路徑的變更⛔ 不影響） |
 | raw manifest（事後錨點） | `raw-manifest --raw <dir> --repo <受信任的 repo> --expected-repo-head <EXPECTED> --out <raw 之外的新路徑>` 印出 `sha256`、`file_count`、`dir_count`——把它們、錨點與它的來源、產生與檢查的完整指令記進 `issue.md` 並 commit；日後以 `--check-sha256 <記下的值>` 檢查（不符 → rc＝1、⛔ 不寫任何檔案）。`--out` 已存在（含 symlink）或落在 raw 之內 → 拒絕。⚠️ 它只能偵測**之後**的改動。⚠️ 只對**正式的** `raw/`、`raw-failed/` 產生（⛔ 不對 `.raw-failed.staging/`、保留的 S 或診斷副本）；2026-10-15 之前的 `raw/`、`raw-failed/` 帶著 `bin/docker` 這個 symlink，一律產不出 manifest |
-| 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（⛔ 沒有 info log；`job_runs` 的保留期是程式常數 30 天（`jobRunRetentionDays`），live 部署的版本⛔ 未查證——2026-10-29 訂正原本的「只留數天」）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
+| 作業規則（正式量測） | ⚠️ 2026-10-15 訂正（⑨-1 細部計畫 D7：原本只看 `*_CRON` 鍵，漏了固定註冊與預設啟用的工作）。**完整的批次清單**＝ live 容器的排程鍵（`docker inspect <live 容器> --format '{{range .Config.Env}}{{println .}}{{end}}' \| grep -E '^[A-Z_]+_(CRON\|ENABLED)='`，**只看排程鍵**、⛔ 不印其他環境變數）＋ `backend/internal/scheduler/scheduler.go` 的固定註冊。2026-10-14 的清單（台北時間）：平日 06:30 `stock_symbol_sync`（每日）與 `corporate_action_sync`（整輪上限 45 分鐘）、07:00 `delisting_reconcile`（每日）、08:50 `pre_market`、09:00～13:55 每 5 分鐘 `intraday`、15:00 `daily_close`（接著 `sr_zone_verify`）、16:00 `evaluation_universe_sync`（接著 `candle_gap_detection`）、17:00 `sr_analysis`、21:00 `chip_daily_sync`、22:00 `sr_analysis_chip`（2026-10-28 起 live 改成 22:00、23:00，見 `architecture.md`「晚間兩輪的時間」）；週末只有每日的 06:30、07:00。**整段執行**（⑨-1 約 3.5 小時、⑨-2 約 6～7 分鐘）⛔ 不重疊任何批次：**當天所有排程時間已過的批次**（⛔ 不只上一個——同時或更早啟動的也可能還在跑）都以 `/scheduler/status`（`http://<backend 容器 IP>:8080/api/v1/scheduler/status`，需要 JWT；或前端的排程狀態頁）確認當天那一筆**已是終態**（有整輪硬上限的才可以依上限推定），輸出記進本次紀錄，而且預計結束時距離下一個批次 ≥ 30 分鐘——⑨-1 因此以週末為首選、平日夜間只作條件式備選（⛔ 沒有 info log；`job_runs` 的保留期是程式常數 30 天（`jobRunRetentionDays`），live 部署的版本⛔ 未查證——2026-10-29 訂正原本的「只留數天」）。量測期間⛔ 不跑測試、⛔ 不 build image、⛔ 不做其他會寫根檔案系統的工作。⚠️ 這只降低無效與抵銷的機率，⛔ 不是保證 |
 | 正式量測之間「只動文件」的定義（2026-10-27，⑨-2 的 P1 修正） | ⑨-1 之後到 ⑨-2、⑨-2 之後到 ⑩，repo 只允許改**文件**：`docs/` 與**根目錄**的 `CLAUDE.md`；其他任何路徑（含 `backend/`、`frontend/`、根目錄的其他檔案、子目錄裡同名的 `CLAUDE.md`）都算程式變更——量到的程式必須 ＝ 下一步要跑的程式。判定方式：`git diff --name-only <前一步的 repo_head> HEAD -- . ':(exclude)docs' ':(exclude)CLAUDE.md'` 為空，而且 `git diff` 本身成功（⑩ 的 precheck P1 即此寫法）。原本只允許 `docs/`，根目錄 `CLAUDE.md` 的修改會被誤擋 |
 | 輸出 | `<work>/acceptance_report.json`（canonical）與 `.txt`、`<work>/raw/`（S 的複本，含 `harness/MANIFEST`；⛔ 不含 shim 的入口 `bin/docker`）；失敗時：三項清理（步驟的 group、收養的程序、容器）都成功才有 `<work>/raw-failed/`（同樣⛔ 不含 `bin/docker`；完整複製到 `.raw-failed.staging` 之後以 `mv -T` 原子發布）與 `failure_summary.json`（只跟著正式的 `raw-failed/`、原子發布）；任一清理失敗 → 只保留 S（診斷資料，⛔ 不救援、⛔ 不產 manifest）。rename 之後才被終止的 `raw-failed/` 仍是正式的原始量測（結束碼可能是 137／143，摘要可能缺失）。規則與 sizing 一節的「harness 的狀態」相同（共用 `scripts/lib/i074-stage2-measure.sh` 的 `on_failure`） |
 | 耗時與空間 | stub 約 7 分鐘；`<work>` 約 600 MB（兩層複本 ＋ 兩條路徑的 run 目錄與 worktree）。只有 ⑦d 的開發驗證（stub）可以用完整個刪除。⚠️ **⑨-1 正式驗收的 `<work>` ⛔ 不刪**（`git show 20eacb2:docs/issue.md` 的 I-074「Stage 2 步驟 ⑨-1 細部計畫 v8」的 D5）：每一次嘗試都連同 `<NAME>.ctl/` 與 raw manifest 保存到 I-074 收斂——正式原始量測的錨（manifest 的 `sha256`）要能回頭對照（⚠️ `~/i074_stage2_acceptance/` 整個目錄已於 2026-10-29 I-074 收斂時依使用者確認刪除；錨仍記在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」，但原始量測已無法再以 `--check-sha256` 對照） |
@@ -2498,8 +2529,9 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 
   停機前跑一次、復原後再跑一次比對即可。**金鑰只確認「有沒有設定」，不要印出內容。**
 - **停 live 會讓那段時間的排程整段不執行**（沒有補跑機制）。動手前先看今晚還有哪些
-  cron：`daily_close` 15:00、`sr_analysis` 17:00、`chip_sync` 21:00、
-  `sr_analysis` chip 輪 22:00、`sr_evaluation` 22:30、`evaluation_universe_sync` 16:00。
+  cron：`daily_close` 15:00、`evaluation_universe_sync` 16:00、`sr_analysis` 17:00、`chip_sync` 22:00、
+  `sr_analysis` chip 輪 23:00（後兩個是 live 的時間，見 `architecture.md`「晚間兩輪的時間」）、`sr_evaluation` 22:30（live 停用）。
+  以 live 容器的排程鍵為準（只看 `*_CRON`／`*_ENABLED`，⛔ 不印其他環境變數）。
   挑窗口時把復原時間也算進去。
 - **不要在本機把 live/deploy project 拉起來**——驗收一律用 `docker-compose.dev.yml` 的
   dev project（CLAUDE.md 規定）。

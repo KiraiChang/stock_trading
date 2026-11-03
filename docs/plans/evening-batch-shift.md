@@ -1,4 +1,4 @@
-# 晚間批次後移一小時 計畫 v1（2026-10-28，✅ 決定 D1～D5 已定案（2026-10-28）；A1～A5 已執行（2026-10-28 14:13，A5 全部 ok，「九」）、⚠️ 待觀察當晚 22:00／23:00；⑩ 經使用者裁決當天 17:00 即用新時段）
+# 晚間批次後移一小時 計畫 v1（2026-10-28，✅ 決定 D1～D5 已定案（2026-10-28）；A1～A5 已執行（2026-10-28 14:13，A5 全部 ok，「九」）、✅ 觀察與文件同步完成（2026-11-03）、範圍 B 併入 `todo.md` T-076（2026-11-03）；⚠️ 待 review 後收斂）
 
 需求（✅ 使用者裁決 2026-10-28）：為了讓 I-074 Stage 2 的 ⑩ 能在平日 17:00 開跑、18:00 之後⛔ 不需要人力介入
 （⑩ 計畫書的 D2；該計畫書已隨 I-074 收斂，原文見 `git show 20eacb2:docs/plans/i074-stage2-step10.md`），把 live 的兩個晚間批次**永久**往後移一小時：
@@ -26,7 +26,7 @@
 |---|---|
 | 目標 | live 的平日 `chip_daily_sync` 22:00、`sr_analysis_chip` 23:00，永久生效；範圍 A ⛔ 不重新部署程式 |
 | 範圍 A（⑩ 之前） | 使用者修改 live 的 compose（加 `CHIP_SYNC_CRON` 鍵）與 live 的 `deploy.sh`（兩個新值，讓之後的部署保留）→ **只重建 backend 容器**（同一個 image）→ 驗證 → 觀察一個平日晚上；文件同步現況（只動 `docs/`） |
-| 範圍 B（⑩ 的晉升結果 commit 之後） | repo 的 `docker-compose.yml` 加 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本加 export 與新值、`backend/config.yaml` 與 `config.go` 的預設值與註解（D3）；另行實作與 review。⚠️ 與 `todo.md` T-076 合併之後要新增 backend 程式與設定接線、**必須 build 新 image**——範圍 B ＋ T-076 另寫計畫書、依那份計畫部署，⛔ 不沿用 A4 的同 image 操作，下一列的限制也⛔ 不適用 |
+| 範圍 B（⑩ 的晉升結果 commit 之後；**2026-11-03 整段併入 `todo.md` T-076**，D2、D3 的內容寫進 T-076「要做的事」⑤） | repo 的 `docker-compose.yml` 加 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本加 export 與新值、`backend/config.yaml` 與 `config.go` 的預設值與註解（D3）；另行實作與 review。⚠️ 與 `todo.md` T-076 合併之後要新增 backend 程式與設定接線、**必須 build 新 image**——範圍 B ＋ T-076 另寫計畫書、依那份計畫部署，⛔ 不沿用 A4 的同 image 操作，下一列的限制也⛔ 不適用 |
 | ⛔ 不做（範圍 A） | ⛔ 不跑 live 的 `deploy.sh`；⛔ 不 build image；⛔ 不動 backend 以外的服務；⛔ 不改其他排程；Claude ⛔ 不讀 live `deploy.sh` 的內容（含金鑰）、⛔ 不碰 live 的檔案（帳號也⛔ 沒有權限）——由使用者執行，Claude 提供指令與判讀 |
 
 ## 二、資料流與順序
@@ -135,5 +135,9 @@ printf 'A5 API 回應（⛔ 沒帶 JWT，預期 401）：%s\n' "$(curl -s -o /de
 | A4 | **14:13:08（+08:00）重建**（容器的 `StartedAt` `2026-10-28T06:13:08Z`）。⚠️ **偏離 D4**（平日 18:00～20:30）：使用者 11:55 詢問能否在盤中執行，Claude 建議 18:00～20:30，另列 14:05～14:50 為技術上可行、但⛔ 不是 D4 的時段（最後一次 `intraday` 13:55、下一個排程 15:00，距離 18 分鐘與 47 分鐘，符合「⛔ 不在任何排程前後 10 分鐘內」）；使用者在 14:13 執行。A4 的輸出⛔ 沒有貼上，以 A5 判定成功 |
 | A5 | 使用者貼上的輸出（原樣）：<br>`1a2`<br>`> CHIP_SYNC_CRON=0 22 * * 1-5`<br>`9c10`<br>`< SR_ANALYSIS_CHIP_CRON=0 22 * * 1-5`<br>`---`<br>`> SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5`<br>`A5 其餘 env（含金鑰）與重建前完全相同 ok`<br>`A5 cron 註冊 ok`<br>`A5 API 回應（⛔ 沒帶 JWT，預期 401）：401`<br>第一行（image、狀態、啟動時間）⛔ 沒有貼上，Claude 14:15 自行唯讀核對：image `ba964c44…`（＝ A1）、`running`、啟動 `06:13:08Z`、重啟次數 0；排程鍵 `CHIP_SYNC_CRON=0 22 * * 1-5`、`SR_ANALYSIS_CHIP_CRON=0 23 * * 1-5`、`SR_ANALYSIS_CRON=0 17 * * 1-5` |
 | 判定 | ✅ A5 全部 ok、⛔ 不需要 A6；基準檔（`/dev/shm/shift-*`）由使用者刪除 |
-| 當晚觀察 | ⚠️ 待確認：`chip_daily_sync` 22:00、`sr_analysis_chip` 23:00 的實際執行時間與結果（`docker logs` 只取 `chip daily sync job completed`、`sr analysis done` 兩種行，或 `/scheduler/status`）→ 「七」3 |
+| 當晚觀察 | ✅ 2026-11-03 以 live 的 `job_runs` 唯讀確認（`chip_daily_sync`、`sr_analysis_chip`，10-20 起）：10-28 起每個平日 `chip_daily_sync` 22:00、`sr_analysis_chip` 23:00 都 success（對照組 10-20～10-27 是 21:00／22:00；11-02 17:39 用 live 的 `deploy.sh` 重新部署之後仍是新時段，代表 A3 寫進 `deploy.sh` 的值有保留）；週末沒有紀錄 → 「七」3 |
 | ⑩ 的時段 | ⚠️ 使用者裁決（2026-10-28 下午）：⑩ 當天 17:00 執行，放行 D4 的「觀察一個平日晚上」與「七」4 的先後順序；依據是 A5 全部 ok、⑩ 的 precheck 仍驗兩個鍵。殘餘風險：後移⛔ 沒有實際生效 → 21:00 的 `chip_daily_sync` 碰到 ⑩ 的尾段。耗時都是估計：17:08 開跑的保守估計正好 21:00、對舊排程沒有緩衝，排程仍在 21:00 或執行超出估計都仍可能重疊；依新排程 22:00，17:30 開跑的保守估計 21:22、緩衝 38 分鐘（⑩ 計畫「十」4）。文件同步（「七」3）改到 ⑩ 結束、Claude 重新啟動之後 |
+| 文件同步（「七」3） | ✅ 2026-11-03：`architecture.md` 新增「晚間兩輪的時間」（live 以 env 覆寫、repo 預設待 T-076），其餘文件改成 live 的時間並指向它；作業程序歸檔到 `development-workflow.md`「只改 live 的環境變數」（⚠️ 註明 2026-10-28 的載入指令在 Redis 密碼改由 `.env` 讀之後⛔ 不能照抄）。⚠️ 待 review |
+| 範圍 B | 2026-11-03 使用者決定整段併入 `todo.md` T-076（同樣要 build 新 image、動的檔案相同）；本計畫不再追蹤，review 通過後與 T-075 一起收斂（「七」5 的收斂條件改成「範圍 A 的文件 review 通過」） |
+| 收尾的 review 第 1 輪（2026-11-03） | 三項都修：① T-076 的「觀察期到 11-07」算錯（11-07 是週六）→ 改成「5 個交易日觀察完成、判讀確認之前⛔ 不部署，預估 11-09，以 TWSE 開休市表為準」；② 「只改 live 的環境變數」補重建前的條件：`job_runs` ⛔ 沒有 `running`、⛔ 不在 06:30～`JOB_RETRY_CUTOFF` 之間（自動重跑的計時器只在記憶體裡）、log 裡每個 job 最後一則重跑訊息⛔ 不是「已排定」；③ 漏同步的三處（`api-reference.md` 的 sr-analysis 排程、`architecture.md` 的 `created_at` 說明、`todo.md` T-071 保留供複驗的排程時段）改成 live 的時間。⚠️ 修正待 review |
+| 收尾的 review 第 2 輪（2026-11-03） | 第 1 輪補的「log 裡每個 job 最後一則重跑訊息⛔ 不是『已排定』」會誤判：排定之後同一個 job 先成功時，計時器被靜默取消、⛔ 不記 log。改成只用時間窗——那三個 job 的排程時刻到 `JOB_RETRY_CUTOFF` 之間⛔ 不重建；依據是手動觸發的失敗⛔ 不排重跑、最晚起跑時刻早於截止時刻（以程式碼確認），並寫明這段時間內⛔ 不能用 log 判斷。⚠️ 修正待 review |

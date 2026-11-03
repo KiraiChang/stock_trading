@@ -54,13 +54,13 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待規劃（⚠️ I-074 ⑩ 的晉升結果 commit 之後才動；**和 T-075 的範圍 B 一起實作**——動的檔案幾乎相同（`config.yaml`、config 的預設值、repo 的 `docker-compose.yml` 與 `deploy.sh` 範本、live 的 compose 與 `deploy.sh`），只需部署一次。⚠️ 要改 backend 程式與設定接線，**必須 build 新 image**，部署另依新計畫書，⛔ 不沿用 T-075 A4 的「同一個 image 只重建容器」；實作前先在 `docs/plans/` 寫計畫書） |
+| 狀態 | 待規劃（**含原 T-075 的範圍 B**（2026-11-03 併入，見「要做的事」⑤）——動的檔案幾乎相同（`config.yaml`、config 的預設值、repo 的 `docker-compose.yml` 與 `deploy.sh` 範本、live 的 compose 與 `deploy.sh`），只需部署一次。⚠️ 要改 backend 程式與設定接線，**必須 build 新 image**，部署另依新計畫書，⛔ 不沿用「同一個 image 只重建 backend」（`development-workflow.md`「只改 live 的環境變數」）；實作前先在 `docs/plans/` 寫計畫書。⚠️ I-123～I-126 的 5 個交易日觀察（2026-11-03 起）完成、判讀確認之前⛔ 不部署——預估到 2026-11-09（11-07、11-08 是週末），遇休市往後延，以 [TWSE 開休市表](https://www.twse.com.tw/holidaySchedule/holidaySchedule?response=html) 為準。原本的前提「I-074 ⑩ 的晉升結果 commit 之後」已滿足（I-074 於 2026-10-29 收斂）） |
 | 優先度 | 低 |
 | 分類 | 排程／live 維運 |
 | 建立日期 | 2026-10-28 |
 | 來源 | 使用者要求（2026-10-28）：想把 15:00～17:00 的批次延後、讓 I-074 ⑩ 提前開跑時，發現 `daily_close` 的時間寫死、⛔ 不能用 env 調整；使用者裁決範圍連 `pre_market`、`intraday` 一起 |
 | 現況 | `backend/internal/scheduler/scheduler.go` 的 `Start()` 直接寫死三個 cron：`pre_market` `50 8 * * 1-5`、`intraday` `*/5 9-13 * * 1-5`、`daily_close` `0 15 * * 1-5`（`sr_zone_verify` 在 `RunDailyClose` 尾端執行，跟著 `daily_close` 走）。⛔ 沒有設定鍵、⛔ 沒有環境變數；這三個的 `AddFunc` 錯誤也⛔ 沒有檢查（可設定的工作註冊失敗時會記 `cron register failed`）。白天的批次只有這三個⛔ 不能用 env 調整 |
-| 要做的事 | ① 三個各加設定鍵與環境變數，預設維持現值；② 註冊改成檢查錯誤、失敗時記 `cron register failed`（值改由設定提供之後可能是錯的，與其他工作一致）；③ repo 的 compose 加鍵、`deploy.sh` 範本加 export，live 的 compose 與 `deploy.sh` 同步；④ 文件（`development-workflow.md` 的 live 批次表、`architecture.md` 的排程表）寫明可設定與先後限制。**首次部署只加設定能力、三個時間維持原值**；真的要延後白天批次，另列項目寫明目標時間與資料完成條件（review 建議，2026-10-28） |
+| 要做的事 | ① 三個各加設定鍵與環境變數，預設維持現值；② 註冊改成檢查錯誤、失敗時記 `cron register failed`（值改由設定提供之後可能是錯的，與其他工作一致）；③ repo 的 compose 加鍵、`deploy.sh` 範本加 export，live 的 compose 與 `deploy.sh` 同步；④ 文件（`development-workflow.md` 的 live 批次表、`architecture.md` 的排程表）寫明可設定與先後限制；⑤（原 T-075 的範圍 B，決定 2026-10-28 使用者定案）晚間兩輪的 repo 預設改成與 live 相同：`chip.sync.cron` `0 22 * * 1-5`、`sr_analysis.chip_cron` `0 23 * * 1-5`（`backend/config.yaml`、`config.go` 的預設與註解；原 D3），`sr_evaluation.cron` 預設改成 `30 23 * * 1-5`，維持「晚於 `sr_analysis_chip`」的設計順序（live 停用、⛔ 不動；原 D2）；repo 的 `docker-compose.yml` 與 `docker-compose.dev.yml` 的 backend environment 加 `CHIP_SYNC_CRON` 鍵、`SR_ANALYSIS_CHIP_CRON` 的預設改成 23:00，`deploy.sh` 範本加 `export CHIP_SYNC_CRON="0 22 * * 1-5"`、`SR_ANALYSIS_CHIP_CRON` 改成 23:00。live 的 compose 與 `deploy.sh` 已是新值（2026-10-28），⛔ 不需要再改；完成後把 `architecture.md`「晚間兩輪的時間」的「repo 的預設值還沒跟上」改掉。**首次部署只加設定能力、三個時間維持原值**；真的要延後白天批次，另列項目寫明目標時間與資料完成條件（review 建議，2026-10-28） |
 | 驗收（正式計畫要含） | ① 註冊失敗⛔ 不能標成已註冊：`markRegistered` 只放在成功分支；`daily_close` 註冊失敗時，`sr_zone_verify` 也⛔ 不能標成已註冊（它目前跟著 `daily_close` 一起標）；② 設定與狀態的測試：預設值、YAML／env 覆寫、錯誤的 cron、盤中的市場時間守衛、改頻率之後的 stale 判定（例如盤中改成每 15 分鐘就會碰到目前 10 分鐘的門檻） |
 | 要注意 | `daily_close` 的 15:00 是刻意的緩衝（程式註解：14:00 曾拉到 count=0、`job_runs` 仍顯示 success）→ 預設⛔ 不提前。下游兩個排程的先後原因⛔ 不一樣：`evaluation_universe_sync`（16:00）自己會抓評估池的日 K（往前回補 `EVALUATION_UNIVERSE_DAYS` 天），排在後面主要是減少重複抓取與資源競爭；`sr_analysis`（17:00）真正需要的是**當日日 K 已入庫**（否則該檔以「最新 K 棒不是今天」跳過），只把 cron 設得較晚⛔ 不保證資料已完成——延後或調整時要以資料完成條件為準、⛔ 不能只靠時間差；`intraday` 另有 `IsMarketOpen` 守衛（13:30 收盤），只改 cron ⛔ 不會延長盤中；`/scheduler/status` 的 stale 門檻寫死在 `backend/internal/api/handler/scheduler.go`（`pre_market`、`daily_close` 26 小時，`intraday` 10 分鐘），改時間或間隔要一併檢查 |
 
@@ -68,7 +68,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v1：[`plans/evening-batch-shift.md`](./plans/evening-batch-shift.md)，決定 D1～D5 ✅ 2026-10-28 定案；A1～A5 已於 2026-10-28 14:13 執行、A5 全部 ok；⚠️ 待觀察當晚 22:00／23:00，之後同步文件；I-074 ⑩ 經使用者裁決 2026-10-28 17:00 即用新時段） |
+| 狀態 | 已實作／待 review（計畫 v1：[`plans/evening-batch-shift.md`](./plans/evening-batch-shift.md)，決定 D1～D5 ✅ 2026-10-28 定案；範圍 A 於 2026-10-28 14:13 上 live、A5 全部 ok；✅ 2026-11-03 觀察確認：10-28 起每個平日 `chip_daily_sync` 22:00、`sr_analysis_chip` 23:00 都 success（對照組 10-20～10-27 是 21:00／22:00；11-02 17:39 用 live 的 `deploy.sh` 重新部署之後仍是新時段，代表 A3 寫進 `deploy.sh` 的值有保留）；文件已同步（`architecture.md`「晚間兩輪的時間」等），作業程序歸檔到 `development-workflow.md`「只改 live 的環境變數」；**範圍 B 已併入 T-076**（2026-11-03 使用者決定）。review 通過後刪除計畫書、移除本筆） |
 | 優先度 | 中（I-074 ⑩ 的平日 17:00 時段以它為前提） |
 | 分類 | 排程／live 維運 |
 | 建立日期 | 2026-10-28 |
@@ -1229,8 +1229,9 @@ SR 的兩支 cron 是**兩個不同 `job_name`**，彼此的 latest-run 投影�
 單獨 build backend image、用 `--no-deps` 只起 postgres＋redis＋backend），細節見下方那節。
 
 驗收條件 3～6 的可執行版本。⚠️ **這台 host 只有 2GiB，起 dev stack 前要先停 live**
-（見 `development-workflow.md`「`MEM` 是上限，不是預留」）；live 的排程時段是平日
-06:30／15:00／16:00／17:00／21:00／22:00，挑空窗做並在下一支之前起回來。
+（見 `development-workflow.md`「`MEM` 是上限，不是預留」）；live 的排程時段（2026-11-03 更新）是每天 06:30、07:00
+（含週末；06:30～08:45 也是自動重跑的時間），平日再加 08:50、盤中 09:00～13:55 每 5 分鐘、15:00、16:00、17:00、22:00、23:00
+（晚間兩輪見 `architecture.md`「晚間兩輪的時間」；以 live 容器的排程鍵為準），挑空窗做並在下一支之前起回來。
 
 **0. 停 live（不是 down，⛔ 不加 `-v`）**
 
@@ -2741,7 +2742,7 @@ T-002 P2 要確認的是「排程用的 `replay_max_rows` / `symbols` 夠不夠�
 | 流程 | 觸發 | 每檔成本 | 200 檔的後果 |
 |---|---|---|---|
 | `runIntradayJob` | 盤中**每 5 分鐘** | 1 request | **完全不可行**：5 req/min 下光一輪就要 40 分鐘 |
-| `runChipDailySync` | 每日 21:00 | 2 requests（法人＋融資券） | 400 requests → 80 分鐘 |
+| `runChipDailySync` | 每日 22:00（live） | 2 requests（法人＋融資券） | 400 requests → 80 分鐘 |
 | `RunDailyClose` | 每日 15:00 | 1 request ＋ signal 評估 | 200 requests → 40 分鐘 |
 | `runPreMarket` | 每日 08:50 | `BackfillHistory(5天)` | 200 requests → 40 分鐘 |
 | `runSRZoneVerification` | 每日盤後 | SR zone 驗證 | 計算量 ×18 |

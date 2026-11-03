@@ -1668,11 +1668,15 @@ python worker.py         # Python worker（選填）
 
 ### 生產 / Docker
 
-```
-docker network create proxy_net 2>/dev/null || true
-docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f docker-compose.yml up --build
-```
+live 由三個各自獨立的 compose stack 組成（live 的檔案都在 repo 外的 `/opt/stacks/scripts/` 底下）：
 
-- PostgreSQL 與 Redis 分別由 `docker-compose.postgres.yml` / `docker-compose.redis.yml` 管理；主 `docker-compose.yml` 負責 backend、python-worker、python-server，並假設 `trading-net` / `proxy_net` 已存在
+| stack | live 的 compose | repo 裡的範本 |
+|---|---|---|
+| postgres（建立 `trading-net`） | `/opt/stacks/scripts/postgres/docker-compose.postgres.yml` | ⛔ 沒有。repo 的同名檔 `docker-compose.postgres.yml` 是 migration 驗證用的 pgtest（獨立的 project 與 network），⛔ 不是它 |
+| redis | `/opt/stacks/scripts/redis/docker-compose.redis.yml`（＋同目錄的 `.env`） | `docker-compose.redis.yml` |
+| stock_trading（backend、python-worker、python-server） | `/opt/stacks/scripts/stock_trading/compose.yml` ＋ `deploy.sh` | `docker-compose.yml` ＋ `deploy.sh` |
+
+- Redis 要求密碼：Redis stack 的目錄要先有 `.env`（`REDIS_PASSWORD`，權限 600），backend 的 `REDIS_PASSWORD` 要與它一致（`deploy.sh` 從那份 `.env` 讀）；Redis ⛔ 不發布 port 到 host。細節見 [`development-workflow.md`](./development-workflow.md)「live 的 Redis：獨立 stack、密碼與 port」
+- `docker-compose.yml` 假設 `trading-net`（postgres stack 建立）與 `proxy_net` 已存在；`proxy_net` 可用 `docker network create proxy_net` 建立
 - Go binary 內嵌前端靜態檔案（單一執行檔）
 - Python worker 與 HTTP server 各自獨立 container

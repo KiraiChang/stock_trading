@@ -1,13 +1,42 @@
+# live 的 Redis：獨立的 compose stack（⛔ 不在 stock_trading 的 docker-compose.yml 裡），backend 經 trading-net 用 redis:6379 連。
+# live 照這份範本部署在自己的目錄（compose 檔所在目錄就是 project 目錄，.env 也放那裡）。
+#
+# 啟動前先建 .env（只存密碼；權限 600；⛔ 不要 cat 它）：
+#   umask 077
+#   python3 -c 'import secrets; print("REDIS_PASSWORD=" + secrets.token_hex(32))' > .env
+#   chmod 600 .env
+# 格式：整份檔只能有一行 REDIS_PASSWORD=<值>（加上空行與 # 開頭的註解），⛔ 不放其他鍵、⛔ 不加引號或 export；
+# 值只用英數與 ._+/=-（上面產生的 hex 就符合）。deploy.sh 範本照這個白名單檢查，不符合就在 down 之前停下。
+# backend 的 REDIS_PASSWORD 要與這裡一致（docker-compose.yml 與 deploy.sh 範本），否則 backend 啟動時
+# 會記 `redis connect failed, cache disabled` 並整個停用 Redis。改密碼之後要重新部署 backend。
+#
+# 設計重點：
+#   - ⛔ 沒有 ports：backend 走 compose 網路，不需要 host 上的 port。docker 的 port publish 會繞過 host 防火牆，
+#     綁 0.0.0.0 等於把 Redis 掛到網路上。真的要從 host 連，改成只綁本機："127.0.0.1:6379:6379"。
+#   - command 經 docker-entrypoint.sh：image 的 entrypoint 只在第一個參數是 redis-server、身分是 root 時，
+#     才會 chown /data 並 setpriv 成 redis。直接 `sh -c "exec redis-server …"` 會繞過它、以 root 執行。
+#   - 用 sh -c 而⛔ 不是把密碼直接放進 command：docker inspect 只看得到 $REDIS_PASSWORD 這個字面
+#     （$$ 是 compose 的跳脫，留給 container 裡的 sh 展開）；Redis 會改寫自己的行程名稱，ps 也看不到。
+#   - REDIS_PASSWORD 用 :? —— .env 不在或沒設時 compose 直接報錯，⛔ 不會起一個沒有密碼的 Redis。
+#   - REDISCLI_AUTH 讓 container 裡的 redis-cli 自動認證（healthcheck 與手動查詢都⛔ 不用把密碼寫在指令裡）。
+#     healthcheck 比對 PONG：redis-cli 遇到認證錯誤時結束碼仍可能是 0。
+#   - 資源上限與其他 stack 一致（見 docs/development-workflow.md「container 上限的總和也要顧」）。
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    cpus: "0.5"
+    mem_limit: 512m
+    memswap_limit: 768m
+    pids_limit: 200
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10

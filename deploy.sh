@@ -9,6 +9,28 @@ export FINMIND_API_KEY="your-finmind-api-key"
 export FINMIND_INTRADAY_ENABLED="false"  # 帳號升級到 Sponsor 級以上再改為 "true"
 export FUGLE_ENABLED="false"           # 驗證通過、確定要開通即時行情後改為 "true"
 export FUGLE_API_KEY="your-fugle-api-key"
+# Redis 的密碼：要與 Redis stack（docker-compose.redis.yml）的 .env 一致。直接從那份 .env 讀，值只留一份
+# （路徑換成 Redis stack 的實際目錄；執行 deploy.sh 的使用者要讀得到那個權限 600 的檔）。
+# 讀不到、格式不對就在 down 之前停下，錯誤訊息⛔ 不印值。
+# 整份 .env 走白名單，⛔ 不模仿 compose 的解析：compose 的 .env 語法很多（export、= 前後的空白、引號、
+# KEY: value、$ 展開…），只認得其中幾種、其他行忽略，就會漏掉沒認出來的寫法，兩邊讀到不同的密碼。
+# 所以只允許三種行：空行、從第一個字元就是 # 的註解、剛好一行 REDIS_PASSWORD=<值>（值只用英數與 ._+/=-，
+# 這種寫法 compose 照字面讀）。其他任何一行都擋下。
+# ⛔ 不能寫成 export X="$(…)"：那樣的結束碼是 export 的，讀檔失敗會被吞掉。
+REDIS_ENV_FILE="/path/to/redis-stack/.env"
+if REDIS_PASSWORD="$(awk '
+  /^[ \t]*$/ || /^#/ { next }
+  /^REDIS_PASSWORD=[A-Za-z0-9._+\/=-]+$/ { n++; v = substr($0, 16); next }
+  { bad++ }
+  END { if (bad || n != 1) exit 3; print v }' "$REDIS_ENV_FILE")"; then rc=0; else rc=$?; fi
+case $rc in
+  0) ;;
+  3) echo "deploy.sh: $REDIS_ENV_FILE 只能有一行 REDIS_PASSWORD=<值>（值只用英數與 ._+/=-），加上空行與 # 開頭的註解，停止部署（還沒 down）" >&2
+     exit 1 ;;
+  *) echo "deploy.sh: 讀不到 $REDIS_ENV_FILE，停止部署（還沒 down）" >&2
+     exit 1 ;;
+esac
+export REDIS_PASSWORD
 export YAHOO_ENABLED="false"           # 盤中批次源（非官方 API，免 token）；實盤驗證(T-032)通過後改為 "true"
 export YAHOO_RATE_LIMIT="20"           # 每分鐘請求上限（批次計一次），保守預設，依實測封鎖風險調整
 export YAHOO_BATCH_SIZE="40"           # 單次請求帶入的 symbol 數，依實測調整

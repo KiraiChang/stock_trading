@@ -92,14 +92,15 @@ go build -o trading-backend ./cmd/server
 
 ## Docker Compose（生產環境）
 
-```bash
-docker network create proxy_net 2>/dev/null || true
-docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f docker-compose.yml up --build
-```
+live 由三個各自獨立的 compose stack 組成：postgres（建立 `trading-net`）、redis、stock_trading
+（Go backend、Python worker、Python HTTP server）。各自的 live 檔案位置、對應的 repo 範本，以及
+**repo 的 `docker-compose.postgres.yml` 是 migration 驗證用的 pgtest、⛔ 不是正式的 postgres** 這一點，
+見 [`architecture.md`](./architecture.md)「生產 / Docker」。
 
-包含：PostgreSQL、Redis、Go backend、Python worker、Python HTTP server。`docker-compose.yml`
-本身假設 `trading-net` / `proxy_net` 已存在；上方 postgres compose 檔會建立
-`trading-net`，`proxy_net` 需先存在或用上方命令建立。
+- Redis 要求密碼：先在 Redis stack 的目錄建 `.env`（建法見 `docker-compose.redis.yml` 的檔頭），
+  backend 的 `REDIS_PASSWORD` 要與它一致（`deploy.sh` 範本從那份 `.env` 讀）。
+- `docker-compose.yml` 假設 `trading-net` / `proxy_net` 已存在；`proxy_net` 可用
+  `docker network create proxy_net` 建立。
 
 服務對應：
 
@@ -108,7 +109,7 @@ docker-compose -f docker-compose.postgres.yml -f docker-compose.redis.yml -f doc
 | Go backend（含前端） | 8080 |
 | Python HTTP server | 8001 |
 | PostgreSQL | 5432 |
-| Redis | 6379 |
+| Redis | 6379（只在 `trading-net` 內，⛔ 不發布到 host） |
 
 app runtime log 會持久化在 repo root 的 `logs/`，避免 `deploy.sh` 或 compose redeploy 重新建立
 container 後遺失：

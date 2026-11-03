@@ -1,5 +1,8 @@
 name: stock_trading_dev
 
+# port 一律只綁 127.0.0.1：docker 的 port publish 會繞過 host 防火牆，綁 0.0.0.0 等於把 dev 的 DB（trading/trading）、
+# Redis 與 API 掛到網路上。從自己的電腦看 dev，用 SSH tunnel（見 docs/development-workflow.md「2. 啟動 dev stack 做 smoke test」）。
+
 x-dev-resource-limits: &dev-resource-limits
   cpus: "0.5"
   mem_limit: 512m
@@ -20,7 +23,7 @@ services:
       POSTGRES_PASSWORD: trading
       POSTGRES_DB: trading
     ports:
-      - "15432:5432"
+      - "127.0.0.1:15432:5432"
     volumes:
       - dev_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -35,12 +38,18 @@ services:
     <<: *dev-resource-limits
     image: redis:7-alpine
     restart: unless-stopped
+    # 與 live 的 docker-compose.redis.yml 同一套寫法（設計理由見那份檔頭）。密碼是 dev 專用的預設值，
+    # 和 dev postgres 的 trading/trading 一樣寫在這裡、⛔ 不是 secret；用 DEV_ 開頭，⛔ 不會撿到 shell 裡 live 的 REDIS_PASSWORD。
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${DEV_REDIS_PASSWORD:-dev-redis-only}
+      REDISCLI_AUTH: ${DEV_REDIS_PASSWORD:-dev-redis-only}
     ports:
-      - "16379:6379"
+      - "127.0.0.1:16379:6379"
     volumes:
       - dev_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -64,7 +73,7 @@ services:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
       REDIS_ADDR: redis:6379
-      REDIS_PASSWORD: ""
+      REDIS_PASSWORD: ${DEV_REDIS_PASSWORD:-dev-redis-only}
       SERVER_PORT: "8080"
       PYTHON_SERVICE_URL: http://python-server:8001
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-change-me}
@@ -152,7 +161,7 @@ services:
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     volumes:
       - ./logs/dev/backend:/app/logs/backend
     networks:
@@ -176,7 +185,7 @@ services:
       LOG_DIR: /app/logs/python-server
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
-      - "18001:8001"
+      - "127.0.0.1:18001:8001"
     volumes:
       - ${SR_SCORING_MODELS_DIR:-./python/models}:/app/models
       - ./logs/dev/python-server:/app/logs/python-server

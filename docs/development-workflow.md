@@ -9,7 +9,7 @@
 
 | 用途 | Compose | Project / resources | Port |
 |------|---------|---------------------|------|
-| 開發驗收 | `docker-compose.dev.yml` | `stock_trading_dev`、`stock_trading_dev_net`、`stock_trading_dev_*` volumes | Backend `18080`、Python `18001`、Postgres `15432`、Redis `16379` |
+| 開發驗收 | `docker-compose.dev.yml` | `stock_trading_dev`、`stock_trading_dev_net`、`stock_trading_dev_*` volumes | 只綁 `127.0.0.1`：Backend `18080`、Python `18001`、Postgres `15432`、Redis `16379` |
 | live / 部署 | `docker-compose.yml` + `deploy.sh` 或正式部署流程 | live project、live network、live volumes | 依部署設定 |
 
 規則：
@@ -18,6 +18,50 @@
 - 不要對 live project 執行 `docker compose down -v`、migration 測試、資料清空或測試資料匯入。
 - 需要重置驗收資料時，只能對 dev compose 執行 `down -v`。
 - dev compose 已使用不同 host ports，可與 live 同機並存。
+- **compose 的 port 一律只綁 `127.0.0.1`**（dev、pgtest、mysql 都是）：docker 的 port publish 會繞過 host 防火牆，
+  綁 `0.0.0.0` 等於把服務掛到網路上。從自己的電腦看 dev，用 SSH tunnel（見下方「2. 啟動 dev stack 做 smoke test」）。
+- **⚠️ 已知限制：Docker 28.0.0 以前，只綁 `127.0.0.1` 擋不住同一個 L2 網段的主機**——官方說明這些版本裡，
+  同一個 L2 網段的其他主機連得到發布在 localhost 的 port（[Publishing ports](https://docs.docker.com/engine/network/port-publishing/#publishing-ports)）。
+  這台的 Engine 是 `20.10.5+dfsg1`（2026-11-03 查），在範圍內。
+  - 所以 `ss -ltn` 只看到 `127.0.0.1` 只能證明監聽的位址，⛔ 不能當成「外部連不到」的證據。
+  - 這台對外只有 `venet0`（Virtuozzo 的點對點介面、`NOARP`，預設路由走它）。這會影響鄰居能不能把這種封包送進來，
+    但⛔ 沒有實測，⛔ 不能據此判定安全。
+  - 受影響的是有發布 port 的：dev 的四個 port，以及 pgtest、MySQL 測試起著的時候。live 的 `docker-compose.yml` 與 Redis
+    都⛔ 沒有發布 port，不受影響。dev Redis 的預設密碼寫在 repo 裡，對這種情況⛔ 不算保護。
+  - 補強（升級到 28.0.0 以上，或自己在 iptables 加規則，丟棄從非 `lo` 進來、目的地是 `127.0.0.0/8` 的封包）尚未裁決，⛔ 沒有做。
+
+### live 的 Redis：獨立 stack、密碼與 port
+
+live 的 Redis（`redis-redis-1`）是**獨立的 compose stack**，⛔ 不在 stock_trading 的 `docker-compose.yml` 裡：
+live 的檔案是 `/opt/stacks/scripts/redis/docker-compose.redis.yml`，範本是 repo 的 `docker-compose.redis.yml`
+（三個 stack 的對照見 [`architecture.md`](./architecture.md)「生產 / Docker」）。backend 經 `trading-net` 用 `redis:6379` 連。
+
+- **⛔ 不發布 port 到 host**：backend 走 compose 網路，不需要 host 上的 port。真的要從 host 連，改成只綁 `127.0.0.1`。
+- **密碼在 Redis stack 目錄的 `.env`**（`REDIS_PASSWORD`，權限 600；建法見範本的檔頭）。範本用 `:?` 要求它存在，
+  沒有 `.env` 時 compose 直接報錯，⛔ 不會起一個沒有密碼的 Redis。
+- **backend 的 `REDIS_PASSWORD` 要一致**：repo 的 `docker-compose.yml` 是 `${REDIS_PASSWORD:-}`，`deploy.sh` 範本從 Redis 的 `.env` 讀值。
+  **`.env` 整份走白名單**：只能有一行 `REDIS_PASSWORD=<值>`（值只用英數與 `._+/=-`），加上空行與從第一個字元就是 `#` 的註解；
+  ⛔ 不放其他鍵。讀不到或不符合時 `deploy.sh` 在 `down` 之前停下。
+  ⛔ 不模仿 compose 的解析：它的 `.env` 語法很多（Compose v5.1.3 實測：同一個鍵寫兩次取後面那行、`KEY: value` 也算賦值、
+  會去掉引號、`\r` 與行尾的 ` # 註解`、會展開 `$`），只認得其中幾種就會漏掉其他寫法，讓 backend 帶的密碼和 Redis 的不同。
+  白名單只接受一種 compose 照字面讀的寫法，其他任何一行都擋下。
+  ⚠️ backend **只在啟動時連一次**：失敗就記 `redis connect failed, cache disabled` 並**整個停用 Redis**——
+  之後訊號⛔ 不再標 degraded，queue 與 cache 卻都⛔ 不用，`job_runs` 看起來可能一切正常。所以改了 Redis 的密碼，一定要重新部署 backend。
+  Redis 只是重建（密碼沒變）時，backend 的 client 會自己重連，⛔ 不需要重新部署。
+- **redis-server 要以 redis（uid 999）執行**：範本的 `command` 經 `docker-entrypoint.sh` 啟動。image 的 entrypoint 只在第一個參數是
+  `redis-server`、身分是 root 時才降權；直接 `sh -c "exec redis-server …"` 會繞過它、以 root 執行。
+- 確認方法（密碼一律⛔ 不印出來）：
+
+  ```bash
+  docker exec redis-redis-1 redis-cli ping                          # PONG（container 裡的 REDISCLI_AUTH 自動認證）
+  docker exec redis-redis-1 sh -c 'REDISCLI_AUTH= redis-cli ping'   # 不帶密碼要被拒
+  docker top redis-redis-1 -o pid,uid,user,comm                     # uid 999
+  docker port redis-redis-1                                         # 沒有輸出＝沒有發布任何 port
+  ss -ltn '( sport = :6379 )'                                       # host 上⛔ 沒有 6379
+  docker exec stock_trading-backend-1 sh -c 'echo ${#REDIS_PASSWORD}'   # 只看長度
+  ```
+
+  backend 的啟動 log 要有 `redis connected`（msg 以 `redis ` 開頭的那一行）。
 
 ## 測試腳本優先
 
@@ -2698,6 +2742,28 @@ process/thread。
 ```bash
 scripts/smoke-dev.sh
 ```
+
+**dev 的 port 只綁 `127.0.0.1`**（2026-11-03 起）：在 host 上照常用 `localhost:18080` 等；從自己的電腦看 dev，開一條 SSH tunnel（⚠️ 在這台的 Docker 版本上，只綁本機⛔ 不是硬界線，見上方「Docker 環境區隔」的已知限制）：
+
+```bash
+# 在自己的電腦上執行；這個連線開著時，瀏覽器開 http://localhost:18080 就是 dev
+ssh -N -L 18080:127.0.0.1:18080 -L 18001:127.0.0.1:18001 <帳號>@<host>
+# 要從自己的電腦連 dev 的 postgres／Redis，再加：-L 15432:127.0.0.1:15432 -L 16379:127.0.0.1:16379
+```
+
+常用的話寫進自己電腦的 `~/.ssh/config`，之後 `ssh -N <別名>` 就好：
+
+```
+Host stock-dev
+  HostName <host>
+  User <帳號>
+  LocalForward 18080 127.0.0.1:18080
+  LocalForward 18001 127.0.0.1:18001
+```
+
+**dev 的 Redis 要求密碼**：預設 `dev-redis-only`（dev 專用、寫在 compose 裡，⛔ 不是 secret），可用 `DEV_REDIS_PASSWORD` 覆寫；
+dev backend 用同一個變數。container 裡的 `redis-cli` 會自動認證：`docker exec stock_trading_dev-redis-1 redis-cli ping`。
+寫法與 live 的 Redis 相同（經 entrypoint 以 redis 執行），見上方「live 的 Redis：獨立 stack、密碼與 port」。
 
 腳本流程是 **先停 → 依序 build → 再啟動**：build 之前會對 dev project 執行
 `compose down --remove-orphans`（**不帶 `-v`，named volume 保留**）。原因是這台 host 只有

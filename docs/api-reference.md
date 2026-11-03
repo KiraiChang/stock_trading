@@ -26,6 +26,13 @@ Authorization: Bearer <token>
 { "user_id": 1, "email": "user@example.com", "status": "inactive" }
 ```
 
+**錯誤回應：**
+
+| 狀態碼 | 說明 |
+|--------|------|
+| 400 | body 不合法（`email` 格式不對、`password` 少於 6 字元） |
+| 409 | `email already exists`——⛔ 不會改既有帳號的密碼，用不同的密碼重新 register 也登不進去 |
+
 ### POST `/auth/login`
 
 登入取得 JWT token。

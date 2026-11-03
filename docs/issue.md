@@ -3424,7 +3424,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復 |
+| 狀態 | 已實作／待 review（2026-11-03：原因查明——帳號早就存在、密碼不同，register 對既有 email 只回 409；文件改成每次用新的驗收帳號，dev 實測通過，見下方「查明」「修正」） |
 | 嚴重度 | 低：文件落後，⛔ 不影響 runtime；照文件做 dev 驗收的人拿不到 JWT，需要 token 的步驟都做不了 |
 | 分類 | 文件 / dev 驗收流程 |
 | 建立日期 | 2026-11-02 |
@@ -3449,3 +3449,25 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 查清原因後再定：例如步驟改成「先試 login、失敗才 register」、改用驗收專用的帳號，
 或在 `development-workflow.md` 寫明 dev 帳密的來源。
+
+#### 查明（2026-11-03，dev 實測；⛔ 沒有碰 live）
+
+用 `NO_BUILD=1 SERVICES=backend scripts/smoke-dev.sh` 起 dev（沿用既有 volume；11-02 之後 backend 程式沒改）：
+
+| 項目 | 結果 |
+|---|---|
+| 重現：`dev@example.com`／`devdevdev` login | **401** `invalid email or password` |
+| dev DB 的 `users`（唯讀；只看 id、狀態、建立時間、雜湊的前綴與長度） | `dev@example.com` 是 id 1、`active`、**2026-08-19** 建（`$2a$`、60 字元）——早於 T-071 的 dev 驗收（09-08）；09-08 建的是 `t071@example.com`（id 13） |
+| register 既有的 `dev@example.com` | **409** `email already exists`（程式：`Create` 失敗就回 409、⛔ 不更新密碼） |
+| 對照：新註冊 `accept-<時間>@example.com` → 啟用 → login | 201 → `UPDATE 1` → **200**、token 204 字元；帶 token 打 `GET /scheduler/status` 回 200、不帶回 401 |
+
+結論：「帳號在步驟 3 之前就存在，而 register ⛔ 不會改既有帳號的密碼」成立；登入端點本身沒有問題（對照組通過）。程式的回應碼：401 ＝ 找不到帳號或密碼不符（`FindByEmail` 出錯也是 401）、403 ＝ 密碼對但不是 `active`。
+
+#### 修正（2026-11-03，⚠️ 待 review）
+
+* `development-workflow.md` 新增「dev 取得 JWT：每次用新的驗收帳號」：帶時間戳的 email、register 要 201、psql 啟用、login 拿不到 token 就印「停下來查」；bash 與 zsh 各實測一次都拿到 token，失敗路徑（打錯 port）兩個警告都有印、`TOKEN` 是空的。
+* `todo.md` T-071 的步驟 3、`development-workflow.md`「四個會讓這件事做錯的細節」改成指向它（as-of 階梯那段的 `$JWT` 統一成 `$TOKEN`）。
+* `api-reference.md` 的 `POST /auth/register` 補錯誤回應（400、409，409 ⛔ 不改密碼）；`development-guide.md`「建立第一個使用者」補同一句並指向新段落。
+* dev 驗完 `down`（⛔ 沒有帶 `-v`），volume 保留；dev DB 多了幾個 `accept-…@example.com`。
+* **review 第 1 輪（2026-11-03）**：失敗提示只是 `|| echo`，整段貼上之後仍會啟用、login，最後回傳 0（review 以假 curl／docker 在 bash、zsh 重現）。改成 `dev_token` 函式：register ⛔ 不是 201、啟用⛔ 不是 `UPDATE 1`、login 拿不到 token 都 `return 1`、後面⛔ 不執行；開頭 `unset TOKEN`，失敗時⛔ 不殘留上一次的 token。驗證：假 `curl`／`docker` 7 種情況 × bash、zsh 都照預期（失敗後的呼叫⛔ 沒有發生、`TOKEN` 是空的、`dev_token && …` 只在成功時執行下一步）；dev stack 實跑 bash、zsh 都拿到 token、`GET /scheduler/status` 回 200；驗完 `down`（⛔ 沒有帶 `-v`）。⚠️ 待 review
+* review 通過後收斂本筆；現況已在 `development-workflow.md`。

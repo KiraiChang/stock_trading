@@ -163,6 +163,8 @@ curl -X POST http://localhost:8080/api/v1/auth/register \
 # → {"user_id":1,"email":"admin@trading.com","status":"inactive"}
 ```
 
+email 已經存在時回 409、⛔ 不改既有帳號的密碼。dev 驗收要取得 token，照 `docs/development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」。
+
 **Step 2. 直接修改資料庫啟用第一個管理員**（因為此時還無法登入）
 
 ```bash

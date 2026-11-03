@@ -1250,18 +1250,9 @@ docker exec stock_trading_dev-postgres-1 \
 # 期望：>= 76
 ```
 
-**3. 取得 token**（新帳號預設 `inactive`，dev 直接改 DB 最省事）
-
-```bash
-curl -s -X POST localhost:18080/api/v1/auth/register \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"dev@example.com","password":"devdevdev"}'
-docker exec stock_trading_dev-postgres-1 \
-  psql -U trading -d trading -c "UPDATE users SET status='active' WHERE email='dev@example.com';"
-TOKEN=$(curl -s -X POST localhost:18080/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"dev@example.com","password":"devdevdev"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
-```
+**3. 取得 token**：貼上 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」的 `dev_token` 函式，單獨執行 `dev_token`，**成功（印出 `TOKEN 長度 …`）才往下做**；之後的步驟用 `$TOKEN`。
+⚠️ 這裡原本用 `dev@example.com`／`devdevdev` register → 啟用 → login，在既有的 dev DB 會 401（`issue.md` I-127：那個帳號 2026-08-19 就建好、密碼不同，
+register 對既有 email 只回 409、⛔ 不改密碼）。dev DB 裡 2026-09-08 建的是 `t071@example.com`，推測當天驗收實際用的是它。
 
 **4. 前置依賴：當日的 `stock_symbol_sync` 必須成功**（⛔ 沒有它整輪會 `failed`；
 這支走 TWSE ISIN，**不吃 FinMind**，所以 dev 沒金鑰也跑得動）

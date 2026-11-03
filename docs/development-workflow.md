@@ -269,6 +269,46 @@ DSN 從 live 的 python-server container 讀，不寫進 repo（密碼不進版�
 ——這個沙箱的 `sleep` 不等比推進 wallclock，且腳本用 `--rm`，容器結束後拿不到
 `FinishedAt`。要量時間得自行在呼叫端記錄起訖。
 
+### dev 取得 JWT：每次用新的驗收帳號
+
+需要 JWT 的 dev 驗收步驟一律用這段取得 `TOKEN`（`issue.md` I-127，2026-11-03 起）。
+
+⛔ **不要沿用 dev DB 裡既有的帳號**（例如 `dev@example.com`）：dev 的 volume 會一直沿用，既有帳號的密碼不一定是文件寫的那個——
+`dev@example.com` 是 2026-08-19 建的，用 `devdevdev` 登入回 401。而 `POST /auth/register` 對已經存在的 email 只回 **409**、
+⛔ 不改密碼，所以「register → 啟用 → login」只在全新的 dev DB 有效，在既有的 DB 會以 401 失敗、看不出原因。
+
+login 的回應碼：**401** ＝ 找不到帳號或密碼不符（查帳號時 DB 出錯也是 401）；**403** ＝ 帳號存在、密碼也對，但不是 `active`。
+新註冊的帳號預設 `inactive`、⛔ 沒有 first-user bootstrap，dev 直接改 DB 啟用。先貼上這個函式：
+
+```bash
+dev_token() {
+  unset TOKEN
+  local email="accept-$(date +%Y%m%d%H%M%S)@example.com" pass="devdevdev" code out
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:18080/api/v1/auth/register \
+    -H 'Content-Type: application/json' -d "{\"email\":\"$email\",\"password\":\"$pass\"}")
+  [ "$code" = 201 ] || { echo "dev_token: register 回 $code（要 201）" >&2; return 1; }
+  out=$(docker exec stock_trading_dev-postgres-1 psql -U trading -d trading \
+    -c "UPDATE users SET status='active' WHERE email='$email';")
+  [ "$out" = "UPDATE 1" ] || { echo "dev_token: 啟用帳號失敗（$out）" >&2; return 1; }
+  TOKEN=$(curl -s -X POST localhost:18080/api/v1/auth/login \
+    -H 'Content-Type: application/json' -d "{\"email\":\"$email\",\"password\":\"$pass\"}" \
+    | python3 -c 'import sys,json; d=sys.stdin.read(); print(json.loads(d).get("token","") if d.startswith("{") else "")')
+  [ -n "$TOKEN" ] || { unset TOKEN; echo "dev_token: login 拿不到 token" >&2; return 1; }
+  echo "TOKEN 長度 ${#TOKEN}（$email）"
+}
+```
+
+再**單獨**執行 `dev_token`；需要 token 的下一步一律寫成 `dev_token && <下一步>`：
+
+```bash
+dev_token && curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/scheduler/status
+```
+
+- 任何一步失敗（register ⛔ 不是 201、啟用⛔ 不是 `UPDATE 1`、login 拿不到 token）就印原因到 stderr、`return 1`，**後面的步驟⛔ 不執行**；
+  開頭先 `unset TOKEN`，失敗時 `TOKEN` 一定是空的，⛔ 不會殘留上一次的值讓後面的步驟靜默沿用。
+- 每次會在 dev DB 多留一個 `accept-<時間>@example.com`；dev 的資料可以重來，⛔ 不需要清。同一秒內跑兩次，第二次的 register 會 409、照常失敗停下。
+- 2026-11-03 實測（bash、zsh 各一次）：用假的 `curl`／`docker` 跑 register 409、`UPDATE 0`、login 回 401、login 回非 JSON、上一次留有 `TOKEN` 的失敗——都 `return 1`、後面的呼叫⛔ 沒有發生、`TOKEN` 是空的；dev stack 實跑拿到 token、`GET /scheduler/status` 回 200。
+
 ### 在 dev stack 上做「as-of 階梯」驗收
 
 要驗的東西**跨越多個交易日**（zone 身分延續、角色翻轉、缺席收攤、事件鏈）時，
@@ -306,7 +346,7 @@ on conflict (symbol,timeframe,ts) do nothing;
 
 ```bash
 curl -sS -X POST http://localhost:18080/api/v1/sr-zones \
-  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"symbol":"0050","timeframe":"1d","limit":400,"reuse_existing":false}'
 ```
 
@@ -325,13 +365,8 @@ SR_SCORING_MODELS_DIR=/opt/stacks/scripts/stock_trading/python/models \
   docker compose -f docker-compose.dev.yml up -d
 ```
 
-**dev 帳號註冊完是 `inactive`，沒有 first-user bootstrap。** `POST /auth/register`
-之後要直接改 DB 才登得進去：
-
-```bash
-docker exec stock_trading_dev-postgres-1 psql -U trading -d trading \
-  -c "update users set status='active' where email='dev@example.com';"
-```
+**dev 帳號註冊完是 `inactive`，沒有 first-user bootstrap；register 對已經存在的 email 只回 409、⛔ 不改密碼。**
+上面打分析用的 `$TOKEN` 照上方「dev 取得 JWT：每次用新的驗收帳號」取得，⛔ 不要沿用 dev DB 裡既有的帳號。
 
 **不要為了這件事重建 image。** `scripts/smoke-dev.sh` 預設會先 `down` 再 build，
 Go compile 峰值 RSS 約 420 MiB，而這台 host 只有 2 GiB。先確認跑著的 image 已經是

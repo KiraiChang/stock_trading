@@ -413,7 +413,7 @@ python3 "$CHECK" --root >/dev/null 2>&1; rc=$?
 set -e
 [ "$rc" -eq 2 ] && pass "--root 缺值 → rc=2" || fail "--root 缺值 rc=$rc"
 
-# ⑮ `docs/` 的子目錄（T-074，2026-11-03）：舊版只掃 `docs/` 這一層，`docs/plans/`、`docs/architecture/` 裡的漂移⛔ 不會被抓到。
+# ⑮ `docs/` 的子目錄（2026-11-03；原記於 `todo.md` T-074，已收斂）：舊版只掃 `docs/` 這一層，`docs/plans/`、`docs/architecture/` 裡的漂移⛔ 不會被抓到。
 #   ⚠️ ⑮-a～d、f 對舊版跑都會失敗（實作前實測過）；⑮-e、g 是新 walker 的防線，舊版不遞迴、本來就⛔ 不會踩到。
 #   頂層放一個正確的引用當對照：子目錄的引用若被略過，「識別符已驗」會停在 1。
 : > "$TD/scripts/doc-refs-legacy.txt"

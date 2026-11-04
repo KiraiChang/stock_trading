@@ -1,6 +1,6 @@
 # I-129 計畫 v4：進場許可的 RR 判斷改由 execution gate 決定，setup 不合格最多試單
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 7 步 ✅ review 通過（commit B），下一步是第 8 步（commit A ✅ `51cafe9`；實作備註見「十」）。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 8 步 ✅ review 通過（commit C）、v5 ✅ 2026-11-04 確認；⚠️ 下一步：第 9 步（使用者依序跑兩趟 Stage 1 與比較工具）。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -189,6 +189,8 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 * 兩趟都設**同一個 `REPLAY_IMAGE_ID`**，避免各自重 build image（I-116 的風險）。
 * `--before-ref` 兩趟都傳 A 的完整 OID（I-115：Stage 1 必填但不使用）。`TOOLING_PATCH` 兩趟都是空的（D6）。
 * 比較前先斷言兩份 artifact 的 `bundle_id` 相同、provenance 的 `runtime_settings` 相同、列的 key 集合相同；任何一項不符就判「無法歸因」，⛔ 不出結論。
+* 另外驗來源完整性與執行身分（第 8 步 review P1-1）：頂層 envelope 與 provenance 的封閉欄位與型別（`stage1` 規則）、`image_digest`、`python_version`、`pip_freeze_sha256` 兩趟相同、兩趟的 `tooling_patch_sha256` 都是空 patch 的值、`base_commit` 分別等於比較工具收到的 A／B（而且 A ≠ B）、`replay_scope` 是全候選。
+* 結果標籤跨版本核對（第 8 步 review P2）：`current_price`、K 棒、`forward_bars`、`forward_return` 等只由凍結資料與日期決定的欄位，A、B 必須完全相同；G_new 與 P 的 `current_price`、`forward_return` 還要對得上從 bundle candles 重算的值。不符就判「無法歸因」。
 
 **欄位驗證**（正式跑之前）
 
@@ -212,7 +214,15 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 * `scripts/run-replay-offline.sh` Stage 1，分別用 `AFTER_REF=A`、`AFTER_REF=B`，各自輸出到空目錄。每趟都跑 bundle 的全部列，不只 I-074 的 156 列。
 * 每跑一次會留下一個 worktree（I-118），跑完照 `development-workflow.md` 的 worktree 清理規則處理。
 
-**逐列比較工具**（新寫，放 `python/scripts/`，附測試）
+**逐列比較工具**（新寫，附測試；CLI 是 `python/scripts/compare-i129-replay.py`，在 python image 裡執行的 wrapper 是 `scripts/compare-i129-replay.sh`，邏輯在 `backtest/modular/sr_scoring/i129_measurement.py`）
+
+* 結論依序判定：`UNATTRIBUTABLE`（輸入不一致或欄位檢查不過，結束碼 5）→ `INVARIANT_VIOLATION`（4）→ `EVIDENCE_INSUFFICIENT`／`SAFETY_FAILED`（3，退回「4.5」）→ `PASS`（0）。
+* 結構不變式除了下方的分組要求，另外檢查：A、B 的 `setup_rr_qualified` 與 decision 可用性一致；`rr_gate.setup_qualified` 與 `setup_rr_qualified` 一致；B 的 final 許可⛔ 不得高於 semantic；setup 不合格的列 B 的 semantic 與 final 都⛔ 不得高於試單、action ⛔ 不得是 Buy、A 必須是 BLOCKED；B 是 BLOCKED 時 final 的理由⛔ 不得是 RR 類（D1）。沒有決策的列（沒有 zone 等）另成一組、⛔ 不比。
+* **G_new 的 D3 放行前提**（第 8 步 review 兩輪；不成立就是 `INVARIANT_VIOLATION`，⛔ 不能由績效數字抵銷；⛔ 只看旗標與 gate 回報的數字不夠）：
+  * 價格完整、RR 可重算：entry／stop／target 都有值、風險與報酬都 > 0；用價格重算的 RR 必須等於 `rr_context.executable_rr` 與 `rr_gate.actual_rr`。
+  * 門檻重算：用 decision engine 的 `_minimum_rr()` 從 `primary_zone` 的 tier／role 與 `entry_action_state` 算出，必須等於 gate 回報的 `minimum_rr`，而且重算的 RR ≥ 門檻。
+  * 旗標：`gate_basis=ENTRY_STOP_TARGET`、target 已知、主 gate 合格、`setup_qualified=false`。
+  * 封頂真的生效：semantic 的許可就是試單，semantic 與 final 都帶 `SETUP_RR_BELOW_MINIMUM`。
 
 * 重用 `replay_bundle/stream.py` 的串流讀取與 `artifacts.compare_rows()`：先串流 A，每列只留精簡投影；再串流 B 邊讀邊比，用 key 對齊。⛔ 不整份載入兩邊（I-117：crossday 的整份載入要 730 MiB）。
 * 成交與停損、目標的判定用 bundle 的 candles（每一列至少有 5 根往後的 K 棒）。
@@ -229,7 +239,7 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 
 | 組 | 定義 | 要求 |
 |---|---|---|
-| U：setup 合格 | — | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes_digest`、`rr_context` 完全相同；`rr_gate` 只能多 `setup_qualified`；`semantic_entry_permission_state` 只能在 B 的 `rr_gate` 不合格時變 WAIT；`path_gate_state` 只能變 `RR_BLOCKED`。其他任何差異都算異常 |
+| U：setup 合格 | — | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes_digest`、`rr_context` 完全相同；`rr_gate` 只能多 `setup_qualified`。B 的主 gate 不合格時（v5，✅ 2026-11-04 確認）：`semantic_entry_permission_state` 只能變 WAIT、`semantic_reason_codes` 只能**多出** RR 類的 code、`path_gate_state` 只能變 `RR_BLOCKED`、`final_entry_reason_codes` 只能**順序不同**（集合相同）、`position_action_condition` 只能是 `reason_codes` 少了 `WAIT_PRICE_FOLLOW_THROUGH`。其他任何差異都算異常 |
 | G_new：新增放行 | setup 不合格、A 是 BLOCKED、B 是 PROBE | 看下方結果指標 |
 | G_wait／G_block | setup 不合格、B 是 WAIT 或結構 BLOCKED | A 必須是 BLOCKED |
 | 升級 | PROBE → ENTRY，或 action BuySmall → Buy | 必須是 0 |
@@ -263,7 +273,7 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 
 | 指標 | 分母 | 最低有效樣本 |
 |---|---|---|
-| 停損觸及率 | 已成交的列 | G_new、P 各 ≥ 30 |
+| 停損觸及率 | 已成交的列（stop 缺值的列算「沒碰到」，列數另外報告；⛔ 不排除——排除會拉高 P 的觸及率、等於放寬 G_new 的容許值） | G_new、P 各 ≥ 30 |
 | 先到目標的比例 | 已成交、而且 `target_price` 有值的列（P 只取這個子集 P_q） | G_new、P_q 各 ≥ 30 |
 | 平均實現 R | 已成交、而且 `stop_price` 有值的列（成交價 ≤ 停損的列記 −1，⛔ 不排除） | G_new、P 各 ≥ 30 |
 | `forward_return` 的平均與正報酬比例（governance 用的那個） | 有 `forward_return` 的列 | G_new ≥ 30 |
@@ -322,8 +332,31 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
    * ✅ 正式 smoke（乾淨的工作樹、tooling patch 是空的）通過：35 列都帶有量測欄位、decision 可用 35 列。執行時 HEAD 是 `a905c94`（I-123～I-126 的 R4、R5，只改 Go 與文件），python 與 smoke 腳本和 `51cafe9` 相同。
 6. 先寫「6.1」的測試，確認在 commit A 的程式上會紅。（✅ 2026-11-04：39 個新測試裡 32 個紅、原因都是改前的行為；「十」）
 7. 改 `decision_engine.py`（「4.2」），更新「6.2」的既有測試，跑 `python/scripts/test.sh`。改前端（「4.3」），跑前端測試。由使用者 commit 成 **commit B**。（✅ 2026-11-04 review 通過，一輪 review 修正 2 項；「十」）
-8. 寫「6.5」的逐列比較工具（附測試）；commit B 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝B）。比較工具若在 commit B 之後才寫，要另外 commit，⛔ 不能讓 B 的工作樹不乾淨地跑 smoke。
+8. 寫「6.5」的逐列比較工具（附測試）；commit B 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝B）。比較工具若在 commit B 之後才寫，要另外 commit，⛔ 不能讓 B 的工作樹不乾淨地跑 smoke。（✅ smoke（HEAD＝`c82adfc`）通過；✅ 工具 review 通過（兩輪 review 修正），commit C；「十」）
 9. 使用者依序跑兩趟 Stage 1，再跑比較工具。Claude 依判準判讀，寫進下一版；不通過或證據不足就照「4.5」退回。
+   指令（在 repo 根目錄、⛔ 兩趟不並行；每趟約 3 小時；兩趟之間⛔ 不 prune image）：
+
+   ```
+   A=$(git rev-parse 51cafe9)
+   B=$(git rev-parse c82adfc)
+   BUNDLE=$PWD/python/baselines/b1_20260901_1d_74350966_5d7ecb10
+   OUT=$HOME/.cache/stock_trading/i129
+   mkdir -p $OUT
+   IMG=$(scripts/pin-replay-image.sh --no-identity)
+   REPLAY_IMAGE_ID=$IMG AFTER_REF=$A \
+     scripts/run-replay-offline.sh --bundle $BUNDLE \
+     --output-dir $OUT/a --before-ref $A
+   REPLAY_IMAGE_ID=$IMG AFTER_REF=$B \
+     scripts/run-replay-offline.sh --bundle $BUNDLE \
+     --output-dir $OUT/b --before-ref $A
+   scripts/compare-i129-replay.sh --bundle $BUNDLE \
+     --a $OUT/a/after_artifact.json \
+     --b $OUT/b/after_artifact.json \
+     --a-commit $A --b-commit $B \
+     --output $OUT/report.json
+   ```
+
+   每趟會留下一個 worktree（I-118），跑完照 `development-workflow.md` 的規則清理。
 10. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。
 
 ## 九、完成後的歸檔位置
@@ -388,6 +421,53 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 * **反向驗證**：用改掉程式的複本各跑一次——拿掉 `rr >= 2.0` 時 1.9 升成 Buy、D4 測試失敗；`target_known` 改回寫死 `False` 時 D2 測試失敗。
 * 修正後 `python/scripts/test.sh` 1796 passed、1 skipped，shell 測試 FAIL 0。前端與 Go ⛔ 沒有再改。
 
+### 第 8 步：逐列比較工具（2026-11-04；✅ review 通過）
+
+* **先跑 smoke（HEAD＝B）**：commit B 之後、寫工具之前，在乾淨的工作樹上跑：通過，35 列都帶有量測欄位、decision 可用 35 列。
+* **工具**：
+  * 串流讀兩份 artifact，每列都套 `StreamRowValidator` 的全部規則與量測欄位檢查。
+  * A 側每列只留精簡投影：欄位 digest 存成一段 bytes，另外只留比對連帶差異要用的三個欄位。
+  * 成交與停損、目標照「6.5」的規則。
+  * 判準的邊界含等號，比較時容許 1e-9 的浮點誤差（0.40 − 0.05 才不會算成 0.35000000000000003）。
+  * 平均實現 R 的分母只取 stop 有值的列（計畫書原定義）；停損觸及率的分母是已成交的列（見下方 review 的第 3 點）。
+  * 測試 56 個：「6.5」列的每個成交邊界案例、判準的順序與邊界、端到端的合成 artifact（含每一種不變式與輸入不一致）、CLI 的結束碼。
+* **校準（真實資料的小樣本，⛔ 不是正式量測）**：
+  * 用 `git archive` 取出 A 的程式碼（⛔ 不建 worktree），與 B 各自對凍結 bundle 跑每檔最新 40 列（440 列、各約 410 秒），再用比較工具本身比較。
+  * 結果：分組 U 176、P 2、G_new 3、G_wait 123、G_block 136；所有不變式都成立。樣本小，所以判為 `EVIDENCE_INSUFFICIENT`，屬於預期。
+  * ⚠️ **發現原本的 U 組規則會誤判**：B 的主 gate 不合格的 43 列 U，除了計畫列的三個欄位，還會連帶改變 `semantic_reason_codes`（多出 gate 的 reason）、
+    `final_entry_reason_codes`（gate 的 reason 改從 semantic 帶進來，只有順序不同）、`position_action_condition`（path 變成 `RR_BLOCKED` 後少了
+    `WAIT_PRICE_FOLLOW_THROUGH`）。照原規則有 30 列會被判成異常。→ v5 把這三項定成**有條件的**允許差異（上方分組表），✅ 2026-11-04 確認；
+    工具已照 v5 實作，校準的 440 列在 v5 規則下 0 異常。
+  * 另外看到的既有行為（⛔ 不在本筆範圍）：final 是 BLOCKED 時，`_final_entry_permission()` 只保留 daily 的理由、濾掉 semantic 的理由，
+    所以結構性 BLOCKED（例如 `MARKET_ACTION_AVOID`）在 final 的 reason codes 裡看不到真正的原因（樣本裡最多的是 `DAILY_CONFIRMATION_REQUIRED`）。
+* **wrapper 實測**：用校準的兩份 artifact 跑 `scripts/compare-i129-replay.sh`，判為 `EVIDENCE_INSUFFICIENT`、結束碼 3；輸出檔已存在時拒絕執行。
+
+#### 第 8 步的 review（2026-11-04）：2 項 P1、1 項 P2，經合成 artifact 確認屬實，已修正
+
+* **P1-1 輸入身分不一致仍可能判 PASS**：原本只比 `bundle_id`、`runtime_settings` 與 key 集合，不同 image、非空 patch、甚至雙方都缺 provenance 都能通過。
+  → 改成先驗 envelope 與 provenance（`stage1` 規則）、image 與套件環境相同、兩趟都是空 patch、`base_commit` 分別等於比較工具收到的 A／B
+  （CLI 與 wrapper 新增必填的 `--a-commit`／`--b-commit`）；任何一項不符都判 `UNATTRIBUTABLE`。
+* **P1-2 G_new 沒有檢查 D3 的放行前提**：原本只依 final 狀態分組，gate 不合格或退回 `ZONE_STATISTIC` 的列被放行也照樣 PASS。
+  → G_new 每一列都要滿足 D3 的前提（上方「逐列比較工具」），不成立就是 `INVARIANT_VIOLATION`；
+  另外對所有列檢查 `rr_gate.setup_qualified` 與 `setup_rr_qualified` 一致。
+* **P2 沒有攔 G_new 的結果標籤差異**：`forward_return` 直接採用 B 的值，A −20%、B +1% 也能 PASS。
+  → 只由凍結資料決定的結果標籤要跨版本完全相同，G_new 與 P 的 `current_price`、`forward_return` 還要對得上從 bundle 重算的值；不符判 `UNATTRIBUTABLE`。
+* **停損觸及率的分母**（同一輪 review 指出）：v5 草案把它改成「只取 stop 有值的列」，但排除 P 裡沒有 stop 的列可能拉高對照組的觸及率、
+  等於放寬 G_new 的容許值，⛔ 不保證更保守。→ 撤回，改回計畫書原定義（已成交的列；stop 缺值算沒碰到，列數另外報告）。
+* **反向驗證**：在複本裡逐一拿掉新加的檢查，對應的測試都會失敗（身分 10 個、D3 前提 7 個、跨版本標籤 1 個、bundle 重算 1 個、分母 1 個）。
+* 用新版工具重跑校準樣本：只剩預期中的「provenance 不合法」（校準用的 artifact 是手造的 provenance）；D3 前提、標籤、`setup_qualified` 一致性在真實資料上都是 0 異常。
+* 測試 78 個（原本 56 個）。
+
+#### 第 8 步的第二輪 review（2026-11-04）：1 項 P1、1 項 P2，經合成 artifact 確認屬實，已修正
+
+* **P1 D3 沒有核對價格與 RR 的一致性**：target 是 None、`executable_rr=1.0` 低於門檻，或 entry／stop／target 100／98／101（實際 RR 0.5）而 gate 宣稱 2.0，都還能 PASS。
+  → 從價格重算 RR、與 context 和 gate 三方核對；門檻用 `_minimum_rr()` 從 `primary_zone` 重算（gate 回報的門檻被改低也攔得到）。
+* **P2 沒有驗 semantic 真的被封頂**：G_new 的 semantic 改成 ENTRY、final 維持 PROBE 仍能 PASS。
+  → G_new 的 semantic 必須是試單；另外對所有列加兩條不變式：final ⛔ 不得高於 semantic、setup 不合格的列 semantic／final ⛔ 不得高於試單且 action ⛔ 不得是 Buy。
+* 新反例 10 個（D3 8 個、不變式 2 個）先寫、確認在修正前會失敗，修正後全部通過；反向驗證逐一拿掉新檢查，對應的測試都會失敗
+  （「100／98／101」那條另外也被「重算的 RR 未達門檻」攔下，屬於雙重涵蓋）。
+* 真實資料的校準樣本在新規則下仍然 0 異常（final ≤ semantic、G_new 的價格重算都成立）。測試 88 個。
+
 ## 修訂紀錄
 
 * **v1（2026-11-03）**：execution gate 單一決定，setup 不合格的列完全依 executable RR 放行。
@@ -408,3 +488,9 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
   * 修訂時自行發現的兩處，一併修正：
     * 「4.4」原本只改 `_decision_fields_from_summary()`，但 replay 列是逐欄組出來的，新欄位不會自動進到列裡 → 欄位清單改成 package 常數，replay 列依它加入，decision 不可用時填 null。
     * 平均實現 R 原本排除「風險 ≤ 0」的列，等於把跳空開在停損之下、最差的列從平均裡拿掉 → 成交價 ≤ 停損一律記 −1R，⛔ 不排除。
+* **v5（2026-11-04，✅ 隨第 8 步 review 通過確認）**：第 8 步的校準（真實資料 440 列）發現「6.5」U 組的「其他任何差異都算異常」會把 gate 不合格時的連帶差異誤判成異常
+  （30 列）。修正：B 的主 gate 不合格時，另外允許 `semantic_reason_codes` 只多出 RR 類的 code、`final_entry_reason_codes` 只有順序不同、
+  `position_action_condition` 只少了 `WAIT_PRICE_FOLLOW_THROUGH`；其餘不變。這是放寬判準，所以先停下來確認（第 8 步 review 認為有合理依據）；
+  另外補了更嚴的不變式（B 是 BLOCKED 時理由⛔ 不得是 RR 類、A、B 的 decision 可用性一致）。
+  ⚠️ 草案原本也把停損觸及率的分母改成「只取 stop 有值的列」，第 8 步 review 指出那⛔ 不保證更保守（可能拉高對照組的觸及率），已撤回、維持原定義。
+  第 8 步 review 另外要求的身分檢查、D3 放行前提與結果標籤核對，都只會讓判定更嚴，⛔ 沒有放寬任何判準。

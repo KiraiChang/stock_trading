@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-129` 起算。**（**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-130` 起算。**（**I-129 於 2026-11-03 發出**——由 `todo.md` T-065 改列（描述的是矛盾結果，依分流規則屬於本清單；**T-065 編號不回收**，比照 T-068 → I-100）。**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-126（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，I-128 於 2026-11-03 發出並收斂（T-071 收斂時的 Go 測試），**下一個可用的是 I-129**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-129（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，I-128 於 2026-11-03 發出並收斂（T-071 收斂時的 Go 測試），I-129 於 2026-11-03 由 `todo.md` T-065 改列，**下一個可用的是 I-130**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,8 +70,8 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
-  已跳號的 I-114，以及下一個可用的 I-129），
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126 / I-129、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
+  已跳號的 I-114，以及下一個可用的 I-130），
   那是預期的，不是殘留。
 
   ⚠️ **I-074**（2026-10-29 收斂）的引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。
@@ -3419,3 +3419,54 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 (1) 整輪失敗記成 failed；(2) 前置條件不成立寫成專屬的安全文字（例如 `delisting_reconcile:stock_symbol_sync_not_ready`）。
 ⚠️ 動到狀態推導與 `job_runs` 的 contract，要先立計畫書。
+
+### I-129：進場許可被 setup RR 提前決定，與對外的 execution gate 反方向矛盾（原 `todo.md` T-065）
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 規劃中（計畫 v4（⚠️ 待確認；v1、v2、v3 各經一輪 review 退回）：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定、setup 不合格最多試單，放寬要先通過離線量測） |
+| 嚴重度 | 中高（會產出**無法診斷**的 `BLOCKED`：對外的 `rr_gate` 兩層都通過、RR 11.0，卻禁止進場，而且沒有任何欄位說明理由；那個 11.0 本身也是 setup gate 擋掉之後才算出來的） |
+| 分類 | Python / SR Zone / 決策語意 / 資料契約 |
+| 發現日期 | 2026-08-27 |
+| 來源 | 原記於 `todo.md` T-055 第三輪 review 的 F1 裁決（T-055 已於 2026-08-27 收斂）——封頂做法只涵蓋單向，反向由 T-065 承接；**2026-11-03 依分流規則改列本筆**（描述的是矛盾結果，不是功能擴充），**T-065 編號不回收**。現況說明見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「已知的單向性」 |
+
+#### 成因：封頂是單調遞減運算，判定在更上游就提前結束
+
+`secondary_gate` 不合格時，`decision_derived_view.semantic_pipeline` 與 `final_entry_permission`
+**一起封頂**到 `PROBE_ALLOWED`。那解決的是**高估**：`setup_rr ≥ 2.0 > executable_rr`。
+
+**封頂只能降不能升**，所以反方向碰不到：`executable_rr` 高於 `setup_rr` 時，判定在更上游讀 setup RR 的地方
+就已經結束，下游拿不到控制權。讀 setup RR 的地方（2026-11-03 讀碼盤點；原 T-065 只列了前兩列與 `strong`）：
+
+| 位置 | 現況 |
+|---|---|
+| `_decision_action()` | `rr < 1.5` 或 `None` → WATCH 提前 return；`strong` 要 `rr >= 2.0` |
+| `_decision_semantic_pipeline()` | `not rr_qualified` → `BLOCKED`（`rr_gate` 是**更早的 setup-RR gate**） |
+| `_daily_confirmation()` | `not rr_gate.qualified` → daily `BLOCKED`，`_final_entry_permission()` 因此直接 BLOCKED |
+| `_decision_derived_view()`、`_price_path()` | `path_gate_state=RR_BLOCKED` 吃 setup gate |
+
+真正要解的是資料流的環：
+
+```
+execution gate ──需要──> entry_executability ──需要──> decision_derived_view ──需要──> execution gate
+```
+
+`_entry_executability()` 只在 semantic 許可放行時才走市價 entry；setup gate 擋掉時改走限價、用 zone 上緣當 entry，
+於是 execution gate 算到的是**另一個進場價**的 RR。
+
+#### 重現（2026-08-27，`_summary` 的 CONTINUATION fixture，support TIER_3、壓力放 122.0）
+
+| `setup_rr` | `rr_gate` | `semantic` / `final` | `action` | `risk_notes` |
+|---|---|---|---|---|
+| 1.4 | `qualified=True` `secondary=True` **`actual_rr=11.0`** | **`BLOCKED`** | `Hold` | 「主交易區風險報酬比不足。」＋「Final Entry 禁止進場…」 |
+| 1.7 | 同上 | **`BLOCKED`** | `Hold` | **只有**「Final Entry 禁止進場…」 |
+| 2.8（對照組） | `actual_rr=2.429` | `ENTRY_ALLOWED` | `BuySmall` | 正常 |
+
+`setup_rr=1.7` 那列最嚴重：**BLOCKED 但沒有任何欄位解釋為什麼**。
+11.0 是限價 entry（zone 上緣 100）算出來的 (122−100)/(100−98)；不被擋時走市價 105，是 (122−105)/(105−98)≈2.43，與對照組相同。
+
+#### 驗收準則
+
+* 上表 `setup_rr=1.4` 與 `1.7` 兩組必須輸出與 `rr_gate` 一致的結果；RR 不合格時必須有欄位指明理由。
+* `setup_rr=2.8` 對照組行為不得改變。
+* 既有的封頂測試（`test_full_entry_gate_caps_authoritative_permission_end_to_end` 與其對照組）必須續存並通過——本筆是**擴充**單向為雙向，不是取代。

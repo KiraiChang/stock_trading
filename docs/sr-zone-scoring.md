@@ -1796,7 +1796,7 @@ gate 等於在測同一個數字兩次。現在沒有可量化 target 時輸出
 **這是刻意保留的已知限制，不是遺漏**。修它要解
 `execution gate → entry_executability → decision_derived_view → execution gate`
 這個資料流的環，會同時動到三個 authoritative 欄位的產生路徑，屬大規模異動——
-追蹤在 [`todo.md`](./todo.md) **T-065**（2026-08-27 由 T-055 的 F1 裁決分出）。
+追蹤在 [`issue.md`](./issue.md) **I-129**（2026-08-27 由 T-055 的 F1 裁決分出，原記為 `todo.md` T-065；計畫書 [`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)）。
 **讀到「兩層 gate 都過卻 BLOCKED」時先看這一節，不要當成新 bug 重新調查。**
 
 ⚠️ **矛盾只在完整流程才看得見**：`decision_derived_view` 的 semantic pipeline 讀的是

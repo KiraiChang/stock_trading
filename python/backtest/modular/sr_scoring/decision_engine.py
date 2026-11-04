@@ -871,7 +871,7 @@ def _apply_full_entry_gate_cap(
     **為什麼是事後校正，不是讓 gate 直接參與仲裁**：資料流上是一個環——
     execution gate 需要 `entry_executability`（要 entry_price 算 target），
     `entry_executability` 需要 `decision_derived_view`，而 derived view 需要 gate。
-    把 gate 前移得先解這個環，屬 T-065 的範圍。
+    把 gate 前移得先解這個環，屬 `docs/issue.md` I-129（原 T-065）的範圍。
 
     **就地改是安全的**，唯一的其他內部消費者 `_entry_executability:806` 對
     `PROBE_ALLOWED` 與 `ENTRY_ALLOWED` 走**同一個分支**，所以封頂不會回頭改變它，
@@ -879,7 +879,7 @@ def _apply_full_entry_gate_cap(
 
     ⚠️ **封頂是單調遞減的，只擋高估、擋不了低估。** 反方向
     （`executable_rr` 高於 `setup_rr`）的矛盾出在更上游的提前 return，這裡碰不到——
-    見 `docs/sr-zone-scoring.md`「RR 語意分層／已知的單向性」與 `docs/todo.md` T-065。
+    見 `docs/sr-zone-scoring.md`「RR 語意分層／已知的單向性」與 `docs/issue.md` I-129。
     """
     if not derived_view or not execution_rr_gate:
         return

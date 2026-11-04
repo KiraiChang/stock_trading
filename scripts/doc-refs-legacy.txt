@@ -57,12 +57,9 @@ sr-zone-scoring.md|decision_engine.py:516
 todo.md|SRZones.svelte:2154
 todo.md|SRZones.svelte:596
 todo.md|SRZones.svelte:598
-todo.md|decision_engine.py:1042
 todo.md|decision_engine.py:1826
 todo.md|decision_engine.py:305
 todo.md|decision_engine.py:315
-todo.md|decision_engine.py:519
-todo.md|decision_engine.py:527
 todo.md|evaluation.py:2167
 todo.md|evaluation.py:256
 todo.md|evaluation.py:308

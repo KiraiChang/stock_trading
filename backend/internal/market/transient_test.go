@@ -33,44 +33,60 @@ func dialErr(inner error) error {
 	return &url.Error{Op: "Get", URL: "https://example.invalid/x", Err: &net.OpError{Op: "dial", Net: "tcp", Err: inner}}
 }
 
+// transientCauses 是 TransientCause 的完整值域（true＝暫時性）。新增原因碼要同時改這裡與 transient.go 的註解。
+var transientCauses = map[string]bool{
+	"dns_timeout": true, "dns_temporary": true, "http_5xx": true, "db_connection": true,
+	"net_unreachable": true, "host_unreachable": true, "conn_refused": true, "conn_reset": true,
+	"net_timeout": true, "net_other": true, "http_timeout": true, "unexpected_eof": true,
+	"dns_permanent": false, "http_non_5xx": false, "db_other": false, "not_transient": false, "none": false,
+}
+
 func TestIsTransientClassifiesByType(t *testing.T) {
 	tests := []struct {
-		name string
-		err  error
-		want bool
+		name  string
+		err   error
+		want  bool
+		cause string // TransientCause 的原因碼（觀察期的追加修正）
 	}{
-		{"nil", nil, false},
+		{"nil", nil, false, "none"},
 		// I-122 的 DNS 逾時：`dial tcp: lookup … on 127.0.0.11:53: … i/o timeout`
-		{"DNS 逾時", fmt.Errorf("twse isin fetch x: %w", dialErr(&net.DNSError{Err: "i/o timeout", Name: "isin.twse.com.tw", IsTimeout: true})), true},
-		{"DNS 暫時性失敗", dialErr(&net.DNSError{Err: "server misbehaving", IsTemporary: true}), true},
-		{"DNS NXDOMAIN ⛔ 不算", dialErr(&net.DNSError{Err: "no such host", IsNotFound: true}), false},
+		{"DNS 逾時", fmt.Errorf("twse isin fetch x: %w", dialErr(&net.DNSError{Err: "i/o timeout", Name: "isin.twse.com.tw", IsTimeout: true})), true, "dns_timeout"},
+		{"DNS 暫時性失敗", dialErr(&net.DNSError{Err: "server misbehaving", IsTemporary: true}), true, "dns_temporary"},
+		{"DNS NXDOMAIN ⛔ 不算", dialErr(&net.DNSError{Err: "no such host", IsNotFound: true}), false, "dns_permanent"},
 		// I-122 的 IPv6 不可達：`dial tcp [2001:…]:443: connect: network is unreachable`
-		{"網路不可達", dialErr(os.NewSyscallError("connect", syscall.ENETUNREACH)), true},
-		{"連線被拒", dialErr(os.NewSyscallError("connect", syscall.ECONNREFUSED)), true},
-		{"連線被重設", &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)}, true},
-		{"HTTP client 逾時", &url.Error{Op: "Get", URL: "https://example.invalid/x", Err: timeoutErr{}}, true},
-		{"連線中途斷掉", fmt.Errorf("recompute: %w", io.ErrUnexpectedEOF), true},
-		{"HTTP 503", newHTTPStatusError(503, "x: HTTP %d", 503), true},
-		{"HTTP 500", newHTTPStatusError(500, "x: HTTP %d", 500), true},
-		{"HTTP 404 ⛔ 不算", newHTTPStatusError(404, "x: HTTP %d", 404), false},
-		{"HTTP 429 ⛔ 不算", newHTTPStatusError(429, "x: HTTP %d", 429), false},
-		{"包在外層的 5xx", fmt.Errorf("finmind fetch failed after %d retries: %w", 3, newHTTPStatusError(503, "y")), true},
+		{"網路不可達", dialErr(os.NewSyscallError("connect", syscall.ENETUNREACH)), true, "net_unreachable"},
+		{"連線被拒", dialErr(os.NewSyscallError("connect", syscall.ECONNREFUSED)), true, "conn_refused"},
+		{"連線被重設", &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)}, true, "conn_reset"},
+		{"HTTP client 逾時", &url.Error{Op: "Get", URL: "https://example.invalid/x", Err: timeoutErr{}}, true, "http_timeout"},
+		{"連線中途斷掉", fmt.Errorf("recompute: %w", io.ErrUnexpectedEOF), true, "unexpected_eof"},
+		{"HTTP 503", newHTTPStatusError(503, "x: HTTP %d", 503), true, "http_5xx"},
+		{"HTTP 500", newHTTPStatusError(500, "x: HTTP %d", 500), true, "http_5xx"},
+		{"HTTP 404 ⛔ 不算", newHTTPStatusError(404, "x: HTTP %d", 404), false, "http_non_5xx"},
+		{"HTTP 429 ⛔ 不算", newHTTPStatusError(429, "x: HTTP %d", 429), false, "http_non_5xx"},
+		{"包在外層的 5xx", fmt.Errorf("finmind fetch failed after %d retries: %w", 3, newHTTPStatusError(503, "y")), true, "http_5xx"},
 		// I-124 的 recovery mode：`FATAL: the database system is in recovery mode (SQLSTATE 57P03)`
-		{"SQLSTATE 57P03", fmt.Errorf("failed to connect: %w", &pgconn.PgError{Code: "57P03"}), true},
-		{"SQLSTATE 08006", &pgconn.PgError{Code: "08006"}, true},
-		{"SQLSTATE 53300", &pgconn.PgError{Code: "53300"}, true},
-		{"SQLSTATE 23505 ⛔ 不算", &pgconn.PgError{Code: "23505"}, false},
+		{"SQLSTATE 57P03", fmt.Errorf("failed to connect: %w", &pgconn.PgError{Code: "57P03"}), true, "db_connection"},
+		{"SQLSTATE 08006", &pgconn.PgError{Code: "08006"}, true, "db_connection"},
+		{"SQLSTATE 53300", &pgconn.PgError{Code: "53300"}, true, "db_connection"},
+		{"SQLSTATE 23505 ⛔ 不算", &pgconn.PgError{Code: "23505"}, false, "db_other"},
 		// job 自己的預算用完：呼叫端要先看自己的 ctx，這裡⛔ 不認
-		{"context 逾時 ⛔ 不算", context.DeadlineExceeded, false},
-		{"context 取消 ⛔ 不算", context.Canceled, false},
-		{"解析錯誤 ⛔ 不算", errors.New("twse isin: parse error"), false},
-		{"主檔快照是空的 ⛔ 不算", store.ErrEmptyStockSymbolSnapshot, false},
-		{"前置條件不成立 ⛔ 不算", ErrStockSymbolSyncNotReady, false},
+		{"context 逾時 ⛔ 不算", context.DeadlineExceeded, false, "not_transient"},
+		{"context 取消 ⛔ 不算", context.Canceled, false, "not_transient"},
+		{"解析錯誤 ⛔ 不算", errors.New("twse isin: parse error"), false, "not_transient"},
+		{"主檔快照是空的 ⛔ 不算", store.ErrEmptyStockSymbolSnapshot, false, "not_transient"},
+		{"前置條件不成立 ⛔ 不算", ErrStockSymbolSyncNotReady, false, "not_transient"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := IsTransient(tt.err); got != tt.want {
 				t.Fatalf("IsTransient(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+			if got := TransientCause(tt.err); got != tt.cause {
+				t.Fatalf("TransientCause(%v) = %q, want %q", tt.err, got, tt.cause)
+			}
+			// 原因碼與重試決策出自同一個判定：暫時性的原因碼⛔ 不得出現在非暫時性的錯誤上，反之亦然。
+			if transientCauses[tt.cause] != tt.want {
+				t.Fatalf("原因碼 %q 的暫時性 = %v，與 IsTransient = %v 不一致", tt.cause, transientCauses[tt.cause], tt.want)
 			}
 		})
 	}
@@ -198,5 +214,43 @@ func assertStatusErr(t *testing.T, err error, want string, code int) {
 	}
 	if got, want := IsTransient(err), code >= 500; got != want {
 		t.Fatalf("IsTransient = %v, want %v", got, want)
+	}
+}
+
+// TransientCause 細分連線層錯誤；任何 OpError 仍然都算暫時性（細分只影響原因碼）。
+func TestTransientCauseNetOpDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		err   error
+		cause string
+	}{
+		{"主機不可達", dialErr(os.NewSyscallError("connect", syscall.EHOSTUNREACH)), "host_unreachable"},
+		{"讀取逾時", &net.OpError{Op: "read", Net: "tcp", Err: timeoutErr{}}, "net_timeout"},
+		{"其他連線層錯誤", &net.OpError{Op: "write", Net: "tcp", Err: errors.New("x")}, "net_other"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := TransientCause(tc.err); got != tc.cause {
+				t.Fatalf("TransientCause = %q, want %q", got, tc.cause)
+			}
+			if !IsTransient(tc.err) || !transientCauses[tc.cause] {
+				t.Fatalf("連線層錯誤必須仍是暫時性")
+			}
+		})
+	}
+}
+
+// 原因碼⛔ 不得帶出錯誤原文（只由型別決定，值域封閉）。
+func TestTransientCauseNeverLeaksErrorText(t *testing.T) {
+	secret := "postgres://user:s3cret@db.internal:5432/x?token=abc"
+	for _, err := range []error{
+		errors.New(secret),
+		fmt.Errorf("wrap: %w", dialErr(os.NewSyscallError("connect", syscall.ENETUNREACH))),
+		&url.Error{Op: "Get", URL: secret, Err: timeoutErr{}},
+		newHTTPStatusError(502, "upstream %s: HTTP %d", secret, 502),
+	} {
+		cause := TransientCause(err)
+		if _, ok := transientCauses[cause]; !ok {
+			t.Fatalf("原因碼 %q 不在封閉值域內", cause)
+		}
 	}
 }

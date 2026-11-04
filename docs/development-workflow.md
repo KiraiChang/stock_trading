@@ -722,6 +722,14 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 再看 `GET /scheduler/status` 該 job **不是 `disabled`**——是的話就是變數沒進容器。
 現況也記在 memory 的「排程狀態看容器 env」。
 
+**任何會重新啟動 backend 的部署，都要確認 Redis 有連上**：看**這一次啟動**的 Redis 狀態行（上一筆 `shutdown signal received`
+之後、這次 `server starting` 之前），要是 `redis connected`。⚠️ 它⛔ 不是緊接在 `server starting` 之前——例如 2026-11-03 的正常啟動是
+`redis connected` → `yahoo intraday enabled` → `job retry config` → `scheduler started` → `server starting`。
+是 `redis connect failed, cache disabled` 的話，這次啟動之後 Redis 整個停用（原因見本檔 Redis 一節：backend 只在啟動時連一次），
+訊號⛔ 不會標 degraded，`job_runs` 可能一切正常——只看開關與 job 狀態查不出來。
+**2026-11-02 實例**：I-123～I-126 上 live 時 backend 啟動 3 次都是 `NOAUTH`，開關的三項確認都通過，
+Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
+
 ### 只改 live 的環境變數：只重建 backend，⛔ 不跑 live 的 `deploy.sh`
 
 2026-10-28 晚間兩輪後移時用過的做法（原記於 `todo.md` T-075，已於 2026-11-03 收斂；現況見 `architecture.md`「晚間兩輪的時間」）。

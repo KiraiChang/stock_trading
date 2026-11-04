@@ -1,6 +1,6 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
-> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B ✅ review 通過（2026-11-02）、commit `a1e6075`——review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` 依 T-078（已收斂；現行做法見 [`development-workflow.md`](../development-workflow.md)「Race detector」）補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」）。「九」第 4 步：✅ 2026-11-02 17:39 上 live、三項確認通過（「十二」的「live 部署」）；⚠️ 觀察 11-03 起的 5 個交易日。
+> 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B ✅ review 通過（2026-11-02）、commit `a1e6075`——review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` 依 T-078（已收斂；現行做法見 [`development-workflow.md`](../development-workflow.md)「Race detector」）補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」）。「九」第 4 步：✅ 2026-11-02 17:39 上 live、三項確認通過（「十二」的「live 部署」）；⚠️ 觀察 11-03 起的 5 個交易日。觀察期的追加修正 R3～R5（2026-11-04；第一輪 review 的 2 項已修正）✅ review 通過：「十二」的「觀察期」。⚠️ R4 尚未上 live。
 > 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
@@ -187,6 +187,10 @@
 1. `docker exec stock_trading-backend-1 sh -c 'echo $JOB_RETRY_ENABLED'` 印出 `true`。
 2. backend 的啟動 log 有那一行 Info：開關是開的、截止時刻 08:45、最晚起跑時刻 07:57／08:22／08:37。
 3. live 的 `compose.yml` 有那四個鍵、`deploy.sh` 有 `JOB_RETRY_ENABLED`（`grep -c` 鍵名）。
+4. **這一次啟動**的 Redis 狀態行（上一筆 `shutdown signal received` 之後、這次 `server starting` 之前）是 `redis connected`。
+   ⚠️ 它⛔ 不是緊接在 `server starting` 之前（中間還有 `job retry config`、`scheduler started` 等）。
+   ⛔ 不能是 `redis connect failed, cache disabled`：那代表這次啟動之後 Redis 整個停用，訊號⛔ 不會標 degraded、`job_runs` 可能一切正常。
+   （R5，2026-11-04 追加：2026-11-02 的三次啟動都是這樣，前三項確認都通過卻沒有發現；「十二」的「觀察期」）
 
 **回滾**：live 的 `deploy.sh` 改成 `JOB_RETRY_ENABLED=false` 再部署，確認 `echo` 印出 `false`、啟動 log 顯示關閉。層四與 I-126 要回滾就退回前一個 image。
 
@@ -296,7 +300,7 @@
 1. 使用者確認本計畫（含 D1～D6）。
 2. **階段 A**：`IsTransient` 與 `HTTPStatusError`（五個 client）、層四（I-125）、I-126 → 測試 → review → 使用者 commit。（✅ `7a9f0cb`）
 3. **階段 B**：層一～三、執行所有權與 409、前端訊息、設定與兩份 repo 範本 → 測試、`RACE=1` 與反向驗證 → dev 實測 → review → 使用者 commit。（✅ 2026-11-02 review 通過、commit `a1e6075`；dev 實測、review 修正 R1、R2、`RACE=1` 都通過：「十二」）
-4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。（✅ 2026-11-02 部署、三項確認通過；⚠️ 觀察 11-03 起：「十二」）
+4. 使用者依「3.7」改 live 的兩份設定、重建 image 並部署、完成三項確認；觀察 5 個交易日。（✅ 2026-11-02 部署、三項確認通過；⚠️ 觀察 11-03 起：「十二」；觀察期的追加修正 R3～R5：「十二」的「觀察期」）
 5. 收斂：歸檔（「十」）、I-123～I-126 與 I-122 一起收斂（I-122 的證據到這時才刪）。
 
 ## 十、完成後的歸檔位置
@@ -305,7 +309,8 @@
   公司行動同步的第二輪。
 * `docs/api-reference.md`：`/scheduler/status` 的狀態語意（整輪失敗記 failed 與 `0/0` 的意思、`error` 的重跑文字、`aborted` 的新訊息、
   `running` 的判讀規則與**結束寫入重試全部失敗時的剩餘限制**）；兩個手動端點的 409。
-* `docs/yahoo-intraday-integration.md`：同一輪內的批次重試與整輪預算，以及「之後成功的一輪會補回漏掉的棒、13:30 那輪例外」的結論。
+* `docs/yahoo-intraday-integration.md`：同一輪內的批次重試與整輪預算，以及「之後成功的一輪會補回漏掉的棒、13:30 那輪例外」的結論；
+  層二 log 的 `run_id`、`first_cause`、`cause` 與原因碼的值域（`market.TransientCause`，R4）。
 * `docs/development-workflow.md`：「新增排程開關要改三個地方」補上 `JOB_RETRY_*` 這個實例（2026-11-02 部署時確實踩到：live 的 `compose.yml` 漏了四個鍵，開關靜默失效；見「十二」的「live 部署」）。
 * `issue.md`：I-123、I-124 收斂時把「⛔ 不追查原因、由重跑吸收」與 I-122 的觀察數字歸到 `data-pipeline.md` 的重跑段。
 
@@ -492,3 +497,76 @@ review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` �
   * 查詢一律唯讀：container 只看 `JOB_RETRY_ENABLED` 這一個變數；live 的兩份設定只數鍵名，⛔ 沒有印任何一行內容。
 * **觀察**：11-02 的早上批次在部署之前就跑完了，5 個交易日的觀察從 **11-03 06:30** 的批次起算。看的是「八」的三件事：
   `job_runs` 有沒有「失敗 → 重跑成功」、`intraday` 的失敗輪數有沒有下降、⛔ 沒有重疊執行。觀察完才進「九」第 5 步（I-122～I-126 一起收斂）。
+
+### 觀察期的紀錄與追加修正（2026-11-04；R3～R5 ✅ review 通過）
+
+**觀察紀錄**（截至 11-04 10:17；來源是 `job_runs` 與 backend 的持久化 log 檔，⛔ 不是 `docker logs`）：
+
+| 項目 | 結果 |
+|---|---|
+| 層二（intraday 同一輪內重試） | 11-03 救回 2 次（11:55:29、13:10:25，各重試 1 次）。第一次失敗的原因沒有記下來（R4 之前的程式只記批次範圍與次數） |
+| 層一（整輪重跑）、層三（公司行動第二輪）、層四（結束寫入重試） | ⛔ 沒有 live 觸發樣本：11-03、11-04 三個每日工作都沒有 failed。11-03 公司行動的 00793B 是 HTTP 404（照設計 partial、⛔ 不重試）；11-04 成功處理的是不同分片，⛔ 不代表該檔已補回 |
+| intraday 失敗輪數 | 11-02（部署前）failed 9（DNS 逾時 2、IPv6 不可達 7，都在重試範圍）、partial 41；11-03 的 55 輪、11-04 到 10:17 的 16 輪全部 success |
+| 重疊執行 | 0 |
+| I-125 | 只有 5137（11-02 17:00 的 `sr_analysis`）：17:00:43 收到 shutdown、17:04:33 啟動時回收，訊息是新的中性文字。`age_min` 是距今的時間，⛔ 不代表執行了 40 小時，也⛔ 不能據此判定結束寫入補償失敗。部署後⛔ 沒有新的卡住紀錄 |
+| I-126 | ⛔ 沒有觸發 |
+| 其他 non-success | `candle_gap_detection` 的 10-23 市場級缺漏與 2867 官方無資料：資料驗證問題，⛔ 不能判成暫時性網路故障 |
+
+⚠️ **partial 41 → 0 ⛔ 不是重跑機制的效果**：41 輪 partial 全是訊號的判重／佇列降級，原因是 Redis 認證失敗（`NOAUTH`），
+批次行情重試⛔ 不處理認證。時間線（backend 的持久化 log）：
+
+| 時間（台北） | 事件 |
+|---|---|
+| 11-02 08:52～15:02 | 舊的 backend 寫 Redis 都 `NOAUTH`（`redis hset failed` 627 次、`signal evaluate degraded` 110 次）→ 訊號標 degraded → partial |
+| 11-02 17:04:33、17:30:31、17:39:35 | 部署時 backend 啟動 3 次，每次都是 `redis connect failed, cache disabled`（`NOAUTH`）→ Redis 整個停用 |
+| 11-02 17:39 ～ 11-03 10:58 | **backend 在 Redis 停用的狀態下執行**：訊號⛔ 不進佇列、⛔ 不標 degraded，`job_runs` 看起來一切正常（`development-workflow.md` 記載的已知限制） |
+| 11-03 10:58:56 | backend 重啟，`redis connected` |
+| 11-03 11:24:47 | Redis container 重建 |
+| 11-03 14:27:44 | backend、python-server、python-worker 以同一份 image 重建，`redis connected`；重跑開關仍開（`JOB_RETRY_ENABLED=true`，啟動 log 照舊） |
+
+* 使用者說明（2026-11-04）：11-03 才加上強密碼要求，並做了上表 11-03 的重啟與重建。
+* ⚠️ 與 log 的差異⛔ 未查：`NOAUTH` 代表 Redis 在 11-02 08:52 就已經要求認證、而 backend 沒有通過。11-02 當時的 Redis container 已經重建，它的 log 不在了。
+* 11-02 部署後的三項確認（「3.7」）都通過，卻沒有發現 Redis 停用 → R5。
+* 這個限制 `development-workflow.md` 已有記載，⛔ 不另立 issue。
+
+**觀察期的 review（2026-11-04）**：兩項 P2，經讀 log 與程式碼確認屬實。
+
+* P2-1 觀察報告漏掉重試成功：原本只讀 `docker logs`（只涵蓋目前這個 container），11-03 14:27 重建之前的 2 次救回整段消失。
+  應改用持久化 log；來源讀不到時標「資料不足」，⛔ 不把缺紀錄當成 0 次 → R3。
+* P2-2 救回之後查不到原本的錯誤：重試成功時只記批次範圍與次數 → R4。
+
+**R3 觀察工具**（`~/.cache/stock_trading/obs/`，repo 外，⛔ 不進版控）：
+
+* `filter-retry-log.py` 改讀 backend 的持久化 log 檔（`/app/logs/backend/backend-<UTC 日期>.log`，經 `docker exec … cat`，原始內容⛔ 不落地），
+  範圍是「起日前一天」到「迄日」的 UTC 日期。
+* 白名單補上層二～四、連帶觸發取消、`server starting`／`shutdown signal received` 與 Redis 連線狀態的訊息，欄位補 `run_id`、`first_cause`、`cause` 等。
+  ⛔ 不輸出 `error`；Redis 連線失敗只輸出封閉值域的 `redis_auth`（noauth／wrongpass／other）。
+* 任一來源讀不到、有無法解析的行、或**歷史檔**結尾不完整 → 結束碼 3，`run-obs.sh` 標「資料不足」、最後 rc 3。
+  只有**執行當下 UTC 日期**的那個檔可能還在寫入、允許結尾不完整（⛔ 不是查詢範圍的最後一天）。
+* 另外輸出 `retry_counts.tsv`（依日期與訊息計數）、`log_sources.tsv`（每個來源的狀態），
+  以及 `startups.tsv`：每次 backend 啟動與**那一次啟動區段**（上一次 shutdown 或啟動之後、這次 `server starting` 之前）的 Redis 狀態
+  （connected／failed_noauth／failed_wrongpass／failed_other／disabled_no_addr／missing）。
+* 驗證：對 live（唯讀）重跑 10-31～11-04，結果與手動查的相同（11-03 救回 2 次；`startups.tsv` 是 11-02 三次 `failed_noauth`、11-03 兩次 `connected`）。
+  讀不到的檔、container 不存在、有無法解析的行、歷史檔結尾不完整（含「只查 11-02、11-02 的檔截斷」這個反例）都回 3，
+  今天的檔結尾不完整照常回 0；啟動區段的判定涵蓋「中間隔了幾行」「Redis 那一行在窗口外」「沒有 Redis 那一行（missing）」「WRONGPASS」；
+  `error` 原文⛔ 沒有出現在輸出裡。
+
+**R4 層二的 log 補原因碼與 run_id**（Go）：
+
+* `market` 新增 `TransientCause(err)`：封閉值域、只由型別決定（DNS 逾時、網路不可達、連線被拒、5xx …），⛔ 不含錯誤原文。
+  `IsTransient` 改成同一個判定的另一個輸出，兩者⛔ 不會分歧；`IsTransient` 的判定結果⛔ 不變（既有的測試表原樣通過）。
+* 層二的四種 log（重試成功、重試失敗、預算用完、最後的 `intraday batch fetch failed`）都帶 `run_id`；
+  `first_cause` 是第一次失敗的原因碼，`cause` 是當次的原因碼。
+* 測試：原因碼與 `IsTransient` 一致、值域封閉、原文⛔ 不外洩；重試一次成功、跨次數保留 `first_cause`、兩次都失敗、永久錯誤四種情境的 log 欄位。
+  `backend/scripts/test.sh` 全部通過。
+* ⚠️ 只改 log，⛔ 不改重試行為。要上 live 才有效果；建議等 5 個交易日的觀察期結束（11-09 之後）再部署，避免觀察期中途換版（待使用者決定）。
+
+**R5 部署確認補 Redis**：「3.7」的部署後確認加第 4 項；`development-workflow.md`「部署後的確認方式」也補上同一條。
+
+**R3～R5 的第一輪 review（2026-11-04）**：R4 未發現阻擋性缺陷；另外兩項經重現與讀 log 確認屬實，已修正：
+
+* P2 R3 會把歷史檔的結尾截斷判成完整來源：原本用「查詢範圍的最後一天」判定檔案仍在寫入，只查 11-02 時，11-02 的檔截斷會被丟掉一筆事件、卻回 rc 0。
+  → 改成只認執行當下的 UTC 日期，補上這個反例（上面的「驗證」）。完整來源中找到的 2 次救回不受影響。
+* P3 R5 要求 Redis 狀態是 `server starting` 的「前一筆」：實際的健康啟動中間還隔著 `yahoo intraday enabled`、`job retry config`、`scheduler started`，
+  照那個寫法會把正常啟動誤判為失敗。→ 改成核對同一次啟動區段的 Redis 狀態行；「3.7」、`development-workflow.md` 與觀察工具的提示一起改，
+  工具直接輸出 `startups.tsv`，⛔ 不再靠人工比對前後筆。

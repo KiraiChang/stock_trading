@@ -714,12 +714,14 @@ func (s *Scheduler) runIntradayBatch() {
 		batch := symbols[start:end]
 		// 每一批的**第一次**抓取⛔ 不受重試預算限制（與導入重試之前相同）。
 		if _, err := s.fetcher.FetchAndStoreIntradayBatch(ctx, batch); err != nil {
-			if s.retryIntradayBatch(retryCtx, start, batch, err) {
+			if s.retryIntradayBatch(retryCtx, runID, start, batch, err) {
 				continue
 			}
 			// 批次請求失敗（例如 Yahoo 被限流/封鎖）：記錄後續跑其他批次。
 			// 未來的 Yahoo→FinMind fallback（T-008/T-031）會在此改為回退補資料。
-			s.log.Warn("intraday batch fetch failed", zap.Int("from", start), zap.Int("size", len(batch)), zap.Error(err))
+			// `cause` 是**第一次**失敗的安全原因碼（err 是第一次抓取的錯誤）。
+			s.log.Warn("intraday batch fetch failed", zap.Uint64("run_id", runID), zap.Int("from", start),
+				zap.Int("size", len(batch)), zap.String("cause", market.TransientCause(err)), zap.Error(err))
 			// 整批失敗只知道筆數不知道是哪幾檔；逐檔的寫入失敗更是完全看不到
 			// （見 issue.md I-103）。
 			tally.addOpaqueFetchFailures(len(batch))
@@ -751,19 +753,26 @@ func (s *Scheduler) intradayRetryContext(ctx context.Context) (context.Context, 
 // retryIntradayBatch 是層二：批次抓取的暫時性失敗在同一輪內重試。回傳 true 代表重試成功，
 // 這一批⛔ 不計入失敗；永久錯誤（4xx、解析錯誤）⛔ 不重試。
 //
+// ⚠️ **每一筆 log 都帶 `run_id` 與 `first_cause`**（觀察期的追加修正，I-123～I-126 計畫書「十二」）：
+// 重試成功時第一次的錯誤⛔ 不會再出現在任何地方，少了它只證明得了「救回幾次」，
+// 看不出救回的是 DNS、連線還是其他暫時性錯誤。原因碼來自 market.TransientCause（封閉值域、⛔ 不含原文）；
+// 每次重試自己的錯誤記在 `cause`。
+//
 // ⚠️ ⛔ 不保證兩輪⛔ 不重疊：批次多、第一次抓取、評估與結束寫入都還要時間（與導入前相同），
 // 重試只讓一輪最多晚約 120 秒結束重試的部分。
-func (s *Scheduler) retryIntradayBatch(retryCtx context.Context, from int, batch []string, err error) bool {
+func (s *Scheduler) retryIntradayBatch(retryCtx context.Context, runID uint64, from int, batch []string, err error) bool {
 	if !s.retry.enabled() {
 		return false
 	}
+	firstCause := market.TransientCause(err)
 	for attempt, wait := range intradayRetryWaits {
 		if !market.IsTransient(err) {
 			return false
 		}
 		if s.retry.wait(retryCtx, wait) != nil {
 			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
-				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt))
+				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt),
+				zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)))
 			return false
 		}
 		_, err = s.fetcher.FetchAndStoreIntradayBatch(retryCtx, batch)
@@ -773,16 +782,19 @@ func (s *Scheduler) retryIntradayBatch(retryCtx context.Context, from int, batch
 		//（其他原因的逐檔寫入失敗是 issue.md I-103 的範圍，這裡⛔ 不擴大）。
 		if retryCtx.Err() != nil {
 			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
-				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1), zap.Error(err))
+				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
+				zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)), zap.Error(err))
 			return false
 		}
 		if err == nil {
 			s.log.Info("intraday batch fetch succeeded after retry",
-				zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1))
+				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
+				zap.String("first_cause", firstCause))
 			return true
 		}
 		s.log.Warn("intraday batch retry failed",
-			zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1), zap.Error(err))
+			zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
+			zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)), zap.Error(err))
 	}
 	return false
 }

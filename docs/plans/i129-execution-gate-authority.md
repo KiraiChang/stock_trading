@@ -1,6 +1,6 @@
 # I-129 計畫 v4：進場許可的 RR 判斷改由 execution gate 決定，setup 不合格最多試單
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 5 步（commit A 已改好、待 commit）。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 7 步 ✅ review 通過（commit B），下一步是第 8 步（commit A ✅ `51cafe9`；實作備註見「十」）。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -318,9 +318,10 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 3. ✅ v3：依第二輪 review 修訂。
 4. ✅ v4（本版）：依第三輪 review 修訂。✅ 2026-11-04 使用者確認（含「6.5」的判準），`145fe58`。
 5. **commit A**：改 `evaluation.py` 與 `replay_bundle` 的欄位常數（「4.4」）、補單元測試，把「6.5」的欄位檢查接進 `scripts/smoke-replay-offline.sh`（合成 bundle 沒有有效決策列時一併調整 `make_smoke_bundle.py`），跑 `python/scripts/test.sh`。由使用者 commit 到分支；commit 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝A）。
-   * ⚠️ 2026-11-04 已改好、待使用者 commit。`python/scripts/test.sh` 通過（1756 passed、1 skipped；shell 測試 FAIL 0）；commit 前先用未 commit 的工作樹跑一次 smoke（patch 帶入改動）：通過，35 列都帶有欄位、decision 可用 35 列，`make_smoke_bundle.py` ⛔ 不需要調整。commit 之後的正式 smoke（HEAD＝A）還沒跑。
-6. 先寫「6.1」的測試，確認在 commit A 的程式上會紅。
-7. 改 `decision_engine.py`（「4.2」），更新「6.2」的既有測試，跑 `python/scripts/test.sh`。改前端（「4.3」），跑前端測試。由使用者 commit 成 **commit B**。
+   * ✅ 2026-11-04 review 通過、commit `51cafe9`。`python/scripts/test.sh` 通過（1756 passed、1 skipped；shell 測試 FAIL 0）；`make_smoke_bundle.py` ⛔ 不需要調整。
+   * ✅ 正式 smoke（乾淨的工作樹、tooling patch 是空的）通過：35 列都帶有量測欄位、decision 可用 35 列。執行時 HEAD 是 `a905c94`（I-123～I-126 的 R4、R5，只改 Go 與文件），python 與 smoke 腳本和 `51cafe9` 相同。
+6. 先寫「6.1」的測試，確認在 commit A 的程式上會紅。（✅ 2026-11-04：39 個新測試裡 32 個紅、原因都是改前的行為；「十」）
+7. 改 `decision_engine.py`（「4.2」），更新「6.2」的既有測試，跑 `python/scripts/test.sh`。改前端（「4.3」），跑前端測試。由使用者 commit 成 **commit B**。（✅ 2026-11-04 review 通過，一輪 review 修正 2 項；「十」）
 8. 寫「6.5」的逐列比較工具（附測試）；commit B 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝B）。比較工具若在 commit B 之後才寫，要另外 commit，⛔ 不能讓 B 的工作樹不乾淨地跑 smoke。
 9. 使用者依序跑兩趟 Stage 1，再跑比較工具。Claude 依判準判讀，寫進下一版；不通過或證據不足就照「4.5」退回。
 10. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。
@@ -340,6 +341,52 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 * `sr-zone-scoring.md`「Decision Replay 的診斷欄位」：「4.4」的量測欄位（validation-only）。
 * 程式、測試與腳本裡指向 I-129 的註解與錯誤訊息（`decision_engine`、`evaluation`、`replay_bundle`、smoke 腳本與測試；收斂時全域搜尋 `I-129`），改指主題文件。
 * `sr-zone-scoring.md` 裡帶行號的 `decision_engine` 引用刪除時，同步減 `scripts/doc-refs-legacy.txt` 的額度。
+
+## 十、實作備註
+
+### 第 6 步：先寫測試（2026-11-04）
+
+* `test_decision_engine.py` 新增 I-129 一組：重現表（setup 1.4／1.7、壓力 122）、對照組 2.8、D3 三條規則、D2、D4、
+  setup 合格且市價 target 未知維持現狀、限價 target 未知、版本字串，以及不變式的掃描
+  （setup ∈ {None, 1.0, 1.4, 1.7, 1.9, 2.8} × 壓力 ∈ {無, 112, 118, 122}，再加 5 組限價）。
+  `_continuation_full_entry_case()` 多一個 `setup_rr` 參數，`resistance_low=None` 時不放壓力。
+* 在 commit A 的程式上：39 個裡 32 個紅，原因都是改前的行為（setup 不合格時進場改走限價 100、`rr_gate` 沒有 `setup_qualified`、
+  RR 不合格輸出 BLOCKED、setup 缺值時 execution gate 仍判合格、版本字串仍是 p4、不變式不成立）；
+  fixture 的前提（主交易區是 support、⛔ 不被擋路壓力搶先）都成立。其餘 7 個是 setup 已合格的掃描組合，改前改後都應該通過。
+
+### 第 7 步：改程式（2026-11-04；✅ review 通過）
+
+照「4.2」實作；下面是計畫沒有寫到、實作時定下的細節：
+
+* **封頂 helper 的 reason code**：主 gate 不合格的 reason 與 D3 的 `SETUP_RR_BELOW_MINIMUM` **一律附上**（即使狀態本來就是 WAIT／PROBE，
+  理由仍然看得到）；secondary 的 `RR_BELOW_FULL_ENTRY` 只在真的往下封頂時附上（T-055 的既有行為）。
+  semantic 用 `_cap_semantic_by_execution_gate()`（回傳新的 dict、⛔ 不就地改），final 在 `_final_entry_permission()` 呼叫同一個 helper。
+* **D2 的實作**：setup RR 缺值時一律走 `ZONE_STATISTIC` 退回（`actual_rr` 維持 None），所以⛔ 不會因為 executable 算得出來就掛上
+  「未達完整買進門檻」的 note。
+* **risk note 的校正**：「主交易區風險報酬比不足。」只在 gate 的判定是 `ZONE_STATISTIC`＋`RR_INSUFFICIENT` 時保留（setup 1.7 這類
+  原本沒有這句的也會補上）；executable 可量化時由 execution gate 的 note 說明，⛔ 不兩句並陳。D3 補「zone 歷史統計的風險報酬比未達門檻，
+  最多觀察性試探。」；`SETUP_FAIL_MAX_ENTRY_STATE` 退回成 WAIT 時，這句自動換成「…先等待確認。」。
+* **semantic 的結構許可與對外版本分開**：`build_decision_summary()` 先算不看 RR 的 semantic，給 `_entry_executability()` 選進場價，
+  再把套過 execution gate 的版本傳給 `_decision_derived_view(semantic_pipeline=…)`。
+* **既有測試**：「6.2」列的 5 項照新規格改寫；另外 `test_entry_track_daily_confirmation_still_backfills_derived_reasons` 只拿掉
+  `rr_gate` 參數（`_daily_confirmation()` 的簽名改了，斷言⛔ 不變）。「6.3」列的測試原樣通過。
+* **前端**：`derivedReasonText` 補 7 個 RR 類標籤、`SRRRGate` 補 `setup_qualified`；`srZones.test.ts` 的 I-074 fixture 依 Python 的真實輸出
+  重新取樣（I-129 之後 setup 不合格的 CONTINUATION 是 `PROBE_ALLOWED`＋`SETUP_RR_BELOW_MINIMUM`，⛔ 不再是 `ENTRY_ALLOWED`），
+  並補標籤與欄位的測試。build 產出的 `backend/internal/ui/dist` 依設計要進版控，要一起放進 commit B。
+* **文件引用**：程式行數改變讓 `todo.md` 一處 `decision_engine.py:<行號>` 漂移，改成不帶行號的 `_event_state_types()`（它不在 legacy 額度內）。
+* **驗證**：`python/scripts/test.sh` 1795 passed、1 skipped，shell 測試 FAIL 0；`frontend/scripts/test.sh` 的 svelte-check 0 errors、
+  vitest 161 passed、build 成功（結束碼 1 只是在提醒 dist 尚未 `git add`）；`backend/scripts/test.sh` 全部通過（Go 程式沒改，用重新 build 的 dist 跑 vet、test、build）。
+
+### 第 6、7 步的 review（2026-11-04）：兩項 P2，經重現確認屬實，已修正
+
+* **P2-1 缺 setup RR 時，已知的 target 被標成未知**：`ZONE_STATISTIC` 退回寫死 `target_known=False`。setup 缺值、壓力 122 時
+  `rr_context.target_known=True`，`rr_gate.target_known` 卻是 `False`，失敗原因分析會把「缺 zone 統計」誤讀成「沒有目標」。
+  → 退回改成照實反映 `rr_context.target_known`；決策⛔ 不變（仍是 WAIT＋`RR_UNAVAILABLE`）。D2 的測試補上兩邊一致的斷言。
+* **P2-2 D4 的測試驗不到 `rr >= 2.0` 那道防線**：原 fixture 的 event-aware relevance 只有 70 左右（< 75），setup 2.8 也只會是 BuySmall，
+  拿掉防線測試照樣通過。→ 改用 `strong` 其餘條件全部成立的 fixture（前一天的 reclaim 事件帶 `zone_ref`、support 的品質提高，
+  setup 1.9 的 relevance 也 ≥ 75），斷言 2.8 → Buy、1.9 → BuySmall，並先斷言各項前提。
+* **反向驗證**：用改掉程式的複本各跑一次——拿掉 `rr >= 2.0` 時 1.9 升成 Buy、D4 測試失敗；`target_known` 改回寫死 `False` 時 D2 測試失敗。
+* 修正後 `python/scripts/test.sh` 1796 passed、1 skipped，shell 測試 FAIL 0。前端與 Go ⛔ 沒有再改。
 
 ## 修訂紀錄
 

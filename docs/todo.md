@@ -2315,7 +2315,7 @@ version control（`A` 狀態）。若未來常發生類似問題，應補一個�
 type 永遠相同，覆寫從來沒有真的遺失過資訊。
 
 這一點很重要，因為 `root_event_type` **確實被 decision 消費**
-（`decision_engine.py:1162-1163` 的 `_event_state_types` 把它併進事件類型集合，
+（`decision_engine.py` 的 `_event_state_types()` 把它併進事件類型集合，
 而該集合直接決定 `event_signal` → `lifecycle_phase`。
 ⚠️ **2026-09-17 訂正**：本句原本還列了 `decision_engine.py` 的 `_event_state_max_age`（行號寫 877），
 但 T-044 把 lifecycle 抽離後 `decision_engine.py` 已**完全不使用 max_age**——

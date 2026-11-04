@@ -408,7 +408,10 @@ def test_confirmed_buy_small_is_small_entry():
 
     assert ds["action"] == "Hold"
     assert ds["entry_action_state"] == "SMALL_ENTRY"
-    assert ds["final_entry_permission"]["state"] == "BLOCKED"
+    # I-129 D1：RR 不合格（setup 1.8 < TIER_1 的 2.0，限價、target 未知 → 沿用 zone 統計）
+    # 一律等待確認，⛔ 不是 BLOCKED；理由要留在 final 的 reason codes 裡。
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert "RR_INSUFFICIENT" in ds["final_entry_permission"]["reason_codes"]
 
 
 def test_high_volatility_downgrades_buy_to_buy_small():
@@ -538,9 +541,12 @@ def test_rr_below_hard_gate_stays_watch_even_with_high_score_and_ev():
     assert ds["action"] == "Hold"
     assert ds["rr_gate"]["qualified"] is False
     assert ds["rr_gate"]["reason_code"] == "RR_INSUFFICIENT"
+    assert ds["rr_gate"]["gate_basis"] == "ZONE_STATISTIC"
     assert ds["best_trade_zone"] is None
-    assert ds["daily_confirmation"]["state"] == "BLOCKED"
-    assert ds["final_entry_permission"]["state"] == "BLOCKED"
+    # I-129：daily confirmation ⛔ 不看 RR（只判價格事實）；RR 不合格一律等待確認（D1），⛔ 不是 BLOCKED。
+    assert ds["daily_confirmation"]["state"] != "BLOCKED"
+    assert ds["final_entry_permission"]["state"] == "WAIT_CONFIRMATION"
+    assert "RR_INSUFFICIENT" in ds["final_entry_permission"]["reason_codes"]
     assert ds["price_path"]["path_state"] == "RR_BLOCKED"
     assert any("風險報酬比不足" in note for note in ds["risk_notes"])
 
@@ -739,7 +745,7 @@ def test_rr_qualified_probe_waits_for_price_follow_through():
     assert ds["rr_gate"]["reason_code"] == "EXECUTION_RR_UNAVAILABLE"
     assert ds["rr_gate"]["target_known"] is False
     assert ds["daily_price_action"]["price_follow_through_state"] == "NO_PRICE_FOLLOW_THROUGH"
-    assert ds["decision_derived_view"]["version"] == "decision-derived-view-p2"
+    assert ds["decision_derived_view"]["version"] == "decision-derived-view-p3"
     assert "WAIT_PRICE_FOLLOW_THROUGH" in ds["decision_derived_view"]["final_entry_reason_codes"]
     assert ds["decision_derived_view"]["path_gate_state"] == "WAIT_PRICE_FOLLOW_THROUGH"
     assert ds["decision_derived_view"]["position_gate_state"] == "HOLD"
@@ -1064,24 +1070,24 @@ def test_near_resistance_blocks_probe_entry_and_best_trade_zone():
 
 
 def test_hard_block_daily_confirmation_does_not_backfill_derived_reasons():
-    # 硬性阻擋（此處 RR 不過 → BLOCKED）不得回填 derived daily reasons，否則會產生
+    # 硬性阻擋（此處收盤跌破支撐 → INVALIDATED）不得回填 derived daily reasons，否則會產生
     # 「禁止進場」卻同時掛「等待價格延續」的矛盾標籤（I-002 要消除的訊號不一致）。
+    # ⚠️ 原本用「RR 不過 → BLOCKED」當硬阻擋；I-129 之後 daily confirmation ⛔ 不看 RR，改用結構事實。
     zone = _zone(low=98.0, high=100.0)
     derived_view = {"daily_reason_codes": ["WAIT_PRICE_FOLLOW_THROUGH", "NO_MOMENTUM_CONFIRMATION"]}
 
     daily = _daily_confirmation(
         primary_zone=zone,
-        primary_interaction=None,
+        primary_interaction={"closed_below": True},
         daily_price_action={},
-        rr_gate={"qualified": False, "reason_code": "RR_NOT_QUALIFIED"},
         derived_view=derived_view,
         entry_action_state="PROBE_ENTRY",
         daily_candidate_zones=[],
-        current_price=99.0,
+        current_price=97.0,
     )
 
-    assert daily["state"] == "BLOCKED"
-    assert daily["reason_codes"] == ["RR_NOT_QUALIFIED"]
+    assert daily["state"] == "INVALIDATED"
+    assert daily["reason_codes"] == ["SUPPORT_CLOSED_BELOW"]
     assert "WAIT_PRICE_FOLLOW_THROUGH" not in daily["reason_codes"]
     assert "NO_MOMENTUM_CONFIRMATION" not in daily["reason_codes"]
 
@@ -1096,7 +1102,6 @@ def test_entry_track_daily_confirmation_still_backfills_derived_reasons():
         primary_zone=zone,
         primary_interaction=None,
         daily_price_action={},
-        rr_gate={"qualified": True},
         derived_view=derived_view,
         entry_action_state="PROBE_ENTRY",
         daily_candidate_zones=[],
@@ -1179,7 +1184,9 @@ def test_derived_position_gate_rr_blocked_support_defense():
     assert dv["path_gate_state"] == "RR_BLOCKED"
     assert dv["path_reason_codes"] == ["RR_NOT_QUALIFIED"]
     assert dv["position_gate_state"] == "WATCH"
-    assert dv["semantic_pipeline"]["entry_permission_state"] == "BLOCKED"
+    # I-129：semantic pipeline 只輸出結構許可，⛔ 不再因 RR 變成 BLOCKED；RR 的封頂由
+    # `build_decision_summary` 在 execution gate 算完之後套上（`_cap_semantic_by_execution_gate`）。
+    assert dv["semantic_pipeline"]["entry_permission_state"] == "WAIT_CONFIRMATION"
 
 
 def test_semantic_pipeline_market_action_avoid_blocks_action_and_entry():
@@ -2404,21 +2411,27 @@ def test_full_entry_gate_failure_is_reachable_with_capped_target():
     assert ds["action"] != "Buy"
 
 
-def _continuation_full_entry_case(resistance_low: float) -> dict:
+def _continuation_full_entry_case(resistance_low: float | None, setup_rr: float | None = 2.8) -> dict:
     """CONTINUATION 路徑（`test_semantic_pipeline_breakout_continuation_entry_allowed` 的形狀），
     加上一道 entry 之上的壓力，用它的 `price_low` 當 target 封頂。
 
     support 用 **TIER_3**（probe 門檻 1.8）——TIER_1 的 `_minimum_rr` 剛好是 2.0，
     與 full entry 門檻重合，probe 和 secondary 會同進同出，測不出兩層的差別。
     entry=105.0（市價）、stop 距離固定，所以 target 一動 RR 就跟著動。
+
+    `setup_rr` 是 support 的 zone 歷史統計（I-129 的重現表用 1.4／1.7／2.8）；
+    `resistance_low=None` 時不放壓力，市價 target 未知。
     """
     zones = [
-        _zone(low=98.0, high=100.0, risk_reward_ratio=2.8, confidence=0.78, trading_score=88.0,
+        _zone(low=98.0, high=100.0, risk_reward_ratio=setup_rr, confidence=0.78, trading_score=88.0,
               tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期"),
-        _zone(role=ZoneType.RESISTANCE.value, low=resistance_low, high=resistance_low + 4.0,
-              tier=ZoneTier.TIER_1_MAIN_STRUCTURE.value, tier_label="主結構",
-              confidence=0.7, risk_reward_ratio=2.4),
     ]
+    if resistance_low is not None:
+        zones.append(
+            _zone(role=ZoneType.RESISTANCE.value, low=resistance_low, high=resistance_low + 4.0,
+                  tier=ZoneTier.TIER_1_MAIN_STRUCTURE.value, tier_label="主結構",
+                  confidence=0.7, risk_reward_ratio=2.4),
+        )
     previous = [{
         "type": "INTRADAY_RECLAIM", "event_family": "SUPPORT_RECLAIM", "event_scope": "ZONE",
         "zone_key": "SUPPORT:98.0000:100.0000", "root_event_type": "INTRADAY_RECLAIM",
@@ -2506,6 +2519,251 @@ def test_secondary_gate_not_qualified_when_no_statistic_exists():
     assert gate["qualified"] is False
     assert gate["reason_code"] == "RR_UNAVAILABLE"
     assert gate["secondary_gate"]["qualified"] is False, "沒有統計可比時不得標成通過"
+
+
+# ── I-129：進場許可的 RR 判斷看 execution gate，setup 不合格最多試單 ─────────────
+# （見 docs/issue.md I-129 與計畫書「二」的 D1～D4、「6.1」）
+#
+# 改前：setup RR 不合格時 semantic 提前變成 BLOCKED → entry 改走限價（zone 上緣 100）
+# → execution gate 算出 (122−100)/(100−98)=11.0、兩層都過，對外卻是 BLOCKED，沒有欄位說得出原因。
+# 改後：entry 照結構走市價 105，executable=(122−105)/(105−98)≈2.43；setup 不合格只封頂到 PROBE。
+
+RR_REASON_CODES = {
+    "RR_INSUFFICIENT", "RR_UNAVAILABLE", "NO_PRIMARY_ZONE", "RR_NOT_QUALIFIED",
+    "EXECUTION_RR_INSUFFICIENT", "EXECUTION_RR_UNAVAILABLE", "RR_BELOW_FULL_ENTRY", "SETUP_RR_BELOW_MINIMUM",
+}
+D3_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
+
+
+def _semantic(ds: dict) -> dict:
+    return ds["decision_derived_view"]["semantic_pipeline"]
+
+
+@pytest.mark.parametrize("setup_rr", [1.4, 1.7])
+def test_i129_setup_fail_executable_qualified_caps_at_probe(setup_rr):
+    """原 T-065 的重現表：setup 1.4／1.7、壓力 122 → 市價 entry、executable≈2.43，最多試單（D3）。"""
+    ds = _continuation_full_entry_case(122.0, setup_rr=setup_rr)
+    ctx, gate, semantic = ds["rr_context"], ds["rr_gate"], _semantic(ds)
+
+    assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value, "fixture 前提：主交易區是 support"
+    assert semantic["lifecycle_phase"] == "CONTINUATION"
+    # entry 照結構走市價，⛔ 不因 setup RR 改走限價（循環已解開）
+    assert ctx["price_basis"] == "CONTINUATION_MARKET_PRICE"
+    assert ctx["entry_price"] == 105.0
+    assert ctx["executable_rr"] == pytest.approx(17.0 / 7.0)
+    assert gate["gate_basis"] == "ENTRY_STOP_TARGET"
+    assert gate["qualified"] is True
+    assert gate["setup_qualified"] is False
+    assert gate["secondary_gate"]["qualified"] is True
+    # semantic 與 final 同進同出：封頂到 PROBE，理由是 setup 不合格
+    assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
+    assert "SETUP_RR_BELOW_MINIMUM" in semantic["reason_codes"]
+    permission = ds["final_entry_permission"]
+    assert permission["state"] == "PROBE_ALLOWED"
+    assert "SETUP_RR_BELOW_MINIMUM" in permission["reason_codes"]
+    assert ds["action"] == "BuySmall"
+    assert ds["market_action"] == "BUY_SMALL"
+    # risk note 說得出原因，而且⛔ 不再同時說「風險報酬比不足」
+    assert D3_NOTE in ds["risk_notes"]
+    assert "主交易區風險報酬比不足。" not in ds["risk_notes"]
+
+
+def test_i129_setup_qualified_control_group_unchanged():
+    """對照組：setup 2.8 → ENTRY_ALLOWED，⛔ 不帶 setup 類的封頂。"""
+    ds = _continuation_full_entry_case(122.0, setup_rr=2.8)
+    gate = ds["rr_gate"]
+
+    assert gate["setup_qualified"] is True
+    assert gate["qualified"] is True
+    assert _semantic(ds)["entry_permission_state"] == "ENTRY_ALLOWED"
+    assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
+    assert "SETUP_RR_BELOW_MINIMUM" not in ds["final_entry_permission"]["reason_codes"]
+    assert D3_NOTE not in ds["risk_notes"]
+
+
+def test_i129_executable_quantified_but_insufficient_waits():
+    """D3 第二條：executable 可量化但 < 門檻 → WAIT＋`EXECUTION_RR_INSUFFICIENT`（⛔ 不是 BLOCKED）。
+
+    壓力 112：executable=(112−105)/7=1.0 < 1.8；距離 7 大於擋路門檻 2，⛔ 不會被擋路壓力搶先。
+    """
+    ds = _continuation_full_entry_case(112.0, setup_rr=1.4)
+    gate, semantic, permission = ds["rr_gate"], _semantic(ds), ds["final_entry_permission"]
+
+    assert ds["primary_zone"]["role"] == ZoneType.SUPPORT.value, "fixture 前提：主交易區是 support"
+    assert ds["entry_blocking_zone"]["blocked"] is False, "fixture 前提：⛔ 不被擋路壓力搶先"
+    assert gate["gate_basis"] == "ENTRY_STOP_TARGET"
+    assert gate["qualified"] is False
+    assert gate["reason_code"] == "EXECUTION_RR_INSUFFICIENT"
+    assert semantic["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert "EXECUTION_RR_INSUFFICIENT" in semantic["reason_codes"]
+    assert permission["state"] == "WAIT_CONFIRMATION"
+    assert "EXECUTION_RR_INSUFFICIENT" in permission["reason_codes"]
+    assert ds["decision_derived_view"]["path_gate_state"] == "RR_BLOCKED"
+    assert ds["action"] == "Hold"
+    assert any("RR 不足" in note for note in ds["risk_notes"])
+
+
+def test_i129_market_entry_without_target_setup_fail_falls_back_to_zone_statistic():
+    """D3 第三條（review P1-1 的端到端測試）：市價、target 未知、setup 不合格 →
+    沿用 setup 判定（`ZONE_STATISTIC`）→ WAIT＋`RR_INSUFFICIENT`，⛔ 不得因 target 未知就全放行。"""
+    ds = _continuation_full_entry_case(None, setup_rr=1.4)
+    gate, permission = ds["rr_gate"], ds["final_entry_permission"]
+
+    assert ds["rr_context"]["price_basis"] == "CONTINUATION_MARKET_PRICE"
+    assert ds["rr_context"]["executable_rr"] is None
+    assert gate["gate_basis"] == "ZONE_STATISTIC"
+    assert gate["qualified"] is False
+    assert gate["reason_code"] == "RR_INSUFFICIENT"
+    assert gate["setup_qualified"] is False
+    assert _semantic(ds)["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert permission["state"] == "WAIT_CONFIRMATION"
+    assert "RR_INSUFFICIENT" in permission["reason_codes"]
+
+
+def test_i129_market_entry_without_target_setup_qualified_unchanged():
+    """setup 合格、市價、target 未知 → 維持現狀（`qualified=true`、`EXECUTION_RR_UNAVAILABLE`）。"""
+    ds = _continuation_full_entry_case(None, setup_rr=2.8)
+    gate = ds["rr_gate"]
+
+    assert gate["qualified"] is True
+    assert gate["reason_code"] == "EXECUTION_RR_UNAVAILABLE"
+    assert gate["gate_basis"] == "MARKET_ENTRY_TARGET_UNAVAILABLE"
+    assert gate["setup_qualified"] is True
+
+
+def test_i129_limit_entry_without_target_setup_fail_waits_not_blocks():
+    """限價、target 未知、setup 不合格 → WAIT＋`RR_INSUFFICIENT`，path 是 `RR_BLOCKED`（D1）；
+    daily confirmation ⛔ 不再因 RR 變成 BLOCKED。"""
+    ds = _summary([_zone(risk_reward_ratio=1.4)])
+    gate, permission = ds["rr_gate"], ds["final_entry_permission"]
+
+    assert ds["rr_context"]["price_basis"] == "PRIMARY_SUPPORT_UPPER"
+    assert gate["gate_basis"] == "ZONE_STATISTIC"
+    assert gate["qualified"] is False
+    assert gate["reason_code"] == "RR_INSUFFICIENT"
+    assert permission["state"] == "WAIT_CONFIRMATION"
+    assert "RR_INSUFFICIENT" in permission["reason_codes"]
+    assert _semantic(ds)["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert ds["decision_derived_view"]["path_gate_state"] == "RR_BLOCKED"
+    assert ds["daily_confirmation"]["state"] != "BLOCKED"
+    assert ds["action"] == "Hold"
+
+
+def test_i129_missing_setup_rr_stays_unavailable_even_with_executable_rr():
+    """D2：setup RR 缺值時，即使 executable 算得出來也⛔ 不放行 → WAIT＋`RR_UNAVAILABLE`。"""
+    ds = _continuation_full_entry_case(122.0, setup_rr=None)
+    gate, permission = ds["rr_gate"], ds["final_entry_permission"]
+
+    assert ds["rr_context"]["executable_rr"] is not None, "fixture 前提：executable 算得出來"
+    assert gate["qualified"] is False
+    assert gate["reason_code"] == "RR_UNAVAILABLE"
+    assert gate["setup_qualified"] is False
+    assert gate["secondary_gate"]["qualified"] is False
+    # 失敗原因是「缺 zone 統計」，⛔ 不是「沒有目標」：target 可用性要照實輸出（第 6、7 步 review P2-1）
+    assert ds["rr_context"]["target_known"] is True
+    assert gate["target_known"] is True
+    assert _semantic(ds)["entry_permission_state"] == "WAIT_CONFIRMATION"
+    assert permission["state"] == "WAIT_CONFIRMATION"
+    assert "RR_UNAVAILABLE" in permission["reason_codes"]
+    assert ds["action"] == "Hold"
+
+
+def _strong_continuation_case(setup_rr: float) -> tuple[dict, ZoneScore]:
+    """`strong` 除了 setup RR 之外的條件**全部成立**的 CONTINUATION（D4 用）。
+
+    與 `_continuation_full_entry_case` 的差別：前一天的 reclaim 事件帶 `zone_ref`（同一個支撐帶，
+    event-aware relevance 加 8 分），support 的品質提高（trading score 95、confidence 0.9），
+    讓 setup 1.9 的 relevance 也穩定 ≥ 75。⚠️ 少了這兩項，2.8 也只會是 BuySmall，
+    測試就驗不到 `rr >= 2.0` 那道防線（第 6、7 步 review P2-2）。
+    """
+    support = _zone(low=98.0, high=100.0, risk_reward_ratio=setup_rr, confidence=0.9, trading_score=95.0,
+                    tier=ZoneTier.TIER_3_SHORT_TERM.value, tier_label="短期")
+    zones = [
+        support,
+        _zone(role=ZoneType.RESISTANCE.value, low=122.0, high=126.0,
+              tier=ZoneTier.TIER_1_MAIN_STRUCTURE.value, tier_label="主結構",
+              confidence=0.7, risk_reward_ratio=2.4),
+    ]
+    previous = [{
+        "type": "INTRADAY_RECLAIM", "event_family": "SUPPORT_RECLAIM", "event_scope": "ZONE",
+        "zone_key": "SUPPORT:98.0000:100.0000", "zone_ref": {"price_low": 98.0, "price_high": 100.0},
+        "root_event_type": "INTRADAY_RECLAIM", "latest_event_type": "INTRADAY_RECLAIM",
+        "direction": "BULLISH", "state": "ACTIVE", "active": True, "age_bars": 1, "expires_after_bars": 3,
+        "reason_codes": ["INTRADAY_RECLAIM"],
+    }]
+    ds = _summary(
+        zones, current_price=105.0, candle_high=106.0, candle_low=102.0,
+        candle_close=105.0, previous_candle_close=102.0, previous_event_states=previous,
+    )
+    return ds, support
+
+
+@pytest.mark.parametrize("setup_rr, expected_action", [(2.8, "Buy"), (1.9, "BuySmall")])
+def test_i129_strong_keeps_setup_condition_no_buy_upgrade(setup_rr, expected_action):
+    """D4：`strong` 的 setup RR ≥ 2.0 保留。其餘 strong 條件都成立時，2.8 → Buy、1.9（TIER_3，已合格）→ BuySmall。
+
+    ⚠️ 拿掉 `rr >= 2.0` 的話 1.9 會升成 Buy，這條就會失敗（已用改掉防線的複本反向驗證過）。
+    """
+    from ..decision_engine import _distance_pct_to_zone, _entry_relevance_score_with_events
+
+    ds, support = _strong_continuation_case(setup_rr)
+    active_events = list(ds["event_state_summary"].get("active") or [])
+    # 前提：除了 setup RR，strong 的其他條件全部成立（少一項，這條測試就驗不到 D4）
+    assert _entry_relevance_score_with_events(support, 105.0, active_events) >= 75
+    assert support.confidence >= 0.65 and (support.expected_value or 0) > 0
+    assert _distance_pct_to_zone(support, 105.0) <= 0.05
+    assert not ds["market_regime"].get("flags")
+    # 前提：final 是 ENTRY、secondary 合格——否則 Buy 會在最後被降成 BuySmall，同樣驗不到
+    assert _semantic(ds)["lifecycle_phase"] == "CONTINUATION"
+    assert ds["final_entry_permission"]["state"] == "ENTRY_ALLOWED"
+    assert ds["rr_gate"]["setup_qualified"] is True
+    assert ds["rr_gate"]["secondary_gate"]["qualified"] is True
+
+    assert ds["action"] == expected_action
+    assert ds["market_action"] == ("BUY" if expected_action == "Buy" else "BUY_SMALL")
+
+
+def test_i129_version_strings():
+    """改後的語意要分得出改前（`stock_sr_decisions` 靠版本字串）；`schema_version` ⛔ 不動。"""
+    ds = _continuation_full_entry_case(122.0, setup_rr=1.4)
+
+    assert _semantic(ds)["version"] == "decision-semantic-pipeline-p5"
+    assert ds["decision_derived_view"]["version"] == "decision-derived-view-p3"
+
+
+def _assert_i129_invariants(ds: dict) -> None:
+    permission = ds["final_entry_permission"]
+    state = permission["state"]
+    semantic_state = _semantic(ds)["entry_permission_state"]
+    gate = ds["rr_gate"]
+    # 1. BLOCKED 只留給結構事實：理由⛔ 不得是 RR 類
+    if state == "BLOCKED":
+        assert not set(permission["reason_codes"]) & RR_REASON_CODES, permission
+    if semantic_state == "BLOCKED":
+        assert not set(_semantic(ds)["reason_codes"]) & RR_REASON_CODES, _semantic(ds)
+    # 2. setup 不合格 → final 最多 PROBE
+    if gate.get("setup_qualified") is False:
+        assert state in ("BLOCKED", "WAIT_CONFIRMATION", "PROBE_ALLOWED"), state
+    # 3. 沒有 final 專屬的 gate 時，semantic 與 final 的許可相等
+    no_final_only_gate = (
+        ds["entry_executability"].get("executable_now")
+        and not ds["entry_blocking_zone"].get("blocked")
+        and (ds["model_governance"].get("confidence_gate") or {}).get("allow_entry") is not False
+        and ds["daily_confirmation"]["state"] not in ("INVALIDATED", "BLOCKED", "CHASING_RISK")
+    )
+    if no_final_only_gate:
+        assert semantic_state == state, (semantic_state, state)
+
+
+@pytest.mark.parametrize("setup_rr", [None, 1.0, 1.4, 1.7, 1.9, 2.8])
+@pytest.mark.parametrize("resistance_low", [None, 112.0, 118.0, 122.0])
+def test_i129_invariants_sweep(setup_rr, resistance_low):
+    _assert_i129_invariants(_continuation_full_entry_case(resistance_low, setup_rr=setup_rr))
+
+
+@pytest.mark.parametrize("setup_rr", [None, 1.0, 1.4, 1.49, 2.2])
+def test_i129_invariants_limit_entry(setup_rr):
+    _assert_i129_invariants(_summary([_zone(risk_reward_ratio=setup_rr)]))
 
 
 # ── 碰觸與收復拆成兩個 structure state ────────────────────────

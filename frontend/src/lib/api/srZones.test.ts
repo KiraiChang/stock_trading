@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from './client'
 import {
+  derivedReasonLabel,
   getSREvaluationJob,
   getSRZoneAnalysis,
   listSREvaluationJobs,
   listSRRegressionResults,
   runSREvaluation,
 } from './srZones'
-import type { SRDecisionZoneSummary, SRSemanticPipeline } from './srZones'
+import type { SRDecisionZoneSummary, SRRRGate, SRSemanticPipeline } from './srZones'
 
 vi.mock('./client', () => ({
   apiFetch: vi.fn(),
@@ -214,14 +215,15 @@ describe('srZones analysis 的 zone builder runtime config', () => {
 // `_decision_semantic_pipeline()` 的回傳與 `_decision_summary_zone()` 的新欄位。
 describe('I-074 診斷欄位的型別契約', () => {
   it('SRSemanticPipeline 接得住四個新欄位', () => {
+    // 2026-11-04 重新取樣（I-129 之後：setup 不合格、executable 合格 → 最多試單）。
     const pipeline: SRSemanticPipeline = {
-      version: 'decision-semantic-pipeline-p4',
+      version: 'decision-semantic-pipeline-p5',
       event_signal: 'CLOSE_RECLAIM',
       lifecycle_phase: 'CONTINUATION',
       market_state: 'BULLISH_CONTINUATION',
       action_state: 'HOLD',
-      entry_permission_state: 'ENTRY_ALLOWED',
-      reason_codes: ['PRICE_UPSIDE_FOLLOW_THROUGH'],
+      entry_permission_state: 'PROBE_ALLOWED',
+      reason_codes: ['CLOSE_RECLAIM', 'PRICE_UPSIDE_FOLLOW_THROUGH', 'SETUP_RR_BELOW_MINIMUM'],
       source_order: ['Event', 'Lifecycle', 'Market State', 'Bias', 'Action', 'Entry'],
       clear_zone_breakout: true,
       continuation_price_evidence_met: true,
@@ -241,5 +243,38 @@ describe('I-074 診斷欄位的型別契約', () => {
     expect(zone.relative_volume).toBeCloseTo(1.42)
     const missing: Pick<SRDecisionZoneSummary, 'relative_volume'> = { relative_volume: null }
     expect(missing.relative_volume).toBeNull()
+  })
+})
+
+// ── I-129：execution gate 的理由與 `rr_gate.setup_qualified` ─────────────────
+describe('I-129 execution gate 的理由與欄位', () => {
+  it('RR 類 reason code 都有中文標籤（⛔ 不顯示原始 code）', () => {
+    for (const code of [
+      'RR_INSUFFICIENT',
+      'RR_UNAVAILABLE',
+      'NO_PRIMARY_ZONE',
+      'EXECUTION_RR_INSUFFICIENT',
+      'EXECUTION_RR_UNAVAILABLE',
+      'RR_BELOW_FULL_ENTRY',
+      'SETUP_RR_BELOW_MINIMUM',
+    ]) {
+      expect(derivedReasonLabel(code)).not.toBe(code)
+    }
+    // 查無對照時照舊回退顯示原始 code
+    expect(derivedReasonLabel('SOME_UNKNOWN_CODE')).toBe('SOME_UNKNOWN_CODE')
+  })
+
+  it('SRRRGate 接得住 setup_qualified（取樣自 Python 的真實輸出）', () => {
+    const gate: Pick<SRRRGate, 'qualified' | 'reason_code' | 'gate_basis' | 'setup_qualified' | 'zone_actual_rr'> = {
+      qualified: true,
+      reason_code: 'RR_QUALIFIED',
+      gate_basis: 'ENTRY_STOP_TARGET',
+      setup_qualified: false,
+      zone_actual_rr: 1.4,
+    }
+    expect(gate.setup_qualified).toBe(false)
+    // 舊快照沒有這個欄位
+    const legacy: Pick<SRRRGate, 'setup_qualified'> = {}
+    expect(legacy.setup_qualified).toBeUndefined()
   })
 })

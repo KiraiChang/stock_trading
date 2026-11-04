@@ -518,6 +518,11 @@ export interface SRRRGate {
   gate_basis?: string
   /** setup RR（zone 歷史統計）。與 `actual_rr` **可以不同**，那正是 T-055 要讓人看見的。 */
   zone_actual_rr?: number | null
+  /**
+   * setup gate（zone 歷史統計）的判定（I-129 起輸出）。`false` 且 `qualified === true` 時，
+   * 進場許可最多到試單（reason code `SETUP_RR_BELOW_MINIMUM`）。舊快照沒有這個欄位。
+   */
+  setup_qualified?: boolean
   target_known?: boolean
   /** 這一層 gate 的名稱；主 gate 恆為 `PROBE`。 */
   gate_kind?: 'PROBE' | 'FULL_ENTRY' | string
@@ -795,6 +800,14 @@ export const derivedReasonText: Record<string, string> = {
   BLOCKING_ZONE_AHEAD: '前方壓力擋道',
   DAILY_CANDIDATE_ONLY: '僅日 K 候選',
   RR_NOT_QUALIFIED: 'RR 未達門檻',
+  // execution gate 的理由（I-129 起會出現在 authority／final 的 reason codes 裡）
+  RR_INSUFFICIENT: 'RR 未達門檻（zone 統計）',
+  RR_UNAVAILABLE: '缺少 RR 統計',
+  NO_PRIMARY_ZONE: '沒有主交易區',
+  EXECUTION_RR_INSUFFICIENT: '可執行 RR 不足',
+  EXECUTION_RR_UNAVAILABLE: '可執行 RR 無法量化（無前方目標）',
+  RR_BELOW_FULL_ENTRY: '未達完整部位 RR 門檻',
+  SETUP_RR_BELOW_MINIMUM: 'zone 統計 RR 未達門檻',
   POSITION_DEFENSE_REQUIRED: '持倉需防守',
   POSITION_RECLAIM_DEFENSE: '收復後條件式防守',
   POSITION_SUPPORT_DEFENSE: '支撐防守',

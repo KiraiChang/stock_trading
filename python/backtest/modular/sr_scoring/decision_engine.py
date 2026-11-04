@@ -505,10 +505,12 @@ def _decision_action(
     if distance_pct > 0.08:
         risk_notes.append("現價離主交易區較遠，不適合追價。")
     rr = primary_zone.risk_reward_ratio
+    # 兩句 setup RR 的 note 帶 code：最後由 `_final_entry_risk_notes` 依 execution gate 校正
+    # （I-129，比照 T-055 對 `RR_BELOW_FULL_ENTRY` 的做法）。
     if rr is None:
-        risk_notes.append("主交易區缺少風險報酬比，先觀察。")
+        risk_notes.append(_risk_note("SETUP_RR_UNAVAILABLE", "主交易區缺少風險報酬比，先觀察。"))
     elif rr < 1.5:
-        risk_notes.append("主交易區風險報酬比不足。")
+        risk_notes.append(_risk_note("SETUP_RR_INSUFFICIENT", SETUP_RR_INSUFFICIENT_NOTE))
     elif rr < FULL_ENTRY_MIN_RR:
         # 這裡用 **setup RR** 先給一個初值——`_decision_action` 跑在 execution gate 之前，
         # 拿不到 `secondary_gate`。真正的判定由 `_final_entry_risk_notes` 依
@@ -527,7 +529,11 @@ def _decision_action(
         return "AVOID", position_action, "Avoid", "避開", risk_notes
     if bearish_setup and not bullish_setup:
         return "AVOID", "REDUCE", "Avoid", "避開", risk_notes
-    if rr is None or rr < 1.5:
+    # ⚠️ 只留 `rr is None` 的提前 return（I-129 D2：缺 zone 統計不放行）。
+    # `rr < 1.5` 的提前 return 已拿掉：RR 是否放行改由 execution gate 決定，setup 不合格最多試單（D3）；
+    # 留著的話 setup 1.4 被放行到 PROBE 時 action 仍是 Hold，又是一組矛盾。
+    # `strong` 的 `rr >= 2.0` 刻意保留（D4）：拿掉會讓 setup 1.9 這類已合格的列從 BuySmall 升成 Buy。
+    if rr is None:
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
 
     relevance = _entry_relevance_score_with_events(primary_zone, current_price, market_events)
@@ -634,6 +640,27 @@ def _final_entry_risk_notes(
                 "RR_BELOW_FULL_ENTRY", "風險報酬比未達完整買進門檻，最多小量試單。"))
         elif not supported and has_note:
             notes = [n for n in notes if _risk_note_code(n) != "RR_BELOW_FULL_ENTRY"]
+    # ── I-129：setup RR 的 note 依 execution gate 校正（同樣要在下面的改寫迴圈之前）─────────
+    #
+    # 「主交易區風險報酬比不足。」只在 **gate 的判定就是 zone 統計**（`ZONE_STATISTIC`、`RR_INSUFFICIENT`）
+    # 時才說——那時它正是不放行的理由；`_decision_action` 依 setup RR < 1.5 給的初值不夠
+    # （setup 1.7 也會走到這裡）。executable RR 可量化時由下方 execution gate 的 note 說明，⛔ 不兩句並陳。
+    # setup 不合格、但 executable 合格（D3）→ 說明為什麼最多只到試單。
+    # `SETUP_RR_UNAVAILABLE`（缺 zone 統計，D2）⛔ 不動：它在任何情況下都成立。
+    if rr_gate and "setup_qualified" in rr_gate:
+        statistic_insufficient = (
+            rr_gate.get("gate_basis") == "ZONE_STATISTIC" and rr_gate.get("reason_code") == "RR_INSUFFICIENT"
+        )
+        has_setup_note = any(_risk_note_code(n) == "SETUP_RR_INSUFFICIENT" for n in notes)
+        if statistic_insufficient and not has_setup_note:
+            notes.append(_risk_note("SETUP_RR_INSUFFICIENT", SETUP_RR_INSUFFICIENT_NOTE))
+        elif not statistic_insufficient and has_setup_note:
+            notes = [n for n in notes if _risk_note_code(n) != "SETUP_RR_INSUFFICIENT"]
+        if state != "BLOCKED" and rr_gate.get("qualified") and rr_gate.get("setup_qualified") is False:
+            notes.append(
+                SETUP_FAIL_CAPPED_NOTE if SETUP_FAIL_MAX_ENTRY_STATE == "PROBE_ALLOWED"
+                else "zone 歷史統計的風險報酬比未達門檻，先等待確認。"
+            )
     if state in ("BLOCKED", "WAIT_CONFIRMATION"):
         cleaned_notes: list[Any] = []
         for note in notes:
@@ -857,47 +884,66 @@ def _unique_reason_codes(codes: list[str]) -> list[str]:
     return out
 
 
-def _apply_full_entry_gate_cap(
-    derived_view: Optional[dict[str, Any]],
+def _apply_execution_gate_caps(
+    state: str,
+    reason_codes: list[str],
     execution_rr_gate: Optional[dict[str, Any]],
-) -> None:
-    """把 full-entry gate 的封頂**同步**套到 semantic pipeline（T-055，2026-08-27 裁決）。
+) -> tuple[str, list[str]]:
+    """把 execution gate 套到一個進場許可上（I-129；semantic 與 final **共用這一個 helper**）。
 
     `decision_derived_view` 與 `final_entry_permission` **兩個都列在
-    `decision_contract.authoritative_fields`**，所以不能只封頂後者——那會讓契約消費者
-    在同一份輸出裡讀到 `ENTRY_ALLOWED`（semantic）與 `PROBE_ALLOWED`（final）兩種進場許可。
-    「final entry 才是 authoritative」不能拿來解釋這個落差，因為契約沒有這樣分層。
+    `decision_contract.authoritative_fields`**，所以兩者必須同進同出——兩邊各寫一份規則的話，
+    契約消費者會在同一份輸出裡讀到兩種進場許可（T-055 的 2026-08-27 裁決）。
 
-    **為什麼是事後校正，不是讓 gate 直接參與仲裁**：資料流上是一個環——
-    execution gate 需要 `entry_executability`（要 entry_price 算 target），
-    `entry_executability` 需要 `decision_derived_view`，而 derived view 需要 gate。
-    把 gate 前移得先解這個環，屬 `docs/issue.md` I-129（原 T-065）的範圍。
+    三條規則（都只往下封頂、⛔ 不拉高；BLOCKED 是結構事實，原樣保留）：
 
-    **就地改是安全的**，唯一的其他內部消費者 `_entry_executability:806` 對
-    `PROBE_ALLOWED` 與 `ENTRY_ALLOWED` 走**同一個分支**，所以封頂不會回頭改變它，
-    不存在回饋迴圈。（改那一行之前先確認這句仍然成立。）
+    1. 主 gate 不合格 → 最多 `WAIT_CONFIRMATION`，附 gate 的 reason code（I-129 D1：RR 不合格
+       一律等待確認、⛔ 不是 BLOCKED）。reason 一律附上，即使狀態本來就是 WAIT。
+    2. setup 不合格、但主 gate 合格（executable RR 可量化且合格）→ 最多
+       `SETUP_FAIL_MAX_ENTRY_STATE`，附 `SETUP_RR_BELOW_MINIMUM`（I-129 D3）。reason 一律附上。
+    3. secondary（完整部位）不合格 → 最多 `PROBE_ALLOWED`，附 `RR_BELOW_FULL_ENTRY`（T-055）。
+       只有真的往下封頂時才附 reason（既有行為）。
 
-    ⚠️ **封頂是單調遞減的，只擋高估、擋不了低估。** 反方向
-    （`executable_rr` 高於 `setup_rr`）的矛盾出在更上游的提前 return，這裡碰不到——
-    見 `docs/sr-zone-scoring.md`「RR 語意分層／已知的單向性」與 `docs/issue.md` I-129。
+    **為什麼現在可以直接仲裁**：原本是一個環——execution gate 需要 entry price，entry price
+    看 semantic 許可，semantic 許可又看 setup RR。I-129 把「選進場價」改成只看結構許可
+    （`build_decision_summary` 的呼叫順序），環就解開了，gate 可以在真正的進場價上算完再回頭封頂。
     """
-    if not derived_view or not execution_rr_gate:
-        return
+    if state == "BLOCKED" or not execution_rr_gate:
+        return state, list(reason_codes)
+    reasons = list(reason_codes)
+    if not execution_rr_gate.get("qualified"):
+        state = _entry_cap_state(state, "WAIT_CONFIRMATION")
+        reasons.append(str(execution_rr_gate.get("reason_code") or "EXECUTION_RR_UNAVAILABLE"))
+    elif execution_rr_gate.get("setup_qualified") is False:
+        state = _entry_cap_state(state, SETUP_FAIL_MAX_ENTRY_STATE)
+        reasons.append("SETUP_RR_BELOW_MINIMUM")
     secondary = execution_rr_gate.get("secondary_gate") or {}
-    if secondary.get("qualified") is not False:
-        return
-    semantic = derived_view.get("semantic_pipeline") or {}
-    state = str(semantic.get("entry_permission_state") or "")
+    if secondary.get("qualified") is False:
+        capped = _entry_cap_state(state, "PROBE_ALLOWED")
+        if capped != state:
+            state = capped
+            reasons.append("RR_BELOW_FULL_ENTRY")
+    return state, _unique_reason_codes(reasons)
+
+
+def _cap_semantic_by_execution_gate(
+    semantic_pipeline: dict[str, Any],
+    execution_rr_gate: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """回傳套過 execution gate 的 semantic pipeline（⛔ 不就地改輸入）。
+
+    ⚠️ 輸入那一份是「結構許可」，`_entry_executability` 用它選進場價；這裡產出的是對外的版本。
+    `setup_rr_qualified` 與 `rr_decoupling_candidate` ⛔ 不動：它們定義在 setup gate 上
+    （validation-only，replay 的等價式檢查依賴它們）。
+    """
+    capped = dict(semantic_pipeline)
+    state = str(capped.get("entry_permission_state") or "")
     if not state:
-        return
-    capped = _entry_cap_state(state, "PROBE_ALLOWED")
-    if capped == state:
-        return
-    semantic["entry_permission_state"] = capped
-    semantic["reason_codes"] = _unique_reason_codes([
-        *list(semantic.get("reason_codes") or []),
-        "RR_BELOW_FULL_ENTRY",
-    ])
+        return capped
+    state, reasons = _apply_execution_gate_caps(state, list(capped.get("reason_codes") or []), execution_rr_gate)
+    capped["entry_permission_state"] = state
+    capped["reason_codes"] = reasons
+    return capped
 
 
 def _final_entry_permission(
@@ -954,32 +1000,13 @@ def _final_entry_permission(
             *reason_codes,
             str(entry_blocking_zone.get("reason_code") or "NEAR_RESISTANCE_BLOCKING_ENTRY"),
         ])
-    if state != "BLOCKED" and execution_rr_gate and not execution_rr_gate.get("qualified"):
-        state = "WAIT_CONFIRMATION"
-        reason_codes = _unique_reason_codes([
-            *reason_codes,
-            str(execution_rr_gate.get("reason_code") or "EXECUTION_RR_UNAVAILABLE"),
-        ])
-    # ── T-055：完整部位 gate 也要能限制 authoritative 欄位 ────────────────────
+    # ── execution gate（I-129）：與 semantic 共用 `_apply_execution_gate_caps` ────────────
     #
-    # 上面那段只讀主 gate（probe 門檻）。probe 過了但 `secondary_gate` 沒過時，
-    # `state` 會停在 `ENTRY_ALLOWED`，而 `final_entry_permission` **才是契約宣告的
-    # authoritative 欄位**——於是畫面同時出現「正式進場已放行」與「完整部位未通過」。
-    # 只在 `_final_action_from_entry` 把 `action` 降成 `BuySmall` 不夠：那是 deprecated
-    # 欄位，改它不會改變 authoritative 的宣告。
-    #
-    # 封頂而不是擋掉：secondary 沒過的語意是「試單可以、完整部位不行」，
-    # 正好就是 `PROBE_ALLOWED`。用 `_entry_cap_state` 所以不會把已經更低的狀態拉高。
-    if state != "BLOCKED" and execution_rr_gate:
-        secondary_gate = execution_rr_gate.get("secondary_gate") or {}
-        if secondary_gate.get("qualified") is False:
-            capped_by_secondary = _entry_cap_state(state, "PROBE_ALLOWED")
-            if capped_by_secondary != state:
-                state = capped_by_secondary
-                reason_codes = _unique_reason_codes([
-                    *reason_codes,
-                    "RR_BELOW_FULL_ENTRY",
-                ])
+    # 主 gate 不合格 → WAIT；setup 不合格但 executable 合格 → 最多試單（D3）；
+    # secondary 不合格 → 最多試單（T-055：`final_entry_permission` 才是契約宣告的
+    # authoritative 欄位，只把 deprecated 的 `action` 降成 BuySmall 不夠）。
+    # semantic 已經套過同一組規則，這裡再套一次是冪等的；兩邊用同一支，所以⛔ 不會分岔。
+    state, reason_codes = _apply_execution_gate_caps(state, reason_codes, execution_rr_gate)
     confidence_gate = (model_governance or {}).get("confidence_gate") or {}
     if state != "BLOCKED" and confidence_gate.get("allow_entry") is False:
         state = "WAIT_CONFIRMATION"
@@ -1040,7 +1067,7 @@ def _decision_semantic_pipeline(
     # 生命週期由獨立的 Lifecycle Engine 判定（見 lifecycle_engine.py 與
     # docs/sr-zone-scoring.md「分層原則：lifecycle 不看 RR」）。
     # **它不吃 rr_gate**：RR 是進場與策略條件，不是事件事實。原本 CONTINUATION 的條件
-    # 含 rr_qualified，等於讓策略條件改寫事件事實；移除後保守度改由下方的 entry gate 負責。
+    # 含 rr_qualified，等於讓策略條件改寫事件事實；移除後保守度改由 execution gate 的封頂負責（I-129）。
     lifecycle = resolve_lifecycle(
         event_state_summary=event_state_summary,
         primary_zone=primary_zone,
@@ -1052,6 +1079,8 @@ def _decision_semantic_pipeline(
     lifecycle_phase = lifecycle["lifecycle_phase"]
     reason_codes: list[str] = list(lifecycle["reason_codes"])
 
+    # ⚠️ `rr_gate` 是 **setup gate**，在這裡**只用來算兩個 validation-only 診斷欄位**
+    # （`setup_rr_qualified`、`rr_decoupling_candidate`），⛔ 不參與進場許可（I-129）。
     rr_qualified = bool((rr_gate or {}).get("qualified"))
 
     if lifecycle_phase in ("BREAKDOWN", "INVALIDATED"):
@@ -1097,11 +1126,11 @@ def _decision_semantic_pipeline(
         else:
             action_state = "WATCH"
 
+        # ⚠️ 這裡⛔ 不看 RR（I-129）：輸出的是**結構許可**，`_entry_executability` 用它選進場價。
+        # RR 的判斷由 execution gate 在真正的進場價上算完之後，再由 `_cap_semantic_by_execution_gate`
+        # 往下封頂——在這裡用 setup RR 提前擋掉，會讓進場改走限價、gate 在錯的價格上算（原 T-065 的循環）。
         if market_state == "BREAKDOWN_RISK":
             entry_permission_state = "BLOCKED"
-        elif not rr_qualified:
-            entry_permission_state = "BLOCKED"
-            reason_codes.append(str((rr_gate or {}).get("reason_code") or "RR_NOT_QUALIFIED"))
         elif blocking_zone_ahead:
             entry_permission_state = "WAIT_CONFIRMATION"
             reason_codes.append("BLOCKING_ZONE_AHEAD")
@@ -1115,7 +1144,7 @@ def _decision_semantic_pipeline(
             entry_permission_state = "WAIT_CONFIRMATION"
 
     return {
-        "version": "decision-semantic-pipeline-p4",
+        "version": "decision-semantic-pipeline-p5",
         "event_signal": event_signal,
         "lifecycle_phase": lifecycle_phase,
         "market_state": market_state,
@@ -1155,7 +1184,12 @@ def _decision_derived_view(
     daily_candidate_zones: Optional[list[dict[str, Any]]] = None,
     blocking_zone_ahead: bool = False,
     entry_blocking_zone_ahead: Optional[bool] = None,
+    *,
+    semantic_pipeline: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    """`semantic_pipeline` 有傳就直接用（I-129：`build_decision_summary` 傳入套過 execution gate 的版本，
+    `rr_gate` 傳 execution gate，所以 `RR_BLOCKED` 也看 execution gate）；沒傳就照舊自己算——
+    測試裡 `_derived` helper 那一批的位置參數呼叫因此不受影響。"""
     active_states = list(event_state_summary.get("active") or [])
     candidate_states = list(event_state_summary.get("candidates") or [])
     active_bearish_states = list(event_state_summary.get("active_bearish_events") or [])
@@ -1163,17 +1197,18 @@ def _decision_derived_view(
     candidate_event_types = _event_state_types(candidate_states)
     short_term_regime = str(regime.get("short_term_regime") or "NORMAL")
     bias_reason_codes: list[str] = []
-    semantic_pipeline = _decision_semantic_pipeline(
-        regime,
-        primary_zone,
-        market_action,
-        event_state_summary,
-        daily_price_action,
-        rr_gate,
-        structure_state,
-        blocking_zone_ahead if entry_blocking_zone_ahead is None else entry_blocking_zone_ahead,
-        (daily_price_action or {}).get("reference_prices", {}).get("current_price") or 0.0,
-    )
+    if semantic_pipeline is None:
+        semantic_pipeline = _decision_semantic_pipeline(
+            regime,
+            primary_zone,
+            market_action,
+            event_state_summary,
+            daily_price_action,
+            rr_gate,
+            structure_state,
+            blocking_zone_ahead if entry_blocking_zone_ahead is None else entry_blocking_zone_ahead,
+            (daily_price_action or {}).get("reference_prices", {}).get("current_price") or 0.0,
+        )
 
     if market_action == "AVOID":
         bias_state = "BEARISH_BIAS"
@@ -1282,7 +1317,7 @@ def _decision_derived_view(
     position_gate_state = str(semantic_pipeline.get("action_state") or "WATCH")
 
     return {
-        "version": "decision-derived-view-p2",
+        "version": "decision-derived-view-p3",
         "bias_state": bias_state,
         "bias_label": _market_bias_label(bias_state),
         "bias_reason_codes": bias_reason_codes,
@@ -1356,6 +1391,13 @@ FULL_ENTRY_MIN_RR = 2.0
 
 GATE_KIND_PROBE = "PROBE"
 GATE_KIND_FULL_ENTRY = "FULL_ENTRY"
+
+# I-129 D3：setup RR 不合格、executable RR 可量化且合格時，進場許可的上限。
+# ⚠️ **放寬集中在這一個常數**：離線量測不通過或證據不足時，改成 "WAIT_CONFIRMATION"
+# 就是「setup 不合格一律等待確認、⛔ 不放行」（計畫書「4.5」），其餘修正全部保留。
+SETUP_FAIL_MAX_ENTRY_STATE = "PROBE_ALLOWED"
+SETUP_RR_INSUFFICIENT_NOTE = "主交易區風險報酬比不足。"
+SETUP_FAIL_CAPPED_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
 
 
 def _minimum_rr(primary_zone: Optional[ZoneScore], entry_action_state: str) -> float:
@@ -1541,6 +1583,9 @@ def _execution_rr_gate(
     zone_actual_rr = base_rr_gate.get("actual_rr")
     execution_rr = rr_context.get("executable_rr")
     market_entry = str(rr_context.get("price_basis") or "") in MARKET_PRICE_ENTRY_BASES
+    # I-129：setup gate 的判定一律隨 gate 輸出。封頂（`_execution_gate_caps`）讀這個欄位，
+    # ⛔ 不讀 validation-only 的 `setup_rr_qualified`，也⛔ 不從 `zone_actual_rr` 和門檻重推。
+    setup_qualified = bool(base_rr_gate.get("qualified"))
 
     # `actual` 未知時「不算不合格」的語意**只適用於 target 未知**——
     # 那是「這次算不出來」，不是「沒有東西可算」。
@@ -1551,6 +1596,7 @@ def _execution_rr_gate(
     def _with_secondary(gate: dict[str, Any], actual: Optional[float]) -> dict[str, Any]:
         # secondary 測的是**同一個 actual**，只換門檻。
         gate["gate_kind"] = GATE_KIND_PROBE
+        gate["setup_qualified"] = setup_qualified
         if actual is None:
             secondary_qualified = str(gate.get("reason_code") or "") in UNKNOWN_BUT_NOT_DISQUALIFYING
         else:
@@ -1562,7 +1608,14 @@ def _execution_rr_gate(
         }
         return gate
 
-    if execution_rr is None and not market_entry:
+    # 沿用 setup-RR 判定（`ZONE_STATISTIC`）的三種情況：
+    #   1. 限價路徑、沒有可量化 target（T-055 的方案 A，見下方）。
+    #   2. I-129 D3：setup 不合格、executable 算不出來——**市價路徑也一樣**。
+    #      「市價 target 未知 → 不算不合格」只保留給 setup 合格的列，否則 setup 不合格的列
+    #      會因為 target 未知而全放行（第一輪 review P1-1）。
+    #   3. I-129 D2：setup RR 缺值（`RR_UNAVAILABLE` / `NO_PRIMARY_ZONE`）——即使 executable 算得出來
+    #      也⛔ 不放行。`actual_rr` 維持 None，所以⛔ 不會掛「未達完整買進門檻」的 note。
+    if zone_actual_rr is None or (execution_rr is None and (not market_entry or not setup_qualified)):
         # **限價路徑且沒有可量化 target → 沿用 setup-RR 判定**（T-055 實作中發現的契約缺口，
         # 2026-08-27 裁決採方案 A）。
         #
@@ -1581,11 +1634,14 @@ def _execution_rr_gate(
         fallback = dict(base_rr_gate)
         fallback["gate_basis"] = "ZONE_STATISTIC"
         fallback["zone_actual_rr"] = zone_actual_rr
-        fallback["target_known"] = False
+        # ⚠️ target 是否可量化**照實反映 rr_context**（⛔ 不寫死 False）：D2 的列 target 可能是已知的，
+        # 只是缺 zone 統計（`RR_UNAVAILABLE`）。寫死的話，失敗原因分析會把「缺統計」誤讀成「沒有目標」。
+        fallback["target_known"] = bool(rr_context.get("target_known"))
         return _with_secondary(fallback, base_rr_gate.get("actual_rr"))
 
     if execution_rr is None:
-        # 市價路徑：target 未知 ≠ RR 不合格（既有語意，`qualified=True`）。
+        # 市價路徑、setup 合格：target 未知 ≠ RR 不合格（既有語意，`qualified=True`）。
+        # setup 不合格的列已在上面退回 `ZONE_STATISTIC`（I-129 D3）。
         return _with_secondary({
             "minimum_rr": minimum,
             "actual_rr": None,
@@ -2418,12 +2474,14 @@ def _daily_confirmation(
     primary_zone: Optional[ZoneScore],
     primary_interaction: Optional[dict[str, Any]],
     daily_price_action: dict[str, Any],
-    rr_gate: dict[str, Any],
     derived_view: dict[str, Any],
     entry_action_state: str,
     daily_candidate_zones: list[dict[str, Any]],
     current_price: float,
 ) -> dict[str, Any]:
+    # ⚠️ ⛔ 不看 RR（I-129，比照「lifecycle 不看 RR」）：daily confirmation 只判價格事實。
+    # 原本 RR 不合格 → daily BLOCKED，`_final_entry_permission` 因此直接 BLOCKED、
+    # 而且把 semantic 的理由濾掉——那是「沒有欄位說得出原因」的成因之一。RR 改由 execution gate 判。
     reason_codes: list[str] = []
     derived_daily_reasons = list(derived_view.get("daily_reason_codes") or [])
     if primary_zone is None:
@@ -2432,9 +2490,6 @@ def _daily_confirmation(
     elif primary_interaction and primary_interaction.get("closed_below") and primary_zone.role == ZoneType.SUPPORT.value:
         state = "INVALIDATED"
         reason_codes.append("SUPPORT_CLOSED_BELOW")
-    elif not rr_gate.get("qualified"):
-        state = "BLOCKED"
-        reason_codes.append(str(rr_gate.get("reason_code") or "RR_NOT_QUALIFIED"))
     elif _distance_pct_to_zone(primary_zone, current_price) > 0.08:
         state = "CHASING_RISK"
         reason_codes.append("PRICE_TOO_FAR_FROM_ZONE")
@@ -2471,7 +2526,7 @@ def _daily_confirmation(
         reason_codes.append("DAILY_CONFIRMATION_REQUIRED")
 
     # derived daily reasons 只在「進場軌道」的結論上補回。硬性阻擋（無主 zone、設定失效、
-    # RR 不過、追價風險）與進場條件無關，補這些 code 只會產生「禁止進場又說等待價格延續」
+    # 追價風險）與進場條件無關，補這些 code 只會產生「禁止進場又說等待價格延續」
     # 的矛盾標籤——正是 I-002 要消除的訊號不一致。
     entry_track = primary_zone is not None and state not in ("INVALIDATED", "BLOCKED", "CHASING_RISK")
     if entry_track:
@@ -2695,7 +2750,9 @@ def build_decision_summary(
         regime, primary_zone, current_price, primary_interaction, active_market_events
     )
     entry_action_state = _entry_action_state(action, primary_zone, structure_state, current_price, active_market_events)
-    rr_gate = _rr_gate(primary_zone, entry_action_state)
+    # setup gate（zone 歷史統計）。I-129 之後它⛔ 不直接決定進場許可：只輸入 execution gate
+    # （D2／D3 的退回與 `setup_qualified`），以及 semantic pipeline 的兩個 validation-only 診斷欄位。
+    setup_rr_gate = _rr_gate(primary_zone, entry_action_state)
     nearest_zone = _nearest_decision_zone(zone_scores, current_price)
     nearest_support_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.SUPPORT.value)
     nearest_resistance_zone = _nearest_zone_by_role(zone_scores, current_price, ZoneType.RESISTANCE.value)
@@ -2735,6 +2792,49 @@ def build_decision_summary(
     ) if nearest_resistance_zone else None
     blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price)
     entry_blocking_zone_ahead = bool(entry_blocking_zone.get("blocked"))
+    # ── I-129：資料流是沒有循環的 DAG（計畫書「4.1」）─────────────────────────────
+    #
+    # ① 結構許可：semantic pipeline ⛔ 不看 RR（setup gate 只用來算兩個診斷欄位）。
+    structural_semantic = _decision_semantic_pipeline(
+        regime,
+        primary_zone,
+        market_action,
+        event_state_summary,
+        daily_price_action,
+        setup_rr_gate,
+        structure_state,
+        entry_blocking_zone_ahead,
+        (daily_price_action or {}).get("reference_prices", {}).get("current_price") or 0.0,
+    )
+    # ② 選進場價：「如果要進場，用什麼價」只看結構許可，和 RR 放不放行無關；之後⛔ 不重算。
+    #    原本這裡讀的是已被 setup RR 擋掉的許可，setup 不合格時就改走限價（zone 上緣），
+    #    execution gate 於是在錯的價格上算出 11.0（原 T-065 的重現）。
+    entry_executability = _entry_executability(
+        primary_zone, current_price, {"semantic_pipeline": structural_semantic},
+    )
+    # ③ target → rr_context → execution gate（對外的 `rr_gate`）。
+    # **target 由呼叫端算好再傳進去**（T-055 定案）：`_rr_context()` 不自己找 zone。
+    # `blocking_resistance_zone` 在上面就已經算完，這裡直接沿用同一個物件——
+    # 三個對外欄位（`entry_blocking_zone` / `blocking_resistance_zone` / target 封頂）
+    # 因此恆指同一個 zone，不會出現「畫面上擋路壓力是 A、target 卻用 B」。
+    _entry_price_for_target = entry_executability.get("entry_price") if entry_executability else None
+    execution_target = _execution_target(
+        _nearest_resistance_above_entry(zone_scores, _entry_price_for_target),
+        blocking_resistance_zone,
+        _entry_price_for_target,
+    )
+    rr_context = _rr_context(
+        primary_zone,
+        entry_executability=entry_executability,
+        defense_lines=defense_lines,
+        target_zone=_nearest_resistance_above_entry(zone_scores, _entry_price_for_target),
+        execution_target=execution_target,
+    )
+    rr_gate = _execution_rr_gate(primary_zone, entry_action_state, rr_context, setup_rr_gate)
+    # ④ 把 execution gate 套到 semantic（對外版本）。與 `_final_entry_permission` 用同一個 helper，
+    #    兩個 authoritative 欄位一定同進同出。
+    semantic_pipeline = _cap_semantic_by_execution_gate(structural_semantic, rr_gate)
+    # ⑤ 其餘的衍生欄位都在 execution gate 之後，⛔ 不回饋給它。
     decision_derived_view = _decision_derived_view(
         regime,
         primary_zone,
@@ -2747,8 +2847,8 @@ def build_decision_summary(
         daily_candidate_zones,
         blocking_zone_ahead,
         entry_blocking_zone_ahead,
+        semantic_pipeline=semantic_pipeline,
     )
-    entry_executability = _entry_executability(primary_zone, current_price, decision_derived_view)
     market_bias, market_bias_label = _market_bias(
         regime,
         primary_zone,
@@ -2773,33 +2873,11 @@ def build_decision_summary(
         primary_zone,
         primary_interaction,
         daily_price_action,
-        rr_gate,
         decision_derived_view,
         entry_action_state,
         daily_candidate_zones,
         current_price,
     )
-    # **target 由呼叫端算好再傳進去**（T-055 定案）：`_rr_context()` 不自己找 zone。
-    # `blocking_resistance_zone` 在 :2474 就已經算完，這裡直接沿用同一個物件——
-    # 三個對外欄位（`entry_blocking_zone` / `blocking_resistance_zone` / target 封頂）
-    # 因此恆指同一個 zone，不會出現「畫面上擋路壓力是 A、target 卻用 B」。
-    _entry_price_for_target = entry_executability.get("entry_price") if entry_executability else None
-    execution_target = _execution_target(
-        _nearest_resistance_above_entry(zone_scores, _entry_price_for_target),
-        blocking_resistance_zone,
-        _entry_price_for_target,
-    )
-    rr_context = _rr_context(
-        primary_zone,
-        entry_executability=entry_executability,
-        defense_lines=defense_lines,
-        target_zone=_nearest_resistance_above_entry(zone_scores, _entry_price_for_target),
-        execution_target=execution_target,
-    )
-    rr_gate = _execution_rr_gate(primary_zone, entry_action_state, rr_context, rr_gate)
-    # 兩個 authoritative 欄位要一起降，順序不能反——封頂必須在 `_final_entry_permission`
-    # 讀 `semantic_entry_state` 之前，否則它會先讀到未封頂的 `ENTRY_ALLOWED`。
-    _apply_full_entry_gate_cap(decision_derived_view, rr_gate)
     final_entry_permission = _final_entry_permission(
         entry_action_state,
         daily_confirmation,

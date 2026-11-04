@@ -26,9 +26,11 @@ from .features import trend_slope, zone_volatility
 from .model import FEATURE_COLUMNS, ModelBundle, load_model
 from .ranking import _assign_tiers, _sort_zone_scores
 from .replay_bundle import (
+    DECISION_MEASUREMENT_FIELDS,
     DIAGNOSTIC_FIELDS,
     DIAGNOSTIC_NO_ZONE_FALLBACK,
     NO_ZONE_SCORES_ERROR,
+    risk_notes_digest,
     validate_replay_errors,
 )
 from .event_engine import EXTREME_VOLUME_THRESHOLD
@@ -839,7 +841,10 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
     # `lifecycle_phase` 是 replay 唯一看得見事件演進階段的欄位。原本沒帶出來，於是
     # 「RR 解耦有沒有改變 lifecycle 判定」在 replay 報告上不可觀測——分佈全同時，
     # 分不出是那條路徑沒被觸發，還是真的沒影響（見 docs/sr-zone-scoring.md「已知並接受的行為改變」的「decision replay 實測（2026-09-01）」）。
-    semantic_pipeline = (summary.get("decision_derived_view") or {}).get("semantic_pipeline") or {}
+    derived_view = summary.get("decision_derived_view") or {}
+    semantic_pipeline = derived_view.get("semantic_pipeline") or {}
+    semantic_reason_codes = semantic_pipeline.get("reason_codes")
+    final_entry_reason_codes = final_entry_permission.get("reason_codes")
     return {
         "market_bias": summary.get("market_bias"),
         "lifecycle_phase": semantic_pipeline.get("lifecycle_phase"),
@@ -866,6 +871,19 @@ def _decision_fields_from_summary(summary: dict[str, Any]) -> dict[str, Any]:
         "position_action_condition": summary.get("position_action_condition"),
         "structure_state": (summary.get("position_action_condition") or {}).get("structure_state"),
         "position_action": summary.get("position_action"),
+        # ── I-129 的量測欄位（validation-only；欄位清單是 `replay_bundle` 的
+        # `DECISION_MEASUREMENT_FIELDS`）：**只匯出，⛔ 不自行重算** ──────────────
+        "market_action": summary.get("market_action"),
+        "action": summary.get("action"),
+        "entry_action_state": summary.get("entry_action_state"),
+        # ⚠️ semantic pipeline 的值，⛔ 不是 `final_entry_state`：final 還會再套 final 專屬的 gate。
+        "semantic_entry_permission_state": semantic_pipeline.get("entry_permission_state"),
+        "semantic_reason_codes": list(semantic_reason_codes) if semantic_reason_codes is not None else None,
+        "path_gate_state": derived_view.get("path_gate_state"),
+        "final_entry_reason_codes": (
+            list(final_entry_reason_codes) if final_entry_reason_codes is not None else None
+        ),
+        "risk_notes_digest": risk_notes_digest(summary.get("risk_notes")),
     }
 
 
@@ -1538,6 +1556,8 @@ def _decision_replay_rows(
             # I-074 Stage 0 的九個診斷欄位。⚠️ 先給 None：只有「真的沒有 zone」才會被
             # 換成 DIAGNOSTIC_NO_ZONE_FALLBACK，其餘留 None 讓 Stage 1／2 的守門抓到。
             diagnostics: dict[str, Any] = dict.fromkeys(DIAGNOSTIC_FIELDS)
+            # I-129 的量測欄位：decision 不可用的列一律 null（⛔ 不沿用上一列的值）。
+            measurement: dict[str, Any] = dict.fromkeys(DECISION_MEASUREMENT_FIELDS)
             event_lifecycle_replay_available = False
             event_state_count = 0
             active_event_count = 0
@@ -1581,6 +1601,9 @@ def _decision_replay_rows(
                         rr_context = fields["rr_context"]
                         rr_gate = fields["rr_gate"]
                         decision_field_context = fields
+                        # ⚠️ replay 列是逐欄組出來的：只加進 `_decision_fields_from_summary()`
+                        # 不會進到列裡，所以依共用清單明確帶出。
+                        measurement = {name: fields[name] for name in DECISION_MEASUREMENT_FIELDS}
                         decision_fields_available = True
                         # **只匯出**（docs/sr-zone-scoring.md「Decision Replay 的診斷欄位」的「責任層」：evaluation 不自行重算）。
                         diagnostics = {name: fields[name] for name in DIAGNOSTIC_FIELDS}
@@ -1671,6 +1694,7 @@ def _decision_replay_rows(
                 "resolved_event_count": resolved_event_count,
                 "expired_event_count": expired_event_count,
                 **diagnostics,
+                **measurement,
             })
     return rows
 

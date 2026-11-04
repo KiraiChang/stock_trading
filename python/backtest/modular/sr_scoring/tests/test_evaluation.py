@@ -24,6 +24,7 @@ from ..evaluation import (
     run_evaluation,
     write_evaluation_result,
 )
+from ..replay_bundle import DECISION_MEASUREMENT_FIELDS, ArtifactError, validate_measurement_fields
 from ..zone_builder import ATRZoneBuilderConfig, ZoneBuilderConfig
 from .conftest import bullish_trend_df
 
@@ -833,6 +834,12 @@ def test_run_decision_replay_reports_unavailable_without_model(tmp_path):
     assert row["rr_gate"] is None
     assert row["decision_fields_available"] is False
     assert row["decision_error"] is None
+    # I-129 的量測欄位：decision 不可用的列 key 存在、值一律 null；
+    # 全部不可用時整批檢查要失敗（空集合⛔ 不能算通過）。
+    for name in DECISION_MEASUREMENT_FIELDS:
+        assert name in row and row[name] is None, name
+    with pytest.raises(ArtifactError, match="沒有任何一列"):
+        validate_measurement_fields(report["replay_rows"], "replay")
     assert row["event_lifecycle_replay_available"] is False
     assert row["event_state_count"] == 0
     assert row["active_event_count"] == 0
@@ -957,6 +964,10 @@ def test_run_decision_replay_reports_model_metadata_and_plan(tmp_path, monkeypat
     assert report["outcome_summary"]["rows_with_model_governance"] == 0
     assert report["outcome_summary"]["model_governance_missing_rows"] == 3
     assert report["outcome_summary"]["rows_with_decision_fields"] > 0
+    # I-129 的量測欄位要真的進到 replay 列（只改 `_decision_fields_from_summary()` 不會）。
+    assert validate_measurement_fields(report["replay_rows"], "replay") == (
+        report["outcome_summary"]["rows_with_decision_fields"]
+    )
     assert report["outcome_summary"]["rows_with_event_lifecycle"] > 0
     assert report["outcome_summary"]["zone_score_error_counts"] == {}
     assert report["outcome_summary"]["decision_error_counts"] == {}

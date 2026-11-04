@@ -165,6 +165,40 @@ for f in after_artifact.json cohort_manifest.json; do
   fi
 done
 
+# ── 3-B：I-129 的量測欄位（validation-only；見 docs/issue.md I-129） ────────
+# ⚠️ **一定要排在這裡**：結束時 trap 會把整個 $WORK（含 after artifact）刪掉，外部程式事後讀不到。
+# ⚠️ 欄位清單與檢查規則都從 package import（`validate_measurement_fields()`），⛔ 不在這裡另抄一份；
+# 它也要求**至少一列** `decision_fields_available=true`——全部都沒有有效決策時，逐列檢查會全部
+# 通過、等於什麼都沒驗到，所以那種情況判失敗（⛔ 不拿掉這條；合成資料不夠就改 make_smoke_bundle.py）。
+# 用工作樹的 python/：Stage 1 跑的正是「HEAD ＋ 工作樹的 tooling patch」，兩邊是同一份程式碼。
+echo "==> 量測欄位檢查（I-129）"
+if [ -s "$STAGE1_OUT/after_artifact.json" ]; then
+  if docker run --rm -i --network none \
+       --user "$(id -u):$(id -g)" \
+       -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \
+       -v "$REPO_ROOT/python":/app:ro \
+       -v "$STAGE1_OUT":/stage1:ro \
+       -w /app "$IMAGE" python - > "$WORK/measurement.log" 2>&1 <<'PY'
+import json
+
+from backtest.modular.sr_scoring.replay_bundle import validate_measurement_fields
+
+with open("/stage1/after_artifact.json", encoding="utf-8") as fh:
+    rows = json.load(fh)["rows"]
+available = validate_measurement_fields(rows, "smoke 的 after artifact")
+print(f"    量測欄位：{len(rows)} 列都帶有欄位，decision 可用 {available} 列")
+PY
+  then
+    cat "$WORK/measurement.log"
+    pass "after artifact 的量測欄位齊全（至少一列 decision 可用）"
+  else
+    tail -20 "$WORK/measurement.log" >&2
+    fail "after artifact 的量測欄位檢查失敗"
+  fi
+else
+  fail "沒有 after artifact，量測欄位無法檢查（⛔ 不能當作通過）"
+fi
+
 # ── ④ Stage 2（before 版本） ──────────────────────────────────────────────
 echo "==> Stage 2（before）"
 if TOOLING_PATCH="$TOOLING_PATCH_ARG" AFTER_REF=HEAD \

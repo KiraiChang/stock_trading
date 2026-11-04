@@ -444,6 +444,82 @@ def check_diagnostics_row(row: dict[str, Any], label: str, *, side: str) -> None
             )
 
 
+# ── I-129 的量測欄位（validation-only；見 docs/issue.md I-129） ──────────────
+#
+# 用途：比較兩版決策時逐列對齊「哪些輸出變了」。值全部取自同一份 decision summary，
+# ⛔ 不在 replay 端重算。
+# ⚠️ ⛔ 不是九個診斷欄位：`DIAGNOSTIC_FIELDS`、no-zone fallback 與
+# `validate_diagnostics()` 的契約都不動。
+# ⚠️ 匯出端（`evaluation.py`）、測試與 smoke 的欄位檢查共用這一份清單與檢查，
+# ⛔ 不在多處各列一份——改了一邊而另一邊沒跟上時，沒有任何東西會報錯。
+DECISION_MEASUREMENT_STR_FIELDS = (
+    "market_action",
+    "action",
+    "entry_action_state",
+    "semantic_entry_permission_state",
+    "path_gate_state",
+    "risk_notes_digest",
+)
+DECISION_MEASUREMENT_LIST_FIELDS = ("semantic_reason_codes", "final_entry_reason_codes")
+DECISION_MEASUREMENT_FIELDS = DECISION_MEASUREMENT_STR_FIELDS + DECISION_MEASUREMENT_LIST_FIELDS
+RISK_NOTES_DIGEST_LENGTH = 16
+
+
+def risk_notes_digest(risk_notes: Any) -> str | None:
+    """`risk_notes` 的 canonical JSON 的 SHA-256 前 16 碼；`None` 時回 `None`。
+
+    ⚠️ 只用來比對「有沒有變」：replay report 會整份進 `metrics_json`，⛔ 不放全文。
+    """
+    if risk_notes is None:
+        return None
+    return sha256_hex(canonical_json_bytes(risk_notes))[:RISK_NOTES_DIGEST_LENGTH]
+
+
+def check_measurement_row(row: dict[str, Any], label: str) -> bool:
+    """**row-level 原語**：一列的量測欄位。回傳這一列的 `decision_fields_available`。
+
+    * 每個欄位的 key 都要存在。
+    * decision 可用的列：字串欄位是非空字串、list 欄位是字串 list（可以是空的）、
+      digest 是 16 碼十六進位小寫。
+    * decision 不可用的列：全部是 null——⛔ 不能沿用上一列的值。
+    """
+    where = f"{label} {row_key(row)}"
+    available = row.get("decision_fields_available")
+    # ⛔ 不能用 isinstance(x, int)：bool 是 int 的子類。
+    if not isinstance(available, bool):
+        raise ArtifactError(f"{where}：decision_fields_available 必須是 JSON true/false，實際 {available!r}")
+    for field in DECISION_MEASUREMENT_FIELDS:
+        if field not in row:
+            raise ArtifactError(f"{where}：缺少量測欄位 {field}（I-129）")
+        value = row[field]
+        if not available:
+            if value is not None:
+                raise ArtifactError(f"{where}：decision 不可用的列，{field} 必須是 null，實際 {value!r}")
+            continue
+        if field in DECISION_MEASUREMENT_LIST_FIELDS:
+            if not isinstance(value, list) or not all(isinstance(v, str) and v for v in value):
+                raise ArtifactError(f"{where}：{field} 必須是非空字串組成的 list，實際 {value!r}")
+        elif not isinstance(value, str) or not value:
+            raise ArtifactError(f"{where}：{field} 必須是非空字串，實際 {value!r}")
+    if available:
+        digest = row["risk_notes_digest"]
+        if len(digest) != RISK_NOTES_DIGEST_LENGTH or any(c not in "0123456789abcdef" for c in digest):
+            raise ArtifactError(f"{where}：risk_notes_digest 必須是 16 碼十六進位小寫，實際 {digest!r}")
+    return available
+
+
+def validate_measurement_fields(rows: Iterable[dict[str, Any]], label: str) -> int:
+    """整批的量測欄位檢查，回傳 decision 可用的列數。
+
+    ⚠️ **至少要有一列 decision 可用**：全部不可用時每一列都是 null，逐列檢查會全部通過，
+    等於什麼都沒驗到（空集合⛔ 不能算通過）。
+    """
+    available = sum(1 for row in rows if check_measurement_row(row, label))
+    if available == 0:
+        raise ArtifactError(f"{label}：沒有任何一列 decision_fields_available=true，量測欄位等於沒有驗到")
+    return available
+
+
 def candidate_keys(rows: Iterable[dict[str, Any]]) -> list[tuple[str, str, str]]:
     return [row_key(row) for row in rows if row[CANDIDATE_FIELD] is True]
 

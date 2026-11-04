@@ -1,6 +1,6 @@
 # I-129 計畫 v4：進場許可的 RR 判斷改由 execution gate 決定，setup 不合格最多試單
 
-> 狀態：⚠️ v4 待確認（2026-11-04；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 5 步（commit A 已改好、待 commit）。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -316,8 +316,9 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 1. ✅ 寫計畫書 v1，把 T-065 改列 I-129。
 2. ✅ v2：依第一輪 review 修訂。
 3. ✅ v3：依第二輪 review 修訂。
-4. ✅ v4（本版）：依第三輪 review 修訂。**停下來，等使用者確認本計畫書（含「6.5」的判準）。**
+4. ✅ v4（本版）：依第三輪 review 修訂。✅ 2026-11-04 使用者確認（含「6.5」的判準），`145fe58`。
 5. **commit A**：改 `evaluation.py` 與 `replay_bundle` 的欄位常數（「4.4」）、補單元測試，把「6.5」的欄位檢查接進 `scripts/smoke-replay-offline.sh`（合成 bundle 沒有有效決策列時一併調整 `make_smoke_bundle.py`），跑 `python/scripts/test.sh`。由使用者 commit 到分支；commit 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝A）。
+   * ⚠️ 2026-11-04 已改好、待使用者 commit。`python/scripts/test.sh` 通過（1756 passed、1 skipped；shell 測試 FAIL 0）；commit 前先用未 commit 的工作樹跑一次 smoke（patch 帶入改動）：通過，35 列都帶有欄位、decision 可用 35 列，`make_smoke_bundle.py` ⛔ 不需要調整。commit 之後的正式 smoke（HEAD＝A）還沒跑。
 6. 先寫「6.1」的測試，確認在 commit A 的程式上會紅。
 7. 改 `decision_engine.py`（「4.2」），更新「6.2」的既有測試，跑 `python/scripts/test.sh`。改前端（「4.3」），跑前端測試。由使用者 commit 成 **commit B**。
 8. 寫「6.5」的逐列比較工具（附測試）；commit B 之後在乾淨的工作樹上跑 smoke（含欄位檢查，HEAD＝B）。比較工具若在 commit B 之後才寫，要另外 commit，⛔ 不能讓 B 的工作樹不乾淨地跑 smoke。
@@ -337,7 +338,7 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 * `database-schema.md` 的欄位說明、`api-reference.md` 的版本字串與 `rr_gate.setup_qualified`。
 * `development-workflow.md`：逐列比較工具的用法（若保留在 repo）。
 * `sr-zone-scoring.md`「Decision Replay 的診斷欄位」：「4.4」的量測欄位（validation-only）。
-* `decision_engine.py` 註解裡指向 I-129 的活指標，改指主題文件。
+* 程式、測試與腳本裡指向 I-129 的註解與錯誤訊息（`decision_engine`、`evaluation`、`replay_bundle`、smoke 腳本與測試；收斂時全域搜尋 `I-129`），改指主題文件。
 * `sr-zone-scoring.md` 裡帶行號的 `decision_engine` 引用刪除時，同步減 `scripts/doc-refs-legacy.txt` 的額度。
 
 ## 修訂紀錄

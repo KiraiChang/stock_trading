@@ -287,9 +287,10 @@ def _u_anomalies(a: _Projection, b_row: dict[str, Any]) -> list[str]:
     * `rr_gate` 只多 `setup_qualified`（其餘鍵與 A 完全相同）。
     * B 的主 gate 不合格時（semantic 套上 execution gate、path 改看 execution gate 的連帶結果）：
       * `semantic_entry_permission_state` 只能變成 WAIT；
-      * `semantic_reason_codes` 只能**多出** RR 類的 code；
+      * `semantic_reason_codes` 與 `final_entry_reason_codes`：多出的只能是 RR 類的 code，少掉的只能是
+        `RR_BELOW_FULL_ENTRY`（v6：主 gate 先封頂到 WAIT 之後，secondary 已經沒有東西可降，依既有規則⛔ 不附它），
+        其餘只能是順序不同；
       * `path_gate_state` 只能變成 `RR_BLOCKED`；
-      * `final_entry_reason_codes` 只能**順序不同**（集合相同：gate 的 reason 改從 semantic 帶進來）；
       * `position_action_condition` 只能是 `reason_codes` 少了 `WAIT_PRICE_FOLLOW_THROUGH`
         （path 變成 `RR_BLOCKED` 之後，derived view ⛔ 不再帶那個 position reason），其餘鍵完全相同。
     其餘任何欄位不同都算異常（含 `U_IDENTICAL_FIELDS`）。
@@ -309,13 +310,9 @@ def _u_anomalies(a: _Projection, b_row: dict[str, Any]) -> list[str]:
         elif name == "path_gate_state":
             if not (gate_failed and b_row.get(name) == "RR_BLOCKED"):
                 bad.append(name)
-        elif name == "semantic_reason_codes":
-            a_codes, b_codes = set(a.semantic_reason_codes or []), set(b_row.get(name) or [])
-            if not (gate_failed and a_codes <= b_codes and (b_codes - a_codes) and (b_codes - a_codes) <= RR_REASON_CODES):
-                bad.append(name)
-        elif name == "final_entry_reason_codes":
-            a_codes, b_codes = a.final_entry_reason_codes or [], b_row.get(name) or []
-            if not (gate_failed and sorted(a_codes) == sorted(b_codes)):
+        elif name in ("semantic_reason_codes", "final_entry_reason_codes"):
+            a_list = a.semantic_reason_codes if name == "semantic_reason_codes" else a.final_entry_reason_codes
+            if not (gate_failed and _only_gate_reason_changes(a_list, b_row.get(name))):
                 bad.append(name)
         elif name == "position_action_condition":
             if not (gate_failed and _only_lost_follow_through(a.position_action_condition, b_row.get(name))):
@@ -323,6 +320,15 @@ def _u_anomalies(a: _Projection, b_row: dict[str, Any]) -> list[str]:
         else:
             bad.append(name)
     return bad
+
+
+# v6：B 的主 gate 不合格時，reason codes 允許的變化（多出的只能是 RR 類、少掉的只能是 `RR_BELOW_FULL_ENTRY`）。
+REASON_CODES_ALLOWED_TO_DISAPPEAR = frozenset({"RR_BELOW_FULL_ENTRY"})
+
+
+def _only_gate_reason_changes(a_codes: Optional[list[str]], b_codes: Optional[list[str]]) -> bool:
+    a_set, b_set = set(a_codes or []), set(b_codes or [])
+    return (b_set - a_set) <= RR_REASON_CODES and (a_set - b_set) <= REASON_CODES_ALLOWED_TO_DISAPPEAR
 
 
 def _only_lost_follow_through(a: Optional[dict[str, Any]], b: Optional[dict[str, Any]]) -> bool:

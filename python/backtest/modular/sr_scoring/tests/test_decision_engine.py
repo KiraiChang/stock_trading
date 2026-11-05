@@ -2521,7 +2521,7 @@ def test_secondary_gate_not_qualified_when_no_statistic_exists():
     assert gate["secondary_gate"]["qualified"] is False, "沒有統計可比時不得標成通過"
 
 
-# ── I-129：進場許可的 RR 判斷看 execution gate，setup 不合格最多試單 ─────────────
+# ── I-129：進場許可的 RR 判斷看 execution gate；setup 不合格的上限量測後退回等待確認 ─────
 # （見 docs/issue.md I-129 與計畫書「二」的 D1～D4、「6.1」）
 #
 # 改前：setup RR 不合格時 semantic 提前變成 BLOCKED → entry 改走限價（zone 上緣 100）
@@ -2532,16 +2532,27 @@ RR_REASON_CODES = {
     "RR_INSUFFICIENT", "RR_UNAVAILABLE", "NO_PRIMARY_ZONE", "RR_NOT_QUALIFIED",
     "EXECUTION_RR_INSUFFICIENT", "EXECUTION_RR_UNAVAILABLE", "RR_BELOW_FULL_ENTRY", "SETUP_RR_BELOW_MINIMUM",
 }
-D3_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
+D3_NOTE = "zone 歷史統計的風險報酬比未達門檻，先等待確認。"
 
 
 def _semantic(ds: dict) -> dict:
     return ds["decision_derived_view"]["semantic_pipeline"]
 
 
+def test_i129_setup_fail_cap_is_wait_after_measurement():
+    """D3 的上限：2026-11-04 正式量測判「證據不足」→ 照計畫書「4.5」退回等待確認。
+
+    沒有新的量測通過之前⛔ 不得改回試單（`PROBE_ALLOWED`）；這條測試讓改動一定要被看見。
+    """
+    from ..decision_engine import SETUP_FAIL_MAX_ENTRY_STATE
+
+    assert SETUP_FAIL_MAX_ENTRY_STATE == "WAIT_CONFIRMATION"
+
+
 @pytest.mark.parametrize("setup_rr", [1.4, 1.7])
-def test_i129_setup_fail_executable_qualified_caps_at_probe(setup_rr):
-    """原 T-065 的重現表：setup 1.4／1.7、壓力 122 → 市價 entry、executable≈2.43，最多試單（D3）。"""
+def test_i129_setup_fail_executable_qualified_waits(setup_rr):
+    """原 T-065 的重現表：setup 1.4／1.7、壓力 122 → 市價 entry、executable≈2.43；
+    setup 不合格的上限是等待確認（D3，量測後退回），semantic 與 final 都帶得出理由。"""
     ds = _continuation_full_entry_case(122.0, setup_rr=setup_rr)
     ctx, gate, semantic = ds["rr_context"], ds["rr_gate"], _semantic(ds)
 
@@ -2555,14 +2566,14 @@ def test_i129_setup_fail_executable_qualified_caps_at_probe(setup_rr):
     assert gate["qualified"] is True
     assert gate["setup_qualified"] is False
     assert gate["secondary_gate"]["qualified"] is True
-    # semantic 與 final 同進同出：封頂到 PROBE，理由是 setup 不合格
-    assert semantic["entry_permission_state"] == "PROBE_ALLOWED"
+    # semantic 與 final 同進同出：封頂到 WAIT，理由是 setup 不合格（⛔ 不是 BLOCKED）
+    assert semantic["entry_permission_state"] == "WAIT_CONFIRMATION"
     assert "SETUP_RR_BELOW_MINIMUM" in semantic["reason_codes"]
     permission = ds["final_entry_permission"]
-    assert permission["state"] == "PROBE_ALLOWED"
+    assert permission["state"] == "WAIT_CONFIRMATION"
     assert "SETUP_RR_BELOW_MINIMUM" in permission["reason_codes"]
-    assert ds["action"] == "BuySmall"
-    assert ds["market_action"] == "BUY_SMALL"
+    assert ds["action"] == "Hold"
+    assert ds["market_action"] == "WATCH"
     # risk note 說得出原因，而且⛔ 不再同時說「風險報酬比不足」
     assert D3_NOTE in ds["risk_notes"]
     assert "主交易區風險報酬比不足。" not in ds["risk_notes"]
@@ -2741,9 +2752,9 @@ def _assert_i129_invariants(ds: dict) -> None:
         assert not set(permission["reason_codes"]) & RR_REASON_CODES, permission
     if semantic_state == "BLOCKED":
         assert not set(_semantic(ds)["reason_codes"]) & RR_REASON_CODES, _semantic(ds)
-    # 2. setup 不合格 → final 最多 PROBE
+    # 2. setup 不合格 → final 最多等待確認（D3 的上限，量測後退回）
     if gate.get("setup_qualified") is False:
-        assert state in ("BLOCKED", "WAIT_CONFIRMATION", "PROBE_ALLOWED"), state
+        assert state in ("BLOCKED", "WAIT_CONFIRMATION"), state
     # 3. 沒有 final 專屬的 gate 時，semantic 與 final 的許可相等
     no_final_only_gate = (
         ds["entry_executability"].get("executable_now")

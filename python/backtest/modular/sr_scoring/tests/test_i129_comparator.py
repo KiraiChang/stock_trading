@@ -505,6 +505,38 @@ def test_e2e_u_group_allowed_gate_consequences(tmp_path):
     assert report["verdict"] == "PASS"
 
 
+def test_e2e_u_group_v6_full_entry_reason_may_disappear(tmp_path):
+    """v6（第 9 步正式量測的 7 列）：主 gate 與 secondary 都不合格時，A 的 semantic 只套了 secondary（PROBE＋
+    `RR_BELOW_FULL_ENTRY`），B 先被主 gate 封頂到 WAIT、secondary 已經沒有東西可降 → reason 裡少了 `RR_BELOW_FULL_ENTRY`。"""
+    a, b = _passing_pair()
+    a.append(_row("100", 30, setup_ok=True, final="WAIT_CONFIRMATION", side="A", semantic="PROBE_ALLOWED",
+                  semantic_codes=("CLOSE_RECLAIM", "RR_BELOW_FULL_ENTRY"), path="BLOCKING_ZONE_AHEAD",
+                  final_codes=("PRICE_TOO_FAR_FROM_ZONE", "CLOSE_RECLAIM", "RR_BELOW_FULL_ENTRY", "EXECUTION_RR_INSUFFICIENT"),
+                  gate_ok=False, gate_reason="EXECUTION_RR_INSUFFICIENT"))
+    b.append(_row("100", 30, setup_ok=True, final="WAIT_CONFIRMATION", side="B", semantic="WAIT_CONFIRMATION",
+                  semantic_codes=("CLOSE_RECLAIM", "EXECUTION_RR_INSUFFICIENT"), path="RR_BLOCKED",
+                  final_codes=("PRICE_TOO_FAR_FROM_ZONE", "CLOSE_RECLAIM", "EXECUTION_RR_INSUFFICIENT"),
+                  gate_ok=False, gate_reason="EXECUTION_RR_INSUFFICIENT"))
+    report = _run(tmp_path, a, b)
+    assert report["invariants"]["u_field_changed_rows"] == 0, report["anomaly_examples"]
+
+
+@pytest.mark.parametrize("a_codes, b_codes, gate_ok", [
+    (("CLOSE_RECLAIM", "RR_BELOW_FULL_ENTRY"), ("CLOSE_RECLAIM",), True),        # gate 合格時⛔ 不允許任何變化
+    (("CLOSE_RECLAIM", "PRICE_UPSIDE_FOLLOW_THROUGH"), ("CLOSE_RECLAIM",), False),  # 少掉的⛔ 不是 RR_BELOW_FULL_ENTRY
+    (("CLOSE_RECLAIM", "RR_INSUFFICIENT"), ("CLOSE_RECLAIM",), False),           # 少掉的是其他 RR code 也⛔ 不行
+])
+def test_e2e_u_group_v6_disallowed_disappearance(tmp_path, a_codes, b_codes, gate_ok):
+    a, b = _passing_pair()
+    reason = "RR_QUALIFIED" if gate_ok else "EXECUTION_RR_INSUFFICIENT"
+    a.append(_row("100", 30, setup_ok=True, final="WAIT_CONFIRMATION", side="A", semantic_codes=a_codes,
+                  gate_ok=gate_ok, gate_reason=reason))
+    b.append(_row("100", 30, setup_ok=True, final="WAIT_CONFIRMATION", side="B", semantic_codes=b_codes,
+                  gate_ok=gate_ok, gate_reason=reason))
+    report = _run(tmp_path, a, b)
+    assert report["u_changed_fields"].get("semantic_reason_codes") == 1
+
+
 @pytest.mark.parametrize("change", [
     {"final_entry_state": "PROBE_ALLOWED"},             # 必須完全相同的欄位
     {"market_action": "BUY_SMALL"},

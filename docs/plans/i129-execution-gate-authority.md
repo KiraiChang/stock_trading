@@ -1,6 +1,6 @@
-# I-129 計畫 v4：進場許可的 RR 判斷改由 execution gate 決定，setup 不合格最多試單
+# I-129 計畫 v7：進場許可的 RR 判斷改由 execution gate 決定；setup 不合格的試單設計經量測退回等待確認
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。⚠️ 實作中：「八」第 8 步 ✅ review 通過（commit C）、v5 ✅ 2026-11-04 確認；⚠️ 下一步：第 9 步（使用者依序跑兩趟 Stage 1 與比較工具）。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。⚠️ 下一步：commit D（退回＋v6＋v7）→ 實作「6.7」的退回驗收模式（commit E）→ 第 12 步。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -19,7 +19,10 @@
 
 1. 「選進場價」不再依賴 RR，資料流變成沒有循環的 DAG；execution gate 在真正的進場價上計算。
 2. semantic、final、`rr_gate` 三者一致，RR 不合格時有欄位說明理由。
-3. setup 不合格、但 executable RR 可量化且合格的列，**最多放行到試單**（`PROBE_ALLOWED`）。這個放寬要先通過「六」的離線量測才能上 live；不通過就退回「不放行」（「4.5」）。
+3. （**原設計，已退回**）setup 不合格、但 executable RR 可量化且合格的列，最多放行到試單（`PROBE_ALLOWED`），要先通過「6.5」的離線量測才能上 live。
+   2026-11-04 的正式量測判「證據不足」（P_q 只有 26 < 30，新放行組的平均實現 R 也是 −0.170），已照「4.5」退回：
+   **現行契約是 setup 不合格一律等待確認**（`WAIT_CONFIRMATION`＋`SETUP_RR_BELOW_MINIMUM`、⛔ 不放行）。退回版的驗收與部署門檻見「6.7」；
+   重新開放試單的門檻另外見「6.7」末段。
 
 不做：
 
@@ -27,7 +30,7 @@
 * `_entry_action_state()` 的 BUY／ACCUMULATE 細分（讀 setup RR 的 `>= 2.5`，兩者正規化後都是 `ENTRY_ALLOWED`，不影響許可）。只在主題文件記一行。
 * 門檻數值（`_minimum_rr()`、`FULL_ENTRY_MIN_RR`）、Lifecycle Engine、`schema_version=sr_zone_decision_replay_p0`、Go 端：都不改。
 * ⛔ 不做 Go 端「依版本失效快照」的機制；部署與回滾改用「七」的程序。
-* ⛔ 不部署。上 live 要出新 image，等 I-123～I-126 的觀察期結束（最早 2026-11-09）、本筆 review 通過、「六」的量測通過之後另立部署計畫，可以跟 T-076 共用同一次 build。
+* ⛔ 不部署。上 live 要出新 image，等 I-123～I-126 的觀察期結束（最早 2026-11-09）、本筆 review 通過、「6.7」的退回版驗收通過之後另立部署計畫，可以跟 T-076 共用同一次 build。
 
 ## 二、裁決
 
@@ -35,7 +38,7 @@
   `BLOCKED` 只留給結構事實：跌破（`BREAKDOWN_RISK`）、`AVOID`、收盤跌破支撐、daily `INVALIDATED`。
   RR 是策略條件、不是結構事實（同「lifecycle 不看 RR」）。兩種狀態的 action 都是 Hold／等待。
 * **D2 缺 zone 統計不放行**：setup RR 是 `None` 時，即使 executable RR 算得出來，也是 `qualified=false`／`RR_UNAVAILABLE`。現在一律 BLOCKED，改完只換成 WAIT。
-* **D3 setup 不合格最多試單**（2026-11-03 使用者確認，回應 review P1-1）。setup RR 有值但未達門檻時：
+* **D3 setup 不合格最多試單**（2026-11-03 使用者確認，回應 review P1-1；⚠️ **2026-11-05 已退回**：量測判「證據不足」，上限改成等待確認，見「4.5」「6.7」）。setup RR 有值但未達門檻時：
 
   | executable RR | 結果 |
   |---|---|
@@ -121,20 +124,22 @@ commit A ⛔ 不改任何決策邏輯，所以 A 的決策輸出與改前的 HEA
 ### 4.5 退回「不放行」
 
 D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證據不足時，把它改成 `WAIT_CONFIRMATION`：setup 不合格的列一律等待確認、⛔ 不放行，但「目標」1、2 的修正全部保留。退回要另開新版記錄量測結果，並改對應的測試。
+（✅ 2026-11-05 已執行：第 9 步判「證據不足」；退回版的驗收見「6.7」。）
 
 ## 五、行為改變
 
 | 列的類別 | 現在 | 改後 |
 |---|---|---|
 | setup 合格 | — | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes` **不變**；`rr_gate` 只多 `setup_qualified`。semantic 許可在 execution gate 不合格時對齊成 WAIT（final 本來就是 WAIT），`path_gate_state` 可能變成 `RR_BLOCKED` |
-| setup 不合格、executable 可量化且合格 | BLOCKED，無法診斷 | **PROBE_ALLOWED**＋`SETUP_RR_BELOW_MINIMUM`：**這是放寬**，action 最多 BuySmall |
+| setup 不合格、executable 可量化且合格 | BLOCKED，無法診斷 | **WAIT**＋`SETUP_RR_BELOW_MINIMUM`、action Hold（⚠️ 原設計是 PROBE＋最多 BuySmall 的放寬；2026-11-04 量測判「證據不足」後退回，見「4.5」「6.7」） |
 | setup 不合格、executable 可量化但不合格 | BLOCKED | WAIT＋`EXECUTION_RR_INSUFFICIENT` |
 | setup 不合格、target 未知 | BLOCKED | WAIT＋`RR_INSUFFICIENT` |
 | setup 缺值 | BLOCKED | WAIT＋`RR_UNAVAILABLE` |
 | 結構阻擋（任何 setup） | BLOCKED | BLOCKED（不變） |
 
-* 放寬只發生在 setup 不合格的列，而且是**所有 lifecycle**，不只 CONTINUATION。I-074 的 156 列只是其中一組回歸案例。
-* setup 不合格的列原本是 Hold，拿掉 `rr < 1.5` 的 return 之後可能變成 BuySmall；`strong` 仍要 setup ≥ 2.0，所以不會出現 Buy。
+* （原設計）放寬只發生在 setup 不合格的列，而且是**所有 lifecycle**，不只 CONTINUATION；I-074 的 156 列只是其中一組回歸案例。
+  退回之後⛔ 沒有任何放寬：setup 不合格的列一律是 WAIT 或結構性的 BLOCKED。
+* 拿掉 `rr < 1.5` 的 return 之後，`_decision_action()` 對 setup 不合格的列可能給出 BuySmall，但 final 是 WAIT，`_final_action_from_entry()` 一律輸出 Hold；`strong` 仍要 setup ≥ 2.0，所以不會出現 Buy。
 * 依設計，「試單升完整進場」與「反向收緊」都應該是 0；「6.5」逐列驗證。
 * `_minimum_rr()` 會隨 action 改變（PROBE_ENTRY → 1.5）。這只發生在 setup 不合格的列，setup 合格與否的分類不受影響：setup < 1.5 在任何門檻下都不合格。
 
@@ -239,7 +244,7 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 
 | 組 | 定義 | 要求 |
 |---|---|---|
-| U：setup 合格 | — | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes_digest`、`rr_context` 完全相同；`rr_gate` 只能多 `setup_qualified`。B 的主 gate 不合格時（v5，✅ 2026-11-04 確認）：`semantic_entry_permission_state` 只能變 WAIT、`semantic_reason_codes` 只能**多出** RR 類的 code、`path_gate_state` 只能變 `RR_BLOCKED`、`final_entry_reason_codes` 只能**順序不同**（集合相同）、`position_action_condition` 只能是 `reason_codes` 少了 `WAIT_PRICE_FOLLOW_THROUGH`。其他任何差異都算異常 |
+| U：setup 合格 | — | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes_digest`、`rr_context` 完全相同；`rr_gate` 只能多 `setup_qualified`。B 的主 gate 不合格時（v5，✅ 2026-11-04 確認）：`semantic_entry_permission_state` 只能變 WAIT、`semantic_reason_codes` 與 `final_entry_reason_codes` 多出的只能是 RR 類的 code、少掉的只能是 `RR_BELOW_FULL_ENTRY`（v6，✅ 2026-11-05 確認），其餘只能是順序不同；`path_gate_state` 只能變 `RR_BLOCKED`、`position_action_condition` 只能是 `reason_codes` 少了 `WAIT_PRICE_FOLLOW_THROUGH`。其他任何差異都算異常 |
 | G_new：新增放行 | setup 不合格、A 是 BLOCKED、B 是 PROBE | 看下方結果指標 |
 | G_wait／G_block | setup 不合格、B 是 WAIT 或結構 BLOCKED | A 必須是 BLOCKED |
 | 升級 | PROBE → ENTRY，或 action BuySmall → Buy | 必須是 0 |
@@ -295,6 +300,45 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 
 ⚠️ **governance 的離線數字⛔ 不當判準**：DB 路徑每檔只取最近 200 列，而且每一列會接前一列的事件狀態，用全量 artifact 重現不出 live 的母體。
 
+### 6.7 退回版（setup 不合格一律等待確認）的驗收（v7，✅ 2026-11-05 確認）
+
+退回之後⛔ 沒有新放行組（G_new），「6.5」的績效判準永遠是「證據不足」，⛔ 不能當退回版的部署門檻。
+退回版的**部署門檻**改用下列結構驗收；「6.5」只用在「重新開放試單」。
+
+**做法**：commit D 之後，用同一個 image（`sha256:854daa998f066c7ad9bc2499ba8fac4cdb205999dbc3d2a7b59077b55a558b0f`）、空 patch
+跑一趟 Stage 1（`AFTER_REF`＝D，約 3 小時；⛔ 不重跑 A），再用比較工具的**退回驗收模式**比較 A（`51cafe9`）與 D。
+image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 image 必須相同）。
+
+**判準**（全部成立才通過；任何一項不成立就⛔ 不部署，先查原因）：
+
+1. **輸入身分與結果標籤**：同「6.5」（envelope 與 provenance、image 與套件環境相同、空 patch、commit 分別等於 A／D、結果標籤跨版本相同）。
+2. **setup 不合格零放行**：`setup_rr_qualified=false` 的列，D 的 semantic 與 final 都⛔ 不得是 PROBE／ENTRY，
+   `market_action` 只能是 `WATCH`／`AVOID`；G_new ＝ 0。setup 缺值的列同樣⛔ 不得放行（D2）。
+3. **U／P 行為不變**：setup 合格的列套「6.5」U 組的規則（v6）——`final_entry_state`、`market_action`、`action`、`position_action`、
+   `risk_notes_digest`、`rr_context` 完全相同，其餘只允許 gate 不合格時的連帶差異；升級與收緊都是 0。
+4. **結構阻擋保留**（v7 第二輪：只看 D ⛔ 不夠，要依 **A 的**結構訊號判斷原本的阻擋是不是純 RR）：
+   * **結構訊號**只取和 RR 無關的事實：`market_action`＝AVOID 或 `action`＝Avoid、semantic 的理由有 `MARKET_ACTION_AVOID`、
+     `lifecycle_phase` 是 BREAKDOWN／INVALIDATED、`daily_confirmation_state` 是 INVALIDATED、`position_action` 是 EXIT／REDUCE／REDUCE_ON_BREAKDOWN。
+     ⚠️ ⛔ 不能看 final 的理由：final 是 BLOCKED 時只保留 daily 的理由，A 的混合案例（AVOID＋REDUCE、final 理由卻只有 `RR_UNAVAILABLE`）會被誤認成純 RR。
+   * 每一列的結構訊號 A、D 必須**完全相同**（⛔ 不得消失、也⛔ 不得多出）；`position_action` A、D 必須相同（減碼／退出指示⛔ 不得弱化）。
+   * A 是 BLOCKED 而且有結構訊號 → D 必須仍是 BLOCKED。
+   * A 是 BLOCKED 而且⛔ 沒有任何結構訊號（純 RR）→ D 只能是 WAIT，而且 final 理由必須有 RR 類的 code。
+   * D 是 BLOCKED 的列，A 必須有結構訊號（⛔ 不得新增阻擋），而且 D 的理由⛔ 不得是 RR 類（D1）。
+   * D 的 `daily_confirmation_state` 是 BLOCKED 或 INVALIDATED 時，final 必須是 BLOCKED。
+   * 正式 A／B 的資料已先驗過這幾條（B 的結構判定與 D 相同）：A 有結構訊號的 BLOCKED 6,650 列在 B 全部仍是 BLOCKED，
+     純 RR 的 5,491 列在 B 是 WAIT 5,453、PROBE 38（D 預期全部是 WAIT）；`position_action` 改變、結構訊號消失、daily 阻擋卻⛔ 沒有 BLOCKED 都是 0。
+   * 反例測試至少包含「A 的阻擋訊號在 D 被清掉、卻補上 RR 理由」：A 是 AVOID＋REDUCE＋BLOCKED，D 是 WATCH＋HOLD＋WAIT＋`RR_UNAVAILABLE` → 必須判不通過。
+5. 其餘「6.5」的結構不變式（final ⛔ 不得高於 semantic、`setup_qualified` 一致、decision 可用性一致等）照舊；第 4 項的結構訊號與 `position_action` 檢查同樣套用到「6.5」（試單模式），只會更嚴。
+
+比較工具新增 `--mode fallback`（commit E）：只套上面的判準、⛔ 不算績效指標；通過判 `FALLBACK_ACCEPTED`（結束碼 0），
+不通過依原本的分類判 `UNATTRIBUTABLE`／`INVARIANT_VIOLATION`。
+
+**部署門檻與重新開放試單的門檻要分開**：
+
+* **部署退回版**：「6.7」通過＋review 通過，再照「七」的程序另立部署計畫。⛔ 不需要「6.5」的績效判準。
+* **重新開放試單**（把 `SETUP_FAIL_MAX_ENTRY_STATE` 改回 `PROBE_ALLOWED`）：要另外再跑「6.5」並判 `PASS`——各項有效樣本都達最低值
+  （P_q 也要 ≥ 30），**而且安全判準全部成立**（含 G_new 的平均實現 R ≥ 0）。只補足樣本⛔ 不夠；在那之前⛔ 不得改回。
+
 ### 6.6 dev stack
 
 用 `docker-compose.dev.yml` 重建 python 服務，對一檔觸發分析，確認 API 回傳的版本字串是 p5／p3、`rr_gate.setup_qualified` 存在、前端的 RR 原因顯示中文標籤。
@@ -319,7 +363,7 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
 
 步驟 3～4 由部署計畫提供可重跑的腳本，輸出逐檔的核對結果。回滾不需要動 DB。
 
-上 live 的關卡仍是「6.5」的離線量測，⛔ 不依賴 live 的 governance 擋下新版。
+上 live 的關卡是「6.7」的退回版驗收（重新開放試單才需要「6.5」判 `PASS`），⛔ 不依賴 live 的 governance 擋下新版。
 
 ## 八、執行步驟
 
@@ -357,18 +401,38 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
    ```
 
    每趟會留下一個 worktree（I-118），跑完照 `development-workflow.md` 的規則清理。
-10. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。
+   （✅ 2026-11-04 跑完；比較工具 v6 判 `EVIDENCE_INSUFFICIENT` → 照「4.5」退回；「十」的「第 9 步」）
+10. **commit D**：退回（「4.5」）、比較工具的 v6 規則、計畫書 v7 與對應的測試。由使用者 commit。（⚠️ 2026-11-05 review 通過、待 commit）
+11. **commit E**：比較工具的退回驗收模式與第 4 項的結構阻擋判準（「6.7」）、反例測試。由使用者 commit；commit 之後在乾淨的工作樹上跑 smoke（HEAD＝E）。
+    ⚠️ E 只改比較工具、⛔ 不改產品程式碼，所以 Stage 1 跑 E 等於跑 D 的產品程式碼。
+12. 使用者跑一趟 Stage 1（`AFTER_REF`＝E、同一個 image），再用退回驗收模式比較 A 與 E（「6.7」）。Claude 判讀、寫進計畫書。
+    指令（在 repo 根目錄；`$A`、`$BUNDLE`、`$OUT` 同第 9 步）：
+
+    ```
+    D=$(git rev-parse HEAD)
+    REPLAY_IMAGE_ID=sha256:854daa998f066c7ad9bc2499ba8fac4cdb205999dbc3d2a7b59077b55a558b0f \
+      AFTER_REF=$D scripts/run-replay-offline.sh --bundle $BUNDLE \
+      --output-dir $OUT/d --before-ref $A
+    scripts/compare-i129-replay.sh --mode fallback --bundle $BUNDLE \
+      --a $OUT/a/after_artifact.json \
+      --b $OUT/d/after_artifact.json \
+      --a-commit $A --b-commit $D \
+      --output $OUT/report_fallback.json
+    ```
+13. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。
 
 ## 九、完成後的歸檔位置
 
 * `sr-zone-scoring.md`：
   * 「RR 語意分層」改寫。
-  * 「已知的單向性」改成現況規格：進場許可的 RR 判斷看 execution gate，setup 不合格最多試單。
+  * 「已知的單向性」改成現況規格：進場許可的 RR 判斷看 execution gate；**setup 不合格一律等待確認**（`WAIT_CONFIRMATION`＋`SETUP_RR_BELOW_MINIMUM`、⛔ 不放行）。
+  * 試單設計（D3 原案）與 2026-11-04 的量測結果記成**歷史**（為什麼退回、數字），連同「重新開放試單的門檻」（「6.7」末段）；
+    ⛔ 不得把試單寫成現況，也要寫明在新的「6.5」判 `PASS` 之前⛔ 不得改回。
   * 補「daily confirmation 不看 RR」。
   * 改掉「RR 不合格時進場一律仍是 BLOCKED」那一段。
   * I-074「156 列都維持 BLOCKED」加註：那是改前行為的紀錄。
   * `_entry_action_state()` 與 `strong` 仍讀 setup RR 的事實記一行。
-  * 「6.5」的量測結果摘要。
+  * 「6.5」的量測結果摘要與「6.7」的驗收結果。
 * `database-schema.md` 的欄位說明、`api-reference.md` 的版本字串與 `rr_gate.setup_qualified`。
 * `development-workflow.md`：逐列比較工具的用法（若保留在 repo）。
 * `sr-zone-scoring.md`「Decision Replay 的診斷欄位」：「4.4」的量測欄位（validation-only）。
@@ -468,6 +532,46 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
   （「100／98／101」那條另外也被「重算的 RR 未達門檻」攔下，屬於雙重涵蓋）。
 * 真實資料的校準樣本在新規則下仍然 0 異常（final ≤ semantic、G_new 的價格重算都成立）。測試 88 個。
 
+### 第 9 步：正式量測（2026-11-04；✅ 判「證據不足」→ 已退回「4.5」）
+
+* **執行**：使用者在 tmux 依序跑兩趟 Stage 1，同一個 image `sha256:854daa998f066c7ad9bc2499ba8fac4cdb205999dbc3d2a7b59077b55a558b0f`、兩趟都是空 patch。
+  * A（`51cafe9`）：15:20～18:01，13,417 列、候選 156 列（與 I-074 相同）。
+  * B（`c82adfc`）：18:02～20:41，13,417 列、候選 156 列。
+  * 執行期間 live 的 17:00 `sr_analysis` 正常（success、106 秒，與前一週 103～142 秒相當）；live 的 container ⛔ 沒有重啟或 OOM。
+  * 兩趟各留下一個 worktree（I-118），都已確認後移除。
+* **比較工具**：`INVARIANT_VIOLATION`，唯一不成立的是 `u_field_changed_rows=7`（其餘不變式、輸入身分、結果標籤、D3 前提全部成立）。
+  分組：U 3,309、P 40、G_new 38、G_wait 5,453、G_block 4,577。
+* **7 列的診斷（⛔ 不是 B 的程式錯誤）**：7 列都是同一種情況——setup 合格、主 gate 與 secondary 都不合格（actual RR 0.08～1.18，門檻 1.5～2.0）。
+  * A：舊的 `_apply_full_entry_gate_cap()` 只把 secondary 套到 semantic，semantic 是 PROBE＋`RR_BELOW_FULL_ENTRY`（主 gate 只在 final 套）。
+  * B：主 gate 不合格先把 semantic 封頂到 WAIT，secondary 已經沒有東西可降，依既有規則⛔ 不附 `RR_BELOW_FULL_ENTRY`。
+  * 所以 B 的 semantic／final reason codes **少了** `RR_BELOW_FULL_ENTRY`、多了主 gate 的 reason；final 狀態（WAIT）、risk notes、action 都相同。
+  * v5 只允許 reason codes「多出」RR 類的 code，漏了這種「少掉 `RR_BELOW_FULL_ENTRY`」的連帶差異。
+* **結果指標**（⚠️ 依「6.5」的判準 1，不變式不成立時⛔ 不進入判準 2、3；以下只供參考）：
+
+  | 指標 | G_new | P（對照組） |
+  |---|---|---|
+  | 訊號數／成交 | 38／38 | 40／39 |
+  | 停損觸及率 | 63.2%（24/38） | 69.2%（27/39） |
+  | 先到目標 | 34.2%（13/38） | P_q 15.4%（4/26） |
+  | 平均實現 R | −0.170（38 列） | −0.544（39 列） |
+  | forward_return 平均／正報酬比例 | +0.49%／50% | −1.71%／35% |
+
+  G_new 分在 9 檔，最多的 2399 占 10/38（26%）。
+  * 若不變式成立，判準 2 會因為 **P_q 只有 26 列（< 30）判「證據不足」**；判準 3 的「G_new 平均實現 R ≥ 0」也⛔ 不成立（−0.170）。
+    兩條路的結論都是**退回「4.5」（setup 不合格一律等待確認、⛔ 不放行）**。
+* **處置（2026-11-05 使用者確認）**：
+  1. **v6 規則修正**：B 的主 gate 不合格時，semantic／final 的 reason codes 多出的只能是 RR 類的 code、少掉的只能是 `RR_BELOW_FULL_ENTRY`
+     （其餘 v5 規則不變）；比較工具補上這條與 4 個測試（允許的那一種、以及 gate 合格時／少掉非 RR code／少掉其他 RR code 三種仍判異常）。
+  2. **正式判定**：只重跑比較工具（⛔ 沒有重跑 Stage 1；報告 `report_v6.json`，原本的 `report.json` 保留）：**`EVIDENCE_INSUFFICIENT`**，
+     唯一不足的是 P_q 先到目標 26 < 30；所有不變式、輸入身分、結果標籤、D3 前提都成立。
+  3. **照「4.5」退回**：`SETUP_FAIL_MAX_ENTRY_STATE` 改成 `WAIT_CONFIRMATION`。setup 不合格、executable 合格的列現在是 WAIT＋`SETUP_RR_BELOW_MINIMUM`、
+     action Hold，risk note「zone 歷史統計的風險報酬比未達門檻，先等待確認。」。「目標」1、2 的修正全部保留。
+     * 測試：重現表那條改成斷言 WAIT；新增一條釘住常數（要改回試單得先有新的量測通過）；不變式「setup 不合格 → final 最多試單」收緊成「最多等待確認」。
+     * 前端：`srZones.test.ts` 的 I-074 fixture 依真實輸出重新取樣（`WAIT_CONFIRMATION`）。
+     * 版本字串維持 p5／p3：commit B 的試單版本⛔ 沒有上過 live，`stock_sr_decisions` 裡⛔ 不會有要區分的舊語意。
+     * 驗證：sr_scoring 的測試 1,665 passed、1 skipped；前端 svelte-check 0 errors、vitest 161 passed、build 成功。
+  * ⚠️ 量測工具（commit C）保留原樣：它量的是「試單」的設計，G_new 的前提照 D3 原定義；之後若要重新評估放寬，可以直接沿用。
+
 ## 修訂紀錄
 
 * **v1（2026-11-03）**：execution gate 單一決定，setup 不合格的列完全依 executable RR 放行。
@@ -494,3 +598,12 @@ G_new 另外要求 ≥ 5 檔，而且單一檔 ≤ 50%。
   另外補了更嚴的不變式（B 是 BLOCKED 時理由⛔ 不得是 RR 類、A、B 的 decision 可用性一致）。
   ⚠️ 草案原本也把停損觸及率的分母改成「只取 stop 有值的列」，第 8 步 review 指出那⛔ 不保證更保守（可能拉高對照組的觸及率），已撤回、維持原定義。
   第 8 步 review 另外要求的身分檢查、D3 放行前提與結果標籤核對，都只會讓判定更嚴，⛔ 沒有放寬任何判準。
+* **v6（2026-11-05，✅ 使用者確認）**：第 9 步正式量測的比較工具判 `INVARIANT_VIOLATION`（7 列 U）。診斷：主 gate 與 secondary 都不合格時，
+  A 的 semantic 只套了 secondary（PROBE＋`RR_BELOW_FULL_ENTRY`），B 先被主 gate 封頂到 WAIT、secondary 已經沒有東西可降而⛔ 不附那個 code——
+  ⛔ 不是 B 的程式錯誤，是 v5 漏了「少掉 `RR_BELOW_FULL_ENTRY`」這種連帶差異。修正：B 的主 gate 不合格時，reason codes 多出的只能是 RR 類、
+  少掉的只能是 `RR_BELOW_FULL_ENTRY`。重跑比較工具的正式判定是 `EVIDENCE_INSUFFICIENT`，照「4.5」退回（D3 的上限改成等待確認）。
+* **v7（2026-11-05，✅ 使用者確認）**：v6 處置的 review 指出 2 項 P2 計畫缺口。修正：
+  * 退回之後⛔ 沒有新放行組，套「6.5」的判準永遠是證據不足 → 新增「6.7」退回版的獨立驗收（setup 不合格零放行、U／P 行為不變、結構阻擋保留），
+    並把**部署門檻**（「6.7」）與**重新開放試單的門檻**（新的「6.5」判 `PASS`，樣本與安全判準都要過）分開；「一」「七」「八」跟著改。
+  * 「九」的歸檔指示仍要求把「setup 不合格最多試單」寫成現況 → 改成現況是等待確認、試單設計記成歷史，並寫明改回的門檻。
+  * 第二輪 review（P1）：「結構阻擋保留」只檢查 D，D 若同時漏掉 A 原有的阻擋仍會通過 → 改成依 **A 的**結構訊號（與 RR 無關的事實）判斷原阻擋是不是純 RR，結構訊號與 `position_action` A、D 必須相同，有結構訊號的阻擋必須維持 BLOCKED，D 的 daily 是 BLOCKED／INVALIDATED 時 final 必須是 BLOCKED，並補「阻擋訊號被清掉、卻補上 RR 理由」的反例測試；這幾條已先在正式 A／B 資料上驗過，⛔ 沒有誤報。

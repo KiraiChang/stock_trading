@@ -215,14 +215,14 @@ describe('srZones analysis 的 zone builder runtime config', () => {
 // `_decision_semantic_pipeline()` 的回傳與 `_decision_summary_zone()` 的新欄位。
 describe('I-074 診斷欄位的型別契約', () => {
   it('SRSemanticPipeline 接得住四個新欄位', () => {
-    // 2026-11-04 重新取樣（I-129 之後：setup 不合格、executable 合格 → 最多試單）。
+    // 2026-11-05 重新取樣（I-129：setup 不合格、executable 合格 → 量測後退回等待確認，⛔ 不再是試單）。
     const pipeline: SRSemanticPipeline = {
       version: 'decision-semantic-pipeline-p5',
       event_signal: 'CLOSE_RECLAIM',
       lifecycle_phase: 'CONTINUATION',
       market_state: 'BULLISH_CONTINUATION',
       action_state: 'HOLD',
-      entry_permission_state: 'PROBE_ALLOWED',
+      entry_permission_state: 'WAIT_CONFIRMATION',
       reason_codes: ['CLOSE_RECLAIM', 'PRICE_UPSIDE_FOLLOW_THROUGH', 'SETUP_RR_BELOW_MINIMUM'],
       source_order: ['Event', 'Lifecycle', 'Market State', 'Bias', 'Action', 'Entry'],
       clear_zone_breakout: true,

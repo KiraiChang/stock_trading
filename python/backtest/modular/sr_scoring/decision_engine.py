@@ -530,8 +530,9 @@ def _decision_action(
     if bearish_setup and not bullish_setup:
         return "AVOID", "REDUCE", "Avoid", "避開", risk_notes
     # ⚠️ 只留 `rr is None` 的提前 return（I-129 D2：缺 zone 統計不放行）。
-    # `rr < 1.5` 的提前 return 已拿掉：RR 是否放行改由 execution gate 決定，setup 不合格最多試單（D3）；
-    # 留著的話 setup 1.4 被放行到 PROBE 時 action 仍是 Hold，又是一組矛盾。
+    # `rr < 1.5` 的提前 return 已拿掉：RR 是否放行改由 execution gate 決定，setup 不合格的上限由
+    # `SETUP_FAIL_MAX_ENTRY_STATE` 決定（D3）；留著的話，上限是試單時 setup 1.4 被放行到 PROBE、action 卻仍是 Hold，
+    # 又是一組矛盾。上限退回 WAIT 之後 final action 一律是 Hold（`_final_action_from_entry()`），兩者一致。
     # `strong` 的 `rr >= 2.0` 刻意保留（D4）：拿掉會讓 setup 1.9 這類已合格的列從 BuySmall 升成 Buy。
     if rr is None:
         return "WATCH", "HOLD", "Hold", "等待", risk_notes
@@ -645,7 +646,7 @@ def _final_entry_risk_notes(
     # 「主交易區風險報酬比不足。」只在 **gate 的判定就是 zone 統計**（`ZONE_STATISTIC`、`RR_INSUFFICIENT`）
     # 時才說——那時它正是不放行的理由；`_decision_action` 依 setup RR < 1.5 給的初值不夠
     # （setup 1.7 也會走到這裡）。executable RR 可量化時由下方 execution gate 的 note 說明，⛔ 不兩句並陳。
-    # setup 不合格、但 executable 合格（D3）→ 說明為什麼最多只到試單。
+    # setup 不合格、但 executable 合格（D3）→ 說明 setup 不合格的上限（`SETUP_FAIL_MAX_ENTRY_STATE`）。
     # `SETUP_RR_UNAVAILABLE`（缺 zone 統計，D2）⛔ 不動：它在任何情況下都成立。
     if rr_gate and "setup_qualified" in rr_gate:
         statistic_insufficient = (
@@ -658,8 +659,7 @@ def _final_entry_risk_notes(
             notes = [n for n in notes if _risk_note_code(n) != "SETUP_RR_INSUFFICIENT"]
         if state != "BLOCKED" and rr_gate.get("qualified") and rr_gate.get("setup_qualified") is False:
             notes.append(
-                SETUP_FAIL_CAPPED_NOTE if SETUP_FAIL_MAX_ENTRY_STATE == "PROBE_ALLOWED"
-                else "zone 歷史統計的風險報酬比未達門檻，先等待確認。"
+                SETUP_FAIL_PROBE_NOTE if SETUP_FAIL_MAX_ENTRY_STATE == "PROBE_ALLOWED" else SETUP_FAIL_WAIT_NOTE
             )
     if state in ("BLOCKED", "WAIT_CONFIRMATION"):
         cleaned_notes: list[Any] = []
@@ -1002,7 +1002,7 @@ def _final_entry_permission(
         ])
     # ── execution gate（I-129）：與 semantic 共用 `_apply_execution_gate_caps` ────────────
     #
-    # 主 gate 不合格 → WAIT；setup 不合格但 executable 合格 → 最多試單（D3）；
+    # 主 gate 不合格 → WAIT；setup 不合格但 executable 合格 → 最多 `SETUP_FAIL_MAX_ENTRY_STATE`（D3）；
     # secondary 不合格 → 最多試單（T-055：`final_entry_permission` 才是契約宣告的
     # authoritative 欄位，只把 deprecated 的 `action` 降成 BuySmall 不夠）。
     # semantic 已經套過同一組規則，這裡再套一次是冪等的；兩邊用同一支，所以⛔ 不會分岔。
@@ -1393,11 +1393,15 @@ GATE_KIND_PROBE = "PROBE"
 GATE_KIND_FULL_ENTRY = "FULL_ENTRY"
 
 # I-129 D3：setup RR 不合格、executable RR 可量化且合格時，進場許可的上限。
-# ⚠️ **放寬集中在這一個常數**：離線量測不通過或證據不足時，改成 "WAIT_CONFIRMATION"
-# 就是「setup 不合格一律等待確認、⛔ 不放行」（計畫書「4.5」），其餘修正全部保留。
-SETUP_FAIL_MAX_ENTRY_STATE = "PROBE_ALLOWED"
+# ⚠️ **放寬集中在這一個常數**。原設計是 "PROBE_ALLOWED"（最多試單），但要先通過離線量測才能上 live；
+# 2026-11-04 的正式量測判「證據不足」（對照組先到目標的樣本只有 26 < 30，新放行組的平均實現 R 也是 −0.17），
+# 所以照計畫書「4.5」退回 "WAIT_CONFIRMATION"：setup 不合格一律等待確認、⛔ 不放行。
+# 其餘修正（進場價不再依賴 RR、semantic／final／rr_gate 一致、RR 不合格是 WAIT 而⛔ 不是 BLOCKED）全部保留。
+# 沒有新的量測通過之前⛔ 不得改回試單（見 docs/issue.md I-129）。
+SETUP_FAIL_MAX_ENTRY_STATE = "WAIT_CONFIRMATION"
 SETUP_RR_INSUFFICIENT_NOTE = "主交易區風險報酬比不足。"
-SETUP_FAIL_CAPPED_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
+SETUP_FAIL_PROBE_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
+SETUP_FAIL_WAIT_NOTE = "zone 歷史統計的風險報酬比未達門檻，先等待確認。"
 
 
 def _minimum_rr(primary_zone: Optional[ZoneScore], entry_action_state: str) -> float:

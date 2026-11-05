@@ -3424,11 +3424,15 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v4（✅ 2026-11-04 確認；v1、v2、v3 各經一輪 review 退回）：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定；setup 不合格的試單設計經量測判「證據不足」，已退回等待確認；commit A ✅ `51cafe9`；第 7 步 ✅ review 通過（commit B `c82adfc`）；第 8 步 ✅ review 通過（commit C `65c50e8`）；第 9 步量測判「證據不足」→ 已退回「4.5」（setup 不合格一律等待確認）；v7 ✅ 確認；commit D ✅ `dcc37df`；退回驗收模式 ✅ review 通過（commit E）；⚠️ 下一步：跑一趟 Stage 1 驗收「6.7」） |
+| 狀態 | 進行中（計畫 v4（✅ 2026-11-04 確認；v1、v2、v3 各經一輪 review 退回）：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定；setup 不合格的試單設計經量測判「證據不足」，已退回等待確認；commit A ✅ `51cafe9`；第 7 步 ✅ review 通過（commit B `c82adfc`）；第 8 步 ✅ review 通過（commit C `65c50e8`）；第 9 步量測判「證據不足」→ 已退回「4.5」（setup 不合格一律等待確認）；v7 ✅ 確認；commit D ✅ `dcc37df`；commit E ✅ `4da7c3a`；退回版驗收 ✅ `FALLBACK_ACCEPTED`（2026-11-05）；⚠️ 下一步：第 13 步歸檔） |
 | 嚴重度 | 中高（會產出**無法診斷**的 `BLOCKED`：對外的 `rr_gate` 兩層都通過、RR 11.0，卻禁止進場，而且沒有任何欄位說明理由；那個 11.0 本身也是 setup gate 擋掉之後才算出來的） |
 | 分類 | Python / SR Zone / 決策語意 / 資料契約 |
 | 發現日期 | 2026-08-27 |
 | 來源 | 原記於 `todo.md` T-055 第三輪 review 的 F1 裁決（T-055 已於 2026-08-27 收斂）——封頂做法只涵蓋單向，反向由 T-065 承接；**2026-11-03 依分流規則改列本筆**（描述的是矛盾結果，不是功能擴充），**T-065 編號不回收**。現況說明見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「已知的單向性」 |
+
+#### 跑測分析 Review（2026-11-05）
+
+獨立紀錄見 [I-129 Replay 跑測與分析適切性 Review](./plans/i129-replay-measurement-review.md)。退回等待確認與既有 FALLBACK_ACCEPTED 結論保留；另記時間外驗證、成交價 RR 落差、最大不利偏移範圍及混合 R／成本口徑四項補強建議。補強尚未實作，範圍與正式方案待裁決；P1 是重新評估放寬前的證據缺口，不代表已推翻退回版結構驗收。原案歸檔時須保留未解發現的追蹤，不直接視為已解決。
 
 #### 成因：封頂是單調遞減運算，判定在更上游就提前結束
 

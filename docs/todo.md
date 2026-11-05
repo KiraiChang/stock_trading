@@ -15,12 +15,12 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-080 起算`。**（**T-065 於 2026-11-03 改列 `issue.md` I-129**——描述的是矛盾結果（兩層 gate 都過卻 BLOCKED），依分流規則屬於 issue；**編號不回收**；原文見 `git show 7312251:docs/todo.md`。**T-071 於 2026-11-03 收斂**——驗收條件 1～6 早已成立；條件 7（live 觀察 A 類）以保留期內的 `job_runs` 與快照判定：能確認的 19 輪 A 類都是 0、failed 的 12 輪都是逾時或前置不成立，**A 類維持 Warn**（使用者確認；證據缺口照實記錄）。現況在 `architecture.md`「終止上市對帳」（含對帳分類與 live 觀察）、`database-schema.md` 的 `delisting_events`、`api-reference.md` 的手動端點，dev 驗收步驟在 `development-workflow.md`「在 dev stack 上驗終止上市對帳」；程式與設定的註解已改成指向上述主題文件；測試註解裡的編號（#19、#20g 等）出自原 T-071 的測試表，原文見 `git show b9cf198:docs/todo.md`。**T-074 於 2026-11-03 收斂**——`check-doc-refs.py` 改掃 `docs/` 底下全部子目錄（含 `architecture/`）、計畫書的 `檔名:行號` 由工具擋；現況在腳本的 docstring、`development-workflow.md` 講 doc-refs 的那一節與 `CLAUDE.md`「協作流程」；原文見 `git show 00db801:docs/todo.md` 與 `git show 00db801:docs/plans/t074-doc-refs-scope.md`。**T-075 於 2026-11-03 收斂**——live 的晚間兩輪 2026-10-28 起後移到 22:00／23:00、觀察確認；現況在 `architecture.md`「晚間兩輪的時間」，作業程序在 `development-workflow.md`「只改 live 的環境變數」；repo 預設的同步（原範圍 B）併入 T-076；原文見 `git show 9bdce8c:docs/todo.md` 與 `git show 9bdce8c:docs/plans/evening-batch-shift.md`。**T-078 於 2026-11-02 收斂**——`RACE=1` 補跑（I-123～I-126 階段 B 的 review 要求）、`smoke-dev.sh` 的依序 build 與部分服務模式、測試與 dev container 的 `oom_score_adj` 都已完成並實跑通過；現況在 `development-workflow.md`「Race detector」「container 上限的總和」「OOM 的犧牲順序」「重的步驟與 Claude session」「2. 啟動 dev stack 做 smoke test」；計畫書原文見 `git show 60576e1:docs/plans/oom-mitigation.md`；**編號不回收**。）（**T-079 於 2026-11-03 發出**——重現 `vet: signal: killed` 時查出 go test 的內建 vet 是多餘、又會在 Claude 跑時 OOM 的一輪。）（**T-078 於 2026-11-02 發出**——Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill、`RACE=1` 也跑不動，使用者要求立 OOM 改善計畫。**T-077、T-073、T-072 於 2026-10-30 收斂**——T-077 刪除了 I-074 Stage 2 的執行工具與漂移測試，解除 `python/` 產品碼的凍結（現況在 `development-workflow.md`「I-074 Stage 2 的 B／C 判讀與 image 還原」「I-074 Stage 2 的 tooling patch」「I-074 Stage 2 的測試落點」與 `sr-zone-scoring.md`「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫書原文見 `git show 7a3e042:docs/plans/t077-retire-i074-stage2-tooling.md`）；T-073 的兩個註解併入 T-077 階段 B 改完；T-072 隨 `test-i074-stage2.sh` 刪除而解除。**編號不回收。**）（**T-077 於 2026-10-29 發出**——I-074 收斂時發現 `scripts/test-replay-args.sh` 的漂移測試在 I-074 結束之後仍凍結 `python/` 的產品碼（收斂計畫 D3；原文見 `git show caf1442:docs/plans/i074-convergence.md`）。）（**T-076 於 2026-10-28 發出**——想把 15:00～17:00 的批次延後時發現 `pre_market`、`intraday`、`daily_close` 的時間寫死在程式裡，和 T-075 的範圍 B 一起做。）（**T-075 於 2026-10-28 發出**——I-074 ⑩ 的平日 17:00 時段要求晚間兩個批次永久後移一小時。）（**T-073／T-074 於 2026-10-27 發出**——`CLAUDE.md` 只留開發規則之後（`30d48ab`），兩個程式註解與 doc-refs 的檢查範圍都排到 I-074 ⑩ 之後。）（**T-072 於 2026-10-08 發出**——由 I-074「Stage 2 步驟 ⑧ 補齊與全量執行的結果」「六」#1 改列（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）：S2 的合成流程依賴 host 可用磁碟 ≥ 1.24 GB。）（**T-071 於 2026-09-04 發出**——使用者要求用 TWSE 終止上市 CSV 設定下市，查證後改為「補下市日期＋對帳」，**CSV 不驅動 `is_listed`**。）（**T-070 於 2026-09-02 發出、2026-09-08 執行完畢並收斂**——承接 `issue.md` I-102 收斂時未完成的執行期觀察；四個交易日的判讀、三個層次的查證方式與「`job_runs.error` 無原始錯誤外洩」的驗收結果都歸檔在 `architecture.md`「live 運作觀察：四個交易日（2026-09-03～09-08）」，觀察時順帶發現的 `corporate_action_sync` 可觀測性缺口另立 `issue.md` I-112——**該筆已於 2026-09-09 修復並收斂**，現況在 `architecture.md`「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號不回收。**）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
+- **編號只增不重用，`下一個新編號從 T-082 起算`。**（**T-065 於 2026-11-03 改列 `issue.md` I-129**——描述的是矛盾結果（兩層 gate 都過卻 BLOCKED），依分流規則屬於 issue；**編號不回收**；原文見 `git show 7312251:docs/todo.md`。**T-071 於 2026-11-03 收斂**——驗收條件 1～6 早已成立；條件 7（live 觀察 A 類）以保留期內的 `job_runs` 與快照判定：能確認的 19 輪 A 類都是 0、failed 的 12 輪都是逾時或前置不成立，**A 類維持 Warn**（使用者確認；證據缺口照實記錄）。現況在 `architecture.md`「終止上市對帳」（含對帳分類與 live 觀察）、`database-schema.md` 的 `delisting_events`、`api-reference.md` 的手動端點，dev 驗收步驟在 `development-workflow.md`「在 dev stack 上驗終止上市對帳」；程式與設定的註解已改成指向上述主題文件；測試註解裡的編號（#19、#20g 等）出自原 T-071 的測試表，原文見 `git show b9cf198:docs/todo.md`。**T-074 於 2026-11-03 收斂**——`check-doc-refs.py` 改掃 `docs/` 底下全部子目錄（含 `architecture/`）、計畫書的 `檔名:行號` 由工具擋；現況在腳本的 docstring、`development-workflow.md` 講 doc-refs 的那一節與 `CLAUDE.md`「協作流程」；原文見 `git show 00db801:docs/todo.md` 與 `git show 00db801:docs/plans/t074-doc-refs-scope.md`。**T-075 於 2026-11-03 收斂**——live 的晚間兩輪 2026-10-28 起後移到 22:00／23:00、觀察確認；現況在 `architecture.md`「晚間兩輪的時間」，作業程序在 `development-workflow.md`「只改 live 的環境變數」；repo 預設的同步（原範圍 B）併入 T-076；原文見 `git show 9bdce8c:docs/todo.md` 與 `git show 9bdce8c:docs/plans/evening-batch-shift.md`。**T-078 於 2026-11-02 收斂**——`RACE=1` 補跑（I-123～I-126 階段 B 的 review 要求）、`smoke-dev.sh` 的依序 build 與部分服務模式、測試與 dev container 的 `oom_score_adj` 都已完成並實跑通過；現況在 `development-workflow.md`「Race detector」「container 上限的總和」「OOM 的犧牲順序」「重的步驟與 Claude session」「2. 啟動 dev stack 做 smoke test」；計畫書原文見 `git show 60576e1:docs/plans/oom-mitigation.md`；**編號不回收**。）（**T-079 於 2026-11-03 發出**——重現 `vet: signal: killed` 時查出 go test 的內建 vet 是多餘、又會在 Claude 跑時 OOM 的一輪。）（**T-078 於 2026-11-02 發出**——Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill、`RACE=1` 也跑不動，使用者要求立 OOM 改善計畫。**T-077、T-073、T-072 於 2026-10-30 收斂**——T-077 刪除了 I-074 Stage 2 的執行工具與漂移測試，解除 `python/` 產品碼的凍結（現況在 `development-workflow.md`「I-074 Stage 2 的 B／C 判讀與 image 還原」「I-074 Stage 2 的 tooling patch」「I-074 Stage 2 的測試落點」與 `sr-zone-scoring.md`「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫書原文見 `git show 7a3e042:docs/plans/t077-retire-i074-stage2-tooling.md`）；T-073 的兩個註解併入 T-077 階段 B 改完；T-072 隨 `test-i074-stage2.sh` 刪除而解除。**編號不回收。**）（**T-077 於 2026-10-29 發出**——I-074 收斂時發現 `scripts/test-replay-args.sh` 的漂移測試在 I-074 結束之後仍凍結 `python/` 的產品碼（收斂計畫 D3；原文見 `git show caf1442:docs/plans/i074-convergence.md`）。）（**T-076 於 2026-10-28 發出**——想把 15:00～17:00 的批次延後時發現 `pre_market`、`intraday`、`daily_close` 的時間寫死在程式裡，和 T-075 的範圍 B 一起做。）（**T-075 於 2026-10-28 發出**——I-074 ⑩ 的平日 17:00 時段要求晚間兩個批次永久後移一小時。）（**T-073／T-074 於 2026-10-27 發出**——`CLAUDE.md` 只留開發規則之後（`30d48ab`），兩個程式註解與 doc-refs 的檢查範圍都排到 I-074 ⑩ 之後。）（**T-072 於 2026-10-08 發出**——由 I-074「Stage 2 步驟 ⑧ 補齊與全量執行的結果」「六」#1 改列（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）：S2 的合成流程依賴 host 可用磁碟 ≥ 1.24 GB。）（**T-071 於 2026-09-04 發出**——使用者要求用 TWSE 終止上市 CSV 設定下市，查證後改為「補下市日期＋對帳」，**CSV 不驅動 `is_listed`**。）（**T-070 於 2026-09-02 發出、2026-09-08 執行完畢並收斂**——承接 `issue.md` I-102 收斂時未完成的執行期觀察；四個交易日的判讀、三個層次的查證方式與「`job_runs.error` 無原始錯誤外洩」的驗收結果都歸檔在 `architecture.md`「live 運作觀察：四個交易日（2026-09-03～09-08）」，觀察時順帶發現的 `corporate_action_sync` 可觀測性缺口另立 `issue.md` I-112——**該筆已於 2026-09-09 修復並收斂**，現況在 `architecture.md`「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號不回收。**）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
   **仍然被佔用**：程式碼註解、主題文件與 git log 會留著舊 ID，重用會讓兩件無關的事
-  共用一個代號。本檔目前看得到的最大是 `T-079`，而 `T-062` / `T-066` / `T-067` / `T-069` 已經發出並收斂、
+  共用一個代號。本檔目前看得到的最大是 `T-081`，而 `T-062` / `T-066` / `T-067` / `T-069` 已經發出並收斂、
   `T-068` 已改列為 `issue.md` I-100、`T-065` 已改列為 `issue.md` I-129，
   更早也有多筆被移除（例如 `T-044` / `T-046` / `T-050` / `T-053` / `T-056` /
   `T-057` / `T-059` / `T-060`）。判斷可用編號時翻 git log 或本節，不要數檔案。
@@ -2919,3 +2919,47 @@ grep 到 `"RECOVERY"` 不代表 `structureStateText` 的那三個 key 還活著�
 
 **順帶一提**：`BREAKDOWN` 與 `SUPPORT_RECLAIM_INVALIDATED` 這兩個**產得出來但至今沒出現過**
 的值，其 label 兩邊是一致的，不在本筆的漂移範圍內。
+
+---
+
+### T-080：RR 策略計算與試單風控規劃書
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 規劃中（v5 已展開人工判斷工具六項工項；策略參數與正式實作方案待裁決） |
+| 優先度 | 中 |
+| 分類 | 策略／RR／Portfolio 風控 |
+| 建立日期 | 2026-11-05 |
+| 來源 | 使用者要求：另案集中規劃 RR 策略計算，以及試單上限、頻率與總曝險；案名、範圍及落檔方式已確認 |
+| 規劃書 | [`plans/t080-rr-strategy-and-probe-risk-controls.md`](./plans/t080-rr-strategy-and-probe-risk-controls.md) |
+
+既有持倉分析已有單檔金額／預計風險上限，無持倉時試單建議為完整允許股數的 50%；這是現況，並非本案已核准的未來參數。
+試單頻率、同股冷卻、連虧暫停新增建議及跨股總曝險估算，集中在規劃書列為待設計與待裁決事項；需要可靠的人工紀錄，資料不足時須標示無法判定。
+v2 已補入風險政策與資料估計的分工、各參數取得方式、預算反推股數、時序驗證／過度調參防範，以及 I-129 資料重用的限制；建議先評估股數風險預算、交易機會去重及整體風險上限。
+v3 另加入按帳戶淨值或預計投入資金百分比計算試單額度、分層配置及金額／風險雙重上限；資產基準、更新時點、累計占用與額度縮減處置留待開發討論，尚未核定比例或變更現行設定。
+v4 依使用者確認收斂為人工判斷工具，保留六項工項：計算規格與精度、資料品質、部位／曝險試算與提示、人工紀錄檢核、建議可追溯性及離線驗證。券商送單、交易額度預留／原子扣抵、成交回報／自動對帳及自動交易控制已移出本期，沿革保留於規劃書「3.6」。產生建議不扣款、不預留額度，也不當成已成交。
+v5 已於規劃書「3.5.1」～「3.5.6」逐項補入目的、輸入與建議行為、資料不足／異常處理、候選驗收案例及待裁決交付，供開發討論與估工；沿用人工判斷範圍，工程驗證與策略效益分開驗收，首版取捨及正式實作仍待確認。
+
+本案關聯 [I-129 計畫](./plans/i129-execution-gate-authority.md)，沿用其 RR 與進場許可的一致性邊界；I-129 退回等待確認的放寬方案，不能因本案新增風控而直接恢復試單。
+後續先核對分析入口與人工資料來源、裁決風險政策與校準方法，再依證據裁決策略參數，完成正式方案 review 後進入實作；目前交付為案件與規劃書紀錄。
+
+
+---
+
+### T-081：三層資產配置與動態再平衡規劃書
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 規劃中（v1 需求集中紀錄已建立；三層規則、配置比例、商品範圍與正式實作方案待裁決） |
+| 優先度 | 中 |
+| 分類 | 資產配置／分層策略／再平衡／人工判斷工具 |
+| 建立日期 | 2026-11-05 |
+| 來源 | 使用者確認：另案處理核心、長期投資、短期波動三層配置，各層獨立判斷，隨時間／價格／持有金額與比例提出調整及風險評估 |
+| 規劃書 | [`plans/t081-layered-asset-allocation-and-rebalancing.md`](./plans/t081-layered-asset-allocation-and-rebalancing.md) |
+
+本案獨立於 T-080，不擴充或改寫其 RR／試單範圍。三層各自定義持有目的、資料需求、週期與加減碼／退出條件，再由整體配置層協調共同資金、集中及重疊曝險。
+動態比較維持現況、加減碼、退出、保留現金及轉投其他商品，呈現調整前後比例／金額、風險、成本與資料限制；不預設改買商品就一定降低風險。
+同商品跨層須分開標記並合併計算曝險，層別合計與已登錄持倉一致；跨層轉移須保留理由及紀錄，不能把短期失敗交易自動改稱長期或核心。
+
+現有 position 是 `portfolio_id + symbol` 的合併 AVG projection，層別與損益歸因、資金／投資研究資料及非股票商品能力須先盤點，不能推定已有三層帳本。
+本期只提供人工判斷建議，不做自動下單、委託追蹤、資金預留或自動換倉；本次交付為案件與規劃書，參數與正式實作方案待 review／裁決。

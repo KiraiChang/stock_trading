@@ -1,6 +1,6 @@
 # I-129 計畫 v7：進場許可的 RR 判斷改由 execution gate 決定；setup 不合格的試單設計經量測退回等待確認
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。commit D ✅ `dcc37df`；「6.7」的退回驗收模式 ✅ review 通過（commit E）；⚠️ 下一步：第 12 步（使用者跑一趟 Stage 1，再用退回驗收模式比較）。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。commit D ✅ `dcc37df`、commit E ✅ `4da7c3a`；✅ 第 12 步退回版驗收 `FALLBACK_ACCEPTED`（2026-11-05）；⚠️ 下一步：第 13 步歸檔。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -406,8 +406,8 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
    （✅ 2026-11-04 跑完；比較工具 v6 判 `EVIDENCE_INSUFFICIENT` → 照「4.5」退回；「十」的「第 9 步」）
 10. **commit D**：退回（「4.5」）、比較工具的 v6 規則、計畫書 v7 與對應的測試。由使用者 commit。（✅ 2026-11-05 review 通過、commit `dcc37df`）
 11. **commit E**：比較工具的退回驗收模式與第 4 項的結構阻擋判準（「6.7」）、反例測試。由使用者 commit；commit 之後在乾淨的工作樹上跑 smoke（HEAD＝E）。
-    ⚠️ E 只改比較工具、⛔ 不改產品程式碼，所以 Stage 1 跑 E 等於跑 D 的產品程式碼。（✅ 2026-11-05 review 通過（一輪 review 修正 2 項），commit E；「十」）
-12. 使用者跑一趟 Stage 1（`AFTER_REF`＝E、同一個 image），再用退回驗收模式比較 A 與 E（「6.7」）。Claude 判讀、寫進計畫書。
+    ⚠️ E 只改比較工具、⛔ 不改產品程式碼，所以 Stage 1 跑 E 等於跑 D 的產品程式碼。（✅ 2026-11-05 review 通過（一輪 review 修正 2 項），commit `4da7c3a`；✅ smoke（HEAD＝E）通過；「十」）
+12. 使用者跑一趟 Stage 1（`AFTER_REF`＝E、同一個 image），再用退回驗收模式比較 A 與 E（「6.7」）。Claude 判讀、寫進計畫書。（✅ 2026-11-05 `FALLBACK_ACCEPTED`；「十」）
     指令（在 repo 根目錄；`$A`、`$BUNDLE`、`$OUT` 同第 9 步）：
 
     ```
@@ -600,6 +600,18 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
   → 每一列的 final 與 action 都要一致（`_final_action_from_entry()` 的對應），兩種模式都套。
 * 測試 118 個（原本 105 個）；反向驗證拿掉這兩項檢查，對應的測試都會失敗。
 * 正式 A／B 資料重跑：母體完整（13,417 列，⛔ 沒有缺漏）、final 與 action 的一致性在 B 上是 0；兩種模式的判定都與先前相同。
+
+### 第 12 步：退回版驗收（2026-11-05；✅ `FALLBACK_ACCEPTED`）
+
+* **smoke（HEAD＝E，乾淨的工作樹）**：通過，35 列都帶有量測欄位、decision 可用 35 列。
+* **Stage 1（E＝`4da7c3a`）**：使用者在 tmux 執行，11:34～14:20，13,417 列、候選 156 列；同一個 image `854daa99…`、空 patch。
+  執行期間 live 的盤中 intraday 35 輪全部 success（平均 9.5 秒），⛔ 沒有受影響。這一趟的 worktree 已確認後移除。
+  * 比較工具那一行貼上時少了最後的 `--output`（`ERROR: 缺少 --output`），由 Claude 用相同參數重跑比較工具（只讀兩份 artifact、⛔ 不重跑 Stage 1）。
+* **退回驗收模式（A＝`51cafe9` vs E）**：**`FALLBACK_ACCEPTED`**（結束碼 0）。母體完整（13,417 列）、輸入身分與結果標籤一致、所有不變式都是 0、U 組 0 異常。
+  分組：U 3,309、P 40、G_wait 5,491、G_block 4,577、G_new 0——G_wait 正好是試單版的 5,453 列加上原本放行的 38 列。
+  G_wait 依 lifecycle：TESTING 3,433、CONFIRMED 1,064、NORMAL 854、CONTINUATION 140。
+* 報告：`~/.cache/stock_trading/i129/report_fallback.json`（repo 外；試單版的 `report.json`、`report_v6.json` 也保留在同一個目錄）。
+* ⇒ 退回版的部署門檻（「6.7」）已通過；部署仍要另立部署計畫（「一」的不做、「七」的程序）。
 
 ## 修訂紀錄
 

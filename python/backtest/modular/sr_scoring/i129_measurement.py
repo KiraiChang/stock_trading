@@ -16,6 +16,12 @@
 4. `SAFETY_FAILED`：安全判準有一項不成立 → 退回「不放行」。
 
 全部通過才是 `PASS`。
+
+⚠️ **兩種模式**（`mode`）：
+* `probe`（預設）：量「setup 不合格最多試單」的設計（計畫書「6.5」），走上面四種結論。
+* `fallback`：驗收退回版「setup 不合格一律等待確認」（計畫書「6.7」）——⛔ 沒有新放行組，⛔ 不判績效指標；
+  依序判 `UNATTRIBUTABLE` → `INVARIANT_VIOLATION`，全部成立是 `FALLBACK_ACCEPTED`。
+兩種模式都套「6.7」第 4 項的結構阻擋檢查（依 **A 的**結構訊號判斷原本的阻擋是不是純 RR）。
 """
 from __future__ import annotations
 
@@ -190,6 +196,63 @@ RR_REASON_CODES = frozenset({
 })
 
 
+MODES = ("probe", "fallback")
+
+# 「6.7」第 4 項：結構訊號——只取和 RR 無關的事實。
+# ⚠️ ⛔ 不看 final 的理由：final 是 BLOCKED 時只保留 daily 的理由，A 的混合案例（AVOID＋REDUCE、final 理由卻只有
+# `RR_UNAVAILABLE`）會被誤認成純 RR。
+STRUCTURAL_POSITION_ACTIONS = frozenset({"EXIT", "REDUCE", "REDUCE_ON_BREAKDOWN"})
+
+
+def structural_signals(row: dict[str, Any]) -> frozenset[str]:
+    """一列的結構訊號（AVOID、跌破的 lifecycle、收盤跌破支撐、減碼／退出指示）。"""
+    out = set()
+    if row.get("market_action") == "AVOID" or row.get("action") == "Avoid":
+        out.add("AVOID_ACTION")
+    if "MARKET_ACTION_AVOID" in (row.get("semantic_reason_codes") or []):
+        out.add("AVOID_SEMANTIC")
+    if row.get("lifecycle_phase") in ("BREAKDOWN", "INVALIDATED"):
+        out.add("BREAKDOWN_PHASE")
+    if row.get("daily_confirmation_state") == "INVALIDATED":
+        out.add("DAILY_INVALIDATED")
+    if row.get("position_action") in STRUCTURAL_POSITION_ACTIONS:
+        out.add(f"POSITION_{row['position_action']}")
+    return frozenset(out)
+
+
+def bundle_universe_keys(loaded) -> set[tuple[str, str, str]]:
+    """凍結 bundle 蘊含的**全部候選列** key——與 Stage 1 的 universe 是同一個推導。
+
+    ⚠️ 直接呼叫 evaluation 的 `_sources_from_candle_rows()` 與 `_bundle_universe_keys()`（⛔ 不另寫一份候選範圍的算法）；
+    timeframe 與 dataset config 的取法同 `_replay_from_bundle()`。只比兩份 artifact 的 key 相同⛔ 不夠：
+    兩邊都只留同一小段時，比較照樣「通過」，卻漏驗了其餘的列（第 11 步 review P1）。
+    """
+    from .dataset import DatasetConfig
+    from .evaluation import _bundle_universe_keys, _sources_from_candle_rows
+
+    replay_config = loaded.replay_config
+    timeframe = str(replay_config.get("timeframe") or loaded.manifest["timeframe"])
+    dataset_config = DatasetConfig(**(replay_config.get("dataset_config") or {}))
+    sources = _sources_from_candle_rows(loaded.candles, timeframe, warn=False)
+    return set(_bundle_universe_keys(sources, dataset_config))
+
+
+# final 與 action 的對應（`decision_engine._final_action_from_entry()`）：WAIT 一律 WATCH＋Hold；BLOCKED 是 WATCH＋Hold 或
+# AVOID＋Avoid；PROBE ⛔ 不得是 Buy（第 11 步 review P2：WAIT 卻帶試單建議也要攔）。
+_FINAL_ACTIONS = {
+    "WAIT_CONFIRMATION": {("WATCH", "Hold")},
+    "BLOCKED": {("WATCH", "Hold"), ("AVOID", "Avoid")},
+}
+
+
+def _final_action_consistent(final_state: Optional[str], market_action: Any, action: Any) -> bool:
+    if final_state in _FINAL_ACTIONS:
+        return (market_action, action) in _FINAL_ACTIONS[final_state]
+    if final_state == "PROBE_ALLOWED":
+        return action != "Buy" and market_action != "BUY"
+    return True
+
+
 def _digest(value: Any) -> bytes:
     return bytes.fromhex(sha256_hex(canonical_json_bytes(value)))[:8]
 
@@ -222,6 +285,9 @@ class _Projection:
     semantic_reason_codes: Optional[list[str]] = None
     final_entry_reason_codes: Optional[list[str]] = None
     position_action_condition: Optional[dict[str, Any]] = None
+    # 「6.7」第 4 項：A 的結構訊號與減碼／退出指示
+    structural: frozenset = frozenset()
+    position_action: Optional[str] = None
 
 
 def _project(row: dict[str, Any]) -> _Projection:
@@ -239,6 +305,8 @@ def _project(row: dict[str, Any]) -> _Projection:
         semantic_reason_codes=row.get("semantic_reason_codes"),
         final_entry_reason_codes=row.get("final_entry_reason_codes"),
         position_action_condition=row.get("position_action_condition"),
+        structural=structural_signals(row),
+        position_action=row.get("position_action"),
     )
 
 
@@ -525,8 +593,12 @@ def compare_artifacts(
     bundle_id: str,
     expected_a_commit: str,
     expected_b_commit: str,
+    universe: set[tuple[str, str, str]],
+    mode: str = "probe",
 ) -> dict[str, Any]:
-    """串流比較兩份 Stage 1 after artifact，回傳報告（含 `verdict`）。"""
+    """串流比較兩份 Stage 1 after artifact，回傳報告（含 `verdict`）。`mode` 見模組說明。"""
+    if mode not in MODES:
+        raise ValueError(f"mode 只接受 {MODES}，實際 {mode!r}")
     unattributable: list[str] = []
 
     # ① 串流 A：全規則驗證＋量測欄位檢查，只留精簡投影
@@ -559,7 +631,7 @@ def compare_artifacts(
         a = a_rows.get(key)
         if a is None:
             return  # key 集合不一致：最後整體判 UNATTRIBUTABLE
-        _compare_row(col, key, a, row, candles)
+        _compare_row(col, key, a, row, candles, mode)
 
     b_load = stream_canonical_artifact(b_path, AFTER_KIND, on_row=on_b)
     b_validator.finish()
@@ -574,15 +646,50 @@ def compare_artifacts(
         unattributable.append(f"結果標籤在兩趟之間不同：{col.label_mismatch} 列（同一份凍結資料、同一天必須相同）")
     if col.label_not_matching_bundle:
         unattributable.append(f"G_new／P 的結果標籤對不上 bundle 的 candles：{col.label_not_matching_bundle} 列")
+    for side, keys in (("A", set(a_rows)), ("B", b_keys)):
+        if keys != universe:
+            unattributable.append(
+                f"{side} 的列與 bundle 的完整候選母體不同（缺 {len(universe - keys)}、多 {len(keys - universe)}；母體 {len(universe)} 列）"
+            )
     if set(a_rows) != b_keys:
         unattributable.append(
             f"列的 key 集合不同（只在 A：{len(set(a_rows) - b_keys)}、只在 B：{len(b_keys - set(a_rows))}）"
         )
 
-    return _report(col, a_load, b_load, len(a_rows), unattributable)
+    return _report(col, a_load, b_load, len(a_rows), unattributable, mode)
 
 
-def _compare_row(col: _Collector, key, a: _Projection, b_row: dict[str, Any], candles: CandleIndex) -> None:
+def _structural_checks(col: _Collector, key, a: _Projection, b_row: dict[str, Any], mode: str) -> None:
+    """「6.7」第 4 項：結構阻擋保留（兩種模式都套），以及退回驗收模式的零放行（第 2 項）。
+
+    ⚠️ 依 **A 的**結構訊號判斷原本的阻擋是不是純 RR——只看 B（或 D）的話，B 若同時漏掉原有的阻擋，
+    只剩 RR 理由、也⛔ 沒有阻擋跡象，照樣會通過。
+    """
+    a_state, b_state = a.final_entry_state, b_row.get("final_entry_state")
+    b_struct = structural_signals(b_row)
+    if a.structural != b_struct:
+        col.anomaly("STRUCTURAL_SIGNALS_CHANGED", key, {"a": sorted(a.structural), "b": sorted(b_struct)})
+    if a.position_action != b_row.get("position_action"):
+        col.anomaly("POSITION_ACTION_CHANGED", key, {"a": a.position_action, "b": b_row.get("position_action")})
+    if a_state == "BLOCKED" and a.structural and b_state != "BLOCKED":
+        col.anomaly("STRUCTURAL_BLOCK_REMOVED", key, {"a_signals": sorted(a.structural), "b": b_state})
+    if b_state == "BLOCKED" and not a.structural:
+        col.anomaly("NEW_BLOCK", key, {"a": a_state, "b_codes": b_row.get("final_entry_reason_codes")})
+    if (a_state == "BLOCKED" and not a.structural and b_state == "WAIT_CONFIRMATION"
+            and not set(b_row.get("final_entry_reason_codes") or []) & RR_REASON_CODES):
+        col.anomaly("UNBLOCK_WITHOUT_RR_REASON", key, b_row.get("final_entry_reason_codes"))
+    if b_row.get("daily_confirmation_state") in ("BLOCKED", "INVALIDATED") and b_state != "BLOCKED":
+        col.anomaly("DAILY_BLOCK_NOT_FINAL", key, {"daily": b_row.get("daily_confirmation_state"), "final": b_state})
+    if mode == "fallback" and b_row.get("setup_rr_qualified") is False:
+        semantic_state = b_row.get("semantic_entry_permission_state")
+        if semantic_state in ("PROBE_ALLOWED", "ENTRY_ALLOWED") or b_state in ("PROBE_ALLOWED", "ENTRY_ALLOWED"):
+            col.anomaly("FALLBACK_RELEASE", key, {"semantic": semantic_state, "final": b_state})
+        if b_row.get("market_action") not in ("WATCH", "AVOID"):
+            col.anomaly("FALLBACK_MARKET_ACTION", key, b_row.get("market_action"))
+
+
+def _compare_row(col: _Collector, key, a: _Projection, b_row: dict[str, Any], candles: CandleIndex,
+                 mode: str = "probe") -> None:
     symbol = key[0]
     if a.label_digest != _digest({f: b_row.get(f) for f in LABEL_FIELDS}):
         col.label_mismatch += 1
@@ -614,6 +721,9 @@ def _compare_row(col: _Collector, key, a: _Projection, b_row: dict[str, Any], ca
     if b_row.get("decision_fields_available") and gate.get("setup_qualified") is not b_setup:
         col.anomaly("SETUP_QUALIFIED_MISMATCH", key, {"rr_gate": gate.get("setup_qualified"), "diagnostic": b_setup})
     if b_row.get("decision_fields_available"):
+        if not _final_action_consistent(b_state, b_row.get("market_action"), b_row.get("action")):
+            col.anomaly("FINAL_ACTION_INCONSISTENT", key,
+                        {"final": b_state, "market_action": b_row.get("market_action"), "action": b_row.get("action")})
         semantic_state = b_row.get("semantic_entry_permission_state")
         # final 只會再套更多 gate：⛔ 不得高於 semantic
         if _rank(b_state) > _rank(semantic_state):
@@ -628,6 +738,8 @@ def _compare_row(col: _Collector, key, a: _Projection, b_row: dict[str, Any], ca
     # BLOCKED 只留給結構事實（D1）：理由⛔ 不得是 RR 類
     if b_state == "BLOCKED" and set(b_row.get("final_entry_reason_codes") or []) & RR_REASON_CODES:
         col.anomaly("BLOCKED_WITH_RR_REASON", key, b_row.get("final_entry_reason_codes"))
+    if a.decision_fields_available and b_row.get("decision_fields_available"):
+        _structural_checks(col, key, a, b_row, mode)
     # setup 缺值的列⛔ 不得放行（D2）
     setup_rr = (b_row.get("rr_context") or {}).get("setup_rr")
     if b_row.get("decision_fields_available") and setup_rr is None and b_state in ("PROBE_ALLOWED", "ENTRY_ALLOWED"):
@@ -647,7 +759,8 @@ def _compare_row(col: _Collector, key, a: _Projection, b_row: dict[str, Any], ca
 
     if group == "G_new":
         col.g_new_symbols[symbol] += 1
-        problems = _d3_precondition_problems(b_row)
+        # 退回驗收模式裡 G_new 本身就是違反（`FALLBACK_RELEASE`），⛔ 不再另驗試單的前提
+        problems = _d3_precondition_problems(b_row) if mode == "probe" else []
         if problems:
             col.anomaly("G_NEW_PRECONDITION", key, problems)
     if group in ("G_new", "P"):
@@ -730,13 +843,17 @@ def judge(
     g_new: dict[str, Any],
     p: dict[str, Any],
     g_new_symbols: Counter,
+    mode: str = "probe",
 ) -> tuple[str, list[str]]:
-    """依「6.5」的判準依序判定。回傳 `(verdict, reasons)`。"""
+    """依「6.5」（`probe`）或「6.7」（`fallback`）的判準依序判定。回傳 `(verdict, reasons)`。"""
     if unattributable:
         return "UNATTRIBUTABLE", list(unattributable)
     broken = [f"{k}={v}" for k, v in invariants.items() if v]
     if broken:
         return "INVARIANT_VIOLATION", broken
+    if mode == "fallback":
+        # 退回版⛔ 沒有新放行組：⛔ 不判績效指標（「6.7」）
+        return "FALLBACK_ACCEPTED", []
 
     insufficient: list[str] = []
     for name, metric, n_key in (
@@ -773,7 +890,8 @@ def judge(
     return "PASS", []
 
 
-def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: list[str]) -> dict[str, Any]:
+def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: list[str],
+            mode: str = "probe") -> dict[str, Any]:
     u_anomaly_rows = col.anomalies.get("U_FIELD_CHANGED", 0)
     invariants = {
         "u_field_changed_rows": u_anomaly_rows,
@@ -789,11 +907,23 @@ def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: lis
         "setup_qualified_mismatch": col.anomalies.get("SETUP_QUALIFIED_MISMATCH", 0),
         "final_above_semantic": col.anomalies.get("FINAL_ABOVE_SEMANTIC", 0),
         "setup_fail_above_probe": col.anomalies.get("SETUP_FAIL_ABOVE_PROBE", 0),
+        # 「6.7」第 4 項（兩種模式）
+        "structural_signals_changed": col.anomalies.get("STRUCTURAL_SIGNALS_CHANGED", 0),
+        "position_action_changed": col.anomalies.get("POSITION_ACTION_CHANGED", 0),
+        "structural_block_removed": col.anomalies.get("STRUCTURAL_BLOCK_REMOVED", 0),
+        "new_block": col.anomalies.get("NEW_BLOCK", 0),
+        "unblock_without_rr_reason": col.anomalies.get("UNBLOCK_WITHOUT_RR_REASON", 0),
+        "daily_block_not_final": col.anomalies.get("DAILY_BLOCK_NOT_FINAL", 0),
+        "final_action_inconsistent": col.anomalies.get("FINAL_ACTION_INCONSISTENT", 0),
+        # 「6.7」第 2 項（只有退回驗收模式）
+        "fallback_release": col.anomalies.get("FALLBACK_RELEASE", 0),
+        "fallback_market_action": col.anomalies.get("FALLBACK_MARKET_ACTION", 0),
     }
     g_new = outcome_metrics(col.outcomes.get("G_new", []), col.forward_returns.get("G_new", []))
     p = outcome_metrics(col.outcomes.get("P", []), col.forward_returns.get("P", []))
     verdict, reasons = judge(
         unattributable=unattributable, invariants=invariants, g_new=g_new, p=p, g_new_symbols=col.g_new_symbols,
+        mode=mode,
     )
     def prov(load) -> dict[str, Any]:
         pv = load.top.get("provenance") or {}
@@ -801,6 +931,7 @@ def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: lis
                 "tooling_patch_sha256": pv.get("tooling_patch_sha256"), "artifact_sha256": load.artifact_sha256}
     return {
         "schema": "i129_measurement_report_v1",
+        "mode": mode,
         "verdict": verdict,
         "verdict_reasons": reasons,
         "rows": row_count,

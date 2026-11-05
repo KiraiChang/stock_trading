@@ -5,9 +5,10 @@
 #   scripts/compare-i129-replay.sh --bundle <bundle 目錄> \
 #       --a <commit A 的 after_artifact.json> --b <commit B 的 after_artifact.json> \
 #       --a-commit <A 的完整 commit> --b-commit <B 的完整 commit> \
-#       --output <report.json>
+#       [--mode probe|fallback] --output <report.json>
+#   --mode probe（預設）量試單的設計（「6.5」）；--mode fallback 驗收退回版（「6.7」）。
 #
-# 結束碼：同 compare-i129-replay.py（0 PASS、3 退回「不放行」、4 不變式不成立、5 無法歸因）；1 ＝ 參數錯誤。
+# 結束碼：同 compare-i129-replay.py（0 PASS／FALLBACK_ACCEPTED、3 退回「不放行」、4 不變式不成立、5 無法歸因）；1 ＝ 參數錯誤。
 # 判準與流程：docs/issue.md I-129 指向的計畫書「6.5」。
 #
 # 設計重點：
@@ -20,9 +21,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-600m}"
 
-usage() { sed -n '4,9p' "$0" >&2; exit 1; }
+usage() { sed -n '4,10p' "$0" >&2; exit 1; }
 
-BUNDLE="" A="" B="" OUTPUT="" A_COMMIT="" B_COMMIT=""
+BUNDLE="" A="" B="" OUTPUT="" A_COMMIT="" B_COMMIT="" MODE="probe"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --bundle) BUNDLE="${2:-}"; shift 2 ;;
@@ -31,6 +32,7 @@ while [ "$#" -gt 0 ]; do
     --output) OUTPUT="${2:-}"; shift 2 ;;
     --a-commit) A_COMMIT="${2:-}"; shift 2 ;;
     --b-commit) B_COMMIT="${2:-}"; shift 2 ;;
+    --mode) MODE="${2:-}"; shift 2 ;;
     *) echo "ERROR: 不認得的參數 $1" >&2; usage ;;
   esac
 done
@@ -43,6 +45,7 @@ for pair in "--a-commit:$A_COMMIT" "--b-commit:$B_COMMIT"; do
   name="${pair%%:*}"; value="${pair#*:}"
   [[ "$value" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: $name 要是完整的 40 字元 commit：'$value'" >&2; exit 1; }
 done
+case "$MODE" in probe|fallback) ;; *) echo "ERROR: --mode 只接受 probe／fallback：'$MODE'" >&2; exit 1 ;; esac
 [ -d "$BUNDLE" ] || { echo "ERROR: 找不到 bundle 目錄 $BUNDLE" >&2; exit 1; }
 [ -f "$A" ] || { echo "ERROR: 找不到 $A" >&2; exit 1; }
 [ -f "$B" ] || { echo "ERROR: 找不到 $B" >&2; exit 1; }
@@ -75,4 +78,4 @@ exec docker run --rm --network none \
   "${MOUNTS[@]}" \
   -w /app "$IMAGE" \
   python scripts/compare-i129-replay.py --bundle "$BUNDLE" --a "$A" --b "$B" \
-    --a-commit "$A_COMMIT" --b-commit "$B_COMMIT" --output "$OUTPUT"
+    --a-commit "$A_COMMIT" --b-commit "$B_COMMIT" --mode "$MODE" --output "$OUTPUT"

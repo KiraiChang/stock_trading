@@ -329,10 +329,16 @@ def _passing_pair():
     return a, b
 
 
-def _run(tmp_path, a_rows, b_rows, *, a_kw=None, b_kw=None, expect=(A_COMMIT, B_COMMIT)):
+def _keys(rows):
+    return {(r["symbol"], r["timeframe"], r["as_of"]) for r in rows}
+
+
+def _run(tmp_path, a_rows, b_rows, *, a_kw=None, b_kw=None, expect=(A_COMMIT, B_COMMIT), mode="probe", universe=None):
+    """`universe` 預設是 A 的 key 集合（合成資料沒有真的 bundle 可推導）。"""
     return compare_artifacts(
         _write(tmp_path, "A", a_rows, **(a_kw or {})), _write(tmp_path, "B", b_rows, **(b_kw or {})), _candles(),
-        bundle_id=BUNDLE_ID, expected_a_commit=expect[0], expected_b_commit=expect[1],
+        bundle_id=BUNDLE_ID, expected_a_commit=expect[0], expected_b_commit=expect[1], mode=mode,
+        universe=_keys(a_rows) if universe is None else universe,
     )
 
 
@@ -629,6 +635,165 @@ def test_stop_touch_denominator_keeps_rows_without_stop():
     assert metrics["realized_r_n"] == 1, "實現 R 仍只取 stop 有值的列（計畫書原定義）"
 
 
+# ── 「6.7」：結構阻擋保留（兩種模式）與退回驗收模式 ───────────────────────────
+
+def _avoid_row(symbol, i, *, side, final="BLOCKED", **kw):
+    """有結構訊號的列：AVOID＋減碼（A 的混合案例：final 理由只有 RR 類，從理由⛔ 不能判斷原本有結構阻擋）。"""
+    params = dict(setup_ok=False, final=final, side=side, action="Avoid", market_action="AVOID",
+                  semantic="BLOCKED", semantic_codes=("MARKET_ACTION_AVOID",), final_codes=("RR_UNAVAILABLE",),
+                  position_action="REDUCE")
+    params.update(kw)
+    return _row(symbol, i, **params)
+
+
+def _fallback_pair():
+    """退回版該長的樣子：純 RR 的阻擋 → WAIT＋RR 理由；結構阻擋 → 仍 BLOCKED；P／U 不變。"""
+    a, b = [], []
+    for s_ in SYMBOLS:
+        for i in range(4):   # 純 RR 的阻擋（A 沒有任何結構訊號）
+            a.append(_row(s_, i, setup_ok=False, final="BLOCKED", side="A", final_codes=("RR_INSUFFICIENT",)))
+            b.append(_row(s_, i, setup_ok=False, final="WAIT_CONFIRMATION", side="B", d3=True))
+        for i in range(4, 6):   # 結構阻擋（AVOID＋REDUCE）
+            a.append(_avoid_row(s_, i, side="A"))
+            b.append(_avoid_row(s_, i, side="B", final_codes=("DAILY_CONFIRMATION_REQUIRED",)))
+        for i in range(8, 10):   # P：兩邊都是既有的試單
+            a.append(_row(s_, i, setup_ok=True, final="PROBE_ALLOWED", side="A", action="BuySmall", market_action="BUY_SMALL"))
+            b.append(_row(s_, i, setup_ok=True, final="PROBE_ALLOWED", side="B", action="BuySmall", market_action="BUY_SMALL"))
+    return a, b
+
+
+def test_fallback_mode_accepts_correct_fallback(tmp_path):
+    report = _run(tmp_path, *_fallback_pair(), mode="fallback")
+    assert report["mode"] == "fallback"
+    assert report["verdict"] == "FALLBACK_ACCEPTED", report["verdict_reasons"]
+    assert report["groups"].get("G_new", 0) == 0
+    assert report["groups"]["G_wait"] == 20 and report["groups"]["G_block"] == 10
+
+
+def test_fallback_mode_rejects_any_setup_fail_release(tmp_path):
+    """退回版：setup 不合格的列⛔ 不得放行（零放行）。用試單版（B）的資料跑退回驗收必須不通過。"""
+    a, b = _fallback_pair()
+    b[0] = _row(SYMBOLS[0], 0, setup_ok=False, final="PROBE_ALLOWED", side="B", action="BuySmall",
+                market_action="BUY_SMALL", d3=True)
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["verdict"] == "INVARIANT_VIOLATION"
+    assert report["invariants"]["fallback_release"] == 1
+    assert report["invariants"]["fallback_market_action"] == 1
+
+
+def test_fallback_mode_rejects_semantic_release_even_if_final_waits(tmp_path):
+    a, b = _fallback_pair()
+    b[0]["semantic_entry_permission_state"] = "PROBE_ALLOWED"
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["invariants"]["fallback_release"] == 1
+
+
+def test_probe_mode_passing_pair_fails_fallback_acceptance(tmp_path):
+    """同一份試單版的合格資料，在退回驗收模式下必須不通過（40 列放行）。"""
+    report = _run(tmp_path, *_passing_pair(), mode="fallback")
+    assert report["verdict"] == "INVARIANT_VIOLATION"
+    assert report["invariants"]["fallback_release"] == 40
+
+
+@pytest.mark.parametrize("mode", ["probe", "fallback"])
+def test_blocked_signal_cleared_but_rr_reason_added_is_rejected(tmp_path, mode):
+    """review 要求的反例：A 是 AVOID＋REDUCE＋BLOCKED（final 理由只有 `RR_UNAVAILABLE`），D 把阻擋訊號清掉、
+    變成 WATCH＋HOLD＋WAIT＋`RR_UNAVAILABLE` → 只看 D 會以為是純 RR 的阻擋被解除，必須判不通過。"""
+    a, b = _fallback_pair() if mode == "fallback" else _passing_pair()
+    a.append(_avoid_row("100", 40, side="A"))
+    b.append(_row("100", 40, setup_ok=False, final="WAIT_CONFIRMATION", side="B", final_codes=("RR_UNAVAILABLE",)))
+    report = _run(tmp_path, a, b, mode=mode)
+    assert report["verdict"] == "INVARIANT_VIOLATION"
+    inv = report["invariants"]
+    assert inv["structural_block_removed"] == 1
+    assert inv["structural_signals_changed"] == 1
+    assert inv["position_action_changed"] == 1
+
+
+@pytest.mark.parametrize("change, invariant", [
+    ({"position_action": "HOLD"}, "position_action_changed"),            # 減碼指示被弱化
+    ({"lifecycle_phase": "TESTING"}, "structural_signals_changed"),      # 跌破的 lifecycle 不見了
+], ids=["position_weakened", "breakdown_phase_lost"])
+def test_structural_signals_must_be_identical(tmp_path, change, invariant):
+    a, b = _fallback_pair()
+    a.append(_avoid_row("100", 40, side="A", phase="BREAKDOWN"))
+    b_row = _avoid_row("100", 40, side="B", phase="BREAKDOWN", final_codes=("DAILY_CONFIRMATION_REQUIRED",))
+    b_row.update(change)
+    b.append(b_row)
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["invariants"][invariant] == 1
+
+
+def test_daily_block_must_keep_final_blocked(tmp_path):
+    """D 的 daily 是 BLOCKED／INVALIDATED 時，final 必須是 BLOCKED。"""
+    a, b = _fallback_pair()
+    a.append(_row("100", 40, setup_ok=True, final="WAIT_CONFIRMATION", side="A"))
+    b.append(_row("100", 40, setup_ok=True, final="WAIT_CONFIRMATION", side="B", daily_confirmation_state="BLOCKED"))
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["invariants"]["daily_block_not_final"] == 1
+
+
+def test_new_block_without_structural_signal_is_rejected(tmp_path):
+    """D 是 BLOCKED，但 A ⛔ 沒有任何結構訊號：⛔ 不得新增阻擋。"""
+    a, b = _fallback_pair()
+    a.append(_row("100", 40, setup_ok=False, final="BLOCKED", side="A", final_codes=("RR_INSUFFICIENT",)))
+    b.append(_row("100", 40, setup_ok=False, final="BLOCKED", side="B", final_codes=("DAILY_CONFIRMATION_REQUIRED",)))
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["invariants"]["new_block"] == 1
+
+
+def test_pure_rr_unblock_needs_rr_reason(tmp_path):
+    """純 RR 的阻擋改成 WAIT 時，final 理由必須說得出是 RR。"""
+    a, b = _fallback_pair()
+    a.append(_row("100", 40, setup_ok=False, final="BLOCKED", side="A", final_codes=("RR_INSUFFICIENT",)))
+    b.append(_row("100", 40, setup_ok=False, final="WAIT_CONFIRMATION", side="B", final_codes=("DAILY_CONFIRMATION_REQUIRED",)))
+    report = _run(tmp_path, a, b, mode="fallback")
+    assert report["invariants"]["unblock_without_rr_reason"] == 1
+
+
+# ── 第 11 步 review：母體完整性、final 與 action 一致 ──────────────────────────
+
+@pytest.mark.parametrize("mode", ["probe", "fallback"])
+def test_truncated_population_is_unattributable(tmp_path, mode):
+    """P1：A、D 都只留同一筆既有試單列——兩邊的 key 相同，但⛔ 不是 bundle 的完整候選母體 → ⛔ 不出結論。"""
+    a, b = _fallback_pair() if mode == "fallback" else _passing_pair()
+    full = _keys(a)
+    p_idx = next(i for i, r in enumerate(a) if r.get("final_entry_state") == "PROBE_ALLOWED" and r["setup_rr_qualified"])
+    report = _run(tmp_path, [a[p_idx]], [b[p_idx]], mode=mode, universe=full)
+    assert report["verdict"] == "UNATTRIBUTABLE"
+    assert any("完整候選母體" in reason for reason in report["verdict_reasons"])
+
+
+def test_population_with_missing_universe_key_is_unattributable(tmp_path):
+    a, b = _fallback_pair()
+    universe = _keys(a) | {("100", "1d", _as_of(59))}
+    report = _run(tmp_path, a, b, mode="fallback", universe=universe)
+    assert report["verdict"] == "UNATTRIBUTABLE"
+
+
+@pytest.mark.parametrize("final, market_action, action", [
+    ("WAIT_CONFIRMATION", "WATCH", "BuySmall"),     # review 的反例：WAIT 卻帶試單建議
+    ("WAIT_CONFIRMATION", "BUY_SMALL", "Hold"),
+    ("BLOCKED", "WATCH", "BuySmall"),
+    ("BLOCKED", "AVOID", "Hold"),
+    ("PROBE_ALLOWED", "BUY", "Buy"),
+])
+@pytest.mark.parametrize("mode", ["probe", "fallback"])
+def test_final_state_and_action_must_be_consistent(tmp_path, mode, final, market_action, action):
+    """P2：final 與 action 要對得上（`_final_action_from_entry()`）：WAIT → WATCH＋Hold、BLOCKED → WATCH＋Hold 或 AVOID＋Avoid、PROBE ⛔ 不得是 Buy。"""
+    a, b = _fallback_pair() if mode == "fallback" else _passing_pair()
+    a.append(_row("100", 40, setup_ok=True, final=final, side="A", market_action=market_action, action=action))
+    b.append(_row("100", 40, setup_ok=True, final=final, side="B", market_action=market_action, action=action))
+    report = _run(tmp_path, a, b, mode=mode)
+    assert report["invariants"]["final_action_inconsistent"] == 1
+    assert report["verdict"] == "INVARIANT_VIOLATION"
+
+
+def test_unknown_mode_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="mode"):
+        _run(tmp_path, *_fallback_pair(), mode="lenient")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _cli():
@@ -639,13 +804,16 @@ def _cli():
     return module
 
 
-def _fake_bundle(monkeypatch):
+def _fake_bundle(monkeypatch, universe=None):
+    """CLI 用：換掉 bundle 的載入與母體推導（合成資料⛔ 沒有真的 replay config）。`universe=None` 時用合格資料的 key。"""
     import types
 
-    from .. import replay_bundle
+    from .. import i129_measurement, replay_bundle
 
     monkeypatch.setattr(replay_bundle, "load_bundle",
                         lambda _p: types.SimpleNamespace(bundle_id=BUNDLE_ID, candles=_candle_rows()))
+    keys = universe if universe is not None else _keys(_passing_pair()[0])
+    monkeypatch.setattr(i129_measurement, "bundle_universe_keys", lambda _loaded: keys)
 
 
 def test_cli_exit_codes(tmp_path, monkeypatch):
@@ -667,6 +835,22 @@ def test_cli_exit_codes(tmp_path, monkeypatch):
     args = ["--bundle", str(tmp_path), "--a", a_path, "--b", bad_b, "--a-commit", A_COMMIT, "--b-commit", B_COMMIT]
     assert cli.main(args + ["--output", str(tmp_path / "r2.json")]) == 5
     assert not (tmp_path / "r2.json").exists()
+
+
+def test_cli_fallback_mode_exit_code(tmp_path, monkeypatch):
+    _fake_bundle(monkeypatch, universe=_keys(_fallback_pair()[0]))
+    cli = _cli()
+    a, b = _fallback_pair()
+    base = ["--bundle", str(tmp_path), "--a", _write(tmp_path, "A", a), "--b", _write(tmp_path, "B", b),
+            "--a-commit", A_COMMIT, "--b-commit", B_COMMIT, "--mode", "fallback"]
+    assert cli.main(base + ["--output", str(tmp_path / "r.json")]) == 0
+    # 試單版的資料跑退回驗收 → 不變式不成立（4）
+    _fake_bundle(monkeypatch)
+    pa, pb = _passing_pair()
+    base = ["--bundle", str(tmp_path), "--a", _write(tmp_path, "A2", pa, commit=A_COMMIT),
+            "--b", _write(tmp_path, "B2", pb, commit=B_COMMIT),
+            "--a-commit", A_COMMIT, "--b-commit", B_COMMIT, "--mode", "fallback"]
+    assert cli.main(base + ["--output", str(tmp_path / "r2.json")]) == 4
 
 
 @pytest.mark.parametrize("bad", ["abc", "A" * 40, "a" * 39])

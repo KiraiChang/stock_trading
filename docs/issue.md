@@ -3424,7 +3424,7 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中（計畫 v4（✅ 2026-11-04 確認；v1、v2、v3 各經一輪 review 退回）：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定；setup 不合格的試單設計經量測判「證據不足」，已退回等待確認；commit A ✅ `51cafe9`；第 7 步 ✅ review 通過（commit B `c82adfc`）；第 8 步 ✅ review 通過（commit C `65c50e8`）；第 9 步量測判「證據不足」→ 已退回「4.5」（setup 不合格一律等待確認）；v7 ✅ 確認；⚠️ 下一步：commit D → 實作退回驗收模式（commit E）→ 跑一趟 Stage 1 驗收「6.7」） |
+| 狀態 | 進行中（計畫 v4（✅ 2026-11-04 確認；v1、v2、v3 各經一輪 review 退回）：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定；setup 不合格的試單設計經量測判「證據不足」，已退回等待確認；commit A ✅ `51cafe9`；第 7 步 ✅ review 通過（commit B `c82adfc`）；第 8 步 ✅ review 通過（commit C `65c50e8`）；第 9 步量測判「證據不足」→ 已退回「4.5」（setup 不合格一律等待確認）；v7 ✅ 確認；commit D ✅ `dcc37df`；退回驗收模式 ✅ review 通過（commit E）；⚠️ 下一步：跑一趟 Stage 1 驗收「6.7」） |
 | 嚴重度 | 中高（會產出**無法診斷**的 `BLOCKED`：對外的 `rr_gate` 兩層都通過、RR 11.0，卻禁止進場，而且沒有任何欄位說明理由；那個 11.0 本身也是 setup gate 擋掉之後才算出來的） |
 | 分類 | Python / SR Zone / 決策語意 / 資料契約 |
 | 發現日期 | 2026-08-27 |

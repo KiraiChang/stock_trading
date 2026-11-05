@@ -6,9 +6,11 @@
       --a <A 的 after_artifact.json> --b <B 的 after_artifact.json> \\
       --a-commit <A 的完整 commit> --b-commit <B 的完整 commit> --output <report.json>
   兩份 artifact 的 provenance.base_commit 必須分別等於 --a-commit／--b-commit（⛔ 不符就⛔ 不出結論）。
+  --mode probe（預設）：量試單的設計（計畫書「6.5」）；--mode fallback：驗收退回版（「6.7」，⛔ 不判績效）。
 
 結束碼（依報告的 `verdict`）：
   0 PASS                         放寬可以上 live（仍要走部署計畫）
+  0 FALLBACK_ACCEPTED            退回版通過驗收（--mode fallback）
   3 EVIDENCE_INSUFFICIENT／SAFETY_FAILED   退回「不放行」（計畫書「4.5」）
   4 INVARIANT_VIOLATION          程式錯誤，停下來修
   5 UNATTRIBUTABLE               輸入不一致或欄位檢查不過，⛔ 不出結論（含讀檔失敗）
@@ -27,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 EXIT_BY_VERDICT = {
     "PASS": 0,
+    "FALLBACK_ACCEPTED": 0,
     "EVIDENCE_INSUFFICIENT": 3,
     "SAFETY_FAILED": 3,
     "INVARIANT_VIOLATION": 4,
@@ -42,9 +45,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--a-commit", required=True, help="commit A 的完整 OID（40 字元）")
     parser.add_argument("--b-commit", required=True, help="commit B 的完整 OID（40 字元）")
     parser.add_argument("--output", required=True, help="報告輸出路徑（⛔ 不覆寫既有檔案）")
+    parser.add_argument("--mode", choices=("probe", "fallback"), default="probe",
+                        help="probe：量試單的設計（「6.5」）；fallback：驗收退回版（「6.7」）")
     args = parser.parse_args(argv)
 
-    from backtest.modular.sr_scoring.i129_measurement import build_candle_index, compare_artifacts
+    from backtest.modular.sr_scoring.i129_measurement import (
+        build_candle_index,
+        bundle_universe_keys,
+        compare_artifacts,
+    )
     from backtest.modular.sr_scoring.replay_bundle import ArtifactError, BundleError, load_bundle
 
     output = Path(args.output)
@@ -55,7 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         loaded = load_bundle(Path(args.bundle))
         report = compare_artifacts(
             args.a, args.b, build_candle_index(loaded.candles), bundle_id=loaded.bundle_id,
-            expected_a_commit=args.a_commit, expected_b_commit=args.b_commit,
+            expected_a_commit=args.a_commit, expected_b_commit=args.b_commit, mode=args.mode,
+            universe=bundle_universe_keys(loaded),
         )
     except (ArtifactError, BundleError) as exc:
         # 讀檔、驗證失敗：⛔ 不出結論

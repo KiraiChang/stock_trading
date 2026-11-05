@@ -1,6 +1,6 @@
 # I-129 計畫 v7：進場許可的 RR 判斷改由 execution gate 決定；setup 不合格的試單設計經量測退回等待確認
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。⚠️ 下一步：commit D（退回＋v6＋v7）→ 實作「6.7」的退回驗收模式（commit E）→ 第 12 步。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。commit D ✅ `dcc37df`；「6.7」的退回驗收模式 ✅ review 通過（commit E）；⚠️ 下一步：第 12 步（使用者跑一趟 Stage 1，再用退回驗收模式比較）。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
 > 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
 
@@ -194,6 +194,7 @@ D3 的上限集中在一個常數（`PROBE_ALLOWED`）。量測不通過或證�
 * 兩趟都設**同一個 `REPLAY_IMAGE_ID`**，避免各自重 build image（I-116 的風險）。
 * `--before-ref` 兩趟都傳 A 的完整 OID（I-115：Stage 1 必填但不使用）。`TOOLING_PATCH` 兩趟都是空的（D6）。
 * 比較前先斷言兩份 artifact 的 `bundle_id` 相同、provenance 的 `runtime_settings` 相同、列的 key 集合相同；任何一項不符就判「無法歸因」，⛔ 不出結論。
+  兩邊的 key 集合還要等於 bundle 推導出的完整候選母體（與 Stage 1 的 universe 同一個推導；第 11 步 review 補）。
 * 另外驗來源完整性與執行身分（第 8 步 review P1-1）：頂層 envelope 與 provenance 的封閉欄位與型別（`stage1` 規則）、`image_digest`、`python_version`、`pip_freeze_sha256` 兩趟相同、兩趟的 `tooling_patch_sha256` 都是空 patch 的值、`base_commit` 分別等於比較工具收到的 A／B（而且 A ≠ B）、`replay_scope` 是全候選。
 * 結果標籤跨版本核對（第 8 步 review P2）：`current_price`、K 棒、`forward_bars`、`forward_return` 等只由凍結資料與日期決定的欄位，A、B 必須完全相同；G_new 與 P 的 `current_price`、`forward_return` 還要對得上從 bundle candles 重算的值。不符就判「無法歸因」。
 
@@ -311,9 +312,10 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
 
 **判準**（全部成立才通過；任何一項不成立就⛔ 不部署，先查原因）：
 
-1. **輸入身分與結果標籤**：同「6.5」（envelope 與 provenance、image 與套件環境相同、空 patch、commit 分別等於 A／D、結果標籤跨版本相同）。
+1. **輸入身分、母體與結果標籤**：同「6.5」（envelope 與 provenance、image 與套件環境相同、空 patch、commit 分別等於 A／D、結果標籤跨版本相同），而且 A、D 的列都必須**完整覆蓋 bundle 推導出的候選母體**（第 11 步 review P1：只比兩邊的 key 相同，兩邊都只留同一小段時照樣會通過）。
 2. **setup 不合格零放行**：`setup_rr_qualified=false` 的列，D 的 semantic 與 final 都⛔ 不得是 PROBE／ENTRY，
    `market_action` 只能是 `WATCH`／`AVOID`；G_new ＝ 0。setup 缺值的列同樣⛔ 不得放行（D2）。
+   另外每一列的 final 與 action 都要一致（`_final_action_from_entry()` 的對應；第 11 步 review P2）：WAIT → WATCH＋Hold、BLOCKED → WATCH＋Hold 或 AVOID＋Avoid、PROBE ⛔ 不得是 Buy——WAIT 卻帶試單建議也要攔。
 3. **U／P 行為不變**：setup 合格的列套「6.5」U 組的規則（v6）——`final_entry_state`、`market_action`、`action`、`position_action`、
    `risk_notes_digest`、`rr_context` 完全相同，其餘只允許 gate 不合格時的連帶差異；升級與收緊都是 0。
 4. **結構阻擋保留**（v7 第二輪：只看 D ⛔ 不夠，要依 **A 的**結構訊號判斷原本的阻擋是不是純 RR）：
@@ -402,9 +404,9 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
 
    每趟會留下一個 worktree（I-118），跑完照 `development-workflow.md` 的規則清理。
    （✅ 2026-11-04 跑完；比較工具 v6 判 `EVIDENCE_INSUFFICIENT` → 照「4.5」退回；「十」的「第 9 步」）
-10. **commit D**：退回（「4.5」）、比較工具的 v6 規則、計畫書 v7 與對應的測試。由使用者 commit。（⚠️ 2026-11-05 review 通過、待 commit）
+10. **commit D**：退回（「4.5」）、比較工具的 v6 規則、計畫書 v7 與對應的測試。由使用者 commit。（✅ 2026-11-05 review 通過、commit `dcc37df`）
 11. **commit E**：比較工具的退回驗收模式與第 4 項的結構阻擋判準（「6.7」）、反例測試。由使用者 commit；commit 之後在乾淨的工作樹上跑 smoke（HEAD＝E）。
-    ⚠️ E 只改比較工具、⛔ 不改產品程式碼，所以 Stage 1 跑 E 等於跑 D 的產品程式碼。
+    ⚠️ E 只改比較工具、⛔ 不改產品程式碼，所以 Stage 1 跑 E 等於跑 D 的產品程式碼。（✅ 2026-11-05 review 通過（一輪 review 修正 2 項），commit E；「十」）
 12. 使用者跑一趟 Stage 1（`AFTER_REF`＝E、同一個 image），再用退回驗收模式比較 A 與 E（「6.7」）。Claude 判讀、寫進計畫書。
     指令（在 repo 根目錄；`$A`、`$BUNDLE`、`$OUT` 同第 9 步）：
 
@@ -571,6 +573,33 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
      * 版本字串維持 p5／p3：commit B 的試單版本⛔ 沒有上過 live，`stock_sr_decisions` 裡⛔ 不會有要區分的舊語意。
      * 驗證：sr_scoring 的測試 1,665 passed、1 skipped；前端 svelte-check 0 errors、vitest 161 passed、build 成功。
   * ⚠️ 量測工具（commit C）保留原樣：它量的是「試單」的設計，G_new 的前提照 D3 原定義；之後若要重新評估放寬，可以直接沿用。
+
+### 第 11 步：退回驗收模式（commit E；2026-11-05；✅ review 通過）
+
+* 比較工具新增 `--mode fallback`（CLI 與 wrapper 都有；預設仍是 `probe`）：只套「6.7」的判準、⛔ 不判績效，通過是 `FALLBACK_ACCEPTED`（結束碼 0）。
+* 「6.7」第 4 項的結構阻擋檢查**兩種模式都套**：
+  * 結構訊號：`market_action` AVOID 或 `action` Avoid、semantic 有 `MARKET_ACTION_AVOID`、lifecycle 是 BREAKDOWN／INVALIDATED、
+    daily 是 INVALIDATED、`position_action` 是 EXIT／REDUCE／REDUCE_ON_BREAKDOWN。
+  * 檢查項目：結構訊號 A／D 完全相同；`position_action` 相同；A 有結構訊號的 BLOCKED 必須維持 BLOCKED；
+    D 的 BLOCKED 必須在 A 有結構訊號；純 RR 的阻擋改成 WAIT 時 final 理由要有 RR 類的 code；D 的 daily 是 BLOCKED／INVALIDATED 時 final 必須是 BLOCKED。
+* 退回驗收模式另外檢查零放行：setup 不合格的列 semantic 與 final 都⛔ 不得是 PROBE／ENTRY、`market_action` 只能是 WATCH／AVOID。
+* 測試 105 個（原本 92 個），含 review 要求的反例「A 是 AVOID＋REDUCE＋BLOCKED（final 理由只有 `RR_UNAVAILABLE`）、
+  D 把阻擋訊號清掉變成 WATCH＋HOLD＋WAIT＋`RR_UNAVAILABLE`」（兩種模式都判不通過）。反向驗證逐一拿掉新檢查，對應的測試都會失敗。
+* **用正式 A／B 資料試跑**（B 是試單版，⛔ 不是驗收對象）：
+  * 試單模式：判定與先前相同（`EVIDENCE_INSUFFICIENT`，P_q 26 < 30）；新加的結構檢查在 13,417 列上都是 0。
+  * 退回驗收模式：`INVARIANT_VIOLATION`——`fallback_release=89`（38 列 final 是 PROBE，51 列是 semantic 被封頂在 PROBE、
+    final 因其他 gate 才是 WAIT）、`fallback_market_action=14`（G_new 裡 `BUY_SMALL` 的列）。退回版這些都應該是 WAIT／WATCH，
+    證明這個模式抓得到放行。
+
+#### 第 11 步的 review（2026-11-05）：1 項 P1、1 項 P2，經重現確認屬實，已修正
+
+* **P1 沒有確認完整母體**：輸入檢查只確認兩側 key 相同。用真實 A／B 各只留同一筆既有試單列、搭配完整 bundle 跑 CLI，原本會判 `FALLBACK_ACCEPTED`、結束碼 0。
+  → A、D 的 key 集合都必須等於 bundle 推導出的完整候選母體（直接呼叫 evaluation 的 `_sources_from_candle_rows()` 與 `_bundle_universe_keys()`，
+  與 Stage 1 的 universe 同一個推導；⛔ 沒有改產品程式碼）。重現同一個情境現在判 `UNATTRIBUTABLE`、結束碼 5（兩邊都缺 13,416 列）。
+* **P2 WAIT 列帶試單建議也會被接受**：final 是 WAIT、`market_action` 是 WATCH、`action` 卻是 BuySmall 仍會通過。
+  → 每一列的 final 與 action 都要一致（`_final_action_from_entry()` 的對應），兩種模式都套。
+* 測試 118 個（原本 105 個）；反向驗證拿掉這兩項檢查，對應的測試都會失敗。
+* 正式 A／B 資料重跑：母體完整（13,417 列，⛔ 沒有缺漏）、final 與 action 的一致性在 B 上是 0；兩種模式的判定都與先前相同。
 
 ## 修訂紀錄
 

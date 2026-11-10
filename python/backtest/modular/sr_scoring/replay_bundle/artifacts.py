@@ -444,7 +444,7 @@ def check_diagnostics_row(row: dict[str, Any], label: str, *, side: str) -> None
             )
 
 
-# ── I-129 的量測欄位（validation-only；見 docs/issue.md I-129） ──────────────
+# ── I-129 的量測欄位（validation-only；見 docs/sr-zone-scoring.md「I-129 的量測欄位」） ──────────────
 #
 # 用途：比較兩版決策時逐列對齊「哪些輸出變了」。值全部取自同一份 decision summary，
 # ⛔ 不在 replay 端重算。

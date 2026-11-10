@@ -2522,11 +2522,12 @@ def test_secondary_gate_not_qualified_when_no_statistic_exists():
 
 
 # ── I-129：進場許可的 RR 判斷看 execution gate；setup 不合格的上限量測後退回等待確認 ─────
-# （見 docs/issue.md I-129 與計畫書「二」的 D1～D4、「6.1」）
+# （規格與 D1～D4 的裁決編號見 docs/sr-zone-scoring.md「進場許可的 RR 判斷看 execution gate」）
 #
 # 改前：setup RR 不合格時 semantic 提前變成 BLOCKED → entry 改走限價（zone 上緣 100）
 # → execution gate 算出 (122−100)/(100−98)=11.0、兩層都過，對外卻是 BLOCKED，沒有欄位說得出原因。
-# 改後：entry 照結構走市價 105，executable=(122−105)/(105−98)≈2.43；setup 不合格只封頂到 PROBE。
+# 改後：entry 照結構走市價 105，executable=(122−105)/(105−98)≈2.43；setup 不合格封頂到等待確認
+# （D3 原案是試單，2026-11-04 量測後退回）。
 
 RR_REASON_CODES = {
     "RR_INSUFFICIENT", "RR_UNAVAILABLE", "NO_PRIMARY_ZONE", "RR_NOT_QUALIFIED",
@@ -2540,7 +2541,7 @@ def _semantic(ds: dict) -> dict:
 
 
 def test_i129_setup_fail_cap_is_wait_after_measurement():
-    """D3 的上限：2026-11-04 正式量測判「證據不足」→ 照計畫書「4.5」退回等待確認。
+    """D3 的上限：2026-11-04 正式量測判「證據不足」→ 退回等待確認。
 
     沒有新的量測通過之前⛔ 不得改回試單（`PROBE_ALLOWED`）；這條測試讓改動一定要被看見。
     """

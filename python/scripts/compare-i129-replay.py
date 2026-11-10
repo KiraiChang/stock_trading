@@ -6,16 +6,16 @@
       --a <A 的 after_artifact.json> --b <B 的 after_artifact.json> \\
       --a-commit <A 的完整 commit> --b-commit <B 的完整 commit> --output <report.json>
   兩份 artifact 的 provenance.base_commit 必須分別等於 --a-commit／--b-commit（⛔ 不符就⛔ 不出結論）。
-  --mode probe（預設）：量試單的設計（計畫書「6.5」）；--mode fallback：驗收退回版（「6.7」，⛔ 不判績效）。
+  --mode probe（預設）：量試單的設計；--mode fallback：驗收退回版（⛔ 不判績效）。
 
 結束碼（依報告的 `verdict`）：
   0 PASS                         放寬可以上 live（仍要走部署計畫）
   0 FALLBACK_ACCEPTED            退回版通過驗收（--mode fallback）
-  3 EVIDENCE_INSUFFICIENT／SAFETY_FAILED   退回「不放行」（計畫書「4.5」）
+  3 EVIDENCE_INSUFFICIENT／SAFETY_FAILED   維持「setup 不合格⛔ 不放行」
   4 INVARIANT_VIOLATION          程式錯誤，停下來修
   5 UNATTRIBUTABLE               輸入不一致或欄位檢查不過，⛔ 不出結論（含讀檔失敗）
 
-判準與規則都在計畫書（docs/issue.md I-129 指向的 plans/i129-execution-gate-authority.md「6.5」），
+判準與規則都在 docs/sr-zone-scoring.md「I-129 離線影響量測的判準」，
 實作在 `backtest/modular/sr_scoring/i129_measurement.py`。
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--b-commit", required=True, help="commit B 的完整 OID（40 字元）")
     parser.add_argument("--output", required=True, help="報告輸出路徑（⛔ 不覆寫既有檔案）")
     parser.add_argument("--mode", choices=("probe", "fallback"), default="probe",
-                        help="probe：量試單的設計（「6.5」）；fallback：驗收退回版（「6.7」）")
+                        help="probe：量試單的設計；fallback：驗收退回版（⛔ 不判績效）")
     args = parser.parse_args(argv)
 
     from backtest.modular.sr_scoring.i129_measurement import (

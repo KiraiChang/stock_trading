@@ -1395,9 +1395,9 @@ GATE_KIND_FULL_ENTRY = "FULL_ENTRY"
 # I-129 D3：setup RR 不合格、executable RR 可量化且合格時，進場許可的上限。
 # ⚠️ **放寬集中在這一個常數**。原設計是 "PROBE_ALLOWED"（最多試單），但要先通過離線量測才能上 live；
 # 2026-11-04 的正式量測判「證據不足」（對照組先到目標的樣本只有 26 < 30，新放行組的平均實現 R 也是 −0.17），
-# 所以照計畫書「4.5」退回 "WAIT_CONFIRMATION"：setup 不合格一律等待確認、⛔ 不放行。
+# 所以退回 "WAIT_CONFIRMATION"：setup 不合格一律等待確認、⛔ 不放行。
 # 其餘修正（進場價不再依賴 RR、semantic／final／rr_gate 一致、RR 不合格是 WAIT 而⛔ 不是 BLOCKED）全部保留。
-# 沒有新的量測通過之前⛔ 不得改回試單（見 docs/issue.md I-129）。
+# 沒有新的量測通過之前⛔ 不得改回試單（重新開放的門檻見 docs/sr-zone-scoring.md「進場許可的 RR 判斷看 execution gate」）。
 SETUP_FAIL_MAX_ENTRY_STATE = "WAIT_CONFIRMATION"
 SETUP_RR_INSUFFICIENT_NOTE = "主交易區風險報酬比不足。"
 SETUP_FAIL_PROBE_NOTE = "zone 歷史統計的風險報酬比未達門檻，最多觀察性試探。"
@@ -2796,7 +2796,7 @@ def build_decision_summary(
     ) if nearest_resistance_zone else None
     blocking_zone_ahead = _has_blocking_zone_ahead(zone_scores, daily_candidate_zones, current_price)
     entry_blocking_zone_ahead = bool(entry_blocking_zone.get("blocked"))
-    # ── I-129：資料流是沒有循環的 DAG（計畫書「4.1」）─────────────────────────────
+    # ── I-129：資料流是沒有循環的 DAG（docs/sr-zone-scoring.md「進場許可的 RR 判斷看 execution gate」） ──
     #
     # ① 結構許可：semantic pipeline ⛔ 不看 RR（setup gate 只用來算兩個診斷欄位）。
     structural_semantic = _decision_semantic_pipeline(

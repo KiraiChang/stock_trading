@@ -1655,9 +1655,9 @@ timeframe 且仍在重用期限內（目前 24 小時）的既有快照，找不
       "reasons": ["整體趨勢 3.2%"]
     },
     "decision_derived_view": {
-      "version": "decision-derived-view-p2",
+      "version": "decision-derived-view-p3",
       "semantic_pipeline": {
-        "version": "decision-semantic-pipeline-p4",
+        "version": "decision-semantic-pipeline-p5",
         "event_signal": "CLOSE_RECLAIM",
         "lifecycle_phase": "CONFIRMED",
         "market_state": "BULLISH_RECOVERY",

@@ -691,14 +691,14 @@ JSON 欄位在 PostgreSQL 為 `JSONB`；SQLite / MySQL 以文字 JSON 儲存。
 | 欄位 | 說明 |
 |------|------|
 | analysis_id | FK → `stock_sr_zone_analyses.id`，每筆 analysis 一筆 decision |
-| market_bias / entry_permission_state / position_action | Decision authority fields；P3 後分別對應 `semantic_pipeline.bias_state`、`entry_permission_state` 與 `action_state` 的對外摘要 |
+| market_bias / entry_permission_state / position_action | Decision authority fields；P3 後分別對應 `semantic_pipeline.bias_state`、`entry_permission_state` 與 `action_state` 的對外摘要。`entry_permission_state` 自 `decision-semantic-pipeline-p5`（I-129）起已套上 execution gate 的封頂：RR 不合格是 `WAIT_CONFIRMATION`、⛔ 不是 `BLOCKED`（見 `sr-zone-scoring.md`「進場許可的 RR 判斷看 execution gate」） |
 | price_path_state / model_health_state / event_market_state | Price path、AI health 與 event state 的查詢欄位 |
 | reason_codes | JSON 陣列，彙整 final entry、price path、model governance 與 active bearish event reason codes |
 | market_regime_json / data_quality_json / decision_derived_view_json | Decision market regime、資料品質與 derived view 權威語意 detail |
 | event_sequence_json / daily_price_action_json | 事件序列與 daily price action detail |
 | price_path_json / daily_confirmation_json | Price path 完整 detail 與日 K 確認狀態 |
 | defense_lines_json | tactical / swing / strategic 防守線 |
-| rr_context_json / rr_gate_json | Entry RR、position RR 來源與 RR gate 判斷 |
+| rr_context_json / rr_gate_json | Entry RR、position RR 來源與 RR gate 判斷（`rr_gate` 是 execution gate；I-129 起多 `setup_qualified`，是 setup gate 的判定，舊快照沒有這個鍵） |
 | position_action_condition_json | 部位操作條件；`state` 由 `semantic_pipeline.action_state` 推導，防守價仍由 primary zone 計算 |
 | market_context_json / confidence_explanation_json / risk_notes_json | 前端決策說明所需的 context、confidence factor 與風險提示 |
 | zone_summaries_json | `nearest_decision_zone`、`nearest_support_zone`、`nearest_resistance_zone`、`primary_structural_zone`、`best_trade_zone`、`primary_zone`、`secondary_zones` |

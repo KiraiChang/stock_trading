@@ -165,7 +165,7 @@ for f in after_artifact.json cohort_manifest.json; do
   fi
 done
 
-# ── 3-B：I-129 的量測欄位（validation-only；見 docs/issue.md I-129） ────────
+# ── 3-B：I-129 的量測欄位（validation-only；見 docs/sr-zone-scoring.md「I-129 的量測欄位」） ────────
 # ⚠️ **一定要排在這裡**：結束時 trap 會把整個 $WORK（含 after artifact）刪掉，外部程式事後讀不到。
 # ⚠️ 欄位清單與檢查規則都從 package import（`validate_measurement_fields()`），⛔ 不在這裡另抄一份；
 # 它也要求**至少一列** `decision_fields_available=true`——全部都沒有有效決策時，逐列檢查會全部

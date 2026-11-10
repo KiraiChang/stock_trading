@@ -1,7 +1,7 @@
-"""I-129 離線影響量測的比較工具（`i129_measurement.py`；規則見計畫書「6.5」）。
+"""I-129 離線影響量測的比較工具（`i129_measurement.py`；規則見 docs/sr-zone-scoring.md「I-129 離線影響量測的判準」）。
 
 三部分：
-1. 成交與停損、目標的判定（`simulate_trade`）：「6.5」列的每個邊界案例。
+1. 成交與停損、目標的判定（`simulate_trade`）：「判準」節成交規則的每個邊界案例。
 2. 判準的順序（`judge`）：無法歸因 → 不變式 → 證據不足（⛔ 不改用較寬的判準）→ 安全。
 3. 端到端（`compare_artifacts`）：用合成的 A／B after artifact 串流比較。
 """
@@ -163,7 +163,7 @@ def test_judge_invariant_before_evidence():
     ("g_new", "realized_r_n"), ("p", "realized_r_n"), ("g_new", "forward_return_n"),
 ])
 def test_judge_any_insufficient_sample_falls_back(side, key):
-    """任何一項判準的有效樣本不足 → 證據不足，⛔ 不改用較寬的判準（計畫書 D5）——即使其他數字都很好看。"""
+    """任何一項判準的有效樣本不足 → 證據不足，⛔ 不改用較寬的判準（D5）——即使其他數字都很好看。"""
     verdict, reasons = _judge(**{side: _metric(**{key: MIN_SAMPLES - 1})})
     assert verdict == "EVIDENCE_INSUFFICIENT"
     assert any(str(MIN_SAMPLES - 1) in r for r in reasons)
@@ -625,17 +625,17 @@ def test_e2e_measurement_field_missing_aborts(tmp_path):
 
 
 def test_stop_touch_denominator_keeps_rows_without_stop():
-    """停損觸及率的分母是**已成交的列**（計畫書原定義）：stop 缺值的列算「沒碰到」、⛔ 不排除——
+    """停損觸及率的分母是**已成交的列**（「判準」節的分母定義）：stop 缺值的列算「沒碰到」、⛔ 不排除——
     排除會拉高對照組 P 的觸及率，等於放寬 G_new 的容許值（第 8 步 review）。"""
     no_stop = simulate_trade(MARKET, 105.0, None, None, _bars(*[(105.0, 106.0, 104.0, 105.0)] * 5))
     stopped = simulate_trade(MARKET, 105.0, 98.0, None, _bars((105.0, 106.0, 97.0, 98.0), *[(98.0, 99.0, 97.0, 98.0)] * 4))
     metrics = outcome_metrics([no_stop, stopped], [])
     assert metrics["stop_touch_n"] == 2 and metrics["stop_touch_rate"] == 0.5
     assert metrics["filled_without_stop"] == 1
-    assert metrics["realized_r_n"] == 1, "實現 R 仍只取 stop 有值的列（計畫書原定義）"
+    assert metrics["realized_r_n"] == 1, "實現 R 仍只取 stop 有值的列（「判準」節的分母定義）"
 
 
-# ── 「6.7」：結構阻擋保留（兩種模式）與退回驗收模式 ───────────────────────────
+# ── 結構阻擋保留（兩種模式）與退回驗收模式 ───────────────────────────
 
 def _avoid_row(symbol, i, *, side, final="BLOCKED", **kw):
     """有結構訊號的列：AVOID＋減碼（A 的混合案例：final 理由只有 RR 類，從理由⛔ 不能判斷原本有結構阻擋）。"""

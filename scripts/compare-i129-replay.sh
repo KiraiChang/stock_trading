@@ -6,10 +6,10 @@
 #       --a <commit A 的 after_artifact.json> --b <commit B 的 after_artifact.json> \
 #       --a-commit <A 的完整 commit> --b-commit <B 的完整 commit> \
 #       [--mode probe|fallback] --output <report.json>
-#   --mode probe（預設）量試單的設計（「6.5」）；--mode fallback 驗收退回版（「6.7」）。
+#   --mode probe（預設）量試單的設計；--mode fallback 驗收退回版（⛔ 不判績效）。
 #
 # 結束碼：同 compare-i129-replay.py（0 PASS／FALLBACK_ACCEPTED、3 退回「不放行」、4 不變式不成立、5 無法歸因）；1 ＝ 參數錯誤。
-# 判準與流程：docs/issue.md I-129 指向的計畫書「6.5」。
+# 判準：docs/sr-zone-scoring.md「I-129 離線影響量測的判準」；流程：docs/development-workflow.md「I-129 的離線影響量測工具」。
 #
 # 設計重點：
 #   - `--network none`、輸入一律唯讀掛載，只有 output 所在的目錄可寫；⛔ 不覆寫既有報告。

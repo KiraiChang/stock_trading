@@ -784,8 +784,9 @@ Market Regime 是所有解讀的最高優先共同前提，先用股票層級與
 | `position_action_condition` | ✅ P3-C 後 `state` 由 `semantic_pipeline.action_state` 推導；防守價仍由 primary zone 計算，`structure_state` 僅供 debug |
 
 P0–P2 已把語意 gate 接進 derived view，價位型欄位仍由各自函式計算實際價格，避免把 price
-math 塞進 lifecycle layer。`decision_derived_view.version=decision-derived-view-p2` 是目前
-收斂後的 payload：不再輸出 production 空轉 echo 的 `final_entry_gate_state`，也不在
+math 塞進 lifecycle layer。`decision_derived_view.version` 目前是 `decision-derived-view-p3`
+（I-129 於 2026-11 升版：`path_gate_state` 的 `RR_BLOCKED` 改看 execution gate，見「進場許可的 RR 判斷看 execution gate」）；
+p2 是 T-034 收斂後的 payload：不再輸出 production 空轉 echo 的 `final_entry_gate_state`，也不在
 `price_path` / `position_action_condition` 內輸出與 legacy state 平行的 gate 欄位。此段是
 T-034 完成後的現況規格；後續維護以本文件為準，不再於 `docs/todo.md` 追蹤完成封存。
 
@@ -795,9 +796,10 @@ P3 開始新增 `decision_derived_view.semantic_pipeline` contract，用來明�
 Event -> Lifecycle -> Market State -> Bias -> Action -> Entry
 ```
 
-`semantic_pipeline.version` **目前為 `decision-semantic-pipeline-p4`**
+`semantic_pipeline.version` **目前為 `decision-semantic-pipeline-p5`**
 （P3 起新增這個 contract，T-044 於 2026-08-13 因 lifecycle 語意改變升為 p4，
-見下方「分層原則：lifecycle 不看 RR」）。標準欄位包含：
+見下方「分層原則：lifecycle 不看 RR」；I-129 於 2026-11 因進場許可改看 execution gate 升為 p5，
+見「進場許可的 RR 判斷看 execution gate」）。標準欄位包含：
 `event_signal`、`lifecycle_phase`、`market_state`、`bias_state`、`action_state`、
 `entry_permission_state`、`reason_codes` 與 `source_order`。P3-A 先用 fixture 鎖住
 Close Reclaim 的 `TESTING` / `CONFIRMED` / `CONTINUATION` 語意；P3-B 已讓
@@ -1320,6 +1322,8 @@ after 的 `lifecycle_phase` 一律是 `CONTINUATION`、`rr_decoupling_candidate`
 
 * **持倉建議實際改變的是第一列的 71 列**（上方情境表的第二列在真實資料上的實例）：條件性續抱 → 續抱。
 * **進場⛔ 沒有放寬**：`final_entry_state` 156 列都維持 `BLOCKED`；top-level `position_action` 有差異的列數是 0。
+  ⚠️ 這是 **I-129 之前**的行為紀錄。I-129 之後 RR 不合格改成等待確認：同一個 bundle 在 2026-11-05 的退回版驗收中，
+  這 156 列的非 AVOID 140 列是 `WAIT_CONFIRMATION`（帶 RR 理由）、AVOID 16 列仍是 `BLOCKED`（見「進場許可的 RR 判斷看 execution gate」）。
 * AVOID 類只有 `lifecycle_phase` 改變：`market_action == "AVOID"` 的短路蓋掉了 lifecycle 對照。
 
 證據的錨（evidence 在 `python/baselines/i074_stage2/evidence/`，判讀器的輸出在 repo 外）：
@@ -1428,7 +1432,7 @@ cohort 一致性 10 / 10 核對通過（項目同「分佈影響：decision repl
 所以它從來不依賴分析排程。replay 已於 2026-09-01 執行，結論見下方
 「decision replay 實測（2026-09-01）」——缺的不是資料量，是**符合觸發條件的樣本**。
 
-`semantic_pipeline.version` 已由 `decision-semantic-pipeline-p3` 升為 `p4`，
+`semantic_pipeline.version` 已由 `decision-semantic-pipeline-p3` 升為 `p4`（之後 I-129 再升為 `p5`），
 所以 `stock_sr_decisions` 裡的資料可以從版本字串分辨是改前還是改後產生的。
 
 標準 Close Reclaim 閱讀路徑：
@@ -1492,10 +1496,10 @@ Legacy action 應由 Market Regime、primary zone、`entry_relevance_score`、ma
 `final_entry_permission` 是 `semantic_pipeline.entry_permission_state` 的對外進場權限輸出，
 並合併 `decision_derived_view.final_entry_reason_codes` 作為可追溯理由；前端若要顯示
 「是否允許進場」應優先讀此欄位；legacy `entry_action_state` / `daily_entry_state` 保留給明細與相容。
-`final_entry_permission.state` 不再輸出 `NO_SETUP` 或空語意；若 daily confirmation 為 `INVALIDATED`
-或 `BLOCKED`，final permission 會降為 `BLOCKED`；若 daily confirmation 為 `CHASING_RISK`，
+`final_entry_permission.state` 不再輸出 `NO_SETUP` 或空語意；若 daily confirmation 為 `INVALIDATED`，
+final permission 會降為 `BLOCKED`（daily confirmation 只判價格事實，I-129 起⛔ 不再因 RR 輸出 `BLOCKED`）；若 daily confirmation 為 `CHASING_RISK`，
 final permission 會降為 `WAIT_CONFIRMATION`。`ENTRY_ALLOWED` 只在 semantic pipeline 判定
-`CONTINUATION`、RR 合格且前方沒有既有 SR 壓力區擋道時輸出；若前方有既有 SR 壓力區，
+`CONTINUATION`、execution gate 兩層都合格而且 setup RR 也合格（見「進場許可的 RR 判斷看 execution gate」）、前方沒有既有 SR 壓力區擋道時輸出；若前方有既有 SR 壓力區，
 未持有者進場權限降為 `WAIT_CONFIRMATION` 並附上 `BLOCKING_ZONE_AHEAD`。`TESTING` /
 `CONFIRMED` 的收復修復語境通常只輸出 `PROBE_ALLOWED`，避免把持有者的 `HOLD` 誤解成
 未持有者可正式進場。
@@ -1749,8 +1753,8 @@ gate 等於在測同一個數字兩次。現在沒有可量化 target 時輸出
 
 | 欄位 | 處置 | 實作位置 |
 |---|---|---|
-| `decision_derived_view.semantic_pipeline.entry_permission_state` | **封頂在 `PROBE_ALLOWED`** ＋ reason code `RR_BELOW_FULL_ENTRY` | `_apply_full_entry_gate_cap` |
-| `final_entry_permission.state` | **封頂在 `PROBE_ALLOWED`** ＋ reason code `RR_BELOW_FULL_ENTRY` | `_final_entry_permission` |
+| `decision_derived_view.semantic_pipeline.entry_permission_state` | **封頂在 `PROBE_ALLOWED`** ＋ reason code `RR_BELOW_FULL_ENTRY` | `_cap_semantic_by_execution_gate`（共用 `_apply_execution_gate_caps`） |
+| `final_entry_permission.state` | **封頂在 `PROBE_ALLOWED`** ＋ reason code `RR_BELOW_FULL_ENTRY` | `_final_entry_permission`（同一個 `_apply_execution_gate_caps`） |
 | `action` / `market_action`（deprecated） | `Buy` → `BuySmall`、`BUY` → `BUY_SMALL` | `_final_action_from_entry` |
 | `risk_notes` | 補 `RR_BELOW_FULL_ENTRY` | `_final_entry_risk_notes` |
 
@@ -1758,51 +1762,131 @@ gate 等於在測同一個數字兩次。現在沒有可量化 target 時輸出
 `decision_derived_view` 與 `final_entry_permission`，所以「final entry 才是 authoritative」
 不能拿來解釋兩者的落差——契約沒有這樣分層。只降其一，契約消費者會在同一份輸出裡
 讀到 `ENTRY_ALLOWED`（semantic）與 `PROBE_ALLOWED`（final）兩種進場許可。
+所以兩者呼叫**同一個** `_apply_execution_gate_caps()`，⛔ 不各寫一份規則。
 
 ⚠️ 只降 `action` **更不夠**：它是 deprecated 欄位，改它不會改變契約宣告的那兩個。
 
 封頂一律用 `_entry_cap_state`，所以不會把已經更低的狀態（`BLOCKED` /
-`WAIT_CONFIRMATION`）反向拉高。
+`WAIT_CONFIRMATION`）反向拉高。secondary 的 `RR_BELOW_FULL_ENTRY` **只在真的往下封頂時**才附上——
+主 gate 已經把狀態封頂到 WAIT 時，secondary 沒有東西可降，就⛔ 不附這個 code（I-129 的量測裡看得到這種列）。
 
-**順序不能反**：`_apply_full_entry_gate_cap` 必須在 `_final_entry_permission` 之前，
-否則後者會先讀到未封頂的 `semantic_entry_state`。
+**順序**：semantic 的封頂在 execution gate 算完之後、derived view 之前套用（`_cap_semantic_by_execution_gate()` 回傳新的 dict、
+⛔ 不就地改輸入）；`_final_entry_permission()` 再套一次是冪等的。`_entry_executability()` 讀的是**還沒套 RR 的結構許可**，
+所以封頂⛔ 不會回頭改變進場價，資料流沒有回饋迴圈（見下一節）。
 
-**就地改 derived view 是安全的**：唯一的其他內部消費者 `_entry_executability` 對
-`PROBE_ALLOWED` 與 `ENTRY_ALLOWED` 走**同一個分支**，封頂不會回頭改變它，
-沒有回饋迴圈。改那一行之前先確認這句仍然成立。
+#### 進場許可的 RR 判斷看 execution gate（I-129；2026-11-05 現況）
 
-#### 已知的單向性（封頂擋高估、擋不了低估）
+**資料流是沒有循環的 DAG**（`build_decision_summary()` 的呼叫順序）：
 
-**封頂是單調遞減運算**，所以上面整套只涵蓋 `setup_rr ≥ 2.0 > executable_rr`
-（宣告的強度**高於**實測）。反方向——`executable_rr` **高於** `setup_rr`——
-判定在更上游的提前 return 就結束了，封頂碰不到：
+```
+_decision_action（只剩 rr is None 的提前 return 與 strong 的 setup 條件）→ entry_action_state → _minimum_rr
+→ setup gate（_rr_gate，zone 歷史統計）
+→ semantic pipeline：⛔ 不看 RR 的「結構許可」（setup gate 只用來算兩個 validation-only 診斷欄位）
+→ _entry_executability：「如果要進場，用什麼價」——只看結構許可，之後⛔ 不重算
+→ execution target → rr_context → execution gate（對外的 rr_gate）
+→ _cap_semantic_by_execution_gate：把 execution gate 套到 semantic（對外的版本）
+→ derived view（path gate 看 execution gate）→ market_bias、price_path、daily_confirmation（⛔ 不看 RR）
+→ _final_entry_permission（同一組封頂）→ final action → risk_notes
+```
 
-| 位置 | 讀的是 | 反方向的後果 |
+**封頂規則**（`_apply_execution_gate_caps()`，semantic 與 final 共用；只往下封頂，`BLOCKED` 原樣保留）：
+
+| 條件 | 上限 | reason code |
 |---|---|---|
-| `_decision_action:519` `rr < 1.5 → WATCH` | setup RR | setup 1.4 / executable 11.0 → `Hold` ＋「主交易區風險報酬比不足。」 |
-| `_decision_semantic_pipeline:1042` `not rr_qualified → BLOCKED` | **更早的 setup-RR gate** | setup 1.7（< TIER_3 的 1.8）→ `BLOCKED` |
-| `_decision_action:527` `strong` 的 `rr >= 2.0` | setup RR | 少發 `Buy`（偏保守，但同樣不是實測數字） |
+| 主 gate 不合格 | `WAIT_CONFIRMATION` | gate 的 reason（`EXECUTION_RR_INSUFFICIENT`／`RR_INSUFFICIENT`／`RR_UNAVAILABLE`／`NO_PRIMARY_ZONE`），一律附上 |
+| setup 不合格、主 gate 合格（executable RR 可量化且合格） | `SETUP_FAIL_MAX_ENTRY_STATE`，**現值 `WAIT_CONFIRMATION`** | `SETUP_RR_BELOW_MINIMUM`，一律附上 |
+| secondary（完整部位）不合格 | `PROBE_ALLOWED` | `RR_BELOW_FULL_ENTRY`，只在真的往下封頂時附上 |
 
-實測（2026-08-27，CONTINUATION fixture、support TIER_3、壓力 122.0）：
+* **RR 不合格一律是 `WAIT_CONFIRMATION`，⛔ 不是 `BLOCKED`**。`BLOCKED` 只留給結構事實：跌破（`BREAKDOWN_RISK`）、
+  `AVOID`、收盤跌破支撐、daily `INVALIDATED`。RR 是策略條件、不是結構事實（同「lifecycle 不看 RR」）。
+* **daily confirmation ⛔ 不看 RR**：`_daily_confirmation()` 只判價格事實，⛔ 不再因 RR 輸出 `BLOCKED`。
+  改前它會因 RR 變成 `BLOCKED`，`_final_entry_permission()` 隨之變成 BLOCKED 並濾掉 semantic 的理由——那是「沒有欄位說得出原因」的成因之一。
+* **setup gate 的角色**：只輸入 execution gate（下面三種退回與 `setup_qualified`），以及 semantic pipeline 的
+  `setup_rr_qualified`、`rr_decoupling_candidate` 兩個 validation-only 診斷欄位。⛔ 不直接決定進場許可。
+* **execution gate 退回 setup 判定（`gate_basis=ZONE_STATISTIC`）的三種情況**：限價路徑且 target 未知（T-055 的方案 A）；
+  setup 不合格且 executable 算不出來——**市價路徑也一樣**（否則 setup 不合格的列會因為 target 未知而全放行）；
+  setup RR 缺值——即使 executable 算得出來也⛔ 不放行（`RR_UNAVAILABLE`，`actual_rr` 維持 null）。
+  「市價 target 未知 → `qualified=true`、`EXECUTION_RR_UNAVAILABLE`」只保留給 setup 合格的列。
+  退回時 `target_known` 照實反映 `rr_context`（缺 zone 統計 ⛔ 不等於沒有目標）。
+* **`rr_gate.setup_qualified`**（I-129 起一律輸出）：setup gate 的判定，與 `setup_rr_qualified` 出自同一顆 gate。
+  封頂讀這個欄位，⛔ 不從 `zone_actual_rr` 和門檻重推。
+* **仍讀 setup RR 的兩處**（⛔ 不影響進場許可）：`_decision_action()` 的 `strong` 要 setup RR ≥ 2.0（拿掉會讓 setup 1.9 這類已合格的列
+  從 BuySmall 升成 Buy）；`_entry_action_state()` 的 BUY／ACCUMULATE 以 `>= 2.5` 細分（兩者正規化後都是 `ENTRY_ALLOWED`）。
+  `_decision_action()` 的 `rr < 1.5` 提前 return 已拿掉；`rr is None` 的保留。
+* **risk notes 依 execution gate 校正**（`_final_entry_risk_notes()`）：「主交易區風險報酬比不足。」只在 gate 的判定是
+  `ZONE_STATISTIC`＋`RR_INSUFFICIENT` 時出現；setup 不合格、executable 合格時是「zone 歷史統計的風險報酬比未達門檻，先等待確認。」；
+  「主交易區缺少風險報酬比，先觀察。」在任何情況下都保留。
+* **版本字串**：`decision-semantic-pipeline-p5`、`decision-derived-view-p3`（`schema_version=sr_zone_decision_replay_p0` 不變，
+  governance gate 依它過濾）。
+* 端到端的守門測試在 `test_decision_engine.py` 的 I-129 一組（重現表、三種退回、D2／D4、不變式掃描）。
 
-| `setup_rr` | `rr_gate` | `semantic` / `final` | `risk_notes` |
-|---|---|---|---|
-| 1.4 | `qualified=True` `secondary=True` **`actual_rr=11.0`** | **`BLOCKED`** | 「風險報酬比不足。」＋「Final Entry 禁止進場…」 |
-| 1.7 | 同上 | **`BLOCKED`** | **只有**「Final Entry 禁止進場…」 |
+**I-129 的裁決編號**（程式、測試與比較工具的註解沿用這組編號）：
 
-`setup_rr=1.7` 那列最嚴重：**BLOCKED 但沒有任何欄位解釋為什麼**，
-`rr_gate` 反而顯示 11.0 兩層皆過。使用者與 API 消費者都無從診斷。
+* **D1**：RR 不合格一律 `WAIT_CONFIRMATION`，不分 gate 來源；`BLOCKED` 只留給結構事實（2026-11-03 使用者裁決）。
+* **D2**：缺 zone 統計⛔ 不放行——setup RR 是 `None` 時，即使 executable RR 算得出來，也是 `qualified=false`／`RR_UNAVAILABLE`。
+* **D3**：setup 有值但未達門檻、executable RR 可量化且合格時的上限，即 `SETUP_FAIL_MAX_ENTRY_STATE`。原案是試單（`PROBE_ALLOWED`），
+  **2026-11-05 經量測退回 `WAIT_CONFIRMATION`**（見下方歷史）；executable 可量化但不合格 → WAIT＋`EXECUTION_RR_INSUFFICIENT`；
+  算不出來 → 沿用 setup 判定（`ZONE_STATISTIC`）→ WAIT＋`RR_INSUFFICIENT`。
+* **D4**：`strong` 保留 setup RR ≥ 2.0；只拿掉 `rr < 1.5` 的提前 return，`rr is None` 的保留（D2）。
+* **D5**：放寬要先過離線量測，判準在量測前定案（本文件「I-129 離線影響量測的判準」）；**證據不足⛔ 不降低標準**——任何一項樣本不夠就是證據不足，
+  ⛔ 不改用較寬的替代判準。
+* **D6**：量測欄位是決策改動之前的獨立 commit，兩趟 replay 都原生帶有這些欄位，⛔ 不用外部 tooling patch（所以兩趟的 patch 都是空的）。
 
-**這是刻意保留的已知限制，不是遺漏**。修它要解
-`execution gate → entry_executability → decision_derived_view → execution gate`
-這個資料流的環，會同時動到三個 authoritative 欄位的產生路徑，屬大規模異動——
-追蹤在 [`issue.md`](./issue.md) **I-129**（2026-08-27 由 T-055 的 F1 裁決分出，原記為 `todo.md` T-065；計畫書 [`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)）。
-**讀到「兩層 gate 都過卻 BLOCKED」時先看這一節，不要當成新 bug 重新調查。**
+T-065 的重現（CONTINUATION fixture、support TIER_3、壓力 122.0）在現況下：
 
-⚠️ **矛盾只在完整流程才看得見**：`decision_derived_view` 的 semantic pipeline 讀的是
-**更早的 setup-RR gate**，`_final_entry_permission` 讀的才是 execution gate。
-所以守門的迴歸測試必須是端到端的——helper 層測試看不到這個落差
-（`test_full_entry_gate_caps_authoritative_permission_end_to_end` 與其對照組）。
+| `setup_rr` | 進場價 | `rr_gate` | `semantic` / `final` | `risk_notes` |
+|---|---|---|---|---|
+| 1.4／1.7 | 市價 105 | `actual_rr≈2.43`、兩層皆過、`setup_qualified=false` | `WAIT_CONFIRMATION`＋`SETUP_RR_BELOW_MINIMUM` | 「zone 歷史統計的風險報酬比未達門檻，先等待確認。」 |
+| 2.8 | 市價 105 | 兩層皆過、`setup_qualified=true` | `ENTRY_ALLOWED` | — |
+
+##### 改前的反方向矛盾（歷史，2026-08-27 實測）
+
+封頂是單調遞減運算，而改前 setup RR 在更上游就提前決定了進場許可：semantic pipeline 的 `not rr_qualified → BLOCKED`、
+daily confirmation 的 RR → BLOCKED、`_decision_action()` 的 `rr < 1.5` 提前 return。setup 不合格時 `_entry_executability()`
+因此改走限價（zone 上緣 100），execution gate 在錯的價格上算出 (122−100)/(100−98)=**11.0**、兩層都過，對外卻是 `BLOCKED`——
+setup 1.7 那列連 risk note 都只有「Final Entry 禁止進場…」，**沒有任何欄位說得出為什麼**。不被擋時本來該走市價 105（≈2.43）。
+
+##### setup 不合格的試單設計與量測（歷史；⛔ 不是現況）
+
+原設計（I-129 的 D3）是「setup 不合格、executable RR 可量化且合格 → 最多試單（`PROBE_ALLOWED`）」，上 live 前要先通過離線量測。
+
+* **量測**（2026-11-04）：同一個凍結 bundle `b1_20260901_1d_74350966_5d7ecb10`、同一個 image、空 patch，
+  分別用改前（`51cafe9`）與試單版（`c82adfc`）跑全量 Stage 1（各 13,417 列），再以逐列比較工具（試單模式）比較。
+  新放行組 G_new 38 列（9 檔）、對照組 P（兩版都是既有的試單）40 列：
+
+  | 指標 | G_new | P |
+  |---|---|---|
+  | 停損觸及率 | 63.2% | 69.2% |
+  | 先到目標 | 34.2% | 15.4%（只有 26 列） |
+  | 平均實現 R | **−0.170** | −0.544 |
+  | forward_return 平均／正報酬比例 | +0.49%／50% | −1.71%／35% |
+
+  判定 **`EVIDENCE_INSUFFICIENT`**（對照組先到目標的有效樣本 26 < 30）；安全判準的「G_new 平均實現 R ≥ 0」也⛔ 不成立。
+* **處置**：`SETUP_FAIL_MAX_ENTRY_STATE` 退回 `WAIT_CONFIRMATION`（setup 不合格一律等待確認、⛔ 不放行），其餘修正全部保留。
+* **退回版的驗收**（2026-11-05）：以退回驗收模式比較改前與退回版（`4da7c3a`）的全量 Stage 1，判 **`FALLBACK_ACCEPTED`**——
+  母體完整、setup 不合格零放行、setup 合格的列交易輸出不變、結構阻擋全部保留（A 有結構訊號的 BLOCKED 仍是 BLOCKED）。
+  分組：setup 合格 3,309＋既有試單 40、setup 不合格的 WAIT 5,491、結構 BLOCKED 4,577、新放行 0。
+* **重新開放試單的門檻**（2026-11-10 使用者裁決）：把常數改回 `PROBE_ALLOWED` 之前，下面三件事都要完成：
+  1. **時間外驗證**（`todo.md` T-002 承接）：記錄訓練資料範圍、標籤的觀察截止時間與模型可用日期，並用保留資料或逐期驗證，
+     證明量測時⛔ 沒有用到未來資訊。這份凍結 bundle 已經反覆參與規則調整，只能當開發／回歸比較資料。
+  2. **成交歸因與量測口徑補強**（`issue.md` I-130 承接）：報告要分解訊號價與成交價的 RR 落差，要區分窗口偏移與持有期間偏移，
+     還要分開三種結果並寫明成本前後的 R。舊報告保留。
+  3. **依事前裁決的新版放行判準判定通過**（I-130 的計畫書，要在量測之前裁決）：
+     * 判準要寫明用哪幾種結果（模擬出場／窗口末評價／成交即失效）、各自的分母與成本情境的版本，並綁定第 1 項的驗證資料版本。
+     * ⛔ 不能讓「成本前通過、成本後為負」的情況放行。
+     * 量測用的成本情境由 I-130 先確認一版，⛔ 不必等 T-080 全部完成；T-080 之後再拿結果評估策略。
+
+     現行判準（本文件「I-129 離線影響量測的判準」的 `PASS`：各項有效樣本 ≥ 30、安全判準全部成立）**保留當回歸比較**，
+     單獨判 `PASS` ⛔ 不再是放行依據。
+
+  只補足樣本再判 `PASS` ⛔ 不夠。三件事完成之前⛔ 不得改回（`test_i129_setup_fail_cap_is_wait_after_measurement` 釘住這個常數）；
+  新版判準裁決之前，一律維持等待確認。
+  前兩件交給別的條目承接，只是移交，⛔ 不代表問題已解決。量測工具的用法見 `development-workflow.md`「I-129 的離線影響量測工具」。
+  由來：2026-11-05 的跑測分析 review 認為，只判 `PASS` 還不足以推論策略效益，記了四項補強：時間外驗證（R1）、
+  訊號價與成交價的 RR 落差（R2）、最大不利偏移的範圍（R3）、平均實現 R 的混合口徑與成本（R4）。
+  R1 由 T-002 承接，R2～R4 都在同一個工具裡，由 I-130 合併承接。
+
+#### RR gate 的其他規則（T-055）
 
 **`RR_BELOW_FULL_ENTRY` 的掛載條件是「有數字且不夠」，不是「secondary 不合格」**：
 
@@ -1829,6 +1913,7 @@ secondary 也是 `false`，但「未達門檻」是需要數字支撐的判斷�
 target 時，gate **沿用 setup-RR 判定**而不是放行。契約原本只寫「target 未知 → `qualified=true`」，
 但那條語意只適用於市價路徑（市價型沒有別的判準）；照搬會讓 **setup RR 1.49（低於 1.5 門檻）
 的 zone 從擋下變成放行**，方向與「target 封頂 → RR 下修 → 偏保守」相反。
+I-129 把這條退路擴充到 setup 不合格且 executable 算不出來的市價路徑，以及 setup RR 缺值的列（見上一節）。
 
 #### 分佈影響：decision replay 實測（2026-09-01）
 
@@ -2884,6 +2969,124 @@ boolean，這裡只消費它來重建集合與計數。
 ⚠️ **測試必須持有來源的 pristine copy**：`compare_rows()` 把來源 dict **直接**放進
 artifact，所以 `artifact["rows"][i]["before"]` **就是** `before_by_key[key]` 那個物件。
 竄改 artifact 時會一併改到來源，來源對照就變成「自己跟自己比」而永遠通過。
+
+#### I-129 的量測欄位（validation-only，2026-11-04）
+
+replay 列另外帶 8 個欄位，用來比較兩版決策時逐列對齊「哪些輸出變了」（I-129 的離線影響量測）。
+值全部取自同一份 decision summary，⛔ 不在 replay 端重算；⛔ 不是上面那九個診斷欄位（`DIAGNOSTIC_FIELDS`、no-zone fallback 與
+`validate_diagnostics()` 的契約都不動）。
+
+| 欄位 | 來源 |
+|---|---|
+| `market_action`、`action`、`entry_action_state` | decision summary 的同名欄位 |
+| `semantic_entry_permission_state`、`semantic_reason_codes` | `decision_derived_view.semantic_pipeline` 的 `entry_permission_state`、`reason_codes` |
+| `path_gate_state` | `decision_derived_view.path_gate_state` |
+| `final_entry_reason_codes` | `final_entry_permission.reason_codes` |
+| `risk_notes_digest` | `risk_notes` 的 canonical JSON 的 SHA-256 前 16 碼（只用來比對「有沒有變」；replay report 會整份進 `metrics_json`，⛔ 不放全文） |
+
+* 欄位名稱是 `replay_bundle` 的 `DECISION_MEASUREMENT_FIELDS`，匯出端（`evaluation.py`）、測試、smoke 與比較工具共用，⛔ 不在多處各列一份。
+  ⚠️ replay 列是逐欄組出來的，只加進 `_decision_fields_from_summary()` 不會進到列裡，所以列依這個常數明確帶出。
+* decision 不可用的列，這 8 個欄位一律是 null（⛔ 不沿用上一列的值）。
+* 檢查：`check_measurement_row()`／`validate_measurement_fields()`——每列都要有每個欄位；decision 可用的列字串欄位非空、
+  list 欄位是字串 list、digest 是 16 碼十六進位小寫；decision 不可用的列全部是 null；**至少一列 decision 可用**（全部不可用時
+  逐列檢查會全部通過、等於什麼都沒驗到）。`scripts/smoke-replay-offline.sh` 在 Stage 1 之後、清理之前用同一個 image 跑這個檢查。
+
+#### I-129 離線影響量測的判準（比較工具的規格；2026-11-05 現況）
+
+逐列比較兩趟 Stage 1 的 after artifact（A＝改前、B＝改後）。邏輯在 `backtest/modular/sr_scoring/i129_measurement.py`，
+判準常數（`MIN_SAMPLES` 等）在檔案開頭；**判準在量測前定案**，⛔ 不在看到結果之後調整，要改值先改這一節。
+用法見 `development-workflow.md`「I-129 的離線影響量測工具」；2026-11-04／11-05 的量測結果見上面「進場許可的 RR 判斷看 execution gate」。
+
+**結論依序判定**（前一種成立就⛔ 不往下看）：`UNATTRIBUTABLE`（結束碼 5）→ `INVARIANT_VIOLATION`（4）→
+試單模式 `EVIDENCE_INSUFFICIENT`／`SAFETY_FAILED`（3）→ `PASS`（0）；退回驗收模式在前兩項之後就是 `FALLBACK_ACCEPTED`（0）。
+
+* **試單模式**（`--mode probe`，預設）：量「setup 不合格最多試單」的設計。這一節的 `PASS` 只當回歸比較；
+  **重新開放試單**（`SETUP_FAIL_MAX_ENTRY_STATE` 改回 `PROBE_ALLOWED`）另有門檻，見「進場許可的 RR 判斷看 execution gate」，要依事前裁決的新版放行判準判定。
+* **退回驗收模式**（`--mode fallback`）：驗收「setup 不合格一律等待確認」。退回之後⛔ 沒有新放行組，試單模式的績效判準永遠是
+  證據不足，⛔ 不能當退回版的部署門檻。這個模式**仍照下面的成交規則模擬、在報告的 `metrics` 輸出既有試單組（P）的參考指標**
+  （報告也照樣列出 `criteria`），但⛔ 不拿績效當驗收判準：結構檢查全部通過就是 `FALLBACK_ACCEPTED`。
+  例：2026-11-05 的退回驗收報告裡，P 組 40 列、成交 39、平均實現 R −0.544——那是參考數字，⛔ 不是工具出錯，也⛔ 不是驗收結果的一部分。
+
+**輸入身分**（任何一項不符 → `UNATTRIBUTABLE`，⛔ 不出結論）：
+
+* 頂層 envelope 與 provenance 的封閉欄位與型別（`stage1` 規則）；`bundle_id`、`runtime_settings`、`image_digest`、`python_version`、
+  `pip_freeze_sha256` 兩趟相同；兩趟的 `tooling_patch_sha256` 都是空 patch 的值；`base_commit` 分別等於 `--a-commit`／`--b-commit`
+  （40 字元完整 OID，而且 A ≠ B）；`replay_scope` 是全候選。
+* 兩邊的 key 集合相同，而且都**等於 bundle 推導出的完整候選母體**（與 Stage 1 的 universe 同一個推導）——只比兩邊相同⛔ 不夠，
+  兩邊都只留同一小段時照樣會通過。
+* 結果標籤（`current_price`、K 棒、`forward_bars`、`forward_return` 等只由凍結資料與日期決定的欄位）A、B 完全相同；
+  G_new 與 P 的 `current_price`、`forward_return` 還要對得上從 bundle candles 重算的值。
+* 每一列都套上一節的 `check_measurement_row()`。
+* 兩份 artifact 都用串流讀：先串流 A、每列只留精簡投影，再串流 B 邊讀邊比（⛔ 不整份載入，I-117）。
+
+**分組**（以 A 的 `setup_rr_qualified` 分類；沒有決策的列另成一組、⛔ 不比）：
+
+| 組 | 定義 | 要求 |
+|---|---|---|
+| U：setup 合格 | P 以外的 setup 合格列 | `final_entry_state`、`market_action`、`action`、`position_action`、`risk_notes_digest`、`rr_context` 完全相同；`rr_gate` 只能多 `setup_qualified`。B 的主 gate 不合格時：semantic 許可只能變 WAIT；semantic 與 final 的 reason codes 多出的只能是 RR 類、少掉的只能是 `RR_BELOW_FULL_ENTRY`，其餘只能是順序不同；`path_gate_state` 只能變 `RR_BLOCKED`；`position_action_condition` 只能少 `WAIT_PRICE_FOLLOW_THROUGH`。其他任何差異都是異常 |
+| G_new：新增放行 | setup 不合格（含缺值）、A 是 BLOCKED、B 是 PROBE | 試單模式的結果指標；退回驗收模式必須是 0 |
+| G_wait／G_block | setup 不合格（含缺值）、B 是 WAIT 或 BLOCKED | A 必須是 BLOCKED |
+| G_other | setup 不合格、不屬於 G_new／G_wait／G_block | 一律是異常 |
+| 升級 | PROBE → ENTRY，或 action BuySmall → Buy | 必須是 0 |
+| 收緊 | A 是 PROBE／ENTRY、B 比 A 低 | 必須是 0 |
+| 對照組 P | setup 合格、A、B 都是 PROBE（既有的試單） | 套 U 組的規則；試單模式的結果指標基準 |
+
+每一組都依 `lifecycle_phase` 與 symbol 列出分布。
+
+**結構不變式**（兩種模式共用；不成立 → `INVARIANT_VIOLATION`，⛔ 不能由績效數字抵銷）：
+
+* A、B 的 `setup_rr_qualified` 與 decision 可用性一致；`rr_gate.setup_qualified` 與 `setup_rr_qualified` 一致；
+  B 的 final 許可⛔ 不得高於 semantic；每一列的 final 與 action 一致（`_final_action_from_entry()` 的對應：WAIT → WATCH＋Hold、
+  BLOCKED → WATCH＋Hold 或 AVOID＋Avoid、PROBE ⛔ 不得是 Buy）。
+* setup 不合格的列 B 的 semantic 與 final 都⛔ 不得高於試單、action ⛔ 不得是 Buy、A 必須是 BLOCKED；setup 缺值的列⛔ 不得是 PROBE／ENTRY（D2）；
+  B 是 BLOCKED 時 final 的理由⛔ 不得是 RR 類（D1）。
+* **結構阻擋保留**：依 **A 的**結構訊號判斷原本的阻擋是不是純 RR（只看 B 的話，B 若同時漏掉原有的阻擋、只剩 RR 理由，照樣會通過）。
+  * 結構訊號只取和 RR 無關的事實：`market_action`＝AVOID 或 `action`＝Avoid、semantic 的理由有 `MARKET_ACTION_AVOID`、
+    `lifecycle_phase` 是 BREAKDOWN／INVALIDATED、`daily_confirmation_state` 是 INVALIDATED、`position_action` 是 EXIT／REDUCE／REDUCE_ON_BREAKDOWN。
+    ⚠️ ⛔ 不看 final 的理由：final 是 BLOCKED 時只保留 daily 的理由，AVOID＋REDUCE、final 理由卻只有 `RR_UNAVAILABLE` 的混合案例會被誤認成純 RR。
+  * 每一列的結構訊號與 `position_action` A、B 必須完全相同（⛔ 不得消失、⛔ 不得多出，減碼／退出指示⛔ 不得弱化）。
+  * A 是 BLOCKED 而且有結構訊號 → B 必須仍是 BLOCKED；A 是 BLOCKED、沒有結構訊號、B 是 WAIT → final 理由必須有 RR 類的 code。
+  * B 是 BLOCKED → A 必須有結構訊號（⛔ 不得新增阻擋）；B 的 daily 是 BLOCKED／INVALIDATED → final 必須是 BLOCKED。
+* **G_new 的放行前提**（只在試單模式；只看旗標與 gate 回報的數字⛔ 不夠）：entry／stop／target 都有值、風險與報酬都 > 0，
+  用價格重算的 RR 等於 `rr_context.executable_rr` 與 `rr_gate.actual_rr`；用 `_minimum_rr()` 從 `primary_zone` 的 tier／role 與
+  `entry_action_state` 重算的門檻等於 gate 的 `minimum_rr`，而且 RR ≥ 門檻；`gate_basis=ENTRY_STOP_TARGET`、target 已知、主 gate 合格、
+  `setup_qualified=false`；semantic 就是試單，semantic 與 final 都帶 `SETUP_RR_BELOW_MINIMUM`。
+* **退回驗收模式另外要求**：setup 不合格的列 B 的 semantic 與 final 都⛔ 不得是 PROBE／ENTRY，`market_action` 只能是 WATCH／AVOID。
+
+**成交規則**（兩種模式都會模擬 G_new 與 P；試單模式拿結果判定，退回驗收模式只輸出參考數字。決策在 as-of 收盤後做出，訂單從下一根起生效；窗口是 as-of 之後的 5 根 bundle candles）：
+
+| 進場類型（`rr_context.price_basis`） | 成交 | 成交當根 |
+|---|---|---|
+| 市價型（`CONTINUATION_MARKET_PRICE`、`RECLAIM_CLOSE`） | 下一根的開盤價 | 整根在成交之後：停損、目標照常判定 |
+| 限價型（`PRIMARY_SUPPORT_UPPER`），開盤即成交（`open ≤ entry_price`） | 開盤價 | 整根在成交之後 |
+| 限價型，盤中觸價（`open > entry_price ≥ low`） | `entry_price` | **只判停損，⛔ 不認列目標**：開盤在 entry 之上，價格一定先往下穿過 entry 才到 low，所以 low 必然在成交之後；high 可能在成交之前 |
+
+* 限價型的成交 K 棒是窗口內第一根 `low ≤ entry_price` 的 K 棒；都沒碰到是**未成交**（不進結果指標，另報成交率）。
+* 停損、目標固定用訊號當下的 `rr_context.stop_price`、`target_price`。停損觸及是 `low ≤ stop_price`（成交價本身 ≤ 停損就算成交當根停損），
+  目標觸及是 `high ≥ target_price`；**同一根同時碰到停損和目標，一律算停損先到**（日 K 看不出先後）。
+* 實現 R（風險＝成交價 − 停損）：停損 → `(min(open, stop_price) − 成交價) / 風險`（之後某根跳空低開按開盤價計，會比 −1 更差）；
+  目標 → `(target_price − 成交價) / 風險`；都沒碰到 → 窗口最後一根收盤的未實現 R。成交價 ≤ 停損（風險無法定義）一律記 −1，⛔ 不排除。
+  ⚠️ 平均實現 R 是這三種結果（模擬出場、窗口末未實現、進場即失效的 −1）混在一起的平均，而且⛔ 沒有扣手續費、交易稅與滑價——
+  是既定口徑的模擬值，⛔ 不是淨交易績效（2026-11-05 跑測分析 review 的 R4；補強由 `issue.md` I-130 承接）。
+
+**結果指標、最低有效樣本與判準**（指標兩種模式都輸出；下面的判準只在試單模式套用。邊界都含等號，比較時容許 1e-9 的浮點誤差）：
+
+| 指標 | 分母 | 最低有效樣本 |
+|---|---|---|
+| 停損觸及率 | 已成交的列（stop 缺值的列算「沒碰到」，列數另外報告；⛔ 不排除——排除會拉高 P 的觸及率、等於放寬 G_new 的容許值） | G_new、P 各 ≥ 30 |
+| 先到目標的比例 | 已成交、`target_price` 有值的列（P 只取這個子集 P_q） | G_new、P_q 各 ≥ 30 |
+| 平均實現 R | 已成交、`stop_price` 有值的列 | G_new、P 各 ≥ 30 |
+| `forward_return` 的平均與正報酬比例 | 有 `forward_return` 的列 | G_new ≥ 30 |
+| 最大不利偏移（中位數與 p90） | 已成交的列；從成交那根到**窗口結束**，⚠️ 含模擬出場之後的 K 棒，⛔ 不是持有期間的偏移（review 的 R3；補強由 I-130 承接） | 只報告，⛔ 不當判準 |
+
+1. **證據充分**：每一項的有效樣本都達到最低值，而且 G_new ≥ 5 檔、單一檔 ≤ 50%。**任何一項不足就是 `EVIDENCE_INSUFFICIENT`**，
+   ⛔ 不改用較寬的判準。
+2. **安全**（每一項都要成立，否則 `SAFETY_FAILED`）：G_new 的停損觸及率 ≤ P＋5 個百分點；G_new 先到目標的比例 ≥ P_q − 5 個百分點；
+   G_new 的平均實現 R ≥ 0；G_new 的平均 `forward_return` ≥ 0、正報酬比例 ≥ 0.45。
+
+⚠️ governance 的離線數字⛔ 不當判準：DB 路徑每檔只取最近 200 列，而且每一列會接前一列的事件狀態，用全量 artifact 重現不出 live 的母體。
+
+比較工具與測試註解裡的「第 8 步 review」「第 11 步 review」「v6」等，是 I-129 計畫書（`docs/plans/i129-execution-gate-authority.md`）的實作備註與修訂編號，只記規則的由來；規則本身以這一節為準。
 
 #### 程式註解裡的 I-074 舊引用（2026-10-29 I-074 收斂；2026-10-30 T-077 改完凍結集合）
 

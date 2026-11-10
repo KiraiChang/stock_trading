@@ -2499,6 +2499,36 @@ here-string 版 **0 次**。⚠️ 診斷用的 `grep -A1`／`grep -v`／`tail` 
 於是只剩「重跑一次看看」——⛔ 那不是收斂，是把問題留到下次。
 
 
+### I-129 的離線影響量測工具
+
+逐列比較兩趟 Stage 1 的 after artifact（例如改前 vs 改後的決策程式），判斷差異能不能歸因、行為是否符合預期。
+判準（成交規則、分組、結構不變式、最低有效樣本）在 `sr-zone-scoring.md`「I-129 離線影響量測的判準」；量測欄位在同檔「I-129 的量測欄位」，量測結果在「進場許可的 RR 判斷看 execution gate」。
+
+* 入口：`scripts/compare-i129-replay.sh`（在 python image 裡跑 `python/scripts/compare-i129-replay.py`；邏輯在
+  `backtest/modular/sr_scoring/i129_measurement.py`）。`--network none`、輸入唯讀掛載、記憶體經 mem-guard 下修；兩份 artifact 用串流讀，
+  ⛔ 不整份載入（I-117）。⛔ 不覆寫既有報告。
+* 兩種模式：
+  * `--mode probe`（預設）：量「setup 不合格最多試單」的設計——成交與停損、目標的模擬，對照組 P、新放行組 G_new 的績效判準；
+    判定 `PASS`（0）、`EVIDENCE_INSUFFICIENT`／`SAFETY_FAILED`（3）。
+  * `--mode fallback`：驗收「setup 不合格一律等待確認」——零放行、setup 合格的列行為不變、結構阻擋保留；⛔ 不判績效，通過是 `FALLBACK_ACCEPTED`（0）。
+    報告的 `metrics` 仍附既有試單組（P）的參考指標，⛔ 不是驗收判準。
+  * 兩種模式共同：輸入不一致或欄位檢查不過 → `UNATTRIBUTABLE`（5）；結構不變式不成立 → `INVARIANT_VIOLATION`（4）。
+* 輸入身分的檢查：envelope 與 provenance（`stage1` 規則）、兩趟同一個 image 與套件環境、兩趟都是空 patch、`base_commit` 分別等於
+  `--a-commit`／`--b-commit`（40 字元完整 OID）、兩邊的 key 集合都等於 bundle 推導出的完整候選母體、結果標籤跨版本相同且對得上 bundle 的 candles。
+* 跑法：先依序跑兩趟 Stage 1（同一個 `REPLAY_IMAGE_ID`、⛔ 不帶 `TOOLING_PATCH`、⛔ 不並行，每趟約 3 小時；`--before-ref` 兩趟都傳改前的
+  完整 OID——I-115），再比較：
+
+  ```bash
+  scripts/compare-i129-replay.sh --mode fallback \
+    --bundle "$PWD/python/baselines/<bundle_id>" \
+    --a <改前的 after_artifact.json> --b <改後的 after_artifact.json> \
+    --a-commit <改前的完整 OID> --b-commit <改後的完整 OID> \
+    --output <報告路徑>
+  ```
+
+  ⚠️ 指令要分行貼上、確認最後一行有貼到——2026-11-05 曾經漏掉 `--output`，腳本只印出用法就結束。
+* 釘住的 image 被別的 build 搶走 tag 之後就變成 dangling，兩趟之間⛔ 不要 `docker image prune`；image 不在本機時，兩趟都要在新的 image 上重跑。
+
 ---
 
 ## Docker 驗收流程

@@ -1,8 +1,8 @@
 # I-129 計畫 v7：進場許可的 RR 判斷改由 execution gate 決定；setup 不合格的試單設計經量測退回等待確認
 
-> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。commit D ✅ `dcc37df`、commit E ✅ `4da7c3a`；✅ 第 12 步退回版驗收 `FALLBACK_ACCEPTED`（2026-11-05）；⚠️ 下一步：第 13 步歸檔。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
+> 狀態：✅ v4 已確認（2026-11-04，`145fe58`；v1、v2、v3 各經一輪 review 退回修訂，修正內容見文末「修訂紀錄」）。✅ 第 9 步正式量測判「證據不足」→ 已照「4.5」退回（setup 不合格一律等待確認）；v6 ✅ 2026-11-05 確認。v7 ✅ 2026-11-05 確認（退回版的獨立驗收「6.7」、歸檔指示的修正）。commit D ✅ `dcc37df`、commit E ✅ `4da7c3a`；✅ 第 12 步退回版驗收 `FALLBACK_ACCEPTED`（2026-11-05）；✅ 第 13 步歸檔完成、I-129 標成「已實作／待 review」（2026-11-05；計畫書保留到 review 確認、收斂時才刪除）。commit C ✅ `65c50e8`。commit A ✅ `51cafe9`、commit B ✅ `c82adfc`；實作備註見「十」。
 > 對應：[`issue.md`](../issue.md) I-129（原 `todo.md` T-065，2026-11-03 依分流規則改列；T-065 編號不回收）。
-> 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「已知的單向性」。
+> 現況規格：[`sr-zone-scoring.md`](../sr-zone-scoring.md)「RR 語意分層」「進場許可的 RR 判斷看 execution gate」「I-129 的量測欄位」「I-129 離線影響量測的判準」；[`development-workflow.md`](../development-workflow.md)「I-129 的離線影響量測工具」。
 
 ## 一、目標與不做的範圍
 
@@ -332,7 +332,7 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
    * 反例測試至少包含「A 的阻擋訊號在 D 被清掉、卻補上 RR 理由」：A 是 AVOID＋REDUCE＋BLOCKED，D 是 WATCH＋HOLD＋WAIT＋`RR_UNAVAILABLE` → 必須判不通過。
 5. 其餘「6.5」的結構不變式（final ⛔ 不得高於 semantic、`setup_qualified` 一致、decision 可用性一致等）照舊；第 4 項的結構訊號與 `position_action` 檢查同樣套用到「6.5」（試單模式），只會更嚴。
 
-比較工具新增 `--mode fallback`（commit E）：只套上面的判準、⛔ 不算績效指標；通過判 `FALLBACK_ACCEPTED`（結束碼 0），
+比較工具新增 `--mode fallback`（commit E）：只套上面的判準、⛔ 不算績效指標（⚠️ 實作仍會模擬並輸出 P 組的參考指標，只是⛔ 不拿來判定；現況以主題文件為準，見「十」第 13 步的 review）；通過判 `FALLBACK_ACCEPTED`（結束碼 0），
 不通過依原本的分類判 `UNATTRIBUTABLE`／`INVARIANT_VIOLATION`。
 
 **部署門檻與重新開放試單的門檻要分開**：
@@ -421,7 +421,7 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
       --a-commit $A --b-commit $D \
       --output $OUT/report_fallback.json
     ```
-13. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。
+13. 歸檔主題文件（「九」），把 I-129 標成「已實作／待 review」。列出變更檔案、commit 建議與指令；Claude ⛔ 不 commit。（✅ 2026-11-05，見「十」）
 
 ## 九、完成後的歸檔位置
 
@@ -612,6 +612,60 @@ image 若已不在本機，A 與 D 都要在新的 image 上重跑（兩趟的 i
   G_wait 依 lifecycle：TESTING 3,433、CONFIRMED 1,064、NORMAL 854、CONTINUATION 140。
 * 報告：`~/.cache/stock_trading/i129/report_fallback.json`（repo 外；試單版的 `report.json`、`report_v6.json` 也保留在同一個目錄）。
 * ⇒ 退回版的部署門檻（「6.7」）已通過；部署仍要另立部署計畫（「一」的不做、「七」的程序）。
+
+### 第 13 步：歸檔（2026-11-05；待 review）
+
+* `sr-zone-scoring.md`：
+  * 「RR 語意分層」的封頂表與順序改成現況。
+  * 「已知的單向性」改寫成「進場許可的 RR 判斷看 execution gate」：DAG、封頂規則、三種退回、`setup_qualified`、仍讀 setup RR 的兩處、risk notes、版本字串、T-065 重現的現況。
+  * 新增 D1～D6 的裁決編號：程式、測試與比較工具的註解沿用這組編號，計畫書刪除後仍要查得到。
+  * 「改前的反方向矛盾」與「試單設計與量測」記成歷史，含量測數字、退回驗收與重新開放的門檻；⛔ 沒有把試單寫成現況。
+  * 原本的 T-055 規則另立「RR gate 的其他規則（T-055）」。
+  * 補 daily confirmation 不看 RR；I-074 的 156 列加註那是改前行為。
+  * 新增「I-129 的量測欄位」。
+  * 新增「I-129 離線影響量測的判準」：「6.5」「6.7」的輸入身分、分組、結構不變式、成交規則、指標與判準。比較工具還留在 repo，重新開放試單時要用，所以規格⛔ 不能只留在計畫書。
+* 跑測分析 review（`plans/i129-replay-measurement-review.md`）的四項發現，沒有因為歸檔而消失：
+  * 判準節照實寫明最大不利偏移含出場後的 K 棒（R3）、平均實現 R 是混合口徑且未扣成本（R4）。
+  * 重新開放試單的門檻加註：只判 `PASS` 還不足以推論策略效益，四項補強要不要納入、由哪一筆承接，待裁決。
+* `development-workflow.md` 新增「I-129 的離線影響量測工具」。`database-schema.md` 的兩欄與 `api-reference.md` 的版本字串已同步。
+  與「九」的差異：`api-reference.md` 本來就⛔ 沒有 `rr_gate`／`rr_context` 的欄位說明，範例也沒有列出 `rr_gate`。
+  所以 `setup_qualified` 記在 `database-schema.md` 的 `rr_gate_json` 與 `sr-zone-scoring.md`，⛔ 不為了這一個鍵在 API 文件另立一節。
+* 程式、腳本與測試裡指向計畫書章節（「4.1」「4.5」「6.5」「6.7」）或 `issue.md` I-129 的註解，全部改指主題文件；`--help` 文字也去掉了章節號。
+  「第 8 步 review」「v6」這類由來註記保留，判準節寫明它們指本計畫書的實作備註。
+* 收斂時（review 確認之後）還要處理：
+  * ~~先裁決四項補強的承接條目~~：✅ 2026-11-10 已裁決（見下方「R1～R4 的承接」）。
+  * ~~修掉 `todo.md` T-080 與 T-080 計畫書指向本計畫書的連結~~：✅ 2026-11-10 已改指 `sr-zone-scoring.md`。
+  * `plans/i129-replay-measurement-review.md` 與本計畫書一起刪除。它指向本計畫書的連結不用改，但刪除前兩份都要已經 commit。
+  * `sr-zone-scoring.md` 判準節指向本計畫書的由來說明，要改成 git 出處。
+  * 刪除本計畫書，移除 `issue.md` 的 I-129，並修掉 I-130、T-002、T-080 裡「I-129 跑測分析 review」的說法：
+    改成 git 出處，或只留 R 編號的由來。
+
+#### R1～R4 的承接（2026-11-10，使用者裁決）
+
+* R1 時間外驗證 → `todo.md` T-002（新增「時間外驗證」一節與剩餘工作第 3 項）。
+* R2～R4 → 新立 `issue.md` I-130「Replay 成交歸因與風險報酬量測口徑補強」。三項都在同一個量測工具裡，合併處理；狀態是待規劃，實作前要另立計畫書。
+* T-080 負責策略的使用方式，拿兩者的量測成果裁決；`todo.md` 與 T-080 計畫書（v6）都補了分工。T-081 不動。
+* 每一項的證據摘要（數字、反例、artifact 指紋）與完成條件，都寫進承接條目本身，⛔ 不依賴 review 紀錄；review 紀錄隨本計畫書收斂刪除。
+* `sr-zone-scoring.md` 的重新開放試單門檻改成：T-002 的 R1 與 I-130 完成之後，依 I-130 事前裁決的新版放行判準判定；
+  本計畫書的舊判準（「6.5」）只當回歸比較。只補足樣本⛔ 不夠；移交⛔ 不代表問題已解決。
+* 承接的 review（2026-11-10）：1 項 P1、2 項 P2，三項都屬實，已修正，紀錄見 `plans/i129-replay-measurement-review.md`「7.1」。
+  * 新版放行判準要事前裁決，並綁定 T-002 的驗證資料與成本情境版本。
+  * I-130 先確認一版量測用成本情境，再交給 T-080 評估。
+  * I-130 補上兩種模式的回歸要求。
+* 本計畫書仍負責 RR 資料流修正與退回版驗收，⛔ 沒有因為移交而擴大範圍。
+
+#### 第 13 步的 review（2026-11-05 紀錄；2026-11-10 修正）：1 項 P2，經讀碼與既有報告確認屬實，已修正
+
+紀錄見 `plans/i129-replay-measurement-review.md`「六」。
+
+* **R5**：判準節寫退回驗收模式「⛔ 不算績效指標」，成交規則與結果指標也標「只在試單模式」，和實作不一致。
+  * 實作：兩種模式都會模擬 G_new 與 P，報告照樣輸出 `metrics` 與 `criteria`；只有 `judge()` 在結構檢查通過之後直接判 `FALLBACK_ACCEPTED`、⛔ 不看績效。
+  * 既有的 `report_fallback.json` 也確實帶有 P 組 40 列、成交 39、平均實現 R −0.544。
+  * 修正只改文件，⛔ 沒有改工具：照 review 的建議，把退回驗收模式改寫成「仍輸出 P 組的參考指標、⛔ 不拿績效當驗收判準」。
+  * 成交規則與結果指標的適用範圍改成「兩種模式都輸出，判準只在試單模式套用」。`development-workflow.md` 的用法同步改。
+  * 本計畫書「6.7」的原句旁加註，原句保留。
+  * 「G_new 的放行前提（只在試單模式）」和實作一致，⛔ 沒有改。
+* review 第一輪的 R1～R4 仍待裁決，不在這次修正範圍。
 
 ## 修訂紀錄
 

@@ -1,4 +1,4 @@
-"""I-129 的量測欄位（validation-only；見 docs/issue.md I-129）。
+"""I-129 的量測欄位（validation-only；見 docs/sr-zone-scoring.md「I-129 的量測欄位」）。
 
 兩件事：
 1. 匯出端：`_decision_fields_from_summary()` 的每個量測欄位都等於 decision summary 的對應值，

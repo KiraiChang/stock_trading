@@ -1,6 +1,6 @@
 """I-129 的離線影響量測：逐列比較 commit A（改前）與 commit B（改後）的 Stage 1 after artifact。
 
-規格與判準都在計畫書（docs/issue.md I-129 指向的 plans/i129-execution-gate-authority.md「6.5」），
+規格與判準都在 docs/sr-zone-scoring.md「I-129 離線影響量測的判準」（下稱「判準」節），
 ⛔ 量測前就定好、⛔ 不在這裡另訂。CLI 在 `python/scripts/compare-i129-replay.py`。
 
 ⚠️ **記憶體**：⛔ 不整份載入兩邊（I-117：crossday 的整份載入要 730 MiB）。先串流 A、每列只留精簡投影，
@@ -18,10 +18,10 @@
 全部通過才是 `PASS`。
 
 ⚠️ **兩種模式**（`mode`）：
-* `probe`（預設）：量「setup 不合格最多試單」的設計（計畫書「6.5」），走上面四種結論。
-* `fallback`：驗收退回版「setup 不合格一律等待確認」（計畫書「6.7」）——⛔ 沒有新放行組，⛔ 不判績效指標；
+* `probe`（預設）：量「setup 不合格最多試單」的設計（「判準」節的試單模式），走上面四種結論。
+* `fallback`：驗收退回版「setup 不合格一律等待確認」（「判準」節的退回驗收模式）——⛔ 沒有新放行組，⛔ 不判績效指標；
   依序判 `UNATTRIBUTABLE` → `INVARIANT_VIOLATION`，全部成立是 `FALLBACK_ACCEPTED`。
-兩種模式都套「6.7」第 4 項的結構阻擋檢查（依 **A 的**結構訊號判斷原本的阻擋是不是純 RR）。
+兩種模式都套「判準」節的「結構阻擋保留」（依 **A 的**結構訊號判斷原本的阻擋是不是純 RR）。
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from .replay_bundle import (
 from .replay_bundle.canonical import canonical_json_bytes, sha256_hex
 from .replay_bundle.stream import stream_canonical_artifact
 
-# ── 判準（計畫書「6.5」的預設值，2026-11-04 隨計畫書 v4 確認）──────────────────
+# ── 判準（「判準」節的數值，2026-11-04 量測前定案）──────────────────
 WINDOW_BARS = 5
 MIN_SAMPLES = 30
 MIN_G_NEW_SYMBOLS = 5
@@ -57,7 +57,7 @@ MIN_POSITIVE_FORWARD_RATE = 0.45
 # 判準的邊界是**含等號**的（≤／≥）；比較時容許浮點誤差，0.40 − 0.05 才不會因為算成 0.35000000000000003 而判不合格。
 EPS = 1e-9
 
-# 兩趟 Stage 1 都⛔ 不帶 tooling patch（計畫書 D6）：空 patch 的 `tooling_patch_sha256` 是空字串的 SHA-256
+# 兩趟 Stage 1 都⛔ 不帶 tooling patch（D6；裁決編號見 docs/sr-zone-scoring.md「進場許可的 RR 判斷看 execution gate」）：空 patch 的 `tooling_patch_sha256` 是空字串的 SHA-256
 # （`scripts/lib/replay-args.sh` 的 `replay_args_tooling_patch_sha256()`）。
 EMPTY_PATCH_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -74,7 +74,7 @@ LIMIT_BASES = {"PRIMARY_SUPPORT_UPPER"}
 ENTRY_RANK = {"BLOCKED": 0, "WAIT_CONFIRMATION": 1, "PROBE_ALLOWED": 2, "ENTRY_ALLOWED": 3}
 
 
-# ── 成交與停損、目標的判定（計畫書「6.5」的成交規則）────────────────────────────
+# ── 成交與停損、目標的判定（「判準」節的成交規則）────────────────────────────
 
 @dataclass(frozen=True)
 class Bar:
@@ -107,7 +107,7 @@ def simulate_trade(
     target_price: Optional[float],
     bars: Sequence[Bar],
 ) -> Optional[TradeOutcome]:
-    """依「6.5」的成交規則模擬一筆訊號。`bars` 是 as-of 之後的窗口（決策在 as-of 收盤後做出）。
+    """依「判準」節的成交規則模擬一筆訊號。`bars` 是 as-of 之後的窗口（決策在 as-of 收盤後做出）。
 
     回傳 None 代表這一列⛔ 不是可模擬的進場型（price_basis 不是市價型或限價型、或缺 entry）。
 
@@ -183,7 +183,7 @@ def simulate_trade(
 
 # ── 逐列比較 ──────────────────────────────────────────────────────────────────
 
-# U 組（setup 合格）**必須完全相同**的欄位（「6.5」的分組表）。
+# U 組（setup 合格）**必須完全相同**的欄位（「判準」節的分組表）。
 U_IDENTICAL_FIELDS = (
     "final_entry_state", "market_action", "action", "position_action", "risk_notes_digest", "rr_context",
 )
@@ -198,7 +198,7 @@ RR_REASON_CODES = frozenset({
 
 MODES = ("probe", "fallback")
 
-# 「6.7」第 4 項：結構訊號——只取和 RR 無關的事實。
+# 「判準」節的結構阻擋保留：結構訊號——只取和 RR 無關的事實。
 # ⚠️ ⛔ 不看 final 的理由：final 是 BLOCKED 時只保留 daily 的理由，A 的混合案例（AVOID＋REDUCE、final 理由卻只有
 # `RR_UNAVAILABLE`）會被誤認成純 RR。
 STRUCTURAL_POSITION_ACTIONS = frozenset({"EXIT", "REDUCE", "REDUCE_ON_BREAKDOWN"})
@@ -285,7 +285,7 @@ class _Projection:
     semantic_reason_codes: Optional[list[str]] = None
     final_entry_reason_codes: Optional[list[str]] = None
     position_action_condition: Optional[dict[str, Any]] = None
-    # 「6.7」第 4 項：A 的結構訊號與減碼／退出指示
+    # 結構阻擋保留：A 的結構訊號與減碼／退出指示
     structural: frozenset = frozenset()
     position_action: Optional[str] = None
 
@@ -660,7 +660,7 @@ def compare_artifacts(
 
 
 def _structural_checks(col: _Collector, key, a: _Projection, b_row: dict[str, Any], mode: str) -> None:
-    """「6.7」第 4 項：結構阻擋保留（兩種模式都套），以及退回驗收模式的零放行（第 2 項）。
+    """「判準」節的結構阻擋保留（兩種模式都套），以及退回驗收模式的零放行。
 
     ⚠️ 依 **A 的**結構訊號判斷原本的阻擋是不是純 RR——只看 B（或 D）的話，B 若同時漏掉原有的阻擋，
     只剩 RR 理由、也⛔ 沒有阻擋跡象，照樣會通過。
@@ -805,11 +805,11 @@ def _quantile(values: list[float], q: float) -> Optional[float]:
 
 
 def outcome_metrics(outcomes: list[TradeOutcome], forward_returns: list[float]) -> dict[str, Any]:
-    """一組的結果指標，每項都附分母（「6.5」的「結果指標與分母」）。"""
+    """一組的結果指標，每項都附分母（「判準」節的結果指標表）。"""
     filled = [o for o in outcomes if o.filled]
     with_target = [o for o in filled if o.target_first is not None]
     with_r = [o for o in filled if o.realized_r is not None]
-    # ⚠️ 停損觸及率的分母是**已成交的列**（計畫書原定義）：stop 缺值的列算「沒碰到」、⛔ 不排除——
+    # ⚠️ 停損觸及率的分母是**已成交的列**（「判準」節的分母定義）：stop 缺值的列算「沒碰到」、⛔ 不排除——
     # 排除會拉高對照組 P 的觸及率，等於放寬 G_new 的容許值（第 8 步 review）。
     stop_rate, stop_n = _rate(bool(o.stop_touched) for o in filled)
     target_rate, target_n = _rate(o.target_first for o in with_target)
@@ -845,14 +845,14 @@ def judge(
     g_new_symbols: Counter,
     mode: str = "probe",
 ) -> tuple[str, list[str]]:
-    """依「6.5」（`probe`）或「6.7」（`fallback`）的判準依序判定。回傳 `(verdict, reasons)`。"""
+    """依「判準」節的試單模式（`probe`）或退回驗收模式（`fallback`）依序判定。回傳 `(verdict, reasons)`。"""
     if unattributable:
         return "UNATTRIBUTABLE", list(unattributable)
     broken = [f"{k}={v}" for k, v in invariants.items() if v]
     if broken:
         return "INVARIANT_VIOLATION", broken
     if mode == "fallback":
-        # 退回版⛔ 沒有新放行組：⛔ 不判績效指標（「6.7」）
+        # 退回版⛔ 沒有新放行組：⛔ 不判績效指標（「判準」節的退回驗收模式）
         return "FALLBACK_ACCEPTED", []
 
     insufficient: list[str] = []
@@ -871,7 +871,7 @@ def judge(
         top, n = g_new_symbols.most_common(1)[0]
         insufficient.append(f"G_new 單一檔 {top} 占 {n}/{total} > {MAX_G_NEW_SYMBOL_SHARE:.0%}")
     if insufficient:
-        # ⛔ 不改用較寬的判準（計畫書 D5）
+        # ⛔ 不改用較寬的判準（D5）
         return "EVIDENCE_INSUFFICIENT", insufficient
 
     failed: list[str] = []
@@ -907,7 +907,7 @@ def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: lis
         "setup_qualified_mismatch": col.anomalies.get("SETUP_QUALIFIED_MISMATCH", 0),
         "final_above_semantic": col.anomalies.get("FINAL_ABOVE_SEMANTIC", 0),
         "setup_fail_above_probe": col.anomalies.get("SETUP_FAIL_ABOVE_PROBE", 0),
-        # 「6.7」第 4 項（兩種模式）
+        # 結構阻擋保留（兩種模式）
         "structural_signals_changed": col.anomalies.get("STRUCTURAL_SIGNALS_CHANGED", 0),
         "position_action_changed": col.anomalies.get("POSITION_ACTION_CHANGED", 0),
         "structural_block_removed": col.anomalies.get("STRUCTURAL_BLOCK_REMOVED", 0),
@@ -915,7 +915,7 @@ def _report(col: _Collector, a_load, b_load, row_count: int, unattributable: lis
         "unblock_without_rr_reason": col.anomalies.get("UNBLOCK_WITHOUT_RR_REASON", 0),
         "daily_block_not_final": col.anomalies.get("DAILY_BLOCK_NOT_FINAL", 0),
         "final_action_inconsistent": col.anomalies.get("FINAL_ACTION_INCONSISTENT", 0),
-        # 「6.7」第 2 項（只有退回驗收模式）
+        # 零放行（只有退回驗收模式）
         "fallback_release": col.anomalies.get("FALLBACK_RELEASE", 0),
         "fallback_market_action": col.anomalies.get("FALLBACK_MARKET_ACTION", 0),
     }

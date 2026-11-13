@@ -1,6 +1,7 @@
 # I-132：backend 沒帶到 Redis 密碼就靜默停用 Redis——部署範本版控與啟動檢查（計畫書 v3）
 
 > 狀態：v3 草稿，待使用者確認（2026-11-13）。使用者已定案：D2、D7、D8；D1、D3～D6、D9～D11 是 Claude 的建議，**還沒經過使用者確認**。⛔ 確認前不改程式、不改範本、不對 live 下指令。
+> ⏸ **2026-11-13 暫停（使用者指示）**：先完成其他驗證工作再回來。停在 E 的實作第一步：附錄 C 的契約表已盤點，C.3 的 Q1～Q4 待確認；程式、範本、live 都還沒動（live 的 F1、D7 修正已完成，見第八節）。
 > 對應：`docs/issue.md` I-132。v2 review 的原文與逐項處理見文末「Review feedback」與「十一、修訂紀錄」。
 
 ## 一、目標與不做的範圍
@@ -34,7 +35,10 @@
 
 * 共同原因：`REDIS_PASSWORD` 只放在 Redis stack 的 `.env`，只有 `deploy.sh` 的白名單區塊會讀出來並 `export`。不經過 `deploy.sh` 的重啟，compose 的 `${REDIS_PASSWORD:-}` 就會帶入空字串。
 * 為什麼沒人發現：backend 只在啟動時連一次 Redis，失敗就記 `redis connect failed, cache disabled`，然後整個停用。API、排程、`job_runs` 都照常運作，只有指標快取和訊號佇列靜默失效。
-* 11-13 的修正與核對：見 `docs/plans/old-vps-data-merge.md` 附錄 B。
+* 11-13 的修正與核對（原記在 I-131 計畫書附錄 B；I-131 查明不需合併之後搬到這裡，計畫書刪除後原文見 `git show c749964:docs/plans/old-vps-data-merge.md`）：
+  * 新 live 的 backend 在 11-12 11:57:46、14:23:34、14:29:51、16:28:37 共啟動四次，前三次都是 `redis connected`，**16:28:37 那次是 `redis connect failed, cache disabled`，錯誤類別 `NOAUTH`**（使用者用只印訊息名稱和錯誤類別的指令確認）。
+  * 原因：16:28 那次沒有經過 `deploy.sh`，專案目錄的 `.env` 不含 `REDIS_PASSWORD`，帶進去的是空字串。
+  * 11-13 11:21:32 修正：照 `deploy.sh` 同一套白名單從 Redis 的 `.env` 讀出密碼，只重建 backend。重建後核對：image 不變、其餘環境變數的雜湊不變、密碼雜湊跟 Redis 一致、`redis connected`；Redis 上看得到 backend 的連線，`indicator:*:latest` 每一輪都有更新；重建沒有中斷任何工作（11:20 那一輪在重建前就結束了）。
 
 ### 2.2 live 的現況（2026-11-13，已依 D2 修正）
 
@@ -307,7 +311,7 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 1b. ✅ **D7：live 的 `compose.yml` 改成用 `env_file` 讀 Redis 的 `.env`（2026-11-13 完成）**：先核對 sha（`20825bfc…`）和 Redis `.env` 的白名單（只有一行 `REDIS_PASSWORD`），再比對修改前（shell 帶入密碼、照 `deploy.sh` 的方式）和修改後（shell ⛔ 沒有密碼）backend 的最終 environment：都是 49 行、hash `87d53bbce18b`，一致才寫入。寫入後在 shell 沒有密碼的情況下，用 `deploy.sh` 的方式和在 scripts 目錄手動執行各驗一次，都一致，`is not set` 警告 0 則；手動 `docker compose ps` 不帶密碼也成功（三個服務都是 running，結束碼 0）。`diff` 只刪了 `REDIS_PASSWORD` 那 1 行，加了 Redis `.env` 的 `env_file`（`required: true`）和 2 行註解。新檔 SHA-256 `f75a32bdf1081c06bba3462671662cbcd97b442be0dd8a3a2bc38e51cb0b34b8`（跟 Claude 在 dev 預先算出的值一致），備份是 `compose.yml.bak.20261113b`。container ⛔ 沒有重建，下次 `up` 才套用。**F3 在 live 解決。**
 2. **review 通過之後，live 的 `deploy.sh` 補上 D5、D6**：失敗即停（`set -euo pipefail`、`git -C`、`git pull --ff-only`、`down` 失敗不進 `up`）、JWT 的最小檢查、readiness 確認。live 的路徑和 compose 檔照現況（固定的 `.env` 絕對路徑、`./compose.yml`、build 目錄當 project directory），⛔ 不整份換成範本。做法跟這次一樣：先核對 sha，在 dev 用同一份原檔預先算出新檔的 sha，指令用 base64 加 sha 核對交付；寫入前單獨試跑每一個檢查。
 3. **C 的部署**：要 build 新的 image 才會生效。依 `development-workflow.md` 的部署規則找時段，避開排程前後 10 分鐘，⛔ 不在早班批次到 08:45 之間。
-   * 跟 I-131 協調：如果 C 在 I-131 正式合併之前部署，要記下 image 和設定的版本（commit、image id、`compose.yml`／`deploy.sh` 的 sha），I-131 的最終演練和驗收都要用同一個版本，⛔ 不能沿用過期的環境結論。
+   * ~~跟 I-131 協調：如果 C 在 I-131 正式合併之前部署，要記下 image 和設定的版本，I-131 的最終演練和驗收都要用同一個版本。~~ I-131 已在 2026-11-13 查明⛔ 沒有資料缺口、不需要合併（待 review），這項協調取消。
 4. **部署後確認**：`redis connected`、readiness 通過、backend 的 `Config.Env` hash 跟部署前一致（沒有改設定時）。故意用錯的密碼⛔ 不在 live 上試，只在 dev 驗證。
 
 ## 九、完成後要歸檔的位置
@@ -328,6 +332,75 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 | E1 | build 目錄 `/opt/stacks/deploy/stock_trading/build/stock_trading/` 底下有沒有 `.env` | ✅ 2026-11-13 使用者查證：⛔ 沒有。scripts 目錄的 `.env` 雜湊開頭是 `06875c113f12`，權限已改成 600 |
 | E2 | F1 的 A/B 實測、live 修改前後的設定比對、第一次部署前後的 `Config.Env` 比對 | ✅ 2026-11-13 使用者在 live 執行、Claude 核對輸出（2.3、第八節第 1 步） |
 | E3 | go-redis v9.5.4 的預設選項和重試條件 | 實作時讀 module 原始碼確認（2.5），並用 dev 的計時實測佐證 |
+
+## 附錄 C：設定契約表（E 的盤點，2026-11-13，待 review）
+
+> 實作第一步的產出。依 `backend/internal/config/config.go` 的每個欄位、`config.Load()` 的 `SetDefault`、`backend/config.yaml`，以及 `main.go`／scheduler 實際怎麼用，逐鍵整理。**這張表 review 通過之後才寫程式。**
+> 環境變數的名稱是 viper 的鍵把 `.` 換成 `_` 再轉大寫（例如 `auth.jwt_secret` → `AUTH_JWT_SECRET`）。
+> 「prod」＝ D9 的環境類別是 production（含沒設定）；「全部」＝ production／dev／test 都檢查。
+
+### C.1 盤點時查到、會影響規則的事實
+
+* **viper 會把空字串當成沒設定**，退回 `config.yaml` 或 `SetDefault` 的值（2.3）。所以檢查的永遠是**最終值**；「空值」和「範例值」要一起擋。
+* **`database.driver` 的預設是 `sqlite`、`dsn` 的預設是本機檔案路徑**。live 如果漏了 `DATABASE_DRIVER`，backend 會**靜默開一個全新的空 SQLite**，排程照跑、API 回空資料。這是盤點裡後果最嚴重的一項。
+* **FinMind 是無條件用到的**：`main.go` 無條件建立 FinMind client，公司行動同步（無條件註冊）、籌碼採集（無條件註冊）、日 K 回補都用它。現在 key 是空值或 `YOUR_FINMIND_API_KEY` 時只記一筆 Warn。
+* **Fugle 只在 `fugle.enabled=true` 時用到**；現在 key 是空值或 `YOUR_FUGLE_API_KEY` 時只記一筆 Warn。`config.yaml` 的預設值就是 `YOUR_FUGLE_API_KEY`。
+* **`python.service_url` 空白時**，SR 分析（排程和手動）會在執行時才失敗（`python service url not configured`）。
+* **cron 字串打錯時**，scheduler 的 `AddFunc` 只記 Error、不中止，那支排程就**靜默不註冊**。只有 `corporate_action.cron` 有退回預設值的第二道防線。
+* **已經有正規化的設定**：`job_retry.*`（≤ 0 或格式錯誤退回預設並記 Error）、`candle_gap_detection.*`（scheduler 的正規化函式）、`sr_zone_verify.*`（兩段式）、`corporate_action.timeout_sec`／`shard_count`（≤ 0 退回預設）、`stock_symbols.timeout_sec`／`fetch_delay_sec`、`delisting.timeout_sec`／`cron`（0 或空白沿用預設）。
+* 型別解析失敗（例如 `ENABLED=abc`）現在就會讓 `config.Load()` 失敗、啟動中止，契約⛔ 不重複處理。
+
+### C.2 契約表
+
+| 設定（環境變數） | 預設值 | 誰用、什麼時候用 | 規則 | 適用條件 | 環境 |
+|---|---|---|---|---|---|
+| `APP_ENV`（新增，D9） | 沒設定＝production | 決定下面「prod」的規則要不要生效 | 只能是 `production`／`dev`／`test`，其他值**一律擋下**（打錯字⛔ 不能默默變成寬鬆模式） | 無條件 | 全部 |
+| `DATABASE_DRIVER` | `sqlite` | DB 連線 | 必須是 `postgres` | 無條件 | prod |
+| `DATABASE_DSN` | `../../output/stock_trading/trading.db`（config.yaml） | DB 連線 | 不能是空值；⛔ 不能是預設的 SQLite 路徑；⛔ 不能含 `config.yaml` 註解裡的範例帳密（`user:password`、`root:password`） | 無條件 | prod |
+| `SERVER_PORT` | `8080` | HTTP | 必須是 1～65535 的整數 | 無條件 | 全部 |
+| `REDIS_ADDR` | 空白（＝停用） | 快取、訊號佇列 | ⛔ 不能是空值（live 一定要有 Redis）；dev／test 允許空白＝停用 | 無條件 | prod |
+| `REDIS_PASSWORD` | 空白 | Redis 認證 | ⛔ 不能是空值 | `REDIS_ADDR` 有值 | prod |
+| `REDIS_DB` | `0` | Redis | 必須 ≥ 0 | `REDIS_ADDR` 有值 | 全部 |
+| `AUTH_JWT_SECRET` | `change-me-in-production` | 登入 token 的簽章 | ⛔ 不能是空值；⛔ 不能是公開範例值（`change-me-in-production`、`change-me`、`dev-only-change-me`）；長度至少 32 bytes（**待確認**，見 C.3 Q1） | 無條件（API 一定會用到） | 不能是空值：全部；範例值與長度：prod |
+| `FINMIND_API_KEY` | `YOUR_FINMIND_API_KEY` | 日 K、公司行動、籌碼（都無條件） | ⛔ 不能是空值或範例值（`YOUR_FINMIND_API_KEY`、`your-finmind-api-key`） | 無條件 | prod |
+| `FINMIND_BASE_URL`、`FINMIND_RATE_LIMIT` | 官方網址、`5` | FinMind client | 網址要能解析成 `https`；rate limit ≥ 1 | 無條件 | 全部 |
+| `FINMIND_INTRADAY_ENABLED` | `false` | 盤中分 K | （開關本身只有型別檢查） | — | — |
+| `FUGLE_API_KEY` | `YOUR_FUGLE_API_KEY` | Fugle 即時行情 | ⛔ 不能是空值或範例值（`YOUR_FUGLE_API_KEY`、`your-fugle-api-key`） | **`FUGLE_ENABLED=true`**；停用時空值、範例值都放行 | prod |
+| `FUGLE_*` 的網址和數值 | 見 `SetDefault` | Fugle | 網址要能解析；`QUOTE_RATE_LIMIT`、`MAX_SUBSCRIPTIONS` ≥ 1；其他維持現行（0／負值有既定語意，例如 `PING_INTERVAL_SEC` 負值＝關閉 ping） | `FUGLE_ENABLED=true` | 全部 |
+| `YAHOO_BASE_URL`、`YAHOO_RATE_LIMIT`、`YAHOO_BATCH_SIZE` | 見 `SetDefault` | Yahoo 盤中；`RATE_LIMIT` 另外給除權息來源用（無條件） | 網址要能解析（`YAHOO_ENABLED=true` 時）；`RATE_LIMIT` ≥ 1（無條件，除權息會用）；`BATCH_SIZE` ≥ 1（啟用時） | 見規則 | 全部 |
+| `PYTHON_SERVICE_URL` | 空白 | SR 分析（排程與手動）、回測的 Method B | ⛔ 不能是空值，而且要能解析成 `http(s)` 網址 | 無條件 | prod |
+| `PYTHON_SR_ZONES_TIMEOUT_SEC` | `120` | SR zone 呼叫 | ≥ 1 | 無條件 | 全部 |
+| `STOCK_SYMBOLS_CRON` | `30 6 * * *` | 主檔同步 | `cron.ParseStandard` 解析得了 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
+| `STOCK_SYMBOLS_SYNC_URLS` | 上市＋上櫃兩個網址 | 主檔同步 | 至少一個、每個都能解析 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
+| `CHIP_SYNC_CRON` | `0 21 * * 1-5` | 籌碼採集（無條件註冊） | 解析得了 | 無條件 | 全部 |
+| `CHIP_SYNC_HISTORY_TRADING_DAYS`、`CHIP_SYNC_BATCH_SIZE` | `500`、`50` | 籌碼 | ≥ 1 | 無條件 | 全部 |
+| `CORPORATE_ACTION_CRON` | `30 6 * * 1-5` | 公司行動（無條件註冊） | 解析得了。⚠️ 現在打錯會退回預設（第二道防線）；契約改成**啟動就擋**，scheduler 的退回邏輯保留給不經過 `config.Load()` 的呼叫端 | 無條件 | 全部 |
+| `EVALUATION_UNIVERSE_CRON`、`_DAYS` | `0 16 * * 1-5`、`10` | 評估標的池 | cron 解析得了；`DAYS` ≥ 1 | `EVALUATION_UNIVERSE_ENABLED=true` | 全部 |
+| `SR_ANALYSIS_CRON`、`_CHIP_CRON`、`_TIMEFRAME`、`_LIMIT` | `0 17 * * 1-5`、`0 22 * * 1-5`、`1d`、`400` | SR 分析排程 | 兩個 cron 都解析得了；`TIMEFRAME` 是程式認得的週期（實作時對照 API 的合法值）；`LIMIT` ≥ 1 | `SR_ANALYSIS_ENABLED=true` | 全部 |
+| `SR_EVALUATION_CRON`、`_TIMEFRAME`、`_LIMIT`、`_REPLAY_MAX_ROWS` | `30 22 * * 1-5`、`1d`、`1500`、`200` | SR evaluation | cron 解析得了；`TIMEFRAME` 同上；兩個數值 ≥ 1 | `SR_EVALUATION_ENABLED=true` | 全部 |
+| `DELISTING_URL`、`DELISTING_CRON` | 官方 CSV 網址、`0 7 * * *` | 終止上市對帳 | 網址要能解析；cron 空白沿用預設，有值就要解析得了 | `DELISTING_ENABLED=true` | 全部 |
+| `JOB_RETRY_*` | 見 `SetDefault` | 自動重跑 | **維持現行的正規化**（退回預設＋Error），⛔ 不改成啟動失敗：那是 I-123～I-126 已確認的行為 | — | — |
+| `CANDLE_GAP_DETECTION_*` | 見 `SetDefault` | 日 K 缺漏偵測 | **維持現行**：scheduler 的正規化函式把關（`config.go` 的註解寫明了分工） | — | — |
+| `SR_ZONE_VERIFY_*` | `30`、`2000` | SR zone 驗證 | **維持現行**（兩段式） | — | — |
+| `CORPORATE_ACTION_TIMEOUT_SEC`、`_SHARD_COUNT` | `2700`、`5` | 公司行動 | **維持現行**（≤ 0 退回預設） | — | — |
+| `STOCK_SYMBOLS_TIMEOUT_SEC`、`_FETCH_DELAY_SEC`、`DELISTING_TIMEOUT_SEC` | `0`（＝沿用程式預設） | 各 client | **維持現行**（0 有既定語意）；負值擋下 | 對應功能啟用時 | 全部 |
+| `POSITION_ANALYSIS_*` | 見 `SetDefault` | 持倉分析 | 金額和 R 倍數 > 0；兩個比例在 (0, 1]；`SR_REUSE_MAX_AGE_HOURS` ≥ 0（**待確認**，見 C.3 Q2） | 無條件 | 全部 |
+| 各功能的 `*_ENABLED` 開關 | 見 `SetDefault` | — | 只有型別檢查（現行） | — | — |
+
+**輸出的規則代號**（log 只寫「鍵名:代號」）：`required`、`public_example`、`invalid_value`、`invalid_cron`、`invalid_url`、`out_of_range`、`too_short`、`required_when_<條件>`（例如 `REDIS_PASSWORD:required_when_redis_addr`）。
+
+### C.3 待使用者確認
+
+* **Q1 JWT 的最短長度**：建議 production 要求至少 32 bytes（HS256 的金鑰長度建議）。⚠️ 要先確認 live 現在的 `AUTH_JWT_SECRET` 夠長，否則上線就會被擋。可以給一段只印**長度**的唯讀指令，請使用者在 live 跑（⛔ 不印值）。如果不夠長，要先換密鑰（所有人要重新登入），或這條規則先不做。
+* **Q2 `POSITION_ANALYSIS_*` 的範圍**：這幾個值影響交易決策的計算。0 或負值現在會怎樣，還沒讀到程式確認；表裡的範圍是依欄位語意推的。要不要納入契約，還是另外處理（屬於交易邏輯，可能超出本案）？
+* **Q3 `REDIS_ADDR` 在 production 必要**：表裡是「production 一定要有 Redis」。如果將來有不用 Redis 的部署方式，這條要拿掉。
+* **Q4 `CORPORATE_ACTION_CRON` 改成啟動就擋**：現在打錯會退回預設時間繼續跑；改成啟動失敗比較明顯，但 backend 會起不來。建議擋（部署前的 D11 檢查會先抓到，不會造成停機）。
+
+### C.4 上線前的核對
+
+* 上 live 之前，用 D11 的「只檢查設定」模式，拿 live 的實際設定跑一次（在 `down` 之前），全部通過才部署。
+* 目前 live 的設定（2.2）預期會通過：`DATABASE_DRIVER=postgres`、`REDIS_ADDR` 和密碼都有、`PYTHON_SERVICE_URL` 有值、`FUGLE_ENABLED` 預設 false、FinMind 和 JWT 都不是範例值（使用者 2026-11-13 比對過 JWT 跟 `.env` 一致；長度待 Q1）。
+* live 要在 compose 加上 `APP_ENV`？D9 的設計是「沒設定＝production」，所以 live ⛔ 不需要加；dev compose 要加 `APP_ENV: dev`。
 
 ## Review feedback（2026-11-13，v2）
 
@@ -391,4 +464,4 @@ I-131 的 R1～R4 仍待處理，不能以 I-132 已修復 live `.env` 或 Redis
 |---|---|---|
 | v1 | 2026-11-13 | 初版：A（A1 `:?`、A2 `.env.example`），C（重試之後非 0 結束），B 不做；記下 F1～F4 和範本落差。同日補充：E1 確認 build 目錄沒有 `.env`，查出 F1 的實際後果（viper 退回 `config.yaml` 的公開預設值），新增 D5；F2 已完成 |
 | v2 | 2026-11-13 | A/B 實測確認 F1，也確認 `--env-file` 修得好；使用者決定 D2 改成在 compose 裡用 `env_file` 注入 `.env`，不在 `deploy.sh` 加 `--env-file`（見 F1 的處置、D2、第八節第 1 步）。4.1、A2、第三節受影響檔案裡的 `--env-file` 寫法和資料流描述還沒改，等 live 驗證完成後一起改寫 |
-| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |
+| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |

@@ -26,10 +26,10 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-133` 起算。**（**I-132 於 2026-11-13 發出**——新機 live 的 backend 重啟時沒帶到 Redis 密碼，Redis 被靜默停用（11-02 之後第二次）；使用者裁決部署範本的版控和啟動檢查一起立案。**I-131 於 2026-11-12 發出**——舊 VPS 證據搬遷時核對時間序，發現新 live 的 DB 是用停機前一天的 dump 還原的、之後到停機的資料不在新 DB。**I-130 於 2026-11-10 發出**——承接 I-129 跑測分析 review 的 R2～R4（Replay 成交歸因與風險報酬量測口徑）。**I-129 於 2026-11-03 發出**——由 `todo.md` T-065 改列（描述的是矛盾結果，依分流規則屬於本清單；**T-065 編號不回收**，比照 T-068 → I-100）。**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-133` 起算。**（**I-129 於 2026-11-13 收斂**——review 確認；上 live 之前查證 p5 已全面生效、⛔ 不需要補做換版程序；現況規格在 `sr-zone-scoring.md`「進場許可的 RR 判斷看 execution gate」「I-129 的量測欄位」「I-129 離線影響量測的判準」，換版程序與上線紀錄在 `development-workflow.md`「決策語意換版上 live：先更新 governance、再刷新快照」，量測工具在同檔「I-129 的離線影響量測工具」；跑測分析 review 的 R1 由 `todo.md` T-002、R2～R4 由 I-130 承接；原文見 `git show c749964:docs/issue.md` 與 `git show c749964:docs/plans/i129-execution-gate-authority.md`；**編號不回收**。**I-131 於 2026-11-13 查明⛔ 沒有資料缺口、改為「已查明／待 review」**——全表比對確認新 live 是用停機後的最終 dump 還原的，合併計畫（改到 v8）不執行；證據在 `~/old_vps_archive/20261112/i131_compare/`，逐表結果記在條目裡。**I-132 於 2026-11-13 發出**——新機 live 的 backend 重啟時沒帶到 Redis 密碼，Redis 被靜默停用（11-02 之後第二次）；使用者裁決部署範本的版控和啟動檢查一起立案。**I-131 於 2026-11-12 發出**——舊 VPS 證據搬遷時核對時間序，發現新 live 的 DB 是用停機前一天的 dump 還原的、之後到停機的資料不在新 DB。**I-130 於 2026-11-10 發出**——承接 I-129 跑測分析 review 的 R2～R4（Replay 成交歸因與風險報酬量測口徑）。**I-129 於 2026-11-03 發出**——由 `todo.md` T-065 改列（描述的是矛盾結果，依分流規則屬於本清單；**T-065 編號不回收**，比照 T-068 → I-100）。**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
-  **現存條目**裡最大的是 I-130（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，I-128 於 2026-11-03 發出並收斂（T-071 收斂時的 Go 測試），I-129 於 2026-11-03 由 `todo.md` T-065 改列，**下一個可用的是 I-130**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
+  **現存條目**裡最大的是 I-132（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，I-128 於 2026-11-03 發出並收斂（T-071 收斂時的 Go 測試），I-129 於 2026-11-03 由 `todo.md` T-065 改列，**下一個可用的是 I-130**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
   已於 2026-08-31 收斂、I-099 已發出並作廢、T-068 改列為 I-100，編號都不回收），但被移除的條目
   （I-040 / I-056 / I-069 已於 2026-08-18 收斂，I-076 於 2026-08-19 收斂，
   I-083 / I-084 於 2026-08-24 收斂，I-086～I-090 於 2026-08-25 收斂，
@@ -70,8 +70,8 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126 / I-129 / I-130、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
-  已跳號的 I-114，以及下一個可用的 I-131），
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126 / I-130～I-132、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
+  已跳號的 I-114、已收斂的 I-129，以及下一個可用的 I-133），
   那是預期的，不是殘留。
 
   ⚠️ **I-074**（2026-10-29 收斂）的引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。
@@ -3191,7 +3191,8 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 * **這次實際驗證過的**：①舊機上用目錄裡的 `SHA256SUMS` 驗過一次：0 筆不符，`SHA256SUMS` 本身的雜湊仍是 `2aa614a6…`；②搬到新機的**相同路徑**後再驗一次，結果相同，接著把既有檔案設成唯讀；③舊 live 的 log 目錄（backend、python-server、python-worker，共 44 個檔；backend 是 `backend-2026-10-30.log`～`backend-2026-11-12.log`）封存在新機 `~/old_vps_archive/20261112/logs/`，跟舊機產生的 sha256 清單核對全部 OK；④舊機上 backend 的 log 目錄**已經沒有** 10-17～10-29 的檔案。
 * **沿用既有紀錄或推論的，這次⛔ 沒有驗證**：④的原因推定是 14 天輪替（`LOG_RETENTION_DAYS=14`，見下方「環境（E0，2026-10-30）」），⛔ 沒有找到刪除紀錄；本筆需要的 log 片段已經在 10-30 保全進證據目錄，這點根據的是計畫「三」的 E0～E3 紀錄，這次⛔ 沒有逐項比對內容。
-* 舊 DB 的兩份 dump 見 [I-131](#i-1312026-11-12-主機搬遷新-live-的-db-由-11-11-1542-的-dump-還原之後到停機的資料不在新-db)
+* 舊 DB 的兩份 dump（都在 `~/old_vps_archive/20261112/db/`，唯讀）：`trading.dump`（11-11 15:42，85,705,876 bytes，SHA-256 `b7a1b922…`）與 `final/stock_trading.dump`（11-12 16:05 停機後的最終 dump，87,361,200 bytes，SHA-256 `1d9495fd…`；`job_runs` 最大 id 5673，最後一筆是 11-12 15:02 的 `sr_zone_verify`）。
+* ⚠️ 觀察期的 `job_runs` 要用**最終 dump** 查，⛔ 不用新 live 的 DB：新 live 是用最終 dump 還原的（2026-11-13 全表比對確認，見 I-131），但它的保留期清理會逐日刪掉最舊的紀錄（11-13 已刪到 10-13）。最終 dump 已還原成 dev 作業 volume `stock_trading_dev_i131_pgdata` 裡的 `merge_old`，查詢要照 `development-workflow.md`「在 dev 查 live 的真實資料：作業專用 volume」帶隔離 override 啟動。
 
 #### 已知症狀（2026-10-29，只有 `/scheduler/status` 每個工作的**最新一筆**；錯誤內容⛔ 沒有看過）
 
@@ -3426,63 +3427,6 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 (1) 整輪失敗記成 failed；(2) 前置條件不成立寫成專屬的安全文字（例如 `delisting_reconcile:stock_symbol_sync_not_ready`）。
 ⚠️ 動到狀態推導與 `job_runs` 的 contract，要先立計畫書。
 
-### I-129：進場許可被 setup RR 提前決定，與對外的 execution gate 反方向矛盾（原 `todo.md` T-065）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **已實作／待 review**（2026-11-05；計畫 v7：[`plans/i129-execution-gate-authority.md`](./plans/i129-execution-gate-authority.md)；方向：execution gate 決定，setup 不合格一律等待確認——試單設計經 2026-11-04 量測判「證據不足」而退回；commit A `51cafe9`、B `c82adfc`、C `65c50e8`、D `dcc37df`、E `4da7c3a`；退回版驗收 ✅ `FALLBACK_ACCEPTED`；現況規格已歸檔到 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「進場許可的 RR 判斷看 execution gate」「I-129 的量測欄位」「I-129 離線影響量測的判準」與 [`development-workflow.md`](./development-workflow.md)「I-129 的離線影響量測工具」；跑測分析 review 的 R1 已移交 `todo.md` T-002、R2～R4 已移交 I-130（2026-11-10；移交⛔ 不代表已解決，也⛔ 不代表可以恢復試單）；⚠️ 收斂時連同 review 紀錄 `plans/i129-replay-measurement-review.md` 一起刪除（兩份都要先 commit）；部署另立計畫，等 I-123～I-126 觀察期結束） |
-| 嚴重度 | 中高（會產出**無法診斷**的 `BLOCKED`：對外的 `rr_gate` 兩層都通過、RR 11.0，卻禁止進場，而且沒有任何欄位說明理由；那個 11.0 本身也是 setup gate 擋掉之後才算出來的） |
-| 分類 | Python / SR Zone / 決策語意 / 資料契約 |
-| 發現日期 | 2026-08-27 |
-| 來源 | 原記於 `todo.md` T-055 第三輪 review 的 F1 裁決（T-055 已於 2026-08-27 收斂）——封頂做法只涵蓋單向，反向由 T-065 承接；**2026-11-03 依分流規則改列本筆**（描述的是矛盾結果，不是功能擴充），**T-065 編號不回收**。現況說明見 [`sr-zone-scoring.md`](./sr-zone-scoring.md)「進場許可的 RR 判斷看 execution gate」 |
-
-#### 跑測分析 Review（2026-11-05）
-
-獨立紀錄見 [I-129 Replay 跑測與分析適切性 Review](./plans/i129-replay-measurement-review.md)。退回等待確認與既有 FALLBACK_ACCEPTED 結論保留；另記時間外驗證、成交價 RR 落差、最大不利偏移範圍及混合 R／成本口徑四項補強建議。補強尚未實作，範圍與正式方案待裁決；P1 是重新評估放寬前的證據缺口，不代表已推翻退回版結構驗收。原案歸檔時須保留未解發現的追蹤，不直接視為已解決。
-
-**承接（2026-11-10 使用者裁決）**：R1 時間外驗證 → `todo.md` T-002；R2～R4（成交價 RR 落差、不利偏移範圍、混合 R 與成本）→ I-130，三項都在同一個量測工具裡，合併處理；T-080 拿兩者的量測成果裁決成本假設、可接受進場價格、失效提示與試單參數，T-081 維持資產配置範圍。各項的證據摘要與完成條件已寫進承接條目本身，⛔ 不依賴 review 紀錄；review 紀錄隨本筆收斂刪除。本筆仍負責 RR 資料流修正與退回版驗收；重新開放試單的門檻改成「T-002 的 R1 與 I-130 都完成之後，依 I-130 事前裁決的新版放行判準判定；舊判準的 `PASS` 只當回歸比較」（`sr-zone-scoring.md`「進場許可的 RR 判斷看 execution gate」）。
-
-#### 成因：封頂是單調遞減運算，判定在更上游就提前結束
-
-`secondary_gate` 不合格時，`decision_derived_view.semantic_pipeline` 與 `final_entry_permission`
-**一起封頂**到 `PROBE_ALLOWED`。那解決的是**高估**：`setup_rr ≥ 2.0 > executable_rr`。
-
-**封頂只能降不能升**，所以反方向碰不到：`executable_rr` 高於 `setup_rr` 時，判定在更上游讀 setup RR 的地方
-就已經結束，下游拿不到控制權。讀 setup RR 的地方（2026-11-03 讀碼盤點；原 T-065 只列了前兩列與 `strong`）：
-
-| 位置 | 現況 |
-|---|---|
-| `_decision_action()` | `rr < 1.5` 或 `None` → WATCH 提前 return；`strong` 要 `rr >= 2.0` |
-| `_decision_semantic_pipeline()` | `not rr_qualified` → `BLOCKED`（`rr_gate` 是**更早的 setup-RR gate**） |
-| `_daily_confirmation()` | `not rr_gate.qualified` → daily `BLOCKED`，`_final_entry_permission()` 因此直接 BLOCKED |
-| `_decision_derived_view()`、`_price_path()` | `path_gate_state=RR_BLOCKED` 吃 setup gate |
-
-真正要解的是資料流的環：
-
-```
-execution gate ──需要──> entry_executability ──需要──> decision_derived_view ──需要──> execution gate
-```
-
-`_entry_executability()` 只在 semantic 許可放行時才走市價 entry；setup gate 擋掉時改走限價、用 zone 上緣當 entry，
-於是 execution gate 算到的是**另一個進場價**的 RR。
-
-#### 重現（2026-08-27，`_summary` 的 CONTINUATION fixture，support TIER_3、壓力放 122.0）
-
-| `setup_rr` | `rr_gate` | `semantic` / `final` | `action` | `risk_notes` |
-|---|---|---|---|---|
-| 1.4 | `qualified=True` `secondary=True` **`actual_rr=11.0`** | **`BLOCKED`** | `Hold` | 「主交易區風險報酬比不足。」＋「Final Entry 禁止進場…」 |
-| 1.7 | 同上 | **`BLOCKED`** | `Hold` | **只有**「Final Entry 禁止進場…」 |
-| 2.8（對照組） | `actual_rr=2.429` | `ENTRY_ALLOWED` | `BuySmall` | 正常 |
-
-`setup_rr=1.7` 那列最嚴重：**BLOCKED 但沒有任何欄位解釋為什麼**。
-11.0 是限價 entry（zone 上緣 100）算出來的 (122−100)/(100−98)；不被擋時走市價 105，是 (122−105)/(105−98)≈2.43，與對照組相同。
-
-#### 驗收準則
-
-* 上表 `setup_rr=1.4` 與 `1.7` 兩組必須輸出與 `rr_gate` 一致的結果；RR 不合格時必須有欄位指明理由。
-* `setup_rr=2.8` 對照組行為不得改變。
-* 既有的封頂測試（`test_full_entry_gate_caps_authoritative_permission_end_to_end` 與其對照組）必須續存並通過——本筆是**擴充**單向為雙向，不是取代。
-
 ### I-130：Replay 成交歸因與風險報酬量測口徑補強（承接 I-129 跑測分析 review 的 R2～R4）
 
 | 欄位 | 內容 |
@@ -3491,7 +3435,7 @@ execution gate ──需要──> entry_executability ──需要──> decis
 | 嚴重度 | 中（現有的績效數字可能被誤讀成成交後的真實績效；⛔ 不影響 live，也⛔ 不推翻 I-129 退回版的 `FALLBACK_ACCEPTED`） |
 | 分類 | Python / SR Zone / 離線量測 |
 | 發現日期 | 2026-11-05 |
-| 來源 | I-129 跑測分析 review（2026-11-05）的 R2、R3、R4；2026-11-10 依使用者裁決立案。同一份 review 的 R1（時間外驗證）由 `todo.md` T-002 承接 |
+| 來源 | I-129 跑測分析 review（2026-11-05；I-129 已於 2026-11-13 收斂，review 原文見 `git show c749964:docs/plans/i129-replay-measurement-review.md`）的 R2、R3、R4；2026-11-10 依使用者裁決立案。同一份 review 的 R1（時間外驗證）由 `todo.md` T-002 承接 |
 
 **範圍**：I-129 的比較工具（`backtest/modular/sr_scoring/i129_measurement.py`；規格見 `sr-zone-scoring.md`「I-129 離線影響量測的判準」）
 試單模式的績效指標。R2～R4 都在同一個工具的成交模擬與報告裡，合併處理，免得三案重複改計算與報告格式。
@@ -3591,113 +3535,74 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 * `report_v6.json` 的 verdict 是 `EVIDENCE_INSUFFICIENT`，理由只列 P_q 26 < 30，因為工具先判樣本、再判安全；平均 R ≥ 0 其實也⛔ 不成立。
   建議保留判定順序，另外輸出每一項安全條件的診斷結果，避免只讀 verdict 的人漏看負值。
 
-### I-131：2026-11-12 主機搬遷：新 live 的 DB 由 11-11 15:42 的 dump 還原，之後到停機的資料不在新 DB
+### I-131：2026-11-12 主機搬遷：懷疑新 live 的 DB 缺了停機前的資料——查明⛔ 沒有缺口
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v8 待確認：[`plans/old-vps-data-merge.md`](./plans/old-vps-data-merge.md)；v1～v5 的 review 共發現 4／4／3／3／1 項，已分別在 v2～v6 修正；v6、v7 的 review（R1～R4、P3）和 D5(d) 的整合評估（含 R5）在 v8 處理，見下方「計畫書的 review」；D5（真實資料的保護）建議採 (d)，v8 改成作業專用資料卷，待確認；策略 A／B ⛔ 尚未裁決，等證據 E1～E6 齊了再定；⛔ 計畫書確認前不對 live 寫入；live 由專人執行，Claude 只出指令；live 的資料由使用者照指令 dump 後交給 dev，在 dev 上查，⛔ 不在 live 上跑 SQL；程式參數由使用者照唯讀的 docker 指令取出後貼回） |
-| 嚴重度 | 高：新 live 缺了約一天的資料（範圍見下方「可能缺的範圍」，⚠️ 尚未逐表核對實際筆數） |
+| 狀態 | **已查明／待 review**（2026-11-13）：新 live 是用舊機**停機後的最終 dump** 還原的，⛔ 沒有資料缺口，不需要合併。原本的合併計畫（[`plans/old-vps-data-merge.md`](./plans/old-vps-data-merge.md)，改到 v8）**不執行**，保留到 review 確認後刪除。條目原文（以為缺了約一天資料的版本）見 `git show c749964:docs/issue.md` |
+| 嚴重度 | 原本評為高；查明之後⛔ 沒有影響 |
 | 分類 | 基礎設施 / live 主機搬遷 / DB |
 | 建立日期 | 2026-11-12 |
-| 來源 | 舊 VPS 證據搬遷時核對 dump、log 與停機的時間序（使用者說明：新機用舊的 dump 還原，新 live 已開始寫入） |
-| 證據 | 新機 `~/old_vps_archive/20261112/`（repo 外；既有檔案唯讀）：`db/trading.dump`（新機還原用的那份）、`db/final/stock_trading.dump`（停機後的最終 dump）、`logs/`（舊 live 的 log）與三份舊機產生的 sha256 清單。舊機的資料目錄 `/opt/stacks/scripts/postgres/data` ⚠️ 保留到本筆收斂為止 |
+| 來源 | 舊 VPS 證據搬遷時核對 dump、log 與停機的時間序，加上使用者說明「新機用舊的 dump 還原」，推論新 DB 缺了 11-11 15:42 之後的資料。⚠️ 這個前提當時⛔ 沒有用資料驗證 |
+| 證據 | repo 外 `~/old_vps_archive/20261112/i131_compare/`（唯讀；`SHA256SUMS` 本身的 SHA-256 `fff7925d…`）：比對腳本與 SQL、逐表輸出、輸入指紋、說明檔。兩份 dump 的位置與指紋見 I-122「主機搬遷」 |
 
-#### 事實（時間是台北）
+#### 怎麼查的
 
-| 時間 | 事件 | 依據 |
-|---|---|---|
-| 11-11 15:42 | 舊機產生 `trading.dump`（85,705,876 bytes，SHA-256 `b7a1b922…`）；**新機的 DB 用這份還原** | 檔案時間；使用者說明 |
-| 11-11 15:42 之後 | 舊 live 繼續運作、繼續寫入舊 DB | 舊 log 持續到隔天 |
-| 11-12 15:56 | 舊 backend 最後一次寫 log（`backend-2026-11-12.log` 的修改時間） | 檔案時間 |
-| 11-12 16:05 | 停機後的最終 dump `stock_trading.dump`（87,361,200 bytes，SHA-256 `1d9495fd…`；pg_dump 16.14、custom format；`pg_restore -l` 記錄的建立時間 08:05:14 UTC，51 張表有資料） | `pg_restore -l` 的檔頭 |
-| 11-12 11:57:46 | 新 live 的 backend 第一次啟動（`scheduler started`）。**這時連的是試跑用的 `trading-test` DB，⛔ 不是 `trading`**（使用者 2026-11-13 說明），所以⛔ 不是跟舊 live 並行寫入同一份正式資料。改連 `trading` 是從哪一次啟動開始，⚠️ 待確認，要在分析快照的 `job_runs` 裡核對 | 啟動時間：新 live 的 backend log（使用者依計畫書附錄 A-2 取回；log 裡最早的一筆）；連哪個 DB：使用者說明 |
-| 11-12 14:23:34、14:29:51、16:28:37 | 新 live 的 backend 又重啟三次。14:29:51 那次重跑機制是 `enabled:false`，16:28:37 改回 `true` | 同上 |
-| 11-13 11:21:32 | 新 live 的 backend 重建，修正 Redis 連線：16:28:37 那次重啟沒有帶到 `REDIS_PASSWORD`（NOAUTH），之後 Redis 一直是停用的。修正後確認 `redis connected`、快取有更新，也沒有中斷任何工作（做法和核對結果見計畫書附錄 B）。本筆封鎖期驗收的「部署後確認（含 Redis）」依賴這項修正 | 使用者在 live 執行、Claude 核對輸出 |
-| 11-13 14:35:15 | 新 live 第一次用改過的 `deploy.sh` 部署（I-132 F1 修正後；build 目錄從 `abdc24d` pull 到 `e3e9156`，只多了文件），backend、python-worker、python-server 都重建。部署前確認 `running` 是 0；backend 重建前後的環境變數一致（50 行，hash `34d11e524211`）；log 有 `redis connected`、`yahoo intraday enabled` | 使用者在 live 執行、Claude 核對輸出（見 I-132 計畫書第八節第 1 步） |
-| 11-13 10:41:29 | 新 live 的分析快照 `live_analysis_20261113T104129.dump`（88,093,282 bytes，SHA-256 `d5a327f2…`；pg_dump 16.15；51 張表有資料） | 使用者依附錄 A-1 dump；dev 重算 SHA-256、讀 `pg_restore -l` 的檔頭 |
+* **輸入**：舊機最終 dump（SHA-256 `1d9495fd…`，`pg_restore -l` 的建立時間 11-12 16:05:14 台北，pg 16.14）還原成 `merge_old`；新 live 的分析快照（SHA-256 `d5a327f2…`，11-13 10:41:29 台北，pg 16.15）還原成 `merge_live`。兩者 `pg_restore` 都是 rc 0，migration 版本都是 76。
+* **環境**：dev compose 加上作業隔離 override（只掛作業 volume `stock_trading_dev_i131_pgdata`、撤掉所有 port、臨時密碼），做法見 `development-workflow.md`「在 dev 查 live 的真實資料：作業專用 volume」。
+* **方法**：51 張表（兩邊的表集合相同）逐表以主鍵比對整列的 `md5(row::text)`；沒有主鍵的表用「整列雜湊＋重複序號」當鍵。舊機那邊只用唯讀連線匯出（鍵, md5, 時間欄），經管線灌進 `merge_live` 的暫存 schema 比對，用完刪除；輸出只有筆數和時間範圍。「內容不同」的列再逐欄計數。2026-11-13 16:06 與 16:35 各跑一次，結果完全相同。
 
-* 使用者原本以為舊 live 是 11-12 早上停的；log 與 dump 的時間顯示停在下午 15:56～16:05 之間。
-* 上表的「依據」中，檔案時間、`pg_restore -l` 的檔頭和 SHA-256 是 2026-11-12～13 實際查過的；「新機用這份還原」是使用者的說明。新 live 實際的第一筆寫入時間，要等分析快照還原到 dev 之後再推算（計畫書 4.2）。
-* **新 live 的 schema 跟舊 DB 的結構相同**（2026-11-13 比對最終 dump 和分析快照的 `--schema-only`）：表、欄位、索引、FK 都一樣。差異只有三個：
-  * 物件擁有者從 `trading_username` 改名成 `trading_user`；
-  * 新 live 多了 `public` schema 的擁有者設定，以及 `REVOKE USAGE ON SCHEMA public FROM PUBLIC`；
-  * `ck_candle_verification_last_result` 的 CHECK 寫法不同，但四個值相同、語意等價。
-  合併時要照這些差異處理擁有者和權限，見計畫書 2.2 和 5.1。
-* 舊機的 `postgres_postgres_data` volume ⛔ 不是 live 的 DB（`pg_wal` 只有 2026-06-30 的段檔）；live 的資料目錄是 bind mount `/opt/stacks/scripts/postgres/data`。
+#### 逐表結果（時間是台北；只列兩邊有差異的表，其他 25 張表完全相同）
 
-#### 可能缺的範圍（⚠️ 依排程表推論，尚未對照兩份 dump）
+| 表 | 相同 | 內容不同 | 只在舊 | 只在新 | 只在舊的時間 | 只在新的時間 |
+|---|---:|---:|---:|---:|---|---|
+| `candles` | 707375 | 55453 | 0 | 910 |  | 11-13 09:05～11-13 10:40 |
+| `chip_scores` | 34931 | 33 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `corporate_actions` | 8772 | 18 | 0 | 0 |  |  |
+| `delisting_events` | 0 | 265 | 0 | 0 |  |  |
+| `delisting_source_snapshots` | 48 | 0 | 0 | 1 |  | 11-13 07:00～11-13 07:00 |
+| `event_instances` | 946 | 46 | 0 | 4 |  | 11-12 23:00～11-12 23:01 |
+| `event_transitions` | 1884 | 0 | 0 | 18 |  | 11-12 17:00～11-12 17:01 |
+| `indicator_snapshots` | 43463 | 1 | 0 | 215 |  | 11-13 09:05～11-13 10:40 |
+| `institutional_trades` | 35255 | 220 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `job_runs` | 1470 | 0 | 66 | 28 | 10-13 06:30～10-13 22:00 | 11-12 17:00～11-13 10:40 |
+| `margin_trades` | 35248 | 220 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `market_event_detections` | 2670 | 0 | 0 | 24 |  | 11-12 17:00～11-12 23:01 |
+| `market_event_states` | 53471 | 0 | 0 | 1810 |  | 11-12 17:00～11-12 23:01 |
+| `signals` | 11425 | 0 | 0 | 49 |  | 11-13 09:05～11-13 10:30 |
+| `sr_identity_stats` | 1180 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_daily_candidates` | 1260 | 0 | 0 | 8 |  | 11-12 17:01～11-12 23:00 |
+| `stock_sr_decisions` | 1196 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_model_governance` | 1196 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_zone_analyses` | 1203 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_zones` | 18713 | 0 | 0 | 326 |  | （無時間欄） |
+| `stock_symbols` | 16470 | 56932 | 0 | 411 |  | 11-13 06:30～11-13 06:30 |
+| `zone_instances` | 2405 | 201 | 0 | 41 |  | 11-12 23:00～11-12 23:01 |
+| `zone_key_aliases` | 5351 | 54 | 21 | 111 | （無時間欄） | （無時間欄） |
+| `zone_relations` | 1023 | 0 | 0 | 10 |  | 11-12 17:01～11-12 23:00 |
+| `zone_role_incarnations` | 2433 | 31 | 0 | 40 |  | 11-12 17:00～11-12 23:00 |
+| `zone_transitions` | 5809 | 0 | 0 | 83 |  | 11-12 17:00～11-12 23:01 |
 
-11-11 15:42 之後的 `evaluation_universe_sync`（16:00）、`sr_analysis`（17:00）、晚間的籌碼兩輪；11-12 的 06:30 批次、`pre_market`、`intraday`，
-以及 15:00 的 `daily_close`（含 `sr_zone_verify`）——還有它們各自的 `job_runs`、訊號與 SR 結果。11-11 的 `daily_close` 是在 dump 之前還是之後完成，也尚未核對。
+完全相同的表：`backtest_jobs`、`backtest_results`、`backtest_trades`、`broker_trades`、`candle_verification_state`、`chip_sync_jobs`、`evaluation_universe`、`goose_db_version`、`group_members`、`market_backfill_jobs`、`portfolio_groups`、`portfolios`、`position_analyses`、`position_transactions`、`positions`、`sr_evaluation_jobs`、`sr_scoring_train_jobs`、`stock_analyses`、`stock_analysis_levels`、`stock_sr_model_metrics`、`stock_sr_regression_results`、`tenant_members`、`tenants`、`users`、`watchlists`。
 
-#### 合併時要處理的衝突（計畫書要先定）
+#### 差異的解釋
 
-* **11-12 兩邊都可能寫過**：新 live 一開始連的是 `trading-test`（見「事實」），改連 `trading` 的時間還沒確認。改連之後新 live 寫入的資料，跟舊 live 在 dump 之後寫的資料，可能是同一天、同一批，各自從外部資料源抓的。
-* **遞增 id 撞號**：新 DB 的 sequence 從 11-11 15:42 的狀態接續，舊 DB 在 dump 之後新增的列，可能和新 live 新增的列用了同一個 id（`job_runs` 等）。
-* 每張表要分類：可由新 live 自己重算或回補的（例如日 K）、只能從舊 DB 補的（例如當時的 `job_runs` 紀錄、當時的訊號）、兩邊都有時以哪邊為準。
+* **只在舊**（只有兩張表，都是新 live 的正常行為）：
+  * `job_runs` 66 列（started_at 10-13 06:30～22:00）：新 live 11-13 08:50 `pre_market` 的保留期清理刪掉的最舊紀錄。`merge_live` 現存最舊的一列緊接在後。
+  * `zone_key_aliases` 21 列（沒有時間欄；`last_seen_at` 10-30 23:00～11-02 23:02）：這些 key 已不再對應任何 zone，但 zone 本身仍在。store 寫入 alias 之後會 prune，每個 zone 只留最近 N 個；新 live 為這些 zone 寫入新 alias（只在新的 111 列）時清掉了最舊的。
+* **只在新**：最早都在 11-12 17:00 之後，是新 live 16:28 重啟之後自己寫的。`job_runs` 的分界：`merge_old` 最大 id 5673（11-12 15:02 `sr_zone_verify`）；`merge_live` 的 id ≤ 5673 共 1470 列跟 `merge_old` 逐列相同，5674（11-12 17:00 `sr_analysis`）起才是新 live 寫的。舊機 11-12 的 intraday 55 輪，完成時間跟舊 live 的 log 逐筆相同；11-11 17:00／23:00 的決策是 p4（舊機的程式）。
+* **內容不同**（逐欄結果見證據的 `coldiff.txt`），全部對得上新 live 跑過的排程：
+  * `candles.adj_factor` 55,453 列、`corporate_actions` 的價格與係數 18 列：11-13 06:30 公司行動同步重算；另有 1 列 candle 的成交量（最後一根 K 棒的收尾）。
+  * `chip_scores`、`institutional_trades`、`margin_trades`：分數與 `updated_at`，11-12 22:00 籌碼採集。
+  * `delisting_events.last_seen_at`：11-13 07:00 終止上市對帳。
+  * `zone_instances`、`event_instances`、`zone_role_incarnations`、`zone_key_aliases.last_seen_at`：11-12 17:00、23:00 的 SR 分析。
+  * `stock_symbols`：`last_seen_at` 56,740 列與 `is_listed` 212 列（192 檔 true→false、20 檔 false→true，另有 20 檔改了名稱／ISIN），11-13 06:30 主檔同步。主檔含權證，研判是日常的到期與新發行，與搬遷無關（⚠️ 沒有拿舊機平常每天的翻動量比較）。
+* **為什麼會誤判**：搬遷紀錄裡「新機用哪一份 dump 還原」只靠說明、沒有比對；新 live 在 11-12 16:28 重啟（最終 dump 是 16:05），時間上就是用最終 dump 還原後才接上正式 DB。教訓歸檔在 `development-workflow.md`「live 主機搬遷：先停寫、再做最終 dump，搬完要比對」。
 
-#### 處置方向（詳見計畫書 v2；待確認）
+#### review 確認之後
 
-1. 在 dev compose 的 postgres 裡另建 `merge_*` DB，⛔ 不另外起 container，也⛔ 不動 dev 的 `trading` DB。在這些 DB 還原兩份舊 dump 和新 live 的快照。
-2. 以 11-11 的 dump 當共同祖先做**三方比對**：只有舊機改的、只有新 live 改的、兩邊都改、id 撞號、自然鍵重複。
-   ⚠️ 只比兩份舊 dump，只能看出「舊機這段期間改了什麼」，⛔ 不等於新 live 實際缺了什麼。
-3. 取得證據 E1～E6，再裁決策略 A（把差異合併進新 live）或 B（以最終 dump 重建，再把新 live 的寫入搬回）。這一步也包括狀態機類的表怎麼處理，以及 id 和參照的對照。
-4. 在 dev 演練（含連到演練 DB 的 smoke 和計時）。之後專人先停寫、做快照，跟演練時用的起點比對一致，才交給專人執行。比對和演練用的 dev DB 裝的是真實資料，全程照 D5 (d) 保護。驗收全部在封鎖期間完成：封鎖外部寫入；排程用時間窗隔離，到了隔離截止時刻就停掉 backend；backend 啟動時的預期寫入要逐項核對；解除封鎖之前要先做合併後快照，快照前後各做一次事後驗證。執行的時段依早班排程（06:30）倒推，用三個檢查點判斷要不要繼續。
-
-#### 計畫書的 review（2026-11-13）
-
-**v1 的 review（四項，v2 已修正）**
-
-1. 只比兩份舊 dump，只能看出「舊機這段期間的變更」。實際缺漏要跟新 live 的快照做三方比對才能確定。
-2. v1 初步建議 B，但歷史 SR 和狀態機能不能補跑還沒有驗證，不足以推薦。v2 改列為證據 E4，A／B 兩案都保留。
-3. 另起 Docker 沙盒跟「開發驗收只用 dev compose」衝突。v2 改成在 dev compose 的 postgres 裡另建 DB，並把 live 真實資料的暴露風險列為 D5。
-4. 還原 DB 和調整 sequence 都⛔ 不能一概說「由單一 transaction 保證回滾」：`nextval`／`setval` 是非交易性的，`DROP／CREATE DATABASE` 也不能放進 transaction。v2 補上交易語意表、停寫快照的關卡，以及回滾的條件與期限。
-
-**v2 的 review（四項，v3 已修正）**
-
-1. [P1] v2 先啟動服務、再做確認和補跑，回滾時會丟掉恢復服務之後的寫入（例如人工交易）。v3 改成驗收全部在封鎖期間完成；解除封鎖之後⛔ 不再直接還原停寫快照，要先保全當下的資料，再用三方比對修正。
-2. [P2] v2 的三方分類漏了未變更的列，id 撞號同時屬於兩類，自然鍵重複可以跨 PK，所以「每列只屬一類」不成立。v3 改成兩層：第一層以 PK 做互斥分類，第二層另外列撞號和自然鍵重複。
-3. [P2] dev compose 的服務都寫死連到 `trading`，直接跑 smoke 驗到的是原本的 DB。v3 改用既有的 `OVERRIDE` 機制，讓三個服務一起指向演練 DB，核對實際連線，並寫出恢復步驟。
-4. [P2] v2 的回滾期限 08:00 晚於 06:30／07:00 的早班批次。v3 改成依實測時間倒推出最晚的回滾時刻，並補上錯過排程時的補跑順序。
-
-**v3 的 review（三項，v4 已修正）**
-
-1. [P2] 「關掉所有排程開關」做不到排程全停。backend 無條件啟動排程器；`pre_market`、`intraday`、`daily_close`、`chip_daily_sync` 都是無條件註冊，`corporate_action_sync` 也沒有開關（2026-11-13 讀程式碼確認）。v4 改成時間窗隔離加上事後驗證：所有工作的觸發時刻都要晚於解除封鎖的時刻，`job_runs` 也⛔ 不能有新的列。
-2. [P2] 解除封鎖之後用停寫快照當比對起點，會混進本次合併造成的變更。v4 改成驗收通過之後、解除封鎖之前先做合併後快照，之後的比對都以它為起點。
-3. [P2] 開始條件漏算停寫快照、交接、還原與比對的時間。v4 改成三個檢查點，每一個都用當下的時間重新判斷。
-
-**v4 的 review（三項，v5 已修正）**
-
-1. [P2] 超時分支讓 backend 繼續跑，06:30 的排程會照常觸發，⛔ 不是「錯過」；而且事後驗證抓不到快照期間觸發的工作。v5 新增隔離截止時刻 T_iso，到了就一定停掉 backend；事後驗證改成快照前後各做一次；解除封鎖統一成正常路徑和超時路徑兩條。
-2. [P2] backend 啟動時本來就會回收 `running` 的紀錄（`AbortRunning`），也會自動套用 migration，「雜湊不能變」會把正常啟動誤判成失敗。v5 事先列出預期的變化，逐項精確核對，其他變化仍然判失敗。
-3. 更正事實：python-worker 是輪詢 DB 裡 pending 的回測任務，⛔ 不是消化 Redis 佇列。
-
-**v5 的 review（一項，加上 D5 的評估；v6 已處理）**
-
-1. [P1] smoke 結束後就恢復預設密碼，但含真實資料的 `merge_*` 還在。v6 改成：保護要涵蓋整個資料留存期間，`merge_*` 清除並驗證之後，才能恢復密碼和一般 dev 設定。
-2. D5 建議採 (d)：撤除所有 host port（要用 reset 寫法，並檢查最終設定）、臨時密碼加上切斷既有連線、核對角色與認證規則、全程保護；(b) 遮罩和 (c) 限時接受風險不採用。撤 port 之後 `smoke-dev.sh` 打不到 host port，所以演練的 smoke 改從 container 內部檢查，⛔ 不修改腳本。
-
-**v5 的 review（一項 P1，待處理；D5 待裁決）**——⚠️ 這是 v5 當時記下的歷史原文，**已由 v6 處理**（見上一段「v5 的 review（一項，加上 D5 的評估；v6 已處理）」），保留供追溯，⛔ 不是現行的待處理項目。
-
-6.1 在 smoke 結束後恢復 `trading/trading`，但其他 `merge_*` 真實資料庫仍保留，會提前解除密碼保護。建議等全部含真實資料的工作 DB 清除並驗證後才恢復一般 dev 設定。D5 建議新增 (d)「撤除對外發布＋臨時憑證＋全程保護」；完整方案比較、處理順序、官方依據與未核驗事項已記在 [`合併計畫書的 Review feedback`](./plans/old-vps-data-merge.md#review-feedback2026-11-13v5)。這是 review 建議，⛔ 尚未裁決或實作。
-
-**v6 的 review（一項 P1、兩項 P2，另有文件一致性 P3；✅ v8 已處理）**
-
-完整內容見 [`合併計畫書的 v6 Review feedback`](./plans/old-vps-data-merge.md#review-feedback2026-11-13v6)：恢復公開密碼的 superuser 仍能透過 SQL 讀殘留 WAL；以一次性 Docker 指令取代 smoke 腳本違反驗證規範；直接輸出 `compose config` 會帶出臨時憑證。前述 v5 的原始 P1 已在 v6 正文處理，本輪的 WAL／特權帳號問題是另列的缺口；本筆兩段 v5 review 的狀態文字仍待同步。
-
-**v7 的 review（✅ v8 已處理）**
-
-v6 的一項 P1、兩項 P2 仍留在正文，未因 v7 的資料交接及時段調整而解除。R4（P2）：附錄 A-1 的 `pg_dump` 失敗後仍繼續算雜湊、交接檔案。**v7 同版複查**：備份帳號已修正為使用者確認的 `trading_user`，R4 的失敗不中止問題仍在；本次未新增項目。Redis `NOAUTH` 依附錄 B 的紀錄，已於 2026-11-13 11:21:32 修復，不再列為未修復阻擋，但 I-131 執行當次仍須重做部署確認。完整核對與建議見 [`合併計畫書的 v7 Review feedback`](./plans/old-vps-data-merge.md#review-feedback2026-11-13v7)。本輪未操作 DB／live。
-
-**整合評估補充（I-132 v2／I-131 v7；✅ v8 已納入，待使用者確認 v8）**：D5(d) 建議沿用 dev compose／project，改用作業專用 PostgreSQL volume，保留原 dev volume，以隔離 WAL 與公開的 dev superuser 帳密。新增 R5（P2）：未發布 host port 仍可能讓同機帳號直接連 container IP，需把這條路徑納入認證／隔離與驗證。其餘 R1～R4 維持待處理。完整建議見 [`D5(d) 與 I-132 的整合評估`](./plans/old-vps-data-merge.md#整合評估d5d-與-i-1322026-11-13v7)。
-
-長期的操作規範要歸檔到 [`development-workflow.md`](./development-workflow.md)，⛔ 不能只留在計畫書和本筆。內容包括：搬遷時先停寫再做最終 dump、log 的封存位置、live 由專人操作的分工、比對用 DB 的做法與暴露風險、交易語意表。範圍見計畫書第十一節。
-
-#### 對其他項目的影響
-
-* I-122～I-126 的觀察期（11-03～11-09）全部發生在舊機，這段的 `job_runs` 兩份 dump 都有，log 也已封存——**觀察期判讀不受本筆阻擋**（⚠️ 「兩份 dump 都有這段的 `job_runs`」是依 dump 的產生時間推論的，⛔ 還沒有還原出來查），
-  但 R3 觀察工具是用 `docker exec` 讀 log，判讀時要改讀封存目錄（見 [`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)「十二」的「主機搬遷」）。
-* [`development-workflow.md`](./development-workflow.md) 記的 Docker Engine 版本（20.10.5）和「只綁 `127.0.0.1` 擋不住同一 L2 網段」的已知限制，是**舊機**的。新機 2026-11-13 查到的是 Engine 29.9.3、Compose v5.7.0（≥ 28.0.0，依官方說明這個限制不適用；但同機的其他帳號仍然連得到 `127.0.0.1` 上的 port）。文件的更正列在計畫書的歸檔範圍內。
+* 刪除 `plans/old-vps-data-merge.md`（已 commit 過），移除本筆。
+* dev 的作業 volume（`merge_old`、`merge_live`）保留到 I-122～I-126 的觀察期判讀完成（要用 `merge_old` 查舊機的 `job_runs`），之後用 `docker volume rm` 指名刪除。`~/i131_merge/live/` 的新 live dump 由使用者決定何時刪除。
 
 ### I-132：backend 沒帶到 Redis 密碼就靜默停用 Redis（部署範本的版控與啟動檢查）
 
@@ -3707,4 +3612,4 @@ v6 的一項 P1、兩項 P2 仍留在正文，未因 v7 的資料交接及時段
 | 嚴重度 | 中：Redis 停用時，指標快取和訊號佇列都會靜默失效，API、排程和 `job_runs` 卻一切正常 |
 | 分類 | 部署 / Backend 啟動 |
 | 建立日期 | 2026-11-13 |
-| 來源 | 新機 live 11-12 16:28 的重啟沒有經過 `deploy.sh`，`NOAUTH`，Redis 停用到 11-13 11:21 才修正（經過見 [I-131](#i-1312026-11-12-主機搬遷新-live-的-db-由-11-11-1542-的-dump-還原之後到停機的資料不在新-db) 的事實表）；11-02 舊機也發生過同樣的事（`development-workflow.md`「live 的 Redis」） |
+| 來源 | 新機 live 11-12 16:28 的重啟沒有經過 `deploy.sh`，`NOAUTH`，Redis 停用到 11-13 11:21 才修正（經過見計畫書 2.1）；11-02 舊機也發生過同樣的事（`development-workflow.md`「live 的 Redis」） |

@@ -22,13 +22,13 @@
   綁 `0.0.0.0` 等於把服務掛到網路上。從自己的電腦看 dev，用 SSH tunnel（見下方「2. 啟動 dev stack 做 smoke test」）。
 - **⚠️ 已知限制：Docker 28.0.0 以前，只綁 `127.0.0.1` 擋不住同一個 L2 網段的主機**——官方說明這些版本裡，
   同一個 L2 網段的其他主機連得到發布在 localhost 的 port（[Publishing ports](https://docs.docker.com/engine/network/port-publishing/#publishing-ports)）。
-  這台的 Engine 是 `20.10.5+dfsg1`（2026-11-03 查），在範圍內。
-  - 所以 `ss -ltn` 只看到 `127.0.0.1` 只能證明監聽的位址，⛔ 不能當成「外部連不到」的證據。
-  - 這台對外只有 `venet0`（Virtuozzo 的點對點介面、`NOARP`，預設路由走它）。這會影響鄰居能不能把這種封包送進來，
-    但⛔ 沒有實測，⛔ 不能據此判定安全。
-  - 受影響的是有發布 port 的：dev 的四個 port，以及 pgtest、MySQL 測試起著的時候。live 的 `docker-compose.yml` 與 Redis
-    都⛔ 沒有發布 port，不受影響。dev Redis 的預設密碼寫在 repo 裡，對這種情況⛔ 不算保護。
-  - 補強（升級到 28.0.0 以上，或自己在 iptables 加規則，丟棄從非 `lo` 進來、目的地是 `127.0.0.0/8` 的封包）尚未裁決，⛔ 沒有做。
+  - **2026-11-12 搬到新主機之後，這個限制不再適用**：新主機的 Engine 是 29.9.3、Compose v5.7.0（2026-11-13 查），已經 ≥ 28.0.0（依官方說明；⛔ 沒有另外實測 L2）。
+    上面這段是舊主機（Engine `20.10.5+dfsg1`、對外只有 Virtuozzo 的 `venet0`）的紀錄，保留供追溯。
+  - 新主機的 dev 帳號用的是 **rootless Docker**（資料目錄 `~/.local/share/docker`，dev 帳號⛔ 不在 `docker` 群組）。container 的 bridge 在 RootlessKit 自己的 network namespace 裡，
+    主機上的其他帳號只能經由**發布的 port** 連進來，⛔ 不能直接連 container IP（2026-11-13 實測：從主機的 namespace 連不到 dev postgres 的 container IP）。
+    live 跑在另一個帳號的 Docker 底下，dev 帳號看不到。
+  - `ss -ltn` 只看到 `127.0.0.1` 仍然只能證明監聽的位址。同一台主機上的其他帳號連得到 `127.0.0.1` 上的 port，所以 dev 的公開帳密（`trading/trading`、Redis 的 `dev-redis-only`）
+    對同機帳號⛔ 不算保護；dev 要放真實資料時，照下方「在 dev 查 live 的真實資料：作業專用 volume」做。
 
 ### live 的 Redis：獨立 stack、密碼與 port
 
@@ -213,6 +213,44 @@ CLAUDE.md 禁止拿 live 做測試資料、migration 驗證與清空資料。少
 > `docker exec` 執行 heredoc 時**一定要加 `-i`**。少了它 stdin 不會進到 container，
 > psql 讀到 EOF 直接以 **exit 0** 結束——指令看起來成功，實際上一行都沒執行。
 > 2026-08-10 就這樣「刪除成功」了一次，是事後查資料才發現根本沒刪。
+
+### live 由專人操作：給專人的指令怎麼寫
+
+live（2026-11-12 起在新主機，跟 dev 同一台、不同帳號）一律由專人操作。Claude ⛔ 不連 live，只寫出指令與預期輸出，由使用者轉交執行後貼回輸出。
+
+* **live 的資料**：優先用 `pg_dump` 交到 dev 的受限目錄，在 dev 的隔離環境裡查（下一節）。⛔ 不在 live 上跑 SQL；非得在 live 上查時，一律唯讀（`PGOPTIONS='-c default_transaction_read_only=on'`），而且先在 dev 的同一份 schema 上跑過。dev 沒有那份 schema 時，可以從 dump 只還原**結構**（`pg_restore --schema-only -t 表名`，不含任何資料列），塞合成資料試跑。
+* **程式參數**（cron、開關、版本、入口）：給唯讀的 docker 指令，只篩需要的鍵，⛔ 不印可能含密碼的環境變數；要比對機密時只印長度或雜湊，或請使用者自己比對。
+* **指令的寫法**（三次實際踩過的錯）：
+  * ⛔ 指令中間不放 `<…>` 佔位符：zsh 會把 `<` 當成輸入重導向，那一行就不會執行。要替換的值放在開頭的變數。
+  * ⛔ 不用 heredoc：從終端機複製時每行可能被補上空白，`EOF` 對不上，zsh 會停在 `heredoc>`。多行的腳本改成 `printf '%s' '…base64…' | base64 -d -i > 暫存檔`，核對 sha256 相符才 `bash` 執行；`-i` 會忽略多出來的空白。
+  * **每一行 ≤ 80 字元**：太長的一行會在複製時被折斷，斷在參數中間時，後半行會被當成另一個指令。長的值放進變數，`if` 拆成多行。
+  * 交付前在 dev 用相同的原檔（sha 一致）實測，並在 zsh 模擬「每行前後多了空白」的貼上；會改檔的指令要先核對原檔 sha、預先算出新檔的 sha，寫入前比對修改前後的最終設定。
+
+### 在 dev 查 live 的真實資料：作業專用 volume
+
+dev 平常的帳密是公開的，所以 live 的真實資料（users、持倉、交易紀錄）⛔ 不能還原進一般的 dev volume。2026-11-13 第一次照這個做法做（I-131 的查證），可以照著重做：
+
+1. **隔離 override**（放在 repo 外的受限目錄，例如 `~/i131_merge/`，目錄 700、檔案 600，⛔ 不進版控）：
+   * postgres、redis 用 `volumes: !override` 改掛作業專用的具名 volume（`stock_trading_dev_i131_pgdata`、`stock_trading_dev_i131_redisdata`），原本的 dev volume 從頭到尾⛔ 不掛載；
+   * 所有服務 `ports: !reset []`（⛔ 不能寫 `ports: []`，`ports` 依 Compose 的合併規則是合併的）；
+   * 臨時隨機密碼：新 volume 初始化時就讀 override 裡的 `POSTGRES_PASSWORD`，⛔ 不需要 `ALTER ROLE`。override 裡用 `${變數:?}` 引用，密碼本身只放在受限目錄的檔案，由 shell 帶入；
+   * 之後要讓應用服務連進來時，backend 的 `REDIS_PASSWORD` 也要換成作業 redis 的密碼，否則會 `WRONGPASS`。
+2. **啟動前檢查最終設定**：`docker compose -f docker-compose.dev.yml -f 隔離override config --format json` 在記憶體裡解析，只輸出通過／失敗：每個服務都沒有 port、postgres／redis 只掛作業 volume、最終設定裡沒有原本的 dev volume、密碼不是 dev 的預設值、project 是 `stock_trading_dev`。⛔ 不把 `config` 印出來（會帶出密碼）。2026-11-13 用的是一次性的檢查，還沒有做成 repo 腳本。
+3. **啟動後核對**：`docker inspect` 的掛載只有作業 volume；`docker ps` 的 port 欄沒有發布；`ss -ltn` 確認 15432、16379、18080、18001 都沒有在監聽；從主機的 namespace 連 container IP 的 5432 要連不上（rootless 的隔離）。角色和 `pg_hba_file_rules` 記進紀錄（官方 image 的 `POSTGRES_USER` 是 superuser，container 內的本機連線是 trust）。
+4. **還原與查詢**：dump 先核對 SHA-256；`pg_restore` 加 `--no-owner --no-acl`，結束碼不是 0 就停下。查詢一律帶唯讀的 `PGOPTIONS`，畫面只輸出筆數、時間範圍、雜湊。兩份 DB 要比對時，用 `copy … to stdout | copy … from stdin` 在兩個 DB 之間傳 `(主鍵, 整列 md5, 時間欄)`，比對在 postgres 裡做，⛔ 不寫成檔案、⛔ 不把大表載進記憶體。
+5. **結束**：`docker compose … stop postgres`（⛔ 不用 `down -v`，那會刪掉原本的 dev volume）。作業期間不帶 override 跑了 dev compose 的話，postgres 會換回原本的 volume，真實資料⛔ 不會暴露，但作業會中斷。作業 volume 保持未掛載，不再需要時用 `docker volume rm` 指名刪除。
+
+### live 主機搬遷：先停寫、再做最終 dump，搬完要比對
+
+2026-11-12 live 從舊 VPS 搬到新主機（I-131；比對的證據在 `~/old_vps_archive/20261112/i131_compare/`，逐表結果記在 `issue.md` I-131）。留下的規則：
+
+* **順序**：停掉舊 live 的寫入 → 做最終 dump → 新主機用**那份最終 dump** 還原 → 才啟動新 live。還原用的是哪一份 dump（檔名、SHA-256、建立時間）要當場記下來。
+* **搬完要比對，⛔ 不能靠記憶判斷用了哪份 dump**：這次的紀錄寫成「用 11-11 15:42 的舊 dump 還原」，據此推論新 live 缺了約一天的資料，還寫了一份合併計畫書（I-131，改到 v8）。後來用上一節的隔離環境做全表比對，才發現新 live 其實是用停機後的最終 dump 還原的、⛔ 沒有缺口。比對方式：最終 dump 與新 live 的快照各自還原，逐表以主鍵比對整列 md5，分成相同／內容不同／只在舊／只在新。預期的差異要逐項解釋：
+  * 只在舊：`job_runs` 被新 live 的保留期清理刪掉的最舊幾天；`zone_key_aliases` 被「每個 zone 只留最近 N 個 alias」的 prune 刪掉的舊 key。
+  * 只在新：時間都在新 live 啟動之後。
+  * 內容不同：逐欄檢查，要對得上新 live 跑過的排程（例如還原係數重算改 `candles.adj_factor`、主檔同步改 `stock_symbols.last_seen_at`）。
+* **log 的封存要放在 14 天輪替的範圍之外**：舊 live 的 log 放在 `~/old_vps_archive/20261112/logs/`，⛔ 不放進新 live 的 `./logs/backend`（新 backend 的輪替會刪掉）。證據目錄搬到新主機的相同路徑，用 sha256 清單核對後設成唯讀。
+* 新主機的 live 環境（2026-11-13 查）：對外只有 caddy 一個入口（反向代理到 `stock_trading-backend-1:8080`），backend、python 服務、postgres、redis 都⛔ 沒有發布 host port；live 的 `config.yaml` 跟 repo 相同，沒有用環境變數設定的鍵都是 repo 的預設值。
 
 ### Redis emission 驗證：`scripts/test-redis-emission.sh`
 
@@ -815,6 +853,30 @@ docker exec stock_trading-python-server-1 sh -c \
 `analysisClient.RunSREvaluation`。python-worker 另外輪詢 `backtest_jobs`。
 **重啟 python 服務會讓這幾條在窗口內失敗**，重啟後第一個 `/sr-zones` 還要付一次
 lazy model load（4.17 MB joblib ＋ SHAP background）的暖機成本。
+
+### 決策語意換版上 live：先更新 governance、再刷新快照
+
+`decision_derived_view` 或 `semantic_pipeline` 的版本字串改變（例如 I-129 的 `decision-semantic-pipeline-p5`）的部署與回滾，照下面的順序做。規則原本寫在 I-129 計畫書「七」（原文見 `git show c749964:docs/plans/i129-execution-gate-authority.md`），I-129 收斂時歸檔到這裡。
+
+**為什麼不能只換 image**（現況事實）：
+
+* governance 只用 model hash 與 schema 查最新一筆 decision replay 結果，**不分語意版本**；live 的 `sr_evaluation` 排程停用，所以舊結論會一直沿用。
+* governance 是**分析時**才套用；快照存的是當時的決策，**重用快照時⛔ 不會重新套用**最新的 governance。
+* 快照重用（`POST /sr-zones` 帶 `reuse_existing=true`、trade analysis 沒帶 `force_refresh`）只檢查 timeframe 和 24 小時內，⛔ 不看版本。
+* `POST /scheduler/sr-analysis/run` 會跳過「最新 K 棒不是今天」與「今天已分析過」的標的，所以觸發成功、甚至整輪成功，都⛔ 不代表快照已經換版，⛔ 不能拿來刷新。
+* `POST /sr-zones` 帶 `reuse_existing=false`（預設）每次都重新分析並寫入一筆快照。
+
+**程序**（部署與回滾都一樣；「版本」指部署或回滾之後應該出現的版本字串）：
+
+1. 切換 image（部署或回滾）。
+2. **先更新 governance**：`POST /scheduler/sr-evaluation/run` 跑一次 decision replay，等工作狀態成功；再唯讀確認同一個 model hash 有一筆建立時間晚於步驟 1 的 regression 結果。live 從來沒有這類結果（`stock_sr_regression_results` 是 0 筆）時照實記錄，gate 是 no-op。
+3. **再刷新快照**：唯讀查出「過去 24 小時內有 1d 快照的標的」與「持有部位的標的」的聯集，逐檔呼叫 `POST /sr-zones`（`reuse_existing=false`）。⛔ 不用 `sr-analysis/run`。
+4. **逐檔核對**：每一檔最新的 1d 快照建立時間晚於步驟 2 完成的時間，而且版本字串符合預期；核對不過的標的重跑步驟 3，全部通過才算完成。
+5. 步驟 1～4 完成之前，trade analysis 一律帶 `force_refresh=true`，⛔ 不依賴重用的快照。
+
+回滾⛔ 不需要動 DB。版本字串存在 `stock_sr_decisions.decision_derived_view_json` 的 `version` 與 `semantic_pipeline.version`。
+
+**I-129（p5）的上線紀錄**：p5 ⛔ 沒有照這個程序上線——它跟著 2026-11-12 的主機搬遷一起上 live（新 live 的 build 目錄是 `abdc24d`，舊 live 最後一次啟動是 11-03 14:27，比 I-129 的第一個 commit 早，所以舊機⛔ 沒跑過）。2026-11-13 事後核對（新 live 11-13 10:41 的 dump，在 dev 的隔離環境查）：11-09～11-11 的 1d 決策都是 p4、11-12 起全部是 p5；每個標的最新的 1d 決策都是 p5 而且都在 24 小時內；24 小時內可能被重用的舊版快照 0 筆；沒有持有中的部位；regression 結果 0 筆（gate 是 no-op）。所以這次沒照程序**沒有留下影響**，⛔ 不需要補做。下一次換版要照程序做。
 
 ### schema migration 上 live 的程序
 

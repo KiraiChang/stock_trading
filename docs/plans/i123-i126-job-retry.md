@@ -590,7 +590,7 @@ review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` �
 **判讀時的改變**：
 
 * R3 工具用 `docker exec … cat` 讀 log，但舊的 container 已經移除了。判讀時改讀封存目錄的檔案。工具在 repo 外，判讀時再調整。
-* `job_runs` 改成從**舊機的最終 dump** 查：它已還原成 dev 作業 volume 裡的 `merge_old`，查法見 `development-workflow.md`「在 dev 查 live 的真實資料：作業專用 volume」。⛔ 不用新 live 的 DB：2026-11-13 的全表比對確認新 live 是用最終 dump 還原的、⛔ 沒有缺口（見 `issue.md` I-131；原本以為新 DB 缺 11-11 15:42 之後的資料，是錯的），但新 live 的保留期清理會逐日刪掉最舊的 `job_runs`（11-13 已刪到 10-13），觀察窗口遲早會被刪到。
+* `job_runs` 改成從**舊機的最終 dump** 查：它已還原成 dev 作業 volume 裡的 `merge_old`，查法見 `development-workflow.md`「在 dev 查 live 的真實資料：作業專用 volume」。⛔ 不用新 live 的 DB：2026-11-13 的全表比對確認新 live 是用最終 dump 還原的、⛔ 沒有缺口（紀錄見 `development-workflow.md`「2026-11-12 搬遷的比對紀錄」；原本以為新 DB 缺 11-11 15:42 之後的資料，是錯的），但新 live 的保留期清理會逐日刪掉最舊的 `job_runs`（11-13 已刪到 10-13），觀察窗口遲早會被刪到。
 
 **待判讀時裁決**：
 

@@ -242,7 +242,7 @@ dev 平常的帳密是公開的，所以 live 的真實資料（users、持倉�
 
 ### live 主機搬遷：先停寫、再做最終 dump，搬完要比對
 
-2026-11-12 live 從舊 VPS 搬到新主機（I-131；比對的證據在 `~/old_vps_archive/20261112/i131_compare/`，逐表結果記在 `issue.md` I-131）。留下的規則：
+2026-11-12 live 從舊 VPS 搬到新主機（I-131，已收斂；比對紀錄見本節最後）。留下的規則：
 
 * **順序**：停掉舊 live 的寫入 → 做最終 dump → 新主機用**那份最終 dump** 還原 → 才啟動新 live。還原用的是哪一份 dump（檔名、SHA-256、建立時間）要當場記下來。
 * **搬完要比對，⛔ 不能靠記憶判斷用了哪份 dump**：這次的紀錄寫成「用 11-11 15:42 的舊 dump 還原」，據此推論新 live 缺了約一天的資料，還寫了一份合併計畫書（I-131，改到 v8）。後來用上一節的隔離環境做全表比對，才發現新 live 其實是用停機後的最終 dump 還原的、⛔ 沒有缺口。比對方式：最終 dump 與新 live 的快照各自還原，逐表以主鍵比對整列 md5，分成相同／內容不同／只在舊／只在新。預期的差異要逐項解釋：
@@ -251,6 +251,69 @@ dev 平常的帳密是公開的，所以 live 的真實資料（users、持倉�
   * 內容不同：逐欄檢查，要對得上新 live 跑過的排程（例如還原係數重算改 `candles.adj_factor`、主檔同步改 `stock_symbols.last_seen_at`）。
 * **log 的封存要放在 14 天輪替的範圍之外**：舊 live 的 log 放在 `~/old_vps_archive/20261112/logs/`，⛔ 不放進新 live 的 `./logs/backend`（新 backend 的輪替會刪掉）。證據目錄搬到新主機的相同路徑，用 sha256 清單核對後設成唯讀。
 * 新主機的 live 環境（2026-11-13 查）：對外只有 caddy 一個入口（反向代理到 `stock_trading-backend-1:8080`），backend、python 服務、postgres、redis 都⛔ 沒有發布 host port；live 的 `config.yaml` 跟 repo 相同，沒有用環境變數設定的鍵都是 repo 的預設值。
+
+#### 2026-11-12 搬遷的比對紀錄（I-131，2026-11-13）
+
+結論：新 live 是用舊機**停機後的最終 dump** 還原的，⛔ 沒有資料缺口，原本的合併計畫不執行。repo 外的證據在 `~/old_vps_archive/20261112/i131_compare/`（唯讀；`SHA256SUMS` 本身的 SHA-256 `fff7925d…`：腳本與 SQL、逐表輸出、逐欄差異、輸入指紋）。I-131 的條目與合併計畫書原文見 `git show aec6bbe:docs/issue.md`、`git show aec6bbe:docs/plans/old-vps-data-merge.md`。
+
+**作業資料的保留條件**（I-131 收斂之後仍然有效，⛔ 不因為 I-131 結案就清理）：
+
+* dev 的作業 volume `stock_trading_dev_i131_pgdata`（含 `merge_old`、`merge_live`）與 `stock_trading_dev_i131_redisdata`：**保留到 I-122～I-126 的觀察期判讀完成**。判讀要用 `merge_old` 查舊機的 `job_runs`（新 live 的保留期清理已經刪掉最舊的紀錄）。判讀完成、而且確認不再需要之後，才用 `docker volume rm` 指名刪除；⛔ 不用 `down -v`。
+* `~/i131_merge/live/` 裡的新 live dump（`live_analysis_20261113T104129.dump`，真實資料，目錄 700）：**刪除時點由使用者決定**，Claude ⛔ 不自行刪除。
+* `~/i131_merge/creds/` 的臨時密碼與 `isolation.override.yml`：跟作業 volume 一起保留（啟動作業 volume 時要用），一起刪除。
+
+##### 怎麼查的
+
+* **輸入**：舊機最終 dump（SHA-256 `1d9495fd…`，`pg_restore -l` 的建立時間 11-12 16:05:14 台北，pg 16.14）還原成 `merge_old`；新 live 的分析快照（SHA-256 `d5a327f2…`，11-13 10:41:29 台北，pg 16.15）還原成 `merge_live`。兩者 `pg_restore` 都是 rc 0，migration 版本都是 76。
+* **環境**：dev compose 加上作業隔離 override（只掛作業 volume `stock_trading_dev_i131_pgdata`、撤掉所有 port、臨時密碼），做法見上方「在 dev 查 live 的真實資料：作業專用 volume」。
+* **方法**：51 張表（兩邊的表集合相同）逐表以主鍵比對整列的 `md5(row::text)`；沒有主鍵的表用「整列雜湊＋重複序號」當鍵。舊機那邊只用唯讀連線匯出（鍵, md5, 時間欄），經管線灌進 `merge_live` 的暫存 schema 比對，用完刪除；輸出只有筆數和時間範圍。「內容不同」的列再逐欄計數。2026-11-13 16:06 與 16:35 各跑一次，結果完全相同。
+
+##### 逐表結果（時間是台北；只列兩邊有差異的表，其他 25 張表完全相同）
+
+| 表 | 相同 | 內容不同 | 只在舊 | 只在新 | 只在舊的時間 | 只在新的時間 |
+|---|---:|---:|---:|---:|---|---|
+| `candles` | 707375 | 55453 | 0 | 910 |  | 11-13 09:05～11-13 10:40 |
+| `chip_scores` | 34931 | 33 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `corporate_actions` | 8772 | 18 | 0 | 0 |  |  |
+| `delisting_events` | 0 | 265 | 0 | 0 |  |  |
+| `delisting_source_snapshots` | 48 | 0 | 0 | 1 |  | 11-13 07:00～11-13 07:00 |
+| `event_instances` | 946 | 46 | 0 | 4 |  | 11-12 23:00～11-12 23:01 |
+| `event_transitions` | 1884 | 0 | 0 | 18 |  | 11-12 17:00～11-12 17:01 |
+| `indicator_snapshots` | 43463 | 1 | 0 | 215 |  | 11-13 09:05～11-13 10:40 |
+| `institutional_trades` | 35255 | 220 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `job_runs` | 1470 | 0 | 66 | 28 | 10-13 06:30～10-13 22:00 | 11-12 17:00～11-13 10:40 |
+| `margin_trades` | 35248 | 220 | 0 | 11 |  | 11-12 22:00～11-12 22:04 |
+| `market_event_detections` | 2670 | 0 | 0 | 24 |  | 11-12 17:00～11-12 23:01 |
+| `market_event_states` | 53471 | 0 | 0 | 1810 |  | 11-12 17:00～11-12 23:01 |
+| `signals` | 11425 | 0 | 0 | 49 |  | 11-13 09:05～11-13 10:30 |
+| `sr_identity_stats` | 1180 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_daily_candidates` | 1260 | 0 | 0 | 8 |  | 11-12 17:01～11-12 23:00 |
+| `stock_sr_decisions` | 1196 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_model_governance` | 1196 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_zone_analyses` | 1203 | 0 | 0 | 22 |  | 11-12 17:00～11-12 23:01 |
+| `stock_sr_zones` | 18713 | 0 | 0 | 326 |  | （無時間欄） |
+| `stock_symbols` | 16470 | 56932 | 0 | 411 |  | 11-13 06:30～11-13 06:30 |
+| `zone_instances` | 2405 | 201 | 0 | 41 |  | 11-12 23:00～11-12 23:01 |
+| `zone_key_aliases` | 5351 | 54 | 21 | 111 | （無時間欄） | （無時間欄） |
+| `zone_relations` | 1023 | 0 | 0 | 10 |  | 11-12 17:01～11-12 23:00 |
+| `zone_role_incarnations` | 2433 | 31 | 0 | 40 |  | 11-12 17:00～11-12 23:00 |
+| `zone_transitions` | 5809 | 0 | 0 | 83 |  | 11-12 17:00～11-12 23:01 |
+
+完全相同的表：`backtest_jobs`、`backtest_results`、`backtest_trades`、`broker_trades`、`candle_verification_state`、`chip_sync_jobs`、`evaluation_universe`、`goose_db_version`、`group_members`、`market_backfill_jobs`、`portfolio_groups`、`portfolios`、`position_analyses`、`position_transactions`、`positions`、`sr_evaluation_jobs`、`sr_scoring_train_jobs`、`stock_analyses`、`stock_analysis_levels`、`stock_sr_model_metrics`、`stock_sr_regression_results`、`tenant_members`、`tenants`、`users`、`watchlists`。
+
+##### 差異的解釋
+
+* **只在舊**（只有兩張表，都是新 live 的正常行為）：
+  * `job_runs` 66 列（started_at 10-13 06:30～22:00）：新 live 11-13 08:50 `pre_market` 的保留期清理刪掉的最舊紀錄。`merge_live` 現存最舊的一列緊接在後。
+  * `zone_key_aliases` 21 列（沒有時間欄；`last_seen_at` 10-30 23:00～11-02 23:02）：這些 key 已不再對應任何 zone，但 zone 本身仍在。store 寫入 alias 之後會 prune，每個 zone 只留最近 N 個；新 live 為這些 zone 寫入新 alias（只在新的 111 列）時清掉了最舊的。
+* **只在新**：最早都在 11-12 17:00 之後，是新 live 16:28 重啟之後自己寫的。`job_runs` 的分界：`merge_old` 最大 id 5673（11-12 15:02 `sr_zone_verify`）；`merge_live` 的 id ≤ 5673 共 1470 列跟 `merge_old` 逐列相同，5674（11-12 17:00 `sr_analysis`）起才是新 live 寫的。舊機 11-12 的 intraday 55 輪，完成時間跟舊 live 的 log 逐筆相同；11-11 17:00／23:00 的決策是 p4（舊機的程式）。
+* **內容不同**（逐欄結果見證據的 `coldiff.txt`），全部對得上新 live 跑過的排程：
+  * `candles.adj_factor` 55,453 列、`corporate_actions` 的價格與係數 18 列：11-13 06:30 公司行動同步重算；另有 1 列 candle 的成交量（最後一根 K 棒的收尾）。
+  * `chip_scores`、`institutional_trades`、`margin_trades`：分數與 `updated_at`，11-12 22:00 籌碼採集。
+  * `delisting_events.last_seen_at`：11-13 07:00 終止上市對帳。
+  * `zone_instances`、`event_instances`、`zone_role_incarnations`、`zone_key_aliases.last_seen_at`：11-12 17:00、23:00 的 SR 分析。
+  * `stock_symbols`：`last_seen_at` 56,740 列與 `is_listed` 212 列（192 檔 true→false、20 檔 false→true，另有 20 檔改了名稱／ISIN），11-13 06:30 主檔同步。主檔含權證，研判是日常的到期與新發行，與搬遷無關（⚠️ 沒有拿舊機平常每天的翻動量比較）。
+* **為什麼會誤判**：搬遷紀錄裡「新機用哪一份 dump 還原」只靠說明、沒有比對；新 live 在 11-12 16:28 重啟（最終 dump 是 16:05），時間上就是用最終 dump 還原後才接上正式 DB。教訓就是上面的規則。
 
 ### Redis emission 驗證：`scripts/test-redis-emission.sh`
 

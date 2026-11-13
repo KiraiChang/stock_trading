@@ -35,7 +35,7 @@
 
 * 共同原因：`REDIS_PASSWORD` 只放在 Redis stack 的 `.env`，只有 `deploy.sh` 的白名單區塊會讀出來並 `export`。不經過 `deploy.sh` 的重啟，compose 的 `${REDIS_PASSWORD:-}` 就會帶入空字串。
 * 為什麼沒人發現：backend 只在啟動時連一次 Redis，失敗就記 `redis connect failed, cache disabled`，然後整個停用。API、排程、`job_runs` 都照常運作，只有指標快取和訊號佇列靜默失效。
-* 11-13 的修正與核對（原記在 I-131 計畫書附錄 B；I-131 查明不需合併之後搬到這裡，計畫書刪除後原文見 `git show c749964:docs/plans/old-vps-data-merge.md`）：
+* 11-13 的修正與核對（原記在 I-131 計畫書附錄 B；I-131 收斂時搬到這裡，原文見 `git show aec6bbe:docs/plans/old-vps-data-merge.md`）：
   * 新 live 的 backend 在 11-12 11:57:46、14:23:34、14:29:51、16:28:37 共啟動四次，前三次都是 `redis connected`，**16:28:37 那次是 `redis connect failed, cache disabled`，錯誤類別 `NOAUTH`**（使用者用只印訊息名稱和錯誤類別的指令確認）。
   * 原因：16:28 那次沒有經過 `deploy.sh`，專案目錄的 `.env` 不含 `REDIS_PASSWORD`，帶進去的是空字串。
   * 11-13 11:21:32 修正：照 `deploy.sh` 同一套白名單從 Redis 的 `.env` 讀出密碼，只重建 backend。重建後核對：image 不變、其餘環境變數的雜湊不變、密碼雜湊跟 Redis 一致、`redis connected`；Redis 上看得到 backend 的連線，`indicator:*:latest` 每一輪都有更新；重建沒有中斷任何工作（11:20 那一輪在重建前就結束了）。
@@ -311,7 +311,7 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 1b. ✅ **D7：live 的 `compose.yml` 改成用 `env_file` 讀 Redis 的 `.env`（2026-11-13 完成）**：先核對 sha（`20825bfc…`）和 Redis `.env` 的白名單（只有一行 `REDIS_PASSWORD`），再比對修改前（shell 帶入密碼、照 `deploy.sh` 的方式）和修改後（shell ⛔ 沒有密碼）backend 的最終 environment：都是 49 行、hash `87d53bbce18b`，一致才寫入。寫入後在 shell 沒有密碼的情況下，用 `deploy.sh` 的方式和在 scripts 目錄手動執行各驗一次，都一致，`is not set` 警告 0 則；手動 `docker compose ps` 不帶密碼也成功（三個服務都是 running，結束碼 0）。`diff` 只刪了 `REDIS_PASSWORD` 那 1 行，加了 Redis `.env` 的 `env_file`（`required: true`）和 2 行註解。新檔 SHA-256 `f75a32bdf1081c06bba3462671662cbcd97b442be0dd8a3a2bc38e51cb0b34b8`（跟 Claude 在 dev 預先算出的值一致），備份是 `compose.yml.bak.20261113b`。container ⛔ 沒有重建，下次 `up` 才套用。**F3 在 live 解決。**
 2. **review 通過之後，live 的 `deploy.sh` 補上 D5、D6**：失敗即停（`set -euo pipefail`、`git -C`、`git pull --ff-only`、`down` 失敗不進 `up`）、JWT 的最小檢查、readiness 確認。live 的路徑和 compose 檔照現況（固定的 `.env` 絕對路徑、`./compose.yml`、build 目錄當 project directory），⛔ 不整份換成範本。做法跟這次一樣：先核對 sha，在 dev 用同一份原檔預先算出新檔的 sha，指令用 base64 加 sha 核對交付；寫入前單獨試跑每一個檢查。
 3. **C 的部署**：要 build 新的 image 才會生效。依 `development-workflow.md` 的部署規則找時段，避開排程前後 10 分鐘，⛔ 不在早班批次到 08:45 之間。
-   * ~~跟 I-131 協調：如果 C 在 I-131 正式合併之前部署，要記下 image 和設定的版本，I-131 的最終演練和驗收都要用同一個版本。~~ I-131 已在 2026-11-13 查明⛔ 沒有資料缺口、不需要合併（待 review），這項協調取消。
+   * ~~跟 I-131 協調：如果 C 在 I-131 正式合併之前部署，要記下 image 和設定的版本，I-131 的最終演練和驗收都要用同一個版本。~~ I-131 已在 2026-11-13 收斂（⛔ 沒有資料缺口、不需要合併），這項協調取消。
 4. **部署後確認**：`redis connected`、readiness 通過、backend 的 `Config.Env` hash 跟部署前一致（沒有改設定時）。故意用錯的密碼⛔ 不在 live 上試，只在 dev 驗證。
 
 ## 九、完成後要歸檔的位置

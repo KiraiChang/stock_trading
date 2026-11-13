@@ -816,7 +816,7 @@ stale := registered && r.Status != "running" && time.Since(r.StartedAt) > jobSta
 > **刻意不讓回收失敗中止啟動**：它只影響狀態頁的顯示，不影響任何排程執行，
 > 為了一個顯示問題而讓整個 backend 起不來是更糟的交換。代價就是上面這條判讀規則。
 
-**結束寫入會重試**（2026-10-30 起，原記於 `issue.md` I-125）：寫結束紀錄失敗時，`finishRunStatus` 退避 1／2／4／8／16／32 秒重試，
+**結束寫入會重試**（2026-10-30 起，原記於 `issue.md` I-125，已收斂）：寫結束紀錄失敗時，`finishRunStatus` 退避 1／2／4／8／16／32 秒重試，
 每次各有 10 秒上限，最壞 133 秒；寫開始紀錄（`startRun`）也有 10 秒上限。開始紀錄寫不進去（沒有 run id）或紀錄不存在時，
 結束寫入⛔ 不會補建紀錄、⛔ 不重試，只記 log（`JobRunRepo.Finish` 在紀錄不存在時回 `ErrJobRunNotFound`；
 UPDATE 零筆時會再確認一次紀錄存不存在，因為 mysql 以相同的值重寫時也回零筆）。起因是 2026-10-22 06:31 live 的 postgres 進入 recovery mode，
@@ -1021,7 +1021,7 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 ### POST `/scheduler/stock-symbol-sync/run`
 
 手動觸發 TWSE ISIN 股票主檔同步，與每日 `stock_symbol_sync` 排程共用同一份邏輯。
-整輪失敗時 `job_runs` 記 **`failed`、`0/0`**（2026-10-30 起；原本寫 `0/1` 而被推導成 `partial`，原記於 `issue.md` I-126）——
+整輪失敗時 `job_runs` 記 **`failed`、`0/0`**（2026-10-30 起；原本寫 `0/1` 而被推導成 `partial`，原記於 `issue.md` I-126，已收斂）——
 ⚠️ `0/0` 只表示沒有回報計數，⛔ 不代表已證實沒有處理任何資料。
 此端點會立即回應，實際同步在背景執行；進度與結果可透過 `GET /scheduler/status`
 查看 `stock_symbol_sync` 這個 job。手動觸發的失敗⛔ 不排自動重跑（「自動重跑：`error` 結尾的固定文字」）。
@@ -1167,7 +1167,7 @@ log 印 `total=11`、`job_runs` 記 `10`，兩個都叫 total 卻是不同的值
 
 **前置是依賴而不是時間錯開**：當日的 `stock_symbol_sync` 必須已經成功，否則整輪
 `failed`（fail-closed），`error` 是專屬的 `delisting_reconcile:stock_symbol_sync_not_ready`
-（2026-10-30 起；原本被壓成 `internal_error`，分不出是連帶失敗，原記於 `issue.md` I-126）。sync 沒跑成功時 `is_listed` 是舊的或不完整的，拿它當投影
+（2026-10-30 起；原本被壓成 `internal_error`，分不出是連帶失敗，原記於 `issue.md` I-126，已收斂）。sync 沒跑成功時 `is_listed` 是舊的或不完整的，拿它當投影
 前置沒有意義；cron 排在 06:30 之後只是常態安排，不構成保證。
 
 **為什麼需要這個入口**：cron **預設關閉**（`delisting.enabled`），dev stack 的驗收

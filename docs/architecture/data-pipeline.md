@@ -184,6 +184,16 @@ repo 的 `docker-compose.yml`、`docker-compose.dev.yml`、`deploy.sh` 範本，
 * I-122 看到的 postgres recovery mode（2026-10-22）在觀察期內⛔ 沒有再出現；照 2026-10-30 的裁決⛔ 不追查原因。⚠️ 觀察期內 DB 端沒有失敗，所以結束寫入的重試（I-125）與 DB 連線類的暫時性判定**在 live 上沒有被觸發過**，它們的行為只有單元測試與 dev 實測的依據。
 * ⚠️ 以上是**舊主機**的網路環境。2026-11-12 搬到新主機之後，DNS／IPv6 的狀況另外觀察（I-123，11-13～11-19）。
 
+### 程式註解裡的 I-124／I-125／I-126
+
+這三筆已在 2026-11-13 收斂。程式與測試註解裡的「（I-124）」「（I-125）」「（I-126）」「I-125 階段 A 的 review」是**由來標記**，記的是「這段為什麼這樣寫」，規格以本檔與 `api-reference.md` 的 `/scheduler/status` 為準：
+
+* **I-124**：2026-10-22 06:31 live 的 postgres 進入 recovery mode（`57P03`），`corporate_action_sync` 整輪中止、結束狀態也寫不進去；⛔ 不追查原因，改由重跑吸收（上面的「什麼算暫時性」把 `57P03` 算成 `db_connection`）。
+* **I-125**：結束寫入失敗後沒有重試、紀錄停在 `running`、回收訊息與事實不符 → 結束寫入的重試、中性的回收訊息、剩餘限制（`api-reference.md`）。
+* **I-126**：整輪失敗記成 `partial`、前置條件不成立記成 `internal_error` → 整輪失敗記 `failed`、`0/0`，前置不成立用專屬文字 `delisting_reconcile:stock_symbol_sync_not_ready`。
+
+條目原文見 `git show 9a061af:docs/issue.md`；計畫書 `plans/i123-i126-job-retry.md` 跟 I-123 共用，I-123 收斂時才刪除。
+
 ## 不負責事項
 
 - 不計算 `chip_scores`，那屬於 Analysis Pipeline。

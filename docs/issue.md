@@ -26,7 +26,7 @@
   重用會讓兩件無關的事共用一個代號。**`I-070` 已經發生過一次**（先發給 T-045 的事件鏈墓碑，
   移除後又發給 T-040 的 `keep_symbols` 靜默丟棄，兩筆現在都已收斂），
   見 `todo.md` T-045 那段的註記。
-- **下一個新編號從 `I-133` 起算。**（**I-129 於 2026-11-13 收斂**——review 確認；上 live 之前查證 p5 已全面生效、⛔ 不需要補做換版程序；現況規格在 `sr-zone-scoring.md`「進場許可的 RR 判斷看 execution gate」「I-129 的量測欄位」「I-129 離線影響量測的判準」，換版程序與上線紀錄在 `development-workflow.md`「決策語意換版上 live：先更新 governance、再刷新快照」，量測工具在同檔「I-129 的離線影響量測工具」；跑測分析 review 的 R1 由 `todo.md` T-002、R2～R4 由 I-130 承接；原文見 `git show c749964:docs/issue.md` 與 `git show c749964:docs/plans/i129-execution-gate-authority.md`；**編號不回收**。**I-131 於 2026-11-13 收斂**——全表比對確認新 live 是用停機後的最終 dump 還原的，⛔ 沒有資料缺口，合併計畫（改到 v8）不執行；比對紀錄（輸入指紋、逐表結果、差異解釋）與搬遷的規則歸檔在 `development-workflow.md`「live 主機搬遷：先停寫、再做最終 dump，搬完要比對」，在 dev 查真實資料的做法在同檔「在 dev 查 live 的真實資料：作業專用 volume」；repo 外的證據在 `~/old_vps_archive/20261112/i131_compare/`；條目與計畫書原文見 `git show aec6bbe:docs/issue.md`、`git show aec6bbe:docs/plans/old-vps-data-merge.md`；**編號不回收**。**I-132 於 2026-11-13 發出**——新機 live 的 backend 重啟時沒帶到 Redis 密碼，Redis 被靜默停用（11-02 之後第二次）；使用者裁決部署範本的版控和啟動檢查一起立案。**I-131 於 2026-11-12 發出**——舊 VPS 證據搬遷時核對時間序，發現新 live 的 DB 是用停機前一天的 dump 還原的、之後到停機的資料不在新 DB。**I-130 於 2026-11-10 發出**——承接 I-129 跑測分析 review 的 R2～R4（Replay 成交歸因與風險報酬量測口徑）。**I-129 於 2026-11-03 發出**——由 `todo.md` T-065 改列（描述的是矛盾結果，依分流規則屬於本清單；**T-065 編號不回收**，比照 T-068 → I-100）。**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
+- **下一個新編號從 `I-133` 起算。**（**I-124、I-125、I-126 於 2026-11-13 收斂**——觀察期判讀（舊主機 11-03～11-09）通過、review 確認：I-124 的 recovery mode 沒有再出現（⛔ 不追查原因），I-125 部署後沒有新的卡住紀錄，I-126 的整輪失敗都記成 `failed`、`0/0`；現況在 `api-reference.md` 的 `/scheduler/status` 與 `data-pipeline.md`「失敗後的自動重跑」（含「live 的觀察」「程式註解裡的 I-124／I-125／I-126」）；⚠️ 結束寫入的重試與 DB 連線類的暫時性判定在 live 上沒有被觸發過；原文見 `git show 9a061af:docs/issue.md`；計畫書跟 I-123 共用、保留到 I-123 收斂；**編號不回收**。**I-129 於 2026-11-13 收斂**——review 確認；上 live 之前查證 p5 已全面生效、⛔ 不需要補做換版程序；現況規格在 `sr-zone-scoring.md`「進場許可的 RR 判斷看 execution gate」「I-129 的量測欄位」「I-129 離線影響量測的判準」，換版程序與上線紀錄在 `development-workflow.md`「決策語意換版上 live：先更新 governance、再刷新快照」，量測工具在同檔「I-129 的離線影響量測工具」；跑測分析 review 的 R1 由 `todo.md` T-002、R2～R4 由 I-130 承接；原文見 `git show c749964:docs/issue.md` 與 `git show c749964:docs/plans/i129-execution-gate-authority.md`；**編號不回收**。**I-131 於 2026-11-13 收斂**——全表比對確認新 live 是用停機後的最終 dump 還原的，⛔ 沒有資料缺口，合併計畫（改到 v8）不執行；比對紀錄（輸入指紋、逐表結果、差異解釋）與搬遷的規則歸檔在 `development-workflow.md`「live 主機搬遷：先停寫、再做最終 dump，搬完要比對」，在 dev 查真實資料的做法在同檔「在 dev 查 live 的真實資料：作業專用 volume」；repo 外的證據在 `~/old_vps_archive/20261112/i131_compare/`；條目與計畫書原文見 `git show aec6bbe:docs/issue.md`、`git show aec6bbe:docs/plans/old-vps-data-merge.md`；**編號不回收**。**I-132 於 2026-11-13 發出**——新機 live 的 backend 重啟時沒帶到 Redis 密碼，Redis 被靜默停用（11-02 之後第二次）；使用者裁決部署範本的版控和啟動檢查一起立案。**I-131 於 2026-11-12 發出**——舊 VPS 證據搬遷時核對時間序，發現新 live 的 DB 是用停機前一天的 dump 還原的、之後到停機的資料不在新 DB。**I-130 於 2026-11-10 發出**——承接 I-129 跑測分析 review 的 R2～R4（Replay 成交歸因與風險報酬量測口徑）。**I-129 於 2026-11-03 發出**——由 `todo.md` T-065 改列（描述的是矛盾結果，依分流規則屬於本清單；**T-065 編號不回收**，比照 T-068 → I-100）。**I-128 於 2026-11-03 發出、同日修正並收斂**——T-071 收斂時（只改註解）跑 `backend/scripts/test.sh`，發現 store 的一個測試用寫死的日期、過了 30 天的查詢窗口就必定失敗；修法是測試改用相對於今天的日期。規則歸檔在 `development-workflow.md`「4. 測試不要依賴『真實今天』」的「反方向」；原文見 `git show 2bb7279:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-03 收斂**——原因是 dev DB 裡的帳號早就存在、密碼不同，而 register 對既有 email 只回 409、⛔ 不改密碼；dev 取得 JWT 的做法歸檔在 `development-workflow.md`「dev 取得 JWT：每次用新的驗收帳號」，register 的錯誤回應在 `api-reference.md`；原文見 `git show 8eaf166:docs/issue.md`；**編號不回收**。**I-127 於 2026-11-02 發出**——I-123～I-126 階段 B 的 dev 實測時發現 dev 驗收清單的登入步驟拿不到 token。**I-123～I-126 於 2026-10-30 發出**——I-122 的調查查出的四個問題：I-123 live 容器對外連線的間歇失敗（DNS 查詢逾時、IPv6 不可達）、I-124 10-22 live 的 postgres 進入 recovery mode、I-125 `job_runs` 的結束寫入失敗後停在 `running`、I-126 `job_runs` 看不出整輪失敗與前置條件不成立。**I-122 於 2026-10-29 發出**——I-074 ⑪ 執行前查排程狀態時，看到當天 live 有四個批次失敗或 partial（使用者裁決另立 issue 調查）。**I-121 於 2026-10-29 發出**——I-074 ⑪ 判讀 B 之後，依 ⑪ 計畫 D4 (a) 承接 I-074 欄位表的「已知限制（open）①」（acceptance 的 raw 複製失敗時，頂層留下看似成功的報告）。**I-120 於 2026-10-29 發出**——I-074 ⑩ 正式執行結果的分析時發現 `python -m` 的 runpy 警告（模組會執行兩次）。**I-119 於 2026-10-27 發出**——I-074 ⑨-1 正式驗收結果的分析時發現 acceptance 報告的 host MemAvailable 低點只涵蓋磁碟取樣的階段。**I-118 於 2026-09-23 發出**——I-074 ③b 的 review 修正時量到 replay 腳本會洩漏 git worktree。**I-117 於 2026-09-23 發出**——由 I-074 Stage 2 開工前盤點發現（Stage 1 的 comparator／finalizer／recovery 都會整份載入兩份 after artifact，超過 mem-guard）。⚠️ **`I-114` 是跳號，⛔ 不得再發用**——2026-09-17 發 I-115 時誤把本行索引文字裡的 `I-114` 當成已發出的條目，於是直接跳到 I-115；依「編號只增不重用」，I-114 就此列為**已跳過**。**I-115 / I-116 於 2026-09-17 發出**——I-115 由 I-074 Stage 1 正式執行時踩到（Stage 1 強制要求 `--before-ref` 卻不使用它，六步程序漏寫）；I-116 由同一次執行的 `InconsistentVersionWarning` 查出（凍結 bundle 的可重現性只靠 image 還在）。**I-113 於 2026-09-10 發出**——由 I-107 步驟 1 量測時發現 cohort 母體對不上（`evaluation_universe` 135 筆 `active` vs full-market report 可辨識的 134 檔，⚠️ **兩者是不同的母體定義**且沒有對帳）。**I-104 / I-105 / I-112 於 2026-09-09 收斂**——三筆的現況都歸檔在 `architecture.md`：I-104 的「**外來錯誤必須先分類，不得把原始錯誤寫進使用者可見欄位**」與**合法形式表**在「寫入失敗的一致性契約」；I-105 的「`verification_unavailable` 一定要帶得出成因」在「日 K 缺漏偵測」；I-112 的 `<stage>_failed:N (symbol:reason, …)` 在「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號都不回收。** **I-112 於 2026-09-08 發出**——`todo.md` T-070（已收斂）的 live 觀察時發現 `corporate_action_sync` 的逐檔失敗不寫進 `error`。**I-109 / I-110 / I-111 於 2026-09-07 發出、2026-09-08 全部修復並收斂**——三筆都由 `todo.md` T-071 的實作與 review 分出：I-109 是 `parseROCDate` 收下不存在的民國年（現況歸檔在 `architecture.md`「民國日期的解析是嚴格的」）；I-110 是前端 job 清單漂移（歸檔在 `development-workflow.md`「新增排程還要同步前端的 job 清單」，並由 `scripts/check-job-names.sh` 擋住）；I-111 是 SQLite 的 `busy_timeout` 保護不到 deferred transaction 的升級（歸檔在 `database-schema.md` 的 CAS 契約，改用 `BEGIN IMMEDIATE`）。**編號都不回收。** **I-108 於 2026-09-04 發出**——由 I-106 計畫書的非有限值實測分出；**I-106 / I-107 於 2026-09-03 發出**——I-107 由 I-106 的 review 分出（TR SMA(14) 與 Wilder ATR(14) 的公式分歧）；I-106 來自 T-040 regression baseline 實跑——T-040 regression baseline 實跑時發現 `atr_pct` 的窗口與註解不符、且 evaluation 與 runtime 用的是兩個不同的 ATR 演算法；**I-103 / I-104 / I-105 於 2026-09-02 發出**——I-103 由 I-102 計畫書 review 分出（Yahoo 批次路徑給不出逐檔寫入失敗）；I-104 由 I-102 實作 review 分出（其餘排程與 job 紀錄仍直接寫入原始錯誤）；I-105 來自 `2867` 跨月當天 live 首次 `partial`（`verification_unavailable` 的成因被丟棄）；I-101 / I-102 於 2026-09-01 發出——前者來自 live 的 indicator upsert 溢位、**已於同日修復並收斂**（未完成的 live 部署由 `todo.md` T-069 承接，**該筆已於 2026-09-02 部署驗收完成並收斂**），後者由它的 review 分出、**2026-09-02 實作部署完成並收斂**（現況規格歸檔在 `architecture.md`「寫入失敗的一致性契約」與 `api-reference.md` 的兩條端點，未完成的執行期觀察由 `todo.md` T-070 承接）；I-100 於 2026-09-01 發出，由 `todo.md` T-068 同日改列——**T-068 編號不回收**；**I-099 於 2026-08-31 發出後同日作廢**——誤把 `deploy.sh` 的保守預設當成與 live 的衝突，實際上該檔是範本、所有開關一律預設 `false` 是既有慣例；**編號不回收**；I-098 於 2026-08-31 由 I-096 的 review 發現分出；I-081～I-083 於 2026-08-21 發出（**I-081 / I-082 於 2026-08-27 隨 `todo.md` T-055 收斂**），I-084～I-087 於 2026-08-24 發出，I-088～I-092 於 2026-08-25 發出（**I-091 於 2026-08-28 收斂**），I-093 / I-094 於 2026-08-26 發出（I-093 已於同日收斂，**I-094 於 2026-08-28 收斂**），I-095～I-097 於 2026-08-27 發出，其中 **I-097 於同日改列 `todo.md` T-064**——編號**不回收**。）
   **發出新編號時記得把這一行一起往前推**——上一次就是漏了這步，I-089 發出去之後
   這裡還寫著「從 I-089 起算」，差一點又重用一次（I-070 已經發生過）。
   **現存條目**裡最大的是 I-132（⚠️ 本行下方的歷史索引仍看得到更大的編號，那是紀錄不是條目）。**I-074 於 2026-10-29 收斂**（長期內容在 `sr-zone-scoring.md` 與 `development-workflow.md`；原文見 `git show 20eacb2:docs/issue.md`）。**I-119、I-121 於 2026-10-30 收斂**（T-077 刪除了 acceptance／sizing harness，兩筆失去對象而解除；I-119 的判讀注意事項在 `sr-zone-scoring.md`「I-074 Stage 2 的容量驗收」的 ⑨-1、⑨-2 正式結果；原文見 `git show 7a3e042:docs/issue.md`；**編號不回收**）。I-109～I-111 於 2026-09-08 收斂、I-104／I-105／I-112 於 2026-09-09 收斂，I-113 於 2026-09-10 發出，I-115 / I-116 於 2026-09-17 發出（**`I-114` 跳號、⛔ 不得再發用**），I-117 / I-118 於 2026-09-23 發出（I-074 Stage 2 開工前盤點與 ③b 的 review），I-119 於 2026-10-27 發出（I-074 ⑨-1 正式驗收結果的分析），I-120／I-121／I-122 於 2026-10-29 發出（I-074 ⑩ 的分析、⑪ 之後的 D4、⑪ 當天的 live 批次異常），I-123～I-126 於 2026-10-30 發出（I-122 的調查），I-127 於 2026-11-02 發出（I-123～I-126 階段 B 的 dev 實測）、2026-11-03 收斂，I-128 於 2026-11-03 發出並收斂（T-071 收斂時的 Go 測試），I-129 於 2026-11-03 由 `todo.md` T-065 改列，**下一個可用的是 I-130**；I-102 已於 2026-09-02 收斂、編號不回收——I-096 / I-098
@@ -70,8 +70,8 @@
   不能有任何「見 I-0xx」形式的活指標。
   **本節自己會出現在輸出裡**（上面提到 I-040 / I-056 / I-069 / I-070～I-072 / I-076 /
   I-081～I-084 / I-086～I-090 / I-093、I-096、I-098、已作廢的 I-099、已收斂的 I-101、
-  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122～I-126 / I-130 / I-132、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
-  已跳號的 I-114、已收斂的 I-129 / I-131，以及下一個可用的 I-133），
+  本檔現有的 I-100 / I-103 / I-106 / I-107 / I-108 / I-113 / I-115～I-118 / I-120 / I-122 / I-123 / I-130 / I-132、已收斂的 I-074 / I-102 / I-104 / I-105 / I-109～I-112 / I-119 / I-121 / I-127 / I-128、
+  已跳號的 I-114、已收斂的 I-124～I-126 / I-129 / I-131，以及下一個可用的 I-133），
   那是預期的，不是殘留。
 
   ⚠️ **I-074**（2026-10-29 收斂）的引用只剩名稱（「I-074 Stage 2」、`i074_*` 檔名）與帶 `20eacb2` 的歷史引用。
@@ -3269,9 +3269,9 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 | `delisting_reconcile` | **照設計的連帶失敗**（根因跟著 `stock_symbol_sync`） | 錯誤就是前置條件的 sentinel（`ErrStockSymbolSyncNotReady`） |
 | `intraday` | **基礎設施（對外連線）** → I-123；⚠️ **持續而且增加** | 13 次是 **DNS 逾時**（直接證據）。18 次是連 Yahoo 的 IPv6 位址時 **`network is unreachable`**，⚠️ **原因待查**：它們也都剛好 10 秒（Yahoo 報價 client 的逾時是 20 秒，⛔ 不是 client 逾時），可能是「A 記錄的查詢逾時、只拿到 AAAA、容器⛔ 沒有 IPv6 路由」（Go 的 resolver 允許 A／AAAA 只回一部分結果），但這只是假說，log ⛔ 沒有記錄 A／AAAA 的查詢結果，⛔ 不能據此判定是 DNS。⛔ 不是收盤時點的邊界問題（13:30 那輪與其他輪相同） |
 | `corporate_action_sync`（partial） | **照設計的 partial**（少數標的） | Yahoo 對 00847B、00793B、2867 回 404，輪到該分片時就會重複（00847B 在 10-23、10-30 兩次）；DNS 逾時 2 檔（1321、00407A）、IPv6 不可達 1 檔（6679）歸 I-123；6578 是上游重設連線 |
-| `corporate_action_sync`（10-22 aborted） | **資料庫事件** → I-124；**記錄的缺口** → I-125 | DB 進入 recovery mode 讓這輪提早失敗，結束狀態也寫不進去，停在 `running` 直到重啟回收 |
+| `corporate_action_sync`（10-22 aborted） | **資料庫事件** → I-124（已收斂）；**記錄的缺口** → I-125（已收斂） | DB 進入 recovery mode 讓這輪提早失敗，結束狀態也寫不進去，停在 `running` 直到重啟回收 |
 
-* 計畫書「二」推測的兩個可觀測性缺口**都證實了** → I-126：`stock_symbol_sync` 的整輪失敗記成 partial；`delisting_reconcile` 的前置條件不成立記成 `internal_error`。
+* 計畫書「二」推測的兩個可觀測性缺口**都證實了** → I-126（已收斂）：`stock_symbol_sync` 的整輪失敗記成 partial；`delisting_reconcile` 的前置條件不成立記成 `internal_error`。
 * ⛔ 不另立 issue：404 與 `network is unreachable` 記成 `internal_error`、`connection reset` 記成 `conn_refused`——符合規格
   （[`architecture.md`](./architecture.md)「寫入失敗的一致性契約」：分類不出來一律 `internal_error`；`joberr` 把 reset 歸在 `conn_refused`）。
 
@@ -3287,9 +3287,9 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 | issue | 內容 |
 |---|---|
 | I-123 | live 容器對外連線的間歇失敗：DNS 查詢逾時、IPv6 不可達（⚠️ 最優先：每個交易日都在失敗） |
-| I-124 | 2026-10-22 06:31 live 的 postgres 進入 recovery mode（原因未查） |
-| I-125 | `job_runs` 的結束寫入失敗後沒有重試，紀錄停在 `running`，回收後的 `aborted` 訊息與事實不符 |
-| I-126 | `job_runs` 看不出「整輪失敗」與「前置條件不成立」 |
+| I-124 | 2026-10-22 06:31 live 的 postgres 進入 recovery mode（原因未查）（✅ 2026-11-13 已收斂，現況見 `architecture/data-pipeline.md`「程式註解裡的 I-124／I-125／I-126」） |
+| I-125 | `job_runs` 的結束寫入失敗後沒有重試，紀錄停在 `running`，回收後的 `aborted` 訊息與事實不符（✅ 2026-11-13 已收斂，現況見 `architecture/data-pipeline.md`「程式註解裡的 I-124／I-125／I-126」） |
+| I-126 | `job_runs` 看不出「整輪失敗」與「前置條件不成立」（✅ 2026-11-13 已收斂，現況見 `architecture/data-pipeline.md`「程式註解裡的 I-124／I-125／I-126」） |
 
 收斂：本筆的結論 review 之後即可收斂（後續由上表各自追蹤；各筆都已有自己的「證據」欄指向同一批證據）；作法歸檔到 `development-workflow.md`（計畫「十」）。⚠️ 收斂 I-122 時⛔ 不刪 `~/i122_evidence/`——要等 I-123～I-126 也都收斂。
 
@@ -3345,87 +3345,6 @@ log 都是 `intraday batch fetch failed`，錯誤分兩種：13 次 `lookup tw.s
 3. **A／AAAA 的查詢結果**：失敗當下兩種記錄各自有沒有回應（例如在容器裡分別查 A 與 AAAA、記下耗時與結果）。
 4. 失敗時刻的分布（是否與時段或負載有關）。
 5. 處置方向：修 host 端的 DNS；或 compose 指定 DNS；或停用 IPv6 的解析／連線；或 backend 對這類失敗重試（`stock_symbol_sync` 目前照設計⛔ 不重試）。⛔ 不在 I-122 處理。
-
-### I-124：2026-10-22 06:31 live 的 postgres 進入 recovery mode（原因未查）
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **觀察期判讀通過／待 review 後收斂**（2026-11-13；判讀見 [`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)「十二」的「觀察期判讀」；觀察期內⛔ 沒有再出現 DB 端的失敗）。原狀態：進行中（⛔ 不追查原因、下方「待查」的 log ⛔ 不再收集——使用者 2026-10-30 裁決：視為暫時性狀況，改由自動重跑吸收；計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；重跑（階段 B）✅ review 通過（2026-11-02，commit `a1e6075`）；✅ 2026-11-02 17:39 上 live（重跑已開，三項確認通過）；⚠️ 觀察 11-03 起的 5 個交易日（使用者執行）） |
-| 嚴重度 | 中：DB 重啟期間所有讀寫都失敗；這次讓 `corporate_action_sync` 整輪中止，結束狀態也寫不進去（I-125） |
-| 分類 | 基礎設施 / live 的 postgres（`postgres-postgres-1`） |
-| 建立日期 | 2026-10-30 |
-| 來源 | I-122 的調查（`corporate_action_sync` id 4573） |
-| 證據 | repo 外 `~/i122_evidence/20261030T155430/`（I-122 保全；說明見 I-122 的「證據」；2026-11-12 主機搬遷後在新機相同路徑，`SHA256SUMS` 已在新機實際重驗）。⚠️ **保存到 I-122～I-126 全部收斂為止** |
-
-#### 事實
-
-* 2026-10-22 06:31:24.183 起，backend 連 DB 收到 `FATAL: the database system is in recovery mode (SQLSTATE 57P03)`
-  （48 檔 `recompute adj factor failed`、`列出有 K 棒的標的失敗`、`job_runs finish failed`）；最早的一筆是 8016 的 `unexpected EOF`（連線中途斷掉）。
-* 當時 06:30 的批次正在跑：`stock_symbol_sync` 06:31:15 剛完成，`corporate_action_sync` 正在重算還原因子。
-* 10-22 06:30～10-28 14:13 log 完整的期間只有這一次；之後只看得到時間窗內的行。
-* recovery mode 代表 postgres 自己做過 crash recovery（某個 postgres process 異常結束後，postmaster 會中斷所有連線再復原）。
-
-#### 待查（⚠️ 另立計畫）
-
-1. postgres 容器在 2026-10-21 22:25Z～22:40Z 的 log：哪個 process、因為什麼結束。⚠️ postgres 的 log 可能含 SQL 片段與連線資訊，取用比照 I-122 的遮罩；
-   ⚠️ 時效：容器重建時 json-file 的 log 就不在了。
-2. host 的 kernel log 同時段有沒有 OOM killer 的紀錄（host 只有 2 GiB；OOM 只是待證的假說之一，⛔ 不先推定）。⚠️ kernel log 會輪替。
-
-### I-125：`job_runs` 的結束寫入失敗後沒有重試，紀錄停在 `running`，回收後的 `aborted` 訊息與事實不符
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **觀察期判讀通過／待 review 後收斂**（2026-11-13；判讀見 [`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)「十二」的「觀察期判讀」；部署後⛔ 沒有新的卡住紀錄，層四沒有觸發）。原狀態：進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的結束寫入重試與中性的回收訊息已 review、commit `7a9f0cb`；✅ 2026-11-02 已上 live；待觀察 5 個交易日後與 I-122～I-126 一起收斂） |
-| 嚴重度 | 中：**本次觀察到的影響**只在紀錄與狀態頁（「這輪是失敗還是被中斷」判斷錯、狀態頁顯示假的「執行中」）；但結束寫入是**所有工作共用的路徑**，依賴 `job_runs` 狀態的下游會被擋住（見「潛在影響」，⚠️ 讀碼推論、尚未實際發生） |
-| 分類 | Backend / 排程（`job_runs`） |
-| 建立日期 | 2026-10-30 |
-| 來源 | I-122 的調查（`corporate_action_sync` id 4573） |
-| 證據 | repo 外 `~/i122_evidence/20261030T155430/`（I-122 保全；說明見 I-122 的「證據」；2026-11-12 主機搬遷後在新機相同路徑，`SHA256SUMS` 已在新機實際重驗）。⚠️ **保存到 I-122～I-126 全部收斂為止** |
-
-#### 事實
-
-* `finishRunStatus`（`backend/internal/scheduler/scheduler.go`）只寫一次（`finishRunWriteTimeout`），失敗只記 Error log `job_runs finish failed`，⛔ 沒有重試。
-* id 4573：2026-10-22 06:31:24 因 DB 進入 recovery mode（I-124）提早失敗，結束狀態也寫不進去 → 停在 `running` → 10-28 14:13:08 backend 重啟時
-  由 `AbortRunning` 改成 `aborted`，`error` 是「process 在此 job 完成前結束，該輪未跑完（啟動時回收）」。實際上 process ⛔ 沒有結束，那一輪是**失敗**。
-* 狀態頁在 10-22 06:31～10-23 06:30 顯示「執行中」（隔天的新一輪才蓋掉；`running` ⛔ 不會被標成 stale）。
-* 文件：[`api-reference.md`](./api-reference.md) 的 `aborted` 定義是「process 在結束前就被中斷」，`running` 的判讀規則只列「真的在跑」與「上次回收失敗」，
-  ⛔ 沒有「結束狀態寫不進去」這條路徑。
-
-#### 潛在影響（⚠️ 讀碼推論，本次⛔ 沒有發生）
-
-* 終止上市對帳的前置條件要求當日**最新一筆** `stock_symbol_sync` 是 success（`StockSymbolSyncSucceededToday`，
-  `backend/internal/scheduler/delisting_reconcile.go`）。`stock_symbol_sync` 同步成功、結束狀態卻寫不進去時，那一列停在 `running`，
-  對帳照樣會被擋下（記成 `delisting_reconcile:internal_error`，見 I-126）——同步其實成功了，下游卻不執行。
-* 其他依賴 `job_runs` 狀態的地方都有同樣的風險；⚠️ 尚未逐一盤點。
-
-#### 處置方向（⚠️ 待規劃）
-
-(a) 結束寫入失敗時重試（DB 恢復後補寫）；(b) 回收時的訊息改成中性（例如「沒有寫入結束狀態」）；(c) 文件補上這條路徑。
-⚠️ 動到 `job_runs` 的狀態語意，要先立計畫書。
-
-### I-126：`job_runs` 看不出「整輪失敗」與「前置條件不成立」
-
-| 欄位 | 內容 |
-|---|---|
-| 狀態 | **觀察期判讀通過／待 review 後收斂**（2026-11-13；判讀見 [`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)「十二」的「觀察期判讀」；整輪失敗都記成 `failed`、`0/0`、帶原因類別）。原狀態：進行中（計畫 v4（已確認）：[`plans/i123-i126-job-retry.md`](./plans/i123-i126-job-retry.md)；階段 A 的兩項已 review、commit `7a9f0cb`；✅ 2026-11-02 已上 live；待觀察 5 個交易日後與 I-122～I-126 一起收斂） |
-| 嚴重度 | 低～中：誤導判讀，⛔ 不影響執行——要看 log 才知道真正的情況 |
-| 分類 | Backend / 排程（`job_runs` 的狀態推導與原因） |
-| 建立日期 | 2026-10-30 |
-| 來源 | I-122 的調查（計畫書「二」推測的兩個缺口，由證據證實） |
-| 證據 | repo 外 `~/i122_evidence/20261030T155430/`（I-122 保全；說明見 I-122 的「證據」；2026-11-12 主機搬遷後在新機相同路徑，`SHA256SUMS` 已在新機實際重驗）。⚠️ **保存到 I-122～I-126 全部收斂為止** |
-
-#### 事實
-
-1. **整輪失敗記成 partial**：`stock_symbol_sync` 的同步回錯誤時寫 `(total 0, failed 1)`（`runStockSymbolSync`），依 `finishRunDegraded` 的推導
-   （`total > 0` 而且 `failed >= total` 才是 failed）落到 **partial**。id 4736、4939、5005 都是整輪失敗、主檔一筆都沒更新，狀態卻是 partial。
-2. **前置條件不成立記成 `internal_error`**：`delisting_reconcile` 的 `ErrStockSymbolSyncNotReady`（文字 `stock_symbol_sync has not succeeded today`）
-   經 `joberr.Classify` 落到 `internal_error`。id 4737、4940、5006 都是 `delisting_reconcile:internal_error`，和真正的內部錯誤分不開。
-* 規格：[`architecture.md`](./architecture.md)「寫入失敗的一致性契約」的合法形式允許本專案自己組的固定安全文字，所以前置條件可以寫成專屬的原因；目前沒有。
-
-#### 處置方向（⚠️ 待規劃）
-
-(1) 整輪失敗記成 failed；(2) 前置條件不成立寫成專屬的安全文字（例如 `delisting_reconcile:stock_symbol_sync_not_ready`）。
-⚠️ 動到狀態推導與 `job_runs` 的 contract，要先立計畫書。
 
 ### I-130：Replay 成交歸因與風險報酬量測口徑補強（承接 I-129 跑測分析 review 的 R2～R4）
 

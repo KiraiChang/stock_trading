@@ -1,7 +1,7 @@
 # I-123～I-126 計畫 v4：暫時性失敗的自動重跑機制
 
 > 狀態：✅ v4 已確認（2026-10-30，`7fd3962`；D1～D6 依建議定案，D5 採 (b)）。階段 A ✅ review 通過、commit `7a9f0cb`；階段 B ✅ review 通過（2026-11-02）、commit `a1e6075`——review 發現 2 項（P2），review 修正（R1、R2）✅ review 通過（⛔ 沒有發現新的程式缺陷；「十二」的「階段 B 的 review 修正」）；`RACE=1` 依 T-078（已收斂；現行做法見 [`development-workflow.md`](../development-workflow.md)「Race detector」）補跑通過（對照組成立；`./internal/scheduler/...`、`./internal/api/handler/` ⛔ 沒有 race；「十二」）。「九」第 4 步：✅ 2026-11-02 17:39 上 live、三項確認通過（「十二」的「live 部署」）；⚠️ 觀察 11-03 起的 5 個交易日。觀察期的追加修正 R3～R5（2026-11-04；第一輪 review 的 2 項已修正）✅ review 通過：「十二」的「觀察期」。⚠️ R4 尚未上 live。
-> 對應：[`issue.md`](../issue.md) I-123～I-126；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
+> 對應：[`issue.md`](../issue.md) I-123～I-126（I-124～I-126 已於 2026-11-13 收斂，剩 I-123）；背景是 I-122 的調查（計畫書 [`i122-live-batch-failures.md`](./i122-live-batch-failures.md)）。
 
 ## 一、目標與不做的範圍
 
@@ -604,7 +604,7 @@ R3 觀察工具另做了「封存版」（`~/.cache/stock_trading/obs/archive/`�
 
 **使用者裁決（2026-11-13，照建議）**：
 
-* 重跑機制、I-124、I-125、I-126：觀察期判讀通過，review 後收斂（`issue.md` 的狀態已改）。live 的觀察結果與 11-07 的殘餘已歸檔到 `data-pipeline.md`「live 的觀察」；層二的原因碼歸檔到 `yahoo-intraday-integration.md`；開關漏鍵的實例歸檔到 `development-workflow.md`。
+* 重跑機制、I-124、I-125、I-126：觀察期判讀通過，✅ 2026-11-13 review 確認並收斂（`issue.md` 移除三筆；由來說明見 `data-pipeline.md`「程式註解裡的 I-124／I-125／I-126」）。本計畫書跟 I-123 共用，保留到 I-123 收斂。live 的觀察結果與 11-07 的殘餘已歸檔到 `data-pipeline.md`「live 的觀察」；層二的原因碼歸檔到 `yahoo-intraday-integration.md`；開關漏鍵的實例歸檔到 `development-workflow.md`。
 * 11-07 `delisting_reconcile` 額度用完：記成已知殘餘，⛔ 不追查。
 * **I-123：在新主機觀察 5 個交易日（11-13～11-19）**，之後與 I-122 一起收斂；本計畫書也保留到那時才刪。
 

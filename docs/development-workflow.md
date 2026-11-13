@@ -828,7 +828,8 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 `redis connected` → `yahoo intraday enabled` → `job retry config` → `scheduler started` → `server starting`。
 是 `redis connect failed, cache disabled` 的話，這次啟動之後 Redis 整個停用（原因見本檔 Redis 一節：backend 只在啟動時連一次），
 訊號⛔ 不會標 degraded，`job_runs` 可能一切正常——只看開關與 job 狀態查不出來。
-**2026-11-02 實例**：I-123～I-126 上 live 時 backend 啟動 3 次都是 `NOAUTH`，開關的三項確認都通過，
+**2026-11-02 實例（開關）**：I-123～I-126 上 live 時，live 的 `compose.yml` 一開始漏了 `JOB_RETRY_*` 四個鍵，`deploy.sh` 有 `export` 也沒用，開關靜默失效；補上鍵之後才生效。（2026-11-13 I-132 之後，開關改放在 scripts 目錄的 `.env`，由 `env_file` 直接注入，見 `docs/plans/i132-redis-silent-disable.md`。）
+**2026-11-02 實例（Redis）**：I-123～I-126 上 live 時 backend 啟動 3 次都是 `NOAUTH`，開關的三項確認都通過，
 Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
 
 ### 只改 live 的環境變數：只重建 backend，⛔ 不跑 live 的 `deploy.sh`

@@ -570,3 +570,17 @@ review 的結論：2 項要修正（都已在隔離副本重現）；`RACE=1` �
 * P3 R5 要求 Redis 狀態是 `server starting` 的「前一筆」：實際的健康啟動中間還隔著 `yahoo intraday enabled`、`job retry config`、`scheduler started`，
   照那個寫法會把正常啟動誤判為失敗。→ 改成核對同一次啟動區段的 Redis 狀態行；「3.7」、`development-workflow.md` 與觀察工具的提示一起改，
   工具直接輸出 `startups.tsv`，⛔ 不再靠人工比對前後筆。
+
+### 主機搬遷（2026-11-12；只記錄事實，影響在觀察期判讀時一併裁決）
+
+* live 於 2026-11-12 從舊 VPS 搬到新機；舊 backend 最後一次寫 log 在 11-12 15:56（台北）。**5 個交易日的觀察窗口（11-03～11-09）全部發生在舊機**，R4 也⛔ 沒有在舊機上線。
+* 觀察用的資料都已搬到新機並經 sha256 核對：
+  * R3 觀察工具與歷次輸出：`~/.cache/stock_trading/obs/`（相同路徑）。
+  * 舊 live 的 log（10-30～11-12）：`~/old_vps_archive/20261112/logs/`。⚠️ 刻意⛔ 不放進新 live 的 `./logs/backend`：新 backend 的 14 天輪替會把它們刪掉。
+  * `job_runs`：兩份舊 DB 的 dump 都涵蓋觀察窗口（位置與時間見 `issue.md` I-131）。
+* 判讀時的改變：
+  * R3 工具是用 `docker exec … cat` 讀 log，舊的 container 已移除；判讀時改讀封存目錄的檔案（工具在 repo 外，判讀時再調整）。
+  * `job_runs` 從 dump 還原到 dev project 的 DB 查詢，⛔ 不用新 live 的 DB（新 DB 缺 11-11 15:42 之後的資料，見 I-131）。
+* 待判讀時裁決：
+  * I-123 的 DNS 逾時與 IPv6 不可達是**舊機的網路環境**。「由重跑吸收」的結論能不能沿用到新機、要不要在新機上另外觀察，在判讀時一併決定。
+  * 新機的 live 是否已開啟重跑（`JOB_RETRY_ENABLED` 等四個鍵）並通過「3.7」的四項部署後確認（含 R5 的 Redis），尚未確認。

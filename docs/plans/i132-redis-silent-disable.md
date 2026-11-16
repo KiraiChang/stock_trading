@@ -1,7 +1,7 @@
 # I-132：backend 沒帶到 Redis 密碼就靜默停用 Redis——部署範本版控與啟動檢查（計畫書 v3）
 
 > 狀態：v3 草稿，待使用者確認（2026-11-13）。使用者已定案：D2、D7、D8；D1、D3～D6、D9～D11 是 Claude 的建議，**還沒經過使用者確認**。⛔ 確認前不改程式、不改範本、不對 live 下指令。
-> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。下一步：附錄 C 的契約表 review 通過後開始寫 E 的程式。
+> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。E 已 commit（2026-11-16）；C 已改好、未 commit，待 review（實作備註在「十一之前：C 的實作備註」）。下一步：C review 通過後做 A1～A3 的範本。
 > 對應：`docs/issue.md` I-132。v2 review 的原文與逐項處理見文末「Review feedback」與「十一、修訂紀錄」。
 
 ## 一、目標與不做的範圍
@@ -378,6 +378,57 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 * **rootless Docker 下 `--user` 寫不進 cache**：腳本用 `--user "$(id -u):$(id -g)"` 跑 container，rootless 模式會把 container 裡的 uid 1001 對應到主機的另一個 subuid，寫不進 dev 擁有的 `~/.cache/stock_trading/gocache`（`mkdir /gocache/00: permission denied`）。這次先把兩個 cache 目錄改成 777 繞過（家目錄是 700，其他帳號進不來；測試只寫 cache、⛔ 不寫 repo）。其他用 `--user` 的測試腳本很可能有同樣的問題。正式的修法屬於驗證流程的修改，要另外立案。
 * **vet 在 700m 被 OOM**：`modernc.org/sqlite/lib` 的 vet 在預設的 `MEM=700m` 下 `signal: killed`（T-079 的已知狀況）；新主機有 7.9 GB，這次用 `MEM=1500m` 通過。
 
+## 十一之前：C 的實作備註（2026-11-16；已改好、未 commit，待 review）
+
+**改了哪些檔案**：
+
+* `backend/internal/store/redis_probe.go`（新增）：
+  * 常數 `RedisProbeAttempts` 5、`RedisProbeInterval` 2 秒、`RedisProbeTimeout` 3 秒（D3；⛔ 不開設定鍵）。
+  * 核心 `probeRedis`：輸入是 ping 函式、次數、間隔、單次上限、可注入的等待函式與每次失敗的回呼；每次嘗試包一個單次上限的 context；最後一次失敗之後⛔ 不再等；父 context 取消時立刻停止。成功回傳嘗試次數，失敗回傳 `*RedisProbeError{Cause, Attempts}`，⛔ 不帶錯誤原文。
+  * `classifyRedisErr`：只看錯誤型別與 Redis 錯誤碼的前綴（`redis.HasErrorPrefix`）。`NOAUTH` → `noauth`；`WRONGPASS`、`ERR invalid password`（Redis 6 以前）、`ERR AUTH …`（伺服器沒設密碼、client 卻帶了）→ `wrongpass`；`*net.DNSError` → `dns`（先判，DNS 逾時也歸 `dns`）；`ECONNREFUSED` → `refused`；`context.DeadlineExceeded` 或 `net.Error.Timeout()` → `timeout`；其他 → `other`。
+  * `probeOptions`：啟動專用 client 的選項，照 4.4（`MaxRetries: -1`、Dial／Read／Write／Pool 的逾時都是 3 秒、`PoolSize: 1`、`ContextTimeoutEnabled: true`）。
+  * `ProbeRedis`：每次嘗試新建 client、ping、`Close()`。
+* `backend/cmd/server/main.go`：Redis 那一步改成「沒有位址 → `redis disabled (no addr configured)`；有位址 → `ProbeRedis`，每次失敗記 Warn `redis probe attempt failed`（`addr`、`attempt`、`max_attempts`、`cause`），全部失敗記 Error `redis connect failed after retries`（`addr`、`attempts`、`cause`）並 `os.Exit(1)`；成功記 `redis connected`（多了 `attempts`）」。之後照舊用 `NewRedis` 建立 runtime client；原本的 `Ping` 與「失敗就換成停用的 client」拿掉。
+* `backend/internal/store/redis_probe_test.go`（新增）：見下方「驗證」。
+
+**實作時查證的事實**（讀 module cache 裡 go-redis v9.5.4 的原始碼，確認 2.5）：
+
+* `Options.init()`：`MaxRetries` 0 → 3、-1 → 0；`DialTimeout` 預設 5 秒；`ReadTimeout` 預設 3 秒；`WriteTimeout` 跟 `ReadTimeout` 相同；`PoolTimeout` 是 `ReadTimeout` + 1 秒；`PoolSize` 是 10 × GOMAXPROCS。
+* `ContextTimeoutEnabled` 為 false 時，`baseClient.context()` 回傳 `context.Background()`，socket 讀寫的 deadline ⛔ 不看呼叫端的 context；為 true 時取「逾時」與「context deadline」較早的那個。dial 一律用 `DialContext`。
+* ⚠️ **`redis.NewClient` 會就地改寫傳入的 `Options`**（`init()` 把 `MaxRetries` -1 改成 0）。同一份 `Options` 拿去建第二個 client 時，0 會被當成「沒設定」而變回 3 次重試。所以 `ProbeRedis` **每次嘗試都呼叫 `probeOptions` 建新的一份**；測試用「每次嘗試只能開一條連線」擋住（見下方 mutation ①）。
+
+**跟計畫的差異**：
+
+1. **原因類別多一個 `canceled`**：4.4 的封閉值域沒有「父 context 被取消」的值，但第七節要求取消時立刻停止，回傳時需要一個類別。現在 `main.go` 傳的是 `context.Background()`，實際上不會出現。
+2. **每次失敗另外記一筆 Warn**（4.4 只寫了最後的 Error）：同樣只有次數與原因類別，方便看出「前幾次失敗、後來成功」的情況。
+
+**驗證**：
+
+* 單元測試（`redis_probe_test.go`，`backend/scripts/test.sh`）全部通過：
+  * 第一次就成功（⛔ 沒有等待）；第 3 次才成功（等 2 次，每次失敗都回報）；
+  * 全部失敗：回傳 `refused`、5 次，等了 4 次、每次 2 秒，最後一次失敗之後⛔ 沒有再等；每次嘗試都有 3 秒以內的 deadline；
+  * 父 context 取消：嘗試途中、等待途中、一開始就已取消，三種都立刻停止、回報 `canceled`；
+  * 原因類別：13 個案例（含包了一層的錯誤、DNS 逾時）；
+  * `probeOptions` 的每個選項，以及每次都回傳新的一份；
+  * **runtime 的 contract**：`NewRedis` 的選項照舊是 go-redis 的預設值（`MaxRetries` 3、`DialTimeout` 5 秒、`ReadTimeout`／`WriteTimeout` 3 秒、`PoolTimeout` 4 秒、`PoolSize` 10 × GOMAXPROCS、`ContextTimeoutEnabled` false）；
+  * **用真的 go-redis client 對假的 RESP 伺服器**（模擬設了 requirepass 的 Redis 7）：密碼正確 → 第一次成功；沒帶密碼 → `noauth`；密碼錯誤 → `wrongpass`，錯誤字串⛔ 不含假密碼；連到已關閉的 port → `refused`；伺服器接受連線但不回應、單次上限 300ms → `timeout`，2 次共不到 2 秒（證明 `ContextTimeoutEnabled` 有生效）；伺服器收到指令就斷線（EOF 是 go-redis 會重試的錯誤）→ 4 次嘗試剛好開 4 條連線（證明 client 內建的重試已關閉）。
+* mutation（都已還原）：①`ProbeRedis` 重用同一份 `Options` → 4 次嘗試開了 13 條連線，測試變紅；②`ContextTimeoutEnabled` 改成 false → 2 次 300ms 的探測花了 6.0 秒，測試變紅；③最後一次失敗之後照樣等 → 3 個測試變紅。
+* `backend/scripts/test.sh` 全部套件通過（`MEM=1500m`）；gofmt 通過（`internal/store` 裡 `model.go`、`sr_identity_stats_repo_test.go` 原本就沒有 gofmt，不是這次的變更，⛔ 沒有動）。
+* **dev 實測**（`docker-compose.dev.yml`，override 放在 scratchpad；postgres 掛的是原本的 dev volume）：
+
+| 情境 | 結果 |
+|---|---|
+| 正常（`SERVICES=backend scripts/smoke-dev.sh`） | 通過；`redis connected`、`attempts` 1，之後 `scheduler started` |
+| 密碼錯誤（假機密含 `$`、`#`） | 5 次 `wrongpass`、間隔 2 秒，最後 `redis connect failed after retries`；container 反覆重啟（45 秒內 `RestartCount` 5）；`/health` 沒有回應；log ⛔ 沒有 `scheduler started`；假機密在 log 裡 0 次 |
+| 沒帶密碼（`REDIS_PASSWORD` 空值，`APP_ENV: dev` 不要求） | `run --rm` 回 rc 1；5 次 `noauth`；探測 8.0 秒 |
+| 位址的主機名稱不存在（`.invalid`） | rc 1；5 次 `dns`；探測 8.0 秒 |
+| 連不到的位址（`10.255.255.1:6379`，沒有回應） | rc 1；5 次 `timeout`；**探測 23.01 秒**（每次 3.0 秒、間隔 2 秒），跟 D3 的理論上限 23 秒一致 |
+| 沒有位址（`REDIS_ADDR` 空值） | `redis disabled (no addr configured)`、`scheduler started`、`/health` 200，`RestartCount` 0（行為不變） |
+
+  * 探測的耗時用 log 的時間戳算：從 `migrations applied` 到 `redis connect failed after retries`。
+  * `job_runs` 在失敗情境的前後都是 0 筆（dev 的表本來就是空的，所以這項證據比較弱；主要的證據是 log 沒有 `scheduler started`、`/health` 沒有回應）。
+  * 跑完 `docker compose -f docker-compose.dev.yml down`（⛔ 沒有 `-v`），dev 與作業用的 volume 都還在。
+
 ## 附錄 C：設定契約表（E 的盤點，2026-11-13，待 review）
 
 > 實作第一步的產出。依 `backend/internal/config/config.go` 的每個欄位、`config.Load()` 的 `SetDefault`、`backend/config.yaml`，以及 `main.go`／scheduler 實際怎麼用，逐鍵整理。**這張表 review 通過之後才寫程式。**
@@ -510,4 +561,4 @@ I-131 的 R1～R4 仍待處理，不能以 I-132 已修復 live `.env` 或 Redis
 |---|---|---|
 | v1 | 2026-11-13 | 初版：A（A1 `:?`、A2 `.env.example`），C（重試之後非 0 結束），B 不做；記下 F1～F4 和範本落差。同日補充：E1 確認 build 目錄沒有 `.env`，查出 F1 的實際後果（viper 退回 `config.yaml` 的公開預設值），新增 D5；F2 已完成 |
 | v2 | 2026-11-13 | A/B 實測確認 F1，也確認 `--env-file` 修得好；使用者決定 D2 改成在 compose 裡用 `env_file` 注入 `.env`，不在 `deploy.sh` 加 `--env-file`（見 F1 的處置、D2、第八節第 1 步）。4.1、A2、第三節受影響檔案裡的 `--env-file` 寫法和資料流描述還沒改，等 live 驗證完成後一起改寫 |
-| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**2026-11-16 補充（review）**：[P2] DSN 契約改用 pgx 的 `pgconn.ParseConfig` 取最終有效帳密，修正 query 參數的範例密碼被放行、引號寫法的合法密碼被擋（附錄 C 之前的「review 修正」）。**同日補充六**：E 實作完成（已改好、未 commit），實作備註、跟計畫的差異（範例值檢查拆成 Go 測試與 `scripts/check-config-examples.py`、timeframe 只檢查格式）與 dev 實測結果寫在附錄 C 之前；記下新主機上 `test.sh` 在 rootless Docker 的 cache 權限問題與 vet 的記憶體需求。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |
+| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**2026-11-16 補充二**：C 實作完成（已改好、未 commit）；實作備註、查證的 go-redis 事實（`NewClient` 會就地改寫 `Options`）、跟計畫的差異（多一個原因類別 `canceled`、每次失敗另記 Warn）與 dev 實測（連不到的位址 23.01 秒）寫在「十一之前：C 的實作備註」。**2026-11-16 補充（review）**：[P2] DSN 契約改用 pgx 的 `pgconn.ParseConfig` 取最終有效帳密，修正 query 參數的範例密碼被放行、引號寫法的合法密碼被擋（附錄 C 之前的「review 修正」）。**同日補充六**：E 實作完成（已改好、未 commit），實作備註、跟計畫的差異（範例值檢查拆成 Go 測試與 `scripts/check-config-examples.py`、timeframe 只檢查格式）與 dev 實測結果寫在附錄 C 之前；記下新主機上 `test.sh` 在 rootless Docker 的 cache 權限問題與 vet 的記憶體需求。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |

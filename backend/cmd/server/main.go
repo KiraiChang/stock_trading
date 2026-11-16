@@ -106,18 +106,35 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Redis（選填；addr 空白時為 no-op）
-	rdb := store.NewRedis(cfg.Redis)
-	if rdb.Enabled() {
-		if err := rdb.Ping(context.Background()); err != nil {
-			log.Warn("redis connect failed, cache disabled", zap.Error(err))
-			rdb = store.NewRedis(store.DisabledRedisConfig())
-		} else {
-			log.Info("redis connected", zap.String("addr", cfg.Redis.Addr))
-		}
-	} else {
+	// Redis：沒設定位址時停用（no-op）；**有設定位址就是必要的**（I-132 的 C）——
+	// 啟動專用的探測有次數與時間上限，仍然連不上就在 AbortRunning、排程器、HTTP 啟動之前結束，
+	// ⛔ 不再靜默停用。log 只帶原因類別與次數，⛔ 不帶錯誤原文。
+	if cfg.Redis.Addr == "" {
 		log.Info("redis disabled (no addr configured)")
+	} else {
+		attempts, err := store.ProbeRedis(context.Background(), cfg.Redis, func(attempt int, cause string) {
+			log.Warn("redis probe attempt failed",
+				zap.String("addr", cfg.Redis.Addr),
+				zap.Int("attempt", attempt),
+				zap.Int("max_attempts", store.RedisProbeAttempts),
+				zap.String("cause", cause))
+		})
+		if err != nil {
+			var pe *store.RedisProbeError
+			cause := store.RedisCauseOther
+			if errors.As(err, &pe) {
+				cause = pe.Cause
+			}
+			log.Error("redis connect failed after retries",
+				zap.String("addr", cfg.Redis.Addr),
+				zap.Int("attempts", attempts),
+				zap.String("cause", cause))
+			os.Exit(1)
+		}
+		log.Info("redis connected", zap.String("addr", cfg.Redis.Addr), zap.Int("attempts", attempts))
 	}
+	// runtime 的 client：選項與重連行為⛔ 不變（探測用的是另一個 client，已經關閉）
+	rdb := store.NewRedis(cfg.Redis)
 
 	// Repos
 	candleRepo := store.NewCandleRepo(db)

@@ -1,7 +1,7 @@
 # I-132：backend 沒帶到 Redis 密碼就靜默停用 Redis——部署範本版控與啟動檢查（計畫書 v3）
 
 > 狀態：v3 草稿，待使用者確認（2026-11-13）。使用者已定案：D2、D7、D8；D1、D3～D6、D9～D11 是 Claude 的建議，**還沒經過使用者確認**。⛔ 確認前不改程式、不改範本、不對 live 下指令。
-> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。E、C 已 commit（2026-11-16）；A1～A3 的範本已改好、未 commit，待 review（實作備註在「十一之前：A1～A3 的實作備註」；現況規格已歸檔到主題文件）。下一步：review 通過後做第八節第 2 步（live 的 `deploy.sh`）與第 3 步（C 的部署）。
+> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。E、C、A1～A3 與 stdin 修正已 commit（2026-11-16，`bd89610`）；第八節第 2 步（live 的 `deploy.sh`）完成，第 3 步第一次部署停在探測、原因已查明並修正；**第 3 步改排 2026-11-16 15:12**（見第八節第 3 步「第二次部署」）。
 > 對應：`docs/issue.md` I-132。v2 review 的原文與逐項處理見文末「Review feedback」與「十一、修訂紀錄」。
 
 ## 一、目標與不做的範圍
@@ -324,7 +324,7 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
      * 本機模擬（目錄配置照 live、常數換成本機值，流程相同）：stage 通過、swap 成功、再跑 swap 被擋；舊檔有其他 `export`、`PROJECT_DIR` 少結尾的 `/`、`origin/init` 的範本不是 review 版、舊檔 sha 不符、參數錯誤都停下，build 目錄⛔ 沒有被改到，假機密 0 次。交付指令在 zsh 模擬「每行前後多空白」的貼上，解碼後 sha 相符；每行 ≤ 80 字元。
    * ✅ **stage（2026-11-16，使用者在 live 執行）**：第一次在第 2 步停下——`origin/init` 還在 `e3e9156`（範本 sha `225a6a8c…`，I-132 之前），範本修正還沒 commit／push；範本 sha 的檢查如預期擋下，⛔ 沒有寫入任何檔案。commit `ab8baa3` 並 push 之後重跑：舊檔 sha 相符（`07ebcc55…`）、`export` 只有 `REDIS_PASSWORD`、`PROJECT_DIR`／`REDIS_ENV_FILE` 逐字相同、範本 sha 相符（`f87f1ff9…`，`ab8baa3`）、`deploy.sh.new` 寫入（`282fdd89…`，權限同舊檔）、**`--preflight` 在 live 通過**（JWT 不是空值或範例值、`env_file` 路徑一致、build 目錄乾淨且在 `init`、Redis `.env` 符合白名單；MemAvailable 5201MiB）。同時的唯讀檢查：build 目錄本機修改 0、HEAD `e3e9156`、三個服務 `Up 2 days`。
    * ✅ **swap（2026-11-16 11:52，使用者在 live 執行）**：舊檔 sha 相符；`deploy.sh` 換成新版（`282fdd89…`），權限與擁有者跟舊檔相同（`700 app:app`）；舊檔備份成 `deploy.sh.bak.20261116115212`。⛔ 沒有部署。
-   * 正式部署是第 3 步，另外執行（使用者 2026-11-16 選定：當天 14:00 之後，I-123 新主機觀察期內，避開 06:30～08:45 與 08:50～13:55）。
+   * 正式部署是第 3 步，另外執行（使用者 2026-11-16 選定：當天 14:00 之後，I-123 新主機觀察期內，避開 06:30～08:45 與 08:50～13:55）。⚠️ 14:05 的第一次部署停在探測（見第 3 步），**改排同日 15:12**。
    * （原本的做法，作廢：）失敗即停（`set -euo pipefail`、`git -C`、`git pull --ff-only`、`down` 失敗不進 `up`）、JWT 的最小檢查、readiness 確認。live 的路徑和 compose 檔照現況（固定的 `.env` 絕對路徑、`./compose.yml`、build 目錄當 project directory），⛔ 不整份換成範本。做法跟這次一樣：先核對 sha，在 dev 用同一份原檔預先算出新檔的 sha，指令用 base64 加 sha 核對交付；寫入前單獨試跑每一個檢查。
 3. **C 的部署**：要 build 新的 image 才會生效。依 `development-workflow.md` 的部署規則找時段，避開排程前後 10 分鐘，⛔ 不在早班批次到 08:45 之間。
    * ~~跟 I-131 協調：如果 C 在 I-131 正式合併之前部署，要記下 image 和設定的版本，I-131 的最終演練和驗收都要用同一個版本。~~ I-131 已在 2026-11-13 收斂（⛔ 沒有資料缺口、不需要合併），這項協調取消。
@@ -333,9 +333,16 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
      * 診斷第三輪：`cfe7f679` 的執行檔（11-16 06:08 UTC）找得到旗標（`grep rc=0`）；live 的 `compose run` 只掛 `/app/logs/backend`；backend 照常 `Up`。
      * **原因（dev 重現）**：live 是操作者在終端機直接執行 `./deploy.sh`。GNU `timeout`（沒有 `--foreground`）會把底下的 docker 放進新的程序群組，對終端機來說是背景；`compose run` 預設會讀 stdin，一讀終端機就被 `SIGTTIN` 停住，120 秒後被 `timeout` 砍掉（rc 124），腳本卻一律報成「不認得 -check-config」。dev 用 `script` 模擬終端機：`timeout 20 … run …` 卡 20 秒、rc 124；加 `</dev/null` 或 `--foreground` 都是 1 秒、rc 0。readiness 的 `compose exec -T` 同樣會卡住（實測超過 40 秒，`timeout 15` 也沒砍掉），而且是在 `down` 之後，所以這次停在探測反而是幸運的。原本的測試用假 docker、而且不是在終端機裡跑，所以沒抓到。
      * **範本修正（偏離已 review 的範本，先記在這裡）**：①腳本開頭 `exec </dev/null`（整支腳本都不需要輸入；選它而不是 `timeout --foreground`，因為 `--foreground` 逾時時不會砍掉子程序）；②兩個 `run` 的結束碼分開判讀：探測 1 =找不到旗標、124 =逾時、其他 =`compose run` 出錯（帶結束碼）；設定檢查 124 =逾時、其他 =沒通過。測試新增 4 項（stdin 必須是 `/dev/null`、在偽終端機裡執行且 compose 會讀 stdin 時要通過、探測出錯與卡住的訊息），共 62 項通過；拿掉 `exec </dev/null` 的突變會讓其中 2 項失敗。shellcheck v0.10.0（docker image）沒有警告。`development-workflow.md` 同步更新（stdin 的說明，以及 live `deploy.sh` 的現況）。
-     * **live 的處理**：新 image 標成 `i132-new`（`cfe7f679`）保留，`latest` 已標回 `40c3af72`。修正 commit、push 之後，照第 2 步的方式重做 stage／swap（第二版：舊檔 `282fdd89…`、範本 `1e132571…`、候選檔 `abcf1c01…`），再擇期部署（排程前後 10 分鐘不動；建議 11-17 14:05 之後）。
+     * **live 的處理**：新 image 標成 `i132-new`（`cfe7f679`）保留，`latest` 已標回 `40c3af72`。修正 commit、push 之後，照第 2 步的方式重做 stage／swap（第二版：舊檔 `282fdd89…`、範本 `1e132571…`、候選檔 `abcf1c01…`），再擇期部署（排程前後 10 分鐘不動）。當時建議 11-17 14:05 之後，**已改為同日 15:12**（下一項之後的「第二次部署」）。
      * ✅ **第二版 stage／swap（2026-11-16 14:3x，使用者在 live 執行）**：舊檔 sha 相符（`282fdd89…`）；`origin/init` 的範本 sha 相符（`1e132571…`，`bd89610`）；候選檔 `abcf1c01…`；`--preflight` 通過（MemAvailable 5175MiB）；swap 完成，第一版備份成 `deploy.sh.bak.20261116143203`，權限 `700 app:app`。⛔ 沒有部署；build 目錄的工作目錄仍在 `ab8baa3`，正式部署時才 pull 到 `bd89610`。
+   * **第二次部署（使用者 2026-11-16 裁決：當天 15:12；原本建議的 11-17 14:05 不用）**
+     * **時段的依據**：`development-workflow.md`「挑窗口」的第二段窗口（`daily_close` 跑完之後到 16:00 之前），加上排程前後 10 分鐘不動。`daily_close` 15:00 開始、平常 15:02 前結束 → 最早 **15:12** 開始；16:00 有 `evaluation_universe` → 最晚 **15:50** 結束。**15:35 還沒進到 `==> down` 就 Ctrl+C**（`down` 之前中斷安全，留 15 分鐘給回滾）。下一個排程是 17:00 的 SR 分析。當初說「15:00 之後沒有空檔」是用第一次的冷 build（backend 213 秒）估的，⛔ 不對：`ab8baa3`→`bd89610` 只改腳本和文件，backend／python 的程式與 migration 都沒變，build 應全部吃快取（backend 預期產出同一個 `cfe7f679`），整個部署約 1～3 分鐘、停機不到 1 分鐘。
+     * **開始的條件**（15:10 之後確認，任何一項不符就⛔ 不部署）：11-16 的 `daily_close` 已 `success`、`finished_at` 有值；`job_runs` 沒有 `running`；live 的 `deploy.sh` sha `abcf1c01…`；backend `RestartCount` 0、image `40c3af72`，`stock_trading-backend:pre-i132` 也是 `40c3af72`（14:05 那次已打，⛔ 不再打，免得覆蓋）；記下 backend `Config.Env` 的行數與 hash；兩個 python container 正在跑的 image（`6a0ad0f2`、`ff19bd55`）跟目前標籤（`e2f347f1`、`16348031`）的 layer 雜湊要相同（只差 metadata；不同就代表這次會換掉 python 的程式，跟「只動 backend」的前提不符，⛔ 不部署），並把正在跑的 image 標成 `stock_trading-python-{server,worker}:pre-i132` 給回滾用。
+     * **參數**（live 的 `deploy.sh` = 範本 `bd89610` 只換 3 行）：`PROJECT_DIR="/opt/stacks/deploy/stock_trading/build/stock_trading/"`、`DEPLOY_BRANCH="init"`、`REDIS_ENV_FILE="/opt/stacks/scripts/redis/.env"`；其餘沿用範本：`MIN_MEM_AVAILABLE_MB=1536`、`READY_TIMEOUT_SEC=90`、`READY_INTERVAL_SEC=2`、`READY_REQUEST_TIMEOUT_SEC=5`、`CHECK_CONFIG_TIMEOUT_SEC=120`。設定：⛔ 不改 scripts 目錄的 `.env`、`compose.yml`、Redis 的 `.env`，所以部署前後 backend 的 `Config.Env` 必須完全相同。版本：build 目錄 `ab8baa3` → `bd89610`（`git pull --ff-only`）。
+     * **預期**：`config ok (production=true)`（live 沒設 `APP_ENV`，D9 當成 production）→ `down` → `up -d --no-build` → `部署完成：backend /health 正常、RestartCount 0`、`rc=0`。
+     * **停在 `down` 之前**：舊服務照常，只把 `latest` 標回 `pre-i132`；**`down` 之後起不來**：三個服務的 `latest` 都標回 `pre-i132`，再 `compose up -d --no-build`（⛔ 不用 `deploy.sh` 回滾，舊 image 不認得 `-check-config`）。
 4. **部署後確認**：`redis connected`、readiness 通過、backend 的 `Config.Env` hash 跟部署前一致（沒有改設定時）。故意用錯的密碼⛔ 不在 live 上試，只在 dev 驗證。
+   * 2026-11-16 15:12 那次另外確認：三個服務 `Up`、backend `RestartCount` 0、image 不是 `40c3af72`；log 有 `redis connected`（`attempts` 1）、`job retry config`、`scheduler started`，⛔ 沒有 `config contract violated`、`config load failed`、`redis probe attempt failed`；**16:10 之後**看新版跑的第一個排程 `evaluation_universe`（16:00）是 `success`；17:00 的 SR 分析與隔天 08:50 的 `pre_market`、盤中 `intraday` 照常（I-123 新主機觀察期的輪數另外判讀）。
 
 ## 九、完成後要歸檔的位置
 

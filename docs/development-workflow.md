@@ -927,6 +927,25 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
 ⛔ 還沒 down）；readiness 的 `compose exec` 也會卡住，而且是在 down 之後。測試在偽終端機（`script`）裡執行 `deploy.sh` 重現這個情況。
 
 ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
+在 `down` **之後**失敗時，三個服務都已經停了：把要退回的服務的 `latest` 標回回滾標籤，再 `compose up -d --no-build`（⛔ 不帶 `--no-deps backend`，
+否則 python 兩個服務不會起來），然後**分別**確認三個服務：都 `Up`、各自的 `RestartCount` 0、backend 的 `/health`、從 backend container 打
+`http://python-server:8001/health`、python-worker 的 log 沒有 `Traceback`。只看 backend 的 `/health` 證明不了 python 恢復了。
+⚠️ **回滾目標要在部署前用標籤留住，而且要標「正在跑的 container 的 image」，⛔ 不是 `latest`**：前一次部署如果 build 完才失敗，
+`latest` 已經指向沒上線的新 image，跟正在跑的版本不同。做法（`C` 是案號；image 不存在時 `docker image inspect` 失敗、⛔ 不打標籤，要記成「沒有回滾目標」）：
+
+```bash
+C=i132
+for s in backend python-server python-worker; do
+  run="$(docker inspect -f '{{.Image}}' "stock_trading-$s-1")"
+  docker image inspect "$run" >/dev/null && docker tag "$run" "stock_trading-$s:pre-$C"
+done
+```
+
+build 會把 `latest` 移到新 image，而且同一份輸入、全部用快取的 build，image ID 也會變（2026-11-16 實測：backend 兩次 build 的建立時間都是 14:08:54、
+大小相同，ID 卻是 `cfe7f679` 與 `14ac07bb`；python 也一樣）——⛔ 不能靠 ID 或「沒改程式所以一樣」認舊版。同一天還發現 live 兩個 python container
+正在跑的 image 已經不在 image 庫（`No such image`，原因未查），container 照常跑，但那一版已經沒有可以退回的 image。
+沒有標籤可用時，可以用「container 內 vs image 內」的實際內容比對（Python 版本、`pip freeze` 與原始碼的雜湊）判斷換版會不會改到**這些項目**；
+⚠️ 它⛔ 不能證明整個 image 只差 metadata（基底 image、系統套件、其他檔案都沒比到），所以⛔ 不能代替回滾目標——那一版仍然要記成「沒有可以完整退回的 image」。
 ⚠️ **回滾到 E 之前的版本時⛔ 不能用這份 `deploy.sh`**：第 5 步會因為舊 image 不認得 `-check-config` 而停下（這是刻意的）。那種回滾要手動 build、`down`、`up -d --no-build`。
 
 **`./deploy.sh --preflight`**：只跑第 1、2 步（加上讀 `MemAvailable`），⛔ 不 pull、⛔ 不 build、⛔ 不 down。換上新的 `deploy.sh` 之前，先用暫存檔名放在

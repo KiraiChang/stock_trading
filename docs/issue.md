@@ -3458,7 +3458,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v3 待確認，v2 的 review 已在 v3 處理：[`plans/i132-redis-silent-disable.md`](./plans/i132-redis-silent-disable.md)；live 的 `.env` 讀取問題 F1 已在 2026-11-13 修正，見計畫第八節第 1 步；本輪 D1／D3～D6、env_file 路徑參數及 Redis 實際逾時的建議見計畫「Review feedback」，待整理為 v3，尚未開始實作） |
+| 狀態 | 已實作／待 review：E（設定契約）、C（Redis 啟動探測）、A1～A3（部署範本）已 commit，2026-11-16 15:10 部署到 live（第八節第 2～4 步：live 的 `deploy.sh` 換成範本只換 3 行、部署結果與兩次偏差）；部署後第一個排程的確認待補；計畫書保留供 review：[`plans/i132-redis-silent-disable.md`](./plans/i132-redis-silent-disable.md)） |
 | 嚴重度 | 中：Redis 停用時，指標快取和訊號佇列都會靜默失效，API、排程和 `job_runs` 卻一切正常 |
 | 分類 | 部署 / Backend 啟動 |
 | 建立日期 | 2026-11-13 |

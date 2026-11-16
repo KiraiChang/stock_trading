@@ -7,6 +7,9 @@ import (
 )
 
 type Config struct {
+	// AppEnv 是環境類別（APP_ENV：production／dev／test；沒設定＝production）。
+	// 決定設定契約（Validate）要不要套用 production 的規則，見 contract.go。
+	AppEnv             string `mapstructure:"app_env"`
 	Server             ServerConfig
 	Database           DatabaseConfig
 	Redis              RedisConfig
@@ -341,12 +344,18 @@ type CorporateActionConfig struct {
 	ShardCount int `mapstructure:"shard_count"`
 }
 
+// Load 讀設定檔與環境變數。失敗時回傳 *LoadError，只帶「鍵名:代號」，⛔ 不帶輸入值或設定檔內容
+// （見 load_error.go）。設定值合不合契約由 Validate 另外檢查。
 func Load() (*Config, error) {
+	// 每次都從乾淨的狀態開始：viper 是全域的，測試會呼叫 Load 多次。
+	viper.Reset()
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("./config")
 
+	// 沒有 SetDefault 的鍵 AutomaticEnv 讀不到；空字串＝沒設定＝production。
+	viper.SetDefault("app_env", "")
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("database.driver", "sqlite")
 	viper.SetDefault("database.dsn", "./trading.db")
@@ -443,12 +452,12 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		return nil, err
+		return nil, safeReadError(err)
 	}
 
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
-		return nil, err
+		return nil, safeDecodeError(err, viper.AllKeys())
 	}
 	return &cfg, nil
 }

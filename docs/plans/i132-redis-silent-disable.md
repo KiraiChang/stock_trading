@@ -339,6 +339,45 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 | E2 | F1 的 A/B 實測、live 修改前後的設定比對、第一次部署前後的 `Config.Env` 比對 | ✅ 2026-11-13 使用者在 live 執行、Claude 核對輸出（2.3、第八節第 1 步） |
 | E3 | go-redis v9.5.4 的預設選項和重試條件 | 實作時讀 module 原始碼確認（2.5），並用 dev 的計時實測佐證 |
 
+## 十一之前：E 的實作備註（2026-11-13；已改好、未 commit，待 review）
+
+**改了什麼**：
+
+* `backend/internal/config/contract.go`（新增）：`Validate()` 依附錄 C 的契約表檢查最終設定，回傳「環境變數名稱:規則代號」的清單；公開範例值的清單（4.6）是這裡的常數；`Config.IsProduction()`（`APP_ENV` 沒設定或是 `production`）。
+* `backend/internal/config/load_error.go`（新增）：`Load()` 失敗時回傳 `*LoadError`。讀不到設定檔 → `config_file:unreadable`、解析不了 → `config_file:invalid`、型別轉換失敗 → 只從 mapstructure 的錯誤取出**viper 已知的鍵名**，轉成 `KEY:invalid_type`；抓到的名稱不是已知的鍵時只回 `config:invalid_type`，⛔ 不會把引號包住的值當成鍵名輸出。
+* `backend/internal/config/config.go`：新增 `AppEnv`（`app_env`／`APP_ENV`，預設空字串）；`Load()` 開頭 `viper.Reset()`（viper 是全域的，只有 config 套件在用）；錯誤改走上面的安全轉換。
+* `backend/cmd/server/main.go`：`config.Load()` 失敗只記 `violations`（⛔ 不再 `zap.Error(err)`）；載入成功後、連 DB 之前跑 `Validate()`，不通過就記 `config contract violated` 並 `os.Exit(1)`；新增 `-check-config` 旗標（只載入與檢查，⛔ 不連 DB，以 0／1 結束）。
+* `backend/go.mod`：`mapstructure` 從 indirect 改成直接依賴（load_error.go 用到它的錯誤型別）。
+* `docker-compose.dev.yml`：backend 加 `APP_ENV: dev`。
+* `scripts/check-config-examples.py`（新增）：見下方「跟計畫的差異」①。
+
+**跟計畫的差異**：
+
+1. **範例值清單的「沒有漏」檢查拆成兩處**：`backend/scripts/test.sh` 只把 `backend/` 掛進 container，Go 測試讀不到 repo 根目錄的 compose 與 `deploy.sh`。所以 Go 測試（`TestPublicExamples_CoverConfigYAML`）只掃 `backend/config.yaml`；compose、`deploy.sh`、兩份 `config.yaml` 由新的 repo 腳本 `scripts/check-config-examples.py` 掃（它從 `contract.go` 讀出清單比對；2026-11-13：8 個檔案、26 個範例值，全部在清單裡）。
+2. **DSN 的帳密用 pgx 的解析取出**（review 修正，見下方「review 修正」）：⛔ 不自己解析字串。
+3. **timeframe 只檢查格式**：repo 裡⛔ 沒有集中的合法 timeframe 清單，契約只要求「數字＋單位」（`^[1-9][0-9]*[mhdw]$`），⛔ 不自己定義哪些週期合法。
+
+**驗證**：
+
+* 單元測試 16 個（review 修正後 18 個；`contract_test.go`、`load_error_test.go`）全部通過，涵蓋：合法設定在四種 `APP_ENV` 都通過；`APP_ENV` 打錯字照 production；清單裡**每一個**公開範例值 production 擋下、dev／test 放行；Fugle 停用時範例值放行；production 與全部環境的規則；停用的功能⛔ 不檢查；違反清單⛔ 不含值或長度；DSN 三種寫法；載入失敗三種情況（型別錯誤帶假機密、設定檔不存在、YAML 壞掉）都回傳安全的錯誤、⛔ 不含假值。
+* 反向驗證：把 `Load()` 改回回傳原始錯誤 → `TestLoad_TypeErrorIsSanitized` 變紅；把 `PublicRedisPasswords` 清空 → `check-config-examples.py` 回 rc 1、列出 3 處。都已改回。
+* `backend/scripts/test.sh` 全部套件通過（`MEM=1500m`，見下方）。
+* **dev 實測**（`docker-compose.dev.yml`，override 放在 scratchpad）：
+  * 正常：`SERVICES=backend scripts/smoke-dev.sh` 通過，log 有 `database connected`、`redis connected`、`scheduler started`，⛔ 沒有違反。postgres 掛的是原本的 dev volume。
+  * 契約違反（`CHIP_SYNC_CRON` 打錯、`PYTHON_SERVICE_URL` 格式錯）：結束碼 1、反覆重啟，log 只有 `config contract violated` 與 `PYTHON_SERVICE_URL:invalid_url`、`CHIP_SYNC_CRON:invalid_cron`，⛔ 沒有 `database connected`。
+  * 型別錯誤（`JOB_RETRY_ENABLED` 設成假機密）：`config load failed` 與 `JOB_RETRY_ENABLED:invalid_type`，log 裡假機密 0 次，⛔ 沒有 `database connected`。
+  * `-check-config`，**postgres 與 redis 都停著**、用 D11 的指令形式（`docker compose … run --rm --no-deps backend ./trading-backend -check-config`）：dev 設定 → `config ok (production=false)`、rc 0；型別錯誤 → rc 1、只有鍵名、假機密 0 次；`APP_ENV: production` → rc 1、`DATABASE_DSN`、`REDIS_PASSWORD`、`AUTH_JWT_SECRET`、`FINMIND_API_KEY` 都是 `public_example`。
+
+**review 修正（2026-11-16）**：[P2] DSN 契約自行解析字串，跟 PostgreSQL driver 不一致——①`postgres://db/trading?user=app&password=trading`：driver 用的是 query 參數裡的範例密碼，契約卻放行；②`password='generated passphrase'`：driver 接受的引號寫法，契約判成 `DATABASE_DSN:invalid_value`，擋住啟動。修正：`dsnCredentials` 改用 `pgconn.ParseConfig`（store 的 `sqlx.Connect("pgx", dsn)` 走的就是這個解析，⛔ 不連線），檢查 driver **最終有效**的帳密：URL userinfo、query 參數（會覆寫 userinfo）、key=value 的引號與跳脫、`PGUSER`／`PGPASSWORD`、passfile 都跟 driver 一致。連帶的行為：
+* driver 不是 postgres 時⛔ 不再解析帳密（`DATABASE_DRIVER:invalid_value` 已經擋下）。
+* MySQL 寫法的 DSN 配 postgres driver：沒有 `=` 時 pgx 解析不了 → `invalid_value`（原本是 `public_example`，一樣擋下）；帶 `?parseTime=true` 時 pgx 會當成 key=value 而解析成功，契約跟 driver 一致、⛔ 不另外擋，這種 DSN 在連線時失敗。
+* 新增測試：review 的兩個案例（含 `Validate` 層級：引號寫法的產生密碼在 production 通過）；每個範例值的 query 參數、query 覆寫 userinfo、引號寫法；`PGPASSWORD` 與 passfile 裡的範例密碼也擋下；測試先清掉 `PG*` 變數、`PGPASSFILE` 指到不存在的檔，結果⛔ 不受執行環境影響。`internal/config`、`cmd/server` 測試與 gofmt 通過。
+
+**新主機上 `backend/scripts/test.sh` 的兩個問題**（⛔ 沒有改腳本，另外處理）：
+
+* **rootless Docker 下 `--user` 寫不進 cache**：腳本用 `--user "$(id -u):$(id -g)"` 跑 container，rootless 模式會把 container 裡的 uid 1001 對應到主機的另一個 subuid，寫不進 dev 擁有的 `~/.cache/stock_trading/gocache`（`mkdir /gocache/00: permission denied`）。這次先把兩個 cache 目錄改成 777 繞過（家目錄是 700，其他帳號進不來；測試只寫 cache、⛔ 不寫 repo）。其他用 `--user` 的測試腳本很可能有同樣的問題。正式的修法屬於驗證流程的修改，要另外立案。
+* **vet 在 700m 被 OOM**：`modernc.org/sqlite/lib` 的 vet 在預設的 `MEM=700m` 下 `signal: killed`（T-079 的已知狀況）；新主機有 7.9 GB，這次用 `MEM=1500m` 通過。
+
 ## 附錄 C：設定契約表（E 的盤點，2026-11-13，待 review）
 
 > 實作第一步的產出。依 `backend/internal/config/config.go` 的每個欄位、`config.Load()` 的 `SetDefault`、`backend/config.yaml`，以及 `main.go`／scheduler 實際怎麼用，逐鍵整理。**這張表 review 通過之後才寫程式。**
@@ -362,7 +401,7 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
 |---|---|---|---|---|---|
 | `APP_ENV`（新增，D9） | 沒設定＝production | 決定下面「prod」的規則要不要生效 | 只能是 `production`／`dev`／`test`，其他值**一律擋下**（打錯字⛔ 不能默默變成寬鬆模式） | 無條件 | 全部 |
 | `DATABASE_DRIVER` | `sqlite` | DB 連線 | 必須是 `postgres` | 無條件 | prod |
-| `DATABASE_DSN` | `../../output/stock_trading/trading.db`（config.yaml） | DB 連線 | 不能是空值；⛔ 不能是預設的 SQLite 路徑；**帳密⛔ 不能是 repo 裡的公開範例**：解析 DSN 的 userinfo，使用者＋密碼是 `trading:trading`（`docker-compose.yml`、dev compose、`docker-compose.postgres.yml`）、`user:password`、`root:password`（兩份 `config.yaml` 的註解），或密碼是 `trading`（`docker-compose.mysql.yml`）、`password`，都擋下。解析不了的 DSN 判 `invalid_value` | 無條件 | prod |
+| `DATABASE_DSN` | `../../output/stock_trading/trading.db`（config.yaml） | DB 連線 | 不能是空值；⛔ 不能是預設的 SQLite 路徑；**帳密⛔ 不能是 repo 裡的公開範例**：用 pgx 的 `pgconn.ParseConfig` 取出 driver 最終有效的帳密（userinfo、query 參數、key=value、`PG*` 環境變數、passfile），使用者＋密碼是 `trading:trading`（`docker-compose.yml`、dev compose、`docker-compose.postgres.yml`）、`user:password`、`root:password`（兩份 `config.yaml` 的註解），或密碼是 `trading`（`docker-compose.mysql.yml`）、`password`，都擋下。pgx 解析不了的 DSN 判 `invalid_value`；driver 不是 postgres 時⛔ 不解析帳密 | 無條件 | prod |
 | `SERVER_PORT` | `8080` | HTTP | 必須是 1～65535 的整數 | 無條件 | 全部 |
 | `REDIS_ADDR` | 空白（＝停用） | 快取、訊號佇列 | ⛔ 不能是空值（live 一定要有 Redis）；dev／test 允許空白＝停用 | 無條件 | prod |
 | `REDIS_PASSWORD` | 空白 | Redis 認證 | ⛔ 不能是空值；⛔ 不能是 repo 裡的公開範例 `dev-redis-only`（dev compose 的預設值） | `REDIS_ADDR` 有值 | prod（dev／test 用 `dev-redis-only` 放行） |
@@ -471,4 +510,4 @@ I-131 的 R1～R4 仍待處理，不能以 I-132 已修復 live `.env` 或 Redis
 |---|---|---|
 | v1 | 2026-11-13 | 初版：A（A1 `:?`、A2 `.env.example`），C（重試之後非 0 結束），B 不做；記下 F1～F4 和範本落差。同日補充：E1 確認 build 目錄沒有 `.env`，查出 F1 的實際後果（viper 退回 `config.yaml` 的公開預設值），新增 D5；F2 已完成 |
 | v2 | 2026-11-13 | A/B 實測確認 F1，也確認 `--env-file` 修得好；使用者決定 D2 改成在 compose 裡用 `env_file` 注入 `.env`，不在 `deploy.sh` 加 `--env-file`（見 F1 的處置、D2、第八節第 1 步）。4.1、A2、第三節受影響檔案裡的 `--env-file` 寫法和資料流描述還沒改，等 live 驗證完成後一起改寫 |
-| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |
+| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**2026-11-16 補充（review）**：[P2] DSN 契約改用 pgx 的 `pgconn.ParseConfig` 取最終有效帳密，修正 query 參數的範例密碼被放行、引號寫法的合法密碼被擋（附錄 C 之前的「review 修正」）。**同日補充六**：E 實作完成（已改好、未 commit），實作備註、跟計畫的差異（範例值檢查拆成 Go 測試與 `scripts/check-config-examples.py`、timeframe 只檢查格式）與 dev 實測結果寫在附錄 C 之前；記下新主機上 `test.sh` 在 rootless Docker 的 cache 權限問題與 vet 的記憶體需求。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |

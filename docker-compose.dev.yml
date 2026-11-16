@@ -70,6 +70,9 @@ services:
       python-server:
         condition: service_started
     environment:
+      # 環境類別（I-132 的設定契約）：dev 的公開範例值（trading/trading、dev-redis-only、dev-only-change-me）
+      # 只在 dev／test 放行；沒設定時當成 production，會在連 DB 之前就被擋下。
+      APP_ENV: dev
       DATABASE_DRIVER: postgres
       DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
       REDIS_ADDR: redis:6379

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	ossignal "os/signal"
@@ -27,7 +29,18 @@ import (
 	"github.com/trading/backend/internal/store"
 )
 
+// checkConfigFlag：只載入設定、跑設定契約檢查，然後以 0（通過）或 1（不通過）結束，
+// ⛔ 不連 DB 或任何外部服務。部署前用新 build 的 image 先跑一次（I-132 D11）：
+//
+//	docker compose … run --rm --no-deps backend ./trading-backend -check-config
+var checkConfigFlag = flag.Bool("check-config", false, "只檢查設定契約後結束（不連 DB）")
+
 func main() {
+	flag.Parse()
+	if *checkConfigFlag {
+		os.Exit(runCheckConfig())
+	}
+
 	log, cleanup, err := applog.New("backend")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "persistent logger init failed: %v\n", err)
@@ -62,9 +75,17 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	// ⛔ 不記錄 config.Load() 的原始錯誤：型別轉換錯誤會帶出輸入值（I-132）。
 	cfg, err := config.Load()
 	if err != nil {
-		log.Error("config load failed", zap.Error(err))
+		log.Error("config load failed", zap.Strings("violations", loadErrorViolations(err)))
+		os.Exit(1)
+	}
+	// 設定契約：在連 DB 之前檢查，不通過就結束（I-132 的 E）。只記「鍵名:代號」，⛔ 不記值。
+	if v := config.Validate(cfg); len(v) > 0 {
+		log.Error("config contract violated",
+			zap.Bool("production", cfg.IsProduction()),
+			zap.Strings("violations", config.ViolationStrings(v)))
 		os.Exit(1)
 	}
 
@@ -314,4 +335,29 @@ func main() {
 			log.Warn("fugle stream close failed", zap.Error(err))
 		}
 	}
+}
+
+// loadErrorViolations 只取出 *config.LoadError 的「鍵名:代號」；其他型別的錯誤⛔ 不輸出內容。
+func loadErrorViolations(err error) []string {
+	var le *config.LoadError
+	if errors.As(err, &le) {
+		return config.ViolationStrings(le.Violations)
+	}
+	return []string{"config:unknown"}
+}
+
+// runCheckConfig 是 -check-config 的本體。輸出只有「鍵名:代號」與通過／不通過。
+func runCheckConfig() int {
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config load failed: %v\n", loadErrorViolations(err))
+		return 1
+	}
+	if v := config.Validate(cfg); len(v) > 0 {
+		fmt.Fprintf(os.Stderr, "config contract violated (production=%t): %s\n",
+			cfg.IsProduction(), config.JoinViolations(v))
+		return 1
+	}
+	fmt.Printf("config ok (production=%t)\n", cfg.IsProduction())
+	return 0
 }

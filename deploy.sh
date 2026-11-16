@@ -9,8 +9,10 @@
 #   * Redis stack 的 .env（REDIS_ENV_FILE）：只有一行 REDIS_PASSWORD，compose.yml 用 env_file 直接讀。
 #
 # 流程（任何一步失敗都回傳非 0，而且在 down 之前就停下；錯誤訊息⛔ 不帶機密）：
-#   preflight → git pull --ff-only → compose config（JWT）→ 記憶體檢查 → build（逐一服務，舊服務還在跑）
-#   → 用新 image 檢查完整設定 → down → up -d --no-build → readiness（/health 與 RestartCount）
+#   preflight → compose config（JWT）→ git pull --ff-only → 記憶體檢查 → build（逐一服務，舊服務還在跑）
+#   → 確認新 image 認得 -check-config → 用新 image 檢查完整設定 → down → up -d --no-build
+#   → readiness（/health 與 RestartCount，總上限 90 秒）
+# `./deploy.sh --preflight` 只跑 preflight 與 JWT 檢查（⛔ 不 pull、不 build、不 down），換上新版之前試跑用。
 # ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
 # ⛔ 這裡不再 export 任何設定：應用設定在 .env、Redis 密碼在 Redis stack 的 .env，都由 compose 的 env_file 注入。
 set -euo pipefail
@@ -31,6 +33,8 @@ READY_TIMEOUT_SEC=90
 # readiness 每次確認之間的間隔，與單次請求的上限（秒；單次上限還會再被剩餘時間截短）
 READY_INTERVAL_SEC=2
 READY_REQUEST_TIMEOUT_SEC=5
+# 用新 image 檢查設定的上限（秒）：正常只要幾秒；超過就當成失敗（⛔ 不 down）
+CHECK_CONFIG_TIMEOUT_SEC=120
 
 # ── 由腳本位置推出來的路徑（⛔ 不要改）────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,6 +50,14 @@ die() {
   echo "deploy.sh: $*" >&2
   exit 1
 }
+
+PREFLIGHT_ONLY=0
+case "${1:-}" in
+  "") ;;
+  --preflight) PREFLIGHT_ONLY=1 ;;
+  *) die "不認得的參數：$1（只有 --preflight）" ;;
+esac
+[ $# -le 1 ] || die "參數太多（只有 --preflight）"
 
 COMPOSE=(docker compose -f "$STACK_COMPOSE_FILE" --project-directory "$PROJECT_DIR")
 compose() {
@@ -117,16 +129,11 @@ case $rc in
   *) die "讀不到 $REDIS_ENV_FILE，停止部署（還沒 down）" ;;
 esac
 
-# ── 2. 更新 build 目錄 ────────────────────────────────────────
-echo "==> git pull --ff-only origin $DEPLOY_BRANCH"
-if ! git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"; then
-  die "git pull 失敗（只允許 fast-forward），停止部署（還沒 down）"
-fi
-
-# ── 3. 最終設定裡的 JWT（在 build 之前就能先擋）──────────────
+# ── 2. 最終設定裡的 JWT（在 git pull 之前就能先擋）──────────
 # 用跟部署相同的參數跑 compose config，**在記憶體裡**用 awk 取出 backend 最終的 AUTH_JWT_SECRET。
 # ⛔ 不把 config 寫到檔案或印到畫面；config 的錯誤訊息也⛔ 不顯示（可能帶出 env_file 的內容）。
-# 完整的設定契約由第 5 步用新 image 檢查，這一步只涵蓋 JWT。
+# 完整的設定契約由第 5 步用新 image 檢查，這一步只涵蓋 JWT。設定都在 scripts 目錄（compose.yml 與兩個
+# env_file），跟 build 目錄 pull 到什麼無關，所以放在 pull 之前。
 echo "==> 檢查最終設定的 AUTH_JWT_SECRET"
 set +e
 compose config 2>/dev/null | awk -v public="$PUBLIC_JWT_SECRETS" '
@@ -155,6 +162,20 @@ case "${st[1]}" in
   *) die "檢查 AUTH_JWT_SECRET 時發生錯誤，停止部署（還沒 down）" ;;
 esac
 
+# --preflight：只跑上面兩步（加上讀 MemAvailable），⛔ 不 pull、⛔ 不 build、⛔ 不 down。
+# 用途：換上新的 deploy.sh 之前，先用暫存檔名放在 scripts 目錄試跑（SCRIPT_DIR 由腳本位置決定）。
+if [ "$PREFLIGHT_ONLY" = 1 ]; then
+  avail="$(awk '/^MemAvailable:/ { print int($2 / 1024) }' "$MEMINFO_FILE" 2>/dev/null || true)"
+  echo "==> preflight 通過（⛔ 沒有 pull、build、down）；MemAvailable ${avail:-?}MiB，build 的下限 ${MIN_MEM_AVAILABLE_MB}MiB"
+  exit 0
+fi
+
+# ── 3. 更新 build 目錄 ────────────────────────────────────────
+echo "==> git pull --ff-only origin $DEPLOY_BRANCH"
+if ! git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"; then
+  die "git pull 失敗（只允許 fast-forward），停止部署（還沒 down）"
+fi
+
 # ── 4. build（舊的服務還在跑）────────────────────────────────
 # 一次 build 一個服務（避免兩個 image 的記憶體峰值疊加），每個服務 build 之前都檢查 MemAvailable。
 if ! services="$(compose config --services 2>/dev/null)"; then
@@ -177,9 +198,16 @@ done
 # ── 5. 用新 image 檢查完整設定（backend 的設定契約）─────────
 # ⚠️ 一定要寫出執行檔：Dockerfile 只有 CMD、沒有 ENTRYPOINT，compose run 後面的參數會整個取代 CMD。
 # 只載入設定、跑契約檢查，⛔ 不連 DB 或任何外部服務；輸出只有鍵名和規則代號。
+# ⛔ 先確認新 image 的 backend 認得 -check-config：I-132 E 之前的 binary ⛔ 不解析參數，會忽略旗標、
+# 直接啟動一個完整的 backend（連 live DB、回收執行中的 job_runs、啟動排程器）。所以先用 grep 在執行檔裡
+# 找旗標名稱（⛔ 不執行它）；找不到就停下（例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版）。
+echo "==> 確認新 image 支援 -check-config"
+if ! timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend; then
+  die "新 image 的 backend 不認得 -check-config（程式比 I-132 E 舊？），⛔ 不執行設定檢查（舊的 binary 會直接啟動整個服務），停止部署（還沒 down）"
+fi
 echo "==> 用新 image 檢查設定"
-if ! compose run --rm --no-deps backend ./trading-backend -check-config; then
-  die "新 image 的設定檢查沒有通過（違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）"
+if ! timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T backend ./trading-backend -check-config; then
+  die "新 image 的設定檢查沒有通過或逾時（違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）"
 fi
 
 # ── 6. 換版 ──────────────────────────────────────────────────

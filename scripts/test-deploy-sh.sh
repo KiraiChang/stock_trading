@@ -90,9 +90,15 @@ case "$1" in
     [ "${2:-}" = "${FAKE_BUILD_FAIL:-}" ] && exit 1
     exit 0 ;;
   run)
-    # 一定要寫出執行檔：只帶旗標的話，真的 container 會把旗標當成程式去執行
     case " $* " in
-      *" backend ./trading-backend -check-config "*) exit "${FAKE_CHECK_RC:-0}" ;;
+      # 先確認 image 認得旗標（grep 執行檔，⛔ 不執行它）
+      *" --entrypoint grep backend -qF check-config ./trading-backend "*)
+        [ "${FAKE_NO_FLAG:-0}" = 1 ] && exit 1
+        exit 0 ;;
+      # 一定要寫出執行檔：只帶旗標的話，真的 container 會把旗標當成程式去執行
+      *" backend ./trading-backend -check-config "*)
+        fake_delay "${FAKE_CHECK_DELAY:-0}"
+        exit "${FAKE_CHECK_RC:-0}" ;;
       *) echo "RUN_WITHOUT_EXECUTABLE" >> "$CALL_LOG"; exit 98 ;;
     esac ;;
   down) exit "${FAKE_DOWN_RC:-0}" ;;
@@ -134,8 +140,9 @@ setup_case() {
       -e "s#^READY_TIMEOUT_SEC=90\$#READY_TIMEOUT_SEC=${READY_T:-4}#" \
       -e "s#^READY_INTERVAL_SEC=2\$#READY_INTERVAL_SEC=1#" \
       -e "s#^READY_REQUEST_TIMEOUT_SEC=5\$#READY_REQUEST_TIMEOUT_SEC=${READY_REQ:-2}#" \
+      -e "s#^CHECK_CONFIG_TIMEOUT_SEC=120\$#CHECK_CONFIG_TIMEOUT_SEC=2#" \
       "$REPO/deploy.sh" > "$CASE/scripts/deploy.sh"
-  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC; do
+  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC CHECK_CONFIG_TIMEOUT_SEC; do
     grep -q "^$k=[0-9]*\$" "$CASE/scripts/deploy.sh" || { echo "  FAIL （測試本身）deploy.sh 找不到 $k"; exit 1; }
   done
   chmod +x "$CASE/scripts/deploy.sh"
@@ -154,7 +161,7 @@ run_deploy() {
   local t0=$SECONDS
   env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" WORK_STATE="$CASE/state" \
     FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" "$@" \
-    bash "$CASE/scripts/deploy.sh" > "$CASE/out" 2>&1
+    bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+"$DEPLOY_ARGS"} > "$CASE/out" 2>&1
   RC=$?
   ELAPSED=$((SECONDS - t0))
 }
@@ -180,10 +187,11 @@ setup_case normal
 run_deploy
 order="$(grep -oE '^(git -C [^ ]+ (rev-parse --is-inside-work-tree|status|pull)|compose (config$|config --services|build [a-z-]+|run|down|up|exec))' "$CASE/calls" \
   | sed -E 's#^git -C [^ ]+ #git #' | uniq | tr '\n' '|')"
-want="git rev-parse --is-inside-work-tree|git status|git pull|compose config|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|compose down|compose up|compose exec|"
+want="git rev-parse --is-inside-work-tree|git status|compose config|git pull|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|compose down|compose up|compose exec|"
 if [ "$RC" -eq 0 ] && [ "$order" = "$want" ] && ! called UP_WITH_BUILD && ! called WGET_WITHOUT_TIMEOUT && called "^compose up -d --no-build$" \
-   && called "^compose run --rm --no-deps backend ./trading-backend -check-config$" && no_secret; then
-  ok "正常：呼叫順序 preflight → pull --ff-only → config → build ×3 → check-config → down → up -d --no-build → readiness"
+   && called "^compose run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend$" \
+   && called "^compose run --rm --no-deps -T backend ./trading-backend -check-config$" && no_secret; then
+  ok "正常：呼叫順序 preflight → config（JWT）→ pull --ff-only → build ×3 → 確認旗標 → check-config → down → up -d --no-build → readiness"
 else
   ng "正常：rc $RC，順序 $order"
 fi
@@ -205,13 +213,13 @@ setup_case redisquote; printf 'REDIS_PASSWORD="a b"\n' > "$CASE/redis/.env"; run
 expect_stop_before_down "Redis 的 .env 的值有引號" "pull"
 setup_case redismissing; rm "$CASE/redis/.env"; run_deploy
 expect_stop_before_down "Redis 的 .env 不存在" "pull"
-setup_case pull;     run_deploy FAKE_PULL_RC=1;      expect_stop_before_down "git pull 失敗" "^compose config" "^compose build"
-setup_case config;   run_deploy FAKE_CONFIG_RC=1;    expect_stop_before_down "compose config 失敗" "^compose build"
-setup_case jwtempty; run_deploy FAKE_JWT_LINE='      AUTH_JWT_SECRET: ""'; expect_stop_before_down "JWT 是空值" "^compose build"
-setup_case jwtmissing; run_deploy FAKE_JWT_LINE='      B_KEY: y'; expect_stop_before_down "backend 沒有 JWT" "^compose build"
+setup_case pull;     run_deploy FAKE_PULL_RC=1;      expect_stop_before_down "git pull 失敗" "config --services" "^compose build"
+setup_case config;   run_deploy FAKE_CONFIG_RC=1;    expect_stop_before_down "compose config 失敗" "pull" "^compose build"
+setup_case jwtempty; run_deploy FAKE_JWT_LINE='      AUTH_JWT_SECRET: ""'; expect_stop_before_down "JWT 是空值" "pull" "^compose build"
+setup_case jwtmissing; run_deploy FAKE_JWT_LINE='      B_KEY: y'; expect_stop_before_down "backend 沒有 JWT" "pull" "^compose build"
 for v in change-me-in-production change-me dev-only-change-me '"change-me"'; do
   setup_case "jwtpub"; run_deploy FAKE_JWT_LINE="      AUTH_JWT_SECRET: $v"
-  expect_stop_before_down "JWT 是公開範例值 $v" "^compose build"
+  expect_stop_before_down "JWT 是公開範例值 $v" "pull" "^compose build"
 done
 setup_case jwtother; run_deploy FAKE_JWT_LINE='      AUTH_JWT_SECRET: change-me-too'
 if [ "$RC" -eq 0 ]; then ok "JWT 只是開頭像範例值 → 通過"; else ng "JWT 只是開頭像範例值：rc $RC"; fi
@@ -221,6 +229,11 @@ setup_case memmissing; printf 'MemTotal: 1 kB\n' > "$CASE/meminfo"; run_deploy
 expect_stop_before_down "讀不到 MemAvailable" "^compose build"
 setup_case build;    run_deploy FAKE_BUILD_FAIL=python-server; expect_stop_before_down "build 失敗" "^compose run" "compose build python-worker"
 setup_case check;    run_deploy FAKE_CHECK_RC=1;     expect_stop_before_down "新 image 的設定檢查失敗"
+setup_case checkhang; run_deploy FAKE_CHECK_DELAY=1000
+if [ "$ELAPSED" -le 4 ]; then expect_stop_before_down "新 image 的設定檢查卡住（${ELAPSED} 秒逾時）"; else ng "設定檢查卡住：${ELAPSED} 秒才結束"; fi
+# 舊的 binary 會忽略 -check-config、直接啟動整個服務：⛔ 不能執行它
+setup_case noflag;   run_deploy FAKE_NO_FLAG=1
+expect_stop_before_down "新 image 不認得 -check-config（比 E 舊）" "backend ./trading-backend -check-config"
 
 setup_case down; run_deploy FAKE_DOWN_RC=1
 if [ "$RC" -ne 0 ] && called "^compose down" && ! called "^compose up"; then ok "down 失敗 → ⛔ 不 up"; else ng "down 失敗：rc $RC"; fi
@@ -253,6 +266,22 @@ setup_case readyslowok; run_deploy FAKE_HEALTH_DELAY=1
 if [ "$RC" -eq 0 ] && [ "$ELAPSED" -le 3 ]; then ok "readiness 回應要 1 秒（在上限內）→ 通過"; else ng "readiness 回應 1 秒：rc $RC、${ELAPSED} 秒"; fi
 setup_case restarted; run_deploy FAKE_RESTARTS=1
 if [ "$RC" -ne 0 ] && ! called "^compose exec"; then ok "RestartCount 不是 0 → 回傳非 0"; else ng "RestartCount 1：rc $RC"; fi
+
+# --preflight：只跑 preflight 與 JWT 檢查，⛔ 不 pull、不 build、不 run、不 down／up
+DEPLOY_ARGS=--preflight
+setup_case pre; run_deploy
+if [ "$RC" -eq 0 ] && grep -q "preflight 通過" "$CASE/out" && called "^compose config$" \
+   && ! called "pull" && ! called "^compose build" && ! called "^compose run" && ! called "^compose down" && ! called "^compose up"; then
+  ok "--preflight：通過、⛔ 沒有 pull／build／run／down／up"
+else
+  ng "--preflight：rc $RC"
+fi
+setup_case preperm; chmod 644 "$CASE/scripts/.env"; run_deploy; expect_stop_before_down "--preflight：.env 權限不是 600" "pull"
+setup_case prejwt; run_deploy FAKE_JWT_LINE='      AUTH_JWT_SECRET: change-me'; expect_stop_before_down "--preflight：JWT 是公開範例值" "pull"
+DEPLOY_ARGS=--bogus
+setup_case badarg; run_deploy
+if [ "$RC" -ne 0 ] && [ ! -s "$CASE/calls" ]; then ok "不認得的參數 → 回傳非 0、⛔ 沒有呼叫 git／docker"; else ng "不認得的參數：rc $RC"; fi
+DEPLOY_ARGS=
 
 # 假 docker 本身要擋得住「run 只帶旗標」：把範本的執行檔拿掉，確認會失敗
 setup_case noexe; sed -i 's#backend ./trading-backend -check-config#backend -check-config#' "$CASE/scripts/deploy.sh"; run_deploy

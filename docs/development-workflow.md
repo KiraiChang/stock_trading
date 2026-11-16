@@ -901,14 +901,18 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
 
 1. **preflight**（都在 `git pull` 之前）：build 目錄是 git checkout、在 `DEPLOY_BRANCH`、追蹤中的檔案沒有本機修改；`compose.yml` 存在；
    `.env` 可讀、權限 `600`；`compose.yml` 裡 backend 的兩個 `env_file` 路徑跟 `deploy.sh` 的 `APP_ENV_FILE`、`REDIS_ENV_FILE` 相同；Redis 的 `.env` 符合白名單。
-2. `git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"`：只允許 fast-forward。
-3. **最終設定的 JWT**：跑 `docker compose … config`，在記憶體裡用 awk 取出 backend 最終的 `AUTH_JWT_SECRET`，空值或公開範例值就停下。
-   ⛔ 不把 config 寫到檔案或印到畫面，`config` 的錯誤訊息也⛔ 不顯示（可能帶出 `env_file` 的內容）。用 awk 是因為 live 主機有沒有 jq／python3 沒有確認。
+2. **最終設定的 JWT**：跑 `docker compose … config`，在記憶體裡用 awk 取出 backend 最終的 `AUTH_JWT_SECRET`，空值或公開範例值就停下。
+   ⛔ 不把 config 寫到檔案或印到畫面，`config` 的錯誤訊息也⛔ 不顯示（可能帶出 `env_file` 的內容）。設定都在 scripts 目錄，跟 build 目錄 pull 到什麼無關，
+   所以放在 pull 之前。
+3. `git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"`：只允許 fast-forward。
 4. **build（舊的服務還在跑）**：一次 build 一個服務，每次 build 之前 `MemAvailable` 要 ≥ `MIN_MEM_AVAILABLE_MB`（1536），不夠就停下、⛔ 不 build、⛔ 不 down，
    由人選擇改在低負載時段、或改用「先 down 再 build」的舊順序。門檻的依據：2026-11-16 在這台主機（約 8GB，dev 與 live 同機）冷 cache build
    backend 與 python-server，`MemAvailable` 從 5290MB 最低降到 4576MB（降 714MB）；門檻留下 build 之後約 800MB 的餘裕。
-5. **用新 image 檢查完整設定**：`docker compose … run --rm --no-deps backend ./trading-backend -check-config`。⚠️ 一定要寫出執行檔：Dockerfile 只有
-   `CMD`、沒有 `ENTRYPOINT`，`compose run` 後面的參數會整個取代 `CMD`。只載入設定、跑契約檢查，⛔ 不連 DB 或任何外部服務；輸出只有鍵名和規則代號。
+5. **用新 image 檢查完整設定**：`docker compose … run --rm --no-deps -T backend ./trading-backend -check-config`（上限 120 秒）。⚠️ 一定要寫出執行檔：
+   Dockerfile 只有 `CMD`、沒有 `ENTRYPOINT`，`compose run` 後面的參數會整個取代 `CMD`。只載入設定、跑契約檢查，⛔ 不連 DB 或任何外部服務；輸出只有鍵名和規則代號。
+   ⛔ **先確認新 image 認得這個旗標**：I-132 E 之前的 binary ⛔ 不解析參數，會忽略 `-check-config`、直接在 `run` 的 container 裡啟動一個完整的 backend
+   （連 live DB、回收執行中的 `job_runs`、啟動排程器）。所以先用 `run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend`
+   在執行檔裡找旗標名稱（⛔ 不執行它；E 之前的程式與依賴的原始碼都沒有這個字串），找不到就停下——例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版。
 6. `down`（失敗就⛔ 不進 `up`）→ `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
 7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
    上限是 **90 秒的總截止時間**（`READY_TIMEOUT_SEC`），⛔ 不是檢查次數：每個 docker 呼叫都用 host 的 `timeout`（coreutils，preflight 會確認有）包住，
@@ -917,6 +921,10 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    `up -d` 成功只代表 Docker 收下了啟動要求，⛔ 不代表 backend 通過了設定契約和 Redis 的探測。
 
 ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
+⚠️ **回滾到 E 之前的版本時⛔ 不能用這份 `deploy.sh`**：第 5 步會因為舊 image 不認得 `-check-config` 而停下（這是刻意的）。那種回滾要手動 build、`down`、`up -d --no-build`。
+
+**`./deploy.sh --preflight`**：只跑第 1、2 步（加上讀 `MemAvailable`），⛔ 不 pull、⛔ 不 build、⛔ 不 down。換上新的 `deploy.sh` 之前，先用暫存檔名放在
+scripts 目錄試跑（腳本只認自己所在的目錄）。
 測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
 
 ⚠️ **live 的 `deploy.sh` 還沒有同步**（2026-11-16）：live 那份仍是 `git pull origin init` → `down` → `up --build -d`，只多了 `.env` 的權限檢查，

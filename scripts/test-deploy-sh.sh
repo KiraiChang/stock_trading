@@ -69,6 +69,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 echo "compose $*" >> "$CALL_LOG"
+# run／exec 預設會讀 stdin：deploy.sh 必須把 stdin 換成 /dev/null（在終端機執行時，timeout 底下的 docker
+# 是背景程序群組，讀終端機會被 SIGTTIN 停住）。FAKE_READ_STDIN=1 時真的讀一次，模擬 compose 的行為。
+case "$1" in
+  run|exec)
+    [ "$(readlink /proc/$$/fd/0)" = /dev/null ] || echo "STDIN_NOT_DEVNULL $1" >> "$CALL_LOG"
+    if [ "${FAKE_READ_STDIN:-0}" = 1 ]; then read -r -t 5 _ || true; fi ;;
+esac
 case "$1" in
   config)
     [ "${FAKE_CONFIG_RC:-0}" = 0 ] || exit "$FAKE_CONFIG_RC"
@@ -93,8 +100,9 @@ case "$1" in
     case " $* " in
       # 先確認 image 認得旗標（grep 執行檔，⛔ 不執行它）
       *" --entrypoint grep backend -qF check-config ./trading-backend "*)
+        fake_delay "${FAKE_PROBE_DELAY:-0}"
         [ "${FAKE_NO_FLAG:-0}" = 1 ] && exit 1
-        exit 0 ;;
+        exit "${FAKE_PROBE_RC:-0}" ;;
       # 一定要寫出執行檔：只帶旗標的話，真的 container 會把旗標當成程式去執行
       *" backend ./trading-backend -check-config "*)
         fake_delay "${FAKE_CHECK_DELAY:-0}"
@@ -161,7 +169,20 @@ run_deploy() {
   local t0=$SECONDS
   env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" WORK_STATE="$CASE/state" \
     FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" "$@" \
-    bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+"$DEPLOY_ARGS"} > "$CASE/out" 2>&1
+    bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+"$DEPLOY_ARGS"} < "$WORK/stdin" > "$CASE/out" 2>&1
+  RC=$?
+  ELAPSED=$((SECONDS - t0))
+}
+# stdin 給一個一般檔案（⛔ 不是 /dev/null）：測試本身從 /dev/null 執行時，才驗得出 deploy.sh 有沒有換掉 stdin
+printf 'x\n' > "$WORK/stdin"
+
+# run_deploy_tty：在偽終端機裡執行（script(1)），重現 live 的情況：操作者在終端機直接執行 ./deploy.sh
+run_deploy_tty() {
+  local t0=$SECONDS cmd
+  cmd="$(printf '%q ' env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" \
+    WORK_STATE="$CASE/state" FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" "$@" \
+    bash "$CASE/scripts/deploy.sh")"
+  script -qec "$cmd" /dev/null > "$CASE/out" 2>&1
   RC=$?
   ELAPSED=$((SECONDS - t0))
 }
@@ -196,6 +217,22 @@ else
   ng "正常：rc $RC，順序 $order"
 fi
 if called "pull --ff-only origin main"; then ok "正常：git pull 只允許 fast-forward"; else ng "正常：git pull 沒有 --ff-only"; fi
+if called "^compose run" && called "^compose exec" && ! called STDIN_NOT_DEVNULL; then
+  ok "正常：compose run／exec 的 stdin 是 /dev/null"
+else
+  ng "正常：compose run／exec 的 stdin 不是 /dev/null（$(grep -c STDIN_NOT_DEVNULL "$CASE/calls") 次）"
+fi
+# 2026-11-16 live 第一次部署的重現：在終端機執行、compose run／exec 會讀 stdin → ⛔ 不能卡到逾時
+if command -v script >/dev/null 2>&1; then
+  setup_case tty; run_deploy_tty FAKE_READ_STDIN=1
+  if [ "$RC" -eq 0 ] && [ "$ELAPSED" -le 3 ] && grep -q "部署完成" "$CASE/out"; then
+    ok "在終端機執行（compose 會讀 stdin）→ 通過，${ELAPSED} 秒"
+  else
+    ng "在終端機執行：rc $RC、${ELAPSED} 秒（卡在讀 stdin？）"
+  fi
+else
+  ng "找不到 script(1)，無法重現終端機的情況"
+fi
 
 setup_case notgit;   run_deploy FAKE_NOT_GIT=1;      expect_stop_before_down "PROJECT_DIR 不是 git checkout" "pull"
 setup_case branch;   run_deploy FAKE_BRANCH=feature; expect_stop_before_down "build 目錄不在部署分支" "pull"
@@ -234,6 +271,14 @@ if [ "$ELAPSED" -le 4 ]; then expect_stop_before_down "新 image 的設定檢查
 # 舊的 binary 會忽略 -check-config、直接啟動整個服務：⛔ 不能執行它
 setup_case noflag;   run_deploy FAKE_NO_FLAG=1
 expect_stop_before_down "新 image 不認得 -check-config（比 E 舊）" "backend ./trading-backend -check-config"
+grep -q "不認得 -check-config" "$CASE/out" || ng "找不到旗標：訊息要說不認得 -check-config"
+# 探測本身出錯或逾時：⛔ 不能說成「找不到旗標」（2026-11-16 live 的誤判）
+setup_case proberr;  run_deploy FAKE_PROBE_RC=125
+expect_stop_before_down "確認旗標的 compose run 出錯（rc 125）" "backend ./trading-backend -check-config"
+if grep -q "結束碼 125" "$CASE/out" && ! grep -q "不認得" "$CASE/out"; then ok "compose run 出錯 → 訊息帶結束碼、⛔ 不說找不到旗標"; else ng "compose run 出錯：訊息不對"; fi
+setup_case probehang; run_deploy FAKE_PROBE_DELAY=1000
+expect_stop_before_down "確認旗標的步驟卡住（${ELAPSED} 秒）" "backend ./trading-backend -check-config"
+if [ "$ELAPSED" -le 4 ] && grep -q "確認 -check-config 的步驟逾時" "$CASE/out"; then ok "確認旗標卡住 → 逾時訊息"; else ng "確認旗標卡住：${ELAPSED} 秒、訊息不對"; fi
 
 setup_case down; run_deploy FAKE_DOWN_RC=1
 if [ "$RC" -ne 0 ] && called "^compose down" && ! called "^compose up"; then ok "down 失敗 → ⛔ 不 up"; else ng "down 失敗：rc $RC"; fi

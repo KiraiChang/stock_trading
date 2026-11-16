@@ -16,6 +16,11 @@
 # ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
 # ⛔ 這裡不再 export 任何設定：應用設定在 .env、Redis 密碼在 Redis stack 的 .env，都由 compose 的 env_file 注入。
 set -euo pipefail
+# ⛔ 不讀 stdin（整支腳本都不需要輸入）：在終端機執行時，timeout 會把它底下的 docker 放進新的程序群組
+# （對終端機來說是背景）；compose run／exec 預設會讀 stdin，一讀終端機就被 SIGTTIN 停住，等到逾時才結束。
+# 2026-11-16 live 第一次部署就停在「確認新 image 支援 -check-config」：grep 本身沒問題，是 compose run 被停住、
+# 120 秒後被 timeout 砍掉（dev 用 script 模擬終端機重現；readiness 的 compose exec 也會卡住，而且是在 down 之後）。
+exec </dev/null
 
 # ── 要填的值 ──────────────────────────────────────────────────
 # build 用的 git checkout 的絕對路徑
@@ -202,13 +207,23 @@ done
 # 直接啟動一個完整的 backend（連 live DB、回收執行中的 job_runs、啟動排程器）。所以先用 grep 在執行檔裡
 # 找旗標名稱（⛔ 不執行它）；找不到就停下（例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版）。
 echo "==> 確認新 image 支援 -check-config"
-if ! timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend; then
-  die "新 image 的 backend 不認得 -check-config（程式比 I-132 E 舊？），⛔ 不執行設定檢查（舊的 binary 會直接啟動整個服務），停止部署（還沒 down）"
-fi
+# 結束碼分開判讀：1 才是「執行檔裡找不到」；124 是逾時；其他是 compose run 本身出錯（⛔ 不是旗標的問題）。
+rc=0
+timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend || rc=$?
+case "$rc" in
+  0) ;;
+  1) die "新 image 的 backend 不認得 -check-config（程式比 I-132 E 舊？），⛔ 不執行設定檢查（舊的 binary 會直接啟動整個服務），停止部署（還沒 down）" ;;
+  124) die "確認 -check-config 的步驟逾時（${CHECK_CONFIG_TIMEOUT_SEC} 秒），⛔ 不執行設定檢查，停止部署（還沒 down）" ;;
+  *) die "確認 -check-config 的步驟失敗（compose run 的結束碼 $rc，⛔ 不是「找不到旗標」），⛔ 不執行設定檢查，停止部署（還沒 down）" ;;
+esac
 echo "==> 用新 image 檢查設定"
-if ! timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T backend ./trading-backend -check-config; then
-  die "新 image 的設定檢查沒有通過或逾時（違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）"
-fi
+rc=0
+timeout "$CHECK_CONFIG_TIMEOUT_SEC" "${COMPOSE[@]}" run --rm --no-deps -T backend ./trading-backend -check-config || rc=$?
+case "$rc" in
+  0) ;;
+  124) die "新 image 的設定檢查逾時（${CHECK_CONFIG_TIMEOUT_SEC} 秒），停止部署（還沒 down，舊服務照常運作）" ;;
+  *) die "新 image 的設定檢查沒有通過（結束碼 $rc；違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）" ;;
+esac
 
 # ── 6. 換版 ──────────────────────────────────────────────────
 echo "==> down"

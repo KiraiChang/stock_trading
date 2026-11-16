@@ -913,12 +913,18 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    ⛔ **先確認新 image 認得這個旗標**：I-132 E 之前的 binary ⛔ 不解析參數，會忽略 `-check-config`、直接在 `run` 的 container 裡啟動一個完整的 backend
    （連 live DB、回收執行中的 `job_runs`、啟動排程器）。所以先用 `run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend`
    在執行檔裡找旗標名稱（⛔ 不執行它；E 之前的程式與依賴的原始碼都沒有這個字串），找不到就停下——例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版。
+   兩個 `run` 的結束碼分開判讀：探測的 1 才是「找不到旗標」，124 是逾時，其他是 `compose run` 本身出錯（訊息帶結束碼，⛔ 不說成找不到旗標）。
 6. `down`（失敗就⛔ 不進 `up`）→ `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
 7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
    上限是 **90 秒的總截止時間**（`READY_TIMEOUT_SEC`），⛔ 不是檢查次數：每個 docker 呼叫都用 host 的 `timeout`（coreutils，preflight 會確認有）包住，
    單次上限取 `READY_REQUEST_TIMEOUT_SEC`（5 秒）與剩餘時間較小的那個，`wget` 也帶 `-T`。請求卡住或回應緩慢時最多超過約 1 秒（`SECONDS` 的精度），
    ⛔ 不會在截止之後才回報成功（review 2026-11-16：原本只限制次數、`wget` 沒有逾時，請求一慢就超過 90 秒，還可能在逾時之後回報成功）。
    `up -d` 成功只代表 Docker 收下了啟動要求，⛔ 不代表 backend 通過了設定契約和 Redis 的探測。
+
+⚠️ **腳本一開始就把 stdin 換成 `/dev/null`**（`exec </dev/null`；整支腳本都不需要輸入）。在終端機直接執行時，`timeout` 會把底下的 docker
+放進新的程序群組（對終端機來說是背景），而 `compose run`／`compose exec` 預設會讀 stdin，一讀終端機就被 `SIGTTIN` 停住，等到逾時才結束。
+2026-11-16 live 第一次用新版部署就因此停在第 5 步的探測（120 秒後被 `timeout` 砍掉，當時的訊息誤報成「不認得 `-check-config`」；
+⛔ 還沒 down）；readiness 的 `compose exec` 也會卡住，而且是在 down 之後。測試在偽終端機（`script`）裡執行 `deploy.sh` 重現這個情況。
 
 ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
 ⚠️ **回滾到 E 之前的版本時⛔ 不能用這份 `deploy.sh`**：第 5 步會因為舊 image 不認得 `-check-config` 而停下（這是刻意的）。那種回滾要手動 build、`down`、`up -d --no-build`。
@@ -927,8 +933,9 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
 scripts 目錄試跑（腳本只認自己所在的目錄）。
 測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
 
-⚠️ **live 的 `deploy.sh` 還沒有同步**（2026-11-16）：live 那份仍是 `git pull origin init` → `down` → `up --build -d`，只多了 `.env` 的權限檢查，
-⛔ 沒有失敗即停、JWT 檢查、build 之後才 down 與 readiness。同步時照 live 的路徑改，⛔ 不整份換成範本（I-132 的計畫書第八節）。
+**live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
+（先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `ab8baa3` 的範本，⚠️ 還沒有上面 stdin 的修正，在終端機執行會停在第 5 步；
+要先換成修正後的範本才能部署（I-132 的計畫書第八節）。
 
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 
@@ -1012,13 +1019,12 @@ lazy model load（4.17 MB joblib ＋ SHAP background）的暖機成本。
 ### schema migration 上 live 的程序
 
 **入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。
-它現在做的是 `git pull origin init` → `docker compose … down` → `up --build -d`
-（範本的流程改成 build 之後才 down，live 還沒同步，見上方「部署腳本：失敗即停」）；
+它的流程見上方「部署腳本：失敗即停」（build 之後才 down；live 那份是範本只換三行）；
 開關與金鑰在 scripts 目錄的 `.env`，由 compose 的 `env_file` 注入。所以：
 
 * 變更要先**推上 `init` 分支**，deploy.sh 才拉得到。
-* 它本身就是 `up --build`，**不要另外下 `build` 或 `up -d`**。
-* 它會先 `down` 再起，**有停機**。
+* 它自己會 build（逐一服務、舊服務還在跑），再 `down` → `up -d --no-build`，**不要另外下 `build` 或 `up -d`**。
+* `down` 到 readiness 通過之間**有停機**（build 不算在內）。
 * ⛔ **不要用 repo 的 `docker-compose.yml` 操作 live**——理由見下方
   「停 live 之前先確認它是怎麼起來的」，那是會靜默關掉生產排程的操作。
 

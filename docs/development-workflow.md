@@ -39,17 +39,25 @@ live 的檔案是 `/opt/stacks/scripts/redis/docker-compose.redis.yml`，範本�
 - **⛔ 不發布 port 到 host**：backend 走 compose 網路，不需要 host 上的 port。真的要從 host 連，改成只綁 `127.0.0.1`。
 - **密碼在 Redis stack 目錄的 `.env`**（`REDIS_PASSWORD`，權限 600；建法見範本的檔頭）。範本用 `:?` 要求它存在，
   沒有 `.env` 時 compose 直接報錯，⛔ 不會起一個沒有密碼的 Redis。
-- **backend 的 `REDIS_PASSWORD` 要一致**：repo 的 `docker-compose.yml` 是 `${REDIS_PASSWORD:-}`，`deploy.sh` 範本從 Redis 的 `.env` 讀值。
+- **backend 怎麼拿到 `REDIS_PASSWORD`**（I-132，2026-11-13 起）：compose 檔的 backend 用 `env_file`（絕對路徑、`required: true`）**直接讀 Redis stack 的 `.env`**，
+  `environment:` 裡⛔ 不寫 `REDIS_PASSWORD`（它的優先順序比 `env_file` 高，寫了就會蓋掉，就算展開成空字串也一樣）。值只有 Redis 那一份，
+  Redis stack 自己也讀同一份檔。repo 範本與 live 的 `compose.yml` 都是這個寫法；設定的整體來源見下方「live 的設定：`env_file` 注入」。
   **`.env` 整份走白名單**：只能有一行 `REDIS_PASSWORD=<值>`（值只用英數與 `._+/=-`），加上空行與從第一個字元就是 `#` 的註解；
-  ⛔ 不放其他鍵。讀不到或不符合時 `deploy.sh` 在 `down` 之前停下。
-  ⛔ 不模仿 compose 的解析：它的 `.env` 語法很多（Compose v5.1.3 實測：同一個鍵寫兩次取後面那行、`KEY: value` 也算賦值、
-  會去掉引號、`\r` 與行尾的 ` # 註解`、會展開 `$`），只認得其中幾種就會漏掉其他寫法，讓 backend 帶的密碼和 Redis 的不同。
-  白名單只接受一種 compose 照字面讀的寫法，其他任何一行都擋下。
-  ⛔ 沒有改用「讓 compose 解析、再取它的結果」（`config` 的輸出）：`deploy.sh` 要另外知道 Redis compose 檔的路徑、解析 JSON、
-  排除 shell 裡已 export 的 `REDIS_PASSWORD`（compose 讓 shell 環境優先於 `.env`），密碼也會經過整份 `config` 的輸出——每一處都是新的出錯點。
-  ⚠️ backend **只在啟動時連一次**：失敗就記 `redis connect failed, cache disabled` 並**整個停用 Redis**——
-  之後訊號⛔ 不再標 degraded，queue 與 cache 卻都⛔ 不用，`job_runs` 看起來可能一切正常。所以改了 Redis 的密碼，一定要重新部署 backend。
-  Redis 只是重建（密碼沒變）時，backend 的 client 會自己重連，⛔ 不需要重新部署。
+  ⛔ 不放其他鍵。`deploy.sh` 範本在 preflight 檢查它（⛔ 不讀出值、⛔ 不 export），不符合就在 `down` 之前停下。
+  白名單只接受一種 compose 照字面讀的寫法：compose 的 `.env` 語法很多（Compose v5.1.3 實測：同一個鍵寫兩次取後面那行、`KEY: value` 也算賦值、
+  會去掉引號、`\r` 與行尾的 ` # 註解`、會展開 `$`），寫法一複雜，人看到的值和 compose 讀到的就可能不同。
+- **backend 啟動時的 Redis 語意**（I-132 的 C，2026-11-16 起的 image）：
+  - ⛔ 沒有設定 `REDIS_ADDR` → `redis disabled (no addr configured)`，停用（照舊）。⚠️ production 的設定契約要求 `REDIS_ADDR` 有值，所以只有 dev／test 會走到這裡。
+  - **有設定位址，Redis 就是必要的**：啟動時用一個**啟動專用**的 client 探測，總共 5 次、失敗後等 2 秒、單次最多 3 秒（理論上限 23 秒，dev 實測連不到的位址 23.01 秒）。
+    每次失敗記 Warn `redis probe attempt failed`，全部失敗記 Error `redis connect failed after retries`（`addr`、`attempts`、`cause`），
+    然後在 `AbortRunning`、排程器、HTTP 啟動**之前**以非 0 結束，container 反覆重啟（`docker ps` 看得到 `Restarting`），⛔ 不再靜默停用。
+  - `cause` 是封閉值域：`noauth`（沒帶密碼）、`wrongpass`（密碼錯）、`timeout`、`refused`、`dns`、`canceled`、`other`。⛔ 不帶錯誤原文。
+    `noauth`／`wrongpass` 重試也不會好，但一律走同一個有限次數的流程（最多多花約 8 秒）。
+  - 探測的 client 關掉了 go-redis 內建的重試（v9.5.4 預設 `MaxRetries` 3、`DialTimeout` 5 秒、`ContextTimeoutEnabled` false，
+    單次 ping 可能超過十幾秒），每次嘗試新建、用完就關。runtime 的 client 照舊由 `NewRedis` 建立，選項與重連行為⛔ 沒有變：
+    Redis 只是重建（密碼沒變）時，backend 的 client 會自己重連，⛔ 不需要重新部署。改了 Redis 的密碼，一定要重新部署 backend。
+  - ⚠️ 這是 image 的行為：live 要等 C 的 image 部署之後才生效。舊的 image 遇到連不上會記 `redis connect failed, cache disabled` 並**整個停用 Redis**
+    ——之後訊號⛔ 不再標 degraded，queue 與 cache 卻都⛔ 不用，`job_runs` 看起來可能一切正常。
 - **redis-server 要以 redis（uid 999）執行**：範本的 `command` 經 `docker-entrypoint.sh` 啟動。image 的 entrypoint 只在第一個參數是
   `redis-server`、身分是 root 時才降權；直接 `sh -c "exec redis-server …"` 會繞過它、以 root 執行。
 - **改範本時⛔ 不在 host 上起一個 Redis 來測**：範本的 network 就是 live 的 `trading-net`；從 repo 目錄起的話，
@@ -674,7 +682,7 @@ parent 已註冊、子排程 enabled、但依賴缺一時**才出現——只開
 
 #### dev 沒有 FinMind 金鑰，吃 FinMind 的東西在 dev 驗不了
 
-`deploy.sh` 進版控的是佔位值，真金鑰在 `/opt/stacks/scripts/stock_trading/`，
+repo 只有 `.env.example`（機密留空），真金鑰在 live scripts 目錄的 `.env`（`/opt/stacks/scripts/stock_trading/`），
 **dev 沒有**——所以任何走 FinMind 回補的步驟在 dev 一定失敗。
 2026-08-28 的作法是**把歷史 K 棒從 live postgres 唯讀複製過來**，而不是回補。
 
@@ -792,27 +800,50 @@ docker exec stock_trading-backend-1 sh -c \
    ```
 7. 驗完 `down`（⛔ 不帶 `-v`）。
 
-### 新增排程開關要改**三個**地方，只加 `export` 會靜默失效
+### live 的設定：`env_file` 注入，⛔ 不再經過 `export`
 
-⛔ **live 用的 compose 檔不是 repo 的 `docker-compose.yml`**：`deploy.sh` 跑的是
-`-f ./compose.yml`（`/opt/stacks/scripts/stock_trading/compose.yml`，**手動維護的副本、
-不在版控**），只有 `--project-directory` 指向 git checkout。所以 repo 那份是範本。
+（I-132；live 2026-11-13 起，repo 範本 2026-11-16 同步。）backend 的設定有三個來源，compose 檔的 backend 用 `env_file`（**絕對路徑**、`required: true`）直接注入：
 
-⚠️ **compose 只會把「服務的 `environment:` 區塊有宣告」的變數帶進容器。**
-沒宣告的 `export` 會被**靜默丟掉**——不會有任何錯誤訊息，容器裡讀到的是空字串，
-程式退回預設值（通常就是「關閉」），而排程頁只會顯示 `disabled`。
+| 來源 | 內容 | repo 範本 | live |
+|---|---|---|---|
+| scripts 目錄的 `.env`（權限 600） | 應用設定：機密、開關、cron、各功能的參數 | `.env.example`（機密留空、開關一律 `false`、數值與 cron 是程式的預設值） | `/opt/stacks/scripts/stock_trading/.env`（19 個鍵） |
+| Redis stack 的 `.env` | 只有一行 `REDIS_PASSWORD` | 建法見 `docker-compose.redis.yml` 的檔頭 | `/opt/stacks/scripts/redis/.env` |
+| DB 憑證 | DSN | 範本寫死 dev 的 `trading:trading`（主機專屬的結構另案，`todo.md` T-082） | `trading-go.env`（`format: raw`） |
 
-所以加一個新排程的開關要**同時**改：
+- ⛔ **live 用的 compose 檔不是 repo 的 `docker-compose.yml`**：`deploy.sh` 跑的是 `-f ./compose.yml`（`/opt/stacks/scripts/stock_trading/compose.yml`，
+  **手動維護的副本、不在版控**），只有 `--project-directory` 指向 build 目錄（另一份 git checkout）。repo 那份是範本：複製到 scripts 目錄、
+  命名為 `compose.yml`，把 `env_file` 的 `/path/to/…` 改成實際路徑。
+- **`environment:` 只留固定的服務連線設定**（範本：`DATABASE_DRIVER`、`DATABASE_DSN`、`REDIS_ADDR`、`SERVER_PORT`、`PYTHON_SERVICE_URL`、`GIN_MODE`、`LOG_DIR`、`LOG_RETENTION_DAYS`）。
+  **同一個鍵只能放一處**：`environment:` 的優先順序比 `env_file` 高，兩邊都有時 `.env` 的值會被**靜默蓋掉**。範本的重複由 `scripts/test-deploy-sh.sh` 擋。
+- ⚠️ **live 跟範本的差異**：live 的 `.env` 只有 19 個鍵（2026-11-13 從 `environment:` 搬過去的那些），其他設定（例如 `YAHOO_RATE_LIMIT`、
+  `CANDLE_GAP_DETECTION_*` 的細項）還留在 live `compose.yml` 的 `environment:`，帶 compose 的預設值。在 live 改一個鍵之前，先確認它在哪一處
+  （只看鍵名、⛔ 不印值，例如 `grep -c '^KEY=' .env`、`grep -c ' KEY:' compose.yml`）。
+- `env_file` 一定要用絕對路徑：相對路徑是相對於 **project directory**（`deploy.sh` 用的是 build 目錄）解析，⛔ 不是 compose 檔所在的目錄（Compose v5.7.0 實測）。
+  `path`／`required` 的長寫法需要 Compose 2.24 以上；live 與 dev 都是 v5.7.0。
+- compose 檔裡⛔ 沒有必填的 `${…:?}`：在 scripts 目錄手動執行 `docker compose ps`／`logs` 不必先帶任何變數。⛔ 不要用 `docker compose config`：
+  它會把機密整份印出來（範本的 `dc.sh` 會擋）。
+- **`.env` 的寫法**依 compose 的 dotenv 規則（2026-11-16 實測，寫在 `.env.example` 的開頭，由 `scripts/test-deploy-sh.sh` 驗證）：
+  - 沒有引號或用雙引號的值，`$X`／`${X}` 會用**執行 docker compose 的那個 shell 的環境變數**展開（沒設定的展開成空字串、⛔ 不報錯）；
+  - 沒有引號的值，` #` 之後是註解、前後的空白會被去掉；有引號的值整段照收；
+  - 值裡有 `$`、`#`、引號或前後空白，用**單引號**包起來（照字面讀）。`config` 的輸出把 `$` 寫成 `$$`，container 拿到的是一個 `$`。
+  - 空值（`KEY=`）等於沒設定：backend 退回 `backend/config.yaml` 的預設值。
+- **backend 啟動時檢查設定契約**（I-132 的 E）：production（`APP_ENV` 沒設定就是 production）缺必要的設定、或用了 repo 裡公開的範例值，
+  在連 DB 之前就以非 0 結束，log 只寫「鍵名:規則代號」。規則見 [`architecture.md`](./architecture.md)「設定契約」。
+
+#### 新增設定鍵（例如排程開關）要改的地方
 
 | 檔案 | 動作 |
 |---|---|
-| `docker-compose.yml`（repo 範本） | backend 的 `environment:` 加鍵 |
-| `deploy.sh`（repo 範本） | 加對應的 `export` |
-| **`/opt/stacks/scripts/stock_trading/compose.yml`**（live，repo 外） | **同樣加鍵**——漏這步等於整件事沒做 |
+| `backend/config.yaml`、`config.go` 的 `SetDefault` | 預設值 |
+| `backend/internal/config/contract.go` | 有格式或範圍要求時加規則（`docs/architecture.md`「設定契約」的表也要更新） |
+| `.env.example`（repo 範本） | 加鍵與說明；開關預設 `false`；⛔ 不加進範本的 `environment:` |
+| `docker-compose.dev.yml` | dev 要用的話加進 backend 的 `environment:` |
+| **live 的 `/opt/stacks/scripts/stock_trading/.env`** | 要在 live 生效就加在這裡，⛔ 不加進 live `compose.yml` 的 `environment:`（兩邊都有時 `environment:` 贏） |
 
-**2026-09-08 實例**：T-071 的 `DELISTING_ENABLED` 已加進 live 的 `deploy.sh`，
-但那份 compose 副本沒有對應的鍵，開關等於沒開。同一天 dev 驗收也踩過同款
-（`STOCK_SYMBOLS_TIMEOUT_SEC` 在 shell export 了，容器裡是空的）。
+以前的寫法（`deploy.sh` 範本加 `export`、compose 的 `environment:` 加 `${KEY}`）已經作廢。那種寫法只會把 `environment:` 有宣告的變數帶進容器，
+漏宣告的 `export` 被**靜默丟掉**：2026-09-08 T-071 的 `DELISTING_ENABLED`、2026-11-02 I-123～I-126 的 `JOB_RETRY_*` 都是 live 的
+`compose.yml` 漏了鍵，開關等於沒開；dev 也踩過（`STOCK_SYMBOLS_TIMEOUT_SEC` 在 shell export 了，容器裡是空的）。`env_file` 會把檔案裡
+每一個鍵都帶進去，這類漏鍵⛔ 不會再發生；新的陷阱是上面的「同一個鍵放兩處」。
 
 **部署後的確認方式**（⛔ 不要只看 deploy.sh 改了就當作生效）：
 
@@ -826,9 +857,9 @@ docker exec stock_trading-backend-1 sh -c 'echo $<VAR>'   # 要印出設定值
 **任何會重新啟動 backend 的部署，都要確認 Redis 有連上**：看**這一次啟動**的 Redis 狀態行（上一筆 `shutdown signal received`
 之後、這次 `server starting` 之前），要是 `redis connected`。⚠️ 它⛔ 不是緊接在 `server starting` 之前——例如 2026-11-03 的正常啟動是
 `redis connected` → `yahoo intraday enabled` → `job retry config` → `scheduler started` → `server starting`。
-是 `redis connect failed, cache disabled` 的話，這次啟動之後 Redis 整個停用（原因見本檔 Redis 一節：backend 只在啟動時連一次），
+C 的 image（2026-11-16 起）連不上時會記 `redis connect failed after retries` 並結束、container 反覆重啟，部署腳本範本的 readiness 也會失敗。
+舊的 image 則是記 `redis connect failed, cache disabled`，這次啟動之後 Redis 整個停用（見本檔「live 的 Redis」），
 訊號⛔ 不會標 degraded，`job_runs` 可能一切正常——只看開關與 job 狀態查不出來。
-**2026-11-02 實例（開關）**：I-123～I-126 上 live 時，live 的 `compose.yml` 一開始漏了 `JOB_RETRY_*` 四個鍵，`deploy.sh` 有 `export` 也沒用，開關靜默失效；補上鍵之後才生效。（2026-11-13 I-132 之後，開關改放在 scripts 目錄的 `.env`，由 `env_file` 直接注入，見 `docs/plans/i132-redis-silent-disable.md`。）
 **2026-11-02 實例（Redis）**：I-123～I-126 上 live 時 backend 啟動 3 次都是 `NOAUTH`，開關的三項確認都通過，
 Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
 
@@ -838,9 +869,9 @@ Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
 適用於 **image 不變、只改環境變數**（例如排程時間）；要改程式就要 build 新 image，⛔ 不適用。
 
 - ⛔ **不跑 live 的 `deploy.sh`**：它會 `git pull`、`down`、`up --build -d`，等於整套停下、拉最新程式重新 build。
-- **改法**：使用者改 live 的 `compose.yml`（要有那個鍵，見上一節）與 `deploy.sh`（讓之後的部署保留新值），
-  再從 live 的 `deploy.sh` 載入環境變數，只重建 backend：
-  `docker compose -f ./compose.yml --project-directory <PROJECT_DIR> up -d --no-build --no-deps backend`。
+- **改法**：使用者改 live scripts 目錄的 `.env`（或那個鍵所在的 `compose.yml`，見上方「live 的設定：`env_file` 注入」；同一個鍵只能放一處），
+  在 scripts 目錄只重建 backend：`docker compose -f ./compose.yml --project-directory "$PROJECT_DIR" up -d --no-build --no-deps backend`
+  （`PROJECT_DIR` 是 build 目錄）。2026-11-13 之後⛔ 不需要先載入任何變數：compose 檔沒有必填的 `${}`，設定由 `env_file` 注入。
 - **重建前**（唯讀）：
   - 容器的 image（`docker inspect` 的 `.Image`）要等於 `stock_trading-backend` 這個 tag 的 image（`docker image inspect` 的 `.Id`）。
     不同時 `--no-build` 會順便換程式，⛔ 不做。
@@ -856,12 +887,40 @@ Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
     最晚起跑時刻＝截止時刻－該 job 的整輪預算－保留時間，所以過了截止時刻就⛔ 不會有待跑的重跑。
   - 這段時間內⛔ 不能用 log 判斷還有沒有待跑的重跑：排定之後同一個 job 先成功（例如手動補跑），計時器會被靜默取消、⛔ 不記 log，
     最後一則重跑訊息仍是 `自動重跑已排定`。
-- ⚠️ **2026-10-28 的載入指令⛔ 不能照抄**：當時用 `eval "$(LC_ALL=C grep -aE '^(export [A-Z_]+|PROJECT_DIR)=' deploy.sh)"`，
-  只抓 `export X=` 開頭的行。2026-11-03 起 `REDIS_PASSWORD` 改由 `deploy.sh` 裡的檢查區塊從 Redis 的 `.env` 讀
-  （見上方「live 的 Redis」），⛔ 不是 `export X=` 的寫法——照抄會讓 `REDIS_PASSWORD` 變成空的、backend 整個停用 Redis
-  （重建後的 sha256 比對會抓到）。下次要用時重新設計載入方式，先 review 再用。
-- 另一個坑（2026-10-28 當時）：live 的 `deploy.sh` ⛔ 不是有效的 UTF-8，GNU grep 預設把它當成二進位檔、⛔ 不輸出任何行，
-  要 `LC_ALL=C grep -a`。
+- ⚠️ **2026-10-28 的載入指令已經作廢**：當時從 live 的 `deploy.sh` 用 `eval "$(LC_ALL=C grep -aE '^(export [A-Z_]+|PROJECT_DIR)=' deploy.sh)"`
+  載入 `export` 的設定；2026-11-03 起 `REDIS_PASSWORD` ⛔ 不是 `export X=` 的寫法，照抄會讓它變成空的，2026-11-13 起設定也都不在 `deploy.sh` 了。
+  ⛔ 不要再用。（當時另一個坑：live 的 `deploy.sh` ⛔ 不是有效的 UTF-8，GNU grep 要 `LC_ALL=C grep -a` 才會輸出。）
+
+### 部署腳本：失敗即停、build 之後才 down（`deploy.sh` 範本）
+
+repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 scripts 目錄，填 `PROJECT_DIR`（build 用的 git checkout）、`DEPLOY_BRANCH`、
+`REDIS_ENV_FILE`。scripts 目錄要有 `compose.yml`（範本 `docker-compose.yml`）與 `.env`（範本 `.env.example`）。⛔ 不再 `export` 任何設定。
+同目錄的 `dc.sh` 範本是手動操作 compose 的小幫手（固定帶跟 `deploy.sh` 相同的參數、擋下 `config`、會改變狀態的子指令要加 `--yes`）。
+
+流程（任何一步失敗都回傳非 0，而且在 `down` 之前就停下；錯誤訊息⛔ 不帶機密）：
+
+1. **preflight**（都在 `git pull` 之前）：build 目錄是 git checkout、在 `DEPLOY_BRANCH`、追蹤中的檔案沒有本機修改；`compose.yml` 存在；
+   `.env` 可讀、權限 `600`；`compose.yml` 裡 backend 的兩個 `env_file` 路徑跟 `deploy.sh` 的 `APP_ENV_FILE`、`REDIS_ENV_FILE` 相同；Redis 的 `.env` 符合白名單。
+2. `git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"`：只允許 fast-forward。
+3. **最終設定的 JWT**：跑 `docker compose … config`，在記憶體裡用 awk 取出 backend 最終的 `AUTH_JWT_SECRET`，空值或公開範例值就停下。
+   ⛔ 不把 config 寫到檔案或印到畫面，`config` 的錯誤訊息也⛔ 不顯示（可能帶出 `env_file` 的內容）。用 awk 是因為 live 主機有沒有 jq／python3 沒有確認。
+4. **build（舊的服務還在跑）**：一次 build 一個服務，每次 build 之前 `MemAvailable` 要 ≥ `MIN_MEM_AVAILABLE_MB`（1536），不夠就停下、⛔ 不 build、⛔ 不 down，
+   由人選擇改在低負載時段、或改用「先 down 再 build」的舊順序。門檻的依據：2026-11-16 在這台主機（約 8GB，dev 與 live 同機）冷 cache build
+   backend 與 python-server，`MemAvailable` 從 5290MB 最低降到 4576MB（降 714MB）；門檻留下 build 之後約 800MB 的餘裕。
+5. **用新 image 檢查完整設定**：`docker compose … run --rm --no-deps backend ./trading-backend -check-config`。⚠️ 一定要寫出執行檔：Dockerfile 只有
+   `CMD`、沒有 `ENTRYPOINT`，`compose run` 後面的參數會整個取代 `CMD`。只載入設定、跑契約檢查，⛔ 不連 DB 或任何外部服務；輸出只有鍵名和規則代號。
+6. `down`（失敗就⛔ 不進 `up`）→ `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
+7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
+   上限是 **90 秒的總截止時間**（`READY_TIMEOUT_SEC`），⛔ 不是檢查次數：每個 docker 呼叫都用 host 的 `timeout`（coreutils，preflight 會確認有）包住，
+   單次上限取 `READY_REQUEST_TIMEOUT_SEC`（5 秒）與剩餘時間較小的那個，`wget` 也帶 `-T`。請求卡住或回應緩慢時最多超過約 1 秒（`SECONDS` 的精度），
+   ⛔ 不會在截止之後才回報成功（review 2026-11-16：原本只限制次數、`wget` 沒有逾時，請求一慢就超過 90 秒，還可能在逾時之後回報成功）。
+   `up -d` 成功只代表 Docker 收下了啟動要求，⛔ 不代表 backend 通過了設定契約和 Redis 的探測。
+
+⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
+測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
+
+⚠️ **live 的 `deploy.sh` 還沒有同步**（2026-11-16）：live 那份仍是 `git pull origin init` → `down` → `up --build -d`，只多了 `.env` 的權限檢查，
+⛔ 沒有失敗即停、JWT 檢查、build 之後才 down 與 readiness。同步時照 live 的路徑改，⛔ 不整份換成範本（I-132 的計畫書第八節）。
 
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 
@@ -945,8 +1004,9 @@ lazy model load（4.17 MB joblib ＋ SHAP background）的暖機成本。
 ### schema migration 上 live 的程序
 
 **入口只有一個**：`/opt/stacks/scripts/stock_trading/deploy.sh`。
-它做的是 `git pull origin init` → `docker compose … down` → `up --build -d`，
-**開關與金鑰由該腳本的 `export` 提供**。所以：
+它現在做的是 `git pull origin init` → `docker compose … down` → `up --build -d`
+（範本的流程改成 build 之後才 down，live 還沒同步，見上方「部署腳本：失敗即停」）；
+開關與金鑰在 scripts 目錄的 `.env`，由 compose 的 `env_file` 注入。所以：
 
 * 變更要先**推上 `init` 分支**，deploy.sh 才拉得到。
 * 它本身就是 `up --build`，**不要另外下 `build` 或 `up -d`**。

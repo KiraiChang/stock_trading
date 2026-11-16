@@ -362,7 +362,7 @@ SR zone 分析——17:00 那輪拿到的是前一日籌碼，23:00 那輪（`sr
 `sr_analysis_chip` 平日 23:00（`SR_ANALYSIS_CHIP_CRON`），讓平日 17:05～22:00 沒有任何批次；**本專案文件寫的都是 live 的時間**。
 兩輪的先後不變：含籌碼那輪必須晚於籌碼採集（約 4 分鐘），兩者隔 1 小時。
 ⚠️ repo 的預設值還沒跟上：`backend/config.yaml` 與 `config.go` 仍是 21:00／22:00（`sr_evaluation` 22:30，live 停用），
-repo 的 compose ⛔ 沒有 `CHIP_SYNC_CRON` 鍵、`deploy.sh` 範本仍是 22:00——dev 與照範本新部署的環境跑的是舊時間。
+repo 的 `.env.example` ⛔ 沒有 `CHIP_SYNC_CRON` 鍵、`SR_ANALYSIS_CHIP_CRON` 仍是 22:00——dev 與照範本新部署的環境跑的是舊時間。
 同步列在 [`todo.md`](./todo.md) T-076（要 build 新 image）。
 
 ### 日 K 維護（`evaluation_universe_sync`，平日 16:00）會跳過「今天已有日 K」的標的
@@ -1721,7 +1721,67 @@ live 由三個各自獨立的 compose stack 組成（live 的檔案都在 repo �
 | redis | `/opt/stacks/scripts/redis/docker-compose.redis.yml`（＋同目錄的 `.env`） | `docker-compose.redis.yml` |
 | stock_trading（backend、python-worker、python-server） | `/opt/stacks/scripts/stock_trading/compose.yml` ＋ `deploy.sh` | `docker-compose.yml` ＋ `deploy.sh` |
 
-- Redis 要求密碼：Redis stack 的目錄要先有 `.env`（`REDIS_PASSWORD`，權限 600），backend 的 `REDIS_PASSWORD` 要與它一致（`deploy.sh` 從那份 `.env` 讀）；Redis ⛔ 不發布 port 到 host。細節見 [`development-workflow.md`](./development-workflow.md)「live 的 Redis：獨立 stack、密碼與 port」
+- **設定的來源**（I-132）：backend 的應用設定在 scripts 目錄的 `.env`（範本 `.env.example`，權限 600）、`REDIS_PASSWORD` 在 Redis stack 的 `.env`、
+  live 的 DB 憑證在 `trading-go.env`，都由 compose 的 `env_file`（**絕對路徑**）注入；`environment:` 只留固定的服務連線設定，同一個鍵⛔ 不能兩處都有。
+  `deploy.sh` ⛔ 不再 `export` 任何設定。細節見 [`development-workflow.md`](./development-workflow.md)「live 的設定：`env_file` 注入」與「部署腳本：失敗即停」。
+- Redis 要求密碼：Redis stack 的目錄要先有 `.env`（`REDIS_PASSWORD`，權限 600），backend 用 `env_file` 讀同一份；Redis ⛔ 不發布 port 到 host。
+  **有設定 `REDIS_ADDR` 時 Redis 是必要的**：backend 啟動時探測 5 次（最多約 23 秒），連不上就在排程器與 HTTP 啟動之前以非 0 結束（I-132 的 C）。
+  細節見 [`development-workflow.md`](./development-workflow.md)「live 的 Redis：獨立 stack、密碼與 port」
 - `docker-compose.yml` 假設 `trading-net`（postgres stack 建立）與 `proxy_net` 已存在；`proxy_net` 可用 `docker network create proxy_net` 建立
 - Go binary 內嵌前端靜態檔案（單一執行檔）
 - Python worker 與 HTTP server 各自獨立 container
+
+#### 設定契約（backend 啟動時檢查）
+
+backend 在 `config.Load()` 之後、**連 DB 之前**依下表檢查最終的設定（`backend/internal/config/contract.go` 的 `Validate`；I-132 的 E）。
+有違反就記 Error `config contract violated`（`production`、`violations`）並以非 0 結束。
+
+* **只輸出「環境變數名稱:規則代號」**，⛔ 不帶值、值的長度或片段。規則代號：`required`、`public_example`、`invalid_value`、`invalid_cron`、
+  `invalid_url`、`out_of_range`、`too_short`、`required_when_redis_addr`；載入失敗時另有 `invalid_type`（型別轉換失敗）與
+  `config_file:unreadable`／`config_file:invalid`（讀不到或解析不了設定檔）。
+* **載入失敗也只輸出鍵名**：mapstructure（v1.5.0）的轉型錯誤會帶出輸入值，viper 讀設定檔的錯誤也可能帶出檔案內容，所以 `Load()` 回傳的是
+  `*config.LoadError`（只有鍵名與代號；鍵名只採用 viper 已知的鍵，引號包住的其他內容一律輸出成 `config:invalid_type`），`main.go` ⛔ 不記原始錯誤。
+* **環境類別 `APP_ENV`**：`production`／`dev`／`test`；**沒設定就是 production**（最嚴格，live 忘了設也是安全的一邊）；打錯字報
+  `APP_ENV:invalid_value`，其他規則照 production 檢查。「全部」的規則三種環境都檢查，「prod」的規則只在 production 檢查。
+  dev compose 設 `APP_ENV: dev`；在本機直接 `go run` 時要自己設。
+* **公開範例值**：repo 裡寫過的範例憑證（`PublicJWTSecrets`、`PublicFinMindKeys`、`PublicFugleKeys`、`PublicRedisPasswords`、`PublicDBUserPasswords`、
+  `PublicDBPasswords`）在 production 一律擋下、dev／test 放行。repo 新增範例值時要補清單：`TestPublicExamples_CoverConfigYAML` 掃 `backend/config.yaml`，
+  `scripts/check-config-examples.py` 掃 compose 檔、`.env.example`、`deploy.sh` 與兩份 `config.yaml`。`deploy.sh` 範本的 JWT 檢查用同一份 JWT 清單（`scripts/test-deploy-sh.sh` 比對）。
+* **每一條都有適用條件**：功能停用時，它的鍵就算是空值或範例值也放行（viper 會把空字串退回 `config.yaml` 的值，例如 `fugle.api_key` 的 `YOUR_FUGLE_API_KEY`）。
+* **只檢查設定、不連 DB 的模式**：`./trading-backend -check-config`，通過印 `config ok (production=…)`、結束碼 0；違反或載入失敗印鍵名與代號、結束碼 1。
+  部署前用新 image 跑：`docker compose … run --rm --no-deps backend ./trading-backend -check-config`（⚠️ 要寫出執行檔：Dockerfile 只有 `CMD`）。
+
+| 設定（環境變數） | 預設值 | 誰用、什麼時候用 | 規則 | 適用條件 | 環境 |
+|---|---|---|---|---|---|
+| `APP_ENV` | 沒設定＝production | 決定下面「prod」的規則要不要生效 | 只能是 `production`／`dev`／`test`，其他值**一律擋下**（打錯字⛔ 不能默默變成寬鬆模式） | 無條件 | 全部 |
+| `DATABASE_DRIVER` | `sqlite` | DB 連線 | 必須是 `postgres` | 無條件 | prod |
+| `DATABASE_DSN` | `../../output/stock_trading/trading.db`（config.yaml） | DB 連線 | 不能是空值；⛔ 不能是預設的 SQLite 路徑；**帳密⛔ 不能是 repo 裡的公開範例**：用 pgx 的 `pgconn.ParseConfig` 取出 driver 最終有效的帳密（userinfo、query 參數、key=value、`PG*` 環境變數、passfile），使用者＋密碼是 `trading:trading`（`docker-compose.yml`、dev compose、`docker-compose.postgres.yml`）、`user:password`、`root:password`（兩份 `config.yaml` 的註解），或密碼是 `trading`（`docker-compose.mysql.yml`）、`password`，都擋下。pgx 解析不了的 DSN 判 `invalid_value`；driver 不是 postgres 時⛔ 不解析帳密 | 無條件 | prod |
+| `SERVER_PORT` | `8080` | HTTP | 必須是 1～65535 的整數 | 無條件 | 全部 |
+| `REDIS_ADDR` | 空白（＝停用） | 快取、訊號佇列 | ⛔ 不能是空值（live 一定要有 Redis）；dev／test 允許空白＝停用 | 無條件 | prod |
+| `REDIS_PASSWORD` | 空白 | Redis 認證 | ⛔ 不能是空值；⛔ 不能是 repo 裡的公開範例 `dev-redis-only`（dev compose 的預設值） | `REDIS_ADDR` 有值 | prod（dev／test 用 `dev-redis-only` 放行） |
+| `REDIS_DB` | `0` | Redis | 必須 ≥ 0 | `REDIS_ADDR` 有值 | 全部 |
+| `AUTH_JWT_SECRET` | `change-me-in-production` | 登入 token 的簽章 | ⛔ 不能是空值；⛔ 不能是公開範例值（`change-me-in-production`、`change-me`、`dev-only-change-me`）；長度至少 32 bytes | 無條件（API 一定會用到） | 不能是空值：全部；範例值與長度：prod |
+| `FINMIND_API_KEY` | `YOUR_FINMIND_API_KEY` | 日 K、公司行動、籌碼（都無條件） | ⛔ 不能是空值或範例值（`YOUR_FINMIND_API_KEY`、`your-finmind-api-key`） | 無條件 | prod |
+| `FINMIND_BASE_URL`、`FINMIND_RATE_LIMIT` | 官方網址、`5` | FinMind client | 網址要能解析成 `https`；rate limit ≥ 1 | 無條件 | 全部 |
+| `FINMIND_INTRADAY_ENABLED` | `false` | 盤中分 K | （開關本身只有型別檢查） | — | — |
+| `FUGLE_API_KEY` | `YOUR_FUGLE_API_KEY` | Fugle 即時行情 | ⛔ 不能是空值或範例值（`YOUR_FUGLE_API_KEY`、`your-fugle-api-key`） | **`FUGLE_ENABLED=true`**；停用時空值、範例值都放行 | prod |
+| `FUGLE_*` 的網址和數值 | 見 `SetDefault` | Fugle | 網址要能解析；`QUOTE_RATE_LIMIT`、`MAX_SUBSCRIPTIONS` ≥ 1；其他維持現行（0／負值有既定語意，例如 `PING_INTERVAL_SEC` 負值＝關閉 ping） | `FUGLE_ENABLED=true` | 全部 |
+| `YAHOO_BASE_URL`、`YAHOO_RATE_LIMIT`、`YAHOO_BATCH_SIZE` | 見 `SetDefault` | Yahoo 盤中；`RATE_LIMIT` 另外給除權息來源用（無條件） | 網址要能解析（`YAHOO_ENABLED=true` 時）；`RATE_LIMIT` ≥ 1（無條件，除權息會用）；`BATCH_SIZE` ≥ 1（啟用時） | 見規則 | 全部 |
+| `PYTHON_SERVICE_URL` | 空白 | SR 分析（排程與手動）、回測的 Method B | ⛔ 不能是空值，而且要能解析成 `http(s)` 網址 | 無條件 | prod |
+| `PYTHON_SR_ZONES_TIMEOUT_SEC` | `120` | SR zone 呼叫 | ≥ 1 | 無條件 | 全部 |
+| `STOCK_SYMBOLS_CRON` | `30 6 * * *` | 主檔同步 | `cron.ParseStandard` 解析得了 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
+| `STOCK_SYMBOLS_SYNC_URLS` | 上市＋上櫃兩個網址 | 主檔同步 | 至少一個、每個都能解析 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
+| `CHIP_SYNC_CRON` | `0 21 * * 1-5` | 籌碼採集（無條件註冊） | 解析得了 | 無條件 | 全部 |
+| `CHIP_SYNC_HISTORY_TRADING_DAYS`、`CHIP_SYNC_BATCH_SIZE` | `500`、`50` | 籌碼 | ≥ 1 | 無條件 | 全部 |
+| `CORPORATE_ACTION_CRON` | `30 6 * * 1-5` | 公司行動（無條件註冊） | 解析得了。啟動就擋；scheduler 的「退回預設值」保留給不經過 `config.Load()` 的呼叫端 | 無條件 | 全部 |
+| `EVALUATION_UNIVERSE_CRON`、`_DAYS` | `0 16 * * 1-5`、`10` | 評估標的池 | cron 解析得了；`DAYS` ≥ 1 | `EVALUATION_UNIVERSE_ENABLED=true` | 全部 |
+| `SR_ANALYSIS_CRON`、`_CHIP_CRON`、`_TIMEFRAME`、`_LIMIT` | `0 17 * * 1-5`、`0 22 * * 1-5`、`1d`、`400` | SR 分析排程 | 兩個 cron 都解析得了；`TIMEFRAME` 是程式認得的週期（數字＋單位，`^[1-9][0-9]*[mhdw]$`；repo 沒有集中的合法清單，⛔ 不自己定義哪些週期合法）；`LIMIT` ≥ 1 | `SR_ANALYSIS_ENABLED=true` | 全部 |
+| `SR_EVALUATION_CRON`、`_TIMEFRAME`、`_LIMIT`、`_REPLAY_MAX_ROWS` | `30 22 * * 1-5`、`1d`、`1500`、`200` | SR evaluation | cron 解析得了；`TIMEFRAME` 同上；兩個數值 ≥ 1 | `SR_EVALUATION_ENABLED=true` | 全部 |
+| `DELISTING_URL`、`DELISTING_CRON` | 官方 CSV 網址、`0 7 * * *` | 終止上市對帳 | 網址要能解析；cron 空白沿用預設，有值就要解析得了 | `DELISTING_ENABLED=true` | 全部 |
+| `JOB_RETRY_*` | 見 `SetDefault` | 自動重跑 | **維持現行的正規化**（退回預設＋Error），⛔ 不改成啟動失敗：那是 I-123～I-126 已確認的行為 | — | — |
+| `CANDLE_GAP_DETECTION_*` | 見 `SetDefault` | 日 K 缺漏偵測 | **維持現行**：scheduler 的正規化函式把關（`config.go` 的註解寫明了分工） | — | — |
+| `SR_ZONE_VERIFY_*` | `30`、`2000` | SR zone 驗證 | **維持現行**（兩段式） | — | — |
+| `CORPORATE_ACTION_TIMEOUT_SEC`、`_SHARD_COUNT` | `2700`、`5` | 公司行動 | **維持現行**（≤ 0 退回預設） | — | — |
+| `STOCK_SYMBOLS_TIMEOUT_SEC`、`_FETCH_DELAY_SEC`、`DELISTING_TIMEOUT_SEC` | `0`（＝沿用程式預設） | 各 client | **維持現行**（0 有既定語意）；負值擋下 | 對應功能啟用時 | 全部 |
+| `POSITION_ANALYSIS_*` | 見 `SetDefault` | 持倉分析（`portfolio.NewAnalyzer`） | `MAX_POSITION_VALUE`、`MAX_RISK_AMOUNT`、`MIN_RISK_REWARD_RATIO`、`BREAKOUT_TARGET_RISK_REWARD_RATIO` > 0；`ADD_ON_RATIO`、`TAKE_PROFIT_REDUCTION_RATIO` 在 (0, 1]；`SR_REUSE_MAX_AGE_HOURS` > 0。啟動就擋（I-132 之前 ≤ 0 會在 `NewAnalyzer` 靜默退回預設值，比例沒有上限檢查，`TAKE_PROFIT_REDUCTION_RATIO` > 1 會讓減碼的目標股數變成負數）；`NewAnalyzer` 的退回邏輯保留給不經過 `config.Load()` 的呼叫端 | 無條件 | 全部 |
+| 各功能的 `*_ENABLED` 開關 | 見 `SetDefault` | — | 只有型別檢查（現行） | — | — |

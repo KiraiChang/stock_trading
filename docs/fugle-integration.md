@@ -193,8 +193,8 @@ fugle:
   ping_interval_sec: 30               # FUGLE_PING_INTERVAL_SEC，主動 ping 保活間隔；0 沿用預設 30，負值關閉
 ```
 
-`docker-compose.yml`/`deploy.sh` 已對應加上 `FUGLE_ENABLED`/`FUGLE_API_KEY`
-環境變數注入點。`cfg.Fugle.Enabled=false`（預設）時，`cmd/server/main.go`
+`.env.example`（由 compose 的 `env_file` 注入；I-132 之前是 `docker-compose.yml`／`deploy.sh` 的 `export`）
+已對應加上 `FUGLE_ENABLED`/`FUGLE_API_KEY`。`cfg.Fugle.Enabled=false`（預設）時，`cmd/server/main.go`
 完全不會組裝 Fugle client，行為與導入前一致。
 
 ---

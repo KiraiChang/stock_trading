@@ -6,111 +6,38 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    # 設定的來源（I-132；規格見 docs/development-workflow.md「live 的設定：env_file」）：
+    #   * 應用設定（機密、開關、cron、各功能的參數）在 scripts 目錄的 .env，由下面的 env_file 注入；
+    #     範本是 repo 的 .env.example。⛔ 不再經過 deploy.sh 的 export 與 ${} 展開。
+    #   * REDIS_PASSWORD 只存在 Redis stack 的 .env（docker-compose.redis.yml），也由 env_file 直接讀，
+    #     值只有一份。
+    #   * environment: 只留固定的服務連線設定。⛔ 不能寫 .env.example 裡有的鍵，也⛔ 不能寫 REDIS_PASSWORD：
+    #     environment 的優先順序比 env_file 高，寫了就會蓋掉（就算展開成空字串也一樣）。
+    #     scripts/test-deploy-sh.sh 會擋重複的鍵。
+    # compose 檔裡⛔ 沒有必填的 ${…:?}，手動執行 docker compose ps／logs 不必先帶入任何變數。
     environment:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
       REDIS_ADDR: redis:6379
-      # 要與 Redis stack（docker-compose.redis.yml）的 .env 一致；沒設時是空字串＝不帶密碼
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       SERVER_PORT: "8080"
       PYTHON_SERVICE_URL: http://python-server:8001
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
-      FINMIND_API_KEY: ${FINMIND_API_KEY}
-      FINMIND_INTRADAY_ENABLED: ${FINMIND_INTRADAY_ENABLED:-false}
-      FUGLE_ENABLED: ${FUGLE_ENABLED:-false}
-      FUGLE_API_KEY: ${FUGLE_API_KEY}
-      # YAHOO_ENABLED 只控制**盤中報價**客戶端；除權息逐檔同步（corporate_action_sync）
-      # 無條件建立，不受它影響。
-      YAHOO_ENABLED: ${YAHOO_ENABLED:-false}
-      # 兩個 Yahoo 客戶端**共用同一個節流器**，速率就是這個值——所以它也節流除權息同步。
-      # 調到 finmind.rate_limit（5）以下會換成 Yahoo 主導逐檔節奏，
-      # CORPORATE_ACTION_TIMEOUT_SEC 的預算會失準。詳見 backend/config.yaml 的 yahoo 註解。
-      YAHOO_RATE_LIMIT: ${YAHOO_RATE_LIMIT:-20}
-      YAHOO_BATCH_SIZE: ${YAHOO_BATCH_SIZE:-40}
-      # 評估標的池的每日日 K 維護（T-040 Step 5）。**預設關閉**：一次會對整個池
-      # （實測 131 檔）各發一個 FinMind 請求，5 req/min 下約 27 分鐘。
-      # 16:00 晚於 daily_close（15:00，已確認當日日 K 已發布），且與 21:00 籌碼採集
-      # 有近 5 小時緩衝。這個池只維護日 K，不進盤中掃描、籌碼同步、signal 或 SR 分析。
-      EVALUATION_UNIVERSE_ENABLED: ${EVALUATION_UNIVERSE_ENABLED:-false}
-      EVALUATION_UNIVERSE_CRON: ${EVALUATION_UNIVERSE_CRON:-0 16 * * 1-5}
-      EVALUATION_UNIVERSE_DAYS: ${EVALUATION_UNIVERSE_DAYS:-10}
-      # 日 K 缺漏偵測（現況見 docs/architecture.md「日 K 缺漏偵測」；
-      # 原記於 issue.md I-091，已收斂）。跟著 evaluation_universe 那輪跑，寫獨立的 job_runs。
-      # **預設關閉**；超出合法範圍的值會被正規化並記 Error log（見 backend/config.yaml 的說明）。
-      CANDLE_GAP_DETECTION_ENABLED: ${CANDLE_GAP_DETECTION_ENABLED:-false}
-      CANDLE_GAP_DETECTION_AGGREGATE_RATIO: ${CANDLE_GAP_DETECTION_AGGREGATE_RATIO:-0.5}
-      CANDLE_GAP_DETECTION_AGGREGATE_MIN_SYMBOLS: ${CANDLE_GAP_DETECTION_AGGREGATE_MIN_SYMBOLS:-5}
-      CANDLE_GAP_DETECTION_CANDIDATE_CAP_PER_RUN: ${CANDLE_GAP_DETECTION_CANDIDATE_CAP_PER_RUN:-20}
-      CANDLE_GAP_DETECTION_TIMEOUT_SEC: ${CANDLE_GAP_DETECTION_TIMEOUT_SEC:-300}
-      CANDLE_GAP_DETECTION_LOOKBACK_TRADING_DAYS: ${CANDLE_GAP_DETECTION_LOOKBACK_TRADING_DAYS:-10}
-      CANDLE_GAP_DETECTION_REQUEST_INTERVAL_MS: ${CANDLE_GAP_DETECTION_REQUEST_INTERVAL_MS:-500}
-      CANDLE_GAP_DETECTION_MARKET_STALE_DAYS: ${CANDLE_GAP_DETECTION_MARKET_STALE_DAYS:-2}
-      CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS: ${CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS:-24}
-      CANDLE_GAP_DETECTION_BREAKER_FAILURES: ${CANDLE_GAP_DETECTION_BREAKER_FAILURES:-5}
-      CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN: ${CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN:-60}
-      # 定期對 watchlist 產生 SR zone 分析。**預設關閉**：它是 production 驗證
-      # 母體的唯一來源（todo.md T-049 前置①的並行比對），開了就會每天累積分析。
-      # ⚠️ 2026-09-01 移除此處對 issue.md I-074 的引用——decision replay 讀 candles，
-      # 不讀 stock_sr_zone_analyses，本排程從來不是它的前置。
-      #
-      # **前置已滿足**：老化單位早已改為「K 棒推進」（2026-08-20 上線），排程與人工
-      # 同日各跑一次不再讓事件老化一天前進 2。現況規格見
-      # docs/sr-zone-scoring.md「老化的單位是『K 棒推進』」（原記於 issue.md I-077，已收斂）。
-      #
-      # 兩個 cron 是刻意的：SR 分析吃籌碼（trading_score 的 Chip 佔 15%），而 FinMind 的
-      # 法人／融資券要晚間才發布。
-      #   cron      17:00 → 當日 K 棒 ＋ 前一日籌碼（收盤後盡快有一份）
-      #   chip_cron 22:00 → 當日 K 棒 ＋ 當日籌碼（晚於 21:00 籌碼採集、早於 22:30 的 sr_evaluation）
-      # 兩輪都會跳過「最新 K 棒不是今天」的標的；chip_cron 那輪額外跳過「當日籌碼尚未入庫」的。
-      # **不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時。
-      SR_ANALYSIS_ENABLED: ${SR_ANALYSIS_ENABLED:-false}
-      SR_ANALYSIS_CRON: ${SR_ANALYSIS_CRON:-0 17 * * 1-5}
-      SR_ANALYSIS_CHIP_CRON: ${SR_ANALYSIS_CHIP_CRON:-0 22 * * 1-5}
-      SR_ANALYSIS_TIMEFRAME: ${SR_ANALYSIS_TIMEFRAME:-1d}
-      SR_ANALYSIS_LIMIT: ${SR_ANALYSIS_LIMIT:-400}
-      # 收盤 SR zone 驗證的覆蓋窗口（單位是天，不是筆數）。
-      # 詳見 backend/config.yaml 的 sr_zone_verify 註解。
-      SR_ZONE_VERIFY_DAYS: ${SR_ZONE_VERIFY_DAYS:-30}
-      SR_ZONE_VERIFY_MAX_ANALYSES: ${SR_ZONE_VERIFY_MAX_ANALYSES:-2000}
-      # 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：
-      # 漏跑一次就會讓該檔整段歷史出現假跳空，而重算是冪等的，所以沒有關掉它的情境。
-      # 06:30 早於 08:50 的 pre_market，讓開盤前的分析已吃到最新係數。
-      # 打錯字會退回預設值繼續跑並記 Error log（靜默停掉等於還原係數無聲過期）。
-      # **不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
-      # 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
-      CORPORATE_ACTION_CRON: ${CORPORATE_ACTION_CRON:-30 6 * * 1-5}
-      # 整輪預算與分片數。當日名單 = watchlist 全量 ＋ 其餘標的的當日分片，
-      # 預設 5 片（週一到週五各一片，每檔每週至少覆蓋一次）；設 1 = 每天全量。
-      # 預算算法與調參時機見 backend/config.yaml 的 corporate_action 註解。
-      CORPORATE_ACTION_TIMEOUT_SEC: ${CORPORATE_ACTION_TIMEOUT_SEC:-2700}
-      CORPORATE_ACTION_SHARD_COUNT: ${CORPORATE_ACTION_SHARD_COUNT:-5}
-      # TWSE 終止上市名單對帳（規格見 docs/architecture.md「終止上市對帳」）。**預設關閉**。
-      # ⚠️ 它**不驅動 is_listed**——只補官方的終止上市日期並對帳告警；判定「還在不在
-      # 交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯（見 docs/architecture.md）。
-      # 前置是**依賴不是時間**：當日的 stock_symbol_sync 必須已成功，否則整輪 failed。
-      # 07:00 排在 06:30 的 ISIN sync 之後，但正確性由那條依賴保證，不是靠時間錯開。
-      # ⚠️ **stale 門檻是 26 小時**（每天跑，不限平日），不要設得比它稀疏。
-      # ℹ️ 手動端點（POST /api/v1/scheduler/delisting-reconcile/run）**不看這個開關**
-      # ——reconciler 一律注入，開關只決定要不要註冊 cron。
-      DELISTING_ENABLED: ${DELISTING_ENABLED:-false}
-      DELISTING_URL: ${DELISTING_URL:-https://www.twse.com.tw/rwd/zh/company/suspendListing?response=csv}
-      DELISTING_CRON: ${DELISTING_CRON:-0 7 * * *}
-      DELISTING_TIMEOUT_SEC: ${DELISTING_TIMEOUT_SEC:-0}
-      # 暫時性失敗的自動重跑（I-123～I-126）。**預設關閉**；live 由 deploy.sh 設 JOB_RETRY_ENABLED=true。
-      # ⚠️ 四個鍵都要在這裡，否則 deploy.sh 的 export 不會被帶進容器（會靜默失效）。
-      # 截止時刻是重跑**整輪**的截止（台北 HH:MM），⛔ 不壓到 08:50 的盤前；live ⛔ 不需要改。
-      # 部署後看 backend 啟動 log 的 `job retry config`：開關、截止時刻與三個工作的最晚起跑時刻。
-      JOB_RETRY_ENABLED: ${JOB_RETRY_ENABLED:-false}
-      JOB_RETRY_INTERVAL_MIN: ${JOB_RETRY_INTERVAL_MIN:-10}
-      JOB_RETRY_MAX_RERUNS: ${JOB_RETRY_MAX_RERUNS:-3}
-      JOB_RETRY_CUTOFF: ${JOB_RETRY_CUTOFF:-08:45}
       # 留白（預設）時 main.go 會把 gin 設成 release。**正式環境不要設 debug**：
       # 它會把完整路由表寫進 log，且 panic 時 recovery 會連整包 request header 一起印
       # （gin 只遮 Authorization，Cookie 與自訂 header 照樣落地）。
-      # 這裡留這個鍵只是讓排查問題時不必改 compose，deploy.sh 刻意不 export 它。
+      # 這裡留這個鍵只是讓排查問題時不必改 compose；.env.example 刻意⛔ 不放它。
       GIN_MODE: ${GIN_MODE:-}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
+    env_file:
+      # ⛔ 一定要用絕對路徑：相對路徑是相對於 project directory（deploy.sh 用的是 build 目錄）解析，
+      # ⛔ 不是相對於這份 compose 檔所在的目錄。複製到 scripts 目錄（命名為 compose.yml）時，
+      # 把 /path/to/… 改成實際路徑，而且要跟 deploy.sh 的 APP_ENV_FILE、REDIS_ENV_FILE 相同
+      # （deploy.sh 的 preflight 會比對）。忘了改的話，required: true 會讓 compose 直接報錯。
+      # ⛔ 不加 format: raw：用 compose 預設的 dotenv 解析（寫法見 .env.example 的開頭）。
+      - path: /path/to/scripts/stock_trading/.env   # 應用設定（從 .env.example 複製，權限 600）
+        required: true
+      - path: /path/to/redis-stack/.env             # 只有一行 REDIS_PASSWORD
+        required: true
     volumes:
       - ./logs/backend:/app/logs/backend
     networks:

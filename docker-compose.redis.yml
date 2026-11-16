@@ -7,8 +7,9 @@
 #   chmod 600 .env
 # 格式：整份檔只能有一行 REDIS_PASSWORD=<值>（加上空行與 # 開頭的註解），⛔ 不放其他鍵、⛔ 不加引號或 export；
 # 值只用英數與 ._+/=-（上面產生的 hex 就符合）。deploy.sh 範本照這個白名單檢查，不符合就在 down 之前停下。
-# backend 的 REDIS_PASSWORD 要與這裡一致（docker-compose.yml 與 deploy.sh 範本），否則 backend 啟動時
-# 會記 `redis connect failed, cache disabled` 並整個停用 Redis。改密碼之後要重新部署 backend。
+# backend 用 env_file 直接讀這一份（docker-compose.yml 範本的 env_file 寫它的絕對路徑），值只有一份。
+# backend 連不上（例如密碼不對）時，啟動探測 5 次之後以非 0 結束、container 反覆重啟（I-132 的 C；
+# 舊的 image 則是記 `redis connect failed, cache disabled` 並整個停用 Redis）。改密碼之後要重新部署 backend。
 #
 # 設計重點：
 #   - ⛔ 沒有 ports：backend 走 compose 網路，不需要 host 上的 port。docker 的 port publish 會繞過 host 防火牆，

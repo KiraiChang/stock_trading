@@ -98,7 +98,8 @@ live 由三個各自獨立的 compose stack 組成：postgres（建立 `trading-
 見 [`architecture.md`](./architecture.md)「生產 / Docker」。
 
 - Redis 要求密碼：先在 Redis stack 的目錄建 `.env`（建法見 `docker-compose.redis.yml` 的檔頭），
-  backend 的 `REDIS_PASSWORD` 要與它一致（`deploy.sh` 範本從那份 `.env` 讀）。
+  backend 由 compose 的 `env_file` 直接讀同一份（應用設定放 scripts 目錄的 `.env`，範本是 `.env.example`；
+  見 [`development-workflow.md`](./development-workflow.md)「live 的設定：`env_file` 注入」）。
 - `docker-compose.yml` 假設 `trading-net` / `proxy_net` 已存在；`proxy_net` 可用
   `docker network create proxy_net` 建立。
 

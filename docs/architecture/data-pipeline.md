@@ -166,9 +166,9 @@ postgres 短暫進入 recovery mode——都是網路波動或第三方維修造
 
 ### 部署與回滾
 
-四個環境變數（`JOB_RETRY_ENABLED`、`JOB_RETRY_INTERVAL_MIN`、`JOB_RETRY_MAX_RERUNS`、`JOB_RETRY_CUTOFF`）要在
-repo 的 `docker-compose.yml`、`docker-compose.dev.yml`、`deploy.sh` 範本，以及 live 的 `compose.yml` 都有，否則靜默失效
-（[`development-workflow.md`](../development-workflow.md)「新增排程開關要改三個地方」）。backend 啟動時記一行 Info
+四個環境變數（`JOB_RETRY_ENABLED`、`JOB_RETRY_INTERVAL_MIN`、`JOB_RETRY_MAX_RERUNS`、`JOB_RETRY_CUTOFF`）在 repo 的 `.env.example`
+與 `docker-compose.dev.yml`；live 放在 scripts 目錄的 `.env`（由 `env_file` 注入，⛔ 不能同時寫在 live `compose.yml` 的 `environment:`，
+見 [`development-workflow.md`](../development-workflow.md)「live 的設定：`env_file` 注入」）。backend 啟動時記一行 Info
 `job retry config`：開關、間隔、上限、截止時刻與三個工作的最晚起跑時刻，部署後看它確認。
 回滾：`JOB_RETRY_ENABLED=false` 重新部署，確認那一行顯示 `enabled=false`。
 

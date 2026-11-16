@@ -1,116 +1,239 @@
 #!/bin/bash
+# deploy.sh 範本（I-132）：部署 stock_trading 的 backend、python-worker、python-server。
+#
+# 目錄的配置（跟 live 相同）：
+#   * scripts 目錄：這支 deploy.sh、compose.yml（repo 的 docker-compose.yml 複製過去）、.env（.env.example 複製
+#     過去，權限 600）。這支腳本只認自己所在的目錄。
+#   * build 目錄（PROJECT_DIR）：專門給 build 用的 git checkout，⛔ 不在裡面改檔案。compose 的 project directory
+#     指向它，build context（`context: .`）才會對。
+#   * Redis stack 的 .env（REDIS_ENV_FILE）：只有一行 REDIS_PASSWORD，compose.yml 用 env_file 直接讀。
+#
+# 流程（任何一步失敗都回傳非 0，而且在 down 之前就停下；錯誤訊息⛔ 不帶機密）：
+#   preflight → git pull --ff-only → compose config（JWT）→ 記憶體檢查 → build（逐一服務，舊服務還在跑）
+#   → 用新 image 檢查完整設定 → down → up -d --no-build → readiness（/health 與 RestartCount）
+# ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
+# ⛔ 這裡不再 export 任何設定：應用設定在 .env、Redis 密碼在 Redis stack 的 .env，都由 compose 的 env_file 注入。
+set -euo pipefail
 
-# 填入 git source 的絕對路徑
+# ── 要填的值 ──────────────────────────────────────────────────
+# build 用的 git checkout 的絕對路徑
 PROJECT_DIR="/path/to/trading"
-
-# 填入機敏設定
-export AUTH_JWT_SECRET="change-me"
-export FINMIND_API_KEY="your-finmind-api-key"
-export FINMIND_INTRADAY_ENABLED="false"  # 帳號升級到 Sponsor 級以上再改為 "true"
-export FUGLE_ENABLED="false"           # 驗證通過、確定要開通即時行情後改為 "true"
-export FUGLE_API_KEY="your-fugle-api-key"
-# Redis 的密碼：要與 Redis stack（docker-compose.redis.yml）的 .env 一致。直接從那份 .env 讀，值只留一份
-# （路徑換成 Redis stack 的實際目錄；執行 deploy.sh 的使用者要讀得到那個權限 600 的檔）。
-# 讀不到、格式不對就在 down 之前停下，錯誤訊息⛔ 不印值。
-# 整份 .env 走白名單，⛔ 不模仿 compose 的解析：compose 的 .env 語法很多（export、= 前後的空白、引號、
-# KEY: value、$ 展開…），只認得其中幾種、其他行忽略，就會漏掉沒認出來的寫法，兩邊讀到不同的密碼。
-# 所以只允許三種行：空行、從第一個字元就是 # 的註解、剛好一行 REDIS_PASSWORD=<值>（值只用英數與 ._+/=-，
-# 這種寫法 compose 照字面讀）。其他任何一行都擋下。
-# ⛔ 不能寫成 export X="$(…)"：那樣的結束碼是 export 的，讀檔失敗會被吞掉。
+# 要部署的分支（build 目錄必須已經 checkout 在這個分支）
+DEPLOY_BRANCH="main"
+# Redis stack 的 .env；必須跟 compose.yml 裡 env_file 寫的路徑相同
 REDIS_ENV_FILE="/path/to/redis-stack/.env"
-if REDIS_PASSWORD="$(awk '
+# build 前 MemAvailable 的下限（MiB）。低於它就⛔ 不 build、⛔ 不 down：不停機 build 時，build 和正在跑的
+# 服務會同時佔記憶體。依據：2026-11-16 在這台主機量的冷 cache build（記在 docs/development-workflow.md
+# 「部署腳本：失敗即停」）。
+MIN_MEM_AVAILABLE_MB=1536
+# readiness 的總上限（秒）：從 up 之後開始算，包含每次請求本身花的時間
+READY_TIMEOUT_SEC=90
+# readiness 每次確認之間的間隔，與單次請求的上限（秒；單次上限還會再被剩餘時間截短）
+READY_INTERVAL_SEC=2
+READY_REQUEST_TIMEOUT_SEC=5
+
+# ── 由腳本位置推出來的路徑（⛔ 不要改）────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STACK_COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
+APP_ENV_FILE="$SCRIPT_DIR/.env"
+# 測試用（scripts/test-deploy-sh.sh）；正式使用⛔ 不要設
+MEMINFO_FILE="${DEPLOY_MEMINFO_FILE:-/proc/meminfo}"
+
+# 跟 backend 設定契約的 PublicJWTSecrets 相同（backend/internal/config/contract.go；測試會比對）
+PUBLIC_JWT_SECRETS="change-me-in-production change-me dev-only-change-me"
+
+die() {
+  echo "deploy.sh: $*" >&2
+  exit 1
+}
+
+COMPOSE=(docker compose -f "$STACK_COMPOSE_FILE" --project-directory "$PROJECT_DIR")
+compose() {
+  "${COMPOSE[@]}" "$@"
+}
+
+# ── 1. preflight（都在 git pull 之前）────────────────────────
+echo "==> preflight"
+# readiness 用 timeout 限制每次請求（coreutils；⛔ 不能缺，否則一個卡住的請求就沒有上限）
+command -v timeout >/dev/null 2>&1 || die "找不到 timeout 指令（coreutils），停止部署（還沒 down）"
+if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  die "$PROJECT_DIR 不是 git checkout，停止部署（還沒 down）"
+fi
+if ! branch="$(git -C "$PROJECT_DIR" rev-parse --abbrev-ref HEAD)"; then
+  die "讀不到 $PROJECT_DIR 的目前分支，停止部署（還沒 down）"
+fi
+if [ "$branch" != "$DEPLOY_BRANCH" ]; then
+  die "$PROJECT_DIR 在分支 $branch，不是 $DEPLOY_BRANCH，停止部署（還沒 down）"
+fi
+# 只看追蹤中的檔案有沒有本機修改；沒有追蹤的檔案如果會跟 pull 衝突，pull 本身會失敗
+if ! dirty="$(git -C "$PROJECT_DIR" status --porcelain --untracked-files=no)"; then
+  die "讀不到 $PROJECT_DIR 的 git status，停止部署（還沒 down）"
+fi
+if [ -n "$dirty" ]; then
+  die "$PROJECT_DIR 有本機修改（build 目錄⛔ 不能改檔案），停止部署（還沒 down）"
+fi
+
+[ -f "$STACK_COMPOSE_FILE" ] || die "找不到 $STACK_COMPOSE_FILE，停止部署（還沒 down）"
+
+if [ ! -f "$APP_ENV_FILE" ] || [ ! -r "$APP_ENV_FILE" ]; then
+  die "讀不到 $APP_ENV_FILE，停止部署（還沒 down）"
+fi
+mode="$(stat -c %a "$APP_ENV_FILE")"
+if [ "$mode" != "600" ]; then
+  die "$APP_ENV_FILE 的權限是 $mode，必須是 600，停止部署（還沒 down）"
+fi
+
+# compose.yml 裡 backend 的 env_file 要剛好指到這兩個檔（只比對路徑字串，⛔ 不讀檔案內容）。
+# 認得兩種寫法：`- path: /abs/file` 與 `- /abs/file`；行尾的 # 註解忽略。
+envfiles="$(awk '
+  /^  [^ #]/ { in_backend = ($0 ~ /^  backend:[ \t]*$/); in_ef = 0; next }
+  in_backend && /^    [^ #]/ { in_ef = ($0 ~ /^    env_file:[ \t]*$/); next }
+  in_backend && in_ef && /^      - / {
+    line = $0
+    sub(/[ \t]+#.*$/, "", line)
+    sub(/^      - (path:[ \t]*)?/, "", line)
+    gsub(/^["\047]|["\047][ \t]*$/, "", line)
+    sub(/[ \t]+$/, "", line)
+    print line
+  }' "$STACK_COMPOSE_FILE")"
+for f in "$APP_ENV_FILE" "$REDIS_ENV_FILE"; do
+  if ! printf '%s\n' "$envfiles" | grep -qxF -- "$f"; then
+    die "$STACK_COMPOSE_FILE 的 backend env_file 沒有 $f（路徑要跟 deploy.sh 相同），停止部署（還沒 down）"
+  fi
+done
+
+# Redis stack 的 .env 走白名單，⛔ 不模仿 compose 的解析：compose 的 .env 語法很多（export、= 前後的空白、
+# 引號、$ 展開…），只認得其中幾種、其他行忽略，就會漏掉沒認出來的寫法。所以只允許三種行：空行、從第一個字元
+# 就是 # 的註解、剛好一行 REDIS_PASSWORD=值（值只用英數與 ._+/=-，這種寫法 compose 照字面讀）。
+# 這裡只檢查、⛔ 不讀出值（compose 自己會讀）。
+if awk '
   /^[ \t]*$/ || /^#/ { next }
-  /^REDIS_PASSWORD=[A-Za-z0-9._+\/=-]+$/ { n++; v = substr($0, 16); next }
+  /^REDIS_PASSWORD=[A-Za-z0-9._+\/=-]+$/ { n++; next }
   { bad++ }
-  END { if (bad || n != 1) exit 3; print v }' "$REDIS_ENV_FILE")"; then rc=0; else rc=$?; fi
+  END { if (bad || n != 1) exit 3 }' "$REDIS_ENV_FILE" 2>/dev/null; then rc=0; else rc=$?; fi
 case $rc in
   0) ;;
-  3) echo "deploy.sh: $REDIS_ENV_FILE 只能有一行 REDIS_PASSWORD=<值>（值只用英數與 ._+/=-），加上空行與 # 開頭的註解，停止部署（還沒 down）" >&2
-     exit 1 ;;
-  *) echo "deploy.sh: 讀不到 $REDIS_ENV_FILE，停止部署（還沒 down）" >&2
-     exit 1 ;;
+  3) die "$REDIS_ENV_FILE 只能有一行 REDIS_PASSWORD=值（值只用英數與 ._+/=-），加上空行與 # 開頭的註解，停止部署（還沒 down）" ;;
+  *) die "讀不到 $REDIS_ENV_FILE，停止部署（還沒 down）" ;;
 esac
-export REDIS_PASSWORD
-export YAHOO_ENABLED="false"           # 盤中批次源（非官方 API，免 token）；實盤驗證(T-032)通過後改為 "true"
-export YAHOO_RATE_LIMIT="20"           # 每分鐘請求上限（批次計一次），保守預設，依實測封鎖風險調整
-export YAHOO_BATCH_SIZE="40"           # 單次請求帶入的 symbol 數，依實測調整
 
-# 評估標的池（T-040 Step 5）：每交易日 16:00 維護池內標的的日 K。
-# 開啟前要先匯入選池成員（前端「評估標的池 → ③ 已入池」），空池時這個 job 什麼都不做。
-export EVALUATION_UNIVERSE_ENABLED="false"  # 匯入選池成員後改為 "true"
-export EVALUATION_UNIVERSE_CRON="0 16 * * 1-5"  # 台北時區
-export EVALUATION_UNIVERSE_DAYS="10"       # 往前幾個日曆天；10 是為了容忍連假，成本與天數無關
+# ── 2. 更新 build 目錄 ────────────────────────────────────────
+echo "==> git pull --ff-only origin $DEPLOY_BRANCH"
+if ! git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"; then
+  die "git pull 失敗（只允許 fast-forward），停止部署（還沒 down）"
+fi
 
-# 日 K 缺漏偵測（現況見 docs/architecture.md；原記於 issue.md I-091，已收斂）。沒有自己的 cron，跟著 evaluation_universe 那輪
-# （16:00）在回補之後跑，但寫獨立的 job_runs 紀錄 candle_gap_detection。
-# 要解的是「evaluation_universe_sync 的 success 只代表請求沒失敗，不代表拿到該有的資料」。
-export CANDLE_GAP_DETECTION_ENABLED="false"          # 驗證通過前預設關閉
-export CANDLE_GAP_DETECTION_AGGREGATE_RATIO="0.5"    # 單一 (market, date) 缺漏比例 >= 此值就短路，合法 (0, 1]
-export CANDLE_GAP_DETECTION_AGGREGATE_MIN_SYMBOLS="5"  # 有效池不足此數時強制逐檔，不套比例
-export CANDLE_GAP_DETECTION_CANDIDATE_CAP_PER_RUN="20" # **候選數不是請求數**；請求上限＝cap × 視窗月份數
-export CANDLE_GAP_DETECTION_TIMEOUT_SEC="300"        # 整輪上限，hard cap 900
-export CANDLE_GAP_DETECTION_LOOKBACK_TRADING_DAYS="10" # **交易日**不是日曆天；刻意不沿用 EVALUATION_UNIVERSE_DAYS
-export CANDLE_GAP_DETECTION_REQUEST_INTERVAL_MS="500"  # 對交易所節流（2 req/s）；合法 >= 100
-export CANDLE_GAP_DETECTION_MARKET_STALE_DAYS="2"    # 單位是預期交易日，不是日曆日
-export CANDLE_GAP_DETECTION_CALENDAR_TTL_HOURS="24"
-export CANDLE_GAP_DETECTION_BREAKER_FAILURES="5"     # **來源層級**，與逐 symbol 的失敗計數是兩回事
-export CANDLE_GAP_DETECTION_BREAKER_COOLDOWN_MIN="60"  # 冷卻後自動恢復
+# ── 3. 最終設定裡的 JWT（在 build 之前就能先擋）──────────────
+# 用跟部署相同的參數跑 compose config，**在記憶體裡**用 awk 取出 backend 最終的 AUTH_JWT_SECRET。
+# ⛔ 不把 config 寫到檔案或印到畫面；config 的錯誤訊息也⛔ 不顯示（可能帶出 env_file 的內容）。
+# 完整的設定契約由第 5 步用新 image 檢查，這一步只涵蓋 JWT。
+echo "==> 檢查最終設定的 AUTH_JWT_SECRET"
+set +e
+compose config 2>/dev/null | awk -v public="$PUBLIC_JWT_SECRETS" '
+  BEGIN { n = split(public, p, " "); for (i = 1; i <= n; i++) bad[p[i]] = 1 }
+  /^  [^ #]/ { in_backend = ($0 ~ /^  backend:[ \t]*$/); in_env = 0; next }
+  in_backend && /^    [^ #]/ { in_env = ($0 ~ /^    environment:[ \t]*$/); next }
+  in_backend && in_env && /^      AUTH_JWT_SECRET:/ {
+    v = $0
+    sub(/^      AUTH_JWT_SECRET:[ \t]*/, "", v)
+    if (v ~ /^".*"$/ || v ~ /^\047.*\047$/) v = substr(v, 2, length(v) - 2)
+    found = 1
+  }
+  END {
+    if (!found || v == "") exit 3
+    if (v in bad) exit 4
+  }'
+st=("${PIPESTATUS[@]}")
+set -e
+if [ "${st[0]}" -ne 0 ]; then
+  die "docker compose config 失敗（為了不帶出機密，⛔ 不顯示原始錯誤；請檢查 compose.yml 與兩個 env_file），停止部署（還沒 down）"
+fi
+case "${st[1]}" in
+  0) ;;
+  3) die "backend 最終的 AUTH_JWT_SECRET 是空值，停止部署（還沒 down）" ;;
+  4) die "backend 最終的 AUTH_JWT_SECRET 是公開的範例值，停止部署（還沒 down）" ;;
+  *) die "檢查 AUTH_JWT_SECRET 時發生錯誤，停止部署（還沒 down）" ;;
+esac
 
-# 定期對 watchlist 產生 SR zone 分析：每交易日兩輪，17:00 與 22:00。
-# 這是 production 驗證母體的唯一來源——沒有它，stock_sr_zone_analyses 只會累積人工點擊的
-# 零星幾筆，todo.md T-049 前置①（新舊兩套 active 事件集合的逐日並行比對）永遠做不了。
-# ⚠️ 2026-09-01 移除此處對 issue.md I-074 的引用：decision replay 的母體是 candles
-# （run_decision_replay -> _load_db_sources），本排程從來不是它的前置。
-#
-# **前置已滿足**：事件老化早已改為依「K 棒推進」而不是「分析次數」（2026-08-20 上線），
-# 所以排程與人工同日各跑一次不再讓老化一天前進 2、污染要累積的母體。
-# 現況規格見 docs/sr-zone-scoring.md「老化的單位是『K 棒推進』」
-#（原記於 issue.md I-077，已收斂）。
-#
-# 兩輪的差別只在籌碼：17:00 拿到的是前一日籌碼（FinMind 法人／融資券晚間才發布），
-# 22:00 那輪晚於 21:00 的籌碼採集，才有當日的。
-export SR_ANALYSIS_ENABLED="false"           # 前置已滿足（見上方），要累積分析母體就改為 "true"
-export SR_ANALYSIS_CRON="0 17 * * 1-5"       # 台北時區，不含當日籌碼那輪
-export SR_ANALYSIS_CHIP_CRON="0 22 * * 1-5"  # 台北時區，含當日籌碼那輪
-export SR_ANALYSIS_TIMEFRAME="1d"
-export SR_ANALYSIS_LIMIT="400"               # 抓取的歷史 K 棒根數
+# ── 4. build（舊的服務還在跑）────────────────────────────────
+# 一次 build 一個服務（避免兩個 image 的記憶體峰值疊加），每個服務 build 之前都檢查 MemAvailable。
+if ! services="$(compose config --services 2>/dev/null)"; then
+  die "列不出 compose.yml 的服務，停止部署（還沒 down）"
+fi
+[ -n "$services" ] || die "compose.yml 沒有任何服務，停止部署（還沒 down）"
+for svc in $services; do
+  if ! avail="$(awk '/^MemAvailable:/ { print int($2 / 1024); found = 1 } END { if (!found) exit 1 }' "$MEMINFO_FILE")"; then
+    die "讀不到 $MEMINFO_FILE 的 MemAvailable，停止部署（還沒 build $svc、還沒 down）"
+  fi
+  if [ "$avail" -lt "$MIN_MEM_AVAILABLE_MB" ]; then
+    die "MemAvailable ${avail}MiB 低於 ${MIN_MEM_AVAILABLE_MB}MiB，⛔ 不在服務運作中 build（還沒 build $svc、還沒 down）。請改在低負載時段，或改用先 down 再 build 的舊順序"
+  fi
+  echo "==> build $svc（MemAvailable ${avail}MiB）"
+  if ! compose build "$svc"; then
+    die "build $svc 失敗，停止部署（還沒 down，舊服務照常運作）"
+  fi
+done
 
-# 公司行動同步（分割／除權息／減資 → 還原係數）。**沒有 enabled 開關**：漏跑一次會讓該檔
-# 整段歷史出現假跳空，重算又是冪等的，所以沒有關掉它的情境；只有時間可調。
-# 06:30 早於 08:50 的 pre_market，讓當天開盤前的分析已吃到最新係數。
-# 需要多跑幾次時直接設多時段（例如 "30 6,12 * * 1-5"）。打錯字會退回預設值繼續跑並記
-# Error log。**不要設得比 80 小時稀疏**：/scheduler/status 的 stale 門檻寫死 80 小時，
-# 稀疏排程會永遠顯示逾期（見 docs/api-reference.md）。
-export CORPORATE_ACTION_CRON="30 6 * * 1-5"  # 台北時區
+# ── 5. 用新 image 檢查完整設定（backend 的設定契約）─────────
+# ⚠️ 一定要寫出執行檔：Dockerfile 只有 CMD、沒有 ENTRYPOINT，compose run 後面的參數會整個取代 CMD。
+# 只載入設定、跑契約檢查，⛔ 不連 DB 或任何外部服務；輸出只有鍵名和規則代號。
+echo "==> 用新 image 檢查設定"
+if ! compose run --rm --no-deps backend ./trading-backend -check-config; then
+  die "新 image 的設定檢查沒有通過（違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）"
+fi
 
-# TWSE 終止上市名單對帳（規格見 docs/architecture.md「終止上市對帳」）：每天 07:00 抓官方「終止上市公司」CSV，補
-# stock_symbols.delisted_date 並與主檔對帳。⚠️ **不驅動 is_listed**——那份 CSV 含歷史
-# 紀錄且代號會被重用（2002 年的光寶電子(2301) 與今天的光寶科(2301) 是兩家公司），
-# 判定「還在不在交易」的權責只屬於 stock_symbol_sync 的 ISIN 缺席邏輯。
-# 前置是**依賴不是時間**：當日的 stock_symbol_sync（06:30）必須已成功，否則整輪 failed。
-# ⛔ **只加 export 不夠**：compose 的 backend environment 區塊也要有對應的鍵，
-# 否則變數不會被帶進容器（會靜默失效）。
-export DELISTING_ENABLED="false"       # dev 驗收通過後改為 "true"
-export DELISTING_CRON="0 7 * * *"      # 台北時區，每天（不限平日）；stale 門檻寫死 26 小時
-export DELISTING_TIMEOUT_SEC="0"       # 0 = 沿用程式預設 60 秒（單一 CSV 請求，實測 8KB）
+# ── 6. 換版 ──────────────────────────────────────────────────
+echo "==> down"
+if ! compose down; then
+  die "down 失敗，⛔ 不進 up；請手動確認服務狀態"
+fi
+echo "==> up -d --no-build"
+if ! compose up -d --no-build; then
+  die "up 失敗；服務目前是停的，請手動處理（⛔ 沒有自動回滾）"
+fi
 
-# 暫時性失敗的自動重跑（I-123～I-126；規格見 docs/architecture/data-pipeline.md「失敗後的自動重跑」）：
-# 主檔同步、公司行動同步（整輪早退）、終止上市對帳遇到 DNS 逾時／連線錯誤／5xx／DB 連線類錯誤時，
-# 隔 10 分鐘重跑、每天最多 3 次、整輪在 08:45 之前結束；主檔成功後連帶重跑被它擋下的對帳。
-# intraday 的批次與公司行動的失敗標的也在同一輪內再試。4xx／429／解析錯誤⛔ 不重跑。
-# ⛔ **不能只加 export**：compose 的 backend environment 區塊也要有對應的四個鍵。
-# 回滾：改回 "false" 重新部署，確認 backend 啟動 log 的 `job retry config` 顯示 enabled=false。
-export JOB_RETRY_ENABLED="false"        # dev 驗收通過後改為 "true"
-export JOB_RETRY_INTERVAL_MIN="10"
-export JOB_RETRY_MAX_RERUNS="3"
-export JOB_RETRY_CUTOFF="08:45"         # 台北 HH:MM，重跑整輪（含紀錄寫入）的截止；⛔ 不壓到 08:50 的盤前
-
-docker compose \
-  -f "$PROJECT_DIR/docker-compose.yml" \
-  --project-directory "$PROJECT_DIR" \
-  down
-
-docker compose \
-  -f "$PROJECT_DIR/docker-compose.yml" \
-  --project-directory "$PROJECT_DIR" \
-  up --build -d
+# ── 7. readiness ─────────────────────────────────────────────
+# up -d 成功只代表 Docker 收下了啟動要求，⛔ 不代表 backend 通過了設定和 Redis 的檢查。
+# 要同時符合「container 內打 /health 拿到成功回應」和「RestartCount 是 0」才算通過。
+# 上限是**總截止時間**（READY_TIMEOUT_SEC），⛔ 不是檢查次數：每個 docker 呼叫都用 timeout 包住，
+# 單次上限取 READY_REQUEST_TIMEOUT_SEC 與剩餘時間較小的那個；wget 自己也帶 -T。
+# 請求卡住或回應緩慢時，最多超過總上限約 1 秒（SECONDS 的精度），⛔ 不會在截止之後才回報成功。
+echo "==> 等 backend ready（最多 ${READY_TIMEOUT_SEC} 秒）"
+deadline=$((SECONDS + READY_TIMEOUT_SEC))
+remaining() {
+  local r=$((deadline - SECONDS))
+  [ "$r" -gt 0 ] || r=0
+  if [ "$r" -gt "$1" ]; then echo "$1"; else echo "$r"; fi
+}
+checks=0
+while :; do
+  t="$(remaining "$READY_REQUEST_TIMEOUT_SEC")"
+  [ "$t" -gt 0 ] || break
+  checks=$((checks + 1))
+  cid="$(timeout "$t" "${COMPOSE[@]}" ps -q backend 2>/dev/null || true)"
+  if [ -n "$cid" ]; then
+    t="$(remaining "$READY_REQUEST_TIMEOUT_SEC")"
+    [ "$t" -gt 0 ] || break
+    restarts="$(timeout "$t" docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo "?")"
+    if [ "$restarts" != "0" ] && [ "$restarts" != "?" ]; then
+      die "backend 重啟過（RestartCount $restarts），部署失敗；看 log：docker compose logs --tail 200 backend（⛔ 沒有自動回滾）"
+    fi
+    t="$(remaining "$READY_REQUEST_TIMEOUT_SEC")"
+    [ "$t" -gt 0 ] || break
+    if timeout "$t" "${COMPOSE[@]}" exec -T backend wget -q -T "$t" -O /dev/null http://127.0.0.1:8080/health >/dev/null 2>&1; then
+      # 成功回應之後再確認一次：沒有重啟過、而且還在截止時間之內
+      t="$(remaining "$READY_REQUEST_TIMEOUT_SEC")"
+      [ "$t" -gt 0 ] || break
+      restarts="$(timeout "$t" docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo "?")"
+      if [ "$restarts" = "0" ] && [ "$SECONDS" -le "$deadline" ]; then
+        echo "==> 部署完成：backend /health 正常、RestartCount 0（第 $checks 次確認）"
+        exit 0
+      fi
+      [ "$restarts" = "?" ] || die "backend 重啟過（RestartCount $restarts），部署失敗（⛔ 沒有自動回滾）"
+    fi
+  fi
+  t="$(remaining "$READY_INTERVAL_SEC")"
+  [ "$t" -gt 0 ] || break
+  sleep "$t"
+done
+die "等了 ${READY_TIMEOUT_SEC} 秒 backend 還沒 ready（確認 $checks 次），部署失敗；看 log：docker compose logs --tail 200 backend（⛔ 沒有自動回滾）"

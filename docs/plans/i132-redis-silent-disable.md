@@ -1,7 +1,7 @@
 # I-132：backend 沒帶到 Redis 密碼就靜默停用 Redis——部署範本版控與啟動檢查（計畫書 v3）
 
 > 狀態：v3 草稿，待使用者確認（2026-11-13）。使用者已定案：D2、D7、D8；D1、D3～D6、D9～D11 是 Claude 的建議，**還沒經過使用者確認**。⛔ 確認前不改程式、不改範本、不對 live 下指令。
-> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。E 已 commit（2026-11-16）；C 已改好、未 commit，待 review（實作備註在「十一之前：C 的實作備註」）。下一步：C review 通過後做 A1～A3 的範本。
+> ▶ 2026-11-13 恢復（I-129、I-131、I-124～I-126 處理完之後）。C.3 的 Q1～Q4 都已由使用者決定（Q1：live 的 JWT 已換成 64 字元）。E、C 已 commit（2026-11-16）；A1～A3 的範本已改好、未 commit，待 review（實作備註在「十一之前：A1～A3 的實作備註」；現況規格已歸檔到主題文件）。下一步：review 通過後做第八節第 2 步（live 的 `deploy.sh`）與第 3 步（C 的部署）。
 > 對應：`docs/issue.md` I-132。v2 review 的原文與逐項處理見文末「Review feedback」與「十一、修訂紀錄」。
 
 ## 一、目標與不做的範圍
@@ -429,6 +429,65 @@ v3 同日改（D7、D10）：compose 檔裡已經沒有必填的 `${}`，手動�
   * `job_runs` 在失敗情境的前後都是 0 筆（dev 的表本來就是空的，所以這項證據比較弱；主要的證據是 log 沒有 `scheduler started`、`/health` 沒有回應）。
   * 跑完 `docker compose -f docker-compose.dev.yml down`（⛔ 沒有 `-v`），dev 與作業用的 volume 都還在。
 
+## 十一之前：A1～A3 的實作備註（2026-11-16；已改好、未 commit，待 review）
+
+**改了哪些檔案**：
+
+| 檔案 | 內容 |
+|---|---|
+| `docker-compose.yml`（範本，A1／A2） | backend 的 `environment:` 只留 8 個鍵：`DATABASE_DRIVER`、`DATABASE_DSN`、`REDIS_ADDR`、`SERVER_PORT`、`PYTHON_SERVICE_URL`、`GIN_MODE`、`LOG_DIR`、`LOG_RETENTION_DAYS`。加上兩個 `env_file`（`/path/to/scripts/stock_trading/.env`、`/path/to/redis-stack/.env`，`required: true`，⛔ 沒有 `format: raw`）。刪掉 `REDIS_PASSWORD` 與其他所有應用設定。python 兩個服務⛔ 沒有改（D1） |
+| `.env.example`（新增，A2） | 40 個鍵：舊 `deploy.sh` 範本 `export` 的 35 個（`REDIS_PASSWORD` 除外），加上舊 compose 範本 `environment:` 裡只在那裡出現的應用設定 5 個（`SR_ZONE_VERIFY_DAYS`、`SR_ZONE_VERIFY_MAX_ANALYSES`、`CORPORATE_ACTION_TIMEOUT_SEC`、`CORPORATE_ACTION_SHARD_COUNT`、`DELISTING_URL`）。機密留空、開關全部 `false`、數值與 cron 是 compose 原本的預設值；說明照搬舊範本的註解。開頭寫明 dotenv 的寫法 |
+| `deploy.sh`（範本，A3） | 照 4.3 重寫（見下方「流程」）。⛔ 沒有任何 `export`；檔案改成可執行（644 → 755） |
+| `dc.sh`（新增，4.5） | live 版本拿掉讀 Redis 密碼那段；其他規則相同 |
+| `scripts/test-deploy-sh.sh`（新增，第七節） | 50 項（見下方「驗證」與「review 修正」） |
+| `scripts/check-config-examples.py` | 掃描範圍加 `.env.example` |
+| `docker-compose.redis.yml` | 檔頭的說明改成 `env_file` 與 C 的語意 |
+
+**`deploy.sh` 的流程**（照 4.3，數字是 4.3 的步驟）：`set -euo pipefail` → preflight（第 2、3 步：build 目錄是 git checkout、**在 `DEPLOY_BRANCH`**、追蹤中的檔案沒有本機修改；`compose.yml` 存在；`.env` 可讀、600；`compose.yml` 裡 backend 的 `env_file` 路徑跟 `APP_ENV_FILE`、`REDIS_ENV_FILE` 相同；第 4 步 Redis 白名單）→ 第 5 步 `git -C … pull --ff-only origin "$DEPLOY_BRANCH"` → 第 6 步 `config` 的 JWT 檢查 → 第 7 步記憶體檢查與逐一服務 build → 第 8 步 `run --rm --no-deps backend ./trading-backend -check-config` → 第 9 步 `down` → 第 10 步 `up -d --no-build` → 第 11 步 readiness（總截止時間 90 秒，每次請求最多 5 秒）。
+
+**跟計畫的差異**：
+
+1. **preflight 多檢查「build 目錄在 `DEPLOY_BRANCH`」**：`git pull origin X` 在別的分支上會把 X 合進那個分支，`--ff-only` 也擋不住「分支本身就不對」。
+2. **「沒有本機修改」只看追蹤中的檔案**（`status --porcelain --untracked-files=no`）：沒有追蹤的檔案⛔ 不算修改；會跟 pull 衝突的話，pull 本身會失敗、一樣停下。
+3. **build 的服務清單用 `compose config --services` 取得**（只有服務名稱、⛔ 不含設定值），⛔ 不寫死在腳本裡；每個服務 build 之前都檢查一次 `MemAvailable`。
+4. **記憶體門檻 `MIN_MEM_AVAILABLE_MB=1536`**：4.3 寫的是「2GiB 主機」，那是舊 VPS；2026-11-12 搬遷之後 live 跟 dev 在同一台（約 8GB）。實測 2026-11-16：冷 cache build backend（163 秒）與 python-server（85 秒），`MemAvailable` 從 5290MB 最低降到 4576MB（降 714MB）。門檻讓 build 之後仍留約 800MB。
+5. **`config` 失敗時⛔ 不顯示原始錯誤**：dotenv 的解析錯誤可能帶出 `env_file` 的那一行。代價是操作者要自己找原因，錯誤訊息會指向 compose.yml 與兩個 env_file。
+6. **測試用的鉤子**：`DEPLOY_MEMINFO_FILE` 可以把 `/proc/meminfo` 換成測試檔（正式使用⛔ 不設）；測試把 readiness 的上限縮短（複製出來的 `deploy.sh` 用 `sed` 改常數）。
+8. **readiness 用總截止時間**（review 修正，見下方）：4.3 第 11 步只寫了「最多等 90 秒」，原本的實作是「45 次 × 2 秒」。
+7. **`.env.example` 的 cron 用單引號**：中間有空白的值不加引號 compose 也照收，加單引號只是讓整段一眼看得出是一個值。
+
+**review 修正（2026-11-16）**：[P2] readiness 沒有落實 90 秒的總上限——外層只限制檢查次數，`wget` 沒有逾時，請求卡住或回應緩慢時實際耗時會超過 90 秒，甚至逾時之後仍回報成功（review 在隔離副本重現：宣告上限縮成 1 秒、請求耗時 3 秒，腳本回傳成功）。修正：
+* 改用**總截止時間**（`READY_TIMEOUT_SEC=90`，用 bash 的 `SECONDS` 算），每一輪的 `compose ps`、`docker inspect`、`compose exec … wget` 都用 host 的 `timeout` 包住，單次上限取 `READY_REQUEST_TIMEOUT_SEC`（5 秒）與剩餘時間較小的那個；`wget` 也帶 `-T`（busybox 的 network read timeout，已在 backend image 確認支援）。間隔的 `sleep` 也截短到剩餘時間。成功回應之後再確認一次 `RestartCount` 與「還在截止時間之內」。
+* preflight 新增：找不到 `timeout`（coreutils）就停下（還沒 down）。
+* 測試：假的 `sleep` 改成真的等、假的 `docker exec`／`ps` 可以模擬延遲（被 `timeout` 砍掉時連同子程序一起結束，⛔ 不留孤兒程序），測試把上限縮成總 4 秒、單次 2 秒。新增 6 項：一直失敗、每次回應 3 秒（超過單次上限）、請求卡住、`compose ps` 卡住，都在 4 秒結束（上限 5 秒）；**review 的重現**（總上限 1 秒、請求 3 秒）→ 1 秒結束、回傳非 0；回應 1 秒（在上限內）→ 通過。假 `docker` 也檢查 `wget` 有沒有帶 `-T`。共 50 項全部通過。
+* mutation（都已還原）：exec 拿掉 `timeout` → 3 秒的慢回應回報成功，測試變紅；`wget` 拿掉 `-T` → 測試變紅。
+* 另外修正 `git diff --check` 指出的 `docs/architecture.md` 檔尾多餘空白行。檢查新檔的行尾空白時發現：測試裡「前後都有空白的值」那一行的行尾空白在寫檔時被去掉了，等於⛔ 沒有測到「去掉後面的空白」；改成用 `printf` 寫進測試的 `.env`（原始碼⛔ 不留行尾空白），重跑通過。
+
+**實作時查證的事實**（Compose v5.7.0，2026-11-16 實測）：
+
+* `config` 的輸出會把 `env_file` 的值合併進 `environment:`（依鍵名排序），服務也依名稱排序；`env_file` 本身不出現。
+* dotenv：沒有引號或雙引號的值，`$X` 用**執行 compose 的 shell 的環境變數**展開（沒設定的展開成空字串）；沒有引號時 ` #` 之後是註解、前後空白會被去掉、`abc#x` 的 `#` 保留；雙引號內的 `#` 保留；單引號照字面讀。`config` 的輸出把 `$` 寫成 `$$`，用 container 實測拿到的是一個 `$`（`'a$b#c d'` → `a$b#c d`）。已寫進 `.env.example` 的開頭。
+* 執行時所在目錄的 `.env` ⛔ 不會被讀到（compose 只找 project directory 的 `.env` 做 interpolation）；範本的 `/path/to` 佔位沒改時 `config` 會報錯。
+
+**驗證**：
+
+* `scripts/test-deploy-sh.sh`：45 項全部通過（review 修正後 50 項）。
+  * 流程（假 `git`／`docker`／`sleep`）：正常情況的呼叫順序（preflight → `pull --ff-only` → `config` → `config --services` → build ×3 → `run … ./trading-backend -check-config` → `down` → `up -d --no-build` → readiness），`up` ⛔ 沒有 `--build`；在 `down` 之前停下的 23 種失敗（不是 git checkout、分支不對、有本機修改、`compose.yml` 不存在、`.env` 不存在、權限不是 600、兩個 `env_file` 路徑各自不一致、Redis `.env` 三種不符合、`pull` 失敗、`config` 失敗、JWT 空值／缺少／4 種公開範例值、`MemAvailable` 太低或讀不到、build 失敗、新 image 的設定檢查失敗），每一種都⛔ 沒有 `down`／`up`、輸出⛔ 沒有假 JWT；`down` 失敗 ⛔ 不 `up`；`up` 失敗、readiness 逾時、`RestartCount` 不是 0 都回傳非 0（readiness 的總上限另見上方「review 修正」）；readiness 第 3 次才成功 → 通過；只是開頭像範例值的 JWT → 通過；假 `docker` 本身擋得住「`run` 只帶旗標」。
+  * 設定解析（真的 `docker compose config`，⛔ 不啟動服務）：從 repo、scripts、其他目錄執行，backend 最終的設定相同；執行目錄的誘餌 `.env` ⛔ 沒有被讀到；`$`、`#`、引號、空白、cron 的解析結果符合 `.env.example` 的說明；`REDIS_PASSWORD` 來自 Redis 的 `.env`；`env_file` 指到不存在的檔、範本的佔位沒改都會報錯。
+  * 範本的 contract：`environment:` 與 `.env.example` 的鍵不重複；`.env.example` ⛔ 沒有漏掉舊範本的 40 個鍵；⛔ 沒有 `REDIS_PASSWORD`、必填的 `${…:?}`、`export`、`format: raw`、`up --build`；機密留空、開關都是 `false`；`deploy.sh` 的公開範例 JWT 跟 `contract.go` 的 `PublicJWTSecrets` 一致。
+  * `dc.sh`：`ps` 直接執行；`config`、沒有 `--yes` 的 `down`、compose 的全域選項都擋下且⛔ 沒有呼叫 docker；`--yes down` 執行。
+* mutation（都已還原）：`down` 的失敗被吞掉、改回 `up --build`、拿掉公開範例 JWT 的檢查、`.env.example` 漏一個鍵、`environment:` 加回 `REDIS_PASSWORD`、拿掉記憶體門檻，6 種都被測試擋下。
+* `bash -n` 三支腳本通過；shellcheck（container 版 v0.10.0）三支 0 則。
+* `scripts/check-config-examples.py`：9 個檔案、23 個範例值（範本⛔ 不再寫死範例的 JWT 與 API key，所以比 E 的時候少 3 個），全部在清單裡；`.env.example` 寫入一個不在清單的 JWT → 回報 1 個。`scripts/check-doc-refs.py` 問題 0。
+* ⚠️ ⛔ 沒有用真的 Docker 跑完整的 `deploy.sh`：它的對象是 live 的目錄配置。實際上線前，照第八節第 2 步在 live 用同一份原檔預先算 sha、逐一試跑檢查。
+
+**已歸檔的現況規格**（第九節）：
+
+* `development-workflow.md`：「live 的 Redis」改成 `env_file` 與 C 的啟動語意；「新增排程開關要改三個地方」改寫成「live 的設定：`env_file` 注入，⛔ 不再經過 `export`」（三個來源、同一個鍵只能放一處、live 跟範本的差異、dotenv 寫法、新增設定鍵要改的地方）；「只改 live 的環境變數」改成 `.env` 的改法、作廢 2026-10-28 的載入指令；新增「部署腳本：失敗即停、build 之後才 down」（流程、記憶體門檻的依據、⛔ 沒有自動回滾、**live 的 `deploy.sh` 還沒同步**）；「schema migration 上 live 的程序」的入口說明。
+* `architecture.md`「生產 / Docker」：設定的來源、Redis 的啟動語意，新增「設定契約（backend 啟動時檢查）」（輸出規則、載入失敗、`APP_ENV`、公開範例值清單與掃描、適用條件、`-check-config`，以及附錄 C 的完整契約表）。
+* 其他：`development-guide.md`、`architecture/data-pipeline.md`、`fugle-integration.md` 的 `export` 說法；`todo.md` T-076 的「要改的地方」；新增 `todo.md` T-082（D1：範本與 live 的結構差異）。
+* 還沒歸檔：第八節 live 的同步結果（第 2～4 步做完再補）。
+
 ## 附錄 C：設定契約表（E 的盤點，2026-11-13，待 review）
 
 > 實作第一步的產出。依 `backend/internal/config/config.go` 的每個欄位、`config.Load()` 的 `SetDefault`、`backend/config.yaml`，以及 `main.go`／scheduler 實際怎麼用，逐鍵整理。**這張表 review 通過之後才寫程式。**
@@ -561,4 +620,4 @@ I-131 的 R1～R4 仍待處理，不能以 I-132 已修復 live `.env` 或 Redis
 |---|---|---|
 | v1 | 2026-11-13 | 初版：A（A1 `:?`、A2 `.env.example`），C（重試之後非 0 結束），B 不做；記下 F1～F4 和範本落差。同日補充：E1 確認 build 目錄沒有 `.env`，查出 F1 的實際後果（viper 退回 `config.yaml` 的公開預設值），新增 D5；F2 已完成 |
 | v2 | 2026-11-13 | A/B 實測確認 F1，也確認 `--env-file` 修得好；使用者決定 D2 改成在 compose 裡用 `env_file` 注入 `.env`，不在 `deploy.sh` 加 `--env-file`（見 F1 的處置、D2、第八節第 1 步）。4.1、A2、第三節受影響檔案裡的 `--env-file` 寫法和資料流描述還沒改，等 live 驗證完成後一起改寫 |
-| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**2026-11-16 補充二**：C 實作完成（已改好、未 commit）；實作備註、查證的 go-redis 事實（`NewClient` 會就地改寫 `Options`）、跟計畫的差異（多一個原因類別 `canceled`、每次失敗另記 Warn）與 dev 實測（連不到的位址 23.01 秒）寫在「十一之前：C 的實作備註」。**2026-11-16 補充（review）**：[P2] DSN 契約改用 pgx 的 `pgconn.ParseConfig` 取最終有效帳密，修正 query 參數的範例密碼被放行、引號寫法的合法密碼被擋（附錄 C 之前的「review 修正」）。**同日補充六**：E 實作完成（已改好、未 commit），實作備註、跟計畫的差異（範例值檢查拆成 Go 測試與 `scripts/check-config-examples.py`、timeframe 只檢查格式）與 dev 實測結果寫在附錄 C 之前；記下新主機上 `test.sh` 在 rootless Docker 的 cache 權限問題與 vet 的記憶體需求。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |
+| v3 | 2026-11-13 | 依 v2 的 review 修正（逐項判斷：全部採納，D5 的做法有調整）：①D1 採建議：只同步 backend 的應用設定 `env_file`、`.env.example` 和部署範本，主機專屬結構另開 todo；②D2 落實到範本：`env_file` 的路徑用必填的 `DEPLOY_ENV_FILE`（4.1），live 維持已驗證的固定路徑；`environment:` 和 `.env.example` 的鍵不能重複，由測試擋；改正第三節、資料流、4.1、第九節裡已作廢的 `--env-file` 寫法；③D3 改正為「總共 5 次、最後一次失敗不再等、理論上限 23 秒」；[P2] go-redis 預設的重試與逾時會讓單次 ping 超過 3 秒 → 新增 2.5 和 4.4：用啟動專用的探測 client（`MaxRetries: -1`、逾時 3 秒、`ContextTimeoutEnabled`、用完就關），runtime client 不變；④D4 採建議，log ⛔ 不帶錯誤原文；⑤D5 採建議但調整做法：部署 preflight 用 awk 在記憶體裡檢查最終設定的 JWT（不用 jq／python3，因為 live 主機有沒有這兩個工具未確認），完整政策另開 issue；⑥新增 D6：失敗即停（`set -euo pipefail`、`git -C`、`pull --ff-only`、`down` 失敗不進 `up`），範本採用 live 的流程（新增 2.2 的流程差異表）；⑦readiness：`up -d` 成功不等於 backend 通過 Redis 檢查 → 4.3 第 9 步；⑧新增 2.4 啟動順序（Redis 失敗時 `AbortRunning`、排程器、HTTP 都還沒啟動）；⑨第七節補上假 `git`／`docker` 的呼叫順序測試、從不同目錄解析設定的比對、特殊字元的值、失敗時確實沒有啟動 HTTP 和排程器的 dev 實測；⑩第八節第 2 步：live 的 `deploy.sh` 也要補 D5、D6，做法同第 1 步；第 3 步記下 C 部署時要給 I-131 的版本資訊。**2026-11-16 補充四（review）**：[P2] readiness 改用 90 秒的總截止時間，每個 docker 呼叫用 `timeout` 包住、`wget` 帶 `-T`，補上慢回應、卡住與 review 重現的測試（「十一之前：A1～A3 的實作備註」的「review 修正」）；修正 `architecture.md` 檔尾空白行。**2026-11-16 補充三**：A1～A3 的範本實作完成（已改好、未 commit），現況規格歸檔到 `development-workflow.md`、`architecture.md`；跟計畫的差異（preflight 多檢查分支、只看追蹤中的檔案、服務清單由 `config --services` 取得、記憶體門檻依新主機實測訂為 1536MiB、`config` 失敗不顯示原始錯誤）與驗證寫在「十一之前：A1～A3 的實作備註」；新增 `todo.md` T-082（D1）。**2026-11-16 補充二**：C 實作完成（已改好、未 commit）；實作備註、查證的 go-redis 事實（`NewClient` 會就地改寫 `Options`）、跟計畫的差異（多一個原因類別 `canceled`、每次失敗另記 Warn）與 dev 實測（連不到的位址 23.01 秒）寫在「十一之前：C 的實作備註」。**2026-11-16 補充（review）**：[P2] DSN 契約改用 pgx 的 `pgconn.ParseConfig` 取最終有效帳密，修正 query 參數的範例密碼被放行、引號寫法的合法密碼被擋（附錄 C 之前的「review 修正」）。**同日補充六**：E 實作完成（已改好、未 commit），實作備註、跟計畫的差異（範例值檢查拆成 Go 測試與 `scripts/check-config-examples.py`、timeframe 只檢查格式）與 dev 實測結果寫在附錄 C 之前；記下新主機上 `test.sh` 在 rootless Docker 的 cache 權限問題與 vet 的記憶體需求。**同日補充五（review）**：①[P2] 公開範例憑證補齊：DSN 的 `trading:trading`／`user:password`／`root:password`、密碼 `trading`／`password`，Redis 的 `dev-redis-only`，production 擋下、dev／test 放行，每個值都有案例；完整清單寫在 4.6，例外：無；②[P2] `config.Load()` 的原始錯誤會帶出輸入值（mapstructure v1.5.0 的轉型錯誤）→ 載入失敗也轉成鍵名＋代號（`invalid_type`、`config_file:*`），正常啟動與 `-check-config` 都測假值不外洩。**同日補充四**：E 的實作第一步完成——新增附錄 C 設定契約表（逐鍵盤點；發現 `DATABASE_DRIVER` 漏設會靜默開空的 SQLite、cron 打錯會靜默不註冊），C.3 列出 Q1～Q4 待確認。**同日補充三（review）**：[P2] D11 的設定檢查要寫出執行檔（`run --rm --no-deps backend ./trading-backend -check-config`）：Dockerfile 只有 CMD、沒有 ENTRYPOINT，`compose run` 的參數會整個取代 CMD；⛔ 不為此改 Dockerfile；測試要驗證指令形式，dev 實測用同一個形式、postgres 停著也要能跑完。**同日補充二（review）**：①[P2] 4.6 的「不能是公開範例值」每一條都要有適用條件，停用的選填功能（例如 `FUGLE_ENABLED=false`、key 留空時 viper 退回 `YOUR_FUGLE_API_KEY`）⛔ 不能讓 backend 起不來，補上測試；範例值清單補 `YOUR_FUGLE_API_KEY`；②[P2] 4.3 主流程和第七節的測試同步成 D11 的順序（build → 用新 image 檢查設定 → down → `up -d --no-build`），並寫出 D11 不採用時的退路；另外補上 review 沒提到的風險：2GiB 主機上不停機 build 可能 OOM → build 前檢查 `MemAvailable`、逐一服務 build。**同日補充（使用者決定）**：D7 `REDIS_PASSWORD` 改由 `env_file` 讀 Redis stack 的 `.env`，live 現在就改（第八節 1b）；D8 新增 E「設定契約檢查」，範圍是完整的契約（4.6），D5 併入 E、⛔ 不另開 issue；新增 D9（環境類別，沒設定當 production）、D10（`env_file` 用絕對路徑佔位，取代 `DEPLOY_ENV_FILE`；依 2.3.1 的實測，相對路徑是相對於 project directory）、D11（部署前用新 image 跑只檢查設定的模式）；4.5 的 `dc.sh` 記下 live 版本，D7 之後不再需要讀密碼 |

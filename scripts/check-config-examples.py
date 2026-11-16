@@ -20,6 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONTRACT = os.path.join(ROOT, "backend", "internal", "config", "contract.go")
 FILES = sorted(glob.glob(os.path.join(ROOT, "docker-compose*.yml"))) + [
     os.path.join(ROOT, "deploy.sh"),
+    os.path.join(ROOT, ".env.example"),
     os.path.join(ROOT, "backend", "config.yaml"),
     os.path.join(ROOT, "python", "config.yaml"),
 ]
@@ -36,6 +37,10 @@ PATTERNS = [
     ("Fugle", re.compile(r'FUGLE_API_KEY[:=]\s*"?\$\{FUGLE_API_KEY:-([^}]+)\}'), ["PublicFugleKeys"]),
     ("Fugle", re.compile(r'FUGLE_API_KEY="([^"]+)"'), ["PublicFugleKeys"]),
     ("API key", re.compile(r'api_key:\s*"([^"]+)"'), ["PublicFinMindKeys", "PublicFugleKeys"]),
+    # .env.example 的 KEY=value（機密應該留空；有寫值就要是清單裡的範例值）
+    ("JWT", re.compile(r"^AUTH_JWT_SECRET='?([^'\n]+?)'?$", re.M), ["PublicJWTSecrets"]),
+    ("FinMind", re.compile(r"^FINMIND_API_KEY='?([^'\n]+?)'?$", re.M), ["PublicFinMindKeys"]),
+    ("Fugle", re.compile(r"^FUGLE_API_KEY='?([^'\n]+?)'?$", re.M), ["PublicFugleKeys"]),
     ("Redis", re.compile(r'\$\{DEV_REDIS_PASSWORD:-([^}]+)\}'), ["PublicRedisPasswords"]),
     ("DB 密碼", re.compile(r'(?:POSTGRES_PASSWORD|MYSQL_PASSWORD|MYSQL_ROOT_PASSWORD):\s*"?([^"\s]+)'), ["PublicDBPasswords"]),
 ]

@@ -38,6 +38,9 @@ set -euo pipefail
 
 FRONTEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$FRONTEND_DIR/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/stock_trading}"
 NODE_IMAGE="${NODE_IMAGE:-node:20-alpine}"
 MEM="${MEM:-440m}"
@@ -72,9 +75,10 @@ INSTALL=0
 
 mkdir -p "$CACHE_DIR/npm"
 
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 DOCKER_ARGS=(
   --rm
-  --user "$(id -u):$(id -g)"
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"}
   --cpus="$CPUS"
   --memory="$MEM"
   --memory-swap="$MEMSWAP"

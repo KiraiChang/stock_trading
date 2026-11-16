@@ -3468,7 +3468,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（計畫 v1 待確認：[`plans/i133-rootless-docker-user.md`](./plans/i133-rootless-docker-user.md)） |
+| 狀態 | 已實作／待 review（2026-11-16：`scripts/lib/docker-user.sh`，15 支腳本改用、cache 擁有者已還原；計畫書與實作備註保留供 review：[`plans/i133-rootless-docker-user.md`](./plans/i133-rootless-docker-user.md)） |
 | 嚴重度 | 低：Go 測試在新主機上直接失敗、不會誤判通過；目前靠手動放寬 cache 目錄的權限繞過 |
 | 分類 | Scripts／Go 測試 |
 | 建立日期 | 2026-11-16 |

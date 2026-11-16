@@ -35,6 +35,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 BACKEND_DIR="$REPO_ROOT/backend"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.postgres.yml}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/stock_trading}"
@@ -100,8 +103,9 @@ BIN_DIR="$(mktemp -d)"
 
 echo "==> [1/4] 編譯 migration 測試執行檔（image=$GO_IMAGE mem=$MEM gomemlimit=$GO_MEMLIMIT）"
 mkdir -p "$CACHE_DIR/gocache" "$CACHE_DIR/gomodcache"
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 docker run --rm \
-  --user "$(id -u):$(id -g)" \
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"} \
   --cpus="$CPUS" \
   --memory="$MEM" \
   --memory-swap="$MEMSWAP" \

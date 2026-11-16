@@ -63,6 +63,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 PYTHON_DIR="$REPO_ROOT/python"
 
 # ── I-100：參數所有權與 Stage 0 互斥（⚠️ 必須排在讀 DSN／連 docker 之前） ──
@@ -155,8 +158,9 @@ if [ ! -d "$MODELS_DIR" ]; then
   exit 1
 fi
 
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 DOCKER_ARGS=(
-  --user "$(id -u):$(id -g)"
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"}
   --network "$NETWORK"
   --cpus="$CPUS"
   --memory="$MEM"

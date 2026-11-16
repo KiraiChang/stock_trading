@@ -1,6 +1,6 @@
 # I-133：rootless Docker 下測試腳本的 `--user` 寫不進 cache（計畫書 v1）
 
-> 狀態：v1 草稿，待使用者確認（2026-11-16）。⛔ 確認前不改腳本、不動 cache 目錄的權限。
+> 狀態：v1.1 已確認並實作（2026-11-16），待 review。實作備註與跟計畫的差異在「七之前：實作備註」。
 > 對應：`docs/issue.md` I-133。跟 `todo.md` T-083 的關係：T-083 的驗證要跑 `python/scripts/test.sh`，所以本計畫先做。
 
 ## 一、目標與不做的範圍
@@ -85,7 +85,7 @@
 **回滾**（舊腳本帶 `--user 1001:1001`，在主機上是 166536；第 3.4 節已經把 cache 遞迴改成 dev 所有、頂層 755，只改回頂層的 777 ⛔ 不夠——內層目錄是 755 的 dev 所有，166536 仍然寫不進去）：
 
 1. `git revert` 這次的 commit。
-2. 用不連網路的 container 對兩個 cache 目錄 `chown -R 1001:1001`（container 的 uid 1001 就是主機的 166536，跟舊腳本寫出來的擁有者相同），頂層再改回 `777`。⛔ 不刪 cache。
+2. 用不連網路的 container 對兩個 cache 目錄 `chown -R 1001:1001`（container 的 uid 1001 就是主機的 166536，跟舊腳本寫出來的擁有者相同；`-R` 連頂層目錄一起改）。⛔ 不刪 cache。~~頂層再改回 `777`~~：演練時發現頂層已經是 166536 所有，dev ⛔ 不能再 `chmod`（`Operation not permitted`），而且⛔ 不需要——擁有者對了，755 就寫得進去（見實作備註）。
 3. 驗證：`find ~/.cache/stock_trading/gocache ~/.cache/stock_trading/gomodcache -mindepth 1 -user dev` 是 0 筆；用舊腳本跑一次 `backend/scripts/test.sh`，⛔ 沒有 `permission denied`，而且第二次跑時套件顯示 `(cached)`（cache 有被重用）。
 
 這套回滾在實作時演練一次（第六節第 5 點），⛔ 不是只寫在紙上。
@@ -107,6 +107,60 @@
    3. 再照第 3.4 節把 cache 改回 dev 所有、頂層 755，用新版的腳本跑一次確認仍然正常，最後移除 worktree。
    結果（含兩次的 `(cached)` 套件數）寫進實作備註。
 
+## 七之前：實作備註（2026-11-16；已改好、未 commit，待 review）
+
+**改了什麼**
+
+* 新增 `scripts/lib/docker-user.sh`：`docker_user_args` 設定 `DOCKER_USER_ARGS`；`docker info` 的 `SecurityOptions` 有 `name=rootless` → 空陣列，其他或 `docker info` 失敗 → `--user "$(id -u):$(id -g)"`；`DOCKER_USER_MODE=auto|user|none`，不認得的值回傳 2；同一支腳本只問一次。
+* 15 支腳本：在 `REPO_ROOT=` 之後 source lib（只載入函式、⛔ 沒有副作用），`--user …` 換成 `${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"}`（`smoke-replay-offline.sh` 兩處）；其他參數⛔ 沒動。
+* `docker_user_args`（會問 `docker info`）放在**參數檢查與 selftest 提前結束之後、緊接著啟動 container 的那一段之前**（`DOCKER_ARGS=(` 陣列或 `docker run` 指令的前一行）。`docker info` 另外用 `timeout`（`DOCKER_INFO_TIMEOUT_SEC`，預設 10 秒）限制，逾時照 rootful 處理。
+* 新增 `scripts/test-docker-user.sh`（19 項），掛在 `python/scripts/test.sh` 的 doc-refs 檢查之後。守門掃 repo 追蹤中與未追蹤（不含 ignore）的 `*.sh`，lib 與測試本身除外。
+* `docs/development-workflow.md`「三支腳本共同保證」改寫成 rootless／rootful 的現況。
+
+**驗證**
+
+* `scripts/test-docker-user.sh` 12 項通過。突變：rootless 也帶 `--user` → 3 項失敗；rootful 也不帶 → 2 項失敗。
+* `bash -n` 全部通過；shellcheck v0.10.0（`-S warning`）15 支修改前後的警告完全相同（1 則，既有的），lib 與新測試 0 則。
+* cache 還原（第 3.4 節）：被 subuid 166536 佔有的 17,707 個檔案（`gomodcache` 13,225、`gocache` 4,482）改回 dev，兩個目錄 777 → 755；之後 `find ! -user dev` 0 筆。
+* 實跑（依序、⛔ 不並行，主機跟 live 共用記憶體；MemAvailable 約 5.2GB）：
+
+| 腳本 | 結果 |
+|---|---|
+| `MEM=1500m backend/scripts/test.sh` | rc 0、151 秒、14 個套件 ok |
+| `python/scripts/test.sh -q` | rc 0：pytest 1915 passed、1 skipped（以 container 的 root 執行，⛔ 沒有依賴非 root 權限的測試失敗）；`test-docker-user.sh` 12 項與既有的 replay shell 測試都通過 |
+| `frontend/scripts/test.sh` | rc 0、76 秒；`dist` ⛔ 沒有變動 |
+| `MEM=1500m scripts/test-postgres-migrations.sh` | rc 0、20 秒；臨時的 postgres 已收掉 |
+
+  每支跑完 repo 與 cache 都⛔ 沒有 dev 以外擁有的檔案，⛔ 沒有 `permission denied`。
+* **沒有實跑**（只做靜態檢查與守門）：`test-mysql-migrations.sh`、`test-redis-emission.sh`、`verify-event-timeline.sh`（會讀 live 的網路，⛔ 不在這裡跑）、`run-evaluation.sh`、`build-selection-report.sh`、`verify-regression-baseline.sh`、`smoke-replay-offline.sh`、`run-replay-offline.sh`、`compare-replay-crossday.sh`、`compare-i129-replay.sh`、`finalize-evidence.sh`。其中會寫掛載目錄的評估／replay 工具，下次實際使用時要確認輸出的擁有者。
+* **回滾演練**（第六節第 5 點）：用 `git worktree` 取出 `52b2932`（改之前，腳本有 `--user`）；`chown -R 1001:1001` 之後 cache 全部是 166536 所有（17,795 個、dev 0 個）。舊腳本跑兩次：第一次 rc 0、112 秒、14 個 ok 裡 10 個 `(cached)`；第二次 rc 0、7 秒、14 個全部 `(cached)`，兩次都⛔ 沒有 `permission denied` → cache 有被重用。再 `chown -R 0:0`、頂層 755（dev 17,832 個、非 dev 0 個），新腳本跑一次 rc 0、70 秒、12 個 `(cached)`。worktree 已移除。
+
+**review 修正（2026-11-16）**：[P2] 第一版把 `docker_user_args` 放在 source 的下一行，也就是參數檢查與 selftest **之前**：`run-evaluation.sh`、`run-replay-offline.sh` 只驗參數的 selftest 也會去問 daemon，daemon 沒回應就卡住，偽造的參數也無法立即被拒絕（review 重現）。修正：
+* 15 支都把呼叫移到啟動 container 的那一段之前（見「改了什麼」）；lib 的 `docker info` 加上逾時。
+* `scripts/test-docker-user.sh` 新增 7 項：`docker info` 沒回應 → 1 秒逾時、照 rootful；**位置檢查**：每個呼叫之後（略過註解與空行）的那一段必須用到 `DOCKER_USER_ARGS`（陣列之內或同一個續行指令），15 支都符合，檢查本身對「排在前面」與「緊接的陣列」各有一個案例；**實測**：用一個任何呼叫都卡 30 秒的假 docker，`run-evaluation.sh` 與 `run-replay-offline.sh` 的 selftest（rc 0）與偽造參數的拒絕（rc 1）都在 0 秒結束、docker 呼叫 0 次。
+* 突變（把兩支的呼叫移回最前面，等於 review 重現的版本）：位置檢查 1 項、實測 4 項失敗（每項卡到 10 秒逾時、docker 呼叫 1 次）。
+* `bash -n` 全部通過；shellcheck（`-S warning`）跟修改前相同，lib 與新測試 0 則。
+* 四支 runtime 在修正後的版本上**重跑一次**（結果見下方「review 修正後的重跑」）。
+
+**review 修正後的重跑**（2026-11-16 16:17～16:21，依序、⛔ 不並行；MemAvailable 5.2GB 上下）：
+
+| 腳本 | 結果 |
+|---|---|
+| `MEM=1500m backend/scripts/test.sh` | rc 0、7 秒（14 個套件都用到 cache） |
+| `python/scripts/test.sh -q` | rc 0、123 秒：pytest 1915 passed、1 skipped；`test-docker-user.sh` 19 項通過 |
+| `frontend/scripts/test.sh` | rc 0、56 秒 |
+| `MEM=1500m scripts/test-postgres-migrations.sh` | rc 0、19 秒；臨時的 postgres 已收掉 |
+
+四支都⛔ 沒有 `permission denied`，每支跑完 repo 與 cache 裡 dev 以外擁有的檔案都是 0。python 的 replay shell 測試又留下 4 個 worktree（I-118，同上），已清掉。
+
+**跟計畫的差異**
+
+* 回滾步驟 2 的「頂層改回 777」拿掉：`chown -R` 連頂層一起改成 166536 之後，dev ⛔ 不能再 `chmod` 它（`Operation not permitted`），而舊腳本在 755 下也寫得進去（擁有者對了）。第五節已改正，演練就是用改正後的步驟通過的。
+
+**順帶看到的（⛔ 不是本次造成）**
+
+* `python/scripts/test.sh` 的 replay shell 測試在 16:04 留下 4 個 git worktree 註冊（`/tmp/tmp.*`，其中 3 個是 prunable）——這是既有的 I-118（`exec docker run` 讓 EXIT trap 不執行）。這 4 個是本次測試留下的，已用 `git worktree remove --force` 與 `git worktree prune` 清掉（只剩主工作目錄）。
+
 ## 七、完成後要歸檔的位置
 
 * `docs/development-workflow.md`：把 `--user` 那段改成「依 Docker 模式決定」的現況說明（rootless 與 rootful 各自的行為、`DOCKER_USER_MODE`、cache 目錄的權限）。
@@ -119,3 +173,4 @@
 |---|---|---|
 | v1 | 2026-11-16 | 初版。 |
 | v1.1 | 2026-11-16 | review [P2]：回滾只改回頂層 777 不夠（內層已遞迴改成 dev 所有、755，舊腳本的 subuid 仍寫不進去）→ 回滾補上「擁有者改回 166536」的步驟與驗證（`(cached)` 證明 cache 被重用），並在實作時演練一次（第六節第 5 點）。 |
+| v1.2 | 2026-11-16 | 實作：回滾步驟 2 拿掉「頂層改回 777」（演練時發現做不到也不需要）；新增實作備註。 |

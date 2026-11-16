@@ -17,6 +17,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 PYTHON_DIR="$REPO_ROOT/python"
 . "$REPO_ROOT/scripts/lib/replay-args.sh"
 
@@ -92,8 +95,9 @@ BASE_COMMIT="$(replay_args_prepare_worktree "$REPO_ROOT" "$SOURCE_REF" "$WORKTRE
 TOOLING_PATCH_SHA256="$(replay_args_tooling_patch_sha256 "$WORKTREE" "$BASE_COMMIT" "${TOOLING_PATCH:-}")"
 RUNNER_SHA256="$(replay_args_runner_sha256 "${BASH_SOURCE[0]}")"
 
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 DOCKER_ARGS=(
-  --rm --network none --user "$(id -u):$(id -g)"
+  --rm --network none ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"}
   --cpus="${CPUS:-1}" --memory="${MEM:-700m}" --memory-swap="${MEM:-700m}"
   -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1
   -v "$WORKTREE/python":/app:ro "${MOUNTS[@]}" -w /app

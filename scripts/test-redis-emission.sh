@@ -17,6 +17,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 GO_IMAGE="${GO_IMAGE:-golang:1.25-alpine}"
 CACHE_DIR="${CACHE_DIR:-$HOME/.cache/stock_trading}"
 
@@ -72,9 +75,10 @@ echo "==> go test ./internal/store/ -run TestLuaCompareAndDelete|TestFirstReadOn
 #    拋棄式 Redis 與 network 就會殘留（2026-09-02 第一版真的留了一個跑 17 分鐘的容器）。
 #    正常執行、保留 exit code，讓 trap 有機會清理。
 status=0
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 docker run --rm \
   "${NETWORK_ARGS[@]}" \
-  --user "$(id -u):$(id -g)" \
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"} \
   --memory 500m --cpus=1 \
   -e HOME=/tmp -e GOMAXPROCS=1 -e GOFLAGS=-p=1 -e GOGC=off -e GOMEMLIMIT=250MiB \
   -e GOCACHE=/gocache -e GOMODCACHE=/gomodcache \

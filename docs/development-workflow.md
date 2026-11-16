@@ -2783,7 +2783,20 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 
 三支腳本共同保證：
 
-- `--user "$(id -u):$(id -g)"`：以本機 uid/gid 執行，container 產出的檔案不會是 root 所有。
+- container 產出的檔案在主機上是執行者所有（⛔ 不會是 root 或 subuid）。container 以哪個 uid 執行由
+  `scripts/lib/docker-user.sh` 依 Docker 的模式決定，三支 `test.sh` 與 `scripts/` 底下用 container 寫檔的腳本都用它（I-133）：
+  - **rootful**：帶 `--user "$(id -u):$(id -g)"`，container 的 uid 就是主機的 uid。
+  - **rootless**（`docker info` 的 `SecurityOptions` 有 `name=rootless`；新主機 srv2141876 是這種）：⛔ 不帶 `--user`。
+    rootless 的 container 在 user namespace 裡，**container 的 uid 0 對應主機的執行者**，其他 uid 對應 `/etc/subuid` 的範圍；
+    帶 `--user 1001:1001` 反而會變成主機上的 subuid（例如 166536），寫不進執行者擁有、權限 755 的 cache 與掛載目錄
+    （2026-11-13 的 `mkdir /gocache/00: permission denied`）。container 的 root 對主機來說就是執行者，權限沒有變大。
+  - `docker info` 失敗或逾時（`DOCKER_INFO_TIMEOUT_SEC`，預設 10 秒）時照 rootful 處理（原本的行為）；`DOCKER_USER_MODE=user|none` 可以強制，只給除錯用。
+  - ⚠️ `docker_user_args`（會問 `docker info`）要放在參數檢查與 selftest 提前結束**之後**、緊接著啟動 container 的那一段之前；
+    排在前面的話，只驗參數的路徑也會去問 daemon，daemon 沒回應就卡住（I-133 的 review）。`scripts/test-docker-user.sh` 會檢查位置。
+  - ⛔ 新腳本不要直接寫 `--user "$(id -u):$(id -g)"`：`scripts/test-docker-user.sh`（`python/scripts/test.sh` 會先跑它）會擋。
+  - cache 目錄（`~/.cache/stock_trading/gocache`、`gomodcache`）是執行者所有、`755`。換到 rootless 主機之前用 `--user` 跑過的話，
+    cache 裡會留下 subuid 擁有的檔案：用一次不連網路的 container 對這兩個目錄 `chown -R 0:0`（rootless 下就是改回執行者），
+    ⛔ 不要用 `chmod 777` 繞過。
 - Go build 產物寫到 container 內 `/tmp`、pytest 關閉 `__pycache__` 與 `.pytest_cache`，
   不在 repo 留下編譯／測試殘渣。
 - build / module / npm 快取放在 repo 外的 `~/.cache/stock_trading/`（可用 `CACHE_DIR=` 覆寫），

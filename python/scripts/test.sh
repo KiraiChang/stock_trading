@@ -34,6 +34,9 @@ set -euo pipefail
 
 PYTHON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$PYTHON_DIR/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-700m}"
 CPUS="${CPUS:-1}"
@@ -77,6 +80,8 @@ fi
 # 的語意是「跳過 replay 的 shell 測試」，⛔ 不該順手把文件檢查也關掉。
 "$REPO_ROOT/scripts/test-doc-refs.sh"   # ⚠️ 守門工具自己的迴歸測試（初版曾 fail-open）
 python3 "$REPO_ROOT/scripts/check-doc-refs.py"
+# container 以哪個 uid 執行的判斷與守門（I-133；假 docker，⛔ 不需要 image）
+"$REPO_ROOT/scripts/test-docker-user.sh"
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
@@ -95,8 +100,9 @@ fi
 
 
 echo "==> pytest：$* image=$IMAGE mem=$MEM"
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 exec docker run --rm \
-  --user "$(id -u):$(id -g)" \
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"} \
   --cpus="$CPUS" \
   --memory="$MEM" \
   --memory-swap="$MEMSWAP" \

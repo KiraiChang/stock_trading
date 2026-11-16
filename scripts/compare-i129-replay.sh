@@ -18,6 +18,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-600m}"
 
@@ -70,8 +73,9 @@ done
 echo "==> 建置 image：$IMAGE" >&2
 docker build -q -t "$IMAGE" "$REPO_ROOT/python" >/dev/null
 echo "==> 比較（mem=$MEM、--network none）" >&2
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 exec docker run --rm --network none \
-  --user "$(id -u):$(id -g)" \
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"} \
   --memory="$MEM" --memory-swap="$MEM" \
   ${OOM_ARG:+"$OOM_ARG"} \
   -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 \

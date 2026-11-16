@@ -39,6 +39,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 PYTHON_DIR="$REPO_ROOT/python"
 IMAGE="${PY_IMAGE:-stock-trading-python-test:latest}"
 MEM="${MEM:-500m}"
@@ -74,9 +77,10 @@ if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
   exit 1
 fi
 
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 DOCKER_ARGS=(
   --rm
-  --user "$(id -u):$(id -g)"
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"}
   --network "$NETWORK"
   --cpus="$CPUS"
   --memory="$MEM"

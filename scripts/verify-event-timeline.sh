@@ -23,6 +23,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# container 以哪個 uid 執行：rootless 時不帶 --user（I-133，見 scripts/lib/docker-user.sh）。
+# ⚠️ 這裡只載入函式；docker_user_args（會問 docker info）放在參數檢查之後、啟動 container 之前。
+. "$REPO_ROOT/scripts/lib/docker-user.sh"
 BACKEND_DIR="$REPO_ROOT/backend"
 SYMBOL="${SYMBOL:-0050}"
 NETWORK="${NETWORK:-trading-net}"
@@ -55,8 +58,9 @@ fi
 mkdir -p "$CACHE_DIR/gocache" "$CACHE_DIR/gomodcache"
 
 echo "==> Event Timeline live 驗證：symbol=$SYMBOL network=$NETWORK mem=$MEM（唯讀）"
+docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 exec docker run --rm \
-  --user "$(id -u):$(id -g)" \
+  ${DOCKER_USER_ARGS[@]+"${DOCKER_USER_ARGS[@]}"} \
   --network "$NETWORK" \
   --cpus="$CPUS" \
   --memory="$MEM" \

@@ -934,8 +934,7 @@ scripts 目錄試跑（腳本只認自己所在的目錄）。
 測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
 
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
-（先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `ab8baa3` 的範本，⚠️ 還沒有上面 stdin 的修正，在終端機執行會停在第 5 步；
-要先換成修正後的範本才能部署（I-132 的計畫書第八節）。
+（先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上，I-132 的計畫書第八節）。
 
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 

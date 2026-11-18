@@ -3045,7 +3045,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 選項 | 代價 |
 |---|---|
-| `requirements.txt` 改精確釘版（`==`） | 要一併處理既有 image 與 live 的版本差；影響範圍超出 SR Zone |
+| `requirements.txt` 改精確釘版（`==`） | ✅ 由 `todo.md` T-083 處理（2026-11-16：版本照 live、基底 image 固定到 digest；repo 與 dev 已實作，live 部署待做），現況見 `development-workflow.md`「python 的套件版本與升級」；⚠️ 只解決「重建得出同一組套件」，⛔ 不解決既有 bundle 訓練時的版本（下兩列仍待決策） |
 | bundle `manifest.json` 增記訓練時的 `pip_freeze`／sklearn 版本 | 只解決「知道差在哪」，⛔ 不解決「裝得回去」 |
 | 為 bundle 保存 image tarball（`docker save`） | 最徹底，但每份 bundle 多數百 MB |
 | 維持現狀，明確接受「image 消失即不可重現」 | ⚠️ 那要寫進 `sr-zone-scoring.md` 成為**明示的已知限制**，⛔ 不能默認 |
@@ -3458,7 +3458,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已實作／待 review：E（設定契約）、C（Redis 啟動探測）、A1～A3（部署範本）已 commit，2026-11-16 15:10 部署到 live（第八節第 2～4 步：live 的 `deploy.sh` 換成範本只換 3 行、部署結果與兩次偏差）；部署後第一個排程的確認待補；計畫書保留供 review：[`plans/i132-redis-silent-disable.md`](./plans/i132-redis-silent-disable.md) |
+| 狀態 | 已實作／待 review：E（設定契約）、C（Redis 啟動探測）、A1～A3（部署範本）已 commit，2026-11-16 15:10 部署到 live（第八節第 2～4 步：live 的 `deploy.sh` 換成範本只換 3 行、部署結果與兩次偏差）；部署後第一個排程（16:00 `evaluation_universe_sync`）`success`；計畫書保留供 review：[`plans/i132-redis-silent-disable.md`](./plans/i132-redis-silent-disable.md) |
 | 嚴重度 | 中：Redis 停用時，指標快取和訊號佇列都會靜默失效，API、排程和 `job_runs` 卻一切正常 |
 | 分類 | 部署 / Backend 啟動 |
 | 建立日期 | 2026-11-13 |

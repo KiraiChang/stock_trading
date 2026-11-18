@@ -82,6 +82,8 @@ fi
 python3 "$REPO_ROOT/scripts/check-doc-refs.py"
 # container 以哪個 uid 執行的判斷與守門（I-133；假 docker，⛔ 不需要 image）
 "$REPO_ROOT/scripts/test-docker-user.sh"
+# python-worker 的 dev 驗收腳本（T-083；假 docker，⛔ 不需要 image）
+"$REPO_ROOT/scripts/test-smoke-dev-worker.sh"
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"

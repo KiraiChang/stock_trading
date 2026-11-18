@@ -955,6 +955,35 @@ scripts 目錄試跑（腳本只認自己所在的目錄）。
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
 （先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上，I-132 的計畫書第八節）。
 
+### python 的套件版本與升級（T-083）
+
+`python/requirements.txt` 是**完整的精確釘版**：直接依賴 15 個、間接依賴 33 個，全部 `==`；`python/Dockerfile` 的基底 image 固定到 digest
+（`python:3.11.18-slim-trixie@sha256:07d48240…`：Python 3.11.18、Debian 13.7、pip 24.0、setuptools 79.0.1、wheel 0.46.3）。
+dev、live 與 `python/scripts/test.sh` 的測試 image 都由同一份 Dockerfile build，所以三者的套件完全相同。
+
+* **為什麼**：原本只寫下限（例如 `pandas>=2.0.0`），快取一失效、重新 build 就裝到當下最新的版本，程式沒改也會換掉套件；
+  2026-11-16 查到 dev 跟 live 已經差了 `fastapi`（0.163.1 vs 0.162.5），而 live 兩個 python container 正在跑的 image 已經不在 image 庫，
+  想重新 build 一份一樣的也做不到。凍結 bundle 的模型檔（pickle）跨 sklearn 版本可能給出不同結果，見 `issue.md` I-116。
+* **版本來源**：2026-11-16 live 的 `pip freeze --all`（python-server 與 python-worker 相同）。`pip`、`setuptools`、`wheel` 由基底 image 決定，⛔ 不列在
+  `requirements.txt`。
+* **`libgomp1` 刻意不釘版本**：Debian 的套件庫會移除舊版，釘了會讓之後的 build 直接失敗；改成驗收時記錄（2026-11-16：14.2.0-19，dev 與 live 相同）。
+* **build 時 `pip check`**：依賴彼此衝突就讓 build 失敗。
+* **比對套件清單用 `pip freeze --all | LC_ALL=C sort | md5sum`**：⚠️ 一定要 `LC_ALL=C`，`sort` 的順序跟 locale 有關（en_US 不分大小寫、C 是大寫在前），
+  同一份清單在不同 locale 下 md5 不同。2026-11-16 的基準是 `39c5d9d45667ea4d872b9e746ac99600`（同一份清單在 en_US.UTF-8 下是 `1c801990…`）。
+* **冷 build 的量測**（2026-11-16，這台主機、live 同時在跑）：`pip install` 42 秒、export 36 秒；`python/scripts/test.sh` 整段（含 pytest）的 MemAvailable 低點
+  4840 MiB（開始時 5253 MiB）。
+* **⚠️ 同一份輸入、全部用快取的 build，image ID 也會變**：BuildKit 每次都會產生新的 attestation manifest。⛔ 不能靠 image ID 認版本；
+  要比內容用 layer 或上面的 md5，回滾目標要在部署前用標籤留住（見「部署腳本：失敗即停」）。
+* **⚠️ Windows 的本機 venv**（`python/setup.sh`、`development-guide.md`）：這組版本在 Windows 上有沒有 wheel ⛔ 沒有驗證過。
+
+**升級的程序**（⛔ 不要只改直接依賴，間接依賴是照 `pip freeze` 列的，不會自己跟著動）：
+
+1. 在 dev 改釘版，一次只升級一組相關的套件；基底 image 要升級時，換 `FROM` 的 tag 與 digest，並記下新的 Python／Debian／pip 版本。
+2. build 之後用新 image 的 `pip freeze --all` 重新產生間接依賴的那一段，⛔ 不手改；`pip check` 要通過。
+3. `python/scripts/test.sh` 全部通過；`scripts/smoke-dev.sh` 與 `scripts/smoke-dev-worker.sh` 通過。
+4. 影響 SR 計算的套件（numpy、pandas、scikit-learn、lightgbm、shap、scipy）升級時，另外做 SR 的回歸驗證，並注意 I-116（模型檔的 pickle 跨版本）。
+5. 部署照「部署腳本：失敗即停」：部署前替 python 正在跑的 image 打回滾標籤，部署前後比對 `LC_ALL=C` 排序的 `pip freeze` md5。
+
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 
 後端的 `knownSchedulerJobs`（`api/handler/scheduler.go`）與前端有兩份對應資料，
@@ -3203,6 +3232,31 @@ NO_BUILD=1 SERVICES=backend OVERRIDE=/path/to/override.yml scripts/smoke-dev.sh
 * **Dockerfile 的前端 stage ⛔ 不改用 repo 裡的 dist**（省掉 build 時的 `npm ci`；2026-11-02 決定不做）：
   那會改到 live 的 image 建置，屬於另一件高影響異動；而且上面的實測低點落在 `go build`，前端的 `npm run build`
   那 16 秒的低點是 592 MB，⛔ 不是瓶頸。
+
+**python-worker 的驗收：`scripts/smoke-dev-worker.sh`**（T-083）。`smoke-dev.sh` ⛔ 不起 python-worker（它在 compose 的 `worker` profile、
+有自己的 build 與 image `stock_trading_dev-python-worker`），所以另外一支，⛔ 不改 `smoke-dev.sh`：
+
+```bash
+scripts/smoke-dev-worker.sh
+EXPECT_FREEZE_MD5=39c5d9d45667ea4d872b9e746ac99600 scripts/smoke-dev-worker.sh   # 另外驗 pip check 與套件清單
+```
+
+* 流程：開始前已經有 python-worker 的 container 就停下、⛔ 不動它 → postgres 起到 healthy → dev DB 的 `backtest_jobs` 有 `pending` 就停下
+  （worker 一起來就會執行它們）→ build（`NO_BUILD=1` 略過）→ 選用的 `pip check`／md5（不連網路、⛔ 不啟動 worker 程式）→ `up -d --no-deps` →
+  container 的 image 要是本次的 → 等 log 出現 `poll #N`（`POLLS`，預設 3；上限 `WAIT_SECONDS`，預設 90 秒），期間一直是 running、`RestartCount` 0 →
+  log 有 `worker started`、⛔ 沒有 `Traceback` 與 `poll #… error`。
+* **只操作 dev project**：compose 檔固定是 `docker-compose.dev.yml`（⛔ 不接受覆寫），而且在任何會改變狀態的指令之前，先確認解析出來的
+  project 是 `stock_trading_dev`，不是就停下；`COMPOSE_PROJECT_NAME` 有設定（含空字串）也停下（同 `smoke-dev.sh`）。
+* **每個 docker 指令都有上限**（coreutils `timeout`）：單次 `CALL_TIMEOUT`（預設 30 秒）、build `BUILD_TIMEOUT`（預設 1200 秒）；等待 `poll #N`
+  期間單次查詢的上限再被剩餘時間截短。逾時先送 SIGTERM，`KILL_AFTER`（預設 5 秒）後還沒結束就送 SIGKILL（`timeout -k`）：
+  docker／plugin 忽略 SIGTERM 時也停得下來。所以 docker 卡住時，等待會在 `WAIT_SECONDS`＋`KILL_AFTER`（＋約 1 秒）內結束，
+  收尾在 `CLEANUP_TIMEOUT`＋`KILL_AFTER` 內結束。
+* **image 只認 `stock_trading_dev-python-worker`**：`config --images python-worker` 會連 depends_on 的 postgres 一起列，順序不固定，
+  ⛔ 不能取第一行。
+* **收尾**：從啟動那一步起，成功、失敗、逾時、Ctrl+C 都會停止並移除**本次建立的** python-worker，並確認它真的不在了；⛔ 不動 postgres 等其他服務。
+  整段收尾共用 `CLEANUP_TIMEOUT`（預設 60 秒）。**移除失敗、逾時或移除後仍查得到 → 結束碼 1**（⛔ 不能回報成功卻留下一個還在輪詢的 worker）。
+* 結束碼：0 通過、1 驗收失敗或收尾失敗、2 參數或前置條件不對（⛔ 沒有啟動 worker）。
+* 測試：`scripts/test-smoke-dev-worker.sh`（假 docker；`python/scripts/test.sh` 會先跑它）。
 
 可用環境變數覆寫等待時間、log 行數或 health URL：
 

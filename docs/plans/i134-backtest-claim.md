@@ -136,6 +136,11 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
    * `backtest_jobs` 各狀態的筆數，`running` 的 job_id 與 `started_at`。
    * 有沒有重複的交易明細：同一個 `job_id` 下，`symbol`、`direction`、`entry_time`、`exit_time` 都相同的列出現兩次以上。有的話列出 job_id 與筆數，⛔ 不清。
    * 時區：比較 python 寫入的 `started_at` 與 Go 寫入的 `created_at` 的差值（正常應該是秒級；差 8 小時左右就是 4.2 的時區問題）。
+   * ✅ **結果（2026-11-18 10:xx，使用者在 live 執行）**：
+     * `backtest_jobs` 共 8 筆：`done` 6、`failed` 2；`pending`／`running` 都是 0 → 目前⛔ 沒有遺留的任務，6.2 的待處理清單預期是空的（上版當天仍要重新盤點）。
+     * 重複的交易明細：0 個 job → 兩條路徑的競爭在 live 上⛔ 沒有留下重複（資料量很少，⛔ 不代表競爭不存在）。
+     * 目前連線的 TimeZone 是 `UTC`；這 8 筆（全部是 2026-07-01 建立的）的 `started_at` 與 `created_at` 相差 0.004～0.021 秒、負值 0 筆，⛔ 沒有觀察到約 8 小時的落差。⚠️ 歷史寫入時的連線時區⛔ 沒有直接確認（review 2026-11-18：原本寫「證明寫入時的連線是 UTC」超出查詢能證明的範圍）。
+     * 8 筆的「開始減建立」都在 21 毫秒內，比 worker 的輪詢間隔（`python/config.yaml` 的 10 秒）短得多，8 筆都剛好被 worker 在 21 毫秒內輪詢到的機率很低，看起來是 HTTP 路徑認領的；但 DB 沒有記執行者，⛔ 無法確認（077 之後才有 `execution_owner`）。
 1. **python 單元測試**（`python/scripts/test.sh`；用 SQLite 檔案 DB，從 repo 的 SQLite migration 建表）：
    * 認領：`pending` 才成功；非 `pending` 回 False 且⛔ 沒有任何寫入；兩個連線（兩個執行緒）同時認領同一筆，只有一個成功。
    * `finish_job`：結果、明細與 `done` 一起提交；在寫明細時注入失敗 → 結果與明細都沒有、狀態仍是 `running`；任務已不是自己的 `running` → rollback、回傳 False。

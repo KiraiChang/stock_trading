@@ -1445,7 +1445,8 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
 
 ### GET `/backtest/:job_id`
 
-取得特定回測任務狀態與結果；`result` 在任務未完成時為 `null`。
+取得特定回測任務狀態與結果；`result` 在任務未完成時為 `null`。（I-134 之前 `pending`／`running` 的任務因為 `error` 是 NULL 讀不出來，
+這支會回 404、列表會回 500；現在都正常。）
 
 **Response（完成後）：**
 ```json
@@ -1489,7 +1490,21 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
 
 ### DELETE `/backtest/:job_id`
 
-取消回測任務，**只能取消 `pending` 狀態**（已開始執行的無法取消，`409 Conflict`）。
+取消回測任務，**只能取消 `pending` 狀態**。條件式更新（只有 `pending` 才改成 `failed`、`error` 是 `cancelled by user`），
+跟 python 的認領同時發生時只有一方成功：
+
+| 情況 | 狀態碼 |
+|---|---|
+| 取消成功 | `200`（`{"message": "cancelled"}`） |
+| 已被 python 認領或已結束 | `409 Conflict`（`only pending jobs can be cancelled`） |
+| 找不到這筆 | `404` |
+| DB 錯誤 | `500`（⛔ 不是 404；訊息不帶內部細節） |
+
+python 服務重啟時，自己留下的 `running` 會被收成 `failed`／`interrupted_on_restart`（⛔ 不自動重跑；規則見
+`database-schema.md` 的 `backtest_jobs`）。
+
+**python-server 的 `POST /backtest`**（backend 內部呼叫，不對外）：回應之前同步認領，成功 `202`；任務已不是 `pending`（已被 worker 認領、
+已取消或已結束）回 `409`、⛔ 不執行。backend 只依狀態碼記 log、⛔ 不改任務狀態；連線失敗或逾時記成「結果未知」（server 可能已經認領）。
 
 ---
 

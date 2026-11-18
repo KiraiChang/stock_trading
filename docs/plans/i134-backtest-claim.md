@@ -1,6 +1,6 @@
-# I-134：回測任務的原子認領與重啟後的遺留 `running`（計畫書 v1.2）
+# I-134：回測任務的原子認領與重啟後的遺留 `running`（計畫書 v1.3）
 
-> 狀態：v1.1 已確認（使用者 2026-11-18）；**v1.2（dev 驗收腳本的細節，第七節第 4 點）待確認**；實作原本暫緩到 T-083 部署到 live 完成之後（使用者 2026-11-18 指示；live 的 `deploy.sh` 會 `git pull`，T-083 部署前 push 的實作會被一起帶上 live）；**T-083 已於 2026-11-18 14:24 部署完成，可以開始實作**。dev 驗收腳本的細節：v1.2 依使用者 2026-11-18 的裁決改寫（第七節第 4 點）。對應：`docs/issue.md` I-134。需求裁決：2026-11-18（D1～D4，見第二節）。
+> 狀態：v1.1 已確認（使用者 2026-11-18）；v1.2（dev 驗收腳本的細節）已確認（2026-11-18）；v1.3（實作時發現的既有問題併入本計畫修正：Go 讀不到 `error` 為 NULL 的任務、worker 在 PostgreSQL 上讀到 JSONB 的 `symbols` 與 DATE 的日期都是原生型別、回測因此失敗；使用者 2026-11-18 同意）；**repo 與 dev 已實作（2026-11-18），待 review；live 的首次上版（6.2）還沒做**（實作備註在「八之後」）；實作原本暫緩到 T-083 部署到 live 完成之後（使用者 2026-11-18 指示；live 的 `deploy.sh` 會 `git pull`，T-083 部署前 push 的實作會被一起帶上 live）；**T-083 已於 2026-11-18 14:24 部署完成，可以開始實作**。dev 驗收腳本的細節：v1.2 依使用者 2026-11-18 的裁決改寫（第七節第 4 點）。對應：`docs/issue.md` I-134。需求裁決：2026-11-18（D1～D4，見第二節）。
 > 相關：`docs/todo.md` T-084（`deploy.sh` 自動檢查回測，D4 另列）、T-083（部署規範裡的回測雙零檢查）。
 
 ## 一、目標與不做的範圍
@@ -91,6 +91,7 @@
   * 這樣 HTTP 回應遺失時，任務已經是 `running`／`server`，worker 撈不到；server 程序如果在背景工作開始前就掛了，下一次啟動會收掉它。
   * `GET /backtest/{job_id}`：改成**明列欄位**的 `SELECT`（就是現在對外的那些欄位，跟 Go 的 `GetJob` 同一組），`execution_owner` ⛔ 不查；`_backtest_job_payload` 的 `trigger_source` → `trigger` 改名照舊。不用「`SELECT *` 再刪掉」的做法：之後再加內部欄位又會漏出去。
 * **認領的 log**（v1.2；dev 驗收用它判斷「兩條路徑都嘗試過同一筆」）：worker 與 server 的每一次認領，成功與失敗都記一行，帶 `job_id`、`owner` 與結果（例如 `claim ok job=… owner=worker`、`claim lost job=… owner=server`）。server 的 409 也算一次失敗的嘗試。
+* **v1.3：worker 解析 `symbols`**（dev 實跑發現的既有 bug，使用者 2026-11-18 同意併入）：`backtest_jobs.symbols` 在 PostgreSQL 是 `JSONB`，psycopg2 讀出來已經是 list，`worker.py` 卻一律 `json.loads`，所以 PostgreSQL 上 worker 接到的每一筆都 `failed`（`the JSON object must be str, bytes or bytearray, not list`）；python-server 收到的是請求的字串，⛔ 不受影響。第七節第 0 步看到 live 的 8 筆都在建立後 21 毫秒內開始，跟「worker 這條路徑在 live 上沒有成功過」一致（⛔ 沒有直接查證）。修法：只有字串才 `json.loads`，list 直接用；list 與字串各一個單元測試。同一類的第二個（修完 `symbols` 重跑時發現）：`start_date`／`end_date` 是 DATE，psycopg2 讀出來是 `date` 物件，modular 回測用它切帶時區的索引會丟 `Cannot compare tz-naive and tz-aware datetime-like objects` → worker 一律轉成 `YYYY-MM-DD` 字串再交給回測（字串與 date 各一個單元測試）。
 * 現有的測試要改與新增：
   * `test_http_server_backtest_submit.py`：202 前已經認領；新增 409 的情況。
   * `test_http_server_backtest_get.py`：**回應契約測試**——`job` 的鍵集合要剛好等於對外欄位的集合（含 `trigger`、不含 `trigger_source`、不含 `execution_owner`）；DB 列多出欄位時也⛔ 不能出現在回應裡。
@@ -100,7 +101,8 @@
 * **取消**：新增 repo 方法，用 `WHERE job_id = ? AND status = 'pending'` 改成 `failed`（`error = 'cancelled by user'`、`finished_at = CURRENT_TIMESTAMP`），回傳影響列數。**只有影響 1 列才算取消成功**（200）。影響 0 列時再查一次這筆：不存在 → 404；存在（已被認領或已結束）→ 409，訊息跟現在「只能取消 pending」一致；任何 DB 錯誤 → 500（`serverError`）。⚠️ 現在的 handler 把 `GetJob` 的所有錯誤都當成 404，要改成只有「查無此列」才是 404。現在是先讀狀態、再無條件更新，中間被認領的話會把執行中的任務標成 `failed`，之後 `done` 又蓋回去。
 * **觸發 HTTP 的 log**：現在不管狀態碼都記 `python http trigger ok`，連線失敗時記「job will be picked up by worker」。改成：2xx 記 ok；409 記「已被認領」；其他狀態碼記 warn；連線失敗或逾時的訊息改成「結果未知：python-server 可能已經認領，⛔ 不能當成未認領；worker 只會接手仍是 pending 的任務」。不論哪一種都⛔ 不改任務狀態。
 * Go 的 `GetJob`／`ListJobs` 已經是明列欄位、`store.BacktestJob` 沒有這個欄位，所以 backend 的回應⛔ 不會帶出 `execution_owner`；用既有的 handler 測試確認回應的鍵集合不變。
-* 既有的 `UpdateJobStatus` 的 `running` 分支沒有呼叫者；保留或刪除在實作時確認（刪除就同步改測試）。
+* 既有的 `UpdateJobStatus` 的 `running` 分支沒有呼叫者；保留或刪除在實作時確認（刪除就同步改測試）。→ 實作：取消改用新的 `CancelPendingJob` 之後 `UpdateJobStatus` 沒有任何呼叫者，已刪除（沒有既有測試）。
+* **v1.3：`GetJob`／`ListJobs` 讀不到 `error` 為 NULL 的任務**（實作時發現的既有 bug，使用者 2026-11-18 同意併入本計畫）。backend 建立任務時不寫 `error`、python 認領時也不寫，所以 `pending`／`running` 的 `error` 是 NULL；`store.BacktestJob.Error` 是 `string`，sqlx 掃描時失敗（`converting NULL to string is unsupported`）。影響（I-134 之前就存在）：`GET /backtest/:id` 對 `pending`／`running` 回 404；`GET /backtest` 只要有一筆 `pending`／`running` 就回 500；`DELETE` 取消 `pending` 也回 404，取消從來沒有成功過。條件式取消影響 0 列時要靠 `GetJob` 分辨 404／409，不修的話 `running` 會變成 500。修法：兩個查詢改成 `COALESCE(error, '') AS error`；對外是 `error,omitempty`，JSON 不變（NULL 與空字串都不輸出）。⛔ 不改型別、⛔ 不改既有資料。測試：`pending`／`running` 的 GET、列表、取消（用真的 SQLite repo）。
 
 ### 5.3 上版時的 schema 時序
 
@@ -209,6 +211,52 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
 | 長時間的交易（結果與明細一起提交） | 明細筆數就是交易次數，一次回測最多數百筆；⛔ 不需要分批 |
 | 舊資料的 NULL `running` | 第六節由使用者確認 |
 
+## 八之後：實作備註（2026-11-18；已改好、未 commit，待 review）
+
+**改了什麼**
+
+* migration `077_backtest_execution_owner`（PostgreSQL／MySQL `VARCHAR(16)`、SQLite `TEXT`；Down `DROP COLUMN`）。
+* python：`backtest/db_writer.py` 改成 `claim_job`／`finish_job`／`fail_job`／`reap_interrupted`／`wait_for_schema`（拿掉 `update_job_status`、`write_result`、`write_trades`）；`worker.py` 每筆先認領、啟動時等 schema 再收尾；`http_server.py` 的 lifespan 等 schema 再收尾、`POST /backtest` 回應前同步認領（409）、`GET /backtest/{job_id}` 明列欄位且 payload 只留對外的鍵。v1.3 的兩個 worker 型別修正（`symbols`、日期）。
+* Go：`CancelPendingJob`（條件式）取代 `UpdateJobStatus`；取消的 200／404／409／500；觸發 HTTP 依結果分開記 log；`GetJob`／`ListJobs` 的 `COALESCE(error, '')`。
+* 測試：python `test_backtest_db_writer.py`（新）、`test_worker_claim.py`（新）、submit／get／startup 三支改寫；`python/scripts/test.sh` 把 backend 的 SQLite migration 唯讀掛進 container（`SQLITE_MIGRATIONS_DIR`），測試用它建表。Go `store/backtest_repo_test.go`、`api/handler/backtest_test.go`、`backtest/job_test.go`（都是新的；之前回測沒有任何 Go 測試）。
+* 腳本：`scripts/smoke-dev-backtest-claim.sh`、`scripts/test-smoke-dev-backtest-claim.sh`（掛進 `python/scripts/test.sh`）。
+
+**跟計畫的差異（除了 v1.3 已記的）**
+
+* **收尾的「確認已停止」多了一步**：被鎖擋住的 backend ⛔ 不會自己發現 client 已經斷線（它在等鎖，不會去讀 socket），所以 container 停了之後，來自它的連線仍留在 `pg_stat_activity`、等鎖放開才會報錯結束。改成 container 確認不在執行之後，用 `pg_terminate_backend` 結束來自它們（開始時與每次重啟後記下的 IP）的連線，再確認為 0。情境裡砍掉服務之後也一樣，但只結束「來自那個 IP、被本輪鎖擋住」的 backend（新起來的 container 可能拿到同一個 IP）。
+* dev 驗收的預設策略是 `breakout_swing_atr_v1`（計畫寫「實作時挑」）：`breakout_v1` 有交易就失敗（I-135）。
+
+**假 docker 測試抓到的腳本 bug（實跑時沒有暴露）**
+
+* `KNOWN_IPS` 在 `$(…)` 裡更新、被 subshell 丟掉，收尾的「沒有來自它們的連線」實際上沒有檢查任何 IP → 改成 `remember_ip VAR CID`（`printf -v`）。
+* socket client 經由 `t` 函式在背景執行，`$!` 是 subshell，kill 它會留下 `timeout` 與 `python3` → 改成直接呼叫 `timeout`；client 收到 TERM 時 RST 關閉後印 `closed`，腳本檢查這一行（之前實跑的 lost-response 很可能沒有真的 RST，修正後重跑通過）。
+
+**驗證**
+
+| 項目 | 結果 |
+|---|---|
+| python 相關測試（db_writer、worker、submit、get、startup） | 通過（含 v1.3 的 `symbols`／日期各 2 項） |
+| Go：store、api/handler、backtest、database | 通過 |
+| `scripts/test-postgres-migrations.sh`、`scripts/test-mysql-migrations.sh`（Up、分段 Down 到 0） | 都通過 |
+| `scripts/test-smoke-dev-backtest-claim.sh` | 38 項通過 |
+| 腳本突變（6 種：拿掉清理的前綴條件、`starts_with` 改 `LIKE`、先恢復服務再刪資料、移除原本停止的 worker、拿掉 race 的雙方證據、拿掉「確認停止才刪資料」） | 各自 1～5 項失敗 |
+| python 突變（拿掉認領的 `AND status = 'pending'`、`finish_job` 拆成兩個交易、拿掉收尾的 owner 條件） | 6／6／2 項失敗 |
+| dev 實跑 `scripts/smoke-dev-backtest-claim.sh`（修正後） | 五個情境全部通過：race 5 筆都有雙方認領紀錄（worker 贏 1、server 贏 4）；兩種重啟的回滾與不互相影響；回應遺失後 worker 三輪沒有接手；schema 等待後繼續。收尾後 dev 的 `backtest_*` 0 筆、沒有臨時 DB、沒有殘留連線與 container |
+| dev 實跑 `NO_BUILD=1 scripts/smoke-dev-worker.sh` | 通過（worker 新的啟動流程） |
+| shellcheck（兩支腳本） | 0 則 |
+| `python/scripts/test.sh -q`（完整） | rc 0、135 秒：pytest 1963 passed、1 skipped；shell 測試（含 `test-smoke-dev-backtest-claim.sh` 38 項）都通過 |
+| `backend/scripts/test.sh`（完整，SQLite） | rc 0 |
+
+**review（2026-11-18）的 P2×3 與修正**
+
+1. **臨時 server 可能留下、DB 卻被刪除**：建立 container 之後取 ID 失敗時，收尾跳過移除、仍然刪 DB（review 用假 docker 重現：server 仍 running、移除 0 次、`DROP DATABASE` 1 次）。→ 改成事先決定名稱、`run` 之前就標記「已起」，收尾一律依名稱 `rm -f`，再用名稱查（`docker ps -a --filter name=^/…$`）；查詢失敗或仍查得到就⛔ 不刪 DB。假 docker 新增三項（取不到 ID 又移不掉 → ⛔ 不刪；取不到 ID 但移得掉 → 才刪；查不到狀態 → ⛔ 不刪）；突變「改回用 ID」→ 3 項失敗。
+2. **schema 等待沒有落實 120 秒上限**：探測的 DB 查詢沒有逾時，探測成功就直接回傳、⛔ 不看期限（review 模擬探測 300 秒、上限 120 秒仍回報成功）。→ 探測放在 daemon thread，只等剩餘時間（卡住就放棄、以 `SchemaNotReady` 結束；daemon 才不會擋住程序結束），探測回來之後再核對期限（過期算逾時），最後一次等待只睡到期限為止。新增三個單元測試（卡住的探測在上限內結束、過期才回來的成功算逾時、最後一次等待被截短）。
+3. **收尾超時後仍持續取得新預算**：剩餘時間用完時固定給 1 秒，每個呼叫還能再加 `KILL_AFTER`（review：`CLEANUP_TIMEOUT=1`、`KILL_AFTER=1` 實際 10 秒）。→ 每個呼叫的上限＝截止時間的剩餘秒數扣掉 `KILL_AFTER`，用完就⛔ 不執行、印出「時限用完，未執行：…」並把收尾記成失敗；`timeout 0`（等於不設上限）由 `t`／`ti`／等待迴圈擋下。假 docker 新增「收尾開始之後每個 docker 呼叫都卡住又忽略 SIGTERM」：`CLEANUP_TIMEOUT=3` → 3 秒結束、列出沒做的項目、⛔ 沒有刪資料；突變「改回補 1 秒」→ 9 秒、測試失敗。
+
+修正後：假 docker 測試 42 項通過；`python/scripts/test.sh -q` rc 0（pytest 1966 passed、1 skipped）；dev 實跑五個情境全部通過、收尾後沒有殘留。Go 這輪沒有改。
+
+**還沒做**：live 的首次上版（6.2，要另外排時段、照流程先盤點與確認）；review 確認。
+
 ## 九、完成後要歸檔的位置
 
 * `docs/architecture.md` 的 python 服務／回測那一節：兩條路徑、原子認領、狀態轉移表、收尾與第三節的前提。
@@ -223,3 +271,5 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
 | v1 | 2026-11-18 | 初版：依 D1～D4 裁決與兩點附加要求。 |
 | v1.1 | 2026-11-18 | review [P2]×3：首次上版另列流程（6.2：停止新提交、盤點並確認待處理清單、確認舊程序退出之後才處理）；python `GET /backtest/{job_id}` 改成明列欄位、加回應契約測試；HTTP 回應遺失的驗收改成以 DB 看到認領提交為準、先暫停 worker。範圍追加（使用者同意）：取消改條件式（200／404／409／500 的條件）、HTTP 觸發依狀態碼記 log 且逾時視為結果未知、時間統一寫在狀態轉移的 SQL、dev 驗收腳本的確認項目。 |
 | v1.2 | 2026-11-18 | dev 驗收腳本的細節（第七節第 4 點；使用者裁決）：D1 直接寫任務、直接打 python-server，backend 的提交流程這次不驗；D2 持鎖改鎖 `backtest_trades`、同步點用 `pg_blocking_pids()` 核對本輪持鎖 PID、測試任務至少要有一筆交易；D3 輪詢間隔不改，race 要有兩條路徑都嘗試認領同一筆的證據才算通過；D4 schema 情境用臨時 DB 加手動 `ALTER`，只驗欄位出現後能繼續啟動，臨時 server 不發布 port、先停 container 與連線再刪 DB。另：回應遺失改用不讀回應的 socket client；收尾改成先停止執行路徑、放鎖與清資料，最後依開始時的紀錄恢復服務；build 與持鎖連線受總剩餘時間約束；前綴用字面比對。5.1 補認領的 log。review [P2]×2：lost-response 也用明細表的鎖當同步點，確認 worker 三輪沒有接手才放鎖；收尾要先確認執行路徑已停止，才刪測試資料與恢復服務，未確認時保留資料、回傳非 0，socket client 與持鎖連線仍照常結束。 |
+| v1.3 | 2026-11-18 | 實作時發現的既有 bug（使用者同意併入）：Go 的 `GetJob`／`ListJobs` 讀不到 `error` 為 NULL 的任務，`pending`／`running` 的 GET 回 404、列表回 500、取消回 404 → 兩個查詢改成 `COALESCE(error, '')`（5.2）；worker 在 PostgreSQL 上解析不了 JSONB 的 `symbols`、日期是 `date` 物件，每一筆都失敗 → 只有字串才 `json.loads`、日期轉成字串（5.1）。`UpdateJobStatus` 沒有呼叫者，刪除。dev 驗收的資料：dev DB 原本沒有任何日 K，使用者同意從舊機最終 dump（SHA-256 `1d9495fd…`）只匯入 2330 的日 K（4,930 筆），⛔ 不匯入其他表；預設策略 `breakout_swing_atr_v1`（`breakout_v1` 有交易就失敗，另立 I-135）。 |
+| v1.3（review） | 2026-11-18 | review [P2]×3：臨時 server 依名稱移除並確認、確認不了就⛔ 不刪臨時 DB；schema 等待的探測受剩餘時間限制、回來後再核對期限；dev 腳本的收尾共用截止時間、用完⛔ 不再給預算並列出未完成的項目。 |

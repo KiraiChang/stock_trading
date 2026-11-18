@@ -84,6 +84,8 @@ python3 "$REPO_ROOT/scripts/check-doc-refs.py"
 "$REPO_ROOT/scripts/test-docker-user.sh"
 # python-worker 的 dev 驗收腳本（T-083；假 docker，⛔ 不需要 image）
 "$REPO_ROOT/scripts/test-smoke-dev-worker.sh"
+# 回測認領的 dev 驗收腳本（I-134；假 docker／curl／python3，⛔ 不需要 image）
+"$REPO_ROOT/scripts/test-smoke-dev-backtest-claim.sh"
 
 echo "==> 建置測試 image：$IMAGE"
 docker build -t "$IMAGE" "$PYTHON_DIR"
@@ -101,6 +103,7 @@ if [ "${SKIP_SHELL_TESTS:-0}" != "1" ]; then
 fi
 
 
+# 回測狀態轉移的測試（I-134）用 repo 的 SQLite migration 建表：唯讀掛進去，⛔ 不另寫一份 schema。
 echo "==> pytest：$* image=$IMAGE mem=$MEM"
 docker_user_args   # 問 docker info；⚠️ 排在參數檢查之後（I-133 review）
 exec docker run --rm \
@@ -114,6 +117,8 @@ exec docker run --rm \
   -e PYTHONDONTWRITEBYTECODE=1 \
   "${ENV_ARGS[@]+"${ENV_ARGS[@]}"}" \
   -v "$PYTHON_DIR":/app \
+  -v "$REPO_ROOT/backend/internal/database/migrations/sqlite":/sqlite-migrations:ro \
+  -e SQLITE_MIGRATIONS_DIR=/sqlite-migrations \
   -w /app \
   "$IMAGE" \
   pytest -p no:cacheprovider "$@"

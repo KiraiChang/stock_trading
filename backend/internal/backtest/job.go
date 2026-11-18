@@ -115,19 +115,36 @@ func (m *Manager) triggerHTTP(job *store.BacktestJob) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	// 不論哪一種結果都⛔ 不改任務狀態：狀態只由 python 的條件式認領決定（I-134）。
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		m.log.Warn("python trigger failed, job will be picked up by worker",
+		// 連線失敗或逾時：python-server 可能已經在回應之前認領了（認領先提交、再回 202），
+		// 所以⛔ 不能當成「沒被認領」；worker 只會接手仍是 pending 的任務。
+		m.log.Warn("python trigger result unknown: python-server may have claimed the job; "+
+			"worker only picks it up if it is still pending",
 			zap.String("job_id", job.JobID),
 			zap.Error(err),
 		)
 		return
 	}
 	defer resp.Body.Close()
-	m.log.Info("python http trigger ok",
-		zap.String("job_id", job.JobID),
-		zap.Int("status", resp.StatusCode),
-	)
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		m.log.Info("python http trigger ok",
+			zap.String("job_id", job.JobID),
+			zap.Int("status", resp.StatusCode),
+		)
+	case resp.StatusCode == http.StatusConflict:
+		m.log.Info("python http trigger: job already claimed or no longer pending",
+			zap.String("job_id", job.JobID),
+			zap.Int("status", resp.StatusCode),
+		)
+	default:
+		m.log.Warn("python http trigger rejected",
+			zap.String("job_id", job.JobID),
+			zap.Int("status", resp.StatusCode),
+		)
+	}
 }
 
 func newJobID() string {

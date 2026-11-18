@@ -444,11 +444,42 @@ conflict target 會整批失敗（`ON CONFLICT DO UPDATE command cannot affect r
 | symbols | JSON 陣列，e.g. `["2330","2454"]`（PostgreSQL 為 JSONB） |
 | timeframe | K 棒週期 |
 | start_date / end_date | 回測區間 |
-| status | `pending` → `running` → `done` / `failed` |
+| status | `pending` → `running` → `done` / `failed`（轉移條件見下表） |
+| execution_owner | 認領這一筆的 python 服務：`worker` 或 `server`；NULL＝還沒被認領，或 migration 077 之前的舊資料。⛔ 不對外（Go 的 `BacktestJob` 與 python 的 `GET /backtest/{job_id}` 都明列欄位、不含它） |
+| error | 失敗原因；`pending`／`running` 時是 NULL（Go 的 `GetJob`／`ListJobs` 用 `COALESCE(error, '')` 讀，對外 `error,omitempty`）。取消是 `cancelled by user`，重啟收掉的是 `interrupted_on_restart` |
 | trigger_source | `manual`（API 觸發）。**DB 欄位名是 `trigger_source`，JSON／API 欄位名仍是 `trigger`**——`trigger` 是 MySQL 保留字，migration 059 改名（見 issue.md I-054） |
 | use_chip_filter | 是否在模組化回測中用 `chip_scores.total_score` 過濾進場 |
 | chip_min_score | 籌碼 filter 門檻（-100～100）；缺資料視為 0 |
-| started_at / finished_at | 執行時間戳 |
+| started_at / finished_at | 執行時間戳；一律由狀態轉移的 SQL 寫 DB 的 `CURRENT_TIMESTAMP`（⛔ 不由 python 組時間字串）。migration 077 之前的舊資料是 python 用 `datetime.utcnow().isoformat()` 寫的不帶時區字串，照寫入當時連線的 TimeZone 解讀；⛔ 沒有改舊資料 |
+
+**狀態轉移**（I-134；每一個都是條件式的 UPDATE，影響 0 列就代表這一筆已經不是自己的，⛔ 不再往下寫）：
+
+| 轉移 | 誰 | 條件 | 影響 0 列時 |
+|---|---|---|---|
+| 建立 → `pending` | backend | （INSERT） | — |
+| `pending` → `running` | worker 或 server（認領） | `job_id = ? AND status = 'pending'`，同時寫 `execution_owner`、`started_at` | 認領失敗：⛔ 不執行（server 回 409） |
+| `pending` → `failed`（取消） | backend `DELETE /backtest/:job_id` | `job_id = ? AND status = 'pending'` | 再查一次：不存在 404、存在 409 |
+| `running` → `done` | 認領者 | `job_id = ? AND status = 'running' AND execution_owner = 自己`；跟結果、交易明細**同一個交易** | 整個交易 rollback（結果與明細都⛔ 不留） |
+| `running` → `failed`（執行出錯） | 認領者 | 同上 | 只記 log |
+| `running` → `failed`（`interrupted_on_restart`） | 同一種服務的下一個程序，啟動時 | `status = 'running' AND execution_owner = 自己` | — |
+
+* 兩條路徑都在用：backend 寫入 `pending` 之後呼叫 python-server 的 `POST /backtest`（`PYTHON_SERVICE_URL`），python-worker 也每 10 秒輪詢 `pending`。
+  server 在**回應之前同步認領**，所以回應在路上遺失時任務已經是 `running`／`server`，worker 撈不到；同一筆兩邊同時認領時只有一方成功。
+* **重啟收尾的前提：每種服務只有一個程序**。所有 `execution_owner = 自己` 的 `running` 都是上一個程序留下的，才能直接收掉。會破壞這個前提的變更：
+
+  | 服務 | 現況 | 會破壞前提的變更 |
+  |---|---|---|
+  | python-worker | compose 一個 service、`python worker.py` 單一程序、依序執行 | `--scale`、多副本、在 container 裡另開執行緒或程序跑任務 |
+  | python-server | compose 一個 service、`python http_server.py`（`uvicorn.run`，沒有 `workers`、沒有 `reload`）；回測在 FastAPI 的背景工作裡，與 HTTP 同一個程序 | uvicorn `workers>1`、`--reload`、gunicorn 多 worker、多副本 |
+  | 新舊重疊 | compose 的重建是先停舊的再起新的；`deploy.sh` 是 `down` → `up` | 「先起新的再停舊的」的滾動更新 |
+  | 本機的 `python/start_server.sh` | `uvicorn … --reload`，只給本機開發 | ⚠️ 不在保證範圍內：reload 時新程序若比舊程序先起，會誤收舊程序的任務。⛔ 不用它連 dev 或 live 的 DB |
+
+  要改成上面任何一種，先把 `execution_owner` 換成實例識別（並重新設計收尾），⛔ 不能直接改。
+* 重啟收掉的任務⛔ 不自動重跑，要的話重新送出。
+* **schema 時序**：compose 裡 python ⛔ 不等 backend、migration 由 backend 啟動時套用，所以 python 兩個服務啟動時先等 `execution_owner` 出現
+  （每 2 秒查一次，整體最多 120 秒；每次探測本身也只等剩餘時間——DB 卡住時探測在 daemon thread 裡被放棄，探測回來時已過期也算逾時；
+  逾時以非 0 結束、交給 compose 重啟）。⛔ 不在 python 端建立欄位。
+* migration 077 之前的 `running`（`execution_owner` 是 NULL）兩種服務都⛔ 不會收；首次上版時由人確認後處理（I-134 計畫書 6.2）。
 
 ---
 

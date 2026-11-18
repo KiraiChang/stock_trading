@@ -89,21 +89,25 @@ func (h *BacktestHandler) GetTrades(c *gin.Context) {
 }
 
 // DELETE /api/v1/backtest/:job_id  (只能取消 pending 狀態)
+//
+// 條件式更新（只有 pending 才改），影響 1 列才算取消成功（200）。影響 0 列時再查一次：
+// 不存在 → 404；存在（已被 python 認領或已結束）→ 409；任何 DB 錯誤 → 500（I-134）。
 func (h *BacktestHandler) Cancel(c *gin.Context) {
 	jobID := c.Param("job_id")
+	ctx := c.Request.Context()
 
-	job, err := h.repo.GetJob(c.Request.Context(), jobID)
+	cancelled, err := h.repo.CancelPendingJob(ctx, jobID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
-		return
-	}
-	if job.Status != "pending" {
-		c.JSON(http.StatusConflict, gin.H{"error": "only pending jobs can be cancelled"})
-		return
-	}
-	if err := h.repo.UpdateJobStatus(c.Request.Context(), jobID, "failed", "cancelled by user"); err != nil {
 		serverError(c, h.log, err, "backtest: cancel job")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "cancelled"})
+	if cancelled {
+		c.JSON(http.StatusOK, gin.H{"message": "cancelled"})
+		return
+	}
+	if _, err := h.repo.GetJob(ctx, jobID); err != nil {
+		jobLookupError(c, h.log, err, "backtest: cancel job lookup")
+		return
+	}
+	c.JSON(http.StatusConflict, gin.H{"error": "only pending jobs can be cancelled"})
 }

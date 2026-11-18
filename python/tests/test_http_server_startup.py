@@ -7,20 +7,51 @@ from __future__ import annotations
 
 import importlib
 
+import pytest
 from fastapi.testclient import TestClient
 
 import http_server
 
 
+def _stub_backtest_startup(monkeypatch, calls: list) -> None:
+    """lifespan 在連線檢查之後還會等 schema、收掉遺留的 running（I-134）；端點以外的測試把它們換成記錄器。"""
+    monkeypatch.setattr(http_server, "wait_for_schema", lambda: calls.append("schema"))
+    monkeypatch.setattr(http_server, "reap_interrupted", lambda owner: calls.append(("reap", owner)) or [])
+
+
 def test_lifespan_runs_db_connection_check(monkeypatch):
-    """服務啟動時仍要 fail-fast 地檢查 DB——這個檢查不能因為要好測就被整個拿掉。"""
+    """服務啟動時仍要 fail-fast 地檢查 DB——這個檢查不能因為要好測就被整個拿掉。
+
+    順序：連線檢查 → 等 schema（migration 077）→ 收掉上一個 server 程序留下的 running。
+    """
     calls = []
     monkeypatch.setattr(http_server, "check_connection", lambda: calls.append("checked"))
+    _stub_backtest_startup(monkeypatch, calls)
 
     with TestClient(http_server.app):
         pass
 
-    assert calls == ["checked"]
+    assert calls == ["checked", "schema", ("reap", "server")]
+
+
+def test_lifespan_schema_timeout_fails_startup_without_reap(monkeypatch):
+    """等不到 schema 就讓啟動失敗（uvicorn 以非 0 結束、交給 compose 重啟），⛔ 不收尾。"""
+    from backtest.db_writer import SchemaNotReady
+
+    calls = []
+    monkeypatch.setattr(http_server, "check_connection", lambda: None)
+
+    def not_ready():
+        raise SchemaNotReady("missing")
+
+    monkeypatch.setattr(http_server, "wait_for_schema", not_ready)
+    monkeypatch.setattr(http_server, "reap_interrupted", lambda owner: calls.append("reap"))
+
+    with pytest.raises(SchemaNotReady):
+        with TestClient(http_server.app):
+            pass
+
+    assert calls == []
 
 
 def test_client_without_lifespan_does_not_touch_db(monkeypatch):

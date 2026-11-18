@@ -8,7 +8,9 @@ import (
 
 type BacktestRepo interface {
 	CreateJob(ctx context.Context, job *BacktestJob) error
-	UpdateJobStatus(ctx context.Context, jobID, status, errMsg string) error
+	// CancelPendingJob 只把 pending 的任務改成 failed（cancelled by user），回傳是否影響 1 列。
+	// 影響 0 列＝不存在、或已被 python 認領／已結束；由呼叫端再查一次分辨（I-134）。
+	CancelPendingJob(ctx context.Context, jobID string) (bool, error)
 	GetJob(ctx context.Context, jobID string) (*BacktestJob, error)
 	ListJobs(ctx context.Context, limit int) ([]BacktestJob, error)
 
@@ -40,28 +42,35 @@ func (r *backtestRepo) CreateJob(ctx context.Context, job *BacktestJob) error {
 	return err
 }
 
-func (r *backtestRepo) UpdateJobStatus(ctx context.Context, jobID, status, errMsg string) error {
-	switch status {
-	case "running":
-		q := r.db.Rebind(`UPDATE backtest_jobs SET status=?, started_at=CURRENT_TIMESTAMP WHERE job_id=?`)
-		_, err := r.db.ExecContext(ctx, q, status, jobID)
-		return err
-	case "done", "failed":
-		q := r.db.Rebind(`UPDATE backtest_jobs SET status=?, error=?, finished_at=CURRENT_TIMESTAMP WHERE job_id=?`)
-		_, err := r.db.ExecContext(ctx, q, status, errMsg, jobID)
-		return err
-	default:
-		q := r.db.Rebind(`UPDATE backtest_jobs SET status=? WHERE job_id=?`)
-		_, err := r.db.ExecContext(ctx, q, status, jobID)
-		return err
+// CancelUserMessage 是取消時寫進 error 的固定字串。
+const CancelUserMessage = "cancelled by user"
+
+// CancelPendingJob 是條件式的 pending → failed：先讀狀態再無條件更新的話，中間被 python
+// 認領的任務會被標成 failed、之後 done 又蓋回去（I-134）。跟 python 的認領用同一個條件，
+// 兩邊同時發生時只有一方影響到列。
+func (r *backtestRepo) CancelPendingJob(ctx context.Context, jobID string) (bool, error) {
+	q := r.db.Rebind(`UPDATE backtest_jobs
+		SET status='failed', error=?, finished_at=CURRENT_TIMESTAMP
+		WHERE job_id=? AND status='pending'`)
+	res, err := r.db.ExecContext(ctx, q, CancelUserMessage, jobID)
+	if err != nil {
+		return false, err
 	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
 }
 
+// GetJob／ListJobs 的 error 用 COALESCE：pending（backend 建立時不寫 error）與 running（認領時也不寫）
+// 的 error 是 NULL，直接掃進 string 會失敗——I-134 之前這讓 pending／running 的 GET 回 404、列表回 500、
+// 取消一直回 404。對外仍是 `error,omitempty`，空字串不輸出，JSON 跟 NULL 時的預期一致。
 func (r *backtestRepo) GetJob(ctx context.Context, jobID string) (*BacktestJob, error) {
 	var job BacktestJob
 	err := r.db.GetContext(ctx, &job, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
-		       status, trigger_source, error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
+		       status, trigger_source, COALESCE(error, '') AS error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
 		FROM backtest_jobs WHERE job_id=?
 	`), jobID)
 	if err != nil {
@@ -74,7 +83,7 @@ func (r *backtestRepo) ListJobs(ctx context.Context, limit int) ([]BacktestJob, 
 	var jobs []BacktestJob
 	err := r.db.SelectContext(ctx, &jobs, r.db.Rebind(`
 		SELECT id, job_id, type, strategy, symbols, timeframe, start_date, end_date,
-		       status, trigger_source, error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
+		       status, trigger_source, COALESCE(error, '') AS error, use_chip_filter, chip_min_score, created_at, started_at, finished_at
 		FROM backtest_jobs
 		ORDER BY created_at DESC
 		LIMIT ?

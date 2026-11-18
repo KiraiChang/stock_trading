@@ -103,3 +103,61 @@ def runners(monkeypatch) -> RunnerCalls:
     monkeypatch.setattr(http_server, "run_decision_replay", fake_run_decision_replay)
     monkeypatch.setattr(http_server, "write_evaluation_result", fake_write_evaluation_result)
     return calls
+
+
+# ── 回測狀態轉移（I-134）：用 repo 的 SQLite migration 建表的檔案 DB ──────────────
+
+_MIGRATION_ENV = "SQLITE_MIGRATIONS_DIR"
+
+
+def _sqlite_migrations_dir() -> Path:
+    """`python/scripts/test.sh` 會把 backend 的 SQLite migration 唯讀掛進 container（`SQLITE_MIGRATIONS_DIR`）；
+    在 host 用 venv 跑時退回 repo 的相對路徑。兩個都找不到就讓測試失敗——⛔ 不 skip，免得靜默少測一段。"""
+    env = os.environ.get(_MIGRATION_ENV)
+    candidates = [Path(env)] if env else []
+    candidates.append(Path(__file__).resolve().parents[2] / "backend/internal/database/migrations/sqlite")
+    for c in candidates:
+        if c.is_dir():
+            return c
+    raise RuntimeError(f"SQLite migrations not found (set {_MIGRATION_ENV}); tried {candidates}")
+
+
+def _goose_up_sql(path: Path) -> str:
+    """取 goose 檔的 Up 段（`-- +goose Up` 到 `-- +goose Down`）。其他 goose 指令都是註解，sqlite 直接略過。"""
+    text_ = path.read_text(encoding="utf-8")
+    up = text_.split("-- +goose Up", 1)[1]
+    return up.split("-- +goose Down", 1)[0]
+
+
+@pytest.fixture
+def backtest_sqlite(tmp_path, monkeypatch):
+    """回傳 `build(upto=None)`：建一個檔案 SQLite、套用 migration，並把 `backtest.db_writer.engine` 換成它。
+
+    `upto` 是最後要套用的 migration 版本（例如 76＝還沒有 `execution_owner`）；省略就全部套用。
+    用檔案而不是 `:memory:`：多執行緒的競爭測試要兩條獨立的連線看到同一個 DB。
+    """
+    import sqlite3
+
+    from sqlalchemy import create_engine
+
+    from backtest import db_writer
+
+    def build(upto: int | None = None):
+        db_path = tmp_path / f"backtest-{upto or 'all'}.db"
+        raw = sqlite3.connect(db_path)
+        try:
+            for f in sorted(_sqlite_migrations_dir().glob("*.sql")):
+                if upto is not None and int(f.name.split("_", 1)[0]) > upto:
+                    continue
+                raw.executescript(_goose_up_sql(f))
+            raw.commit()
+        finally:
+            raw.close()
+        eng = create_engine(
+            f"sqlite:///{db_path}",
+            connect_args={"check_same_thread": False, "timeout": 10},
+        )
+        monkeypatch.setattr(db_writer, "engine", eng)
+        return eng
+
+    return build

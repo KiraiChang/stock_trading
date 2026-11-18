@@ -7,7 +7,7 @@ Go 可 POST /backtest 主動觸發，不需等待 worker 輪詢。
     uvicorn http_server:app --port 8001 --reload
 
 API：
-  POST /backtest          執行回測（同步，可能耗時數秒）
+  POST /backtest          認領後在背景執行回測（202；任務已不是 pending 時 409）
   GET  /backtest/{job_id} 查詢結果（從 DB 讀）
   GET  /health            健康檢查
 """
@@ -37,11 +37,18 @@ from db import engine, check_connection
 from contextlib import asynccontextmanager
 from datetime import date
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from typing import Any, List, Optional, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
-from backtest.db_writer import update_job_status, write_result, write_trades
+from backtest.db_writer import (
+    claim_job,
+    fail_job,
+    finish_job,
+    reap_interrupted,
+    wait_for_schema,
+)
 from backtest.modular.analysis import DEFAULT_FETCH_LIMIT, analyze_symbol
 from backtest.modular.sr_scoring.scoring import DEFAULT_FETCH_LIMIT as SR_SCORING_DEFAULT_FETCH_LIMIT
 from backtest.modular.sr_scoring.scoring import score_symbol
@@ -75,10 +82,17 @@ async def lifespan(app: FastAPI):
     """
     log.info("connecting to database...")
     check_connection()
+    # 新的 python 可能比 backend 套用 migration 077 先啟動；等不到就 raise（非 0 結束、交給 compose 重啟）。
+    wait_for_schema()
+    # 收掉上一個 server 程序留下的 running。⚠️ 依據是「server 只有一個程序」：uvicorn 加 workers 或
+    # reload 會讓這一步誤收別的程序的任務（前提見 docs/database-schema.md 的 backtest_jobs）。
+    reap_interrupted(BACKTEST_OWNER)
     yield
 
 
 app = FastAPI(title="Trading Backtest Service", version="1.0.0", lifespan=lifespan)
+
+BACKTEST_OWNER = "server"
 
 
 class BacktestRequest(BaseModel):
@@ -100,11 +114,11 @@ class BacktestRequest(BaseModel):
 
 
 def _run_and_write(req: BacktestRequest) -> None:
+    """背景工作：任務已在 `POST /backtest` 回應之前認領（`running`／`server`），這裡只負責執行與收尾。"""
     job_id = req.job_id
     log.info("running job=%s  strategy=%s  symbols=%s  timeframe=%s",
              job_id, req.strategy, req.symbols, req.timeframe)
     try:
-        update_job_status(job_id, "running")
         output = run_backtest(
             strategy=req.strategy,
             symbols=req.symbols,
@@ -114,9 +128,8 @@ def _run_and_write(req: BacktestRequest) -> None:
             use_chip_filter=req.use_chip_filter,
             chip_min_score=req.chip_min_score,
         )
-        write_result(job_id, output["result"])
-        write_trades(job_id, output["trades"])
-        update_job_status(job_id, "done")
+        if not finish_job(job_id, BACKTEST_OWNER, output["result"], output["trades"]):
+            return  # 已不是自己的 running：結果與明細已 rollback，finish_job 已記 log
         log.info("job=%s done — total_trades=%d  total_return=%.2f%%  sharpe=%.4f",
                  job_id,
                  output["result"]["total_trades"],
@@ -124,26 +137,42 @@ def _run_and_write(req: BacktestRequest) -> None:
                  output["result"]["sharpe_ratio"])
     except Exception as exc:
         log.error("job=%s failed: %s", job_id, exc, exc_info=True)
-        update_job_status(job_id, "failed", str(exc))
+        fail_job(job_id, BACKTEST_OWNER, str(exc))
 
 
 @app.post("/backtest", status_code=202)
 async def submit_backtest(req: BacktestRequest, background_tasks: BackgroundTasks):
-    """非同步執行回測（立即回傳 job_id，背景執行）。"""
+    """在回應之前**同步認領**，成功才排進背景執行（202）；任務已不是 pending 就回 409。
+
+    認領在回應之前提交，所以回應就算在路上遺失，任務也已經是 `running`／`server`，
+    worker 撈不到（worker 只接 `pending`）。DB 呼叫放到 threadpool，⛔ 不卡住 event loop。
+    """
     log.info("POST /backtest  job=%s  strategy=%s", req.job_id, req.strategy)
+    if not await run_in_threadpool(claim_job, req.job_id, BACKTEST_OWNER):
+        raise HTTPException(status_code=409, detail="job is not pending (already claimed or finished)")
     background_tasks.add_task(_run_and_write, req)
     return {"job_id": req.job_id, "status": "running"}
+
+
+# 對外的 job 欄位（DB 欄位名），跟 Go 端 `GetJob` 查的是同一組。內部欄位（例如 `execution_owner`）
+# ⛔ 不在這裡：SQL 明列欄位、payload 也只留這些鍵，之後再加內部欄位也不會漏到 API 回應。
+_BACKTEST_JOB_COLUMNS = (
+    "id", "job_id", "type", "strategy", "symbols", "timeframe", "start_date", "end_date",
+    "status", "trigger_source", "error", "use_chip_filter", "chip_min_score",
+    "created_at", "started_at", "finished_at",
+)
 
 
 def _backtest_job_payload(job_row) -> dict:
     """把 backtest_jobs 的 DB 列轉成對外的 job 形狀。
 
-    `SELECT *` 會讓任何 schema 變動直接漏到 API 回應，所以 DB 欄位名與對外欄位名
+    只留 `_BACKTEST_JOB_COLUMNS` 裡的鍵（DB 列多出來的欄位一律丟掉）。DB 欄位名與對外欄位名
     不同的地方要在這裡明確轉回來。目前只有一個：`trigger` 是 MySQL 保留字，
     DB 欄位已改名為 `trigger_source`（migration 059，見 issue.md I-054），
     但對外的欄位名維持 `trigger`——Go 端 `store.BacktestJob` 的 json tag 也是這樣。
     """
-    job = dict(job_row)
+    row = dict(job_row)
+    job = {k: row[k] for k in _BACKTEST_JOB_COLUMNS if k in row}
     if "trigger_source" in job:
         job["trigger"] = job.pop("trigger_source")
     return job
@@ -153,7 +182,7 @@ def _backtest_job_payload(job_row) -> dict:
 async def get_backtest(job_id: str):
     """查詢回測狀態與結果。"""
     log.info("GET /backtest/%s", job_id)
-    job_sql = text("SELECT * FROM backtest_jobs WHERE job_id=:id")
+    job_sql = text(f"SELECT {', '.join(_BACKTEST_JOB_COLUMNS)} FROM backtest_jobs WHERE job_id=:id")
     res_sql = text("SELECT * FROM backtest_results WHERE job_id=:id")
 
     with engine.connect() as conn:

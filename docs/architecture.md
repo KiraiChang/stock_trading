@@ -1204,6 +1204,12 @@ Python Worker / HTTP Server
 Go API（讀取結果回傳給前端）
 ```
 
+兩條路徑同時在用（backend 呼叫 HTTP，worker 也照常輪詢），同一筆由**原子認領**決定誰執行：條件式的 `pending` → `running`，
+同時寫 `execution_owner`（`worker`／`server`）；server 在回應之前就認領。結果、交易明細與 `done` 在同一個交易提交，
+條件是「仍是自己的 `running`」。python 兩個服務啟動時先等 schema（migration 077），再把自己上一個程序留下的 `running` 收成
+`failed`／`interrupted_on_restart`（⛔ 不自動重跑）。這個收尾依賴「每種服務只有一個程序」；狀態轉移表、這個前提與會破壞它的變更，
+見 `database-schema.md` 的 `backtest_jobs`（I-134）。
+
 模組化回測可選擇啟用 `use_chip_filter`，用 `chip_scores.total_score` 與
 `chip_min_score` 門檻過濾進場訊號；legacy backtrader 策略收到該選項時會記 warning
 並忽略，不中斷回測。

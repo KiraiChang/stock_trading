@@ -948,6 +948,10 @@ build 會把 `latest` 移到新 image，而且同一份輸入、全部用快取�
 ⚠️ 它⛔ 不能證明整個 image 只差 metadata（基底 image、系統套件、其他檔案都沒比到），所以⛔ 不能代替回滾目標——那一版仍然要記成「沒有可以完整退回的 image」。
 ⚠️ **回滾到 E 之前的版本時⛔ 不能用這份 `deploy.sh`**：第 5 步會因為舊 image 不認得 `-check-config` 而停下（這是刻意的）。那種回滾要手動 build、`down`、`up -d --no-build`。
 
+**部署前的回測雙零檢查**（I-134 的 D4；⛔ 沒有寫進 `deploy.sh`，自動化另列 `todo.md` T-084）：開始部署之前，`backtest_jobs` 的 `pending` 與
+`running` 都要是 0；從這個確認到部署後的確認做完，⛔ 不從前端或 API 送出回測（build 期間舊的 worker 還在跑，會接走新任務，`down` 時被中斷）。
+I-134 之後，被中斷的任務會在 python 重啟時收成 `failed`／`interrupted_on_restart`（⛔ 不再停在 `running`），但仍然⛔ 不會自動重跑。
+
 **`./deploy.sh --preflight`**：只跑第 1、2 步（加上讀 `MemAvailable`），⛔ 不 pull、⛔ 不 build、⛔ 不 down。換上新的 `deploy.sh` 之前，先用暫存檔名放在
 scripts 目錄試跑（腳本只認自己所在的目錄）。
 測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
@@ -3258,6 +3262,48 @@ EXPECT_FREEZE_MD5=39c5d9d45667ea4d872b9e746ac99600 scripts/smoke-dev-worker.sh  
   整段收尾共用 `CLEANUP_TIMEOUT`（預設 60 秒）。**移除失敗、逾時或移除後仍查得到 → 結束碼 1**（⛔ 不能回報成功卻留下一個還在輪詢的 worker）。
 * 結束碼：0 通過、1 驗收失敗或收尾失敗、2 參數或前置條件不對（⛔ 沒有啟動 worker）。
 * 測試：`scripts/test-smoke-dev-worker.sh`（假 docker；`python/scripts/test.sh` 會先跑它）。
+
+**回測認領與持久化的驗收：`scripts/smoke-dev-backtest-claim.sh`**（I-134；規格見 `database-schema.md` 的 `backtest_jobs`）。
+
+```bash
+scripts/smoke-dev.sh                       # 先起 dev stack（backend 會套用 migration）
+scripts/smoke-dev-backtest-claim.sh        # 五個情境全跑
+SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
+```
+
+* **範圍**：直接用 psql 寫入測試任務、直接呼叫 python-server 的 `POST /backtest`（`127.0.0.1:18001`），⛔ 不經過 backend。驗的是 python 的認領與
+  持久化；backend 的條件式取消、HTTP 觸發的 log 由 Go 測試負責。⚠️ 完整的 backend 提交流程這支⛔ 沒有驗。
+* **情境**：
+  * `race`：一次寫入 5 筆 `pending`，等 worker 的 log 出現撈到這一批，才並行送出 5 個 `POST`。**通過要有證據**：至少一筆的 log 裡 worker 與 server
+    都有認領紀錄（`claim ok` 與 `claim lost`／409），⛔ 不靠時序推論；每一筆只有一個 `claim ok`、`execution_owner` 是那一方、結果 1 列、明細沒有重複。
+  * `server-restart`／`worker-restart`：用 DB 鎖把任務卡在「已認領、結果已寫入、還沒提交」，`kill -s KILL` 被測服務再起回 → 被砍的那筆是
+    `failed`／`interrupted_on_restart`、結果與明細都回滾；另一種服務的任務⛔ 不受影響、放鎖後 `done`。
+  * `lost-response`：worker 先暫停；不讀回應的 socket client（主機上的 `python3 -I`）送出 `POST`，同步點之後用 `SO_LINGER` 0 直接 RST；
+    恢復 worker、等三輪 → worker ⛔ 沒有接手，放鎖後由 server 完成。⛔ 不用 `curl`（它可能早就讀到 202）。
+  * `schema`：臨時 DB（`i134smoke_<時間>`，只有回測三張表、拿掉 `execution_owner`）＋臨時 python-server（`compose run`、⛔ 不發布 port）→ 等 schema →
+    手動 `ALTER` 之後繼續啟動。只驗「欄位出現後能繼續啟動」，077 本身由 migration 測試驗。
+* **持鎖與同步點**：背景的 psql（`application_name` 帶本輪前綴）`LOCK TABLE backtest_trades IN SHARE MODE`。鎖**明細表**而不是結果表：`finish_job`
+  先寫結果、再寫明細，被擋住時結果已在同一個交易裡，砍掉程序後才驗得到「結果也一起回滾」。同步點是被測服務的連線（用 container IP 比對
+  `client_addr`）的 `pg_blocking_pids()` 含本輪持鎖的 PID、而且已持有 `backtest_results` 的鎖——⛔ 只看 `wait_event_type='Lock'` 不算。
+  ⚠️ 被鎖擋住的 backend ⛔ 不會自己發現 client 已經被砍，所以砍掉服務之後，腳本會結束「來自那個 IP、被本輪鎖擋住」的 backend 再往下。
+* **測試資料隔離**：job_id 一律是 `i134smoke_<執行時間>_<情境>_<序號>`；SQL 用 `starts_with(job_id, :'prefix')`（psql 變數）做字面比對，
+  ⛔ 不用 `LIKE`（`_` 是萬用字元）。開始前 dev DB 有任何 `pending`／`running`、或有之前留下的 `i134smoke_` 任務就停下（結束碼 2、⛔ 不改任何東西）。
+* **收尾**（成功、失敗、逾時、Ctrl+C 都一樣，依序）：本次前綴的 `pending` 改成 `failed` → 停掉 python 兩個服務（暫停中的先 `unpause`）→
+  **確認已停止**（container 不在執行、⛔ 不是 paused；結束並確認沒有來自它們的 DB 連線）→ 結束 socket client 與持鎖連線（⛔ 不論確認結果）→
+  確認通過才刪本次的資料 → 臨時 server 確認停止才刪臨時 DB → 確認通過才依開始時的紀錄恢復服務（worker 原本在跑就起回來；原本存在但停止就
+  維持停止、⛔ 不移除；原本不存在才移除本次建立的）。確認沒有通過就⛔ 不刪資料、⛔ 不恢復服務，印出前綴與手動清理的 SQL、結束碼 1。
+* **上限**：每個 docker／psql／curl 呼叫都是 `timeout -k`；build、持鎖連線、每個等待迴圈的上限都再被總剩餘時間（`TOTAL_TIMEOUT`）截短。
+  收尾另有自己的截止時間（`CLEANUP_TIMEOUT`，⛔ 不受總時間限制）。每個呼叫可用的秒數是「截止時間的剩餘秒數扣掉 `KILL_AFTER`」（SIGTERM 之後
+  還要等 `KILL_AFTER` 才 SIGKILL）；用完就⛔ 不再執行、印出「時限用完，未執行：…」並回傳失敗——⛔ 不能每個呼叫再補一點時間（review 2026-11-18：
+  原本耗盡後每次給 1 秒，`CLEANUP_TIMEOUT=1` 實際花了 10 秒）。
+* **臨時 server 用事先決定的名稱**（`i134smoke_<時間>_schema`）移除與確認；`run` 之後取不到 ID、或確認不了已經不在，就⛔ 不刪臨時 DB。
+* **dev 的測試資料**：預設 2330、2024-01-01～2025-12-31、`breakout_swing_atr_v1`（會產生交易；重啟與回應遺失的同步點需要至少一筆交易）。
+  dev DB 原本沒有任何日 K，2026-11-18 從舊機的最終 dump（`~/old_vps_archive/20261112/db/final/stock_trading.dump`，SHA-256 `1d9495fd…`）
+  **只匯入 2330 的日 K**（4,930 筆，2006-10-18～2026-11-11；使用者同意）：`pg_restore --data-only -t candles -f -` 經 pipe 過濾
+  `symbol=2330`、`timeframe=1d`、拿掉 `id` 欄之後直接 `COPY` 進 dev，⛔ 沒有寫中間檔、⛔ 沒有匯入其他表（users、持倉、交易紀錄都⛔ 不進一般的
+  dev volume，見「在 dev 查 live 的真實資料：作業專用 volume」）。`breakout_v1` 有交易就會失敗（`issue.md` I-135），⛔ 不要拿它當驗收策略。
+* 結束碼：0 全部通過、1 驗收失敗或收尾失敗、2 參數或前置條件不對（⛔ 沒有改任何東西）。
+* 測試：`scripts/test-smoke-dev-backtest-claim.sh`（假 docker／curl／python3；`python/scripts/test.sh` 會先跑它）。
 
 可用環境變數覆寫等待時間、log 行數或 health URL：
 

@@ -970,6 +970,7 @@ dev、live 與 `python/scripts/test.sh` 的測試 image 都由同一份 Dockerfi
 * **build 時 `pip check`**：依賴彼此衝突就讓 build 失敗。
 * **比對套件清單用 `pip freeze --all | LC_ALL=C sort | md5sum`**：⚠️ 一定要 `LC_ALL=C`，`sort` 的順序跟 locale 有關（en_US 不分大小寫、C 是大寫在前），
   同一份清單在不同 locale 下 md5 不同。2026-11-16 的基準是 `39c5d9d45667ea4d872b9e746ac99600`（同一份清單在 en_US.UTF-8 下是 `1c801990…`）。
+  live 2026-11-18 換上釘版的 image，部署前後兩個 python 服務都是這個 md5。
 * **冷 build 的量測**（2026-11-16，這台主機、live 同時在跑）：`pip install` 42 秒、export 36 秒；`python/scripts/test.sh` 整段（含 pytest）的 MemAvailable 低點
   4840 MiB（開始時 5253 MiB）。
 * **⚠️ 同一份輸入、全部用快取的 build，image ID 也會變**：BuildKit 每次都會產生新的 attestation manifest。⛔ 不能靠 image ID 認版本；

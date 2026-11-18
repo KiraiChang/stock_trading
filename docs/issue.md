@@ -3045,7 +3045,7 @@ InconsistentVersionWarning: Trying to unpickle estimator LabelEncoder from versi
 
 | 選項 | 代價 |
 |---|---|
-| `requirements.txt` 改精確釘版（`==`） | ✅ 由 `todo.md` T-083 處理（2026-11-16：版本照 live、基底 image 固定到 digest；repo 與 dev 已實作，live 部署待做），現況見 `development-workflow.md`「python 的套件版本與升級」；⚠️ 只解決「重建得出同一組套件」，⛔ 不解決既有 bundle 訓練時的版本（下兩列仍待決策） |
+| `requirements.txt` 改精確釘版（`==`） | ✅ 由 `todo.md` T-083 處理（2026-11-16：版本照 live、基底 image 固定到 digest；repo 與 dev 已實作，live 2026-11-18 已部署），現況見 `development-workflow.md`「python 的套件版本與升級」；⚠️ 只解決「重建得出同一組套件」，⛔ 不解決既有 bundle 訓練時的版本（下兩列仍待決策） |
 | bundle `manifest.json` 增記訓練時的 `pip_freeze`／sklearn 版本 | 只解決「知道差在哪」，⛔ 不解決「裝得回去」 |
 | 為 bundle 保存 image tarball（`docker save`） | 最徹底，但每份 bundle 多數百 MB |
 | 維持現狀，明確接受「image 消失即不可重現」 | ⚠️ 那要寫進 `sr-zone-scoring.md` 成為**明示的已知限制**，⛔ 不能默認 |
@@ -3491,7 +3491,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中：計畫書 v1.1 已確認（2026-11-18），實作等 T-083 部署到 live 完成後開始：[`plans/i134-backtest-claim.md`](./plans/i134-backtest-claim.md) |
+| 狀態 | 規劃中：計畫書 v1.1 已確認（2026-11-18）；T-083 已於 2026-11-18 部署到 live，可以開始實作（先確認 dev 驗收腳本的細節）：[`plans/i134-backtest-claim.md`](./plans/i134-backtest-claim.md) |
 | 嚴重度 | 低：只影響手動送出的回測，⛔ 不影響排程與交易訊號；但任務會永遠顯示執行中、沒有結果，也⛔ 不會自動重跑 |
 | 分類 | Python worker／回測 |
 | 建立日期 | 2026-11-18 |

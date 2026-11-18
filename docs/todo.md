@@ -71,7 +71,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 進行中：repo 與 dev 已實作／待 review（2026-11-16；dev 的套件已跟 live 相同），live 的部署還沒做；計畫書與實作備註：[`plans/t083-python-pin-deps.md`](./plans/t083-python-pin-deps.md) |
+| 狀態 | 已實作／待 review：repo 與 dev 2026-11-16，live 2026-11-18 部署（套件內容不變；17:00 `sr_analysis` 待確認）；計畫書與部署紀錄：[`plans/t083-python-pin-deps.md`](./plans/t083-python-pin-deps.md) |
 | 優先度 | 高（live 的 python 已經沒有可以完整退回的 image；dev 與 live 的 `fastapi` 版本已經不同） |
 | 分類 | Python／部署 |
 | 建立日期 | 2026-11-16 |

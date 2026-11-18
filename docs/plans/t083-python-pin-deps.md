@@ -1,6 +1,6 @@
 # T-083：鎖定 python 的套件版本與基底 image，讓 python image 可以重現（計畫書 v1）
 
-> 狀態：v1.2 已確認；repo 與 dev 的部分已實作（2026-11-16），待 review；**live 的部署（3.4、第六節第 5 點）還沒做**。實作備註在「八之前：實作備註」。
+> 狀態：v1.2 已確認；repo 與 dev 的部分已實作（2026-11-16）；**live 已於 2026-11-18 部署**（結果見實作備註「live 部署結果」），已實作／待 review。⚠️ 部署後第一個用到 python 的排程（11-18 17:00 的 `sr_analysis`）還沒確認。實作備註在「八之前：實作備註」。
 > 對應：`docs/todo.md` T-083。相關：`docs/issue.md` I-116（本計畫做的是它「待決策」表的第一項）、I-133（本計畫的驗證要跑 `python/scripts/test.sh`，I-133 先做）。
 
 ## 一、目標與不做的範圍
@@ -196,6 +196,19 @@
 * **部署後**：三個服務 `Up`、`RestartCount` 0；backend `Config.Env` 跟部署前相同、log 有 `redis connected`、`scheduler started`；兩個 python 服務的 layer `2d613846a388`、md5 `39c5d9d4…`、51 行，image ID 跟部署前不同（確認真的換上新 image）；記下 Debian 與 `libgomp1` 的版本；python-server `/health` 200；python-worker 的 log 有 `poll #`、沒有 `Traceback`；`backtest_jobs` 的 `pending`／`running` 仍是 0；17:00 的 `sr_analysis` 是 `success`。
 * **回滾**：照「部署腳本：失敗即停」。`down` 之後起不來時，三個服務的 `latest` 都標回 `pre-t083`，再用 `dc.sh` 執行 `up -d --no-build`（三個一起起），分別確認。
 
+**live 部署結果（2026-11-18，使用者在 live 執行）**
+
+* **開始條件**（14:14:09）：全部符合。`job_runs` 的 `running` 0；`backtest_jobs` 的 `pending`／`running` 都是 0；`deploy.sh` sha `abcf1c019b25`、`--preflight` 通過（MemAvailable 5199MiB）；三個服務 `running`、`RestartCount` 0，image 依序是 `14ac07bbfdc0`、`8647d96a2fb2`、`394eb654a2de`；`Config.Env` 50 行、`a4eccbc0aa79`；backend 執行檔 `df45b9cffe0c`。
+* **回滾標籤**：`stock_trading-{backend,python-server,python-worker}:pre-t083` 三個都在，ID 跟上一點的 image 相同。
+* **`deploy.sh`**：`git pull` 從 `d5314e6` 快進到 `e61fbdf`（T-083 的 `11015e5` 之後只多了文件）；build 時 MemAvailable 5184MiB；`部署完成：backend /health 正常、RestartCount 0`，`deploy rc=0`。
+* **部署後確認**（14:24:04）：
+  * 三個服務 `running`、`RestartCount` 0；image 換成 backend `2438fb0d1adf`、python-server `bee594b80d5c`、python-worker `5520de9a372b`（三個都跟部署前不同）。
+  * backend：`Config.Env` 50 行、`a4eccbc0aa79`（跟部署前相同）；**執行檔 sha 仍是 `df45b9cffe0c`**——Go 重新編譯了，產出的執行檔相同；backend 執行檔與 `Config.Env` 相同，image 的其餘內容⛔ 沒有完整比對（image ID 不同的原因未查）；log 的 `redis connected`／`scheduler started` 共 2 筆，`config contract violated`／`config load failed` 0 筆。
+  * python 兩個服務：前 4 層 layer `2d613846a388`、`pip freeze --all | LC_ALL=C sort | md5sum` 是 `39c5d9d45667ea4d872b9e746ac99600`、51 行、Debian 13.7、`libgomp1` 14.2.0-19，都跟部署前相同 → 套件內容沒變，只是換成可以重現的 image。
+  * python-server `/health` 回 `{"status":"ok"}`（rc 0）；python-worker 的 log 有 27 次 `poll #`、0 個 `Traceback`；`backtest_jobs` 的 `pending`／`running` 仍是 0。
+* **待確認**：11-18 17:00 的 `sr_analysis`（部署後第一個用到 python 的排程）。14:24 查到的最新一筆是 11-17 17:00 的（id 5876、`success`），是部署前的，⛔ 不能當證據。
+* `pre-t083` 標籤保留到 review 確認後再清。
+
 ## 八、完成後要歸檔的位置
 
 * `docs/development-workflow.md`：「python 的套件版本與升級」（釘版的原因、版本來源、升級程序、`libgomp1` 不釘的取捨、Windows venv 的限制）；smoke 那一節補上 `scripts/smoke-dev-worker.sh` 的用法、環境變數與收尾行為。
@@ -272,3 +285,4 @@ wheel==0.46.3
 | v1.3 | 2026-11-16 | 實作（repo 與 dev）：md5 的基準改成 `LC_ALL=C` 排序（`39c5d9d4…`；原本的 `1c801990…` 是主機 en_US locale 的排序結果）；基底 image 的 layer 比對 dev 完成、live 移到部署前；新增實作備註。 |
 | v1.4 | 2026-11-16 | review [P2]×3（`smoke-dev-worker.sh`）：只操作 dev project（compose 檔固定、驗證 project 名稱）、收尾失敗回傳非 0、每個 docker 指令都有上限（等待期間受剩餘時間限制、收尾共用一個上限）；測試 43 項。 |
 | v1.5 | 2026-11-18 | review [P2]（`smoke-dev-worker.sh`）：`timeout` 加 `-k`（`KILL_AFTER`），忽略 SIGTERM 的 docker 也會被砍掉；dev 實跑發現 `config --images` 的順序不固定，改成只認 `stock_trading_dev-python-worker`；測試 50 項。 |
+| （記錄） | 2026-11-18 | live 部署完成（`d5314e6`→`e61fbdf`，`deploy rc=0`）：python 的 layer 與 md5 跟部署前相同，backend 執行檔相同；17:00 `sr_analysis` 待確認。 |

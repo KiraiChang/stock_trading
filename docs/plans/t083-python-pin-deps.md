@@ -1,6 +1,6 @@
 # T-083：鎖定 python 的套件版本與基底 image，讓 python image 可以重現（計畫書 v1）
 
-> 狀態：v1.2 已確認；repo 與 dev 的部分已實作（2026-11-16）；**live 已於 2026-11-18 部署**（結果見實作備註「live 部署結果」），已實作／待 review。⚠️ 部署後第一個用到 python 的排程（11-18 17:00 的 `sr_analysis`）還沒確認。實作備註在「八之前：實作備註」。
+> 狀態：v1.2 已確認；repo 與 dev 的部分已實作（2026-11-16）；**live 已於 2026-11-18 部署**（結果見實作備註「live 部署結果」），已實作／待 review。部署後第一個用到 python 的排程（11-18 17:00 的 `sr_analysis`）是 `success`。實作備註在「八之前：實作備註」。
 > 對應：`docs/todo.md` T-083。相關：`docs/issue.md` I-116（本計畫做的是它「待決策」表的第一項）、I-133（本計畫的驗證要跑 `python/scripts/test.sh`，I-133 先做）。
 
 ## 一、目標與不做的範圍
@@ -206,7 +206,7 @@
   * backend：`Config.Env` 50 行、`a4eccbc0aa79`（跟部署前相同）；**執行檔 sha 仍是 `df45b9cffe0c`**——Go 重新編譯了，產出的執行檔相同；backend 執行檔與 `Config.Env` 相同，image 的其餘內容⛔ 沒有完整比對（image ID 不同的原因未查）；log 的 `redis connected`／`scheduler started` 共 2 筆，`config contract violated`／`config load failed` 0 筆。
   * python 兩個服務：前 4 層 layer `2d613846a388`、`pip freeze --all | LC_ALL=C sort | md5sum` 是 `39c5d9d45667ea4d872b9e746ac99600`、51 行、Debian 13.7、`libgomp1` 14.2.0-19，都跟部署前相同 → 套件內容沒變，只是換成可以重現的 image。
   * python-server `/health` 回 `{"status":"ok"}`（rc 0）；python-worker 的 log 有 27 次 `poll #`、0 個 `Traceback`；`backtest_jobs` 的 `pending`／`running` 仍是 0。
-* **待確認**：11-18 17:00 的 `sr_analysis`（部署後第一個用到 python 的排程）。14:24 查到的最新一筆是 11-17 17:00 的（id 5876、`success`），是部署前的，⛔ 不能當證據。
+* **部署後第一個用到 python 的排程**（17:12:37 唯讀查詢）：11-18 17:00 的 `sr_analysis` id 5942 `success`，17:00:00 開始、17:01:19 結束，`symbols_total` 11、`symbols_failed` 0；前一天 id 5876 也是 11／0、約 73 秒，這次約 79 秒，差不多。python-server 最近 2 小時 0 個 `Traceback`；兩個 python 服務仍是 `running`、`RestartCount` 0、image 是部署後的 `bee594b80d5c`／`5520de9a372b`（部署後沒有重啟）。（14:24 查到的 id 5876 是部署前的，⛔ 不當證據。）
 * `pre-t083` 標籤保留到 review 確認後再清。
 
 ## 八、完成後要歸檔的位置
@@ -285,4 +285,4 @@ wheel==0.46.3
 | v1.3 | 2026-11-16 | 實作（repo 與 dev）：md5 的基準改成 `LC_ALL=C` 排序（`39c5d9d4…`；原本的 `1c801990…` 是主機 en_US locale 的排序結果）；基底 image 的 layer 比對 dev 完成、live 移到部署前；新增實作備註。 |
 | v1.4 | 2026-11-16 | review [P2]×3（`smoke-dev-worker.sh`）：只操作 dev project（compose 檔固定、驗證 project 名稱）、收尾失敗回傳非 0、每個 docker 指令都有上限（等待期間受剩餘時間限制、收尾共用一個上限）；測試 43 項。 |
 | v1.5 | 2026-11-18 | review [P2]（`smoke-dev-worker.sh`）：`timeout` 加 `-k`（`KILL_AFTER`），忽略 SIGTERM 的 docker 也會被砍掉；dev 實跑發現 `config --images` 的順序不固定，改成只認 `stock_trading_dev-python-worker`；測試 50 項。 |
-| （記錄） | 2026-11-18 | live 部署完成（`d5314e6`→`e61fbdf`，`deploy rc=0`）：python 的 layer 與 md5 跟部署前相同，backend 執行檔相同；17:00 `sr_analysis` 待確認。 |
+| （記錄） | 2026-11-18 | live 部署完成（`d5314e6`→`e61fbdf`，`deploy rc=0`）：python 的 layer 與 md5 跟部署前相同，backend 執行檔相同；17:00 `sr_analysis`（id 5942）`success`、11／0。 |

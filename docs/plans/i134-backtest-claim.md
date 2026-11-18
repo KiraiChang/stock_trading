@@ -1,6 +1,6 @@
-# I-134：回測任務的原子認領與重啟後的遺留 `running`（計畫書 v1.1）
+# I-134：回測任務的原子認領與重啟後的遺留 `running`（計畫書 v1.2）
 
-> 狀態：v1.1 已確認（使用者 2026-11-18）；實作原本暫緩到 T-083 部署到 live 完成之後（使用者 2026-11-18 指示；live 的 `deploy.sh` 會 `git pull`，T-083 部署前 push 的實作會被一起帶上 live）；**T-083 已於 2026-11-18 14:24 部署完成，可以開始實作**。dev 驗收腳本的細節實作前另外確認（第七節第 4 點）。對應：`docs/issue.md` I-134。需求裁決：2026-11-18（D1～D4，見第二節）。
+> 狀態：v1.1 已確認（使用者 2026-11-18）；**v1.2（dev 驗收腳本的細節，第七節第 4 點）待確認**；實作原本暫緩到 T-083 部署到 live 完成之後（使用者 2026-11-18 指示；live 的 `deploy.sh` 會 `git pull`，T-083 部署前 push 的實作會被一起帶上 live）；**T-083 已於 2026-11-18 14:24 部署完成，可以開始實作**。dev 驗收腳本的細節：v1.2 依使用者 2026-11-18 的裁決改寫（第七節第 4 點）。對應：`docs/issue.md` I-134。需求裁決：2026-11-18（D1～D4，見第二節）。
 > 相關：`docs/todo.md` T-084（`deploy.sh` 自動檢查回測，D4 另列）、T-083（部署規範裡的回測雙零檢查）。
 
 ## 一、目標與不做的範圍
@@ -90,6 +90,7 @@
   * `POST /backtest`：**在回應之前同步認領**（用 threadpool 執行 DB 呼叫，⛔ 不卡住 event loop）。認領成功 → 排背景工作、回 202（回應內容不變）；認領失敗 → 回 409、⛔ 不排背景工作。背景工作只負責執行與 `finish_job`／`fail_job`。
   * 這樣 HTTP 回應遺失時，任務已經是 `running`／`server`，worker 撈不到；server 程序如果在背景工作開始前就掛了，下一次啟動會收掉它。
   * `GET /backtest/{job_id}`：改成**明列欄位**的 `SELECT`（就是現在對外的那些欄位，跟 Go 的 `GetJob` 同一組），`execution_owner` ⛔ 不查；`_backtest_job_payload` 的 `trigger_source` → `trigger` 改名照舊。不用「`SELECT *` 再刪掉」的做法：之後再加內部欄位又會漏出去。
+* **認領的 log**（v1.2；dev 驗收用它判斷「兩條路徑都嘗試過同一筆」）：worker 與 server 的每一次認領，成功與失敗都記一行，帶 `job_id`、`owner` 與結果（例如 `claim ok job=… owner=worker`、`claim lost job=… owner=server`）。server 的 409 也算一次失敗的嘗試。
 * 現有的測試要改與新增：
   * `test_http_server_backtest_submit.py`：202 前已經認領；新增 409 的情況。
   * `test_http_server_backtest_get.py`：**回應契約測試**——`job` 的鍵集合要剛好等於對外欄位的集合（含 `trigger`、不含 `trigger_source`、不含 `execution_owner`）；DB 列多出欄位時也⛔ 不能出現在回應裡。
@@ -151,23 +152,50 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
    * `owner` 的值檢查。
 2. **Go 測試**（`backend/scripts/test.sh`，SQLite）：取消 `pending` → 200、寫入 `failed`／`cancelled by user`／`finished_at`；已被認領或已結束 → 409、狀態⛔ 不變；不存在 → 404；DB 錯誤（查詢或更新失敗）→ 500、⛔ 不是 404；認領與取消同時發生時只有一方成功。觸發 HTTP：2xx、409、其他狀態碼、連線失敗、逾時各記對應的 log，任務狀態都⛔ 不變。回應的鍵集合⛔ 不含 `execution_owner`。
 3. **migration**：Go 的 SQLite migration 測試、`scripts/test-postgres-migrations.sh`、`scripts/test-mysql-migrations.sh`（Up／Down 都要過）。
-4. **dev 實測**（新增 repo 腳本，見下；只用 `docker-compose.dev.yml` 的 dev project）：
-   * **兩條路徑競爭**（誰贏都合法，驗的是「只執行一次」）：backend 送出多筆回測（HTTP 與 worker 都開著），每一筆的 `execution_owner` 只有一個、交易明細沒有重複、server 與 worker 的 log 合起來每一筆只執行一次。為了讓競爭真的發生，worker 的輪詢間隔設成最短，並另外直接把任務寫成 `pending` 後同時打 `POST /backtest`。
-   * **python-server 單獨重啟**：server 執行中的任務，砍掉 server 再起來 → 該筆變成 `failed`／`interrupted_on_restart`；worker ⛔ 沒有接手、worker 自己的任務⛔ 不受影響。
-   * **python-worker 單獨重啟**：同上，角色對調（先停 server，讓 worker 認領）。
-   * **HTTP 回應遺失**（v1 review P2：「很短的逾時後斷線」⛔ 不能保證 server 已經認領，worker 合法搶先認領也會讓測試失敗，所以要控制時序）：
-     1. 先暫停 worker（`docker compose pause python-worker`），讓這一筆只有 server 能認領。
-     2. 直接寫入一筆測試用的 `pending`，對 python-server 送 `POST /backtest`；**等到 DB 看到這一筆已經是 `running`／`server`（認領已提交）**，才把 client 端的連線關掉、⛔ 不讀回應（等同回應遺失；server 那邊照常執行背景工作）。認領在回應之前同步完成（5.1），所以這個時間點一定在回應送出之前或同時。
-     3. 恢復 worker，至少等 3 輪輪詢。
-     4. 驗證：worker 的 log 沒有處理這個 job_id；這一筆最後由 server 完成成 `done`、`execution_owner` 仍是 `server`；交易明細只有一份。
-     * 單元測試另外鎖住同一個不變式：認領提交之後、回應之前就讓 handler 失敗或取消，任務仍是 `running`／`server`，worker 的認領回 False。
-   * **schema 時序**：用沒有 077 的 DB 先起 python，再讓 backend 套用 → python 在等待之後正常啟動。
-   * 腳本：`scripts/smoke-dev-backtest-claim.sh`，加上假 docker 的測試 `scripts/test-smoke-dev-backtest-claim.sh`（掛進 `python/scripts/test.sh`）。使用者 2026-11-18 同意納入；⚠️ **實作前先把腳本細節列給使用者確認**，至少包含：
-     * **dev project 限制**：比照 `smoke-dev-worker.sh`——compose 檔固定、改變狀態之前驗證 project 是 `stock_trading_dev`、擋 `COMPOSE_PROJECT_NAME`。
-     * **測試資料隔離**：測試任務的 job_id 用固定前綴（例如 `i134smoke_<時間>_`），驗證與清理都只針對這個前綴；開始前 dev DB 有任何非本次的 `pending`／`running` 就停下（否則會被一起執行或誤判）；結束時刪除本次的任務、結果與明細，⛔ 不動其他列。
-     * **每個 docker 呼叫的上限**：`timeout -k`（同 `smoke-dev-worker.sh` 的 `KILL_AFTER`），等待迴圈受總時限約束。
-     * **失敗收尾**：成功、失敗、逾時、Ctrl+C 都要恢復被暫停的 worker、清掉本次的測試資料，並把 python 兩個服務恢復到開始前的狀態；收尾失敗回傳非 0。
-     * **同步方式**：上面「HTTP 回應遺失」的做法——以 DB 看到認領已提交為準，再切斷回應；⛔ 不靠固定的 sleep 或逾時。
+4. **dev 實測**（新增 repo 腳本 `scripts/smoke-dev-backtest-claim.sh`；只用 `docker-compose.dev.yml` 的 dev project；v1.2 依使用者 2026-11-18 的裁決改寫）
+   * **範圍**（裁決 D1）：腳本直接用 psql 寫入測試任務、直接呼叫 python-server 的 `POST /backtest`（`127.0.0.1:18001`），⛔ 不經過 backend。dev smoke 驗的是 **python 的認領與持久化**；backend 的條件式取消、HTTP 觸發與 log 由第 2 點的 Go 測試負責。⚠️ 這次**沒有驗完整的 backend 提交流程**（backend 收到請求 → INSERT → 觸發 HTTP → python 認領）。
+   * **dev project 限制**：比照 `smoke-dev-worker.sh`——compose 檔固定是 `docker-compose.dev.yml`、⛔ 不接受覆寫；擋 `COMPOSE_PROJECT_NAME`（空字串也擋）；任何改變狀態的指令之前確認解析出來的 project 是 `stock_trading_dev`。
+   * **開始前的檢查**（任何一項不符就 rc 2、⛔ 不改任何東西）：postgres 與 python-server 在跑；dev DB 已有 `execution_owner`（backend 已套用 077）；dev DB ⛔ 沒有任何 `pending`／`running`；worker 沒有處於 `paused`；測試標的在日期範圍內有日 K（標的、日期、策略都有預設值，可用環境變數換；策略在實作時挑一個最快、而且在預設範圍內**至少產生一筆交易**的）。
+   * **開始時記錄服務狀態**：python-server 的 container ID；python-worker 是「不存在」「存在但停止」「在跑」三者之一，連同 container ID。收尾依這份紀錄恢復。
+   * **image**：build python 兩個 image（上限見下），`up -d --no-deps python-server` 確保跑的是新 image；worker 的 image 只認 `stock_trading_dev-python-worker`。
+   * **測試資料隔離**：job_id 一律是 `i134smoke_<執行時間>_<情境>_<序號>`；前綴只允許 `[a-z0-9_]`，由腳本驗證。驗證與清理的 SQL 用**字面比對**（`starts_with(job_id, :'prefix')`，前綴用 psql 變數傳入），⛔ 不用 `LIKE`（`_` 會被當成萬用字元）。
+   * **上限**：每個 docker／psql 呼叫都用 `timeout -k "$KILL_AFTER"`（預設 `CALL_TIMEOUT=30`、`KILL_AFTER=5`）；整體上限 `TOTAL_TIMEOUT`；**build、持鎖連線**與每個等待迴圈的上限都取「自己的預設值」與「總剩餘時間」的較小值；收尾另有 `CLEANUP_TIMEOUT`（逾時之後仍要能收尾，所以⛔ 不受總剩餘時間限制）。
+   * **持鎖的做法**（裁決 D2，重啟兩個情境共用）：
+     * 背景開一個 psql（`PGAPPNAME=i134smoke_<執行時間>_lock`），在交易裡 `LOCK TABLE backtest_trades IN SHARE MODE`，再 `pg_sleep(上限)`；記下它的 PID。鎖的是**交易明細表**：`finish_job` 先寫結果、再寫明細，所以被擋住時結果已經寫進同一個交易、還沒提交，程序被砍後要驗證**結果也一起回滾**。（鎖 `backtest_results` 會擋在結果寫入之前，就算結果與明細被錯拆成兩個交易，測試也照樣通過。）
+     * **同步點**：被測服務的 DB 連線（用 container 在 dev 網路上的 IP 比對 `pg_stat_activity.client_addr`）的 `pg_blocking_pids()` 包含本輪持鎖的 PID。⛔ 只看 `wait_event_type='Lock'` 不算。同時確認這個連線在 `backtest_results` 上已持有鎖（`pg_locks`），作為「結果已在同一個交易裡寫入」的證據。
+     * 測試任務若沒有產生交易，`finish_job` 不會碰到明細表、任務會直接完成、等不到同步點 → 這個情境判**失敗**（⛔ 不算通過）。
+     * 放鎖：`pg_terminate_backend(持鎖 PID)`，再結束背景的 psql。
+   * **情境**（預設全部跑，可用 `SCENARIOS=` 挑選）：
+     * **`race`**（裁決 D3）：輪詢間隔維持 `config.yaml` 的值，⛔ 不為測試改產品設定。在一個交易裡寫入 5 筆 `pending`（worker 每輪最多撈 5 筆），等到 worker 的 log（從寫入前的時間點起算）出現撈到 5 筆的那一輪，才並行送出這 5 筆的 `POST /backtest`。⛔ 不把「pause 超過輪詢間隔就一定會競爭」當成保證；**通過條件以證據為準**：
+       * 至少有一筆任務，worker 與 server 的認領 log 都有出現（一方 `claim ok`、另一方 `claim lost` 或 409）——也就是兩條路徑確實都嘗試認領過同一筆；**沒有這個證據就判失敗**（未覆蓋競爭），⛔ 不算通過。
+       * 每一筆：最後是 `done`、只有一個 `execution_owner`，且等於 `claim ok` 那一方；兩邊的 `claim ok` 合計剛好 1 次；結果 1 列；交易明細沒有重複。
+       * 兩邊各贏幾筆只做記錄，⛔ 不要求兩邊都贏過。
+     * **`server-restart`**：持鎖 → worker 認領 W（只寫入、不打 HTTP）並卡在明細 → 暫停 worker → 寫入 S 並 `POST`，server 認領並卡在明細 → 對 server `docker compose kill` → 起回 server → S 是 `failed`／`interrupted_on_restart`、有 `finished_at`、結果與明細都 0 列；W 仍是 `running`／`worker` → 放鎖、恢復 worker → W 是 `done`。
+     * **`worker-restart`**：角色對調（S 先被 server 認領並卡住，再讓 worker 認領 W 並卡住，砍 worker、起回）→ W `failed`／`interrupted_on_restart`、結果與明細 0 列；S 仍 `running`／`server` → 放鎖 → S `done`。
+     * **`lost-response`**（v1.2 review：也用明細表的鎖，免得快速的回測在第一次查詢前就變成 `done`，讓正確的實作也驗收失敗）：
+       1. 先暫停 worker，讓這一筆只有 server 能認領；開始持鎖。
+       2. 寫入一筆 `pending`；用**確定不讀取回應的 socket client**（腳本內附的小 python 程式，用 `python3 -I` 在主機上執行：連線、送出完整的請求、印出 `sent`，之後⛔ 不呼叫任何讀取，只等著被結束）送出 `POST /backtest`。⛔ 不用 `curl`：DB 看到認領的時候，`curl` 可能早就讀到 202 並結束。
+       3. 等到**同步點**：這一筆是 `running`／`server`（認領已提交），而且 server 的連線被本輪持鎖的 PID 擋住（同重啟情境的判斷）。這時任務一定還沒完成。接著結束 client（`SO_LINGER` 0，關閉時直接 RST，丟掉 server 送來、尚未讀取的回應）。
+       4. 恢復 worker，等到 worker 的 log 出現恢復之後的至少 3 輪輪詢；這段期間這一筆仍是 `running`／`server`，worker 的 log 沒有這個 job_id。
+       5. 確認 worker 沒有接手之後才放鎖，等這一筆完成。
+       6. 驗證：最後是 `done`、`execution_owner` 仍是 `server`；worker 的 log 從頭到尾沒有這個 job_id；結果 1 列、交易明細只有一份（沒有重複，筆數等於結果的 `total_trades`）。
+     * **`schema`**（裁決 D4）：只驗「**欄位出現後，python 能繼續啟動**」；077 的正確性由第 3 點的 migration 測試負責。
+       1. 在 dev postgres 建臨時 DB `i134smoke_<執行時間>`，用 `pg_dump -s` 複製回測三張表的結構，再拿掉 `execution_owner`。
+       2. 用 `compose run --rm --no-deps` 起一個臨時的 python-server（`DATABASE_DSN` 指向臨時 DB、**⛔ 不發布 port**、名稱帶本輪前綴），記下 container ID；確認 log 顯示它在等 schema。
+       3. 手動 `ALTER TABLE … ADD COLUMN execution_owner VARCHAR(16)` → 確認它接著完成啟動（log）。
+       4. 先停掉這個 container（依記下的 ID）、`pg_terminate_backend` 結束連到臨時 DB 的所有連線，再 `DROP DATABASE`。
+       * 臨時 server 只連臨時 DB，它的收尾（`reap_interrupted`）也只作用在臨時 DB，⛔ 不違反第三節的前提。
+   * **收尾**（trap EXIT／INT／TERM；成功、失敗、逾時、Ctrl+C 都走同一段；依序）：
+     1. **讓兩條執行路徑停止處理本次的任務**：本次前綴下仍是 `pending` 的改成 `failed`（`error` 記 `i134smoke_cleanup`），之後沒有路徑能再認領；接著停掉 python 兩個服務（暫停中的 worker 先 `unpause` 再立刻 `stop`；此時鎖還在，卡住的任務提交不了）。
+     2. **確認執行路徑已停止**：python 兩個服務的 container 都不在執行（`State.Running` 為 false、⛔ 不是 `paused`），而且 `pg_stat_activity` 裡⛔ 沒有來自它們的連線（用開始時記下的 container IP 比對，持鎖連線除外）。
+     3. 結束 socket client 與持鎖的連線——這兩項是獨立的資源，⛔ 不論第 2 步的結果都要做（盡力而為，失敗就記下）。
+     4. **只有第 2 步確認通過才做**：依前綴刪除本次的交易明細、結果、任務。
+     5. 臨時 DB：先停掉臨時 server（依記下的 ID）並確認它已不在執行、結束連到臨時 DB 的連線；**確認之後**才 `DROP DATABASE`。這一項只依賴臨時 server，跟第 2 步無關。
+     6. **只有第 2 步確認通過才做，而且最後才做**：依開始時的紀錄恢復服務。python-server 起回來；worker 原本在跑就起回來，原本存在但停止就維持停止（⛔ 不移除），原本不存在才移除本次建立的 container。⚠️ 開始前已確認 dev 沒有其他 `pending`／`running`；執行期間若有人在 dev 另外送出回測、剛好被停掉，重啟後的收尾會把它標成 `interrupted_on_restart`（符合新的語意，dev 才會遇到）。
+     * **第 2 步沒有確認通過**（停止失敗、逾時、查詢失敗）：⛔ 不刪測試資料、⛔ 不恢復服務（避免跟仍在執行的任務競爭）；印出本次前綴、各服務的狀態與手動清理的 SQL，回傳非 0。
+     * 任何一步失敗，最後都回傳非 0；除了上面「依賴第 2 步」的兩步，其他步驟失敗時仍繼續往下做。
+   * **假 docker 測試** `scripts/test-smoke-dev-backtest-claim.sh`（掛進 `python/scripts/test.sh`）：參數與 project 檢查；開始前的檢查擋下時⛔ 沒有改變狀態；清理的 SQL 只帶本次前綴、用字面比對；收尾的順序（停止路徑 → 確認停止 → 放鎖 → 刪資料 → 恢復服務）；停止失敗或確認不通過時⛔ 沒有刪資料、⛔ 沒有恢復服務，但 socket client 與持鎖連線仍被結束；臨時 server 沒有確認停止時⛔ 不刪臨時 DB；worker 三種開始狀態各自恢復正確（存在但停止的⛔ 不被移除）；失敗、逾時時暫停的 worker 一定被處理、持鎖連線被結束；卡住又忽略 SIGTERM 的呼叫被 `-k` 砍掉、⛔ 沒有孤兒；race 沒有雙方嘗試的證據時判失敗；收尾失敗回傳非 0。
+   * **腳本的突變**：拿掉清理的前綴條件、`starts_with` 改成 `LIKE`、收尾改成先恢復服務再刪資料、把存在但停止的 worker 當成本次建立而移除、race 拿掉「雙方嘗試」的檢查、拿掉「確認停止才刪資料」的條件，各自要讓假 docker 測試失敗。
 5. **突變**：拿掉認領的 `AND status = 'pending'`、把 `finish_job` 拆成兩個交易、拿掉收尾的 owner 條件，各自要讓對應的測試失敗。
 
 ## 八、主要風險與因應
@@ -194,3 +222,4 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
 |---|---|---|
 | v1 | 2026-11-18 | 初版：依 D1～D4 裁決與兩點附加要求。 |
 | v1.1 | 2026-11-18 | review [P2]×3：首次上版另列流程（6.2：停止新提交、盤點並確認待處理清單、確認舊程序退出之後才處理）；python `GET /backtest/{job_id}` 改成明列欄位、加回應契約測試；HTTP 回應遺失的驗收改成以 DB 看到認領提交為準、先暫停 worker。範圍追加（使用者同意）：取消改條件式（200／404／409／500 的條件）、HTTP 觸發依狀態碼記 log 且逾時視為結果未知、時間統一寫在狀態轉移的 SQL、dev 驗收腳本的確認項目。 |
+| v1.2 | 2026-11-18 | dev 驗收腳本的細節（第七節第 4 點；使用者裁決）：D1 直接寫任務、直接打 python-server，backend 的提交流程這次不驗；D2 持鎖改鎖 `backtest_trades`、同步點用 `pg_blocking_pids()` 核對本輪持鎖 PID、測試任務至少要有一筆交易；D3 輪詢間隔不改，race 要有兩條路徑都嘗試認領同一筆的證據才算通過；D4 schema 情境用臨時 DB 加手動 `ALTER`，只驗欄位出現後能繼續啟動，臨時 server 不發布 port、先停 container 與連線再刪 DB。另：回應遺失改用不讀回應的 socket client；收尾改成先停止執行路徑、放鎖與清資料，最後依開始時的紀錄恢復服務；build 與持鎖連線受總剩餘時間約束；前綴用字面比對。5.1 補認領的 log。review [P2]×2：lost-response 也用明細表的鎖當同步點，確認 worker 三輪沒有接手才放鎖；收尾要先確認執行路徑已停止，才刪測試資料與恢復服務，未確認時保留資料、回傳非 0，socket client 與持鎖連線仍照常結束。 |

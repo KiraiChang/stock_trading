@@ -255,7 +255,21 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
 
 修正後：假 docker 測試 42 項通過；`python/scripts/test.sh -q` rc 0（pytest 1966 passed、1 skipped）；dev 實跑五個情境全部通過、收尾後沒有殘留。Go 這輪沒有改。
 
-**還沒做**：live 的首次上版（6.2，要另外排時段、照流程先盤點與確認）；review 確認。
+**live 首次上版（6.2；2026-11-18，使用者在 live 執行）**
+
+* **時段**：17:18 開始、17:25 確認完成。⚠️ ⛔ 不在當初給的時段（14:05～14:50、15:12～15:50）內，而且是在 I-134 的 review 確認之前執行的（使用者決定）。開始時 `job_runs` 沒有 `running`；17:00 的 `sr_analysis`（id 5942）17:01:19 已經結束，距離超過 10 分鐘；下一個排程是 21:00。
+* **第 1、2 步（停止新提交、盤點）**：17:18:31 `backtest_jobs` 的 `pending`／`running` 都是 0（`done` 6、`failed` 2）→ 待處理清單是空的。migration 版本 76；`deploy.sh` sha `abcf1c019b25`、`--preflight` 通過（MemAvailable 4919MiB）；三個服務 `running`、`RestartCount` 0（`2438fb0d1adf`、`bee594b80d5c`、`5520de9a372b`）；`Config.Env` 50 行、`a4eccbc0aa79`；backend 執行檔 `df45b9cffe0c`。
+* **第 3 步（記下舊程序）**：python-server `3e50b66dd8f6`（StartedAt 06:20:21Z）、python-worker `cc3eb9fefae9`（06:20:20Z）；三個服務打上 `pre-i134`（ID 同上）。
+* **第 4 步（部署）**：`git pull` `e61fbdf`→`7cca99a`；`config ok (production=true)`；`down` → `up -d --no-build`；`部署完成：backend /health 正常、RestartCount 0`，`deploy rc=0`。
+* **第 5、6 步與部署後確認**（17:25:23）：
+  * 三個服務 `running`、`RestartCount` 0，image 都換了（backend `c0e4e6f21e15`、python-server `aad99a5aac67`、python-worker `29b60134f355`）；新的 container 是 `d6dad08f386e`／`0a1cc344cf9b`，第 3 步的舊 ID 查不到（0）→ 舊程序已退出。
+  * backend：`Config.Env` 50 行、`a4eccbc0aa79`（不變）；執行檔 `b07a2830c0fc`（Go 有改，預期不同）；`redis connected`／`scheduler started` 2 筆、設定錯誤 0 筆；`migrations applied` 的 `"version":77`，DB 的 goose 版本 77，`execution_owner` 欄位存在。
+  * python：兩個服務都是 `schema ready`（server 09:24:59Z、worker 09:24:55Z；都⛔ 沒有等待）與 `no interrupted jobs to reap`（各自的 owner），`Traceback` 0；python-server `/health` `{"status":"ok"}`；worker 有 3 次 `poll #`。
+  * 第 6 步：`running` 且 `execution_owner IS NULL` 的列 0 筆，⛔ 不需要處理；`pending`／`running` 仍是 0。
+* 之後的部署回到 6.1。`pre-i134` 標籤保留到 review 確認後再清。
+* ⚠️ worker 這條路徑在 live 上第一次能真的執行任務（v1.3 修了 JSONB／DATE 的型別）；上版後還沒有送過回測，第一筆回測的結果之後再看。
+
+**還沒做**：review 確認。
 
 ## 九、完成後要歸檔的位置
 

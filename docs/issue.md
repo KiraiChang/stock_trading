@@ -3491,7 +3491,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 修復中：計畫書 v1.3（v1.2 已確認；v1.3 併入實作時發現的兩個既有問題：Go 讀不到 NULL `error`、worker 在 PostgreSQL 上讀到的 `symbols`（JSONB）與日期（DATE）是原生型別、回測因此失敗，使用者 2026-11-18 同意）；repo 與 dev 已實作／待 review（2026-11-18），live 的首次上版還沒做：[`plans/i134-backtest-claim.md`](./plans/i134-backtest-claim.md) |
+| 狀態 | 修復中：計畫書 v1.3（v1.2 已確認；v1.3 併入實作時發現的兩個既有問題：Go 讀不到 NULL `error`、worker 在 PostgreSQL 上讀到的 `symbols`（JSONB）與日期（DATE）是原生型別、回測因此失敗，使用者 2026-11-18 同意）；已實作／待 review：repo 與 dev 2026-11-18，live 2026-11-18 17:25 首次上版完成（待處理的遺留 0 筆）：[`plans/i134-backtest-claim.md`](./plans/i134-backtest-claim.md) |
 | 嚴重度 | 低：只影響手動送出的回測，⛔ 不影響排程與交易訊號；但任務會永遠顯示執行中、沒有結果，也⛔ 不會自動重跑 |
 | 分類 | Python worker／回測 |
 | 建立日期 | 2026-11-18 |

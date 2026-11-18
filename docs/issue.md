@@ -3491,7 +3491,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 待修復（只記問題，修法之後另外規劃） |
+| 狀態 | 規劃中：需求已裁決（2026-11-18，D1～D4），計畫書 v1.1 待確認（v1 的 review 已納入）：[`plans/i134-backtest-claim.md`](./plans/i134-backtest-claim.md) |
 | 嚴重度 | 低：只影響手動送出的回測，⛔ 不影響排程與交易訊號；但任務會永遠顯示執行中、沒有結果，也⛔ 不會自動重跑 |
 | 分類 | Python worker／回測 |
 | 建立日期 | 2026-11-18 |
@@ -3509,5 +3509,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 #### 待查與修法方向（寫計畫書時決定）
 
 * 啟動時怎麼處理留下的 `running`：改成 `failed`（帶明確的原因）、還是重設成 `pending` 重跑；要分得出「真的還在跑」與「上一次留下的」（例如記錄執行者與心跳，或以啟動時間判斷）。
-* 認領任務沒有原子性：worker 先 `SELECT … pending` 再另外 `UPDATE` 成 `running`，backend 又可能同時透過 HTTP 讓 python-server 執行同一筆。兩條路徑會不會重複執行同一筆、live 實際用的是哪一條，要先查。
+* 認領任務沒有原子性：worker 先 `SELECT … pending` 再另外 `UPDATE` 成 `running`（`UPDATE` ⛔ 沒有 `AND status = 'pending'`），python-server 收到 `POST /backtest` 也⛔ 不看目前狀態就執行。
+  * **live 兩條路徑都在用**（2026-11-18 使用者在 live 唯讀確認：backend 的 `PYTHON_SERVICE_URL` 有設定；python-worker 也在跑）。backend 寫入 `pending` 之後另開 goroutine 呼叫 python-server，python-server 在背景工作裡才標成 `running`；這段空檔裡 worker 剛好輪詢到，同一筆就會被兩邊各執行一次。
+  * 重複執行的後果：`backtest_results` 是 `ON CONFLICT(job_id) DO UPDATE`（後寫的蓋掉先寫的），但 `backtest_trades` 是單純的 `INSERT`，**交易明細會重複一份**。live 有沒有發生過，可以查同一個 `job_id` 的 `backtest_trades` 有沒有重複的列（寫計畫書時查）。
 * `deploy.sh` 要不要把「有 `pending`／`running` 的回測就停下」做成部署前檢查。

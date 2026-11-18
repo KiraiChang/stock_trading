@@ -184,6 +184,18 @@
 
 **還沒做**：live 的部署（3.4、第六節第 5 點），要另外排時段；部署前先比對 live 的基底 layer。
 
+**live 部署前的唯讀比對（2026-11-18，使用者在 live 執行）**：python-server（正在跑的 image `8647d96a`）與 python-worker（`394eb654`）的前 4 層 layer 雜湊都是 `2d613846a388`（跟新 Dockerfile 釘住的 digest 相同），`pip freeze --all | LC_ALL=C sort | md5sum` 都是 `39c5d9d45667ea4d872b9e746ac99600`、51 行（跟 `requirements.txt` 一致）。→ 符合部署條件。
+
+**live 部署的安排（2026-11-18）**
+
+* **時段**：`development-workflow.md`「挑窗口」加上排程前後 10 分鐘不動 → **14:05～14:50**（`intraday` 最後一輪 13:55、`daily_close` 15:00），或 `daily_close` 跑完之後 **15:12～15:50**（16:00 有 `evaluation_universe_sync`）。用到 python 的排程是 17:00 的 `sr_analysis`。
+* **跟 3.4 的差異（記下）**：3.4 寫「backend 用快取、內容不變」⛔ 不完全對。backend 的 Dockerfile 是 `COPY backend ./`，而 I-133 改了 `backend/scripts/test.sh`，所以 Go 的編譯那一層快取會失效、重新編譯（程式沒改；最終 image 只放執行檔與 `config.yaml`，build context 排除 `.git`、`go build -trimpath`，預期執行檔相同）。npm 與 `go mod download` 那幾層仍用快取。所以 build 會比 I-132 第二次部署（全部快取）久：python 冷 build（dev 量到 `pip install` 42 秒、export 36 秒）加上 Go 重新編譯，預估 5～8 分鐘；停機仍只有 `down`→`up` 那一段。部署前後比對 backend 執行檔的 sha256 當作證據，不同就記下、不當成失敗（`Config.Env` 必須相同）。
+* **開始的條件**（任何一項不符就⛔ 不部署）：`job_runs` 沒有 `running`；**`backtest_jobs` 的 `pending` 與 `running` 都是 0**（review 2026-11-18 補：回測⛔ 不記在 `job_runs`。python-worker 輪詢 `pending`、執行前標成 `running`，python-server 的 `POST /backtest` 也在背景執行並標成 `running`；兩者重啟後都⛔ 不會撿回 `running` 的任務，部署中斷的回測會一直停在 `running`。`pending` 不是 0 時，新的 worker 一起來就會執行它們。有 `running` 時看 `started_at`：還在跑就等它結束；是之前留下、早已沒在跑的，記下來由使用者決定，⛔ 不在部署中處理；重啟後停在 `running` 的問題本身記在 `issue.md` I-134）；`deploy.sh` sha `abcf1c01…`、`--preflight` 通過；三個服務 `running`、`RestartCount` 0；記下 backend `Config.Env` 的行數與 hash（11-16 是 50 行、`a4eccbc0aa79`）與執行檔 sha256；三個服務正在跑的 image 都打上 `pre-t083` 回滾標籤（`development-workflow.md`「部署腳本：失敗即停」的做法；python 兩個的 image 存在，這次⛔ 不會像 I-132 那樣沒有回滾目標）。
+* **部署期間⛔ 不新增回測**：從開始條件確認到部署後確認做完，操作者⛔ 不從前端或 API 送出回測（build 期間舊的 worker 還在跑，會接走新任務，`down` 時被中斷）。
+* **中斷點**：14:05 開始的話，14:40 還沒進到 `==> down` 就 Ctrl+C（`down` 之前中斷安全，把三個服務的 `latest` 標回 `pre-t083`）；15:12 開始的話是 15:40。
+* **部署後**：三個服務 `Up`、`RestartCount` 0；backend `Config.Env` 跟部署前相同、log 有 `redis connected`、`scheduler started`；兩個 python 服務的 layer `2d613846a388`、md5 `39c5d9d4…`、51 行，image ID 跟部署前不同（確認真的換上新 image）；記下 Debian 與 `libgomp1` 的版本；python-server `/health` 200；python-worker 的 log 有 `poll #`、沒有 `Traceback`；`backtest_jobs` 的 `pending`／`running` 仍是 0；17:00 的 `sr_analysis` 是 `success`。
+* **回滾**：照「部署腳本：失敗即停」。`down` 之後起不來時，三個服務的 `latest` 都標回 `pre-t083`，再用 `dc.sh` 執行 `up -d --no-build`（三個一起起），分別確認。
+
 ## 八、完成後要歸檔的位置
 
 * `docs/development-workflow.md`：「python 的套件版本與升級」（釘版的原因、版本來源、升級程序、`libgomp1` 不釘的取捨、Windows venv 的限制）；smoke 那一節補上 `scripts/smoke-dev-worker.sh` 的用法、環境變數與收尾行為。

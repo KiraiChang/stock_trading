@@ -1,6 +1,6 @@
 # I-135：backtrader 引擎取出交易明細的錯誤（計畫書 v1.3）
 
-> 狀態：v1.3 已確認（使用者 2026-11-18）；**repo 與 dev 已實作（2026-11-18），待 review；live 還沒部署**（實作備註在「六之後」）。對應：`docs/issue.md` I-135。需求確認：2026-11-18（使用者：欄位一起修、查 live 的 2 筆 `failed`、先寫計畫書）。裁決：D1 採 (a)、D2 改成帶 `+08:00` 的時間（2026-11-18，含補充，見第三節第 4 點）。
+> 狀態：v1.3 已確認（使用者 2026-11-18）；**repo 與 dev 已實作（2026-11-18）、review 通過（2026-11-19）；live 已上版（2026-11-19，`7a97ac5`）；待收斂**（實作備註與上版紀錄在「六之後」）。對應：`docs/issue.md` I-135。需求確認：2026-11-18（使用者：欄位一起修、查 live 的 2 筆 `failed`、先寫計畫書）。裁決：D1 採 (a)、D2 改成帶 `+08:00` 的時間（2026-11-18，含補充，見第三節第 4 點）。
 
 ## 一、目標與不做的範圍
 
@@ -154,6 +154,24 @@
 | `python/scripts/test.sh -q`（完整） | rc 0：pytest 2010 passed、1 skipped（review 修正前 1981）；shell 測試都通過 |
 | `backend/scripts/test.sh ./internal/database/...` | rc 0（PostgreSQL 的測試在這裡 skip，由上一列的腳本執行） |
 | dev 實跑 `SCENARIOS=trades SMOKE_STRATEGY=breakout_v1`（2330、2024-01-01～2025-12-31） | 通過：3 筆明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間；收尾後 dev 的 `backtest_jobs` 0 筆。review 修正後（改用共用查詢）2026-11-19 重跑：同樣通過、3 筆、0 筆殘留 |
+
+**live 上版（I-134 的 6.1 一般部署；2026-11-19，使用者在 live 執行）**
+
+* **時段**：部署前檢查 14:04:12（唯讀），部署後確認 14:09:11；python 兩個服務 14:08:43／14:08:47 起來。部署的開始時間沒有另外記，在部署前檢查之後。從部署前檢查到部署後確認都沒有送回測。
+* **部署前檢查**：`job_runs` 的 `running` 0 筆；`backtest_jobs` 的 `pending`／`running` 都是 0。策略與狀態的分布：`breakout_swing_atr_v1` `done` 2、`failed` 1；`breakout_v1` `done` 1；`breakout_volprofile_composite_v1` `done` 1、`failed` 1；`pullback_atrchannel_structural_v1` `done` 1；`pullback_swing_composite_v1` `done` 1。`breakout_v1` 的明細 0 筆。
+  * migration 版本 77；`deploy.sh` sha `abcf1c019b25`，`--preflight` 通過（MemAvailable 4577MiB）。
+  * 三個服務 `running`、`RestartCount` 0（`c0e4e6f21e15`、`aad99a5aac67`、`29b60134f355`）；`Config.Env` 50 行、`a4eccbc0aa79`；backend 執行檔 `b07a2830c0fc`。
+  * 舊 image 的 `engine.py` 沒有 `tradehistory=True`（0）。
+* **回滾標籤**：三個服務打上 `pre-i135`（ID 同上）。
+* **部署**：`git pull` `7cca99a`→`7a97ac5`（14 個檔）；`部署完成：backend /health 正常、RestartCount 0`，`deploy rc=0`。
+* **部署後確認**（14:09:11）：
+  * 三個服務 `running`、`RestartCount` 0；image 都換了（backend `c8bf4e9fdd65`、python-server `034581dc5f42`、python-worker `52ed36ba11a3`）。
+  * backend：`Config.Env` 50 行、`a4eccbc0aa79`（不變）；執行檔 `b07a2830c0fc`（不變，符合預期：Go 只改了測試檔）；`redis connected`／`scheduler started` 2 筆、設定錯誤 0 筆；migration 版本 77。
+  * 新 image 的程式：`engine.py` 的 `tradehistory=True` 2 行（註解與程式各 1 行，跟 `7a97ac5` 相同；給指令時預期 1 是算錯）、`_trade_row` 2 行（定義與呼叫）；`strategy/base.py` 的 `percabs` 0 → I-136 沒有帶上去。
+  * python：兩個服務都是 `schema ready`（⛔ 沒有等待）與各自 owner 的 `no interrupted jobs to reap`，`Traceback` 0；python-server `/health` `{"status":"ok"}`；worker 有 3 次 `poll #`。
+  * `pending`／`running` 仍是 0；策略與狀態的分布、`breakout_v1` 的明細筆數都跟部署前相同。
+* ⚠️ 上版後 live 還沒有跑過有交易的 `breakout_v1`。有交易的路徑由 dev 實跑驗證（上表）；live 上第一筆的費用仍是 I-136 之前的模型，⛔ 報酬數字不能參考。
+* `pre-i135` 標籤保留到收斂後再清。
 
 ## 七、完成後要歸檔的位置與另案
 

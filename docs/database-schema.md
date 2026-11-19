@@ -552,6 +552,12 @@ backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、
   （它用自己的費用計算，費率同樣由 config 傳入）。
 * **時間與資料庫**：帶 offset 的字串寫進 PostgreSQL 的 `TIMESTAMPTZ`，存的時刻跟連線的 TimeZone 無關（`scripts/test-postgres-migrations.sh` 會跑的測試驗證）。
   ⚠️ 只保證 PostgreSQL：MySQL 的 `DATETIME` 收到帶 offset 的值仍會換成連線的時區，SQLite 存的是字串本身。
+* **程式註解裡的 I-135／I-136**：兩筆都在 2026-11-19 收斂。程式、測試與腳本註解裡的「（I-135）」「（I-136）」是**由來標記**，記的是這段為什麼這樣寫，
+  規格以本節為準：
+  * **I-135**：`breakout_v1` 只要有交易就失敗——`strategy._trades` 是兩層（data → tradeid → 交易的 list），原本只走了一層。
+    修正時一併改成從成交紀錄算明細、時間帶 `+08:00`（當時的裁決 D2）、寫入前核對，以及共用的明細查詢。
+  * **I-136**：broker 的手續費被除以 100、實際扣費沒有交易稅 → `TWCommission` 設 `percabs=True`、⛔ 不覆寫 `getcommission()`、
+    賣出（含開空單）課稅，engine 明確傳入 config 費率；`commission` 定義為含稅的模擬總費用，以及共用的費用查詢。
 
 ---
 

@@ -3310,6 +3310,14 @@ SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
     image 的，換上本次的 image 之後、寫入任務之前再讀一次，用它當預期值（讀不到 → 結束碼 1、照常收尾）。
   * 查詢是 `backend/internal/database/testdata/backtest_trades_fee_check.sql`（`$1`＝job_id、`$2`＝前綴、`$3`／`$4`＝費率），跟
     `TestPostgresMigrationsBacktestTradesFeeCheck` 共用同一份，寫法同上。
+  * **在 live 唯讀核對一筆任務**（2026-11-19 I-136 上版後首次使用）：兩份查詢也能對 live 的一筆 backtrader 任務執行。做法跟腳本一樣，用 `PREPARE`／`EXECUTE`
+    經 `psql -v` 綁值，連線帶 `default_transaction_read_only=on`；`$1` 和 `$2` 都帶 job_id（`starts_with` 必然成立，篩選等於 `job_id =`）。
+    要另外查同一條件下的明細筆數，確認「0 筆不符」不是因為沒有列。
+    * **適用範圍**：費用查詢的費率取 python-server container 裡 config 的值，所以只適用於**用目前部署的版本新跑的任務**
+      （任務在這個 container 啟動之後建立）。費率換版之後，舊任務是照當時的費率正確算的，用現在的費率會被判成不符。
+    * 核對歷史任務時，`$3`／`$4` 要帶任務執行當時的費率，從當時部署的 commit 的 `python/config.yaml` 取。
+      I-136 新舊界線（`database-schema.md` 的 `backtest_trades`）之前的 backtrader 任務⛔ 不適用費用查詢：那時的費用模型本身是錯的。
+    ⚠️ SQL 檔要從 build checkout 讀（`deploy.sh` 的 `PROJECT_DIR`）：scripts 目錄⛔ 不是 git checkout。
 * **dev 的測試資料**：預設 2330、2024-01-01～2025-12-31、`breakout_swing_atr_v1`（會產生交易；重啟與回應遺失的同步點需要至少一筆交易）。
   dev DB 原本沒有任何日 K，2026-11-18 從舊機的最終 dump（`~/old_vps_archive/20261112/db/final/stock_trading.dump`，SHA-256 `1d9495fd…`）
   **只匯入 2330 的日 K**（4,930 筆，2006-10-18～2026-11-11；使用者同意）：`pg_restore --data-only -t candles -f -` 經 pipe 過濾

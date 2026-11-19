@@ -6,7 +6,7 @@ import (
 )
 
 // TestPostgresMigrationsTimestamptzOffsetIsSessionIndependent：python 的 backtrader 路徑把交易時間寫成帶 `+08:00`
-// 的字串（issue.md I-135 的 D2）。這裡驗證它依賴的 PostgreSQL 行為：帶 offset 的字串寫進 TIMESTAMPTZ，
+// 的字串（由來：I-135 的 D2；規格見 docs/database-schema.md 的 backtest_trades「時間與資料庫」）。這裡驗證它依賴的 PostgreSQL 行為：帶 offset 的字串寫進 TIMESTAMPTZ，
 // 存下的時刻跟連線的 TimeZone 無關；⛔ 不帶時區的字串則會照連線的 TimeZone 解讀（原本的寫法因此依賴連線設定）。
 //
 // 名稱以 TestPostgresMigrations 開頭，才會被 scripts/test-postgres-migrations.sh 執行（它用 -test.run 篩選）。

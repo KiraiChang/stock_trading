@@ -224,7 +224,7 @@ v1 的寫法有順序矛盾（v1 review P2）：開始條件要求 `running` 是
 **跟計畫的差異（除了 v1.3 已記的）**
 
 * **收尾的「確認已停止」多了一步**：被鎖擋住的 backend ⛔ 不會自己發現 client 已經斷線（它在等鎖，不會去讀 socket），所以 container 停了之後，來自它的連線仍留在 `pg_stat_activity`、等鎖放開才會報錯結束。改成 container 確認不在執行之後，用 `pg_terminate_backend` 結束來自它們（開始時與每次重啟後記下的 IP）的連線，再確認為 0。情境裡砍掉服務之後也一樣，但只結束「來自那個 IP、被本輪鎖擋住」的 backend（新起來的 container 可能拿到同一個 IP）。
-* dev 驗收的預設策略是 `breakout_swing_atr_v1`（計畫寫「實作時挑」）：`breakout_v1` 有交易就失敗（I-135）。
+* dev 驗收的預設策略是 `breakout_swing_atr_v1`（計畫寫「實作時挑」）：`breakout_v1` 有交易就失敗（I-135，2026-11-19 已修正並收斂）。
 
 **假 docker 測試抓到的腳本 bug（實跑時沒有暴露）**
 

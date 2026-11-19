@@ -1199,7 +1199,8 @@ Python Worker / HTTP Server
     ↓ backtest/engine.py 依 strategy 名稱分派：
     │   - 命中 backtest/modular/strategy.py 的 STRATEGY_PRESETS → 走純 pandas/numpy
     │     的模組化引擎（見 backtest-modular-strategy.md）
-    │   - 否則走既有 backtrader 引擎（STRATEGY_MAP）
+    │   - 否則走既有 backtrader 引擎（STRATEGY_MAP）；要開 tradehistory，交易明細從每次成交算
+    │     （欄位定義見 database-schema.md 的 backtest_trades）
     ↓ 寫入 backtest_results + backtest_trades（兩條路徑輸出格式一致）
 Go API（讀取結果回傳給前端）
 ```

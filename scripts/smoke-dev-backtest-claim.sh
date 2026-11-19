@@ -14,7 +14,9 @@
 #   dev DB ⛔ 沒有任何 pending／running 的回測；測試標的在日期範圍內有日 K，而且回測至少產生一筆交易。
 #
 # Environment overrides:
-#   SCENARIOS        要跑的情境，逗號或空白分隔（default: race,server-restart,worker-restart,lost-response,schema）
+#   SCENARIOS        要跑的情境，逗號或空白分隔（default: race,server-restart,worker-restart,lost-response,schema）。
+#                    另有 trades（I-135：backtrader 路徑的交易明細；要搭配 SMOKE_STRATEGY=breakout_v1，⛔ 不在預設裡）：
+#                      SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 scripts/smoke-dev-backtest-claim.sh
 #   NO_BUILD         1 = 不 build，用現有的 image（default: 0）
 #   SMOKE_STRATEGY   回測策略（default: breakout_swing_atr_v1；2330 的 2024～2025 日 K 會產生交易）
 #   SMOKE_SYMBOL     回測標的（default: 2330）
@@ -53,8 +55,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="docker-compose.dev.yml"
 DEV_PROJECT="stock_trading_dev"
-ALL_SCENARIOS="race server-restart worker-restart lost-response schema"
-SCENARIOS="${SCENARIOS:-$ALL_SCENARIOS}"
+DEFAULT_SCENARIOS="race server-restart worker-restart lost-response schema"
+ALL_SCENARIOS="$DEFAULT_SCENARIOS trades"
+SCENARIOS="${SCENARIOS:-$DEFAULT_SCENARIOS}"
 NO_BUILD="${NO_BUILD:-0}"
 SMOKE_STRATEGY="${SMOKE_STRATEGY:-breakout_swing_atr_v1}"
 SMOKE_SYMBOL="${SMOKE_SYMBOL:-2330}"
@@ -94,6 +97,15 @@ for s in ${SCENARIOS//,/ }; do
   case " $ALL_SCENARIOS " in *" $s "*) SCEN_LIST+=("$s") ;; *) die2 "不認得的情境：$s（可用：$ALL_SCENARIOS）" ;; esac
 done
 [ "${#SCEN_LIST[@]}" -gt 0 ] || die2 "SCENARIOS 是空的"
+# trades 的精度界線是照 backtrader 路徑的欄位定義訂的（I-135），只用在 breakout_v1
+if [[ " ${SCEN_LIST[*]} " == *" trades "* ]] && [ "$SMOKE_STRATEGY" != breakout_v1 ]; then
+  die2 "trades 情境要搭配 SMOKE_STRATEGY=breakout_v1（目前：$SMOKE_STRATEGY）"
+fi
+# trades 的明細查詢跟 Go 的 PostgreSQL 測試共用同一份檔案（參數 $1＝job_id、$2＝前綴；⛔ 不在這裡另寫一份）
+TRADES_CHECK_SQL="$REPO_ROOT/backend/internal/database/testdata/backtest_trades_check.sql"
+if [[ " ${SCEN_LIST[*]} " == *" trades "* ]] && [ ! -r "$TRADES_CHECK_SQL" ]; then
+  die2 "讀不到明細查詢：$TRADES_CHECK_SQL"
+fi
 for c in timeout curl python3; do
   command -v "$c" >/dev/null 2>&1 || die2 "找不到 $c"
 done
@@ -700,6 +712,27 @@ SQL
 }
 tmp_log_has() { local out; out="$(t "$(rem "$CALL_TIMEOUT")" docker logs "$TMP_SRV_ID" 2>&1)" || return 1; grep -qF -- "$1" <<<"$out"; }
 
+# trades（I-135）：backtrader 路徑寫進 backtest_trades 的明細——筆數、價格與股數、帶方向的精度界線、台北時間。
+#   認領的路徑誰都可以（202 或 409 都接受），驗的是寫進去的內容。
+scenario_trades() {
+  local id="${PREFIX}trades_1" code s bad
+  log "trades：$SMOKE_STRATEGY 的交易明細（筆數、價格與股數、帶方向的精度界線、台北時間）"
+  insert_jobs "$id"
+  code="$(post_job "$id")" || code=err
+  case "$code" in 202|409) ;; *) fail "POST $id 回 $code（預期 202 或 409）" ;; esac
+  wait_until "$id 結束" job_final "$id"
+  expect_job_status "$id" "done"
+  expect_done_once "$id"
+  s="$(job_state "$id")" || fail "查不到 $id 的狀態"
+  [ "$(field "$s" 6)" -ge 1 ] 2>/dev/null || fail "$id 沒有任何交易明細（這組資料應該要有交易）"
+  # 共用查詢包進 PREPARE，再用 psql 變數 EXECUTE（$1＝job_id、$2＝前綴）
+  bad="$( { printf 'PREPARE trades_check(text, text) AS\n'; cat "$TRADES_CHECK_SQL"
+            printf ";\nEXECUTE trades_check(:'id', :'prefix');\n"; } | q trades_check "id=$id")" || fail "查不到 $id 的交易明細"
+  bad="${bad//[[:space:]]/}"
+  [ "$bad" = 0 ] || fail "$id 有 $bad 筆明細不符合規格（必要欄位是 NULL 或 NaN、價格／股數不是正數、超出精度界線，或時間不是台北的日 K 時刻）"
+  echo "    通過：$(field "$s" 6) 筆交易明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間"
+}
+
 for sc in "${SCEN_LIST[@]}"; do
   case "$sc" in
     race) scenario_race ;;
@@ -707,6 +740,7 @@ for sc in "${SCEN_LIST[@]}"; do
     worker-restart) restart_case worker ;;
     lost-response) scenario_lost_response ;;
     schema) scenario_schema ;;
+    trades) scenario_trades ;;
   esac
 done
 log "全部通過：${SCEN_LIST[*]}"

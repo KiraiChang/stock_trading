@@ -3297,11 +3297,17 @@ SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
   還要等 `KILL_AFTER` 才 SIGKILL）；用完就⛔ 不再執行、印出「時限用完，未執行：…」並回傳失敗——⛔ 不能每個呼叫再補一點時間（review 2026-11-18：
   原本耗盡後每次給 1 秒，`CLEANUP_TIMEOUT=1` 實際花了 10 秒）。
 * **臨時 server 用事先決定的名稱**（`i134smoke_<時間>_schema`）移除與確認；`run` 之後取不到 ID、或確認不了已經不在，就⛔ 不刪臨時 DB。
+* **`trades` 情境**（I-135；⛔ 不在預設裡）：`SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 scripts/smoke-dev-backtest-claim.sh`。寫入一筆、`POST`、
+  等到結束 → `done`；明細筆數等於結果的 `total_trades` 且至少 1 筆；每一筆的股數與進出場價都是正數、符合帶方向的精度界線
+  （`database-schema.md` 的 `backtest_trades`）、時間換成台北是 `00:00:00`，必要欄位⛔ 不能是 NULL 或 NaN。收尾跟其他情境同一套。只接受 `breakout_v1`（界線是照 backtrader 路徑的欄位定義訂的）。
+  明細查詢是 `backend/internal/database/testdata/backtest_trades_check.sql`，跟 `scripts/test-postgres-migrations.sh` 會跑的
+  `TestPostgresMigrationsBacktestTradesCheck` 共用同一份（腳本用 `PREPARE`／`EXECUTE`、Go 綁參數；⛔ 不在腳本裡另寫一份）。
+  它把好的條件 AND 起來再用 `IS NOT TRUE` 判壞：NULL 參與比較得到 UNKNOWN，直接寫壞的條件會讓那一列被濾掉、判成通過。
 * **dev 的測試資料**：預設 2330、2024-01-01～2025-12-31、`breakout_swing_atr_v1`（會產生交易；重啟與回應遺失的同步點需要至少一筆交易）。
   dev DB 原本沒有任何日 K，2026-11-18 從舊機的最終 dump（`~/old_vps_archive/20261112/db/final/stock_trading.dump`，SHA-256 `1d9495fd…`）
   **只匯入 2330 的日 K**（4,930 筆，2006-10-18～2026-11-11；使用者同意）：`pg_restore --data-only -t candles -f -` 經 pipe 過濾
   `symbol=2330`、`timeframe=1d`、拿掉 `id` 欄之後直接 `COPY` 進 dev，⛔ 沒有寫中間檔、⛔ 沒有匯入其他表（users、持倉、交易紀錄都⛔ 不進一般的
-  dev volume，見「在 dev 查 live 的真實資料：作業專用 volume」）。`breakout_v1` 有交易就會失敗（`issue.md` I-135），⛔ 不要拿它當驗收策略。
+  dev volume，見「在 dev 查 live 的真實資料：作業專用 volume」）。`breakout_v1` 在 I-135 之前有交易就會失敗；預設的驗收策略維持 `breakout_swing_atr_v1`，`breakout_v1` 用在 `trades` 情境。
 * 結束碼：0 全部通過、1 驗收失敗或收尾失敗、2 參數或前置條件不對（⛔ 沒有改任何東西）。
 * 測試：`scripts/test-smoke-dev-backtest-claim.sh`（假 docker／curl／python3；`python/scripts/test.sh` 會先跑它）。
 

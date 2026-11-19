@@ -1,6 +1,6 @@
 # I-135：backtrader 引擎取出交易明細的錯誤（計畫書 v1.3）
 
-> 狀態：v1.2 review 後改成 v1.3，待確認。對應：`docs/issue.md` I-135。需求確認：2026-11-18（使用者：欄位一起修、查 live 的 2 筆 `failed`、先寫計畫書）。裁決：D1 採 (a)、D2 改成帶 `+08:00` 的時間（2026-11-18，含補充，見第三節第 4 點）。
+> 狀態：v1.3 已確認（使用者 2026-11-18）；**repo 與 dev 已實作（2026-11-18），待 review；live 還沒部署**（實作備註在「六之後」）。對應：`docs/issue.md` I-135。需求確認：2026-11-18（使用者：欄位一起修、查 live 的 2 筆 `failed`、先寫計畫書）。裁決：D1 採 (a)、D2 改成帶 `+08:00` 的時間（2026-11-18，含補充，見第三節第 4 點）。
 
 ## 一、目標與不做的範圍
 
@@ -108,6 +108,52 @@
    * 執行：`scripts/smoke-dev.sh` 起 dev stack 之後，`SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 scripts/smoke-dev-backtest-claim.sh`（dev 的 2330 日 K 是 I-134 匯入的；日期用腳本的預設 2024-01-01～2025-12-31）；跑完用 `down` 停掉 dev（⛔ 不帶 `-v`）。
    * `trades` 情境：寫入一筆 `pending`、`POST /backtest`、等到結束。通過條件：`done`；明細筆數等於結果的 `total_trades`，而且至少 1 筆；每一筆的 `size`、`entry_price`、`exit_price` 都大於 0；每一筆都符合帶方向的精度界線（在 SQL 裡算）；`entry_time`／`exit_time` 換成台北時間是 `00:00:00`（日 K 的成交時刻）。任一項不符就失敗、照常收尾。
    * 腳本的假 docker 測試（`scripts/test-smoke-dev-backtest-claim.sh`）加上：`trades` 通過、任務 `failed` 時失敗、界線不符時失敗，三種都有收尾。
+
+## 六之後：實作備註（2026-11-18；已改好、未 commit，待 review）
+
+**改了什麼**
+
+* `python/backtest/engine.py`：`Cerebro(stdstats=False, tradehistory=True)`；`_extract_trades` 走兩層；新的 `_trade_row` 照第三節從成交紀錄算（進出場價加權、`size` 是進場股數、方向依第一筆成交、`pnl_pct` 照 D1），並驗證「部位⛔ 不變號、最後回到 0」「未四捨五入的毛損益＝`t.pnl`」「`t.commission`＝Σ `event.commission`」，任一項不符就 raise `TradeExtractionError`；時間由 `_bt_time_to_taipei_iso` 從 UTC 時刻轉成台北時間（取代 `_unix_to_iso`）。
+* 測試：`python/tests/test_backtest_engine_trades.py`（15 項：一次平倉的全部欄位、review 的分批出場與加減碼交錯兩個例子、空方與空方分批回補、反手拆成兩筆的費用 21／20、多筆多檔、沒有交易與未平倉、時間換算、五種不一致的成交紀錄要 raise、`breakout_v1` 本身）。`breakout_v1` 用固定種子的合成資料（seed 16，3 筆交易），⛔ 不需要改用 dev 實跑代替。
+* `backend/internal/database/timestamptz_postgres_test.go`：第六節第 2 點（名稱以 `TestPostgresMigrations` 開頭才會被腳本執行）。
+* `scripts/smoke-dev-backtest-claim.sh`：`trades` 情境（只接受 `breakout_v1`，⛔ 不在預設裡）；`scripts/test-smoke-dev-backtest-claim.sh` 加 5 項。
+
+**跟計畫的差異**
+
+* 測試檔要自己把 `python/backtest` 放進 `sys.path`：`engine` 用 `from strategy.base import …`，單獨執行這支測試時（沒有先 import `http_server`）會找不到 `strategy`。
+* `trades` 情境限定 `breakout_v1`（參數檢查擋下其他策略、結束碼 2）：精度界線是照 backtrader 路徑的欄位定義訂的，modular 的 `size` 可以是小數、定義也不同。
+
+**實作 review 的修正（2026-11-19；3 個 P2，使用者確認修法與補充）**
+
+1. **非有限數繞過核對**：NaN 的大小比較一律不成立，`_trade_row` 會收下含 NaN 的成交、寫出 NaN 的價格與損益。改成在**任何運算之前**
+   先確認成交的股數、價格、費用、時間，以及 `t.pnl`／`t.pnlcomm`／`t.commission` 都是有限數，否則 raise。
+2. **dev 腳本把 NULL 判成通過**：原本的查詢只列「壞的條件」，NULL 參與比較得到 UNKNOWN，那一列被 WHERE 濾掉。改成：
+   * 查詢抽成共用檔 `backend/internal/database/testdata/backtest_trades_check.sql`（參數 `$1`＝job_id、`$2`＝前綴）：dev 腳本把它包進
+     `PREPARE`、用 psql 變數 `EXECUTE`；Go 測試 `go:embed` 同一份、綁參數執行，⛔ 不另外複製查詢。
+   * 好的條件全部 AND 起來、用 `IS NOT TRUE` 判壞；必要欄位逐一寫 `IS NOT NULL`；數值欄位排除 `NaN`（DECIMAL 存得下 NaN，PostgreSQL
+     的 NaN 等於 NaN、大於任何數）；時間要求 `isfinite`。
+   * `TestPostgresMigrationsBacktestTradesCheck`（`scripts/test-postgres-migrations.sh` 會跑）：暫存表 `LIKE public.backtest_trades`
+     （保留欄位型別），拿掉 `symbol`、`direction` 的 NOT NULL，NULL 的負向案例才真的進得了查詢；10 個必要欄位各自 NULL、6 個數值欄位
+     各自 NaN、時間 ±infinity、方向／正數／界線／台北時刻各自違反都要算 1 筆，好的多方與空方列、界線內（差 0.10）算 0，前綴不符的⛔ 不算。
+   * 假 docker 測試：送出的查詢就是共用檔的內容、用 `IS NOT TRUE`、`EXECUTE` 綁 `:'prefix'`；查詢失敗 → rc 1、照常收尾。
+3. **容許值偏離計畫**（⚠️ 實作時把容許值乘上金額，成了相對誤差，⛔ 沒有回報；已改回）：毛損益、費用、部位歸零都恢復計畫約定的**絕對容許值
+   `1e-6`**。測試：毛損益與費用各測差 ±5e-7 通過、±2e-6 報錯；大額基數（毛損益與費用都是 1e6）下差 0.5 報錯（相對誤差的寫法會放行）；
+   大額（單筆成交金額約 1e8～4e8）、多筆加減碼交錯的多空交易走真的 backtrader 都通過。`1e-6` 記為**採用的值**，⛔ 不寫成對任意金額的保證
+   （`database-schema.md` 的 `backtest_trades`）。
+
+**驗證**
+
+| 項目 | 結果 |
+|---|---|
+| `test_backtest_engine_trades.py` | 44 項通過（原本 15 項；review 修正加 29 項：非有限數 18＋時間 1、兩種容許值邊界各 4、大額差 0.5、大額多筆成交） |
+| 突變（拿掉第二層迴圈、關掉 `tradehistory`、進場價改回 `t.price`、出場價改回原公式、時間直接貼 `+08:00`） | 9／8／1／7／4 項失敗 |
+| review 修正的突變（容許值改回乘上金額、拿掉有限數檢查） | 4／19 項失敗 |
+| 共用查詢的突變（在 PostgreSQL 上跑） | 換回 review 前的查詢 → 13 項失敗（9 個欄位 NULL、`size`／`pnl_pct` NaN、時間 ±infinity）；拿掉 NaN 排除 → 2 項失敗（`size`、`pnl_pct`；其他數值欄位的 NaN 由界線擋下）；`IS NOT TRUE` 改成 `NOT (…)` → 0 項失敗：必要欄位已逐一寫 `IS NOT NULL`，兩道防線少一道仍擋得住，⛔ 不代表 `IS NOT TRUE` 多餘 |
+| `scripts/test-postgres-migrations.sh` | rc 0；`TestPostgresMigrationsTimestamptzOffsetIsSessionIndependent`、`TestPostgresMigrationsBacktestTradesCheck` 通過 |
+| `scripts/test-smoke-dev-backtest-claim.sh` | 50 項通過（review 修正加 3 項） |
+| `python/scripts/test.sh -q`（完整） | rc 0：pytest 2010 passed、1 skipped（review 修正前 1981）；shell 測試都通過 |
+| `backend/scripts/test.sh ./internal/database/...` | rc 0（PostgreSQL 的測試在這裡 skip，由上一列的腳本執行） |
+| dev 實跑 `SCENARIOS=trades SMOKE_STRATEGY=breakout_v1`（2330、2024-01-01～2025-12-31） | 通過：3 筆明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間；收尾後 dev 的 `backtest_jobs` 0 筆。review 修正後（改用共用查詢）2026-11-19 重跑：同樣通過、3 筆、0 筆殘留 |
 
 ## 七、完成後要歸檔的位置與另案
 

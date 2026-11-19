@@ -517,18 +517,32 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 
 ## backtest_trades
 
-每筆回測交易明細。
+每筆回測交易明細（只列已平倉的交易）。兩條回測路徑寫同一組欄位；**backtrader 路徑**（`STRATEGY_MAP`，例如 `breakout_v1`）的定義如下，
+全部從 backtrader 的成交紀錄（`tradehistory=True` 的 `Trade.history`）算（I-135）：
 
 | 欄位 | 說明 |
 |------|------|
 | job_id | FK → backtest_jobs.job_id |
 | symbol | 股票代號 |
-| direction | `BUY` / `SELL` |
-| entry_time / exit_time | 進出場時間 |
-| entry_price / exit_price | 進出場價格 |
-| size | 交易股數 |
-| pnl / pnl_pct | 損益（絕對值 / 百分比） |
-| commission | 手續費 |
+| direction | 方向：多方 `BUY`、空方 `SELL`（第一筆成交的正負號） |
+| entry_time / exit_time | 第一筆進場成交、最後一筆出場成交的時刻。寫成帶 `+08:00` 的台北時間（由 UTC 時刻換算）；日 K 的成交時刻是台北的 `00:00:00` |
+| entry_price / exit_price | 進場成交、出場成交各自依股數加權的平均價（2 位）。⛔ 不用 backtrader 的 `Trade.price`：減碼後再加碼時它是剩餘部位的成本，⛔ 不是全部進場成交的均價 |
+| size | 進場成交的股數合計（正數） |
+| pnl | 淨損益（毛損益扣掉費用，2 位） |
+| pnl_pct | 淨損益 ÷ **未四捨五入**的進場成交金額，比例值（`0.01`＝1%；`DECIMAL(8,4)`）。modular 路徑是「淨損益 ÷ 進場時該標的的 equity」，目前全額投入，分母數值相同；口徑統一見 `todo.md` T-085 |
+| commission | 分攤到這筆交易的費用（＝這筆交易各成交事件的費用合計；反手的委託會拆成兩筆交易、費用依股數分攤）。⚠️ 反映的是 broker 實際扣的金額，**⛔ 不代表台股的實際費用**：目前的費用模型手續費率被除以 100、賣出沒有交易稅（`issue.md` I-136） |
+
+* **寫入前的核對**（不符就 raise，讓任務 `failed`，⛔ 不寫出看起來正常的錯誤數字）：
+  * 成交的股數、價格、費用、時間，以及 backtrader 的損益與費用，都要是**有限數**（NaN、正負無限大一律報錯）。這一步在任何運算之前做：
+    NaN 的大小比較一律不成立，後面的核對擋不住它。
+  * 部位在同一筆交易裡⛔ 不變號、最後回到 0；未四捨五入的毛損益等於 backtrader 的 `Trade.pnl`；`Trade.commission` 等於各成交事件的費用合計。
+  * 這些核對採用**絕對容許值 `1e-6`**（⛔ 不乘上金額）。這是採用的值，⛔ 不是對任意金額的保證；測試以大額（單筆成交金額約
+    1e8～4e8）、多筆加減碼交錯的多空交易支持它目前夠用。
+* **精度界線**：欄位是四捨五入過的，⛔ 不能拿來精確反算。毛損益在**未四捨五入**的成交資料上等於 backtrader 的損益（見上一點）；
+  存下來的值符合 `|d × (exit_price − entry_price) × size − (pnl + commission)| ≤ 0.01 × size + 0.01`，`d` 是方向（`BUY` +1、`SELL` −1）。
+  例：買 3@102、賣 1@104、賣 2@105，毛損益 8；出場均價存成 104.67，反算是 8.01。
+* **時間與資料庫**：帶 offset 的字串寫進 PostgreSQL 的 `TIMESTAMPTZ`，存的時刻跟連線的 TimeZone 無關（`scripts/test-postgres-migrations.sh` 會跑的測試驗證）。
+  ⚠️ 只保證 PostgreSQL：MySQL 的 `DATETIME` 收到帶 offset 的值仍會換成連線的時區，SQLite 存的是字串本身。
 
 ---
 

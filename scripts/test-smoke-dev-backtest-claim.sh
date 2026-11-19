@@ -165,9 +165,11 @@ case "$name" in
     case "$id" in
       *race_1) echo "done|worker||true|1|4|0|4" ;;
       *race_*) echo "done|server||true|1|4|0|4" ;;
+      *trades_*) [ "${FAKE_TRADES_FAILED:-0}" = 1 ] && echo "failed|server|boom|true|0|0|0|" || echo "done|server||true|1|3|0|3" ;;
       *) echo "running|server||false|0|0|0|" ;;
     esac ;;
   cleanup_fail_pending) touch "$STATE/cleanup_started" ;;
+  trades_check) [ "${FAKE_TRADES_CHECK_FAIL:-0}" = 1 ] && exit 1; echo "${FAKE_TRADES_BAD:-0}" ;;
   cleanup_delete) [ "${FAKE_DELETE_FAIL:-0}" = 1 ] && exit 1 ;;
   tmpdb_add_col) touch "$STATE/addcol" ;;
 esac
@@ -395,6 +397,33 @@ else
 fi
 run schema_ps_fail SCENARIOS=schema FAKE_TMP_NOWAIT=1 FAKE_TMP_PS_FAIL=1
 [ "$RC" -eq 1 ] && ! called '^SQL tmpdb_drop ' && ok "查不到臨時 server 的狀態 → ⛔ 不刪臨時 DB" || ng "查詢失敗卻刪了 DB：rc $RC"
+
+echo "== trades 情境（I-135）"
+run trades_ok SCENARIOS=trades SMOKE_STRATEGY=breakout_v1
+if [ "$RC" -eq 0 ] && grep -q '3 筆交易明細' "$CASE/out" && called "$DELETE" \
+   && grep '^SQL trades_check' "$CASE/calls" | grep -qF 'starts_with(t.job_id, $2)' \
+   && grep '^SQL trades_check' "$CASE/calls" | grep -qF "EXECUTE trades_check(:'id', :'prefix');"; then
+  ok "trades 通過 → rc 0、明細查詢只帶本次前綴（EXECUTE 綁 :'prefix'）、照常收尾"
+else
+  ng "trades：rc $RC"; sed 's/^/      /' "$CASE/out" | tail -5
+fi
+grep '^SQL trades_check' "$CASE/calls" | grep -q "CASE t.direction WHEN 'BUY' THEN 1 ELSE -1 END" \
+  && ok "  精度界線帶方向（空方 −1）" || ng "  精度界線沒有帶方向"
+# 送出的查詢就是共用檔案本身（PREPARE … AS <檔案內容>;），⛔ 不是腳本裡另一份
+SHARED_SQL="$REPO_ROOT/backend/internal/database/testdata/backtest_trades_check.sql"
+WANT="PREPARE trades_check(text, text) AS $(tr '\n' ' ' <"$SHARED_SQL");"
+grep '^SQL trades_check' "$CASE/calls" | grep -qF -- "$WANT" \
+  && ok "  明細查詢是共用檔案的內容（包進 PREPARE）" || ng "  明細查詢跟共用檔案不一致"
+grep '^SQL trades_check' "$CASE/calls" | grep -qF 'IS NOT TRUE' \
+  && ok "  壞列用 IS NOT TRUE 判（NULL 也算壞）" || ng "  明細查詢沒有用 IS NOT TRUE"
+run trades_failed SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_TRADES_FAILED=1
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '預期 done' "$CASE/out" && ok "任務 failed → rc 1、照常收尾" || ng "任務 failed：rc $RC"
+run trades_bad SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_TRADES_BAD=2
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '2 筆明細不符合規格' "$CASE/out" && ok "明細不符合規格 → rc 1、照常收尾" || ng "明細不符合：rc $RC"
+run trades_check_fail SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_TRADES_CHECK_FAIL=1
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '查不到 .* 的交易明細' "$CASE/out" && ok "明細查詢失敗 → rc 1、照常收尾" || ng "明細查詢失敗：rc $RC"
+run trades_wrong_strategy SCENARIOS=trades
+expect_untouched "trades 沒搭配 breakout_v1" 2
 
 echo "== 收尾的時限"
 run race_base

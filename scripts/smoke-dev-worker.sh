@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # python-worker 的 dev 驗收：build（可略過）→ 啟動 → 確認用的是本次的 image、持續運行、啟動 log 沒有錯誤
-# → 收尾（停止並移除本次建立的 worker）。T-083 的計畫書 3.5。
+# → 收尾（停止並移除本次建立的 worker）。由來：T-083；用法見 docs/development-workflow.md。
 #
 # 為什麼另外一支：scripts/smoke-dev.sh ⛔ 不支援 python-worker（它在 compose 的 `worker` profile、
 # 有自己的 build 與 image），而且 smoke-dev.sh 預設會先 down，語意不同。

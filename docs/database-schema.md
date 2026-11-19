@@ -479,7 +479,15 @@ conflict target 會整批失敗（`ON CONFLICT DO UPDATE command cannot affect r
 * **schema 時序**：compose 裡 python ⛔ 不等 backend、migration 由 backend 啟動時套用，所以 python 兩個服務啟動時先等 `execution_owner` 出現
   （每 2 秒查一次，整體最多 120 秒；每次探測本身也只等剩餘時間——DB 卡住時探測在 daemon thread 裡被放棄，探測回來時已過期也算逾時；
   逾時以非 0 結束、交給 compose 重啟）。⛔ 不在 python 端建立欄位。
-* migration 077 之前的 `running`（`execution_owner` 是 NULL）兩種服務都⛔ 不會收；首次上版時由人確認後處理（I-134 計畫書 6.2）。
+* migration 077 之前的 `running`（`execution_owner` 是 NULL）兩種服務都⛔ 不會收，要由人確認後處理。live 首次上版（2026-11-18）時，部署前與
+  舊程序退出後各查一次，這種列都是 0 筆，⛔ 沒有需要處理的。之後新程式認領時一定會寫 `execution_owner`，不會再產生新的 NULL `running`。
+  當時的流程（停止新提交 → 盤點 → 記下舊程序 → 部署 → 確認舊程序退出 → 只處理清單內仍是 NULL 的列）見
+  `git show 85849b9:docs/plans/i134-backtest-claim.md` 的 6.2。
+* **程式註解裡的 I-134**：I-134 在 2026-11-19 收斂。程式、測試、腳本與三份 migration 077 檔頭裡的「（I-134）」「`issue.md` I-134」是**由來標記**，
+  記的是這段為什麼這樣寫，規格以本節與 `architecture.md` 的回測流程為準。⛔ 不為了改這些標記去動 migration 檔。
+  I-134 的內容是 python 服務重啟後，執行中的回測一直停在 `running`。修正包括：原子認領與 `execution_owner`、結果與明細同一個交易提交、
+  重啟時收掉自己留下的 `running`、server 在認領失敗時回 409，以及一併修掉的兩個既有問題：Go 讀不到 `error` 是 NULL 的任務、
+  worker 讀到 PostgreSQL 原生型別的 `symbols`／日期。
 
 ---
 

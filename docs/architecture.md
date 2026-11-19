@@ -1212,6 +1212,13 @@ Go API（讀取結果回傳給前端）
 條件是「仍是自己的 `running`」。python 兩個服務啟動時先等 schema（migration 077），再把自己上一個程序留下的 `running` 收成
 `failed`／`interrupted_on_restart`（⛔ 不自動重跑）。這個收尾依賴「每種服務只有一個程序」；狀態轉移表、這個前提與會破壞它的變更，
 見 `database-schema.md` 的 `backtest_jobs`（I-134）。
+⚠️ I-134 上版（2026-11-18）之後到 2026-11-19，live 只跑過一筆回測（`bt_20261119_062856_000`），由 server 認領。worker 認領並跑完一筆的路徑在 live 上還沒實際發生過，
+只在 dev 驗證過（`smoke-dev-backtest-claim.sh` 的競爭與重啟情境）。依據是使用者在 live 的唯讀查詢：
+* `backtest_jobs` 共 8 筆。I-134 上版前（2026-11-18 17:18）是 `done` 6、`failed` 2；2026-11-19 14:04（I-135 部署前）與 14:24（I-136 部署後）
+  查到的策略與狀態分布，加總仍是同樣的 8 筆，`pending`／`running` 都是 0，所以這段期間沒有新建任務。
+* 之後新建的只有 `bt_20261119_062856_000`（14:28:56 建立、14:28:57 `done`），它的 `execution_owner` 查到是 `server`（2026-11-19）。
+* 部署紀錄的原文：I-134 的在 `git show 85849b9:docs/plans/i134-backtest-claim.md`，I-135 的在 `git show 419856e:docs/plans/i135-backtrader-trades.md`，I-136 的在 `git show 419856e:docs/plans/i136-tw-commission.md`。
+  `execution_owner` 的查詢結果只記在這裡。
 
 模組化回測可選擇啟用 `use_chip_filter`，用 `chip_scores.total_score` 與
 `chip_min_score` 門檻過濾進場訊號；legacy backtrader 策略收到該選項時會記 warning
@@ -1794,3 +1801,12 @@ backend 在 `config.Load()` 之後、**連 DB 之前**依下表檢查最終的�
 | `STOCK_SYMBOLS_TIMEOUT_SEC`、`_FETCH_DELAY_SEC`、`DELISTING_TIMEOUT_SEC` | `0`（＝沿用程式預設） | 各 client | **維持現行**（0 有既定語意）；負值擋下 | 對應功能啟用時 | 全部 |
 | `POSITION_ANALYSIS_*` | 見 `SetDefault` | 持倉分析（`portfolio.NewAnalyzer`） | `MAX_POSITION_VALUE`、`MAX_RISK_AMOUNT`、`MIN_RISK_REWARD_RATIO`、`BREAKOUT_TARGET_RISK_REWARD_RATIO` > 0；`ADD_ON_RATIO`、`TAKE_PROFIT_REDUCTION_RATIO` 在 (0, 1]；`SR_REUSE_MAX_AGE_HOURS` > 0。啟動就擋（I-132 之前 ≤ 0 會在 `NewAnalyzer` 靜默退回預設值，比例沒有上限檢查，`TAKE_PROFIT_REDUCTION_RATIO` > 1 會讓減碼的目標股數變成負數）；`NewAnalyzer` 的退回邏輯保留給不經過 `config.Load()` 的呼叫端 | 無條件 | 全部 |
 | 各功能的 `*_ENABLED` 開關 | 見 `SetDefault` | — | 只有型別檢查（現行） | — | — |
+
+#### 程式註解裡的 I-132
+
+I-132 在 2026-11-19 收斂。程式、測試、腳本、compose 範本與 `.env.example` 裡的「（I-132）」「I-132 的 C／E／A1～A3／D1」是**由來標記**，
+記的是這段為什麼這樣寫，規格以本節、上面的「設定的來源」與 `development-workflow.md` 為準：
+
+* **I-132**：新機 live 11-12 的 backend 重啟沒有經過 `deploy.sh`、沒帶到 Redis 密碼，Redis 被靜默停用（11-02 舊機也發生過）。
+  修正分成幾塊：E 是上面的設定契約；C 是有設定 `REDIS_ADDR` 時啟動探測 Redis、失敗就結束；A1～A3 是部署範本，`env_file` 注入、
+  `.env.example`、`dc.sh`，以及失敗即停、先 build 再 down、readiness 的 `deploy.sh`。D1 決定範本只同步 backend 的應用設定，主機專屬的結構另列 `todo.md` T-082。

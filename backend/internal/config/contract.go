@@ -10,7 +10,7 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
-// 設定契約（I-132 的 E；規格見 docs/plans/i132-redis-silent-disable.md 附錄 C）。
+// 設定契約（由來：I-132 的 E；規格見 docs/architecture.md「設定契約（backend 啟動時檢查）」）。
 //
 // Validate 在 Load() 之後、連 DB 之前執行；違反時只回報「環境變數名稱:規則代號」，
 // ⛔ 不帶值、值的長度或片段。規則依 APP_ENV 分兩級：
@@ -43,10 +43,10 @@ const (
 	AppEnvTest       = "test"
 )
 
-// JWTMinLength 是 production 的 AUTH_JWT_SECRET 最短長度（HS256；C.3 Q1）。
+// JWTMinLength 是 production 的 AUTH_JWT_SECRET 最短長度（HS256；docs/architecture.md 設定契約表的 `AUTH_JWT_SECRET` 列）。
 const JWTMinLength = 32
 
-// 公開範例值：repo 裡任何一處寫過的範例或預設憑證（完整清單見計畫書 4.6；測試會掃描 repo 確認沒有漏）。
+// 公開範例值：repo 裡任何一處寫過的範例或預設憑證（清單與掃描方式見 docs/architecture.md「設定契約」的公開範例值；測試會掃描 repo 確認沒有漏）。
 var (
 	PublicJWTSecrets      = []string{"change-me-in-production", "change-me", "dev-only-change-me"}
 	PublicFinMindKeys     = []string{"YOUR_FINMIND_API_KEY", "your-finmind-api-key"}
@@ -269,7 +269,7 @@ func Validate(cfg *Config) []Violation {
 	c.atLeast("CHIP_SYNC_HISTORY_TRADING_DAYS", cfg.Chip.Sync.HistoryTradingDays, 1)
 	c.atLeast("CHIP_SYNC_BATCH_SIZE", cfg.Chip.Sync.BatchSize, 1)
 
-	// ── 公司行動（無條件註冊；空白沿用 scheduler 的預設，打錯字啟動就擋：C.3 Q4）──
+	// ── 公司行動（無條件註冊；空白沿用 scheduler 的預設，打錯字啟動就擋：設定契約表的 `CORPORATE_ACTION_CRON` 列）──
 	if strings.TrimSpace(cfg.CorporateAction.Cron) != "" {
 		c.cron("CORPORATE_ACTION_CRON", cfg.CorporateAction.Cron)
 	}
@@ -309,7 +309,7 @@ func Validate(cfg *Config) []Violation {
 		c.atLeast("DELISTING_TIMEOUT_SEC", cfg.Delisting.TimeoutSec, 0)
 	}
 
-	// ── 持倉分析（C.3 Q2；現在 ≤ 0 會在 portfolio.NewAnalyzer 靜默退回預設值）──
+	// ── 持倉分析（設定契約表的 `POSITION_ANALYSIS_*` 列；不檢查的話 ≤ 0 會在 portfolio.NewAnalyzer 靜默退回預設值）──
 	pa := cfg.PositionAnalysis
 	positive := func(key string, v float64) {
 		if !(v > 0) {

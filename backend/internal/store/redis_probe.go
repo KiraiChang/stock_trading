@@ -12,7 +12,7 @@ import (
 	"github.com/trading/backend/internal/config"
 )
 
-// 啟動時的 Redis 探測（I-132 的 C；設計見 docs/plans/i132-redis-silent-disable.md 4.4、D3、D4）。
+// 啟動時的 Redis 探測（由來：I-132 的 C；規格見 docs/development-workflow.md「live 的 Redis」）。
 //
 // 有設定 REDIS_ADDR 時，Redis 是必要的：連不上就重試，仍然失敗由 main.go 在 HTTP 與排程器
 // 啟動之前以非 0 結束，⛔ 不再靜默停用。

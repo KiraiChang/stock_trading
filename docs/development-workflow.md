@@ -957,7 +957,7 @@ scripts 目錄試跑（腳本只認自己所在的目錄）。
 測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
 
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
-（先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上，I-132 的計畫書第八節）。
+（先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上；經過見 `git show 85849b9:docs/plans/i132-redis-silent-disable.md` 第八節）。
 
 ### python 的套件版本與升級（T-083）
 
@@ -988,6 +988,9 @@ dev、live 與 `python/scripts/test.sh` 的測試 image 都由同一份 Dockerfi
 3. `python/scripts/test.sh` 全部通過；`scripts/smoke-dev.sh` 與 `scripts/smoke-dev-worker.sh` 通過。
 4. 影響 SR 計算的套件（numpy、pandas、scikit-learn、lightgbm、shap、scipy）升級時，另外做 SR 的回歸驗證，並注意 I-116（模型檔的 pickle 跨版本）。
 5. 部署照「部署腳本：失敗即停」：部署前替 python 正在跑的 image 打回滾標籤，部署前後比對 `LC_ALL=C` 排序的 `pip freeze` md5。
+
+**程式註解裡的 T-083**：T-083 在 2026-11-19 收斂。`python/Dockerfile`、`python/requirements.txt`、`scripts/smoke-dev-worker.sh` 與它的測試裡的「（T-083）」是**由來標記**，
+規格以本節為準。T-083 做的是：python 套件全部照 live 的 `pip freeze` 精確釘版、基底 image 固定到 digest、build 時跑 `pip check`，以及新增 worker 的 dev 驗收腳本。
 
 ### 新增排程還要同步**前端的 job 清單**，由 `scripts/check-job-names.sh` 擋
 
@@ -2845,6 +2848,9 @@ VITEST_ARGS="src/routes/SRZones.test.ts" frontend/scripts/test.sh
 | `CPUS` | `1` | `1` | `1` |
 | `--pids-limit` | 200 | 200 | 200 |
 | image 覆寫 | `GO_IMAGE` | `PY_IMAGE` | `NODE_IMAGE` |
+
+**程式註解裡的 I-133**：I-133 在 2026-11-19 收斂。`scripts/lib/docker-user.sh`、三支 `test.sh` 與用它的腳本裡的「（I-133）」是**由來標記**，規格以本節的「三支腳本共同保證」為準。
+I-133 的內容是：rootless Docker 下帶 `--user` 會寫不進 cache，改成依 Docker 的模式決定要不要帶 `--user`。
 
 ### `MEM` 是上限，不是預留——不可高於 host 可用量
 

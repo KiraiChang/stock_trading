@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 回測任務的認領與持久化的 dev 驗收（I-134 計畫書第七節第 4 點）：兩條路徑的競爭、python-server／python-worker
+# 回測任務的認領與持久化的 dev 驗收（由來：I-134；用法見 docs/development-workflow.md）：兩條路徑的競爭、python-server／python-worker
 # 各自重啟、HTTP 回應遺失、schema 時序。
 #
 # 範圍：直接用 psql 寫入測試任務、直接呼叫 python-server 的 POST /backtest，⛔ 不經過 backend。這裡驗的是

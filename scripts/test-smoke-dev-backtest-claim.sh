@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/smoke-dev-backtest-claim.sh 的測試（I-134 計畫書第七節第 4 點）。⛔ 不需要真的 docker：假的 docker／curl／python3
+# scripts/smoke-dev-backtest-claim.sh 的測試（由來：I-134）。⛔ 不需要真的 docker：假的 docker／curl／python3
 # 記錄呼叫並照 FAKE_* 回應，驗證參數與前置檢查的停止點、測試資料只用本次前綴（字面比對）、收尾的順序與條件、
 # worker 三種開始狀態的恢復、持鎖連線與 socket client 一定被結束、卡住又忽略 SIGTERM 的呼叫被 -k 砍掉。
 #

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/smoke-dev-worker.sh 的測試（T-083 計畫書 3.5）。⛔ 不需要真的 docker：用假的 docker 記錄呼叫，
+# scripts/smoke-dev-worker.sh 的測試（由來：T-083）。⛔ 不需要真的 docker：用假的 docker 記錄呼叫，
 # 驗證每一種失敗的停止點、等待上限，以及「從啟動 worker 起，失敗也一定收尾、只收本次的 worker」。
 #
 # 用法：scripts/test-smoke-dev-worker.sh；結束碼 0 全部通過、1 有失敗。

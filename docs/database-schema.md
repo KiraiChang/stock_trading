@@ -545,7 +545,10 @@ backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、
   例：買 3@102、賣 1@104、賣 2@105，毛損益 8；出場均價存成 104.67，反算是 8.01。
 * **費用的新舊界線**（I-136）：修正之前 backtrader 路徑的 broker 扣的費用**偏低**（手續費只有設定值的 1/100、完全沒有交易稅），
   所以 `commission` 偏低、`pnl` 與 `backtest_results` 的報酬、平均損益被高估，勝率等統計也可能不同。既有資料⛔ 不改、⛔ 不回補；
-  要新的結果就另建 job 重跑。live 的界線（部署的 commit、python image、時間）：⚠️ 部署後補上。modular 路徑⛔ 不受影響
+  要新的結果就另建 job 重跑。live 的界線：commit `03e7028`，python-server image `40702c240772`、python-worker `c58a5cce2c69`，
+  界線時間 2026-11-19 14:22:38（台北），是兩個 python 服務中較晚啟動的時間（worker 14:22:37）。
+  部署期間沒有排隊或執行中的回測，所以這之後建立的 backtrader 任務才是新的費用。界線之前 live 只有 1 筆 `breakout_v1`
+  （2026-07-01，`done`、0 筆交易），沒有受影響的數字。modular 路徑⛔ 不受影響
   （它用自己的費用計算，費率同樣由 config 傳入）。
 * **時間與資料庫**：帶 offset 的字串寫進 PostgreSQL 的 `TIMESTAMPTZ`，存的時刻跟連線的 TimeZone 無關（`scripts/test-postgres-migrations.sh` 會跑的測試驗證）。
   ⚠️ 只保證 PostgreSQL：MySQL 的 `DATETIME` 收到帶 offset 的值仍會換成連線的時區，SQLite 存的是字串本身。

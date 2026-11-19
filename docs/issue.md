@@ -3539,7 +3539,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已實作／待 review（repo 與 dev 2026-11-19；live 還沒部署，要等 I-135 上 live 驗收完成才 push）：計畫書 v1.1（已確認）與實作備註：[`plans/i136-tw-commission.md`](./plans/i136-tw-commission.md) |
+| 狀態 | 已實作／review 通過、待收斂（repo 與 dev 2026-11-19、review 通過；live 2026-11-19 14:22 上版 `03e7028`、rc=0，上版後的 `breakout_v1` 實跑核對通過）：計畫書 v1.1（已確認）與實作備註：[`plans/i136-tw-commission.md`](./plans/i136-tw-commission.md) |
 | 嚴重度 | 中：backtrader 路徑（`breakout_v1`）扣的費用**偏低**（手續費只有 1/100、沒有交易稅），所以淨損益被**高估**，總表的報酬、勝率等統計也可能因此改變；modular 路徑⛔ 不用這個模型。⛔ 不影響排程與交易訊號 |
 | 分類 | Python／回測 |
 | 建立日期 | 2026-11-18 |

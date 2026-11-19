@@ -170,7 +170,10 @@
   * 新 image 的程式：`engine.py` 的 `tradehistory=True` 2 行（註解與程式各 1 行，跟 `7a97ac5` 相同；給指令時預期 1 是算錯）、`_trade_row` 2 行（定義與呼叫）；`strategy/base.py` 的 `percabs` 0 → I-136 沒有帶上去。
   * python：兩個服務都是 `schema ready`（⛔ 沒有等待）與各自 owner 的 `no interrupted jobs to reap`，`Traceback` 0；python-server `/health` `{"status":"ok"}`；worker 有 3 次 `poll #`。
   * `pending`／`running` 仍是 0；策略與狀態的分布、`breakout_v1` 的明細筆數都跟部署前相同。
-* ⚠️ 上版後 live 還沒有跑過有交易的 `breakout_v1`。有交易的路徑由 dev 實跑驗證（上表）；live 上第一筆的費用仍是 I-136 之前的模型，⛔ 報酬數字不能參考。
+* **驗收門檻（使用者裁決，2026-11-19 補記）**：dev 有交易的實跑（上表）＋live 部署後檢查（上一點）。I-135 的版本上⛔ 不在 live 跑有交易的回測：
+  費用模型還沒修正，報酬數字不能參考。這個門檻由 Claude 在部署後檢查（14:09:11）之後提議，使用者採納，於 14:12:44 push 了 I-136（時間取自本機 reflog）。
+* I-135 上版期間 live 沒有跑有交易的 `breakout_v1`。第一筆在 I-136 上版之後才跑（2026-11-19 14:28，`bt_20261119_062856_000`）：3 筆明細，
+  共用的明細查詢在 live 唯讀執行，0 筆不符；詳見 `plans/i136-tw-commission.md` 的上版紀錄。
 * `pre-i135` 標籤保留到收斂後再清。
 
 ## 七、完成後要歸檔的位置與另案

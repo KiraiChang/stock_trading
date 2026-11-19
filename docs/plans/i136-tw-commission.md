@@ -1,7 +1,10 @@
 # I-136 計畫書 v1.1：backtrader 的費用模型改成「設定費率的模擬模型」
 
-> 狀態：v1.1 已確認（使用者 2026-11-19）；**repo 與 dev 已實作（2026-11-19），待 review；live 還沒部署**（實作備註在「七之後」）。對應：`docs/issue.md` I-136。需求確認：2026-11-19（使用者裁決 D1(a)、D2(a)、D3、D4，並補充評估與條件，見第三節）。
+> 狀態：v1.1 已確認（使用者 2026-11-19）；**repo 與 dev 已實作（2026-11-19）、review 通過（2026-11-19）；live 已上版（2026-11-19，`03e7028`）；待收斂**（實作備註與上版紀錄在「七之後」）。對應：`docs/issue.md` I-136。需求確認：2026-11-19（使用者裁決 D1(a)、D2(a)、D3、D4，並補充評估與條件，見第三節）。
 > ⚠️ **部署順序（使用者裁決）**：I-135（2026-11-19 review 通過、`7a97ac5` 已 push）**上 live 並驗收完成之後**，才 push I-136；在那之前 I-136 的 commit 只留在本機，免得部署時一起帶上去。
+> **I-135 的驗收門檻（使用者裁決，2026-11-19 補記）**：dev 有交易的實跑＋live 部署後檢查。I-135 的版本上⛔ 不在 live 跑有交易的回測：
+> 那時的費用模型還沒修正，報酬數字不能參考；改在 I-136 上版後補跑。這個門檻由 Claude 在 I-135 部署後檢查（14:09:11）之後提議，
+> 使用者採納，於 14:12:44 push 了含 I-136 的 `03e7028`（時間取自本機 reflog）。補跑在 14:28：明細查詢 0 筆不符（見「七之後」的上版紀錄）。
 
 ## 一、目標與不做的範圍
 
@@ -185,6 +188,43 @@
 | `python/scripts/test.sh -q`（完整） | rc 0：pytest 2023 passed、1 skipped；shell 測試都通過 |
 | `backend/scripts/test.sh ./internal/database/...` | rc 0（PostgreSQL 的測試在這裡 skip，由上面的腳本執行） |
 | dev 實跑 `SCENARIOS=trades SMOKE_STRATEGY=breakout_v1`（2330、2024-01-01～2025-12-31） | 通過：開始前與換上本次的 image 之後讀到的費率都是 0.001425／0.003；3 筆明細符合 I-135 的條件，費用也符合 config 費率；收尾後 dev 的 `backtest_jobs` 0 筆；dev stack 已 `down`（⛔ 沒有 `-v`） |
+
+**live 上版（I-134 的 6.1 一般部署；2026-11-19，使用者在 live 執行）**
+
+* **時段**：部署前檢查 14:17:54（唯讀），python-worker 14:22:37、python-server 14:22:38 啟動，部署後確認 14:24:37。部署前檢查到部署後確認之間沒有送回測。
+* **部署前檢查**：`job_runs` 的 `running` 0 筆；`backtest_jobs` 的 `pending`／`running` 都是 0；策略與狀態的分布同 I-135 上版後。
+  migration 版本 77；`deploy.sh` sha `abcf1c019b25`，`--preflight` 通過（MemAvailable 4679MiB）。三個服務 `running`、`RestartCount` 0
+  （`c8bf4e9fdd65`、`034581dc5f42`、`52ed36ba11a3`，即 I-135 上版後的 image）；`Config.Env` 50 行、`a4eccbc0aa79`；backend 執行檔 `b07a2830c0fc`；
+  舊 image 的 `strategy/base.py` 沒有 `percabs`（0）。
+  * ⚠️ 指令的 `git log` 寫錯目錄：live 的 scripts 目錄不是 git checkout，build checkout 是 `deploy.sh` 的 `PROJECT_DIR`。
+    `git pull` 的輸出顯示部署前是 `7a97ac5`。
+* **D4 受影響的清單**（部署前重查）：`STRATEGY_MAP` 只有 `breakout_v1`，1 筆 `done`（2026-07-01 15:39:55 建立、15:39:56 完成），
+  明細 0 筆，所以⛔ 沒有受影響的既有數字。部署後重查，結果相同。
+* **回滾標籤**：三個服務打上 `pre-i136`（ID 同上）。
+* **部署**：`git pull` `7a97ac5`→`03e7028`（17 個檔）；`部署完成：backend /health 正常、RestartCount 0`，`deploy rc=0`。
+* **部署後確認**（14:24:37）：
+  * 三個服務 `running`、`RestartCount` 0；image 都換了（backend `f3a5ae6b9c9c`、python-server `40702c240772`、python-worker `c58a5cce2c69`）。
+  * backend：`Config.Env` 50 行、`a4eccbc0aa79`（不變）；執行檔 `b07a2830c0fc`（不變，Go 只改了測試檔）；`redis connected`／`scheduler started` 2 筆、
+    設定錯誤 0 筆；migration 版本 77。
+  * 兩個 python 服務的程式：`percabs` 2 行（註解與參數）、`def getcommission` 0、`def _getcommission` 1、`TWCommission(commission=` 1；
+    容器內 config 的費率 `0.001425 0.003`。`schema ready`（⛔ 沒有等待）、各自 owner 的 `no interrupted jobs to reap`，`Traceback` 0；
+    python-server `/health` `{"status":"ok"}`；worker 有 13 次 `poll #`。
+  * `pending`／`running` 仍是 0；策略與狀態的分布、D4 清單與 `breakout_v1` 的明細筆數都跟部署前相同。
+* **新舊界線（D4）**：commit `03e7028`，python-server image `40702c240772`、python-worker `c58a5cce2c69`，
+  界線時間取 2026-11-19 14:22:38（台北），也就是兩個 python 服務中較晚啟動的時間（server 14:22:38、worker 14:22:37），
+  從這一刻起兩個服務都是新程式。14:24:37 是部署後確認的時間，⛔ 不是界線。已歸檔到 `database-schema.md` 的「費用的新舊界線」。
+* **上版後的實跑核對**：使用者從前端送 `breakout_v1`（2330、2024-01-01～2025-12-31），任務 `bt_20261119_062856_000`，
+  14:28:56 建立、14:28:57 `done`。這是 live 上第一筆有交易的 `breakout_v1`。
+  * 明細 3 筆，都是 `BUY`、1 股、時間帶 `+08`；`backtest_results` 的 `total_trades` 3、`total_return` 0.0003、`win_rate` 0.6667、`avg_pnl` 93.5087。
+  * 共用查詢在 live 唯讀執行：I-135 的明細規格 0 筆不符、I-136 的費用（容器 config 的費率 0.001425／0.003）0 筆不符。
+    綁定值：兩份查詢的 `$1`（job_id）和 `$2`（前綴）都是 `bt_20261119_062856_000`，費用查詢的 `$3`＝`0.001425`、`$4`＝`0.003`。
+    前綴就是 job_id 本身，`starts_with` 必然成立，所以篩選條件等於 `job_id = 'bt_20261119_062856_000'`。
+    同一條件下 `backtest_trades` 有 3 筆，這兩個 0 涵蓋本次的三筆明細。
+  * 手算：802.42→870.81 的模擬費用 4.99678，存成 5.00；1050.37→987.45 是 5.86624，存成 5.87；1113.47→1407.21 是 7.81360，存成 7.81。
+    三筆的 `pnl` 都等於出場價−進場價−`commission`。明細的平均淨損益約 93.51：用存下來的兩位價格和未四捨五入的費用重算是 93.511125，
+    跟總表的 `avg_pnl` 93.5087 仍有差。總表是用未四捨五入的成交價算的，明細的成交價與 `pnl` 只存兩位，所以兩者在存檔精度內一致。
+    這個差距⛔ 不能只歸因於費用的四捨五入。
+* `pre-i136` 標籤保留到收斂後再清。
 
 ## 八、完成後要歸檔的位置
 

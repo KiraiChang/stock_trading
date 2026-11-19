@@ -15,9 +15,10 @@ python_service:
   worker_poll_interval: 10   # 秒，Method A 輪詢間隔
 
 backtest:
-  # 台灣股市手續費設定
+  # 台灣股市費用設定（比例值：0.001425＝0.1425%）。backtrader 與 modular 兩條回測路徑共用，
+  # 由 backtest/engine.py 傳入（I-136）；⛔ 沒有最低手續費與取整數（見 docs/todo.md T-085）
   commission_rate: 0.001425  # 買賣各 0.1425%
-  tax_rate: 0.003            # 賣出交易稅 0.3%
+  tax_rate: 0.003            # 賣出交易稅 0.3%（空單的賣出在進場）
   initial_cash: 1_000_000    # 回測初始資金（新台幣）
 
 sr_scoring:

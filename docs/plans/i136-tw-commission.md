@@ -1,6 +1,6 @@
 # I-136 計畫書 v1.1：backtrader 的費用模型改成「設定費率的模擬模型」
 
-> 狀態：v1.1 待 review（2026-11-19；v1 review [P2]×2 與兩個測試細節已修正，第七節第 4 點使用者裁決要做）。對應：`docs/issue.md` I-136。需求確認：2026-11-19（使用者裁決 D1(a)、D2(a)、D3、D4，並補充評估與條件，見第三節）。
+> 狀態：v1.1 已確認（使用者 2026-11-19）；**repo 與 dev 已實作（2026-11-19），待 review；live 還沒部署**（實作備註在「七之後」）。對應：`docs/issue.md` I-136。需求確認：2026-11-19（使用者裁決 D1(a)、D2(a)、D3、D4，並補充評估與條件，見第三節）。
 > ⚠️ **部署順序（使用者裁決）**：I-135（2026-11-19 review 通過、`7a97ac5` 已 push）**上 live 並驗收完成之後**，才 push I-136；在那之前 I-136 的 commit 只留在本機，免得部署時一起帶上去。
 
 ## 一、目標與不做的範圍
@@ -147,6 +147,44 @@
      `commission`／`size`／價格／`direction` 是 NULL、`commission` 是 NaN、前綴不符的⛔ 不算。
    * **假 docker 測試**：送出的查詢就是共用檔的內容；費用不符 → rc 1、照常收尾；費用查詢失敗 → rc 1、照常收尾；讀不到費率、或費率不是有效數字 → rc 2、⛔ 沒有改任何東西。
 5. 完整驗證：`python/scripts/test.sh`（全部）、`scripts/test-postgres-migrations.sh`、`scripts/test-smoke-dev-backtest-claim.sh`、`backend/scripts/test.sh ./internal/database/...`。
+
+## 七之後：實作備註（2026-11-19；已改好、未 commit，待 review）
+
+**改了什麼**
+
+* `python/backtest/strategy/base.py`：`TWCommission` 加 `percabs=True`、拿掉自己覆寫的 `getcommission()`，手續費與 `size < 0` 的交易稅只在
+  `_getcommission()` 算；docstring 寫明定位（設定費率的模擬模型）與不做的規則（T-085）。
+* `python/backtest/engine.py`：`TWCommission(commission=COMMISSION_RATE, tax=TAX_RATE)`。
+* `python/tests/test_backtest_engine_trades.py`：`run` fixture 改成替換工廠（接受 `commission`、`tax`，回傳⛔ 不帶參數的 `FixedRate()`），
+  跑完斷言 `engine` 剛好傳了一次、值是 config 的費率；檔頭說明改寫。
+* `python/tests/test_tw_commission.py`（新，13 項）：直接跑 Cerebro 的基本、空單、多張委託、同一張委託多次成交（`FixedSize(4)`）、反手、自訂費率、
+  零費率；走 `run_backtest` 的自訂費率、零費率、config 費率的多空兩筆（明細兩位、`total_return`／`avg_pnl` 依位數驗算）；modular 的費率傳遞與
+  `_close` 多空的課稅邊。
+* 共用查詢 `backend/internal/database/testdata/backtest_trades_fee_check.sql`、`TestPostgresMigrationsBacktestTradesFeeCheck`（新）；
+  I-135 那支的暫存表與寫入抽成兩支共用的 `tradesProbe`（行為⛔ 不變）。
+* `scripts/smoke-dev-backtest-claim.sh`：`read_rates`（container 裡 `config` 的原始費率，只收有限的非負小數）、`trades` 情境的費用核對；
+  `scripts/test-smoke-dev-backtest-claim.sh` 加 10 項。
+* 文件：`database-schema.md`（`commission` 的定義、新舊界線、`backtest_results` 一句）、`architecture.md`（費用模型）、`development-workflow.md`（費用核對）、
+  `python/config.yaml` 的註解、`todo.md` T-085（費用細節規則）。
+
+**跟計畫的差異**
+
+* **費率讀兩次**：計畫寫「寫入任務之前讀，讀不到就結束碼 2」。config 是 build 時複製進 image 的，開始前那個 container 可能是舊的 image，所以：
+  開始前讀一次（照計畫，讀不到 → 2、⛔ 沒有改任何東西）；換上本次的 image 之後、寫入任務之前再讀一次，**用這一次當預期值**（讀不到 → 1、照常收尾）。
+* **總表驗算的界線另加 1e-9**：`avg_pnl` 剛好落在四捨五入的半位時（79.75375 存成 79.7537），差是 5e-5 加上浮點雜訊；界線仍是半個最小位數。
+* Go 測試的 helper 重構（`tradesProbe`）：為了讓兩支共用查詢的測試用同一套暫存表，⛔ 沒有改 I-135 那支的案例。
+
+**驗證**
+
+| 項目 | 結果 |
+|---|---|
+| `test_tw_commission.py`＋`test_backtest_engine_trades.py` | 57 項通過（新 13＋I-135 的 44；I-135 那支經由工廠照樣通過） |
+| 突變（拿掉 `percabs`、漏稅、恢復覆寫的 `getcommission()`、`engine` 傳字面值、`_getcommission()` 用字面值、`engine` 改回不帶參數） | 8／8／8／2／4／12 項失敗 |
+| `scripts/test-postgres-migrations.sh` | rc 0；`TestPostgresMigrationsBacktestTradesCheck`、`TestPostgresMigrationsBacktestTradesFeeCheck` 通過 |
+| `scripts/test-smoke-dev-backtest-claim.sh` | 60 項通過（加 10 項） |
+| `python/scripts/test.sh -q`（完整） | rc 0：pytest 2023 passed、1 skipped；shell 測試都通過 |
+| `backend/scripts/test.sh ./internal/database/...` | rc 0（PostgreSQL 的測試在這裡 skip，由上面的腳本執行） |
+| dev 實跑 `SCENARIOS=trades SMOKE_STRATEGY=breakout_v1`（2330、2024-01-01～2025-12-31） | 通過：開始前與換上本次的 image 之後讀到的費率都是 0.001425／0.003；3 筆明細符合 I-135 的條件，費用也符合 config 費率；收尾後 dev 的 `backtest_jobs` 0 筆；dev stack 已 `down`（⛔ 沒有 `-v`） |
 
 ## 八、完成後要歸檔的位置
 

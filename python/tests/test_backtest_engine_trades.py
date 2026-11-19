@@ -1,7 +1,8 @@
 """backtrader 路徑的交易明細（I-135）：從成交紀錄算進出場價、股數、費用與時間。
 
 用合成的日 K 與照腳本下單的測試策略，走 `run_backtest` 同一條路徑（`fetch_candles` 換成假的、`STRATEGY_MAP`
-加上測試策略、費用換成測試自己的固定比例——⛔ 不依賴有已知問題的 `TWCommission`，見 issue.md I-136）。
+加上測試策略、費用換成測試自己的固定比例 1%）。費用用獨立的固定比例，跟 `TWCommission` 分開驗：
+`TWCommission` 本身的扣費由 test_tw_commission.py 用真的類別驗（I-136）。
 委託在第 n 根 K 棒送出、在第 n+1 根的開盤價成交。規格見 docs/database-schema.md 的 backtest_trades。
 """
 from __future__ import annotations
@@ -61,12 +62,24 @@ def _scripted(actions: list[tuple[int, str, str, int]]):
 
 @pytest.fixture
 def run(monkeypatch):
+    """`engine` 用 `TWCommission(commission=…, tax=…)` 建費用模型（I-136）。這裡換成一個**工廠**：接受同樣的關鍵字參數、
+    記下收到的值，但回傳⛔ 不帶參數的 `FixedRate()`——傳進去的費率會蓋掉測試的 1%，`tax` 也⛔ 不是 `FixedRate` 的參數
+    （會丟 TypeError）。跑完確認 `engine` 真的傳了這兩個參數：介面改了卻沒跟上時會失敗，⛔ 不靜默。"""
     def _run(data: dict[str, list[dict]], actions=None, strategy: str = "scripted", commission=FixedRate):
+        received: list[dict] = []
+        commission_cls = commission  # 工廠的參數也叫 commission，先換個名字
+
+        def factory(*, commission: float, tax: float):
+            received.append({"commission": commission, "tax": tax})
+            return commission_cls()
+
         monkeypatch.setattr(engine, "fetch_candles", lambda symbol, tf, limit: data[symbol])
-        monkeypatch.setattr(engine, "TWCommission", commission)
+        monkeypatch.setattr(engine, "TWCommission", factory)
         if actions is not None:
             monkeypatch.setitem(engine.STRATEGY_MAP, "scripted", _scripted(actions))
-        return engine.run_backtest(strategy, list(data), "1d", "2025-01-01", "2025-12-31")["trades"]
+        trades = engine.run_backtest(strategy, list(data), "1d", "2025-01-01", "2025-12-31")["trades"]
+        assert received == [{"commission": engine.COMMISSION_RATE, "tax": engine.TAX_RATE}]
+        return trades
 
     return _run
 

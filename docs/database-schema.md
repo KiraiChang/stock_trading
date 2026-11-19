@@ -513,6 +513,8 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 | total_trades / win_trades / loss_trades | 交易統計 |
 | avg_pnl | 平均損益 |
 
+backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、報酬被高估；新舊界線見 `backtest_trades` 的「費用的新舊界線」。
+
 ---
 
 ## backtest_trades
@@ -530,7 +532,7 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 | size | 進場成交的股數合計（正數） |
 | pnl | 淨損益（毛損益扣掉費用，2 位） |
 | pnl_pct | 淨損益 ÷ **未四捨五入**的進場成交金額，比例值（`0.01`＝1%；`DECIMAL(8,4)`）。modular 路徑是「淨損益 ÷ 進場時該標的的 equity」，目前全額投入，分母數值相同；口徑統一見 `todo.md` T-085 |
-| commission | 分攤到這筆交易的費用（＝這筆交易各成交事件的費用合計；反手的委託會拆成兩筆交易、費用依股數分攤）。⚠️ 反映的是 broker 實際扣的金額，**⛔ 不代表台股的實際費用**：目前的費用模型手續費率被除以 100、賣出沒有交易稅（`issue.md` I-136） |
+| commission | 分攤到這筆交易的**模擬總費用**＝手續費＋賣出的交易稅（＝這筆交易各成交事件的費用合計；反手的委託會拆成兩筆交易、費用依股數分攤）。費用模型是「**設定費率的模擬模型**」（I-136）：config 的 `commission_rate`（買賣都收）與 `tax_rate`（賣出收，空單的賣出在進場），都是比例值；⛔ 沒有最低手續費、⛔ 不取整數、⛔ 沒有商品別稅率（ETF、當沖等），見 `todo.md` T-085。新舊界線見本表下方 |
 
 * **寫入前的核對**（不符就 raise，讓任務 `failed`，⛔ 不寫出看起來正常的錯誤數字）：
   * 成交的股數、價格、費用、時間，以及 backtrader 的損益與費用，都要是**有限數**（NaN、正負無限大一律報錯）。這一步在任何運算之前做：
@@ -541,6 +543,10 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 * **精度界線**：欄位是四捨五入過的，⛔ 不能拿來精確反算。毛損益在**未四捨五入**的成交資料上等於 backtrader 的損益（見上一點）；
   存下來的值符合 `|d × (exit_price − entry_price) × size − (pnl + commission)| ≤ 0.01 × size + 0.01`，`d` 是方向（`BUY` +1、`SELL` −1）。
   例：買 3@102、賣 1@104、賣 2@105，毛損益 8；出場均價存成 104.67，反算是 8.01。
+* **費用的新舊界線**（I-136）：修正之前 backtrader 路徑的 broker 扣的費用**偏低**（手續費只有設定值的 1/100、完全沒有交易稅），
+  所以 `commission` 偏低、`pnl` 與 `backtest_results` 的報酬、平均損益被高估，勝率等統計也可能不同。既有資料⛔ 不改、⛔ 不回補；
+  要新的結果就另建 job 重跑。live 的界線（部署的 commit、python image、時間）：⚠️ 部署後補上。modular 路徑⛔ 不受影響
+  （它用自己的費用計算，費率同樣由 config 傳入）。
 * **時間與資料庫**：帶 offset 的字串寫進 PostgreSQL 的 `TIMESTAMPTZ`，存的時刻跟連線的 TimeZone 無關（`scripts/test-postgres-migrations.sh` 會跑的測試驗證）。
   ⚠️ 只保證 PostgreSQL：MySQL 的 `DATETIME` 收到帶 offset 的值仍會換成連線的時區，SQLite 存的是字串本身。
 

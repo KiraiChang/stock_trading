@@ -74,7 +74,8 @@ def run_backtest(
     # ⛔ 不能關：交易結束後 Trade 的 size／value 都歸 0，沒有成交紀錄就算不出來。
     cerebro = bt.Cerebro(stdstats=False, tradehistory=True)
     cerebro.broker.setcash(INITIAL_CASH)
-    cerebro.broker.addcommissioninfo(TWCommission())
+    # 明確傳入 config 的費率（跟 modular 的共同入口一致；I-136）
+    cerebro.broker.addcommissioninfo(TWCommission(commission=COMMISSION_RATE, tax=TAX_RATE))
     cerebro.addstrategy(strategy_cls)
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
     cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe",

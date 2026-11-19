@@ -1200,7 +1200,9 @@ Python Worker / HTTP Server
     │   - 命中 backtest/modular/strategy.py 的 STRATEGY_PRESETS → 走純 pandas/numpy
     │     的模組化引擎（見 backtest-modular-strategy.md）
     │   - 否則走既有 backtrader 引擎（STRATEGY_MAP）；要開 tradehistory，交易明細從每次成交算
-    │     （欄位定義見 database-schema.md 的 backtest_trades）
+    │     （欄位定義見 database-schema.md 的 backtest_trades）。費用模型 TWCommission：config 的費率
+    │     （比例值、percabs=True）由 engine 傳入，買賣收手續費、賣出（含開空單）另收交易稅，
+    │     只在 _getcommission() 算（⛔ 不覆寫 getcommission()，broker 扣款走父類別的委派）
     ↓ 寫入 backtest_results + backtest_trades（兩條路徑輸出格式一致）
 Go API（讀取結果回傳給前端）
 ```

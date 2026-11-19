@@ -130,7 +130,15 @@ case "$sub" in
       fi
     done
     exit 0 ;;
-  exec) ;;
+  exec)
+    # exec -T python-server python -c …：讀 config 的費率（I-136）。第幾次讀記在 $STATE/rates_n
+    if [[ " $* " == *" python-server python "* ]]; then
+      n=$(( $(cat "$STATE/rates_n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STATE/rates_n"
+      echo "RATES_READ $n" >> "$CALL_LOG"
+      [ "${FAKE_RATES_FAIL:-0}" = 1 ] && exit 1
+      [ "${FAKE_RATES_FAIL_AFTER:-0}" = 1 ] && [ "$n" -ge 2 ] && exit 1
+      echo "${FAKE_RATES-0.001425 0.003}"; exit 0
+    fi ;;
   *) echo "fake docker: 沒預期的 compose 子指令：$sub $*" >&2; exit 97 ;;
 esac
 
@@ -170,6 +178,7 @@ case "$name" in
     esac ;;
   cleanup_fail_pending) touch "$STATE/cleanup_started" ;;
   trades_check) [ "${FAKE_TRADES_CHECK_FAIL:-0}" = 1 ] && exit 1; echo "${FAKE_TRADES_BAD:-0}" ;;
+  trades_fee_check) [ "${FAKE_FEE_CHECK_FAIL:-0}" = 1 ] && exit 1; echo "${FAKE_FEE_BAD:-0}" ;;
   cleanup_delete) [ "${FAKE_DELETE_FAIL:-0}" = 1 ] && exit 1 ;;
   tmpdb_add_col) touch "$STATE/addcol" ;;
 esac
@@ -422,6 +431,31 @@ run trades_bad SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_TRADES_BAD=2
 [ "$RC" -eq 1 ] && called "$DELETE" && grep -q '2 筆明細不符合規格' "$CASE/out" && ok "明細不符合規格 → rc 1、照常收尾" || ng "明細不符合：rc $RC"
 run trades_check_fail SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_TRADES_CHECK_FAIL=1
 [ "$RC" -eq 1 ] && called "$DELETE" && grep -q '查不到 .* 的交易明細' "$CASE/out" && ok "明細查詢失敗 → rc 1、照常收尾" || ng "明細查詢失敗：rc $RC"
+# 費用核對（I-136）：送出的是共用檔的內容、費率是 container 裡 config 的原始值、在寫入任務之前讀
+run trades_fee_ok SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_RATES="0.002 0.004"
+FEE_SQL="$REPO_ROOT/backend/internal/database/testdata/backtest_trades_fee_check.sql"
+WANT="PREPARE fee_check(text, text, numeric, numeric) AS $(tr '\n' ' ' <"$FEE_SQL");"
+if [ "$RC" -eq 0 ] && grep '^SQL trades_fee_check' "$CASE/calls" | grep -qF -- "$WANT" \
+   && grep '^SQL trades_fee_check' "$CASE/calls" | grep -qF "EXECUTE fee_check(:'id', :'prefix', :'comm_rate', :'tax_rate');" \
+   && grep -qF -- "-v comm_rate=0.002 -v tax_rate=0.004" "$CASE/calls"; then
+  ok "費用核對：共用檔的內容（包進 PREPARE）、費率用 container 讀到的值（0.002／0.004）"
+else
+  ng "費用核對：rc $RC"; sed 's/^/      /' "$CASE/out" | tail -5
+fi
+[ "$(count '^RATES_READ ')" -eq 2 ] && [ "$(first '^RATES_READ 2')" -lt "$(first '^SQL insert_jobs')" ] \
+  && ok "  費率讀兩次（開始前、換上本次的 image 之後），第二次在寫入任務之前" || ng "  費率讀取的次數或順序不對"
+run trades_fee_bad SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_FEE_BAD=1
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '1 筆明細的 commission 跟 config 費率' "$CASE/out" && ok "費用不符 → rc 1、照常收尾" || ng "費用不符：rc $RC"
+run trades_fee_check_fail SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_FEE_CHECK_FAIL=1
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '查不到 .* 的費用核對' "$CASE/out" && ok "費用查詢失敗 → rc 1、照常收尾" || ng "費用查詢失敗：rc $RC"
+run trades_rates_fail SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_RATES_FAIL=1
+expect_untouched "開始前讀不到 config 費率" 2
+for bad in "nan 0.003" "0.001425 inf" "-0.001 0.003" "0.001425"; do
+  run trades_rates_invalid SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_RATES="$bad"
+  expect_untouched "費率不是有限的非負數（$bad）" 2
+done
+run trades_rates_fail_after SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_RATES_FAIL_AFTER=1
+[ "$RC" -eq 1 ] && called "$DELETE" && ! called '^SQL insert_jobs' && ok "換上本次的 image 之後讀不到費率 → rc 1、⛔ 沒寫入任務、照常收尾" || ng "之後讀不到費率：rc $RC"
 run trades_wrong_strategy SCENARIOS=trades
 expect_untouched "trades 沒搭配 breakout_v1" 2
 

@@ -103,8 +103,11 @@ if [[ " ${SCEN_LIST[*]} " == *" trades "* ]] && [ "$SMOKE_STRATEGY" != breakout_
 fi
 # trades 的明細查詢跟 Go 的 PostgreSQL 測試共用同一份檔案（參數 $1＝job_id、$2＝前綴；⛔ 不在這裡另寫一份）
 TRADES_CHECK_SQL="$REPO_ROOT/backend/internal/database/testdata/backtest_trades_check.sql"
-if [[ " ${SCEN_LIST[*]} " == *" trades "* ]] && [ ! -r "$TRADES_CHECK_SQL" ]; then
-  die2 "讀不到明細查詢：$TRADES_CHECK_SQL"
+# 費用核對（I-136）也一樣：參數 $1＝job_id、$2＝前綴、$3＝手續費率、$4＝稅率
+TRADES_FEE_SQL="$REPO_ROOT/backend/internal/database/testdata/backtest_trades_fee_check.sql"
+if [[ " ${SCEN_LIST[*]} " == *" trades "* ]]; then
+  [ -r "$TRADES_CHECK_SQL" ] || die2 "讀不到明細查詢：$TRADES_CHECK_SQL"
+  [ -r "$TRADES_FEE_SQL" ] || die2 "讀不到費用查詢：$TRADES_FEE_SQL"
 fi
 for c in timeout curl python3; do
   command -v "$c" >/dev/null 2>&1 || die2 "找不到 $c"
@@ -164,6 +167,19 @@ q() {
 
 log() { echo "==> $*"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
+
+# read_rates → "c t"：python-server container 裡 config 載入的**原始**費率（I-136；`python/config.yaml` 的
+#   backtest.commission_rate／tax_rate）。⛔ 不讀 TWCommission 的參數（那是被測的對象，換算錯了會兩邊一起錯）。
+#   只接受有限的非負小數（nan、inf、負數都不是）；讀不到或不合格就回傳非 0。
+valid_rate() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?$ ]]; }
+read_rates() {
+  local out c t
+  out="$(dc exec -T "$SRV" python -c 'from config import COMMISSION_RATE as c, TAX_RATE as t; print(repr(float(c)), repr(float(t)))')" || return 1
+  out="${out##*$'\n'}"
+  read -r c t _ <<<"$out"
+  valid_rate "$c" && valid_rate "$t" || return 1
+  echo "$c $t"
+}
 
 # ── 服務的查詢 ──
 # cid_of SVC：用 label 找（⛔ 含 compose run 的臨時 container，oneoff=False 排除它）；超過一個就當成錯誤
@@ -516,6 +532,12 @@ pre="${pre//[[:space:]]/}"
 [ "$(field "$pre" 2)" = 0 ] || die2 "dev DB 有 $(field "$pre" 2) 筆 pending／running 的回測；⛔ 不操作（會被一起執行或誤判）"
 [ "$(field "$pre" 3)" = 0 ] || die2 "dev DB 還有之前留下的 i134smoke_ 任務（$(field "$pre" 3) 筆）；先確認、清掉再重跑"
 [ "$(field "$pre" 4)" -gt 0 ] 2>/dev/null || die2 "$SMOKE_SYMBOL 在 $SMOKE_START～$SMOKE_END 沒有日 K"
+# trades 的費用核對要用 config 的原始費率：開始前先確認讀得到（⛔ 還沒改任何東西，讀不到就結束碼 2）。
+#   config 是 build 時複製進 image 的，實際用的值在換上本次的 image 之後、寫入任務之前再讀一次（scenario_trades）。
+if [[ " ${SCEN_LIST[*]} " == *" trades "* ]]; then
+  RATES0="$(read_rates)" || die2 "讀不到 $SRV 的 config 費率（COMMISSION_RATE、TAX_RATE），或不是有限的非負數"
+  echo "    $SRV 目前的費率（config）：手續費 ${RATES0% *}、交易稅 ${RATES0#* }"
+fi
 echo "    worker 開始時：$WRK_STATE0；$SMOKE_SYMBOL 日 K $(field "$pre" 4) 根"
 
 # ═══ 2. build 與換上本次的 image ═══
@@ -715,8 +737,12 @@ tmp_log_has() { local out; out="$(t "$(rem "$CALL_TIMEOUT")" docker logs "$TMP_S
 # trades（I-135）：backtrader 路徑寫進 backtest_trades 的明細——筆數、價格與股數、帶方向的精度界線、台北時間。
 #   認領的路徑誰都可以（202 或 409 都接受），驗的是寫進去的內容。
 scenario_trades() {
-  local id="${PREFIX}trades_1" code s bad
-  log "trades：$SMOKE_STRATEGY 的交易明細（筆數、價格與股數、帶方向的精度界線、台北時間）"
+  local id="${PREFIX}trades_1" code s bad rates c tx
+  log "trades：$SMOKE_STRATEGY 的交易明細（筆數、價格與股數、帶方向的精度界線、台北時間、費用）"
+  # 預期費用用執行這次回測的 image 載入的 config 原始費率（寫入任務之前讀）
+  rates="$(read_rates)" || fail "讀不到 $SRV 的 config 費率（COMMISSION_RATE、TAX_RATE），或不是有限的非負數"
+  c="${rates% *}"; tx="${rates#* }"
+  echo "    費率（本次的 image 的 config）：手續費 $c、交易稅 $tx"
   insert_jobs "$id"
   code="$(post_job "$id")" || code=err
   case "$code" in 202|409) ;; *) fail "POST $id 回 $code（預期 202 或 409）" ;; esac
@@ -730,7 +756,13 @@ scenario_trades() {
             printf ";\nEXECUTE trades_check(:'id', :'prefix');\n"; } | q trades_check "id=$id")" || fail "查不到 $id 的交易明細"
   bad="${bad//[[:space:]]/}"
   [ "$bad" = 0 ] || fail "$id 有 $bad 筆明細不符合規格（必要欄位是 NULL 或 NaN、價格／股數不是正數、超出精度界線，或時間不是台北的日 K 時刻）"
-  echo "    通過：$(field "$s" 6) 筆交易明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間"
+  # 費用核對（I-136）：commission 跟 config 原始費率算出的模擬費用（手續費＋賣出的交易稅）差在界線內
+  bad="$( { printf 'PREPARE fee_check(text, text, numeric, numeric) AS\n'; cat "$TRADES_FEE_SQL"
+            printf ";\nEXECUTE fee_check(:'id', :'prefix', :'comm_rate', :'tax_rate');\n"; } \
+          | q trades_fee_check "id=$id" "comm_rate=$c" "tax_rate=$tx")" || fail "查不到 $id 的費用核對"
+  bad="${bad//[[:space:]]/}"
+  [ "$bad" = 0 ] || fail "$id 有 $bad 筆明細的 commission 跟 config 費率（手續費 $c、交易稅 $tx）算出的模擬費用對不上"
+  echo "    通過：$(field "$s" 6) 筆交易明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間、費用符合 config 費率"
 }
 
 for sc in "${SCEN_LIST[@]}"; do

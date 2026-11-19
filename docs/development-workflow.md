@@ -3303,6 +3303,13 @@ SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
   明細查詢是 `backend/internal/database/testdata/backtest_trades_check.sql`，跟 `scripts/test-postgres-migrations.sh` 會跑的
   `TestPostgresMigrationsBacktestTradesCheck` 共用同一份（腳本用 `PREPARE`／`EXECUTE`、Go 綁參數；⛔ 不在腳本裡另寫一份）。
   它把好的條件 AND 起來再用 `IS NOT TRUE` 判壞：NULL 參與比較得到 UNKNOWN，直接寫壞的條件會讓那一列被濾掉、判成通過。
+  * **費用核對**（I-136）：每一筆的 `commission` 跟 config 原始費率算出的模擬費用比——多單 `size × (entry_price × c + exit_price × (c + t))`、
+    空單 `size × (entry_price × (c + t) + exit_price × c)`，差⛔ 不能超過 `0.005 × size × (2c + t) + 0.005`（兩個價格與 `commission` 各自的四捨五入）。
+  * 費率 `c`、`t` 從 python-server container 裡 `config` 載入的 `COMMISSION_RATE`、`TAX_RATE` 讀，⛔ 不讀 `TWCommission` 的參數（被測的對象，
+    換算錯了會兩邊一起錯）。讀兩次：開始前讀一次（讀不到或不是有限的非負數 → 結束碼 2、⛔ 沒有改任何東西）；config 是 build 時複製進
+    image 的，換上本次的 image 之後、寫入任務之前再讀一次，用它當預期值（讀不到 → 結束碼 1、照常收尾）。
+  * 查詢是 `backend/internal/database/testdata/backtest_trades_fee_check.sql`（`$1`＝job_id、`$2`＝前綴、`$3`／`$4`＝費率），跟
+    `TestPostgresMigrationsBacktestTradesFeeCheck` 共用同一份，寫法同上。
 * **dev 的測試資料**：預設 2330、2024-01-01～2025-12-31、`breakout_swing_atr_v1`（會產生交易；重啟與回應遺失的同步點需要至少一筆交易）。
   dev DB 原本沒有任何日 K，2026-11-18 從舊機的最終 dump（`~/old_vps_archive/20261112/db/final/stock_trading.dump`，SHA-256 `1d9495fd…`）
   **只匯入 2330 的日 K**（4,930 筆，2006-10-18～2026-11-11；使用者同意）：`pg_restore --data-only -t candles -f -` 經 pipe 過濾

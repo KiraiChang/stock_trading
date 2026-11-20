@@ -318,7 +318,19 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
        **新版查詢**必須報「重疊 0、失敗 1」；另加「執行的輪次缺逐檔列、沒有 `evidence_failed`」→ 資料不足，「有 `evidence_failed`」→ 對帳不完整、⛔ 不是資料不足。
    * 層二的救回、原因碼、Redis 等其他項目照原做法；觀察工具讀的 log 訊息名稱⛔ 不變。
    * 新版本另外有逐輪紀錄（`intraday_symbol_runs`、`intraday_rounds`），封存時一起帶走，判讀時可以拿來逐輪對帳，⛔ 不改變門檻。
-6. **I-123、I-122 的收斂**跟著延後到新窗口判讀完成；dev 作業 volume、交接目錄照 I-123 的保留條件繼續保留。
+6. **新版查詢的實作與驗收**（2026-11-20，repo 外的 `~/.cache/stock_trading/obs/archive/`）：
+   * `run-obs-archive.sh` 加 `OBS_QUERY_SET=v2`（預設 v1，行為⛔ 不變——用 11-13～11-19 的資料重跑，v1 的 12 個輸出檔跟修改前逐位元組相同；原檔備份在 `run-obs-archive.sh.v1-20261120`）。
+   * 新版查詢獨立在 `queries_v2.tsv`（工具與驗收腳本讀同一份）：`v2_intraday_daily`（排定輪數、最終失敗＝failed＋等鎖逾時的 skipped、全部寫入失敗與讀不到清單另外列）、
+     `v2_rounds`（連續兩輪判定用）、`v2_overlap`（盤中與補抓用 `intraday_rounds` 的持鎖區間、排除沒有執行的；其他工作照舊）、`v2_evidence`（逐輪對帳）；
+     `v2_judge.py` 印出判讀用的數字，資料不足時結束碼 3（⛔ 不在工具裡下通過／延長的結論）。
+   * 驗收 `accept_v2.sh`：在 dev postgres 建臨時 DB（表結構取自 repo 的 migration 010／063／079、只有合成資料、用完刪掉），全部符合：
+     「一輪執行中、另一輪等鎖逾時」舊查詢報重疊 1／failed 0，新版報**重疊 0、最終失敗 1**；補抓按 `job_runs` 起訖會報重疊 1，按持鎖區間 0；
+     有 `evidence_failed` 的輪次是對帳不完整（結束碼 0）；已執行卻缺逐檔列、沒有 `evidence_failed` → 資料不足（結束碼 3）；每日不到 55 輪 → 資料不足。
+   * 檔案指紋（SHA-256 前 12 碼）：`run-obs-archive.sh` `3054d5671db0`、`queries_v2.tsv` `f601d260afdd`、`v2_judge.py` `9effa36a37ae`、`accept_v2.sh` `5fd8c84f65aa`。
+   * ⚠️ 新版窗口的交接要多帶兩張表：`pg_dump -t public.job_runs -t public.intraday_rounds -t public.intraday_symbol_runs`。
+7. **上版順序**（使用者 2026-11-20 裁決）：11-21（假日）準備並上版，下禮拜 live 與 dev 同步驗證（dev 的「成功 → 500 → 恢復」實跑與畫面核對改在上版之後、跟 live 第一個交易日同步做）。
+   ⚠️ 這表示上版前⛔ 沒有 dev 的排程輪次實跑；風險由單元與整合測試（真的 SQLite、真的訊號引擎）與 dev 的手動補抓實跑承擔，出問題照回滾（退回 `pre-t088` 的 image、⛔ 不用退 migration 079）。
+8. **I-123、I-122 的收斂**跟著延後到新窗口判讀完成；dev 作業 volume、交接目錄照 I-123 的保留條件繼續保留。
 
 **代價**：I-123 的收斂比 A 晚（新窗口 5 個交易日從換版後才開始）；好處是盤中逐檔的可見性與「⛔ 不用舊 K 棒評估」提早上線。
 
@@ -379,10 +391,10 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
 | frontend（svelte-check、vitest 186 項、build） | 通過；dist 有新檔要一起加入版控 |
 | python 完整測試 | 2154 項通過、1 項跳過（這次⛔ 沒有改 python） |
 | dev 實跑：手動補抓 | ✅ 見下方 |
-| dev 實跑：排程輪次（成功、500、恢復）與畫面 | ⚠️ 待做：排程只在盤中（09:00～13:30）執行，要在下一個交易時段實跑 |
+| dev 實跑：排程輪次（成功、500、恢復）與畫面 | ⚠️ 待做：使用者裁決改在上版之後、跟 live 的第一個交易日同步驗證（第九節第 7 點） |
 | 實作 review 的四項修正（2026-11-20） | backend scheduler 測試、frontend（svelte-check 0、vitest 189 項、build）通過 |
 | 實作 review 第二輪的三項修正（2026-11-20） | backend 完整測試、postgres／mysql migration 驗證（079 的 CHECK 加 `failed`）、frontend（svelte-check 0、vitest 192 項、build）通過；⚠️ dev DB 已套用舊版 079，下次 dev 實跑前要讓它重新套用（刪兩張表與 `goose_db_version` 的 79 那一列，只在 dev） |
-| C 切版前：觀察工具的新版查詢與驗收案例（重疊 0、失敗 1） | ⚠️ 待做：目前的封存工具仍是舊口徑 |
+| C 切版前：觀察工具的新版查詢與驗收案例（重疊 0、失敗 1） | ✅ 2026-11-20（見第九節「新版查詢的實作與驗收」） |
 
 * **dev 實跑：手動補抓**（2026-11-20 收盤後；dev compose 加暫存 override：一個假的 Yahoo 批次端點（TLS、自簽憑證只給這個 container 信任），
   `YAHOO_ENABLED=true`；postgres 掛的是一般的 dev volume）：自選清單 2330、0050。

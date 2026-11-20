@@ -200,6 +200,9 @@
   * ⚠️ 這仍是估算：K 棒被刪掉、或事後被改寫（upsert 只更新價量、⛔ 不改 `created_at`）都無法完整還原當時的狀態。
   * 另外列出 `breakout_v1` 送了多檔的任務：只有「**第一檔成功載入的標的**」會交易（排在前面但範圍內沒資料的會先被略過），結果⛔ 不代表其他檔。
 * 部署後記下 commit、python image、啟動時間當界線，歸檔到 `database-schema.md`（同 I-136 的做法）。
+* **盤點結果**（2026-11-20 10:08 在 live 唯讀執行，live 當時是 `03e7028`；SQL 先在 dev 以合成資料驗過：一般截斷、晚補的 K 棒、1m 與 1d 分開、
+  範圍在窗口內、多檔第一檔無資料）：`done`／`failed` 共 9 筆任務、41 組任務×標的，被截掉的 0 組、0 根；`breakout_v1` 多檔 1 筆
+  （`bt_20260701_073955_000`，5 檔，實際交易 2330）；pending／running 0 筆。已歸檔到 `database-schema.md` 的 `data_coverage` 新舊界線。
 
 ### 9. 前端：選檔與明確拒絕的顯示
 
@@ -419,6 +422,25 @@
 | dev 實跑 `trades`，2330、2015-01-01～2025-12-31 | rc 0：範圍內 2,682 根＝DB 的根數（遠超過舊的 1,000 根）、首根 2015-01-05、暖身 250；17 筆明細與費用核對通過 |
 | dev 實跑 `trades`，2330、2005-01-01～2012-12-31 | rc 0：首根 2006-10-19（DB 的第一根）、1,547 根＝DB 的根數、暖身 0；6 筆明細通過 |
 | dev 非預設值 `BACKTEST_MAX_SYMBOLS=2`（三個服務都帶入） | Go：3 檔 400 `too_many_symbols:3:2`、`breakout_v1` 2 檔 400 `backtrader_single_symbol:2`、`9999-12-31` 400 `invalid_date:end_date`、modular 2 檔 201 → `done`（2317 在 dev 沒有日 K → `skipped`）；直接寫進 DB 的 3 檔任務，server 與 worker 都 `failed`／`too_many_symbols:3:2`，Go 讀出相同代碼。測試任務已刪除，dev stack 已 `down`（⛔ 沒有 `-v`） |
+
+## 七之二：live 上版（2026-11-20）
+
+* 14:04 部署前檢查：live `03e7028`、`job_runs` running 0、回測 pending／running 0、migration 77、`deploy.sh` `abcf1c019b25`、`--preflight` 通過；
+  image backend `f3a5ae6b9c9c`、python-server `40702c240772`、python-worker `c58a5cce2c69`（已打 `pre-i137` 回滾標籤）。
+* `deploy.sh`：`03e7028..31e5566`，rc=0。
+* 14:11 部署後：三個服務 `running`、RestartCount 0；image backend `bc503920bb75`、python-server `f166cc4e58c5`、python-worker `4303b51148a2`；
+  backend 執行檔 `90539d61bf71`、`Config.Env` 50 行與雜湊不變；migration 78、`data_coverage` 欄位存在；前端入口 `index-C6VWJ-Bz.js`；
+  python 兩個服務的設定 `250 20 5000 35000`、費率不變、`schema ready`（077、078）、沒有 Traceback；`/health` 正常、worker 有在 poll；
+  既有 7 筆結果的 `data_coverage` 都是 NULL，任務的分布與 2 筆 `failed` 跟部署前相同。
+* 新舊界線：2026-11-20 14:10:35（台北，python-server 啟動；worker 14:10:34），歸檔在 `database-schema.md` 的 `data_coverage`。
+* 上版後的實跑核對（E-2）：`breakout_v1`、2330、2024-01-01～2025-12-31（`bt_20261120_061311_000`，14:13:11 建立、不到 1 秒 `done`）。
+  `data_coverage` 是一筆 2330：`first_bar` 2024-01-02、`last_bar` 2025-12-31、`bars` 485（等於 DB 在這段台北日期的日 K 根數）、
+  `warmup_bars`／`warmup_required` 250／250、`skipped` false。明細 3 筆、`total_trades` 3；I-135 的明細查詢與 I-136 的費用查詢都 0 筆不符（rc 0）。
+  `sharpe_ratio` -50.6 是 `breakout_v1` 固定買 1 股、報酬極小（`total_return` 0.0003）而無風險利率 1% 的結果，公式跟原本的分析器相同，
+  屬於 `todo.md` T-085（部位大小），⛔ 不是 I-137 的問題。前端的檢查（E-1）：使用者 2026-11-20 在已登入的 live 畫面確認正常——切到 `breakout_v1` 時是單選、不預選；
+  兩筆舊的 `failed`（`bt_20260701_074009_000`、`bt_20260701_075122_000`）各自顯示「回測失敗（內部錯誤）」。
+* E-2 輸出裡的 `zsh: command not found: status` 是把說明文字一起貼進終端機，出現在查任務狀態那一行之後；部署的 rc=0 是 C 段緊接
+  `deploy.sh` 取得，兩者無關。
 
 ## 八、v1 的 Q1～Q4 裁決（2026-11-19）
 

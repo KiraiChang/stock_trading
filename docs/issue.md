@@ -3458,7 +3458,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已實作／待 review（2026-11-20）：計畫書 v1.7（v1.4 已確認，v1.5 是實作中的裁決，v1.6 是實作 review 的修正，v1.7 是 review 定下 `max_task_bars` 35,000）：[`plans/i137-backtest-date-range.md`](./plans/i137-backtest-date-range.md)（使用者 2026-11-19 裁決 D1～D4 與 Q1～Q4；v1～v1.3 review 的修正已併入） |
+| 狀態 | 已實作／已上 live（2026-11-20 14:04～14:11，`03e7028`→`31e5566`，rc=0；上版後實跑核對與 live 畫面確認都通過），待 review 後收斂：計畫書 v1.7（v1.4 已確認，v1.5 是實作中的裁決，v1.6 是實作 review 的修正，v1.7 是 review 定下 `max_task_bars` 35,000）：[`plans/i137-backtest-date-range.md`](./plans/i137-backtest-date-range.md)（使用者 2026-11-19 裁決 D1～D4 與 Q1～Q4；v1～v1.3 review 的修正已併入） |
 | 嚴重度 | 中：日期範圍的起點早於最近 N 根、但終點還在 N 根之內時，回測只用到還在最近 N 根裡的那一段，任務照樣 `done`、⛔ 沒有提示（全部標的整段都在 N 根之前時，兩條路徑都會丟錯，⛔ 不會靜默成功） |
 | 分類 | Python／回測 |
 | 建立日期 | 2026-11-18 |

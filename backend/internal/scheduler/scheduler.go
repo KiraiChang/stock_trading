@@ -200,6 +200,19 @@ type Scheduler struct {
 	// 不可 recover，整個行程死掉。
 	registeredJobsMu sync.RWMutex
 	registeredJobs   map[string]bool
+	// 盤中逐輪存證與輸入指紋（T-088＋I-103；intraday.go）。未注入（SetIntradayEvidence）時⛔ 不寫存證、
+	// ⛔ 不比對指紋（取得新資料的標的一律評估），抓取失敗的標的仍然⛔ 不評估。
+	intradayEvidence store.IntradayEvidenceRepo
+	intradayCandles  store.CandleRepo
+	// intradayLock 是盤中一輪與手動補抓共用的鎖（容量 1 的 channel，等待可以設上限）。
+	intradayLock chan struct{}
+	// intradayRunningRun 是正在執行的那一輪的 run_id（0＝沒有），狀態 API 用它分「評估中」與「中斷」。
+	intradayRunningRun atomic.Uint64
+	// 以下只有測試會改。
+	intradayLockWait  time.Duration
+	refillLockWait    time.Duration
+	refillDeadline    time.Duration
+	intradayClockFunc func() time.Time
 	// finishRetryBackoffs 是結束寫入失敗後的等待序列；nil 時用 defaultFinishRetryBackoffs。
 	// 只有測試會改它（避免真的等上一分鐘）。
 	finishRetryBackoffs []time.Duration
@@ -257,6 +270,10 @@ func New(
 		log:              log,
 		cron:             cron.New(cron.WithLocation(timeutil.TaipeiTZ)),
 		registeredJobs:   map[string]bool{},
+		intradayLock:     make(chan struct{}, 1),
+		intradayLockWait: defaultIntradayLockWait,
+		refillLockWait:   defaultRefillLockWait,
+		refillDeadline:   defaultRefillDeadline,
 	}
 }
 
@@ -561,15 +578,22 @@ var defaultFinishRetryBackoffs = []time.Duration{
 //
 // ⚠️ **單一 symbol 失敗不中斷整輪**——其餘標的照跑，這一檔記進 tally。
 func (s *Scheduler) evaluateSymbol(ctx context.Context, tally *jobFailureTally, symbol, timeframe string) {
-	res, err := s.signalEng.EvaluateWithResult(ctx, symbol, timeframe)
+	s.evaluateSymbolWith(ctx, tally, symbol, timeframe, signal.EvaluateOptions{})
+}
+
+// evaluateSymbolWith 與 evaluateSymbol 相同，多了訊號引擎的選項，並回傳結果（盤中要寫逐檔的評估結果，T-088）。
+func (s *Scheduler) evaluateSymbolWith(
+	ctx context.Context, tally *jobFailureTally, symbol, timeframe string, opts signal.EvaluateOptions,
+) (*signal.EvaluateResult, error) {
+	res, err := s.signalEng.EvaluateWithOptions(ctx, symbol, timeframe, opts)
 	if err != nil {
 		s.log.Warn("signal evaluate failed",
 			zap.String("symbol", symbol), zap.String("timeframe", timeframe), zap.Error(err))
 		tally.addEvaluateFailure(symbol, err)
-		return
+		return res, err
 	}
 	if res == nil || !res.Degraded {
-		return
+		return res, nil
 	}
 	// **降級不是硬失敗**：訊號評估成功了，只是某個階段沒做到。
 	// 記進 degraded 集合（不進 symbols_failed），該輪由 finishRunDegraded 收成 partial。
@@ -588,6 +612,7 @@ func (s *Scheduler) evaluateSymbol(ctx context.Context, tally *jobFailureTally, 
 	s.log.Warn("signal evaluate degraded",
 		zap.String("symbol", symbol), zap.String("timeframe", timeframe),
 		zap.Strings("stages", stages), zap.String("first_stage", string(stage)), zap.Error(cause))
+	return res, nil
 }
 
 // finishRunWithTally 依 tally 收尾——**降級要讓該輪變 partial，但不計入 symbols_failed**。
@@ -603,6 +628,14 @@ func (s *Scheduler) runPreMarket() {
 		s.log.Warn("job_runs cleanup failed", zap.Error(err))
 	} else if n > 0 {
 		s.log.Info("job_runs cleanup done", zap.Int64("deleted", n))
+	}
+	// 盤中逐輪存證的保留期跟 job_runs 相同，同一步清理（T-088）。
+	if s.intradayEvidence != nil {
+		if n, err := s.intradayEvidence.DeleteBefore(ctx, jobRunRetentionCutoff()); err != nil {
+			s.log.Warn("intraday evidence cleanup failed", zap.Error(err))
+		} else if n > 0 {
+			s.log.Info("intraday evidence cleanup done", zap.Int64("deleted", n))
+		}
 	}
 
 	runID := s.startRun(ctx, "pre_market")
@@ -635,168 +668,6 @@ func (s *Scheduler) runPreMarket() {
 	s.log.Info("pre-market job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
 
 	s.finishRunWithTally(ctx, runID, "pre_market", len(symbols), tally)
-}
-
-func (s *Scheduler) runIntradayJob() {
-	if !timeutil.IsMarketOpen(time.Now()) {
-		return
-	}
-	// 有掛載批次盤中源（Yahoo）時優先走批次路徑（免 token）；未掛載才退回 FinMind 分K。
-	if s.fetcher.HasIntradaySource() {
-		s.runIntradayBatch()
-		return
-	}
-	if !s.intradayEnabled {
-		// finmind.intraday_enabled=false（預設）且無批次源：帳號等級不足以使用
-		// TaiwanStockKBar dataset，不建立 job_run 紀錄，避免每 5 分鐘
-		// 洗一筆「skipped」進資料庫；升級帳號或啟用 Yahoo 後即可恢復
-		s.log.Debug("intraday job skipped: no batch source and finmind.intraday_enabled=false")
-		return
-	}
-
-	ctx := context.Background()
-	runID := s.startRun(ctx, "intraday")
-
-	symbols, err := s.watchlist.Symbols(ctx)
-	if err != nil {
-		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "intraday", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
-		return
-	}
-
-	today := timeutil.TodayTaipei()
-	tally := newJobFailureTally()
-	for i, sym := range symbols {
-		if err := s.fetcher.FetchAndStoreMinute(ctx, sym, today); err != nil {
-			if errors.Is(err, market.ErrInsufficientTier) {
-				// 帳號等級不足是整個 token 的限制，對其他 symbol 重試也一定會失敗，
-				// 記一次 log 後整輪跳過，避免每 5 分鐘對 watchlist 每檔股票都打一次注定失敗的請求
-				s.log.Warn("intraday job skipped: finmind token tier insufficient", zap.Error(err))
-				s.finishRunStatus(ctx, runID, "intraday", "skipped", len(symbols), len(symbols)-i,
-					safeJobErrorSummary("finmind_tier", err))
-				return
-			}
-			s.log.Warn("intraday fetch failed", zap.String("symbol", sym), zap.Error(err))
-			tally.addFetchFailure(sym, err)
-		}
-		s.evaluateSymbol(ctx, tally, sym, "1m")
-	}
-	s.finishRunWithTally(ctx, runID, "intraday", len(symbols), tally)
-}
-
-// runIntradayBatch 為批次盤中源（Yahoo）版本的盤中 job：把 watchlist 依 batch_size
-// 分批、每批一次請求拉多檔 1 分K 並寫入 candles，再逐檔跑 signal 掃描。
-func (s *Scheduler) runIntradayBatch() {
-	ctx := context.Background()
-	// 層二的重試預算從一輪開始時起算（retryIntradayBatch）。
-	retryCtx, cancelRetry := s.intradayRetryContext(ctx)
-	defer cancelRetry()
-	runID := s.startRun(ctx, "intraday")
-
-	symbols, err := s.watchlist.Symbols(ctx)
-	if err != nil {
-		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "intraday", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
-		return
-	}
-
-	batchSize := s.fetcher.IntradayBatchSize()
-	if batchSize <= 0 {
-		batchSize = len(symbols)
-	}
-
-	tally := newJobFailureTally()
-	for start := 0; start < len(symbols); start += batchSize {
-		end := start + batchSize
-		if end > len(symbols) {
-			end = len(symbols)
-		}
-		batch := symbols[start:end]
-		// 每一批的**第一次**抓取⛔ 不受重試預算限制（與導入重試之前相同）。
-		if _, err := s.fetcher.FetchAndStoreIntradayBatch(ctx, batch); err != nil {
-			if s.retryIntradayBatch(retryCtx, runID, start, batch, err) {
-				continue
-			}
-			// 批次請求失敗（例如 Yahoo 被限流/封鎖）：記錄後續跑其他批次。
-			// 未來的 Yahoo→FinMind fallback（T-008/T-031）會在此改為回退補資料。
-			// `cause` 是**第一次**失敗的安全原因碼（err 是第一次抓取的錯誤）。
-			s.log.Warn("intraday batch fetch failed", zap.Uint64("run_id", runID), zap.Int("from", start),
-				zap.Int("size", len(batch)), zap.String("cause", market.TransientCause(err)), zap.Error(err))
-			// 整批失敗只知道筆數不知道是哪幾檔；逐檔的寫入失敗更是完全看不到
-			// （見 issue.md I-103）。
-			tally.addOpaqueFetchFailures(len(batch))
-		}
-	}
-
-	for _, sym := range symbols {
-		s.evaluateSymbol(ctx, tally, sym, "1m")
-	}
-	s.finishRunWithTally(ctx, runID, "intraday", len(symbols), tally)
-}
-
-// 層二的常數（I-123～I-126 計畫書「3.3」）：每批最多重試 2 次（等 10 秒、再等 20 秒），
-// 整輪的重試共用 120 秒的預算。
-var intradayRetryWaits = []time.Duration{10 * time.Second, 20 * time.Second}
-
-const intradayRetryBudget = 120 * time.Second
-
-// intradayRetryContext 建這一輪的重試 context：「一輪開始 ＋ intradayRetryBudget」到期。
-// **重試的等待、Yahoo 節流器的等待、HTTP 請求與寫 K 棒都用它**，所以重試最晚在一輪開始後
-// 120 秒結束——⛔ 不是只檢查「要不要開始重試」。重試關閉時回傳原本的 ctx（⛔ 不會用到）。
-func (s *Scheduler) intradayRetryContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if !s.retry.enabled() {
-		return ctx, func() {}
-	}
-	return s.retry.budgetContext(ctx, intradayRetryBudget, errIntradayRetryBudget)
-}
-
-// retryIntradayBatch 是層二：批次抓取的暫時性失敗在同一輪內重試。回傳 true 代表重試成功，
-// 這一批⛔ 不計入失敗；永久錯誤（4xx、解析錯誤）⛔ 不重試。
-//
-// ⚠️ **每一筆 log 都帶 `run_id` 與 `first_cause`**（觀察期的追加修正，I-123～I-126 計畫書「十二」）：
-// 重試成功時第一次的錯誤⛔ 不會再出現在任何地方，少了它只證明得了「救回幾次」，
-// 看不出救回的是 DNS、連線還是其他暫時性錯誤。原因碼來自 market.TransientCause（封閉值域、⛔ 不含原文）；
-// 每次重試自己的錯誤記在 `cause`。
-//
-// ⚠️ ⛔ 不保證兩輪⛔ 不重疊：批次多、第一次抓取、評估與結束寫入都還要時間（與導入前相同），
-// 重試只讓一輪最多晚約 120 秒結束重試的部分。
-func (s *Scheduler) retryIntradayBatch(retryCtx context.Context, runID uint64, from int, batch []string, err error) bool {
-	if !s.retry.enabled() {
-		return false
-	}
-	firstCause := market.TransientCause(err)
-	for attempt, wait := range intradayRetryWaits {
-		if !market.IsTransient(err) {
-			return false
-		}
-		if s.retry.wait(retryCtx, wait) != nil {
-			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
-				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt),
-				zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)))
-			return false
-		}
-		_, err = s.fetcher.FetchAndStoreIntradayBatch(retryCtx, batch)
-		// **成功要同時滿足兩件事**：回傳 nil，而且重試 context 還沒到期。
-		// FetchAndStoreIntradayBatch 遇到逐檔寫入失敗只記 log、最後仍回 nil，只看回傳值會把
-		// 「HTTP 成功、寫 K 棒途中預算到期」誤當成成功。到期就保留這一批的失敗計數
-		//（其他原因的逐檔寫入失敗是 issue.md I-103 的範圍，這裡⛔ 不擴大）。
-		if retryCtx.Err() != nil {
-			s.log.Warn("intraday batch retry stopped: retry budget exhausted",
-				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
-				zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)), zap.Error(err))
-			return false
-		}
-		if err == nil {
-			s.log.Info("intraday batch fetch succeeded after retry",
-				zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
-				zap.String("first_cause", firstCause))
-			return true
-		}
-		s.log.Warn("intraday batch retry failed",
-			zap.Uint64("run_id", runID), zap.Int("from", from), zap.Int("size", len(batch)), zap.Int("retries", attempt+1),
-			zap.String("first_cause", firstCause), zap.String("cause", market.TransientCause(err)), zap.Error(err))
-	}
-	return false
 }
 
 // RunDailyClose 執行「收盤後拉日K + 完整掃描」的邏輯，供 cron 排程與

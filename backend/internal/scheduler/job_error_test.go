@@ -92,32 +92,40 @@ func TestJobFailureTallyUsesUnionNotSum(t *testing.T) {
 	}
 }
 
-// TestJobFailureTallyOpaqueFetchDoesNotDoubleCount 涵蓋只知筆數的路徑
-// （runPreMarket 的 BackfillHistory、runIntradayBatch 的整批失敗）。
-func TestJobFailureTallyOpaqueFetchDoesNotDoubleCount(t *testing.T) {
-	t.Run("opaque 較大時取 opaque", func(t *testing.T) {
+// T-088＋I-103：抓取失敗與寫入失敗分開列、symbols_failed 是三類的聯集；存證寫失敗⛔ 不進 symbols_failed，但讓該輪至少 partial。
+func TestJobFailureTallyFetchStoreEvidence(t *testing.T) {
+	t.Run("fetch 與 store 分開列、聯集計數", func(t *testing.T) {
 		tally := newJobFailureTally()
-		tally.addOpaqueFetchFailures(5)
+		tally.addFetchFailure("2330", errors.New("boom"))
+		tally.addStoreFailure("2454", errors.New("boom"))
+		tally.addStoreFailure("2330", errors.New("boom"))
 		tally.addEvaluateFailure("2454", errors.New("boom"))
-		if got := tally.failedCount(); got != 5 {
-			t.Errorf("得到 %d, want 5", got)
-		}
-	})
-	t.Run("聯集較大時取聯集", func(t *testing.T) {
-		tally := newJobFailureTally()
-		tally.addOpaqueFetchFailures(1)
-		tally.addEvaluateFailure("2454", errors.New("boom"))
-		tally.addEvaluateFailure("2330", errors.New("boom"))
 		if got := tally.failedCount(); got != 2 {
-			t.Errorf("得到 %d, want 2", got)
+			t.Errorf("聯集應為 2，得到 %d", got)
+		}
+		got := tally.summary()
+		if !strings.Contains(got, "fetch_failed:1 (") || !strings.Contains(got, "store_failed:2 (") ||
+			!strings.Contains(got, "evaluate_failed:1 (") {
+			t.Errorf("摘要要分開列 fetch／store／evaluate，得到 %q", got)
+		}
+		if strings.Index(got, "fetch_failed") > strings.Index(got, "store_failed") {
+			t.Errorf("順序應是 fetch、store、evaluate，得到 %q", got)
 		}
 	})
-	t.Run("opaque 沒有逐檔資訊時摘要只記數量", func(t *testing.T) {
+	t.Run("存證寫失敗：不計入失敗數、但讓該輪 partial", func(t *testing.T) {
 		tally := newJobFailureTally()
-		tally.addOpaqueFetchFailures(3)
-		got := tally.summary()
-		if got != "fetch_failed:3" {
-			t.Errorf("得到 %q, want %q", got, "fetch_failed:3")
+		tally.addEvidenceFailures(3)
+		if got := tally.failedCount(); got != 0 {
+			t.Errorf("存證失敗⛔ 不進 symbols_failed，得到 %d", got)
+		}
+		if !tally.hasDegraded() {
+			t.Error("存證失敗要讓該輪至少 partial")
+		}
+		if got := tally.summary(); got != "evidence_failed:3" {
+			t.Errorf("得到 %q", got)
+		}
+		if got := deriveRunStatus(11, tally.failedCount(), tally.hasDegraded()); got != "partial" {
+			t.Errorf("狀態應是 partial，得到 %q", got)
 		}
 	})
 }

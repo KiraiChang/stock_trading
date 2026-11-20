@@ -88,6 +88,19 @@ func (e *Engine) Evaluate(ctx context.Context, symbol, timeframe string) (*store
 // 真正走得到這條路的是「indicator 落盤正常、但 signals 單表／單欄位寫入失敗」
 // ——I-101 的 signals.vol_ratio 型別溢位就是那個形狀。詳見 docs/architecture.md「寫入失敗的一致性契約」。
 func (e *Engine) EvaluateWithResult(ctx context.Context, symbol, timeframe string) (*EvaluateResult, error) {
+	return e.EvaluateWithOptions(ctx, symbol, timeframe, EvaluateOptions{})
+}
+
+// EvaluateOptions 是 EvaluateWithOptions 的選項（T-088）。零值＝原本的行為。
+type EvaluateOptions struct {
+	// Withhold：照常算到判重為止，觸發時⛔ 不送出（⛔ 不 reserve、⛔ 不寫 signals、⛔ 不推播），
+	// 結果記在 Withheld／WithheldSignal。盤中的資料比上一次評估新、但落後超過門檻時用：
+	// 那時的訊號⛔ 不能當成即時訊號送出（docs/yahoo-intraday-integration.md）。
+	Withhold bool
+}
+
+// EvaluateWithOptions 與 EvaluateWithResult 相同，多了 EvaluateOptions。
+func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe string, opts EvaluateOptions) (*EvaluateResult, error) {
 	res := &EvaluateResult{}
 
 	snap, err := e.indicator.Compute(ctx, symbol, timeframe)
@@ -133,6 +146,14 @@ func (e *Engine) EvaluateWithResult(ctx context.Context, symbol, timeframe strin
 			zap.String("direction", sig.Direction),
 			zap.Time("timestamp", sig.Timestamp),
 		)
+		res.Suppressed = true
+		return res, nil
+	}
+
+	// 不送出：停在 reservation 之前，⛔ 不佔用 reservation（否則資料追上之後那一輪會被自己擋下）。
+	if opts.Withhold {
+		res.Withheld = true
+		res.WithheldSignal = sig
 		return res, nil
 	}
 
@@ -140,6 +161,7 @@ func (e *Engine) EvaluateWithResult(ctx context.Context, symbol, timeframe strin
 	if !allowed {
 		e.log.Debug("duplicate signal suppressed by reservation",
 			zap.String("symbol", symbol), zap.String("type", sig.SignalType))
+		res.Suppressed = true
 		return res, nil
 	}
 

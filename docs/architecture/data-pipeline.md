@@ -172,6 +172,18 @@ postgres 短暫進入 recovery mode——都是網路波動或第三方維修造
 `job retry config`：開關、間隔、上限、截止時刻與三個工作的最晚起跑時刻，部署後看它確認。
 回滾：`JOB_RETRY_ENABLED=false` 重新部署，確認那一行顯示 `enabled=false`。
 
+### 盤中的逐輪存證（T-088＋I-103）
+
+盤中一輪的資料流：等鎖（最多 60 秒）→ 建 `job_runs` 與 `intraday_rounds` → Yahoo 批次（層二重試回傳逐檔結果）→ 逐檔寫 K 棒 →
+讀最近 120 根算輸入指紋 → 寫 `intraday_symbol_runs` 的行情段 → 只對可評估的標的呼叫訊號引擎 → 寫評估段 → `job_runs` 收尾（摘要分開列 fetch 與 store）。
+規則見 [`yahoo-intraday-integration.md`](../yahoo-intraday-integration.md)「逐檔結果、能不能評估與存證」，表格見 [`database-schema.md`](../database-schema.md)。
+
+* **讀不到自選清單**的輪次記成 `failed`（`watchlist_fetch`），⛔ 不會被算成 success。
+* **逐輪對帳**：每一輪的 `fetch_failed`、`store_failed` 檔數、可評估與未評估的檔數，都能從 `intraday_symbol_runs` 重算，並且要等於那一輪 `job_runs` 的摘要與
+  `symbols_failed`；`intraday_rounds.evidence_failures > 0`（或摘要有 `evidence_failed`）的輪次是「對帳不完整」。
+* **觀察判讀時的口徑**（I-123 的新版窗口）：`skipped`（`lock_wait_timeout`）的輪次那一輪⛔ 沒有新資料、也⛔ 沒有評估，判讀時計入最終失敗、另外列出；
+  重疊只看實際執行的輪次（排除 `skipped`）。全部標的寫入失敗也會讓那一輪 `failed`，判讀時另外列出、⛔ 不從計數中扣除。
+
 ### live 的觀察（2026-11-03～11-12，舊主機）
 
 部署（2026-11-02 17:39）之後 5 個交易日（11-03～11-09）的判讀，加上之後到舊主機停機（11-12）；`job_runs` 用舊主機停機後的最終 dump、log 用封存的持久化 log，來源完整：

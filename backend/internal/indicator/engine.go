@@ -12,6 +12,10 @@ import (
 
 const lookback = 120 // 拉取最近 120 根 K 棒，足夠所有指標計算
 
+// Lookback 是指標每次讀取的 K 棒根數（＝lookback）。盤中的輸入指紋（T-088）用同一個值，
+// 涵蓋指標與訊號引擎（100 根）實際讀到的 K 棒；⛔ 不另寫一份常數。
+const Lookback = lookback
+
 // minCandles 是算得出指標的最低根數（MA60 需要 60 根，其餘指標更少）。
 const minCandles = 35
 

@@ -126,6 +126,11 @@ func NewServer(
 
 		sch := handler.NewSchedulerHandler(jobRunRepo, sched, log)
 		protected.GET("/scheduler/status", sch.GetStatus)
+		// 盤中逐檔行情與評估狀態、手動補抓當日分 K（T-088＋I-103）。
+		// ⚠️ 補抓沿用手動排程端點的權限（任何登入的使用者）；多人使用之前要調整（docs/api-reference.md）。
+		inh := handler.NewIntradayHandler(store.NewIntradayEvidenceRepo(db), watchlistRepo, candleRepo, sched, log)
+		protected.GET("/intraday/status", inh.GetStatus)
+		protected.POST("/scheduler/intraday-refill/run", inh.RunRefill)
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
 		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)

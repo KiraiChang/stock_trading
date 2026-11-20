@@ -1,6 +1,6 @@
 # T-088＋I-103 計畫書 v1.5：盤中逐檔行情可用性（逐檔抓取與寫入結果、能否評估、畫面顯示、矯正手段）
 
-> 狀態：v1.5，⚠️ 待使用者確認（v1、v1.2、v1.3、v1.4 的 review 已併入；2026-11-20 使用者裁決：上版採第九節的 C、D6 沿用現有權限）。
+> 狀態：v1.5（✅ 2026-11-20 使用者確認）；**已實作、未 commit，待 review**（實作備註與偏差見第十節；v1、v1.2、v1.3、v1.4 的 review 已併入；2026-11-20 使用者裁決：上版採第九節的 C、D6 沿用現有權限）。
 > 對應：`docs/todo.md` T-088、`docs/issue.md` I-103。
 > 需求確認：2026-11-20（使用者：T-088 與 I-103 合併成一份計畫書，先於 T-084／T-087 進行）。
 
@@ -88,7 +88,7 @@
 
 **輸入指紋**（v1.3 改）：寫入之後，從 DB 讀**評估實際會用到的 K 棒**——這一檔最近 120 根 1 分 K（指標的 120 根涵蓋訊號引擎的 100 根），
 依時間排序，對每一根的時間與 OHLCV 取 SHA-256。同時間戳的棒被更新、較早的棒被補回或**被修訂**（例如某一根的高低價或收盤價改了），指紋都會變。
-⚠️ 窗口大小跟著指標的 `lookback` 走（同一個常數或共用的取值，⛔ 各寫一份）。
+⚠️ 窗口大小跟著指標的 `lookback` 走（同一個常數或共用的取值，⛔ 不各寫一份）。
 
 在 `evaluateSymbol(…, "1m")` **之前**，依這一輪的逐檔結果決定：
 
@@ -151,10 +151,10 @@
 
 * `GET /api/v1/intraday/status`：回傳**最近一輪排程的輪次紀錄**（`intraday_rounds`：排定時點、結果、`run_id`），以及自選清單每一檔的
   **最近一筆逐檔紀錄**、**最近一次手動補抓**（如果比排程的新）、**上一次成功評估**的時間、**最後有效 K 棒**，與依當下時間算的 `lag`；沒有紀錄的標的回 `null`（例如還沒開盤）。
-* **最近一輪被跳過時**（v1.5）：skipped 的輪次沒有逐檔列，所以畫面⛔ 只看逐檔列會停在上一輪的結果。最近一輪排程的輪次紀錄比該檔最近一筆逐檔列新時，
+* **最近一輪被跳過時**（v1.5）：skipped 的輪次沒有逐檔列，所以畫面如果只看逐檔列，會停在上一輪的結果。最近一輪排程的輪次紀錄比該檔最近一筆逐檔列新時，
   以輪次紀錄為準，例如 09:15 等鎖逾時：「09:15 本輪未執行（等鎖逾時）｜本輪未評估｜最後有效 K 棒 09:10｜上一次評估 09:10」——
   保留 09:10 的最後有效 K 棒與上一次評估時間，但⛔ 不把 09:10 的評估結果當成 09:15 的。
-* **刷新方式**：前端在盤中每 60 秒重抓一次（排程是 5 分鐘一輪，60 秒內看得到新一輪）；非盤中只在載入時抓一次。
+* **刷新方式**：前端在盤中每 60 秒重抓一次（排程是 5 分鐘一輪，60 秒內看得到新一輪）；非盤中每 5 分鐘一次（實作 review 後改：原本非盤中只抓一次，開盤前開著的頁面開盤後不會恢復）。
   每一列顯示 `data_at`／`eval_at`，所以畫面停在舊資料時看得出來。⛔ 不靠 WebSocket（它只在產生訊號時推播）。
 * 自選清單每一列顯示兩段：
   * **行情**：「HH:MM 已更新｜最後 K 棒 HH:MM」、「本輪未取得新 K 棒」、「行情更新失敗（原因）」；延遲超過門檻另加「行情延遲 N 分鐘」。
@@ -247,10 +247,10 @@
 * **最近一輪被跳過**：09:10 正常評估、09:15 等鎖逾時 → API 帶出 09:15 的輪次紀錄，畫面顯示「本輪未執行（等鎖逾時）｜本輪未評估」，最後有效 K 棒與上一次評估仍是 09:10。
 * **存證失敗**：`startRun` 失敗 → 照樣抓取與評估、log `intraday evidence unavailable`；逐檔紀錄寫失敗 → `evidence_failed:N`、該輪至少 partial、
   `intraday_rounds.evidence_failures` 計數；評估段寫失敗 → 下一輪再評估、訊號由判重擋下。
-* **排定與執行分開**：兩輪依序執行時，`job_runs` 的區間⛔ 重疊（用既有的重疊查詢核對）；`intraday_rounds` 的 `scheduled_at` 與 `lock_acquired_at` 各自正確。
+* **排定與執行分開**：兩輪依序執行時，`job_runs` 的區間⛔ 不重疊（用既有的重疊查詢核對）；`intraday_rounds` 的 `scheduled_at` 與 `lock_acquired_at` 各自正確。
 * 觸發但被判重擋下 → `signal_suppressed`；新但延遲超過門檻、觸發 → `withheld_stale`、`signals` 沒有新列、沒有推播。
 * **鎖與上限**：補抓與盤中一輪依序執行；盤中一輪等鎖超過 60 秒 → `skipped`＋`lock_wait_timeout`、沒有逐檔的列；補抓等鎖超過 30 秒 → 409；
-  補抓整次超過 45 秒 → `failed`＋`refill_deadline`、已寫的照實回報；兩輪盤中排程⛔ 重疊。
+  補抓整次超過 45 秒 → `failed`＋`refill_deadline`、已寫的照實回報；兩輪盤中排程⛔ 不重疊。
 * **手動補抓**：收盤後可執行、只寫 K 棒、⛔ 不呼叫訊號引擎、⛔ 不推進上一次成功評估（補抓後下一輪照常評估）、回報新增／更新／不變與缺口、`job_runs` 有紀錄；
   畫面顯示「已補抓，本次未評估」，⛔ 不顯示「本輪評估中」。
 * **畫面**：評估段還沒寫、`job_runs` 還在跑 →「本輪評估中」；已結束或 `aborted` →「本輪評估未完成（中斷）」。
@@ -302,6 +302,8 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
    * **`skipped`（等鎖逾時）怎麼算**（v1.4）：每天要有 55 輪**排定**的紀錄（`job_runs` 含 `skipped`；不到 55 照「資料不足」）；
      `skipped` 的輪次那一輪⛔ 沒有新資料、也⛔ 沒有評估，對使用者的結果跟抓取失敗相同，所以**計入最終失敗輪數**（從嚴），判讀時另外列出原因 `lock_wait_timeout`。
    * **重疊**：只看**實際執行**的輪次（排除 `skipped`），用 `job_runs` 的起訖判定（先拿鎖再建 run，起訖就是執行區間），也可以用 `intraday_rounds` 的執行區間交叉核對。
+     ⚠️ （實作 review 2026-11-20）**手動補抓**在放鎖之後才寫完 `job_runs`，它的 `job_runs` 起訖⛔ 不等於持鎖區間：新版查詢若把補抓納入重疊判定，
+     一律用 `intraday_rounds` 的 `lock_acquired_at`～`exec_finished_at`（依序執行的補抓按 `job_runs` 起訖會報重疊 1、按持鎖區間是 0）。
    * **對帳不完整**的輪次（3.3）另外列出。
    * **逐輪證據缺失時的資料不足**（v1.5）：
      * 某交易日 intraday 的 `job_runs`（含 `skipped`）不是 55 輪 → 資料不足（建立 run 失敗的輪次就是這樣）；
@@ -319,6 +321,80 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
 6. **I-123、I-122 的收斂**跟著延後到新窗口判讀完成；dev 作業 volume、交接目錄照 I-123 的保留條件繼續保留。
 
 **代價**：I-123 的收斂比 A 晚（新窗口 5 個交易日從換版後才開始）；好處是盤中逐檔的可見性與「⛔ 不用舊 K 棒評估」提早上線。
+
+## 十、實作備註（2026-11-20；已改好、未 commit，待 review）
+
+**改了哪些**
+
+* market：`IntradaySymbolResult`（`written`／`no_data`／`store_failed`／`fetch_failed`）；`FetchAndStoreIntradayBatch(ctx, runID, symbols)` 回逐檔結果，
+  拆出 `FetchIntradayBatchCandles`（只抓）與 `StoreIntradayBatch`（依請求順序逐檔寫，ctx 到期時還沒寫的記 `store_failed`）；`FetchAndStoreMinute` 回逐檔結果（空回應 `no_data`）。
+* store：`IntradayEvidenceRepo`（兩張表、最近一筆與上一次成功評估各一句查詢、清理同一個交易）；migration 079 三份。
+* signal：`EvaluateWithOptions`（`Withhold`：停在 reservation 之前）、`EvaluateResult.Suppressed`（DB 判重與 reservation 都算）、`Withheld`／`WithheldSignal`。
+  `indicator.Lookback` 匯出給指紋用。
+* scheduler：新檔 `intraday.go`（鎖、一輪、兩條路徑、判定、指紋、存證、重試回傳逐檔結果）與 `intraday_refill.go`（手動補抓）；
+  `job_error.go` 的 tally 加 `storeFailed`、`evidenceFailed`，**移除只知筆數的 opaque 計數**（唯一的使用者是舊的批次路徑）；`pre_market` 清理逐輪紀錄。
+* api：`GET /intraday/status`、`POST /scheduler/intraday-refill/run`（`IntradayHandler`）；main 注入 `SetIntradayEvidence`。
+* frontend：`lib/api/intraday.ts`、`lib/utils/intradayStatus.ts`（判讀文字的純函式）、`lib/stores/intraday.ts`；自選清單每一列下方一行盤中狀態、
+  標題列「補抓當日分 K」按鈕與結果；Dashboard 盤中每 60 秒重抓、非盤中抓一次就停。dist 重新 build。
+* 文件：`architecture.md`「寫入失敗的一致性契約」、`yahoo-intraday-integration.md`「逐檔結果、能不能評估與存證」、`architecture/data-pipeline.md`
+  「盤中的逐輪存證」、`database-schema.md` 兩張表、`api-reference.md` 兩支端點。
+
+**跟計畫的差異**（都不改變規格的方向，review 時請確認）
+
+1. **「本輪評估中」與「中斷」的判定**：計畫寫看那一輪 `job_runs` 是否 `running`；實作改用 scheduler 行程內「正在執行的 run_id」
+   （`IntradayRunningRunID`）——等價（重啟回收的 `aborted` 一定不是行程內正在跑的那一輪），而且⛔ 不用為了這件事擴充 `JobRunRepo` 介面。
+2. **FinMind 路徑的「帳號等級不足」**：以前逐檔抓、逐檔評估，撞到等級不足時前面的檔已經評估過；現在先抓完再評估，撞到時整輪 `skipped`、前面的檔也不評估。
+   live 沒有啟用這條路徑。
+3. **評估結果的優先順序**：同時有降級與送出時記 `degraded`（原因是第一個降級的階段），⛔ 不記 `signal_sent`。
+4. **缺口的範圍**：13:26～13:29 是收盤集合競價（13:25～13:30 不撮合），⛔ 不列為缺口；09:00 照列（第一根是否標成 09:00 依來源而定，列為「仍無法確認」）。
+5. **`intraday_refill` 不在 `/scheduler/status` 的排程清單**：它只有手動觸發，列進去會被當成 `never_run`／stale；結果查 `job_runs` 與補抓的回應。
+6. **新增一行 log** `intraday round started`（`run_id`、排定時點、等鎖時間）；既有的訊息名稱與欄位都⛔ 不變。
+**實作 review（2026-11-20）的修正**：
+
+* [P2] 手動補抓失敗或沒有當日 K 棒時，畫面仍顯示「已補抓」→ 依補抓的逐檔結果顯示（「已補抓」「補抓：沒有當日 K 棒」「補抓失敗（原因）」），都保留最後有效 K 棒。
+* [P2] 開盤前開著 Dashboard、開盤後不會自動刷新（非盤中的回應會清掉計時器）→ 改成 `setTimeout` 串接：盤中 60 秒、非盤中 5 分鐘，每次依最新的 `market_open` 決定下一次；
+  補跨開盤的驗收（fake timers：非盤中 → 開盤 → 每 60 秒、停止之後不再抓）。
+* [P2] 補抓的 45 秒沒有涵蓋整段持鎖時間（收尾重試最壞約 133 秒仍持鎖）→ 期限從拿到鎖開始算，建 run 改用期限內的 ctx，K 棒寫完就放鎖，存證與 `job_runs` 收尾在鎖外；
+  補測試「`job_runs` 收尾卡住時，鎖已經放掉、K 棒已寫入」。`intraday_rounds.exec_finished_at` 記的是放鎖的時刻。
+* [P2] 讀不到自選清單時兩條路徑都以 total=0、failed=0 收尾、推成 success → 明確記成 `failed`（`watchlist_fetch`），補兩條路徑的測試。
+
+**實作 review 第二輪（2026-11-20）的修正**：
+
+* [P2] 讀不到自選清單後畫面仍沿用上一輪的「未觸發」→ 輪次紀錄記 `outcome=failed`（migration 079 的 CHECK 加 `failed`；079 尚未上 live，直接改）；
+  狀態 API 的 `round_skipped` 改成一般化的 `round_state`（`skipped`／`failed`／`running`／`incomplete`），補抓與輪次紀錄都比逐檔列新時取 run_id 較新的；
+  畫面顯示「本輪執行失敗｜本輪未評估」並保留上一次評估時間。
+* [P2] 初次請求未完成就切頁，舊頁面仍會啟動輪詢與 WebSocket → 銷毀之後⛔ 不再啟動；補 Dashboard 的元件測試（拿掉那道檢查時測試會失敗）。
+* [P3] 持鎖測試可能在補抓真正開始前就拿到鎖 → 先用通道確認已進入 `job_runs` 的收尾，再驗證拿得到鎖。
+
+7. **`job_runs` 摘要的原因碼**沿用既有的 joberr 分類器（`safeJobErrorReason`）：Yahoo 回 HTTP 500 時摘要是 `fetch_failed:2 (0050:internal_error, …)`，
+   逐檔紀錄的 `data_cause` 才是 `http_5xx`（`market.TransientCause`）。joberr 認不得 HTTP 狀態碼是既有的分類範圍，本案⛔ 不改；review 時請判斷要不要另案。
+
+**驗證**（2026-11-20）
+
+| 項目 | 結果 |
+|---|---|
+| backend 完整測試（`backend/scripts/test.sh`） | 全部通過 |
+| scheduler 的盤中測試開 race detector（`RACE=1`） | 通過 |
+| postgres、mysql 的 migration 驗證（up → 驗 schema → 分段 down 到 0） | 都 rc 0 |
+| frontend（svelte-check、vitest 186 項、build） | 通過；dist 有新檔要一起加入版控 |
+| python 完整測試 | 2154 項通過、1 項跳過（這次⛔ 沒有改 python） |
+| dev 實跑：手動補抓 | ✅ 見下方 |
+| dev 實跑：排程輪次（成功、500、恢復）與畫面 | ⚠️ 待做：排程只在盤中（09:00～13:30）執行，要在下一個交易時段實跑 |
+| 實作 review 的四項修正（2026-11-20） | backend scheduler 測試、frontend（svelte-check 0、vitest 189 項、build）通過 |
+| 實作 review 第二輪的三項修正（2026-11-20） | backend 完整測試、postgres／mysql migration 驗證（079 的 CHECK 加 `failed`）、frontend（svelte-check 0、vitest 192 項、build）通過；⚠️ dev DB 已套用舊版 079，下次 dev 實跑前要讓它重新套用（刪兩張表與 `goose_db_version` 的 79 那一列，只在 dev） |
+| C 切版前：觀察工具的新版查詢與驗收案例（重疊 0、失敗 1） | ⚠️ 待做：目前的封存工具仍是舊口徑 |
+
+* **dev 實跑：手動補抓**（2026-11-20 收盤後；dev compose 加暫存 override：一個假的 Yahoo 批次端點（TLS、自簽憑證只給這個 container 信任），
+  `YAHOO_ENABLED=true`；postgres 掛的是一般的 dev volume）：自選清單 2330、0050。
+  ①第一次：當日 09:00～13:30 共 271 分鐘、假服務刻意缺 09:30 → 每檔新增 270、缺口只列 09:30（13:26～13:29 假服務有回，⛔ 不是缺口）；
+  ②第二次（同樣的資料）→ 不變 270；③假服務回 500 → 兩檔 `fetch_failed`／`http_5xx`，`job_runs` 是 `failed`、2 檔失敗。
+  `intraday_rounds` 4 筆 `source=refill`、都有結束時間；狀態 API 在收盤後 `market_open=false`、延遲依當下時間算（219 分鐘）但⛔ 不標 stale、沒有排程輪次時 `latest_round` 是 null。
+  實跑發現兩處小問題，已修並補測試：自選清單是空的時補抓回應的 `symbols` 是 null（改成空陣列）；抓取失敗那幾列的 `gaps` 是 null（改成空陣列）。
+* 新增的測試：抓取失敗時舊 K 棒符合突破條件也⛔ 不評估（對照組證明那批 K 棒確實會觸發）；重試的逐檔結果（A 寫入成功、B 寫入失敗、C 沒有資料，`http_recovered`）；
+  重試預算在寫入途中與請求途中到期；指紋相同才跳過、評估失敗會重試；只修訂較早一根指紋就變；延遲的資料⛔ 不送出；等鎖逾時 `skipped`；依序執行時排定與實際開始分開記；
+  存證寫失敗 `evidence_failed`＋partial；建立 run 失敗照樣評估；手動補抓的新增／更新／不變與缺口、⛔ 不評估、⛔ 不推進上一次成功評估；補抓 busy／不在清單／沒有來源；
+  補抓逾時；FinMind 空回應⛔ 不評估；repo 的最近一筆、上一次成功評估與清理；狀態 API 的 round_skipped、eval_pending、refill、延遲；
+  `fetched intraday batch candles` 的既有欄位；前端判讀文字（「未觸發」只對應 no_signal、抓取失敗顯示「本輪未評估」）。
 
 ## 版本紀錄
 

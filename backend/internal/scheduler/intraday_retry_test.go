@@ -119,7 +119,7 @@ func TestIntradayBatchRetrySucceedsAfterTransientFailure(t *testing.T) {
 	src := &retryBatchSource{batch: 2, errs: []error{transientDialErr()}}
 	s, jobRuns, clock := newIntradayRetryScheduler(t, src, &retryCandleRepo{}, retryOn, intradayFourSymbols)
 
-	s.runIntradayBatch()
+	s.runIntradayRound(tpe(9, 5))
 
 	if got := finishedOnce(t, jobRuns); got.status != "success" || got.symbolsFailed != 0 {
 		t.Fatalf("得到 %s %d 檔失敗，期望 success、0 檔", got.status, got.symbolsFailed)
@@ -137,7 +137,7 @@ func TestIntradayBatchRetryGivesUpAfterTwoRetries(t *testing.T) {
 	src := &retryBatchSource{batch: 2, errs: []error{transientDialErr(), transientDialErr(), transientDialErr()}}
 	s, jobRuns, clock := newIntradayRetryScheduler(t, src, &retryCandleRepo{}, retryOn, intradayFourSymbols)
 
-	s.runIntradayBatch()
+	s.runIntradayRound(tpe(9, 5))
 
 	if got := finishedOnce(t, jobRuns); got.symbolsFailed != 2 {
 		t.Fatalf("失敗 %d 檔，期望第一批的 2 檔", got.symbolsFailed)
@@ -165,7 +165,7 @@ func TestIntradayBatchRetrySkipsPermanentOrDisabled(t *testing.T) {
 			src := &retryBatchSource{batch: 2, errs: []error{tc.err}}
 			s, jobRuns, clock := newIntradayRetryScheduler(t, src, &retryCandleRepo{}, tc.cfg, intradayFourSymbols)
 
-			s.runIntradayBatch()
+			s.runIntradayRound(tpe(9, 5))
 
 			if got := finishedOnce(t, jobRuns); got.symbolsFailed != 2 {
 				t.Fatalf("失敗 %d 檔，期望 2 檔", got.symbolsFailed)
@@ -198,7 +198,7 @@ func TestIntradayRetryBudgetBoundsAllRetries(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.runIntradayBatch()
+		s.runIntradayRound(tpe(9, 5))
 	}()
 	select {
 	case <-done:
@@ -221,7 +221,7 @@ func TestIntradayRetryBudgetBoundsAllRetries(t *testing.T) {
 }
 
 // HTTP 成功、寫 K 棒時預算到期：那一批仍計入失敗，⛔ 不算重試成功
-// （FetchAndStoreIntradayBatch 遇到逐檔寫入失敗只記 log、仍回 nil）。
+// （寫入階段逾時的檔記 store_failed、原因碼 retry_budget）。
 func TestIntradayRetrySuccessRequiresLiveBudget(t *testing.T) {
 	var clock *fakeRetryClock
 	candles := &retryCandleRepo{onInsert: func(ctx context.Context) error {
@@ -233,7 +233,7 @@ func TestIntradayRetrySuccessRequiresLiveBudget(t *testing.T) {
 	s, jobRuns, c := newIntradayRetryScheduler(t, src, candles, retryOn, []string{"2330", "2454"})
 	clock = c
 
-	s.runIntradayBatch()
+	s.runIntradayRound(tpe(9, 5))
 
 	if got := finishedOnce(t, jobRuns); got.symbolsFailed != 2 {
 		t.Fatalf("失敗 %d 檔，期望 2 檔（預算到期⛔ 不算重試成功）", got.symbolsFailed)

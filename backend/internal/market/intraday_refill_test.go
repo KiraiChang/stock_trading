@@ -73,7 +73,7 @@ func TestIntradayBatchNextRoundRefillsMissedBars(t *testing.T) {
 	to := from.Add(10 * time.Minute)
 
 	// 09:01 那一輪：Yahoo 503，什麼都沒寫進去。
-	if _, err := f.FetchAndStoreIntradayBatch(ctx, []string{"2330"}); err == nil || !IsTransient(err) {
+	if _, err := f.FetchAndStoreIntradayBatch(ctx, 0, []string{"2330"}); err == nil || !IsTransient(err) {
 		t.Fatalf("第一輪應是暫時性失敗，得到 %v", err)
 	}
 	if got, _ := candles.GetRange(ctx, "2330", "1m", from, to); len(got) != 0 {
@@ -81,7 +81,7 @@ func TestIntradayBatchNextRoundRefillsMissedBars(t *testing.T) {
 	}
 
 	// 09:02 那一輪：回當日全部 → 第一輪缺的 09:01 補回來。
-	if _, err := f.FetchAndStoreIntradayBatch(ctx, []string{"2330"}); err != nil {
+	if _, err := f.FetchAndStoreIntradayBatch(ctx, 0, []string{"2330"}); err != nil {
 		t.Fatalf("第二輪：%v", err)
 	}
 	got, err := candles.GetRange(ctx, "2330", "1m", from, to)
@@ -93,7 +93,7 @@ func TestIntradayBatchNextRoundRefillsMissedBars(t *testing.T) {
 	}
 
 	// 下一輪覆蓋還在走的那一根（ON CONFLICT DO UPDATE），⛔ 不會重複。
-	if _, err := f.FetchAndStoreIntradayBatch(ctx, []string{"2330"}); err != nil {
+	if _, err := f.FetchAndStoreIntradayBatch(ctx, 0, []string{"2330"}); err != nil {
 		t.Fatalf("第三輪：%v", err)
 	}
 	got, _ = candles.GetRange(ctx, "2330", "1m", from, to)

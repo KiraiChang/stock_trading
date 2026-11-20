@@ -32,6 +32,13 @@ type EvaluateResult struct {
 
 	// SignalGenerated 本次是否產生訊號（沒觸發條件、或被判重抑制時為 false）。
 	SignalGenerated bool `json:"signal_generated"`
+	// Suppressed 條件觸發了，但被判重擋下（DB 判重或 reservation）。T-088：盤中的逐檔評估結果要分得出
+	// 「觸發但被判重擋下」與「沒有觸發」，⛔ 不改判重的規則。
+	Suppressed bool `json:"suppressed"`
+	// Withheld 條件觸發、也通過判重，但呼叫端要求⛔ 不送出（EvaluateOptions.Withhold；資料延遲時用）：
+	// ⛔ 沒有 reserve、⛔ 沒有寫 signals、⛔ 沒有推播。Signal 仍是 nil，候選訊號在 WithheldSignal。
+	Withheld       bool          `json:"withheld"`
+	WithheldSignal *store.Signal `json:"-"`
 	// DBPersisted signal history 是否成功落 DB。
 	DBPersisted bool `json:"db_persisted"`
 	// QueueEnqueued 是否**真的**寫進 Redis queue。

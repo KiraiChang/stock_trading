@@ -1450,7 +1450,7 @@ artifact 及其 SHA-256」寫進
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中（與 `todo.md` T-088 合併；計畫書 v1.5 待確認：[`plans/t088-i103-intraday-data-availability.md`](./plans/t088-i103-intraday-data-availability.md)） |
+| 狀態 | 已實作／待 review（2026-11-20，未 commit；與 `todo.md` T-088 合併；計畫書 v1.5：[`plans/t088-i103-intraday-data-availability.md`](./plans/t088-i103-intraday-data-availability.md)） |
 | 嚴重度 | 中（**live 走的正是這條路**；逐檔寫入失敗會靜默，`job_runs` 照樣 `success`。與 **I-102**（已收斂）是同一類「失敗被吞掉」，但發生在**更上游的行情抓取層**） |
 | 分類 | Go / 排程 / 市場資料 / 可觀測性 |
 | 發現日期 | 2026-09-02 |

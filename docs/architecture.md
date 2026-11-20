@@ -1660,12 +1660,18 @@ DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立�
 
 | 現象 | `symbols_failed` | `error` 前綴 |
 |---|---:|---|
-| 行情抓取／回補失敗 | 計入 | `fetch_failed:N` |
+| 行情抓取／回補失敗（盤中：這一檔所在的請求失敗） | 計入 | `fetch_failed:N (代號:原因, …)` |
+| 盤中：回應拿到了、這一檔寫入失敗（T-088＋I-103） | 計入 | `store_failed:N (代號:原因, …)` |
 | `Evaluate` 硬失敗（含指標寫入失敗、資料不足、DB 讀取失敗） | 計入 | `evaluate_failed:N` |
 | 降級（訊號送出但某階段沒做到） | **不計入** | `degraded:N` |
+| 盤中：逐輪存證（`intraday_rounds`／`intraday_symbol_runs`）寫失敗（T-088） | **不計入**，但該輪至少 `partial` | `evidence_failed:N` |
 
-⚠️ **`symbols_failed` 是 `fetchFailed ∪ evaluateFailed` 的聯集，不是相加**——同一檔可能兩者
+⚠️ **`symbols_failed` 是 `fetchFailed ∪ storeFailed ∪ evaluateFailed` 的聯集，不是相加**——同一檔可能兩者
 皆有，相加會重複計數，甚至讓 `failed >= total` 成立而把整輪誤判成 `failed`。
+
+⚠️ **盤中的 Yahoo 批次路徑是逐檔粒度**（2026-11，T-088＋I-103）：以前整批失敗只知道筆數、逐檔寫入失敗完全看不到，
+`symbols_failed` 只有批次粒度；現在每一檔分成寫入成功、回應裡沒有（`no_data`，⛔ 不是失敗：開盤第一輪、停牌、當下無成交都會發生）、
+寫入失敗、整批抓取失敗四種，失敗的逐檔記入。逐檔結果與能不能評估的規則見 `yahoo-intraday-integration.md`「逐檔結果、能不能評估與存證」。
 
 ⚠️ **判別兩種 `partial`**：`symbols_failed > 0` ＋ `evaluate_failed:` 是硬失敗；
 `symbols_failed = 0` ＋ `degraded:` 是降級。

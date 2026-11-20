@@ -214,10 +214,57 @@ FinMind 逐檔在同樣速率要 **95 分鐘**。
 4. `Fetcher` 掛載點一般化（`SetIntradaySource` + `FetchAndStoreIntradayBatch`，另有 `HasIntradaySource`
    / `IntradayBatchSize` 供排程判斷），與 Fugle（`SetFugle`）並存。
 5. `cmd/yahoo-check` 獨立驗證工具（不掛主服務，印原始 payload 與解析後 candles）。
-6. `scheduler.runIntradayJob` 在 `HasIntradaySource()` 為真時走 `runIntradayBatch`，依 `batch_size`
-   分批呼叫 `FetchAndStoreIntradayBatch`。
+6. `scheduler.runIntradayJob` 在 `HasIntradaySource()` 為真時走批次路徑，依 `batch_size`
+   分批呼叫 `FetchAndStoreIntradayBatch`（回傳逐檔結果，見下方「逐檔結果、能不能評估與存證」）。
 
 冪等性由 `candles` 表 `UNIQUE(symbol, timeframe, ts)` 保證，重覆抓取只會 UPSERT 不會重複。
+
+### 逐檔結果、能不能評估與存證（T-088＋I-103）
+
+2026-11 起。原則（使用者 2026-11-20）：⛔ **不全面依靠第三方資訊決定系統是否正常**——「Yahoo 有回應」⛔ 不等於「資料可用」，
+「`job_runs` success」⛔ 不等於「每一檔都完成評估」；並保留第三方資料異常時的矯正手段。
+
+* **逐檔結果**（`market.IntradaySymbolResult`）：`FetchAndStoreIntradayBatch` 的 error 只代表整批請求失敗；請求成功時依請求的順序回傳每一檔：
+  `written`（帶最後一根的時間與根數）、`no_data`（回應裡沒有這檔或全是 null 棒，⛔ 不是失敗）、`store_failed`（寫入失敗）；
+  整批失敗時那一批每一檔都是 `fetch_failed`。FinMind 的逐檔路徑（`FetchAndStoreMinute`，live 沒有啟用）同一套結果，**空回應是 `no_data`**。
+* **重試的逐檔結果**：層二重試時 HTTP 成功，逐檔照實記（例：A 寫入成功、B 寫入失敗、C 沒有資料，三檔分別記）；
+  每一檔另記這一批的嘗試次數與 `http_recovered`，「HTTP 救回」⛔ 不等於「寫入成功」。重試預算到期時依實際停在哪個階段分類：
+  已提交 `written`、HTTP 200 已拿到但寫入階段逾時 `store_failed`（`retry_budget`）、確認沒有 `no_data`、回應本身沒拿到 `fetch_failed`（`retry_budget`）。
+  層二的 log 訊息與觸發條件⛔ 不變（I-123 的觀察工具在用），只新增欄位。
+* **評估之前先判定**（每一檔）：
+
+  | 這一輪的資料 | 評估 |
+  |---|---|
+  | `written`，**輸入指紋**跟上一次成功評估不同（或沒有成功評估的紀錄） | ✅ 評估 |
+  | `written`，指紋跟上一次成功評估相同 | ⛔ 不評估（`unchanged`：引擎讀到的 K 棒完全相同） |
+  | `no_data`、`fetch_failed`、`store_failed` | ⛔ 不評估——⛔ 不從舊 K 棒產生或推送訊號，也⛔ 不被當成「未觸發」 |
+
+  * **輸入指紋**：寫入之後從 DB 讀最近 `indicator.Lookback`（120）根 1 分 K（涵蓋訊號引擎的 100 根），依時間排序，對每一根的時間與 OHLCV 取 SHA-256。
+    同時間戳的棒被更新、較早的棒被補回或修訂，指紋都會變。
+  * 「上一次成功評估」＝最近一筆評估成功（`no_signal`／`signal_sent`／`signal_suppressed`／`withheld_stale`／`degraded`）的紀錄；
+    評估失敗、手動補抓、中斷都⛔ 不算，下一輪會再評估。
+  * **延遲**（首版門檻 10 分鐘，`scheduler.IntradayStaleAfter`）：最後一根落後這一輪的時刻超過門檻時，照常計算，但觸發時⛔ 不當成即時訊號送出
+    （訊號引擎的 `Withhold`：⛔ 不 reserve、⛔ 不寫 `signals`、⛔ 不推播），結果記 `withheld_stale`；資料追上之後條件仍成立就正常送出。
+    延遲跟抓取、寫入、評估結果分開記，狀態 API 依當下時間算，盤中停止更新時也看得到。
+  * 每一檔的評估結果：`no_signal`、`signal_sent`、`signal_suppressed`（觸發但被判重擋下）、`withheld_stale`、`degraded`、`evaluate_failed`、
+    `not_evaluated`（原因 `fetch_failed`／`store_failed`／`no_data`／`unchanged`）。「未觸發」只對應 `no_signal`。
+* **鎖與上限**：盤中一輪與手動補抓共用一把鎖、依序執行（兩輪排程之間也是），較舊的請求⛔ 不會晚回來覆寫較新的 K 棒。
+  **先拿鎖再建 `job_runs`**，起訖就是實際執行區間。盤中等鎖最多 60 秒，逾時⛔ 不執行：`job_runs` 記 `skipped`＋`lock_wait_timeout`、
+  `intraday_rounds.outcome=skipped_lock_timeout`、⛔ 不寫逐檔的列。手動補抓等鎖最多 30 秒（逾時回 409）；**整段持鎖最多 45 秒**（小於盤中等鎖的上限）：
+  期限從拿到鎖就開始算（建 run、讀既有的棒、抓取與寫 K 棒都在期限內），K 棒寫完就放鎖，存證與 `job_runs` 的收尾在鎖外，收尾卡住⛔ 不會讓下一輪等鎖逾時。
+* **讀不到自選清單**：這一輪明確記成 `failed`（摘要 `watchlist_fetch:…`；`intraday_rounds.outcome=failed`），⛔ 不是用 total=0、failed=0 推出來的 success。
+* **存證**：每一輪、每一檔寫進 `intraday_rounds`／`intraday_symbol_runs`（`database-schema.md`），行情段在抓取與寫入之後、評估段在那一檔評估完成之後；
+  ⛔ 不放 Redis（Redis 停用時會跟著消失）。存證寫失敗時照跑、照規則評估，`job_runs` 摘要加 `evidence_failed:N`、該輪至少 `partial`；
+  失敗的方向是「多評估」（查不到上一次成功評估就再評估，同一個訊號由判重擋下）。建立 run 失敗時照跑，只是沒有逐輪紀錄（log `intraday evidence unavailable`）。
+* **畫面**：自選清單每一檔下方一行，行情與評估分兩段（`GET /intraday/status`；Dashboard 盤中每 60 秒、非盤中每 5 分鐘重抓，開盤前開著的頁面開盤後會自動恢復 60 秒）。
+  手動補抓比排程新時依補抓的逐檔結果顯示：寫入成功「已補抓」、沒有當日 K 棒「補抓：沒有當日 K 棒」、失敗「補抓失敗（原因）」，都保留最後有效 K 棒。最近一輪比某一檔的逐檔列新時以輪次紀錄為準
+  （等鎖逾時「本輪未執行」、讀不到自選清單「本輪執行失敗」、還在跑「本輪執行中」、已結束卻沒有這一檔的列「本輪紀錄不完整」，都顯示本輪未評估並保留上一輪的最後有效 K 棒與評估時間）；評估段還沒寫時分「本輪評估中」與「本輪評估未完成（中斷）」。
+  原因只顯示原因碼對照的中文，⛔ 不顯示原始錯誤。
+* **手動補抓**（`POST /scheduler/intraday-refill/run`，自選清單標題列的「補抓當日分 K」）：只限當日、自選清單；**只寫 K 棒、⛔ 不評估訊號**，
+  收盤後也可以執行（13:30 最後一輪失敗時用）；⛔ 不推進上一次成功評估（下一輪指紋不同就照常評估）。回報每一檔新增／更新／不變的根數、
+  當日的最後一根與根數（寫入進度，⛔ 不等於已補齊），以及**仍無法確認的缺口**：交易時段內（09:00～13:25 與 13:30；13:26～13:29 是收盤集合競價，⛔ 不列）
+  DB 沒有 K 棒的分鐘，可能是當下無成交，也可能是資料缺漏，⛔ 不判定。結果記 `job_runs`（`intraday_refill`，⛔ 不在 `/scheduler/status` 的排程清單裡）。
+* **還沒做的矯正手段**：空窗期間的「事後補判」（引擎只看最新一根，補判要另外設計）、備援資料源（T-031、T-008）。
 
 ### 批次失敗的同一輪重試
 
@@ -238,7 +285,7 @@ I-122 在 live 看到 31 輪批次失敗，多半是 DNS 逾時這類暫時性�
 **某一輪失敗時缺的棒，下一輪成功時就補回來**（回答 I-122「缺的 K 棒會不會補回」）：批次端點一次回傳**當日全部**的 1 分 K，
 寫入是 `ON CONFLICT … DO UPDATE`，還在走的那一根也會被下一輪覆蓋。由 `market/intraday_refill_test.go` 走正式的抓取流程
 （Yahoo client → `FetchAndStoreIntradayBatch` → SQLite）驗證。⚠️ **13:30 是最後一輪**，那一輪失敗就沒有下一輪可以補
-（日 K 由 15:00 的 `daily_close` 另外抓，不受影響）。
+（日 K 由 15:00 的 `daily_close` 另外抓，不受影響）；要補當日分 K 用手動補抓（上方「逐檔結果、能不能評估與存證」）。
 
 **已擱置的後續工作**：批次請求失敗（Yahoo 被限流/封鎖）時的 Yahoo→FinMind fallback
 目前未實作，`runIntradayBatch` 在上面的重試之後只記 log 續跑其他批次。這筆與 Fugle→FinMind fallback

@@ -71,30 +71,75 @@ func (f *Fetcher) IntradayBatchSize() int {
 	return f.batchSource.BatchSize()
 }
 
-// FetchAndStoreIntradayBatch 用批次盤中源一次拉取多檔當日 1 分K 並寫入 candles，
-// 回傳成功寫入的 symbol 數。個別 symbol 寫入失敗只記 log、不中斷其他 symbol。
-func (f *Fetcher) FetchAndStoreIntradayBatch(ctx context.Context, symbols []string) (int, error) {
+// FetchIntradayBatchCandles 只向批次盤中源拉取多檔當日 1 分K、⛔ 不寫入。
+// 手動補抓要先拿到回應、跟 DB 既有的棒比對之後才寫（T-088 的 intraday_refill）。
+func (f *Fetcher) FetchIntradayBatchCandles(ctx context.Context, symbols []string) (map[string][]Candle, error) {
 	if f.batchSource == nil {
-		return 0, fmt.Errorf("intraday batch source not configured")
+		return nil, fmt.Errorf("intraday batch source not configured")
 	}
-	bySymbol, err := f.batchSource.FetchIntradayCandlesBatch(ctx, symbols)
-	if err != nil {
-		return 0, err
-	}
+	return f.batchSource.FetchIntradayCandlesBatch(ctx, symbols)
+}
 
-	stored := 0
-	for sym, candles := range bySymbol {
+// StoreIntradayBatch 把一次批次回應逐檔寫入 candles，**依 symbols 的順序**回傳每一檔的結果
+// （T-088＋I-103：以前只回「寫入了幾檔」，看不出是哪一檔、也分不開「沒有資料」與「寫入失敗」）。
+//
+// ctx 到期時，還沒寫的檔記 store_failed（Err 是 ctx.Err()）：回應已經拿到、停在寫入階段。
+// 呼叫端用它分出「重試預算在寫入途中到期」（計畫書 3.1）。
+func (f *Fetcher) StoreIntradayBatch(ctx context.Context, runID uint64, symbols []string, bySymbol map[string][]Candle) []IntradaySymbolResult {
+	out := make([]IntradaySymbolResult, 0, len(symbols))
+	for _, sym := range symbols {
+		candles := bySymbol[sym]
 		if len(candles) == 0 {
+			out = append(out, IntradaySymbolResult{Symbol: sym, Status: IntradayNoData})
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			out = append(out, IntradaySymbolResult{Symbol: sym, Status: IntradayStoreFailed, Err: err})
 			continue
 		}
 		if err := f.candles.BulkInsert(ctx, f.toStoreCandles(candles)); err != nil {
-			f.log.Warn("intraday batch store failed", zap.String("symbol", sym), zap.Error(err))
+			// 訊息名稱⛔ 不改（I-123 的觀察工具在用），只加欄位。
+			f.log.Warn("intraday batch store failed", zap.Uint64("run_id", runID), zap.String("symbol", sym),
+				zap.String("cause", TransientCause(err)), zap.Error(err))
+			out = append(out, IntradaySymbolResult{Symbol: sym, Status: IntradayStoreFailed, Err: err})
 			continue
 		}
-		stored++
+		last := candles[0].Timestamp
+		for _, c := range candles[1:] {
+			if c.Timestamp.After(last) {
+				last = c.Timestamp
+			}
+		}
+		out = append(out, IntradaySymbolResult{Symbol: sym, Status: IntradayWritten, LastBarTS: last, Bars: len(candles)})
 	}
-	f.log.Info("fetched intraday batch candles", zap.Int("requested", len(symbols)), zap.Int("stored", stored))
-	return stored, nil
+	return out
+}
+
+// FetchAndStoreIntradayBatch 用批次盤中源一次拉取多檔當日 1 分K 並寫入 candles。
+//
+// error 只代表**整批請求失敗**（回應本身沒拿到）；請求成功時回傳每一檔的結果，
+// 個別 symbol 寫入失敗⛔ 不中斷其他 symbol（現況見 docs/yahoo-intraday-integration.md）。
+func (f *Fetcher) FetchAndStoreIntradayBatch(ctx context.Context, runID uint64, symbols []string) ([]IntradaySymbolResult, error) {
+	bySymbol, err := f.FetchIntradayBatchCandles(ctx, symbols)
+	if err != nil {
+		return nil, err
+	}
+	results := f.StoreIntradayBatch(ctx, runID, symbols, bySymbol)
+	var stored, noData, storeFailed int
+	for _, r := range results {
+		switch r.Status {
+		case IntradayWritten:
+			stored++
+		case IntradayNoData:
+			noData++
+		case IntradayStoreFailed:
+			storeFailed++
+		}
+	}
+	// 訊息名稱與既有的 requested／stored ⛔ 不改（I-123 的觀察工具在用），只加欄位。
+	f.log.Info("fetched intraday batch candles", zap.Int("requested", len(symbols)), zap.Int("stored", stored),
+		zap.Int("no_data", noData), zap.Int("store_failed", storeFailed), zap.Uint64("run_id", runID))
+	return results, nil
 }
 
 // FetchAndStoreFugleIntraday 為 Tier 1：用 Fugle REST 拉取當日 1 分K 並寫入 candles，
@@ -160,19 +205,31 @@ func (f *Fetcher) FetchAndStoreDaily(ctx context.Context, symbol string, date ti
 	return nil
 }
 
-func (f *Fetcher) FetchAndStoreMinute(ctx context.Context, symbol string, date time.Time) error {
+// FetchAndStoreMinute 是 FinMind 的逐檔盤中路徑（live 沒有啟用）。回傳這一檔的結果（T-088 的 D4）：
+// 抓取失敗 fetch_failed、寫入失敗 store_failed、**空回應 no_data**——以前空回應也回成功，
+// 接著就用舊 K 棒評估。
+func (f *Fetcher) FetchAndStoreMinute(ctx context.Context, symbol string, date time.Time) IntradaySymbolResult {
 	candles, err := f.client.FetchMinuteCandles(ctx, symbol, date)
 	if err != nil {
-		return err
+		return IntradaySymbolResult{Symbol: symbol, Status: IntradayFetchFailed, Err: err}
+	}
+	if len(candles) == 0 {
+		return IntradaySymbolResult{Symbol: symbol, Status: IntradayNoData}
 	}
 
 	storeCandles := f.toStoreCandles(candles)
 	if err := f.candles.BulkInsert(ctx, storeCandles); err != nil {
-		return err
+		return IntradaySymbolResult{Symbol: symbol, Status: IntradayStoreFailed, Err: err}
 	}
 
+	last := candles[0].Timestamp
+	for _, c := range candles[1:] {
+		if c.Timestamp.After(last) {
+			last = c.Timestamp
+		}
+	}
 	f.log.Info("fetched minute candles", zap.String("symbol", symbol), zap.Int("count", len(storeCandles)))
-	return nil
+	return IntradaySymbolResult{Symbol: symbol, Status: IntradayWritten, LastBarTS: last, Bars: len(candles)}
 }
 
 // BackfillHistory 補齊歷史日K，days 為往前幾天，回傳失敗的股票數量。

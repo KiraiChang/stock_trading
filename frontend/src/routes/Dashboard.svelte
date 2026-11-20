@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
   import WatchlistTable from '../components/market/WatchlistTable.svelte'
   import SignalPanel from '../components/signal/SignalPanel.svelte'
@@ -13,18 +13,45 @@
   import { fetchIndicators } from '../lib/api/indicators'
   import { deriveTrendFromMA } from '../lib/utils/trend'
   import { socket } from '../lib/ws/socket'
+  import { fetchIntradayStatus } from '../lib/api/intraday'
+  import { intradayStatus } from '../lib/stores/intraday'
+  import { startIntradayPolling, type IntradayPoller } from '../lib/utils/intradayPolling'
 
   let wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/market`
   let showSetup = false
+
+  // 盤中逐檔狀態（T-088）：盤中每 60 秒重抓一次（排程是 5 分鐘一輪，60 秒內看得到新一輪）；非盤中仍繼續、改成每 5 分鐘一次，
+  // 開盤前開著頁面、開盤後不重開也會恢復 60 秒的刷新（lib/utils/intradayPolling.ts）。⛔ 不靠 WebSocket（它只在產生訊號時推播）。
+  let intradayPoller: IntradayPoller | null = null
+
+  async function loadIntradayStatus(): Promise<boolean | null> {
+    try {
+      const st = await fetchIntradayStatus()
+      intradayStatus.set(st)
+      return st.market_open
+    } catch {
+      // 讀不到狀態時保留上一次的內容；畫面上每一列都有時間，看得出是舊的。
+      return null
+    }
+  }
+
+  // 初次請求還沒回來就切頁時，⛔ 不能在已銷毀的頁面啟動輪詢與 WebSocket（review 2026-11-20：回到 Dashboard 會出現兩組輪詢）。
+  let destroyed = false
+  onDestroy(() => {
+    destroyed = true
+    intradayPoller?.stop()
+  })
 
   onMount(async () => {
     const [wl, sigs] = await Promise.all([
       fetchWatchlist().catch(() => []),
       fetchSignals(50).catch(() => []),
     ])
+    if (destroyed) return
     watchlist.set(wl)
     signals.set(sigs)
     hydrateQuotes(wl, sigs)
+    intradayPoller = startIntradayPolling(loadIntradayStatus)
 
     // 首次登入且監控清單為空時，顯示初始設定精靈
     if (wl.length === 0) {
@@ -118,6 +145,7 @@
       <WatchlistTable
         on:symbolWatched={(e) => socket.subscribe([e.detail])}
         on:symbolUnwatched={(e) => socket.unsubscribe([e.detail])}
+        on:intradayRefilled={loadIntradayStatus}
       />
     </div>
 

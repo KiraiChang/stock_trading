@@ -28,7 +28,7 @@ func observeIntradayRetry(t *testing.T, errs []error) *observer.ObservedLogs {
 	core, logs := observer.New(zapcore.InfoLevel)
 	s.log = zap.New(core)
 	jobRuns.nextID = 42
-	s.runIntradayBatch()
+	s.runIntradayRound(tpe(9, 5))
 	return logs
 }
 

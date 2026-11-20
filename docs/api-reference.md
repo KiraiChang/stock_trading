@@ -1215,6 +1215,37 @@ cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
 的核心約束（把 131 檔塞進 watchlist 會讓六個流程各乘上約 12 倍）。
 選取規格見 [`evaluation-universe-selection-plan.md`](./evaluation-universe-selection-plan.md)。
 
+### GET `/intraday/status`
+
+自選清單每一檔的盤中行情與評估狀態（T-088＋I-103；規則見 `yahoo-intraday-integration.md`「逐檔結果、能不能評估與存證」）。
+前端盤中每 60 秒、非盤中每 5 分鐘重抓一次。
+
+| 欄位 | 說明 |
+|------|------|
+| `now`、`market_open` | 伺服器時間、是否盤中 |
+| `stale_after_minutes` | 延遲門檻（10） |
+| `latest_round` | 最近一輪排程的輪次紀錄（`intraday_rounds` 的欄位，另加 `running`：這一輪現在還在執行）；沒有時是 null |
+| `symbols[].latest` | 這一檔最近一輪排程的逐檔列（`intraday_symbol_runs` 的欄位，⛔ 不含 fingerprint）；沒有紀錄時是 null |
+| `symbols[].refill` | 最近一次手動補抓的列，**只在比 `latest` 新時**才帶 |
+| `symbols[].last_success_eval_at`、`last_success_run_id` | 上一次成功評估 |
+| `symbols[].last_bar_ts`、`lag_minutes`、`stale` | DB 裡最後一根 1 分 K、依當下時間算的落後分鐘（最後一根不是今天時是 null）、盤中且落後超過門檻 |
+| `symbols[].round_state` | 最近一輪排程比這一檔最近的逐檔列新時那一輪的狀態：`skipped`（等鎖逾時）、`failed`（讀不到自選清單等、在逐檔結果之前就失敗）、`running`（還在跑）、`incomplete`（已結束卻沒有這一檔的列）；畫面以輪次紀錄為準，⛔ 不把上一輪的評估當成這一輪的。省略＝最近的逐檔列就是最近一輪的。補抓與輪次紀錄都比逐檔列新時取 run_id 較新的一個 |
+| `symbols[].eval_pending` | 最近的逐檔列還沒有評估段時：`evaluating`（那一輪還在跑）或 `interrupted`（已結束或中斷） |
+
+### POST `/scheduler/intraday-refill/run`
+
+手動補抓當日 1 分 K（T-088 的 D3）：**只寫 K 棒、⛔ 不評估訊號**，收盤後也可以執行。**同步執行**（等鎖最多 30 秒；拿到鎖之後最多 45 秒，K 棒寫完就放鎖，存證與收尾在鎖外）。
+
+* Body（可省略）：`{"symbols": ["2330"]}`；省略＝整份自選清單，⛔ 不接受清單以外的代號。
+* 200：`run_id`、`window_from`／`window_to`（當日 09:00～現在或 13:30）、`deadline_exceeded`、`symbols[]`：
+  `status`（`written`／`no_data`／`store_failed`／`fetch_failed`；逾時還沒處理到的是 `fetch_failed`＋`refill_deadline`）、`cause`、
+  `inserted`／`updated`／`unchanged`（跟補抓前 DB 的棒比對）、`last_bar_ts`／`bars_today`（寫入進度，⛔ 不等於已補齊）、
+  `gap_minutes`／`gaps`／`gaps_truncated`（仍無法確認的缺口，13:26～13:29 收盤集合競價⛔ 不列）。
+* 400 `symbol_not_in_watchlist`、`invalid_body`；409 `intraday_busy`（盤中一輪正在執行）、`intraday_source_unavailable`（沒有批次盤中源）。
+* 結果記 `job_runs`（`intraday_refill`，⛔ 不在 `GET /scheduler/status` 的排程清單裡）與 `intraday_symbol_runs`（`source=refill`）。
+* ⚠️ **權限**：沿用現有手動排程端點，**任何登入的使用者都能觸發**。目前只有一人使用（使用者 2026-11-20 裁決 D6）；**多人使用之前要調整**
+  （見 `feature-reviews/2026-11-19-first-usable-release.md`「共用環境與權限」）。
+
 ### GET `/evaluation-universe`
 
 | 參數 | 說明 |

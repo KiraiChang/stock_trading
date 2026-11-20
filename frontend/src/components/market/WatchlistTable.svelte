@@ -13,11 +13,52 @@
     searchStockSymbols,
   } from '../../lib/api/watchlist'
   import type { StockSymbol } from '../../lib/api/watchlist'
+  import { runIntradayRefill } from '../../lib/api/intraday'
+  import { ApiError } from '../../lib/api/client'
+  import { intradayStatus } from '../../lib/stores/intraday'
+  import { describeIntraday, describeRefill, type IntradayTone } from '../../lib/utils/intradayStatus'
 
   const dispatch = createEventDispatcher<{
     symbolWatched: string
     symbolUnwatched: string
+    intradayRefilled: void
   }>()
+
+  // ── 盤中逐檔狀態（T-088）：行情與評估分兩段 ─────────────────
+  $: intradayBySymbol = new Map(($intradayStatus?.symbols ?? []).map((s) => [s.symbol, s]))
+  const toneClass: Record<IntradayTone, string> = {
+    ok: 'text-gray-400',
+    muted: 'text-muted',
+    warn: 'text-amber-400',
+    error: 'text-rise',
+  }
+
+  // 手動補抓當日分 K：只寫 K 棒、⛔ 不評估訊號（收盤後也可以執行）。
+  let refilling = false
+  let refillError = ''
+  let refillLines: string[] = []
+
+  async function refillIntraday() {
+    refilling = true
+    refillError = ''
+    refillLines = []
+    try {
+      const report = await runIntradayRefill()
+      refillLines = report.symbols.map(describeRefill)
+      if (report.deadline_exceeded) refillError = '補抓超過時間上限，部分標的未完成'
+      dispatch('intradayRefilled')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        refillError = e.message.includes('intraday_source_unavailable')
+          ? '沒有可用的盤中資料源，無法補抓'
+          : '盤中排程正在執行，請稍後再試'
+      } else {
+        refillError = '補抓失敗，請稍後再試'
+      }
+    } finally {
+      refilling = false
+    }
+  }
 
   // 即時監聽（WebSocket 訂閱）最多 3 檔，超過上限後端回 409
   let watchError = ''
@@ -290,6 +331,12 @@
         {/each}
       </div>
       <button
+        class="text-xs px-2.5 py-1 border border-border text-muted hover:text-white rounded-lg transition-colors disabled:opacity-50"
+        title="重新抓取並寫入當日 1 分 K（只寫 K 棒、不評估訊號）"
+        disabled={refilling}
+        on:click={refillIntraday}
+      >{refilling ? '補抓中...' : '補抓當日分 K'}</button>
+      <button
         class="text-xs px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors"
         on:click={openAdd}
       >+ 新增</button>
@@ -298,6 +345,16 @@
 
   {#if watchError}
     <p class="px-4 py-2 text-rise text-xs border-b border-border">{watchError}</p>
+  {/if}
+  {#if refillError}
+    <p class="px-4 py-2 text-rise text-xs border-b border-border" data-testid="intraday-refill-error">{refillError}</p>
+  {/if}
+  {#if refillLines.length > 0}
+    <ul class="px-4 py-2 text-[11px] text-gray-300 border-b border-border space-y-0.5" data-testid="intraday-refill-result">
+      {#each refillLines as line}
+        <li>{line}</li>
+      {/each}
+    </ul>
   {/if}
 
   <div class="overflow-x-auto">
@@ -318,6 +375,7 @@
       <tbody>
         {#each filteredWatchlist as item (item.symbol)}
           {@const q = $quotes.get(item.symbol)}
+          {@const ist = intradayBySymbol.get(item.symbol)}
 
           {#if confirmDeleteSymbol === item.symbol}
             <!-- 刪除確認列 -->
@@ -407,6 +465,18 @@
                 </div>
               </td>
             </tr>
+            {#if ist}
+              {@const view = describeIntraday(ist, $intradayStatus?.latest_round ?? null)}
+              <!-- 盤中狀態（T-088）：行情｜評估 -->
+              <tr class="border-b border-border/50" data-testid="intraday-status-{item.symbol}">
+                <td colspan="9" class="px-4 pb-2 pt-0 text-[11px] {toneClass[view.tone]}">
+                  <span>盤中：{view.data}</span>
+                  {#if view.evaluation}
+                    <span class="ml-2">評估：{view.evaluation}</span>
+                  {/if}
+                </td>
+              </tr>
+            {/if}
           {/if}
         {:else}
           <tr>

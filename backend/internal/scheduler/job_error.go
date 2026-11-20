@@ -28,7 +28,10 @@ func safeJobErrorSummary(stage string, err error) string { return joberr.Summary
 // 而同一檔可能同時抓取失敗與評估失敗。相加會重複計數，甚至讓 failed >= total 成立
 // 而把整輪誤判成 failed。**要的是聯集。**
 type jobFailureTally struct {
-	fetchFailed    map[string]reasonCode
+	fetchFailed map[string]reasonCode
+	// storeFailed 是**回應拿到了、寫入失敗**的標的（T-088＋I-103）。跟 fetchFailed 分開存，
+	// 摘要分開列；symbols_failed 是三類的聯集。
+	storeFailed    map[string]reasonCode
 	evaluateFailed map[string]reasonCode
 
 	// degraded 是**評估成功但有降級**的 symbol，值是該檔各 stage 的**安全 reason code**。
@@ -40,32 +43,36 @@ type jobFailureTally struct {
 	// stage_errors）都要走同一個分類器，原始 cause 只進 log。
 	degraded map[string]map[string]reasonCode
 
-	// fetchFailedOpaque 是**只知道筆數、不知道是哪幾檔**的抓取失敗。
-	//
-	// 兩條路徑給不出 symbol：runPreMarket 的 BackfillHistory 只回一個 int，
-	// runIntradayBatch 的 FetchAndStoreIntradayBatch 逐檔失敗只記 log
-	// （那個盲區另立 issue.md I-103 追蹤，不在本筆範圍）。
-	fetchFailedOpaque int
+	// evidenceFailed 是盤中逐輪存證（intraday_rounds／intraday_symbol_runs）寫失敗的次數（T-088）。
+	// ⛔ 不進 symbols_failed（行情與評估本身可能都成功了），但讓該輪至少收成 partial，
+	// ⛔ 不讓「整輪 success、卻缺逐檔證據」出現。
+	evidenceFailed int
 }
 
 func newJobFailureTally() *jobFailureTally {
 	return &jobFailureTally{
 		fetchFailed:    map[string]reasonCode{},
+		storeFailed:    map[string]reasonCode{},
 		evaluateFailed: map[string]reasonCode{},
 		degraded:       map[string]map[string]reasonCode{},
-	}
-}
-
-// addOpaqueFetchFailures 記「知道有 n 檔抓取失敗，但不知道是哪幾檔」。
-func (t *jobFailureTally) addOpaqueFetchFailures(n int) {
-	if n > 0 {
-		t.fetchFailedOpaque += n
 	}
 }
 
 // addFetchFailure 記行情抓取／回補失敗。
 func (t *jobFailureTally) addFetchFailure(symbol string, err error) {
 	t.fetchFailed[symbol] = safeJobErrorReason(err)
+}
+
+// addStoreFailure 記「回應拿到了、這一檔寫入失敗」（T-088＋I-103）。
+func (t *jobFailureTally) addStoreFailure(symbol string, err error) {
+	t.storeFailed[symbol] = safeJobErrorReason(err)
+}
+
+// addEvidenceFailures 記盤中存證寫失敗的次數。
+func (t *jobFailureTally) addEvidenceFailures(n int) {
+	if n > 0 {
+		t.evidenceFailed += n
+	}
 }
 
 // addEvaluateFailure 記 Evaluate 的硬失敗。
@@ -91,51 +98,48 @@ func (t *jobFailureTally) addDegraded(symbol string, stageErrs map[string]error)
 	t.degraded[symbol] = reasons
 }
 
-// hasDegraded 供 finishRunDegraded 判斷該輪要不要收成 partial。
-func (t *jobFailureTally) hasDegraded() bool { return len(t.degraded) > 0 }
+// hasDegraded 供 finishRunDegraded 判斷該輪要不要收成 partial。存證寫失敗也算（T-088）。
+func (t *jobFailureTally) hasDegraded() bool { return len(t.degraded) > 0 || t.evidenceFailed > 0 }
 
-// failedCount 回傳 |fetchFailed ∪ evaluateFailed|，並與 opaque 計數取大者。
+// failedCount 回傳 |fetchFailed ∪ storeFailed ∪ evaluateFailed|。
 //
-// ⚠️ **為什麼是聯集不是相加**：同一檔可能既抓取失敗又評估失敗。相加會重複計數，
+// ⚠️ **為什麼是聯集不是相加**：同一檔可能既抓取（或寫入）失敗又評估失敗。相加會重複計數，
 // 也可能讓 failed >= total 成立而把整輪誤判成 failed。
 //
-// ⚠️ **為什麼 opaque 是取 max 而不是加上去**：那條路徑不知道是哪幾檔，
-// 與 evaluateFailed 的重疊算不出來。相加會重複計數，所以取兩者的大者當**下界**。
-// 這是刻意的低估——真正的修法是讓那些路徑回報逐檔失敗（見 issue.md I-103）。
-// 判定 partial/failed 不受影響：只要任一邊非零就已經是 partial。
+// 以前盤中的 Yahoo 批次路徑只知道「這一批失敗了幾檔」、不知道是哪幾檔，這裡要跟筆數取大者當下界；
+// T-088＋I-103 之後每一條路徑都回報逐檔結果，⛔ 不再有只知筆數的情況。
 func (t *jobFailureTally) failedCount() int {
-	union := make(map[string]struct{}, len(t.fetchFailed)+len(t.evaluateFailed))
-	for sym := range t.fetchFailed {
-		union[sym] = struct{}{}
-	}
-	for sym := range t.evaluateFailed {
-		union[sym] = struct{}{}
-	}
-	if t.fetchFailedOpaque > len(union) {
-		return t.fetchFailedOpaque
+	union := make(map[string]struct{}, len(t.fetchFailed)+len(t.storeFailed)+len(t.evaluateFailed))
+	for _, m := range []map[string]reasonCode{t.fetchFailed, t.storeFailed, t.evaluateFailed} {
+		for sym := range m {
+			union[sym] = struct{}{}
+		}
 	}
 	return len(union)
 }
 
 // summary 產生 job_runs.error 的內容。
 //
-// 格式：`fetch_failed:3; evaluate_failed:2 (2454:numeric_overflow, 6182:insufficient_data)`
+// 格式：`fetch_failed:3 (…); store_failed:1 (…); evaluate_failed:2 (2454:numeric_overflow, 6182:insufficient_data); degraded:…; evidence_failed:N`
 //
 // **只含 stage、symbol 與封閉值域的 reason code**，不含任何原始錯誤文字。
 // 明細以 symbol 排序，讓同一組失敗每次產生相同字串（測試與人眼比對都需要）。
 func (t *jobFailureTally) summary() string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 5)
 	if n := len(t.fetchFailed); n > 0 {
 		parts = append(parts, fmt.Sprintf("fetch_failed:%d (%s)", n, formatReasons(t.fetchFailed)))
-	} else if t.fetchFailedOpaque > 0 {
-		// 沒有逐檔資訊時只記數量，不假裝知道是哪幾檔。
-		parts = append(parts, fmt.Sprintf("fetch_failed:%d", t.fetchFailedOpaque))
+	}
+	if n := len(t.storeFailed); n > 0 {
+		parts = append(parts, fmt.Sprintf("store_failed:%d (%s)", n, formatReasons(t.storeFailed)))
 	}
 	if n := len(t.evaluateFailed); n > 0 {
 		parts = append(parts, fmt.Sprintf("evaluate_failed:%d (%s)", n, formatReasons(t.evaluateFailed)))
 	}
 	if n := len(t.degraded); n > 0 {
 		parts = append(parts, fmt.Sprintf("degraded:%d (%s)", n, formatStageCounts(t.degraded)))
+	}
+	if t.evidenceFailed > 0 {
+		parts = append(parts, fmt.Sprintf("evidence_failed:%d", t.evidenceFailed))
 	}
 	return strings.Join(parts, "; ")
 }

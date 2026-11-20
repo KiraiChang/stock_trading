@@ -507,6 +507,42 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 
 ---
 
+## intraday_rounds
+
+盤中一輪一列（migration 079；T-088＋I-103）。`run_id` 是 `job_runs` 的 id（⛔ 不設外鍵：保留期清理在開盤前跟 `job_runs` 同一步刪）。
+
+| 欄位 | 說明 |
+|------|------|
+| run_id | `job_runs.id`（主鍵） |
+| source | `scheduled`（盤中排程）／`refill`（手動補抓） |
+| scheduled_at | 排定的時點 |
+| lock_acquired_at | 拿到鎖、實際開始執行的時刻；等鎖逾時是 NULL |
+| exec_finished_at | 實際結束的時刻；還在跑、中斷或沒有執行是 NULL |
+| lock_wait_ms | 等鎖的時間 |
+| outcome | `executed`／`skipped_lock_timeout`（等鎖逾時、⛔ 不執行）／`failed`（在逐檔結果之前就失敗，例如讀不到自選清單；⛔ 沒有逐檔的列） |
+| evidence_failures | 逐輪存證寫失敗的次數；> 0 的輪次是「對帳不完整」 |
+
+## intraday_symbol_runs
+
+盤中每一輪、每一檔一列，主鍵 `(run_id, symbol)`（migration 079）。行情段在抓取與寫入之後 insert，評估段在那一檔評估完成之後 update；
+手動補抓（`source=refill`）的列沒有評估段。保留期跟 `job_runs` 相同（約 600 列／天）。
+
+| 欄位 | 說明 |
+|------|------|
+| run_id／symbol／source | 同 `intraday_rounds` |
+| data_at | 寫行情段的時刻 |
+| data_status | `written`／`no_data`／`store_failed`／`fetch_failed` |
+| data_cause | 安全原因碼（`market.TransientCause` 的值域，另加 `retry_budget`、`refill_deadline`）；written／no_data 是 NULL |
+| last_bar_ts | 這次寫入的最後一根的時間；written 以外是 NULL |
+| fingerprint | 寫入之後 DB 裡最近 120 根 1 分 K 的 SHA-256（輸入指紋）；written 以外是 NULL |
+| fetch_attempts | 這一檔所在那一批的嘗試次數（1～3） |
+| http_recovered | 第一次失敗、後來 HTTP 成功（⛔ 不等於寫入成功） |
+| eval_at／eval_status／eval_cause | 評估段。`eval_status`：`no_signal`／`signal_sent`／`signal_suppressed`／`withheld_stale`／`degraded`／`evaluate_failed`／`not_evaluated`；`not_evaluated` 的 `eval_cause` 是 `fetch_failed`／`store_failed`／`no_data`／`unchanged` |
+
+* 回滾：兩張都是新表，退回舊 image 即可、⛔ 不用退 migration（舊程式不讀不寫它們；goose 遇到較新的 schema ⛔ 不報錯，見 `backtest_results` 的 078 說明）。
+
+---
+
 ## backtest_results
 
 回測績效摘要，Python 寫入後由 Go API 讀取。

@@ -15,7 +15,8 @@ from decimal import Decimal
 import numpy as np
 
 from ...indicators import calc_atr, calc_macd, calc_rsi
-from ..service import _aggregate_result, _to_dataframe, _trade_to_dict
+from ...data_range import to_dataframe
+from ..service import _aggregate_result, _trade_to_dict
 from ..support_resistance.volume_profile import VolumeProfileSR
 from ..types import BacktestReport, Direction, ExitReason, Trade
 from .conftest import bullish_trend_df
@@ -57,7 +58,7 @@ def test_to_dataframe_casts_decimal_columns_to_float():
          "close": Decimal("102.50"), "volume": 1300, "timestamp": 1700172800},
     ]
 
-    df = _to_dataframe(rows, "2023-01-01", "2030-01-01")
+    df = to_dataframe(rows)
 
     for col in ("open", "high", "low", "close", "volume"):
         assert df[col].dtype == float, f"{col} 應轉成 float64，實際是 {df[col].dtype}"

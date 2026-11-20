@@ -49,12 +49,25 @@ class BacktestEngine:
         df: pd.DataFrame,
         strategy: TradingStrategy,
         chip_scores: dict[str, float] | None = None,
+        trade_start_index: int | None = None,
     ) -> BacktestReport:
+        """`trade_start_index`（I-137）：範圍內第一根的位置，之前是暖身段（只用來算指標）。
+
+        * `None`：沿用原本的行為（沒有暖身段；資料不到 `min_bars + 2` 根回空報告；權益曲線從第 `min_bars` 根起記）。
+        * 給了位置：交易起點與統計起點都是這一根。迴圈從這一根開始；還不能評估訊號時（`t < min_bars`，只有暖身不足才會發生），
+          每一根記**初始權益**、⛔ 不評估訊號。整段都達不到 `min_bars` 時⛔ 沒有交易，權益曲線仍涵蓋範圍內每一根。
+        """
         df = df.sort_index()
         n = len(df)
         warmup = strategy.min_bars
-        if n <= warmup + 1:
-            return _empty_report(strategy.name)
+        if trade_start_index is None:
+            if n <= warmup + 1:
+                return _empty_report(strategy.name)
+            loop_start = warmup
+        else:
+            if not 0 <= trade_start_index < n:
+                raise ValueError(f"trade_start_index out of range: {trade_start_index} (n={n})")
+            loop_start = trade_start_index
 
         equity = self.initial_cash
         equity_at_entry = equity
@@ -64,7 +77,11 @@ class BacktestEngine:
         position: Position | None = None
         pending_signal = None
 
-        for t in range(warmup, n):
+        for t in range(loop_start, n):
+            if t < warmup:
+                # 暖身不足：還不能評估訊號，空手、權益不變（統計從範圍首根起算，這些點也要在權益曲線裡）
+                equity_curve.append((df.index[t], equity))
+                continue
             bar = df.iloc[t]
             history = df.iloc[: t + 1]
 

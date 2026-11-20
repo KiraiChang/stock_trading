@@ -74,9 +74,13 @@ case "$1" in
   rm) [ "${FAKE_TMP_STAYS:-0}" = 1 ] || set_st tmp absent; exit 0 ;;
   logs)
     if [ "${FAKE_TMP_NOWAIT:-0}" = 0 ]; then
-      echo "INFO backtest.db_writer — waiting for schema (backtest_jobs.execution_owner), retry in 2s"
-      if [ -f "$STATE/addcol" ]; then
-        echo "INFO backtest.db_writer — schema ready: backtest_jobs.execution_owner exists"
+      # 每呼叫一次 logs 就多一輪探測；077 與 078 都補回之後才就緒（FAKE_READY_WITH_077=1：只補 077 就就緒＝探測漏了 078）
+      n=$(( $(cat "$STATE/waits" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STATE/waits"
+      for _ in $(seq "$n"); do
+        echo "INFO backtest.db_writer — waiting for schema (backtest_jobs.execution_owner (077), backtest_results.data_coverage (078)), retry in 2s"
+      done
+      if [ -f "$STATE/addcol" ] && { [ -f "$STATE/addcov" ] || [ "${FAKE_READY_WITH_077:-0}" = 1 ]; }; then
+        echo "INFO backtest.db_writer — schema ready: backtest_jobs.execution_owner (077), backtest_results.data_coverage (078) exist"
         echo "INFO backtest.db_writer — no interrupted jobs to reap owner=server"
       fi
     fi
@@ -163,7 +167,7 @@ name="$(head -1 <<<"$sql" | sed -n 's/^-- q:\(.*\)$/\1/p')"
 echo "SQL $name $(tr '\n' ' ' <<<"$sql")" >> "$CALL_LOG"
 hang "q:$name"
 case "$name" in
-  precheck) echo "${FAKE_PRECHECK:-1|0|0|485}" ;;
+  precheck) echo "${FAKE_PRECHECK:-1|0|0|485|1}" ;;
   lock_hold) exec /bin/sleep 61 ;;
   lock_pid) echo 4242 ;;
   lock_left) echo "${FAKE_LOCK_LEFT:-0}" ;;
@@ -181,6 +185,8 @@ case "$name" in
   trades_fee_check) [ "${FAKE_FEE_CHECK_FAIL:-0}" = 1 ] && exit 1; echo "${FAKE_FEE_BAD:-0}" ;;
   cleanup_delete) [ "${FAKE_DELETE_FAIL:-0}" = 1 ] && exit 1 ;;
   tmpdb_add_col) touch "$STATE/addcol" ;;
+  tmpdb_add_cov) touch "$STATE/addcov" ;;
+  trades_coverage) [ "${FAKE_COVERAGE_FAIL:-0}" = 1 ] && exit 1; echo "${FAKE_COVERAGE-487|2024-01-02|2025-12-31|250|false|487}" ;;
 esac
 exit 0
 EOF
@@ -267,14 +273,16 @@ run wrong_project FAKE_PROJECT=stock_trading
 expect_untouched "project 不是 stock_trading_dev" 2
 
 echo "== 開始前的檢查"
-run pre_no_owner "FAKE_PRECHECK=0|0|0|485"
+run pre_no_owner "FAKE_PRECHECK=0|0|0|485|1"
 expect_untouched "沒有 execution_owner（077 還沒套用）" 2
-run pre_pending "FAKE_PRECHECK=1|2|0|485"
+run pre_pending "FAKE_PRECHECK=1|2|0|485|1"
 expect_untouched "有 pending／running" 2
-run pre_leftover "FAKE_PRECHECK=1|0|3|485"
+run pre_leftover "FAKE_PRECHECK=1|0|3|485|1"
 expect_untouched "有之前留下的 i134smoke_ 任務" 2
-run pre_nocandle "FAKE_PRECHECK=1|0|0|0"
+run pre_nocandle "FAKE_PRECHECK=1|0|0|0|1"
 expect_untouched "沒有日 K" 2
+run pre_no_coverage "FAKE_PRECHECK=1|0|0|485|0"
+expect_untouched "沒有 data_coverage（078 還沒套用；I-137）" 2
 run pre_wrk_paused FAKE_WRK0=paused
 expect_untouched "worker 是 paused" 2
 run pre_srv_down FAKE_SRV0=exited
@@ -384,6 +392,19 @@ else
   ng "schema：rc $RC rm=$o_rm drop=$o_drop run=$run_line"
 fi
 grep '^SQL tmpdb_drop ' "$CASE/calls" | grep -q 'DROP DATABASE IF EXISTS :"tmpdb"' && ok "  DROP DATABASE 用 psql 變數" || ng "  DROP DATABASE 的寫法不對"
+o_cov=$(first '^SQL tmpdb_add_cov '); o_col=$(first '^SQL tmpdb_add_col ')
+if [ -n "$o_col" ] && [ -n "$o_cov" ] && [ "$o_col" -lt "$o_cov" ] \
+   && grep '^SQL tmpdb_drop_col ' "$CASE/calls" | grep -qF 'DROP COLUMN data_coverage'; then
+  ok "  臨時 DB 拿掉 077、078 兩個欄位；先補 077、確認仍在等，再補 078（I-137）"
+else
+  ng "  schema 的 077／078 順序不對：add_col=$o_col add_cov=$o_cov"
+fi
+run schema_ready_with_077 SCENARIOS=schema FAKE_READY_WITH_077=1
+if [ "$RC" -eq 1 ] && grep -q '只有 077、還沒有 078 時臨時 server 就繼續啟動了' "$CASE/out" && called '^SQL tmpdb_drop '; then
+  ok "只補 077 就就緒（探測漏了 078）→ rc 1、照常收尾（I-137）"
+else
+  ng "只補 077 就就緒沒被抓到：rc $RC"; sed 's/^/      /' "$CASE/out" | tail -4
+fi
 run schema_tmp_stays SCENARIOS=schema FAKE_TMP_NOWAIT=1 FAKE_TMP_STAYS=1
 if [ "$RC" -eq 1 ] && ! called '^SQL tmpdb_drop ' && grep -q '不刪臨時 DB' "$CASE/out"; then
   ok "臨時 server 沒有確認停止 → rc 1、⛔ 不刪臨時 DB"
@@ -458,6 +479,23 @@ run trades_rates_fail_after SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_RAT
 [ "$RC" -eq 1 ] && called "$DELETE" && ! called '^SQL insert_jobs' && ok "換上本次的 image 之後讀不到費率 → rc 1、⛔ 沒寫入任務、照常收尾" || ng "之後讀不到費率：rc $RC"
 run trades_wrong_strategy SCENARIOS=trades
 expect_untouched "trades 沒搭配 breakout_v1" 2
+
+echo "== trades 的覆蓋範圍（I-137）"
+run trades_cov_ok SCENARIOS=trades SMOKE_STRATEGY=breakout_v1
+if [ "$RC" -eq 0 ] && grep -q '覆蓋範圍：2024-01-02～2025-12-31，487 根（等於 DB 的根數），暖身 250 根' "$CASE/out" \
+   && grep '^SQL trades_coverage' "$CASE/calls" | grep -qF "AT TIME ZONE 'Asia/Taipei'"; then
+  ok "覆蓋範圍的根數等於 DB 裡這段台北日期的根數 → 通過；DB 的根數用台北日期算"
+else
+  ng "覆蓋範圍：rc $RC"; sed 's/^/      /' "$CASE/out" | tail -4
+fi
+run trades_cov_truncated SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 "FAKE_COVERAGE=200|2025-03-01|2025-12-31|250|false|487"
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '範圍內根數 200 不等於 DB 裡' "$CASE/out" && ok "範圍內根數少於 DB（被截斷）→ rc 1、照常收尾" || ng "截斷沒被抓到：rc $RC"
+run trades_cov_null SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 "FAKE_COVERAGE=|||||487"
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '的結果沒有 data_coverage' "$CASE/out" && ok "結果沒有 data_coverage → rc 1、照常收尾" || ng "沒有 data_coverage：rc $RC"
+run trades_cov_out_of_range SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 "FAKE_COVERAGE=487|2023-12-29|2025-12-31|250|false|487"
+[ "$RC" -eq 1 ] && grep -q '超出 2024-01-01～2025-12-31' "$CASE/out" && ok "首尾日期超出請求的範圍 → rc 1" || ng "首尾超出範圍：rc $RC"
+run trades_cov_fail SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 FAKE_COVERAGE_FAIL=1
+[ "$RC" -eq 1 ] && called "$DELETE" && grep -q '查不到 .* 的覆蓋範圍' "$CASE/out" && ok "覆蓋範圍查詢失敗 → rc 1、照常收尾" || ng "覆蓋範圍查詢失敗：rc $RC"
 
 echo "== 收尾的時限"
 run race_base

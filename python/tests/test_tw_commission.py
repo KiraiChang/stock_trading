@@ -18,11 +18,12 @@ import backtrader as bt
 import pandas as pd
 import pytest
 
-from backtest import engine
+from backtest import data_range, engine
 from backtest.modular import service as modular_service
 from backtest.modular.backtester import BacktestEngine
 from backtest.modular.types import Direction, ExitReason, Position
 from strategy.base import TWCommission
+from candle_range_fake import FakeRangeFetch
 
 C, T = 0.001425, 0.003  # 測試用的費率（跟 config 的值相同，但測試自己傳入）
 CASH = 1_000_000.0
@@ -203,7 +204,7 @@ def _scripted(actions):
 def run_bt(monkeypatch):
     """`run_backtest` 的 backtrader 路徑；費用模型⛔ 不換，用 engine 自己建的真 `TWCommission`。可以換掉 engine 的費率。"""
     def _run(opens, actions, *, commission_rate=None, tax_rate=None):
-        monkeypatch.setattr(engine, "fetch_candles", lambda symbol, tf, limit: _rows(opens))
+        monkeypatch.setattr(data_range, "fetch_candles_range", FakeRangeFetch({"T": _rows(opens)}))
         monkeypatch.setitem(engine.STRATEGY_MAP, "scripted", _scripted(actions))
         if commission_rate is not None:
             monkeypatch.setattr(engine, "COMMISSION_RATE", commission_rate)
@@ -273,6 +274,8 @@ def test_modular_receives_config_rates(monkeypatch):
             raise _Stop
 
     monkeypatch.setattr(modular_service, "BacktestEngine", Spy)
+    # modular 先取完資料才建 BacktestEngine（I-137）
+    monkeypatch.setattr(data_range, "fetch_candles_range", FakeRangeFetch({"T": _rows([100.0] * 5)}))
     monkeypatch.setattr(engine, "COMMISSION_RATE", 0.002)
     monkeypatch.setattr(engine, "TAX_RATE", 0.004)
     with pytest.raises(_Stop):

@@ -20,7 +20,7 @@ type noRepo struct{ store.BacktestRepo }
 
 func newTestManager(url string, timeout time.Duration) (*Manager, *observer.ObservedLogs) {
 	core, logs := observer.New(zapcore.InfoLevel)
-	m := NewManager(noRepo{}, url, zap.New(core))
+	m := NewManager(noRepo{}, url, 20, zap.New(core))
 	m.httpTimeout = timeout
 	return m, logs
 }

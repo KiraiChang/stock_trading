@@ -1,6 +1,6 @@
-# I-137 計畫書 v1.4：回測改成依日期範圍取 K 棒（暖身、覆蓋範圍標示、任務上限、日期驗證、breakout_v1 限單檔）
+# I-137 計畫書 v1.7：回測改成依日期範圍取 K 棒（暖身、覆蓋範圍標示、任務上限、日期驗證、breakout_v1 限單檔）
 
-> 狀態：v1.4 草稿，待使用者確認。對應：`docs/issue.md` I-137。
+> 狀態：v1.7（v1.4 已確認並實作；v1.5 是實作中的裁決：每一檔的上限與資料不足的代碼；v1.6 是實作 review 的修正；v1.7 是 review 定下 `max_task_bars` 35,000）。已實作／待 review。對應：`docs/issue.md` I-137。
 > 需求確認：2026-11-19。使用者裁決（四項都採建議）：D1 往前多取暖身根數、D2 資料不足時照跑並標示、D3 設上限且超過就明確拒絕、
 > D4 既有資料不改、記新舊界線。v1 的第九節 Q1～Q4 已裁決（見第三節第 6、7 點與第八節），v1 review 的 5 個 P2 與 API 契約、v1.1 review 的 4 個 P2 與 2 個 P3、v1.2 review 的 2 個 P2 與日期上界、v1.3 review 的 1 個 P2 已併入（見版本紀錄）。
 
@@ -88,6 +88,9 @@
       暖身是 0 或很短時，範圍前段會漏記，範圍太短時甚至一根都記不到。分析器的 `prenext`、`nextstart`、`next` 三個都要記
       （只記台北日期 ≥ `trade_start` 的根）。
     * `total_return` 仍是期初期末資產（暖身段沒有交易，結果相同）。
+    * （v1.6）**年化報酬與夏普以日為期**：原本的 `Returns`／`SharpeRatio` 都是 `timeframe=Days`，先取每一天最後一根的資產再算；
+      最大回撤（`DrawDown`）是逐根算。分 K 一天多根時，⛔ 不能把每一根當成一天、照 252 年化（review 2026-11-19：那樣即使沒有暖身、成交完全相同，
+      1m 的結果也會變）。對照測試加上一天多根的分 K。
 
 ### 3. 覆蓋範圍寫進結果（D2、Q3）
 
@@ -115,11 +118,22 @@
 
 ### 4. 任務上限（D3）
 
-* **兩個上限**：
+* **三個上限**（v1.5 加上每一檔的上限）：
   * `max_symbols`：每個任務的標的數。Go 建任務時與 python 都要判斷，所以要有**兩邊共用的設定來源**（見下）。
-  * `max_task_bars`：每個任務所有標的的**範圍段＋暖身段**根數合計。只有 python 判斷，放在 python config 的 `backtest` 區段。
-  * **數值待實測決定**（第六節第 5 點），寫回本節給使用者確認後才定案。決定前要先在 live 唯讀查自選清單的檔數與歷史任務的最多檔數：
-    前端預設勾選整個自選清單，上限太小會擋掉平常的用法。
+  * `max_symbol_bars`（v1.5）：**每一檔**的範圍段＋暖身段根數（＝實際送進引擎的資料量；暖身取滿 250 根時，範圍最多 4,750 根）。只有 python 判斷。
+  * `max_task_bars`：每個任務所有標的的**範圍段＋暖身段**根數合計，限制多檔的總量。只有 python 判斷。
+* **數值**（2026-11-19 實測與 live 唯讀查詢）：
+  * live：自選清單 11 檔；歷史任務每個策略最多送過 5 檔；自選清單的日 K 每檔最深 4,935 根、11 檔合計 29,978 根；另有 `1m`，每檔最深 22,652 根、合計 199,356 根
+    （前端只送 `1d`，但 API 接受其他 timeframe）。
+  * dev 量測（合成日 K、`--memory=700m --cpus=1`）：記憶體高點都在 111～121MB，⛔ 不是瓶頸；**時間是瓶頸**，modular 跟每一檔根數的平方成正比
+    （`pullback_atrchannel_structural_v1` 單檔 1,500／2,750／5,250／10,250 根為 5.6／19.5／76／268 秒，另兩種 composite 5,250 根約 60 秒），
+    backtrader 的 `breakout_v1` 10,250 根 1.7 秒。只靠合計擋不住單一檔很長（例如 6 萬根全給一檔，modular 估計超過 2 小時），所以加上每一檔的上限。
+  * **`max_symbols` = 20**（自選清單全選 11 檔不會被擋）；**`max_symbol_bars` = 5,000**（使用者裁決；日 K 的整段歷史放得下，modular 單檔約 60～76 秒）；
+    **`max_task_bars` = 35,000**（v1.7，review 的建議、使用者採用；原本的候選值 60,000）：11 檔日 K 整段歷史 29,978 根放得下、還有約 5,000 根餘裕；
+    最壞情況 7 檔 × 5,000 根，依下面的實測（耗時跟檔數成正比）約 8 分鐘。等 T-086 改善 modular 效能後再評估提高。
+    （v1.6 實測多檔，取代原本用單檔外推的「約 15 分鐘」）`pullback_atrchannel_structural_v1`：4 檔 × 2,750 根（含暖身）82 秒（單檔 19.5 秒 × 4）；
+    **12 檔 × 5,000 根＝60,000 根（原候選值的最壞情況）830 秒（約 13.8 分鐘）、記憶體高點 144MB**——耗時跟檔數成正比。
+  * modular 的平方成長另列 `todo.md` T-086。
 * **`max_symbols` 的設定來源**：環境變數 `BACKTEST_MAX_SYMBOLS`，Go 與 python 用**同一個預設值**。
   * Go：backend config 的 `backtest.max_symbols`（viper 對應 `BACKTEST_MAX_SYMBOLS`），`SetDefault` 給預設值，設定契約加一條 ≥ 1。
   * python：`config.py` 讀 `BACKTEST_MAX_SYMBOLS`，沒設定（或空字串）就用 `config.yaml` 的 `backtest.max_symbols`；不是 ≥ 1 的整數就啟動失敗。
@@ -127,16 +141,32 @@
   * live 目前**只用預設值**：live 的 compose 裡，python 兩個服務⛔ 沒有 `env_file`，只有固定的 `environment:`。要改值時，backend 的 `.env` 與
     python 兩個服務的 `environment:` 要一起改，這個規則寫進 `development-workflow.md`。dev compose 讓三個服務都能從同一個變數帶入，供非預設值的驗收。
 * **標的數**：Go 建任務前與 python 共用入口都檢查，超過時 Go 回 400、python 讓任務 `failed`。
-* **總根數**：python 先依序取完**所有**標的的資料再開始跑（modular 改成先取後跑）。每一檔呼叫 `fetch_candles_range` 時帶「剩下的額度」，
-  範圍段先扣、再用剩下的額度限制暖身段（第 1 點）。任何一檔超過就讓任務 `failed`，⛔ 不截斷、⛔ 不跑一半。
+* **總根數與每一檔**：python 先依序取完**所有**標的的資料再開始跑（modular 改成先取後跑）。每一檔呼叫 `fetch_candles_range` 時帶
+  `min(每一檔的上限, 任務剩下的額度)`，範圍段先扣、再用剩下的額度限制暖身段（第 1 點）。任何一檔超過就讓任務 `failed`，⛔ 不截斷、⛔ 不跑一半。
+  * **分開回報**（v1.5）：每一檔的上限先擋到 → `symbol_too_large:<代號>:<至少 n>:<max>`（要縮短日期範圍，減少檔數沒有用）；
+    任務剩下的額度先擋到 → `task_too_large:<代號>:<至少 n>:<max>`（**先碰到任務的總額度**：要減少檔數或縮短範圍）。
+    ⚠️ 查詢在 `額度 + 1` 根就停，所以只知道先碰到哪一個上限：只剩 1,000 根額度、下一檔有 6,000 根時，查到第 1,001 根就回 `task_too_large`，
+    ⛔ 不能宣稱「每一檔都合格」（review 2026-11-19）。
   * 錯誤訊息只說得出**下限**：查詢在 `額度 + 1` 根就停了，實際總數可能更多。寫成
     `task too large: at least <n> bars (range + warmup) by symbol <symbol>, max <m>`，⛔ 不寫成「共 n 根」。
 * 上限⛔ 不在 Go 算根數（要查 DB，留在 python 一處）。
 
+### 4-1. 資料不足（v1.5；只用於 backtrader）
+
+* 資料（範圍段＋暖身段）比策略指標的 minperiod 還少時，backtrader 預設的 runonce 模式會丟 `IndexError`（實測：`BreakoutV1` 19 根丟錯、20 根可以跑），
+  I-137 之前就是這樣，任務以 `internal_error` 失敗。
+* 改成**執行前檢查**：實際載入的範圍段＋暖身段根數，對照策略的 `required_bars()`（`BreakoutV1` 是 `max(ma_fast, ma_slow, rsi_period + 1, vol_period)` ＝ 20，
+  測試核對它等於 backtrader 實際的 minperiod）。不夠就讓任務失敗：`insufficient_data:<代號>:<取得 n>:<需要 m>`，
+  畫面顯示「資料不足：取得 19 根，至少需要 20 根」。
+* 暖身沒滿 250 根、但總資料仍夠初始化：照常跑，覆蓋範圍標暖身不足。
+* modular ⛔ 不用這個代碼：它在資料不到 `min_bars` 時本來就不評估訊號（第 2 點），不會丟錯。
+
 ### 5. 日期驗證（Q1）
 
 * **Go**：`POST /backtest` 在建任務之前檢查 `start_date`、`end_date` 是 `YYYY-MM-DD`、是存在的日期（`2025-02-30` 不行）、`start_date` ≤ `end_date`
-  （同一天可以），而且兩個日期都⛔ 不能晚於 **2099-12-31**。不符回 400，訊息寫明哪一個欄位。
+  （同一天可以），而且兩個日期都⛔ 不能晚於 **2099-12-31**、⛔ 不能早於 **0001-01-01**（v1.6：Go 的 `time.Parse` 收年份 0000，python 不收、
+  PostgreSQL 也會報錯而回 500）。不符回 400，訊息寫明哪一個欄位。
+  * （v1.6）Go 與 python 的請求驗證由**同一份案例檔**鎖住（兩邊各一份、內容相同，由 repo 層腳本比對），跟錯誤允許規則的案例檔同一套做法。
   * **最大日期 2099-12-31**：取數的上界是「結束日的隔天 00:00（台北）」，`9999-12-31` 是合法日期，但加一天會溢位。
     Go 與 python 共用同一個常數，由第 6 點的 repo 層腳本比對兩邊的值。
 * **python**：兩條執行路徑（server 與 worker）共用的入口做同樣的檢查，不符就讓任務 `failed`：繞過 Go 直接寫進 DB 的、或修正之前已經排隊的任務，都會明確失敗。
@@ -197,7 +227,9 @@
   | `start_after_end` | 開始日晚於結束日 |
   | `too_many_symbols:<n>:<max>` | 標的數超過上限 |
   | `backtrader_single_symbol:<n>` | backtrader 策略送了多檔 |
-  | `task_too_large:<symbol>:<至少 n>:<max>` | 總根數（含暖身）超過上限 |
+  | `task_too_large:<symbol>:<至少 n>:<max>` | 先碰到任務的總額度（所有標的合計，含暖身） |
+  | `symbol_too_large:<symbol>:<至少 n>:<max>` | 單一檔（含暖身）超過每一檔的上限（v1.5） |
+  | `insufficient_data:<symbol>:<取得 n>:<需要 m>` | backtrader：資料不夠初始化指標（v1.5） |
   | `no_data_in_range` | 所有標的在範圍內都沒有資料 |
   | `unknown_strategy` | 策略名稱不認得 |
   | `interrupted_on_restart` | 既有（I-134），不變 |
@@ -220,7 +252,7 @@
 | 位置 | 改動 |
 |---|---|
 | `python/db.py` | 新增 `fetch_candles_range`；還原價處理抽成共用的內部函式 |
-| `python/config.py`、`python/config.yaml` | `backtest.warmup_bars`（250）、`backtest.max_symbols`、`backtest.max_task_bars`（待實測） |
+| `python/config.py`、`python/config.yaml` | `backtest.warmup_bars`（250）、`backtest.max_symbols`、`backtest.max_task_bars`（35,000） |
 | `python/backtest/engine.py` | 共用入口的驗證（日期、標的數、backtrader 單檔）、新讀法、上限、`trade_start`、自己算的統計、覆蓋範圍 |
 | `python/backtest/strategy/base.py`、`breakout_v1.py` | `trade_start` 與範圍外不下單、記錄範圍內的資產 |
 | `python/backtest/modular/service.py`、`backtester.py` | 先取後跑、新讀法、上限、迴圈起點與初始權益、覆蓋範圍 |
@@ -283,13 +315,18 @@
    * 用照腳本下單的策略（下單時機不看指標），同一組成交：(a) 只餵範圍段、掛原本三個分析器；(b) 餵暖身＋範圍、用新的分析器與 `trade_start`。
      兩者的 `annual_return`、`sharpe_ratio`、`max_drawdown` 相同。
    * 同一次執行同時掛原本三個分析器與新的分析器（暖身 0）：數值相同。
-   * 暖身 0、範圍比 `BreakoutV1` 的 minperiod 還短：新的分析器仍記到範圍內每一根（走的是 `prenext`），三個統計是 0。
+   * （v1.5 修改）**總資料足夠初始化、但範圍首根仍在 `prenext`**：例如暖身 5 根＋範圍 30 根（首根是第 6 根，minperiod 20），新的分析器從範圍首根起
+     記到每一根；暖身 0、範圍 30 根也一樣（前 19 根走 `prenext`）。v1.4 原本寫的「範圍比 minperiod 還短」現在會是 `insufficient_data`（第三節第 4-1 點）。
 5. **上限**：
    * 標的數等於上限通過、多 1 檔在 Go 回 400、在 python 讓任務 `failed`。
    * 總根數（含暖身）等於上限通過、多 1 根失敗，訊息寫「至少 n 根」、上限與代號；超過時⛔ 沒有開始跑任何一檔。
    * **範圍段沒超過、加上暖身才超過**（例如剩 10 根額度、範圍段 10 根、暖身有 250 根）→ 失敗；暖身段的查詢最多取剩下的額度 + 1 根。
    * 多檔時第二檔才超過 → 失敗，第一檔⛔ 沒有開始跑。
    * **額度剛好用完，下一檔範圍內沒有資料、只有暖身段的歷史** → 那一檔是 `skipped`（`warmup_bars` 0）、任務照常完成；暖身段的查詢⛔ 沒有執行。
+   * （v1.5）**單一檔超過每一檔的上限** → `symbol_too_large`；**先碰到任務的總額度** → `task_too_large`；**兩種上限都會超過、但先碰到總額度** →
+     `task_too_large`；單一檔剛好等於上限可以執行。
+   * （v1.5）**資料不足**：minperiod − 1 根 → `insufficient_data`；剛好等於 minperiod 可以執行；範圍很短（例如 3 根）但暖身足夠時照常通過；
+     `required_bars()` 等於 backtrader 實際的 minperiod。
    * **`max_symbols` 用非預設值**（dev 的三個服務都設成 2）：3 檔的請求 Go 回 400；直接寫進 DB 的 3 檔任務，server 與 worker 都讓它 `failed`；2 檔照常。
    * **實測決定數值**：先在 live 唯讀查自選清單的檔數與歷史任務的最多檔數；dev 用 2330 的完整日 K（4,930 根）與合成的多檔資料，
      在 mem-guard 下量兩條路徑的執行時間與記憶體高點（單檔長範圍、多檔、候選上限的 1.5 倍）；數值與量測結果寫回第三節第 4 點給使用者確認。
@@ -328,6 +365,61 @@
 * `python/config.yaml`：新設定的註解。
 * `docs/issue.md` I-137 改成「已實作／待 review」；review 確認後收斂。I-138 另行處理。
 
+## 七之後：實作備註（2026-11-19；已改好、未 commit，待 review）
+
+**改了什麼**
+
+* python：`db.fetch_candles_range`（範圍段 `LIMIT 額度 + 1`、範圍段 0 根⛔ 不查暖身、暖身段用剩下的額度限制；還原價抽成 `_apply_adjustment`）；
+  `backtest/data_range.py`（兩條路徑共用的取資料：先取後跑、額度、覆蓋範圍）；`backtest/job_errors.py`（請求驗證、對外代碼、允許規則、`MAX_DATE`）；
+  `backtest/range_stats.py`（`RangeValue` 分析器與照抄 backtrader 公式的範圍內統計）；`strategy/base.py` 的 `trade_start` 與 `bar_taipei_date`；
+  `BreakoutV1.next()` 範圍外不下單；modular 的 `BacktestEngine.run(trade_start_index=…)`；`db_writer` 寫 `data_coverage`、schema 探測加 078；
+  server／worker 失敗時寫 `job_error_code(exc)`；python-server 的 GET 套用允許規則、解析 `data_coverage`；config 的 `warmup_bars`／`max_symbols`
+  （`BACKTEST_MAX_SYMBOLS` 可覆寫）／`max_task_bars`。
+* migration 078（三份）：`backtest_results.data_coverage TEXT`。
+* Go：`config.Backtest.MaxSymbols`（`BACKTEST_MAX_SYMBOLS`，預設 20，設定契約 ≥ 1）；`backtest.ValidateRequest`、`PublicJobError`、`MaxDate`、
+  `BacktraderStrategies`；`Manager` 帶標的數上限；handler 的 400、兩個 GET 清洗 `error`；`BacktestResult.DataCoverage`（`store.NullJSONText`：
+  輸出原本的 JSON 值或 null）。
+* 前端：`BACKTRADER_STRATEGIES`／`isBacktraderStrategy`、`DataCoverage` 型別；`lib/backtestErrors.ts`（代碼 → 中文）；`Backtest.svelte`
+  的選檔規則、400 原因、失敗任務的原因、覆蓋範圍一檔一行。
+* 腳本：`scripts/check-backtest-contract.py`（掛進 `frontend/scripts/test.sh`）；`smoke-dev-backtest-claim.sh`（前置檢查要 078、schema 情境
+  先補 077 確認仍在等再補 078、trades 情境核對覆蓋範圍的根數等於 DB 的根數）與它的假 docker 測試；`docker-compose.dev.yml` 三個服務都能帶入
+  `BACKTEST_MAX_SYMBOLS`；`.env.example` 加註解說明（平常保持註解）。
+
+**跟計畫的差異**
+
+1. **允許規則用整串比對**：python 的 `re.match` 加 `$` 會放過「代碼後面多一個換行」（`$` 可以匹配結尾換行之前），Go 的 `^…$` 不會。
+   python 改用 `fullmatch`，案例檔加兩筆結尾換行的案例鎖住。
+2. **既有測試配合「backtrader 限單檔」改寫**：I-135 的兩個多檔測試（`test_multiple_trades_and_symbols`、大額多筆成交）原本走 `run_backtest`
+   送兩檔，現在會被擋。前者拆成「單檔多筆」走 `run_backtest`、「`_extract_trades` 走過每一檔」直接用 Cerebro 載兩檔驗；後者多方、空方分兩次跑。
+   驗的內容⛔ 不變。
+3. **資料比指標期數還短**：backtrader 預設的 runonce 模式直接丟 `IndexError`（`runonce=False` 不會），I-137 之前就是這樣。回報使用者後裁決採 (c)：
+   新增 `insufficient_data`（第三節第 4-1 點，v1.5）。v1.4 的「範圍比 minperiod 還短」驗收因此改成「總資料足夠、範圍首根仍在 prenext」。
+4. **上限**：量測發現時間（modular 平方成長）才是瓶頸，回報使用者後裁決加上每一檔 5,000 根的上限（第三節第 4 點，v1.5）；
+   數值依 live 唯讀查詢與 dev 量測寫回第三節第 4 點，`max_task_bars` 由 v1.7 的 review 定為 35,000。modular 效能另列 `todo.md` T-086。
+5. modular 的 `trade_start_index` 預設是 `None`（維持原本的行為），只有 `run_modular_backtest` 會帶值；直接呼叫 `BacktestEngine.run` 的測試與工具不受影響。
+6. 前端測試：jsdom 裡結束日期輸入框的初始值是空的，送出前的日期檢查會先擋下，所以送出相關的測試先明確填好兩個日期（跟本案無關的測試環境現象）。
+
+**驗證**
+
+| 項目 | 結果 |
+|---|---|
+| `python/scripts/test.sh -q`（完整） | rc 0：2154 passed、1 skipped（v1.6 之後）（新增 `test_db_fetch_candles_range.py` 9 項、`test_backtest_date_range.py` 等） |
+| `backend/scripts/test.sh`（完整） | 全部 ok |
+| `scripts/test-postgres-migrations.sh`、`scripts/test-mysql-migrations.sh` | rc 0、rc 0 |
+| `frontend/scripts/test.sh` | svelte-check 0 錯誤、vitest 174 passed、build 成功；dist 有新檔要 `git add`（`check-dist-assets.sh` 的設計） |
+| `scripts/check-backtest-contract.py`、`scripts/check-job-names.sh` | 一致 |
+| `scripts/test-smoke-dev-backtest-claim.sh` | 68 項通過（原本 60 項） |
+| 突變（python） | 12 組都有測試失敗：放回最近 1000 根 6、拿掉範圍外不下單 2、交易門檻改 UTC 1、統計算到暖身段 1、分析器只在 next 記 1、modular 權益曲線從 min_bars 起 2、schema 探測拿掉 078 2、拿掉範圍段的 LIMIT 1、暖身不扣額度 1、空範圍仍查暖身 1、失敗時寫 `str(exc)` 3、python GET 不清洗 error 11。⚠️ 第一次寫的「拿掉 LIMIT」只是停用第一道超過判斷，第二道照樣判超過（等價突變，9 項全過），改成真的拿掉 SQL 的 `LIMIT` 才是有效突變 |
+| 突變（v1.5） | 拿掉 `insufficient_data` 檢查 1、每檔上限一律回 `task_too_large` 2、拿掉每檔上限 2 項失敗；`required_bars()` 少算 RSI 的 +1 是等價突變（最大值仍由 SMA(20) 決定），由「等於 backtrader 實際 minperiod」的測試把關 |
+| 突變（Go） | GET 不清洗 1、清單不清洗 1、POST 不檢查 1、最大日期不檢查 1、允許規則放行全部 1、`data_coverage` 輸出成字串 1 |
+| v1.6 的修正 | 分 K 一天 4 根的新舊對照（同一次執行、有暖身段）都等於原本的分析器；反向測試：把每一根當成一天就不同。突變：拿掉以日分組 → 2 項失敗；拿掉 Go 的 `MinDate` → 共用案例與 handler 的 400 各 1 項失敗。兩種上限都會超過、先碰到總額度 → `task_too_large` |
+| 突變（`check-backtest-contract.py`） | 前端名單、Go 名單、`max_symbols` 預設值、最大日期、案例檔，各改一處都 rc 1 |
+| 上限實測 | 見第三節第 4 點（live 唯讀查詢 2026-11-19 17:38；dev 合成資料量測） |
+| dev 實跑 `smoke-dev-backtest-claim.sh`（預設五個情境） | rc 0：race、server-restart、worker-restart、lost-response、schema（只補 077 時臨時 server 仍在等，補 078 之後才繼續啟動） |
+| dev 實跑 `trades`，2330、2015-01-01～2025-12-31 | rc 0：範圍內 2,682 根＝DB 的根數（遠超過舊的 1,000 根）、首根 2015-01-05、暖身 250；17 筆明細與費用核對通過 |
+| dev 實跑 `trades`，2330、2005-01-01～2012-12-31 | rc 0：首根 2006-10-19（DB 的第一根）、1,547 根＝DB 的根數、暖身 0；6 筆明細通過 |
+| dev 非預設值 `BACKTEST_MAX_SYMBOLS=2`（三個服務都帶入） | Go：3 檔 400 `too_many_symbols:3:2`、`breakout_v1` 2 檔 400 `backtrader_single_symbol:2`、`9999-12-31` 400 `invalid_date:end_date`、modular 2 檔 201 → `done`（2317 在 dev 沒有日 K → `skipped`）；直接寫進 DB 的 3 檔任務，server 與 worker 都 `failed`／`too_many_symbols:3:2`，Go 讀出相同代碼。測試任務已刪除，dev stack 已 `down`（⛔ 沒有 `-v`） |
+
 ## 八、v1 的 Q1～Q4 裁決（2026-11-19）
 
 * **Q1** 日期驗證一起做：Go 檢查 `YYYY-MM-DD`、日期存在、開始日 ≤ 結束日（同一天可以），失敗回 400；python 在兩條執行路徑的共用入口做同樣的檢查。→ 第三節第 5 點。
@@ -344,3 +436,6 @@
 | v1.2 | 2026-11-19 | review [P2]×4：①backtrader 的範圍內權益改由獨立分析器在 `prenext`、`nextstart`、`next` 都記（策略的 `next()` 在指標達到 minperiod 前不會被呼叫），統計的比較改成成交與權益序列相同的對照；②總根數上限：範圍段先扣，暖身段用剩下的額度限制，測「範圍段沒超過、加上暖身才超過」，錯誤訊息寫「至少 n 根」；③`max_symbols` 的共用設定來源是 `BACKTEST_MAX_SYMBOLS`、Go 與 python 同一個預設值（live 的 python 服務沒有 `env_file`，只用預設值），dev 用非預設值驗收三個服務；④前端：首次載入與切到 backtrader 策略時不預選、要求重新選檔，顯示 400 的原因與失敗任務的 `error`。[P3]×2：名單與預設值的比對改成 repo 層的檢查腳本（pytest 讀不到 Go 與前端），掛進 `frontend/scripts/test.sh`；歷史盤點加上 `candles.created_at` 的條件，舊版 `breakout_v1` 寫成只交易「第一檔成功載入的標的」。 |
 | v1.3 | 2026-11-19 | review [P2]×2：①範圍段 0 根就直接略過（`skipped`、`warmup_bars` 0），⛔ 不查暖身段、⛔ 不扣額度，測「額度剛好用完，下一檔只有暖身歷史」；②失敗原因只顯示可公開的內容：python 寫封閉值域的代碼（其他例外一律 `internal_error`，原始例外只進 log），Go 回傳前比對允許清單、舊的原始文字改回 `internal_error`，前端代碼對照中文，測試原始例外不出現在 API 與畫面；`backtest_jobs.error` 納入 `architecture.md` 的錯誤分類契約。另外補上日期上界：最大日期 2099-12-31，Go 與 python 共用（`9999-12-31` 加一天會溢位）。 |
 | v1.4 | 2026-11-19 | review [P2]×1：python-server 的 `GET /backtest/{job_id}` 也會回傳 `error`，同樣套用允許規則；Go 與 python 的規則用兩份內容相同的案例檔鎖住（repo 層腳本比對）；python-server 的 GET 回傳的 `data_coverage` 要先解析成陣列。 |
+| v1.5 | 2026-11-19 | 實作中的裁決（使用者）：①加每一檔的上限 5,000 根（範圍段＋暖身段；量測發現 modular 的時間跟每一檔根數的平方成正比，只靠合計擋不住單一檔很長），單一檔超過回 `symbol_too_large`、每一檔都合格但合計超過回 `task_too_large`；modular 效能另列 T-086；②資料不夠初始化 backtrader 指標時，執行前檢查並回 `insufficient_data`（取代原本丟 `IndexError` 變成 `internal_error`），v1.4 的「範圍比 minperiod 還短」驗收改成「總資料足夠、範圍首根仍在 prenext」。上限數值依 live 唯讀查詢與 dev 量測寫回第三節第 4 點。 |
+| v1.6 | 2026-11-19 | 實作 review：[P2] backtrader 的年化報酬與夏普改回以日為期（取每一天最後一根的資產，跟原本 `timeframe=Days` 的分析器相同），最大回撤維持逐根，補一天多根的分 K 新舊對照；[P3] Go 擋掉年份 0000（`MinDate` 0001-01-01，回 400 `invalid_date`），請求驗證改用 Go 與 python 共用的案例檔；[P3] `task_too_large` 的描述改成「先碰到任務的總額度」（查詢在額度 + 1 根就停，⛔ 不能宣稱每一檔都合格），補兩種上限都會超過的案例。`max_task_bars` 的 60,000 仍是候選值，多檔的整體耗時見實測。 |
+| v1.7 | 2026-11-20 | 實作 review 通過 v1.6 的三項修正；`max_task_bars` 依 review 的建議定為 **35,000**（含暖身；11 檔日 K 整段歷史 29,978 根放得下，60,000 的多檔實測單筆 830 秒，最壞情況改為 7 檔 × 5,000 根、約 8 分鐘），等 T-086 改善 modular 效能後再評估提高。 |

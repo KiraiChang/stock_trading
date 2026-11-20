@@ -177,3 +177,29 @@ def test_claim_committed_before_response_survives_handler_failure(backtest_sqlit
         )).one()
     assert tuple(row) == ("running", "server")
     assert db_writer.claim_job("job-1", "worker") is False
+
+
+# ── I-137：背景執行失敗時只寫分類過的代碼 ─────────────────────────────────
+
+
+@pytest.mark.parametrize("exc,want", [
+    (RuntimeError("boom [SQL: SELECT secret FROM t]"), "internal_error"),
+    (None, "task_too_large:2330:60001:60000"),
+])
+def test_run_and_write_fails_with_public_code(monkeypatch, exc, want):
+    from backtest.job_errors import BacktestJobError
+
+    written = []
+    err = exc if exc is not None else BacktestJobError("task_too_large:2330:60001:60000")
+
+    def boom(**kw):
+        raise err
+
+    monkeypatch.setattr(http_server, "run_backtest", boom)
+    monkeypatch.setattr(http_server, "fail_job", lambda job_id, owner, error: written.append((job_id, owner, error)))
+    req = http_server.BacktestRequest(job_id="j1", strategy="breakout_v1", symbols=["2330"],
+                                      start_date="2025-01-01", end_date="2025-12-31")
+
+    http_server._run_and_write(req)
+
+    assert written == [("j1", "server", want)]

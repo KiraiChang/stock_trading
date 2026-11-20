@@ -524,11 +524,14 @@ SELECT (SELECT count(*) FROM information_schema.columns
     || (SELECT count(*) FROM backtest_jobs WHERE status IN ('pending', 'running')) || '|'
     || (SELECT count(*) FROM backtest_jobs WHERE starts_with(job_id, 'i134smoke_')) || '|'
     || (SELECT count(*) FROM candles WHERE symbol = :'symbol' AND timeframe = '1d'
-        AND ts >= CAST(:'start' AS date) AND ts < CAST(:'end' AS date) + 1);
+        AND ts >= CAST(:'start' AS date) AND ts < CAST(:'end' AS date) + 1) || '|'
+    || (SELECT count(*) FROM information_schema.columns
+        WHERE table_name = 'backtest_results' AND column_name = 'data_coverage');
 SQL
 )" || die2 "查不到 dev DB（連不上、逾時或表不存在）"
 pre="${pre//[[:space:]]/}"
 [ "$(field "$pre" 1)" = 1 ] || die2 "dev DB 沒有 backtest_jobs.execution_owner（backend 還沒套用 migration 077）"
+[ "$(field "$pre" 5)" = 1 ] || die2 "dev DB 沒有 backtest_results.data_coverage（backend 還沒套用 migration 078）"
 [ "$(field "$pre" 2)" = 0 ] || die2 "dev DB 有 $(field "$pre" 2) 筆 pending／running 的回測；⛔ 不操作（會被一起執行或誤判）"
 [ "$(field "$pre" 3)" = 0 ] || die2 "dev DB 還有之前留下的 i134smoke_ 任務（$(field "$pre" 3) 筆）；先確認、清掉再重跑"
 [ "$(field "$pre" 4)" -gt 0 ] 2>/dev/null || die2 "$SMOKE_SYMBOL 在 $SMOKE_START～$SMOKE_END 沒有日 K"
@@ -703,7 +706,8 @@ polls_ge3() { local n; n="$(polls_since "$1")" || return 1; [ "$n" -ge 3 ]; }
 
 scenario_schema() {
   local ts
-  log "schema：臨時 DB 沒有 execution_owner → 臨時 server 等待 → ALTER 之後繼續啟動（077 本身由 migration 測試負責）"
+  local n0
+  log "schema：臨時 DB 沒有 077、078 的欄位 → 臨時 server 等待 → 只補 077 仍在等 → 補 078 之後才繼續啟動（migration 本身由 migration 測試負責）"
   q tmpdb_create "tmpdb=$TMPDB" >/dev/null <<'SQL' || fail "建立臨時 DB 失敗"
 CREATE DATABASE :"tmpdb";
 SQL
@@ -711,8 +715,9 @@ SQL
   t "$(rem "$CALL_TIMEOUT")" docker compose -f "$COMPOSE_FILE" --profile worker exec -T postgres sh -c \
     "pg_dump -U trading -d trading -s -t 'public.backtest_*' | psql -U trading -d $TMPDB -X -q -v ON_ERROR_STOP=1 -f -" \
     >/dev/null || fail "複製回測三張表的結構失敗"
-  SQL_DB="$TMPDB" q tmpdb_drop_col >/dev/null <<'SQL' || fail "拿掉臨時 DB 的 execution_owner 失敗"
+  SQL_DB="$TMPDB" q tmpdb_drop_col >/dev/null <<'SQL' || fail "拿掉臨時 DB 的 execution_owner 與 data_coverage 失敗"
 ALTER TABLE backtest_jobs DROP COLUMN execution_owner;
+ALTER TABLE backtest_results DROP COLUMN data_coverage;
 SQL
   ts="$(now_ts)"
   # ⛔ 不發布 port（compose run 預設不發布；⛔ 不加 --service-ports）。
@@ -725,19 +730,28 @@ SQL
   SQL_DB="$TMPDB" q tmpdb_add_col >/dev/null <<'SQL' || fail "臨時 DB 加回 execution_owner 失敗"
 ALTER TABLE backtest_jobs ADD COLUMN execution_owner VARCHAR(16);
 SQL
+  # 077 在、078 還沒（I-137）：再多等兩輪探測，仍然要在等、⛔ 不能就緒
+  n0="$(tmp_wait_count)" || fail "讀不到臨時 server 的 log"
+  wait_until "臨時 server 在只有 077 時再探測兩輪" tmp_wait_count_ge "$((n0 + 2))"
+  if tmp_log_has "schema ready"; then fail "只有 077、還沒有 078 時臨時 server 就繼續啟動了（應該要等 data_coverage）"; fi
+  SQL_DB="$TMPDB" q tmpdb_add_cov >/dev/null <<'SQL' || fail "臨時 DB 加回 data_coverage 失敗"
+ALTER TABLE backtest_results ADD COLUMN data_coverage TEXT;
+SQL
   wait_until "臨時 server 繼續啟動" tmp_log_has "schema ready"
   wait_until "臨時 server 完成啟動收尾" tmp_log_has "no interrupted jobs to reap owner=server"
   [ "$(t "$(rem "$CALL_TIMEOUT")" docker inspect -f '{{.State.Status}}' "$TMP_SRV_ID")" = running ] || fail "臨時 server 沒有在跑"
   ( drop_tmpdb ) || fail "清掉臨時 server 與臨時 DB 失敗"
   TMP_SRV_ID=""; TMP_SRV_STARTED=0; TMPDB_CREATED=0
-  echo "    通過：欄位出現之後臨時 server 繼續啟動；臨時 server 與臨時 DB 已清掉"
+  echo "    通過：只有 077 時臨時 server 繼續等，078 也出現之後才繼續啟動；臨時 server 與臨時 DB 已清掉"
 }
 tmp_log_has() { local out; out="$(t "$(rem "$CALL_TIMEOUT")" docker logs "$TMP_SRV_ID" 2>&1)" || return 1; grep -qF -- "$1" <<<"$out"; }
+tmp_wait_count() { local out; out="$(t "$(rem "$CALL_TIMEOUT")" docker logs "$TMP_SRV_ID" 2>&1)" || return 1; grep -cF -- "waiting for schema" <<<"$out" || true; }
+tmp_wait_count_ge() { local n; n="$(tmp_wait_count)" || return 1; [ "$n" -ge "$1" ]; }
 
 # trades（I-135）：backtrader 路徑寫進 backtest_trades 的明細——筆數、價格與股數、帶方向的精度界線、台北時間。
 #   認領的路徑誰都可以（202 或 409 都接受），驗的是寫進去的內容。
 scenario_trades() {
-  local id="${PREFIX}trades_1" code s bad rates c tx
+  local id="${PREFIX}trades_1" code s bad rates c tx cov
   log "trades：$SMOKE_STRATEGY 的交易明細（筆數、價格與股數、帶方向的精度界線、台北時間、費用）"
   # 預期費用用執行這次回測的 image 載入的 config 原始費率（寫入任務之前讀）
   rates="$(read_rates)" || fail "讀不到 $SRV 的 config 費率（COMMISSION_RATE、TAX_RATE），或不是有限的非負數"
@@ -762,6 +776,27 @@ scenario_trades() {
           | q trades_fee_check "id=$id" "comm_rate=$c" "tax_rate=$tx")" || fail "查不到 $id 的費用核對"
   bad="${bad//[[:space:]]/}"
   [ "$bad" = 0 ] || fail "$id 有 $bad 筆明細的 commission 跟 config 費率（手續費 $c、交易稅 $tx）算出的模擬費用對不上"
+  # 覆蓋範圍（I-137）：寫進結果的範圍內根數，要等於 DB 裡這段台北日期的日 K 根數（⛔ 被截斷就會少）
+  cov="$(q trades_coverage "id=$id" "symbol=$SMOKE_SYMBOL" "start=$SMOKE_START" "end=$SMOKE_END" <<'SQL'
+SELECT coalesce(CAST(r.data_coverage AS jsonb) -> 0 ->> 'bars', '') || '|'
+    || coalesce(CAST(r.data_coverage AS jsonb) -> 0 ->> 'first_bar', '') || '|'
+    || coalesce(CAST(r.data_coverage AS jsonb) -> 0 ->> 'last_bar', '') || '|'
+    || coalesce(CAST(r.data_coverage AS jsonb) -> 0 ->> 'warmup_bars', '') || '|'
+    || coalesce(CAST(r.data_coverage AS jsonb) -> 0 ->> 'skipped', '') || '|'
+    || (SELECT count(*) FROM candles WHERE symbol = :'symbol' AND timeframe = '1d'
+        AND ts >= CAST(:'start' AS date)::timestamp AT TIME ZONE 'Asia/Taipei'
+        AND ts < (CAST(:'end' AS date) + 1)::timestamp AT TIME ZONE 'Asia/Taipei')
+FROM backtest_results r WHERE r.job_id = :'id';
+SQL
+)" || fail "查不到 $id 的覆蓋範圍"
+  cov="${cov//[[:space:]]/}"
+  [ -n "$(field "$cov" 1)" ] || fail "$id 的結果沒有 data_coverage"
+  [ "$(field "$cov" 5)" = false ] || fail "$id 的覆蓋範圍標成略過（$cov）"
+  [ "$(field "$cov" 1)" = "$(field "$cov" 6)" ] \
+    || fail "$id 的範圍內根數 $(field "$cov" 1) 不等於 DB 裡 $SMOKE_START～$SMOKE_END 的日 K $(field "$cov" 6) 根（被截斷？）"
+  [[ ! "$(field "$cov" 2)" < "$SMOKE_START" && ! "$(field "$cov" 3)" > "$SMOKE_END" ]] \
+    || fail "$id 的首尾日期 $(field "$cov" 2)～$(field "$cov" 3) 超出 $SMOKE_START～$SMOKE_END"
+  echo "    覆蓋範圍：$(field "$cov" 2)～$(field "$cov" 3)，$(field "$cov" 1) 根（等於 DB 的根數），暖身 $(field "$cov" 4) 根"
   echo "    通過：$(field "$s" 6) 筆交易明細，價格與股數都是正數、符合帶方向的精度界線、時間是台北時間、費用符合 config 費率"
 }
 

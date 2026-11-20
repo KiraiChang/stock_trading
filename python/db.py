@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 import sys
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import bindparam, create_engine, text
@@ -266,25 +267,114 @@ def fetch_candles(
 
     result = list(reversed([dict(r) for r in rows]))
     if adjusted:
-        for row in result:
-            # 係數為 None/0（欄位還沒被重算過，或舊資料）時當作 1。
-            # 「沒有係數」的正解是「不調整」，不是「價格歸零」。
-            factor = float(row.get("adj_factor") or 1.0)
-            if factor <= 0:
-                factor = 1.0
-            # vol_factor 缺值（Phase 1 的舊資料）時退回 adj_factor：
-            # 那時只有分割，價量本來就共用一個係數。
-            vol_factor = float(row.get("vol_factor") or 0.0)
-            if vol_factor <= 0:
-                vol_factor = factor
-            for field in ("open", "high", "low", "close"):
-                if row.get(field) is not None:
-                    row[field] = float(row[field]) * factor
-            if row.get("volume") is not None:
-                row["volume"] = float(row["volume"]) / vol_factor
+        _apply_adjustment(result)
     log.debug("fetch_candles symbol=%s tf=%s adjusted=%s as_of=%s → %d rows",
               symbol, timeframe, adjusted, as_of, len(result))
     return result
+
+
+def _apply_adjustment(rows: list[dict]) -> None:
+    """還原價（就地修改）：價乘 `adj_factor`、量除 `vol_factor`。規則見 `fetch_candles` 的說明。"""
+    for row in rows:
+        # 係數為 None/0（欄位還沒被重算過，或舊資料）時當作 1。
+        # 「沒有係數」的正解是「不調整」，不是「價格歸零」。
+        factor = float(row.get("adj_factor") or 1.0)
+        if factor <= 0:
+            factor = 1.0
+        # vol_factor 缺值（Phase 1 的舊資料）時退回 adj_factor：
+        # 那時只有分割，價量本來就共用一個係數。
+        vol_factor = float(row.get("vol_factor") or 0.0)
+        if vol_factor <= 0:
+            vol_factor = factor
+        for col in ("open", "high", "low", "close"):
+            if row.get(col) is not None:
+                row[col] = float(row[col]) * factor
+        if row.get("volume") is not None:
+            row["volume"] = float(row["volume"]) / vol_factor
+
+
+@dataclass
+class CandleRange:
+    """`fetch_candles_range` 的結果。`exceeded` 為 True 時 `bars_read` 是**下限**（查詢在額度 + 1 根就停了）。"""
+
+    warmup: list[dict] = field(default_factory=list)
+    in_range: list[dict] = field(default_factory=list)
+    exceeded: bool = False
+
+    @property
+    def bars_read(self) -> int:
+        return len(self.warmup) + len(self.in_range)
+
+
+def taipei_day_start_epoch(d: str | date) -> int:
+    """台北日期 `d` 的 00:00 的 epoch（含當日的下界）。"""
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
+    return int(datetime.combine(d, datetime.min.time(), tzinfo=TAIPEI).timestamp())
+
+
+def fetch_candles_range(
+    symbol: str,
+    timeframe: str,
+    start_date: str | date,
+    end_date: str | date,
+    warmup_bars: int,
+    budget: int,
+    adjusted: bool = True,
+    conn=None,
+) -> CandleRange:
+    """依台北日期取 `start_date`～`end_date`（含頭含尾）的 K 棒，再取起點之前最多 `warmup_bars` 根暖身（I-137）。
+
+    ⛔ 不像 `fetch_candles` 取「最近 N 根」：那會讓範圍的前段被靜默截掉。
+
+    **額度 `budget`**：這一檔最多能用的根數（範圍段＋暖身段）。上限由讀取本身擋，⛔ 不先 `COUNT` 再讀
+    （兩次查詢之間補進來的資料會突破上限）：
+      1. 範圍段 `LIMIT budget + 1`；取到 `budget + 1` 根就是超過，⛔ 不查暖身段。
+      2. 範圍段是 0 根：這一檔沒有資料，⛔ 不查暖身段（否則前一檔用完額度時，這一檔會因為一根舊 K 棒讓整筆任務失敗）。
+      3. 暖身段用剩下的額度限制：`LIMIT min(warmup_bars, 剩下 + 1)`；比剩下的多 1 根就是超過。
+    上下界都用跟回傳的 `timestamp` 同一個表示式算（比照 `as_of`）。
+    """
+    if budget < 0:
+        raise ValueError("budget must be >= 0")
+    ts_epoch = _ts_epoch_expr()
+    lo = taipei_day_start_epoch(start_date)
+    hi = as_of_cutoff_epoch(end_date)
+    cols = f"""symbol, timeframe, open, high, low, close, volume, amount, adj_factor, vol_factor,
+               {ts_epoch} AS timestamp"""
+    range_sql = text(f"""
+        SELECT {cols}
+        FROM candles
+        WHERE symbol = :symbol AND timeframe = :tf AND {ts_epoch} >= :lo AND {ts_epoch} < :hi
+        ORDER BY ts ASC
+        LIMIT :limit
+    """)
+    warmup_sql = text(f"""
+        SELECT {cols}
+        FROM candles
+        WHERE symbol = :symbol AND timeframe = :tf AND {ts_epoch} < :lo
+        ORDER BY ts DESC
+        LIMIT :limit
+    """)
+    out = CandleRange()
+    base = {"symbol": symbol, "tf": timeframe, "lo": lo, "hi": hi}
+    with _reader(conn) as reader:
+        out.in_range = [dict(r) for r in reader.execute(range_sql, {**base, "limit": budget + 1}).mappings().all()]
+        if len(out.in_range) > budget:
+            out.exceeded = True
+        elif out.in_range:
+            left = budget - len(out.in_range)
+            limit = min(warmup_bars, left + 1)
+            if limit > 0:
+                rows = reader.execute(warmup_sql, {**base, "limit": limit}).mappings().all()
+                out.warmup = list(reversed([dict(r) for r in rows]))
+            if len(out.warmup) > left:
+                out.exceeded = True
+    if adjusted:
+        _apply_adjustment(out.warmup)
+        _apply_adjustment(out.in_range)
+    log.debug("fetch_candles_range symbol=%s tf=%s %s~%s warmup=%d range=%d exceeded=%s",
+              symbol, timeframe, start_date, end_date, len(out.warmup), len(out.in_range), out.exceeded)
+    return out
 
 
 def fetch_market_trading_days(timeframe: str = "1d", limit: int = 60) -> list[str]:

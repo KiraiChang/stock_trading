@@ -20,6 +20,17 @@ backtest:
   commission_rate: 0.001425  # 買賣各 0.1425%
   tax_rate: 0.003            # 賣出交易稅 0.3%（空單的賣出在進場）
   initial_cash: 1_000_000    # 回測初始資金（新台幣）
+  # 依日期範圍取 K 棒（I-137）：起點之前多取的暖身根數，只用來算指標；交易與統計都從範圍內第一根開始
+  warmup_bars: 250
+  # 每個任務的上限，超過就讓任務 failed（⛔ 不截斷）。max_symbols 可用環境變數 BACKTEST_MAX_SYMBOLS 覆寫，
+  # 預設值必須跟 backend/internal/config 的 backtest.max_symbols 相同（scripts/check-backtest-contract.py 比對）。
+  max_symbols: 20
+  # 每一檔的範圍段＋暖身段根數（＝實際送進引擎的資料量）。暖身取滿 250 根時，範圍最多 4,750 根。
+  # modular 的時間跟每一檔根數的平方成正比（實測 5,000 根約 60～76 秒），所以要有每一檔的上限，⛔ 只靠合計擋不住單一檔很長
+  max_symbol_bars: 5000
+  # 所有標的的範圍段＋暖身段根數合計。35,000：自選清單 11 檔的日 K 整段歷史約 3 萬根放得下；最壞情況（7 檔 × 5,000 根）
+  # 依實測（12 檔 × 5,000 根 830 秒，耗時跟檔數成正比）約 8 分鐘。等 docs/todo.md T-086 改善 modular 效能後再評估提高
+  max_task_bars: 35000
 
 sr_scoring:
   # 相對於 python/ 目錄；由 backtest/modular/sr_scoring/train.py 產生。

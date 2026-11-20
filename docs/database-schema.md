@@ -446,7 +446,7 @@ conflict target 會整批失敗（`ON CONFLICT DO UPDATE command cannot affect r
 | start_date / end_date | 回測區間 |
 | status | `pending` → `running` → `done` / `failed`（轉移條件見下表） |
 | execution_owner | 認領這一筆的 python 服務：`worker` 或 `server`；NULL＝還沒被認領，或 migration 077 之前的舊資料。⛔ 不對外（Go 的 `BacktestJob` 與 python 的 `GET /backtest/{job_id}` 都明列欄位、不含它） |
-| error | 失敗原因；`pending`／`running` 時是 NULL（Go 的 `GetJob`／`ListJobs` 用 `COALESCE(error, '')` 讀，對外 `error,omitempty`）。取消是 `cancelled by user`，重啟收掉的是 `interrupted_on_restart` |
+| error | 失敗原因；`pending`／`running` 時是 NULL（Go 的 `GetJob`／`ListJobs` 用 `COALESCE(error, '')` 讀，對外 `error,omitempty`）。取消是 `cancelled by user`，重啟收掉的是 `interrupted_on_restart`。I-137 起 python 只寫封閉值域的代碼（形式見 `architecture.md`「寫入失敗的一致性契約」的合法形式表），三個讀出端點回傳前再比對同一份規則；I-137 之前留下的原始例外文字⛔ 不改 DB，對外改回 `internal_error` |
 | trigger_source | `manual`（API 觸發）。**DB 欄位名是 `trigger_source`，JSON／API 欄位名仍是 `trigger`**——`trigger` 是 MySQL 保留字，migration 059 改名（見 issue.md I-054） |
 | use_chip_filter | 是否在模組化回測中用 `chip_scores.total_score` 過濾進場 |
 | chip_min_score | 籌碼 filter 門檻（-100～100）；缺資料視為 0 |
@@ -476,7 +476,7 @@ conflict target 會整批失敗（`ON CONFLICT DO UPDATE command cannot affect r
 
   要改成上面任何一種，先把 `execution_owner` 換成實例識別（並重新設計收尾），⛔ 不能直接改。
 * 重啟收掉的任務⛔ 不自動重跑，要的話重新送出。
-* **schema 時序**：compose 裡 python ⛔ 不等 backend、migration 由 backend 啟動時套用，所以 python 兩個服務啟動時先等 `execution_owner` 出現
+* **schema 時序**：compose 裡 python ⛔ 不等 backend、migration 由 backend 啟動時套用，所以 python 兩個服務啟動時先等 `execution_owner` 與 `backtest_results.data_coverage`（078；I-137）都出現
   （每 2 秒查一次，整體最多 120 秒；每次探測本身也只等剩餘時間——DB 卡住時探測在 daemon thread 裡被放棄，探測回來時已過期也算逾時；
   逾時以非 0 結束、交給 compose 重啟）。⛔ 不在 python 端建立欄位。
 * migration 077 之前的 `running`（`execution_owner` 是 NULL）兩種服務都⛔ 不會收，要由人確認後處理。live 首次上版（2026-11-18）時，部署前與
@@ -520,8 +520,28 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 | sharpe_ratio | 夏普比率 |
 | total_trades / win_trades / loss_trades | 交易統計 |
 | avg_pnl | 平均損益 |
+| data_coverage | 每一檔實際取到的資料範圍，JSON 陣列存成 TEXT（migration 078；I-137）。NULL＝I-137 之前的結果，覆蓋範圍不明、⛔ 不回補 |
 
 backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、報酬被高估；新舊界線見 `backtest_trades` 的「費用的新舊界線」。
+
+**`data_coverage` 的格式**（I-137）：陣列，一檔一筆，順序跟請求的 `symbols` 相同（含被略過的）：
+
+| 鍵 | 說明 |
+|---|---|
+| `symbol` | 股票代號 |
+| `first_bar`、`last_bar` | 範圍內實際取到的第一根、最後一根的台北日期（`YYYY-MM-DD`）；被略過時是 null |
+| `bars` | 範圍內的根數 |
+| `warmup_bars` | 實際取到的暖身根數（起點之前，最多 `warmup_required`） |
+| `warmup_required` | 需要的暖身根數（config 的 `backtest.warmup_bars`，目前 250） |
+| `skipped` | 範圍內 0 根、這一檔被略過時是 true（這時⛔ 不查暖身段，`warmup_bars` 是 0） |
+
+* **首尾日期與暖身是否足夠分開記**，⛔ 不合成一個「完整／不完整」的狀態：`first_bar` 晚於 `start_date` 可能只是起點遇到週末或休市，
+  也可能那一檔後來才有資料，⛔ 不判定是哪一種；暖身不足（例如 DB 的第一根剛好在起點當天）是另一件事。
+* **範圍內的缺漏⛔ 不偵測**（例如中間少了一個月）：要判定漏了交易日需要獨立的交易日依據，這裡沒有。
+* 全部被略過時任務 `failed`（`no_data_in_range`），不會寫結果。
+* **新舊界線**：I-137 部署之前的回測都先取「最近 N 根」再切（backtrader 1000 根、modular 2000 根），範圍的前段可能被靜默截掉，
+  而且沒有暖身（指標從範圍首根冷啟動）、modular 的統計從第 `min_bars` 根起算。⛔ 不改、⛔ 不回補；要新的結果就另建 job 重跑。
+  live 的界線：⚠️ 部署後補上。
 
 ---
 

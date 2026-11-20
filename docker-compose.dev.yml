@@ -161,6 +161,9 @@ services:
       # debug 模式會多印 76 行 [GIN-debug]，且 panic 時 recovery 會連整包 request header
       # 一起寫進 log（gin 只遮 Authorization），所以只在需要時暫時開。
       GIN_MODE: ${GIN_MODE:-}
+      # 回測任務的標的數上限（I-137）：三個服務讀同一個變數，空字串＝用程式的預設值（Go 與 python 相同）。
+      # 非預設值的驗收：BACKTEST_MAX_SYMBOLS=2 docker compose -f docker-compose.dev.yml up -d …（三個服務一起帶入）
+      BACKTEST_MAX_SYMBOLS: ${BACKTEST_MAX_SYMBOLS:-}
       LOG_DIR: /app/logs/backend
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
@@ -185,6 +188,7 @@ services:
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       PYTHON_SERVICE_PORT: "8001"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      BACKTEST_MAX_SYMBOLS: ${BACKTEST_MAX_SYMBOLS:-}
       LOG_DIR: /app/logs/python-server
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     ports:
@@ -210,6 +214,7 @@ services:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: "postgresql+psycopg2://trading:trading@postgres:5432/trading"
       SR_SCORING_MODEL_PATH: /app/models/sr_scoring_v4.joblib
+      BACKTEST_MAX_SYMBOLS: ${BACKTEST_MAX_SYMBOLS:-}
       LOG_DIR: /app/logs/python-worker
       LOG_RETENTION_DAYS: ${LOG_RETENTION_DAYS:-14}
     volumes:

@@ -32,18 +32,23 @@ type CreateRequest struct {
 type Manager struct {
 	repo          store.BacktestRepo
 	pythonHTTPURL string // Method B：Python FastAPI 端點（空白 = 僅用 Method A）
+	maxSymbols    int    // 每個任務的標的數上限（BACKTEST_MAX_SYMBOLS；I-137）
 	httpTimeout   time.Duration
 	log           *zap.Logger
 }
 
-func NewManager(repo store.BacktestRepo, pythonHTTPURL string, log *zap.Logger) *Manager {
+func NewManager(repo store.BacktestRepo, pythonHTTPURL string, maxSymbols int, log *zap.Logger) *Manager {
 	return &Manager{
 		repo:          repo,
 		pythonHTTPURL: pythonHTTPURL,
+		maxSymbols:    maxSymbols,
 		httpTimeout:   30 * time.Second,
 		log:           log,
 	}
 }
+
+// MaxSymbols 回傳每個任務的標的數上限，給 POST /backtest 的檢查用。
+func (m *Manager) MaxSymbols() int { return m.maxSymbols }
 
 // Submit 建立 Job 並嘗試觸發 Python
 func (m *Manager) Submit(ctx context.Context, req CreateRequest) (*store.BacktestJob, error) {

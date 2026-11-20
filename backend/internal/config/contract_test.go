@@ -21,6 +21,7 @@ func validConfig(appEnv string) *Config {
 		Yahoo:              YahooConfig{BaseURL: "https://tw.stock.yahoo.com/x", RateLimit: 20, BatchSize: 40},
 		StockSymbols:       StockSymbolsConfig{Enabled: true, Cron: "30 6 * * *", SyncURLs: []string{"https://isin.twse.com.tw/a"}},
 		Python:             PythonConfig{ServiceURL: "http://python-server:8001", SRZonesTimeoutSec: 120},
+		Backtest:           BacktestConfig{MaxSymbols: 20},
 		Auth:               AuthConfig{JWTSecret: strings.Repeat("k", 64)},
 		Chip:               ChipConfig{Sync: ChipSyncConfig{HistoryTradingDays: 500, BatchSize: 50, Cron: "0 21 * * 1-5"}},
 		SREvaluation:       SREvaluationConfig{Cron: "30 22 * * 1-5", Timeframe: "1d", Limit: 1500, ReplayMaxRows: 200},

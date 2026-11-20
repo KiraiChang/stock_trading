@@ -742,7 +742,10 @@ type BacktestResult struct {
 	WinTrades    int       `db:"win_trades"    json:"win_trades"`
 	LossTrades   int       `db:"loss_trades"   json:"loss_trades"`
 	AvgPnL       float64   `db:"avg_pnl"       json:"avg_pnl"`
-	CreatedAt    time.Time `db:"created_at"    json:"created_at"`
+	// DataCoverage：每一檔實際取到的首尾日期、根數、暖身根數與是否被略過（JSON 陣列；I-137）。
+	// I-137 之前的結果是 NULL，API 輸出 null。格式見 docs/database-schema.md 的 backtest_results。
+	DataCoverage NullJSONText `db:"data_coverage" json:"data_coverage"`
+	CreatedAt    time.Time    `db:"created_at"    json:"created_at"`
 }
 
 type BacktestTrade struct {

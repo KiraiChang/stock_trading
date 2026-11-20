@@ -14,8 +14,9 @@ from typing import Any
 
 import pandas as pd
 
-from db import fetch_candles, fetch_chip_scores
+from db import fetch_chip_scores
 
+from ..data_range import load_task_candles
 from .backtester import BacktestEngine
 from .strategy import STRATEGY_PRESETS, build_strategy
 from .types import BacktestReport, Direction, Trade
@@ -36,7 +37,17 @@ def run_modular_backtest(
     tax_rate: float = 0.003,
     use_chip_filter: bool = False,
     chip_min_score: float = 0.0,
+    *,
+    warmup_bars: int,
+    max_task_bars: int,
+    max_symbol_bars: int | None = None,
 ) -> dict[str, Any]:
+    """依日期範圍取資料（I-137）：先取完所有標的（總根數受上限），再逐檔跑；每一檔從範圍內第一根開始交易與記權益，
+    暖身段只用來算指標。日期、標的數等請求檢查在共用入口 `engine.run_backtest` 做。"""
+    loaded, coverage = load_task_candles(
+        symbols, timeframe, start_date, end_date,
+        warmup_bars=warmup_bars, max_task_bars=max_task_bars, max_symbol_bars=max_symbol_bars,
+    )
     engine = BacktestEngine(
         initial_cash=initial_cash,
         commission_rate=commission_rate,
@@ -45,32 +56,19 @@ def run_modular_backtest(
     )
 
     reports: list[BacktestReport] = []
-    for symbol in symbols:
-        rows = fetch_candles(symbol, timeframe, limit=2000)
-        if not rows:
-            log.warning("modular backtest: symbol=%s tf=%s — no candles in DB, skipped", symbol, timeframe)
-            continue
-        df = _to_dataframe(rows, start_date, end_date)
-        if df.empty:
-            log.warning(
-                "modular backtest: symbol=%s tf=%s — no data in range %s~%s, skipped",
-                symbol, timeframe, start_date, end_date,
-            )
-            continue
-
-        chip_scores = _chip_score_map(symbol, start_date, end_date) if use_chip_filter else None
-        report = engine.run(symbol, df, build_strategy(strategy), chip_scores=chip_scores)
+    for sd in loaded:
+        chip_scores = _chip_score_map(sd.symbol, start_date, end_date) if use_chip_filter else None
+        report = engine.run(sd.symbol, sd.df, build_strategy(strategy), chip_scores=chip_scores, trade_start_index=sd.r0)
         reports.append(report)
         log.info(
             "modular backtest done symbol=%s trades=%d total_return=%.2f%%",
-            symbol, report.total_trades, report.total_return * 100,
+            sd.symbol, report.total_trades, report.total_return * 100,
         )
 
-    if not reports:
-        raise ValueError("No data loaded for any symbol in the given date range")
-
+    result = _aggregate_result(strategy, reports, initial_cash)
+    result["data_coverage"] = coverage
     return {
-        "result": _aggregate_result(strategy, reports, initial_cash),
+        "result": result,
         "trades": [_trade_to_dict(t) for r in reports for t in r.trades],
     }
 
@@ -85,18 +83,6 @@ def _chip_score_map(symbol: str, start_date: str, end_date: str) -> dict[str, fl
         key = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
         result[key] = float(r["total_score"])
     return result
-
-
-def _to_dataframe(rows: list[dict], start_date: str, end_date: str) -> pd.DataFrame:
-    df = pd.DataFrame(rows)
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert("Asia/Taipei")
-    df = df.set_index("datetime").sort_index()
-    # candles 的 open/high/low/close 在 Postgres/MySQL 是 DECIMAL 欄位，
-    # psycopg2/pymysql 預設回傳 decimal.Decimal 而非 float（SQLite 動態型別則
-    # 天生回傳 float，本地開發用 SQLite 才沒發現這個問題）。astype(float) 統一轉型，
-    # 避免 support_resistance/entries/exits 裡的 numpy 運算跟 Decimal 混用出現 TypeError。
-    df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    return df.loc[start_date:end_date]
 
 
 def _aggregate_result(strategy: str, reports: list[BacktestReport], initial_cash: float) -> dict:

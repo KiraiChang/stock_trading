@@ -29,6 +29,7 @@ type Config struct {
 	PositionAnalysis   PositionAnalysisConfig   `mapstructure:"position_analysis"`
 	Delisting          DelistingConfig          `mapstructure:"delisting"`
 	JobRetry           JobRetryConfig           `mapstructure:"job_retry"`
+	Backtest           BacktestConfig           `mapstructure:"backtest"`
 }
 
 // JobRetryConfig 是暫時性失敗的自動重跑（I-123～I-126 計畫書 docs/plans/i123-i126-job-retry.md「3.7」）。
@@ -45,6 +46,14 @@ type JobRetryConfig struct {
 	// Cutoff 是重跑**整輪**（含紀錄寫入）的截止時刻（台北，HH:MM），預設 08:45——
 	// ⛔ 不壓到 08:50 的盤前。最晚起跑 ＝ 截止 − 業務預算 − 3 分鐘。格式錯誤時退回預設並記 Error。
 	Cutoff string `mapstructure:"cutoff"`
+}
+
+// BacktestConfig：建回測任務時的檢查（I-137）。
+type BacktestConfig struct {
+	// MaxSymbols 是每個任務的標的數上限（環境變數 BACKTEST_MAX_SYMBOLS）。python 的 config.yaml 的
+	// backtest.max_symbols 必須是同一個預設值（scripts/check-backtest-contract.py 比對）；改值時 backend 與
+	// python 兩個服務要一起改（docs/development-workflow.md）。
+	MaxSymbols int `mapstructure:"max_symbols"`
 }
 
 type PositionAnalysisConfig struct {
@@ -387,6 +396,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("stock_symbols.fetch_delay_sec", 0)
 	viper.SetDefault("auth.jwt_secret", "change-me-in-production")
 	viper.SetDefault("python.sr_zones_timeout_sec", 120)
+	viper.SetDefault("backtest.max_symbols", 20)
 	viper.SetDefault("chip.sync.history_trading_days", 500)
 	viper.SetDefault("chip.sync.batch_size", 50)
 	viper.SetDefault("chip.sync.cron", "0 21 * * 1-5")

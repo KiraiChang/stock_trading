@@ -146,5 +146,9 @@ else
   # 讀不到 frontend/。這一步失敗代表加了排程卻沒同步前端，不是測試壞了。
   "$REPO_ROOT/scripts/check-job-names.sh"
 
+  # 回測的跨 runtime 契約（I-137）：backtrader 名單（python／Go／前端）、標的數上限的預設值、最大日期、
+  # 錯誤允許規則的案例檔。放這裡的理由同上：要同時讀三個 runtime 的原始碼。
+  python3 "$REPO_ROOT/scripts/check-backtest-contract.py"
+
   echo "==> frontend check + test + build 全部通過"
 fi

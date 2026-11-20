@@ -840,6 +840,11 @@ docker exec stock_trading-backend-1 sh -c \
 | `docker-compose.dev.yml` | dev 要用的話加進 backend 的 `environment:` |
 | **live 的 `/opt/stacks/scripts/stock_trading/.env`** | 要在 live 生效就加在這裡，⛔ 不加進 live `compose.yml` 的 `environment:`（兩邊都有時 `environment:` 贏） |
 
+⚠️ **例外：`BACKTEST_MAX_SYMBOLS`（回測的標的數上限；I-137）是 backend 與 python 兩個服務共用的設定**。Go 建任務時與 python 執行時都檢查，
+兩邊的預設值相同（`scripts/check-backtest-contract.py` 比對）。live 的 compose 裡 python 兩個服務⛔ 沒有 `env_file`，所以**只改 `.env` 會讓
+Go 與 python 判定不一致**。live 目前只用預設值（20）；要改的話，backend 的 `.env` 與 python 兩個服務的 `environment:` 要一起改、一起部署。
+dev compose 已讓三個服務都從同一個變數帶入（`BACKTEST_MAX_SYMBOLS=2 docker compose -f docker-compose.dev.yml up -d …`），供非預設值的驗收。
+
 以前的寫法（`deploy.sh` 範本加 `export`、compose 的 `environment:` 加 `${KEY}`）已經作廢。那種寫法只會把 `environment:` 有宣告的變數帶進容器，
 漏宣告的 `export` 被**靜默丟掉**：2026-09-08 T-071 的 `DELISTING_ENABLED`、2026-11-02 I-123～I-126 的 `JOB_RETRY_*` 都是 live 的
 `compose.yml` 漏了鍵，開關等於沒開；dev 也踩過（`STOCK_SYMBOLS_TIMEOUT_SEC` 在 shell export 了，容器裡是空的）。`env_file` 會把檔案裡
@@ -1021,6 +1026,22 @@ dev、live 與 `python/scripts/test.sh` 的測試 image 都由同一份 Dockerfi
 `@types/node`，vitest 裡讀檔要多裝相依。前端腳本掛的是 repo root，兩邊都讀得到。
 
 ℹ️ 真正的修法是讓型別從後端產生，但那需要一套產生流程，目前用這道檢查代替。
+
+### 回測的跨 runtime 契約，由 `scripts/check-backtest-contract.py` 擋
+
+I-137 起，回測有幾個值三個 runtime 都要相同，⛔ 只改其中一處就會判定不一致。`frontend/scripts/test.sh` 在最後（`check-job-names.sh` 之後）呼叫
+`python3 scripts/check-backtest-contract.py`，比對：
+
+* **backtrader 策略名單**（一次只接受 1 檔）：python 的 `STRATEGY_MAP`（準）、Go 的 `BacktraderStrategies`（`internal/backtest/validate.go`）、
+  前端的 `BACKTRADER_STRATEGIES`（`lib/api/backtest.ts`），雙向集合比較。
+* **標的數上限的預設值**：Go 的 `SetDefault("backtest.max_symbols", …)`、`backend/config.yaml` 與 `python/config.yaml`。
+* **最大、最小日期**：python 的 `job_errors.MAX_DATE`／`MIN_DATE` 與 Go 的 `MaxDate`／`MinDate`。
+* **兩份案例檔**，兩邊的單元測試各自跑全部案例：錯誤允許規則（`python/tests/data/backtest_job_error_cases.json` 與
+  `backend/internal/backtest/testdata/job_error_cases.json`）、請求驗證（`python/tests/data/backtest_request_validation_cases.json` 與
+  `backend/internal/backtest/testdata/request_validation_cases.json`），各自內容相同。
+
+放在前端腳本的理由跟 `check-job-names.sh` 相同：要同時讀三個 runtime 的原始碼，pytest 的 container 只掛載 `python/`、
+`backend/scripts/test.sh` 只掛載 `backend/`。
 
 ### live 現在跑的是哪一版程式碼
 
@@ -3286,8 +3307,9 @@ SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
     `failed`／`interrupted_on_restart`、結果與明細都回滾；另一種服務的任務⛔ 不受影響、放鎖後 `done`。
   * `lost-response`：worker 先暫停；不讀回應的 socket client（主機上的 `python3 -I`）送出 `POST`，同步點之後用 `SO_LINGER` 0 直接 RST；
     恢復 worker、等三輪 → worker ⛔ 沒有接手，放鎖後由 server 完成。⛔ 不用 `curl`（它可能早就讀到 202）。
-  * `schema`：臨時 DB（`i134smoke_<時間>`，只有回測三張表、拿掉 `execution_owner`）＋臨時 python-server（`compose run`、⛔ 不發布 port）→ 等 schema →
-    手動 `ALTER` 之後繼續啟動。只驗「欄位出現後能繼續啟動」，077 本身由 migration 測試驗。
+  * `schema`：臨時 DB（`i134smoke_<時間>`，只有回測三張表、拿掉 077 的 `execution_owner` 與 078 的 `data_coverage`）＋臨時 python-server
+    （`compose run`、⛔ 不發布 port）→ 等 schema → 只補回 077、再等兩輪探測，⛔ 不能就緒（I-137）→ 補回 078 之後才繼續啟動。
+    只驗「兩個欄位都出現後才能繼續啟動」，migration 本身由 migration 測試驗。
 * **持鎖與同步點**：背景的 psql（`application_name` 帶本輪前綴）`LOCK TABLE backtest_trades IN SHARE MODE`。鎖**明細表**而不是結果表：`finish_job`
   先寫結果、再寫明細，被擋住時結果已在同一個交易裡，砍掉程序後才驗得到「結果也一起回滾」。同步點是被測服務的連線（用 container IP 比對
   `client_addr`）的 `pg_blocking_pids()` 含本輪持鎖的 PID、而且已持有 `backtest_results` 的鎖——⛔ 只看 `wait_event_type='Lock'` 不算。
@@ -3303,6 +3325,10 @@ SCENARIOS=race,lost-response NO_BUILD=1 scripts/smoke-dev-backtest-claim.sh
   還要等 `KILL_AFTER` 才 SIGKILL）；用完就⛔ 不再執行、印出「時限用完，未執行：…」並回傳失敗——⛔ 不能每個呼叫再補一點時間（review 2026-11-18：
   原本耗盡後每次給 1 秒，`CLEANUP_TIMEOUT=1` 實際花了 10 秒）。
 * **臨時 server 用事先決定的名稱**（`i134smoke_<時間>_schema`）移除與確認；`run` 之後取不到 ID、或確認不了已經不在，就⛔ 不刪臨時 DB。
+* **`trades` 情境的覆蓋範圍**（I-137）：任務完成後，結果的 `data_coverage` 的範圍內根數要**等於** DB 裡這段台北日期的日 K 根數
+  （⛔ 被截斷就會少），首尾日期要在請求的範圍內。要驗「比 1000 根長的範圍沒有被截掉」，把範圍拉長：
+  `SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 SMOKE_START=2015-01-01 SMOKE_END=2025-12-31 scripts/smoke-dev-backtest-claim.sh`。
+  開始前也確認 dev DB 已套用 078（`backtest_results.data_coverage`），沒有就結束碼 2。
 * **`trades` 情境**（I-135；⛔ 不在預設裡）：`SCENARIOS=trades SMOKE_STRATEGY=breakout_v1 scripts/smoke-dev-backtest-claim.sh`。寫入一筆、`POST`、
   等到結束 → `done`；明細筆數等於結果的 `total_trades` 且至少 1 筆；每一筆的股數與進出場價都是正數、符合帶方向的精度界線
   （`database-schema.md` 的 `backtest_trades`）、時間換成台北是 `00:00:00`，必要欄位⛔ 不能是 NULL 或 NaN。收尾跟其他情境同一套。只接受 `breakout_v1`（界線是照 backtrader 路徑的欄位定義訂的）。

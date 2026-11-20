@@ -36,6 +36,7 @@ from db import engine, check_connection
 
 from sqlalchemy import text
 from backtest.engine import run_backtest
+from backtest.job_errors import job_error_code
 from backtest.db_writer import (
     SchemaNotReady,
     claim_job,
@@ -106,8 +107,9 @@ def _process(job: dict) -> None:
                  output["result"]["total_return"] * 100,
                  output["result"]["sharpe_ratio"])
     except Exception as exc:
+        # 對外只寫分類過的代碼（I-137）：原始例外可能帶 SQL 或參數，只進 log
         log.error("job=%s failed: %s", job_id, exc, exc_info=True)
-        fail_job(job_id, OWNER, str(exc))
+        fail_job(job_id, OWNER, job_error_code(exc))
 
 
 def main() -> None:

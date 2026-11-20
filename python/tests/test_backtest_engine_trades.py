@@ -1,6 +1,6 @@
 """backtrader 路徑的交易明細（I-135）：從成交紀錄算進出場價、股數、費用與時間。
 
-用合成的日 K 與照腳本下單的測試策略，走 `run_backtest` 同一條路徑（`fetch_candles` 換成假的、`STRATEGY_MAP`
+用合成的日 K 與照腳本下單的測試策略，走 `run_backtest` 同一條路徑（`fetch_candles_range` 換成假的、`STRATEGY_MAP`
 加上測試策略、費用換成測試自己的固定比例 1%）。費用用獨立的固定比例，跟 `TWCommission` 分開驗：
 `TWCommission` 本身的扣費由 test_tw_commission.py 用真的類別驗（I-136）。
 委託在第 n 根 K 棒送出、在第 n+1 根的開盤價成交。規格見 docs/database-schema.md 的 backtest_trades。
@@ -19,7 +19,8 @@ import backtrader as bt
 import numpy as np
 import pytest
 
-from backtest import engine
+from backtest import data_range, engine
+from candle_range_fake import FakeRangeFetch
 
 RATE = 0.01  # 測試用的費率：每次成交 1%
 T0 = datetime(2025, 1, 1, tzinfo=timezone(timedelta(hours=8)))  # 第 1 根 K 棒：台北 2025-01-01 00:00
@@ -73,7 +74,7 @@ def run(monkeypatch):
             received.append({"commission": commission, "tax": tax})
             return commission_cls()
 
-        monkeypatch.setattr(engine, "fetch_candles", lambda symbol, tf, limit: data[symbol])
+        monkeypatch.setattr(data_range, "fetch_candles_range", FakeRangeFetch(data))
         monkeypatch.setattr(engine, "TWCommission", factory)
         if actions is not None:
             monkeypatch.setitem(engine.STRATEGY_MAP, "scripted", _scripted(actions))
@@ -179,12 +180,29 @@ def test_reversal_splits_into_two_trades_with_allocated_commission(run):
     assert long_t["exit_time"] == short_t["entry_time"] == _taipei(2)
 
 
-def test_multiple_trades_and_symbols(run):
-    trades = run(
-        {"A": _rows([100] * 8), "B": _rows([50] * 8)},
-        [(1, "A", "buy", 1), (2, "A", "close", 0), (1, "B", "buy", 2), (2, "B", "close", 0),
-         (4, "B", "buy", 3), (5, "B", "close", 0)],
-    )
+def test_multiple_trades_one_symbol(run):
+    trades = run({"B": _rows([50] * 8)}, [(1, "B", "buy", 2), (2, "B", "close", 0), (4, "B", "buy", 3), (5, "B", "close", 0)])
+
+    assert sorted((t["symbol"], t["size"]) for t in trades) == [("B", 2.0), ("B", 3.0)]
+
+
+def test_extract_trades_walks_every_data():
+    """`_extract_trades` 走過每一檔資料（data → tradeid → 交易）。`run_backtest` 的 backtrader 策略只接受 1 檔（I-137），
+    所以這裡直接用 Cerebro 載入兩檔，確認取明細的迴圈本身沒有只看第一檔。"""
+    cerebro = bt.Cerebro(stdstats=False, tradehistory=True)
+    cerebro.broker.setcash(1e6)
+    cerebro.broker.addcommissioninfo(FixedRate())
+    for sym, price in (("A", 100), ("B", 50)):
+        df = data_range.to_dataframe(_rows([price] * 8))
+        data = bt.feeds.PandasData(dataname=df, datetime=None, open="open", high="high", low="low",
+                                   close="close", volume="volume", openinterest=-1)
+        data._name = sym
+        cerebro.adddata(data)
+    cerebro.addstrategy(_scripted([(1, "A", "buy", 1), (2, "A", "close", 0), (1, "B", "buy", 2), (2, "B", "close", 0),
+                                   (4, "B", "buy", 3), (5, "B", "close", 0)]))
+    strat = cerebro.run()[0]
+
+    trades = engine._extract_trades(strat, ["A", "B"])
 
     assert sorted((t["symbol"], t["size"]) for t in trades) == [("A", 1.0), ("B", 2.0), ("B", 3.0)]
 
@@ -297,11 +315,13 @@ def test_large_multi_fill_trades_pass_absolute_tolerance(run, monkeypatch):
     浮點誤差都在 1e-6 以內（⛔ 不是對任意金額的保證）。"""
     monkeypatch.setattr(engine, "INITIAL_CASH", 1e11)
     opens = [1234.57, 1234.57, 1301.13, 1187.91, 1350.39, 1288.07, 1199.99, 1273.41, 1311.17, 1222.23, 1222.23]
-    trades = run({"L": _rows(opens), "S": _rows([o * 0.731 for o in opens])},
+    # backtrader 策略一次只接受 1 檔（I-137），多方與空方分兩次跑
+    trades = run({"L": _rows(opens)},
                  [(1, "L", "buy", 300_000), (2, "L", "sell", 170_000), (3, "L", "buy", 230_000),
-                  (4, "L", "sell", 90_000), (5, "L", "buy", 41_333), (6, "L", "sell", 311_333),
-                  (1, "S", "sell", 250_000), (3, "S", "buy", 120_001), (4, "S", "sell", 77_777),
-                  (7, "S", "buy", 207_776)])
+                  (4, "L", "sell", 90_000), (5, "L", "buy", 41_333), (6, "L", "sell", 311_333)])
+    trades += run({"S": _rows([o * 0.731 for o in opens])},
+                  [(1, "S", "sell", 250_000), (3, "S", "buy", 120_001), (4, "S", "sell", 77_777),
+                   (7, "S", "buy", 207_776)])
     assert sorted((t["symbol"], t["direction"]) for t in trades) == [("L", "BUY"), ("S", "SELL")]
     for t in trades:
         assert _within_bound(t)

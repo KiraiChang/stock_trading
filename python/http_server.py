@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Any, List, Optional, Union
 from sqlalchemy import text
 from backtest.engine import run_backtest
+from backtest.job_errors import job_error_code, public_job_error
 from backtest.db_writer import (
     claim_job,
     fail_job,
@@ -136,8 +137,9 @@ def _run_and_write(req: BacktestRequest) -> None:
                  output["result"]["total_return"] * 100,
                  output["result"]["sharpe_ratio"])
     except Exception as exc:
+        # 對外只寫分類過的代碼（I-137）：原始例外可能帶 SQL 或參數，只進 log
         log.error("job=%s failed: %s", job_id, exc, exc_info=True)
-        fail_job(job_id, BACKTEST_OWNER, str(exc))
+        fail_job(job_id, BACKTEST_OWNER, job_error_code(exc))
 
 
 @app.post("/backtest", status_code=202)
@@ -175,7 +177,22 @@ def _backtest_job_payload(job_row) -> dict:
     job = {k: row[k] for k in _BACKTEST_JOB_COLUMNS if k in row}
     if "trigger_source" in job:
         job["trigger"] = job.pop("trigger_source")
+    if "error" in job:
+        # 跟 Go 的兩個 GET 同一份允許規則（I-137）：I-137 之前留下的原始文字一律改回 internal_error
+        job["error"] = public_job_error(job["error"])
     return job
+
+
+def _backtest_result_payload(res_row) -> dict | None:
+    """`backtest_results` 的列轉成對外形狀：`data_coverage` 存的是 JSON 字串，回傳陣列（I-137 之前的結果是 null），
+    跟 Go 的 `GET /api/v1/backtest/:job_id` 一致。"""
+    if not res_row:
+        return None
+    result = dict(res_row)
+    if "data_coverage" in result:
+        raw = result["data_coverage"]
+        result["data_coverage"] = json.loads(raw) if isinstance(raw, str) and raw else None
+    return result
 
 
 @app.get("/backtest/{job_id}")
@@ -193,7 +210,7 @@ async def get_backtest(job_id: str):
 
     return {
         "job":    _backtest_job_payload(job_row),
-        "result": dict(res_row) if res_row else None,
+        "result": _backtest_result_payload(res_row),
     }
 
 

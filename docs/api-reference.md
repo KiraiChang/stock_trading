@@ -1386,7 +1386,7 @@ cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
 **Request Body：**
 ```json
 {
-  "strategy": "breakout_v1",
+  "strategy": "breakout_swing_atr_v1",
   "symbols": ["2330", "2454"],
   "timeframe": "1d",
   "start_date": "2023-01-01",
@@ -1411,6 +1411,21 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
 | `pullback_swing_composite_v1` | 模組化 | Swing High/Low 支撐壓力 + 回測支撐進場 + 複合停損 |
 
 模組化策略的完整數學定義見 [backtest-modular-strategy.md](./backtest-modular-strategy.md)。
+
+回測依台北日期取 `start_date`～`end_date`（含頭含尾）的 K 棒，另取起點之前的暖身資料；規則見 `architecture.md` 的回測流程（I-137）。
+
+**400（建任務之前就拒絕；I-137）**：`error` 是代碼，前端對照成中文。
+
+| `error` | 原因 |
+|---|---|
+| `strategy, symbols, start_date, end_date are required` | 必填欄位是空的（既有） |
+| `invalid_date:start_date`、`invalid_date:end_date` | 不是 `YYYY-MM-DD`、日期不存在，或不在 `0001-01-01`～`2099-12-31` 之間 |
+| `start_after_end` | 開始日晚於結束日（同一天可以） |
+| `too_many_symbols:<n>:<max>` | 標的數超過 `BACKTEST_MAX_SYMBOLS`（預設 20） |
+| `backtrader_single_symbol:<n>` | backtrader 策略（`breakout_v1`）一次只能一檔 |
+
+建好的任務在執行時仍可能失敗（例如總根數超過上限、範圍內都沒有資料），原因寫在任務的 `error`，形式見 `architecture.md`
+「寫入失敗的一致性契約」的合法形式表。
 
 **Response（201 Created）：**
 ```json
@@ -1448,6 +1463,9 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
 取得特定回測任務狀態與結果；`result` 在任務未完成時為 `null`。（I-134 之前 `pending`／`running` 的任務因為 `error` 是 NULL 讀不出來，
 這支會回 404、列表會回 500；現在都正常。）
 
+`job.error`（這支與 `GET /backtest` 的清單都一樣）只會是分類過的代碼：I-137 之前留下的原始例外文字一律回 `internal_error`。
+`result.data_coverage` 是每一檔實際取到的資料範圍（陣列，格式見 `database-schema.md` 的 `backtest_results`）；I-137 之前的結果是 `null`。
+
 **Response（完成後）：**
 ```json
 {
@@ -1463,7 +1481,11 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
     "total_trades": 24,
     "win_trades": 15,
     "loss_trades": 9,
-    "avg_pnl": 3250.5
+    "avg_pnl": 3250.5,
+    "data_coverage": [
+      {"symbol": "2330", "first_bar": "2023-01-03", "last_bar": "2024-12-31", "bars": 484,
+       "warmup_bars": 250, "warmup_required": 250, "skipped": false}
+    ]
   }
 }
 ```
@@ -1505,6 +1527,7 @@ python 服務重啟時，自己留下的 `running` 會被收成 `failed`／`inte
 
 **python-server 的 `POST /backtest`**（backend 內部呼叫，不對外）：回應之前同步認領，成功 `202`；任務已不是 `pending`（已被 worker 認領、
 已取消或已結束）回 `409`、⛔ 不執行。backend 只依狀態碼記 log、⛔ 不改任務狀態；連線失敗或逾時記成「結果未知」（server 可能已經認領）。
+python-server 的 `GET /backtest/{job_id}`（內部用）跟 Go 的 `/:job_id` 一樣：`error` 回傳前比對同一份允許規則、`data_coverage` 是陣列或 `null`。
 
 ---
 

@@ -1196,7 +1196,9 @@ Python 負責回測，獨立運行，透過共用 DB 與 Go 溝通。
 Go（寫入 backtest_jobs）
     ↓ DB polling（Method A）或 HTTP（Method B）
 Python Worker / HTTP Server
-    ↓ backtest/engine.py 依 strategy 名稱分派：
+    ↓ backtest/engine.py 的 run_backtest（兩條執行路徑的共用入口）先檢查請求（策略、日期、標的數、backtrader 單檔），
+    │ 再依日期範圍取 K 棒（範圍段＋起點之前 250 根暖身段，任務的總根數有上限；backtest/data_range.py）
+    ↓ 依 strategy 名稱分派：
     │   - 命中 backtest/modular/strategy.py 的 STRATEGY_PRESETS → 走純 pandas/numpy
     │     的模組化引擎（見 backtest-modular-strategy.md）
     │   - 否則走既有 backtrader 引擎（STRATEGY_MAP）；要開 tradehistory，交易明細從每次成交算
@@ -1209,7 +1211,7 @@ Go API（讀取結果回傳給前端）
 
 兩條路徑同時在用（backend 呼叫 HTTP，worker 也照常輪詢），同一筆由**原子認領**決定誰執行：條件式的 `pending` → `running`，
 同時寫 `execution_owner`（`worker`／`server`）；server 在回應之前就認領。結果、交易明細與 `done` 在同一個交易提交，
-條件是「仍是自己的 `running`」。python 兩個服務啟動時先等 schema（migration 077），再把自己上一個程序留下的 `running` 收成
+條件是「仍是自己的 `running`」。python 兩個服務啟動時先等 schema（migration 077 的 `execution_owner` 與 078 的 `data_coverage`），再把自己上一個程序留下的 `running` 收成
 `failed`／`interrupted_on_restart`（⛔ 不自動重跑）。這個收尾依賴「每種服務只有一個程序」；狀態轉移表、這個前提與會破壞它的變更，
 見 `database-schema.md` 的 `backtest_jobs`（I-134）。
 ⚠️ I-134 上版（2026-11-18）之後到 2026-11-19，live 只跑過一筆回測（`bt_20261119_062856_000`），由 server 認領。worker 認領並跑完一筆的路徑在 live 上還沒實際發生過，
@@ -1219,6 +1221,35 @@ Go API（讀取結果回傳給前端）
 * 之後新建的只有 `bt_20261119_062856_000`（14:28:56 建立、14:28:57 `done`），它的 `execution_owner` 查到是 `server`（2026-11-19）。
 * 部署紀錄的原文：I-134 的在 `git show 85849b9:docs/plans/i134-backtest-claim.md`，I-135 的在 `git show 419856e:docs/plans/i135-backtrader-trades.md`，I-136 的在 `git show 419856e:docs/plans/i136-tw-commission.md`。
   `execution_owner` 的查詢結果只記在這裡。
+
+**依日期範圍取資料（I-137）**：兩條路徑都依台北日期取 `start_date`～`end_date`（含頭含尾）的 K 棒，⛔ 不再先取「最近 N 根」再切
+（原本 backtrader 是 1000 根、modular 是 2000 根，範圍的前段會被靜默截掉）。
+
+* **暖身**：起點之前另取 `backtest.warmup_bars`（250）根，只用來算指標。目前最長的回看是 60 根；Wilder 平滑經過 250 根，
+  起點的權重剩約 1e-8。暖身根數固定，同一個請求的結果⛔ 不會因為 DB 補了更早的資料而改變。
+* **交易起點與統計起點都是範圍內第一根**：
+  * backtrader：`BaseTWStrategy` 的 `trade_start` 之前⛔ 不下單（用 bar 的**台北日期**判斷，backtrader 的 bar 時間是不帶時區的 UTC）。
+    統計改由 `RangeValue` 分析器記範圍內每一根的資產，再用跟 `Returns`／`SharpeRatio`／`DrawDown` 相同的公式算
+    （`backtest/range_stats.py`；原本三個分析器會算到暖身段）：年化報酬與夏普**以日為期**（取每一天最後一根的資產；分 K 一天多根時⛔ 不能把每一根當成一天），
+    最大回撤逐根算。
+  * modular：迴圈從範圍內第一根開始；暖身不足、還不能評估訊號時，逐根記初始權益（權益曲線一定從範圍首根起）。
+* **任務上限**：標的數 `BACKTEST_MAX_SYMBOLS`（20；Go 建任務時與 python 都檢查）；每一檔的範圍段＋暖身段 `backtest.max_symbol_bars`
+  （5,000，暖身取滿時範圍最多 4,750 根）；所有標的合計 `backtest.max_task_bars`（35,000；自選清單 11 檔的日 K 整段歷史約 3 萬根放得下，最壞情況約 8 分鐘，T-086 之後再評估提高）。後兩個只有 python 算，由讀取本身的 `LIMIT` 擋，
+  先取完所有標的才開始跑。超過就讓任務失敗、⛔ 不截斷，每一檔的上限先擋到（`symbol_too_large`，這一檔本身就超過、要縮短範圍）跟先碰到任務的總額度（`task_too_large`，要減少檔數或縮短範圍；
+  ⚠️ 查詢在總額度用完就停，⛔ 不知道那一檔本身有沒有超過每一檔的上限）分開回報。
+  每一檔要有上限是因為 modular 的時間跟每一檔根數的平方成正比（5,000 根約 60～76 秒；`todo.md` T-086）。
+* **日期**：`YYYY-MM-DD`、存在的日期、開始日 ≤ 結束日、介於 `0001-01-01`～`2099-12-31`（取數上界是結束日隔天，`9999-12-31` 會溢位；
+  年份 `0000` Go 的 `time.Parse` 收、python 不收、PostgreSQL 也會報錯，所以 Go 明確擋掉）。Go 與 python 的判定由同一份請求驗證案例檔鎖住。
+* **backtrader 策略一次只接受 1 檔**：`BreakoutV1` 只看第一檔資料，多檔時其他檔⛔ 不會交易（真正的多檔見 `issue.md` I-138）。
+  前端選到它時改成單選，Go 回 400，python 也擋。
+* **覆蓋範圍**：每一檔實際取到的首尾日期、根數、暖身根數與是否被略過寫進 `backtest_results.data_coverage`，前端在總表上方一檔一行顯示。
+  範圍內的缺漏⛔ 不偵測（沒有獨立的交易日依據）。
+* **錯誤只寫分類過的代碼**：`backtest_jobs.error` 見本檔「寫入失敗的一致性契約」的合法形式表；Go 的兩個 GET 與 python-server 的 GET
+  回傳前再比對同一份允許規則。
+* 三個 runtime 共用的值（backtrader 名單、標的數的預設值、最大日期、錯誤規則的案例檔）由 `scripts/check-backtest-contract.py` 比對。
+* **資料不足**（backtrader）：執行前檢查實際載入的範圍段＋暖身段是否夠策略的 minperiod（`BreakoutV1.required_bars()`，目前 20 根）。
+  不夠就讓任務失敗（`insufficient_data`，畫面顯示「資料不足：取得 19 根，至少需要 20 根」），⛔ 不讓 backtrader 的 runonce 模式丟 `IndexError`。
+  暖身沒滿 250 根但仍夠初始化時照常跑，覆蓋範圍標暖身不足。
 
 模組化回測可選擇啟用 `use_chip_filter`，用 `chip_scores.total_score` 與
 `chip_min_score` 門檻過濾進場訊號；legacy backtrader 策略收到該選項時會記 warning
@@ -1637,7 +1668,8 @@ DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立�
 以及 handler 寫進 job 紀錄的 error 與 backfill／chip 的 `failures` 陣列——
 **所有會流到畫面的 job 錯誤欄位**（2026-09-02 起；**2026-09-03 部署、2026-09-08
 以四個交易日的 live 紀錄驗證完成**——原記於 `issue.md` I-104，已收斂）。
-分類器在 `internal/joberr`。
+分類器在 `internal/joberr`。回測任務的 `backtest_jobs.error` 由 python 寫入，I-137 起也納入這條約束
+（分類在 `python/backtest/job_errors.py`，Go 的對應規則在 `internal/backtest/validate.go`；形式見下表）。
 
 ⚠️ **合法形式依欄位而不同，⛔ 不要用單一格式判**：
 
@@ -1645,6 +1677,7 @@ DB 判重擋下。要保證投遞得另立 outbox／retry worker，那是獨立�
 |---|---|
 | `job_runs.error` | `stage:reason`、`stage:symbol:reason`、`stage:N (symbol:reason, …)`（`jobFailureTally.summary()` 與 `corporate_action_sync` 的 `<stage>_failed`，明細上限 `summaryDetailCap` 10 筆）、`stage:N`（沒有逐檔資訊時只記數量，例如 `fetch_failed:11`）、經核准的 `SafeMessenger` 描述、以及既有的固定安全文字 |
 | job 紀錄的 error（`MarkFailed`） | `stage:reason` |
+| `backtest_jobs.error`（python 寫入；I-137） | 封閉值域的代碼：`invalid_date:<start_date\|end_date>`、`start_after_end`、`too_many_symbols:<n>:<max>`、`backtrader_single_symbol:<n>`、`task_too_large:<代號或 ?>:<至少 n>:<max>`（合計）、`symbol_too_large:<代號或 ?>:<至少 n>:<max>`（單一檔）、`insufficient_data:<代號或 ?>:<取得 n>:<需要 m>`、`no_data_in_range`、`unknown_strategy`、`interrupted_on_restart`、`internal_error`；Go 取消任務寫的既有文字 `cancelled by user`。其他例外一律 `internal_error`（原始例外只進 log）。讀出端點（Go 的 `GET /backtest`、`/:job_id` 與 python-server 的 `GET /backtest/{job_id}`）回傳前比對同一份規則，I-137 之前留下的原始文字改回 `internal_error` |
 | `failures[].error`（backfill／chip） | **裸 reason code**（symbol 已在同一列的欄位裡） |
 
 **判準是「不含原始錯誤文字、主機、DSN、SQL 片段」，不是「符合某個格式」**——
@@ -1785,6 +1818,7 @@ backend 在 `config.Load()` 之後、**連 DB 之前**依下表檢查最終的�
 | `YAHOO_BASE_URL`、`YAHOO_RATE_LIMIT`、`YAHOO_BATCH_SIZE` | 見 `SetDefault` | Yahoo 盤中；`RATE_LIMIT` 另外給除權息來源用（無條件） | 網址要能解析（`YAHOO_ENABLED=true` 時）；`RATE_LIMIT` ≥ 1（無條件，除權息會用）；`BATCH_SIZE` ≥ 1（啟用時） | 見規則 | 全部 |
 | `PYTHON_SERVICE_URL` | 空白 | SR 分析（排程與手動）、回測的 Method B | ⛔ 不能是空值，而且要能解析成 `http(s)` 網址 | 無條件 | prod |
 | `PYTHON_SR_ZONES_TIMEOUT_SEC` | `120` | SR zone 呼叫 | ≥ 1 | 無條件 | 全部 |
+| `BACKTEST_MAX_SYMBOLS` | `20` | `POST /backtest` 的標的數上限（python 兩個服務也讀同一個變數、同一個預設值；I-137） | ≥ 1 | 無條件 | 全部 |
 | `STOCK_SYMBOLS_CRON` | `30 6 * * *` | 主檔同步 | `cron.ParseStandard` 解析得了 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
 | `STOCK_SYMBOLS_SYNC_URLS` | 上市＋上櫃兩個網址 | 主檔同步 | 至少一個、每個都能解析 | `STOCK_SYMBOLS_ENABLED=true` | 全部 |
 | `CHIP_SYNC_CRON` | `0 21 * * 1-5` | 籌碼採集（無條件註冊） | 解析得了 | 無條件 | 全部 |

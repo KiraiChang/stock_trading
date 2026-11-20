@@ -30,7 +30,21 @@ export interface BacktestResult {
   win_trades: number
   loss_trades: number
   avg_pnl: number
+  // 每一檔實際取到的資料範圍（I-137）；I-137 之前的結果是 null
+  data_coverage?: DataCoverage[] | null
   created_at: string
+}
+
+// 覆蓋範圍的一檔（格式見 docs/database-schema.md 的 backtest_results）。
+// first_bar 晚於開始日可能只是遇到週末或休市，⛔ 不判定成缺漏；範圍內的缺漏也⛔ 不偵測。
+export interface DataCoverage {
+  symbol: string
+  first_bar: string | null
+  last_bar: string | null
+  bars: number
+  warmup_bars: number
+  warmup_required: number
+  skipped: boolean
 }
 
 export interface BacktestTrade {
@@ -66,6 +80,14 @@ export const BACKTEST_STRATEGIES = [
   { value: 'pullback_atrchannel_structural_v1', label: 'pullback_atrchannel_structural_v1（ATR通道 + 結構停損）' },
   { value: 'pullback_swing_composite_v1', label: 'pullback_swing_composite_v1（Swing S/R + 複合停損）' },
 ] as const
+
+// backtrader 引擎的策略（python 的 STRATEGY_MAP）：一次只能回測一檔（I-137；真正的多檔見 docs/issue.md I-138）。
+// ⛔ 改這份名單要同步 Go 的 BacktraderStrategies 與 python 的 STRATEGY_MAP（scripts/check-backtest-contract.py 比對）。
+export const BACKTRADER_STRATEGIES = ['breakout_v1'] as const
+
+export function isBacktraderStrategy(strategy: string): boolean {
+  return (BACKTRADER_STRATEGIES as readonly string[]).includes(strategy)
+}
 
 export async function submitBacktest(opts: SubmitBacktestOptions): Promise<BacktestJob> {
   const res = await apiFetch<{ job: BacktestJob }>('/backtest', {

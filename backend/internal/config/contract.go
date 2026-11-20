@@ -246,6 +246,7 @@ func Validate(cfg *Config) []Violation {
 		c.url("PYTHON_SERVICE_URL", cfg.Python.ServiceURL, "http", "https")
 	}
 	c.atLeast("PYTHON_SR_ZONES_TIMEOUT_SEC", cfg.Python.SRZonesTimeoutSec, 1)
+	c.atLeast("BACKTEST_MAX_SYMBOLS", cfg.Backtest.MaxSymbols, 1)
 
 	// ── 主檔同步 ──
 	if cfg.StockSymbols.Enabled {

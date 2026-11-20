@@ -1,0 +1,228 @@
+[
+ {
+  "name": "合法",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "同一天",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-06-02",
+  "end_date": "2025-06-02",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "最大日期",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2099-12-31",
+  "end_date": "2099-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "最小日期",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "0001-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "年份 0000",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "0000-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "結束日年份 0000",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "0000-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:end_date"
+ },
+ {
+  "name": "斜線",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025/01/01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "少補零",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-1-1",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "日期不存在",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-02-30",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "非閏年 2/29",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-02-29",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "閏年 2/29",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2024-02-29",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "9999-12-31",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "9999-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:end_date"
+ },
+ {
+  "name": "2100-01-01",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2100-01-01",
+  "max_symbols": 2,
+  "want": "invalid_date:end_date"
+ },
+ {
+  "name": "結尾多空白",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-01-01 ",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ },
+ {
+  "name": "開始晚於結束",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "2330"
+  ],
+  "start_date": "2025-06-02",
+  "end_date": "2025-06-01",
+  "max_symbols": 2,
+  "want": "start_after_end"
+ },
+ {
+  "name": "modular 多檔",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "A",
+   "B"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "標的數超過",
+  "strategy": "breakout_swing_atr_v1",
+  "symbols": [
+   "A",
+   "B",
+   "C"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "too_many_symbols:3:2"
+ },
+ {
+  "name": "backtrader 多檔",
+  "strategy": "breakout_v1",
+  "symbols": [
+   "A",
+   "B"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "backtrader_single_symbol:2"
+ },
+ {
+  "name": "backtrader 單檔",
+  "strategy": "breakout_v1",
+  "symbols": [
+   "A"
+  ],
+  "start_date": "2025-01-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": ""
+ },
+ {
+  "name": "日期先於檔數檢查",
+  "strategy": "breakout_v1",
+  "symbols": [
+   "A",
+   "B",
+   "C"
+  ],
+  "start_date": "2025-13-01",
+  "end_date": "2025-12-31",
+  "max_symbols": 2,
+  "want": "invalid_date:start_date"
+ }
+]

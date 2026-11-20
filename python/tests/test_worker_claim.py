@@ -87,13 +87,29 @@ def test_run_error_fails_as_worker(monkeypatch, calls):
     monkeypatch.setattr(worker, "claim_job", lambda job_id, owner: True)
 
     def boom(**kw):
-        raise RuntimeError("no candles")
+        raise RuntimeError("no candles at SELECT * FROM candles WHERE secret")
 
     monkeypatch.setattr(worker, "run_backtest", boom)
 
     worker._process(dict(JOB))
 
-    assert calls == [("fail", "j1", "worker", "no candles")]
+    # 對外只寫分類過的代碼（I-137）：非預期的例外一律 internal_error，原始文字⛔ 不寫進 error
+    assert calls == [("fail", "j1", "worker", "internal_error")]
+
+
+def test_known_error_code_is_written_as_is(monkeypatch, calls):
+    from backtest.job_errors import BacktestJobError
+
+    monkeypatch.setattr(worker, "claim_job", lambda job_id, owner: True)
+
+    def boom(**kw):
+        raise BacktestJobError("task_too_large:2330:60001:60000")
+
+    monkeypatch.setattr(worker, "run_backtest", boom)
+
+    worker._process(dict(JOB))
+
+    assert calls == [("fail", "j1", "worker", "task_too_large:2330:60001:60000")]
 
 
 class _StopLoop(BaseException):

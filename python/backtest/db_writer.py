@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -34,7 +35,7 @@ SCHEMA_WAIT_TIMEOUT_SEC = 120.0
 
 
 class SchemaNotReady(RuntimeError):
-    """等不到 `backtest_jobs.execution_owner`（migration 077 還沒套用）。"""
+    """等不到需要的欄位：`backtest_jobs.execution_owner`（migration 077）或 `backtest_results.data_coverage`（078）。"""
 
 
 class _NotOwner(Exception):
@@ -49,16 +50,16 @@ def _check_owner(owner: str) -> None:
 _RESULT_SQL = text("""
     INSERT INTO backtest_results
         (job_id, strategy, total_return, annual_return, win_rate,
-         max_drawdown, sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl)
+         max_drawdown, sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, data_coverage)
     VALUES
         (:job_id, :strategy, :total_return, :annual_return, :win_rate,
-         :max_drawdown, :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl)
+         :max_drawdown, :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl, :data_coverage)
     ON CONFLICT(job_id) DO UPDATE SET
         total_return=excluded.total_return, annual_return=excluded.annual_return,
         win_rate=excluded.win_rate, max_drawdown=excluded.max_drawdown,
         sharpe_ratio=excluded.sharpe_ratio, total_trades=excluded.total_trades,
         win_trades=excluded.win_trades, loss_trades=excluded.loss_trades,
-        avg_pnl=excluded.avg_pnl
+        avg_pnl=excluded.avg_pnl, data_coverage=excluded.data_coverage
 """)  # SQLite／PostgreSQL 的 ON CONFLICT 語法；MySQL 需改為 ON DUPLICATE KEY UPDATE
 
 _TRADE_SQL = text("""
@@ -103,9 +104,13 @@ def finish_job(job_id: str, owner: str, result: dict, trades: list[dict]) -> boo
         SET status = 'done', error = '', finished_at = CURRENT_TIMESTAMP
         WHERE job_id = :id AND status = 'running' AND execution_owner = :owner
     """)
+    params = {"job_id": job_id, **result}
+    # 覆蓋範圍（I-137）存成 JSON 字串；沒有的話（例如舊的呼叫端）是 NULL
+    coverage = result.get("data_coverage")
+    params["data_coverage"] = json.dumps(coverage, ensure_ascii=False) if coverage is not None else None
     try:
         with engine.begin() as conn:
-            conn.execute(_RESULT_SQL, {"job_id": job_id, **result})
+            conn.execute(_RESULT_SQL, params)
             for t in trades:
                 conn.execute(_TRADE_SQL, {"job_id": job_id, **t})
             if conn.execute(done_sql, {"id": job_id, "owner": owner}).rowcount != 1:
@@ -165,10 +170,16 @@ def reap_interrupted(owner: str) -> list[str]:
     return job_ids
 
 
+# 兩個 python 服務在接任務之前要等的欄位（migration 由 backend 啟動時套用）。
+# 078 的 data_coverage（I-137）也要等：⛔ 改成「寫入時才報錯」會讓正常任務跑完整段才因為上版時序變成 failed。
+SCHEMA_REQUIRED = "backtest_jobs.execution_owner (077), backtest_results.data_coverage (078)"
+
+
 def _schema_ready() -> bool:
     try:
         with engine.connect() as conn:
             conn.execute(text("SELECT execution_owner FROM backtest_jobs WHERE 1 = 0"))
+            conn.execute(text("SELECT data_coverage FROM backtest_results WHERE 1 = 0"))
         return True
     except Exception as exc:  # 欄位不存在或 DB 暫時連不上，都等下一輪
         log.info("schema not ready yet: %s", type(exc).__name__)
@@ -198,9 +209,9 @@ def wait_for_schema(
     clock: Callable[[], float] = time.monotonic,
     probe: Callable[[], bool] = _schema_ready,
 ) -> None:
-    """等 `backtest_jobs.execution_owner` 出現（migration 由 backend 啟動時套用）。
+    """等需要的欄位出現（`SCHEMA_REQUIRED`；migration 由 backend 啟動時套用）。
 
-    compose 裡 python ⛔ 不等 backend，新的 python 可能比 077 先啟動。每 `interval` 秒查一次，整體最多 `timeout` 秒：
+    compose 裡 python ⛔ 不等 backend，新的 python 可能比 077／078 先啟動。每 `interval` 秒查一次，整體最多 `timeout` 秒：
     每次探測的等待時間是剩餘時間（探測卡住也不會超過）、探測回來之後再核對一次期限（回來時已經過期就算逾時，
     ⛔ 不回報成功）。逾時 raise `SchemaNotReady`，由呼叫端以非 0 結束、交給 compose 重啟。
     ⛔ 不在 python 端建立欄位（schema 只由 goose 管）。
@@ -209,8 +220,8 @@ def wait_for_schema(
 
     def not_ready(why: str) -> SchemaNotReady:
         return SchemaNotReady(
-            f"backtest_jobs.execution_owner not found within {timeout:.0f}s ({why}; "
-            "migration 077 not applied; backend applies migrations on startup)"
+            f"required columns not found within {timeout:.0f}s ({why}; need {SCHEMA_REQUIRED}; "
+            "backend applies migrations on startup)"
         )
 
     while True:
@@ -220,10 +231,10 @@ def wait_for_schema(
         if clock() > deadline:
             raise not_ready("schema probe returned after the deadline")
         if ok:
-            log.info("schema ready: backtest_jobs.execution_owner exists")
+            log.info("schema ready: %s exist", SCHEMA_REQUIRED)
             return
         left = deadline - clock()
         if left <= 0:
             raise not_ready("timed out")
-        log.info("waiting for schema (backtest_jobs.execution_owner), retry in %.0fs", interval)
+        log.info("waiting for schema (%s), retry in %.0fs", SCHEMA_REQUIRED, interval)
         sleep(min(interval, left))

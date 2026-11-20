@@ -164,7 +164,7 @@ func main() {
 	sigEngine := signal.NewEngine(candleRepo, signalRepo, rdb, indEngine, chipScoreRepo, log)
 
 	// Backtest manager
-	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, log)
+	btManager := backtest.NewManager(backtestRepo, cfg.Python.ServiceURL, cfg.Backtest.MaxSymbols, log)
 
 	// 個股分析：實際計算委由 Python（重用 backtest/modular 的模組化策略元件），
 	// Go 只負責呼叫、持久化與驗證；PYTHON_SERVICE_URL 未設定時呼叫會回錯誤訊息

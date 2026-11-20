@@ -186,3 +186,80 @@ def test_job_query_against_real_schema_returns_public_keys(client, backtest_sqli
 
     assert response.status_code == 200
     assert set(response.json()["job"]) == PUBLIC_JOB_KEYS
+
+
+# ── I-137：error 只回分類過的代碼、data_coverage 是陣列或 null ─────────────────
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_CASES = json.loads((Path(__file__).resolve().parent / "data" / "backtest_job_error_cases.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", _CASES, ids=lambda c: repr(c["input"])[:40])
+def test_error_follows_the_shared_public_rule(client, fake_engine, case):
+    """跟 Go 的兩個 GET 同一份案例檔：舊的原始文字（含 SQL）改回 internal_error，合法代碼、取消與中斷照舊。"""
+    fake_engine(job_row={"job_id": "job-1", "status": "failed", "error": case["input"]}, result_row=None)
+
+    response = client.get(ENDPOINT.format(job_id="job-1"))
+
+    assert response.status_code == 200
+    assert response.json()["job"]["error"] == case["want"]
+
+
+def test_raw_exception_text_never_reaches_the_response(client, fake_engine):
+    raw = "(psycopg2.errors.UndefinedColumn) column \"secret_col\" does not exist [SQL: SELECT secret_col FROM t]"
+    fake_engine(job_row={"job_id": "job-1", "status": "failed", "error": raw}, result_row=None)
+
+    response = client.get(ENDPOINT.format(job_id="job-1"))
+
+    assert "secret_col" not in response.text and "SELECT" not in response.text
+    assert response.json()["job"]["error"] == "internal_error"
+
+
+def test_data_coverage_is_parsed_into_a_list(client, fake_engine):
+    cov = [{"symbol": "2330", "first_bar": "2024-01-02", "last_bar": "2025-12-31", "bars": 487,
+            "warmup_bars": 250, "warmup_required": 250, "skipped": False}]
+    fake_engine(job_row={"job_id": "job-1", "status": "done"},
+                result_row={"job_id": "job-1", "total_trades": 3, "data_coverage": json.dumps(cov)})
+
+    response = client.get(ENDPOINT.format(job_id="job-1"))
+
+    assert response.json()["result"]["data_coverage"] == cov  # 陣列，⛔ 不是字串
+
+
+def test_data_coverage_of_old_results_is_null(client, fake_engine):
+    fake_engine(job_row={"job_id": "job-1", "status": "done"},
+                result_row={"job_id": "job-1", "total_trades": 3, "data_coverage": None})
+
+    response = client.get(ENDPOINT.format(job_id="job-1"))
+
+    assert response.json()["result"]["data_coverage"] is None
+
+
+def test_finish_job_writes_coverage_and_get_returns_it(client, backtest_sqlite, monkeypatch):
+    """真的 schema（含 078）：finish_job 把覆蓋範圍寫成 JSON 字串，GET 讀回陣列。"""
+    from sqlalchemy import text
+
+    from backtest import db_writer
+
+    eng = backtest_sqlite()
+    with eng.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO backtest_jobs (job_id, type, strategy, symbols, timeframe, start_date, end_date,
+                                       status, trigger_source, execution_owner)
+            VALUES ('job-1', 'backtest', 'breakout_v1', '["2330"]', '1d', '2026-01-01', '2026-06-30',
+                    'running', 'manual', 'server')
+        """))
+    monkeypatch.setattr(http_server, "engine", eng)
+    cov = [{"symbol": "2330", "first_bar": "2026-01-02", "last_bar": "2026-06-30", "bars": 120,
+            "warmup_bars": 250, "warmup_required": 250, "skipped": False}]
+    result = {"strategy": "breakout_v1", "total_return": 0.0, "annual_return": 0.0, "win_rate": 0.0,
+              "max_drawdown": 0.0, "sharpe_ratio": 0.0, "total_trades": 0, "win_trades": 0, "loss_trades": 0,
+              "avg_pnl": 0.0, "data_coverage": cov}
+    assert db_writer.finish_job("job-1", "server", result, [])
+
+    body = client.get(ENDPOINT.format(job_id="job-1")).json()
+
+    assert body["result"]["data_coverage"] == cov
+    assert body["job"]["status"] == "done"

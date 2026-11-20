@@ -9,10 +9,13 @@
     getBacktestTrades,
     cancelBacktestJob,
     BACKTEST_STRATEGIES,
+    isBacktraderStrategy,
     type BacktestJob,
     type BacktestResult,
     type BacktestTrade,
   } from '../lib/api/backtest'
+  import { ApiError } from '../lib/api/client'
+  import { describeBacktestCode, describeJobFailure } from '../lib/backtestErrors'
   import type { WatchlistItem } from '../lib/stores/market'
 
   const POLL_MS = 5000
@@ -25,6 +28,12 @@
   let endDate = defaultEndDate()
   let submitting = false
   let submitError = ''
+  // backtrader 策略一次只能回測一檔（I-137）：首次載入與切換到它時⛔ 不預選，要使用者自己選
+  const SINGLE_HINT = 'backtrader 版一次只能回測一檔，請選一檔'
+  let selectHint = ''
+  let lastStrategy = strategy
+  $: singleMode = isBacktraderStrategy(strategy)
+  $: onStrategyChange(strategy)
 
   // ── Job 清單（輪詢） ───────────────────────────────────────────
   let jobs: BacktestJob[] = []
@@ -34,6 +43,7 @@
 
   // ── 選中 job 的結果詳情 ──────────────────────────────────────
   let selectedJobId = ''
+  let selectedJob: BacktestJob | null = null
   let selectedResult: BacktestResult | null = null
   let selectedTrades: BacktestTrade[] = []
   let detailLoading = false
@@ -51,7 +61,12 @@
 
   onMount(async () => {
     watchlistItems = await fetchWatchlist().catch(() => [])
-    selectedSymbols = new Set(watchlistItems.map((i) => i.symbol))
+    if (isBacktraderStrategy(strategy)) {
+      selectedSymbols = new Set()
+      selectHint = SINGLE_HINT
+    } else {
+      selectedSymbols = new Set(watchlistItems.map((i) => i.symbol))
+    }
     await loadJobs()
     timer = setInterval(loadJobs, POLL_MS)
   })
@@ -75,7 +90,25 @@
     }
   }
 
+  function onStrategyChange(s: string) {
+    if (s === lastStrategy) return
+    lastStrategy = s
+    // 從 modular 切到 backtrader、而且已選超過 1 檔：清空並提示，⛔ 不自動挑一檔
+    if (isBacktraderStrategy(s) && selectedSymbols.size > 1) {
+      selectedSymbols = new Set()
+      selectHint = SINGLE_HINT
+    } else if (!isBacktraderStrategy(s)) {
+      selectHint = ''
+    }
+  }
+
   function toggleSymbol(symbol: string) {
+    if (singleMode) {
+      // 單選：選新的一檔就取代舊的
+      selectedSymbols = selectedSymbols.has(symbol) ? new Set() : new Set([symbol])
+      if (selectedSymbols.size === 1) selectHint = ''
+      return
+    }
     if (selectedSymbols.has(symbol)) selectedSymbols.delete(symbol)
     else selectedSymbols.add(symbol)
     selectedSymbols = selectedSymbols
@@ -109,8 +142,12 @@
       })
       await loadJobs()
       await selectJob(job.job_id)
-    } catch {
-      submitError = '送出回測失敗，請稍後再試'
+    } catch (e) {
+      // 400 是後端明確拒絕（日期、檔數、backtrader 多檔），顯示原因；其他錯誤維持原本的訊息
+      submitError =
+        e instanceof ApiError && e.status === 400
+          ? describeBacktestCode(e.message) ?? '送出的內容不合法，請檢查日期與股票'
+          : '送出回測失敗，請稍後再試'
     } finally {
       submitting = false
     }
@@ -127,7 +164,8 @@
       detailError = ''
     }
     try {
-      const { result } = await getBacktestJob(jobId)
+      const { job, result } = await getBacktestJob(jobId)
+      selectedJob = job
       selectedResult = result
       selectedTrades = result ? await getBacktestTrades(jobId) : []
     } catch {
@@ -231,10 +269,15 @@
         <div>
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs text-muted">選擇股票</span>
-            <button class="text-xs text-muted hover:text-white transition-colors" on:click={toggleAllSymbols}>
-              {selectedSymbols.size === watchlistItems.length && watchlistItems.length > 0 ? '取消全選' : '全選'}
-            </button>
+            {#if !singleMode}
+              <button class="text-xs text-muted hover:text-white transition-colors" on:click={toggleAllSymbols}>
+                {selectedSymbols.size === watchlistItems.length && watchlistItems.length > 0 ? '取消全選' : '全選'}
+              </button>
+            {/if}
           </div>
+          {#if selectHint}
+            <p class="text-xs text-amber-400 mb-2" data-testid="select-hint">{selectHint}</p>
+          {/if}
           <div class="max-h-48 overflow-y-auto border border-border rounded-lg">
             {#if watchlistItems.length === 0}
               <p class="px-4 py-6 text-center text-muted text-sm">尚無監控股票，請先至 Dashboard 新增</p>
@@ -245,7 +288,8 @@
                          hover:bg-border/20 cursor-pointer transition-colors"
                 >
                   <input
-                    type="checkbox"
+                    type={singleMode ? 'radio' : 'checkbox'}
+                    name={singleMode ? 'bt-symbol' : undefined}
                     checked={selectedSymbols.has(item.symbol)}
                     on:change={() => toggleSymbol(item.symbol)}
                     class="accent-indigo-600 w-4 h-4"
@@ -339,9 +383,31 @@
           <p class="px-5 py-8 text-center text-muted text-sm">載入中...</p>
         {:else if detailError}
           <p class="px-5 py-4 text-rise text-sm">{detailError}</p>
+        {:else if selectedJob?.status === 'failed'}
+          <div class="px-5 py-4 text-sm" data-testid="job-failed">
+            <p class="text-rise font-medium">回測失敗</p>
+            <p class="text-muted mt-1">{describeJobFailure(selectedJob.error)}</p>
+          </div>
         {:else if !selectedResult}
           <p class="px-5 py-8 text-center text-muted text-sm">尚未完成，稍後會自動刷新</p>
         {:else}
+          {#if selectedResult.data_coverage && selectedResult.data_coverage.length > 0}
+            <ul class="px-5 pt-4 space-y-1 text-xs" data-testid="data-coverage">
+              {#each selectedResult.data_coverage as c (c.symbol)}
+                <li class="text-muted">
+                  <span class="text-white font-medium">{c.symbol}</span>：
+                  {#if c.skipped}
+                    <span class="text-amber-400">區間內沒有資料，已略過</span>
+                  {:else}
+                    {c.first_bar}～{c.last_bar}，{c.bars} 根
+                    {#if c.warmup_bars < c.warmup_required}
+                      <span class="text-amber-400">，暖身不足（{c.warmup_bars}／{c.warmup_required} 根）</span>
+                    {/if}
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-4 text-xs border-b border-border">
             <div>
               <p class="text-muted mb-1">總報酬率</p>

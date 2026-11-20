@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 )
 
 // NullFloat64 / NullString / NullTime 包裝 database/sql 對應型別，
@@ -80,6 +81,34 @@ func (n *NullString) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &n.String); err != nil {
 		return err
 	}
+	n.Valid = true
+	return nil
+}
+
+// NullJSONText 是存成 TEXT 的 JSON 值（可為 NULL）。API 輸出時是**原本的 JSON 值**（例如陣列），⛔ 不是字串；
+// NULL 或空字串輸出 null。內容不是合法的 JSON 時也輸出 null（⛔ 讓整個回應壞掉）。
+// 用在 backtest_results.data_coverage（I-137）。
+type NullJSONText struct {
+	sql.NullString
+}
+
+func (n NullJSONText) MarshalJSON() ([]byte, error) {
+	if !n.Valid || n.String == "" || !json.Valid([]byte(n.String)) {
+		return []byte("null"), nil
+	}
+	return []byte(n.String), nil
+}
+
+func (n *NullJSONText) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		n.Valid = false
+		n.String = ""
+		return nil
+	}
+	if !json.Valid(data) {
+		return fmt.Errorf("NullJSONText: invalid JSON")
+	}
+	n.String = string(data)
 	n.Valid = true
 	return nil
 }

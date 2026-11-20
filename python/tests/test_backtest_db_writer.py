@@ -332,6 +332,7 @@ def test_wait_for_schema_times_out_without_077(backtest_sqlite):
 
 
 def test_wait_for_schema_continues_once_column_appears(backtest_sqlite):
+    """077 先套用、078 還沒（I-137）：仍然不就緒、繼續等；078 也套用之後才往下。"""
     eng = backtest_sqlite(upto=76)
     clock = _FakeClock()
 
@@ -340,10 +341,22 @@ def test_wait_for_schema_continues_once_column_appears(backtest_sqlite):
         if len(clock.sleeps) == 3:
             with eng.begin() as conn:
                 conn.execute(text("ALTER TABLE backtest_jobs ADD COLUMN execution_owner TEXT"))
+        if len(clock.sleeps) == 5:
+            with eng.begin() as conn:
+                conn.execute(text("ALTER TABLE backtest_results ADD COLUMN data_coverage TEXT"))
 
     db_writer.wait_for_schema(timeout=120, interval=2, sleep=sleep_then_migrate, clock=clock)
 
-    assert clock.sleeps == [2, 2, 2]
+    assert clock.sleeps == [2, 2, 2, 2, 2]
+
+
+def test_schema_not_ready_with_077_but_without_078(backtest_sqlite):
+    """077 在、078 不在：探測是 False（兩個服務都不接任務）；套用 078 之後才是 True。"""
+    eng = backtest_sqlite(upto=77)
+    assert db_writer._schema_ready() is False
+    with eng.begin() as conn:
+        conn.execute(text("ALTER TABLE backtest_results ADD COLUMN data_coverage TEXT"))
+    assert db_writer._schema_ready() is True
 
 
 def test_wait_for_schema_bounds_a_hanging_probe():

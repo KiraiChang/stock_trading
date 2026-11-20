@@ -32,6 +32,11 @@ func (h *BacktestHandler) Submit(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "strategy, symbols, start_date, end_date are required"})
 		return
 	}
+	// 日期、標的數、backtrader 單檔（I-137）：回的是跟 python 寫進 backtest_jobs.error 相同的代碼，前端對照成中文
+	if code := backtest.ValidateRequest(req, h.manager.MaxSymbols()); code != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": code})
+		return
+	}
 	req.Trigger = "manual"
 
 	job, err := h.manager.Submit(c.Request.Context(), req)
@@ -55,6 +60,9 @@ func (h *BacktestHandler) ListJobs(c *gin.Context) {
 		serverError(c, h.log, err, "backtest: list jobs")
 		return
 	}
+	for i := range jobs {
+		jobs[i].Error = backtest.PublicJobError(jobs[i].Error)
+	}
 	c.JSON(http.StatusOK, gin.H{"jobs": jobs, "total": len(jobs)})
 }
 
@@ -67,6 +75,9 @@ func (h *BacktestHandler) GetJob(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 		return
 	}
+
+	// error 只回分類過的代碼（I-137）：I-137 之前留下的原始例外文字改回 internal_error
+	job.Error = backtest.PublicJobError(job.Error)
 
 	result, _ := h.repo.GetResult(c.Request.Context(), jobID) // 可能還沒完成
 

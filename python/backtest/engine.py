@@ -14,16 +14,26 @@ from datetime import datetime, timezone
 from typing import Any
 
 import backtrader as bt
-import pandas as pd
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from config import INITIAL_CASH, COMMISSION_RATE, TAX_RATE
-from db import TAIPEI, fetch_candles
+from config import (
+    BACKTEST_MAX_SYMBOL_BARS,
+    BACKTEST_MAX_SYMBOLS,
+    BACKTEST_MAX_TASK_BARS,
+    BACKTEST_WARMUP_BARS,
+    COMMISSION_RATE,
+    INITIAL_CASH,
+    TAX_RATE,
+)
+from db import TAIPEI
 from strategy.base import TWCommission
 from strategy.breakout_v1 import BreakoutV1
+from .data_range import load_task_candles
+from .job_errors import insufficient_data, validate_request
 from .modular.service import MODULAR_STRATEGIES, run_modular_backtest
+from .range_stats import RangeValue, range_stats
 
 log = logging.getLogger(__name__)
 
@@ -51,12 +61,24 @@ def run_backtest(
     docs/chip-analysis-design.md 第9節）；legacy backtrader 策略沒有這個
     掛勾點，若請求帶了 use_chip_filter=True 只記警告並忽略，不中斷回測
     （這是選填的加分項，不該讓整個任務失敗）。
+
+    **兩條執行路徑（server、worker）的共用入口**（I-137）：先檢查策略、日期、標的數與 backtrader 單檔，
+    不符就 raise `BacktestJobError`（呼叫端寫成對外代碼、任務 `failed`）。資料依日期範圍取、另加暖身段，
+    見 `data_range.load_task_candles`。
     """
+    start_date, end_date = validate_request(
+        strategy, symbols, start_date, end_date,
+        known_strategies=set(STRATEGY_MAP) | set(MODULAR_STRATEGIES),
+        backtrader_strategies=set(STRATEGY_MAP),
+        max_symbols=BACKTEST_MAX_SYMBOLS,
+    )
     if strategy in MODULAR_STRATEGIES:
         return run_modular_backtest(
             strategy, symbols, timeframe, start_date, end_date,
             initial_cash=INITIAL_CASH, commission_rate=COMMISSION_RATE, tax_rate=TAX_RATE,
             use_chip_filter=use_chip_filter, chip_min_score=chip_min_score,
+            warmup_bars=BACKTEST_WARMUP_BARS, max_task_bars=BACKTEST_MAX_TASK_BARS,
+            max_symbol_bars=BACKTEST_MAX_SYMBOL_BARS,
         )
 
     if use_chip_filter:
@@ -66,9 +88,20 @@ def run_backtest(
              strategy, symbols, timeframe, start_date, end_date)
     t0 = time.monotonic()
 
-    strategy_cls = STRATEGY_MAP.get(strategy)
-    if strategy_cls is None:
-        raise ValueError(f"Unknown strategy: {strategy}. Available: {list(STRATEGY_MAP)} or modular: {list(MODULAR_STRATEGIES)}")
+    strategy_cls = STRATEGY_MAP[strategy]  # validate_request 已確認認得
+    # 先取完資料（總根數受上限），才開始跑。backtrader 策略只接受 1 檔（validate_request 已擋）。
+    loaded, coverage = load_task_candles(
+        symbols, timeframe, start_date, end_date,
+        warmup_bars=BACKTEST_WARMUP_BARS, max_task_bars=BACKTEST_MAX_TASK_BARS,
+        max_symbol_bars=BACKTEST_MAX_SYMBOL_BARS,
+    )
+    # 執行前檢查：實際載入的範圍段＋暖身段要夠策略的 minperiod 初始化指標，否則 backtrader（runonce）會丟 IndexError。
+    # 暖身沒滿 250 根但仍夠初始化時照常跑（覆蓋範圍會標暖身不足）。
+    need = getattr(strategy_cls, "required_bars", None)
+    for sd in loaded:
+        if need is not None and len(sd.df) < need():
+            raise insufficient_data(sd.symbol, len(sd.df), need())
+    trade_start = loaded[0].df.index[loaded[0].r0].date()
 
     # tradehistory=True：交易明細要從每次成交（history 的 event）算進出場價與股數（I-135）。
     # ⛔ 不能關：交易結束後 Trade 的 size／value 都歸 0，沒有成交紀錄就算不出來。
@@ -76,40 +109,23 @@ def run_backtest(
     cerebro.broker.setcash(INITIAL_CASH)
     # 明確傳入 config 的費率（跟 modular 的共同入口一致；I-136）
     cerebro.broker.addcommissioninfo(TWCommission(commission=COMMISSION_RATE, tax=TAX_RATE))
-    cerebro.addstrategy(strategy_cls)
+    # 暖身段只算指標：策略在 trade_start 之前⛔ 不下單，統計只算範圍內（range_stats；原本的三個分析器會算到暖身段）
+    cerebro.addstrategy(strategy_cls, trade_start=trade_start)
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
-    cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe",
-                        timeframe=bt.TimeFrame.Days, annualize=True)
-    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
-    cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
+    cerebro.addanalyzer(RangeValue, _name="range_value", trade_start=trade_start)
 
-    loaded = 0
-    for symbol in symbols:
-        rows = fetch_candles(symbol, timeframe, limit=1000)
-        if not rows:
-            log.warning("symbol=%s tf=%s — no candles in DB, skipped", symbol, timeframe)
-            continue
-        df = _to_dataframe(rows, start_date, end_date)
-        if df.empty:
-            log.warning("symbol=%s tf=%s — no data in range %s~%s, skipped",
-                        symbol, timeframe, start_date, end_date)
-            continue
-        log.info("symbol=%s loaded %d candles (%s ~ %s)",
-                 symbol, len(df), df.index[0].date(), df.index[-1].date())
+    for sd in loaded:
         data = bt.feeds.PandasData(
-            dataname=df,
+            dataname=sd.df,
             datetime=None,
             open="open", high="high", low="low",
             close="close", volume="volume", openinterest=-1,
         )
-        data._name = symbol
+        data._name = sd.symbol
         cerebro.adddata(data)
-        loaded += 1
 
-    if not cerebro.datas:
-        raise ValueError("No data loaded for any symbol in the given date range")
-
-    log.info("running cerebro with %d symbol(s), initial_cash=%.0f ...", loaded, INITIAL_CASH)
+    log.info("running cerebro with %d symbol(s), initial_cash=%.0f, trade_start=%s ...",
+             len(loaded), INITIAL_CASH, trade_start)
     initial_value = cerebro.broker.getvalue()
     results = cerebro.run()
     final_value = cerebro.broker.getvalue()
@@ -117,6 +133,7 @@ def run_backtest(
 
     strat = results[0]
     result = _extract_result(strat, strategy, initial_value, final_value)
+    result["data_coverage"] = coverage
     trades = _extract_trades(strat, symbols)
 
     log.info("backtest done in %.2fs — total_return=%.2f%%  trades=%d  win_rate=%.1f%%",
@@ -128,24 +145,11 @@ def run_backtest(
     return {"result": result, "trades": trades}
 
 
-def _to_dataframe(rows: list[dict], start_date: str, end_date: str) -> pd.DataFrame:
-    df = pd.DataFrame(rows)
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert("Asia/Taipei")
-    df = df.set_index("datetime").sort_index()
-    # candles 的 open/high/low/close/amount 在 Postgres/MySQL 是 DECIMAL 欄位，
-    # psycopg2/pymysql 預設回傳 decimal.Decimal 而非 float（SQLite 動態型別則
-    # 天生回傳 float，本地開發用 SQLite 才沒發現這個問題）。astype(float) 統一轉型，
-    # 避免後續數值運算跟 Decimal 混用出現 TypeError。
-    df = df[["open", "high", "low", "close", "volume"]].astype(float)
-    df = df.loc[start_date:end_date]
-    return df
-
-
 def _extract_result(strat, strategy: str, initial: float, final: float) -> dict:
     ta = strat.analyzers.trades.get_analysis()
-    sharpe_val = strat.analyzers.sharpe.get_analysis().get("sharperatio", 0.0) or 0.0
-    dd = strat.analyzers.drawdown.get_analysis()
-    ret = strat.analyzers.returns.get_analysis()
+    rv = strat.analyzers.range_value.get_analysis()
+    stats = range_stats(rv["start_value"], rv["values"], final, rv["days"])
+    sharpe_val = stats.sharpe_ratio or 0.0
 
     total_closed = ta.get("total", {}).get("closed", 0)
     won = ta.get("won", {}).get("total", 0)
@@ -153,14 +157,14 @@ def _extract_result(strat, strategy: str, initial: float, final: float) -> dict:
     pnl_net = ta.get("pnl", {}).get("net", {}).get("total", 0.0)
 
     total_return = (final - initial) / initial if initial else 0.0
-    annual_return = float(ret.get("rnorm100", 0.0)) / 100.0
+    annual_return = stats.annual_return
 
     return {
         "strategy":      strategy,
         "total_return":  round(total_return, 6),
         "annual_return": round(annual_return, 6),
         "win_rate":      round(won / total_closed, 4) if total_closed else 0.0,
-        "max_drawdown":  round(float(dd.get("max", {}).get("drawdown", 0.0)) / 100.0, 6),
+        "max_drawdown":  round(stats.max_drawdown_pct / 100.0, 6),
         "sharpe_ratio":  round(float(sharpe_val), 4),
         "total_trades":  total_closed,
         "win_trades":    won,

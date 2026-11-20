@@ -29,6 +29,13 @@ class BreakoutV1(BaseTWStrategy):
         ("vol_period", 20),
     )
 
+    @classmethod
+    def required_bars(cls) -> int:
+        """指標初始化需要的根數（＝backtrader 的 minperiod；RSI 要 period + 1 根）。資料比這少，runonce 模式會丟 IndexError，
+        所以 engine 在執行前檢查（I-137：insufficient_data）。測試核對它等於 backtrader 實際的 minperiod。"""
+        p = dict(cls.params._getitems())
+        return max(p["ma_fast"], p["ma_slow"], p["rsi_period"] + 1, p["vol_period"])
+
     def __init__(self):
         self.ma_fast = bt.indicators.SMA(self.data.close, period=self.p.ma_fast)
         self.ma_slow = bt.indicators.SMA(self.data.close, period=self.p.ma_slow)
@@ -38,6 +45,8 @@ class BreakoutV1(BaseTWStrategy):
         self.order = None
 
     def next(self):
+        if not self.in_trade_range():
+            return  # 暖身段（I-137）：只算指標，⛔ 不下單；委託在下一根成交，所以暖身段最後一根的形態也⛔ 不會在範圍首根成交
         if self.order:
             return  # 等待掛單完成
 

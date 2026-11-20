@@ -175,6 +175,12 @@ SHORT: effective_stop = min(atr_stop, structural_stop)
 指標計算（`total_return`/`annual_return`/`max_drawdown`/`sharpe_ratio`）皆
 基於逐 bar 的 mark-to-market 權益曲線；`annual_return` 用 252 個交易日年化。
 
+6. **暖身段與範圍首根**（I-137）：`run_modular_backtest` 餵進來的資料是「起點之前最多 250 根暖身段＋請求的日期範圍」，
+   `trade_start_index` 是範圍內第一根的位置。迴圈從這一根開始，`history`（`df.iloc[: t + 1]`）含暖身段，所以範圍首根的指標已經暖身；
+   權益曲線也從這一根開始記。暖身不足、還不能評估訊號（`t < min_bars`）時，那幾根只記初始權益、⛔ 不評估訊號；
+   整段都達不到 `min_bars` 時⛔ 沒有交易，權益曲線仍涵蓋範圍內每一根。不帶 `trade_start_index`（直接呼叫 `BacktestEngine.run`）時維持原本的行為：
+   資料不到 `min_bars + 2` 根回空報告、權益曲線從第 `min_bars` 根起記。
+
 ---
 
 ## STRATEGY_PRESETS（可直接用字串名稱呼叫）

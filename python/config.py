@@ -36,6 +36,26 @@ COMMISSION_RATE: float = _raw["backtest"]["commission_rate"]
 TAX_RATE: float = _raw["backtest"]["tax_rate"]
 INITIAL_CASH: float = _raw["backtest"]["initial_cash"]
 
+
+def _positive_int(name: str, raw: object) -> int:
+    """設定值必須是 ≥ 1 的整數，否則在 import 期就失敗（服務起不來，⛔ 不帶著錯的上限跑）。"""
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer >= 1") from None
+    if value < 1 or str(raw).strip() != str(value):
+        raise ValueError(f"{name} must be an integer >= 1")
+    return value
+
+
+# 依日期範圍取 K 棒（I-137）。max_symbols 可用環境變數覆寫（空字串＝沒設定），Go 端用同一個變數與預設值。
+BACKTEST_WARMUP_BARS: int = _positive_int("backtest.warmup_bars", _raw["backtest"]["warmup_bars"])
+BACKTEST_MAX_SYMBOLS: int = _positive_int(
+    "BACKTEST_MAX_SYMBOLS", os.getenv("BACKTEST_MAX_SYMBOLS") or _raw["backtest"]["max_symbols"]
+)
+BACKTEST_MAX_SYMBOL_BARS: int = _positive_int("backtest.max_symbol_bars", _raw["backtest"]["max_symbol_bars"])
+BACKTEST_MAX_TASK_BARS: int = _positive_int("backtest.max_task_bars", _raw["backtest"]["max_task_bars"])
+
 # ── SR Scoring ────────────────────────────────────────────────
 SR_SCORING_MODEL_PATH: str = os.getenv("SR_SCORING_MODEL_PATH") or str(
     (_ROOT / _raw["sr_scoring"]["model_path"]).resolve()

@@ -98,31 +98,31 @@ func (r *backtestRepo) upsertResultSQL() string {
 		return `
 			INSERT INTO backtest_results
 				(job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
-				 sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl)
+				 sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, data_coverage)
 			VALUES
 				(:job_id, :strategy, :total_return, :annual_return, :win_rate, :max_drawdown,
-				 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl)
+				 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl, :data_coverage)
 			ON DUPLICATE KEY UPDATE
 				total_return=VALUES(total_return), annual_return=VALUES(annual_return),
 				win_rate=VALUES(win_rate), max_drawdown=VALUES(max_drawdown),
 				sharpe_ratio=VALUES(sharpe_ratio), total_trades=VALUES(total_trades),
 				win_trades=VALUES(win_trades), loss_trades=VALUES(loss_trades),
-				avg_pnl=VALUES(avg_pnl)`
+				avg_pnl=VALUES(avg_pnl), data_coverage=VALUES(data_coverage)`
 	}
 	// sqlite 和 postgres 均支援 ON CONFLICT 語法
 	return `
 		INSERT INTO backtest_results
 			(job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
-			 sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl)
+			 sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, data_coverage)
 		VALUES
 			(:job_id, :strategy, :total_return, :annual_return, :win_rate, :max_drawdown,
-			 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl)
+			 :sharpe_ratio, :total_trades, :win_trades, :loss_trades, :avg_pnl, :data_coverage)
 		ON CONFLICT(job_id) DO UPDATE SET
 			total_return=excluded.total_return, annual_return=excluded.annual_return,
 			win_rate=excluded.win_rate, max_drawdown=excluded.max_drawdown,
 			sharpe_ratio=excluded.sharpe_ratio, total_trades=excluded.total_trades,
 			win_trades=excluded.win_trades, loss_trades=excluded.loss_trades,
-			avg_pnl=excluded.avg_pnl`
+			avg_pnl=excluded.avg_pnl, data_coverage=excluded.data_coverage`
 }
 
 func (r *backtestRepo) UpsertResult(ctx context.Context, res *BacktestResult) error {
@@ -134,7 +134,7 @@ func (r *backtestRepo) GetResult(ctx context.Context, jobID string) (*BacktestRe
 	var result BacktestResult
 	err := r.db.GetContext(ctx, &result, r.db.Rebind(`
 		SELECT id, job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
-		       sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, created_at
+		       sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, data_coverage, created_at
 		FROM backtest_results WHERE job_id=?
 	`), jobID)
 	if err != nil {

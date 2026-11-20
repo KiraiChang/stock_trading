@@ -16,6 +16,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/backtest"
 	"github.com/trading/backend/internal/config"
 	"github.com/trading/backend/internal/database"
 	"github.com/trading/backend/internal/store"
@@ -179,4 +180,123 @@ func backtestHandlerTestDB(t *testing.T) *sqlx.DB {
 		t.Fatalf("migrations: %v", err)
 	}
 	return db
+}
+
+// ── I-137：建任務前的 400、error 只回分類過的代碼、data_coverage 是陣列或 null ──
+
+func TestBacktestSubmitRejectsInvalidRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := backtestHandlerTestDB(t)
+	repo := store.NewBacktestRepo(db)
+	h := NewBacktestHandler(backtest.NewManager(repo, "", 2, zap.NewNop()), repo, zap.NewNop())
+	router := gin.New()
+	router.POST("/backtest", h.Submit)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/backtest", strings.NewReader(body)))
+		return w
+	}
+	cases := []struct {
+		body string
+		code int
+		err  string
+	}{
+		{`{"strategy":"breakout_v1","symbols":["2330"],"start_date":"2025-02-30","end_date":"2025-12-31"}`, 400, "invalid_date:start_date"},
+		{`{"strategy":"breakout_v1","symbols":["2330"],"start_date":"2025-01-01","end_date":"9999-12-31"}`, 400, "invalid_date:end_date"},
+		{`{"strategy":"breakout_v1","symbols":["2330"],"start_date":"0000-01-01","end_date":"2025-12-31"}`, 400, "invalid_date:start_date"},
+		{`{"strategy":"breakout_v1","symbols":["2330"],"start_date":"2025-06-02","end_date":"2025-06-01"}`, 400, "start_after_end"},
+		{`{"strategy":"breakout_swing_atr_v1","symbols":["A","B","C"],"start_date":"2025-01-01","end_date":"2025-12-31"}`, 400, "too_many_symbols:3:2"},
+		{`{"strategy":"breakout_v1","symbols":["A","B"],"start_date":"2025-01-01","end_date":"2025-12-31"}`, 400, "backtrader_single_symbol:2"},
+		{`{"strategy":"breakout_swing_atr_v1","symbols":["A","B"],"start_date":"2025-06-02","end_date":"2025-06-02"}`, 201, ""},
+	}
+	for _, c := range cases {
+		w := post(c.body)
+		if w.Code != c.code {
+			t.Fatalf("%s：status=%d，預期 %d（%s）", c.body, w.Code, c.code, w.Body.String())
+		}
+		if c.err != "" {
+			var resp map[string]string
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp["error"] != c.err {
+				t.Fatalf("%s：error=%q，預期 %q", c.body, resp["error"], c.err)
+			}
+		}
+	}
+	var n int
+	if err := db.Get(&n, `SELECT COUNT(*) FROM backtest_jobs`); err != nil || n != 1 {
+		t.Fatalf("只有合法的那一筆會建任務：%d（%v）", n, err)
+	}
+}
+
+func TestBacktestGetHidesRawErrorsAndReturnsCoverage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := backtestHandlerTestDB(t)
+	raw := `(psycopg2.errors.UndefinedColumn) column "secret_col" does not exist [SQL: SELECT secret_col FROM t]`
+	for _, j := range []struct{ id, status, err string }{
+		{"old", "failed", raw},
+		{"code", "failed", "task_too_large:2330:60001:60000"},
+		{"cancel", "failed", "cancelled by user"},
+		{"done", "done", ""},
+		{"legacy", "done", ""},
+	} {
+		if _, err := db.Exec(`INSERT INTO backtest_jobs
+			(job_id, type, strategy, symbols, timeframe, start_date, end_date, status, trigger_source, error)
+			VALUES (?, 'backtest', 'breakout_v1', '["2330"]', '1d', '2026-01-01', '2026-06-30', ?, 'manual', ?)`,
+			j.id, j.status, j.err); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cov := `[{"symbol":"2330","first_bar":"2026-01-02","last_bar":"2026-06-30","bars":120,"warmup_bars":250,"warmup_required":250,"skipped":false}]`
+	for _, r := range []struct {
+		id  string
+		cov any
+	}{{"done", cov}, {"legacy", nil}} {
+		if _, err := db.Exec(`INSERT INTO backtest_results (job_id, strategy, total_return, annual_return, win_rate, max_drawdown,
+			sharpe_ratio, total_trades, win_trades, loss_trades, avg_pnl, data_coverage)
+			VALUES (?, 'breakout_v1', 0, 0, 0, 0, 0, 0, 0, 0, 0, ?)`,
+			r.id, r.cov); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewBacktestHandler(nil, store.NewBacktestRepo(db), zap.NewNop())
+	router := gin.New()
+	router.GET("/backtest/:job_id", h.GetJob)
+	router.GET("/backtest", h.ListJobs)
+	get := func(path string) (string, map[string]any) {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s：%d %s", path, w.Code, w.Body.String())
+		}
+		var m map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		return w.Body.String(), m
+	}
+
+	for path, want := range map[string]string{"/backtest/old": "internal_error", "/backtest/code": "task_too_large:2330:60001:60000",
+		"/backtest/cancel": "cancelled by user"} {
+		body, m := get(path)
+		if got := m["job"].(map[string]any)["error"]; got != want {
+			t.Errorf("%s：error=%v，預期 %q", path, got, want)
+		}
+		if strings.Contains(body, "secret_col") || strings.Contains(body, "SELECT") {
+			t.Errorf("%s：回應帶出了原始例外：%s", path, body)
+		}
+	}
+	listBody, _ := get("/backtest")
+	if strings.Contains(listBody, "secret_col") || !strings.Contains(listBody, `"error":"internal_error"`) {
+		t.Errorf("清單沒有改回 internal_error：%s", listBody)
+	}
+
+	_, m := get("/backtest/done")
+	got, ok := m["result"].(map[string]any)["data_coverage"].([]any)
+	if !ok || len(got) != 1 || got[0].(map[string]any)["symbol"] != "2330" || got[0].(map[string]any)["bars"] != float64(120) {
+		t.Errorf("data_coverage 應該是陣列：%#v", m["result"].(map[string]any)["data_coverage"])
+	}
+	_, m = get("/backtest/legacy")
+	if v, present := m["result"].(map[string]any)["data_coverage"]; !present || v != nil {
+		t.Errorf("舊結果的 data_coverage 應該是 null：%#v（present=%v）", v, present)
+	}
 }

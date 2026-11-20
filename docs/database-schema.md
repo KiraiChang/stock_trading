@@ -520,7 +520,7 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 | sharpe_ratio | 夏普比率 |
 | total_trades / win_trades / loss_trades | 交易統計 |
 | avg_pnl | 平均損益 |
-| data_coverage | 每一檔實際取到的資料範圍，JSON 陣列存成 TEXT（migration 078；I-137）。NULL＝I-137 之前的結果，覆蓋範圍不明、⛔ 不回補 |
+| data_coverage | 每一檔實際取到的資料範圍，JSON 陣列存成 TEXT（migration 078；I-137）。NULL＝未記錄覆蓋範圍（I-137 上版之前，以及回滾到舊 image 期間寫入的結果），⛔ 不回補 |
 
 backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、報酬被高估；新舊界線見 `backtest_trades` 的「費用的新舊界線」。
 
@@ -543,7 +543,13 @@ backtrader 路徑（`STRATEGY_MAP`）在 I-136 之前的結果，費用偏低、
   而且沒有暖身（指標從範圍首根冷啟動）、modular 的統計從第 `min_bars` 根起算。⛔ 不改、⛔ 不回補；要新的結果就另建 job 重跑。
   live 的界線：commit `31e5566`，backend image `bc503920bb75`、python-server `f166cc4e58c5`、python-worker `4303b51148a2`，
   界線時間 2026-11-20 14:10:35（台北），是兩個 python 服務中較晚啟動的時間（worker 14:10:34）；migration 078 由同一次部署的 backend 套用。
-  部署時 `backtest_results` 7 筆，`data_coverage` 全是 NULL（⛔ 沒有回補）。
+  部署時 `backtest_results` 7 筆，`data_coverage` 全是 NULL（⛔ 沒有回補）。上版後的實跑 `bt_20261120_061311_000`（`breakout_v1`、2330、
+  2024-01-01～2025-12-31）：`bars` 485，等於 DB 在這段台北日期的日 K 根數，暖身 250／250。
+  * **回滾不用退 078**：欄位可為 NULL。舊 python 的寫入、舊 Go 的結果查詢都明確列欄位，舊 python 的 schema 等待也不看它；
+    goose（v3.21.1）在 DB 版本高於舊 binary 認得的最大版本時⛔ 不報錯、也不執行任何 migration。
+    ⚠️ 舊 python-server 的 `GET /backtest/{job_id}` 讀結果用 `SELECT *`，回滾期間會把保留下來的 `data_coverage` 以**原始的 JSON 字串**帶出
+    （新版才解析成陣列）；Go 的 API 不受影響。退回舊 image 之後新寫的結果 `data_coverage` 是 NULL。
+  * 部署紀錄（部署前後的核對）原文見 `git show 64019c4:docs/plans/i137-backtest-date-range.md` 的「七之二」。
   * **部署前的唯讀盤點**（2026-11-20 10:08，live 當時是 `03e7028`）：以每筆任務的 `started_at`（沒有就 `created_at`）為準，重建當時看得到的最近 N 根
     （K 棒的 `ts` 與 `created_at` 都早於那個時間），數範圍內（台北日期）落在 N 根之外的根數。`done`／`failed` 共 9 筆任務、41 組任務×標的，
     **被截掉的都是 0**（範圍都在當時的最近 N 根之內）；pending／running 0 筆。⚠️ 這是估算：K 棒被刪掉、或事後被改寫（⛔ 不改 `created_at`）都無法還原。

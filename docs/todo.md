@@ -15,12 +15,12 @@
 - 新增項目時往下加一筆，編號遞增（`T-0xx`），不要覆蓋舊編號。
 - 項目狀態改變時直接更新該筆的「狀態」欄位，不需要搬移位置；若項目已完成
   且不需要保留歷史，可以整筆刪除或搬到文件最下方的「已完成封存」。
-- **編號只增不重用，`下一個新編號從 T-087 起算`。**（**T-086 於 2026-11-19 發出**——I-137 實作時量到 modular 回測的時間跟每一檔根數的平方成正比（使用者裁決：I-137 先加每檔 5,000 根的上限，效能另列）。**T-083 於 2026-11-19 收斂**——使用者確認 review 通過；live 2026-11-18 部署（基底 image 的前四層 layer 與 `pip freeze --all` 的雜湊跟部署前相符），部署後第一個用到 python 的排程（17:00 `sr_analysis`）`success`。現況在 `development-workflow.md`「python 的套件版本與升級（T-083）」（釘版的原因與來源、升級程序、`libgomp1` 不釘的取捨、Windows venv 沒驗證）與 `smoke-dev-worker.sh` 的用法、「程式註解裡的 T-083」；`issue.md` I-116 的「待決策」表第一項已標成由 T-083 處理；條目與計畫書原文見 `git show 85849b9:docs/todo.md`、`git show 85849b9:docs/plans/t083-python-pin-deps.md`；**編號不回收**。**T-085 於 2026-11-18 發出**——I-135 計畫書 review 的另案裁決：`breakout_v1` 固定只買 1 股（部位大小設計），與兩條回測路徑的 `pnl_pct` 口徑統一併成一筆。**T-084 於 2026-11-18 發出**——I-134 的 D4：`deploy.sh` 的部署前檢查加上回測的 `pending`／`running`，本次先不改 live 的 `deploy.sh`。**T-083 於 2026-11-16 發出**——I-132 部署到 live 時發現 `python/requirements.txt` 大多沒有鎖版本，兩次 build 可能裝到不同的套件版本。**T-082 於 2026-11-16 發出**——I-132 的 D1：repo 的 compose 範本只同步了 backend 的應用設定，主機專屬的結構另立。**T-065 於 2026-11-03 改列 `issue.md` I-129**（I-129 已於 2026-11-13 收斂）——描述的是矛盾結果（兩層 gate 都過卻 BLOCKED），依分流規則屬於 issue；**編號不回收**；原文見 `git show 7312251:docs/todo.md`。**T-071 於 2026-11-03 收斂**——驗收條件 1～6 早已成立；條件 7（live 觀察 A 類）以保留期內的 `job_runs` 與快照判定：能確認的 19 輪 A 類都是 0、failed 的 12 輪都是逾時或前置不成立，**A 類維持 Warn**（使用者確認；證據缺口照實記錄）。現況在 `architecture.md`「終止上市對帳」（含對帳分類與 live 觀察）、`database-schema.md` 的 `delisting_events`、`api-reference.md` 的手動端點，dev 驗收步驟在 `development-workflow.md`「在 dev stack 上驗終止上市對帳」；程式與設定的註解已改成指向上述主題文件；測試註解裡的編號（#19、#20g 等）出自原 T-071 的測試表，原文見 `git show b9cf198:docs/todo.md`。**T-074 於 2026-11-03 收斂**——`check-doc-refs.py` 改掃 `docs/` 底下全部子目錄（含 `architecture/`）、計畫書的 `檔名:行號` 由工具擋；現況在腳本的 docstring、`development-workflow.md` 講 doc-refs 的那一節與 `CLAUDE.md`「協作流程」；原文見 `git show 00db801:docs/todo.md` 與 `git show 00db801:docs/plans/t074-doc-refs-scope.md`。**T-075 於 2026-11-03 收斂**——live 的晚間兩輪 2026-10-28 起後移到 22:00／23:00、觀察確認；現況在 `architecture.md`「晚間兩輪的時間」，作業程序在 `development-workflow.md`「只改 live 的環境變數」；repo 預設的同步（原範圍 B）併入 T-076；原文見 `git show 9bdce8c:docs/todo.md` 與 `git show 9bdce8c:docs/plans/evening-batch-shift.md`。**T-078 於 2026-11-02 收斂**——`RACE=1` 補跑（I-123～I-126 階段 B 的 review 要求）、`smoke-dev.sh` 的依序 build 與部分服務模式、測試與 dev container 的 `oom_score_adj` 都已完成並實跑通過；現況在 `development-workflow.md`「Race detector」「container 上限的總和」「OOM 的犧牲順序」「重的步驟與 Claude session」「2. 啟動 dev stack 做 smoke test」；計畫書原文見 `git show 60576e1:docs/plans/oom-mitigation.md`；**編號不回收**。）（**T-079 於 2026-11-03 發出**——重現 `vet: signal: killed` 時查出 go test 的內建 vet 是多餘、又會在 Claude 跑時 OOM 的一輪。）（**T-078 於 2026-11-02 發出**——Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill、`RACE=1` 也跑不動，使用者要求立 OOM 改善計畫。**T-077、T-073、T-072 於 2026-10-30 收斂**——T-077 刪除了 I-074 Stage 2 的執行工具與漂移測試，解除 `python/` 產品碼的凍結（現況在 `development-workflow.md`「I-074 Stage 2 的 B／C 判讀與 image 還原」「I-074 Stage 2 的 tooling patch」「I-074 Stage 2 的測試落點」與 `sr-zone-scoring.md`「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫書原文見 `git show 7a3e042:docs/plans/t077-retire-i074-stage2-tooling.md`）；T-073 的兩個註解併入 T-077 階段 B 改完；T-072 隨 `test-i074-stage2.sh` 刪除而解除。**編號不回收。**）（**T-077 於 2026-10-29 發出**——I-074 收斂時發現 `scripts/test-replay-args.sh` 的漂移測試在 I-074 結束之後仍凍結 `python/` 的產品碼（收斂計畫 D3；原文見 `git show caf1442:docs/plans/i074-convergence.md`）。）（**T-076 於 2026-10-28 發出**——想把 15:00～17:00 的批次延後時發現 `pre_market`、`intraday`、`daily_close` 的時間寫死在程式裡，和 T-075 的範圍 B 一起做。）（**T-075 於 2026-10-28 發出**——I-074 ⑩ 的平日 17:00 時段要求晚間兩個批次永久後移一小時。）（**T-073／T-074 於 2026-10-27 發出**——`CLAUDE.md` 只留開發規則之後（`30d48ab`），兩個程式註解與 doc-refs 的檢查範圍都排到 I-074 ⑩ 之後。）（**T-072 於 2026-10-08 發出**——由 I-074「Stage 2 步驟 ⑧ 補齊與全量執行的結果」「六」#1 改列（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）：S2 的合成流程依賴 host 可用磁碟 ≥ 1.24 GB。）（**T-071 於 2026-09-04 發出**——使用者要求用 TWSE 終止上市 CSV 設定下市，查證後改為「補下市日期＋對帳」，**CSV 不驅動 `is_listed`**。）（**T-070 於 2026-09-02 發出、2026-09-08 執行完畢並收斂**——承接 `issue.md` I-102 收斂時未完成的執行期觀察；四個交易日的判讀、三個層次的查證方式與「`job_runs.error` 無原始錯誤外洩」的驗收結果都歸檔在 `architecture.md`「live 運作觀察：四個交易日（2026-09-03～09-08）」，觀察時順帶發現的 `corporate_action_sync` 可觀測性缺口另立 `issue.md` I-112——**該筆已於 2026-09-09 修復並收斂**，現況在 `architecture.md`「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號不回收。**）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
+- **編號只增不重用，`下一個新編號從 T-088 起算`。**（**T-087 於 2026-11-20 發出**——I-137 收斂後使用者要求立案：migration 由 backend 啟動時套用，失敗要到換版之後才發現，改成在部署流程裡、換版之前明確執行。**T-086 於 2026-11-19 發出**——I-137 實作時量到 modular 回測的時間跟每一檔根數的平方成正比（使用者裁決：I-137 先加每檔 5,000 根的上限，效能另列）。**T-083 於 2026-11-19 收斂**——使用者確認 review 通過；live 2026-11-18 部署（基底 image 的前四層 layer 與 `pip freeze --all` 的雜湊跟部署前相符），部署後第一個用到 python 的排程（17:00 `sr_analysis`）`success`。現況在 `development-workflow.md`「python 的套件版本與升級（T-083）」（釘版的原因與來源、升級程序、`libgomp1` 不釘的取捨、Windows venv 沒驗證）與 `smoke-dev-worker.sh` 的用法、「程式註解裡的 T-083」；`issue.md` I-116 的「待決策」表第一項已標成由 T-083 處理；條目與計畫書原文見 `git show 85849b9:docs/todo.md`、`git show 85849b9:docs/plans/t083-python-pin-deps.md`；**編號不回收**。**T-085 於 2026-11-18 發出**——I-135 計畫書 review 的另案裁決：`breakout_v1` 固定只買 1 股（部位大小設計），與兩條回測路徑的 `pnl_pct` 口徑統一併成一筆。**T-084 於 2026-11-18 發出**——I-134 的 D4：`deploy.sh` 的部署前檢查加上回測的 `pending`／`running`，本次先不改 live 的 `deploy.sh`。**T-083 於 2026-11-16 發出**——I-132 部署到 live 時發現 `python/requirements.txt` 大多沒有鎖版本，兩次 build 可能裝到不同的套件版本。**T-082 於 2026-11-16 發出**——I-132 的 D1：repo 的 compose 範本只同步了 backend 的應用設定，主機專屬的結構另立。**T-065 於 2026-11-03 改列 `issue.md` I-129**（I-129 已於 2026-11-13 收斂）——描述的是矛盾結果（兩層 gate 都過卻 BLOCKED），依分流規則屬於 issue；**編號不回收**；原文見 `git show 7312251:docs/todo.md`。**T-071 於 2026-11-03 收斂**——驗收條件 1～6 早已成立；條件 7（live 觀察 A 類）以保留期內的 `job_runs` 與快照判定：能確認的 19 輪 A 類都是 0、failed 的 12 輪都是逾時或前置不成立，**A 類維持 Warn**（使用者確認；證據缺口照實記錄）。現況在 `architecture.md`「終止上市對帳」（含對帳分類與 live 觀察）、`database-schema.md` 的 `delisting_events`、`api-reference.md` 的手動端點，dev 驗收步驟在 `development-workflow.md`「在 dev stack 上驗終止上市對帳」；程式與設定的註解已改成指向上述主題文件；測試註解裡的編號（#19、#20g 等）出自原 T-071 的測試表，原文見 `git show b9cf198:docs/todo.md`。**T-074 於 2026-11-03 收斂**——`check-doc-refs.py` 改掃 `docs/` 底下全部子目錄（含 `architecture/`）、計畫書的 `檔名:行號` 由工具擋；現況在腳本的 docstring、`development-workflow.md` 講 doc-refs 的那一節與 `CLAUDE.md`「協作流程」；原文見 `git show 00db801:docs/todo.md` 與 `git show 00db801:docs/plans/t074-doc-refs-scope.md`。**T-075 於 2026-11-03 收斂**——live 的晚間兩輪 2026-10-28 起後移到 22:00／23:00、觀察確認；現況在 `architecture.md`「晚間兩輪的時間」，作業程序在 `development-workflow.md`「只改 live 的環境變數」；repo 預設的同步（原範圍 B）併入 T-076；原文見 `git show 9bdce8c:docs/todo.md` 與 `git show 9bdce8c:docs/plans/evening-batch-shift.md`。**T-078 於 2026-11-02 收斂**——`RACE=1` 補跑（I-123～I-126 階段 B 的 review 要求）、`smoke-dev.sh` 的依序 build 與部分服務模式、測試與 dev container 的 `oom_score_adj` 都已完成並實跑通過；現況在 `development-workflow.md`「Race detector」「container 上限的總和」「OOM 的犧牲順序」「重的步驟與 Claude session」「2. 啟動 dev stack 做 smoke test」；計畫書原文見 `git show 60576e1:docs/plans/oom-mitigation.md`；**編號不回收**。）（**T-079 於 2026-11-03 發出**——重現 `vet: signal: killed` 時查出 go test 的內建 vet 是多餘、又會在 Claude 跑時 OOM 的一輪。）（**T-078 於 2026-11-02 發出**——Claude 在 I-123～I-126 階段 B 的 dev 實測時被 OOM kill、`RACE=1` 也跑不動，使用者要求立 OOM 改善計畫。**T-077、T-073、T-072 於 2026-10-30 收斂**——T-077 刪除了 I-074 Stage 2 的執行工具與漂移測試，解除 `python/` 產品碼的凍結（現況在 `development-workflow.md`「I-074 Stage 2 的 B／C 判讀與 image 還原」「I-074 Stage 2 的 tooling patch」「I-074 Stage 2 的測試落點」與 `sr-zone-scoring.md`「I-074 Stage 2 的晉升與 B／C 判讀器」；計畫書原文見 `git show 7a3e042:docs/plans/t077-retire-i074-stage2-tooling.md`）；T-073 的兩個註解併入 T-077 階段 B 改完；T-072 隨 `test-i074-stage2.sh` 刪除而解除。**編號不回收。**）（**T-077 於 2026-10-29 發出**——I-074 收斂時發現 `scripts/test-replay-args.sh` 的漂移測試在 I-074 結束之後仍凍結 `python/` 的產品碼（收斂計畫 D3；原文見 `git show caf1442:docs/plans/i074-convergence.md`）。）（**T-076 於 2026-10-28 發出**——想把 15:00～17:00 的批次延後時發現 `pre_market`、`intraday`、`daily_close` 的時間寫死在程式裡，和 T-075 的範圍 B 一起做。）（**T-075 於 2026-10-28 發出**——I-074 ⑩ 的平日 17:00 時段要求晚間兩個批次永久後移一小時。）（**T-073／T-074 於 2026-10-27 發出**——`CLAUDE.md` 只留開發規則之後（`30d48ab`），兩個程式註解與 doc-refs 的檢查範圍都排到 I-074 ⑩ 之後。）（**T-072 於 2026-10-08 發出**——由 I-074「Stage 2 步驟 ⑧ 補齊與全量執行的結果」「六」#1 改列（歷史：`git show 20eacb2:docs/issue.md` 的 I-074）：S2 的合成流程依賴 host 可用磁碟 ≥ 1.24 GB。）（**T-071 於 2026-09-04 發出**——使用者要求用 TWSE 終止上市 CSV 設定下市，查證後改為「補下市日期＋對帳」，**CSV 不驅動 `is_listed`**。）（**T-070 於 2026-09-02 發出、2026-09-08 執行完畢並收斂**——承接 `issue.md` I-102 收斂時未完成的執行期觀察；四個交易日的判讀、三個層次的查證方式與「`job_runs.error` 無原始錯誤外洩」的驗收結果都歸檔在 `architecture.md`「live 運作觀察：四個交易日（2026-09-03～09-08）」，觀察時順帶發現的 `corporate_action_sync` 可觀測性缺口另立 `issue.md` I-112——**該筆已於 2026-09-09 修復並收斂**，現況在 `architecture.md`「逐檔失敗要帶得出哪一檔、哪個階段、什麼類別」。**編號不回收。**）（T-050 與 T-052 於 2026-08-31 收斂——編號不回收。）（T-062 於 2026-08-25 收斂；T-063 於 2026-08-26 發出、2026-08-27 收斂；T-064 於 2026-08-27 發出，內容由 `issue.md` I-097 改列；T-065 於 2026-08-27 發出，由 T-055 的 F1 裁決分出；T-055 於 2026-08-27 收斂；T-066 於 2026-08-27 發出、**2026-09-01 執行完畢並收斂**（結論歸檔在 `sr-zone-scoring.md`「分佈影響：decision replay 實測（2026-09-01）」，逐列資料在 `python/baselines/replay_cohort_2026-09-01.json`）；T-067 於 2026-08-28 發出、承接 `issue.md` I-091 未完成的驗收，**2026-09-02 驗收完成並收斂**（結論歸檔在 `architecture.md`「日 K 缺漏偵測」的「驗收實測（2026-08-28）」與「live 運作觀察：四個交易日」兩節，dev 驗收程序歸檔在 `development-workflow.md`「在 dev stack 上驗排程類功能」）；**T-068 於 2026-09-01 發出後同日改列為 `issue.md` I-100**——它是已發生的已知限制而非待規劃項目，**編號不回收**；T-069 於 2026-09-01 發出、承接 `issue.md` I-101 未完成的 live 部署與驗收，**2026-09-02 驗收完成並收斂**——migration 075 已於 2026-09-01 16:49:36 上 live，schema 現況在 `database-schema.md`、RSI 邊界語意在 `indicator-spec.md`、上 live 的程序與「偏離窗口不可用 `job_runs` success 自證」在 `development-workflow.md`。）
   **發出新編號時記得把這一行一起往前推**——比照 [`issue.md`](./issue.md) 的同名規則，
   那邊漏推過一次，差點重用編號（`I-070` 已經真的重用過一次）。
 - **不要用「檔案裡最大值 + 1」決定編號。** 已收斂的項目會整筆移除，但它們的編號
   **仍然被佔用**：程式碼註解、主題文件與 git log 會留著舊 ID，重用會讓兩件無關的事
-  共用一個代號。本檔目前看得到的最大是 `T-085`，而 `T-062` / `T-066` / `T-067` / `T-069` 已經發出並收斂、
+  共用一個代號。本檔目前看得到的最大是 `T-087`，而 `T-062` / `T-066` / `T-067` / `T-069` 已經發出並收斂、
   `T-068` 已改列為 `issue.md` I-100、`T-065` 已改列為 `issue.md` I-129（已收斂），
   更早也有多筆被移除（例如 `T-044` / `T-046` / `T-050` / `T-053` / `T-056` /
   `T-057` / `T-059` / `T-060`）。判斷可用編號時翻 git log 或本節，不要數檔案。
@@ -50,6 +50,41 @@
 
 ---
 
+### T-087：將資料庫 migration 從 backend 啟動移到部署流程
+
+| 欄位 | 內容 |
+|---|---|
+| 狀態 | 待規劃 |
+| 優先度 | 中（主要價值：migration 失敗提早到換版之前發現） |
+| 分類 | 部署／資料庫 |
+| 建立日期 | 2026-11-20 |
+| 來源 | I-137 收斂後使用者要求立案（2026-11-20） |
+
+#### 現況
+
+* backend 啟動時用 goose 套用 migration（`backend/cmd/server/main.go` 呼叫 `database.RunMigrations`），schema 變更跟換 backend image 綁在一起；
+  `deploy.sh` 在 `down` 之前⛔ 無法確認 migration 會成功，migration 失敗就等於 backend 起不來。
+* python 兩個服務直接等待必要的欄位（`backtest/db_writer.py` 的 `_schema_ready`，目前是 077、078），所以 schema 就緒⛔ 不依賴
+  backend 與 python 的啟動先後；代價是每加一個 python 要用的 migration，等待條件就要跟著改（I-134、I-137 都改過）。
+
+#### 內容（待規劃，具體旗標、容器配置與回滾步驟留到實作計畫再定）
+
+1. **獨立執行 migration**：同一支 backend binary 提供 migration 模式，再由新 image 的一次性容器執行，兩者可以搭配。
+   規劃時優先評估沿用 `deploy.sh` 目前「build → 設定檢查 → down」的順序：設定檢查通過之後，才執行**允許在停機前套用**的 migration，
+   成功才繼續換版。
+2. **啟動時只檢查 schema**：「版本不足就拒絕啟動」列為 live 的候選做法。
+   * python 若改成等版本號，要先定義「已套用的版本」，以及回滾時可接受的版本範圍（例如舊 image 碰到較新的 schema）。
+   * ⚠️ goose v3.21.1 的 `GetDBVersion` 在版本表不存在時可能建立表，真正的唯讀檢查要另選讀法。
+3. **停機前套用的條件要同時看相容性與鎖定成本**：
+   * 「先加後刪」解決的是舊程式能不能繼續讀寫；新欄位即使相容，DDL 仍可能阻塞線上查詢。
+   * 要定義鎖等待的上限（migration 075 已有設定鎖等待上限的先例）、哪些變更必須停機才能套用，
+     以及 migration 部分成功、或 schema 已升級但換版失敗時怎麼恢復。
+4. **保留 dev 與測試的自動化**（驗收條件）：空資料庫初始化、SQLite 單元測試建表（`migrate_sqlite_test.go`）、dev smoke 都要能一鍵完成。
+   之後再決定由各腳本呼叫 migrator，或保留 dev 明確啟用的自動套用模式。
+5. **與 T-084 的關係**：分案追蹤，T-084 可以先做，日後可在同一次更換 live 的 `deploy.sh`。若 migration 排在停機前，部署開始時的
+   pending／running 雙零檢查只反映當下，規劃時要處理「檢查之後、切換之前又有新任務進來」的窗口。
+6. live 的 `deploy.sh` 不在 repo 裡，改了範本之後要照 I-132 的「先試跑、再換檔」流程換上（`development-workflow.md`「部署腳本：失敗即停」）。
+
 ### T-086：modular 回測的時間跟每一檔根數的平方成正比
 
 | 欄位 | 內容 |
@@ -58,7 +93,7 @@
 | 優先度 | 低（I-137 已用每檔 5,000 根的上限擋住；⛔ 不影響排程與交易訊號） |
 | 分類 | Python／回測 |
 | 建立日期 | 2026-11-19 |
-| 來源 | `issue.md` I-137 實作時的量測（使用者 2026-11-19 裁決另列） |
+| 來源 | I-137（2026-11-20 收斂）實作時的量測（使用者 2026-11-19 裁決另列）；上限的現況見 `architecture.md` 的回測流程 |
 
 #### 內容
 

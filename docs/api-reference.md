@@ -1464,7 +1464,7 @@ legacy `breakout_v1` 收到這兩個欄位時會忽略並記 warning log，不�
 這支會回 404、列表會回 500；現在都正常。）
 
 `job.error`（這支與 `GET /backtest` 的清單都一樣）只會是分類過的代碼：I-137 之前留下的原始例外文字一律回 `internal_error`。
-`result.data_coverage` 是每一檔實際取到的資料範圍（陣列，格式見 `database-schema.md` 的 `backtest_results`）；I-137 之前的結果是 `null`。
+`result.data_coverage` 是每一檔實際取到的資料範圍（陣列，格式見 `database-schema.md` 的 `backtest_results`）；沒有記錄覆蓋範圍的結果（I-137 上版之前，或回滾到舊 image 期間寫入的）是 `null`。
 
 **Response（完成後）：**
 ```json

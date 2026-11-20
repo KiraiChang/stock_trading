@@ -1249,7 +1249,21 @@ Go API（讀取結果回傳給前端）
 * 三個 runtime 共用的值（backtrader 名單、標的數的預設值、最大日期、錯誤規則的案例檔）由 `scripts/check-backtest-contract.py` 比對。
 * **資料不足**（backtrader）：執行前檢查實際載入的範圍段＋暖身段是否夠策略的 minperiod（`BreakoutV1.required_bars()`，目前 20 根）。
   不夠就讓任務失敗（`insufficient_data`，畫面顯示「資料不足：取得 19 根，至少需要 20 根」），⛔ 不讓 backtrader 的 runonce 模式丟 `IndexError`。
-  暖身沒滿 250 根但仍夠初始化時照常跑，覆蓋範圍標暖身不足。
+  暖身沒滿 250 根但仍夠初始化時照常跑，覆蓋範圍標暖身不足。modular ⛔ 不用這個代碼（資料不到 `min_bars` 時本來就不評估訊號）。
+* **取數的細節**（`db.fetch_candles_range`）：每一檔帶 `min(每一檔的上限, 任務剩下的額度)` 當額度；先取範圍段（`LIMIT 額度 + 1`），
+  範圍段是 0 根就略過這一檔（⛔ 不查暖身段、⛔ 不扣額度），否則再用剩下的額度限制暖身段。⛔ 不先 `COUNT` 再讀（兩次查詢之間補進來的資料突破不了上限）。
+  超過時錯誤裡的根數是**下限**（查到額度 + 1 根就停），訊息寫「至少 n 根」。
+* **前端**（`Backtest.svelte`）：
+  * **選檔**：首次載入時，預設策略是 backtrader 策略就⛔ 不預選、提示要選一檔；是 modular 時照舊全選自選清單。
+    從 modular 切到 backtrader 策略時，已選多檔才清空並提示（⛔ 不自動挑一檔），只選了一檔就保留。backtrader 策略下勾選改成單選（選新的一檔取代舊的），
+    切回 modular 時保留目前的選擇、恢復多選。
+  * **錯誤**：送出被拒絕（400）時顯示原因。選到 `failed` 的任務時顯示「回測失敗」與代碼對照的中文（`lib/backtestErrors.ts`）：
+    取消（`cancelled by user`）、重啟中斷（`interrupted_on_restart`）與 I-137 的各個代碼各有自己的提示；`internal_error`、不認得的代碼，
+    以及 I-137 之前留下的未分類紀錄（API 已改回 `internal_error`），才顯示通用訊息「回測失敗（內部錯誤）」。
+* **程式註解裡的 I-137**：I-137 在 2026-11-20 收斂。程式、測試、腳本、設定與三份 migration 078 檔頭裡的「（I-137）」是**由來標記**，
+  記的是這段為什麼這樣寫，規格以本節、`database-schema.md` 的 `backtest_results`（`data_coverage` 與新舊界線）與 `api-reference.md` 的回測端點為準。
+  I-137 的內容是回測先取「最近 N 根」再切，範圍的前段會被靜默截掉。修正時一併加上暖身、覆蓋範圍、任務上限、日期驗證、
+  backtrader 限單檔與錯誤分類。⛔ 不為了改這些標記去動 migration 檔。
 
 模組化回測可選擇啟用 `use_chip_filter`，用 `chip_scores.total_score` 與
 `chip_min_score` 門檻過濾進場訊號；legacy backtrader 策略收到該選項時會記 warning

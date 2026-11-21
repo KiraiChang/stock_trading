@@ -86,7 +86,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 已實作／待 review（2026-11-20，未 commit；與 `issue.md` I-103 合併；計畫書 v1.5：[`plans/t088-i103-intraday-data-availability.md`](./plans/t088-i103-intraday-data-availability.md)） |
+| 狀態 | 已實作／待 review（2026-11-20 實作；2026-11-21 上 live `941f11e`，排程輪次與畫面的實跑驗證排在 11-23 起、live 與 dev 同步；與 `issue.md` I-103 合併；計畫書 v1.5：[`plans/t088-i103-intraday-data-availability.md`](./plans/t088-i103-intraday-data-availability.md)） |
 | 優先度 | 中（影響盤中訊號的正確性：抓取失敗時仍用舊 K 棒評估，舊 K 棒符合條件就可能推送過期的訊號，不符合則容易被解讀為「未觸發」） |
 | 分類 | Go／排程／市場資料／訊號 |
 | 建立日期 | 2026-11-20 |

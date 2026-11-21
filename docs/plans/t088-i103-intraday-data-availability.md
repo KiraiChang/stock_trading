@@ -328,6 +328,7 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
      有 `evidence_failed` 的輪次是對帳不完整（結束碼 0）；已執行卻缺逐檔列、沒有 `evidence_failed` → 資料不足（結束碼 3）；每日不到 55 輪 → 資料不足。
    * 檔案指紋（SHA-256 前 12 碼）：`run-obs-archive.sh` `3054d5671db0`、`queries_v2.tsv` `f601d260afdd`、`v2_judge.py` `9effa36a37ae`、`accept_v2.sh` `5fd8c84f65aa`。
    * ⚠️ 新版窗口的交接要多帶兩張表：`pg_dump -t public.job_runs -t public.intraday_rounds -t public.intraday_symbol_runs`。
+   * 2026-11-21 更新（I-139 計畫書第九節的先行項目）：判讀改依預定交易日清單逐日核對、每個預定交易日恰好 55 輪，上面的指紋已過時，現行的指紋與驗收紀錄見 I-123 計畫書「新版窗口的預定交易日」。
 7. **上版順序**（使用者 2026-11-20 裁決）：11-21（假日）準備並上版，下禮拜 live 與 dev 同步驗證（dev 的「成功 → 500 → 恢復」實跑與畫面核對改在上版之後、跟 live 第一個交易日同步做）。
    ⚠️ 這表示上版前⛔ 沒有 dev 的排程輪次實跑；風險由單元與整合測試（真的 SQLite、真的訊號引擎）與 dev 的手動補抓實跑承擔，出問題照回滾（退回 `pre-t088` 的 image、⛔ 不用退 migration 079）。
 8. **I-123、I-122 的收斂**跟著延後到新窗口判讀完成；dev 作業 volume、交接目錄照 I-123 的保留條件繼續保留。

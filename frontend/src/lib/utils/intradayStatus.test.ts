@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { IntradayRound, IntradaySymbolRun, IntradaySymbolStatus } from '../api/intraday'
-import { describeIntraday, describeRefill, intradayCauseLabel } from './intradayStatus'
+import type { IntradayRound, IntradayStatusResponse, IntradaySymbolRun, IntradaySymbolStatus } from '../api/intraday'
+import { describeIntraday, describeRefill, intradayCauseLabel, intradayNotices } from './intradayStatus'
 
 // 2026-11-02 09:xx 台北
 const at = (hm: string) => `2026-11-02T${hm}:00+08:00`
@@ -127,5 +127,53 @@ describe('describeRefill', () => {
       describeRefill({ symbol: 'B', status: 'fetch_failed', cause: 'refill_deadline', inserted: 0, updated: 0, unchanged: 0,
         last_bar_ts: null, bars_today: 0, gap_minutes: 0, gaps: [], gaps_truncated: false }),
     ).toBe('B：未完成（補抓逾時）')
+  })
+})
+
+// I-139：休市日每一列顯示「今日休市」，⛔ 不顯示上一個交易日的「已更新」；清單標題列的提示各自分開。
+describe('trading day (I-139)', () => {
+  it('shows market closed instead of the previous result', () => {
+    const cal = describeIntraday(status({}), null, { is_trading: false, source: 'calendar' })
+    expect(cal).toEqual({ data: '今日休市（日曆）', evaluation: '', tone: 'muted' })
+    expect(describeIntraday(status({}), null, { is_trading: false, source: 'manual' }).data).toBe('今日休市（手動設定）')
+    expect(describeIntraday(status({}), null, { is_trading: false, source: 'weekend' }).data).toBe('今日休市（週末）')
+    expect(describeIntraday(status({ round_state: 'skipped' }), skippedRound, { is_trading: false, source: 'manual' }).data).not.toContain(
+      '已更新',
+    )
+  })
+
+  it('keeps the normal display on trading days and when the calendar is unavailable', () => {
+    expect(describeIntraday(status({}), null, { is_trading: true, source: 'fallback' }).data).toContain('已更新')
+    expect(describeIntraday(status({}), null, { is_trading: true, source: 'calendar' }).evaluation).toBe('未觸發')
+  })
+})
+
+function resp(p: Partial<IntradayStatusResponse>): IntradayStatusResponse {
+  return {
+    now: at('10:05'), trading_day: { is_trading: true, source: 'calendar' }, market_open: true, session_data: 'ok',
+    stale_after_minutes: 10, latest_round: null, symbols: [], ...p,
+  }
+}
+
+describe('intradayNotices', () => {
+  it('shows the calendar fallback notice', () => {
+    expect(intradayNotices(resp({ trading_day: { is_trading: true, source: 'fallback' } })).map((n) => n.text)).toEqual([
+      '交易日曆取不到，照平日執行',
+    ])
+  })
+
+  it('separates no data yet, empty watchlist and unavailable', () => {
+    expect(intradayNotices(resp({ session_data: 'none_yet' }))[0].text).toBe(
+      '截至 10:05 尚未收到今日盤中資料，請核對行情來源與交易所公告',
+    )
+    expect(intradayNotices(resp({ session_data: 'empty_watchlist' }))[0].text).toBe('自選清單是空的')
+    expect(intradayNotices(resp({ session_data: 'unavailable' }))[0].text).toBe('讀不到盤中資料狀態')
+  })
+
+  it('adds no notice for known fetch or store failures, pending, ok and closed', () => {
+    for (const s of ['fetch_failing', 'store_failing', 'pending', 'ok', 'closed'] as const) {
+      expect(intradayNotices(resp({ session_data: s }))).toEqual([])
+    }
+    expect(intradayNotices(null)).toEqual([])
   })
 })

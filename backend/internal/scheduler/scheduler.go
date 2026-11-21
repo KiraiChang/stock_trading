@@ -22,6 +22,7 @@ import (
 	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/internal/tradingday"
 	"github.com/trading/backend/pkg/timeutil"
 )
 
@@ -208,6 +209,8 @@ type Scheduler struct {
 	intradayLock chan struct{}
 	// intradayRunningRun 是正在執行的那一輪的 run_id（0＝沒有），狀態 API 用它分「評估中」與「中斷」。
 	intradayRunningRun atomic.Uint64
+	// tradingDay 是跟 API 共用的交易日判斷（I-139；market_closed.go）。nil＝每個平日都當交易日（舊行為）。
+	tradingDay *tradingday.Judge
 	// 以下只有測試會改。
 	intradayLockWait  time.Duration
 	refillLockWait    time.Duration
@@ -279,8 +282,9 @@ func New(
 
 func (s *Scheduler) Start() {
 	// 盤前初始化：補齊近 5 天日K 缺口 + 預熱日線指標
+	// 休市日的閘門只放在 cron 入口（I-139；market_closed.go）：手動端點與重跑走原本的函式、⛔ 不經過閘門。
 	s.cron.AddFunc("50 8 * * 1-5", func() {
-		s.runPreMarket()
+		s.runPreMarketCron()
 	})
 	s.markRegistered("pre_market")
 
@@ -297,11 +301,11 @@ func (s *Scheduler) Start() {
 	// 15:00 給 FinMind 更多緩衝時間，仍抓空的話可用 RunDailyClose 手動重拉
 	// （見 handler.SchedulerHandler.RunDailyClose）。
 	s.cron.AddFunc("0 15 * * 1-5", func() {
-		s.RunDailyClose()
+		s.runDailyCloseCron()
 	})
 	s.markRegistered("daily_close")
-	// sr_zone_verify 沒有自己的 cron——它在 RunDailyClose 尾端無條件執行，
-	// 所以「有沒有排程會觸發它」等同於 daily_close。
+	// sr_zone_verify 沒有自己的 cron——它在 RunDailyClose 尾端無條件執行（休市日 daily_close 記 skipped、
+	// 它照跑），所以「有沒有排程會觸發它」等同於 daily_close。
 	s.markRegistered("sr_zone_verify")
 
 	// 籌碼採集：與 15:00 收盤掃描解耦，改為傍晚獨立排程（預設 21:00，見
@@ -622,7 +626,12 @@ func (s *Scheduler) finishRunWithTally(ctx context.Context, runID uint64, jobNam
 
 func (s *Scheduler) runPreMarket() {
 	ctx := context.Background()
+	s.cleanupRetention(ctx)
+	s.runPreMarketWork(ctx)
+}
 
+// cleanupRetention 是盤前的保留期清理（job_runs 與盤中逐輪存證）。跟當天有沒有交易無關，休市日照跑（I-139）。
+func (s *Scheduler) cleanupRetention(ctx context.Context) {
 	// 保留最近 jobRunRetentionDays 天的排程執行紀錄，開盤前清掉更舊的。
 	if n, err := s.jobRuns.DeleteBefore(ctx, jobRunRetentionCutoff()); err != nil {
 		s.log.Warn("job_runs cleanup failed", zap.Error(err))
@@ -637,7 +646,10 @@ func (s *Scheduler) runPreMarket() {
 			s.log.Info("intraday evidence cleanup done", zap.Int64("deleted", n))
 		}
 	}
+}
 
+// runPreMarketWork 是盤前的回補日 K 與預熱日線指標（為了當天的盤中；休市日⛔ 不跑）。
+func (s *Scheduler) runPreMarketWork(ctx context.Context) {
 	runID := s.startRun(ctx, "pre_market")
 	s.log.Info("pre-market job started")
 
@@ -695,7 +707,11 @@ func (s *Scheduler) RunDailyClose() {
 	failed := tally.failedCount()
 	s.log.Info("daily close job completed", zap.Int("symbols", len(symbols)), zap.Int("failed", failed))
 	s.finishRunWithTally(ctx, runID, "daily_close", len(symbols), tally)
+	s.runDailyCloseTail(ctx)
+}
 
+// runDailyCloseTail 是收盤尾端、跟當日取數無關的部分。休市日 daily_close 記 skipped 之後照樣執行（I-139）。
+func (s *Scheduler) runDailyCloseTail(ctx context.Context) {
 	// SR zone 驗證是獨立的 job_run 紀錄，失敗不影響上面已經完成的 daily_close
 	// 結果——兩者依序執行但彼此獨立記錄，其中一個出問題不會讓另一個也跟著
 	// 判定失敗。

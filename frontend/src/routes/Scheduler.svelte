@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
   import Layout from '../components/layout/Layout.svelte'
+  import MarketDayPanel from '../components/scheduler/MarketDayPanel.svelte'
   import {
     fetchSchedulerStatus,
     triggerDailyCloseRun,
@@ -222,6 +223,9 @@
         重新整理
       </button>
     </div>
+
+    <!-- 交易日與臨時休市的手動設定（I-139） -->
+    <MarketDayPanel />
 
     {#if error}
       <p class="text-rise text-sm mb-4">{error}</p>

@@ -505,6 +505,30 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 | error | 最後一筆錯誤或摘要訊息 |
 | started_at / finished_at | 執行時間戳 |
 
+* **休市日的 `skipped`**（I-139）：`pre_market`、`intraday`（09:00～13:30 每一輪一筆，一天 55 筆）、`daily_close` 在休市日記 `status=skipped`、`symbols_total=0`、
+  `error` 是 `market_closed (calendar)` 或 `market_closed (manual)`（⛔ 不含其他文字）。等鎖逾時的 `skipped` 是 `lock_wait_timeout`，兩者用 `error` 分開。
+  規則見 architecture.md「休市日的行為」。
+
+---
+
+## market_day_overrides
+
+臨時休市（颱風假）與推翻日曆的手動設定（migration 080；I-139）。**只新增、⛔ 不改寫**：每次儲存與取消各一列；某一天目前的狀態＝該日 `id` 最大的那一列，
+最新一列是 `cleared` 或那天沒有任何列＝依日曆。量很小（一年幾列），⛔ 不清理。
+
+| 欄位 | 說明 |
+|------|------|
+| id | 主鍵 |
+| trade_date | 台北的日曆日期字串 `YYYY-MM-DD`（CHECK 格式）。⛔ 不用 DATE：三種 DB 與 driver 的時區處理不同 |
+| action | `closed`（手動休市）／`open`（手動照常開市，推翻日曆的休市日）／`cleared`（取消，回到日曆） |
+| reason | 原因（必填，最多 200 字），例如「證交所公告 11-22 颱風全日休市」 |
+| user_id | 操作者（`users.id`；⛔ 不設外鍵） |
+| created_at | 寫入時刻 |
+
+* 索引 `(trade_date, id)`：判斷時讀某一天最新的一列（每次判斷都重讀、⛔ 不快取）。
+* API 只接受今天或未來的平日（`PUT`／`DELETE /market-day-overrides/{date}`）；過去的日期⛔ 不能改（過去的 `job_runs` 已經發生）。
+* 回滾：新表，退回舊 image 即可、⛔ 不用退 migration（舊程式不讀不寫它）。
+
 ---
 
 ## intraday_rounds

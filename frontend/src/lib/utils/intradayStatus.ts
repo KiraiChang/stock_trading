@@ -1,4 +1,10 @@
-import type { IntradayRefillSymbol, IntradayRound, IntradaySymbolStatus } from '../api/intraday'
+import type {
+  IntradayRefillSymbol,
+  IntradayRound,
+  IntradayStatusResponse,
+  IntradaySymbolStatus,
+  TradingDay,
+} from '../api/intraday'
 
 // 盤中狀態 → 畫面文字（T-088＋I-103）。行情與評估分兩段；「未觸發」只在 no_signal 時出現，
 // 抓取失敗、沒有新 K 棒、輸入沒變、等鎖逾時都顯示「本輪未評估」與原因，⛔ 不跟「未觸發」混在一起。
@@ -62,7 +68,21 @@ const notEvaluatedLabels: Record<string, string> = {
   unchanged: '本輪未評估（資料沒有變化）',
 }
 
-export function describeIntraday(st: IntradaySymbolStatus, round: IntradayRound | null): IntradayView {
+const closedLabels: Record<string, string> = {
+  calendar: '今日休市（日曆）',
+  manual: '今日休市（手動設定）',
+  weekend: '今日休市（週末）',
+}
+
+export function describeIntraday(
+  st: IntradaySymbolStatus,
+  round: IntradayRound | null,
+  tradingDay?: TradingDay | null,
+): IntradayView {
+  // 休市日（I-139）：⛔ 不顯示上一個交易日的「已更新」。
+  if (tradingDay && !tradingDay.is_trading) {
+    return { data: closedLabels[tradingDay.source] ?? '今日休市', evaluation: '', tone: 'muted' }
+  }
   const lastBar = `最後有效 K 棒 ${hhmm(st.last_bar_ts)}`
   const delay = st.stale && st.lag_minutes != null ? `｜行情延遲 ${st.lag_minutes} 分鐘` : ''
 
@@ -153,4 +173,36 @@ export function describeRefill(r: IntradayRefillSymbol): string {
     text += `｜仍無法確認的缺口 ${r.gap_minutes} 分鐘（${list}）`
   }
   return text
+}
+
+export interface IntradayNotice {
+  text: string
+  tone: IntradayTone
+  key: 'calendar_fallback' | 'none_yet' | 'empty_watchlist' | 'unavailable'
+}
+
+// 清單標題列的提示（I-139）：日曆取不到、還沒收到今日盤中資料、自選清單是空的、讀不到盤中資料狀態。
+// 抓取或寫入失敗（fetch_failing／store_failing）⛔ 不另出提示：沿用每一列的 T-088 失敗顯示，避免同一個提示同時代表資料源故障與休市。
+export function intradayNotices(resp: IntradayStatusResponse | null): IntradayNotice[] {
+  if (!resp) return []
+  const out: IntradayNotice[] = []
+  if (resp.trading_day?.source === 'fallback') {
+    out.push({ key: 'calendar_fallback', text: '交易日曆取不到，照平日執行', tone: 'warn' })
+  }
+  switch (resp.session_data) {
+    case 'none_yet':
+      out.push({
+        key: 'none_yet',
+        text: `截至 ${hhmm(resp.now)} 尚未收到今日盤中資料，請核對行情來源與交易所公告`,
+        tone: 'warn',
+      })
+      break
+    case 'empty_watchlist':
+      out.push({ key: 'empty_watchlist', text: '自選清單是空的', tone: 'muted' })
+      break
+    case 'unavailable':
+      out.push({ key: 'unavailable', text: '讀不到盤中資料狀態', tone: 'error' })
+      break
+  }
+  return out
 }

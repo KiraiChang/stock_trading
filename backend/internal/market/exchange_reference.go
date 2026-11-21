@@ -164,7 +164,10 @@ type exchangeReference struct {
 	twseURL     string
 	tpexURL     string
 
-	lastRequest time.Time
+	// throttleSlot 是節流的鎖（容量 1 的 channel），保護 lastRequest：缺漏偵測與交易日判斷（I-139）共用同一個 client，
+	// 可能同時呼叫。⛔ 不用 sync.Mutex：等鎖期間要能響應取消（交易日判斷有 5 秒期限）。
+	throttleSlot chan struct{}
+	lastRequest  time.Time
 
 	// 年度日曆快取。**歷史年度不會變**，當年度靠 TTL 容忍年中補班補假修訂。
 	// 沒有它的話每輪都會逐年重打 TWSE——對一份整年預先公布、幾乎不變的資料而言
@@ -177,6 +180,8 @@ type exchangeReference struct {
 type cachedCalendar struct {
 	cal       *TradingCalendar
 	fetchedAt time.Time
+	// startedAt 是這份日曆的請求**開始**的時刻：較早開始、較晚回來的請求⛔ 不能蓋掉較新的那一份（I-139 實作 review 第三輪）。
+	startedAt time.Time
 }
 
 // ExchangeReferenceOptions 的零值欄位沿用預設。
@@ -219,6 +224,8 @@ func NewExchangeReference(
 		tpexURL:     pick(opts.TPExURL, tpexStockDayURL),
 		calCache:    make(map[int]cachedCalendar, 2),
 		calTTL:      opts.CalendarTTL,
+
+		throttleSlot: make(chan struct{}, 1),
 	}
 }
 
@@ -235,7 +242,10 @@ func (c *exchangeReference) getJSON(ctx context.Context, source, rawURL string, 
 	if c.breaker.IsOpen(source) {
 		return fmt.Errorf("%w: %s breaker open", ErrVerificationUnavailable, source)
 	}
-	c.throttle(ctx)
+	if err := c.throttle(ctx); err != nil {
+		// 呼叫端自己的期限或取消，⛔ 不是來源故障，⛔ 不累加 breaker。
+		return fmt.Errorf("%w: %s throttle wait: %v", ErrVerificationUnavailable, source, err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -243,6 +253,10 @@ func (c *exchangeReference) getJSON(ctx context.Context, source, rawURL string, 
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if ctx.Err() != nil {
+			// 呼叫端自己的期限或取消，⛔ 不是來源故障，⛔ 不累加 breaker。
+			return fmt.Errorf("%w: %s request canceled: %v", ErrVerificationUnavailable, source, ctx.Err())
+		}
 		c.breaker.Fail(source)
 		return fmt.Errorf("%w: %s request failed: %v", ErrVerificationUnavailable, source, err)
 	}
@@ -254,6 +268,10 @@ func (c *exchangeReference) getJSON(ctx context.Context, source, rawURL string, 
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if ctx.Err() != nil {
+			// 讀 body 時才被呼叫端取消或到期，同樣⛔ 不是來源故障（I-139 實作 review 第三輪）。
+			return fmt.Errorf("%w: %s read body canceled: %v", ErrVerificationUnavailable, source, ctx.Err())
+		}
 		c.breaker.Fail(source)
 		return fmt.Errorf("%w: %s read body: %v", ErrVerificationUnavailable, source, err)
 	}
@@ -269,18 +287,34 @@ func (c *exchangeReference) getJSON(ctx context.Context, source, rawURL string, 
 // throttle 保證兩次請求之間至少間隔 RequestInterval。
 //
 // **對交易所保守節流**，與 FinMind 的 5 req/min 無關——這是為了不對公開端點造成壓力。
-func (c *exchangeReference) throttle(ctx context.Context) {
+//
+// 拿著鎖等：多個呼叫端同時進來時依序間隔，⛔ 不會同時算出「不用等」。等鎖與等間隔都響應 ctx：
+// 取消或到期時回 ctx 的錯誤、⛔ 不更新 lastRequest（這一次沒有發出請求）。
+func (c *exchangeReference) throttle(ctx context.Context) error {
 	if c.interval <= 0 {
-		return
+		return ctx.Err()
 	}
-	wait := c.interval - time.Since(c.lastRequest)
-	if wait > 0 {
+	select {
+	case c.throttleSlot <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-c.throttleSlot }()
+	// 鎖空著時，上面的 select 即使 ctx 已經取消也可能先拿到鎖（實作 review 第二輪）：拿到之後再檢查一次。
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if wait := c.interval - time.Since(c.lastRequest); wait > 0 {
+		t := time.NewTimer(wait)
+		defer t.Stop()
 		select {
 		case <-ctx.Done():
-		case <-time.After(wait):
+			return ctx.Err()
+		case <-t.C:
 		}
 	}
 	c.lastRequest = time.Now()
+	return nil
 }
 
 // ── 年度交易日曆 ────────────────────────────────────────────────────────────
@@ -300,12 +334,17 @@ func (c *exchangeReference) TradingCalendar(ctx context.Context, year int) (*Tra
 	if cal, ok := c.cachedCalendar(year); ok {
 		return cal, nil
 	}
+	started := time.Now()
 	cal, err := c.fetchCalendar(ctx, year)
 	if err != nil {
 		// **失敗不寫快取**：否則一次限流會讓整個 TTL 期間都拿不到日曆。
 		return nil, err
 	}
-	c.storeCalendar(year, cal)
+	// **已取消或已過期的請求⛔ 不寫快取**（I-139 實作 review 第三輪）：被呼叫端放棄的請求（例如交易日判斷等不到而 fallback 的那一筆）
+	// 晚回來時，結果照樣交給還在等它的人，但⛔ 不能拿它更新所有人共用的年度快取。
+	if ctx.Err() == nil {
+		c.storeCalendar(year, cal, started)
+	}
 	return cal, nil
 }
 
@@ -322,13 +361,17 @@ func (c *exchangeReference) cachedCalendar(year int) (*TradingCalendar, bool) {
 	return entry.cal, true
 }
 
-func (c *exchangeReference) storeCalendar(year int, cal *TradingCalendar) {
+// storeCalendar 寫入年度快取。快取裡已經有**較晚開始**的請求寫入的那一份時⛔ 不覆蓋：較早開始的請求晚回來，內容可能比較舊。
+func (c *exchangeReference) storeCalendar(year int, cal *TradingCalendar, started time.Time) {
 	if c.calTTL <= 0 {
 		return
 	}
 	c.calMu.Lock()
 	defer c.calMu.Unlock()
-	c.calCache[year] = cachedCalendar{cal: cal, fetchedAt: time.Now()}
+	if cur, ok := c.calCache[year]; ok && cur.startedAt.After(started) {
+		return
+	}
+	c.calCache[year] = cachedCalendar{cal: cal, fetchedAt: time.Now(), startedAt: started}
 }
 
 func (c *exchangeReference) fetchCalendar(ctx context.Context, year int) (*TradingCalendar, error) {

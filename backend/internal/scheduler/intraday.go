@@ -79,7 +79,9 @@ func (s *Scheduler) acquireIntradayLock(wait time.Duration) (release func(), wai
 }
 
 func (s *Scheduler) runIntradayJob() {
-	if !timeutil.IsMarketOpen(time.Now()) {
+	now := s.intradayNow()
+	// 13:30 之後的 cron 觸發（13:35～13:55）⛔ 不建立紀錄，一天 55 輪。
+	if !timeutil.IsMarketOpen(now) {
 		return
 	}
 	if !s.fetcher.HasIntradaySource() && !s.intradayEnabled {
@@ -89,7 +91,14 @@ func (s *Scheduler) runIntradayJob() {
 		s.log.Debug("intraday job skipped: no batch source and finmind.intraday_enabled=false")
 		return
 	}
-	s.runIntradayRound(s.intradayNow())
+	// 休市日（I-139）：每一輪記一筆 skipped＋market_closed，只寫 job_runs——⛔ 不拿鎖、⛔ 不寫逐輪存證。
+	// 有紀錄才分得出「排程有觸發、確認休市」和「排程漏跑」。
+	ctx := context.Background()
+	if reason, closed := s.marketClosed(ctx, now); closed {
+		s.recordMarketClosed(ctx, "intraday", reason)
+		return
+	}
+	s.runIntradayRound(now)
 }
 
 // runIntradayRound 跑盤中一輪：等鎖 → 建 run（**先拿鎖再建**，job_runs 的起訖就是實際執行區間，

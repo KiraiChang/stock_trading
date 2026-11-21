@@ -27,6 +27,7 @@ import (
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/internal/tradingday"
 )
 
 // checkConfigFlag：只載入設定、跑設定契約檢查，然後以 0（通過）或 1（不通過）結束，
@@ -276,6 +277,9 @@ func main() {
 	// 兩者缺一不可——後者證明不了「有人在用它」。
 	gapCfg, _, gapReference := scheduler.NewCandleGapDependencies(cfg.CandleGapDetection, log)
 	sched.SetCandleGapDetection(store.NewCandleVerificationRepo(db), gapReference, gapCfg)
+	// 休市日的判斷（I-139）：跟缺漏偵測共用同一個交易所 client（節流、breaker、日曆快取），
+	// scheduler 與 API handler 共用同一個實例（handler 經由 sched.TradingDay() 取得）。**在 Start() 之前**注入。
+	sched.SetTradingDay(tradingday.New(gapReference, store.NewMarketDayOverrideRepo(db), log))
 	// 收盤驗證的覆蓋窗口（見 docs/architecture.md）。沒注入也能跑（零值退回預設），但那樣就吃不到
 	// config 的調整，所以與其他注入放在一起、同樣在 Start() 之前。
 	sched.SetSRZoneVerify(cfg.SRZoneVerify)

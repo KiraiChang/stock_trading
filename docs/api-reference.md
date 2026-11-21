@@ -1222,7 +1222,10 @@ cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
 
 | 欄位 | 說明 |
 |------|------|
-| `now`、`market_open` | 伺服器時間、是否盤中 |
+| `now` | 伺服器時間 |
+| `trading_day` | 跟排程共用的交易日判斷（I-139）：`is_trading`、`source`（`weekend`／`manual`／`calendar`／`fallback`；fallback＝日曆取不到、照平日當交易日），`manual` 時另帶 `override`（`market_day_overrides` 的那一列） |
+| `market_open` | 交易日且 09:00～13:30 |
+| `session_data` | 今天到目前有沒有盤中資料：`ok`／`pending`／`none_yet`／`fetch_failing`／`store_failing`／`empty_watchlist`／`unavailable`／`closed`（條件與畫面見 `yahoo-intraday-integration.md`；只提示、⛔ 不停排程） |
 | `stale_after_minutes` | 延遲門檻（10） |
 | `latest_round` | 最近一輪排程的輪次紀錄（`intraday_rounds` 的欄位，另加 `running`：這一輪現在還在執行）；沒有時是 null |
 | `symbols[].latest` | 這一檔最近一輪排程的逐檔列（`intraday_symbol_runs` 的欄位，⛔ 不含 fingerprint）；沒有紀錄時是 null |
@@ -1245,6 +1248,21 @@ cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
 * 結果記 `job_runs`（`intraday_refill`，⛔ 不在 `GET /scheduler/status` 的排程清單裡）與 `intraday_symbol_runs`（`source=refill`）。
 * ⚠️ **權限**：沿用現有手動排程端點，**任何登入的使用者都能觸發**。目前只有一人使用（使用者 2026-11-20 裁決 D6）；**多人使用之前要調整**
   （見 `feature-reviews/2026-11-19-first-usable-release.md`「共用環境與權限」）。
+
+### 臨時休市與推翻日曆的手動設定（I-139）
+
+規則見 architecture.md「休市日的行為」，表格見 database-schema.md 的 `market_day_overrides`。每次儲存與取消各寫一列（操作者、時間、原因），**下一次判斷就生效**
+（排程的下一輪、畫面的下一次輪詢），⛔ 不中斷正在跑的那一輪。⚠️ 權限同手動排程端點：任何登入的使用者；多人使用之前要調整。
+
+* `GET /market-day-overrides?from=YYYY-MM-DD`（`from` 預設今天）：
+  `today`（`date`、`is_trading`、`source`、`override`：今天的判斷與依據）、`current`（每一天目前生效中的手動設定，最新一列是 `closed`／`open` 的那幾天）、
+  `history`（`from` 以後的完整操作紀錄，依日期與 id 排序，含取消）。400 `invalid_from`。
+* `PUT /market-day-overrides/{date}`：body `{"action": "closed"|"open", "reason": "…"}`。200：`override`（**這次寫入的那一列**，寫入與讀回在同一步完成，
+  別的頁面同時寫入也⛔ 不會拿到對方的紀錄）、`trading_day`（那一天寫入後的判斷）。500＝沒有寫入。
+* `DELETE /market-day-overrides/{date}`：body `{"reason": "…"}`，寫一列 `cleared`、回到日曆。那一天沒有生效中的手動設定時 409 `no_active_override`。
+* 422：`invalid_date`（格式或不存在的日期）、`past_date`（今天以前）、`weekend`（週末一律休市）、`invalid_action`、`reason_required`、`reason_too_long`（超過 200 字）；
+  400 `invalid_body`。
+* **只代表全日休市**：依交易所公告；停班範圍（全日、上午、下午）的處理不同，只有部分時段停班而照常交易時⛔ 不要設定。
 
 ### GET `/evaluation-universe`
 

@@ -21,6 +21,16 @@ vi.mock('../lib/api/scheduler', () => ({
   triggerCorporateActionSyncRun: vi.fn(),
   triggerDelistingReconcileRun: vi.fn(),
 }))
+// 排程頁上方的休市設定面板（I-139）有自己的測試（MarketDayPanel.test.ts），這裡只讓它載得起來。
+vi.mock('../lib/api/marketDays', () => ({
+  fetchMarketDayOverrides: vi.fn().mockResolvedValue({
+    today: { date: '2026-11-02', is_trading: true, source: 'calendar' },
+    current: [],
+    history: [],
+  }),
+  setMarketDayOverride: vi.fn(),
+  clearMarketDayOverride: vi.fn(),
+}))
 
 const srEvaluationJob: SchedulerJob = {
   job_name: 'sr_evaluation',

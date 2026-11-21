@@ -16,7 +16,7 @@
   import { runIntradayRefill } from '../../lib/api/intraday'
   import { ApiError } from '../../lib/api/client'
   import { intradayStatus } from '../../lib/stores/intraday'
-  import { describeIntraday, describeRefill, type IntradayTone } from '../../lib/utils/intradayStatus'
+  import { describeIntraday, describeRefill, intradayNotices, type IntradayTone } from '../../lib/utils/intradayStatus'
 
   const dispatch = createEventDispatcher<{
     symbolWatched: string
@@ -26,6 +26,7 @@
 
   // ── 盤中逐檔狀態（T-088）：行情與評估分兩段 ─────────────────
   $: intradayBySymbol = new Map(($intradayStatus?.symbols ?? []).map((s) => [s.symbol, s]))
+  $: notices = intradayNotices($intradayStatus)
   const toneClass: Record<IntradayTone, string> = {
     ok: 'text-gray-400',
     muted: 'text-muted',
@@ -346,6 +347,9 @@
   {#if watchError}
     <p class="px-4 py-2 text-rise text-xs border-b border-border">{watchError}</p>
   {/if}
+  {#each notices as n (n.key)}
+    <p class="px-4 py-2 text-xs border-b border-border {toneClass[n.tone]}" data-testid="intraday-notice-{n.key}">{n.text}</p>
+  {/each}
   {#if refillError}
     <p class="px-4 py-2 text-rise text-xs border-b border-border" data-testid="intraday-refill-error">{refillError}</p>
   {/if}
@@ -466,7 +470,7 @@
               </td>
             </tr>
             {#if ist}
-              {@const view = describeIntraday(ist, $intradayStatus?.latest_round ?? null)}
+              {@const view = describeIntraday(ist, $intradayStatus?.latest_round ?? null, $intradayStatus?.trading_day ?? null)}
               <!-- 盤中狀態（T-088）：行情｜評估 -->
               <tr class="border-b border-border/50" data-testid="intraday-status-{item.symbol}">
                 <td colspan="9" class="px-4 pb-2 pt-0 text-[11px] {toneClass[view.tone]}">

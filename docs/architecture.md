@@ -192,6 +192,46 @@ dataset（`TaiwanStockKBar`）需要 Sponsor 級以上 token，帳號等級不�
 `runIntradayJob` 會直接跳過，不會每 5 分鐘對 FinMind 發出注定失敗的請求；
 升級帳號後改成 `true` 即可恢復，見 [finmind-integration.md](./finmind-integration.md)。
 
+### 休市日的行為（I-139）
+
+2026-11 起，scheduler 認得平日的休市日。原本 cron 與 `timeutil.IsMarketOpen` 只看星期幾，平日的休市日（例如年假、颱風假）照樣跑盤中與收盤，
+`job_runs` 記成 success，盤中狀態把前一個交易日的資料顯示成「已更新」。
+
+* **共用的交易日判斷**（`internal/tradingday`）：main 建立一個實例，scheduler 與 API（`/intraday/status`、`/market-day-overrides`）共用同一份快取與降級狀態，
+  相近時間的呼叫端⛔ 不會得到不同的判斷。判斷順序與依據（`source`）：
+  1. `weekend`：週六、週日一律休市，⛔ 不查日曆、⛔ 不看手動設定（跟只限平日的 cron 一致；**補行交易日是已知限制**，要支援得讀日曆的「補行交易」列並放寬 cron）。
+  2. `manual`：當天有生效中的手動設定（`market_day_overrides`，見下）。手動設定**每次判斷都重讀**、⛔ 不快取，設定與取消在下一次判斷就生效。
+     讀手動設定有自己的期限（2 秒；cron 傳的 context 沒有期限），讀不到或逾時照日曆判斷。
+  3. `calendar`：TWSE 年度日曆（`market.TradingCalendar`，`holidaySchedule` 逐列分類、驗年份），跟日 K 缺漏偵測共用同一個 client、節流、breaker 與 TTL 快取。
+  4. `fallback`：日曆取不到（逾時、請求失敗、breaker 開啟、年份驗證失敗）→ **一律當成交易日**（fail-open）。交易日被誤擋的代價（整天沒有盤中訊號）遠大於休市日多跑一次。
+* **日曆查詢**：同一年同一時間只有一個共用請求（單一請求，其他呼叫端等它的結果）；共用請求用自己的 context 加 **5 秒逾時**，跟發起它的呼叫端脫鉤——
+  呼叫端（例如畫面的 API 請求）先被取消只影響它自己（回 fallback），其他呼叫端照樣拿到結果，**呼叫端取消⛔ 不算日曆失敗**。
+  共用請求本身失敗時，降級結果**共用 5 分鐘**：這段時間內所有呼叫端直接用 fallback（⛔ 不再請求、⛔ 不再等待），過了才重試。
+  來源⛔ 沒有響應取消時，呼叫端最多等兩倍期限就回 fallback 並寫下降級結果，卡住的請求移出共用請求（降級期滿後重新探測；它晚回來的結果⛔ 不影響判斷）。
+  交易所 client 的節流等候（等鎖與等間隔）也響應取消；已取消的請求⛔ 不推進節流時間，呼叫端自己的取消或期限（含請求送出途中與讀 body 時）⛔ 不累加 breaker。
+  年度日曆快取：已取消或已過期的請求⛔ 不寫快取，較早開始、較晚回來的請求⛔ 不覆蓋較晚開始的那一份。
+  進入降級時記一次 Warn `trading calendar unavailable`（帶原因碼），恢復時記一次 Info `trading calendar recovered`。
+* **哪些排程看日曆**：閘門**只放在 cron 入口**，手動端點與重跑走原本的函式、⛔ 不經過閘門。
+
+  | 排程 | 休市日 |
+  |---|---|
+  | `intraday` | 09:00～13:30 的**每一輪**記 `skipped`（一天 55 筆），**只寫 `job_runs`**：⛔ 不拿鎖、⛔ 不抓取、⛔ 不評估、⛔ 不寫 `intraday_rounds`／`intraday_symbol_runs`。有紀錄才分得出「確認休市」和「排程漏跑」；13:30 之後的 cron 觸發照舊⛔ 不建立紀錄 |
+  | `pre_market` | 保留期清理（`job_runs` 與逐輪存證）**照跑**；回補 5 天日 K 與預熱⛔ 不跑，記 `skipped` |
+  | `daily_close` | 當日取數與掃描⛔ 不跑，記 `skipped`；尾端的 `sr_zone_verify` **照跑**（驗的是最近 N 天的分析） |
+  | `evaluation_universe_sync`（含 `candle_gap_detection`）、`chip_daily_sync` | **照原排程**：會回補或核對過去幾天的資料 |
+  | `sr_analysis`、`sr_analysis_chip` | 照舊（「今天的 K 棒已入庫」的前置會讓它們自己跳過） |
+  | `stock_symbol_sync`、`corporate_action_sync`、`delisting_reconcile`、`sr_evaluation` | 照跑：跟當天有沒有交易無關（公司行動依星期分片，跳過會讓那一片當週沒有覆蓋） |
+  | 手動端點（`daily-close/run`、`intraday-refill/run` 等）與重跑 | 照跑（手動補抓在休市日會回「沒有當日 K 棒」） |
+
+  `skipped` 的內容：`symbols_total=0`、`error` 是 `market_closed (calendar)` 或 `market_closed (manual)`，⛔ 不含其他文字。`fallback` 時照跑，`job_runs` 照常。
+* **臨時休市（颱風假）**：年度日曆⛔ 不含當天才宣布的臨時休市，由人在排程頁的「交易日與臨時休市」設定（`PUT`／`DELETE /market-day-overrides/{date}`，見 api-reference.md）。
+  三種狀態：依日曆、手動休市、手動照常開市（推翻日曆）。只接受今天或未來的平日；儲存與取消都要填原因，每次各留一列（操作者、時間、原因，只新增、⛔ 不改寫）。
+  **只代表全日休市**：停班範圍（全日、上午、下午）對交易的處理不同，依交易所公告；只有部分時段停班而照常交易時⛔ 不要設定。盤中才設定的話，之前已執行的輪次照實保留，從下一輪起記 `skipped`。
+  操作程序見 development-workflow.md「颱風假的手動休市」。
+* **畫面**：`/intraday/status` 帶 `trading_day`，`market_open`＝交易日且 09:00～13:30；休市日自選清單每一列顯示「今日休市（日曆／手動設定／週末）」，
+  日曆取不到時清單標題列提示「交易日曆取不到，照平日執行」。沒有盤中資料的提示（`session_data`）見 yahoo-intraday-integration.md。
+* **程式註解裡的 I-139**：`tradingday`、`scheduler/market_closed.go`、`handler/market_day_overrides.go` 與 migration 080 的註解引用 I-139，指的就是本節。
+
 ---
 
 ## 模組關係
@@ -284,7 +324,7 @@ Svelte 單頁應用（`frontend/src/routes/`），登入後由 Sidebar 切換：
 | 歷史資料回補 | `backfill` | 勾選監控清單股票回補 K 棒（`POST /market/backfill`）；下方另有「手動計算指標」（`POST /indicators/:symbol/compute`）與「手動評估訊號」（`POST /signals/:symbol/evaluate`）兩個區塊，任意股票代號都可用 |
 | 策略回測 | `backtest` | 送出回測任務（`POST /backtest`）、輪詢狀態、查看結果與逐筆交易 |
 | 籌碼分析 | `chips` | 查詢籌碼摘要、歷史分數、券商分點排行，並可手動同步籌碼資料（`POST /chips/sync`） |
-| 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄 |
+| 排程監控 | `scheduler` | 顯示 `pre_market`/`intraday`/`daily_close` 排程執行紀錄；上方「交易日與臨時休市」顯示今天的判斷與依據，可設定或取消手動休市／手動照常開市（見「休市日的行為」） |
 | 使用者管理 | `users` | 啟用/停用帳號 |
 
 Dashboard 的即時欄位以 REST 主動 hydrate（`/candles`、`/indicators`、`/signals`），

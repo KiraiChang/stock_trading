@@ -131,6 +131,11 @@ func NewServer(
 		inh := handler.NewIntradayHandler(store.NewIntradayEvidenceRepo(db), watchlistRepo, candleRepo, sched, log)
 		protected.GET("/intraday/status", inh.GetStatus)
 		protected.POST("/scheduler/intraday-refill/run", inh.RunRefill)
+		// 臨時休市與推翻日曆的手動設定（I-139）。權限同上：任何登入的使用者；多人使用之前要調整。
+		mdo := handler.NewMarketDayOverrideHandler(store.NewMarketDayOverrideRepo(db), sched, log)
+		protected.GET("/market-day-overrides", mdo.List)
+		protected.PUT("/market-day-overrides/:date", mdo.Put)
+		protected.DELETE("/market-day-overrides/:date", mdo.Delete)
 		protected.POST("/scheduler/daily-close/run", sch.RunDailyClose)
 		protected.POST("/scheduler/stock-symbol-sync/run", sch.RunStockSymbolSync)
 		protected.POST("/scheduler/sr-evaluation/run", sch.RunSREvaluation)

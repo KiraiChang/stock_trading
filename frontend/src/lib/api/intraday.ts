@@ -53,9 +53,41 @@ export interface IntradaySymbolStatus {
   eval_pending?: 'evaluating' | 'interrupted'
 }
 
+// 跟排程共用的交易日判斷（I-139）。依據：週末／手動設定／TWSE 年度日曆／日曆取不到（照平日執行）。
+export type TradingDaySource = 'weekend' | 'manual' | 'calendar' | 'fallback'
+
+export interface MarketDayOverride {
+  id: number
+  trade_date: string
+  action: 'closed' | 'open' | 'cleared'
+  reason: string
+  user_id: number
+  created_at: string
+}
+
+export interface TradingDay {
+  is_trading: boolean
+  source: TradingDaySource
+  override?: MarketDayOverride
+}
+
+// 今天到目前有沒有盤中資料（I-139 的 D4，只提示、⛔ 不停排程）。
+export type IntradaySessionData =
+  | 'ok'
+  | 'pending'
+  | 'none_yet'
+  | 'fetch_failing'
+  | 'store_failing'
+  | 'empty_watchlist'
+  | 'unavailable'
+  | 'closed'
+
 export interface IntradayStatusResponse {
   now: string
+  trading_day: TradingDay
+  // 交易日且 09:00～13:30。
   market_open: boolean
+  session_data: IntradaySessionData
   stale_after_minutes: number
   latest_round: IntradayRound | null
   symbols: IntradaySymbolStatus[]

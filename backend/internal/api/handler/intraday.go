@@ -9,8 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/trading/backend/internal/market"
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/internal/tradingday"
 	"github.com/trading/backend/pkg/timeutil"
 )
 
@@ -68,9 +70,33 @@ type intradaySymbolStatus struct {
 	EvalPending string `json:"eval_pending,omitempty"`
 }
 
+// session_data 的值域（I-139 的 D4）：今天到目前有沒有盤中資料。各狀態分開，
+// ⛔ 不讓同一個提示同時代表資料源故障與市場休市；⛔ 不用來自動停排程。
+const (
+	sessionDataOK             = "ok"              // 今天已有 1 分 K
+	sessionDataPending        = "pending"         // 交易日 09:30 之前、還沒有今天的 1 分 K（⛔ 不提示）
+	sessionDataNoneYet        = "none_yet"        // 交易日 09:30 之後、所有自選標的今天都沒有 1 分 K、最近一輪沒有已知的抓取或寫入失敗
+	sessionDataFetchFailing   = "fetch_failing"   // 同上，但今天最近一輪有 fetch_failed 或輪次 failed（沿用抓取失敗的顯示）
+	sessionDataStoreFailing   = "store_failing"   // 同上，但今天最近一輪已有回應、K 棒寫入失敗（沿用寫入失敗的顯示）
+	sessionDataEmptyWatchlist = "empty_watchlist" // 自選清單是空的
+	sessionDataUnavailable    = "unavailable"     // 查 DB 失敗
+	sessionDataClosed         = "closed"          // 今天判斷為休市
+)
+
+// sessionDataCheckFrom 是「尚未收到今日盤中資料」開始提示的時刻（台北 09:30）。
+const sessionDataCheckFrom = 9*60 + 30
+
+// noJudge 是沒有注入共用判斷時的退路：週末休市、平日照 fallback（跟舊行為一樣當交易日）。
+var noJudge = tradingday.New(nil, nil, nil)
+
 type intradayStatusResponse struct {
-	Now               time.Time              `json:"now"`
-	MarketOpen        bool                   `json:"market_open"`
+	Now time.Time `json:"now"`
+	// TradingDay 是跟排程共用的交易日判斷（I-139）：is_trading 與依據（weekend／manual／calendar／fallback）。
+	TradingDay tradingday.Result `json:"trading_day"`
+	// MarketOpen＝交易日且 09:00～13:30。
+	MarketOpen bool `json:"market_open"`
+	// SessionData 見上面的值域。
+	SessionData       string                 `json:"session_data"`
 	StaleAfterMinutes int                    `json:"stale_after_minutes"`
 	LatestRound       *intradayRoundView     `json:"latest_round"`
 	Symbols           []intradaySymbolStatus `json:"symbols"`
@@ -85,8 +111,13 @@ func (h *IntradayHandler) GetStatus(c *gin.Context) {
 		serverError(c, h.log, err, "intraday status: watchlist")
 		return
 	}
+	judge := noJudge
+	if h.sched != nil && h.sched.TradingDay() != nil {
+		judge = h.sched.TradingDay()
+	}
+	td := judge.On(ctx, now)
 	resp := intradayStatusResponse{
-		Now: now, MarketOpen: timeutil.IsMarketOpen(now),
+		Now: now, TradingDay: td, MarketOpen: td.IsTrading && timeutil.IsMarketOpen(now),
 		StaleAfterMinutes: int(scheduler.IntradayStaleAfter / time.Minute),
 		Symbols:           make([]intradaySymbolStatus, 0, len(symbols)),
 	}
@@ -120,11 +151,25 @@ func (h *IntradayHandler) GetStatus(c *gin.Context) {
 	}
 
 	nowLocal := now.In(timeutil.TaipeiTZ)
+	sameDay := func(t time.Time) bool {
+		l := t.In(timeutil.TaipeiTZ)
+		return l.Year() == nowLocal.Year() && l.YearDay() == nowLocal.YearDay()
+	}
+	var anyToday, candleErr, fetchFailed, storeFailed bool
+	roundToday := round != nil && sameDay(round.ScheduledAt)
 	for _, sym := range symbols {
 		st := intradaySymbolStatus{Symbol: sym}
 		if row, ok := latest[sym]; ok {
 			r := row
 			st.Latest = &r
+			if roundToday && row.RunID == round.RunID {
+				switch row.DataStatus {
+				case string(market.IntradayFetchFailed):
+					fetchFailed = true
+				case string(market.IntradayStoreFailed):
+					storeFailed = true
+				}
+			}
 			if !row.EvalStatus.Valid {
 				if running != 0 && running == row.RunID {
 					st.EvalPending = "evaluating"
@@ -172,12 +217,13 @@ func (h *IntradayHandler) GetStatus(c *gin.Context) {
 			case errors.Is(err, sql.ErrNoRows):
 				// 這一檔沒有任何 1 分 K。
 			case err != nil:
+				candleErr = true
 				h.log.Warn("intraday status: latest candle", zap.String("symbol", sym), zap.Error(err))
 			case last != nil:
 				ts := last.Timestamp
 				st.LastBarTS = &ts
-				l := ts.In(timeutil.TaipeiTZ)
-				if l.Year() == nowLocal.Year() && l.YearDay() == nowLocal.YearDay() {
+				if sameDay(ts) {
+					anyToday = true
 					lag := int(now.Sub(ts) / time.Minute)
 					st.LagMinutes = &lag
 					st.Stale = resp.MarketOpen && now.Sub(ts) > scheduler.IntradayStaleAfter
@@ -186,7 +232,30 @@ func (h *IntradayHandler) GetStatus(c *gin.Context) {
 		}
 		resp.Symbols = append(resp.Symbols, st)
 	}
+	resp.SessionData = deriveSessionData(td.IsTrading, len(symbols), candleErr, anyToday,
+		nowLocal.Hour()*60+nowLocal.Minute(), (roundToday && round.Outcome == store.IntradayOutcomeFailed) || fetchFailed, storeFailed)
 	c.JSON(http.StatusOK, resp)
+}
+
+// deriveSessionData 推導 session_data（優先序由上而下）。fetchFailing／storeFailing 只看今天最近一輪。
+func deriveSessionData(trading bool, symbols int, candleErr, anyToday bool, minuteOfDay int, fetchFailing, storeFailing bool) string {
+	switch {
+	case !trading:
+		return sessionDataClosed
+	case symbols == 0:
+		return sessionDataEmptyWatchlist
+	case candleErr:
+		return sessionDataUnavailable
+	case anyToday:
+		return sessionDataOK
+	case minuteOfDay < sessionDataCheckFrom:
+		return sessionDataPending
+	case fetchFailing:
+		return sessionDataFetchFailing
+	case storeFailing:
+		return sessionDataStoreFailing
+	}
+	return sessionDataNoneYet
 }
 
 type intradayRefillRequest struct {

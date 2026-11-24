@@ -331,7 +331,8 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
    * 2026-11-21 更新（I-139 計畫書第九節的先行項目）：判讀改依預定交易日清單逐日核對、每個預定交易日恰好 55 輪，上面的指紋已過時，現行的指紋與驗收紀錄見 I-123 計畫書「新版窗口的預定交易日」。
 7. **上版順序**（使用者 2026-11-20 裁決）：11-21（假日）準備並上版，下禮拜 live 與 dev 同步驗證（dev 的「成功 → 500 → 恢復」實跑與畫面核對改在上版之後、跟 live 第一個交易日同步做）。
    ⚠️ 這表示上版前⛔ 沒有 dev 的排程輪次實跑；風險由單元與整合測試（真的 SQLite、真的訊號引擎）與 dev 的手動補抓實跑承擔，出問題照回滾（退回 `pre-t088` 的 image、⛔ 不用退 migration 079）。
-   ✅ **live 上版紀錄**（2026-11-21 週六 15:12～15:26；平日的 cron 在週六⛔ 不觸發，live 週末只有 06:30 主檔同步與 07:00 終止上市對帳，都已跑完）：`31e5566` → `941f11e`；image backend `bc503920bb75` → `cc9c64c1e37e`、python-server `f166cc4e58c5` → `75922cb6672b`、python-worker `4303b51148a2` → `7fea4e0b4679`（python 程式沒改，重新 build 出新的 ID）；回滾標籤 `pre-t088` 指向舊的三個；`Config.Env` 50 行 `a4eccbc0aa79` 不變；backend 執行檔 `90539d61bf71` → `639c279ba1cf`；migration 79、兩張新表都在、0 筆；前端入口 `index-C6VWJ-Bz.js` → `index-BC4dYoER.js`；`/intraday/status` 未帶 token 回 401（換版前 404）；log 的 `redis connected`＋`scheduler started` 2 行、設定錯誤 0、panic 0；python `/health` 正常。**新 backend 啟動 2026-11-21 15:21:59（台北）**。
+   ✅ 2026-11-24 補做完成：dev 的「成功 → 500 → 恢復」實跑與畫面、live 新版前兩個交易日的輪次與逐檔紀錄都符合（見第十節）。
+   ✅ **live 上版紀錄**（2026-11-21 週六 15:12～15:26；平日的 cron 在週六⛔ 不觸發，live 週末只有 06:30 主檔同步與 07:00 終止上市對帳，都已跑完）：`31e5566` → `941f11e`；image backend `bc503920bb75` → `cc9c64c1e37e`、python-server `f166cc4e58c5` → `75922cb6672b`、python-worker `4303b51148a2` → `7fea4e0b4679`（python 程式沒改，重新 build 出新的 ID）；回滾標籤 `pre-t088` 指向舊的三個；`Config.Env` 50 行 `a4eccbc0aa79` 不變；backend 執行檔 `90539d61bf71` → `639c279ba1cf`；migration 79、兩張新表都在、0 筆；前端入口 `index-C6VWJ-Bz.js` → `index-BC4dYoER.js`；`/intraday/status` 未帶 token 回 401（換版前 404）；log 的 `redis connected`＋`scheduler started` 2 行、設定錯誤 0、panic 0；python `/health` 正常。**新 backend 啟動 2026-11-21 15:21:59（台北）**。上版後的前端確認（E-1）：使用者 2026-11-21 回報正常。
    ✅ **切版證據**（2026-11-21）：① 舊版資料截止：`job_runs` 最大 id `6078`（11-21 07:00 `delisting_reconcile`）、共 1541 筆，dump 前後一致；舊版最後一筆 intraday 是 id `6069`（11-20 13:30）。② 新 backend 啟動 2026-11-21 15:21:59（台北）。③ 新版第一筆 intraday 的 `run_id`：`6085`（2026-11-23 09:00:00 台北，`success`；2026-11-24 10:17 左右 live 唯讀查詢，`intraday_rounds` 最小 `run_id` 也是 `6085`、當時共 71 列＝11-23 的 55 輪加 11-24 09:00～10:15 的 16 輪，兩邊一致）。換版前那一段的封存在 `~/i131_merge/live/obs1121/`（`job_runs` dump 32,398 bytes＋UTC 11-19～11-21 三個 log），`SHA256SUMS` 的雜湊 `8737224ae96d…`，live 端、admin 搬檔後與 dev 端三次核對一致；UTC 11-21 的 log 只複製到 15:15，換版前最後幾分鐘與換版後的內容留給新版窗口的交接。換版前那一段只有 11-20 一個交易日，照第九節的 C 用舊口徑判讀並記錄（⛔ 不能據此通過）。
 8. **I-123、I-122 的收斂**跟著延後到新窗口判讀完成；dev 作業 volume、交接目錄照 I-123 的保留條件繼續保留。
 
@@ -394,7 +395,7 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
 | frontend（svelte-check、vitest 186 項、build） | 通過；dist 有新檔要一起加入版控 |
 | python 完整測試 | 2154 項通過、1 項跳過（這次⛔ 沒有改 python） |
 | dev 實跑：手動補抓 | ✅ 見下方 |
-| dev 實跑：排程輪次（成功、500、恢復）與畫面 | ⚠️ 待做：使用者裁決改在上版之後、跟 live 的第一個交易日同步驗證（第九節第 7 點） |
+| dev 實跑：排程輪次（成功、500、恢復）與畫面 | ✅ 2026-11-24（上版之後做，第九節第 7 點；見下方） |
 | 實作 review 的四項修正（2026-11-20） | backend scheduler 測試、frontend（svelte-check 0、vitest 189 項、build）通過 |
 | 實作 review 第二輪的三項修正（2026-11-20） | backend 完整測試、postgres／mysql migration 驗證（079 的 CHECK 加 `failed`）、frontend（svelte-check 0、vitest 192 項、build）通過；⚠️ dev DB 已套用舊版 079，下次 dev 實跑前要讓它重新套用（刪兩張表與 `goose_db_version` 的 79 那一列，只在 dev） |
 | C 切版前：觀察工具的新版查詢與驗收案例（重疊 0、失敗 1） | ✅ 2026-11-20（見第九節「新版查詢的實作與驗收」） |
@@ -405,6 +406,20 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
   ②第二次（同樣的資料）→ 不變 270；③假服務回 500 → 兩檔 `fetch_failed`／`http_5xx`，`job_runs` 是 `failed`、2 檔失敗。
   `intraday_rounds` 4 筆 `source=refill`、都有結束時間；狀態 API 在收盤後 `market_open=false`、延遲依當下時間算（219 分鐘）但⛔ 不標 stale、沒有排程輪次時 `latest_round` 是 null。
   實跑發現兩處小問題，已修並補測試：自選清單是空的時補抓回應的 `symbols` 是 null（改成空陣列）；抓取失敗那幾列的 `gaps` 是 null（改成空陣列）。
+* **dev 實跑：排程輪次與畫面**（2026-11-24 盤中；同一個 dev compose 與假 Yahoo，自選清單 2330、0050；dev 的 `JOB_RETRY_ENABLED=false`，所以每一檔 `fetch_attempts=1`、同一輪內⛔ 不重試，是預期行為）：
+  ①成功：10:00 那一輪 `job_runs` id 82 `success`、`intraday_rounds.outcome=executed`，兩檔 `written`／`no_signal`；
+  ②假服務改成回 500（10:00:17 切換）→ 10:05、10:10 兩輪（id 83、84）`job_runs` 是 `failed`、2 檔失敗，`intraday_rounds` 仍是 `executed`，逐檔 `fetch_failed`／`http_5xx`／`not_evaluated`；
+  畫面（首頁自選清單，使用者確認）：「10:05 行情更新失敗（伺服器錯誤（5xx））｜最後有效 K 棒 10:00」、「評估：本輪未評估（行情更新失敗）」，最後有效 K 棒沿用上一輪、⛔ 沒有被空值蓋掉；
+  `session_data` 維持 `ok`（當天已經有 K 棒，抓取失敗只在每一列顯示，照 I-139 的規格⛔ 不另出橫幅）；
+  ③改回 ok（10:10:10）→ 10:15 那一輪（id 85）`success`，兩檔 `written`、最後 K 棒 10:15，畫面恢復「10:15 已更新」。
+  `job_runs.error` 的摘要只寫粗分類（`internal_error`），細的原因碼在 `intraday_symbol_runs.data_cause`（`http_5xx`）與 log 的 `intraday batch fetch failed`（`cause`）。
+  ⚠️ 驗收環境的插曲：假服務的自簽憑證只給了 2 天效期，2026-11-22 17:07 過期，11-23 08:50 的 pre_market 與 09:00～09:30 的 7 輪（id 8～15）都因為 TLS 驗證失敗記 `failed`（逐檔原因 `not_transient`）；09:31 換 30 天的憑證、重啟假服務與 backend 後，09:35 起恢復。這是 dev 驗收環境的問題，⛔ 不是程式問題。
+* **live 同步驗證**（2026-11-24 10:25 左右，使用者在 live 跑唯讀查詢；新版第一個交易日 11-23 與 11-24 盤中到當時）：
+  `intraday_rounds` 11-23 是 55 輪 `scheduled`／`executed`、11-24 到 10:25 是 18 輪，存證寫失敗 0、等鎖 0 ms、排定到實際開始最多 0.04 秒；
+  `job_runs` 的 intraday 兩天都是 `success`（55、18 筆），跟輪次紀錄一致；`intraday_symbol_runs` 11-23 共 605 列＝55 輪 × 11 檔、11-24 共 198 列＝18 × 11，逐輪逐檔都有紀錄；
+  兩天都⛔ 沒有 `fetch_failed`／`store_failed`（`no_data` 每天 11 列、`written` 其餘），評估結果有 `no_signal`、`not_evaluated`、`signal_sent`、`signal_suppressed`，⛔ 沒有 `evaluate_failed`／`withheld_stale`／`degraded`；
+  換版後的其他作業（pre_market、daily_close、sr_zone_verify、sr_analysis 等）都正常，只有 `candle_gap_detection` 與 `corporate_action_sync` 各一筆 `partial`（單一標的驗不了／股利取不到），跟 T-088 無關。
+  live 首頁顯示「盤中：10:25 已更新｜最後 K 棒 10:25」「評估：未觸發」。
 * 新增的測試：抓取失敗時舊 K 棒符合突破條件也⛔ 不評估（對照組證明那批 K 棒確實會觸發）；重試的逐檔結果（A 寫入成功、B 寫入失敗、C 沒有資料，`http_recovered`）；
   重試預算在寫入途中與請求途中到期；指紋相同才跳過、評估失敗會重試；只修訂較早一根指紋就變；延遲的資料⛔ 不送出；等鎖逾時 `skipped`；依序執行時排定與實際開始分開記；
   存證寫失敗 `evidence_failed`＋partial；建立 run 失敗照樣評估；手動補抓的新增／更新／不變與缺口、⛔ 不評估、⛔ 不推進上一次成功評估；補抓 busy／不在清單／沒有來源；

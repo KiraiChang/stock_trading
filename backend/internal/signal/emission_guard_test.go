@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +27,9 @@ type fakeRedis struct {
 	deleteS  *store.DeleteOutcome
 	enqueueS *store.EnqueueOutcome
 	calls    int
+	// I-140：B 規則的保留收到的 now（驗證三條路徑共用同一個取樣值），與模擬回應遺失的次數。
+	untilNows     []time.Time
+	lostResponses int
 }
 
 func newFakeRedis() *fakeRedis { return &fakeRedis{keys: map[string]string{}} }
@@ -40,6 +45,43 @@ func (f *fakeRedis) ReserveEmission(_ context.Context, key, token string, _ time
 		return store.ReserveOutcome{Status: store.ReserveAlreadyExists}
 	}
 	f.keys[key] = token
+	return store.ReserveOutcome{Status: store.ReserveReserved}
+}
+
+// ReserveEmissionUntil 照 store 的 Lua 腳本語意（I-140）：值存 token|到期毫秒，同一 token 重試回已取得、
+// 其他 token 在 now < 值裡的到期時刻時回 already_exists。lostResponses > 0 時模擬「已寫入但回應遺失、客戶端重試」。
+func (f *fakeRedis) ReserveEmissionUntil(_ context.Context, key, token string, now, expiresAt time.Time) store.ReserveOutcome {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.untilNows = append(f.untilNows, now)
+	if f.reserveS != nil {
+		return *f.reserveS
+	}
+	attempts := 1 + f.lostResponses
+	f.lostResponses = 0
+	var out store.ReserveOutcome
+	for i := 0; i < attempts; i++ {
+		out = f.reserveUntilOnce(key, token, now, expiresAt)
+	}
+	return out
+}
+
+func (f *fakeRedis) reserveUntilOnce(key, token string, now, expiresAt time.Time) store.ReserveOutcome {
+	if v, ok := f.keys[key]; ok {
+		tok, ms, found := strings.Cut(v, "|")
+		if !found {
+			return store.ReserveOutcome{Status: store.ReserveAlreadyExists}
+		}
+		if tok == token {
+			return store.ReserveOutcome{Status: store.ReserveReserved}
+		}
+		exp, err := strconv.ParseInt(ms, 10, 64)
+		if err != nil || now.UnixMilli() < exp {
+			return store.ReserveOutcome{Status: store.ReserveAlreadyExists}
+		}
+	}
+	f.keys[key] = store.EmissionUntilValue(token, expiresAt)
 	return store.ReserveOutcome{Status: store.ReserveReserved}
 }
 

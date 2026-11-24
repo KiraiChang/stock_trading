@@ -238,12 +238,15 @@ Token 有效期 24 小時。之後請求帶入 `Authorization: Bearer <token>`�
       "price": 980.0, "volume": 45000000, "vol_ratio": 2.25,
       "resistance": 975.0, "support": 0.0, "trend": "BULLISH",
       "note": "突破阻力 975.00，量比 2.25x",
-      "ts": "2024-01-15T10:30:00+08:00"
+      "ts": "2024-01-15T10:30:00+08:00",
+      "timeframe": "1d"
     }
   ],
   "total": 1
 }
 ```
+
+`timeframe` 是評估用的時間框架（I-140）：`1m`（盤中）、`1d`（日 K）；I-140 之前寫入的訊號是 `null`。
 
 ---
 

@@ -3524,7 +3524,7 @@ G_new 的平均 R −0.170306 是這個混合口徑的模擬值，⛔ 不是已�
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中：計畫書 [`docs/plans/i140-intraday-bounce-dedup.md`](./plans/i140-intraday-bounce-dedup.md) v1.3 ✅ 複審通過（2026-11-24）；7.1 的 live 匯出與離線初估已完成（B 約擋掉已送出的 31%），實作與 7.3 重播排在 I-139 上版之後（2026-11-24 已取證；同日 review 裁決首版方向：只做盤中 1 分 K 的 `SUPPORT_BOUNCE` 去重，見「方向裁決」；實作排在 I-139 上版之後） |
+| 狀態 | 規劃中：計畫書 [`docs/plans/i140-intraday-bounce-dedup.md`](./plans/i140-intraday-bounce-dedup.md) v1.3 ✅ 複審通過（2026-11-24）；7.1 的 live 匯出與離線初估已完成（B 約擋掉已送出的 31%）；B 規則與 `signals.timeframe` 已在 `i140` 分支實作；實作複審保留的兩點（本機整掃寬限、錨點依 `created_at`）已修正、待複審（計畫書第十節；production 仍用 A），7.3 重播與 7.4 dev 驗收待做；I-139 上 live 之前⛔ 不合併（2026-11-24 已取證；同日 review 裁決首版方向：只做盤中 1 分 K 的 `SUPPORT_BOUNCE` 去重，見「方向裁決」；實作排在 I-139 上版之後） |
 | 嚴重度 | 中：⛔ 不是資料錯誤，但訊號是給人決策用的，同一類觀察訊號洗版會稀釋 BREAKOUT／BREAKDOWN，也讓「訊號量」失去判讀價值 |
 | 分類 | Go／訊號引擎 |
 | 建立日期 | 2026-11-24 |

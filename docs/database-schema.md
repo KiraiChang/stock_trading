@@ -186,7 +186,8 @@ from adj where prev > 0 and abs(p/prev-1) > 0.15 order by abs(p/prev-1) desc;
 | strength | 訊號強度，預設 1.0；有籌碼資料時會依 `chip_scores.signal` 上修或下修 |
 | chip_signal | 評估當下使用的籌碼訊號；空值代表查無籌碼資料 |
 | **ts** | **觸發當下的 K 棒時間戳，⛔ 不是寫入時間** |
-| created_at | 實際寫入時間 |
+| timeframe | 評估用的時間框架（I-140，migration 081）：`1m`（盤中）、`1d`（盤前、收盤、手動評估預設）。可為 NULL、沒有預設值：**NULL＝I-140 之前寫入的列（不明）**，舊資料⛔ 不回填（盤中時段也可能有手動的 `1d` 評估，推不回來）。盤中 SUPPORT_BOUNCE 的 B 規則只看 `timeframe = '1m'` 的列（`signal-spec.md`「訊號去重」） |
+| created_at | 實際寫入時間＝送出時間。**I-140 起由程式寫入、截到整秒**（⛔ 不再用 DB 的預設值；同一台主機，跟原本的「寫入當下」相差在 1 秒內）。截秒是為了三種 DB 存得一樣：MySQL 的 `DATETIME(0)` 帶小數秒寫入會四捨五入、可能多出 1 秒，PostgreSQL 的 `TIMESTAMPTZ` 會保留小數秒。寫入前也一律轉 UTC（SQLite 存成文字，依它排序時時區要一致）。B 規則用它當冷卻錨點，取 `created_at` 最新的一列、同一秒再依 `id` |
 
 ⚠️ **統計每日訊號量要用 `created_at`，不是 `ts`**（2026-09-08 的 live 觀察時踩到，原記於 `todo.md` T-070，已收斂；現況見 `architecture.md`「live 運作觀察：四個交易日」）：
 盤前那輪（08:50）產生的訊號帶的是**前一個交易時段**的 K 棒時間戳，用 `ts` 分組會把

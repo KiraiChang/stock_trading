@@ -326,8 +326,9 @@ dev 平常的帳密是公開的，所以 live 的真實資料（users、持倉�
 ### Redis emission 驗證：`scripts/test-redis-emission.sh`
 
 驗**只有真實 Redis 才驗得到**的語意——目前是 signal emission reservation 的
-**Lua 原子 compare-and-delete**（設計見 [`architecture.md`](./architecture.md)
-「寫入失敗的一致性契約」的 reservation 那節）。
+**Lua 原子 compare-and-delete**，以及盤中 SUPPORT_BOUNCE（B 規則，I-140）的 **Lua 保留**
+（四種鍵狀態、同一 token 重試、連線延遲時仍用傳入的 `now` 判斷、存活期＝到期＋寬限；
+設計見 [`architecture.md`](./architecture.md)「寫入失敗的一致性契約」的 reservation 那節與「盤中 1 分 K 的 SUPPORT_BOUNCE」）。
 
 ```bash
 scripts/test-redis-emission.sh                            # 起拋棄式 Redis，跑完即刪

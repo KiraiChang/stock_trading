@@ -177,6 +177,11 @@ type Signal struct {
 	Strength   float64    `db:"strength"    json:"strength"`
 	ChipSignal NullString `db:"chip_signal" json:"chip_signal,omitempty"`
 	Timestamp  time.Time  `db:"ts"          json:"ts"`
+	// Timeframe 是評估用的時間框架（I-140）：`1m`（盤中）、`1d`（日 K）；NULL＝I-140 之前寫入的列（不明）。
+	Timeframe NullString `db:"timeframe" json:"timeframe"`
+	// CreatedAt 是送出時間，由程式寫入（I-140，截到整秒；⛔ 不再用 DB 的預設值）。
+	// 盤中 SUPPORT_BOUNCE 的 B 規則用它當冷卻錨點（docs/signal-spec.md「訊號去重」）。⛔ 不放進 API（json:"-"）。
+	CreatedAt time.Time `db:"created_at" json:"-"`
 }
 
 type JobRun struct {

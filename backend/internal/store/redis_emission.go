@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -22,7 +23,7 @@ import (
 // 「設定停用不算 degraded、READONLY 算 degraded」——不分開就落實不了。
 //
 // ⛔ **這三個操作只回封閉的 status，不要改回用 err == nil 推導。**
-// ⚠️ 範圍**僅限這三個**：既有方法維持原契約，不在本筆範圍內。
+// ⚠️ 範圍**僅限這幾個**（I-140 另加了 B 規則用的 ReserveEmissionUntil）：既有方法維持原契約，不在本筆範圍內。
 
 // ErrRedisWriteBackoff 是 backoff 狀態的 sentinel。
 //
@@ -103,6 +104,69 @@ func (r *RedisClient) ReserveEmission(ctx context.Context, key, token string, tt
 		return ReserveOutcome{Status: ReserveError, Err: err}
 	}
 	if !ok {
+		return ReserveOutcome{Status: ReserveAlreadyExists}
+	}
+	return ReserveOutcome{Status: ReserveReserved}
+}
+
+// EmissionUntilGrace 是 B 規則保留鍵的存活寬限（I-140）：鍵在到期時刻之後再留這麼久才消失。
+// **判斷一律用值裡的到期時刻**，寬限只是讓 Redis 自己的到期⛔ 不會搶在判斷之前把鍵清掉。
+const EmissionUntilGrace = 5 * time.Minute
+
+// EmissionUntilValue 是 B 規則保留鍵的值：`token|到期時刻（Unix 毫秒）`。釋放時 compare-and-delete 比的是整個值。
+func EmissionUntilValue(token string, expiresAt time.Time) string {
+	return token + "|" + strconv.FormatInt(expiresAt.UnixMilli(), 10)
+}
+
+// reserveUntilScript 是 B 規則的原子保留（I-140，docs/signal-spec.md「訊號去重」）。
+//
+//	ARGV[1] token、ARGV[2] 呼叫端取樣的 now（Unix 毫秒）、ARGV[3] 新的到期時刻（Unix 毫秒）、ARGV[4] 鍵的實際存活期限（PXAT，到期＋寬限）
+//
+//	1 鍵不存在                                 → 寫入，回 1（已取得）
+//	2 鍵存在、token 相同（回應遺失後的重試）     → ⛔ 不改值，回 1（沿用原本的到期時刻）
+//	3 鍵存在、token 不同、now < 值裡的到期時刻   → 回 0（競爭失敗）
+//	4 鍵存在、token 不同、now ≥ 值裡的到期時刻   → 覆寫，回 1
+//
+// ⛔ **不靠 Redis 自己的到期與時鐘判斷**：用的是呼叫端傳進來的 now 與值裡的到期時刻，
+// 連線延遲與客戶端重試都⛔ 不影響結果，跟 DB、本機保留用同一個時刻。
+// 值的格式不認得時（⛔ 不該發生：A 的鍵格式不同）當成已被占用，寧可少發一次。
+var reserveUntilScript = redis.NewScript(`
+local v = redis.call('GET', KEYS[1])
+if v then
+  local sep = string.find(v, '|', 1, true)
+  if not sep then
+    return 0
+  end
+  if string.sub(v, 1, sep - 1) == ARGV[1] then
+    return 1
+  end
+  local exp = tonumber(string.sub(v, sep + 1))
+  if exp == nil or tonumber(ARGV[2]) < exp then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1] .. '|' .. ARGV[3], 'PXAT', ARGV[4])
+return 1
+`)
+
+// ReserveEmissionUntil 是 B 規則（盤中 1 分 K 的 SUPPORT_BOUNCE）的保留：到期時刻由呼叫端決定、判斷用呼叫端的 now。
+// 回傳狀態的值域與不變量跟 ReserveEmission 相同。釋放用 ReleaseEmission(key, EmissionUntilValue(token, expiresAt))。
+func (r *RedisClient) ReserveEmissionUntil(ctx context.Context, key, token string, now, expiresAt time.Time) ReserveOutcome {
+	if r.rdb == nil {
+		return ReserveOutcome{Status: ReserveDisabled}
+	}
+	if r.skipWrite() {
+		return ReserveOutcome{Status: ReserveBackoff, Err: ErrRedisWriteBackoff}
+	}
+	n, err := reserveUntilScript.Run(ctx, r.rdb, []string{key}, token, now.UnixMilli(), expiresAt.UnixMilli(),
+		expiresAt.Add(EmissionUntilGrace).UnixMilli()).Int64()
+	if err != nil {
+		if r.classifyWriteErr(err) {
+			return ReserveOutcome{Status: ReserveBackoff, Err: ErrRedisWriteBackoff}
+		}
+		return ReserveOutcome{Status: ReserveError, Err: err}
+	}
+	if n == 0 {
 		return ReserveOutcome{Status: ReserveAlreadyExists}
 	}
 	return ReserveOutcome{Status: ReserveReserved}

@@ -21,6 +21,17 @@ const (
 	recentSignalLimit  = 20
 )
 
+// DedupPolicy 是盤中 1 分 K 的 SUPPORT_BOUNCE 用哪一條去重規則（I-140，docs/signal-spec.md「訊號去重」）。
+// 其他類型與日 K 一律用 A；production 由 cmd/server 設定，⛔ 不開環境變數。
+type DedupPolicy int
+
+const (
+	// DedupPriceKey（A，現行）：同一 symbol＋類型＋方向＋價位 15 分鐘內不重發。
+	DedupPriceKey DedupPolicy = iota
+	// DedupIntradayBounceBySymbol（B）：盤中 1 分 K 的 SUPPORT_BOUNCE，同一檔上一筆送出起算 15 分鐘內不再送出，⛔ 不比對支撐價位。
+	DedupIntradayBounceBySymbol
+)
+
 type Engine struct {
 	candles store.CandleRepo
 	signals store.SignalRepo
@@ -33,6 +44,7 @@ type Engine struct {
 	// 這類時序測試不必靠 time.Sleep 賭。production 就是 time.Now。
 	now               func() time.Time
 	localReservations *localReservations
+	dedupPolicy       DedupPolicy
 	indicator         *indicator.Engine
 	chipScores        store.ChipScoreRepo
 	log               *zap.Logger
@@ -67,6 +79,14 @@ func NewEngine(
 // ⛔ production 不得呼叫——constructor 已經接好真實的 Redis client 與 time.Now。
 func (e *Engine) SetEmissionStoreForTest(s emissionStore) { e.emission = s }
 func (e *Engine) SetClockForTest(now func() time.Time)    { e.now = now }
+
+// SetDedupPolicy 設定盤中 1 分 K 的 SUPPORT_BOUNCE 用哪一條去重規則（預設 A）。只在啟動時、開始評估之前呼叫。
+func (e *Engine) SetDedupPolicy(p DedupPolicy) { e.dedupPolicy = p }
+
+// usesIntradayBounceRule：這個候選是否走 B 規則（只有盤中 1 分 K 的 SUPPORT_BOUNCE，且設定為 B）。
+func (e *Engine) usesIntradayBounceRule(sig *store.Signal, timeframe string) bool {
+	return e.dedupPolicy == DedupIntradayBounceBySymbol && sig.SignalType == "SUPPORT_BOUNCE" && timeframe == intradayBounceTimeframe
+}
 
 // Evaluate 對單一股票執行完整訊號分析，皆基於 candles（OHLCV）計算，不需要
 // 額外的即時行情來源。回傳觸發的 Signal；沒有觸發（不符合突破/跌破/爆量
@@ -129,13 +149,27 @@ func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe stri
 	}
 
 	e.applyChipWeighting(ctx, symbol, sig)
+	// I-140：記下評估用的時間框架（所有類型）；B 規則的 DB 判重只看 timeframe = '1m' 的列。
+	sig.Timeframe = store.NullString{NullString: sql.NullString{String: timeframe, Valid: true}}
+	bRule := e.usesIntradayBounceRule(sig, timeframe)
+	// B 規則在 DB 判重**之前**取樣一次 now，DB、本機、Redis 與送出時間都用它（I-140；⛔ 不重新取樣：
+	// DB 查詢在到期前開始、到期後才回來時，三條路徑仍用同一個 now，⛔ 不會跨秒分歧）。
+	var now time.Time
+	if bRule {
+		now = e.now()
+	}
 
 	// ── 判重：DB 為主、reservation 為輔 ───────────────────────────────
 	// DB 判重讀的是權威歷史；但它失敗時會 fail-open，於是 signals 寫不進去時
 	// 「判重」與「寫入」同時失效，每一輪都會重推同一個訊號。
 	// reservation 是第二層，並且**通過 DB 判重時也要 reserve**——否則 cooldown
 	// 中途 DB 才掛掉時，Redis 裡沒有那筆保留，重複推送照樣發生。
-	suppress, err := e.shouldSuppressDuplicate(ctx, symbol, sig)
+	var suppress bool
+	if bRule {
+		suppress, err = e.shouldSuppressIntradayBounce(ctx, symbol, now)
+	} else {
+		suppress, err = e.shouldSuppressDuplicate(ctx, symbol, sig)
+	}
 	if err != nil {
 		e.log.Warn("signal duplicate check failed", zap.String("symbol", symbol), zap.Error(err))
 		res.markDegraded(StageDedupDegraded, err)
@@ -157,7 +191,17 @@ func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe stri
 		return res, nil
 	}
 
-	held, allowed := e.tryReserveEmission(ctx, signalIdentityKey(sig), res)
+	var held *reservation
+	var allowed bool
+	if bRule {
+		// 送出時間截到整秒（三種 DB 存得一樣），到期時刻＝送出時間＋15 分鐘，三條路徑共用。
+		sentAt := now.Truncate(time.Second)
+		held, allowed = e.tryReserveEmissionUntil(ctx, intradayBounceKey(sig), now, sentAt.Add(signalCooldown), res)
+		sig.CreatedAt = sentAt
+	} else {
+		held, allowed = e.tryReserveEmission(ctx, signalIdentityKey(sig), res)
+		sig.CreatedAt = e.now() // I-140：created_at 由程式寫入送出時間（repo 截到整秒）
+	}
 	if !allowed {
 		e.log.Debug("duplicate signal suppressed by reservation",
 			zap.String("symbol", symbol), zap.String("type", sig.SignalType))
@@ -228,6 +272,17 @@ func (e *Engine) shouldSuppressDuplicate(ctx context.Context, symbol string, sig
 		}
 	}
 	return false, nil
+}
+
+// shouldSuppressIntradayBounce 是 B 規則的 DB 判重（I-140）：同一檔 timeframe = '1m' 最新的 SUPPORT_BOUNCE
+// 是錨點，`now < 錨點的 created_at + 15 分鐘` 就抑制（now 比 created_at 早——時鐘倒退——也抑制）。
+// 錨點只認「DB 已寫入」的列：被抑制、扣住（Withhold）的候選⛔ 不寫 signals，所以⛔ 不會延長冷卻。
+func (e *Engine) shouldSuppressIntradayBounce(ctx context.Context, symbol string, now time.Time) (bool, error) {
+	prev, err := e.signals.LatestBySymbolTypeTimeframe(ctx, symbol, "SUPPORT_BOUNCE", intradayBounceTimeframe)
+	if err != nil || prev == nil {
+		return false, err
+	}
+	return now.Before(prev.CreatedAt.Add(signalCooldown)), nil
 }
 
 // sameSignalIdentity 比較兩個訊號是不是「同一個」。

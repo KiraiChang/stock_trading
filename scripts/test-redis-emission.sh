@@ -70,7 +70,7 @@ fi
 
 mkdir -p "$CACHE_DIR/gocache" "$CACHE_DIR/gomodcache"
 
-echo "==> go test ./internal/store/ -run TestLuaCompareAndDelete|TestFirstReadOnly"
+echo "==> go test ./internal/store/ -run TestLuaCompareAndDelete|TestFirstReadOnly|TestLuaReserveUntil"
 # ⛔ **不要用 exec**：exec 會讓 shell 被 docker 取代，trap EXIT 永遠不會執行，
 #    拋棄式 Redis 與 network 就會殘留（2026-09-02 第一版真的留了一個跑 17 分鐘的容器）。
 #    正常執行、保留 exit code，讓 trap 有機會清理。
@@ -86,6 +86,6 @@ docker run --rm \
   -v "$REPO_ROOT/backend":/app -w /app \
   -v "$CACHE_DIR/gocache":/gocache \
   -v "$CACHE_DIR/gomodcache":/gomodcache \
-  "$GO_IMAGE" go test ./internal/store/ -run 'TestLuaCompareAndDelete|TestFirstReadOnly' -count=1 -v || status=$?
+  "$GO_IMAGE" go test ./internal/store/ -run 'TestLuaCompareAndDelete|TestFirstReadOnly|TestLuaReserveUntil' -count=1 -v || status=$?
 
 exit $status

@@ -44,9 +44,10 @@ func (dedupChipRepo) GetLatest(context.Context, string) (*store.ChipScore, error
 
 type dedupSignalRepo struct {
 	store.SignalRepo
-	inserted  []store.Signal
-	insertErr error
-	getErr    error
+	inserted   []store.Signal
+	insertErr  error
+	getErr     error
+	latestHook func()
 }
 
 func (d *dedupSignalRepo) Insert(_ context.Context, s *store.Signal) error {
@@ -57,16 +58,36 @@ func (d *dedupSignalRepo) Insert(_ context.Context, s *store.Signal) error {
 	return nil
 }
 
-func (d *dedupSignalRepo) GetBySymbol(_ context.Context, _ string, _ int) ([]store.Signal, error) {
+func (d *dedupSignalRepo) GetBySymbol(_ context.Context, _ string, limit int) ([]store.Signal, error) {
 	if d.getErr != nil {
 		return nil, d.getErr
 	}
-	// 最新在前，比照真實 repo。
+	// 最新在前、最多 limit 筆，比照真實 repo（I-140 的「最近 20 筆」邊界案例要靠它）。
 	out := make([]store.Signal, 0, len(d.inserted))
-	for i := len(d.inserted) - 1; i >= 0; i-- {
+	for i := len(d.inserted) - 1; i >= 0 && (limit <= 0 || len(out) < limit); i-- {
 		out = append(out, d.inserted[i])
 	}
 	return out, nil
+}
+
+// LatestBySymbolTypeTimeframe 比照真實 repo：同一類型、同一時間框架（NULL ⛔ 不算）created_at 最新的一列，同一秒取較晚寫入的。
+// latestHook 在查詢途中執行（I-140：模擬 DB 查詢橫跨到期秒）。
+func (d *dedupSignalRepo) LatestBySymbolTypeTimeframe(_ context.Context, symbol, signalType, timeframe string) (*store.Signal, error) {
+	if d.latestHook != nil {
+		d.latestHook()
+	}
+	if d.getErr != nil {
+		return nil, d.getErr
+	}
+	var best *store.Signal
+	for i := range d.inserted {
+		s := d.inserted[i]
+		if s.Symbol == symbol && s.SignalType == signalType && s.Timeframe.Valid && s.Timeframe.String == timeframe &&
+			(best == nil || !s.CreatedAt.Before(best.CreatedAt)) {
+			best = &s
+		}
+	}
+	return best, nil
 }
 
 // bounceCandles 造一段「支撐反彈」形狀：長期在 100 附近打底，最後一根探到支撐、

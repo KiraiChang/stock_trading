@@ -5,6 +5,7 @@
 > v1.3 依 v1.2 複審：`now` 改在 B 的 DB 判重前取樣、Redis 重試認得自己的 token（D1），重播核對 DB 實際取到的最近 20 筆與判重欄位、保留鎖驗不了時標「歷史未確認」（D3）。
 > 需求：2026-11-24 使用者要求寫計畫書（`docs/issue.md` I-140 的「方向裁決」）。同日確認：首版以 B 為對照候選、C 留後續；
 > 先寫計畫書，live 匯出是第一個驗證步驟；實作排在 I-139 上版之後。
+> ⚠️ **實作時程的偏差**（使用者 2026-11-24 裁決）：程式提前在獨立的 `i140` 分支（另一個 git worktree）實作；**I-139 上 live 之前⛔ 不合併進 `init`**，免得 I-139 上版時一起帶上；dev stack 等 I-139 的 dev 驗收（11-24 下午 M8～M10、11-25 早上 M2）做完才重建。7.3 重播仍等新版窗口交接（11-28 之後）的資料。live 切版條件（第九節）⛔ 不變。
 
 ## 一、目標與不做的範圍
 
@@ -341,6 +342,50 @@
   其他類型（BREAKOUT、BREAKDOWN、VOLUME_SPIKE）的筆數與換版前同一量級。
 * **只在採用 B 時**：盤中 `SUPPORT_BOUNCE` 同一檔相鄰兩筆 `created_at` 未滿 15 分鐘的對數為 0、每日筆數與重播 B 的估計同一量級。
 * **維持 A 時**：去重沿用現行規則，盤中 `SUPPORT_BOUNCE` 的筆數與換版前同一量級（⛔ 不檢查零重複）。
+
+## 十、實作備註（2026-11-24，`i140` 分支、未 commit）
+
+**做了哪些**（計畫 3.1～3.5、7.2）
+
+* **migration 081**（postgres、sqlite、mysql）：`signals.timeframe`，可為 NULL、⛔ 不回填；Down 移除欄位。
+* **store**：`Signal` 加 `Timeframe`（API 輸出 `timeframe`）與 `CreatedAt`（⛔ 不放進 API）；`Insert` 寫入兩者、`created_at` 截到整秒；
+  既有兩個查詢帶出兩欄；新增 `LatestBySymbolTypeTimeframe`（同一檔、同一類型、同一時間框架最新寫入的一列）。
+  Redis 新增 `ReserveEmissionUntil`（Lua，四種鍵狀態、同一 token 重試回已取得、判斷用傳入的 `now`）、`EmissionUntilValue`、寬限 `EmissionUntilGrace`（5 分鐘）。
+* **signal**：`DedupPolicy`（`DedupPriceKey`＝A、`DedupIntradayBounceBySymbol`＝B）與 `SetDedupPolicy`；只有「SUPPORT_BOUNCE＋`1m`＋B」走 B：
+  DB 判重前取樣一次 `now`、`shouldSuppressIntradayBounce`（`now < 錨點 created_at＋15 分鐘` 就抑制）、`tryReserveEmissionUntil`（本機 `reserveUntil` 與 Redis 用同一個 `now` 與到期時刻）、
+  送出時間截到整秒寫進 `created_at`。A 的流程不變，只多了 `timeframe` 與 `created_at` 由程式寫入（共通變更）。
+  保留的第 3～7 步抽成 `settleReservation`（A、B 共用）；釋放的 compare-and-delete 改比 `redisValue`（A 是 token、B 是 `token|到期時刻`）。
+* **cmd/server ⛔ 沒有改**：production 維持 A，等 7.3 重播裁決後再設定。
+* `scripts/test-redis-emission.sh` 的篩選加上新的整合測試；主題文件（`signal-spec.md`、`architecture.md`、`database-schema.md`、`api-reference.md`、`development-workflow.md`）已歸檔，標明 production 目前用 A。
+
+**跟計畫的差異**
+
+1. `Insert` 在 `created_at` 沒填時補「現在」（引擎一定會填；給測試與工具用），一律截到整秒。
+2. ~~B 的錨點查詢依 `id` 取最新~~（實作複審 P2-2 推翻，見下方「實作複審的修正」）：改依 `created_at` 最新、同一秒再依 `id`；`Insert` 一律轉 UTC，SQLite 的文字排序才可靠。
+3. 既有的判重測試 fixture（`bounceCandles`）最後一根量比 3 倍，實際觸發的是 **VOLUME_SPIKE**、⛔ 不是 SUPPORT_BOUNCE（名稱與註解寫的是支撐反彈）。
+   B 的測試另做「最後一根量能正常」的 fixture，並在每次評估檢查觸發的類型（fixture 失效就直接失敗）；既有測試⛔ 沒有改（它們驗的是類型無關的判重流程）。
+4. 重播工具（7.3）與 dev 驗收（7.4）還沒做：重播要等新版窗口交接（11-28 之後）的資料與隔離的 PostgreSQL；dev 驗收等 I-139 的 dev 驗收做完才重建 dev stack。
+
+**驗證**
+
+* signal 套件全部通過；突變：關掉 B 規則 → 15 個子測試失敗；`now` 改在 DB 判重之後取樣 → 「DB 查詢橫跨到期秒」失敗。
+* store 套件（SQLite）通過；真 Redis（`scripts/test-redis-emission.sh`）三支整合測試通過，含新的 `TestLuaReserveUntilAgainstRealRedis`（1.7 秒，含等到 Redis 時鐘過了到期時刻）。
+* PostgreSQL、MySQL 的 migration 驗證腳本都 rc 0，含新的 `…SignalTimeframe`：repo 寫入帶 0.7 秒的 `created_at` 讀回整秒；直接寫入時 MySQL 四捨五入成下一秒、PostgreSQL 保留小數秒（證明要先截秒）；NULL 與 `1d` 的列⛔ 不當錨點。
+* backend 完整測試（`backend/scripts/test.sh`）通過；signal 開 race 通過；store 開 race 整包超過 Go 預設的 10 分鐘（逾時在無關的 delisting 測試，⛔ 沒有 data race），新增的 `SignalRepo` 測試單獨開 race 通過。
+
+**實作複審的修正**（2026-11-24，複審保留兩點，修正後再進 7.4）
+
+* **P2-1 本機整掃讓跨到期秒的候選提早放行**：候選在到期前取樣、DB 查詢還沒回來，另一檔在到期後觸發整掃，就刪掉了原檔的鎖；
+  DB 寫失敗且 Redis 停用時，原候選回來會被放行，違反「三條路徑共用同一個 `now`」。
+  修法：本機項目多一個「可整掃時刻」，B 是到期＋5 分鐘（跟 Redis 鍵的寬限相同）、A 仍是到期；判斷照舊看到期時刻。
+  補兩檔交錯的測試（09:15:59.8 取樣、查詢途中另一檔 09:16:00.5 觸發整掃，原檔仍要抑制）與整掃寬限的單元測試。
+* **P2-2 依 `id` 取錨點，較晚寫入的舊時間會蓋掉有效冷卻**：`created_at` 在 DB 判重前取樣，寫入順序可能相反（09:20 先寫、09:04 後寫，09:22 的候選選到 09:04 而放行）。
+  修法：錨點查詢改成 `ORDER BY created_at DESC, id DESC`；`Insert` 把 `created_at` 轉 UTC 再截秒（SQLite 是帶時區的文字，時區混用時字串排序會錯）。
+  補寫入順序相反、同一秒、`+08:00` 表示的案例（SQLite、PostgreSQL、MySQL），以及引擎層「只剩 DB」的案例；測試替身的錨點查詢也改成依 `created_at`。
+  查詢仍走既有的 `(symbol, ts)` 索引再排序，每檔的列數小，⛔ 沒有加索引。
+* **驗證**：signal 套件、store 的 `SignalRepo`（SQLite）、真 Redis 三支、PostgreSQL 與 MySQL 的 migration 腳本（含 `…SignalTimeframe`）、backend 完整測試都通過；
+  signal 開 race、store 的 `SignalRepo` 開 race 通過。突變：拿掉整掃寬限 → 兩支新測試失敗；查詢改回依 `id`、或 `Insert` 不轉 UTC → SQLite 的案例失敗；
+  測試替身改回依寫入順序 → 引擎層的案例失敗。
 
 ## 版本紀錄
 

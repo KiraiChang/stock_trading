@@ -7,6 +7,7 @@
 | BREAKOUT | BUY | 突破阻力 + 爆量 + 多頭 |
 | BREAKDOWN | SELL | 跌破支撐 + 空頭 |
 | VOLUME_SPIKE | WATCH | 異常爆量（無論方向） |
+| SUPPORT_BOUNCE | WATCH | 價格貼近支撐後反彈（只在上面三種都沒觸發時才檢查） |
 
 ---
 
@@ -77,14 +78,46 @@ VolRatio >= 3.0
 
 ---
 
+## Support Bounce 條件
+
+```
+1. 最新一根 K 棒的 Low 落在某個支撐價位 ±1% 內（觸及支撐）
+2. Close > 該支撐價位（收回支撐之上）
+3. (Close - Low) / (High - Low) >= 0.5（收在當根振幅的上半部；High == Low 時不觸發）
+```
+
+只在 `CheckBreakout`（BREAKOUT、BREAKDOWN、VOLUME_SPIKE）**沒有觸發任何訊號**時才檢查；支撐依序檢查，
+第一個符合的就輸出。⛔ 不要求量能、⛔ 不要求趨勢——這是比 BREAKOUT／BREAKDOWN 更早期、方向性較弱的觀察訊號。
+盤中用 1 分 K 評估時，支撐每一輪由最近 100 根 K 棒重算、會小幅漂移（I-140 的取證見 `issue.md`）。
+
+---
+
 ## 訊號去重
 
-`Engine.Evaluate` 在寫入 DB、推送 Redis queue 與 WebSocket broadcast 前會檢查最近訊號。
-同一 `symbol + signal_type + direction + relevant level` 在 15 分鐘內不重發：
+`Engine.Evaluate` 在寫入 DB、推送 Redis queue 與 WebSocket broadcast 前會檢查最近訊號。有兩條規則：
+
+**A（價位鍵，現行；所有類型與日 K 都用它）**：同一 `symbol + signal_type + direction + relevant level` 在 15 分鐘內不重發：
 
 - BREAKOUT 以 `Resistance` 作為 relevant level。
 - BREAKDOWN / SUPPORT_BOUNCE 以 `Support` 作為 relevant level。
 - VOLUME_SPIKE 不比對價位。
+- 時間：DB 判重比的是兩筆的 K 棒時間 `ts`；保留鎖（本機、Redis）從保留當下起算 15 分鐘。
+- ⚠️ 已知限制：價位量化到 1e-6，但 `signals` 只存兩位小數——DB 判重拿讀回的兩位小數跟六位小數的候選比，
+  支撐沒漂移也比不到，只剩保留鎖擋得住完全相同的價位（I-140）。
+
+**B（盤中 1 分 K 的 SUPPORT_BOUNCE，I-140）**：同一檔上一筆**已寫進 `signals`**、`timeframe = '1m'` 的 SUPPORT_BOUNCE
+**送出時間**起算 15 分鐘內，⛔ 不再送出新的 SUPPORT_BOUNCE，**⛔ 不比對支撐價位**——15 分鐘內碰到不同支撐也只提醒一次（明示接受的取捨）。
+
+- 只有「SUPPORT_BOUNCE ＋ 評估用 `1m`」走 B，⛔ 不看呼叫來源（手動評估帶 `timeframe=1m` 也一樣）；其他一律 A。
+- **時間**：候選在 DB 判重**之前**取樣一次 `now`；送出時間 `sentAt = now` 截到整秒、寫進 `signals.created_at`；
+  到期時刻 `expiresAt = sentAt + 15 分鐘`。DB、本機、Redis 三條路徑都只比 `now ≥ expiresAt`（未到就抑制；時鐘倒退也抑制）。
+- **錨點**：DB 判重找同一檔 `timeframe = '1m'`、`created_at` 最新的 SUPPORT_BOUNCE（同一秒取 `id` 大的；timeframe 是 NULL 的舊列⛔ 不算）。
+  ⛔ 不能只依 `id`（寫入順序）：`created_at` 在 DB 判重前就取樣，較晚寫入的列可能帶較早的送出時間，依 `id` 會讓它蓋掉仍有效的冷卻。
+  保留鎖是第二層，涵蓋「DB 寫失敗但通道送出」的那一筆。
+- **被抑制、被扣住（`Withhold`）的候選⛔ 不寫 `signals`、⛔ 不保留**，所以⛔ 不延長冷卻：09:01 送出、09:11 被抑制、09:16 可以送出。
+- 細節（送出證據、Redis 的保留方式、重啟與 Redis 狀態）見 `architecture.md`「寫入失敗的一致性契約」的「盤中 1 分 K 的 SUPPORT_BOUNCE（B 規則）」。
+
+⚠️ **production 目前用 A**：B 已實作，live 要不要改用 B，等 I-140 的 A／B 重播結果裁決（`docs/plans/i140-intraday-bounce-dedup.md` 第七節）。
 
 ---
 

@@ -56,3 +56,14 @@ func signalIdentityKeyOf(sig store.Signal) string {
 func emissionKey(identity string) string {
 	return "signal:emitted:" + identity
 }
+
+// intradayBounceTimeframe 是 B 規則適用的時間框架（I-140）：盤中評估用的 1 分 K。
+const intradayBounceTimeframe = "1m"
+
+// intradayBounceKey 是 B 規則（盤中 1 分 K 的 SUPPORT_BOUNCE，同一檔 15 分鐘只提醒一次）的身分鍵。
+//
+// **⛔ 不帶價位**——B 的取捨就是「15 分鐘內碰到不同支撐也只提醒一次」。帶 `tf=` 讓它跟 A 的價位鍵
+// （`symbol|SUPPORT_BOUNCE|WATCH|價位`）字串格式不同，⛔ 不會互相碰撞；日 K 的 SUPPORT_BOUNCE 仍用 A 的鍵。
+func intradayBounceKey(sig *store.Signal) string {
+	return strings.Join([]string{sig.Symbol, sig.SignalType, sig.Direction, "tf=" + intradayBounceTimeframe}, "|")
+}

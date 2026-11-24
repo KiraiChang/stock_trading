@@ -65,3 +65,61 @@ func TestLuaCompareAndDeleteAgainstRealRedis(t *testing.T) {
 		t.Errorf("釋放後 key 應消失，得到 %q", got)
 	}
 }
+
+// TestLuaReserveUntilAgainstRealRedis 驗 B 規則的保留（I-140）在真實 Redis 上的四種情況、連線延遲與重試。
+// 一樣只由 scripts/test-redis-emission.sh 執行（⛔ 不指向 live）。
+func TestLuaReserveUntilAgainstRealRedis(t *testing.T) {
+	addr := os.Getenv("REDIS_TEST_ADDR")
+	if addr == "" {
+		t.Skip("REDIS_TEST_ADDR 未設定，跳過真實 Redis 整合測試")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c := NewRedis(mustRedisConfig(addr))
+	key := fmt.Sprintf("signal:emitted:test-until-%d", time.Now().UnixNano())
+
+	now := time.Now().Truncate(time.Second)
+	exp := now.Add(time.Second) // 到期時刻：1 秒後（整秒）
+	defer c.ReleaseEmission(ctx, key, EmissionUntilValue("token-A", exp))
+
+	// 1 鍵不存在 → 取得
+	if out := c.ReserveEmissionUntil(ctx, key, "token-A", now, exp); out.Status != ReserveReserved {
+		t.Fatalf("A 應取得：%v (%v)", out.Status, out.Err)
+	}
+	// 2 同一 token 重試（回應遺失後客戶端重送）→ 已取得、值與到期時刻⛔ 不變
+	if out := c.ReserveEmissionUntil(ctx, key, "token-A", now.Add(300*time.Millisecond), exp.Add(time.Hour)); out.Status != ReserveReserved {
+		t.Fatalf("同一 token 重試要回已取得：%v (%v)", out.Status, out.Err)
+	}
+	if got, _ := c.Get(ctx, key); got != EmissionUntilValue("token-A", exp) {
+		t.Fatalf("重試⛔ 不能改值或到期時刻：%q", got)
+	}
+	// 3 其他 token、now 早於值裡的到期時刻 → already_exists
+	if out := c.ReserveEmissionUntil(ctx, key, "token-B", exp.Add(-time.Millisecond), exp.Add(15*time.Minute)); out.Status != ReserveAlreadyExists {
+		t.Fatalf("到期前其他 token 要失敗：%v (%v)", out.Status, out.Err)
+	}
+	// 連線延遲：等到 Redis 的牆上時間已經過了到期時刻（鍵靠寬限還在），候選在到期前 0.5 秒取樣——
+	// 仍要 already_exists（判斷用傳入的 now 與值裡的到期時刻，⛔ 不受 Redis 時鐘影響）。
+	time.Sleep(time.Until(exp.Add(1500 * time.Millisecond)))
+	if out := c.ReserveEmissionUntil(ctx, key, "token-B", exp.Add(-500*time.Millisecond), exp.Add(15*time.Minute)); out.Status != ReserveAlreadyExists {
+		t.Fatalf("到期前 0.5 秒取樣、指令晚到 2 秒，仍要抑制：%v (%v)", out.Status, out.Err)
+	}
+	// 拿 token 本身（⛔ 不是完整的值）釋放不掉。
+	if out := c.ReleaseEmission(ctx, key, "token-A"); out.Status != DeleteNotOwner {
+		t.Fatalf("compare-and-delete 比的是整個值：%v", out.Status)
+	}
+	// 4 其他 token、now ≥ 值裡的到期時刻 → 覆寫成功
+	exp2 := exp.Add(15 * time.Minute)
+	if out := c.ReserveEmissionUntil(ctx, key, "token-B", exp, exp2); out.Status != ReserveReserved {
+		t.Fatalf("到期後其他 token 要取得：%v (%v)", out.Status, out.Err)
+	}
+	if got, _ := c.Get(ctx, key); got != EmissionUntilValue("token-B", exp2) {
+		t.Fatalf("要覆寫成新的值：%q", got)
+	}
+	// 鍵的實際存活期＝到期＋寬限
+	if ttl, err := c.rdb.PTTL(ctx, key).Result(); err != nil || ttl < 15*time.Minute || ttl > 15*time.Minute+EmissionUntilGrace+time.Second {
+		t.Fatalf("存活期要約等於到期＋寬限：%v %v", ttl, err)
+	}
+	if out := c.ReleaseEmission(ctx, key, EmissionUntilValue("token-B", exp2)); out.Status != DeleteDeleted {
+		t.Fatalf("用完整的值要刪得掉：%v", out.Status)
+	}
+}

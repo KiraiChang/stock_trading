@@ -213,6 +213,11 @@
   休市日相關的第 3～5 點要等 I-139 上版後才會出現 `market_closed`，可以跟本案一起做。
   ✅ **先行項目已完成**（2026-11-21，使用者確認 v1.2 後先做）：逐日核對與恰好 55 輪檢查已實作並驗收（2026-11-21）：判讀器讀預定交易日清單（`OBS_V2_EXPECTED_DAYS`，`~/.cache/stock_trading/obs/archive/expected_days_i123_v2.txt`，內容 11-23～11-27，已向 TWSE `holidaySchedule` 端點核對 2026 年 11 月沒有休市日），逐一檢查清單上的每一天；沒給清單或清單不合格（格式、重複、空的）結束碼 2，執行腳本在跑查詢之前另外檢查清單上每一天都是範圍內的平日；不在清單上的日期另外列出、⛔ 不計入輪數與最終失敗。驗收 `accept_v2.sh` 39 項全部符合，新增的案例：整天零筆、全空、只剩一天 55 輪、恰好 55 輪（對照）、56 輪、不在清單上的日期、清單輸入、執行腳本的清單檢查；換回修改前的判讀器跑同一份驗收，整天零筆、全空、只剩一天 55 輪三個案例都失敗（重現了缺天漏檢），56 輪照樣抓得到（原本就是 `!= 55`）。v1 的查詢與輸出路徑⛔ 沒有改（新增的部分都在 `OBS_QUERY_SET=v2` 的分支裡）。檔案指紋（SHA-256 前 12 碼）：`run-obs-archive.sh` `fb32980a4789`、`queries_v2.tsv` `f601d260afdd`（未改）、`v2_judge.py` `589ac35e327a`、`accept_v2.sh` `4e5f47f1cbff`、`expected_days_i123_v2.txt` `d459d4cc94b5`；修改前的檔備份為 `*.pre-expected-20261121`。細節記在 I-123 計畫書的「新版窗口的預定交易日」。
 * 上版時段照部署規範；休市日照樣只能用平日的時段（照跑的排程還在）。
+* **上版安排**（2026-11-24 準備）：預定 **11-28（週六）08:45 之後**，在 I-123 新版窗口（11-23～11-27）的交接做完之後；live 從 `941f11e` 拉到當時 init 的 HEAD
+  （上版前在 dev 核對：`941f11e` 之後除了 docs 只有本案的程式與前端；`i140` 分支⛔ 不能已經合併進 init）。程序照 T-088 那次（部署前檢查 → 回滾標籤 `pre-i139` → `deploy.sh` → 部署後確認），設定鍵、compose、`deploy.sh`、python 都⛔ 沒有改。
+  部署後要看到：migration 80、`market_day_overrides` 存在且 0 筆、前端入口換成新版、`/api/v1/market-day-overrides` 未帶 token 回 401（換版前 404）、首頁自選清單顯示「今日休市（週末）」；
+  ⛔ 不在 live 試設定或取消。第一個交易日（11-30）09:05 之後：`pre_market` 與盤中照常、`market_closed` 0 筆、log 的 `trading calendar unavailable` 與 `trading day override unavailable` 0 次。
+  回滾：退回 `pre-i139` 的 image；schema 留在 80（新表舊程式⛔ 不會碰）。
 
 ## 十、實作備註（2026-11-21）
 
@@ -246,7 +251,18 @@
 | 前端（`frontend/scripts/test.sh`） | ✅ svelte-check 0、vitest 205、build（dist 重建） |
 | 反證（改壞程式後新測試要失敗） | ✅ 拿掉盤中閘門、共用請求沿用呼叫端 context、盤前清理放到閘門之後、拿掉 `store_failing`，四項都被抓到 |
 | 觀察工具 `accept_v2.sh` | ✅ 55 項全部符合（新增：只有一筆 market_closed、確認休市且 55 輪、確認休市卻沒有順延、盤中才設定且確認全日休市、盤中才設定但⛔ 不在清單上、清單輸入）；換回前一版判讀器時新增案例全部失敗；執行腳本整條跑過一次（確認休市清單有複製並傳給判讀器） |
-| dev 實跑（第七節最後一點） | ⚠️ 待做：手動休市在 dev 走一個休市日（盤中與收盤記 skipped、`sr_zone_verify` 照跑、畫面顯示今日休市、取消後下一輪恢復），排在 review 之後、跟 T-088 的 dev 驗證一起做 |
+| dev 實跑（第七節最後一點） | ✅ 盤中與收盤（2026-11-24）；⚠️ 盤前待 11-25 08:50 確認。細節見表格下方「dev 實跑」 |
+
+**dev 實跑**（2026-11-24；dev compose＋假 Yahoo 批次端點，自選清單 2330、0050；跟 T-088 的 dev 排程輪次驗證同一天，見 T-088 計畫書）：
+
+1. **盤中途中設定手動休市**：09:45:27 從排程頁把 11-24 設成休市（`market_day_overrides` id 7）→ 09:50、09:55 兩輪（`job_runs` id 80、81）記 `skipped`、`market_closed (manual)`、`symbols_total=0`；
+   `intraday_rounds` 沒有這兩輪的紀錄（run_id 從 79 跳到 82）、假 Yahoo ⛔ 沒有收到請求；首頁自選清單顯示「今日休市（手動設定）」（使用者確認）。
+   09:56:44 取消（id 8，`cleared`）→ 10:00 那一輪（id 82）`success`，⛔ 不用重啟。當天盤中共 55 筆＝51 `success`＋2 `skipped`＋2 `failed`（10:05、10:10 是 T-088 驗收刻意讓假 Yahoo 回 500）；`intraday_rounds` 53 輪 `executed`。
+2. **收盤**：14:35:31 設定休市（id 9）→ 15:00 `daily_close`（id 125）`skipped`、`market_closed (manual)`、`symbols_total=0`，⛔ 沒有抓日 K；
+   `sr_zone_verify`（id 126）照跑、`success`（log 有 `sr zone verification job completed`）。⚠️ dev 最近 30 天內沒有可驗證的 SR 分析（`analyses=0`），所以只證明它⛔ 沒有被擋，⛔ 沒有驗到處理資料的部分（那部分本案沒有改）。
+   15:12:04 取消（id 10），之後的排程照常。
+3. **盤前**：15:12:52 先把 11-25 設成休市（id 11），⚠️ 待 11-25 08:50 確認 `pre_market` 記 `skipped`、⛔ 不回補。
+   dev 的 `pre_market` 平常就是 `failed`：dev 的 FinMind token 無效（`Token is illegal`；11-23 的 id 8、11-24 的 id 69 都是），跟本案無關；休市日應該連回補都⛔ 不嘗試（log ⛔ 不會出現 `backfill failed`）。
 
 **第一輪實作 review 的修正**（2026-11-21，三個 P2）：
 

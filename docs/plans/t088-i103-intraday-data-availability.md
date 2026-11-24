@@ -413,7 +413,7 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
   `session_data` 維持 `ok`（當天已經有 K 棒，抓取失敗只在每一列顯示，照 I-139 的規格⛔ 不另出橫幅）；
   ③改回 ok（10:10:10）→ 10:15 那一輪（id 85）`success`，兩檔 `written`、最後 K 棒 10:15，畫面恢復「10:15 已更新」。
   `job_runs.error` 的摘要只寫粗分類（`internal_error`），細的原因碼在 `intraday_symbol_runs.data_cause`（`http_5xx`）與 log 的 `intraday batch fetch failed`（`cause`）。
-  ⚠️ 驗收環境的插曲：假服務的自簽憑證只給了 2 天效期，2026-11-22 17:07 過期，11-23 08:50 的 pre_market 與 09:00～09:30 的 7 輪（id 8～15）都因為 TLS 驗證失敗記 `failed`（逐檔原因 `not_transient`）；09:31 換 30 天的憑證、重啟假服務與 backend 後，09:35 起恢復。這是 dev 驗收環境的問題，⛔ 不是程式問題。
+  ⚠️ 驗收環境的插曲：假服務的自簽憑證只給了 2 天效期，2026-11-22 17:07 過期，11-23 09:00～09:30 的 7 輪盤中（id 9～15）都因為 TLS 驗證失敗記 `failed`（逐檔原因 `not_transient`）。（2026-11-24 更正：原本把同日 08:50 的 `pre_market`（id 8）也算進來，它的 `failed` 是 dev 的 FinMind token 無效（`Token is illegal`），dev 每天都這樣（11-24 的 id 69 相同），跟憑證無關。）09:31 換 30 天的憑證、重啟假服務與 backend 後，09:35 起恢復。這是 dev 驗收環境的問題，⛔ 不是程式問題。
 * **live 同步驗證**（2026-11-24 10:25 左右，使用者在 live 跑唯讀查詢；新版第一個交易日 11-23 與 11-24 盤中到當時）：
   `intraday_rounds` 11-23 是 55 輪 `scheduled`／`executed`、11-24 到 10:25 是 18 輪，存證寫失敗 0、等鎖 0 ms、排定到實際開始最多 0.04 秒；
   `job_runs` 的 intraday 兩天都是 `success`（55、18 筆），跟輪次紀錄一致；`intraday_symbol_runs` 11-23 共 605 列＝55 輪 × 11 檔、11-24 共 198 列＝18 × 11，逐輪逐檔都有紀錄；

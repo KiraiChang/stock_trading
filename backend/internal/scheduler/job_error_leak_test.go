@@ -355,11 +355,14 @@ func TestSafeJobErrorSummaryDoesNotLeak(t *testing.T) {
 // ── stub ───────────────────────────────────────────────────────
 
 func newWatchlistFailScheduler(jobRuns *schedulerJobRunRepoStub) *Scheduler {
-	return New(
+	s := New(
 		nil, nil, &schedulerWatchlistStub{err: leakingError()}, jobRuns,
 		nil, nil, nil, "", nil, "", false,
 		nil, nil, nil, nil, config.SREvaluationConfig{}, false, zap.NewNop(),
 	)
+	// I-141：daily_close 讀不到自選清單時收盤尾端（sr_zone_verify）照跑，給一個沒有分析的替身（success 0/0）。
+	s.srZoneRepo = &schedulerSRZoneRepoStub{}
+	return s
 }
 
 // newOKWatchlistScheduler 讓清單成功，逼測試走到逐檔那條路徑。

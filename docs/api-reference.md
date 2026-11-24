@@ -1260,6 +1260,7 @@ cron 與手動**共用同一把鎖**（也共用同一個 `job_name`）。
 * `PUT /market-day-overrides/{date}`：body `{"action": "closed"|"open", "reason": "…"}`。200：`override`（**這次寫入的那一列**，寫入與讀回在同一步完成，
   別的頁面同時寫入也⛔ 不會拿到對方的紀錄）、`trading_day`（那一天寫入後的判斷）。500＝沒有寫入。
 * `DELETE /market-day-overrides/{date}`：body `{"reason": "…"}`，寫一列 `cleared`、回到日曆。那一天沒有生效中的手動設定時 409 `no_active_override`。
+  ⚠️ 取消的是當下最新的那一列，⛔ 不是呼叫端畫面上看到的那一列（⛔ 沒有樂觀鎖；`PUT` 同樣是後到的蓋掉先到的）。已知限制，見 `database-schema.md` 的 `market_day_overrides`；樂觀鎖列 `todo.md` T-090。
 * 422：`invalid_date`（格式或不存在的日期）、`past_date`（今天以前）、`weekend`（週末一律休市）、`invalid_action`、`reason_required`、`reason_too_long`（超過 200 字）；
   400 `invalid_body`。
 * **只代表全日休市**：依交易所公告；停班範圍（全日、上午、下午）的處理不同，只有部分時段停班而照常交易時⛔ 不要設定。

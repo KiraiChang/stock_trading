@@ -648,6 +648,13 @@ func (s *Scheduler) cleanupRetention(ctx context.Context) {
 	}
 }
 
+// failRunOnWatchlist：讀不到自選清單時這一輪**明確記成 failed**、0/0（I-141，比照盤中的 failIntradayRoundOnWatchlist）。
+// ⛔ 不能用 finishRun(…, 0, 0, …)：狀態推導會得到 success——整輪完全沒做事，卻顯示成功。
+// 清單讀得到但是空的是另一回事：那是合法的零標的輪次，照樣走 finishRun 得到 success。
+func (s *Scheduler) failRunOnWatchlist(ctx context.Context, runID uint64, jobName string, err error) {
+	s.finishRunStatus(ctx, runID, jobName, "failed", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
+}
+
 // runPreMarketWork 是盤前的回補日 K 與預熱日線指標（為了當天的盤中；休市日⛔ 不跑）。
 func (s *Scheduler) runPreMarketWork(ctx context.Context) {
 	runID := s.startRun(ctx, "pre_market")
@@ -656,7 +663,7 @@ func (s *Scheduler) runPreMarketWork(ctx context.Context) {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "pre_market", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
+		s.failRunOnWatchlist(ctx, runID, "pre_market", err)
 		return
 	}
 
@@ -691,7 +698,9 @@ func (s *Scheduler) RunDailyClose() {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "daily_close", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
+		s.failRunOnWatchlist(ctx, runID, "daily_close", err)
+		// 收盤尾端跟自選清單無關，照跑（I-141；跟休市日的規則一致，見 runDailyCloseTail）。
+		s.runDailyCloseTail(ctx)
 		return
 	}
 
@@ -730,7 +739,7 @@ func (s *Scheduler) runChipDailySync(ctx context.Context) {
 	symbols, err := s.watchlist.Symbols(ctx)
 	if err != nil {
 		s.log.Error("watchlist fetch failed", zap.Error(err))
-		s.finishRun(ctx, runID, "chip_daily_sync", 0, 0, safeJobErrorSummary("watchlist_fetch", err))
+		s.failRunOnWatchlist(ctx, runID, "chip_daily_sync", err)
 		return
 	}
 

@@ -237,7 +237,7 @@
    `queries_v2.tsv` 的 `v2_intraday_daily` 加 `skipped_closed` 欄，`skipped_other` 改成排除 `market_closed`。
 
 **讀碼時順帶發現、⛔ 不在本案修的**：`pre_market` 讀不到自選清單時呼叫 `finishRun(…, 0, 0, …)`，狀態推導成 `success`（摘要有 `watchlist_fetch`）。
-`daily_close` 同樣的路徑也是如此。這是既有行為，跟休市日無關；要不要比照 T-088 的盤中改成 `failed`，另外決定。
+`daily_close` 同樣的路徑也是如此。這是既有行為，跟休市日無關；要不要比照 T-088 的盤中改成 `failed`，另外決定。→ 2026-11-24 使用者裁決：另立 `issue.md` I-141（三個排程都改記 `failed`，查證時發現 `chip_daily_sync` 也一樣；`daily_close` 尾端照跑），⛔ 不跟本案一起上版。
 
 **驗證**（2026-11-21）：
 
@@ -275,6 +275,7 @@
    handler ⛔ 不再另查「那一天最新的一列」。測試：別的頁面在這次寫入之後也寫了一筆、而且讀回壞掉 → 仍回 200 與自己的那一列；寫入失敗 → 500 且⛔ 沒有留下紀錄；
    8 個並行請求各自拿回自己的那一列；postgres 與 mysql 的實際寫入另由 `TestPostgresMigrations…`／`TestMySQLMigrations…MarketDayOverrideInsert` 驗（兩支 migration 腳本）。
    ⚠️ 仍然存在、⛔ 不在本輪處理：`DELETE` 先檢查「那一天有沒有生效中的設定」再寫 `cleared`，兩者之間別的頁面寫入時，取消可能蓋掉對方剛寫的設定（最新一列以 id 為準）；回應仍是自己那一列。
+   → 2026-11-24 使用者裁決：記為已知限制（`database-schema.md` 的 `market_day_overrides`、`api-reference.md`）；樂觀鎖（`expected_id`）列 `todo.md` T-090。只把「先查、再寫」包進同一個 transaction 擋不住「送出請求之前對方就寫入」的情況，所以⛔ 不採用。
 3. **全日休市的確認綁定日期**：勾選時記下是哪一天，換日期就清掉、必須重新勾選；儲存時也檢查確認的日期跟選定的日期相同。勾選的文字改成「我已確認交易所公告 YYYY-MM-DD 全日休市」。
 
 反證：把這三處分別改回原本的寫法（手動設定⛔ 沒有期限、日曆卡住⛔ 沒有呼叫端上限、節流等鎖⛔ 不響應取消、寫入後另查 Latest、換日期⛔ 不清確認），新測試都失敗

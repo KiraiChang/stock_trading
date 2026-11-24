@@ -217,7 +217,7 @@ dataset（`TaiwanStockKBar`）需要 Sponsor 級以上 token，帳號等級不�
   |---|---|
   | `intraday` | 09:00～13:30 的**每一輪**記 `skipped`（一天 55 筆），**只寫 `job_runs`**：⛔ 不拿鎖、⛔ 不抓取、⛔ 不評估、⛔ 不寫 `intraday_rounds`／`intraday_symbol_runs`。有紀錄才分得出「確認休市」和「排程漏跑」；13:30 之後的 cron 觸發照舊⛔ 不建立紀錄 |
   | `pre_market` | 保留期清理（`job_runs` 與逐輪存證）**照跑**；回補 5 天日 K 與預熱⛔ 不跑，記 `skipped` |
-  | `daily_close` | 當日取數與掃描⛔ 不跑，記 `skipped`；尾端的 `sr_zone_verify` **照跑**（驗的是最近 N 天的分析） |
+  | `daily_close` | 當日取數與掃描⛔ 不跑，記 `skipped`；尾端的 `sr_zone_verify` **照跑**（驗的是最近 N 天的分析；讀不到自選清單而提早結束時也照跑，見 `architecture/data-pipeline.md`「讀不到自選清單：整輪記 failed」，I-141） |
   | `evaluation_universe_sync`（含 `candle_gap_detection`）、`chip_daily_sync` | **照原排程**：會回補或核對過去幾天的資料 |
   | `sr_analysis`、`sr_analysis_chip` | 照舊（「今天的 K 棒已入庫」的前置會讓它們自己跳過） |
   | `stock_symbol_sync`、`corporate_action_sync`、`delisting_reconcile`、`sr_evaluation` | 照跑：跟當天有沒有交易無關（公司行動依星期分片，跳過會讓那一片當週沒有覆蓋） |

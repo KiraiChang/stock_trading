@@ -218,6 +218,7 @@ func TestRunDailyCloseEarlyReturnDoesNotLeakCause(t *testing.T) {
 		jobRuns, nil, nil, nil, "", nil, "", false,
 		nil, nil, nil, nil, config.SREvaluationConfig{}, false, zap.NewNop(),
 	)
+	s.srZoneRepo = &schedulerSRZoneRepoStub{} // I-141：讀不到自選清單時收盤尾端照跑
 
 	s.RunDailyClose()
 

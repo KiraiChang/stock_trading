@@ -178,11 +178,25 @@ postgres 短暫進入 recovery mode——都是網路波動或第三方維修造
 讀最近 120 根算輸入指紋 → 寫 `intraday_symbol_runs` 的行情段 → 只對可評估的標的呼叫訊號引擎 → 寫評估段 → `job_runs` 收尾（摘要分開列 fetch 與 store）。
 規則見 [`yahoo-intraday-integration.md`](../yahoo-intraday-integration.md)「逐檔結果、能不能評估與存證」，表格見 [`database-schema.md`](../database-schema.md)。
 
-* **讀不到自選清單**的輪次記成 `failed`（`watchlist_fetch`），⛔ 不會被算成 success。
+* **讀不到自選清單**的輪次記成 `failed`（`watchlist_fetch`），⛔ 不會被算成 success（每日排程同一條規則，見下方「讀不到自選清單：整輪記 failed」）。
 * **逐輪對帳**：每一輪的 `fetch_failed`、`store_failed` 檔數、可評估與未評估的檔數，都能從 `intraday_symbol_runs` 重算，並且要等於那一輪 `job_runs` 的摘要與
   `symbols_failed`；`intraday_rounds.evidence_failures > 0`（或摘要有 `evidence_failed`）的輪次是「對帳不完整」。
 * **觀察判讀時的口徑**（I-123 的新版窗口）：`skipped`（`lock_wait_timeout`）的輪次那一輪⛔ 沒有新資料、也⛔ 沒有評估，判讀時計入最終失敗、另外列出；
   重疊只看實際執行的輪次（排除 `skipped`）。全部標的寫入失敗也會讓那一輪 `failed`，判讀時另外列出、⛔ 不從計數中扣除。
+
+### 讀不到自選清單：整輪記 failed（I-141）
+
+`pre_market`、`intraday`、`daily_close`、`chip_daily_sync` 的標的都來自自選清單。讀不到清單（多半是 DB 出問題）時這一輪什麼都沒做，
+**明確記 `failed`、`symbols_total=0`、`symbols_failed=0`**，`error` 是 `watchlist_fetch:<原因碼>`（安全摘要）。
+⛔ 不能用 `total=0, failed=0` 交給狀態推導：那會得到 `success`（I-141 之前盤前、收盤、籌碼同步就是這樣，只有 `error` 欄看得出來）。
+
+* **清單讀得到但是空的是另一回事**：合法的零標的輪次，照樣 `success`、`0/0`。
+* **`daily_close` 的收盤尾端照跑**：讀不到自選清單時記 `failed` 之後仍執行尾端的 `sr_zone_verify`（它驗的是最近 N 天的 SR 分析、更新 `sr_zones` 的狀態，⛔ 不讀自選清單），
+  跟休市日的規則一致；兩筆紀錄的狀態各自獨立。手動端點（`daily-close/run`）走同一個函式。
+* 其他排程的對應行為不同、⛔ 不屬於這條：SR 分析讀不到自選清單也是 `failed`（寫法是 `1/1`）；`corporate_action_sync` 讀不到自選清單仍跑當日分片，記 `partial`；
+  `evaluation_universe_sync` 讀不到候選清單是 `partial`。
+* I-141 修改的三個每日排程（`pre_market`、`daily_close`、`chip_daily_sync`）都⛔ 不在自動重跑（`job_retry`）的範圍內，狀態改變只影響可觀測性（`job_runs`、`/scheduler/status`、排程頁）。
+  `intraday` 有既有的輪內批次重試（`job_retry` 的層二，重試的是 Yahoo 批次），讀不到自選清單時那一輪在抓取之前就結束、⛔ 不會重試。
 
 ### 休市日的閘門（I-139）
 

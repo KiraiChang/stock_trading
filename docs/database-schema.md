@@ -508,6 +508,9 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 * **休市日的 `skipped`**（I-139）：`pre_market`、`intraday`（09:00～13:30 每一輪一筆，一天 55 筆）、`daily_close` 在休市日記 `status=skipped`、`symbols_total=0`、
   `error` 是 `market_closed (calendar)` 或 `market_closed (manual)`（⛔ 不含其他文字）。等鎖逾時的 `skipped` 是 `lock_wait_timeout`，兩者用 `error` 分開。
   規則見 architecture.md「休市日的行為」。
+* **讀不到自選清單的 `failed`**（I-141）：`pre_market`、`intraday`、`daily_close`、`chip_daily_sync` 讀不到自選清單時，整輪沒有執行，記 `status=failed`、`0/0`、
+  `error` 是 `watchlist_fetch:<原因碼>`。⛔ 不要跟「清單讀得到但是空的」混在一起：那是合法的零標的輪次，記 `success`、`0/0`、`error` 空白。
+  規則見 `architecture/data-pipeline.md`「讀不到自選清單：整輪記 failed」。
 
 ---
 
@@ -528,6 +531,9 @@ manual/backfill 籌碼同步另用 `chip_sync_jobs`。
 * 索引 `(trade_date, id)`：判斷時讀某一天最新的一列（每次判斷都重讀、⛔ 不快取）。
 * API 只接受今天或未來的平日（`PUT`／`DELETE /market-day-overrides/{date}`）；過去的日期⛔ 不能改（過去的 `job_runs` 已經發生）。
 * 回滾：新表，退回舊 image 即可、⛔ 不用退 migration（舊程式不讀不寫它）。
+* ⚠️ **已知限制：取消與儲存⛔ 沒有樂觀鎖**（2026-11-24 使用者裁決保留現況）：`DELETE` 寫 `cleared` 前只查「那一天有沒有生效中的設定」，取消的是**當下最新的那一列**，
+  ⛔ 不是畫面上看到的那一列；兩個頁面同時操作時，後到的會蓋掉先到的（`PUT` 也一樣）。目前只有一位操作者、一年設定幾次，每次操作都留一列（誰、何時、原因），
+  事後查得到。樂觀鎖（`expected_id`）列 `todo.md` T-090，多人操作之前要做。
 
 ---
 

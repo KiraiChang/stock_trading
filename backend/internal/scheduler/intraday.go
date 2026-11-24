@@ -480,6 +480,9 @@ func (s *Scheduler) intradayFingerprint(ctx context.Context, symbol string) (str
 	return candleFingerprint(cs), nil
 }
 
+// CandleFingerprint 是 candleFingerprint 的 exported 版本：I-140 的離線重播要用同一個算法核對 live 記錄的指紋（⛔ 不另寫一份）。
+func CandleFingerprint(cs []store.Candle) string { return candleFingerprint(cs) }
+
 func candleFingerprint(cs []store.Candle) string {
 	sorted := append([]store.Candle(nil), cs...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Timestamp.Before(sorted[j].Timestamp) })

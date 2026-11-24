@@ -47,6 +47,9 @@ func signalIdentityKey(sig *store.Signal) string {
 	return strings.Join(parts, "|")
 }
 
+// PriceKeyIdentity 是 A 規則的身分鍵（保留鎖的鍵，見 signalIdentityKey）。只給 I-140 的離線重播核對「同一個保留鍵」用。
+func PriceKeyIdentity(sig *store.Signal) string { return signalIdentityKey(sig) }
+
 // signalIdentityKeyOf 是 store.Signal（值）版本，給 DB 判重比對用。
 func signalIdentityKeyOf(sig store.Signal) string {
 	return signalIdentityKey(&sig)

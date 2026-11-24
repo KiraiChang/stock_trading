@@ -323,6 +323,25 @@ dev 平常的帳密是公開的，所以 live 的真實資料（users、持倉�
   * `stock_symbols`：`last_seen_at` 56,740 列與 `is_listed` 212 列（192 檔 true→false、20 檔 false→true，另有 20 檔改了名稱／ISIN），11-13 06:30 主檔同步。主檔含權證，研判是日常的到期與新發行，與搬遷無關（⚠️ 沒有拿舊機平常每天的翻動量比較）。
 * **為什麼會誤判**：搬遷紀錄裡「新機用哪一份 dump 還原」只靠說明、沒有比對；新 live 在 11-12 16:28 重啟（最終 dump 是 16:05），時間上就是用最終 dump 還原後才接上正式 DB。教訓就是上面的規則。
 
+### I-140 的 A／B 重播工具：`backend/cmd/bouncereplay`
+
+盤中 1 分 K `SUPPORT_BOUNCE` 去重規則（A：價位鍵、B：同一檔 15 分鐘）的離線重播，規格與判定條件見 I-140 計畫書第 7.3 節。
+程式在 `backend/internal/bouncereplay`（邏輯）與 `backend/cmd/bouncereplay`（入口）；Dockerfile 只 build `cmd/server`，⛔ 不會進 production image。
+
+* **資料隔離**：輸入是 live 的交接資料（1 分 K、`signals`、`intraday_rounds`、`intraday_symbol_runs`），**只**還原進上一節「作業專用 volume」的隔離 PostgreSQL，
+  在裡面另建三個 database：來源庫（交接資料，工具用唯讀連線讀）、A 與 B 的重播庫（新建、空的，工具會先跑 migration）。
+  **三個名稱都必須以 `i140_` 開頭**，否則工具拒絕執行（防止指向 live 或一般 dev 的資料庫）；A、B 與來源庫不能相同，重播庫的 `signals` 不是空的也拒絕。
+  輸出（`precheck.md`、`report.md`、`records.csv`）放 dev 的作業目錄（權限 700），⛔ 不進 repo。工具在隔離 compose 的網路裡執行，⛔ 不發布 port；DSN 由 shell 從受限目錄帶入，工具⛔ 不印 DSN。
+* **預定交易日清單**（必填 `-expected-days`，一行一個 `YYYY-MM-DD`，跟 I-123 觀察工具用的清單同一份）：預檢與判定都要求清單上的每一天都有評估、清單外的日期⛔ 不能出現，
+  所以缺一整天的資料、或整個窗口是空的，都會判不通過，⛔ 不會只看有資料的那幾天。
+* **順序**：先 `-mode precheck`（只算輸入指紋、⛔ 不跑引擎；「指紋相同」的比例是覆蓋率的上限，另外檢查預定交易日的完整性），不通過就停下回報；再 `-mode replay`
+  （先做保留鎖的自我檢查，A、B 各一次，沒通過就停下）。
+* **結束碼與判定**：0 通過；2 參數或安全檢查不通過；1 其他錯誤；3 不通過——預檢的覆蓋率上限達不到門檻（⛔ 不進入正式重播）、自我檢查失敗、
+  覆蓋率沒達到門檻或對帳有原因不明的不一致（報告⛔ 不輸出 A／B 比較），或 B 的回歸檢查失敗（B 的 15 分鐘內重複、資料延遲時有任何送出、A 或 B 任一邊的非目標訊號差異無法證實來自最近 20 筆的邊界）。
+  覆蓋率的分子是「可對帳而且 A 跟 live 一致」，時鐘邊界與 live 評估異常只留在分母。
+* **測試**：單元測試（SQLite，含用同一個引擎模擬 live 再重播、應全部可對帳）在 `backend/scripts/test.sh` 裡；PostgreSQL 的部分（來源庫的讀取 SQL、外部訊號照原樣注入、
+  NUMERIC 精度）用 `scripts/test-bouncereplay-pg.sh`，起拋棄式的 postgres（沿用 `docker-compose.postgres.yml` 的服務定義，但 project、網路、volume 都是這一次專用的、⛔ 不發布 port），收尾只清理這一次建立的資源，⛔ 不會碰到 migration 驗證的資源。
+
 ### Redis emission 驗證：`scripts/test-redis-emission.sh`
 
 驗**只有真實 Redis 才驗得到**的語意——目前是 signal emission reservation 的

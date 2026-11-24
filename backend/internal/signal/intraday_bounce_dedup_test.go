@@ -557,3 +557,22 @@ func hasStage(res *EvaluateResult, s Stage) bool {
 	}
 	return false
 }
+
+// I-140 重播工具用的兩個內部欄位：被抑制時是哪一層、觸發的候選（⛔ 不影響判重）。
+func TestEvaluateResultReportsSuppressLayerAndCandidate(t *testing.T) {
+	// DB：15 分鐘內有錨點。
+	db := evalBounce(t, newBounceEngine(t, &dedupSignalRepo{inserted: []store.Signal{anchor(t0)}}, newFakeRedis(), &clock{t: t0.Add(time.Minute)}))
+	if !db.Suppressed || db.SuppressedBy != SuppressedByDB || db.Candidate == nil || db.Candidate.SignalType != "SUPPORT_BOUNCE" {
+		t.Fatalf("DB 擋下：by=%q candidate=%+v", db.SuppressedBy, db.Candidate)
+	}
+	// 保留鎖：DB 寫失敗（沒有錨點）、Redis 停用，第二次被本機保留鎖擋下。
+	c := &clock{t: t0}
+	e := newBounceEngine(t, &dedupSignalRepo{insertErr: errors.New("db down")}, disabledRedis(), c)
+	if first := evalBounce(t, e); !first.SignalGenerated || first.SuppressedBy != "" || first.Candidate != first.Signal {
+		t.Fatalf("送出：by=%q、Candidate 要是送出的那一筆：%+v", first.SuppressedBy, first)
+	}
+	c.set(t0.Add(time.Minute))
+	if second := evalBounce(t, e); !second.Suppressed || second.SuppressedBy != SuppressedByReservation {
+		t.Fatalf("保留鎖擋下：by=%q", second.SuppressedBy)
+	}
+}

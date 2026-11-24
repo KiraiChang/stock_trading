@@ -151,6 +151,7 @@ func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe stri
 	e.applyChipWeighting(ctx, symbol, sig)
 	// I-140：記下評估用的時間框架（所有類型）；B 規則的 DB 判重只看 timeframe = '1m' 的列。
 	sig.Timeframe = store.NullString{NullString: sql.NullString{String: timeframe, Valid: true}}
+	res.Candidate = sig
 	bRule := e.usesIntradayBounceRule(sig, timeframe)
 	// B 規則在 DB 判重**之前**取樣一次 now，DB、本機、Redis 與送出時間都用它（I-140；⛔ 不重新取樣：
 	// DB 查詢在到期前開始、到期後才回來時，三條路徑仍用同一個 now，⛔ 不會跨秒分歧）。
@@ -181,6 +182,7 @@ func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe stri
 			zap.Time("timestamp", sig.Timestamp),
 		)
 		res.Suppressed = true
+		res.SuppressedBy = SuppressedByDB
 		return res, nil
 	}
 
@@ -206,6 +208,7 @@ func (e *Engine) EvaluateWithOptions(ctx context.Context, symbol, timeframe stri
 		e.log.Debug("duplicate signal suppressed by reservation",
 			zap.String("symbol", symbol), zap.String("type", sig.SignalType))
 		res.Suppressed = true
+		res.SuppressedBy = SuppressedByReservation
 		return res, nil
 	}
 

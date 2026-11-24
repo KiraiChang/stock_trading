@@ -27,6 +27,14 @@ const (
 // EvaluateResult 是 Evaluate 的結果。
 //
 // ⚠️ **HTTP 200 / SignalGenerated 都不代表已寫入 signal history**——要看 DBPersisted。
+// SuppressLayer 是判重擋下候選的那一層（I-140 的重播用）。
+type SuppressLayer string
+
+const (
+	SuppressedByDB          SuppressLayer = "db"
+	SuppressedByReservation SuppressLayer = "reservation"
+)
+
 type EvaluateResult struct {
 	Signal *store.Signal `json:"signal"`
 
@@ -39,6 +47,10 @@ type EvaluateResult struct {
 	// ⛔ 沒有 reserve、⛔ 沒有寫 signals、⛔ 沒有推播。Signal 仍是 nil，候選訊號在 WithheldSignal。
 	Withheld       bool          `json:"withheld"`
 	WithheldSignal *store.Signal `json:"-"`
+	// SuppressedBy 是被判重擋下的那一層（Suppressed 為 true 時才有值）；Candidate 是觸發的候選訊號（送出、抑制、扣住都有）。
+	// 兩者只給 I-140 的離線重播分辨抑制層與取得候選用（⛔ 不進 JSON、⛔ 不影響判重）。
+	SuppressedBy SuppressLayer `json:"-"`
+	Candidate    *store.Signal `json:"-"`
 	// DBPersisted signal history 是否成功落 DB。
 	DBPersisted bool `json:"db_persisted"`
 	// QueueEnqueued 是否**真的**寫進 Redis queue。

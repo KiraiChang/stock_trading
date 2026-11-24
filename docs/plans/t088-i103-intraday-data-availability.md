@@ -420,6 +420,8 @@ D 改用 log 計數判讀。使用者裁決採 **C**：實作、review、dev 驗
   兩天都⛔ 沒有 `fetch_failed`／`store_failed`（`no_data` 每天 11 列、`written` 其餘），評估結果有 `no_signal`、`not_evaluated`、`signal_sent`、`signal_suppressed`，⛔ 沒有 `evaluate_failed`／`withheld_stale`／`degraded`；
   換版後的其他作業（pre_market、daily_close、sr_zone_verify、sr_analysis 等）都正常，只有 `candle_gap_detection` 與 `corporate_action_sync` 各一筆 `partial`（單一標的驗不了／股利取不到），跟 T-088 無關。
   live 首頁顯示「盤中：10:25 已更新｜最後 K 棒 10:25」「評估：未觸發」。
+  追查（同日稍後）：`no_data` 那 11 列都是每天 09:00 那一輪（開盤當下還沒有 K 棒）；`written` 但 `not_evaluated` 的原因碼全是 `unchanged`（指紋相同、⛔ 不重評）。
+  11-23 的 `signal_sent` 145 次跟 `signals` 當天 145 筆一致，換版前 11-16～11-20 每天 122～161 筆，⛔ 沒有因換版變多（`SUPPORT_BOUNCE` 每天約 105～120 筆，是既有的分佈）。
 * 新增的測試：抓取失敗時舊 K 棒符合突破條件也⛔ 不評估（對照組證明那批 K 棒確實會觸發）；重試的逐檔結果（A 寫入成功、B 寫入失敗、C 沒有資料，`http_recovered`）；
   重試預算在寫入途中與請求途中到期；指紋相同才跳過、評估失敗會重試；只修訂較早一根指紋就變；延遲的資料⛔ 不送出；等鎖逾時 `skipped`；依序執行時排定與實際開始分開記；
   存證寫失敗 `evidence_failed`＋partial；建立 run 失敗照樣評估；手動補抓的新增／更新／不變與缺口、⛔ 不評估、⛔ 不推進上一次成功評估；補抓 busy／不在清單／沒有來源；

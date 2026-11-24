@@ -345,8 +345,12 @@ func writeMetrics(w io.Writer, m Metrics, days []string) {
 			a.Candidates, a.Sent, pct(a.Suppressed, a.Candidates), a.ShortPairs, a.SameSupportPairs,
 			b.Candidates, b.Sent, pct(b.Suppressed, b.Candidates), b.ShortPairs, b.SameSupportPairs, a.Withheld, b.Withheld)
 	}
-	fmt.Fprintf(w, "\n* 被合併的不同支撐（B 抑制、A 會送出）：%d 筆，其中支撐不同 %d 筆（%s），相距 p10 %.3f%%、p50 %.3f%%、p90 %.3f%%、最大 %.3f%%，超過 1%% 的 %d 筆\n",
-		m.Merged, m.MergedDiff, pct(m.MergedDiff, m.Merged), quantile(m.MergedPct, 0.1), quantile(m.MergedPct, 0.5), quantile(m.MergedPct, 0.9), quantile(m.MergedPct, 1), m.MergedOver1)
+	dist := "相距：—（沒有支撐不同的）"
+	if len(m.MergedPct) > 0 {
+		dist = fmt.Sprintf("相距 p10 %.3f%%、p50 %.3f%%、p90 %.3f%%、最大 %.3f%%", quantile(m.MergedPct, 0.1), quantile(m.MergedPct, 0.5), quantile(m.MergedPct, 0.9), quantile(m.MergedPct, 1))
+	}
+	fmt.Fprintf(w, "\n* 被合併的不同支撐（B 抑制、A 會送出）：%d 筆，其中支撐不同 %d 筆（%s），%s，超過 1%% 的 %d 筆\n",
+		m.Merged, m.MergedDiff, pct(m.MergedDiff, m.Merged), dist, m.MergedOver1)
 	fmt.Fprintf(w, "* 非目標訊號 A、B 的送出差異：%d 筆\n", len(m.NonTargetDiff))
 	for _, x := range m.NonTargetDiff {
 		fmt.Fprintf(w, "  * %s\n", x)

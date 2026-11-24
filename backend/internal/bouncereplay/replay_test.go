@@ -646,3 +646,11 @@ func TestNonTargetDiffOneSidedSendWithSameStatus(t *testing.T) {
 		t.Fatalf("兩邊都送出、內容相同：⛔ 不是差異：%q", same.NonTargetDiff)
 	}
 }
+
+func TestReportHasNoNaNWithoutMergedSupports(t *testing.T) {
+	var buf bytes.Buffer
+	WriteReport(&buf, mkRecs(10, "d"), []string{"d"}, nil, nil)
+	if strings.Contains(buf.String(), "NaN") || !strings.Contains(buf.String(), "相距：—") {
+		t.Fatalf("沒有被合併的不同支撐時⛔ 不能印 NaN：\n%s", buf.String())
+	}
+}

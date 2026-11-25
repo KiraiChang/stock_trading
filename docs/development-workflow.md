@@ -899,13 +899,15 @@ Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
 ### 部署腳本：失敗即停、build 之後才 down（`deploy.sh` 範本）
 
 repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 scripts 目錄，填 `PROJECT_DIR`（build 用的 git checkout）、`DEPLOY_BRANCH`、
-`REDIS_ENV_FILE`。scripts 目錄要有 `compose.yml`（範本 `docker-compose.yml`）與 `.env`（範本 `.env.example`）。⛔ 不再 `export` 任何設定。
+`REDIS_ENV_FILE`，以及查回測狀態用的 `DB_CONTAINER`、`DB_USER`（T-084；`DB_NAME` 預設 `trading`）。scripts 目錄要有 `compose.yml`（範本 `docker-compose.yml`）與 `.env`（範本 `.env.example`）。⛔ 不再 `export` 任何設定。
 同目錄的 `dc.sh` 範本是手動操作 compose 的小幫手（固定帶跟 `deploy.sh` 相同的參數、擋下 `config`、會改變狀態的子指令要加 `--yes`）。
 
 流程（任何一步失敗都回傳非 0，而且在 `down` 之前就停下；錯誤訊息⛔ 不帶機密）：
 
 1. **preflight**（都在 `git pull` 之前）：build 目錄是 git checkout、在 `DEPLOY_BRANCH`、追蹤中的檔案沒有本機修改；`compose.yml` 存在；
-   `.env` 可讀、權限 `600`；`compose.yml` 裡 backend 的兩個 `env_file` 路徑跟 `deploy.sh` 的 `APP_ENV_FILE`、`REDIS_ENV_FILE` 相同；Redis 的 `.env` 符合白名單。
+   `.env` 可讀、權限 `600`；`compose.yml` 裡 backend 的兩個 `env_file` 路徑跟 `deploy.sh` 的 `APP_ENV_FILE`、`REDIS_ENV_FILE` 相同；Redis 的 `.env` 符合白名單；
+   最後查一次**回測的 `pending`／`running`**（見下方「部署前的回測雙零檢查」）。一開始先檢查 `DB_CONTAINER`、`DB_USER`、`DB_NAME`：還是佔位值、空的、
+   或有英數與 `_.-` 以外的字元就停下（⛔ 不呼叫 docker）。
 2. **最終設定的 JWT**：跑 `docker compose … config`，在記憶體裡用 awk 取出 backend 最終的 `AUTH_JWT_SECRET`，空值或公開範例值就停下。
    ⛔ 不把 config 寫到檔案或印到畫面，`config` 的錯誤訊息也⛔ 不顯示（可能帶出 `env_file` 的內容）。設定都在 scripts 目錄，跟 build 目錄 pull 到什麼無關，
    所以放在 pull 之前。
@@ -919,6 +921,8 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    （連 live DB、回收執行中的 `job_runs`、啟動排程器）。所以先用 `run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend`
    在執行檔裡找旗標名稱（⛔ 不執行它；E 之前的程式與依賴的原始碼都沒有這個字串），找不到就停下——例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版。
    兩個 `run` 的結束碼分開判讀：探測的 1 才是「找不到旗標」，124 是逾時，其他是 `compose run` 本身出錯（訊息帶結束碼，⛔ 不說成找不到旗標）。
+   設定檢查通過之後，`down` 之前**再查一次回測**：build 要好幾分鐘，這段期間舊的 worker 還在跑、會接走新送出的回測。這次擋下時新 image 已經 build 好、
+   舊服務照常運作，回測結束後重跑 `./deploy.sh`。
 6. `down`（失敗就⛔ 不進 `up`）→ `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
 7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
    上限是 **90 秒的總截止時間**（`READY_TIMEOUT_SEC`），⛔ 不是檢查次數：每個 docker 呼叫都用 host 的 `timeout`（coreutils，preflight 會確認有）包住，
@@ -953,16 +957,44 @@ build 會把 `latest` 移到新 image，而且同一份輸入、全部用快取�
 ⚠️ 它⛔ 不能證明整個 image 只差 metadata（基底 image、系統套件、其他檔案都沒比到），所以⛔ 不能代替回滾目標——那一版仍然要記成「沒有可以完整退回的 image」。
 ⚠️ **回滾到 E 之前的版本時⛔ 不能用這份 `deploy.sh`**：第 5 步會因為舊 image 不認得 `-check-config` 而停下（這是刻意的）。那種回滾要手動 build、`down`、`up -d --no-build`。
 
-**部署前的回測雙零檢查**（I-134 的 D4；⛔ 沒有寫進 `deploy.sh`，自動化另列 `todo.md` T-084）：開始部署之前，`backtest_jobs` 的 `pending` 與
+**部署前的回測雙零檢查**（I-134 的 D4；T-084 起由 `deploy.sh` 判定）：開始部署之前，`backtest_jobs` 的 `pending` 與
 `running` 都要是 0；從這個確認到部署後的確認做完，⛔ 不從前端或 API 送出回測（build 期間舊的 worker 還在跑，會接走新任務，`down` 時被中斷）。
 I-134 之後，被中斷的任務會在 python 重啟時收成 `failed`／`interrupted_on_restart`（⛔ 不再停在 `running`），但仍然⛔ 不會自動重跑。
 
-**`./deploy.sh --preflight`**：只跑第 1、2 步（加上讀 `MemAvailable`），⛔ 不 pull、⛔ 不 build、⛔ 不 down。換上新的 `deploy.sh` 之前，先用暫存檔名放在
+`deploy.sh` 查兩次（同一個函式）：preflight 的最後（`git pull` 之前，`--preflight` 也會跑到）、`down` 之前。做法：
+`docker inspect -f '{{.State.Running}}' "$DB_CONTAINER"` 確認 DB 的 container 在跑，再
+`docker exec -e PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=5000" "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -X -v ON_ERROR_STOP=1 -qtAc …`
+查兩個筆數（container 內的本機連線，⛔ 不需要密碼；⛔ 不帶 `-i`）。兩個 docker 呼叫都包 `timeout -k 5 "$BACKTEST_CHECK_TIMEOUT_SEC"`（15 秒；到期送 TERM、
+再過 5 秒 KILL），daemon ⛔ 沒有回應時單次檢查最多約 40 秒。判定：
+
+| 情況 | 判定 |
+|---|---|
+| 剛好一行 `0\|0` | 通過，印出 `==> 回測：pending 0、running 0` |
+| 任何一個 > 0 | 停下，訊息列出兩個筆數 |
+| `inspect` 或 `exec` 逾時（124／137） | 停下「查回測狀態逾時（inspect／exec）」 |
+| container 不存在或⛔ 沒有在跑 | 停下「找不到在跑的 DB container DB_CONTAINER=…」 |
+| 其他非 0 結束碼 | 停下，訊息帶結束碼（⛔ 不顯示原始錯誤） |
+| 輸出不是剛好一行「數字\|數字」 | 停下「輸出格式不對」 |
+
+* 解析看**原始輸出**：`$(…)` 會去掉結尾所有的換行，所以成功時在輸出後面補一個標記字元再取出，必須剛好是「數字\|數字」加一個換行
+  （`0|0` 後面多一個空行、沒有換行都算格式不對）。是不是 0 用**字串比對**，⛔ 不做整數比較——超出 Bash 整數範圍的筆數（例如 `9223372036854775808`）
+  會讓 `[ -ne ]` 出錯，在 `if` 裡被當成「不大於 0」而放行（2026-11-25 review 的兩個反例）。
+
+* ⛔ **不留跳過檢查的選項**（T-084 使用者裁決）：真的要在有回測時部署，改用人工流程（手動 build、`down`、`up -d --no-build`），並先處理那些回測。
+* psql／docker 的 stderr 丟掉，只依結束碼分類；訊息只帶兩個數字與 `DB_CONTAINER`。
+* 第二次檢查到 `down` 之間仍有幾秒的空窗，所以「部署期間⛔ 不送回測」的規範照舊保留。
+* live 換上新版 `deploy.sh` 之前，部署手冊 A 段的人工查詢照做；換上之後 A 段的查詢保留當作紀錄，判定以 `deploy.sh` 為準。
+
+**`./deploy.sh --preflight`**：只跑第 1、2 步（含第一次回測檢查，加上讀 `MemAvailable`），⛔ 不 pull、⛔ 不 build、⛔ 不 down。換上新的 `deploy.sh` 之前，先用暫存檔名放在
 scripts 目錄試跑（腳本只認自己所在的目錄）。
-測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker` 驗證每一種失敗的停止點與正常的呼叫順序；真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
+測試：`scripts/test-deploy-sh.sh`（假的 `git`／`docker`／`timeout` 驗證每一種失敗的停止點與正常的呼叫順序——回測檢查的兩次位置、唯讀的 `PGOPTIONS`、
+每個 DB 的 docker 呼叫都包 `timeout -k`、查不到的各種分類、卡住與忽略 TERM 時在上限內結束而且⛔ 沒有殘留；每個案例另有 30 秒的外層上限；
+真的 `docker compose config` 驗證 `env_file` 的解析；`dc.sh` 的放行與擋下）。
 
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
 （先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上；經過見 `git show 85849b9:docs/plans/i132-redis-silent-disable.md` 第八節）。
+⚠️ 這一版還⛔ 沒有回測檢查。換上 T-084 的範本時要換的行從三行變五行（加 `DB_CONTAINER`＝`postgres-postgres-1`、`DB_USER`＝`trading_user`；`DB_NAME` 兩邊都是 `trading`），
+換上之前另要唯讀核對 `DB_CONTAINER`／`DB_NAME` 就是三個服務正在用的 DB（程序見 `docs/plans/t084-deploy-backtest-check.md` 第八節）。
 
 ### python 的套件版本與升級（T-083）
 

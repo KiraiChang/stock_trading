@@ -9,10 +9,12 @@
 #   * Redis stack 的 .env（REDIS_ENV_FILE）：只有一行 REDIS_PASSWORD，compose.yml 用 env_file 直接讀。
 #
 # 流程（任何一步失敗都回傳非 0，而且在 down 之前就停下；錯誤訊息⛔ 不帶機密）：
-#   preflight → compose config（JWT）→ git pull --ff-only → 記憶體檢查 → build（逐一服務，舊服務還在跑）
-#   → 確認新 image 認得 -check-config → 用新 image 檢查完整設定 → down → up -d --no-build
-#   → readiness（/health 與 RestartCount，總上限 90 秒）
-# `./deploy.sh --preflight` 只跑 preflight 與 JWT 檢查（⛔ 不 pull、不 build、不 down），換上新版之前試跑用。
+#   preflight（最後查回測的 pending／running）→ compose config（JWT）→ git pull --ff-only → 記憶體檢查
+#   → build（逐一服務，舊服務還在跑）→ 確認新 image 認得 -check-config → 用新 image 檢查完整設定
+#   → 再查一次回測 → down → up -d --no-build → readiness（/health 與 RestartCount，總上限 90 秒）
+# 回測（T-084）：backtest_jobs 有任何 pending 或 running 就停下；查不到（container 不在、逾時、權限、輸出格式不對）
+# 也算失敗、停下。⛔ 不留跳過檢查的選項：真的要在有回測時部署，改用人工流程（手動 build、down、up）。
+# `./deploy.sh --preflight` 只跑 preflight（含第一次回測檢查）與 JWT 檢查（⛔ 不 pull、不 build、不 down），換上新版之前試跑用。
 # ⚠️ 部署失敗時⛔ 沒有自動回滾：只會回報失敗，由人判斷要不要換回前一版的 image。
 # ⛔ 這裡不再 export 任何設定：應用設定在 .env、Redis 密碼在 Redis stack 的 .env，都由 compose 的 env_file 注入。
 set -euo pipefail
@@ -40,6 +42,13 @@ READY_INTERVAL_SEC=2
 READY_REQUEST_TIMEOUT_SEC=5
 # 用新 image 檢查設定的上限（秒）：正常只要幾秒；超過就當成失敗（⛔ 不 down）
 CHECK_CONFIG_TIMEOUT_SEC=120
+# 查回測狀態用的 DB（T-084）：live 的 DB 在另一個 stack 的 container，用 docker exec 在 container 內以本機連線查（⛔ 不需要密碼）。
+# 只允許英數與 _.-；佔位值沒換掉就停下（⛔ 不呼叫 docker）
+DB_CONTAINER="your-postgres-container"
+DB_USER="your-db-user"
+DB_NAME="trading"
+# 查回測狀態的硬逾時（秒）：docker inspect 與 docker exec 各自包 timeout -k 5（到期送 TERM，再過 5 秒還沒結束就 KILL）
+BACKTEST_CHECK_TIMEOUT_SEC=15
 
 # ── 由腳本位置推出來的路徑（⛔ 不要改）────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +56,10 @@ STACK_COMPOSE_FILE="$SCRIPT_DIR/compose.yml"
 APP_ENV_FILE="$SCRIPT_DIR/.env"
 # 測試用（scripts/test-deploy-sh.sh）；正式使用⛔ 不要設
 MEMINFO_FILE="${DEPLOY_MEMINFO_FILE:-/proc/meminfo}"
+
+# 查回測狀態的 SQL（T-084）：只讀、一行兩個數字（pending|running）。⛔ 不要改：測試會從這裡取出字串、在拋棄式 PostgreSQL 上實測
+BACKTEST_CHECK_SQL="SELECT count(*) FILTER (WHERE status = 'pending'), count(*) FILTER (WHERE status = 'running') FROM backtest_jobs"
+BACKTEST_PGOPTIONS="-c default_transaction_read_only=on -c statement_timeout=5000"
 
 # 跟 backend 設定契約的 PublicJWTSecrets 相同（backend/internal/config/contract.go；測試會比對）
 PUBLIC_JWT_SECRETS="change-me-in-production change-me dev-only-change-me"
@@ -69,8 +82,51 @@ compose() {
   "${COMPOSE[@]}" "$@"
 }
 
+# check_backtests 階段 [補充說明]：查 backtest_jobs 的 pending／running（唯讀、有硬逾時）。兩個都是 0 才通過；
+# 有任何一筆、或查不到（container 不在、逾時、其他錯誤、輸出格式不對）都停下。psql／docker 的原始錯誤⛔ 不顯示（stderr 丟掉）。
+check_backtests() {
+  local where="$1" extra="${2:-}" rc out running pending
+  rc=0
+  running="$(timeout -k 5 "$BACKTEST_CHECK_TIMEOUT_SEC" docker inspect -f '{{.State.Running}}' "$DB_CONTAINER" 2>/dev/null)" || rc=$?
+  case "$rc" in
+    0) ;;
+    124|137) die "查回測狀態逾時（inspect，${BACKTEST_CHECK_TIMEOUT_SEC} 秒），停止部署（$where）$extra" ;;
+    *) die "找不到在跑的 DB container DB_CONTAINER=$DB_CONTAINER，停止部署（$where）$extra" ;;
+  esac
+  [ "$running" = true ] || die "找不到在跑的 DB container DB_CONTAINER=$DB_CONTAINER，停止部署（$where）$extra"
+  rc=0
+  # 成功時在輸出後面補一個 #：$(…) 會去掉結尾所有的換行，補了才看得到原始輸出（例如 0|0 後面多一個空行）
+  out="$(timeout -k 5 "$BACKTEST_CHECK_TIMEOUT_SEC" docker exec -e PGOPTIONS="$BACKTEST_PGOPTIONS" "$DB_CONTAINER" \
+    psql -U "$DB_USER" -d "$DB_NAME" -X -v ON_ERROR_STOP=1 -qtAc "$BACKTEST_CHECK_SQL" 2>/dev/null && printf '#')" || rc=$?
+  case "$rc" in
+    0) ;;
+    124|137) die "查回測狀態逾時（exec，${BACKTEST_CHECK_TIMEOUT_SEC} 秒），停止部署（$where）$extra" ;;
+    *) die "查回測狀態失敗（結束碼 $rc；⛔ 不顯示原始錯誤，請手動用唯讀查詢確認），停止部署（$where）$extra" ;;
+  esac
+  out="${out%#}"
+  # 原始輸出必須剛好一行「數字|數字」加一個換行；多行、空行、其他文字都⛔ 不符合
+  [[ "$out" =~ ^([0-9]+)[|]([0-9]+)$'\n'$ ]] || die "查回測狀態的輸出格式不對，停止部署（$where）$extra"
+  pending="${BASH_REMATCH[1]}"
+  running="${BASH_REMATCH[2]}"
+  # 只有兩個都剛好是字串 0 才放行；⛔ 不做整數比較（超出 Bash 整數範圍的數字，比較會出錯而被當成「不大於 0」）
+  if [ "$pending" != 0 ] || [ "$running" != 0 ]; then
+    die "backtest_jobs 有 pending $pending、running $running，等回測結束再部署（⛔ 不留跳過的選項），停止部署（$where）$extra"
+  fi
+  echo "==> 回測：pending 0、running 0"
+}
+
 # ── 1. preflight（都在 git pull 之前）────────────────────────
 echo "==> preflight"
+# 查回測用的 DB 設定：佔位值或空字串、不允許的字元 → 停下（⛔ 不呼叫 docker；值會拼進 docker 的參數）
+for kv in "DB_CONTAINER=$DB_CONTAINER" "DB_USER=$DB_USER" "DB_NAME=$DB_NAME"; do
+  k="${kv%%=*}"
+  v="${kv#*=}"
+  case "$v" in
+    ""|your-postgres-container|your-db-user) die "先填 $k（deploy.sh 開頭的「要填的值」），停止部署（還沒 pull、還沒 down）" ;;
+  esac
+  [[ "$v" =~ ^[A-Za-z0-9_.-]+$ ]] || die "$k 只能用英數與 _.-，停止部署（還沒 pull、還沒 down）"
+done
+[[ "$BACKTEST_CHECK_TIMEOUT_SEC" =~ ^[1-9][0-9]*$ ]] || die "BACKTEST_CHECK_TIMEOUT_SEC 要是正整數，停止部署（還沒 pull、還沒 down）"
 # readiness 用 timeout 限制每次請求（coreutils；⛔ 不能缺，否則一個卡住的請求就沒有上限）
 command -v timeout >/dev/null 2>&1 || die "找不到 timeout 指令（coreutils），停止部署（還沒 down）"
 if ! git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -134,6 +190,9 @@ case $rc in
   *) die "讀不到 $REDIS_ENV_FILE，停止部署（還沒 down）" ;;
 esac
 
+# 回測的 pending／running（第一次）：preflight 的最後、JWT 檢查之前，所以 --preflight 也會跑到。最早擋下，什麼都還沒動。
+check_backtests "還沒 pull、還沒 down"
+
 # ── 2. 最終設定裡的 JWT（在 git pull 之前就能先擋）──────────
 # 用跟部署相同的參數跑 compose config，**在記憶體裡**用 awk 取出 backend 最終的 AUTH_JWT_SECRET。
 # ⛔ 不把 config 寫到檔案或印到畫面；config 的錯誤訊息也⛔ 不顯示（可能帶出 env_file 的內容）。
@@ -167,7 +226,7 @@ case "${st[1]}" in
   *) die "檢查 AUTH_JWT_SECRET 時發生錯誤，停止部署（還沒 down）" ;;
 esac
 
-# --preflight：只跑上面兩步（加上讀 MemAvailable），⛔ 不 pull、⛔ 不 build、⛔ 不 down。
+# --preflight：只跑上面兩步（含第一次回測檢查，加上讀 MemAvailable），⛔ 不 pull、⛔ 不 build、⛔ 不 down。
 # 用途：換上新的 deploy.sh 之前，先用暫存檔名放在 scripts 目錄試跑（SCRIPT_DIR 由腳本位置決定）。
 if [ "$PREFLIGHT_ONLY" = 1 ]; then
   avail="$(awk '/^MemAvailable:/ { print int($2 / 1024) }' "$MEMINFO_FILE" 2>/dev/null || true)"
@@ -224,6 +283,9 @@ case "$rc" in
   124) die "新 image 的設定檢查逾時（${CHECK_CONFIG_TIMEOUT_SEC} 秒），停止部署（還沒 down，舊服務照常運作）" ;;
   *) die "新 image 的設定檢查沒有通過（結束碼 $rc；違反的鍵見上方），停止部署（還沒 down，舊服務照常運作）" ;;
 esac
+
+# 回測的 pending／running（第二次，down 之前）：build 要好幾分鐘，這段期間舊的 worker 還在跑、會接走新送出的回測。
+check_backtests "還沒 down" "；新 image 已經 build 好、舊服務照常運作，回測結束後重跑 ./deploy.sh"
 
 # ── 6. 換版 ──────────────────────────────────────────────────
 echo "==> down"

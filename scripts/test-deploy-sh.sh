@@ -48,15 +48,58 @@ cat > "$FAKEBIN/docker" <<'EOF'
 # 模擬回應緩慢或卡住：被 timeout 砍掉時連同 sleep 一起結束，⛔ 不留下孤兒程序
 fake_delay() {
   [ "$1" = 0 ] && return 0
+  if [ "$(trap -p TERM)" = "trap -- '' SIGTERM" ]; then
+    # 忽略 TERM（模擬卡死的 daemon 呼叫）：sleep 也繼承忽略，只有 timeout -k 的 KILL 才停得下來
+    /bin/sleep "$1" &
+    wait $!
+    return 0
+  fi
   /bin/sleep "$1" &
   local p=$!
   trap 'kill "$p" 2>/dev/null; exit 143' TERM INT
   wait "$p"
   trap - TERM INT
 }
+# 回測檢查（T-084）的第 n 次呼叫：FAKE_BT<n>_X 優先，其次 FAKE_BT_X，再其次預設值
+bt() {
+  local v="FAKE_BT${BT_N}_$1" d="FAKE_BT_$1"
+  if [ -n "${!v+x}" ]; then printf '%s' "${!v}"; elif [ -n "${!d+x}" ]; then printf '%s' "${!d}"; else printf '%s' "$2"; fi
+}
+bt_count() {
+  BT_N=$(($(cat "$WORK_STATE/$1" 2>/dev/null || echo 0) + 1))
+  echo "$BT_N" > "$WORK_STATE/$1"
+}
 if [ "${1:-}" = "inspect" ]; then
   echo "docker $*" >> "$CALL_LOG"
+  if [ "${2:-}" = "-f" ] && [ "${3:-}" = '{{.State.Running}}' ]; then
+    bt_count bt_inspect
+    [ "$(bt IGNORE_TERM 0)" = 1 ] && trap '' TERM
+    fake_delay "$(bt INSPECT_DELAY 0)"
+    echo "FAKE-DOCKER-STDERR-7c1e" >&2
+    [ "$(bt MISSING 0)" = 1 ] && exit 1
+    bt RUNNING true
+    echo
+    exit 0
+  fi
   echo "${FAKE_RESTARTS:-0}"
+  exit 0
+fi
+if [ "${1:-}" = "exec" ]; then
+  # 只認 deploy.sh 的形式：exec -e PGOPTIONS=… 容器 psql -U 帳號 -d 資料庫 -X -v ON_ERROR_STOP=1 -qtAc SQL（⛔ 不帶 -i）
+  echo "docker $*" >> "$CALL_LOG"
+  [ "$(readlink /proc/$$/fd/0)" = /dev/null ] || echo "STDIN_NOT_DEVNULL exec" >> "$CALL_LOG"
+  if [ "$#" -ne 14 ] || [ "$2" != "-e" ] || [ "${3%%=*}" != PGOPTIONS ] || [ "$5" != psql ] || [ "$6" != -U ] || [ "$8" != -d ] \
+     || [ "${10}" != -X ] || [ "${11}" != -v ] || [ "${12}" != ON_ERROR_STOP=1 ] || [ "${13}" != -qtAc ] || [ -z "${14}" ]; then
+    echo "fake docker: 沒預期的 exec：$*" >&2; exit 97
+  fi
+  printf '%s\n' "${14}" > "$WORK_STATE/bt_sql"
+  bt_count bt_exec
+  [ "$(bt IGNORE_TERM 0)" = 1 ] && trap '' TERM
+  fake_delay "$(bt EXEC_DELAY 0)"
+  echo "FAKE-PSQL-STDERR-7c1e" >&2
+  rc="$(bt RC 0)"
+  [ "$rc" = 0 ] || exit "$rc"
+  printf '%b' "$(bt OUT '0|0\n')"
   exit 0
 fi
 [ "${1:-}" = "compose" ] || { echo "fake docker: 沒預期的呼叫：$*" >&2; exit 97; }
@@ -128,6 +171,15 @@ case "$1" in
 esac
 EOF
 
+cat > "$FAKEBIN/timeout" <<'EOF'
+#!/bin/bash
+# 假 timeout：記下回測檢查的 docker inspect／exec 是怎麼包的，再交給真的 timeout（行為不變）
+case " $* " in
+  *" docker inspect -f {{.State.Running}} "*|*" docker exec "*) echo "TIMEOUT $*" >> "$CALL_LOG" ;;
+esac
+exec /usr/bin/timeout "$@"
+EOF
+
 cat > "$FAKEBIN/sleep" <<'EOF'
 #!/bin/bash
 # 真的等（readiness 的上限是總截止時間，時間要真的經過）；測試把間隔設成 1 秒
@@ -149,8 +201,11 @@ setup_case() {
       -e "s#^READY_INTERVAL_SEC=2\$#READY_INTERVAL_SEC=1#" \
       -e "s#^READY_REQUEST_TIMEOUT_SEC=5\$#READY_REQUEST_TIMEOUT_SEC=${READY_REQ:-2}#" \
       -e "s#^CHECK_CONFIG_TIMEOUT_SEC=120\$#CHECK_CONFIG_TIMEOUT_SEC=2#" \
+      -e "s#^DB_CONTAINER=\"your-postgres-container\"#DB_CONTAINER=\"${DB_C-fake-pg}\"#" \
+      -e "s#^DB_USER=\"your-db-user\"#DB_USER=\"${DB_U-fake_user}\"#" \
+      -e "s#^BACKTEST_CHECK_TIMEOUT_SEC=15\$#BACKTEST_CHECK_TIMEOUT_SEC=1#" \
       "$REPO/deploy.sh" > "$CASE/scripts/deploy.sh"
-  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC CHECK_CONFIG_TIMEOUT_SEC; do
+  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC CHECK_CONFIG_TIMEOUT_SEC BACKTEST_CHECK_TIMEOUT_SEC; do
     grep -q "^$k=[0-9]*\$" "$CASE/scripts/deploy.sh" || { echo "  FAIL （測試本身）deploy.sh 找不到 $k"; exit 1; }
   done
   chmod +x "$CASE/scripts/deploy.sh"
@@ -164,10 +219,11 @@ setup_case() {
   : > "$CASE/calls"
 }
 
-# run_deploy：在乾淨的環境變數下執行（FAKE_* 由呼叫端用 env 帶入）
+# run_deploy：在乾淨的環境變數下執行（FAKE_* 由呼叫端用 env 帶入）。
+# 外層上限 30 秒（RUN_LIMIT）：deploy.sh 的某個逾時失效時（例如拿掉 timeout -k 的反證），案例判失敗、⛔ 不讓整支測試卡住
 run_deploy() {
   local t0=$SECONDS
-  env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" WORK_STATE="$CASE/state" \
+  /usr/bin/timeout -k 2 "${RUN_LIMIT:-30}" env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" WORK_STATE="$CASE/state" \
     FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" "$@" \
     bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+"$DEPLOY_ARGS"} < "$WORK/stdin" > "$CASE/out" 2>&1
   RC=$?
@@ -188,7 +244,7 @@ run_deploy_tty() {
 }
 
 called() { grep -q -- "$1" "$CASE/calls"; }
-no_secret() { ! grep -q "$FAKE_JWT_MARKER" "$CASE/out"; }
+no_secret() { ! grep -q "$FAKE_JWT_MARKER" "$CASE/out" && ! grep -q "STDERR-7c1e" "$CASE/out"; }
 
 # 應該在 down 之前停下的失敗：回傳非 0、⛔ 沒有 down／up、輸出⛔ 沒有假 JWT
 expect_stop_before_down() {
@@ -206,13 +262,13 @@ echo "== 一、deploy.sh 的流程（假 git／docker）"
 
 setup_case normal
 run_deploy
-order="$(grep -oE '^(git -C [^ ]+ (rev-parse --is-inside-work-tree|status|pull)|compose (config$|config --services|build [a-z-]+|run|down|up|exec))' "$CASE/calls" \
-  | sed -E 's#^git -C [^ ]+ #git #' | uniq | tr '\n' '|')"
-want="git rev-parse --is-inside-work-tree|git status|compose config|git pull|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|compose down|compose up|compose exec|"
+order="$(grep -oE '^(git -C [^ ]+ (rev-parse --is-inside-work-tree|status|pull)|compose (config$|config --services|build [a-z-]+|run|down|up|exec)|docker (inspect -f [{][{][.]State[.]Running[}][}]|exec))' "$CASE/calls" \
+  | sed -E 's#^git -C [^ ]+ #git #; s#^docker inspect.*#docker inspect-db#' | uniq | tr '\n' '|')"
+want="git rev-parse --is-inside-work-tree|git status|docker inspect-db|docker exec|compose config|git pull|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|docker inspect-db|docker exec|compose down|compose up|compose exec|"
 if [ "$RC" -eq 0 ] && [ "$order" = "$want" ] && ! called UP_WITH_BUILD && ! called WGET_WITHOUT_TIMEOUT && called "^compose up -d --no-build$" \
    && called "^compose run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend$" \
    && called "^compose run --rm --no-deps -T backend ./trading-backend -check-config$" && no_secret; then
-  ok "正常：呼叫順序 preflight → config（JWT）→ pull --ff-only → build ×3 → 確認旗標 → check-config → down → up -d --no-build → readiness"
+  ok "正常：呼叫順序 preflight（回測檢查）→ config（JWT）→ pull --ff-only → build ×3 → 確認旗標 → check-config → 回測檢查 → down → up -d --no-build → readiness"
 else
   ng "正常：rc $RC，順序 $order"
 fi
@@ -312,6 +368,109 @@ if [ "$RC" -eq 0 ] && [ "$ELAPSED" -le 3 ]; then ok "readiness 回應要 1 秒�
 setup_case restarted; run_deploy FAKE_RESTARTS=1
 if [ "$RC" -ne 0 ] && ! called "^compose exec"; then ok "RestartCount 不是 0 → 回傳非 0"; else ng "RestartCount 1：rc $RC"; fi
 
+# ── 回測的 pending／running（T-084）────────────────────────
+# 假 docker 的回應：FAKE_BT<n>_OUT／RC／RUNNING／MISSING／INSPECT_DELAY／EXEC_DELAY／IGNORE_TERM（n＝第幾次檢查；沒有 n 的套用到每一次）
+DB_DELAY=1017   # 卡住的延遲：用少見的秒數，事後才找得出有沒有殘留的 sleep
+no_leftover() { /bin/sleep 0.3; ! pgrep -f "^/bin/sleep $DB_DELAY\$" >/dev/null; }
+grep_out() { grep -qF -- "$1" "$CASE/out"; }
+n_calls() { grep -c -- "$1" "$CASE/calls"; }
+
+setup_case btnormal; run_deploy
+sql_deploy="$(sed -n 's/^BACKTEST_CHECK_SQL="\(.*\)"$/\1/p' "$CASE/scripts/deploy.sh")"
+if [ "$RC" -eq 0 ] && [ "$(n_calls '^docker exec ')" -eq 2 ] && [ "$(n_calls '^docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] \
+   && [ "$(grep -c 'pending 0、running 0' "$CASE/out")" -eq 2 ] && no_secret; then
+  ok "回測：兩次都 0|0 → 部署完成，inspect 與 exec 各兩次、訊息印出兩次"
+else
+  ng "回測：兩次都 0|0：rc $RC、exec $(n_calls '^docker exec ') 次"
+fi
+if [ "$(grep '^docker exec ' "$CASE/calls" | grep -c -- '-e PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 fake-pg psql -U fake_user -d trading ')" -eq 2 ]; then
+  ok "回測：兩次的 PGOPTIONS 都是唯讀加 statement_timeout，帳號與 database 照開頭的設定"
+else
+  ng "回測：exec 的參數不對"
+fi
+if [ "$(n_calls '^TIMEOUT -k 5 1 docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] && [ "$(n_calls '^TIMEOUT -k 5 1 docker exec ')" -eq 2 ] \
+   && [ "$(n_calls '^TIMEOUT ')" -eq 4 ]; then
+  ok "回測：每一個 docker inspect／exec 都包 timeout -k 5"
+else
+  ng "回測：有 docker inspect／exec 沒有包 timeout -k（TIMEOUT $(n_calls '^TIMEOUT ') 筆）"
+fi
+if [ -n "$sql_deploy" ] && [ "$(cat "$CASE/state/bt_sql")" = "$sql_deploy" ]; then
+  ok "回測：送出的 SQL 就是 deploy.sh 的 BACKTEST_CHECK_SQL"
+else
+  ng "回測：送出的 SQL 跟 BACKTEST_CHECK_SQL 不同"
+fi
+
+# 超出 Bash 整數範圍的筆數（review 2026-11-25 的反例）：⛔ 不能因為整數比較出錯而放行
+for v in '1|0' '0|2' '9223372036854775808|0' '0|99999999999999999999'; do
+  setup_case btfirst; run_deploy FAKE_BT1_OUT="$v\n"
+  expect_stop_before_down "回測第一次 $v → 停在 pull 之前" "pull" "^compose build"
+  p="${v%|*}"; r="${v#*|}"
+  if ! { grep_out "pending $p、running $r" && grep_out "還沒 pull"; }; then ng "回測第一次 $v：訊息要有兩個筆數與「還沒 pull」"; fi
+done
+setup_case btsecondblank; run_deploy 'FAKE_BT2_OUT=0|0\n\n'
+if [ "$RC" -ne 0 ] && grep_out "輸出格式不對" && grep_out "新 image 已經 build 好" && ! called "^compose down"; then
+  ok "回測第二次 0|0 後面多一個空行 → 停下、⛔ 沒有 down"
+else
+  ng "回測第二次 0|0 後面多一個空行：rc $RC"
+fi
+setup_case btsecond; run_deploy FAKE_BT2_OUT='0|1\n'
+if [ "$RC" -ne 0 ] && called "^compose build python-worker" && called "backend ./trading-backend -check-config" \
+   && ! called "^compose down" && ! called "^compose up" && grep_out "pending 0、running 1" && grep_out "新 image 已經 build 好" && no_secret; then
+  ok "回測第二次 0|1 → 有 build 與設定檢查、⛔ 沒有 down／up，訊息說新 image 已經 build 好"
+else
+  ng "回測第二次 0|1：rc $RC"
+fi
+
+stop_case() {   # stop_case 名稱 訊息片段 FAKE_…：第一次就查不到 → 停在 pull 之前、訊息分類對
+  local name="$1" msg="$2"; shift 2
+  setup_case btfail; run_deploy "$@"
+  expect_stop_before_down "回測查不到：$name" "pull" "^compose build"
+  grep_out "$msg" || ng "回測查不到：$name 的訊息要有「$msg」"
+}
+stop_case "container ⛔ 沒有在跑" "找不到在跑的 DB container DB_CONTAINER=fake-pg" FAKE_BT_RUNNING=false
+stop_case "container 不存在" "找不到在跑的 DB container DB_CONTAINER=fake-pg" FAKE_BT_MISSING=1
+stop_case "exec 結束碼 2" "查回測狀態失敗（結束碼 2" FAKE_BT_RC=2
+stop_case "輸出是空的" "輸出格式不對" FAKE_BT_OUT=
+stop_case "輸出兩行" "輸出格式不對" 'FAKE_BT_OUT=0|0\n1|0\n'
+stop_case "輸出是文字" "輸出格式不對" 'FAKE_BT_OUT=abc\n'
+stop_case "輸出 1|x" "輸出格式不對" 'FAKE_BT_OUT=1|x\n'
+# review 2026-11-25 的反例：0|0 後面多一個空行（$(…) 會吃掉結尾的換行）；另外 0|0 沒有換行也⛔ 不是 psql 的正常輸出
+stop_case "0|0 後面多一個空行" "輸出格式不對" 'FAKE_BT_OUT=0|0\n\n'
+stop_case "0|0 沒有換行" "輸出格式不對" 'FAKE_BT_OUT=0|0'
+stop_case "inspect 逾時" "查回測狀態逾時（inspect" FAKE_BT_INSPECT_DELAY=$DB_DELAY
+if ! { [ "$ELAPSED" -le 3 ] && no_leftover; }; then ng "inspect 逾時：${ELAPSED} 秒、或留下 sleep"; fi
+stop_case "exec 逾時" "查回測狀態逾時（exec" FAKE_BT_EXEC_DELAY=$DB_DELAY
+if ! { [ "$ELAPSED" -le 3 ] && no_leftover; }; then ng "exec 逾時：${ELAPSED} 秒、或留下 sleep"; fi
+
+for which in INSPECT EXEC; do
+  setup_case btsecondhang; run_deploy "FAKE_BT2_${which}_DELAY=$DB_DELAY"
+  if [ "$RC" -ne 0 ] && called "^compose build python-worker" && ! called "^compose down" && ! called "^compose up" \
+     && grep_out "查回測狀態逾時（${which,,}" && [ "$ELAPSED" -le 4 ] && no_leftover; then
+    ok "回測第二次的 ${which,,} 卡住 → ${ELAPSED} 秒逾時、⛔ 沒有 down／up、⛔ 沒有殘留的 sleep"
+  else
+    ng "回測第二次的 ${which,,} 卡住：rc $RC、${ELAPSED} 秒"
+  fi
+done
+# 卡死的 daemon 呼叫連 TERM 都不理：timeout -k 5 的 KILL 要讓它在「逾時＋5 秒」內結束
+setup_case btkill; run_deploy FAKE_BT_IGNORE_TERM=1 FAKE_BT_EXEC_DELAY=$DB_DELAY
+if [ "$RC" -ne 0 ] && grep_out "查回測狀態逾時（exec" && [ "$ELAPSED" -le 8 ] && ! called "pull" && no_leftover; then
+  ok "回測的 exec 忽略 TERM → KILL 後 ${ELAPSED} 秒結束、判成逾時、⛔ 沒有殘留"
+else
+  ng "回測的 exec 忽略 TERM：rc $RC、${ELAPSED} 秒"
+fi
+
+# 開頭的 DB 設定：佔位值沒換、空的、有不允許的字元 → 停下，⛔ 沒有任何 git／docker 呼叫
+for c in "DB_C=your-postgres-container" "DB_U=your-db-user" "DB_C=" "DB_C=a;b" "DB_U=x y"; do
+  ck="${c%%=*}"; v="${c#*=}"
+  if [ "$ck" = DB_C ]; then DB_C="$v" setup_case btcfg; else DB_U="$v" setup_case btcfg; fi
+  run_deploy
+  if [ "$RC" -ne 0 ] && [ ! -s "$CASE/calls" ] && { grep_out "先填" || grep_out "只能用英數"; }; then
+    ok "DB 設定 $c → 停下、⛔ 沒有呼叫 git／docker"
+  else
+    ng "DB 設定 $c：rc $RC、呼叫 $(wc -l < "$CASE/calls") 筆"
+  fi
+done
+
 # --preflight：只跑 preflight 與 JWT 檢查，⛔ 不 pull、不 build、不 run、不 down／up
 DEPLOY_ARGS=--preflight
 setup_case pre; run_deploy
@@ -321,6 +480,12 @@ if [ "$RC" -eq 0 ] && grep -q "preflight 通過" "$CASE/out" && called "^compose
 else
   ng "--preflight：rc $RC"
 fi
+if [ "$(grep -c '^docker exec ' "$CASE/calls")" -eq 1 ] && grep -qF "pending 0、running 0" "$CASE/out"; then
+  ok "--preflight：回測只查一次、印出 pending 0、running 0"
+else
+  ng "--preflight：回測查了 $(grep -c '^docker exec ' "$CASE/calls") 次"
+fi
+setup_case prebt; run_deploy 'FAKE_BT_OUT=1|0\n'; expect_stop_before_down "--preflight：回測 1|0 → 停下" "pull"
 setup_case preperm; chmod 644 "$CASE/scripts/.env"; run_deploy; expect_stop_before_down "--preflight：.env 權限不是 600" "pull"
 setup_case prejwt; run_deploy FAKE_JWT_LINE='      AUTH_JWT_SECRET: change-me'; expect_stop_before_down "--preflight：JWT 是公開範例值" "pull"
 DEPLOY_ARGS=--bogus

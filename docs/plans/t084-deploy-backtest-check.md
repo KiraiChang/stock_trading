@@ -1,8 +1,10 @@
 # T-084 計畫書 v1.1：`deploy.sh` 的部署前檢查加上回測的 `pending`／`running`
 
-> 狀態：v1.1（2026-11-25，併入 v1 review：兩次檢查的設計可採，補三點），待複審。對應：`docs/todo.md` T-084。
+> 狀態：v1.1（2026-11-25，併入 v1 review：兩次檢查的設計可採，補三點）；**已在 `t084` 分支實作，2026-11-25 實作複審通過**（實作備註見第九節）；合併與換上 live 照第八節，排在 I-141 上 live 之後。對應：`docs/todo.md` T-084。
 > 需求（2026-11-25 使用者確認）：把部署規範的人工「回測雙零檢查」做進 `deploy.sh`；查不到算失敗、⛔ 不留跳過的選項、DB 的 container 與帳號在腳本開頭設定。
-> 時程：只寫計畫。實作與換上 live 都排在 I-139（11-28）與 I-141（11-30）上版之後——那兩次都用現在的 `deploy.sh`，⛔ 不在中間換。
+> 時程：換上 live 排在 I-139（11-28）與 I-141（11-30）上版之後——那兩次都用現在的 `deploy.sh`，⛔ 不在中間換。
+> ⚠️ **實作時程的偏差**（使用者 2026-11-25 裁決）：程式提前在獨立的 `t084` 分支（另一個 git worktree）實作與驗證，**I-139、I-141 上 live 之前⛔ 不合併進 `init`**
+> （`deploy.sh` 一拉就會帶上）；合併、換上 live 的時間與程序（第八節）⛔ 不變。合併前在當時的 `init` 上重跑第六節的測試。
 
 ## 一、目標與不做的範圍
 
@@ -160,6 +162,34 @@ timeout -k 5 "$BACKTEST_CHECK_TIMEOUT_SEC" docker exec \
   4. 另一份暫存檔把 `DB_CONTAINER` 改成不存在的名稱跑 `--preflight` → 要停下；刪掉這份。
   5. 備份 `deploy.sh` 成 `deploy.sh.bak-日期`，換上新版，記下 SHA-256。
 * 換上之後的第一次部署，部署手冊 A 段的人工查詢照做，跟 `deploy.sh` 的結果對照一次。
+
+## 九、實作備註（2026-11-25，`t084` 分支、未合併）
+
+* `deploy.sh`（範本）：D1～D4 照設計。查詢的 SQL 與 `PGOPTIONS` 放在「由腳本推出來的路徑」區塊的兩個變數（`BACKTEST_CHECK_SQL`、`BACKTEST_PGOPTIONS`），
+  測試與 SQL 實測都從這裡取字串（⛔ 不另外手寫一份）；兩次檢查共用 `check_backtests 階段 [補充說明]`。`BACKTEST_CHECK_TIMEOUT_SEC` 另檢查是正整數。
+  DB 設定的檢查放在 preflight 的第一步（任何 git／docker 呼叫之前）。
+* `scripts/test-deploy-sh.sh`：
+  * 假 docker 加回測檢查的 `inspect -f '{{.State.Running}}'` 與 `exec`（只認 D2 的形式；每一次的回應可以分開設定），stderr 固定印一個標記字串；
+    加假 `timeout`（記下 DB 的 docker 呼叫怎麼包，再交給真的 `timeout`）。既有案例的預設是 `0|0`，全部照舊通過；正常案例的呼叫順序加上兩次檢查的位置。
+  * 新案例（26 項）：兩次 `0|0` 通過（inspect 與 exec 各兩次、唯讀 `PGOPTIONS`、帳號與 database、每個呼叫都包 `timeout -k 5`、SQL 就是範本的字串）；
+    第一次 `1|0`、`0|2` 停在 pull 之前；第二次 `0|1` 有 build 與設定檢查、⛔ 沒有 down／up、訊息說新 image 已經 build 好；
+    查不到七種（⛔ 沒有在跑、不存在、exec 結束碼 2、空輸出、兩行、文字、`1|x`）與 inspect／exec 逾時都停在 pull 之前；第二次的 inspect／exec 卡住在上限內結束、⛔ 沒有 down／up、⛔ 沒有殘留的 sleep；
+    exec 忽略 TERM 時 KILL 後約 6 秒結束、判成逾時；DB 設定的佔位值、空值、不允許的字元都停下而且⛔ 沒有任何 git／docker 呼叫；`--preflight` 只查一次、`1|0` 停下。
+  * 每個案例另有 30 秒的外層上限（反證「拿掉 `-k`」時，忽略 TERM 的案例會一直卡住；外層上限讓它判失敗、⛔ 不讓整支測試卡住）。
+  * 結果：通過 88、失敗 0；`shellcheck`（v0.10.0 的 container）`deploy.sh`、`dc.sh`、`scripts/test-deploy-sh.sh` 0 則。
+  * 反證：拿掉第二次檢查、查不到改成放行、拿掉 `-k`、⛔ 不檢查輸出格式、拿掉第一次檢查，五項都有測試失敗。
+* SQL 實測（拋棄式 PostgreSQL：`postgres:16-alpine`、`--network none`、⛔ 不掛 volume，套完 repo 的 80 個 postgres migration）：
+  從範本取出的 SQL 在空表 `0|0`、一筆 `pending` `1|0`、再兩筆 `running` `1|2`、`done` 與 `failed` ⛔ 不計入；同樣的 `PGOPTIONS` 下 `DELETE` 被唯讀擋下、筆數不變。
+* dev 實測（跟 live 相同的目錄配置：暫存的 scripts 目錄、從 `init` clone 的 build 目錄、Redis 的 `.env`；`DB_CONTAINER` 指向另一個拋棄式 PostgreSQL；真的 docker）：
+  `--preflight` 通過並印出 `pending 0、running 0`；`DB_CONTAINER` 填成不存在的名稱 → 停下「找不到在跑的 DB container」；插入一筆 `pending` → 停下並列出筆數；輸出⛔ 沒有假的機密。
+  兩個實測的腳本放在 repo 外（一次性，⛔ 不進 repo）。
+* 文件：`development-workflow.md` 的「部署腳本：失敗即停」（要填的值、preflight 與第 5 步之後的兩次檢查）、「部署前的回測雙零檢查」（判定表、⛔ 不留跳過的選項）、
+  `--preflight` 的說明、測試的說明、「live 的 `deploy.sh`」（目前那一版⛔ 沒有回測檢查；換上時從三行變五行、換上前的核對）。
+* **輸出解析的修正**（2026-11-25 review）：原本用 `$(…)` 取輸出、`-ne` 比較，兩個反例會印出雙零並放行——`9223372036854775808|0`（超出 Bash 整數範圍，
+  `-ne` 出錯、在 `if` 裡當成否）與 `0|0` 後面多一個空行（`$(…)` 去掉了結尾的換行）。改成保留原始輸出（成功時補一個標記字元再取出），必須剛好一行「數字\|數字」加一個換行，
+  是不是 0 用字串比對。測試補四個反例（兩個超大筆數停下並列出筆數、多一個空行與沒有換行判格式不對）與第二次檢查的空行案例；
+  反證：換回舊的解析，這 9 項都失敗。結果：通過 93、失敗 0；`shellcheck` 0 則；SQL 實測與 dev 實測重跑通過（真的 psql 輸出符合新的嚴格格式）。
+* **還沒做**：合併進 `init`（I-141 上 live 之後）、換上 live（第八節）。
 
 ## 版本紀錄
 

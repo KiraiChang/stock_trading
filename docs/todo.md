@@ -202,7 +202,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中：計畫書 [`docs/plans/t084-deploy-backtest-check.md`](./plans/t084-deploy-backtest-check.md) v1.1（2026-11-25 併入 review：核對查的是正在用的 DB、inspect 也有硬逾時、SQL 實測用拋棄式 PostgreSQL；待複審；實作與換上 live 排在 I-141 上版之後） |
+| 狀態 | 已實作、2026-11-25 實作複審通過（`t084` 分支、⛔ 沒有合併進 `init`；待合併、換上 live 後收斂）：計畫書 [`docs/plans/t084-deploy-backtest-check.md`](./plans/t084-deploy-backtest-check.md) v1.1 與第九節實作備註；合併與換上 live 排在 I-141 上版（11-30）之後 |
 | 優先度 | 低（目前由部署規範的人工檢查涵蓋） |
 | 分類 | 部署 |
 | 建立日期 | 2026-11-18 |

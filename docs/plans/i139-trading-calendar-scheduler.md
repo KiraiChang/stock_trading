@@ -251,7 +251,7 @@
 | 前端（`frontend/scripts/test.sh`） | ✅ svelte-check 0、vitest 205、build（dist 重建） |
 | 反證（改壞程式後新測試要失敗） | ✅ 拿掉盤中閘門、共用請求沿用呼叫端 context、盤前清理放到閘門之後、拿掉 `store_failing`，四項都被抓到 |
 | 觀察工具 `accept_v2.sh` | ✅ 55 項全部符合（新增：只有一筆 market_closed、確認休市且 55 輪、確認休市卻沒有順延、盤中才設定且確認全日休市、盤中才設定但⛔ 不在清單上、清單輸入）；換回前一版判讀器時新增案例全部失敗；執行腳本整條跑過一次（確認休市清單有複製並傳給判讀器） |
-| dev 實跑（第七節最後一點） | ✅ 盤中與收盤（2026-11-24）；⚠️ 盤前待 11-25 08:50 確認。細節見表格下方「dev 實跑」 |
+| dev 實跑（第七節最後一點） | ✅ 盤中與收盤（2026-11-24）、盤前（2026-11-25）。細節見表格下方「dev 實跑」 |
 
 **dev 實跑**（2026-11-24；dev compose＋假 Yahoo 批次端點，自選清單 2330、0050；跟 T-088 的 dev 排程輪次驗證同一天，見 T-088 計畫書）：
 
@@ -261,8 +261,9 @@
 2. **收盤**：14:35:31 設定休市（id 9）→ 15:00 `daily_close`（id 125）`skipped`、`market_closed (manual)`、`symbols_total=0`，⛔ 沒有抓日 K；
    `sr_zone_verify`（id 126）照跑、`success`（log 有 `sr zone verification job completed`）。⚠️ dev 最近 30 天內沒有可驗證的 SR 分析（`analyses=0`），所以只證明它⛔ 沒有被擋，⛔ 沒有驗到處理資料的部分（那部分本案沒有改）。
    15:12:04 取消（id 10），之後的排程照常。
-3. **盤前**：15:12:52 先把 11-25 設成休市（id 11），⚠️ 待 11-25 08:50 確認 `pre_market` 記 `skipped`、⛔ 不回補。
-   dev 的 `pre_market` 平常就是 `failed`：dev 的 FinMind token 無效（`Token is illegal`；11-23 的 id 8、11-24 的 id 69 都是），跟本案無關；休市日應該連回補都⛔ 不嘗試（log ⛔ 不會出現 `backfill failed`）。
+3. **盤前**：11-24 15:12:52 先把 11-25 設成休市（id 11）→ 11-25 08:50 `pre_market`（`job_runs` id 130）`skipped`、`market_closed (manual)`；log 只有一行 `job skipped: market closed`，⛔ 沒有 `backfill failed`，回補與預熱都⛔ 沒有嘗試。
+   id 11 沒有在開盤前取消，所以 11-25 的 dev 盤中也照手動休市記 `skipped`（09:00 起每一輪），⛔ 沒有寫 `intraday_rounds`；只影響 dev。
+   dev 的 `pre_market` 平常就是 `failed`：dev 的 FinMind token 無效（`Token is illegal`；11-23 的 id 8、11-24 的 id 69 都是），跟本案無關。
 
 **第一輪實作 review 的修正**（2026-11-21，三個 P2）：
 

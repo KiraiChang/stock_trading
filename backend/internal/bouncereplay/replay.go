@@ -3,6 +3,7 @@ package bouncereplay
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -38,13 +39,14 @@ func statusOf(res *signal.EvaluateResult, err error) Outcome {
 	o := Outcome{}
 	if err != nil {
 		o.Status, o.Err = "evaluate_failed", err.Error()
+		o.Insufficient = errors.Is(err, indicator.ErrInsufficientCandles)
 		return o
 	}
 	if res == nil {
 		o.Status = "no_signal"
 		return o
 	}
-	o.Candidate, o.SuppressedBy = res.Candidate, string(res.SuppressedBy)
+	o.Candidate, o.SuppressedBy, o.Persisted = res.Candidate, string(res.SuppressedBy), res.DBPersisted
 	if res.Candidate != nil {
 		o.Key = signal.PriceKeyIdentity(res.Candidate)
 	}
@@ -218,8 +220,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		rec.A = statusOf(resA, errA)
 		resB, errB := r.engB.EvaluateWithOptions(ctx, e.Symbol, Timeframe, opts)
 		rec.B = statusOf(resB, errB)
-		if rec.B.Status == "signal_suppressed" && rec.A.Status == "signal_sent" && rec.B.Candidate != nil &&
-			rec.B.Candidate.SignalType == "SUPPORT_BOUNCE" {
+		if needsAnchor(rec.A, rec.B) {
 			if anc, err := r.repoB.LatestBySymbolTypeTimeframe(ctx, e.Symbol, "SUPPORT_BOUNCE", Timeframe); err == nil && anc != nil {
 				v := anc.Support
 				rec.BAnchorSupport = &v
@@ -248,6 +249,12 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
+// needsAnchor：B 抑制了 SUPPORT_BOUNCE 的候選、A 這一筆成功寫進 signals（降級但寫入成功的也算）——要查 B 當時的錨點支撐
+// （第 7.3 節衡量口徑 3「被合併的不同支撐」；跟送出數同一個依據）。
+func needsAnchor(a, b Outcome) bool {
+	return b.Status == "signal_suppressed" && b.Candidate != nil && b.Candidate.SignalType == "SUPPORT_BOUNCE" && a.Sent != nil && a.Persisted
+}
+
 // isNonTarget：這一邊有非目標訊號（⛔ 不是 SUPPORT_BOUNCE）的候選或送出。
 func isNonTarget(o Outcome) bool {
 	return (o.Candidate != nil && o.Candidate.SignalType != "SUPPORT_BOUNCE") || (o.Sent != nil && o.Sent.SignalType != "SUPPORT_BOUNCE")
@@ -266,7 +273,7 @@ func nonTargetType(a, b Outcome) string {
 }
 
 // markNonTarget：A、B **任一邊**有非目標訊號就比對（複審 2026-11-24：⛔ 不能只從 A 那一邊啟動——A 沒有候選、B 卻送出也要記）；
-// 有差異時只在逐筆證實來自最近 20 筆的邊界才算已解釋。
+// 有差異時只在逐筆證實來自最近 20 筆的邊界才算已解釋。重播這一側的降級、評估失敗或產生了卻沒寫入，另記成執行異常（⛔ 不算差異）。
 func markNonTarget(rec *Record, histA, histB []store.Signal, histOK bool) {
 	if !isNonTarget(rec.A) && !isNonTarget(rec.B) {
 		return
@@ -275,39 +282,64 @@ func markNonTarget(rec *Record, histA, histB []store.Signal, histOK bool) {
 		rec.NonTargetDiff = d
 		rec.NonTargetExplained = histOK && explainRecent20(rec.A, rec.B, histA, histB)
 	}
+	rec.NonTargetAnomaly = execAnomaly(rec.A, rec.B)
 }
 
-// nonTargetDiff：同一次評估、非目標訊號在 A、B 的結果（狀態或送出的內容）不同。
-// 先核對兩邊有沒有送出（複審 2026-11-24：狀態可能相同——例如兩邊都是 degraded——但只有一邊真的送出），再比狀態與內容。
+// written：這一邊成功寫進 signals 的那一筆（沒有就是 nil）。
+func written(o Outcome) *store.Signal {
+	if o.Sent != nil && o.Persisted {
+		return o.Sent
+	}
+	return nil
+}
+
+// nonTargetDiff：同一次評估、非目標訊號在 A、B **成功寫進 signals** 的紀錄不同——只有一邊寫入，或兩邊寫入的內容不同
+// （複審 2026-11-25：跟摘要的送出集合同一個依據；執行狀態的差異——例如 A degraded、B signal_sent 但兩邊寫入相同——⛔ 不算差異，另列執行異常）。
 func nonTargetDiff(a, b Outcome) string {
-	if (a.Sent == nil) != (b.Sent == nil) {
+	wa, wb := written(a), written(b)
+	if (wa == nil) != (wb == nil) {
 		side := "A"
-		if b.Sent != nil {
+		if wb != nil {
 			side = "B"
 		}
-		return fmt.Sprintf("只有 %s 送出：A %s（%s）、B %s（%s）", side, a.Status, a.SuppressedBy, b.Status, b.SuppressedBy)
+		return fmt.Sprintf("只有 %s 寫入 signals：A %s（%s）、B %s（%s）", side, a.Status, a.SuppressedBy, b.Status, b.SuppressedBy)
 	}
-	if a.Status != b.Status {
-		return fmt.Sprintf("A %s（%s）、B %s（%s）", a.Status, a.SuppressedBy, b.Status, b.SuppressedBy)
-	}
-	if a.Sent != nil && b.Sent != nil {
-		ls := &LiveSignal{Symbol: b.Sent.Symbol, SignalType: b.Sent.SignalType, Direction: b.Sent.Direction, Price: b.Sent.Price,
-			Support: b.Sent.Support, Resistance: b.Sent.Resistance, TS: b.Sent.Timestamp}
-		if d := sameSend(a.Sent, ls); d != "" {
-			return "送出的內容不同：" + d
+	if wa != nil {
+		ls := &LiveSignal{Symbol: wb.Symbol, SignalType: wb.SignalType, Direction: wb.Direction, Price: wb.Price,
+			Support: wb.Support, Resistance: wb.Resistance, TS: wb.Timestamp}
+		if d := sameSend(wa, ls); d != "" {
+			return "寫入的內容不同：" + d
 		}
 	}
 	return ""
 }
 
-// explainRecent20 逐筆證實差異來自「最近 20 筆」的邊界（7.2 的那一種原因）：一邊被 DB 判重擋下、另一邊送出；
-// 擋下的那一邊，讓它擋下的那一列（同一個身分、K 棒時間 15 分鐘內）在最近 20 筆之內；送出的那一邊也有同一列，但落在第 20 筆之外。
+// execAnomaly：重播這一側的執行異常（降級、評估失敗〔行情不足除外〕、產生了訊號卻沒寫入）。
+func execAnomaly(a, b Outcome) string {
+	var out []string
+	for _, x := range []struct {
+		name string
+		o    Outcome
+	}{{"A", a}, {"B", b}} {
+		switch {
+		case x.o.Status == "degraded" || (x.o.Status == "evaluate_failed" && !x.o.Insufficient):
+			out = append(out, fmt.Sprintf("%s %s（寫入 %v）", x.name, x.o.Status, written(x.o) != nil))
+		case x.o.Sent != nil && !x.o.Persisted:
+			out = append(out, fmt.Sprintf("%s 產生了訊號卻沒寫入", x.name))
+		}
+	}
+	return strings.Join(out, "、")
+}
+
+// explainRecent20 逐筆證實差異來自「最近 20 筆」的邊界（7.2 的那一種原因）：一邊被 DB 判重擋下、另一邊寫入 signals（降級但寫入成功的也算）；
+// 擋下的那一邊，讓它擋下的那一列（同一個身分、K 棒時間 15 分鐘內）在最近 20 筆之內；寫入的那一邊也有同一列，但落在第 20 筆之外，
+// 而且寫入方的前 20 筆⛔ 沒有任何一列會擋下這個候選。
 func explainRecent20(a, b Outcome, histA, histB []store.Signal) bool {
 	sup, sent, hs, ht := a, b, histA, histB
 	if b.Status == "signal_suppressed" {
 		sup, sent, hs, ht = b, a, histB, histA
 	}
-	if sup.Status != "signal_suppressed" || sup.SuppressedBy != string(signal.SuppressedByDB) || sent.Status != "signal_sent" ||
+	if sup.Status != "signal_suppressed" || sup.SuppressedBy != string(signal.SuppressedByDB) || written(sent) == nil ||
 		sup.Candidate == nil || sent.Candidate == nil || sup.Key != sent.Key {
 		return false
 	}
@@ -322,11 +354,18 @@ func explainRecent20(a, b Outcome, histA, histB []store.Signal) bool {
 		}
 		return idx
 	}
+	// 寫入方的前 20 筆⛔ 不能有任何一筆會擋下這個候選：有的話，正常的 DB 判重本來就會擋下，這次寫入可能是判重查詢失敗後放行的（複審 2026-11-25）。
+	bt := blocker(ht)
+	for _, j := range bt {
+		if j < RecentLimit {
+			return false
+		}
+	}
 	for _, i := range blocker(hs) {
 		if i >= RecentLimit {
 			continue
 		}
-		for _, j := range blocker(ht) {
+		for _, j := range bt {
 			if j >= RecentLimit && ht[j].Timestamp.Equal(hs[i].Timestamp) && ht[j].SignalType == hs[i].SignalType {
 				return true
 			}

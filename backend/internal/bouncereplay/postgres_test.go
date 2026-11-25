@@ -118,6 +118,27 @@ func TestPostgresBounceReplay(t *testing.T) {
 			t.Fatalf("run %d %s：group=%s（%s）match=%s（%s）", x.RunID, x.Symbol, x.Group, x.GroupReason, x.AMatch, x.MatchDetail)
 		}
 	}
+	// 補充重播的讀取（LoadFixed 的 SQL）：自選清單的每一檔（2454 沒有 K 棒也留著）、暖身的 K 棒與同一份 signals；清單外有 1 分 K 的列成 Unlisted。
+	fin, err := LoadFixed(ctx, src, LoadOptions{From: base, To: base.Add(24 * time.Hour)}, oldWatch("0050", "2330", "2454"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fin.Candles) != 3 || len(fin.Candles["2454"]) != 0 || len(fin.Candles["2330"]) != len(in.Candles["2330"]) || len(fin.Signals) != len(in.Signals) || len(fin.Unlisted) != 0 {
+		t.Fatalf("LoadFixed：candles %d（2330 %d/%d）signals %d/%d unlisted %v", len(fin.Candles), len(fin.Candles["2330"]), len(in.Candles["2330"]), len(fin.Signals), len(in.Signals), fin.Unlisted)
+	}
+	fin2, err := LoadFixed(ctx, src, LoadOptions{From: base, To: base.Add(24 * time.Hour)}, oldWatch("2330"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fin2.Unlisted) != 1 || fin2.Unlisted[0] != "0050" || len(fin2.Candles) != 1 {
+		t.Fatalf("清單外有 1 分 K 的要列成 Unlisted：%v %d", fin2.Unlisted, len(fin2.Candles))
+	}
+	for _, x := range fin2.Signals {
+		if x.Symbol != "2330" {
+			t.Fatalf("signals 只讀清單內的：%+v", x)
+		}
+	}
+
 	var got time.Time
 	if err := dbA.GetContext(ctx, &got, `SELECT created_at FROM signals WHERE signal_type = 'BREAKDOWN'`); err != nil {
 		t.Fatal(err)

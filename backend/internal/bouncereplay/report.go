@@ -66,8 +66,10 @@ func computeMetrics(recs []Record, scope string, include func(Record) bool) Metr
 			if pol.o.Candidate == nil {
 				continue
 			}
+			// 送出統計只算成功寫進 signals 的（降級但寫入成功的也算；寫入失敗的⛔ 不算）。
+			persisted := pol.o.Sent != nil && pol.o.Persisted
 			if pol.o.Candidate.SignalType != "SUPPORT_BOUNCE" {
-				if pol.o.Sent != nil {
+				if persisted {
 					s := pol.o.Sent
 					nonTarget[pol.name][fmt.Sprintf("%s|%s|%s|%.2f|%s", s.Symbol, s.SignalType, s.Direction, round2(s.Price), s.Timestamp.Format(time.RFC3339))]++
 				}
@@ -75,16 +77,17 @@ func computeMetrics(recs []Record, scope string, include func(Record) bool) Metr
 			}
 			for _, s := range ss {
 				s.Candidates++
-				switch pol.o.Status {
-				case "signal_sent":
+				if persisted {
 					s.Sent++
+				}
+				switch pol.o.Status {
 				case "signal_suppressed":
 					s.Suppressed++
 				case "withheld_stale":
 					s.Withheld++
 				}
 			}
-			if pol.o.Sent != nil {
+			if persisted {
 				sends[pol.name] = append(sends[pol.name], sendKey{r.Symbol, r.Day, pol.o.Sent.CreatedAt, round2(pol.o.Sent.Support)})
 			}
 		}
@@ -159,7 +162,8 @@ type Summary struct {
 	Unexplained []Record
 	Explained   []Record
 	Abnormal    []Record
-	NonTarget   []Record // 非目標訊號 A、B 不同的評估（已解釋與未解釋都列）
+	NonTarget   []Record // 非目標訊號 A、B 寫入 signals 的紀錄不同的評估（已解釋與未解釋都列）
+	Anomalies   []Record // 非目標訊號的評估裡，重播這一側的執行異常（另列、⛔ 不算差異）
 	CoverageOK  bool
 	// Comparable：覆蓋率達到門檻、⛔ 沒有原因不明的不一致——才輸出 A／B 比較。
 	Comparable bool
@@ -182,6 +186,9 @@ func Summarize(recs []Record, expected []string) Summary {
 		}
 		if r.NonTargetDiff != "" {
 			s.NonTarget = append(s.NonTarget, r)
+		}
+		if r.NonTargetAnomaly != "" {
+			s.Anomalies = append(s.Anomalies, r)
 		}
 		if r.Group != GroupReconcilable && r.GroupReason != "" {
 			for _, x := range strings.Split(r.GroupReason, "；") {
@@ -313,6 +320,12 @@ func WriteReport(w io.Writer, recs []Record, expected, notes, selfCheck []string
 			fmt.Fprintf(w, "* run %d %s %s %s：%s（%s）\n", r.RunID, r.Symbol, r.EvalAt.Format(time.RFC3339), nonTargetType(r.A, r.B), r.NonTargetDiff, ex)
 		}
 	}
+	if len(s.Anomalies) > 0 {
+		fmt.Fprintf(w, "\n### 非目標訊號評估的重播執行異常（另列、⛔ 不算 A、B 的差異；差異只比成功寫入 signals 的紀錄）\n\n")
+		for _, r := range s.Anomalies {
+			fmt.Fprintf(w, "* run %d %s %s %s：%s\n", r.RunID, r.Symbol, r.EvalAt.Format(time.RFC3339), nonTargetType(r.A, r.B), r.NonTargetAnomaly)
+		}
+	}
 	fmt.Fprintf(w, "\n## 判定\n\n")
 	if s.Pass {
 		fmt.Fprintf(w, "✅ 通過：覆蓋率達到門檻、⛔ 沒有原因不明的不一致、B 的回歸檢查都通過。\n")
@@ -351,6 +364,7 @@ func writeMetrics(w io.Writer, m Metrics, days []string) {
 	}
 	fmt.Fprintf(w, "\n* 被合併的不同支撐（B 抑制、A 會送出）：%d 筆，其中支撐不同 %d 筆（%s），%s，超過 1%% 的 %d 筆\n",
 		m.Merged, m.MergedDiff, pct(m.MergedDiff, m.Merged), dist, m.MergedOver1)
+	fmt.Fprintf(w, "* 送出數、短時間重複對數與非目標訊號的送出集合只算成功寫進 signals 的紀錄（降級但寫入成功的也算；寫入失敗的⛔ 不算）\n")
 	fmt.Fprintf(w, "* 非目標訊號 A、B 的送出差異：%d 筆\n", len(m.NonTargetDiff))
 	for _, x := range m.NonTargetDiff {
 		fmt.Fprintf(w, "  * %s\n", x)

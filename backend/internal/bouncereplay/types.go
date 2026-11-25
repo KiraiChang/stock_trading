@@ -77,6 +77,16 @@ type Input struct {
 	// ExpectedDays 是交接的預定交易日清單（台北日期，YYYY-MM-DD）：預檢與判定都依它檢查完整性——
 	// 清單上的每一天都要有評估、清單外的日期⛔ 不能出現，空清單或整個窗口沒有評估都判不通過（複審 2026-11-24）。
 	ExpectedDays []string
+	// Watchlist 是交接的自選清單（只有補充重播用）：每天的分母（見 FixedMembers）。
+	Watchlist []WatchEntry
+	// Unlisted：窗口內有 1 分 K、但不在自選清單的代號（補充重播⛔ 不納入，只列在報告）。
+	Unlisted []string
+}
+
+// WatchEntry 是自選清單的一檔：added_at 用來排除當天 09:00 之後才加入的標的。
+type WatchEntry struct {
+	Symbol  string
+	AddedAt time.Time
 }
 
 // 分群（第 7.3 節「對帳與覆蓋率」）。
@@ -103,6 +113,14 @@ type Outcome struct {
 	Candidate    *store.Signal
 	Sent         *store.Signal
 	Key          string // A 的身分鍵（保留鎖的鍵）
+	// Insufficient：評估錯誤是 indicator.ErrInsufficientCandles（行情不足）。Status 仍是 evaluate_failed（跟 live 的對應相同），
+	// 補充重播把它跟其他評估失敗分開統計。
+	Insufficient bool
+	// Persisted：引擎的 DBPersisted（訊號成功寫進重播庫的 signals）。報表的送出統計（送出數、短時間重複對數、非目標訊號的送出集合）
+	// 一律以它為準；A 與 live 的逐筆對帳、Withhold 的回歸檢查仍看 Sent（有沒有產生訊號）。
+	Persisted bool
+	// ReadErr：重播庫的讀取失敗（判重歷史、B 的錨點）。補充重播把它算成比較不完整。
+	ReadErr string
 }
 
 // Record 是一次評估的完整紀錄（輸出 CSV 的一列）。
@@ -123,6 +141,8 @@ type Record struct {
 	// 只有逐筆證實來自「最近 20 筆」的邊界才算已解釋（NonTargetExplained）。
 	NonTargetDiff      string
 	NonTargetExplained bool
+	// NonTargetAnomaly：非目標訊號的那一次評估，重播這一側有執行異常（降級、評估失敗、產生了卻沒寫入）——另列、⛔ 不算差異。
+	NonTargetAnomaly string
 }
 
 // counted：可對帳而且 A 跟 live 一致——覆蓋率的分子與「只算可對帳」的比較範圍。

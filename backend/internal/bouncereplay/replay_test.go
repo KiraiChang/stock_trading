@@ -329,14 +329,14 @@ func TestComputeMetrics(t *testing.T) {
 	anchor := 100.0
 	recs := []Record{
 		{Eval: Eval{RunID: 1, Symbol: "2330"}, Day: "d", Group: GroupReconcilable,
-			A: Outcome{Status: "signal_sent", Candidate: sb(100, base), Sent: sb(100, base)},
-			B: Outcome{Status: "signal_sent", Candidate: sb(100, base), Sent: sb(100, base)}},
+			A: Outcome{Status: "signal_sent", Candidate: sb(100, base), Persisted: true, Sent: sb(100, base)},
+			B: Outcome{Status: "signal_sent", Candidate: sb(100, base), Persisted: true, Sent: sb(100, base)}},
 		{Eval: Eval{RunID: 2, Symbol: "2330"}, Day: "d", Group: GroupInputChanged,
-			A: Outcome{Status: "signal_sent", Candidate: sb(101.5, base.Add(5*time.Minute)), Sent: sb(101.5, base.Add(5*time.Minute))},
+			A: Outcome{Status: "signal_sent", Candidate: sb(101.5, base.Add(5*time.Minute)), Persisted: true, Sent: sb(101.5, base.Add(5*time.Minute))},
 			B: Outcome{Status: "signal_suppressed", Candidate: sb(101.5, base)}, BAnchorSupport: &anchor},
 		{Eval: Eval{RunID: 3, Symbol: "2330", EvalStatus: "signal_suppressed"}, Day: "d", Withhold: true,
 			A: Outcome{Status: "signal_suppressed", Candidate: &store.Signal{SignalType: "BREAKDOWN"}},
-			B: Outcome{Status: "signal_sent", Candidate: &store.Signal{SignalType: "BREAKDOWN"},
+			B: Outcome{Status: "signal_sent", Candidate: &store.Signal{SignalType: "BREAKDOWN"}, Persisted: true,
 				Sent: &store.Signal{Symbol: "2330", SignalType: "BREAKDOWN", Direction: "SELL", Price: 99, Timestamp: base}}},
 	}
 	m := computeMetrics(recs, "all", func(Record) bool { return true })
@@ -404,8 +404,8 @@ func TestBRegressionsFailVerdict(t *testing.T) {
 	}
 	t.Run("B 15 分鐘內重複", func(t *testing.T) {
 		recs := mkRecs(10, "d")
-		recs[0].B = Outcome{Status: "signal_sent", Candidate: sb(base), Sent: sb(base)}
-		recs[1].B = Outcome{Status: "signal_sent", Candidate: sb(base.Add(14 * time.Minute)), Sent: sb(base.Add(14 * time.Minute))}
+		recs[0].B = Outcome{Status: "signal_sent", Candidate: sb(base), Persisted: true, Sent: sb(base)}
+		recs[1].B = Outcome{Status: "signal_sent", Candidate: sb(base.Add(14 * time.Minute)), Persisted: true, Sent: sb(base.Add(14 * time.Minute))}
 		if s := Summarize(recs, []string{"d"}); s.Pass || !strings.Contains(strings.Join(s.Failures, ""), "15 分鐘內的重複") {
 			t.Fatalf("B 的短時間重複要判失敗：%+v", s.Failures)
 		}
@@ -446,10 +446,32 @@ func TestExplainRecent20(t *testing.T) {
 	// B 少了幾筆 SUPPORT_BOUNCE：blocker 落在第 6 筆（20 筆內）→ B 擋下；A 多了 SUPPORT_BOUNCE，blocker 在第 26 筆（20 筆外）→ A 送出。
 	histB := append(filler(5), blocker)
 	histA := append(filler(25), blocker)
-	a := Outcome{Status: "signal_sent", Candidate: cand, Key: key}
+	a := Outcome{Status: "signal_sent", Candidate: cand, Key: key, Sent: cand, Persisted: true}
 	b := Outcome{Status: "signal_suppressed", SuppressedBy: string(signal.SuppressedByDB), Candidate: cand, Key: key}
 	if !explainRecent20(a, b, histA, histB) {
 		t.Fatal("這正是最近 20 筆的邊界，要證實")
+	}
+	// 送出那一邊降級但寫入成功：例外照樣成立；產生了卻沒寫入：⛔ 不是（也不會是差異）
+	if da := (Outcome{Status: "degraded", Candidate: cand, Key: key, Sent: cand, Persisted: true}); !explainRecent20(da, b, histA, histB) {
+		t.Fatal("降級但寫入成功的那一邊，最近 20 筆的邊界照樣要證實")
+	}
+	if na := (Outcome{Status: "degraded", Candidate: cand, Key: key, Sent: cand}); explainRecent20(na, b, histA, histB) {
+		t.Fatal("沒寫入的那一邊⛔ 不能用來證實")
+	}
+	// 反例（複審 2026-11-25）：寫入方第 20 筆之外有共同的那一列，但前 20 筆內還有另一列同鍵、冷卻期內的——正常查詢本來就會擋下，⛔ 不能證實
+	other := store.Signal{Symbol: "2330", SignalType: "BREAKDOWN", Direction: "SELL", Support: 99.5, Timestamp: base.Add(5 * time.Minute)}
+	histA2 := append(append(filler(3), other), append(filler(22), blocker)...)
+	if i := len(histA2) - 1; i < RecentLimit {
+		t.Fatalf("共同的那一列要在第 20 筆之外：%d", i)
+	}
+	if explainRecent20(a, b, histA2, histB) {
+		t.Fatal("寫入方前 20 筆內還有會擋下候選的那一列：⛔ 不是最近 20 筆的邊界")
+	}
+	// 同一列但落在冷卻期外（K 棒時間早 15 分鐘以上）：⛔ 不會擋下，例外照樣成立
+	far := other
+	far.Timestamp = cand.Timestamp.Add(-Cooldown)
+	if histA3 := append(append(filler(3), far), append(filler(22), blocker)...); !explainRecent20(a, b, histA3, histB) {
+		t.Fatal("前 20 筆內那一列在冷卻期外：⛔ 不擋，例外要成立")
 	}
 	if explainRecent20(a, b, histB, histB) {
 		t.Fatal("送出那一邊的 blocker 也在 20 筆內：⛔ 不是邊界")
@@ -607,7 +629,7 @@ func TestWithholdViolationAnySend(t *testing.T) {
 func TestNonTargetDiffFromEitherSide(t *testing.T) {
 	bo := &store.Signal{Symbol: "2330", SignalType: "BREAKOUT", Direction: "BUY", Price: 106, Resistance: 105, Timestamp: base}
 	rec := Record{Eval: Eval{RunID: 1, Symbol: "2330"}, Day: "d", Group: GroupReconcilable, AMatch: MatchOK,
-		A: Outcome{Status: "no_signal"}, B: Outcome{Status: "signal_sent", Candidate: bo, Sent: bo}}
+		A: Outcome{Status: "no_signal"}, B: Outcome{Status: "signal_sent", Candidate: bo, Sent: bo, Persisted: true}}
 	markNonTarget(&rec, nil, nil, true)
 	if rec.NonTargetDiff == "" || rec.NonTargetExplained {
 		t.Fatalf("A 沒有候選、B 送出 BREAKOUT 要記差異且未解釋：%+v", rec)
@@ -627,8 +649,8 @@ func TestNonTargetDiffOneSidedSendWithSameStatus(t *testing.T) {
 	// 複審（2026-11-24 第三輪）：A、B 都是 degraded，但只有 B 真的送出 BREAKOUT——狀態相同也要記差異、判不通過。
 	bo := &store.Signal{Symbol: "2330", SignalType: "BREAKOUT", Direction: "BUY", Price: 106, Resistance: 105, Timestamp: base}
 	for name, ab := range map[string][2]Outcome{
-		"只有 B 送出": {{Status: "degraded", Candidate: bo}, {Status: "degraded", Candidate: bo, Sent: bo}},
-		"只有 A 送出": {{Status: "degraded", Candidate: bo, Sent: bo}, {Status: "degraded", Candidate: bo}},
+		"只有 B 送出": {{Status: "degraded", Candidate: bo}, {Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}},
+		"只有 A 送出": {{Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}, {Status: "degraded", Candidate: bo}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rec := Record{Eval: Eval{RunID: 1, Symbol: "2330"}, Day: "d", Group: GroupReconcilable, AMatch: MatchOK, A: ab[0], B: ab[1]}
@@ -642,8 +664,58 @@ func TestNonTargetDiffOneSidedSendWithSameStatus(t *testing.T) {
 		})
 	}
 	same := Record{Eval: Eval{RunID: 2, Symbol: "2330"}, Day: "d", A: Outcome{Status: "degraded", Candidate: bo, Sent: bo}, B: Outcome{Status: "degraded", Candidate: bo, Sent: bo}}
-	if markNonTarget(&same, nil, nil, true); same.NonTargetDiff != "" {
-		t.Fatalf("兩邊都送出、內容相同：⛔ 不是差異：%q", same.NonTargetDiff)
+	if markNonTarget(&same, nil, nil, true); same.NonTargetDiff != "" || same.NonTargetAnomaly == "" {
+		t.Fatalf("兩邊都產生、都沒寫入：⛔ 不是差異、要列執行異常：%+v", same)
+	}
+	both := Record{Eval: Eval{RunID: 3, Symbol: "2330"}, Day: "d", A: Outcome{Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}, B: Outcome{Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}}
+	if markNonTarget(&both, nil, nil, true); both.NonTargetDiff != "" {
+		t.Fatalf("兩邊都寫入成功、內容相同：⛔ 不是差異：%q", both.NonTargetDiff)
+	}
+}
+
+// 複審（2026-11-25）：A、B 都是 degraded、產生相同的 BREAKOUT，只有一邊寫入 signals——逐筆驗收也要依實際寫入判定（跟摘要的送出集合同一個依據）。
+func TestNonTargetDiffOneSidedPersist(t *testing.T) {
+	bo := &store.Signal{Symbol: "2330", SignalType: "BREAKOUT", Direction: "BUY", Price: 106, Resistance: 105, Timestamp: base}
+	for name, ab := range map[string][2]Outcome{
+		"只有 A 寫入": {{Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}, {Status: "degraded", Candidate: bo, Sent: bo}},
+		"只有 B 寫入": {{Status: "degraded", Candidate: bo, Sent: bo}, {Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := Record{Eval: Eval{RunID: 1, Symbol: "2330"}, Day: "d", Group: GroupReconcilable, AMatch: MatchOK, A: ab[0], B: ab[1]}
+			markNonTarget(&rec, nil, nil, true)
+			if !strings.Contains(rec.NonTargetDiff, "寫入 signals") || rec.NonTargetExplained {
+				t.Fatalf("單側寫入要記差異且未解釋：%+v", rec)
+			}
+			recs := append(mkRecs(9, "d"), rec)
+			s := Summarize(recs, []string{"d"})
+			if s.Pass || len(s.NonTarget) != 1 {
+				t.Fatalf("要判不通過：%v", s.Failures)
+			}
+			if m := computeMetrics(recs, "", func(Record) bool { return true }); len(m.NonTargetDiff) != 1 {
+				t.Fatalf("摘要的送出集合也要有差異：%v", m.NonTargetDiff)
+			}
+		})
+	}
+}
+
+// 複審（2026-11-25）：被合併的支撐跟送出數同一個依據——A 降級但寫入成功、B 抑制，也要查 B 的錨點。
+func TestNeedsAnchor(t *testing.T) {
+	sb := &store.Signal{Symbol: "2330", SignalType: "SUPPORT_BOUNCE", Support: 100}
+	bsup := Outcome{Status: "signal_suppressed", Candidate: sb}
+	for name, c := range map[string]struct {
+		a, b Outcome
+		want bool
+	}{
+		"A 送出寫入":    {Outcome{Status: "signal_sent", Candidate: sb, Sent: sb, Persisted: true}, bsup, true},
+		"A 降級但寫入成功": {Outcome{Status: "degraded", Candidate: sb, Sent: sb, Persisted: true}, bsup, true},
+		"A 寫入失敗":    {Outcome{Status: "degraded", Candidate: sb, Sent: sb}, bsup, false},
+		"A 沒有送出":    {Outcome{Status: "signal_suppressed", Candidate: sb}, bsup, false},
+		"B 沒有抑制":    {Outcome{Status: "signal_sent", Candidate: sb, Sent: sb, Persisted: true}, Outcome{Status: "signal_sent", Candidate: sb, Sent: sb, Persisted: true}, false},
+		"B 抑制的不是反彈": {Outcome{Status: "signal_sent", Candidate: sb, Sent: sb, Persisted: true}, Outcome{Status: "signal_suppressed", Candidate: &store.Signal{SignalType: "BREAKOUT"}}, false},
+	} {
+		if got := needsAnchor(c.a, c.b); got != c.want {
+			t.Fatalf("%s：needsAnchor=%v，要 %v", name, got, c.want)
+		}
 	}
 }
 
@@ -652,5 +724,47 @@ func TestReportHasNoNaNWithoutMergedSupports(t *testing.T) {
 	WriteReport(&buf, mkRecs(10, "d"), []string{"d"}, nil, nil)
 	if strings.Contains(buf.String(), "NaN") || !strings.Contains(buf.String(), "相距：—") {
 		t.Fatalf("沒有被合併的不同支撐時⛔ 不能印 NaN：\n%s", buf.String())
+	}
+}
+
+// 複審（2026-11-25 第三輪）：逐筆只比成功寫入 signals 的紀錄——兩邊寫入相同、只是執行狀態不同（A degraded、B signal_sent），
+// ⛔ 不是差異、主要窗口⛔ 不因此不通過；降級另列成執行異常。
+func TestNonTargetStatusOnlyDiffIsAnomaly(t *testing.T) {
+	bo := &store.Signal{Symbol: "2330", SignalType: "BREAKOUT", Direction: "BUY", Price: 106, Resistance: 105, Timestamp: base}
+	for name, c := range map[string]struct {
+		a, b Outcome
+		want string
+	}{
+		"A 降級、兩邊寫入相同":    {Outcome{Status: "degraded", Candidate: bo, Sent: bo, Persisted: true}, Outcome{Status: "signal_sent", Candidate: bo, Sent: bo, Persisted: true}, "A degraded（寫入 true）"},
+		"A 產生了沒寫入、B 沒送出": {Outcome{Status: "degraded", Candidate: bo, Sent: bo}, Outcome{Status: "signal_suppressed", Candidate: bo}, "A degraded（寫入 false）"},
+		"B 評估失敗、A 沒送出":   {Outcome{Status: "signal_suppressed", Candidate: bo}, Outcome{Status: "evaluate_failed", Err: "boom"}, "B evaluate_failed（寫入 false）"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := Record{Eval: Eval{RunID: 1, Symbol: "2330"}, Day: "d", Group: GroupReconcilable, AMatch: MatchOK, A: c.a, B: c.b}
+			markNonTarget(&rec, nil, nil, true)
+			if rec.NonTargetDiff != "" || rec.NonTargetAnomaly != c.want {
+				t.Fatalf("只比寫入、執行狀態另列：diff=%q anomaly=%q", rec.NonTargetDiff, rec.NonTargetAnomaly)
+			}
+			recs := append(mkRecs(9, "d"), rec)
+			s := Summarize(recs, []string{"d"})
+			if !s.Pass || len(s.NonTarget) != 0 || len(s.Anomalies) != 1 {
+				t.Fatalf("⛔ 不能因執行狀態判不通過：%v", s.Failures)
+			}
+			if m := computeMetrics(recs, "", func(Record) bool { return true }); len(m.NonTargetDiff) != 0 {
+				t.Fatalf("摘要也要一致：%v", m.NonTargetDiff)
+			}
+			var buf bytes.Buffer
+			WriteReport(&buf, recs, []string{"d"}, nil, nil)
+			if !strings.Contains(buf.String(), "重播執行異常") || !strings.Contains(buf.String(), c.want) {
+				t.Fatalf("報告要另列執行異常：\n%s", buf.String())
+			}
+		})
+	}
+	// 兩邊都寫入、內容不同：照樣是差異
+	bo2 := *bo
+	bo2.Price = 107
+	rec := Record{Eval: Eval{RunID: 2, Symbol: "2330"}, Day: "d", A: Outcome{Status: "signal_sent", Candidate: bo, Sent: bo, Persisted: true}, B: Outcome{Status: "signal_sent", Candidate: &bo2, Sent: &bo2, Persisted: true}}
+	if markNonTarget(&rec, nil, nil, true); !strings.Contains(rec.NonTargetDiff, "寫入的內容不同") {
+		t.Fatalf("寫入的內容不同要記差異：%q", rec.NonTargetDiff)
 	}
 }

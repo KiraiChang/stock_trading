@@ -956,7 +956,7 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    |---|---|
    | 停機前（5a～5c、第二次回測檢查） | 停下，原服務照常運作；⛔ 沒有碰 live 的 schema |
    | `down` 之後、套用之前（備份失敗、`-expect-fingerprint` 不符＝結束碼 5） | ⛔ 沒有碰 schema：用部署前的回滾標籤把舊 image 換回 `latest`，`up -d --no-build` |
-   | 套用到一半（結束碼 3、4、外層 timeout） | 停止確認通過之後：用 `-migrate=status` 查最後成功的版本並對照實際 schema；已提交的都是「先加」、舊 image 確認相容才換回舊 image，否則從備份還原到乾淨的 DB（新 database 用 `pg_restore --role=trading_user --no-owner --no-acl` 還原、核對指紋與筆數、用應用帳號實測權限，再改名切換）後啟動舊 image |
+   | 套用到一半（結束碼 3、4、外層 timeout） | 停止確認通過之後：用 `-migrate=status` 查最後成功的版本並對照實際 schema；已提交的都是「先加」、舊 image 確認相容才換回舊 image，否則從備份還原到乾淨的 DB 後啟動舊 image：管理帳號 `postgres` 建庫（`CREATE DATABASE … OWNER trading_user`；live 的 `trading_user` ⛔ 沒有 CREATEDB）→ `trading_user` 連線 `pg_restore --no-owner --no-acl --exit-on-error` → `trading_user` 把 database 與 public schema 的 ACL 對齊原庫（`REVOKE ALL ON DATABASE … FROM PUBLIC`、`ALTER SCHEMA public OWNER TO trading_user`、`REVOKE ALL ON SCHEMA public FROM PUBLIC`）→ 核對指紋、筆數、擁有者、ACL 逐字相同，用應用帳號實測權限 → 管理帳號改名切換 |
    | 全部套用成功、新服務 readiness 失敗 | 優先換回已驗證相容的舊 image、保留新 schema（回滾窗口內舊版必須能讀寫新 schema）；服務已經 `up` 過，回滾要**先 `down`**（見下方「部署失敗時」） |
 
    ⚠️ 有 migration 的部署窗口＝備份＋套用上限（15 分鐘）＋停止確認＋可能的還原，⛔ 不能只算套用的時間。完整的還原程序與演練結果見 `docs/plans/t087-migration-in-deploy.md` 第五、六節。

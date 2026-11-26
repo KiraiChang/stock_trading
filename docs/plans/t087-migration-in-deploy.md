@@ -169,20 +169,27 @@
 * 部署腳本⛔ 不自動跑 `goose down`；也⛔ 不自動 `up`（理由見 D4）。
 * **還原到乾淨的 DB**（⛔ 不在套用過的庫上反向修補，避免部分套用新增的物件殘留）：
   1. 停止確認（D7）通過，所有應用服務都是停的；
-  2. 在 live 的 PostgreSQL 建一個新的 database（`trading_restore_<時間戳>`，**owner 是正式應用帳號 `trading_user`**），從 D6 的備份還原：
-     * **還原角色**：用 `pg_restore --role=trading_user --no-owner --no-acl --exit-on-error` 以應用帳號的身分建立物件，所有表、sequence、index 都由 `trading_user` 擁有，
-       跟現在 live 的擁有關係一致（`--no-owner` 會讓物件歸還原時的角色所有、`--no-acl` 會略過原有授權，所以角色要指定成應用帳號）；
-       直接用 `trading_user` 連線還原時物件自然歸它所有；用管理帳號連線時才需要 `--role`，而且管理帳號必須是 `trading_user` 角色的成員（盤點時確認）；
-     * 現有 live 的授權若⛔ 不只是 owner（例如另有唯讀帳號的 GRANT），先在盤點時列出，還原後照清單補上；
+  2. 建新的 database、從 D6 的備份還原（v1.6：live 的 `trading_user` ⛔ 沒有 CREATEDB，見第七節的盤點）：
+     * **建庫用管理帳號 `postgres`**：`CREATE DATABASE trading_restore_<時間戳> OWNER trading_user`。⛔ 不替 `trading_user` 加 CREATEDB（⛔ 不改 live 的權限）；
+     * **還原用 `trading_user` 連線**：`pg_restore --no-owner --no-acl --exit-on-error`，物件自然歸它所有，跟現在 live 的擁有關係一致（`--no-owner` 讓物件歸連線的角色、
+       `--no-acl` 略過原有授權），⛔ 不需要 `--role`；
+     * **還原後、改名前，用 `trading_user` 把還原庫的 ACL 對齊原庫**（它是新庫的 owner，做得到；⛔ 不需要管理帳號）：
+       `REVOKE ALL ON DATABASE trading_restore_<時間戳> FROM PUBLIC`、`ALTER SCHEMA public OWNER TO trading_user`、`REVOKE ALL ON SCHEMA public FROM PUBLIC`。
+       原因：新建的 database 預設 PUBLIC 有 CONNECT、TEMP，public schema 預設歸 `pg_database_owner`、PUBLIC 有 USAGE；`--no-owner --no-acl` 的還原⛔ 不會改這些，
+       而 live 的 `trading` 兩者都只有 owner；
+     * live 現在⛔ 沒有 owner 以外的授權與預設授權（盤點確認），還原後⛔ 不需要補授權；之後若新增，要先列進清單、還原後照清單補上；
   3. 核對：
      * `-migrate=status` 的 fingerprint 等於部署時的 base、逐表筆數等於備份前記下的數字；
      * 擁有者：還原庫的 schema 物件（表、sequence、view）全部由 `trading_user` 擁有（查 `pg_class`／`pg_namespace`，列出例外，例外數必須是 0）；
+     * database 與 public schema 的 owner、ACL 跟原庫**逐字相同**（`pg_database.datacl`、`pg_namespace.nspacl`）；
      * **改名之前，用正式應用帳號 `trading_user` 連還原庫實測權限**：每張應用表各做一次 `SELECT … LIMIT 1`；在一個交易裡對代表性的表（`job_runs`、`backtest_jobs`、
        `position_analyses` 等，清單在演練時定）`INSERT`、`UPDATE`、`DELETE` 一筆後 `ROLLBACK`；每個 sequence `nextval` 一次（sequence 前進⛔ 不影響正確性，只會跳號）；
        任何一項失敗就⛔ 不改名、先修權限；
-  4. 切換：確認兩個 database 都⛔ 沒有連線後，`trading` 改名成 `trading_failed_<時間戳>`、`trading_restore_<時間戳>` 改名成 `trading`；
+  4. 切換：確認兩個 database 都⛔ 沒有連線後，**用管理帳號 `postgres`** 把 `trading` 改名成 `trading_failed_<時間戳>`、`trading_restore_<時間戳>` 改名成 `trading`
+     （改名要 owner 加上 CREATEDB，`trading_user` 做不到）；改名⛔ 不影響 owner 與 ACL；
   5. 用回滾標籤啟動舊 image，跑部署手冊的部署後確認；`trading_failed_<時間戳>` 留到原因查清楚、確認不需要之後才刪。
-  需要的權限（建 database、改名）在開工前的 live 盤點確認；權限不夠時改用 live 專人的管理帳號，程序在演練時一併確定。
+  管理帳號只用在建庫與兩次改名；`postgres` 在 live 的 DB 容器內以本機連線使用（跟 `trading_user` 一樣經 `docker exec`），由專人執行。
+  這套程序（建庫與改名用管理帳號、ACL 對齊）在 dev 驗證過（第七節「還原程序修正的 dev 驗證」）。
 * **回滾窗口**：有 migration 的部署之後，到下一次確認不再回滾之前，舊版必須能讀寫新 schema。拆除欄位、切斷舊的寫法要等回滾窗口結束後的另一次 migration（「先加後刪」）。
   每支新 migration 在計畫書裡要寫明它屬於「先加」還是「後刪」。
 
@@ -327,6 +334,9 @@
 | 演練 3（schema 成功、服務換版失敗） | 試跑、備份、套用 82 都 ok，`pending -`；`up` 之後 backend 重啟（RestartCount 2），readiness 判定失敗，⛔ 沒有自動回滾。回滾到 `:rh-t087` 之後：backend 與 python-server 的 `/health` 都 ok，RestartCount 都是 0，唯讀檢查接受 extra 81、82；用新的驗收帳號送 1 檔回測（`2330`，01-02～03-31），python-worker 跑到 `done`，`backtest_results` 有 1 筆，worker 的 log ⛔ 沒有 Traceback |
 | 第 5 項前半（T-087 之前的 image） | 換成 `:rh-init`（down 之後才 up）：舊 backend 啟動時跑 goose，回報 `migrations applied … version 82`，⛔ 沒有要套用的。啟動前後的快照完全相同：`goose_db_version`（83 列，md5 相同）、public 的 741 個欄位、124 個約束 |
 
+⚠️ 演練 4 的應用帳號有 CREATEDB，建庫與改名都由它做；live 的 `trading_user` ⛔ 沒有 CREATEDB，而且 live 的 database 與 public schema 的 ACL 不是預設值（第七節盤點）。
+這兩點的差異由第七節「還原程序修正的 dev 驗證」補驗，第五節的程序已經照它修正（v1.6）。
+
 **耗時**（DB 479 MB，`-Fc` 備份約 88 MB；live 現在的資料比 11-13 多，上 live 前要用盤點的 DB 大小重新估）：
 * build：backend 有改程式時約 2 分 10 秒；python 兩個用快取，各約 1 秒。
 * 試跑（建網路、臨時 PostgreSQL、匯 schema、status、up、清理）：7 秒。
@@ -357,6 +367,46 @@ readiness 失敗的回滾要先 `down`（或 `up -d --no-build --force-recreate`
 * 實作前的 live 唯讀盤點（指令另給）：PostgreSQL 的主版本與 image（live 主機上有沒有同版本的 image）、主機的可用記憶體與磁碟（試跑容器、備份目錄）、DB 大小、
   `goose_db_version` 的已套用集合跟 init 的 embed 清單一致、目前有沒有其他長時間連線（只看筆數與 `application_name`）、`trading_user` 能不能建 database 與改名（還原程序用）、
   **現有物件的擁有者與 owner 以外的授權**（還原後要一致；只列角色與物件數，⛔ 不列資料）。
+
+### live 唯讀盤點的結果（2026-11-26 10:47，專人執行；腳本 sha256 `12781052…`，先在 dev 實跑過）
+
+11-28（I-139）、11-30（I-141）兩次部署之後，fingerprint、`deploy.sh` 與 build 目錄、DB 大小都會變；T-087 上版前要重跑同一份腳本，比對有變的部分。
+
+| 項目 | 結果 | 對 T-087 的意思 |
+|---|---|---|
+| 主機 | 2 CPU；available 4022 MiB；`/` 剩 49G（docker 的資料目錄 `/home/app/.local/share/docker`、`/opt/stacks` 都在同一個檔案系統）；`flock`、`timeout` 都有 | 記憶體高於 build 的下限 1536 MiB；備份的空間足夠。live 的 Docker 也是 rootless，跟 dev 演練的環境相同 |
+| docker | Engine 29.9.3、Compose 5.7.0（跟 dev 相同）；DB 容器 `postgres-postgres-1` 用 `postgres:16-alpine`（`aa6cb33c…`），在 `trading-net` 上的別名有 `postgres`；主機上有同一個 image；`pg_dump`／`pg_restore` 都是 16.15 | `TRIAL_PG_IMAGE="postgres:16-alpine"` 可以直接用、⛔ 不用另外拉 image；Compose 版本相同，所以演練發現的回滾行為（標籤改了⛔ 不會重建容器）在 live 一樣適用 |
+| DB | PostgreSQL 16.15；`trading` 768 MB（dev 演練是 479 MB，約 1.6 倍）；最大的是 `candles` 356 MB | 用演練的比例估：備份約 60 秒、還原約 90 秒、備份檔約 140 MB |
+| migration | 已套用 79 支、最大 79；fingerprint `a0312d37…`＝「1～79」的 SHA-256 | 跟 init 的 embed（80 支）只差 080（I-139 的 migration，11-28 部署後才會套用）；⛔ 沒有缺號、⛔ 沒有多出來的版本 |
+| 連線 | 只有 `trading` 上 7 條 `idle`、`application_name` 是空的（最長 4 天多，是 live 服務的連線池） | ⛔ 沒有其他長時間的連線；停止確認只看 `trading-migrator-<run_id>`，碰不到它們 |
+| 角色 | `postgres`：superuser；`trading_user`：**非 superuser、⛔ 沒有 CREATEDB**、可登入；⛔ 沒有角色成員關係 | **第五節的還原程序要改**：`trading_user` 建不了 database，也改不了名（改名要 owner 加上 CREATEDB）。見下方「待確認」 |
+| database | `trading`、`trading_test` 的 owner 都是 `trading_user`，ACL 都是 `{trading_user=CTc/trading_user}`（PUBLIC ⛔ 沒有 CONNECT、TEMP） | 新建的還原庫預設 PUBLIC 有 CONNECT、TEMP，要對齊 |
+| 物件 | public 的表 53、index 146、sequence 42 全部歸 `trading_user`；public schema 的 owner 是 `trading_user`、ACL 是 `{trading_user=UC/trading_user}`；`plpgsql` 歸 `postgres`（PostgreSQL 內建） | 新建的庫裡，public schema 預設歸 `pg_database_owner`、PUBLIC 有 USAGE，`--no-owner --no-acl` 還原⛔ 不會改它，要對齊。**dev 演練沒有涵蓋這一點**（dev 的 public 是預設值） |
+| 授權 | owner 以外的授權、預設授權都⛔ 沒有 | 還原後⛔ 不需要補授權 |
+| 回測 | pending 0、running 0 | — |
+| 服務設定 | 三個服務的 DSN 都是 `trading_user@postgres:5432/trading`；`DATABASE_AUTO_MIGRATE` 都⛔ 沒有設定 | `DB_USER=trading_user` 跟 migrator 的 DSN 是同一個帳號；backend 換成 T-087 之後會走唯讀檢查 |
+| 部署目錄 | live `deploy.sh` sha256 `abcf1c01…`＝init 的 `deploy.sh` 只改 3 行；`PROJECT_DIR` 是 `/opt/stacks/deploy/stock_trading/build/stock_trading/`；`/opt/stacks/deploy` 歸 `app`、權限 700 | 盤點腳本把 build 目錄寫錯（少了 `build/stock_trading`），另外補查：build 目錄在 `init`、`941f11e`、追蹤中的檔案⛔ 沒有修改（`941f11e` 是 `origin/init` 的祖先，之後的 13 個 commit 含 I-139，等 11-28 部署）；部署帳號是 `app`；`/opt/stacks/deploy/*`、`/opt/stacks/scripts/*` 都歸 `app`。`BACKUP_DIR` 定為 `/opt/stacks/deploy/db-backups`（新建、700；上一層 `/opt/stacks/deploy` 已經是 700、歸 `app`）；⛔ 不放在 `/opt/stacks/deploy/stock_trading` 底下（那一層是 775） |
+
+**第五節還原程序的修正（2026-11-26 使用者確認，已改進第五節）**：建庫與改名改用管理帳號 `postgres`；還原、ACL 對齊、核對、權限實測都用 `trading_user`；
+⛔ 不替 `trading_user` 加 CREATEDB。
+
+### 還原程序修正的 dev 驗證（2026-11-26，全部通過）
+
+dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 live 的盤點重現權限配置，用合成資料；⛔ 沒有用 live 資料、⛔ 沒有碰 dev 的 `trading`；做完全部刪除。
+
+* **配置**：管理帳號是 dev 的 superuser；應用帳號 `t087_app` 是 NOSUPERUSER、NOCREATEDB；正式庫 `t087_acl_src` 的 database ACL 是 `{t087_app=CTc/t087_app}`，
+  public schema 歸 `t087_app`、ACL 是 `{t087_app=UC/t087_app}`，跟 live 同形。兩張表（含 FK 與 index），共 2500 列。
+* **結果**（一共 17 項，失敗 0）：
+  1. 應用帳號 `pg_dump -Fc`：rc 0。
+  2. 反證：應用帳號自己 `CREATE DATABASE` 被拒絕（`permission denied to create database`）。
+  3. 管理帳號 `CREATE DATABASE … OWNER t087_app`；應用帳號 `pg_restore --no-owner --no-acl --exit-on-error`：rc 0。
+  4. 反證：對齊之前核對失敗、2 行不同：database ACL 是預設值；public schema 歸 `pg_database_owner`、ACL 是 `{pg_database_owner=UC/pg_database_owner,=U/pg_database_owner}`。
+  5. **對齊的三條由應用帳號執行成功**（⛔ 不需要管理帳號）；之後 owner、ACL、owner 例外（0）、筆數、sequence 都跟正式庫逐字相同。
+  6. 權限實測：SELECT、INSERT、UPDATE、DELETE（之後 ROLLBACK）、`nextval` 都成功；只有 sequence 跳號 +2，是預期內的。
+  7. 反證：應用帳號改名被拒絕（`permission denied to rename database`）。
+  8. 兩個庫都⛔ 沒有連線之後，管理帳號改名成功；切換後的庫跟改名前的還原庫逐字相同（改名⛔ 不影響 owner 與 ACL），應用帳號連得上。
+  9. 測試用的 database 與帳號都已刪除。
+* 第一次執行有 1 項失敗：腳本拿切換後的快照去跟「權限實測之前」比，sequence 因為 `nextval` 跳號而不同。這是腳本比錯對象，⛔ 不是程序的問題；改成跟「權限實測之後」比，跳號另外確認剛好 +2，第二次全部通過。
 
 ## 八、完成後要歸檔的位置
 
@@ -461,3 +511,5 @@ readiness 失敗的回滾要先 `down`（或 `up -d --no-build --force-recreate`
 | v1.2 | 2026-11-25 | 併入 v1.1 review：[1] 外層逾時改成獨立的故障注入（migrator 自己的上限拉長、只縮短外層 timeout），證明停止確認找到具名容器、目標 DB 上本次的連線歸零之前⛔ 沒有復原動作；`application_name` 帶本次的 `run_id`、停止確認只限目標 DB 與本次的 pid；[2] 還原角色定為 `trading_user`（`--role`、新庫的 owner），改名前用應用帳號實測讀、寫、sequence 權限與擁有者；盤點加現有擁有者與授權；演練加權限的反證 |
 | v1.3 | 2026-11-26 | 第六節補 dev 演練的做法：作業隔離的 DB／Redis 加上 `docker-compose.yml` 副本的應用 stack、11-13 的 live 快照、R0 舊版與 R1 第一次部署、五項演練的順序（1→4→2→3，第 5 項併進 1 與 3）、演練用的 migration 與故障注入只放未追蹤檔 |
 | v1.4 | 2026-11-26 | 第六節記 dev 演練紀錄：R0、R1 與五項演練都照預期；各步的耗時；跟做法不同的三處；發現 readiness 失敗後的回滾要先 `down`（或 `--force-recreate`），已修進部署手冊（含逐一核對 image ID）；演練資料已刪除 |
+| v1.5 | 2026-11-26 | 第七節記 live 唯讀盤點的結果；`trading_user` 沒有 CREATEDB、live 的 database 與 public schema 的 ACL 不是預設值 → 第五節的還原程序待確認修正（建庫與改名用管理帳號、還原後對齊 ACL，並在 dev 補演練） |
+| v1.6 | 2026-11-26 | 使用者確認還原程序的修正並改進第五節：建庫與改名用 `postgres`；還原、ACL 對齊、核對、權限實測用 `trading_user`；核對加上 database 與 public schema 的 ACL 逐字相同。dev 驗證 17 項全部通過（含建庫、改名、未對齊的三個反證）；`BACKUP_DIR` 定為 `/opt/stacks/deploy/db-backups` |

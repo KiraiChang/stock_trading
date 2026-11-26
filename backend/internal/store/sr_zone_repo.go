@@ -36,6 +36,9 @@ type SRZoneRepo interface {
 	// 分析，就會讓 1d 的排程誤判「今天已經分析過」而整批跳過。
 	// 沒有任何分析時回 (nil, nil)——那不是錯誤，是「這檔還沒被分析過」。
 	GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*SRZoneAnalysis, error)
+	// GetSourceRefs 依 id 一次取回多份快照的 id、timeframe、analyzed_at（T-089：交易計畫的來源回查）。
+	// 一句 IN 查詢；不存在的 id 不會出現在結果裡（呼叫端據此判斷「快照已刪」）。ids 是空的時回空、⛔ 不查詢。
+	GetSourceRefs(ctx context.Context, ids []uint64) ([]SRZoneAnalysisSourceRef, error)
 	GetZones(ctx context.Context, analysisID uint64) ([]SRZone, error)
 	GetDecision(ctx context.Context, analysisID uint64) (*SRDecision, error)
 	GetMarketEventDetections(ctx context.Context, analysisID uint64) ([]MarketEventDetection, error)
@@ -414,6 +417,24 @@ func (r *srZoneRepo) List(ctx context.Context, symbol string, limit int) ([]SRZo
 		`), limit)
 	}
 	return rows, err
+}
+
+// GetSourceRefs 見介面上的說明。只 SELECT 三欄（⛔ 不用 srZoneAnalysisColumns：九個 RawJSON 欄位平均 28 kB／筆）。
+func (r *srZoneRepo) GetSourceRefs(ctx context.Context, ids []uint64) ([]SRZoneAnalysisSourceRef, error) {
+	if len(ids) == 0 {
+		return []SRZoneAnalysisSourceRef{}, nil
+	}
+	query, args, err := sqlx.In(`
+		SELECT id, timeframe, analyzed_at FROM stock_sr_zone_analyses WHERE id IN (?) ORDER BY id
+	`, ids)
+	if err != nil {
+		return nil, err
+	}
+	rows := []SRZoneAnalysisSourceRef{}
+	if err := r.db.SelectContext(ctx, &rows, r.db.Rebind(query), args...); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // ListRefsSince 由 idx_stock_sr_zone_analyses_created_at 支撐（migration 073）——

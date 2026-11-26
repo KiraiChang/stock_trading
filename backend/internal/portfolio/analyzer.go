@@ -60,7 +60,8 @@ type srAnalysisProvider interface {
 	Analyze(ctx context.Context, symbol string, opts analysis.SRAnalysisOptions) (*analysis.SRAnalysisResult, error)
 }
 
-func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRepo store.SRZoneRepo, config Config) *Analyzer {
+// NewAnalyzer：candles 給 SR 快照的重用判斷用（T-089 D1：只在快照是目前最新那根日 K 時重用）。
+func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRepo store.SRZoneRepo, candles analysis.LatestCandleReader, config Config) *Analyzer {
 	// 逐欄位補預設：任何一項風險/部位參數缺漏或 <= 0 都會讓部位計算靜默失效
 	// （例如 MaxRiskAmount=0 會讓 riskShares=0、永遠 target 0），所以每項各自回退。
 	d := DefaultConfig()
@@ -88,7 +89,7 @@ func NewAnalyzer(client *analysis.Client, positions store.PositionRepo, srZoneRe
 	return &Analyzer{
 		positions: positions,
 		srProvider: analysis.NewSRAnalysisProvider(
-			client, srZoneRepo, config.SRReuseMaxAge,
+			client, srZoneRepo, candles, config.SRReuseMaxAge,
 		),
 		config: config,
 		now:    time.Now,
@@ -354,6 +355,10 @@ func (a *Analyzer) buildSnapshot(position *store.Position, sr *store.SRZoneAnaly
 			"avg_cost":            position.AvgCost,
 			"current_price":       current,
 			"sr_zone_analysis_id": sr.ID,
+			// T-089 D2：計畫的來源（只加鍵、⛔ 不改既有鍵）。timeframe 是 SR 快照的 timeframe，
+			// market_data_at 是 SR 快照的 analyzed_at（最後一根 K 棒的時間＝行情日期）；回查快照（可能被刪）之前先看這兩個鍵。
+			"timeframe":      sr.Timeframe,
+			"market_data_at": sr.AnalyzedAt,
 		},
 		"entry_decision": map[string]any{
 			"applicable":        entryApplicable,

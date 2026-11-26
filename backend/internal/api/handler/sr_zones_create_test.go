@@ -179,6 +179,11 @@ func (s *srZoneRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timef
 	return nil, nil
 }
 
+// GetSourceRefs 只為滿足 store.SRZoneRepo 介面而存在（T-089 交易計畫的來源回查）；SRZoneHandler 不碰它。
+func (s *srZoneRepoStub) GetSourceRefs(ctx context.Context, ids []uint64) ([]store.SRZoneAnalysisSourceRef, error) {
+	return nil, nil
+}
+
 // ListRefsSince 只為滿足 store.SRZoneRepo 介面而存在——這個 stub 服務的 SRZoneHandler
 // 走的是 List／GetLatestByTimeframe，不碰這支（sr_zone_verify 排程才用它）。
 // 刻意回空而不是轉呼叫 List：真的有人在這裡依賴它時，測試會因為拿不到資料而失敗，
@@ -402,6 +407,13 @@ func TestSRZoneCreateDefaultsToNewSnapshot(t *testing.T) {
 	}
 }
 
+// srLatestCandleStub 是 SR 快照重用判斷用的最新 K 棒（T-089 D1）。
+type srLatestCandleStub struct{ ts time.Time }
+
+func (c srLatestCandleStub) GetLatest(ctx context.Context, symbol, timeframe string) (*store.Candle, error) {
+	return &store.Candle{Symbol: symbol, Timeframe: timeframe, Timestamp: c.ts}, nil
+}
+
 func TestSRZoneCreateCanReuseExistingSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstreamCalls := 0
@@ -422,7 +434,8 @@ func TestSRZoneCreateCanReuseExistingSnapshot(t *testing.T) {
 			Status: "PENDING", TradingScore: 70,
 		}}},
 	}
-	provider := analysis.NewSRAnalysisProvider(analysis.NewClient(upstream.URL), repo, 24*time.Hour)
+	// T-089 D1：最新那根日 K 就是快照的 analyzed_at，才會重用
+	provider := analysis.NewSRAnalysisProvider(analysis.NewClient(upstream.URL), repo, srLatestCandleStub{ts: now.Add(-time.Hour)}, 24*time.Hour)
 	handler := NewSRZoneHandler(analysis.NewClient(upstream.URL), repo, nil, nil, nil, provider, zap.NewNop())
 	router := gin.New()
 	router.POST("/sr-zones", handler.Create)

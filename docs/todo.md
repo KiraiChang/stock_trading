@@ -54,7 +54,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中：計畫書 [`docs/plans/t089-first-usable-trade-plan.md`](./plans/t089-first-usable-trade-plan.md) v1.5（2026-11-25 功能設計可收斂；dev 驗收用可丟棄的 database，補帳號啟用指向與切換前的回測雙零、服務狀態，待複審；Q1～Q4 已裁決；live 唯讀盤點已完成（重用期限 24 小時、計畫 0 筆），I-141 上 live 之後開工；回看另外處理） |
+| 狀態 | 進行中（程式已實作、dev 實跑驗收未做）：計畫書 [`docs/plans/t089-first-usable-trade-plan.md`](./plans/t089-first-usable-trade-plan.md) v1.6（v1.5 複審通過；2026-11-26 在 `t089` 分支實作，I-139、I-141 上 live 之前⛔ 不合併；回看另外處理） |
 | 優先度 | 高（功能檢討建議的第一版交付；目前沒有其他條目承接） |
 | 分類 | 前端／交易分析／產品 |
 | 建立日期 | 2026-11-20 |

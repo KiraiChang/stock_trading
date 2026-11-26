@@ -42,6 +42,9 @@ type Result struct {
 	IsTrading bool                     `json:"is_trading"`
 	Source    string                   `json:"source"`
 	Override  *store.MarketDayOverride `json:"override,omitempty"`
+	// OverrideUnavailable：讀手動設定失敗或逾時（T-089）。這時照日曆（或 fallback）判斷、Source 仍是 calendar／fallback，
+	// 只是那一天⛔ 沒有確認過手動設定。判斷結果與排程的降級行為⛔ 不因它改變；`json:"-"`，⛔ 不出現在既有 API 的回應。
+	OverrideUnavailable bool `json:"-"`
 }
 
 // CalendarSource 是年度日曆的來源（market.ExchangeReference 滿足它）。
@@ -114,21 +117,23 @@ func (j *Judge) On(ctx context.Context, day time.Time) Result {
 		return Result{IsTrading: false, Source: SourceWeekend}
 	}
 	// 手動設定每次都重讀（⛔ 不快取）：設定與取消在下一次判斷就生效。
+	overrideUnavailable := false
 	if j.overrides != nil {
 		o, err := j.readOverride(ctx, d.Format("2006-01-02"))
 		switch {
 		case err != nil:
 			// 讀不到手動設定時照日曆判斷（DB 讀不到時排程本身大多也跑不了）。
 			j.log.Warn("trading day override unavailable, using calendar", zap.Error(err))
+			overrideUnavailable = true
 		case o.Effective():
 			return Result{IsTrading: o.Action == store.MarketDayOpen, Source: SourceManual, Override: o}
 		}
 	}
 	cal, ok := j.calendar(ctx, d.Year())
 	if !ok {
-		return Result{IsTrading: true, Source: SourceFallback}
+		return Result{IsTrading: true, Source: SourceFallback, OverrideUnavailable: overrideUnavailable}
 	}
-	return Result{IsTrading: cal.IsTradingDay(d), Source: SourceCalendar}
+	return Result{IsTrading: cal.IsTradingDay(d), Source: SourceCalendar, OverrideUnavailable: overrideUnavailable}
 }
 
 type overrideResult struct {

@@ -1,6 +1,6 @@
-# T-089 計畫書 v1.5：可用首版——台股盤後交易計畫
+# T-089 計畫書 v1.7：可用首版——台股盤後交易計畫
 
-> 狀態：v1.5（2026-11-25：功能設計可收斂；dev 驗收在可丟棄的 database 上做，補帳號啟用與切換前的服務狀態，待複審）。第八節的 live 唯讀盤點已完成（重用期限 24 小時、計畫 0 筆），可以開工；實作排在 I-141 上 live（11-30）之後。對應：`docs/todo.md` T-089。
+> 狀態：v1.7（2026-11-26：v1.5 複審通過；程式在 `t089` 分支實作完成，併入實作 review 的三項，測試與反證全部通過，見第十節；第六節的 dev 實跑驗收未做）。第八節的 live 唯讀盤點已完成（重用期限 24 小時、計畫 0 筆）。對應：`docs/todo.md` T-089。
 > 需求：照 T-089 的三項交付（接通入口、顯示資料是否可用、用實際流程驗收）與「計畫書要優先定清的兩件事」；
 > 功能檢討的「下一期回看」（5 個交易日試用）⛔ 不在本案，首版可操作後另外處理（使用者 2026-11-25 裁決）。
 > 依據：[`feature-reviews/2026-11-19-first-usable-release.md`](../feature-reviews/2026-11-19-first-usable-release.md)。
@@ -266,8 +266,13 @@
 * **切換前**（服務還在跑、連著 `trading` 時）：
   * **回測雙零檢查**：`trading` 的 `backtest_jobs` 裡 `pending` 與 `running` 都是 0（沿用 `development-workflow.md`「部署前的回測雙零檢查」）；⛔ 不是 0 就等它結束，⛔ 不切換。
     停 Python 會中斷執行中的回測，服務恢復後會把留在 `trading` 的 `running` 回收成失敗。驗收期間⛔ 不送回測。
-  * **記下服務狀態**：`docker compose -f docker-compose.dev.yml ps` 的服務清單與狀態存進作業目錄，特別記下 `python-worker`（屬於 `worker` profile，
-    一般的 `up -d` ⛔ 不會帶起它）當時有沒有在跑。
+  * **記下服務狀態**（review 2026-11-26 修正：⛔ 不用 `ps`，它只列在跑的）：`docker compose -f docker-compose.dev.yml --profile worker ps -a --format json`
+    （含 `worker` profile 的 `python-worker`、含已停止的容器）存進作業目錄，整理成三份清單：
+    * **原本在跑**：容器存在而且 `State` 是 `running` 的服務；
+    * **原本停著**：容器存在、⛔ 不是 `running`（`exited`、`created`…）的服務；
+    * **原本沒有容器**：`--profile worker config --services` 列得出、但⛔ 沒有容器的服務（2026-11-26 查：`python-worker` 目前就是這種）。
+
+    `ps -a` 也會列出同一個 project、但⛔ 不在這份 compose 裡的容器（2026-11-26 查：別份 compose 留下的 `fake-yahoo`）：只記錄、⛔ 不動，復原後的核對狀態要一樣。
 * **建立**：dev 的服務全部停下（`stop`）後，只啟動 dev postgres，用 `CREATE DATABASE t089_accept TEMPLATE trading` 複製一份 dev 的 `trading`
   （範本複製要求來源⛔ 沒有連線；先確認磁碟空間夠）。dev 原本的 `trading` 在驗收期間⛔ 沒有任何服務連著，內容⛔ 不會變。
   ⚠️ dev postgres 要掛**一般的 dev volume**：用作業隔離 override（掛 `stock_trading_dev_i131_pgdata`，I-123 判讀與 I-140 重播在用）的作業要先停下，兩者⛔ 不能同時跑。
@@ -288,11 +293,19 @@
 
 **復原與丟棄**（成功或中途失敗都要做；**服務復原與資料丟棄是兩件獨立的事**，前一件失敗⛔ 不擋後一件）：
 
-1. **服務復原**（先做）：停掉驗收 override 啟動的服務，再照**切換前記下的服務狀態**重建 dev 服務（DSN 回到 `trading`、Redis 回到原本的編號）：
-   一般服務用 `docker compose -f docker-compose.dev.yml up -d`；切換前 `python-worker` 有在跑的話，再加 `--profile worker` 把它帶回來，切換前沒在跑的⛔ 不要帶起來。
-   核對：服務清單與狀態跟切換前記下的相同；backend、python-server（與 worker）連的是 `trading`；`trading` 的 `backtest_jobs` 仍是雙零。
+1. **服務復原**（先做）：用 `docker compose -f docker-compose.dev.yml -f 驗收 override --profile worker stop` 停掉驗收期間的所有服務，再**依切換前記下的三份清單**
+   用一般的設定重建（DSN 回到 `trading`、Redis 回到原本的編號）。⛔ 不用不指名的 `up -d`：那會啟動切換前停著的服務（review 2026-11-26）。
+   * **原本在跑**：`docker compose -f docker-compose.dev.yml up -d --no-deps` 後面逐一列出這些服務名稱；清單裡有 `python-worker` 時加 `--profile worker`。
+   * **原本停著**：`docker compose -f docker-compose.dev.yml up --no-start --no-deps` 列出這些服務名稱，用一般設定重建、⛔ 不啟動
+     （⛔ 不留下指向 `t089_accept` 的驗收設定容器；`python-worker` 在清單裡時同樣加 `--profile worker`）。
+   * **原本沒有容器**：驗收期間建立的這些容器用 `docker compose -f docker-compose.dev.yml rm -f` 列出服務名稱刪掉（只刪容器、⛔ 不帶 `-v`）。
+
+   核對：再跑一次同樣的 `ps -a --format json`，逐一服務比對跟切換前相同（在跑／停著／沒有容器）；在跑的 backend、python-server、python-worker
+   連的是 `trading`（只看 database 名稱）；`trading` 的 `backtest_jobs` 仍是雙零。⛔ 不相同就停下回報，⛔ 不自己補啟動或停止。
    驗收中途停下時（例如步驟 6 停了 python-server）也一樣從這一步開始，⛔ 不需要先處理任何資料。
 2. **資料丟棄**（服務都已經不連 `t089_accept` 之後）：`DROP DATABASE t089_accept`；清掉驗收用的 Redis 編號。
+   這兩步要 dev 的 postgres、redis 在跑：**原本停著**或**原本沒有容器**的話，只為這一步用 `up -d --no-deps postgres redis` 暫時啟動，
+   做完照它原本的狀態處理（停著的 `stop`、沒有容器的 `rm -f`），再跑一次第 1 步的核對。
 3. **核對**：`t089_accept` 已不存在；`trading` 裡 X、Y 的最新日 K、SR 快照與計畫的最大 id 跟建立前記下的相同（驗收期間沒有東西寫進 `trading`）。
 4. 驗收 override 與作業目錄的截圖、紀錄保留到 review 結束；override 裡⛔ 沒有密碼以外的機密，跟作業目錄一起刪。
 
@@ -340,6 +353,63 @@
 * **Q3**（採建議）：首版只加摘要卡。
 * **Q4**（採建議）：dev 用瀏覽器走完整流程並留畫面證據；較晚回應的時序由前端測試控制。
 
+## 十、實作備註（2026-11-26，`t089` 分支、未合併）
+
+**後端**
+
+* B1 `tradingday`：`Result` 加 `OverrideUnavailable`（`json:"-"`）；讀手動設定失敗或逾時時是 true，判斷結果、`Source`、排程的降級⛔ 不變。
+  日曆也取不到時是 fallback 加旗標。
+* B2 `store`：`SRZoneRepo.GetSourceRefs(ids)` 只 SELECT `id, timeframe, analyzed_at`，一句 `IN`（`sqlx.In`＋`Rebind`，跟既有的 `CandleDatesInRange` 同一個寫法）；
+  空的 ids ⛔ 不查詢。新型別 `SRZoneAnalysisSourceRef`。實作 `SRZoneRepo` 的兩個測試替身補上這個方法。
+* B3 D1：`NewSRAnalysisProvider` 多一個 `LatestCandleReader`（`store.CandleRepo` 滿足它），`portfolio.NewAnalyzer` 跟著多一個參數；
+  兩處呼叫端（`api/server.go`）傳 `candleRepo`。沒有注入（nil）時一律⛔ 不重用。既有的重用測試改成提供「最新 K 棒就是快照那一根」。
+* B4：`decision_context` 加 `timeframe`、`market_data_at`。
+* B5 D2：新檔 `api/handler/trade_plan_status.go`。
+  * 共用判斷照 intraday 的做法，**請求時才**從 scheduler 取（handler 建立時 scheduler 可能還沒注入；開工前已說明）；沒有時用 `noJudge`，平日是 fallback → `calendar` = `unconfirmed`。
+    建構函式收 `func() *tradingday.Judge`，nil 指標轉成 nil 介面（⛔ 不讓「裝著 nil 指標的介面」被當成有判斷）。
+  * 計畫的回應用內嵌 `*store.PositionAnalysis` 的 struct，JSON 攤平、只多兩個欄位。
+  * 回查失敗時只有「需要回查」的那幾筆當 false；evidence 帶 timeframe 的新紀錄照常判定（`source_lookup` = `error` 時畫面一律「行情狀態無法確認」）。
+  * 持倉讀到 `(nil, nil)` 也當 0（測試替身的行為；正式的 repo 是 `sql.ErrNoRows`）。
+* gofmt：只格式化這次新增的檔；既有檔案裡原本就沒格式化的部分（例如 `store/model.go` 的其他 struct）⛔ 沒有動。
+
+**前端**
+
+* F1：新型別 `TradePlan`（`PositionAnalysis` 加兩個欄位）、`TradeDataStatus`；`listTradeAnalyses` 改回 `{ analyses, data_status }`。
+* F2：`lib/utils/tradePlanStatus.ts`：主狀態表、兩個提示、`pickSummaryPlan`。時間用 `formatToParts` 自己組字串（locale 的 `format()` 會插入不換行空白，畫面與測試都不穩定）。
+* F3：觀察清單每列在代號旁加「計畫」按鈕（一直顯示，⛔ 不放在 hover 才出現的操作欄）。
+* F4：`Positions.svelte` 重寫 script 與上半部；既有的細節區塊（原「最新分析」，改名「計畫細節」）逐字保留。
+  * **錯誤分兩種**：載入錯誤（重新載入成功就清掉）與動作錯誤（分析、買賣、更正；同一檔下一次動作開始時才清掉）。
+    第一版只有一種，回到 A 重新載入時把 A 的「更正失敗」清掉了，由前端測試抓到後改正。
+  * 資料不足時摘要卡與細節區塊都⛔ 不顯示判斷；使用者從歷史點選時細節區塊照樣顯示那一筆。
+* `vite build` 會換掉 `backend/internal/ui/dist` 的 bundle 檔名，commit 時要一起 `git add backend/internal/ui/dist`。
+
+**測試與反證**（2026-11-26）
+
+* 後端：`backend/scripts/test.sh` 全部套件 rc 0（16 個套件）。新測試：D1 四組、analyzer 的 evidence 鍵、`GetSourceRefs`（SQLite）、
+  `OverrideUnavailable` 六種情境與 JSON、handler 的來源判定（八筆）、回查失敗、`latest_candle` 三種加未注入、應有行情日十二種（含連假、跨年、
+  fallback、讀不到手動設定、15 天找不到、沒有共用判斷）、`awaiting_today` 四種、`position_version` 三種、Analyze 的回應。
+  **反證五項都失敗**：拿掉同一根日 K 條件、`no_data` 與 `error` 合併、拿掉 `rule_version` 判定、`calendar` 只看 fallback、B1 不設旗標。
+* 前端：`frontend/scripts/test.sh` svelte-check 0 錯誤 0 警告、vitest 29 個檔 258 項全過、build 成功。新測試：`tradePlanStatus` 33 項、
+  `WatchlistTable` 2 項、`Positions` 17 項（入口、404、`latest_candle` = `error`、唯讀投組、載入鏈三項、分析三項、寫入三項、切換投組三項）。
+  **反證六項都失敗**：拿掉選擇比對、拿掉序號比對、`busy` 改回整頁共用、分析回來用當下的選擇重新載入、寫入回來不比對選擇、錯誤不依鍵。
+* `GetSourceRefs` 的 `IN` 只在 SQLite 上測；PostgreSQL 上同樣寫法的 `CandleDatesInRange` 已在 live 使用，dev 實跑驗收時會經過 PostgreSQL。
+
+**實作 review（2026-11-26）的修正**
+
+* [P1] 買賣或更正寫入成功、重新載入失敗時，摘要仍拿寫入前的持倉版本比對而標「最新」。改成：寫入成功時在那一檔記一個序號，
+  `tradePlanStatus` 多一個輸入 `positionWrittenSinceLoad`，有它就是「持倉已變動」；**寫入之後才開始**的載入成功時才清掉（寫入前就在飛的載入⛔ 不算）。
+* [P2] 從投組 1 的 2330 切到投組 2，持倉清單還在載入時選 2454，清單一回來就跳回 2330。改成：投組切換立即確定選擇並開始載入，跟持倉清單並行；
+  持倉清單也帶投組與序號，晚回來的舊清單⛔ 不蓋掉新的；開頁時從觀察清單帶入的代號，在使用者已經自己選了別檔時⛔ 不覆蓋。建立投組後回到原本那一檔也用同一個做法。
+* [P2] dev 復原：改用 `ps -a` 記三份清單、逐一指名復原（第六節）；指令在 dev 上唯讀試過，確認列得出已停止的容器與 profile 服務。
+* 測試：`Positions` 加 5 項（買進、更正各一項的「寫入成功、重新載入失敗」，投組切換三項），`tradePlanStatus` 加 2 項；
+  五項新反證都失敗（買進、更正成功不標待確認、狀態不看待確認、投組切換改回先等持倉清單、持倉清單不比對序號）。
+
+**實作 review 第二輪（2026-11-26）**：前輪三項複審通過。[P3] 換投組時，新投組的個股持倉已經載入、持倉清單還沒回來的期間，
+頁尾「現有 LONG」仍顯示舊投組的股票。改成：持倉清單記住屬於哪一個投組，換投組時立即清空（投組切換與建立投組都經過同一個地方）。
+`Positions` 加 1 項，反證（拿掉換投組時清空）失敗。
+
+**還沒做**：第六節的 dev 實跑驗收（主機上沒有無頭瀏覽器，要先決定用 Playwright 的 docker image 或由使用者經通道操作）。
+
 ## 版本紀錄
 
 | 版本 | 日期 | 內容 |
@@ -351,3 +421,6 @@
 | v1.3（live 盤點） | 2026-11-25 | 第八節記 live 唯讀盤點：重用期限用映像檔的 24 小時（環境變數沒有設定）；`position_analyses` 0 筆；設計⛔ 不變 |
 | v1.4 | 2026-11-25 | 併入 v1.3 review（功能設計可收斂）：dev 驗收改在可丟棄的 database `t089_accept`（範本複製 dev 的 `trading`，驗收 override 改 DSN 與 Redis 編號）上做，結束後整個丟掉，⛔ 不再逐筆刪快照（重用的快照 id 會選到驗收前的資料、排程的身分追蹤改過的既有狀態復原不了）；服務復原與資料丟棄分開、前者先做且⛔ 不依賴後者 |
 | v1.5 | 2026-11-25 | 併入 v1.4 review：驗收帳號的啟用與補合成日 K 的 SQL 都明確指向 `t089_accept`、寫入前查 `current_database()`（共用的 `dev_token` 固定寫 `trading`，⛔ 不改它，驗收用換了 `-d` 的版本）；切換前做回測雙零檢查並記下服務狀態，復原照切換前的狀態（`python-worker` 屬於 `worker` profile，有在跑才用 `--profile worker` 帶回） |
+| v1.6 | 2026-11-26 | v1.5 複審通過；在 `t089` 分支實作 B1～B6、F1～F5（第十節）；共用判斷改成請求時從 scheduler 取（開工前說明）；錯誤拆成載入與動作兩種；後端反證五項、前端反證六項都失敗；dev 實跑驗收未做 |
+| v1.7（第二輪） | 2026-11-26 | 前輪三項複審通過；[P3] 換投組時頁尾「現有 LONG」立即清空，⛔ 不暫時顯示舊投組的股票 |
+| v1.7 | 2026-11-26 | 併入實作 review：[P1] 買賣或更正寫入成功後、重新載入成功之前，摘要⛔ 不能是「最新」（標持倉已變動）；[P2] 投組切換立即確定選擇、持倉清單帶投組與序號，晚到的回應⛔ 不跳回原本那一檔；[P2] dev 復原改用 `ps -a` 記三份清單（在跑／停著／沒有容器），逐一指名復原，⛔ 不用不指名的 `up -d` |

@@ -21,6 +21,7 @@ import (
 	"github.com/trading/backend/internal/scheduler"
 	"github.com/trading/backend/internal/signal"
 	"github.com/trading/backend/internal/store"
+	"github.com/trading/backend/internal/tradingday"
 	"github.com/trading/backend/internal/ui"
 )
 
@@ -163,7 +164,7 @@ func NewServer(
 		protected.POST("/analysis/:id/verify", anh.Verify)
 		protected.DELETE("/analysis/:id", anh.Delete)
 
-		srAnalysisProvider := analysis.NewSRAnalysisProvider(analysisClient, srZoneRepo, positionConfig.SRReuseMaxAge)
+		srAnalysisProvider := analysis.NewSRAnalysisProvider(analysisClient, srZoneRepo, candleRepo, positionConfig.SRReuseMaxAge)
 		szh := handler.NewSRZoneHandler(
 			analysisClient, srZoneRepo, watchlistRepo, srScoringTrainJobRepo, srZoneVerifier, srAnalysisProvider, log,
 		)
@@ -231,7 +232,7 @@ func NewServer(
 		protected.POST("/chips/sync", cph.Sync)
 		protected.GET("/chips/sync/:job_id", cph.GetSyncJob)
 
-		positionAnalyzer := portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, positionConfig)
+		positionAnalyzer := portfolio.NewAnalyzer(analysisClient, positionRepo, srZoneRepo, candleRepo, positionConfig)
 		ph := handler.NewPositionHandler(positionRepo, portfolioRepoForScope, log)
 		protected.GET("/positions", ph.List)
 		protected.GET("/positions/:symbol", ph.Get)
@@ -239,7 +240,16 @@ func NewServer(
 		protected.POST("/positions/:symbol/transactions", ph.AddTransaction)
 		protected.POST("/positions/:symbol/adjustments", ph.Adjust)
 
-		tah := handler.NewTradeAnalysisHandler(positionRepo, portfolioRepoForScope, positionAnalyzer, log)
+		// T-089 D2：資料狀態要最新日 K、SR 快照的來源回查與共用的交易日判斷（請求時才從 scheduler 取，跟 intraday 相同）
+		tah := handler.NewTradeAnalysisHandler(
+			positionRepo, portfolioRepoForScope, positionAnalyzer, candleRepo, srZoneRepo,
+			func() *tradingday.Judge {
+				if sched == nil {
+					return nil
+				}
+				return sched.TradingDay()
+			}, log,
+		)
 		protected.POST("/trade-analysis/analyze", tah.Analyze)
 		protected.GET("/trade-analysis/:symbol/history", tah.ListHistory)
 	}

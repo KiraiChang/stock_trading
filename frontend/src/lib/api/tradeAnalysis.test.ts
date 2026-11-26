@@ -13,10 +13,13 @@ beforeEach(() => {
 describe('trade analysis api portfolio scope', () => {
   it('sends portfolio_id for analysis writes and history reads', async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce({ analysis: {} })
-    vi.mocked(apiFetch).mockResolvedValueOnce({ analyses: [] })
+    vi.mocked(apiFetch).mockResolvedValueOnce({ analyses: [], data_status: { latest_candle: 'ok' } })
 
     await analyzeTrade('2330', 7, true)
-    await listTradeAnalyses('2330', 7)
+    const history = await listTradeAnalyses('2330', 7)
+    // T-089：歷史連同 data_status 一起回傳
+    expect(history.analyses).toEqual([])
+    expect(history.data_status).toMatchObject({ latest_candle: 'ok' })
 
     const [, init] = vi.mocked(apiFetch).mock.calls[0]
     expect(JSON.parse(String(init?.body))).toMatchObject({ symbol: '2330', portfolio_id: 7, force_refresh: true })

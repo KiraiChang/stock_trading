@@ -30,20 +30,28 @@ type SRAnalysisResult struct {
 	Zones    []store.SRZone
 }
 
+// LatestCandleReader 取某檔某 timeframe 最新的一根 K 棒（store.CandleRepo 滿足它）。查無資料時回 sql.ErrNoRows。
+type LatestCandleReader interface {
+	GetLatest(ctx context.Context, symbol, timeframe string) (*store.Candle, error)
+}
+
 type SRAnalysisProvider struct {
 	scorer        SRZoneScorer
 	repo          store.SRZoneRepo
+	candles       LatestCandleReader
 	reuseMaxAge   time.Duration
 	snapshotLimit int
 	now           func() time.Time
 }
 
-func NewSRAnalysisProvider(scorer SRZoneScorer, repo store.SRZoneRepo, reuseMaxAge time.Duration) *SRAnalysisProvider {
+// NewSRAnalysisProvider：candles 用來確認候選快照是不是「目前最新那根 K 棒」算出來的（T-089 D1）；
+// 是 nil 時確認不了，一律⛔ 不重用。
+func NewSRAnalysisProvider(scorer SRZoneScorer, repo store.SRZoneRepo, candles LatestCandleReader, reuseMaxAge time.Duration) *SRAnalysisProvider {
 	if reuseMaxAge <= 0 {
 		reuseMaxAge = defaultSRAnalysisReuseMaxAge
 	}
 	return &SRAnalysisProvider{
-		scorer: scorer, repo: repo, reuseMaxAge: reuseMaxAge,
+		scorer: scorer, repo: repo, candles: candles, reuseMaxAge: reuseMaxAge,
 		snapshotLimit: defaultSRAnalysisSnapshotLimit,
 		now:           time.Now,
 	}
@@ -93,7 +101,18 @@ func (p *SRAnalysisProvider) Analyze(ctx context.Context, symbol string, opts SR
 	return &SRAnalysisResult{Analysis: saved, Zones: savedZones}, nil
 }
 
+// loadReusable 找可以重用的快照。T-089 D1：除了 timeframe 相同、年齡在 reuseMaxAge 內，快照的 analyzed_at
+// 還要**等於**這一檔、這個 timeframe 目前最新那根 K 棒的時間（Python 把 analyzed_at 設成最後一根 K 棒的時間）。
+// 新 K 棒入庫後一定重算，⛔ 不再依賴 reuseMaxAge 的設定值。查不到最新 K 棒（查無資料或查詢失敗）→ ⛔ 不重用、
+// 照常呼叫 Python，⛔ 不因為這次查詢而讓分析失敗。只會讓重用變少、⛔ 不會變多。
 func (p *SRAnalysisProvider) loadReusable(ctx context.Context, symbol, timeframe string) (*SRAnalysisResult, error) {
+	if p.candles == nil {
+		return nil, nil
+	}
+	latest, err := p.candles.GetLatest(ctx, symbol, timeframe)
+	if err != nil || latest == nil {
+		return nil, nil
+	}
 	snapshotLimit := p.snapshotLimit
 	if snapshotLimit <= 0 {
 		snapshotLimit = defaultSRAnalysisSnapshotLimit
@@ -104,6 +123,9 @@ func (p *SRAnalysisProvider) loadReusable(ctx context.Context, symbol, timeframe
 	}
 	for i := range analyses {
 		if analyses[i].Timeframe != timeframe {
+			continue
+		}
+		if !analyses[i].AnalyzedAt.Equal(latest.Timestamp) {
 			continue
 		}
 		age := p.currentTime().Sub(analyses[i].AnalyzedAt)

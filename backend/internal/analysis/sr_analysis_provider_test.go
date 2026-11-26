@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -20,6 +21,25 @@ type srProviderScorerStub struct {
 func (s *srProviderScorerStub) ScoreZones(ctx context.Context, symbol, timeframe string, limit int) (*ZoneScoreResult, error) {
 	s.calls++
 	return s.result, s.err
+}
+
+// latestCandleStub 是 D1 用的最新 K 棒（T-089）：ts 是那根 K 棒的時間；err 非 nil 時回錯誤；noData 時回 sql.ErrNoRows。
+type latestCandleStub struct {
+	ts     time.Time
+	err    error
+	noData bool
+	calls  int
+}
+
+func (c *latestCandleStub) GetLatest(ctx context.Context, symbol, timeframe string) (*store.Candle, error) {
+	c.calls++
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.noData {
+		return nil, sql.ErrNoRows
+	}
+	return &store.Candle{Symbol: symbol, Timeframe: timeframe, Timestamp: c.ts}, nil
 }
 
 type srProviderRepoStub struct {
@@ -97,6 +117,11 @@ func (s *srProviderRepoStub) Get(ctx context.Context, id uint64) (*store.SRZoneA
 
 // 排程用的 timeframe-aware 查詢。這些 stub 沒有用到它。
 func (s *srProviderRepoStub) GetLatestByTimeframe(ctx context.Context, symbol, timeframe string) (*store.SRZoneAnalysis, error) {
+	return nil, nil
+}
+
+// GetSourceRefs 只為滿足 store.SRZoneRepo 介面而存在（T-089 交易計畫的來源回查）；SRAnalysisProvider 不碰它。
+func (s *srProviderRepoStub) GetSourceRefs(ctx context.Context, ids []uint64) ([]store.SRZoneAnalysisSourceRef, error) {
 	return nil, nil
 }
 
@@ -179,7 +204,7 @@ func TestSRAnalysisProviderReusesFreshSnapshot(t *testing.T) {
 		zones: map[uint64][]store.SRZone{9: {{ID: 1, AnalysisID: 9}}},
 	}
 	scorer := &srProviderScorerStub{result: testZoneScoreResult("2330", now)}
-	provider := NewSRAnalysisProvider(scorer, repo, 24*time.Hour)
+	provider := NewSRAnalysisProvider(scorer, repo, &latestCandleStub{ts: now.Add(-time.Hour)}, 24*time.Hour)
 	provider.now = func() time.Time { return now }
 
 	result, err := provider.Analyze(context.Background(), "2330", SRAnalysisOptions{})
@@ -202,7 +227,7 @@ func TestSRAnalysisProviderForceRefreshCreatesSnapshot(t *testing.T) {
 		nextID:   10,
 	}
 	scorer := &srProviderScorerStub{result: testZoneScoreResult("2330", now)}
-	provider := NewSRAnalysisProvider(scorer, repo, 24*time.Hour)
+	provider := NewSRAnalysisProvider(scorer, repo, &latestCandleStub{ts: now.Add(-time.Hour)}, 24*time.Hour)
 	provider.now = func() time.Time { return now }
 
 	result, err := provider.Analyze(context.Background(), "2330", SRAnalysisOptions{ForceRefresh: true})
@@ -225,7 +250,8 @@ func TestSRAnalysisProviderRefreshesExpiredSnapshot(t *testing.T) {
 		nextID:   10,
 	}
 	scorer := &srProviderScorerStub{result: testZoneScoreResult("2330", now)}
-	provider := NewSRAnalysisProvider(scorer, repo, 24*time.Hour)
+	// 最新 K 棒就是快照那一根（同一根日 K 的條件成立），只有年齡超過上限 → 照舊重算
+	provider := NewSRAnalysisProvider(scorer, repo, &latestCandleStub{ts: now.Add(-48 * time.Hour)}, 24*time.Hour)
 	provider.now = func() time.Time { return now }
 
 	result, err := provider.Analyze(context.Background(), "2330", SRAnalysisOptions{})
@@ -239,7 +265,7 @@ func TestSRAnalysisProviderRefreshesExpiredSnapshot(t *testing.T) {
 
 func TestSRAnalysisProviderWrapsRepoErrors(t *testing.T) {
 	repo := &srProviderRepoStub{listErr: errors.New("db down")}
-	provider := NewSRAnalysisProvider(&srProviderScorerStub{}, repo, 24*time.Hour)
+	provider := NewSRAnalysisProvider(&srProviderScorerStub{}, repo, &latestCandleStub{}, 24*time.Hour)
 
 	_, err := provider.Analyze(context.Background(), "2330", SRAnalysisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "list existing sr zone analyses") {

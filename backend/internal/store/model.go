@@ -246,6 +246,14 @@ type SRZoneAnalysisRef struct {
 	Symbol string `db:"symbol" json:"symbol"`
 }
 
+// SRZoneAnalysisSourceRef 是確認交易計畫來源用的最小欄位（T-089 D2）：計畫記的 sr_zone_analysis_id 回查這三欄，
+// 判斷那份快照還在、是不是日 K、行情時間跟計畫一不一致。⛔ 不載入完整的 SRZoneAnalysis（九個 RawJSON 欄位）。
+type SRZoneAnalysisSourceRef struct {
+	ID         uint64    `db:"id"          json:"id"`
+	Timeframe  string    `db:"timeframe"   json:"timeframe"`
+	AnalyzedAt time.Time `db:"analyzed_at" json:"analyzed_at"`
+}
+
 type SRZoneAnalysis struct {
 	ID           uint64    `db:"id"                    json:"id"`
 	Symbol       string    `db:"symbol"                json:"symbol"`

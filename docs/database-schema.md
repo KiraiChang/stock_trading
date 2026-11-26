@@ -1522,6 +1522,16 @@ Action、目前／目標／調整股數、調整金額、進場／停損／停�
 被引用的 SR Zone 快照時，`position_analyses` 不會被刪除或阻擋；歷史分析仍保留
 自身的決策快照欄位，但無法再透過該 id 回查完整 SR zones。
 
+三個時間與版本欄位的語意（T-089）：
+
+* `analyzed_at` 是**行情日期**：複製自 SR 快照的 `analyzed_at`，也就是這次分析實際用到的最後一根日 K 的時間（台北當日 00:00），⛔ 不是牆上時間。
+* `created_at` 是**分析紀錄時間**（這筆計畫寫入的時間）。
+* `position_version` 是分析當時的持倉版本；跟目前持倉的版本不同，表示之後有買賣或更正，畫面標「持倉已變動」。
+
+新計畫的 `evidence.decision_context` 另記 `timeframe`（SR 快照的 timeframe）與 `market_data_at`（SR 快照的 `analyzed_at`），用來確認來源；
+本案之前的現行紀錄沒有這兩個鍵，改回查 SR 快照。038 搬過來的舊紀錄（`holding_sr_zone_v1_legacy`）的 `sr_zone_analysis_id` 是原樣搬移的舊值、
+`analyzed_at` 的語意無法確認，一律「來源無法確認」（判定規則見 `api-reference.md` 的 `source_confirmed_1d`）。
+
 Migration 038 將同 symbol 的舊 holdings 依股數加權合併為一筆
 `OPENING_BALANCE`，並把舊 `holding_analyses` 搬為
 `rule_version=holding_sr_zone_v1_legacy` 後移除舊表。

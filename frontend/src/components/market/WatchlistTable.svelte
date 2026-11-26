@@ -16,6 +16,7 @@
   import { runIntradayRefill } from '../../lib/api/intraday'
   import { ApiError } from '../../lib/api/client'
   import { intradayStatus } from '../../lib/stores/intraday'
+  import { currentRoute } from '../../lib/stores/router'
   import { describeIntraday, describeRefill, intradayNotices, type IntradayTone } from '../../lib/utils/intradayStatus'
 
   const dispatch = createEventDispatcher<{
@@ -137,6 +138,13 @@
     showModal = false
     submitting = false
     formError = ''
+  }
+
+  // T-089 D4：從觀察清單直接開啟這一檔的交易計畫（交易分析頁會讀 selectedSymbol 自動載入、⛔ 不自動分析）。
+  // 點列本身照舊只切換 K 線圖。
+  function openPlan(symbol: string) {
+    selectedSymbol.set(symbol)
+    currentRoute.set('positions')
   }
 
   function stockStatusLabel(item: WatchlistItem): string {
@@ -408,7 +416,15 @@
               on:click={() => selectedSymbol.set(item.symbol)}
             >
               <td class="px-4 py-2">
-                <div class="font-medium text-white">{item.symbol}</div>
+                <div class="flex items-center gap-2">
+                  <span class="font-medium text-white">{item.symbol}</span>
+                  <button
+                    class="text-[10px] px-1.5 py-0.5 rounded border border-indigo-500/40 text-indigo-300 hover:bg-indigo-900/40 transition-colors"
+                    title="開啟 {item.symbol} 的交易計畫"
+                    data-testid="open-plan-{item.symbol}"
+                    on:click|stopPropagation={() => openPlan(item.symbol)}
+                  >計畫</button>
+                </div>
                 <div class="text-xs text-muted truncate max-w-28">{item.name}</div>
                 <div class="mt-1 flex items-center gap-1 flex-wrap">
                   <span class="text-[10px] px-1.5 py-0.5 rounded border {stockStatusClass(item)}">{stockStatusLabel(item)}</span>

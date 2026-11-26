@@ -2351,6 +2351,34 @@ SR Zone 快照格式。分析入口統一由 `/trade-analysis/*` 提供（舊的
 快照後來被刪除，trade-analysis 歷史仍會保留 `analysis` 內的決策快照欄位，但
 `sr_zone_analysis` / `zones` 可能無法再由該 id 回查完整市場結構明細。
 
+### 行情日期、來源與資料狀態（T-089，只加欄位）
+
+兩支端點的每一筆計畫（`POST` 回應的 `analysis`、`GET …/history` 的 `analyses[]`）多兩個衍生欄位（後端算、⛔ 不存 DB），
+回應頂層多一個 `data_status`。⛔ 沒有收窄：`timeframe` 照舊接受，歷史照舊回全部紀錄。
+
+| 欄位 | 內容 |
+|---|---|
+| `market_date` | `analyzed_at`（這次分析實際用到的最後一根日 K）的台北日期 `YYYY-MM-DD`；來源無法確認時是 `null` |
+| `source_confirmed_1d` | 確認是現行分析器用日 K 產生的計畫。依序判定、第一個成立的決定結果：① `rule_version` ⛔ 不是 `position_sr_zone_v1`（例如 038 的 `holding_sr_zone_v1_legacy`）→ `false`；② `evidence.decision_context.timeframe` 有值 → 等於 `1d` 才是 `true`；③ 回查 `sr_zone_analysis_id` 的 SR 快照：存在、`timeframe` 是 `1d`、`analyzed_at` 等於計畫的 `analyzed_at` → `true`；④ 其他（快照已刪、對不上）→ `false`。③ 用一句 `IN` 查詢一次取完；回查失敗時需要回查的那幾筆當 `false`，`data_status.source_lookup` = `error` |
+
+`data_status`（針對這一個投組與標的）：
+
+| 欄位 | 內容 |
+|---|---|
+| `latest_candle` | `ok`（有日 K）／`no_data`（查無日 K）／`error`（查詢失敗；⛔ 不是 `no_data`） |
+| `latest_candle_date` | `ok` 時是最新一根日 K 的台北日期，其餘 `null` |
+| `expected_date` | 當下應有的行情日：今天是交易日、而且台北時間已過 13:30 → 今天；其他（盤前與盤中、休市日、週末）→ `settled_date` |
+| `settled_date` | 今天之前最近一個交易日（往回最多 15 天；找不到是 `null`） |
+| `awaiting_today` | 今天是交易日、已過 13:30、`latest_candle_date` 早於今天 → `true`（13:30 到當天日 K 入庫之間，用 `settled_date` 的計畫仍算最新） |
+| `calendar` | `confirmed`：推算用到的每一天都是 `weekend`、`manual`，或 `calendar` 且手動設定有讀到；`unconfirmed`：有任何一天是 `fallback`、讀不到手動設定（共用判斷的內部旗標 `OverrideUnavailable`，⛔ 不出現在 `/market-day-overrides`、`/intraday/status` 的回應），或往回 15 天找不到交易日 |
+| `position_version` | 目前持倉的版本（沒有持倉列是 `0`；讀取失敗是 `null`） |
+| `source_lookup` | `ok`／`error`（上面 ③ 的回查） |
+| `as_of` | 伺服器產生這份狀態的時間 |
+
+交易日用跟排程共用的休市判斷（`tradingday.Judge`，I-139）由今天往回推。新計畫的 `evidence.decision_context` 另記
+`timeframe`（SR 快照的 timeframe）與 `market_data_at`（SR 快照的 `analyzed_at`）。畫面怎麼用這些欄位判斷「最新」見
+`architecture.md` 的「交易計畫的資料狀態」。
+
 ---
 
 ## Position Analysis API

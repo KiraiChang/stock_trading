@@ -52,6 +52,9 @@ export interface PositionAnalysisEvidence {
     avg_cost?: number | null
     current_price?: number | null
     sr_zone_analysis_id?: number | null
+    // T-089：計畫的來源（新紀錄才有）。timeframe 是 SR 快照的 timeframe，market_data_at 是 SR 快照的 analyzed_at
+    timeframe?: string
+    market_data_at?: string
   }
   entry_decision?: {
     applicable?: boolean

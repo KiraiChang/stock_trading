@@ -1,7 +1,15 @@
 # Database Schema
 
 支援三種資料庫：**SQLite**（開發）、**MySQL 8.0+**、**PostgreSQL 14+**。  
-Migration 由 goose 在啟動時自動執行，不需手動跑 SQL。
+Migration 由 goose 套用（embed 在 backend 的 binary 裡），不需手動跑 SQL。**套用時機**（T-087）：
+
+* **live**：由 `deploy.sh` 在停機中用新 image 的 `./trading-backend -migrate=up` 套用（`down` 之後、`up` 之前；之前先在拋棄式 PostgreSQL 上試跑）；
+  backend 啟動時只做**唯讀檢查**（embed 的每一支都已套用才啟動，DB 多出較新的版本可以接受）。流程見 `development-workflow.md`「部署腳本：失敗即停」。
+* **dev**：dev compose 設 `DATABASE_AUTO_MIGRATE: "true"`，backend 啟動時照舊自動套用；本機直接 `go run` 時要自己設，或先跑一次 `-migrate=up`。
+* **測試**：Go 測試直接呼叫 `database.RunMigrations`，⛔ 不經過啟動路徑。
+* **「先加後刪」與回滾窗口**：有 migration 的部署之後，到確認不再回滾之前，舊版 backend 與 python 必須能讀寫新 schema（新增可為 NULL 的欄位、新表、新索引屬於「先加」）。
+  拆欄位、改型別、切斷舊寫法屬於「後刪」，要等回滾窗口結束之後的另一次部署。每支新 migration 的計畫書要寫明它屬於哪一種。
+* goose 的交易邊界是單一檔案：一次部署有多支時，前幾支可能已經提交、後面那支失敗才回滾它自己；部署腳本⛔ 不自動 `goose down`（失敗時的處理見部署手冊的復原分支）。
 
 ---
 

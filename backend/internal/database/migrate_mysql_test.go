@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -361,5 +362,66 @@ func assertCandlePositivePriceCheck(t *testing.T, db *sqlx.DB) {
 	}
 	if _, err := db.Exec(`DELETE FROM candles WHERE symbol = '2330'`); err != nil {
 		t.Errorf("清理測試資料失敗: %v", err)
+	}
+}
+
+// T-087：MySQL 的唯讀檢查（information_schema 確認版本表、每個版本取最後一列；⛔ 不建表、讀完版本表不變）。
+// 名稱以 TestMySQLMigrations 開頭，scripts/test-mysql-migrations.sh 才會跑到。
+func TestMySQLMigrationsReadOnlyStatus(t *testing.T) {
+	db := mysqlTestDB(t)
+	ctx := context.Background()
+	goose.SetBaseFS(mysqlFS)
+	if err := goose.SetDialect("mysql"); err != nil {
+		t.Fatal(err)
+	}
+	// 從乾淨的狀態開始：down 到 0、刪掉版本表
+	_ = goose.DownToContext(ctx, db.DB, mysqlMigrationDir, 0)
+	if _, err := db.Exec(`DROP TABLE IF EXISTS goose_db_version`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadStatus(ctx, db, "mysql"); !errors.Is(err, ErrNoVersionTable) {
+		t.Fatalf("版本表不存在：%v", err)
+	}
+	var n int
+	if err := db.Get(&n, `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'goose_db_version'`); err != nil || n != 0 {
+		t.Fatalf("唯讀檢查⛔ 不能建表：%d %v", n, err)
+	}
+	if err := RunMigrations(ctx, db, "mysql", zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	var before, after string
+	snap := `SELECT COALESCE(GROUP_CONCAT(CONCAT(id, ':', version_id, ':', is_applied) ORDER BY id), '') FROM goose_db_version`
+	_ = db.Get(&before, snap)
+	if s, err := CheckApplied(ctx, db, "mysql"); err != nil || len(s.Pending) != 0 {
+		t.Fatalf("全部已套用：%v %+v", err, s)
+	}
+	_ = db.Get(&after, snap)
+	if before != after || before == "" {
+		t.Fatal("讀完之後版本表要相同")
+	}
+	// 缺中間一支：先記下 079 那一列，刪掉、檢查，再用**同一個 id** 補回（id 決定 goose 認的目前版本，
+	// 換成新的 id 會讓 goose 以為 079 是最新的、之後的 down 撤錯支）
+	var row struct {
+		ID      int64  `db:"id"`
+		Applied bool   `db:"is_applied"`
+		TStamp  string `db:"tstamp"`
+	}
+	if err := db.Get(&row, `SELECT id, is_applied, CAST(tstamp AS CHAR) AS tstamp FROM goose_db_version WHERE version_id = 79`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM goose_db_version WHERE version_id = 79`); err != nil {
+		t.Fatal(err)
+	}
+	var pe *PendingError
+	_, cerr := CheckApplied(ctx, db, "mysql")
+	if _, err := db.Exec(`INSERT INTO goose_db_version (id, version_id, is_applied, tstamp) VALUES (?, 79, ?, ?)`, row.ID, row.Applied, row.TStamp); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.As(cerr, &pe) || JoinVersions(pe.Pending) != "79" {
+		t.Fatalf("缺 079：%v", cerr)
+	}
+	_ = db.Get(&after, snap)
+	if after != before {
+		t.Fatal("補回之後版本表要跟原本相同")
 	}
 }

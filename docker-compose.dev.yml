@@ -75,6 +75,8 @@ services:
       APP_ENV: dev
       DATABASE_DRIVER: postgres
       DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable
+      # T-087：dev 明確開啟「啟動時自動套用 migration」（預設 false＝只做唯讀檢查；live 由 deploy.sh 在停機中套用）
+      DATABASE_AUTO_MIGRATE: "true"
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${DEV_REDIS_PASSWORD:-dev-redis-only}
       SERVER_PORT: "8080"

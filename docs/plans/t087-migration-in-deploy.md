@@ -1,9 +1,12 @@
 # T-087 計畫書 v1.2：資料庫 migration 從 backend 啟動移到部署流程
 
-> 狀態：v1.2（2026-11-25，併入 v1.1 review：外層逾時改成獨立的故障注入、還原後用應用帳號驗證權限），待複審。對應：`docs/todo.md` T-087。
+> 狀態：v1.2（2026-11-25，併入 v1.1 review：外層逾時改成獨立的故障注入、還原後用應用帳號驗證權限），待複審；**程式與部署腳本已在 `t087` 分支實作（第十節），
+> dev 演練（第六節）與 live 唯讀盤點（第七節）還沒做**。對應：`docs/todo.md` T-087。
 > 裁決（2026-11-25）：Q1 採「停機中正式套用＋停機前試跑」；Q2 live 啟動只做唯讀檢查、dev 明確啟用自動套用；Q3 python 維持等欄位；
 > Q4 先完成 T-084，兩案都通過驗收再合併成一次 live `deploy.sh` 換檔（T-087 的復原演練延後時，T-084 可以單獨上線）。
-> 時程：只寫計畫；實作排在 11-30（I-141 上 live）之後、T-084 之後。
+> 時程：換上 live 排在 11-30（I-141 上 live）之後，跟 T-084 合併成一次換檔（第七節）。
+> ⚠️ **實作時程的偏差**（使用者 2026-11-25 裁決）：程式提前在獨立的 `t087` 分支（從 `t084` 開，另一個 git worktree）實作；**I-139、I-141 上 live 之前⛔ 不合併進 `init`**。
+> 合併、演練、換上 live 的時間與程序⛔ 不變；合併前在當時的 `init` 上重跑第六節的測試。
 
 ## 一、目標與不做的範圍
 
@@ -254,6 +257,87 @@
 * **Q-A 備份**：採停機後備份（D6）。`pg_restore -l` 只確認備份檔讀得出來，還原能力由演練驗證；演練寫清楚還原到乾淨的 DB、核對版本、切回舊服務（第五節、第六節第 4 項）。
 * **Q-B 上限**：首版預設 `lock_timeout` 5 秒、單一語句 10 分鐘、整體 15 分鐘；整體上限到期後仍要完成停止確認（D7）；部署窗口另計備份與可能的還原時間。
 * **Q-C 試跑環境**：live 主機上的隔離容器；開工前盤點 PostgreSQL image、記憶體與磁碟；試跑用獨立網路、migrator 明確指向臨時庫、試跑前核對目標（D5）。
+
+## 十、實作備註（2026-11-25，`t087` 分支、未合併）
+
+**跟設計不同、要確認的地方**
+
+1. ~~試跑的拋棄式 PostgreSQL 用 trust~~：review（2026-11-25）⛔ 不接受（`--internal` 只擋對外的連線，主機上的程序仍連得到容器），**改回原裁決的臨時帳密**：
+   密碼是這一次產生的 32 位亂數，只經環境變數傳給 docker（`env POSTGRES_PASSWORD=… docker run -e POSTGRES_PASSWORD`；DSN 也是 `-e DATABASE_DSN`／`-e TRIAL_DSN` 不帶值），
+   ⛔ 不出現在指令列、⛔ 不印出來；標記表的確認在容器裡用**同一個 DSN 字串**連線。
+2. **`BACKUP_DIR` 在每次部署的 preflight 都檢查**（佔位值、存在、可寫、權限 700），⛔ 不只在 pending 不空時：換上之後第一次有 migration 的部署才發現目錄有問題，會停在停機中。
+3. **`-migrate=up` 拒絕亂序的 pending**（pending 有低於已套用最大版本的缺號 → 結束碼 1、⛔ 不套用任何一支）：goose 預設也⛔ 不套用亂序的 migration，提前判斷是為了訊息清楚、⛔ 不套到一半。
+4. **`-migrate` 模式照樣呼叫 `config.Load()`**（D1 原寫「只載入 database 區段」）：設定的載入是整份一起（viper），但**只使用並檢查 `database`**，⛔ 不跑設定契約；
+   載入失敗（型別錯誤、設定檔讀不到）時結束碼 1、只印鍵名。
+5. 試跑等 PostgreSQL ready 時用 TCP（`pg_isready -h 127.0.0.1`）：image 初始化期間的暫時伺服器只聽 unix socket，用 socket 會太早判成 ready。
+6. `-migrate` 的輸出每行以 `migrate: ` 開頭（`deploy.sh` 依前綴取值）；失敗時只印 PostgreSQL 的 SQLSTATE（例如 `55P03`），⛔ 不印錯誤原文。
+7. `deploy.sh` 的 `RUN_ID` 在部署開始時產生（UTC 時間戳 `20261201T060501Z` 的格式；測試用 `DEPLOY_RUN_ID` 固定），試跑的網路與容器、正式 migrator 的容器與 `application_name` 都帶它。
+8. 停止確認的等待時間（60 秒、30 秒、每 5 秒確認一次）、外層 timeout（960 秒）都放在 `deploy.sh` 開頭「要填的值」，演練時只改外層 timeout（第六節第 2 項）。
+
+**backend**
+
+* `internal/database`：`ReadStatus`（版本表存在檢查、每個版本取最後一列、PostgreSQL 在 `READ ONLY` 交易裡讀）、`CheckApplied`、`RequiredVersions`（goose 的檔名解析）、
+  `Fingerprint`、`MigrateUp`（`UpByOne` 迴圈、逐支回報、亂序拒絕、期限）、`OpenPostgresMigrator`（啟動參數帶 `application_name`、`lock_timeout`、`statement_timeout`）。
+* `internal/config`：`database.auto_migrate`（預設 false）、契約 `DATABASE_AUTO_MIGRATE:invalid_value`（production＋true）。
+* `cmd/server`：`-migrate=status|up`、`-run-id`、`-expect-fingerprint`、三個上限的旗標；啟動時依 `auto_migrate` 走 `RunMigrations` 或唯讀檢查（`checkSchema`）。
+* `docker-compose.dev.yml` 的 backend 加 `DATABASE_AUTO_MIGRATE: "true"`；`docker-compose.yml` 只加註解。
+* 測試：
+  * SQLite（每次都跑）：版本表不存在（⛔ 不建表）、全部都在且檢查前後版本表不變、缺中間一支（079）、多一支（999）通過、實際跑一次 goose down、最後一列 `is_applied=false`、
+    指紋、逐支套用（測試用的 embed 目錄：第二支失敗 → 第一支已提交、第二支回滾、第三支⛔ 不執行）、全部成功與 pending 空、亂序拒絕、期限已到。
+  * `cmd/server`：參數錯誤 1、版本表不存在 2、空的 DB 套用全部 0、status 的輸出、pending 空 0、指紋不符 5 而且⛔ 沒有套用、指紋相符套用 1 支、一支失敗 3（⛔ 不印錯誤原文）、
+    整體期限 4、亂序 1、輸出⛔ 不帶 DSN；啟動時的唯讀檢查（空的 DB 拒絕而且⛔ 不建表、全部已套用通過、缺 079 拒絕並在 log 列出 79）。
+  * 設定契約：production＋true 擋下、dev 放行；`Load()` 的預設 false、環境變數 true 讀得到。
+  * PostgreSQL（`scripts/test-postgres-migrations.sh`，跑的測試名單加上這幾支）：唯讀狀態（版本表不存在⛔ 不建表、goose down、缺 079）、migrator 連線的
+    `SHOW lock_timeout`／`statement_timeout`／`application_name` 與 `pg_stat_activity` 認得出、另一個連線持有 `ACCESS EXCLUSIVE` 時在 `lock_timeout`（1 秒）內以 `55P03` 失敗、
+    鎖放掉後重跑成功、整體期限（1 秒，⛔ 沒有 lock／statement timeout）停下而且 5 秒內 DB 上⛔ 沒有本次的 active 語句、被停下的那支已回滾。
+  * MySQL（`scripts/test-mysql-migrations.sh`）：唯讀狀態（版本表不存在⛔ 不建表、讀完版本表不變、缺 079；用同一個 id 補回紀錄）。
+  * 反證：只看最大版本、⛔ 不比 `-expect-fingerprint`、⛔ 不看 `is_applied`、拿掉契約，四項都有測試失敗。
+  * 結果：backend 完整測試、PostgreSQL 腳本、MySQL 腳本都通過。
+
+**`deploy.sh`（範本）**：D4～D7 照設計（第 5a～5c、6a～6b 步、停止確認函式、`--confirm-migrator-stopped`）。`scripts/test-deploy-sh.sh` 的假 docker 加上試跑、備份、
+具名 migrator（外層 timeout 砍掉 CLI 時容器留在 running）、`pg_stat_activity` 的連線數與 cancel／terminate；新案例 29 項：pending 空、pending 不空而且試跑通過
+（順序、`docker run --network 試跑網路`、`-expect-fingerprint`、備份檔權限 600、試跑資源刪乾淨）、停機前的 12 種失敗（都停在 down 之前、資源刪乾淨）、試跑資源刪不掉、
+停機中的 6 種失敗（都⛔ 沒有 up）、外層 timeout（stop 容器、cancel 連線、歸零之後才印復原訊息）、stop 不了改 kill、連線停不掉與查不到容器狀態（印「需要人工確認」、⛔ 沒有復原訊息）、
+手動停止確認、`BACKUP_DIR` 的佔位值與權限。結果：通過 122、失敗 0；`shellcheck` 0 則。
+反證：跳過試跑、正式套用後⛔ 不做停止確認、正式套用⛔ 不帶 `-expect-fingerprint`、cancel ⛔ 不限本次的 `application_name`、試跑失敗⛔ 不清理、套用失敗仍然 up，六項都有測試失敗。
+
+**review（2026-11-25）的修正**
+
+* **備份與正式套用指向同一個 DB**：版本指紋只涵蓋已套用的版本，兩個不同的 DB 可能相同。`-migrate=status`／`up` 多印一行實例識別
+  （`system_identifier|database|oid|postmaster 啟動時間`；`database.InstanceSQL`），`deploy.sh` 用 `DB_CONTAINER`／`DB_NAME` 以**同一段 SQL**（`INSTANCE_SQL`，
+  `test-deploy-sh.sh` 的靜態檢查比對兩邊逐字相同）查一次，**down 之前**兩邊不同就停下；down 之後、備份之前再查一次（實例變了就⛔ 不備份、⛔ 不套用）；
+  正式套用帶 `-expect-instance`（migrator 自己再核對一次，不符 → 結束碼 5、⛔ 沒有套用）。停止確認與備份都用 `DB_CONTAINER`，已經證明跟 migrator 是同一個 DB。
+* **備份**：檔名改成本次專屬（`trading_<run_id>_<指紋前 12 碼>.dump`），同名檔（含 `.partial`）已經存在就失敗、⛔ 不覆蓋；`backup_db` 由 `|| die` 呼叫、`set -e` 在裡面⛔ 不生效，
+  所以 `mv` 與之後的檢查都改成明確判斷（改名失敗、改名後 `.partial` 還在或新檔是空的 → 失敗）。原本 `mv` 失敗會被忽略，接著驗到同名的舊檔而回 0。
+* **部署互斥**：`git pull` 之前用 `flock -n` 取得 scripts 目錄的 `.deploy.lock`（拿不到就停下、⛔ 不等；鎖跟著程序，結束就放掉）；preflight 確認有 `flock`。
+  `RUN_ID` 加 6 位亂數尾碼（`20261201T060501Z-a1b2c3`）。
+* **試跑只清理本次建立的資源**：開頭先確認三個名稱都⛔ 不存在（存在就停下、⛔ 不清理），之後才註冊 trap；清理只動本次嘗試建立過的（名稱帶本次的 `RUN_ID`、又有部署鎖，
+  確認之後出現的同名資源就是這一次的，建立到一半失敗的也算）。
+* 測試：`cmd/server` 加 `-expect-instance`（SQLite 帶它一律不符；替身實例不同 → 5、⛔ 沒有套用；相同 → 套用）；PostgreSQL 加「同一個 database 的兩條連線識別相同、
+  兩個版本完全相同的 database 識別不同」；`test-deploy-sh.sh` 加「版本相同、DB 不同」兩種（database 不同、實例不同）、migrator 沒印識別、腳本查不到識別、down 之後實例變了、
+  備份改名失敗、同名舊備份已存在（⛔ 不覆蓋）、舊備份在而且改名失敗（review 的重現，⛔ 不正式套用）、試跑網路的名稱已經存在（⛔ 不清理別人的）、試跑容器還沒建立時⛔ 沒有 `docker rm`、
+  臨時密碼與 DSN 都⛔ 不在指令列與輸出、試跑的 migrator 跟標記表確認用同一個 DSN、部署互斥（第一個還在跑時第二個停在 pull 之前、結束之後鎖放掉）、
+  改名時同名的舊檔已經在（開頭的檢查之後才出現）而且改名失敗（⛔ 不正式套用）。
+* 結果：`test-deploy-sh.sh` 通過 134、失敗 0；`shellcheck` 0 則；backend 完整測試、PostgreSQL 腳本（含實例識別）、MySQL 腳本都通過。
+  反證：⛔ 不比實例、正式套用⛔ 不帶 `-expect-instance`、改名⛔ 不檢查、⛔ 不擋同名舊檔、⛔ 不取部署鎖、清理⛔ 不看是不是本次建立的、臨時密碼放在指令列，七項都有測試失敗
+  （「改名⛔ 不檢查」原本被其他檢查蓋掉、測試分辨不出來，補了「舊檔在開頭的檢查之後才出現」的案例之後才會失敗）。
+
+**第二輪 review（2026-11-25）的修正**
+
+* **臨時密碼⛔ 不在任何程序參數**：原本 `timeout … env KEY=值 docker …` 把密碼（與含密碼的 DSN）留在 `env`／`timeout` 的參數裡（`/proc/<pid>/cmdline` 讀得到），
+  容器裡的 `psql "$TRIAL_DSN"` 也把 DSN 放進參數。改成在子 shell 裡 `export`（shell 內建、⛔ 不產生程序）再呼叫 `timeout`／`docker`（`-e 名稱` 不帶值）；
+  標記表的確認改用 libpq 的 `PG*` 環境變數（主機、port、帳號、密碼、database、sslmode 跟 migrator 的 DSN 是同一組參數）。
+  測試：假 `timeout` 把每一次的完整參數記下來，跟假 docker 的參數紀錄一起驗「臨時密碼與 `postgres://trial:` 都⛔ 不出現」；標記表那一次的 `PG*` 與 migrator 的 DSN 要是同一組。
+* **備份原子地拒絕覆寫**：原本只在開始前檢查一次，pg_dump 期間才出現的同名檔會被最後的 `mv` 覆寫、檢查也照樣通過。改成 `.partial` 用 noclobber（`set -C`）建立，
+  正式檔名用 `ln`（hard link；目的檔已經存在時 `link(2)` 一定失敗）、⛔ 不用 `mv`，連結之後確認正式檔跟 `.partial` 是同一個 inode 才刪 `.partial`。
+  測試：pg_dump 期間出現同名檔（假 pg_dump 在寫的同時放一個舊檔）→ 原檔保留、`.partial` 清掉、⛔ 不正式套用；`.partial` 已經存在 → ⛔ 不覆寫、⛔ 不 pg_dump、⛔ 不正式套用；連結失敗。
+* 結果：`test-deploy-sh.sh` 通過 135、失敗 0；`shellcheck` 0 則。反證：密碼改回 `env` 放進參數、標記表把 DSN 當 psql 的參數、migrator 的 DSN 改回 `env` 放進參數、
+  正式檔名改回 `mv`，四項都有測試失敗。這一輪⛔ 沒有改 Go 程式（PostgreSQL／MySQL 腳本沿用上一輪的結果）。
+* **第三輪 review（2026-11-25）**：晚出現的同名路徑是目錄、或指向目錄的符號連結時，`ln` 會把連結建到那個目錄裡（migration 照樣中止，但多出連結、`.partial` 也留下）。
+  改成 `ln -T --`（目的路徑是目錄或指向目錄的連結也直接失敗）；`-ef` 核對不符時也刪 `.partial`。測試加這兩種（目錄、符號連結）：拒絕、目錄裡⛔ 沒有多出連結、
+  `.partial` 清掉、⛔ 不正式套用。結果：通過 137、失敗 0；`shellcheck` 0 則；反證：拿掉 `-T`，兩項都失敗。
+
+**還沒做**：第六節的 dev 演練（五項，用拋棄式 PostgreSQL 與作業隔離 volume 上的 live 複本）、第七節的 live 唯讀盤點、合併進 `init`、換上 live。
 
 ## 版本紀錄
 

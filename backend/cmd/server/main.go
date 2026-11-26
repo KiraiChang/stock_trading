@@ -41,6 +41,9 @@ func main() {
 	if *checkConfigFlag {
 		os.Exit(runCheckConfig())
 	}
+	if *migrateFlag != "" {
+		os.Exit(runMigrateFromFlags())
+	}
 
 	log, cleanup, err := applog.New("backend")
 	if err != nil {
@@ -101,9 +104,14 @@ func main() {
 	}
 	log.Info("database connected", zap.String("driver", cfg.Database.Driver))
 
-	// 自動套用 migrations
-	if err := database.RunMigrations(context.Background(), db, cfg.Database.Driver, log); err != nil {
-		log.Error("migrations failed", zap.Error(err))
+	// migration（T-087）：DATABASE_AUTO_MIGRATE=true（dev compose）才在啟動時自動套用；
+	// 預設（live）只做唯讀檢查——embed 的每一支都已套用才啟動，live 的 migration 由 deploy.sh 在停機中用 -migrate=up 套用。
+	if cfg.Database.AutoMigrate {
+		if err := database.RunMigrations(context.Background(), db, cfg.Database.Driver, log); err != nil {
+			log.Error("migrations failed", zap.Error(err))
+			os.Exit(1)
+		}
+	} else if err := checkSchema(db, cfg.Database.Driver, log); err != nil {
 		os.Exit(1)
 	}
 

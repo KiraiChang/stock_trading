@@ -84,6 +84,101 @@ if [ "${1:-}" = "inspect" ]; then
   echo "${FAKE_RESTARTS:-0}"
   exit 0
 fi
+# ── T-087：試跑、備份、正式 migrator、停止確認（狀態放在 $WORK_STATE）──
+DEFAULT_STATUS='migrate: pending -\nmigrate: fingerprint aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nmigrate: instance 7712040185090818081|trading|16384|20261125093441474452\n'
+DEFAULT_INST='7712040185090818081|trading|16384|20261125093441474452'
+st_get() { if [ -e "$WORK_STATE/$1" ]; then cat "$WORK_STATE/$1"; else printf '%s' "${2:-}"; fi; }
+st_set() { printf '%s' "$2" > "$WORK_STATE/$1"; }
+case "${1:-}" in
+  ps)  # ps -a --filter name=^/名稱$ --format {{.State}}
+    echo "docker $*" >> "$CALL_LOG"
+    [ "${FAKE_PS_RC:-0}" = 0 ] || exit "$FAKE_PS_RC"
+    name="${4#name=^/}"; name="${name%\$}"
+    case "$name" in
+      stock_trading-migrator-*) [ "${FAKE_PS_MIGRATOR_RC:-0}" = 0 ] || exit "$FAKE_PS_MIGRATOR_RC"; st_get migrator_state ""; echo ;;
+      *) if [ -e "$WORK_STATE/c_$name" ]; then echo running; else echo; fi ;;
+    esac
+    exit 0 ;;
+  rm)  # rm -fv 名稱…
+    echo "docker $*" >> "$CALL_LOG"; shift 2
+    if [ "${FAKE_TRIAL_LEAK:-0}" != 1 ]; then for c in "$@"; do rm -f "$WORK_STATE/c_$c"; done; fi
+    exit 0 ;;
+  network)
+    echo "docker $*" >> "$CALL_LOG"
+    case "$2" in
+      create) [ "${FAKE_NET_CREATE_RC:-0}" = 0 ] || exit "$FAKE_NET_CREATE_RC"; : > "$WORK_STATE/n_$4" ;;
+      rm) [ "${FAKE_TRIAL_LEAK:-0}" = 1 ] || rm -f "$WORK_STATE/n_$3" ;;
+      ls) n="${5#name=^}"; n="${n%\$}"; if [ -e "$WORK_STATE/n_$n" ]; then echo netid123; fi ;;
+    esac
+    exit 0 ;;
+  stop) echo "docker $*" >> "$CALL_LOG"; if [ "${FAKE_STOP_WORKS:-1}" = 1 ]; then st_set migrator_state exited; fi; exit 0 ;;
+  kill) echo "docker $*" >> "$CALL_LOG"; if [ "${FAKE_KILL_WORKS:-1}" = 1 ]; then st_set migrator_state exited; fi; exit 0 ;;
+  run)
+    echo "docker $*" >> "$CALL_LOG"
+    case " $* " in
+      *" run -d --name "*)
+        # 臨時密碼只經環境變數（-e POSTGRES_PASSWORD 不帶值）
+        case " $* " in *" -e POSTGRES_PASSWORD "*) ;; *) echo "PW_NOT_FROM_ENV" >> "$CALL_LOG" ;; esac
+        [ "${#POSTGRES_PASSWORD}" -ge 16 ] || echo "PW_MISSING" >> "$CALL_LOG"
+        st_set pw "${POSTGRES_PASSWORD:-}"
+        : > "$WORK_STATE/c_$4"
+        [ "${FAKE_TRIALPG_RC:-0}" = 0 ] || exit "$FAKE_TRIALPG_RC"
+        echo cid; exit 0 ;;
+      *" -e PGPASSWORD "*)
+        [ "${PGPASSWORD:-}" = "$(st_get pw)" ] || echo "MARKER_PW_DIFF" >> "$CALL_LOG"
+        case " $* " in *"postgres://"*) echo "MARKER_DSN_IN_ARGV" >> "$CALL_LOG" ;; esac
+        st_set dsn "postgres://${PGUSER:-}:${PGPASSWORD:-}@${PGHOST:-}:${PGPORT:-}/${PGDATABASE:-}?sslmode=${PGSSLMODE:-}"
+        echo "${FAKE_MARKER-t}"; exit 0 ;;
+      *" -migrate=status "*|*" -migrate=up "*)
+        case " $* " in *" -e DATABASE_DSN "*) ;; *) echo "DSN_NOT_FROM_ENV" >> "$CALL_LOG" ;; esac
+        [ "${DATABASE_DSN:-}" = "$(st_get dsn)" ] || echo "DSN_DIFF" >> "$CALL_LOG"
+        case " $* " in
+          *" -migrate=status "*) printf '%b' "${FAKE_TS_OUT-${FAKE_MS1_OUT-$DEFAULT_STATUS}}"; exit "${FAKE_TS_RC:-0}" ;;
+        esac
+        printf 'migrate: step version=81 end=x duration=1s result=ok\nmigrate: after pending %s\n' "${FAKE_TU_AFTER:--}"; exit "${FAKE_TU_RC:-0}" ;;
+    esac
+    echo "fake docker: 沒預期的 run：$*" >&2; exit 97 ;;
+  exec)
+    case " $* " in
+      *" pg_isready "*) echo "docker $*" >> "$CALL_LOG"; exit "${FAKE_PGREADY_RC:-0}" ;;
+      *" --schema-only "*) echo "docker $*" >> "$CALL_LOG"; echo "-- fake schema"; exit "${FAKE_DUMP_SCHEMA_RC:-0}" ;;
+      *" --data-only "*) echo "docker $*" >> "$CALL_LOG"; echo "-- fake data"; exit "${FAKE_DUMP_DATA_RC:-0}" ;;
+      *" -Fc "*)
+        echo "docker $*" >> "$CALL_LOG"
+        [ "${FAKE_BACKUP_RC:-0}" = 0 ] || exit "$FAKE_BACKUP_RC"
+        # FAKE_BACKUP_PLANT_OLD：寫備份的同時，正式檔名出現同名的東西（開頭的「已經存在」檢查之後才出現）：
+        #   1＝一般檔（內容 OLD）、dir＝目錄、symlink＝指向另一個目錄的符號連結
+        if [ "${FAKE_BACKUP_PLANT_OLD:-0}" != 0 ]; then
+          t="$(readlink /proc/$$/fd/1)"
+          case "$t" in
+            *.partial)
+              case "$FAKE_BACKUP_PLANT_OLD" in
+                1) printf 'OLD' > "${t%.partial}" ;;
+                dir) mkdir "${t%.partial}" ;;
+                symlink) mkdir -p "$WORK_STATE/elsewhere" && /usr/bin/ln -s "$WORK_STATE/elsewhere" "${t%.partial}" ;;
+              esac ;;
+          esac
+        fi
+        printf 'PGDMP-fake'; exit 0 ;;
+      *" pg_restore -l "*) echo "docker $*" >> "$CALL_LOG"; cat >/dev/null; exit "${FAKE_RESTORE_L_RC:-0}" ;;
+      *"CREATE TABLE t087_trial_target"*) echo "docker $*" >> "$CALL_LOG"; exit "${FAKE_MARKER_CREATE_RC:-0}" ;;
+      *" -U trial -d trial "*) echo "docker $*" >> "$CALL_LOG"; cat >/dev/null; exit "${FAKE_RESTORE_RC:-0}" ;;
+      *"pg_control_system"*)
+        # 腳本用 DB_CONTAINER／DB_NAME 查的實例識別（第 n 次：FAKE_INST<n>）
+        echo "docker $*" >> "$CALL_LOG"
+        BT_N=$(($(st_get inst_n 0) + 1)); st_set inst_n "$BT_N"
+        v="FAKE_INST${BT_N}"
+        printf '%s\n' "${!v-${FAKE_INST-$DEFAULT_INST}}"; exit 0 ;;
+      *"pg_stat_activity"*)
+        echo "docker $*" >> "$CALL_LOG"
+        case " $* " in
+          *pg_cancel_backend*) if [ "${FAKE_CANCEL_WORKS:-1}" = 1 ]; then st_set sessions 0; fi; echo 1; exit 0 ;;
+          *pg_terminate_backend*) if [ "${FAKE_TERMINATE_WORKS:-1}" = 1 ]; then st_set sessions 0; fi; echo 1; exit 0 ;;
+        esac
+        [ "${FAKE_SESSIONS_RC:-0}" = 0 ] || exit "$FAKE_SESSIONS_RC"
+        st_get sessions "${FAKE_SESSIONS:-0}"; echo; exit 0 ;;
+    esac ;;
+esac
 if [ "${1:-}" = "exec" ]; then
   # 只認 deploy.sh 的形式：exec -e PGOPTIONS=… 容器 psql -U 帳號 -d 資料庫 -X -v ON_ERROR_STOP=1 -qtAc SQL（⛔ 不帶 -i）
   echo "docker $*" >> "$CALL_LOG"
@@ -122,6 +217,10 @@ esac
 case "$1" in
   config)
     [ "${FAKE_CONFIG_RC:-0}" = 0 ] || exit "$FAKE_CONFIG_RC"
+    if [ "${2:-}" = "--images" ]; then
+      echo "stock_trading-backend"
+      exit 0
+    fi
     if [ "${2:-}" = "--services" ]; then
       printf 'backend\npython-server\npython-worker\n'
       exit 0
@@ -146,6 +245,23 @@ case "$1" in
         fake_delay "${FAKE_PROBE_DELAY:-0}"
         [ "${FAKE_NO_FLAG:-0}" = 1 ] && exit 1
         exit "${FAKE_PROBE_RC:-0}" ;;
+      # T-087：確認新 image 認得 -migrate（grep 執行檔）
+      *" --entrypoint grep backend -qF migrate-statement-timeout ./trading-backend "*)
+        [ "${FAKE_NO_MIGRATE_FLAG:-0}" = 1 ] && exit 1
+        exit 0 ;;
+      # T-087：正式套用（具名容器）。外層 timeout 砍掉 CLI 時（TERM），容器的狀態留在 running（模擬 CLI 退出、容器還在跑）
+      *" --name stock_trading-migrator-"*" backend ./trading-backend -migrate=up "*)
+        st_set migrator_state running
+        printf 'migrate: step version=81 end=x duration=1s result=ok\n'
+        fake_delay "${FAKE_MUP_DELAY:-0}"
+        [ "${FAKE_MUP_LEAVE_RUNNING:-0}" = 1 ] || st_set migrator_state ""
+        exit "${FAKE_MUP_RC:-0}" ;;
+      # T-087：-migrate=status（第 n 次：FAKE_MS<n>_OUT／RC）
+      *" backend ./trading-backend -migrate=status "*)
+        BT_N=$(($(st_get ms_n 0) + 1)); st_set ms_n "$BT_N"
+        v="FAKE_MS${BT_N}_OUT"; r="FAKE_MS${BT_N}_RC"
+        printf '%b' "${!v-${FAKE_MS_OUT-$DEFAULT_STATUS}}"
+        exit "${!r:-0}" ;;
       # 一定要寫出執行檔：只帶旗標的話，真的 container 會把旗標當成程式去執行
       *" backend ./trading-backend -check-config "*)
         fake_delay "${FAKE_CHECK_DELAY:-0}"
@@ -173,11 +289,21 @@ EOF
 
 cat > "$FAKEBIN/timeout" <<'EOF'
 #!/bin/bash
-# 假 timeout：記下回測檢查的 docker inspect／exec 是怎麼包的，再交給真的 timeout（行為不變）
+# 假 timeout：記下回測檢查的 docker inspect／exec 是怎麼包的，再交給真的 timeout（行為不變）；
+# 每一次的完整參數另外記在 $WORK_STATE/argv（驗臨時密碼與 DSN ⛔ 不在程序參數裡）
+printf '%s\n' "timeout $*" >> "$WORK_STATE/argv"
 case " $* " in
   *" docker inspect -f {{.State.Running}} "*|*" docker exec "*) echo "TIMEOUT $*" >> "$CALL_LOG" ;;
 esac
 exec /usr/bin/timeout "$@"
+EOF
+
+cat > "$FAKEBIN/ln" <<'EOF'
+#!/bin/bash
+# 假 ln：FAKE_LN_FAIL=1 時連結失敗、⛔ 不動檔案（T-087 review 的備份反例）；其他照真的 ln
+echo "ln $*" >> "$CALL_LOG"
+[ "${FAKE_LN_FAIL:-0}" = 1 ] && exit 1
+exec /usr/bin/ln "$@"
 EOF
 
 cat > "$FAKEBIN/sleep" <<'EOF'
@@ -204,8 +330,13 @@ setup_case() {
       -e "s#^DB_CONTAINER=\"your-postgres-container\"#DB_CONTAINER=\"${DB_C-fake-pg}\"#" \
       -e "s#^DB_USER=\"your-db-user\"#DB_USER=\"${DB_U-fake_user}\"#" \
       -e "s#^BACKTEST_CHECK_TIMEOUT_SEC=15\$#BACKTEST_CHECK_TIMEOUT_SEC=1#" \
+      -e "s#^BACKUP_DIR=\"/path/to/db-backups\"#BACKUP_DIR=\"${BK_DIR-$CASE/backup}\"#" \
+      -e "s#^STOP_WAIT_SEC=60\$#STOP_WAIT_SEC=2#" -e "s#^CANCEL_WAIT_SEC=30\$#CANCEL_WAIT_SEC=2#" -e "s#^STOP_POLL_SEC=5\$#STOP_POLL_SEC=1#" \
+      -e "s#^MIGRATE_OUTER_TIMEOUT_SEC=960\$#MIGRATE_OUTER_TIMEOUT_SEC=${OUTER_T:-960}#" \
       "$REPO/deploy.sh" > "$CASE/scripts/deploy.sh"
-  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC CHECK_CONFIG_TIMEOUT_SEC BACKTEST_CHECK_TIMEOUT_SEC; do
+  mkdir -m 700 "$CASE/backup"
+  for k in READY_TIMEOUT_SEC READY_INTERVAL_SEC READY_REQUEST_TIMEOUT_SEC CHECK_CONFIG_TIMEOUT_SEC BACKTEST_CHECK_TIMEOUT_SEC \
+           STOP_WAIT_SEC CANCEL_WAIT_SEC STOP_POLL_SEC MIGRATE_OUTER_TIMEOUT_SEC; do
     grep -q "^$k=[0-9]*\$" "$CASE/scripts/deploy.sh" || { echo "  FAIL （測試本身）deploy.sh 找不到 $k"; exit 1; }
   done
   chmod +x "$CASE/scripts/deploy.sh"
@@ -224,8 +355,8 @@ setup_case() {
 run_deploy() {
   local t0=$SECONDS
   /usr/bin/timeout -k 2 "${RUN_LIMIT:-30}" env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls" WORK_STATE="$CASE/state" \
-    FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" "$@" \
-    bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+"$DEPLOY_ARGS"} < "$WORK/stdin" > "$CASE/out" 2>&1
+    FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" DEPLOY_RUN_ID=t087test "$@" \
+    bash "$CASE/scripts/deploy.sh" ${DEPLOY_ARGS:+$DEPLOY_ARGS} < "$WORK/stdin" > "$CASE/out" 2>&1
   RC=$?
   ELAPSED=$((SECONDS - t0))
 }
@@ -264,7 +395,7 @@ setup_case normal
 run_deploy
 order="$(grep -oE '^(git -C [^ ]+ (rev-parse --is-inside-work-tree|status|pull)|compose (config$|config --services|build [a-z-]+|run|down|up|exec)|docker (inspect -f [{][{][.]State[.]Running[}][}]|exec))' "$CASE/calls" \
   | sed -E 's#^git -C [^ ]+ #git #; s#^docker inspect.*#docker inspect-db#' | uniq | tr '\n' '|')"
-want="git rev-parse --is-inside-work-tree|git status|docker inspect-db|docker exec|compose config|git pull|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|docker inspect-db|docker exec|compose down|compose up|compose exec|"
+want="git rev-parse --is-inside-work-tree|git status|docker inspect-db|docker exec|compose config|git pull|compose config --services|compose build backend|compose build python-server|compose build python-worker|compose run|docker exec|docker inspect-db|docker exec|compose down|compose up|compose exec|"
 if [ "$RC" -eq 0 ] && [ "$order" = "$want" ] && ! called UP_WITH_BUILD && ! called WGET_WITHOUT_TIMEOUT && called "^compose up -d --no-build$" \
    && called "^compose run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend$" \
    && called "^compose run --rm --no-deps -T backend ./trading-backend -check-config$" && no_secret; then
@@ -377,19 +508,19 @@ n_calls() { grep -c -- "$1" "$CASE/calls"; }
 
 setup_case btnormal; run_deploy
 sql_deploy="$(sed -n 's/^BACKTEST_CHECK_SQL="\(.*\)"$/\1/p' "$CASE/scripts/deploy.sh")"
-if [ "$RC" -eq 0 ] && [ "$(n_calls '^docker exec ')" -eq 2 ] && [ "$(n_calls '^docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] \
+if [ "$RC" -eq 0 ] && [ "$(n_calls '^docker exec .*backtest_jobs')" -eq 2 ] && [ "$(n_calls '^docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] \
    && [ "$(grep -c 'pending 0、running 0' "$CASE/out")" -eq 2 ] && no_secret; then
   ok "回測：兩次都 0|0 → 部署完成，inspect 與 exec 各兩次、訊息印出兩次"
 else
-  ng "回測：兩次都 0|0：rc $RC、exec $(n_calls '^docker exec ') 次"
+  ng "回測：兩次都 0|0：rc $RC、exec $(n_calls '^docker exec .*backtest_jobs') 次"
 fi
-if [ "$(grep '^docker exec ' "$CASE/calls" | grep -c -- '-e PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 fake-pg psql -U fake_user -d trading ')" -eq 2 ]; then
+if [ "$(grep '^docker exec .*backtest_jobs' "$CASE/calls" | grep -c -- '-e PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 fake-pg psql -U fake_user -d trading ')" -eq 2 ]; then
   ok "回測：兩次的 PGOPTIONS 都是唯讀加 statement_timeout，帳號與 database 照開頭的設定"
 else
   ng "回測：exec 的參數不對"
 fi
-if [ "$(n_calls '^TIMEOUT -k 5 1 docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] && [ "$(n_calls '^TIMEOUT -k 5 1 docker exec ')" -eq 2 ] \
-   && [ "$(n_calls '^TIMEOUT ')" -eq 4 ]; then
+if [ "$(n_calls '^TIMEOUT -k 5 1 docker inspect -f {{.State.Running}} fake-pg$')" -eq 2 ] && [ "$(n_calls '^TIMEOUT -k 5 1 docker exec .*backtest_jobs')" -eq 2 ] \
+   && [ "$(n_calls '^TIMEOUT ')" -eq "$(n_calls '^docker exec \|^docker inspect -f {{.State.Running}}')" ]; then
   ok "回測：每一個 docker inspect／exec 都包 timeout -k 5"
 else
   ng "回測：有 docker inspect／exec 沒有包 timeout -k（TIMEOUT $(n_calls '^TIMEOUT ') 筆）"
@@ -470,6 +601,222 @@ for c in "DB_C=your-postgres-container" "DB_U=your-db-user" "DB_C=" "DB_C=a;b" "
     ng "DB 設定 $c：rc $RC、呼叫 $(wc -l < "$CASE/calls") 筆"
   fi
 done
+
+# ── migration（T-087）────────────────────────────────────────
+FPA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+INST="7712040185090818081|trading|16384|20261125093441474452"
+PEND="FAKE_MS1_OUT=migrate: pending 81\nmigrate: fingerprint $FPA\nmigrate: instance $INST\n"
+AFTER="FAKE_MS2_OUT=migrate: pending -\nmigrate: fingerprint bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nmigrate: instance $INST\n"
+line_of() { grep -n -m1 -- "$1" "$CASE/calls" | cut -d: -f1; }
+before() { local a b; a="$(line_of "$1")"; b="$(line_of "$2")"; [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]; }
+trial_clean() { ! ls "$CASE/state"/c_* "$CASE/state"/n_* >/dev/null 2>&1 && called "^docker network rm stock_trading-trial-t087test"; }
+# 臨時密碼⛔ 不能出現在呼叫紀錄（指令列）與輸出；DSN 都經環境變數、試跑的 migrator 跟標記表確認用同一個 DSN
+no_trial_secret() {
+  local pw; pw="$(cat "$CASE/state/pw" 2>/dev/null)"
+  [ -n "$pw" ] && ! grep -qF -- "$pw" "$CASE/calls" && ! grep -qF -- "$pw" "$CASE/out" \
+    && ! grep -qF -- "$pw" "$CASE/state/argv" && ! grep -q "postgres://trial:" "$CASE/state/argv" "$CASE/calls" \
+    && ! called "PW_NOT_FROM_ENV\|PW_MISSING\|MARKER_PW_DIFF\|MARKER_DSN_IN_ARGV\|DSN_NOT_FROM_ENV\|DSN_DIFF"
+}
+
+setup_case mignone; run_deploy
+if [ "$RC" -eq 0 ] && called "migrate-statement-timeout ./trading-backend" && called "backend ./trading-backend -migrate=status" \
+   && ! called "^docker network" && ! called "pg_dump" && ! called "migrate=up" && before "migrate=status" "^compose down" && grep_out "沒有待套用的 migration"; then
+  ok "migration：pending 空 → 確認旗標、讀狀態（down 之前）；⛔ 沒有試跑、備份、-migrate=up"
+else
+  ng "migration：pending 空：rc $RC"
+fi
+
+setup_case migok; run_deploy "$PEND" "$AFTER"
+if [ "$RC" -eq 0 ] && before "^docker network create --internal stock_trading-trial-t087test" "^compose down" \
+   && before "^docker run --rm --name stock_trading-trialmig-t087test --network stock_trading-trial-t087test .* -migrate=up -run-id=trial-t087test -expect-fingerprint=$FPA" "^compose down" \
+   && before "^compose down" " -Fc" && before " -Fc" "pg_restore -l" && before "pg_restore -l" "--name stock_trading-migrator-t087test backend ./trading-backend -migrate=up -run-id=t087test -expect-fingerprint=$FPA" \
+   && before "-migrate=up -run-id=t087test" "^docker ps -a --filter name=^/stock_trading-migrator-t087test" && before "^docker ps -a --filter name=^/stock_trading-migrator-t087test" "^compose up" \
+   && [ "$(grep -c '^compose run .*backend ./trading-backend -migrate=status' "$CASE/calls")" -eq 2 ] && trial_clean \
+   && ! called "^compose run .*trialmig" && [ -s "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump" ] && [ "$(stat -c %a "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump")" = 600 ] \
+   && called "^docker rm -fv stock_trading-trialmig-t087test stock_trading-trialpg-t087test" && no_trial_secret \
+   && called "-migrate=up -run-id=t087test -expect-fingerprint=$FPA -expect-instance=7712040185090818081|trading|16384|20261125093441474452 " \
+   && grep_out "migrator 與腳本連到同一個 DB"; then
+  ok "migration：pending 81、試跑通過 → 試跑在 down 之前（docker run --network 試跑網路），備份與正式套用（-expect-fingerprint）在 down 之後、up 之前，停止確認後才 up；試跑資源都刪了"
+else
+  ng "migration：pending 81 試跑通過：rc $RC：$(tail -2 "$CASE/out" | tr '\n' ' ')"
+fi
+if grep -q "trial_cleanup\|沒有刪乾淨" "$CASE/out"; then ng "migration：成功路徑不該有清理失敗的訊息"; fi
+
+stop_mig() {   # stop_mig 名稱 訊息片段 FAKE_…：停在 down 之前，試跑的資源刪乾淨
+  local name="$1" msg="$2"; shift 2
+  setup_case migstop; run_deploy "$PEND" "$@"
+  if [ "$RC" -ne 0 ] && ! called "^compose down" && ! called "^compose up" && grep_out "$msg" && grep_out "還沒 down" && no_secret; then
+    if called "^docker network create"; then
+      if trial_clean; then ok "migration：$name → 停在 down 之前、試跑資源刪乾淨"; else ng "migration：$name：試跑資源沒刪乾淨"; fi
+    else
+      ok "migration：$name → 停在 down 之前"
+    fi
+  else
+    ng "migration：$name：rc $RC：$(tail -1 "$CASE/out")"
+  fi
+}
+stop_mig "新 image 不認得 -migrate" "不認得 -migrate" FAKE_NO_MIGRATE_FLAG=1
+stop_mig "status 結束碼 2" "沒有 goose_db_version" FAKE_MS1_RC=2
+stop_mig "status 輸出格式不對" "輸出格式不對" 'FAKE_MS1_OUT=migrate: pending 81\n'
+# T-087 review：版本相同、DB 不同（migrator 與腳本指向不同的實例或 database）→ 停在 down 之前、⛔ 沒有試跑
+stop_mig "版本相同、DB 不同（database 不同）" "指向不同的 DB" "FAKE_INST=7712040185090818081|trading_other|16999|20261125093441474452"
+called "^docker network create" && ng "migration：DB 不同時⛔ 不能開始試跑"
+stop_mig "版本相同、DB 不同（實例不同）" "指向不同的 DB" "FAKE_INST=1111111111111111111|trading|16384|20261101000000000000"
+stop_mig "migrator 沒印實例識別" "讀不到 migrator 連到的 DB 的實例識別" 'FAKE_MS1_OUT=migrate: pending 81\nmigrate: fingerprint aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+stop_mig "腳本查不到實例識別" "查不到實例識別" "FAKE_INST=garbage"
+# T-087 review：試跑的名稱已經存在（⛔ 不是這一次建立的）→ 停下、⛔ 不清理它
+setup_case migexists; : > "$CASE/state/n_stock_trading-trial-t087test"; run_deploy "$PEND"
+if [ "$RC" -ne 0 ] && ! called "^compose down" && grep_out "已經存在" && ! called "^docker network rm" && ! called "^docker rm" && [ -e "$CASE/state/n_stock_trading-trial-t087test" ]; then
+  ok "migration：試跑網路的名稱已經存在 → 停在 down 之前、⛔ 不清理別人的資源"
+else
+  ng "migration：試跑網路的名稱已經存在：rc $RC"
+fi
+stop_mig "試跑網路建不起來" "建立試跑網路失敗" FAKE_NET_CREATE_RC=1
+called "^docker rm" && ng "migration：試跑容器還沒建立時⛔ 不能 docker rm"
+stop_mig "試跑 PostgreSQL 起不來" "啟動試跑用 PostgreSQL 失敗" FAKE_TRIALPG_RC=125
+stop_mig "匯出 schema 失敗" "匯出或還原 live 的 schema 失敗" FAKE_DUMP_SCHEMA_RC=1
+stop_mig "還原失敗" "匯出或還原 live 的 schema 失敗" FAKE_RESTORE_RC=3
+stop_mig "匯出版本紀錄失敗" "goose_db_version 的紀錄失敗" FAKE_DUMP_DATA_RC=1
+stop_mig "目標標記表不存在" "找不到目標標記表" FAKE_MARKER=f
+stop_mig "臨時庫的指紋跟 live 不同" "版本紀錄跟 live 不同" "FAKE_TS_OUT=migrate: pending 81\nmigrate: fingerprint bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+stop_mig "試跑 -migrate=up 失敗" "-migrate=up 沒有通過" FAKE_TU_RC=3
+stop_mig "試跑之後 pending 不是空的" "-migrate=up 沒有通過" FAKE_TU_AFTER=81
+setup_case migleak; run_deploy "$PEND" FAKE_TRIAL_LEAK=1
+if [ "$RC" -ne 0 ] && ! called "^compose down" && grep_out "沒有刪乾淨"; then ok "migration：試跑資源刪不掉 → 停在 down 之前、印出沒刪乾淨的名稱"; else ng "migration：試跑資源刪不掉：rc $RC"; fi
+
+stop_after_down() {   # stop_after_down 名稱 訊息片段 FAKE_…：down 之後停下、⛔ 沒有 up
+  local name="$1" msg="$2"; shift 2
+  setup_case migdown; run_deploy "$PEND" "$AFTER" "$@"
+  if [ "$RC" -ne 0 ] && called "^compose down" && ! called "^compose up" && ! called "goose down" && grep_out "$msg" && grep_out "服務目前是停的" && no_secret; then
+    ok "migration：$name → ⛔ 沒有 up、印出下一步"
+  else
+    ng "migration：$name：rc $RC：$(tail -1 "$CASE/out")"
+  fi
+}
+stop_after_down "備份失敗" "備份失敗，⛔ 不套用" FAKE_BACKUP_RC=1
+if called "migrate=up -run-id=t087test"; then ng "migration：備份失敗時⛔ 不能正式套用"; fi
+stop_after_down "備份讀不出來" "備份失敗，⛔ 不套用" FAKE_RESTORE_L_RC=1
+# T-087 review：新備份改名失敗、同名的舊檔還在 → ⛔ 不能把舊檔當成這次的備份、⛔ 不呼叫正式 migrator
+stop_after_down "備份連結失敗" "備份失敗，⛔ 不套用" FAKE_LN_FAIL=1
+if called "migrate=up -run-id=t087test"; then ng "migration：備份連結失敗時⛔ 不能正式套用"; fi
+setup_case migoldbk; printf 'OLD' > "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump"; run_deploy "$PEND" "$AFTER"
+if [ "$RC" -ne 0 ] && ! called "migrate=up -run-id=t087test" && ! called "^compose up" && grep_out "已經存在" && [ "$(cat "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump")" = OLD ]; then
+  ok "migration：同名的舊備份已經存在 → 備份失敗、⛔ 不覆蓋、⛔ 不正式套用"
+else
+  ng "migration：同名的舊備份：rc $RC"
+fi
+setup_case migoldbk2; printf 'OLD' > "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump"; run_deploy "$PEND" "$AFTER" FAKE_LN_FAIL=1
+if [ "$RC" -ne 0 ] && ! called "migrate=up -run-id=t087test" && [ "$(cat "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump")" = OLD ]; then
+  ok "migration：舊備份在、新備份連結又失敗 → ⛔ 不正式套用"
+else
+  ng "migration：舊備份在、改名失敗：rc $RC"
+fi
+# review 的重現：同名檔在 pg_dump 期間才出現（開頭的檢查之後）→ ⛔ 不能覆寫它、⛔ 不能把它當成這次的備份、⛔ 不正式套用
+setup_case migplant; run_deploy "$PEND" "$AFTER" FAKE_BACKUP_PLANT_OLD=1
+if [ "$RC" -ne 0 ] && ! called "migrate=up -run-id=t087test" && ! called "^compose up" && grep_out "已經存在（pg_dump 期間出現？）" \
+   && [ "$(cat "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump")" = OLD ] && [ ! -e "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump.partial" ]; then
+  ok "migration：pg_dump 期間出現同名檔 → ⛔ 不覆寫（原檔保留）、備份失敗、⛔ 不正式套用"
+else
+  ng "migration：pg_dump 期間出現同名檔：rc $RC"
+fi
+# review：晚出現的同名路徑是目錄、或指向目錄的符號連結 → ln -T 直接拒絕（⛔ 不把連結建到那個目錄裡），.partial 清掉、⛔ 不正式套用
+for kind in dir symlink; do
+  setup_case "migplant$kind"; run_deploy "$PEND" "$AFTER" FAKE_BACKUP_PLANT_OLD=$kind
+  B="$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump"
+  inside="$(find -L "$B" "$CASE/state/elsewhere" -mindepth 1 2>/dev/null | wc -l)"
+  if [ "$RC" -ne 0 ] && ! called "migrate=up -run-id=t087test" && ! called "^compose up" && grep_out "已經存在（pg_dump 期間出現？）" \
+     && [ "$inside" = 0 ] && [ ! -e "$B.partial" ] && [ "$(find "$CASE/backup" -name '*.partial' | wc -l)" = 0 ]; then
+    ok "migration：pg_dump 期間出現同名的 $kind → ln -T 拒絕、⛔ 沒有多出連結、.partial 清掉、⛔ 不正式套用"
+  else
+    ng "migration：pg_dump 期間出現同名的 $kind：rc $RC、裡面 $inside 個"
+  fi
+done
+setup_case migpartial; printf 'OTHER' > "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump.partial"; run_deploy "$PEND" "$AFTER"
+if [ "$RC" -ne 0 ] && ! called "migrate=up -run-id=t087test" && ! called " -Fc" && [ "$(cat "$CASE/backup/trading_t087test_aaaaaaaaaaaa.dump.partial")" = OTHER ]; then
+  ok "migration：.partial 已經存在 → ⛔ 不覆寫、⛔ 不 pg_dump、⛔ 不正式套用"
+else
+  ng "migration：.partial 已經存在：rc $RC"
+fi
+# down 之後 DB 的實例變了（重啟、切換）→ ⛔ 不備份、⛔ 不套用
+stop_after_down "down 之後實例變了" "實例識別變了" "FAKE_INST2=7712040185090818081|trading|16384|20261125120000000000"
+if called " -Fc" || called "migrate=up -run-id=t087test"; then ng "migration：實例變了⛔ 不能備份或套用"; fi
+stop_after_down "正式套用結束碼 3" "有一支失敗" FAKE_MUP_RC=3
+grep_out "還原到乾淨的 DB" || ng "migration：結束碼 3 的訊息要有還原的下一步"
+called "^docker ps -a --filter name=^/stock_trading-migrator-t087test" || ng "migration：結束碼 3 也要做停止確認"
+stop_after_down "正式套用結束碼 4" "正式套用逾時" FAKE_MUP_RC=4
+stop_after_down "正式套用結束碼 5" "沒有套用任何一支" FAKE_MUP_RC=5
+grep_out "回滾標籤" || ng "migration：結束碼 5 的訊息要說用回滾標籤啟動舊 image"
+stop_after_down "套用之後 pending 不是空的" "套用之後 pending 不是空的" "FAKE_MS2_OUT=migrate: pending 81\nmigrate: fingerprint bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"
+
+# 外層 timeout 砍掉 docker CLI、容器與 DB 連線都還在 → 停止確認：stop 容器、cancel 連線、歸零之後才印復原訊息
+OUTER_T=2 setup_case migouter; run_deploy "$PEND" "$AFTER" FAKE_MUP_DELAY=$DB_DELAY FAKE_SESSIONS=2
+if [ "$RC" -ne 0 ] && grep_out "外層 timeout 到期" && called "^docker stop -t 30 stock_trading-migrator-t087test" \
+   && before "^docker stop -t 30" "pg_cancel_backend" && ! called "pg_terminate_backend" && grep_out "停止確認通過" && ! called "^compose up" && no_leftover; then
+  ok "migration：外層 timeout 到期（容器還在跑、DB 有 2 個連線）→ stop 容器、cancel 連線、歸零之後才印復原訊息；⛔ 沒有 up"
+else
+  ng "migration：外層 timeout：rc $RC：$(tail -2 "$CASE/out" | tr '\n' ' ')"
+fi
+if called "pg_cancel_backend" && ! grep "pg_cancel_backend" "$CASE/calls" | grep -q "application_name = 'trading-migrator-t087test' AND datname = 'trading'"; then
+  ng "migration：cancel 只能對本次的 application_name 與部署目標的 database"
+fi
+OUTER_T=2 setup_case migkill; run_deploy "$PEND" "$AFTER" FAKE_MUP_DELAY=$DB_DELAY FAKE_STOP_WORKS=0
+if [ "$RC" -ne 0 ] && before "^docker stop" "^docker kill" && grep_out "停止確認通過" && ! called "^compose up" && no_leftover; then
+  ok "migration：docker stop 停不下來 → docker kill，確認退出後才印復原訊息"
+else
+  ng "migration：stop 停不下來：rc $RC"
+fi
+OUTER_T=2 setup_case migstuck; run_deploy "$PEND" "$AFTER" FAKE_MUP_DELAY=$DB_DELAY FAKE_SESSIONS=1 FAKE_CANCEL_WORKS=0 FAKE_TERMINATE_WORKS=0
+if [ "$RC" -ne 0 ] && before "pg_cancel_backend" "pg_terminate_backend" && grep_out "需要人工確認 migrator 已停止" && ! grep_out "外層 timeout 到期" \
+   && ! called "^compose up" && no_leftover; then
+  ok "migration：cancel、terminate 之後連線還在 → 停下、印「需要人工確認」，⛔ 沒有任何復原訊息與 up"
+else
+  ng "migration：連線停不掉：rc $RC：$(tail -1 "$CASE/out")"
+fi
+OUTER_T=2 setup_case migdockerdown; run_deploy "$PEND" "$AFTER" FAKE_MUP_DELAY=$DB_DELAY FAKE_PS_MIGRATOR_RC=1
+if [ "$RC" -ne 0 ] && grep_out "需要人工確認 migrator 已停止" && ! grep_out "外層 timeout 到期" && ! called "^compose up" && no_leftover; then
+  ok "migration：查不到容器狀態 → 停下、印「需要人工確認」"
+else
+  ng "migration：查不到容器狀態：rc $RC"
+fi
+
+# T-087 review：部署互斥——同一個 scripts 目錄同時只能有一個 deploy.sh 過了 pull 之前的鎖
+# 第一個：readiness 第 5 次才 ready（up 之後還要約 4 秒，期間鎖還在）
+READY_T=10 setup_case lock
+( run_deploy FAKE_HEALTH_AFTER=5 ) &
+lock_pid=$!
+for _ in $(seq 1 100); do grep -q "^compose up" "$CASE/calls" 2>/dev/null && break; /bin/sleep 0.1; done
+/usr/bin/timeout -k 2 30 env -i PATH="$FAKEBIN:/usr/bin:/bin" HOME="$WORK" CALL_LOG="$CASE/calls2" WORK_STATE="$CASE/state2" \
+  FAKE_JWT_MARKER="$FAKE_JWT_MARKER" DEPLOY_MEMINFO_FILE="$CASE/meminfo" DEPLOY_RUN_ID=t087second \
+  bash "$CASE/scripts/deploy.sh" < "$WORK/stdin" > "$CASE/out2" 2>&1
+rc2=$?
+mkdir -p "$CASE/state2"
+wait "$lock_pid"
+if [ "$rc2" -ne 0 ] && grep -q "另一個 deploy.sh 正在部署同一個目標" "$CASE/out2" && ! grep -q "pull\|^compose build" "$CASE/calls2" && grep -q "部署完成" "$CASE/out"; then
+  ok "部署互斥：第一個還在 build 之後的步驟時，第二個停在 pull 之前；第一個照常完成"
+else
+  ng "部署互斥：rc2 $rc2：$(tail -1 "$CASE/out2")"
+fi
+setup_case lock2; run_deploy
+if [ "$RC" -eq 0 ] && grep_out "部署鎖："; then ok "部署互斥：前一個結束之後鎖就放掉，下一次照常部署"; else ng "部署互斥：鎖沒放掉：rc $RC"; fi
+
+# 手動的停止確認
+DEPLOY_ARGS="--confirm-migrator-stopped t087test"
+setup_case migconfirm; run_deploy FAKE_SESSIONS=1
+if [ "$RC" -eq 0 ] && grep_out "停止確認通過" && called "pg_cancel_backend" && ! called "^git" && ! called "^compose"; then
+  ok "--confirm-migrator-stopped：只做停止確認（⛔ 沒有 git／compose）"
+else
+  ng "--confirm-migrator-stopped：rc $RC"
+fi
+DEPLOY_ARGS="--confirm-migrator-stopped a;b"
+setup_case migconfirmbad; run_deploy
+if [ "$RC" -ne 0 ] && ! called "^docker"; then ok "--confirm-migrator-stopped 的 RUN_ID 格式不對 → 停下"; else ng "--confirm-migrator-stopped 格式不對：rc $RC"; fi
+DEPLOY_ARGS=
+
+# BACKUP_DIR：佔位值沒換、權限不是 700 → preflight 就停下（⛔ 沒有任何 git／docker 呼叫）
+BK_DIR=/path/to/db-backups setup_case bkph; run_deploy
+if [ "$RC" -ne 0 ] && [ ! -s "$CASE/calls" ] && grep_out "先填 BACKUP_DIR"; then ok "BACKUP_DIR 佔位值 → 停下、⛔ 沒有呼叫"; else ng "BACKUP_DIR 佔位值：rc $RC"; fi
+setup_case bkperm; chmod 755 "$CASE/backup"; run_deploy
+if [ "$RC" -ne 0 ] && [ ! -s "$CASE/calls" ] && grep_out "BACKUP_DIR 的權限必須是 700"; then ok "BACKUP_DIR 權限 755 → 停下"; else ng "BACKUP_DIR 權限：rc $RC"; fi
 
 # --preflight：只跑 preflight 與 JWT 檢查，⛔ 不 pull、不 build、不 run、不 down／up
 DEPLOY_ARGS=--preflight
@@ -640,12 +987,20 @@ if re.search(r"^\s*export\s", deploy, re.M):
 if "up --build" in deploy:
     errs.append("deploy.sh 還有 up --build")
 
+# T-087：deploy.sh 的 INSTANCE_SQL 要跟 backend 的 database.InstanceSQL 逐字相同（兩邊的輸出直接比對）
+conn = open(os.path.join(repo, "backend/internal/database/migrator_conn.go"), encoding="utf-8").read()
+gm = re.search(r"const InstanceSQL = ((?:`[^`]*`\s*\+?\s*)+)", conn)
+go_sql = "".join(re.findall(r"`([^`]*)`", gm.group(1))) if gm else None
+sm = re.search(r'^INSTANCE_SQL="([^"]*)"$', deploy, re.M)
+if not go_sql or not sm or sm.group(1) != go_sql:
+    errs.append("deploy.sh 的 INSTANCE_SQL 跟 database.InstanceSQL 不一致")
+
 if errs:
     for e in errs:
         print("  FAIL " + e)
     sys.exit(1)
 print(f"  ok   範本 contract：environment {len(env_keys)} 個鍵、.env.example {len(ex)} 個鍵，不重複、不漏鍵；"
-      "沒有 REDIS_PASSWORD、${…:?}、export；deploy.sh 的公開範例 JWT 跟 contract.go 一致")
+      "沒有 REDIS_PASSWORD、${…:?}、export；deploy.sh 的公開範例 JWT 跟 contract.go 一致、INSTANCE_SQL 跟 database.InstanceSQL 一致")
 EOF
 
 echo "== 三、dc.sh"

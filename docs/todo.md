@@ -129,7 +129,7 @@
 
 | 欄位 | 內容 |
 |---|---|
-| 狀態 | 規劃中：計畫書 [`docs/plans/t087-migration-in-deploy.md`](./plans/t087-migration-in-deploy.md) v1.2（2026-11-25 併入第二輪 review：外層逾時獨立注入、停止確認限本次與目標 DB、還原後用應用帳號驗證權限；Q1～Q4 與 Q-A～Q-C 已裁決；待複審；實作排在 T-084 之後） |
+| 狀態 | 進行中（`t087` 分支、⛔ 沒有合併進 `init`）：計畫書 [`docs/plans/t087-migration-in-deploy.md`](./plans/t087-migration-in-deploy.md) v1.2 待複審；程式與部署腳本已實作（第十節），dev 演練與 live 唯讀盤點還沒做；合併與換上 live 排在 I-141 上版（11-30）之後、跟 T-084 一次換檔 |
 | 優先度 | 中（主要價值：migration 失敗提早到換版之前發現） |
 | 分類 | 部署／資料庫 |
 | 建立日期 | 2026-11-20 |

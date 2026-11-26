@@ -1840,6 +1840,26 @@ live 由三個各自獨立的 compose stack 組成（live 的檔案都在 repo �
 - Go binary 內嵌前端靜態檔案（單一執行檔）
 - Python worker 與 HTTP server 各自獨立 container
 
+#### migration 的套用與啟動時的唯讀檢查（T-087）
+
+backend 啟動順序：載入設定 → 設定契約 → 連 DB → **migration**（下面兩種之一）→ Redis 探測 → 其餘。
+
+* `DATABASE_AUTO_MIGRATE=true`（dev compose）：照舊用 goose 自動套用（`database.RunMigrations`）。
+* **預設（`false`，live）：唯讀檢查**（`database.CheckApplied`）。在唯讀交易裡（PostgreSQL 的 `BEGIN READ ONLY`）讀 `goose_db_version`，每個 `version_id` 取最後一列的
+  `is_applied` 決定「已套用集合」（goose v3.21.1 跑 down 時會刪掉那個版本的紀錄；`is_applied=false` 的列防禦性地視為未套用），跟 embed 目錄的檔名解析出來的清單比對。
+  版本表不存在、查詢失敗、或 embed 的任何一支沒有套用（**含中間缺號**，⛔ 不只看最大版本）→ 記 Error（只有版本號與錯誤類別）並以非 0 結束；
+  DB 多出 embed 沒有的版本可以接受（記一行 Info；回滾到舊 image 時就是這種情況）。⛔ 不用 `goose.GetDBVersion`（版本表不存在時它會建表）。
+* **migration 模式**（同一支 binary，`cmd/server/migrate.go`）：只載入設定裡的 `database` 區段、連 DB、做完就結束；⛔ 不跑完整的設定契約、⛔ 不連 Redis、⛔ 不啟動排程與 HTTP。
+  輸出只有版本號、計數、耗時與 SQLSTATE（⛔ 不帶 DSN 或錯誤原文），每行以 `migrate: ` 開頭。
+  * `-migrate=status`（唯讀）：`required`、`applied`（數量與最大版本）、`pending`（含中間缺號）、`extra`、`fingerprint`（已套用集合的 SHA-256：排序後的版本以逗號串起來）。
+    另印 `instance`：實例識別（`system_identifier|database|oid|postmaster 啟動時間`，`database.InstanceSQL`；只有 PostgreSQL，其他印 `-`），
+    部署流程拿它跟 `deploy.sh` 用 `DB_CONTAINER` 查到的比對，確認兩條連線是同一個 DB。結束碼 0 成功、2 版本表不存在、1 其他。
+  * `-migrate=up`：先印套用前的狀態（`before …`）；`-expect-instance` 或 `-expect-fingerprint` 不符 → 結束碼 5、⛔ 沒有套用；pending 空 → 0。pending 低於已套用的最大版本（亂序）→ 1、⛔ 不套用。
+    逐支套用（goose `UpByOne`），每支記開始與結束；任何一支失敗就停下（結束碼 3，前面的已提交）；整體期限到了 → 4。最後印套用後的狀態（`after …`）。
+    PostgreSQL 的連線把 `application_name`（`trading-migrator-<run_id>`，`-run-id`）、`lock_timeout`（`-migrate-lock-timeout`，預設 5 秒）、`statement_timeout`
+    （`-migrate-statement-timeout`，預設 10 分鐘）放在連線的啟動參數（每一條新連線都帶，⛔ 不靠 `SET`）；整體期限 `-migrate-timeout`（預設 15 分鐘）。⛔ 沒有新增設定鍵。
+  * 部署流程怎麼用它（試跑、備份、具名容器、停止確認）見 `development-workflow.md`「部署腳本：失敗即停」。
+
 #### 設定契約（backend 啟動時檢查）
 
 backend 在 `config.Load()` 之後、**連 DB 之前**依下表檢查最終的設定（`backend/internal/config/contract.go` 的 `Validate`；I-132 的 E）。
@@ -1864,6 +1884,7 @@ backend 在 `config.Load()` 之後、**連 DB 之前**依下表檢查最終的�
 |---|---|---|---|---|---|
 | `APP_ENV` | 沒設定＝production | 決定下面「prod」的規則要不要生效 | 只能是 `production`／`dev`／`test`，其他值**一律擋下**（打錯字⛔ 不能默默變成寬鬆模式） | 無條件 | 全部 |
 | `DATABASE_DRIVER` | `sqlite` | DB 連線 | 必須是 `postgres` | 無條件 | prod |
+| `DATABASE_AUTO_MIGRATE` | `false` | backend 啟動時要不要自動套用 migration（T-087；`false`＝只做唯讀檢查） | ⛔ 不能是 `true`（live 的 migration 由 `deploy.sh` 在停機中套用；設定錯誤⛔ 不能退回自動套用）；dev compose 明確設 `true` | 無條件 | prod |
 | `DATABASE_DSN` | `../../output/stock_trading/trading.db`（config.yaml） | DB 連線 | 不能是空值；⛔ 不能是預設的 SQLite 路徑；**帳密⛔ 不能是 repo 裡的公開範例**：用 pgx 的 `pgconn.ParseConfig` 取出 driver 最終有效的帳密（userinfo、query 參數、key=value、`PG*` 環境變數、passfile），使用者＋密碼是 `trading:trading`（`docker-compose.yml`、dev compose、`docker-compose.postgres.yml`）、`user:password`、`root:password`（兩份 `config.yaml` 的註解），或密碼是 `trading`（`docker-compose.mysql.yml`）、`password`，都擋下。pgx 解析不了的 DSN 判 `invalid_value`；driver 不是 postgres 時⛔ 不解析帳密 | 無條件 | prod |
 | `SERVER_PORT` | `8080` | HTTP | 必須是 1～65535 的整數 | 無條件 | 全部 |
 | `REDIS_ADDR` | 空白（＝停用） | 快取、訊號佇列 | ⛔ 不能是空值（live 一定要有 Redis）；dev／test 允許空白＝停用 | 無條件 | prod |

@@ -899,7 +899,8 @@ Redis 卻從 11-02 17:39 停用到 11-03 10:58 才在下一次重啟時恢復。
 ### 部署腳本：失敗即停、build 之後才 down（`deploy.sh` 範本）
 
 repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 scripts 目錄，填 `PROJECT_DIR`（build 用的 git checkout）、`DEPLOY_BRANCH`、
-`REDIS_ENV_FILE`，以及查回測狀態用的 `DB_CONTAINER`、`DB_USER`（T-084；`DB_NAME` 預設 `trading`）。scripts 目錄要有 `compose.yml`（範本 `docker-compose.yml`）與 `.env`（範本 `.env.example`）。⛔ 不再 `export` 任何設定。
+`REDIS_ENV_FILE`，以及查回測狀態用的 `DB_CONTAINER`、`DB_USER`（T-084；`DB_NAME` 預設 `trading`）、migration 用的 `BACKUP_DIR`（權限 700）與 `TRIAL_PG_IMAGE`
+（跟 live 的 PostgreSQL 同一個主版本、主機上已經有的 image；T-087）。scripts 目錄要有 `compose.yml`（範本 `docker-compose.yml`）與 `.env`（範本 `.env.example`）。⛔ 不再 `export` 任何設定。
 同目錄的 `dc.sh` 範本是手動操作 compose 的小幫手（固定帶跟 `deploy.sh` 相同的參數、擋下 `config`、會改變狀態的子指令要加 `--yes`）。
 
 流程（任何一步失敗都回傳非 0，而且在 `down` 之前就停下；錯誤訊息⛔ 不帶機密）：
@@ -911,7 +912,8 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
 2. **最終設定的 JWT**：跑 `docker compose … config`，在記憶體裡用 awk 取出 backend 最終的 `AUTH_JWT_SECRET`，空值或公開範例值就停下。
    ⛔ 不把 config 寫到檔案或印到畫面，`config` 的錯誤訊息也⛔ 不顯示（可能帶出 `env_file` 的內容）。設定都在 scripts 目錄，跟 build 目錄 pull 到什麼無關，
    所以放在 pull 之前。
-3. `git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"`：只允許 fast-forward。
+3. **部署鎖**（T-087）：`flock -n` 取得 scripts 目錄的 `.deploy.lock`，拿不到（另一個 `deploy.sh` 正在部署同一個目標）就停下、⛔ 不等；鎖跟著程序，結束就放掉。
+   接著 `git -C "$PROJECT_DIR" pull --ff-only origin "$DEPLOY_BRANCH"`：只允許 fast-forward。
 4. **build（舊的服務還在跑）**：一次 build 一個服務，每次 build 之前 `MemAvailable` 要 ≥ `MIN_MEM_AVAILABLE_MB`（1536），不夠就停下、⛔ 不 build、⛔ 不 down，
    由人選擇改在低負載時段、或改用「先 down 再 build」的舊順序。門檻的依據：2026-11-16 在這台主機（約 8GB，dev 與 live 同機）冷 cache build
    backend 與 python-server，`MemAvailable` 從 5290MB 最低降到 4576MB（降 714MB）；門檻留下 build 之後約 800MB 的餘裕。
@@ -921,9 +923,43 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    （連 live DB、回收執行中的 `job_runs`、啟動排程器）。所以先用 `run --rm --no-deps -T --entrypoint grep backend -qF check-config ./trading-backend`
    在執行檔裡找旗標名稱（⛔ 不執行它；E 之前的程式與依賴的原始碼都沒有這個字串），找不到就停下——例如 build 目錄的程式比 E 舊、或為了回滾 checkout 了舊版。
    兩個 `run` 的結束碼分開判讀：探測的 1 才是「找不到旗標」，124 是逾時，其他是 `compose run` 本身出錯（訊息帶結束碼，⛔ 不說成找不到旗標）。
+   **migration（T-087，停機前）**：
+   * 5a 先 grep 執行檔確認新 image 認得 `-migrate`（找旗標名稱 `migrate-statement-timeout`；比照 `-check-config`，⛔ 不執行）；
+   * 5b 新 image 跑 `-migrate=status` 讀 live 的狀態（唯讀），記下 `fingerprint`（基準）、`pending` 與 `instance`（實例識別：`system_identifier|database|oid|postmaster 啟動時間`）；
+     再用 `DB_CONTAINER`／`DB_NAME` 以同一段 SQL（`INSTANCE_SQL`）查一次，**兩邊不同就停下**——版本指紋只涵蓋已套用的版本，兩個不同的 DB 可能相同，
+     備份、正式套用、停止確認必須是同一個 DB；
+   * 5c `pending` 不是空的 → **停機前試跑**：先確認試跑的三個名稱都⛔ 不存在（存在就停下、⛔ 不清理），建一個 `--internal` 的 docker 網路與拋棄式 PostgreSQL
+     （`TRIAL_PG_IMAGE`、⛔ 不開 port、臨時帳密：這一次產生的亂數密碼只經環境變數傳給 docker——在子 shell 裡 `export` 再呼叫 `timeout`／`docker`，
+     ⛔ 不用 `env KEY=值`（會留在程序參數裡）；容器裡確認標記表的 psql 用 libpq 的 `PG*` 環境變數，⛔ 不把 DSN 當參數），
+     從 live 的 postgres container 唯讀匯出 `pg_dump --schema-only --no-owner --no-acl` 與 `--data-only -t public.goose_db_version`（版本紀錄；只帶 schema 的話
+     goose 會在已經有物件的庫上從第一支重跑），直接接到拋棄式 container 還原（⛔ 不落地）；建標記表 `t087_trial_target`，用試跑的 DSN 確認它存在（DSN 指錯就停下）；
+     臨時庫的 `-migrate=status` 要等於 5b 的基準；再用 `docker run --network 試跑網路`（⛔ 不用 compose run——它會接上 live 的網路）跑 `-migrate=up -expect-fingerprint=基準`，
+     要成功而且之後 pending 是空的。本次建立的容器、試跑的 migrator、網路不論成功失敗都刪（trap），刪完確認都不存在；任何一步失敗都停下（還沒 down）。
+     ⚠️ 試跑只驗 SQL、物件依賴與套用順序：空表⛔ 沒有辦法驗證既有資料符不符合新的約束，也量不出大表改寫的耗時。
+
    設定檢查通過之後，`down` 之前**再查一次回測**：build 要好幾分鐘，這段期間舊的 worker 還在跑、會接走新送出的回測。這次擋下時新 image 已經 build 好、
    舊服務照常運作，回測結束後重跑 `./deploy.sh`。
-6. `down`（失敗就⛔ 不進 `up`）→ `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
+6. `down`（失敗就⛔ 不進 `up`）→ **migration（T-087，停機中；pending 空就跳過）** → `up -d --no-build`（用第 4 步 build 好的 image，⛔ 不在停機之後才 build）。
+   * 6a **備份**：先用 `DB_CONTAINER` 再查一次實例識別（down 之後實例變了就⛔ 不備份、⛔ 不套用）；`pg_dump -Fc` 到 `BACKUP_DIR`（檔名 `trading_<run_id>_<基準指紋前 12 碼>.dump`，
+     本次專屬；**原子地拒絕覆寫**：`.partial` 用 noclobber 建立、正式檔名用 `ln -T`（目的檔已經存在時一定失敗；目的路徑是目錄或指向目錄的符號連結時也直接失敗、⛔ 不把連結建到目錄裡）而⛔ 不用 `mv`（rename 會覆寫 pg_dump 期間才出現的同名檔），
+     連結之後確認是同一個檔才刪 `.partial`；權限 600），`pg_restore -l` 確認讀得出來（能不能還原由演練驗證）；失敗就⛔ 不套用。
+   * **正式套用**：具名的一次性容器 `compose run --rm --no-deps -T --name stock_trading-migrator-<run_id> backend ./trading-backend -migrate=up -run-id=<run_id> -expect-fingerprint=基準 -expect-instance=實例識別 …`
+     （上限：`lock_timeout` 5 秒、單一語句 10 分鐘、整體 15 分鐘），外層 `timeout -k 10 960`。`run_id` 是部署開始時的 UTC 時間戳加 6 位亂數，取得部署鎖時會印出來。
+   * **停止確認**（成功、失敗、逾時都做；外層 timeout 只砍得掉 docker CLI，⛔ 不代表容器與 DB 上的工作已經結束）：容器還在跑就 `docker stop -t 30`、再不停就 `docker kill`，
+     最後要不存在或已退出；部署目標 database 上 `application_name = 'trading-migrator-<run_id>'` 的連線數要歸零——等最多 60 秒 → 對**這些 pid** `pg_cancel_backend` →
+     再等 30 秒 → `pg_terminate_backend`（⛔ 不碰其他 application_name、其他 database）。任何一步確認不了就停下、印「需要人工確認 migrator 已停止」，⛔ 不印復原的下一步。
+     手動執行：`./deploy.sh --confirm-migrator-stopped <run_id>`。
+   * 6b 再跑一次 `-migrate=status`，pending 必須是空的。
+   * 6a、6b 任何失敗：⛔ 不 `up`（build 之後 `latest` 已經指向新 image，自動 up 會啟動新版）、⛔ 不自動 `goose down`；依失敗點印出下一步（下表），結束、非 0。
+
+   | 失敗點 | 處理 |
+   |---|---|
+   | 停機前（5a～5c、第二次回測檢查） | 停下，原服務照常運作；⛔ 沒有碰 live 的 schema |
+   | `down` 之後、套用之前（備份失敗、`-expect-fingerprint` 不符＝結束碼 5） | ⛔ 沒有碰 schema：用部署前的回滾標籤把舊 image 換回 `latest`，`up -d --no-build` |
+   | 套用到一半（結束碼 3、4、外層 timeout） | 停止確認通過之後：用 `-migrate=status` 查最後成功的版本並對照實際 schema；已提交的都是「先加」、舊 image 確認相容才換回舊 image，否則從備份還原到乾淨的 DB（新 database 用 `pg_restore --role=trading_user --no-owner --no-acl` 還原、核對指紋與筆數、用應用帳號實測權限，再改名切換）後啟動舊 image |
+   | 全部套用成功、新服務 readiness 失敗 | 優先換回已驗證相容的舊 image、保留新 schema（回滾窗口內舊版必須能讀寫新 schema） |
+
+   ⚠️ 有 migration 的部署窗口＝備份＋套用上限（15 分鐘）＋停止確認＋可能的還原，⛔ 不能只算套用的時間。完整的還原程序與演練結果見 `docs/plans/t087-migration-in-deploy.md` 第五、六節。
 7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
    上限是 **90 秒的總截止時間**（`READY_TIMEOUT_SEC`），⛔ 不是檢查次數：每個 docker 呼叫都用 host 的 `timeout`（coreutils，preflight 會確認有）包住，
    單次上限取 `READY_REQUEST_TIMEOUT_SEC`（5 秒）與剩餘時間較小的那個，`wget` 也帶 `-T`。請求卡住或回應緩慢時最多超過約 1 秒（`SECONDS` 的精度），
@@ -993,7 +1029,8 @@ scripts 目錄試跑（腳本只認自己所在的目錄）。
 
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
 （先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上；經過見 `git show 85849b9:docs/plans/i132-redis-silent-disable.md` 第八節）。
-⚠️ 這一版還⛔ 沒有回測檢查。換上 T-084 的範本時要換的行從三行變五行（加 `DB_CONTAINER`＝`postgres-postgres-1`、`DB_USER`＝`trading_user`；`DB_NAME` 兩邊都是 `trading`），
+⚠️ 這一版還⛔ 沒有回測檢查與 migration 的步驟。換上 T-084＋T-087 的範本時要換的行從三行變七行（加 `DB_CONTAINER`＝`postgres-postgres-1`、`DB_USER`＝`trading_user`、
+`BACKUP_DIR`（live 主機上權限 700 的備份目錄）、`TRIAL_PG_IMAGE`（live 的 PostgreSQL 同一個主版本、主機上已經有的 image；盤點時確認）；`DB_NAME` 兩邊都是 `trading`），
 換上之前另要唯讀核對 `DB_CONTAINER`／`DB_NAME` 就是三個服務正在用的 DB（程序見 `docs/plans/t084-deploy-backtest-check.md` 第八節）。
 
 ### python 的套件版本與升級（T-083）
@@ -1154,6 +1191,11 @@ lazy model load（4.17 MB joblib ＋ SHAP background）的暖機成本。
 
 **migration 是 embed 進 binary 的**，所以「schema 有沒有更新」等於「image 有沒有重建」。
 `docker compose up -d` 只重建容器不重建 image（原記於 `todo.md` T-067，已收斂）。
+
+**T-087 之後**（live 換上 T-087 的 `deploy.sh` 與程式之後）：migration ⛔ 不再在 backend 啟動時套用，改由 `deploy.sh` 在 `down` 之後、`up` 之前套用
+（停機前先在拋棄式 PostgreSQL 上試跑，停機中先備份；見「部署腳本：失敗即停」），backend 啟動時只做唯讀檢查。
+套用時三個應用服務都已經停了，⛔ 不會跟排程的寫入搶鎖；下面「挑窗口」的考量仍然適用在**部署時段**本身（停機的影響、部署後的確認）。
+dev 的 backend 照舊在啟動時自動套用（dev compose 的 `DATABASE_AUTO_MIGRATE: "true"`）；本機直接 `go run` 時要自己設這個變數，或先跑一次 `./trading-backend -migrate=up`。
 
 #### 挑窗口：先確認哪些排程會寫到你要改的表
 

@@ -15,6 +15,8 @@ services:
     #     environment 的優先順序比 env_file 高，寫了就會蓋掉（就算展開成空字串也一樣）。
     #     scripts/test-deploy-sh.sh 會擋重複的鍵。
     # compose 檔裡⛔ 沒有必填的 ${…:?}，手動執行 docker compose ps／logs 不必先帶入任何變數。
+    # DATABASE_AUTO_MIGRATE ⛔ 不設（預設 false，T-087）：backend 啟動時只做唯讀檢查，migration 由 deploy.sh 在停機中套用；
+    # production 設 true 違反設定契約。
     environment:
       DATABASE_DRIVER: postgres
       DATABASE_DSN: postgres://trading:trading@postgres:5432/trading?sslmode=disable

@@ -156,7 +156,7 @@ if [ -z "$NETWORK_NAME" ]; then
 fi
 
 # ── 階段 C：執行已編好的測試執行檔 ──────────────────────────────────
-echo "==> [3/4] 跑 migration 驗證（up → 驗 schema → 分段 down 到 0 → NOT VALID 約束情境）"
+echo "==> [3/4] 跑 migration 驗證（up → 驗 schema → 分段 down 到 0 → NOT VALID 約束情境；T-087 的唯讀檢查、migrator 連線、lock_timeout、整體期限）"
 docker run --rm \
   --network "$NETWORK_NAME" \
   --cpus="$CPUS" \
@@ -166,7 +166,7 @@ docker run --rm \
   -e POSTGRES_MIGRATION_DSN="$POSTGRES_DSN" \
   -v "$BIN_DIR":/out:ro \
   "$RUN_IMAGE" \
-  /out/migrate-postgres.test -test.v -test.run 'TestPostgresMigrations'
+  /out/migrate-postgres.test -test.v -test.run '^(TestPostgresMigrations|TestPostgresReadStatus|TestPostgresMigrator|TestPostgresMigrateUp)'
 
 # ── 階段 D：收尾由 trap 處理 ────────────────────────────────────────
 echo "==> [4/4] postgres migration 驗證通過"

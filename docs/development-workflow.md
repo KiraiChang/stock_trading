@@ -957,7 +957,7 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
    | 停機前（5a～5c、第二次回測檢查） | 停下，原服務照常運作；⛔ 沒有碰 live 的 schema |
    | `down` 之後、套用之前（備份失敗、`-expect-fingerprint` 不符＝結束碼 5） | ⛔ 沒有碰 schema：用部署前的回滾標籤把舊 image 換回 `latest`，`up -d --no-build` |
    | 套用到一半（結束碼 3、4、外層 timeout） | 停止確認通過之後：用 `-migrate=status` 查最後成功的版本並對照實際 schema；已提交的都是「先加」、舊 image 確認相容才換回舊 image，否則從備份還原到乾淨的 DB（新 database 用 `pg_restore --role=trading_user --no-owner --no-acl` 還原、核對指紋與筆數、用應用帳號實測權限，再改名切換）後啟動舊 image |
-   | 全部套用成功、新服務 readiness 失敗 | 優先換回已驗證相容的舊 image、保留新 schema（回滾窗口內舊版必須能讀寫新 schema） |
+   | 全部套用成功、新服務 readiness 失敗 | 優先換回已驗證相容的舊 image、保留新 schema（回滾窗口內舊版必須能讀寫新 schema）；服務已經 `up` 過，回滾要**先 `down`**（見下方「部署失敗時」） |
 
    ⚠️ 有 migration 的部署窗口＝備份＋套用上限（15 分鐘）＋停止確認＋可能的還原，⛔ 不能只算套用的時間。完整的還原程序與演練結果見 `docs/plans/t087-migration-in-deploy.md` 第五、六節。
 7. **readiness**：從 container 內部打 `/health`（busybox 的 `wget`），要同時「拿到成功回應」而且「backend 的 `RestartCount` 是 0」才算通過。
@@ -975,6 +975,21 @@ repo 的 `deploy.sh` 是範本（I-132 的 A3，2026-11-16）：複製到 script
 在 `down` **之後**失敗時，三個服務都已經停了：把要退回的服務的 `latest` 標回回滾標籤，再 `compose up -d --no-build`（⛔ 不帶 `--no-deps backend`，
 否則 python 兩個服務不會起來），然後**分別**確認三個服務：都 `Up`、各自的 `RestartCount` 0、backend 的 `/health`、從 backend container 打
 `http://python-server:8001/health`、python-worker 的 log 沒有 `Traceback`。只看 backend 的 `/health` 證明不了 python 恢復了。
+⚠️ **`up` 之後才失敗（readiness 失敗、RestartCount 不是 0）時，服務⛔ 不是停的**：容器都還在（backend 可能在重啟循環，python 兩個可能正常在跑）。
+這時只把 `latest` 標回回滾標籤、再 `up -d --no-build` ⛔ 不夠——Compose ⛔ 不把「標籤指向別的 image」當成設定變更，**還在跑的容器⛔ 不會被重建**，繼續用新 image。
+要先 `compose down`，再 `compose up -d --no-build`（或 `up -d --no-build --force-recreate`）；最後**逐一核對**三個容器的 image ID 等於回滾標籤的 ID，
+再做上面的三項確認（`C` 是下方打標籤時的案號；三行輸出都要是 `same`）：
+
+```bash
+for s in backend python-server python-worker; do
+  run="$(docker inspect -f '{{.Image}}' "stock_trading-$s-1")"
+  tag="$(docker image inspect -f '{{.Id}}' "stock_trading-$s:pre-$C")"
+  [ -n "$run" ] && [ "$run" = "$tag" ] && echo "$s same" || echo "$s DIFFERENT"
+done
+```
+
+2026-11-26 T-087 的 dev 演練 3 踩到（Compose v5.7.0）：readiness 失敗後照舊寫法回滾，只有當時在重啟的 backend 被重建，python 兩個還是新 image；先 `down` 再 `up` 才三個都換回來
+（紀錄在 `docs/plans/t087-migration-in-deploy.md` 第六節）。
 ⚠️ **回滾目標要在部署前用標籤留住，而且要標「正在跑的 container 的 image」，⛔ 不是 `latest`**：前一次部署如果 build 完才失敗，
 `latest` 已經指向沒上線的新 image，跟正在跑的版本不同。做法（`C` 是案號；image 不存在時 `docker image inspect` 失敗、⛔ 不打標籤，要記成「沒有回滾目標」）：
 

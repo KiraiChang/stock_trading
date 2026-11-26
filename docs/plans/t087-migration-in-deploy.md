@@ -234,6 +234,119 @@
    權限實測要失敗，證明這一步驗得出問題。另外用作業隔離 volume 上的 live 複本量 dump 與還原的耗時。
 5. **舊 image 碰到較新的 schema**：T-087 之前的 image 啟動時⛔ 沒有改動 schema（自動套用無事可做）；T-087 之後的舊 image 啟動時唯讀檢查通過（DB 多出的版本被接受）。
 
+### dev 演練的做法（v1.3，2026-11-26）
+
+**環境**：全部在 dev 帳號的 rootless Docker 裡做。live 跑在另一個帳號的 Docker，dev 帳號看不到，所以演練⛔ 不會碰到 live。
+
+* **repo 外的作業目錄** `~/t087_rh/`（權限 700，⛔ 不進版控）：
+  * `scripts/`：演練用的 `deploy.sh` 副本、`compose.yml`、`.env`（600）；
+  * `redis/.env`；
+  * `build/`：本機 repo 的 clone，origin 指向本機 repo、⛔ 不連 GitHub；
+  * `backups/`（700）；
+  * `creds/`：臨時密碼；
+  * `rec/`：每一項的輸出與耗時。
+* **DB 與 Redis 的 stack**：dev compose 加作業隔離 override，做法照 `development-workflow.md`「在 dev 查 live 的真實資料：作業專用 volume」：
+  * 新的作業 volume `stock_trading_dev_t087_pgdata`、`stock_trading_dev_t087_redisdata`；
+  * 撤掉所有 port、用臨時密碼；
+  * 只啟動 postgres 與 redis。
+
+  跟 live 一樣，DB 在另一個 stack，`deploy.sh` 的 `down` ⛔ 不會停到它。
+* **資料**：用 11-13 的 live 分析快照（`~/i131_merge/live/` 那份；migration 版本 76、51 張表），先核對 SHA-256，再還原成作業庫的 `trading`。
+  帳號比照第五節：
+  * 管理帳號：image 的 `POSTGRES_USER`（superuser）。
+  * 應用帳號：`trading_user`（LOGIN、非 superuser、CREATEDB），擁有所有物件（`pg_restore --no-owner --no-acl --role=trading_user`）。
+
+  backend、python 兩個服務和 `deploy.sh` 的 `DB_USER` 都用 `trading_user`。
+* **應用 stack**：`compose.yml` 是 repo `docker-compose.yml` 的副本，只改四處：
+  * `name: stock_trading_dev_t087`；
+  * 網路改成 external 的 `stock_trading_dev_net`，拿掉 `proxy_net`；
+  * 三個服務的 `DATABASE_DSN` 從 `environment` 移到 env_file，改帶應用帳號與臨時密碼；
+  * env_file 的路徑。
+* **`deploy.sh` 只改「要填的值」**：`DB_CONTAINER=stock_trading_dev-postgres-1`、`DB_USER=trading_user`、`DB_NAME=trading`、`TRIAL_PG_IMAGE=postgres:16-alpine`，
+  另外填 `BACKUP_DIR`、`PROJECT_DIR`、`DEPLOY_BRANCH`、`REDIS_ENV_FILE`。
+* **演練用的 migration 與故障注入**：放在 `build/` 裡，**⛔ 不 commit**。`deploy.sh` 只擋追蹤中檔案的修改，未追蹤的檔案照樣會進 build context，go:embed 讀得到。
+  編號接在 080 之後（081、082）。
+
+**順序**：每一項都記錄開始與結束時間、`deploy.sh` 的結束碼與關鍵輸出、試跑／備份（含檔案大小）／套用／還原各自的耗時。
+
+0. **R0 部署舊版**：`build/` checkout 在 `init`，用 `init` 的 `deploy.sh` 部署。舊 backend 啟動時會自動套用 077～080，跟 live 現在的做法相同。
+   三個 image 打上回滾標籤 `:rh-init`。
+1. **R1 第一次部署 T-087**（第七節的縮影）：`build/` 換到 `t087`，用 `t087` 的 `deploy.sh`。
+   * pending 是空的 → 只跑 5a、5b，⛔ 沒有試跑、備份與套用；
+   * backend 走唯讀檢查，readiness 通過；
+   * 打上回滾標籤 `:rh-t087`。
+2. **演練 1（前一支成功、下一支失敗）**：
+   * 081：在 `job_runs` 加一個可為 NULL 的欄位；
+   * 082：加 `CHECK (job_name <> 't087_rh_poison')`；
+   * 部署前，用管理帳號在作業庫的 `job_runs` 插一筆 `t087_rh_poison`。試跑的臨時庫只有 schema、沒有這筆資料，所以試跑會通過。
+
+   要證明的照上面第 1 項。之後把 `:rh-t087` 換回 `latest`，`up -d --no-build`，確認 backend 的唯讀檢查接受多出來的 081（第 5 項的後半）。
+3. **演練 4（備份可還原）**：接著演練 1 的狀態，用演練 1 的備份照第五節的五步做。
+   * 反證：另建一個 database，用管理帳號還原、⛔ 不帶 `--role`，權限實測要失敗；做完刪掉。
+   * 切換後用 `:rh-t087` 啟動、跑部署後確認，並確認 081 的欄位⛔ 不在。
+
+   這一步做完，作業庫回到 080。
+4. **演練 2（外層逾時）**：
+   * 事先用應用帳號建一張表 `t087_rh_lockme`（試跑的 schema 匯出會帶到它）；
+   * 081 同演練 1；082 是 `ALTER TABLE t087_rh_lockme ADD COLUMN …`；
+   * 部署前開兩條連線：
+     * 持有鎖的連線：`application_name` 是 `t087-rh-holder`，在交易裡 `LOCK TABLE t087_rh_lockme IN ACCESS SHARE MODE`。
+       用 ACCESS SHARE 是因為試跑與備份的 `pg_dump` 也要拿 ACCESS SHARE，要讓它們⛔ 不被擋；只有 082 的 ALTER 會等。
+     * 模擬別次 migrator 的連線：`application_name` 是 `trading-migrator-decoy`，閒置。
+   * 演練用的 `deploy.sh`：鎖等待、語句上限都設成 60m，整體期限 3600 秒，**只把外層 timeout 設成 30 秒**。
+
+   要證明的照上面第 2 項。做完放掉持有鎖的連線。
+5. **演練 3（schema 成功、服務換版失敗）**：
+   * 082 換成會成功的版本（`t087_rh_lockme` 再加一個欄位）。
+   * 另加一個未追蹤的 Go 檔做故障注入：⛔ 不帶參數啟動（也就是正式服務）時，3 秒後結束。`-check-config`、`-migrate` 都帶參數，⛔ 不受影響，所以只有新 image 的服務起不來。
+   * 預期 readiness 失敗，然後換回 `:rh-t087` 啟動。
+   * **讀寫的確認**：
+     * backend 與 python-server 的 `/health` 正常，RestartCount 是 0；
+     * 照「dev 取得 JWT」建一個驗收帳號，送一個 1 檔、短區間的回測，python-worker 接手並跑到 `done`。這樣 backend 寫、worker 讀寫都有走到。
+   * 最後換成 `:rh-init` 啟動一次（第 5 項的前半）：啟動前後的 fingerprint，以及 `t087_rh_lockme`、`job_runs` 的欄位清單，都⛔ 沒有變。
+
+**結束**：
+* 每一項的紀錄整理進本節。
+* 應用 stack `compose down`（project `stock_trading_dev_t087`，⛔ 不帶 `-v`），刪掉 `:rh-*` 標籤，確認試跑沒有殘留（應為 0）；DB 與 Redis 用 `stop`。
+* 作業 volume、`backups/`、`~/t087_rh/` 裡都有 live 的真實資料：先列出要刪的對象給使用者確認，再逐一指名刪除（⛔ 不用 `down -v`）。
+
+### dev 演練紀錄（2026-11-26 09:46～10:20，`t087` 分支 `50a5ee2`）
+
+**結論**：R0、R1 與五項演練都照預期走完。發現一個部署手冊的缺口：readiness 失敗之後的回滾，只重新標 `latest` 再 `up -d --no-build` 是不夠的（見下方「發現」）。
+
+**環境**：照上一節的做法建好。11-13 的 live 快照核對 SHA-256 OK，用管理帳號帶 `--role=trading_user` 還原，rc 0、68 秒；51 張表、擁有者例外 0，PostgreSQL 16.15，DB 479 MB。
+隔離檢查：`config` 檢查通過；兩個容器只掛作業 volume，⛔ 沒有發布 port；`ss` 上 15432、16379、18080、18001 都⛔ 沒有在監聽。
+
+| 項目 | 結果 |
+|---|---|
+| R0 舊版（`init` 的 `deploy.sh`） | 第一次被設定契約擋在 `down` 之前（`FINMIND_API_KEY:public_example`；演練的 `.env` 是範本的空值，改成假的值）。第二次 rc 0：舊 backend 啟動時套用了 077～080，readiness 第 1 次確認就通過 |
+| R1 第一次部署 T-087 | rc 0：`pending -`，只跑 5a、5b；⛔ 沒有試跑、備份、套用（`backups/` 是空的、⛔ 沒有試跑容器）。backend 的 log 是 `schema check passed (read only)`、required 80；`goose_db_version` ⛔ 沒有新增任何一列 |
+| 演練 1（前一支成功、下一支失敗） | 試跑 81、82 都 ok（臨時庫沒有資料）。正式套用：81 ok，82 `failed (sqlstate 23514)`，`after pending 82`，結束碼 3；停止確認通過，⛔ 沒有 `up`。`status` 是 applied 81、pending 82；欄位在、約束不在，⛔ 沒有連線殘留。`:rh-t087` 換回 `latest` 啟動：唯讀檢查通過，並記一筆 `database has migrations newer than this image (accepted)`，extra 81；三個服務的 RestartCount 都是 0 |
+| 演練 4（備份可還原） | 演練 1 的備份（`pg_restore -l` 讀得出來）用**應用帳號**建庫、還原：rc 0、53 秒。fingerprint 等於 base（`dc284764…`）。逐表筆數：54 張表裡只有 `goose_db_version` 差 1（失敗的庫多 081 那一列），其他 53 張相同。權限實測：擁有者例外 0、54 張表都 SELECT 得到、`job_runs`／`backtest_jobs`／`candles`／`position_analyses` 的 DML 都成功（之後 ROLLBACK）、43 個 sequence 都能 `nextval`。**反證**：管理帳號、⛔ 不帶 `--role` 還原，擁有者例外 245 個，權限實測在第一張表就 `permission denied`（rc 3），做完刪掉。兩個 database 都⛔ 沒有連線之後，用應用帳號改名（70 ms），應用帳號有權限。用 `:rh-t087` 啟動通過，fingerprint 等於 base，081 的欄位與 082 的約束都⛔ 不在 |
+| 演練 2（外層逾時） | 部署前另開三條連線：持有 ACCESS SHARE 的 `t087-rh-holder`；閒置的 `trading-migrator-decoy`；**另一個 database**（`trading_failed_*`）上 `application_name` 跟本次完全相同的連線（`DEPLOY_RUN_ID` 事先固定）。試跑通過。正式套用：81 ok，82 開始等鎖；30 秒後外層 timeout 到期 → 停止確認：容器還在（running），`docker stop` → 等 60 秒，連線還在 1 條 → `pg_cancel_backend` → 歸零 → 才印復原訊息（rc 1，外層 timeout 那一條）。三條另開的連線都還在，鎖也還在；082 已回滾（欄位⛔ 不在、`pending 82`），81 已提交。具名容器⛔ 沒有殘留 |
+| 演練 3（schema 成功、服務換版失敗） | 試跑、備份、套用 82 都 ok，`pending -`；`up` 之後 backend 重啟（RestartCount 2），readiness 判定失敗，⛔ 沒有自動回滾。回滾到 `:rh-t087` 之後：backend 與 python-server 的 `/health` 都 ok，RestartCount 都是 0，唯讀檢查接受 extra 81、82；用新的驗收帳號送 1 檔回測（`2330`，01-02～03-31），python-worker 跑到 `done`，`backtest_results` 有 1 筆，worker 的 log ⛔ 沒有 Traceback |
+| 第 5 項前半（T-087 之前的 image） | 換成 `:rh-init`（down 之後才 up）：舊 backend 啟動時跑 goose，回報 `migrations applied … version 82`，⛔ 沒有要套用的。啟動前後的快照完全相同：`goose_db_version`（83 列，md5 相同）、public 的 741 個欄位、124 個約束 |
+
+**耗時**（DB 479 MB，`-Fc` 備份約 88 MB；live 現在的資料比 11-13 多，上 live 前要用盤點的 DB 大小重新估）：
+* build：backend 有改程式時約 2 分 10 秒；python 兩個用快取，各約 1 秒。
+* 試跑（建網路、臨時 PostgreSQL、匯 schema、status、up、清理）：7 秒。
+* `down`：1～11 秒。
+* 備份（`pg_dump -Fc` 加 `pg_restore -l`）：37～38 秒；單獨的 `pg_dump -Fc`：46 秒。
+* 正式套用：每支 10 ms 左右。
+* 停止確認：正常結束時 1 秒內；外層逾時時 62 秒（STOP_WAIT 60 秒之後才 cancel）。
+* 還原（應用帳號）：53 秒；改名：70 ms。
+* 停機時間：演練 3 從 `down` 到 readiness 判定共 41 秒；演練 2 從 `down` 到印出復原訊息共 2 分 21 秒（其中外層 timeout 30 秒、停止確認 62 秒）。
+
+**跟做法不同的地方**：
+* 演練 3 的故障注入改成「⛔ 不帶參數啟動時**立刻**結束」，⛔ 不是原本寫的 3 秒後才結束：R1 的 readiness 第 1 次確認就通過，表示 backend 3 秒內就會回 `/health`，所以延遲 3 秒才結束的話，readiness 可能誤判成通過。
+* 演練 2 多加了一條連線：另一個 database 上、`application_name` 跟本次相同，用來證明停止確認只限目標 DB。
+* 演練的 `.env` 加了假的 `FINMIND_API_KEY`（理由見上表 R0）。
+
+**發現（部署手冊的缺口，2026-11-26 已修進 `development-workflow.md`「部署腳本：失敗即停」的「部署失敗時」）**：readiness 失敗時三個服務都已經 `up`、還在跑（backend 在重啟循環，python 兩個正常在跑）。照手冊把 `latest` 標回回滾標籤、再 `up -d --no-build`，
+**只有 backend 被重建**（它當時不是 running）；python 兩個容器⛔ 沒有被重建，還是用新 image（Compose v5.7.0：image 的標籤改了，⛔ 不算設定變更）。
+先 `down` 再 `up -d --no-build`，三個都換回了回滾標籤的 image（逐一用 image ID 核對）。手冊「在 `down` 之後失敗時，三個服務都已經停了」只適用於 6a、6b 的失敗；
+readiness 失敗的回滾要先 `down`（或 `up -d --no-build --force-recreate`），最後還要逐一核對容器的 image ID 等於回滾標籤。
+
 ## 七、上 live
 
 * 前提：T-084 已實作並通過 review；T-087 的演練全部通過。兩者合併成**一次** live `deploy.sh` 換檔（照 I-132「先試跑、再換檔」，T-084 第八節的核對一併做）。
@@ -346,3 +459,5 @@
 | v1 | 2026-11-25 | 初版：依 2026-11-25 裁決（Q1 停機中正式套用＋停機前試跑、Q2 唯讀檢查、Q3 python 不動、Q4 先 T-084）；試跑帶入 `goose_db_version` 的紀錄並核對指紋；復原分支四種；dev 演練四項；三項待裁決 |
 | v1.1 | 2026-11-25 | 併入 v1 review：[1] 部分成功演練改成依資料觸發（第二支的約束只有正式演練庫的資料會違反），要證明試跑通過、正式套用第一支已提交、第二支失敗、腳本維持停機、能恢復舊服務；另加外層逾時演練；[2] 正式 migrator 用具名容器與 `application_name`，新增 D7 停止確認（容器退出、`pg_stat_activity` 歸零，必要時 cancel／terminate），重試、還原、啟動舊服務前一定先做；[3] 更正 goose down 會刪除版本紀錄，補實際跑 down 的測試；第九節三項依建議裁決：還原到乾淨的 DB 的五步程序、部署窗口計入備份與還原、試跑用獨立網路與目標標記表 |
 | v1.2 | 2026-11-25 | 併入 v1.1 review：[1] 外層逾時改成獨立的故障注入（migrator 自己的上限拉長、只縮短外層 timeout），證明停止確認找到具名容器、目標 DB 上本次的連線歸零之前⛔ 沒有復原動作；`application_name` 帶本次的 `run_id`、停止確認只限目標 DB 與本次的 pid；[2] 還原角色定為 `trading_user`（`--role`、新庫的 owner），改名前用應用帳號實測讀、寫、sequence 權限與擁有者；盤點加現有擁有者與授權；演練加權限的反證 |
+| v1.3 | 2026-11-26 | 第六節補 dev 演練的做法：作業隔離的 DB／Redis 加上 `docker-compose.yml` 副本的應用 stack、11-13 的 live 快照、R0 舊版與 R1 第一次部署、五項演練的順序（1→4→2→3，第 5 項併進 1 與 3）、演練用的 migration 與故障注入只放未追蹤檔 |
+| v1.4 | 2026-11-26 | 第六節記 dev 演練紀錄：R0、R1 與五項演練都照預期；各步的耗時；跟做法不同的三處；發現 readiness 失敗後的回滾要先 `down`（或 `--force-recreate`），已修進部署手冊（含逐一核對 image ID）；演練資料已刪除 |

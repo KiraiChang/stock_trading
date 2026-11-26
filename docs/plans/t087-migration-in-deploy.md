@@ -408,6 +408,70 @@ dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 li
   9. 測試用的 database 與帳號都已刪除。
 * 第一次執行有 1 項失敗：腳本拿切換後的快照去跟「權限實測之前」比，sequence 因為 `nextval` 跳號而不同。這是腳本比錯對象，⛔ 不是程序的問題；改成跟「權限實測之後」比，跳號另外確認剛好 +2，第二次全部通過。
 
+### live `deploy.sh` 換檔程序（草稿，2026-11-26；T-084＋T-087 一次換）
+
+**時機與順序**：11-30 I-141 上 live 之後；t084、t087 合併進 `init` 並推上去之後；任何一個⛔ 沒有在部署的時段（只換腳本、⛔ 不部署、⛔ 不碰服務）。
+順序一定是「合併 → 換檔 → 第一次部署」：
+* 換檔前⛔ 不能用舊的 `deploy.sh` 部署合併後的程式。T-087 的 backend 預設只做唯讀檢查，舊腳本又⛔ 沒有套用 migration 的步驟，有待套用的版本時 backend 會起不來。
+* 新的 `deploy.sh` 碰到 T-087 之前的程式，會停在 5a（新 image 不認得 `-migrate`），停下時服務⛔ 沒有被 down。所以換檔比合併早也不會出事，只是不能部署。
+
+**要改的行**：範本「要填的值」裡的 6 行。`PROJECT_DIR`、`DEPLOY_BRANCH`、`REDIS_ENV_FILE` 沿用 live 現在的值，加上 `DB_CONTAINER`、`DB_USER`、`BACKUP_DIR`。
+`TRIAL_PG_IMAGE`、`DB_NAME` 的預設值就是 live 的值（第七節盤點）。`development-workflow.md` 原本寫的「七行」已經更正為六行。
+
+**事先算好的 SHA-256**（草稿依 `t087` 分支的 `deploy.sh`；i140、i141 都⛔ 沒有改 `deploy.sh`，合併後應該不變）：
+* live 現在的 `deploy.sh`：`abcf1c01…`（init 版的範本只改 3 行；第七節盤點）；
+* 範本（合併後 `origin/init` 的 `deploy.sh`）：`f84d525f23a7a1c2…`；
+* 換上的新檔：`b3cd697ff4b6fdf8…`。
+
+合併之後先在 dev 核對 `origin/init:deploy.sh` 的 SHA-256 還是 `f84d525f…`；不同就重算新檔的 SHA-256、重做兩支腳本與交付區塊，並重新實測。
+
+**兩支輔助腳本**（repo 外的 `~/t087_swap/`，700；含 `SHA256SUMS`、交付用的 base64 區塊、預期的新檔）：
+* `t087swap_prep.sh`（`215d2a43…`）：
+  * 核對範本的 SHA-256；
+  * 暫存檔、`.partial` 已經存在就停下，⛔ 不覆寫也⛔ 不刪；
+  * 6 行逐一替換，每一行在範本裡都要剛好 1 行，換完也要剛好 1 行；
+  * 跟範本比要剛好改了 6 行，新檔的 SHA-256 要相符；
+  * 權限沿用舊檔，才把 `.partial` 改名成 `deploy.sh.t087`；
+  * 任何一項不符就停下，只清掉這一次建立的暫存檔。
+* `t087swap_dbcheck.sh`（`4101e7fe…`）：T-084 第八節的「核對查的是正在用的那個 DB」。
+  * 三個服務 DSN 的 host 要是 `postgres` 或 `postgres-postgres-1`、database 要是 `trading`（⛔ 不印 DSN 與密碼）；
+  * 從 python-server 用它自己的 DSN 查實例識別（SQL 跟 `deploy.sh` 的 `INSTANCE_SQL` 相同），跟用 `DB_CONTAINER`／`DB_USER`／`DB_NAME` 查到的逐字比對；
+  * DSN 只在 python-server 容器內從環境變數讀，⛔ 不經過腳本。
+
+**dev 實測**（2026-11-26）：
+* 產生腳本：
+  * 正常情況：產生的檔案跟預算的新檔完全相同，權限沿用舊檔；
+  * 範本被改過、暫存檔已存在、`.partial` 已存在：三種都停下，原本就存在的檔案⛔ 沒有被動到；
+  * 反證：範本少一行、多一行（另外重算範本的 SHA-256，讓 SHA 那關先放行）都停下，⛔ 沒有留下暫存檔。
+* 核對腳本（dev 的 backend、python-server 與 dev postgres）：
+  * 正常情況：全部一致；
+  * 反證：`DB_NAME` 填錯時，DSN 的 database 與實例識別都判成不一致、rc 1。
+* 兩支 shellcheck 都⛔ 沒有警告。
+* 交付區塊在 zsh、bash 模擬每行前後多出空白貼上，還原出來的檔案都跟原檔相同。
+* 步驟指令每行 ≤ 78 字元，`zsh -n`、`bash -n` 都通過。
+* 反證用的 `sed` 只換掉 `DB_CONTAINER` 一行。
+* 換檔那一行：備份檔已經存在時整串停下（舊檔、暫存檔都⛔ 沒有動）；正常時先備份、再換上。
+
+**步驟**（live 專人執行；在 scripts 目錄、用部署帳號 `app`）：
+
+| 步驟 | 做什麼 | 預期 |
+|---|---|---|
+| 1 | 核對 live 現在的 `deploy.sh`，確認三個暫存檔名都不存在 | `abcf1c01…`；三個都 `No such file` |
+| 2 | build 目錄 `git fetch origin init`（⛔ 不動工作區），`git show FETCH_HEAD:deploy.sh` 存成 `deploy.sh.tmpl` | 範本 `f84d525f…`；build 目錄追蹤中的檔案⛔ 沒有修改（0） |
+| 3 | `mkdir -m 700 /opt/stacks/deploy/db-backups` | `700 app`；目錄已經存在就停下回報 |
+| 4 | 貼上 `t087swap_prep.sh` 的區塊、核對腳本的 SHA-256，再執行 | 腳本 `215d2a43…`；新檔 `b3cd697f…`；印出的 8 個值跟上面相同 |
+| 5 | 貼上 `t087swap_dbcheck.sh` 的區塊、核對腳本的 SHA-256，再執行 | 腳本 `4101e7fe…`；「全部一致：可以繼續換檔」。不一致就停下、⛔ 不換檔 |
+| 6 | `./deploy.sh.t087 --preflight` | `回測：pending 0、running 0`、`preflight 通過`。有回測在跑就是擋下，等它結束再試 |
+| 7 | 反證：另存一份 `DB_CONTAINER` 填錯的暫存檔跑 `--preflight`，做完刪掉 | 停下「找不到在跑的 DB container DB_CONTAINER=no-such-pg」、rc 1 |
+| 8 | `./deploy.sh.t087 --confirm-migrator-stopped swapcheck`（假的 run_id；只讀） | `停止確認通過`（⛔ 沒有容器、⛔ 沒有連線，所以⛔ 不會 stop／cancel 任何東西） |
+| 9 | 備份舊檔（`deploy.sh.bak-日期時間`，已經存在就整串停下）、換上新檔，再跑一次 `./deploy.sh --preflight`，刪掉範本與兩支腳本 | `deploy.sh` 是 `b3cd697f…`、備份是 `abcf1c01…`；preflight 通過 |
+
+**換檔之後的第一次部署**（部署窗口內；部署手冊 A 段的人工查詢照做、跟 `deploy.sh` 的結果對照一次）：
+* 預期 5a 通過；5b 的 `pending -`、fingerprint `dc284764…`（11-28 I-139 套用 080 之後是 1～80）、實例識別一致；`⛔ 沒有待套用的 migration`，⛔ 沒有試跑、備份、套用；
+* readiness 通過；backend 的 log 有 `schema check passed (read only)`、required 80。
+
+**換回舊檔**：用步驟 9 印出的備份檔名複製回 `deploy.sh`，SHA-256 要是 `abcf1c01…`。⚠️ 舊檔⛔ 沒有 migration 的步驟：合併之後只能在⛔ 沒有待套用的 migration 時拿它部署。
+
 ## 八、完成後要歸檔的位置
 
 * `docs/development-workflow.md`：「部署腳本：失敗即停」的新流程（試跑、備份、正式套用、復原分支）、`-migrate` 模式的用法、dev 的 `DATABASE_AUTO_MIGRATE`。
@@ -513,3 +577,4 @@ dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 li
 | v1.4 | 2026-11-26 | 第六節記 dev 演練紀錄：R0、R1 與五項演練都照預期；各步的耗時；跟做法不同的三處；發現 readiness 失敗後的回滾要先 `down`（或 `--force-recreate`），已修進部署手冊（含逐一核對 image ID）；演練資料已刪除 |
 | v1.5 | 2026-11-26 | 第七節記 live 唯讀盤點的結果；`trading_user` 沒有 CREATEDB、live 的 database 與 public schema 的 ACL 不是預設值 → 第五節的還原程序待確認修正（建庫與改名用管理帳號、還原後對齊 ACL，並在 dev 補演練） |
 | v1.6 | 2026-11-26 | 使用者確認還原程序的修正並改進第五節：建庫與改名用 `postgres`；還原、ACL 對齊、核對、權限實測用 `trading_user`；核對加上 database 與 public schema 的 ACL 逐字相同。dev 驗證 17 項全部通過（含建庫、改名、未對齊的三個反證）；`BACKUP_DIR` 定為 `/opt/stacks/deploy/db-backups` |
+| v1.7 | 2026-11-26 | 第七節加 live `deploy.sh` 換檔程序的草稿：順序（合併 → 換檔 → 第一次部署）、要改的是 6 行（⛔ 不是 7 行）、事先算好的三個 SHA-256、兩支輔助腳本（產生新檔、核對 DB）與 dev 實測、9 個步驟與預期、第一次部署的預期、換回舊檔 |

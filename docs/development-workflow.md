@@ -1044,9 +1044,11 @@ scripts 目錄試跑（腳本只認自己所在的目錄）。
 
 **live 的 `deploy.sh`**（2026-11-16）：是這份範本、只替換 `PROJECT_DIR`、`DEPLOY_BRANCH`（`init`）、`REDIS_ENV_FILE` 三行，版本以 SHA-256 固定
 （先用暫存檔名 `--preflight` 試跑，再備份、換上）。目前換上的是 `bd89610` 的範本（含上面 stdin 的修正；2026-11-16 換上；經過見 `git show 85849b9:docs/plans/i132-redis-silent-disable.md` 第八節）。
-⚠️ 這一版還⛔ 沒有回測檢查與 migration 的步驟。換上 T-084＋T-087 的範本時要換的行從三行變七行（加 `DB_CONTAINER`＝`postgres-postgres-1`、`DB_USER`＝`trading_user`、
-`BACKUP_DIR`（live 主機上權限 700 的備份目錄）、`TRIAL_PG_IMAGE`（live 的 PostgreSQL 同一個主版本、主機上已經有的 image；盤點時確認）；`DB_NAME` 兩邊都是 `trading`），
-換上之前另要唯讀核對 `DB_CONTAINER`／`DB_NAME` 就是三個服務正在用的 DB（程序見 `docs/plans/t084-deploy-backtest-check.md` 第八節）。
+⚠️ 這一版還⛔ 沒有回測檢查與 migration 的步驟。換上 T-084＋T-087 的範本時要換的行從三行變**六行**：加 `DB_CONTAINER`＝`postgres-postgres-1`、`DB_USER`＝`trading_user`、
+`BACKUP_DIR`＝`/opt/stacks/deploy/db-backups`（新建、700）。`TRIAL_PG_IMAGE`（`postgres:16-alpine`）與 `DB_NAME`（`trading`）的範本預設值就是 live 的值，⛔ 不用改
+（2026-11-26 live 盤點確認：主機上已經有跟 live DB 同一個 `postgres:16-alpine`）。
+換上之前另要唯讀核對 `DB_CONTAINER`／`DB_NAME` 就是三個服務正在用的 DB（程序見 `docs/plans/t084-deploy-backtest-check.md` 第八節；換檔的完整程序與指令見
+`docs/plans/t087-migration-in-deploy.md` 第七節「live `deploy.sh` 換檔程序」）。
 
 ### python 的套件版本與升級（T-083）
 

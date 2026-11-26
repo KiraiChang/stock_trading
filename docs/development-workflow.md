@@ -418,6 +418,51 @@ dev_token && curl -s -H "Authorization: Bearer $TOKEN" localhost:18080/api/v1/sc
 - 每次會在 dev DB 多留一個 `accept-<時間>@example.com`；dev 的資料可以重來，⛔ 不需要清。同一秒內跑兩次，第二次的 register 會 409、照常失敗停下。
 - 2026-11-03 實測（bash、zsh 各一次）：用假的 `curl`／`docker` 跑 register 409、`UPDATE 0`、login 回 401、login 回非 JSON、上一次留有 `TOKEN` 的失敗——都 `return 1`、後面的呼叫⛔ 沒有發生、`TOKEN` 是空的；dev stack 實跑拿到 token、`GET /scheduler/status` 回 200。
 
+### 在可丟棄的 dev database 上做瀏覽器驗收（T-089 的做法）
+
+要在 dev 補合成資料、讓排程照常跑、再用瀏覽器走完整流程時，整段在一個**可丟棄的 database** 上做，結束後整個丟掉。
+⛔ 不逐筆刪資料：合成日 K 一存在，排程（SR 分析的身分追蹤、SR 驗證、指標與訊號）就可能用它改動既有的區間、事件與狀態，逐筆刪復原不了。
+2026-11-26 T-089 第一次照這個做法做完，紀錄在 `git show c27a8d2:docs/plans/t089-first-usable-trade-plan.md` 第十節。
+
+**切換前**（作業目錄放在 repo 外、權限 700）：
+
+1. **三份服務清單**：`docker compose -f docker-compose.dev.yml --profile worker ps -a --format json`（⛔ 不用 `ps`，它只列在跑的），
+   配合 `--profile worker config --services` 整理成「原本在跑」「原本停著」（容器存在、⛔ 不是 `running`）「原本沒有容器」。
+   同一個 project 但⛔ 不在這份 compose 的容器（例如別份 compose 留下的 `fake-yahoo`）只記錄、⛔ 不動。
+2. **image 回復點**：dev compose 的 project 固定是 `stock_trading_dev`，換 worktree 仍共用同一組預設標籤，在別的 worktree build 會把那份程式蓋進 `latest`。
+   build 之前逐一服務記下兩個 ID（兩者可能不同）：容器實際用的（`docker inspect -f '{{.Image}}'`，用它打 `:pre-<案號>`）與 `latest` 原本指向的
+   （`docker image inspect -f '{{.Id}}'`）。沒有容器的服務只記後者。
+3. **回測雙零**、**Redis 的專用編號是空的**（`redis-cli -n 編號 DBSIZE` 是 0、沒有別的作業在用），並記下要核對的基準（相關標的的最新日 K、各表的最大 id）。
+
+**建立與連線**：
+
+* dev 的應用服務都停下後只啟動 postgres，`CREATE DATABASE 驗收庫 TEMPLATE trading`（範本複製要求來源⛔ 沒有連線）。
+* 驗收 override（repo 外、權限 600）只改三個應用服務的 `DATABASE_DSN` 指向驗收庫、backend 的 `REDIS_DB` 用專用編號；啟動前用 `config --format json` 在記憶體裡檢查、
+  只印通過／失敗。啟動後核對：`pg_stat_activity` 裡應用服務的連線都在驗收庫、backend 的有效設定是那個 `REDIS_DB`。
+* **每一次直接寫 DB 前查 `SELECT current_database()`**，⛔ 不是驗收庫就中止；寫入後核對筆數。上面的 `dev_token` 固定把啟用帳號的 SQL 送到 `trading`，
+  切換後要用一份把 `-d` 換成驗收庫的版本（⛔ 不改共用的 `dev_token`），並確認 `trading` 裡⛔ 沒有那個驗收帳號。
+* 分析要用到機率模型時，照下方「`SR_SCORING_MODELS_DIR` 沒帶就分析不了」那段，在 override 裡把模型目錄唯讀掛給 python-server。
+
+**瀏覽器（Playwright）**：
+
+* `mcr.microsoft.com/playwright/python:v1.48.0-jammy` 只有瀏覽器、**沒有 Python 的 `playwright` 套件**，要另外 build 一個本機用的 image：
+  `FROM` 它、`RUN pip install --no-cache-dir playwright==1.48.0`（版本跟 image 一致，瀏覽器沿用 image 裡的）。
+* 容器接 `stock_trading_dev_net`、打 `http://backend:8080`。每一步開新的瀏覽器，用 `add_init_script` 先寫 `localStorage` 的 `trading_token`、`trading_email`、
+  `trading_selected_portfolio_id` 再開首頁，畫面元素用 `data-testid` 找；每一步留截圖與畫面文字。
+* 要在同一個分頁裡「先失敗、再恢復」（例如停掉 python-server 再啟動）時，在腳本裡等一段時間，由主機端在那段時間裡停、啟動容器。
+* 較晚回應的時序⛔ 不在瀏覽器裡驗（不穩定），交給前端元件測試控制。
+
+**復原與丟棄**（成功或中途失敗都要做；服務復原先做、⛔ 不依賴資料丟棄）：
+
+1. 用「一般 compose＋驗收 override＋`--profile worker`」`stop` 停掉驗收期間的所有服務。
+2. **image 分兩段標回去**：重建之前，每個服務的 `latest` 先指向 `:pre-<案號>`（容器原本用的 image）；依三份清單、在 dev 平常的目錄（主 repo）用一般設定、一律帶 `--no-build` 重建
+   ——原本在跑的 `up -d --no-build --no-deps 服務…`、原本停著的 `up --no-start --no-build --no-deps 服務…`、原本沒有容器的 `rm -f 服務…`（⛔ 不帶 `-v`）；
+   重建之後才把 `latest` 標回它原本指向的 ID。⛔ 不用不指名的 `up -d`（會啟動原本停著的服務）。
+3. **資料丟棄**：`DROP DATABASE 驗收庫`、`redis-cli -n 編號 FLUSHDB`（⛔ 不用 `FLUSHALL`）。postgres、redis 原本停著時只為這一步暫時啟動，做完照原狀態停回去。
+   查詢輸出（驗收庫已不存在、`DBSIZE` 是 0）留在紀錄裡。
+4. **核對**：再跑一次 `ps -a`，逐一服務的類別（在跑／停著／沒有容器；`exited` 與 `created` 都算停著）、容器實際用的 image ID、`latest` 的 ID 都跟切換前相同；
+   在跑的服務連的是 `trading`；`trading` 的基準逐字相同、回測雙零。⛔ 不相同就停下回報，⛔ 不自己補啟動或停止。通過之後才刪 `:pre-<案號>`。
+
 ### 在 dev stack 上做「as-of 階梯」驗收
 
 要驗的東西**跨越多個交易日**（zone 身分延續、角色翻轉、缺席收攤、事件鏈）時，
@@ -467,12 +512,22 @@ curl -sS -X POST http://localhost:18080/api/v1/sr-zones \
 
 **`SR_SCORING_MODELS_DIR` 沒帶就分析不了。** repo 的 `python/models/` 是**空的**，
 compose 預設會把它掛進去，於是 `POST /sr-zones` 回 **503「機率模型尚未訓練」**——
-看起來像模型壞了，其實是掛錯目錄。啟動 dev stack 時要指到有 joblib 的目錄：
+看起來像模型壞了，其實是掛錯目錄。啟動 dev stack 時要指到有 `sr_scoring_v4.joblib` 的目錄。
+
+⚠️ 舊主機的做法（指向 live 的 `/opt/stacks/scripts/stock_trading/python/models`）搬到新主機之後⛔ 不能用：那是 live `app` 帳號、權限 700 的目錄，dev 帳號讀不到。
+改用 repo 的 I-074 baseline 模型——2026-11-26 T-089 驗收時請 live 專人從 python-server 容器取出 `/app/models/sr_scoring_v4.joblib` 核對，
+**跟 `python/baselines/b1_20260901_1d_74350966_5d7ecb10/model.joblib` 是同一個檔**（sha256 `2a91fd8d16ad…`），也就是 live 目前用的仍是 2026-09 那一版。
+compose 掛的是目錄、程式讀的檔名是 `sr_scoring_v4.joblib`，所以複製一份改名：
 
 ```bash
-SR_SCORING_MODELS_DIR=/opt/stacks/scripts/stock_trading/python/models \
-  docker compose -f docker-compose.dev.yml up -d
+M="$HOME/dev_sr_models"
+B=python/baselines/b1_20260901_1d_74350966_5d7ecb10/model.joblib
+mkdir -p -m 700 "$M" && cp "$B" "$M/sr_scoring_v4.joblib"
+sha256sum "$M/sr_scoring_v4.joblib"
+SR_SCORING_MODELS_DIR="$M" docker compose -f docker-compose.dev.yml up -d
 ```
+
+live 重新訓練模型之後，這份副本就跟 live 不同了；要跟 live 一致時，照 T-089 的做法請專人用 `docker cp` 取出、核對 sha256 後交到 dev。
 
 **dev 帳號註冊完是 `inactive`，沒有 first-user bootstrap；register 對已經存在的 email 只回 409、⛔ 不改密碼。**
 上面打分析用的 `$TOKEN` 照上方「dev 取得 JWT：每次用新的驗收帳號」取得，⛔ 不要沿用 dev DB 裡既有的帳號。

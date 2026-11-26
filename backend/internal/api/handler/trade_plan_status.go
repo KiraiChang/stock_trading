@@ -1,7 +1,7 @@
 package handler
 
 // T-089 D2：交易計畫的行情日期、來源確認與資料狀態（只加回應欄位，⛔ 不存 DB、⛔ 不改判斷邏輯）。
-// 規格見 docs/plans/t089-first-usable-trade-plan.md 第三節 D2；現況說明歸檔在 docs/api-reference.md 的交易分析兩支端點。
+// 現況規格見 docs/api-reference.md「行情日期、來源與資料狀態」（交易分析兩支端點）與 docs/architecture.md「交易計畫的資料狀態（T-089）」。
 
 import (
 	"context"

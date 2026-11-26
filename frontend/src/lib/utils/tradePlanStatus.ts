@@ -2,7 +2,7 @@ import type { TradeDataStatus, TradePlan } from '../api/tradeAnalysis'
 
 /**
  * T-089 D3：交易計畫摘要卡的狀態推導（集中在這裡，頁面⛔ 不自己判斷）。
- * 規格見 docs/plans/t089-first-usable-trade-plan.md 第三節 D3（主狀態表由上往下，取第一個符合的）。
+ * 現況規格見 docs/architecture.md「交易計畫的資料狀態（T-089）」（主狀態由上往下，取第一個符合的）。
  *
  * 「最新」只能由倒數第二列的條件產生：行情日期等於庫內最新日 K，而且等於應有的行情日（或等待今日日 K 時等於 settled_date）。
  * ⛔ 不能因為沒有命中其他狀態就變成最新——最後一列是兜底的「行情狀態無法確認」。

@@ -145,6 +145,21 @@ describe('Positions 入口（T-089 D4）', () => {
     expect(summaryText()).toContain('2330 的觀察條件')
   })
 
+  it('判斷「等待」與資料狀態分開顯示，並列出下一個觀察條件（驗收步驟 4 的元件證據）', async () => {
+    await open('2330')
+    const card = screen.getByTestId('plan-summary')
+    const judgement = screen.getByTestId('plan-judgement')
+    const status = screen.getByTestId('plan-status')
+    expect(judgement.textContent?.trim()).toBe('等待')
+    expect(status.getAttribute('data-state')).toBe('latest')
+    // 兩個是同一張卡裡各自獨立的元素：判斷⛔ 不寫在資料狀態裡，資料狀態也⛔ 不寫在判斷裡
+    expect(card.contains(judgement) && card.contains(status)).toBe(true)
+    expect(status.contains(judgement) || judgement.contains(status)).toBe(false)
+    expect(status.textContent).not.toContain('等待')
+    expect(card.textContent).toContain('下一個觀察條件')
+    expect(card.textContent).toContain('2330 的觀察條件')
+  })
+
   it('沒有投組 → 建立 → 自動載入原本那一檔', async () => {
     useDefaults([])
     selectedPortfolioID.set(0)

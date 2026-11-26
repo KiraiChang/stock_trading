@@ -1,6 +1,6 @@
-# T-089 計畫書 v1.7：可用首版——台股盤後交易計畫
+# T-089 計畫書 v1.10：可用首版——台股盤後交易計畫
 
-> 狀態：v1.7（2026-11-26：v1.5 複審通過；程式在 `t089` 分支實作完成，併入實作 review 的三項，測試與反證全部通過，見第十節；第六節的 dev 實跑驗收未做）。第八節的 live 唯讀盤點已完成（重用期限 24 小時、計畫 0 筆）。對應：`docs/todo.md` T-089。
+> 狀態：v1.10（2026-11-26：v1.5 複審通過；程式在 `t089` 分支實作完成，實作 review 兩輪通過；第六節的 dev 實跑驗收完成，紀錄在第十節）。第八節的 live 唯讀盤點已完成（重用期限 24 小時、計畫 0 筆）。對應：`docs/todo.md` T-089。
 > 需求：照 T-089 的三項交付（接通入口、顯示資料是否可用、用實際流程驗收）與「計畫書要優先定清的兩件事」；
 > 功能檢討的「下一期回看」（5 個交易日試用）⛔ 不在本案，首版可操作後另外處理（使用者 2026-11-25 裁決）。
 > 依據：[`feature-reviews/2026-11-19-first-usable-release.md`](../feature-reviews/2026-11-19-first-usable-release.md)。
@@ -273,6 +273,14 @@
     * **原本沒有容器**：`--profile worker config --services` 列得出、但⛔ 沒有容器的服務（2026-11-26 查：`python-worker` 目前就是這種）。
 
     `ps -a` 也會列出同一個 project、但⛔ 不在這份 compose 裡的容器（2026-11-26 查：別份 compose 留下的 `fake-yahoo`）：只記錄、⛔ 不動，復原後的核對狀態要一樣。
+    `python-worker` 驗收用不到（瀏覽器流程與強制刷新 SR 走 python-server），⛔ 不啟動；開跑前用 `ps -a` 再確認它原本沒有容器，驗收後確認它仍然沒有容器。
+  * **image 的回復點**（v1.8）：dev compose 的 project 固定是 `stock_trading_dev`，換 worktree 仍共用同一組預設標籤（`stock_trading_dev-<服務>:latest`），
+    在 t089 worktree build 會把 t089 的程式蓋進這個標籤。build 之前逐一服務記下兩個值（兩者可能不同）：
+    * **容器實際用的 image ID**（`docker inspect -f '{{.Image}}'` 容器）——用它打回復標籤 `stock_trading_dev-<服務>:pre-t089`；
+    * **預設標籤原本指向的 ID**（`docker image inspect -f '{{.Id}}'` `stock_trading_dev-<服務>:latest`）——記進作業目錄，復原時把 `latest` 標回它。
+
+    沒有容器的服務（`python-worker`）只記預設標籤的 ID。照 `development-workflow.md`「部署失敗時」的做法：⛔ 不靠 ID 或「沒改程式所以一樣」認舊版。
+  * **Redis DB 5 要能獨占**：開跑前確認 dev Redis 的 DB 5 是空的（`DBSIZE` 是 0）、沒有其他作業在用；驗收 backend 啟動後核對它的有效設定是 `REDIS_DB=5`。
 * **建立**：dev 的服務全部停下（`stop`）後，只啟動 dev postgres，用 `CREATE DATABASE t089_accept TEMPLATE trading` 複製一份 dev 的 `trading`
   （範本複製要求來源⛔ 沒有連線；先確認磁碟空間夠）。dev 原本的 `trading` 在驗收期間⛔ 沒有任何服務連著，內容⛔ 不會變。
   ⚠️ dev postgres 要掛**一般的 dev volume**：用作業隔離 override（掛 `stock_trading_dev_i131_pgdata`，I-123 判讀與 I-140 重播在用）的作業要先停下，兩者⛔ 不能同時跑。
@@ -293,21 +301,38 @@
 
 **復原與丟棄**（成功或中途失敗都要做；**服務復原與資料丟棄是兩件獨立的事**，前一件失敗⛔ 不擋後一件）：
 
-1. **服務復原**（先做）：用 `docker compose -f docker-compose.dev.yml -f 驗收 override --profile worker stop` 停掉驗收期間的所有服務，再**依切換前記下的三份清單**
-   用一般的設定重建（DSN 回到 `trading`、Redis 回到原本的編號）。⛔ 不用不指名的 `up -d`：那會啟動切換前停著的服務（review 2026-11-26）。
-   * **原本在跑**：`docker compose -f docker-compose.dev.yml up -d --no-deps` 後面逐一列出這些服務名稱；清單裡有 `python-worker` 時加 `--profile worker`。
-   * **原本停著**：`docker compose -f docker-compose.dev.yml up --no-start --no-deps` 列出這些服務名稱，用一般設定重建、⛔ 不啟動
+1. **服務復原**（先做）：用 `docker compose -f docker-compose.dev.yml -f 驗收 override --profile worker stop` 停掉驗收期間的所有服務；
+   **image 分兩段標回去**（v1.8；v1.10 修正順序）：compose 重建容器時用的是 `latest` 當下指向的 image，而「容器原本用的 ID」與「`latest` 原本指向的 ID」可能不同，所以：
+   * **重建之前**：每個服務的 `latest` 先指向 `:pre-t089`（也就是**容器原本用的 image**）；
+   * 接著**依切換前記下的三份清單**用一般的設定、一律帶 `--no-build` 重建（DSN 回到 `trading`、Redis 回到原本的編號），容器就回到原本的 image；
+   * **重建之後**：再把 `latest` 標回切換前記下的「預設標籤原本指向的 ID」（已經建好的容器⛔ 不受標籤影響）。兩個 ID 相同時這一步不會改變任何東西。
+   * 沒有容器的服務（`python-worker`）沒有「容器原本用的 ID」，只做重建之後那一步。
+
+   ⛔ 不用不指名的 `up -d`：那會啟動切換前停著的服務（review 2026-11-26）。
+   * **原本在跑**：`docker compose -f docker-compose.dev.yml up -d --no-build --no-deps` 後面逐一列出這些服務名稱；清單裡有 `python-worker` 時加 `--profile worker`。
+   * **原本停著**：`docker compose -f docker-compose.dev.yml up --no-start --no-build --no-deps` 列出這些服務名稱，用一般設定重建、⛔ 不啟動
      （⛔ 不留下指向 `t089_accept` 的驗收設定容器；`python-worker` 在清單裡時同樣加 `--profile worker`）。
    * **原本沒有容器**：驗收期間建立的這些容器用 `docker compose -f docker-compose.dev.yml rm -f` 列出服務名稱刪掉（只刪容器、⛔ 不帶 `-v`）。
 
-   核對：再跑一次同樣的 `ps -a --format json`，逐一服務比對跟切換前相同（在跑／停著／沒有容器）；在跑的 backend、python-server、python-worker
-   連的是 `trading`（只看 database 名稱）；`trading` 的 `backtest_jobs` 仍是雙零。⛔ 不相同就停下回報，⛔ 不自己補啟動或停止。
-   驗收中途停下時（例如步驟 6 停了 python-server）也一樣從這一步開始，⛔ 不需要先處理任何資料。
-2. **資料丟棄**（服務都已經不連 `t089_accept` 之後）：`DROP DATABASE t089_accept`；清掉驗收用的 Redis 編號。
+   核對：再跑一次同樣的 `ps -a --format json`，逐一服務比對跟切換前相同（在跑／停著／沒有容器）；**每個容器的 image ID 等於切換前那個容器實際用的 ID**、
+   每個 `latest` 等於切換前記下的 ID；在跑的 backend、python-server、python-worker 連的是 `trading`（只看 database 名稱），backend 的 `REDIS_DB` 回到原本的值；
+   `trading` 的 `backtest_jobs` 仍是雙零。⛔ 不相同就停下回報，⛔ 不自己補啟動或停止。
+   驗收中途停下時（例如步驟 6 停了 python-server，或 build 之後任何一步失敗）也一樣從這一步開始，**標回 image 也要做**，⛔ 不需要先處理任何資料。
+   核對通過之後才刪 `:pre-t089` 標籤。
+2. **資料丟棄**（服務都已經不連 `t089_accept` 之後）：`DROP DATABASE t089_accept`；清掉驗收用的 Redis 編號（只清 DB 5：`redis-cli -n 5 FLUSHDB`，⛔ 不用 `FLUSHALL`）。
    這兩步要 dev 的 postgres、redis 在跑：**原本停著**或**原本沒有容器**的話，只為這一步用 `up -d --no-deps postgres redis` 暫時啟動，
    做完照它原本的狀態處理（停著的 `stop`、沒有容器的 `rm -f`），再跑一次第 1 步的核對。
 3. **核對**：`t089_accept` 已不存在；`trading` 裡 X、Y 的最新日 K、SR 快照與計畫的最大 id 跟建立前記下的相同（驗收期間沒有東西寫進 `trading`）。
 4. 驗收 override 與作業目錄的截圖、紀錄保留到 review 結束；override 裡⛔ 沒有密碼以外的機密，跟作業目錄一起刪。
+
+**驗收中的兩項裁決**（2026-11-26 使用者採建議）：
+
+* **交易日曆取不到時**：先回報並留證——用一檔已有日 K 的股票，保留 `calendar` = `unconfirmed`、畫面的「行情狀態無法確認」與 backend 的日曆錯誤紀錄；
+  若是暫時故障，等 5 分鐘的降級期過後重試一次。仍然失敗，就把依賴日曆的判讀（「最新」「行情過期」「更新失敗」）標成待補驗，
+  先完成入口、沒有投組、唯讀與復原的檢查。⛔ 不用手動設定「照常開市」代替（會讓那一天直接走 manual，也可能改變應有行情日）。
+* **找不到判斷是「等待」的標的時**：先查 X、Y，再查 dev 的自選清單；仍然沒有，驗收紀錄寫「元件測試通過，dev 無實際樣本」。
+  元件測試（`Positions.test.ts`「判斷『等待』與資料狀態分開顯示」）斷言同一張摘要卡裡 `plan-judgement` 顯示「等待」、`plan-status` 是另一個獨立的元素、
+  也列出下一個觀察條件。合成日 K 維持原本的用途，⛔ 不調整走勢去做出「等待」。
 
 **步驟**（每一步留截圖與畫面文字）：
 
@@ -408,7 +433,62 @@
 頁尾「現有 LONG」仍顯示舊投組的股票。改成：持倉清單記住屬於哪一個投組，換投組時立即清空（投組切換與建立投組都經過同一個地方）。
 `Positions` 加 1 項，反證（拿掉換投組時清空）失敗。
 
-**還沒做**：第六節的 dev 實跑驗收（主機上沒有無頭瀏覽器，要先決定用 Playwright 的 docker image 或由使用者經通道操作）。
+### dev 實跑驗收紀錄（2026-11-26 16:50～17:15，`t089` 分支 `b7cb1a3`）
+
+**結論**：步驟 1～3、5、6、8 照預期通過；步驟 4、7 依使用者裁決由元件測試補足（理由見下表）；步驟 9 的復原與丟棄全部核對一致。
+
+**環境**：
+* 瀏覽器：Playwright 的 `mcr.microsoft.com/playwright/python:v1.48.0-jammy`（這個 image 沒有 Python 的 `playwright` 套件，另外 build 一個本機用的 `t089-pw:local`，只 `pip install playwright==1.48.0`）。
+  容器接 `stock_trading_dev_net`、打 `http://backend:8080`；每一步注入 JWT 與投組選擇、從首頁觀察清單按「計畫」進入；截圖與畫面文字在 repo 外的 `~/t089_accept/shots/`（29 張，保留到 review 結束）。
+* 交易日曆取得成功（`calendar` = `confirmed`）。dev 的手動設定留著 I-139 dev 驗收時的 **11-25 休市**，照裁決⛔ 沒有改，所以當時（11-26 16:55，交易日、13:30 之後）
+  `expected_date` = 11-26、`settled_date` = 11-24、`awaiting_today` = true。
+* **機率模型**：dev 的 `python/models` 是空的，分析一律 503「機率模型尚未訓練」（畫面正確地當成「更新失敗」類、⛔ 不是資料不足）。
+  改由 live 專人從 python-server 容器複製 `sr_scoring_v4.joblib` 交給 dev（sha256 `2a91fd8d…`，三處一致），驗收 override 唯讀掛進 python-server。
+  這顆**跟 repo 的 I-074 baseline（`python/baselines/b1_20260901_…/model.joblib`）是同一個檔**。
+* **標的**：dev 的日 K 超過 250 根的只有 2330（最後 11-12）；自選清單的 0050 完全沒有日 K。依使用者同意，Y 也用 2330，放在另一個投組、在補合成日 K **之前**先做步驟 5；
+  0050 加驗「資料不足」。X（2330，專用投組）補合成日 K 11-13～11-23（7 根），步驟 2 再補 11-24。
+
+| 步驟 | 結果 |
+|---|---|
+| 5 行情過期（Y） | 開頁「尚無計畫：最新日 K 只到 11-12（應有 11-24），分析結果會是過期的行情」＋「今日日 K 尚未入庫」提示；分析後「行情過期：最新日 K 只到 11-12（應有 11-24）」，⛔ 不是最新；判斷「避開」另外顯示；歷史列有行情 11-12 |
+| 加驗：資料不足（0050） | 開頁就是「資料不足」（`latest_candle` = `no_data`）；分析回 404 後仍是「資料不足」，⛔ 不顯示判斷 |
+| 1 兩步內看到計畫 | 按「計畫」→「尚無計畫：最新日 K 只到 11-23（應有 11-24）」→ 按「分析」→「行情過期」（差一天） |
+| 2 新日 K | 補 11-24 後「用 11-23 的日 K · 已有 11-24 的日 K，請重新分析」；重新分析 SR 快照重算（新 id，11-24），主狀態「最新」（等待今日日 K 時用 `settled_date`）＋提示 |
+| 3 買進後、還沒重新分析 | 買進 1000 股後立刻「持倉已變動（買賣或更正後），請重新分析」；重新分析得到 LONG、持倉版本 1 的計畫（「減碼」），回到「最新」 |
+| 4 判斷「等待」 | dev 沒有實際樣本（2330 是「避開」與「減碼」，0050 沒有日 K）；依裁決記「元件測試通過，dev 無實際樣本」。截圖仍可看到判斷是摘要卡裡獨立的元素、旁邊列出下一個觀察條件 |
+| 6 刷新失敗 | 停驗收的 python-server、按「強制刷新 SR」→「更新失敗（17:05）：顯示的是 11-24 的歷史計畫」，錯誤只在 2330；切到 0050 再切回，標記仍在；啟動 python-server 後重新分析回到「最新」（同一個瀏覽器分頁） |
+| 7 沒有投組 | **前提不成立**：註冊時後端就自動建立「Personal Portfolio」（`ensureDefaultUserPortfolio`），正常流程碰不到「沒有投組」。新帳號從觀察清單按「計畫」直接載入 2330（尚無計畫）。依裁決記「正常流程碰不到；畫面路徑由元件測試（沒有投組 → 建立 → 自動載入原本那一檔）涵蓋」 |
+| 8 唯讀投組 | 群組投組（驗收帳號是 VIEWER）：投組選單標 READ、上方說明「目前 Portfolio 為唯讀…歷史照樣可看」、「分析」停用；API 上 OWNER 分析 201、VIEWER 403；歷史照樣顯示 OWNER 的那一筆 |
+
+**順帶確認**：
+* D1：補日 K 之後，舊快照（11-12、11-23）都⛔ 沒有被重用。步驟 3 又重算一份，⛔ 沒有重用 11-24 那份——它是最新那根日 K，但 `analyzed_at`（11-24 00:00）距今超過 24 小時，被原本的年齡條件排除；跟設計一致（D1 只會讓重用變少）。
+* 帳號啟用、補日 K 的每一次寫入前都查 `current_database()` 是 `t089_accept`，寫入後核對筆數；`trading` 裡⛔ 沒有驗收帳號。
+
+**步驟 9：復原與丟棄**（照第六節 v1.8）：
+* 切換前：三份清單——停著 `postgres`、`python-server`、`redis`、`backend`；沒有容器 `python-worker`；另記 `fake-yahoo`（exited）。
+  image：backend `3a4acd5d67de`、python-server `d37c5a8d92dd`（容器實際用的與 `latest` 相同）、python-worker 只有 `latest` `b51cf6f2cd28`；打 `:pre-t089`。
+  `trading` 回測雙零；Redis DB 5 是空的；驗收 backend 啟動後的有效設定 `REDIS_DB=5`、應用服務的連線全部在 `t089_accept`。
+* 收尾：停驗收服務 → 三個 `latest` 標回原本的 ID → 在主 repo 目錄用一般設定 `up --no-start --no-build --no-deps` 重建停著的四個服務
+  （backend、python-server 重建後是 `created`，切換前是 `exited`，同屬「停著」）→ 暫時啟動 postgres、redis：`DROP DATABASE t089_accept`、`redis-cli -n 5 FLUSHDB` → 停回去。
+  這次每個服務的「容器原本用的 ID」與「`latest` 原本指向的 ID」都相同，所以先標 `latest` 再重建的結果正確；兩者不同時的順序已改正在第六節（v1.10：重建前 `latest` 指向 `:pre-t089`、重建後才標回原本的 ID）。
+* 清理的查詢輸出（2026-11-26 17:13，當時終端機逐字；另存在 `~/t089_accept/cleanup_output.txt`）：
+
+  ```
+  conns_on_accept|0          ← DROP 之前，t089_accept 上沒有連線
+  dropped
+  exists|0                   ← DROP 之後查 pg_database：t089_accept 不存在
+  db5 before flush: 0        ← redis-cli -n 5 DBSIZE
+  OK                         ← redis-cli -n 5 FLUSHDB
+  db5 after: 0               ← redis-cli -n 5 DBSIZE
+  # Keyspace
+  db0:keys=1,expires=0,avg_ttl=0,subexpiry=0   ← 只有 db0（切換前就是這 1 個 key），⛔ 沒有 db5
+  baseline-identical         ← trading 的基準檔前後逐字相同
+  backtests|0|0
+  ```
+* 核對：`ps -a` 逐一服務的類別、容器實際用的 image ID、`latest` 的 ID 全部跟切換前相同；`python-worker` 仍然沒有容器、`fake-yahoo` 照舊；
+  backend 的 DSN 回到 `trading`、⛔ 沒有 `REDIS_DB`；`trading` 的基準（X、Y 的日 K、SR 快照／計畫／日 K／使用者的最大 id、goose 版本）逐字相同；回測雙零。核對通過後刪掉 `:pre-t089`。
+* 還留著：`~/t089_accept/`（截圖、紀錄、override、模型副本），保留到 review 結束再刪；live `app` 家目錄裡的模型副本請專人刪除；
+  驗收用的兩個 Playwright image（約 2.8 GB）留著供之後的驗收用，不需要時再刪。
 
 ## 版本紀錄
 
@@ -422,5 +502,8 @@
 | v1.4 | 2026-11-25 | 併入 v1.3 review（功能設計可收斂）：dev 驗收改在可丟棄的 database `t089_accept`（範本複製 dev 的 `trading`，驗收 override 改 DSN 與 Redis 編號）上做，結束後整個丟掉，⛔ 不再逐筆刪快照（重用的快照 id 會選到驗收前的資料、排程的身分追蹤改過的既有狀態復原不了）；服務復原與資料丟棄分開、前者先做且⛔ 不依賴後者 |
 | v1.5 | 2026-11-25 | 併入 v1.4 review：驗收帳號的啟用與補合成日 K 的 SQL 都明確指向 `t089_accept`、寫入前查 `current_database()`（共用的 `dev_token` 固定寫 `trading`，⛔ 不改它，驗收用換了 `-d` 的版本）；切換前做回測雙零檢查並記下服務狀態，復原照切換前的狀態（`python-worker` 屬於 `worker` profile，有在跑才用 `--profile worker` 帶回） |
 | v1.6 | 2026-11-26 | v1.5 複審通過；在 `t089` 分支實作 B1～B6、F1～F5（第十節）；共用判斷改成請求時從 scheduler 取（開工前說明）；錯誤拆成載入與動作兩種；後端反證五項、前端反證六項都失敗；dev 實跑驗收未做 |
+| v1.10 | 2026-11-26 | 併入驗收 review（驗收通過、同意步驟 4、7 以元件測試補驗）：[1] image 復原順序改正——重建前 `latest` 先指向 `:pre-t089`（容器原本的 image）、重建後才標回 `latest` 原本的 ID（兩者不同時，舊順序會讓容器用到原標籤的 ID）；這次兩者相同，結果正確；[2] 步驟 9 補清理的查詢輸出（`t089_accept` 不存在、DB 5 `DBSIZE` 0） |
+| v1.9 | 2026-11-26 | dev 實跑驗收完成（紀錄在第十節）：步驟 1～3、5、6、8 通過；Y 用 2330 的另一個投組、加驗 0050 資料不足；機率模型由 live 交接（跟 repo baseline 同一個檔）；步驟 4、7 依裁決由元件測試補足（步驟 7 的前提不成立：註冊時自動建立 Personal Portfolio）；補「等待」的元件斷言；復原與丟棄全部核對一致 |
+| v1.8 | 2026-11-26 | dev 驗收的具體化（使用者同意三項）：image 回復點——build 前記下容器實際用的 image ID（打 `:pre-t089`）與預設標籤原本指向的 ID，復原時先停驗收服務、標回 `latest`、`--no-build` 依原狀態重建、比對 image ID，中途失敗也照做；`python-worker` ⛔ 不啟動（開跑前與驗收後確認沒有容器）；Redis 用 DB 5（開跑前確認是空的、驗收 backend 的有效設定是 5、結束只清 DB 5） |
 | v1.7（第二輪） | 2026-11-26 | 前輪三項複審通過；[P3] 換投組時頁尾「現有 LONG」立即清空，⛔ 不暫時顯示舊投組的股票 |
 | v1.7 | 2026-11-26 | 併入實作 review：[P1] 買賣或更正寫入成功後、重新載入成功之前，摘要⛔ 不能是「最新」（標持倉已變動）；[P2] 投組切換立即確定選擇、持倉清單帶投組與序號，晚到的回應⛔ 不跳回原本那一檔；[P2] dev 復原改用 `ps -a` 記三份清單（在跑／停著／沒有容器），逐一指名復原，⛔ 不用不指名的 `up -d` |

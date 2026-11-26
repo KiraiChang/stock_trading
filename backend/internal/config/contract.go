@@ -181,6 +181,10 @@ func Validate(cfg *Config) []Violation {
 				c.add("DATABASE_DSN", RulePublicExample)
 			}
 		}
+		// T-087：live 的 migration 由部署流程在停機中套用，⛔ 不能靠設定錯誤退回「啟動時自動套用」
+		if cfg.Database.AutoMigrate {
+			c.add("DATABASE_AUTO_MIGRATE", RuleInvalidValue)
+		}
 	}
 
 	// ── HTTP ──

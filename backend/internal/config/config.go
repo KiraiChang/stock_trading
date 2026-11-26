@@ -79,6 +79,10 @@ type PythonConfig struct {
 type DatabaseConfig struct {
 	Driver string `mapstructure:"driver"` // "sqlite" 或 "mysql"
 	DSN    string `mapstructure:"dsn"`
+	// AutoMigrate（DATABASE_AUTO_MIGRATE，T-087）：true 時 backend 啟動就自動套用 migration（dev compose 明確設 true）；
+	// **預設 false**：啟動時只做唯讀檢查（embed 的每一支都已套用才啟動），live 的 migration 由 deploy.sh 在停機中用 -migrate=up 套用。
+	// production 設 true 違反設定契約。
+	AutoMigrate bool `mapstructure:"auto_migrate"`
 }
 
 type ServerConfig struct {
@@ -368,6 +372,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("database.driver", "sqlite")
 	viper.SetDefault("database.dsn", "./trading.db")
+	viper.SetDefault("database.auto_migrate", false)
 	viper.SetDefault("finmind.base_url", "https://api.finmindtrade.com/api/v4")
 	viper.SetDefault("finmind.rate_limit", 5)
 	viper.SetDefault("finmind.intraday_enabled", false)

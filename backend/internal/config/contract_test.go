@@ -160,6 +160,8 @@ func TestValidate_ProductionRules(t *testing.T) {
 		{"jwt short", "AUTH_JWT_SECRET", RuleTooShort, func(c *Config) { c.Auth.JWTSecret = strings.Repeat("k", JWTMinLength-1) }},
 		{"finmind empty", "FINMIND_API_KEY", RuleRequired, func(c *Config) { c.FinMind.APIKey = "" }},
 		{"python url empty", "PYTHON_SERVICE_URL", RuleRequired, func(c *Config) { c.Python.ServiceURL = "" }},
+		// T-087：live 的 migration 由部署流程套用，production ⛔ 不能開啟動時自動套用；dev 可以
+		{"auto migrate on", "DATABASE_AUTO_MIGRATE", RuleInvalidValue, func(c *Config) { c.Database.AutoMigrate = true }},
 	}
 	for _, c := range cases {
 		prod := validConfig("")
@@ -339,5 +341,27 @@ func TestPublicExamples_CoverConfigYAML(t *testing.T) {
 		if !contains(PublicDBUserPasswords, user+":"+pass) && !contains(PublicDBPasswords, pass) {
 			t.Errorf("config.yaml 的 DSN 範例帳密 %s:%s 不在清單", user, pass)
 		}
+	}
+}
+
+// T-087：DATABASE_AUTO_MIGRATE 預設 false（啟動時只做唯讀檢查），環境變數設 true 才自動套用。
+func TestLoad_DatabaseAutoMigrateDefaultFalse(t *testing.T) {
+	inTempDir(t, "server:\n  port: \"8080\"\n")
+	t.Setenv("DATABASE_AUTO_MIGRATE", "")
+	os.Unsetenv("DATABASE_AUTO_MIGRATE")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Database.AutoMigrate {
+		t.Fatal("預設要是 false")
+	}
+	t.Setenv("DATABASE_AUTO_MIGRATE", "true")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Database.AutoMigrate {
+		t.Fatal("DATABASE_AUTO_MIGRATE=true 要讀得到")
 	}
 }

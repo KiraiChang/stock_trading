@@ -213,6 +213,25 @@
   休市日相關的第 3～5 點要等 I-139 上版後才會出現 `market_closed`，可以跟本案一起做。
   ✅ **先行項目已完成**（2026-11-21，使用者確認 v1.2 後先做）：逐日核對與恰好 55 輪檢查已實作並驗收（2026-11-21）：判讀器讀預定交易日清單（`OBS_V2_EXPECTED_DAYS`，`~/.cache/stock_trading/obs/archive/expected_days_i123_v2.txt`，內容 11-23～11-27，已向 TWSE `holidaySchedule` 端點核對 2026 年 11 月沒有休市日），逐一檢查清單上的每一天；沒給清單或清單不合格（格式、重複、空的）結束碼 2，執行腳本在跑查詢之前另外檢查清單上每一天都是範圍內的平日；不在清單上的日期另外列出、⛔ 不計入輪數與最終失敗。驗收 `accept_v2.sh` 39 項全部符合，新增的案例：整天零筆、全空、只剩一天 55 輪、恰好 55 輪（對照）、56 輪、不在清單上的日期、清單輸入、執行腳本的清單檢查；換回修改前的判讀器跑同一份驗收，整天零筆、全空、只剩一天 55 輪三個案例都失敗（重現了缺天漏檢），56 輪照樣抓得到（原本就是 `!= 55`）。v1 的查詢與輸出路徑⛔ 沒有改（新增的部分都在 `OBS_QUERY_SET=v2` 的分支裡）。檔案指紋（SHA-256 前 12 碼）：`run-obs-archive.sh` `fb32980a4789`、`queries_v2.tsv` `f601d260afdd`（未改）、`v2_judge.py` `589ac35e327a`、`accept_v2.sh` `4e5f47f1cbff`、`expected_days_i123_v2.txt` `d459d4cc94b5`；修改前的檔備份為 `*.pre-expected-20261121`。細節記在 I-123 計畫書的「新版窗口的預定交易日」。
 * 上版時段照部署規範；休市日照樣只能用平日的時段（照跑的排程還在）。
+* ⚠️ **上版日期改成 2026-11-27（週五）收盤後**（使用者裁決）：I-123 改用新的收斂標準（I-123 計畫書第 4 點的 2026-11-27 裁決），⛔ 不再需要為了保護新版窗口而排在交接之後；
+  本案在交易日的行為⛔ 不變，這次部署記成新版窗口內已知的一次啟動。時段用 14:05～14:50（盤中結束後、15:00 收盤批次之前）或 15:12～15:50。
+  上版前在 dev 的核對已在 2026-11-27 做完：init HEAD `2e0bf1d`；`941f11e` 之後 13 個 commit 只有 `a30d9a8`（本案）改程式；i140、i141、t084、t087、t089 都⛔ 沒有合併；
+  backend 完整測試、frontend 完整測試（build 後工作區⛔ 沒有變更）、PostgreSQL 與 MySQL 的 migration 驗證都通過。下面原本的安排保留作紀錄。
+* ✅ **上版紀錄（2026-11-27，live `941f11e` → `2e0bf1d`）**：
+  * **部署前**（14:02:47）：running 0、回測 pending／running 都沒有、最後一筆是 13:30 的 intraday；當天盤中 55 輪；migration 79、`market_day_overrides` ⛔ 不存在；
+    `deploy.sh` sha `abcf1c019b25`，`--preflight` 通過；三個服務 `running`、RestartCount 0，image：backend `cc9c64c1e37e`、python-server `75922cb6672b`、python-worker `7fea4e0b4679`；
+    backend 上一次啟動 2026-11-21 15:21:59（台北，T-088 上版）；`Config.Env` 50 行、雜湊 `a4eccbc0aa79`；backend 執行檔 `639c279ba1cf`；前端入口 `index-BC4dYoER.js`；`/api/v1/market-day-overrides` 404。
+  * **回滾標籤**：三個 `pre-i139`，ID 跟部署前的 image 一致。
+  * **部署**：`git pull` `941f11e..2e0bf1d`，用新 image 檢查設定 `config ok (production=true)`，down → up，readiness 第 1 次確認就通過，`deploy rc=0`。
+    新 backend 啟動 **2026-11-27 14:08:03（台北）**。13:30 盤中結束到 15:00 收盤批次之間沒有排程，停機期間⛔ 沒有漏跑。
+  * **部署後**（14:08:38）：git `2e0bf1d`；三個服務 `running`、RestartCount 0，image：backend `982d1d8e3f36`、python-server `e61c90d7c6b6`、python-worker `b5c67d329690`；
+    `Config.Env` 50 行、雜湊 `a4eccbc0aa79`（⛔ 沒有變）；backend 執行檔 `6e083f1cb457`；log 的 `redis connected`＋`scheduler started` 2 行、設定契約錯誤 0、panic 0、`migrations applied` 的 `"version":80`；
+    前端入口 `index-0Wfo9j7j.js`；新 API 未帶 token 回 401；migration 80、`market_day_overrides` 存在且 0 筆；當天 `market_closed` 0 筆；running 0、回測 pending／running 都沒有；python `/health` 回 ok。
+  * **python 的 image 也換了 ID**：`941f11e..2e0bf1d` 之間 `python/` ⛔ 沒有改，是重新 build（build cache 沒命中）的結果。用 `--network none` 的臨時容器核對新舊 image，兩個服務都一樣：
+    `libgomp1` `14.2.0-19`、`/app` 檔案雜湊 `fff301889a12`、`pip freeze` 雜湊 `cd18f89342f1`，跟 dev 的 python image 也相同。所以內容⛔ 沒有變，⛔ 不需要回滾。
+  * **畫面**：排程頁有「交易日與臨時休市」面板、顯示交易日；首頁自選清單⛔ 沒有出現「今日休市」（當天是交易日）。⛔ 沒有在 live 試設定或取消。
+  * **第一個排程之後**：15:00 `daily_close` `success`、15:02 `sr_zone_verify` `success`（⛔ 不是 `skipped`）；`redis connected` 1 次；`trading calendar unavailable`、`trading day override unavailable` 都是 0 次；當天 `market_closed` 0 筆。
+  * **還沒做的**：第一個週末（11-28、11-29）與第一個交易日（11-30）的確認照下面原本的安排（`pre_market` 與盤中照常、`market_closed` 0 筆、兩種 unavailable 都是 0 次）；週末的首頁應該顯示「今日休市（週末）」。
 * **上版安排**（2026-11-24 準備）：預定 **11-28（週六）08:45 之後**，在 I-123 新版窗口（11-23～11-27）的交接做完之後；live 從 `941f11e` 拉到當時 init 的 HEAD
   （上版前在 dev 核對：`941f11e` 之後除了 docs 只有本案的程式與前端；`i140` 分支⛔ 不能已經合併進 init）。程序照 T-088 那次（部署前檢查 → 回滾標籤 `pre-i139` → `deploy.sh` → 部署後確認），設定鍵、compose、`deploy.sh`、python 都⛔ 沒有改。
   部署後要看到：migration 80、`market_day_overrides` 存在且 0 筆、前端入口換成新版、`/api/v1/market-day-overrides` 未帶 token 回 401（換版前 404）、首頁自選清單顯示「今日休市（週末）」；

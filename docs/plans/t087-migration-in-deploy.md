@@ -414,6 +414,10 @@ dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 li
 順序一定是「合併 → 換檔 → 第一次部署」：
 * 換檔前⛔ 不能用舊的 `deploy.sh` 部署合併後的程式。T-087 的 backend 預設只做唯讀檢查，舊腳本又⛔ 沒有套用 migration 的步驟，有待套用的版本時 backend 會起不來。
 * 新的 `deploy.sh` 碰到 T-087 之前的程式，會停在 5a（新 image 不認得 `-migrate`），停下時服務⛔ 沒有被 down。所以換檔比合併早也不會出事，只是不能部署。
+* **i140 比 T-087 先上**（使用者 2026-11-27 裁決）：i140 新增 migration `081_signal_timeframe`（三種 DB 各一份），照舊由 backend 啟動時自動套用；
+  所以 T-087 的第一次部署時，live 已經是 1～81。i140 要在 t087 合併進 `init` **之前**部署完——t087 合併之後 backend 只做唯讀檢查，
+  這時再部署含 081 的程式就得走新的 `deploy.sh`（那樣 081 會變成第一支走試跑、備份、套用的 migration，跟這次的安排不同）。
+  換檔前重跑的盤點要確認 live 已套用 81 支、fingerprint `1cf3f824…`；不是的話就停下，重新確認順序。
 
 **要改的行**：範本「要填的值」裡的 6 行。`PROJECT_DIR`、`DEPLOY_BRANCH`、`REDIS_ENV_FILE` 沿用 live 現在的值，加上 `DB_CONTAINER`、`DB_USER`、`BACKUP_DIR`。
 `TRIAL_PG_IMAGE`、`DB_NAME` 的預設值就是 live 的值（第七節盤點）。`development-workflow.md` 原本寫的「七行」已經更正為六行。
@@ -467,8 +471,8 @@ dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 li
 | 9 | 備份舊檔（`deploy.sh.bak-日期時間`，已經存在就整串停下）、換上新檔，再跑一次 `./deploy.sh --preflight`，刪掉範本與兩支腳本 | `deploy.sh` 是 `b3cd697f…`、備份是 `abcf1c01…`；preflight 通過 |
 
 **換檔之後的第一次部署**（部署窗口內；部署手冊 A 段的人工查詢照做、跟 `deploy.sh` 的結果對照一次）：
-* 預期 5a 通過；5b 的 `pending -`、fingerprint `dc284764…`（11-28 I-139 套用 080 之後是 1～80）、實例識別一致；`⛔ 沒有待套用的 migration`，⛔ 沒有試跑、備份、套用；
-* readiness 通過；backend 的 log 有 `schema check passed (read only)`、required 80。
+* 預期 5a 通過；5b 的 `pending -`、fingerprint `1cf3f8241f79…`（11-28 I-139 套用 080、i140 套用 081 之後是 1～81）、實例識別一致；`⛔ 沒有待套用的 migration`，⛔ 沒有試跑、備份、套用；
+* readiness 通過；backend 的 log 有 `schema check passed (read only)`、required 81。
 
 **換回舊檔**：用步驟 9 印出的備份檔名複製回 `deploy.sh`，SHA-256 要是 `abcf1c01…`。⚠️ 舊檔⛔ 沒有 migration 的步驟：合併之後只能在⛔ 沒有待套用的 migration 時拿它部署。
 
@@ -577,4 +581,5 @@ dev compose 的 postgres（16.15）裡另建專用的帳號與 database，照 li
 | v1.4 | 2026-11-26 | 第六節記 dev 演練紀錄：R0、R1 與五項演練都照預期；各步的耗時；跟做法不同的三處；發現 readiness 失敗後的回滾要先 `down`（或 `--force-recreate`），已修進部署手冊（含逐一核對 image ID）；演練資料已刪除 |
 | v1.5 | 2026-11-26 | 第七節記 live 唯讀盤點的結果；`trading_user` 沒有 CREATEDB、live 的 database 與 public schema 的 ACL 不是預設值 → 第五節的還原程序待確認修正（建庫與改名用管理帳號、還原後對齊 ACL，並在 dev 補演練） |
 | v1.6 | 2026-11-26 | 使用者確認還原程序的修正並改進第五節：建庫與改名用 `postgres`；還原、ACL 對齊、核對、權限實測用 `trading_user`；核對加上 database 與 public schema 的 ACL 逐字相同。dev 驗證 17 項全部通過（含建庫、改名、未對齊的三個反證）；`BACKUP_DIR` 定為 `/opt/stacks/deploy/db-backups` |
+| v1.8 | 2026-11-27 | 使用者裁決 i140（含 migration 081）比 T-087 先上：i140 要在 t087 合併之前部署完，081 照舊由 backend 啟動時套用；換檔前的盤點要確認 live 是 1～81（fingerprint `1cf3f824…`）；第一次部署的預期改成 1～81、required 81 |
 | v1.7 | 2026-11-26 | 第七節加 live `deploy.sh` 換檔程序的草稿：順序（合併 → 換檔 → 第一次部署）、要改的是 6 行（⛔ 不是 7 行）、事先算好的三個 SHA-256、兩支輔助腳本（產生新檔、核對 DB）與 dev 實測、9 個步驟與預期、第一次部署的預期、換回舊檔 |
